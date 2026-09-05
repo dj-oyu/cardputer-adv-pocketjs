@@ -4,6 +4,15 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 
 現在は設計・初期準備段階です。動作するファームウェアやビルド手順はまだありません。
 
+## 設計ドキュメント
+
+- [ハードウェア仕様と制約](docs/hardware-constraints.md)：SoC、メモリ、ピン配置、共有バス、描画・実行時の注意点。
+- [プラットフォーム設計](docs/architecture.md)：責務、アプリの起動・終了、入力、描画、メモリ管理。
+- [ホームUI設計](docs/home-ui.md)：カテゴリと項目の選択、背景、アニメーション、画面遷移。
+- [Hello World検証計画](docs/milestone-01.md)：実装順序、測定項目、完了条件。
+
+各ドキュメントの数値目標とAPI案は設計値です。実装済み・実測済みを意味しません。
+
 ## 最初の到達点
 
 ホームからJavaScript製のHello Worldアプリを起動し、キー入力でカウンターを更新し、ホームへ戻れることを目指します。起動と終了を繰り返してメモリが回収されることも確認します。
@@ -44,3 +53,8 @@ PSPのクロスメディアバー（XMB）の情報整理を参考に、左右�
 - [PocketJS ESP-IDFガイド](https://github.com/pocket-stack/pocketjs/blob/main/site/content/docs/esp-idf.md)
 
 設計調査時のPocketJS参照コミット: `6a0a1b6c91a506c473fc37a0256a47b12eceeca8`。
+
+## ライセンス
+
+本プロジェクト独自のコードとドキュメントは[MIT License](LICENSE)で公開します。
+外部ライブラリ、フォント、画像などはそれぞれのライセンスに従います。

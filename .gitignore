@@ -4,8 +4,11 @@ dist/
 managed_components/
 node_modules/
 .pio/
+target/
+dependencies.lock.*.tmp
 sdkconfig
 sdkconfig.old
+sdkconfig.*.old
 
 # Local settings and credentials
 .env
@@ -19,3 +22,12 @@ sdkconfig.old
 Thumbs.db
 __pycache__/
 *.pyc
+
+# Local tooling and temporary captures
+.venv/
+venv/
+.cache/
+*.log
+*.tmp
+
+# Keep sdkconfig.defaults*, dependency lockfiles, and test fixtures tracked.
