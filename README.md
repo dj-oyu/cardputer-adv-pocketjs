@@ -10,6 +10,7 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 - [プラットフォーム設計](docs/architecture.md)：責務、アプリの起動・終了、入力、描画、メモリ管理。
 - [ホームUI設計](docs/home-ui.md)：カテゴリと項目の選択、背景、アニメーション、画面遷移。
 - [Hello World検証計画](docs/milestone-01.md)：実装順序、測定項目、完了条件。
+- [SKK日本語入力設計](docs/japanese-input.md)：既存Cコアの再利用、入力優先順位、Flash辞書、候補表示、M2検証計画。
 
 各ドキュメントの数値目標とAPI案は設計値です。実装済み・実測済みを意味しません。
 

@@ -32,7 +32,8 @@ P4専用PPAは組み込まない。液晶転送とADVの入力は本プロジェ
 | Shell | ホーム、起動表示、エラー表示、選択位置の保持 | 小さなネイティブUI状態 |
 | AppManager | 起動、停止要求、状態遷移、失敗時の後始末 | アプリセッション、固定長のエラー情報 |
 | AppSession | QuickJSとPocketJSの生成、評価、フレーム処理 | guest、UI core、binding、renderer、package |
-| InputRouter | 物理キーを操作へ変換、戻る操作の先取り | 上限付き入力キュー |
+| InputRouter | ForceStopの先取り、IME優先配送、未消費キーの配送 | 上限付き入力キュー、フォーカス世代 |
+| TextInputService（M2） | 共通SKK、候補表示、確定UTF-8の配送 | 単一所有のIME状態、共有Flash辞書 |
 | DisplayService | Shellまたはアプリの描画を液晶へ送る | 画面所有者、DMA完了状態 |
 
 同時に動くJSアプリは1つ。ホームと復帰画面はネイティブ実装。
@@ -95,7 +96,10 @@ Hello Worldは素のJSを編集用ソースにし、ビルド時にPocketJSの�
 上流guestは `globalThis.frame` を要求するため、単独の `print()` のみではアプリとして成立しない。
 JSX/TSXやVue SFCはQuickJSでは直接評価できず、使用する場合はPCで変換する。
 
-最初の入力は決定・戻る・方向操作。戻るはJSへ渡す前に制御タスクが処理する。
+最初の入力は決定・戻る・方向操作。M1ではBackでホームへ戻る。
+M2以降は専用ForceStopだけを制御タスクで先取りし、通常キーはIME、入力欄、Shellの順に処理する。
+変換中のEscをアプリ終了に使わず、Enter確定を改行や送信へ二重配送しない。
+詳細は[SKK日本語入力設計](japanese-input.md)を参照する。
 将来のエディタ用文字入力は方向ボタンとは別のイベントとして追加する。現行IDF入力構造には文字列入力がないためアダプターが必要。
 音、SD、IMU、通信APIは後段で追加し、実装していない機能をhost capabilitiesへ宣言しない。
 

@@ -7,6 +7,7 @@
 XMBの横カテゴリ・縦リストを参考に独自のビジュアルを作る。既存のアイコンや背景素材は流用しない。
 方向入力は論理的なLeft/Right/Up/Downへ変換し、Enterで決定、Esc相当のキーで戻る。
 ADVの物理キーとFn併用の割り当てはキーボード検証時に固定する。PSPのボタン配置を前提にしない。
+日本語入力中のEscはIMEが先に取消として処理する。通常のBackとは別にForceStop操作を設ける（[入力設計](japanese-input.md)）。
 
 左右でカテゴリ、上下で選択カテゴリの項目を移動。最初はAppsとHello Worldのみを表示する。
 将来はCreate、Learn、Connect、Settingsを追加するが、未実装カテゴリを空のまま並べない。
