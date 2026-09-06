@@ -27,6 +27,12 @@ static int16_t ocean_cols[LCD_W/8][3][8] __attribute__((aligned(16)));
 // because the indexed load reads four bytes per lane. Baking C's truncation
 // into the table is what keeps the vector row bit-exact on negative values.
 static int32_t ocean_sine16[256], ocean_sine6[256];
+// The three ribbons, eight columns at a time, for the wave row's vector form.
+static int16_t wave_cols[LCD_W/8][3][8] __attribute__((aligned(16)));
+// softness in the low half of each entry and its channel weight in the high
+// half, so one indexed load fetches both and the unzip separates them. Entry
+// 64 is zero, which is how "further than 64 rows away" stops being a branch.
+static uint32_t wave_lut[3][65];
 static int depth_phase[LCD_H], cross_phase[LCD_H];
 static bool sine_ready;
 static struct {int x,y;uint16_t color;} stars[36];
@@ -149,6 +155,14 @@ static void build_tables(void) {
     }
     for(int x=0;x<LCD_W;x++)
         ocean_cols[x>>3][2][x&7]=(int16_t)(x<160?160-x:x-160);
+    for(int l=0;l<3;l++) {
+        for(int d=0;d<64;d++) {
+            unsigned lo=softness[l][d];
+            unsigned hi=l==0?lo/4:l==1?lo/3:lo/2;
+            wave_lut[l][d]=lo|(hi<<16);
+        }
+        wave_lut[l][64]=0;
+    }
     sine_ready=true;
 }
 
@@ -241,7 +255,7 @@ ocean_row_pie(uint16_t *row, int depth, int cross, int span, int haze) {
         "  ee.ldxq.32      q4, q0, %[ta], 1, 5\n"
         "  ee.ldxq.32      q4, q0, %[ta], 2, 6\n"
         "  ee.ldxq.32      q4, q0, %[ta], 3, 7\n"
-        "  ee.vunzip.16    q3, q4\n"                  /* q3 = swell*16                   1.8.210 */
+        "  ee.vunzip.16    q3, q4\n"                  /* q3 = swell*16                   1.8.207 */
         "  ee.ldxq.32      q4, q1, %[tb], 0, 0\n"
         "  ee.ldxq.32      q4, q1, %[tb], 1, 1\n"
         "  ee.ldxq.32      q4, q1, %[tb], 2, 2\n"
@@ -286,9 +300,9 @@ ocean_row_pie(uint16_t *row, int depth, int cross, int span, int haze) {
         "  ee.vmul.u16     q4, q4, q2\n"              /* green field */
         "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 256 */
         "  ee.vmul.u16     q5, q5, q2\n"              /* blue field */
-        "  ee.orq          q0, q0, q4\n"              /*                                 1.8.42 */
+        "  ee.orq          q0, q0, q4\n"              /*                                 1.8.45 */
         "  ee.orq          q0, q0, q5\n"
-        "  ee.vst.128.ip   q0, %[row], 16\n"          /* eight pixels out                1.8.190 */
+        "  ee.vst.128.ip   q0, %[row], 16\n"          /* eight pixels out                1.8.192 */
         "1:\n"
         : [row] "+a"(row), [in] "+a"(in), [kp] "=&a"(kp)
         : [k] "a"(k), [ta] "a"(ta), [tb] "a"(tb), [zero] "a"(zero),
@@ -296,7 +310,123 @@ ocean_row_pie(uint16_t *row, int depth, int cross, int span, int haze) {
         : "memory");
 }
 
-
+// One row of the wave background, on the vector unit. Bit-exact with the loop
+// it replaces: the three channel weights (/4, /3, /2) are folded into the
+// lookup table's high half, so an indexed load fetches the light and its
+// weighted form together and the unzip separates them. "Further than 64 rows
+// from the ribbon" is min(d,64) into an entry that holds zero, which is how a
+// per-pixel branch disappears.
+//
+// q0,q1 work out |y-ribbon| then carry red; q2 is the broadcast constant; q3
+// and q4 accumulate the plain and weighted sums; q5 holds 64 throughout; q6
+// and q7 take each layer's lookup. All eight are in use.
+//
+// The early-clobber on kp is load-bearing. Without it GCC gave kp and k the
+// same register — they start equal — and the rewind at the top of each block
+// became an increment, so the constants marched off the end of the array.
+static void __attribute__((noinline))
+wave_row_pie(uint16_t *row, int y, unsigned green, unsigned blue) {
+    int16_t k[10] __attribute__((aligned(4))) = {
+        64,                     /* the index clamp; entry 64 of the table is 0 */
+        (int16_t)y,
+        5,
+        (int16_t)green,
+        (int16_t)blue,
+        0x00F8,
+        (int16_t)0x8000,        /* x*32768>>11 = x*16, twice for r<<8 */
+        0x00FC,
+        16384,                  /* x<<3 */
+        256,                    /* x>>3 */
+    };
+    const int16_t *in=&wave_cols[0][0][0];
+    const int16_t *kp;
+    const uint32_t *t0=wave_lut[0], *t1=wave_lut[1], *t2=wave_lut[2];
+    int blocks=LCD_W/8, sar=11;
+    __asm__ volatile(
+        "wsr.sar        %[sar]\n"                     /*                                 1.8.128 */
+        "mov            %[kp], %[k]\n"
+        "ee.vldbc.16.ip q5, %[kp], 2\n"               /* 64, resident                    1.8.95  */
+        "loopgtz        %[blocks], 1f\n"              /* 30 blocks of 8 pixels */
+        "  addi         %[kp], %[k], 2\n"             /* rewind the constant walk to k[1] */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* y */
+        /* layer 0: the light and light/4 */
+        "  ee.vld.128.ip   q0, %[in], 16\n"           /* ribbons[0][x..x+7]              1.8.88  */
+        "  ee.vsubs.s16    q1, q2, q0\n"              /*                                 1.8.198 */
+        "  ee.vsubs.s16    q0, q0, q2\n"
+        "  ee.vmax.s16     q0, q0, q1\n"              /* |y-ribbon|                      1.8.104 */
+        "  ee.vmin.s16     q0, q0, q5\n"              /* min(d,64)                       1.8.113 */
+        "  ee.ldxq.32      q3, q0, %[t0], 0, 0\n"     /*                                 1.8.37  */
+        "  ee.ldxq.32      q3, q0, %[t0], 1, 1\n"
+        "  ee.ldxq.32      q3, q0, %[t0], 2, 2\n"
+        "  ee.ldxq.32      q3, q0, %[t0], 3, 3\n"
+        "  ee.ldxq.32      q4, q0, %[t0], 0, 4\n"
+        "  ee.ldxq.32      q4, q0, %[t0], 1, 5\n"
+        "  ee.ldxq.32      q4, q0, %[t0], 2, 6\n"
+        "  ee.ldxq.32      q4, q0, %[t0], 3, 7\n"
+        "  ee.vunzip.16    q3, q4\n"                  /* q3 = light0, q4 = light0/4      1.8.207 */
+        /* layer 1 */
+        "  ee.vld.128.ip   q0, %[in], 16\n"
+        "  ee.vsubs.s16    q1, q2, q0\n"
+        "  ee.vsubs.s16    q0, q0, q2\n"
+        "  ee.vmax.s16     q0, q0, q1\n"
+        "  ee.vmin.s16     q0, q0, q5\n"
+        "  ee.ldxq.32      q6, q0, %[t1], 0, 0\n"
+        "  ee.ldxq.32      q6, q0, %[t1], 1, 1\n"
+        "  ee.ldxq.32      q6, q0, %[t1], 2, 2\n"
+        "  ee.ldxq.32      q6, q0, %[t1], 3, 3\n"
+        "  ee.ldxq.32      q7, q0, %[t1], 0, 4\n"
+        "  ee.ldxq.32      q7, q0, %[t1], 1, 5\n"
+        "  ee.ldxq.32      q7, q0, %[t1], 2, 6\n"
+        "  ee.ldxq.32      q7, q0, %[t1], 3, 7\n"
+        "  ee.vunzip.16    q6, q7\n"
+        "  ee.vadds.s16    q3, q3, q6\n"              /* light0+light1                   1.8.70  */
+        "  ee.vadds.s16    q4, q4, q7\n"              /* light0/4 + light1/3 */
+        /* layer 2 */
+        "  ee.vld.128.ip   q0, %[in], 16\n"
+        "  ee.vsubs.s16    q1, q2, q0\n"
+        "  ee.vsubs.s16    q0, q0, q2\n"
+        "  ee.vmax.s16     q0, q0, q1\n"
+        "  ee.vmin.s16     q0, q0, q5\n"
+        "  ee.ldxq.32      q6, q0, %[t2], 0, 0\n"
+        "  ee.ldxq.32      q6, q0, %[t2], 1, 1\n"
+        "  ee.ldxq.32      q6, q0, %[t2], 2, 2\n"
+        "  ee.ldxq.32      q6, q0, %[t2], 3, 3\n"
+        "  ee.ldxq.32      q7, q0, %[t2], 0, 4\n"
+        "  ee.ldxq.32      q7, q0, %[t2], 1, 5\n"
+        "  ee.ldxq.32      q7, q0, %[t2], 2, 6\n"
+        "  ee.ldxq.32      q7, q0, %[t2], 3, 7\n"
+        "  ee.vunzip.16    q6, q7\n"
+        /* the three channels; no clamp, they cannot leave 0..255 */
+        "  ee.vadds.s16    q6, q6, q3\n"              /* sum + light2 */
+        "  ee.vadds.s16    q3, q3, q7\n"              /* sum + light2/2 */
+        "  ee.vadds.s16    q4, q4, q7\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 5 */
+        "  ee.vadds.s16    q0, q4, q2\n"              /* red */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* green base */
+        "  ee.vadds.s16    q3, q3, q2\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* blue base */
+        "  ee.vadds.s16    q6, q6, q2\n"
+        /* pack, the shifts done as multiplies against SAR=11 */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0xF8 */
+        "  ee.andq         q0, q0, q2\n"              /*                                 1.8.1   */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 32768 */
+        "  ee.vmul.u16     q0, q0, q2\n"              /*                                 1.8.128 */
+        "  ee.vmul.u16     q0, q0, q2\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0xFC */
+        "  ee.andq         q3, q3, q2\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 16384 */
+        "  ee.vmul.u16     q3, q3, q2\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 256 */
+        "  ee.vmul.u16     q6, q6, q2\n"
+        "  ee.orq          q0, q0, q3\n"              /*                                 1.8.45  */
+        "  ee.orq          q0, q0, q6\n"
+        "  ee.vst.128.ip   q0, %[row], 16\n"          /*                                 1.8.192 */
+        "1:\n"
+        : [row] "+a"(row), [in] "+a"(in), [kp] "=&a"(kp)
+        : [k] "a"(k), [t0] "a"(t0), [t1] "a"(t1), [t2] "a"(t2),
+          [blocks] "a"(blocks), [sar] "a"(sar)
+        : "memory");
+}
 
 // The vector row reads ocean_cols, so both planes that change per frame have
 // to be rebuilt whenever distortion does.
@@ -418,6 +548,7 @@ void shell_draw(const char *error, unsigned phase) {
         ribbons[l][x]=(int16_t)(centers[l]+tilt_y*depths[l]/256.0f
             +(x-LCD_W/2)*level_slope/256
             +(sine[a&255]*(9+l*4)+sine[b&255]*6)/256.0f);
+        wave_cols[x>>3][l][x&7]=ribbons[l][x];
     }
     if(mode==1) {
         // Perspective compresses the swell spacing towards a visible horizon.
@@ -461,18 +592,7 @@ void shell_draw(const char *error, unsigned phase) {
                 ocean_row_pie(row,depth_phase[y],cross_phase[y],
                           12+(y-36)/3, 24-(y-36)/5);
             } else {
-                unsigned green=14+y/7, blue=30+y/5;
-                for(int x=0;x<LCD_W;x++) {
-                    unsigned light[3];
-                    for(int l=0;l<3;l++) {
-                        int d=y-ribbons[l][x];if(d<0)d=-d;
-                        light[l]=d<64?softness[l][d]:0;
-                    }
-                    unsigned sum=light[0]+light[1];
-                    row[x]=board_rgb(5+light[0]/4+light[1]/3+light[2]/2,
-                                     green+sum+light[2]/2,
-                                     blue+sum+light[2]);
-                }
+                wave_row_pie(row,y,14+y/7,30+y/5);
             }
         }
         loop_us+=(unsigned)(esp_timer_get_time()-band);
