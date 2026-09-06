@@ -22,6 +22,8 @@ static void input_task(void *arg) {
         if(usb_serial_jtag_read_bytes(&c,1,0)>0) {
             if(c=='\r'||c=='\n'||c=='e')key=KEY_ENTER;
             if(c=='q'||c==27)key=KEY_BACK;
+            if(c=='b')key=KEY_RIGHT;
+            if(c=='a')key=KEY_LEFT;
             if(c=='s')atomic_store(&capture,true);
             if(c>='1'&&c<='6')atomic_store(&diagnostic,c);
         }
@@ -37,7 +39,9 @@ static void ui_task(void *arg) {
     unsigned phase=0;
     ESP_LOGI("shell","HOME_READY");
     while(1) {
+        int64_t frame_start=esp_timer_get_time();
         board_key_t key=KEY_NONE;xQueueReceive(keys,&key,0);
+        if(!running && (key==KEY_LEFT||key==KEY_RIGHT))shell_change_background(key==KEY_RIGHT?1:-1);
         if(atomic_exchange(&stop,false)) {
             if(running)app_stop();
             running=false;error=NULL;xQueueReset(keys);
@@ -61,7 +65,8 @@ static void ui_task(void *arg) {
             if(e!=ESP_OK) {app_stop();running=false;error="EXECUTION FAILED";}
         } else shell_draw(error,phase++);
         if(snapshot)board_capture(false);
-        vTaskDelay(pdMS_TO_TICKS(running?33:66));
+        int elapsed_ms=(int)((esp_timer_get_time()-frame_start)/1000);
+        vTaskDelay(pdMS_TO_TICKS(elapsed_ms<33?33-elapsed_ms:1));
     }
 }
 void app_main(void) {
