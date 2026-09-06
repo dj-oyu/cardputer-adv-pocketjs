@@ -27,6 +27,10 @@ static unsigned frames;
 static bool redraw;
 static double render_sum, present_sum;
 static unsigned painted;
+// Hand-written PIE kernels for the two ops this renderer actually asks for
+// (opaque fill, coverage-mask blend); anything they cannot honour exactly is
+// declined and the Rust software path draws it.
+extern const pocketjs_rgb565_accelerator_t render_accel;
 // Borrowed for the length of a start; the Playground owns the bytes and does
 // not edit them while a run is up.
 static const char *user_source;
@@ -213,6 +217,7 @@ esp_err_t app_tick(uint32_t buttons) {
         // at before anyone hand-writes a kernel for either.
         int64_t began=esp_timer_get_time();
         unsigned sent_us=0;
+        uint32_t sw_ops=0, accel=0;
         // Full-width strips avoid copying undefined columns of a narrow damage rect.
         uint16_t *pixels=board_strip();
         for(int y=0;y<LCD_H;y+=STRIP_H) {
@@ -220,8 +225,12 @@ esp_err_t app_tick(uint32_t buttons) {
             memset(pixels,0,(size_t)LCD_W*STRIP_H*sizeof(*pixels));
             pocketjs_rgb565_rect_t region={.x=0,.y=y,.width=LCD_W,.height=rows};
             pocketjs_rgb565_render_stats_t stats={.struct_size=sizeof(stats)};
-            e=pocketjs_rgb565_render_strip(renderer,&frame,pixels,LCD_W*rows,region,NULL,&stats);
+            e=pocketjs_rgb565_render_strip(renderer,&frame,pixels,LCD_W*rows,region,
+                                           &render_accel,&stats);
             if(e)goto fail;
+            // software_ops counts what the kernels declined, so a non-zero
+            // figure here is the share still drawn the slow way.
+            sw_ops+=stats.software_ops; accel+=stats.ppa_fills+stats.ppa_blends;
             int64_t sending=esp_timer_get_time();
             e=board_present(y,rows,pixels);if(e)goto fail;
             sent_us+=(unsigned)(esp_timer_get_time()-sending);
@@ -229,8 +238,9 @@ esp_err_t app_tick(uint32_t buttons) {
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         render_sum+=whole-sent_us; present_sum+=sent_us; painted++;
         if(painted==30) {
-            ESP_LOGI("app","PAINT render_ms=%.2f send_ms=%.2f",
-                     render_sum/30/1000.0, present_sum/30/1000.0);
+            ESP_LOGI("app","PAINT render_ms=%.2f send_ms=%.2f accel=%u software=%u",
+                     render_sum/30/1000.0, present_sum/30/1000.0,
+                     (unsigned)accel,(unsigned)sw_ops);
             render_sum=0; present_sum=0; painted=0;
         }
     }
