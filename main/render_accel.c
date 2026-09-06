@@ -21,7 +21,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "esp_cpu.h"
 #include "pocketjs/render_rgb565.h"
+
+// What the two hooks below actually cost, so the rest of a frame's render time
+// can be attributed to the renderer instead of guessed at. Read and cleared by
+// the caller once a frame.
+uint32_t render_accel_cycles;
 
 /* ------------------------------------------------------------------------ */
 /* Scalar reference: used for the unaligned head/tail of every row, and as    */
@@ -75,109 +81,119 @@ static void __attribute__((noinline)) fill_blocks_pie(uint16_t *dst, const uint1
 static void __attribute__((noinline)) blend_blocks_pie(uint16_t *dst, const uint8_t *mask, const int16_t *k, int n) {
     const int16_t *kp;
     int sar = 11, sh8 = 8;
+    /* v2: scheduled for TRM Table 1.7-2 (loads and EE.VMUL define their result at stage 2,
+     * ALU ops read at stage 1): every load/VMUL result is consumed >= 2 instructions later,
+     * so the pipeline never interlocks on data. Constant walk order (blend_constants()):
+     *   unpack: 1, 64, 63, 31, 16384, 512, 8192, 128
+     *   red   : s_r, 0xFF, 1, 127, 128, s_g      (the next channel's s is prefetched at the end)
+     *   green : 0xFF, 1, 127, 128, s_b
+     *   blue  : 0xFF, 1, 127, 128, 0xF8
+     *   pack  : 32768, 0xFC, 16384, 256
+     * QR: q0 = pixels -> alpha ; q1/q2/q3 = dst r/g/b (8-bit) -> ones -> results ;
+     *     q4 = const slot / SRCMB out ; q5 = lo ; q6 = s -> hi -> diff -> next s ; q7 = a'.
+     * Per channel: c = lo + floor((diff*a'+127)/255), lo=min(s,d), diff=|s-d|, a'=(s<d)?255-a:a,
+     * floor(x/255) = (x + (x>>8) + 1) >> 8 in the 40-bit QACC lanes (exact for x <= 65152). */
     __asm__ volatile(
-        "wsr.sar        %[sar]\n"                     /* SAR = 11 for all EE.VMUL.U16 below (1.8.128) */
-        "2:\n"                                        /* software loop: body is > 256 bytes, so no LOOP insn */
-        "  mov          %[kp], %[k]\n"                /* rewind the constant walk */
+        "wsr.sar        %[sar]\n"                     /* SAR = 11 for all EE.VMUL.U16          (1.8.128) */
+        "2:\n"
+        "  mov          %[kp], %[k]\n"
         "  ee.vld.128.ip   q0, %[d], 0\n"             /* q0 = 8 destination pixels          (1.8.88) */
-        /* ---- unpack RGB565 -> 8-bit with bit replication ---- */
         "  ee.vldbc.16.ip  q1, %[kp], 2\n"            /* 1                                  (1.8.95) */
-        "  ee.vmul.u16     q1, q0, q1\n"              /* r5 = p*1 >> 11 */
         "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 64 */
-        "  ee.vmul.u16     q2, q0, q2\n"              /* p*64 >> 11 = p >> 5 */
         "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 63 */
-        "  ee.andq         q2, q2, q4\n"              /* g6                                 (1.8.1) */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 31 */
-        "  ee.andq         q3, q0, q4\n"              /* b5 */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 16384: x*16384>>11 = x<<3 */
-        "  ee.vldbc.16.ip  q5, %[kp], 2\n"            /* 512:   x*512>>11   = x>>2 */
-        "  ee.vmul.u16     q6, q1, q4\n"              /* r5<<3 */
-        "  ee.vmul.u16     q7, q1, q5\n"              /* r5>>2 */
-        "  ee.orq          q1, q6, q7\n"              /* dr = (r5<<3)|(r5>>2)               (1.8.45) */
-        "  ee.vmul.u16     q6, q3, q4\n"              /* b5<<3 */
-        "  ee.vmul.u16     q7, q3, q5\n"              /* b5>>2 */
+        "  ee.vldbc.16.ip  q5, %[kp], 2\n"            /* 31 */
+        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* 16384: x<<3 */
+        "  ee.vldbc.16.ip  q7, %[kp], 2\n"            /* 512:   x>>2 */
+        "  ee.vmul.u16     q1, q0, q1\n"              /* r5 = p>>11 */
+        "  ee.vmul.u16     q2, q0, q2\n"              /* p>>5 */
+        "  ee.andq         q3, q0, q5\n"              /* b5                                 (1.8.1) */
+        "  ee.vld.l.64.ip  q0, %[m], 8\n"             /* q0[63:0] = 8 mask bytes, mask += 8 (1.8.92) */
+        "  ee.andq         q2, q2, q4\n"              /* g6 */
+        "  ee.vmul.u16     q4, q1, q6\n"              /* r5<<3 */
+        "  ee.vmul.u16     q5, q1, q7\n"              /* r5>>2 */
+        "  ee.vmul.u16     q6, q3, q6\n"              /* b5<<3 */
+        "  ee.vmul.u16     q7, q3, q7\n"              /* b5>>2 */
+        "  ee.orq          q1, q4, q5\n"              /* dr = (r5<<3)|(r5>>2)               (1.8.45) */
+        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 8192: x<<2 */
+        "  ee.vldbc.16.ip  q5, %[kp], 2\n"            /* 128:  x>>4 */
         "  ee.orq          q3, q6, q7\n"              /* db */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 8192: x*8192>>11 = x<<2 */
-        "  ee.vldbc.16.ip  q5, %[kp], 2\n"            /* 128:  x*128>>11  = x>>4 */
         "  ee.vmul.u16     q6, q2, q4\n"              /* g6<<2 */
         "  ee.vmul.u16     q7, q2, q5\n"              /* g6>>4 */
+        "  ee.zero.q       q4\n"                      /*                                    (1.8.216) */
+        "  ee.vzip.8       q0, q4\n"                  /* q0 = alpha x8 (16-bit lanes)       (1.8.212) */
         "  ee.orq          q2, q6, q7\n"              /* dg */
-        /* ---- mask: 8 bytes -> 8 x 16-bit lanes ---- */
-        "  ee.vld.l.64.ip  q0, %[m], 8\n"             /* q0[63:0] = 8 mask bytes, mask += 8 (1.8.92) */
-        "  ee.zero.q       q4\n"                      /* q4 = 0                             (1.8.216) */
-        "  ee.vzip.8       q0, q4\n"                  /* q0 = {m0,0,m1,0,...}: alpha x8      (1.8.212) */
-        /* ---- red: q1 = lo + floor((diff*a'+127)/255) ---- */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* s_r */
-        "  ee.vmin.s16     q5, q4, q1\n"              /* lo   = min(s,d)                    (1.8.113) */
-        "  ee.vmax.s16     q6, q4, q1\n"              /* hi   = max(s,d)                    (1.8.104) */
-        "  ee.vsubs.s16    q6, q6, q5\n"              /* diff = hi-lo                       (1.8.198) */
-        "  ee.vcmp.lt.s16  q7, q4, q1\n"              /* 0xFFFF where s<d                   (1.8.85) */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 0x00FF */
-        "  ee.andq         q7, q7, q4\n"              /* 0x00FF where s<d */
-        "  ee.xorq         q7, q0, q7\n"              /* a' = a ^ mask = (s<d) ? 255-a : a  (1.8.214) */
+        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* s_r */
+        /* ---- red (D = q1) ---- */
         "  ee.zero.qacc\n"                            /*                                    (1.8.217) */
-        "  ee.vmulas.u16.qacc q6, q7\n"               /* QACC  = diff*a'                    (1.8.163) */
+        "  ee.vmin.s16     q5, q6, q1\n"              /* lo = min(s,d)                      (1.8.113) */
+        "  ee.vcmp.lt.s16  q7, q6, q1\n"              /* 0xFFFF where s<d                   (1.8.85) */
+        "  ee.vmax.s16     q6, q6, q1\n"              /* hi                                 (1.8.104) */
+        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 0x00FF */
+        "  ee.vldbc.16.ip  q1, %[kp], 2\n"            /* 1   (d red is dead from here) */
+        "  ee.vsubs.s16    q6, q6, q5\n"              /* diff = hi-lo                       (1.8.198) */
+        "  ee.andq         q7, q7, q4\n"              /* 0x00FF where s<d */
         "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 127 */
-        "  ee.vldbc.16.ip  q1, %[kp], 2\n"            /* 1   (d red no longer needed) */
-        "  ee.vmulas.u16.qacc q4, q1\n"               /* QACC += 127            -> x */
-        "  ee.srcmb.s16.qacc q4, %[sh8], 0\n"         /* QACC  = x>>8 (= t), q4 unused      (1.8.54) */
-        "  ee.vmulas.u16.qacc q6, q7\n"               /* QACC += diff*a' */
+        "  ee.xorq         q7, q0, q7\n"              /* a' = (s<d) ? 255-a : a             (1.8.214) */
+        "  ee.vmulas.u16.qacc q6, q7\n"               /* QACC  = diff*a'                    (1.8.163) */
+        "  ee.vmulas.u16.qacc q4, q1\n"               /* QACC += 127                = x */
+        "  ee.srcmb.s16.qacc q4, %[sh8], 0\n"         /* QACC  = x>>8 (= t)                 (1.8.54) */
         "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 128 */
-        "  ee.vmulas.u16.qacc q4, q1\n"               /* QACC += 128            -> x + t + 1 */
+        "  ee.vmulas.u16.qacc q6, q7\n"               /* QACC += diff*a' */
+        "  ee.vmulas.u16.qacc q4, q1\n"               /* QACC += 128                = x+t+1 */
+        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* s_g (prefetch for the next channel) */
         "  ee.srcmb.s16.qacc q4, %[sh8], 0\n"         /* q4 = (x+t+1)>>8 = floor(x/255) */
         "  ee.vadds.s16    q1, q5, q4\n"              /* red = lo + q                       (1.8.70) */
-        /* ---- green: same with q2 ---- */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* s_g */
-        "  ee.vmin.s16     q5, q4, q2\n"
-        "  ee.vmax.s16     q6, q4, q2\n"
-        "  ee.vsubs.s16    q6, q6, q5\n"
-        "  ee.vcmp.lt.s16  q7, q4, q2\n"
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 0x00FF */
-        "  ee.andq         q7, q7, q4\n"
-        "  ee.xorq         q7, q0, q7\n"
+        /* ---- green (D = q2), same sequence ---- */
         "  ee.zero.qacc\n"
-        "  ee.vmulas.u16.qacc q6, q7\n"
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 127 */
+        "  ee.vmin.s16     q5, q6, q2\n"
+        "  ee.vcmp.lt.s16  q7, q6, q2\n"
+        "  ee.vmax.s16     q6, q6, q2\n"
+        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 0x00FF */
         "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 1 */
+        "  ee.vsubs.s16    q6, q6, q5\n"
+        "  ee.andq         q7, q7, q4\n"
+        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 127 */
+        "  ee.xorq         q7, q0, q7\n"
+        "  ee.vmulas.u16.qacc q6, q7\n"
         "  ee.vmulas.u16.qacc q4, q2\n"
         "  ee.srcmb.s16.qacc q4, %[sh8], 0\n"
-        "  ee.vmulas.u16.qacc q6, q7\n"
         "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 128 */
+        "  ee.vmulas.u16.qacc q6, q7\n"
         "  ee.vmulas.u16.qacc q4, q2\n"
+        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* s_b (prefetch) */
         "  ee.srcmb.s16.qacc q4, %[sh8], 0\n"
         "  ee.vadds.s16    q2, q5, q4\n"              /* green */
-        /* ---- blue: same with q3 ---- */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* s_b */
-        "  ee.vmin.s16     q5, q4, q3\n"
-        "  ee.vmax.s16     q6, q4, q3\n"
-        "  ee.vsubs.s16    q6, q6, q5\n"
-        "  ee.vcmp.lt.s16  q7, q4, q3\n"
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 0x00FF */
-        "  ee.andq         q7, q7, q4\n"
-        "  ee.xorq         q7, q0, q7\n"
+        /* ---- blue (D = q3), same sequence ---- */
         "  ee.zero.qacc\n"
-        "  ee.vmulas.u16.qacc q6, q7\n"
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 127 */
+        "  ee.vmin.s16     q5, q6, q3\n"
+        "  ee.vcmp.lt.s16  q7, q6, q3\n"
+        "  ee.vmax.s16     q6, q6, q3\n"
+        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 0x00FF */
         "  ee.vldbc.16.ip  q3, %[kp], 2\n"            /* 1 */
+        "  ee.vsubs.s16    q6, q6, q5\n"
+        "  ee.andq         q7, q7, q4\n"
+        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 127 */
+        "  ee.xorq         q7, q0, q7\n"
+        "  ee.vmulas.u16.qacc q6, q7\n"
         "  ee.vmulas.u16.qacc q4, q3\n"
         "  ee.srcmb.s16.qacc q4, %[sh8], 0\n"
-        "  ee.vmulas.u16.qacc q6, q7\n"
         "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 128 */
+        "  ee.vmulas.u16.qacc q6, q7\n"
         "  ee.vmulas.u16.qacc q4, q3\n"
+        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* 0xF8 (pack prefetch) */
         "  ee.srcmb.s16.qacc q4, %[sh8], 0\n"
         "  ee.vadds.s16    q3, q5, q4\n"              /* blue */
         /* ---- pack RGB565 = ((r&0xF8)<<8)|((g&0xFC)<<3)|(b>>3) ---- */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 0xF8 */
-        "  ee.andq         q1, q1, q4\n"
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 32768: x*32768>>11 = x<<4, twice = x<<8 */
-        "  ee.vmul.u16     q1, q1, q4\n"
-        "  ee.vmul.u16     q1, q1, q4\n"              /* red field */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 0xFC */
-        "  ee.andq         q2, q2, q4\n"
+        "  ee.vldbc.16.ip  q7, %[kp], 2\n"            /* 32768: x<<4, applied twice = x<<8 */
+        "  ee.vldbc.16.ip  q5, %[kp], 2\n"            /* 0xFC */
         "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 16384: x<<3 */
+        "  ee.andq         q1, q1, q6\n"              /* r & 0xF8 */
+        "  ee.vmul.u16     q1, q1, q7\n"              /* r*16 */
+        "  ee.andq         q2, q2, q5\n"              /* g & 0xFC */
+        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* 256: x>>3 */
+        "  ee.vmul.u16     q1, q1, q7\n"              /* r*256 = red field */
         "  ee.vmul.u16     q2, q2, q4\n"              /* green field */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"            /* 256: x>>3 */
-        "  ee.vmul.u16     q3, q3, q4\n"              /* blue field */
+        "  ee.vmul.u16     q3, q3, q6\n"              /* blue field */
         "  ee.orq          q1, q1, q2\n"
         "  ee.orq          q1, q1, q3\n"
         "  ee.vst.128.ip   q1, %[d], 16\n"            /* 8 pixels out, dst += 16            (1.8.192) */
@@ -217,9 +233,9 @@ static void blend_constants(int16_t k[24], unsigned r, unsigned g, unsigned b) {
     const int16_t head[8] = { 1, 64, 63, 31, 16384, 512, 8192, 128 };
     for (int i = 0; i < 8; i++) k[i] = head[i];
     const unsigned s[3] = { r, g, b };
-    for (int c = 0; c < 3; c++) {           /* s, 0x00FF, 127, 1, 128 */
+    for (int c = 0; c < 3; c++) {           /* s, 0x00FF, 1, 127, 128 */
         int16_t *e = k + 8 + c * 5;
-        e[0] = (int16_t)s[c]; e[1] = 0x00FF; e[2] = 127; e[3] = 1; e[4] = 128;
+        e[0] = (int16_t)s[c]; e[1] = 0x00FF; e[2] = 1; e[3] = 127; e[4] = 128;
     }
     k[23] = 0x00F8;
     /* pack constants continue right after; see blend_a8 below */
@@ -234,6 +250,7 @@ static bool accel_fill(void *u, uint16_t *dst, size_t n, uint32_t w, uint32_t h,
     if (r.width == 0 || r.height == 0) return true;
     if (r.x + r.width > w || r.y + r.height > h || (size_t)w * h > n) return false;
     if (((uintptr_t)dst & 15) != 0 || (w & 7) != 0) return false;   /* rows must stay 16-byte aligned */
+    uint32_t began = esp_cpu_get_cycle_count();
     for (uint32_t y = r.y; y < r.y + r.height; y++) {
         uint16_t *row = dst + (size_t)y * w + r.x;
         uint32_t left = r.width;
@@ -242,6 +259,7 @@ static bool accel_fill(void *u, uint16_t *dst, size_t n, uint32_t w, uint32_t h,
         if (blocks) { fill_blocks_pie(row, &color, (int)blocks); row += blocks * 8; left -= blocks * 8; }
         while (left--) *row++ = color;                                        /* tail */
     }
+    render_accel_cycles += esp_cpu_get_cycle_count() - began;
     return true;
 }
 
@@ -253,6 +271,7 @@ static bool accel_blend(void *u, uint16_t *dst, size_t n, uint32_t w, uint32_t h
     if (r.width == 0 || r.height == 0) return true;
     if (r.x + r.width > w || r.y + r.height > h || (size_t)w * h > n || mask_size < (size_t)w * h) return false;
     if (((uintptr_t)dst & 15) != 0 || ((uintptr_t)mask & 15) != 0 || (w & 7) != 0) return false;
+    uint32_t began = esp_cpu_get_cycle_count();
     int16_t k[32] __attribute__((aligned(4)));
     blend_constants(k, red, green, blue);
     k[24] = (int16_t)0x8000; k[25] = 0x00FC; k[26] = 16384; k[27] = 256;      /* pack constants */
@@ -268,6 +287,7 @@ static bool accel_blend(void *u, uint16_t *dst, size_t n, uint32_t w, uint32_t h
         }
         while (left--) { *row = blend_px(*row, red, green, blue, *m); row++; m++; }
     }
+    render_accel_cycles += esp_cpu_get_cycle_count() - began;
     return true;
 }
 

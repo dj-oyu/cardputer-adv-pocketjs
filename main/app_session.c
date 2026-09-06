@@ -25,12 +25,13 @@ static atomic_bool stop_requested;
 static int64_t deadline;
 static unsigned frames;
 static bool redraw;
-static double render_sum, present_sum;
+static double render_sum, present_sum, kernel_sum;
 static unsigned painted;
 // Hand-written PIE kernels for the two ops this renderer actually asks for
 // (opaque fill, coverage-mask blend); anything they cannot honour exactly is
 // declined and the Rust software path draws it.
 extern const pocketjs_rgb565_accelerator_t render_accel;
+extern uint32_t render_accel_cycles;
 // Borrowed for the length of a start; the Playground owns the bytes and does
 // not edit them while a run is up.
 static const char *user_source;
@@ -237,11 +238,15 @@ esp_err_t app_tick(uint32_t buttons) {
         }
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         render_sum+=whole-sent_us; present_sum+=sent_us; painted++;
+        // The kernels' own cycles, over the same 30 frames as the rest, so
+        // render_ms splits into what they cost and what the renderer around
+        // them costs.
+        kernel_sum+=render_accel_cycles; render_accel_cycles=0;
         if(painted==30) {
-            ESP_LOGI("app","PAINT render_ms=%.2f send_ms=%.2f accel=%u software=%u",
-                     render_sum/30/1000.0, present_sum/30/1000.0,
+            ESP_LOGI("app","PAINT render_ms=%.2f kernel_ms=%.2f send_ms=%.2f accel=%u software=%u",
+                     render_sum/30/1000.0, kernel_sum/30/240000.0, present_sum/30/1000.0,
                      (unsigned)accel,(unsigned)sw_ops);
-            render_sum=0; present_sum=0; painted=0;
+            render_sum=0; present_sum=0; kernel_sum=0; painted=0;
         }
     }
     e=pocketjs_rgb565_commit(renderer,target,&frame);
