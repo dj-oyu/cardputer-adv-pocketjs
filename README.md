@@ -6,6 +6,8 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 
 ## 設計ドキュメント
 
+- [ファイルシステムAPI仕様案](docs/filesystem-api.md)：pocket.fs、ディレクトリとファイル操作、SD、逐次読書き、保存保証、メディア・PC転送との接続。
+
 - [共通JS API仕様案](docs/common-api.md)：将来のアプリ、UI・入力・保存、センサー、Wi-Fi／BLE、外部I/O、PC連携の公開契約と実装段階。実装前の提案です。
 
 - [Windows / EIM開発環境](docs/build-environment.md)：このPCのIDF v6.0.1、環境切り替え、ビルド・書き込みコマンド。

@@ -45,7 +45,7 @@ type DeviceInfo = {
 };
 ```
 
-名前例: `ui.basic`, `input.text`, `storage.kv`, `storage.files.sd`, `sensors.imu`, `audio.tone`, `audio.capture`, `net.wifi`, `net.http`, `ble.central`, `ble.peripheral`, `io.i2c`, `io.spi`, `io.uart`, `io.gpio`, `io.ir`, `bridge.pc`。未知名はsupported=falseで返す。supported=falseの機能も名前空間／メソッドを持ち、呼出しはUNSUPPORTEDで失敗する。
+名前例: `ui.basic`, `input.text`, `storage.kv`, `fs.volume.app`, `fs.volume.assets`, `fs.volume.sd`, `sensors.imu`, `audio.tone`, `audio.capture`, `audio.playback`, `net.wifi`, `net.http`, `ble.central`, `ble.peripheral`, `io.i2c`, `io.spi`, `io.uart`, `io.gpio`, `io.ir`, `bridge.pc`。未知名はsupported=falseで返す。supported=falseの機能も名前空間／メソッドを持ち、呼出しはUNSUPPORTEDで失敗する。
 
 availableは予約ではなく観測値。確認直後に資源が変わり得るため、open/acquireの結果が最終判断となる。認可状態は別であり、available=trueだけでは利用権を得ない。limitsはそのビルドのハード上限、取得ハンドルは実際に割り当てられた値を返す。
 
@@ -163,18 +163,15 @@ TextSessionは `{getText():string, close():void}`。ホスト所有の小さな�
 pocket.storage.get(key:string, options?:Options): Promise<{value:unknown;revision:number}|null>;
 pocket.storage.set(key:string, value:unknown, options?:Options & {ifRevision?:number}): Promise<{revision:number}>;
 pocket.storage.remove(key:string, options?:Options): Promise<void>;
-pocket.files.open(path:string, mode:"read"|"replace", options?:Options): Promise<File>;
-type File = {
-  read(maxBytes:number, options?:Options):Promise<Uint8Array|null>;
-  write(bytes:Uint8Array, options?:Options):Promise<number>;
-  commit(options?:Options):Promise<void>;
-  close():void;
-};
 ```
 
 storageはアプリIDごとに分離した小さな状態保存。valueはJSON互換のnull/boolean/有限number/string/配列/plain object。関数、循環、undefined、BigIntは拒否。keyは1〜64 UTF-8 bytes。未作成はnull、保存したnullはvalue:nullのレコードで区別する。revision不一致はCONFLICT。成功応答は永続化完了後。旧値か新値のどちらかに復旧できる原子的置換を必須とする。終了hookに依存しない。
 
-filesのパスは `app:/...` と `sd:/...`。appは自分の領域、sdはホストで許可されたディレクトリが仮想ルート。`..`、NUL、ルート外参照を拒否。readはEOFでnull、空ファイルとNOT_FOUNDを区別する。replaceは一時版へ書き、commit成功で公開。close前の未commitは破棄する。書込失敗で旧ファイルを消さない。媒体抜去はDISCONNECTED、終了後の再挿入で古いハンドルを復活させない。SDの電源断保証は媒体依存であり、バックエンドがatomic replaceを検証できるまでそのcapabilityを有効化しない。
+ファイルシステムは **pocket.fs** に統一する。初稿のpocket.filesは採用しない。[ファイルシステムAPI詳細](filesystem-api.md)をファイル操作の正規仕様とし、本書の共通規則より具体的な契約・上限・既定値は詳細仕様を優先する。
+
+fsは `app:/`（アプリの永続ファイル）、`assets:/`（同梱の読取専用素材）、`sd:/`（許可フォルダーを仮想ルートにしたSD）を扱う。stat/list/mkdir/remove/rename/copy、open/read/write/seek/flush/commit/close、readText/writeText、媒体状態と世代を定義する。listはページ取得、読書きはチャンク単位で、全量RAM読み込みを前提にしない。
+
+openはread/create/replace/append。create/replaceは一時版へ書き、commitで公開して自動close。空ファイルとNOT_FOUNDを区別する。appendは末尾追記で、電源断による部分書込を許容する用途に分ける。通常運転中のatomicReplaceと電源断復旧のcrashSafeReplaceを別featureとし、既定の安全な保存を黙って弱い保証へ落とさない。媒体抜去でハンドルを無効化し、再挿入でも復活させない。JSへformatや生Flash操作は提供しない。
 
 作品管理は別のホストサービスとする。`pocket.workspace.pick({kind:"source"}) -> Promise<SourceRef|null>`、`read(ref) -> Promise<{text,revision}>`、`create({title,text}) -> Promise<SourceRef>`、`save(ref,text,{ifRevision}) -> Promise<{revision}>`、`run(ref,{returnState}) -> void`を後段で追加する。SourceRefはホスト発行の不透明参照。教材はcreateでコピーし、既存作品へのsaveは明示的な選択とrevision確認を必要とする。
 
