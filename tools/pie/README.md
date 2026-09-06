@@ -31,7 +31,7 @@ stalls.py       … 「その並びは速いか」      データ依存ストー
 | **式・表・スケーリング**を変えた（例: 表に定数を畳み込む、シフト量を変える） | `run_models.py` で該当モデルを更新して総当たり → `test_kernels.py` |
 | `render_accel.c` の**ラッパー**（矩形の頭・尾、整列判定）を触った | `run_models.py accel` |
 | **新しい命令**を使った | `piesim.py` にその命令を TRM の擬似コードから追加してから `test_kernels.py`。未対応命令は `NotImplementedError` で止まる（黙って素通りはしない） |
-| 実機で「命令数のわりにサイクルが多い」 | まず `stalls.py`。0 ストールでも残る分（実測で 25〜35 サイクル/ブロック）はデータ依存以外の未特定コストで、命令数を減らしても比例しては減らない。見積もりはその前提で |
+| 実機で「命令数のわりにサイクルが多い」 | まず `stalls.py`。その `estimated cycles per block` と実測（`PERF` の `kernel=` を 30×行数で割る）を突き合わせる。一致すればカーネルは下限で走っており、次に効くのは命令数削減だけ。大きく外れるなら計測にカーネル以外が混ざっている |
 | 実機に焼く直前 | 3 つ全部 |
 
 ## 使い方
@@ -58,16 +58,18 @@ loop body ~213 bytes
 21 stall(s): producer -> consumer (index: op) on register
     3: ee.vldbc.16.ip       ->   4: ee.vadds.s16         q2
     ...
-estimated issue cycles per block: 87
+estimated cycles per block: 88.2 (66 issue + 1 store x0.6 + 21 stalls)
 ```
 ```
 ocean_row_pie: 62 instructions per block, 35 memory (56%), 16 ldxq, 15 vldbc
 loop body ~201 bytes
 no stage-2 producer followed immediately by its consumer: 0 data stalls
-estimated issue cycles per block: 62
+estimated cycles per block: 62.6 (62 issue + 1 store x0.6 + 0 stalls)
 ```
 
-実機の海面カーネルは v1 が 123 サイクル/ブロック、v2 が 86、`ldxq` を全廃した v3（40 命令、放物線近似）が約 73 でした。`estimated issue cycles` は**データ依存ストールだけを数えた下限**で、実機はそれより 25〜35 サイクル/ブロック多く、この残差は `ldxq` を消しても消えませんでした（原因未特定、[docs/pie-simd.md §3](../../docs/pie-simd.md)）。ツールが 0 と言った後に残る時間はこの種のもので、**命令数を減らしてもサイクルは比例しては減りません**（62→40 命令で 16% 短縮）。
+`estimated cycles per block` は実機で測った機械の下限（[docs/pie-simd.md §3.5](../../docs/pie-simd.md)）から出しています: PIE は算術・乗算・`VRELU`/`VPRELU` とも **1 命令 1 サイクル**で発行し、追加で払うのは融合ロード（`.LD.INCP`）1 本あたり 0.37 サイクル、ストア 1 本あたり 0.6 サイクル、そしてストール 1 つあたり 1 サイクルです。海面 v3（40 命令、融合ロード 12 本）はこの式で 45.3、実測 45.5 サイクル/ブロックで、**ストールを消したカーネルは理論下限で走ります**。
+
+実測がこの見積もりを大きく上回るときは、まずカーネル以外が計測に混ざっていないかを疑ってください。海面で一度「25〜35 サイクル/ブロックの残差」を追いかけて `ldxq` を疑いましたが、正体は `loop` の計測値に空の塗りつぶし 37 行とタイマ呼び出しが含まれていたことでした（`PERF` の `kernel=` はその後分けたもの）。
 
 ## 新しいカーネルを書くときの手順
 

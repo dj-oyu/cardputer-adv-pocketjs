@@ -13,10 +13,13 @@ producer. A consumer written *immediately* after such a producer costs one
 stall cycle; one independent instruction in between costs nothing.
 
 The report lists every such pair (including pairs that wrap from the end of
-the loop body to its start), counts memory instructions, and estimates the
-loop body size against the 256-byte limit of `loopgtz`. Measured on the
-device, removing these pairs alone took the ocean kernel from 1.90 to 1.39
-cycles per instruction; whatever remains after that is not a data stall.
+the loop body to its start), counts memory instructions, estimates the loop
+body size against the 256-byte limit of `loopgtz`, and gives the expected
+cycles per block from the measured machine floor (docs/pie-simd.md 3.5):
+instructions + 0.37 per fused load + 0.6 per store + stalls. A kernel with no
+stalls runs at that figure on the device (ocean v3: 45.3 estimated, 45.5
+measured); a measurement well above it means the timer is also covering
+something that is not the kernel.
 
 Limitations: the QACC accumulator and SAR are not modelled (their def/use rows
 in the table are incomplete), and the size estimate is from the usual encodings
@@ -32,6 +35,10 @@ STAGE2 = {'ee.vld.128.ip', 'ee.vld.l.64.ip', 'ee.vldbc.16', 'ee.vldbc.16.ip', 'e
           'ee.vmul.s16', 'ee.vmul.u16', 'ee.vrelu.s16', 'ee.vprelu.s16'}
 MEMORY = {'ee.vld.128.ip', 'ee.vld.l.64.ip', 'ee.vldbc.16', 'ee.vldbc.16.ip', 'ee.ldxq.32',
           'ee.vst.128.ip'}
+# Measured machine floor (docs/pie-simd.md 3.5): one instruction per cycle for
+# every EE arithmetic, multiply and (P)RELU, plus these per-instruction extras.
+FUSED_LOAD = 0.37     # each EE.*.LD.INCP
+STORE = 0.6           # each EE.VST.128.IP
 SIZE = {'ee.ldxq.32': 4, 'mov': 2, 'addi': 2, 'wsr.sar': 3, 'loopgtz': 3, 'bnez': 3}
 
 
@@ -131,7 +138,11 @@ def main():
         print(f'{len(stalls)} stall(s): producer -> consumer (index: op) on register')
         for j, pop, i, cop, r in stalls:
             print(f'  {j:3}: {pop:<20} -> {i:3}: {cop:<20} {r}')
-    print(f'estimated issue cycles per block: {total + len(stalls)}')
+    fused = sum(op.endswith('.ld.incp') for op, _, _ in body)
+    stores = sum(op == 'ee.vst.128.ip' for op, _, _ in body)
+    cycles = total + fused * FUSED_LOAD + stores * STORE + len(stalls)
+    print(f'estimated cycles per block: {cycles:.1f} ({total} issue + {fused} fused load x{FUSED_LOAD}'
+          f' + {stores} store x{STORE} + {len(stalls)} stalls)')
 
 
 if __name__ == '__main__':
