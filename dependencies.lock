@@ -1,0 +1,77 @@
+dependencies:
+  espressif/quickjs-ng:
+    component_hash: 51ead31abca34af01a44df24128e9ea10331cf35beb976a18fae62a03d36d6e2
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.4'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.14.0
+  idf:
+    source:
+      type: idf
+    version: 6.0.1
+  pocket-stack/pocketjs_guest:
+    dependencies:
+    - name: idf
+      version: '>=6.0,<6.2'
+    - name: espressif/quickjs-ng
+      version: 0.14.0
+    source:
+      path: .cache/components/pocketjs_guest
+      type: local
+    targets:
+    - esp32p4
+    - esp32s3
+    version: 0.1.0
+  pocket-stack/pocketjs_render_rgb565:
+    dependencies:
+    - name: idf
+      version: '>=6.0,<6.2'
+    - name: pocket-stack/pocketjs_ui_core
+      version: 0.1.0
+    source:
+      path: .cache/pocketjs/hosts/esp-idf/components/pocketjs_render_rgb565
+      type: local
+    targets:
+    - esp32p4
+    - esp32s3
+    version: 0.1.0
+  pocket-stack/pocketjs_ui_core:
+    dependencies:
+    - name: idf
+      version: '>=6.0,<6.2'
+    source:
+      path: .cache/pocketjs/hosts/esp-idf/components/pocketjs_ui_core
+      type: local
+    targets:
+    - esp32p4
+    - esp32s3
+    version: 0.1.0
+  pocket-stack/pocketjs_ui_qjs:
+    dependencies:
+    - name: idf
+      version: '>=6.0,<6.2'
+    - name: pocket-stack/pocketjs_guest
+      version: 0.1.0
+    - name: pocket-stack/pocketjs_ui_core
+      version: 0.1.0
+    source:
+      path: .cache/pocketjs/hosts/esp-idf/components/pocketjs_ui_qjs
+      type: local
+    targets:
+    - esp32p4
+    - esp32s3
+    version: 0.1.0
+direct_dependencies:
+- espressif/quickjs-ng
+- idf
+- pocket-stack/pocketjs_guest
+- pocket-stack/pocketjs_render_rgb565
+- pocket-stack/pocketjs_ui_core
+- pocket-stack/pocketjs_ui_qjs
+manifest_hash: 7885c8b8dc64ad499ed95cdf092cbe29727221e089f60e3c96081fa8e6b3c3c9
+target: esp32s3
+version: 3.0.0
