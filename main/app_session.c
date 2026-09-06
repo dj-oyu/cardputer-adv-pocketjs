@@ -8,6 +8,7 @@
 #include "pocketjs/render_rgb565.h"
 #include "jsconsole.h"
 #include "jsfont.h"
+#include "pocket_api.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -139,6 +140,7 @@ esp_err_t app_start_test(char test) {
     jsconsole_clear();
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"jsfont",jsfont_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
     cc.logical_width=LCD_W;cc.logical_height=LCD_H;cc.raster_density=1;cc.tick_hz=30;
