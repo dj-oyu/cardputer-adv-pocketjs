@@ -1,4 +1,4 @@
-"""Measure both backgrounds after flashing/resetting the device."""
+"""Measure all backgrounds after flashing/resetting the device."""
 import argparse
 from pathlib import Path
 import time
@@ -27,9 +27,10 @@ try:
     s.write(b'b');read_until('CATEGORY 1')
     s.write(b'uu');read_until('SELECT 0')
     # Explicitly select each background through its child menu.
-    for mode in range(2):
+    for mode in range(3):
         s.write(b'e');read_until('OPEN')
-        s.write(b'd' if mode else b'u');read_until('CHOICE')
+        for key in b'uu'+b'd'*mode:
+            s.write(bytes([key]));read_until('CHOICE')
         s.write(b'e');read_until('VALUE')
         for sample in range(4):
             lines=read_until('PERF')

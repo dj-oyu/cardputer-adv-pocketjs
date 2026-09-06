@@ -67,10 +67,11 @@ with serial.Serial(a.port, 115200, timeout=0.2) as s:
     time.sleep(2.5)
     s.reset_input_buffer()
     records = []
-    for mode in range(2):
+    for mode in range(3):
         command('uu', 'SELECT 0')
         command('e', 'OPEN')
-        command('u' if mode == 0 else 'd', 'CHOICE')
+        command('u', 'CHOICE');command('u', 'CHOICE')
+        for _ in range(mode):command('d', 'CHOICE')
         command('e', 'VALUE')
         deadline = time.monotonic() + 8
         sequence = 'dduueudqab'

@@ -1,5 +1,5 @@
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
-idf_component_register(SRCS "main.c" "board.c" "shell.c" "app_session.c" "motion.c" "sound.c"
+idf_component_register(SRCS "main.c" "board.c" "shell.c" "solar_sail.c" "solar_time.c" "app_session.c" "motion.c" "sound.c"
     "keymap.c" "jpfont.c" "skk_session.c" "editor.c" "codeedit.c" "srcstore.c" "jsconsole.c" "jslex.c" "jsfont.c" "lessons.c" "tutorial.c" "paint.c" "render_accel.c"
     "../.cache/bmi270/bmi2.c" "../.cache/bmi270/bmi270.c"
     INCLUDE_DIRS "." "${CMAKE_BINARY_DIR}/generated" "../.cache/bmi270"
@@ -13,4 +13,4 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 # The small procedural renderer benefits from speed optimization; the JS engine
 # and other components retain the project's size optimization.
-set_source_files_properties(shell.c render_accel.c PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(shell.c solar_sail.c render_accel.c PROPERTIES COMPILE_OPTIONS "-O2")

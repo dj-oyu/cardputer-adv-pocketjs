@@ -15,7 +15,8 @@ def command(key,marker):
     raise RuntimeError(lines[-12:])
 def value(selected):
     command('e','OPEN')
-    command('d' if selected else 'u','CHOICE')
+    command('u','CHOICE');command('u','CHOICE')
+    for _ in range(selected):command('d','CHOICE')
     line=command('e','VALUE')
     print(line,flush=True)
     m=re.search(r'background=(\d+) fps=(\d+) sound=(\d+)',line)
@@ -25,6 +26,8 @@ try:
     command('q','HOME_READY');command('a','CATEGORY 0');command('b','CATEGORY 1')
     command('u','SELECT');command('u','SELECT 0')
     first=value(0);second=value(1);assert first[0]==0 and second[0]==1
+    third=value(2);assert third[0]==2
+    value(1)
     # Back cancels the pending choice without applying it.
     command('e','OPEN');command('u','CHOICE 0');command('q','HOME_READY')
     line=command('e','OPEN');assert 'choice=1' in line,line

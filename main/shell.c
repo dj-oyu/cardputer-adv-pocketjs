@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "solar_sail.h"
 #include "board.h"
 #include "motion.h"
 #include "sound.h"
@@ -15,7 +16,8 @@
 static uint16_t *strip;
 static int strip_y, strip_h;
 static unsigned mode;
-static const char *names[]={"LEVEL WAVE","OCEAN + STARS"};
+static const char *names[]={"LEVEL WAVE","OCEAN + STARS","SOLAR SAIL"};
+#define BACKGROUND_N (sizeof(names)/sizeof(names[0]))
 static int16_t ribbons[3][LCD_W];
 static uint8_t softness[3][64];
 static int16_t sine[256], distortion[LCD_W];
@@ -64,7 +66,7 @@ static bool prefs_ready;
 void shell_init(void) {
     if(nvs_flash_init()==ESP_OK && nvs_open("home",NVS_READWRITE,&prefs)==ESP_OK) {
         prefs_ready=true;uint8_t v;
-        if(nvs_get_u8(prefs,"background",&v)==ESP_OK)mode=v%2;
+        if(nvs_get_u8(prefs,"background",&v)==ESP_OK)mode=v%BACKGROUND_N;
         if(nvs_get_u8(prefs,"fps",&v)==ESP_OK)show_fps=v!=0;
         if(nvs_get_u8(prefs,"sound",&v)==ESP_OK)sfx=v!=0;
     }
@@ -76,7 +78,9 @@ bool shell_key(board_key_t key) {
         choices=false;sound_play(2);
         ESP_LOGI("shell","HOME_READY");
     } else if(choices&&(key==KEY_UP||key==KEY_DOWN)) {
-        unsigned next=key==KEY_DOWN?1:0;
+        unsigned next=choice,count=setting==0?BACKGROUND_N:2;
+        if(key==KEY_DOWN&&next+1<count)next++;
+        if(key==KEY_UP&&next>0)next--;
         if(next!=choice){choice=next;sound_play(0);}
         ESP_LOGI("settings","CHOICE %u",choice);
     } else if(choices&&(key==KEY_LEFT||key==KEY_RIGHT)) {
@@ -105,7 +109,7 @@ bool shell_key(board_key_t key) {
             ESP_LOGI("settings","OPEN %u choice=%u",setting,choice);
             return false;
         }
-        if(setting==0&&mode!=choice)shell_change_background(1);
+        if(setting==0&&mode!=choice)shell_change_background((int)choice-(int)mode);
         if(setting==1)show_fps=choice!=0;
         if(setting==2){sfx=choice!=0;sound_set_enabled(sfx);}
         choices=false;
@@ -122,8 +126,9 @@ bool shell_key(board_key_t key) {
     return false;
 }
 void shell_change_background(int direction) {
-    mode=(mode+2+direction)%2;
+    mode=(unsigned)(((int)mode+(int)BACKGROUND_N+direction)%(int)BACKGROUND_N);
     window_start=0;samples=0;max_us=0;draw_sum=0;fps=0;
+    present_sum=prep_sum=loop_sum=hud_sum=0;
     ESP_LOGI("background","MODE %u %s",mode,names[mode]);
 }
 static float fade(float x) {return x*x*x*(x*(x*6-15)+10);}
@@ -514,7 +519,7 @@ static void draw_menu(void) {
         int x=(int)lroundf(16+(1-depth_pos)*LCD_W);
         const char *toggles[]={"OFF","ON"};
         label(x,37,labels[setting],1,depth_pos);
-        menu_list(x,choice_pos,setting==0?names:toggles,2,depth_pos,NULL);
+        menu_list(x,choice_pos,setting==0?names:toggles,setting==0?BACKGROUND_N:2,depth_pos,NULL);
     }
 }
 void shell_draw(const char *error, unsigned phase) {
@@ -558,7 +563,8 @@ void shell_draw(const char *error, unsigned phase) {
             cross_phase[y]=(int)((depth*3.1f-t*0.7f)*40.7437f);
         }
     }
-    for(int i=0;i<36;i++) {
+    if(mode==2)solar_sail_prepare(dt,tilt_x,tilt_y);
+    if(mode!=2)for(int i=0;i<36;i++) {
         unsigned seed=hash(i,91);float speed=1+(seed%13)*0.3f;
         stars[i].x=(int)fmodf((seed%240)+t*speed,240);
         stars[i].y=(int)fmodf(((seed>>8)%135)+t*(0.4f+speed*0.2f),135);
@@ -578,7 +584,8 @@ void shell_draw(const char *error, unsigned phase) {
         // 18.1 became 12.9. Turning the divisions into shifts and reciprocals
         // was measured too and moved nothing: this core divides in hardware, so
         // what counted was how often the work ran, not what it cost each time.
-        for(int y=strip_y;y<strip_y+strip_h;y++) {
+        if(mode==2)solar_sail_draw(strip,strip_y,strip_h);
+        else for(int y=strip_y;y<strip_y+strip_h;y++) {
             uint16_t *row=strip+(size_t)(y-strip_y)*LCD_W;
             if(mode==1) {
                 if(y<=36) {
@@ -598,7 +605,7 @@ void shell_draw(const char *error, unsigned phase) {
         }
         loop_us+=(unsigned)(esp_timer_get_time()-band);
         band=esp_timer_get_time();
-        for(int i=0;i<36;i++) {
+        if(mode!=2)for(int i=0;i<36;i++) {
             int px=stars[i].x,py=stars[i].y;
             if(py+2<strip_y||py-2>=strip_y+strip_h)continue;
             uint16_t c=stars[i].color;
@@ -618,6 +625,10 @@ void shell_draw(const char *error, unsigned phase) {
             }
             pixel(px,py,c);
             if(i%7==0){pixel(px-1,py,muted);pixel(px+1,py,muted);pixel(px,py-1,muted);pixel(px,py+1,muted);}
+        }
+        if(mode==2) {
+            text(12,121,solar_sail_time_label(),1,board_rgb(61,88,105));
+            text(166,121,solar_sail_target(),1,board_rgb(87,125,144));
         }
         char meter[16];snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
         if(show_fps)text(194,8,meter,1,muted);
