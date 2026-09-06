@@ -11,6 +11,7 @@
 #include "pocket_api.h"
 #include "pocket_storage.h"
 #include "pocket_imu.h"
+#include "pocket_av.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -120,6 +121,7 @@ void app_stop(void) {
     jsfont_detach();
     // Before the guest goes: the watches hold callbacks belonging to it.
     pocket_imu_reset();
+    pocket_av_reset();
     if(renderer && target) pocketjs_rgb565_abort(renderer,target);
     if(target) pocketjs_rgb565_target_destroy(target);
     if(renderer) pocketjs_rgb565_renderer_destroy(renderer);
@@ -147,6 +149,7 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"imu",pocket_imu_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
     cc.logical_width=LCD_W;cc.logical_height=LCD_H;cc.raster_density=1;cc.tick_hz=30;
@@ -216,6 +219,7 @@ esp_err_t app_tick(uint32_t buttons) {
     // Watch deliveries before the frame, so a listener that updates a node and
     // the frame that draws it are the same turn rather than one apart.
     pocket_imu_pump();
+    pocket_av_pump();
     pocketjs_ui_input_t input={.struct_size=sizeof(input),.buttons=buttons};
     pocketjs_ui_frame_view_t frame={.struct_size=sizeof(frame)};
     esp_err_t e=pocketjs_ui_turn(binding,&input,&frame);
