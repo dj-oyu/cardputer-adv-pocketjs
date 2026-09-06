@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "esp_timer.h"
+#include "esp_cpu.h"
 #include "esp_log.h"
 
 static uint16_t *strip;
@@ -38,6 +39,10 @@ static struct {int x,y;uint16_t color;} stars[36];
 static int64_t window_start;
 static unsigned samples, max_us;
 static uint64_t present_sum, prep_sum, loop_sum, hud_sum;
+// The vector rows alone, inside loop_sum. Worth its two cycle reads a row: for
+// a long time "loop" was read as if it were the kernel, and it is not — the
+// sky above the horizon and the scaffolding are a quarter of it.
+static uint64_t kernel_cycles;
 static uint64_t draw_sum;
 static float fps;
 static unsigned category,setting,app;
@@ -593,10 +598,14 @@ void shell_draw(const char *error, unsigned phase) {
                     for(int x=0;x<LCD_W;x++) row[x]=sky;
                     continue;
                 }
+                uint32_t c0=esp_cpu_get_cycle_count();
                 ocean_row_pie(row,depth_phase[y],cross_phase[y],
                           12+(y-36)/3, 24-(y-36)/5);
+                kernel_cycles+=esp_cpu_get_cycle_count()-c0;
             } else {
+                uint32_t c0=esp_cpu_get_cycle_count();
                 wave_row_pie(row,y,14+y/7,30+y/5);
+                kernel_cycles+=esp_cpu_get_cycle_count()-c0;
             }
         }
         loop_us+=(unsigned)(esp_timer_get_time()-band);
@@ -648,11 +657,12 @@ void shell_draw(const char *error, unsigned phase) {
         // the per-pixel loop, the stars and the menu at once, and only one of
         // those is worth vectorising.
         ESP_LOGI("background",
-            "PERF mode=%u fps=%.1f draw=%.2f prep=%.2f loop=%.2f hud=%.2f send=%.2f",
+            "PERF mode=%u fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f hud=%.2f send=%.2f",
             mode,fps,(double)draw_sum/samples/1000.0,
             (double)prep_sum/samples/1000.0,(double)loop_sum/samples/1000.0,
+            (double)kernel_cycles/samples/240000.0,
             (double)hud_sum/samples/1000.0,(double)present_sum/samples/1000.0);
-        samples=0;draw_sum=0;present_sum=0;prep_sum=0;loop_sum=0;hud_sum=0;
+        samples=0;draw_sum=0;present_sum=0;prep_sum=0;loop_sum=0;hud_sum=0;kernel_cycles=0;
         max_us=0;window_start=now;
     }
 }
