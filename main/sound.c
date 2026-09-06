@@ -9,11 +9,33 @@
 #include <math.h>
 #include <stdatomic.h>
 
+#define SAMPLE_RATE 24000
+
+// A click, or a tone. kind is the click index, or -1 for a tone; the rest is
+// only read for tones.
+typedef struct {
+    int32_t id;
+    int16_t kind;
+    uint16_t frequency;
+    uint16_t gain;        // 0..4096
+    uint32_t frames;
+    sound_done_fn done;
+    void *ctx;
+} request_t;
+
 static i2s_chan_handle_t output;
 static QueueHandle_t events;
 static atomic_bool enabled=true;
+static atomic_int cancelled;
+static atomic_int next_id=1;
 void sound_set_enabled(bool value){atomic_store(&enabled,value);}
-void sound_play(int kind){if(events&&atomic_load(&enabled))xQueueSend(events,&kind,0);}
+bool sound_available(void){return events!=NULL;}
+bool sound_play(int kind) {
+    if(!events||!atomic_load(&enabled))return false;
+    request_t req={.kind=(int16_t)kind};
+    return xQueueSend(events,&req,0)==pdTRUE;
+}
+void sound_tone_cancel(int32_t id){if(id>0)atomic_store(&cancelled,id);}
 
 // The three clicks, rendered once at startup rather than every time they play.
 //
@@ -30,36 +52,113 @@ enum { SFX_KINDS=3, SFX_LONGEST=1440 };
 static const int16_t sfx_frames[SFX_KINDS]={720,1440,1080};
 static int16_t sfx_pcm[SFX_KINDS][SFX_LONGEST];
 
+// audio.tone takes any frequency and any length, so there is nothing to bake:
+// the wave has to be produced while it plays. What the clicks showed is that
+// the cost that mattered was sinf, not the loop around it, so this keeps the
+// loop and drops the sinf. One period of a sine lives in a 256-entry table, and
+// a 32-bit phase accumulator walks it: the top 8 bits index, the next 8 weight
+// a linear interpolation between neighbours, and the step is the frequency
+// scaled by 2^32/24000, so any frequency is exact to a fraction of a hertz
+// without a division per sample. That leaves a handful of integer multiplies
+// per sample against sinf's several hundred cycles — an operation count, not a
+// measurement. The clicks are the only thing here that has been measured, and
+// they are untouched: they still play from their tables.
+enum { WAVE_POINTS=256, WAVE_PEAK=12000 };
+static int16_t wave[WAVE_POINTS];
+
 static void synthesize(int kind) {
     int frames=sfx_frames[kind];
     float phase=0,frequency=kind==1?880:kind==2?440:660;
     for(int n=0;n<frames;n++) {
         float u=(float)n/frames;
         float envelope=fminf(n/72.0f,1.0f)*(1-u)*(1-u);
-        phase+=6.2831853f*frequency*(kind==1?1+0.35f*u:1-0.15f*u)/24000;
+        phase+=6.2831853f*frequency*(kind==1?1+0.35f*u:1-0.15f*u)/SAMPLE_RATE;
         // Peak stays near -7 dBFS including the second harmonic.
         sfx_pcm[kind][n]=(int16_t)(12000*envelope*(sinf(phase)+0.18f*sinf(phase*2)));
     }
 }
 
-static void audio_task(void *arg) {
-    (void)arg;int kind;int16_t pcm[256];
-    while(1) {
-        xQueueReceive(events,&kind,portMAX_DELAY);
-        if(!atomic_load(&enabled))continue;
-        if(kind<0||kind>=SFX_KINDS)continue;
-        int frames=sfx_frames[kind];
-        // A tail of silence past the end pushes the last samples through the
-        // DMA ring, as the synthesised version's frames+256 did.
-        for(int start=0;start<frames+256;start+=128) {
-            for(int j=0;j<128;j++) {
-                int n=start+j;
-                int16_t sample=(n<frames && atomic_load(&enabled))?sfx_pcm[kind][n]:0;
-                pcm[j*2]=pcm[j*2+1]=sample;
+// Sends one 128-frame block and says whether the channel is still healthy.
+static bool emit(const int16_t *pcm) {
+    size_t written=0;
+    esp_err_t err=i2s_channel_write(output,pcm,256*sizeof(int16_t),&written,100);
+    if(err==ESP_OK&&written==256*sizeof(int16_t))return true;
+    ESP_LOGW("sound","I2S write failed");
+    return false;
+}
+
+static void play_click(int kind,int16_t *pcm) {
+    int frames=sfx_frames[kind];
+    // A tail of silence past the end pushes the last samples through the
+    // DMA ring, as the synthesised version's frames+256 did.
+    for(int start=0;start<frames+256;start+=128) {
+        for(int j=0;j<128;j++) {
+            int n=start+j;
+            int16_t sample=(n<frames && atomic_load(&enabled))?sfx_pcm[kind][n]:0;
+            pcm[j*2]=pcm[j*2+1]=sample;
+        }
+        if(!emit(pcm))break;
+    }
+}
+
+static void play_tone(const request_t *req,int16_t *pcm) {
+    uint32_t phase=0,step=(uint32_t)(((uint64_t)req->frequency<<32)/SAMPLE_RATE);
+    uint32_t frames=req->frames;
+    // The same 3 ms attack the clicks use, and a release to match, so a tone
+    // neither starts nor stops on a step in the waveform. Short tones get half
+    // their length at each end instead.
+    uint32_t ramp=frames/2<72?frames/2:72;
+    bool completed=true;
+    for(uint32_t start=0;start<frames+256;start+=128) {
+        if(atomic_load(&cancelled)==req->id){completed=false;break;}
+        for(int j=0;j<128;j++) {
+            uint32_t n=start+j;
+            int value=0;
+            if(n<frames&&atomic_load(&enabled)) {
+                unsigned index=phase>>24,frac=(phase>>16)&0xff;
+                int s=(wave[index]*(int)(256-frac)+wave[(index+1)&(WAVE_POINTS-1)]*(int)frac)>>8;
+                int envelope=4096;
+                if(ramp) {
+                    if(n<ramp)envelope=(int)(n*4096/ramp);
+                    else if(n>=frames-ramp)envelope=(int)((frames-n)*4096/ramp);
+                }
+                value=((s*envelope)>>12)*req->gain>>12;
             }
-            size_t written=0;
-            esp_err_t err=i2s_channel_write(output,pcm,sizeof(pcm),&written,100);
-            if(err!=ESP_OK||written!=sizeof(pcm)){ESP_LOGW("sound","I2S write failed");break;}
+            phase+=step;
+            pcm[j*2]=pcm[j*2+1]=(int16_t)value;
+        }
+        if(!emit(pcm)){completed=false;break;}
+    }
+    if(req->done)req->done(req->ctx,completed);
+}
+
+int32_t sound_tone(unsigned frequency_hz,unsigned duration_ms,float gain,
+                   sound_done_fn done,void *ctx) {
+    if(!events)return SOUND_ERR_UNSUPPORTED;
+    if(frequency_hz<SOUND_TONE_MIN_HZ||frequency_hz>SOUND_TONE_MAX_HZ)return SOUND_ERR_INVALID;
+    if(!duration_ms||duration_ms>SOUND_TONE_MAX_MS)return SOUND_ERR_INVALID;
+    // Written as a positive test so that a NaN gain is rejected rather than
+    // slipping past two comparisons that are both false.
+    if(!(gain>=0.0f&&gain<=1.0f))return SOUND_ERR_INVALID;
+    request_t req={
+        .id=atomic_fetch_add(&next_id,1),
+        .kind=-1,
+        .frequency=(uint16_t)frequency_hz,
+        .gain=(uint16_t)(gain*4096.0f),
+        .frames=duration_ms*(SAMPLE_RATE/1000),
+        .done=done,.ctx=ctx};
+    if(xQueueSend(events,&req,0)!=pdTRUE)return SOUND_ERR_BUSY;
+    return req.id;
+}
+
+static void audio_task(void *arg) {
+    (void)arg;request_t req;int16_t pcm[256];
+    while(1) {
+        xQueueReceive(events,&req,portMAX_DELAY);
+        if(req.kind>=0) {
+            if(req.kind<SFX_KINDS&&atomic_load(&enabled))play_click(req.kind,pcm);
+        } else {
+            play_tone(&req,pcm);
         }
     }
 }
@@ -69,7 +168,7 @@ void sound_init(i2c_master_bus_handle_t bus) {
     channel.dma_desc_num=4;channel.dma_frame_num=128;channel.auto_clear=true;
     esp_err_t err=i2s_new_channel(&channel,&output,NULL);
     if(err!=ESP_OK){ESP_LOGW("sound","I2S channel unavailable: %s",esp_err_to_name(err));return;}
-    i2s_std_config_t cfg={.clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(24000),
+    i2s_std_config_t cfg={.clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
         .slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,I2S_SLOT_MODE_STEREO),
         .gpio_cfg={.mclk=I2S_GPIO_UNUSED,.bclk=41,.ws=43,.dout=42,.din=I2S_GPIO_UNUSED}};
     err=i2s_channel_init_std_mode(output,&cfg);if(err!=ESP_OK)goto fail;
@@ -86,11 +185,12 @@ void sound_init(i2c_master_bus_handle_t bus) {
         vTaskDelay(pdMS_TO_TICKS(2));
     }
     i2c_master_bus_rm_device(codec);if(err!=ESP_OK)goto fail;
-    events=xQueueCreate(4,sizeof(int));
+    events=xQueueCreate(4,sizeof(request_t));
     if(!events)goto fail;
     int64_t began=esp_timer_get_time();
     for(int k=0;k<SFX_KINDS;k++)synthesize(k);
-    ESP_LOGI("sound","3 clicks rendered in %lld us",esp_timer_get_time()-began);
+    for(int i=0;i<WAVE_POINTS;i++)wave[i]=(int16_t)(WAVE_PEAK*sinf(6.2831853f*i/WAVE_POINTS));
+    ESP_LOGI("sound","3 clicks and the tone table rendered in %lld us",esp_timer_get_time()-began);
     if(xTaskCreate(audio_task,"sfx",4096,NULL,7,NULL)!=pdPASS){vQueueDelete(events);events=NULL;goto fail;}
     ESP_LOGI("sound","ES8311 ready; synthesized 24kHz stereo; default ON");return;
 fail:

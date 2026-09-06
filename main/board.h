@@ -14,3 +14,12 @@ uint16_t *board_strip(void);
 esp_err_t board_present(int y, int rows, uint16_t *pixels);
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 void board_capture(bool enabled);
+
+// Battery voltage at the pack, and when it was sampled. There is deliberately
+// no percentage and no charging flag here: the board has no fuel gauge and no
+// charger status line, and a state of charge guessed from one voltage of an
+// uncharacterised cell would be a number that looks measured and is not.
+typedef struct { int millivolts; int64_t time_us; } board_battery_t;
+// False if the ADC or its calibration is unavailable, in which case there is no
+// reading to report rather than a bad one.
+bool board_battery_read(board_battery_t *out);

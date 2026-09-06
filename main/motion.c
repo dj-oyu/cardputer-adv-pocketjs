@@ -16,6 +16,41 @@ static float origin_y,filtered_x,filtered_y;
 static atomic_int tilt_x,tilt_y;
 static int64_t last_read,last_log;
 static unsigned failures;
+
+// Full-scale conversions taken from the BMI270 datasheet, not measured here.
+// The accelerometer is configured for +-2 g over a signed 16-bit word, so 16384
+// LSB/g, which is where the existing /16384 below comes from. The gyroscope is
+// configured for +-2000 deg/s: the widest range, so that a flick of the wrist
+// clips nothing, and still 0.061 deg/s per count, far below the part's noise.
+#define GRAVITY           9.80665f
+#define GYRO_RADS_PER_LSB (2000.0f*3.14159265f/180.0f/32768.0f)
+#define SAMPLE_PERIOD_US  20000
+
+// Board axes to the published frame (x right, y up, z toward the viewer).
+//
+// UNVERIFIED. How Bosch's package sits on the ADV board is in no document we
+// have, and no amount of software can find out, so this is the identity
+// permutation until the hardware says otherwise. The periodic log at the end of
+// motion_poll prints the mapped values in m/s^2 precisely so the six-position
+// check in acceptance condition 7 can be read straight off the monitor. Change
+// only these three lines afterwards: everything downstream reads what they
+// produce, including roll and pitch.
+#define MAP_X(ax,ay,az) (ax)
+#define MAP_Y(ax,ay,az) (ay)
+#define MAP_Z(ax,ay,az) (az)
+
+// motion_poll writes from input_task; motion_latest reads from whichever task
+// the caller runs on. An odd version means a write is in progress, so a reader
+// that sees the same even version either side of its copy knows the copy held
+// together. Cheaper on the writing side than a mutex, and that is the side that
+// runs every 20 ms.
+static motion_sample_t latest;
+static atomic_uint version;
+static uint32_t sequence,dropped;
+static int64_t last_sample;
+static atomic_bool gyro_wanted;
+static bool gyro_running;
+
 static int8_t read_reg(uint8_t reg,uint8_t *data,uint32_t len,void *ctx) {
     (void)ctx;return i2c_master_transmit_receive(device,&reg,1,data,len,10)==ESP_OK?0:-1;
 }
@@ -35,19 +70,54 @@ void motion_init(i2c_master_bus_handle_t bus) {
     if(i2c_master_bus_add_device(bus,&cfg,&device)!=ESP_OK)return;
     imu.intf=BMI2_I2C_INTF;imu.read=read_reg;imu.write=write_reg;imu.delay_us=delay_us;imu.read_write_len=32;
     int rc=bmi270_init(&imu);
-    struct bmi2_sens_config sensor={.type=BMI2_ACCEL};
-    if(!rc)rc=bmi2_get_sensor_config(&sensor,1,&imu);
-    sensor.cfg.acc.odr=BMI2_ACC_ODR_50HZ;sensor.cfg.acc.range=BMI2_ACC_RANGE_2G;
-    if(!rc)rc=bmi2_set_sensor_config(&sensor,1,&imu);
+    // The gyroscope is configured here and enabled only on request, so turning
+    // it on later costs one register write instead of a reconfiguration.
+    struct bmi2_sens_config sensor[2]={{.type=BMI2_ACCEL},{.type=BMI2_GYRO}};
+    if(!rc)rc=bmi2_get_sensor_config(sensor,2,&imu);
+    sensor[0].cfg.acc.odr=BMI2_ACC_ODR_50HZ;sensor[0].cfg.acc.range=BMI2_ACC_RANGE_2G;
+    sensor[1].cfg.gyr.odr=BMI2_GYR_ODR_50HZ;sensor[1].cfg.gyr.range=BMI2_GYR_RANGE_2000;
+    sensor[1].cfg.gyr.ois_range=BMI2_GYR_OIS_2000;
+    sensor[1].cfg.gyr.filter_perf=BMI2_PERF_OPT_MODE;
+    sensor[1].cfg.gyr.noise_perf=BMI2_POWER_OPT_MODE;
+    if(!rc)rc=bmi2_set_sensor_config(sensor,2,&imu);
     uint8_t accel=BMI2_ACCEL;
     if(!rc)rc=bmi2_sensor_enable(&accel,1,&imu);
     ready=rc==0;
-    ESP_LOGI("motion","BMI270 addr=0x%x chip=0x%x init=%d accel=50Hz",addr,imu.chip_id,rc);
+    ESP_LOGI("motion","BMI270 addr=0x%x chip=0x%x init=%d accel=50Hz gyro=configured,off",addr,imu.chip_id,rc);
 }
 void motion_recenter(void){centered=false;}
 void motion_get(int *x,int *y){*x=atomic_load(&tilt_x);*y=atomic_load(&tilt_y);}
+bool motion_present(void){return ready;}
+unsigned motion_rate_hz(void){return 1000000u/SAMPLE_PERIOD_US;}
+void motion_request_gyro(bool on){atomic_store(&gyro_wanted,on);}
+bool motion_latest(motion_sample_t *out) {
+    if(!ready)return false;
+    for(int attempt=0;attempt<8;attempt++) {
+        unsigned before=atomic_load(&version);
+        if(before&1u)continue;
+        *out=latest;
+        if(atomic_load(&version)==before)return before!=0;
+    }
+    return false;
+}
+// Brings the gyroscope's power state in line with the last request. Called from
+// motion_poll so that input_task stays the only task touching this device.
+static void apply_gyro_request(void) {
+    bool want=atomic_load(&gyro_wanted);
+    if(want==gyro_running)return;
+    uint8_t gyro=BMI2_GYRO;
+    int rc=want?bmi2_sensor_enable(&gyro,1,&imu):bmi2_sensor_disable(&gyro,1,&imu);
+    if(rc!=BMI2_OK) {
+        ESP_LOGW("motion","gyro %s failed: %d",want?"enable":"disable",rc);
+        atomic_store(&gyro_wanted,gyro_running);
+        return;
+    }
+    gyro_running=want;
+    ESP_LOGI("motion","gyro %s",want?"on":"off");
+}
 void motion_poll(void) {
-    int64_t now=esp_timer_get_time();if(!ready||now-last_read<20000)return;last_read=now;
+    int64_t now=esp_timer_get_time();if(!ready||now-last_read<SAMPLE_PERIOD_US)return;last_read=now;
+    apply_gyro_request();
     struct bmi2_sens_data data={0};
     if(bmi2_get_sensor_data(&data,&imu)!=BMI2_OK){
         if(++failures>=10){atomic_store(&tilt_x,0);atomic_store(&tilt_y,0);}
@@ -66,5 +136,50 @@ void motion_poll(void) {
     if(ty>180)ty=180;
     if(ty< -180)ty=-180;
     atomic_store(&tilt_x,tx);atomic_store(&tilt_y,ty);
-    if(now-last_log>5000000){last_log=now;ESP_LOGI("motion","ACC %d %d %d TILT %d %d",data.acc.x,data.acc.y,data.acc.z,tx,ty);}
+
+    // The published sample. Whatever the wallpaper does with the raw board axes
+    // above, this half is the one that owes the spec its frame and its units,
+    // so it is derived separately rather than scaled out of the tilt filter.
+    motion_sample_t sample={0};
+    sample.accel_x=MAP_X(ax,ay,az)*GRAVITY;
+    sample.accel_y=MAP_Y(ax,ay,az)*GRAVITY;
+    sample.accel_z=MAP_Z(ax,ay,az)*GRAVITY;
+    if(gyro_running&&(data.status&BMI2_DRDY_GYR)) {
+        float gx=data.gyr.x*GYRO_RADS_PER_LSB;
+        float gy=data.gyr.y*GYRO_RADS_PER_LSB;
+        float gz=data.gyr.z*GYRO_RADS_PER_LSB;
+        sample.gyro_x=MAP_X(gx,gy,gz);
+        sample.gyro_y=MAP_Y(gx,gy,gz);
+        sample.gyro_z=MAP_Z(gx,gy,gz);
+        sample.gyro_valid=true;
+    }
+    sample.roll=atan2f(sample.accel_y,sample.accel_z);
+    sample.pitch=atan2f(-sample.accel_x,
+        sqrtf(sample.accel_y*sample.accel_y+sample.accel_z*sample.accel_z));
+    // An estimate, and labelled as one: a gap longer than one polling period
+    // means samples the BMI270 produced that nobody collected. It cannot tell a
+    // late poll from a stalled sensor, and it does not use the part's own
+    // sensortime, which wraps every 655 ms and so cannot survive a long gap.
+    if(last_sample) {
+        int missed=(int)((now-last_sample+SAMPLE_PERIOD_US/2)/SAMPLE_PERIOD_US)-1;
+        if(missed>0)dropped+=(unsigned)missed;
+    }
+    last_sample=now;
+    sample.time_us=now;sample.sequence=++sequence;sample.dropped=dropped;
+    atomic_fetch_add(&version,1u);
+    latest=sample;
+    atomic_fetch_add(&version,1u);
+
+    // Every two seconds, in the units section 8 publishes, because the axis
+    // check in acceptance condition 7 is read off this line: hold the device in
+    // each of six orientations and see which component sits near +-9810 while
+    // the other two sit near zero. Scaled to integers rather than printed as
+    // floats to keep printf's float formatting, and the libm it drags in, out
+    // of a path that runs whether anyone is reading the log or not.
+    if(now-last_log>2000000){last_log=now;
+        ESP_LOGI("motion","ACC %d %d %d mm/s2 GYR %d %d %d mrad/s%s seq=%lu drop=%lu TILT %d %d",
+                 (int)(sample.accel_x*1000),(int)(sample.accel_y*1000),(int)(sample.accel_z*1000),
+                 (int)(sample.gyro_x*1000),(int)(sample.gyro_y*1000),(int)(sample.gyro_z*1000),
+                 sample.gyro_valid?"":" (off)",
+                 (unsigned long)sample.sequence,(unsigned long)sample.dropped,tx,ty);}
 }

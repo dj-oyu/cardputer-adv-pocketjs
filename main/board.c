@@ -4,8 +4,13 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
@@ -95,6 +100,76 @@ static bool swap_agrees(void) {
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b) {
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
 }
+
+// ---------------------------------------------------------------------------
+// Battery voltage.
+//
+// The pack reaches GPIO10 -- ADC1 channel 9 on the S3 -- through a 100k/100k
+// divider, so the reading is half the cell voltage. Three sources agree:
+// M5Unified's Power_Class.cpp gives board_M5CardputerADV _batAdcPin 10,
+// _batAdcUnit 1 and _adc_ratio 2.0f; the official ADV pinout lists Battery_ADC
+// on G10; and schematic v1.0 shows R8 and R12 as the two 100k legs.
+//
+// What the board does not have is anything to ask about charging. The charger
+// is a TP4057 whose CHRG and STDBY pins drive only the indicator LED, there is
+// no PMIC and no fuel gauge on the I2C bus, and M5Stack's own documentation
+// says so in as many words. So this reports millivolts and nothing else: no
+// percentage, since nobody here has characterised the cell, and no charging
+// flag, since there is no wire to read one from. With USB plugged in the
+// reading sits near a full pack whatever its real state, and with the side
+// switch off the pack is disconnected entirely.
+//
+// None of the above has been checked against a meter on this unit yet.
+static adc_oneshot_unit_handle_t battery_adc;
+static adc_cali_handle_t battery_cali;
+static SemaphoreHandle_t battery_lock;
+static int64_t battery_time;
+static int battery_mv;
+
+static void battery_init(void) {
+    adc_oneshot_unit_init_cfg_t unit = {.unit_id = ADC_UNIT_1};
+    if (adc_oneshot_new_unit(&unit, &battery_adc) != ESP_OK) { battery_adc=NULL; goto absent; }
+    adc_oneshot_chan_cfg_t chan = {.atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_12};
+    if (adc_oneshot_config_channel(battery_adc, ADC_CHANNEL_9, &chan) != ESP_OK) goto absent;
+    // Without the calibration curve the converter gives counts, not volts, and
+    // the linear guess that would turn one into the other is exactly the kind
+    // of number this file refuses to invent. No curve, no reading.
+    adc_cali_curve_fitting_config_t cali = {.unit_id = ADC_UNIT_1, .chan = ADC_CHANNEL_9,
+        .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_12};
+    if (adc_cali_create_scheme_curve_fitting(&cali, &battery_cali) != ESP_OK) battery_cali=NULL;
+    battery_lock = xSemaphoreCreateMutex();
+    if (!battery_lock) goto absent;
+    ESP_LOGI("board", "Battery ADC on GPIO10 (ADC1 ch9, x2 divider), calibration: %s",
+             battery_cali ? "curve fitting" : "absent, readings disabled");
+    return;
+absent:
+    ESP_LOGW("board", "Battery ADC unavailable");
+    battery_cali = NULL;
+}
+
+bool board_battery_read(board_battery_t *out) {
+    if (!battery_adc || !battery_cali || !battery_lock) return false;
+    xSemaphoreTake(battery_lock, portMAX_DELAY);
+    int64_t now = esp_timer_get_time();
+    // A pack cannot move quickly and power status is a synchronous call an app
+    // may make every frame, so one burst of conversions every half second is
+    // more than the value can justify. Eight of them because a single 12-bit
+    // read on this part is visibly noisy.
+    if (!battery_time || now-battery_time > 500000) {
+        int total=0, taken=0;
+        for (int i=0;i<8;i++) {
+            int raw=0, mv=0;
+            if (adc_oneshot_read(battery_adc, ADC_CHANNEL_9, &raw) != ESP_OK) continue;
+            if (adc_cali_raw_to_voltage(battery_cali, raw, &mv) != ESP_OK) continue;
+            total += mv; taken++;
+        }
+        if (taken) { battery_mv = total*2/taken; battery_time = now; }
+    }
+    bool have = battery_time != 0;
+    if (have) { out->millivolts = battery_mv; out->time_us = battery_time; }
+    xSemaphoreGive(battery_lock);
+    return have;
+}
 esp_err_t board_init(void) {
     gpio_config_t g = {.pin_bit_mask = (1ULL<<33)|(1ULL<<34)|(1ULL<<38), .mode = GPIO_MODE_OUTPUT};
     ESP_ERROR_CHECK(gpio_config(&g));
@@ -141,6 +216,7 @@ esp_err_t board_init(void) {
     for (int i=0;i<10;i++) { uint8_t value; kread(0x04, &value); }
     ESP_ERROR_CHECK(kwrite(0x02, 0x1f));
     ESP_LOGI("board", "ADV keyboard detected; LCD 240x135 RGB565; no PSRAM");
+    battery_init();
     motion_init(ih);
     sound_init(ih);
     return ESP_OK;
