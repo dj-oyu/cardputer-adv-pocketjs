@@ -126,6 +126,12 @@ static void home_draw(void)  { shell_draw(home_error,home_phase++); }
 static void enter(screen_id_t next);
 static void begin_run(const char *source, size_t len);
 
+// The calibration program is embedded rather than kept in a source slot: it is
+// the thing you reach for when the sensor is wrong, and a slot someone has
+// edited is exactly what you cannot trust at that moment.
+extern const char imucal_start[] asm("_binary_imucal_js_start");
+extern const char imucal_end[]   asm("_binary_imucal_js_end");
+
 static bool home_key(const keystroke_t *k) {
     board_key_t nav=k->nav;
     if(nav==KEY_NONE) return true;
@@ -144,6 +150,7 @@ static bool home_key(const keystroke_t *k) {
         case 1: enter(SCREEN_PRACTICE); break;
         case 2: enter(SCREEN_CODE); break;
         case 3: enter(SCREEN_TUTORIAL); break;
+        case 4: begin_run(imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
         default: begin_run(NULL,0);          // the built-in app
     }
     return true;
