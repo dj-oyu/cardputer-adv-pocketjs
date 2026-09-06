@@ -13,7 +13,9 @@ def command(key,marker):
         line=s.readline().decode(errors='replace').strip();lines.append(line)
         if marker in line:return line
     raise RuntimeError(lines[-12:])
-def value():
+def value(selected):
+    command('e','OPEN')
+    command('d' if selected else 'u','CHOICE')
     line=command('e','VALUE')
     print(line,flush=True)
     m=re.search(r'background=(\d+) fps=(\d+) sound=(\d+)',line)
@@ -22,15 +24,18 @@ def value():
 try:
     command('q','HOME_READY');command('a','CATEGORY 0');command('b','CATEGORY 1')
     command('u','SELECT');command('u','SELECT 0')
-    first=value();second=value();assert first[0]!=second[0]
-    command('d','SELECT 1');first=value();second=value();assert first[1]!=second[1]
-    command('d','SELECT 2');state=value()
-    if state[2]:state=value()
+    first=value(0);second=value(1);assert first[0]==0 and second[0]==1
+    # Back cancels the pending choice without applying it.
+    command('e','OPEN');command('u','CHOICE 0');command('q','HOME_READY')
+    line=command('e','OPEN');assert 'choice=1' in line,line
+    command('q','HOME_READY')
+    command('d','SELECT 1');first=value(1);second=value(0);assert first[1]==1 and second[1]==0
+    command('d','SELECT 2');state=value(0)
     assert state[2]==0
     time.sleep(0.3);s.read_all()
     command('u','SELECT 1');time.sleep(0.2)
     assert b'SFX' not in s.read_all(),'Sound emitted while muted'
-    command('d','SELECT 2');assert value()[2]==1
+    command('d','SELECT 2');assert value(1)[2]==1
     end=time.monotonic()+2;heard=False
     while time.monotonic()<end:
         if b'SFX 1 synthesized' in s.readline():heard=True;break

@@ -26,6 +26,12 @@ static unsigned samples, max_us;
 static uint64_t draw_sum;
 static float fps;
 static unsigned category,setting;
+static bool choices;
+static unsigned choice;
+static float category_pos, item_pos, choice_pos, depth_pos;
+static int64_t animation_time;
+static const char *categories[]={"APPS","SETTINGS"};
+static const char *labels[]={"BACKGROUND","FPS DISPLAY","SOUND"};
 static bool show_fps,sfx=true;
 static nvs_handle_t prefs;
 static bool prefs_ready;
@@ -40,7 +46,16 @@ void shell_init(void) {
     ESP_LOGI("settings","LOADED background=%u fps=%d sound=%d",mode,show_fps,sfx);
 }
 bool shell_key(board_key_t key) {
-    if(key==KEY_LEFT||key==KEY_RIGHT) {
+    if(key==KEY_BACK) {
+        choices=false;sound_play(2);
+        ESP_LOGI("shell","HOME_READY");
+    } else if(choices&&(key==KEY_UP||key==KEY_DOWN)) {
+        unsigned next=key==KEY_DOWN?1:0;
+        if(next!=choice){choice=next;sound_play(0);}
+        ESP_LOGI("settings","CHOICE %u",choice);
+    } else if(choices&&(key==KEY_LEFT||key==KEY_RIGHT)) {
+        // Horizontal input changes categories only at the root.
+    } else if(key==KEY_LEFT||key==KEY_RIGHT) {
         unsigned next=key==KEY_RIGHT?1:0;
         if(next!=category){category=next;sound_play(0);}
         ESP_LOGI("shell","CATEGORY %u",category);
@@ -52,9 +67,16 @@ bool shell_key(board_key_t key) {
         ESP_LOGI("settings","SELECT %u",setting);
     } else if(key==KEY_ENTER) {
         if(category==0){sound_play(1);return true;}
-        if(setting==0)shell_change_background(1);
-        if(setting==1)show_fps=!show_fps;
-        if(setting==2){sfx=!sfx;sound_set_enabled(sfx);}
+        if(!choices) {
+            choices=true;choice=setting==0?mode:setting==1?show_fps:sfx;
+            choice_pos=choice;sound_play(1);
+            ESP_LOGI("settings","OPEN %u choice=%u",setting,choice);
+            return false;
+        }
+        if(setting==0&&mode!=choice)shell_change_background(1);
+        if(setting==1)show_fps=choice!=0;
+        if(setting==2){sfx=choice!=0;sound_set_enabled(sfx);}
+        choices=false;
         sound_play(1);
         if(prefs_ready) {
             esp_err_t err=nvs_set_u8(prefs,"background",mode);
@@ -104,9 +126,66 @@ static void text(int x,int y,const char *s,int scale,uint16_t color) {
                 for(int sy=0;sy<scale;sy++)for(int sx=0;sx<scale;sx++)pixel(x+xx*scale+sx,y+yy*scale+sy,color);
     }
 }
+static float approach(float value,float target,float amount) {
+    float result=value+(target-value)*amount;
+    return fabsf(result-target)<0.005f?target:result;
+}
+static void label(int x,int y,const char *s,int scale,float emphasis) {
+    if(emphasis<=0)return;
+    if(emphasis>1)emphasis=1;
+    text(x+1,y+1,s,scale,board_rgb(2,7,15));
+    text(x,y,s,scale,board_rgb(65+172*emphasis,100+146*emphasis,125+130*emphasis));
+}
+static float item_y(float delta) {
+    // Leave space for the category rail between the previous and focused item.
+    return delta<0?69+57*delta:69+41*delta;
+}
+static void menu_list(int x,float position,const char *const *items,unsigned count,
+                      float opacity,const char *detail) {
+    for(unsigned i=0;i<count;i++) {
+        float distance=fabsf(i-position);
+        float strength=1-fminf(distance,1)*0.70f;
+        float y=item_y(i-position);
+        // Fade while crossing the category text, so two lines never collide.
+        float clearance=fminf(fabsf(y-34)/20,1);
+        label(x,(int)lroundf(y),items[i],2,opacity*strength*clearance);
+    }
+    float settled=1-fminf(fabsf(position-roundf(position))*4,1);
+    if(detail)label(x,89,detail,1,opacity*settled*0.75f);
+}
+static void draw_menu(void) {
+    for(unsigned c=0;c<2;c++) {
+        float offset=(c-category_pos)*96;
+        float visibility=1-fminf(fabsf(c-category_pos),1);
+        int x=(int)lroundf(16+offset-depth_pos*160);
+        label(x,37,categories[c],1,(0.35f+0.65f*visibility)*(1-depth_pos*0.6f));
+        if(visibility>0.01f) {
+            if(c==0) {
+                const char *apps[]={"HELLO WORLD"};
+                menu_list(x,0,apps,1,visibility,"JAVASCRIPT / POCKETJS");
+            } else {
+                const char *detail=setting==0?names[mode]:setting==1?(show_fps?"ON":"OFF"):(sfx?"ON":"OFF");
+                menu_list(x,item_pos,labels,3,visibility*(1-depth_pos),detail);
+            }
+        }
+    }
+    if(depth_pos>0.005f) {
+        int x=(int)lroundf(16+(1-depth_pos)*LCD_W);
+        const char *toggles[]={"OFF","ON"};
+        label(x,37,labels[setting],1,depth_pos);
+        menu_list(x,choice_pos,setting==0?names:toggles,2,depth_pos,NULL);
+    }
+}
 void shell_draw(const char *error, unsigned phase) {
     (void)phase;
     int64_t started=esp_timer_get_time();
+    float dt=animation_time?(started-animation_time)*0.000001f:0.033f;
+    animation_time=started;
+    float amount=1-expf(-dt/0.045f);
+    category_pos=approach(category_pos,category,amount);
+    item_pos=approach(item_pos,setting,amount);
+    choice_pos=approach(choice_pos,choice,amount);
+    depth_pos=approach(depth_pos,choices?1:0,amount);
     float t=(started%3600000000LL)*0.000001f;
     // One owner draws the LCD; eight rows at a time. No full-screen framebuffer.
     const uint16_t white=board_rgb(237,246,255), muted=board_rgb(122,169,197);
@@ -197,26 +276,10 @@ void shell_draw(const char *error, unsigned phase) {
         }
         char meter[16];snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
         if(show_fps)text(194,8,meter,1,muted);
-        text(34,29,"APPS",1,category==0?white:muted);
-        text(139,29,"SETTINGS",1,category==1?white:muted);
-        int bar=category==0?30:135;
-        for(int x=bar;x<bar+(category==0?32:56);x++)pixel(x,42,white);
         if(error) {
             text(24,69,"APP ERROR",2,white);text(24,94,error,1,muted);
-        } else if(category==0) {
-            text(20,72,">",2,board_rgb(119,233,255));
-            text(44,70,"HELLO WORLD",2,white);
-            text(44,92,"JAVASCRIPT / POCKETJS",1,muted);
-        } else {
-            const char *labels[]={"BACKGROUND","FPS DISPLAY","SOUND"};
-            const char *values[]={names[mode],show_fps?"ON":"OFF",sfx?"ON":"OFF"};
-            for(unsigned row=0;row<3;row++) {
-                int y=59+row*21;uint16_t color=row==setting?white:muted;
-                if(row==setting)text(12,y,">",1,white);
-                text(27,y,labels[row],1,color);text(116,y,values[row],1,color);
-            }
-        }
-        text(12,123,error?"ESC / ENTER TO RETURN":category==0?"</> CATEGORY   ENTER OPEN":"UP/DOWN SELECT  ENTER CHANGE",1,muted);
+            text(12,123,"ESC / ENTER TO RETURN",1,muted);
+        } else draw_menu();
         ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
     }
     unsigned elapsed=(unsigned)(esp_timer_get_time()-started);

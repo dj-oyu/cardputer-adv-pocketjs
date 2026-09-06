@@ -104,6 +104,9 @@ esp_err_t board_present(int y, int rows, const uint16_t *pixels) {
                 for(int n=0;n<4;n++)line[x*4+n]=hex[(p>>(12-4*n))&15];
             }
             line[LCD_W*4]=0;printf("PIX %d %s\n",y+r,line);
+            fflush(stdout);
+            // Diagnostic capture only: let USB drain before the next full row.
+            vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
     // ST7789's 240x135 visible window in landscape (MADCTL=0x60).

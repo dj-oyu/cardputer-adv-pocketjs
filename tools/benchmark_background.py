@@ -26,10 +26,11 @@ try:
     s.write(b'q');read_until('HOME_READY')
     s.write(b'b');read_until('CATEGORY 1')
     s.write(b'uu');read_until('SELECT 0')
-    # Test the saved background first, then the other background.
+    # Explicitly select each background through its child menu.
     for mode in range(2):
-        if mode:
-            s.write(b'e');read_until('VALUE')
+        s.write(b'e');read_until('OPEN')
+        s.write(b'd' if mode else b'u');read_until('CHOICE')
+        s.write(b'e');read_until('VALUE')
         for sample in range(4):
             lines=read_until('PERF')
             for line in lines:

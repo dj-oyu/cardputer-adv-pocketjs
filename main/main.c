@@ -48,10 +48,12 @@ static void ui_task(void *arg) {
         int64_t frame_start=esp_timer_get_time();
         board_key_t key=KEY_NONE;xQueueReceive(keys,&key,0);
         if(atomic_exchange(&stop,false)) {
-            sound_play(2);
-            if(running)app_stop();
+            if(running||error) {
+                sound_play(2);
+                if(running)app_stop();
+                ESP_LOGI("shell","HOME_READY");
+            } else shell_key(KEY_BACK);
             running=false;error=NULL;xQueueReset(keys);
-            ESP_LOGI("shell","HOME_READY");
         } else if(!running && key!=KEY_NONE) {
             if(error&&key==KEY_ENTER)error=NULL;
             else if(!error&&shell_key(key)) { running=app_start()==ESP_OK;if(!running)error="START FAILED"; }
