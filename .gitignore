@@ -1,5 +1,6 @@
 # Build outputs and fetched dependencies
 build/
+build_*/
 dist/
 managed_components/
 node_modules/
