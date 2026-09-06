@@ -5,6 +5,7 @@
 #include "keymap.h"
 #include "editor.h"
 #include "codeedit.h"
+#include "tutorial.h"
 #include "jpfont.h"
 #include "skk_session.h"
 #include "app_session.h"
@@ -23,6 +24,7 @@ static atomic_bool capture;
 static atomic_int diagnostic;
 static atomic_bool editing;   // SKK practice
 static atomic_bool coding;    // Playground
+static atomic_bool teaching;  // Tutorial, which drives the Playground itself
 
 // USB drives the shell with single letters, but the editor needs the bytes
 // themselves so a host script can type romaji at it. The mode decides which
@@ -31,13 +33,18 @@ static bool usb_stroke(char c, keystroke_t *k) {
     memset(k,0,sizeof(*k));
     // Every printable byte belongs to the editor while it is open — 's' and 'c'
     // included — so the host controls move to control bytes there.
-    if(atomic_load(&editing)||atomic_load(&coding)) {
+    if(atomic_load(&editing)||atomic_load(&coding)||atomic_load(&teaching)) {
         // C-s is the Playground's save, so the host capture moves to C-p.
         if(c==0x10) { atomic_store(&capture,true); return false; }   // C-p
         if(c==27) { k->text[0]='\0';memcpy(k->text+1,"esc",3);k->len=4;k->nav=KEY_BACK;return true; }
         if(c=='\r'||c=='\n') { k->text[0]='\n';k->len=1;k->nav=KEY_ENTER;return true; }
         if(c=='\b'||c==0x7f) { k->text[0]='\b';k->len=1;return true; }
         if(c==0x0b) { k->toggle_ime=true;return true; }   // C-k stands in for C-j
+        // The arrows are Fn combinations on the keyboard and have no byte of
+        // their own, so a host driving this over USB gets C-b and C-f.
+        if(c==0x02) { k->text[0]='\0';memcpy(k->text+1,"left",4);k->len=5;k->nav=KEY_LEFT;return true; }
+        if(c==0x06) { k->text[0]='\0';memcpy(k->text+1,"right",5);k->len=6;k->nav=KEY_RIGHT;return true; }
+        if(c==0x04) { k->text[0]='\0';memcpy(k->text+1,"del",3);k->len=4;return true; }   // Fn+Del
         if((unsigned char)c<0x20) { k->text[0]=c;k->len=1;return true; }
         k->text[0]=c;k->len=1;return true;
     }
@@ -63,7 +70,7 @@ static void input_task(void *arg) {
         char c;
         if(!have && usb_serial_jtag_read_bytes(&c,1,0)>0) have=usb_stroke(c,&k);
         if(have) {
-            bool typing=atomic_load(&editing)||atomic_load(&coding);
+            bool typing=atomic_load(&editing)||atomic_load(&coding)||atomic_load(&teaching);
             if(k.force_stop || (k.nav==KEY_BACK && !typing)) {
                 atomic_store(&stop,true);app_request_stop();
             } else xQueueSend(keys,&k,0);
@@ -76,6 +83,7 @@ static void ui_task(void *arg) {
     bool running=false;
     const char *error=NULL;
     unsigned phase=0;
+    esp_err_t last_start=ESP_OK;   // what the tutorial's run reported at start
     ESP_LOGI("shell","HOME_READY");
     while(1) {
         int64_t frame_start=esp_timer_get_time();
@@ -110,6 +118,60 @@ static void ui_task(void *arg) {
                 vTaskDelay(pdMS_TO_TICKS(held<16?16-held:1));
                 continue;
             }
+        }
+
+        if(atomic_load(&teaching)) {
+            // The tutorial owns both its chapter screen and the Playground, so
+            // the run it asks for carries the chapter's hidden prelude.
+            // `!running` matters: code_state stays CODE_RUNNING until the run
+            // reports back, so without it every frame started another guest
+            // and orphaned the last one's memory.
+            if(!running && tutorial_state()==TUTORIAL_WRITING
+               && code_state()==CODE_RUNNING) {
+                size_t n=0;
+                const char *src=tutorial_source(&n);
+                esp_err_t e=app_start_source(src,n);
+                if(e==ESP_OK) { running=true; }
+                else {
+                    app_stop(); running=false;
+                    tutorial_ran(e,app_error());
+                }
+                ESP_LOGI("tutorial","RUN %u bytes -> %s",(unsigned)n,esp_err_to_name(e));
+                if(running) { last_start=ESP_OK; }
+            } else if(running) {
+                bool leave=have && stroke.nav==KEY_BACK;
+                if(leave) app_request_stop();
+                bool shot=atomic_exchange(&capture,false);
+                if(shot) {board_capture(true);app_force_redraw();}
+                esp_err_t e=ESP_OK;
+                if(!leave) {
+                    if(key==KEY_ENTER)sound_play(1);
+                    e=app_tick(key==KEY_ENTER?0x4000:0);
+                    if(e==ESP_OK && key==KEY_ENTER)e=app_tick(0);
+                }
+                if(shot)board_capture(false);
+                if(leave || atomic_exchange(&stop,false) || e!=ESP_OK) {
+                    app_stop(); running=false;
+                    xQueueReset(keys);
+                    tutorial_ran(last_start,app_error());
+                }
+            } else {
+                if(have && !tutorial_key(&stroke)) {
+                    atomic_store(&teaching,false);
+                    sound_play(2);
+                    ESP_LOGI("shell","HOME_READY");
+                    continue;
+                }
+                bool shot=atomic_exchange(&capture,false);
+                if(shot||tutorial_dirty()) {
+                    if(shot)board_capture(true);
+                    tutorial_draw();
+                    if(shot)board_capture(false);
+                }
+            }
+            int held=(int)((esp_timer_get_time()-frame_start)/1000);
+            vTaskDelay(pdMS_TO_TICKS(held<16?16-held:1));
+            continue;
         }
 
         if(atomic_load(&coding)) {
@@ -211,6 +273,10 @@ static void ui_task(void *arg) {
                     case 2:
                         code_open();atomic_store(&coding,true);
                         ESP_LOGI("code","CODE_READY");
+                        break;
+                    case 3:
+                        tutorial_open();atomic_store(&teaching,true);
+                        ESP_LOGI("tutorial","TUTORIAL_READY");
                         break;
                     default:
                         running=app_start()==ESP_OK;

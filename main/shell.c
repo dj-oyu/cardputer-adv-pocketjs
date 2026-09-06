@@ -26,9 +26,9 @@ static unsigned samples, max_us;
 static uint64_t draw_sum;
 static float fps;
 static unsigned category,setting,app;
-static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND"};
+static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
-                                  "WRITE AND RUN JAVASCRIPT"};
+                                  "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT"};
 #define APP_N (sizeof(apps)/sizeof(apps[0]))
 static float app_pos;
 unsigned shell_app(void) { return app; }

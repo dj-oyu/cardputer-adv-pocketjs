@@ -1,7 +1,7 @@
 # Windows / EIM 開発環境とビルド手順
 
 確認日: 2026-09-06。このPCはEIMでESP-IDFを管理する。PlatformIOのIDF・Pythonを本プロジェクトのビルドに混在させない。
-環境の起動と各ツールのバージョンを実行確認済み。プロジェクトは設計段階でCMakeLists.txt/mainがまだなく、以下のfirmwareビルド・書き込みは未実行。
+環境の起動と各ツールのバージョン、ファームウェアのビルド・実機書き込みを確認済み。機能の基準はcommit `2b053b7`。チュートリアル統合は進行中で、作業ツリーのビルド結果は統合後に記録する。
 
 ## このPCで確認した構成
 
@@ -19,7 +19,7 @@
 | CMake / Ninja | 4.0.3 / 1.12.1 |
 
 PocketJS調査版のIDF要求 `>=6.0,<6.2` にv6.0.1は含まれる。このバージョンを最初のビルド基準とする。
-これはPocketJSとADVのfirmwareビルド成功を意味しない。依存の取得、S3 Rustアーカイブ、ドライバーの統合はM1で検証する。
+依存取得、S3 Rustアーカイブ生成、ドライバー統合はM1でビルド・書き込み済み。[当時の結果](firmware-m1.md)を参照する。
 SKKの先行sizeof調査は別のGCC 14.2.0で実施しているため、取り込み時はこのEIM環境で再確認する。
 
 ## 方法A: 現在のPowerShellを有効化（確認済み）
@@ -60,10 +60,9 @@ eim shell v6.0.1
 
 `eim select v6.0.1`はIDE向けの選択状態を更新する操作で、既存PowerShellのPATHを切り替える代わりにはならない。
 
-## firmware作成後の標準コマンド
+## 依存準備と標準ビルド
 
-以下はリポジトリルートにESP-IDFプロジェクトを作成した後に使用する。
-本ドキュメント追加時点ではCMakeLists.txtがなく、まだ実行しない。
+リポジトリルートにCMakeLists.txtとmainがある。初回はIDF環境を有効化して `python tools/prepare_dependencies.py` を実行し、WSLで本リポジトリへ移動して `bash tools/build_native.sh` を実行する。後者はespupで用意したpocketjs-espツールチェーンと `.cache/tools/export-esp.sh` を前提とする。既存のアーカイブを使う通常の増分ビルドでは毎回Rustを構築しない。
 
 ```powershell
 Set-Location C:\devs\m5stack\cardputer-adv-pocketjs
@@ -90,7 +89,7 @@ idf.py -B build size-components
 eim run 'idf.py -B build build' v6.0.1 | Out-Host
 ```
 
-## 書き込みとログ（未実施）
+## 書き込みとログ
 
 有効化したIDF環境でポートを調べ、対象ADVを確認してから使用する。
 
@@ -103,6 +102,18 @@ idf.py -B build -p $cardputerPort flash monitor
 
 monitor終了はCtrl+]。接続できない場合は公式のG0操作でダウンロードモードに入れる。
 flashは現在のfirmwareを置き換える。erase-flashは通常のビルド手順に含めない。
+
+## 辞書・フォントの別アセット
+
+通常のidf.py flashはアプリ・bootloader・partition tableを書き込む。辞書・日本語フォントは別に生成して書き込む。最新のpartition配置を確認してから実行する。
+
+- SKK: 移植元のskk_prep.pyでイメージ生成。`--max-size 0x200000`を指定し、skk_dictの0x310000へ配置する。辞書の版と生成結果は[日本語入力設計](japanese-input.md)を参照。
+- 東雲12px: `python tools/make_jpfont.py --font shinonome --bdf-dir <BDFのディレクトリ> -o jpfont12.bin --check`。jp_fontの先頭0x510000へ配置する。
+- 美咲8px: `python tools/make_jpfont.py --font misaki --bdf <misaki_gothic.bdf> -o jpfont8.bin --check`。jp_font内の相対0x40000、絶対0x550000へ配置する。
+
+上記のパスは生成時に指定する。各フォントが割り当てた256KiB窓に収まること、辞書が2MiBに収まることを実ファイルで確認する。アセットの出典・ライセンスは生成ツールとlicensesを参照する。現行生成物を新たに測定していないため、過去のサイズを現在のファイルサイズと見なさない。
+
+現行storageは0x590000から2496KiB。旧配置の0x710000からのデータ自動移行は実装されていないため、旧版からの更新では先に保存内容のバックアップと移行方針を決める。
 
 ## 混在を避けるための確認
 
@@ -119,10 +130,11 @@ IDF_PATHだけを書き換えてビルドしない。Python依存、compiler、C
 調査時、制限された実行環境ではEIMのログ初期化が失敗し、通常の実行環境では成功した。
 同じエラーの場合はログ書き込み権限と実行環境を確認し、IDFを再インストールする前に切り分ける。
 
-## 今回実行した検証と未検証項目
+## 検証記録の位置付け
 
 - 実行済み: EIM一覧、設定参照、dot-source、IDF/Python/GCC/CMake/Ninjaのバージョン、EIM runによるIDF/Python起動。
-- 未実施: firmwareビルド、依存解決、Rustアーカイブ構築、flash、実機ログ。
+- M1以降に実施済み: firmwareビルド、依存解決、Rustアーカイブ構築、flash、実機ログ。[M1記録](firmware-m1.md)と[XMB記録](xmb-research.md)を参照。
+- 現在の日本語入力・Playground構成、および進行中チュートリアルの性能は、各統合commitに対して別途記録する。過去のRAM/FPSを転用しない。
 - インストールや既存IDFの更新は行っていない。
 
 ## 参照

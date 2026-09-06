@@ -54,6 +54,11 @@ const char *code_source(size_t *out) { *out=len; return text; }
 // through it, so a lesson can never reach the person's own program.
 static unsigned slot=SRC_SLOT_USER;
 
+// What the header calls this session: "JS" for the person's own program, the
+// chapter number while a lesson is being worked on, so the two screens of the
+// tutorial are never confused for each other.
+static char label[4]="JS";
+
 static void open_slot(unsigned which, const char *seed, size_t seed_len) {
     slot=which;
     len=srcstore_load(slot,text);
@@ -69,10 +74,12 @@ static void open_slot(unsigned which, const char *seed, size_t seed_len) {
 }
 
 void code_open(void) {
+    snprintf(label,sizeof(label),"JS");
     open_slot(SRC_SLOT_USER,TEMPLATE,sizeof(TEMPLATE)-1);
 }
 
 void code_open_lesson(unsigned lesson, const char *seed, size_t seed_len) {
+    snprintf(label,sizeof(label),"T%u",(lesson+1)%100u);
     open_slot(SRC_SLOT_LESSON+lesson,seed,seed_len);
 }
 
@@ -344,12 +351,14 @@ void code_draw(void) {
         strip_h=LCD_H-strip_y<STRIP_H?LCD_H-strip_y:STRIP_H;
         for(int i=0;i<LCD_W*strip_h;i++) strip[i]=board_rgb(6,11,20);
 
-        ascii(4,3,"JS",dim);
+        ascii(4,3,label,dim);
         ascii(20,3,unsaved?"*":" ",warn);
         char pos[24];
         snprintf(pos,sizeof(pos),"L%u %uB",(unsigned)here+1,(unsigned)len);
         ascii(30,3,pos,dim);
-        if(notice[0]) ascii(120,3,notice,accent);
+        // The tutorial's verdicts come through here, so this line has to carry
+        // Japanese; misaki's 8 px fits the 14 px header.
+        if(notice[0]) small_text(104,2,notice,strlen(notice),accent);
         fill(0,13,LCD_W,1,rule);
 
         // Lines, from top_line down. Only the visible window is walked.
