@@ -377,6 +377,18 @@ esp_err_t pocket_api_install(JSContext *ctx, void *user_data) {
     JS_NewClassID(rt,&token_class);
     if(JS_NewClass(rt,hub_class,&hub_class_def)<0) return ESP_FAIL;
     if(JS_NewClass(rt,token_class,&token_class_def)<0) return ESP_FAIL;
+    // A class with no prototype registered produces objects whose prototype is
+    // null, and those have no toString: String(token), `${token}` and print(token)
+    // all throw TypeError rather than saying something unhelpful. A debugging
+    // line is not where an API should fail, so the token gets a plain object
+    // prototype and stringifies as [object Object].
+    JSValue hub_proto=JS_NewObject(ctx), token_proto=JS_NewObject(ctx);
+    if(JS_IsException(hub_proto)||JS_IsException(token_proto)) {
+        JS_FreeValue(ctx,hub_proto); JS_FreeValue(ctx,token_proto);
+        return ESP_FAIL;
+    }
+    JS_SetClassProto(ctx,hub_class,hub_proto);
+    JS_SetClassProto(ctx,token_class,token_proto);
 
     if(state) {
         // One realm at a time; a second would leave the first unreachable.
