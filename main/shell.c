@@ -51,9 +51,6 @@ static const char *labels[]={"BACKGROUND","FPS DISPLAY","SOUND"};
 static bool show_fps,sfx=true;
 static nvs_handle_t prefs;
 static bool prefs_ready;
-// Defined below, next to the two implementations they choose between.
-static void (*ocean_row)(uint16_t *,int,int,int,int);
-static void (*ocean_row_vector)(uint16_t *,int,int,int,int);
 void shell_init(void) {
     if(nvs_flash_init()==ESP_OK && nvs_open("home",NVS_READWRITE,&prefs)==ESP_OK) {
         prefs_ready=true;uint8_t v;
@@ -63,16 +60,6 @@ void shell_init(void) {
     }
     sound_set_enabled(sfx);
     ESP_LOGI("settings","LOADED background=%u fps=%d sound=%d",mode,show_fps,sfx);
-    // The vector row is claimed to be bit-exact, so nothing less is accepted.
-    // Every row is compared, because span and haze differ down the screen and
-    // the reflection is only on the centre ones.
-    int worst=shell_ocean_selftest();
-    if(worst==0) {
-        ocean_row=ocean_row_vector;
-        ESP_LOGI("background","ocean row: PIE");
-    } else {
-        ESP_LOGW("background","ocean row: scalar (PIE differs by %d)",worst);
-    }
 }
 bool shell_key(board_key_t key) {
     if(key==KEY_BACK) {
@@ -149,8 +136,7 @@ static float perlin(float x,float y) {
 }
 static unsigned clamp(int v) {return v<0?0:v>255?255:(unsigned)v;}
 
-// Built once, and needed before the first frame so the start-up comparison
-// between the scalar and vector rows has something real to work on.
+// Built once, before the first frame that needs them.
 static void build_tables(void) {
     if(sine_ready) return;
     for(int i=0;i<256;i++) sine[i]=(int16_t)(sinf(i*6.2831853f/256)*256);
@@ -166,15 +152,16 @@ static void build_tables(void) {
     sine_ready=true;
 }
 
-// One row of the ocean, below the horizon. Pulled out of the strip loop as a
-// function of its own because it is the candidate for a hand-written vector
-// version: keeping the scalar one intact gives that something to be checked
-// against, byte for byte, before it is trusted with the screen.
+// One row of the ocean, below the horizon. `depth` and `cross` are the row's
+// two phases, `span` the half-width of the reflection and `haze` its distance
+// fade — all constant across the row.
 //
-// `depth` and `cross` are the row's two phases, `span` the half-width of the
-// reflection and `haze` its distance fade — all constant across the row.
-static void ocean_row_scalar(uint16_t *row, int depth, int cross,
-                             int span, int haze) {
+// Not called: ocean_row_pie below does this, and this is what it means. The
+// assembly cannot be read without it, and the two were checked against each
+// other over every input before the scalar one was retired, so anything that
+// changes here has to change there.
+static void __attribute__((unused))
+ocean_row_scalar(uint16_t *row, int depth, int cross, int span, int haze) {
     for(int x=0;x<LCD_W;x++) {
         int bend=distortion[x];
         int swell=sine[(depth+bend)&255];
@@ -309,36 +296,7 @@ ocean_row_pie(uint16_t *row, int depth, int cross, int span, int haze) {
         : "memory");
 }
 
-// Swapped for the vector implementation once it has agreed with the scalar row
-// above at start-up.
-static void (*ocean_row)(uint16_t *,int,int,int,int)=ocean_row_scalar;
-static void (*ocean_row_vector)(uint16_t *,int,int,int,int)=ocean_row_pie;
 
-
-// Rows differ in phase, span and haze, so one row proves little; these cover
-// the horizon, the middle and the bottom, where span and haze are furthest
-// apart and the reflection is on and off the centre.
-static int compare_row(int y) {
-    static uint16_t a[LCD_W] __attribute__((aligned(16)));
-    static uint16_t b[LCD_W] __attribute__((aligned(16)));
-    int depth=depth_phase[y], cross=cross_phase[y];
-    int span=12+(y-36)/3, haze=24-(y-36)/5;
-    ocean_row_scalar(a,depth,cross,span,haze);
-    ocean_row_vector(b,depth,cross,span,haze);
-    int worst=0;
-    for(int x=0;x<LCD_W;x++) {
-        int dr=((a[x]>>11)&31)-((b[x]>>11)&31);
-        int dg=((a[x]>>5)&63)-((b[x]>>5)&63);
-        int db=(a[x]&31)-(b[x]&31);
-        if(dr<0) dr=-dr;
-        if(dg<0) dg=-dg;
-        if(db<0) db=-db;
-        if(dr>worst) worst=dr;
-        if(dg>worst) worst=dg;
-        if(db>worst) worst=db;
-    }
-    return worst;
-}
 
 // The vector row reads ocean_cols, so both planes that change per frame have
 // to be rebuilt whenever distortion does.
@@ -349,25 +307,6 @@ static void build_columns(void) {
     }
 }
 
-int shell_ocean_selftest(void) {
-    if(!ocean_row_vector) return -1;
-    build_tables();
-    // The phase tables are filled by the first draw; without them both sides
-    // would agree on zeroes and prove nothing.
-    for(int x=0;x<LCD_W;x++) distortion[x]=(int16_t)(perlin(x*0.018f,0.4f)*28);
-    build_columns();
-    for(int y=37;y<LCD_H;y++) {
-        float d=800.0f/(y-28);
-        depth_phase[y]=(int)((d*1.8f+1.2f)*40.7437f);
-        cross_phase[y]=(int)((d*3.1f-0.7f)*40.7437f);
-    }
-    int worst=0;
-    for(int y=37;y<LCD_H;y++) {
-        int d=compare_row(y);
-        if(d>worst) worst=d;
-    }
-    return worst;
-}
 static void pixel(int x,int y,uint16_t c) {
     if (x>=0 && x<LCD_W && y>=strip_y && y<strip_y+strip_h) strip[(y-strip_y)*LCD_W+x]=c;
 }
@@ -519,7 +458,7 @@ void shell_draw(const char *error, unsigned phase) {
                     for(int x=0;x<LCD_W;x++) row[x]=sky;
                     continue;
                 }
-                ocean_row(row,depth_phase[y],cross_phase[y],
+                ocean_row_pie(row,depth_phase[y],cross_phase[y],
                           12+(y-36)/3, 24-(y-36)/5);
             } else {
                 unsigned green=14+y/7, blue=30+y/5;
