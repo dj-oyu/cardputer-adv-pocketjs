@@ -106,6 +106,10 @@ static const setting_t settings[]={
      fps_get,        fps_set,        SHELL_SCREEN_NONE},
     {"SOUND",      SETTING_CHOICES, toggles, 2,            "sound",
      sound_get,      sound_set,      SHELL_SCREEN_NONE},
+    // The first action row. It has no value and no NVS key of its own: what it
+    // changes lives in the "wifi" namespace, written by the screen it opens.
+    {"TIME SYNC",  SETTING_ACTION,  NULL,    0,            NULL,
+     NULL,           NULL,           SHELL_SCREEN_WIFI_TIME},
 };
 #define SETTING_N (sizeof(settings)/sizeof(settings[0]))
 
@@ -125,7 +129,10 @@ static void settings_summary(char *out,size_t size) {
 
 void shell_init(void) {
     char summary[128]={0};
-    if(nvs_flash_init()==ESP_OK && nvs_open("home",NVS_READWRITE,&prefs)==ESP_OK) {
+    // NVS is brought up by app_main() now. It used to be the first term of this
+    // condition, where a failure was indistinguishable from "no key stored" and
+    // reached the person only as settings that reset themselves.
+    if(nvs_open("home",NVS_READWRITE,&prefs)==ESP_OK) {
         prefs_ready=true;uint8_t v;
         for(unsigned i=0;i<SETTING_N;i++)
             if(settings[i].key&&nvs_get_u8(prefs,settings[i].key,&v)==ESP_OK)

@@ -13,6 +13,12 @@ def command(key,marker):
         line=s.readline().decode(errors='replace').strip();lines.append(line)
         if marker in line:return line
     raise RuntimeError(lines[-12:])
+def expect(marker):
+    end=time.monotonic()+8;lines=[]
+    while time.monotonic()<end:
+        line=s.readline().decode(errors='replace').strip();lines.append(line)
+        if marker in line:return line
+    raise RuntimeError(lines[-12:])
 def value(selected):
     command('e','OPEN')
     command('u','CHOICE');command('u','CHOICE')
@@ -24,7 +30,7 @@ def value(selected):
     return tuple(map(int,m.groups()))
 try:
     command('q','HOME_READY');command('a','CATEGORY 0');command('b','CATEGORY 1')
-    command('u','SELECT');command('u','SELECT 0')
+    command('u','SELECT');command('u','SELECT');command('u','SELECT 0')
     first=value(0);second=value(1);assert first[0]==0 and second[0]==1
     third=value(2);assert third[0]==2
     value(1)
@@ -44,13 +50,23 @@ try:
         # Logged after the last I2S write of the click, not when it was queued.
         if b'SFX 1 played' in s.readline():heard=True;break
     assert heard,'Synthesized audio was not submitted to I2S'
+    # TIME SYNC is the first SETTING_ACTION row: Enter leaves the home screen
+    # for the Wi-Fi screen rather than opening a value list. Escape comes back.
+    # No credentials are entered here; this checks the wiring, not the radio.
+    command('d','SELECT 3')
+    line=command('e','SCREEN 3');assert 'screen=1' in line,line
+    expect('WIFI_READY')
+    s.write(b'\x1b');expect('HOME_READY')
+    command('b','CATEGORY 1');command('u','SELECT 2')
     command('a','CATEGORY 0');command('e','HELLO_FRAME_PRESENTED');command('q','HOME_READY')
     print('SETTINGS_OK sound=ON categories, toggles, mute, app-return',flush=True)
 finally:
     # An assertion above can abort while SOUND is OFF, which then persists in NVS.
     # Walk back to Settings > SOUND > ON so the device is never left muted.
     try:
-        # home, Settings, top, SOUND, open, choose ON, apply.
-        for key in 'qbuuddede':s.write(key.encode());time.sleep(0.4)
+        # home, Settings, top, SOUND, open, choose ON, apply. Three ups, because
+        # an abort can leave the cursor on TIME SYNC and two would stop short of
+        # the top — and the fourth row's Enter opens a screen, not a value list.
+        for key in 'qbuuuddede':s.write(key.encode());time.sleep(0.4)
     except Exception:pass
     s.close()

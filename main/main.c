@@ -5,6 +5,7 @@
 #include "keymap.h"
 #include "editor.h"
 #include "codeedit.h"
+#include "wifi_ui.h"
 #include "tutorial.h"
 #include "jpfont.h"
 #include "skk_session.h"
@@ -16,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
+#include "nvs_flash.h"
 #include <stdatomic.h>
 #include <string.h>
 
@@ -93,6 +95,7 @@ typedef enum {
     SCREEN_PRACTICE,
     SCREEN_CODE,
     SCREEN_TUTORIAL,
+    SCREEN_WIFI,
     SCREEN_COUNT
 } screen_id_t;
 
@@ -132,6 +135,18 @@ static void begin_run(const char *source, size_t len);
 extern const char imucal_start[] asm("_binary_imucal_js_start");
 extern const char imucal_end[]   asm("_binary_imucal_js_end");
 
+// shell_key() cannot say "hand the display to another screen": its bool already
+// means "launch the app shell_app() names". The request is left behind instead,
+// and every shell_key() call site has to collect it — one that does not leaves
+// the request standing until the next press, which then opens the screen on the
+// wrong key.
+static void take_pending_screen(void) {
+    switch(shell_pending_screen()) {
+        case SHELL_SCREEN_WIFI_TIME: enter(SCREEN_WIFI); break;
+        case SHELL_SCREEN_NONE:      break;
+    }
+}
+
 static bool home_key(const keystroke_t *k) {
     board_key_t nav=k->nav;
     if(nav==KEY_NONE) return true;
@@ -145,7 +160,9 @@ static bool home_key(const keystroke_t *k) {
         }
         return true;
     }
-    if(!shell_key(nav)) return true;
+    bool launch=shell_key(nav);
+    take_pending_screen();
+    if(!launch) return true;
     switch(shell_app()) {
         case 1: enter(SCREEN_PRACTICE); break;
         case 2: enter(SCREEN_CODE); break;
@@ -197,6 +214,13 @@ static const screen_ops_t SCREENS[SCREEN_COUNT]={
         .key=tutorial_key, .dirty=tutorial_dirty, .draw=tutorial_draw,
         .wants_run=tutorial_wants_run, .ended=tutorial_ran,
         .frame_ms=16, .takes_text=true,
+    },
+    // Nothing on this screen animates; it repaints when a key or the sync task
+    // moves it. 33 ms is the pace of waiting for a radio, not of typing.
+    [SCREEN_WIFI]={
+        .tag="wifi_ui", .ready="WIFI_READY", .open=wifi_ui_open,
+        .key=wifi_ui_key, .dirty=wifi_ui_dirty, .draw=wifi_ui_draw,
+        .frame_ms=33, .takes_text=true,
     },
 };
 
@@ -293,7 +317,7 @@ static void ui_task(void *arg) {
             if(running) end_run(ESP_OK);
             else if(screen!=SCREEN_HOME) go_home();
             else if(home_error) home_error=NULL;
-            else shell_key(KEY_BACK);
+            else { shell_key(KEY_BACK); take_pending_screen(); }
             xQueueReset(keys);
             have=false;
         }
@@ -324,9 +348,28 @@ static void ui_task(void *arg) {
     }
 }
 
+// Every stored preference, the SKK settings and the Wi-Fi credentials live in
+// NVS, so it comes up before the first thing that reads it. It used to be one
+// term of an && chain inside shell_init(), where the failure was discarded and
+// surfaced only as settings that had reset themselves.
+static void nvs_init(void) {
+    esp_err_t err=nvs_flash_init();
+    // These two are the only failures an erase fixes: the partition is full of
+    // stale pages, or it was written by a different NVS version. Erasing on
+    // anything else would throw away the user's settings to work around a fault
+    // we would rather see, so the rest is logged and left alone.
+    if(err==ESP_ERR_NVS_NO_FREE_PAGES||err==ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW("boot","NVS_ERASED %s",esp_err_to_name(err));
+        err=nvs_flash_erase();
+        if(err==ESP_OK) err=nvs_flash_init();
+    }
+    if(err!=ESP_OK) ESP_LOGE("boot","NVS_INIT_FAILED %s",esp_err_to_name(err));
+}
+
 void app_main(void) {
     ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=512KiB");
     ESP_ERROR_CHECK(board_init());
+    nvs_init();
     shell_init();
     // Neither is fatal: the home stays usable with no dictionary and no font,
     // and the editors show which one is missing.
