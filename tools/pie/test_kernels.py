@@ -1,0 +1,221 @@
+"""Run the project's PIE kernels through the instruction-level model and compare
+them with their scalar definitions.
+
+    python tools/pie/test_kernels.py           (from the repository root)
+
+Each test extracts the inline assembly straight out of main/shell.c or
+main/render_accel.c, builds the same memory the C code would (tables, per-row
+constants, the 8-column input blocks), executes the assembly with `piesim`, and
+compares every output pixel with a Python transcription of the scalar
+reference next to the kernel (ocean_row_scalar / wave_row_scalar in shell.c,
+blend_px in render_accel.c, which is the Rust blend_rgb565 formula).
+
+What this catches: a wrong register in a rescheduled kernel, a constant read in
+the wrong order, an off-by-one in a lookup lane, a pointer that does not advance
+by what the caller assumes. What it does not catch: an algorithm that is itself
+wrong for some input — that is the job of the exhaustive C models in models/,
+and of the `__attribute__((unused))` scalar functions they were written from.
+
+The constant arrays of the ocean and wave kernels are evaluated from the C
+initializer text, so reordering k[] in the source is checked automatically.
+The blend constants come from blend_constants() in render_accel.c, which has
+no initializer to parse; blend_k() below mirrors it and must be kept in step.
+"""
+import math
+import os
+import random
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(__file__))
+from piesim import Sim, extract_asm, extract_constants, store16, store32, load16  # noqa: E402
+
+ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
+SHELL = os.path.join(ROOT, 'main', 'shell.c')
+ACCEL = os.path.join(ROOT, 'main', 'render_accel.c')
+LCD_W = 240
+
+
+def rgb565(r, g, b):
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+
+
+def cdiv(a, b):
+    """C integer division (truncates toward zero)."""
+    q = abs(a) // abs(b)
+    return q if (a >= 0) == (b > 0) else -q
+
+
+# The tables are built here exactly as shell.c builds them. Python's double
+# precision may differ from sinf/expf by one unit in a few entries; that does
+# not matter because both sides of the comparison use the same table.
+SINE = [int(math.sin(i * 6.2831853 / 256) * 256) for i in range(256)]
+WIDTHS, BRIGHT = (18, 5, 24), (14, 32, 21)
+SOFTNESS = [[int(BRIGHT[l] * math.exp(-d * d / (2 * WIDTHS[l] * WIDTHS[l]))) for d in range(64)]
+            for l in range(3)]
+
+
+class OceanRow(unittest.TestCase):
+    """ocean_row_pie against ocean_row_scalar (shell.c)."""
+
+    @staticmethod
+    def scalar(depth, cross, span, haze, distortion):
+        out = []
+        for x in range(LCD_W):
+            bend = distortion[x]
+            swell = SINE[(depth + bend) & 255]
+            ripple = SINE[(cross + x * 2 + bend * 2) & 255]
+            crest = max(swell - 180 + cdiv(ripple, 6), 0)
+            dx = abs(x - 160)
+            reflection = (span - dx) * 128 // span if dx < span else 0
+            glint = crest * (40 + reflection) // 128
+            shade = (swell + 256) // 32
+            lift = shade + haze + glint
+            clamp = lambda v: min(max(v, 0), 255)
+            out.append(rgb565(clamp(3 + glint), clamp(20 + lift), clamp(39 + lift)))
+        return out
+
+    def test_rows(self):
+        with open(SHELL, encoding='utf-8') as f:
+            src = f.read()
+        exact = 'ocean_sine16' in src       # table kernel (bit-exact) or the parabola kernel
+        asm = extract_asm(SHELL, 'ocean_row_pie(')
+        rng = random.Random(3)
+        moved, worst, total = 0, [0, 0, 0], 0
+        for _ in range(40):
+            y = rng.randint(37, 134)
+            span, haze = 12 + (y - 36) // 3, 24 - (y - 36) // 5
+            depth, cross = rng.randint(0, 200000), rng.randint(0, 200000)
+            distortion = [rng.randint(-28, 28) for _ in range(LCD_W)]
+            mem = bytearray(1 << 17)
+            ROW, COLS, TA, TB, K, KV = 0x1000, 0x2000, 0x4000, 0x4400, 0x5000, 0x5100
+            scale = 1 if exact else 16     # build_columns(): the parabola kernel keeps its phases x16
+            for x in range(LCD_W):        # ocean_cols[b][0..2][i]
+                b, i = x >> 3, x & 7
+                planes = (distortion[x] * scale, (2 * x + 2 * distortion[x]) * scale, abs(x - 160))
+                for l, v in enumerate(planes):
+                    store16(mem, COLS + (b * 3 + l) * 16 + 2 * i, [v & 0xFFFF])
+            store32(mem, TA, [s * 16 for s in SINE])                        # ocean_sine16
+            store32(mem, TB, [cdiv(s, 6) * 16 - 180 * 16 for s in SINE])     # ocean_sine6
+            k = extract_constants(SHELL, 'ocean_row_pie(', dict(depth=depth, cross=cross, span=span, haze=haze))
+            store16(mem, K, k)
+            sim = Sim(mem)
+            sim.run(asm, {'row': ROW, 'in': COLS, 'k': K, 'kv': KV, 'k8': KV + 16 * (len(k) - 1),
+                          'ta': TA, 'tb': TB, 'zero': 0, 's15': 15, 'nk': len(k),
+                          'blocks': LCD_W // 8, 'sar': 11})
+            got, want = load16(mem, ROW, LCD_W), self.scalar(depth, cross, span, haze, distortion)
+            if exact:
+                self.assertEqual(got, want, f'row y={y} depth={depth} cross={cross}')
+            else:
+                for g, w in zip(got, want):
+                    total += 1
+                    moved += g != w
+                    for c, (sh, m) in enumerate(((11, 31), (5, 63), (0, 31))):
+                        worst[c] = max(worst[c], abs(((g >> sh) & m) - ((w >> sh) & m)))
+            self.assertEqual(sim.ar['row'], ROW + LCD_W * 2)
+        if not exact:
+            # The parabola kernel's own contract (see its comment in shell.c): about one
+            # pixel in ten moves by one RGB565 step, none by more than two in green.
+            self.assertLessEqual(worst[0], 1, 'red moved by more than one step')
+            self.assertLessEqual(worst[1], 2, 'green moved by more than two steps')
+            self.assertLessEqual(worst[2], 1, 'blue moved by more than one step')
+            self.assertLess(moved / total, 0.2, f'{moved}/{total} pixels differ from the scalar row')
+            print(f'ocean (approximate kernel): {moved}/{total} pixels moved, worst step r/g/b = {worst}')
+
+
+class WaveRow(unittest.TestCase):
+    """wave_row_pie against wave_row_scalar (shell.c)."""
+
+    @staticmethod
+    def scalar(y, ribbons):
+        green, blue = 14 + y // 7, 30 + y // 5
+        out = []
+        for x in range(LCD_W):
+            light = []
+            for l in range(3):
+                d = abs(y - ribbons[l][x])
+                light.append(SOFTNESS[l][d] if d < 64 else 0)
+            s = light[0] + light[1]
+            out.append(rgb565(5 + light[0] // 4 + light[1] // 3 + light[2] // 2,
+                              green + s + light[2] // 2, blue + s + light[2]))
+        return out
+
+    def test_rows(self):
+        asm = extract_asm(SHELL, 'wave_row_pie(')
+        rng = random.Random(5)
+        for _ in range(40):
+            y = rng.randint(0, 134)
+            ribbons = [[rng.randint(-40, 200) for _ in range(LCD_W)] for _ in range(3)]
+            mem = bytearray(1 << 16)
+            ROW, COLS, T, K = 0x1000, 0x2000, 0x4000, 0x6000
+            for x in range(LCD_W):
+                for l in range(3):
+                    store16(mem, COLS + ((x >> 3) * 3 + l) * 16 + 2 * (x & 7), [ribbons[l][x] & 0xFFFF])
+            lut = []
+            for l in range(3):                            # wave_lut[l][d] = light | (weighted << 16), [64] = 0
+                for d in range(65):
+                    lo = SOFTNESS[l][d] if d < 64 else 0
+                    hi = (lo // 4, lo // 3, lo // 2)[l]
+                    lut.append(lo | (hi << 16))
+            store32(mem, T, lut)
+            k = extract_constants(SHELL, 'wave_row_pie(', dict(y=y, green=14 + y // 7, blue=30 + y // 5))
+            store16(mem, K, k)
+            sim = Sim(mem)
+            sim.run(asm, {'row': ROW, 'in': COLS, 'k': K, 't0': T, 't1': T + 65 * 4, 't2': T + 130 * 4,
+                          'blocks': LCD_W // 8, 'sar': 11})
+            self.assertEqual(load16(mem, ROW, LCD_W), self.scalar(y, ribbons), f'row y={y}')
+            self.assertEqual(sim.ar['row'], ROW + LCD_W * 2)
+
+
+def blend_k(r, g, b):
+    """Mirror of blend_constants() plus the pack constants in accel_blend()."""
+    k = [1, 64, 63, 31, 16384, 512, 8192, 128]
+    for s in (r, g, b):
+        k += [s, 0x00FF, 1, 127, 128]
+    k += [0x00F8, 0x8000, 0x00FC, 16384, 256]
+    return k
+
+
+class BlendBlocks(unittest.TestCase):
+    """blend_blocks_pie against blend_px (render_accel.c) = the Rust software blend."""
+
+    @staticmethod
+    def blend_px(p, r, g, b, a):
+        r5, g6, b5 = (p >> 11) & 31, (p >> 5) & 63, p & 31
+        dr, dg, db = (r5 << 3) | (r5 >> 2), (g6 << 2) | (g6 >> 4), (b5 << 3) | (b5 >> 2)
+        ia = 255 - a
+        return rgb565((r * a + dr * ia + 127) // 255, (g * a + dg * ia + 127) // 255,
+                      (b * a + db * ia + 127) // 255)
+
+    def test_blocks(self):
+        asm = extract_asm(ACCEL, 'blend_blocks_pie(')
+        rng = random.Random(7)
+        for _ in range(200):
+            n = rng.randint(1, 30)
+            px = [rng.getrandbits(16) for _ in range(n * 8)]
+            mask = [rng.choice((0, 255, rng.getrandbits(8), rng.getrandbits(8))) for _ in range(n * 8)]
+            r, g, b = (rng.getrandbits(8) for _ in range(3))
+            mem = bytearray(1 << 16)
+            DST, MASK, K = 0x1000, 0x3000, 0x4000
+            store16(mem, DST, px)
+            mem[MASK:MASK + n * 8] = bytes(mask)
+            store16(mem, K, blend_k(r, g, b))
+            sim = Sim(mem)
+            sim.run(asm, {'d': DST, 'm': MASK, 'n': n, 'k': K, 'sar': 11, 'sh8': 8})
+            self.assertEqual(load16(mem, DST, n * 8), [self.blend_px(p, r, g, b, a) for p, a in zip(px, mask)])
+            self.assertEqual((sim.ar['d'], sim.ar['m'], sim.ar['n']), (DST + n * 16, MASK + n * 8, 0))
+
+
+class FillBlocks(unittest.TestCase):
+    def test_blocks(self):
+        asm = extract_asm(ACCEL, 'fill_blocks_pie(')
+        mem = bytearray(1 << 12)
+        store16(mem, 0x800, [0xBEEF])
+        sim = Sim(mem)
+        sim.run(asm, {'d': 0x100, 'c': 0x800, 'n': 5})
+        self.assertEqual(load16(mem, 0x100, 40), [0xBEEF] * 40)
+        self.assertEqual(load16(mem, 0x100 + 80, 1), [0])
+
+
+if __name__ == '__main__':
+    unittest.main()
