@@ -10,6 +10,7 @@ a=p.parse_args()
 out=Path(__file__).resolve().parents[1]/'.cache/backgrounds'
 out.mkdir(parents=True,exist_ok=True)
 s=serial.Serial(a.port,115200,timeout=0.2)
+time.sleep(1.5);s.reset_input_buffer()
 records=[]
 
 def read_until(marker, timeout=15):

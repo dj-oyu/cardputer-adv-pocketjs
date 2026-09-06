@@ -6,6 +6,7 @@ import serial
 
 p=argparse.ArgumentParser();p.add_argument('--port',required=True);a=p.parse_args()
 s=serial.Serial(a.port,115200,timeout=0.1)
+time.sleep(1.5);s.reset_input_buffer()
 def command(key,marker):
     s.write(key.encode());end=time.monotonic()+5;lines=[]
     while time.monotonic()<end:

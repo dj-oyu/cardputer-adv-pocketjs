@@ -9,6 +9,8 @@ p.add_argument('--port', required=True)
 p.add_argument('--cycles', type=int, default=100)
 args = p.parse_args()
 s = serial.Serial(args.port, 115200, timeout=0.2)
+time.sleep(1.5)
+s.reset_input_buffer()
 
 def command(value, marker):
     s.write(value.encode())
