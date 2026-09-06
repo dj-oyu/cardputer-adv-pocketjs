@@ -336,66 +336,56 @@ ocean_row_pie(uint16_t *row, int depth, int cross, int span, int haze) {
 static void __attribute__((noinline))
 wave_row_pie(uint16_t *row, int y, unsigned green, unsigned blue) {
     int16_t k[10] __attribute__((aligned(4))) = {
-        64,                     /* the index clamp; entry 64 of the table is 0 */
-        (int16_t)y,
-        5,
-        (int16_t)green,
-        (int16_t)blue,
-        0x00F8,
-        (int16_t)0x8000,        /* x*32768>>11 = x*16, twice for r<<8 */
-        0x00FC,
-        16384,                  /* x<<3 */
-        256,                    /* x>>3 */
+        64, (int16_t)y, 5, (int16_t)green, (int16_t)blue,
+        0x00F8, (int16_t)0x8000, 0x00FC, 16384, 256
     };
-    const int16_t *in=&wave_cols[0][0][0];
+    const int16_t *in = &wave_cols[0][0][0];
     const int16_t *kp;
-    const uint32_t *t0=wave_lut[0], *t1=wave_lut[1], *t2=wave_lut[2];
-    int blocks=LCD_W/8, sar=11;
+    const uint32_t *t0 = wave_lut[0], *t1 = wave_lut[1], *t2 = wave_lut[2];
+    int blocks = LCD_W / 8, sar = 11;
     __asm__ volatile(
-        "wsr.sar        %[sar]\n"                     /*                                 1.8.128 */
+        "wsr.sar        %[sar]\n"                        /* SAR=11 for the EE.VMUL.U16 pack (1.8.128) */
         "mov            %[kp], %[k]\n"
-        "ee.vldbc.16.ip q5, %[kp], 2\n"               /* 64, resident                    1.8.95  */
-        "loopgtz        %[blocks], 1f\n"              /* 30 blocks of 8 pixels */
-        "  addi         %[kp], %[k], 2\n"             /* rewind the constant walk to k[1] */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* y */
-        /* layer 0: the light and light/4 */
-        "  ee.vld.128.ip   q0, %[in], 16\n"           /* ribbons[0][x..x+7]              1.8.88  */
-        "  ee.vsubs.s16    q1, q2, q0\n"              /*                                 1.8.198 */
-        "  ee.vsubs.s16    q0, q0, q2\n"
-        "  ee.vmax.s16     q0, q0, q1\n"              /* |y-ribbon|                      1.8.104 */
-        "  ee.vmin.s16     q0, q0, q5\n"              /* min(d,64)                       1.8.113 */
-        "  ee.ldxq.32      q3, q0, %[t0], 0, 0\n"     /*                                 1.8.37  */
+        "ee.vldbc.16.ip q5, %[kp], 2\n"                  /* q5 = 64, resident                    (1.8.95) */
+        "loopgtz        %[blocks], 1f\n"
+        "  addi         %[kp], %[k], 2\n"                /* constant walk restarts at k[1] */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"               /* q2 = y */
+        "  ee.vld.128.ip   q0, %[in], 16\n"              /* ribbons[0]                           (1.8.88) */
+        "  ee.vld.128.ip   q1, %[in], 16\n"              /* ribbons[1] */
+        "  ee.vsubs.s16    q6, q2, q0\n"                 /* y - r0            (q2 3 back, q0 2 back) (1.8.198) */
+        "  ee.vsubs.s16    q7, q2, q1\n"                 /* y - r1 */
+        "  ee.vsubs.s16    q0, q0, q2\n"                 /* r0 - y */
+        "  ee.vsubs.s16    q1, q1, q2\n"                 /* r1 - y */
+        "  ee.vmax.s16     q0, q0, q6\n"                 /* |y - r0|                             (1.8.104) */
+        "  ee.vmax.s16     q1, q1, q7\n"                 /* |y - r1| */
+        "  ee.vmin.s16     q0, q0, q5\n"                 /* idx0 = min(d,64)                     (1.8.113) */
+        "  ee.vmin.s16     q1, q1, q5\n"                 /* idx1 */
+        /* layer 0 -> q3/q4, layer 1 -> q6/q7, interleaved                              (1.8.37) */
+        "  ee.ldxq.32      q3, q0, %[t0], 0, 0\n"
+        "  ee.ldxq.32      q6, q1, %[t1], 0, 0\n"
         "  ee.ldxq.32      q3, q0, %[t0], 1, 1\n"
+        "  ee.ldxq.32      q6, q1, %[t1], 1, 1\n"
         "  ee.ldxq.32      q3, q0, %[t0], 2, 2\n"
+        "  ee.ldxq.32      q6, q1, %[t1], 2, 2\n"
         "  ee.ldxq.32      q3, q0, %[t0], 3, 3\n"
+        "  ee.ldxq.32      q6, q1, %[t1], 3, 3\n"
         "  ee.ldxq.32      q4, q0, %[t0], 0, 4\n"
+        "  ee.ldxq.32      q7, q1, %[t1], 0, 4\n"
         "  ee.ldxq.32      q4, q0, %[t0], 1, 5\n"
+        "  ee.ldxq.32      q7, q1, %[t1], 1, 5\n"
         "  ee.ldxq.32      q4, q0, %[t0], 2, 6\n"
+        "  ee.ldxq.32      q7, q1, %[t1], 2, 6\n"
         "  ee.ldxq.32      q4, q0, %[t0], 3, 7\n"
-        "  ee.vunzip.16    q3, q4\n"                  /* q3 = light0, q4 = light0/4      1.8.207 */
-        /* layer 1 */
-        "  ee.vld.128.ip   q0, %[in], 16\n"
-        "  ee.vsubs.s16    q1, q2, q0\n"
-        "  ee.vsubs.s16    q0, q0, q2\n"
-        "  ee.vmax.s16     q0, q0, q1\n"
-        "  ee.vmin.s16     q0, q0, q5\n"
-        "  ee.ldxq.32      q6, q0, %[t1], 0, 0\n"
-        "  ee.ldxq.32      q6, q0, %[t1], 1, 1\n"
-        "  ee.ldxq.32      q6, q0, %[t1], 2, 2\n"
-        "  ee.ldxq.32      q6, q0, %[t1], 3, 3\n"
-        "  ee.ldxq.32      q7, q0, %[t1], 0, 4\n"
-        "  ee.ldxq.32      q7, q0, %[t1], 1, 5\n"
-        "  ee.ldxq.32      q7, q0, %[t1], 2, 6\n"
-        "  ee.ldxq.32      q7, q0, %[t1], 3, 7\n"
-        "  ee.vunzip.16    q6, q7\n"
-        "  ee.vadds.s16    q3, q3, q6\n"              /* light0+light1                   1.8.70  */
-        "  ee.vadds.s16    q4, q4, q7\n"              /* light0/4 + light1/3 */
-        /* layer 2 */
-        "  ee.vld.128.ip   q0, %[in], 16\n"
-        "  ee.vsubs.s16    q1, q2, q0\n"
-        "  ee.vsubs.s16    q0, q0, q2\n"
-        "  ee.vmax.s16     q0, q0, q1\n"
-        "  ee.vmin.s16     q0, q0, q5\n"
+        "  ee.ldxq.32      q7, q1, %[t1], 3, 7\n"
+        "  ee.vld.128.ip   q0, %[in], 16\n"              /* ribbons[2] */
+        "  ee.vunzip.16    q3, q4\n"                     /* q3 = light0, q4 = light0/4  (q4 written 3 back) (1.8.207) */
+        "  ee.vunzip.16    q6, q7\n"                     /* q6 = light1, q7 = light1/3  (q7 written 3 back) */
+        "  ee.vsubs.s16    q1, q2, q0\n"                 /* y - r2            (q0 3 back) */
+        "  ee.vsubs.s16    q0, q0, q2\n"                 /* r2 - y */
+        "  ee.vadds.s16    q3, q3, q6\n"                 /* light0+light1                        (1.8.70) */
+        "  ee.vadds.s16    q4, q4, q7\n"                 /* light0/4+light1/3 */
+        "  ee.vmax.s16     q0, q0, q1\n"                 /* |y - r2| */
+        "  ee.vmin.s16     q0, q0, q5\n"                 /* idx2 */
         "  ee.ldxq.32      q6, q0, %[t2], 0, 0\n"
         "  ee.ldxq.32      q6, q0, %[t2], 1, 1\n"
         "  ee.ldxq.32      q6, q0, %[t2], 2, 2\n"
@@ -404,32 +394,30 @@ wave_row_pie(uint16_t *row, int y, unsigned green, unsigned blue) {
         "  ee.ldxq.32      q7, q0, %[t2], 1, 5\n"
         "  ee.ldxq.32      q7, q0, %[t2], 2, 6\n"
         "  ee.ldxq.32      q7, q0, %[t2], 3, 7\n"
-        "  ee.vunzip.16    q6, q7\n"
-        /* the three channels; no clamp, they cannot leave 0..255 */
-        "  ee.vadds.s16    q6, q6, q3\n"              /* sum + light2 */
-        "  ee.vadds.s16    q3, q3, q7\n"              /* sum + light2/2 */
-        "  ee.vadds.s16    q4, q4, q7\n"
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 5 */
-        "  ee.vadds.s16    q0, q4, q2\n"              /* red */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* green base */
-        "  ee.vadds.s16    q3, q3, q2\n"
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* blue base */
-        "  ee.vadds.s16    q6, q6, q2\n"
-        /* pack, the shifts done as multiplies against SAR=11 */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0xF8 */
-        "  ee.andq         q0, q0, q2\n"              /*                                 1.8.1   */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 32768 */
-        "  ee.vmul.u16     q0, q0, q2\n"              /*                                 1.8.128 */
-        "  ee.vmul.u16     q0, q0, q2\n"
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0xFC */
-        "  ee.andq         q3, q3, q2\n"
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 16384 */
-        "  ee.vmul.u16     q3, q3, q2\n"
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 256 */
-        "  ee.vmul.u16     q6, q6, q2\n"
-        "  ee.orq          q0, q0, q3\n"              /*                                 1.8.45  */
-        "  ee.orq          q0, q0, q6\n"
-        "  ee.vst.128.ip   q0, %[row], 16\n"          /*                                 1.8.192 */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"               /* 5      (y no longer needed) */
+        "  ee.vldbc.16.ip  q1, %[kp], 2\n"               /* green */
+        "  ee.vunzip.16    q6, q7\n"                     /* q6 = light2, q7 = light2/2  (q7 written 3 back) */
+        "  ee.vadds.s16    q6, q6, q3\n"                 /* light0+light1+light2 */
+        "  ee.vadds.s16    q3, q3, q7\n"                 /* light0+light1+light2/2 */
+        "  ee.vadds.s16    q4, q4, q7\n"                 /* light0/4+light1/3+light2/2 */
+        "  ee.vldbc.16.ip  q7, %[kp], 2\n"               /* blue */
+        "  ee.vadds.s16    q0, q4, q2\n"                 /* r = 5 + ...      (q2 loaded 6 back) */
+        "  ee.vadds.s16    q3, q3, q1\n"                 /* g = green + ...  (q1 loaded 5 back) */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"               /* 0xF8 */
+        "  ee.vldbc.16.ip  q1, %[kp], 2\n"               /* 32768 */
+        "  ee.vldbc.16.ip  q4, %[kp], 2\n"               /* 0xFC */
+        "  ee.vadds.s16    q6, q6, q7\n"                 /* b = blue + ...   (q7 loaded 4 back) */
+        "  ee.vldbc.16.ip  q7, %[kp], 2\n"               /* 16384 */
+        "  ee.andq         q0, q0, q2\n"                 /* r & 0xF8         (q2 4 back)         (1.8.1) */
+        "  ee.andq         q3, q3, q4\n"                 /* g & 0xFC         (q4 3 back) */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"               /* 256 */
+        "  ee.vmul.u16     q0, q0, q1\n"                 /* r*16                                 (1.8.128) */
+        "  ee.vmul.u16     q3, q3, q7\n"                 /* g<<3             (q7 3 back) */
+        "  ee.vmul.u16     q0, q0, q1\n"                 /* r*256            (q0 mul 2 back) */
+        "  ee.vmul.u16     q6, q6, q2\n"                 /* b>>3             (q2 3 back) */
+        "  ee.orq          q0, q0, q3\n"                 /*                  (q0 2 back, q3 3 back) (1.8.45) */
+        "  ee.orq          q0, q0, q6\n"                 /*                  (q6 mul 2 back) */
+        "  ee.vst.128.ip   q0, %[row], 16\n"             /*                                      (1.8.192) */
         "1:\n"
         : [row] "+a"(row), [in] "+a"(in), [kp] "=&a"(kp)
         : [k] "a"(k), [t0] "a"(t0), [t1] "a"(t1), [t2] "a"(t2),

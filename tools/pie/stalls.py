@@ -16,10 +16,15 @@ The report lists every such pair (including pairs that wrap from the end of
 the loop body to its start), counts memory instructions, estimates the loop
 body size against the 256-byte limit of `loopgtz`, and gives the expected
 cycles per block from the measured machine floor (docs/pie-simd.md 3.5):
-instructions + 0.37 per fused load + 0.6 per store + stalls. A kernel with no
-stalls runs at that figure on the device (ocean v3: 45.3 estimated, 45.5
-measured); a measurement well above it means the timer is also covering
-something that is not the kernel.
+instructions + 0.6 per store + stalls. Every PIE instruction issues in one
+cycle whatever it is -- sweeping the count of fused loads and of EE.LDXQ.32
+from 0 to 32 changed nothing -- so only the 128-bit store and the stalls are
+charged for. Inside a running frame a stall-free kernel measures 30-40% above
+this figure: roughly 12% for the per-row setup divided across the blocks, and
+another 24% for being preempted (PIE is coprocessor 3, so its state is saved
+and restored on every switch). Ocean v3 estimates 40.6 and measures 45.5 timed
+alone, 56 in the frame; wave v2 estimates 69.6 and measures 95 in the frame.
+Further above that means the timer is covering something not in the kernel.
 
 Limitations: the QACC accumulator and SAR are not modelled (their def/use rows
 in the table are incomplete), and the size estimate is from the usual encodings
@@ -35,9 +40,9 @@ STAGE2 = {'ee.vld.128.ip', 'ee.vld.l.64.ip', 'ee.vldbc.16', 'ee.vldbc.16.ip', 'e
           'ee.vmul.s16', 'ee.vmul.u16', 'ee.vrelu.s16', 'ee.vprelu.s16'}
 MEMORY = {'ee.vld.128.ip', 'ee.vld.l.64.ip', 'ee.vldbc.16', 'ee.vldbc.16.ip', 'ee.ldxq.32',
           'ee.vst.128.ip'}
-# Measured machine floor (docs/pie-simd.md 3.5): one instruction per cycle for
-# every EE arithmetic, multiply and (P)RELU, plus these per-instruction extras.
-FUSED_LOAD = 0.37     # each EE.*.LD.INCP
+# Measured machine floor (docs/pie-simd.md 3.5): one cycle per instruction, of
+# any kind -- loads, fused loads and indexed loads included. The store is the
+# only instruction that was measurably more.
 STORE = 0.6           # each EE.VST.128.IP
 SIZE = {'ee.ldxq.32': 4, 'mov': 2, 'addi': 2, 'wsr.sar': 3, 'loopgtz': 3, 'bnez': 3}
 
@@ -140,9 +145,10 @@ def main():
             print(f'  {j:3}: {pop:<20} -> {i:3}: {cop:<20} {r}')
     fused = sum(op.endswith('.ld.incp') for op, _, _ in body)
     stores = sum(op == 'ee.vst.128.ip' for op, _, _ in body)
-    cycles = total + fused * FUSED_LOAD + stores * STORE + len(stalls)
-    print(f'estimated cycles per block: {cycles:.1f} ({total} issue + {fused} fused load x{FUSED_LOAD}'
-          f' + {stores} store x{STORE} + {len(stalls)} stalls)')
+    cycles = total + stores * STORE + len(stalls)
+    print(f'estimated cycles per block: {cycles:.1f} ({total} issue'
+          f' + {stores} store x{STORE} + {len(stalls)} stalls);'
+          f' expect 30-40% more inside a frame')
 
 
 if __name__ == '__main__':
