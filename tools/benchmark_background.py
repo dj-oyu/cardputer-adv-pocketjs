@@ -1,4 +1,4 @@
-"""Measure four backgrounds after flashing/resetting the device."""
+"""Measure both backgrounds after flashing/resetting the device."""
 import argparse
 from pathlib import Path
 import time
@@ -24,7 +24,7 @@ def read_until(marker, timeout=15):
 try:
     s.write(b'q');read_until('HOME_READY')
     # Firmware boots in WAVE; invoke this once after flashing/reset.
-    for mode in range(4):
+    for mode in range(2):
         if mode:
             s.write(b'b');read_until('MODE')
         for sample in range(4):

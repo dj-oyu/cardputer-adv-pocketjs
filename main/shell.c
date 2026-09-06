@@ -10,15 +10,17 @@
 static uint16_t strip[LCD_W*STRIP_H];
 static int strip_y, strip_h;
 static unsigned mode;
-static const char *names[]={"WAVE","OCEAN","STARS","SEA + STARS"};
-static int16_t field[24][41];
+static const char *names[]={"WAVE + STARS","OCEAN + STARS"};
+static int16_t sine[256], distortion[LCD_W];
+static int depth_phase[LCD_H], cross_phase[LCD_H];
+static bool sine_ready;
 static struct {int x,y;uint16_t color;} stars[36];
 static int64_t window_start;
 static unsigned samples, max_us;
 static uint64_t draw_sum;
 static float fps;
 void shell_change_background(int direction) {
-    mode=(mode+4+direction)%4;
+    mode=(mode+2+direction)%2;
     window_start=0;samples=0;max_us=0;draw_sum=0;fps=0;
     ESP_LOGI("background","MODE %u %s",mode,names[mode]);
 }
@@ -62,11 +64,21 @@ void shell_draw(const char *error, unsigned phase) {
     const uint16_t white=board_rgb(237,246,255), muted=board_rgb(122,169,197);
     int wave[LCD_W];
     for(int x=0;x<LCD_W;x++)wave[x]=83+sinf(x*0.020f+t*0.6f)*13+sinf(x*0.009f-t*0.27f)*8;
-    if(mode==1||mode==3)for(int y=0;y<24;y++)for(int x=0;x<41;x++) {
-        float nx=x*0.12f,ny=y*0.19f;
-        field[y][x]=(perlin(nx+t*0.13f,ny-t*0.09f)+0.38f*perlin(nx*2.1f-t*0.09f,ny*2.1f+t*0.17f))*512;
+    if(!sine_ready) {
+        for(int i=0;i<256;i++)sine[i]=(int16_t)(sinf(i*6.2831853f/256)*256);
+        sine_ready=true;
     }
-    if(mode>=2)for(int i=0;i<36;i++) {
+    if(mode==1) {
+        // Perspective compresses the swell spacing towards a visible horizon.
+        // Noise only bends the coherent wave fronts; it no longer paints clouds.
+        for(int x=0;x<LCD_W;x++)distortion[x]=(int16_t)(perlin(x*0.018f,t*0.12f)*28);
+        for(int y=37;y<LCD_H;y++) {
+            float depth=800.0f/(y-28);
+            depth_phase[y]=(int)((depth*1.8f+t*1.2f)*40.7437f);
+            cross_phase[y]=(int)((depth*3.1f-t*0.7f)*40.7437f);
+        }
+    }
+    for(int i=0;i<36;i++) {
         unsigned seed=hash(i,91);float speed=1+(seed%13)*0.3f;
         stars[i].x=(int)fmodf((seed%240)+t*speed,240);
         stars[i].y=(int)fmodf(((seed>>8)%135)+t*(0.4f+speed*0.2f),135);
@@ -78,16 +90,23 @@ void shell_draw(const char *error, unsigned phase) {
         for(int y=strip_y;y<strip_y+strip_h;y++)for(int x=0;x<LCD_W;x++) {
             int distance=y-wave[x];if(distance<0)distance=-distance;
             unsigned glow=distance<15 ? (15-distance)*2:0;
-            if(mode==1||mode==3) {
-                int gx=x/6,gy=y/6,fx=x%6,fy=y%6;
-                int top=field[gy][gx]*(6-fx)+field[gy][gx+1]*fx;
-                int bottom=field[gy+1][gx]*(6-fx)+field[gy+1][gx+1]*fx;
-                int n=(top*(6-fy)+bottom*fy)/36;
-                int light=(bottom-top)/2+n/4;if(light<0)light=0;
-                strip[(y-strip_y)*LCD_W+x]=board_rgb(clamp(4+light/16),clamp(20+y*14/100+(n*12+light*76)/512),clamp(39+y*22/100+(n*18+light*92)/512));
+            if(mode==1) {
+                if(y<=36) {
+                    strip[(y-strip_y)*LCD_W+x]=board_rgb(5+y/12,13+y/3,29+y/2);
+                    continue;
+                }
+                int swell=sine[(depth_phase[y]+distortion[x])&255];
+                int ripple=sine[(cross_phase[y]+x*2+distortion[x]*2)&255];
+                int crest=swell-180+ripple/6;if(crest<0)crest=0;
+                int span=12+(y-36)/3,dx=x-160;if(dx<0)dx=-dx;
+                int reflection=dx<span?(span-dx)*128/span:0;
+                int glint=crest*(40+reflection)/128;
+                int shade=(swell+256)/32;
+                int haze=24-(y-36)/5;
+                strip[(y-strip_y)*LCD_W+x]=board_rgb(clamp(3+glint),clamp(20+shade+haze+glint),clamp(39+shade+haze+glint));
             } else strip[(y-strip_y)*LCD_W+x]=board_rgb(5+glow/3,14+y/7+glow,30+y/5+glow);
         }
-        if(mode>=2)for(int i=0;i<36;i++) {
+        for(int i=0;i<36;i++) {
             int px=stars[i].x,py=stars[i].y;
             if(py+1<strip_y||py-1>=strip_y+strip_h)continue;
             uint16_t c=stars[i].color;
