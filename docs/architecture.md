@@ -18,7 +18,8 @@ Pocket VaporのCへの事前変換は使用しない。
 
 調査基準はPocketJSコミット `6a0a1b6c91a506c473fc37a0256a47b12eceeca8`。
 そのESP-IDFコンポーネントはIDF `>=6.0,<6.2` と `espressif/quickjs-ng 0.14.0` を宣言している。
-実装開始時にIDFの具体的なバージョンと依存ロックを固定する。S3用Rustアーカイブの配布状態を確認し、なければ対応Xtensa Rustでソースビルドする。
+このPCのEIMに登録されたIDF v6.0.1を最初のビルド基準とし、依存ロックは実装開始時に固定する。[環境とコマンド](build-environment.md)を参照。
+S3用Rustアーカイブの配布状態を確認し、なければ対応Xtensa Rustでソースビルドする。
 公式ADVデモのIDF 5.4.2設定をそのまま流用せず、ドライバーの参考として扱う。
 
 S3では `pocketjs_package`、`pocketjs_ui_qjs`、`pocketjs_render_rgb565` とその依存を使用する。

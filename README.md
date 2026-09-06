@@ -6,6 +6,7 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 
 ## 設計ドキュメント
 
+- [Windows / EIM開発環境](docs/build-environment.md)：このPCのIDF v6.0.1、環境切り替え、ビルド・書き込みコマンド。
 - [ハードウェア仕様と制約](docs/hardware-constraints.md)：SoC、メモリ、ピン配置、共有バス、描画・実行時の注意点。
 - [プラットフォーム設計](docs/architecture.md)：責務、アプリの起動・終了、入力、描画、メモリ管理。
 - [ホームUI設計](docs/home-ui.md)：カテゴリと項目の選択、背景、アニメーション、画面遷移。
