@@ -42,4 +42,11 @@ try:
     assert heard,'Synthesized audio was not submitted to I2S'
     command('a','CATEGORY 0');command('e','HELLO_FRAME_PRESENTED');command('q','HOME_READY')
     print('SETTINGS_OK sound=ON categories, toggles, mute, app-return',flush=True)
-finally:s.close()
+finally:
+    # An assertion above can abort while SOUND is OFF, which then persists in NVS.
+    # Walk back to Settings > SOUND > ON so the device is never left muted.
+    try:
+        # home, Settings, top, SOUND, open, choose ON, apply.
+        for key in 'qbuuddede':s.write(key.encode());time.sleep(0.4)
+    except Exception:pass
+    s.close()

@@ -26,7 +26,8 @@ static void audio_task(void *arg) {
                     float u=(float)n/frames;
                     float envelope=fminf(n/72.0f,1.0f)*(1-u)*(1-u);
                     phase+=6.2831853f*frequency*(kind==1?1+0.35f*u:1-0.15f*u)/24000;
-                    sample=1600*envelope*(sinf(phase)+0.18f*sinf(phase*2));
+                    // Peak stays near -7 dBFS including the second harmonic.
+                    sample=12000*envelope*(sinf(phase)+0.18f*sinf(phase*2));
                 }
                 pcm[j*2]=pcm[j*2+1]=(int16_t)sample;
             }
@@ -41,7 +42,8 @@ void sound_init(i2c_master_bus_handle_t bus) {
     if(i2c_master_probe(bus,0x18,30)!=ESP_OK){ESP_LOGW("sound","ES8311 unavailable");return;}
     i2s_chan_config_t channel=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1,I2S_ROLE_MASTER);
     channel.dma_desc_num=4;channel.dma_frame_num=128;channel.auto_clear=true;
-    esp_err_t err=i2s_new_channel(&channel,&output,NULL);if(err!=ESP_OK)return;
+    esp_err_t err=i2s_new_channel(&channel,&output,NULL);
+    if(err!=ESP_OK){ESP_LOGW("sound","I2S channel unavailable: %s",esp_err_to_name(err));return;}
     i2s_std_config_t cfg={.clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(24000),
         .slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,I2S_SLOT_MODE_STEREO),
         .gpio_cfg={.mclk=I2S_GPIO_UNUSED,.bclk=41,.ws=43,.dout=42,.din=I2S_GPIO_UNUSED}};
