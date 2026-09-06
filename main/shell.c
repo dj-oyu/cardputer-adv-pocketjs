@@ -1,6 +1,9 @@
 #include "shell.h"
 #include "board.h"
 #include "motion.h"
+#include "sound.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "fonts.h"
 #include <math.h>
 #include <string.h>
@@ -22,6 +25,48 @@ static int64_t window_start;
 static unsigned samples, max_us;
 static uint64_t draw_sum;
 static float fps;
+static unsigned category,setting;
+static bool show_fps,sfx=true;
+static nvs_handle_t prefs;
+static bool prefs_ready;
+void shell_init(void) {
+    if(nvs_flash_init()==ESP_OK && nvs_open("home",NVS_READWRITE,&prefs)==ESP_OK) {
+        prefs_ready=true;uint8_t v;
+        if(nvs_get_u8(prefs,"background",&v)==ESP_OK)mode=v%2;
+        if(nvs_get_u8(prefs,"fps",&v)==ESP_OK)show_fps=v!=0;
+        if(nvs_get_u8(prefs,"sound",&v)==ESP_OK)sfx=v!=0;
+    }
+    sound_set_enabled(sfx);
+    ESP_LOGI("settings","LOADED background=%u fps=%d sound=%d",mode,show_fps,sfx);
+}
+bool shell_key(board_key_t key) {
+    if(key==KEY_LEFT||key==KEY_RIGHT) {
+        unsigned next=key==KEY_RIGHT?1:0;
+        if(next!=category){category=next;sound_play(0);}
+        ESP_LOGI("shell","CATEGORY %u",category);
+    } else if(category==1&&(key==KEY_UP||key==KEY_DOWN)) {
+        unsigned next=setting;
+        if(key==KEY_DOWN&&next<2)next++;
+        if(key==KEY_UP&&next>0)next--;
+        if(next!=setting){setting=next;sound_play(0);}
+        ESP_LOGI("settings","SELECT %u",setting);
+    } else if(key==KEY_ENTER) {
+        if(category==0){sound_play(1);return true;}
+        if(setting==0)shell_change_background(1);
+        if(setting==1)show_fps=!show_fps;
+        if(setting==2){sfx=!sfx;sound_set_enabled(sfx);}
+        sound_play(1);
+        if(prefs_ready) {
+            esp_err_t err=nvs_set_u8(prefs,"background",mode);
+            if(!err)err=nvs_set_u8(prefs,"fps",show_fps);
+            if(!err)err=nvs_set_u8(prefs,"sound",sfx);
+            if(!err)err=nvs_commit(prefs);
+            if(err)ESP_LOGW("settings","Save failed: %s",esp_err_to_name(err));
+        }
+        ESP_LOGI("settings","VALUE background=%u fps=%d sound=%d",mode,show_fps,sfx);
+    }
+    return false;
+}
 void shell_change_background(int direction) {
     mode=(mode+2+direction)%2;
     window_start=0;samples=0;max_us=0;draw_sum=0;fps=0;
@@ -150,18 +195,28 @@ void shell_draw(const char *error, unsigned phase) {
             pixel(px,py,c);
             if(i%7==0){pixel(px-1,py,muted);pixel(px+1,py,muted);pixel(px,py-1,muted);pixel(px,py+1,muted);}
         }
-        text(12,8,"POCKET / CARDPUTER",1,muted);
         char meter[16];snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
-        text(194,8,meter,1,muted);
-        text(12,20,names[mode],1,muted);
-        // Minimal apps category icon, drawn from primitives.
-        for(int y=32;y<48;y++)for(int x=27;x<43;x++)
-            if(x<30||x>39||y<35||y>44)pixel(x,y,white);
-        text(56,36,"APPS",1,white);
-        text(20,72,">",2,board_rgb(119,233,255));
-        text(44,70,error?"APP ERROR":"HELLO WORLD",2,white);
-        text(44,92,error?error:"JAVASCRIPT / POCKETJS",1,muted);
-        text(12,121,error?"ESC / ENTER TO RETURN":"ENTER OPEN  </> BACKGROUND",1,muted);
+        if(show_fps)text(194,8,meter,1,muted);
+        text(34,29,"APPS",1,category==0?white:muted);
+        text(139,29,"SETTINGS",1,category==1?white:muted);
+        int bar=category==0?30:135;
+        for(int x=bar;x<bar+(category==0?32:56);x++)pixel(x,42,white);
+        if(error) {
+            text(24,69,"APP ERROR",2,white);text(24,94,error,1,muted);
+        } else if(category==0) {
+            text(20,72,">",2,board_rgb(119,233,255));
+            text(44,70,"HELLO WORLD",2,white);
+            text(44,92,"JAVASCRIPT / POCKETJS",1,muted);
+        } else {
+            const char *labels[]={"BACKGROUND","FPS DISPLAY","SOUND"};
+            const char *values[]={names[mode],show_fps?"ON":"OFF",sfx?"ON":"OFF"};
+            for(unsigned row=0;row<3;row++) {
+                int y=59+row*21;uint16_t color=row==setting?white:muted;
+                if(row==setting)text(12,y,">",1,white);
+                text(27,y,labels[row],1,color);text(116,y,values[row],1,color);
+            }
+        }
+        text(12,123,error?"ESC / ENTER TO RETURN":category==0?"</> CATEGORY   ENTER OPEN":"UP/DOWN SELECT  ENTER CHANGE",1,muted);
         ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
     }
     unsigned elapsed=(unsigned)(esp_timer_get_time()-started);

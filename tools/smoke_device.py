@@ -24,6 +24,7 @@ def command(value, marker):
 
 try:
     command('q', 'HOME_READY')
+    command('a', 'CATEGORY 0')
     memory = []
     for i in range(args.cycles):
         command('e', 'HELLO_FRAME_PRESENTED')

@@ -1,6 +1,7 @@
 #include "board.h"
 #include "shell.h"
 #include "motion.h"
+#include "sound.h"
 #include "app_session.h"
 #include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
@@ -26,6 +27,8 @@ static void input_task(void *arg) {
             if(c=='q'||c==27)key=KEY_BACK;
             if(c=='b')key=KEY_RIGHT;
             if(c=='a')key=KEY_LEFT;
+            if(c=='u')key=KEY_UP;
+            if(c=='d')key=KEY_DOWN;
             if(c=='s')atomic_store(&capture,true);
             if(c=='c')motion_recenter();
             if(c>='1'&&c<='6')atomic_store(&diagnostic,c);
@@ -44,14 +47,14 @@ static void ui_task(void *arg) {
     while(1) {
         int64_t frame_start=esp_timer_get_time();
         board_key_t key=KEY_NONE;xQueueReceive(keys,&key,0);
-        if(!running && (key==KEY_LEFT||key==KEY_RIGHT))shell_change_background(key==KEY_RIGHT?1:-1);
         if(atomic_exchange(&stop,false)) {
+            sound_play(2);
             if(running)app_stop();
             running=false;error=NULL;xQueueReset(keys);
             ESP_LOGI("shell","HOME_READY");
-        } else if(!running && key==KEY_ENTER) {
-            if(error)error=NULL;
-            else { running=app_start()==ESP_OK;if(!running)error="START FAILED"; }
+        } else if(!running && key!=KEY_NONE) {
+            if(error&&key==KEY_ENTER)error=NULL;
+            else if(!error&&shell_key(key)) { running=app_start()==ESP_OK;if(!running)error="START FAILED"; }
             key=KEY_NONE;
         }
         int test=atomic_exchange(&diagnostic,0);
@@ -62,6 +65,7 @@ static void ui_task(void *arg) {
         bool snapshot=atomic_exchange(&capture,false);
         if(snapshot) {board_capture(true);app_force_redraw();}
         if(running) {
+            if(key==KEY_ENTER)sound_play(1);
             esp_err_t e=app_tick(key==KEY_ENTER?0x4000:0);
             // Insert a release frame so consecutive queued presses remain distinct.
             if(e==ESP_OK && key==KEY_ENTER)e=app_tick(0);
@@ -75,6 +79,7 @@ static void ui_task(void *arg) {
 void app_main(void) {
     ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=2MiB");
     ESP_ERROR_CHECK(board_init());
+    shell_init();
     usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
     keys=xQueueCreate(16,sizeof(board_key_t));configASSERT(keys);
