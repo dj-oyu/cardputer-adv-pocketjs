@@ -16,8 +16,9 @@
 static uint16_t *strip;
 static int strip_y, strip_h;
 static unsigned mode;
-static const char *names[]={"LEVEL WAVE","OCEAN + STARS","SOLAR SAIL"};
+static const char *const names[]={"LEVEL WAVE","OCEAN + STARS","SOLAR SAIL"};
 #define BACKGROUND_N (sizeof(names)/sizeof(names[0]))
+static const char *const toggles[]={"OFF","ON"};
 static int16_t ribbons[3][LCD_W];
 static uint8_t softness[3][64];
 static int16_t sine[256], distortion[LCD_W];
@@ -61,26 +62,93 @@ static unsigned choice;
 static float category_pos, item_pos, choice_pos, depth_pos;
 static int64_t animation_time;
 static const char *categories[]={"APPS","SETTINGS"};
-static const char *labels[]={"BACKGROUND","FPS DISPLAY","SOUND"};
 static bool show_fps,sfx=true;
 static nvs_handle_t prefs;
 static bool prefs_ready;
+static shell_screen_t pending_screen;
+
+// The settings list used to live in eight places at once — a label array, a
+// navigation bound, two "how many values does this one have" ternaries, the
+// seed, the apply chain, the save chain and the detail line — and they only
+// agreed by hand. Growing the backgrounds from two to three already broke a
+// capture script that had counted key presses against the old length. It is
+// one table now: a row is an entry, and nothing outside the table counts.
+typedef enum {
+    SETTING_CHOICES,   // a fixed set of value names, chosen on the depth screen
+    SETTING_ACTION,    // selecting it leaves the home screen for another one
+} setting_kind_t;
+typedef struct {
+    const char *label;           // the row, as the Settings list draws it
+    setting_kind_t kind;
+    const char *const *values;   // SETTING_CHOICES: the value names
+    unsigned count;              // SETTING_CHOICES: how many of them
+    const char *key;             // NVS key, NULL for anything not persisted
+    unsigned (*get)(void);       // the live value, as an index into values
+    void (*set)(unsigned);       // make the live value that index
+    shell_screen_t screen;       // SETTING_ACTION: where Enter goes
+} setting_t;
+
+// Loading a preference and applying one are the same act — make the setting
+// equal to this index — so the table carries one setter for both. Background
+// goes through shell_change_background() because changing the mode also has to
+// throw away the frame statistics gathered under the old one.
+static unsigned background_get(void) {return mode;}
+static void background_set(unsigned v) {if(v!=mode)shell_change_background((int)v-(int)mode);}
+static unsigned fps_get(void) {return show_fps;}
+static void fps_set(unsigned v) {show_fps=v!=0;}
+static unsigned sound_get(void) {return sfx;}
+static void sound_set(unsigned v) {sfx=v!=0;sound_set_enabled(sfx);}
+
+static const setting_t settings[]={
+    {"BACKGROUND", SETTING_CHOICES, names,   BACKGROUND_N, "background",
+     background_get, background_set, SHELL_SCREEN_NONE},
+    {"FPS DISPLAY",SETTING_CHOICES, toggles, 2,            "fps",
+     fps_get,        fps_set,        SHELL_SCREEN_NONE},
+    {"SOUND",      SETTING_CHOICES, toggles, 2,            "sound",
+     sound_get,      sound_set,      SHELL_SCREEN_NONE},
+};
+#define SETTING_N (sizeof(settings)/sizeof(settings[0]))
+
+// "background=0 fps=1 sound=1" — the line test_settings.py parses. Built from
+// the NVS keys so a new persisted row appears in it without being named here;
+// an action row has no key and no value, and stays out.
+static void settings_summary(char *out,size_t size) {
+    size_t used=0;
+    for(unsigned i=0;i<SETTING_N;i++) {
+        if(!settings[i].key)continue;
+        int n=snprintf(out+used,size-used,used?" %s=%u":"%s=%u",
+                       settings[i].key,settings[i].get());
+        if(n<0||(size_t)n>=size-used)break;
+        used+=(size_t)n;
+    }
+}
+
 void shell_init(void) {
+    char summary[128]={0};
     if(nvs_flash_init()==ESP_OK && nvs_open("home",NVS_READWRITE,&prefs)==ESP_OK) {
         prefs_ready=true;uint8_t v;
-        if(nvs_get_u8(prefs,"background",&v)==ESP_OK)mode=v%BACKGROUND_N;
-        if(nvs_get_u8(prefs,"fps",&v)==ESP_OK)show_fps=v!=0;
-        if(nvs_get_u8(prefs,"sound",&v)==ESP_OK)sfx=v!=0;
+        for(unsigned i=0;i<SETTING_N;i++)
+            if(settings[i].key&&nvs_get_u8(prefs,settings[i].key,&v)==ESP_OK)
+                settings[i].set(v);
     }
+    // Still unconditional: with no stored key the default has to reach the
+    // mixer too, and the setter above never ran.
     sound_set_enabled(sfx);
-    ESP_LOGI("settings","LOADED background=%u fps=%d sound=%d",mode,show_fps,sfx);
+    settings_summary(summary,sizeof summary);
+    ESP_LOGI("settings","LOADED %s",summary);
+}
+
+shell_screen_t shell_pending_screen(void) {
+    shell_screen_t requested=pending_screen;
+    pending_screen=SHELL_SCREEN_NONE;
+    return requested;
 }
 bool shell_key(board_key_t key) {
     if(key==KEY_BACK) {
         choices=false;sound_play(2);
         ESP_LOGI("shell","HOME_READY");
     } else if(choices&&(key==KEY_UP||key==KEY_DOWN)) {
-        unsigned next=choice,count=setting==0?BACKGROUND_N:2;
+        unsigned next=choice,count=settings[setting].count;
         if(key==KEY_DOWN&&next+1<count)next++;
         if(key==KEY_UP&&next>0)next--;
         if(next!=choice){choice=next;sound_play(0);}
@@ -99,31 +167,39 @@ bool shell_key(board_key_t key) {
         ESP_LOGI("shell","APP %u",app);
     } else if(category==1&&(key==KEY_UP||key==KEY_DOWN)) {
         unsigned next=setting;
-        if(key==KEY_DOWN&&next<2)next++;
+        if(key==KEY_DOWN&&next+1<(unsigned)SETTING_N)next++;
         if(key==KEY_UP&&next>0)next--;
         if(next!=setting){setting=next;sound_play(0);}
         ESP_LOGI("settings","SELECT %u",setting);
     } else if(key==KEY_ENTER) {
         if(category==0){sound_play(1);return true;}
+        const setting_t *entry=&settings[setting];
         if(!choices) {
-            choices=true;choice=setting==0?mode:setting==1?show_fps:sfx;
+            if(entry->kind==SETTING_ACTION) {
+                pending_screen=entry->screen;
+                sound_play(1);
+                ESP_LOGI("settings","SCREEN %u screen=%d",setting,(int)entry->screen);
+                return false;
+            }
+            choices=true;choice=entry->get();
             choice_pos=choice;sound_play(1);
             ESP_LOGI("settings","OPEN %u choice=%u",setting,choice);
             return false;
         }
-        if(setting==0&&mode!=choice)shell_change_background((int)choice-(int)mode);
-        if(setting==1)show_fps=choice!=0;
-        if(setting==2){sfx=choice!=0;sound_set_enabled(sfx);}
+        entry->set(choice);
         choices=false;
         sound_play(1);
         if(prefs_ready) {
-            esp_err_t err=nvs_set_u8(prefs,"background",mode);
-            if(!err)err=nvs_set_u8(prefs,"fps",show_fps);
-            if(!err)err=nvs_set_u8(prefs,"sound",sfx);
+            esp_err_t err=ESP_OK;
+            for(unsigned i=0;i<SETTING_N&&err==ESP_OK;i++)
+                if(settings[i].key)
+                    err=nvs_set_u8(prefs,settings[i].key,(uint8_t)settings[i].get());
             if(!err)err=nvs_commit(prefs);
             if(err)ESP_LOGW("settings","Save failed: %s",esp_err_to_name(err));
         }
-        ESP_LOGI("settings","VALUE background=%u fps=%d sound=%d",mode,show_fps,sfx);
+        char summary[128]={0};
+        settings_summary(summary,sizeof summary);
+        ESP_LOGI("settings","VALUE %s",summary);
     }
     return false;
 }
@@ -489,15 +565,19 @@ static float item_y(float delta) {
     // Leave space for the category rail between the previous and focused item.
     return delta<0?69+57*delta:69+41*delta;
 }
-static void menu_list(int x,float position,const char *const *items,unsigned count,
-                      float opacity,const char *detail) {
+// `stride` is the step from one label to the next: the settings table keeps its
+// label inside a wider struct, and walking it in place beats a parallel array
+// of labels that could drift out of step with the table.
+static void menu_list(int x,float position,const char *const *items,size_t stride,
+                      unsigned count,float opacity,const char *detail) {
     for(unsigned i=0;i<count;i++) {
         float distance=fabsf(i-position);
         float strength=1-fminf(distance,1)*0.70f;
         float y=item_y(i-position);
         // Fade while crossing the category text, so two lines never collide.
         float clearance=fminf(fabsf(y-34)/20,1);
-        label(x,(int)lroundf(y),items[i],2,opacity*strength*clearance);
+        const char *item=*(const char *const *)((const char *)items+(size_t)i*stride);
+        label(x,(int)lroundf(y),item,2,opacity*strength*clearance);
     }
     float settled=1-fminf(fabsf(position-roundf(position))*4,1);
     if(detail)label(x,89,detail,1,opacity*settled*0.75f);
@@ -510,18 +590,22 @@ static void draw_menu(void) {
         label(x,37,categories[c],1,(0.35f+0.65f*visibility)*(1-depth_pos*0.6f));
         if(visibility>0.01f) {
             if(c==0) {
-                menu_list(x,app_pos,apps,APP_N,visibility,app_details[app]);
+                menu_list(x,app_pos,apps,sizeof apps[0],APP_N,visibility,app_details[app]);
             } else {
-                const char *detail=setting==0?names[mode]:setting==1?(show_fps?"ON":"OFF"):(sfx?"ON":"OFF");
-                menu_list(x,item_pos,labels,3,visibility*(1-depth_pos),detail);
+                // An action row has no value to show under the list.
+                const setting_t *entry=&settings[setting];
+                const char *detail=entry->values?entry->values[entry->get()]:NULL;
+                menu_list(x,item_pos,&settings[0].label,sizeof settings[0],SETTING_N,
+                          visibility*(1-depth_pos),detail);
             }
         }
     }
     if(depth_pos>0.005f) {
         int x=(int)lroundf(16+(1-depth_pos)*LCD_W);
-        const char *toggles[]={"OFF","ON"};
-        label(x,37,labels[setting],1,depth_pos);
-        menu_list(x,choice_pos,setting==0?names:toggles,setting==0?BACKGROUND_N:2,depth_pos,NULL);
+        const setting_t *entry=&settings[setting];
+        label(x,37,entry->label,1,depth_pos);
+        menu_list(x,choice_pos,entry->values,sizeof entry->values[0],entry->count,
+                  depth_pos,NULL);
     }
 }
 void shell_draw(const char *error, unsigned phase) {
