@@ -11,7 +11,7 @@
 static uint16_t strip[LCD_W*STRIP_H];
 static int strip_y, strip_h;
 static unsigned mode;
-static const char *names[]={"DEPTH / TILT","OCEAN + STARS"};
+static const char *names[]={"LEVEL WAVE","OCEAN + STARS"};
 static int16_t ribbons[3][LCD_W];
 static uint8_t softness[3][64];
 static int16_t sine[256], distortion[LCD_W];
@@ -66,6 +66,7 @@ void shell_draw(const char *error, unsigned phase) {
     // One owner draws the LCD; eight rows at a time. No full-screen framebuffer.
     const uint16_t white=board_rgb(237,246,255), muted=board_rgb(122,169,197);
     int tilt_x,tilt_y;motion_get(&tilt_x,&tilt_y);
+    int level_slope=(int)(tanf(tilt_x/256.0f)*256);
     if(!sine_ready) {
         for(int i=0;i<256;i++)sine[i]=(int16_t)(sinf(i*6.2831853f/256)*256);
         const float widths[]={18,5,24};const float brightness[]={14,32,21};
@@ -80,6 +81,7 @@ void shell_draw(const char *error, unsigned phase) {
         int a=(int)((px*(0.014f+l*0.004f)+t*speeds[l]+l*1.6f)*40.7437f);
         int b=(int)((px*0.009f-t*0.24f+l)*40.7437f);
         ribbons[l][x]=(int16_t)(centers[l]+tilt_y*depths[l]/256.0f
+            +(x-LCD_W/2)*level_slope/256
             +(sine[a&255]*(9+l*4)+sine[b&255]*6)/256.0f);
     }
     if(mode==1) {

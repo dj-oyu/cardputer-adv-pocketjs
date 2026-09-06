@@ -7,11 +7,12 @@
 #include "freertos/task.h"
 #include <stdatomic.h>
 #include <string.h>
+#include <math.h>
 
 static i2c_master_dev_handle_t device;
 static struct bmi2_dev imu;
 static bool ready, centered;
-static float origin_x,origin_y,filtered_x,filtered_y;
+static float origin_y,filtered_x,filtered_y;
 static atomic_int tilt_x,tilt_y;
 static int64_t last_read,last_log;
 static unsigned failures;
@@ -53,9 +54,12 @@ void motion_poll(void) {
         return;
     }
     failures=0;if(!(data.status&BMI2_DRDY_ACC))return;
-    float x=data.acc.x/16384.0f,y=data.acc.y/16384.0f;
-    if(!centered){origin_x=x;origin_y=y;filtered_x=0;filtered_y=0;centered=true;}
-    filtered_x+=(x-origin_x-filtered_x)*0.10f;filtered_y+=(y-origin_y-filtered_y)*0.10f;
+    float ax=data.acc.x/16384.0f,ay=data.acc.y/16384.0f,az=data.acc.z/16384.0f;
+    // Absolute lateral inclination: booting while tilted must not redefine level.
+    float x=atan2f(ax,sqrtf(ay*ay+az*az));
+    float y=atan2f(ay,sqrtf(ax*ax+az*az));
+    if(!centered){origin_y=y;filtered_x=x;filtered_y=0;centered=true;}
+    filtered_x+=(x-filtered_x)*0.10f;filtered_y+=(y-origin_y-filtered_y)*0.10f;
     int tx=(int)(filtered_x*256),ty=(int)(filtered_y*256);
     if(tx>180)tx=180;
     if(tx< -180)tx=-180;
