@@ -11,7 +11,7 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 
-static uint16_t strip[LCD_W*STRIP_H];
+static uint16_t *strip;
 static int strip_y, strip_h;
 static unsigned mode;
 static const char *names[]={"LEVEL WAVE","OCEAN + STARS"};
@@ -25,7 +25,13 @@ static int64_t window_start;
 static unsigned samples, max_us;
 static uint64_t draw_sum;
 static float fps;
-static unsigned category,setting;
+static unsigned category,setting,app;
+static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND"};
+static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
+                                  "WRITE AND RUN JAVASCRIPT"};
+#define APP_N (sizeof(apps)/sizeof(apps[0]))
+static float app_pos;
+unsigned shell_app(void) { return app; }
 static bool choices;
 static unsigned choice;
 static float category_pos, item_pos, choice_pos, depth_pos;
@@ -59,6 +65,12 @@ bool shell_key(board_key_t key) {
         unsigned next=key==KEY_RIGHT?1:0;
         if(next!=category){category=next;sound_play(0);}
         ESP_LOGI("shell","CATEGORY %u",category);
+    } else if(category==0&&(key==KEY_UP||key==KEY_DOWN)) {
+        unsigned next=app;
+        if(key==KEY_DOWN&&next+1<(unsigned)APP_N)next++;
+        if(key==KEY_UP&&next>0)next--;
+        if(next!=app){app=next;sound_play(0);}
+        ESP_LOGI("shell","APP %u",app);
     } else if(category==1&&(key==KEY_UP||key==KEY_DOWN)) {
         unsigned next=setting;
         if(key==KEY_DOWN&&next<2)next++;
@@ -161,8 +173,7 @@ static void draw_menu(void) {
         label(x,37,categories[c],1,(0.35f+0.65f*visibility)*(1-depth_pos*0.6f));
         if(visibility>0.01f) {
             if(c==0) {
-                const char *apps[]={"HELLO WORLD"};
-                menu_list(x,0,apps,1,visibility,"JAVASCRIPT / POCKETJS");
+                menu_list(x,app_pos,apps,APP_N,visibility,app_details[app]);
             } else {
                 const char *detail=setting==0?names[mode]:setting==1?(show_fps?"ON":"OFF"):(sfx?"ON":"OFF");
                 menu_list(x,item_pos,labels,3,visibility*(1-depth_pos),detail);
@@ -178,12 +189,14 @@ static void draw_menu(void) {
 }
 void shell_draw(const char *error, unsigned phase) {
     (void)phase;
+    strip=board_strip();
     int64_t started=esp_timer_get_time();
     float dt=animation_time?(started-animation_time)*0.000001f:0.033f;
     animation_time=started;
     float amount=1-expf(-dt/0.045f);
     category_pos=approach(category_pos,category,amount);
     item_pos=approach(item_pos,setting,amount);
+    app_pos=approach(app_pos,app,amount);
     choice_pos=approach(choice_pos,choice,amount);
     depth_pos=approach(depth_pos,choices?1:0,amount);
     float t=(started%3600000000LL)*0.000001f;
