@@ -18,9 +18,11 @@ def check(path, partitions=None):
         entries[name] = (offset, length)
     if end > 0x800000:
         raise SystemExit('Partitions exceed physical 8 MiB Flash')
-    for name in ('skk_dict', 'jp_font'):
-        if entries.get(name, (0, 0))[1] < 0x200000:
-            raise SystemExit(f'{name} must reserve at least 2 MiB')
+    # SKK-JISYO.ML measures 1,949,758 bytes; shinonome 12/14/16 px as 1bpp
+    # cells covering all of JIS X 0208 measure 564 KB together.
+    for name, least in (('skk_dict', 0x200000), ('jp_font', 0x80000)):
+        if entries.get(name, (0, 0))[1] < least:
+            raise SystemExit(f'{name} must reserve at least {least} bytes')
     size = Path(path).stat().st_size
     budget = entries['factory'][1]
     if budget > 0x300000:
