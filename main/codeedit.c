@@ -1,5 +1,7 @@
 #include "codeedit.h"
+#include "utf8.h"
 #include "board.h"
+#include "paint.h"
 #include "jpfont.h"
 #include "skk_session.h"
 #include "srcstore.h"
@@ -93,13 +95,13 @@ void code_returned(const char *error) {
 static size_t prev_boundary(size_t i) {
     if(!i) return 0;
     i--;
-    while(i && ((unsigned char)text[i]&0xc0)==0x80) i--;
+    while(i && utf8_is_cont(text[i])) i--;
     return i;
 }
 static size_t next_boundary(size_t i) {
     if(i>=len) return len;
     i++;
-    while(i<len && ((unsigned char)text[i]&0xc0)==0x80) i++;
+    while(i<len && utf8_is_cont(text[i])) i++;
     return i;
 }
 static size_t line_start(size_t i) {
@@ -151,7 +153,7 @@ static void move_vertical(int delta) {
         if(cursor>dend) cursor=dend;
     }
     // The column arithmetic can land inside a multi-byte character.
-    while(cursor>0 && cursor<len && ((unsigned char)text[cursor]&0xc0)==0x80) cursor--;
+    while(cursor>0 && cursor<len && utf8_is_cont(text[cursor])) cursor--;
 }
 
 // ---- keys -----------------------------------------------------------------
@@ -273,22 +275,6 @@ static void span_collect(void *user_data, unsigned line,
     }
 }
 
-static void ascii(int x,int y,const char *s,uint16_t colour) {
-    if(y>=strip_y+strip_h || y+7<=strip_y) return;
-    for(;*s;s++,x+=6) {
-        unsigned c=(unsigned char)*s;
-        if(c<32||c>126) c='?';
-        for(int yy=0;yy<7;yy++) {
-            int py=y+yy-strip_y;
-            if(py<0||py>=strip_h) continue;
-            for(int xx=0;xx<5;xx++)
-                if(font_rows[(c-32)*7+yy]&(1<<(4-xx))) {
-                    int px=x+xx;
-                    if(px>=0&&px<LCD_W) strip[py*LCD_W+px]=colour;
-                }
-        }
-    }
-}
 
 // The console strip and the error line, where 33 px has to hold several rows.
 // Latin keeps the 5x7 face at 6 px — misaki's own is 3 px wide and unreadable
@@ -299,25 +285,14 @@ static void small_text(int x,int y,const char *s,size_t len,uint16_t colour) {
         unsigned char c=(unsigned char)s[i];
         if(c<0x80) {
             char one[2]={(char)c,0};
-            ascii(x,y+1,one,colour);   // 7 rows inside the 8 px row
+            paint_ascii(x,y+1,one,colour);   // 7 rows inside the 8 px row
             x+=6; i++;
             continue;
         }
         size_t run=1;
-        while(i+run<len && ((unsigned char)s[i+run]&0xc0)==0x80) run++;
+        while(i+run<len && utf8_is_cont(s[i+run])) run++;
         x=jpfont_draw(JPFONT_SMALL,strip,strip_y,strip_h,x,y,s+i,run,colour);
         i+=run;
-    }
-}
-
-static void fill(int x,int y,int w,int h,uint16_t colour) {
-    for(int r=0;r<h;r++) {
-        int py=y+r-strip_y;
-        if(py<0||py>=strip_h) continue;
-        for(int c=0;c<w;c++) {
-            int px=x+c;
-            if(px>=0&&px<LCD_W) strip[py*LCD_W+px]=colour;
-        }
     }
 }
 
@@ -349,17 +324,18 @@ void code_draw(void) {
 
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H?LCD_H-strip_y:STRIP_H;
+        paint_begin(strip,strip_y,strip_h);
         for(int i=0;i<LCD_W*strip_h;i++) strip[i]=board_rgb(6,11,20);
 
-        ascii(4,3,label,dim);
-        ascii(20,3,unsaved?"*":" ",warn);
+        paint_ascii(4,3,label,dim);
+        paint_ascii(20,3,unsaved?"*":" ",warn);
         char pos[24];
         snprintf(pos,sizeof(pos),"L%u %uB",(unsigned)here+1,(unsigned)len);
-        ascii(30,3,pos,dim);
+        paint_ascii(30,3,pos,dim);
         // The tutorial's verdicts come through here, so this line has to carry
         // Japanese; misaki's 8 px fits the 14 px header.
         if(notice[0]) small_text(104,2,notice,strlen(notice),accent);
-        fill(0,13,LCD_W,1,rule);
+        paint_fill(0,13,LCD_W,1,rule);
 
         // Lines, from top_line down. Only the visible window is walked.
         size_t i=0, line=0;
@@ -369,7 +345,7 @@ void code_draw(void) {
             size_t end=line_end(i);
             char num[8];
             snprintf(num,sizeof(num),"%3u",(unsigned)line+1);
-            ascii(2,y+2,num,line==here?accent:rule);
+            paint_ascii(2,y+2,num,line==here?accent:rule);
 
             int x=GUTTER;
             size_t at=span_n[row]?row_off[row]:i;
@@ -382,7 +358,7 @@ void code_draw(void) {
                     char flat[32];
                     size_t m=n<sizeof(flat)-1?n:sizeof(flat)-1;
                     memcpy(flat,text+at,m); flat[m]=0;
-                    ascii(x,y+2,flat,colour); x+=6*(int)m;
+                    paint_ascii(x,y+2,flat,colour); x+=6*(int)m;
                 }
                 at+=n;
             }
@@ -398,11 +374,11 @@ void code_draw(void) {
                 const char *pre=im?ime_preedit(im,&plen):NULL;
                 if(plen && jpfont_ready(JPFONT_TEXT)) {
                     int pw=(int)jpfont_width(JPFONT_TEXT,pre,plen);
-                    fill(cx,y,pw<LCD_W-cx?pw:LCD_W-cx,LINE_H,board_rgb(18,34,54));
+                    paint_fill(cx,y,pw<LCD_W-cx?pw:LCD_W-cx,LINE_H,board_rgb(18,34,54));
                     jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,pre,plen,accent);
-                    fill(cx+pw,y,1,LINE_H,caret);
+                    paint_fill(cx+pw,y,1,LINE_H,caret);
                 } else {
-                    fill(cx,y,1,LINE_H,caret);
+                    paint_fill(cx,y,1,LINE_H,caret);
                 }
             }
             if(end>=len) { i=len+1; break; }
@@ -411,14 +387,14 @@ void code_draw(void) {
 
         // Candidates while converting, otherwise what the last run said: its
         // exception if it threw, else the lines it printed.
-        fill(0,CONSOLE_TOP-2,LCD_W,1,rule);
+        paint_fill(0,CONSOLE_TOP-2,LCD_W,1,rule);
         int ncand=im?ime_cand_count(im):0, sel=im?ime_sel(im):-1;
         const char *failure=jsconsole_error();
         if(ncand>0 && sel>=0 && jpfont_ready(JPFONT_TEXT)) {
             char tag[16];
             snprintf(tag,sizeof(tag),"%u/%u",
                      (unsigned)(sel+1)%1000u,(unsigned)ncand%1000u);
-            ascii(4,CONSOLE_TOP+2,tag,dim);
+            paint_ascii(4,CONSOLE_TOP+2,tag,dim);
             int cx=44;
             for(int c=sel;c<ncand && cx<LCD_W-16;c++) {
                 size_t clen=0;
@@ -438,12 +414,12 @@ void code_draw(void) {
             }
         }
 
-        fill(0,LCD_H-11,LCD_W,1,rule);
+        paint_fill(0,LCD_H-11,LCD_W,1,rule);
         const char *mode="EN";
         if(skk_session_ready() && ime_on(skk_session()))
             mode = ime_mode(skk_session())==SKK_MODE_KATA ? "KANA/KATA" : "KANA";
-        ascii(4,LCD_H-8,"C-R RUN C-S SAVE C-N NEW",dim);
-        ascii(180,LCD_H-8,mode,accent);
+        paint_ascii(4,LCD_H-8,"C-R RUN C-S SAVE C-N NEW",dim);
+        paint_ascii(180,LCD_H-8,mode,accent);
         ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
     }
 }

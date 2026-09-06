@@ -5,6 +5,7 @@
 #include "jsconsole.h"
 #include "jpfont.h"
 #include "board.h"
+#include "paint.h"
 #include "sound.h"
 #include "fonts.h"
 #include "nvs.h"
@@ -219,34 +220,10 @@ bool tutorial_key(const keystroke_t *k) {
 
 // ---- drawing --------------------------------------------------------------
 
-static void ascii(int x,int y,const char *s,uint16_t colour) {
-    if(y>=strip_y+strip_h || y+7<=strip_y) return;
-    for(;*s;s++,x+=6) {
-        unsigned c=(unsigned char)*s;
-        if(c<32||c>126) c='?';
-        for(int yy=0;yy<7;yy++) {
-            int py=y+yy-strip_y;
-            if(py<0||py>=strip_h) continue;
-            for(int xx=0;xx<5;xx++)
-                if(font_rows[(c-32)*7+yy]&(1<<(4-xx))) {
-                    int px=x+xx;
-                    if(px>=0&&px<LCD_W) strip[py*LCD_W+px]=colour;
-                }
-        }
-    }
-}
 static void jp(int x,int y,const char *s,uint16_t colour) {
     if(!s||!*s) return;
     jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,x,y,s,strlen(s),colour);
 }
-static void fill(int x,int y,int w,int h,uint16_t colour) {
-    for(int r=0;r<h;r++) {
-        int py=y+r-strip_y;
-        if(py<0||py>=strip_h) continue;
-        for(int c=0;c<w;c++) if(x+c>=0&&x+c<LCD_W) strip[py*LCD_W+x+c]=colour;
-    }
-}
-
 void tutorial_draw(void) {
     if(state==TUTORIAL_WRITING) { code_draw(); dirty=false; return; }
     dirty=false;
@@ -263,11 +240,12 @@ void tutorial_draw(void) {
 
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H?LCD_H-strip_y:STRIP_H;
+        paint_begin(strip,strip_y,strip_h);
         for(int i=0;i<LCD_W*strip_h;i++) strip[i]=board_rgb(6,11,20);
 
         jp(4,1,reference?"番号の意味":l->title,accent);
-        ascii(LCD_W-28,3,progress,dim);
-        fill(0,14,LCD_W,1,rule);
+        paint_ascii(LCD_W-28,3,progress,dim);
+        paint_fill(0,14,LCD_W,1,rule);
 
         if(reference) {
             for(unsigned r=0;r<LESSON_REF_ROWS;r++)
@@ -279,7 +257,7 @@ void tutorial_draw(void) {
             if(verdict[0]) jp(6,92,verdict,cleared?good:accent);
         }
 
-        fill(0,LCD_H-13,LCD_W,1,rule);
+        paint_fill(0,LCD_H-13,LCD_W,1,rule);
         jp(4,LCD_H-12,reference?"Tab:もどる":
            cleared?"Enter:次へ Tab:番号 ←→:章":
                    "Enter:書く Tab:番号 Del:戻す",dim);

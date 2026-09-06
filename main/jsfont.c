@@ -1,5 +1,6 @@
 #include "jsfont.h"
 #include "jpfont.h"
+#include "utf8.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include <string.h>
@@ -99,12 +100,8 @@ static JSValue host_glyphs(JSContext *ctx, JSValueConst this_val,
     if(!s) return JS_EXCEPTION;
     bool grew=false;
     for(size_t i=0;i<n;) {
-        unsigned char c=(unsigned char)s[i];
-        uint32_t cp; size_t adv;
-        if(c<0x80)                    { cp=c; adv=1; }
-        else if((c&0xe0)==0xc0&&i+1<n){ cp=((c&0x1fu)<<6)|(s[i+1]&0x3f); adv=2; }
-        else if((c&0xf0)==0xe0&&i+2<n){ cp=((c&0x0fu)<<12)|((s[i+1]&0x3f)<<6)|(s[i+2]&0x3f); adv=3; }
-        else                          { cp=0xfffd; adv=1; }
+        size_t adv;
+        uint32_t cp=utf8_decode(s,n,i,&adv);
         i+=adv;
         if(remember(cp)) grew=true;
     }

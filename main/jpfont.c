@@ -1,4 +1,5 @@
 #include "jpfont.h"
+#include "utf8.h"
 #include "esp_partition.h"
 #include "esp_log.h"
 #include <string.h>
@@ -97,19 +98,6 @@ bool jpfont_init(void) {
     return loaded>0;
 }
 
-// One UTF-8 scalar. Malformed bytes advance by one and read as the tofu box,
-// so a broken string can never desynchronise the caller's loop.
-static uint32_t decode(const char *s, size_t len, size_t i, size_t *adv) {
-    unsigned char c=(unsigned char)s[i];
-    if(c<0x80) { *adv=1; return c; }
-    if((c&0xe0)==0xc0 && i+1<len) { *adv=2; return ((c&0x1fu)<<6)|(s[i+1]&0x3f); }
-    if((c&0xf0)==0xe0 && i+2<len) {
-        *adv=3; return ((c&0x0fu)<<12)|((s[i+1]&0x3f)<<6)|(s[i+2]&0x3f);
-    }
-    if((c&0xf8)==0xf0 && i+3<len) { *adv=4; return 0xfffd; }  // outside the BMP
-    *adv=1; return 0xfffd;
-}
-
 // gid 0 is the tofu box, so a miss resolves to it rather than to nothing.
 static uint32_t gid_of(const face_t *f, uint32_t cp) {
     if(cp>0xffff) return 0;
@@ -139,7 +127,7 @@ unsigned jpfont_glyph(jpfont_id_t id, uint32_t cp, uint8_t *out) {
 
 unsigned jpfont_advance(jpfont_id_t id, const char *s, size_t len, size_t i,
                         size_t *adv) {
-    uint32_t cp=decode(s,len,i,adv);
+    uint32_t cp=utf8_decode(s,len,i,adv);
     face_t *f=face(id);
     if(!f) return 0;
     return f->cmap[gid_of(f,cp)].advance;
@@ -157,7 +145,7 @@ int jpfont_draw(jpfont_id_t id, uint16_t *pixels, int strip_y, int rows,
     if(!f) return x;
     for(size_t i=0;i<len;) {
         size_t adv;
-        uint32_t gid=gid_of(f,decode(s,len,i,&adv));
+        uint32_t gid=gid_of(f,utf8_decode(s,len,i,&adv));
         i+=adv;
         const uint8_t *cell=f->bitmap+(size_t)gid*f->glyph_bytes;
         for(unsigned gy=0;gy<f->hdr.cell_h;gy++) {

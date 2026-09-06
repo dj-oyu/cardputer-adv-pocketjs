@@ -1,4 +1,5 @@
 #include "jsconsole.h"
+#include "utf8.h"
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
@@ -46,8 +47,8 @@ static void append(const char *s, size_t n) {
         // sequence, which draws as tofu. A continuation byte therefore never
         // starts a line: the whole character moves down together.
         if(pending_len>=JSC_COLS) {
-            if(((unsigned char)c&0xc0)==0x80) {
-                while(pending_len && ((unsigned char)pending[pending_len-1]&0xc0)==0x80)
+            if(utf8_is_cont(c)) {
+                while(pending_len && utf8_is_cont(pending[pending_len-1]))
                     pending_len--;
                 if(pending_len) pending_len--;   // the lead byte too
             }

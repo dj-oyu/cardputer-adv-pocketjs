@@ -4,6 +4,8 @@
 
 ハードウェアの前提は[仕様と開発制約](hardware-constraints.md)を参照する。
 
+将来の公開APIは[共通JS API仕様案 v0.1](common-api.md)に分離する。pocket.*は新設予定であり、本書が記載する現在の実装済みAPIではない。
+
 ## 目的と境界
 
 Cardputer ADV上でQuickJS版PocketJSのアプリを起動・操作・終了できる土台を作る。

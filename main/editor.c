@@ -1,5 +1,7 @@
 #include "editor.h"
+#include "utf8.h"
 #include "board.h"
+#include "paint.h"
 #include "jpfont.h"
 #include "skk_session.h"
 #include "sound.h"
@@ -56,7 +58,7 @@ static void append(const char *s, size_t len) {
 static void backspace(void) {
     if(!buf_len) return;
     size_t i=buf_len-1;
-    while(i>0 && ((unsigned char)buf[i]&0xc0)==0x80) i--;
+    while(i>0 && utf8_is_cont(buf[i])) i--;
     buf_len=i;
     buf[buf_len]=0;
 }
@@ -129,22 +131,6 @@ bool editor_key(const keystroke_t *k) {
 
 // The 5x7 ASCII face the shell uses, for labels the Japanese font need not
 // carry and for the fallback when jp_font is missing.
-static void ascii(int x,int y,const char *s,uint16_t colour) {
-    if(y>=strip_y+strip_h || y+7<=strip_y) return;
-    for(;*s;s++,x+=6) {
-        unsigned c=(unsigned char)*s;
-        if(c<32||c>126) c='?';
-        for(int yy=0;yy<7;yy++) {
-            int py=y+yy-strip_y;
-            if(py<0||py>=strip_h) continue;
-            for(int xx=0;xx<5;xx++)
-                if(font_rows[(c-32)*7+yy]&(1<<(4-xx))) {
-                    int px=x+xx;
-                    if(px>=0&&px<LCD_W) strip[py*LCD_W+px]=colour;
-                }
-        }
-    }
-}
 
 static void jp(int x,int y,const char *s,size_t len,uint16_t colour) {
     jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,x,y,s,len,colour);
@@ -177,33 +163,34 @@ void editor_draw(void) {
 
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H ? LCD_H-strip_y : STRIP_H;
+        paint_begin(strip,strip_y,strip_h);
         for(int i=0;i<LCD_W*strip_h;i++) strip[i]=board_rgb(6,12,22);
 
         // Header: the drill's romaji and the IME mode.
-        ascii(4,3,"SKK",dim);
-        ascii(28,3,DRILLS[drill].reading,accent);
+        paint_ascii(4,3,"SKK",dim);
+        paint_ascii(28,3,DRILLS[drill].reading,accent);
         const char *mark=mode_mark();
         if(jpfont_ready(JPFONT_TEXT)) {
             int w=(int)jpfont_width(JPFONT_TEXT,mark,strlen(mark));
             jp(LCD_W-4-w,1,mark,strlen(mark),accent);
-        } else ascii(LCD_W-16,3,mark,dim);
+        } else paint_ascii(LCD_W-16,3,mark,dim);
         for(int x=0;x<LCD_W;x++) {
             int py=13-strip_y;
             if(py>=0&&py<strip_h) strip[py*LCD_W+x]=rule;
         }
 
         if(!jpfont_ready(JPFONT_TEXT)) {
-            ascii(4,40,"NO JAPANESE FONT",ink);
-            ascii(4,52,"FLASH jp_font PARTITION",dim);
+            paint_ascii(4,40,"NO JAPANESE FONT",ink);
+            paint_ascii(4,52,"FLASH jp_font PARTITION",dim);
         } else {
             // Target, then what the user has actually produced.
-            ascii(4,20,"TARGET",dim);
+            paint_ascii(4,20,"TARGET",dim);
             jp(54,17,DRILLS[drill].target,strlen(DRILLS[drill].target),dim);
 
-            ascii(4,40,"YOURS",dim);
+            paint_ascii(4,40,"YOURS",dim);
             jp(54,37,buf,buf_len,cleared?good:ink);
 
-            if(cleared) ascii(4,57,"OK - ENTER FOR NEXT",good);
+            if(cleared) paint_ascii(4,57,"OK - ENTER FOR NEXT",good);
 
             if(im) {
                 size_t plen=0;
@@ -217,7 +204,7 @@ void editor_draw(void) {
                     char tag[16];
                     snprintf(tag,sizeof(tag),"%u/%u",
                              (unsigned)(sel+1)%1000u,(unsigned)n%1000u);
-                    ascii(4,95,tag,dim);
+                    paint_ascii(4,95,tag,dim);
                     int x=44;
                     for(int i=sel;i<n && x<LCD_W-16;i++) {
                         size_t clen=0;
@@ -229,11 +216,11 @@ void editor_draw(void) {
                     }
                 }
             } else {
-                ascii(4,74,skk_session_status(),dim);
+                paint_ascii(4,74,skk_session_status(),dim);
             }
         }
 
-        ascii(4,LCD_H-9,"C-J KANA  ESC BACK",dim);
+        paint_ascii(4,LCD_H-9,"C-J KANA  ESC BACK",dim);
         ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
     }
 }
