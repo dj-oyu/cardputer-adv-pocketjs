@@ -1,18 +1,9 @@
 #include "solar_sail.h"
 #include "solar_time.h"
-#include "esp_cpu.h"
-#include "esp_log.h"
 #include <math.h>
 #include <stdlib.h>
 #include <stdbool.h>
 
-// Temporary: where a frame's time goes, before anything is optimised for speed.
-// PERF already separates prepare (prep) from draw (loop); this splits each of
-// those into the parts that could be worked on independently.
-static uint64_t t_orbits, t_scene, t_index, t_sky, t_lines;
-static unsigned t_frames;
-#define PHASE(acc) for(uint32_t _b=esp_cpu_get_cycle_count(), _o=1; _o; \
-                       acc += esp_cpu_get_cycle_count()-_b, _o=0)
 
 enum { W=240, H=135, MAX_LINES=1536, ORBIT_STEPS=96 };
 #define RAD 0.017453292519943295f
@@ -298,7 +289,7 @@ void solar_sail_prepare(float dt,int tx,int ty) {
     // tour/IMU and unsynchronized demo. Resync never restarts the camera tour.
     solar_time_sample_t time=solar_time_now(elapsed);
     sim_days=time.days;time_source=time.source;
-    PHASE(t_orbits) {
+    {
         for(unsigned i=0;i<8;i++)orbits[i]=orbit_at(i,sim_days);
         for(unsigned i=0;i<SATELLITE_N;i++)satellite_orbits[i]=satellite_at(i,sim_days);
     }
@@ -319,19 +310,34 @@ void solar_sail_prepare(float dt,int tx,int ty) {
     front=(Vec){sinf(yaw)*cosf(elevation),-cosf(yaw)*cosf(elevation),sinf(elevation)};
     up=cross(front,right);
     count=0;index_valid=false;
-    PHASE(t_scene) {
+    {
     for(unsigned i=0;i<36;i++) {
         unsigned seed=(i+1)*2654435761u;
         float x=(seed%W)-steer_x*6,y=((seed>>9)%H)+steer_y*4;
         line(x,y,x,y,rgb(25,38,54));
     }
+    // Projecting an ellipse is linear in its two axes, so the camera only has
+    // to meet u and v once per orbit instead of once per point. Substituting
+    // orbit_point into project and collecting terms leaves each of the 96
+    // points as two multiply-adds a coordinate; it was two dot products, a
+    // scale and two vector adds. Same arithmetic, factored -- the plane it
+    // draws is identical to what project() returned.
+    float cx=dot(center,right)*zoom, cy=-dot(center,up)*zoom;
     for(unsigned i=0;i<8;i++) {
-        Vec a=project(orbit_point(&orbits[i],cs[0],sn[0]));
+        const Orbit *o=&orbits[i];
+        float ax=o->a*dot(o->u,right)*zoom, ay=-o->a*dot(o->u,up)*zoom;
+        float bx=o->b*dot(o->v,right)*zoom, by=-o->b*dot(o->v,up)*zoom;
+        float x0=screen_x-cx, y0=61-cy;
+        uint16_t color=i==focus?rgb(21,48,60):rgb(10,25,36);
+        float c=cs[0]-o->e, s=sn[0];
+        float px=x0+ax*c+bx*s, py=y0+ay*c+by*s;
         for(int k=0;k<ORBIT_STEPS;k++) {
-            Vec b=project(orbit_point(&orbits[i],cs[k+1],sn[k+1]));
-            segment(a,b,i==focus?rgb(21,48,60):rgb(10,25,36));a=b;
+            c=cs[k+1]-o->e; s=sn[k+1];
+            float qx=x0+ax*c+bx*s, qy=y0+ay*c+by*s;
+            line(px,py,qx,qy,color);px=qx;py=qy;
         }
     }
+    {
     unsigned order[9];Vec positions[9];
     for(unsigned i=0;i<9;i++){order[i]=i;positions[i]=project(i==8?(Vec){0,0,0}:orbits[i].pos);}
     for(unsigned i=1;i<9;i++)for(unsigned j=i;j>0&&positions[order[j]].z<positions[order[j-1]].z;j--){unsigned a=order[j];order[j]=order[j-1];order[j-1]=a;}
@@ -350,14 +356,9 @@ void solar_sail_prepare(float dt,int tx,int ty) {
         satellite_disks(i,p,weight,true);
     }
     }
-    PHASE(t_index) index_lines();
-
-    if(++t_frames==60) {
-        ESP_LOGI("solar","PHASES orbits=%.2f scene=%.2f index=%.2f | sky=%.2f lines=%.2f ms, %u segments",
-                 t_orbits/60/240000.0, t_scene/60/240000.0, t_index/60/240000.0,
-                 t_sky/60/240000.0, t_lines/60/240000.0, count);
-        t_orbits=t_scene=t_index=t_sky=t_lines=0; t_frames=0;
     }
+    index_lines();
+
 }
 // Scalar-equivalent contiguous stores; no lookup, 16-byte aligned rows.
 static void __attribute__((noinline)) fill_row(uint16_t *row,uint16_t color) {
@@ -371,12 +372,11 @@ static void __attribute__((noinline)) fill_row(uint16_t *row,uint16_t color) {
 #endif
 }
 void solar_sail_draw(uint16_t *pixels,int y,int height) {
-    PHASE(t_sky) for(int j=0;j<height;j++)fill_row(pixels+j*W,sky[y+j]);
+    for(int j=0;j<height;j++)fill_row(pixels+j*W,sky[y+j]);
     bool indexed=y%8==0&&height==(H-y<8?H-y:8);
     if(indexed&&!index_valid)index_lines();
     indexed=indexed&&index_fits;
     unsigned begin=indexed?band_offsets[y/8]:0,end=indexed?band_offsets[y/8+1]:count;
-    PHASE(t_lines)
     for(unsigned i=begin;i<end;i++) {
         Line l=lines[indexed?band_items[i]:i];
         if(l.y1==-1) {
