@@ -10,3 +10,36 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_FREERTOS_HZ=1000
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # CONFIG_SPIRAM is not set
+
+# --- Wi-Fi: one clock sync, then off again (main/wifi_time.c) ---------------
+# The radio exists to fetch the time and is stopped again; nothing in this
+# firmware streams. Every value below trades throughput the device never uses
+# for DRAM and flash, which are what an ESP32-S3FN8 without PSRAM runs out of.
+#
+# IRAM_OPT/RX_IRAM_OPT keep the Wi-Fi hot paths in flash instead of IRAM. On the
+# S3 that IRAM comes out of the same DIRAM pool as the guest heap, and a single
+# SNTP exchange does not care how fast it is served.
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+# STA only: there is no AP mode in the product.
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
+# The credentials live in this project's own "wifi" namespace and are handed to
+# the driver as WIFI_STORAGE_RAM, so the driver's own NVS copy is dead weight —
+# and a second copy of a passphrase that nothing here could erase.
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+# Buffers for a handshake, a DHCP lease and one 48 byte NTP packet.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_MGMT_SBUF_NUM=8
+# Aggregation only pays off over a sustained transfer.
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+# One IPv4 UDP conversation with one server. DHCPS is the server half.
+CONFIG_LWIP_IPV6=n
+CONFIG_LWIP_DHCPS=n
+CONFIG_LWIP_MAX_SOCKETS=4
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16
+# Not an optimization: the console is USB Serial/JTAG (see above) and the S3's
+# PHY needs this workaround to leave it working while the radio is on.
+CONFIG_ESP_PHY_ENABLE_USB=y
