@@ -296,130 +296,149 @@ static void small_text(int x,int y,const char *s,size_t len,uint16_t colour) {
     }
 }
 
+// The bands of the screen. Each is drawn once per strip and clips itself, so
+// none of them needs to know which strip is live — paint_begin holds that.
+typedef struct {
+    uint16_t ink, dim, accent, warn, caret, rule;
+    uint16_t span[JSLEX_KINDS];
+} palette_t;
+static palette_t colour;
+static ime_t *ime;                // the session, or NULL when there is no dict
+static size_t caret_line;
+
+static void draw_header(void) {
+    paint_ascii(4,3,label,colour.dim);
+    paint_ascii(20,3,unsaved?"*":" ",colour.warn);
+    char pos[24];
+    snprintf(pos,sizeof(pos),"L%u %uB",(unsigned)caret_line+1,(unsigned)len);
+    paint_ascii(30,3,pos,colour.dim);
+    // The tutorial's verdicts come through here, so this line has to carry
+    // Japanese; misaki's 8 px fits the 14 px header.
+    if(notice[0]) small_text(104,2,notice,strlen(notice),colour.accent);
+    paint_fill(0,13,LCD_W,1,colour.rule);
+}
+
+// The caret, and over it whatever the IME is composing. A reading being
+// converted lives in the engine, not in the buffer, so it has to be drawn
+// where it will land: without this the whole of "Kanji" stays invisible until
+// it commits and typing looks like it stopped.
+static void draw_caret(int x,int y,size_t line_at) {
+    size_t plen=0;
+    const char *pre=ime?ime_preedit(ime,&plen):NULL;
+    int cx=x+(int)(jpfont_ready(JPFONT_TEXT)
+                   ? jpfont_width(JPFONT_TEXT,text+line_at,cursor-line_at)
+                   : 6*(cursor-line_at));
+    if(plen && jpfont_ready(JPFONT_TEXT)) {
+        int pw=(int)jpfont_width(JPFONT_TEXT,pre,plen);
+        paint_fill(cx,y,pw<LCD_W-cx?pw:LCD_W-cx,LINE_H,board_rgb(18,34,54));
+        jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,pre,plen,colour.accent);
+        cx+=pw;
+    }
+    paint_fill(cx,y,1,LINE_H,colour.caret);
+}
+
+static void draw_lines(void) {
+    size_t i=0, line=0;
+    while(line<top_line && i<len) { if(text[i]=='\n') line++; i++; }
+    for(int row=0;row<VIEW_ROWS && i<=len;row++,line++) {
+        int y=VIEW_TOP+row*LINE_H;
+        size_t end=line_end(i);
+        char num[8];
+        snprintf(num,sizeof(num),"%3u",(unsigned)line+1);
+        paint_ascii(2,y+2,num,line==caret_line?colour.accent:colour.rule);
+
+        int x=GUTTER;
+        size_t at=span_n[row]?row_off[row]:i;
+        for(unsigned sp=0;sp<span_n[row] && x<LCD_W;sp++) {
+            size_t n=span_len[row][sp];
+            uint16_t c=colour.span[span_kind[row][sp]];
+            if(jpfont_ready(JPFONT_TEXT))
+                x=jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,x,y,text+at,n,c);
+            else {
+                char flat[32];
+                size_t m=n<sizeof(flat)-1?n:sizeof(flat)-1;
+                memcpy(flat,text+at,m); flat[m]=0;
+                paint_ascii(x,y+2,flat,c); x+=6*(int)m;
+            }
+            at+=n;
+        }
+        if(cursor>=i && cursor<=end && line==caret_line) draw_caret(GUTTER,y,i);
+        if(end>=len) break;
+        i=end+1;
+    }
+}
+
+// Candidates while converting, otherwise what the last run said: its exception
+// if it threw, else the lines it printed.
+static void draw_console(void) {
+    paint_fill(0,CONSOLE_TOP-2,LCD_W,1,colour.rule);
+    int ncand=ime?ime_cand_count(ime):0, sel=ime?ime_sel(ime):-1;
+    const char *failure=jsconsole_error();
+    if(ncand>0 && sel>=0 && jpfont_ready(JPFONT_TEXT)) {
+        char tag[16];
+        snprintf(tag,sizeof(tag),"%u/%u",
+                 (unsigned)(sel+1)%1000u,(unsigned)ncand%1000u);
+        paint_ascii(4,CONSOLE_TOP+2,tag,colour.dim);
+        int cx=44;
+        for(int c=sel;c<ncand && cx<LCD_W-16;c++) {
+            size_t clen=0;
+            const char *cand=ime_cand(ime,c,&clen);
+            if(!cand) break;
+            cx=jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,CONSOLE_TOP,cand,clen,
+                           c==sel?colour.ink:colour.dim);
+            cx+=6;
+        }
+        return;
+    }
+    if(failure) { small_text(4,CONSOLE_TOP,failure,strlen(failure),colour.warn); return; }
+    unsigned n=jsconsole_count(), rows=n<CONSOLE_ROWS?n:CONSOLE_ROWS;
+    for(unsigned r=0;r<rows;r++) {
+        const char *line=jsconsole_line(n-rows+r);
+        small_text(4,CONSOLE_TOP+(int)r*8,line,strlen(line),colour.dim);
+    }
+}
+
+static void draw_footer(void) {
+    paint_fill(0,LCD_H-11,LCD_W,1,colour.rule);
+    const char *mode="EN";
+    if(skk_session_ready() && ime_on(skk_session()))
+        mode = ime_mode(skk_session())==SKK_MODE_KATA ? "KANA/KATA" : "KANA";
+    paint_ascii(4,LCD_H-8,"C-R RUN C-S SAVE C-N NEW",colour.dim);
+    paint_ascii(180,LCD_H-8,mode,colour.accent);
+}
+
 void code_draw(void) {
     dirty=false;
     strip=board_strip();
-    ime_t *im = skk_session_ready() ? skk_session() : NULL;
-    const uint16_t ink   =board_rgb(220,230,242);
-    const uint16_t dim   =board_rgb(92,116,146);
-    const uint16_t accent=board_rgb(120,200,255);
-    const uint16_t warn  =board_rgb(240,180,110);
-    const uint16_t caret =board_rgb(120,200,255);
-    const uint16_t rule  =board_rgb(22,38,58);
+    ime = skk_session_ready() ? skk_session() : NULL;
+    caret_line=cursor_line();
+    colour=(palette_t){
+        .ink=board_rgb(220,230,242), .dim=board_rgb(92,116,146),
+        .accent=board_rgb(120,200,255), .warn=board_rgb(240,180,110),
+        .caret=board_rgb(120,200,255), .rule=board_rgb(22,38,58),
+        .span={
+            [JSLEX_PLAIN]  =board_rgb(220,230,242),
+            [JSLEX_KEYWORD]=board_rgb(130,190,255),
+            [JSLEX_STRING] =board_rgb(150,220,160),
+            [JSLEX_COMMENT]=board_rgb(96,116,140),
+            [JSLEX_NUMBER] =board_rgb(240,190,130),
+        },
+    };
 
     // Colour the visible window once. Doing it inside the strip loop would
     // scan the source seventeen times for one repaint.
-    size_t here=cursor_line();
     span_reset();
     unsigned base=(unsigned)top_line;
     jslex_scan(text,len,base,base+VIEW_ROWS-1,span_collect,&base);
-
-    const uint16_t palette[JSLEX_KINDS]={
-        [JSLEX_PLAIN]  =board_rgb(220,230,242),
-        [JSLEX_KEYWORD]=board_rgb(130,190,255),
-        [JSLEX_STRING] =board_rgb(150,220,160),
-        [JSLEX_COMMENT]=board_rgb(96,116,140),
-        [JSLEX_NUMBER] =board_rgb(240,190,130),
-    };
 
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H?LCD_H-strip_y:STRIP_H;
         paint_begin(strip,strip_y,strip_h);
         for(int i=0;i<LCD_W*strip_h;i++) strip[i]=board_rgb(6,11,20);
-
-        paint_ascii(4,3,label,dim);
-        paint_ascii(20,3,unsaved?"*":" ",warn);
-        char pos[24];
-        snprintf(pos,sizeof(pos),"L%u %uB",(unsigned)here+1,(unsigned)len);
-        paint_ascii(30,3,pos,dim);
-        // The tutorial's verdicts come through here, so this line has to carry
-        // Japanese; misaki's 8 px fits the 14 px header.
-        if(notice[0]) small_text(104,2,notice,strlen(notice),accent);
-        paint_fill(0,13,LCD_W,1,rule);
-
-        // Lines, from top_line down. Only the visible window is walked.
-        size_t i=0, line=0;
-        while(line<top_line && i<len) { if(text[i]=='\n') line++; i++; }
-        for(int row=0;row<VIEW_ROWS && i<=len;row++,line++) {
-            int y=VIEW_TOP+row*LINE_H;
-            size_t end=line_end(i);
-            char num[8];
-            snprintf(num,sizeof(num),"%3u",(unsigned)line+1);
-            paint_ascii(2,y+2,num,line==here?accent:rule);
-
-            int x=GUTTER;
-            size_t at=span_n[row]?row_off[row]:i;
-            for(unsigned sp=0;sp<span_n[row] && x<LCD_W;sp++) {
-                size_t n=span_len[row][sp];
-                uint16_t colour=palette[span_kind[row][sp]];
-                if(jpfont_ready(JPFONT_TEXT))
-                    x=jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,x,y,text+at,n,colour);
-                else {
-                    char flat[32];
-                    size_t m=n<sizeof(flat)-1?n:sizeof(flat)-1;
-                    memcpy(flat,text+at,m); flat[m]=0;
-                    paint_ascii(x,y+2,flat,colour); x+=6*(int)m;
-                }
-                at+=n;
-            }
-
-            if(cursor>=i && cursor<=end && line==here) {
-                int cx=GUTTER+(int)(jpfont_ready(JPFONT_TEXT)?jpfont_width(JPFONT_TEXT,text+i,cursor-i)
-                                                  :6*(cursor-i));
-                // A reading being converted lives in the IME, not in the
-                // buffer, so it has to be drawn where it will land. Without
-                // this the whole of "Kanji" is invisible until it commits and
-                // typing looks like it stopped.
-                size_t plen=0;
-                const char *pre=im?ime_preedit(im,&plen):NULL;
-                if(plen && jpfont_ready(JPFONT_TEXT)) {
-                    int pw=(int)jpfont_width(JPFONT_TEXT,pre,plen);
-                    paint_fill(cx,y,pw<LCD_W-cx?pw:LCD_W-cx,LINE_H,board_rgb(18,34,54));
-                    jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,pre,plen,accent);
-                    paint_fill(cx+pw,y,1,LINE_H,caret);
-                } else {
-                    paint_fill(cx,y,1,LINE_H,caret);
-                }
-            }
-            if(end>=len) { i=len+1; break; }
-            i=end+1;
-        }
-
-        // Candidates while converting, otherwise what the last run said: its
-        // exception if it threw, else the lines it printed.
-        paint_fill(0,CONSOLE_TOP-2,LCD_W,1,rule);
-        int ncand=im?ime_cand_count(im):0, sel=im?ime_sel(im):-1;
-        const char *failure=jsconsole_error();
-        if(ncand>0 && sel>=0 && jpfont_ready(JPFONT_TEXT)) {
-            char tag[16];
-            snprintf(tag,sizeof(tag),"%u/%u",
-                     (unsigned)(sel+1)%1000u,(unsigned)ncand%1000u);
-            paint_ascii(4,CONSOLE_TOP+2,tag,dim);
-            int cx=44;
-            for(int c=sel;c<ncand && cx<LCD_W-16;c++) {
-                size_t clen=0;
-                const char *cand=ime_cand(im,c,&clen);
-                if(!cand) break;
-                cx=jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,CONSOLE_TOP,cand,clen,
-                               c==sel?ink:dim);
-                cx+=6;
-            }
-        }
-        else if(failure) small_text(4,CONSOLE_TOP,failure,strlen(failure),warn);
-        else {
-            unsigned n=jsconsole_count(), rows=n<CONSOLE_ROWS?n:CONSOLE_ROWS;
-            for(unsigned r=0;r<rows;r++) {
-                const char *line=jsconsole_line(n-rows+r);
-                small_text(4,CONSOLE_TOP+(int)r*8,line,strlen(line),dim);
-            }
-        }
-
-        paint_fill(0,LCD_H-11,LCD_W,1,rule);
-        const char *mode="EN";
-        if(skk_session_ready() && ime_on(skk_session()))
-            mode = ime_mode(skk_session())==SKK_MODE_KATA ? "KANA/KATA" : "KANA";
-        paint_ascii(4,LCD_H-8,"C-R RUN C-S SAVE C-N NEW",dim);
-        paint_ascii(180,LCD_H-8,mode,accent);
+        draw_header();
+        draw_lines();
+        draw_console();
+        draw_footer();
         ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
     }
 }

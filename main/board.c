@@ -121,6 +121,10 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     esp_err_t e=command(0x2a,xs,4); if(e) return e;
     e=command(0x2b,ys,4); if(e) return e;
     // After the capture block above, which wants the pixels as drawn.
+    //
+    // A 32-bit version of this was measured and was worse: this file builds at
+    // -Os, where the four-byte memcpy that expresses an aligned wide access
+    // stayed a call and the transfer went from 16.5 ms to 24.2 ms.
     for(int i=0;i<LCD_W*rows;i++) pixels[i]=(uint16_t)((pixels[i]<<8)|(pixels[i]>>8));
     return command(0x2c,pixels,LCD_W*rows*2);
 }
