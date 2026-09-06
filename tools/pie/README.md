@@ -58,16 +58,16 @@ loop body ~213 bytes
 21 stall(s): producer -> consumer (index: op) on register
     3: ee.vldbc.16.ip       ->   4: ee.vadds.s16         q2
     ...
-estimated cycles per block: 88.2 (66 issue + 1 store x0.6 + 21 stalls)
+estimated cycles per block: 87.6 (66 issue + 0 fused load x0.37 + 1 store x0.6 + 21 stalls)
 ```
 ```
 ocean_row_pie: 62 instructions per block, 35 memory (56%), 16 ldxq, 15 vldbc
 loop body ~201 bytes
 no stage-2 producer followed immediately by its consumer: 0 data stalls
-estimated cycles per block: 62.6 (62 issue + 1 store x0.6 + 0 stalls)
+estimated cycles per block: 62.6 (62 issue + 0 fused load x0.37 + 1 store x0.6 + 0 stalls)
 ```
 
-`estimated cycles per block` は実機で測った機械の下限（[docs/pie-simd.md §3.5](../../docs/pie-simd.md)）から出しています: PIE は算術・乗算・`VRELU`/`VPRELU` とも **1 命令 1 サイクル**で発行し、追加で払うのは融合ロード（`.LD.INCP`）1 本あたり 0.37 サイクル、ストア 1 本あたり 0.6 サイクル、そしてストール 1 つあたり 1 サイクルです。海面 v3（40 命令、融合ロード 12 本）はこの式で 45.3、実測 45.5 サイクル/ブロックで、**ストールを消したカーネルは理論下限で走ります**。
+`estimated cycles per block` は実機で測った機械の下限（[docs/pie-simd.md §3.5](../../docs/pie-simd.md)）から出しています: PIE は算術・乗算・`VRELU`/`VPRELU` とも **1 命令 1 サイクル**で発行し、追加で払うのは融合ロード（`.LD.INCP`）1 本あたり 0.37 サイクル、ストア 1 本あたり 0.6 サイクル、そしてストール 1 つあたり 1 サイクルです。係数は 40 命令のマイクロベンチ（融合ロード 12 本で 45.3）から取ったもので、実際の海面 v3（40 命令、融合ロード 23 本、実測 45.5）に当てると 49.1 と 1 割ほど高めに出ます。融合ロードのコストは本数に比例しては伸びないようなので、この見積もりは**上限側の目安**として使ってください。いずれにせよ、**ストールを消したカーネルは機械の下限のすぐ近くで走ります**。
 
 実測がこの見積もりを大きく上回るときは、まずカーネル以外が計測に混ざっていないかを疑ってください。海面で一度「25〜35 サイクル/ブロックの残差」を追いかけて `ldxq` を疑いましたが、正体は `loop` の計測値に空の塗りつぶし 37 行とタイマ呼び出しが含まれていたことでした（`PERF` の `kernel=` はその後分けたもの）。
 
