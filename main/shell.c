@@ -23,7 +23,7 @@ static bool sine_ready;
 static struct {int x,y;uint16_t color;} stars[36];
 static int64_t window_start;
 static unsigned samples, max_us;
-static uint64_t present_sum;
+static uint64_t present_sum, prep_sum, loop_sum, hud_sum;
 static uint64_t draw_sum;
 static float fps;
 static unsigned category,setting,app;
@@ -129,14 +129,35 @@ static unsigned clamp(int v) {return v<0?0:v>255?255:(unsigned)v;}
 static void pixel(int x,int y,uint16_t c) {
     if (x>=0 && x<LCD_W && y>=strip_y && y<strip_y+strip_h) strip[(y-strip_y)*LCD_W+x]=c;
 }
+// Every menu label is drawn twice (shadow, then face) for each of seventeen
+// strips, so this runs some four hundred times a frame. It used to reach the
+// buffer through pixel(), which re-tested four bounds for each lit dot; now the
+// row is resolved once per row, blank glyph rows are skipped whole, and a run
+// that has left the screen ends the string.
 static void text(int x,int y,const char *s,int scale,uint16_t color) {
-    if(y>=strip_y+strip_h || y+7*scale<=strip_y)return;
+    if(y>=strip_y+strip_h || y+7*scale<=strip_y) return;
     for(;*s;s++,x+=6*scale) {
+        if(x>=LCD_W) return;
+        if(x+5*scale<=0) continue;
         unsigned c=(unsigned char)*s;
-        if(c<32 || c>126)c='?';
-        for(int yy=0;yy<7;yy++) for(int xx=0;xx<5;xx++)
-            if(font_rows[(c-32)*7+yy] & (1<<(4-xx)))
-                for(int sy=0;sy<scale;sy++)for(int sx=0;sx<scale;sx++)pixel(x+xx*scale+sx,y+yy*scale+sy,color);
+        if(c<32 || c>126) c='?';
+        const uint8_t *glyph=font_rows+(c-32)*7;
+        for(int gy=0;gy<7;gy++) {
+            unsigned bits=glyph[gy];
+            if(!bits) continue;
+            for(int sy=0;sy<scale;sy++) {
+                int py=y+gy*scale+sy-strip_y;
+                if(py<0||py>=strip_h) continue;
+                uint16_t *row=strip+(size_t)py*LCD_W;
+                for(int gx=0;gx<5;gx++) {
+                    if(!(bits&(1u<<(4-gx)))) continue;
+                    for(int sx=0;sx<scale;sx++) {
+                        int px=x+gx*scale+sx;
+                        if(px>=0&&px<LCD_W) row[px]=color;
+                    }
+                }
+            }
+        }
     }
 }
 static float approach(float value,float target,float amount) {
@@ -192,7 +213,7 @@ void shell_draw(const char *error, unsigned phase) {
     (void)phase;
     strip=board_strip();
     int64_t started=esp_timer_get_time();
-    unsigned present_us=0;
+    unsigned present_us=0, loop_us=0, hud_us=0;
     float dt=animation_time?(started-animation_time)*0.000001f:0.033f;
     animation_time=started;
     float amount=1-expf(-dt/0.045f);
@@ -243,8 +264,10 @@ void shell_draw(const char *error, unsigned phase) {
             stars[i].x=(stars[i].x+tilt_x*depth/256+LCD_W)%LCD_W;
             stars[i].y=(stars[i].y+tilt_y*depth/256+LCD_H)%LCD_H;}
     }
+    int64_t after_prep=esp_timer_get_time();
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H ? LCD_H-strip_y:STRIP_H;
+        int64_t band=esp_timer_get_time();
         // Everything that depends only on the row is lifted out of the column
         // loop: it used to be recomputed 240 times a row, 32,400 times a frame.
         // That is the whole of the saving — 23.2 ms of pixels became 18.8, and
@@ -289,6 +312,8 @@ void shell_draw(const char *error, unsigned phase) {
                 }
             }
         }
+        loop_us+=(unsigned)(esp_timer_get_time()-band);
+        band=esp_timer_get_time();
         for(int i=0;i<36;i++) {
             int px=stars[i].x,py=stars[i].y;
             if(py+2<strip_y||py-2>=strip_y+strip_h)continue;
@@ -316,6 +341,7 @@ void shell_draw(const char *error, unsigned phase) {
             text(24,69,"APP ERROR",2,white);text(24,94,error,1,muted);
             text(12,123,"ESC / ENTER TO RETURN",1,muted);
         } else draw_menu();
+        hud_us+=(unsigned)(esp_timer_get_time()-band);
         // Timed apart from the pixels: 240x135x2 bytes at 40 MHz is about
         // 13 ms of bit time whatever the arithmetic above costs, and that is
         // the floor any optimisation of it is measured against.
@@ -326,15 +352,20 @@ void shell_draw(const char *error, unsigned phase) {
     unsigned elapsed=(unsigned)(esp_timer_get_time()-started);
     if(!window_start)window_start=started;
     samples++;draw_sum+=elapsed;present_sum+=present_us;
+    prep_sum+=(unsigned)(after_prep-started);loop_sum+=loop_us;hud_sum+=hud_us;
     if(elapsed>max_us)max_us=elapsed;
     int64_t now=esp_timer_get_time();
     if(now-window_start>=2000000) {
         fps=samples*1000000.0f/(now-window_start);
+        // Split four ways, because "pixels" was standing for the phase tables,
+        // the per-pixel loop, the stars and the menu at once, and only one of
+        // those is worth vectorising.
         ESP_LOGI("background",
-            "PERF mode=%u fps=%.1f draw_ms=%.2f pixels_ms=%.2f send_ms=%.2f max_ms=%.2f",
+            "PERF mode=%u fps=%.1f draw=%.2f prep=%.2f loop=%.2f hud=%.2f send=%.2f",
             mode,fps,(double)draw_sum/samples/1000.0,
-            (double)(draw_sum-present_sum)/samples/1000.0,
-            (double)present_sum/samples/1000.0,max_us/1000.0);
-        samples=0;draw_sum=0;present_sum=0;max_us=0;window_start=now;
+            (double)prep_sum/samples/1000.0,(double)loop_sum/samples/1000.0,
+            (double)hud_sum/samples/1000.0,(double)present_sum/samples/1000.0);
+        samples=0;draw_sum=0;present_sum=0;prep_sum=0;loop_sum=0;hud_sum=0;
+        max_us=0;window_start=now;
     }
 }

@@ -17,7 +17,11 @@ static i2c_master_dev_handle_t keyboard;
 // synchronously, so no two of them ever hold pixels at the same time. Five
 // private copies of this used to cost 15 KB of the 512 KB budget.
 // If the transfer ever becomes an async DMA queue, this has to split in two.
-static uint16_t shared[LCD_W * STRIP_H] __attribute__((aligned(4)));
+// 16, not 4: the PIE 128-bit accesses below force the low four address bits to
+// zero rather than faulting, so a misaligned buffer would silently read and
+// write somewhere else. A row is 480 bytes, itself a multiple of 16, so every
+// row start lands correctly once the base does.
+static uint16_t shared[LCD_W * STRIP_H] __attribute__((aligned(16)));
 uint16_t *board_strip(void) { return shared; }
 static bool capture;
 void board_capture(bool enabled) {
@@ -41,6 +45,53 @@ static esp_err_t kwrite(uint8_t reg, uint8_t value) {
 static esp_err_t kread(uint8_t reg, uint8_t *value) {
     return i2c_master_transmit_receive(keyboard, &reg, 1, value, 1, 30);
 }
+
+// ---------------------------------------------------------------------------
+// The panel wants each RGB565 pixel's two bytes the other way round.
+//
+// The S3's PIE unit does sixteen pixels a pass: two 128-bit loads, a
+// de-interleave that gathers the even bytes into one register and the odd into
+// the other, then a re-interleave with the two registers exchanged (TRM
+// 1.8.209 and 1.8.212). There are no intrinsics for any of it, so this is
+// assembly, and it is kept out of line because loopgtz drives the hardware loop
+// registers and must not sit inside a loop the compiler is also driving.
+//
+// PIE is coprocessor 3, saved and restored on a task switch like the FPU, so
+// this is safe in a task and not in an interrupt.
+//
+// Nothing here is trusted on faith: board_init runs both versions over the same
+// bytes and only enables this one if they agree exactly.
+static bool pie_swap;
+
+static void __attribute__((noinline)) swap_pie(uint16_t *pixels, unsigned blocks) {
+    uint16_t *out=pixels;
+    __asm__ volatile(
+        "loopgtz %2, 1f\n"
+        "  ee.vld.128.ip q0, %0, 16\n"
+        "  ee.vld.128.ip q1, %0, 16\n"
+        "  ee.vunzip.8   q0, q1\n"
+        "  ee.vzip.8     q1, q0\n"
+        "  ee.vst.128.ip q1, %1, 16\n"
+        "  ee.vst.128.ip q0, %1, 16\n"
+        "1:\n"
+        : "+a"(pixels), "+a"(out)
+        : "a"(blocks)
+        : "memory");
+}
+
+static void swap_scalar(uint16_t *pixels, int count) {
+    for(int i=0;i<count;i++) pixels[i]=(uint16_t)((pixels[i]<<8)|(pixels[i]>>8));
+}
+
+// 32 pixels is 64 bytes, two of the 32-byte blocks the vector loop consumes.
+static bool swap_agrees(void) {
+    static uint16_t reference[32] __attribute__((aligned(16)));
+    static uint16_t vectored[32]  __attribute__((aligned(16)));
+    for(int i=0;i<32;i++) reference[i]=vectored[i]=(uint16_t)(i*2477u+0x1234u);
+    swap_scalar(reference,32);
+    swap_pie(vectored,sizeof(vectored)/32);
+    return memcmp(reference,vectored,sizeof(reference))==0;
+}
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b) {
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
 }
@@ -54,6 +105,8 @@ esp_err_t board_init(void) {
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
     spi_device_interface_config_t dev = {.clock_speed_hz=40000000, .mode=0, .spics_io_num=37, .queue_size=1};
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev, &lcd));
+    pie_swap=swap_agrees();
+    ESP_LOGI("board","byte swap: %s",pie_swap?"PIE":"scalar (PIE disagreed)");
     ESP_ERROR_CHECK(command(0x01, NULL, 0)); vTaskDelay(pdMS_TO_TICKS(150));
     ESP_ERROR_CHECK(command(0x11, NULL, 0)); vTaskDelay(pdMS_TO_TICKS(120));
     uint8_t format=0x55, orientation=0x60;
@@ -122,9 +175,11 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     e=command(0x2b,ys,4); if(e) return e;
     // After the capture block above, which wants the pixels as drawn.
     //
-    // A 32-bit version of this was measured and was worse: this file builds at
-    // -Os, where the four-byte memcpy that expresses an aligned wide access
+    // A 32-bit C version of this was measured and was worse: this file builds
+    // at -Os, where the four-byte memcpy that expresses an aligned wide access
     // stayed a call and the transfer went from 16.5 ms to 24.2 ms.
-    for(int i=0;i<LCD_W*rows;i++) pixels[i]=(uint16_t)((pixels[i]<<8)|(pixels[i]>>8));
+    int count=LCD_W*rows;
+    if(pie_swap) swap_pie(pixels,(unsigned)(count*2/32));
+    else swap_scalar(pixels,count);
     return command(0x2c,pixels,LCD_W*rows*2);
 }
