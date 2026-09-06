@@ -19,14 +19,13 @@ static int16_t ribbons[3][LCD_W];
 static uint8_t softness[3][64];
 static int16_t sine[256], distortion[LCD_W];
 // Laid out for the vector row below: eight columns at a time, three planes it
-// walks in order with one pointer — the bend, the second phase's x term, and
-// |x-160|. The 16-byte alignment is not optional: a 128-bit load forces the low
-// four address bits to zero rather than faulting.
-static int16_t ocean_cols[LCD_W/8][3][8] __attribute__((aligned(16)));
-// The same sine, pre-scaled by 16 and pre-divided by 6, as 32-bit entries
-// because the indexed load reads four bytes per lane. Baking C's truncation
-// into the table is what keeps the vector row bit-exact on negative values.
-static int32_t ocean_sine16[256], ocean_sine6[256];
+// walks in order with one pointer — the bend and the second phase's x term,
+// both times 16 because the row keeps its phases at that scale, and |x-160|.
+// The 16-byte alignment is not optional: a 128-bit load forces the low four
+// address bits to zero rather than faulting. The extra block is read, never
+// drawn: the last block's fused loads fetch the phases of a block that does
+// not exist, and they have to land somewhere we own.
+static int16_t ocean_cols[LCD_W/8+1][3][8] __attribute__((aligned(16)));
 // The three ribbons, eight columns at a time, for the wave row's vector form.
 static int16_t wave_cols[LCD_W/8][3][8] __attribute__((aligned(16)));
 // softness in the low half of each entry and its channel weight in the high
@@ -149,12 +148,6 @@ static void build_tables(void) {
     const float widths[]={18,5,24};const float brightness[]={14,32,21};
     for(int l=0;l<3;l++)for(int d=0;d<64;d++)
         softness[l][d]=(uint8_t)(brightness[l]*expf(-d*d/(2*widths[l]*widths[l])));
-    for(int i=0;i<256;i++) {
-        ocean_sine16[i]=sine[i]*16;
-        // The crest's -180 offset rides in this table, so the kernel needs
-        // neither a constant nor an add for it.
-        ocean_sine6[i]=(sine[i]/6)*16-180*16;
-    }
     for(int x=0;x<LCD_W;x++)
         ocean_cols[x>>3][2][x&7]=(int16_t)(x<160?160-x:x-160);
     for(int l=0;l<3;l++) {
@@ -192,128 +185,132 @@ ocean_row_scalar(uint16_t *row, int depth, int cross, int span, int haze) {
     }
 }
 
-// The same row on the PIE unit, eight pixels a pass. Bit-exact with the scalar
-// version above rather than approximate: both divisions were removed without
-// losing a value — ripple/6 by baking C's truncation into a table, and the
-// divide by the row's span by a reciprocal whose error is smaller than the
-// result's own step. The clamps are gone because the channels provably stay
-// inside 0..255 (3..157, 3..214, 3..233).
+// The same row on the PIE unit, eight pixels a pass, without the sine tables.
+// Not bit-exact any more: the sine is a parabola with one refinement, and
+// over every input one pixel in ten moves by one RGB565 step, none by more
+// than two in green (checked against ocean_row_scalar with a lane-exact model
+// of the instructions below; the animation itself is unchanged). Everything
+// else — the reciprocal, the clamps that are not needed, SAR=11 and the RGB565
+// placement by multiply — is as before.
 //
-// SAR is set once, to 11, and every shift in the body is a multiply by a
-// constant: the vector multiply keeps the low 16 bits of a 32-bit product
-// shifted right by SAR, so a multiplier above 2048 shifts left and one below
-// shifts right. That is also how the RGB565 fields are placed, because there
-// is no 16-bit-lane shift instruction.
+// The phases arrive as 16*phase. Multiplying by 32768 with SAR=11 gives x*16,
+// and the low 16 bits of that (1.8.129 keeps only those) are exactly
+// (phase mod 256 - 128) * 256: the index mask and the centering fall out of
+// one multiply. Call it s = 256u. Then
+//     sine*16  ~=  u*(128-|u|)  =  (s/32) * (32767-|s|) >> 11
+// with |s| from EE.VPRELU.S16 against -32768 shifted by 15 (1.8.182), which
+// negates the lanes that are <= 0 and leaves the rest alone. The +1 in the
+// phase constants keeps s off -32768 itself. The swell is then refined as
+// y*(0.775+0.225|y|), which takes the worst error from 15/256 to 1.4/256; the
+// ripple is divided by 6 on its way in and does not need it. The divide by 6
+// is 341/2048 on |s|. shade+haze+20 is a single add, because 512*(haze+20)
+// rides through the >>9 without touching its floor; blue is green+19.
 //
-// Every load, and every EE.VMUL and EE.VRELU, defines its result at pipeline
-// stage 2 while the arithmetic reads at stage 1 (TRM table 1.7-2), so a
-// consumer written immediately after one of them stalls for a cycle. The order
-// below therefore leaves at least one independent instruction between each such
-// pair: the constants are double-buffered across q2/q6/q7 and loaded two or
-// three instructions before use, and the two lookups alternate registers so the
-// unzip is never adjacent to the load that filled it.
-//
-// q0,q1 hold indices then the red channel; q2, q6 and q7 rotate as the
-// broadcast constant, read in order from k[]; q3 carries the swell then the
-// shade, q4 the ripple then green, q5 the second lookup then blue.
+// Every hazard in TRM table 1.7-2 is scheduled away, so the body issues one
+// instruction a cycle: nothing loads a constant on its own. Each arithmetic
+// instruction that has a .LD.INCP form (1.8.71, 1.8.123, 1.8.129, 1.8.199)
+// also fetches, into the register it has just finished with, the constant that
+// will be wanted two instructions later, from a per-row table of the constants
+// already broadcast to 16 bytes; the same instructions bring in the next
+// block's planes, so the loop carries four values across the block boundary.
+// q7 holds 32768 for the whole row; the rest were allocated so those four land
+// where the next block reads them. The rewind of the constant walk is the one
+// plain instruction in the body.
 //
 // Section numbers are the ESP32-S3 TRM's.
 static void __attribute__((noinline))
 ocean_row_pie(uint16_t *row, int depth, int cross, int span, int haze) {
-    int16_t k[15] __attribute__((aligned(4))) = {
-        (int16_t)(depth & 255),                /* the index mask makes the rest moot */
-        (int16_t)(cross & 255),
-        0x00FF,
+    int16_t k[21] __attribute__((aligned(4))) = {
+        (int16_t)(((depth & 255) << 4) + 1),   /* depth16: the phase x16, +1 keeps s off -32768 */
+        (int16_t)(((cross & 255) << 4) + 1),   /* cross16 */
+        64,                                    /* s*64>>11 = s/32 */
+        32767,                                 /* 32768-|s|, one short */
+        341,                                   /* 2048/6: |s|/6 */
+        5461,                                  /* 32768/6 */
+        230,                                   /* 0.225 at x2048, halved for |y| at x4096 */
+        1587,                                  /* 0.775 at x2048 */
+        -180*16,                               /* the crest offset, at the x16 scale */
         (int16_t)span,
         (int16_t)((262144 + span - 1) / span), /* ceil(128*2048/span) */
         40,
-        4,
+        (int16_t)(4096 + 512*(haze + 20)),     /* 256*16 and haze+20 in one add */
+        4,                                     /* >>9 */
         3,
-        /* shade is floor(swell/32)+8, and that 8 rides in these two constants
-           rather than costing an add of its own. */
-        (int16_t)(haze + 28),
-        (int16_t)(haze + 47),
+        19,                                    /* blue = green + 19 */
         0x00F8,
-        (int16_t)0x8000,                       /* x*32768>>11 = x*16, applied twice for r<<8 */
         0x00FC,
         16384,                                 /* x<<3 */
-        256                                    /* x>>3 */
+        256,                                   /* x>>3 */
+        (int16_t)0x8000                        /* x<<4, and the sine fold; resident in q7 */
     };
+    int16_t kv[21][8] __attribute__((aligned(16)));   /* each of the above, broadcast */
+    /* kp and ks are early-clobber: they start equal to kv and k, and without
+       the & GCC hands them the same registers, so the walks never rewind. */
     const int16_t *in=&ocean_cols[0][0][0];
-    const int16_t *kp;
-    const int32_t *ta=ocean_sine16, *tb=ocean_sine6;
-    int zero=0, blocks=LCD_W/8, sar=11;
+    const int16_t *kp, *ks;
+    const int16_t *k8=&kv[20][0];
+    int zero=0, s15=15, nk=21, blocks=LCD_W/8, sar=11;
     __asm__ volatile(
+        /* broadcast the 21 constants once: some 60 cycles a row, two a block */
+        "mov            %[ks], %[k]\n"
+        "mov            %[kp], %[kv]\n"
+        "loopgtz        %[nk], 0f\n"
+        "  ee.vldbc.16.ip  q0, %[ks], 2\n"            /*                                 1.8.95 */
+        "  ee.vst.128.ip   q0, %[kp], 16\n"           /*                                 1.8.192 */
+        "0:\n"
         "wsr.sar        %[sar]\n"                     /* every EE.VMUL below shifts by this */
+        "mov            %[kp], %[kv]\n"
+        "ee.vld.128.ip  q7, %[k8], 16\n"              /* 32768, for the row              1.8.88 */
+        "ee.vld.128.ip  q0, %[in], 16\n"              /* block 0: bend*16 */
+        "ee.vld.128.ip  q1, %[in], 16\n"              /* block 0: the ripple phase */
+        "ee.vld.128.ip  q2, %[kp], 16\n"              /* depth16 */
+        "ee.vld.128.ip  q3, %[kp], 16\n"              /* cross16 */
         "loopgtz        %[blocks], 1f\n"              /* 30 blocks of 8 pixels, no branch inside */
-        "  mov          %[kp], %[k]\n"                /* rewind the constant walk */
-        "  ee.vld.128.ip   q0, %[in], 16\n"           /* distortion[x..x+7]              1.8.88 */
-        "  ee.vld.128.ip   q1, %[in], 16\n"           /* 2x + 2*distortion */
-        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* depth                           1.8.95 */
-        "  ee.vldbc.16.ip  q7, %[kp], 2\n"            /* cross */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0x00FF */
-        "  ee.vadds.s16    q0, q0, q6\n"              /*                                 1.8.70 */
-        "  ee.vadds.s16    q1, q1, q7\n"
-        "  ee.andq         q0, q0, q2\n"              /* (depth+bend)&255                1.8.1  */
-        "  ee.andq         q1, q1, q2\n"
-        /* One 32-bit lane per instruction; the unzip then packs the low halves.
-           The two tables alternate so no register takes two loads in a row. 1.8.37 */
-        "  ee.ldxq.32      q3, q0, %[ta], 0, 0\n"
-        "  ee.ldxq.32      q5, q1, %[tb], 0, 0\n"
-        "  ee.ldxq.32      q3, q0, %[ta], 1, 1\n"
-        "  ee.ldxq.32      q5, q1, %[tb], 1, 1\n"
-        "  ee.ldxq.32      q3, q0, %[ta], 2, 2\n"
-        "  ee.ldxq.32      q5, q1, %[tb], 2, 2\n"
-        "  ee.ldxq.32      q3, q0, %[ta], 3, 3\n"
-        "  ee.ldxq.32      q5, q1, %[tb], 3, 3\n"
-        "  ee.ldxq.32      q4, q0, %[ta], 0, 4\n"
-        "  ee.ldxq.32      q6, q1, %[tb], 0, 4\n"
-        "  ee.ldxq.32      q4, q0, %[ta], 1, 5\n"
-        "  ee.ldxq.32      q6, q1, %[tb], 1, 5\n"
-        "  ee.ldxq.32      q4, q0, %[ta], 2, 6\n"
-        "  ee.ldxq.32      q6, q1, %[tb], 2, 6\n"
-        "  ee.ldxq.32      q4, q0, %[ta], 3, 7\n"
-        "  ee.ldxq.32      q6, q1, %[tb], 3, 7\n"
-        "  ee.vldbc.16.ip  q7, %[kp], 2\n"            /* span */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* ceil(262144/span) */
-        "  ee.vunzip.16    q3, q4\n"                  /* q3 = swell*16                   1.8.207 */
-        "  ee.vunzip.16    q5, q6\n"                  /* q5 = (ripple/6)*16 - 180*16 */
-        "  ee.vld.128.ip   q0, %[in], 16\n"           /* |x-160| */
-        "  ee.vadds.s16    q4, q5, q3\n"              /* crest*16, still possibly negative */
-        "  ee.vsubs.s16    q1, q7, q0\n"              /*                                 1.8.198 */
-        "  ee.vrelu.s16    q4, %[zero], %[zero]\n"    /* max(crest,0) without a register 1.8.184 */
-        "  ee.vrelu.s16    q1, %[zero], %[zero]\n"    /* dx>=span leaves no reflection */
-        "  ee.vldbc.16.ip  q7, %[kp], 2\n"            /* 40 */
-        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* 4 */
-        "  ee.vmul.s16     q1, q1, q2\n"              /* reflection                      1.8.122 */
-        "  ee.vmul.s16     q3, q3, q6\n"              /* floor(swell/32) */
-        "  ee.vadds.s16    q1, q1, q7\n"              /* 40 + reflection */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 3 */
-        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* haze+28 */
-        "  ee.vmul.s16     q1, q4, q1\n"              /* glint = crest*(40+refl)/128 */
-        "  ee.vldbc.16.ip  q7, %[kp], 2\n"            /* haze+47 */
-        "  ee.vadds.s16    q3, q3, q1\n"              /* shade+glint, less the shared 8 */
-        "  ee.vadds.s16    q0, q1, q2\n"              /* red */
-        "  ee.vadds.s16    q4, q3, q6\n"              /* green */
-        "  ee.vadds.s16    q5, q3, q7\n"              /* blue */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0xF8 */
-        "  ee.vldbc.16.ip  q6, %[kp], 2\n"            /* 32768 */
-        "  ee.vldbc.16.ip  q7, %[kp], 2\n"            /* 0xFC */
-        "  ee.andq         q0, q0, q2\n"
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 16384 */
-        "  ee.vmul.u16     q0, q0, q6\n"              /*                                 1.8.128 */
-        "  ee.andq         q4, q4, q7\n"
-        "  ee.vldbc.16.ip  q7, %[kp], 2\n"            /* 256 */
-        "  ee.vmul.u16     q0, q0, q6\n"              /* red field in place */
-        "  ee.vmul.u16     q4, q4, q2\n"              /* green field */
-        "  ee.vmul.u16     q5, q5, q7\n"              /* blue field */
-        "  ee.orq          q0, q0, q4\n"              /*                                 1.8.45 */
-        "  ee.orq          q0, q0, q5\n"
-        "  ee.vst.128.ip   q0, %[row], 16\n"          /* eight pixels out                1.8.192 */
+        /* on entry: q0 = bend*16, q1 = ripple phase, q2 = depth16, q3 = cross16, kp -> 64 */
+        "  ee.vadds.s16.ld.incp   q2, %[kp], q0, q0, q2\n"  /* bend16 + depth16: the swell phase, x16; load 64 */
+        "  ee.vadds.s16.ld.incp   q3, %[kp], q1, q1, q3\n"  /* the ripple phase, x16; load 32767 */
+        "  ee.vmul.u16            q0, q0, q7\n"  /* s = 256u: x*16 kept to 16 bits folds mod 4096 and signs it */
+        "  ee.vmul.u16            q1, q1, q7\n"
+        "  ee.vmul.s16            q4, q0, q2\n"  /* s/32 = 8u */
+        "  ee.vmul.s16.ld.incp    q5, %[kp], q2, q1, q2\n"  /* load 341 = 2048/6 */
+        "  ee.vprelu.s16          q0, q0, q7, %[s15]\n"  /* |s|: -32768*x >> 15 = -x on the lanes <= 0 */
+        "  ee.vprelu.s16          q1, q1, q7, %[s15]\n"
+        "  ee.vsubs.s16.ld.incp   q0, %[kp], q3, q3, q0\n"  /* 32767 - |s|; load 5461 = 32768/6 */
+        "  ee.vmul.s16.ld.incp    q5, %[kp], q1, q1, q5\n"  /* |s|/6; load 230 */
+        "  ee.vmul.s16.ld.incp    q3, %[kp], q4, q4, q3\n"  /* swell*16 = 8u*(32767-|s|) >> 11 ~ u*(128-|u|); load 1587 */
+        "  ee.vsubs.s16.ld.incp   q1, %[kp], q0, q0, q1\n"  /* 5461 - |s|/6; load -180*16 */
+        "  ee.vprelu.s16          q6, q4, q7, %[s15]\n"  /* |swell16| */
+        "  ee.vmul.s16.ld.incp    q0, %[kp], q2, q2, q0\n"  /* (ripple/6)*16; load span */
+        "  ee.vmul.s16.ld.incp    q5, %[in], q6, q6, q5\n"  /* 0.225*|y| at x2048; load |x-160| */
+        "  ee.vadds.s16.ld.incp   q2, %[kp], q1, q2, q1\n"  /* ripple/6*16 - 180*16; load ceil(262144/span) */
+        "  ee.vadds.s16.ld.incp   q3, %[kp], q6, q6, q3\n"  /* 0.775 + 0.225|y| at x2048; load 40 */
+        "  ee.vsubs.s16.ld.incp   q5, %[kp], q0, q0, q5\n"  /* span - |x-160|; load 4096+512*(haze+20) */
+        "  ee.vmul.s16.ld.incp    q6, %[kp], q4, q4, q6\n"  /* swell16 = y*(0.775+0.225|y|): the refinement; load 4 */
+        "  ee.vrelu.s16           q0, %[zero], %[zero]\n"  /* no reflection past the span */
+        "  ee.vadds.s16           q1, q1, q4\n"  /* crest*16, maybe negative */
+        "  ee.vmul.s16.ld.incp    q2, %[kp], q0, q0, q2\n"  /* (span-dx)*128/span; load 3 */
+        "  ee.vrelu.s16           q1, %[zero], %[zero]\n"  /* max(crest,0) */
+        "  ee.vadds.s16.ld.incp   q5, %[kp], q4, q4, q5\n"  /* swell16 + 4096 + 512*(haze+20); load 19 */
+        "  ee.vadds.s16.ld.incp   q3, %[kp], q0, q0, q3\n"  /* 40 + reflection; load 0xF8 */
+        "  ee.vmul.s16.ld.incp    q1, %[kp], q0, q1, q0\n"  /* glint = crest*(40+refl)/128; load 0xFC */
+        "  ee.vmul.s16.ld.incp    q6, %[kp], q4, q4, q6\n"  /* shade+haze+20: the 512*(haze+20) rides through >>9 exactly; load 16384 */
+        "  ee.vadds.s16           q2, q0, q2\n"  /* red = 3+glint */
+        "  ee.vadds.s16.ld.incp   q0, %[kp], q4, q4, q0\n"  /* green = 20+lift; load 256 */
+        "  mov                    %[kp], %[kv]\n"  /* rewind the constant walk */
+        "  ee.andq                q3, q2, q3\n"
+        "  ee.vadds.s16.ld.incp   q2, %[kp], q5, q4, q5\n"  /* blue = 39+lift; load next block: depth16 */
+        "  ee.vmul.u16            q3, q3, q7\n"
+        "  ee.andq                q1, q4, q1\n"
+        "  ee.vmul.u16.ld.incp    q3, %[kp], q4, q3, q7\n"  /* red field; load next block: cross16 */
+        "  ee.vmul.u16.ld.incp    q0, %[in], q5, q5, q0\n"  /* blue field; load next block: bend16 */
+        "  ee.vmul.u16.ld.incp    q1, %[in], q6, q1, q6\n"  /* green field; load next block: ripple phase */
+        "  ee.orq                 q4, q4, q5\n"
+        "  ee.orq                 q4, q4, q6\n"
+        "  ee.vst.128.ip          q4, %[row], 16\n"  /* eight pixels out */
         "1:\n"
-        : [row] "+a"(row), [in] "+a"(in), [kp] "=&a"(kp)
-        : [k] "a"(k), [ta] "a"(ta), [tb] "a"(tb), [zero] "a"(zero),
-          [blocks] "a"(blocks), [sar] "a"(sar)
+        : [row] "+a"(row), [in] "+a"(in), [kp] "=&a"(kp), [ks] "=&a"(ks)
+        : [k] "a"(k), [kv] "a"(&kv[0][0]), [k8] "a"(k8), [zero] "a"(zero), [s15] "a"(s15),
+          [nk] "a"(nk), [blocks] "a"(blocks), [sar] "a"(sar)
         : "memory");
 }
 
@@ -439,8 +436,8 @@ wave_row_pie(uint16_t *row, int y, unsigned green, unsigned blue) {
 // to be rebuilt whenever distortion does.
 static void build_columns(void) {
     for(int x=0;x<LCD_W;x++) {
-        ocean_cols[x>>3][0][x&7]=distortion[x];
-        ocean_cols[x>>3][1][x&7]=(int16_t)(2*x+2*distortion[x]);
+        ocean_cols[x>>3][0][x&7]=(int16_t)(distortion[x]*16);
+        ocean_cols[x>>3][1][x&7]=(int16_t)((2*x+2*distortion[x])*16);
     }
 }
 
