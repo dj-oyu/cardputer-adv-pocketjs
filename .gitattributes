@@ -1,9 +1,2 @@
 * text=auto
-*.md text eol=lf
-*.js text eol=lf
-*.ts text eol=lf
-*.tsx text eol=lf
-*.c text eol=lf
-*.cpp text eol=lf
-*.h text eol=lf
-*.json text eol=lf
+*.sh text eol=lf
