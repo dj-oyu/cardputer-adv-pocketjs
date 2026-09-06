@@ -103,10 +103,21 @@ esp_err_t board_init(void) {
     spi_bus_config_t bus = {.mosi_io_num=35, .miso_io_num=-1, .sclk_io_num=36,
         .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=sizeof(shared)};
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
-    spi_device_interface_config_t dev = {.clock_speed_hz=40000000, .mode=0, .spics_io_num=37, .queue_size=1};
+    // 80MHz, not the 40MHz M5Stack ships. The panel's flex is short and the
+    // ST7789 tolerates it: send went from 15.5ms to 9.1ms measured, and the
+    // owner confirmed on the physical panel that nothing is corrupted. That
+    // confirmation had to be by eye -- board_capture dumps the buffer before
+    // the byte swap and the transfer, and MISO is unwired, so no software
+    // check here can see what actually reaches the glass. Revert to 40000000
+    // if any tearing or colour damage ever shows up.
+    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37, .queue_size=1};
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev, &lcd));
     pie_swap=swap_agrees();
-    ESP_LOGI("board","byte swap: %s",pie_swap?"PIE":"scalar (PIE disagreed)");
+    // Says which clock is in the binary. Several sessions share this tree, and
+    // a measurement once moved 6ms because a clock change nobody remembered
+    // making was sitting in the working copy.
+    ESP_LOGI("board","LCD SPI %d Hz, byte swap: %s",
+             dev.clock_speed_hz, pie_swap?"PIE":"scalar (PIE disagreed)");
     ESP_ERROR_CHECK(command(0x01, NULL, 0)); vTaskDelay(pdMS_TO_TICKS(150));
     ESP_ERROR_CHECK(command(0x11, NULL, 0)); vTaskDelay(pdMS_TO_TICKS(120));
     uint8_t format=0x55, orientation=0x60;
