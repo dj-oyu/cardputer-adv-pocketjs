@@ -18,6 +18,15 @@ static const char *names[]={"LEVEL WAVE","OCEAN + STARS"};
 static int16_t ribbons[3][LCD_W];
 static uint8_t softness[3][64];
 static int16_t sine[256], distortion[LCD_W];
+// Laid out for the vector row below: eight columns at a time, three planes it
+// walks in order with one pointer — the bend, the second phase's x term, and
+// |x-160|. The 16-byte alignment is not optional: a 128-bit load forces the low
+// four address bits to zero rather than faulting.
+static int16_t ocean_cols[LCD_W/8][3][8] __attribute__((aligned(16)));
+// The same sine, pre-scaled by 16 and pre-divided by 6, as 32-bit entries
+// because the indexed load reads four bytes per lane. Baking C's truncation
+// into the table is what keeps the vector row bit-exact on negative values.
+static int32_t ocean_sine16[256], ocean_sine6[256];
 static int depth_phase[LCD_H], cross_phase[LCD_H];
 static bool sine_ready;
 static struct {int x,y;uint16_t color;} stars[36];
@@ -42,6 +51,9 @@ static const char *labels[]={"BACKGROUND","FPS DISPLAY","SOUND"};
 static bool show_fps,sfx=true;
 static nvs_handle_t prefs;
 static bool prefs_ready;
+// Defined below, next to the two implementations they choose between.
+static void (*ocean_row)(uint16_t *,int,int,int,int);
+static void (*ocean_row_vector)(uint16_t *,int,int,int,int);
 void shell_init(void) {
     if(nvs_flash_init()==ESP_OK && nvs_open("home",NVS_READWRITE,&prefs)==ESP_OK) {
         prefs_ready=true;uint8_t v;
@@ -51,6 +63,16 @@ void shell_init(void) {
     }
     sound_set_enabled(sfx);
     ESP_LOGI("settings","LOADED background=%u fps=%d sound=%d",mode,show_fps,sfx);
+    // The vector row is claimed to be bit-exact, so nothing less is accepted.
+    // Every row is compared, because span and haze differ down the screen and
+    // the reflection is only on the centre ones.
+    int worst=shell_ocean_selftest();
+    if(worst==0) {
+        ocean_row=ocean_row_vector;
+        ESP_LOGI("background","ocean row: PIE");
+    } else {
+        ESP_LOGW("background","ocean row: scalar (PIE differs by %d)",worst);
+    }
 }
 bool shell_key(board_key_t key) {
     if(key==KEY_BACK) {
@@ -126,6 +148,226 @@ static float perlin(float x,float y) {
                mix(gradient(ix,iy+1,fx,fy-1),gradient(ix+1,iy+1,fx-1,fy-1),fade(fx)),fade(fy));
 }
 static unsigned clamp(int v) {return v<0?0:v>255?255:(unsigned)v;}
+
+// Built once, and needed before the first frame so the start-up comparison
+// between the scalar and vector rows has something real to work on.
+static void build_tables(void) {
+    if(sine_ready) return;
+    for(int i=0;i<256;i++) sine[i]=(int16_t)(sinf(i*6.2831853f/256)*256);
+    const float widths[]={18,5,24};const float brightness[]={14,32,21};
+    for(int l=0;l<3;l++)for(int d=0;d<64;d++)
+        softness[l][d]=(uint8_t)(brightness[l]*expf(-d*d/(2*widths[l]*widths[l])));
+    for(int i=0;i<256;i++) {
+        ocean_sine16[i]=sine[i]*16;
+        ocean_sine6[i]=(sine[i]/6)*16;
+    }
+    for(int x=0;x<LCD_W;x++)
+        ocean_cols[x>>3][2][x&7]=(int16_t)(x<160?160-x:x-160);
+    sine_ready=true;
+}
+
+// One row of the ocean, below the horizon. Pulled out of the strip loop as a
+// function of its own because it is the candidate for a hand-written vector
+// version: keeping the scalar one intact gives that something to be checked
+// against, byte for byte, before it is trusted with the screen.
+//
+// `depth` and `cross` are the row's two phases, `span` the half-width of the
+// reflection and `haze` its distance fade — all constant across the row.
+static void ocean_row_scalar(uint16_t *row, int depth, int cross,
+                             int span, int haze) {
+    for(int x=0;x<LCD_W;x++) {
+        int bend=distortion[x];
+        int swell=sine[(depth+bend)&255];
+        int ripple=sine[(cross+x*2+bend*2)&255];
+        int crest=swell-180+ripple/6;if(crest<0)crest=0;
+        int dx=x-160;if(dx<0)dx=-dx;
+        int reflection=dx<span?(span-dx)*128/span:0;
+        int glint=crest*(40+reflection)/128;
+        int shade=(swell+256)/32;
+        int lift=shade+haze+glint;
+        row[x]=board_rgb(clamp(3+glint),clamp(20+lift),clamp(39+lift));
+    }
+}
+
+// The same row on the PIE unit, eight pixels a pass. Bit-exact with the scalar
+// version above rather than approximate: both divisions were removed without
+// losing a value — ripple/6 by baking C's truncation into a table, and the
+// divide by the row's span by a reciprocal whose error is smaller than the
+// result's own step. The clamps are gone because the channels provably stay
+// inside 0..255 (3..157, 3..214, 3..233).
+//
+// SAR is set once, to 11, and every shift in the body is a multiply by a
+// constant: the vector multiply keeps the low 16 bits of a 32-bit product
+// shifted right by SAR, so a multiplier above 2048 shifts left and one below
+// shifts right. That is also how the RGB565 fields are placed, because there
+// is no 16-bit-lane shift instruction.
+//
+// q0,q1 hold indices then the red channel; q2 is the broadcast constant, read
+// in order from k[]; q3 carries the swell, q4 the ripple then green, q5 the
+// indexed-load scratch then blue. q6 and q7 are unused.
+//
+// Section numbers are the ESP32-S3 TRM's.
+static void __attribute__((noinline))
+ocean_row_pie(uint16_t *row, int depth, int cross, int span, int haze) {
+    int16_t k[17] __attribute__((aligned(4))) = {
+        (int16_t)(depth & 255),                /* the index mask makes the rest moot */
+        (int16_t)(cross & 255),
+        0x00FF,
+        -180*16,                               /* the crest offset, at the x16 scale */
+        (int16_t)span,
+        (int16_t)((262144 + span - 1) / span), /* ceil(128*2048/span) */
+        40,
+        4096,                                  /* 256*16 */
+        4,
+        3,
+        (int16_t)(haze + 20),
+        (int16_t)(haze + 39),
+        0x00F8,
+        (int16_t)0x8000,                       /* x*32768>>11 = x*16, applied twice for r<<8 */
+        0x00FC,
+        16384,                                 /* x<<3 */
+        256                                    /* x>>3 */
+    };
+    const int16_t *in=&ocean_cols[0][0][0];
+    const int16_t *kp;
+    const int32_t *ta=ocean_sine16, *tb=ocean_sine6;
+    int zero=0, blocks=LCD_W/8, sar=11;
+    __asm__ volatile(
+        "wsr.sar        %[sar]\n"                     /* every EE.VMUL below shifts by this */
+        "loopgtz        %[blocks], 1f\n"              /* 30 blocks of 8 pixels, no branch inside */
+        "  mov          %[kp], %[k]\n"                /* rewind the constant walk */
+        "  ee.vld.128.ip   q0, %[in], 16\n"           /* distortion[x..x+7]              1.8.88 */
+        "  ee.vld.128.ip   q1, %[in], 16\n"           /* 2x + 2*distortion */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* depth                           1.8.95 */
+        "  ee.vadds.s16    q0, q0, q2\n"              /*                                 1.8.70 */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* cross */
+        "  ee.vadds.s16    q1, q1, q2\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0x00FF */
+        "  ee.andq         q0, q0, q2\n"              /* (depth+bend)&255                1.8.1  */
+        "  ee.andq         q1, q1, q2\n"
+        /* One 32-bit lane per instruction; the unzip then packs the low halves. 1.8.37 */
+        "  ee.ldxq.32      q3, q0, %[ta], 0, 0\n"
+        "  ee.ldxq.32      q3, q0, %[ta], 1, 1\n"
+        "  ee.ldxq.32      q3, q0, %[ta], 2, 2\n"
+        "  ee.ldxq.32      q3, q0, %[ta], 3, 3\n"
+        "  ee.ldxq.32      q4, q0, %[ta], 0, 4\n"
+        "  ee.ldxq.32      q4, q0, %[ta], 1, 5\n"
+        "  ee.ldxq.32      q4, q0, %[ta], 2, 6\n"
+        "  ee.ldxq.32      q4, q0, %[ta], 3, 7\n"
+        "  ee.vunzip.16    q3, q4\n"                  /* q3 = swell*16                   1.8.210 */
+        "  ee.ldxq.32      q4, q1, %[tb], 0, 0\n"
+        "  ee.ldxq.32      q4, q1, %[tb], 1, 1\n"
+        "  ee.ldxq.32      q4, q1, %[tb], 2, 2\n"
+        "  ee.ldxq.32      q4, q1, %[tb], 3, 3\n"
+        "  ee.ldxq.32      q5, q1, %[tb], 0, 4\n"
+        "  ee.ldxq.32      q5, q1, %[tb], 1, 5\n"
+        "  ee.ldxq.32      q5, q1, %[tb], 2, 6\n"
+        "  ee.ldxq.32      q5, q1, %[tb], 3, 7\n"
+        "  ee.vunzip.16    q4, q5\n"                  /* q4 = (ripple/6)*16 */
+        "  ee.vadds.s16    q4, q4, q3\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* -2880 */
+        "  ee.vadds.s16    q4, q4, q2\n"              /* crest*16, still possibly negative */
+        "  ee.vrelu.s16    q4, %[zero], %[zero]\n"    /* max(crest,0) without a register 1.8.184 */
+        "  ee.vld.128.ip   q0, %[in], 16\n"           /* |x-160| */
+        "  ee.vldbc.16.ip  q1, %[kp], 2\n"            /* span */
+        "  ee.vsubs.s16    q1, q1, q0\n"              /*                                 1.8.198 */
+        "  ee.vrelu.s16    q1, %[zero], %[zero]\n"    /* dx>=span leaves no reflection */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* ceil(262144/span) */
+        "  ee.vmul.s16     q1, q1, q2\n"              /* reflection                      1.8.122 */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 40 */
+        "  ee.vadds.s16    q1, q1, q2\n"
+        "  ee.vmul.s16     q1, q4, q1\n"              /* glint = crest*(40+refl)/128 */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 4096 */
+        "  ee.vadds.s16    q3, q3, q2\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 4 */
+        "  ee.vmul.s16     q3, q3, q2\n"              /* shade = (swell+256)/32 */
+        "  ee.vadds.s16    q3, q3, q1\n"              /* shade+glint */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 3 */
+        "  ee.vadds.s16    q0, q1, q2\n"              /* red */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* haze+20 */
+        "  ee.vadds.s16    q4, q3, q2\n"              /* green */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* haze+39 */
+        "  ee.vadds.s16    q5, q3, q2\n"              /* blue */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0xF8 */
+        "  ee.andq         q0, q0, q2\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 32768 */
+        "  ee.vmul.u16     q0, q0, q2\n"              /*                                 1.8.128 */
+        "  ee.vmul.u16     q0, q0, q2\n"              /* red field in place */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 0xFC */
+        "  ee.andq         q4, q4, q2\n"
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 16384 */
+        "  ee.vmul.u16     q4, q4, q2\n"              /* green field */
+        "  ee.vldbc.16.ip  q2, %[kp], 2\n"            /* 256 */
+        "  ee.vmul.u16     q5, q5, q2\n"              /* blue field */
+        "  ee.orq          q0, q0, q4\n"              /*                                 1.8.42 */
+        "  ee.orq          q0, q0, q5\n"
+        "  ee.vst.128.ip   q0, %[row], 16\n"          /* eight pixels out                1.8.190 */
+        "1:\n"
+        : [row] "+a"(row), [in] "+a"(in), [kp] "=&a"(kp)
+        : [k] "a"(k), [ta] "a"(ta), [tb] "a"(tb), [zero] "a"(zero),
+          [blocks] "a"(blocks), [sar] "a"(sar)
+        : "memory");
+}
+
+// Swapped for the vector implementation once it has agreed with the scalar row
+// above at start-up.
+static void (*ocean_row)(uint16_t *,int,int,int,int)=ocean_row_scalar;
+static void (*ocean_row_vector)(uint16_t *,int,int,int,int)=ocean_row_pie;
+
+
+// Rows differ in phase, span and haze, so one row proves little; these cover
+// the horizon, the middle and the bottom, where span and haze are furthest
+// apart and the reflection is on and off the centre.
+static int compare_row(int y) {
+    static uint16_t a[LCD_W] __attribute__((aligned(16)));
+    static uint16_t b[LCD_W] __attribute__((aligned(16)));
+    int depth=depth_phase[y], cross=cross_phase[y];
+    int span=12+(y-36)/3, haze=24-(y-36)/5;
+    ocean_row_scalar(a,depth,cross,span,haze);
+    ocean_row_vector(b,depth,cross,span,haze);
+    int worst=0;
+    for(int x=0;x<LCD_W;x++) {
+        int dr=((a[x]>>11)&31)-((b[x]>>11)&31);
+        int dg=((a[x]>>5)&63)-((b[x]>>5)&63);
+        int db=(a[x]&31)-(b[x]&31);
+        if(dr<0) dr=-dr;
+        if(dg<0) dg=-dg;
+        if(db<0) db=-db;
+        if(dr>worst) worst=dr;
+        if(dg>worst) worst=dg;
+        if(db>worst) worst=db;
+    }
+    return worst;
+}
+
+// The vector row reads ocean_cols, so both planes that change per frame have
+// to be rebuilt whenever distortion does.
+static void build_columns(void) {
+    for(int x=0;x<LCD_W;x++) {
+        ocean_cols[x>>3][0][x&7]=distortion[x];
+        ocean_cols[x>>3][1][x&7]=(int16_t)(2*x+2*distortion[x]);
+    }
+}
+
+int shell_ocean_selftest(void) {
+    if(!ocean_row_vector) return -1;
+    build_tables();
+    // The phase tables are filled by the first draw; without them both sides
+    // would agree on zeroes and prove nothing.
+    for(int x=0;x<LCD_W;x++) distortion[x]=(int16_t)(perlin(x*0.018f,0.4f)*28);
+    build_columns();
+    for(int y=37;y<LCD_H;y++) {
+        float d=800.0f/(y-28);
+        depth_phase[y]=(int)((d*1.8f+1.2f)*40.7437f);
+        cross_phase[y]=(int)((d*3.1f-0.7f)*40.7437f);
+    }
+    int worst=0;
+    for(int y=37;y<LCD_H;y++) {
+        int d=compare_row(y);
+        if(d>worst) worst=d;
+    }
+    return worst;
+}
 static void pixel(int x,int y,uint16_t c) {
     if (x>=0 && x<LCD_W && y>=strip_y && y<strip_y+strip_h) strip[(y-strip_y)*LCD_W+x]=c;
 }
@@ -227,13 +469,7 @@ void shell_draw(const char *error, unsigned phase) {
     const uint16_t white=board_rgb(237,246,255), muted=board_rgb(122,169,197);
     int tilt_x,tilt_y;motion_get(&tilt_x,&tilt_y);
     int level_slope=(int)(tanf(tilt_x/256.0f)*256);
-    if(!sine_ready) {
-        for(int i=0;i<256;i++)sine[i]=(int16_t)(sinf(i*6.2831853f/256)*256);
-        const float widths[]={18,5,24};const float brightness[]={14,32,21};
-        for(int l=0;l<3;l++)for(int d=0;d<64;d++)
-            softness[l][d]=(uint8_t)(brightness[l]*expf(-d*d/(2*widths[l]*widths[l])));
-        sine_ready=true;
-    }
+    build_tables();
     if(mode==0)for(int l=0;l<3;l++)for(int x=0;x<LCD_W;x++) {
         const float speeds[]={0.20f,0.60f,0.32f};const int depths[]={4,12,28};
         const int centers[]={54,82,116};
@@ -248,6 +484,7 @@ void shell_draw(const char *error, unsigned phase) {
         // Perspective compresses the swell spacing towards a visible horizon.
         // Noise only bends the coherent wave fronts; it no longer paints clouds.
         for(int x=0;x<LCD_W;x++)distortion[x]=(int16_t)(perlin(x*0.018f,t*0.12f)*28);
+        build_columns();
         for(int y=37;y<LCD_H;y++) {
             float depth=800.0f/(y-28);
             depth_phase[y]=(int)((depth*1.8f+t*1.2f)*40.7437f);
@@ -282,21 +519,8 @@ void shell_draw(const char *error, unsigned phase) {
                     for(int x=0;x<LCD_W;x++) row[x]=sky;
                     continue;
                 }
-                int depth=depth_phase[y], cross=cross_phase[y];
-                int span=12+(y-36)/3;
-                int haze=24-(y-36)/5;
-                for(int x=0;x<LCD_W;x++) {
-                    int bend=distortion[x];
-                    int swell=sine[(depth+bend)&255];
-                    int ripple=sine[(cross+x*2+bend*2)&255];
-                    int crest=swell-180+ripple/6;if(crest<0)crest=0;
-                    int dx=x-160;if(dx<0)dx=-dx;
-                    int reflection=dx<span?(span-dx)*128/span:0;
-                    int glint=crest*(40+reflection)/128;
-                    int shade=(swell+256)/32;
-                    int lift=shade+haze+glint;
-                    row[x]=board_rgb(clamp(3+glint),clamp(20+lift),clamp(39+lift));
-                }
+                ocean_row(row,depth_phase[y],cross_phase[y],
+                          12+(y-36)/3, 24-(y-36)/5);
             } else {
                 unsigned green=14+y/7, blue=30+y/5;
                 for(int x=0;x<LCD_W;x++) {
