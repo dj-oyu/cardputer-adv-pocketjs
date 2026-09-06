@@ -1,4 +1,5 @@
 #include "board.h"
+#include "motion.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
@@ -69,6 +70,7 @@ esp_err_t board_init(void) {
     for (int i=0;i<10;i++) { uint8_t value; kread(0x04, &value); }
     ESP_ERROR_CHECK(kwrite(0x02, 0x1f));
     ESP_LOGI("board", "ADV keyboard detected; LCD 240x135 RGB565; no PSRAM");
+    motion_init(ih);
     return ESP_OK;
 }
 board_key_t board_key(void) {

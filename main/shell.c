@@ -1,5 +1,6 @@
 #include "shell.h"
 #include "board.h"
+#include "motion.h"
 #include "fonts.h"
 #include <math.h>
 #include <string.h>
@@ -10,7 +11,9 @@
 static uint16_t strip[LCD_W*STRIP_H];
 static int strip_y, strip_h;
 static unsigned mode;
-static const char *names[]={"WAVE + STARS","OCEAN + STARS"};
+static const char *names[]={"DEPTH / TILT","OCEAN + STARS"};
+static int16_t ribbons[3][LCD_W];
+static uint8_t softness[3][64];
 static int16_t sine[256], distortion[LCD_W];
 static int depth_phase[LCD_H], cross_phase[LCD_H];
 static bool sine_ready;
@@ -62,11 +65,22 @@ void shell_draw(const char *error, unsigned phase) {
     float t=(started%3600000000LL)*0.000001f;
     // One owner draws the LCD; eight rows at a time. No full-screen framebuffer.
     const uint16_t white=board_rgb(237,246,255), muted=board_rgb(122,169,197);
-    int wave[LCD_W];
-    for(int x=0;x<LCD_W;x++)wave[x]=83+sinf(x*0.020f+t*0.6f)*13+sinf(x*0.009f-t*0.27f)*8;
+    int tilt_x,tilt_y;motion_get(&tilt_x,&tilt_y);
     if(!sine_ready) {
         for(int i=0;i<256;i++)sine[i]=(int16_t)(sinf(i*6.2831853f/256)*256);
+        const float widths[]={18,5,24};const float brightness[]={14,32,21};
+        for(int l=0;l<3;l++)for(int d=0;d<64;d++)
+            softness[l][d]=(uint8_t)(brightness[l]*expf(-d*d/(2*widths[l]*widths[l])));
         sine_ready=true;
+    }
+    if(mode==0)for(int l=0;l<3;l++)for(int x=0;x<LCD_W;x++) {
+        const float speeds[]={0.20f,0.60f,0.32f};const int depths[]={4,12,28};
+        const int centers[]={54,82,116};
+        float px=x+tilt_x*depths[l]/256.0f;
+        int a=(int)((px*(0.014f+l*0.004f)+t*speeds[l]+l*1.6f)*40.7437f);
+        int b=(int)((px*0.009f-t*0.24f+l)*40.7437f);
+        ribbons[l][x]=(int16_t)(centers[l]+tilt_y*depths[l]/256.0f
+            +(sine[a&255]*(9+l*4)+sine[b&255]*6)/256.0f);
     }
     if(mode==1) {
         // Perspective compresses the swell spacing towards a visible horizon.
@@ -84,12 +98,13 @@ void shell_draw(const char *error, unsigned phase) {
         stars[i].y=(int)fmodf(((seed>>8)%135)+t*(0.4f+speed*0.2f),135);
         float twinkle=0.5f+0.5f*sinf(t*(0.5f+(i%5)*0.13f)+i*2.7f);
         stars[i].color=board_rgb(45+twinkle*100,80+twinkle*120,105+twinkle*130);
+        if(mode==0){int depth=4+(i%3)*12;
+            stars[i].x=(stars[i].x+tilt_x*depth/256+LCD_W)%LCD_W;
+            stars[i].y=(stars[i].y+tilt_y*depth/256+LCD_H)%LCD_H;}
     }
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H ? LCD_H-strip_y:STRIP_H;
         for(int y=strip_y;y<strip_y+strip_h;y++)for(int x=0;x<LCD_W;x++) {
-            int distance=y-wave[x];if(distance<0)distance=-distance;
-            unsigned glow=distance<15 ? (15-distance)*2:0;
             if(mode==1) {
                 if(y<=36) {
                     strip[(y-strip_y)*LCD_W+x]=board_rgb(5+y/12,13+y/3,29+y/2);
@@ -104,12 +119,32 @@ void shell_draw(const char *error, unsigned phase) {
                 int shade=(swell+256)/32;
                 int haze=24-(y-36)/5;
                 strip[(y-strip_y)*LCD_W+x]=board_rgb(clamp(3+glint),clamp(20+shade+haze+glint),clamp(39+shade+haze+glint));
-            } else strip[(y-strip_y)*LCD_W+x]=board_rgb(5+glow/3,14+y/7+glow,30+y/5+glow);
+            } else {
+                unsigned light[3];
+                for(int l=0;l<3;l++){int d=y-ribbons[l][x];if(d<0)d=-d;light[l]=d<64?softness[l][d]:0;}
+                strip[(y-strip_y)*LCD_W+x]=board_rgb(5+light[0]/4+light[1]/3+light[2]/2,
+                    14+y/7+light[0]+light[1]+light[2]/2,
+                    30+y/5+light[0]+light[1]+light[2]);
+            }
         }
         for(int i=0;i<36;i++) {
             int px=stars[i].x,py=stars[i].y;
-            if(py+1<strip_y||py-1>=strip_y+strip_h)continue;
+            if(py+2<strip_y||py-2>=strip_y+strip_h)continue;
             uint16_t c=stars[i].color;
+            if(mode==0) {
+                int layer=i%3,radius=layer==2?2:0;
+                for(int yy=-radius;yy<=radius;yy++)for(int xx=-radius;xx<=radius;xx++) {
+                    int sx=px+xx,sy=py+yy,d=xx*xx+yy*yy;
+                    if(d>5||sx<0||sx>=LCD_W||sy<strip_y||sy>=strip_y+strip_h)continue;
+                    int strength=layer==2?(6-d)*14:layer==0?64:200;
+                    uint16_t old=strip[(sy-strip_y)*LCD_W+sx];
+                    unsigned r=(((old>>11)&31)*8*(256-strength)+((c>>11)&31)*8*strength)/256;
+                    unsigned g=(((old>>5)&63)*4*(256-strength)+((c>>5)&63)*4*strength)/256;
+                    unsigned b=((old&31)*8*(256-strength)+(c&31)*8*strength)/256;
+                    pixel(sx,sy,board_rgb(r,g,b));
+                }
+                continue;
+            }
             pixel(px,py,c);
             if(i%7==0){pixel(px-1,py,muted);pixel(px+1,py,muted);pixel(px,py-1,muted);pixel(px,py+1,muted);}
         }

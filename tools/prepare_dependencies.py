@@ -20,3 +20,7 @@ new = '36128da188cb236ffd029dd3c672ff8f85e5a196a9211e267a515c8efc1ab52c'
 assert text.count(old) == 1
 preparer.write_text(text.replace(old, new), encoding='utf-8')
 print('Prepared PocketJS', REVISION)
+bmi = ROOT / '.cache/bmi270'
+if not bmi.exists():
+    subprocess.run(['git','clone','https://github.com/boschsensortec/BMI270_SensorAPI.git',str(bmi)],check=True)
+subprocess.run(['git','-C',str(bmi),'checkout','--detach','41129fcfe39c583ee5462d79195741945d51c1fe'],check=True)

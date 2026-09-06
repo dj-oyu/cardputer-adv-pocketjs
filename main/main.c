@@ -1,5 +1,6 @@
 #include "board.h"
 #include "shell.h"
+#include "motion.h"
 #include "app_session.h"
 #include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
@@ -18,6 +19,7 @@ static void input_task(void *arg) {
     (void)arg;
     while(1) {
         board_key_t key=board_key();
+        motion_poll();
         char c;
         if(usb_serial_jtag_read_bytes(&c,1,0)>0) {
             if(c=='\r'||c=='\n'||c=='e')key=KEY_ENTER;
@@ -25,6 +27,7 @@ static void input_task(void *arg) {
             if(c=='b')key=KEY_RIGHT;
             if(c=='a')key=KEY_LEFT;
             if(c=='s')atomic_store(&capture,true);
+            if(c=='c')motion_recenter();
             if(c>='1'&&c<='6')atomic_store(&diagnostic,c);
         }
         if(key==KEY_BACK) { atomic_store(&stop,true);app_request_stop(); }
