@@ -41,7 +41,8 @@ try:
     command('d','SELECT 2');assert value(1)[2]==1
     end=time.monotonic()+2;heard=False
     while time.monotonic()<end:
-        if b'SFX 1 synthesized' in s.readline():heard=True;break
+        # Logged after the last I2S write of the click, not when it was queued.
+        if b'SFX 1 played' in s.readline():heard=True;break
     assert heard,'Synthesized audio was not submitted to I2S'
     command('a','CATEGORY 0');command('e','HELLO_FRAME_PRESENTED');command('q','HOME_READY')
     print('SETTINGS_OK sound=ON categories, toggles, mute, app-return',flush=True)

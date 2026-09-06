@@ -97,8 +97,13 @@ static void play_click(int kind,int16_t *pcm) {
             int16_t sample=(n<frames && atomic_load(&enabled))?sfx_pcm[kind][n]:0;
             pcm[j*2]=pcm[j*2+1]=sample;
         }
-        if(!emit(pcm))break;
+        if(!emit(pcm))return;
     }
+    // The only evidence from outside that a click reached the codec, and what
+    // tools/test_settings.py asserts on: the queue accepting a request proves
+    // nothing about the I2S write that follows. It said "synthesized" until the
+    // clicks stopped being synthesized per play; the check it backs is the same.
+    ESP_LOGI("sound","SFX %d played %d frames",kind,frames);
 }
 
 static void play_tone(const request_t *req,int16_t *pcm) {
