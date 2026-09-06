@@ -179,11 +179,26 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
-    // ST7789's 240x135 visible window in landscape (MADCTL=0x60).
-    uint16_t x0=40, x1=279, y0=y+53, y1=y+53+rows-1;
-    uint8_t xs[]={x0>>8,x0,x1>>8,x1}, ys[]={y0>>8,y0,y1>>8,y1};
-    esp_err_t e=command(0x2a,xs,4); if(e) return e;
-    e=command(0x2b,ys,4); if(e) return e;
+    // ST7789's 240x135 visible window in landscape (MADCTL=0x60). Every caller
+    // walks the whole panel top to bottom without skipping a row (see the
+    // callers' `for(strip_y=0; strip_y<LCD_H; strip_y+=STRIP_H)` loops), so
+    // the window is the same 135-row rectangle every frame. Setting it once
+    // per frame and then only streaming RAMWR data cuts 17 strips' worth of
+    // CASET/RASET (32 transactions) down to one: RAMWR is documented to stay
+    // open -- the write pointer keeps auto-incrementing -- across CS toggles
+    // until another command is sent, and nothing else here sends the panel a
+    // command mid-frame. Nothing in software could confirm that -- board_capture
+    // samples `pixels` before this point, and MISO is unwired -- so it was
+    // checked on the physical panel, which is the only evidence there is. If
+    // the picture ever tears or the ribbons land on the wrong rows, revert to
+    // setting xs/ys and issuing 0x2c on every call, the way this used to work.
+    if(y==0) {
+        uint16_t x0=40, x1=279, y0=53, y1=53+LCD_H-1;
+        uint8_t xs[]={x0>>8,x0,x1>>8,x1}, ys[]={y0>>8,y0,y1>>8,y1};
+        esp_err_t e=command(0x2a,xs,4); if(e) return e;
+        e=command(0x2b,ys,4); if(e) return e;
+        e=command(0x2c,NULL,0); if(e) return e;   // RAMWR: opens the write session
+    }
     // After the capture block above, which wants the pixels as drawn.
     //
     // A 32-bit C version of this was measured and was worse: this file builds
@@ -192,5 +207,5 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     int count=LCD_W*rows;
     if(pie_swap) swap_pie(pixels,(unsigned)(count*2/32));
     else swap_scalar(pixels,count);
-    return command(0x2c,pixels,LCD_W*rows*2);
+    return tx(true,pixels,(size_t)LCD_W*rows*2);
 }
