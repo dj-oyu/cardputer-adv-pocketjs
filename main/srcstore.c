@@ -25,32 +25,45 @@ typedef struct {
 // previous version, so losing power mid-write costs the last save rather than
 // the whole source. The cost is 12 KB of a 2.4 MB partition.
 #define FACES 2
+// A slot is its two faces, laid end to end. Slot 0 starts at offset 0, so the
+// records written before slots existed are still where this looks for them.
+#define SLOT_SPAN ((size_t)BLOCK*FACES)
 
-static const esp_partition_t *slot(void) {
+static const esp_partition_t *storage(void) {
     return esp_partition_find_first(ESP_PARTITION_TYPE_DATA,0x42,"storage");
 }
 
+// Byte offset of one face, or SIZE_MAX when it does not fit the partition.
+static size_t face_at(const esp_partition_t *p, unsigned slot, unsigned face) {
+    if(slot>=SRC_SLOT_COUNT) return SIZE_MAX;
+    size_t off=(size_t)slot*SLOT_SPAN+(size_t)face*BLOCK;
+    return (off+BLOCK<=p->size) ? off : SIZE_MAX;
+}
+
 // Reads one face into `out`. Returns false unless the record verifies.
-static bool read_face(const esp_partition_t *p, unsigned face,
+static bool read_face(const esp_partition_t *p, unsigned slot, unsigned face,
                       char *out, src_hdr_t *hdr) {
-    size_t base=(size_t)face*BLOCK;
+    size_t base=face_at(p,slot,face);
+    if(base==SIZE_MAX) return false;
     if(esp_partition_read(p,base,hdr,sizeof(*hdr))!=ESP_OK) return false;
     if(hdr->magic!=SRC_MAGIC || hdr->len>SRC_MAX) return false;
     if(esp_partition_read(p,base+sizeof(*hdr),out,hdr->len)!=ESP_OK) return false;
     out[hdr->len]=0;
     if(esp_crc32_le(0,(const uint8_t*)out,hdr->len)!=hdr->crc) {
-        ESP_LOGW("src","face %u failed its CRC",face);
+        ESP_LOGW("src","slot %u face %u failed its CRC",slot,face);
         return false;
     }
     return true;
 }
 
-// Which face holds the newest good record, or -1 when neither does.
-static int newest(const esp_partition_t *p, uint32_t *out_seq) {
+// Which face of a slot holds the newest good record, or -1 when neither does.
+static int newest(const esp_partition_t *p, unsigned slot, uint32_t *out_seq) {
     int best=-1; uint32_t best_seq=0;
     for(unsigned f=0;f<FACES;f++) {
+        size_t base=face_at(p,slot,f);
+        if(base==SIZE_MAX) continue;
         src_hdr_t hdr;
-        if(esp_partition_read(p,(size_t)f*BLOCK,&hdr,sizeof(hdr))!=ESP_OK) continue;
+        if(esp_partition_read(p,base,&hdr,sizeof(hdr))!=ESP_OK) continue;
         if(hdr.magic!=SRC_MAGIC || hdr.len>SRC_MAX) continue;
         if(best<0 || (int32_t)(hdr.seq-best_seq)>0) { best=(int)f; best_seq=hdr.seq; }
     }
@@ -58,21 +71,21 @@ static int newest(const esp_partition_t *p, uint32_t *out_seq) {
     return best;
 }
 
-size_t srcstore_load(char *out) {
+size_t srcstore_load(unsigned slot, char *out) {
     out[0]=0;
-    const esp_partition_t *p=slot();
+    const esp_partition_t *p=storage();
     if(!p) return 0;
     // Try the newest face, then the other one: a half-written newest face
     // fails its CRC and the previous version is still there.
     uint32_t seq=0;
-    int first=newest(p,&seq);
+    int first=newest(p,slot,&seq);
     if(first<0) return 0;
     for(unsigned attempt=0;attempt<FACES;attempt++) {
         unsigned face=(unsigned)((first+attempt)%FACES);
         src_hdr_t hdr;
-        if(read_face(p,face,out,&hdr)) {
-            ESP_LOGI("src","loaded %u bytes from face %u seq %u",
-                     (unsigned)hdr.len,face,(unsigned)hdr.seq);
+        if(read_face(p,slot,face,out,&hdr)) {
+            ESP_LOGI("src","slot %u: loaded %u bytes from face %u seq %u",
+                     slot,(unsigned)hdr.len,face,(unsigned)hdr.seq);
             return hdr.len;
         }
     }
@@ -80,14 +93,27 @@ size_t srcstore_load(char *out) {
     return 0;
 }
 
-bool srcstore_save(const char *text, size_t len) {
+bool srcstore_clear(unsigned slot) {
+    const esp_partition_t *p=storage();
+    if(!p) return false;
+    for(unsigned f=0;f<FACES;f++) {
+        size_t base=face_at(p,slot,f);
+        if(base==SIZE_MAX) return false;
+        if(esp_partition_erase_range(p,base,BLOCK)!=ESP_OK) return false;
+    }
+    ESP_LOGI("src","slot %u cleared",slot);
+    return true;
+}
+
+bool srcstore_save(unsigned slot, const char *text, size_t len) {
     if(len>SRC_MAX) return false;
-    const esp_partition_t *p=slot();
-    if(!p || p->size<(size_t)BLOCK*FACES) return false;
+    const esp_partition_t *p=storage();
+    if(!p) return false;
     uint32_t seq=0;
-    int current=newest(p,&seq);
+    int current=newest(p,slot,&seq);
     unsigned face=(current<0)?0:(unsigned)((current+1)%FACES);
-    size_t base=(size_t)face*BLOCK;
+    size_t base=face_at(p,slot,face);
+    if(base==SIZE_MAX) return false;
 
     // Flash writes want 4-byte offsets and lengths, so the body goes out in one
     // aligned run and the last few bytes ride in a padded word. Staging the
@@ -109,7 +135,7 @@ bool srcstore_save(const char *text, size_t len) {
     }
     if(err==ESP_OK) err=esp_partition_write(p,base,&hdr,sizeof(hdr));
     if(err!=ESP_OK) { ESP_LOGW("src","save failed: %s",esp_err_to_name(err)); return false; }
-    ESP_LOGI("src","saved %u bytes to face %u seq %u",
-             (unsigned)len,face,(unsigned)hdr.seq);
+    ESP_LOGI("src","slot %u: saved %u bytes to face %u seq %u",
+             slot,(unsigned)len,face,(unsigned)hdr.seq);
     return true;
 }

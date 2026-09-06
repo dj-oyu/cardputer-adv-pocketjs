@@ -50,12 +50,30 @@ code_state_t code_state(void) { return state; }
 bool code_dirty(void) { return dirty; }
 const char *code_source(size_t *out) { *out=len; return text; }
 
-void code_open(void) {
-    len=srcstore_load(text);
-    if(!len) { memcpy(text,TEMPLATE,sizeof(TEMPLATE)); len=sizeof(TEMPLATE)-1; }
+// Which record this session reads and writes. Everything that saves goes
+// through it, so a lesson can never reach the person's own program.
+static unsigned slot=SRC_SLOT_USER;
+
+static void open_slot(unsigned which, const char *seed, size_t seed_len) {
+    slot=which;
+    len=srcstore_load(slot,text);
+    if(!len && seed_len) {
+        if(seed_len>SRC_MAX) seed_len=SRC_MAX;
+        memcpy(text,seed,seed_len);
+        len=seed_len;
+    }
+    text[len]=0;
     cursor=len; top_line=0; unsaved=false; state=CODE_EDIT; dirty=true;
     notice[0]=0;
     if(skk_session_ready()) { ime_reset(skk_session()); ime_set_on(skk_session(),false); }
+}
+
+void code_open(void) {
+    open_slot(SRC_SLOT_USER,TEMPLATE,sizeof(TEMPLATE)-1);
+}
+
+void code_open_lesson(unsigned lesson, const char *seed, size_t seed_len) {
+    open_slot(SRC_SLOT_LESSON+lesson,seed,seed_len);
 }
 
 void code_returned(const char *error) {
@@ -177,7 +195,7 @@ bool code_key(const keystroke_t *k) {
         case '\t': insert("  ",2); follow_cursor(); return true;
         case 0x13: // C-s
             snprintf(notice,sizeof(notice),
-                     srcstore_save(text,len)?"SAVED %u B":"SAVE FAILED",(unsigned)len);
+                     srcstore_save(slot,text,len)?"SAVED %u B":"SAVE FAILED",(unsigned)len);
             unsaved=false; sound_play(1);
             return true;
         case 0x0e: // C-n: empty document. The template is what a first-ever
@@ -188,7 +206,7 @@ bool code_key(const keystroke_t *k) {
             return true;
         case 0x12: // C-r. Saving only what changed keeps a run from erasing
                    // three flash sectors, and stalling the UI while it does.
-            if(unsaved) { srcstore_save(text,len); unsaved=false; }
+            if(unsaved) { srcstore_save(slot,text,len); unsaved=false; }
             state=CODE_RUNNING;
             snprintf(notice,sizeof(notice),"RUNNING");
             return true;
