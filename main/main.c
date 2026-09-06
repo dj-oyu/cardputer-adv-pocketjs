@@ -273,6 +273,7 @@ static void paint(const screen_ops_t *s) {
 
 static void ui_task(void *arg) {
     (void)arg;
+    ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
     while(1) {
         int64_t frame_start=esp_timer_get_time();
