@@ -62,7 +62,11 @@ garden_density(GardenSpan *s,int px,int y,int shift) {
 // one array of (mask+1) corners per row describes the whole octave.
 static int garden_corner(int c,int mask,int y,int shift) {
     unsigned cy=(unsigned)(y>>shift);
-    int fy=garden_smooth((y&((1<<shift)-1))*256/(1<<shift));
+    // *256/(1<<shift) is <<(8-shift), and `shift` is a parameter so the
+    // compiler could not see that: it emitted a real hardware divide, twelve
+    // times a row. Exact, not an approximation -- the divisor is a power of two
+    // and the numerator is non-negative.
+    int fy=garden_smooth((y&((1<<shift)-1))<<(8-shift));
     int a=(int)(garden_hash((unsigned)(c&mask)+cy*19)&255);
     int b=(int)(garden_hash((unsigned)(c&mask)+(cy+1)*19)&255);
     return a+(b-a)*fy/256;
@@ -776,12 +780,28 @@ void garden_row(uint16_t *row,int y,const GardenFrame *f) {
         // do not assume the caller's row pointer is 16-byte aligned.
         // The vertical term does not depend on x; clipping once also drops the
         // per-pixel bounds test.
+        // The one per-pixel division left in this file, and the only one that
+        // was never hoisted: rr is invariant for the whole ellipse-row and the
+        // divide ran on all ~10,450 pixels the canopy touches in a frame.
+        //
+        // Exactly, not approximately. The lobe's reciprocals rounded up at 2^22
+        // and moved the picture by a step; here the domain is small enough
+        // (rr = rx*rx for rx in 28..44, and |dx| <= rx so the numerator never
+        // exceeds rr) that ceil(2^26/rr) with a shift of 18 reproduces
+        // dx*dx*256/rr for every reachable pair. garden_model.c sweeps it.
         int qy=dy*dy*256/(ry*ry),rr=rx*rx;
+#ifndef GARDEN_NO_CANOPY_RECIP
+        int mrr=garden_recip(rr,26);
+#endif
         int lo=cx-rx,hi=cx+rx;
         if(lo<0)lo=0;
         if(hi>239)hi=239;
         for(int x=lo;x<=hi;x++) {
+#ifdef GARDEN_NO_CANOPY_RECIP
             int dx=x-cx,q=256-dx*dx*256/rr-qy;
+#else
+            int dx=x-cx,q=256-((dx*dx*mrr)>>18)-qy;
+#endif
             if(q>0)row[x]=garden_mix(row[x],leafy,(unsigned)q*3/5);
         }
     }

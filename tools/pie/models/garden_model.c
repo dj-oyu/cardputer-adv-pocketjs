@@ -209,6 +209,34 @@ static void sweep_dither(void) {
     printf("%-10s over all 65536 lane values: %u/%u/%u/%u\n", "dither", bin[0], bin[1], bin[2], bin[3]);
 }
 
+// The canopy's per-pixel divide, replaced exactly rather than approximately.
+// rx runs 28..44 so rr = rx*rx runs 784..1936, and the ellipse is clipped so
+// that |dx| <= rx: the numerator never exceeds the divisor. Over that domain a
+// round-up reciprocal at 2^26 with a shift of 18 is not a bound, it is an
+// identity -- which is why the canopy change moves no pixels at all, unlike the
+// sunlight lobe's reciprocals above. The shift is the smallest that is exact
+// (16 and 17 are out by one) and the largest that keeps dx*dx*M inside a signed
+// 32-bit int, which is a two-sided constraint worth stating: there is no slack.
+static void sweep_canopy(void) {
+    long checked = 0, maxprod = 0;
+    for (int rx = 28; rx <= 44; rx++) {
+        int d = rx * rx;
+        long M = ((1L << 26) + d - 1) / d;
+        for (int u = 0; u <= rx; u++) {
+            long n = (long)u * u, prod = n * M;
+            if (prod > maxprod) maxprod = prod;
+            if (prod > 2147483647L) { printf("canopy: dx*dx*M leaves a signed int\n"); mismatches++; return; }
+            if ((prod >> 18) != n * 256 / d) {
+                printf("canopy: rr=%d dx2=%ld gives %ld, not %ld\n", d, n, prod >> 18, n * 256 / d);
+                mismatches++;
+            }
+            checked++;
+        }
+    }
+    printf("%-10s exact over %ld reachable pairs, rr 784..1936; widest product %ld of 2^31\n",
+           "canopy", checked, maxprod);
+}
+
 int main(void) {
     sweep_smooth();
     sweep_lerp();
@@ -225,6 +253,7 @@ int main(void) {
     sweep_shoulder();
     sweep_channels();
     sweep_dither();
+    sweep_canopy();
     printf("mismatches=%ld\n", mismatches);
     return mismatches ? 1 : 0;
 }
