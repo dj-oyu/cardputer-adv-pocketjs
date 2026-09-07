@@ -22,9 +22,21 @@
 //                                  4770   which is what the board measured as
 //                                         mbedTLS's largest single allocation
 //
-// 674 bytes of that buy nothing, and this block is taken and released six times
-// in one handshake, so it is also six chances to leave a hole. Passing 0 gets
-// the same buffer without the second helping.
+// 333 bytes of that buy nothing -- the 8-byte SSL_BUF_HEAD_OFFSET_SIZE is
+// charged either way and is not waste. Commit fb41a02's message says 674, which
+// is wrong; 4,770 minus 4,437 is 333, and that is the number to trust. The
+// block is taken and released six times in one handshake.
+//
+// The proof does not depend on this build's sdkconfig. ssl_misc.h:416 defines
+// MBEDTLS_SSL_OUT_BUFFER_LEN as HEADER_LEN + PAYLOAD_OVERHEAD + OUT_CONTENT_LEN,
+// and tx_buffer_len's else branch adds exactly HEADER_LEN + PAYLOAD_OVERHEAD, so
+// tx_buffer_len(ssl, OUT_BUFFER_LEN) == tx_buffer_len(ssl, 0) + HEADER_LEN +
+// PAYLOAD_OVERHEAD by substitution, whatever the content length is set to.
+//
+// Nor is it eight call sites. There are 19 across the port -- 11 in
+// esp_ssl_cli.c, 7 in esp_ssl_srv.c, and esp_mbedtls_dynamic_impl.c:161 makes
+// the same mistake on the RX side with MBEDTLS_SSL_IN_BUFFER_LEN. This wrap
+// only covers the TX ones. See docs/idf-tls-txbuffer-report.md.
 //
 // Why a linker wrap and not a patched IDF: C:\esp\v6.0.1\esp-idf is shared by
 // every project on this machine and is replaced wholesale on an IDF update, so
