@@ -691,10 +691,29 @@ static const pocket_limit_t storage_limits[] = {
 // available is an observation, so the probe reports whether the namespace is
 // open — and opens it, once, so that the first answer is the true one rather
 // than a pessimistic guess.
+//
+// It cannot ask store_open() for that. store_open() caches its handle in
+// `state`, and `state` is calloc'd by build_storage(), which does not run until
+// an app first reads pocket.storage. So an app that checked the capability
+// before using the namespace was always told DISABLED, and an app that used it
+// without checking worked: feature-testing first, which is the behaviour
+// section 2 exists to encourage, was the behaviour being punished. This asks
+// the same question without the cache and keeps the cache when there is one.
+static bool store_reachable(void) {
+    if(state) return store_open();
+    if(nvs_flash_init()!=ESP_OK) return false;
+    char name[NVS_NS_NAME_MAX_SIZE];
+    namespace_name(name);
+    nvs_handle_t probe;
+    if(nvs_open(name,NVS_READWRITE,&probe)!=ESP_OK) return false;
+    nvs_close(probe);
+    return true;
+}
+
 static void storage_probe(const pocket_capability_t *capability, bool *available,
                           const char **reason) {
     (void)capability;
-    *available=store_open();
+    *available=store_reachable();
     *reason=*available?NULL:POCKET_REASON_DISABLED;
 }
 
