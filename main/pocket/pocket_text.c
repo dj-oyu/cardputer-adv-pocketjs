@@ -103,17 +103,37 @@ void pocket_text_reset(void) {
 // freed by the call -- an onEdit that calls close() does exactly that -- so
 // nothing after this may touch it unless the answer is true.
 static bool fire(session_t *s, JSValueConst fn, int argc, JSValueConst *argv) {
-    if(!s->ctx || !JS_IsFunction(s->ctx,fn)) return live==s;
+    // Everything this function needs after the call is read BEFORE it. `s` is
+    // one calloc of session+buffer, so a close() from inside the listener frees
+    // the whole block -- and the reopen that usually follows takes the same
+    // size class straight back off the free list, which is what turns `s->ctx`
+    // after the call from a poisoned read into a plausible-looking pointer
+    // built out of the NEW session's field. Cache, do not reload.
+    JSContext *ctx=s->ctx;
+    if(!ctx || !JS_IsFunction(ctx,fn)) return live==s;
     uint32_t handle=s->handle;
-    JSValue result=JS_Call(s->ctx,fn,JS_UNDEFINED,argc,argv);
+    // The listener is called through a reference of OUR own, and this is the
+    // one that stops the board rebooting. `fn` is borrowed from s->on_*, and
+    // the session holds the only reference to it: a listener that calls
+    // close() reaches destroy(), which frees exactly those three JSValues --
+    // so the function object, its bytecode and the atoms of every string
+    // literal after the close() are released WHILE THAT FUNCTION IS STILL
+    // RUNNING. On the board that is the LoadProhibited: `c.close(); reopen();`
+    // dies on the second statement, which is why OPEN-D was never printed.
+    // QuickJS's own rule -- the caller keeps the callee alive for the call --
+    // was the one being broken here, and it cannot be fixed by handle checks
+    // afterwards because the crash happens before "afterwards".
+    JSValue held=JS_DupValue(ctx,fn);
+    JSValue result=JS_Call(ctx,held,JS_UNDEFINED,argc,argv);
+    JS_FreeValue(ctx,held);
     if(JS_IsException(result)) {
-        JSValue e=JS_GetException(s->ctx);
-        const char *text=JS_ToCString(s->ctx,e);
+        JSValue e=JS_GetException(ctx);
+        const char *text=JS_ToCString(ctx,e);
         ESP_LOGW(TAG,"listener threw: %s",text?text:"?");
-        if(text) JS_FreeCString(s->ctx,text);
-        JS_FreeValue(s->ctx,e);
+        if(text) JS_FreeCString(ctx,text);
+        JS_FreeValue(ctx,e);
     }
-    JS_FreeValue(s->ctx,result);
+    JS_FreeValue(ctx,result);
     return live && live->handle==handle;
 }
 
@@ -122,14 +142,18 @@ static bool fire(session_t *s, JSValueConst fn, int argc, JSValueConst *argv) {
 // only for what the engine has settled, and that is the one string this file
 // ever copies out of the IME.
 static bool fire_edit(session_t *s) {
-    if(!s->ctx) return true;
-    JSValue event=JS_NewObject(s->ctx);
-    if(JS_IsException(event)) { JS_FreeValue(s->ctx,event); return live==s; }
-    JS_SetPropertyStr(s->ctx,event,"text",
-                      JS_NewStringLen(s->ctx,s->field.buf,s->field.len));
+    // Same rule as fire(): the context is taken before the listener runs,
+    // because the event still has to be released after a listener that closed
+    // the session out from under us.
+    JSContext *ctx=s->ctx;
+    if(!ctx) return true;
+    JSValue event=JS_NewObject(ctx);
+    if(JS_IsException(event)) { JS_FreeValue(ctx,event); return live==s; }
+    JS_SetPropertyStr(ctx,event,"text",
+                      JS_NewStringLen(ctx,s->field.buf,s->field.len));
     JSValueConst argv[1]={event};
     bool alive=fire(s,s->on_edit,1,argv);
-    JS_FreeValue(s->ctx,event);
+    JS_FreeValue(ctx,event);
     return alive;
 }
 
