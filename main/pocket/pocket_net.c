@@ -46,14 +46,32 @@ static const char *TAG = "pocket.net";
 // The headroom a TLS handshake needs before it is worth starting. mbedTLS at
 // this build's defaults wants a 16 KiB record buffer, a 4 KiB output buffer and
 // its context and parsed chain on top -- call it 30 KiB, of which one block is
-// 16 KiB. Both numbers below are ESTIMATES from those defaults, not measured on
-// the handshake, and they are deliberately above it: an app that is refused
+// 16 KiB. Both numbers below started as estimates from those defaults. What has
+// since been measured (see TLSCOST below) is that they are checked about 14 KB
+// before the allocation that actually fails, because esp_http_client builds
+// itself in between: at 41,300 free here, mbedtls_ssl_setup was reached with
+// 27,232 and returned ALLOC_FAILED. So the margin is not the slack it looks
+// like. They remain deliberately above the handshake: an app that is refused
 // here is told OUT_OF_MEMORY with a number it can act on, whereas a handshake
 // that runs the internal heap out takes the whole session down. Free heap at
 // the home screen is about 222 KiB, a linked radio costs about 37 KiB of that,
 // and a guest that has grown into its 144 KiB cap can leave less than this.
-#define NET_TLS_MIN_FREE   (48*1024)
-#define NET_TLS_MIN_BLOCK  (20*1024)
+// Measured 2026-09-08 against https://example.com/ with CONFIG_MBEDTLS_DYNAMIC_BUFFER
+// on. The handshake succeeded and cost 7,172 bytes of free heap -- a quarter of
+// the 30 KiB the paragraph above guessed -- but it took 15,360 out of the
+// largest block, which is the number that actually binds. At the gate there
+// were about 46 KiB free and 31,744 in the largest block; by the time
+// esp_http_client_open ran, 32,328 and 23,552. Both thresholds are set from
+// that with margin, and both are checked roughly 14 KB before the allocation
+// they are protecting.
+//
+// One server, one certificate chain, one run. A longer chain wants more, so
+// these stay above what was measured rather than at it.
+#define NET_TLS_MIN_FREE   (40*1024)
+// Raised, not lowered, by the measurement: 20 KiB here would have left about
+// 12 KiB by the time the 15,360 byte allocation was made, and it would have
+// failed. The old value was the one genuinely wrong number of the two.
+#define NET_TLS_MIN_BLOCK  (26*1024)
 // Plain HTTP is a socket, a 512 byte client buffer and this file's two arenas.
 #define NET_PLAIN_MIN_FREE (12*1024)
 // Measured on the board, 2026-09-07, with the probe in wifi_time.c: esp_wifi_init
@@ -337,7 +355,22 @@ static void http_task(void *arg) {
     }
 
     if(client) {
+        // Kept rather than removed: it is the only place the handshake's real
+        // appetite becomes visible, and the thresholds above were guesses until
+        // it existed. Measured 2026-09-08 with the gates lowered on purpose:
+        // the request-time check saw 41,300 free, this point saw 27,232, and
+        // mbedtls_ssl_setup then failed with -0x008D (ALLOC_FAILED). The 14 KB
+        // between the two is esp_http_client building itself, which is why a
+        // threshold that looked generous against the handshake is not.
+        size_t before_free=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+        size_t before_block=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
         esp_err_t err=esp_http_client_open(client,(int)http.body_len);
+        size_t after_free=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+        size_t after_block=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+        ESP_LOGI(TAG,"TLSCOST open=%s free %u->%u (used %d) block %u->%u",
+                 esp_err_to_name(err),(unsigned)before_free,(unsigned)after_free,
+                 (int)before_free-(int)after_free,
+                 (unsigned)before_block,(unsigned)after_block);
         if(err!=ESP_OK)
             // esp_http_client folds the handshake into open(), so a refused
             // connection and a rejected certificate arrive the same way and

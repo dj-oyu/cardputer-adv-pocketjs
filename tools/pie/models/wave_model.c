@@ -1,5 +1,5 @@
 /* Exhaustive proof that the wave kernel's arithmetic equals wave_row_scalar
- * (main/shell.c): all 135 rows x all three |y-ribbon| in 0..70, both signs
+ * (main/scene/wave.c): all 135 rows x all three |y-ribbon| in 0..70, both signs
  * (386,543,880 pixels). Models the lookup table layout light | (weighted<<16),
  * the min(d,64) clamp and the SAR=11 multiply pack. Build: see run_models.py. */
 #include <stdio.h>

@@ -31,3 +31,13 @@ const char *code_source(size_t *len);
 
 // Called when the guest stops, with the reason to show (NULL on a clean exit).
 void code_returned(const char *error);
+
+// Leaving the screen for good. The 8 KB source buffer goes back to the heap;
+// the next open reads the slot out of flash again.
+void code_close(void);
+
+// The same buffer, given back for the length of a run and taken again at the
+// end of it. Release must not be called until the guest has finished parsing:
+// app_start_source() reads straight out of the caller's bytes.
+void code_run_release(void);
+void code_run_restore(void);

@@ -3,6 +3,7 @@ import argparse
 from pathlib import Path
 import time
 import serial
+from home_modes import BACKGROUNDS
 
 p=argparse.ArgumentParser()
 p.add_argument('--port',required=True)
@@ -27,9 +28,9 @@ try:
     s.write(b'b');read_until('CATEGORY 1')
     s.write(b'uu');read_until('SELECT 0')
     # Explicitly select each background through its child menu.
-    for mode in range(3):
+    for mode in range(len(BACKGROUNDS)):
         s.write(b'e');read_until('OPEN')
-        for key in b'uu'+b'd'*mode:
+        for key in b'u'*(len(BACKGROUNDS)-1)+b'd'*mode:
             s.write(bytes([key]));read_until('CHOICE')
         s.write(b'e');read_until('VALUE')
         for sample in range(4):

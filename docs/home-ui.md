@@ -1,5 +1,10 @@
 # ホームUI設計
 
+2026-09-07試作追加: BackgroundにFLOWER RAY / FLOWER MESHを追加。
+さらにLILY OF VALLEY / SUNFLOWER / SNOWDROPを追加。頂点・画像素材をFlashへ保存せず、関数から描画する。
+花は背景だけとして追加し、以下の既存XMB配置と遷移を全背景で共用する。
+方式・メモリ・検証範囲は[Flowerホーム試作](flower-home.md)を参照。
+
 更新: 2026-09-06。確定済みcommit `2b053b7`の文字主体ホームを記述。チュートリアルの追加は進行中。[XMB調査](xmb-research.md)は設計経緯と初版の測定記録。
 
 ## 操作と情報構造

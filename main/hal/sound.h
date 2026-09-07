@@ -28,6 +28,13 @@ bool sound_play(int kind);
 // False if sound_init found no codec; every other call here is then inert.
 bool sound_available(void);
 
+// Re-runs the synthesis the baked tables replaced and logs the worst absolute
+// difference. A one-shot diagnostic ('8' over USB, main.c), not on any path a
+// user reaches: the tables are in flash and the point is to find out what this
+// board's newlib sinf says about them, which no host can answer. Allocates
+// SFX_SAMPLES*2 bytes for the length of the check and frees them.
+void sound_check_tables(void);
+
 // Called from the audio task once, when the tone stops. completed is false if
 // sound_tone_cancel got to it first, or if the I2S write failed. The callback
 // runs at the audio task's priority with its stack, so it must do no more than

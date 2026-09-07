@@ -3,6 +3,7 @@ import argparse
 import re
 import time
 import serial
+from home_modes import BACKGROUNDS
 
 p=argparse.ArgumentParser();p.add_argument('--port',required=True);a=p.parse_args()
 s=serial.Serial(a.port,115200,timeout=0.1)
@@ -21,7 +22,7 @@ def expect(marker,timeout=8):
     raise RuntimeError(lines[-12:])
 def value(selected):
     command('e','OPEN')
-    command('u','CHOICE');command('u','CHOICE')
+    for _ in range(len(BACKGROUNDS)-1):command('u','CHOICE')
     for _ in range(selected):command('d','CHOICE')
     line=command('e','VALUE')
     print(line,flush=True)
@@ -32,7 +33,7 @@ try:
     command('q','HOME_READY');command('a','CATEGORY 0');command('b','CATEGORY 1')
     command('u','SELECT');command('u','SELECT');command('u','SELECT 0')
     first=value(0);second=value(1);assert first[0]==0 and second[0]==1
-    third=value(2);assert third[0]==2
+    for mode in range(2,len(BACKGROUNDS)):assert value(mode)[0]==mode
     value(1)
     # Back cancels the pending choice without applying it.
     command('e','OPEN');command('u','CHOICE 0');command('q','HOME_READY')

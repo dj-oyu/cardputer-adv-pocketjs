@@ -1,4 +1,5 @@
 #include "solar_sail.h"
+#include "scene_mem.h"
 #include "solar_time.h"
 #include <math.h>
 #include <stdlib.h>
@@ -44,20 +45,55 @@ static const Satellite satellites[]={
 #define SATELLITE_N (sizeof(satellites)/sizeof(satellites[0]))
 static Orbit orbits[8];
 static Orbit satellite_orbits[SATELLITE_N];
-static Line lines[MAX_LINES];
 enum { BANDS=(H+7)/8, INDEX_CAPACITY=4096 };
-static uint16_t band_items[INDEX_CAPACITY],band_offsets[BANDS+1];
+// The 29,579 bytes this scene used to hold in .bss from boot to power-off,
+// split the way scene_mem.h splits memory, because the two halves have
+// different lifetimes and only one of them is large.
+//
+// The core is what `if(!ready)` builds once: trigonometry, the sky gradient and
+// the disk table. Six kilobytes, derived from nothing but constants, and every
+// other scene borrows the same block in turn -- so it is sized to the largest
+// core rather than to the sum, and flower's 7,776 already covers it.
+//
+// The bulk is the per-frame scratch, and it is the reason the split exists: a
+// display list of 1,536 lines and its band index are 23,552 bytes that belong
+// to this background alone. Held in the core they would sit behind every other
+// mode for the rest of the boot after solar_sail had been looked at once.
+//
+// Two structs rather than two columns of hand-written offsets: the layout
+// inside each block is then the compiler's problem.
+typedef struct {
+    Vec      cage[11][33];
+    float    cs[ORBIT_STEPS+1],sn[ORBIT_STEPS+1];
+    uint16_t sky[H];
+    uint8_t  disk_half[25][25];
+} solar_core_t;
+typedef struct {
+    Line     lines[MAX_LINES];
+    uint16_t band_items[INDEX_CAPACITY];
+} solar_bulk_t;
+// Pointers rather than macros, and named exactly as the arrays were, so every
+// use site in this file reads the same as it did. NULL is the honest state
+// between a failed allocation and the next prepare, and both draw paths test
+// for it rather than trusting a flag.
+static Line     *lines;
+static uint16_t *band_items,*sky;
+static Vec     (*cage)[33];
+static float    *cs,*sn;
+static uint8_t (*disk_half)[25];
+// Any address unique to this file identifies it to the block.
+static const char solar_owner;
+// This one stays in .bss: 36 bytes, and solar_sail_draw reads it to find the
+// span of the band it is on before anything has proved a block exists.
+static uint16_t band_offsets[BANDS+1];
 static bool index_valid,index_fits;
-static uint8_t disk_half[25][25];
 static unsigned count,focus;
 static double elapsed,sim_days;
 static solar_time_source_t time_source;
 static float baseline_x,baseline_y,steer_x,steer_y;
 static Vec right,up,front,center;
-static float zoom,screen_x=178,cs[ORBIT_STEPS+1],sn[ORBIT_STEPS+1];
-static Vec cage[11][33];
+static float zoom,screen_x=178;
 static bool ready;
-static uint16_t sky[H];
 static uint16_t rgb(int r,int g,int b){return (r>>3)<<11|(g>>2)<<5|(b>>3);}
 static Vec add(Vec a,Vec b){return (Vec){a.x+b.x,a.y+b.y,a.z+b.z};}
 static Vec mul(Vec a,float s){return (Vec){a.x*s,a.y*s,a.z*s};}
@@ -283,6 +319,25 @@ void solar_sail_prepare(float dt,int tx,int ty) {
     if(dt>0.1f)dt=.033f;
     if(dt<0)dt=0;
     elapsed+=dt;
+    // Core first, always: taking it is what evicts another scene's bulk, so
+    // asking for the bulk before it would hand back a block about to be freed.
+    bool rebuild;
+    solar_core_t *core=scene_mem(&solar_owner,sizeof *core,&rebuild);
+    if(!core) {
+        // Nothing to draw on and nothing to draw. Clearing `ready` here is not
+        // strictly needed -- a later grow reports a rebuild of its own -- but a
+        // cache flag left true while its data is unreachable is the exact shape
+        // scene_mem.h exists to rule out, so it does not survive the failure.
+        cage=NULL; cs=NULL; sn=NULL; sky=NULL; disk_half=NULL;
+        lines=NULL; band_items=NULL;
+        ready=false; count=0; index_valid=false;
+        return;
+    }
+    sky=core->sky; cage=core->cage; cs=core->cs; sn=core->sn;
+    disk_half=core->disk_half;
+    // The trigonometry, the sky gradient and the disk table are cached in that
+    // block, so they are exactly as old as it is.
+    if(rebuild) ready=false;
     if(!ready) {
         for(int k=0;k<=ORBIT_STEPS;k++){cs[k]=cosf(k*6.2831853f/ORBIT_STEPS);sn[k]=sinf(k*6.2831853f/ORBIT_STEPS);}
         for(int j=0;j<11;j++)for(int k=0;k<=32;k++) {
@@ -295,6 +350,20 @@ void solar_sail_prepare(float dt,int tx,int ty) {
         for(int r=0;r<=24;r++)for(int dy=0;dy<=r;dy++)disk_half[r][dy]=(uint8_t)sqrtf(r*r-dy*dy);
         ready=true;
     }
+    // The display list. Asking for it every frame rather than once is what
+    // makes the eviction in scene_mem() work: the frame after another scene
+    // took the core, this call allocates again and is told to rebuild.
+    bool bulk_rebuild;
+    solar_bulk_t *bulk=scene_bulk(&solar_owner,sizeof *bulk,&bulk_rebuild);
+    if(!bulk) {
+        // The sky is in the core and still drawable; only the solar system is
+        // missing. Plain, not a crash, and not a blank screen either.
+        lines=NULL; band_items=NULL; count=0; index_valid=false;
+        return;
+    }
+    lines=bulk->lines; band_items=bulk->band_items;
+    // The index describes lines that are no longer there.
+    if(bulk_rebuild) index_valid=false;
     // Orbital epoch comes from the clock provider; elapsed only drives the
     // tour/IMU and unsynchronized demo. Resync never restarts the camera tour.
     solar_time_sample_t time=solar_time_now(elapsed);
@@ -382,7 +451,14 @@ static void __attribute__((noinline)) fill_row(uint16_t *row,uint16_t color) {
 #endif
 }
 void solar_sail_draw(uint16_t *pixels,int y,int height) {
+    // Without the core there is not even a sky gradient to draw on, so the flat
+    // colour stands in for it. A background that cannot allocate should look
+    // plain, not crash.
+    if(!sky) { for(int j=0;j<height;j++)fill_row(pixels+j*W,rgb(3,7,17)); return; }
     for(int j=0;j<height;j++)fill_row(pixels+j*W,sky[y+j]);
+    // The core came back and the bulk did not: the gradient above is the whole
+    // picture. count is already 0, so this only says so plainly.
+    if(!lines) return;
     bool indexed=y%8==0&&height==(H-y<8?H-y:8);
     if(indexed&&!index_valid)index_lines();
     indexed=indexed&&index_fits;

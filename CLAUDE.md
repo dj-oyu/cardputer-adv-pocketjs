@@ -38,6 +38,10 @@ python tools\benchmark_app.py --port COM3              # JSアプリのPAINT内�
 
 ```bash
 python tools/test_flash_budget.py       # パーティション予約ガード
+gcc -O2 -Wall -Wextra -Werror tools/test_solar_sail.c -lm -o .cache/test_sail.exe && .cache/test_sail.exe
+gcc -O2 -Wall -Wextra -Werror tools/test_flower.c -lm -o .cache/test_flower.exe && .cache/test_flower.exe
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_time.c -lm -o /tmp/t && /tmp/t"   # WSLのみ
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/test_sfx.py"   # 焼き込んだ効果音表と旧合成の差（WSLのみ。gccはWindows側に無い）
 python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
 python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで模擬実行しスカラーと全画素比較
 python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
@@ -50,6 +54,10 @@ python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --chec
 **DRAMは `tools/memlog.py` が記録する。** ビルドのたびに静的値を `.cache/memlog/memory.jsonl`（git管理外）へ追記し、**動いたときだけ**書くので、ログはビルドの一覧ではなく変化の一覧になる。`--port` を付けると実機の空きヒープ（アイドル時とアプリ実行中）も一緒に残る。増減はファイル別に出るので「DRAMが6KiB増えた」ではなく「`pocket_io.c.obj +1113`」が読める。
 
 `main/` のPIEカーネルを触ったら、焼く前にこの3層を通す。詳細は `tools/pie/README.md` と `docs/pie-simd.md`。
+
+**ホスト側の検査は `main/` のパスを直書きするので、ファイルを動かすと黙って壊れる。** `main/` へディレクトリを切った `e770950` は2種類を壊した — `tools/test_solar_sail.c` の `#include "../main/solar_sail.c"`、および `tools/pie/test_kernels.py` と `tools/pie/models/accel_host_test.c` が指す `main/shell.c` / `main/render_accel.c` / `main/solar_sail.c`。前者はビルド不能、後者は5件すべてが `FileNotFoundError`。つまり**「焼く前に3層を通す」は再編以降ずっと実行できておらず、その間に焼いたものは検査されていない**。誰も走らせていない検査は、失敗しないという意味で通っているように見える。壊れていたのは他に `tools/test_solar_time.c` と `tools/pie/profile_solar.c` と `tools/pie/models/accel_host_test.c`。**`main/` の中でファイルを動かしたら、`grep -rn "main/" tools/` で参照元を洗ってから動かす。**
+
+**`test_solar_time.c` はMinGWでは通らない。** Windowsの `struct timeval.tv_sec` は4バイトで、2038年の検査が書き込む `2147483648` が負に化ける。ESP-IDFの `time_t` は64bitなので実機は無関係。WSLで走らせること。ホストの型がファームの型と違う場所は、テストが嘘をつく。
 
 ## アーキテクチャ
 

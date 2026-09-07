@@ -1,5 +1,5 @@
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
-idf_component_register(SRCS "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "app_session.c" "hal/motion.c" "hal/sound.c"
+idf_component_register(SRCS "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "hal/motion.c" "hal/sound.c"
     "hal/keymap.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/jsfont.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/pocket_io.c" "pocket/pocket_ui.c" "pocket/pocket_app.c" "pocket/pocket_workspace.c" "pocket/app_registry.c" "pocket/pocket_net.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c" "scene/render_accel.c"
     "pet/pet_assets.c" "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../.cache/bmi270/bmi2.c" "../.cache/bmi270/bmi270.c"
     INCLUDE_DIRS "." "hal" "pocket" "pet" "ui" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../.cache/bmi270"
@@ -12,7 +12,22 @@ idf_component_register(SRCS "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sai
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_font.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_font.py")
+# The click PCM and the tone sine table used to be built into .bss at boot; they
+# depend on nothing but compile-time constants, so they are baked here and land
+# in .rodata instead. tools/test_sfx.py diffs the output against the synthesis
+# that produced it (main/hal/sfx_synth.h).
+execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_sfx.py" "${CMAKE_BINARY_DIR}/generated"
+    COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_sfx.py")
+# The same argument for the home screen's three constant scene tables: sine,
+# softness and wave_lut were 1,484 B of .bss built once at the first frame from
+# nothing but literals. tools/test_scene_tables.py diffs the baked values
+# against the C expressions that used to build them.
+execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_scene_tables.py" "${CMAKE_BINARY_DIR}/generated"
+    COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_scene_tables.py")
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 # The small procedural renderer benefits from speed optimization; the JS engine
 # and other components retain the project's size optimization.
-set_source_files_properties(shell.c solar_sail.c render_accel.c PROPERTIES COMPILE_OPTIONS "-O2")
+target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c")
+set_source_files_properties(shell.c solar_sail.c render_accel.c scene/flower.c scene/glass_rain.c scene/wave.c scene/ocean.c PROPERTIES COMPILE_OPTIONS "-O2")

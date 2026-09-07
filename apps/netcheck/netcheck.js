@@ -2,7 +2,10 @@
 (function(){
   var N = pocket.net, T = pocket.time, URL = 'https://example.com/';
   function say(t){ console.log('NETCHK '+t); }
-  function no(t){ return function(e){ say(t+' '+e.code+' '+e.outcome); }; }
+  // The message carries the numbers a refusal was made on; without it a
+  // LOW_MEMORY or OUT_OF_MEMORY says only that something did not fit.
+  function no(t){ return function(e){ say(t+' '+e.code+' '+e.outcome+
+                                          (e.message?' :: '+e.message:'')); }; }
   function yes(t){ return function(){ say(t+' NOT REJECTED'); }; }
   function cap(n){
     var c = pocket.capabilities.get(n);
@@ -71,7 +74,19 @@
           return p;
         })
         .then(function(){
-          return N.wifi.acquire({profileId:'default'}).then(leased,no('ACQUIRE'));
+          // A cancelled scan still has to bring the radio down, so the acquire
+          // right after one is refused with a BUSY that the API marks
+          // retryable. Honouring that is part of testing the contract.
+          function tryAcquire(left){
+            return N.wifi.acquire({profileId:'default'}).then(leased,function(e){
+              if (e.code==='BUSY' && left>0) {
+                say('ACQUIRE busy, retrying');
+                return T.sleep(400).then(function(){return tryAcquire(left-1);});
+              }
+              return no('ACQUIRE')(e);
+            });
+          }
+          return tryAcquire(8);
         })
         .then(function(){ say('DONE'); });
     },

@@ -54,6 +54,10 @@ extern uint32_t render_accel_cycles;
 // not edit them while a run is up.
 static const char *user_source;
 static size_t user_length;
+// Evaluated first, in the same realm, when the caller has one. The tutorial's
+// chapters use it for the eight lines that build the text node they work on.
+static const char *user_prelude;
+static size_t user_prelude_length;
 void app_force_redraw(void) { redraw=true; }
 
 static int interrupt(JSRuntime *rt, void *opaque) {
@@ -90,11 +94,15 @@ static const char FRAME_WRAP[] =
     "globalThis.frame=function(){try{return f.apply(this,arguments);}"
     "catch(e){__pjs_error(String(e),e&&e.stack);throw e;}};})()";
 
-static esp_err_t eval_user_source(const char *source, size_t length) {
+// One evaluation, with its exception reported the way the Playground needs it.
+// `filename` is what the learner is shown in the error, so the prelude and the
+// lesson are told apart when the failure is in the part nobody typed.
+static esp_err_t eval_reporting(const char *source, size_t length,
+                                const char *filename) {
     JSContext *ctx=pocketjs_guest_quickjs_context(guest);
     if(!ctx) return ESP_ERR_INVALID_STATE;
 
-    JSValue result=JS_Eval(ctx,source,length,"user.js",JS_EVAL_TYPE_GLOBAL);
+    JSValue result=JS_Eval(ctx,source,length,filename,JS_EVAL_TYPE_GLOBAL);
     if(JS_IsException(result)) {
         JSValue exception=JS_GetException(ctx);
         char message[128]={0};
@@ -102,7 +110,8 @@ static esp_err_t eval_user_source(const char *source, size_t length) {
         if(text) { snprintf(message,sizeof(message),"%s",text); JS_FreeCString(ctx,text); }
         JSValue stack=JS_GetPropertyStr(ctx,exception,"stack");
         // A stack getter can itself throw. Clearing the new pending exception
-        // here keeps the bind-frame evaluation below from inheriting it.
+        // here keeps whatever the caller evaluates next -- the lesson after a
+        // prelude, the frame wrapper after the source -- from inheriting it.
         if(JS_IsException(stack)) JS_FreeValue(ctx,JS_GetException(ctx));
         else if(!JS_IsUndefined(stack)&&!JS_IsNull(stack)) {
             const char *s=JS_ToCString(ctx,stack);
@@ -122,6 +131,34 @@ static esp_err_t eval_user_source(const char *source, size_t length) {
         return ESP_FAIL;
     }
     JS_FreeValue(ctx,result);
+    return ESP_OK;
+}
+
+// The lesson's prelude and the learner's own lines, as two evaluations in one
+// realm rather than one concatenated script.
+//
+// QuickJS keeps the global lexical environment on the realm, so the prelude's
+// top-level `const t` is visible to the second evaluation -- measured on the
+// board, not assumed. What that buys is the error message: a learner who
+// misspells `print` on their only line was told `user.js:9:1`, because the
+// prelude is eight lines and both halves were one script, and chapter 2 is
+// about reading error messages. It also deletes the 8,704 byte buffer the join
+// needed.
+//
+// This is safe only because a run always builds a fresh guest -- app_stop()
+// destroys it and app_start_test() creates another -- so the prelude is never
+// evaluated twice into one realm. That case throws a SyntaxError for the
+// duplicate lexical binding, and it would arrive on the learner's second
+// Ctrl+R, naming a line they never wrote.
+static esp_err_t eval_user_source(const char *source, size_t length) {
+    JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+    if(!ctx) return ESP_ERR_INVALID_STATE;
+    if(user_prelude) {
+        esp_err_t pre=eval_reporting(user_prelude,user_prelude_length,"prelude.js");
+        if(pre!=ESP_OK) return pre;
+    }
+    esp_err_t err=eval_reporting(source,length,"user.js");
+    if(err!=ESP_OK) return err;
 
     JSValue wrap=JS_Eval(ctx,FRAME_WRAP,sizeof(FRAME_WRAP)-1,"wrap.js",JS_EVAL_TYPE_GLOBAL);
     if(JS_IsException(wrap)) JS_FreeValue(ctx,JS_GetException(ctx));
@@ -290,12 +327,14 @@ fail:
     ESP_LOGE("app","START_FAILED %s",esp_err_to_name(err));
     app_stop();return err;
 }
-esp_err_t app_start(void) { user_source=NULL; return app_start_test(0); }
+esp_err_t app_start(void) { user_source=NULL; user_prelude=NULL; return app_start_test(0); }
 
-esp_err_t app_start_source(const char *source, size_t length) {
+esp_err_t app_start_source(const char *prelude, size_t prelude_length,
+                           const char *source, size_t length) {
     user_source=source; user_length=length;
+    user_prelude=prelude; user_prelude_length=prelude_length;
     esp_err_t err=app_start_test(0);
-    user_source=NULL;
+    user_source=NULL; user_prelude=NULL;
     return err;
 }
 

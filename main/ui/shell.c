@@ -1,5 +1,10 @@
 #include "shell.h"
+#include "scene.h"
+#include "wave.h"
+#include "ocean.h"
 #include "solar_sail.h"
+#include "flower.h"
+#include "glass_rain.h"
 #include "board.h"
 #include "motion.h"
 #include "sound.h"
@@ -16,29 +21,37 @@
 static uint16_t *strip;
 static int strip_y, strip_h;
 static unsigned mode;
-static const char *const names[]={"LEVEL WAVE","OCEAN + STARS","SOLAR SAIL"};
-#define BACKGROUND_N (sizeof(names)/sizeof(names[0]))
+// The backgrounds. See scene_ops_t in scene/scene.h for why this is a table.
+// FLOWER MESH used to sit after FLOWER RAY and drew the same flower from a
+// stored vertex mesh. The mesh cost 17,472 bytes of .bss for the whole life of
+// the boot on a board whose heap is the binding constraint, and the analytic
+// path it sat beside needs no geometry at all -- so the renderer is ray only
+// and the row went with it. tools/home_modes.py reads the rows below.
+static void solar_prepare(float dt,int tilt_x,int tilt_y,unsigned variant);
+static void flower_scene_prepare(float dt,int tilt_x,int tilt_y,unsigned variant);
+static uint32_t solar_scene_draw(uint16_t *strip,int y,int height);
+static uint32_t flower_scene_draw(uint16_t *strip,int y,int height);
+static void solar_labels(uint16_t *strip,int y,int height);
+
+static const scene_ops_t SCENES[]={
+    {"LEVEL WAVE",    wave_prepare,  wave_draw,  wave_overlay,  0},
+    {"OCEAN + STARS", ocean_prepare, ocean_draw, ocean_overlay, 0},
+    {"SOLAR SAIL",    solar_prepare, solar_scene_draw, solar_labels,   0},
+    // One row for the plants. It used to be four -- FLOWER RAY, LILY OF VALLEY,
+    // SUNFLOWER, SNOWDROP -- which asked somebody to choose between three
+    // flowers they had not seen. The row now rotates the three botanicals on
+    // its own, each change hidden behind a dissolve; the interval and the fade
+    // are named constants in flower.c. FLOWER RAY drew FLOWER_CRYSTAL, which
+    // still exists and is still tested but is no longer a thing to pick.
+    {"FLOWER", flower_scene_prepare, flower_scene_draw, NULL, 0},
+};
+#define BACKGROUND_N (sizeof(SCENES)/sizeof(SCENES[0]))
+// mode is an index into SCENES and NVS can hand back anything, so every read
+// goes through here rather than trusting the stored byte.
+static const scene_ops_t *scene(void) {
+    return &SCENES[mode<BACKGROUND_N?mode:0];
+}
 static const char *const toggles[]={"OFF","ON"};
-static int16_t ribbons[3][LCD_W];
-static uint8_t softness[3][64];
-static int16_t sine[256], distortion[LCD_W];
-// Laid out for the vector row below: eight columns at a time, three planes it
-// walks in order with one pointer — the bend and the second phase's x term,
-// both times 16 because the row keeps its phases at that scale, and |x-160|.
-// The 16-byte alignment is not optional: a 128-bit load forces the low four
-// address bits to zero rather than faulting. The extra block is read, never
-// drawn: the last block's fused loads fetch the phases of a block that does
-// not exist, and they have to land somewhere we own.
-static int16_t ocean_cols[LCD_W/8+1][3][8] __attribute__((aligned(16)));
-// The three ribbons, eight columns at a time, for the wave row's vector form.
-static int16_t wave_cols[LCD_W/8][3][8] __attribute__((aligned(16)));
-// softness in the low half of each entry and its channel weight in the high
-// half, so one indexed load fetches both and the unzip separates them. Entry
-// 64 is zero, which is how "further than 64 rows away" stops being a branch.
-static uint32_t wave_lut[3][65];
-static int depth_phase[LCD_H], cross_phase[LCD_H];
-static bool sine_ready;
-static struct {int x,y;uint16_t color;} stars[36];
 static int64_t window_start;
 static unsigned samples, max_us;
 static uint64_t present_sum, prep_sum, loop_sum, hud_sum;
@@ -81,7 +94,14 @@ typedef enum {
 typedef struct {
     const char *label;           // the row, as the Settings list draws it
     setting_kind_t kind;
-    const char *const *values;   // SETTING_CHOICES: the value names
+    // SETTING_CHOICES: the value names, and the step from one to the next.
+    // BACKGROUND's live inside scene_ops_t rows rather than in an array of
+    // their own, so the stride is the row -- the same trick menu_list already
+    // uses to walk this table's own labels, and for the same reason: a
+    // parallel array of labels is a second list that can disagree with the
+    // first one.
+    const char *const *values;
+    size_t stride;
     unsigned count;              // SETTING_CHOICES: how many of them
     const char *key;             // NVS key, NULL for anything not persisted
     unsigned (*get)(void);       // the live value, as an index into values
@@ -94,27 +114,38 @@ typedef struct {
 // goes through shell_change_background() because changing the mode also has to
 // throw away the frame statistics gathered under the old one.
 static unsigned background_get(void) {return mode;}
-static void background_set(unsigned v) {if(v!=mode)shell_change_background((int)v-(int)mode);}
+static void background_set(unsigned v) {
+    // A device that stored SNOWDROP under the old seven-row menu comes back to
+    // a four-row one. Out of range means the first row, not whatever index the
+    // modulo in shell_change_background() would have landed on -- that would
+    // have silently moved somebody from a flower to the solar system.
+    if(v>=BACKGROUND_N)v=0;
+    if(v!=mode)shell_change_background((int)v-(int)mode);
+}
 static unsigned fps_get(void) {return show_fps;}
 static void fps_set(unsigned v) {show_fps=v!=0;}
 static unsigned sound_get(void) {return sfx;}
 static void sound_set(unsigned v) {sfx=v!=0;sound_set_enabled(sfx);}
 
 static const setting_t settings[]={
-    {"BACKGROUND", SETTING_CHOICES, names,   BACKGROUND_N, "background",
-     background_get, background_set, SHELL_SCREEN_NONE},
-    {"FPS DISPLAY",SETTING_CHOICES, toggles, 2,            "fps",
-     fps_get,        fps_set,        SHELL_SCREEN_NONE},
-    {"SOUND",      SETTING_CHOICES, toggles, 2,            "sound",
-     sound_get,      sound_set,      SHELL_SCREEN_NONE},
+    {"BACKGROUND", SETTING_CHOICES, &SCENES[0].name, sizeof SCENES[0], BACKGROUND_N,
+     "background",  background_get,  background_set, SHELL_SCREEN_NONE},
+    {"FPS DISPLAY",SETTING_CHOICES, toggles, sizeof toggles[0], 2,
+     "fps",         fps_get,         fps_set,        SHELL_SCREEN_NONE},
+    {"SOUND",      SETTING_CHOICES, toggles, sizeof toggles[0], 2,
+     "sound",       sound_get,       sound_set,      SHELL_SCREEN_NONE},
     // The first action row. It has no value and no NVS key of its own: what it
     // changes lives in the "wifi" namespace, written by the screen it opens.
     // Named for the thing it configures, like every row above it — syncing the
     // clock is one action on that screen, not the whole of what it is for.
-    {"WI-FI",      SETTING_ACTION,  NULL,    0,            NULL,
-     NULL,           NULL,           SHELL_SCREEN_WIFI},
+    {"WI-FI",      SETTING_ACTION,  NULL,    0,                 0,
+     NULL,          NULL,            NULL,           SHELL_SCREEN_WIFI},
 };
 #define SETTING_N (sizeof(settings)/sizeof(settings[0]))
+// One value name out of a row's list, wherever that list keeps them.
+static const char *value_name(const setting_t *e,unsigned i) {
+    return *(const char *const *)((const char *)e->values+(size_t)i*e->stride);
+}
 
 // "background=0 fps=1 sound=1" — the line test_settings.py parses. Built from
 // the NVS keys so a new persisted row appears in it without being named here;
@@ -217,322 +248,13 @@ void shell_change_background(int direction) {
     mode=(unsigned)(((int)mode+(int)BACKGROUND_N+direction)%(int)BACKGROUND_N);
     window_start=0;samples=0;max_us=0;draw_sum=0;fps=0;
     present_sum=prep_sum=loop_sum=hud_sum=0;
-    ESP_LOGI("background","MODE %u %s",mode,names[mode]);
-}
-static float fade(float x) {return x*x*x*(x*(x*6-15)+10);}
-static float mix(float a,float b,float t) {return a+(b-a)*t;}
-static unsigned hash(int x,int y) {
-    unsigned h=(unsigned)x*374761393u+(unsigned)y*668265263u;
-    h=(h^(h>>13))*1274126177u;return h^(h>>16);
-}
-static float gradient(int x,int y,float dx,float dy) {
-    switch(hash(x,y)&7) {
-        case 0:return dx;case 1:return -dx;case 2:return dy;case 3:return -dy;
-        case 4:return (dx+dy)*0.7071f;case 5:return (dx-dy)*0.7071f;
-        case 6:return (-dx+dy)*0.7071f;default:return (-dx-dy)*0.7071f;
-    }
-}
-static float perlin(float x,float y) {
-    int ix=(int)floorf(x),iy=(int)floorf(y);float fx=x-ix,fy=y-iy;
-    return mix(mix(gradient(ix,iy,fx,fy),gradient(ix+1,iy,fx-1,fy),fade(fx)),
-               mix(gradient(ix,iy+1,fx,fy-1),gradient(ix+1,iy+1,fx-1,fy-1),fade(fx)),fade(fy));
-}
-static unsigned clamp(int v) {return v<0?0:v>255?255:(unsigned)v;}
-
-// Built once, before the first frame that needs them.
-static void build_tables(void) {
-    if(sine_ready) return;
-    for(int i=0;i<256;i++) sine[i]=(int16_t)(sinf(i*6.2831853f/256)*256);
-    const float widths[]={18,5,24};const float brightness[]={14,32,21};
-    for(int l=0;l<3;l++)for(int d=0;d<64;d++)
-        softness[l][d]=(uint8_t)(brightness[l]*expf(-d*d/(2*widths[l]*widths[l])));
-    for(int x=0;x<LCD_W;x++)
-        ocean_cols[x>>3][2][x&7]=(int16_t)(x<160?160-x:x-160);
-    for(int l=0;l<3;l++) {
-        for(int d=0;d<64;d++) {
-            unsigned lo=softness[l][d];
-            unsigned hi=l==0?lo/4:l==1?lo/3:lo/2;
-            wave_lut[l][d]=lo|(hi<<16);
-        }
-        wave_lut[l][64]=0;
-    }
-    sine_ready=true;
+    ESP_LOGI("background","MODE %u %s",mode,scene()->name);
 }
 
-// One row of the ocean, below the horizon. `depth` and `cross` are the row's
-// two phases, `span` the half-width of the reflection and `haze` its distance
-// fade — all constant across the row.
-//
-// Not called: ocean_row_pie below does this, and this is what it means. The
-// assembly cannot be read without it, and the two were checked against each
-// other over every input before the scalar one was retired, so anything that
-// changes here has to change there.
-static void __attribute__((unused))
-ocean_row_scalar(uint16_t *row, int depth, int cross, int span, int haze) {
-    for(int x=0;x<LCD_W;x++) {
-        int bend=distortion[x];
-        int swell=sine[(depth+bend)&255];
-        int ripple=sine[(cross+x*2+bend*2)&255];
-        int crest=swell-180+ripple/6;if(crest<0)crest=0;
-        int dx=x-160;if(dx<0)dx=-dx;
-        int reflection=dx<span?(span-dx)*128/span:0;
-        int glint=crest*(40+reflection)/128;
-        int shade=(swell+256)/32;
-        int lift=shade+haze+glint;
-        row[x]=board_rgb(clamp(3+glint),clamp(20+lift),clamp(39+lift));
-    }
-}
-
-// The same row on the PIE unit, eight pixels a pass, without the sine tables.
-// Not bit-exact any more: the sine is a parabola with one refinement, and
-// over every input one pixel in ten moves by one RGB565 step, none by more
-// than two in green (checked against ocean_row_scalar with a lane-exact model
-// of the instructions below; the animation itself is unchanged). Everything
-// else — the reciprocal, the clamps that are not needed, SAR=11 and the RGB565
-// placement by multiply — is as before.
-//
-// The phases arrive as 16*phase. Multiplying by 32768 with SAR=11 gives x*16,
-// and the low 16 bits of that (1.8.129 keeps only those) are exactly
-// (phase mod 256 - 128) * 256: the index mask and the centering fall out of
-// one multiply. Call it s = 256u. Then
-//     sine*16  ~=  u*(128-|u|)  =  (s/32) * (32767-|s|) >> 11
-// with |s| from EE.VPRELU.S16 against -32768 shifted by 15 (1.8.182), which
-// negates the lanes that are <= 0 and leaves the rest alone. The +1 in the
-// phase constants keeps s off -32768 itself. The swell is then refined as
-// y*(0.775+0.225|y|), which takes the worst error from 15/256 to 1.4/256; the
-// ripple is divided by 6 on its way in and does not need it. The divide by 6
-// is 341/2048 on |s|. shade+haze+20 is a single add, because 512*(haze+20)
-// rides through the >>9 without touching its floor; blue is green+19.
-//
-// Every hazard in TRM table 1.7-2 is scheduled away, so the body issues one
-// instruction a cycle: nothing loads a constant on its own. Each arithmetic
-// instruction that has a .LD.INCP form (1.8.71, 1.8.123, 1.8.129, 1.8.199)
-// also fetches, into the register it has just finished with, the constant that
-// will be wanted two instructions later, from a per-row table of the constants
-// already broadcast to 16 bytes; the same instructions bring in the next
-// block's planes, so the loop carries four values across the block boundary.
-// q7 holds 32768 for the whole row; the rest were allocated so those four land
-// where the next block reads them. The rewind of the constant walk is the one
-// plain instruction in the body.
-//
-// Section numbers are the ESP32-S3 TRM's.
-static void __attribute__((noinline))
-ocean_row_pie(uint16_t *row, int depth, int cross, int span, int haze) {
-    int16_t k[21] __attribute__((aligned(4))) = {
-        (int16_t)(((depth & 255) << 4) + 1),   /* depth16: the phase x16, +1 keeps s off -32768 */
-        (int16_t)(((cross & 255) << 4) + 1),   /* cross16 */
-        64,                                    /* s*64>>11 = s/32 */
-        32767,                                 /* 32768-|s|, one short */
-        341,                                   /* 2048/6: |s|/6 */
-        5461,                                  /* 32768/6 */
-        230,                                   /* 0.225 at x2048, halved for |y| at x4096 */
-        1587,                                  /* 0.775 at x2048 */
-        -180*16,                               /* the crest offset, at the x16 scale */
-        (int16_t)span,
-        (int16_t)((262144 + span - 1) / span), /* ceil(128*2048/span) */
-        40,
-        (int16_t)(4096 + 512*(haze + 20)),     /* 256*16 and haze+20 in one add */
-        4,                                     /* >>9 */
-        3,
-        19,                                    /* blue = green + 19 */
-        0x00F8,
-        0x00FC,
-        16384,                                 /* x<<3 */
-        256,                                   /* x>>3 */
-        (int16_t)0x8000                        /* x<<4, and the sine fold; resident in q7 */
-    };
-    int16_t kv[21][8] __attribute__((aligned(16)));   /* each of the above, broadcast */
-    /* kp and ks are early-clobber: they start equal to kv and k, and without
-       the & GCC hands them the same registers, so the walks never rewind. */
-    const int16_t *in=&ocean_cols[0][0][0];
-    const int16_t *kp, *ks;
-    const int16_t *k8=&kv[20][0];
-    int zero=0, s15=15, nk=21, blocks=LCD_W/8, sar=11;
-    __asm__ volatile(
-        /* broadcast the 21 constants once: some 60 cycles a row, two a block */
-        "mov            %[ks], %[k]\n"
-        "mov            %[kp], %[kv]\n"
-        "loopgtz        %[nk], 0f\n"
-        "  ee.vldbc.16.ip  q0, %[ks], 2\n"            /*                                 1.8.95 */
-        "  ee.vst.128.ip   q0, %[kp], 16\n"           /*                                 1.8.192 */
-        "0:\n"
-        "wsr.sar        %[sar]\n"                     /* every EE.VMUL below shifts by this */
-        "mov            %[kp], %[kv]\n"
-        "ee.vld.128.ip  q7, %[k8], 16\n"              /* 32768, for the row              1.8.88 */
-        "ee.vld.128.ip  q0, %[in], 16\n"              /* block 0: bend*16 */
-        "ee.vld.128.ip  q1, %[in], 16\n"              /* block 0: the ripple phase */
-        "ee.vld.128.ip  q2, %[kp], 16\n"              /* depth16 */
-        "ee.vld.128.ip  q3, %[kp], 16\n"              /* cross16 */
-        "loopgtz        %[blocks], 1f\n"              /* 30 blocks of 8 pixels, no branch inside */
-        /* on entry: q0 = bend*16, q1 = ripple phase, q2 = depth16, q3 = cross16, kp -> 64 */
-        "  ee.vadds.s16.ld.incp   q2, %[kp], q0, q0, q2\n"  /* bend16 + depth16: the swell phase, x16; load 64 */
-        "  ee.vadds.s16.ld.incp   q3, %[kp], q1, q1, q3\n"  /* the ripple phase, x16; load 32767 */
-        "  ee.vmul.u16            q0, q0, q7\n"  /* s = 256u: x*16 kept to 16 bits folds mod 4096 and signs it */
-        "  ee.vmul.u16            q1, q1, q7\n"
-        "  ee.vmul.s16            q4, q0, q2\n"  /* s/32 = 8u */
-        "  ee.vmul.s16.ld.incp    q5, %[kp], q2, q1, q2\n"  /* load 341 = 2048/6 */
-        "  ee.vprelu.s16          q0, q0, q7, %[s15]\n"  /* |s|: -32768*x >> 15 = -x on the lanes <= 0 */
-        "  ee.vprelu.s16          q1, q1, q7, %[s15]\n"
-        "  ee.vsubs.s16.ld.incp   q0, %[kp], q3, q3, q0\n"  /* 32767 - |s|; load 5461 = 32768/6 */
-        "  ee.vmul.s16.ld.incp    q5, %[kp], q1, q1, q5\n"  /* |s|/6; load 230 */
-        "  ee.vmul.s16.ld.incp    q3, %[kp], q4, q4, q3\n"  /* swell*16 = 8u*(32767-|s|) >> 11 ~ u*(128-|u|); load 1587 */
-        "  ee.vsubs.s16.ld.incp   q1, %[kp], q0, q0, q1\n"  /* 5461 - |s|/6; load -180*16 */
-        "  ee.vprelu.s16          q6, q4, q7, %[s15]\n"  /* |swell16| */
-        "  ee.vmul.s16.ld.incp    q0, %[kp], q2, q2, q0\n"  /* (ripple/6)*16; load span */
-        "  ee.vmul.s16.ld.incp    q5, %[in], q6, q6, q5\n"  /* 0.225*|y| at x2048; load |x-160| */
-        "  ee.vadds.s16.ld.incp   q2, %[kp], q1, q2, q1\n"  /* ripple/6*16 - 180*16; load ceil(262144/span) */
-        "  ee.vadds.s16.ld.incp   q3, %[kp], q6, q6, q3\n"  /* 0.775 + 0.225|y| at x2048; load 40 */
-        "  ee.vsubs.s16.ld.incp   q5, %[kp], q0, q0, q5\n"  /* span - |x-160|; load 4096+512*(haze+20) */
-        "  ee.vmul.s16.ld.incp    q6, %[kp], q4, q4, q6\n"  /* swell16 = y*(0.775+0.225|y|): the refinement; load 4 */
-        "  ee.vrelu.s16           q0, %[zero], %[zero]\n"  /* no reflection past the span */
-        "  ee.vadds.s16           q1, q1, q4\n"  /* crest*16, maybe negative */
-        "  ee.vmul.s16.ld.incp    q2, %[kp], q0, q0, q2\n"  /* (span-dx)*128/span; load 3 */
-        "  ee.vrelu.s16           q1, %[zero], %[zero]\n"  /* max(crest,0) */
-        "  ee.vadds.s16.ld.incp   q5, %[kp], q4, q4, q5\n"  /* swell16 + 4096 + 512*(haze+20); load 19 */
-        "  ee.vadds.s16.ld.incp   q3, %[kp], q0, q0, q3\n"  /* 40 + reflection; load 0xF8 */
-        "  ee.vmul.s16.ld.incp    q1, %[kp], q0, q1, q0\n"  /* glint = crest*(40+refl)/128; load 0xFC */
-        "  ee.vmul.s16.ld.incp    q6, %[kp], q4, q4, q6\n"  /* shade+haze+20: the 512*(haze+20) rides through >>9 exactly; load 16384 */
-        "  ee.vadds.s16           q2, q0, q2\n"  /* red = 3+glint */
-        "  ee.vadds.s16.ld.incp   q0, %[kp], q4, q4, q0\n"  /* green = 20+lift; load 256 */
-        "  mov                    %[kp], %[kv]\n"  /* rewind the constant walk */
-        "  ee.andq                q3, q2, q3\n"
-        "  ee.vadds.s16.ld.incp   q2, %[kp], q5, q4, q5\n"  /* blue = 39+lift; load next block: depth16 */
-        "  ee.vmul.u16            q3, q3, q7\n"
-        "  ee.andq                q1, q4, q1\n"
-        "  ee.vmul.u16.ld.incp    q3, %[kp], q4, q3, q7\n"  /* red field; load next block: cross16 */
-        "  ee.vmul.u16.ld.incp    q0, %[in], q5, q5, q0\n"  /* blue field; load next block: bend16 */
-        "  ee.vmul.u16.ld.incp    q1, %[in], q6, q1, q6\n"  /* green field; load next block: ripple phase */
-        "  ee.orq                 q4, q4, q5\n"
-        "  ee.orq                 q4, q4, q6\n"
-        "  ee.vst.128.ip          q4, %[row], 16\n"  /* eight pixels out */
-        "1:\n"
-        : [row] "+a"(row), [in] "+a"(in), [kp] "=&a"(kp), [ks] "=&a"(ks)
-        : [k] "a"(k), [kv] "a"(&kv[0][0]), [k8] "a"(k8), [zero] "a"(zero), [s15] "a"(s15),
-          [nk] "a"(nk), [blocks] "a"(blocks), [sar] "a"(sar)
-        : "memory");
-}
-
-// One row of the wave background, on the vector unit. Bit-exact with the loop
-// it replaces: the three channel weights (/4, /3, /2) are folded into the
-// lookup table's high half, so an indexed load fetches the light and its
-// weighted form together and the unzip separates them. "Further than 64 rows
-// from the ribbon" is min(d,64) into an entry that holds zero, which is how a
-// per-pixel branch disappears.
-//
-// q0,q1 work out |y-ribbon| then carry red; q2 is the broadcast constant; q3
-// and q4 accumulate the plain and weighted sums; q5 holds 64 throughout; q6
-// and q7 take each layer's lookup. All eight are in use.
-//
-// The early-clobber on kp is load-bearing. Without it GCC gave kp and k the
-// same register — they start equal — and the rewind at the top of each block
-// became an increment, so the constants marched off the end of the array.
-static void __attribute__((noinline))
-wave_row_pie(uint16_t *row, int y, unsigned green, unsigned blue) {
-    int16_t k[10] __attribute__((aligned(4))) = {
-        64, (int16_t)y, 5, (int16_t)green, (int16_t)blue,
-        0x00F8, (int16_t)0x8000, 0x00FC, 16384, 256
-    };
-    const int16_t *in = &wave_cols[0][0][0];
-    const int16_t *kp;
-    const uint32_t *t0 = wave_lut[0], *t1 = wave_lut[1], *t2 = wave_lut[2];
-    int blocks = LCD_W / 8, sar = 11;
-    __asm__ volatile(
-        "wsr.sar        %[sar]\n"                        /* SAR=11 for the EE.VMUL.U16 pack (1.8.128) */
-        "mov            %[kp], %[k]\n"
-        "ee.vldbc.16.ip q5, %[kp], 2\n"                  /* q5 = 64, resident                    (1.8.95) */
-        "loopgtz        %[blocks], 1f\n"
-        "  addi         %[kp], %[k], 2\n"                /* constant walk restarts at k[1] */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"               /* q2 = y */
-        "  ee.vld.128.ip   q0, %[in], 16\n"              /* ribbons[0]                           (1.8.88) */
-        "  ee.vld.128.ip   q1, %[in], 16\n"              /* ribbons[1] */
-        "  ee.vsubs.s16    q6, q2, q0\n"                 /* y - r0            (q2 3 back, q0 2 back) (1.8.198) */
-        "  ee.vsubs.s16    q7, q2, q1\n"                 /* y - r1 */
-        "  ee.vsubs.s16    q0, q0, q2\n"                 /* r0 - y */
-        "  ee.vsubs.s16    q1, q1, q2\n"                 /* r1 - y */
-        "  ee.vmax.s16     q0, q0, q6\n"                 /* |y - r0|                             (1.8.104) */
-        "  ee.vmax.s16     q1, q1, q7\n"                 /* |y - r1| */
-        "  ee.vmin.s16     q0, q0, q5\n"                 /* idx0 = min(d,64)                     (1.8.113) */
-        "  ee.vmin.s16     q1, q1, q5\n"                 /* idx1 */
-        /* layer 0 -> q3/q4, layer 1 -> q6/q7, interleaved                              (1.8.37) */
-        "  ee.ldxq.32      q3, q0, %[t0], 0, 0\n"
-        "  ee.ldxq.32      q6, q1, %[t1], 0, 0\n"
-        "  ee.ldxq.32      q3, q0, %[t0], 1, 1\n"
-        "  ee.ldxq.32      q6, q1, %[t1], 1, 1\n"
-        "  ee.ldxq.32      q3, q0, %[t0], 2, 2\n"
-        "  ee.ldxq.32      q6, q1, %[t1], 2, 2\n"
-        "  ee.ldxq.32      q3, q0, %[t0], 3, 3\n"
-        "  ee.ldxq.32      q6, q1, %[t1], 3, 3\n"
-        "  ee.ldxq.32      q4, q0, %[t0], 0, 4\n"
-        "  ee.ldxq.32      q7, q1, %[t1], 0, 4\n"
-        "  ee.ldxq.32      q4, q0, %[t0], 1, 5\n"
-        "  ee.ldxq.32      q7, q1, %[t1], 1, 5\n"
-        "  ee.ldxq.32      q4, q0, %[t0], 2, 6\n"
-        "  ee.ldxq.32      q7, q1, %[t1], 2, 6\n"
-        "  ee.ldxq.32      q4, q0, %[t0], 3, 7\n"
-        "  ee.ldxq.32      q7, q1, %[t1], 3, 7\n"
-        "  ee.vld.128.ip   q0, %[in], 16\n"              /* ribbons[2] */
-        "  ee.vunzip.16    q3, q4\n"                     /* q3 = light0, q4 = light0/4  (q4 written 3 back) (1.8.207) */
-        "  ee.vunzip.16    q6, q7\n"                     /* q6 = light1, q7 = light1/3  (q7 written 3 back) */
-        "  ee.vsubs.s16    q1, q2, q0\n"                 /* y - r2            (q0 3 back) */
-        "  ee.vsubs.s16    q0, q0, q2\n"                 /* r2 - y */
-        "  ee.vadds.s16    q3, q3, q6\n"                 /* light0+light1                        (1.8.70) */
-        "  ee.vadds.s16    q4, q4, q7\n"                 /* light0/4+light1/3 */
-        "  ee.vmax.s16     q0, q0, q1\n"                 /* |y - r2| */
-        "  ee.vmin.s16     q0, q0, q5\n"                 /* idx2 */
-        "  ee.ldxq.32      q6, q0, %[t2], 0, 0\n"
-        "  ee.ldxq.32      q6, q0, %[t2], 1, 1\n"
-        "  ee.ldxq.32      q6, q0, %[t2], 2, 2\n"
-        "  ee.ldxq.32      q6, q0, %[t2], 3, 3\n"
-        "  ee.ldxq.32      q7, q0, %[t2], 0, 4\n"
-        "  ee.ldxq.32      q7, q0, %[t2], 1, 5\n"
-        "  ee.ldxq.32      q7, q0, %[t2], 2, 6\n"
-        "  ee.ldxq.32      q7, q0, %[t2], 3, 7\n"
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"               /* 5      (y no longer needed) */
-        "  ee.vldbc.16.ip  q1, %[kp], 2\n"               /* green */
-        "  ee.vunzip.16    q6, q7\n"                     /* q6 = light2, q7 = light2/2  (q7 written 3 back) */
-        "  ee.vadds.s16    q6, q6, q3\n"                 /* light0+light1+light2 */
-        "  ee.vadds.s16    q3, q3, q7\n"                 /* light0+light1+light2/2 */
-        "  ee.vadds.s16    q4, q4, q7\n"                 /* light0/4+light1/3+light2/2 */
-        "  ee.vldbc.16.ip  q7, %[kp], 2\n"               /* blue */
-        "  ee.vadds.s16    q0, q4, q2\n"                 /* r = 5 + ...      (q2 loaded 6 back) */
-        "  ee.vadds.s16    q3, q3, q1\n"                 /* g = green + ...  (q1 loaded 5 back) */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"               /* 0xF8 */
-        "  ee.vldbc.16.ip  q1, %[kp], 2\n"               /* 32768 */
-        "  ee.vldbc.16.ip  q4, %[kp], 2\n"               /* 0xFC */
-        "  ee.vadds.s16    q6, q6, q7\n"                 /* b = blue + ...   (q7 loaded 4 back) */
-        "  ee.vldbc.16.ip  q7, %[kp], 2\n"               /* 16384 */
-        "  ee.andq         q0, q0, q2\n"                 /* r & 0xF8         (q2 4 back)         (1.8.1) */
-        "  ee.andq         q3, q3, q4\n"                 /* g & 0xFC         (q4 3 back) */
-        "  ee.vldbc.16.ip  q2, %[kp], 2\n"               /* 256 */
-        "  ee.vmul.u16     q0, q0, q1\n"                 /* r*16                                 (1.8.128) */
-        "  ee.vmul.u16     q3, q3, q7\n"                 /* g<<3             (q7 3 back) */
-        "  ee.vmul.u16     q0, q0, q1\n"                 /* r*256            (q0 mul 2 back) */
-        "  ee.vmul.u16     q6, q6, q2\n"                 /* b>>3             (q2 3 back) */
-        "  ee.orq          q0, q0, q3\n"                 /*                  (q0 2 back, q3 3 back) (1.8.45) */
-        "  ee.orq          q0, q0, q6\n"                 /*                  (q6 mul 2 back) */
-        "  ee.vst.128.ip   q0, %[row], 16\n"             /*                                      (1.8.192) */
-        "1:\n"
-        : [row] "+a"(row), [in] "+a"(in), [kp] "=&a"(kp)
-        : [k] "a"(k), [t0] "a"(t0), [t1] "a"(t1), [t2] "a"(t2),
-          [blocks] "a"(blocks), [sar] "a"(sar)
-        : "memory");
-}
-
-// The vector row reads ocean_cols, so both planes that change per frame have
-// to be rebuilt whenever distortion does.
-static void build_columns(void) {
-    for(int x=0;x<LCD_W;x++) {
-        ocean_cols[x>>3][0][x&7]=(int16_t)(distortion[x]*16);
-        ocean_cols[x>>3][1][x&7]=(int16_t)((2*x+2*distortion[x])*16);
-    }
-}
-
-static void pixel(int x,int y,uint16_t c) {
-    if (x>=0 && x<LCD_W && y>=strip_y && y<strip_y+strip_h) strip[(y-strip_y)*LCD_W+x]=c;
-}
 // Every menu label is drawn twice (shadow, then face) for each of seventeen
 // strips, so this runs some four hundred times a frame. It used to reach the
-// buffer through pixel(), which re-tested four bounds for each lit dot; now the
+// buffer through a clipped per-dot writer (the shape scene/stars.c still
+// uses), which re-tested four bounds for each lit dot; now the
 // row is resolved once per row, blank glyph rows are skipped whole, and a run
 // that has left the screen ends the string.
 static void text(int x,int y,const char *s,int scale,uint16_t color) {
@@ -604,7 +326,7 @@ static void draw_menu(void) {
             } else {
                 // An action row has no value to show under the list.
                 const setting_t *entry=&settings[setting];
-                const char *detail=entry->values?entry->values[entry->get()]:NULL;
+                const char *detail=entry->values?value_name(entry,entry->get()):NULL;
                 menu_list(x,item_pos,&settings[0].label,sizeof settings[0],SETTING_N,
                           visibility*(1-depth_pos),detail);
             }
@@ -614,10 +336,52 @@ static void draw_menu(void) {
         int x=(int)lroundf(16+(1-depth_pos)*LCD_W);
         const setting_t *entry=&settings[setting];
         label(x,37,entry->label,1,depth_pos);
-        menu_list(x,choice_pos,entry->values,sizeof entry->values[0],entry->count,
+        menu_list(x,choice_pos,entry->values,entry->stride,entry->count,
                   depth_pos,NULL);
     }
 }
+// ---------------------------------------------------------------------------
+// The scenes, as the table above names them.
+//
+// These are adapters, not renderers: each one is the branch shell_draw used to
+// take, moved behind the row that selects it. wave and ocean still keep their
+// state and their vector rows in this file; solar_sail, flower and glass_rain
+// are their own translation units already.
+//
+// Every scene now keeps its own clock, accumulated from dt and clamped the way
+// solar_sail and flower already clamped theirs -- so the table has one
+// convention and a new row has one obvious shape. The absolute clock that used
+// to be computed here and read by wave and ocean is gone with them.
+// ---------------------------------------------------------------------------
+static int64_t frame_started;
+
+static void solar_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
+    (void)variant;
+    solar_sail_prepare(dt,tilt_x,tilt_y);
+}
+static void flower_scene_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
+    (void)variant;
+    flower_prepare_rotating(dt,tilt_x,tilt_y);
+    glass_rain_prepare(dt,(uint32_t)frame_started);
+}
+static uint32_t solar_scene_draw(uint16_t *s,int y,int height) {
+    // No inline assembly in this one: its cost is ordinary C and belongs in
+    // loop=, not in kernel=.
+    solar_sail_draw(s,y,height);
+    return 0;
+}
+static uint32_t flower_scene_draw(uint16_t *s,int y,int height) {
+    uint32_t c0=esp_cpu_get_cycle_count();
+    flower_draw(s,y,height);
+    glass_rain_draw(s,y,height);
+    return esp_cpu_get_cycle_count()-c0;
+}
+static void solar_labels(uint16_t *s,int y,int height) {
+    (void)s;(void)y;(void)height;
+    text(12,121,solar_sail_time_label(),1,board_rgb(61,88,105));
+    text(166,121,solar_sail_target(),1,board_rgb(87,125,144));
+}
+
 void shell_draw(const char *error, unsigned phase) {
     (void)phase;
     strip=board_strip();
@@ -631,101 +395,22 @@ void shell_draw(const char *error, unsigned phase) {
     app_pos=approach(app_pos,app,amount);
     choice_pos=approach(choice_pos,choice,amount);
     depth_pos=approach(depth_pos,choices?1:0,amount);
-    float t=(started%3600000000LL)*0.000001f;
     // One owner draws the LCD; eight rows at a time. No full-screen framebuffer.
     const uint16_t white=board_rgb(237,246,255), muted=board_rgb(122,169,197);
     int tilt_x,tilt_y;motion_get(&tilt_x,&tilt_y);
-    int level_slope=(int)(tanf(tilt_x/256.0f)*256);
-    build_tables();
-    if(mode==0)for(int l=0;l<3;l++)for(int x=0;x<LCD_W;x++) {
-        const float speeds[]={0.20f,0.60f,0.32f};const int depths[]={4,12,28};
-        const int centers[]={54,82,116};
-        float px=x+tilt_x*depths[l]/256.0f;
-        int a=(int)((px*(0.014f+l*0.004f)+t*speeds[l]+l*1.6f)*40.7437f);
-        int b=(int)((px*0.009f-t*0.24f+l)*40.7437f);
-        ribbons[l][x]=(int16_t)(centers[l]+tilt_y*depths[l]/256.0f
-            +(x-LCD_W/2)*level_slope/256
-            +(sine[a&255]*(9+l*4)+sine[b&255]*6)/256.0f);
-        wave_cols[x>>3][l][x&7]=ribbons[l][x];
-    }
-    if(mode==1) {
-        // Perspective compresses the swell spacing towards a visible horizon.
-        // Noise only bends the coherent wave fronts; it no longer paints clouds.
-        for(int x=0;x<LCD_W;x++)distortion[x]=(int16_t)(perlin(x*0.018f,t*0.12f)*28);
-        build_columns();
-        for(int y=37;y<LCD_H;y++) {
-            float depth=800.0f/(y-28);
-            depth_phase[y]=(int)((depth*1.8f+t*1.2f)*40.7437f);
-            cross_phase[y]=(int)((depth*3.1f-t*0.7f)*40.7437f);
-        }
-    }
-    if(mode==2)solar_sail_prepare(dt,tilt_x,tilt_y);
-    if(mode!=2)for(int i=0;i<36;i++) {
-        unsigned seed=hash(i,91);float speed=1+(seed%13)*0.3f;
-        stars[i].x=(int)fmodf((seed%240)+t*speed,240);
-        stars[i].y=(int)fmodf(((seed>>8)%135)+t*(0.4f+speed*0.2f),135);
-        float twinkle=0.5f+0.5f*sinf(t*(0.5f+(i%5)*0.13f)+i*2.7f);
-        stars[i].color=board_rgb(45+twinkle*100,80+twinkle*120,105+twinkle*130);
-        if(mode==0){int depth=4+(i%3)*12;
-            stars[i].x=(stars[i].x+tilt_x*depth/256+LCD_W)%LCD_W;
-            stars[i].y=(stars[i].y+tilt_y*depth/256+LCD_H)%LCD_H;}
-    }
+    // One row, one scene. What used to be four `if(mode==...)` chains scattered
+    // through this function is now three calls through the table.
+    const scene_ops_t *sc=scene();
+    frame_started=started;
+    sc->prepare(dt,tilt_x,tilt_y,sc->variant);
     int64_t after_prep=esp_timer_get_time();
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H ? LCD_H-strip_y:STRIP_H;
         int64_t band=esp_timer_get_time();
-        // Everything that depends only on the row is lifted out of the column
-        // loop: it used to be recomputed 240 times a row, 32,400 times a frame.
-        // That is the whole of the saving — 23.2 ms of pixels became 18.8, and
-        // 18.1 became 12.9. Turning the divisions into shifts and reciprocals
-        // was measured too and moved nothing: this core divides in hardware, so
-        // what counted was how often the work ran, not what it cost each time.
-        if(mode==2)solar_sail_draw(strip,strip_y,strip_h);
-        else for(int y=strip_y;y<strip_y+strip_h;y++) {
-            uint16_t *row=strip+(size_t)(y-strip_y)*LCD_W;
-            if(mode==1) {
-                if(y<=36) {
-                    uint16_t sky=board_rgb(5+y/12,13+y/3,29+y/2);
-                    for(int x=0;x<LCD_W;x++) row[x]=sky;
-                    continue;
-                }
-                uint32_t c0=esp_cpu_get_cycle_count();
-                ocean_row_pie(row,depth_phase[y],cross_phase[y],
-                          12+(y-36)/3, 24-(y-36)/5);
-                kernel_cycles+=esp_cpu_get_cycle_count()-c0;
-            } else {
-                uint32_t c0=esp_cpu_get_cycle_count();
-                wave_row_pie(row,y,14+y/7,30+y/5);
-                kernel_cycles+=esp_cpu_get_cycle_count()-c0;
-            }
-        }
+        kernel_cycles+=sc->draw(strip,strip_y,strip_h);
         loop_us+=(unsigned)(esp_timer_get_time()-band);
         band=esp_timer_get_time();
-        if(mode!=2)for(int i=0;i<36;i++) {
-            int px=stars[i].x,py=stars[i].y;
-            if(py+2<strip_y||py-2>=strip_y+strip_h)continue;
-            uint16_t c=stars[i].color;
-            if(mode==0) {
-                int layer=i%3,radius=layer==2?2:0;
-                for(int yy=-radius;yy<=radius;yy++)for(int xx=-radius;xx<=radius;xx++) {
-                    int sx=px+xx,sy=py+yy,d=xx*xx+yy*yy;
-                    if(d>5||sx<0||sx>=LCD_W||sy<strip_y||sy>=strip_y+strip_h)continue;
-                    int strength=layer==2?(6-d)*14:layer==0?64:200;
-                    uint16_t old=strip[(sy-strip_y)*LCD_W+sx];
-                    unsigned r=(((old>>11)&31)*8*(256-strength)+((c>>11)&31)*8*strength)/256;
-                    unsigned g=(((old>>5)&63)*4*(256-strength)+((c>>5)&63)*4*strength)/256;
-                    unsigned b=((old&31)*8*(256-strength)+(c&31)*8*strength)/256;
-                    pixel(sx,sy,board_rgb(r,g,b));
-                }
-                continue;
-            }
-            pixel(px,py,c);
-            if(i%7==0){pixel(px-1,py,muted);pixel(px+1,py,muted);pixel(px,py-1,muted);pixel(px,py+1,muted);}
-        }
-        if(mode==2) {
-            text(12,121,solar_sail_time_label(),1,board_rgb(61,88,105));
-            text(166,121,solar_sail_target(),1,board_rgb(87,125,144));
-        }
+        if(sc->overlay)sc->overlay(strip,strip_y,strip_h);
         char meter[16];snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
         if(show_fps)text(194,8,meter,1,muted);
         if(error) {

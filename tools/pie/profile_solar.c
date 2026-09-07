@@ -7,10 +7,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #ifndef SOLAR_SOURCE
-#define SOLAR_SOURCE "../../main/solar_sail.c"
+#define SOLAR_SOURCE "../../main/scene/solar_sail.c"
 #endif
 #include SOLAR_SOURCE
-#include "../../main/solar_time.c"
+#include "../../main/scene/solar_time.c"
 static uint64_t ns(void) {
     struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);
     return (uint64_t)t.tv_sec*1000000000+t.tv_nsec;

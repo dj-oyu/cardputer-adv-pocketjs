@@ -6,7 +6,7 @@
 // accessor really becomes a plain property, what a second contributor sees, and
 // what an app gets when a build refuses. None of that can be checked on the
 // device without flashing, and this file is the answer -- js_lazy_namespace()
-// and pocket_api_lazy() below are transcribed from main/pocket_api.c, minus the
+// and pocket_api_lazy() below are transcribed from main/pocket/pocket_api.c, minus the
 // ESP logging. They are a copy, so a change there needs the same change here;
 // the alternative was no coverage of the one part of the refactor that is a
 // QuickJS semantics question rather than a C one.

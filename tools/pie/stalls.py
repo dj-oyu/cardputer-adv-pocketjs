@@ -1,7 +1,7 @@
 """Static pipeline check for a PIE kernel: where will it interlock?
 
-    python tools/pie/stalls.py main/shell.c ocean_row_pie
-    python tools/pie/stalls.py main/render_accel.c blend_blocks_pie
+    python tools/pie/stalls.py main/scene/ocean.c ocean_row_pie
+    python tools/pie/stalls.py main/scene/render_accel.c blend_blocks_pie
 
 Reads the inline assembly of the named function and applies TRM table 1.7-2:
 loads, EE.LDXQ.32, EE.VMUL.*, EE.VRELU.* and EE.VPRELU.* define their QR result

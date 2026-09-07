@@ -2,13 +2,17 @@
 #include "ima_adpcm.h"
 #include "driver/i2s_std.h"
 #include "esp_cpu.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
-#include <math.h>
+// sfx_pcm / sfx_offset / sfx_frames / wave, generated into the build tree by
+// tools/make_sfx.py. The block above play_click says why they are not in .bss.
+#include "sfx_tables.h"
+// The synthesis those tables replace, kept so the board can check them.
+#include "sfx_synth.h"
 #include <stdatomic.h>
+#include <stdlib.h>
 
 #define SAMPLE_RATE ((int)SOUND_SAMPLE_RATE)
 
@@ -44,45 +48,92 @@ bool sound_play(int kind) {
 }
 void sound_tone_cancel(int32_t id){if(id>0)atomic_store(&cancelled,id);}
 
-// The three clicks, rendered once at startup rather than every time they play.
+// The three clicks and the tone's sine table live in flash, generated at build
+// time by tools/make_sfx.py into sfx_tables.h.
 //
-// Synthesising one of these cost 25.6 ms of CPU, measured, against the 59.4 ms
-// it takes to play: two sinf, two float divisions and a float-to-int per sample
-// came to about 3,600 cycles each. The audio task runs at priority 7 and shares
-// core 0 with the drawing task (IDF pins an unpinned task to the first core on
-// which it touches the FPU, and both of these use floats), so that 43% came
-// straight out of the frames around it — about 7 ms of every frame that queued
-// a sound. Playing from a table leaves the task with a copy to do.
+// They used to be built into .bss at sound_init(): 8,640 B for a rectangular
+// int16_t[3][1440] and 512 B for the wave, resident from boot to power-off.
+// Sound is not a screen -- it plays on the home screen, in the editor and while
+// an app runs -- so unlike the background scenes those bytes could never be
+// released, and on a board with 341,760 B of DIRAM and no PSRAM they were 9 KB
+// standing between an app and a TLS handshake. Nothing in either table depends
+// on anything known at run time: not volume, which is applied per sample on the
+// way out, and not mute, which is read per sample too. So they are const, which
+// puts them in .rodata, which is flash reached through the cache, which is free.
 //
-// 6.5 KB of .bss for the three, mono; the stereo pair is made on the way out.
-enum { SFX_KINDS=3, SFX_LONGEST=1440 };
-static const int16_t sfx_frames[SFX_KINDS]={720,1440,1080};
-static int16_t sfx_pcm[SFX_KINDS][SFX_LONGEST];
+// Why that is safe on an S3, where DMA cannot read flash-mapped memory: neither
+// table ever reaches a DMA descriptor. play_click and play_tone read them a
+// sample at a time with the CPU into pcm[], a local of audio_task and therefore
+// internal RAM, and i2s_channel_write copies that into the driver's own DMA
+// buffers. The DMA reads the driver's copy; the descriptors never see either of
+// these pointers. Nor does an ISR: both are read only on the "sfx" task, so a
+// flash write, which disables the cache, stalls that task rather than faulting
+// it -- and this file's own code is flash-resident already, so an erase could
+// delay a click before this change as much as after it.
+//
+// The rectangle is flattened. The real lengths are {720,1440,1080} = 3,240
+// frames against the rectangle's 4,320, and sfx_offset[] costs one add at the
+// one place that indexes it. sfx_frames[] still carries the per-kind length
+// that the "SFX %d played %d frames" line prints, which tools/test_settings.py
+// asserts on.
+//
+// What was measured, and why the tables exist at all: synthesising one click
+// cost 25.6 ms of CPU against the 59.4 ms it takes to play -- two sinf, two
+// float divisions and a float-to-int per sample, about 3,600 cycles each. The
+// audio task runs at priority 7 and shares core 0 with the drawing task (IDF
+// pins an unpinned task to the first core on which it touches the FPU, and both
+// of these use floats), so that 43% came straight out of the frames around it,
+// about 7 ms of every frame that queued a sound. Playing from a table leaves
+// the task with a copy to do; playing from flash leaves it with the same copy.
+//
+// audio.tone takes any frequency and any length, so there is nothing to bake
+// for it: the wave has to be produced while it plays. What the clicks showed is
+// that the cost that mattered was sinf, not the loop around it, so play_tone
+// keeps the loop and drops the sinf. One period of a sine lives in the 256-entry
+// wave[], and a 32-bit phase accumulator walks it: the top 8 bits index, the
+// next 8 weight a linear interpolation between neighbours, and the step is the
+// frequency scaled by 2^32/24000, so any frequency is exact to a fraction of a
+// hertz without a division per sample. That leaves a handful of integer
+// multiplies per sample against sinf's several hundred cycles -- an operation
+// count, not a measurement.
+//
+// The synthesis these tables replace is kept verbatim in main/hal/sfx_synth.h,
+// where tools/test_sfx.py runs it and diffs it against what the generator
+// emitted. Worst-case difference over all 3,240 click samples and all 256 wave
+// samples: 0.
 
-// audio.tone takes any frequency and any length, so there is nothing to bake:
-// the wave has to be produced while it plays. What the clicks showed is that
-// the cost that mattered was sinf, not the loop around it, so this keeps the
-// loop and drops the sinf. One period of a sine lives in a 256-entry table, and
-// a 32-bit phase accumulator walks it: the top 8 bits index, the next 8 weight
-// a linear interpolation between neighbours, and the step is the frequency
-// scaled by 2^32/24000, so any frequency is exact to a fraction of a hertz
-// without a division per sample. That leaves a handful of integer multiplies
-// per sample against sinf's several hundred cycles — an operation count, not a
-// measurement. The clicks are the only thing here that has been measured, and
-// they are untouched: they still play from their tables.
-enum { WAVE_POINTS=256, WAVE_PEAK=12000 };
-static int16_t wave[WAVE_POINTS];
-
-static void synthesize(int kind) {
-    int frames=sfx_frames[kind];
-    float phase=0,frequency=kind==1?880:kind==2?440:660;
-    for(int n=0;n<frames;n++) {
-        float u=(float)n/frames;
-        float envelope=fminf(n/72.0f,1.0f)*(1-u)*(1-u);
-        phase+=6.2831853f*frequency*(kind==1?1+0.35f*u:1-0.15f*u)/SAMPLE_RATE;
-        // Peak stays near -7 dBFS including the second harmonic.
-        sfx_pcm[kind][n]=(int16_t)(12000*envelope*(sinf(phase)+0.18f*sinf(phase*2)));
+// Regenerates both tables with this chip's own libm and reports how far the
+// baked ones are from what it would have produced.
+//
+// tools/test_sfx.py already diffs the generator against sfx_synth.h on a host,
+// and finds zero -- but that compares Python's libm to the host's glibc, and
+// the only sinf that ever mattered is the xtensa newlib one that ran here. A
+// difference of 1 is -90 dBFS and inaudible; the reason to measure it anyway is
+// that "probably inaudible" is the kind of sentence this project has been wrong
+// about before. Runs from the ui task on request, never at boot, so the 3,240
+// samples of scratch and the ~77 ms of sinf cost nothing the rest of the time.
+void sound_check_tables(void) {
+    int16_t *scratch=malloc(SFX_SAMPLES*sizeof(int16_t));
+    if(!scratch){ESP_LOGW("sound","TABLES no room for %d bytes",
+                          (int)(SFX_SAMPLES*sizeof(int16_t)));return;}
+    int peak=0,at=0,where=0;   // where: click index, or -1 for the wave
+    for(int k=0;k<SFX_KINDS;k++) {
+        sfx_ref_synthesize(k,scratch+sfx_offset[k]);
+        for(int n=0;n<sfx_frames[k];n++) {
+            int d=sfx_pcm[sfx_offset[k]+n]-scratch[sfx_offset[k]+n];
+            if(d<0)d=-d;
+            if(d>peak){peak=d;at=n;where=k;}
+        }
     }
+    // The wave is 256 of the 3,240 the scratch already holds.
+    sfx_ref_wave(scratch);
+    for(int i=0;i<WAVE_POINTS;i++) {
+        int d=wave[i]-scratch[i];
+        if(d<0)d=-d;
+        if(d>peak){peak=d;at=i;where=-1;}
+    }
+    free(scratch);
+    ESP_LOGI("sound","TABLES worst=%d of 32767 where=%d at=%d",peak,where,at);
 }
 
 // Sends one 128-frame block and says whether the channel is still healthy.
@@ -101,7 +152,7 @@ static void play_click(int kind,int16_t *pcm) {
     for(int start=0;start<frames+256;start+=128) {
         for(int j=0;j<128;j++) {
             int n=start+j;
-            int16_t sample=(n<frames && atomic_load(&enabled))?sfx_pcm[kind][n]:0;
+            int16_t sample=(n<frames && atomic_load(&enabled))?sfx_pcm[sfx_offset[kind]+n]:0;
             pcm[j*2]=pcm[j*2+1]=sample;
         }
         if(!emit(pcm))return;
@@ -302,12 +353,10 @@ void sound_init(i2c_master_bus_handle_t bus) {
     i2c_master_bus_rm_device(codec);if(err!=ESP_OK)goto fail;
     events=xQueueCreate(4,sizeof(request_t));
     if(!events)goto fail;
-    int64_t began=esp_timer_get_time();
-    for(int k=0;k<SFX_KINDS;k++)synthesize(k);
-    for(int i=0;i<WAVE_POINTS;i++)wave[i]=(int16_t)(WAVE_PEAK*sinf(6.2831853f*i/WAVE_POINTS));
-    ESP_LOGI("sound","3 clicks and the tone table rendered in %lld us",esp_timer_get_time()-began);
     if(xTaskCreate(audio_task,"sfx",4096,NULL,7,NULL)!=pdPASS){vQueueDelete(events);events=NULL;goto fail;}
-    ESP_LOGI("sound","ES8311 ready; synthesized 24kHz stereo; default ON");return;
+    // Nothing is rendered here any more; the tables were rendered by the build.
+    ESP_LOGI("sound","ES8311 ready; 24kHz stereo from %d baked samples; default ON",
+             SFX_SAMPLES+WAVE_POINTS);return;
 fail:
     ESP_LOGW("sound","Audio unavailable: %s",esp_err_to_name(err));
     i2s_channel_disable(output);i2s_del_channel(output);output=NULL;

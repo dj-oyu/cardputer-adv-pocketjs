@@ -4,7 +4,7 @@
     python tools/pocket_bridge.py serve --port COM3        # answer a running app
     python tools/pocket_bridge.py demo  --port COM3        # type the app in, then serve
 
-The wire format is main/pocket_bridge.h. A frame is
+The wire format is main/pocket/pocket_bridge.h. A frame is
 
     0x1d 'B' <hex of body and CRC32> '\\n'
 
@@ -332,7 +332,7 @@ def demo(port, adapter, source, skip_typing):
     port.write(b'd')
     time.sleep(0.1)
     port.write(b'd')
-    expect(port, 'APP 2', 5)               # PLAYGROUND, main/shell.c apps[]
+    expect(port, 'APP 2', 5)               # PLAYGROUND, main/ui/shell.c apps[]
     port.write(b'e')
     expect(port, 'CODE_READY', 5)
     if not skip_typing:

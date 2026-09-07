@@ -14,6 +14,7 @@
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_bridge.h"
+#include "scene_mem.h"
 #include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -57,7 +58,11 @@ static bool usb_stroke(char c, keystroke_t *k) {
     }
     if(c=='s') { atomic_store(&capture,true); return false; }
     if(c=='c') { motion_recenter(); return false; }
-    if(c>='1'&&c<='6') { atomic_store(&diagnostic,c); return false; }
+    // '8' is not an app: it checks the baked sound tables against this chip's
+    // own libm (sound_check_tables), and is handled where the others start. It
+    // is not folded into the range because '7' has no diagnostic behind it and
+    // would silently start the default app.
+    if((c>='1'&&c<='6')||c=='8') { atomic_store(&diagnostic,c); return false; }
     if(c=='\r'||c=='\n'||c=='e')k->nav=KEY_ENTER;
     else if(c=='q'||c==27)k->nav=KEY_BACK;
     else if(c=='b')k->nav=KEY_RIGHT;
@@ -110,13 +115,30 @@ typedef struct {
     const char *tag;                 // log tag
     const char *ready;               // logged on arrival
     void (*open)(void);
+    // The other end of open(): called on the screen being left, so a screen
+    // that took memory to be on show can give it back. Without it every screen
+    // held its buffers from boot to power-off whether it was up or not.
+    void (*close)(void);
     bool (*key)(const keystroke_t *k);   // false: leave for the home screen
     bool (*dirty)(void);
     void (*draw)(void);
     // Set when the screen can run JavaScript. Returns true once it wants to.
     bool (*wants_run)(const char **source, size_t *len);
+    // What has to be evaluated before that source, in the same realm, or NULL.
+    // Only a source the screen asked to run carries it: an app started from the
+    // home screen or by pocket.workspace.run() is a whole program of its own,
+    // and those call sites pass NULL rather than reading this.
+    const char *(*prelude)(size_t *len);
     // How the run ended, for the screen that asked for it.
     void (*ended)(esp_err_t started, const char *error);
+    // The buffers a screen lends the parser. run_release() is called once the
+    // guest has finished reading the source -- not before: app_start_source()
+    // parses straight out of the caller's bytes -- and run_restore() before
+    // ended(), so whatever ended() reads is back. A screen that holds 8 KB of
+    // editable source is dead for the whole of a run, which is the one stretch
+    // in which the guest, the font atlas and the radio all want that block.
+    void (*run_release)(void);
+    void (*run_restore)(void);
     uint8_t frame_ms;
     bool takes_text;
 } screen_ops_t;
@@ -134,7 +156,8 @@ static bool home_dirty(void) { return true; }   // the background animates
 static void home_draw(void)  { shell_draw(home_error,home_phase++); }
 
 static void enter(screen_id_t next);
-static void begin_run(const char *app_id, const char *source, size_t len);
+static void begin_run(const char *app_id, const char *prelude, size_t prelude_len,
+                      const char *source, size_t len);
 
 // The calibration program is embedded rather than kept in a source slot: it is
 // the thing you reach for when the sensor is wrong, and a slot someone has
@@ -178,10 +201,10 @@ static bool home_key(const keystroke_t *k) {
         case 1: enter(SCREEN_PRACTICE); break;
         case 2: enter(SCREEN_CODE); break;
         case 3: enter(SCREEN_TUTORIAL); break;
-        case 4: begin_run("local.imucal",imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
-        case 5: begin_run("local.pet",pet_start,(size_t)(pet_end-pet_start-1)); break;
-        case 6: begin_run("local.companion",companion_start,(size_t)(companion_end-companion_start-1)); break;
-        default: begin_run("local.hello",NULL,0);          // the built-in app
+        case 4: begin_run("local.imucal",NULL,0,imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
+        case 5: begin_run("local.pet",NULL,0,pet_start,(size_t)(pet_end-pet_start-1)); break;
+        case 6: begin_run("local.companion",NULL,0,companion_start,(size_t)(companion_end-companion_start-1)); break;
+        default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
 }
@@ -217,15 +240,19 @@ static const screen_ops_t SCREENS[SCREEN_COUNT]={
         .frame_ms=16, .takes_text=true,
     },
     [SCREEN_CODE]={
-        .tag="code", .ready="CODE_READY", .open=code_open,
+        .tag="code", .ready="CODE_READY", .open=code_open, .close=code_close,
         .key=code_key, .dirty=code_dirty, .draw=code_draw,
         .wants_run=code_wants_run, .ended=code_ended,
+        .run_release=code_run_release, .run_restore=code_run_restore,
         .frame_ms=16, .takes_text=true,
     },
     [SCREEN_TUTORIAL]={
         .tag="tutorial", .ready="TUTORIAL_READY", .open=tutorial_open,
+        .close=tutorial_close,
         .key=tutorial_key, .dirty=tutorial_dirty, .draw=tutorial_draw,
-        .wants_run=tutorial_wants_run, .ended=tutorial_ran,
+        .wants_run=tutorial_wants_run, .prelude=tutorial_prelude,
+        .ended=tutorial_ran,
+        .run_release=tutorial_run_release, .run_restore=tutorial_run_restore,
         .frame_ms=16, .takes_text=true,
     },
     // Nothing on this screen animates; it repaints when a key or the sync task
@@ -238,6 +265,7 @@ static const screen_ops_t SCREENS[SCREEN_COUNT]={
 };
 
 static void enter(screen_id_t next) {
+    if(SCREENS[screen].close) SCREENS[screen].close();
     screen=next;
     atomic_store(&text_screen,SCREENS[next].takes_text);
     if(SCREENS[next].open) SCREENS[next].open();
@@ -256,6 +284,9 @@ static void end_run(esp_err_t tick_err) {
     running=false;
     xQueueReset(keys);
     const screen_ops_t *o=&SCREENS[owner];
+    // Before ended(): the tutorial's verdicts read the editor's source, and the
+    // editor's own ended() draws it.
+    if(o->run_restore) o->run_restore();
     const char *why=app_error();
     if(o->ended) o->ended(run_started, tick_err==ESP_OK?why:(why[0]?why:"EXECUTION FAILED"));
     else {
@@ -275,7 +306,7 @@ static void take_pending_run(void) {
     const char *source=NULL;
     size_t      length=0;
     if(!pocket_workspace_run_take(&source,&length)) return;
-    begin_run(APP_ID_WORK,source,length);
+    begin_run(APP_ID_WORK,NULL,0,source,length);
     // app_start_source() borrows the bytes only for the length of the start.
     pocket_workspace_run_done();
 }
@@ -285,10 +316,21 @@ static void take_pending_run(void) {
 // check what the manifest requires — so the name here is the whole of the
 // decision, and the ternary on a source pointer that used to stand in for it
 // is gone.
-static void begin_run(const char *app_id, const char *source, size_t len) {
+static void begin_run(const char *app_id, const char *prelude, size_t prelude_len,
+                      const char *source, size_t len) {
     owner=screen;
+    // The home screen's background is about to stop being drawn for as long as
+    // the guest owns the display, so its scratch stops being worth anything to
+    // it and starts being worth a great deal to the guest, the font atlas and
+    // the radio. Here rather than in enter(): this is the moment the memory
+    // changes hands, and the next prepare() after the run takes it back.
+    scene_mem_release();
     app_registry_select(app_id);
-    run_started = source ? app_start_source(source,len) : app_start();
+    run_started = source ? app_start_source(prelude,prelude_len,source,len)
+                         : app_start();
+    // The bytes have been parsed, so the screen that lent them can put them
+    // back in the heap for as long as the guest is up.
+    if(SCREENS[owner].run_release) SCREENS[owner].run_release();
     ESP_LOGI(SCREENS[owner].tag,"RUN %u bytes -> %s",
              (unsigned)len,esp_err_to_name(run_started));
     if(run_started==ESP_OK) { running=true; return; }
@@ -297,6 +339,7 @@ static void begin_run(const char *app_id, const char *source, size_t len) {
     app_stop();
     running=false;
     const screen_ops_t *o=&SCREENS[owner];
+    if(o->run_restore) o->run_restore();
     if(o->ended) o->ended(run_started,app_error());
     else home_error="START FAILED";
 }
@@ -399,13 +442,19 @@ static void ui_task(void *arg) {
             }
             s=&SCREENS[screen];              // key() may have moved us
             const char *source=NULL; size_t len=0;
-            if(!running && s->wants_run && s->wants_run(&source,&len))
+            if(!running && s->wants_run && s->wants_run(&source,&len)) {
+                const char *pre=NULL; size_t pre_len=0;
+                if(s->prelude) pre=s->prelude(&pre_len);
                 begin_run(screen==SCREEN_TUTORIAL?"local.tutorial":"local.playground",
-                          source,len);
+                          pre,pre_len,source,len);
+            }
             else if(!running)
                 paint(s);
 
             int test=atomic_exchange(&diagnostic,0);
+            // Runs in place of starting a guest: it needs no app, and holding
+            // 6,480 bytes of scratch is only affordable while none is running.
+            if(test=='8') { sound_check_tables(); test=0; }
             if(test && !running && screen==SCREEN_HOME) {
                 owner=SCREEN_HOME;
                 app_registry_select(APP_ID_DEFAULT);

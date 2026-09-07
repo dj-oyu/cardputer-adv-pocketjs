@@ -24,11 +24,6 @@ static tutorial_state_t state;
 static bool     dirty=true;
 static char     verdict[40];
 
-// The prelude and the learner's lines, joined for the run. One buffer rather
-// than making codeedit hold a longer source: the join is only ever read.
-static char joined[SRC_MAX+512];
-static size_t joined_len;
-
 static uint16_t *strip;
 static int strip_y, strip_h;
 
@@ -78,23 +73,26 @@ void tutorial_open(void) {
     ESP_LOGI("tutorial","OPEN chapter=%u of %u",chapter+1,lesson_count());
 }
 
-const char *tutorial_source(size_t *len) {
-    const lesson_t *l=lesson_at(chapter);
-    size_t n=0;
-    const char *written=code_source(&n);
-    joined_len=0;
-    if(l->prelude) {
-        size_t p=strlen(l->prelude);
-        if(p<sizeof(joined)) { memcpy(joined,l->prelude,p); joined_len=p; }
-    }
-    if(joined_len+n<sizeof(joined)) {
-        memcpy(joined+joined_len,written,n);
-        joined_len+=n;
-    }
-    joined[joined_len]=0;
-    *len=joined_len;
-    return joined;
+// The learner's own lines, and nothing else. The chapter's prelude used to be
+// concatenated onto the front of them here, into an SRC_MAX+512 byte static
+// that was resident from boot for the sake of four chapters out of nine -- and
+// resident through every run, which is the stretch where the radio cannot find
+// its 48 KB. The two now go to the guest as two evaluations in one realm, so
+// there is nothing to join and nothing to hold.
+const char *tutorial_source(size_t *len) { return code_source(len); }
+
+// Run before it, in the same realm. Five of the nine chapters have none.
+const char *tutorial_prelude(size_t *len) {
+    const char *p=lesson_at(chapter)->prelude;
+    *len = p ? strlen(p) : 0;
+    return p;
 }
+
+// Leaving the screen, and the two ends of a run. The editor is this screen's
+// while a lesson is being written, so its buffer travels with these.
+void tutorial_close(void) { code_close(); }
+void tutorial_run_release(void) { code_run_release(); }
+void tutorial_run_restore(void) { code_run_restore(); }
 
 // ---- did they get there? --------------------------------------------------
 

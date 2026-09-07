@@ -50,3 +50,14 @@ CONFIG_LWIP_SNTP_STARTUP_DELAY=n
 # Not an optimization: the console is USB Serial/JTAG (see above) and the S3's
 # PHY needs this workaround to leave it working while the radio is on.
 CONFIG_ESP_PHY_ENABLE_USB=y
+
+# TLS from an app is the tightest allocation on this board. Measured 2026-09-08:
+# esp_http_client_open reached mbedtls_ssl_setup with 27,232 bytes free and
+# 18,432 in the largest block, and it returned -0x008D (ALLOC_FAILED). The
+# demand is the 16 KiB SSL_IN_CONTENT_LEN plus 4 KiB out plus the context, and
+# the supply cannot be raised by 20 KiB on a 341,760 byte board with no PSRAM.
+# The dynamic buffer shrinks the record buffers once the handshake is over,
+# which suits pocket.net's one-request-at-a-time shape, and unlike lowering
+# SSL_IN_CONTENT_LEN it does not decide in advance which servers this device can
+# talk to.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y

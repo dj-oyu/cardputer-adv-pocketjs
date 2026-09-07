@@ -1,5 +1,5 @@
 /* Exhaustive proof that the ocean kernel's arithmetic equals ocean_row_scalar
- * (main/shell.c) for every input: 256 swell indices x 256 ripple indices x
+ * (main/scene/ocean.c) for every input: 256 swell indices x 256 ripple indices x
  * 161 |x-160| x 98 rows = 1,034,027,008 pixels. Models each PIE lane operation
  * with its TRM 1.8 semantics (saturating adds, 32-bit product >> SAR kept to
  * 16 bits) and the folded constants the kernel uses (sine*16, (sine/6)*16-2880,

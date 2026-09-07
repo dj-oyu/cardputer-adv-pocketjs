@@ -3,11 +3,11 @@ them with their scalar definitions.
 
     python tools/pie/test_kernels.py           (from the repository root)
 
-Each test extracts the inline assembly straight out of main/shell.c or
-main/render_accel.c, builds the same memory the C code would (tables, per-row
+Each test extracts the inline assembly straight out of main/scene/ocean.c, main/scene/wave.c or
+main/scene/render_accel.c, builds the same memory the C code would (tables, per-row
 constants, the 8-column input blocks), executes the assembly with `piesim`, and
 compares every output pixel with a Python transcription of the scalar
-reference next to the kernel (ocean_row_scalar / wave_row_scalar in shell.c,
+reference next to the kernel (ocean_row_scalar in ocean.c,
 blend_px in render_accel.c, which is the Rust blend_rgb565 formula).
 
 What this catches: a wrong register in a rescheduled kernel, a constant read in
@@ -31,8 +31,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 from piesim import Sim, extract_asm, extract_constants, store16, store32, load16  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
-SHELL = os.path.join(ROOT, 'main', 'shell.c')
-ACCEL = os.path.join(ROOT, 'main', 'render_accel.c')
+# The two vector rows left shell.c when each background became its own
+# file; the assembly moved verbatim, so only these paths changed.
+OCEAN = os.path.join(ROOT, 'main', 'scene', 'ocean.c')
+WAVE = os.path.join(ROOT, 'main', 'scene', 'wave.c')
+ACCEL = os.path.join(ROOT, 'main', 'scene', 'render_accel.c')
 LCD_W = 240
 
 
@@ -56,7 +59,7 @@ SOFTNESS = [[int(BRIGHT[l] * math.exp(-d * d / (2 * WIDTHS[l] * WIDTHS[l]))) for
 
 
 class OceanRow(unittest.TestCase):
-    """ocean_row_pie against ocean_row_scalar (shell.c)."""
+    """ocean_row_pie against ocean_row_scalar (scene/ocean.c)."""
 
     @staticmethod
     def scalar(depth, cross, span, haze, distortion):
@@ -76,10 +79,10 @@ class OceanRow(unittest.TestCase):
         return out
 
     def test_rows(self):
-        with open(SHELL, encoding='utf-8') as f:
+        with open(OCEAN, encoding='utf-8') as f:
             src = f.read()
         exact = 'ocean_sine16' in src       # table kernel (bit-exact) or the parabola kernel
-        asm = extract_asm(SHELL, 'ocean_row_pie(')
+        asm = extract_asm(OCEAN, 'ocean_row_pie(')
         rng = random.Random(3)
         moved, worst, total = 0, [0, 0, 0], 0
         for _ in range(40):
@@ -97,7 +100,7 @@ class OceanRow(unittest.TestCase):
                     store16(mem, COLS + (b * 3 + l) * 16 + 2 * i, [v & 0xFFFF])
             store32(mem, TA, [s * 16 for s in SINE])                        # ocean_sine16
             store32(mem, TB, [cdiv(s, 6) * 16 - 180 * 16 for s in SINE])     # ocean_sine6
-            k = extract_constants(SHELL, 'ocean_row_pie(', dict(depth=depth, cross=cross, span=span, haze=haze))
+            k = extract_constants(OCEAN, 'ocean_row_pie(', dict(depth=depth, cross=cross, span=span, haze=haze))
             store16(mem, K, k)
             sim = Sim(mem)
             sim.run(asm, {'row': ROW, 'in': COLS, 'k': K, 'kv': KV, 'k8': KV + 16 * (len(k) - 1),
@@ -124,7 +127,7 @@ class OceanRow(unittest.TestCase):
 
 
 class WaveRow(unittest.TestCase):
-    """wave_row_pie against wave_row_scalar (shell.c)."""
+    """wave_row_pie against its scalar model (scene/wave.c)."""
 
     @staticmethod
     def scalar(y, ribbons):
@@ -141,7 +144,7 @@ class WaveRow(unittest.TestCase):
         return out
 
     def test_rows(self):
-        asm = extract_asm(SHELL, 'wave_row_pie(')
+        asm = extract_asm(WAVE, 'wave_row_pie(')
         rng = random.Random(5)
         for _ in range(40):
             y = rng.randint(0, 134)
@@ -158,7 +161,7 @@ class WaveRow(unittest.TestCase):
                     hi = (lo // 4, lo // 3, lo // 2)[l]
                     lut.append(lo | (hi << 16))
             store32(mem, T, lut)
-            k = extract_constants(SHELL, 'wave_row_pie(', dict(y=y, green=14 + y // 7, blue=30 + y // 5))
+            k = extract_constants(WAVE, 'wave_row_pie(', dict(y=y, green=14 + y // 7, blue=30 + y // 5))
             store16(mem, K, k)
             sim = Sim(mem)
             sim.run(asm, {'row': ROW, 'in': COLS, 'k': K, 't0': T, 't1': T + 65 * 4, 't2': T + 130 * 4,
@@ -219,7 +222,7 @@ class FillBlocks(unittest.TestCase):
 
 class SolarFillRow(unittest.TestCase):
     def test_rows(self):
-        asm = extract_asm(os.path.join(ROOT, 'main', 'solar_sail.c'), 'fill_row(')
+        asm = extract_asm(os.path.join(ROOT, 'main', 'scene', 'solar_sail.c'), 'fill_row(')
         rng = random.Random(19)
         for color in [0, 0xFFFF, 0xF800, 0x07E0, 0x001F] + [rng.getrandbits(16) for _ in range(128)]:
             mem = bytearray([0xA5] * 4096)

@@ -1,15 +1,49 @@
 // Host check: cc -O2 -fsanitize=address,undefined tools/test_solar_sail.c -lm -o /tmp/test-sail
-#include "../main/solar_sail.c"
-#include "../main/solar_time.c"
+//
+// scene_mem.c comes first because both of the others draw from it: the scene's
+// 29,579 bytes of arrays now live in two borrowed blocks rather than in .bss,
+// and the block contract is checked at the end of main().
+#include "../main/scene/scene_mem.c"
+#include "../main/scene/solar_sail.c"
+#include "../main/scene/solar_time.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+// A second scene, borrowing the same core and bulk and leaving them full of
+// rubbish. Its address is all it needs to be one.
+static const char foreign_owner;
+static void foreign_scribble(void) {
+    bool rebuild;
+    void *core=scene_mem(&foreign_owner,sizeof(solar_core_t),&rebuild);
+    assert(core&&rebuild);
+    memset(core,0x5a,sizeof(solar_core_t));
+    void *bulk=scene_bulk(&foreign_owner,sizeof(solar_bulk_t),&rebuild);
+    assert(bulk&&rebuild);
+    memset(bulk,0x5a,sizeof(solar_bulk_t));
+}
+// The scene drifts: elapsed, the tilt baseline and the steering carry from
+// frame to frame. Drawing the same pose twice means setting all of it and then
+// asking for a zero-length frame, so nothing advances between the two.
+static void pose(double at) {
+    elapsed=at;baseline_x=baseline_y=steer_x=steer_y=0;
+    solar_sail_prepare(0,120,-90);
+}
 int main(int argc,char **argv) {
     // Kepler residual across the full anomaly range, including Mercury's e.
+    //
+    // The bound is float's, not double's. eccentric() folds the mean anomaly in
+    // double -- Mercury's L passes 59,000 degrees over the tour and only double
+    // keeps the fraction of that -- and then solves in float, because this core
+    // has a single-precision FPU and the answer ends up as a pixel. Measured
+    // worst case over this sweep is 2.48e-7 rad at Mercury, -226 deg, which is
+    // float's own limit and, as the note beside eccentric() says, under a
+    // thousandth of a pixel at the widest zoom. 5e-7 still catches a solver
+    // that stops converging; 1e-10 would be asserting the arithmetic is double.
     for(int i=0;i<8;i++)for(int j=-360;j<=360;j++) {
         double m=j*0.017453292519943295,e=planets[i].base[1];
         double E=eccentric(m,e);
-        assert(fabs(remainder(E-e*sin(E)-m,6.283185307179586))<1e-10);
+        assert(fabs(remainder(E-e*sin(E)-m,6.283185307179586))<5e-7);
     }
     for(int i=0;i<8;i++)for(int day=0;day<=14610;day+=487) {
         Orbit o=orbit_at(i,day);
@@ -36,12 +70,18 @@ int main(int argc,char **argv) {
     }
     assert(per_parent[2]==1&&per_parent[4]==4&&per_parent[5]==1&&SATELLITE_N==6);
     struct {uint16_t guard[8],data[W*8],end[8];} band;
+    unsigned peak_lines=0;bool index_overflowed=false;
     for(int frame=0;frame<1200;frame++) {
         elapsed=frame*.25; // All eight visits, transitions, and wraparound.
         int tx=frame<300?0:frame<600?180:frame<900?-180:0;
         int ty=frame<600?0:frame<900?180:-180;
         solar_sail_prepare(1.0f/30,tx,ty);
+        // MAX_LINES sizes the larger half of the bulk block, so how close the
+        // tour actually comes to it is the number that says whether 1,536 can
+        // be cut. Reported below rather than left as a bound nobody has read.
         assert(count<MAX_LINES);
+        if(count>peak_lines)peak_lines=count;
+        if(!index_fits)index_overflowed=true;
         solar_sail_draw(full,0,H);
         for(int y=0;y<H;y+=8) {
             memset(&band,0xa5,sizeof(band));
@@ -89,5 +129,54 @@ int main(int argc,char **argv) {
         }
         fclose(f);
     }
-    puts("SOLAR_SAIL_OK 6 satellites, periods, occultation/transit, Kepler residual, full tour, 1200 frames, strips and bounds");
+    // ---- the two-tier scene block -------------------------------------
+    // The core (trigonometry, sky gradient, disk table) and the bulk (the
+    // display list and its band index) are borrowed from scene_mem, which
+    // hands the same address to another scene and grows it without warning.
+    // A pose drawn on a released block, and on one a foreign owner has
+    // scribbled over, must equal the pose drawn on a block nobody touched --
+    // that is the whole of the contract, and a cache flag kept outside the
+    // block is the one way to fail it.
+    static uint16_t reference[W*H];
+    pose(37);solar_sail_draw(reference,0,H);
+
+    // Note the order: a release is followed by a prepare, never by a draw.
+    // main.c releases in begin_run() and shell_draw calls prepare before its
+    // strip loop, so the firmware never draws on a block it has not just
+    // re-borrowed. The pointers here would be stale if it did.
+    scene_mem_release();
+    pose(37);solar_sail_draw(full,0,H);
+    assert(memcmp(reference,full,sizeof(full))==0);
+
+    foreign_scribble();
+    pose(37);solar_sail_draw(full,0,H);
+    assert(memcmp(reference,full,sizeof(full))==0);
+    // Strips too: this is the path that reads band_items, the half of the bulk
+    // a whole-frame call never touches.
+    for(int y=0;y<H;y+=8) {
+        int h=H-y<8?H-y:8;
+        solar_sail_draw(assembled+y*W,y,h);
+    }
+    assert(memcmp(reference,assembled,sizeof(full))==0);
+
+    // Drawing without a block. The bulk gone but the core kept is a sky with
+    // no solar system on it; neither one is a dereference.
+    scene_mem_release();
+    pose(37);
+    lines=NULL;band_items=NULL;count=0;
+    solar_sail_draw(full,0,H);
+    for(int i=0;i<W*H;i++)assert(full[i]==sky[i/W]);
+    sky=NULL;
+    solar_sail_draw(full,0,H);
+    for(int i=0;i<W*H;i++)assert(full[i]==rgb(3,7,17));
+    scene_mem_release();
+
+    printf("SOLAR_SAIL_OK 6 satellites, periods, occultation/transit, Kepler "
+           "residual, full tour, 1200 frames, strips and bounds; block "
+           "recycling and both null paths; peak %u lines of %u%s; core %zu "
+           "bulk %zu, static residue %zu bytes\n",
+           peak_lines,(unsigned)MAX_LINES,
+           index_overflowed?" (band index overflowed)":"",
+           sizeof(solar_core_t),sizeof(solar_bulk_t),
+           sizeof(orbits)+sizeof(satellite_orbits)+sizeof(band_offsets));
 }

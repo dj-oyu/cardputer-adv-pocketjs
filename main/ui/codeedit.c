@@ -14,11 +14,27 @@
 #include "fonts.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 // A gap buffer would save the memmove on every insert, but the source is
 // capped at 8 KB and one memmove of that is microseconds — far below the 27 ms
 // the repaint costs. A flat buffer keeps the cursor arithmetic obvious.
-static char   text[SRC_MAX+1];
+//
+// On the heap rather than in .bss, and not because 8 KB is much to reserve but
+// because of *when* it is reserved: as a static it was resident from boot to
+// power-off, including the whole of a run, which is the one moment the guest,
+// the font atlas and the Wi-Fi driver are all competing for a contiguous
+// block. It is taken when this screen opens, given back when it closes, and
+// given back again for the length of every run — the source is in flash by
+// then, so it comes back from there rather than from a copy.
+static char   text_stub[1];
+static char  *text = text_stub;   // never NULL: everything below walks it
+static bool text_live(void) { return text!=text_stub; }
+
+// Whether flash holds what the buffer holds. `doc.changed` cannot answer this
+// on its own: a slot opened on its seed has never been written, is not
+// modified, and would come back empty from a reload.
+static bool stored;
 
 // The buffer, the cursor and the modified flag live in the document the command
 // engine works on, so there is one copy of each rather than two that drift.
@@ -62,6 +78,25 @@ code_state_t code_state(void) { return state; }
 bool code_dirty(void) { return dirty; }
 const char *code_source(size_t *out) { *out=doc.len; return text; }
 
+// Takes the buffer if it is not held. A failure is not fatal: `cap` of zero
+// makes the engine refuse every insert and the stub keeps every reader in
+// bounds, so the screen still draws and still says why it is empty.
+static void take_buffer(void) {
+    if(!text_live()) {
+        char *b=malloc(SRC_MAX+1);
+        if(b) b[0]=0;
+        else ESP_LOGE("code","NO MEMORY %u B; the slot is still in flash",
+                      (unsigned)SRC_MAX+1);
+        if(b) text=b;
+    }
+    doc.text=text; doc.cap=text_live()?SRC_MAX:0;
+}
+static void give_buffer(void) {
+    if(text_live()) free(text);
+    text=text_stub; text[0]=0;
+    doc.text=text; doc.cap=0; doc.len=0;
+}
+
 // Which record this session reads and writes. Everything that saves goes
 // through it, so a lesson can never reach the person's own program.
 static unsigned slot=SRC_SLOT_USER;
@@ -73,12 +108,14 @@ static char label[4]="JS";
 
 static void open_slot(unsigned which, const char *seed, size_t seed_len) {
     slot=which;
-    doc.text=text; doc.cap=SRC_MAX;
-    doc.len=srcstore_load(slot,text);
-    if(!doc.len && seed_len) {
+    take_buffer();
+    doc.len=text_live()?srcstore_load(slot,text):0;
+    stored=true;                        // what is in the buffer came from flash
+    if(!doc.len && seed_len && text_live()) {
         if(seed_len>SRC_MAX) seed_len=SRC_MAX;
         memcpy(text,seed,seed_len);
         doc.len=seed_len;
+        stored=false;                   // the seed has never been written
     }
     text[doc.len]=0;
     // Vim opens at the top of the file, and the first key is a command rather
@@ -92,6 +129,7 @@ static void open_slot(unsigned which, const char *seed, size_t seed_len) {
     // first command message replaces this, which is right: it is onboarding,
     // not chrome.
     snprintf(notice,sizeof(notice),"C-R RUN  C-S SAVE");
+    if(!text_live()) snprintf(notice,sizeof(notice),"NO MEMORY FOR SOURCE");
     ime_wanted=false;
     if(skk_session_ready()) { ime_reset(skk_session()); ime_set_on(skk_session(),false); }
 }
@@ -110,6 +148,29 @@ void code_open_lesson(unsigned lesson, const char *seed, size_t seed_len) {
     // language before the first one. The Playground still opens in normal mode;
     // this is the one screen where arriving means typing.
     vim_begin_insert(&vim);
+}
+
+// Leaving the screen. The buffer is 8 KB that nothing reads again until the
+// next open, and the next open reads it out of flash.
+void code_close(void) { give_buffer(); }
+
+// The guest has finished parsing out of this buffer, so it goes back to the
+// heap for the length of the run — which is exactly the stretch in which the
+// radio needs about 48 KB free and finds 23. do_run() has written the source to
+// flash by now, which is what makes this a release rather than a loss.
+void code_run_release(void) { give_buffer(); }
+
+// The run is over and the screen is about to be read again. The document comes
+// back byte for byte, so the cursor and the undo ring's offsets still mean what
+// they meant.
+void code_run_restore(void) {
+    take_buffer();
+    doc.len=text_live()?srcstore_load(slot,text):0;
+    text[doc.len]=0;
+    if(doc.cursor>doc.len) doc.cursor=doc.len;
+    vim_clamp(&vim,&doc);
+    doc.changed=false; stored=true;
+    dirty=true;
 }
 
 void code_returned(const char *error) {
@@ -149,14 +210,20 @@ static void do_save(void) {
     snprintf(notice,sizeof(notice),
              srcstore_save(slot,text,doc.len)?"SAVED %u B":"SAVE FAILED",
              (unsigned)doc.len);
-    doc.changed=false;
+    doc.changed=false; stored=true;
     sound_play(1);
 }
 
 static void do_run(void) {
     // Saving only what changed keeps a run from erasing three flash sectors,
-    // and stalling the UI while it does.
-    if(doc.changed) { srcstore_save(slot,text,doc.len); doc.changed=false; }
+    // and stalling the UI while it does. `stored` is the second half of that
+    // test: the buffer is handed back to the heap for the length of the run and
+    // reloaded from flash afterwards, so a seed that was never written would
+    // come back as an empty document.
+    if(doc.changed || !stored) {
+        srcstore_save(slot,text,doc.len);
+        doc.changed=false; stored=true;
+    }
     state=CODE_RUNNING;
     snprintf(notice,sizeof(notice),"RUNNING");
 }
@@ -165,6 +232,7 @@ static void do_new(void) {
     // The template is what a first-ever open starts from, not what "new" means
     // afterwards.
     text[0]=0; doc.len=0; doc.cursor=0; doc.changed=true;
+    stored=false;
     top_line=0;
     vim_reset(&vim);
     // Emptying the document is followed by typing into it, so it starts typing.

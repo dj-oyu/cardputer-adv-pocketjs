@@ -1,4 +1,8 @@
-// cc -std=c11 -O2 -Wall -Wextra -fsanitize=address,undefined tools/test_solar_time.c -lm -o /tmp/test-solar-time
+// Host check. MUST run where time_t is 64-bit -- under WSL, not MinGW:
+//   wsl -e bash -lc "cd /mnt/c/devs/... && gcc -O2 -Wall -Wextra -Werror \n//     tools/test_solar_time.c -lm -o /tmp/test_solar_time && /tmp/test_solar_time"
+// Windows' struct timeval.tv_sec is 4 bytes, so the 2038 case below stores
+// -2147483648 and the assertion fails for a reason that has nothing to do
+// with the firmware. ESP-IDF's time_t is 64-bit; the device is not affected.
 #include <sys/time.h>
 #include <assert.h>
 #include <math.h>
@@ -12,8 +16,9 @@ static int fake_gettimeofday(struct timeval *out,void *zone) {
     *out=fake_now;return 0;
 }
 #define gettimeofday fake_gettimeofday
-#include "../main/solar_time.c"
-#include "../main/solar_sail.c"
+#include "../main/scene/scene_mem.c"
+#include "../main/scene/solar_time.c"
+#include "../main/scene/solar_sail.c"
 
 int main(void) {
     // A boot with nothing claimed asks the clock rather than assuming: the RTC

@@ -1,4 +1,4 @@
-/* Host test of the whole accelerator entry points in main/render_accel.c
+/* Host test of the whole accelerator entry points in main/scene/render_accel.c
  * (accel_fill / accel_blend, including the scalar head and tail of every row and
  * the pointer arithmetic), compiled with -DRENDER_ACCEL_HOST_MODEL so the inline
  * assembly is replaced by the C lane model inside render_accel.c. 200,000 random
@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../../../main/render_accel.c"
+#include "../../../main/scene/render_accel.c"
 static uint16_t ref_blend(uint16_t p, unsigned r, unsigned g, unsigned b, unsigned a){
   if(a==0)return p; if(a>=255)return pack565(r,g,b);
   unsigned r5=(p>>11)&31,g6=(p>>5)&63,b5=p&31; unsigned dr=(r5<<3)|(r5>>2),dg=(g6<<2)|(g6>>4),db=(b5<<3)|(b5>>2),ia=255-a;
