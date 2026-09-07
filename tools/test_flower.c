@@ -87,11 +87,14 @@ int main(void) {
         printf("SPECIES_OK %d: 60 poses, %u analytic parts, no stored vertices\n",species,count);
     }
     // Analytic bell sanity checks independent of the assembled plant.
+    // Built by hand, so it needs the same derivation flower_prepare does; see
+    // petal_reciprocals. Without it bell_hit divides by uninitialised memory.
     Petal p={.axis={{1,0,0},{0,1,0},{0,0,1}},.radius={1,1,1}};
+    petal_reciprocals(&p);
     float z=-1000;V n;
     assert(bell_hit(&p,0,0,&z,&n)&&fabsf(z-.88f)<.0001f);
     z=-1000;assert(!bell_hit(&p,1.3f,0,&z,&n));
-    p.axis[1]=(V){0,0,1};p.axis[2]=(V){0,1,0};
+    p.axis[1]=(V){0,0,1};p.axis[2]=(V){0,1,0};petal_reciprocals(&p);
     z=-1000;assert(bell_hit(&p,.5f,0,&z,&n)&&z<.9f); // No artificial cap across the mouth.
     // The shared block is recycled between scenes and given back when an app
     // starts, so a scene that takes it must rebuild what it caches there. That

@@ -22,6 +22,7 @@
 #define PROF_FENCE __asm__ __volatile__("":::"memory")
 static uint32_t prof_total,prof_garden,prof_visits,prof_hits,prof_frames;
 static uint32_t prof_sqrt,prof_sqrtn,prof_shade,prof_bell,prof_belln;
+static uint32_t prof_span,prof_spann,prof_div,prof_divn,prof_scan,prof_pre;
 #endif
 
 // Orthographic primary rays intersect thin ellipsoids analytically. This is
@@ -39,7 +40,7 @@ static uint32_t prof_sqrt,prof_sqrtn,prof_shade,prof_bell,prof_belln;
 typedef struct { float x,y,z; } V;
 typedef struct {
     V c,axis[3];
-    float radius[3],q[6],invzz;
+    float radius[3],inv_radius[3],q[6],invzz;
     int xmin,xmax,ymin,ymax;
     unsigned material,shape;
 } Petal;
@@ -56,7 +57,7 @@ static const char flower_owner;
 static unsigned count=PETALS;
 static flower_species_t current_species;
 static bool seeds_ready;
-static float bell_slopes[LAT],bell_offsets[LAT];
+static float bell_slopes[LAT],bell_offsets[LAT],bell_rmax2;
 static void prepare_seeds(void);
 // There is no vertex mesh. There was one -- 8 petals x 7 x 13 vertices, 17,472
 // bytes of .bss -- feeding a triangle rasteriser that only background mode 4
@@ -120,11 +121,46 @@ static flower_species_t bloom_next(flower_species_t from) {
     unsigned step=1+bloom_random()%(n-1);
     return (flower_species_t)(FLOWER_VALLEY+(here+step)%n);
 }
+// Every float `/` in this file used to be a call. The FPU on this part has no
+// divide instruction, GCC emits no seed sequence for one, and -mlongcalls turns
+// the call into `l32r` + `callx8` into a ROM address -- so it is invisible to a
+// mnemonic search and to a `call8 <symbol>` search alike, which is why two
+// rounds of planning here were built on "ray_row has no divisions". It has
+// sixteen. See docs/pie-simd.md 3.7.
+//
+// A call is worse than its own cycles. `__divsf3` and `fmaxf` take their
+// arguments in *integer* registers, so each one costs an `rfr`/`wfr` pair and
+// spills whatever floats are live around it: ray_row carries 97 float
+// arithmetic instructions against 158 float loads and stores, and shade has
+// more register-file moves than arithmetic. Removing a divide removes the
+// traffic around it, not just the routine.
+//
+// FLOWER_DIV_EXACT restores the original expressions so tools/test_flower_div.c
+// can hold the two against each other pixel for pixel; without it, the hot
+// paths multiply by a reciprocal computed once per part per frame.
+#ifdef FLOWER_DIV_EXACT
+#define DIVR(num,inv,den) ((num)/(den))
+#define POS(x)            fmaxf(0,(x))
+#else
+#define DIVR(num,inv,den) ((num)*(inv))
+#define POS(x)            ((x)>0?(x):0)
+#endif
+#define INV_SCALE (1.0f/SCALE)
+// A Petal is not finished when its radii are set: bell_hit and shade read
+// inv_radius on their hot paths, and a Petal that has radii but no reciprocals
+// draws from uninitialised memory rather than failing. So the derivation is a
+// named call rather than three lines inside one loop -- there is one thing to
+// remember, it is greppable, and tools/test_flower.c calls the same one when it
+// builds a Petal by hand for the analytic checks.
+static void petal_reciprocals(Petal *p) {
+    for(int j=0;j<3;j++)p->inv_radius[j]=1/p->radius[j];
+}
 static V add(V a,V b) { return (V){a.x+b.x,a.y+b.y,a.z+b.z}; }
 static V mul(V a,float b) { return (V){a.x*b,a.y*b,a.z*b}; }
 static float dot(V a,V b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
 static V cross(V a,V b) {return (V){a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
-static V normal(V a) { return mul(a,1.0f/sqrtf(fmaxf(dot(a,a),1e-12f))); }
+static V normal(V a) { float d=dot(a,a);
+    return mul(a,1.0f/sqrtf(d>1e-12f?d:1e-12f)); }
 static V rotate(V a,float yaw,float pitch) {
     float c=cosf(yaw),s=sinf(yaw),cp=cosf(pitch),sp=sinf(pitch);
     V b={c*a.x-s*a.y,s*a.x+c*a.y,a.z};
@@ -177,13 +213,22 @@ static void trumpet(V root,V direction,float length,float radius,unsigned materi
 // times interval is about one pixel of screen displacement. The table in
 // tools/flower_stale.c is that price list.
 #ifndef FLOWER_SWAY
-#define FLOWER_SWAY .04f
+#define FLOWER_SWAY .09f
 #endif
 #ifndef FLOWER_BREATH
-#define FLOWER_BREATH .025f
+#define FLOWER_BREATH .055f
 #endif
 #ifndef FLOWER_CUP
-#define FLOWER_CUP .025f
+#define FLOWER_CUP .055f
+#endif
+// CRYSTAL is not a plant and does not sway; what it does is open and close.
+// BEND is how far the petals swing over the breath, FLEX the per-petal offset
+// that keeps them from moving as one piece.
+#ifndef FLOWER_BEND
+#define FLOWER_BEND .40f
+#endif
+#ifndef FLOWER_FLEX
+#define FLOWER_FLEX .15f
 #endif
 static void cup(V root,float size,unsigned material,float yaw,float pitch) {
     // Six tepals in two whorls: upright, overlapping ellipsoidal surfaces.
@@ -264,7 +309,11 @@ static void botanicals(float yaw,float pitch) {
         for(int i=0;i<6;i++)part((V){-.3f+i*.12f,-1.3f,-.15f},
             (V){-.88f+i*.34f,-.2f+(i%3)*.15f,-.12f},.026f,.016f,LEAF,yaw,pitch);
     } else if(current_species==FLOWER_CALLA) {
-        V head={.04f,.02f,0};
+        // The calla was the one species `sway` never reached: its head is a
+        // fixed point and everything above it hangs off that, so the wind blew
+        // through it. Moving the head moves the stem's top, the spathe and the
+        // spadix together, which is the same nod the others already have.
+        V head={.04f+sway,.02f,0};
         stem(base,(V){0,-.55f,0},head,7,.03f,yaw,pitch);
         part(base,(V){-.75f,-.25f,-.15f},.18f,.035f,LEAF,yaw,pitch);
         part(base,(V){.69f,-.45f,-.12f},.18f,.035f,LEAF,yaw,pitch);
@@ -351,7 +400,7 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
         Petal *p=&petals[i];
         if(current_species==FLOWER_CRYSTAL) {
         float a=i*2*PI/7, breath=.5f+.5f*sinf(elapsed*.65f);
-        float bend=.15f+.23f*breath+.08f*sinf(elapsed*.5f+i*.8f);
+        float bend=.15f+FLOWER_BEND*breath+FLOWER_FLEX*sinf(elapsed*.5f+i*.8f);
         V u={cosf(a)*cosf(bend),sinf(a)*cosf(bend),sinf(bend)};
         V v={-sinf(a),cosf(a),0};
         V n={-cosf(a)*sinf(bend),-sinf(a)*sinf(bend),cosf(bend)};
@@ -367,8 +416,10 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
         }
         for(int j=0;j<6;j++)p->q[j]=0;
         float ex=0,ey=0;
+        petal_reciprocals(p);
         for(int j=0;j<3;j++) {
-            V b=p->axis[j];float r=p->radius[j],k=1/(r*r);
+            V b=p->axis[j];float r=p->radius[j],ir=p->inv_radius[j];
+            float k=ir*ir;
             p->q[0]+=b.x*b.x*k;p->q[1]+=b.y*b.y*k;p->q[2]+=b.z*b.z*k;
             p->q[3]+=b.x*b.y*k;p->q[4]+=b.x*b.z*k;p->q[5]+=b.y*b.z*k;
             ex+=b.x*b.x*r*r;ey+=b.y*b.y*r*r;
@@ -396,12 +447,21 @@ static void prepare_seeds(void) {
         seed_map[y*32+x]=(uint8_t)(100+i%4*40);
     }
     float previous=0;
+    bell_rmax2=0;
     for(int i=0;i<LAT;i++) {
         float t=(float)(i+1)/LAT,k=2*t-1;
         float radius=t<.5f?sqrtf(fmaxf(0,1-(1-2*t)*(1-2*t)))*.88f:.88f+.24f*k*k*k;
         bell_slopes[i]=(radius-previous)*LAT*.5f;
         bell_offsets[i]=previous-bell_slopes[i]*(-1+2.0f*i/LAT);
         previous=radius;
+        // The widest the bell ever gets, for bell_reject. Taken over the whole
+        // of each band and then over all bands, and inflated 2% so that the
+        // rounding in a test built from squares and products can only ever make
+        // it reject less.
+        float rlo=bell_slopes[i]*(-1+2.0f*i/LAT)+bell_offsets[i];
+        float rhi=bell_slopes[i]*(-1+2.0f*(i+1)/LAT)+bell_offsets[i];
+        float m=fabsf(rlo)>fabsf(rhi)?fabsf(rlo):fabsf(rhi);
+        if(m*m*1.02f>bell_rmax2)bell_rmax2=m*m*1.02f;
     }
     seeds_ready=true;
 }
@@ -410,22 +470,22 @@ static uint16_t shade(V n,int petal,V hit) {
     bool inside=n.z<0;
     n=normal(n);
     if(inside)n=mul(n,-1);
-    float diffuse=fmaxf(0,dot(n,(V){-.36f,.48f,.8f}));
-    float rim=1-fmaxf(0,n.z);rim*=rim;
-    float spec=fmaxf(0,dot(n,(V){-.19f,.25f,.949f}));
+    float diffuse=POS(dot(n,(V){-.36f,.48f,.8f}));
+    float rim=1-POS(n.z);rim*=rim;
+    float spec=POS(dot(n,(V){-.19f,.25f,.949f}));
     spec*=spec;spec*=spec;spec*=spec;spec*=spec;
-    float band=fmaxf(0,1-fabsf(n.x*.65f+n.y*.3f-.18f)*6);
+    float band=POS(1-fabsf(n.x*.65f+n.y*.3f-.18f)*6);
     band=band*band*.22f;
     if(material>=LEAF) {
         const Petal *p=&petals[petal];V local=add(hit,mul(p->c,-1));
-        float longitudinal=dot(local,p->axis[0])/p->radius[0];
-        float transverse=dot(local,p->axis[1])/p->radius[1];
+        float longitudinal=DIVR(dot(local,p->axis[0]),p->inv_radius[0],p->radius[0]);
+        float transverse=DIVR(dot(local,p->axis[1]),p->inv_radius[1],p->radius[1]);
         float light=.30f+.66f*diffuse;
         if(inside)light*=material==GOLD?.8f:.52f;
         if(p->shape==2)light=.55f+.43f*diffuse;
         float r=0,g=0,b=0;
         if(material==LEAF) {
-            float vein=fmaxf(0,1-fabsf(transverse)*12)*.16f;
+            float vein=POS(1-fabsf(transverse)*12)*.16f;
             r=22;g=105+vein*160;b=53+vein*100;spec*=.35f;
         } else if(material==GOLD) {
             r=255;g=165+25*longitudinal;b=13;
@@ -435,7 +495,7 @@ static uint16_t shade(V n,int petal,V hit) {
         else if(material==VIOLET) {r=139+34*longitudinal;g=65+20*longitudinal;b=235;}
         else if(material==SEED) {
             int x=clampi((int)(16+15*longitudinal),0,31),y=clampi((int)(16+15*transverse),0,31);
-            float seed=seed_map[y*32+x]/255.0f;
+            float seed=DIVR(seed_map[y*32+x],1.0f/255,255.0f);
             r=50+seed*72;g=25+seed*43;b=12+seed*16;spec*=.1f;
         } else {
             r=225;g=239;b=229;
@@ -452,9 +512,44 @@ static uint16_t shade(V n,int petal,V hit) {
 // Bell radius is a smooth cubic profile sampled into six conical bands. Each
 // band has an analytic ray intersection; the bottom remains open. Both roots
 // are considered so the inner-facing far wall can be seen through the mouth.
+#ifdef FLOWER_BELL_CHECK
+// Host-only bookkeeping: how often the test fires, and whether it ever fired on
+// a visit that the full six-band walk would have turned into a hit. The second
+// number is the whole proof, and it has to be zero.
+unsigned bell_visits_seen,bell_rejected,bell_rejected_wrongly;
+#endif
+// A bell visit costs about 2,750 cycles on the device -- six latitude bands
+// walked unconditionally, each with a discriminant, a software square root and
+// a pair of divisions -- and 59-64% of them miss. This is the test that stops
+// paying for those.
+//
+// It is a bounding cylinder, not a bound on the bell: if the ray's closest
+// approach to the bell's axis is wider than the bell's widest radius, no band's
+// cone can be met, whatever its height. That makes it conservative by
+// construction and cheap by construction too -- fourteen multiply-adds, no
+// division and no square root, because the minimum of |ray-axis|^2 is
+// c0 - b0*b0/a0 and multiplying the comparison through by a0 removes the only
+// divide. It deliberately ignores the -1..1 height limit, so it rejects a
+// subset of the misses and never a hit; tools/test_bell_reject.c is what turns
+// "never" from a claim into a number.
+static bool bell_reject(const float *o,const float *d) {
+    float a0=d[0]*d[0]+d[2]*d[2];
+    float b0=o[0]*d[0]+o[2]*d[2];
+    float c0=o[0]*o[0]+o[2]*o[2];
+    if(a0<=0)return c0>bell_rmax2;          /* the ray runs along the axis */
+    return c0*a0-b0*b0>bell_rmax2*a0;
+}
 static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
     V origin={dx,dy,0};float o[3],d[3];
-    for(int j=0;j<3;j++) {o[j]=dot(origin,p->axis[j])/p->radius[j];d[j]=p->axis[j].z/p->radius[j];}
+    for(int j=0;j<3;j++) {o[j]=DIVR(dot(origin,p->axis[j]),p->inv_radius[j],p->radius[j]);
+                          d[j]=DIVR(p->axis[j].z,p->inv_radius[j],p->radius[j]);}
+#ifdef FLOWER_BELL_CHECK
+    bell_visits_seen++;
+    bool rejected=bell_reject(o,d);
+    if(rejected)bell_rejected++;
+#else
+    if(bell_reject(o,d))return false;
+#endif
     bool found=false;
     for(int band=0;band<LAT;band++) {
         float lo=-1+2.0f*band/LAT,hi=-1+2.0f*(band+1)/LAT;
@@ -467,7 +562,22 @@ static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
         if(fabsf(a)<1e-7f) {if(fabsf(b)>1e-7f)roots[nr++]=-c/(2*b);}
         else {
             float disc=b*b-a*c;if(disc<0)continue;
-            float sd=sqrtf(disc);roots[nr++]=(-b+sd)/a;roots[nr++]=(-b-sd)/a;
+            // The two roots share a divisor, so they share one divide. The
+            // square root is timed because there can be six of them in a
+            // visit, at 174 measured cycles each, and that is the largest
+            // thing in bell_hit that has a name.
+#ifdef ESP_PLATFORM
+            PROF_FENCE;uint32_t bs=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
+            float sd=sqrtf(disc);
+#ifdef ESP_PLATFORM
+            PROF_FENCE;prof_div+=esp_cpu_get_cycle_count()-bs;prof_divn++;PROF_FENCE;
+#endif
+#ifdef FLOWER_DIV_EXACT
+            roots[nr++]=(-b+sd)/a;roots[nr++]=(-b-sd)/a;
+#else
+            float inva=1.0f/a;roots[nr++]=(-b+sd)*inva;roots[nr++]=(-b-sd)*inva;
+#endif
         }
         for(int k=0;k<nr;k++) {
             float z=roots[k],v=o[1]+d[1]*z;
@@ -475,10 +585,15 @@ static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
             float u=o[0]+d[0]*z,w=o[2]+d[2]*z;
             // A calla's spathe is asymmetrically open, exposing its spadix.
             if(p->shape==2&&(v>.28f-.8f*w||v>1-.65f*u*u))continue;
-            V n=add(add(mul(p->axis[0],u/p->radius[0]),mul(p->axis[1],-(slope*v+offset)*slope/p->radius[1])),mul(p->axis[2],w/p->radius[2]));
+            V n=add(add(mul(p->axis[0],DIVR(u,p->inv_radius[0],p->radius[0])),
+                        mul(p->axis[1],DIVR(-(slope*v+offset)*slope,p->inv_radius[1],p->radius[1]))),
+                    mul(p->axis[2],DIVR(w,p->inv_radius[2],p->radius[2])));
             *best=z+p->c.z;*norm=n;found=true;
         }
     }
+#ifdef FLOWER_BELL_CHECK
+    if(rejected&&found)bell_rejected_wrongly++;
+#endif
     return found;
 }
 // The dissolve, on the way out of shade(). It mixes towards `sky` rather than
@@ -497,10 +612,21 @@ static uint16_t dissolve(uint16_t sky,uint16_t lit) {
 static void ray_row(uint16_t *row,int y) {
     // Preserve the woodland under overlapping petals during the dissolve.
     // Automatic storage only; no extra full-frame or persistent pixel buffer.
+#ifdef ESP_PLATFORM
+    PROF_FENCE;uint32_t p0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
     uint16_t backdrop[FW];memcpy(backdrop,row+X0,sizeof backdrop);
+#ifdef ESP_PLATFORM
+    PROF_FENCE;prof_pre+=esp_cpu_get_cycle_count()-p0;
+    uint32_t c0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
     for(unsigned i=0;i<count;i++) {
         const Petal *p=&petals[i];if(y<p->ymin||y>p->ymax)continue;
-        float dy=(65-(y+.5f))/SCALE-p->c.y;
+        // One __divsf3, timed on its own. Every float `/` in this file is a
+        // call into a ROM software routine -- the FPU on this part has no
+        // divide instruction and the compiler never emits the seed sequence --
+        // and the whole remaining plan turns on what one of them costs.
+        float dy=DIVR(65-(y+.5f),INV_SCALE,SCALE)-p->c.y;
         // PIE candidate (unmeasured): for ellipsoids, b, c and discriminant d
         // are polynomials across x. A bounded fixed-point 8-pixel rejection
         // pass could skip misses before scalar sqrt/depth/normal/shading.
@@ -509,9 +635,10 @@ static void ray_row(uint16_t *row,int y) {
         // Bell clipping is a separate path; measure it before extending this.
 #ifdef ESP_PLATFORM
         prof_visits+=(uint32_t)(p->xmax-p->xmin+1);
+        PROF_FENCE;uint32_t x0=esp_cpu_get_cycle_count();PROF_FENCE;
 #endif
         for(int x=p->xmin;x<=p->xmax;x++) {
-            float dx=(x+.5f-180)/SCALE-p->c.x;
+            float dx=DIVR(x+.5f-180,INV_SCALE,SCALE)-p->c.x;
             if(p->shape) {
                 float z=depth[x-X0];V n;
                 // bell_hit is timed on every visit, not every hit, because
@@ -573,7 +700,13 @@ static void ray_row(uint16_t *row,int y) {
 #endif
             row[x]=dissolve(backdrop[x-X0],lit);
         }
+#ifdef ESP_PLATFORM
+        PROF_FENCE;prof_span+=esp_cpu_get_cycle_count()-x0;prof_spann++;PROF_FENCE;
+#endif
     }
+#ifdef ESP_PLATFORM
+    PROF_FENCE;prof_scan+=esp_cpu_get_cycle_count()-c0;PROF_FENCE;
+#endif
 }
 void flower_draw(uint16_t *pixels,int y,int height) {
     if(!pixels||y<0||height<0||y>H||height>H-y)return;
@@ -624,7 +757,9 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         // is not zero, and the sqrt figure carries the larger share of it.
         ESP_LOGI("garden","SPLIT frames=%u total=%.2f garden=%.2f pixels=%.2f decor=%.2f "
                  "ray=%.2f visits=%u hits=%u | sqrt=%.2f (%u calls, %u cy) shade=%.2f (%u cy) "
-                 "bell=%.2f (%u visits, %u cy) rest=%.2f (ms/frame; total vs kernel= is the check)",
+                 "bell=%.2f (%u visits, %u cy) | span=%.2f (%u rows, %u cy/visit) "
+                 "bsqrt=%.2f (%u calls, %u cy) scan=%.2f pre=%.2f rest=%.2f "
+                 "(ms/frame; total vs kernel= is the check)",
                  prof_frames,tot,gar,pix,gar-pix,tot-gar,
                  prof_visits/prof_frames,prof_hits/prof_frames,
                  prof_sqrt/240000.0/prof_frames,prof_sqrtn/prof_frames,
@@ -633,9 +768,19 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  prof_hits?prof_shade/prof_hits:0,
                  prof_bell/240000.0/prof_frames,prof_belln/prof_frames,
                  prof_belln?prof_bell/prof_belln:0,
-                 tot-gar-(prof_sqrt+prof_shade+prof_bell)/240000.0/prof_frames);
+                 // span holds sqrt, shade and bell; the per-visit figure has
+                 // them taken back out, so it is the quadratic and the dx
+                 // division and nothing else.
+                 prof_span/240000.0/prof_frames,prof_spann/prof_frames,
+                 prof_visits?(prof_span-prof_sqrt-prof_shade-prof_bell)/prof_visits:0,
+                 prof_div/240000.0/prof_frames,prof_divn/prof_frames,
+                 prof_divn?prof_div/prof_divn:0,
+                 (prof_scan-prof_span)/240000.0/prof_frames,
+                 prof_pre/240000.0/prof_frames,
+                 tot-gar-(prof_scan+prof_pre)/240000.0/prof_frames);
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
+        prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;
     }
 #endif
 }
