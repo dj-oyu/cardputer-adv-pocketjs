@@ -344,7 +344,24 @@ static void ui_task(void *arg) {
         if(running) {
             tick_run(have,&stroke);
         } else {
-            if(have && !s->key(&stroke)) go_home();
+            // A repaint costs about as much as a whole frame, so taking one
+            // key per frame capped typing at the frame rate -- and the queue
+            // then threw the rest away without saying so: a 3,055 byte source
+            // typed in over USB arrived 621 bytes short. Keys are drained and
+            // painted once, which is also the only state anybody can see.
+            //
+            // A key that moves screens or asks for a run ends the batch, so
+            // the screen it moved to gets its own frame rather than being fed
+            // the keys meant for the one before it. Both wants_run predicates
+            // are pure, which is what makes asking twice per frame free.
+            screen_id_t was=screen;
+            while(have) {
+                if(!s->key(&stroke)) { go_home(); break; }
+                if(screen!=was) break;
+                const char *ignored; size_t ignored_len;
+                if(s->wants_run && s->wants_run(&ignored,&ignored_len)) break;
+                have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+            }
             s=&SCREENS[screen];              // key() may have moved us
             const char *source=NULL; size_t len=0;
             if(!running && s->wants_run && s->wants_run(&source,&len))
