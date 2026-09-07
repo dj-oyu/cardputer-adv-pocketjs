@@ -10,6 +10,7 @@
 #include "jsfont.h"
 #include "pocket_api.h"
 #include "pocket_storage.h"
+#include "pocket_fs.h"
 #include "pocket_imu.h"
 #include "pocket_av.h"
 #include "pocket_app.h"
@@ -126,6 +127,7 @@ void app_stop(void) {
     // Section 5 runs the stop hook before the subscriptions it may still use
     // are taken away, so this comes first.
     pocket_app_reset();
+    pocket_fs_reset();
     pocket_imu_reset();
     pocket_av_reset();
     pocket_ui_reset();
@@ -162,6 +164,7 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"jsfont",jsfont_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"imu",pocket_imu_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
