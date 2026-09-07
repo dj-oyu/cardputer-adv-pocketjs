@@ -31,15 +31,21 @@ int main(void) {
     unsigned long all_seen=0,all_rej=0,all_wrong=0;
     for(int sp=0;sp<8;sp++) {
         bell_visits_seen=bell_rejected=bell_rejected_wrongly=0;
+        bell_miss_disc=bell_miss_height=bell_miss_depth=bell_miss_clip=0;
         for(int ph=0;ph<PHASES;ph++) {
             elapsed=1.3f+ph*0.83f-1.0f/30;
             flower_prepare(1.0f/30,0,0,(flower_species_t)sp);
             flower_draw(fb,0,H);
         }
-        if(bell_visits_seen)
-            printf("%-10s %7u bell visits, %7u rejected (%5.1f%%), %u wrongly\n",
+        if(bell_visits_seen) {
+            unsigned surv=bell_visits_seen-bell_rejected;
+            printf("%-10s %6u visits %6u rejected (%4.1f%%) %u wrongly | of %6u"
+                   " survivors still missing: cone %4.1f%% height %4.1f%% depth %4.1f%% clip %4.1f%%\n",
                    NAME[sp],bell_visits_seen,bell_rejected,
-                   100.0*bell_rejected/bell_visits_seen,bell_rejected_wrongly);
+                   100.0*bell_rejected/bell_visits_seen,bell_rejected_wrongly,surv,
+                   100.0*bell_miss_disc/surv,100.0*bell_miss_height/surv,
+                   100.0*bell_miss_depth/surv,100.0*bell_miss_clip/surv);
+        }
         else
             printf("%-10s no bell parts\n",NAME[sp]);
         all_seen+=bell_visits_seen;all_rej+=bell_rejected;

@@ -40,7 +40,7 @@ static uint32_t prof_span,prof_spann,prof_div,prof_divn,prof_scan,prof_pre;
 typedef struct { float x,y,z; } V;
 typedef struct {
     V c,axis[3];
-    float radius[3],inv_radius[3],q[6],invzz;
+    float radius[3],inv_radius[3],bd[3],ba0,inv_a0,inv_d1,q[6],invzz;
     int xmin,xmax,ymin,ymax;
     unsigned material,shape;
 } Petal;
@@ -57,7 +57,7 @@ static const char flower_owner;
 static unsigned count=PETALS;
 static flower_species_t current_species;
 static bool seeds_ready;
-static float bell_slopes[LAT],bell_offsets[LAT],bell_rmax2;
+static float bell_slopes[LAT],bell_offsets[LAT],bell_lo[LAT],bell_hi[LAT],bell_rmax2;
 static void prepare_seeds(void);
 // There is no vertex mesh. There was one -- 8 petals x 7 x 13 vertices, 17,472
 // bytes of .bss -- feeding a triangle rasteriser that only background mode 4
@@ -154,11 +154,26 @@ static flower_species_t bloom_next(flower_species_t from) {
 // builds a Petal by hand for the analytic checks.
 static void petal_reciprocals(Petal *p) {
     for(int j=0;j<3;j++)p->inv_radius[j]=1/p->radius[j];
+    // The ray direction in the petal's own scaled frame. It depends on the
+    // part and not on the pixel, so bell_hit was recomputing it on every one
+    // of its ~2,000 visits a frame; and having it here is what lets the two
+    // reciprocals below exist at all, which is what keeps bell_reject free of
+    // division.
+    for(int j=0;j<3;j++)p->bd[j]=p->axis[j].z*p->inv_radius[j];
+    p->ba0=p->bd[0]*p->bd[0]+p->bd[2]*p->bd[2];
+    p->inv_a0=p->ba0>0?1/p->ba0:0;
+    p->inv_d1=p->bd[1]!=0?1/p->bd[1]:0;
 }
 static V add(V a,V b) { return (V){a.x+b.x,a.y+b.y,a.z+b.z}; }
 static V mul(V a,float b) { return (V){a.x*b,a.y*b,a.z*b}; }
 static float dot(V a,V b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
 static V cross(V a,V b) {return (V){a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
+// Measured at 1.16 ms of a 22 ms ray_row, so the reciprocal square root that
+// would replace this sqrtf-then-divide is NOT worth writing. The idea is
+// correct and keeps resurfacing -- software sqrt, two-stage call, a soft-float
+// divide after it -- and it was wrong about the magnitude three times before
+// the counter settled it. Left here so the next person finds the number
+// instead of the reasoning.
 static V normal(V a) { float d=dot(a,a);
     return mul(a,1.0f/sqrtf(d>1e-12f?d:1e-12f)); }
 static V rotate(V a,float yaw,float pitch) {
@@ -451,15 +466,22 @@ static void prepare_seeds(void) {
     for(int i=0;i<LAT;i++) {
         float t=(float)(i+1)/LAT,k=2*t-1;
         float radius=t<.5f?sqrtf(fmaxf(0,1-(1-2*t)*(1-2*t)))*.88f:.88f+.24f*k*k*k;
+        // The band's height bounds are a function of the band index and
+        // nothing else, so they belong here and not in bell_hit -- where they
+        // were two `2.0f*band/LAT` divisions, and a division on this part is a
+        // call into a ROM routine (docs/pie-simd.md 3.7). Six bands, twice
+        // each, on every one of ~2,000 bell visits a frame.
+        bell_lo[i]=-1+2.0f*i/LAT;
+        bell_hi[i]=-1+2.0f*(i+1)/LAT;
         bell_slopes[i]=(radius-previous)*LAT*.5f;
-        bell_offsets[i]=previous-bell_slopes[i]*(-1+2.0f*i/LAT);
+        bell_offsets[i]=previous-bell_slopes[i]*bell_lo[i];
         previous=radius;
         // The widest the bell ever gets, for bell_reject. Taken over the whole
         // of each band and then over all bands, and inflated 2% so that the
         // rounding in a test built from squares and products can only ever make
         // it reject less.
-        float rlo=bell_slopes[i]*(-1+2.0f*i/LAT)+bell_offsets[i];
-        float rhi=bell_slopes[i]*(-1+2.0f*(i+1)/LAT)+bell_offsets[i];
+        float rlo=bell_slopes[i]*bell_lo[i]+bell_offsets[i];
+        float rhi=bell_slopes[i]*bell_hi[i]+bell_offsets[i];
         float m=fabsf(rlo)>fabsf(rhi)?fabsf(rlo):fabsf(rhi);
         if(m*m*1.02f>bell_rmax2)bell_rmax2=m*m*1.02f;
     }
@@ -517,42 +539,68 @@ static uint16_t shade(V n,int petal,V hit) {
 // a visit that the full six-band walk would have turned into a hit. The second
 // number is the whole proof, and it has to be zero.
 unsigned bell_visits_seen,bell_rejected,bell_rejected_wrongly;
+// Of the visits the cylinder does not reject and that still miss: which stage
+// threw them away. bell_reject can only be tightened towards whichever of these
+// is large, so this is the measurement that chooses the next test rather than
+// the next test being chosen and then justified.
+unsigned bell_miss_disc,bell_miss_height,bell_miss_depth,bell_miss_clip;
 #endif
 // A bell visit costs about 2,750 cycles on the device -- six latitude bands
 // walked unconditionally, each with a discriminant, a software square root and
 // a pair of divisions -- and 59-64% of them miss. This is the test that stops
 // paying for those.
 //
-// It is a bounding cylinder, not a bound on the bell: if the ray's closest
-// approach to the bell's axis is wider than the bell's widest radius, no band's
-// cone can be met, whatever its height. That makes it conservative by
-// construction and cheap by construction too -- fourteen multiply-adds, no
-// division and no square root, because the minimum of |ray-axis|^2 is
-// c0 - b0*b0/a0 and multiplying the comparison through by a0 removes the only
-// divide. It deliberately ignores the -1..1 height limit, so it rejects a
-// subset of the misses and never a hit; tools/test_bell_reject.c is what turns
-// "never" from a claim into a number.
-static bool bell_reject(const float *o,const float *d) {
-    float a0=d[0]*d[0]+d[2]*d[2];
+// It is a bounding cylinder, capped: if the ray never comes within the bell's
+// widest radius of its axis *while it is at a height the bell occupies*, then
+// no band's cone can be met. Both halves are needed and the second was added
+// after measuring -- the radial half alone rejected 21.8% of visits, and of the
+// survivors that still missed, 38-48% had met a cone outside its band's height.
+//
+// Conservative by construction: it bounds every band by the widest one and
+// ignores which band a height belongs to, so the set it rejects is a subset of
+// the misses. Cheap by construction too -- about fourteen multiply-adds, no
+// division and no square root, because 1/a0 and 1/d[1] belong to the part and
+// are taken once a frame in petal_reciprocals.
+//
+// "By construction" is not a measurement, which is the whole lesson of this
+// file's history; tools/test_bell_reject.c runs the full six-band walk anyway
+// and counts the visits where the test said no and the walk said yes.
+static bool bell_reject(const Petal *p,const float *o) {
+    const float *d=p->bd;
     float b0=o[0]*d[0]+o[2]*d[2];
     float c0=o[0]*o[0]+o[2]*o[2];
-    if(a0<=0)return c0>bell_rmax2;          /* the ray runs along the axis */
-    return c0*a0-b0*b0>bell_rmax2*a0;
+    if(p->ba0<=0)return c0>bell_rmax2;      /* the ray runs along the axis */
+    float zc=-b0*p->inv_a0;                 /* where the ray passes closest */
+    // ...but only the part of the ray where the bell has any height at all
+    // counts. Measured on the host: of the visits the radial test alone let
+    // through and that still missed, 38-48% met a cone at a height the bell
+    // does not reach. Clamping the closest approach into the height window is
+    // what catches those, and it needs no division because 1/d[1] and 1/a0
+    // belong to the part rather than the pixel.
+    if(p->inv_d1!=0) {
+        float za=(-1-o[1])*p->inv_d1,zb=(1-o[1])*p->inv_d1;
+        float zlo=za<zb?za:zb,zhi=za<zb?zb:za;
+        if(zc<zlo)zc=zlo;else if(zc>zhi)zc=zhi;
+    } else if(o[1]<-1||o[1]>1) return true; /* height fixed, and outside it */
+    return c0+(2*b0+p->ba0*zc)*zc>bell_rmax2;
 }
 static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
     V origin={dx,dy,0};float o[3],d[3];
-    for(int j=0;j<3;j++) {o[j]=DIVR(dot(origin,p->axis[j]),p->inv_radius[j],p->radius[j]);
-                          d[j]=DIVR(p->axis[j].z,p->inv_radius[j],p->radius[j]);}
+    for(int j=0;j<3;j++)o[j]=DIVR(dot(origin,p->axis[j]),p->inv_radius[j],p->radius[j]);
+    for(int j=0;j<3;j++)d[j]=p->bd[j];
 #ifdef FLOWER_BELL_CHECK
     bell_visits_seen++;
-    bool rejected=bell_reject(o,d);
+    bool rejected=bell_reject(p,o);
     if(rejected)bell_rejected++;
 #else
-    if(bell_reject(o,d))return false;
+    if(bell_reject(p,o))return false;
 #endif
     bool found=false;
+#ifdef FLOWER_BELL_CHECK
+    bool saw_root=false,saw_height=false,saw_depth=false,saw_clip=false;
+#endif
     for(int band=0;band<LAT;band++) {
-        float lo=-1+2.0f*band/LAT,hi=-1+2.0f*(band+1)/LAT;
+        float lo=bell_lo[band],hi=bell_hi[band];
         float slope=bell_slopes[band],offset=bell_offsets[band];
         float r=slope*o[1]+offset,dr=slope*d[1];
         float a=d[0]*d[0]+d[2]*d[2]-dr*dr;
@@ -566,8 +614,22 @@ static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
             // square root is timed because there can be six of them in a
             // visit, at 174 measured cycles each, and that is the largest
             // thing in bell_hit that has a name.
+            //
+            // This counter used to sit around ray_row's `dy` and was called
+            // `div`, on the theory that it was pricing a software division. It
+            // was not: the numerator depends only on y, so the compiler hoists
+            // the divide out of the petal loop and the brackets contained a
+            // subtraction. It reported 3-4 cycles, which was true and told
+            // nobody anything, and an estimate of "150-250 cycles per software
+            // division" was built on top of it and used to justify a plan. A
+            // counter that reports a plausible wrong number is worse than no
+            // counter; this one was moved rather than deleted because there is
+            // a real question here, but the name it had has to go with it.
 #ifdef ESP_PLATFORM
             PROF_FENCE;uint32_t bs=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
+#ifdef FLOWER_BELL_CHECK
+            saw_root=true;
 #endif
             float sd=sqrtf(disc);
 #ifdef ESP_PLATFORM
@@ -581,9 +643,16 @@ static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
         }
         for(int k=0;k<nr;k++) {
             float z=roots[k],v=o[1]+d[1]*z;
+#ifdef FLOWER_BELL_CHECK
+            if(v>=lo&&v<=hi)saw_height=true;
+            if(v>=lo&&v<=hi&&z+p->c.z>*best)saw_depth=true;
+#endif
             if(v<lo||v>hi||z+p->c.z<=*best)continue;
             float u=o[0]+d[0]*z,w=o[2]+d[2]*z;
             // A calla's spathe is asymmetrically open, exposing its spadix.
+#ifdef FLOWER_BELL_CHECK
+            if(p->shape==2&&(v>.28f-.8f*w||v>1-.65f*u*u))saw_clip=true;
+#endif
             if(p->shape==2&&(v>.28f-.8f*w||v>1-.65f*u*u))continue;
             V n=add(add(mul(p->axis[0],DIVR(u,p->inv_radius[0],p->radius[0])),
                         mul(p->axis[1],DIVR(-(slope*v+offset)*slope,p->inv_radius[1],p->radius[1]))),
@@ -593,6 +662,14 @@ static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
     }
 #ifdef FLOWER_BELL_CHECK
     if(rejected&&found)bell_rejected_wrongly++;
+    if(!rejected&&!found) {
+        // In the order the walk applies them, so each count is "got this far
+        // and no further".
+        if(!saw_root)        bell_miss_disc++;    /* outside every cone, radially */
+        else if(!saw_height) bell_miss_height++;  /* met a cone outside its band */
+        else if(!saw_depth)  bell_miss_depth++;   /* met it behind what is drawn */
+        else if(saw_clip)    bell_miss_clip++;    /* the calla's open spathe */
+    }
 #endif
     return found;
 }
