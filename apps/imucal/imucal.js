@@ -1,6 +1,6 @@
-// IMU axis calibration: six orientations decide MAP_X/MAP_Y/MAP_Z for
-// main/motion.c. Records on stillness, answers in sound, keeps the result.
-// Why, and why this file is terse, are in README.md beside it.
+// IMU axis calibration: six orientations decide MAP_X/MAP_Y/MAP_Z for motion.c.
+// Records on stillness, answers in sound, keeps the result. See README.md --
+// including why this file is terse: the guest parses it, so bytes cost heap.
 (function () {
   var P = { w: 1, h: 2, pos: 24, top: 25, left: 28, bg: 64, r: 68, fg: 96 };
   function node(kind, x, y, w, h, color, text) {
@@ -21,8 +21,8 @@
   }
   function mm(v) { var n = Math.round(v * 1000); return (n < 0 ? '' : '+') + n; }
 
-  var LABEL = ['DESK, SCREEN UP', 'DESK, SCREEN DOWN', 'UPRIGHT, FACING YOU',
-               'UPRIGHT, INVERTED', 'RIGHT EDGE DOWN', 'LEFT EDGE DOWN'];
+  var LABEL = ['DESK, FACE UP', 'DESK, FACE DOWN', 'UP, FACING YOU',
+               'UP, INVERTED', 'RIGHT EDGE DOWN', 'LEFT EDGE DOWN'];
   var AXIS = [2, 2, 1, 1, 0, 0], SIGN = [1, -1, 1, -1, -1, 1];
   var NAME = ['AX', 'AY', 'AZ'], PUB = ['X', 'Y', 'Z'];
 
@@ -41,7 +41,7 @@
   if (!cap.supported || !cap.available) {
     say(head, 'NO IMU: ' + cap.reason);
     console.log('IMUCAL_UNAVAILABLE ' + cap.reason);
-    globalThis.frame = function () {};
+  globalThis.frame = function () {};
     return;
   }
 
@@ -49,8 +49,6 @@
   var idle = pocket.sensors.imu.latest();
   console.log('IMUCAL GYRO BEFORE ' + (idle && idle.gyro ? 'ON' : 'null'));
 
-  // How the answer leaves the device. The walk needs the cable unplugged, so
-  // the log is only read afterwards, by which time that run is over.
   pocket.storage.get('axes').then(function (r) {
     if (r) console.log('IMUCAL_LAST ' + r.value.map + ' err=' + r.value.err +
                        '% gyr=' + r.value.n + (r.value.ok ? ' ok' : ' SUSPECT'));
@@ -110,9 +108,7 @@
       t += (i ? ' ' : '') + PUB[i] + '=' + (map[i].s < 0 ? '-' : '') + NAME[map[i].i];
     }
     console.log(ok ? 'IMUCAL_OK' : 'IMUCAL_SUSPECT');
-    // No cable can be attached through six positions, so the answer has to
-    // survive without one: on screen in full, and in storage for later.
-    say(head, ok ? 'DONE' : 'DONE, READINGS DISAGREED');
+    say(head, ok ? 'DONE' : 'DONE, DISAGREED');
     say(live, t);
     say(stat, 'ERR ' + err + '%  GYR ' + mm(peak[0]) + ' ' + mm(peak[1]) + ' ' + mm(peak[2]));
     say(spin, 'SAVING');
@@ -131,7 +127,7 @@
   function show() {
     if (got.length < 6) {
       say(head, (got.length + 1) + '/6 ' + LABEL[got.length]);
-      say(foot, armed ? 'HOLD STILL. ESC QUITS' : 'MOVE TO THE NEXT POSITION');
+      say(foot, armed ? 'HOLD STILL. ESC QUITS' : 'MOVE TO NEXT');
     }
     if (!now) return;
     var a = now.accel, g = now.gyro;
