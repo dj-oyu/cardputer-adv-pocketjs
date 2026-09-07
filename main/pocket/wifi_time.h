@@ -71,6 +71,12 @@ esp_err_t wifi_time_sync_start(void);
 // Safe from any task at any time.
 wifi_time_status_t wifi_time_status(void);
 
+// Whether the driver is initialised right now. A capability probe needs this to
+// tell "the radio is already up, so using it is free" from "the radio has to be
+// brought up, which costs about 48 KB and fails outright below that". Safe from
+// any task; it is a plain read of a flag the attempt task owns.
+bool wifi_time_radio_is_up(void);
+
 // ------------------------------------------------------------------ scanning
 //
 // So the SSID is chosen from what is actually in the air rather than typed. A

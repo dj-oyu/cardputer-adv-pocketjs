@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_heap_caps.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -166,6 +167,11 @@ static esp_event_handler_instance_t wifi_handler, ip_handler;
 // runs. Only the creator deletes it.
 static bool owns_event_loop;
 static bool wifi_inited, wifi_started;
+
+// Written by the attempt task under the single-attempt lock and read by capability
+// probes on the guest's task. A stale read is harmless in both directions: the
+// probe is an observation, and the acquire that follows is the real answer.
+bool wifi_time_radio_is_up(void) { return wifi_inited; }
 static unsigned attempts_left;
 // A scan brings the radio up the same way a sync does but must not associate,
 // so STA_START only connects when someone is waiting for an address.
@@ -249,8 +255,19 @@ static esp_err_t radio_up(bool connect) {
     sta_netif=esp_netif_create_default_wifi_sta();
     if(!sta_netif) return ESP_ERR_NO_MEM;
 
+    // Section 14 asks for the radio's cost to be recorded rather than guessed,
+    // and this is the place: esp_wifi_init makes the largest single allocation
+    // on this board, and it fails by refusing outright rather than by running
+    // slower. The pair brackets the call so the cost is the difference, and a
+    // failure prints the level it failed at -- which is the number anyone
+    // deciding a guest heap cap actually needs.
+    size_t before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
     err=esp_wifi_init(&init);
+    size_t after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    ESP_LOGI(TAG,"RADIO_INIT %s free=%u->%u cost=%d",
+             err==ESP_OK?"ok":esp_err_to_name(err),
+             (unsigned)before,(unsigned)after,(int)before-(int)after);
     if(err!=ESP_OK) return err;
     wifi_inited=true;
 

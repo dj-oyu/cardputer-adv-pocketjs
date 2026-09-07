@@ -56,6 +56,17 @@ static const char *TAG = "pocket.net";
 #define NET_TLS_MIN_BLOCK  (20*1024)
 // Plain HTTP is a socket, a 512 byte client buffer and this file's two arenas.
 #define NET_PLAIN_MIN_FREE (12*1024)
+// Measured on the board, 2026-09-07, with the probe in wifi_time.c: esp_wifi_init
+// costs 27,192 bytes, and the netif and event loop it needs first cost about
+// 21,000 more. Both are freed again when the radio comes down, so this is a
+// recurring price and not a one-off. LWIP itself is not in the number: v6.0.1
+// has no esp_netif_deinit, so the stack stays up for the life of the boot and is
+// already paid for by the time any app asks.
+//
+// The two above are for a request on a link that is already up. This one is the
+// cost of bringing one up, which is four times larger, and using the smaller
+// number here is what made net.wifi claim to be available at 30 KB free.
+#define NET_RADIO_MIN_FREE (56*1024)
 
 // The one Wi-Fi profile this host has: the SSID and key the settings screen
 // stores in NVS. Section 11 makes profileId a reference to host configuration
@@ -1248,6 +1259,10 @@ static const pocket_limit_t wifi_limits[] = {
     {.name="maxListeners",     .kind=POCKET_LIMIT_INT,  .number=NET_LEASE_WATCHES},
     {.name="profileIds",       .kind=POCKET_LIMIT_TEXT, .text=NET_PROFILE_ID},
     {.name="band",             .kind=POCKET_LIMIT_TEXT, .text="2.4GHz"},
+    // Published because an app that sees available=false with LOW_MEMORY has no
+    // other way to learn how far short it is, and because the number is the one
+    // real constraint on using the radio from an app at all.
+    {.name="radioMinFreeBytes", .kind=POCKET_LIMIT_INT,  .number=NET_RADIO_MIN_FREE},
     {.name="mode",             .kind=POCKET_LIMIT_TEXT, .text="sta"},
     {.name="scanMaxNetworks",  .kind=POCKET_LIMIT_INT,  .number=WIFI_TIME_SCAN_MAX},
     {.name="scanTimeoutMs",    .kind=POCKET_LIMIT_INT,  .number=NET_SCAN_TIMEOUT_MS},
@@ -1293,9 +1308,17 @@ static void wifi_probe(const pocket_capability_t *cap, bool *available,
     // an app runs, so the answer cannot change inside a session and the NVS
     // read stays out of a per-call probe.
     if(!have_credentials) { *available=false; *reason=POCKET_REASON_DISABLED; return; }
-    // A link the app already holds is available; otherwise it depends on
-    // whether the clock or the SSID scan has the radio. Section 2 calls this an
-    // observation and not a reservation, which is exactly what it is here.
+    // Section 2 calls available an observation rather than a reservation, but
+    // an observation still has to be one. This said true to apps/netcheck while
+    // the radio could not start at all: esp_wifi_init returned ESP_ERR_NO_MEM
+    // at 9,160 bytes free, and it does that without degrading first.
+    //
+    // A link already up costs nothing to keep, so it is available whatever the
+    // heap looks like. Bringing one up is what has a price.
+    if(!wifi_time_radio_is_up()) {
+        size_t free_now=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+        if(free_now<NET_RADIO_MIN_FREE) { *available=false; *reason="LOW_MEMORY"; return; }
+    }
     *available=true;
     *reason=NULL;
 }
@@ -1305,7 +1328,13 @@ static void http_probe(const pocket_capability_t *cap, bool *available,
     (void)cap;
     if(!have_credentials) { *available=false; *reason=POCKET_REASON_DISABLED; return; }
     size_t free_now=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-    if(free_now<NET_PLAIN_MIN_FREE) { *available=false; *reason="LOW_MEMORY"; return; }
+    // Every request goes over a lease, so http is only as available as the link
+    // under it. Without one already held, that means the radio still has to come
+    // up, and the 12 KB below is nowhere near what that costs -- reporting true
+    // here said the same untruth net.wifi used to, one level further up.
+    size_t need = lease.handle ? NET_PLAIN_MIN_FREE
+                : wifi_time_radio_is_up() ? NET_PLAIN_MIN_FREE : NET_RADIO_MIN_FREE;
+    if(free_now<need) { *available=false; *reason="LOW_MEMORY"; return; }
     if(atomic_load(&http.alive)) { *available=false; *reason=POCKET_REASON_BUSY; return; }
     *available=true;
     *reason=NULL;
