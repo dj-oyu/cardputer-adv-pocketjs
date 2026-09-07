@@ -140,6 +140,12 @@ typedef struct {
     // in which the guest, the font atlas and the radio all want that block.
     void (*run_release)(void);
     void (*run_restore)(void);
+    // For a screen that sends only the strips it changed. Two things make that
+    // record wrong from outside: board_capture prints the strips that are
+    // sent, so a partial frame is a partial screenshot, and pet_hub_overlay
+    // rides on board_present, so the pet only moves on the strips that go out.
+    // Both are announced here rather than guessed at by the screen.
+    void (*repaint_all)(void);
     uint8_t frame_ms;
     bool takes_text;
 } screen_ops_t;
@@ -245,6 +251,7 @@ static const screen_ops_t SCREENS[SCREEN_COUNT]={
         .key=code_key, .dirty=code_dirty, .draw=code_draw,
         .wants_run=code_wants_run, .ended=code_ended,
         .run_release=code_run_release, .run_restore=code_run_restore,
+        .repaint_all=code_repaint_all,
         .frame_ms=16, .takes_text=true,
     },
     [SCREEN_TUTORIAL]={
@@ -403,6 +410,7 @@ static void paint(const screen_ops_t *s) {
     int64_t began=esp_timer_get_time();
     bool shot=atomic_exchange(&capture,false);
     if(!shot && !pet_repaint && !s->dirty()) return;
+    if((shot||pet_repaint) && s->repaint_all) s->repaint_all();
     if(shot) board_capture(true);
     s->draw();
     if(shot) board_capture(false);

@@ -139,14 +139,22 @@ unsigned jpfont_width(jpfont_id_t id, const char *s, size_t len) {
     return w;
 }
 
-int jpfont_draw(jpfont_id_t id, uint16_t *pixels, int strip_y, int rows,
-                int x, int y, const char *s, size_t len, uint16_t colour) {
+int jpfont_draw_clip(jpfont_id_t id, uint16_t *pixels, int strip_y, int rows,
+                     int x, int y, const char *s, size_t len, uint16_t colour,
+                     int x0, int x1) {
     face_t *f=face(id);
     if(!f) return x;
+    if(x0<0) x0=0;
+    if(x1>LCD_W) x1=LCD_W;
     for(size_t i=0;i<len;) {
         size_t adv;
         uint32_t gid=gid_of(f,utf8_decode(s,len,i,&adv));
         i+=adv;
+        // Wholly left of the window: advance the pen and touch nothing. This is
+        // the common case for every character scrolled off the left edge, and
+        // skipping the cell loop is what keeps a deep horizontal scroll from
+        // costing more than a shallow one.
+        if(x+(int)f->hdr.cell_w<=x0) { x+=f->cmap[gid].advance; continue; }
         const uint8_t *cell=f->bitmap+(size_t)gid*f->glyph_bytes;
         for(unsigned gy=0;gy<f->hdr.cell_h;gy++) {
             int py=y+(int)gy-strip_y;
@@ -154,12 +162,17 @@ int jpfont_draw(jpfont_id_t id, uint16_t *pixels, int strip_y, int rows,
             uint16_t *row=pixels+(size_t)py*LCD_W;
             for(unsigned gx=0;gx<f->hdr.cell_w;gx++) {
                 int px=x+(int)gx;
-                if(px<0||px>=LCD_W) continue;
+                if(px<x0||px>=x1) continue;
                 if(cell[gy*f->stride+gx/8] & (0x80u>>(gx&7))) row[px]=colour;
             }
         }
         x+=f->cmap[gid].advance;
-        if(x>=LCD_W) break;
+        if(x>=x1) break;
     }
     return x;
+}
+
+int jpfont_draw(jpfont_id_t id, uint16_t *pixels, int strip_y, int rows,
+                int x, int y, const char *s, size_t len, uint16_t colour) {
+    return jpfont_draw_clip(id,pixels,strip_y,rows,x,y,s,len,colour,0,LCD_W);
 }

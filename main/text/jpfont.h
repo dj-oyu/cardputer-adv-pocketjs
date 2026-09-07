@@ -47,3 +47,13 @@ unsigned jpfont_width(jpfont_id_t font, const char *s, size_t len);
 // each. Returns the pen x after the run.
 int jpfont_draw(jpfont_id_t font, uint16_t *pixels, int strip_y, int rows,
                 int x, int y, const char *s, size_t len, uint16_t colour);
+
+// The same, refusing to write outside [x0,x1). A horizontally scrolled column
+// starts its pen left of its own left edge, so the first glyph is usually a
+// partial one and would otherwise land on whatever the column is inset from --
+// in the editor, the line numbers. The clip is a parameter rather than module
+// state because this face is drawn from the Rust UI core as well as from the
+// screens, and a clip left set by one of them would follow the other.
+int jpfont_draw_clip(jpfont_id_t font, uint16_t *pixels, int strip_y, int rows,
+                     int x, int y, const char *s, size_t len, uint16_t colour,
+                     int x0, int x1);

@@ -39,7 +39,15 @@ static esp_err_t tx(bool data, const void *bytes, size_t n) {
     spi_transaction_t t = {.length = n * 8, .tx_buffer = bytes};
     return spi_device_polling_transmit(lcd, &t);
 }
+// The panel row the open RAMWR session will write next, or -1 when no session
+// is open. board_present() streams into an open one rather than re-addressing
+// the window on every strip, so it needs to know where the pointer is; any
+// command at all ends the session, which is why this is cleared here instead
+// of at the call sites.
+static int next_row = -1;
+
 static esp_err_t command(uint8_t c, const void *data, size_t n) {
+    next_row = -1;
     esp_err_t e = tx(false, &c, 1);
     return e == ESP_OK && n ? tx(true, data, n) : e;
 }
@@ -257,27 +265,34 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
-    // ST7789's 240x135 visible window in landscape (MADCTL=0x60). Every caller
-    // walks the whole panel top to bottom without skipping a row (see the
-    // callers' `for(strip_y=0; strip_y<LCD_H; strip_y+=STRIP_H)` loops), so
-    // the window is the same 135-row rectangle every frame. Setting it once
-    // per frame and then only streaming RAMWR data cuts 17 strips' worth of
-    // CASET/RASET (32 transactions) down to one: RAMWR is documented to stay
+    // ST7789's 240x135 visible window in landscape (MADCTL=0x60). Most callers
+    // walk the whole panel top to bottom without skipping a row (their
+    // `for(strip_y=0; strip_y<LCD_H; strip_y+=STRIP_H)` loops), and for those
+    // the window is set once per frame and the rest is streamed: RAMWR stays
     // open -- the write pointer keeps auto-incrementing -- across CS toggles
     // until another command is sent, and nothing else here sends the panel a
-    // command mid-frame. Nothing in software could confirm that -- board_capture
-    // samples `pixels` before this point, and MISO is unwired -- so it was
-    // checked on the physical panel, which is the only evidence there is. If
-    // the picture ever tears or the ribbons land on the wrong rows, revert to
-    // setting xs/ys and issuing 0x2c on every call, the way this used to work.
-    if(y==0) {
-        uint16_t x0=40, x1=279, y0=53, y1=53+LCD_H-1;
+    // command mid-frame. That cuts 17 strips' worth of CASET/RASET (32
+    // transactions) down to one.
+    //
+    // The condition is where the pointer is, not `y==0`. It used to be the
+    // latter, which was the same test while every caller sent every strip.
+    // main/ui/codeedit.c now sends only the strips it changed, and under the
+    // old test a frame that skipped strip 0 set no window at all: its rows
+    // went wherever the pointer happened to be, and a frame that skipped a
+    // middle strip pulled everything below it up by 8 rows. Neither is
+    // visible from software -- board_capture samples `pixels` above, before
+    // this point, and MISO is unwired -- so it would have shown only on the
+    // glass. Tracking the pointer costs a re-window per discontinuity and
+    // nothing at all for a caller that sends every strip.
+    if(y!=next_row) {
+        uint16_t x0=40, x1=279, y0=53+(uint16_t)y, y1=53+LCD_H-1;
         uint8_t xs[]={x0>>8,x0,x1>>8,x1}, ys[]={y0>>8,y0,y1>>8,y1};
         esp_err_t e=command(0x2a,xs,4); if(e) return e;
         e=command(0x2b,ys,4); if(e) return e;
         e=command(0x2c,NULL,0); if(e) return e;   // RAMWR: opens the write session
     }
-    // After the capture block above, which wants the pixels as drawn.
+    // The byte swap goes after the capture block above, which wants the pixels
+    // as drawn.
     //
     // A 32-bit C version of this was measured and was worse: this file builds
     // at -Os, where the four-byte memcpy that expresses an aligned wide access
@@ -285,5 +300,11 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     int count=LCD_W*rows;
     if(pie_swap) swap_pie(pixels,(unsigned)(count*2/32));
     else swap_scalar(pixels,count);
-    return tx(true,pixels,(size_t)LCD_W*rows*2);
+    esp_err_t e=tx(true,pixels,(size_t)LCD_W*rows*2);
+    // Where the pointer lands once these rows are in. At the bottom of the
+    // window it wraps to the window's own top, which is only row 0 when this
+    // frame started there, so the end of the panel always re-windows. A failed
+    // transfer leaves the pointer unknown, which is what -1 means.
+    next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
+    return e;
 }

@@ -17,3 +17,10 @@ void paint_begin(uint16_t *strip, int strip_y, int strip_h);
 void paint_ascii(int x, int y, const char *s, uint16_t colour);
 
 void paint_fill(int x, int y, int w, int h, uint16_t colour);
+
+// Narrow both of the above to [x0,x1) in screen x, until the next
+// paint_begin(). A column that scrolls sideways draws its first cell partly
+// off its own left edge; without this the overhang lands on whatever the
+// column is inset from. paint_begin resets it to the whole row, so a screen
+// that never scrolls never has to know this exists.
+void paint_clip(int x0, int x1);

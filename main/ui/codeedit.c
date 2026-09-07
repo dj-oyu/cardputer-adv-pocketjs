@@ -47,6 +47,12 @@ static vim_state_t vim;
 static bool ime_wanted;
 
 static size_t top_line;        // first visible line
+// Pixels of the text column scrolled off to the left. A pixel rather than a
+// column count because jpfont draws variable-width glyphs: "a" is 6 px and
+// "あ" is 12, so "column 20" is not a position any two lines agree on.
+// One offset is shared by all six rows -- per-line offsets would make a
+// vertical motion slide the text sideways under the cursor.
+static int    left_px;
 static bool   dirty=true;
 static char   notice[48];
 static code_state_t state;
@@ -58,6 +64,16 @@ static code_state_t state;
 #define CONSOLE_TOP (VIEW_TOP+VIEW_ROWS*LINE_H+3)
 // 8 px rows, so four of them fit the 33 px between the code and the footer.
 #define CONSOLE_ROWS 4
+// The text column: everything right of the line numbers.
+#define TEXT_W   (LCD_W-GUTTER)
+// Scroll in bands rather than by one column. A margin alone still moves the
+// view on every keystroke once the cursor is parked at the edge, which is the
+// jitter that makes a scrolling editor unreadable; jumping a band puts the
+// cursor well inside the window and buys 48 px of typing before the next move.
+#define HSCROLL_BAND 48
+// ...and keep this much of the line beyond the cursor in view, so the
+// character being typed is never the last one on the panel.
+#define HSCROLL_EDGE 24
 
 // Draws something on the first frame, so a run that works looks like it did.
 // The property numbers are the host's; see apps/hello/main.js for the full set.
@@ -123,7 +139,7 @@ static void open_slot(unsigned which, const char *seed, size_t seed_len) {
     doc.cursor=0; doc.changed=false;
     vim_reset(&vim);
     vim_clamp(&vim,&doc);
-    top_line=0; state=CODE_EDIT; dirty=true;
+    top_line=0; left_px=0; state=CODE_EDIT; code_repaint_all();
     // The footer spends its room teaching how to type, so the two keys that
     // make the Playground worth opening are taught on arrival instead. The
     // first command message replaces this, which is right: it is onboarding,
@@ -170,11 +186,13 @@ void code_run_restore(void) {
     if(doc.cursor>doc.len) doc.cursor=doc.len;
     vim_clamp(&vim,&doc);
     doc.changed=false; stored=true;
-    dirty=true;
+    // Nothing was sent to the panel while the guest owned it, so the record of
+    // what it is showing is worthless: everything has to go out again.
+    code_repaint_all();
 }
 
 void code_returned(const char *error) {
-    state=CODE_EDIT; dirty=true;
+    state=CODE_EDIT; code_repaint_all();
     snprintf(notice,sizeof(notice),"%s",error?error:"RETURNED");
 }
 
@@ -197,11 +215,37 @@ static size_t cursor_line(void) {
     return line;
 }
 
-// Keep the cursor's line inside the window.
+static int glyph_width(const char *s, size_t n);
+
+// The width of the cell the caret covers, which is one character in normal
+// mode and a bar between characters otherwise. It is part of what has to stay
+// on screen: a caret sitting on the last visible glyph is half off the panel.
+static int caret_cell(void) {
+    if(vim_mode(&vim)!=VIM_NORMAL) return 1;
+    if(doc.cursor>=doc.len || text[doc.cursor]=='\n') return 5;
+    size_t n=1;
+    while(doc.cursor+n<doc.len && utf8_is_cont(text[doc.cursor+n])) n++;
+    return glyph_width(text+doc.cursor,n);
+}
+
+// Keep the cursor's line inside the window, and the cursor itself inside the
+// text column. Both are view properties: vimcmd.c owns the cursor and has no
+// screen to keep it on, which is what makes it host-testable.
 static void follow_cursor(void) {
     size_t line=cursor_line();
     if(line<top_line) top_line=line;
     else if(line>=top_line+VIEW_ROWS) top_line=line-VIEW_ROWS+1;
+
+    size_t ls=line_start(doc.cursor);
+    int cx=glyph_width(text+ls,doc.cursor-ls), cw=caret_cell();
+    // Left first, then right: a band is wider than the margin, so the two can
+    // never both want to run, and a line shorter than the current offset ends
+    // with the first loop walking the view back to the start of the line.
+    while(left_px>0 && cx-left_px<HSCROLL_EDGE) {
+        left_px-=HSCROLL_BAND;
+        if(left_px<0) left_px=0;
+    }
+    while(cx+cw-left_px>TEXT_W-HSCROLL_EDGE) left_px+=HSCROLL_BAND;
 }
 
 // ---- keys -----------------------------------------------------------------
@@ -233,7 +277,7 @@ static void do_new(void) {
     // afterwards.
     text[0]=0; doc.len=0; doc.cursor=0; doc.changed=true;
     stored=false;
-    top_line=0;
+    top_line=0; left_px=0;
     vim_reset(&vim);
     // Emptying the document is followed by typing into it, so it starts typing.
     // A host piping a source in over USB depends on that too: it sends C-n and
@@ -354,28 +398,76 @@ static int strip_y, strip_h;
 // the ones before it, and nothing has to hold a byte-per-character map.
 // 6 rows x 24 runs x 2 bytes plus bookkeeping: under 400 bytes of BSS.
 #define SPANS_PER_ROW 24
-#define ROW_BYTES_MAX 128       // far past the 218 px the text column can show
+// The most bytes one row keeps. It bounds the *window*, not the line: what is
+// kept starts at the first chunk the column overlaps, so 218 px of column is
+// about 37 latin characters plus however far past the edge the chunk that
+// straddles it runs -- 255 bytes in the worst case. Measuring it from the start
+// of the line instead is what made a line scrolled past its 256th byte draw
+// blank, with only the caret on it; tools/test_codeedit.c asserts the row has
+// ink. This is a byte cap, not an array bound: the span table is unchanged, so
+// it costs no BSS.
+#define ROW_BYTES_MAX 256
 static uint8_t span_len[VIEW_ROWS][SPANS_PER_ROW];
 static uint8_t span_kind[VIEW_ROWS][SPANS_PER_ROW];
 static uint8_t span_n[VIEW_ROWS];
 static uint16_t row_off[VIEW_ROWS];   // SRC_MAX is 8192, so 16 bits reach it
+// Where row_off[] sits, in pixels from the start of its line, and how far into
+// the line the collector has walked. Both are pixels because the pen is: the
+// bytes the collector skipped still moved it right.
+static int row_x[VIEW_ROWS];
+static int row_px[VIEW_ROWS];
+static uint16_t row_kept[VIEW_ROWS];
 
-static void span_reset(void) { memset(span_n,0,sizeof(span_n)); }
+static void span_reset(void) {
+    memset(span_n,0,sizeof(span_n));
+    memset(row_x,0,sizeof(row_x));
+    memset(row_px,0,sizeof(row_px));
+    memset(row_kept,0,sizeof(row_kept));
+}
 
-// jslex hands back one run at a time; long runs arrive split at 255 bytes so a
-// uint8 length is always enough.
+// A chunk boundary that is also a character boundary. Both glyph_width() and
+// jpfont_draw_clip() decode from the first byte of what they are handed, so a
+// chunk cut through a UTF-8 sequence is U+FFFD to one of them and a different
+// number of pixels to the other -- the two would then disagree about where the
+// rest of the line starts.
+static size_t span_chop(size_t off, size_t take, size_t length) {
+    while(take && take<length && utf8_is_cont(text[off+take])) take--;
+    return take;
+}
+
+// jslex hands back one run at a time, in order within a line; long runs arrive
+// split at 255 bytes so a uint8 length is always enough.
+//
+// Only the runs the text column can actually show are kept. A run wholly left
+// of the column advances the pen and is dropped, which is what keeps a deep
+// scroll costing the same as a shallow one and lets the span table stay small
+// no matter how long the line is.
 static void span_collect(void *user_data, unsigned line,
                          size_t off, size_t length, uint8_t kind) {
     unsigned base=*(unsigned*)user_data;
     if(line<base) return;
     unsigned row=line-base;
-    if(row>=VIEW_ROWS || off>0xffff) return;
-    if(!span_n[row]) row_off[row]=off;
-    size_t seen=0;
-    for(unsigned i=0;i<span_n[row];i++) seen+=span_len[row][i];
-    while(length && seen<ROW_BYTES_MAX) {
-        size_t take=length>255?255:length;
-        if(seen+take>ROW_BYTES_MAX) take=ROW_BYTES_MAX-seen;
+    if(row>=VIEW_ROWS) return;
+    while(length) {
+        size_t take=span_chop(off,length>255?255:length,length);
+        if(!take) return;
+        int w=glyph_width(text+off,take);
+        if(row_px[row]+w<=left_px) {          // wholly left of the column
+            row_px[row]+=w; off+=take; length-=take;
+            continue;
+        }
+        if(row_px[row]-left_px>=TEXT_W) return;   // and past its right edge
+        if(row_kept[row]>=ROW_BYTES_MAX) return;
+        if(row_kept[row]+take>ROW_BYTES_MAX) {
+            take=span_chop(off,ROW_BYTES_MAX-row_kept[row],length);
+            if(!take) return;
+            w=glyph_width(text+off,take);
+        }
+        if(!row_kept[row]) {
+            if(off>0xffff) return;            // past what row_off can address
+            row_off[row]=(uint16_t)off;
+            row_x[row]=row_px[row];
+        }
         if(span_n[row]<SPANS_PER_ROW) {
             span_len[row][span_n[row]]=(uint8_t)take;
             span_kind[row][span_n[row]]=kind;
@@ -387,11 +479,16 @@ static void span_collect(void *user_data, unsigned line,
             // colour instead of vanishing.
             unsigned last=SPANS_PER_ROW-1;
             size_t room=255-span_len[row][last];
-            if(!room) break;
-            if(take>room) take=room;
+            if(!room) return;
+            if(take>room) {
+                take=span_chop(off,room,length);
+                if(!take) return;
+                w=glyph_width(text+off,take);
+            }
             span_len[row][last]=(uint8_t)(span_len[row][last]+take);
         }
-        seen+=take; length-=take;
+        row_kept[row]+=(uint16_t)take; row_px[row]+=w;
+        off+=take; length-=take;
     }
 }
 
@@ -453,7 +550,8 @@ static void draw_caret(int x,int y,size_t line_at) {
     if(plen && jpfont_ready(JPFONT_TEXT)) {
         int pw=(int)jpfont_width(JPFONT_TEXT,pre,plen);
         paint_fill(cx,y,pw<LCD_W-cx?pw:LCD_W-cx,LINE_H,board_rgb(18,34,54));
-        jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,pre,plen,colour.accent);
+        jpfont_draw_clip(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,pre,plen,
+                         colour.accent,GUTTER,LCD_W);
         cx+=pw;
     }
     if(vim_mode(&vim)!=VIM_NORMAL || plen) { paint_fill(cx,y,1,LINE_H,colour.caret); return; }
@@ -468,38 +566,69 @@ static void draw_caret(int x,int y,size_t line_at) {
     int w=n?glyph_width(text+doc.cursor,n):5;
     paint_fill(cx,y,w<LCD_W-cx?w:LCD_W-cx,LINE_H,colour.caret);
     if(n && jpfont_ready(JPFONT_TEXT))
-        jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,text+doc.cursor,n,colour.ground);
+        jpfont_draw_clip(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,text+doc.cursor,n,
+                         colour.ground,GUTTER,LCD_W);
 }
 
-static void draw_lines(void) {
+// The six visible rows, worked out once per repaint. This used to be walked
+// inside draw_lines(), which the strip loop called seventeen times: the line
+// scan, the line_end() of every row and the span bookkeeping all ran once per
+// strip to produce the same six answers.
+typedef struct {
+    bool   used;        // a line reaches this row
+    size_t line;        // 0-based line number
+    size_t at, end;     // its bytes, without the newline
+} vrow_t;
+static vrow_t vrow[VIEW_ROWS];
+
+static void rows_prepare(void) {
+    for(int r=0;r<VIEW_ROWS;r++) vrow[r].used=false;
     size_t i=0, line=0;
     while(line<top_line && i<doc.len) { if(text[i]=='\n') line++; i++; }
-    for(int row=0;row<VIEW_ROWS && i<=doc.len;row++,line++) {
-        int y=VIEW_TOP+row*LINE_H;
+    for(int r=0;r<VIEW_ROWS && i<=doc.len;r++,line++) {
         size_t end=line_end(i);
-        char num[8];
-        snprintf(num,sizeof(num),"%3u",(unsigned)line+1);
-        paint_ascii(2,y+2,num,line==caret_line?colour.accent:colour.rule);
-
-        int x=GUTTER;
-        size_t at=span_n[row]?row_off[row]:i;
-        for(unsigned sp=0;sp<span_n[row] && x<LCD_W;sp++) {
-            size_t n=span_len[row][sp];
-            uint16_t c=colour.span[span_kind[row][sp]];
-            if(jpfont_ready(JPFONT_TEXT))
-                x=jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,x,y,text+at,n,c);
-            else {
-                char flat[32];
-                size_t m=n<sizeof(flat)-1?n:sizeof(flat)-1;
-                memcpy(flat,text+at,m); flat[m]=0;
-                paint_ascii(x,y+2,flat,c); x+=6*(int)m;
-            }
-            at+=n;
-        }
-        if(doc.cursor>=i && doc.cursor<=end && line==caret_line) draw_caret(GUTTER,y,i);
+        vrow[r]=(vrow_t){.used=true,.line=line,.at=i,.end=end};
         if(end>=doc.len) break;
         i=end+1;
     }
+}
+
+static void draw_row(int row) {
+    if(!vrow[row].used) return;
+    int y=VIEW_TOP+row*LINE_H;
+    char num[8];
+    snprintf(num,sizeof(num),"%3u",(unsigned)vrow[row].line+1);
+    paint_ascii(2,y+2,num,vrow[row].line==caret_line?colour.accent:colour.rule);
+    // The one thing that says the line continues off to the left. Without it a
+    // scrolled view and a short line are the same picture.
+    if(left_px) paint_fill(GUTTER-2,y,1,LINE_H,colour.accent);
+
+    // Everything below draws with the pen left of the column when scrolled, so
+    // the clip is what keeps a half-visible glyph off the line numbers.
+    paint_clip(GUTTER,LCD_W);
+    // row_x is where the first kept run sits in its line; everything before it
+    // was skipped by the collector, not drawn off the left edge, so the pen
+    // starts there rather than at the start of the line.
+    int x=GUTTER-left_px+row_x[row];
+    size_t at=span_n[row]?row_off[row]:vrow[row].at;
+    for(unsigned sp=0;sp<span_n[row] && x<LCD_W;sp++) {
+        size_t n=span_len[row][sp];
+        uint16_t c=colour.span[span_kind[row][sp]];
+        if(jpfont_ready(JPFONT_TEXT))
+            x=jpfont_draw_clip(JPFONT_TEXT,strip,strip_y,strip_h,x,y,text+at,n,c,
+                               GUTTER,LCD_W);
+        else {
+            char flat[32];
+            size_t m=n<sizeof(flat)-1?n:sizeof(flat)-1;
+            memcpy(flat,text+at,m); flat[m]=0;
+            paint_ascii(x,y+2,flat,c); x+=6*(int)m;
+        }
+        at+=n;
+    }
+    if(vrow[row].line==caret_line &&
+       doc.cursor>=vrow[row].at && doc.cursor<=vrow[row].end)
+        draw_caret(GUTTER-left_px,y,vrow[row].at);
+    paint_clip(0,LCD_W);
 }
 
 // Candidates while converting, otherwise what the last run said: its exception
@@ -579,6 +708,159 @@ static void draw_footer(void) {
     paint_ascii(KANA_X,LCD_H-8,kana,colour.accent);
 }
 
+// ---- what the panel is showing --------------------------------------------
+//
+// There is no second framebuffer and no read-back: board_capture copies the
+// strip before the byte swap and MISO is unwired, so nothing in software can
+// see the glass. This table is therefore the *only* record of what is on it,
+// and a band left out of it stays wrong until something else redraws that
+// strip -- invisibly, because a capture only shows the strips that were sent.
+//
+// So each band carries a hash of every value its draw_* function reads. Adding
+// a value to one of those functions without adding it here is the whole class
+// of bug this arrangement can have, and tools/test_codeedit.c exists to catch
+// it: it renders every frame twice, once incrementally and once in full, and
+// compares the pixels.
+enum {
+    BAND_HEADER = 0,
+    BAND_ROW,                            // ...and VIEW_ROWS-1 more
+    BAND_CONSOLE = BAND_ROW+VIEW_ROWS,
+    BAND_FOOTER,
+    BAND_COUNT
+};
+#define BAND_ALL ((1u<<BAND_COUNT)-1u)
+
+// Screen rows each band owns, [y0,y1). Rows 14-15 and 88 belong to no band:
+// nothing but the ground colour is ever drawn there, so a strip that is never
+// sent again cannot make them wrong.
+static const uint8_t BAND_Y0[BAND_COUNT]={
+    0,
+    VIEW_TOP+0*LINE_H, VIEW_TOP+1*LINE_H, VIEW_TOP+2*LINE_H,
+    VIEW_TOP+3*LINE_H, VIEW_TOP+4*LINE_H, VIEW_TOP+5*LINE_H,
+    CONSOLE_TOP-2, LCD_H-11,
+};
+static const uint8_t BAND_Y1[BAND_COUNT]={
+    14,
+    VIEW_TOP+1*LINE_H, VIEW_TOP+2*LINE_H, VIEW_TOP+3*LINE_H,
+    VIEW_TOP+4*LINE_H, VIEW_TOP+5*LINE_H, VIEW_TOP+6*LINE_H,
+    CONSOLE_TOP+CONSOLE_ROWS*8+1, LCD_H,
+};
+
+static uint32_t shown[BAND_COUNT];
+static bool     shown_valid;
+static unsigned since_full;
+
+// Every so often, send everything whether or not it looks unchanged. This does
+// not make a missed input correct -- it makes it temporary, which is the
+// difference between a display bug someone can describe and one that survives
+// until the screen is left. 120 frames is about two seconds at frame_ms=16 and
+// costs 1/120th of the saving.
+#define FULL_EVERY 120
+
+void code_repaint_all(void) { shown_valid=false; dirty=true; }
+
+static uint32_t hbytes(uint32_t h, const void *p, size_t n) {
+    const unsigned char *b=(const unsigned char*)p;
+    while(n--) { h^=*b++; h*=16777619u; }
+    return h;
+}
+static uint32_t hu(uint32_t h, uint32_t v) { return hbytes(h,&v,sizeof v); }
+static uint32_t hstr(uint32_t h, const char *t) {
+    return t ? hbytes(hu(h,1),t,strlen(t)) : hu(h,0);
+}
+
+// Shared by every band: the faces and the dictionary can arrive after the
+// first repaint, and each of them changes what all four draw.
+static uint32_t hband_env(void) {
+    uint32_t h=2166136261u;
+    h=hu(h,jpfont_ready(JPFONT_TEXT));
+    h=hu(h,jpfont_ready(JPFONT_SMALL));
+    return hu(h,ime!=NULL);
+}
+
+static uint32_t hband_header(void) {
+    uint32_t h=hband_env();
+    h=hstr(h,label);
+    h=hu(h,doc.changed);
+    h=hu(h,(uint32_t)caret_line);
+    h=hu(h,(uint32_t)doc.len);
+    return hstr(h,notice);
+}
+
+static uint32_t hband_row(int row) {
+    uint32_t h=hu(hband_env(),vrow[row].used);
+    if(!vrow[row].used) return h;
+    h=hu(h,(uint32_t)vrow[row].line);
+    h=hu(h,(uint32_t)left_px);
+    h=hu(h,vrow[row].line==caret_line);      // the gutter's colour
+    // The bytes actually painted are the spans, not the whole line: what falls
+    // past ROW_BYTES_MAX is not drawn and must not be hashed, or a repaint
+    // would be ordered for a change nobody can see.
+    size_t at=span_n[row]?row_off[row]:vrow[row].at, n=0;
+    h=hu(h,span_n[row]);
+    h=hu(h,(uint32_t)row_x[row]);            // where the kept runs start
+    for(unsigned sp=0;sp<span_n[row];sp++) {
+        h=hu(h,span_len[row][sp]);
+        h=hu(h,span_kind[row][sp]);
+        n+=span_len[row][sp];
+    }
+    if(at>doc.len) at=doc.len;
+    if(at+n>doc.len) n=doc.len-at;
+    h=hbytes(h,text+at,n);
+    bool caret = vrow[row].line==caret_line &&
+                 doc.cursor>=vrow[row].at && doc.cursor<=vrow[row].end;
+    h=hu(h,caret);
+    if(caret) {
+        size_t plen=0;
+        const char *pre=ime?ime_preedit(ime,&plen):NULL;
+        h=hu(h,(uint32_t)doc.cursor);
+        h=hu(h,vim_mode(&vim));
+        h=hu(h,(uint32_t)plen);
+        if(plen) h=hbytes(h,pre,plen);
+    }
+    return h;
+}
+
+static uint32_t hband_console(void) {
+    uint32_t h=hband_env();
+    int ncand=ime?ime_cand_count(ime):0, sel=ime?ime_sel(ime):-1;
+    h=hu(h,(uint32_t)ncand); h=hu(h,(uint32_t)sel);
+    if(ncand>0 && sel>=0) {
+        for(int c=sel;c<ncand;c++) {
+            size_t clen=0;
+            const char *cand=ime_cand(ime,c,&clen);
+            if(!cand) break;
+            h=hbytes(hu(h,(uint32_t)clen),cand,clen);
+        }
+        return h;                     // the candidate line replaces the rest
+    }
+    h=hstr(h,jsconsole_error());
+    unsigned n=jsconsole_count(), rows=n<CONSOLE_ROWS?n:CONSOLE_ROWS;
+    h=hu(h,rows);
+    for(unsigned r=0;r<rows;r++) h=hstr(h,jsconsole_line(n-rows+r));
+    return h;
+}
+
+static uint32_t hband_footer(void) {
+    uint32_t h=hband_env();
+    size_t clen=0;
+    const char *cmd=vim_cmdline(&vim,&clen);
+    h=hu(h,cmd!=NULL);
+    if(cmd) return hbytes(hu(hu(h,(uint32_t)clen),(unsigned char)vim.cmd_kind),cmd,clen);
+    h=hu(h,vim_mode(&vim));
+    h=hstr(h,vim_pending(&vim));
+    bool kana=skk_session_ready() && ime_on(skk_session());
+    h=hu(h,kana);
+    return hu(h,kana?(uint32_t)ime_mode(skk_session()):0u);
+}
+
+static void draw_band(int band) {
+    if(band==BAND_HEADER)       draw_header();
+    else if(band==BAND_CONSOLE) draw_console();
+    else if(band==BAND_FOOTER)  draw_footer();
+    else                        draw_row(band-BAND_ROW);
+}
+
 void code_draw(void) {
     dirty=false;
     strip=board_strip();
@@ -598,20 +880,39 @@ void code_draw(void) {
         },
     };
 
+    rows_prepare();
     // Colour the visible window once. Doing it inside the strip loop would
-    // scan the source seventeen times for one repaint.
+    // scan the source seventeen times for one repaint. It still runs on every
+    // repaint: the lexer's state at a line depends on every byte before it, so
+    // skipping the scan needs a per-line state cache, which is a separate
+    // change with its own measurement.
     span_reset();
     unsigned base=(unsigned)top_line;
     jslex_scan(text,doc.len,base,base+VIEW_ROWS-1,span_collect,&base);
 
+    uint32_t now[BAND_COUNT], damage=0;
+    now[BAND_HEADER]=hband_header();
+    for(int r=0;r<VIEW_ROWS;r++) now[BAND_ROW+r]=hband_row(r);
+    now[BAND_CONSOLE]=hband_console();
+    now[BAND_FOOTER]=hband_footer();
+    if(!shown_valid || ++since_full>=FULL_EVERY) { damage=BAND_ALL; since_full=0; }
+    else for(int b=0;b<BAND_COUNT;b++) if(now[b]!=shown[b]) damage|=1u<<b;
+    if(!damage) return;
+
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H?LCD_H-strip_y:STRIP_H;
+        uint32_t here=0;
+        for(int b=0;b<BAND_COUNT;b++)
+            if(BAND_Y0[b]<strip_y+strip_h && BAND_Y1[b]>strip_y) here|=1u<<b;
+        if(!(here&damage)) continue;
         paint_begin(strip,strip_y,strip_h);
         for(int i=0;i<LCD_W*strip_h;i++) strip[i]=colour.ground;
-        draw_header();
-        draw_lines();
-        draw_console();
-        draw_footer();
+        // Every band that touches this strip, not only the damaged ones: the
+        // clear above took the whole strip, so a clean band sharing it has to
+        // be put back before the strip goes out.
+        for(int b=0;b<BAND_COUNT;b++) if(here&(1u<<b)) draw_band(b);
         ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
     }
+    memcpy(shown,now,sizeof shown);
+    shown_valid=true;
 }

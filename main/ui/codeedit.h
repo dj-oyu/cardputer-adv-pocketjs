@@ -26,6 +26,13 @@ bool code_key(const keystroke_t *k);
 bool code_dirty(void);
 void code_draw(void);
 
+// Forget what the panel is believed to be showing, so the next code_draw()
+// sends every strip. Required before a capture -- board_capture prints only
+// the strips that are sent -- and whenever something outside this screen draws
+// over it: the pet overlay rides on board_present, so a frame that presents
+// three strips moves the pet on three strips only.
+void code_repaint_all(void);
+
 // The source the run should evaluate.
 const char *code_source(size_t *len);
 

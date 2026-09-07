@@ -3,9 +3,16 @@
 
 static uint16_t *strip;
 static int strip_y, strip_h;
+static int clip_x0, clip_x1=LCD_W;
 
 void paint_begin(uint16_t *pixels, int y, int rows) {
     strip=pixels; strip_y=y; strip_h=rows;
+    clip_x0=0; clip_x1=LCD_W;
+}
+
+void paint_clip(int x0, int x1) {
+    clip_x0=x0<0?0:x0;
+    clip_x1=x1>LCD_W?LCD_W:x1;
 }
 
 void paint_ascii(int x, int y, const char *s, uint16_t colour) {
@@ -19,7 +26,7 @@ void paint_ascii(int x, int y, const char *s, uint16_t colour) {
             for(int gx=0;gx<5;gx++)
                 if(font_rows[(c-32)*7+gy]&(1<<(4-gx))) {
                     int px=x+gx;
-                    if(px>=0&&px<LCD_W) strip[py*LCD_W+px]=colour;
+                    if(px>=clip_x0&&px<clip_x1) strip[py*LCD_W+px]=colour;
                 }
         }
     }
@@ -32,7 +39,7 @@ void paint_fill(int x, int y, int w, int h, uint16_t colour) {
         if(py<0||py>=strip_h) continue;
         for(int c=0;c<w;c++) {
             int px=x+c;
-            if(px>=0&&px<LCD_W) strip[py*LCD_W+px]=colour;
+            if(px>=clip_x0&&px<clip_x1) strip[py*LCD_W+px]=colour;
         }
     }
 }
