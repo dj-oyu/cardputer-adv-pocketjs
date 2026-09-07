@@ -1,0 +1,57 @@
+# --- BLE Central feasibility measurement (docs/common-api.md section 12) -----
+#
+# NOT referenced by any default build. It is applied on top of
+# sdkconfig.defaults only when a build is configured with
+#   -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ble"
+# so that measuring what NimBLE costs cannot change what another session builds.
+#
+# Everything below is the smallest central-only NimBLE this board could host:
+# one connection, no GATT server, no advertising, no 5.0 features, no bonding.
+# The point is to establish the FLOOR of the DIRAM cost, so that if the floor
+# does not fit, no amount of tuning rescues section 12.
+
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+
+# Central + observer only. Section 12 defers Peripheral to a later stage, and a
+# GATT server this firmware never answers is pure .bss.
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
+CONFIG_BT_NIMBLE_GATT_CLIENT=y
+CONFIG_BT_NIMBLE_GATT_SERVER=n
+
+# Section 12: "接続1件". The controller sizes its per-link state from
+# BT_CTRL_BLE_MAX_ACT, which must also cover the scan activity.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_CTRL_BLE_MAX_ACT=2
+
+# Pairing/bonding is a host-screen concern in section 12 and no app-facing
+# feature here needs it yet; the SM tables and the NVS bond store are not
+# bought for a measurement of the floor.
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=n
+CONFIG_BT_NIMBLE_NVS_PERSIST=n
+
+# 5.0: extended advertising, coded PHY, periodic sync, ISO. None of it is in
+# section 12's central surface.
+CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT=n
+
+# Notification queue in section 12 is 4 deep with an explicit dropped counter,
+# so the host mbuf pool does not have to absorb a backlog.
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=0
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=6
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=128
+CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2
+CONFIG_BT_NIMBLE_MAX_CCCDS=4
+CONFIG_BT_NIMBLE_L2CAP_COC_MAX_NUM=0
+CONFIG_BT_NIMBLE_WHITELIST_SIZE=1
+
+# The host task is the largest single stack the stack asks for; 4 KiB is the
+# documented floor for a client-only build.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096
+
+# No PSRAM on this part, so INTERNAL is the only honest setting: choosing
+# anything else would only hide where the memory came from.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y

@@ -222,15 +222,15 @@ cueは既存合成音の非同期受付で、ミュート・キュー満杯な�
 
 IRは送信のみ。durationsUsはmark/space交互で先頭mark、全要素正値、合計時間・要素数・carrier範囲を制限する。タイミング生成はnative。受信機能を本体搭載扱いしない。
 
-### 9.1 圧縮音声の再生（追加案）
+### 9.1 短尺クリップの再生
 
-音楽プレイヤー、教材音声、ペットの短い音声、PCからの音声応答を対象に、`audio.playback`を追加候補とする。再生はnativeのファイル読取→コンテナ解析→デコード→PCMリング→I²Sで行い、JSは操作・状態・画面だけを担当する。再生中もJSのframeやGCから独立して音声を供給する。
+音楽プレイヤー、教材音声、ペットの短い音声、PCからの音声応答を対象に `audio.playback` を提案した節だったが、**この機体では圧縮音声のデコードが成立しないことが計測で確定した**ので、成立する範囲へ縮めて実装した。落とした理由は下の「なぜMP3/Opus/FLACではないか」に数字で置く。提案のままだった `player` の形（open→info/play/pause/seek/status/onState/close）はそのまま残っている。変わったのは入力の形式と大きさだけ。
 
 ```ts
 pocket.audio.player.open({source:string}, options?:Options):Promise<Player>;
 type Player = {
-  info(): {codec:string;sampleRate:number;channels:number;
-           durationMs:number|null;seekable:boolean};
+  info(): {codec:"wav/pcm16"|"wav/ima-adpcm";sampleRate:24000;channels:1;
+           durationMs:number;seekable:true};
   play():Promise<void>;
   pause():Promise<void>;
   seek(positionMs:number,options?:Options):Promise<void>;
@@ -241,27 +241,32 @@ type Player = {
 };
 ```
 
-sourceは初版では許可済み `app:/` / `sd:/` の音声ファイルのみ。openは有界のヘッダ検査とデコード資源取得までで、自動再生しない。playは出力開始の受付完了、pauseは停止位置の保持完了を返し、曲全体の終了はonStateで通知する。再生位置は消費したPCM framesから求める。seekable=falseならseekはUNSUPPORTED。endedからのplayは初版ではCLOSED相当とせずNOT_AVAILABLEとし、再生し直すにはopenし直す。close後はすべてCLOSED。出力先はホストの本体スピーカー／有線出力で、Bluetooth音声出力を意味しない。
+sourceは `app:/` / `assets:/` のWAVファイルで、24kHz・1ch・16bit PCMまたはIMA ADPCM（WAVのブロック配置）。**最大8,192バイト**——ADPCMで約0.68秒、PCM16で約0.17秒。openはファイル全体を1回だけ読み、ヘッダを検査し、再生は始めない。playは出力受付の完了、pauseは停止位置の保持完了を返し、曲の終わりはonStateで通知する。位置は消費したPCM framesから求める。endedからのplayとseekはNOT_AVAILABLE（再生し直すにはopenし直す）。close後はすべてCLOSED。1プレイヤー・1音声で、toneとは排他（tone中のopenはBUSY）。セッション終了時は自動close。
 
-1プレイヤー・1音声ストリームから開始する。tone・録音とは排他、再生中のcueはfalseを返す。将来の効果音ミックスは別capability。ファイルのmetadata・埋込画像・コンテナpacket・FLAC blocksizeにも上限を設け、巨大なタグやブロックでRAMを使い切らない。カード抜去はDISCONNECTEDで停止し、I²Sへは無音を供給する。終了・例外時はプレイヤーを自動closeする。別アプリへ移っても続くBGMは、ホスト所有のメディアサービスとして別段階で設計する。
+seekは実装している——クリップは全部RAMにあるので、seekable=falseにする理由がない。ただしADPCMはブロック先頭からしか再開できない（ブロック先頭の4バイトが予測器を再初期化する）ので、要求位置を含むブロックの先頭に落ちる。`seekBlockAligned` がそれを言う。pause/resumeも同じ丸めを受ける。
 
-初期再生対象案:
+underrunsは常に0で、これは正直な0である。クリップは再生開始前に全部RAMにあり、I²Sへの供給が間に合わなくなる生産者が存在しない。フィールドを残すのは、ストリーミング入力を足したときに0でなくなるから。
 
-| 形式 | 最初の対象 | 判定 |
+出力は本体スピーカー。ミュート中のクリップは長さを保ったまま無音になる（toneと同じ規則）。ミキシングはしない。別アプリへ移っても続くBGMは、ホスト所有のメディアサービスとして別段階の設計。
+
+**なぜMP3/Opus/FLACではないか。** 4つが独立に不成立で、どれか1つでも足りる。
+
+| 制約 | 実測・確認値 | 帰結 |
 | --- | --- | --- |
-| MP3 | 44.1/48kHz、mono/stereo、まず一般的なCBR/VBRファイル | 最初の実装候補 |
-| Opus | Ogg Opus、最大48kHz・2ch。raw packetは別入力形式 | 音楽・教材・PC音声応答向け。packet単体とOgg解析を区別 |
-| FLAC | native FLAC、16bit・44.1/48kHz・最大2ch、blocksize上限を設定 | RAM計測後に対応。高サンプルレート・多chは初期対象外 |
+| デコーダーの入手 | ESP-IDF v6.0.1の`components/`に音声デコーダーは1つもない | esp_audio_codecはレジストリの管理コンポーネントで、vendoring・ライセンス・Flashが別途要る |
+| デコーダーのheap | 公開値でMP3 28KB / Opus 26.6KB / FLAC 89.4KB（S3R8、decoder heapのみ） | アプリ実行中の**最大連続空きは実測23,552バイト**（`app: MEM ... largest=`、tools/uibudget/README.md）。コンテナ解析・入出力リング・task stackの前に、デコーダー単体で最大ブロックを超える |
+| PCMリング | 48kHz/16bit/2chは192,000バイト/秒。この節が挙げていた100ms分＝19,200バイト | 23,552バイトの82%。リングは1つの連続確保なので、これだけで崖に当たる |
+| 音源の置き場 | `sd:` はこのファームに一度もマウントされていない（ドライバがない）。`app:/` の1ファイル上限は24,576バイト | 24,576バイトは128kbps MP3で1.5秒、96kbps Opusで1.9秒、44.1/16/2 FLACで0.14秒。デコーダーが無料でも音楽プレイヤーにはならない |
 
-Espressifのesp_audio_codec v2.5.0には3形式のデコーダーがあり、公開測定ではMP3が28KB/CPU 8.17%、Opusが26.6KB/5.86%、FLACが89.4KB/8.0%。MP3/FLACは44.1kHz 2ch、Opusは48kHz 2ch。**S3R8上の測定で、RAM欄はdecoder heapだけ**。task stack、コンテナ解析、入出力リング、SD、JS、日本語フォント、TLSを含むADV上の値ではない。Opusは正弦波から生成したデータで、全コンテンツの最悪値ではない。同資料のSimple DecoderはOgg Opusに対応するがseekには対応しない。[公式コンポーネント v2.5.0](https://components.espressif.com/components/espressif/esp_audio_codec/versions/2.5.0/readme)
+加えて既存出力は24kHz固定で、この節自身が「そのまま音楽データを流さない」と書いていた。44.1/48kHzへ寄せるならリサンプラーかI²Sの再設定が要り、そのRAMもこの23.5KiBの中から出る。Flashは制約ではない（factory 3MiB中、実測spare 1,283,760バイト）。**足りないのはDRAMの連続領域であって、Flashでも計算量でもない。**
 
-48kHz・16bit・stereoのPCMは192000bytes/sで、100ms分なら19200bytes（計算値）。少量リングで逐次再生すれば曲全体をRAMへ置く必要はない。ただしcodec作業領域とSD待ちの吸収分を別途確保する。FLACは圧縮率よりもデコード時のblocksizeやsample形式によるピークを確認する。
+8,192バイトという上限は `app:/` の24,576ではなく、最大連続空き23,552から来ている。断片化していないときだけ通る機能は、人の前で落ちる機能になる。
 
-既存の効果音出力は24kHz固定なので、そのまま音楽データを流さない。音声サービスで44.1/48kHzへの出力設定切替とES8311動作を検証する。固定出力レートへ統一するならnativeリサンプラーを追加し、そのRAM/CPUも測る。本体スピーカーへのmono合成・有線出力の経路と音量はボード側で確認する。
+実装のコスト（`tools/memlog.py`、対 7c67504）：静的DIRAM **+160バイト**（`pocket_av.c.obj +133`、`sound.c.obj +12`、残りはalignment）、Flash code +4,588バイト。再生中はクリップ1つ分のmalloc（最大8,192バイト）だけが増える。デコードは既存の音声タスクとI²Sをそのまま使い、リングを持たない。IMA ADPCMの表は194バイトのFlash、状態は音声タスクのstack上に20バイト。
 
-ネットワーク再生はSD再生成立後。汎用HTTP APIの64KiB総量上限を黙って解除せず、別の `audio.streaming` capabilityとして有界圧縮データリング・再接続・buffering・無再送の扱いを追加する。Flashにはcodecと少量の音だけを置き、長い曲はSDを基本にする。codecを選択してリンクした後にアプリ3MiBとSKK辞書2MiBの予算を再確認する。
+デコーダーの検証は `python tools/test_ima.py`（実機不要）。`main/hal/ima_adpcm.h` をホストのgccで同じ行のままコンパイルし、独立に書いた参照デコーダーとサンプル単位で照合し、正弦波の往復SNR（実測32.3dB）を測り、「ブロック単体のデコードが通しのデコードと一致する」——seekとresumeが立っている前提——を確認する。**音そのものの正しさはソフトウェアだけでは確認できない**（`board_capture` はフレームバッファしか見えず、ES8311に何が届いたかは見えない）ので、実機での試聴は物理確認として別に依頼する。
 
-受け入れ試験: 各形式で10分以上、JS操作・日本語再描画・SD待ちを重ねてunderrun、最大デコード時間、heap最低値／最大連続領域、stack、Flash増分を測る。破損ファイル、巨大metadata、上限block、繰返しopen/close、pause/resume、カード抜去も確認する。実装採用版のIDF互換性・リンクサイズ・ライセンスは導入時に固定する。
+将来: ストリーミング（`audio.streaming`）、SD、圧縮形式は、いずれもこの23.5KiBの制約が動いてから。PSRAM付きの機体へ移すか、アプリを止めて再生専用の状態に入る設計にすれば、上の表はすべて書き換わる。
 
 ## 10. 外部I/Oと共有バス
 

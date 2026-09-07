@@ -1,4 +1,5 @@
 #include "sound.h"
+#include "ima_adpcm.h"
 #include "driver/i2s_std.h"
 #include "esp_cpu.h"
 #include "esp_timer.h"
@@ -9,10 +10,13 @@
 #include <math.h>
 #include <stdatomic.h>
 
-#define SAMPLE_RATE 24000
+#define SAMPLE_RATE ((int)SOUND_SAMPLE_RATE)
 
-// A click, or a tone. kind is the click index, or -1 for a tone; the rest is
-// only read for tones.
+// A click, a tone, or a clip. kind is the click index, -1 for a tone, -2 for a
+// clip; frequency is read only for tones, and the last three fields only for
+// clips. One struct rather than a union because the queue is four entries deep:
+// the twelve bytes a clip adds cost 48 bytes of .bss in total, and a union
+// would cost the same reading twice as badly.
 typedef struct {
     int32_t id;
     int16_t kind;
@@ -21,6 +25,9 @@ typedef struct {
     uint32_t frames;
     sound_done_fn done;
     void *ctx;
+    const uint8_t *data;  // clips: the caller's payload, read in place
+    uint32_t bytes;
+    uint16_t block;       // clips: ADPCM block size, 0 for PCM16
 } request_t;
 
 static i2s_chan_handle_t output;
@@ -137,6 +144,107 @@ static void play_tone(const request_t *req,int16_t *pcm) {
     if(req->done)req->done(req->ctx,completed);
 }
 
+// ------------------------------------------------------------------- clips
+//
+// The whole clip is already in the caller's RAM and is read in place, so this
+// adds no ring buffer, no second task and no second I2S channel -- it is the
+// same 128-frame block the clicks and tones write, filled from a decoder
+// instead of from a table. That is the only shape of playback this board has
+// room for; docs/common-api.md 9.1 carries the measurements that rule out the
+// alternative.
+//
+// The IMA ADPCM decoder is in ima_adpcm.h, where tools/test_ima.py can compile
+// the same lines this task runs. It costs 194 bytes of flash for its two tables
+// and 20 bytes of state on this task's stack; that is the whole of the codec.
+
+// The clip the audio task is inside, and the id whoever wants it stopped last
+// asked for. Both are the whole of the handshake in sound_clip_stop().
+static atomic_int clip_active;
+static atomic_int clip_halt;
+static atomic_uint clip_frames;   // output frames produced so far
+
+static void play_clip(const request_t *req,int16_t *pcm) {
+    // Claim first, then look for a stop: sound_clip_stop() writes the halt and
+    // then reads this, so with sequentially consistent atomics one of the two
+    // sides always sees the other. Either this returns without touching the
+    // caller's bytes, or the stopper waits for it to finish. There is no
+    // interleaving where the buffer is freed under a read.
+    atomic_store(&clip_active,req->id);
+    atomic_store(&clip_frames,0);
+    if(atomic_load(&clip_halt)==req->id) {
+        atomic_store(&clip_active,0);
+        if(req->done) req->done(req->ctx,false);
+        return;
+    }
+    ima_t ima={.data=req->data,.bytes=req->bytes,.block=req->block};
+    uint32_t frames=req->frames, at=0;
+    bool completed=true;
+    // A tail of silence past the end, as the clicks have, to push the last
+    // samples through the DMA ring.
+    while(at<frames+256) {
+        if(atomic_load(&clip_halt)==req->id) { completed=false; break; }
+        for(int j=0;j<128;j++,at++) {
+            int sample=0;
+            if(at<frames) {
+                if(req->block) sample=ima_next(&ima);
+                else {
+                    uint32_t off=at*2u;
+                    sample=off+1<req->bytes
+                        ?(int16_t)(req->data[off]|(req->data[off+1]<<8)):0;
+                }
+                // Muting silences a clip without shortening it, the same way it
+                // treats a tone: what is heard changes, not how long it lasts.
+                if(!atomic_load(&enabled)) sample=0;
+                sample=(sample*req->gain)>>12;
+            }
+            pcm[j*2]=pcm[j*2+1]=(int16_t)sample;
+        }
+        atomic_store(&clip_frames,at<frames?at:frames);
+        if(!emit(pcm)) { completed=false; break; }
+    }
+    atomic_store(&clip_active,0);
+    if(req->done) req->done(req->ctx,completed);
+}
+
+int32_t sound_clip_start(const uint8_t *data,uint32_t bytes,int format,
+                         uint16_t block,uint32_t frames,float gain,
+                         sound_done_fn done,void *ctx) {
+    if(!events) return SOUND_ERR_UNSUPPORTED;
+    if(!data||!bytes||!frames) return SOUND_ERR_INVALID;
+    if(!(gain>=0.0f&&gain<=1.0f)) return SOUND_ERR_INVALID;
+    // A block has a four-byte header and at least one nibble pair after it, and
+    // has to be even for the nibble walk above to end where the next block
+    // begins. PCM16 has no blocks at all.
+    if(format==SOUND_CLIP_IMA) { if(block<8||block&1) return SOUND_ERR_INVALID; }
+    else if(format==SOUND_CLIP_PCM16) block=0;
+    else return SOUND_ERR_INVALID;
+    request_t req={
+        .id=atomic_fetch_add(&next_id,1),
+        .kind=-2,
+        .gain=(uint16_t)(gain*4096.0f),
+        .frames=frames,
+        .done=done,.ctx=ctx,
+        .data=data,.bytes=bytes,.block=block};
+    if(xQueueSend(events,&req,0)!=pdTRUE) return SOUND_ERR_BUSY;
+    return req.id;
+}
+
+bool sound_clip_stop(int32_t id) {
+    if(id<=0) return true;
+    atomic_store(&clip_halt,id);
+    // One block is 5.3ms and the write it may be inside gives up after 100ms,
+    // so 200ms is well past any honest wait. Returning false would mean the
+    // audio task still holds the caller's bytes, which is not a thing to
+    // recover from by freeing them anyway.
+    for(int i=0;i<40&&atomic_load(&clip_active)==id;i++)
+        vTaskDelay(pdMS_TO_TICKS(5));
+    return atomic_load(&clip_active)!=id;
+}
+
+uint32_t sound_clip_position(int32_t id) {
+    return atomic_load(&clip_active)==id?atomic_load(&clip_frames):0;
+}
+
 int32_t sound_tone(unsigned frequency_hz,unsigned duration_ms,float gain,
                    sound_done_fn done,void *ctx) {
     if(!events)return SOUND_ERR_UNSUPPORTED;
@@ -162,6 +270,8 @@ static void audio_task(void *arg) {
         xQueueReceive(events,&req,portMAX_DELAY);
         if(req.kind>=0) {
             if(req.kind<SFX_KINDS&&atomic_load(&enabled))play_click(req.kind,pcm);
+        } else if(req.kind==-2) {
+            play_clip(&req,pcm);
         } else {
             play_tone(&req,pcm);
         }

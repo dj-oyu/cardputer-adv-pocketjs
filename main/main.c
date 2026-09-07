@@ -10,7 +10,8 @@
 #include "jpfont.h"
 #include "skk_session.h"
 #include "app_session.h"
-#include "pocket_storage.h"
+#include "pocket_workspace.h"
+#include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_bridge.h"
 #include "driver/usb_serial_jtag.h"
@@ -133,7 +134,7 @@ static bool home_dirty(void) { return true; }   // the background animates
 static void home_draw(void)  { shell_draw(home_error,home_phase++); }
 
 static void enter(screen_id_t next);
-static void begin_run(const char *source, size_t len);
+static void begin_run(const char *app_id, const char *source, size_t len);
 
 // The calibration program is embedded rather than kept in a source slot: it is
 // the thing you reach for when the sensor is wrong, and a slot someone has
@@ -177,10 +178,10 @@ static bool home_key(const keystroke_t *k) {
         case 1: enter(SCREEN_PRACTICE); break;
         case 2: enter(SCREEN_CODE); break;
         case 3: enter(SCREEN_TUTORIAL); break;
-        case 4: begin_run(imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
-        case 5: begin_run(pet_start,(size_t)(pet_end-pet_start-1)); break;
-        case 6: begin_run(companion_start,(size_t)(companion_end-companion_start-1)); break;
-        default: begin_run(NULL,0);          // the built-in app
+        case 4: begin_run("local.imucal",imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
+        case 5: begin_run("local.pet",pet_start,(size_t)(pet_end-pet_start-1)); break;
+        case 6: begin_run("local.companion",companion_start,(size_t)(companion_end-companion_start-1)); break;
+        default: begin_run("local.hello",NULL,0);          // the built-in app
     }
     return true;
 }
@@ -248,6 +249,8 @@ static void go_home(void) {
     enter(SCREEN_HOME);
 }
 
+static void take_pending_run(void);
+
 static void end_run(esp_err_t tick_err) {
     app_stop();
     running=false;
@@ -260,11 +263,31 @@ static void end_run(esp_err_t tick_err) {
         sound_play(2);
         ESP_LOGI("shell","HOME_READY");
     }
+    // A session that ended because it called pocket.workspace.run() hands the
+    // screen straight to the work it named: section 7 has the current session
+    // end and the target take over, with no second program running at any
+    // moment. The screen the run belongs to is unchanged, so Back still leaves
+    // to where the person started.
+    take_pending_run();
 }
 
-static void begin_run(const char *source, size_t len) {
+static void take_pending_run(void) {
+    const char *source=NULL;
+    size_t      length=0;
+    if(!pocket_workspace_run_take(&source,&length)) return;
+    begin_run(APP_ID_WORK,source,length);
+    // app_start_source() borrows the bytes only for the length of the start.
+    pocket_workspace_run_done();
+}
+
+// Which app is starting, by name. Section 3 gives the host the identity, and
+// app_session.c reads it back out of the registry to key the stores and to
+// check what the manifest requires — so the name here is the whole of the
+// decision, and the ternary on a source pointer that used to stand in for it
+// is gone.
+static void begin_run(const char *app_id, const char *source, size_t len) {
     owner=screen;
-    pocket_storage_set_owner(source==pet_start?"local.pet":"local.default");
+    app_registry_select(app_id);
     run_started = source ? app_start_source(source,len) : app_start();
     ESP_LOGI(SCREENS[owner].tag,"RUN %u bytes -> %s",
              (unsigned)len,esp_err_to_name(run_started));
@@ -281,6 +304,15 @@ static void begin_run(const char *source, size_t len) {
 // One frame of a running guest. Back returns to the screen that started it,
 // except from the home screen, where the whole app is what Back leaves.
 static void tick_run(bool have, const keystroke_t *stroke) {
+    // The works picker is a host screen over a live guest: while it is up the
+    // guest is not ticked and the keys are the picker's. Its promise settles on
+    // the turn after it closes, which is the first turn the guest runs again.
+    if(pocket_workspace_modal()) {
+        if(have) pocket_workspace_modal_key(stroke);
+        if(pocket_workspace_modal_dirty()) pocket_workspace_modal_draw();
+        if(!pocket_workspace_modal()) app_force_redraw();
+        return;
+    }
     board_key_t key=have?stroke->nav:KEY_NONE;
     bool leave = have && key==KEY_BACK;
     esp_err_t e=ESP_OK;
@@ -299,6 +331,9 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     }
     if(shot) board_capture(false);
 
+    // Accepted this turn, so no further input reaches the app: the session ends
+    // here and end_run() starts what it asked for.
+    if(!leave && e==ESP_OK && pocket_workspace_run_requested()) { end_run(ESP_OK); return; }
     if(leave || e!=ESP_OK) end_run(e);
 }
 
@@ -365,13 +400,15 @@ static void ui_task(void *arg) {
             s=&SCREENS[screen];              // key() may have moved us
             const char *source=NULL; size_t len=0;
             if(!running && s->wants_run && s->wants_run(&source,&len))
-                begin_run(source,len);
+                begin_run(screen==SCREEN_TUTORIAL?"local.tutorial":"local.playground",
+                          source,len);
             else if(!running)
                 paint(s);
 
             int test=atomic_exchange(&diagnostic,0);
             if(test && !running && screen==SCREEN_HOME) {
                 owner=SCREEN_HOME;
+                app_registry_select(APP_ID_DEFAULT);
                 run_started=app_start_test(test);
                 running = run_started==ESP_OK;
                 if(!running) { app_stop(); home_error="TEST ERROR"; }

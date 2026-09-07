@@ -14,25 +14,32 @@
 // What is published:
 //   audio.cue(name)                 sound_play, synchronous, returns bool
 //   audio.tone(spec, options)       sound_tone, Promise<void>
-//   audio.capture.open / audio.player.open   present and reject UNSUPPORTED
+//   audio.capture.open              present and rejects UNSUPPORTED
+//   audio.player.open(spec)         Promise<Player> — one clip, in RAM, in the
+//                                   host's 24 kHz mono, as PCM16 or IMA ADPCM
+//                                   inside a WAV. Section 9.1's MP3/Opus/FLAC
+//                                   off sd: is not reachable on this board and
+//                                   the section carries the measurements.
 //   power.status()                  battery millivolts; percent and charging
 //                                   are null because the board cannot read them
 //   power.onChange(fn)              Subscription, fired when the reading moves
 //   power.keepAwake(options)        present and throws UNSUPPORTED
 //
-// Everything here runs on the JS owner task except one callback: sound.c calls
-// the tone's `done` on the audio task at priority 7. That callback posts one
-// completion and does nothing else; pocket_api_pump() is what turns it into a
+// Everything here runs on the JS owner task except two callbacks: sound.c calls
+// the tone's and the clip's `done` on the audio task at priority 7. Each posts
+// one completion and does nothing else; pocket_api_pump() is what turns it into a
 // Promise resolution on the JS task, as section 5 requires.
 
 esp_err_t pocket_av_install(JSContext *ctx, void *user_data);
 
 // Delivers battery changes. Call once per frame from the JS task, next to
 // pocket_imu_pump() and pocket_api_pump(); the last of those is what settles a
-// finished tone. Cheap when nothing is subscribed: it returns after one load.
+// finished tone, and this one is what turns a finished clip into onState.
+// Cheap when nothing is subscribed: it returns after one load.
 void pocket_av_pump(void);
 
-// Drops every power subscription, so its callbacks are released. Call from the
+// Drops every power and player subscription, so its callbacks are released,
+// and stops and frees a clip the audio task may still be reading. Call from the
 // JS task while the guest is still alive -- app_stop() before it destroys the
 // guest. A tone still sounding is pocket_api_reset()'s to end, which app_stop()
 // calls right after this one.

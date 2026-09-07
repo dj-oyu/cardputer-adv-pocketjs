@@ -15,9 +15,12 @@
 #include "pocket_av.h"
 #include "pocket_io.h"
 #include "pocket_net.h"
+#include "pocket_ble.h"
 #include "pocket_ui.h"
 #include "pocket_app.h"
 #include "pocket_bridge.h"
+#include "pocket_workspace.h"
+#include "app_registry.h"
 #include "pet_assets.h"
 #include "pet_hub.h"
 #include "esp_heap_caps.h"
@@ -63,6 +66,14 @@ static esp_err_t install_limits(JSContext *ctx, void *data) {
     return ESP_OK;
 }
 void app_request_stop(void) { atomic_store(&stop_requested,true); }
+
+// app_registry.c takes this rather than calling pocket_api_supported() itself,
+// so that the registry stays free of the API surface and can be tested on a
+// host that has neither.
+static bool capability_supported(const char *name, void *user) {
+    (void)user;
+    return pocket_api_supported(name);
+}
 
 // pocketjs_guest_eval dumps an exception to stderr and returns ESP_FAIL, so the
 // message never reaches the caller. The Playground needs it, and the guest's
@@ -144,6 +155,9 @@ void app_stop(void) {
     // its promise slot is taken away.
     pocket_net_reset();
     pocket_fs_reset();
+    // Before pocket_api_reset(): a picker still on screen holds a promise slot,
+    // and giving the screen back is what posts its completion.
+    pocket_workspace_reset();
     pocket_ui_reset();
     pocket_bridge_reset();
     pocket_api_reset();
@@ -163,12 +177,19 @@ esp_err_t app_start_test(char test) {
     deadline=esp_timer_get_time()+2000000;
     pocketjs_guest_config_t gc;
     pocketjs_guest_config_defaults(&gc);
-    // 144 KiB, not 128. The cap was chosen when the native API surface was
+    // 160 KiB, not 128. The cap was chosen when the native API surface was
     // nothing; it has since grown and apps started failing to evaluate at all
     // while the system still had 59 KiB free during a run -- the cap was the
     // binding constraint, not the memory. Parsing peaks well above what the
     // program then retains, which is why a 6.5 KB source sat at 107 KiB and a
-    // 6.7 KB one did not fit at 128.
+    // 6.7 KB one did not fit at 128. Lazy namespace installation bought the
+    // 20 KiB that makes this size safe; without it the guest takes the room at
+    // startup instead.
+    //
+    // It is also the reason an app cannot bring the radio up: with the guest
+    // holding ~105 KB, esp_wifi_init is reached with 9 KB free and needs about
+    // 48. See NET_RADIO_MIN_FREE in pocket_net.c. The fix is ordering, not a
+    // smaller cap for everyone -- most apps never touch the radio.
     gc.heap_limit=160*1024; gc.stack_limit=20*1024; gc.prefer_psram=false;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
@@ -184,10 +205,14 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"io",pocket_io_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"net",pocket_net_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"ble",pocket_ble_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pui",pocket_ui_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"bridge",pocket_bridge_install,NULL));
     // After "console": it wraps print and console.log onto the section 7 ring.
     TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
+    // After "app": launchContext and info join pocket.app, and a contributor
+    // runs in the order it registered.
+    TRY(pocketjs_guest_quickjs_install_once(guest,"workspace",pocket_workspace_install,NULL));
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
     cc.logical_width=LCD_W;cc.logical_height=LCD_H;cc.raster_density=1;cc.tick_hz=30;
@@ -230,6 +255,26 @@ esp_err_t app_start_test(char test) {
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
     }
     if(test)length=strlen(source);
+    // Section 3's registration check, and the last thing before the app's own
+    // code runs: every surface has registered its capabilities by now, so an
+    // app asking for one this build does not implement is refused here rather
+    // than failing somewhere inside itself. The identity is applied at the same
+    // moment, because the stores below are keyed by it and a session must not
+    // inherit the last one's.
+    {
+        const app_manifest_t *manifest=app_registry_current();
+        pocket_storage_set_owner(manifest->id);
+        pocket_fs_set_owner(manifest->id);
+        char reason[64];
+        if(!app_registry_admit(manifest,POCKET_API_VERSION,capability_supported,
+                               NULL,reason,sizeof reason)) {
+            jsconsole_set_error(reason);
+            ESP_LOGW("app","APP_REFUSED %s %s",manifest->id,reason);
+            err=ESP_ERR_NOT_SUPPORTED;
+            goto fail;
+        }
+        ESP_LOGI("app","APP_ID %s",manifest->id);
+    }
     if(user_source) {
         TRY(eval_user_source(source,length));
     } else {

@@ -110,6 +110,11 @@ static const pocket_capability_t *lookup(const char *name) {
     return NULL;
 }
 
+bool pocket_api_supported(const char *name) {
+    const pocket_capability_t *cap=name?lookup(name):NULL;
+    return cap && cap->supported;
+}
+
 esp_err_t pocket_api_register(const pocket_capability_t *capability) {
     if(!capability || !capability->name) return ESP_ERR_INVALID_ARG;
     for(unsigned i=0;i<override_count;i++) {

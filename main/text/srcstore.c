@@ -71,7 +71,22 @@ static int newest(const esp_partition_t *p, unsigned slot, uint32_t *out_seq) {
     return best;
 }
 
+uint32_t srcstore_revision(unsigned slot) {
+    const esp_partition_t *p=storage();
+    if(!p) return 0;
+    uint32_t seq=0;
+    // A slot whose only face fails its CRC still has a sequence number, and
+    // reporting it is right: the caller asks "has this moved since I read it",
+    // and a record that went bad has moved.
+    return newest(p,slot,&seq)<0 ? 0 : seq;
+}
+
 size_t srcstore_load(unsigned slot, char *out) {
+    return srcstore_load_checked(slot,out,NULL);
+}
+
+size_t srcstore_load_checked(unsigned slot, char *out, bool *verified) {
+    if(verified) *verified=false;
     out[0]=0;
     const esp_partition_t *p=storage();
     if(!p) return 0;
@@ -86,6 +101,7 @@ size_t srcstore_load(unsigned slot, char *out) {
         if(read_face(p,slot,face,out,&hdr)) {
             ESP_LOGI("src","slot %u: loaded %u bytes from face %u seq %u",
                      slot,(unsigned)hdr.len,face,(unsigned)hdr.seq);
+            if(verified) *verified=true;
             return hdr.len;
         }
     }

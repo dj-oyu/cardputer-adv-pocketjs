@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_err.h"
 #include "quickjs.h"
 
@@ -44,3 +45,14 @@ void pocket_fs_reset(void);
 // Call between sessions, never during one; open handles refer to objects that a
 // change of owner would make unreachable.
 void pocket_fs_set_owner(const char *app_id);
+
+// Reads a whole file for another native surface. `out` may be NULL to ask only
+// how big the file is. Returns the byte count, or -1 with *code set to the
+// PocketError code the caller should reject with. Paths are parsed exactly as
+// an app's are, so sd: is refused here for the same reason it is there.
+//
+// This exists for pocket_av.c's audio.player, which needs a clip's bytes and
+// has no JS round trip to get them through. It is the JS task's to call, like
+// everything else in this file: the flash reads happen inside it.
+int32_t pocket_fs_read_all(const char *path, uint8_t *out, uint32_t cap,
+                           const char **code);

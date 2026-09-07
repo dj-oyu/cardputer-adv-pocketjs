@@ -24,3 +24,38 @@ static inline uint32_t utf8_decode(const char *s, size_t len, size_t i, size_t *
     if((c&0xf8)==0xf0 && i+3<len) { *adv=4; return 0xfffd; }
     *adv=1; return 0xfffd;
 }
+
+// Strict validation, which utf8_decode() deliberately does not do: it never
+// fails, so that a display loop cannot desynchronise. An API that accepts text
+// from a program has the opposite duty — section 4 of docs/common-api.md
+// refuses malformed UTF-8 and lone surrogates at a text API — and this is that
+// check. Overlong forms, truncated tails, surrogates and anything past
+// U+10FFFF are all rejected.
+//
+// pocket_storage.c and pocket_fs.c each carry a private copy of this predicate,
+// written before there was a shared home for it. New code uses this one.
+static inline bool utf8_valid(const char *s, size_t n) {
+    const unsigned char *p=(const unsigned char *)s;
+    for(size_t i=0;i<n;) {
+        unsigned char c=p[i];
+        size_t   extra;
+        uint32_t cp;
+        if(c<0x80)              { i++; continue; }
+        else if((c&0xe0)==0xc0) { extra=1; cp=c&0x1fu; }
+        else if((c&0xf0)==0xe0) { extra=2; cp=c&0x0fu; }
+        else if((c&0xf8)==0xf0) { extra=3; cp=c&0x07u; }
+        else return false;
+        if(i+extra>=n) return false;
+        for(size_t k=1;k<=extra;k++) {
+            if((p[i+k]&0xc0)!=0x80) return false;
+            cp=(cp<<6)|(uint32_t)(p[i+k]&0x3fu);
+        }
+        if(extra==1 && cp<0x80)    return false;
+        if(extra==2 && cp<0x800)   return false;
+        if(extra==3 && cp<0x10000) return false;
+        if(cp>0x10ffff)            return false;
+        if(cp>=0xd800 && cp<=0xdfff) return false;   // lone surrogate
+        i+=extra+1;
+    }
+    return true;
+}

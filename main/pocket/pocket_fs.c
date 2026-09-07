@@ -2403,6 +2403,48 @@ static JSValue js_copy(JSContext *ctx, JSValueConst self,
 
 // ------------------------------------------------------- text convenience
 
+// The native half of readText, for a surface that has no JS value to hand back:
+// same resolution, same block reads, no allocation of its own. Written here
+// rather than as a copy in the caller because everything it needs -- the path
+// parse, the store's mount, the inode's block list, the CRC check -- is private
+// to this file and stays that way.
+int32_t pocket_fs_read_all(const char *path, uint8_t *out, uint32_t cap,
+                           const char **code) {
+    *code=NULL;
+    fs_path_t p;
+    const char *why=path_parse(path,path?strlen(path):0,&p);
+    if(why) { *code=POCKET_ERR_INVALID_ARGUMENT; return -1; }
+    if(p.volume==VOL_SD) { *code=POCKET_ERR_PERMISSION_DENIED; return -1; }
+    if(p.volume==VOL_APP&&!mount()) { *code=POCKET_ERR_NOT_AVAILABLE; return -1; }
+    if(!p.depth) { *code=FS_ERR_IS_DIRECTORY; return -1; }
+
+    fs_file_t src={.mode=MODE_READ,.volume=p.volume,.asset=-1,.verified=-1};
+    if(p.volume==VOL_ASSETS) {
+        int a=asset_find(&p);
+        if(a<0) { *code=POCKET_ERR_NOT_FOUND; return -1; }
+        src.asset=(int8_t)a; src.size=asset_size(a);
+    } else {
+        uint16_t id=resolve(&p,false,NULL,&why);
+        if(!id) { *code=why?why:POCKET_ERR_NOT_FOUND; return -1; }
+        if(store->dir[id-1].kind==FS_KIND_DIR) { *code=FS_ERR_IS_DIRECTORY; return -1; }
+        const fs_obj_t *o=object(id);
+        if(!o) { *code=POCKET_ERR_CORRUPT_DATA; return -1; }
+        src.obj=id; src.size=o->size;
+        memcpy(src.sector,o->sector,sizeof(src.sector));
+    }
+    // A size question is answered before the cap is applied, so a caller can
+    // tell "too big for me" from "too big for you" and say so in its own words.
+    if(!out) return (int32_t)src.size;
+    if(src.size>cap) { *code=POCKET_ERR_LIMIT_EXCEEDED; return -1; }
+    uint32_t at=0;
+    while(at<src.size) {
+        int n=file_bytes(&src,at,src.size-at,out+at,code);
+        if(n<=0) { if(!*code) *code=POCKET_ERR_CORRUPT_DATA; return -1; }
+        at+=(uint32_t)n;
+    }
+    return (int32_t)at;
+}
+
 static JSValue js_read_text(JSContext *ctx, JSValueConst self,
                             int argc, JSValueConst *argv) {
     (void)self;

@@ -116,6 +116,12 @@ struct pocket_capability {
 // reservation has misread it.
 esp_err_t pocket_api_register(const pocket_capability_t *capability);
 
+// Section 2's supported flag for one name, without building a JS value for it.
+// app_registry.c's admission check is the caller: an app that needs a
+// capability this firmware does not implement is refused before it starts, and
+// that decision is made in C before there is a realm to ask through.
+bool pocket_api_supported(const char *name);
+
 // ------------------------------------------------------------ lazy namespaces
 //
 // Every pocket.* namespace used to be built at session start, so an app paid

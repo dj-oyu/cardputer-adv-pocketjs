@@ -826,7 +826,9 @@ static const pocket_limit_t app_limits[] = {
     {.name="maxFrameListeners",.kind=POCKET_LIMIT_INT, .number=APP_FRAME_LISTENERS},
     {.name="stopHookMs",       .kind=POCKET_LIMIT_INT, .number=APP_STOP_MS},
     {.name="stopReasons",      .kind=POCKET_LIMIT_TEXT,.text="back"},
-    {.name="launchContext",    .kind=POCKET_LIMIT_FLAG,.number=0},  // section 7, later
+    // pocket_workspace.c contributes launchContext() and info() to this
+    // namespace, so the flag an app branches on says 1 here.
+    {.name="launchContext",    .kind=POCKET_LIMIT_FLAG,.number=1},
     {0},
 };
 static const pocket_limit_t time_limits[] = {
