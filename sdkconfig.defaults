@@ -40,6 +40,13 @@ CONFIG_LWIP_IPV6=n
 CONFIG_LWIP_DHCPS=n
 CONFIG_LWIP_MAX_SOCKETS=4
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16
+# RFC 4330 asks for a random 0-5000 ms delay before the first NTP request, so
+# that a street full of devices powering up together does not hit a public
+# pool at once. This device syncs once, when a person presses a key, and the
+# draw decided whether the 10 s wait was met: the same credentials synced and
+# then timed out at stage=sntp on the next attempt. Off.
+CONFIG_LWIP_SNTP_STARTUP_DELAY=n
+
 # Not an optimization: the console is USB Serial/JTAG (see above) and the S3's
 # PHY needs this workaround to leave it working while the radio is on.
 CONFIG_ESP_PHY_ENABLE_USB=y
