@@ -84,6 +84,17 @@ static const char *TAG = "pocket.net";
 // it was reverted rather than kept for the graph. What would actually fix this
 // is holding the connection and its TLS context across requests, which section
 // 11 does not currently describe.
+//
+// There is a way out an app can take today, and it works completely: close the
+// lease and acquire it again. Measured over sixteen requests with one cycle in
+// the middle -- after eight, free was 39,660 and the block 29,696 and falling;
+// after close, three seconds, and a fresh acquire, 57,104 and 31,744, which are
+// the round-zero numbers exactly. Eight more requests then succeeded. So the
+// fragmentation lives entirely in allocations the net stack gives back when the
+// radio comes down, and nothing accumulates across a lease. apps/netcheck
+// documents the recipe; it is deliberately not done automatically here, because
+// dropping an app's link underneath it costs three seconds and is a decision
+// the app should make rather than discover.
 #define NET_TLS_MIN_FREE   (40*1024)
 // Raised, not lowered, by the measurement: 20 KiB here would have left about
 // 12 KiB by the time the 15,360 byte allocation was made, and it would have
