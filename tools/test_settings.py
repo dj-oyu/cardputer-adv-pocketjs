@@ -57,12 +57,16 @@ try:
     # entered here, and nothing associates.
     command('d','SELECT 3')
     line=command('e','SCREEN 3');assert 'screen=1' in line,line
-    expect('WIFI_READY');expect('SCAN_START')
+    # SCAN_START first: wifi_ui starts the scan before it announces the screen,
+    # so waiting for WIFI_READY and then for SCAN_START waits for a line that
+    # has already gone past.
+    expect('SCAN_START');expect('WIFI_READY')
     s.write(b'\x1b');expect('HOME_READY')
     # Waited for, not slept through: the app launched below shares the heap the
     # radio is still holding until the scan task exits.
     expect('SCAN_DONE',20)
     command('b','CATEGORY 1');command('u','SELECT 2')
+    # POCKET PET is appended at index 5; existing settings/Hello indices stay fixed.
     command('a','CATEGORY 0');command('e','HELLO_FRAME_PRESENTED');command('q','HOME_READY')
     print('SETTINGS_OK sound=ON categories, toggles, mute, app-return',flush=True)
 finally:
