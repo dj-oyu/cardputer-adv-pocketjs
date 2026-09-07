@@ -30,8 +30,7 @@ with serial.Serial(a.port, 115200, timeout=0.2) as s:
                 return line
         raise RuntimeError(marker)
 
-    def capture(name):
-        time.sleep(0.4)
+    def attempt():
         command('s', 'CAPTURE_BEGIN')
         rows = {}
         deadline = time.monotonic() + 15
@@ -47,6 +46,24 @@ with serial.Serial(a.port, 115200, timeout=0.2) as s:
                 rows[int(y)] = bytes(rgb)
             if 'CAPTURE_END' in line:
                 break
+        return rows
+
+    # A capture is 135 lines of 960 hex characters, and the firmware already
+    # waits 5ms after each one to let USB drain. It still loses a few rows when
+    # something else logs at the same time -- the missing rows are scattered and
+    # the line before them is truncated mid-hex, which is dropped output rather
+    # than a strip the panel never received. Retrying gets a whole screen; the
+    # assert stays exact, because a capture with a hole in it is not a
+    # screenshot and must never be written out as one.
+    def capture(name):
+        time.sleep(0.4)
+        rows = attempt()
+        for _ in range(2):
+            if len(rows) == 135:
+                break
+            print('CAPTURE retry', name, len(rows), flush=True)
+            time.sleep(0.6)
+            rows = attempt()
         assert len(rows) == 135 and all(len(r) == 720 for r in rows.values()), len(rows)
         raw = b''.join(b'\0' + rows[y] for y in range(135))
         png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 240, 135, 8, 2, 0, 0, 0))
