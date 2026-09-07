@@ -47,7 +47,7 @@ void glass_rain_prepare(float dt,uint32_t seed) {
                 RainDrop *d=&drops[i];
                 *d=(RainDrop){.x=rain_range(12,228),.y=rain_range(6,44),
                     .speed=rain_range(7,12),.life=rain_range(6,8),
-                    .phase=rain_range(0,6.2831853f),.radius=2+(rain_random()&1)};
+                    .phase=rain_range(0,6.2831853f),.radius=3+(rain_random()&1)};
                 d->start=d->y;remaining--;break;
             }
             next_drop=rain_range(.35f,.8f);
@@ -77,11 +77,18 @@ void glass_rain_draw(uint16_t *pixels,int y,int height) {
             int cx=(int)(d->x+1.2f*sinf(py*.045f+d->phase));
             unsigned fade=(unsigned)(256*fminf(1,fminf(d->age*3,d->life)));
             int dy=py-cy;
+            // Lower-priority PIE candidate: coverage and RGB565 blends share
+            // arithmetic, but spans are only 9-11 pixels and displaced reads
+            // need gathers. Setup, alignment edges and per-lane loads may cost
+            // more than they save (docs/pie-simd.md). Profile before batching;
+            // preserve source_row sampling and overlapping-drop order.
             for(int dx=-d->radius-1;dx<=d->radius+1;dx++) {
                 int x=cx+dx;if(x<0||x>=RAIN_W)continue;
                 int q=dx*dx*256/(d->radius*d->radius)+dy*dy*256/(ry*ry);
                 if(q<256) {
-                    int sample=rain_clamp(x-dx/2,0,RAIN_W-1);
+                    // Integer magnification about the bead's center. x-dx/2
+                    // rounded ±1 back to x, giving small beads no refraction.
+                    int sample=rain_clamp(cx+dx/2,0,RAIN_W-1);
                     uint16_t wet=source_row[sample];
                     // Opposing light/dark rims sell the lens without tracing it.
                     if(q>125&&dx<=0)wet=rain_mix(wet,0x9e7b,70);

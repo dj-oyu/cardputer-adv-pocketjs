@@ -29,14 +29,14 @@ def label(data,x,y,value,scale,emphasis):
     text(data,x,y,value,scale,tuple(int(a+b*emphasis) for a,b in ((65,172),(100,146),(125,130))))
 
 gallery=[]
-for mode in ('ray', 'valley', 'sunflower', 'snowdrop'):
+for mode in ('ray', 'valley', 'sunflower', 'snowdrop','tulip','daffodil','crocus','calla'):
     path = Path(__file__).resolve().parents[1] / '.cache' / f'flower-{mode}.ppm'
     magic, size, maximum, data = path.read_bytes().split(b'\n', 3)
     assert magic == b'P6' and size == b'240 135' and maximum == b'255'
     assert len(data) == 240*135*3
     data = bytearray(data)
     # Gallery contains only the backgrounds, without any menu or title overlay.
-    if mode in ('valley','sunflower','snowdrop'):gallery.append(bytearray(data))
+    if mode in ('tulip','daffodil','crocus','calla'):gallery.append(bytearray(data))
     # Existing XMB, settled on Apps > Hello World. No flower-specific menu.
     label(data,16,37,'APPS',1,1)
     label(data,112,37,'SETTINGS',1,.35)
@@ -48,12 +48,12 @@ for mode in ('ray', 'valley', 'sunflower', 'snowdrop'):
     png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
     path.with_suffix('.png').write_bytes(png)
 
-# Three actual procedural renders, enlarged with nearest-neighbour sampling.
+# Four new procedural plants, enlarged with nearest-neighbour sampling.
 rows=[]
 for y in range(135):
     row=b''.join(bytes(p[y*720+120*3:(y+1)*720]) for p in gallery)
     row=b''.join(row[x:x+3]*3 for x in range(0,len(row),3))
     rows.extend([b'\0'+row]*3)
-png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',1080,405,8,2,0,0,0))
+png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',len(gallery)*360,405,8,2,0,0,0))
 png+=chunk(b'IDAT',zlib.compress(b''.join(rows)))+chunk(b'IEND',b'')
 (root/'.cache/flower-gallery.png').write_bytes(png)

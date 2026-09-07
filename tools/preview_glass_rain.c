@@ -1,4 +1,6 @@
 // Generate host-rendered frames; none of these images are firmware assets.
+#include "../main/scene/scene_mem.c"
+#include "../main/scene/garden.c"
 #include "../main/scene/flower.c"
 #include "../main/scene/glass_rain.c"
 #include <stdio.h>

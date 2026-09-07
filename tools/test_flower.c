@@ -1,12 +1,18 @@
 // Host: gcc -O2 -Wall -Wextra tools/test_flower.c -lm -o .cache/test_flower
 #include "../main/scene/scene_mem.c"
+#include "../main/scene/garden.c"
 #include "../main/scene/flower.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
-static uint16_t full[W*H],assembled[W*H];
+static uint16_t full[W*H],assembled[W*H],background[W*H];
+static void background_frame(void) {
+    GardenFrame f;garden_prepare(&f,elapsed);
+    if(seed_map)f.seed=((GardenFrame*)(seed_map+32*32))->seed;
+    for(int y=0;y<H;y++)garden_row(background+y*W,y,&f);
+}
 static void ppm(const char *path,const uint16_t *p) {
     FILE *f=fopen(path,"wb");assert(f);fprintf(f,"P6\n%d %d\n255\n",W,H);
     for(int i=0;i<W*H;i++) {
@@ -29,6 +35,7 @@ int main(void) {
         elapsed=frame*.7f;
         flower_prepare(1.0f/30,frame%3==0?-180:180,frame%2?-180:180,FLOWER_CRYSTAL);
         flower_draw(full,0,H);
+        background_frame();
         for(int y=0;y<H;y+=8) {
             memset(&band,0xa5,sizeof band);int h=H-y<8?H-y:8;
             flower_draw(band.data,y,h);
@@ -37,9 +44,9 @@ int main(void) {
             memcpy(assembled+y*W,band.data,W*h*2);
         }
         assert(memcmp(full,assembled,sizeof full)==0);
-        for(int y=0;y<H;y++)for(int x=0;x<X0;x++)assert(full[y*W+x]==rgb(3,6+y/35,11+y/27));
+        for(int y=0;y<H;y++)for(int x=0;x<X0;x++)assert(full[y*W+x]==background[y*W+x]);
         for(int y=12;y<120;y++)for(int x=X0;x<W;x++)
-            covered_crystal+=full[y*W+x]!=rgb(3,6+y/35,11+y/27);
+            covered_crystal+=full[y*W+x]!=background[y*W+x];
     }
     // The flower is actually on screen rather than a field of background.
     assert(covered_crystal>60000);
@@ -49,7 +56,9 @@ int main(void) {
     for(int k=0;k<W*8;k++)assert(band.data[k]==0xa5a5);
     elapsed=4;tx=ty=0;flower_prepare(0,0,0,FLOWER_CRYSTAL);
     flower_draw(full,0,H);ppm(".cache/flower-ray.ppm",full);
-    const char *files[]={"", ".cache/flower-valley.ppm", ".cache/flower-sunflower.ppm", ".cache/flower-snowdrop.ppm"};
+    const char *files[]={"", ".cache/flower-valley.ppm", ".cache/flower-sunflower.ppm", ".cache/flower-snowdrop.ppm",
+        ".cache/flower-tulip.ppm", ".cache/flower-daffodil.ppm", ".cache/flower-crocus.ppm", ".cache/flower-calla.ppm"};
+    _Static_assert(sizeof files/sizeof files[0]==FLOWER_SPECIES_COUNT,"preview list");
     for(int species=1;species<FLOWER_SPECIES_COUNT;species++) {
         unsigned covered=0;
         for(int frame=0;frame<60;frame++) {
@@ -57,6 +66,7 @@ int main(void) {
             flower_prepare(.033f,frame%3==0?-180:180,frame%2?-180:180,(flower_species_t)species);
             assert(count>8&&count<MAX_PARTS);
             flower_draw(full,0,H);
+            background_frame();
             for(int y=0;y<H;y+=8) {
                 memset(&band,0xa5,sizeof band);int h=H-y<8?H-y:8;
                 flower_draw(band.data,y,h);
@@ -66,7 +76,7 @@ int main(void) {
             }
             assert(memcmp(full,assembled,sizeof full)==0);
             for(int y=0;y<H;y++)for(int x=0;x<W;x++) {
-                bool mark=full[y*W+x]!=rgb(3,6+y/35,11+y/27);
+                bool mark=full[y*W+x]!=background[y*W+x];
                 if(x<X0||y<12||y>119)assert(!mark);
                 covered+=mark;
             }
@@ -147,15 +157,20 @@ int main(void) {
     unsigned seen[FLOWER_SPECIES_COUNT]={0};
     unsigned swaps=0,dissolving=0,opaque=0;
     flower_species_t previous=flower_current_species();
+    unsigned previous_layout=bloom_rng;
     // Four rotations at 30 fps. Long enough that the generator has to produce
     // every species rather than happening to.
-    const int FRAMES=(int)(4*FLOWER_ROTATE_S*30)+120;
+    const int ROTATIONS=24;
+    const int FRAMES=(int)(ROTATIONS*FLOWER_ROTATE_S*30)+120;
     for(int frame=0;frame<FRAMES;frame++) {
         flower_prepare_rotating(1.0f/30,frame%5==0?-90:90,frame%3?60:-60);
         float fade=flower_fade();
         assert(fade>=0&&fade<=1);
         // The rotation only ever shows a botanical; CRYSTAL is not in it.
         flower_species_t now=flower_current_species();
+        unsigned layout=((GardenFrame*)(seed_map+32*32))->seed;
+        assert((layout!=previous_layout)==(now!=previous));
+        previous_layout=layout;
         assert(now>=FLOWER_VALLEY&&now<FLOWER_SPECIES_COUNT);
         seen[now]++;
         assert(count>8&&count<MAX_PARTS);
@@ -165,7 +180,8 @@ int main(void) {
             swaps++;
             assert(fade==0);
             flower_draw(full,0,H);
-            for(int y=0;y<H;y++)for(int x=0;x<W;x++)assert(full[y*W+x]==sky_at(y));
+            background_frame();
+            assert(memcmp(full,background,sizeof full)==0);
             // And never the same plant twice: a rotation that repeats looks
             // like it has stopped.
             assert(now!=previous);
@@ -176,7 +192,7 @@ int main(void) {
     }
     // Four intervals of 40 s in 4x40x30+120 frames: four swaps, and the extra
     // 120 frames are there so the last one is followed by visible frames.
-    assert(swaps==4);
+    assert(swaps==(unsigned)ROTATIONS);
     for(int s=FLOWER_VALLEY;s<FLOWER_SPECIES_COUNT;s++)
         assert(seen[s]>0);   // all three botanicals actually came up
     // The dissolve happened and was brief: 1.2 s of every 40 at 30 fps is 36
@@ -188,7 +204,7 @@ int main(void) {
     assert(flower_fade()==1);
     flower_draw(full,0,H);
     assert(memcmp(full,assembled,sizeof full)==0);
-    printf("ROTATION_OK: %u swaps over %d frames, all three botanicals, every "
+    printf("ROTATION_OK: %u swaps over %d frames, all botanicals, every "
            "swap on a blank frame, %u dissolving / %u opaque; interval %.0fs "
            "fade %.1fs\n",
            swaps,FRAMES,dissolving,opaque,(double)FLOWER_ROTATE_S,(double)FLOWER_FADE_S);
