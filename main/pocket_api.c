@@ -2,6 +2,8 @@
 #include "board.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,14 +60,24 @@ static const char *const error_codes[] = {
 static const pocket_capability_t *overrides[POCKET_MAX_REGISTERED];
 static unsigned                   override_count;
 
+// How deep the completion table is. The low bits of a request number are its
+// slot's index, so this has to stay a power of two.
+//
+// A slot costs 72 bytes of .bss, measured, and today exactly one surface uses
+// one, so the table is sized for the concurrency that is coming -- IR transmit,
+// audio.player and HTTP, which unlike a tone do not exclude each other -- and
+// not for the concurrency anyone has asked for. Raising the bits by one doubles
+// the table and nothing else; the request number rearranges itself around it.
+#define POCKET_PROMISE_SLOT_BITS 2
+#define POCKET_MAX_PROMISES      (1u<<POCKET_PROMISE_SLOT_BITS)
+
 // Per-realm state. It lives in a hub object the pocket namespace holds, so the
 // realm's finalizer is what ends its life: nothing here outlives the guest.
 typedef struct {
-    JSContext *ctx;
-    JSValue    error_proto;
-    JSValue    subscribers[POCKET_MAX_SUBSCRIPTIONS];
-    uint32_t   handles[POCKET_MAX_SUBSCRIPTIONS];   // 0 marks a free slot
-    uint32_t   next_handle;
+    JSContext         *ctx;
+    JSValue            error_proto;
+    pocket_sub_slot_t  subscribers[POCKET_MAX_SUBSCRIPTIONS];
+    pocket_sub_table_t subs;
 } pocket_state_t;
 
 typedef struct {
@@ -128,6 +140,26 @@ JSValue pocket_api_throw(JSContext *ctx, const char *code, const char *operation
     return JS_Throw(ctx,error);
 }
 
+JSValue pocket_api_settled(JSContext *ctx, JSValue value, bool rejected) {
+    JSValue funcs[2];
+    JSValue promise=JS_NewPromiseCapability(ctx,funcs);
+    if(JS_IsException(promise)) { JS_FreeValue(ctx,value); return promise; }
+    JSValue done=JS_Call(ctx,funcs[rejected?1:0],JS_UNDEFINED,1,
+                         (JSValueConst *)&value);
+    JS_FreeValue(ctx,done);
+    JS_FreeValue(ctx,funcs[0]);
+    JS_FreeValue(ctx,funcs[1]);
+    JS_FreeValue(ctx,value);
+    return promise;
+}
+
+JSValue pocket_api_reject(JSContext *ctx, const char *code, const char *operation,
+                          const char *message, bool retryable, const char *outcome) {
+    JSValue error=pocket_api_error(ctx,code,operation,message,retryable,outcome);
+    if(JS_IsException(error)) return error;   // only on OOM building the error
+    return pocket_api_settled(ctx,error,true);
+}
+
 // --------------------------------------------------------- cancel tokens
 
 static void token_finalizer(JSRuntime *rt, JSValueConst value) {
@@ -168,6 +200,283 @@ static JSValue js_cancel_source(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx,source,"token",token);
     JS_SetPropertyStr(ctx,source,"cancel",cancel);
     return source;
+}
+
+// ----------------------------------------------------------- subscriptions
+
+// close() is bound to its table, its slot and the handle that slot held when it
+// was made, so a second call, or a call after the slot has been reused, finds a
+// mismatch and does nothing. func_data is the C function's own storage and is
+// not reachable from JS, so the table address it carries cannot be forged; the
+// table also outlives every close() bound to it, because a close() is an object
+// of the realm whose teardown is what ends a per-realm table's life.
+static JSValue js_sub_close(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv, int magic,
+                            JSValueConst *func_data) {
+    (void)this_val; (void)argc; (void)argv;
+    uint32_t handle=0;
+    int64_t  address=0;
+    if(JS_ToUint32(ctx,&handle,func_data[0])) return JS_EXCEPTION;
+    if(JS_ToInt64(ctx,&address,func_data[1])) return JS_EXCEPTION;
+    pocket_sub_table_t *table=(pocket_sub_table_t *)(uintptr_t)address;
+    if(table && magic>=0 && magic<table->count && handle &&
+       table->slots[magic].handle==handle)
+        pocket_api_sub_close(table,magic);
+    return JS_UNDEFINED;
+}
+
+JSValue pocket_api_sub_open(JSContext *ctx, pocket_sub_table_t *table,
+                            JSValueConst listener, const char *operation,
+                            const char *full, int *slot_out) {
+    int slot=-1;
+    for(int i=0;i<table->count;i++)
+        if(!table->slots[i].handle) { slot=i; break; }
+    if(slot<0) return pocket_api_throw(ctx,POCKET_ERR_LIMIT_EXCEEDED,operation,
+                                       full,false,NULL);
+    JSValue subscription=JS_NewObject(ctx);
+    if(JS_IsException(subscription)) return subscription;
+    if(++table->next_handle==0) table->next_handle=1;
+    table->slots[slot].handle=table->next_handle;
+    table->slots[slot].callback=JS_DupValue(ctx,listener);
+    table->ctx=ctx;
+    table->open++;
+    if(table->changed) table->changed(table);
+    JSValue data[2]={JS_NewUint32(ctx,table->slots[slot].handle),
+                     JS_NewInt64(ctx,(int64_t)(uintptr_t)table)};
+    JSValue close=JS_NewCFunctionData(ctx,js_sub_close,0,slot,2,data);
+    JS_FreeValue(ctx,data[0]);
+    JS_FreeValue(ctx,data[1]);
+    JS_SetPropertyStr(ctx,subscription,"close",close);
+    if(slot_out) *slot_out=slot;
+    return subscription;
+}
+
+void pocket_api_sub_close(pocket_sub_table_t *table, int slot) {
+    if(slot<0 || slot>=table->count || !table->slots[slot].handle) return;
+    table->slots[slot].handle=0;
+    // A table whose realm never opened anything holds no JS value to free.
+    if(table->ctx) JS_FreeValue(table->ctx,table->slots[slot].callback);
+    table->slots[slot].callback=JS_UNDEFINED;
+    table->open--;
+    if(table->changed) table->changed(table);
+}
+
+void pocket_api_sub_close_all(pocket_sub_table_t *table) {
+    for(int i=0;i<table->count;i++) pocket_api_sub_close(table,i);
+}
+
+void pocket_api_sub_deliver(pocket_sub_table_t *table,
+                            pocket_sub_payload_fn build, void *user) {
+    JSContext *ctx=table->ctx;
+    if(!ctx) return;
+    for(int i=0;i<table->count;i++) {
+        // A listener may close subscriptions, this one included, so each slot is
+        // re-read and the callback held across its own call.
+        if(!table->slots[i].handle) continue;
+        JSValue payload=JS_UNDEFINED;
+        if(!build(ctx,i,user,&payload)) continue;
+        uint32_t handle=table->slots[i].handle;
+        JSValue fn=JS_DupValue(ctx,table->slots[i].callback);
+        JSValue result=JS_Call(ctx,fn,JS_UNDEFINED,1,(JSValueConst *)&payload);
+        if(JS_IsException(result)) {
+            JSValue error=JS_GetException(ctx);
+            const char *text=JS_ToCString(ctx,error);
+            ESP_LOGW(table->tag,"%s listener failed: %s",table->what,text?text:"?");
+            if(text) JS_FreeCString(ctx,text);
+            JS_FreeValue(ctx,error);
+            if(table->close_on_throw && table->slots[i].handle==handle)
+                pocket_api_sub_close(table,i);
+        }
+        JS_FreeValue(ctx,result);
+        JS_FreeValue(ctx,payload);
+        JS_FreeValue(ctx,fn);
+    }
+}
+
+void pocket_api_sub_mark(pocket_sub_table_t *table, JSRuntime *rt,
+                         JS_MarkFunc *mark) {
+    for(int i=0;i<table->count;i++) JS_MarkValue(rt,table->slots[i].callback,mark);
+}
+
+// ------------------------------------------------------- async completions
+//
+// See the header for what a request number is and why its counter is never
+// reset. A slot is claimed before the driver starts, so a driver that finishes
+// before it has even returned its handle has somewhere to post to; the JS task
+// reads that post on its next pump.
+
+typedef struct {
+    // Written by the JS task, read by driver tasks and ISRs.
+    atomic_uint request;        // 0 marks a free slot
+    // Written by the driver, read by the JS task.
+    atomic_uint done;           // the request the driver finished, 0 for none
+    atomic_int  status;
+    bool        armed;          // a Promise exists to settle
+    JSContext  *ctx;
+    JSValue     resolve, reject;
+    JSValue     cancel;         // JS_UNDEFINED when the call passed no token
+    int64_t     deadline_us;
+    const char *stop_code;      // NULL until the host asked the work to stop
+    const pocket_promise_ops_t *ops;
+    void       *user;
+} pocket_promise_t;
+
+static pocket_promise_t promises[POCKET_MAX_PROMISES];
+static unsigned         promise_open;      // slots claimed, armed or not
+// Never reset. See the header: this is what makes a request number unique for
+// the life of the run, and an ended session's completions unreadable.
+static uint32_t         promise_counter = 1;
+
+static pocket_promise_t *promise_of(pocket_request_t request) {
+    if(!request) return NULL;
+    pocket_promise_t *p=&promises[request&(POCKET_MAX_PROMISES-1)];
+    return atomic_load(&p->request)==request?p:NULL;
+}
+
+static void promise_release(pocket_promise_t *p) {
+    if(p->ctx) {
+        JS_FreeValue(p->ctx,p->resolve);
+        JS_FreeValue(p->ctx,p->reject);
+        JS_FreeValue(p->ctx,p->cancel);
+    }
+    p->resolve=p->reject=p->cancel=JS_UNDEFINED;
+    p->ctx=NULL;
+    p->armed=false;
+    p->stop_code=NULL;
+    const pocket_promise_ops_t *ops=p->ops;
+    void                       *user=p->user;
+    p->ops=NULL;
+    p->user=NULL;
+    atomic_store(&p->request,0);
+    promise_open--;
+    // Last, so the surface finds the slot already free.
+    if(ops && ops->release) ops->release(user);
+}
+
+pocket_request_t pocket_api_promise_open(void) {
+    for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
+        pocket_promise_t *p=&promises[i];
+        if(atomic_load(&p->request)) continue;
+        atomic_store(&p->done,0);
+        atomic_store(&p->status,POCKET_STATUS_OK);
+        p->armed=false;
+        p->ctx=NULL;
+        p->resolve=p->reject=p->cancel=JS_UNDEFINED;
+        p->deadline_us=0;
+        p->stop_code=NULL;
+        p->ops=NULL;
+        p->user=NULL;
+        // The counter keeps the bits the slot index does not use, and skips 0 so
+        // that no request number can collide with "none".
+        uint32_t request=(promise_counter<<POCKET_PROMISE_SLOT_BITS)|i;
+        promise_counter=(promise_counter+1)&
+                        ((1u<<(32-POCKET_PROMISE_SLOT_BITS))-1u);
+        if(!promise_counter) promise_counter=1;
+        atomic_store(&p->request,request);
+        promise_open++;
+        return request;
+    }
+    return 0;
+}
+
+void pocket_api_promise_abandon(pocket_request_t request) {
+    pocket_promise_t *p=promise_of(request);
+    if(p) promise_release(p);
+}
+
+JSValue pocket_api_promise_arm(JSContext *ctx, pocket_request_t request,
+                               const pocket_promise_ops_t *ops, void *user,
+                               JSValue cancel, int64_t deadline_us) {
+    pocket_promise_t *p=promise_of(request);
+    if(!p) {
+        JS_FreeValue(ctx,cancel);
+        return JS_ThrowInternalError(ctx,"pocket: no such request");
+    }
+    JSValue funcs[2];
+    JSValue promise=JS_NewPromiseCapability(ctx,funcs);
+    if(JS_IsException(promise)) {
+        // Nothing can settle a Promise that was not built, so the slot goes
+        // back; the driver's completion then matches no request and is never
+        // read. `ops` is not installed yet, so no release hook runs for a call
+        // that never armed.
+        JS_FreeValue(ctx,cancel);
+        promise_release(p);
+        return promise;
+    }
+    p->ctx=ctx;
+    p->resolve=funcs[0];
+    p->reject=funcs[1];
+    p->cancel=cancel;
+    p->deadline_us=deadline_us;
+    p->ops=ops;
+    p->user=user;
+    p->armed=true;
+    return promise;
+}
+
+void pocket_api_complete(pocket_request_t request, int32_t status) {
+    pocket_promise_t *p=promise_of(request);
+    if(!p) return;
+    atomic_store(&p->status,status);
+    // Written last: the pump reads the number first and only then trusts the
+    // status beside it.
+    atomic_store(&p->done,request);
+}
+
+static void promise_settle(pocket_promise_t *p, JSValue value, bool rejected) {
+    JSContext *ctx=p->ctx;
+    // A surface's settle() can only fail by running the guest heap out while
+    // building its error. Settling with whatever QuickJS threw instead keeps the
+    // rule that matters: a Promise handed to the app always settles.
+    if(JS_IsException(value)) value=JS_GetException(ctx);
+    JSValue done=JS_Call(ctx,rejected?p->reject:p->resolve,JS_UNDEFINED,1,
+                         (JSValueConst *)&value);
+    JS_FreeValue(ctx,done);
+    JS_FreeValue(ctx,value);
+    promise_release(p);
+}
+
+// Asks the driver to stop and remembers why. The Promise is not settled here;
+// see pocket_promise_ops_t.stop.
+static void promise_stop(pocket_promise_t *p, const char *code) {
+    if(p->stop_code) return;
+    p->stop_code=code;
+    if(p->ops->stop) p->ops->stop(p->user,code);
+}
+
+void pocket_api_pump(void) {
+    if(!promise_open) return;
+    int64_t now=esp_timer_get_time();
+    for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
+        pocket_promise_t *p=&promises[i];
+        uint32_t request=atomic_load(&p->request);
+        if(!request || !p->armed) continue;
+        if(atomic_load(&p->done)==request) {
+            bool    rejected=false;
+            JSValue value=p->ops->settle(p->ctx,p->user,atomic_load(&p->status),
+                                         p->stop_code,&rejected);
+            promise_settle(p,value,rejected);
+            continue;
+        }
+        if(p->stop_code) continue;    // already stopping; waiting for the driver
+        if(!JS_IsUndefined(p->cancel) && pocket_api_cancel_requested(p->cancel))
+            promise_stop(p,POCKET_ERR_CANCELLED);
+        else if(now>p->deadline_us)
+            promise_stop(p,POCKET_ERR_TIMEOUT);
+    }
+}
+
+void pocket_api_reset(void) {
+    for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
+        pocket_promise_t *p=&promises[i];
+        if(!atomic_load(&p->request)) continue;
+        // The realm is going away, so there is nobody left to settle to. The
+        // work is asked to stop and then left alone: its completion carries a
+        // request number this session will never read again, and the driver
+        // holds no JS value to free.
+        if(p->ops && p->ops->stop) p->ops->stop(p->user,POCKET_ERR_CLOSED);
+        promise_release(p);
+    }
 }
 
 // ---------------------------------------------------------- capabilities
@@ -227,23 +536,6 @@ static JSValue js_capabilities_get(JSContext *ctx, JSValueConst this_val,
     return result;
 }
 
-// close() is bound to a slot and the handle that slot held when it was made, so
-// a second call finds a mismatch and does nothing.
-static JSValue js_subscription_close(JSContext *ctx, JSValueConst this_val,
-                                     int argc, JSValueConst *argv, int magic,
-                                     JSValueConst *func_data) {
-    (void)this_val; (void)argc; (void)argv;
-    uint32_t handle=0;
-    if(JS_ToUint32(ctx,&handle,func_data[0])) return JS_EXCEPTION;
-    if(state && magic>=0 && magic<POCKET_MAX_SUBSCRIPTIONS
-       && state->handles[magic]==handle && handle!=0) {
-        state->handles[magic]=0;
-        JS_FreeValue(ctx,state->subscribers[magic]);
-        state->subscribers[magic]=JS_UNDEFINED;
-    }
-    return JS_UNDEFINED;
-}
-
 static JSValue js_capabilities_on_change(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv) {
     (void)this_val;
@@ -254,50 +546,22 @@ static JSValue js_capabilities_on_change(JSContext *ctx, JSValueConst this_val,
     if(!state) return pocket_api_throw(ctx,POCKET_ERR_CLOSED,
                                        "capabilities.onChange",
                                        "the pocket API is not active",false,NULL);
-    int slot=-1;
-    for(int i=0;i<POCKET_MAX_SUBSCRIPTIONS;i++)
-        if(state->handles[i]==0) { slot=i; break; }
-    if(slot<0) return pocket_api_throw(ctx,POCKET_ERR_LIMIT_EXCEEDED,
-                                       "capabilities.onChange",
-                                       "too many subscriptions",false,NULL);
-    if(++state->next_handle==0) state->next_handle=1;
-    state->handles[slot]=state->next_handle;
-    state->subscribers[slot]=JS_DupValue(ctx,argv[0]);
-    JSValue subscription=JS_NewObject(ctx);
-    if(JS_IsException(subscription)) {
-        state->handles[slot]=0;
-        JS_FreeValue(ctx,state->subscribers[slot]);
-        state->subscribers[slot]=JS_UNDEFINED;
-        return subscription;
-    }
-    JSValue handle=JS_NewUint32(ctx,state->handles[slot]);
-    JSValue close=JS_NewCFunctionData(ctx,js_subscription_close,0,slot,1,&handle);
-    JS_FreeValue(ctx,handle);
-    JS_SetPropertyStr(ctx,subscription,"close",close);
-    return subscription;
+    return pocket_api_sub_open(ctx,&state->subs,argv[0],"capabilities.onChange",
+                               "too many subscriptions",NULL);
+}
+
+// Every subscriber sees the same capability, but each gets its own object: the
+// listener before it may have kept, or changed, the one it was handed.
+static bool capability_payload(JSContext *ctx, int slot, void *user,
+                               JSValue *payload) {
+    (void)slot;
+    *payload=capability_object(ctx,(const char *)user);
+    return true;
 }
 
 void pocket_api_capability_changed(const char *name) {
     if(!state || !name) return;
-    JSContext *ctx=state->ctx;
-    for(int i=0;i<POCKET_MAX_SUBSCRIPTIONS;i++) {
-        // A listener may close subscriptions, this one included, so each slot is
-        // re-read and the callback held across its own call.
-        if(state->handles[i]==0) continue;
-        JSValue fn=JS_DupValue(ctx,state->subscribers[i]);
-        JSValue capability=capability_object(ctx,name);
-        JSValue result=JS_Call(ctx,fn,JS_UNDEFINED,1,(JSValueConst *)&capability);
-        if(JS_IsException(result)) {
-            JSValue error=JS_GetException(ctx);
-            const char *text=JS_ToCString(ctx,error);
-            ESP_LOGW(TAG,"onChange listener failed: %s",text?text:"?");
-            if(text) JS_FreeCString(ctx,text);
-            JS_FreeValue(ctx,error);
-        }
-        JS_FreeValue(ctx,result);
-        JS_FreeValue(ctx,capability);
-        JS_FreeValue(ctx,fn);
-    }
+    pocket_api_sub_deliver(&state->subs,capability_payload,(void *)name);
 }
 
 // ---------------------------------------------------------------- device
@@ -327,7 +591,7 @@ static void hub_finalizer(JSRuntime *rt, JSValueConst value) {
     if(!st) return;
     JS_FreeValueRT(rt,st->error_proto);
     for(int i=0;i<POCKET_MAX_SUBSCRIPTIONS;i++)
-        JS_FreeValueRT(rt,st->subscribers[i]);
+        JS_FreeValueRT(rt,st->subscribers[i].callback);
     if(state==st) state=NULL;
     free(st);
 }
@@ -339,8 +603,7 @@ static void hub_mark(JSRuntime *rt, JSValueConst value, JS_MarkFunc *mark) {
     pocket_state_t *st=JS_GetOpaque(value,hub_class);
     if(!st) return;
     JS_MarkValue(rt,st->error_proto,mark);
-    for(int i=0;i<POCKET_MAX_SUBSCRIPTIONS;i++)
-        JS_MarkValue(rt,st->subscribers[i],mark);
+    pocket_api_sub_mark(&st->subs,rt,mark);
 }
 
 static const JSClassDef hub_class_def = {
@@ -399,7 +662,17 @@ esp_err_t pocket_api_install(JSContext *ctx, void *user_data) {
     if(!st) return ESP_ERR_NO_MEM;
     st->ctx=ctx;
     st->error_proto=JS_UNDEFINED;
-    for(int i=0;i<POCKET_MAX_SUBSCRIPTIONS;i++) st->subscribers[i]=JS_UNDEFINED;
+    for(int i=0;i<POCKET_MAX_SUBSCRIPTIONS;i++)
+        st->subscribers[i].callback=JS_UNDEFINED;
+    // The table is inside the hub, so the collector can see the listeners and a
+    // listener that closes over pocket does not pin the realm. close_on_throw is
+    // off here: onChange fires only when a capability moves, so a listener that
+    // throws costs nothing to keep, and taking its subscription away over one
+    // bad call would be a surprise the two polled surfaces do not have.
+    st->subs=(pocket_sub_table_t){
+        .slots=st->subscribers, .count=POCKET_MAX_SUBSCRIPTIONS, .ctx=ctx,
+        .tag=TAG, .what="onChange", .close_on_throw=false,
+    };
 
     JSValue hub=JS_NewObjectClass(ctx,hub_class);
     if(JS_IsException(hub)) { free(st); return ESP_FAIL; }

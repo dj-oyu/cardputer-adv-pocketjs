@@ -12,7 +12,7 @@
 esp_err_t pocket_imu_install(JSContext *ctx, void *user_data);
 
 // Delivers to the open watches whose period has elapsed. Cheap and safe to call
-// when nothing is subscribed: it returns after one comparison.
+// when nothing is subscribed: it returns after one load and one branch.
 void pocket_imu_pump(void);
 
 // Closes every watch. Call from the JS task while the guest is still alive --

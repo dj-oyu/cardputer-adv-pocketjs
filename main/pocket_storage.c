@@ -157,32 +157,6 @@ static bool utf8_valid(const uint8_t *s, size_t n) {
     return true;
 }
 
-// ---------------------------------------------------------------- promises
-//
-// Section 4 puts argument errors from a Promise-returning method into the
-// rejection rather than a throw, so every exit from get/set/remove goes through
-// here. The work itself is synchronous, so the Promise is already settled when
-// the app receives it; see the note above js_get().
-static JSValue settled(JSContext *ctx, JSValue value, bool rejected) {
-    JSValue funcs[2];
-    JSValue promise=JS_NewPromiseCapability(ctx,funcs);
-    if(JS_IsException(promise)) { JS_FreeValue(ctx,value); return promise; }
-    JSValue done=JS_Call(ctx,funcs[rejected?1:0],JS_UNDEFINED,1,
-                         (JSValueConst *)&value);
-    JS_FreeValue(ctx,done);
-    JS_FreeValue(ctx,funcs[0]);
-    JS_FreeValue(ctx,funcs[1]);
-    JS_FreeValue(ctx,value);
-    return promise;
-}
-
-static JSValue reject(JSContext *ctx, const char *code, const char *operation,
-                      const char *message, bool retryable, const char *outcome) {
-    JSValue error=pocket_api_error(ctx,code,operation,message,retryable,outcome);
-    if(JS_IsException(error)) return error;   // only on OOM building the error
-    return settled(ctx,error,true);
-}
-
 // ---------------------------------------------------------------- the store
 
 static bool store_open(void) {
@@ -272,20 +246,21 @@ static bool room_for(size_t bytes, size_t replacing) {
 static JSValue take_key(JSContext *ctx, JSValueConst value, const char *operation,
                         char name[NVS_KEY_NAME_MAX_SIZE]) {
     if(!JS_IsString(value))
-        return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                      "key must be a string",false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                 "key must be a string",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     size_t length=0;
     const char *key=JS_ToCStringLen(ctx,&length,value);
     if(!key) return JS_EXCEPTION;
     JSValue error=JS_UNDEFINED;
     if(length<1 || length>KV_MAX_KEY_BYTES)
-        error=reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                     "key must be 1 to 64 UTF-8 bytes",false,
-                     POCKET_OUTCOME_NOT_APPLIED);
+        error=pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                "key must be 1 to 64 UTF-8 bytes",false,
+                                POCKET_OUTCOME_NOT_APPLIED);
     else if(!utf8_valid((const uint8_t *)key,length))
-        error=reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                     "key is not well-formed UTF-8",false,
-                     POCKET_OUTCOME_NOT_APPLIED);
+        error=pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                "key is not well-formed UTF-8",false,
+                                POCKET_OUTCOME_NOT_APPLIED);
     else
         record_name(key,length,name);
     JS_FreeCString(ctx,key);
@@ -307,9 +282,9 @@ static JSValue take_options(JSContext *ctx, JSValueConst value,
     out->cancelled=false;
     if(JS_IsUndefined(value) || JS_IsNull(value)) return JS_UNDEFINED;
     if(!JS_IsObject(value))
-        return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                      "options must be an object",false,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                 "options must be an object",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
 
     JSValue timeout=JS_GetPropertyStr(ctx,value,"timeoutMs");
     if(JS_IsException(timeout)) return JS_EXCEPTION;
@@ -319,9 +294,9 @@ static JSValue take_options(JSContext *ctx, JSValueConst value,
         JS_FreeValue(ctx,timeout);
         if(bad || !isfinite(ms) || ms!=(double)(int64_t)ms ||
            ms<1 || ms>KV_MAX_TIMEOUT_MS)
-            return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                          "timeoutMs must be a whole number of 1 to 30000",
-                          false,POCKET_OUTCOME_NOT_APPLIED);
+            return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                     "timeoutMs must be a whole number of 1 to 30000",
+                                     false,POCKET_OUTCOME_NOT_APPLIED);
     } else JS_FreeValue(ctx,timeout);
 
     JSValue cancel=JS_GetPropertyStr(ctx,value,"cancel");
@@ -329,9 +304,9 @@ static JSValue take_options(JSContext *ctx, JSValueConst value,
     if(!JS_IsUndefined(cancel) && !JS_IsNull(cancel)) {
         if(!pocket_api_is_cancel_token(cancel)) {
             JS_FreeValue(ctx,cancel);
-            return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                          "cancel must be a token from pocket.cancel.source()",
-                          false,POCKET_OUTCOME_NOT_APPLIED);
+            return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                     "cancel must be a token from pocket.cancel.source()",
+                                     false,POCKET_OUTCOME_NOT_APPLIED);
         }
         out->cancelled=pocket_api_cancel_requested(cancel);
     }
@@ -344,9 +319,9 @@ static JSValue take_options(JSContext *ctx, JSValueConst value,
         bool bad=!JS_IsNumber(revision) || JS_ToFloat64(ctx,&r,revision);
         JS_FreeValue(ctx,revision);
         if(bad || !isfinite(r) || r!=(double)(int64_t)r || r<0 || r>UINT32_MAX)
-            return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                          "ifRevision must be a revision number or 0",false,
-                          POCKET_OUTCOME_NOT_APPLIED);
+            return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                     "ifRevision must be a revision number or 0",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
         out->if_revision=(int64_t)r;
     } else JS_FreeValue(ctx,revision);
     return JS_UNDEFINED;
@@ -425,6 +400,10 @@ static bool value_ok(JSContext *ctx, JSValueConst value, int depth, int *budget,
 
 // ------------------------------------------------------------------- get
 
+// Section 4 puts argument errors from a Promise-returning method into the
+// rejection rather than a throw, so every exit from get/set/remove goes through
+// pocket_api_reject().
+//
 // The three methods return a Promise that is already settled: the NVS read or
 // write runs to completion on the JS task before the Promise leaves. Section 7
 // asks that a success answer mean the value is durable, which this satisfies by
@@ -444,11 +423,13 @@ static JSValue js_get(JSContext *ctx, JSValueConst this_val,
     bad=take_options(ctx,argc>1?argv[1]:JS_UNDEFINED,OP,&options);
     if(!JS_IsUndefined(bad)) return bad;
     if(options.cancelled)
-        return reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled before the read",
-                      false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,
+                                 "cancelled before the read",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     if(!store_open())
-        return reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,"the key/value store is not open",
-                      true,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,
+                                 "the key/value store is not open",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
 
     size_t length=0;
     const char *key=JS_ToCStringLen(ctx,&length,argv[0]);
@@ -460,23 +441,26 @@ static JSValue js_get(JSContext *ctx, JSValueConst this_val,
 
     if(err==ESP_ERR_INVALID_SIZE) {
         record_free(&record);
-        return reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,"the stored record does not verify",
-                      false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                 "the stored record does not verify",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
     if(err==ESP_ERR_NO_MEM) {
         record_free(&record);
-        return reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,"no memory to read the record",
-                      true,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,
+                                 "no memory to read the record",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
     if(err!=ESP_OK) {
         ESP_LOGW(TAG,"get: %s",esp_err_to_name(err));
         record_free(&record);
-        return reject(ctx,POCKET_ERR_IO_ERROR,OP,"the store could not be read",
-                      true,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_IO_ERROR,OP,
+                                 "the store could not be read",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
     // A slot holding someone else's key is a hash collision, and for a reader
     // that is simply an absent key.
-    if(!mine) { record_free(&record); return settled(ctx,JS_NULL,false); }
+    if(!mine) { record_free(&record); return pocket_api_settled(ctx,JS_NULL,false); }
 
     // Section 7 keeps a stored null distinct from a missing key: this is the
     // record, so it answers with value:null rather than null.
@@ -485,14 +469,15 @@ static JSValue js_get(JSContext *ctx, JSValueConst this_val,
     record_free(&record);
     if(JS_IsException(value)) {
         JS_FreeValue(ctx,JS_GetException(ctx));
-        return reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,"the stored value is not JSON",
-                      false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                 "the stored value is not JSON",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
     JSValue result=JS_NewObject(ctx);
     if(JS_IsException(result)) { JS_FreeValue(ctx,value); return result; }
     JS_SetPropertyStr(ctx,result,"value",value);
     JS_SetPropertyStr(ctx,result,"revision",JS_NewUint32(ctx,revision));
-    return settled(ctx,result,false);
+    return pocket_api_settled(ctx,result,false);
 }
 
 // ------------------------------------------------------------------- set
@@ -515,15 +500,17 @@ static JSValue js_set(JSContext *ctx, JSValueConst this_val,
         // An unreadable property leaves QuickJS's exception pending; the
         // rejection carries the reason, so the stale exception is cleared.
         if(JS_HasException(ctx)) JS_FreeValue(ctx,JS_GetException(ctx));
-        return reject(ctx,budget<0?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_INVALID_ARGUMENT,
-                      OP,why,false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,
+                                 budget<0?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_INVALID_ARGUMENT,
+                                 OP,why,false,POCKET_OUTCOME_NOT_APPLIED);
     }
 
     JSValue json=JS_JSONStringify(ctx,value,JS_UNDEFINED,JS_UNDEFINED);
     if(JS_IsException(json)) {
         JS_FreeValue(ctx,JS_GetException(ctx));
-        return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,"value could not be encoded",
-                      false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                 "value could not be encoded",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
     size_t json_len=0;
     const char *text=JS_ToCStringLen(ctx,&json_len,json);
@@ -531,19 +518,21 @@ static JSValue js_set(JSContext *ctx, JSValueConst this_val,
     if(!text) return JS_EXCEPTION;
     if(json_len>KV_MAX_VALUE_BYTES) {
         JS_FreeCString(ctx,text);
-        return reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
-                      "the encoded value is over 4096 bytes",false,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
+                                 "the encoded value is over 4096 bytes",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
     if(options.cancelled) {
         JS_FreeCString(ctx,text);
-        return reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled before the write",
-                      false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,
+                                 "cancelled before the write",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
     if(!store_open()) {
         JS_FreeCString(ctx,text);
-        return reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,"the key/value store is not open",
-                      true,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,
+                                 "the key/value store is not open",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
 
     size_t key_len=0;
@@ -569,35 +558,39 @@ static JSValue js_set(JSContext *ctx, JSValueConst this_val,
         err=ESP_OK;
     }
     if(err!=ESP_OK) {
-        answer=reject(ctx,err==ESP_ERR_NO_MEM?POCKET_ERR_OUT_OF_MEMORY:POCKET_ERR_IO_ERROR,
-                      OP,"the store could not be read",true,POCKET_OUTCOME_NOT_APPLIED);
+        answer=pocket_api_reject(ctx,
+                                 err==ESP_ERR_NO_MEM?POCKET_ERR_OUT_OF_MEMORY:POCKET_ERR_IO_ERROR,
+                                 OP,"the store could not be read",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
         goto done;
     }
     if(old.blob && !record_is(&old,key,key_len)) {
-        answer=reject(ctx,POCKET_ERR_CONFLICT,OP,
-                      "this key collides with another key already stored",false,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        answer=pocket_api_reject(ctx,POCKET_ERR_CONFLICT,OP,
+                                 "this key collides with another key already stored",
+                                 false,POCKET_OUTCOME_NOT_APPLIED);
         goto done;
     }
     // A missing record is revision 0, which gives ifRevision:0 the meaning
     // "create this key, and fail if someone else got there first".
     current=old.blob?old.header.revision:0;
     if(options.if_revision>=0 && (uint32_t)options.if_revision!=current) {
-        answer=reject(ctx,POCKET_ERR_CONFLICT,OP,"the stored revision has moved on",
-                      false,POCKET_OUTCOME_NOT_APPLIED);
+        answer=pocket_api_reject(ctx,POCKET_ERR_CONFLICT,OP,
+                                 "the stored revision has moved on",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
         goto done;
     }
 
     if(!room_for(size,old.blob?old.size:0)) {
-        answer=reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
-                      "the store has no room for this value",false,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        answer=pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
+                                 "the store has no room for this value",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
         goto done;
     }
     blob=malloc(size);
     if(!blob) {
-        answer=reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,"no memory to build the record",
-                      true,POCKET_OUTCOME_NOT_APPLIED);
+        answer=pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,
+                                 "no memory to build the record",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
         goto done;
     }
     header.revision=current+1;
@@ -616,15 +609,17 @@ static JSValue js_set(JSContext *ctx, JSValueConst this_val,
         bool full=err==ESP_ERR_NVS_NOT_ENOUGH_SPACE;
         // nvs_set_blob either wrote the whole record or none of it, but a
         // failing commit leaves which one it was undecided.
-        answer=reject(ctx,full?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_IO_ERROR,OP,
-                      full?"the store is full":"the value could not be written",
-                      !full,full?POCKET_OUTCOME_NOT_APPLIED:POCKET_OUTCOME_UNKNOWN);
+        answer=pocket_api_reject(ctx,
+                                 full?POCKET_ERR_LIMIT_EXCEEDED:POCKET_ERR_IO_ERROR,OP,
+                                 full?"the store is full":"the value could not be written",
+                                 !full,
+                                 full?POCKET_OUTCOME_NOT_APPLIED:POCKET_OUTCOME_UNKNOWN);
         goto done;
     }
     result=JS_NewObject(ctx);
     if(JS_IsException(result)) { answer=result; goto done; }
     JS_SetPropertyStr(ctx,result,"revision",JS_NewUint32(ctx,header.revision));
-    answer=settled(ctx,result,false);
+    answer=pocket_api_settled(ctx,result,false);
 done:
     record_free(&old);
     JS_FreeCString(ctx,key);
@@ -645,11 +640,13 @@ static JSValue js_remove(JSContext *ctx, JSValueConst this_val,
     bad=take_options(ctx,argc>1?argv[1]:JS_UNDEFINED,OP,&options);
     if(!JS_IsUndefined(bad)) return bad;
     if(options.cancelled)
-        return reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled before the removal",
-                      false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,
+                                 "cancelled before the removal",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     if(!store_open())
-        return reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,"the key/value store is not open",
-                      true,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,
+                                 "the key/value store is not open",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
 
     size_t key_len=0;
     const char *key=JS_ToCStringLen(ctx,&key_len,argv[0]);
@@ -663,18 +660,21 @@ static JSValue js_remove(JSContext *ctx, JSValueConst this_val,
     record_free(&record);
     JS_FreeCString(ctx,key);
     if(err!=ESP_OK && err!=ESP_ERR_INVALID_SIZE)
-        return reject(ctx,err==ESP_ERR_NO_MEM?POCKET_ERR_OUT_OF_MEMORY:POCKET_ERR_IO_ERROR,
-                      OP,"the store could not be read",true,POCKET_OUTCOME_NOT_APPLIED);
-    if(!erase) return settled(ctx,JS_UNDEFINED,false);
+        return pocket_api_reject(ctx,
+                                 err==ESP_ERR_NO_MEM?POCKET_ERR_OUT_OF_MEMORY:POCKET_ERR_IO_ERROR,
+                                 OP,"the store could not be read",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    if(!erase) return pocket_api_settled(ctx,JS_UNDEFINED,false);
 
     err=nvs_erase_key(state->nvs,name);
     if(err==ESP_OK) err=nvs_commit(state->nvs);
     if(err!=ESP_OK && err!=ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG,"remove: %s",esp_err_to_name(err));
-        return reject(ctx,POCKET_ERR_IO_ERROR,OP,"the key could not be removed",
-                      true,POCKET_OUTCOME_UNKNOWN);
+        return pocket_api_reject(ctx,POCKET_ERR_IO_ERROR,OP,
+                                 "the key could not be removed",true,
+                                 POCKET_OUTCOME_UNKNOWN);
     }
-    return settled(ctx,JS_UNDEFINED,false);
+    return pocket_api_settled(ctx,JS_UNDEFINED,false);
 }
 
 // ------------------------------------------------------------ capability

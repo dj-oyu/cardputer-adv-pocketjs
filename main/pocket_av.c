@@ -5,11 +5,8 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <math.h>
-#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-
-static const char *TAG = "pocket.av";
 
 // Section 14 caps a general Promise at 30000ms; storage.kv enforces the same
 // number, and one ceiling for the whole host is easier to teach than one per
@@ -28,35 +25,11 @@ static const char *TAG = "pocket.av";
 #define POWER_POLL_US   1000000
 #define POWER_STEP_MV   20
 
-static JSContext *av_ctx;
-
-// ------------------------------------------------------------------ promises
+// ------------------------------------------------------------------- options
 //
 // Section 4 puts argument errors from a Promise-returning method into the
-// rejection rather than a throw. Same two helpers pocket_storage.c has; see the
-// note at the end of this file about where they should end up living.
-
-static JSValue settled(JSContext *ctx, JSValue value, bool rejected) {
-    JSValue funcs[2];
-    JSValue promise=JS_NewPromiseCapability(ctx,funcs);
-    if(JS_IsException(promise)) { JS_FreeValue(ctx,value); return promise; }
-    JSValue done=JS_Call(ctx,funcs[rejected?1:0],JS_UNDEFINED,1,
-                         (JSValueConst *)&value);
-    JS_FreeValue(ctx,done);
-    JS_FreeValue(ctx,funcs[0]);
-    JS_FreeValue(ctx,funcs[1]);
-    JS_FreeValue(ctx,value);
-    return promise;
-}
-
-static JSValue reject(JSContext *ctx, const char *code, const char *operation,
-                      const char *message, bool retryable, const char *outcome) {
-    JSValue error=pocket_api_error(ctx,code,operation,message,retryable,outcome);
-    if(JS_IsException(error)) return error;   // only on OOM building the error
-    return settled(ctx,error,true);
-}
-
-// ------------------------------------------------------------------- options
+// rejection rather than a throw, so the exits below go through
+// pocket_api_reject().
 
 typedef struct {
     int32_t timeout_ms;    // 0 for "not given"
@@ -74,9 +47,9 @@ static JSValue take_options(JSContext *ctx, JSValueConst value,
     out->cancelled=false;
     if(JS_IsUndefined(value) || JS_IsNull(value)) return JS_UNDEFINED;
     if(!JS_IsObject(value))
-        return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                      "options must be an object",false,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                 "options must be an object",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
 
     JSValue timeout=JS_GetPropertyStr(ctx,value,"timeoutMs");
     if(JS_IsException(timeout)) return JS_EXCEPTION;
@@ -87,9 +60,9 @@ static JSValue take_options(JSContext *ctx, JSValueConst value,
         // Section 4 refuses to round an over-range request quietly.
         if(bad || !isfinite(ms) || ms!=(double)(int64_t)ms ||
            ms<1 || ms>AV_MAX_TIMEOUT_MS)
-            return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                          "timeoutMs must be a whole number of 1 to 30000",
-                          false,POCKET_OUTCOME_NOT_APPLIED);
+            return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                     "timeoutMs must be a whole number of 1 to 30000",
+                                     false,POCKET_OUTCOME_NOT_APPLIED);
         out->timeout_ms=(int32_t)ms;
     } else JS_FreeValue(ctx,timeout);
 
@@ -98,9 +71,9 @@ static JSValue take_options(JSContext *ctx, JSValueConst value,
     if(!JS_IsUndefined(cancel) && !JS_IsNull(cancel)) {
         if(!pocket_api_is_cancel_token(cancel)) {
             JS_FreeValue(ctx,cancel);
-            return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
-                          "cancel must be a token from pocket.cancel.source()",
-                          false,POCKET_OUTCOME_NOT_APPLIED);
+            return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,operation,
+                                     "cancel must be a token from pocket.cancel.source()",
+                                     false,POCKET_OUTCOME_NOT_APPLIED);
         }
         out->cancelled=pocket_api_cancel_requested(cancel);
         out->cancel=cancel;      // kept, and freed when the tone settles
@@ -140,67 +113,76 @@ static JSValue js_cue(JSContext *ctx, JSValueConst this_val,
 //
 // The hand-back. sound.c calls `done` on the audio task at priority 7, and
 // section 5 forbids that task from touching QuickJS at all, so the callback
-// writes two atomics and stops. pocket_av_pump() reads them on the JS task and
+// posts a completion and stops. pocket_api_pump() reads it on the JS task and
 // is the only code that settles the Promise.
 //
 // The request number, not a flag, is what the two sides agree on: sound_tone()
 // may finish a 1ms tone before it has even returned its id, and a session may
 // end with a tone still sounding. Matching numbers makes both harmless -- a
-// completion whose number nobody is waiting for is simply never read. The
-// counter is deliberately never reset, so a tone left behind by one session
-// cannot be mistaken for the first tone of the next.
+// completion whose number nobody is waiting for is simply never read. That
+// number and the rule behind it now belong to pocket_api.c, which is also where
+// the reason its counter is never reset is written down.
 
-static atomic_uint tone_finished;             // request number, 0 for none
-static atomic_bool tone_finished_completed;
-
-static uint32_t tone_next_request = 1;
+// The only status audio.tone posts besides POCKET_STATUS_OK. Nobody asked the
+// tone to stop, so the I2S write failed under it.
+#define TONE_STATUS_STOPPED_EARLY 1
 
 static struct {
-    bool        active;
-    JSValue     resolve, reject;
-    JSValue     cancel;         // JS_UNDEFINED when the call passed no token
-    uint32_t    request;
-    int32_t     id;             // sound.c's id, for sound_tone_cancel
-    int64_t     deadline_us;
-    const char *stop_code;      // NULL until we asked the tone to stop early
+    bool    active;
+    int32_t id;         // sound.c's id, for sound_tone_cancel
 } tone;
 
 static void tone_done(void *ctx, bool completed) {
-    atomic_store(&tone_finished_completed,completed);
-    // Written last: the pump reads the number first and only then trusts the
-    // flag beside it.
-    atomic_store(&tone_finished,(uint32_t)(uintptr_t)ctx);
+    pocket_api_complete((pocket_request_t)(uintptr_t)ctx,
+                        completed?POCKET_STATUS_OK:TONE_STATUS_STOPPED_EARLY);
 }
 
-static void tone_release(JSContext *ctx) {
-    JS_FreeValue(ctx,tone.resolve);
-    JS_FreeValue(ctx,tone.reject);
-    JS_FreeValue(ctx,tone.cancel);
-    tone.resolve=tone.reject=tone.cancel=JS_UNDEFINED;
+// Asks the tone to stop. The Promise is not settled here: section 4 gives the
+// host the wait for the native stop, and the audio task still owns the request
+// until its callback lands.
+static void tone_stop(void *user, const char *code) {
+    (void)user; (void)code;
+    sound_tone_cancel(tone.id);
+}
+
+static JSValue tone_finish(JSContext *ctx, void *user, int32_t status,
+                           const char *stop_code, bool *rejected) {
+    (void)user;
+    bool completed=status==POCKET_STATUS_OK;
+    *rejected=true;
+    if(stop_code)
+        // The tone was told to stop. outcome is the honest part: a stop that
+        // arrived after the last frame still made the sound.
+        return pocket_api_error(ctx,stop_code,"audio.tone",
+                                !strcmp(stop_code,POCKET_ERR_TIMEOUT)
+                                    ?"the tone outlived timeoutMs"
+                                    :"cancelled while playing",
+                                false,
+                                completed?POCKET_OUTCOME_APPLIED
+                                         :POCKET_OUTCOME_UNKNOWN);
+    if(completed) { *rejected=false; return JS_UNDEFINED; }
+    return pocket_api_error(ctx,POCKET_ERR_IO_ERROR,"audio.tone",
+                            "the tone stopped early",true,
+                            POCKET_OUTCOME_UNKNOWN);
+}
+
+static void tone_released(void *user) {
+    (void)user;
     tone.active=false;
-    tone.stop_code=NULL;
 }
 
-static void tone_settle(JSContext *ctx, JSValue value, bool rejected) {
-    // pocket_api_error() can only fail by running the guest heap out while
-    // building the error. Settling with whatever QuickJS threw instead keeps
-    // the rule that matters: a Promise handed to the app always settles.
-    if(JS_IsException(value)) value=JS_GetException(ctx);
-    JSValue done=JS_Call(ctx,rejected?tone.reject:tone.resolve,JS_UNDEFINED,1,
-                         (JSValueConst *)&value);
-    JS_FreeValue(ctx,done);
-    JS_FreeValue(ctx,value);
-    tone_release(ctx);
-}
+static const pocket_promise_ops_t tone_ops = {
+    .settle=tone_finish, .stop=tone_stop, .release=tone_released,
+};
 
 static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv) {
     (void)this_val;
     static const char *const OP="audio.tone";
     if(argc<1 || !JS_IsObject(argv[0]))
-        return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
-                      "tone(spec, options) needs a spec object",false,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                 "tone(spec, options) needs a spec object",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
 
     double frequency=0, duration=0, gain=0;
     static const char *const FIELDS[]={"frequencyHz","durationMs","gain"};
@@ -211,26 +193,26 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
         bool bad=!JS_IsNumber(field) || JS_ToFloat64(ctx,SLOTS[i],field);
         JS_FreeValue(ctx,field);
         if(bad || !isfinite(*SLOTS[i]))
-            return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
-                          "frequencyHz, durationMs and gain must be numbers",
-                          false,POCKET_OUTCOME_NOT_APPLIED);
+            return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                     "frequencyHz, durationMs and gain must be numbers",
+                                     false,POCKET_OUTCOME_NOT_APPLIED);
     }
     // The same range sound.c enforces, checked here so the refusal arrives as a
     // PocketError with the limit in it rather than as SOUND_ERR_INVALID. The
     // rounding below is the 1Hz and 1ms resolution of the synthesiser, not a
     // silent clamp: a value outside the range is refused, never rounded into it.
     if(frequency<SOUND_TONE_MIN_HZ || frequency>SOUND_TONE_MAX_HZ)
-        return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
-                      "frequencyHz must be 20 to 8000",false,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                 "frequencyHz must be 20 to 8000",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     if(duration<1 || duration>SOUND_TONE_MAX_MS)
-        return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
-                      "durationMs must be 1 to 5000",false,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                 "durationMs must be 1 to 5000",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     // Written as a positive test so a NaN gain cannot pass two false compares.
     if(!(gain>=0.0 && gain<=1.0))
-        return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
-                      "gain must be 0 to 1",false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                 "gain must be 0 to 1",false,POCKET_OUTCOME_NOT_APPLIED);
 
     av_options_t options;
     JSValue bad=take_options(ctx,argc>1?argv[1]:JS_UNDEFINED,OP,&options);
@@ -241,115 +223,87 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
     // it remembers a single id.
     if(tone.active) {
         JS_FreeValue(ctx,options.cancel);
-        return reject(ctx,POCKET_ERR_BUSY,OP,"a tone is already playing",true,
-                      POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_BUSY,OP,"a tone is already playing",
+                                 true,POCKET_OUTCOME_NOT_APPLIED);
     }
     if(options.cancelled) {
         JS_FreeValue(ctx,options.cancel);
-        return reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled before the tone",
-                      false,POCKET_OUTCOME_NOT_APPLIED);
+        return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,
+                                 "cancelled before the tone",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     }
 
     unsigned hz=(unsigned)(frequency+0.5), ms=(unsigned)(duration+0.5);
-    uint32_t request=tone_next_request;
+    // The slot is claimed before the audio task is given anything to finish, so
+    // a 1ms tone that completes inside sound_tone() has somewhere to post to.
+    // Unreachable while tone.active is the one tone at a time, but the table is
+    // shared with every other surface that waits on a driver.
+    pocket_request_t request=pocket_api_promise_open();
+    if(!request) {
+        JS_FreeValue(ctx,options.cancel);
+        return pocket_api_reject(ctx,POCKET_ERR_BUSY,OP,
+                                 "too many operations are pending",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    }
     int32_t id=sound_tone(hz,ms,(float)gain,tone_done,(void *)(uintptr_t)request);
     if(id<0) {
+        pocket_api_promise_abandon(request);
         JS_FreeValue(ctx,options.cancel);
         switch(id) {
             case SOUND_ERR_BUSY:
-                return reject(ctx,POCKET_ERR_BUSY,OP,"the sound queue is full",
-                              true,POCKET_OUTCOME_NOT_APPLIED);
+                return pocket_api_reject(ctx,POCKET_ERR_BUSY,OP,
+                                         "the sound queue is full",true,
+                                         POCKET_OUTCOME_NOT_APPLIED);
             // sound.c calls this one UNSUPPORTED because it means "no codec on
             // this board", but section 2 reserves UNSUPPORTED for what the
             // firmware does not implement. A missing codec is NOT_AVAILABLE.
             case SOUND_ERR_UNSUPPORTED:
-                return reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,
-                              "no audio codec on this unit",false,
-                              POCKET_OUTCOME_NOT_APPLIED);
+                return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,
+                                         "no audio codec on this unit",false,
+                                         POCKET_OUTCOME_NOT_APPLIED);
             default:
-                return reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
-                              "the tone was refused",false,
-                              POCKET_OUTCOME_NOT_APPLIED);
+                return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                         "the tone was refused",false,
+                                         POCKET_OUTCOME_NOT_APPLIED);
         }
     }
-    if(++tone_next_request==0) tone_next_request=1;
-
-    JSValue funcs[2];
-    JSValue promise=JS_NewPromiseCapability(ctx,funcs);
-    if(JS_IsException(promise)) {
-        // Nothing can settle a Promise that was not built, so the tone is asked
-        // to stop; its completion goes unread, which is what an unmatched
-        // request number is for.
-        sound_tone_cancel(id);
-        JS_FreeValue(ctx,options.cancel);
-        return promise;
-    }
-    tone.active=true;
-    tone.resolve=funcs[0];
-    tone.reject=funcs[1];
-    tone.cancel=options.cancel;
-    tone.request=request;
     tone.id=id;
     // Section 4 measures timeoutMs from the call and includes the queue wait,
     // so the default has to cover a tone already sounding ahead of this one.
-    tone.deadline_us=esp_timer_get_time()+
+    int64_t deadline_us=esp_timer_get_time()+
         1000LL*(options.timeout_ms?options.timeout_ms:(int32_t)ms+AV_QUEUE_SLACK_MS);
-    av_ctx=ctx;
-    return promise;
-}
-
-// Asks the tone to stop and remembers why. The Promise is not settled here:
-// section 4 gives the host the wait for the native stop, and the audio task
-// still owns the request until its callback lands.
-static void tone_stop(const char *code) {
-    if(tone.stop_code) return;
-    tone.stop_code=code;
-    sound_tone_cancel(tone.id);
-}
-
-static void tone_pump(JSContext *ctx) {
-    uint32_t finished=atomic_load(&tone_finished);
-    if(finished==tone.request) {
-        bool completed=atomic_load(&tone_finished_completed);
-        atomic_store(&tone_finished,0);
-        if(tone.stop_code) {
-            // The tone was told to stop. outcome is the honest part: a stop
-            // that arrived after the last frame still made the sound.
-            tone_settle(ctx,pocket_api_error(ctx,tone.stop_code,"audio.tone",
-                !strcmp(tone.stop_code,POCKET_ERR_TIMEOUT)
-                    ?"the tone outlived timeoutMs":"cancelled while playing",
-                false,completed?POCKET_OUTCOME_APPLIED:POCKET_OUTCOME_UNKNOWN),true);
-        } else if(completed) {
-            tone_settle(ctx,JS_UNDEFINED,false);
-        } else {
-            // Nobody asked it to stop, so the I2S write failed under it.
-            tone_settle(ctx,pocket_api_error(ctx,POCKET_ERR_IO_ERROR,"audio.tone",
-                "the tone stopped early",true,POCKET_OUTCOME_UNKNOWN),true);
-        }
-        return;
+    JSValue promise=pocket_api_promise_arm(ctx,request,&tone_ops,NULL,
+                                           options.cancel,deadline_us);
+    if(JS_IsException(promise)) {
+        // Nothing can settle a Promise that was not built, so the tone is asked
+        // to stop; its completion goes unread, which is what an unmatched
+        // request number is for. The slot and the cancel token are already back.
+        sound_tone_cancel(id);
+        return promise;
     }
-    if(tone.stop_code) return;    // already stopping; waiting for the callback
-    if(!JS_IsUndefined(tone.cancel) && pocket_api_cancel_requested(tone.cancel))
-        tone_stop(POCKET_ERR_CANCELLED);
-    else if(esp_timer_get_time()>tone.deadline_us)
-        tone_stop(POCKET_ERR_TIMEOUT);
+    tone.active=true;
+    return promise;
 }
 
 // ------------------------------------------------------------------- power
 
-typedef struct {
-    JSValue  callback;
-    uint32_t handle;      // 0 marks a free slot
-    bool     fresh;       // no delivery yet, so the first poll reports whatever it finds
-} power_watch_t;
+// pocket_api.c owns the callback, the handle and the close(); what is left
+// beside each subscription is whether it has been told anything yet.
+static pocket_sub_slot_t power_slots[POWER_WATCHES];
+static bool power_fresh[POWER_WATCHES];   // no delivery yet, so the first poll
+                                          // reports whatever it finds
+static pocket_sub_table_t power_table = {
+    .slots=power_slots, .count=POWER_WATCHES,
+    .tag="pocket.av", .what="power",
+    // Same rule pocket_imu.c uses: a listener that throws loses its
+    // subscription rather than the log and a call every second.
+    .close_on_throw=true,
+};
 
-static power_watch_t power_watches[POWER_WATCHES];
-static unsigned      power_open;
-static uint32_t      power_next_handle;
-static int64_t       power_next_us;
-static bool          power_primed;   // a sample has been taken since install
-static bool          power_have;     // that sample was readable
-static int           power_mv;
+static int64_t power_next_us;
+static bool    power_primed;   // a sample has been taken since install
+static bool    power_have;     // that sample was readable
+static int     power_mv;
 
 // Section 8 refuses a state of charge guessed from one voltage of an
 // uncharacterised cell, and the TP4057 on this board takes its charge status no
@@ -377,55 +331,19 @@ static JSValue js_status(JSContext *ctx, JSValueConst this_val,
     return power_state(ctx);
 }
 
-static void power_close_slot(JSContext *ctx, int slot) {
-    if(!power_watches[slot].handle) return;
-    power_watches[slot].handle=0;
-    JS_FreeValue(ctx,power_watches[slot].callback);
-    power_watches[slot].callback=JS_UNDEFINED;
-    power_open--;
-}
-
-static JSValue js_power_close(JSContext *ctx, JSValueConst this_val,
-                              int argc, JSValueConst *argv, int magic,
-                              JSValueConst *func_data) {
-    (void)this_val; (void)argc; (void)argv;
-    uint32_t handle=0;
-    if(JS_ToUint32(ctx,&handle,func_data[0])) return JS_EXCEPTION;
-    // Bound to the slot and to the handle it held, so closing twice, or closing
-    // after the slot was reused, does nothing.
-    if(magic>=0 && magic<POWER_WATCHES && handle &&
-       power_watches[magic].handle==handle)
-        power_close_slot(ctx,magic);
-    return JS_UNDEFINED;
-}
-
 static JSValue js_on_change(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv) {
     (void)this_val;
     if(argc<1 || !JS_IsFunction(ctx,argv[0]))
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"power.onChange",
                                 "onChange(listener) needs a function",false,NULL);
-    int slot=-1;
-    for(int i=0;i<POWER_WATCHES;i++)
-        if(!power_watches[i].handle) { slot=i; break; }
-    if(slot<0)
-        return pocket_api_throw(ctx,POCKET_ERR_LIMIT_EXCEEDED,"power.onChange",
-                                "too many subscriptions",false,NULL);
-    JSValue subscription=JS_NewObject(ctx);
+    int slot=0;
+    JSValue subscription=pocket_api_sub_open(ctx,&power_table,argv[0],
+                                             "power.onChange",
+                                             "too many subscriptions",&slot);
     if(JS_IsException(subscription)) return subscription;
-    if(++power_next_handle==0) power_next_handle=1;
-    power_watches[slot]=(power_watch_t){
-        .callback=JS_DupValue(ctx,argv[0]),
-        .handle=power_next_handle,
-        .fresh=true,
-    };
-    av_ctx=ctx;
-    power_open++;
+    power_fresh[slot]=true;
     power_next_us=0;    // sample on the next frame rather than a second later
-    JSValue handle=JS_NewUint32(ctx,power_watches[slot].handle);
-    JSValue close=JS_NewCFunctionData(ctx,js_power_close,0,slot,1,&handle);
-    JS_FreeValue(ctx,handle);
-    JS_SetPropertyStr(ctx,subscription,"close",close);
     return subscription;
 }
 
@@ -442,7 +360,15 @@ static JSValue js_keep_awake(JSContext *ctx, JSValueConst this_val,
                             false,POCKET_OUTCOME_NOT_APPLIED);
 }
 
-static void power_pump(JSContext *ctx) {
+static bool power_payload(JSContext *ctx, int slot, void *user, JSValue *payload) {
+    const bool *changed=user;
+    if(!*changed && !power_fresh[slot]) return false;
+    power_fresh[slot]=false;
+    *payload=power_state(ctx);
+    return true;
+}
+
+static void power_pump(void) {
     int64_t now=esp_timer_get_time();
     if(now<power_next_us) return;
     power_next_us=now+POWER_POLL_US;
@@ -455,29 +381,7 @@ static void power_pump(JSContext *ctx) {
                  (have && abs(battery.millivolts-power_mv)>=POWER_STEP_MV);
     power_primed=true;
     if(changed) { power_have=have; power_mv=have?battery.millivolts:0; }
-
-    for(int i=0;i<POWER_WATCHES;i++) {
-        power_watch_t *w=&power_watches[i];
-        if(!w->handle || (!changed && !w->fresh)) continue;
-        w->fresh=false;
-        uint32_t handle=w->handle;
-        JSValue fn=JS_DupValue(ctx,w->callback);
-        JSValue payload=power_state(ctx);
-        JSValue result=JS_Call(ctx,fn,JS_UNDEFINED,1,(JSValueConst *)&payload);
-        if(JS_IsException(result)) {
-            JSValue error=JS_GetException(ctx);
-            const char *text=JS_ToCString(ctx,error);
-            ESP_LOGW(TAG,"power listener failed: %s",text?text:"?");
-            if(text) JS_FreeCString(ctx,text);
-            JS_FreeValue(ctx,error);
-            // Same rule pocket_imu.c uses: a listener that throws loses its
-            // subscription rather than the log and a call every second.
-            if(w->handle==handle) power_close_slot(ctx,i);
-        }
-        JS_FreeValue(ctx,result);
-        JS_FreeValue(ctx,payload);
-        JS_FreeValue(ctx,fn);
-    }
+    pocket_api_sub_deliver(&power_table,power_payload,&changed);
 }
 
 // ----------------------------------------------------- unimplemented surfaces
@@ -487,9 +391,10 @@ static JSValue js_unsupported(JSContext *ctx, JSValueConst this_val,
                               JSValueConst *func_data) {
     (void)this_val; (void)argc; (void)argv; (void)magic;
     const char *operation=JS_ToCString(ctx,func_data[0]);
-    JSValue error=reject(ctx,POCKET_ERR_UNSUPPORTED,operation?operation:"audio",
-                         "not implemented in this build",false,
-                         POCKET_OUTCOME_NOT_APPLIED);
+    JSValue error=pocket_api_reject(ctx,POCKET_ERR_UNSUPPORTED,
+                                    operation?operation:"audio",
+                                    "not implemented in this build",false,
+                                    POCKET_OUTCOME_NOT_APPLIED);
     if(operation) JS_FreeCString(ctx,operation);
     return error;
 }
@@ -510,29 +415,16 @@ static void add_unsupported(JSContext *ctx, JSValue parent, const char *child,
 // ------------------------------------------------------------- pump / reset
 
 void pocket_av_pump(void) {
-    if(!av_ctx) return;
-    if(tone.active) tone_pump(av_ctx);
-    if(power_open) power_pump(av_ctx);
+    if(power_table.open) power_pump();
 }
 
 void pocket_av_reset(void) {
-    if(av_ctx) {
-        if(tone.active) {
-            // The realm is going away, so there is nobody left to settle to.
-            // The tone is asked to stop and then left alone: its completion
-            // carries a request number this session will never read again, and
-            // the audio task holds no JS value to free.
-            sound_tone_cancel(tone.id);
-            tone_release(av_ctx);
-        }
-        for(int i=0;i<POWER_WATCHES;i++) power_close_slot(av_ctx,i);
-    }
-    tone.active=false;
-    tone.stop_code=NULL;
-    power_open=0;
+    // The tone is not here: it waits on a promise slot, and pocket_api_reset()
+    // is what asks it to stop and lets its resolvers go.
+    pocket_api_sub_close_all(&power_table);
+    power_table.ctx=NULL;
     power_primed=false;
     power_next_us=0;
-    av_ctx=NULL;
 }
 
 // ------------------------------------------------------------- capabilities
@@ -602,19 +494,16 @@ esp_err_t pocket_av_install(JSContext *ctx, void *user_data) {
     pocket_api_register(&audio_tone_capability);
     pocket_api_register(&power_capability);
 
-    // A realm going away takes its callbacks with it, so the tables start empty
-    // on every install. tone_next_request is not touched: it is the one piece
-    // of state that has to outlive a session.
-    tone.resolve=tone.reject=tone.cancel=JS_UNDEFINED;
+    // A realm going away takes its callbacks with it, so the table starts empty
+    // on every install.
     tone.active=false;
-    tone.stop_code=NULL;
     for(int i=0;i<POWER_WATCHES;i++) {
-        power_watches[i].callback=JS_UNDEFINED;
-        power_watches[i].handle=0;
+        power_slots[i].callback=JS_UNDEFINED;
+        power_slots[i].handle=0;
     }
-    power_open=0;
+    power_table.open=0;
+    power_table.ctx=ctx;
     power_primed=false;
-    av_ctx=ctx;
 
     JSValue root=pocket_api_root(ctx);
     if(JS_IsUndefined(root)) { JS_FreeValue(ctx,root); return ESP_ERR_INVALID_STATE; }

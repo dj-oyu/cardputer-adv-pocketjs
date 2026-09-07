@@ -2,36 +2,40 @@
 #include "pocket_api.h"
 #include "motion.h"
 #include "esp_timer.h"
-#include "esp_log.h"
 #include <math.h>
 
 // Four is what fits the screen: a program that wants five views of the same
 // sensor wants one watch and its own fan-out.
 #define POCKET_IMU_WATCHES 4
 
+// The pacing that sits beside each subscription. pocket_api.c owns the
+// callback, the handle and the close(); what is left here is what a watch
+// means -- how often it wants a sample, and how many it has been spared.
 typedef struct {
-    JSValue  callback;
     int64_t  period_us;
     int64_t  next_us;
     uint32_t last_sequence;   // 0 until the first delivery
     uint32_t dropped;         // deliveries omitted since this watch opened
-    uint32_t handle;          // 0 marks a free slot
 } watch_t;
 
-static JSContext *watch_ctx;
-static watch_t    watches[POCKET_IMU_WATCHES];
-static unsigned   open_watches;
-static uint32_t   next_handle;
-
-static const char *TAG = "pocket.imu";
+static pocket_sub_slot_t watch_slots[POCKET_IMU_WATCHES];
+static watch_t           watches[POCKET_IMU_WATCHES];
 
 // The gyroscope draws several times the accelerometer's current, so it runs
 // only while something is watching. latest() therefore reports gyro null to a
 // program that never opened a watch, which is the same "not available now"
 // answer section 8 gives for a sensor the firmware does not read.
-static void follow_gyro_demand(void) {
-    motion_request_gyro(open_watches>0);
+static void follow_gyro_demand(pocket_sub_table_t *table) {
+    motion_request_gyro(table->open>0);
 }
+
+static pocket_sub_table_t watch_table = {
+    .slots=watch_slots, .count=POCKET_IMU_WATCHES,
+    .tag="pocket.imu", .what="watch",
+    // A listener that throws every frame would otherwise fill the log and keep
+    // costing a call; the program keeps its other watches.
+    .close_on_throw=true, .changed=follow_gyro_demand,
+};
 
 static JSValue sample_object(JSContext *ctx, const motion_sample_t *s,
                              uint32_t dropped) {
@@ -73,28 +77,6 @@ static JSValue js_latest(JSContext *ctx, JSValueConst this_val,
     return sample_object(ctx,&sample,sample.dropped);
 }
 
-static void close_slot(JSContext *ctx, int slot) {
-    if(!watches[slot].handle) return;
-    watches[slot].handle=0;
-    JS_FreeValue(ctx,watches[slot].callback);
-    watches[slot].callback=JS_UNDEFINED;
-    open_watches--;
-    follow_gyro_demand();
-}
-
-static JSValue js_watch_close(JSContext *ctx, JSValueConst this_val,
-                              int argc, JSValueConst *argv, int magic,
-                              JSValueConst *func_data) {
-    (void)this_val; (void)argc; (void)argv;
-    uint32_t handle=0;
-    if(JS_ToUint32(ctx,&handle,func_data[0])) return JS_EXCEPTION;
-    // Bound to the slot and to the handle that slot held, so closing twice, or
-    // closing after the slot has been reused, does nothing.
-    if(magic>=0 && magic<POCKET_IMU_WATCHES && handle && watches[magic].handle==handle)
-        close_slot(ctx,magic);
-    return JS_UNDEFINED;
-}
-
 static JSValue js_watch(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv) {
     (void)this_val;
@@ -116,81 +98,61 @@ static JSValue js_watch(JSContext *ctx, JSValueConst this_val,
     if(rate>motion_rate_hz())
         return pocket_api_throw(ctx,POCKET_ERR_LIMIT_EXCEEDED,"sensors.imu.watch",
                                 "rateHz above the sensor's rate",false,NULL);
-    int slot=-1;
-    for(int i=0;i<POCKET_IMU_WATCHES;i++)
-        if(!watches[i].handle) { slot=i; break; }
-    if(slot<0)
-        return pocket_api_throw(ctx,POCKET_ERR_LIMIT_EXCEEDED,"sensors.imu.watch",
-                                "too many watches",false,NULL);
-    JSValue subscription=JS_NewObject(ctx);
+    int slot=0;
+    JSValue subscription=pocket_api_sub_open(ctx,&watch_table,argv[1],
+                                             "sensors.imu.watch",
+                                             "too many watches",&slot);
     if(JS_IsException(subscription)) return subscription;
-    if(++next_handle==0) next_handle=1;
     watches[slot]=(watch_t){
-        .callback=JS_DupValue(ctx,argv[1]),
         .period_us=(int64_t)(1000000.0/rate),
         .next_us=esp_timer_get_time(),
-        .handle=next_handle,
     };
-    watch_ctx=ctx;
-    open_watches++;
-    follow_gyro_demand();
-    JSValue handle=JS_NewUint32(ctx,watches[slot].handle);
-    JSValue close=JS_NewCFunctionData(ctx,js_watch_close,0,slot,1,&handle);
-    JS_FreeValue(ctx,handle);
-    JS_SetPropertyStr(ctx,subscription,"close",close);
     return subscription;
 }
 
+// One frame's sample, and the time the frame asked for it.
+typedef struct {
+    const motion_sample_t *sample;
+    int64_t                now;
+} watch_round_t;
+
+static bool watch_payload(JSContext *ctx, int slot, void *user, JSValue *payload) {
+    const watch_round_t *round=user;
+    watch_t             *w=&watches[slot];
+    if(round->now<w->next_us) return false;
+    // The rate is a ceiling on deliveries, not a promise of one: with nothing
+    // new from the sensor there is nothing to deliver, and re-sending the last
+    // sample would make timeMs a lie about freshness.
+    if(w->last_sequence==round->sample->sequence) return false;
+    // Samples the sensor produced between two deliveries were skipped on
+    // purpose -- this is the "delivered the newest, queued nothing" part of
+    // section 8, and dropped is how the program learns it happened.
+    if(w->last_sequence) w->dropped+=round->sample->sequence-w->last_sequence-1;
+    w->last_sequence=round->sample->sequence;
+    // Drift-free pacing, but never a burst: after a long stall the next
+    // delivery is one period out rather than several at once.
+    w->next_us+=w->period_us;
+    if(w->next_us<round->now) w->next_us=round->now+w->period_us;
+    *payload=sample_object(ctx,round->sample,w->dropped);
+    return true;
+}
+
 void pocket_imu_pump(void) {
-    if(!open_watches || !watch_ctx) return;
-    int64_t now=esp_timer_get_time();
+    if(!watch_table.open) return;
     motion_sample_t sample;
     if(!motion_latest(&sample)) return;
-    JSContext *ctx=watch_ctx;
-    for(int i=0;i<POCKET_IMU_WATCHES;i++) {
-        watch_t *w=&watches[i];
-        if(!w->handle || now<w->next_us) continue;
-        // The rate is a ceiling on deliveries, not a promise of one: with
-        // nothing new from the sensor there is nothing to deliver, and
-        // re-sending the last sample would make timeMs a lie about freshness.
-        if(w->last_sequence==sample.sequence) continue;
-        // Samples the sensor produced between two deliveries were skipped on
-        // purpose -- this is the "delivered the newest, queued nothing" part of
-        // section 8, and dropped is how the program learns it happened.
-        if(w->last_sequence) w->dropped+=sample.sequence-w->last_sequence-1;
-        w->last_sequence=sample.sequence;
-        // Drift-free pacing, but never a burst: after a long stall the next
-        // delivery is one period out rather than several at once.
-        w->next_us+=w->period_us;
-        if(w->next_us<now) w->next_us=now+w->period_us;
-        uint32_t handle=w->handle;
-        JSValue fn=JS_DupValue(ctx,w->callback);
-        JSValue payload=sample_object(ctx,&sample,w->dropped);
-        JSValue result=JS_Call(ctx,fn,JS_UNDEFINED,1,(JSValueConst *)&payload);
-        if(JS_IsException(result)) {
-            JSValue error=JS_GetException(ctx);
-            const char *text=JS_ToCString(ctx,error);
-            ESP_LOGW(TAG,"watch listener failed: %s",text?text:"?");
-            if(text) JS_FreeCString(ctx,text);
-            JS_FreeValue(ctx,error);
-            // A listener that throws every frame would otherwise fill the log
-            // and keep costing a call; the program keeps its other watches.
-            if(w->handle==handle) close_slot(ctx,i);
-        }
-        JS_FreeValue(ctx,result);
-        JS_FreeValue(ctx,payload);
-        JS_FreeValue(ctx,fn);
-    }
+    watch_round_t round={.sample=&sample,.now=esp_timer_get_time()};
+    pocket_api_sub_deliver(&watch_table,watch_payload,&round);
 }
 
 void pocket_imu_reset(void) {
-    if(watch_ctx)
-        for(int i=0;i<POCKET_IMU_WATCHES;i++) close_slot(watch_ctx,i);
-    watch_ctx=NULL;
-    open_watches=0;
+    pocket_api_sub_close_all(&watch_table);
+    watch_table.ctx=NULL;
     // A program that ended without closing its watches must not leave the
-    // gyroscope drawing current until the next one starts.
-    follow_gyro_demand();
+    // gyroscope drawing current until the next one starts. Closing them has
+    // already done that through `changed`; this is for the run that opened
+    // none, whose install still asked the gyroscope for nothing.
+    motion_request_gyro(false);
 }
 
 // ---------------------------------------------------------------- capability
@@ -228,12 +190,12 @@ esp_err_t pocket_imu_install(JSContext *ctx, void *user_data) {
     for(int i=0;i<POCKET_IMU_WATCHES;i++) {
         // A realm going away takes its callbacks with it. Nothing here survives
         // a session, so the table starts empty on every install.
-        watches[i].callback=JS_UNDEFINED;
-        watches[i].handle=0;
+        watch_slots[i].callback=JS_UNDEFINED;
+        watch_slots[i].handle=0;
     }
-    open_watches=0;
-    watch_ctx=ctx;
-    follow_gyro_demand();
+    watch_table.open=0;
+    watch_table.ctx=ctx;
+    follow_gyro_demand(&watch_table);
 
     JSValue root=pocket_api_root(ctx);
     if(JS_IsUndefined(root)) { JS_FreeValue(ctx,root); return ESP_ERR_INVALID_STATE; }

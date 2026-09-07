@@ -119,9 +119,11 @@ void app_report(void) {
 }
 void app_stop(void) {
     jsfont_detach();
-    // Before the guest goes: the watches hold callbacks belonging to it.
+    // Before the guest goes: the watches hold callbacks belonging to it, and a
+    // promise still in flight holds its resolvers.
     pocket_imu_reset();
     pocket_av_reset();
+    pocket_api_reset();
     if(renderer && target) pocketjs_rgb565_abort(renderer,target);
     if(target) pocketjs_rgb565_target_destroy(target);
     if(renderer) pocketjs_rgb565_renderer_destroy(renderer);
@@ -219,6 +221,9 @@ esp_err_t app_tick(uint32_t buttons) {
     // Watch deliveries before the frame, so a listener that updates a node and
     // the frame that draws it are the same turn rather than one apart.
     pocket_imu_pump();
+    // Between the two, so a tone that finished settles in the same order the
+    // one pump in pocket_av.c used to settle it in.
+    pocket_api_pump();
     pocket_av_pump();
     pocketjs_ui_input_t input={.struct_size=sizeof(input),.buttons=buttons};
     pocketjs_ui_frame_view_t frame={.struct_size=sizeof(frame)};
