@@ -229,6 +229,7 @@ static void gpio_release(int pin) {
 }
 
 static void watch_release(int slot);   // defined with the subscription table
+static bool watch_owned_by(int slot, int32_t id);
 
 static void handle_teardown(io_handle_t *h) {
     switch(h->kind) {
@@ -252,7 +253,14 @@ static void handle_teardown(io_handle_t *h) {
             gpio_release(13); gpio_release(15);
             break;
         case H_GPIO:
-            if(h->gpio_watch>=0) watch_release(h->gpio_watch);
+            // Only if that slot is still this handle's. subscription.close()
+            // frees the slot through the subscription table without telling
+            // the handle, so gpio_watch goes stale, and the next handle to
+            // open a watch takes the same slot -- closing this one then killed
+            // the other's listener silently. watch_t.id exists for exactly
+            // this check; gpio_watch() already makes it at the other end.
+            if(watch_owned_by(h->gpio_watch,handle_id((int)(h-handles))))
+                watch_release(h->gpio_watch);
             gpio_release(PORTS[h->port].pins[0]);
             break;
         default: return;
@@ -401,6 +409,12 @@ static pocket_sub_table_t watch_table = {
     // edge would otherwise fill the log for as long as the pin keeps moving.
     .close_on_throw=true,
 };
+
+// Whether that slot is still the watch this handle opened. The subscription
+// table can free a slot behind the handle's back, and the next watch reuses it.
+static bool watch_owned_by(int slot, int32_t id) {
+    return slot>=0 && slot<IO_GPIO_WATCHES && watch_state[slot].id==id;
+}
 
 static void watch_release(int slot) {
     if(slot<0 || slot>=IO_GPIO_WATCHES) return;
@@ -1126,6 +1140,17 @@ static JSValue ir_send(JSContext *ctx, JSValueConst this_val,
         return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
                                  "send(spec, options) needs a spec object",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
+    // Before anything writes ir_symbols. That buffer is the payload the RMT
+    // encoder is still reading while a frame goes out: a frame over 128
+    // durations does not fit the channel's memory in one pass, so the TX
+    // interrupt keeps coming back for more of it. Filling it first and
+    // checking afterwards truncated the frame in the air -- a zeroed duration
+    // is the end marker -- and then resolved its promise as though the whole
+    // thing had gone out.
+    if(ir_busy)
+        return pocket_api_reject(ctx,POCKET_ERR_BUSY,OP,
+                                 "a frame is already going out",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     int64_t carrier=0;
     JSValue error=JS_UNDEFINED;
     if(!take_int(ctx,argv[0],"carrierHz",OP,IR_MIN_CARRIER_HZ,IR_MAX_CARRIER_HZ,
@@ -1196,6 +1221,9 @@ static JSValue ir_send(JSContext *ctx, JSValueConst this_val,
     JSValue bad=take_options(ctx,argc>1?argv[1]:JS_UNDEFINED,OP,
                              IO_MAX_TIMEOUT_MS,&options);
     if(!JS_IsUndefined(bad)) return bad;
+    // Checked once more, because take_options() above can run a getter on the
+    // app's options object and a getter can call send(). The check at the top
+    // is what protects the buffer; this one is what protects the channel.
     if(ir_busy) {
         JS_FreeValue(ctx,options.cancel);
         return pocket_api_reject(ctx,POCKET_ERR_BUSY,OP,
