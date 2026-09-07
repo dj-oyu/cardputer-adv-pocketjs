@@ -1117,16 +1117,12 @@ static JSValue js_on_key(JSContext *ctx, JSValueConst self,
                             false,NULL);
 }
 
-// Likewise for the text session: it wants the host's IME and edit field, which
-// only a screen declaring takes_text receives, and the running-app screen does
-// not. input.text keeps pocket_api.c's declared supported=false entry.
-static JSValue js_text_open(JSContext *ctx, JSValueConst self,
-                            int argc, JSValueConst *argv) {
-    (void)self; (void)argc; (void)argv;
-    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,"input.text.open",
-                            "no host text session for a running app yet",
-                            false,NULL);
-}
+// input.text used to be a second UNSUPPORTED stub here, on the argument that
+// only a screen declaring takes_text gets the IME. That argument was wrong
+// about where the field has to live, not about the machinery: pocket_text.c
+// puts the field in the HOST and composites it over the guest's own frame, and
+// main.c hands it the keyboard for as long as it is open. It contributes to
+// this same namespace and defines input.text itself.
 
 // -------------------------------------------------------------- pump/reset
 
@@ -1230,7 +1226,6 @@ static const pocket_limit_t input_limits[] = {
     {.name="maxWatches",    .kind=POCKET_LIMIT_INT,  .number=UI_ACTION_SUBS},
     {.name="repeatDelayMs", .kind=POCKET_LIMIT_INT,  .number=REPEAT_DELAY_US/1000},
     {.name="keyEvents",     .kind=POCKET_LIMIT_FLAG, .number=0},
-    {.name="textSessions",  .kind=POCKET_LIMIT_INT,  .number=0},
     {0},
 };
 
@@ -1417,11 +1412,8 @@ static esp_err_t build_input(JSContext *ctx, JSValueConst ns, void *user) {
         JS_NewCFunction(ctx,js_on_key,"onKey",1),JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx,ns,"held",
         JS_NewCFunction(ctx,js_held,"held",1),JS_PROP_ENUMERABLE);
-    JSValue text=JS_NewObject(ctx);
-    if(JS_IsException(text)) return ESP_ERR_NO_MEM;
-    JS_DefinePropertyValueStr(ctx,text,"open",
-        JS_NewCFunction(ctx,js_text_open,"open",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,ns,"text",text,JS_PROP_ENUMERABLE);
+    // input.text belongs to pocket_text.c, which contributes to this namespace
+    // after this does. See the note where the stub used to be.
     return ESP_OK;
 }
 

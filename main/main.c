@@ -14,6 +14,7 @@
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_bridge.h"
+#include "pocket_text.h"
 #include "scene_mem.h"
 #include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
@@ -356,6 +357,17 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         if(!pocket_workspace_modal()) app_force_redraw();
         return;
     }
+    // A text session takes the keyboard from the guest for as long as it is
+    // open: section 6 gives the HOST the field, so the app receives neither the
+    // keystrokes nor the Back that would otherwise end it -- Escape there means
+    // "cancel the conversion, or the field", and both are pocket_text's.
+    if(have && pocket_text_active()) {
+        pocket_text_key(stroke);
+        have=false;
+        // The guest's renderer presents only when IT has damage, so a field
+        // that moved on a frame the app did not would not be sent at all.
+        if(pocket_text_take_dirty()) app_force_redraw();
+    }
     board_key_t key=have?stroke->nav:KEY_NONE;
     bool leave = have && key==KEY_BACK;
     esp_err_t e=ESP_OK;
@@ -373,6 +385,12 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         if(e==ESP_OK && buttons) e=app_tick(0);
     }
     if(shot) board_capture(false);
+    // Again after the turn, for the field the app itself moved: open() and
+    // close() are ordinary JS calls and can happen in a frame with no key and
+    // no damage of the guest's own. The repaint lands on the next frame, which
+    // is 33 ms and is why the check above exists as well -- a keystroke has to
+    // be seen in the frame it was typed in.
+    if(pocket_text_take_dirty()) app_force_redraw();
 
     // Accepted this turn, so no further input reaches the app: the session ends
     // here and end_run() starts what it asked for.
@@ -463,6 +481,13 @@ static void ui_task(void *arg) {
                 if(!running) { app_stop(); home_error="TEST ERROR"; }
             }
         }
+
+        // Which reading of the USB byte stream applies. A running app is
+        // normally not a text screen, and a text session makes it one for as
+        // long as it is up -- otherwise a host script driving this over USB
+        // could not type into the field it just opened.
+        atomic_store(&text_screen,
+                     SCREENS[screen].takes_text || pocket_text_active());
 
         int held=(int)((esp_timer_get_time()-frame_start)/1000);
         unsigned cap = running ? 33 : SCREENS[screen].frame_ms;

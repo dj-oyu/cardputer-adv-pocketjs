@@ -17,6 +17,7 @@
 #include "pocket_net.h"
 #include "pocket_ble.h"
 #include "pocket_ui.h"
+#include "pocket_text.h"
 #include "pocket_app.h"
 #include "pocket_bridge.h"
 #include "pocket_workspace.h"
@@ -196,6 +197,9 @@ void app_stop(void) {
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
     pocket_ui_reset();
+    // Before pocket_api_reset(): an open field holds three guest callbacks, and
+    // a screen change closes the session -- which is what the end of a run is.
+    pocket_text_reset();
     pocket_bridge_reset();
     pocket_api_reset();
     if(renderer && target) pocketjs_rgb565_abort(renderer,target);
@@ -244,6 +248,9 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"net",pocket_net_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"ble",pocket_ble_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pui",pocket_ui_install,NULL));
+    // After "pui": both contribute to pocket.input, and contributors run in
+    // the order they registered.
+    TRY(pocketjs_guest_quickjs_install_once(guest,"text",pocket_text_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"bridge",pocket_bridge_install,NULL));
     // After "console": it wraps print and console.log onto the section 7 ring.
     TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
@@ -395,6 +402,10 @@ esp_err_t app_tick(uint32_t buttons) {
                                            &render_accel,&stats);
             if(e)goto fail;
             pet_assets_overlay(pixels,y,rows);
+            // Section 6's host-owned edit field, composited over the guest's
+            // own frame rather than drawn by it: the guest never learns there
+            // is a field, only what was committed into it.
+            pocket_text_overlay(pixels,y,rows);
             // software_ops counts what the kernels declined, so a non-zero
             // figure here is the share still drawn the slow way.
             sw_ops+=stats.software_ops; accel+=stats.ppa_fills+stats.ppa_blends;
