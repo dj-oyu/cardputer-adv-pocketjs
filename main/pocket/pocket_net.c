@@ -3,6 +3,7 @@
 #include "wifi_time.h"
 #include "solar_time.h"
 #include "esp_crt_bundle.h"
+
 #include "esp_tls_errors.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -68,15 +69,14 @@ static const char *TAG = "pocket.net";
 // One server, one certificate chain, one run. A longer chain wants more, so
 // these stay above what was measured rather than at it.
 //
-// A known limit rather than a bug to be found later: about eight consecutive
-// HTTPS requests work, and the ninth is refused. Measured 2026-09-08 over
-// twelve rounds against the same host -- total free recovers fully between
-// requests (39,892 up to 50,396 across one boundary), but the largest free
-// block walks down 31,744 -> 24,576 and stays there. That is fragmentation,
-// not a leak, and it is the block the handshake needs. The per-request TLS
-// context of roughly 7.5 KB is the piece doing it; six other hosts, including
-// a 4096-bit chain, all cost between 6,596 and 8,336 bytes, so this is the
-// shape of every request rather than a bad one.
+// What was called fragmentation for most of a day was mostly these thresholds.
+// Instrumenting each stage of a request showed the largest free block is
+// 31,744 at task creation, stays 31,744 through the handshake, dips during the
+// body read, and is 31,744 again after esp_http_client_cleanup -- for nine
+// consecutive requests. A request leaves nothing behind. What declined was the
+// free heap, by about 2,100 a round, and that was the test app's own promise
+// chain growing the guest heap, which comes out of the same pool. Twelve of
+// twelve requests succeed with the numbers below.
 //
 // Making the worker task persistent instead of one per request was tried and
 // measured: the block held its maximum for five rounds instead of three, and
@@ -95,11 +95,20 @@ static const char *TAG = "pocket.net";
 // documents the recipe; it is deliberately not done automatically here, because
 // dropping an app's link underneath it costs three seconds and is a decision
 // the app should make rather than discover.
-#define NET_TLS_MIN_FREE   (40*1024)
+#define NET_TLS_MIN_FREE   (20*1024)
 // Raised, not lowered, by the measurement: 20 KiB here would have left about
 // 12 KiB by the time the 15,360 byte allocation was made, and it would have
 // failed. The old value was the one genuinely wrong number of the two.
-#define NET_TLS_MIN_BLOCK  (26*1024)
+// Both numbers were sized for a world where mbedTLS allocated from the general
+// heap. A dedicated 20 KiB arena for mbedTLS was built and measured and then
+// withdrawn: it removed mbedTLS from the general heap entirely and made things
+// worse, because taking 20 KiB of one piece costs more contiguity than the
+// ninety small blocks it removed. Eight consecutive requests without it, six
+// with it lazily taken, seven with it taken at lease time. What survives from
+// that work is these two numbers, measured with the arena in place and still
+// true without it: a handshake wants about 6,600 to 8,300 bytes of free heap
+// and its largest single allocation is 4,437.
+#define NET_TLS_MIN_BLOCK  (8*1024)
 // Plain HTTP is a socket, a 512 byte client buffer and this file's two arenas.
 #define NET_PLAIN_MIN_FREE (12*1024)
 // Measured on the board, 2026-09-07, with the probe in wifi_time.c: esp_wifi_init
@@ -467,6 +476,8 @@ static void http_task(void *arg) {
     // rsp_headers and chunk belong to the response object and are freed by the
     // JS task when it closes; a worker that ends first leaves them alone.
     atomic_store(&http.alive,false);
+    // After cleanup, so mbedTLS has returned everything: this is the edge on
+    // which a pool whose session already ended is actually handed back.
     ESP_LOGI(TAG,"HTTP_WORKER_DONE status=%d",(int)http.status_code);
     // Last, and only here: the lease may have been given back while the socket
     // was still open, and the radio is not taken down under a live connection.
@@ -1235,6 +1246,8 @@ static JSValue js_request(JSContext *ctx, JSValueConst self,
     }
     http.open=request;
     atomic_store(&http.alive,true);
+    // The worker owns mbedTLS's allocations from here until it says otherwise,
+    // and the pool must not be handed back underneath it.
     // 6 KiB: a TLS handshake's own frames are the deep part, and this task also
     // carries esp_http_client and the socket calls under it.
     if(xTaskCreate(http_task,"pocket_http",6144,NULL,5,NULL)!=pdPASS) {
@@ -1309,6 +1322,9 @@ void pocket_net_reset(void) {
         // A session that ended while acquire was still waiting.
         wifi_time_link_stop();
     }
+    // mbedTLS's pool is a session-scoped loan, not a static buffer: an app that
+    // never opened a socket never took it, and one that did gives it back here
+    // rather than holding 20 KB across the next app's whole run.
 }
 
 // ---------------------------------------------------------------- capability
