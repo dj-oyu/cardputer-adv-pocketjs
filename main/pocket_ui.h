@@ -30,6 +30,14 @@
 
 esp_err_t pocket_ui_install(JSContext *ctx, void *user_data);
 
+// Wraps globalThis.ui's createNode and destroyNode so the node budget applies
+// to apps on the legacy path too -- which is every app in apps/. Call from the
+// JS task after the UI binding is mounted and before the app's source runs;
+// without it the guard sees only nodes pocket.ui made itself, which is how a
+// screen walked past the layout cliff and rebooted the device instead of being
+// told no.
+void pocket_ui_attach(JSContext *ctx);
+
 // Turns the frame's button mask into ActionEvents and expires a toast. Call
 // once per frame from the JS task with the same mask app_tick() was handed.
 // Costs two loads and a branch when nothing is subscribed and no toast is up.

@@ -163,6 +163,11 @@ static JSValue    ui_fn[F_COUNT];
 static bool       ui_ready;
 static JSContext *ui_ctx;
 static unsigned   live_nodes;
+// The legacy createNode/destroyNode as they were before pocket_ui_attach()
+// replaced them. ui_bind() takes these rather than re-reading the object, so
+// this surface's own calls skip the wrapper and are counted once, here.
+static JSValue    legacy_create=JS_UNDEFINED, legacy_destroy=JS_UNDEFINED;
+static bool       legacy_wrapped;
 
 static bool ui_bind(JSContext *ctx, const char *op) {
     if(ui_ready) return true;
@@ -172,7 +177,15 @@ static bool ui_bind(JSContext *ctx, const char *op) {
     int found=0;
     if(JS_IsObject(obj)) {
         for(;found<F_COUNT;found++) {
-            ui_fn[found]=JS_GetPropertyStr(ctx,obj,UI_FN[found]);
+            // The originals, when the guest's two are wrappers: going through
+            // them would count this surface's nodes twice and ask budget_ok
+            // about a tree it is already inside.
+            if(legacy_wrapped && found==F_CREATE)
+                ui_fn[found]=JS_DupValue(ctx,legacy_create);
+            else if(legacy_wrapped && found==F_DESTROY)
+                ui_fn[found]=JS_DupValue(ctx,legacy_destroy);
+            else
+                ui_fn[found]=JS_GetPropertyStr(ctx,obj,UI_FN[found]);
             if(!JS_IsFunction(ctx,ui_fn[found])) break;
         }
     }
@@ -1145,7 +1158,14 @@ void pocket_ui_reset(void) {
             for(int i=0;i<F_COUNT;i++) JS_FreeValue(ctx,ui_fn[i]);
             JS_FreeValue(ctx,ui_obj);
         }
+        // The originals the wrapper closed over belong to the realm too.
+        if(legacy_wrapped) {
+            JS_FreeValue(ctx,legacy_create);
+            JS_FreeValue(ctx,legacy_destroy);
+        }
     }
+    legacy_create=JS_UNDEFINED; legacy_destroy=JS_UNDEFINED;
+    legacy_wrapped=false;
     memset(nodes,0,sizeof(nodes));
     memset(lists,0,sizeof(lists));
     memset(screens,0,sizeof(screens));
@@ -1248,6 +1268,56 @@ static bool make_class(JSContext *ctx, JSClassID *id, const JSClassDef *def,
     return true;
 }
 #define METHODS(a) (a),(int)(sizeof(a)/sizeof((a)[0]))
+
+// ------------------------------------------- the guard the legacy path needs
+//
+// budget_ok() only ever saw nodes this surface made, so an app on the raw
+// ui.createNode path -- which every app in apps/ still is -- was never asked.
+// The firmware held the right ceiling and the pet app walked past it into a
+// 29,648-byte contiguous request the heap could not pay, and the Rust side
+// aborts rather than failing: the device rebooted instead of the call
+// returning an error.
+//
+// So the two calls that change the tree's size are wrapped, and the counting
+// happens in one place for both paths. A refusal is a PocketError the app can
+// catch and draw around, which is the whole difference from a reboot.
+static JSValue js_legacy_create(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv) {
+    if(!budget_ok(ctx,1,"ui.createNode")) return JS_EXCEPTION;
+    JSValue id=JS_Call(ctx,legacy_create,this_val,argc,argv);
+    if(!JS_IsException(id)) live_nodes++;
+    return id;
+}
+static JSValue js_legacy_destroy(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv) {
+    JSValue r=JS_Call(ctx,legacy_destroy,this_val,argc,argv);
+    if(!JS_IsException(r) && live_nodes) live_nodes--;
+    return r;
+}
+
+void pocket_ui_attach(JSContext *ctx) {
+    // Not at install: app_session.c mounts the binding after it installs the
+    // guest surfaces, so globalThis.ui does not exist yet then. This runs where
+    // jsfont.c's setText wrapper does, after the mount and before the app's
+    // own source is evaluated.
+    if(legacy_wrapped) return;
+    JSValue global=JS_GetGlobalObject(ctx);
+    JSValue obj=JS_GetPropertyStr(ctx,global,"ui");
+    JS_FreeValue(ctx,global);
+    if(!JS_IsObject(obj)) { JS_FreeValue(ctx,obj); return; }
+    JSValue create=JS_GetPropertyStr(ctx,obj,"createNode");
+    JSValue destroy=JS_GetPropertyStr(ctx,obj,"destroyNode");
+    if(JS_IsFunction(ctx,create) && JS_IsFunction(ctx,destroy)) {
+        legacy_create=create; legacy_destroy=destroy; legacy_wrapped=true;
+        JS_SetPropertyStr(ctx,obj,"createNode",
+            JS_NewCFunction(ctx,js_legacy_create,"createNode",1));
+        JS_SetPropertyStr(ctx,obj,"destroyNode",
+            JS_NewCFunction(ctx,js_legacy_destroy,"destroyNode",1));
+    } else {
+        JS_FreeValue(ctx,create); JS_FreeValue(ctx,destroy);
+    }
+    JS_FreeValue(ctx,obj);
+}
 
 esp_err_t pocket_ui_install(JSContext *ctx, void *user_data) {
     (void)user_data;

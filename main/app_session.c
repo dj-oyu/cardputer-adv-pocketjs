@@ -194,6 +194,10 @@ esp_err_t app_start_test(char test) {
                 ESP_LOGW("app","setText wrapper failed; Japanese will be tofu");
             }
             JS_FreeValue(ctx,w);
+            // Same place, same reason: the binding exists now and no app source
+            // has run. This one puts the node budget in front of the legacy
+            // ui.createNode that every app in apps/ still uses.
+            pocket_ui_attach(ctx);
         }
     }
     const char *source=user_source?user_source:hello_start;
