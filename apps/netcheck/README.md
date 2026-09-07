@@ -57,3 +57,50 @@ USBログの `js` タグに `NETCHK ...` として出る。無線側の `LINK_ST
   `pocket_net_reset()` が同じ経路を通る。
 - 途中で **戻る** キーを押してアプリを殺しても、`LINK_DOWN` は必ず出る。出なければ
   リースが漏れている。
+
+
+## tlshosts.js — 相手を変えて測る
+
+閾値は example.com 1件から決めたので、鍵長とチェーンの違う相手で確かめる。
+2026-09-08 の実測:
+
+| ホスト | 結果 | ハンドシェイクの消費 |
+| --- | --- | --- |
+| example.com | 200 | 8,336 |
+| www.google.com | **失敗** | 1,036 |
+| github.com | 200 | 6,640 |
+| letsencrypt.org | 200 | 6,596 |
+| rsa4096.badssl.com | 200 | 7,196 |
+| sha512.badssl.com | 200 | 6,612 |
+
+消費は 6,596〜8,336 に収まり、4096bit 鍵でも変わらない。仕様書が見積もっていた
+30 KiB は4倍以上の過大評価だった。
+
+**Google には接続できない。** `esp-x509-crt-bundle: Failed to verify certificate`、
+`mbedtls_ssl_handshake -0x3000` = `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`。
+`CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL` を使っているが、IDF v6.0.1 の
+バンドルに当該 CA が無い。**メモリの問題ではない。**
+
+そしてこれは報告のされ方の欠陥でもある。証明書の検証失敗がアプリには
+`IO_ERROR :: the request did not reach a response` として届く。§11 は TLS の失敗を
+`TLS_ERROR` として区別するよう定めており `pocket_net.c` にもその判定はあるが、
+`esp_http_client_open` が `ESP_ERR_HTTP_CONNECT` に丸めるため判定に届いていない。
+**アプリからは「電波が悪い」「証明書が信用できない」「メモリ不足」が同じに見える。**
+
+## tlsleak.js — 何回続けられるか
+
+同じ相手に12回。**8回で打ち止め**になる。
+
+```
+free  58,896 → 55,616 → 52,876 → … → 33,600
+block 31,744 → 31,744 → 31,744 → 24,576 → … → 24,576
+9回目  OUT_OF_MEMORY :: 50396 free, 24576 largest block
+```
+
+リークではない — 空きは回復する（ある境界で 39,892 → 50,396）。戻らないのは
+**最大連続ブロック**で、ハンドシェイクが要求するのがまさにそれ。原因は毎回
+確保・解放される約 7.5 KB の TLS コンテキスト。
+
+ワーカータスクをリクエストごとではなく常駐にする案は試して測った:
+最大ブロックの維持が3回から5回に伸びただけで、**9回目が拒否されるのは同じ**。
+リクエスト数が1つも増えなかったので取り消した。

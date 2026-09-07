@@ -67,6 +67,23 @@ static const char *TAG = "pocket.net";
 //
 // One server, one certificate chain, one run. A longer chain wants more, so
 // these stay above what was measured rather than at it.
+//
+// A known limit rather than a bug to be found later: about eight consecutive
+// HTTPS requests work, and the ninth is refused. Measured 2026-09-08 over
+// twelve rounds against the same host -- total free recovers fully between
+// requests (39,892 up to 50,396 across one boundary), but the largest free
+// block walks down 31,744 -> 24,576 and stays there. That is fragmentation,
+// not a leak, and it is the block the handshake needs. The per-request TLS
+// context of roughly 7.5 KB is the piece doing it; six other hosts, including
+// a 4096-bit chain, all cost between 6,596 and 8,336 bytes, so this is the
+// shape of every request rather than a bad one.
+//
+// Making the worker task persistent instead of one per request was tried and
+// measured: the block held its maximum for five rounds instead of three, and
+// the ninth request was refused exactly as before. It bought no requests, so
+// it was reverted rather than kept for the graph. What would actually fix this
+// is holding the connection and its TLS context across requests, which section
+// 11 does not currently describe.
 #define NET_TLS_MIN_FREE   (40*1024)
 // Raised, not lowered, by the measurement: 20 KiB here would have left about
 // 12 KiB by the time the 15,360 byte allocation was made, and it would have
