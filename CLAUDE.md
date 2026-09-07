@@ -43,7 +43,11 @@ python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで�
 python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
 wsl -e bash -lc "cd tools/uibudget && cargo run --release --bin sweep"    # レイアウト確保の段差
 wsl -e bash -lc "cd tools/uibudget && cargo run --release --bin screen 9 3"  # この画面は載るか
+python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
+python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
 ```
+
+**DRAMは `tools/memlog.py` が記録する。** ビルドのたびに静的値を `.cache/memlog/memory.jsonl`（git管理外）へ追記し、**動いたときだけ**書くので、ログはビルドの一覧ではなく変化の一覧になる。`--port` を付けると実機の空きヒープ（アイドル時とアプリ実行中）も一緒に残る。増減はファイル別に出るので「DRAMが6KiB増えた」ではなく「`pocket_io.c.obj +1113`」が読める。
 
 `main/` のPIEカーネルを触ったら、焼く前にこの3層を通す。詳細は `tools/pie/README.md` と `docs/pie-simd.md`。
 
@@ -65,7 +69,7 @@ JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EM
 
 ## この機体で繰り返し踏む制約
 
-- **PSRAMなし、DRAMは約334KiB。** ホーム画面の空きヒープは実測228KiB（Wi-Fiリンク後）。JSゲストの上限は144KiB — 128KiBだった頃、ネイティブAPIの `.bss` が増えてアプリが解析すら通らなくなった（システムには59KiBの空きがあった）。**capabilityを足すたびにゲストの部屋が減り、それを測る仕組みは無い。**
+- **PSRAMなし、DRAMは約334KiB。** ホーム画面の空きヒープは実測228KiB（Wi-Fiリンク後）。JSゲストの上限は144KiB — 128KiBだった頃、ネイティブAPIの `.bss` が増えてアプリが解析すら通らなくなった（システムには59KiBの空きがあった）。**capabilityを足すたびにゲストの部屋が減る。** 増減の記録は `tools/memlog.py` が持つ。
 - **ゲストは起動時にJSソースを解析するので、ソースのバイト数がヒープを食う。** 実測で6.5KBのアプリはゲスト107KiB、7.6KBは評価に失敗する。アプリのコメントは短く、理由は隣の `README.md` へ。
 - **Rust UIコアはメモリ不足を報告せずパニックして再起動する。** `ui.setText` が引き起こすフォントアトラス再構築が小さなアプリの最大の単発確保。
 - **レイアウトが要求する単一連続ブロックは taffy ノード数で段階的に跳ねる。** taffyノード = ルート + 「木に繋がっていて本文が空でない」ノード（空のテキストランは `layout.rs` の `build()` が `None` を返し木に入らない）。**16以下 → 2,048B / 17〜33 → 29,648B / 34以上 → 59,296B。** アプリ実行中の最大連続空きは実測23.5KiB程度なので、**その段差を跨ぐ画面は確保に失敗し、Rust側がabortする**。`ui.createNode` で組んでも同じで、34ノード以上はこの機体では到達不能。`pocket_ui.c` は空ランを区別せず多めに数えるので、崖の手前で断る側に倒れている。`tools/uibudget/` で焼く前に確認できる（`cargo run --release --bin screen 9 3` が実機の失敗をそのまま再現する）。
