@@ -750,9 +750,12 @@ void shell_draw(const char *error, unsigned phase) {
         // Split four ways, because "pixels" was standing for the phase tables,
         // the per-pixel loop, the stars and the menu at once, and only one of
         // those is worth vectorising.
+        // clock= is the only way a host script can see whether the SNTP sync
+        // took: the label it reports is drawn on the sail scene and nothing
+        // else logs it, so checking it used to mean reading pixels.
         ESP_LOGI("background",
-            "PERF mode=%u fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f hud=%.2f send=%.2f",
-            mode,fps,(double)draw_sum/samples/1000.0,
+            "PERF mode=%u clock=%s fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f hud=%.2f send=%.2f",
+            mode,solar_sail_time_label(),fps,(double)draw_sum/samples/1000.0,
             (double)prep_sum/samples/1000.0,(double)loop_sum/samples/1000.0,
             (double)kernel_cycles/samples/240000.0,
             (double)hud_sum/samples/1000.0,(double)present_sum/samples/1000.0);
