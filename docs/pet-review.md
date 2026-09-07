@@ -95,3 +95,26 @@ PC側は `tools/pet_companion.py` に `serve` サブコマンド（フレーム�
 - 複数セッションが1つのツリーを共有している。ビルドディレクトリを分け、コミットは自分の変更だけを `git show HEAD:<file>` に当てた blob で staging する（`CLAUDE.md` 末尾）。
 - ノード数を変えたら `wsl -e bash -lc "cd tools/uibudget && cargo run --release --bin sweep"` で段差を確認する。
 - DRAMを増やしたらビルドが `.cache/memlog/memory.jsonl` に記録する。`python tools/memlog.py --map build_<dir>/cardputer_pocketjs.map` で差分が読める。
+
+## 仕様化で分かったこと、および却下した項目
+
+2026-09-07、上の指摘を実装可能な仕様へ落とす作業で、レビュー自身の誤りが5つ見つかった。実装より先にコードで裏取りした結果を残す。
+
+**レビューの誤り**
+
+- `pet_assets.c` の投げ場所の行番号は誤り。実際は `24, 28, 42, 49, 76, 80, 89, 96` の8箇所。`pet_hub.c` 側11箇所は正しく、合計19は一致する。
+- `usage()` が毎秒作る4オブジェクトは**蓄積しない**。QuickJSは参照カウントなので `draw()` を抜けた時点で返る。一時確保であってGC圧でもリークでもない。
+
+**このファイルの「変化通知を1行で」という記述は誤り。**
+
+`pocket_api_capability_changed()` は firmware のどこからも呼ばれておらず、配るのは `limits` 込みの Capability オブジェクトであって、**データ変化の通知ではない**。用途違いで、置き換えようとしていた `usage()` より重い。
+
+**`pet_hub_pump()` は `app_tick()` の外で走る**（`main.c`）。QuickJSの割り込み期限は `app_tick()` の先頭で更新されるので、そこからJSを呼ぶと前フレームの期限を使う。ループが250ms以上止まった直後（キャプチャ、効果音合成）に呼べば、リスナーは即 interrupt される。**ペットからJSへ届ける処理は `app_tick()` の中に置く必要がある。**
+
+**`frame()` から例外が抜けるとアプリが終わる**（`main.c` の `end_run`）。だから `PocketError` 化はJS側の catch を伴って初めて意味を持つ。今の実装はNVS保存失敗でそのまま投げるので、**NVSが開けない機体ではEnter一発でアプリが落ちる。**
+
+### 却下した2項目
+
+**変化通知は建てない。** `rewards()` はfloatを返し確保ゼロ、`pet.js` の `frame()` は減衰とアニメーションのため毎フレーム走る必要があり、購読にしてもフラグを読む形にしかならない。companion も残秒・NOW・staleの時間駆動表示なので1Hz描画は残る。**建てるなら** `pocket.pet.onChange` を `pocket_api_sub_*` の土台で、`pet_hub_js_pump()` を `app_tick()` 内に、`pet_hub_reset()` を `pocket_api_reset()` の前に置く形。PC連携で「受信メッセージ」という本物のイベント源ができたとき、その一部として作るのが筋。
+
+**ノード上限のアプリ側 try/catch も作らない。** firmware側は `pocket_ui_attach()` で完了しており（`23e149d`）、`pet.js` は15ノードで `layout_block(15)` が0なので拒否は構造的に起きない。`pet.js` に残っているソース余裕は約400バイトで、**起きない分岐に使うより静的な保証に使う** — ホストテストの `createNode` モックに「15を超えたら fail」の assert 1行。拒否が起きたときの挙動は `EVAL_ERROR` でホームへ戻る、で十分。
