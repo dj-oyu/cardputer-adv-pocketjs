@@ -10,7 +10,7 @@
 
 Cardputer ADV上でQuickJS版PocketJSのアプリを起動・操作・終了できる土台を作る。
 最初のアプリはJavaScript製Hello Worldとキー入力カウンター。
-アプリ管理・ネイティブホームに加え、PlaygroundとSKK Practiceを実装した。Docs／チュートリアルは進行中、ペット・PC連携は未実装。
+アプリ管理・ネイティブホームに加え、PlaygroundとSKK Practiceを実装した。Docs／チュートリアルは進行中、PC連携は未実装。ペットは2026-09-07に同梱JSアプリとして実装し、ホストテスト・ビルドを確認した（実機未確認）。
 
 対象はESP32-S3FN8、240×135 LCD、PSRAMなし。8MB Flashは保存領域でありJSヒープには数えない。
 QuickJSとMicroQuickJSは異なるエンジンであり、この計画ではPocketJS上流が使用するquickjs-ngを用いる。

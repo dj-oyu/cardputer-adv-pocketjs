@@ -217,5 +217,20 @@ class FillBlocks(unittest.TestCase):
         self.assertEqual(load16(mem, 0x100 + 80, 1), [0])
 
 
+class SolarFillRow(unittest.TestCase):
+    def test_rows(self):
+        asm = extract_asm(os.path.join(ROOT, 'main', 'solar_sail.c'), 'fill_row(')
+        rng = random.Random(19)
+        for color in [0, 0xFFFF, 0xF800, 0x07E0, 0x001F] + [rng.getrandbits(16) for _ in range(128)]:
+            mem = bytearray([0xA5] * 4096)
+            store16(mem, 0x802, [color])  # Scalar broadcast needs only 2-byte alignment.
+            sim = Sim(mem)
+            sim.run(asm, {'out': 0x100, 'c': 0x802, 'n': LCD_W // 8})
+            self.assertEqual(load16(mem, 0x100, LCD_W), [color] * LCD_W)
+            self.assertEqual(sim.ar['out'], 0x100 + LCD_W * 2)
+            self.assertEqual(mem[0xF0:0x100], bytes([0xA5] * 16))
+            self.assertEqual(mem[0x100 + LCD_W * 2:0x110 + LCD_W * 2], bytes([0xA5] * 16))
+
+
 if __name__ == '__main__':
     unittest.main()

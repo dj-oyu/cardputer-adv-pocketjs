@@ -239,8 +239,10 @@ bool board_key_event(board_keyevent_t *out) {
 // Byte-swaps `pixels` in place and sends it. The caller repaints the strip
 // before every present, so consuming the buffer costs nothing and saves a
 // second one.
+#include "pet_hub.h"
 esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
+    pet_hub_overlay(pixels,y,rows);
     if(capture) {
         static char line[LCD_W*4+1];
         const char *hex="0123456789abcdef";

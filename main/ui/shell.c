@@ -50,10 +50,11 @@ static uint64_t draw_sum;
 static float fps;
 static unsigned category,setting,app;
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
-                          "IMU CALIBRATION"};
+                          "IMU CALIBRATION","POCKET PET","PET COMPANION"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
-                                  "FIND THE SENSOR AXES"};
+                                  "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
+                                  "AI USAGE / ALARM / TIMER"};
 #define APP_N (sizeof(apps)/sizeof(apps[0]))
 static float app_pos;
 unsigned shell_app(void) { return app; }

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pocket Pet — 操作プレビュー</title>
+<style>
+body{margin:0;background:#09131f;color:#e6eee8;font:16px system-ui;display:grid;place-content:center;min-height:100vh;text-align:center}h1{font-size:26px;margin:0 0 8px}p{color:#9aafc0;line-height:1.7}canvas{width:min(90vw,960px);image-rendering:pixelated;border:10px solid #223649;border-radius:12px;margin:20px 0}button{background:#203648;border:1px solid #456078;color:#edf8ff;padding:12px 22px;border-radius:8px;font:inherit;cursor:pointer;margin:4px}button:hover{background:#345368}.small{font-size:13px}#error{color:#ffa58e}
+</style>
+<style>body{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 10px}p{max-width:960px;width:100%;box-sizing:border-box;padding:0 10px}canvas{box-sizing:border-box;flex-shrink:0}</style>
+<h1>Pocket Pet</h1><p>12種類の小さな同居人。選んで、ごはんをあげて、一緒にひと休み。</p>
+<canvas id="screen" width="240" height="135" aria-label="ペットアプリ画面"></canvas>
+<div><button data-key="16" aria-label="上">↑</button></div>
+<div><button data-key="128" aria-label="左">←</button><button data-key="16384">決定</button><button data-key="32" aria-label="右">→</button></div>
+<div><button data-key="64" aria-label="下">↓</button><button id="restart">保存して開き直す</button></div>
+<p class="small">矢印キーとEnterでも操作できます。NAMEで名前、PETSでペットを変更。<br>同じアプリコードを使った操作プレビューです。実機とは文字の描画が異なります。</p><p id="error"></p>
+<script>
+const screen=document.getElementById('screen'),g=screen.getContext('2d');
+let nodes=[null,{props:{}}],sprites=[],pending=0,petPosition=null,speech='',speechAt=0;
+function color(n){return '#'+((n>>>8).toString(16).padStart(6,'0'));}
+window.ui={createNode(kind){nodes.push({kind,props:{}});return nodes.length-1;},setProp(n,k,v){nodes[n].props[k]=v;},setText(n,t){nodes[n].text=t;},insertBefore(){}};
+ui.replaceText=ui.setText;
+window.__petNow=()=>performance.now();window.__petImage=(n,i)=>{nodes[n].image=i;};
+window.pocket={storage:{get:async()=>{const s=localStorage.getItem('pocket-pet-preview-v1');return s?{value:JSON.parse(s)}:null;},set:async(k,v)=>localStorage.setItem('pocket-pet-preview-v1',JSON.stringify(v))}};
+window.pocket.pet={show:window.__petImage,rewards:()=>0,select:n=>{if(n!==undefined)localStorage.setItem('pocket-pet-selected',n);return Number(localStorage.getItem('pocket-pet-selected'))||0;}};
+window.pocket.pet.place=(i,x,y,mood=0)=>{petPosition=i<0?null:{i,x,y,mood};};
+window.pocket.pet.say=t=>{speech=t;speechAt=performance.now();};
+function face(i,x,y,mood){
+  const e=[[16,32,24],[17,36,32],[16,29,27]][Math.floor(i/4)];
+  for(let side=0;side<2;side++)for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){
+    let on=mood===1||(mood===5&&side===1)?dy===1:mood===2?dy===Math.abs(dx)-1:mood===3?Math.abs(dx)+Math.abs(dy)<=3&&(Math.abs(dx)===2||Math.abs(dy)===2):mood===4?dy>=0&&dy<=1&&Math.abs(dx)<=1:Math.abs(dx)+Math.abs(dy)<=3;
+    if(!on)continue;
+    g.fillStyle=i%4===3?'#11ddff':i===2?'#ffbb33':'#332211';
+    if((mood===0||mood===5&&side===0)&&dx===-1&&dy===-1)g.fillStyle='#ffffee';
+    if(i===2&&(mood===0||mood===5&&side===0)&&dx===0&&Math.abs(dy)<=1)g.fillStyle='#111111';
+    g.fillRect(x+e[side]+dx,y+e[2]+dy,1,1);
+  }
+}
+function paint(){
+  g.fillStyle=color(nodes[1].props[64]||0);g.fillRect(0,0,240,135);
+  g.imageSmoothingEnabled=false;
+  for(const n of nodes.slice(2)){
+    let p=n.props,x=p[28],y=p[25],w=p[1],h=p[2];
+    if(n.kind===0){g.fillStyle=color(p[64]);g.fillRect(x,y,w,h);}
+    else if(n.kind===1){g.fillStyle=color(p[96]);g.font='8px monospace';g.textBaseline='top';g.fillText(n.text||'',x,y);}
+    else if(sprites[n.image])g.drawImage(sprites[n.image],x,y,w,h);
+  }
+  if(petPosition){let p=petPosition;g.drawImage(sprites[p.i],p.x,p.y);face(p.i,p.x,p.y,p.mood);}
+  let age=performance.now()-speechAt;
+  if(petPosition&&speech&&age<2400){g.fillStyle='#102030';g.fillRect(96,24,140,21);g.fillStyle='#fff0cc';g.fillRect(97,25,138,19);g.fillRect(92,38,5,3);g.fillStyle='#102030';g.font='8px monospace';g.fillText(speech.slice(0,Math.floor(age/70)),100,31);}
+}
+function press(k){pending=k;}
+document.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>press(+b.dataset.key));
+document.addEventListener('keydown',e=>{let k={ArrowUp:16,ArrowRight:32,ArrowDown:64,ArrowLeft:128,Enter:16384}[e.key];if(k){e.preventDefault();if(!e.repeat)press(k);}});
+document.getElementById('restart').onclick=()=>{if(window.frame){frame(8192);setTimeout(()=>location.reload(),50);}};
+window.addEventListener('pagehide',()=>{if(window.frame)frame(8192);});
+(async()=>{
+  const r=await fetch('assets/pets-compact.bin');if(!r.ok)throw Error('画像を読み込めません');
+  const b=new DataView(await r.arrayBuffer());
+  if(b.getUint32(0,false)!==0x50505432)throw Error('画像形式が違います');
+  for(let i=0;i<12;i++){
+    let c=document.createElement('canvas');c.width=c.height=64;
+    let q=c.getContext('2d'),d=q.createImageData(64,64);
+    let indices=new Uint8Array(4096);
+    for(let y=0;y<64;y++){
+      let start=b.getUint16(4+(Math.floor(i/4)*64+y)*2,true),off=800+(start&32767);
+      if(start&32768){for(let x=0;x<64;x++)indices[y*64+x]=(b.getUint8(off+(x>>1))>>(x%2*4))&15;}
+      else{let x=0;while(x<64){let v=b.getUint8(off++);for(let n=0;n<=(v>>4);n++)indices[y*64+x++]=v&15;}}
+    }
+    let patches=800+b.getUint16(388,true);
+    for(let o=b.getUint16(774+i*2,true);o<b.getUint16(776+i*2,true);o+=2){let v=b.getUint16(patches+o,true);indices[v&4095]=v>>12;}
+    for(let j=0;j<4096;j++){let v=b.getUint16(390+i*32+indices[j]*2,true);for(let k=0;k<4;k++)d.data[j*4+k]=((v>>k*4)&15)*17;}
+    q.putImageData(d,0,0);sprites.push(c);
+  }
+  await new Promise((ok,no)=>{let s=document.createElement('script');s.src='pet.js';s.onload=ok;s.onerror=no;document.body.append(s);});
+  setInterval(()=>{try{frame(pending);if(pending)frame(0);pending=0;paint();}catch(e){document.getElementById('error').textContent=String(e);}},1000/30);
+})().catch(e=>document.getElementById('error').textContent=String(e));
+</script></html>

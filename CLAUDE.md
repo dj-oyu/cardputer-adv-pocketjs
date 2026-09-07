@@ -59,7 +59,9 @@ python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --chec
 
 `main/board.c` がLCD・キーボード・I2Cバスを所有し、`board_present()` が唯一の転送口。ストリップバッファは firmware 全体で1本（`board_strip()`）で、同期転送だから成立している。非同期DMA化するならここを2本に割る必要がある。
 
-**共通JS API `pocket.*`** は `docs/common-api.md` の実装。`main/pocket_api.c` が土台（capability登録、`PocketError`、cancelトークン、購読テーブル、Promise完了テーブル、`pocket_api_pump()`）で、`pocket_imu.c` / `pocket_av.c` / `pocket_storage.c` が各面を載せる。**新しい面は `pocket_api_register()` で capability を差し替えるだけで、`pocket_api.c` を編集しない。** 購読簿記・`settled()`/`reject()`・非同期完了は土台側にあるので、面の側で書き直さない。
+`main/` は役割ごとに分かれている。`hal/`（LCD・キーボード・IMU・音）、`pocket/`（`pocket.*` API と Wi-Fi）、`pet/`、`ui/`（画面とエディタ）、`text/`（フォント・字句解析・SKK・ソース保存）、`scene/`（背景と描画カーネル）、直下は `main.c` と `app_session.c` のみ。**全サブディレクトリが `INCLUDE_DIRS` に入っているので、`#include "board.h"` のような書き方は変わらない** — 移動でソースを1行も書き換えずに済ませるための構成。
+
+**共通JS API `pocket.*`** は `docs/common-api.md` の実装。`main/pocket/pocket_api.c` が土台（capability登録、`PocketError`、cancelトークン、購読テーブル、Promise完了テーブル、遅延名前空間、`pocket_api_pump()`）で、`pocket_imu.c` / `pocket_av.c` / `pocket_storage.c` などが各面を載せる。**名前空間はアプリが最初に読んだときに構築される**（`pocket_api_lazy()`）。`capabilities` と `apiVersion` だけが eager で、feature-test が何も構築しないことを構造的に保証している。**新しい面は `pocket_api_register()` で capability を差し替えるだけで、`pocket_api.c` を編集しない。** 購読簿記・`settled()`/`reject()`・非同期完了は土台側にあるので、面の側で書き直さない。
 
 `capability.supported` は「このファームが `pocket.*` の面を実装している」の意味。レガシーの `ui.createNode` があることを理由に true にしない（feature-testを通したアプリが `UNSUPPORTED` ではなく `TypeError` を食う）。`limits` に出す値は**コードで実際に強制している値だけ**。
 

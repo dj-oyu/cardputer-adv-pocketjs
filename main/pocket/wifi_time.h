@@ -98,3 +98,39 @@ wifi_time_state_t wifi_time_scan_state(void);
 // so could not be drawn or stored (docs/common-api.md:306).
 unsigned wifi_time_scan_networks(wifi_time_network_t *out, unsigned max,
                                  bool *truncated);
+
+// ---------------------------------------------------------------- the link
+//
+// A held association, for pocket_net.c. Same radio_up()/tear_down() pair as the
+// clock and the scan and, through the same single-attempt lock, mutually
+// exclusive with both: whoever asks second gets ESP_ERR_INVALID_STATE. Nothing
+// here syncs a clock or touches solar_time.
+//
+// This is the only part of this module that stays up. It exists because HTTP
+// wants the radio for the length of a request and possibly across several, and
+// paying a multi-second association per request would be worse for both the
+// battery and the app. The lease is the app's to end; wifi_time_link_stop()
+// and a session ending are the only things that take it away.
+
+typedef enum {
+    WIFI_TIME_LINK_DOWN,        // no link held
+    WIFI_TIME_LINK_CONNECTING,
+    WIFI_TIME_LINK_UP,          // associated with an address
+    WIFI_TIME_LINK_FAILED       // never came up, or the AP took it away
+} wifi_time_link_t;
+
+// Starts the link task. Returns immediately; poll wifi_time_link_state().
+// ESP_ERR_INVALID_STATE when a sync, a scan or another link already has the
+// radio. Uses the credentials in NVS, exactly as the clock does.
+esp_err_t wifi_time_link_start(void);
+
+// Asks for the link back. Non-blocking and idempotent: the task tears the radio
+// down and clears the lock on its own. The stage of a failure is in
+// wifi_time_status(), which the link fills the same way a sync does.
+void wifi_time_link_stop(void);
+
+wifi_time_link_t wifi_time_link_state(void);
+
+// Copies the address the link holds, always NUL terminating; "" when it has
+// none. Safe from any task.
+void wifi_time_link_ip(char *out, size_t size);

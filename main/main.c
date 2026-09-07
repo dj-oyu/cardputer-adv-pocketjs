@@ -10,6 +10,9 @@
 #include "jpfont.h"
 #include "skk_session.h"
 #include "app_session.h"
+#include "pocket_storage.h"
+#include "pet_hub.h"
+#include "pocket_bridge.h"
 #include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,10 +32,13 @@ static atomic_int diagnostic;
 // it: the same byte is a menu direction on the home screen and a character
 // everywhere else.
 static atomic_bool text_screen;
+static bool pet_repaint;
 
 // USB drives the home screen with single letters, but an editor needs the
 // bytes themselves so a host script can type at it. 0x1b closes either way.
 static bool usb_stroke(char c, keystroke_t *k) {
+    if(pocket_bridge_usb((uint8_t)c))return false;
+    if(pet_hub_usb((uint8_t)c))return false;
     memset(k,0,sizeof(*k));
     if(atomic_load(&text_screen)) {
         // C-s is the editor's save, so the host capture moves to C-p.
@@ -134,6 +140,10 @@ static void begin_run(const char *source, size_t len);
 // edited is exactly what you cannot trust at that moment.
 extern const char imucal_start[] asm("_binary_imucal_js_start");
 extern const char imucal_end[]   asm("_binary_imucal_js_end");
+extern const char pet_start[] asm("_binary_pet_js_start");
+extern const char pet_end[] asm("_binary_pet_js_end");
+extern const char companion_start[] asm("_binary_companion_js_start");
+extern const char companion_end[] asm("_binary_companion_js_end");
 
 // shell_key() cannot say "hand the display to another screen": its bool already
 // means "launch the app shell_app() names". The request is left behind instead,
@@ -168,6 +178,8 @@ static bool home_key(const keystroke_t *k) {
         case 2: enter(SCREEN_CODE); break;
         case 3: enter(SCREEN_TUTORIAL); break;
         case 4: begin_run(imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
+        case 5: begin_run(pet_start,(size_t)(pet_end-pet_start-1)); break;
+        case 6: begin_run(companion_start,(size_t)(companion_end-companion_start-1)); break;
         default: begin_run(NULL,0);          // the built-in app
     }
     return true;
@@ -252,6 +264,7 @@ static void end_run(esp_err_t tick_err) {
 
 static void begin_run(const char *source, size_t len) {
     owner=screen;
+    pocket_storage_set_owner(source==pet_start?"local.pet":"local.default");
     run_started = source ? app_start_source(source,len) : app_start();
     ESP_LOGI(SCREENS[owner].tag,"RUN %u bytes -> %s",
              (unsigned)len,esp_err_to_name(run_started));
@@ -270,16 +283,19 @@ static void begin_run(const char *source, size_t len) {
 static void tick_run(bool have, const keystroke_t *stroke) {
     board_key_t key=have?stroke->nav:KEY_NONE;
     bool leave = have && key==KEY_BACK;
-    if(leave) app_request_stop();
+    esp_err_t e=ESP_OK;
+    // Let the guest persist its last state before cancellation tears it down.
+    if(leave) { e=app_tick(0x2000); app_request_stop(); }
 
     bool shot=atomic_exchange(&capture,false);
     if(shot) { board_capture(true); app_force_redraw(); }
-    esp_err_t e=ESP_OK;
     if(!leave) {
         if(key==KEY_ENTER) sound_play(1);
-        e=app_tick(key==KEY_ENTER?0x4000:0);
+        uint32_t buttons=key==KEY_ENTER?0x4000:key==KEY_UP?0x10:
+                         key==KEY_RIGHT?0x20:key==KEY_DOWN?0x40:key==KEY_LEFT?0x80:0;
+        e=app_tick(buttons);
         // A release frame, so consecutive queued presses stay distinct.
-        if(e==ESP_OK && key==KEY_ENTER) e=app_tick(0);
+        if(e==ESP_OK && buttons) e=app_tick(0);
     }
     if(shot) board_capture(false);
 
@@ -290,7 +306,7 @@ static void tick_run(bool have, const keystroke_t *stroke) {
 static void paint(const screen_ops_t *s) {
     int64_t began=esp_timer_get_time();
     bool shot=atomic_exchange(&capture,false);
-    if(!shot && !s->dirty()) return;
+    if(!shot && !pet_repaint && !s->dirty()) return;
     if(shot) board_capture(true);
     s->draw();
     if(shot) board_capture(false);
@@ -310,6 +326,9 @@ static void ui_task(void *arg) {
         int64_t frame_start=esp_timer_get_time();
         keystroke_t stroke={0};
         bool have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+        pet_repaint=pet_hub_pump();
+        if(have&&pet_hub_key(stroke.nav)){have=false;pet_repaint=true;}
+        if(pet_repaint&&running)app_force_redraw();
         const screen_ops_t *s=&SCREENS[screen];
 
         // The force stop, and Back on the home screen, arrive out of band.
@@ -370,6 +389,7 @@ void app_main(void) {
     ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=512KiB");
     ESP_ERROR_CHECK(board_init());
     nvs_init();
+    pet_hub_init();
     shell_init();
     // Neither is fatal: the home stays usable with no dictionary and no font,
     // and the editors show which one is missing.

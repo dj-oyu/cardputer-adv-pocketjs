@@ -36,6 +36,8 @@ static const char *TAG = "wifi";
 
 #define BIT_GOT_IP  BIT0
 #define BIT_GIVEN_UP BIT1
+// Only the link uses this one: an association that had an address and lost it.
+#define BIT_LINK_LOST BIT2
 
 // -------------------------------------------------------------- shared state
 
@@ -168,6 +170,10 @@ static unsigned attempts_left;
 // A scan brings the radio up the same way a sync does but must not associate,
 // so STA_START only connects when someone is waiting for an address.
 static bool auto_connect;
+// Set only while the link task owns the radio. It changes what a disconnect
+// means: for a clock sync, one more try; for a lease that already had an
+// address, the end of the lease. `linked` is that "already had an address".
+static bool hold_link, linked;
 
 // The disconnect reason is the only evidence of what actually went wrong, and
 // the split below is what the UI needs: "the network is not there" sends the
@@ -204,6 +210,11 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     } else if(id==WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *e=data;
         status_stage(reason_stage(e->reason),e->reason);
+        // A lease that had an address and lost it is over. Reconnecting under
+        // an app that believes it is connected would hand it a different
+        // address without telling it, and section 11 asks for the drop to reach
+        // the app as DISCONNECTED instead.
+        if(linked) { linked=false; xEventGroupSetBits(events,BIT_LINK_LOST); return; }
         if(terminal_reason(e->reason)||attempts_left==0) {
             xEventGroupSetBits(events,BIT_GIVEN_UP);
         } else {
@@ -220,6 +231,7 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data) {
     taskENTER_CRITICAL(&status_lock);
     snprintf(status.ip,sizeof status.ip,IPSTR,IP2STR(&e->ip_info.ip));
     taskEXIT_CRITICAL(&status_lock);
+    if(hold_link) linked=true;
     xEventGroupSetBits(events,BIT_GOT_IP);
 }
 
@@ -274,6 +286,79 @@ static void tear_down(void) {
     if(owns_event_loop) { esp_event_loop_delete_default(); owns_event_loop=false; }
 }
 
+// The stored network, read the same way for the clock and for a lease. One copy
+// of it because a divergence here would show up as a fault in the clock path,
+// which is the one that is verified on hardware. The PSK lands in the caller's
+// frame and is the caller's to wipe before that frame goes away.
+static esp_err_t load_credentials(char *ssid, size_t ssid_size,
+                                  char *psk, size_t psk_size) {
+    ssid[0]='\0'; psk[0]='\0';
+    esp_err_t err=nvs_ready();
+    nvs_handle_t h;
+    if(err==ESP_OK) err=nvs_open(WIFI_NAMESPACE,NVS_READONLY,&h);
+    if(err==ESP_OK) {
+        size_t len=ssid_size;
+        err=nvs_get_str(h,WIFI_KEY_SSID,ssid,&len);
+        if(err==ESP_OK) {
+            len=psk_size;
+            esp_err_t p=nvs_get_str(h,WIFI_KEY_PSK,psk,&len);
+            // A saved open network has no psk key at all.
+            if(p==ESP_ERR_NVS_NOT_FOUND) psk[0]='\0';
+            else if(p!=ESP_OK) err=p;
+        }
+        nvs_close(h);
+    }
+    // Nothing stored and NVS unreadable are different faults and the caller
+    // reports both at stage NVS; an empty SSID is the first of the two, which
+    // is the ESP_ERR_NVS_NOT_FOUND the sync task substituted before this moved.
+    if(err==ESP_OK&&ssid[0]=='\0') err=ESP_ERR_NVS_NOT_FOUND;
+    return err;
+}
+
+// Everything from a stored network to an address: the radio up, the config in,
+// the start, and the wait the events feed. The clock and a lease want exactly
+// this much and differ only in what they do with the address afterwards, so the
+// retry rule in on_wifi() is reached down one path rather than two.
+//
+// ESP_ERR_WIFI_NOT_CONNECT means the wait ran out or the attempt gave up, and
+// the stage in `status` already says which of those it was; any other error is
+// bring-up and carries its own esp_err_t.
+static esp_err_t associate_and_wait(const char *ssid, const char *psk) {
+    esp_err_t err=radio_up(true);
+    if(err!=ESP_OK) return err;
+
+    wifi_config_t cfg={0};
+    // Not snprintf: these are wire fields, 32 and 64 bytes with no NUL, and a
+    // 32 character SSID is legal. The struct is already zeroed, so copying the
+    // bytes and leaving the rest is both shorter and the only correct form.
+    memcpy(cfg.sta.ssid,ssid,strnlen(ssid,sizeof cfg.sta.ssid));
+    memcpy(cfg.sta.password,psk,strnlen(psk,sizeof cfg.sta.password));
+    // Accepting anything from open upward lets one stored network work on a WEP
+    // guest AP and on WPA3; the AP decides, and a threshold here would only turn
+    // a working network into an unexplained "not found".
+    cfg.sta.threshold.authmode=WIFI_AUTH_OPEN;
+    err=esp_wifi_set_config(WIFI_IF_STA,&cfg);
+    memset(&cfg,0,sizeof cfg);
+    if(err!=ESP_OK) return err;
+
+    status_stage(WIFI_TIME_STAGE_ASSOC,0);
+    err=esp_wifi_start();          // STA_START connects; see on_wifi()
+    if(err!=ESP_OK) return err;
+    wifi_started=true;
+
+    EventBits_t bits=xEventGroupWaitBits(events,BIT_GOT_IP|BIT_GIVEN_UP,pdFALSE,pdFALSE,
+                                         pdMS_TO_TICKS(CONNECT_TIMEOUT_MS));
+    if(!(bits&BIT_GOT_IP)) return ESP_ERR_WIFI_NOT_CONNECT;
+
+    wifi_ap_record_t ap;
+    if(esp_wifi_sta_get_ap_info(&ap)==ESP_OK) {
+        taskENTER_CRITICAL(&status_lock);
+        status.rssi=ap.rssi;
+        taskEXIT_CRITICAL(&status_lock);
+    }
+    return ESP_OK;
+}
+
 static void finish(wifi_time_stage_t stage, int reason) {
     status_stage(stage,reason);
     status_state(WIFI_TIME_FAILED);
@@ -291,27 +376,8 @@ static void sync_task(void *arg) {
     char ssid[WIFI_TIME_SSID_MAX+1]="";
     // Zeroed again before this frame goes away; see the wipe at the end.
     char psk[WIFI_TIME_PSK_MAX+1]="";
-    {
-        err=nvs_ready();
-        nvs_handle_t h;
-        if(err==ESP_OK) err=nvs_open(WIFI_NAMESPACE,NVS_READONLY,&h);
-        if(err==ESP_OK) {
-            size_t len=sizeof ssid;
-            err=nvs_get_str(h,WIFI_KEY_SSID,ssid,&len);
-            if(err==ESP_OK) {
-                len=sizeof psk;
-                esp_err_t p=nvs_get_str(h,WIFI_KEY_PSK,psk,&len);
-                // A saved open network has no psk key at all.
-                if(p==ESP_ERR_NVS_NOT_FOUND) psk[0]='\0';
-                else if(p!=ESP_OK) err=p;
-            }
-            nvs_close(h);
-        }
-        if(err!=ESP_OK||ssid[0]=='\0') {
-            finish(WIFI_TIME_STAGE_NVS,err==ESP_OK?ESP_ERR_NVS_NOT_FOUND:(int)err);
-            goto done;
-        }
-    }
+    err=load_credentials(ssid,sizeof ssid,psk,sizeof psk);
+    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_NVS,(int)err); goto done; }
 
     ESP_LOGI(TAG,"SYNC_START ssid=%s",ssid);
     status_stage(WIFI_TIME_STAGE_INIT,0);
@@ -320,44 +386,15 @@ static void sync_task(void *arg) {
     if(!events) { finish(WIFI_TIME_STAGE_INIT,ESP_ERR_NO_MEM); goto done; }
     attempts_left=CONNECT_ATTEMPTS-1;
 
-    err=radio_up(true);
-    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
-
-    wifi_config_t cfg={0};
-    // Not snprintf: these are wire fields, 32 and 64 bytes with no NUL, and a
-    // 32 character SSID is legal. The struct is already zeroed, so copying the
-    // bytes and leaving the rest is both shorter and the only correct form.
-    memcpy(cfg.sta.ssid,ssid,strnlen(ssid,sizeof cfg.sta.ssid));
-    memcpy(cfg.sta.password,psk,strnlen(psk,sizeof cfg.sta.password));
-    // Accepting anything from open upward lets one stored network work on a WEP
-    // guest AP and on WPA3; the AP decides, and a threshold here would only turn
-    // a working network into an unexplained "not found".
-    cfg.sta.threshold.authmode=WIFI_AUTH_OPEN;
-    err=esp_wifi_set_config(WIFI_IF_STA,&cfg);
-    memset(&cfg,0,sizeof cfg);
-    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
-
-    status_stage(WIFI_TIME_STAGE_ASSOC,0);
-    err=esp_wifi_start();          // STA_START connects; see on_wifi()
-    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
-    wifi_started=true;
-
-    EventBits_t bits=xEventGroupWaitBits(events,BIT_GOT_IP|BIT_GIVEN_UP,pdFALSE,pdFALSE,
-                                         pdMS_TO_TICKS(CONNECT_TIMEOUT_MS));
-    if(!(bits&BIT_GOT_IP)) {
+    err=associate_and_wait(ssid,psk);
+    if(err==ESP_ERR_WIFI_NOT_CONNECT) {
         // The stage already says where it stalled: ASSOC if the AP never
         // answered, DHCP if it did and the address never arrived.
         wifi_time_status_t now=wifi_time_status();
         finish(now.stage,now.reason);
         goto done;
     }
-
-    wifi_ap_record_t ap;
-    if(esp_wifi_sta_get_ap_info(&ap)==ESP_OK) {
-        taskENTER_CRITICAL(&status_lock);
-        status.rssi=ap.rssi;
-        taskEXIT_CRITICAL(&status_lock);
-    }
+    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
     {
         wifi_time_status_t now=wifi_time_status();
         ESP_LOGI(TAG,"SYNC_CONNECTED ip=%s rssi=%d",now.ip,now.rssi);
@@ -553,7 +590,139 @@ esp_err_t wifi_time_scan_start(void) {
     bool expected=false;
     if(!atomic_compare_exchange_strong(&running,&expected,true))
         return ESP_ERR_INVALID_STATE;
+    // Before the task exists, not inside it: a caller that polls immediately
+    // would otherwise read the state the previous scan left behind and take it
+    // for this one's answer.
+    taskENTER_CRITICAL(&scan_lock);
+    scan_state=WIFI_TIME_RUNNING;
+    taskEXIT_CRITICAL(&scan_lock);
     if(xTaskCreate(scan_task,"wifi_scan",4096,NULL,5,NULL)!=pdPASS) {
+        taskENTER_CRITICAL(&scan_lock);
+        scan_state=WIFI_TIME_FAILED;
+        taskEXIT_CRITICAL(&scan_lock);
+        atomic_store(&running,false);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+// ---------------------------------------------------------------- the link
+//
+// The one part of this module that stays up, and the only reason it does is
+// that HTTP wants an association for the length of a request and possibly
+// across several -- see the header. It reuses radio_up()/tear_down(), the event
+// handlers, the credential read and the association wait, so a lease and a
+// clock sync differ in one thing: what happens after the address arrives.
+//
+// The same `running` lock guards it, which is what makes a lease and a sync
+// mutually exclusive. Unlike the other two tasks it holds that lock for as long
+// as the app holds the lease.
+
+static atomic_int  link_state_v;     // wifi_time_link_t
+static atomic_bool link_stop_req;
+
+wifi_time_link_t wifi_time_link_state(void) {
+    return (wifi_time_link_t)atomic_load(&link_state_v);
+}
+
+void wifi_time_link_ip(char *out, size_t size) {
+    if(!out||size==0) return;
+    taskENTER_CRITICAL(&status_lock);
+    // Only while the link is up: `status.ip` outlives a sync, and handing a
+    // stale address to an app that just lost its lease would be a lie.
+    if(atomic_load(&link_state_v)==WIFI_TIME_LINK_UP)
+        snprintf(out,size,"%s",status.ip);
+    else out[0]='\0';
+    taskEXIT_CRITICAL(&status_lock);
+}
+
+void wifi_time_link_stop(void) { atomic_store(&link_stop_req,true); }
+
+static void link_task(void *arg) {
+    (void)arg;
+    esp_err_t err;
+
+    taskENTER_CRITICAL(&status_lock);
+    status=(wifi_time_status_t){.state=WIFI_TIME_RUNNING,.stage=WIFI_TIME_STAGE_NVS};
+    taskEXIT_CRITICAL(&status_lock);
+
+    char ssid[WIFI_TIME_SSID_MAX+1]="";
+    // Zeroed again before this frame goes away; see the wipe at the end.
+    char psk[WIFI_TIME_PSK_MAX+1]="";
+    err=load_credentials(ssid,sizeof ssid,psk,sizeof psk);
+    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_NVS,(int)err); goto done; }
+
+    // The SSID is what the AP broadcasts; the key appears nowhere, at no level.
+    ESP_LOGI(TAG,"LINK_START ssid=%s",ssid);
+    status_stage(WIFI_TIME_STAGE_INIT,0);
+
+    events=xEventGroupCreate();
+    if(!events) { finish(WIFI_TIME_STAGE_INIT,ESP_ERR_NO_MEM); goto done; }
+    attempts_left=CONNECT_ATTEMPTS-1;
+    // Before the radio, so that an address arriving early is already counted as
+    // a lease rather than as a sync's.
+    hold_link=true;
+
+    err=associate_and_wait(ssid,psk);
+    if(err!=ESP_OK) {
+        if(err==ESP_ERR_WIFI_NOT_CONNECT) {
+            wifi_time_status_t now=wifi_time_status();
+            finish(now.stage,now.reason);
+        } else finish(WIFI_TIME_STAGE_INIT,err);
+        goto done;
+    }
+
+    status_stage(WIFI_TIME_STAGE_NONE,0);
+    status_state(WIFI_TIME_OK);
+    atomic_store(&link_state_v,WIFI_TIME_LINK_UP);
+    ESP_LOGI(TAG,"LINK_UP free=%u",(unsigned)esp_get_free_heap_size());
+
+    // Held until the app gives it back or the AP takes it away. The wait is on
+    // the event group the driver already feeds; the 250 ms bound is what turns
+    // a stop request into an exit without a second synchronisation object, and
+    // a quarter second of extra association at the end of a program is not
+    // worth one. Nothing is polled here -- the loop sleeps.
+    while(!atomic_load(&link_stop_req)) {
+        EventBits_t bits=xEventGroupWaitBits(events,BIT_LINK_LOST,pdTRUE,pdFALSE,
+                                             pdMS_TO_TICKS(250));
+        if(bits&BIT_LINK_LOST) {
+            // Reported, not retried: see on_wifi(). The app sees disconnected
+            // and decides whether to ask for another lease.
+            ESP_LOGW(TAG,"LINK_LOST reason=%d",wifi_time_status().reason);
+            atomic_store(&link_state_v,WIFI_TIME_LINK_FAILED);
+            break;
+        }
+    }
+
+done:
+    // The passphrase leaves RAM before the radio does. A plain memset on a dead
+    // local is exactly what a compiler is allowed to drop, so the write goes
+    // through a volatile pointer.
+    for(volatile char *p=psk;p<psk+sizeof psk;p++) *p=0;
+    if(atomic_load(&link_state_v)!=WIFI_TIME_LINK_FAILED)
+        atomic_store(&link_state_v,WIFI_TIME_LINK_DOWN);
+    hold_link=false; linked=false;
+    tear_down();
+    if(events) { vEventGroupDelete(events); events=NULL; }
+    ESP_LOGI(TAG,"LINK_DOWN state=%d free=%u",
+             (int)wifi_time_link_state(),(unsigned)esp_get_free_heap_size());
+    atomic_store(&link_stop_req,false);
+    atomic_store(&running,false);
+    vTaskDelete(NULL);
+}
+
+esp_err_t wifi_time_link_start(void) {
+    bool expected=false;
+    if(!atomic_compare_exchange_strong(&running,&expected,true))
+        return ESP_ERR_INVALID_STATE;
+    atomic_store(&link_stop_req,false);
+    // Set before the task exists so that a caller polling immediately sees
+    // connecting rather than the state the last lease left behind.
+    atomic_store(&link_state_v,WIFI_TIME_LINK_CONNECTING);
+    // 4 KiB, the same as the other two: this task waits, and the driver and
+    // LWIP have their own stacks sized by Kconfig.
+    if(xTaskCreate(link_task,"wifi_link",4096,NULL,5,NULL)!=pdPASS) {
+        atomic_store(&link_state_v,WIFI_TIME_LINK_DOWN);
         atomic_store(&running,false);
         return ESP_ERR_NO_MEM;
     }

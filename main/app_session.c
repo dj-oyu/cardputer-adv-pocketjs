@@ -11,11 +11,15 @@
 #include "pocket_api.h"
 #include "pocket_storage.h"
 #include "pocket_fs.h"
-#include "pocket_io.h"
 #include "pocket_imu.h"
 #include "pocket_av.h"
-#include "pocket_app.h"
+#include "pocket_io.h"
+#include "pocket_net.h"
 #include "pocket_ui.h"
+#include "pocket_app.h"
+#include "pocket_bridge.h"
+#include "pet_assets.h"
+#include "pet_hub.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -24,6 +28,9 @@
 
 extern const char hello_start[] asm("_binary_main_js_start");
 extern const char hello_end[] asm("_binary_main_js_end");
+// TEMPORARY: diagnostic 7 proves the legacy node guard fires.
+extern const char nodecap_start[] asm("_binary_nodecap_js_start");
+extern const char pet_start[] asm("_binary_pet_js_start");
 static pocketjs_guest_t *guest;
 static pocketjs_ui_core_t *core;
 static pocketjs_ui_qjs_t *binding;
@@ -33,8 +40,8 @@ static atomic_bool stop_requested;
 static int64_t deadline;
 static unsigned frames;
 static bool redraw;
-static double render_sum, present_sum, kernel_sum;
-static unsigned painted;
+static double render_sum, present_sum, kernel_sum, turn_sum;
+static unsigned painted, ticks;
 // Hand-written PIE kernels for the two ops this renderer actually asks for
 // (opaque fill, coverage-mask blend); anything they cannot honour exactly is
 // declined and the Rust software path draws it.
@@ -125,14 +132,20 @@ void app_stop(void) {
     jsfont_detach();
     // Before the guest goes: the watches hold callbacks belonging to it, and a
     // promise still in flight holds its resolvers.
-    // Section 5 runs the stop hook before the subscriptions it may still use
-    // are taken away, so this comes first.
+    // First: section 5 runs the stop hook before I/O cancellation and before
+    // the subscriptions it may still want to use are taken away.
     pocket_app_reset();
-    pocket_io_reset();
-    pocket_fs_reset();
+    pet_assets_reset();
     pocket_imu_reset();
     pocket_av_reset();
+    pocket_io_reset();
+    // Before pocket_api_reset(): dropping the lease is what asks the radio to
+    // come down, and a request still in flight has to be told to stop before
+    // its promise slot is taken away.
+    pocket_net_reset();
+    pocket_fs_reset();
     pocket_ui_reset();
+    pocket_bridge_reset();
     pocket_api_reset();
     if(renderer && target) pocketjs_rgb565_abort(renderer,target);
     if(target) pocketjs_rgb565_target_destroy(target);
@@ -156,11 +169,6 @@ esp_err_t app_start_test(char test) {
     // binding constraint, not the memory. Parsing peaks well above what the
     // program then retains, which is why a 6.5 KB source sat at 107 KiB and a
     // 6.7 KB one did not fit at 128.
-    // 160 KiB. Lazy namespaces gave the system 20 KiB back -- free heap during
-    // a run went from 46,456 to 66,776 -- and the cap is a ceiling, not a
-    // reservation, so raising it costs nothing an app does not take. It is
-    // what lets the pet app fit: lazy install alone moved its allocation into
-    // the parse peak rather than removing it.
     gc.heap_limit=160*1024; gc.stack_limit=20*1024; gc.prefer_psram=false;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
@@ -172,11 +180,14 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"io",pocket_io_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"imu",pocket_imu_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"io",pocket_io_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"net",pocket_net_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pui",pocket_ui_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"bridge",pocket_bridge_install,NULL));
+    // After "console": it wraps print and console.log onto the section 7 ring.
+    TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
     cc.logical_width=LCD_W;cc.logical_height=LCD_H;cc.raster_density=1;cc.tick_hz=30;
@@ -206,6 +217,8 @@ esp_err_t app_start_test(char test) {
         }
     }
     const char *source=user_source?user_source:hello_start;
+    TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"pet-assets",pet_assets_install,core));
     size_t length=user_source?user_length:(size_t)(hello_end-hello_start-1);
     // USB-only diagnostics exercise the same lifecycle and resource limits.
     switch(test) {
@@ -249,20 +262,36 @@ esp_err_t app_tick(uint32_t buttons) {
     deadline=esp_timer_get_time()+250000;
     // Watch deliveries before the frame, so a listener that updates a node and
     // the frame that draws it are the same turn rather than one apart.
+    // First: it posts the sleeps that came due, so pocket_api_pump() settles
+    // them this turn, and it is where Starting becomes Running.
+    pocket_app_pump();
     pocket_imu_pump();
+    pocket_io_pump();
+    // Before pocket_api_pump(): what the PC answered this turn is posted here
+    // and settled below, rather than a frame late.
+    pocket_bridge_pump();
+    // Same reason: a link that came up or a scan that finished is posted here
+    // and settled below, in the turn that noticed it.
+    pocket_net_pump();
     // Between the two, so a tone that finished settles in the same order the
     // one pump in pocket_av.c used to settle it in.
     pocket_api_pump();
     pocket_av_pump();
-    pocket_io_pump();
-    pocket_app_pump();
+    // The same mask the turn below is handed: pocket.input reports what the
+    // host forwarded, never a second reading of the keyboard.
     pocket_ui_pump(buttons);
     pocketjs_ui_input_t input={.struct_size=sizeof(input),.buttons=buttons};
     pocketjs_ui_frame_view_t frame={.struct_size=sizeof(frame)};
+    // The JS side of the frame: frame() in QuickJS plus the UI core's tick and
+    // draw. Timed on every tick, painted or not, so turn_ms is its own number
+    // next to render_ms rather than hidden inside the frame period.
+    int64_t turning=esp_timer_get_time();
     esp_err_t e=pocketjs_ui_turn(binding,&input,&frame);
+    turn_sum+=(double)(esp_timer_get_time()-turning); ticks++;
     if(e)return e;
     pocketjs_rgb565_damage_plan_t plan={.struct_size=sizeof(plan)};
     e=pocketjs_rgb565_prepare(renderer,target,&frame,&plan);if(e)return e;
+    pet_assets_tick();
     if(plan.region_count || redraw) {
         redraw=false;
         // Split the same way the home screen is: the renderer's own work
@@ -281,6 +310,7 @@ esp_err_t app_tick(uint32_t buttons) {
             e=pocketjs_rgb565_render_strip(renderer,&frame,pixels,LCD_W*rows,region,
                                            &render_accel,&stats);
             if(e)goto fail;
+            pet_assets_overlay(pixels,y,rows);
             // software_ops counts what the kernels declined, so a non-zero
             // figure here is the share still drawn the slow way.
             sw_ops+=stats.software_ops; accel+=stats.ppa_fills+stats.ppa_blends;
@@ -295,10 +325,11 @@ esp_err_t app_tick(uint32_t buttons) {
         // them costs.
         kernel_sum+=render_accel_cycles; render_accel_cycles=0;
         if(painted==30) {
-            ESP_LOGI("app","PAINT render_ms=%.2f kernel_ms=%.2f send_ms=%.2f accel=%u software=%u",
+            ESP_LOGI("app","PAINT turn_ms=%.2f render_ms=%.2f kernel_ms=%.2f send_ms=%.2f accel=%u software=%u",
+                     ticks?turn_sum/ticks/1000.0:0.0,
                      render_sum/30/1000.0, kernel_sum/30/240000.0, present_sum/30/1000.0,
                      (unsigned)accel,(unsigned)sw_ops);
-            render_sum=0; present_sum=0; kernel_sum=0; painted=0;
+            render_sum=0; present_sum=0; kernel_sum=0; painted=0; turn_sum=0; ticks=0;
         }
     }
     e=pocketjs_rgb565_commit(renderer,target,&frame);
