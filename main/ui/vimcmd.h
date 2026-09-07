@@ -127,7 +127,8 @@ void vim_begin_insert(vim_state_t *v);
 // "" when the last key had nothing to say.
 const char *vim_message(const vim_state_t *v);
 
-// The ':' or '/' line as typed, leader included; NULL outside VIM_CMDLINE.
+// The ':' or '/' line as typed, without its leader — that is `cmd_kind`.
+// NULL outside VIM_CMDLINE.
 const char *vim_cmdline(const vim_state_t *v, size_t *len);
 
 // The half-typed command, for the corner of the footer: "3d", "d2f", "".

@@ -3,6 +3,31 @@
 #include <string.h>
 #include <stdio.h>
 
+// ---------------------------------------------------------------------------
+// What is deliberately absent, so it is not re-proposed as an oversight.
+//
+// `%` (jump to the matching bracket). Doing it correctly means knowing whether
+// the bracket under the cursor is code or text, and jslex is line-oriented —
+// it colours the visible window and carries no state a motion could ask. A
+// naive scan is confidently wrong inside `"a(b"`: it walks to a paren that is
+// part of a string literal and an operator built on it deletes real code. An
+// absent motion is better than one that is right until it silently is not.
+//
+// `.` (repeat the last change). The change would have to be replayed, and in
+// insert mode a change can arrive from SKK as a *commit* whose keystrokes were
+// a reading: typing "kanji" and converting produces 漢字, so replaying the
+// keystrokes types "kanji" and replaying the commit types 漢字 where the reading
+// should have been converted afresh. Neither is what the person did, and the
+// engine's conversion state is gone by then.
+//
+// Visual mode. A selection is a second span layer over the row runs
+// `codeedit.c` gets from jslex, orthogonal to them — a rewrite of its drawing
+// for operators that `d{motion}` and `y{motion}` already reach.
+//
+// Redo. `C-r` is the Playground's RUN and is on the footer contract, and a redo
+// log costs a second copy of the undo ring for the rarer half of the pair.
+// ---------------------------------------------------------------------------
+
 // ---- positions ------------------------------------------------------------
 
 static size_t prev_boundary(const vim_doc_t *d, size_t i) {

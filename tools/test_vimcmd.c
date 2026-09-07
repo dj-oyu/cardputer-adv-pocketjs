@@ -213,18 +213,30 @@ int main(void) {
     keys("dd");         EQ("three",0,"a second dd");
     keys("u");          EQ("two\nthree",0,"u restores one line");
     keys("u");          EQ("one\ntwo\nthree",0,"u restores the other");
-    // Deleting more than the ring can hold clears the history rather than
-    // half-restoring it.
+    // A change larger than the ring is the case where a bug destroys someone's
+    // program: there is no way to put the bytes back, so the only safe answer
+    // is to forget the history and leave the document exactly as the change
+    // left it. Half-restoring it would hand back a file that never existed.
     {
         char big[1200];
         memset(big,'x',sizeof(big)-1);
+        big[600]='\n';                       // two lines, so `dd` has a choice
         big[sizeof(big)-1]=0;
         load(big);
-        keys("d$");
-        check(D.len==0,"a delete larger than the undo ring");
+        keys("jdd");
+        size_t after=D.len;
+        check(after==600,"a delete larger than the undo ring happened");
         keys("u");
-        check(D.len==0 && !strcmp(vim_message(&V),"ALREADY AT OLDEST CHANGE"),
-              "it is not undoable, and says so");
+        check(D.len==after,"the barrier left the document untouched");
+        check(!memcmp(BUF,big,after) && BUF[after]==0,
+              "and byte for byte what the delete left");
+        check(!strcmp(vim_message(&V),"ALREADY AT OLDEST CHANGE"),
+              "and said so rather than pretending");
+        // The history is gone, not broken: the next change still undoes.
+        keys("x");
+        check(D.len==after-1,"a change after the barrier");
+        keys("u");
+        check(D.len==after && !memcmp(BUF,big,after),"undoes normally again");
     }
     // The oldest changes fall off; the newest always come back.
     load("abcdefghij");

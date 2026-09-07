@@ -1,4 +1,5 @@
 #include "codeedit.h"
+#include "vimcmd.h"
 #include "utf8.h"
 #include "board.h"
 #include "paint.h"
@@ -18,10 +19,19 @@
 // capped at 8 KB and one memmove of that is microseconds — far below the 27 ms
 // the repaint costs. A flat buffer keeps the cursor arithmetic obvious.
 static char   text[SRC_MAX+1];
-static size_t len;
-static size_t cursor;          // byte offset, always on a UTF-8 boundary
+
+// The buffer, the cursor and the modified flag live in the document the command
+// engine works on, so there is one copy of each rather than two that drift.
+static vim_doc_t   doc;
+static vim_state_t vim;
+
+// The kana state the person last asked for. Normal mode must not run the
+// engine — the next key is a command, not a reading — so a toggle pressed
+// there only records the wish, and each insert restores it.
+static bool ime_wanted;
+
 static size_t top_line;        // first visible line
-static bool   dirty=true, unsaved;
+static bool   dirty=true;
 static char   notice[48];
 static code_state_t state;
 
@@ -50,7 +60,7 @@ static const char TEMPLATE[] =
 
 code_state_t code_state(void) { return state; }
 bool code_dirty(void) { return dirty; }
-const char *code_source(size_t *out) { *out=len; return text; }
+const char *code_source(size_t *out) { *out=doc.len; return text; }
 
 // Which record this session reads and writes. Everything that saves goes
 // through it, so a lesson can never reach the person's own program.
@@ -63,15 +73,26 @@ static char label[4]="JS";
 
 static void open_slot(unsigned which, const char *seed, size_t seed_len) {
     slot=which;
-    len=srcstore_load(slot,text);
-    if(!len && seed_len) {
+    doc.text=text; doc.cap=SRC_MAX;
+    doc.len=srcstore_load(slot,text);
+    if(!doc.len && seed_len) {
         if(seed_len>SRC_MAX) seed_len=SRC_MAX;
         memcpy(text,seed,seed_len);
-        len=seed_len;
+        doc.len=seed_len;
     }
-    text[len]=0;
-    cursor=len; top_line=0; unsaved=false; state=CODE_EDIT; dirty=true;
-    notice[0]=0;
+    text[doc.len]=0;
+    // Vim opens at the top of the file, and the first key is a command rather
+    // than a character, so nothing is typed by accident on arrival.
+    doc.cursor=0; doc.changed=false;
+    vim_reset(&vim);
+    vim_clamp(&vim,&doc);
+    top_line=0; state=CODE_EDIT; dirty=true;
+    // The footer spends its room teaching how to type, so the two keys that
+    // make the Playground worth opening are taught on arrival instead. The
+    // first command message replaces this, which is right: it is onboarding,
+    // not chrome.
+    snprintf(notice,sizeof(notice),"C-R RUN  C-S SAVE");
+    ime_wanted=false;
     if(skk_session_ready()) { ime_reset(skk_session()); ime_set_on(skk_session(),false); }
 }
 
@@ -91,44 +112,22 @@ void code_returned(const char *error) {
 }
 
 // ---- text mechanics -------------------------------------------------------
+//
+// The engine has its own copies of these for the commands; these are the
+// drawing side's, which only ever reads.
 
-static size_t prev_boundary(size_t i) {
-    if(!i) return 0;
-    i--;
-    while(i && utf8_is_cont(text[i])) i--;
-    return i;
-}
-static size_t next_boundary(size_t i) {
-    if(i>=len) return len;
-    i++;
-    while(i<len && utf8_is_cont(text[i])) i++;
-    return i;
-}
 static size_t line_start(size_t i) {
     while(i && text[i-1]!='\n') i--;
     return i;
 }
 static size_t line_end(size_t i) {
-    while(i<len && text[i]!='\n') i++;
+    while(i<doc.len && text[i]!='\n') i++;
     return i;
 }
 static size_t cursor_line(void) {
     size_t line=0;
-    for(size_t i=0;i<cursor;i++) if(text[i]=='\n') line++;
+    for(size_t i=0;i<doc.cursor;i++) if(text[i]=='\n') line++;
     return line;
-}
-
-static void insert(const char *s, size_t n) {
-    if(len+n>SRC_MAX) { snprintf(notice,sizeof(notice),"SOURCE FULL"); return; }
-    memmove(text+cursor+n,text+cursor,len-cursor);
-    memcpy(text+cursor,s,n);
-    len+=n; cursor+=n; text[len]=0; unsaved=true;
-}
-static void erase_before(void) {
-    if(!cursor) return;
-    size_t start=prev_boundary(cursor);
-    memmove(text+start,text+cursor,len-cursor);
-    len-=cursor-start; cursor=start; text[len]=0; unsaved=true;
 }
 
 // Keep the cursor's line inside the window.
@@ -138,89 +137,136 @@ static void follow_cursor(void) {
     else if(line>=top_line+VIEW_ROWS) top_line=line-VIEW_ROWS+1;
 }
 
-static void move_vertical(int delta) {
-    size_t start=line_start(cursor), column=cursor-start;
-    if(delta<0) {
-        if(!start) return;
-        size_t up=line_start(start-1);
-        cursor=up+column;
-        if(cursor>start-1) cursor=start-1;
-    } else {
-        size_t end=line_end(cursor);
-        if(end>=len) return;
-        size_t down=end+1, dend=line_end(down);
-        cursor=down+column;
-        if(cursor>dend) cursor=dend;
-    }
-    // The column arithmetic can land inside a multi-byte character.
-    while(cursor>0 && cursor<len && utf8_is_cont(text[cursor])) cursor--;
+// ---- keys -----------------------------------------------------------------
+
+static void do_save(void) {
+    snprintf(notice,sizeof(notice),
+             srcstore_save(slot,text,doc.len)?"SAVED %u B":"SAVE FAILED",
+             (unsigned)doc.len);
+    doc.changed=false;
+    sound_play(1);
 }
 
-// ---- keys -----------------------------------------------------------------
+static void do_run(void) {
+    // Saving only what changed keeps a run from erasing three flash sectors,
+    // and stalling the UI while it does.
+    if(doc.changed) { srcstore_save(slot,text,doc.len); doc.changed=false; }
+    state=CODE_RUNNING;
+    snprintf(notice,sizeof(notice),"RUNNING");
+}
+
+static void do_new(void) {
+    // The template is what a first-ever open starts from, not what "new" means
+    // afterwards.
+    text[0]=0; doc.len=0; doc.cursor=0; doc.changed=true;
+    top_line=0;
+    vim_reset(&vim);
+    // Emptying the document is followed by typing into it, so it starts typing.
+    // A host piping a source in over USB depends on that too: it sends C-n and
+    // then the bytes, and in normal mode those bytes would be commands.
+    vim_begin_insert(&vim);
+    if(skk_session_ready()) ime_set_on(skk_session(),ime_wanted);
+    jsconsole_set_error(NULL);
+    snprintf(notice,sizeof(notice),"NEW");
+}
+
+// One line per command, so a host script can assert on the cursor without a
+// screenshot. Insert-mode keystrokes are deliberately silent: a host piping a
+// 6 KB source in would otherwise get 6000 log lines through a 1 KB USB buffer,
+// and the drawing task would stall behind them.
+static void log_state(void) {
+    static const char *const NAMES[]={"NORMAL","INSERT","CMD"};
+    ESP_LOGI("code","VIM %s L%u C%u B%u",NAMES[vim_mode(&vim)],
+             (unsigned)cursor_line()+1,
+             (unsigned)(doc.cursor-line_start(doc.cursor)),
+             (unsigned)doc.len);
+}
 
 bool code_key(const keystroke_t *k) {
     dirty=true;
     if(state==CODE_RUNNING) return true;
 
     if(k->toggle_ime) {
-        if(skk_session_ready()) {
-            ime_t *im=skk_session();
-            ime_set_on(im,!ime_on(im));
-            snprintf(notice,sizeof(notice),"IME %s",ime_on(im)?"ON":"OFF");
-        }
+        ime_wanted=!ime_wanted;
+        if(skk_session_ready() && vim_mode(&vim)==VIM_INSERT)
+            ime_set_on(skk_session(),ime_wanted);
+        snprintf(notice,sizeof(notice),"IME %s",ime_wanted?"ON":"OFF");
         return true;
     }
     if(!k->len) return true;
 
-    // The IME sees every key first, so a token can never be expanded before the
-    // engine has had its say. It passes everything back when kana input is off.
-    if(skk_session_ready()) {
+    // The editor's own three keys, in every mode, because the footer promises
+    // them and tools/pocket_bridge.py drives the editor with them. They are
+    // taken before the IME so a save is never swallowed by a conversion.
+    if(k->text[0]) switch(k->text[0]) {
+        case 0x13: do_save(); return true;   // C-s
+        case 0x12: do_run();  return true;   // C-r
+        case 0x0e: do_new();  return true;   // C-n
+    }
+
+    vim_key_t vk={VIM_KEY_TEXT,k->text,k->len};
+    if(k->text[0]=='\0') {
+        const char *name=k->text+1;
+        size_t n=k->len-1;
+        if(n==3&&!memcmp(name,"esc",3))        vk.kind=VIM_KEY_ESC;
+        else if(n==3&&!memcmp(name,"del",3))   vk.kind=VIM_KEY_BACKSPACE;
+        else if(n==4&&!memcmp(name,"left",4))  vk.kind=VIM_KEY_LEFT;
+        else if(n==5&&!memcmp(name,"right",5)) vk.kind=VIM_KEY_RIGHT;
+        else if(n==2&&!memcmp(name,"up",2))    vk.kind=VIM_KEY_UP;
+        else if(n==4&&!memcmp(name,"down",4))  vk.kind=VIM_KEY_DOWN;
+        else return true;
+        vk.text=NULL; vk.len=0;
+    } else if(k->text[0]==0x03) {
+        // C-c. This keyboard has no Escape of its own — Fn+` produces the token
+        // above and a host sends 0x1b — so leaving a mode has a second surface
+        // that needs neither.
+        vk.kind=VIM_KEY_ESC; vk.text=NULL; vk.len=0;
+    }
+
+    // Only insert mode may reach the IME. In normal mode a key is a command,
+    // and handing `d` to a kana engine would make it one half of a reading.
+    if(vim_mode(&vim)==VIM_INSERT && vk.kind==VIM_KEY_TEXT && skk_session_ready()) {
         ime_t *im=skk_session();
         ime_disp_t d=ime_feed(im,k->text,k->len);
         if(d==IME_TEXT) {
             size_t n=0;
             const char *committed=ime_text(im,&n);
-            insert(committed,n); follow_cursor();
+            vim_key_t t={VIM_KEY_TEXT,committed,n};
+            vim_feed(&vim,&doc,t);
+            follow_cursor();
             return true;
         }
         if(d==IME_TAKEN) return true;
     }
 
-    if(k->text[0]=='\0') {
-        const char *name=k->text+1;
-        size_t n=k->len-1;
-        if(n==3&&!memcmp(name,"esc",3))   return false;
-        if(n==3&&!memcmp(name,"del",3))   { erase_before(); follow_cursor(); return true; }
-        if(n==4&&!memcmp(name,"left",4))  { cursor=prev_boundary(cursor); follow_cursor(); return true; }
-        if(n==5&&!memcmp(name,"right",5)) { cursor=next_boundary(cursor); follow_cursor(); return true; }
-        if(n==2&&!memcmp(name,"up",2))    { move_vertical(-1); follow_cursor(); return true; }
-        if(n==4&&!memcmp(name,"down",4))  { move_vertical(1);  follow_cursor(); return true; }
-        return true;
+    bool was_insert = vim_mode(&vim)==VIM_INSERT;
+    // Leaving insert drops whatever was being composed rather than committing
+    // it: a mode change must not put a half-converted reading in the source.
+    if(vk.kind==VIM_KEY_ESC && was_insert && skk_session_ready()) {
+        ime_reset(skk_session());
+        ime_set_on(skk_session(),false);
     }
 
-    switch(k->text[0]) {
-        case '\b': erase_before(); follow_cursor(); return true;
-        case '\n': insert("\n",1); follow_cursor(); return true;
-        case '\t': insert("  ",2); follow_cursor(); return true;
-        case 0x13: // C-s
-            snprintf(notice,sizeof(notice),
-                     srcstore_save(slot,text,len)?"SAVED %u B":"SAVE FAILED",(unsigned)len);
-            unsaved=false; sound_play(1);
-            return true;
-        case 0x0e: // C-n: empty document. The template is what a first-ever
-                   // open starts from, not what "new" means afterwards.
-            text[0]=0; len=0; cursor=0; top_line=0; unsaved=true;
-            jsconsole_set_error(NULL);
-            snprintf(notice,sizeof(notice),"NEW");
-            return true;
-        case 0x12: // C-r. Saving only what changed keeps a run from erasing
-                   // three flash sectors, and stalling the UI while it does.
-            if(unsaved) { srcstore_save(slot,text,len); unsaved=false; }
-            state=CODE_RUNNING;
-            snprintf(notice,sizeof(notice),"RUNNING");
-            return true;
+    vim_action_t act=vim_feed(&vim,&doc,vk);
+
+    if(!was_insert && vim_mode(&vim)==VIM_INSERT && skk_session_ready())
+        ime_set_on(skk_session(),ime_wanted);
+
+    const char *m=vim_message(&vim);
+    if(m[0]) snprintf(notice,sizeof(notice),"%s",m);
+    follow_cursor();
+    if(vim_mode(&vim)!=VIM_INSERT || !was_insert) log_state();
+
+    switch(act) {
+        case VIM_ACT_SAVE:       do_save(); break;
+        case VIM_ACT_SAVE_QUIT:  do_save(); return false;
+        case VIM_ACT_QUIT:
+            // `:q` on unsaved work refuses and says which command means it.
+            if(doc.changed) { snprintf(notice,sizeof(notice),"NO WRITE (:q! TO DROP)"); break; }
+            return false;
+        case VIM_ACT_QUIT_FORCE: return false;
+        case VIM_ACT_NONE:       break;
     }
-    if((unsigned char)k->text[0]>=0x20) { insert(k->text,k->len); follow_cursor(); }
     return true;
 }
 
@@ -299,7 +345,7 @@ static void small_text(int x,int y,const char *s,size_t len,uint16_t colour) {
 // The bands of the screen. Each is drawn once per strip and clips itself, so
 // none of them needs to know which strip is live — paint_begin holds that.
 typedef struct {
-    uint16_t ink, dim, accent, warn, caret, rule;
+    uint16_t ink, dim, accent, warn, caret, rule, ground;
     uint16_t span[JSLEX_KINDS];
 } palette_t;
 static palette_t colour;
@@ -308,14 +354,18 @@ static size_t caret_line;
 
 static void draw_header(void) {
     paint_ascii(4,3,label,colour.dim);
-    paint_ascii(20,3,unsaved?"*":" ",colour.warn);
+    paint_ascii(20,3,doc.changed?"*":" ",colour.warn);
     char pos[24];
-    snprintf(pos,sizeof(pos),"L%u %uB",(unsigned)caret_line+1,(unsigned)len);
+    snprintf(pos,sizeof(pos),"L%u %uB",(unsigned)caret_line+1,(unsigned)doc.len);
     paint_ascii(30,3,pos,colour.dim);
     // The tutorial's verdicts come through here, so this line has to carry
     // Japanese; misaki's 8 px fits the 14 px header.
     if(notice[0]) small_text(104,2,notice,strlen(notice),colour.accent);
     paint_fill(0,13,LCD_W,1,colour.rule);
+}
+
+static int glyph_width(const char *s, size_t n) {
+    return (int)(jpfont_ready(JPFONT_TEXT) ? jpfont_width(JPFONT_TEXT,s,n) : 6*n);
 }
 
 // The caret, and over it whatever the IME is composing. A reading being
@@ -325,22 +375,32 @@ static void draw_header(void) {
 static void draw_caret(int x,int y,size_t line_at) {
     size_t plen=0;
     const char *pre=ime?ime_preedit(ime,&plen):NULL;
-    int cx=x+(int)(jpfont_ready(JPFONT_TEXT)
-                   ? jpfont_width(JPFONT_TEXT,text+line_at,cursor-line_at)
-                   : 6*(cursor-line_at));
+    int cx=x+glyph_width(text+line_at,doc.cursor-line_at);
     if(plen && jpfont_ready(JPFONT_TEXT)) {
         int pw=(int)jpfont_width(JPFONT_TEXT,pre,plen);
         paint_fill(cx,y,pw<LCD_W-cx?pw:LCD_W-cx,LINE_H,board_rgb(18,34,54));
         jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,pre,plen,colour.accent);
         cx+=pw;
     }
-    paint_fill(cx,y,1,LINE_H,colour.caret);
+    if(vim_mode(&vim)!=VIM_NORMAL || plen) { paint_fill(cx,y,1,LINE_H,colour.caret); return; }
+    // Normal mode sits *on* a character, so the caret covers one. The panel has
+    // no inverse mode, so the glyph is painted again in the background colour
+    // rather than left buried under the block.
+    size_t n=0;
+    if(doc.cursor<doc.len && text[doc.cursor]!='\n') {
+        n=1;
+        while(doc.cursor+n<doc.len && utf8_is_cont(text[doc.cursor+n])) n++;
+    }
+    int w=n?glyph_width(text+doc.cursor,n):5;
+    paint_fill(cx,y,w<LCD_W-cx?w:LCD_W-cx,LINE_H,colour.caret);
+    if(n && jpfont_ready(JPFONT_TEXT))
+        jpfont_draw(JPFONT_TEXT,strip,strip_y,strip_h,cx,y,text+doc.cursor,n,colour.ground);
 }
 
 static void draw_lines(void) {
     size_t i=0, line=0;
-    while(line<top_line && i<len) { if(text[i]=='\n') line++; i++; }
-    for(int row=0;row<VIEW_ROWS && i<=len;row++,line++) {
+    while(line<top_line && i<doc.len) { if(text[i]=='\n') line++; i++; }
+    for(int row=0;row<VIEW_ROWS && i<=doc.len;row++,line++) {
         int y=VIEW_TOP+row*LINE_H;
         size_t end=line_end(i);
         char num[8];
@@ -362,8 +422,8 @@ static void draw_lines(void) {
             }
             at+=n;
         }
-        if(cursor>=i && cursor<=end && line==caret_line) draw_caret(GUTTER,y,i);
-        if(end>=len) break;
+        if(doc.cursor>=i && doc.cursor<=end && line==caret_line) draw_caret(GUTTER,y,i);
+        if(end>=doc.len) break;
         i=end+1;
     }
 }
@@ -398,13 +458,51 @@ static void draw_console(void) {
     }
 }
 
+// The last row. This is the only thing standing between a modal editor and
+// someone writing their first JavaScript on this machine, so it does not
+// decorate — it says which mode is on and which key gets out of it.
+//
+// The mode is a filled badge rather than text among text: the two modes differ
+// by hue before they differ by word, so "why are my letters disappearing" is
+// answerable at a glance, and the hint next to it names a key that exists on
+// this keyboard. Escape is Fn+` here and nowhere in the legend, which is
+// exactly the thing a person cannot guess.
+#define BADGE_W  42
+#define HINT_X   48
+#define ECHO_X   160
+#define KANA_X   210
+
 static void draw_footer(void) {
     paint_fill(0,LCD_H-11,LCD_W,1,colour.rule);
-    const char *mode="EN";
+    size_t clen=0;
+    const char *cmd=vim_cmdline(&vim,&clen);
+    if(cmd) {
+        // The ':' or '/' is its own indicator, so the line takes the whole row.
+        char line[VIM_CMD_MAX+2];
+        line[0]=vim.cmd_kind;
+        size_t n=clen<sizeof(line)-2?clen:sizeof(line)-2;
+        memcpy(line+1,cmd,n); line[n+1]=0;
+        paint_ascii(4,LCD_H-8,line,colour.ink);
+        paint_fill(4+6*(int)(n+1),LCD_H-9,1,9,colour.caret);
+        return;
+    }
+
+    bool insert=vim_mode(&vim)==VIM_INSERT;
+    paint_fill(0,LCD_H-10,BADGE_W,10,insert?colour.warn:colour.accent);
+    paint_ascii(3,LCD_H-8,insert?"INSERT":"NORMAL",colour.ground);
+    paint_ascii(HINT_X,LCD_H-8,
+                insert?"Fn+` = DONE TYPING":"PRESS i TO TYPE",
+                insert?colour.ink:colour.dim);
+
+    const char *echo=vim_pending(&vim);
+    if(echo[0]) paint_ascii(ECHO_X,LCD_H-8,echo,colour.ink);
+
+    // Four characters, because the badge and the hint now own the room the
+    // long form used to have. KANA and KATA still read apart.
+    const char *kana="EN";
     if(skk_session_ready() && ime_on(skk_session()))
-        mode = ime_mode(skk_session())==SKK_MODE_KATA ? "KANA/KATA" : "KANA";
-    paint_ascii(4,LCD_H-8,"C-R RUN C-S SAVE C-N NEW",colour.dim);
-    paint_ascii(180,LCD_H-8,mode,colour.accent);
+        kana = ime_mode(skk_session())==SKK_MODE_KATA ? "KATA" : "KANA";
+    paint_ascii(KANA_X,LCD_H-8,kana,colour.accent);
 }
 
 void code_draw(void) {
@@ -416,6 +514,7 @@ void code_draw(void) {
         .ink=board_rgb(220,230,242), .dim=board_rgb(92,116,146),
         .accent=board_rgb(120,200,255), .warn=board_rgb(240,180,110),
         .caret=board_rgb(120,200,255), .rule=board_rgb(22,38,58),
+        .ground=board_rgb(6,11,20),
         .span={
             [JSLEX_PLAIN]  =board_rgb(220,230,242),
             [JSLEX_KEYWORD]=board_rgb(130,190,255),
@@ -429,12 +528,12 @@ void code_draw(void) {
     // scan the source seventeen times for one repaint.
     span_reset();
     unsigned base=(unsigned)top_line;
-    jslex_scan(text,len,base,base+VIEW_ROWS-1,span_collect,&base);
+    jslex_scan(text,doc.len,base,base+VIEW_ROWS-1,span_collect,&base);
 
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H?LCD_H-strip_y:STRIP_H;
         paint_begin(strip,strip_y,strip_h);
-        for(int i=0;i<LCD_W*strip_h;i++) strip[i]=board_rgb(6,11,20);
+        for(int i=0;i<LCD_W*strip_h;i++) strip[i]=colour.ground;
         draw_header();
         draw_lines();
         draw_console();
