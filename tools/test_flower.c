@@ -92,10 +92,10 @@ int main(void) {
     Petal p={.axis={{1,0,0},{0,1,0},{0,0,1}},.radius={1,1,1}};
     petal_reciprocals(&p);
     float z=-1000;V n;
-    assert(bell_hit(&p,0,0,&z,&n)&&fabsf(z-.88f)<.0001f);
-    z=-1000;assert(!bell_hit(&p,1.3f,0,&z,&n));
+    assert(bell_hit_at(&p,0,0,&z,&n)&&fabsf(z-.88f)<.0001f);
+    z=-1000;assert(!bell_hit_at(&p,1.3f,0,&z,&n));
     p.axis[1]=(V){0,0,1};p.axis[2]=(V){0,1,0};petal_reciprocals(&p);
-    z=-1000;assert(bell_hit(&p,.5f,0,&z,&n)&&z<.9f); // No artificial cap across the mouth.
+    z=-1000;assert(bell_hit_at(&p,.5f,0,&z,&n)&&z<.9f); // No artificial cap across the mouth.
     // The shared block is recycled between scenes and given back when an app
     // starts, so a scene that takes it must rebuild what it caches there. That
     // is the one thing this arrangement can get wrong, and it fails silently --

@@ -49,9 +49,9 @@ static void diff(const char *pa,const char *pb) {
     FILE *a=fopen(pa,"rb"),*b=fopen(pb,"rb");
     if(!a||!b){perror("open");exit(1);}
     static uint16_t x[W*H],y[W*H];
-    int worst_any=0;unsigned long moved_all=0,total_all=0;
+    int worst_any=0;unsigned long moved_all=0,total_all=0,hard_all=0;
     for(int sp=0;sp<SPECIES;sp++) {
-        unsigned long moved=0,total=0;int step[3]={0,0,0};
+        unsigned long moved=0,total=0,hard=0;int step[3]={0,0,0};
         for(int ph=0;ph<PHASES;ph++) {
             if(fread(x,sizeof x,1,a)!=1||fread(y,sizeof y,1,b)!=1){
                 fprintf(stderr,"short read: were both dumps written?\n");exit(1);}
@@ -61,18 +61,26 @@ static void diff(const char *pa,const char *pb) {
                 moved++;
                 int c[3]={(x[i]>>11)&31,(x[i]>>5)&63,x[i]&31};
                 int d[3]={(y[i]>>11)&31,(y[i]>>5)&63,y[i]&31};
-                for(int k=0;k<3;k++){int e=abs(c[k]-d[k]);if(e>step[k])step[k]=e;}
+                int big=0;
+                for(int k=0;k<3;k++){int e=abs(c[k]-d[k]);if(e>step[k])step[k]=e;if(e>big)big=e;}
+                // A rounding change shades a pixel a step differently. A pixel
+                // that changed silhouette membership swaps flower for woodland,
+                // which is tens of steps. The two need separate counts: a
+                // worst-step number alone cannot tell one pixel of the second
+                // kind from a thousand of the first.
+                if(big>=4)hard++;
             }
         }
         moved_all+=moved;total_all+=total;
         for(int k=0;k<3;k++)if(step[k]>worst_any)worst_any=step[k];
-        printf("%-10s %8lu/%lu moved (%6.4f%%)  worst step r=%d g=%d b=%d\n",
-               NAME[sp],moved,total,100.0*moved/total,step[0],step[1],step[2]);
+        hard_all+=hard;
+        printf("%-10s %8lu/%lu moved (%6.4f%%)  worst step r=%d g=%d b=%d  silhouette %lu\n",
+               NAME[sp],moved,total,100.0*moved/total,step[0],step[1],step[2],hard);
     }
     fclose(a);fclose(b);
-    printf("\nDIV_OK: %lu/%lu pixels move (%.4f%%), worst channel step %d, over "
-           "%d species x %d phases\n",
-           moved_all,total_all,100.0*moved_all/total_all,worst_any,SPECIES,PHASES);
+    printf("\nDIV_OK: %lu/%lu pixels move (%.4f%%), worst channel step %d, "
+           "%lu changed silhouette, over %d species x %d phases\n",
+           moved_all,total_all,100.0*moved_all/total_all,worst_any,hard_all,SPECIES,PHASES);
     // The licence. A reciprocal multiply may land a discriminant on the other
     // side of `d<0`, which moves one silhouette pixel by a whole shading step;
     // what it must not do is move the interior, so the share has to stay tiny
@@ -80,6 +88,11 @@ static void diff(const char *pa,const char *pb) {
     if(100.0*moved_all/total_all>0.25){
         printf("FAIL: more than a quarter of one percent of pixels moved\n");exit(1);}
     if(worst_any>63){printf("FAIL: a channel saturated\n");exit(1);}
+    // Zero is the only acceptable answer here. A pixel that swapped flower for
+    // background is not a rounding difference, it is an edge in the wrong place,
+    // and a worst-step number cannot distinguish one of them from a thousand
+    // pixels shaded a step differently.
+    if(hard_all){printf("FAIL: %lu pixels changed silhouette\n",hard_all);exit(1);}
 }
 
 int main(int argc,char**argv) {

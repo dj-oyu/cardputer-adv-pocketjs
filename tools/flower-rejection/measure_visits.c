@@ -17,7 +17,7 @@ static void classify(int y){
             float dx=(x+.5f-180)/SCALE-p->c.x;
             if(p->shape){bell_visits++;
                 float z=depth[x-X0];V n;
-                if(!bell_hit(p,dx,dy,&z,&n))bell_miss++;else depth[x-X0]=z;
+                if(!bell_hit_at(p,dx,dy,&z,&n))bell_miss++;else depth[x-X0]=z;
                 continue;}
             visits++;
             float b=p->q[4]*dx+p->q[5]*dy;

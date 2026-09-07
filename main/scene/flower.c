@@ -40,7 +40,7 @@ static uint32_t prof_span,prof_spann,prof_div,prof_divn,prof_scan,prof_pre;
 typedef struct { float x,y,z; } V;
 typedef struct {
     V c,axis[3];
-    float radius[3],inv_radius[3],bd[3],ba0,inv_a0,inv_d1,q[6],invzz;
+    float radius[3],inv_radius[3],bd[3],oax[3],ba0,inv_a0,inv_d1,q[6],invzz;
     int xmin,xmax,ymin,ymax;
     unsigned material,shape;
 } Petal;
@@ -138,6 +138,21 @@ static flower_species_t bloom_next(flower_species_t from) {
 // FLOWER_DIV_EXACT restores the original expressions so tools/test_flower_div.c
 // can hold the two against each other pixel for pixel; without it, the hot
 // paths multiply by a reciprocal computed once per part per frame.
+// Each optimisation in this file has a switch that turns it off, so that its
+// effect on the device can be measured by flashing both and subtracting. That
+// is a requirement rather than a nicety, and it is here because of a specific
+// mistake: bell_reject shipped in the same commit as the counter that was meant
+// to measure it, so its device effect is unknown and cannot now be recovered.
+// The host numbers stand on their own -- 40.8% of bell visits rejected, zero
+// hits dropped -- but "40.8% of visits" is not "40.8% of the time", which is
+// exactly the distinction that retired tools/flower-rejection.
+//
+//   FLOWER_DIV_EXACT        the divisions, instead of reciprocal multiplies
+//   FLOWER_NO_BAND_HOIST    the band bounds recomputed inside bell_hit
+//   FLOWER_NO_SPAN_AFFINE   the three dot products, instead of dx*A+B
+//   FLOWER_NO_BELL_REJECT   no early rejection; walk all six bands always
+//   FLOWER_BELL_CHECK       compute the rejection, do not act on it, and count
+//                           the visits where it was wrong (must be zero)
 #ifdef FLOWER_DIV_EXACT
 #define DIVR(num,inv,den) ((num)/(den))
 #define POS(x)            fmaxf(0,(x))
@@ -160,6 +175,15 @@ static void petal_reciprocals(Petal *p) {
     // reciprocals below exist at all, which is what keeps bell_reject free of
     // division.
     for(int j=0;j<3;j++)p->bd[j]=p->axis[j].z*p->inv_radius[j];
+    // o[j] is affine in x, and this is its slope. The span walks x by one, so
+    // the three dot products bell_hit was doing per visit -- nine multiplies
+    // and six adds -- become dx*oax[j] + (the row's constant term): three and
+    // three. Written as a re-evaluation from dx rather than a running sum on
+    // purpose: a forward difference over a 120-pixel span accumulates about
+    // 7e-6 relative, and o[] feeds the discriminant whose *sign* decides
+    // whether a pixel is inside the silhouette. Re-evaluating costs one extra
+    // multiply and cannot drift.
+    for(int j=0;j<3;j++)p->oax[j]=p->axis[j].x*p->inv_radius[j];
     p->ba0=p->bd[0]*p->bd[0]+p->bd[2]*p->bd[2];
     p->inv_a0=p->ba0>0?1/p->ba0:0;
     p->inv_d1=p->bd[1]!=0?1/p->bd[1]:0;
@@ -584,15 +608,23 @@ static bool bell_reject(const Petal *p,const float *o) {
     } else if(o[1]<-1||o[1]>1) return true; /* height fixed, and outside it */
     return c0+(2*b0+p->ba0*zc)*zc>bell_rmax2;
 }
-static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
-    V origin={dx,dy,0};float o[3],d[3];
+// `ob` carries the part of o[] that depends on the row rather than the column;
+// see petal_reciprocals. bell_hit_at below is the form that takes a bare
+// (dx,dy), for callers outside the span walk.
+static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm) {
+    float o[3],d[3];
+#ifdef FLOWER_NO_SPAN_AFFINE
+    V origin={dx,ob[3],0};
     for(int j=0;j<3;j++)o[j]=DIVR(dot(origin,p->axis[j]),p->inv_radius[j],p->radius[j]);
+#else
+    for(int j=0;j<3;j++)o[j]=dx*p->oax[j]+ob[j];
+#endif
     for(int j=0;j<3;j++)d[j]=p->bd[j];
 #ifdef FLOWER_BELL_CHECK
     bell_visits_seen++;
     bool rejected=bell_reject(p,o);
     if(rejected)bell_rejected++;
-#else
+#elif !defined(FLOWER_NO_BELL_REJECT)
     if(bell_reject(p,o))return false;
 #endif
     bool found=false;
@@ -600,7 +632,11 @@ static bool bell_hit(const Petal *p,float dx,float dy,float *best,V *norm) {
     bool saw_root=false,saw_height=false,saw_depth=false,saw_clip=false;
 #endif
     for(int band=0;band<LAT;band++) {
+#ifdef FLOWER_NO_BAND_HOIST
+        float lo=-1+2.0f*band/LAT,hi=-1+2.0f*(band+1)/LAT;
+#else
         float lo=bell_lo[band],hi=bell_hi[band];
+#endif
         float slope=bell_slopes[band],offset=bell_offsets[band];
         float r=slope*o[1]+offset,dr=slope*d[1];
         float a=d[0]*d[0]+d[2]*d[2]-dr*dr;
@@ -686,6 +722,17 @@ static uint16_t dissolve(uint16_t sky,uint16_t lit) {
     unsigned b=((sky&31)*g+(lit&31)*f)>>8;
     return (uint16_t)(r<<11|gr<<5|b);
 }
+// ob[0..2] is dy's contribution to o[], constant along a row; ob[3] carries dy
+// itself so that FLOWER_NO_SPAN_AFFINE can rebuild the original expression.
+static void bell_row_terms(const Petal *p,float dy,float *ob) {
+    for(int j=0;j<3;j++)ob[j]=dy*p->axis[j].y*p->inv_radius[j];
+    ob[3]=dy;
+}
+static bool __attribute__((unused))
+bell_hit_at(const Petal *p,float dx,float dy,float *best,V *norm) {
+    float ob[4];bell_row_terms(p,dy,ob);
+    return bell_hit(p,dx,ob,best,norm);
+}
 static void ray_row(uint16_t *row,int y) {
     // Preserve the woodland under overlapping petals during the dissolve.
     // Automatic storage only; no extra full-frame or persistent pixel buffer.
@@ -714,6 +761,8 @@ static void ray_row(uint16_t *row,int y) {
         prof_visits+=(uint32_t)(p->xmax-p->xmin+1);
         PROF_FENCE;uint32_t x0=esp_cpu_get_cycle_count();PROF_FENCE;
 #endif
+        float ob[4];
+        if(p->shape)bell_row_terms(p,dy,ob);
         for(int x=p->xmin;x<=p->xmax;x++) {
             float dx=DIVR(x+.5f-180,INV_SCALE,SCALE)-p->c.x;
             if(p->shape) {
@@ -725,11 +774,11 @@ static void ray_row(uint16_t *row,int y) {
                 // completely.
 #ifdef ESP_PLATFORM
                 PROF_FENCE;uint32_t v0=esp_cpu_get_cycle_count();PROF_FENCE;
-                bool got=bell_hit(p,dx,dy,&z,&n);
+                bool got=bell_hit(p,dx,ob,&z,&n);
                 PROF_FENCE;prof_bell+=esp_cpu_get_cycle_count()-v0;prof_belln++;PROF_FENCE;
                 if(got) {
 #else
-                if(bell_hit(p,dx,dy,&z,&n)) {
+                if(bell_hit(p,dx,ob,&z,&n)) {
 #endif
                     depth[x-X0]=z;
 #ifdef ESP_PLATFORM
