@@ -118,3 +118,27 @@ PC側は `tools/pet_companion.py` に `serve` サブコマンド（フレーム�
 **変化通知は建てない。** `rewards()` はfloatを返し確保ゼロ、`pet.js` の `frame()` は減衰とアニメーションのため毎フレーム走る必要があり、購読にしてもフラグを読む形にしかならない。companion も残秒・NOW・staleの時間駆動表示なので1Hz描画は残る。**建てるなら** `pocket.pet.onChange` を `pocket_api_sub_*` の土台で、`pet_hub_js_pump()` を `app_tick()` 内に、`pet_hub_reset()` を `pocket_api_reset()` の前に置く形。PC連携で「受信メッセージ」という本物のイベント源ができたとき、その一部として作るのが筋。
 
 **ノード上限のアプリ側 try/catch も作らない。** firmware側は `pocket_ui_attach()` で完了しており（`23e149d`）、`pet.js` は15ノードで `layout_block(15)` が0なので拒否は構造的に起きない。`pet.js` に残っているソース余裕は約400バイトで、**起きない分岐に使うより静的な保証に使う** — ホストテストの `createNode` モックに「15を超えたら fail」の assert 1行。拒否が起きたときの挙動は `EVAL_ERROR` でホームへ戻る、で十分。
+
+## 実装状況（2026-09-07 時点）
+
+項目1〜3は**作業ツリーに実装済みで、実機で検証済み**。ただし `main/pet_hub.c` / `pet_hub_core.c` / `pet_assets.c` / `apps/companion/` はまだ一度もコミットされていないため、**この修正もコミットされていない**。ペット機能をコミットする人がそのまま拾うこと。
+
+実機での確認結果（Playground相当の診断アプリ、`pet.js` を介さず直接）:
+
+```
+PET LIM {"maxPets":12,"maxNotifications":8,"maxTimers":4,"maxLabelChars":24,
+         "maxTimerIdChars":16,"maxAlarmSeconds":604800,"maxSpeechChars":22}
+PET CAP true true
+PET T1  PocketError INVALID_ARGUMENT pet.select  false
+PET T2  PocketError INVALID_ARGUMENT pet.alarm   false      ← 非ASCII
+PET T3  PocketError LIMIT_EXCEEDED   pet.alarm   false      ← ラベル25文字
+PET T3b NO THROW                                            ← 24文字は通る
+PET T4  PocketError LIMIT_EXCEEDED   pet.alarm   true       ← タイマー5本目
+PET T5  PocketError LIMIT_EXCEEDED   pet.say     false      ← 吹き出し25文字
+```
+
+**T3 と T3b の対が、公開した `maxLabelChars: 24` が机上の値でないことの証明。** 24文字はちょうど通り、25文字で落ちる。
+
+`JS_Throw*` は `pet_hub.c` と `pet_assets.c` から**ゼロになった**（残るのは `JS_ToInt32`/`JS_ToCString` 失敗時の `JS_EXCEPTION` だけで、これはQuickJS自身のTypeError）。
+
+実機で踏めない経路は仕様どおり: `pet_hub.c` の保存失敗（NVSを壊す必要がある）、`probe` の `available:false` 側、`pet_assets.c` のOOM。

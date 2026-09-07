@@ -21,11 +21,7 @@
   var species=node(1,15,99,96,10,0xb8c7d6ff,'');
   var status=node(1,122,29,113,10,0x67dfc7ff,'');
   var labels=[], bars=[], colors=[0xf5bb69ff,0xf08bbcff,0x67dfc7ff];
-  // No track behind the bars. Three more nodes would put this screen at 18
-  // taffy nodes, and a relayout past 16 asks for one contiguous 29,648-byte
-  // block against the ~11 KiB an app has: the Rust core aborts rather than
-  // failing, so the app rebooted the device instead of starting. At 15 the
-  // request is 2,048. See CLAUDE.md and tools/uibudget.
+  // Bars have no track: 15 nodes is the ceiling. See README.md.
   for(var i=0;i<3;i++) {
     labels.push(node(1,122,45+i*18,110,9,0xc9d5dfff,''));
     bars.push(node(0,122,56+i*18,85,3,colors[i]));
@@ -89,7 +85,7 @@
       if(edge&0x10)choice=(choice+8)%12;
       if(edge&0x40)choice=(choice+4)%12;
       if(edge&0xf0)image();
-      if(edge&0x4000){pocket.pet.select(choice);s.selected=choice;mode=0;image();save();console.log('PET_SELECTED '+choice);}
+      if(edge&0x4000){try{pocket.pet.select(choice);}catch(e){message('SAVE FAILED');}s.selected=choice;mode=0;image();save();console.log('PET_SELECTED '+choice);}
     }else if(mode===2){
       if(edge&0x80)pos=(pos+7)%8;
       if(edge&0x20)pos=(pos+1)%8;
