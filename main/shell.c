@@ -108,8 +108,10 @@ static const setting_t settings[]={
      sound_get,      sound_set,      SHELL_SCREEN_NONE},
     // The first action row. It has no value and no NVS key of its own: what it
     // changes lives in the "wifi" namespace, written by the screen it opens.
-    {"TIME SYNC",  SETTING_ACTION,  NULL,    0,            NULL,
-     NULL,           NULL,           SHELL_SCREEN_WIFI_TIME},
+    // Named for the thing it configures, like every row above it — syncing the
+    // clock is one action on that screen, not the whole of what it is for.
+    {"WI-FI",      SETTING_ACTION,  NULL,    0,            NULL,
+     NULL,           NULL,           SHELL_SCREEN_WIFI},
 };
 #define SETTING_N (sizeof(settings)/sizeof(settings[0]))
 

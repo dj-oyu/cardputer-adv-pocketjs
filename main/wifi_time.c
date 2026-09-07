@@ -163,7 +163,11 @@ static esp_event_handler_instance_t wifi_handler, ip_handler;
 // The default event loop may already belong to something else by the time this
 // runs. Only the creator deletes it.
 static bool owns_event_loop;
+static bool wifi_inited, wifi_started;
 static unsigned attempts_left;
+// A scan brings the radio up the same way a sync does but must not associate,
+// so STA_START only connects when someone is waiting for an address.
+static bool auto_connect;
 
 // The disconnect reason is the only evidence of what actually went wrong, and
 // the split below is what the UI needs: "the network is not there" sends the
@@ -192,7 +196,7 @@ static bool terminal_reason(uint8_t reason) {
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg; (void)base;
     if(id==WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if(auto_connect) esp_wifi_connect();
     } else if(id==WIFI_EVENT_STA_CONNECTED) {
         // Associated and authenticated; anything that fails from here is the
         // address, not the credentials.
@@ -219,13 +223,44 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data) {
     xEventGroupSetBits(events,BIT_GOT_IP);
 }
 
-// Undoes exactly what bring_up() managed to do, in reverse, and is safe to call
+// Everything both tasks need before they can talk to the air. Split out because
+// a scan and a sync differ only in what they do once the radio is running, and
+// two copies of this sequence would be two chances to leave it half up.
+static esp_err_t radio_up(bool connect) {
+    auto_connect=connect;
+    esp_err_t err=esp_netif_init();
+    if(err!=ESP_OK) return err;
+    err=esp_event_loop_create_default();
+    if(err==ESP_OK) owns_event_loop=true;
+    else if(err!=ESP_ERR_INVALID_STATE) return err;
+
+    sta_netif=esp_netif_create_default_wifi_sta();
+    if(!sta_netif) return ESP_ERR_NO_MEM;
+
+    wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
+    err=esp_wifi_init(&init);
+    if(err!=ESP_OK) return err;
+    wifi_inited=true;
+
+    err=esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,on_wifi,NULL,&wifi_handler);
+    if(err==ESP_OK&&connect)
+        err=esp_event_handler_instance_register(IP_EVENT,IP_EVENT_STA_GOT_IP,on_ip,NULL,&ip_handler);
+    if(err!=ESP_OK) return err;
+
+    // RAM storage keeps the driver from writing a second copy of the key into
+    // its own NVS namespace, where nothing in this module could clear it.
+    err=esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if(err==ESP_OK) err=esp_wifi_set_mode(WIFI_MODE_STA);
+    return err;
+}
+
+// Undoes exactly what radio_up() managed to do, in reverse, and is safe to call
 // after a partial failure. esp_netif_deinit() is deliberately absent: ESP-IDF
 // v6.0.1 documents it as unsupported and it returns ESP_ERR_NOT_SUPPORTED, so
 // the LWIP task and its buffers survive the first sync for the life of the boot.
-static void tear_down(bool wifi_inited, bool wifi_started) {
+static void tear_down(void) {
     esp_netif_sntp_deinit();
-    if(wifi_started) { esp_wifi_disconnect(); esp_wifi_stop(); }
+    if(wifi_started) { esp_wifi_disconnect(); esp_wifi_stop(); wifi_started=false; }
     if(ip_handler) {
         esp_event_handler_instance_unregister(IP_EVENT,IP_EVENT_STA_GOT_IP,ip_handler);
         ip_handler=NULL;
@@ -234,7 +269,7 @@ static void tear_down(bool wifi_inited, bool wifi_started) {
         esp_event_handler_instance_unregister(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_handler);
         wifi_handler=NULL;
     }
-    if(wifi_inited) esp_wifi_deinit();
+    if(wifi_inited) { esp_wifi_deinit(); wifi_inited=false; }
     if(sta_netif) { esp_netif_destroy_default_wifi(sta_netif); sta_netif=NULL; }
     if(owns_event_loop) { esp_event_loop_delete_default(); owns_event_loop=false; }
 }
@@ -247,7 +282,6 @@ static void finish(wifi_time_stage_t stage, int reason) {
 
 static void sync_task(void *arg) {
     (void)arg;
-    bool wifi_inited=false, wifi_started=false;
     esp_err_t err;
 
     taskENTER_CRITICAL(&status_lock);
@@ -286,29 +320,7 @@ static void sync_task(void *arg) {
     if(!events) { finish(WIFI_TIME_STAGE_INIT,ESP_ERR_NO_MEM); goto done; }
     attempts_left=CONNECT_ATTEMPTS-1;
 
-    err=esp_netif_init();
-    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
-    err=esp_event_loop_create_default();
-    if(err==ESP_OK) owns_event_loop=true;
-    else if(err!=ESP_ERR_INVALID_STATE) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
-
-    sta_netif=esp_netif_create_default_wifi_sta();
-    if(!sta_netif) { finish(WIFI_TIME_STAGE_INIT,ESP_ERR_NO_MEM); goto done; }
-
-    wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
-    err=esp_wifi_init(&init);
-    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
-    wifi_inited=true;
-
-    err=esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,on_wifi,NULL,&wifi_handler);
-    if(err==ESP_OK)
-        err=esp_event_handler_instance_register(IP_EVENT,IP_EVENT_STA_GOT_IP,on_ip,NULL,&ip_handler);
-    if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
-
-    // RAM storage keeps the driver from writing a second copy of the key into
-    // its own NVS namespace, where nothing in this module could clear it.
-    err=esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    if(err==ESP_OK) err=esp_wifi_set_mode(WIFI_MODE_STA);
+    err=radio_up(true);
     if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_INIT,err); goto done; }
 
     wifi_config_t cfg={0};
@@ -380,7 +392,7 @@ done:
     // local is exactly what a compiler is allowed to drop, so the write goes
     // through a volatile pointer.
     for(volatile char *p=psk;p<psk+sizeof psk;p++) *p=0;
-    tear_down(wifi_inited,wifi_started);
+    tear_down();
     if(events) { vEventGroupDelete(events); events=NULL; }
     ESP_LOGI(TAG,"SYNC_DONE state=%d free=%u",
              (int)wifi_time_status().state,
@@ -396,6 +408,152 @@ esp_err_t wifi_time_sync_start(void) {
     // 4 KiB covers this task's own frames; the driver and LWIP run on their own
     // tasks and are sized by Kconfig, not from here.
     if(xTaskCreate(sync_task,"wifi_time",4096,NULL,5,NULL)!=pdPASS) {
+        atomic_store(&running,false);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+// ------------------------------------------------------------------ scanning
+
+static portMUX_TYPE scan_lock = portMUX_INITIALIZER_UNLOCKED;
+static wifi_time_network_t scan_list[WIFI_TIME_SCAN_MAX];
+static unsigned scan_count;
+static bool scan_truncated;
+static wifi_time_state_t scan_state;
+
+wifi_time_state_t wifi_time_scan_state(void) {
+    taskENTER_CRITICAL(&scan_lock);
+    wifi_time_state_t s=scan_state;
+    taskEXIT_CRITICAL(&scan_lock);
+    return s;
+}
+
+unsigned wifi_time_scan_networks(wifi_time_network_t *out, unsigned max,
+                                 bool *truncated) {
+    if(!out) max=0;
+    taskENTER_CRITICAL(&scan_lock);
+    unsigned n=scan_count<max?scan_count:max;
+    for(unsigned i=0;i<n;i++) out[i]=scan_list[i];
+    if(truncated) *truncated=scan_truncated||n<scan_count;
+    taskEXIT_CRITICAL(&scan_lock);
+    return n;
+}
+
+// An SSID is 32 arbitrary bytes on the wire, and this firmware has to draw it
+// and store it as a string. Anything that is not well formed UTF-8 is dropped
+// rather than shown as replacement characters that cannot be typed back in
+// (docs/common-api.md:306); a lone surrogate is rejected for the same reason
+// the storage API rejects one.
+static bool ssid_printable(const uint8_t *s, size_t n) {
+    for(size_t i=0;i<n;) {
+        uint8_t c=s[i];
+        size_t extra; uint32_t cp;
+        if(c<0x20||c==0x7f) return false;      // control bytes are not a name
+        if(c<0x80) { i++; continue; }
+        else if((c&0xe0)==0xc0) { extra=1; cp=c&0x1fU; }
+        else if((c&0xf0)==0xe0) { extra=2; cp=c&0x0fU; }
+        else if((c&0xf8)==0xf0) { extra=3; cp=c&0x07U; }
+        else return false;
+        if(i+extra>=n) return false;
+        for(size_t k=1;k<=extra;k++) {
+            if((s[i+k]&0xc0)!=0x80) return false;
+            cp=(cp<<6)|(uint32_t)(s[i+k]&0x3fU);
+        }
+        if(extra==1&&cp<0x80) return false;
+        if(extra==2&&cp<0x800) return false;
+        if(extra==3&&cp<0x10000) return false;
+        if(cp>0x10ffff) return false;
+        if(cp>=0xd800&&cp<=0xdfff) return false;
+        i+=extra+1;
+    }
+    return true;
+}
+
+// One row per SSID, strongest kept. A mesh or a repeater answers from several
+// radios under one name, and three identical rows to choose between is a list
+// that looks broken. Insertion sort into a 16 entry array: the list is tiny and
+// keeping it ordered here means the UI can draw it without sorting anything.
+static void scan_insert(const wifi_ap_record_t *ap) {
+    size_t len=strnlen((const char*)ap->ssid,sizeof ap->ssid);
+    if(len==0) return;                                   // hidden network
+    if(!ssid_printable(ap->ssid,len)) { scan_truncated=true; return; }
+
+    for(unsigned i=0;i<scan_count;i++) {
+        if(strncmp(scan_list[i].ssid,(const char*)ap->ssid,len)==0&&
+           scan_list[i].ssid[len]=='\0') {
+            if(ap->rssi>scan_list[i].rssi) scan_list[i].rssi=ap->rssi;
+            return;
+        }
+    }
+    if(scan_count==WIFI_TIME_SCAN_MAX) {
+        // The array is full and ordered, so the weakest is last. Replace it
+        // only if this one is stronger; either way something was dropped.
+        scan_truncated=true;
+        if(ap->rssi<=scan_list[WIFI_TIME_SCAN_MAX-1].rssi) return;
+        scan_count--;
+    }
+    unsigned at=scan_count;
+    while(at>0&&scan_list[at-1].rssi<ap->rssi) { scan_list[at]=scan_list[at-1]; at--; }
+    memcpy(scan_list[at].ssid,ap->ssid,len);
+    scan_list[at].ssid[len]='\0';
+    scan_list[at].rssi=ap->rssi;
+    scan_list[at].secure=ap->authmode!=WIFI_AUTH_OPEN;
+    scan_count++;
+}
+
+static void scan_task(void *arg) {
+    (void)arg;
+    taskENTER_CRITICAL(&scan_lock);
+    scan_state=WIFI_TIME_RUNNING; scan_count=0; scan_truncated=false;
+    taskEXIT_CRITICAL(&scan_lock);
+
+    ESP_LOGI(TAG,"SCAN_START");
+    esp_err_t err=radio_up(false);   // no association, no IP handler
+    if(err==ESP_OK) {
+        err=esp_wifi_start();
+        if(err==ESP_OK) wifi_started=true;
+    }
+    if(err==ESP_OK) {
+        // Active scan with the driver's default dwell. docs/common-api.md:306
+        // allows 5 s; the default sweep of the 2.4 GHz channels finishes well
+        // inside that, and a longer dwell only finds APs too weak to join.
+        wifi_scan_config_t cfg={.show_hidden=false,.scan_type=WIFI_SCAN_TYPE_ACTIVE};
+        err=esp_wifi_scan_start(&cfg,true);
+    }
+    if(err==ESP_OK) {
+        // One record at a time: esp_wifi_scan_get_ap_records() would want a
+        // wifi_ap_record_t per AP up front, and that array is larger than the
+        // list it would be filtered down into.
+        wifi_ap_record_t ap;
+        while(esp_wifi_scan_get_ap_record(&ap)==ESP_OK) {
+            // The driver call stays outside the lock; only the list needs it.
+            taskENTER_CRITICAL(&scan_lock);
+            scan_insert(&ap);
+            taskEXIT_CRITICAL(&scan_lock);
+        }
+        esp_wifi_clear_ap_list();
+    }
+
+    taskENTER_CRITICAL(&scan_lock);
+    scan_state=err==ESP_OK?WIFI_TIME_OK:WIFI_TIME_FAILED;
+    unsigned found=scan_count; bool cut=scan_truncated;
+    taskEXIT_CRITICAL(&scan_lock);
+
+    tear_down();
+    if(err==ESP_OK) ESP_LOGI(TAG,"SCAN_OK found=%u truncated=%d",found,(int)cut);
+    else ESP_LOGW(TAG,"SCAN_FAILED reason=%d",(int)err);
+    ESP_LOGI(TAG,"SCAN_DONE state=%d free=%u",
+             (int)wifi_time_scan_state(),(unsigned)esp_get_free_heap_size());
+    atomic_store(&running,false);
+    vTaskDelete(NULL);
+}
+
+esp_err_t wifi_time_scan_start(void) {
+    bool expected=false;
+    if(!atomic_compare_exchange_strong(&running,&expected,true))
+        return ESP_ERR_INVALID_STATE;
+    if(xTaskCreate(scan_task,"wifi_scan",4096,NULL,5,NULL)!=pdPASS) {
         atomic_store(&running,false);
         return ESP_ERR_NO_MEM;
     }

@@ -70,3 +70,31 @@ esp_err_t wifi_time_sync_start(void);
 
 // Safe from any task at any time.
 wifi_time_status_t wifi_time_status(void);
+
+// ------------------------------------------------------------------ scanning
+//
+// So the SSID is chosen from what is actually in the air rather than typed. A
+// typed SSID fails as WIFI_REASON_NO_AP_FOUND whether the network is absent or
+// the spelling is wrong, and those want opposite things from the person.
+
+#define WIFI_TIME_SCAN_MAX 16   // docs/common-api.md:306 caps a scan at 16
+
+typedef struct {
+    char   ssid[WIFI_TIME_SSID_MAX+1];
+    int8_t rssi;
+    bool   secure;               // anything but an open network
+} wifi_time_network_t;
+
+// Brings the radio up, scans, and takes it down again, like the sync task and
+// under the same single-attempt lock: a scan and a sync cannot overlap.
+// Returns immediately; poll wifi_time_scan_state().
+esp_err_t wifi_time_scan_start(void);
+wifi_time_state_t wifi_time_scan_state(void);
+
+// Copies up to max networks, strongest first, into out; returns how many. One
+// entry per SSID — a mesh answering from three radios is one network to choose.
+// truncated, when given, reports that something was dropped: more than
+// WIFI_TIME_SCAN_MAX distinct networks, or an SSID that was not valid UTF-8 and
+// so could not be drawn or stored (docs/common-api.md:306).
+unsigned wifi_time_scan_networks(wifi_time_network_t *out, unsigned max,
+                                 bool *truncated);

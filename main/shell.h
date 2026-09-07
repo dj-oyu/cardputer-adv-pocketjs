@@ -7,7 +7,7 @@
 // here for the caller to collect after the key is handled.
 typedef enum {
     SHELL_SCREEN_NONE = 0,
-    SHELL_SCREEN_WIFI_TIME,   // no entry asks for this yet; the shape is ready
+    SHELL_SCREEN_WIFI,        // the "WI-FI" settings row
 } shell_screen_t;
 
 void shell_init(void);

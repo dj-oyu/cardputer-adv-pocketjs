@@ -142,8 +142,8 @@ extern const char imucal_end[]   asm("_binary_imucal_js_end");
 // wrong key.
 static void take_pending_screen(void) {
     switch(shell_pending_screen()) {
-        case SHELL_SCREEN_WIFI_TIME: enter(SCREEN_WIFI); break;
-        case SHELL_SCREEN_NONE:      break;
+        case SHELL_SCREEN_WIFI: enter(SCREEN_WIFI); break;
+        case SHELL_SCREEN_NONE: break;
     }
 }
 

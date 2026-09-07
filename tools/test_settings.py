@@ -13,8 +13,8 @@ def command(key,marker):
         line=s.readline().decode(errors='replace').strip();lines.append(line)
         if marker in line:return line
     raise RuntimeError(lines[-12:])
-def expect(marker):
-    end=time.monotonic()+8;lines=[]
+def expect(marker,timeout=8):
+    end=time.monotonic()+timeout;lines=[]
     while time.monotonic()<end:
         line=s.readline().decode(errors='replace').strip();lines.append(line)
         if marker in line:return line
@@ -50,13 +50,18 @@ try:
         # Logged after the last I2S write of the click, not when it was queued.
         if b'SFX 1 played' in s.readline():heard=True;break
     assert heard,'Synthesized audio was not submitted to I2S'
-    # TIME SYNC is the first SETTING_ACTION row: Enter leaves the home screen
-    # for the Wi-Fi screen rather than opening a value list. Escape comes back.
-    # No credentials are entered here; this checks the wiring, not the radio.
+    # WI-FI is the first SETTING_ACTION row: Enter leaves the home screen for
+    # the picker rather than opening a value list, and the picker starts a scan
+    # on arrival. Escape comes back mid-scan; the scan finishes on its own and
+    # puts the radio down, which is what SCAN_DONE reports. No credentials are
+    # entered here, and nothing associates.
     command('d','SELECT 3')
     line=command('e','SCREEN 3');assert 'screen=1' in line,line
-    expect('WIFI_READY')
+    expect('WIFI_READY');expect('SCAN_START')
     s.write(b'\x1b');expect('HOME_READY')
+    # Waited for, not slept through: the app launched below shares the heap the
+    # radio is still holding until the scan task exits.
+    expect('SCAN_DONE',20)
     command('b','CATEGORY 1');command('u','SELECT 2')
     command('a','CATEGORY 0');command('e','HELLO_FRAME_PRESENTED');command('q','HOME_READY')
     print('SETTINGS_OK sound=ON categories, toggles, mute, app-return',flush=True)
@@ -65,7 +70,7 @@ finally:
     # Walk back to Settings > SOUND > ON so the device is never left muted.
     try:
         # home, Settings, top, SOUND, open, choose ON, apply. Three ups, because
-        # an abort can leave the cursor on TIME SYNC and two would stop short of
+        # an abort can leave the cursor on WI-FI and two would stop short of
         # the top — and the fourth row's Enter opens a screen, not a value list.
         for key in 'qbuuuddede':s.write(key.encode());time.sleep(0.4)
     except Exception:pass
