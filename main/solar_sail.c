@@ -268,7 +268,17 @@ static void globe(unsigned i,Vec p,float r) {
     if(rings){ring(p,r*1.55f,u,v,true,ring_color);ring(p,r*2.15f,u,v,true,ring_color);}
 }
 const char *solar_sail_target(void){return planets[focus].name;}
-const char *solar_sail_time_label(void){return time_source==SOLAR_TIME_UTC?"UTC":"DEMO";}
+// Four states, not two. A clock that stopped answering or came back outside the
+// supported window used to read DEMO, which is also what never having synced
+// looks like -- so a real failure was indistinguishable from the normal state.
+const char *solar_sail_time_label(void) {
+    switch(time_source) {
+        case SOLAR_TIME_UTC:          return "UTC";
+        case SOLAR_TIME_UNAVAILABLE:  return "NO CLOCK";
+        case SOLAR_TIME_OUT_OF_RANGE: return "CLOCK RANGE";
+        default:                      return "DEMO";
+    }
+}
 void solar_sail_prepare(float dt,int tx,int ty) {
     if(dt>0.1f)dt=.033f;
     if(dt<0)dt=0;

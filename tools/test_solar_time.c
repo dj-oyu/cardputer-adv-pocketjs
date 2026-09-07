@@ -16,8 +16,12 @@ static int fake_gettimeofday(struct timeval *out,void *zone) {
 #include "../main/solar_sail.c"
 
 int main(void) {
+    // A boot with nothing claimed asks the clock rather than assuming: the RTC
+    // outlives the flag, so a reset must not throw away a synchronized clock.
+    // An unset clock reads the epoch and is refused, which is DEMO, not a
+    // failure -- a device that never synced has not gone wrong.
     solar_time_sample_t t=solar_time_now(100);
-    assert(t.source==SOLAR_TIME_DEMO&&t.days==25&&reads==0);
+    assert(t.source==SOLAR_TIME_DEMO&&t.days==25&&reads==1);
     assert(solar_time_now(-1).days==0&&solar_time_now(NAN).days==0);
     assert(solar_time_now(1e12).days==14610);
     solar_time_set_synchronized(true);
@@ -47,7 +51,23 @@ int main(void) {
     // Resynchronization, including backward correction, does not reset tour.
     fake_now.tv_sec-=1800;solar_time_set_synchronized(true);solar_sail_prepare(.033f,0,0);
     assert(focus==2&&fabs((sim_days-before)*86400-1801)<1e-6);
+    // Distrust outranks the clock's own evidence, or "this clock is wrong"
+    // would be a statement the code quietly ignores.
     solar_time_set_synchronized(false);solar_sail_prepare(0,0,0);
     assert(strcmp(solar_sail_time_label(),"DEMO")==0&&sim_days==elapsed*.25);
-    puts("SOLAR_TIME_OK unsynced, UTC, leap day, range, 2038, errors, holdover, resync, tour independence");
+    // A reboot loses the flag, not the RTC. Rediscovering the clock is what
+    // stops the sail scene from reverting to demo time after a restart.
+    trust=TRUST_UNKNOWN;
+    assert(solar_time_now(4).source==SOLAR_TIME_UTC);
+    assert(atomic_load(&trust)==TRUST_YES);
+    // Failures stay distinguishable from never having synced, both ways round.
+    trust=TRUST_UNKNOWN;fake_error=1;
+    assert(solar_time_now(4).source==SOLAR_TIME_DEMO);
+    solar_time_set_synchronized(true);
+    assert(solar_time_now(4).source==SOLAR_TIME_UNAVAILABLE);fake_error=0;
+    trust=TRUST_UNKNOWN;fake_now.tv_sec=0;
+    assert(solar_time_now(4).source==SOLAR_TIME_DEMO);
+    solar_time_set_synchronized(true);
+    assert(solar_time_now(4).source==SOLAR_TIME_OUT_OF_RANGE);
+    puts("SOLAR_TIME_OK unsynced, UTC, leap day, range, 2038, errors, holdover, resync, reboot, distrust, tour independence");
 }
