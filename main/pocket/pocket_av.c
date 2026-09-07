@@ -303,12 +303,20 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
 // second task and no second I2S channel. seek is real because the clip is in
 // RAM; at ADPCM's block granularity, which limits publishes.
 
-// The whole file, header included. Not the 24,576 app:/ allows: the largest
-// contiguous block with an app running measures 23,552 bytes, and a feature
-// that only works when the heap is unfragmented is a feature that fails in
-// front of the person using it. 8 KiB leaves room for the allocation to succeed
-// and is 0.68 s of ADPCM.
-#define PLAYER_MAX_BYTES 8192
+// The whole file, header included, and now exactly what app:/ allows.
+//
+// This was 8,192 for a reason that has expired. The largest contiguous block
+// with an app running measured 23,552 bytes, and a clip that only loads when
+// the heap is unfragmented is a clip that fails in front of the person using
+// it -- so the cap was set well below the block rather than at the file limit.
+// That block now measures 73,728 (tools/memlog.py --port --check), because
+// static DIRAM went from 197,847 to 111,383 bytes. A 24,576-byte allocation
+// against 73,728 is the same kind of margin 8,192 had against 23,552.
+//
+// It costs nothing but a constant and it triples every clip: 2.05 s of ADPCM
+// instead of 0.68, 0.51 s of PCM16 instead of 0.17. The cap is now the file
+// system's, so this stops being a second limit an app has to discover.
+#define PLAYER_MAX_BYTES 24576
 #define PLAYER_WATCHES   2
 #define PLAYER_CODEC_PCM  "wav/pcm16"
 #define PLAYER_CODEC_IMA  "wav/ima-adpcm"
@@ -863,34 +871,6 @@ static void power_pump(void) {
     pocket_api_sub_deliver(&power_table,power_payload,&changed);
 }
 
-// ----------------------------------------------------- unimplemented surfaces
-
-static JSValue js_unsupported(JSContext *ctx, JSValueConst this_val,
-                              int argc, JSValueConst *argv, int magic,
-                              JSValueConst *func_data) {
-    (void)this_val; (void)argc; (void)argv; (void)magic;
-    const char *operation=JS_ToCString(ctx,func_data[0]);
-    JSValue error=pocket_api_reject(ctx,POCKET_ERR_UNSUPPORTED,
-                                    operation?operation:"audio",
-                                    "not implemented in this build",false,
-                                    POCKET_OUTCOME_NOT_APPLIED);
-    if(operation) JS_FreeCString(ctx,operation);
-    return error;
-}
-
-// Section 2 asks a supported=false feature to keep its namespace and method and
-// to fail the call with UNSUPPORTED, so audio.capture and audio.playback are
-// here as names that reject rather than as a TypeError about undefined.
-static void add_unsupported(JSContext *ctx, JSValue parent, const char *child,
-                            const char *method, const char *operation) {
-    JSValue object=JS_NewObject(ctx);
-    JSValue name=JS_NewString(ctx,operation);
-    JS_DefinePropertyValueStr(ctx,object,method,
-        JS_NewCFunctionData(ctx,js_unsupported,2,0,1,&name),JS_PROP_ENUMERABLE);
-    JS_FreeValue(ctx,name);
-    JS_DefinePropertyValueStr(ctx,parent,child,object,JS_PROP_ENUMERABLE);
-}
-
 // ------------------------------------------------------------- pump / reset
 
 void pocket_av_pump(void) {
@@ -989,8 +969,8 @@ static void power_probe(const pocket_capability_t *cap, bool *available,
 // leaves unlisted names to return supported=false. Both are named here because
 // a program has to be able to detect them: cue is a stage A feature with no
 // name of its own, and power is where the two nulls above are documented.
-// audio.capture and audio.playback keep pocket_api.c's declared entries, which
-// already say supported=false with NOT_IMPLEMENTED.
+// audio.capture is registered by pocket_capture.c, which owns the microphone
+// and contributes `capture` to this namespace.
 static const pocket_capability_t audio_cue_capability = {
     .name="audio.cue", .supported=true, .available=false,
     .reason=POCKET_REASON_NO_DEVICE, .limits=cue_limits, .probe=audio_probe,
@@ -1022,7 +1002,8 @@ static esp_err_t build_audio(JSContext *ctx, JSValueConst ns, void *user) {
         JS_NewCFunction(ctx,js_cue,"cue",1),JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx,ns,"tone",
         JS_NewCFunction(ctx,js_tone,"tone",2),JS_PROP_ENUMERABLE);
-    add_unsupported(ctx,ns,"capture","open","audio.capture.open");
+    // audio.capture is pocket_capture.c's, contributed to this same
+    // namespace by a second lazy builder.
     // A realm going away takes its listeners with it, so the table starts empty
     // every time the namespace is built.
     for(int i=0;i<PLAYER_WATCHES;i++) {
