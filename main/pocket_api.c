@@ -7,10 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-// How many capabilities other native surfaces may publish on top of the
-// declared set, and how many onChange subscriptions one realm may hold. Both
-// are pointer-sized tables so the cost in .bss stays flat.
-#define POCKET_MAX_REGISTERED    16
+// How many capabilities may be registered in total -- not headroom above
+// builtins[], which is what the old wording said and what made 16 look
+// generous. Nineteen names register today and the sixteenth filled the table:
+// time, log and pet.companion silently reported supported=false while working,
+// which is the honesty mechanism failing at exactly the thing it exists for.
+// A pointer each, so the cost of the margin is 64 bytes of .bss.
+#define POCKET_MAX_REGISTERED    32
 #define POCKET_MAX_SUBSCRIPTIONS 8
 
 // The names of docs/common-api.md section 2, all of them. A name that is not
@@ -109,7 +112,16 @@ esp_err_t pocket_api_register(const pocket_capability_t *capability) {
             return ESP_OK;
         }
     }
-    if(override_count>=POCKET_MAX_REGISTERED) return ESP_ERR_NO_MEM;
+    if(override_count>=POCKET_MAX_REGISTERED) {
+        // Loud, because eighteen of the nineteen call sites discard this
+        // return value and the symptom is a capability that works while
+        // denying it exists -- which no app can distinguish from one that is
+        // genuinely absent.
+        ESP_LOGE(TAG,"capability table full at %u; \"%s\" will report "
+                     "supported=false while it works",
+                 POCKET_MAX_REGISTERED,capability->name);
+        return ESP_ERR_NO_MEM;
+    }
     overrides[override_count++]=capability;
     return ESP_OK;
 }
@@ -681,6 +693,16 @@ esp_err_t pocket_api_install(JSContext *ctx, void *user_data) {
     st->error_proto=error_prototype(ctx);
 
     JSValue root=JS_NewObject(ctx);
+    if(JS_IsException(root)) {
+        // Out of memory here used to be permanent rather than per-session: hub
+        // would be defined onto an exception, its finalizer would never run,
+        // and state stayed set, so every later app_start_test() answered
+        // INVALID_STATE until the device was rebooted.
+        JS_FreeValue(ctx,hub);
+        JS_FreeValue(ctx,st->error_proto);
+        state=NULL; free(st);
+        return ESP_ERR_NO_MEM;
+    }
     define(ctx,root,"apiVersion",JS_NewString(ctx,POCKET_API_VERSION));
 
     JSValue device=JS_NewObject(ctx);
