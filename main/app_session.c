@@ -156,7 +156,12 @@ esp_err_t app_start_test(char test) {
     // binding constraint, not the memory. Parsing peaks well above what the
     // program then retains, which is why a 6.5 KB source sat at 107 KiB and a
     // 6.7 KB one did not fit at 128.
-    gc.heap_limit=144*1024; gc.stack_limit=20*1024; gc.prefer_psram=false;
+    // 160 KiB. Lazy namespaces gave the system 20 KiB back -- free heap during
+    // a run went from 46,456 to 66,776 -- and the cap is a ceiling, not a
+    // reservation, so raising it costs nothing an app does not take. It is
+    // what lets the pet app fit: lazy install alone moved its allocation into
+    // the parse peak rather than removing it.
+    gc.heap_limit=160*1024; gc.stack_limit=20*1024; gc.prefer_psram=false;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
     TRY(pocketjs_guest_quickjs_install(guest,install_limits,NULL));

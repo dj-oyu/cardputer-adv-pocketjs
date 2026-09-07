@@ -2696,28 +2696,17 @@ static const JSCFunctionListEntry fs_methods[] = {
     JS_CFUNC_DEF("writeText",      3, js_write_text),
 };
 
-esp_err_t pocket_fs_install(JSContext *ctx, void *user_data) {
-    (void)user_data;
-    pocket_api_register(&app_capability);
-    pocket_api_register(&assets_capability);
-    pocket_api_register(&sd_capability);
-    if(!owner_hash) pocket_fs_set_owner(NULL);
+// Whether pocket.fs was ever read. The reset below has real work to do -- flash
+// erases among it -- and a run that never opened a file must not pay for it.
+static bool built;
 
-    JSValue root=pocket_api_root(ctx);
-    if(!JS_IsObject(root)) {
-        // Installing pocket_api first is the caller's job; doing it silently
-        // here would hide the ordering bug rather than report it.
-        JS_FreeValue(ctx,root);
-        return ESP_ERR_INVALID_STATE;
-    }
+static esp_err_t build_fs(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
     JSRuntime *rt=JS_GetRuntime(ctx);
     JS_NewClassID(rt,&file_class);
-    if(JS_NewClass(rt,file_class,&file_class_def)<0) {
-        JS_FreeValue(ctx,root);
-        return ESP_FAIL;
-    }
+    if(JS_NewClass(rt,file_class,&file_class_def)<0) return ESP_FAIL;
     JSValue proto=JS_NewObject(ctx);
-    if(JS_IsException(proto)) { JS_FreeValue(ctx,root); return ESP_FAIL; }
+    if(JS_IsException(proto)) return ESP_ERR_NO_MEM;
     JS_SetPropertyFunctionList(ctx,proto,file_methods,
                                (int)(sizeof(file_methods)/sizeof(file_methods[0])));
     // One shared prototype, so a File costs the guest one object with an
@@ -2732,15 +2721,26 @@ esp_err_t pocket_fs_install(JSContext *ctx, void *user_data) {
     cursors_clear();
     volume_table.ctx=ctx;
 
-    JSValue fs=JS_NewObject(ctx);
-    JS_SetPropertyFunctionList(ctx,fs,fs_methods,
+    JS_SetPropertyFunctionList(ctx,ns,fs_methods,
                                (int)(sizeof(fs_methods)/sizeof(fs_methods[0])));
-    JS_DefinePropertyValueStr(ctx,root,"fs",fs,JS_PROP_ENUMERABLE);
-    JS_FreeValue(ctx,root);
+    built=true;
     return ESP_OK;
 }
 
+esp_err_t pocket_fs_install(JSContext *ctx, void *user_data) {
+    (void)user_data;
+    // Eager: three capability entries, so a feature test answers without a
+    // class, a prototype or nineteen function objects being made first.
+    pocket_api_register(&app_capability);
+    pocket_api_register(&assets_capability);
+    pocket_api_register(&sd_capability);
+    if(!owner_hash) pocket_fs_set_owner(NULL);
+    return pocket_api_lazy(ctx,"fs",build_fs,NULL);
+}
+
 void pocket_fs_reset(void) {
+    if(!built) return;   // no handle, no cursor, no index: nothing to give back
+    built=false;
     // Section 8: everything is cancelled when the app ends, and a create or
     // replace that never committed loses its temporary version here. That is
     // flash erases at app_stop() -- up to seven sectors, tens of milliseconds

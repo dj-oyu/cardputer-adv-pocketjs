@@ -73,6 +73,16 @@ typedef struct pocket_capability pocket_capability_t;
 // `available` starts at the static value and `reason` at the static reason;
 // write either to report the current state. Keep it cheap and side-effect free:
 // the document treats available as an observation, not a reservation.
+//
+// That distinction has teeth now that namespaces are built on first read. A
+// probe answering available=true says the device, the setting and the room were
+// there when it was asked; the namespace is allocated at a later instant, and
+// on this board the free heap moves between the two. So an app can be told a
+// capability is available and still get OUT_OF_MEMORY from the read that would
+// use it. Both answers are honest -- they are answers to different questions at
+// different moments -- and section 4 has the code for the second. Do not make a
+// probe reserve anything to close the gap: it is called on every get(), by apps
+// that are only asking.
 typedef void (*pocket_capability_probe_fn)(const pocket_capability_t *cap,
                                            bool *available,
                                            const char **reason);
@@ -90,7 +100,55 @@ struct pocket_capability {
 // Publishes a capability, replacing any entry with the same name. The struct
 // must outlive the registration; point it at a static const. Safe to call
 // before a session starts. Returns ESP_ERR_NO_MEM when the table is full.
+//
+// This is C data -- a pointer into a table -- and costs the guest nothing, so
+// it stays eager while the namespaces below do not. That is deliberate: an app
+// feature-tests before it instantiates, and a capabilities.get() that had to
+// build pocket.net in order to say whether net.http exists would defeat the
+// whole point of asking.
+//
+// The consequence, which is not a contradiction but is worth knowing: get()
+// can answer supported=true, available=true and the read of the namespace a
+// moment later can still fail with OUT_OF_MEMORY. `available` is an
+// observation at the instant it is taken, and the allocation happens at a
+// different instant on a device whose free heap moves during a run. Section 4
+// has the code for the second answer; an app that treats the first as a
+// reservation has misread it.
 esp_err_t pocket_api_register(const pocket_capability_t *capability);
+
+// ------------------------------------------------------------ lazy namespaces
+//
+// Every pocket.* namespace used to be built at session start, so an app paid
+// for all of them and touched two. Measured: apps/hello/main.js sat at 102,272
+// bytes of guest heap against a 147,456 cap, where the same source measured
+// 85,602 before any of these surfaces existed -- and the pet app stopped
+// parsing at all.
+//
+// A namespace is now built the first time the app reads it. The root carries an
+// accessor per name; the first read runs the contributors below, replaces the
+// accessor with the plain enumerable value it produced, and every read after
+// that is an ordinary property lookup that never reaches C. An app that reads
+// two namespaces pays for two.
+
+// Adds to a namespace that is being built. `ns` is the object the property will
+// become; fill it in and return ESP_OK. It is NOT owned by the contributor and
+// must not be freed. More than one contributor may register the same name --
+// pet_hub.c makes pocket.pet and pet_assets.c adds to it -- and they run in the
+// order they registered.
+//
+// Return anything but ESP_OK when the namespace cannot be built: the partial
+// object is thrown away and the app receives a PocketError with
+// OUT_OF_MEMORY and this namespace as its operation. The accessor survives, so
+// a later read tries again -- which is the honest thing when what failed was an
+// allocation and not the request.
+typedef esp_err_t (*pocket_namespace_fn)(JSContext *ctx, JSValueConst ns,
+                                         void *user);
+
+// Registers a contributor to pocket.<name>, defining the accessor if this is
+// the first for that name. Call from a surface's _install(); the table is
+// cleared by pocket_api_install(), so every session registers afresh.
+esp_err_t pocket_api_lazy(JSContext *ctx, const char *name,
+                          pocket_namespace_fn contribute, void *user);
 
 // Tells subscribers that a capability's observable state moved. No-op when no
 // realm is live. JS owner task only.
@@ -99,8 +157,13 @@ void pocket_api_capability_changed(const char *name);
 // Registers globalThis.pocket. Pass to pocketjs_guest_quickjs_install_once().
 esp_err_t pocket_api_install(JSContext *ctx, void *user_data);
 
-// The pocket root, for surfaces that add their own namespace to it. Returns
-// JS_UNDEFINED when the API is not installed. The caller frees the value.
+// The pocket root. Returns JS_UNDEFINED when the API is not installed; the
+// caller frees the value.
+//
+// No longer the way to add a namespace -- pocket_api_lazy() is -- and reading a
+// namespace off this is now a way to build one by accident: the property is an
+// accessor until its first read. Nothing in main/ calls this outside
+// pocket_api.c any more, and a new call site should be a contributor instead.
 JSValue pocket_api_root(JSContext *ctx);
 
 // Builds a PocketError. `message` may be NULL, in which case the code is used.

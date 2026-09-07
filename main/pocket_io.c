@@ -1038,7 +1038,11 @@ static void watch_pump(void) {
 
 static rmt_channel_handle_t ir_channel;
 static rmt_encoder_handle_t ir_encoder;
-static rmt_symbol_word_t    ir_symbols[IR_MAX_DURATIONS/2];   // 512 bytes .bss
+// Taken on the first frame sent and given back in pocket_io_reset(), for the
+// same reason pocket_fs.c gives for its index: 512 bytes of .bss standing
+// empty is 512 bytes an app that never touches the emitter cannot use, and on
+// this board the scarce thing is the room a running app has.
+static rmt_symbol_word_t   *ir_symbols;
 static bool                 ir_busy;
 // The request the ISR posts to. It travels in a static rather than in the
 // channel's user_data because CONFIG_RMT_TX_ISR_CACHE_SAFE, off in this build
@@ -1154,7 +1158,16 @@ static JSValue ir_send(JSContext *ctx, JSValueConst this_val,
     // which the encoder still needs a second half for, so it gets the shortest
     // space the hardware can express -- a zero-length half would run forever.
     int64_t total=0;
-    memset(ir_symbols,0,sizeof(ir_symbols));
+    if(!ir_symbols) {
+        ir_symbols=calloc(IR_MAX_DURATIONS/2,sizeof(*ir_symbols));
+        if(!ir_symbols) {
+            JS_FreeValue(ctx,list);
+            return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,
+                                     "no memory for the frame buffer",true,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+        }
+    }
+    memset(ir_symbols,0,(IR_MAX_DURATIONS/2)*sizeof(*ir_symbols));
     for(uint32_t i=0;i<count;i++) {
         JSValue item=JS_GetPropertyUint32(ctx,list,i);
         double v=0;
@@ -1413,7 +1426,13 @@ void pocket_io_pump(void) {
     if(watch_table.open) watch_pump();
 }
 
+// Whether pocket.io was ever read. Without it no pin was claimed, no bus was
+// built and no IR channel exists, so the whole of this is someone else's work.
+static bool built;
+
 void pocket_io_reset(void) {
+    if(!built) return;
+    built=false;
     for(int i=0;i<IO_HANDLES;i++)
         if(handles[i].kind!=H_FREE) handle_close(&handles[i]);
     pocket_api_sub_close_all(&watch_table);
@@ -1425,6 +1444,9 @@ void pocket_io_reset(void) {
     if(ir_channel) { rmt_disable(ir_channel); rmt_del_channel(ir_channel); }
     if(ir_encoder) rmt_del_encoder(ir_encoder);
     ir_channel=NULL; ir_encoder=NULL; ir_busy=false;
+    // After the channel is gone, so nothing can still be reading the frame.
+    free(ir_symbols);
+    ir_symbols=NULL;
     // handle_close() above dropped the last grove user, but an open() that
     // built the bus and then failed to add its device left one with no users.
     if(grove_bus) { i2c_del_master_bus(grove_bus); grove_bus=NULL; }
@@ -1552,17 +1574,11 @@ static void add_open(JSContext *ctx, JSValue parent, const char *child,
     JS_DefinePropertyValueStr(ctx,parent,child,object,JS_PROP_ENUMERABLE);
 }
 
-esp_err_t pocket_io_install(JSContext *ctx, void *user_data) {
-    (void)user_data;
-    pocket_api_register(&io_i2c_capability);
-    pocket_api_register(&io_spi_capability);
-    pocket_api_register(&io_uart_capability);
-    pocket_api_register(&io_gpio_capability);
-    pocket_api_register(&io_ir_capability);
-
+static esp_err_t build_io(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
     // A realm going away takes its callbacks with it, so the tables start empty
-    // on every install. Nothing native can still be open here: app_stop() runs
-    // pocket_io_reset() before the guest goes.
+    // every time this is built. Nothing native can still be open here:
+    // app_stop() runs pocket_io_reset() before the guest goes.
     for(int i=0;i<IO_HANDLES;i++) {
         handles[i].kind=H_FREE;
         handles[i].gpio_watch=-1;
@@ -1577,25 +1593,33 @@ esp_err_t pocket_io_install(JSContext *ctx, void *user_data) {
     watch_table.ctx=ctx;
     claimed_pins=0;
 
-    JSValue root=pocket_api_root(ctx);
-    if(JS_IsUndefined(root)) { JS_FreeValue(ctx,root); return ESP_ERR_INVALID_STATE; }
-
-    JSValue io=JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx,io,"ports",
+    JS_DefinePropertyValueStr(ctx,ns,"ports",
         JS_NewCFunction(ctx,js_ports,"ports",0),JS_PROP_ENUMERABLE);
-    add_open(ctx,io,"i2c",js_i2c_open);
-    add_open(ctx,io,"spi",js_spi_open);
-    add_open(ctx,io,"uart",js_uart_open);
-    add_open(ctx,io,"gpio",js_gpio_open);
+    add_open(ctx,ns,"i2c",js_i2c_open);
+    add_open(ctx,ns,"spi",js_spi_open);
+    add_open(ctx,ns,"uart",js_uart_open);
+    add_open(ctx,ns,"gpio",js_gpio_open);
 
     JSValue ir=JS_NewObject(ctx);
+    if(JS_IsException(ir)) return ESP_ERR_NO_MEM;
     JS_DefinePropertyValueStr(ctx,ir,"send",
         JS_NewCFunction(ctx,ir_send,"send",2),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,io,"ir",ir,JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx,ns,"ir",ir,JS_PROP_ENUMERABLE);
 
-    JS_DefinePropertyValueStr(ctx,root,"io",io,JS_PROP_ENUMERABLE);
-    JS_FreeValue(ctx,root);
+    built=true;
     ESP_LOGI(TAG,"pocket.io ready: %u ports, %d handles",
              (unsigned)PORT_COUNT,IO_HANDLES);
     return ESP_OK;
+}
+
+esp_err_t pocket_io_install(JSContext *ctx, void *user_data) {
+    (void)user_data;
+    // Five capability entries, eager, so a feature test for io.spi answers
+    // without the other four surfaces being built to ask.
+    pocket_api_register(&io_i2c_capability);
+    pocket_api_register(&io_spi_capability);
+    pocket_api_register(&io_uart_capability);
+    pocket_api_register(&io_gpio_capability);
+    pocket_api_register(&io_ir_capability);
+    return pocket_api_lazy(ctx,"io",build_io,NULL);
 }

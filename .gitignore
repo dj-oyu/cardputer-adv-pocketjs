@@ -32,3 +32,7 @@ venv/
 *.tmp
 
 # Keep sdkconfig.defaults*, dependency lockfiles, and test fixtures tracked.
+
+# Host-side lazy-namespace test: objects and binary, built by tools/build_lazy_test.sh
+tools/.lazytest/
+tools/test_lazy_namespace

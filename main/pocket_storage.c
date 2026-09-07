@@ -734,42 +734,44 @@ static JSValue object_prototype(JSContext *ctx) {
     return proto;
 }
 
-esp_err_t pocket_storage_install(JSContext *ctx, void *user_data) {
-    (void)user_data;
+// Everything here runs on the first read of pocket.storage: the class, the
+// per-realm state and the three functions. An app that never stores anything
+// pays for none of it.
+static esp_err_t build_storage(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
     JSRuntime *rt=JS_GetRuntime(ctx);
     JS_NewClassID(rt,&hub_class);
     if(JS_NewClass(rt,hub_class,&hub_class_def)<0) return ESP_FAIL;
-
-    JSValue root=pocket_api_root(ctx);
-    if(!JS_IsObject(root)) {
-        // Nothing to hang the namespace on; installing pocket_api first is the
-        // caller's job and doing it silently here would hide the ordering bug.
-        JS_FreeValue(ctx,root);
-        return ESP_ERR_INVALID_STATE;
-    }
-    if(state) { JS_FreeValue(ctx,root); return ESP_ERR_INVALID_STATE; }
+    if(state) return ESP_ERR_INVALID_STATE;
 
     storage_state_t *st=calloc(1,sizeof(*st));
-    if(!st) { JS_FreeValue(ctx,root); return ESP_ERR_NO_MEM; }
+    if(!st) return ESP_ERR_NO_MEM;
     st->object_proto=JS_UNDEFINED;
     JSValue hub=JS_NewObjectClass(ctx,hub_class);
-    if(JS_IsException(hub)) { free(st); JS_FreeValue(ctx,root); return ESP_FAIL; }
+    if(JS_IsException(hub)) { free(st); return ESP_ERR_NO_MEM; }
     JS_SetOpaque(hub,st);
     state=st;
     st->object_proto=object_prototype(ctx);
 
-    JSValue storage=JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx,storage,"get",
+    JS_DefinePropertyValueStr(ctx,ns,"get",
         JS_NewCFunction(ctx,js_get,"get",2),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,storage,"set",
+    JS_DefinePropertyValueStr(ctx,ns,"set",
         JS_NewCFunction(ctx,js_set,"set",3),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,storage,"remove",
+    JS_DefinePropertyValueStr(ctx,ns,"remove",
         JS_NewCFunction(ctx,js_remove,"remove",2),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,storage,"__hub",hub,0);
-    JS_DefinePropertyValueStr(ctx,root,"storage",storage,JS_PROP_ENUMERABLE);
-    JS_FreeValue(ctx,root);
+    // The hub hangs off the namespace so the realm owns the state and the
+    // finalizer runs with it -- which is also what ends this state's life,
+    // there being no pocket_storage_reset() to call.
+    JS_DefinePropertyValueStr(ctx,ns,"__hub",hub,0);
+    return ESP_OK;
+}
 
+esp_err_t pocket_storage_install(JSContext *ctx, void *user_data) {
+    (void)user_data;
     // Replaces the declared storage.kv entry in place; section 2's contract for
     // it goes from supported=false to a live capability with enforced limits.
-    return pocket_api_register(&storage_capability);
+    // Eager, so a feature test answers without building anything.
+    esp_err_t err=pocket_api_register(&storage_capability);
+    if(err!=ESP_OK) return err;
+    return pocket_api_lazy(ctx,"storage",build_storage,NULL);
 }

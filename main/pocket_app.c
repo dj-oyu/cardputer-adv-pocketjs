@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG = "pocket.app";
@@ -97,8 +98,16 @@ typedef struct {
 
 static const char *const LOG_LEVELS[] = { "debug", "info", "warn", "error" };
 
-static log_record_t log_records[LOG_RECORDS];
-static char         log_arena[LOG_ARENA_BYTES];
+// The ring is taken on the first line an app writes and given back when the
+// app ends. Two kilobytes of .bss otherwise sit there for every program,
+// including the ones that never print -- the same reasoning pocket_fs.c gives
+// for its index, and the same shape: one allocation, freed in the reset.
+typedef struct {
+    log_record_t records[LOG_RECORDS];
+    char         arena[LOG_ARENA_BYTES];
+} log_ring_t;
+
+static log_ring_t  *log_ring;
 static unsigned     log_head, log_count;    // ring of records
 static unsigned     log_write, log_used;    // ring of bytes
 static uint32_t     log_sequence;
@@ -107,6 +116,8 @@ static int64_t      log_window_us;
 static unsigned     log_window_bytes;
 
 static void log_reset(void) {
+    free(log_ring);
+    log_ring=NULL;
     log_head=log_count=log_write=log_used=0;
     log_sequence=0; log_dropped=0;
     log_window_us=0; log_window_bytes=0;
@@ -114,12 +125,20 @@ static void log_reset(void) {
 
 static void log_evict_oldest(void) {
     if(!log_count) return;
-    log_used-=log_records[log_head].length;
+    log_used-=log_ring->records[log_head].length;
     log_head=(log_head+1)%LOG_RECORDS;
     log_count--;
 }
 
-static void log_record(int level, const char *text, size_t length) {
+// Returns false only when the ring could not be taken. A refused record is
+// otherwise a dropped one, which read().dropped already accounts for; the
+// caller that asked for this write by name is the one that turns false into an
+// error, and console.log is not it.
+static bool log_record(int level, const char *text, size_t length) {
+    if(!log_ring) {
+        log_ring=calloc(1,sizeof(*log_ring));
+        if(!log_ring) return false;
+    }
     // Truncate on a character boundary: half a UTF-8 sequence read back through
     // read() would be a string the program cannot print.
     bool truncated=false;
@@ -133,7 +152,7 @@ static void log_record(int level, const char *text, size_t length) {
     // its own older records pushed out by its newest ones.
     int64_t now=esp_timer_get_time();
     if(now-log_window_us>=1000000) { log_window_us=now; log_window_bytes=0; }
-    if(log_window_bytes+length>LOG_BYTES_PER_SEC) { log_dropped++; return; }
+    if(log_window_bytes+length>LOG_BYTES_PER_SEC) { log_dropped++; return true; }
     log_window_bytes+=(unsigned)length;
 
     while(log_count>=LOG_RECORDS || log_used+length>LOG_ARENA_BYTES)
@@ -141,27 +160,28 @@ static void log_record(int level, const char *text, size_t length) {
     unsigned offset=log_write;
     size_t   first=length;
     if(offset+first>LOG_ARENA_BYTES) first=LOG_ARENA_BYTES-offset;
-    memcpy(log_arena+offset,text,first);
-    memcpy(log_arena,text+first,length-first);
+    memcpy(log_ring->arena+offset,text,first);
+    memcpy(log_ring->arena,text+first,length-first);
     log_write=(unsigned)((offset+length)%LOG_ARENA_BYTES);
     log_used+=(unsigned)length;
 
     unsigned slot=(log_head+log_count)%LOG_RECORDS;
-    log_records[slot]=(log_record_t){
+    log_ring->records[slot]=(log_record_t){
         .sequence=++log_sequence,
         .time_ms=(uint32_t)(now/1000),
         .offset=(uint16_t)offset, .length=(uint16_t)length,
         .level=(uint8_t)level, .truncated=truncated,
     };
     log_count++;
+    return true;
 }
 
 static JSValue log_text(JSContext *ctx, const log_record_t *r) {
     char   buffer[LOG_RECORD_BYTES];
     size_t first=r->length;
     if(r->offset+first>LOG_ARENA_BYTES) first=LOG_ARENA_BYTES-r->offset;
-    memcpy(buffer,log_arena+r->offset,first);
-    memcpy(buffer+first,log_arena,r->length-first);
+    memcpy(buffer,log_ring->arena+r->offset,first);
+    memcpy(buffer+first,log_ring->arena,r->length-first);
     return JS_NewStringLen(ctx,buffer,r->length);
 }
 
@@ -188,8 +208,13 @@ static JSValue js_log_write(JSContext *ctx, JSValueConst this_val,
     size_t      length=0;
     const char *text=JS_ToCStringLen(ctx,&length,argv[1]);
     if(!text) return JS_EXCEPTION;
-    log_record(kind,text,length);
+    bool kept=log_record(kind,text,length);
     JS_FreeCString(ctx,text);
+    // The ring is taken on the first write, so this is where running out of
+    // room to keep a log reaches the program that asked for one.
+    if(!kept) return pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,
+                                      "no memory for the log ring",true,
+                                      POCKET_OUTCOME_NOT_APPLIED);
     // Not echoed to USB: section 7 asks the log path not to stop a JS turn on a
     // synchronous full-volume write. read() is how a record leaves the device.
     return JS_UNDEFINED;
@@ -228,7 +253,7 @@ static JSValue js_log_read(JSContext *ctx, JSValueConst this_val,
     JSValue records=JS_NewArray(ctx);
     uint32_t taken=0;
     for(unsigned i=0;i<log_count && (double)taken<limit;i++) {
-        const log_record_t *r=&log_records[(log_head+i)%LOG_RECORDS];
+        const log_record_t *r=&log_ring->records[(log_head+i)%LOG_RECORDS];
         if((double)r->sequence<=after) continue;
         JSValue entry=JS_NewObject(ctx);
         JS_SetPropertyStr(ctx,entry,"sequence",JS_NewUint32(ctx,r->sequence));
@@ -782,6 +807,11 @@ void pocket_app_reset(void) {
     start_hook=stop_hook=JS_UNDEFINED;
     // The sleeps are not settled here: they wait on promise slots, and
     // pocket_api_reset() is what asks them to stop and lets their resolvers go.
+    //
+    // Last, and after the stop hook: the hook may print, and a ring freed
+    // before it ran would simply be taken again. Nothing reads a record once
+    // the realm holding read() is gone.
+    log_reset();
     js_ctx=NULL;
 }
 
@@ -832,6 +862,41 @@ static void define(JSContext *ctx, JSValueConst object, const char *name,
     JS_DefinePropertyValueStr(ctx,object,name,value,JS_PROP_ENUMERABLE);
 }
 
+// The three namespaces this file publishes, plus its one contribution to
+// pocket.device. None of the state below moves with them: pocket_app_pump()
+// reads `phase` on every turn whether or not the app ever names pocket.app,
+// and the console wrapper writes to the log ring from the first line an app
+// prints. What is lazy here is only the objects.
+
+static esp_err_t build_app(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    define(ctx,ns,"start",JS_NewCFunction(ctx,js_start,"start",1));
+    define(ctx,ns,"exit",JS_NewCFunction(ctx,js_exit,"exit",0));
+    define(ctx,ns,"onFrame",JS_NewCFunction(ctx,js_on_frame,"onFrame",1));
+    return ESP_OK;
+}
+
+static esp_err_t build_time(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    define(ctx,ns,"now",JS_NewCFunction(ctx,js_time_now,"now",0));
+    define(ctx,ns,"wall",JS_NewCFunction(ctx,js_time_wall,"wall",0));
+    define(ctx,ns,"sleep",JS_NewCFunction(ctx,js_sleep,"sleep",2));
+    return ESP_OK;
+}
+
+static esp_err_t build_log(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    define(ctx,ns,"write",JS_NewCFunction(ctx,js_log_write,"write",2));
+    define(ctx,ns,"read",JS_NewCFunction(ctx,js_log_read,"read",1));
+    return ESP_OK;
+}
+
+static esp_err_t build_metrics(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    define(ctx,ns,"metrics",JS_NewCFunction(ctx,js_metrics,"metrics",0));
+    return ESP_OK;
+}
+
 esp_err_t pocket_app_install(JSContext *ctx, void *user_data) {
     (void)user_data;
     pocket_api_register(&app_capability);
@@ -858,33 +923,15 @@ esp_err_t pocket_app_install(JSContext *ctx, void *user_data) {
     log_reset();
     js_ctx=ctx;
 
-    JSValue root=pocket_api_root(ctx);
-    if(JS_IsUndefined(root)) { JS_FreeValue(ctx,root); return ESP_ERR_INVALID_STATE; }
-
-    JSValue app=JS_NewObject(ctx);
-    define(ctx,app,"start",JS_NewCFunction(ctx,js_start,"start",1));
-    define(ctx,app,"exit",JS_NewCFunction(ctx,js_exit,"exit",0));
-    define(ctx,app,"onFrame",JS_NewCFunction(ctx,js_on_frame,"onFrame",1));
-    define(ctx,root,"app",app);
-
-    JSValue time=JS_NewObject(ctx);
-    define(ctx,time,"now",JS_NewCFunction(ctx,js_time_now,"now",0));
-    define(ctx,time,"wall",JS_NewCFunction(ctx,js_time_wall,"wall",0));
-    define(ctx,time,"sleep",JS_NewCFunction(ctx,js_sleep,"sleep",2));
-    define(ctx,root,"time",time);
-
-    JSValue log=JS_NewObject(ctx);
-    define(ctx,log,"write",JS_NewCFunction(ctx,js_log_write,"write",2));
-    define(ctx,log,"read",JS_NewCFunction(ctx,js_log_read,"read",1));
-    define(ctx,root,"log",log);
-
-    // device is pocket_api.c's object; metrics belongs beside info because
-    // section 7 puts it there, and adding a property is not editing that file.
-    JSValue device=JS_GetPropertyStr(ctx,root,"device");
-    if(JS_IsObject(device))
-        define(ctx,device,"metrics",JS_NewCFunction(ctx,js_metrics,"metrics",0));
-    JS_FreeValue(ctx,device);
-    JS_FreeValue(ctx,root);
+    esp_err_t err;
+    if((err=pocket_api_lazy(ctx,"app",build_app,NULL))!=ESP_OK) return err;
+    if((err=pocket_api_lazy(ctx,"time",build_time,NULL))!=ESP_OK) return err;
+    if((err=pocket_api_lazy(ctx,"log",build_log,NULL))!=ESP_OK) return err;
+    // device is pocket_api.c's namespace; metrics belongs beside info because
+    // section 7 puts it there, and contributing to it is not editing that file.
+    // Registering second means info is defined first, as it was when the object
+    // was built in one place.
+    if((err=pocket_api_lazy(ctx,"device",build_metrics,NULL))!=ESP_OK) return err;
 
     JSValue global=JS_GetGlobalObject(ctx);
     JSValue console=JS_GetPropertyStr(ctx,global,"console");

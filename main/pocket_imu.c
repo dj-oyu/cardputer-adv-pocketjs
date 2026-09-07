@@ -145,7 +145,14 @@ void pocket_imu_pump(void) {
     pocket_api_sub_deliver(&watch_table,watch_payload,&round);
 }
 
+// Whether pocket.sensors was ever read.
+static bool built;
+
 void pocket_imu_reset(void) {
+    // A run that never read the namespace opened no watch and asked the
+    // gyroscope for nothing, so there is nothing here to put back.
+    if(!built) return;
+    built=false;
     pocket_api_sub_close_all(&watch_table);
     watch_table.ctx=NULL;
     // A program that ended without closing its watches must not leave the
@@ -178,18 +185,11 @@ static const pocket_capability_t imu_capability = {
     .reason=POCKET_REASON_NO_DEVICE, .limits=imu_limits_live, .probe=imu_probe,
 };
 
-esp_err_t pocket_imu_install(JSContext *ctx, void *user_data) {
-    (void)user_data;
-    // maxRateHz is what motion.c actually polls at, so the published limit and
-    // the limit js_watch enforces are the same number by construction.
-    for(unsigned i=0;i<sizeof(imu_limits)/sizeof(imu_limits[0]);i++)
-        imu_limits_live[i]=imu_limits[i];
-    imu_limits_live[0].number=(int32_t)motion_rate_hz();
-    pocket_api_register(&imu_capability);
-
+static esp_err_t build_sensors(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
     for(int i=0;i<POCKET_IMU_WATCHES;i++) {
         // A realm going away takes its callbacks with it. Nothing here survives
-        // a session, so the table starts empty on every install.
+        // a session, so the table starts empty every time it is built.
         watch_slots[i].callback=JS_UNDEFINED;
         watch_slots[i].handle=0;
     }
@@ -197,14 +197,24 @@ esp_err_t pocket_imu_install(JSContext *ctx, void *user_data) {
     watch_table.ctx=ctx;
     follow_gyro_demand(&watch_table);
 
-    JSValue root=pocket_api_root(ctx);
-    if(JS_IsUndefined(root)) { JS_FreeValue(ctx,root); return ESP_ERR_INVALID_STATE; }
-    JSValue sensors=JS_NewObject(ctx);
     JSValue imu=JS_NewObject(ctx);
+    if(JS_IsException(imu)) return ESP_ERR_NO_MEM;
     JS_SetPropertyStr(ctx,imu,"latest",JS_NewCFunction(ctx,js_latest,"latest",0));
     JS_SetPropertyStr(ctx,imu,"watch",JS_NewCFunction(ctx,js_watch,"watch",2));
-    JS_SetPropertyStr(ctx,sensors,"imu",imu);
-    JS_DefinePropertyValueStr(ctx,root,"sensors",sensors,JS_PROP_ENUMERABLE);
-    JS_FreeValue(ctx,root);
+    JS_SetPropertyStr(ctx,ns,"imu",imu);
+    built=true;
     return ESP_OK;
+}
+
+esp_err_t pocket_imu_install(JSContext *ctx, void *user_data) {
+    (void)user_data;
+    // maxRateHz is what motion.c actually polls at, so the published limit and
+    // the limit js_watch enforces are the same number by construction. Eager,
+    // with the capability, so a feature test reads a live limit without the
+    // namespace existing.
+    for(unsigned i=0;i<sizeof(imu_limits)/sizeof(imu_limits[0]);i++)
+        imu_limits_live[i]=imu_limits[i];
+    imu_limits_live[0].number=(int32_t)motion_rate_hz();
+    pocket_api_register(&imu_capability);
+    return pocket_api_lazy(ctx,"sensors",build_sensors,NULL);
 }

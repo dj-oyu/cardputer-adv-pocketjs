@@ -161,6 +161,12 @@ static const char *const UI_FN[F_COUNT] = {
 static JSValue    ui_obj;
 static JSValue    ui_fn[F_COUNT];
 static bool       ui_ready;
+// Whether the four classes and the node/list/screen tables have been made for
+// this realm. They are, on the first read of either pocket.ui or pocket.input:
+// both namespaces are this file's and both can reach the same state -- an
+// input.text prompt opens a node -- so whichever is read first pays for them
+// and the second finds them done.
+static bool       realm_ready;
 static JSContext *ui_ctx;
 static unsigned   live_nodes;
 // The legacy createNode/destroyNode as they were before pocket_ui_attach()
@@ -1188,6 +1194,9 @@ void pocket_ui_reset(void) {
     depth=0; live_nodes=0; held_mask=0;
     toast_box=0; toast_label=0; toast_until=0;
     ui_ready=false; ui_ctx=NULL;
+    // The classes belong to the realm that is going away, so the next session
+    // builds its own on the first read of either namespace.
+    realm_ready=false;
 }
 
 // ------------------------------------------------------------- capabilities
@@ -1350,20 +1359,17 @@ void pocket_ui_attach(JSContext *ctx) {
     JS_FreeValue(ctx,obj);
 }
 
-esp_err_t pocket_ui_install(JSContext *ctx, void *user_data) {
-    (void)user_data;
-    pocket_api_register(&ui_capability);
-    pocket_api_register(&input_capability);
-
+// See realm_ready where it is declared.
+static esp_err_t ensure_realm(JSContext *ctx) {
+    if(realm_ready) return ESP_OK;
     // Nothing here survives a session: the realm going away takes the callbacks
     // and the retained arrays with it, so every table starts empty.
     memset(nodes,0,sizeof(nodes));
     memset(lists,0,sizeof(lists));
     memset(screens,0,sizeof(screens));
     memset(repeat_at,0,sizeof(repeat_at));
-    depth=0; live_nodes=0; held_mask=0;
+    depth=0; held_mask=0;
     toast_box=0; toast_label=0; toast_until=0;
-    ui_ready=false; ui_ctx=ctx;
     for(int i=0;i<UI_ACTION_SUBS;i++) {
         action_slots[i].callback=JS_UNDEFINED;
         action_slots[i].handle=0;
@@ -1382,34 +1388,59 @@ esp_err_t pocket_ui_install(JSContext *ctx, void *user_data) {
             make_class(ctx,&list_class,&list_def,METHODS(list_methods),node_proto);
     JS_FreeValue(ctx,node_proto);
     if(!ok) return ESP_FAIL;
+    realm_ready=true;
+    return ESP_OK;
+}
 
-    JSValue root=pocket_api_root(ctx);
-    if(JS_IsUndefined(root)) { JS_FreeValue(ctx,root); return ESP_ERR_INVALID_STATE; }
-
-    JSValue ui=JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx,ui,"screen",
+static esp_err_t build_ui(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    esp_err_t err=ensure_realm(ctx);
+    if(err!=ESP_OK) return err;
+    JS_DefinePropertyValueStr(ctx,ns,"screen",
         JS_NewCFunction(ctx,js_ui_screen,"screen",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,ui,"push",
+    JS_DefinePropertyValueStr(ctx,ns,"push",
         JS_NewCFunction(ctx,js_ui_push,"push",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,ui,"pop",
+    JS_DefinePropertyValueStr(ctx,ns,"pop",
         JS_NewCFunction(ctx,js_ui_pop,"pop",0),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,ui,"toast",
+    JS_DefinePropertyValueStr(ctx,ns,"toast",
         JS_NewCFunction(ctx,js_ui_toast,"toast",2),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,root,"ui",ui,JS_PROP_ENUMERABLE);
+    return ESP_OK;
+}
 
-    JSValue input=JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx,input,"onAction",
+static esp_err_t build_input(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    esp_err_t err=ensure_realm(ctx);
+    if(err!=ESP_OK) return err;
+    JS_DefinePropertyValueStr(ctx,ns,"onAction",
         JS_NewCFunction(ctx,js_on_action,"onAction",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,input,"onKey",
+    JS_DefinePropertyValueStr(ctx,ns,"onKey",
         JS_NewCFunction(ctx,js_on_key,"onKey",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,input,"held",
+    JS_DefinePropertyValueStr(ctx,ns,"held",
         JS_NewCFunction(ctx,js_held,"held",1),JS_PROP_ENUMERABLE);
     JSValue text=JS_NewObject(ctx);
+    if(JS_IsException(text)) return ESP_ERR_NO_MEM;
     JS_DefinePropertyValueStr(ctx,text,"open",
         JS_NewCFunction(ctx,js_text_open,"open",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,input,"text",text,JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,root,"input",input,JS_PROP_ENUMERABLE);
-
-    JS_FreeValue(ctx,root);
+    JS_DefinePropertyValueStr(ctx,ns,"text",text,JS_PROP_ENUMERABLE);
     return ESP_OK;
+}
+
+esp_err_t pocket_ui_install(JSContext *ctx, void *user_data) {
+    (void)user_data;
+    pocket_api_register(&ui_capability);
+    pocket_api_register(&input_capability);
+
+    // Eager, and it has to be: the node budget guards every app, including the
+    // ones that never read pocket.ui and build their display with the legacy
+    // ui.createNode. pocket_ui_attach() wraps that a few lines after this runs
+    // and counts through live_nodes, so the counter and its realm start clean
+    // whether or not the namespace is ever built.
+    memset(legacy_ids,0,sizeof(legacy_ids));
+    live_nodes=0;
+    ui_ready=false; ui_ctx=ctx;
+    realm_ready=false;
+
+    esp_err_t err=pocket_api_lazy(ctx,"ui",build_ui,NULL);
+    if(err!=ESP_OK) return err;
+    return pocket_api_lazy(ctx,"input",build_input,NULL);
 }

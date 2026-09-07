@@ -418,7 +418,15 @@ void pocket_av_pump(void) {
     if(power_table.open) power_pump();
 }
 
+// Whether either of this file's two namespaces was read. One flag for both:
+// the halves below are no-ops for the namespace that was not built -- a table
+// with no open slot, a tone nothing could have started -- and two flags would
+// be two things to keep in step for no gain.
+static bool built;
+
 void pocket_av_reset(void) {
+    if(!built) return;
+    built=false;
     // The tone is not here: it waits on a promise slot, and pocket_api_reset()
     // is what asks it to stop and lets its resolvers go.
     pocket_api_sub_close_all(&power_table);
@@ -488,15 +496,25 @@ static const pocket_capability_t power_capability = {
     .reason=POCKET_REASON_NO_DEVICE, .limits=power_limits, .probe=power_probe,
 };
 
-esp_err_t pocket_av_install(JSContext *ctx, void *user_data) {
-    (void)user_data;
-    pocket_api_register(&audio_cue_capability);
-    pocket_api_register(&audio_tone_capability);
-    pocket_api_register(&power_capability);
-
-    // A realm going away takes its callbacks with it, so the table starts empty
-    // on every install.
+static esp_err_t build_audio(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    // Nothing could have started a tone without this namespace, so this is the
+    // one place it needs clearing.
     tone.active=false;
+    JS_DefinePropertyValueStr(ctx,ns,"cue",
+        JS_NewCFunction(ctx,js_cue,"cue",1),JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx,ns,"tone",
+        JS_NewCFunction(ctx,js_tone,"tone",2),JS_PROP_ENUMERABLE);
+    add_unsupported(ctx,ns,"capture","open","audio.capture.open");
+    add_unsupported(ctx,ns,"player","open","audio.player.open");
+    built=true;
+    return ESP_OK;
+}
+
+static esp_err_t build_power(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    // A realm going away takes its callbacks with it, so the table starts empty
+    // every time it is built.
     for(int i=0;i<POWER_WATCHES;i++) {
         power_slots[i].callback=JS_UNDEFINED;
         power_slots[i].handle=0;
@@ -504,28 +522,22 @@ esp_err_t pocket_av_install(JSContext *ctx, void *user_data) {
     power_table.open=0;
     power_table.ctx=ctx;
     power_primed=false;
-
-    JSValue root=pocket_api_root(ctx);
-    if(JS_IsUndefined(root)) { JS_FreeValue(ctx,root); return ESP_ERR_INVALID_STATE; }
-
-    JSValue audio=JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx,audio,"cue",
-        JS_NewCFunction(ctx,js_cue,"cue",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,audio,"tone",
-        JS_NewCFunction(ctx,js_tone,"tone",2),JS_PROP_ENUMERABLE);
-    add_unsupported(ctx,audio,"capture","open","audio.capture.open");
-    add_unsupported(ctx,audio,"player","open","audio.player.open");
-    JS_DefinePropertyValueStr(ctx,root,"audio",audio,JS_PROP_ENUMERABLE);
-
-    JSValue power=JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx,power,"status",
+    JS_DefinePropertyValueStr(ctx,ns,"status",
         JS_NewCFunction(ctx,js_status,"status",0),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,power,"onChange",
+    JS_DefinePropertyValueStr(ctx,ns,"onChange",
         JS_NewCFunction(ctx,js_on_change,"onChange",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,power,"keepAwake",
+    JS_DefinePropertyValueStr(ctx,ns,"keepAwake",
         JS_NewCFunction(ctx,js_keep_awake,"keepAwake",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,root,"power",power,JS_PROP_ENUMERABLE);
-
-    JS_FreeValue(ctx,root);
+    built=true;
     return ESP_OK;
+}
+
+esp_err_t pocket_av_install(JSContext *ctx, void *user_data) {
+    (void)user_data;
+    pocket_api_register(&audio_cue_capability);
+    pocket_api_register(&audio_tone_capability);
+    pocket_api_register(&power_capability);
+    esp_err_t err=pocket_api_lazy(ctx,"audio",build_audio,NULL);
+    if(err!=ESP_OK) return err;
+    return pocket_api_lazy(ctx,"power",build_power,NULL);
 }

@@ -16,6 +16,12 @@
 #define POCKET_MAX_REGISTERED    32
 #define POCKET_MAX_SUBSCRIPTIONS 8
 
+// How many namespace contributors may register. Eighteen names have one each
+// and two names have two, so twenty is what is used today; the margin costs
+// twelve bytes of .bss per unused slot and the alternative is the same silent
+// truncation the capability table was found doing.
+#define POCKET_MAX_LAZY 28
+
 // The names of docs/common-api.md section 2, all of them. A name that is not
 // implemented yet still has to answer get() with supported=false rather than
 // throw, so the whole list is declared here and later stages replace entries
@@ -632,6 +638,103 @@ static void define(JSContext *ctx, JSValueConst object,
     JS_DefinePropertyValueStr(ctx,object,name,value,JS_PROP_ENUMERABLE);
 }
 
+// ------------------------------------------------------------ lazy namespaces
+//
+// See the header for why. The table is plain C data; the only thing on the
+// guest heap before an app touches anything is one accessor per name.
+
+typedef struct {
+    const char         *name;       // static; not copied
+    pocket_namespace_fn contribute;
+    void               *user;
+} pocket_lazy_t;
+
+static pocket_lazy_t lazy[POCKET_MAX_LAZY];
+static unsigned      lazy_count;
+
+// The one getter behind every accessor. Its magic is the index of the first
+// contributor for the name, and the rest are found by walking forward -- the
+// two names with a second contributor register it later in the same session,
+// and pocket.device's second is several installs away, so matching by name
+// rather than by adjacency is what makes the order the registration order and
+// not the file order.
+static JSValue js_lazy_namespace(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv, int magic) {
+    (void)argc; (void)argv;
+    if(magic<0 || (unsigned)magic>=lazy_count) return JS_UNDEFINED;
+    const char *name=lazy[magic].name;
+    JSValue ns=JS_NewObject(ctx);
+    if(JS_IsException(ns)) return ns;
+    esp_err_t err=ESP_OK;
+    for(unsigned i=(unsigned)magic;i<lazy_count && err==ESP_OK;i++)
+        if(!strcmp(lazy[i].name,name))
+            err=lazy[i].contribute(ctx,ns,lazy[i].user);
+    if(err!=ESP_OK) {
+        // Nothing half-built is ever installed: the partial object goes and the
+        // accessor stays, so a read after the heap has moved builds it properly
+        // rather than finding a namespace missing half its methods. retryable
+        // says so, because on this board that is often true a second later.
+        JS_FreeValue(ctx,ns);
+        ESP_LOGW(TAG,"pocket.%s could not be built: %s",name,
+                 esp_err_to_name(err));
+        return pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,name,
+                                "no memory to build this namespace",true,NULL);
+    }
+    // Replaces this accessor with the value it produced, in the descriptor
+    // shape the property had when it was built eagerly: enumerable, and
+    // neither writable nor configurable. The getter's own function object has
+    // no referent afterwards and goes with the next collection, so a namespace
+    // an app does touch costs what it always cost and nothing more.
+    JS_DefinePropertyValueStr(ctx,this_val,name,JS_DupValue(ctx,ns),
+                              JS_PROP_ENUMERABLE);
+    return ns;
+}
+
+esp_err_t pocket_api_lazy(JSContext *ctx, const char *name,
+                          pocket_namespace_fn contribute, void *user) {
+    if(!name || !contribute) return ESP_ERR_INVALID_ARG;
+    if(lazy_count>=POCKET_MAX_LAZY) {
+        // Loud for the same reason the capability table is: the symptom of a
+        // silent truncation here is a namespace that is simply absent, which
+        // an app cannot tell from one this firmware does not implement.
+        ESP_LOGE(TAG,"lazy table full at %u; pocket.%s will not exist",
+                 POCKET_MAX_LAZY,name);
+        return ESP_ERR_NO_MEM;
+    }
+    bool first=true;
+    for(unsigned i=0;i<lazy_count;i++)
+        if(!strcmp(lazy[i].name,name)) { first=false; break; }
+    unsigned slot=lazy_count;
+    lazy[slot]=(pocket_lazy_t){.name=name,.contribute=contribute,.user=user};
+    lazy_count++;
+    if(!first) return ESP_OK;   // the accessor is already on the root
+
+    JSValue root=pocket_api_root(ctx);
+    if(!JS_IsObject(root)) {
+        // Installing pocket_api first is the caller's job; doing it silently
+        // here would hide the ordering bug rather than report it.
+        JS_FreeValue(ctx,root);
+        lazy_count--;
+        return ESP_ERR_INVALID_STATE;
+    }
+    // generic_magic rather than getter_magic, and not for want of trying the
+    // latter: a getter is invoked as an ordinary zero-argument call with the
+    // object as `this`, so the general entry point is both the honest type and
+    // the one that needs no cast between incompatible function pointers.
+    JSValue getter=JS_NewCFunctionMagic(ctx,js_lazy_namespace,name,0,
+                                        JS_CFUNC_generic_magic,(int)slot);
+    JSAtom atom=JS_NewAtom(ctx,name);
+    // Configurable, unlike the property it becomes: replacing an accessor with
+    // a value needs it, and the window in which it is configurable ends with
+    // the first read.
+    int ok=JS_DefinePropertyGetSet(ctx,root,atom,getter,JS_UNDEFINED,
+                                   JS_PROP_ENUMERABLE|JS_PROP_CONFIGURABLE);
+    JS_FreeAtom(ctx,atom);
+    JS_FreeValue(ctx,root);
+    if(ok<0) { lazy_count--; return ESP_FAIL; }
+    return ESP_OK;
+}
+
 static JSValue error_prototype(JSContext *ctx) {
     JSValue global=JS_GetGlobalObject(ctx);
     JSValue base=JS_GetPropertyStr(ctx,global,"Error");
@@ -645,8 +748,34 @@ static JSValue error_prototype(JSContext *ctx) {
     return proto;
 }
 
+// The three namespaces this file owns. Each is one object and one or two
+// functions, which is little -- but it is little for every app, including the
+// ones that never mention them.
+
+static esp_err_t build_device(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    define(ctx,ns,"info",JS_NewCFunction(ctx,js_device_info,"info",0));
+    return ESP_OK;
+}
+
+static esp_err_t build_cancel(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    define(ctx,ns,"source",JS_NewCFunction(ctx,js_cancel_source,"source",0));
+    return ESP_OK;
+}
+
+static esp_err_t build_error_codes(JSContext *ctx, JSValueConst ns, void *user) {
+    (void)user;
+    for(unsigned i=0;i<sizeof(error_codes)/sizeof(error_codes[0]);i++)
+        define(ctx,ns,error_codes[i],JS_NewString(ctx,error_codes[i]));
+    return ESP_OK;
+}
+
 esp_err_t pocket_api_install(JSContext *ctx, void *user_data) {
     (void)user_data;
+    // First: a start that failed part way through leaves contributors behind,
+    // and the next session must not inherit them.
+    lazy_count=0;
     JSRuntime *rt=JS_GetRuntime(ctx);
     JS_NewClassID(rt,&hub_class);
     JS_NewClassID(rt,&token_class);
@@ -705,10 +834,9 @@ esp_err_t pocket_api_install(JSContext *ctx, void *user_data) {
     }
     define(ctx,root,"apiVersion",JS_NewString(ctx,POCKET_API_VERSION));
 
-    JSValue device=JS_NewObject(ctx);
-    define(ctx,device,"info",JS_NewCFunction(ctx,js_device_info,"info",0));
-    define(ctx,root,"device",device);
-
+    // Eager, and the only namespace that is. An app feature-tests before it
+    // instantiates, so the thing it asks with must not itself instantiate
+    // anything; see the header.
     JSValue capabilities=JS_NewObject(ctx);
     define(ctx,capabilities,"get",
            JS_NewCFunction(ctx,js_capabilities_get,"get",1));
@@ -716,23 +844,23 @@ esp_err_t pocket_api_install(JSContext *ctx, void *user_data) {
            JS_NewCFunction(ctx,js_capabilities_on_change,"onChange",1));
     define(ctx,root,"capabilities",capabilities);
 
-    JSValue cancel=JS_NewObject(ctx);
-    define(ctx,cancel,"source",
-           JS_NewCFunction(ctx,js_cancel_source,"source",0));
-    define(ctx,root,"cancel",cancel);
-
-    JSValue codes=JS_NewObject(ctx);
-    for(unsigned i=0;i<sizeof(error_codes)/sizeof(error_codes[0]);i++)
-        define(ctx,codes,error_codes[i],JS_NewString(ctx,error_codes[i]));
-    define(ctx,root,"errorCodes",codes);
-
     // The hub is not part of the public shape; it hangs off the root only so
     // that the realm owns the state and the finalizer runs with it.
     JS_DefinePropertyValueStr(ctx,root,"__hub",hub,0);
 
+    // Before the accessors: pocket_api_lazy() finds the root through
+    // globalThis, so the root has to be reachable from it first.
     JSValue global=JS_GetGlobalObject(ctx);
     JS_DefinePropertyValueStr(ctx,global,"pocket",root,JS_PROP_ENUMERABLE);
     JS_FreeValue(ctx,global);
+
+    // device is built lazily even though it is this file's own, because
+    // pocket_app.c adds metrics to it and a namespace with two contributors is
+    // exactly what the mechanism is for. errorCodes is seventeen strings most
+    // apps never read.
+    pocket_api_lazy(ctx,"device",build_device,NULL);
+    pocket_api_lazy(ctx,"cancel",build_cancel,NULL);
+    pocket_api_lazy(ctx,"errorCodes",build_error_codes,NULL);
     return ESP_OK;
 }
 
