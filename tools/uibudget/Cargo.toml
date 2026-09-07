@@ -1,0 +1,14 @@
+# Host harness for the UI core's layout allocator. Deliberately NOT in a cargo
+# workspace: every crate under .cache/pocketjs stands alone for the same reason
+# (cargo-psp), and this one path-depends on two of them.
+[package]
+name = "uibudget"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+pocketjs-core = { path = "../../.cache/pocketjs/engine/core", features = ["std"] }
+pocketjs-render-rgb565 = { path = "../../.cache/pocketjs/engine/backends/rgb565" }
+
+[workspace]

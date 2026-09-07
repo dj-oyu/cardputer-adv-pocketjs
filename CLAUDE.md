@@ -41,6 +41,8 @@ python tools/test_flash_budget.py       # パーティション予約ガード
 python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
 python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで模擬実行しスカラーと全画素比較
 python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
+wsl -e bash -lc "cd tools/uibudget && cargo run --release --bin sweep"    # レイアウト確保の段差
+wsl -e bash -lc "cd tools/uibudget && cargo run --release --bin screen 9 3"  # この画面は載るか
 ```
 
 `main/` のPIEカーネルを触ったら、焼く前にこの3層を通す。詳細は `tools/pie/README.md` と `docs/pie-simd.md`。
@@ -66,7 +68,7 @@ JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EM
 - **PSRAMなし、DRAMは約334KiB。** ホーム画面の空きヒープは実測228KiB（Wi-Fiリンク後）。JSゲストの上限は144KiB — 128KiBだった頃、ネイティブAPIの `.bss` が増えてアプリが解析すら通らなくなった（システムには59KiBの空きがあった）。**capabilityを足すたびにゲストの部屋が減り、それを測る仕組みは無い。**
 - **ゲストは起動時にJSソースを解析するので、ソースのバイト数がヒープを食う。** 実測で6.5KBのアプリはゲスト107KiB、7.6KBは評価に失敗する。アプリのコメントは短く、理由は隣の `README.md` へ。
 - **Rust UIコアはメモリ不足を報告せずパニックして再起動する。** `ui.setText` が引き起こすフォントアトラス再構築が小さなアプリの最大の単発確保。
-- **コアノードが16個を超えると、レイアウトが29,648バイトの連続領域を要求する（33個で59,296）。** taffyのノードが1853バイト要素の倍々Vecに入っているため。アプリ実行中の最大連続空きは実測で23.5KiB程度なので、**16ノード以上の画面は確保に失敗してパニックする**。`ui.createNode` で組んでも同じで、33ノード以上はこの機体では到達不能。安全圏は15ノード。`pocket.ui` はこれを `safeNodes`/`maxNodes` として公開し、越える生成を `OUT_OF_MEMORY` で拒否する。
+- **レイアウトが要求する単一連続ブロックは taffy ノード数で段階的に跳ねる。** taffyノード = ルート + 「木に繋がっていて本文が空でない」ノード（空のテキストランは `layout.rs` の `build()` が `None` を返し木に入らない）。**16以下 → 2,048B / 17〜33 → 29,648B / 34以上 → 59,296B。** アプリ実行中の最大連続空きは実測23.5KiB程度なので、**その段差を跨ぐ画面は確保に失敗し、Rust側がabortする**。`ui.createNode` で組んでも同じで、34ノード以上はこの機体では到達不能。`pocket_ui.c` は空ランを区別せず多めに数えるので、崖の手前で断る側に倒れている。`tools/uibudget/` で焼く前に確認できる（`cargo run --release --bin screen 9 3` が実機の失敗をそのまま再現する）。
 - **`main/keymap.c` は素の `` ` `` `;` `,` `.` `/` に `nav` を立てる。** テキストを受ける画面は `k->text` だけを読み `k->nav` を無視する（`codeedit.c` / `editor.c` / `wifi_ui.c` がそうしている）。
 - **命令キャッシュのアラインメントで、同じカーネルがビルド間で15%動く。** それ未満の差を主張するなら同一バイナリでの比較が要る。
 - **`board_capture` は byte swap と転送の前にバッファを写し、MISOは未配線。** 表示が正しいことをソフトウェアだけでは確認できない。物理確認を依頼する。
