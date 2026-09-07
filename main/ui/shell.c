@@ -39,10 +39,9 @@ static const scene_ops_t SCENES[]={
     {"SOLAR SAIL",    solar_prepare, solar_scene_draw, solar_labels,   0},
     // One row for the plants. It used to be four -- FLOWER RAY, LILY OF VALLEY,
     // SUNFLOWER, SNOWDROP -- which asked somebody to choose between three
-    // flowers they had not seen. The row now rotates the three botanicals on
+    // flowers they had not seen. The row now rotates the botanicals on
     // its own, each change hidden behind a dissolve; the interval and the fade
-    // are named constants in flower.c. FLOWER RAY drew FLOWER_CRYSTAL, which
-    // still exists and is still tested but is no longer a thing to pick.
+    // are named constants in flower.c.
     {"FLOWER", flower_scene_prepare, flower_scene_draw, NULL, 0},
 };
 #define BACKGROUND_N (sizeof(SCENES)/sizeof(SCENES[0]))
@@ -59,6 +58,27 @@ static uint64_t present_sum, prep_sum, loop_sum, hud_sum;
 // a long time "loop" was read as if it were the kernel, and it is not — the
 // sky above the horizon and the scaffolding are a quarter of it.
 static uint64_t kernel_cycles;
+// TEMPORARY, and it splits `hud` the way kernel= splits `loop`. hud has been
+// 6.2 ms for as long as anyone has measured it -- larger than shade, 13% of the
+// frame -- and nothing has ever looked inside it, because every counter added
+// this session went into the scene. It is four different things running once
+// per strip, seventeen times a frame:
+//
+//   fmt    the FPS string, formatted whether or not it is shown
+//   ovl    the scene's overlay (NULL for FLOWER, so zero there)
+//   fps    drawing that string
+//   menu   the whole menu: the layout once a frame, the painting per strip
+//
+// `ovl` is the self-check: FLOWER's overlay is NULL, so it must read 0.00 there
+// or the split is wrong. A counter that can be held against a known zero is
+// worth more than one that cannot.
+//
+// Cycle counts, not esp_timer_get_time(): the timer is 0.90 us a call
+// (docs/pie-simd.md 3.5), and eight of those per strip would be 0.12 ms of
+// measurement on a 6.2 ms subject, concentrated on whichever piece is smallest.
+// `rsr.ccount` is one instruction.
+static uint64_t hud_fmt_cy,hud_ovl_cy,hud_fps_cy,hud_menu_cy;
+#define HUD_FENCE __asm__ __volatile__("":::"memory")
 static uint64_t draw_sum;
 static float fps;
 static unsigned category,setting,app;
@@ -248,6 +268,7 @@ void shell_change_background(int direction) {
     mode=(unsigned)(((int)mode+(int)BACKGROUND_N+direction)%(int)BACKGROUND_N);
     window_start=0;samples=0;max_us=0;draw_sum=0;fps=0;
     present_sum=prep_sum=loop_sum=hud_sum=0;
+    hud_fmt_cy=hud_ovl_cy=hud_fps_cy=hud_menu_cy=0;
     ESP_LOGI("background","MODE %u %s",mode,scene()->name);
 }
 
@@ -287,11 +308,45 @@ static float approach(float value,float target,float amount) {
     float result=value+(target-value)*amount;
     return fabsf(result-target)<0.005f?target:result;
 }
+// The menu's layout is a pure function of the four animated positions and does
+// not depend on which strip is being drawn -- only the *drawing* was clipped,
+// by text()'s strip check at the top. So all of it ran seventeen times a frame
+// to produce the same answer: eleven rows of fades, item_y, lroundf, fminf and
+// a settings getter, of which sixteen repetitions were discarded. It is
+// resolved once into this list and painted per strip.
+//
+// The list holds resolved colours rather than emphases, which moves the three
+// float multiplies and the board_rgb out of the per-strip path with everything
+// else. Shadow then text, in list order, is the same order and the same pixels
+// as the old label() produced.
+// The list lives on shell_draw's stack, not in .bss: the ui task has 32 KB and
+// DIRAM on this board does not (CLAUDE.md). A file-static pointer is what lets
+// label() reach it from two calls down without threading a parameter through
+// menu_layout and menu_list -- the same shape flower.c uses for `petals`.
+typedef struct { int16_t x,y; uint8_t scale; uint16_t color; const char *s; } hud_label_t;
+// Sized from the menu itself, so adding an app or a settings row grows it: two
+// category labels, both lists with their detail line, and the choices overlay
+// with its own label. The +8 is the largest `count` any settings row may offer
+// before this has to be revisited, and the clamp in label() is the backstop if
+// it ever is -- a dropped label is a missing menu row, so it is worth both.
+#define HUD_LABEL_MAX (2 + (APP_N+1) + (SETTING_N+1) + (1+8))
+static hud_label_t *hud_labels;
+static unsigned hud_label_n;
+
 static void label(int x,int y,const char *s,int scale,float emphasis) {
-    if(emphasis<=0)return;
+    if(emphasis<=0||!s)return;
+    if(!hud_labels||hud_label_n>=HUD_LABEL_MAX)return;
     if(emphasis>1)emphasis=1;
-    text(x+1,y+1,s,scale,board_rgb(2,7,15));
-    text(x,y,s,scale,board_rgb(65+172*emphasis,100+146*emphasis,125+130*emphasis));
+    hud_labels[hud_label_n++]=(hud_label_t){(int16_t)x,(int16_t)y,(uint8_t)scale,
+        board_rgb(65+172*emphasis,100+146*emphasis,125+130*emphasis),s};
+}
+static void paint_labels(void) {
+    const uint16_t shadow=board_rgb(2,7,15);
+    for(unsigned i=0;i<hud_label_n;i++) {
+        const hud_label_t *l=&hud_labels[i];
+        text(l->x+1,l->y+1,l->s,l->scale,shadow);
+        text(l->x,l->y,l->s,l->scale,l->color);
+    }
 }
 static float item_y(float delta) {
     // Leave space for the category rail between the previous and focused item.
@@ -314,7 +369,8 @@ static void menu_list(int x,float position,const char *const *items,size_t strid
     float settled=1-fminf(fabsf(position-roundf(position))*4,1);
     if(detail)label(x,89,detail,1,opacity*settled*0.75f);
 }
-static void draw_menu(void) {
+static void menu_layout(void) {
+    hud_label_n=0;
     for(unsigned c=0;c<2;c++) {
         float offset=(c-category_pos)*96;
         float visibility=1-fminf(fabsf(c-category_pos),1);
@@ -404,19 +460,36 @@ void shell_draw(const char *error, unsigned phase) {
     frame_started=started;
     sc->prepare(dt,tilt_x,tilt_y,sc->variant);
     int64_t after_prep=esp_timer_get_time();
+    // Both of these used to run once per strip. Neither depends on the strip.
+    // They stay inside hud_us so that the figure keeps meaning "all of the HUD"
+    // across this change and the before and after can be subtracted; two timer
+    // calls a frame is 1.8 us against the 6.2 ms being measured.
+    hud_label_t labels[HUD_LABEL_MAX];hud_labels=labels;
+    int64_t hud_once=esp_timer_get_time();
+    HUD_FENCE;uint32_t f0=esp_cpu_get_cycle_count();HUD_FENCE;
+    char meter[16];snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
+    HUD_FENCE;uint32_t f1=esp_cpu_get_cycle_count();HUD_FENCE;
+    hud_fmt_cy+=f1-f0;
+    if(!error)menu_layout();
+    HUD_FENCE;hud_menu_cy+=esp_cpu_get_cycle_count()-f1;HUD_FENCE;
+    hud_us+=(unsigned)(esp_timer_get_time()-hud_once);
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H ? LCD_H-strip_y:STRIP_H;
         int64_t band=esp_timer_get_time();
         kernel_cycles+=sc->draw(strip,strip_y,strip_h);
         loop_us+=(unsigned)(esp_timer_get_time()-band);
         band=esp_timer_get_time();
+        HUD_FENCE;uint32_t h0=esp_cpu_get_cycle_count();HUD_FENCE;
         if(sc->overlay)sc->overlay(strip,strip_y,strip_h);
-        char meter[16];snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
+        HUD_FENCE;uint32_t h1=esp_cpu_get_cycle_count();HUD_FENCE;
         if(show_fps)text(194,8,meter,1,muted);
+        HUD_FENCE;uint32_t h3=esp_cpu_get_cycle_count();HUD_FENCE;
+        hud_ovl_cy+=h1-h0;hud_fps_cy+=h3-h1;
         if(error) {
             text(24,69,"APP ERROR",2,white);text(24,94,error,1,muted);
             text(12,123,"ESC / ENTER TO RETURN",1,muted);
-        } else draw_menu();
+        } else paint_labels();
+        HUD_FENCE;hud_menu_cy+=esp_cpu_get_cycle_count()-h3;HUD_FENCE;
         hud_us+=(unsigned)(esp_timer_get_time()-band);
         // Timed apart from the pixels: 240x135x2 bytes at 40 MHz is about
         // 13 ms of bit time whatever the arithmetic above costs, and that is
@@ -440,12 +513,17 @@ void shell_draw(const char *error, unsigned phase) {
         // took: the label it reports is drawn on the sail scene and nothing
         // else logs it, so checking it used to mean reading pixels.
         ESP_LOGI("background",
-            "PERF mode=%u clock=%s fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f hud=%.2f send=%.2f",
+            "PERF mode=%u clock=%s fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f "
+            "hud=%.2f (ovl=%.2f fmt=%.2f fps=%.2f menu=%.2f) send=%.2f",
             mode,solar_sail_time_label(),fps,(double)draw_sum/samples/1000.0,
             (double)prep_sum/samples/1000.0,(double)loop_sum/samples/1000.0,
             (double)kernel_cycles/samples/240000.0,
-            (double)hud_sum/samples/1000.0,(double)present_sum/samples/1000.0);
+            (double)hud_sum/samples/1000.0,
+            (double)hud_ovl_cy/samples/240000.0,(double)hud_fmt_cy/samples/240000.0,
+            (double)hud_fps_cy/samples/240000.0,(double)hud_menu_cy/samples/240000.0,
+            (double)present_sum/samples/1000.0);
         samples=0;draw_sum=0;present_sum=0;prep_sum=0;loop_sum=0;hud_sum=0;kernel_cycles=0;
+        hud_fmt_cy=hud_ovl_cy=hud_fps_cy=hud_menu_cy=0;
         max_us=0;window_start=now;
     }
 }
