@@ -1,5 +1,9 @@
 # IMU axis calibration
 
+**Measured on this unit: `X=AX Y=AY Z=AZ`, scale error −0.5%.** The BMI270 is
+already aligned with the published frame, so `main/motion.c` keeps the identity
+macros. Re-run this if the sensor is reseated or the board revised.
+
 `imucal.js` finds how the BMI270 is oriented on the Cardputer ADV board and
 prints the three macros `main/motion.c` needs:
 
@@ -13,6 +17,13 @@ The orientation is in none of the documents we have — not the schematic, not
 M5Unified, not the datasheet — and no amount of software can determine it. The
 only way is to hold the device in a known orientation and see which component
 gravity lands in. The app walks six of them, two per published axis.
+
+## Why the cable cannot be attached
+
+Two of the six positions cannot be reached with USB plugged in, so the run that
+produces the answer is the one run whose log nobody can read. The result is
+therefore written to the screen in full and saved through `pocket.storage`;
+reopening the app with the cable back on prints it as `IMUCAL_LAST`.
 
 ## Why it does not ask for a key press
 

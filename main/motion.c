@@ -28,13 +28,17 @@ static unsigned failures;
 
 // Board axes to the published frame (x right, y up, z toward the viewer).
 //
-// UNVERIFIED. How Bosch's package sits on the ADV board is in no document we
-// have, and no amount of software can find out, so this is the identity
-// permutation until the hardware says otherwise. The periodic log at the end of
-// motion_poll prints the mapped values in m/s^2 precisely so the six-position
-// check in acceptance condition 7 can be read straight off the monitor. Change
-// only these three lines afterwards: everything downstream reads what they
-// produce, including roll and pitch.
+// Verified on the hardware, and the identity turned out to be right: the BMI270
+// sits on the ADV board already aligned with the frame the spec publishes.
+// Nothing said so -- the orientation is in none of the documents we have, and
+// no amount of software can find it out -- so it was measured by holding the
+// device in six known orientations and seeing which component gravity landed
+// in. That walk is apps/imucal, and it reported X=AX Y=AY Z=AZ with the two
+// observations of every axis agreeing, at a scale error of -0.5%.
+//
+// If the sensor is ever reseated or the board revised, run it again and change
+// only these three lines: everything downstream reads what they produce,
+// including roll and pitch, and the gyroscope goes through them too.
 #define MAP_X(ax,ay,az) (ax)
 #define MAP_Y(ax,ay,az) (ay)
 #define MAP_Z(ax,ay,az) (az)

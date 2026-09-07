@@ -1,9 +1,6 @@
-// IMU axis calibration: six known orientations decide MAP_X/MAP_Y/MAP_Z for
-// main/motion.c. It records on stillness and answers in sound, so no key is
-// needed from a hand holding the device face down.
-//
-// The reasoning, and why this file is terse, are in README.md beside it: the
-// guest parses this source at runtime, so comments here cost heap.
+// IMU axis calibration: six orientations decide MAP_X/MAP_Y/MAP_Z for
+// main/motion.c. Records on stillness, answers in sound, keeps the result.
+// Why, and why this file is terse, are in README.md beside it.
 (function () {
   var P = { w: 1, h: 2, pos: 24, top: 25, left: 28, bg: 64, r: 68, fg: 96 };
   function node(kind, x, y, w, h, color, text) {
@@ -40,8 +37,7 @@
   var foot = node(1, 12, 104, 216, 10, 0x8fa6bcff, 'HOLD STILL. ESC QUITS');
 
   var cap = pocket.capabilities.get('sensors.imu');
-  console.log('IMUCAL CAP ' + cap.supported + ' ' + cap.available + ' ' +
-              JSON.stringify(cap.limits));
+  console.log('IMUCAL CAP ' + cap.supported + ' ' + cap.available);
   if (!cap.supported || !cap.available) {
     say(head, 'NO IMU: ' + cap.reason);
     console.log('IMUCAL_UNAVAILABLE ' + cap.reason);
@@ -52,6 +48,13 @@
   var now = null, recent = [], got = [], peak = [0, 0, 0], seen = 0;
   var idle = pocket.sensors.imu.latest();
   console.log('IMUCAL GYRO BEFORE ' + (idle && idle.gyro ? 'ON' : 'null'));
+
+  // How the answer leaves the device. The walk needs the cable unplugged, so
+  // the log is only read afterwards, by which time that run is over.
+  pocket.storage.get('axes').then(function (r) {
+    if (r) console.log('IMUCAL_LAST ' + r.value.map + ' err=' + r.value.err +
+                       '% gyr=' + r.value.n + (r.value.ok ? ' ok' : ' SUSPECT'));
+  }, function (e) { console.log('IMUCAL_LAST_FAILED ' + e.code); });
 
   var sub = pocket.sensors.imu.watch({ rateHz: 20 }, function (s) {
     now = s;
@@ -106,14 +109,17 @@
                   (map[i].s < 0 ? '-' : '') + NAME[map[i].i].toLowerCase() + ')');
       t += (i ? ' ' : '') + PUB[i] + '=' + (map[i].s < 0 ? '-' : '') + NAME[map[i].i];
     }
-    console.log('IMUCAL_GYRO n=' + seen + ' peak ' + mm(peak[0]) + ' ' +
-                mm(peak[1]) + ' ' + mm(peak[2]));
-    for (i = 0; i < 3; i++)
-      if (peak[i] < 0.05) console.log('IMUCAL_GYRO_FLAT ' + PUB[i]);
     console.log(ok ? 'IMUCAL_OK' : 'IMUCAL_SUSPECT');
-    say(head, ok ? 'DONE, SEE USB LOG' : 'DONE, READINGS DISAGREED');
-    say(live, t); say(stat, 'SCALE ERROR ' + err + '%'); say(spin, 'GYR OFF');
+    // No cable can be attached through six positions, so the answer has to
+    // survive without one: on screen in full, and in storage for later.
+    say(head, ok ? 'DONE' : 'DONE, READINGS DISAGREED');
+    say(live, t);
+    say(stat, 'ERR ' + err + '%  GYR ' + mm(peak[0]) + ' ' + mm(peak[1]) + ' ' + mm(peak[2]));
+    say(spin, 'SAVING');
     say(foot, 'ESC QUITS');
+    pocket.storage.set('axes', { map: t, err: err, peak: peak, n: seen, ok: ok })
+      .then(function () { say(spin, 'SAVED'); },
+            function (e) { say(spin, 'SAVE ' + e.code); });
     sub.close();
     sub.close();          // documented no-op; if it were not, this throws
     checkAt = ticks + 10;
@@ -152,14 +158,12 @@
         console.log('IMUCAL_SAMPLE ' + got.length + ' ' + mm(a.x) + ' ' +
                     mm(a.y) + ' ' + mm(a.z));
         beep(1046);
-        // recent is deliberately kept: clearing it makes steady() false for the
-        // next twelve samples, which the re-arm below would read as movement and
-        // record the same position again without anyone touching the device.
+        // recent is kept: clearing it reads as movement to the re-arm below.
         still = 0; armed = false; moved = 0;
         if (got.length === 6) { report(); return; }
       }
     } else {
-          moved = steady() ? 0 : moved + 1;
+      moved = steady() ? 0 : moved + 1;
       if (moved >= 10) { armed = true; still = 0; beep(523); }
     }
     show();
