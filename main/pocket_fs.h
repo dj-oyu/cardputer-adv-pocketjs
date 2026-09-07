@@ -32,8 +32,8 @@ esp_err_t pocket_fs_install(JSContext *ctx, void *user_data);
 // uncommitted create/replace has its temporary blocks erased, the list cursors
 // and volume subscriptions are dropped, and the in-RAM index is freed. Call
 // from app_stop() while the guest is still alive. Nothing of this surface
-// outlives a session except 449 bytes of static tables; the index is rebuilt
-// from 64 sector headers the next time an app touches a file.
+// outlives a session except 481 bytes of static tables; the 504-byte index is
+// rebuilt from 64 sector headers the next time an app touches a file.
 void pocket_fs_reset(void);
 
 // Which app's files app:/ resolves to. Objects carry an owner hash and a lookup

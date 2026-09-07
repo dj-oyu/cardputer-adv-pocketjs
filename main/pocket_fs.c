@@ -23,13 +23,20 @@ static const char *TAG = "pocket.fs";
 // `storage` would take the person's saved programs with it, which section 10 of
 // docs/filesystem-api.md names as the thing not to do.
 //
-// So app:/ is a small log-structured store written here, in the region behind
+// So app:/ is a small copy-on-write store written here, in the region behind
 // srcstore's slots. One sector is one block; a block is a 24-byte header and up
-// to 4072 bytes of payload; an object -- a file or a directory -- is one
-// metadata block and, for a file, as many data blocks as it needs. Nothing is
-// ever rewritten in place: a new version is written to free sectors and becomes
-// visible the moment its metadata block lands. That single write is the commit
-// point, and it is what makes atomicReplace true.
+// to 4072 bytes of payload; an object -- a file or a directory -- is one INODE
+// block that names the sectors holding its data. Nothing is ever rewritten in
+// place: a new version goes to free sectors and becomes visible the moment its
+// inode lands. That single write is the commit point, and it is what makes
+// atomicReplace true.
+//
+// The inode is what keeps the host out of DRAM. Because the block list lives on
+// flash, RAM holds two 64-bit allocation bitmaps and six bytes per object -- 504
+// bytes for the whole store -- and a lookup pays one ~120-byte read for the one
+// candidate a name hash did not rule out. A design that cached names and block
+// maps in RAM instead measured 3080 bytes and would have grown with the region;
+// this one does not.
 //
 // What it deliberately is not: crash-safe. The design gives the property by
 // construction, but section 6 asks for a power-cut test before the feature is
@@ -88,87 +95,122 @@ _Static_assert(FS_BASE==0x60000u, "srcstore no longer ends where app:/ begins");
 #define FS_RESERVE_SECTORS 4
 
 // ------------------------------------------------------------ block format
+//
+// A block is one sector: a 24-byte header and up to 4072 bytes of payload. The
+// header is written together with the payload and the CRC covers the payload,
+// so a torn write is caught by arithmetic rather than by trusting that a magic
+// number implies the bytes behind it.
 
-#define FS_MAGIC 0x31534650u    // "PFS1"
-#define FS_ERASED 0xffffffffu
+#define FS_MAGIC   0x31534650u    // "PFS1"
+#define FS_ERASED  0xffffffffu
+#define FS_NO_SECTOR 0xffu
 
-#define FS_KIND_DATA  0u
-#define FS_KIND_FILE  1u
-#define FS_KIND_DIR   2u
-#define FS_KIND_GONE  3u        // a tombstone: this object was removed
+#define FS_KIND_DATA 0u
+#define FS_KIND_FILE 1u
+#define FS_KIND_DIR  2u
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;
     uint32_t owner;     // FNV-1a of the owning app id
-    uint32_t gen;       // the version of this object the block was written for
+    uint32_t gen;       // this object's version; the highest one is the live one
     uint16_t obj;       // object id, 1..FS_MAX_OBJECTS
-    uint16_t index;     // 0 = metadata, 1.. = data block index-1
+    uint16_t index;     // 0 = inode, 1.. = data block index-1
     uint16_t len;       // payload bytes
     uint16_t kind;      // FS_KIND_*, FS_KIND_DATA on a data block
     uint32_t crc;       // esp_crc32_le of the payload
 } fs_blk_t;
 _Static_assert(sizeof(fs_blk_t)==24, "the block header must stay 4-byte tidy");
 
-// The metadata payload, followed by name_len bytes of name.
+// The inode: the payload of a block with index 0, followed by the name.
 //
-// content_gen is the generation whose data blocks this metadata publishes, and
-// it is separate from the header's gen so that a rename -- which writes new
-// metadata and leaves every data block alone -- does not orphan the data. It is
-// also what makes an interrupted write invisible: blocks written for a
-// generation above content_gen have not been published and never will be.
+// It NAMES the sectors holding its data. That one field is what keeps the host
+// index small: with the block list on flash there is nothing in RAM that has to
+// remember where a file's bytes are, and finding them is an array lookup rather
+// than a scan. A sector number fits in a byte because the region is 64 sectors;
+// growing it past 255 means widening this field and the format with it.
+//
+// It is also the whole of the commit protocol. Writing this block publishes a
+// version: before it lands the new data sectors are referenced by nothing, and
+// after it lands the old ones are. Recovery needs no journal and no ordering
+// rule beyond "the highest gen for an object wins".
 typedef struct __attribute__((packed)) {
-    uint32_t content_gen;
-    uint32_t size;          // file bytes; 0 for a directory
-    int64_t  mtime_ms;      // Unix ms, or 0 when the clock could not be trusted
-    uint16_t parent;        // containing directory, 0 for the volume root
-    uint16_t blocks;        // data blocks in this version
+    uint32_t size;              // file bytes; 0 for a directory
+    int64_t  mtime_ms;          // Unix ms, or 0 when the clock could not be trusted
+    uint16_t parent;            // containing directory, 0 for the volume root
     uint16_t name_len;
+    uint16_t blocks;            // valid entries in sector[]
     uint16_t reserved;
-} fs_meta_t;
-_Static_assert(sizeof(fs_meta_t)==24, "the metadata payload must stay packed");
+    uint8_t  sector[FS_MAX_BLOCKS];
+    uint8_t  pad;
+} fs_inode_t;
+_Static_assert(sizeof(fs_inode_t)==28, "the inode payload must stay packed");
 
-#define FS_META_MAX (sizeof(fs_meta_t)+FS_MAX_NAME)
+#define FS_INODE_MAX (sizeof(fs_inode_t)+FS_MAX_NAME)
 
-// ------------------------------------------------------------- the store
+// ------------------------------------------------------------- the index
 //
-// Built by mount() from 64 header reads, held only for the session that asked
-// for it: allocated on the first file operation and freed by pocket_fs_reset(),
-// so an app that never opens a file pays nothing and an app that does gives the
-// room back when it ends.
-
-typedef enum { SEC_FREE, SEC_DIRTY, SEC_USED } fs_sec_state_t;
+// What the host keeps in RAM, and deliberately no more:
+//
+//   two 64-bit words   which sectors are spoken for and which need an erase
+//   six bytes per id   where the inode is, what it is, whose child it is, and
+//                      16 bits of its name
+//
+// The six-byte digest can only ever say NO. A name matches when the hash and
+// the parent match AND the inode read from flash agrees, which is the same
+// hash-then-verify shape pocket_storage.c uses for its NVS keys: a hash is not
+// a name, and the stored copy is what turns "this could be it" into "this is
+// it". A lookup therefore costs one small flash read, not 64 bytes of DRAM per
+// file for the whole run.
+//
+// A tiny window of decoded inodes sits behind object(), so the walk of a path
+// or the building of a listing does not re-read the same inode. Any change to
+// the store bumps `mutations`, which is also the window's epoch, so a stale
+// entry cannot survive a write.
 
 typedef struct {
-    uint16_t obj;       // 0 unless SEC_USED
-    uint16_t index;
-    uint32_t gen;
-    uint8_t  state;
-} fs_sec_t;
+    uint8_t  sector;    // the sector holding this object's inode
+    uint8_t  kind;      // FS_KIND_FILE / FS_KIND_DIR; 0 when the id is free
+    uint16_t parent;
+    uint16_t hash;      // 16 bits of the name, enough to pick one candidate
+} fs_dir_t;
 
+// A decoded inode. Only ever lives in the window below or on a caller's stack.
 typedef struct {
     uint32_t owner;
-    uint32_t gen;           // the newest metadata block's generation
-    uint32_t content_gen;
+    uint32_t gen;
     uint32_t size;
     int64_t  mtime_ms;
     uint16_t parent;
     uint16_t blocks;
-    uint8_t  kind;          // FS_KIND_FILE / FS_KIND_DIR; 0 when the id is free
+    uint8_t  kind;
     uint8_t  name_len;
+    uint8_t  sector[FS_MAX_BLOCKS];
     char     name[FS_MAX_NAME];
 } fs_obj_t;
 
+#define FS_WINDOW 3
+
 typedef struct {
-    fs_sec_t sec[FS_SECTORS];
-    fs_obj_t obj[FS_MAX_OBJECTS];       // obj[i] is object id i+1
-    uint32_t mutations;                 // every published change bumps this
+    uint16_t id;        // 0 marks an empty slot
+    uint32_t epoch;     // the mutation count this was read at
+    fs_obj_t o;
+} fs_win_t;
+
+typedef struct {
+    uint64_t used;      // one bit per sector: referenced, or held by a writer
+    uint64_t dirty;     // one bit per sector: holds bytes, needs an erase first
+    fs_dir_t dir[FS_MAX_OBJECTS];
+    fs_win_t win[FS_WINDOW];
+    uint32_t mutations;
+    uint16_t mine;      // sectors the current owner holds, for the quota
+    uint8_t  next_win;
 } fs_index_t;
 
-// The index is the only heap this surface holds for the life of the run, so its
-// size is asserted rather than left to be discovered by an app that runs out of
-// room. Growing FS_MAX_OBJECTS or a name costs internal DRAM here and nowhere
-// else; the assert is what makes that visible at build time.
-_Static_assert(sizeof(fs_index_t)==3080, "the app: index changed size");
+// The index is the only heap this surface holds, so its size is asserted rather
+// than left to be discovered by an app that runs out of room. Growing
+// FS_MAX_OBJECTS, FS_SECTORS or the window costs internal DRAM here and nowhere
+// else, and the assert is what makes that visible at build time.
+_Static_assert(sizeof(fs_index_t)==504, "the app: index changed size");
 
 static const esp_partition_t *part;
 static fs_index_t            *store;
@@ -177,7 +219,7 @@ static bool                   mount_failed;
 // ------------------------------------------------------------------ owner
 
 #define FS_DEFAULT_OWNER "local.default"
-static char  owner_id[48] = FS_DEFAULT_OWNER;
+static char     owner_id[48] = FS_DEFAULT_OWNER;
 static uint32_t owner_hash;
 
 static uint32_t fnv1a(const void *data, size_t length) {
@@ -187,6 +229,11 @@ static uint32_t fnv1a(const void *data, size_t length) {
     // 0 and the erased word are reserved for "no owner here", so a hash landing
     // on either is nudged rather than allowed to look like an empty sector.
     return (hash==0||hash==FS_ERASED)?1u:hash;
+}
+
+static uint16_t name_hash(const char *name, size_t length) {
+    uint32_t h=fnv1a(name,length);
+    return (uint16_t)(h^(h>>16));
 }
 
 void pocket_fs_set_owner(const char *app_id) {
@@ -199,33 +246,45 @@ void pocket_fs_set_owner(const char *app_id) {
 
 static uint32_t sector_at(unsigned s) { return FS_BASE+(uint32_t)s*FS_SECTOR; }
 
+#define BIT(s)      (1ull<<(s))
+#define IS_USED(s)  ((store->used&BIT(s))!=0)
+#define IS_DIRTY(s) ((store->dirty&BIT(s))!=0)
+
 static bool sector_erase(unsigned s) {
     if(esp_partition_erase_range(part,sector_at(s),FS_SECTOR)!=ESP_OK) {
+        // Left dirty rather than free: a sector whose erase failed may hold
+        // anything, and writing over it would produce a block that verifies
+        // nowhere. It stays out of the allocator until an erase does succeed.
         ESP_LOGW(TAG,"erase of sector %u failed",s);
-        store->sec[s].state=SEC_DIRTY;
+        store->used&=~BIT(s);
+        store->dirty|=BIT(s);
         return false;
     }
-    store->sec[s]=(fs_sec_t){.state=SEC_FREE};
+    store->used&=~BIT(s);
+    store->dirty&=~BIT(s);
     return true;
 }
 
-// Frees the sector an object version no longer needs. A failed erase leaves the
-// sector marked dirty, which keeps it out of the allocator until an erase does
-// succeed rather than letting a half-erased sector be written over.
+// Gives a sector back. Only ever called for a sector this owner holds, which is
+// why the quota counter can be maintained without asking whose it was.
 static void sector_release(unsigned s) {
-    if(store->sec[s].state==SEC_USED) sector_erase(s);
+    if(s>=FS_SECTORS||!IS_USED(s)) return;
+    if(store->mine) store->mine--;
+    sector_erase(s);
 }
 
-// A sector to write into, erased and ready. SEC_FREE sectors are handed out
-// first because they need no erase; a dirty one costs the ~30ms a 4 KiB erase
-// takes on this flash, which is a third of a frame and is why the writer only
-// allocates when its staging buffer is actually full.
+// A sector to write into, erased and ready. Already-erased sectors go first
+// because they need no erase; a dirty one costs the time a 4 KiB erase takes on
+// this flash, which is why a writer only allocates when its staging buffer is
+// actually full.
 static int sector_take(void) {
     for(unsigned pass=0;pass<2;pass++)
         for(unsigned s=0;s<FS_SECTORS;s++) {
-            if(pass==0 && store->sec[s].state!=SEC_FREE) continue;
-            if(pass==1 && store->sec[s].state!=SEC_DIRTY) continue;
-            if(pass==1 && !sector_erase(s)) continue;
+            if(IS_USED(s)) continue;
+            if(pass==0&&IS_DIRTY(s)) continue;
+            if(pass==1&&!sector_erase(s)) continue;
+            store->used|=BIT(s);
+            store->mine++;
             return (int)s;
         }
     return -1;
@@ -233,34 +292,18 @@ static int sector_take(void) {
 
 static unsigned sectors_free(void) {
     unsigned n=0;
-    for(unsigned s=0;s<FS_SECTORS;s++)
-        if(store->sec[s].state!=SEC_USED) n++;
-    return n;
-}
-
-// Sectors this owner is holding. Charged in whole sectors because that is the
-// unit the flash gives out, so quotaBytes means what the allocator means.
-static unsigned sectors_used_by_owner(void) {
-    unsigned n=0;
-    for(unsigned s=0;s<FS_SECTORS;s++) {
-        if(store->sec[s].state!=SEC_USED) continue;
-        const fs_obj_t *o=&store->obj[store->sec[s].obj-1];
-        if(o->owner==owner_hash) n++;
-    }
+    for(unsigned s=0;s<FS_SECTORS;s++) if(!IS_USED(s)) n++;
     return n;
 }
 
 // True when `want` more sectors may be taken: both the app's own quota and the
 // floor that keeps a full store still emptiable.
 static bool room_for(unsigned want) {
-    if(sectors_used_by_owner()+want>FS_QUOTA_SECTORS) return false;
-    unsigned free_now=sectors_free();
-    return free_now>=want+FS_RESERVE_SECTORS;
+    if(store->mine+want>FS_QUOTA_SECTORS) return false;
+    return sectors_free()>=want+FS_RESERVE_SECTORS;
 }
 
-// Writes one block into an already-erased sector. Header and payload go out as
-// one call so there is no window in which the header is present and the payload
-// is not; a torn write is caught by the CRC, never by trusting the magic alone.
+// Writes one block into an already-erased sector.
 static bool block_write(unsigned s, const fs_blk_t *hdr,
                         const void *payload, size_t len) {
     uint8_t head[sizeof(fs_blk_t)];
@@ -268,8 +311,8 @@ static bool block_write(unsigned s, const fs_blk_t *hdr,
     if(esp_partition_write(part,sector_at(s),head,sizeof(head))!=ESP_OK) goto bad;
     if(len) {
         size_t body=len&~(size_t)3, tail=len-body;
-        if(body && esp_partition_write(part,sector_at(s)+sizeof(fs_blk_t),
-                                       payload,body)!=ESP_OK) goto bad;
+        if(body&&esp_partition_write(part,sector_at(s)+sizeof(fs_blk_t),
+                                     payload,body)!=ESP_OK) goto bad;
         if(tail) {
             // Flash writes want whole words; the last few bytes ride in a word
             // padded with the erased value so the rest of the sector is
@@ -280,12 +323,10 @@ static bool block_write(unsigned s, const fs_blk_t *hdr,
                                    word,sizeof(word))!=ESP_OK) goto bad;
         }
     }
-    store->sec[s]=(fs_sec_t){.obj=hdr->obj,.index=hdr->index,.gen=hdr->gen,
-                             .state=SEC_USED};
     return true;
 bad:
     ESP_LOGW(TAG,"write to sector %u failed",s);
-    store->sec[s].state=SEC_DIRTY;
+    store->dirty|=BIT(s);
     return false;
 }
 
@@ -309,41 +350,70 @@ static bool block_verify(unsigned s, const fs_blk_t *hdr) {
     return crc==hdr->crc;
 }
 
+// ------------------------------------------------------------------ inodes
+
+// Reads and verifies the inode in sector `s`. This is the one flash read the
+// small index trades DRAM for, and it is ~120 bytes.
+static bool inode_read(unsigned s, fs_obj_t *out) {
+    fs_blk_t hdr;
+    if(s>=FS_SECTORS||!block_header(s,&hdr)) return false;
+    if(hdr.magic!=FS_MAGIC||hdr.index!=0||hdr.len<sizeof(fs_inode_t)||
+       hdr.len>FS_INODE_MAX||(hdr.kind!=FS_KIND_FILE&&hdr.kind!=FS_KIND_DIR))
+        return false;
+    uint8_t payload[FS_INODE_MAX];
+    if(esp_partition_read(part,sector_at(s)+sizeof(hdr),payload,hdr.len)!=ESP_OK)
+        return false;
+    if(esp_crc32_le(0,payload,hdr.len)!=hdr.crc) return false;
+    fs_inode_t node;
+    memcpy(&node,payload,sizeof(node));
+    if(node.name_len<1||node.name_len>FS_MAX_NAME||
+       sizeof(node)+node.name_len!=hdr.len||node.blocks>FS_MAX_BLOCKS)
+        return false;
+    memset(out,0,sizeof(*out));
+    out->owner=hdr.owner; out->gen=hdr.gen; out->kind=(uint8_t)hdr.kind;
+    out->size=node.size; out->mtime_ms=node.mtime_ms; out->parent=node.parent;
+    out->blocks=node.blocks; out->name_len=(uint8_t)node.name_len;
+    memcpy(out->sector,node.sector,FS_MAX_BLOCKS);
+    memcpy(out->name,payload+sizeof(node),node.name_len);
+    return true;
+}
+
+// The decoded inode for a live object, through the window. NULL when the id is
+// free or its inode no longer reads back.
+//
+// The pointer is valid until the next call: the window is three slots deep so
+// that a path walk and a listing do not thrash, but a caller that needs two
+// objects at once copies what it needs. Any mutation invalidates every slot.
+static const fs_obj_t *object(uint16_t id) {
+    if(id<1||id>FS_MAX_OBJECTS||!store) return NULL;
+    fs_dir_t *d=&store->dir[id-1];
+    if(!d->kind) return NULL;
+    for(int i=0;i<FS_WINDOW;i++)
+        if(store->win[i].id==id&&store->win[i].epoch==store->mutations)
+            return &store->win[i].o;
+    fs_win_t *w=&store->win[store->next_win];
+    store->next_win=(uint8_t)((store->next_win+1)%FS_WINDOW);
+    w->id=0;
+    if(!inode_read(d->sector,&w->o)) {
+        ESP_LOGW(TAG,"object %u has no readable inode",(unsigned)id);
+        return NULL;
+    }
+    w->id=id;
+    w->epoch=store->mutations;
+    return &w->o;
+}
+
 // ------------------------------------------------------------------ mount
-
-// Which sector holds (obj,store) for the object's published generation, or -1.
-// The live block for an store is the newest one at or below content_gen:
-// anything above it belongs to a version that never committed, and anything
-// below has been superseded by a rewrite -- which is how append rewrites its
-// partial tail block without disturbing the blocks before it.
-static int block_find(uint16_t obj, uint16_t idx, uint32_t content_gen) {
-    int best=-1; uint32_t best_gen=0;
-    for(unsigned s=0;s<FS_SECTORS;s++) {
-        const fs_sec_t *e=&store->sec[s];
-        if(e->state!=SEC_USED||e->obj!=obj||e->index!=idx) continue;
-        if(e->gen>content_gen) continue;
-        if(best<0||e->gen>=best_gen) { best=(int)s; best_gen=e->gen; }
-    }
-    return best;
-}
-
-// Erases every block of `obj` that the published version does not use. Run
-// after a commit and once per object at mount, so an interrupted write costs
-// sectors until the next mount and never costs correctness.
-static void collect(uint16_t obj) {
-    const fs_obj_t *o=&store->obj[obj-1];
-    for(unsigned s=0;s<FS_SECTORS;s++) {
-        const fs_sec_t *e=&store->sec[s];
-        if(e->state!=SEC_USED||e->obj!=obj) continue;
-        if(e->index==0) { if(e->gen!=o->gen) sector_release(s); continue; }
-        if(e->gen>o->content_gen||e->index>o->blocks) { sector_release(s); continue; }
-        if(block_find(obj,e->index,o->content_gen)!=(int)s) sector_release(s);
-    }
-}
-
-// Reads the sector headers, picks the newest metadata block for each object and
-// throws away what no published version refers to. 64 header reads plus one
-// small payload read per live object; nothing here reads a data block.
+//
+// One pass over 64 sector headers picks the newest inode for each object, and a
+// second reads those inodes to learn which sectors they reference. Everything
+// referenced becomes used; everything else that holds bytes becomes dirty and
+// is erased only when the allocator needs it, so an interrupted write costs a
+// sector until something asks for it and never costs correctness.
+//
+// There is no superblock on purpose. One would save this scan and cost a write
+// to the same sector on every operation, which is a wear hotspot the size of
+// this region does not justify.
 static bool mount(void) {
     if(store) return true;
     if(mount_failed) return false;
@@ -354,65 +424,61 @@ static bool mount(void) {
         return false;
     }
     store=calloc(1,sizeof(*store));
-    if(!store) { ESP_LOGW(TAG,"no memory for the store"); mount_failed=true; return false; }
+    if(!store) { ESP_LOGW(TAG,"no memory for the index"); mount_failed=true; return false; }
 
-    uint32_t meta_gen[FS_MAX_OBJECTS]={0};
-    int      meta_sec[FS_MAX_OBJECTS];
-    for(int i=0;i<FS_MAX_OBJECTS;i++) meta_sec[i]=-1;
+    uint8_t  inode_at[FS_MAX_OBJECTS];
+    uint32_t inode_gen[FS_MAX_OBJECTS];
+    memset(inode_at,FS_NO_SECTOR,sizeof(inode_at));
+    memset(inode_gen,0,sizeof(inode_gen));
 
     for(unsigned s=0;s<FS_SECTORS;s++) {
         fs_blk_t hdr;
-        if(!block_header(s,&hdr)) { store->sec[s].state=SEC_DIRTY; continue; }
-        if(hdr.magic==FS_ERASED) { store->sec[s].state=SEC_FREE; continue; }
+        if(!block_header(s,&hdr)) { store->dirty|=BIT(s); continue; }
+        if(hdr.magic==FS_ERASED) continue;              // erased: free and clean
+        store->dirty|=BIT(s);                           // until something claims it
         if(hdr.magic!=FS_MAGIC||hdr.obj<1||hdr.obj>FS_MAX_OBJECTS||
-           hdr.len>FS_BLOCK_PAYLOAD) { store->sec[s].state=SEC_DIRTY; continue; }
-        store->sec[s]=(fs_sec_t){.obj=hdr.obj,.index=hdr.index,.gen=hdr.gen,
-                                 .state=SEC_USED};
-        if(hdr.index!=0) continue;
-        // Metadata is small and it decides what everything else means, so it is
-        // the one thing mount verifies. A data block is verified when read.
-        if(hdr.len<sizeof(fs_meta_t)||hdr.len>FS_META_MAX||!block_verify(s,&hdr)) {
-            ESP_LOGW(TAG,"sector %u holds unreadable metadata",s);
-            store->sec[s].state=SEC_DIRTY;
-            continue;
-        }
+           hdr.len>FS_BLOCK_PAYLOAD||hdr.index!=0) continue;
         int i=hdr.obj-1;
-        if(meta_sec[i]<0||hdr.gen>=meta_gen[i]) { meta_sec[i]=(int)s; meta_gen[i]=hdr.gen; }
+        if(inode_at[i]==FS_NO_SECTOR||hdr.gen>=inode_gen[i]) {
+            inode_at[i]=(uint8_t)s;
+            inode_gen[i]=hdr.gen;
+        }
     }
 
     unsigned live=0;
     for(int i=0;i<FS_MAX_OBJECTS;i++) {
-        if(meta_sec[i]<0) continue;
-        uint8_t payload[FS_META_MAX];
-        fs_blk_t hdr;
-        if(!block_header((unsigned)meta_sec[i],&hdr)) continue;
-        if(esp_partition_read(part,sector_at((unsigned)meta_sec[i])+sizeof(hdr),
-                              payload,hdr.len)!=ESP_OK) continue;
-        fs_meta_t meta;
-        memcpy(&meta,payload,sizeof(meta));
-        if(hdr.kind==FS_KIND_GONE||meta.name_len<1||meta.name_len>FS_MAX_NAME||
-           sizeof(meta)+meta.name_len>hdr.len) {
-            // A tombstone has done its job once the version it retired is gone,
-            // so it is collected here and the object id becomes free again.
-            store->obj[i].gen=hdr.gen;
-            store->obj[i].content_gen=hdr.gen;
-            store->obj[i].blocks=0;
-            collect((uint16_t)(i+1));
-            sector_release((unsigned)meta_sec[i]);
-            memset(&store->obj[i],0,sizeof(store->obj[i]));
-            continue;
+        if(inode_at[i]==FS_NO_SECTOR) continue;
+        fs_obj_t o;
+        // A removal erases the inode, so an object with no readable inode is an
+        // object that is gone. Its data sectors stay dirty and are reclaimed by
+        // the allocator; nothing has to be replayed.
+        if(!inode_read(inode_at[i],&o)) continue;
+        store->dir[i].sector=inode_at[i];
+        store->dir[i].kind=o.kind;
+        store->dir[i].parent=o.parent;
+        store->dir[i].hash=name_hash(o.name,o.name_len);
+        store->used|=BIT(inode_at[i]);
+        store->dirty&=~BIT(inode_at[i]);
+        if(o.owner==owner_hash) store->mine++;
+        for(unsigned b=0;b<o.blocks;b++) {
+            unsigned s=o.sector[b];
+            if(s>=FS_SECTORS) continue;
+            fs_blk_t hdr;
+            // The inode owns the sector either way; a header that disagrees is
+            // logged and the read of that block will fail its CRC, which is a
+            // more useful answer than making the whole file disappear.
+            if(!block_header(s,&hdr)||hdr.magic!=FS_MAGIC||hdr.obj!=i+1||
+               hdr.index!=b+1)
+                ESP_LOGW(TAG,"object %d block %u points at a stranger",i+1,b+1);
+            store->used|=BIT(s);
+            store->dirty&=~BIT(s);
+            if(o.owner==owner_hash) store->mine++;
         }
-        fs_obj_t *o=&store->obj[i];
-        o->owner=hdr.owner; o->gen=hdr.gen; o->content_gen=meta.content_gen;
-        o->size=meta.size; o->mtime_ms=meta.mtime_ms; o->parent=meta.parent;
-        o->blocks=meta.blocks; o->kind=(uint8_t)hdr.kind;
-        o->name_len=(uint8_t)meta.name_len;
-        memcpy(o->name,payload+sizeof(meta),meta.name_len);
-        collect((uint16_t)(i+1));
         live++;
     }
-    ESP_LOGI(TAG,"app:/ mounted at 0x%06x: %u objects, %u/%u sectors free",
-             (unsigned)FS_BASE,live,sectors_free(),(unsigned)FS_SECTORS);
+    ESP_LOGI(TAG,"app:/ mounted at 0x%06x: %u objects, %u/%u sectors free, "
+             "index %u bytes",(unsigned)FS_BASE,live,sectors_free(),
+             (unsigned)FS_SECTORS,(unsigned)sizeof(fs_index_t));
     return true;
 }
 
@@ -527,19 +593,21 @@ static const char *path_leaf(const fs_path_t *p, size_t *len) {
 
 // --------------------------------------------------------- object lookup
 
-static fs_obj_t *object(uint16_t id) {
-    if(id<1||id>FS_MAX_OBJECTS) return NULL;
-    fs_obj_t *o=&store->obj[id-1];
-    return o->kind?o:NULL;
-}
-
+// The digest narrows the field without touching flash; the inode decides.
+// Kind and parent are exact, the hash is 16 bits, so the usual cost of a lookup
+// is one inode read for the one candidate that survives.
 static uint16_t child_of(uint16_t parent, const char *name, size_t n) {
+    uint16_t want=name_hash(name,n);
     for(int i=0;i<FS_MAX_OBJECTS;i++) {
-        fs_obj_t *o=&store->obj[i];
-        if(!o->kind||o->owner!=owner_hash||o->parent!=parent) continue;
-        // Byte comparison, which is what caseSensitive:true reports. Nothing
-        // here folds case or normalises, so two spellings are two names.
-        if(o->name_len==n&&!memcmp(o->name,name,n)) return (uint16_t)(i+1);
+        const fs_dir_t *d=&store->dir[i];
+        if(!d->kind||d->parent!=parent||d->hash!=want) continue;
+        const fs_obj_t *o=object((uint16_t)(i+1));
+        // Byte comparison of the stored name, which is what caseSensitive:true
+        // reports: nothing here folds case or normalises. The owner is checked
+        // in the same read, which is what keeps the shared root from letting
+        // one app see another's files.
+        if(o&&o->owner==owner_hash&&o->name_len==n&&!memcmp(o->name,name,n))
+            return (uint16_t)(i+1);
     }
     return 0;
 }
@@ -559,13 +627,15 @@ static uint16_t resolve(const fs_path_t *p, bool stop_short, uint16_t *parent,
         uint16_t next=child_of(at,p->text+p->off[i],p->size[i]);
         if(!next) { *why=POCKET_ERR_NOT_FOUND; return 0; }
         // Every element but the last one named has to be a directory; the last
-        // one is whatever the caller asked about.
-        if(object(next)->kind!=FS_KIND_DIR&&i+1<last) { *why="NOT_DIRECTORY"; return 0; }
+        // one is whatever the caller asked about. The digest answers this, so
+        // an intermediate element costs no second read.
+        if(store->dir[next-1].kind!=FS_KIND_DIR&&i+1<last)
+            { *why="NOT_DIRECTORY"; return 0; }
         prev=at; at=next;
     }
     if(stop_short) {
         // `at` is now the directory the leaf would live in.
-        if(at&&object(at)->kind!=FS_KIND_DIR) { *why="NOT_DIRECTORY"; return 0; }
+        if(at&&store->dir[at-1].kind!=FS_KIND_DIR) { *why="NOT_DIRECTORY"; return 0; }
         if(parent) *parent=at;
         return 0;
     }
@@ -620,76 +690,90 @@ static int64_t wall_ms(void) {
 
 // -------------------------------------------------------------- publishing
 
-// Claims a free object id and marks it as belonging to this owner. `pending`
-// keeps the id invisible to lookups until its metadata lands, which is what
-// stops an uncommitted create from being seen by stat or list.
+// An id claimed by an open writer. The digest still says free, so an
+// uncommitted create is invisible to stat and list; this only stops a second
+// writer from taking the same id.
 static uint8_t pending[FS_MAX_OBJECTS];
 
 static uint16_t object_claim(void) {
     for(int i=0;i<FS_MAX_OBJECTS;i++)
-        if(!store->obj[i].kind&&!pending[i]) {
-            memset(&store->obj[i],0,sizeof(store->obj[i]));
-            store->obj[i].owner=owner_hash;
-            pending[i]=1;
-            return (uint16_t)(i+1);
-        }
+        if(!store->dir[i].kind&&!pending[i]) { pending[i]=1; return (uint16_t)(i+1); }
     return 0;
 }
 
-static void object_unclaim(uint16_t id) {
-    pending[id-1]=0;
-    if(!store->obj[id-1].kind) memset(&store->obj[id-1],0,sizeof(fs_obj_t));
-}
+static void object_unclaim(uint16_t id) { pending[id-1]=0; }
 
-// Writes the metadata block that publishes a version, and updates the store to
-// match. This one write is the commit point of the whole store: before it the
-// new data blocks sit above content_gen and are invisible, after it the old
-// ones are unreferenced and collect() takes them back.
-static bool meta_write(uint16_t id, uint16_t kind, uint16_t parent,
-                       const char *name, size_t name_len, uint32_t gen,
-                       uint32_t content_gen, uint32_t size, uint16_t blocks) {
-    uint8_t payload[FS_META_MAX];
-    fs_meta_t meta={.content_gen=content_gen,.size=size,.mtime_ms=wall_ms(),
-                    .parent=parent,.blocks=blocks,.name_len=(uint16_t)name_len};
-    memcpy(payload,&meta,sizeof(meta));
-    if(name_len) memcpy(payload+sizeof(meta),name,name_len);
-    size_t len=sizeof(meta)+name_len;
+// Writes the inode that publishes a version, then gives back whatever the
+// previous version used and this one does not.
+//
+// The write of this one block is the commit point of the whole store. Until it
+// lands, the new data sectors are named by no inode and a reader still finds
+// the old version whole; after it lands the old sectors are the unreferenced
+// ones. That is atomicReplace, and it needs no journal because the inode is the
+// journal.
+static bool inode_write(uint16_t id, uint16_t kind, uint16_t parent,
+                        const char *name, size_t name_len, uint32_t gen,
+                        uint32_t size, const uint8_t *sectors, uint16_t blocks) {
+    fs_obj_t old;
+    uint8_t  old_at=store->dir[id-1].sector;
+    bool     had=store->dir[id-1].kind&&inode_read(old_at,&old);
+
+    uint8_t    payload[FS_INODE_MAX];
+    fs_inode_t node={.size=size,.mtime_ms=wall_ms(),.parent=parent,
+                     .name_len=(uint16_t)name_len,.blocks=blocks};
+    memset(node.sector,FS_NO_SECTOR,sizeof(node.sector));
+    if(sectors&&blocks) memcpy(node.sector,sectors,blocks);
+    memcpy(payload,&node,sizeof(node));
+    memcpy(payload+sizeof(node),name,name_len);
+    size_t len=sizeof(node)+name_len;
 
     int s=sector_take();
     if(s<0) return false;
     fs_blk_t hdr={.magic=FS_MAGIC,.owner=owner_hash,.gen=gen,.obj=id,.index=0,
                   .len=(uint16_t)len,.kind=kind,
                   .crc=esp_crc32_le(0,payload,len)};
-    if(!block_write((unsigned)s,&hdr,payload,len)) return false;
+    if(!block_write((unsigned)s,&hdr,payload,len)) {
+        sector_release((unsigned)s);
+        return false;
+    }
 
-    fs_obj_t *o=&store->obj[id-1];
-    o->owner=owner_hash; o->gen=gen; o->content_gen=content_gen;
-    o->size=size; o->mtime_ms=meta.mtime_ms; o->parent=parent;
-    o->blocks=blocks; o->kind=(uint8_t)(kind==FS_KIND_GONE?0:kind);
-    o->name_len=(uint8_t)name_len;
-    if(name_len) memcpy(o->name,name,name_len);
-    store->mutations++;
+    store->dir[id-1]=(fs_dir_t){.sector=(uint8_t)s,.kind=(uint8_t)kind,
+                                .parent=parent,.hash=name_hash(name,name_len)};
+    store->mutations++;     // also the window epoch, so no stale inode survives
+
+    if(had) {
+        for(unsigned b=0;b<old.blocks;b++) {
+            bool still=false;
+            for(unsigned k=0;k<blocks&&!still;k++) still=sectors[k]==old.sector[b];
+            if(!still) sector_release(old.sector[b]);
+        }
+        sector_release(old_at);
+    }
     return true;
 }
 
-// Retires an object. The tombstone is what survives a power cut between the
-// metadata write and the erases; mount() drops it once the blocks it retired
-// are gone, so a removed file costs no flash in the long run.
+// Retires an object. Removal is the erase of its inode and nothing else: a data
+// block no inode names is unreferenced, and mount() hands it back to the
+// allocator. A crash during the erase leaves either an inode that still reads
+// back -- the file survives -- or one that does not -- the file is gone. There
+// is no third state, so there is no tombstone to write and none to reclaim.
 static bool object_remove(uint16_t id) {
-    fs_obj_t *o=&store->obj[id-1];
-    uint32_t gen=o->gen+1;
-    if(!meta_write(id,FS_KIND_GONE,0,NULL,0,gen,gen,0,0)) return false;
-    collect(id);
-    for(unsigned s=0;s<FS_SECTORS;s++)
-        if(store->sec[s].state==SEC_USED&&store->sec[s].obj==id) sector_release(s);
-    memset(o,0,sizeof(*o));
+    fs_obj_t o;
+    uint8_t  at=store->dir[id-1].sector;
+    bool     had=inode_read(at,&o);
+    sector_release(at);
+    store->dir[id-1]=(fs_dir_t){0};
+    store->mutations++;
+    if(had) for(unsigned b=0;b<o.blocks;b++) sector_release(o.sector[b]);
     return true;
 }
 
+// Parent chains never cross owners: a lookup only ever returns an id whose
+// inode named this owner, so nothing but the shared root can hold another
+// app's children, and the root is never asked here.
 static bool dir_has_children(uint16_t id) {
     for(int i=0;i<FS_MAX_OBJECTS;i++)
-        if(store->obj[i].kind&&store->obj[i].owner==owner_hash&&
-           store->obj[i].parent==id) return true;
+        if(store->dir[i].kind&&store->dir[i].parent==id) return true;
     return false;
 }
 
@@ -821,6 +905,14 @@ static void revision_of(char out[24], uint16_t obj, uint32_t gen) {
     snprintf(out,24,"%u.%lu",(unsigned)obj,(unsigned long)gen);
 }
 
+// The revision of an object whose inode may have become unreadable. Such an
+// inode matches no revision an app is holding, so 0 is the honest answer and
+// the CONFLICT the caller then reports is the right one.
+static void revision_of_object(char out[24], uint16_t id) {
+    const fs_obj_t *o=object(id);
+    revision_of(out,id,o?o->gen:0);
+}
+
 static JSValue entry_new(JSContext *ctx, const char *path, const char *name,
                          size_t name_len, bool directory, int64_t size,
                          int64_t mtime, const char *revision) {
@@ -857,29 +949,32 @@ static void path_join(char out[FS_MAX_PATH+1], const fs_path_t *dir,
 // Rebuilds the virtual path of an app: object by walking parents to the root.
 // A path can always be rebuilt because every object names its parent, which is
 // also why a rename costs one metadata block and no walk of the subtree.
+//
+// Built right to left, copying each name as it is read: object() hands back a
+// window slot that the next call may reuse, so holding a pointer across the
+// walk would be holding a name that has already been replaced.
 static void object_path(uint16_t id, char out[FS_MAX_PATH+1]) {
-    const char *parts[FS_MAX_DEPTH];
-    uint8_t     lens[FS_MAX_DEPTH];
-    int n=0;
-    for(uint16_t at=id;at&&n<FS_MAX_DEPTH;at=store->obj[at-1].parent) {
-        parts[n]=store->obj[at-1].name;
-        lens[n]=store->obj[at-1].name_len;
-        n++;
+    char   tail[FS_MAX_PATH+2];
+    size_t end=sizeof(tail)-1;
+    tail[end]=0;
+    for(uint16_t at=id,step=0;at&&step<FS_MAX_DEPTH;step++) {
+        const fs_obj_t *o=object(at);
+        if(!o) break;
+        uint16_t parent=o->parent;      // read before the window moves on
+        size_t   n=o->name_len;
+        if(end<n+1) break;
+        end-=n;
+        memcpy(tail+end,o->name,n);
+        tail[--end]='/';
+        at=parent;
     }
-    memcpy(out,"app:/",5);
-    size_t used=5;
-    for(int i=n-1;i>=0;i--) {
-        if(used+lens[i]+1u>FS_MAX_PATH) break;
-        if(i!=n-1) out[used++]='/';
-        memcpy(out+used,parts[i],lens[i]);
-        used+=lens[i];
-    }
-    out[used]=0;
+    snprintf(out,FS_MAX_PATH+1,"app:%s",tail+end);
 }
 
 // The Entry for an app: object, given the path it was reached by.
 static JSValue entry_of_object(JSContext *ctx, const char *path, uint16_t id) {
-    const fs_obj_t *o=&store->obj[id-1];
+    const fs_obj_t *o=object(id);
+    if(!o) return JS_NULL;
     char rev[24];
     revision_of(rev,id,o->gen);
     return entry_new(ctx,path,o->name,o->name_len,o->kind==FS_KIND_DIR,
@@ -902,7 +997,7 @@ typedef struct {
     uint32_t handle;        // 0 marks a free slot
     uint8_t  mode;
     uint8_t  volume;
-    int8_t   asset;         // store into ASSETS, -1 on app:
+    int8_t   asset;         // index into ASSETS, -1 on app:
     uint16_t obj;           // app: object, claimed even by an uncommitted create
     uint16_t parent;
     uint8_t  name_len;
@@ -913,7 +1008,15 @@ typedef struct {
     uint16_t next_index;    // the data block the staging buffer belongs to
     uint8_t *buf;           // FS_BLOCK_PAYLOAD of staging; writers only
     uint16_t buf_len;
-    int16_t  tail;          // sector holding an unfinished partial block, -1 none
+    // The block list, copied from the inode at open and republished at commit.
+    // A reader holds it so that read() is an array lookup and no flash read at
+    // all beyond the bytes themselves; a writer builds it as blocks land.
+    uint8_t  sector[FS_MAX_BLOCKS];
+    // The sectors THIS writer allocated and has not published. An append starts
+    // with a sector list it does not own -- those blocks belong to the version
+    // on flash -- so discarding has to erase these and only these.
+    uint8_t  own[FS_MAX_BLOCKS+1];
+    uint8_t  nown;
     int16_t  verified;      // sector whose CRC a reader has already checked
     bool     broken;        // a failed write refuses everything afterwards
 } fs_file_t;
@@ -932,10 +1035,7 @@ static fs_file_t *file_of(uint32_t handle) {
 // Erases whatever a writer has staged in flash but not published. Safe to run
 // on a reader (it owns no sectors) and safe to run twice.
 static void writer_discard(fs_file_t *f) {
-    if(f->mode==MODE_READ||!f->obj) return;
-    for(unsigned s=0;s<FS_SECTORS;s++)
-        if(store->sec[s].state==SEC_USED&&store->sec[s].obj==f->obj&&
-           store->sec[s].gen>=f->gen) sector_release(s);
+    while(f->nown) sector_release(f->own[--f->nown]);
 }
 
 static void file_close(fs_file_t *f, bool discard) {
@@ -978,34 +1078,58 @@ static bool object_busy(uint16_t obj) {
             if(at==obj) return true;
             at=files[i].parent;
         }
-        for(;at;at=store->obj[at-1].parent)
+        for(;at;at=store->dir[at-1].parent)
             if(at==obj) return true;
     }
     return false;
 }
 
-// Pushes the staging buffer out as one data block. A partial block written by
-// flush() keeps its sector in f->tail: the next write rewrites the block into a
-// fresh sector and releases that one, which is safe precisely because an
-// unpublished block is one nothing can see.
+static bool writer_owns(const fs_file_t *f, uint8_t s) {
+    for(unsigned i=0;i<f->nown;i++) if(f->own[i]==s) return true;
+    return false;
+}
+
+static void writer_drop_own(fs_file_t *f, uint8_t s) {
+    for(unsigned i=0;i<f->nown;i++)
+        if(f->own[i]==s) { f->own[i]=f->own[--f->nown]; return; }
+}
+
+// Pushes the staging buffer out as one data block, and records the sector in
+// the list the inode will publish.
+//
+// A partial block written by flush() is rewritten into a fresh sector when more
+// bytes arrive. The one it replaces is released only if this writer allocated
+// it: on an append the block being extended belongs to the version already on
+// flash, and erasing that would destroy data an inode still names.
 static bool writer_put_block(fs_file_t *f) {
-    if(!room_for(1)) return false;
+    if(f->next_index>FS_MAX_BLOCKS||!room_for(1)) return false;
     int s=sector_take();
     if(s<0) return false;
     fs_blk_t hdr={.magic=FS_MAGIC,.owner=owner_hash,.gen=f->gen,.obj=f->obj,
                   .index=f->next_index,.len=f->buf_len,.kind=FS_KIND_DATA,
                   .crc=esp_crc32_le(0,f->buf,f->buf_len)};
-    if(!block_write((unsigned)s,&hdr,f->buf,f->buf_len)) return false;
-    if(f->tail>=0) sector_release((unsigned)f->tail);
-    f->tail=(int16_t)s;
-    if(f->buf_len>=FS_BLOCK_PAYLOAD) { f->next_index++; f->buf_len=0; f->tail=-1; }
+    if(!block_write((unsigned)s,&hdr,f->buf,f->buf_len)) {
+        sector_release((unsigned)s);
+        return false;
+    }
+    uint8_t prev=f->sector[f->next_index-1];
+    f->sector[f->next_index-1]=(uint8_t)s;
+    f->own[f->nown++]=(uint8_t)s;
+    if(prev!=FS_NO_SECTOR&&writer_owns(f,prev)) {
+        writer_drop_own(f,prev);
+        sector_release(prev);
+    }
+    if(f->buf_len>=FS_BLOCK_PAYLOAD) { f->next_index++; f->buf_len=0; }
     return true;
 }
 
-// The blocks the version being built will have once its metadata lands.
+// The blocks the version being built will have once its inode lands.
 static uint16_t writer_blocks(const fs_file_t *f) {
     return (uint16_t)(f->next_index-1+(f->buf_len?1:0));
 }
+
+// After a publish the staged sectors belong to the inode, not to the writer.
+static void writer_published(fs_file_t *f) { f->nown=0; }
 
 // -------------------------------------------------------------- file reads
 
@@ -1027,8 +1151,11 @@ static int file_bytes(fs_file_t *f, uint32_t pos, uint32_t want, uint8_t *out,
     uint32_t within=pos%FS_BLOCK_PAYLOAD;
     uint32_t room=(uint32_t)FS_BLOCK_PAYLOAD-within;
     if(want>room) want=room;                    // never span two blocks
-    int s=block_find(f->obj,idx,store->obj[f->obj-1].content_gen);
-    if(s<0) { *code=POCKET_ERR_CORRUPT_DATA; return -1; }
+    // The handle carries the inode's block list, so finding the bytes is an
+    // array lookup. This is the whole reason the host index needs no map of
+    // which sector holds what.
+    int s=(idx<=FS_MAX_BLOCKS)?f->sector[idx-1]:FS_NO_SECTOR;
+    if(s==FS_NO_SECTOR) { *code=POCKET_ERR_CORRUPT_DATA; return -1; }
     if(f->verified!=(int16_t)s) {
         fs_blk_t hdr;
         if(!block_header((unsigned)s,&hdr)||!block_verify((unsigned)s,&hdr)) {
@@ -1227,18 +1354,30 @@ static JSValue js_file_flush(JSContext *ctx, JSValueConst self,
                                  POCKET_OUTCOME_UNKNOWN);
     }
     if(f->mode==MODE_APPEND) {
-        fs_obj_t *o=&store->obj[f->obj-1];
-        if(!meta_write(f->obj,FS_KIND_FILE,o->parent,o->name,o->name_len,
-                       f->gen,f->gen,f->size,writer_blocks(f))) {
+        // The name and parent do not change, but the inode has to be rewritten
+        // to name the new block list and the new length. inode_write() releases
+        // the sector the extended tail block used to live in.
+        const fs_obj_t *o=object(f->obj);
+        if(!o) {
+            f->broken=true;
+            return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                     "this file no longer has an inode",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+        }
+        char     name[FS_MAX_NAME];
+        uint8_t  name_len=o->name_len;
+        uint16_t parent=o->parent;
+        memcpy(name,o->name,name_len);
+        if(!inode_write(f->obj,FS_KIND_FILE,parent,name,name_len,f->gen,
+                        f->size,f->sector,writer_blocks(f))) {
             f->broken=true;
             return pocket_api_reject(ctx,POCKET_ERR_IO_ERROR,OP,
                                      "the appended bytes could not be published",
                                      true,POCKET_OUTCOME_UNKNOWN);
         }
-        collect(f->obj);
-        // The tail block is published now, so it is no longer the writer's to
-        // release; the next write rewrites it at a generation above this one.
-        f->tail=-1;
+        // Those sectors belong to the inode now; a later discard must not take
+        // them back. The next write rewrites the tail into a fresh sector.
+        writer_published(f);
         f->gen++;
     }
     return pocket_api_settled(ctx,JS_UNDEFINED,false);
@@ -1277,14 +1416,14 @@ static JSValue js_file_commit(JSContext *ctx, JSValueConst self,
     uint16_t obj=f->obj, parent=f->parent;
     char name[FS_MAX_NAME]; uint8_t name_len=f->name_len;
     memcpy(name,f->name,name_len);
-    if(!meta_write(obj,FS_KIND_FILE,parent,name,name_len,f->gen,f->gen,
-                   f->size,writer_blocks(f))) {
+    if(!inode_write(obj,FS_KIND_FILE,parent,name,name_len,f->gen,
+                    f->size,f->sector,writer_blocks(f))) {
         f->broken=true;
         return pocket_api_reject(ctx,POCKET_ERR_IO_ERROR,OP,
                                  "the new version could not be published",true,
                                  POCKET_OUTCOME_NOT_APPLIED);
     }
-    collect(obj);
+    writer_published(f);
     pending[obj-1]=0;
     // The handle is closed by a successful commit, per section 5, and the Entry
     // is built from the store rather than from the handle so that it reports
@@ -1351,7 +1490,7 @@ static JSValue volume_info(JSContext *ctx, uint8_t volume) {
                           JS_NewInt64(ctx,(int64_t)sectors_free()*FS_SECTOR));
         JS_SetPropertyStr(ctx,v,"quotaBytes",JS_NewInt64(ctx,FS_QUOTA_BYTES));
         JS_SetPropertyStr(ctx,v,"usedBytes",
-                          JS_NewInt64(ctx,(int64_t)sectors_used_by_owner()*FS_SECTOR));
+                          JS_NewInt64(ctx,(int64_t)store->mine*FS_SECTOR));
     } else if(app) {
         JS_SetPropertyStr(ctx,v,"capacityBytes",JS_NULL);
         JS_SetPropertyStr(ctx,v,"freeBytes",JS_NULL);
@@ -1535,7 +1674,7 @@ static JSValue js_list(JSContext *ctx, JSValueConst self,
         dir=resolve(&p,false,NULL,&why);
         if(!dir) return pocket_api_reject(ctx,why?why:POCKET_ERR_NOT_FOUND,OP,
                                           "no such directory",false,NULL);
-        if(store->obj[dir-1].kind!=FS_KIND_DIR)
+        if(store->dir[dir-1].kind!=FS_KIND_DIR)
             return pocket_api_reject(ctx,FS_ERR_NOT_DIRECTORY,OP,
                                      "this path is a file",false,NULL);
     } else if(p.volume==VOL_ASSETS&&p.depth) {
@@ -1580,9 +1719,14 @@ static JSValue js_list(JSContext *ctx, JSValueConst self,
         // Backend enumeration order, which here is object-id order. Section 4
         // asks explicitly that a listing not be sorted: sorting would mean
         // holding every name at once, which is the thing a paged list avoids.
+        // Backend enumeration order, which here is object-id order, and the
+        // page is what bounds the work: one inode read per entry returned, not
+        // one per file in the store. The owner is checked from that same read
+        // because the volume root is the one directory two apps can share.
         for(;at<FS_MAX_OBJECTS&&emitted<limit;at++) {
-            const fs_obj_t *o=&store->obj[at];
-            if(!o->kind||o->owner!=owner_hash||o->parent!=dir) continue;
+            if(!store->dir[at].kind||store->dir[at].parent!=dir) continue;
+            const fs_obj_t *o=object((uint16_t)(at+1));
+            if(!o||o->owner!=owner_hash) continue;
             path_join(path,&p,o->name,o->name_len);
             JS_SetPropertyUint32(ctx,entries,emitted++,
                                  entry_of_object(ctx,path,(uint16_t)(at+1)));
@@ -1590,12 +1734,13 @@ static JSValue js_list(JSContext *ctx, JSValueConst self,
     }
 
     // More to come? Keep or make a cursor. Running out of cursor slots is not
-    // an error for a listing that has finished.
+    // an error for a listing that has finished. The digest answers this without
+    // a read; at worst it says "more" for a foreign root entry and the next
+    // page comes back empty with nextCursor null.
     bool more=false;
     if(p.volume==VOL_ASSETS) more=at<ASSET_COUNT;
     else for(uint16_t i=at;i<FS_MAX_OBJECTS&&!more;i++)
-        more=store->obj[i].kind&&store->obj[i].owner==owner_hash&&
-             store->obj[i].parent==dir;
+        more=store->dir[i].kind&&store->dir[i].parent==dir;
 
     JSValue result=JS_NewObject(ctx);
     JS_SetPropertyStr(ctx,result,"entries",entries);
@@ -1674,7 +1819,7 @@ static JSValue js_mkdir(JSContext *ctx, JSValueConst self,
         uint16_t child=child_of(at,name,n);
         bool last=i+1==p.depth;
         if(child) {
-            if(store->obj[child-1].kind!=FS_KIND_DIR)
+            if(store->dir[child-1].kind!=FS_KIND_DIR)
                 return pocket_api_reject(ctx,
                     last?FS_ERR_ALREADY_EXISTS:FS_ERR_NOT_DIRECTORY,OP,
                     "a file already has that name",false,
@@ -1697,7 +1842,7 @@ static JSValue js_mkdir(JSContext *ctx, JSValueConst self,
             return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
                                      "the store holds at most 24 objects",false,
                                      POCKET_OUTCOME_NOT_APPLIED);
-        if(!meta_write(id,FS_KIND_DIR,at,name,n,1,1,0,0)) {
+        if(!inode_write(id,FS_KIND_DIR,at,name,n,1,0,NULL,0)) {
             object_unclaim(id);
             // Section 4: a recursive mkdir that fails part way does not roll
             // back, and the outcome says so rather than pretending otherwise.
@@ -1737,7 +1882,7 @@ static JSValue js_remove(JSContext *ctx, JSValueConst self,
     if(!id) return pocket_api_reject(ctx,why?why:POCKET_ERR_NOT_FOUND,OP,
                                      "no such file or directory",false,
                                      POCKET_OUTCOME_NOT_APPLIED);
-    if(store->obj[id-1].kind==FS_KIND_DIR&&dir_has_children(id))
+    if(store->dir[id-1].kind==FS_KIND_DIR&&dir_has_children(id))
         return pocket_api_reject(ctx,FS_ERR_NOT_EMPTY,OP,
                                  "this directory is not empty",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
@@ -1747,7 +1892,7 @@ static JSValue js_remove(JSContext *ctx, JSValueConst self,
                                  POCKET_OUTCOME_NOT_APPLIED);
     if(want[0]) {
         char have[24];
-        revision_of(have,id,store->obj[id-1].gen);
+        revision_of_object(have,id);
         // Section 4: the check and the removal happen under the same host lock,
         // which on a single JS task means inside this one call.
         if(strcmp(have,want))
@@ -1765,7 +1910,7 @@ static JSValue js_remove(JSContext *ctx, JSValueConst self,
 // ----------------------------------------------------------------- rename
 
 static bool is_below(uint16_t maybe_child, uint16_t maybe_parent) {
-    for(uint16_t at=maybe_child;at;at=store->obj[at-1].parent)
+    for(uint16_t at=maybe_child;at;at=store->dir[at-1].parent)
         if(at==maybe_parent) return true;
     return false;
 }
@@ -1824,7 +1969,7 @@ static JSValue js_rename(JSContext *ctx, JSValueConst self,
                                  POCKET_OUTCOME_NOT_APPLIED);
     if(want[0]) {
         char have[24];
-        revision_of(have,id,store->obj[id-1].gen);
+        revision_of_object(have,id);
         if(strcmp(have,want))
             return pocket_api_reject(ctx,POCKET_ERR_CONFLICT,OP,
                                      "the revision has moved on",false,
@@ -1834,16 +1979,20 @@ static JSValue js_rename(JSContext *ctx, JSValueConst self,
         return pocket_api_reject(ctx,FS_ERR_QUOTA,OP,
                                  "no room for the new name",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
-    fs_obj_t *o=&store->obj[id-1];
-    // One metadata block carries the new name and parent; content_gen does not
-    // move, so not a byte of the data is rewritten and no observer sees a
-    // half-renamed tree.
-    if(!meta_write(id,o->kind,parent,leaf,n,o->gen+1,o->content_gen,o->size,
-                   o->blocks))
+    // Copied out of the window, because inode_write() moves the window on.
+    const fs_obj_t *live=object(id);
+    if(!live)
+        return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                 "this path has no readable inode",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    fs_obj_t o=*live;
+    // One inode carries the new name and parent and re-lists the SAME sectors,
+    // so not a byte of the data is rewritten and no observer sees a half-renamed
+    // tree. The old inode is released once the new one is on flash.
+    if(!inode_write(id,o.kind,parent,leaf,n,o.gen+1,o.size,o.sector,o.blocks))
         return pocket_api_reject(ctx,POCKET_ERR_IO_ERROR,OP,
                                  "the new name could not be written",true,
                                  POCKET_OUTCOME_NOT_APPLIED);
-    collect(id);
     return pocket_api_settled(ctx,JS_UNDEFINED,false);
 }
 
@@ -1961,7 +2110,7 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
                                      NULL);
         memset(f,0,sizeof(*f));
         f->handle=next_handle++; f->mode=MODE_READ; f->volume=VOL_ASSETS;
-        f->asset=(int8_t)a; f->size=asset_size(a); f->verified=-1; f->tail=-1;
+        f->asset=(int8_t)a; f->size=asset_size(a); f->verified=-1;
         f->name_len=(uint8_t)name_len;
         memcpy(f->name,leaf,name_len);
         return pocket_api_settled(ctx,file_wrap(ctx,f),false);
@@ -1975,7 +2124,7 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
                                      "the containing directory is not there",
                                      false,POCKET_OUTCOME_NOT_APPLIED);
     uint16_t id=child_of(parent,leaf,name_len);
-    if(id&&store->obj[id-1].kind==FS_KIND_DIR)
+    if(id&&store->dir[id-1].kind==FS_KIND_DIR)
         return pocket_api_reject(ctx,FS_ERR_IS_DIRECTORY,OP,
                                  "this path is a directory",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
@@ -1988,7 +2137,7 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
                                  false,POCKET_OUTCOME_NOT_APPLIED);
     if(want[0]&&id) {
         char have[24];
-        revision_of(have,id,store->obj[id-1].gen);
+        revision_of_object(have,id);
         // Section 5: for replace and append the check and the taking of the
         // write right are one step, which on one JS task is this call.
         if(strcmp(have,want))
@@ -2003,12 +2152,26 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
 
     memset(f,0,sizeof(*f));
     f->handle=next_handle++; f->mode=mode; f->volume=VOL_APP; f->asset=-1;
-    f->parent=parent; f->name_len=(uint8_t)name_len; f->verified=-1; f->tail=-1;
+    f->parent=parent; f->name_len=(uint8_t)name_len; f->verified=-1;
+    memset(f->sector,FS_NO_SECTOR,sizeof(f->sector));
     memcpy(f->name,leaf,name_len);
 
+    if(mode==MODE_READ||mode==MODE_APPEND) {
+        // The block list comes off the inode once, here. Nothing can replace
+        // the file while this handle is out -- a writer and any other handle on
+        // the same object are BUSY -- so the copy stays true for its lifetime.
+        const fs_obj_t *o=object(id);
+        if(!o) {
+            memset(f,0,sizeof(*f));
+            return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                     "this file has no readable inode",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+        }
+        memcpy(f->sector,o->sector,sizeof(f->sector));
+        f->size=o->size;
+    }
     if(mode==MODE_READ) {
         f->obj=id;
-        f->size=store->obj[id-1].size;
         return pocket_api_settled(ctx,file_wrap(ctx,f),false);
     }
 
@@ -2033,20 +2196,31 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
         f->gen=1;
     } else {
         f->obj=id;
-        // Above the published generation, so nothing this writer lays down can
-        // be seen until its metadata block says so.
-        f->gen=store->obj[id-1].gen+1;
+        // Above the published version, so nothing this writer lays down can be
+        // seen until its inode says so.
+        const fs_obj_t *o=object(id);
+        if(!o) {
+            free(f->buf);
+            memset(f,0,sizeof(*f));
+            return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                     "this file has no readable inode",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+        }
+        f->gen=o->gen+1;
+        // A replace builds a whole new block list; the old one stays on the
+        // inode until commit and is released there.
+        if(mode==MODE_REPLACE) memset(f->sector,FS_NO_SECTOR,sizeof(f->sector));
     }
     if(mode==MODE_APPEND) {
         // tell() starts at the existing end, and the partial tail block is
         // pulled back into the staging buffer so the append continues the block
         // rather than starting a ragged one.
-        const fs_obj_t *o=&store->obj[id-1];
-        f->size=o->size; f->pos=o->size;
-        if(o->size) {
-            f->next_index=(uint16_t)((o->size-1)/FS_BLOCK_PAYLOAD+1);
+        f->pos=f->size;
+        if(f->size) {
+            uint32_t total=f->size;
+            f->next_index=(uint16_t)((total-1)/FS_BLOCK_PAYLOAD+1);
             uint32_t whole=(uint32_t)(f->next_index-1)*FS_BLOCK_PAYLOAD;
-            uint32_t tail=o->size-whole;
+            uint32_t tail=total-whole;
             if(tail<FS_BLOCK_PAYLOAD) {
                 fs_file_t reader=*f;
                 reader.mode=MODE_READ; reader.verified=-1;
@@ -2109,8 +2283,7 @@ static JSValue js_copy(JSContext *ctx, JSValueConst self,
     // The source, as a reader that never enters the handle table: section 8
     // counts a native copy against the same resources, and it does that here by
     // running inside one JS turn while no other operation can start.
-    fs_file_t src={.mode=MODE_READ,.volume=from.volume,.asset=-1,.verified=-1,
-                   .tail=-1};
+    fs_file_t src={.mode=MODE_READ,.volume=from.volume,.asset=-1,.verified=-1};
     if(from.volume==VOL_ASSETS) {
         int a=asset_find(&from);
         if(a<0) return pocket_api_reject(ctx,POCKET_ERR_NOT_FOUND,OP,
@@ -2121,10 +2294,15 @@ static JSValue js_copy(JSContext *ctx, JSValueConst self,
         uint16_t id=resolve(&from,false,NULL,&why);
         if(!id) return pocket_api_reject(ctx,why?why:POCKET_ERR_NOT_FOUND,OP,
                                          "no such file",false,NULL);
-        if(store->obj[id-1].kind==FS_KIND_DIR)
+        if(store->dir[id-1].kind==FS_KIND_DIR)
             return pocket_api_reject(ctx,FS_ERR_IS_DIRECTORY,OP,
                                      "copy takes files only",false,NULL);
-        src.obj=id; src.size=store->obj[id-1].size;
+        const fs_obj_t *o=object(id);
+        if(!o) return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                        "the source has no readable inode",
+                                        false,NULL);
+        src.obj=id; src.size=o->size;
+        memcpy(src.sector,o->sector,sizeof(src.sector));
     }
     if(src.size>FS_MAX_FILE)
         return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
@@ -2149,7 +2327,8 @@ static JSValue js_copy(JSContext *ctx, JSValueConst self,
                                  POCKET_OUTCOME_NOT_APPLIED);
 
     fs_file_t dst={.mode=MODE_CREATE,.volume=VOL_APP,.asset=-1,.parent=parent,
-                   .verified=-1,.tail=-1,.next_index=1,.gen=1};
+                   .verified=-1,.next_index=1,.gen=1};
+    memset(dst.sector,FS_NO_SECTOR,sizeof(dst.sector));
     dst.obj=object_claim();
     if(!dst.obj)
         return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
@@ -2175,8 +2354,8 @@ static JSValue js_copy(JSContext *ctx, JSValueConst self,
         if(!ok) code=FS_ERR_QUOTA;
     }
     if(ok&&dst.buf_len) ok=writer_put_block(&dst);
-    if(ok) ok=meta_write(dst.obj,FS_KIND_FILE,parent,leaf,name_len,dst.gen,
-                         dst.gen,dst.size,writer_blocks(&dst));
+    if(ok) ok=inode_write(dst.obj,FS_KIND_FILE,parent,leaf,name_len,dst.gen,
+                          dst.size,dst.sector,writer_blocks(&dst));
     if(!ok) {
         // Section 4: a failed or cancelled copy throws the temporary version
         // away and leaves the source untouched. Nothing was ever published.
@@ -2188,7 +2367,7 @@ static JSValue js_copy(JSContext *ctx, JSValueConst self,
                                  POCKET_OUTCOME_NOT_APPLIED);
     }
     free(dst.buf);
-    collect(dst.obj);
+    writer_published(&dst);
     pending[dst.obj-1]=0;
     return pocket_api_settled(ctx,entry_of_object(ctx,to.text,dst.obj),false);
 }
@@ -2219,8 +2398,7 @@ static JSValue js_read_text(JSContext *ctx, JSValueConst self,
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
 
-    fs_file_t src={.mode=MODE_READ,.volume=p.volume,.asset=-1,.verified=-1,
-                   .tail=-1};
+    fs_file_t src={.mode=MODE_READ,.volume=p.volume,.asset=-1,.verified=-1};
     if(p.volume==VOL_ASSETS) {
         int a=asset_find(&p);
         if(a<0) return pocket_api_reject(ctx,POCKET_ERR_NOT_FOUND,OP,
@@ -2233,10 +2411,15 @@ static JSValue js_read_text(JSContext *ctx, JSValueConst self,
         uint16_t id=resolve(&p,false,NULL,&why);
         if(!id) return pocket_api_reject(ctx,why?why:POCKET_ERR_NOT_FOUND,OP,
                                          "no such file",false,NULL);
-        if(store->obj[id-1].kind==FS_KIND_DIR)
+        if(store->dir[id-1].kind==FS_KIND_DIR)
             return pocket_api_reject(ctx,FS_ERR_IS_DIRECTORY,OP,
                                      "this path is a directory",false,NULL);
-        src.obj=id; src.size=store->obj[id-1].size;
+        const fs_obj_t *o=object(id);
+        if(!o) return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                        "this file has no readable inode",
+                                        false,NULL);
+        src.obj=id; src.size=o->size;
+        memcpy(src.sector,o->sector,sizeof(src.sector));
     }
     // Section 7: over the limit is a refusal, never a silent truncation.
     if(src.size>(uint32_t)cap)
@@ -2321,13 +2504,14 @@ static JSValue js_write_text(JSContext *ctx, JSValueConst self,
     const char *leaf=path_leaf(&p,&name_len);
     uint16_t id=why?0:child_of(parent,leaf,name_len);
     fs_file_t w={.mode=MODE_CREATE,.volume=VOL_APP,.asset=-1,.parent=parent,
-                 .verified=-1,.tail=-1,.next_index=1,.gen=1};
+                 .verified=-1,.next_index=1,.gen=1};
+    memset(w.sector,FS_NO_SECTOR,sizeof(w.sector));
     if(why) {
         answer=pocket_api_reject(ctx,why,OP,"the containing directory is not there",
                                  false,POCKET_OUTCOME_NOT_APPLIED);
         goto done;
     }
-    if(id&&store->obj[id-1].kind==FS_KIND_DIR) {
+    if(id&&store->dir[id-1].kind==FS_KIND_DIR) {
         answer=pocket_api_reject(ctx,FS_ERR_IS_DIRECTORY,OP,
                                  "this path is a directory",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
@@ -2347,7 +2531,7 @@ static JSValue js_write_text(JSContext *ctx, JSValueConst self,
     }
     if(id&&want[0]) {
         char have[24];
-        revision_of(have,id,store->obj[id-1].gen);
+        revision_of_object(have,id);
         if(strcmp(have,want)) {
             answer=pocket_api_reject(ctx,POCKET_ERR_CONFLICT,OP,
                                      "the revision has moved on",false,
@@ -2361,7 +2545,16 @@ static JSValue js_write_text(JSContext *ctx, JSValueConst self,
                                  POCKET_OUTCOME_NOT_APPLIED);
         goto done;
     }
-    if(id) { w.obj=id; w.gen=store->obj[id-1].gen+1; w.mode=MODE_REPLACE; }
+    if(id) {
+        const fs_obj_t *o=object(id);
+        if(!o) {
+            answer=pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,OP,
+                                     "this file has no readable inode",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+            goto done;
+        }
+        w.obj=id; w.gen=o->gen+1; w.mode=MODE_REPLACE;
+    }
     else {
         w.obj=object_claim();
         if(!w.obj) {
@@ -2383,8 +2576,8 @@ static JSValue js_write_text(JSContext *ctx, JSValueConst self,
     // sequence inside one call so no half-written state is ever reachable.
     if(!writer_feed(&w,(const uint8_t *)text,len)||
        (w.buf_len&&!writer_put_block(&w))||
-       !meta_write(w.obj,FS_KIND_FILE,parent,leaf,name_len,w.gen,w.gen,w.size,
-                   writer_blocks(&w))) {
+       !inode_write(w.obj,FS_KIND_FILE,parent,leaf,name_len,w.gen,w.size,
+                    w.sector,writer_blocks(&w))) {
         writer_discard(&w);
         if(!id) object_unclaim(w.obj);
         free(w.buf);
@@ -2394,7 +2587,7 @@ static JSValue js_write_text(JSContext *ctx, JSValueConst self,
         goto done;
     }
     free(w.buf);
-    collect(w.obj);
+    writer_published(&w);
     pending[w.obj-1]=0;
     answer=pocket_api_settled(ctx,entry_of_object(ctx,p.text,w.obj),false);
 done:
