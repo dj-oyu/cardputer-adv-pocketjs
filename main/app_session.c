@@ -12,6 +12,7 @@
 #include "pocket_storage.h"
 #include "pocket_imu.h"
 #include "pocket_av.h"
+#include "pocket_app.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -121,6 +122,9 @@ void app_stop(void) {
     jsfont_detach();
     // Before the guest goes: the watches hold callbacks belonging to it, and a
     // promise still in flight holds its resolvers.
+    // Section 5 runs the stop hook before the subscriptions it may still use
+    // are taken away, so this comes first.
+    pocket_app_reset();
     pocket_imu_reset();
     pocket_av_reset();
     pocket_api_reset();
@@ -158,6 +162,7 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"imu",pocket_imu_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
     cc.logical_width=LCD_W;cc.logical_height=LCD_H;cc.raster_density=1;cc.tick_hz=30;
@@ -231,6 +236,7 @@ esp_err_t app_tick(uint32_t buttons) {
     // one pump in pocket_av.c used to settle it in.
     pocket_api_pump();
     pocket_av_pump();
+    pocket_app_pump();
     pocketjs_ui_input_t input={.struct_size=sizeof(input),.buttons=buttons};
     pocketjs_ui_frame_view_t frame={.struct_size=sizeof(frame)};
     esp_err_t e=pocketjs_ui_turn(binding,&input,&frame);

@@ -1,6 +1,6 @@
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 idf_component_register(SRCS "main.c" "board.c" "shell.c" "solar_sail.c" "solar_time.c" "app_session.c" "motion.c" "sound.c"
-    "keymap.c" "jpfont.c" "skk_session.c" "editor.c" "codeedit.c" "srcstore.c" "jsconsole.c" "jslex.c" "jsfont.c" "pocket_api.c" "pocket_storage.c" "pocket_imu.c" "pocket_av.c" "wifi_time.c" "wifi_ui.c" "lessons.c" "tutorial.c" "paint.c" "render_accel.c"
+    "keymap.c" "jpfont.c" "skk_session.c" "editor.c" "codeedit.c" "srcstore.c" "jsconsole.c" "jslex.c" "jsfont.c" "pocket_api.c" "pocket_storage.c" "pocket_imu.c" "pocket_av.c" "pocket_app.c" "wifi_time.c" "wifi_ui.c" "lessons.c" "tutorial.c" "paint.c" "render_accel.c"
     "../.cache/bmi270/bmi2.c" "../.cache/bmi270/bmi270.c"
     INCLUDE_DIRS "." "${CMAKE_BINARY_DIR}/generated" "../.cache/bmi270"
     REQUIRES pocketjs_guest pocketjs_ui_core pocketjs_ui_qjs pocketjs_render_rgb565
