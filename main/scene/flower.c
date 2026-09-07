@@ -5,6 +5,25 @@
 #include <stddef.h>
 #include <string.h>
 
+// TEMPORARY (goes with the PIE kernel). The previous version of this counter
+// timed ray_row directly and did not track: it read flat while kernel= rose
+// 20 ms for work added inside the very call it wrapped. So ray is no longer
+// counted, it is subtracted. total_ wraps the whole row body and garden_ wraps
+// garden_row, both around calls the compiler cannot see through; work added
+// anywhere in ray_row must move total_ while leaving garden_ alone, and there
+// is no window it can hide in.
+//
+// The instrument checks itself against the only figure that has never
+// contradicted itself: total should equal kernel= less glass_rain and the strip
+// scaffolding, a couple of ms. If it does not, believe kernel= and delete this.
+#ifdef ESP_PLATFORM
+#include "esp_cpu.h"
+#include "esp_log.h"
+#define PROF_FENCE __asm__ __volatile__("":::"memory")
+static uint32_t prof_total,prof_garden,prof_visits,prof_hits,prof_frames;
+static uint32_t prof_sqrt,prof_sqrtn,prof_shade,prof_bell,prof_belln;
+#endif
+
 // Orthographic primary rays intersect thin ellipsoids analytically. This is
 // actual visibility tracing, but the pearl/glass lighting is an approximation:
 // no secondary rays, refraction, or physically based transparency is claimed.
@@ -49,7 +68,7 @@ static void prepare_seeds(void);
 // analytic path, which stores no geometry at all -- an ellipsoid is six
 // coefficients and a ray meets it in closed form. The triangles were the only
 // reason to keep vertices.
-static float elapsed,tx,ty;
+static float elapsed;
 
 // ---------------------------------------------------------------------------
 // The rotation behind the single FLOWER menu row.
@@ -150,10 +169,26 @@ static void trumpet(V root,V direction,float length,float radius,unsigned materi
     p->radius[0]=radius;p->radius[1]=length*.5f;p->radius[2]=radius;
     p->material=material;p->shape=shape;
 }
+// The amplitudes of the botanical animation, named rather than inline so that
+// tools/flower_stale.c can price them. Raising them costs no frame time at all:
+// ray_row is 30 ms of which almost everything is the 1,957 shaded pixels, and
+// moving further does not shade more pixels. The only budget they spend is the
+// interval a traced frame stays reusable, and that trade is direct -- speed
+// times interval is about one pixel of screen displacement. The table in
+// tools/flower_stale.c is that price list.
+#ifndef FLOWER_SWAY
+#define FLOWER_SWAY .04f
+#endif
+#ifndef FLOWER_BREATH
+#define FLOWER_BREATH .025f
+#endif
+#ifndef FLOWER_CUP
+#define FLOWER_CUP .025f
+#endif
 static void cup(V root,float size,unsigned material,float yaw,float pitch) {
     // Six tepals in two whorls: upright, overlapping ellipsoidal surfaces.
     for(int i=0;i<6;i++) {
-        float a=i*PI/3+.25f,r=((material==VIOLET?.39f:.27f)+.025f*sinf(elapsed*.8f))*size;
+        float a=i*PI/3+.25f,r=((material==VIOLET?.39f:.27f)+FLOWER_CUP*sinf(elapsed*.8f))*size;
         V bottom=add(root,(V){.045f*size*cosf(a),0,.045f*size*sinf(a)});
         V top=add(root,(V){r*cosf(a),size*(.94f+(i%2)*.045f),r*sinf(a)});
         part(bottom,top,size*.20f,size*.075f,material,yaw,pitch);
@@ -161,7 +196,7 @@ static void cup(V root,float size,unsigned material,float yaw,float pitch) {
 }
 static void botanicals(float yaw,float pitch) {
     count=0;
-    float sway=.04f*sinf(elapsed*.7f),breath=.025f*sinf(elapsed*.8f);
+    float sway=FLOWER_SWAY*sinf(elapsed*.7f),breath=FLOWER_BREATH*sinf(elapsed*.8f);
     V base={-.18f,-1.35f,0};
     if(current_species==FLOWER_VALLEY) {
         stem(base,(V){-.55f,.5f,0},(V){.05f,1.2f,0},9,.024f,yaw,pitch);
@@ -196,7 +231,7 @@ static void botanicals(float yaw,float pitch) {
         part(base,(V){.43f,-.04f,-.1f},.052f,.025f,LEAF,yaw,pitch);
         part(add(top,(V){0,.06f,0}),add(top,(V){0,-.15f,0}),.12f,.10f,LEAF,yaw,pitch);
         for(int i=0;i<3;i++) {
-            float a=i*2*PI/3+.2f+tx*.25f;
+            float a=i*2*PI/3+.2f;
             V start=add(top,(V){cosf(a)*.04f,-.12f,sinf(a)*.04f});
             V tip=add(top,(V){cosf(a)*(.47f+breath),-.98f,sinf(a)*.28f});
             part(start,tip,.132f,.048f,IVORY,yaw,pitch);
@@ -271,9 +306,24 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
     // A return from an app must not advance the flower by minutes in one frame.
     if(!isfinite(dt)||dt<0)dt=0;
     dt=fminf(dt,.1f);elapsed=fmodf(elapsed+dt,120*PI);
-    float response=1-expf(-dt*5);
-    tx+=(clampi(tilt_x,-180,180)/512.0f-tx)*response;
-    ty+=(clampi(tilt_y,-180,180)/512.0f-ty)*response;
+    // The board's tilt used to reach the orientation from here, through a
+    // first-order filter into tx/ty. It is gone, and the parameters are kept
+    // only because SCENES[]'s row shape requires this signature.
+    //
+    // It was not removed for the cycles -- it was two multiply-adds a frame.
+    // It was removed because it did not read on the glass: a board sitting on
+    // a desk reports TILT 6 0, so tx settled at about 0.012 rad and stayed
+    // there. A coupling that only moves when someone deliberately waves the
+    // machine is paying, in every frame and in every test, for something
+    // nobody sees.
+    //
+    // What it buys back is larger than what it cost. The flower is now a pure
+    // function of `elapsed`, so two frames at the same time are the same
+    // frame, and an approximation to it -- a cached trace reused for a few
+    // frames, say -- can be compared against the exact thing for the same
+    // moment with nothing external to hold still. tools/flower-stale.c is that
+    // comparison, and it could not have been written while tilt was wired.
+    (void)tilt_x;(void)tilt_y;
     current_species=species>=0&&species<FLOWER_SPECIES_COUNT?species:FLOWER_CRYSTAL;
     // Naming a species outright means drawing it, not dissolving into it. The
     // rotation sets its own factor after this returns.
@@ -290,11 +340,11 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
     // one way to get this wrong.
     if(rebuild)seeds_ready=false;
     prepare_seeds();
-    float yaw=elapsed*.05f+tx, pitch=.48f+ty;
+    float yaw=elapsed*.05f, pitch=.48f;
     count=PETALS;
     if(current_species!=FLOWER_CRYSTAL) {
         // Plants sway around their roots rather than rotating upside down.
-        yaw=tx*.18f+.035f*sinf(elapsed*.6f);pitch=.12f+ty*.3f;
+        yaw=.035f*sinf(elapsed*.6f);pitch=.12f;
         botanicals(yaw,pitch);
     }
     for(unsigned i=0;i<count;i++) {
@@ -457,26 +507,71 @@ static void ray_row(uint16_t *row,int y) {
         // PIE is not floating-point SIMD: retain conservative hit masks near
         // d=0, prove ranges, and compare silhouettes/depth with this reference.
         // Bell clipping is a separate path; measure it before extending this.
+#ifdef ESP_PLATFORM
+        prof_visits+=(uint32_t)(p->xmax-p->xmin+1);
+#endif
         for(int x=p->xmin;x<=p->xmax;x++) {
             float dx=(x+.5f-180)/SCALE-p->c.x;
             if(p->shape) {
                 float z=depth[x-X0];V n;
+                // bell_hit is timed on every visit, not every hit, because
+                // that is how it runs: six conical bands, each with its own
+                // discriminant, square root and pair of divisions, and
+                // 59-64% of them miss. Dividing ray_row by `hits` hides it
+                // completely.
+#ifdef ESP_PLATFORM
+                PROF_FENCE;uint32_t v0=esp_cpu_get_cycle_count();PROF_FENCE;
+                bool got=bell_hit(p,dx,dy,&z,&n);
+                PROF_FENCE;prof_bell+=esp_cpu_get_cycle_count()-v0;prof_belln++;PROF_FENCE;
+                if(got) {
+#else
                 if(bell_hit(p,dx,dy,&z,&n)) {
+#endif
                     depth[x-X0]=z;
-                    row[x]=dissolve(backdrop[x-X0],shade(n,i,(V){dx+p->c.x,dy+p->c.y,z}));
+#ifdef ESP_PLATFORM
+                    prof_hits++;
+                    PROF_FENCE;uint32_t b0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
+                    uint16_t lit=shade(n,i,(V){dx+p->c.x,dy+p->c.y,z});
+#ifdef ESP_PLATFORM
+                    PROF_FENCE;prof_shade+=esp_cpu_get_cycle_count()-b0;PROF_FENCE;
+#endif
+                    row[x]=dissolve(backdrop[x-X0],lit);
                 }
                 continue;
             }
             float b=p->q[4]*dx+p->q[5]*dy;
             float c=p->q[0]*dx*dx+2*p->q[3]*dx*dy+p->q[1]*dy*dy-1;
             float d=b*b-p->q[2]*c;if(d<0)continue;
-            float dz=(-b+sqrtf(d))*p->invzz,z=dz+p->c.z;
+            // sqrtf is not one instruction on this part. It resolves to an
+            // 88-instruction software routine behind a two-level call, and
+            // normal() inside shade() runs another one and a soft-float divide
+            // on top; this is here to find out what that actually costs before
+            // anybody replaces it.
+#ifdef ESP_PLATFORM
+            PROF_FENCE;uint32_t s0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
+            float root=sqrtf(d);
+#ifdef ESP_PLATFORM
+            PROF_FENCE;prof_sqrt+=esp_cpu_get_cycle_count()-s0;prof_sqrtn++;PROF_FENCE;
+#endif
+            float dz=(-b+root)*p->invzz,z=dz+p->c.z;
             if(z<=depth[x-X0])continue;
             depth[x-X0]=z;
+#ifdef ESP_PLATFORM
+            prof_hits++;
+#endif
             V n={p->q[0]*dx+p->q[3]*dy+p->q[4]*dz,
                  p->q[3]*dx+p->q[1]*dy+p->q[5]*dz,
                  p->q[4]*dx+p->q[5]*dy+p->q[2]*dz};
-            row[x]=dissolve(backdrop[x-X0],shade(n,i,(V){dx+p->c.x,dy+p->c.y,z}));
+#ifdef ESP_PLATFORM
+            PROF_FENCE;uint32_t h0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
+            uint16_t lit=shade(n,i,(V){dx+p->c.x,dy+p->c.y,z});
+#ifdef ESP_PLATFORM
+            PROF_FENCE;prof_shade+=esp_cpu_get_cycle_count()-h0;PROF_FENCE;
+#endif
+            row[x]=dissolve(backdrop[x-X0],lit);
         }
     }
 }
@@ -488,11 +583,59 @@ void flower_draw(uint16_t *pixels,int y,int height) {
     else {garden_prepare(&fallback,elapsed);garden=&fallback;}
     for(int j=0;j<height;j++) {
         int py=y+j;uint16_t *row=pixels+j*W;
+#ifdef ESP_PLATFORM
+        PROF_FENCE;uint32_t t0=esp_cpu_get_cycle_count();PROF_FENCE;
         garden_row(row,py,garden);
+        PROF_FENCE;uint32_t t1=esp_cpu_get_cycle_count();PROF_FENCE;
+        prof_garden+=t1-t0;
+#else
+        garden_row(row,py,garden);
+#endif
         // Without the block there is no flower, but there is still a sky. A
         // background that cannot allocate should look plain, not crash.
-        if(py<12||py>119||!depth)continue;
+        if(py<12||py>119||!depth) {
+#ifdef ESP_PLATFORM
+            PROF_FENCE;prof_total+=esp_cpu_get_cycle_count()-t0;PROF_FENCE;
+#endif
+            continue;
+        }
         for(int x=0;x<FW;x++)depth[x]=-1000;
         ray_row(row,py);
+#ifdef ESP_PLATFORM
+        PROF_FENCE;prof_total+=esp_cpu_get_cycle_count()-t0;PROF_FENCE;
+#endif
     }
+#ifdef ESP_PLATFORM
+    if(y+height>=H&&++prof_frames>=60) {
+        double tot=prof_total/240000.0/prof_frames,gar=prof_garden/240000.0/prof_frames;
+        // The vector half of garden_row, so that `garden` can be split into
+        // what the PIE kernel costs and what the still-scalar trunks, canopy
+        // and grass cost. Nobody has ever measured the second number, and
+        // after the kernel landed it is the larger half of the two.
+        double pix=garden_prof_pixels()/240000.0/prof_frames;
+        // visits are the pixels the rejection arithmetic touches; hits are the
+        // ones that reach sqrtf, the normal and shade(). The two have very
+        // different unit costs -- roughly 20 cycles against 200 -- so which of
+        // them dominates decides whether narrowing the spans is worth anything
+        // at all, and nobody has ever counted the second one.
+        // Inside ray_row: sqrt is every d>=0 (more than the hits), shade is
+        // every hit. Two rsr.ccount either side of each is about 2 cycles on
+        // regions of 150 and 1000, so the perturbation is under 2% -- but it
+        // is not zero, and the sqrt figure carries the larger share of it.
+        ESP_LOGI("garden","SPLIT frames=%u total=%.2f garden=%.2f pixels=%.2f decor=%.2f "
+                 "ray=%.2f visits=%u hits=%u | sqrt=%.2f (%u calls, %u cy) shade=%.2f (%u cy) "
+                 "bell=%.2f (%u visits, %u cy) rest=%.2f (ms/frame; total vs kernel= is the check)",
+                 prof_frames,tot,gar,pix,gar-pix,tot-gar,
+                 prof_visits/prof_frames,prof_hits/prof_frames,
+                 prof_sqrt/240000.0/prof_frames,prof_sqrtn/prof_frames,
+                 prof_sqrtn?prof_sqrt/prof_sqrtn:0,
+                 prof_shade/240000.0/prof_frames,
+                 prof_hits?prof_shade/prof_hits:0,
+                 prof_bell/240000.0/prof_frames,prof_belln/prof_frames,
+                 prof_belln?prof_bell/prof_belln:0,
+                 tot-gar-(prof_sqrt+prof_shade+prof_bell)/240000.0/prof_frames);
+        prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
+        prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
+    }
+#endif
 }

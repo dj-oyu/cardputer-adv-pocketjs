@@ -2,7 +2,7 @@
 compiler is available (gcc, clang, cc, or `zig cc`).
 
     python tools/pie/run_models.py            all four
-    python tools/pie/run_models.py blend      one of: ocean, wave, blend, accel
+    python tools/pie/run_models.py blend      one of: ocean, wave, blend, accel, garden
 
 Each model prints its own verdict; this script fails if any of them reports a
 mismatch or a non-zero exit. The ocean model needs a few seconds, the others
@@ -21,6 +21,7 @@ TARGETS = {
     'wave': (['wave_model.c'], []),
     'blend': (['blend_model.c'], []),
     'accel': (['accel_host_test.c'], ['-DRENDER_ACCEL_HOST_MODEL', '-I' + os.path.join(MODELS, 'stub')]),
+    'garden': (['garden_model.c'], []),
 }
 
 

@@ -54,7 +54,7 @@ int main(void) {
     for(int i=0;i<PETALS;i++)assert(petals[i].invzz>0&&isfinite(petals[i].invzz));
     memset(&band,0xa5,sizeof band);flower_draw(band.data,-1,8);
     for(int k=0;k<W*8;k++)assert(band.data[k]==0xa5a5);
-    elapsed=4;tx=ty=0;flower_prepare(0,0,0,FLOWER_CRYSTAL);
+    elapsed=4;flower_prepare(0,0,0,FLOWER_CRYSTAL);
     flower_draw(full,0,H);ppm(".cache/flower-ray.ppm",full);
     const char *files[]={"", ".cache/flower-valley.ppm", ".cache/flower-sunflower.ppm", ".cache/flower-snowdrop.ppm",
         ".cache/flower-tulip.ppm", ".cache/flower-daffodil.ppm", ".cache/flower-crocus.ppm", ".cache/flower-calla.ppm"};
@@ -82,7 +82,7 @@ int main(void) {
             }
         }
         assert(covered>18000);
-        elapsed=4;tx=ty=0;flower_prepare(0,0,0,(flower_species_t)species);
+        elapsed=4;flower_prepare(0,0,0,(flower_species_t)species);
         flower_draw(full,0,H);ppm(files[species],full);
         printf("SPECIES_OK %d: 60 poses, %u analytic parts, no stored vertices\n",species,count);
     }
@@ -98,11 +98,11 @@ int main(void) {
     // is the one thing this arrangement can get wrong, and it fails silently --
     // a stale seed_map is a plausible-looking flower with the wrong texture.
     // Drawing the same pose either side of a release must agree exactly.
-    elapsed=4;tx=ty=0;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
+    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
     flower_draw(full,0,H);
     memcpy(assembled,full,sizeof full);
     scene_mem_release();
-    elapsed=4;tx=ty=0;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
+    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
     flower_draw(full,0,H);
     assert(memcmp(full,assembled,sizeof full)==0);
     // And a foreign owner taking the block in between must not change that.
@@ -111,7 +111,7 @@ int main(void) {
     void *b=scene_mem(&other_owner,64,&stolen);
     assert(b&&stolen);
     memset(b,0x5a,64);
-    elapsed=4;tx=ty=0;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
+    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
     flower_draw(full,0,H);
     assert(memcmp(full,assembled,sizeof full)==0);
     // ---- the block is 16-byte aligned ----------------------------------
@@ -200,7 +200,7 @@ int main(void) {
     assert(dissolving>0&&dissolving<FRAMES/8);
     assert(opaque>FRAMES*3/4);
     // Naming a species directly must be unaffected by any of that.
-    elapsed=4;tx=ty=0;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
+    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
     assert(flower_fade()==1);
     flower_draw(full,0,H);
     assert(memcmp(full,assembled,sizeof full)==0);
@@ -211,7 +211,7 @@ int main(void) {
 
     printf("FLOWER_OK: strip equivalence, bounds, 60 poses per species, block recycling;"
            " static residue %zu bytes, shared block %zu; host %.3fs (not device timing)\n",
-           sizeof petals+sizeof depth+sizeof seed_map+sizeof elapsed+sizeof tx+sizeof ty
+           sizeof petals+sizeof depth+sizeof seed_map+sizeof elapsed
            +sizeof bell_slopes+sizeof bell_offsets+sizeof count+sizeof current_species
            +sizeof seeds_ready,
            (size_t)FLOWER_BYTES,

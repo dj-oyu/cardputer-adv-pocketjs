@@ -235,5 +235,152 @@ class SolarFillRow(unittest.TestCase):
             self.assertEqual(mem[0x100 + LCD_W * 2:0x110 + LCD_W * 2], bytes([0xA5] * 16))
 
 
+GARDEN = os.path.join(ROOT, 'main', 'scene', 'garden.c')
+# main/scene/garden.c, garden_dither and GARDEN_M3.
+DKX, DKY, DKC, DKM, M3 = 18453, 26253, 17872, 42589, 21846
+
+
+class GardenRow(unittest.TestCase):
+    """The three garden kernels against the lane model beside them in garden.c.
+
+    The reference below is a transcription of garden_octave_lanes and
+    garden_pixels, not of garden_row_scalar: those two are an approximation of
+    the scalar loop by design (reciprocals instead of divisions, two floors
+    where there was one), and the size of that approximation is measured
+    separately, in tools/test_garden.c, against the scalar loop itself. What is
+    checked here is the other half -- that the assembly is that lane model, with
+    those registers, reading those constants in that order.
+
+    Row parameters are drawn at random from the ranges garden_pixels_row can
+    actually produce for y in 0..134, so the kernels are exercised well past the
+    one frame a fixed row would give.
+    """
+
+    @staticmethod
+    def recip(d, sh):
+        return ((1 << sh) + d - 1) // d
+
+    @staticmethod
+    def runs(p, step):
+        """The block runs garden_octave_row cuts the row into."""
+        out, b = [], 0
+        while b < 30:
+            g = b * 8 * step + p
+            n = min((255 - (g & 255)) // (step * 8) + 1, 30 - b)
+            out.append((b, n, g & 255, g >> 8))
+            b += n
+        return out
+
+    @classmethod
+    def dens_ref(cls, vc, vf, p6, p5):
+        dens = [0] * 240
+        for v, mask, p, step, first in ((vc, 3, p6, 4, True), (vf, 7, p5, 8, False)):
+            for b, n, rc0, cc in cls.runs(p, step):
+                a = v[cc & mask]
+                da = v[(cc + 1) & mask] - a
+                ddb = v[(cc + 2) & mask] - v[(cc + 1) & mask] - da
+                for i in range(n):
+                    for l in range(8):
+                        rc = rc0 + step * (i * 8 + l)
+                        t = rc & 255
+                        fx = ((t * t) * (768 - 2 * t)) >> 16
+                        nm = -1 if rc > 255 else 0
+                        lo = a + (da & nm)
+                        hi = lo + da + (ddb & nm)
+                        d = (lo * (256 - fx) + hi * fx) >> 8
+                        x = (b + i) * 8 + l
+                        dens[x] = 3 * d if first else dens[x] + d
+        return dens
+
+    @staticmethod
+    def pixels_ref(dens, r):
+        out = []
+        for x in range(LCD_W):
+            u = max(-r['width'], min(r['width'], x - r['center']))
+            q = 256 - ((((u * u) & 0xFFFF) * r['mww']) >> 14)
+            S = dens[x]
+            amb = r['ay'] + ((S * 1366) >> 16)
+            k = r['kb'] + ((S * 820) >> 16)
+            hz = 320 + S
+            sun = (((q * k) & 0xFFFF) * q) >> 16
+            for at, w, m, gain in ((r['at0'], r['w0'], r['mw0'], 4),
+                                   (r['at1'], r['w1'], r['mw1'], 7)):
+                d = max(-w, min(w, x - at))
+                sh = 256 - ((((d * d) & 0xFFFF) * m) >> 14)
+                sun += (((((sh * gain) & 0xFFFF) * sh) >> 8) * hz) >> 18
+            h = ((x * DKX) ^ r['dy']) & 0xFFFF
+            dd = ((((h * h) >> 17) * DKM) >> 16) & 3
+            cr = ((amb * 128 + sun * 640) >> 8) + dd + 10
+            cg = ((amb * 192 + sun * 384) >> 8) + dd + 22
+            cb = ((amb + ((sun * M3) >> 16) + dd + 28) * 32) >> 8
+            out.append((((cr * 256) & 0xF800) | ((cg * 8) & 0x07E0)) | cb)
+        return out
+
+    KV, RCV, XV, DENS, ROW, K = 0x1000, 0x2000, 0x2100, 0x3000, 0x4000, 0x5000
+
+    def broadcast(self, mem, values):
+        """garden_broadcast, run rather than emulated, so the table the loops
+        walk is the one the device would have."""
+        store16(mem, self.K, values)
+        Sim(mem).run(extract_asm(GARDEN, 'garden_broadcast('),
+                     {'k': self.K, 'kv': self.KV, 'ks': 0, 'kp': 0, 'nk': len(values)})
+
+    def octave(self, mem, name, env, n, rc0, step, a, da, ddb, dens):
+        k = extract_constants(GARDEN, name, dict(env, a=a, da=da, ddb=ddb))
+        self.broadcast(mem, k)
+        store16(mem, self.RCV, [(rc0 + step * i) & 0xFFFF for i in range(8)])
+        ar = {'kp': 0, 'kv': self.KV, 'rp': self.RCV, 'dens': dens, 'dp': dens,
+              'n': n, 'sh8': 8, 'sh16': 16, 'zero': 0}
+        sim = Sim(mem)
+        sim.run(extract_asm(GARDEN, name), ar)
+        self.assertEqual(sim.ar['dens'], dens + n * 16)
+
+    def test_row(self):
+        rng = random.Random(31)
+        for _ in range(24):
+            y = rng.randrange(135)
+            width, w0, w1 = 58 + y // 3, 10 + y // 13, 10 + y // 8
+            r = {'center': rng.randrange(60, 200), 'width': width,
+                 'mww': self.recip(width * width, 22),
+                 'w0': w0, 'mw0': self.recip(w0 * w0, 22),
+                 'w1': w1, 'mw1': self.recip(w1 * w1, 22),
+                 'ay': 20 + y // 15, 'kb': 17 + rng.randint(-5, 5),
+                 'dy': (y * DKY + DKC) & 0xFFFF}
+            r['at0'], r['at1'] = r['center'] - 18, r['center'] + 27
+            vc = [rng.randrange(256) for _ in range(4)]
+            vf = [rng.randrange(256) for _ in range(8)]
+            p6, p5 = rng.randrange(1024), rng.randrange(2048)
+
+            mem = bytearray(1 << 16)
+            env = dict(center=r['center'], width=width, mww=r['mww'],
+                       at0=r['at0'], w0=w0, mw0=r['mw0'],
+                       at1=r['at1'], w1=w1, mw1=r['mw1'],
+                       ay=r['ay'], kb=r['kb'], dy=r['dy'],
+                       GARDEN_DKX=DKX, GARDEN_DKM=DKM, GARDEN_M3=M3)
+            for v, mask, p, step, name in ((vc, 3, p6, 4, 'garden_coarse_pie('),
+                                           (vf, 7, p5, 8, 'garden_fine_pie(')):
+                for b, n, rc0, cc in self.runs(p, step):
+                    a = v[cc & mask]
+                    da = v[(cc + 1) & mask] - a
+                    ddb = v[(cc + 2) & mask] - v[(cc + 1) & mask] - da
+                    self.octave(mem, name, env, n, rc0, step, a, da, ddb,
+                                self.DENS + b * 16)
+            dens = self.dens_ref(vc, vf, p6, p5)
+            self.assertEqual(load16(mem, self.DENS, LCD_W), [d & 0xFFFF for d in dens])
+
+            self.broadcast(mem, extract_constants(GARDEN, 'garden_pixels_pie(', env))
+            store16(mem, self.XV, list(range(8)))
+            sim = Sim(mem)
+            sim.run(extract_asm(GARDEN, 'garden_pixels_pie('),
+                    {'kp': 0, 'kv': self.KV, 'xp': self.XV, 'dens': self.DENS,
+                     'row': self.ROW, 'cnt': 30,
+                     'sh8': 8, 'sh14': 14, 'sh16': 16, 'sh17': 17, 'sh18': 18,
+                     'zero': 0})
+            self.assertEqual(load16(mem, self.ROW, LCD_W), self.pixels_ref(dens, r))
+            self.assertEqual((sim.ar['row'], sim.ar['dens'], sim.ar['cnt']),
+                             (self.ROW + LCD_W * 2, self.DENS + LCD_W * 2, 0))
+
+
+
 if __name__ == '__main__':
     unittest.main()

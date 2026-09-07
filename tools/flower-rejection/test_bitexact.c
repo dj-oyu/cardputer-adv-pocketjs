@@ -1,6 +1,6 @@
-#include "../main/scene/scene_mem.c"
-#include "../main/scene/garden.c"
-#include "../main/scene/flower.c"
+#include "../../main/scene/scene_mem.c"
+#include "../../main/scene/garden.c"
+#include "../../main/scene/flower.c"
 #include <stdio.h>
 #include <time.h>
 static uint16_t a[W*H],b[W*H];
