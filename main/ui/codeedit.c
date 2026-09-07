@@ -104,6 +104,12 @@ void code_open(void) {
 void code_open_lesson(unsigned lesson, const char *seed, size_t seed_len) {
     snprintf(label,sizeof(label),"T%u",(lesson+1)%100u);
     open_slot(SRC_SLOT_LESSON+lesson,seed,seed_len);
+    // A chapter tells the learner to type the line and press Ctrl+R, and that
+    // sentence has to stay true. Normal mode would read those letters as
+    // commands, and the first thing a tutorial must not do is teach a second
+    // language before the first one. The Playground still opens in normal mode;
+    // this is the one screen where arriving means typing.
+    vim_begin_insert(&vim);
 }
 
 void code_returned(const char *error) {
