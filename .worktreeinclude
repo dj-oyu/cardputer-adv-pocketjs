@@ -1,0 +1,10 @@
+# Gitignored artifacts a fresh worktree needs before it can build.
+#
+# A worktree at another commit is how you find out whether a regression is
+# yours or was already there, so it has to be cheap to make. Everything else
+# under .cache/ is fetched by tools/prepare_dependencies.py, which clones the
+# PocketJS upstream and bmi270 at their pinned revisions in about a minute.
+# The Rust archives are the exception: tools/build_native.sh cross-compiles
+# them for xtensa under WSL, which is tens of minutes, and the output does not
+# depend on anything in this repository. Copying them is always correct.
+.cache/native/
