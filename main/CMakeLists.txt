@@ -29,7 +29,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 # The small procedural renderer benefits from speed optimization; the JS engine
 # and other components retain the project's size optimization.
-target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c")
-set_source_files_properties(shell.c solar_sail.c render_accel.c scene/flower.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c PROPERTIES COMPILE_OPTIONS "-O2")
+target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c")
+set_source_files_properties(ui/shell.c scene/solar_sail.c scene/render_accel.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c PROPERTIES COMPILE_OPTIONS "-O2")
 
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_mbedtls_add_tx_buffer" "-Wl,-u,__wrap_esp_mbedtls_add_tx_buffer")
