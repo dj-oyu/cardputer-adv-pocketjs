@@ -168,6 +168,15 @@ static unsigned   live_nodes;
 // this surface's own calls skip the wrapper and are counted once, here.
 static JSValue    legacy_create=JS_UNDEFINED, legacy_destroy=JS_UNDEFINED;
 static bool       legacy_wrapped;
+// The ids the wrapper handed out. ui.destroyNode has no return value to
+// trust: the core drops the call silently for the root, for a dead id and
+// for one that never existed (engine/core/src/lib.rs destroy_node), and the
+// binding answers undefined either way. Crediting the budget for a destroy
+// that destroyed nothing let four lines of legacy JS walk the counter back
+// to zero with the tree still standing, and the abort this guard exists to
+// prevent came back. 0 marks a free entry, which is also the id an app uses
+// as its "no node yet" sentinel.
+static int32_t    legacy_ids[UI_MAX_NODES];
 
 static bool ui_bind(JSContext *ctx, const char *op) {
     if(ui_ready) return true;
@@ -1164,6 +1173,12 @@ void pocket_ui_reset(void) {
             JS_FreeValue(ctx,legacy_destroy);
         }
     }
+    // Cleared, not just freed: ui_bind()'s failure path frees ui_fn[0] when
+    // globalThis.ui is not an object, and a value left over from a destroyed
+    // realm would be freed with the next session's context.
+    for(int i=0;i<F_COUNT;i++) ui_fn[i]=JS_UNDEFINED;
+    ui_obj=JS_UNDEFINED;
+    memset(legacy_ids,0,sizeof(legacy_ids));
     legacy_create=JS_UNDEFINED; legacy_destroy=JS_UNDEFINED;
     legacy_wrapped=false;
     memset(nodes,0,sizeof(nodes));
@@ -1284,14 +1299,30 @@ static bool make_class(JSContext *ctx, JSClassID *id, const JSClassDef *def,
 static JSValue js_legacy_create(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv) {
     if(!budget_ok(ctx,1,"ui.createNode")) return JS_EXCEPTION;
-    JSValue id=JS_Call(ctx,legacy_create,this_val,argc,argv);
-    if(!JS_IsException(id)) live_nodes++;
-    return id;
+    JSValue result=JS_Call(ctx,legacy_create,this_val,argc,argv);
+    if(JS_IsException(result)) return result;
+    int32_t id=0;
+    if(!JS_ToInt32(ctx,&id,result) && id>0) {
+        for(unsigned i=0;i<UI_MAX_NODES;i++)
+            if(!legacy_ids[i]) { legacy_ids[i]=id; live_nodes++; break; }
+    }
+    return result;
 }
 static JSValue js_legacy_destroy(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv) {
+    int32_t id=0;
+    if(argc>0) JS_ToInt32(ctx,&id,argv[0]);
     JSValue r=JS_Call(ctx,legacy_destroy,this_val,argc,argv);
-    if(!JS_IsException(r) && live_nodes) live_nodes--;
+    // Only an id this wrapper issued and has not yet retired gives the budget
+    // anything back. Destroying the root, a dead id or one that never existed
+    // costs nothing and returns nothing, so it must credit nothing.
+    if(!JS_IsException(r) && id>0)
+        for(unsigned i=0;i<UI_MAX_NODES;i++)
+            if(legacy_ids[i]==id) {
+                legacy_ids[i]=0;
+                if(live_nodes) live_nodes--;
+                break;
+            }
     return r;
 }
 
