@@ -5,6 +5,7 @@
 #include "solar_sail.h"
 #include "flower.h"
 #include "menu_rows.h"
+#include "overlay.h"
 #include "glass_rain.h"
 #include "board.h"
 #include "motion.h"
@@ -89,12 +90,20 @@ static uint64_t hud_fmt_cy,hud_ovl_cy,hud_fps_cy,hud_menu_cy;
 static uint64_t draw_sum;
 static float fps;
 static unsigned category,setting,app;
+// APPEND to this table; do not insert. tools/capture_home.py and
+// tools/test_settings.py both leave this list for the settings category before
+// they count anything, so a row on the end changes no navigation either of them
+// does -- capture_home.py line 80 says as much about POCKET PET. A row in the
+// MIDDLE would renumber shell_app(), and with it main.c's switch, silently.
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
-                          "IMU CALIBRATION","POCKET PET","PET COMPANION"};
+                          "IMU CALIBRATION","POCKET PET","PET COMPANION",
+                          "AUDIO STREAM","OPUS STREAM"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
-                                  "AI USAGE / ALARM / TIMER"};
+                                  "AI USAGE / ALARM / TIMER",
+                                  "PLAY A CLIP AND TIME THE FRAMES",
+                                  "DECODE OPUS AND TIME THE FRAMES"};
 #define APP_N (sizeof(apps)/sizeof(apps[0]))
 static float app_pos;
 unsigned shell_app(void) { return app; }
@@ -167,6 +176,17 @@ static const setting_t settings[]={
     // clock is one action on that screen, not the whole of what it is for.
     {"WI-FI",      SETTING_ACTION,  NULL,    0,                 0,
      NULL,          NULL,            NULL,           SHELL_SCREEN_WIFI},
+    // The overlay of docs/common-api.md 3.1, and the only way to it. 3.1 asks
+    // that revoking permission be reachable from the home screen even while
+    // the overlay is broken, so it is a row here and not a screen of its own:
+    // this list draws with nothing of the overlay's on the path. The ON label
+    // is a live buffer -- ui/overlay.c writes the frame cost, the refusal or
+    // the stop into it -- which is the "somewhere the person can see it and
+    // decide" the same section asks for. APPENDED, not inserted: the settings
+    // rows are navigated by counted key presses in tools/test_settings.py and
+    // tools/capture_home.py.
+    {"DESK CLOCK", SETTING_CHOICES, overlay_toggle_names, sizeof overlay_toggle_names[0], 2,
+     "overlay",     overlay_armed_get, overlay_armed_set, SHELL_SCREEN_NONE},
 };
 #define SETTING_N (sizeof(settings)/sizeof(settings[0]))
 // One value name out of a row's list, wherever that list keeps them.
@@ -487,6 +507,12 @@ void shell_draw(const char *error, unsigned phase) {
         band=esp_timer_get_time();
         HUD_FENCE;uint32_t h0=esp_cpu_get_cycle_count();HUD_FENCE;
         if(sc->overlay)sc->overlay(strip,strip_y,strip_h);
+        // 3.1: an overlay may not cover the shell's own UI. That is settled
+        // here, by order, rather than by choosing a rectangle -- menu_rows.h
+        // shows that no row is safe from the menu during a scroll, so a
+        // geometric answer would be false. Everything the shell draws below
+        // this line lands on top.
+        overlay_paint(strip,strip_y,strip_h);
         HUD_FENCE;uint32_t h1=esp_cpu_get_cycle_count();HUD_FENCE;
         if(show_fps)text(194,8,meter,1,muted);
         HUD_FENCE;uint32_t h3=esp_cpu_get_cycle_count();HUD_FENCE;

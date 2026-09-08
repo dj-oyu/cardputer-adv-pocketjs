@@ -22,6 +22,7 @@
 #include "pocket_app.h"
 #include "pocket_bridge.h"
 #include "pocket_workspace.h"
+#include "pocket_overlay.h"
 #include "app_registry.h"
 #include "pet_assets.h"
 #include "pet_hub.h"
@@ -60,6 +61,22 @@ static size_t user_length;
 // chapters use it for the eight lines that build the text node they work on.
 static const char *user_prelude;
 static size_t user_prelude_length;
+// THE ONE PLACE THE GUEST'S LIFETIME CHANGES.
+//
+// Until now a session was bounded by entering and leaving an app screen: the
+// home screen's loop built a guest when somebody pressed Enter on a row and
+// destroyed it when they pressed Back. docs/common-api.md 3.1 adds a second
+// bound -- the HOME SCREEN owns a session for as long as it is on show -- and
+// that is the whole of the difference. Everything else about the contract is
+// unchanged and deliberately so: app_stop() below still tears the surfaces
+// down in the reverse of the order they were built, and every module holding a
+// guest callback is still reset before the guest is destroyed. An overlay
+// session is a session; it is only started and ended by a different event.
+//
+// The flag is what an overlay session does NOT get: no Rust UI core, no font
+// atlas, no rgb565 renderer, and a much smaller guest heap. See
+// pocket_overlay.h for why drawing goes through a host display list instead.
+static bool overlay_session;
 void app_force_redraw(void) { redraw=true; }
 
 static int interrupt(JSRuntime *rt, void *opaque) {
@@ -201,6 +218,7 @@ void app_stop(void) {
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
     pocket_ui_reset();
+    pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and
     // a screen change closes the session -- which is what the end of a run is.
     pocket_text_reset();
@@ -236,6 +254,11 @@ esp_err_t app_start_test(char test) {
     // 48. See NET_RADIO_MIN_FREE in pocket_net.c. The fix is ordering, not a
     // smaller cap for everyone -- most apps never touch the radio.
     gc.heap_limit=160*1024; gc.stack_limit=20*1024; gc.prefer_psram=false;
+    // An overlay runs WHILE a background scene is drawing, so it is sized for
+    // what is left rather than for what a foreground app may take. 3.1 asks for
+    // the check before the start rather than a failure during it; ui/overlay.c
+    // makes the reservation and this is the cap it reserved against.
+    if(overlay_session) { gc.heap_limit=OVERLAY_GUEST_HEAP; gc.stack_limit=8*1024; }
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
     TRY(pocketjs_guest_quickjs_install(guest,install_limits,NULL));
@@ -245,6 +268,16 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"jsfont",jsfont_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
+    // 3.1: an overlay's default capability set is NARROWER than a foreground
+    // app's, because it runs while nobody is looking at it. The narrowing is
+    // done by not installing the surface at all, so capabilities.get() answers
+    // supported=false for the radio, the microphone and the buses -- which is
+    // the honest answer for this session, and costs the guest nothing.
+    if(overlay_session) {
+        TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
+        TRY(pocketjs_guest_quickjs_install_once(guest,"overlay",pocket_overlay_install,NULL));
+        goto surfaces_done;
+    }
     TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"imu",pocket_imu_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
@@ -264,6 +297,9 @@ esp_err_t app_start_test(char test) {
     // After "app": launchContext and info join pocket.app, and a contributor
     // runs in the order it registered.
     TRY(pocketjs_guest_quickjs_install_once(guest,"workspace",pocket_workspace_install,NULL));
+surfaces_done:
+    if(overlay_session) goto source_ready;
+    {
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
     cc.logical_width=LCD_W;cc.logical_height=LCD_H;cc.raster_density=1;cc.tick_hz=30;
@@ -292,9 +328,11 @@ esp_err_t app_start_test(char test) {
             pocket_ui_attach(ctx);
         }
     }
-    const char *source=user_source?user_source:hello_start;
     TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pet-assets",pet_assets_install,core));
+    }
+source_ready:;
+    const char *source=user_source?user_source:hello_start;
     size_t length=user_source?user_length:(size_t)(hello_end-hello_start-1);
     // USB-only diagnostics exercise the same lifecycle and resource limits.
     switch(test) {
@@ -331,22 +369,53 @@ esp_err_t app_start_test(char test) {
     } else {
         TRY(pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js"));
     }
-    pocketjs_rgb565_renderer_config_t rc;
-    pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;
-    TRY(pocketjs_rgb565_renderer_create(&rc,&renderer));
-    TRY(pocketjs_rgb565_target_create(&target));
+    if(!overlay_session) {
+        pocketjs_rgb565_renderer_config_t rc;
+        pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;
+        TRY(pocketjs_rgb565_renderer_create(&rc,&renderer));
+        TRY(pocketjs_rgb565_target_create(&target));
+    }
     app_report();
     return ESP_OK;
 fail:
     ESP_LOGE("app","START_FAILED %s",esp_err_to_name(err));
     app_stop();return err;
 }
-esp_err_t app_start(void) { user_source=NULL; user_prelude=NULL; return app_start_test(0); }
+esp_err_t app_start(void) {
+    user_source=NULL; user_prelude=NULL; overlay_session=false;
+    return app_start_test(0);
+}
+
+esp_err_t app_start_overlay(const char *source, size_t length) {
+    user_source=source; user_length=length;
+    user_prelude=NULL; overlay_session=true;
+    esp_err_t err=app_start_test(0);
+    user_source=NULL;
+    // Left standing on failure too: app_stop() has already run inside
+    // app_start_test(), and the flag only ever decides what the NEXT start
+    // builds. ui/overlay.c clears it by calling app_stop() itself.
+    return err;
+}
+
+// One turn of an overlay. No damage plan, no strips, no bus: what an overlay
+// draws is a display list the shell composites into its own frame, so the
+// whole of the frame here is the guest's own JavaScript.
+esp_err_t app_overlay_tick(void) {
+    if(!guest) return ESP_ERR_INVALID_STATE;
+    deadline=esp_timer_get_time()+50000;
+    pocket_app_pump();
+    pocket_api_pump();
+    pocketjs_guest_frame_t f={.struct_size=sizeof(f)};
+    esp_err_t e=pocketjs_guest_frame(guest,&f);
+    frames++;
+    return e;
+}
 
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length) {
     user_source=source; user_length=length;
     user_prelude=prelude; user_prelude_length=prelude_length;
+    overlay_session=false;
     esp_err_t err=app_start_test(0);
     user_source=NULL; user_prelude=NULL;
     return err;
@@ -377,6 +446,14 @@ esp_err_t app_tick(uint32_t buttons) {
     // filled here and settles below, in the same turn rather than the next.
     pocket_capture_pump();
     pocket_api_pump();
+    // AFTER pocket_api_pump(), unlike the ones above it: this one posts no
+    // completion for that pump to settle. It delivers fs.onVolumeChange, which
+    // says the card was granted or has gone, and a listener may call straight
+    // back into pocket.fs -- so it runs in the part of the turn where nothing
+    // of that surface is in flight. While the folder picker is up the guest is
+    // not ticked at all, so a grant is announced on the first frame after the
+    // person chose, which is the first frame the app could act on it.
+    pocket_fs_pump();
     pocket_av_pump();
     // The same mask the turn below is handed: pocket.input reports what the
     // host forwarded, never a second reading of the keyboard.

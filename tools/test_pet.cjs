@@ -5,16 +5,16 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname,'../apps/pet/pet.js'),'utf8');
 const E=0x4000,L=0x80,R=0x20,U=0x10,D=0x40,B=0x2000;
 async function boot(initial, failRead=false, failWrite=false) {
-  let time=0, saved=initial, writes=0, picture=-1, selected=initial&&initial.selected<12?initial.selected:0, reward=0, nodes=[null,{props:{}}];
+  let time=0, saved=initial, writes=0, picture=-1, selected=initial&&initial.selected<12?initial.selected:0, reward=0, pose, nodes=[null,{props:{}}];
   const ui={createNode(k){assert(nodes.length-2<15,'16th node: past safeNodes, see pocket_ui.c layout_block()');nodes.push({kind:k,props:{}});return nodes.length-1;},
     setProp(n,k,v){nodes[n].props[k]=v;},setText(n,t){nodes[n].text=t;},insertBefore(){}};
   ui.replaceText=ui.setText;ui.setText=()=>{throw Error('ASCII UI must not grow the dynamic font atlas');};
   const ctx={ui,console:{log(){}},__petNow:()=>time,__petImage:(n,i)=>{picture=i;},
-    pocket:{pet:{say:t=>{assert(t.length<=22);},place:(i,x,y,m)=>{assert(i>=0&&i<12);assert.equal(x,27);assert(y>=29&&y<=31);assert(m===undefined||m>=0&&m<=5);picture=i;},show:(n,i)=>{picture=i;},select:(n)=>{if(n!==undefined){if(failWrite)throw Object.assign(Error(),{code:'IO_ERROR',outcome:'not-applied'});selected=n;}return selected;},rewards:()=>reward},storage:{get:()=>failRead?Promise.reject(Error()):Promise.resolve(initial?{value:structuredClone(initial)}:null),
+    pocket:{pet:{say:t=>{assert(t.length<=22);},place:(i,x,y,m)=>{assert(i>=0&&i<12);assert.equal(x,27);assert(y>=29&&y<=31);assert(m===undefined||m>=0&&m<=5);picture=i;pose={i,y,m};},show:(n,i)=>{picture=i;},select:(n)=>{if(n!==undefined){if(failWrite)throw Object.assign(Error(),{code:'IO_ERROR',outcome:'not-applied'});selected=n;}return selected;},rewards:()=>reward},storage:{get:()=>failRead?Promise.reject(Error()):Promise.resolve(initial?{value:structuredClone(initial)}:null),
       set:(k,v)=>{assert.equal(k,'pet.v1');if(failWrite)return Promise.reject(Error());saved=JSON.parse(JSON.stringify(v));writes++;return Promise.resolve();}}}};
   vm.createContext(ctx);vm.runInContext(source,ctx);await Promise.resolve();
   return {key(k){ctx.frame(k);ctx.frame(0);},advance(ms){for(let n=0;n<ms;n+=1000){time+=Math.min(1000,ms-n);ctx.frame(0);}},
-    feed(n){reward=n;},get saved(){return saved;},get writes(){return writes;},get picture(){return picture;},
+    feed(n){reward=n;},step(ms){time+=ms;ctx.frame(0);},get pose(){return pose;},get saved(){return saved;},get writes(){return writes;},get picture(){return picture;},
     has(t){return nodes.some(n=>n&&n.text&&n.text.includes(t));}};
 }
 (async()=>{
@@ -45,5 +45,16 @@ async function boot(initial, failRead=false, failWrite=false) {
   b=await boot(null,false,true);b.key(E);await Promise.resolve();b.advance(1000);assert(b.has('SAVE FAILED'));
   const compact=fs.readFileSync(path.join(__dirname,'../apps/pet/assets/pets-compact.bin'));
   assert.equal(compact.subarray(0,4).toString(),'PPT2');assert(compact.length<8192);
+  // Exercise real frame timing: blink closes both eyes and reopens, while
+  // a care reaction takes priority. Selection must use the displayed pet.
+  let motion=await boot();motion.key(E);motion.step(4900);assert.equal(motion.pose.m,0);
+  motion.step(100);assert.equal(motion.pose.m,1);
+  motion.step(100);assert.equal(motion.pose.m,1);
+  motion.step(100);assert.equal(motion.pose.m,0);
+  motion.step(4700);motion.key(E);motion.step(100);assert.equal(motion.pose.m,2);
+  motion.key(R);motion.key(R);motion.key(E);assert.equal(motion.pose.y,31);
+  motion.key(R);motion.key(R);motion.key(E);motion.key(R);
+  assert.equal(motion.pose.i,1);assert.notEqual(motion.pose.y,31);
+  motion.key(E);assert.notEqual(motion.pose.y,31);
   console.log('PASS: selection, care, sleep, naming, per-pet persistence, timing, corrupt data, I/O failures, asset size');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -49,6 +49,17 @@ int main(int argc,char **argv) {
         assert(changes>0 && changes<=60);
     }
     pet_pixels_row(data,12,0,row);for(unsigned x=0;x<64;x++) assert(!row[x]);
+    // Blink uses the closed-eye expression, on BOTH anchors (the bird's
+    // anchors are both left of x=32, so screen halves are not a valid test).
+    const unsigned eyes[3][3]={{16,32,24},{17,36,32},{16,29,27}};
+    for(unsigned pet=0;pet<12;pet++) for(unsigned y=0;y<64;y++) {
+        memset(row,0,sizeof(row));pet_pixels_face(pet,y,1,row);
+        for(unsigned x=0;x<64;x++) {
+            const unsigned *e=eyes[pet/4];
+            bool closed=y==e[2]+1 && ((x+2>=e[0] && x<=e[0]+2) || (x+2>=e[1] && x<=e[1]+2));
+            assert((row[x]!=0)==closed);
+        }
+    }
     pet_pixels_row(data,0,64,row);for(unsigned x=0;x<64;x++) assert(!row[x]);
     const int positions[][2]={{27,29},{20,32},{5,5},{-31,-20},{220,120},{240,135}};
     uint16_t guarded[240*8+2];

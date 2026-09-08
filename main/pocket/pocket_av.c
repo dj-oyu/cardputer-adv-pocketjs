@@ -1,6 +1,7 @@
 #include "pocket_av.h"
 #include "pocket_api.h"
 #include "pocket_fs.h"
+#include "opus_feed.h"
 #include "sound.h"
 #include "board.h"
 #include "esp_timer.h"
@@ -289,52 +290,177 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
 
 // ------------------------------------------------------------ audio.player
 //
-// Section 9.1 asks for MP3, Opus or FLAC off sd:. None of that is reachable on
-// this board and the numbers are in the section itself: IDF v6.0.1 ships no
-// decoder at all, Espressif's own figures put a decoder's heap at 26.6 to 89.4
-// KB against the 23,552 bytes that is the largest contiguous block measured
-// while an app is up, sd: has no driver here, and app:/ caps a file at 24,576
-// bytes -- 1.5 seconds of 128 kbps MP3, which is not a music player either.
+// Section 9.1 asks for MP3, Opus or FLAC off sd:. None of that is here: IDF
+// v6.0.1 ships no decoder, sd: has no driver on this build, and the section
+// carries the 2026-09-08 re-measurement that says heap is no longer the reason.
+// What is here is the same Player bounded to what this host decodes: one
+// source, in the host's own 24 kHz mono, as IMA ADPCM or PCM16 inside a WAV.
 //
-// What is here instead is the same Player, bounded to what fits: one clip, in
-// RAM, in the host's own 24 kHz mono, as IMA ADPCM or PCM16 inside a WAV. The
-// bytes are read once at open and decoded in place by the audio task, so the
-// whole feature is one allocation the app can see the size of, no ring, no
-// second task and no second I2S channel. seek is real because the clip is in
-// RAM; at ADPCM's block granularity, which limits publishes.
+// IT IS STREAMED. That is the whole of what changed, and it changed because the
+// previous shape was diagnosed backwards. A clip was read into RAM whole at
+// open and decoded in place, under a PLAYER_MAX_BYTES of 24,576 -- which people
+// read as a codec problem and answered by shopping for codecs. It was not: a
+// sound longer than the buffer cannot play however well it compresses, so the
+// buffer was the ceiling. Now the ring is what is resident (6,144 bytes, and
+// only while a player has been asked to play) and the source is what is long.
+//
+// What that is worth TODAY is smaller than it sounds, and saying so is the
+// point of this paragraph. `app:/` caps one file at 24,576 bytes in the
+// filesystem itself -- FS_MAX_FILE in pocket_fs.c, derived from the 16-sector
+// quota and the requirement that a replace hold two versions at once -- which
+// is the same number PLAYER_MAX_BYTES was. So on app: the length does not move
+// at all; what moves is that the player stops spending 24,576 bytes of heap to
+// hold a sound it is playing 2,048 bytes of. The length only moves when the
+// source can be longer: `assets:/`, which is flash-mapped firmware content and
+// has no such cap, or sd: when it lands. The player no longer has an opinion
+// either way, which is the part that was worth building.
+//
+// The producer is pocket_av_pump(), on the JS/ui task, because that is the task
+// pocket_fs.c's reads belong to -- its store index and block walk are not
+// thread-safe and nothing here is going to make them so. A refill is one
+// esp_partition_read of at most 2,048 bytes; at PCM16's 48,000 bytes a second
+// that is about 23 reads a second, at most one slot-full per frame after the
+// first. It is the same work fs.file.read already does on this task on an app's
+// behalf, and it is nowhere near the "long operation on the drawing task" that
+// froze the panel for sound_capture_probe().
+//
+// MEASURED ON THE BOARD (2026-09-08), and it settled a question this file used
+// to carry only an estimate for. apps/streamplay times 60 idle frames against a
+// whole play, on one binary, and repeats. Thirteen consecutive cycles:
+//
+//   underruns=0   deltaTenthMs -2..-4   worstFrameMs 35..36
+//   idleTenthMs 337..338                playTenthMs 334..335
+//
+// deltaTenthMs is playing-mean minus idle-mean in tenths of a millisecond, so
+// feeding measured very slightly NEGATIVE. That is not a saving, it is noise:
+// the honest statement is that THE COST OF FEEDING IS BELOW WHAT THIS
+// INSTRUMENT CAN RESOLVE, against a predicted bound of 1 ms. Nobody should
+// quote -0.3 ms as a speed-up.
+//
+// The thirteen cycles matter more than the first one. Each cycle is a fresh
+// open/close, so a delta that grew across them would have meant something
+// leaking through the player's lifetime; identical cycles say there is not one.
+// A single measurement could not have told those apart.
+//
+// The consumer is the audio task, as before. Between them, `underruns` finally
+// means something: it counts 128-frame blocks the audio task had to fill with
+// silence because the pump had not got back yet.
+//
+// WHERE THIS DESIGN DOES NOT REACH, AND IT IS sd:. Feeding from the ui task is
+// safe because a flash read is short. A card read is not. The figures are
+// sd-surface's and they are arithmetic, not measurement -- nobody has timed a
+// card-backed stream on this board:
+//
+//   * the bus runs at 400 kHz, so one 2,048-byte slot is about 41 ms of bus
+//     time IN WHATEVER FRAME ASKS FOR IT, before the directory walk and open
+//     that pocket_fs_read_at() does per call. A 33 ms frame cannot contain
+//     that, and a frame that does not finish is a panel that stops -- the exact
+//     failure sound_capture_probe() was moved off this task to avoid.
+//   * 24 kHz mono PCM16 is 48,000 B/s = 384 kbit/s against that 400 kbit/s bus,
+//     so card-backed PCM16 cannot sustain realtime at this clock at all,
+//     whoever feeds it. ADPCM's 12,000 B/s fits the bandwidth with room, but
+//     each refill still stalls its frame for as long.
+//
+// So `assets:/` and `app:/` are what this feeder serves, and a card source will
+// stutter and drag the frame rather than fail cleanly. Two ways out, and they
+// are different work: raise the SD clock (sd_media.c says that is a measurement
+// rather than an edit, and MISO is wired so it can be checked in software), or
+// move the feed to a task of its own at priority 4 -- which needs the fs
+// surface made thread-safe first, and is why it was not done here. NEITHER IS
+// WORTH STARTING ON THE ARITHMETIC ALONE. Time a card read first.
 
-// The whole file, header included, and now exactly what app:/ allows.
+// PLAYER_MAX_BYTES WAS HERE, and it was 24,576. It is gone rather than moved,
+// and the reason is worth the paragraph because three people in a row have now
+// answered this question with the previous answer.
 //
-// This was 8,192 for a reason that has expired. The largest contiguous block
-// with an app running measured 23,552 bytes, and a clip that only loads when
-// the heap is unfragmented is a clip that fails in front of the person using
-// it -- so the cap was set well below the block rather than at the file limit.
-// That block now measures 73,728 (tools/memlog.py --port --check), because
-// static DIRAM went from 197,847 to 111,383 bytes. A 24,576-byte allocation
-// against 73,728 is the same kind of margin 8,192 had against 23,552.
+// The blame has moved twice. It was read as a CODEC limit -- 2.05 s of ADPCM,
+// so find a better codec -- and the answer to that was: no, THE CAP IS THE
+// BUFFER, a sound longer than the buffer cannot play however well it
+// compresses. That correction was right and still incomplete. Measure the next
+// step and the cap is neither: for `app:/` it is THE FILESYSTEM QUOTA.
+// FS_MAX_FILE in pocket_fs.c is 24,576, derived from the 16-sector quota and
+// the requirement that a replace hold two versions at once, and PLAYER_MAX_
+// BYTES was set to match it.
 //
-// It costs nothing but a constant and it triples every clip: 2.05 s of ADPCM
-// instead of 0.68, 0.51 s of PCM16 instead of 0.17. The cap is now the file
-// system's, so this stops being a second limit an app has to discover.
-#define PLAYER_MAX_BYTES 24576
+// SO THE TWO NUMBERS WERE EQUAL BY DERIVATION, NOT BY COINCIDENCE. Anybody who
+// moves one of them and expects a longer clip on app: will find nothing
+// changes, and will not be able to explain why. The buffer is now gone and the
+// quota is still there; app: is still 24,576 bytes of source and always was.
+//
+// What streaming actually changed is therefore two things, neither of them
+// length on app:. First, the 24,576-byte allocation a player held from open()
+// became a 6,144-byte ring held only while it plays. Second, and this is the
+// deliverable: the player no longer has an opinion about how long a source is,
+// so a volume that can hold a longer one needs no second rewrite here. sd: is
+// that volume and it has landed; assets: is flash-mapped firmware content and
+// never had the cap either.
+//
+// Each step in that chain looked like the answer until somebody measured the
+// next one. Assume there is another.
+
+// How much of the file the header walk may look at. The walk itself is ranged
+// -- eight bytes to read a chunk header, then a skip -- so a big LIST in front
+// of the data costs reads and not RAM; this bounds how many chunks a file may
+// make us walk before it is called malformed.
+#define PLAYER_MAX_CHUNKS 64
+// Pump calls to wait for the decoder's first slot before calling it a failure.
+// Priming is measured in a couple of frames (prime_us in the OPUSDEC line says
+// how many microseconds it really took); 30 frames is about a second, which is
+// far past anything healthy and short enough that a decoder that died without
+// saying so becomes an error rather than a player stuck in "playing" in silence.
+#define PLAYER_PRIME_FRAMES 30
 #define PLAYER_WATCHES   2
 #define PLAYER_CODEC_PCM  "wav/pcm16"
 #define PLAYER_CODEC_IMA  "wav/ima-adpcm"
+// Named for what it decodes rather than for what Opus can carry, because the
+// gate in opus_feed.h refuses the rest of Opus by name. An app that feature-tests
+// this string and then hands us a SILK asset would otherwise be surprised at
+// play() instead of at open().
+#define PLAYER_CODEC_OPUS "opus/celt"
+#define PLAYER_RING_BYTES (SOUND_STREAM_SLOTS*SOUND_STREAM_SLOT_BYTES)
+// The compressed ring, and it is the same struct and the same slot geometry as
+// the PCM one on purpose: those atomics are the part of streaming whose mistakes
+// are silent, and tools/test_stream.c already compiles and exercises them. A
+// second, smaller, hand-written ring would have saved 4 KiB of playtime heap and
+// duplicated exactly the code that header exists to keep un-duplicated.
+//
+// What 6,144 bytes buys on this side is not 128 ms but 2.0 seconds: Opus at
+// 24 kbps is 3,050 bytes a second, sixteen times denser than the PCM16 the same
+// ring holds downstream. That is the slack the ui task's 39.9 ms frames are paid
+// out of, and it is why nothing here has to become thread-safe.
+#define PLAYER_PKT_BYTES  (SOUND_STREAM_SLOTS*SOUND_STREAM_SLOT_BYTES)
 
 typedef enum { P_READY=0, P_PLAYING, P_PAUSED, P_ENDED, P_ERROR } player_state_t;
+// Which of the three the open source turned out to be. `block` used to carry
+// this on its own (nonzero meant ADPCM); a third codec needs a name.
+typedef enum { C_PCM16=0, C_IMA, C_OPUS } player_codec_t;
 static const char *const PLAYER_STATE_NAME[]={
     "ready","playing","paused","ended","error" };
 
 static struct {
     bool     open;
+    player_codec_t codec;
     int32_t  id;            // identity the bound methods carry; never reused
-    uint8_t *file;          // the whole file, one allocation
-    uint32_t offset, bytes; // the data chunk within it
+    char    *path;          // the source, kept because every refill re-reads it
+    uint32_t offset, bytes; // the data chunk within the file
     uint16_t block;         // ADPCM block size, 0 for PCM16
     uint32_t per_block;     // output frames one ADPCM block is worth
     uint32_t frames;        // the clip's length in output frames
-    uint32_t position;      // frames consumed before the running clip started
-    int32_t  clip;          // sound.c's id, 0 when nothing is queued
+    uint32_t position;      // frames consumed before the running stream started
+    uint32_t feed;          // the next byte of the file the pump will read
+    uint32_t underruns;     // carried across pause and seek; see M_STATUS
+    uint8_t *ring_bytes;    // PLAYER_RING_BYTES, or NULL before the first play
+    sound_stream_t ring;
+    // Opus only, and NULL for everything else: the compressed ring between the
+    // pump and the decode task, and the container the header described.
+    uint8_t *pkt_bytes;
+    sound_stream_t pkt;
+    opus_pak_t pak;
+    int32_t  stream;        // sound.c's id, 0 when nothing is queued
+    // Opus only: the audio task has not been started yet because the decode task
+    // has not produced anything yet. See the priming block in player_pump().
+    bool     priming;
+    uint16_t prime_waits;
     player_state_t state;
     bool     announce;      // a state change the pump has still to deliver
 } player;
@@ -343,11 +469,11 @@ static int32_t player_next_id=1;
 
 // The audio task's hand-back. Same rule as the tone's: post and stop.
 //
-// What the callback carries is a launch number, not sound.c's clip id: a clip
-// short enough can be over before sound_clip_start() has returned that id, and
-// a completion nobody can name yet is a completion that gets applied to the
-// wrong thing. The number is minted before the launch and moved on by every
-// halt, so a stopped clip's completion matches nothing and is dropped -- the
+// What the callback carries is a launch number, not sound.c's stream id: a
+// source short enough can be over before sound_stream_start() has returned that
+// id, and a completion nobody can name yet is a completion that gets applied to
+// the wrong thing. The number is minted before the launch and moved on by every
+// halt, so a stopped stream's completion matches nothing and is dropped -- the
 // same trick, and the same reason, as pocket_api.c's request numbers.
 static uint32_t player_seq;
 static atomic_int player_done_seq;
@@ -360,37 +486,53 @@ static void clip_done(void *ctx, bool completed) {
 
 // ---- the container
 //
-// Every length below is checked against what is left of the file before it is
-// used, so a truncated or lying header ends as a refusal rather than as a read
-// past the buffer. Section 9.1 asks for bounds on metadata and blocks; the
-// bound here is the whole file, which is smaller than any of them.
-static const char *wav_parse(const uint8_t *f, uint32_t n) {
-    if(n<44||memcmp(f,"RIFF",4)||memcmp(f+8,"WAVE",4)) return "not a WAV file";
+// The walk is ranged now rather than over a buffer, which is what lets a file
+// be longer than anything this host will hold: eight bytes to read a chunk
+// header, sixteen or twenty more for a fmt body, and a skip for everything
+// else. Every length is checked against the file size before it is used, so a
+// truncated or lying header ends as a refusal rather than as a read past the
+// end. PLAYER_MAX_CHUNKS bounds the walk itself.
+static const char *player_at(uint32_t at, uint8_t *out, uint32_t want) {
+    const char *code=NULL;
+    int32_t got=pocket_fs_read_at(player.path,at,out,want,&code);
+    if(got!=(int32_t)want) return "the source could not be read";
+    return NULL;
+}
+
+static const char *wav_parse(uint32_t size) {
+    uint8_t head[24];
+    if(size<44) return "not a WAV file";
+    const char *why=player_at(0,head,12);
+    if(why) return why;
+    if(memcmp(head,"RIFF",4)||memcmp(head+8,"WAVE",4)) return "not a WAV file";
     uint32_t at=12, rate=0, per_block=0;
     uint16_t format=0, channels=0, bits=0, align=0;
     bool have_fmt=false;
     player.offset=player.bytes=0;
-    while(at+8<=n) {
-        uint32_t size=(uint32_t)f[at+4]|((uint32_t)f[at+5]<<8)|
-                      ((uint32_t)f[at+6]<<16)|((uint32_t)f[at+7]<<24);
-        const uint8_t *body=f+at+8;
-        if(size>n-at-8) return "a chunk runs past the end of the file";
-        if(!memcmp(f+at,"fmt ",4)&&size>=16) {
-            format=(uint16_t)(body[0]|(body[1]<<8));
-            channels=(uint16_t)(body[2]|(body[3]<<8));
-            rate=(uint32_t)body[4]|((uint32_t)body[5]<<8)|
-                 ((uint32_t)body[6]<<16)|((uint32_t)body[7]<<24);
-            align=(uint16_t)(body[12]|(body[13]<<8));
-            bits=(uint16_t)(body[14]|(body[15]<<8));
+    for(unsigned n=0;n<PLAYER_MAX_CHUNKS&&at+8<=size;n++) {
+        if((why=player_at(at,head,8))) return why;
+        uint32_t body=(uint32_t)head[4]|((uint32_t)head[5]<<8)|
+                      ((uint32_t)head[6]<<16)|((uint32_t)head[7]<<24);
+        if(body>size-at-8) return "a chunk runs past the end of the file";
+        if(!memcmp(head,"fmt ",4)&&body>=16) {
+            uint8_t f[20];
+            uint32_t want=body>=20?20:16;
+            if((why=player_at(at+8,f,want))) return why;
+            format=(uint16_t)(f[0]|(f[1]<<8));
+            channels=(uint16_t)(f[2]|(f[3]<<8));
+            rate=(uint32_t)f[4]|((uint32_t)f[5]<<8)|
+                 ((uint32_t)f[6]<<16)|((uint32_t)f[7]<<24);
+            align=(uint16_t)(f[12]|(f[13]<<8));
+            bits=(uint16_t)(f[14]|(f[15]<<8));
             // IMA carries its samples-per-block in the fmt extension. Trusting
             // it rather than deriving it is what lets a file made by a tool
             // that pads its blocks still decode where its blocks really begin.
-            if(size>=20) per_block=(uint32_t)(body[18]|(body[19]<<8));
+            if(want==20) per_block=(uint32_t)(f[18]|(f[19]<<8));
             have_fmt=true;
-        } else if(!memcmp(f+at,"data",4)) {
-            player.offset=at+8; player.bytes=size;
+        } else if(!memcmp(head,"data",4)) {
+            player.offset=at+8; player.bytes=body;
         }
-        at+=8+size+(size&1);    // chunks are padded to an even length
+        at+=8+body+(body&1);    // chunks are padded to an even length
     }
     if(!have_fmt) return "the file has no fmt chunk";
     if(!player.bytes) return "the file has no audio in it";
@@ -400,7 +542,13 @@ static const char *wav_parse(const uint8_t *f, uint32_t n) {
         player.block=0; player.per_block=1;
         player.frames=player.bytes/2;
     } else if(format==0x11&&bits==4) {
+        player.codec=C_IMA;
         if(align<8||(align&1)||align>player.bytes) return "the ADPCM block size is not usable";
+        // A block has to fit one slot whole or a slot boundary would land
+        // mid-block, where there is nothing to reseed the predictor from. This
+        // is the one thing streaming refuses that the RAM clip did not, and it
+        // is 2,048 bytes: 4,093 output frames, 170 ms of audio in one block.
+        if(align>SOUND_STREAM_SLOT_BYTES) return "the ADPCM block is larger than the stream slot";
         player.block=align;
         player.per_block=per_block?per_block:(uint32_t)(align-4)*2+1;
         uint32_t blocks=player.bytes/align, tail=player.bytes%align;
@@ -412,6 +560,42 @@ static const char *wav_parse(const uint8_t *f, uint32_t n) {
     return NULL;
 }
 
+// The Opus container, and the two things open() has to establish about it: that
+// the header describes something this host decodes, and that the FIRST PACKET
+// really is CELT 20 ms mono. The second is one four-byte read and it is what
+// turns a wrongly-encoded asset into a refusal at open() rather than into a
+// stream that dies three slots in. Every later packet is gated in the decode
+// task, where a refusal ends the stream as an error.
+static const char *opus_parse(uint32_t size) {
+    uint8_t head[OPUS_PAK_HEADER];
+    const char *why=player_at(0,head,OPUS_PAK_HEADER);
+    if(why) return why;
+    if((why=opus_pak_parse(head,size,&player.pak))) return why;
+    uint8_t first[3];
+    if((why=player_at(player.pak.data_offset,first,3))) return why;
+    if(((uint32_t)first[0]|((uint32_t)first[1]<<8))<1)
+        return "the first Opus packet is empty";
+    if(!opus_pak_toc_ok(first[2]))
+        return "this host decodes CELT 20 ms mono Opus only";
+    player.codec=C_OPUS;
+    player.block=0; player.per_block=1;
+    player.offset=player.pak.data_offset;
+    player.bytes=size-player.pak.data_offset;
+    player.frames=player.pak.total_frames;
+    return NULL;
+}
+
+// Which of the three the file is. The magic decides, not the extension: a name
+// is what a user typed and a magic is what a tool wrote.
+static const char *source_parse(uint32_t size) {
+    uint8_t magic[4];
+    const char *why=player_at(0,magic,4);
+    if(why) return why;
+    if(!memcmp(magic,"POK1",4)) return opus_parse(size);
+    player.codec=C_PCM16;              // wav_parse promotes this to C_IMA
+    return wav_parse(size);
+}
+
 // ---- state
 
 static void player_set_state(player_state_t state) {
@@ -420,69 +604,270 @@ static void player_set_state(player_state_t state) {
     player.announce=true;   // delivered from the pump, never inside a JS call
 }
 
-// sound_clip_position() answers 0 both before the audio task has reached the
-// clip and after it is over, and the pump is what tells those apart -- so
+// sound_stream_position() answers 0 both before the audio task has reached the
+// stream and after it is over, and the pump is what tells those apart -- so
 // between the last sample and the next frame the raw sum would walk backwards
 // to where play() started. Keeping the highest reading is enough: within one
-// clip the position only ever grows, and a halt or a seek sets it afresh.
+// stream the position only ever grows, and a halt or a seek sets it afresh.
 static uint32_t player_reported;
 
 static uint32_t player_frames_now(void) {
-    if(player.state!=P_PLAYING||!player.clip) return player.position;
-    uint32_t done=player.position+sound_clip_position(player.clip);
+    if(player.state!=P_PLAYING||!player.stream) return player.position;
+    uint32_t done=player.position+sound_stream_position(player.stream);
     if(done>player.frames) done=player.frames;
     if(done<player_reported) return player_reported;
     player_reported=done;
     return done;
 }
 
-// Stops whatever is sounding and takes the position with it. The read has to
-// come first: sound_clip_position() answers 0 once the clip is over, and the
-// stop is what makes it over. The few frames the audio task may add between the
-// two are lost, which is a position up to 5ms behind and never ahead.
+// Fills every free slot from the source. The producer half of sound.h's ring,
+// and the only thing on the JS task that touches the file after open.
+//
+// It publishes the last slot with `last` set rather than a zero-length one
+// afterwards, so the audio task learns the source is finished at the same
+// moment it gets the bytes that finish it, and never spends a slot cycle on an
+// empty slot to be told.
+// The Opus half of the refill. Same job as the one below -- fill every free slot
+// from the file -- but the ring it fills carries compressed packets for the
+// decode task rather than samples for the audio task, and a slot has to end
+// where a packet does for the same reason an ADPCM slot has to end where a block
+// does. opus_pak_whole() is that trim; the bytes it leaves behind are read again
+// as the head of the next slot, which costs one short re-read per slot and saves
+// carrying a partial packet across the boundary.
+static void player_feed_opus(void) {
+    uint32_t end=player.offset+player.bytes;
+    for(;;) {
+        if(player.feed>=end) return;
+        uint8_t *slot=sound_stream_slot(&player.pkt);
+        if(!slot) return;
+        uint32_t want=SOUND_STREAM_SLOT_BYTES, left=end-player.feed;
+        if(want>left) want=left;
+        const char *code=NULL;
+        int32_t got=pocket_fs_read_at(player.path,player.feed,slot,want,&code);
+        if(got<=0) {
+            ESP_LOGW("pocket.av","the source stopped reading at %u",
+                     (unsigned)player.feed);
+            sound_stream_publish(&player.pkt,0,true);
+            player.feed=end;
+            return;
+        }
+        uint32_t whole=opus_pak_whole(slot,(uint32_t)got);
+        // Zero means the first packet in this slot claims to be longer than a
+        // slot, which opus_pak_parse already refused through maxPacketBytes -- so
+        // reaching here means the file disagrees with its own header. Ending is
+        // the honest move; retrying would read the same bytes forever.
+        bool last=player.feed+(uint32_t)got>=end;
+        if(!whole) {
+            ESP_LOGE("pocket.av","a packet at %u does not fit a slot",
+                     (unsigned)player.feed);
+            sound_stream_publish(&player.pkt,0,true);
+            player.feed=end;
+            return;
+        }
+        player.feed+=whole;
+        // A tail shorter than its own length prefix is a truncated file. The
+        // whole packets before it still play; the stream ends where they do.
+        if(last) player.feed=end;
+        sound_stream_publish(&player.pkt,whole,last);
+    }
+}
+
+static void player_feed(void) {
+    if(player.codec==C_OPUS) { if(player.pkt_bytes) player_feed_opus(); return; }
+    if(!player.ring_bytes) return;
+    uint32_t end=player.offset+player.bytes;
+    for(;;) {
+        if(player.feed>=end) return;            // the last slot carried `last`
+        uint8_t *slot=sound_stream_slot(&player.ring);
+        if(!slot) return;
+        uint32_t want=SOUND_STREAM_SLOT_BYTES;
+        // A slot holds whole ADPCM blocks; see sound.h for why that is what
+        // makes a slot boundary cost the decoder nothing.
+        if(player.block) want-=want%player.block;
+        uint32_t left=end-player.feed;
+        if(want>left) want=left;
+        const char *code=NULL;
+        int32_t got=pocket_fs_read_at(player.path,player.feed,slot,want,&code);
+        if(got<=0) {
+            // The source stopped answering mid-stream. Ending it here is the
+            // honest move: the audio task plays what it already has and the
+            // completion reports the shortfall, which reaches the app as the
+            // same "stopped early" P_ERROR an I2S failure does.
+            ESP_LOGW("pocket.av","the source stopped reading at %u",
+                     (unsigned)player.feed);
+            sound_stream_publish(&player.ring,0,true);
+            player.feed=end;
+            return;
+        }
+        player.feed+=(uint32_t)got;
+        sound_stream_publish(&player.ring,(uint32_t)got,player.feed>=end);
+    }
+}
+
+// Stops whatever is sounding and takes the position and the underruns with it.
+// The reads have to come first: sound_stream_position() answers 0 once the
+// stream is over, and the stop is what makes it over. The few frames the audio
+// task may add between the two are lost, which is a position up to 5ms behind
+// and never ahead.
 static bool player_halt(void) {
-    if(!player.clip) return true;
+    // No sound stream is not the same as nothing running. The decode task can
+    // outlive the audio task -- the audio task stops when it has played the
+    // frames it was promised, and the decoder is at that moment parked waiting
+    // for a slot that will never come free. Returning true here without asking
+    // it to stop would let teardown free two rings it is still holding.
+    if(!player.stream) {
+        if(player.codec!=C_OPUS) return true;
+        // Priming counts as running: the decode task is alive and holding both
+        // rings even though nothing is sounding yet.
+        player.priming=false;
+        return opus_feed_stop();
+    }
     player.position=player_frames_now();
-    bool released=sound_clip_stop(player.clip);
-    player.clip=0;
+    player.underruns+=sound_stream_underruns();
+    bool released=sound_stream_stop(player.stream);
+    // The audio task first, then the decode task: stopping the consumer first
+    // means the decoder finds the PCM ring full and parks rather than spinning
+    // through the packets it had left. Both have to say they are out before
+    // either ring can be freed, so the two answers are ANDed rather than the
+    // second one overwriting the first.
+    if(player.codec==C_OPUS) released=opus_feed_stop()&&released;
+    player.stream=0;
     player_seq++;   // the completion this stop provokes now matches nothing
     return released;
 }
 
-// Queues the rest of the clip from `player.position`. ADPCM is only resumable
+// Queues the rest of the source from `player.position`. ADPCM is only resumable
 // where a block begins -- a block reseeds the decoder, mid-block there is
 // nothing to reseed from -- so the position moves back to the start of the
 // block it lands in. That rounding is the whole of seekResolutionMs.
+// Where in the file an Opus stream restarts from, and what the position becomes.
+//
+// Opus packets are variable length, so a byte offset is not derivable from a
+// frame number -- which is what the container's index is for. One entry per
+// indexInterval packets, so a seek lands on the entry at or before the request
+// and the position moves back to that packet's first frame. Same rounding an
+// ADPCM block already imposes, at 100 ms rather than 21.
+//
+// The reads: four bytes. This runs on the drawing task and it is not allowed to
+// walk the file.
+//
+// `skip` is the encoder lookahead, and it is only the first entry that carries
+// it -- header totalFrames already excludes those samples, so entry 0 has to
+// drop them to make the two agree, and any later entry is thousands of samples
+// past them.
+static const char *player_locate_opus(uint32_t *start, uint32_t *byte,
+                                      uint16_t *skip) {
+    const opus_pak_t *k=&player.pak;
+    uint32_t packet=(*start+k->pre_skip)/k->frame_samples;
+    uint32_t entry=packet/k->index_interval;
+    if(entry>=k->index_count) entry=k->index_count-1;
+    uint8_t at[4];
+    const char *why=player_at(k->index_offset+entry*4,at,4);
+    if(why) return why;
+    uint32_t offset=(uint32_t)at[0]|((uint32_t)at[1]<<8)|
+                    ((uint32_t)at[2]<<16)|((uint32_t)at[3]<<24);
+    if(offset<k->data_offset||offset>=k->file_bytes)
+        return "the seek index points outside the file";
+    uint32_t first=entry*(uint32_t)k->index_interval*k->frame_samples;
+    *skip=entry?0:k->pre_skip;
+    *start=entry?first-k->pre_skip:0;
+    *byte=offset;
+    return NULL;
+}
+
 static const char *player_launch(void) {
     uint32_t start=player.position, byte=player.offset;
-    if(player.block) {
+    uint16_t skip=0;
+    if(player.codec==C_OPUS) {
+        const char *why=player_locate_opus(&start,&byte,&skip);
+        if(why) return "unavailable";
+    } else if(player.block) {
         uint32_t index=start/player.per_block;
         start=index*player.per_block;
         byte+=index*player.block;
     } else byte+=start*2;
     if(start>=player.frames||byte>=player.offset+player.bytes) return "ended";
+    // The ring is taken at the first play and held until close, not taken and
+    // given back around every pause: 6,144 bytes churned on each pause would
+    // fragment a heap whose largest block is the thing this whole surface has
+    // to fit inside. A player that is opened and never played still costs
+    // nothing, which is the case that matters.
+    if(!player.ring_bytes) {
+        player.ring_bytes=malloc(PLAYER_RING_BYTES);
+        if(!player.ring_bytes) return "unavailable";
+        player.ring.bytes=player.ring_bytes;
+    }
+    // The compressed ring, and it exists only for an Opus source. Held to close
+    // for the same reason the PCM one is: churning 6 KiB on every pause is how a
+    // heap whose largest block this whole surface has to fit inside gets
+    // fragmented.
+    if(player.codec==C_OPUS&&!player.pkt_bytes) {
+        player.pkt_bytes=malloc(PLAYER_PKT_BYTES);
+        if(!player.pkt_bytes) return "unavailable";
+        player.pkt.bytes=player.pkt_bytes;
+    }
     player.position=start;
     player_reported=start;
+    player.feed=byte;
+    sound_stream_rewind(&player.ring);
     uint32_t seq=++player_seq;
-    int32_t id=sound_clip_start(player.file+byte,
-                                player.offset+player.bytes-byte,
-                                player.block?SOUND_CLIP_IMA:SOUND_CLIP_PCM16,
-                                player.block,player.frames-start,1.0f,
-                                clip_done,(void *)(uintptr_t)seq);
+    // Primed before the audio task is given anything to play, so the first
+    // block is audio rather than an underrun. Three slots is one read of at
+    // most 6,144 bytes in total.
+    if(player.codec==C_OPUS) {
+        sound_stream_rewind(&player.pkt);
+        player_feed();          // compressed slots, so the decoder has work
+        // The decode task is created here and deleted when the stream ends, so
+        // Opus costs nothing at rest -- 18,436 bytes of decoder state and 14,336
+        // of stack are taken now and given back at stop.
+        if(!opus_feed_start(&player.ring,&player.pkt,player.frames-start,skip))
+            { player_seq++; return "unavailable"; }
+        // AND THE AUDIO TASK IS NOT STARTED HERE. This line used to be shared
+        // with the WAV path below, under a comment claiming that starting the
+        // audio task after the decode task meant the ring had samples in it
+        // first. That ordered the two CALLS, not the two pieces of work:
+        // opus_feed_start() creates a task and returns before it has run, so the
+        // audio task was handed an EMPTY ring and every 128-frame block it could
+        // not fill was an underrun. Measured on the board: 5 of them, 26.7 ms,
+        // which is what a cold opus_decoder_create plus two cold decodes costs.
+        //
+        // The WAV path has no such gap because ITS producer is player_feed(), a
+        // function call on this task -- it has genuinely finished when the line
+        // after it runs. A task cannot be primed by calling a function, so the
+        // start moves to the pump, which begins the sound on the first frame
+        // that finds a slot published. Section 9.1 has play() resolve on the
+        // output being accepted rather than on sound being heard, so spending
+        // one frame here costs the contract nothing and blocks nobody: the
+        // alternative was blocking the drawing task for the length of a decode.
+        player.priming=true;
+        player.prime_waits=0;
+        return NULL;
+    }
+    player_feed();
+    int32_t id=sound_stream_start(&player.ring,
+                                  player.block?SOUND_STREAM_IMA:SOUND_STREAM_PCM16,
+                                  player.block,player.frames-start,1.0f,
+                                  clip_done,(void *)(uintptr_t)seq);
     if(id<0) { player_seq++; return id==SOUND_ERR_BUSY?"busy":"unavailable"; }
-    player.clip=id;
+    player.stream=id;
     return NULL;
 }
 
 static void player_teardown(void) {
     if(!player.open) return;
     player.open=false;
-    if(player_halt()) free(player.file);
-    else ESP_LOGE("pocket.av","the audio task still holds a clip; its %u bytes stay",
-                  (unsigned)player.bytes);
-    player.file=NULL;
+    if(player_halt()) { free(player.ring_bytes); free(player.pkt_bytes); }
+    else ESP_LOGE("pocket.av","a task still holds the rings; their %u bytes stay",
+                  (unsigned)(PLAYER_RING_BYTES+
+                             (player.codec==C_OPUS?PLAYER_PKT_BYTES:0)));
+    player.ring_bytes=NULL; player.ring.bytes=NULL;
+    player.pkt_bytes=NULL; player.pkt.bytes=NULL;
+    free(player.path); player.path=NULL;
     player.state=P_READY; player.announce=false;
     player.position=0; player.frames=0; player.bytes=0;
+    player.feed=0; player.underruns=0;
+    player.priming=false; player.prime_waits=0;
+    player.codec=C_PCM16;
 }
 
 // ---- onState
@@ -499,12 +884,15 @@ static bool player_payload(JSContext *ctx, int slot, void *user, JSValue *payloa
     if(JS_IsException(event)) return false;
     JS_SetPropertyStr(ctx,event,"state",
                       JS_NewString(ctx,PLAYER_STATE_NAME[player.state]));
-    // Nothing here fails asynchronously except an I2S write that stopped early,
-    // and that is what P_ERROR is. A player that ends normally carries no error.
+    // What can now fail asynchronously: an I2S write that stopped early, and a
+    // producer that could not keep the ring fed for 2.7 seconds. Both are
+    // P_ERROR and both are honestly "the stream stopped early"; which of the
+    // two it was is in the log, not in the app's error, because an app can do
+    // nothing different about either.
     JS_SetPropertyStr(ctx,event,"error",
         player.state==P_ERROR
             ?pocket_api_error(ctx,POCKET_ERR_IO_ERROR,"audio.player",
-                              "the clip stopped early",true,
+                              "the stream stopped early",true,
                               POCKET_OUTCOME_UNKNOWN)
             :JS_NULL);
     *payload=event;
@@ -512,14 +900,46 @@ static bool player_payload(JSContext *ctx, int slot, void *user, JSValue *payloa
 }
 
 static void player_pump(void) {
+    // The Opus start, deferred out of play() -- see player_launch(). One slot is
+    // 40 ms of decoded audio, which is a whole frame of head start for a
+    // consumer that takes 5.3 ms at a time; eof covers a source so short the
+    // decoder finished it before publishing twice.
+    if(player.priming) {
+        player_feed();          // keep the packet ring full while we wait
+        if(atomic_load(&player.ring.filled)||atomic_load(&player.ring.eof)) {
+            player.priming=false;
+            int32_t id=sound_stream_start(&player.ring,SOUND_STREAM_PCM16,0,
+                                          player.frames-player.position,1.0f,
+                                          clip_done,(void *)(uintptr_t)player_seq);
+            if(id<0) { opus_feed_stop(); player_set_state(P_ERROR); }
+            else player.stream=id;
+        } else if(++player.prime_waits>PLAYER_PRIME_FRAMES) {
+            // The decoder never published and never said it was finished. Saying
+            // so beats a player that reports "playing" in silence for ever.
+            ESP_LOGE("pocket.av","the decoder produced nothing in %u frames",
+                     (unsigned)PLAYER_PRIME_FRAMES);
+            player.priming=false;
+            opus_feed_stop();
+            player_set_state(P_ERROR);
+        }
+    }
     uint32_t done=(uint32_t)atomic_load(&player_done_seq);
-    if(player.clip&&done==player_seq) {
+    if(player.stream&&done==player_seq) {
         atomic_store(&player_done_seq,0);
         bool ok=atomic_load(&player_done_ok);
-        player.clip=0;
+        player.underruns+=sound_stream_underruns();
+        // The audio task cannot tell a stream that ended from one whose decoder
+        // gave up -- both look like a PCM ring that reached eof -- so the fault
+        // count is what separates them. Without this a refused packet would be
+        // reported to the app as a clip that simply finished early.
+        if(player.codec==C_OPUS&&opus_feed_faults()) ok=false;
+        player.stream=0;
         if(ok) player.position=player.frames;
         if(player.state==P_PLAYING) player_set_state(ok?P_ENDED:P_ERROR);
     }
+    // The refill, and the reason this surface has a pump at all now. Ahead of
+    // the delivery below so a listener that runs long costs the ring nothing.
+    if(player.state==P_PLAYING) player_feed();
     if(player.announce&&player_table.open) {
         player.announce=false;
         pocket_api_sub_deliver(&player_table,player_payload,NULL);
@@ -568,11 +988,13 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
             JSValue info=JS_NewObject(ctx);
             if(JS_IsException(info)) return info;
             JS_SetPropertyStr(ctx,info,"codec",
-                JS_NewString(ctx,player.block?PLAYER_CODEC_IMA:PLAYER_CODEC_PCM));
+                JS_NewString(ctx,player.codec==C_OPUS?PLAYER_CODEC_OPUS
+                                :player.codec==C_IMA?PLAYER_CODEC_IMA
+                                                    :PLAYER_CODEC_PCM));
             JS_SetPropertyStr(ctx,info,"sampleRate",JS_NewInt32(ctx,SOUND_SAMPLE_RATE));
             JS_SetPropertyStr(ctx,info,"channels",JS_NewInt32(ctx,1));
             JS_SetPropertyStr(ctx,info,"durationMs",
-                JS_NewInt32(ctx,(int)(player.frames*1000u/SOUND_SAMPLE_RATE)));
+                JS_NewInt32(ctx,(int)((uint64_t)player.frames*1000u/SOUND_SAMPLE_RATE)));
             JS_SetPropertyStr(ctx,info,"seekable",JS_TRUE);
             return info;
         }
@@ -596,12 +1018,12 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
                 return pocket_api_reject(ctx,
                     !strcmp(why,"busy")?POCKET_ERR_BUSY:POCKET_ERR_NOT_AVAILABLE,
                     op,!strcmp(why,"busy")?"the sound queue is full"
-                                          :"no audio codec on this unit",
-                    !strcmp(why,"busy"),POCKET_OUTCOME_NOT_APPLIED);
+                                          :"there is no room for the stream",
+                    true,POCKET_OUTCOME_NOT_APPLIED);
             }
             player_set_state(P_PLAYING);
             // Section 9.1 has play() resolve on the output being accepted, not
-            // on the clip being over; that is what onState is for.
+            // on the stream being over; that is what onState is for.
             return pocket_api_settled(ctx,JS_UNDEFINED,false);
         }
         case M_PAUSE: {
@@ -633,8 +1055,8 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
             player_halt();
             player.position=frame; player_reported=frame;
             if(was_playing&&player_launch())
-                // The clip could not be requeued, so the position moved but the
-                // sound stopped. outcome=applied is the honest half of that.
+                // The stream could not be requeued, so the position moved but
+                // the sound stopped. outcome=applied is the honest half of that.
                 { player_set_state(P_PAUSED);
                   return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,op,
                       "the seek landed but playback could not resume",true,
@@ -647,11 +1069,16 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
             JS_SetPropertyStr(ctx,status,"state",
                 JS_NewString(ctx,PLAYER_STATE_NAME[player.state]));
             JS_SetPropertyStr(ctx,status,"positionMs",
-                JS_NewInt32(ctx,(int)(player_frames_now()*1000u/SOUND_SAMPLE_RATE)));
-            // Always zero, and honestly so: the clip is in RAM before it starts,
-            // so there is no producer to fall behind the I2S write. The field
-            // stays because a streamed source would have one.
-            JS_SetPropertyStr(ctx,status,"underruns",JS_NewInt32(ctx,0));
+                JS_NewInt32(ctx,(int)((uint64_t)player_frames_now()*1000u/SOUND_SAMPLE_RATE)));
+            // No longer always zero, and no longer honestly zero either: the
+            // producer is the pump on the drawing task and it can be late. One
+            // count is 128 frames, 5.3 ms of silence spliced in rather than
+            // audio dropped -- so a nonzero reading means the sound got longer,
+            // not that part of it went missing. Accumulated across pause and
+            // seek because it is a property of the playback, not of the run.
+            JS_SetPropertyStr(ctx,status,"underruns",
+                JS_NewInt32(ctx,(int)(player.underruns+
+                    (player.stream?sound_stream_underruns():0))));
             return status;
         }
         case M_ON_STATE: {
@@ -715,46 +1142,44 @@ static JSValue js_player_open(JSContext *ctx, JSValueConst this_val,
             "cancelled before the open",false,POCKET_OUTCOME_NOT_APPLIED);
     }
 
-    // Ask the size first so a file that could never fit is refused before an
-    // 8 KiB allocation is attempted for it.
+    // The path is what the player keeps instead of the bytes: every refill
+    // re-resolves it, which is also what makes a source that is deleted or
+    // replaced under a running stream end as a read failure rather than as a
+    // stale buffer. One small allocation for the length of the player.
+    size_t n=strlen(source)+1;
+    char *path=malloc(n);
+    if(path) memcpy(path,source,n);
+    JS_FreeCString(ctx,source);
+    if(!path)
+        return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,
+            "no room for the source path",true,POCKET_OUTCOME_NOT_APPLIED);
+    player.path=path;
+
+    // The size first, and it is the only thing open() reads whole: nothing else
+    // about this call scales with the file.
     const char *code=NULL;
-    int32_t size=pocket_fs_read_all(source,NULL,0,&code);
+    int32_t size=pocket_fs_read_all(player.path,NULL,0,&code);
     if(size<0) {
         JSValue error=pocket_api_reject(ctx,code?code:POCKET_ERR_IO_ERROR,OP,
                                         "the source could not be read",
                                         false,POCKET_OUTCOME_NOT_APPLIED);
-        JS_FreeCString(ctx,source);
+        free(player.path); player.path=NULL;
         return error;
     }
-    if(size>PLAYER_MAX_BYTES) {
-        JS_FreeCString(ctx,source);
-        return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
-            "the file is longer than maxSourceBytes",false,
-            POCKET_OUTCOME_NOT_APPLIED);
-    }
-    uint8_t *file=malloc((size_t)size);
-    if(!file) {
-        JS_FreeCString(ctx,source);
-        return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,
-            "no room for the clip",true,POCKET_OUTCOME_NOT_APPLIED);
-    }
-    int32_t got=pocket_fs_read_all(source,file,(uint32_t)size,&code);
-    JS_FreeCString(ctx,source);
-    if(got!=size) {
-        free(file);
-        return pocket_api_reject(ctx,code?code:POCKET_ERR_IO_ERROR,OP,
-            "the source could not be read",false,POCKET_OUTCOME_NOT_APPLIED);
-    }
-
-    player.file=file;
-    const char *why=wav_parse(file,(uint32_t)got);
+    const char *why=source_parse((uint32_t)size);
     if(why) {
-        free(file); player.file=NULL;
+        free(player.path); player.path=NULL;
         return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,why,false,
                                  POCKET_OUTCOME_NOT_APPLIED);
     }
     player.open=true; player.id=player_next_id++;
-    player.position=0; player_reported=0; player.clip=0; player.state=P_READY; player.announce=false;
+    player.position=0; player_reported=0; player.stream=0;
+    player.feed=0; player.underruns=0;
+    player.ring_bytes=NULL; player.ring.bytes=NULL;
+    player.pkt_bytes=NULL; player.pkt.bytes=NULL;
+    sound_stream_rewind(&player.ring);
+    sound_stream_rewind(&player.pkt);
+    player.state=P_READY; player.announce=false;
 
     JSValue object=JS_NewObject(ctx);
     if(JS_IsException(object)) { player_teardown(); return object; }
@@ -768,7 +1193,7 @@ static JSValue js_player_open(JSContext *ctx, JSValueConst this_val,
     player_add(ctx,object,"close",0,M_CLOSE,key);
     JS_FreeValue(ctx,key);
     // Section 9.1: open takes the header check and the resources, and does not
-    // start the sound.
+    // start the sound. What it no longer takes is the sound itself.
     return pocket_api_settled(ctx,object,false);
 }
 
@@ -921,11 +1346,25 @@ static const pocket_limit_t tone_limits[] = {
 // there is no gain on a clip and no mixing, so neither has a limit to state.
 static const pocket_limit_t player_limits[] = {
     {.name="codecs",         .kind=POCKET_LIMIT_TEXT,
-     .text=PLAYER_CODEC_PCM "," PLAYER_CODEC_IMA},
+     .text=PLAYER_CODEC_PCM "," PLAYER_CODEC_IMA "," PLAYER_CODEC_OPUS},
+    // The Opus entry is "opus/celt" and not "opus", and that is the honest
+    // width of it: the decoder in this image will refuse a SILK or a hybrid
+    // packet by name, because the 10,420-byte stack it is given was measured
+    // for CELT 20 ms mono and is only a LOWER bound for the other modes. A
+    // capability string that said "opus" would be publishing a stack nobody has
+    // measured. The container is this project's own -- tools/make_opus_asset.py
+    // writes it, main/pocket/opus_feed.h documents it -- and not Ogg.
+    {.name="opusContainer", .kind=POCKET_LIMIT_TEXT,.text="pocket/opus-packets-1"},
+    {.name="opusFrameMs",   .kind=POCKET_LIMIT_INT, .number=20},
     {.name="volumes",        .kind=POCKET_LIMIT_TEXT,.text="app,assets"},
     {.name="sampleRate",     .kind=POCKET_LIMIT_INT,.number=(int32_t)SOUND_SAMPLE_RATE},
     {.name="channels",       .kind=POCKET_LIMIT_INT,.number=1},
-    {.name="maxSourceBytes", .kind=POCKET_LIMIT_INT,.number=PLAYER_MAX_BYTES},
+    // maxSourceBytes is GONE, and its absence is the report. It used to say
+    // 24,576, which this file enforced with a malloc; nothing enforces a source
+    // size here any more, and a limit nothing enforces is worse than no limit.
+    // What still bounds a source is the volume it sits on -- `app:` publishes
+    // maxFileBytes on fs.volume.app, which is where an app should have been
+    // asking all along.
     {.name="concurrent",     .kind=POCKET_LIMIT_INT,.number=1},
     {.name="maxWatches",     .kind=POCKET_LIMIT_INT,.number=PLAYER_WATCHES},
     {.name="seekable",       .kind=POCKET_LIMIT_FLAG,.number=1},
@@ -933,7 +1372,30 @@ static const pocket_limit_t player_limits[] = {
     // containing the request. 256-byte blocks at 24 kHz are 21 ms; the number
     // is the file's, so this states the shape rather than a value.
     {.name="seekBlockAligned",.kind=POCKET_LIMIT_FLAG,.number=1},
-    {.name="streaming",      .kind=POCKET_LIMIT_FLAG,.number=0},
+    {.name="streaming",      .kind=POCKET_LIMIT_FLAG,.number=1},
+    // What an underrun does, published because an app can hear the difference
+    // and cannot otherwise tell which of the three it got. "stretch" is
+    // silence inserted with nothing dropped and nothing repeated, and
+    // positionMs stalling for exactly as long; the alternatives would have been
+    // "drop" (audio lost to hold timing) and "stop". The full argument is above
+    // sound_stream_start() in sound.h.
+    {.name="underrunPolicy", .kind=POCKET_LIMIT_TEXT,.text="stretch"},
+    // And the one case that is not survivable: a producer that publishes
+    // nothing at all for this long ends the stream, and onState reports it the
+    // way it reports a failed I2S write.
+    {.name="maxStarveMs",    .kind=POCKET_LIMIT_INT,
+     .number=(int32_t)SOUND_STREAM_STARVE_MS},
+    // What the ring costs while a player is playing, and the ceiling on an
+    // ADPCM block that follows from it: a block has to fit one slot whole or a
+    // slot boundary lands where the predictor cannot be reseeded. wav_parse
+    // refuses a larger block by name.
+    {.name="ringBytes",      .kind=POCKET_LIMIT_INT,.number=PLAYER_RING_BYTES},
+    {.name="maxBlockBytes",  .kind=POCKET_LIMIT_INT,
+     .number=(int32_t)SOUND_STREAM_SLOT_BYTES},
+    // A second ring of the same size, and only while an Opus source is playing:
+    // the pump fills it with packets and the decode task drains it. Published
+    // because it is playtime heap an app can be told about rather than discover.
+    {.name="opusRingBytes",  .kind=POCKET_LIMIT_INT,.number=PLAYER_PKT_BYTES},
     {.name="mixesWithTone",  .kind=POCKET_LIMIT_FLAG,.number=0},
     {0},
 };

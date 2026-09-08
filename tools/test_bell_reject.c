@@ -33,7 +33,7 @@ int main(void) {
     for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++) {
         bell_visits_seen=bell_rejected=bell_rejected_wrongly=0;
         bell_miss_disc=bell_miss_height=bell_miss_depth=bell_miss_clip=0;
-        bell_accepts=bell_hit_visits=0;
+        bell_accepts=bell_hit_visits=0;bell_discs=0;
         for(int ph=0;ph<PHASES;ph++) {
             elapsed=1.3f+ph*0.83f-1.0f/30;
             flower_prepare(1.0f/30,0,0,(flower_species_t)sp);
@@ -50,6 +50,13 @@ int main(void) {
         }
         else
             printf("%-10s no bell parts\n",NAME[sp]);
+        // Square roots per visit, and until 1/a was hoisted, divisions per
+        // visit too. "Up to six" was the only figure anyone had; this is the
+        // one that says what the hoist is worth.
+        if(bell_visits_seen)
+            printf("%-10s   %u discriminants >= 0 over %u walked visits = %.2f each\n",
+                   NAME[sp],bell_discs,bell_visits_seen-bell_rejected,
+                   (double)bell_discs/(bell_visits_seen-bell_rejected));
         if(bell_hit_visits)printf("%-10s   %u accepts over %u hit visits = %.2f each\n",
                                   NAME[sp],bell_accepts,bell_hit_visits,
                                   (double)bell_accepts/bell_hit_visits);

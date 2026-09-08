@@ -1,0 +1,69 @@
+#pragma once
+#include <stdbool.h>
+#include <stdint.h>
+
+// The decisions of docs/common-api.md 3.1 that do not need a board.
+//
+// Everything here is a pure function of its arguments, the way
+// pet/pet_hub_core.c and pocket/app_registry.c are, so tools/test_overlay.c
+// settles the safety valves on the host. That matters more here than usual:
+// the valve this file exists for is the one whose failure mode is a device
+// that boot-loops with no way in, and a valve that can only be tested by
+// flashing the thing it protects is not tested.
+
+typedef enum {
+    OVERLAY_OFF = 0,   // the person has not asked for one
+    OVERLAY_BLOCKED,   // asked for, but the last start did not survive: 3.1's
+                       // "起動中に落ちるオーバーレイを自動で再武装しない"
+    OVERLAY_REFUSED,   // asked for, but the up-front reservation failed
+    OVERLAY_STOPPED,   // was running; the shell stopped it
+    OVERLAY_STARTING,  // the non-volatile flag is written and the guest is
+                       // being built. A reset in this state is what BLOCKED
+                       // reads on the next boot.
+    OVERLAY_RUNNING,
+} overlay_state_t;
+
+// Where on the LCD an overlay may draw. x/y are screen pixels; an overlay's
+// own coordinates are relative to the box and are never translated by the
+// guest, so a program cannot even express a pixel outside it -- and asking for
+// one is refused rather than clipped (3.1: clipping hides the mistake from the
+// author).
+typedef struct { int16_t x, y, w, h; } overlay_region_t;
+
+// True when a w*h box at (x,y) in region-local coordinates lies wholly inside
+// the region. Zero and negative extents are refused: a program that computed a
+// width of -1 has a bug, and drawing nothing would hide it.
+bool overlay_region_holds(const overlay_region_t *region,
+                          int x, int y, int w, int h);
+
+// What to do at boot, from the two bits that survive a reset.
+//
+// `armed` is the person's setting. `starting` is the flag written immediately
+// before the last start and cleared only after the overlay ran healthily for a
+// while -- so finding it still set means the last start did not get that far,
+// and the only safe reading of that is "it took the device down". Re-arming is
+// then a human act.
+overlay_state_t overlay_boot_state(bool armed, bool starting);
+
+typedef struct {
+    uint32_t budget_us;    // what one overlay turn may cost
+    uint16_t over_limit;   // consecutive over-budget turns that stop it
+    uint32_t healthy_us;   // how long a healthy run is before the flag clears
+    // state
+    uint16_t over_run;
+    uint64_t started_us;
+    uint32_t last_us, worst_us;
+    uint32_t turns;
+} overlay_budget_t;
+
+void overlay_budget_start(overlay_budget_t *b, uint64_t now_us);
+
+// Records one turn. Returns true when the shell must stop the overlay: 3.1
+// wants a repeatedly over-budget overlay stopped, because a home screen that
+// cannot be operated is a home screen the person cannot switch it off from.
+// One slow turn is not a fault -- a garbage collection is one turn -- so it is
+// a run of them.
+bool overlay_budget_turn(overlay_budget_t *b, uint32_t turn_us);
+
+// True once the run has been healthy long enough to clear the starting flag.
+bool overlay_budget_healthy(const overlay_budget_t *b, uint64_t now_us);

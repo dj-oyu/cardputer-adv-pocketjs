@@ -57,6 +57,11 @@ bool sd_generation_valid(const sd_media_t *m, uint32_t gen) {
     return gen != 0 && m->state == SD_MEDIA_READY && m->generation == gen;
 }
 
+bool sd_name_reserved(const char *name, size_t len) {
+    size_t n = sizeof(SD_TEMP_SUFFIX) - 1;
+    return len >= n && memcmp(name + len - n, SD_TEMP_SUFFIX, n) == 0;
+}
+
 sd_path_result_t sd_path_build(const sd_media_t *m, const char *rel, size_t len,
                                char *out, size_t outsz) {
     // Order matters and is a contract, not a preference. docs/filesystem-api.md
@@ -92,6 +97,10 @@ sd_path_result_t sd_path_build(const sd_media_t *m, const char *rel, size_t len,
         for (size_t k = 0; k < n; k++)
             if (rel[start + k] == '\\' || rel[start + k] == '\0')
                 return SD_PATH_INVALID;
+        // The host's own temporary files. Refused at every depth, not only at
+        // the leaf: a directory named this way would hide a whole subtree from
+        // listings for the same reason, and no app has a use for the name.
+        if (sd_name_reserved(rel + start, n)) return SD_PATH_INVALID;
         if (i < len) i++;                                    // step over '/'
     }
 

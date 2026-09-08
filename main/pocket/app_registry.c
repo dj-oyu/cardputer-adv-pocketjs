@@ -17,6 +17,7 @@ static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
 static const char *const CAPS_PET_OPT[]= {"sensors.imu", "audio.tone", NULL};
 static const char *const CAPS_WORK[]   = {"workspace", NULL};
 static const char *const CAPS_COMP[]   = {"net.http", "audio.tone", NULL};
+static const char *const CAPS_OVERLAY[]= {"ui.overlay", "time", NULL};
 
 // The one range this build knows. It is written out per row rather than shared
 // so that a row can be moved forward on its own, which is what a version range
@@ -61,6 +62,17 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.tutorial", .title="TUTORIAL", .entry="src:1",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_NONE, .optional=CAPS_WORK, .works=APP_WORKS_SELF},
+
+    // The overlay of section 3.1. Its runtime is not one of the two above --
+    // it is "pocket-overlay" in the document -- but nothing in this file reads
+    // the runtime except the API range check, and an overlay is a pocket-API
+    // app in every way that check cares about. Both capabilities are REQUIRED
+    // rather than optional on purpose: a clock with no clock and an overlay
+    // with nowhere to draw are not degraded, they are pointless, and 3.1 asks
+    // for that to be said before the guest is built rather than after.
+    {.id="local.deskclock", .title="DESK CLOCK", .entry="apps/deskclock/deskclock.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_OVERLAY, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // A work started by pocket.workspace.run(). Its own identity, so its
     // storage is its own and the Playground's is out of reach.

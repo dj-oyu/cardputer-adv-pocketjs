@@ -17,11 +17,11 @@
 
 #define SAMPLE_RATE ((int)SOUND_SAMPLE_RATE)
 
-// A click, a tone, or a clip. kind is the click index, -1 for a tone, -2 for a
-// clip; frequency is read only for tones, and the last three fields only for
-// clips. One struct rather than a union because the queue is four entries deep:
-// the twelve bytes a clip adds cost 48 bytes of .bss in total, and a union
-// would cost the same reading twice as badly.
+// A click, a tone, or a stream. kind is the click index, -1 for a tone, -2 for
+// a stream; frequency is read only for tones, and the last two fields only for
+// streams. One struct rather than a union because the queue is four entries
+// deep: the eight bytes a stream adds cost 32 bytes of .bss in total, and a
+// union would cost the same reading twice as badly.
 typedef struct {
     int32_t id;
     int16_t kind;
@@ -30,9 +30,8 @@ typedef struct {
     uint32_t frames;
     sound_done_fn done;
     void *ctx;
-    const uint8_t *data;  // clips: the caller's payload, read in place
-    uint32_t bytes;
-    uint16_t block;       // clips: ADPCM block size, 0 for PCM16
+    sound_stream_t *stream;         // streams: the caller's ring
+    uint16_t block;       // streams: ADPCM block size, 0 for PCM16
 } request_t;
 
 static i2s_chan_handle_t output;
@@ -203,82 +202,113 @@ static void play_tone(const request_t *req,int16_t *pcm) {
     if(req->done)req->done(req->ctx,completed);
 }
 
-// ------------------------------------------------------------------- clips
+// ----------------------------------------------------------------- streams
 //
-// The whole clip is already in the caller's RAM and is read in place, so this
-// adds no ring buffer, no second task and no second I2S channel -- it is the
-// same 128-frame block the clicks and tones write, filled from a decoder
-// instead of from a table. That is the only shape of playback this board has
-// room for; docs/common-api.md 9.1 carries the measurements that rule out the
-// alternative.
+// The consumer half of sound.h's ring. The producer -- pocket_av.c's player,
+// running on the JS/ui task -- reads the source and publishes slots; this task
+// takes them in order, decodes, and writes the same 128-frame block the clicks
+// and tones write. No second I2S channel and no second task: the ring is the
+// only thing this adds, and the caller owns it.
+//
+// What replaced what: the previous shape took the whole sound in one buffer and
+// read it in place, which made the buffer the ceiling on length. Nothing about
+// the audio task changes here except where the bytes come from.
 //
 // The IMA ADPCM decoder is in ima_adpcm.h, where tools/test_ima.py can compile
 // the same lines this task runs. It costs 194 bytes of flash for its two tables
 // and 20 bytes of state on this task's stack; that is the whole of the codec.
 
-// The clip the audio task is inside, and the id whoever wants it stopped last
-// asked for. Both are the whole of the handshake in sound_clip_stop().
-static atomic_int clip_active;
-static atomic_int clip_halt;
-static atomic_uint clip_frames;   // output frames produced so far
+// The stream the audio task is inside, and the id whoever wants it stopped last
+// asked for. Both are the whole of the handshake in sound_stream_stop().
+static atomic_int stream_active;
+static atomic_int stream_halt;
+static atomic_uint stream_frames;      // output frames produced so far
+static atomic_uint stream_starved;     // blocks filled with silence
 
-static void play_clip(const request_t *req,int16_t *pcm) {
-    // Claim first, then look for a stop: sound_clip_stop() writes the halt and
+// The underrun policy is stated in full above sound_stream_start() in sound.h,
+// because it is the part of this design an app can see. The two lines it comes
+// to here: a starved block is silence and the source does not advance, and a
+// producer that has published nothing for SOUND_STREAM_STARVE_BLOCKS blocks in
+// a row ends the stream as incomplete.
+
+static void play_stream(const request_t *req,int16_t *pcm) {
+    sound_stream_t *s=req->stream;
+    // Claim first, then look for a stop: sound_stream_stop() writes the halt and
     // then reads this, so with sequentially consistent atomics one of the two
     // sides always sees the other. Either this returns without touching the
-    // caller's bytes, or the stopper waits for it to finish. There is no
-    // interleaving where the buffer is freed under a read.
-    atomic_store(&clip_active,req->id);
-    atomic_store(&clip_frames,0);
-    if(atomic_load(&clip_halt)==req->id) {
-        atomic_store(&clip_active,0);
+    // caller's ring, or the stopper waits for it to finish. There is no
+    // interleaving where the ring is freed under a read.
+    atomic_store(&stream_active,req->id);
+    atomic_store(&stream_frames,0);
+    atomic_store(&stream_starved,0);
+    if(atomic_load(&stream_halt)==req->id) {
+        atomic_store(&stream_active,0);
         if(req->done) req->done(req->ctx,false);
         return;
     }
-    ima_t ima={.data=req->data,.bytes=req->bytes,.block=req->block};
-    uint32_t frames=req->frames, at=0;
+    stream_read_t r={0};
+    uint32_t frames=req->frames, at=0, starved=0;
     bool completed=true;
     // A tail of silence past the end, as the clicks have, to push the last
     // samples through the DMA ring.
     while(at<frames+256) {
-        if(atomic_load(&clip_halt)==req->id) { completed=false; break; }
-        for(int j=0;j<128;j++,at++) {
+        if(atomic_load(&stream_halt)==req->id) { completed=false; break; }
+        // One 128-frame block; stream_sample() in sound_stream.h is the walk.
+        bool starving=false;
+        for(int j=0;j<128;j++) {
             int sample=0;
             if(at<frames) {
-                if(req->block) sample=ima_next(&ima);
-                else {
-                    uint32_t off=at*2u;
-                    sample=off+1<req->bytes
-                        ?(int16_t)(req->data[off]|(req->data[off+1]<<8)):0;
+                bool ended=false;
+                if(stream_sample(s,&r,req->block,&sample,&ended)) {
+                    at++;
+                    // Muting silences a stream without shortening it, the same
+                    // way it treats a tone: what is heard changes, not how long
+                    // it lasts.
+                    if(!atomic_load(&enabled)) sample=0;
+                    sample=(sample*req->gain)>>12;
+                } else if(ended) {
+                    // The source ended shorter than its header claimed. What is
+                    // left of the loop is the silence tail.
+                    frames=at; at++; sample=0;
+                } else {
+                    // The producer is behind. Silence for this sample and the
+                    // same position next time, so an underrun stretches the
+                    // sound rather than dropping part of it -- and
+                    // status().positionMs stalls with it, which is the truth.
+                    starving=true; sample=0;
                 }
-                // Muting silences a clip without shortening it, the same way it
-                // treats a tone: what is heard changes, not how long it lasts.
-                if(!atomic_load(&enabled)) sample=0;
-                sample=(sample*req->gain)>>12;
-            }
+            } else at++;
             pcm[j*2]=pcm[j*2+1]=(int16_t)sample;
         }
-        atomic_store(&clip_frames,at<frames?at:frames);
+        if(starving) {
+            starved++;
+            atomic_store(&stream_starved,atomic_load(&stream_starved)+1);
+            if(starved>=SOUND_STREAM_STARVE_BLOCKS) { completed=false; break; }
+        } else starved=0;
+        atomic_store(&stream_frames,at<frames?at:frames);
         if(!emit(pcm)) { completed=false; break; }
     }
-    atomic_store(&clip_active,0);
+    stream_release(s,&r);
+    atomic_store(&stream_active,0);
     if(req->done) req->done(req->ctx,completed);
 }
 
-int32_t sound_clip_start(const uint8_t *data,uint32_t bytes,int format,
-                         uint16_t block,uint32_t frames,float gain,
-                         sound_done_fn done,void *ctx) {
+int32_t sound_stream_start(sound_stream_t *stream,int format,uint16_t block,
+                           uint32_t frames,float gain,
+                           sound_done_fn done,void *ctx) {
     if(!events) return SOUND_ERR_UNSUPPORTED;
     // The codec is recording. BUSY rather than UNSUPPORTED: the feature exists
     // and the answer changes when the recording closes.
     if(atomic_load(&capturing)) return SOUND_ERR_BUSY;
-    if(!data||!bytes||!frames) return SOUND_ERR_INVALID;
+    if(!stream||!stream->bytes||!frames) return SOUND_ERR_INVALID;
     if(!(gain>=0.0f&&gain<=1.0f)) return SOUND_ERR_INVALID;
     // A block has a four-byte header and at least one nibble pair after it, and
-    // has to be even for the nibble walk above to end where the next block
-    // begins. PCM16 has no blocks at all.
-    if(format==SOUND_CLIP_IMA) { if(block<8||block&1) return SOUND_ERR_INVALID; }
-    else if(format==SOUND_CLIP_PCM16) block=0;
+    // has to be even for the nibble walk to end where the next block begins. It
+    // also has to fit a slot whole: a slot ending mid-block would leave the
+    // decoder with nothing to reseed from. PCM16 has no blocks at all.
+    if(format==SOUND_STREAM_IMA) {
+        if(block<8||block&1||block>SOUND_STREAM_SLOT_BYTES) return SOUND_ERR_INVALID;
+    } else if(format==SOUND_STREAM_PCM16) block=0;
     else return SOUND_ERR_INVALID;
     request_t req={
         .id=atomic_fetch_add(&next_id,1),
@@ -286,26 +316,28 @@ int32_t sound_clip_start(const uint8_t *data,uint32_t bytes,int format,
         .gain=(uint16_t)(gain*4096.0f),
         .frames=frames,
         .done=done,.ctx=ctx,
-        .data=data,.bytes=bytes,.block=block};
+        .stream=stream,.block=block};
     if(xQueueSend(events,&req,0)!=pdTRUE) return SOUND_ERR_BUSY;
     return req.id;
 }
 
-bool sound_clip_stop(int32_t id) {
+bool sound_stream_stop(int32_t id) {
     if(id<=0) return true;
-    atomic_store(&clip_halt,id);
+    atomic_store(&stream_halt,id);
     // One block is 5.3ms and the write it may be inside gives up after 100ms,
     // so 200ms is well past any honest wait. Returning false would mean the
-    // audio task still holds the caller's bytes, which is not a thing to
-    // recover from by freeing them anyway.
-    for(int i=0;i<40&&atomic_load(&clip_active)==id;i++)
+    // audio task still holds the caller's ring, which is not a thing to
+    // recover from by freeing it anyway.
+    for(int i=0;i<40&&atomic_load(&stream_active)==id;i++)
         vTaskDelay(pdMS_TO_TICKS(5));
-    return atomic_load(&clip_active)!=id;
+    return atomic_load(&stream_active)!=id;
 }
 
-uint32_t sound_clip_position(int32_t id) {
-    return atomic_load(&clip_active)==id?atomic_load(&clip_frames):0;
+uint32_t sound_stream_position(int32_t id) {
+    return atomic_load(&stream_active)==id?atomic_load(&stream_frames):0;
 }
+
+uint32_t sound_stream_underruns(void) { return atomic_load(&stream_starved); }
 
 int32_t sound_tone(unsigned frequency_hz,unsigned duration_ms,float gain,
                    sound_done_fn done,void *ctx) {
@@ -972,7 +1004,7 @@ static void audio_task(void *arg) {
         if(req.kind>=0) {
             if(req.kind<SFX_KINDS&&atomic_load(&enabled))play_click(req.kind,pcm);
         } else if(req.kind==-2) {
-            play_clip(&req,pcm);
+            play_stream(&req,pcm);
         } else {
             play_tone(&req,pcm);
         }

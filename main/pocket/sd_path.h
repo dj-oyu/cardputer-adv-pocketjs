@@ -6,6 +6,38 @@
 // Everything a mistake here would cost is an authorisation bug, which is the
 // class of bug least likely to be noticed by running the feature and most
 // likely to be noticed by a test that tries to escape.
+//
+// ---------------------------------------------------------------------------
+// TWO INVARIANTS THAT LOOK LIKE REDUNDANT CHECKS AND ARE NOT
+//
+// Both of these read as belt-and-braces to someone tidying this file up, and
+// both have a reason that is invisible from the code alone. tools/test_sd.c
+// fails if either is removed; if you are here because that test broke, read
+// this before "fixing" the test.
+//
+// 1. THE GRANT IS CHECKED BEFORE THE MEDIA STATE.
+//    sd_path_build returns SD_PATH_NO_GRANT before it looks at m->state, and
+//    the callers in pocket_fs.c check m->granted before m->state too. Swapping
+//    them looks harmless -- an app with no grant is refused either way -- but
+//    the ERROR IT GETS would then depend on whether a card is present:
+//    DISCONNECTED with the slot empty, PERMISSION_DENIED with a card in. That
+//    is an app the person never authorised learning whether they have a card
+//    inserted, by calling an API that is supposed to tell it nothing. Small
+//    leak, real one, and free to avoid. docs/filesystem-api.md line 176 asks
+//    for the refusal not to reveal what is there; this is what that costs.
+//
+// 2. REMOVAL DROPS THE GRANT.
+//    sd_media_removed() calls sd_media_revoke(), so a card that goes away takes
+//    the authorisation with it. Keeping the grant across a removal looks like a
+//    convenience -- the person already chose this folder, why ask again -- but
+//    the card that comes back is NOT NECESSARILY THE SAME CARD. There is no
+//    card-detect pin on this board and no identity check on remount, so "the
+//    folder named pocket on the card in the slot" can silently become a folder
+//    of the same name on somebody else's card. The generation counter alone
+//    does not save you: it invalidates open handles, but a fresh call would
+//    happily open the new card's folder under the old permission. The grant has
+//    to die with the media, and re-granting has to go back through the picker.
+// ---------------------------------------------------------------------------
 #ifndef SD_PATH_H
 #define SD_PATH_H
 
@@ -64,6 +96,15 @@ bool sd_media_usable(const sd_media_t *m);
 
 // A handle or cursor made under `gen` is still live.
 bool sd_generation_valid(const sd_media_t *m, uint32_t gen);
+
+// The suffix an uncommitted create or replace wears while it is being written.
+// docs/filesystem-api.md section 2 keeps temporary files out of LISTINGS; this
+// keeps them out of the NAMESPACE, which is stronger and simpler: a name no app
+// can address is a name no app can create, so the rename a commit performs can
+// never land on top of a file the app made itself under the temporary's name,
+// and a listing has nothing to filter that stat could still reveal.
+#define SD_TEMP_SUFFIX ".pkt-tmp"
+bool sd_name_reserved(const char *name, size_t len);
 
 // Reasons sd_path_build can refuse, so the caller can pick the right error
 // without re-deriving why.

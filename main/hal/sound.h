@@ -1,7 +1,9 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include "driver/i2c_master.h"
+#include "sound_stream.h"
 
 // sound_tone's limits. The ceiling is well under the 12 kHz Nyquist of the
 // 24 kHz output so the wavetable's own aliasing stays inaudible; the floor is
@@ -54,43 +56,78 @@ int32_t sound_tone(unsigned frequency_hz, unsigned duration_ms, float gain,
 // is remembered, which is enough while one tone plays at a time.
 void sound_tone_cancel(int32_t id);
 
-// ------------------------------------------------------------------- clips
+// ------------------------------------------------------------------ streams
 //
-// A clip is a block of decoded-on-the-fly audio the caller already holds in
-// RAM: 16-bit PCM, or IMA ADPCM in the WAV block layout. It plays through the
-// same task, the same queue and the same I2S channel as the clicks and tones,
-// which is the only reason it fits here at all -- see docs/common-api.md 9.1
-// for why a real codec does not.
+// A stream is audio the caller produces while it plays: 16-bit PCM, or IMA
+// ADPCM in the WAV block layout, arriving in slots the caller fills from its
+// own task. It plays through the same task, the same queue and the same I2S
+// channel as the clicks and tones.
+//
+// It replaced a "clip" that was the whole sound in one buffer, read in place.
+// That shape made the buffer the limit on length -- 24,576 bytes, about 2.05 s
+// of ADPCM -- and it made the buffer's size the cost of having a player open at
+// all. Here the ring is what is resident and the source is what is long, so
+// length is the source's business and the memory is a constant.
 //
 // Everything is mono at SOUND_SAMPLE_RATE. There is no resampler on this host,
-// so a clip at any other rate is the caller's to refuse.
+// so a source at any other rate is the caller's to refuse.
 enum {
-    SOUND_CLIP_PCM16 = 0,       // int16 little-endian, one channel
-    SOUND_CLIP_IMA   = 1,       // IMA ADPCM, `block` bytes per block
+    SOUND_STREAM_PCM16 = 0,     // int16 little-endian, one channel
+    SOUND_STREAM_IMA   = 1,     // IMA ADPCM, `block` bytes per block
 };
 
 #define SOUND_SAMPLE_RATE 24000u
 
-// Queues one clip and returns its id, or one of the negative errors above.
-// `data` must stay put and unchanged until the callback lands or
-// sound_clip_stop() returns true -- the audio task reads it in place, which is
-// what keeps a clip from needing a ring buffer of its own. `frames` is how many
-// output samples the payload is worth; `block` is the ADPCM block size and is
-// ignored for PCM16. A clip queued behind a tone waits for it, as everything
-// on this queue does.
-int32_t sound_clip_start(const uint8_t *data, uint32_t bytes, int format,
-                         uint16_t block, uint32_t frames, float gain,
-                         sound_done_fn done, void *ctx);
+// sound_stream_t, the slot geometry, and the producer's three calls
+// (sound_stream_slot / sound_stream_publish / sound_stream_rewind) are in
+// sound_stream.h, which has no ESP dependency so that tools/test_stream.py can
+// compile the same lines the audio task runs.
 
-// Stops the clip with this id and waits for the audio task to let go of its
-// buffer. True when it has -- and only then may the caller free those bytes.
-// False means the wait ran out with the task still inside the clip, which
-// leaves the caller no choice but to leak the buffer; it has not been seen.
-bool sound_clip_stop(int32_t id);
+// What happens when the producer cannot keep up, which is the failure this
+// design actually has. The audio task fills the block with silence, counts it,
+// and DOES NOT ADVANCE the source: an underrun stretches the sound and never
+// drops or repeats a sample of it. Nothing is invented and nothing is lost.
+//
+// Why not the alternatives. Repeating the last block invents audio that was
+// never in the source. Skipping ahead to hold wall-clock timing loses audio
+// silently, which is the playback twin of splicing a recording across a DMA
+// overflow -- and section 9 already refuses that on the capture side, in the
+// same words, for the same reason. Failing on the first late block would end
+// playback over one slow frame, and the producer runs on the task that draws,
+// which has been measured at 39.9 ms against a 33 ms budget; being late
+// occasionally is this system's normal condition, not its exception.
+//
+// What is NOT survivable is a producer that has stopped altogether -- a session
+// ending with a stream queued, or a source that went away. After this long with
+// nothing published at all, the stream ends incomplete and the app is told, as
+// it is told about a failed I2S write. Sounding silence forever is worse than
+// saying so.
+#define SOUND_STREAM_STARVE_BLOCKS 512
+#define SOUND_STREAM_STARVE_MS \
+    ((SOUND_STREAM_STARVE_BLOCKS*128*1000)/(int)SOUND_SAMPLE_RATE)
 
-// Output frames this clip has produced so far. Zero once it is over, so read it
-// before the callback lands or keep your own total.
-uint32_t sound_clip_position(int32_t id);
+// Queues one stream and returns its id, or one of the negative errors above.
+// `frames` is how many output samples the source is worth and bounds the
+// playback; `block` is the ADPCM block size and is ignored for PCM16. At least
+// one slot should be published before this is called, or the first block is an
+// underrun. A stream queued behind a tone waits for it, as everything on this
+// queue does.
+int32_t sound_stream_start(sound_stream_t *stream, int format, uint16_t block,
+                           uint32_t frames, float gain,
+                           sound_done_fn done, void *ctx);
+
+// Stops the stream with this id and waits for the audio task to let go of the
+// ring. True when it has -- and only then may the caller free those bytes.
+bool sound_stream_stop(int32_t id);
+
+// Output frames this stream has produced so far. Zero once it is over, so read
+// it before the callback lands or keep your own total.
+uint32_t sound_stream_position(int32_t id);
+
+// 128-frame blocks the audio task had to fill with silence because the producer
+// had published nothing. This is the number `status().underruns` reports, and
+// with a streamed source it is no longer always zero. Cleared at each start.
+uint32_t sound_stream_underruns(void);
 
 // ------------------------------------------------------------------ capture
 //
@@ -111,7 +148,7 @@ uint32_t sound_clip_position(int32_t id);
 //
 // Capture and playback are exclusive here, as docs/common-api.md section 9 asks
 // of this first version: while a recording is open sound_play() answers false
-// and sound_tone()/sound_clip_start() answer SOUND_ERR_BUSY, which is also what
+// and sound_tone()/sound_stream_start() answer SOUND_ERR_BUSY, which is also what
 // makes "UI cues do not sound while recording" a property of this file rather
 // than a rule every caller has to remember.
 

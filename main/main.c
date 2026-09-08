@@ -1,5 +1,6 @@
 #include "board.h"
 #include "shell.h"
+#include "overlay.h"
 #include "motion.h"
 #include "sound.h"
 #include "keymap.h"
@@ -11,6 +12,7 @@
 #include "skk_session.h"
 #include "app_session.h"
 #include "pocket_workspace.h"
+#include "sd_picker.h"
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_capture.h"
@@ -181,6 +183,10 @@ extern const char pet_start[] asm("_binary_pet_js_start");
 extern const char pet_end[] asm("_binary_pet_js_end");
 extern const char companion_start[] asm("_binary_companion_js_start");
 extern const char companion_end[] asm("_binary_companion_js_end");
+extern const char streamplay_start[] asm("_binary_streamplay_js_start");
+extern const char streamplay_end[] asm("_binary_streamplay_js_end");
+extern const char opusplay_start[] asm("_binary_opusplay_js_start");
+extern const char opusplay_end[] asm("_binary_opusplay_js_end");
 
 // shell_key() cannot say "hand the display to another screen": its bool already
 // means "launch the app shell_app() names". The request is left behind instead,
@@ -217,6 +223,8 @@ static bool home_key(const keystroke_t *k) {
         case 4: begin_run("local.imucal",NULL,0,imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
         case 5: begin_run("local.pet",NULL,0,pet_start,(size_t)(pet_end-pet_start-1)); break;
         case 6: begin_run("local.companion",NULL,0,companion_start,(size_t)(companion_end-companion_start-1)); break;
+        case 7: begin_run("local.streamplay",NULL,0,streamplay_start,(size_t)(streamplay_end-streamplay_start-1)); break;
+        case 8: begin_run("local.opusplay",NULL,0,opusplay_start,(size_t)(opusplay_end-opusplay_start-1)); break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
@@ -279,6 +287,13 @@ static const screen_ops_t SCREENS[SCREEN_COUNT]={
 };
 
 static void enter(screen_id_t next) {
+    // docs/common-api.md 3.1 moves the guest's lifetime from "entering and
+    // leaving the app screen" to "the home screen owning the frame", and this
+    // is the leaving half: the home screen is giving the display away, so the
+    // session it owns ends here. It has to be before the screen changes,
+    // because app_stop() tears down surfaces that the arriving screen may
+    // immediately build again.
+    if(next!=SCREEN_HOME) overlay_release();
     if(SCREENS[screen].close) SCREENS[screen].close();
     screen=next;
     atomic_store(&text_screen,SCREENS[next].takes_text);
@@ -333,6 +348,13 @@ static void take_pending_run(void) {
 static void begin_run(const char *app_id, const char *prelude, size_t prelude_len,
                       const char *source, size_t len) {
     owner=screen;
+    // The other half of the same rule. Every path that builds a foreground
+    // guest comes through here, and app_session.c holds ONE set of statics --
+    // so the overlay's session must be gone before this one is built. A path
+    // that reached app_start_test() without passing here would silently
+    // overwrite a live guest pointer; the one that exists (the USB
+    // diagnostics) releases the overlay itself.
+    overlay_release();
     // The home screen's background is about to stop being drawn for as long as
     // the guest owns the display, so its scratch stops being worth anything to
     // it and starts being worth a great deal to the guest, the font atlas and
@@ -368,6 +390,18 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         if(have) pocket_workspace_modal_key(stroke);
         if(pocket_workspace_modal_dirty()) pocket_workspace_modal_draw();
         if(!pocket_workspace_modal()) app_force_redraw();
+        return;
+    }
+    // fs.requestFolder puts up the same kind of screen for the same kind of
+    // reason: the person choosing a folder on the card IS the grant, so the
+    // guest waits while they do it. An app that opened both in one turn gets
+    // them in this order rather than on top of each other; the second one's
+    // deadline keeps running while it waits, which is what a person who is
+    // being asked two questions at once would expect of the second.
+    if(sd_picker_modal()) {
+        if(have) sd_picker_modal_key(stroke);
+        if(sd_picker_modal_dirty()) sd_picker_modal_draw();
+        if(!sd_picker_modal()) app_force_redraw();
         return;
     }
     // A text session takes the keyboard from the guest for as long as it is
@@ -477,6 +511,12 @@ static void ui_task(void *arg) {
                 have=xQueueReceive(keys,&stroke,0)==pdTRUE;
             }
             s=&SCREENS[screen];              // key() may have moved us
+            // One overlay turn, before the frame it will be composited into
+            // and only where the home screen still owns the display. It runs
+            // ahead of the wants_run test below so that a key which starts a
+            // foreground app in this same frame still finds the overlay
+            // released by begin_run() rather than half-ticked.
+            if(!running && screen==SCREEN_HOME) overlay_tick();
             const char *source=NULL; size_t len=0;
             if(!running && s->wants_run && s->wants_run(&source,&len)) {
                 const char *pre=NULL; size_t pre_len=0;
@@ -497,6 +537,7 @@ static void ui_task(void *arg) {
             // begin while a guest owns the display.
             if(test=='9') { sound_capture_probe(); test=0; }
             if(test && !running && screen==SCREEN_HOME) {
+                overlay_release();
                 owner=SCREEN_HOME;
                 app_registry_select(APP_ID_DEFAULT);
                 run_started=app_start_test(test);
@@ -542,6 +583,11 @@ void app_main(void) {
     nvs_init();
     pet_hub_init();
     shell_init();
+    // After shell_init(), which is where the stored arming bit reaches the
+    // overlay's setter, and before the UI task, which is what would start it.
+    // This is the boot that decides whether an overlay that did not survive
+    // its last start gets another one, and the answer is no.
+    overlay_init();
     // Neither is fatal: the home stays usable with no dictionary and no font,
     // and the editors show which one is missing.
     jpfont_init();

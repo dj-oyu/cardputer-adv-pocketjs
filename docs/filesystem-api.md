@@ -49,11 +49,18 @@ type VolumeInfo = {
     append:boolean;rename:boolean};
 };
 pocket.fs.space(path:string,options?:FsOptions):Promise<VolumeInfo>;
+pocket.fs.requestFolder(volumeId:"sd",options?:FsOptions):Promise<string|null>;
 ```
+
+`requestFolder` は**許可を作る唯一の入口**で、`sd:` にだけ意味がある。ホストがカード直下のフォルダー一覧を描き、**人が選んだ行がそのまま許可になる**。アプリはフォルダー名を渡せない——引数はvolume idだけで、ホストは列挙した候補以外を許可しない。解決値は仮想ルート `"sd:/"`、人が断ったときはnull（失敗ではない）。カード上の実際のフォルダー名は返さない。人はホスト画面でそれを見ており、アプリは仮想ルート越しにしか到達できないからである。timeoutMsは既定120秒・上限300秒で、期限切れはTIMEOUT。**マウントはこの呼び出しの中でしか起きない。** したがって人が選ぶ前は、カードが刺さっていてもいなくても `volumes()` のsdは `absent` であり、アプリはカードの有無を観測できない。許可はセッション限りで、アプリ終了時にアンマウントとともに落ちる。
 
 volumesは新しい媒体アクセスを発生させない。未対応volumeは返さず、`fs.volume.app` / `fs.volume.assets` / `fs.volume.sd` のcapabilityで検出する。stateやfeatureは認可とは別。spaceは媒体へ問い合わせて更新した値を返す。freeBytesは物理volumeの空き、quotaBytes/usedBytesは自アプリの上限と使用量。nullは取得不能で0と区別する。
 
 generationはマウント／抜去・再挿入ごとに変わる。ハンドルと一覧cursorは世代を保持する。抜去時は保留I/OをDISCONNECTEDで終了し、再挿入しても旧ハンドルを有効にしない。ホストが明示的に再マウントする。アプリへformat、partition操作、任意mount、Flash生読書きは提供しない。マウント失敗で自動formatもしない。
+
+**この機体のSD（実測 2026-09-08）。** microSDはSPI接続で、EXTバスとSPI信号を共有する（CS=12、MOSI=14、CLK=40、MISO=39。LCDは別系統なのでカードの転送が画面を止めることはない）。64GB SDHC・512バイトセクタを400kHzでマウントし、ルート列挙とファイルの作成・書込・削除まで確認した。資源は**マウントで7,032バイト、ハンドル2本でさらに1,640バイト**——いずれもheapで、アンマウントすると全量返る（3周でリーク0）。**カードに触れないアプリはこれを一切負担しない。** 静的DIRAMではないので、`.bss` として全アプリに課金される種類の費用ではない。
+
+**カード検出ピンが無い。** ピンマップにcard detectは無く、抜去はイベントとして受け取れない。観測できるのは「次のコマンドが失敗した形」だけである。したがって `fs.volume.sd` の `available` は**何かを試みた瞬間の観測値**であり、ホストはポーリングしない——ポーリングは、ハードウェアが報告できない生存性を発明することになる。アプリ側の設計上の帰結は、`available=true` を見てから実際に使うまでの間にカードが消えていても、それは異常ではなく通常の経路だということ。抜去を検知した時点で保留I/OはDISCONNECTED、ハンドルとcursorは無効化し、**grantも落とす**（差し替えられたカードは、その人が許可したフォルダーではない。再挿入はホストの再マウントと選択のやり直しを要する）。
 
 ## 4. メタデータ・一覧・ディレクトリ
 
@@ -135,7 +142,13 @@ appendはセンサーログ等の用途で、原子的な文書保存には使�
 
 replaceはatomicReplace=trueのvolumeだけで提供する。durability既定値はcreate/replaceでcrash-safe、appendでsynced、readでは指定不可。crash-safe非対応時はUNSUPPORTEDで、黙って保証を下げない。SDで弱い保証を受け入れる用途は明示的にsyncedを指定する。途中のカード抜去で媒体自体が壊れた場合までデータ保持を保証しない。
 
-PC由来の一般的なSDファイルシステムにrenameがあるだけでcrashSafeReplace=trueと宣言しない。バックエンドごとにジャーナル／二面・復旧規則を実装して電源断試験を通すまでfalse。replace失敗は、公開前ならnot-applied、公開確認後ならapplied、媒体応答を失って判定できなければunknown。unknownのあとに自動再試行してユーザーの変更を上書きしない。
+PC由来の一般的なSDファイルシステムにrenameがあるだけでcrashSafeReplace=trueと宣言しない。バックエンドごとにジャーナル／二面・復旧規則を実装して電源断試験を通すまでfalse。
+
+**`sd:` の具体：`crashSafeReplace=false`、そして既定のopenは断られる。** FATにジャーナルは無く、この機体で電源断試験も通していないので、上の規則どおりfalseを宣言する。`atomicReplace` は一時ファイル＋renameで満たすのでtrue。**帰結として、既定のdurability（create/replaceではcrash-safe）を使った `open()` はUNSUPPORTEDで失敗する。** SDへ保存するアプリは `durability:"synced"` を明示的に指定しなければならない。
+
+**実装（2026-09-08）。** create/replaceは対象の隣の一時ファイル `<name>.pkt-tmp` へ書き、commitで `rename` して公開する。FatFsの `rename` は既存の宛先を拒むので、replaceは `unlink` してから `rename` する二段になる。この隙間は**このAPIからは観測できない**——1回のJSターンの中で、他の操作が始まれない——ので `atomicReplace=true` は満たす。隙間での電源断こそが `crashSafeReplace=false` の意味するところである。`.pkt-tmp` で終わる名前は**アプリの名前空間から除外**する（一覧から隠すだけでなく、statもopenもINVALID_ARGUMENT）。隠すだけでは、公開直前のrenameの宛先にアプリが座れてしまう。
+
+これは驚きだが、意図した驚きである。黙って弱い保証へ落とすほうが安全に見えるのは、壊れるまでの間だけで、電源断で人の作品が消えるのはSDに保存した側である。**最初の呼出しで断られるのは安く、破損してから気づくのは高い。** ただし断り方には条件がある——エラーはUNSUPPORTEDを返すだけでなく、**受け付ける値（`durability:"synced"`）をメッセージに含める**。仕様書を読み直させる `UNSUPPORTED` と、直し方を教える `UNSUPPORTED` は、文字列1個分しか違わない。replace失敗は、公開前ならnot-applied、公開確認後ならapplied、媒体応答を失って判定できなければunknown。unknownのあとに自動再試行してユーザーの変更を上書きしない。
 
 一時版の容量もquotaへ計上する。置換には旧版＋新版＋管理情報が同時に収まる必要があり、満たさなければNO_SPACE/QUOTA_EXCEEDEDで旧版を維持する。GCを呼んでFlash空きを作れると仮定しない。起動時復旧はホストが公開前に行い、孤立一時版は有効な旧版を確認してから回収する。
 
@@ -192,6 +205,14 @@ PC転送はcreate/replaceの一時版へ分割writeし、長さ・hash・対応�
 3. appの永続バックエンドを導入してcreate/replace/commit、空ファイル、quota、電源断復旧を検証する。
 4. SDのmkdir/copy/rename/remove/appendを段階追加し、保証レベルをvolumeに反映する。
 5. workspace・プレイヤー・PC bridgeを同じホスト層へ接続する。
+
+**実行されたものとされていないもの（2026-09-09）。** 実機で動いたのは**ドライバ**（マウント・アンマウント・ルート列挙・作成/書込/削除）と、2026-09-08時点の `stat`/`list` まで。**その後に足した面は一度も実機で走っていない**——picker、open、書込、commit、mkdir/remove/rename、volumes/space、pump、nativeのranged read。ホスト側で検査できるのは認可規則だけ（`tools/test_sd.c`）で、残りはカードが要る。`apps/pocketfs/README.md` にカードと人が要る5手順を書いた。
+
+**400kHzが決めること。** バス帯域は約50,000バイト/秒。24kHzモノラルPCM16は48,000バイト/秒なので、**カードからの実時間ストリーミングは成立しない**（Opusなら約1/30で余裕がある）。2,048バイトの1回読みは約41msで、これは呼んだフレームの中で消える時間である。以上は**計算であって実測ではない**——この機体でカード読み出しを計時した者はまだいない。速度を上げるのは編集ではなく測定で、`main/pocket/sd_media.c` の `max_freq_khz` に理由を書いた。
+
+**`onVolumeChange` は配信される（2026-09-09）。** sd:の状態は許可の瞬間と抜去の観測時に動くが、その2箇所はどちらもネイティブのfs呼び出しの内側で、そこからゲストのcallbackを回すと、いま処理中のハンドルをlistenerが閉じられてしまう。そこで配信は `pocket_fs_pump()`（`app_tick()` から毎フレーム）へ寄せた:状態が最後に通知した値と違えば1回だけ配る。**1フレーム内で動いて戻った変化は通知しない**——§3が状態を観測値と定めている以上、誰も観測していない。picker表示中はゲストがtickされないので、許可は**人が選んだ次のフレーム**、すなわちアプリが最初に行動できるフレームで届く。
+
+**進捗（2026-09-08）。** 1と2は完了。3のうちappのcreate/replace/commit・空ファイル・quotaは動作（電源断復旧は未検証）。4のSDはread/write両方が通り、`requestFolder`・stat・list・open(read/create/replace/append)・readText/writeText・mkdir/remove/renameを実装、`fs.volume.sd` は `supported=true`。未実装は**SDを含むcopy**（1ターンで400kHzの全量転送をすると入力が止まるため、将来のjob APIへ回す。UNSUPPORTEDで断る）と**crashSafeReplace**（電源断試験が未実施なのでfalseのまま）。`caseSensitive` はSDだけ **false**——FatFsは長い名前の照合で大小文字を畳むので、アプリが別名だと思う2つが同じ1ファイルになる。
 
 ファイルシステム実装の選定は別途行う。現行storageは0x590000から2496KiBで、srcstoreの16スロット（合計384KiB）も使用する。同じ領域へFSをそのままformatしない。既存スロットを予約して残りに載せるか、バックアップと明示的な移行を行うかを決めてから導入する。API要求だけを理由にSKK辞書2MiBやアプリ3MiBを縮めない。
 

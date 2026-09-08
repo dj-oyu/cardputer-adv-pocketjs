@@ -69,6 +69,28 @@ int main(void) {
               escapes[i], (int)r, r == SD_PATH_OK ? buf : "");
     }
 
+    // ---- the host's temporary files are not in the app's namespace -----------
+    //
+    // A create or replace stages into "<target>.pkt-tmp" and publishes it with
+    // a rename. If an app could address that name it could sit on the
+    // destination of a commit already in flight -- or read a half-written file
+    // that section 2 says a listing must not even show it. Refused at every
+    // depth, so a directory of the name cannot hide a subtree either.
+    CHECK(sd_name_reserved("a.pkt-tmp", 9), "temp suffix not recognised");
+    CHECK(!sd_name_reserved("a.pkt-tmpx", 10), "suffix matched in the middle");
+    CHECK(!sd_name_reserved("pkt-tmp", 7), "a name without the dot is reserved");
+    static const char *reserved[] = {
+        "a.pkt-tmp", ".pkt-tmp", "dir/a.pkt-tmp", "a.pkt-tmp/b", "x/y.pkt-tmp",
+    };
+    for (size_t i = 0; i < sizeof reserved / sizeof *reserved; i++) {
+        sd_path_result_t r = build(&m, reserved[i], buf, sizeof buf);
+        CHECK(r == SD_PATH_INVALID, "reserved \"%s\" returned %d (%s)",
+              reserved[i], (int)r, r == SD_PATH_OK ? buf : "");
+    }
+    // And an ordinary name that merely looks similar still works.
+    CHECK(build(&m, "a.pkt-tmpx", buf, sizeof buf) == SD_PATH_OK,
+          "a name near the reserved one was refused");
+
     // ---- a grant itself cannot contain a separator ---------------------------
     sd_media_t g;
     sd_media_reset(&g);

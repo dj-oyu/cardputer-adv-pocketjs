@@ -26,6 +26,17 @@ typedef struct { float x,y,z; } V;
 typedef struct {
     V c,axis[3];
     float radius[3],inv_radius[3],bd[3],oax[3],ba0,inv_a0,inv_d1,q[6],invzz;
+    // The band quadratic's leading coefficient, its reciprocal, and the band
+    // radius' slope along the ray -- all three per band. They look like they
+    // belong to the pixel and do not: a = bd0^2 + bd2^2 - (slope*bd1)^2 names
+    // only the part's own ray direction and the band profile, so it is fixed
+    // for the whole frame. bell_hit was computing it, and dividing by it, once
+    // per band on every one of ~2,000 visits. A float division on this part is
+    // a call into a ROM routine that no disassembly search for `div` will show
+    // (docs/pie-simd.md 3.7), which is how six of them per visit survived the
+    // pass that hoisted the band bounds out of the same loop.
+    float bell_dr[FLOWER_BELL_BANDS],bell_a[FLOWER_BELL_BANDS];
+    float bell_inva[FLOWER_BELL_BANDS];
     // Half-extent in world units, on the two screen axes. Kept because the
     // screen boxes below cannot be computed until the camera is known, and the
     // camera is chosen by measuring the plant -- so the parts are walked twice

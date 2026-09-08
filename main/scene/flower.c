@@ -341,6 +341,11 @@ static flower_species_t bloom_next(flower_species_t from) {
 //   FLOWER_NO_BAND_HOIST    the band bounds recomputed inside bell_hit
 //   FLOWER_NO_SPAN_AFFINE   the three dot products, instead of dx*A+B
 //   FLOWER_NO_BELL_REJECT   no early rejection; walk all six bands always
+//   FLOWER_NO_BAND_INVA     a, 1/a, dr and the two dot products recomputed
+//                           inside the band loop, as they were
+//   FLOWER_NO_BAND_DOTS     only the two dot products, so that the division
+//                           hoist can be priced on its own
+//   FLOWER_NO_IFLOOR        floorf/ceilf calls, instead of trunc-and-correct
 //   FLOWER_BELL_CHECK       compute the rejection, do not act on it, and count
 //                           the visits where it was wrong (must be zero)
 #ifdef FLOWER_DIV_EXACT
@@ -377,8 +382,64 @@ static void petal_reciprocals(Petal *p) {
     p->ba0=p->bd[0]*p->bd[0]+p->bd[2]*p->bd[2];
     p->inv_a0=p->ba0>0?1/p->ba0:0;
     p->inv_d1=p->bd[1]!=0?1/p->bd[1]:0;
+    // The six band quadratics' leading coefficients and their reciprocals.
+    //
+    // This is the same hoist as bell_lo/bell_hi above it, one step further in:
+    // a = bd0^2 + bd2^2 - (slope*bd1)^2 mentions the part and the band profile
+    // and nothing else, so `a`, the sign test on it, and 1/a are all constant
+    // across every pixel of every row. bell_hit was paying a software division
+    // for 1/a on each of six bands on each visit -- and because that division
+    // is `l32r`+`callx8` into __divsf3 rather than an instruction, it is
+    // invisible to every way anybody has looked at this loop (docs/pie-simd.md
+    // 3.7).
+    //
+    // bell_slopes is filled by prepare_seeds, which flower_prepare calls
+    // before this loop. A Petal whose reciprocals are taken before that gets
+    // zeros here rather than stale values, and would draw nothing rather than
+    // draw wrongly -- but the ordering is a real requirement, not a nicety.
+    {
+        const float *slopes=p->shape==FLOWER_SHAPE_CLOCHE?flower_cloche_slopes:bell_slopes;
+        for(int i=0;i<LAT;i++) {
+            float dr=slopes[i]*p->bd[1];
+            // Spelled from ba0 rather than from bd[] again, so that the value
+            // here is the same expression the band loop used to evaluate --
+            // ba0 is literally bd0*bd0+bd2*bd2 two lines up.
+            float a=p->ba0-dr*dr;
+            p->bell_dr[i]=dr;p->bell_a[i]=a;
+            // Guarded exactly as bell_hit guards it, so the zero here means
+            // "the band loop takes its degenerate branch" and never divides.
+            p->bell_inva[i]=fabsf(a)<1e-7f?0:1.0f/a;
+        }
+    }
 }
 static int clampi(int x,int lo,int hi) { return x<lo?lo:x>hi?hi:x; }
+// floorf and ceilf, to int, without the call.
+//
+// `floorf` compiles to `l32r`+`callx8` into a ROM routine on this part -- it is
+// a call, and no search of the disassembly for a mnemonic will show it
+// (docs/pie-simd.md 3.7). A C cast to int is `trunc.s`, one instruction, and
+// differs from floorf only in which way it rounds negatives.
+//
+// The obvious spelling of this is a plain `(int)x` justified by an argument
+// that x is never negative. That argument is available for both of the call
+// sites here, and it is not used, because it is an argument about values and
+// it can only be checked by sampling. These two identities are about the
+// representation and hold for every finite float that fits in an int:
+//
+//   floorf(x) == trunc(x) - (x < 0 && trunc(x) != x)
+//   ceilf(x)  == trunc(x) + (x > 0 && trunc(x) != x)
+//
+// trunc(x) != x is exactly "x had a fractional part", and the sign test picks
+// the direction truncation got wrong. tools/test_flower_floor.c walks all 2^32
+// float bit patterns against the library. Being unconditional is the point: a
+// later caller may pass something negative, and then nothing has to be re-proved.
+#ifdef FLOWER_NO_IFLOOR
+#define ifloor(x) ((int)floorf(x))
+#define iceil(x)  ((int)ceilf(x))
+#else
+static inline int ifloor(float x) { int t=(int)x;return t-(x<0.0f&&(float)t!=x); }
+static inline int iceil (float x) { int t=(int)x;return t+(x>0.0f&&(float)t!=x); }
+#endif
 static uint16_t rgb(int r,int g,int b) {
     return (uint16_t)((clampi(r,0,255)>>3)<<11 |
                       (clampi(g,0,255)>>2)<<5 | (clampi(b,0,255)>>3));
@@ -630,10 +691,12 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
     }
     for(unsigned i=0;i<count;i++) {
         Petal *p=&petals[i];
-        p->xmin=clampi((int)floorf(180+cam_s*(p->c.x-p->ex-cam_x)),X0,W-1);
-        p->xmax=clampi((int)ceilf(180+cam_s*(p->c.x+p->ex-cam_x)),X0,W-1);
-        p->ymin=clampi((int)floorf(65-cam_s*(p->c.y+p->ey-cam_y)),12,H-1);
-        p->ymax=clampi((int)ceilf(65-cam_s*(p->c.y-p->ey-cam_y)),12,H-1);
+        // Four calls a part a frame -- 224 of them on the largest species,
+        // which is small next to the band loop and is not nothing.
+        p->xmin=clampi(ifloor(180+cam_s*(p->c.x-p->ex-cam_x)),X0,W-1);
+        p->xmax=clampi(iceil (180+cam_s*(p->c.x+p->ex-cam_x)),X0,W-1);
+        p->ymin=clampi(ifloor(65-cam_s*(p->c.y+p->ey-cam_y)),12,H-1);
+        p->ymax=clampi(iceil (65-cam_s*(p->c.y-p->ey-cam_y)),12,H-1);
     }
 #ifdef ESP_PLATFORM
     // Per part, not per frame: the species differ by a factor of three in part
@@ -871,7 +934,9 @@ static uint16_t shade(V n,int petal,V hit) {
         else if(material==CHECKER) {
             // Local coordinates keep the chequering on the bell as it sways.
             // No texture image or extra geometry; only this material pays.
-            int tile=(int)floorf((longitudinal+1)*4)+(int)floorf((transverse+1)*5);
+            // Two calls on every chequered pixel of every frame fritillaria
+            // is on screen, and it is the only species with this material.
+            int tile=ifloor((longitudinal+1)*4)+ifloor((transverse+1)*5);
             float pale=(tile&1)?1.0f:0.0f;
             // Aubergine ground with subdued violet tessellation. The former
             // pale pink squares overwhelmed both the colour and the volume.
@@ -908,6 +973,11 @@ unsigned bell_miss_disc,bell_miss_height,bell_miss_depth,bell_miss_clip;
 // built on every acceptance and is now built once for the winner, so this
 // ratio is the whole of what that trade costs or saves in arithmetic.
 unsigned bell_accepts,bell_hit_visits;
+// How many band iterations reach a non-negative discriminant. That is the
+// exact count of square roots, and it was also the exact count of software
+// divisions until 1/a moved to petal_reciprocals -- so it prices both, and it
+// is the number the estimate "up to six a visit" was standing in for.
+unsigned bell_discs;
 #endif
 // A bell visit costs about 2,750 cycles on the device -- six latitude bands
 // walked unconditionally, each with a discriminant, a software square root and
@@ -965,6 +1035,14 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
     for(int j=0;j<3;j++)o[j]=dx*p->oax[j]+ob[j];
 #endif
     for(int j=0;j<3;j++)d[j]=p->bd[j];
+    // The two dot products the band loop needs. They do not mention the band,
+    // so they were being formed six times per visit -- twenty multiplies and
+    // ten adds thrown away -- and bell_reject was forming them a seventh time
+    // just below. One copy, computed here, read by both.
+    float b0=o[0]*d[0]+o[2]*d[2],c0=o[0]*o[0]+o[2]*o[2];
+#if defined(FLOWER_NO_BAND_INVA)||defined(FLOWER_NO_BAND_DOTS)
+    (void)b0;(void)c0;
+#endif
 #ifdef FLOWER_BELL_CHECK
     bell_visits_seen++;
     bool rejected=bell_reject(p,o);
@@ -1007,10 +1085,32 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
         float lo=bell_lo[band],hi=bell_hi[band];
 #endif
         float slope=slopes[band],offset=offsets[band];
+#ifdef FLOWER_NO_BAND_INVA
         float r=slope*o[1]+offset,dr=slope*d[1];
         float a=d[0]*d[0]+d[2]*d[2]-dr*dr;
         float b=o[0]*d[0]+o[2]*d[2]-r*dr;
         float c=o[0]*o[0]+o[2]*o[2]-r*r;
+#else
+        // dr and a are the part's, not the pixel's; see petal_reciprocals.
+        float dr=p->bell_dr[band],a=p->bell_a[band];
+        float r=slope*o[1]+offset;
+        // Two switches and not one, because the two hoists price two different
+        // things and the device can only answer one question per flash. With
+        // DOTS alone reverted, the difference against the default is thirty
+        // float operations a visit and nothing else; with INVA reverted, it is
+        // ~4.8 software divisions a visit and nothing else. Nobody has ever
+        // measured what a float division costs on this part -- every figure in
+        // docs/pie-simd.md 3.7 for it is an estimate -- and this is the first
+        // change whose removed count is known exactly (it equals the square
+        // root count, which the SPLIT line already prints).
+#ifdef FLOWER_NO_BAND_DOTS
+        float b=o[0]*d[0]+o[2]*d[2]-r*dr;
+        float c=o[0]*o[0]+o[2]*o[2]-r*r;
+#else
+        float b=b0-r*dr;
+        float c=c0-r*r;
+#endif
+#endif
         float roots[2];int nr=0;
         if(fabsf(a)<1e-7f) {if(fabsf(b)>1e-7f)roots[nr++]=-c/(2*b);}
         else {
@@ -1034,7 +1134,7 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
             PROF_FENCE;uint32_t bs=esp_cpu_get_cycle_count();PROF_FENCE;
 #endif
 #ifdef FLOWER_BELL_CHECK
-            saw_root=true;
+            saw_root=true;if(!rejected)bell_discs++;   /* the shipping build never walks a rejected visit */
 #endif
             float sd=sqrtf(disc);
 #ifdef ESP_PLATFORM
@@ -1042,8 +1142,13 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
 #endif
 #ifdef FLOWER_DIV_EXACT
             roots[nr++]=(-b+sd)/a;roots[nr++]=(-b-sd)/a;
-#else
+#elif defined(FLOWER_NO_BAND_INVA)
             float inva=1.0f/a;roots[nr++]=(-b+sd)*inva;roots[nr++]=(-b-sd)*inva;
+#else
+            // Taken once a frame instead of once a band a visit. This is the
+            // whole of FLOWER_NO_BAND_INVA's cost, and it is a ROM call.
+            float inva=p->bell_inva[band];
+            roots[nr++]=(-b+sd)*inva;roots[nr++]=(-b-sd)*inva;
 #endif
         }
         for(int k=0;k<nr;k++) {

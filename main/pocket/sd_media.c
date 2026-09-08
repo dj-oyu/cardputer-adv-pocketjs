@@ -41,6 +41,24 @@ bool sd_media_mount(void) {
     // 400 kHz is what the probe negotiated and verified end to end, including a
     // write. Raising it is a measurement, not an edit: MISO is wired here, so
     // unlike the LCD a faster clock can at least be checked in software.
+    //
+    // WHAT THIS NUMBER DECIDES, because it is not obvious from here and the
+    // next person to want it will be someone whose feature does not work.
+    // 400 kHz is 400 kbit/s, so about 50,000 bytes a second before any
+    // per-command overhead. Some arithmetic that follows from it, none of it
+    // measured on this board -- nobody has yet timed a read here:
+    //
+    //   24 kHz mono PCM16 is 48,000 bytes a second. Streaming it off the card
+    //   in realtime needs ~96% of the bus, so it does not fit. Opus at this
+    //   rate is roughly a thirtieth of that and fits with room to spare.
+    //   One 2,048-byte read is ~41 ms of bus time, inside whatever frame asked
+    //   for it -- a dropped frame, not a slow one, on a 30 fps display.
+    //   An fopen walks the directory first, which is at least one more sector.
+    //
+    // So "the card is too slow for X" and "this firmware is doing X badly" are
+    // different diagnoses, and this constant is where the first one lives. A
+    // card that negotiates 20 MHz would change every line above; the probe
+    // asked for 400 kHz and got it, and nobody has since asked for more.
     host.max_freq_khz = 400;
 
     esp_vfs_fat_sdmmc_mount_config_t cfg = {
@@ -81,6 +99,10 @@ void sd_media_unmount(void) {
     // Removal, not failure: the grant goes with it, so a remount cannot silently
     // reconnect an app to a folder the person authorised on a different card.
     sd_media_removed(&media);
+}
+
+bool sd_media_grant_folder(const char *folder, size_t len) {
+    return sd_media_grant(&media, folder, len);
 }
 
 void sd_media_note_error(int err) {

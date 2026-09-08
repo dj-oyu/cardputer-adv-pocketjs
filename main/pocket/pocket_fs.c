@@ -10,6 +10,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <errno.h>
+#include <unistd.h>
+#include "sd_media.h"
+#include "sd_picker.h"
 
 static const char *TAG = "pocket.fs";
 
@@ -676,11 +682,41 @@ extern const char asset_hello_start[] asm("_binary_main_js_start");
 extern const char asset_hello_end[]   asm("_binary_main_js_end");
 extern const char asset_imucal_start[] asm("_binary_imucal_js_start");
 extern const char asset_imucal_end[]   asm("_binary_imucal_js_end");
+extern const char asset_chime_start[]  asm("_binary_chime_wav_start");
+extern const char asset_chime_end[]    asm("_binary_chime_wav_end");
+extern const char asset_chimepok_start[] asm("_binary_chime_pok_start");
+extern const char asset_chimepok_end[]   asm("_binary_chime_pok_end");
+extern const char asset_tonepok_start[]  asm("_binary_tone_pok_start");
+extern const char asset_tonepok_end[]    asm("_binary_tone_pok_end");
 
-typedef struct { const char *name; const char *start, *end; } fs_asset_t;
+// `text` is not decoration: EMBED_TXTFILES appends a NUL and EMBED_FILES does
+// not, and asset_size() has to know which. It is recorded per row rather than
+// guessed from the extension, because the cost of guessing wrong on a binary is
+// one lost byte at the very end -- the quietest possible failure.
+typedef struct { const char *name; const char *start, *end; bool text; } fs_asset_t;
 static const fs_asset_t ASSETS[]={
-    {"hello.js",  asset_hello_start,  asset_hello_end},
-    {"imucal.js", asset_imucal_start, asset_imucal_end},
+    {"hello.js",  asset_hello_start,  asset_hello_end,  true},
+    {"imucal.js", asset_imucal_start, asset_imucal_end, true},
+    // The one piece of audio in the tree, for pocket_av.c's player: 150,554
+    // bytes, which is six times what app: would hold, so a streamed clip and a
+    // clip that had to fit in RAM are visibly different things. apps/chime
+    // holds the file and says why it is PCM16 rather than ADPCM.
+    {"chime.wav", asset_chime_start,  asset_chime_end,  false},
+    // The same click train as Opus: 26,274 bytes for 8.20 s against that file's
+    // 150,554 for 3.14 s. apps/opusplay plays it and times what the decode task
+    // costs the renderer. The `false` is load-bearing here for the second time
+    // -- see asset_size() -- and an Opus packet stream has no terminator to
+    // lose, so a wrong flag would cut the last packet short rather than
+    // announce itself.
+    {"chime.pok", asset_chimepok_start, asset_chimepok_end, false},
+    // 15 s of 541.7 Hz. An underrun is 128 frames = 5.333 ms = 1/187.5 s, so a
+    // tone at a multiple of 187.5 Hz resumes exactly in phase after one and
+    // makes no pop at all -- the defect would be silent in the material chosen
+    // to reveal it. 541.7 Hz is the worst-case-best over one to eight
+    // underruns; tools/make_tone_asset.py refuses anything within 5% of a
+    // multiple. apps/opusplay/README.md says why a click train, being mostly
+    // silence, can only catch a fraction of them.
+    {"tone.pok",  asset_tonepok_start,  asset_tonepok_end,  false},
 };
 #define ASSET_COUNT (sizeof(ASSETS)/sizeof(ASSETS[0]))
 
@@ -695,7 +731,11 @@ static int asset_find(const fs_path_t *p) {
 
 static uint32_t asset_size(int i) {
     size_t n=(size_t)(ASSETS[i].end-ASSETS[i].start);
-    return n?(uint32_t)(n-1):0;     // drop the terminator EMBED_TXTFILES adds
+    // Drop the terminator EMBED_TXTFILES adds, and ONLY then: the last byte of
+    // a WAV is a sample, not a NUL, and subtracting it would truncate every
+    // binary asset by one byte for as long as nobody looked at the end of one.
+    if(!ASSETS[i].text) return (uint32_t)n;
+    return n?(uint32_t)(n-1):0;
 }
 
 // ------------------------------------------------------------- the clock
@@ -914,13 +954,22 @@ static JSValue take_path(JSContext *ctx, JSValueConst value, const char *op,
     if(why)
         return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,op,why,false,
                                  POCKET_OUTCOME_NOT_APPLIED);
-    if(out->volume==VOL_SD)
-        // Section 8 asks an unauthorised area to answer PERMISSION_DENIED
-        // rather than reveal what is or is not there. Nothing is authorised on
-        // sd: in this build because nothing mounts it.
-        return pocket_api_reject(ctx,POCKET_ERR_PERMISSION_DENIED,op,
-                                 "sd: is not available to apps in this firmware",
-                                 false,POCKET_OUTCOME_NOT_APPLIED);
+    if(out->volume==VOL_SD) {
+        // The grant is tested before the media state, and the order is a
+        // contract rather than a preference: section 8 asks an unauthorised
+        // area to answer PERMISSION_DENIED without revealing what is there, and
+        // checking the card first would let an ungranted app tell a mounted
+        // card from an empty slot by which error came back.
+        const sd_media_t *m=sd_media();
+        if(!m->granted)
+            return pocket_api_reject(ctx,POCKET_ERR_PERMISSION_DENIED,op,
+                                     "no folder on sd: has been granted to this app",
+                                     false,POCKET_OUTCOME_NOT_APPLIED);
+        if(m->state!=SD_MEDIA_READY)
+            return pocket_api_reject(ctx,POCKET_ERR_DISCONNECTED,op,
+                                     "the card is not mounted",true,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+    }
     if(out->volume==VOL_APP&&!mount())
         return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,op,
                                  "the app: store could not be mounted",true,
@@ -944,7 +993,7 @@ static void revision_of_object(char out[24], uint16_t id) {
 
 static JSValue entry_new(JSContext *ctx, const char *path, const char *name,
                          size_t name_len, bool directory, int64_t size,
-                         int64_t mtime, const char *revision) {
+                         int64_t mtime, const char *revision, bool accessible) {
     JSValue e=JS_NewObject(ctx);
     if(JS_IsException(e)) return e;
     JS_SetPropertyStr(ctx,e,"name",JS_NewStringLen(ctx,name,name_len));
@@ -954,11 +1003,11 @@ static JSValue entry_new(JSContext *ctx, const char *path, const char *name,
     JS_SetPropertyStr(ctx,e,"modifiedUnixMs",
                       mtime>0?JS_NewInt64(ctx,mtime):JS_NULL);
     JS_SetPropertyStr(ctx,e,"revision",JS_NewString(ctx,revision));
-    // Every name this store holds passed name_ok() on the way in, so nothing
-    // here is inaccessible. The property exists because an SD card written by a
-    // PC will need it, and an app that reads it today should not have to learn
-    // a new field the day sd: arrives.
-    JS_SetPropertyStr(ctx,e,"accessible",JS_TRUE);
+    // Section 2: a name this API could not have created is LISTED and marked
+    // rather than hidden or rewritten -- an app that cannot see a file cannot
+    // explain why it cannot open it. Everything app: and assets: hold passed
+    // name_ok() on the way in, so only the card ever answers false here.
+    JS_SetPropertyStr(ctx,e,"accessible",JS_NewBool(ctx,accessible));
     return e;
 }
 
@@ -1007,7 +1056,7 @@ static JSValue entry_of_object(JSContext *ctx, const char *path, uint16_t id) {
     char rev[24];
     revision_of(rev,id,o->gen);
     return entry_new(ctx,path,o->name,o->name_len,o->kind==FS_KIND_DIR,
-                     o->size,o->mtime_ms,rev);
+                     o->size,o->mtime_ms,rev,true);
 }
 
 // ------------------------------------------------------------- file handles
@@ -1016,6 +1065,15 @@ static JSValue entry_of_object(JSContext *ctx, const char *path, uint16_t id) {
 // app kept after close() finds no slot and answers CLOSED rather than reaching
 // a slot that has since been reused. That is the shape pocket_ui.c settled on
 // for its nodes, and the reason is the same.
+
+// An sd: writer's two names for the same file. The temporary it stages into is
+// not here: it is this path plus SD_TEMP_SUFFIX, rebuilt on the stack at the
+// three moments that need it, because a second copy would be a second thing to
+// keep in step.
+typedef struct {
+    char fspath[SD_FSPATH_MAX];   // the FatFs path the bytes will land at
+    char vpath[FS_MAX_PATH+1];    // the app's name for it, for the Entry
+} sd_writer_t;
 
 #define MODE_READ    0
 #define MODE_CREATE  1
@@ -1048,6 +1106,25 @@ typedef struct {
     uint8_t  nown;
     int16_t  verified;      // sector whose CRC a reader has already checked
     bool     broken;        // a failed write refuses everything afterwards
+    // sd: only. The handle carries the media generation it was opened under, so
+    // a card swapped underneath it is detectable rather than merely unlucky --
+    // section 3 requires that a removal invalidate handles and that reinsertion
+    // not revive them, and a generation compare is how that is enforced at the
+    // one place it matters, which is the next use of the handle.
+    FILE    *sd;
+    uint32_t sd_gen;
+    // A digest of the FatFs path, for the exclusion rule of section 5. The
+    // handle has no room for 320 bytes of path and does not need them: a
+    // collision costs a spurious BUSY, which fails closed, while storing the
+    // path would cost 640 bytes of internal DRAM for every app that never
+    // touches a card.
+    uint32_t sd_key;
+    // Where an sd: writer will publish, and what the app calls that place.
+    // Allocated when such a handle opens and freed when it closes, so a reader
+    // -- and an app that never touches a card -- pays a pointer for it. 577
+    // bytes of heap while a write is in flight, against 640 bytes of permanent
+    // internal DRAM if the paths lived in this struct.
+    sd_writer_t *sd_w;
 } fs_file_t;
 
 static fs_file_t files[FS_MAX_HANDLES];
@@ -1070,6 +1147,24 @@ static void writer_discard(fs_file_t *f) {
 static void file_close(fs_file_t *f, bool discard) {
     if(!f->handle) return;
     if(discard) writer_discard(f);
+    if(f->volume==VOL_SD) {
+        // THIS LOOKS LIKE A LEAK AND IS NOT. The FILE* is touched only while
+        // the card that made it is still the card in the slot. After a removal the FatFs mount is gone and the fd
+        // belongs to a VFS that has been unregistered, so closing it would be a
+        // call into a driver that no longer exists; the handle is dropped
+        // instead, and what it held went with the mount.
+        bool live=sd_generation_valid(sd_media(),f->sd_gen);
+        if(f->sd&&live) fclose(f->sd);
+        f->sd=NULL;
+        // Section 5: an uncommitted create or replace loses its temporary
+        // version here, which is what makes those modes safe to abandon.
+        if(discard&&live&&f->sd_w&&f->mode!=MODE_READ&&f->mode!=MODE_APPEND) {
+            char temp[SD_FSPATH_MAX+sizeof(SD_TEMP_SUFFIX)];
+            snprintf(temp,sizeof temp,"%s%s",f->sd_w->fspath,SD_TEMP_SUFFIX);
+            unlink(temp);
+        }
+        free(f->sd_w);
+    }
     if(f->mode==MODE_CREATE&&f->obj&&pending[f->obj-1]) object_unclaim(f->obj);
     free(f->buf);
     memset(f,0,sizeof(*f));
@@ -1170,6 +1265,25 @@ static int file_bytes(fs_file_t *f, uint32_t pos, uint32_t want, uint8_t *out,
     if(pos>=f->size) return 0;
     uint32_t left=f->size-pos;
     if(want>left) want=left;
+    if(f->volume==VOL_SD) {
+        // The one place a removal is enforced for a read: section 3 asks that a
+        // card going away end pending I/O with DISCONNECTED and that a
+        // reinsertion not revive the handle, and a generation compare is what
+        // both of those are.
+        if(!sd_generation_valid(sd_media(),f->sd_gen)) {
+            *code=POCKET_ERR_DISCONNECTED;
+            return -1;
+        }
+        if(fseek(f->sd,(long)pos,SEEK_SET)!=0) { *code=POCKET_ERR_IO_ERROR; return -1; }
+        size_t got=fread(out,1,want,f->sd);
+        if(got==0&&ferror(f->sd)) {
+            // A read that failed is the only removal signal this board has.
+            sd_media_note_error(ESP_ERR_TIMEOUT);
+            *code=POCKET_ERR_IO_ERROR;
+            return -1;
+        }
+        return (int)got;
+    }
     if(f->volume==VOL_ASSETS) {
         // Mapped flash: this is a memcpy out of the firmware image, and the
         // only copy that exists is the one the app receives.
@@ -1200,6 +1314,43 @@ static int file_bytes(fs_file_t *f, uint32_t pos, uint32_t want, uint8_t *out,
         return -1;
     }
     return (int)want;
+}
+
+// The sd: operations the File methods and the entry points below dispatch
+// into. They are DEFINED next to the capability that publishes them, at the end
+// of this file, because they share nothing with the app: store above; they are
+// declared here because the calls come first.
+static JSValue sd_open(JSContext *ctx, const fs_path_t *p, uint8_t mode,
+                       const char *want, const char *op, fs_file_t *f);
+static JSValue sd_file_write(JSContext *ctx, fs_file_t *f, const char *op,
+                             const uint8_t *data, size_t len);
+static JSValue sd_publish(JSContext *ctx, const char *op, FILE *fh,
+                          const char *fspath, const char *vpath, bool replacing);
+static JSValue sd_fail(JSContext *ctx, const char *op, int e, const char *what,
+                       const char *outcome);
+static JSValue sd_mkdir(JSContext *ctx, const fs_path_t *p, const char *op,
+                        bool recursive);
+static JSValue sd_remove(JSContext *ctx, const fs_path_t *p, const char *op,
+                         const char *want);
+static JSValue sd_rename(JSContext *ctx, const fs_path_t *from,
+                         const fs_path_t *to, const char *op, const char *want);
+static JSValue sd_read_text(JSContext *ctx, const fs_path_t *p, const char *op,
+                            uint32_t cap);
+static JSValue sd_write_text(JSContext *ctx, const fs_path_t *p, const char *op,
+                             const char *text, size_t len, bool replace,
+                             const char *want);
+static uint32_t sd_key_of(const char *fspath);
+static bool sd_busy(uint32_t key, bool writing);
+
+// Section 8's min(volume, quota, 2GiB-1), which here is the 2GiB-1: it is also
+// the largest size the uint32 positions in this file can carry.
+#define SD_MAX_FILE 2147483647u
+
+// True while a handle still refers to the card it was opened on. Section 3
+// wants a removal to end pending I/O and a reinsertion not to revive anything,
+// and this compare is where both happen.
+static bool sd_handle_live(const fs_file_t *f) {
+    return f->volume!=VOL_SD||sd_generation_valid(sd_media(),f->sd_gen);
 }
 
 // --------------------------------------------------------- the File methods
@@ -1287,9 +1438,14 @@ static JSValue js_file_write(JSContext *ctx, JSValueConst self,
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,
                                  "cancelled before the write",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
+    if(!sd_handle_live(f))
+        return pocket_api_reject(ctx,POCKET_ERR_DISCONNECTED,OP,
+                                 "the card this file was opened on is gone",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
     // Section 5 makes a zero-length write a no-op with no side effect, which
     // includes not moving tell() and not touching flash.
     if(len==0) return pocket_api_settled(ctx,JS_NewInt32(ctx,0),false);
+    if(f->volume==VOL_SD) return sd_file_write(ctx,f,OP,data,len);
     if((uint64_t)f->size+len>FS_MAX_FILE)
         return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
                                  "a file on this volume holds at most 24576 bytes",
@@ -1376,6 +1532,22 @@ static JSValue js_file_flush(JSContext *ctx, JSValueConst self,
     fs_options_t options;
     JSValue bad=take_options(ctx,argc>0?argv[0]:JS_UNDEFINED,OP,&options);
     if(!JS_IsUndefined(bad)) return bad;
+    if(!sd_handle_live(f))
+        return pocket_api_reject(ctx,POCKET_ERR_DISCONNECTED,OP,
+                                 "the card this file was opened on is gone",false,
+                                 POCKET_OUTCOME_UNKNOWN);
+    if(f->volume==VOL_SD) {
+        // For create and replace this synchronises the TEMPORARY and publishes
+        // nothing, which is section 5's rule; for append it is the publication,
+        // an append having no commit to reach.
+        int fd=fileno(f->sd);
+        if(fflush(f->sd)!=0||(fd>=0&&fsync(fd)!=0)) {
+            f->broken=true;
+            return sd_fail(ctx,OP,errno,"the bytes could not be synchronised",
+                           POCKET_OUTCOME_UNKNOWN);
+        }
+        return pocket_api_settled(ctx,JS_UNDEFINED,false);
+    }
     if(f->buf_len&&!writer_put_block(f)) {
         f->broken=true;
         return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
@@ -1435,6 +1607,28 @@ static JSValue js_file_commit(JSContext *ctx, JSValueConst self,
                                  "cancelled before the commit",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
     }
+    if(f->volume==VOL_SD) {
+        if(!sd_handle_live(f)) {
+            // The temporary is on a card that is not here; nothing to erase and
+            // nothing published.
+            file_close(f,true);
+            return pocket_api_reject(ctx,POCKET_ERR_DISCONNECTED,OP,
+                                     "the card this file was opened on is gone",
+                                     false,POCKET_OUTCOME_NOT_APPLIED);
+        }
+        // The handle ends here either way, per section 5, so the slot is given
+        // back before the publish rather than after: what sd_publish() reports
+        // is about the file, not about the handle.
+        FILE       *fh=f->sd;
+        sd_writer_t *w=f->sd_w;
+        bool replacing=f->mode==MODE_REPLACE;
+        f->sd=NULL;
+        f->sd_w=NULL;
+        file_close(f,false);
+        JSValue answer=sd_publish(ctx,OP,fh,w->fspath,w->vpath,replacing);
+        free(w);
+        return answer;
+    }
     if(f->buf_len&&!writer_put_block(f)) {
         f->broken=true;
         return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
@@ -1492,28 +1686,62 @@ static JSValue js_file_close(JSContext *ctx, JSValueConst self,
 #define FS_ERR_CROSS_DEVICE   "CROSS_DEVICE"
 #define FS_ERR_STALE_CURSOR   "STALE_CURSOR"
 
+// The sd: backend is defined further down, next to the capability that
+// publishes it; the operations above dispatch into it by volume.
+static JSValue sd_stat(JSContext *ctx, const fs_path_t *p, const char *op);
+static const char *sd_errno_code(int e);
+static int sd_list_page(JSContext *ctx, const fs_path_t *p, uint16_t at,
+                        unsigned limit, JSValue entries, bool *more, int *err,
+                        uint16_t *next_at);
 // ------------------------------------------------------------- volume info
 
 static void feature(JSContext *ctx, JSValue o, const char *name, bool on) {
     JS_SetPropertyStr(ctx,o,name,JS_NewBool(ctx,on));
 }
 
-static JSValue volume_info(JSContext *ctx, uint8_t volume) {
+// `touch` is section 3's one difference between volumes() and space(): the
+// first must cause no media access and the second is allowed to ask. It is a
+// parameter rather than two functions because everything else about the two
+// answers is identical, and a copy would drift.
+static JSValue volume_info(JSContext *ctx, uint8_t volume, bool touch) {
     JSValue v=JS_NewObject(ctx);
     if(JS_IsException(v)) return v;
     bool app=volume==VOL_APP;
-    bool ready=app?(store!=NULL):true;
+    bool sd=volume==VOL_SD;
+    const sd_media_t *media=sd_media();
+    bool ready=app?(store!=NULL):(sd?media->state==SD_MEDIA_READY:true);
     JS_SetPropertyStr(ctx,v,"id",JS_NewString(ctx,VOLUME_NAME[volume]));
-    JS_SetPropertyStr(ctx,v,"state",JS_NewString(ctx,ready?"ready":"error"));
-    // Nothing on this board can be removed or remounted, so the generation is
-    // a constant. It exists so an app written against it keeps working the day
-    // sd: arrives and a generation starts moving.
-    JS_SetPropertyStr(ctx,v,"generation",JS_NewInt32(ctx,1));
-    JS_SetPropertyStr(ctx,v,"readOnly",JS_NewBool(ctx,!app));
-    // Byte comparison of names, no folding and no normalisation.
-    JS_SetPropertyStr(ctx,v,"caseSensitive",JS_TRUE);
+    // Section 3 has four states and sd: is the only volume that uses more than
+    // one of them. ABSENT covers "no card" and "card removed" alike -- this
+    // board has no card-detect pin, so the two are not distinguishable and
+    // pretending otherwise would be an invention.
+    const char *state=ready?"ready":"error";
+    if(sd&&!ready) state=media->state==SD_MEDIA_ERROR?"error":"absent";
+    JS_SetPropertyStr(ctx,v,"state",JS_NewString(ctx,state));
+    // app: and assets: cannot be removed or remounted, so their generation is a
+    // constant; sd: carries the real one, which moves on every mount.
+    JS_SetPropertyStr(ctx,v,"generation",JS_NewInt32(ctx,
+        sd?(int32_t)media->generation:1));
+    JS_SetPropertyStr(ctx,v,"readOnly",JS_NewBool(ctx,!app&&!sd));
+    // Byte comparison of names on the volumes this firmware implements, and NOT
+    // on the card: FatFs folds case when it matches a long name, so two names
+    // an app thinks are different are one file there. Section 2 asks this flag
+    // to say so rather than leaving the app to find out.
+    JS_SetPropertyStr(ctx,v,"caseSensitive",sd?JS_FALSE:JS_TRUE);
 
-    if(app&&ready) {
+    if(sd) {
+        // Section 3: freeBytes is the physical volume's, quota is the app's --
+        // and no quota is enforced on the card, so those two are null rather
+        // than 0. `limits` reports only what the code enforces and so does this.
+        uint64_t capacity=0,freebytes=0;
+        bool asked=touch&&ready&&sd_media_space(&capacity,&freebytes);
+        JS_SetPropertyStr(ctx,v,"capacityBytes",
+                          asked?JS_NewInt64(ctx,(int64_t)capacity):JS_NULL);
+        JS_SetPropertyStr(ctx,v,"freeBytes",
+                          asked?JS_NewInt64(ctx,(int64_t)freebytes):JS_NULL);
+        JS_SetPropertyStr(ctx,v,"quotaBytes",JS_NULL);
+        JS_SetPropertyStr(ctx,v,"usedBytes",JS_NULL);
+    } else if(app&&ready) {
         JS_SetPropertyStr(ctx,v,"capacityBytes",JS_NewInt64(ctx,FS_SIZE));
         JS_SetPropertyStr(ctx,v,"freeBytes",
                           JS_NewInt64(ctx,(int64_t)sectors_free()*FS_SECTOR));
@@ -1537,20 +1765,25 @@ static JSValue volume_info(JSContext *ctx, uint8_t volume) {
     }
 
     JSValue f=JS_NewObject(ctx);
+    bool writes=app||sd;
     feature(ctx,f,"read",true);
-    feature(ctx,f,"write",app);
-    feature(ctx,f,"directories",app);
+    feature(ctx,f,"write",writes);
+    feature(ctx,f,"directories",writes);
     feature(ctx,f,"seekRead",true);
-    feature(ctx,f,"replace",app);
-    // The metadata block that publishes a version is one write, and until it
-    // lands a reader sees the old version whole. That is atomicReplace.
-    feature(ctx,f,"atomicReplace",app);
-    // And this is NOT claimed. Section 6 asks for a power-cut test before the
-    // flag goes true, and nobody has cut power to this store. The design gives
-    // the property; the evidence does not exist yet.
+    feature(ctx,f,"replace",writes);
+    // app:  the metadata block that publishes a version is one write, and until
+    //       it lands a reader sees the old version whole.
+    // sd:   a temporary beside the target, published by a rename.
+    // Both are atomicReplace: no reader and no listing meets a partial file.
+    feature(ctx,f,"atomicReplace",writes);
+    // And this is NOT claimed, on either volume. Section 6 asks for a power-cut
+    // test before the flag goes true and nobody has cut power to this board.
+    // The design gives the property on app:; FAT does not give it at all. The
+    // consequence for sd: is that create and replace refuse the default
+    // durability -- see take_durability().
     feature(ctx,f,"crashSafeReplace",false);
-    feature(ctx,f,"append",app);
-    feature(ctx,f,"rename",app);
+    feature(ctx,f,"append",writes);
+    feature(ctx,f,"rename",writes);
     JS_SetPropertyStr(ctx,v,"features",f);
     return v;
 }
@@ -1559,18 +1792,34 @@ static JSValue js_volumes(JSContext *ctx, JSValueConst self,
                           int argc, JSValueConst *argv) {
     (void)self; (void)argc; (void)argv;
     // Section 3: volumes() causes no media access, and an unsupported volume is
-    // simply not listed. sd: is therefore absent rather than present-and-broken.
+    // simply not listed. All three are implemented now, so all three are here
+    // and sd: reports whatever state it is already in -- which before the
+    // person has chosen a folder is "absent" with a card in the slot and
+    // "absent" with an empty one, because nothing has looked.
     mount();
     JSValue a=JS_NewArray(ctx);
-    JS_SetPropertyUint32(ctx,a,0,volume_info(ctx,VOL_APP));
-    JS_SetPropertyUint32(ctx,a,1,volume_info(ctx,VOL_ASSETS));
+    JS_SetPropertyUint32(ctx,a,0,volume_info(ctx,VOL_APP,false));
+    JS_SetPropertyUint32(ctx,a,1,volume_info(ctx,VOL_ASSETS,false));
+    JS_SetPropertyUint32(ctx,a,2,volume_info(ctx,VOL_SD,false));
     return a;
 }
 
-// The only removable volume this API names is sd:, and this build does not
-// mount it, so no listener can ever fire. The subscription is real all the
-// same: an app that closes it and an app that leaks it behave the way section 4
-// says, and the day a card arrives nothing on the JS side changes.
+// onVolumeChange, and the reason this surface has a pump at all.
+//
+// sd: is the one volume here that moves: absent to ready when the person grants
+// a folder, and back when an operation finds the card gone. Both of those
+// happen in the WRONG PLACE to tell an app about -- one inside the picker's key
+// handling, the other inside sd_fail(), which is reached from the middle of a
+// native fs call. Delivering there would run a guest callback while this file
+// is part way through an operation, and the listener could close the very
+// handle that operation is working on.
+//
+// So nothing is delivered where the state moves. pocket_fs_pump() compares what
+// the media says now against what was last announced, once a frame, on the JS
+// task, with no fs call in flight -- the same shape every other surface uses
+// and for the same reason. A change that happens and is undone inside one frame
+// is not announced, which is correct: section 3 makes state an observation, and
+// nobody observed that one.
 static pocket_sub_slot_t volume_slots[2];
 static pocket_sub_table_t volume_table={
     .slots=volume_slots,.count=2,.tag="pocket.fs",.what="onVolumeChange",
@@ -1586,6 +1835,46 @@ static JSValue js_on_volume_change(JSContext *ctx, JSValueConst self,
                                "two volume listeners are already open",NULL);
 }
 
+// Whether pocket.fs was ever read. The pump below and the reset at the end of
+// this file both have real work to do -- flash erases among it -- and a run
+// that never opened a file must not pay for either.
+static bool built;
+
+// What was last announced. Set at session start to what the media already says,
+// so an app that subscribes hears about the NEXT change rather than about the
+// state it could have read from volumes() in the same breath.
+static uint32_t sd_told_gen;
+static uint8_t  sd_told_state;
+
+static void sd_told_now(void) {
+    const sd_media_t *m=sd_media();
+    sd_told_gen=m->generation;
+    sd_told_state=(uint8_t)m->state;
+}
+
+static bool sd_volume_payload(JSContext *ctx, int slot, void *user,
+                              JSValue *payload) {
+    (void)slot; (void)user;
+    // Section 3 forbids volumes() from touching the medium and this is the same
+    // answer, so `touch` is false: an event says what changed, it does not go
+    // and ask the card something new.
+    *payload=volume_info(ctx,VOL_SD,false);
+    return true;
+}
+
+void pocket_fs_pump(void) {
+    if(!built) return;                 // nobody read pocket.fs; nothing to tell
+    const sd_media_t *m=sd_media();
+    if(m->generation==sd_told_gen&&(uint8_t)m->state==sd_told_state) return;
+    sd_told_now();
+    if(!volume_table.ctx) return;
+    pocket_api_sub_deliver(&volume_table,sd_volume_payload,NULL);
+    // available moves with the state -- sd_probe() reads the same two fields --
+    // so capabilities.onChange hears it here too rather than only on the next
+    // capabilities.get().
+    pocket_api_capability_changed("fs.volume.sd");
+}
+
 static JSValue js_space(JSContext *ctx, JSValueConst self,
                         int argc, JSValueConst *argv) {
     (void)self;
@@ -1596,10 +1885,10 @@ static JSValue js_space(JSContext *ctx, JSValueConst self,
     fs_options_t options;
     bad=take_options(ctx,argc>1?argv[1]:JS_UNDEFINED,OP,&options);
     if(!JS_IsUndefined(bad)) return bad;
-    // Section 3 has space() ask the medium; here the store IS the medium's
-    // answer, and it was built from the sector headers rather than cached from
-    // a guess.
-    return pocket_api_settled(ctx,volume_info(ctx,p.volume),false);
+    // Section 3 has space() ask the medium. On app: the store IS the medium's
+    // answer and was built from the sector headers rather than cached from a
+    // guess; on sd: this is the one call that reaches f_getfree.
+    return pocket_api_settled(ctx,volume_info(ctx,p.volume,true),false);
 }
 
 // ------------------------------------------------------------------- stat
@@ -1623,7 +1912,9 @@ static JSValue js_stat(JSContext *ctx, JSValueConst self,
         // an app can stat it to learn a volume is reachable without a name.
         return pocket_api_settled(ctx,
             entry_new(ctx,p.text,VOLUME_NAME[p.volume],
-                      strlen(VOLUME_NAME[p.volume]),true,0,0,"root"),false);
+                      strlen(VOLUME_NAME[p.volume]),true,0,0,"root",true),false);
+
+    if(p.volume==VOL_SD) return sd_stat(ctx,&p,OP);
 
     if(p.volume==VOL_ASSETS) {
         int a=asset_find(&p);
@@ -1634,7 +1925,8 @@ static JSValue js_stat(JSContext *ctx, JSValueConst self,
         // Assets are part of the firmware image, so their revision is the
         // build and never moves inside one.
         return pocket_api_settled(ctx,
-            entry_new(ctx,p.text,leaf,n,false,asset_size(a),0,"firmware"),false);
+            entry_new(ctx,p.text,leaf,n,false,asset_size(a),0,"firmware",true),
+            false);
     }
     const char *why=NULL;
     uint16_t id=resolve(&p,false,NULL,&why);
@@ -1658,6 +1950,11 @@ typedef struct {
     uint16_t at;            // where the next page starts
     uint32_t owner;
     uint32_t mutations;
+    // sd: only. A FAT directory has no mutation counter, so a cursor into one
+    // is scoped by the media generation instead: a card removed and reinserted
+    // mid-listing produces a new generation and this cursor goes STALE rather
+    // than silently continuing into a different filesystem at the same offset.
+    uint32_t gen;
     int64_t  expires_us;
 } fs_cursor_t;
 
@@ -1723,7 +2020,14 @@ static JSValue js_list(JSContext *ctx, JSValueConst self,
                                      false,NULL);
         // assets: can be listed before anything has mounted app:, so the
         // counter is read through the pointer that may still be NULL.
-        if(c->mutations!=(store?store->mutations:0)) {
+        if(p.volume==VOL_SD) {
+            if(!sd_generation_valid(sd_media(),c->gen)) {
+                c->token=0;
+                return pocket_api_reject(ctx,FS_ERR_STALE_CURSOR,OP,
+                                         "the card changed while this listing was open",
+                                         false,NULL);
+            }
+        } else if(c->mutations!=(store?store->mutations:0)) {
             c->token=0;
             return pocket_api_reject(ctx,FS_ERR_STALE_CURSOR,OP,
                                      "the store changed while this listing was open",
@@ -1736,13 +2040,27 @@ static JSValue js_list(JSContext *ctx, JSValueConst self,
     if(JS_IsException(entries)) return entries;
     uint32_t emitted=0;
     char path[FS_MAX_PATH+1];
-    if(p.volume==VOL_ASSETS) {
+    bool sd_more=false;
+    if(p.volume==VOL_SD) {
+        int err=0;
+        uint16_t next_at=at;
+        int n=sd_list_page(ctx,&p,at,(unsigned)limit,entries,&sd_more,&err,
+                           &next_at);
+        if(err) {
+            JS_FreeValue(ctx,entries);
+            sd_media_note_error(err==EIO?ESP_ERR_TIMEOUT:ESP_OK);
+            return pocket_api_reject(ctx,sd_errno_code(err),OP,
+                                     "this path could not be listed",false,NULL);
+        }
+        emitted=(uint32_t)n;
+        at=next_at;
+    } else if(p.volume==VOL_ASSETS) {
         for(;at<ASSET_COUNT&&emitted<limit;at++) {
             size_t n=strlen(ASSETS[at].name);
             path_join(path,&p,ASSETS[at].name,n);
             JS_SetPropertyUint32(ctx,entries,emitted++,
                 entry_new(ctx,path,ASSETS[at].name,n,false,
-                          asset_size((int)at),0,"firmware"));
+                          asset_size((int)at),0,"firmware",true));
         }
     } else {
         // Backend enumeration order, which here is object-id order. Section 4
@@ -1767,7 +2085,8 @@ static JSValue js_list(JSContext *ctx, JSValueConst self,
     // a read; at worst it says "more" for a foreign root entry and the next
     // page comes back empty with nextCursor null.
     bool more=false;
-    if(p.volume==VOL_ASSETS) more=at<ASSET_COUNT;
+    if(p.volume==VOL_SD) more=sd_more;
+    else if(p.volume==VOL_ASSETS) more=at<ASSET_COUNT;
     else for(uint16_t i=at;i<FS_MAX_OBJECTS&&!more;i++)
         more=store->dir[i].kind&&store->dir[i].parent==dir;
 
@@ -1792,6 +2111,7 @@ static JSValue js_list(JSContext *ctx, JSValueConst self,
     }
     c->at=at;
     c->mutations=store?store->mutations:0;
+    c->gen=sd_media()->generation;
     c->expires_us=esp_timer_get_time()+FS_CURSOR_US;
     char text[32];
     snprintf(text,sizeof(text),"%u.%lu",(unsigned)(c-cursors),
@@ -1804,7 +2124,10 @@ static JSValue js_list(JSContext *ctx, JSValueConst self,
 
 // The checks every mutating call shares. Returns a rejection, or JS_UNDEFINED.
 static JSValue writable(JSContext *ctx, const fs_path_t *p, const char *op) {
-    if(p->volume!=VOL_APP)
+    // sd: passes here, and the check that matters for it has already happened:
+    // take_path() refused the call unless the person granted a folder AND the
+    // card is mounted, in that order.
+    if(p->volume==VOL_ASSETS)
         return pocket_api_reject(ctx,FS_ERR_READ_ONLY,op,
                                  "assets: is read-only",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
@@ -1840,6 +2163,7 @@ static JSValue js_mkdir(JSContext *ctx, JSValueConst self,
     if(options.cancelled)
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
+    if(p.volume==VOL_SD) return sd_mkdir(ctx,&p,OP,recursive);
 
     uint16_t at=0;
     for(unsigned i=0;i<p.depth;i++) {
@@ -1905,6 +2229,7 @@ static JSValue js_remove(JSContext *ctx, JSValueConst self,
     if(options.cancelled)
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
+    if(p.volume==VOL_SD) return sd_remove(ctx,&p,OP,want);
 
     const char *why=NULL;
     uint16_t id=resolve(&p,false,NULL,&why);
@@ -1970,6 +2295,7 @@ static JSValue js_rename(JSContext *ctx, JSValueConst self,
     if(options.cancelled)
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
+    if(from.volume==VOL_SD) return sd_rename(ctx,&from,&to,OP,want);
 
     const char *why=NULL;
     uint16_t id=resolve(&from,false,NULL,&why);
@@ -2044,13 +2370,27 @@ static JSValue js_rename(JSContext *ctx, JSValueConst self,
 // Nothing is downgraded behind the app: it either did not ask, or it was told
 // no. When the power-cut test of section 6 is run and passes, the flag and this
 // default move together.
+// `must_ask` is the sd: case, and it is the one place the two volumes differ:
+// there the default IS refused, exactly as section 6 writes it, because FAT
+// cannot give the guarantee the default names. docs/filesystem-api.md section 6
+// calls that an intended surprise and asks for the refusal to name the value it
+// accepts -- a spec-lookup UNSUPPORTED and a self-correcting one differ by one
+// string, and this is that string.
 static JSValue take_durability(JSContext *ctx, JSValueConst opt, const char *op,
-                               bool *bad_out, JSValue *bad) {
+                               bool must_ask, bool *bad_out, JSValue *bad) {
     char text[16];
     *bad_out=false;
     if(!take_string(ctx,opt,"durability",op,text,sizeof(text),bad)) {
         *bad_out=true;
         return *bad;
+    }
+    if(!text[0]&&must_ask) {
+        *bad_out=true;
+        return pocket_api_reject(ctx,POCKET_ERR_UNSUPPORTED,op,
+            "sd: cannot promise crash-safe replacement, which is what create "
+            "and replace default to; pass durability:\"synced\" to accept what "
+            "the card can give",
+            false,POCKET_OUTCOME_NOT_APPLIED);
     }
     if(!text[0]||!strcmp(text,"synced")) return JS_UNDEFINED;
     *bad_out=true;
@@ -2100,7 +2440,9 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
     if(!take_string(ctx,opt,"ifRevision",OP,want,sizeof(want),&bad)) return bad;
     if(mode!=MODE_READ) {
         bool wrong=false;
-        JSValue d=take_durability(ctx,opt,OP,&wrong,&bad);
+        JSValue d=take_durability(ctx,opt,OP,
+                                  p.volume==VOL_SD&&mode!=MODE_APPEND,
+                                  &wrong,&bad);
         if(wrong) return d;
     }
     // Section 5: a create has nothing to check a revision against.
@@ -2127,6 +2469,9 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
         return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,OP,
                                  "two files are already open",true,
                                  POCKET_OUTCOME_NOT_APPLIED);
+
+    // ---- sd: the card, inside the folder the person granted
+    if(p.volume==VOL_SD) return sd_open(ctx,&p,mode,want,OP,f);
 
     // ---- assets: read only, straight out of the firmware image
     if(p.volume==VOL_ASSETS) {
@@ -2305,6 +2650,14 @@ static JSValue js_copy(JSContext *ctx, JSValueConst self,
     if(!JS_IsUndefined(bad)) return bad;
     bad=writable(ctx,&to,OP);
     if(!JS_IsUndefined(bad)) return bad;
+    // Section 4 allows copy across volumes and this build does not serve the
+    // card end of it: the transfer would have to be paced across frames to keep
+    // a 400 kHz bus off the input path, and that is the job the future job API
+    // gets. Refusing by name beats a copy that stalls a frame for a second.
+    if(from.volume==VOL_SD||to.volume==VOL_SD)
+        return pocket_api_reject(ctx,POCKET_ERR_UNSUPPORTED,OP,
+            "copy does not serve sd: yet; open both paths and move the bytes",
+            false,POCKET_OUTCOME_NOT_APPLIED);
     if(options.cancelled)
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
@@ -2401,48 +2754,159 @@ static JSValue js_copy(JSContext *ctx, JSValueConst self,
     return pocket_api_settled(ctx,entry_of_object(ctx,to.text,dst.obj),false);
 }
 
-// ------------------------------------------------------- text convenience
+// ------------------------------------------------------- native file reads
+//
+// Two entry points for surfaces that have no JS value to hand back and no JS
+// round trip to get one through. pocket_av.c's audio.player is the caller: it
+// asks how long a clip is when it opens, then reads a ring slot at a time while
+// it plays.
+//
+// THE JS TASK'S TO CALL, and now for three reasons rather than one. The flash
+// reads happen inside the call; the app: index and handle table are this task's;
+// and on sd: the grant, the mount generation and FatFs itself all belong to it.
+// Calling either of these from a worker would race the picker.
+//
+// The resolution is shared rather than copied, and that is the point of it
+// being written this way. A ranged read is a second way into the same
+// backends, and a second way in is where an invariant gets bypassed -- the
+// grant tested BEFORE the media state, a directory refused before a size is
+// reported, a writer's file refused to a reader. One function, so there is one
+// set of rules and not two that drift.
 
-// The native half of readText, for a surface that has no JS value to hand back:
-// same resolution, same block reads, no allocation of its own. Written here
-// rather than as a copy in the caller because everything it needs -- the path
-// parse, the store's mount, the inode's block list, the CRC check -- is private
-// to this file and stays that way.
+// Fills `src` with a reader that never enters the handle table. Returns NULL on
+// success, or the PocketError code the caller should report. On sd: it leaves
+// an open FILE in src->sd which the caller MUST fclose.
+static const char *native_reader(const char *path, fs_path_t *p, fs_file_t *src) {
+    const char *why=path_parse(path,path?strlen(path):0,p);
+    if(why) return POCKET_ERR_INVALID_ARGUMENT;
+    if(!p->depth) return FS_ERR_IS_DIRECTORY;
+
+    memset(src,0,sizeof(*src));
+    src->mode=MODE_READ; src->volume=p->volume; src->asset=-1; src->verified=-1;
+
+    if(p->volume==VOL_SD) {
+        // The same two checks take_path() makes for an app, in the same order
+        // and for the same reason: an ungranted caller must not be able to tell
+        // a mounted card from an empty slot by which error comes back. See the
+        // header of sd_path.h -- this is the second caller that ordering has,
+        // and it is why the ordering is a contract rather than a preference.
+        const sd_media_t *m=sd_media();
+        if(!m->granted) return POCKET_ERR_PERMISSION_DENIED;
+        if(m->state!=SD_MEDIA_READY) return POCKET_ERR_DISCONNECTED;
+        char fspath[SD_FSPATH_MAX];
+        if(sd_path_build(m,p->text+p->off[0],(size_t)(p->len-p->off[0]),
+                         fspath,sizeof fspath)!=SD_PATH_OK)
+            return POCKET_ERR_INVALID_ARGUMENT;
+        struct stat st;
+        if(stat(fspath,&st)!=0) {
+            int e=errno;
+            if(e==EIO) sd_media_note_error(ESP_ERR_TIMEOUT);
+            return sd_errno_code(e);
+        }
+        if(S_ISDIR(st.st_mode)) return FS_ERR_IS_DIRECTORY;
+        if((uint64_t)st.st_size>SD_MAX_FILE) return POCKET_ERR_LIMIT_EXCEEDED;
+        // Section 5's exclusion applies to a native reader too: section 8 counts
+        // the player against the same resources as a JS handle, so a file some
+        // app is part way through writing is not one this reads.
+        uint32_t key=sd_key_of(fspath);
+        if(sd_busy(key,false)) return POCKET_ERR_BUSY;
+        src->sd=fopen(fspath,"rb");
+        if(!src->sd) {
+            int e=errno;
+            if(e==EIO) sd_media_note_error(ESP_ERR_TIMEOUT);
+            return sd_errno_code(e);
+        }
+        src->sd_key=key;
+        // The generation this read is against. file_bytes() compares it, so a
+        // card pulled between the open and the read answers DISCONNECTED rather
+        // than whatever the next card has at that offset. There is no handle
+        // held across calls, so the grant dying with the media -- sd_path.h's
+        // second invariant -- is what stops the NEXT call as well.
+        src->sd_gen=sd_media()->generation;
+        src->size=(uint32_t)st.st_size;
+        return NULL;
+    }
+    if(p->volume==VOL_APP&&!mount()) return POCKET_ERR_NOT_AVAILABLE;
+    if(p->volume==VOL_ASSETS) {
+        int a=asset_find(p);
+        if(a<0) return POCKET_ERR_NOT_FOUND;
+        src->asset=(int8_t)a; src->size=asset_size(a);
+        return NULL;
+    }
+    uint16_t id=resolve(p,false,NULL,&why);
+    if(!id) return why?why:POCKET_ERR_NOT_FOUND;
+    if(store->dir[id-1].kind==FS_KIND_DIR) return FS_ERR_IS_DIRECTORY;
+    const fs_obj_t *o=object(id);
+    if(!o) return POCKET_ERR_CORRUPT_DATA;
+    src->obj=id; src->size=o->size;
+    memcpy(src->sector,o->sector,sizeof(src->sector));
+    return NULL;
+}
+
+static void native_reader_close(fs_file_t *src) {
+    // Only if the card that opened it is still the card in the slot: after a
+    // removal the fd belongs to a VFS that has been unregistered. Same rule as
+    // file_close(), and the same reason.
+    if(src->sd&&sd_generation_valid(sd_media(),src->sd_gen)) fclose(src->sd);
+    src->sd=NULL;
+}
+
 int32_t pocket_fs_read_all(const char *path, uint8_t *out, uint32_t cap,
                            const char **code) {
-    *code=NULL;
     fs_path_t p;
-    const char *why=path_parse(path,path?strlen(path):0,&p);
-    if(why) { *code=POCKET_ERR_INVALID_ARGUMENT; return -1; }
-    if(p.volume==VOL_SD) { *code=POCKET_ERR_PERMISSION_DENIED; return -1; }
-    if(p.volume==VOL_APP&&!mount()) { *code=POCKET_ERR_NOT_AVAILABLE; return -1; }
-    if(!p.depth) { *code=FS_ERR_IS_DIRECTORY; return -1; }
-
-    fs_file_t src={.mode=MODE_READ,.volume=p.volume,.asset=-1,.verified=-1};
-    if(p.volume==VOL_ASSETS) {
-        int a=asset_find(&p);
-        if(a<0) { *code=POCKET_ERR_NOT_FOUND; return -1; }
-        src.asset=(int8_t)a; src.size=asset_size(a);
-    } else {
-        uint16_t id=resolve(&p,false,NULL,&why);
-        if(!id) { *code=why?why:POCKET_ERR_NOT_FOUND; return -1; }
-        if(store->dir[id-1].kind==FS_KIND_DIR) { *code=FS_ERR_IS_DIRECTORY; return -1; }
-        const fs_obj_t *o=object(id);
-        if(!o) { *code=POCKET_ERR_CORRUPT_DATA; return -1; }
-        src.obj=id; src.size=o->size;
-        memcpy(src.sector,o->sector,sizeof(src.sector));
-    }
+    fs_file_t src;
+    *code=native_reader(path,&p,&src);
+    if(*code) return -1;
+    int32_t answer=-1;
     // A size question is answered before the cap is applied, so a caller can
     // tell "too big for me" from "too big for you" and say so in its own words.
-    if(!out) return (int32_t)src.size;
-    if(src.size>cap) { *code=POCKET_ERR_LIMIT_EXCEEDED; return -1; }
+    if(!out) { answer=(int32_t)src.size; goto done; }
+    if(src.size>cap) { *code=POCKET_ERR_LIMIT_EXCEEDED; goto done; }
     uint32_t at=0;
     while(at<src.size) {
         int n=file_bytes(&src,at,src.size-at,out+at,code);
-        if(n<=0) { if(!*code) *code=POCKET_ERR_CORRUPT_DATA; return -1; }
+        if(n<=0) { if(!*code) *code=POCKET_ERR_CORRUPT_DATA; goto done; }
         at+=(uint32_t)n;
     }
-    return (int32_t)at;
+    answer=(int32_t)at;
+done:
+    native_reader_close(&src);
+    return answer;
+}
+
+// The same, from an offset and bounded, for a caller that streams rather than
+// loads. A player that held its whole source made its buffer the ceiling on a
+// clip's length; this one keeps the path and re-reads a slot at a time.
+//
+// Re-resolving per call is deliberate and is the contract: a source deleted,
+// replaced or on a card that has gone ends the stream as a read failure instead
+// of playing bytes from something else. What it costs on sd: is a directory
+// walk and an open per call, and at 400 kHz that is not free -- see the note in
+// pocket_fs.h before building a demonstration around it.
+//
+// file_bytes() already takes a position and already refuses to span two blocks,
+// so this is the shared resolution and a loop.
+int32_t pocket_fs_read_at(const char *path, uint32_t offset, uint8_t *out,
+                          uint32_t want, const char **code) {
+    if(!out) { *code=POCKET_ERR_INVALID_ARGUMENT; return -1; }
+    fs_path_t p;
+    fs_file_t src;
+    *code=native_reader(path,&p,&src);
+    if(*code) return -1;
+    int32_t answer=-1;
+    if(offset>=src.size) { answer=0; goto done; }
+    if(want>src.size-offset) want=src.size-offset;
+    uint32_t at=0;
+    while(at<want) {
+        int n=file_bytes(&src,offset+at,want-at,out+at,code);
+        if(n<0) { if(!*code) *code=POCKET_ERR_CORRUPT_DATA; goto done; }
+        if(!n) break;                     // end of file inside the request
+        at+=(uint32_t)n;
+    }
+    answer=(int32_t)at;
+done:
+    native_reader_close(&src);
+    return answer;
 }
 
 static JSValue js_read_text(JSContext *ctx, JSValueConst self,
@@ -2468,6 +2932,11 @@ static JSValue js_read_text(JSContext *ctx, JSValueConst self,
     if(options.cancelled)
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
+    if(p.volume==VOL_SD) {
+        if(!p.depth) return pocket_api_reject(ctx,FS_ERR_IS_DIRECTORY,OP,
+                                              "this path is a directory",false,NULL);
+        return sd_read_text(ctx,&p,OP,(uint32_t)cap);
+    }
 
     fs_file_t src={.mode=MODE_READ,.volume=p.volume,.asset=-1,.verified=-1};
     if(p.volume==VOL_ASSETS) {
@@ -2548,7 +3017,7 @@ static JSValue js_write_text(JSContext *ctx, JSValueConst self,
     char want[24];
     if(!take_string(ctx,opt,"ifRevision",OP,want,sizeof(want),&bad)) return bad;
     bool wrong=false;
-    JSValue d=take_durability(ctx,opt,OP,&wrong,&bad);
+    JSValue d=take_durability(ctx,opt,OP,p.volume==VOL_SD,&wrong,&bad);
     if(wrong) return d;
     if(options.cancelled)
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,"cancelled",false,
@@ -2565,6 +3034,11 @@ static JSValue js_write_text(JSContext *ctx, JSValueConst self,
             big?"writeText takes at most 8192 UTF-8 bytes"
                :"the text is not well-formed UTF-8",
             false,POCKET_OUTCOME_NOT_APPLIED);
+    }
+    if(p.volume==VOL_SD) {
+        JSValue done=sd_write_text(ctx,&p,OP,text,len,replace,want);
+        JS_FreeCString(ctx,text);
+        return done;
     }
 
     JSValue answer=JS_UNDEFINED;
@@ -2666,20 +3140,680 @@ done:
     return answer;
 }
 
+// --------------------------------------------------------------- sd: backend
+//
+// STATE OF THIS SURFACE, 2026-09-08. The four steps the previous handover
+// listed are done, in the order it gave, and this is what they came to.
+//
+// Reachable from an app, end to end:
+//
+//   fs.requestFolder("sd") -> the host screen in sd_picker.c; the person's
+//                             choice IS the grant, and it is the only thing
+//                             that mounts a card in this firmware
+//   fs.stat / fs.list      -> sd_stat(), sd_list_page(), paged, cursor scoped
+//                             by media generation
+//   fs.open                -> sd_open(): read, create, replace, append
+//   read / seek / write / flush / commit / close on those handles
+//   fs.readText / fs.writeText / fs.mkdir / fs.remove / fs.rename
+//   fs.volumes / fs.space  -> volume_info(), the second one touching f_getfree
+//   the capability          -> supported=true, available observed by sd_probe()
+//
+// NOT here, and each for a reason rather than for lack of time:
+//
+//   fs.copy with an sd: end. Section 4 allows it; a whole-file transfer over a
+//   400 kHz bus inside one JS turn would hold the frame for as long as the file
+//   takes, and the paced version is the job API section 8 defers. It refuses by
+//   name so an app is told rather than stalled.
+//
+//   A per-frame pump, which fs.onVolumeChange needs and this surface has never
+//   had. See the comment above volume_table for what that costs an app today.
+//
+//   crashSafeReplace. Still false, and section 6 says what would change it: a
+//   power-cut test this board has not been through. Everything else about
+//   replace is real -- a temporary beside the target, published by a rename --
+//   and the two flags being different is the whole point of section 6 keeping
+//   them apart.
+//
+
+// One thing that IS here and was not planned: the native readers below --
+// pocket_fs_read_all() and pocket_fs_read_at(), which pocket_av.c's player uses
+// -- now serve sd: as well. A native surface reading the card is not borrowing
+// a permission it does not have: docs/filesystem-api.md section 9 puts the
+// player's permission check and read on this side deliberately, and the grant
+// it uses is the one the person made for the app the player is running inside.
+// It goes through the same ordering an app's call does, in native_reader(),
+// which exists precisely so there is one set of rules and not two.
+//
+// WHAT HAS RUN ON HARDWARE, AND WHAT HAS NOT. Read this before quoting any of
+// the numbers below, and before assuming a path works because it is written.
+//
+//   Run on a board:  the driver underneath -- mount, unmount, root enumeration,
+//                    a file created, written and removed -- by the agent who
+//                    brought sd_media.c up on 2026-09-08, and fs.stat / fs.list
+//                    as they stood that day.
+//   NOT run:         everything this file gained afterwards. The picker has
+//                    never been drawn on a screen. open, the writers, commit,
+//                    mkdir/remove/rename, volumes/space, the pump, and the
+//                    native readers on sd: are compiled, reviewed and
+//                    host-tested where a host can reach them -- tools/test_sd.c
+//                    covers the authorisation rules and nothing else can be
+//                    tested without a card.
+//   Changed under a path that HAD worked: the list cursor now counts entries
+//                    consumed rather than entries returned (they differ as soon
+//                    as one is skipped), listings filter the temporary suffix,
+//                    and entry.accessible is computed instead of always true.
+//                    If something on a card misbehaves, start there.
+//
+// apps/pocketfs/pocketfs.js is the automated half and needs no card; its README
+// carries the five steps that need a card and a person, including the one that
+// checks the durability refusal names the value it wants.
+//
+// What it costs. Measured on the board 2026-09-08, before the capability
+// flipped: mount 7,032 bytes of heap, two open handles 1,640 more, unmount
+// returns all of it, leak 0 across three cycles, on a 64 GB SDHC at 400 kHz
+// with 512-byte sectors. NONE of that is paid by an app that never asks for a
+// folder -- the mount happens in the picker and nowhere else -- but the mount
+// path, the card struct and the VFS registration are now REACHABLE, so
+// --gc-sections keeps them and the static cost of this build is not the +48
+// bytes that was measured while they were dead. That number wants taking again
+// against this build; it is the first figure from this work that means
+// anything.
+//
+// Two things that must not be tidied away, both of them in sd_path.h's header
+// at length: the grant is checked BEFORE the media state, and a removal drops
+// the grant. tools/test_sd.c fails if either goes, and the reserved-suffix
+// check added with the write path is in the same test for the same reason --
+// deleting it produces five real escape paths in the output.
+
+// A third backend, and deliberately not threaded through the machinery above.
+// app: addresses objects by inode id and assets: by table index; sd: addresses
+// them by path, through the POSIX layer esp_vfs_fat publishes. Forcing a FAT
+// directory into the object-id model would mean inventing ids for entries this
+// firmware does not own and cannot keep stable, so the operations that differ
+// are written out separately and the ones that do not -- entry_new, path_join,
+// the cursor table -- are shared as they stand.
+
+// Translates a parsed sd: path into the FatFs path under the granted folder, or
+// produces the rejection. Returns JS_UNDEFINED when `out` is filled.
+static JSValue sd_fspath(JSContext *ctx, const fs_path_t *p, const char *op,
+                         char *out, size_t outsz) {
+    const char *rel = p->depth ? p->text + p->off[0] : "";
+    size_t      len = p->depth ? (size_t)(p->len - p->off[0]) : 0;
+    switch(sd_path_build(sd_media(),rel,len,out,outsz)) {
+    case SD_PATH_OK:
+        return JS_UNDEFINED;
+    case SD_PATH_NO_GRANT:
+        return pocket_api_reject(ctx,POCKET_ERR_PERMISSION_DENIED,op,
+                                 "no folder on sd: has been granted to this app",
+                                 false,POCKET_OUTCOME_NOT_APPLIED);
+    case SD_PATH_DISCONNECTED:
+        return pocket_api_reject(ctx,POCKET_ERR_DISCONNECTED,op,
+                                 "the card is not mounted",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    case SD_PATH_TOO_LONG:
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                 "path is too long for this volume",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    default:
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                 "path is not a portable path",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    }
+}
+
+// errno at the moment a POSIX call failed, as the nearest section 8 code. ENOENT
+// is the only one an app should routinely see; the rest are the card answering
+// badly, which is CORRUPT_DATA or IO_ERROR and not the app's fault.
+static const char *sd_errno_code(int e) {
+    switch(e) {
+    case ENOENT:  return POCKET_ERR_NOT_FOUND;
+    case EACCES:  return POCKET_ERR_PERMISSION_DENIED;
+    case EEXIST:  return FS_ERR_ALREADY_EXISTS;
+    case ENOTDIR: return FS_ERR_NOT_DIRECTORY;
+    case EISDIR:  return FS_ERR_IS_DIRECTORY;
+    case ENOSPC:  return FS_ERR_NO_SPACE;
+    case ENFILE:
+    case EMFILE:  return POCKET_ERR_LIMIT_EXCEEDED;
+    default:      return POCKET_ERR_IO_ERROR;
+    }
+}
+
+// A FAT timestamp is local time with no zone, and this firmware has no way to
+// know which zone the writing PC was in. Section 4 says an unavailable time is
+// null rather than a guess, so mtime is reported only as what stat() gives and
+// never adjusted.
+// Section 4: an opaque token valid within a mount generation. Size and mtime
+// are what the medium has; they move together with any write the host can
+// observe, and nothing outside a generation compares them.
+static void sd_revision(char out[24], const struct stat *st) {
+    snprintf(out,24,"%u.%llu.%lld",(unsigned)sd_media()->generation,
+             (unsigned long long)st->st_size,(long long)st->st_mtime);
+}
+
+static JSValue sd_entry(JSContext *ctx, const char *vpath, const char *name,
+                        size_t name_len, const struct stat *st) {
+    // The card is the one volume whose names this firmware did not make, so it
+    // is the one place accessible can be false: a PC writes names this API
+    // refuses, and a path that does not fit the 256-byte limit joins to "".
+    bool reachable=name_ok(name,name_len)&&vpath[0];
+    // Section 4: revision is an opaque token valid within a mount generation.
+    // Size and mtime are what the medium has; they change together with any
+    // write the host can observe, and nothing outside a generation compares
+    // them.
+    char rev[24];
+    sd_revision(rev,st);
+    return entry_new(ctx,vpath,name,name_len,S_ISDIR(st->st_mode),
+                     (int64_t)st->st_size,(int64_t)st->st_mtime*1000,rev,
+                     reachable);
+}
+
+static JSValue sd_stat(JSContext *ctx, const fs_path_t *p, const char *op) {
+    char fspath[SD_FSPATH_MAX];
+    JSValue bad=sd_fspath(ctx,p,op,fspath,sizeof fspath);
+    if(!JS_IsUndefined(bad)) return bad;
+
+    struct stat st;
+    if(stat(fspath,&st)!=0) {
+        int e=errno;
+        sd_media_note_error(e==EIO?ESP_ERR_TIMEOUT:ESP_OK);
+        return pocket_api_reject(ctx,sd_errno_code(e),op,
+                                 "no such file or directory",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    }
+    const char *name = p->depth ? p->text+p->off[p->depth-1] : "";
+    size_t      nlen = p->depth ? p->size[p->depth-1] : 0;
+    return pocket_api_settled(ctx,sd_entry(ctx,p->text,name,nlen,&st),false);
+}
+
+// One page of a directory. `at` is how many entries to skip, which is the only
+// cursor a FAT directory can offer without holding the DIR open across calls --
+// and holding it open would pin a handle for 30 seconds of app inactivity.
+// Re-opening and skipping is O(n) per page and honest about what it costs; the
+// page limit is what bounds it.
+static int sd_list_page(JSContext *ctx, const fs_path_t *p, uint16_t at,
+                        unsigned limit, JSValue entries, bool *more, int *err,
+                        uint16_t *next_at) {
+    char fspath[SD_FSPATH_MAX];
+    if(sd_path_build(sd_media(),
+                     p->depth?p->text+p->off[0]:"",
+                     p->depth?(size_t)(p->len-p->off[0]):0,
+                     fspath,sizeof fspath)!=SD_PATH_OK) { *err=EINVAL; return 0; }
+
+    DIR *d=opendir(fspath);
+    if(!d) { *err=errno; return 0; }
+
+    int emitted=0; uint16_t seen=0;
+    struct dirent *de;
+    char child[SD_FSPATH_MAX];
+    char vpath[FS_MAX_PATH+1];
+    *more=false;
+    while((de=readdir(d))!=NULL) {
+        // The cursor counts entries CONSUMED, not entries returned. They differ
+        // whenever one is skipped below, and counting the returned ones would
+        // make the next page start short and repeat what this one skipped.
+        if(seen<at) { seen++; continue; }
+        if((unsigned)emitted>=limit) { *more=true; break; }
+        seen++;
+        size_t nlen=strlen(de->d_name);
+        // Section 2: the host's own temporary files are not listed. They are
+        // also not addressable -- sd_path_build refuses the suffix -- so this
+        // is the listing half of one rule rather than a rule of its own.
+        if(sd_name_reserved(de->d_name,nlen)) continue;
+        // A PC writes names this firmware would refuse to create. They are
+        // listed rather than hidden -- an app that cannot see a file cannot
+        // explain why it cannot open it -- and entry.accessible is what says
+        // whether it can be used.
+        struct stat st;
+        int n=snprintf(child,sizeof child,"%s/%s",fspath,de->d_name);
+        if(n<0||(size_t)n>=sizeof child) continue;
+        if(stat(child,&st)!=0) continue;
+        path_join(vpath,p,de->d_name,nlen);
+        JS_SetPropertyUint32(ctx,entries,(uint32_t)emitted++,
+                             sd_entry(ctx,vpath,de->d_name,nlen,&st));
+    }
+    closedir(d);
+    *err=0;
+    *next_at=seen;
+    return emitted;
+}
+
+
+// --------------------------------------------------------------- sd: writes
+//
+// Section 6, for the volume it costs the most on. FAT has no journal and this
+// board has not been through a power-cut test, so crashSafeReplace is false and
+// stays false until it has. atomicReplace is true and is earned rather than
+// assumed: a create or replace stages into a temporary beside the target and
+// publishes it with a rename, so no read and no listing ever meets a
+// half-written file.
+//
+// FatFs' rename refuses an existing destination, so a replace is
+// unlink-then-rename rather than one call. The gap between the two is not
+// observable THROUGH THIS API -- one JS turn on a single-threaded host, with no
+// other operation able to start inside it -- and a power cut in that gap is
+// precisely what crashSafeReplace=false is telling the app about. That is the
+// whole of the difference between the two flags, written out because the next
+// person here will wonder whether the unlink is a bug.
+//
+// The consequence an app meets first: per section 6 the DEFAULT durability for
+// create and replace is crash-safe, this volume cannot give it, and so an
+// open() that does not say durability:"synced" is refused. The refusal names
+// the value it wants, because a spec-lookup UNSUPPORTED and a self-correcting
+// one differ by one string.
+
+static void sd_temp_path(const char *fspath, char *out, size_t outsz) {
+    snprintf(out,outsz,"%s%s",fspath,SD_TEMP_SUFFIX);
+}
+
+// Section 5 needs to know when two handles mean the same file. A digest rather
+// than the path: see fs_file_t.sd_key for why, and note that a collision
+// refuses an operation that would have been allowed, never the other way round.
+static uint32_t sd_key_of(const char *fspath) {
+    return fnv1a(fspath,strlen(fspath));
+}
+
+static bool sd_busy(uint32_t key, bool writing) {
+    for(int i=0;i<FS_MAX_HANDLES;i++) {
+        fs_file_t *f=&files[i];
+        if(!f->handle||f->volume!=VOL_SD||f->sd_key!=key) continue;
+        if(writing||f->mode!=MODE_READ) return true;
+    }
+    return false;
+}
+
+// errno at the moment a POSIX call failed, turned into a rejection and into the
+// removal signal this board has no pin for.
+static JSValue sd_fail(JSContext *ctx, const char *op, int e, const char *what,
+                       const char *outcome) {
+    if(e==EIO) sd_media_note_error(ESP_ERR_TIMEOUT);
+    return pocket_api_reject(ctx,sd_errno_code(e),op,what,e==EIO,outcome);
+}
+
+// Publishes what a writer staged. `fh` is closed whichever way this goes, and
+// the answer is the Promise the call settles with.
+static JSValue sd_publish(JSContext *ctx, const char *op, FILE *fh,
+                          const char *fspath, const char *vpath, bool replacing) {
+    char temp[SD_FSPATH_MAX+sizeof(SD_TEMP_SUFFIX)];
+    sd_temp_path(fspath,temp,sizeof temp);
+    // Sync before publish, so what the rename makes visible is what the card
+    // holds rather than what the C library was still holding.
+    int fd=fileno(fh);
+    if(fflush(fh)!=0||(fd>=0&&fsync(fd)!=0)) {
+        int e=errno;
+        fclose(fh);
+        unlink(temp);
+        return sd_fail(ctx,op,e,"the new version could not be synchronised",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    }
+    if(fclose(fh)!=0) {
+        int e=errno;
+        unlink(temp);
+        return sd_fail(ctx,op,e,"the new version could not be closed",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    }
+    if(replacing&&unlink(fspath)!=0&&errno!=ENOENT) {
+        int e=errno;
+        unlink(temp);
+        return sd_fail(ctx,op,e,"the old version could not be replaced",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    }
+    if(rename(temp,fspath)!=0) {
+        // The one path where the outcome is genuinely unknown: on a replace the
+        // old version is already gone and the new one did not land. Section 6
+        // forbids retrying automatically after an unknown, so this says so and
+        // stops.
+        int e=errno;
+        unlink(temp);
+        return sd_fail(ctx,op,e,"the new version could not be published",
+                       replacing?POCKET_OUTCOME_UNKNOWN:POCKET_OUTCOME_NOT_APPLIED);
+    }
+    struct stat st;
+    if(stat(fspath,&st)!=0)
+        return sd_fail(ctx,op,errno,"the new version could not be read back",
+                       POCKET_OUTCOME_APPLIED);
+    const char *slash=strrchr(vpath,'/');
+    const char *name=slash?slash+1:vpath;
+    return pocket_api_settled(ctx,sd_entry(ctx,vpath,name,strlen(name),&st),false);
+}
+
+// fs.open on sd:. Fills the slot and answers with the File, or answers with the
+// rejection and leaves the slot free.
+static JSValue sd_open(JSContext *ctx, const fs_path_t *p, uint8_t mode,
+                       const char *want, const char *op, fs_file_t *f) {
+    char fspath[SD_FSPATH_MAX];
+    JSValue bad=sd_fspath(ctx,p,op,fspath,sizeof fspath);
+    if(!JS_IsUndefined(bad)) return bad;
+
+    struct stat st;
+    bool there=stat(fspath,&st)==0;
+    if(there&&S_ISDIR(st.st_mode))
+        return pocket_api_reject(ctx,FS_ERR_IS_DIRECTORY,op,
+                                 "this path is a directory",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    if(mode==MODE_CREATE&&there)
+        return pocket_api_reject(ctx,FS_ERR_ALREADY_EXISTS,op,
+                                 "this file already exists",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    if(mode!=MODE_CREATE&&!there)
+        return pocket_api_reject(ctx,POCKET_ERR_NOT_FOUND,op,"no such file",
+                                 false,POCKET_OUTCOME_NOT_APPLIED);
+    if(there&&(uint64_t)st.st_size>SD_MAX_FILE)
+        return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,op,
+                                 "this file is larger than this API can address",
+                                 false,POCKET_OUTCOME_NOT_APPLIED);
+    if(there&&want[0]) {
+        char have[24];
+        sd_revision(have,&st);
+        if(strcmp(have,want))
+            return pocket_api_reject(ctx,POCKET_ERR_CONFLICT,op,
+                                     "the revision has moved on",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+    }
+    uint32_t key=sd_key_of(fspath);
+    if(sd_busy(key,mode!=MODE_READ))
+        return pocket_api_reject(ctx,POCKET_ERR_BUSY,op,
+                                 "this file is open elsewhere",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+
+    memset(f,0,sizeof(*f));
+    f->mode=mode; f->volume=VOL_SD; f->asset=-1; f->verified=-1;
+    f->sd_key=key;
+    // The generation this handle was made under. Every later use compares it,
+    // which is where section 3's "a removal invalidates handles" is enforced.
+    f->sd_gen=sd_media()->generation;
+    size_t name_len=0;
+    const char *leaf=path_leaf(p,&name_len);
+    f->name_len=(uint8_t)name_len;
+    memcpy(f->name,leaf,name_len);
+
+    char temp[SD_FSPATH_MAX+sizeof(SD_TEMP_SUFFIX)];
+    if(mode==MODE_CREATE||mode==MODE_REPLACE) {
+        f->sd_w=calloc(1,sizeof(*f->sd_w));
+        if(!f->sd_w) {
+            memset(f,0,sizeof(*f));
+            return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,op,
+                                     "no memory for the write",true,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+        }
+        memcpy(f->sd_w->fspath,fspath,strlen(fspath)+1);
+        memcpy(f->sd_w->vpath,p->text,(size_t)p->len+1);
+        sd_temp_path(fspath,temp,sizeof temp);
+        f->sd=fopen(temp,"wb");
+    } else if(mode==MODE_APPEND) {
+        f->sd=fopen(fspath,"ab");
+        f->size=(uint32_t)st.st_size;
+        f->pos=f->size;
+    } else {
+        f->sd=fopen(fspath,"rb");
+        f->size=(uint32_t)st.st_size;
+    }
+    if(!f->sd) {
+        int e=errno;
+        free(f->sd_w);
+        memset(f,0,sizeof(*f));
+        return sd_fail(ctx,op,e,"the file could not be opened",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    }
+    f->handle=next_handle++;
+    return pocket_api_settled(ctx,file_wrap(ctx,f),false);
+}
+
+// One write on an sd: handle. Section 5: the bytes are copied at acceptance --
+// fwrite does that -- and a failure closes the writer, because the temporary is
+// now of a length nobody knows.
+static JSValue sd_file_write(JSContext *ctx, fs_file_t *f, const char *op,
+                             const uint8_t *data, size_t len) {
+    if((uint64_t)f->size+len>SD_MAX_FILE)
+        return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,op,
+                                 "a file on this volume holds at most 2147483647 bytes",
+                                 false,POCKET_OUTCOME_NOT_APPLIED);
+    size_t done=fwrite(data,1,len,f->sd);
+    if(done!=len) {
+        int e=errno;
+        f->broken=true;
+        f->size+=(uint32_t)done;
+        JSValue err=pocket_api_error(ctx,e==ENOSPC?FS_ERR_NO_SPACE:sd_errno_code(e),
+                                     op,"the card would not take these bytes",
+                                     false,POCKET_OUTCOME_NOT_APPLIED);
+        JS_SetPropertyStr(ctx,err,"bytesTransferred",JS_NewInt64(ctx,(int64_t)done));
+        if(e==EIO) sd_media_note_error(ESP_ERR_TIMEOUT);
+        return pocket_api_settled(ctx,err,true);
+    }
+    f->size+=(uint32_t)len;
+    f->pos=f->size;
+    return pocket_api_settled(ctx,JS_NewInt64(ctx,(int64_t)len),false);
+}
+
+// fs.mkdir, fs.remove and fs.rename on sd:. Each is one POSIX call plus the
+// checks section 4 asks for; none of them can reach outside the granted folder,
+// because every path they take is built by sd_path_build first.
+static JSValue sd_mkdir(JSContext *ctx, const fs_path_t *p, const char *op,
+                        bool recursive) {
+    char fspath[SD_FSPATH_MAX];
+    JSValue bad=sd_fspath(ctx,p,op,fspath,sizeof fspath);
+    if(!JS_IsUndefined(bad)) return bad;
+    struct stat st;
+    if(stat(fspath,&st)==0)
+        // Section 4: an existing directory is a success, a file is a conflict.
+        return S_ISDIR(st.st_mode)
+            ? pocket_api_settled(ctx,JS_UNDEFINED,false)
+            : pocket_api_reject(ctx,FS_ERR_ALREADY_EXISTS,op,
+                                "a file already has that name",false,
+                                POCKET_OUTCOME_NOT_APPLIED);
+    if(recursive) {
+        // Every missing parent in turn. Section 4 gives no rollback for a
+        // recursive mkdir that fails half way, and this does not invent one.
+        for(char *at=fspath+1;*at;at++) {
+            if(*at!='/') continue;
+            *at='\0';
+            int r=mkdir(fspath,0777);
+            int e=errno;
+            *at='/';
+            if(r!=0&&e!=EEXIST)
+                return sd_fail(ctx,op,e,"a parent directory could not be made",
+                               POCKET_OUTCOME_UNKNOWN);
+        }
+    }
+    if(mkdir(fspath,0777)!=0)
+        return sd_fail(ctx,op,errno,"the directory could not be made",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    return pocket_api_settled(ctx,JS_UNDEFINED,false);
+}
+
+static JSValue sd_remove(JSContext *ctx, const fs_path_t *p, const char *op,
+                         const char *want) {
+    char fspath[SD_FSPATH_MAX];
+    JSValue bad=sd_fspath(ctx,p,op,fspath,sizeof fspath);
+    if(!JS_IsUndefined(bad)) return bad;
+    struct stat st;
+    if(stat(fspath,&st)!=0)
+        return sd_fail(ctx,op,errno,"no such file or directory",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    if(want[0]) {
+        char have[24];
+        sd_revision(have,&st);
+        if(strcmp(have,want))
+            return pocket_api_reject(ctx,POCKET_ERR_CONFLICT,op,
+                                     "the revision has moved on",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+    }
+    if(sd_busy(sd_key_of(fspath),true))
+        return pocket_api_reject(ctx,POCKET_ERR_BUSY,op,
+                                 "a handle is open on this path",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    // Section 4: files and EMPTY directories, and a non-empty one is NOT_EMPTY
+    // rather than the recursive delete this version does not have.
+    int r=S_ISDIR(st.st_mode)?rmdir(fspath):unlink(fspath);
+    if(r!=0) {
+        int e=errno;
+        if(S_ISDIR(st.st_mode)&&(e==ENOTEMPTY||e==EACCES||e==EEXIST))
+            return pocket_api_reject(ctx,FS_ERR_NOT_EMPTY,op,
+                                     "this directory is not empty",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+        return sd_fail(ctx,op,e,"this path could not be removed",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    }
+    return pocket_api_settled(ctx,JS_UNDEFINED,false);
+}
+
+static JSValue sd_rename(JSContext *ctx, const fs_path_t *from,
+                         const fs_path_t *to, const char *op, const char *want) {
+    char a[SD_FSPATH_MAX],b[SD_FSPATH_MAX];
+    JSValue bad=sd_fspath(ctx,from,op,a,sizeof a);
+    if(!JS_IsUndefined(bad)) return bad;
+    bad=sd_fspath(ctx,to,op,b,sizeof b);
+    if(!JS_IsUndefined(bad)) return bad;
+    struct stat st;
+    if(stat(a,&st)!=0)
+        return sd_fail(ctx,op,errno,"no such file or directory",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    if(want[0]) {
+        char have[24];
+        sd_revision(have,&st);
+        if(strcmp(have,want))
+            return pocket_api_reject(ctx,POCKET_ERR_CONFLICT,op,
+                                     "the revision has moved on",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+    }
+    struct stat dst;
+    if(stat(b,&dst)==0)
+        // Section 4: rename never overwrites.
+        return pocket_api_reject(ctx,FS_ERR_ALREADY_EXISTS,op,
+                                 "something already has that name",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    if(sd_busy(sd_key_of(a),true)||sd_busy(sd_key_of(b),true))
+        return pocket_api_reject(ctx,POCKET_ERR_BUSY,op,
+                                 "a handle is open on this path",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    if(rename(a,b)!=0)
+        return sd_fail(ctx,op,errno,"the new name could not be written",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    return pocket_api_settled(ctx,JS_UNDEFINED,false);
+}
+
+// fs.readText on sd:, section 7's convenience over a read handle. Written out
+// separately only because the handle table is not involved.
+static JSValue sd_read_text(JSContext *ctx, const fs_path_t *p, const char *op,
+                            uint32_t cap) {
+    char fspath[SD_FSPATH_MAX];
+    JSValue bad=sd_fspath(ctx,p,op,fspath,sizeof fspath);
+    if(!JS_IsUndefined(bad)) return bad;
+    struct stat st;
+    if(stat(fspath,&st)!=0)
+        return sd_fail(ctx,op,errno,"no such file",POCKET_OUTCOME_NOT_APPLIED);
+    if(S_ISDIR(st.st_mode))
+        return pocket_api_reject(ctx,FS_ERR_IS_DIRECTORY,op,
+                                 "this path is a directory",false,NULL);
+    // Section 7: over the limit is a refusal, never a silent truncation, and it
+    // is answered from the size before a byte reaches the guest's heap.
+    if((uint64_t)st.st_size>cap)
+        return pocket_api_reject(ctx,POCKET_ERR_LIMIT_EXCEEDED,op,
+                                 "the file is longer than maxBytes",false,NULL);
+    size_t size=(size_t)st.st_size;
+    char *text=malloc(size?size:1);
+    if(!text) return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,op,
+                                       "no memory to read the file",true,NULL);
+    FILE *fh=fopen(fspath,"rb");
+    if(!fh) {
+        int e=errno;
+        free(text);
+        return sd_fail(ctx,op,e,"the file could not be opened",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    }
+    size_t got=size?fread(text,1,size,fh):0;
+    bool failed=got!=size;
+    if(failed&&ferror(fh)) sd_media_note_error(ESP_ERR_TIMEOUT);
+    fclose(fh);
+    if(failed) {
+        free(text);
+        return pocket_api_reject(ctx,POCKET_ERR_IO_ERROR,op,
+                                 "the file could not be read",false,NULL);
+    }
+    if(!utf8_valid((const uint8_t *)text,size)) {
+        free(text);
+        return pocket_api_reject(ctx,POCKET_ERR_CORRUPT_DATA,op,
+                                 "the file is not well-formed UTF-8",false,NULL);
+    }
+    JSValue str=JS_NewStringLen(ctx,text,size);
+    free(text);
+    return pocket_api_settled(ctx,str,JS_IsException(str));
+}
+
+// fs.writeText on sd:. open -> write -> commit, the whole sequence inside one
+// call so no half-written state is ever reachable -- the same shape the app:
+// side has, over a different backend.
+static JSValue sd_write_text(JSContext *ctx, const fs_path_t *p, const char *op,
+                             const char *text, size_t len, bool replace,
+                             const char *want) {
+    char fspath[SD_FSPATH_MAX];
+    JSValue bad=sd_fspath(ctx,p,op,fspath,sizeof fspath);
+    if(!JS_IsUndefined(bad)) return bad;
+    struct stat st;
+    bool there=stat(fspath,&st)==0;
+    if(there&&S_ISDIR(st.st_mode))
+        return pocket_api_reject(ctx,FS_ERR_IS_DIRECTORY,op,
+                                 "this path is a directory",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    // Section 7: never an implicit overwrite, and replace needs a target.
+    if(!replace&&there)
+        return pocket_api_reject(ctx,FS_ERR_ALREADY_EXISTS,op,
+                                 "this file already exists",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    if(replace&&!there)
+        return pocket_api_reject(ctx,POCKET_ERR_NOT_FOUND,op,"no such file",
+                                 false,POCKET_OUTCOME_NOT_APPLIED);
+    if(there&&want[0]) {
+        char have[24];
+        sd_revision(have,&st);
+        if(strcmp(have,want))
+            return pocket_api_reject(ctx,POCKET_ERR_CONFLICT,op,
+                                     "the revision has moved on",false,
+                                     POCKET_OUTCOME_NOT_APPLIED);
+    }
+    if(sd_busy(sd_key_of(fspath),true))
+        return pocket_api_reject(ctx,POCKET_ERR_BUSY,op,
+                                 "this file is open elsewhere",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    char temp[SD_FSPATH_MAX+sizeof(SD_TEMP_SUFFIX)];
+    sd_temp_path(fspath,temp,sizeof temp);
+    FILE *fh=fopen(temp,"wb");
+    if(!fh) return sd_fail(ctx,op,errno,"the file could not be opened",
+                           POCKET_OUTCOME_NOT_APPLIED);
+    if(len&&fwrite(text,1,len,fh)!=len) {
+        int e=errno;
+        fclose(fh);
+        unlink(temp);
+        return sd_fail(ctx,op,e,"the card would not take these bytes",
+                       POCKET_OUTCOME_NOT_APPLIED);
+    }
+    return sd_publish(ctx,op,fh,fspath,p->text,there);
+}
+
 // ------------------------------------------------------------ capabilities
 //
 // Three names from section 2, and the third is the one worth reading.
 //
-// fs.volume.sd is supported=false. docs/hardware-constraints.md records the
-// official pin map for the microSD slot on this board -- CS=12, MOSI=14,
-// CLK=40, MISO=39, on an SPI bus the EXT connector shares -- so the hardware is
-// there. What is not there is any code in this firmware that has ever selected
-// that bus, clocked a card or mounted a filesystem on one, and this session had
-// no board to try it on. Reporting supported=true on the strength of a pin
-// table would put an app through UNSUPPORTED-shaped failures at every call
-// instead of the one honest answer it can act on. The available flag would be
-// worse: section 2 makes it an observation, and there is nothing here to
-// observe with.
+// fs.volume.sd is supported=true as of this build, and the bar it had to clear
+// was not "a card mounts". It mounted on 2026-09-08 -- 64 GB SDHC, 512-byte
+// sectors, FATFS at 400 kHz over the pin map in docs/hardware-constraints.md
+// (CS=12, MOSI=14, CLK=40, MISO=39, on the SPI bus the EXT connector shares),
+// root enumerated, files written and removed -- and the capability stayed false
+// for months afterwards on purpose. `supported` says whether an APP can use
+// this surface, not whether the driver works: flipping it while nothing in this
+// file reached the driver would have put an app that feature-tested its way in
+// through an UNSUPPORTED-shaped failure at every call, which is precisely the
+// failure section 2 exists to prevent.
+//
+// It flips now because the picker, open, read, write, volumes and space all
+// answer. `limits` below reports only values this file actually enforces, which
+// is why there is no quotaBytes on the card and why maxFileBytes is there.
+//
+// One hardware fact the surface does not change: there is NO card-detect pin in
+// the map. Removal is not an event this firmware can receive, only the shape of
+// a command that failed. available is therefore observed -- sd_probe() reports
+// whether a granted card is answering, and asks the hardware nothing -- and
+// nothing polls, because polling would invent a liveness the hardware cannot
+// report.
 
 static const pocket_limit_t app_limits[] = {
     {.name="maxPathBytes",    .kind=POCKET_LIMIT_INT, .number=FS_MAX_PATH},
@@ -2728,9 +3862,44 @@ static const pocket_capability_t assets_capability = {
     .name="fs.volume.assets", .supported=true, .available=true,
     .limits=assets_limits,
 };
+// Only what this file actually enforces, which is why there is no quotaBytes
+// here: nothing charges an app for what it writes to the card. maxFileBytes IS
+// enforced -- sd_open() refuses a larger file -- and it is also the largest
+// size the uint32 positions in this file can address.
+static const pocket_limit_t sd_limits[] = {
+    {.name="maxPathBytes",  .kind=POCKET_LIMIT_INT, .number=FS_MAX_PATH},
+    {.name="maxNameBytes",  .kind=POCKET_LIMIT_INT, .number=FS_MAX_NAME},
+    {.name="maxDepth",      .kind=POCKET_LIMIT_INT, .number=FS_MAX_DEPTH},
+    {.name="maxOpenFiles",  .kind=POCKET_LIMIT_INT, .number=SD_MAX_OPEN_FILES},
+    {.name="maxCursors",    .kind=POCKET_LIMIT_INT, .number=FS_MAX_CURSORS},
+    {.name="chunkBytes",    .kind=POCKET_LIMIT_INT, .number=FS_CHUNK},
+    {.name="listLimit",     .kind=POCKET_LIMIT_INT, .number=FS_LIST_MAX},
+    {.name="maxFileBytes",  .kind=POCKET_LIMIT_INT, .number=(int32_t)SD_MAX_FILE},
+    {.name="maxTextBytes",  .kind=POCKET_LIMIT_INT, .number=FS_TEXT_MAX},
+    {.name="maxTimeoutMs",  .kind=POCKET_LIMIT_INT, .number=FS_MAX_TIMEOUT_MS},
+    // The only durability create and replace accept here, and the value the
+    // refusal of the default names.
+    {.name="durability",    .kind=POCKET_LIMIT_TEXT,.text="synced"},
+    // The grant comes from a host screen. An app that reads this knows there is
+    // something to call and that it cannot name the folder itself.
+    {.name="picker",        .kind=POCKET_LIMIT_FLAG,.number=1},
+    {.kind=POCKET_LIMIT_END},
+};
+
+// Deliberately does NOT mount. available says whether a card the person has
+// already granted is answering; before they have chosen, the answer is no
+// without the hardware being asked -- which is also what keeps an app from
+// learning whether there is a card in the slot at all.
+static void sd_probe(const pocket_capability_t *capability, bool *available,
+                     const char **reason) {
+    (void)capability;
+    *available=sd_media_usable(sd_media());
+    *reason=*available?NULL:POCKET_REASON_DISABLED;
+}
+
 static const pocket_capability_t sd_capability = {
-    .name="fs.volume.sd", .supported=false, .available=false,
-    .reason=POCKET_REASON_NOT_IMPLEMENTED,
+    .name="fs.volume.sd", .supported=true, .available=false,
+    .reason=POCKET_REASON_DISABLED, .limits=sd_limits, .probe=sd_probe,
 };
 
 // ---------------------------------------------------------------- install
@@ -2765,11 +3934,8 @@ static const JSCFunctionListEntry fs_methods[] = {
     JS_CFUNC_DEF("open",           2, js_open),
     JS_CFUNC_DEF("readText",       2, js_read_text),
     JS_CFUNC_DEF("writeText",      3, js_write_text),
+    JS_CFUNC_DEF("requestFolder", 2, sd_picker_request),
 };
-
-// Whether pocket.fs was ever read. The reset below has real work to do -- flash
-// erases among it -- and a run that never opened a file must not pay for it.
-static bool built;
 
 static esp_err_t build_fs(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
@@ -2791,6 +3957,8 @@ static esp_err_t build_fs(JSContext *ctx, JSValueConst ns, void *user) {
     memset(pending,0,sizeof(pending));
     cursors_clear();
     volume_table.ctx=ctx;
+    // The card's state at the start of the run is the baseline, not an event.
+    sd_told_now();
 
     JS_SetPropertyFunctionList(ctx,ns,fs_methods,
                                (int)(sizeof(fs_methods)/sizeof(fs_methods[0])));
@@ -2810,14 +3978,33 @@ esp_err_t pocket_fs_install(JSContext *ctx, void *user_data) {
 }
 
 void pocket_fs_reset(void) {
-    if(!built) return;   // no handle, no cursor, no index: nothing to give back
-    built=false;
+    // A folder screen still up goes back to the shell, and its promise is
+    // settled by the completion picker_finish() posts.
+    sd_picker_reset();
     // Section 8: everything is cancelled when the app ends, and a create or
     // replace that never committed loses its temporary version here. That is
     // flash erases at app_stop() -- up to seven sectors, tens of milliseconds
     // each -- and it is the price of not leaving a half-written file behind.
-    for(int i=0;i<FS_MAX_HANDLES;i++)
-        if(files[i].handle) file_close(&files[i],true);
+    //
+    // BEFORE the unmount, and the order is not decoration: after it the media
+    // generation has moved, and file_close() then declines to touch a FILE*
+    // whose VFS is gone. Closing while the card is still mounted is what makes
+    // an sd: temporary actually disappear.
+    if(built)
+        for(int i=0;i<FS_MAX_HANDLES;i++)
+            if(files[i].handle) file_close(&files[i],true);
+    // The card is one session's. Section 3 is explicit that a re-inserted card
+    // has to go back through the picker, and sd_media_unmount() drops the grant
+    // as it returns the 7,032 bytes the mount holds. Outside the `built` test
+    // on purpose: a session that reached the picker must give the card back
+    // even if it never built anything else.
+    sd_media_unmount();
+    // The unmount above moved the state, and there is nobody left to tell: the
+    // guest is going away and its listeners with it. Recording it as announced
+    // keeps the next session's baseline honest.
+    sd_told_now();
+    if(!built) return;   // no handle, no cursor, no index: nothing to give back
+    built=false;
     memset(pending,0,sizeof(pending));
     cursors_clear();
     pocket_api_sub_close_all(&volume_table);

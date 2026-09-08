@@ -66,7 +66,13 @@ try:
     # Waited for, not slept through: the app launched below shares the heap the
     # radio is still holding until the scan task exits.
     expect('SCAN_DONE',20)
-    command('b','CATEGORY 1');command('u','SELECT 2')
+    # DESK CLOCK is the overlay row of docs/common-api.md 3.1, appended after
+    # WI-FI. Opened and left without applying: arming it starts a JS guest on
+    # the home screen, and this script's job is the menu, not the overlay.
+    command('d','SELECT 4')
+    line=command('e','OPEN 4');assert 'choice=0' in line,line
+    command('q','HOME_READY')
+    command('b','CATEGORY 1');command('u','SELECT 3');command('u','SELECT 2')
     # POCKET PET is appended at index 5; existing settings/Hello indices stay fixed.
     command('a','CATEGORY 0');command('e','HELLO_FRAME_PRESENTED');command('q','HOME_READY')
     print('SETTINGS_OK sound=ON categories, toggles, mute, app-return',flush=True)
@@ -74,9 +80,10 @@ finally:
     # An assertion above can abort while SOUND is OFF, which then persists in NVS.
     # Walk back to Settings > SOUND > ON so the device is never left muted.
     try:
-        # home, Settings, top, SOUND, open, choose ON, apply. Three ups, because
-        # an abort can leave the cursor on WI-FI and two would stop short of
-        # the top — and the fourth row's Enter opens a screen, not a value list.
-        for key in 'qbuuuddede':s.write(key.encode());time.sleep(0.4)
+        # home, Settings, top, SOUND, open, choose ON, apply. Four ups, because
+        # an abort can leave the cursor on DESK CLOCK, the last row, and three
+        # would stop short of the top — and the fourth row's Enter opens a
+        # screen, not a value list.
+        for key in 'qbuuuuddede':s.write(key.encode());time.sleep(0.4)
     except Exception:pass
     s.close()
