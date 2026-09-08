@@ -143,11 +143,19 @@ int main(void) {
     // A mote whose gain, gate or fade grew would breach these; a mote that
     // stopped drawing would fail the strict inequality below.
     {
-        const int G=GARDEN_GLOW_MAX;
+        const int G=GARDEN_GLOW_MAX;(void)G;
         assert(lo[0]==qlo[0]&&lo[1]==qlo[1]&&lo[2]==qlo[2]);   /* only ever adds */
+#if GARDEN_NO_MOTES
+        // The build with the swarm removed. "The motes add light" cannot hold
+        // where there are none, and the useful assertion is its opposite: with
+        // them gone the frame must be EXACTLY the light, or something other
+        // than the swarm is drawing into the shaft.
+        assert(hi[0]==qhi[0]&&hi[1]==qhi[1]&&hi[2]==qhi[2]);
+#else
         assert(hi[0]>qhi[0]&&hi[0]<=qhi[0]+(((5*G)>>1)>>3)+1);
         assert(hi[1]>qhi[1]&&hi[1]<=qhi[1]+(((6*G)>>2)>>2)+1);
         assert(hi[2]>=qhi[2]&&hi[2]<=qhi[2]+((G/3)>>3)+1);
+#endif
     }
     assert(mr>4.752&&mr<4.848&&mg>13.822&&mg<14.101&&mb>7.086&&mb<7.229);
     // ---------------------------------------------------------------------
@@ -209,6 +217,11 @@ int main(void) {
     assert(edge>1.437&&edge<1.589);
     assert(chi<20);                       // 3 dof; ~11.3 is the 99% point
     assert(ph>0.235&&ph<0.265&&pv>0.235&&pv<0.265);
+#if !GARDEN_NO_MOTES
+    // Everything from here to CONTRACT_OK is about the swarm, so a build
+    // with the swarm removed skips it rather than failing it. That build is
+    // a measurement -- it is how the feature is priced -- so it is worth
+    // having the rest of this file still run in it.
     // ---------------------------------------------------------------------
     // The swarm, as a thing that can fail.
     //
@@ -566,6 +579,7 @@ int main(void) {
                bits,GARDEN_ROWS*GARDEN_MOTES);
     }
 #endif
+#endif
     printf("CONTRACT_OK: mean r=%.4f g=%.4f b=%.4f  light %d..%d/%d..%d/%d..%d"
            " exact, with motes %d..%d/%d..%d/%d..%d"
            "  edge=%.4f dither chi=%.2f P(left)=%.4f P(up)=%.4f\n",
@@ -573,98 +587,15 @@ int main(void) {
            lo[0],hi[0],lo[1],hi[1],lo[2],hi[2],edge,chi,ph,pv);
     // The frame is a parameter block that lives in the releasable flower scene
     // allocation. It grew from 16 bytes to 212 for the swarm, to 484 for the
-    // row index, back to 448 when the per-mote home went, and now past 512 for
-    // the trace's ring.
+    // row index, and back to 448 when the per-mote home went.
     //
-    // The bound fired, which is what it was for. Having the argument rather
-    // than deleting it: sixty-five bytes of ring is history rather than
-    // parameters, so it is the first thing here that does not belong by the
-    // rule as written -- but a separate scene_mem block for sixty-five bytes
-    // would cost more in bookkeeping and one more lifetime to get wrong than
-    // the rule saves. Raised deliberately, once, with the reason attached. The
-    // next thing to breach it should have to make its own case.
-    assert(sizeof(GardenFrame)<=640);
-#if GARDEN_ECG
-    // ---------------------------------------------------------------------
-    // The trace, as a thing that can fail.
-    //
-    // It draws over the scene, it is the first thing in this file reached from
-    // the strip loop rather than the row loop, and it is supposed to be quiet.
-    // Each of those is a way it could be wrong that nothing else here notices:
-    // writing outside its box, disagreeing between strip and full-frame, or
-    // being loud enough to compete with the menu.
-    // ---------------------------------------------------------------------
-    {
-        GardenFrame g={0};
-        for(int w=0;w<400;w++)garden_prepare(&g,10.0f+w*0.04f);
-        for(int y=0;y<135;y++)garden_row(before+y*240,y,&g);
-        memcpy(after,before,sizeof after);
-        garden_ecg_draw(after,0,135,&g);
-        // Strips must give the same picture as one pass, which is the property
-        // the whole scene is built on and the one a clipped overlay is most
-        // likely to break.
-        memcpy(wet,before,sizeof wet);
-        for(int y=0;y<135;y+=8)garden_ecg_draw(wet+y*240,y,135-y<8?135-y:8,&g);
-        assert(!memcmp(after,wet,sizeof wet));
-        // Inside its box and nowhere else. The box is the trace's own geometry
-        // plus the waver and the tallest spike it can draw.
-        unsigned touched=0,rows_lo=999,rows_hi=0,cols_lo=999,cols_hi=0;
-        unsigned worst=0;
-        for(int y=0;y<135;y++)for(int x=0;x<240;x++) {
-            uint16_t a=before[y*240+x],b=after[y*240+x];
-            if(a==b)continue;
-            touched++;
-            if((unsigned)y<rows_lo)rows_lo=(unsigned)y;
-            if((unsigned)y>rows_hi)rows_hi=(unsigned)y;
-            if((unsigned)x<cols_lo)cols_lo=(unsigned)x;
-            if((unsigned)x>cols_hi)cols_hi=(unsigned)x;
-            unsigned d=(unsigned)(abs((int)((a>>11)&31)-(int)((b>>11)&31))*2);
-            unsigned dg=(unsigned)abs((int)((a>>5)&63)-(int)((b>>5)&63));
-            unsigned db=(unsigned)(abs((int)(a&31)-(int)(b&31))*2);
-            if(dg>d)d=dg;
-            if(db>d)d=db;
-            if(d>worst)worst=d;
-        }
-        assert(touched>GARDEN_ECG_N/2);         /* it draws */
-        assert(cols_lo>=GARDEN_ECG_X);
-        assert(cols_hi<GARDEN_ECG_X+GARDEN_ECG_DRAW*GARDEN_ECG_XS);
-        assert(cols_hi<240);
-        assert(rows_lo>=(unsigned)(GARDEN_ECG_Y-GARDEN_ECG_WAVER-GARDEN_ECG_SPIKE));
-        assert(rows_hi<=(unsigned)(GARDEN_ECG_Y+GARDEN_ECG_WAVER+GARDEN_ECG_SPIKE
-                                   +GARDEN_ECG_THICK-1));
-        // Where it may sit relative to the menu is NOT asserted here, and that
-        // is the point. This file can only see the rows the trace uses; whether
-        // those clash with the interface is a fact about main/ui/menu_rows.h,
-        // and asserting it from a remembered screenshot is exactly how the
-        // trace ended up drawn through SKK PRACTICE. tools/test_menu_rows.c
-        // owns that assertion because it owns the rule.
-        // Pale, and the bound comes from something already on the screen
-        // rather than from what came out today. VISIBLE measures the motes at
-        // their brightest moving a channel by about twelve half-steps, and the
-        // trace is meant to be quieter than the midges it is describing. Half
-        // of that is the line. (Set from the numbers, not to them: at an alpha
-        // of 150 this read 24 and the assertion would have been written around
-        // it.)
-        assert(worst<=16);
-        // The afterglow, as a measurement rather than a hope. The newest eighth
-        // of the trace must move its pixels further than the oldest eighth --
-        // that is the whole claim, and it is a claim about ring position rather
-        // than about anything stored.
-        unsigned young=0,old=0;
-        for(int y=0;y<135;y++)for(int x=0;x<240;x++) {
-            uint16_t a=before[y*240+x],b=after[y*240+x];
-            if(a==b)continue;
-            unsigned d=(unsigned)abs((int)((a>>5)&63)-(int)((b>>5)&63));
-            int w=GARDEN_ECG_DRAW*GARDEN_ECG_XS;
-            if(x>=GARDEN_ECG_X+w*7/8)young+=d;
-            else if(x<GARDEN_ECG_X+w/8)old+=d;
-        }
-        assert(young>old*2);
-        printf("ECG_OK: %u pixels in rows %u..%u, columns %u..%u; worst channel"
-               " move %u half-steps; head/tail brightness %u vs %u\n",
-               touched,rows_lo,rows_hi,cols_lo,cols_hi,worst,young,old);
-    }
-#endif
+    // The bound has fired once, for a trace of the swarm's births and deaths
+    // whose ring pushed it past 512. That was argued, raised to 640, and then
+    // the trace was measured at 3.3 to 4.0 ms and removed -- so the bound is
+    // back where it was, and the episode is worth one line: the argument for
+    // raising it was sound and the feature still did not survive contact with
+    // a frame counter. A bound is not what decides whether something belongs.
+    assert(sizeof(GardenFrame)<=512);
     printf("GARDEN_OK: changing=%u gradients=%u lit_left=%u rain_pixels=%u; frame parameters=%zu bytes; no persistent garden arrays\n",
            changing,gradient,lit_left,modified,sizeof(GardenFrame));
 }

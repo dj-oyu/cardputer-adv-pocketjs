@@ -27,10 +27,6 @@ uint32_t garden_prof_pixels(void) {
 // It counts rows entered as well as cycles, because cycles per mote-row is the
 // number in dispute: the disassembly says 118 instructions a drawn pixel, and
 // 81 pixels of that is 0.07 ms against a measured 0.47.
-static uint32_t garden_ecg_cycles;
-uint32_t garden_prof_ecg(void) {
-    uint32_t v=garden_ecg_cycles;garden_ecg_cycles=0;return v;
-}
 static uint32_t garden_mote_cycles,garden_mote_rows;
 uint32_t garden_prof_motes(uint32_t *rows) {
     uint32_t v=garden_mote_cycles;
@@ -187,6 +183,11 @@ typedef struct {
     int at0,w0,mw0,at1,w1,mw1;
     int ambient_y,kbase,dy;
     int p5,p6;
+    // The tilt-shift's constants. They are exactly the values the pixel pass
+    // was loading anyway -- the two channel masks, the dither's width and the
+    // three channel floors -- so grading them by row costs no instructions at
+    // all. Defaults are the sharp scene.
+    int dmask,qr,qg,fr,fg,fb;
     int vc[4],vf[8];
 } GardenRow;
 static int garden_recip(int d,int sh) { return (int)((((long)1<<sh)+d-1)/d); }
@@ -287,8 +288,8 @@ static inline uint16_t garden_shade_pixel(int x,int dn,const GardenRow *r,int ex
     sun+=garden_shoulder(x,r->at0,r->w0,r->mw0,4,haze);
     sun+=garden_shoulder(x,r->at1,r->w1,r->mw1,7,haze);
     unsigned h=((unsigned)(x*GARDEN_DKX)^(unsigned)r->dy)&0xffffu;
-    int d=(int)((((h*h)>>17)*GARDEN_DKM>>16)&3u);
-    int fr=10,fg=22,fb=28;      /* the channel floors, named so the switch can drop them */
+    int d=(int)((((h*h)>>17)*GARDEN_DKM>>16)&(unsigned)r->dmask);
+    int fr=r->fr,fg=r->fg,fb=r->fb;
 #if GARDEN_MOTE_ONLY
     // Everything the BACKGROUND writes, dropped -- and nothing else. See the
     // switch in garden.h: `q` is computed above and survives untouched, because
@@ -306,7 +307,7 @@ static inline uint16_t garden_shade_pixel(int x,int dn,const GardenRow *r,int ex
     int cr=((ambient+5*sun)>>1)+d+fr;
     int cg=((3*ambient+6*sun)>>2)+d+fg;
     int cb=(ambient+((sun*GARDEN_M3)>>16)+d+fb)>>3;
-    return (uint16_t)((((cr*256)&0xF800)|((cg*8)&0x07E0))|cb);
+    return (uint16_t)((((cr*256)&r->qr)|((cg*8)&r->qg))|cb);
 }
 static void __attribute__((unused))
 garden_pixels(uint16_t *row,const int16_t *dens,const GardenRow *r) {
@@ -643,108 +644,7 @@ static void garden_motes(GardenFrame *f) {
         m->speed=0;m->glow=0;m->dim=0;m->dir=0;
     }
     garden_capacity(f,cx,cy,wake);
-#if GARDEN_ECG
-    // One column a frame, and the ring advances. Four bits each is up to
-    // fifteen events of either kind in one frame, which the capacity rule
-    // cannot produce -- it makes at most one of each -- so the clamp is a
-    // statement about the field's width rather than a limit anything reaches.
-    f->ecg_head=(uint8_t)((f->ecg_head+1u)&(GARDEN_ECG_N-1));
-    f->ecg[f->ecg_head]=(uint8_t)(((f->born>15?15:f->born)<<4)
-                                  |(f->died>15?15:f->died));
-#endif
 }
-#if GARDEN_ECG
-// The trace. Sixty-four columns of what the swarm did, newest on the right.
-//
-// Every part of it is a function of the ring and the column, so nothing is
-// stored but the ring: the afterglow is the column's distance from the head,
-// the waver is one noise sample, and the colour is chosen from which side of
-// the baseline the pixel is on. No second pass, no surface to decay.
-//
-// Warm for births and cool for deaths -- the motes' own colour against the
-// mist's -- and no red anywhere near it. The panel already has one red mark
-// with a meaning, and a second coloured dot meaning "a midge died" would be a
-// bad neighbour to a recording indicator.
-void garden_ecg_draw(uint16_t *strip,int y0,int height,const GardenFrame *f) {
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t e0=esp_cpu_get_cycle_count();GARDEN_FENCE;
-#endif
-    // Nothing of the trace is in this strip: one compare, and out. Fourteen of
-    // the seventeen strips a frame leave here.
-    int lo=GARDEN_ECG_Y-GARDEN_ECG_WAVER-GARDEN_ECG_SPIKE;
-    int hi=GARDEN_ECG_Y+GARDEN_ECG_WAVER+GARDEN_ECG_SPIKE+GARDEN_ECG_THICK-1;
-    if(y0+height>lo&&y0<=hi) {
-    const uint16_t warm=garden_rgb(255,214,150),cool=garden_rgb(150,196,214);
-    for(int i=0;i<GARDEN_ECG_DRAW;i++) {
-        int x0=GARDEN_ECG_X+(GARDEN_ECG_DRAW-1-i)*GARDEN_ECG_XS;
-        uint8_t v=f->ecg[(f->ecg_head-(unsigned)i)&(GARDEN_ECG_N-1)];
-        int up=v>>4,dn=v&15;
-        // The baseline wanders. One sample a column of the field the wind and
-        // the shaft's warp already ride, so between events the line is alive
-        // rather than stopped, and it costs no state at all.
-        int wav=(garden_motion((unsigned)(f->phase+i*37),641)-128)*GARDEN_ECG_WAVER>>7;
-        if(wav>GARDEN_ECG_WAVER)wav=GARDEN_ECG_WAVER;
-        if(wav<-GARDEN_ECG_WAVER)wav=-GARDEN_ECG_WAVER;
-        int base=GARDEN_ECG_Y+wav;
-        // Six rows an event, clamped to the band. The clamp is still what
-        // keeps the trace inside the rows it promised, but it is a ceiling now
-        // rather than the two-level flattening a eleven-row band forced: one,
-        // two and three events draw differently.
-        int top=base,bot=base;
-        if(up)top=base-(up*GARDEN_ECG_GAIN>GARDEN_ECG_SPIKE?GARDEN_ECG_SPIKE
-                                                           :up*GARDEN_ECG_GAIN);
-        if(dn)bot=base+(dn*GARDEN_ECG_GAIN>GARDEN_ECG_SPIKE?GARDEN_ECG_SPIKE
-                                                           :dn*GARDEN_ECG_GAIN);
-        // The afterglow, and it is a function of ring position rather than a
-        // decaying surface: this scene repaints every pixel every frame, so
-        // there is nothing to decay. A column's distance from the write head IS
-        // how long ago it happened, which makes the data and the fade the same
-        // quantity and correct by construction.
-        int glow=GARDEN_ECG_ALPHA-(int)i*GARDEN_ECG_ALPHA/GARDEN_ECG_DRAW;
-        // The stroke, applied to the baseline only: a spike is already tall
-        // enough to be an object and thickening it would close the gap between
-        // an up and a down on the same column.
-        if(top==bot)bot=top+GARDEN_ECG_THICK-1;
-        for(int yy=top;yy<=bot;yy++) {
-            if(yy<y0||yy>=y0+height||yy<0||yy>=135)continue;
-            for(int sx=0;sx<GARDEN_ECG_XS;sx++) {
-            int x=x0+sx;
-            if(x<0||x>=240)continue;
-            // Dithered with the scene's own dither rather than a second noise.
-            // A pale colour over sixty-four columns of five-bit channels has
-            // about four distinguishable levels, which without this reads as
-            // four blocks rather than a fade. This function is already asserted
-            // uniform over its four values and uncorrelated with both
-            // neighbours, which is exactly the problem it was written for.
-            // Keyed on the pixel, and that is right here rather than merely
-            // simplest. The trace does not scroll: a column's screen position
-            // is its ring age, so the ramp it is dithering is a function of x
-            // and does not move. Only the spike heights change from frame to
-            // frame, and those are solid bars rather than gradients. There is
-            // no fixed texture for a moving line to pass behind, because the
-            // line and the texture are both still.
-            // Centred on zero, not added on top. garden_dither returns 0..3,
-            // and using it as-is brightens the trace by an average of one and a
-            // half dither steps -- so the pale it was tuned to would drift with
-            // the dither's amplitude, which is a property of the panel and not
-            // of the trace. (-3,-1,1,3) has a mean of zero, so the amplitude
-            // can be sized to the channel without moving the brightness.
-            int a=glow+(garden_dither(x,yy)*2-3)*GARDEN_ECG_DITHER/2;
-            if(a<0)a=0;
-            if(a>255)a=255;
-            uint16_t *px=&strip[(yy-y0)*240+x];
-            *px=garden_mix(*px,yy<base?warm:cool,(unsigned)a);
-            }
-        }
-    }
-    }
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;garden_ecg_cycles+=esp_cpu_get_cycle_count()-e0;GARDEN_FENCE;
-#else
-    (void)strip;(void)y0;(void)height;
-#endif
-}
-#endif
 #if GARDEN_MOTE_INDEX && !GARDEN_NO_MOTES
 // The scan, hoisted out of the row loop. Written here and nowhere else, and
 // read-only from garden_row -- which is what makes it legal at all, given that
@@ -1076,10 +976,14 @@ garden_pixels_pie(uint16_t *row,const int16_t *dens,const GardenRow *r) {
         320,                                 /* 4*haze, so the shoulder shifts by 18 */
         (int16_t)(-at0), (int16_t)w0, (int16_t)(-w0), (int16_t)mw0, 256, 4,
         (int16_t)(-at1), (int16_t)w1, (int16_t)(-w1), (int16_t)mw1, 256, 7,
-        GARDEN_DKX, (int16_t)dy, GARDEN_DKM, 3,
-        128, 640, 10, 256, (int16_t)0xF800,  /* red: (ambient + 5 sun) >> 1, then placed */
-        192, 384, 22, 8, 0x07E0,             /* green: (3 ambient + 6 sun) >> 2 */
-        GARDEN_M3, 28, 32,                   /* blue: no left shift to hide the >>3 in */
+        // Six of the constants below are graded by row for the tilt-shift --
+        // the dither's width, the two channel masks and the three floors. The
+        // instruction that uses each is unchanged; only the value it loads
+        // moves, which is why the effect is free in the pixel loop.
+        GARDEN_DKX, (int16_t)dy, GARDEN_DKM, (int16_t)r->dmask,
+        128, 640, (int16_t)r->fr, 256, (int16_t)r->qr,   /* red: (ambient+5sun)>>1 */
+        192, 384, (int16_t)r->fg, 8, (int16_t)r->qg,     /* green: (3ambient+6sun)>>2 */
+        GARDEN_M3, (int16_t)r->fb, 32,       /* blue: no left shift to hide the >>3 in */
         8                                    /* eight pixels on */
     };
     int16_t kv[40][8] __attribute__((aligned(16)));
@@ -1343,12 +1247,64 @@ static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
     r.at0=at0;r.w0=w0;r.mw0=garden_recip(ww0,22);
     r.at1=at1;r.w1=w1;r.mw1=garden_recip(ww1,22);
     r.ambient_y=ambient_y;r.kbase=17+f->breath;
+    r.dmask=3;r.qr=(int16_t)0xF800;r.qg=0x07E0;r.fr=10;r.fg=22;r.fb=28;
     r.dy=(y*GARDEN_DKY+GARDEN_DKC)&0xffff;
     // px>>5 and px>>6 are 8x+(phase>>5) and 4x+(phase>>6) exactly: x*256 is a
     // multiple of 64, so the shift never mixes x with the phase's low bits.
     r.p5=f->phase>>5;r.p6=f->phase>>6;
     for(int i=0;i<4;i++)r.vc[i]=garden_corner(i,3,y,6);
     for(int i=0;i<8;i++)r.vf[i]=garden_corner(i,7,y,5);
+#if GARDEN_FOCUS
+    // The defocus, and the whole of it is here: eight lerps and two constants.
+    //
+    // `soft` is 0 in the sharp band and climbs to focus_amt over the falloff.
+    // Scaling the fine octave's corners toward their own mean is what removes
+    // the detail -- the pixel loop does not know it has happened, runs the same
+    // instructions on the same lattice, and simply has less to draw.
+    if(f->focus_amt) {
+        int d=y-f->focus_y;
+        if(d<0)d=-d;
+        d-=GARDEN_FOCUS_BAND;
+        if(d<0)d=0;
+        int soft=d*255/GARDEN_FOCUS_FALL;
+        if(soft>255)soft=255;
+        soft=soft*f->focus_amt/255;
+        if(soft) {
+            // Toward the mean, not toward zero: an octave scaled to nothing
+            // still has to leave the row at the brightness it had, or the
+            // defocused band would be a stripe of a different colour.
+            int keep=255-(255-GARDEN_FOCUS_KEEP)*soft/255;
+            int m=0;
+            for(int i=0;i<8;i++)m+=r.vf[i];
+            m>>=3;
+            for(int i=0;i<8;i++)r.vf[i]=m+(r.vf[i]-m)*keep/255;
+            // The coarse octave too, and it is the one that matters. Folding
+            // only the fine octave was the obvious move and it did nothing
+            // measurable: `dens` is 3*Dc + Df, so the fine one is a quarter of
+            // the field, and what the eye reads at this scale is the coarse
+            // one. Measured at a sixteen-pixel separation -- the scale the
+            // octaves actually live at -- flattening the fine octave alone
+            // moved the number from 1.93 to 1.88 and in one row moved it the
+            // wrong way.
+            int ckeep=255-(255-GARDEN_FOCUS_CKEEP)*soft/255;
+            int cm=0;
+            for(int i=0;i<4;i++)cm+=r.vc[i];
+            cm>>=2;
+            for(int i=0;i<4;i++)r.vc[i]=cm+(r.vc[i]-cm)*ckeep/255;
+            // The dither half. Coarsening the quantisation throws away tonal
+            // detail; raising the dither with it is what stops that becoming
+            // bands. Both are constants the pixel pass already loads, so they
+            // cost nothing -- and the channel floors come down by half the
+            // dither's span so the defocused region does not also brighten.
+#if GARDEN_FOCUS_DITHER
+            r.dmask=soft>170?7:3;
+            r.qr=soft>128?(int16_t)0xF000:(int16_t)0xF800;
+            r.qg=soft>128?0x07C0:0x07E0;
+            r.fr=10-r.dmask/2;r.fg=22-r.dmask/2;r.fb=28-r.dmask/2;
+#endif
+        }
+    }
+#endif
     int16_t dens[240] __attribute__((aligned(16)));
     garden_octave_row(dens,r.vc,3,r.p6,4,1);
     garden_octave_row(dens,r.vf,7,r.p5,8,0);

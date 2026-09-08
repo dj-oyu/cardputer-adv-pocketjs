@@ -462,6 +462,15 @@ static esp_err_t codec_read(uint8_t reg, uint8_t *out) {
 // A variable so sound_capture_probe() can sweep it.
 static uint8_t mic_reg14=0x1a;
 
+// The ES8311's ADC automute and ALC are NOT involved in anything here, and this
+// is written down so the next person does not spend a run finding out: 0x18 bit
+// 6 is automute and bit 7 is ALC, the datasheet gives both a reset default of
+// 0, and nothing in this file writes 0x18 at all. It was also tested rather
+// than trusted -- a probe row that wrote 0x18, 0x19 and 0x1a explicitly to zero
+// behaved exactly like the control row. Automute is the first thing a reader
+// suspects when audio stops partway through a recording, and on this board it
+// has been eliminated twice.
+
 // 0x16 is the PGA step, 0..7 for 0 to 42 dB, and on this board it is the gain
 // that matters: the microphone is on the analog input, so this sits in front of
 // the converter and buys real signal-to-noise where 0x17 behind it does not.
@@ -562,6 +571,16 @@ static const uint8_t CAPTURE_OFF[][2]={
 
 // The driver's own report that the DMA wrapped onto audio nobody had read. Runs
 // in the I2S interrupt, so it does one relaxed store and nothing else.
+//
+// What an overflow does and does not do, from i2s_common.c's
+// i2s_dma_rx_callback: when the message queue is full the driver drops the
+// OLDEST descriptor, fires this, and posts the new one. The channel is never
+// stopped and i2s_channel_read() keeps returning data. So an overrun costs old
+// audio and never future audio -- which means a stalled or silent stream is
+// never explained by an overflow, and a whole family of "the ring overran and
+// everything after it died" theories can be ruled out without a run. Worth
+// knowing before reading the driver again: it took an afternoon to establish
+// once.
 static bool capture_overflow(i2s_chan_handle_t handle, i2s_event_data_t *event,
                              void *user) {
     (void)handle; (void)event; (void)user;

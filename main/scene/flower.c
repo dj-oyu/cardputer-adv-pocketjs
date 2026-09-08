@@ -297,6 +297,22 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
         p->ymin=clampi((int)floorf(65-SCALE*(p->c.y+ey)),12,H-1);
         p->ymax=clampi((int)ceilf(65-SCALE*(p->c.y-ey)),12,H-1);
     }
+#if GARDEN_FOCUS
+    // Where the tilt-shift keeps its focus: the plant, not a fixed row.
+    //
+    // A named row would be wrong on half the species -- they differ by a factor
+    // of three in part count and stand at different heights -- and the shaft
+    // slants, so "the middle" is not where the subject is either. The parts have
+    // just been built and carry their own bounding boxes, so the subject's
+    // vertical centre is already known here and costs a loop over count.
+    if(seed_map&&count) {
+        long sy=0;
+        for(unsigned i=0;i<count;i++)sy+=(petals[i].ymin+petals[i].ymax)/2;
+        GardenFrame *gf=(GardenFrame*)(seed_map+32*32);
+        gf->focus_y=(int16_t)(sy/(long)count);
+        gf->focus_amt=GARDEN_FOCUS_AMT;
+    }
+#endif
 #ifdef ESP_PLATFORM
     // Per part, not per frame: the species differ by a factor of three in part
     // count, so a frame figure alone cannot say whether this loop is expensive
@@ -739,18 +755,6 @@ static void ray_row(uint16_t *row,int y) {
     PROF_FENCE;prof_scan+=esp_cpu_get_cycle_count()-c0;PROF_FENCE;
 #endif
 }
-// The overlay hook. It needs the GardenFrame, which lives in the scene block,
-// so it resolves the pointer the same way flower_draw does -- and does nothing
-// at all when there is no block, because a background that cannot allocate
-// should look plain rather than crash.
-void flower_overlay(uint16_t *pixels,int y,int height) {
-#if GARDEN_ECG
-    if(!pixels||y<0||height<0||y>H||height>H-y||!seed_map)return;
-    garden_ecg_draw(pixels,y,height,(const GardenFrame*)(seed_map+32*32));
-#else
-    (void)pixels;(void)y;(void)height;
-#endif
-}
 void flower_draw(uint16_t *pixels,int y,int height) {
     if(!pixels||y<0||height<0||y>H||height>H-y)return;
     GardenFrame fallback={0};   /* the swarm carries state; zero is its valid start */
@@ -809,10 +813,6 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         uint32_t moterows=0;
         uint32_t motecy=garden_prof_motes(&moterows);
         double mot=motecy/240000.0/prof_frames;
-        // The trace, from the inside. `ovl` in the PERF line measures the same
-        // region from the strip loop; the two are independent counters over the
-        // same code and disagreeing is the failure.
-        double ecg=garden_prof_ecg()/240000.0/prof_frames;
         // visits are the pixels the rejection arithmetic touches; hits are the
         // ones that reach sqrtf, the normal and shade(). The two have very
         // different unit costs -- roughly 20 cycles against 200 -- so which of
@@ -826,7 +826,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  "ray=%.2f visits=%u hits=%u | sqrt=%.2f (%u calls, %u cy) shade=%.2f (%u cy) "
                  "bell=%.2f (%u visits, %u cy) | span=%.2f (%u rows, %u cy/visit) "
                  "bsqrt=%.2f (%u calls, %u cy) scan=%.2f pre=%.2f rest=%.2f "
-                 "motes=%.3f (%u rows/frame, %u cy/row) ecg=%.3f | "
+                 "motes=%.3f (%u rows/frame, %u cy/row) | "
                  "prep: garden=%.3f seeds=%.3f build=%.3f petals=%.3f (%u parts, %u cy/part) "
                  "(ms/frame; total vs kernel= is the check)",
                  prof_frames,tot,gar,pix,gar-pix,tot-gar,
@@ -847,7 +847,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  (prof_scan-prof_span)/240000.0/prof_frames,
                  prof_pre/240000.0/prof_frames,
                  tot-gar-(prof_scan+prof_pre)/240000.0/prof_frames,
-                 mot,moterows/prof_frames,moterows?motecy/moterows:0,ecg,
+                 mot,moterows/prof_frames,moterows?motecy/moterows:0,
                  prof_pgarden/240000.0/prof_frames,prof_pseeds/240000.0/prof_frames,
                  prof_pbuild/240000.0/prof_frames,prof_ppetal/240000.0/prof_frames,
                  prof_ppetaln/prof_frames,

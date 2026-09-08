@@ -30,7 +30,3 @@ void flower_prepare_rotating(float dt, int tilt_x, int tilt_y);
 flower_species_t flower_current_species(void);
 float flower_fade(void);
 void flower_draw(uint16_t *pixels, int y, int height);
-// The swarm's birth-and-death trace, in the scene's overlay slot. Separate from
-// flower_draw on purpose: it is the only thing in this scene that is drawn from
-// the strip loop rather than the row loop, and that is where it has to stay.
-void flower_overlay(uint16_t *pixels, int y, int height);

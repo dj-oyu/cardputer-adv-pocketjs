@@ -152,114 +152,55 @@ typedef struct {
 #ifndef GARDEN_LIVE_FIXED
 #define GARDEN_LIVE_FIXED 0
 #endif
-// The birth-and-death trace, drawn in the scene's overlay slot.
+// Tilt-shift, and where it is done matters more than what it is.
 //
-// An ECG rather than a bar chart, because births and deaths ARE discrete
-// events: flat between, a spike when one happens, births up and deaths down.
-// That also removes the storage a rate graph would need -- no bucketing into
-// per-second counts, no ring of rates, just what happened in each of the last
-// sixty-four frames.
+// Defocus is the ABSENCE of fine structure, so the honest way to get it is to
+// stop generating the fine structure -- not to add noise on top of it, which
+// reads as grain over a sharp image, and not to blur afterwards, which means
+// reading and writing every pixel a second time. A full-frame pass over
+// 240x135 starts at about 0.7 ms at five cycles a pixel, and this frame is
+// already over its budget.
 //
-// It lives in the overlay hook and nowhere near garden_pixels_row. That is not
-// tidiness: 401 bytes of cold code inside the row function costs 0.37 ms merely
-// by existing, measured, whether or not it draws anything. An overlay is
-// reached from the strip loop and pays none of that.
+// The garden's mist is two octaves of value noise. The fine octave's lattice
+// corners are a PER-ROW input, so pulling them toward their own mean scales
+// that octave's amplitude away to nothing -- genuine loss of high-frequency
+// detail, perfectly graded, and it costs eight lerps a row rather than anything
+// at all per pixel. The mean is preserved by construction, so the defocused
+// band does not change brightness.
 //
-// Placement is measured rather than named. This scene has no horizon line --
-// it is a shaft, trunks, a canopy and grass rising from below the bottom of the
-// screen -- so "below the horizon" resolves to the band under the menu: the
-// HUD's labels sit at rows 37, 69 and 89, and nothing of the interface is below
-// 100. Rows 112..132 are free of it, which is also how the trace loses the
-// competition with the menu: it never overlaps it.
-#ifndef GARDEN_ECG
-#define GARDEN_ECG 1
-#endif
-// Columns, and a power of two so the ring masks rather than divides. 128 at a
-// byte each is 128 bytes of the scene block; 256 would be the next step up and
-// would push GardenFrame past the bound in tools/test_garden.c, which is the
-// bound doing its job rather than an accident.
-#define GARDEN_ECG_N 128
-// How many of the ring's columns are drawn, and how wide each one is.
+// The dither the owner asked for does the other half: away from the band the
+// quantisation is coarsened by a mask (a constant the pixel pass already loads,
+// so it is free) and the dither amplitude is raised to hide the banding that
+// would otherwise cause. Tonal detail genuinely thrown away, and noise only
+// where there is now less detail than the panel can show.
 //
-// The ring is a power of two so it masks; the drawn width is not tied to it,
-// which is what lets the trace be scaled without changing how much history it
-// keeps. 112 columns two pixels wide is 224 of the 240, against 64 pixels
-// before -- and the blocks are visible, which is what was asked for. Four and a
-// half seconds of history at 25 fps.
-//
-// Scaling the columns rather than adding them was the choice: 224 one-pixel
-// columns would need a 256-entry ring, which is 256 bytes of the scene block
-// and past the bound, to show more history than a swarm with a death every
-// three seconds has to show.
-#ifndef GARDEN_ECG_DRAW
-#define GARDEN_ECG_DRAW 112
+// The subject stays sharp because the flower is drawn AFTER the background and
+// is not touched by any of this. That is what a tilt-shift is.
+#ifndef GARDEN_FOCUS
+#define GARDEN_FOCUS 1
 #endif
-#ifndef GARDEN_ECG_XS
-#define GARDEN_ECG_XS 2
+// Half-height of the sharp band, and how many rows the falloff takes.
+// How strong the effect is at its worst, 0..255. This is the one knob that is
+// purely a matter of taste, so it is the one to move first.
+#ifndef GARDEN_FOCUS_AMT
+#define GARDEN_FOCUS_AMT 255
 #endif
-// The stroke. A one-pixel baseline is a hairline at this size and disappears
-// into the mist between events; two is what makes the line an object.
-#ifndef GARDEN_ECG_THICK
-#define GARDEN_ECG_THICK 2
+#ifndef GARDEN_FOCUS_BAND
+#define GARDEN_FOCUS_BAND 18
 #endif
-#ifndef GARDEN_ECG_X
-#define GARDEN_ECG_X 8
+#ifndef GARDEN_FOCUS_FALL
+#define GARDEN_FOCUS_FALL 46
 #endif
-// The baseline, and it is 129 rather than 122 because 122 was wrong. Rows
-// 112..132 were chosen from a state in which the menu's labels sat at 37, 69
-// and 89; the XMB scroll animates those, and at rest an item lands on 110 as
-// well, fourteen rows tall, straight through the trace. main/ui/menu_rows.h
-// derives the resting bands from the layout rule instead of from a screenshot,
-// and 124..134 is the one below the menu. tools/test_menu_rows.c holds the
-// trace's whole box inside it.
-// The baseline, centred in 96..134 -- the two free bands with the menu's own
-// resting row between them. It crosses that row, deliberately, and the argument
-// for it is one this file already had to make: no row is safe during a scroll
-// anyway, and what protects the trace is that the overlay is drawn BEFORE
-// paint_labels, so text passes over it rather than through it. That ordering
-// does not care whether the band is eleven rows or thirty-nine.
-//
-// It was 129 in an eleven-row band, and 122 before that from a screenshot.
-#ifndef GARDEN_ECG_Y
-#define GARDEN_ECG_Y 115
+// How much of the fine octave survives at full defocus, in 256ths.
+// The quantisation-and-dither half, separable from the octave half so the two
+// can be measured apart. They pull in opposite directions on the one number
+// that says whether this reads as softness -- the roughness between neighbours
+// -- and only measuring them separately shows by how much.
+#ifndef GARDEN_FOCUS_DITHER
+#define GARDEN_FOCUS_DITHER 1
 #endif
-// The tallest the trace can reach from the baseline, waver excluded. Still
-// sized to the band rather than to the data -- but the band is 96..134 now, so
-// the clamp that flattened three events onto two levels can go. At six rows an
-// event: one 6, two 12, three 17 and anything more 17.
-// Sixteen and not seventeen: the box is baseline + waver + spike + stroke, and
-// seventeen put its last row at 135 on a 135-row panel. The clip would have
-// hidden that; the assertion in tools/test_menu_rows.c did not.
-#ifndef GARDEN_ECG_SPIKE
-#define GARDEN_ECG_SPIKE 16
-#endif
-#ifndef GARDEN_ECG_GAIN
-#define GARDEN_ECG_GAIN 6
-#endif
-#ifndef GARDEN_ECG_ALPHA
-// Of 256, at the head, fading back along the ramp. 90 rather than 100 because
-// the dither was re-sized to the panel and centring it moved the peak: this
-// keeps the trace's brightest pixel where the small version's was, so making
-// the trace bigger did not quietly also make it brighter. Size was what was
-// asked for; contrast was not.
-#define GARDEN_ECG_ALPHA 90
-#endif
-// The idle waver. A perfectly flat line for the three seconds between deaths
-// does not read as calm, it reads as a graph that has stopped; real traces have
-// a baseline that wanders. On the same garden_motion lattice as everything
-// else, so it costs one sample a column and no state. A floor, not the signal.
-#ifndef GARDEN_ECG_WAVER
-#define GARDEN_ECG_WAVER 2
-#endif
-// How far the dither may move the alpha, and it is sized to the panel rather
-// than to the trace. One step of the six-bit green channel is about 256/63 = 4
-// of the 0..256 mix, so a dither smaller than four cannot cross a channel
-// boundary and cannot break a band; much larger and it stops being a dither and
-// becomes noise on the line. It used to be derived from the column count, which
-// was wrong for the same reason a bound fitted to one condition is wrong: at 64
-// columns it happened to land near four.
-#ifndef GARDEN_ECG_DITHER
-#define GARDEN_ECG_DITHER 4
+#ifndef GARDEN_FOCUS_KEEP
+#define GARDEN_FOCUS_KEEP 26
 #endif
 // Where a replacement may appear. The centroid can drift; a birth may not
 // follow it off the top or into the dying zone.
@@ -475,24 +416,18 @@ typedef struct {
     int sun,phase,breath;
     unsigned seed;
     GardenMote mote[GARDEN_MOTES];
-    uint8_t born,died;  /* this frame's events, for the trace */
-#if GARDEN_ECG
-    // The trace's whole storage: one byte a column, births in the high nibble
-    // and deaths in the low. It is a ring, so a column's distance from the head
-    // is how long ago that frame was -- which is also the afterglow, evaluated
-    // at draw time from the position instead of stored anywhere.
-    uint8_t ecg[GARDEN_ECG_N];
-    uint8_t ecg_head;
-#endif
+    uint8_t born,died;  /* this frame's events */
+    // Tilt-shift. focus_amt 0 is off, and a zeroed GardenFrame is therefore the
+    // scene exactly as it was -- which is what lets every contract in
+    // tools/test_garden.c go on asserting the same numbers.
+    int16_t focus_y;    /* the row that stays sharp */
+    uint8_t focus_amt;  /* 0..255, how strong the effect is at its worst */
 #if GARDEN_MOTE_INDEX
     uint16_t rowmask[GARDEN_ROWS];  /* bit i: mote i draws on this row */
 #endif
 } GardenFrame;
 void garden_prepare(GardenFrame *frame,float time);
 void garden_row(uint16_t *row,int y,const GardenFrame *frame);
-// The trace, clipped to one strip. Reads the frame and writes nothing but the
-// strip; called from the scene's overlay hook, never from garden_row.
-void garden_ecg_draw(uint16_t *strip,int y0,int height,const GardenFrame *frame);
 #ifdef ESP_PLATFORM
 // TEMPORARY, and it goes with flower.c's counters. garden_row is now made of
 // two very different things -- three vector passes over the 240 pixels, then
@@ -503,7 +438,4 @@ uint32_t garden_prof_pixels(void);
 // Cycles spent in the mote touch-up and the number of rows it ran on, measured
 // inside the shipping binary rather than by subtracting two builds. Clears both.
 uint32_t garden_prof_motes(uint32_t *rows);
-// The trace's own cost, measured in the shipping binary. `ovl` in the PERF line
-// measures the same region from the other side and the two must agree.
-uint32_t garden_prof_ecg(void);
 #endif

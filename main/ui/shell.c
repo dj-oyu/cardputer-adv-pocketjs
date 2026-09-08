@@ -43,7 +43,7 @@ static const scene_ops_t SCENES[]={
     // flowers they had not seen. The row now rotates the botanicals on
     // its own, each change hidden behind a dissolve; the interval and the fade
     // are named constants in flower.c.
-    {"FLOWER", flower_scene_prepare, flower_scene_draw, flower_overlay, 0},
+    {"FLOWER", flower_scene_prepare, flower_scene_draw, NULL, 0},
 };
 #define BACKGROUND_N (sizeof(SCENES)/sizeof(SCENES[0]))
 // mode is an index into SCENES and NVS can hand back anything, so every read
@@ -70,17 +70,15 @@ static uint64_t kernel_cycles;
 //   fps    drawing that string
 //   menu   the whole menu: the layout once a frame, the painting per strip
 //
-// `ovl` WAS the self-check: FLOWER's overlay was NULL, so it had to read 0.00
-// there or the split was wrong, and a counter that can be held against a known
-// zero is worth more than one that cannot. That zero is spent -- FLOWER has an
-// overlay now, the swarm's trace, and no scene is left without one.
+// `ovl` is the self-check: FLOWER's overlay is NULL, so it must read 0.00 there
+// or the split is wrong. A counter that can be held against a known zero is
+// worth more than one that cannot.
 //
-// What replaces it is better, and it is the same idea from the other side: the
-// trace counts its own cycles (`garden_prof_ecg`, printed as `ecg=` on the
-// SPLIT line), so `ovl` here and `ecg` there measure the same region through
-// two independent counters and must agree. A known zero was one constraint; two
-// counters that have to match is one too, and it keeps working after the thing
-// being measured stops being nothing.
+// It was spent for a while. FLOWER carried an overlay -- a trace of the swarm's
+// births and deaths -- and the pair of counters that replaced the known zero
+// (this one and the trace's own) had to agree instead. The trace measured 3.3
+// to 4.0 ms and came out again, so the zero is back, and the episode is in
+// docs/pie-simd.md 3.9 rather than in a comment here.
 //
 // Cycle counts, not esp_timer_get_time(): the timer is 0.90 us a call
 // (docs/pie-simd.md 3.5), and eight of those per strip would be 0.12 ms of

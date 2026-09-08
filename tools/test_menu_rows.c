@@ -2,10 +2,12 @@
 //
 //   gcc -O2 -Wall -Wextra -Werror tools/test_menu_rows.c -lm -o /tmp/mr && /tmp/mr
 //
-// This test exists because an assertion in tools/test_garden.c was written from
-// one screenshot: the garden's trace was placed at rows 112..132 and asserted to
-// miss the menu, on the strength of a state in which the labels happened to sit
-// at 37, 69 and 89. The board put SKK PRACTICE across 108..125.
+// This test exists because an assertion elsewhere was written from one
+// screenshot: a decoration was placed at rows 112..132 and asserted to miss the
+// menu, on the strength of a state in which the labels happened to sit at 37,
+// 69 and 89. The board put SKK PRACTICE across 108..125. That decoration has
+// since been removed for costing 3.3 ms; the rule it forced someone to write
+// down is the part that was worth keeping.
 //
 // The failure was not the measurement, it was the generalisation -- the same
 // shape as a centroid bound fitted to a sixteen-mote swarm. So the answer is not
@@ -16,7 +18,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "../main/scene/garden.h"
 #define H 135
 int main(void) {
     unsigned char rest[H]={0};
@@ -45,48 +46,19 @@ int main(void) {
             if(e-r>best){best=e-r;best_lo=r;}
         }
     printf("\n     widest free band %d..%d (%d rows)\n",best_lo,best_lo+best-1,best);
-#if GARDEN_ECG
-    // The trace has to fit a band the menu does not rest on. This is the
-    // assertion the screenshot version could not make, and it is deliberately
-    // stated over the whole box the trace can reach -- baseline, waver and the
-    // tallest spike together -- rather than over the rows it happened to use in
-    // one frame.
-    int lo=GARDEN_ECG_Y-GARDEN_ECG_WAVER-GARDEN_ECG_SPIKE;
-    int hi=GARDEN_ECG_Y+GARDEN_ECG_WAVER+GARDEN_ECG_SPIKE+GARDEN_ECG_THICK-1;
-    assert(lo>=0&&hi<H);
-    int shared=0;
-    for(int r=lo;r<=hi;r++)if(rest[r])shared++;
-    // NOT disjointness. The trace used to have to miss the menu's resting rows,
-    // and that assertion was right for an eleven-row ornament sitting in a gap.
-    // It is the wrong property now, and it was always the weaker argument: what
-    // keeps the two apart is the DRAW ORDER, not the geometry, and the order
-    // does not care whether the band is eleven rows or thirty-nine. Asserting
-    // disjointness for a taller trace would only have forced it back to eleven.
+    // The property any overlay relies on, checked where it lives: the overlay
+    // hook must run BEFORE paint_labels in the strip loop, or a scene's
+    // decoration draws over the interface instead of under it.
     //
-    // Reported rather than bounded tightly, because the number is the thing to
-    // watch: if a later change puts most of the trace under the menu's own
-    // resting row it should show up here and not on the glass.
-    assert(shared*2<hi-lo+1);
-    printf("ECG_ROWS_OK: the trace's box is %d..%d (%d rows), of which %d are"
-           " rows the menu rests on\n",lo,hi,hi-lo+1,shared);
-    // While the menu scrolls, item_y sweeps continuously and every row is
-    // crossed; that is a fact about the layout, not a bound, and it is why the
-    // claim is "where the menu does not rest" and never "where it never is".
-    {
-        int crossed=0;
-        for(int i=0;i<=200;i++) {
-            float d=-4.0f+i*8.0f/200;
-            int y=(int)(menu_item_y(d)+0.5f);
-            if(y+MENU_TEXT_ROWS(MENU_ITEM_SCALE)>lo&&y<=hi)crossed=1;
-        }
-        assert(crossed);        /* if this ever stops being true, say so */
-    }
-    // The property the trace actually relies on, checked where it lives: the
-    // overlay hook must run BEFORE paint_labels in the strip loop, or text and
-    // trace swap places and an ornament draws over the interface. It is a fact
-    // about the order of two calls in one function, so this reads that
-    // function. Crude, and still an assertion about the real thing rather than
-    // about a copy of it.
+    // FLOWER has no overlay today -- it had one, a trace of the swarm's births
+    // and deaths, and that is what made someone write this file. It measured
+    // 3.3 to 4.0 ms and came out. The other three backgrounds still have
+    // overlays and still depend on this order, and the next thing that wants to
+    // draw under the menu will depend on it too.
+    //
+    // It is a fact about the order of two calls in one function, so this reads
+    // that function. Crude, and still an assertion about the real thing rather
+    // than about a copy of it.
     {
         FILE *fp=fopen("main/ui/shell.c","rb");
         assert(fp);
@@ -97,9 +69,8 @@ int main(void) {
         const char *ovl=strstr(src,"sc->overlay(strip,strip_y,strip_h)");
         const char *lab=strstr(src,"paint_labels()");
         assert(ovl&&lab&&ovl<lab);
-        printf("             drawn before paint_labels, which is the whole of"
-               " what keeps the text over it rather than under\n");
+        printf("     overlays are drawn before paint_labels, which is what"
+               " keeps text over a decoration rather than under\n");
     }
-#endif
     return 0;
 }
