@@ -30,37 +30,41 @@ with serial.Serial(a.port, 115200, timeout=0.2) as s:
                 return line
         raise RuntimeError(marker)
 
+    # A capture is 135 lines of 960 hex characters -- about 131 KB arriving over
+    # roughly a second, on top of whatever else is logging.
+    #
+    # Read it in bulk and parse afterwards. Decoding each line as it arrives is
+    # what loses rows: the work per line is enough that the host stops draining
+    # the port, the operating system's own buffer overflows, and the missing
+    # rows come back scattered with the line before each gap truncated
+    # mid-hex. That looks exactly like the firmware dropping log output, and it
+    # was diagnosed as such here for most of a day -- the same capture that gave
+    # 81, 85 and 92 rows line-by-line gives 135 first time when the port is
+    # drained into a buffer and parsed at the end.
     def attempt():
         command('s', 'CAPTURE_BEGIN')
-        rows = {}
-        deadline = time.monotonic() + 15
+        buf = bytearray()
+        deadline = time.monotonic() + 18
         while time.monotonic() < deadline:
-            line = s.readline().decode(errors='replace').strip()
-            match = re.search(r'PIX (\d+) ([0-9a-f]{960})', line)
-            if match:
-                y, data = match.groups()
-                rgb = bytearray()
-                for x in range(0, len(data), 4):
-                    v = int(data[x:x+4], 16)
-                    rgb.extend((((v >> 11) & 31)*255//31, ((v >> 5) & 63)*255//63, (v & 31)*255//31))
-                rows[int(y)] = bytes(rgb)
-            if 'CAPTURE_END' in line:
+            buf += s.read(65536)
+            if b'CAPTURE_END' in buf:
                 break
+        rows = {}
+        for y, data in re.findall(r'PIX (\d+) ([0-9a-f]{960})', buf.decode(errors='replace')):
+            rgb = bytearray()
+            for x in range(0, len(data), 4):
+                v = int(data[x:x+4], 16)
+                rgb.extend((((v >> 11) & 31)*255//31, ((v >> 5) & 63)*255//63, (v & 31)*255//31))
+            rows[int(y)] = bytes(rgb)
         return rows
 
-    # A capture is 135 lines of 960 hex characters, and the firmware already
-    # waits 5ms after each one to let USB drain. It still loses a few rows when
-    # something else logs at the same time -- the missing rows are scattered and
-    # the line before them is truncated mid-hex, which is dropped output rather
-    # than a strip the panel never received. Retrying gets a whole screen; the
-    # assert stays exact, because a capture with a hole in it is not a
-    # screenshot and must never be written out as one.
+    # One retry remains for the genuinely unlucky run. The assert stays exact:
+    # a capture with a hole in it is not a screenshot and must never be written
+    # out as one just because most of the rows arrived.
     def capture(name):
         time.sleep(0.4)
         rows = attempt()
-        for _ in range(2):
-            if len(rows) == 135:
-                break
+        if len(rows) != 135:
             print('CAPTURE retry', name, len(rows), flush=True)
             time.sleep(0.6)
             rows = attempt()
