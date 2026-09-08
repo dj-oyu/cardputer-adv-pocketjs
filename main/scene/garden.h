@@ -106,6 +106,161 @@ typedef struct {
 #ifndef GARDEN_SURGE_GAIN
 #define GARDEN_SURGE_GAIN 3
 #endif
+// How many of the sixteen are awake. The array, the row mask and the storage
+// are fixed at sixteen; only the count varies.
+//
+// The mode is 60% of the array. The spread is in units of the noise sum's
+// standard deviation (117 over the phase period), scaled by 256: at 4 the count
+// has a standard deviation of about 1.8, so six is more than two deviations
+// down and sixteen a little over three up -- both tails clip, which is fine,
+// but the mode is what was asked for and it is where the clipping is not.
+//
+// GARDEN_LIVE_SLOW is the one that matters for how it looks, and it trades two
+// things against each other. Swept over five minutes of animation:
+//
+//   0   mode 10, spread 6..13, a change every 1.6 s   -- overlaps its own fade
+//   1   mode 10, spread 6..13, a change every 2.9 s   -- chosen
+//   2   mode  9, spread 6..12, a change every 7.5 s
+//   3   mode  9, spread 8..11, a change every 15  s   -- too narrow to read
+//
+// Shifting the phase slows the drift, but it also samples a smaller slice of
+// the noise lattice per period, so the distribution narrows with it -- at 3 the
+// count barely leaves nine and the mode has moved off the value asked for. One
+// is where the drift is slower than the second-long fade a retirement takes and
+// the bell is still a bell.
+//
+// Set GARDEN_LIVE_FIXED to pin the count at the mode, which is what a build
+// measuring anything else about the swarm should do.
+#ifndef GARDEN_LIVE_MODE
+#define GARDEN_LIVE_MODE 10
+#endif
+#ifndef GARDEN_LIVE_LO
+#define GARDEN_LIVE_LO 6
+#endif
+#ifndef GARDEN_LIVE_SPREAD
+#define GARDEN_LIVE_SPREAD 4
+#endif
+#ifndef GARDEN_LIVE_SLOW
+#define GARDEN_LIVE_SLOW 1
+#endif
+// The birth chance, in thirty-seconds per mote of deficit. It sets how hard the
+// population is pulled back to the cap, and through that how often the trace
+// has anything to draw.
+#ifndef GARDEN_BIRTH_RATE
+#define GARDEN_BIRTH_RATE 8
+#endif
+#ifndef GARDEN_LIVE_FIXED
+#define GARDEN_LIVE_FIXED 0
+#endif
+// The birth-and-death trace, drawn in the scene's overlay slot.
+//
+// An ECG rather than a bar chart, because births and deaths ARE discrete
+// events: flat between, a spike when one happens, births up and deaths down.
+// That also removes the storage a rate graph would need -- no bucketing into
+// per-second counts, no ring of rates, just what happened in each of the last
+// sixty-four frames.
+//
+// It lives in the overlay hook and nowhere near garden_pixels_row. That is not
+// tidiness: 401 bytes of cold code inside the row function costs 0.37 ms merely
+// by existing, measured, whether or not it draws anything. An overlay is
+// reached from the strip loop and pays none of that.
+//
+// Placement is measured rather than named. This scene has no horizon line --
+// it is a shaft, trunks, a canopy and grass rising from below the bottom of the
+// screen -- so "below the horizon" resolves to the band under the menu: the
+// HUD's labels sit at rows 37, 69 and 89, and nothing of the interface is below
+// 100. Rows 112..132 are free of it, which is also how the trace loses the
+// competition with the menu: it never overlaps it.
+#ifndef GARDEN_ECG
+#define GARDEN_ECG 1
+#endif
+// Columns, and a power of two so the ring masks rather than divides. 128 at a
+// byte each is 128 bytes of the scene block; 256 would be the next step up and
+// would push GardenFrame past the bound in tools/test_garden.c, which is the
+// bound doing its job rather than an accident.
+#define GARDEN_ECG_N 128
+// How many of the ring's columns are drawn, and how wide each one is.
+//
+// The ring is a power of two so it masks; the drawn width is not tied to it,
+// which is what lets the trace be scaled without changing how much history it
+// keeps. 112 columns two pixels wide is 224 of the 240, against 64 pixels
+// before -- and the blocks are visible, which is what was asked for. Four and a
+// half seconds of history at 25 fps.
+//
+// Scaling the columns rather than adding them was the choice: 224 one-pixel
+// columns would need a 256-entry ring, which is 256 bytes of the scene block
+// and past the bound, to show more history than a swarm with a death every
+// three seconds has to show.
+#ifndef GARDEN_ECG_DRAW
+#define GARDEN_ECG_DRAW 112
+#endif
+#ifndef GARDEN_ECG_XS
+#define GARDEN_ECG_XS 2
+#endif
+// The stroke. A one-pixel baseline is a hairline at this size and disappears
+// into the mist between events; two is what makes the line an object.
+#ifndef GARDEN_ECG_THICK
+#define GARDEN_ECG_THICK 2
+#endif
+#ifndef GARDEN_ECG_X
+#define GARDEN_ECG_X 8
+#endif
+// The baseline, and it is 129 rather than 122 because 122 was wrong. Rows
+// 112..132 were chosen from a state in which the menu's labels sat at 37, 69
+// and 89; the XMB scroll animates those, and at rest an item lands on 110 as
+// well, fourteen rows tall, straight through the trace. main/ui/menu_rows.h
+// derives the resting bands from the layout rule instead of from a screenshot,
+// and 124..134 is the one below the menu. tools/test_menu_rows.c holds the
+// trace's whole box inside it.
+// The baseline, centred in 96..134 -- the two free bands with the menu's own
+// resting row between them. It crosses that row, deliberately, and the argument
+// for it is one this file already had to make: no row is safe during a scroll
+// anyway, and what protects the trace is that the overlay is drawn BEFORE
+// paint_labels, so text passes over it rather than through it. That ordering
+// does not care whether the band is eleven rows or thirty-nine.
+//
+// It was 129 in an eleven-row band, and 122 before that from a screenshot.
+#ifndef GARDEN_ECG_Y
+#define GARDEN_ECG_Y 115
+#endif
+// The tallest the trace can reach from the baseline, waver excluded. Still
+// sized to the band rather than to the data -- but the band is 96..134 now, so
+// the clamp that flattened three events onto two levels can go. At six rows an
+// event: one 6, two 12, three 17 and anything more 17.
+// Sixteen and not seventeen: the box is baseline + waver + spike + stroke, and
+// seventeen put its last row at 135 on a 135-row panel. The clip would have
+// hidden that; the assertion in tools/test_menu_rows.c did not.
+#ifndef GARDEN_ECG_SPIKE
+#define GARDEN_ECG_SPIKE 16
+#endif
+#ifndef GARDEN_ECG_GAIN
+#define GARDEN_ECG_GAIN 6
+#endif
+#ifndef GARDEN_ECG_ALPHA
+// Of 256, at the head, fading back along the ramp. 90 rather than 100 because
+// the dither was re-sized to the panel and centring it moved the peak: this
+// keeps the trace's brightest pixel where the small version's was, so making
+// the trace bigger did not quietly also make it brighter. Size was what was
+// asked for; contrast was not.
+#define GARDEN_ECG_ALPHA 90
+#endif
+// The idle waver. A perfectly flat line for the three seconds between deaths
+// does not read as calm, it reads as a graph that has stopped; real traces have
+// a baseline that wanders. On the same garden_motion lattice as everything
+// else, so it costs one sample a column and no state. A floor, not the signal.
+#ifndef GARDEN_ECG_WAVER
+#define GARDEN_ECG_WAVER 2
+#endif
+// How far the dither may move the alpha, and it is sized to the panel rather
+// than to the trace. One step of the six-bit green channel is about 256/63 = 4
+// of the 0..256 mix, so a dither smaller than four cannot cross a channel
+// boundary and cannot break a band; much larger and it stops being a dither and
+// becomes noise on the line. It used to be derived from the column count, which
+// was wrong for the same reason a bound fitted to one condition is wrong: at 64
+// columns it happened to land near four.
+#ifndef GARDEN_ECG_DITHER
+#define GARDEN_ECG_DITHER 4
+#endif
 // Where a replacement may appear. The centroid can drift; a birth may not
 // follow it off the top or into the dying zone.
 #define GARDEN_BORN_LO 22
@@ -320,12 +475,24 @@ typedef struct {
     int sun,phase,breath;
     unsigned seed;
     GardenMote mote[GARDEN_MOTES];
+    uint8_t born,died;  /* this frame's events, for the trace */
+#if GARDEN_ECG
+    // The trace's whole storage: one byte a column, births in the high nibble
+    // and deaths in the low. It is a ring, so a column's distance from the head
+    // is how long ago that frame was -- which is also the afterglow, evaluated
+    // at draw time from the position instead of stored anywhere.
+    uint8_t ecg[GARDEN_ECG_N];
+    uint8_t ecg_head;
+#endif
 #if GARDEN_MOTE_INDEX
     uint16_t rowmask[GARDEN_ROWS];  /* bit i: mote i draws on this row */
 #endif
 } GardenFrame;
 void garden_prepare(GardenFrame *frame,float time);
 void garden_row(uint16_t *row,int y,const GardenFrame *frame);
+// The trace, clipped to one strip. Reads the frame and writes nothing but the
+// strip; called from the scene's overlay hook, never from garden_row.
+void garden_ecg_draw(uint16_t *strip,int y0,int height,const GardenFrame *frame);
 #ifdef ESP_PLATFORM
 // TEMPORARY, and it goes with flower.c's counters. garden_row is now made of
 // two very different things -- three vector passes over the 240 pixels, then
@@ -336,4 +503,7 @@ uint32_t garden_prof_pixels(void);
 // Cycles spent in the mote touch-up and the number of rows it ran on, measured
 // inside the shipping binary rather than by subtracting two builds. Clears both.
 uint32_t garden_prof_motes(uint32_t *rows);
+// The trace's own cost, measured in the shipping binary. `ovl` in the PERF line
+// measures the same region from the other side and the two must agree.
+uint32_t garden_prof_ecg(void);
 #endif

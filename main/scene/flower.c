@@ -41,7 +41,7 @@ static uint32_t prof_pgarden,prof_pseeds,prof_pbuild,prof_ppetal,prof_ppetaln;
 #define H 135
 #define X0 120
 #define FW 120
-#define LAT 6
+#define LAT FLOWER_BELL_BANDS
 #define SCALE 37.0f
 // The three arrays below live in the shared scene block, not in .bss: see
 // scene_mem.h. Declaring them as pointers rather than arrays is what keeps
@@ -294,8 +294,8 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
         }
         p->xmin=clampi((int)floorf(180+SCALE*(p->c.x-ex)),X0,W-1);
         p->xmax=clampi((int)ceilf(180+SCALE*(p->c.x+ex)),X0,W-1);
-        p->ymin=clampi((int)floorf(65-SCALE*(p->c.y+ey)),12,119);
-        p->ymax=clampi((int)ceilf(65-SCALE*(p->c.y-ey)),12,119);
+        p->ymin=clampi((int)floorf(65-SCALE*(p->c.y+ey)),12,H-1);
+        p->ymax=clampi((int)ceilf(65-SCALE*(p->c.y-ey)),12,H-1);
     }
 #ifdef ESP_PLATFORM
     // Per part, not per frame: the species differ by a factor of three in part
@@ -362,7 +362,32 @@ static uint16_t shade(V n,int petal,V hit) {
             r=22;g=105+vein*160;b=53+vein*100;spec*=.35f;
         } else if(material==GOLD) {
             r=255;g=165+25*longitudinal;b=13;
-            if(p->shape) {g=220;b=47;light=.70f+.28f*diffuse;spec*=.3f;}
+            if(p->shape) {
+                g=220;b=47;
+                // Keep the corona's inner wall shaded. Overwriting both sides
+                // with the same bright floor erased its depth at small size.
+                light=inside?.38f+.30f*diffuse:.62f+.34f*diffuse;
+                spec*=.3f;
+            }
+        }
+        else if(material==CORONA) {
+            // Surface-bound light, not a postprocess bloom: no extra rays,
+            // texture or buffer. axis[1] runs from the throat to the mouth.
+            if(p->shape) {
+                float t=(transverse+1)*.5f;
+                float streak=POS(1-fabsf(longitudinal-.20f)*4.5f);
+                streak*=streak;
+                float echo=POS(1-fabsf(longitudinal+.52f)*9);
+                float flow=(streak+.32f*echo)*(.25f+.75f*t);
+                float lip=POS((t-.80f)*5);
+                float wall=inside?.40f+.32f*diffuse:.48f+.36f*diffuse;
+                return rgb(255*wall+145*flow+100*lip,
+                           (150+70*t)*wall+150*flow+100*lip,
+                           (8+34*t)*wall+100*flow+75*lip);
+            }
+            // Recessed luminous throat; the side wall retains an amber shadow.
+            float core=POS(1-longitudinal*longitudinal-transverse*transverse);
+            return rgb(224+31*core,159+79*core,27+124*core);
         }
         else if(material==ROSE) {r=242;g=47+35*longitudinal;b=104+32*longitudinal;}
         else if(material==VIOLET) {r=139+34*longitudinal;g=65+20*longitudinal;b=235;}
@@ -380,8 +405,11 @@ static uint16_t shade(V n,int petal,V hit) {
             // No texture image or extra geometry; only this material pays.
             int tile=(int)floorf((longitudinal+1)*4)+(int)floorf((transverse+1)*5);
             float pale=(tile&1)?1.0f:0.0f;
-            r=103+91*pale;g=31+76*pale;b=88+67*pale;
-            spec*=.3f;
+            // Aubergine ground with subdued violet tessellation. The former
+            // pale pink squares overwhelmed both the colour and the volume.
+            r=88+27*pale;g=32+14*pale;b=109+29*pale;
+            light=(inside?.30f:.48f)+.48f*diffuse;
+            spec*=.15f;
         }
         else if(material==SEED) {
             int x=clampi((int)(16+15*longitudinal),0,31),y=clampi((int)(16+15*transverse),0,31);
@@ -501,13 +529,16 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
 #ifdef FLOWER_BELL_CHECK
     bool saw_root=false,saw_height=false,saw_depth=false,saw_clip=false;
 #endif
+    // The cloche fits inside the ordinary bell's conservative 1.12 bound.
+    const float *slopes=p->shape==FLOWER_SHAPE_CLOCHE?flower_cloche_slopes:bell_slopes;
+    const float *offsets=p->shape==FLOWER_SHAPE_CLOCHE?flower_cloche_offsets:bell_offsets;
     for(int band=0;band<LAT;band++) {
 #ifdef FLOWER_NO_BAND_HOIST
         float lo=-1+2.0f*band/LAT,hi=-1+2.0f*(band+1)/LAT;
 #else
         float lo=bell_lo[band],hi=bell_hi[band];
 #endif
-        float slope=bell_slopes[band],offset=bell_offsets[band];
+        float slope=slopes[band],offset=offsets[band];
         float r=slope*o[1]+offset,dr=slope*d[1];
         float a=d[0]*d[0]+d[2]*d[2]-dr*dr;
         float b=o[0]*d[0]+o[2]*d[2]-r*dr;
@@ -708,6 +739,18 @@ static void ray_row(uint16_t *row,int y) {
     PROF_FENCE;prof_scan+=esp_cpu_get_cycle_count()-c0;PROF_FENCE;
 #endif
 }
+// The overlay hook. It needs the GardenFrame, which lives in the scene block,
+// so it resolves the pointer the same way flower_draw does -- and does nothing
+// at all when there is no block, because a background that cannot allocate
+// should look plain rather than crash.
+void flower_overlay(uint16_t *pixels,int y,int height) {
+#if GARDEN_ECG
+    if(!pixels||y<0||height<0||y>H||height>H-y||!seed_map)return;
+    garden_ecg_draw(pixels,y,height,(const GardenFrame*)(seed_map+32*32));
+#else
+    (void)pixels;(void)y;(void)height;
+#endif
+}
 void flower_draw(uint16_t *pixels,int y,int height) {
     if(!pixels||y<0||height<0||y>H||height>H-y)return;
     GardenFrame fallback={0};   /* the swarm carries state; zero is its valid start */
@@ -726,7 +769,9 @@ void flower_draw(uint16_t *pixels,int y,int height) {
 #endif
         // Without the block there is no flower, but there is still a sky. A
         // background that cannot allocate should look plain, not crash.
-        if(py<12||py>119||!depth) {
+        // The roots continue beyond the bottom edge, like the garden grasses.
+        // A margin at y=119 visibly severed every stem above the ground.
+        if(py<12||!depth) {
 #ifdef ESP_PLATFORM
             PROF_FENCE;prof_total+=esp_cpu_get_cycle_count()-t0;PROF_FENCE;
 #endif
@@ -764,6 +809,10 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         uint32_t moterows=0;
         uint32_t motecy=garden_prof_motes(&moterows);
         double mot=motecy/240000.0/prof_frames;
+        // The trace, from the inside. `ovl` in the PERF line measures the same
+        // region from the strip loop; the two are independent counters over the
+        // same code and disagreeing is the failure.
+        double ecg=garden_prof_ecg()/240000.0/prof_frames;
         // visits are the pixels the rejection arithmetic touches; hits are the
         // ones that reach sqrtf, the normal and shade(). The two have very
         // different unit costs -- roughly 20 cycles against 200 -- so which of
@@ -777,7 +826,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  "ray=%.2f visits=%u hits=%u | sqrt=%.2f (%u calls, %u cy) shade=%.2f (%u cy) "
                  "bell=%.2f (%u visits, %u cy) | span=%.2f (%u rows, %u cy/visit) "
                  "bsqrt=%.2f (%u calls, %u cy) scan=%.2f pre=%.2f rest=%.2f "
-                 "motes=%.3f (%u rows/frame, %u cy/row) | "
+                 "motes=%.3f (%u rows/frame, %u cy/row) ecg=%.3f | "
                  "prep: garden=%.3f seeds=%.3f build=%.3f petals=%.3f (%u parts, %u cy/part) "
                  "(ms/frame; total vs kernel= is the check)",
                  prof_frames,tot,gar,pix,gar-pix,tot-gar,
@@ -798,7 +847,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  (prof_scan-prof_span)/240000.0/prof_frames,
                  prof_pre/240000.0/prof_frames,
                  tot-gar-(prof_scan+prof_pre)/240000.0/prof_frames,
-                 mot,moterows/prof_frames,moterows?motecy/moterows:0,
+                 mot,moterows/prof_frames,moterows?motecy/moterows:0,ecg,
                  prof_pgarden/240000.0/prof_frames,prof_pseeds/240000.0/prof_frames,
                  prof_pbuild/240000.0/prof_frames,prof_ppetal/240000.0/prof_frames,
                  prof_ppetaln/prof_frames,

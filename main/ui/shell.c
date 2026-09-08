@@ -4,6 +4,7 @@
 #include "ocean.h"
 #include "solar_sail.h"
 #include "flower.h"
+#include "menu_rows.h"
 #include "glass_rain.h"
 #include "board.h"
 #include "motion.h"
@@ -42,7 +43,7 @@ static const scene_ops_t SCENES[]={
     // flowers they had not seen. The row now rotates the botanicals on
     // its own, each change hidden behind a dissolve; the interval and the fade
     // are named constants in flower.c.
-    {"FLOWER", flower_scene_prepare, flower_scene_draw, NULL, 0},
+    {"FLOWER", flower_scene_prepare, flower_scene_draw, flower_overlay, 0},
 };
 #define BACKGROUND_N (sizeof(SCENES)/sizeof(SCENES[0]))
 // mode is an index into SCENES and NVS can hand back anything, so every read
@@ -69,9 +70,17 @@ static uint64_t kernel_cycles;
 //   fps    drawing that string
 //   menu   the whole menu: the layout once a frame, the painting per strip
 //
-// `ovl` is the self-check: FLOWER's overlay is NULL, so it must read 0.00 there
-// or the split is wrong. A counter that can be held against a known zero is
-// worth more than one that cannot.
+// `ovl` WAS the self-check: FLOWER's overlay was NULL, so it had to read 0.00
+// there or the split was wrong, and a counter that can be held against a known
+// zero is worth more than one that cannot. That zero is spent -- FLOWER has an
+// overlay now, the swarm's trace, and no scene is left without one.
+//
+// What replaces it is better, and it is the same idea from the other side: the
+// trace counts its own cycles (`garden_prof_ecg`, printed as `ecg=` on the
+// SPLIT line), so `ovl` here and `ecg` there measure the same region through
+// two independent counters and must agree. A known zero was one constraint; two
+// counters that have to match is one too, and it keeps working after the thing
+// being measured stops being nothing.
 //
 // Cycle counts, not esp_timer_get_time(): the timer is 0.90 us a call
 // (docs/pie-simd.md 3.5), and eight of those per strip would be 0.12 ms of
@@ -348,10 +357,9 @@ static void paint_labels(void) {
         text(l->x,l->y,l->s,l->scale,l->color);
     }
 }
-static float item_y(float delta) {
-    // Leave space for the category rail between the previous and focused item.
-    return delta<0?69+57*delta:69+41*delta;
-}
+// The rule lives in menu_rows.h so that something other than a screenshot can
+// read it; see that header for what it implies about where a decoration may go.
+static float item_y(float delta) { return menu_item_y(delta); }
 // `stride` is the step from one label to the next: the settings table keeps its
 // label inside a wider struct, and walking it in place beats a parallel array
 // of labels that could drift out of step with the table.
@@ -364,10 +372,10 @@ static void menu_list(int x,float position,const char *const *items,size_t strid
         // Fade while crossing the category text, so two lines never collide.
         float clearance=fminf(fabsf(y-34)/20,1);
         const char *item=*(const char *const *)((const char *)items+(size_t)i*stride);
-        label(x,(int)lroundf(y),item,2,opacity*strength*clearance);
+        label(x,(int)lroundf(y),item,MENU_ITEM_SCALE,opacity*strength*clearance);
     }
     float settled=1-fminf(fabsf(position-roundf(position))*4,1);
-    if(detail)label(x,89,detail,1,opacity*settled*0.75f);
+    if(detail)label(x,MENU_DETAIL_Y,detail,1,opacity*settled*0.75f);
 }
 static void menu_layout(void) {
     hud_label_n=0;
@@ -375,7 +383,7 @@ static void menu_layout(void) {
         float offset=(c-category_pos)*96;
         float visibility=1-fminf(fabsf(c-category_pos),1);
         int x=(int)lroundf(16+offset-depth_pos*160);
-        label(x,37,categories[c],1,(0.35f+0.65f*visibility)*(1-depth_pos*0.6f));
+        label(x,MENU_CATEGORY_Y,categories[c],1,(0.35f+0.65f*visibility)*(1-depth_pos*0.6f));
         if(visibility>0.01f) {
             if(c==0) {
                 menu_list(x,app_pos,apps,sizeof apps[0],APP_N,visibility,app_details[app]);

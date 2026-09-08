@@ -223,17 +223,24 @@ int main(void) {
     // ---------------------------------------------------------------------
     {
         GardenFrame g={0};
-        // A zeroed frame is fourteen particles at (0,0), which is outside the
-        // shaft. The cull is what seeds them, so this is the rule being used
-        // for the thing it is for.
-        garden_prepare(&g,10.0f);
+        // A zeroed frame is sixteen sleeping particles, and the swarm now
+        // ASSEMBLES rather than appearing: the population is what a birth rate
+        // and a capacity leave behind, and births are one a frame with a chance
+        // that grows with the deficit. Sixteen frames is about two thirds of a
+        // second, so this is the boot behaviour and not a warm-up hidden in a
+        // test -- but it does mean "the first frame" is no longer when the
+        // swarm exists, and asserting there would only measure the birth rate.
+        for(int w=0;w<40;w++)garden_prepare(&g,10.0f+w*0.04f);
+        int awake=0;
         for(int i=0;i<GARDEN_MOTES;i++) {
+            if(!g.mote[i].speed)continue;
+            awake++;
             int my=g.mote[i].y>>4,c,h;
             assert(my>=0&&my<135);
             garden_shaft(my,&g,&c,&h);
             assert((g.mote[i].x>>4)>c-h&&(g.mote[i].x>>4)<c+h);
-            assert(g.mote[i].speed>0);
         }
+        assert(awake>=GARDEN_LIVE_LO&&awake<=GARDEN_MOTES);
         // Two minutes, not one. The dying latch fires about once every fifteen
         // seconds now that cohesion keeps the swarm together, and a sixty-second
         // window caught a quiet stretch and reported zero -- a feature that
@@ -249,6 +256,19 @@ int main(void) {
         #define GARDEN_DIA_REF 59
         long diasum=0,offsum=0;int dia_lo=32767,dia_hi=0,off_hi=0;
         int prev_dia=0,last_cross=-1,crossn=0;double gaps=0,gap2=0;
+        // The population, which now varies. Counted as a distribution rather
+        // than a number, because "a bell with the mode at 60%" is a claim about
+        // a shape and only a histogram can fail it.
+        long livehist[GARDEN_MOTES+1]={0};
+        unsigned livechg=0,empty=0,retired=0,doomed=0;
+        // Events as the frame itself reports them, rather than inferred from
+        // the state afterwards. garden_prepare counts what it did; three
+        // separate reconstructions of that in this file have each been wrong
+        // about a denominator, and this one cannot be.
+        unsigned births=0,dies=0,deathn=0;
+        double deathgap=0,deathgap2=0;int last_death=-1;
+        int prev_live=-1;
+        uint8_t pspeed[GARDEN_MOTES]={0};
         double stepsum=0;
         int prev_age[GARDEN_MOTES]={0};
         int8_t psign[GARDEN_MOTES]={0};
@@ -256,10 +276,24 @@ int main(void) {
         int16_t px[GARDEN_MOTES]={0},py[GARDEN_MOTES]={0};
         for(int fr=0;fr<F;fr++) {
             garden_prepare(&g,10.0f+fr*0.04f);
+            births+=g.born;dies+=g.died;
+            if(g.died) {
+                if(last_death>=0) {
+                    double gp=fr-last_death;
+                    deathn++;deathgap+=gp;deathgap2+=gp*gp;
+                }
+                last_death=fr;
+            }
             for(int i=0;i<GARDEN_MOTES;i++) {
                 const GardenMote *m=&g.mote[i];
-                if(fr&&(m->age<prev_age[i]||m->age==0))deaths++;
-                else if(fr) {
+                // A replacement, and only a replacement. A mote that went to
+                // sleep because the population shrank, or woke because it grew,
+                // also resets its age -- and counting those as churn would have
+                // made the turnover bound fail for a reason that is the feature
+                // working. The distinguishing fact is that a cull happens while
+                // the mote is awake on both sides of it.
+                if(fr&&pspeed[i]&&m->speed&&(m->age<prev_age[i]||m->age==0))deaths++;
+                else if(fr&&pspeed[i]&&m->speed) {
                     int d=abs(m->x-px[i])+abs(m->y-py[i]);
                     moves++;stepsum+=d/16.0;
                     if(d<=4)slow++;             /* a quarter of a pixel: a hover */
@@ -268,12 +302,26 @@ int main(void) {
                 // of taste: the sign flips once and never back. A region test
                 // would let a particle sitting on the line flicker, and this is
                 // the assertion that would notice if one ever crept back in.
-                if(psign[i]>0&&m->dir<0)latched++;
+                // The latch fires for two different reasons now, and they are
+                // not the same feature: crossing into the bottom fifth, and
+                // being told to retire because the swarm shrank. Both use the
+                // same fade on purpose; the test has to tell them apart or the
+                // assertion that the bottom fifth is still reachable would pass
+                // on retirements alone.
+                if(psign[i]>0&&m->dir<0) {
+                    latched++;
+                    if((m->y>>4)>GARDEN_DOOM)doomed++;else retired++;
+                }
                 if(psign[i]<0&&m->dir>0&&m->age>0)unlatched++;
                 if(m->dir<0&&pdim[i]&&m->dim>pdim[i]&&m->age>0)dimmed++;
-                psign[i]=m->dir;pdim[i]=m->dim;
-                assert(m->dir!=0);              /* zero has no sign to read the latch from */
+                psign[i]=m->dir;pdim[i]=m->dim;pspeed[i]=m->speed;
                 prev_age[i]=m->age;px[i]=m->x;py[i]=m->y;
+                if(!m->speed)continue;          /* asleep: not on the glass */
+                // Scoped to the awake, and that scope is the invariant. A
+                // sleeping mote has never been seeded and its dir is still the
+                // zero the frame was allocated with; an awake one must have a
+                // sign, because the sign is where the dying latch lives.
+                assert(m->dir!=0);
                 int my=m->y>>4,c,h;
                 assert(my>=0&&my<135);
                 garden_shaft(my,&g,&c,&h);
@@ -286,15 +334,20 @@ int main(void) {
             // too weak lets them disperse. Both show up as "the diameter
             // changed", so the diameter needs a floor as well as a ceiling.
             {
-                int lo_x=32767,hi_x=-32768,lo_y=32767,hi_y=-32768,ax=0,ay=0;
+                int lo_x=32767,hi_x=-32768,lo_y=32767,hi_y=-32768,ax=0,ay=0,nl=0;
                 for(int i=0;i<GARDEN_MOTES;i++) {
+                    if(!g.mote[i].speed)continue;
                     int mx=g.mote[i].x>>4,my2=g.mote[i].y>>4;
                     if(mx<lo_x)lo_x=mx;
                     if(mx>hi_x)hi_x=mx;
                     if(my2<lo_y)lo_y=my2;
                     if(my2>hi_y)hi_y=my2;
-                    ax+=mx;ay+=my2;
+                    ax+=mx;ay+=my2;nl++;
                 }
+                livehist[nl]++;
+                if(!nl){empty++;prev_live=nl;prev_dia=0;continue;}
+                if(prev_live>=0&&nl!=prev_live)livechg++;
+                prev_live=nl;
                 int dia=(hi_x-lo_x)+(hi_y-lo_y);
                 diasum+=dia;
                 // Breathing. A cohesion loop that oscillates has a REGULAR
@@ -318,7 +371,7 @@ int main(void) {
                 if(dia>dia_hi)dia_hi=dia;
                 // Where the body sits, so phototaxis is checked as a statement
                 // about the group rather than about any one mote.
-                int ccx=ax/GARDEN_MOTES,ccy=ay/GARDEN_MOTES,sc,sh2;
+                int ccx=ax/nl,ccy=ay/nl,sc,sh2;
                 garden_shaft(ccy,&g,&sc,&sh2);
                 offsum+=abs(ccx-sc);
                 if(abs(ccx-sc)>off_hi)off_hi=abs(ccx-sc);
@@ -326,6 +379,8 @@ int main(void) {
         }
         double step=stepsum/moves,hover=100.0*slow/moves;
         double dia=(double)diasum/F,off=(double)offsum/F;
+        int live_mode=0,live_lo=0,live_hi=0;double live_mean=0;
+        double death_gap=0,death_spread=0;
         assert(shafted==visible);               /* never outside the light it needs */
         // Widened from 1.2, and for a reason rather than to fit: the shared
         // surge exists to make the swarm dash together, so the mean step MUST
@@ -345,7 +400,65 @@ int main(void) {
         // Phototaxis, as a statement about the group. The centroid lives near
         // the axis rather than at the edge of the beam, which is the whole of
         // what "toward the light" means when q peaks on the axis.
-        assert(off<20&&off_hi<45);
+        //
+        // The worst-case bound is 60 and not 45, and the reason is population
+        // rather than tuning: the centroid of a smaller swarm is a noisier
+        // estimate and wanders further. Measured over fifteen minutes, the
+        // worst excursion is 16 px when thirteen are awake and 45 when seven
+        // are -- so a bound set from a sixteen-mote run was a bound that would
+        // fail the first time the swarm thinned, which is now every few
+        // seconds. The mean is unaffected and stays where it was.
+        assert(off<20&&off_hi<60);
+        // The population, as a shape. The mode is the thing that was asked for
+        // -- 60% of the array -- and the floor is the thing that would be
+        // noticed if it were wrong: a beam with nothing in it reads as a broken
+        // feature, not as variation, so no frame may be empty and none may fall
+        // below the floor the header sets.
+        {
+            int mode=0,seen=0,lo_n=GARDEN_MOTES,hi_n=0;
+            double meanl=0;
+            for(int i=0;i<=GARDEN_MOTES;i++) {
+                if(livehist[i]>livehist[mode])mode=i;
+                if(livehist[i]){seen++;if(i<lo_n)lo_n=i;if(i>hi_n)hi_n=i;}
+                meanl+=(double)i*livehist[i];
+            }
+            meanl/=F;
+            assert(empty==0);                   /* the beam is never bare */
+            assert(lo_n>=GARDEN_LIVE_LO);       /* the floor is the floor */
+            assert(hi_n<=GARDEN_MOTES);
+            assert(mode==GARDEN_LIVE_MODE);     /* the mode is what was asked for */
+            assert(meanl>GARDEN_LIVE_MODE-2&&meanl<GARDEN_LIVE_MODE+2);
+#if GARDEN_LIVE_FIXED
+            // The switch pins the CAP, and the cap is a ceiling rather than a
+            // count: a death drops the population below it and a birth brings
+            // it back, so even pinned it breathes by a mote or two. That is not
+            // a weaker version of the assertion, it is the correct one -- the
+            // population has not been a number anybody sets since it became
+            // what two rates leave behind.
+            // And it breathes UPWARD, which is worth stating because it is
+            // the opposite of what it looks like it should do. The capacity
+            // rule does not count a dying mote, so the replacement is born
+            // while the old one is still fading and the number of things on
+            // the glass is the cap plus however many fades are running. That
+            // overlap is deliberate -- it is what stops the swarm thinning
+            // visibly every time one leaves -- and this is where it shows.
+            assert(lo_n>=GARDEN_LIVE_MODE&&hi_n<=GARDEN_LIVE_MODE+3);
+#else
+            assert(seen>=5);                    /* a distribution, not a constant */
+            // The population changes often now and that is the feature: it is
+            // what two rates against a drifting cap leave behind, not a number
+            // anybody sets. So the rate gets a loose bound and the REGULARITY
+            // gets a tight one -- a birth rule that was smooth would make the
+            // deaths a metronome, and the trace of them a clock. Same statistic
+            // as the breathing test, for the same reason.
+            assert(livechg>20&&livechg<(unsigned)F/2);
+            double bm=deathn?deathgap/deathn:0;
+            double bs=deathn?sqrt(deathgap2/deathn-bm*bm):0;
+            assert(deathn>20&&bm>0&&bs/bm>0.4);
+            death_gap=bm;death_spread=bm?bs/bm:0;
+#endif
+            live_mode=mode;live_lo=lo_n;live_hi=hi_n;live_mean=meanl;
+        }
         // Not breathing. The interval between crossings has to be irregular:
         // a ringing swarm gives a metronome, and its spread over its mean
         // collapses. Measured at 1.2 here; 0.4 is the line.
@@ -354,27 +467,45 @@ int main(void) {
             double gs=crossn?sqrt(gap2/crossn-gm*gm):0;
             assert(crossn>50&&gm>0&&gs/gm>0.4);
         }
-        // Turnover is bounded above and not below. A volume of thirty pixels
-        // inside a shaft eighty wide means a particle rarely reaches the edge,
-        // so zero deaths in a minute is the expected steady state and a stable
-        // swarm is what a real one looks like. What must not happen is churn:
-        // the cull firing often would mean particles are being replaced faster
-        // than the eight-frame ramp can hide, and the swarm would flicker.
-        assert(deaths*8<=F/25);                 /* at most one replacement per 8 s */
+        // Turnover used to be bounded above at one replacement per eight
+        // seconds, because a swarm held together by cohesion almost never lost
+        // one to the shaft's edge and churn was the only failure available.
+        // The capacity rule makes turnover the mechanism rather than an
+        // accident, so the bound has to move -- but the reason it existed does
+        // not: a replacement is hidden by an eight-frame ramp and a death by a
+        // second-long fade, so the two together set how fast the swarm can turn
+        // over without popping. One event every eight frames is that limit.
+        assert(dies*8<(unsigned)F);
+        assert(births*8<(unsigned)F);
+#if !GARDEN_LIVE_FIXED
+        // The floor belongs to the free-cap build only. With the cap pinned the
+        // only deaths left are the shaft and the bottom fifth, and those were
+        // always rare -- which is itself the measurement: nearly all of the
+        // turnover is the capacity rule, and pinning it takes the swarm back to
+        // one death every fifteen seconds.
+        assert(dies>10&&births>10);
+#endif
+        // Births and deaths have to balance over a window this long, or the
+        // population is not being held by a capacity at all -- it is drifting,
+        // and the drift would be invisible until the swarm emptied or filled.
+        assert(births+GARDEN_MOTES>=dies&&dies+GARDEN_MOTES>=births);
+        (void)deaths;
         // The latch must still be reachable. Cohesion pulls the swarm toward an
         // anchor well above the dying line, and a slightly stronger pull would
         // make the bottom-fifth fade dead code that still passes every test
         // above -- which is the failure VISIBLE was written for, in a different
         // place.
-        assert(latched>0);
+        assert(doomed>0);
         assert(unlatched==0);                   /* one-way, and this is the whole of it */
         assert(dimmed==0);                      /* the fade only ever runs down */
-        printf("SWARM_OK: %d in the shaft always; %.2f px/frame, hovering %.0f%%"
-               " of frames; diameter %.0f px (%d..%d); centroid %.1f px off the"
-               " axis (worst %d); %u reached the bottom fifth and none came back"
-               " from it; %u replacements in %d s\n",
-               GARDEN_MOTES,step,hover,dia,dia_lo,dia_hi,off,off_hi,
-               latched,deaths,F/25);
+        printf("SWARM_OK: %d..%d awake (mode %d, mean %.1f) of %d; %.2f px/frame,"
+               " hovering %.0f%% of frames; diameter %.0f px (%d..%d); centroid"
+               " %.1f px off the axis (worst %d); %u births %u deaths in %d s"
+               " (%u to the bottom fifth, %u over capacity or out of the beam;"
+               " one every %.1f s, spread %.2f of the mean)\n",
+               live_lo,live_hi,live_mode,live_mean,GARDEN_MOTES,step,hover,
+               dia,dia_lo,dia_hi,off,off_hi,births,dies,F/25,doomed,retired,
+               death_gap/25.0,death_spread);
     }
     // The assertion this suite did not have, and its absence is why a feature
     // that never reached the eye passed everything: SWARM_OK proves the model
@@ -440,13 +571,100 @@ int main(void) {
            "  edge=%.4f dither chi=%.2f P(left)=%.4f P(up)=%.4f\n",
            mr,mg,mb,qlo[0],qhi[0],qlo[1],qhi[1],qlo[2],qhi[2],
            lo[0],hi[0],lo[1],hi[1],lo[2],hi[2],edge,chi,ph,pv);
-    // The frame is a parameter block that lives in the releasable flower
-    // scene allocation. It grew from 16 bytes to 212 for the swarm and to 484
-    // for the row index, and each of those was worth arguing about; a bound
-    // here is what makes the next one an argument rather than a drift. Half a
-    // kilobyte is the line: past that it is not parameters any more, and
-    // whatever wants the space should be asking scene_mem for its own block.
-    assert(sizeof(GardenFrame)<=512);
+    // The frame is a parameter block that lives in the releasable flower scene
+    // allocation. It grew from 16 bytes to 212 for the swarm, to 484 for the
+    // row index, back to 448 when the per-mote home went, and now past 512 for
+    // the trace's ring.
+    //
+    // The bound fired, which is what it was for. Having the argument rather
+    // than deleting it: sixty-five bytes of ring is history rather than
+    // parameters, so it is the first thing here that does not belong by the
+    // rule as written -- but a separate scene_mem block for sixty-five bytes
+    // would cost more in bookkeeping and one more lifetime to get wrong than
+    // the rule saves. Raised deliberately, once, with the reason attached. The
+    // next thing to breach it should have to make its own case.
+    assert(sizeof(GardenFrame)<=640);
+#if GARDEN_ECG
+    // ---------------------------------------------------------------------
+    // The trace, as a thing that can fail.
+    //
+    // It draws over the scene, it is the first thing in this file reached from
+    // the strip loop rather than the row loop, and it is supposed to be quiet.
+    // Each of those is a way it could be wrong that nothing else here notices:
+    // writing outside its box, disagreeing between strip and full-frame, or
+    // being loud enough to compete with the menu.
+    // ---------------------------------------------------------------------
+    {
+        GardenFrame g={0};
+        for(int w=0;w<400;w++)garden_prepare(&g,10.0f+w*0.04f);
+        for(int y=0;y<135;y++)garden_row(before+y*240,y,&g);
+        memcpy(after,before,sizeof after);
+        garden_ecg_draw(after,0,135,&g);
+        // Strips must give the same picture as one pass, which is the property
+        // the whole scene is built on and the one a clipped overlay is most
+        // likely to break.
+        memcpy(wet,before,sizeof wet);
+        for(int y=0;y<135;y+=8)garden_ecg_draw(wet+y*240,y,135-y<8?135-y:8,&g);
+        assert(!memcmp(after,wet,sizeof wet));
+        // Inside its box and nowhere else. The box is the trace's own geometry
+        // plus the waver and the tallest spike it can draw.
+        unsigned touched=0,rows_lo=999,rows_hi=0,cols_lo=999,cols_hi=0;
+        unsigned worst=0;
+        for(int y=0;y<135;y++)for(int x=0;x<240;x++) {
+            uint16_t a=before[y*240+x],b=after[y*240+x];
+            if(a==b)continue;
+            touched++;
+            if((unsigned)y<rows_lo)rows_lo=(unsigned)y;
+            if((unsigned)y>rows_hi)rows_hi=(unsigned)y;
+            if((unsigned)x<cols_lo)cols_lo=(unsigned)x;
+            if((unsigned)x>cols_hi)cols_hi=(unsigned)x;
+            unsigned d=(unsigned)(abs((int)((a>>11)&31)-(int)((b>>11)&31))*2);
+            unsigned dg=(unsigned)abs((int)((a>>5)&63)-(int)((b>>5)&63));
+            unsigned db=(unsigned)(abs((int)(a&31)-(int)(b&31))*2);
+            if(dg>d)d=dg;
+            if(db>d)d=db;
+            if(d>worst)worst=d;
+        }
+        assert(touched>GARDEN_ECG_N/2);         /* it draws */
+        assert(cols_lo>=GARDEN_ECG_X);
+        assert(cols_hi<GARDEN_ECG_X+GARDEN_ECG_DRAW*GARDEN_ECG_XS);
+        assert(cols_hi<240);
+        assert(rows_lo>=(unsigned)(GARDEN_ECG_Y-GARDEN_ECG_WAVER-GARDEN_ECG_SPIKE));
+        assert(rows_hi<=(unsigned)(GARDEN_ECG_Y+GARDEN_ECG_WAVER+GARDEN_ECG_SPIKE
+                                   +GARDEN_ECG_THICK-1));
+        // Where it may sit relative to the menu is NOT asserted here, and that
+        // is the point. This file can only see the rows the trace uses; whether
+        // those clash with the interface is a fact about main/ui/menu_rows.h,
+        // and asserting it from a remembered screenshot is exactly how the
+        // trace ended up drawn through SKK PRACTICE. tools/test_menu_rows.c
+        // owns that assertion because it owns the rule.
+        // Pale, and the bound comes from something already on the screen
+        // rather than from what came out today. VISIBLE measures the motes at
+        // their brightest moving a channel by about twelve half-steps, and the
+        // trace is meant to be quieter than the midges it is describing. Half
+        // of that is the line. (Set from the numbers, not to them: at an alpha
+        // of 150 this read 24 and the assertion would have been written around
+        // it.)
+        assert(worst<=16);
+        // The afterglow, as a measurement rather than a hope. The newest eighth
+        // of the trace must move its pixels further than the oldest eighth --
+        // that is the whole claim, and it is a claim about ring position rather
+        // than about anything stored.
+        unsigned young=0,old=0;
+        for(int y=0;y<135;y++)for(int x=0;x<240;x++) {
+            uint16_t a=before[y*240+x],b=after[y*240+x];
+            if(a==b)continue;
+            unsigned d=(unsigned)abs((int)((a>>5)&63)-(int)((b>>5)&63));
+            int w=GARDEN_ECG_DRAW*GARDEN_ECG_XS;
+            if(x>=GARDEN_ECG_X+w*7/8)young+=d;
+            else if(x<GARDEN_ECG_X+w/8)old+=d;
+        }
+        assert(young>old*2);
+        printf("ECG_OK: %u pixels in rows %u..%u, columns %u..%u; worst channel"
+               " move %u half-steps; head/tail brightness %u vs %u\n",
+               touched,rows_lo,rows_hi,cols_lo,cols_hi,worst,young,old);
+    }
+#endif
     printf("GARDEN_OK: changing=%u gradients=%u lit_left=%u rain_pixels=%u; frame parameters=%zu bytes; no persistent garden arrays\n",
            changing,gradient,lit_left,modified,sizeof(GardenFrame));
 }

@@ -27,6 +27,10 @@ uint32_t garden_prof_pixels(void) {
 // It counts rows entered as well as cycles, because cycles per mote-row is the
 // number in dispute: the disassembly says 118 instructions a drawn pixel, and
 // 81 pixels of that is 0.07 ms against a measured 0.47.
+static uint32_t garden_ecg_cycles;
+uint32_t garden_prof_ecg(void) {
+    uint32_t v=garden_ecg_cycles;garden_ecg_cycles=0;return v;
+}
 static uint32_t garden_mote_cycles,garden_mote_rows;
 uint32_t garden_prof_motes(uint32_t *rows) {
     uint32_t v=garden_mote_cycles;
@@ -351,6 +355,118 @@ static int garden_sin(unsigned a) {
     int u=(int)(a&255)-128,v=u<0?-u:u;
     return (u*(128-v))>>4;                  /* -256..256 */
 }
+// One mote, seeded into the swarm rather than at a home of its own: near the
+// centroid, inside the dead zone, so a newcomer joins the group instead of
+// flying across the beam to it. On the very first frame the centroid is the
+// anchor, which is how a zeroed GardenFrame becomes a swarm with no separate
+// initialisation to forget.
+static void garden_seed(GardenFrame *f,GardenMote *m,unsigned g,int cx,int cy) {
+    int center,half;
+    int off=(int)((g>>8)&127)-64;
+    off=off*(off<0?-off:off)/64;                 /* biased to the middle */
+    int nx=cx+off*GARDEN_COHERE_R/8;
+    int ny=(cy+((int)((g>>16)&63)-32)*GARDEN_COHERE_R/4)>>4;
+    if(ny<GARDEN_BORN_LO)ny=GARDEN_BORN_LO;
+    if(ny>GARDEN_BORN_HI)ny=GARDEN_BORN_HI;
+    garden_shaft(ny,f,&center,&half);
+    // Never outside the light it needs, whatever the centroid was doing.
+    if(nx<(center-half+2)*16)nx=(center-half+2)*16;
+    if(nx>(center+half-2)*16)nx=(center+half-2)*16;
+    m->x=(int16_t)nx;m->y=(int16_t)(ny*16);
+    m->dir=(int8_t)(1+(int)((g>>1)&126));       /* 1..127: alive, never zero */
+    m->speed=(uint8_t)(10+((g>>24)&11));
+    m->glow=(uint8_t)(GARDEN_GLOW_BASE+((g>>20)&31));
+#if GARDEN_MOTE_HUSH
+    m->glow=0;      /* present, moved, indexed -- and drawing nothing */
+#endif
+    m->age=0;m->dim=0;
+}
+
+// Births and deaths, as two rates against a carrying capacity.
+//
+// The population is not set anywhere. It is what a birth rate and a cap leave
+// behind, which is why a mote that dies because the swarm is over capacity
+// reads as a lifespan without being one -- and why there are no clocks to
+// synchronise. A per-mote lifetime would have given sixteen parallel timers
+// started at boot, ringing together on the first cycle and never again, which
+// is the worst shape a bug can have.
+//
+// Three things this has to get right.
+//
+// BIRTHS ARE IRREGULAR ON PURPOSE. A smooth birth rate against a smoothly
+// drifting cap crosses at a regular interval, and the trace of it becomes a
+// metronome -- the same failure the cohesion loop could have had, and it is
+// tested the same way: the spread of the intervals, not their mean. So the
+// noise lives here, in whether a birth happens at all, rather than in the cap.
+// The chance scales with the deficit, which also means a swarm starting from
+// nothing fills in half a second and a swarm one short takes its time.
+//
+// THE STRAGGLER IS THE ONE THAT DIES. Furthest from the centroid, which costs
+// nothing because cohesion has already computed that distance for every mote,
+// needs no age field and no lottery, and tells a better story than an invisible
+// clock: the one that drifted out of the group is the one that does not make it.
+//
+// IT MUST NOT LOOK LIKE CULLING. An over-capacity death goes through the same
+// latch as a bottom-fifth one -- fade, turn, withdraw -- so the two are
+// indistinguishable on the glass. One dying animation, three causes.
+static void garden_capacity(GardenFrame *f,int cx,int cy,int wake) {
+    // A dying mote does not count toward the population, and getting that
+    // wrong cost a factor of ten. It fades for a second -- twenty-four frames
+    // -- and while it fades it still has a speed, so counting it as live left
+    // the swarm over capacity for the whole fade and the rule killed another
+    // one on every one of those frames. One step down in the cap took out two
+    // dozen midges: 216 deaths in two minutes against 39.
+    //
+    // THE SHAPE IS WORTH MORE THAN THE FIX. A rule that fires every frame on a
+    // condition that takes time to clear will fire for the whole of that time,
+    // once per frame, and the effect is the duration in frames -- twenty-four
+    // here, and it would be sixty on a faster panel. It is the same class as a
+    // latch that can be un-set: the state that says "this is being dealt with"
+    // has to be visible to the rule that would deal with it again. Anything
+    // added here that acts on a count, a distance or a threshold should be
+    // asked what it does on the second frame of a response, not the first.
+    //
+    // Excluding them also means the replacement arrives while the old one is
+    // still fading, which is the overlap a swarm should have -- and it is why
+    // GARDEN_LIVE_FIXED shows the population sitting slightly ABOVE its cap.
+    int live=0,worst=-1,worstd=-1;
+    for(int i=0;i<GARDEN_MOTES;i++) {
+        const GardenMote *m=&f->mote[i];
+        if(!m->speed||m->dir<0)continue;
+        live++;
+        int ox=cx-m->x,oy=cy-m->y;
+        int d1=(ox<0?-ox:ox)+(oy<0?-oy:oy);
+        if(d1>worstd) { worstd=d1;worst=i; }
+    }
+    unsigned h=garden_hash((unsigned)f->phase*0x27220A95u+f->seed*747796405u+13u);
+    if(live>wake&&worst>=0) {
+        // Over capacity: the straggler leaves, through the latch.
+        GardenMote *m=&f->mote[worst];
+        m->dir=(int8_t)-m->dir;
+        m->dim=GARDEN_DYING;
+    } else if(live<wake) {
+        // Under capacity: a birth, with a chance that grows with the deficit.
+        // At a deficit of one this is about one frame in eight, so the swarm
+        // does not snap back to the cap the instant it drops below it -- which
+        // is what would make the trace regular.
+        // The floor is not negotiable and the cap already respects it, but
+        // natural deaths do not: a run of them with a slow birth rate walked
+        // the population down to one, which is a swarm of one and a diameter of
+        // zero. Below the floor a birth is certain. That is regular, and
+        // regularity there does not show because it is an emergency rather than
+        // the regime -- above the floor the chance is what makes the trace
+        // irregular, and that is where the swarm spends its time.
+        int deficit=wake-live;
+        if(live<GARDEN_LIVE_LO||(int)(h&31u)<deficit*GARDEN_BIRTH_RATE) {
+            for(int i=0;i<GARDEN_MOTES;i++)
+                if(!f->mote[i].speed) {
+                    garden_seed(f,&f->mote[i],garden_hash(h^(unsigned)i*2654435761u),cx,cy);
+                    if(f->born<255)f->born++;
+                    break;
+                }
+        }
+    }
+}
 // The swarm, advanced one frame.
 //
 // Everything random here is a function of (phase, particle), so the same
@@ -358,6 +474,7 @@ static int garden_sin(unsigned a) {
 // draws that move them do not carry anything. That is what makes a swarm
 // testable at all.
 static void garden_motes(GardenFrame *f) {
+    f->born=0;f->died=0;
     // The centroid, and it is the reason the swarm is sixteen rather than
     // fourteen: a sum of fourteen divided by sixteen is not the centroid scaled
     // down, it is the centroid TRANSLATED one eighth of the way to the top-left
@@ -369,6 +486,36 @@ static void garden_motes(GardenFrame *f) {
     int sx=0,sy=0,live=0;
     for(int i=0;i<GARDEN_MOTES;i++)
         if(f->mote[i].speed) { sx+=f->mote[i].x;sy+=f->mote[i].y;live++; }
+    // How many are awake this frame, and the shape of that number.
+    //
+    // A bell without a transcendental: three samples of the same integer value
+    // noise the wind and the warp ride, summed. Value noise already leans to
+    // the middle -- it is interpolated between lattice values, not drawn flat
+    // -- and three of them measure as mean 376, sd 117 over the whole phase
+    // period, which at this resolution is a bell nobody can distinguish from a
+    // real one when the outcome is an integer between six and sixteen. A
+    // Box-Muller would have been the most expensive line in the swarm by an
+    // order of magnitude: sinf here is a 2.3 KB Rust routine behind a thunk.
+    //
+    // Sampled on a SLOWED phase. The noise moves about 20 lattice units a frame
+    // at full rate, which is enough to move the count by two between frames --
+    // sixteen midges flickering to fourteen and back at 25 Hz reads as a
+    // rendering fault, not as variation. Shifted down it drifts like weather,
+    // which is what the anchor already does and needs no timer and no state.
+    //
+    // The floor is deliberate and it is not zero. A god ray with nothing in it
+    // reads as the feature having broken, so the tail that would empty the beam
+    // is cut off well above the point where anyone would wonder.
+    int wake=GARDEN_LIVE_MODE;
+#if !GARDEN_LIVE_FIXED
+    {
+        unsigned q=(unsigned)f->phase>>GARDEN_LIVE_SLOW;
+        int bell=garden_motion(q,401)+garden_motion(q,613)+garden_motion(q,829);
+        wake+=((bell-376)*GARDEN_LIVE_SPREAD)>>8;
+        if(wake<GARDEN_LIVE_LO)wake=GARDEN_LIVE_LO;
+        if(wake>GARDEN_MOTES)wake=GARDEN_MOTES;
+    }
+#endif
     // Before the first cull there is nobody to average. The anchor stands in,
     // so the first frame's tether pulls toward where the swarm is about to be
     // rather than toward the corner.
@@ -376,8 +523,15 @@ static void garden_motes(GardenFrame *f) {
         +((garden_motion((unsigned)f->phase,311)-128)*GARDEN_SWARM_DY>>3);
     int ac,ah;garden_shaft(anchor_y>>4,f,&ac,&ah);
     int anchor_x=(ac+((garden_motion((unsigned)f->phase,577)-128)*ah>>9))*16;
-    int cx=live==GARDEN_MOTES?sx>>4:anchor_x;
-    int cy=live==GARDEN_MOTES?sy>>4:anchor_y;
+    // And here the shift goes. Dividing a sum of sixteen by sixteen was exact,
+    // which was the whole argument for sixteen -- but the count varies now, and
+    // dividing a sum of ten by sixteen is the same defect this file removed a
+    // day ago: not a scaled centroid, a centroid dragged an eighth of the way
+    // to the corner of the screen. Two integer divisions a frame is about 32
+    // cycles on this part; the swarm's drawing is 280,000. Correct beats clever
+    // at that price, and keeping the shift would have been clever.
+    int cx=live?sx/live:anchor_x;
+    int cy=live?sy/live:anchor_y;
     // Phototaxis, applied once to the group rather than fourteen times to its
     // members. `q` peaks on the axis, so "toward the light" is "toward offset
     // zero" and no gradient has to be sampled: the whole of it is pulling the
@@ -478,36 +632,119 @@ static void garden_motes(GardenFrame *f) {
             alive=u>-half&&u<half;
         }
         if(alive)continue;
-        // Replaced where it can be seen. This is also how the swarm starts: a
-        // zeroed GardenFrame is fourteen particles at (0,0), which is outside
-        // the shaft, so the cull is the seeding rule as well as the death rule
-        // and there is no separate initialisation to forget.
-        unsigned g=garden_hash(h^0xA5A5u);
-        // Reborn into the swarm rather than at a home of its own: near the
-        // centroid, inside the dead zone, so a replacement joins the group
-        // instead of flying across the beam to it. On the first frame the
-        // centroid is the anchor, which is how a zeroed GardenFrame becomes a
-        // swarm without a separate initialisation.
-        int off=(int)((g>>8)&127)-64;
-        off=off*(off<0?-off:off)/64;                 /* biased to the middle */
-        int nx=cx+off*GARDEN_COHERE_R/8;
-        int ny=(cy+((int)((g>>16)&63)-32)*GARDEN_COHERE_R/4)>>4;
-        if(ny<GARDEN_BORN_LO)ny=GARDEN_BORN_LO;
-        if(ny>GARDEN_BORN_HI)ny=GARDEN_BORN_HI;
-        garden_shaft(ny,f,&center,&half);
-        // Never outside the light it needs, whatever the centroid was doing.
-        if(nx<(center-half+2)*16)nx=(center-half+2)*16;
-        if(nx>(center+half-2)*16)nx=(center+half-2)*16;
-        m->x=(int16_t)nx;m->y=(int16_t)(ny*16);
-        m->dir=(int8_t)(1+(int)((g>>1)&126));       /* 1..127: alive, never zero */
-        m->speed=(uint8_t)(10+((g>>24)&11));
-        m->glow=(uint8_t)(GARDEN_GLOW_BASE+((g>>20)&31));
-#if GARDEN_MOTE_HUSH
-        m->glow=0;      /* present, moved, indexed -- and drawing nothing */
-#endif
-        m->age=0;m->dim=0;
+        // Death, and this is now the only place it happens. Whatever ended it
+        // -- the shaft, the bottom fifth, or the capacity rule -- it ends the
+        // same way: asleep, and therefore out of the centroid, out of the row
+        // index and out of every count, by the speed==0 tests that were
+        // already in the file. Rebirth belongs to the capacity rule and not to
+        // the cull, which is what makes the population a consequence of two
+        // rates rather than a number anybody sets.
+        if(m->speed&&f->died<255)f->died++;
+        m->speed=0;m->glow=0;m->dim=0;m->dir=0;
     }
+    garden_capacity(f,cx,cy,wake);
+#if GARDEN_ECG
+    // One column a frame, and the ring advances. Four bits each is up to
+    // fifteen events of either kind in one frame, which the capacity rule
+    // cannot produce -- it makes at most one of each -- so the clamp is a
+    // statement about the field's width rather than a limit anything reaches.
+    f->ecg_head=(uint8_t)((f->ecg_head+1u)&(GARDEN_ECG_N-1));
+    f->ecg[f->ecg_head]=(uint8_t)(((f->born>15?15:f->born)<<4)
+                                  |(f->died>15?15:f->died));
+#endif
 }
+#if GARDEN_ECG
+// The trace. Sixty-four columns of what the swarm did, newest on the right.
+//
+// Every part of it is a function of the ring and the column, so nothing is
+// stored but the ring: the afterglow is the column's distance from the head,
+// the waver is one noise sample, and the colour is chosen from which side of
+// the baseline the pixel is on. No second pass, no surface to decay.
+//
+// Warm for births and cool for deaths -- the motes' own colour against the
+// mist's -- and no red anywhere near it. The panel already has one red mark
+// with a meaning, and a second coloured dot meaning "a midge died" would be a
+// bad neighbour to a recording indicator.
+void garden_ecg_draw(uint16_t *strip,int y0,int height,const GardenFrame *f) {
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;uint32_t e0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#endif
+    // Nothing of the trace is in this strip: one compare, and out. Fourteen of
+    // the seventeen strips a frame leave here.
+    int lo=GARDEN_ECG_Y-GARDEN_ECG_WAVER-GARDEN_ECG_SPIKE;
+    int hi=GARDEN_ECG_Y+GARDEN_ECG_WAVER+GARDEN_ECG_SPIKE+GARDEN_ECG_THICK-1;
+    if(y0+height>lo&&y0<=hi) {
+    const uint16_t warm=garden_rgb(255,214,150),cool=garden_rgb(150,196,214);
+    for(int i=0;i<GARDEN_ECG_DRAW;i++) {
+        int x0=GARDEN_ECG_X+(GARDEN_ECG_DRAW-1-i)*GARDEN_ECG_XS;
+        uint8_t v=f->ecg[(f->ecg_head-(unsigned)i)&(GARDEN_ECG_N-1)];
+        int up=v>>4,dn=v&15;
+        // The baseline wanders. One sample a column of the field the wind and
+        // the shaft's warp already ride, so between events the line is alive
+        // rather than stopped, and it costs no state at all.
+        int wav=(garden_motion((unsigned)(f->phase+i*37),641)-128)*GARDEN_ECG_WAVER>>7;
+        if(wav>GARDEN_ECG_WAVER)wav=GARDEN_ECG_WAVER;
+        if(wav<-GARDEN_ECG_WAVER)wav=-GARDEN_ECG_WAVER;
+        int base=GARDEN_ECG_Y+wav;
+        // Six rows an event, clamped to the band. The clamp is still what
+        // keeps the trace inside the rows it promised, but it is a ceiling now
+        // rather than the two-level flattening a eleven-row band forced: one,
+        // two and three events draw differently.
+        int top=base,bot=base;
+        if(up)top=base-(up*GARDEN_ECG_GAIN>GARDEN_ECG_SPIKE?GARDEN_ECG_SPIKE
+                                                           :up*GARDEN_ECG_GAIN);
+        if(dn)bot=base+(dn*GARDEN_ECG_GAIN>GARDEN_ECG_SPIKE?GARDEN_ECG_SPIKE
+                                                           :dn*GARDEN_ECG_GAIN);
+        // The afterglow, and it is a function of ring position rather than a
+        // decaying surface: this scene repaints every pixel every frame, so
+        // there is nothing to decay. A column's distance from the write head IS
+        // how long ago it happened, which makes the data and the fade the same
+        // quantity and correct by construction.
+        int glow=GARDEN_ECG_ALPHA-(int)i*GARDEN_ECG_ALPHA/GARDEN_ECG_DRAW;
+        // The stroke, applied to the baseline only: a spike is already tall
+        // enough to be an object and thickening it would close the gap between
+        // an up and a down on the same column.
+        if(top==bot)bot=top+GARDEN_ECG_THICK-1;
+        for(int yy=top;yy<=bot;yy++) {
+            if(yy<y0||yy>=y0+height||yy<0||yy>=135)continue;
+            for(int sx=0;sx<GARDEN_ECG_XS;sx++) {
+            int x=x0+sx;
+            if(x<0||x>=240)continue;
+            // Dithered with the scene's own dither rather than a second noise.
+            // A pale colour over sixty-four columns of five-bit channels has
+            // about four distinguishable levels, which without this reads as
+            // four blocks rather than a fade. This function is already asserted
+            // uniform over its four values and uncorrelated with both
+            // neighbours, which is exactly the problem it was written for.
+            // Keyed on the pixel, and that is right here rather than merely
+            // simplest. The trace does not scroll: a column's screen position
+            // is its ring age, so the ramp it is dithering is a function of x
+            // and does not move. Only the spike heights change from frame to
+            // frame, and those are solid bars rather than gradients. There is
+            // no fixed texture for a moving line to pass behind, because the
+            // line and the texture are both still.
+            // Centred on zero, not added on top. garden_dither returns 0..3,
+            // and using it as-is brightens the trace by an average of one and a
+            // half dither steps -- so the pale it was tuned to would drift with
+            // the dither's amplitude, which is a property of the panel and not
+            // of the trace. (-3,-1,1,3) has a mean of zero, so the amplitude
+            // can be sized to the channel without moving the brightness.
+            int a=glow+(garden_dither(x,yy)*2-3)*GARDEN_ECG_DITHER/2;
+            if(a<0)a=0;
+            if(a>255)a=255;
+            uint16_t *px=&strip[(yy-y0)*240+x];
+            *px=garden_mix(*px,yy<base?warm:cool,(unsigned)a);
+            }
+        }
+    }
+    }
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;garden_ecg_cycles+=esp_cpu_get_cycle_count()-e0;GARDEN_FENCE;
+#else
+    (void)strip;(void)y0;(void)height;
+#endif
+}
+#endif
 #if GARDEN_MOTE_INDEX && !GARDEN_NO_MOTES
 // The scan, hoisted out of the row loop. Written here and nowhere else, and
 // read-only from garden_row -- which is what makes it legal at all, given that
