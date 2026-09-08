@@ -23,6 +23,15 @@
 static uint32_t prof_total,prof_garden,prof_visits,prof_hits,prof_frames;
 static uint32_t prof_sqrt,prof_sqrtn,prof_shade,prof_bell,prof_belln;
 static uint32_t prof_span,prof_spann,prof_div,prof_divn,prof_scan,prof_pre;
+// prep. It is 3.2 ms -- larger than everything the swarm thread argued about
+// put together -- and it has never been split. Four counters rather than four
+// builds, because the last two attributions in this file were both artefacts
+// of subtracting one build from another.
+//
+// flower_build_botanicals lives in flower_species.c, which belongs to the
+// board's owner. Timing a call is not reading the callee, so this measures it
+// from outside and says nothing about what is inside it.
+static uint32_t prof_pgarden,prof_pseeds,prof_pbuild,prof_ppetal,prof_ppetaln;
 #endif
 
 // Orthographic primary rays intersect thin ellipsoids analytically. This is
@@ -243,15 +252,28 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
     petals=(Petal*)m;
     depth=(float*)(m+sizeof(Petal)*MAX_PARTS);
     seed_map=(uint8_t*)(depth+FW);
+#ifdef ESP_PLATFORM
+    PROF_FENCE;uint32_t q0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
     garden_prepare((GardenFrame*)(seed_map+32*32),elapsed);
     // The spiral and the bell profile are cached in that block, so they are as
     // new as it is. Keeping the flag outside and the data inside would be the
     // one way to get this wrong.
     if(rebuild)seeds_ready=false;
+#ifdef ESP_PLATFORM
+    PROF_FENCE;uint32_t q1=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
     prepare_seeds();
+#ifdef ESP_PLATFORM
+    PROF_FENCE;uint32_t q2=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
     // Plants sway around their roots rather than rotating upside down.
     float yaw=.035f*sinf(elapsed*.6f),pitch=.12f;
     flower_build_botanicals(current_species,yaw,pitch);
+#ifdef ESP_PLATFORM
+    PROF_FENCE;uint32_t q3=esp_cpu_get_cycle_count();PROF_FENCE;
+    prof_pgarden+=q1-q0;prof_pseeds+=q2-q1;prof_pbuild+=q3-q2;
+#endif
     for(unsigned i=0;i<count;i++) {
         Petal *p=&petals[i];
         for(int j=0;j<6;j++)p->q[j]=0;
@@ -275,6 +297,12 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
         p->ymin=clampi((int)floorf(65-SCALE*(p->c.y+ey)),12,119);
         p->ymax=clampi((int)ceilf(65-SCALE*(p->c.y-ey)),12,119);
     }
+#ifdef ESP_PLATFORM
+    // Per part, not per frame: the species differ by a factor of three in part
+    // count, so a frame figure alone cannot say whether this loop is expensive
+    // or merely long.
+    PROF_FENCE;prof_ppetal+=esp_cpu_get_cycle_count()-q3;prof_ppetaln+=count;PROF_FENCE;
+#endif
 }
 static void prepare_seeds(void) {
     if(seeds_ready)return;
@@ -729,6 +757,13 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         // and grass cost. Nobody has ever measured the second number, and
         // after the kernel landed it is the larger half of the two.
         double pix=garden_prof_pixels()/240000.0/prof_frames;
+        // The mote touch-up, timed where it runs. `moterows` is the count the
+        // per-row figure is divided by, printed rather than assumed, because
+        // the last two attributions in this file both divided by a number
+        // nobody had counted.
+        uint32_t moterows=0;
+        uint32_t motecy=garden_prof_motes(&moterows);
+        double mot=motecy/240000.0/prof_frames;
         // visits are the pixels the rejection arithmetic touches; hits are the
         // ones that reach sqrtf, the normal and shade(). The two have very
         // different unit costs -- roughly 20 cycles against 200 -- so which of
@@ -742,6 +777,8 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  "ray=%.2f visits=%u hits=%u | sqrt=%.2f (%u calls, %u cy) shade=%.2f (%u cy) "
                  "bell=%.2f (%u visits, %u cy) | span=%.2f (%u rows, %u cy/visit) "
                  "bsqrt=%.2f (%u calls, %u cy) scan=%.2f pre=%.2f rest=%.2f "
+                 "motes=%.3f (%u rows/frame, %u cy/row) | "
+                 "prep: garden=%.3f seeds=%.3f build=%.3f petals=%.3f (%u parts, %u cy/part) "
                  "(ms/frame; total vs kernel= is the check)",
                  prof_frames,tot,gar,pix,gar-pix,tot-gar,
                  prof_visits/prof_frames,prof_hits/prof_frames,
@@ -760,10 +797,16 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  prof_divn?prof_div/prof_divn:0,
                  (prof_scan-prof_span)/240000.0/prof_frames,
                  prof_pre/240000.0/prof_frames,
-                 tot-gar-(prof_scan+prof_pre)/240000.0/prof_frames);
+                 tot-gar-(prof_scan+prof_pre)/240000.0/prof_frames,
+                 mot,moterows/prof_frames,moterows?motecy/moterows:0,
+                 prof_pgarden/240000.0/prof_frames,prof_pseeds/240000.0/prof_frames,
+                 prof_pbuild/240000.0/prof_frames,prof_ppetal/240000.0/prof_frames,
+                 prof_ppetaln/prof_frames,
+                 prof_ppetaln?prof_ppetal/prof_ppetaln:0);
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
         prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;
+        prof_pgarden=prof_pseeds=prof_pbuild=prof_ppetal=prof_ppetaln=0;
     }
 #endif
 }
