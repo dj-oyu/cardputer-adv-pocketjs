@@ -54,7 +54,6 @@
 // running on top so it still reads as an insect and not as something on rails.
 typedef struct {
     int16_t x,y;        /* position, 1/16 px -- it moves less than a pixel a frame */
-    int16_t hoff,hy;    /* the home it holds: an offset from the shaft, and a row */
     int8_t  dir;        /* |dir|-1 is the heading; dir < 0 means dying */
     uint8_t speed;      /* 1/16 px a frame; zero means never seeded */
     uint8_t glow;       /* peak addition to `sun`, before the shaft gates it */
@@ -63,7 +62,54 @@ typedef struct {
 } GardenMote;
 #define GARDEN_DYING 24     /* a second at 24 fps: long enough to read as leaving */
 #define GARDEN_DOOM  108    /* the bottom fifth of 135 */
-#define GARDEN_MOTES 14
+// Sixteen, and the number is arithmetic rather than taste. The swarm's centre
+// is a sum divided by the count, and a sum of fourteen divided by sixteen is
+// not a scaled centroid -- it is the centroid moved an eighth of the way to the
+// screen's top-left corner, about 16 px left and 9 up for a swarm in the middle
+// of the beam. Sixteen makes the shift exact. It also fills GardenFrame's
+// sixteen-bit row mask exactly, and the eye cannot tell it from fourteen.
+#define GARDEN_MOTES 16
+// Where the swarm holds station: the shaft's axis, at this row, drifting by
+// GARDEN_SWARM_DY rows on the same noise the wind rides.
+#ifndef GARDEN_SWARM_Y
+#define GARDEN_SWARM_Y 68
+#endif
+#ifndef GARDEN_SWARM_DY
+#define GARDEN_SWARM_DY 40
+#endif
+// The centroid's pull toward that anchor -- the whole of phototaxis, applied
+// once to the group instead of once per mote. `q` peaks on the axis, so
+// "toward the light" is "toward offset zero" and no gradient is sampled.
+#ifndef GARDEN_PHOTO_SH
+#define GARDEN_PHOTO_SH 7
+#endif
+// The individual half of it: a mote moving away from the axis is pulled back at
+// this strength, one moving toward it is not pulled at all. Reluctance to leave
+// the light, at the cost of a sign test.
+#ifndef GARDEN_PHOTO_ASYM
+#define GARDEN_PHOTO_ASYM 6
+#endif
+// No cohesion inside this radius of the centroid, in whole pixels of L1
+// distance. It is the answer to the one failure cohesion always has -- N things
+// pulled to one point become one point -- and it is O(N), which pairwise
+// repulsion would not be.
+#ifndef GARDEN_COHERE_R
+#define GARDEN_COHERE_R 18
+#endif
+// The shared surge. One sample of garden_motion a frame, read by every mote, so
+// a disturbance passes through the group at once rather than fourteen
+// independent coincidences happening to line up. Above the threshold only, so
+// most frames have none.
+#ifndef GARDEN_SURGE_ON
+#define GARDEN_SURGE_ON 150
+#endif
+#ifndef GARDEN_SURGE_GAIN
+#define GARDEN_SURGE_GAIN 3
+#endif
+// Where a replacement may appear. The centroid can drift; a birth may not
+// follow it off the top or into the dying zone.
+#define GARDEN_BORN_LO 22
+#define GARDEN_BORN_HI 104
 #define GARDEN_ROWS 135
 // Which particles touch which row, decided once a frame instead of once a row.
 //
@@ -184,6 +230,55 @@ typedef struct {
 #ifndef GARDEN_NO_MOTES
 #define GARDEN_NO_MOTES 0
 #endif
+// Diagnostic: the swarm present but drawing nothing.
+//
+//   idf.py -B build_hush -DCMAKE_C_FLAGS="-DGARDEN_MOTE_HUSH=1" build
+//
+// Every particle is seeded, moved, culled and indexed exactly as in the
+// shipping build; only `glow` is forced to zero, so the index finds no rows and
+// the touch-up writes no pixels. All the code is still compiled and still in
+// the same place -- the compiler cannot know the mask will always be empty.
+//
+// It exists to split the swarm's 0.844 ms, which GARDEN_NO_MOTES prices as a
+// whole, into two halves that need completely different fixes:
+//
+//   HUSH - NO_MOTES   the cost of the touch-up merely BEING in garden_pixels_row
+//   full - HUSH       the cost of the ~81 garden_shade_pixel calls a frame
+//
+// The reason to want that split: 0.784 ms over 81.3 calls is 2,314 cycles a
+// call, and garden_shade_pixel is about forty integer instructions. It cannot
+// be the arithmetic by a factor of thirty. What did change is the size of the
+// function around it -- garden_pixels_row is 953 bytes with the swarm and 552
+// without, it lives in flash, and it runs 135 times a frame with two PIE
+// kernels either side of the new code. See GARDEN_MOTE_OUTLINE.
+#ifndef GARDEN_MOTE_HUSH
+#define GARDEN_MOTE_HUSH 0
+#endif
+// The touch-up as an out-of-line call instead of inlined into the row.
+//
+//   idf.py -B build_outline -DCMAKE_C_FLAGS="-DGARDEN_MOTE_OUTLINE=1" build
+//
+// Off by default: it is an experiment, and it has not been measured on the
+// board. Do not turn it on because it sounds right.
+//
+// The hypothesis it tests. `garden_pixels_row` executes from flash through the
+// instruction cache, and the swarm added 401 bytes to it -- cold code sitting
+// between the pixel kernel and the end of the row, refetched on every one of
+// the 135 rows whether any particle is on that row or not. Only about 27 rows
+// a frame have one. Moving the body out of line means a row with an empty mask
+// executes a load and a branch and never brings those bytes in at all.
+//
+// If that is where the 0.8 ms is, this recovers most of it -- and it is also
+// the first thing that would make GARDEN_MOTE_INDEX worth its 270 bytes, since
+// the mask is what lets the call be skipped. If it recovers nothing, the cost
+// is genuinely in the arithmetic and the question about storing the `sun` lanes
+// instead of rebuilding them becomes the live one.
+//
+// Measure HUSH first. This switch is only interesting if HUSH - NO_MOTES is
+// large, and if it is small this one cannot help.
+#ifndef GARDEN_MOTE_OUTLINE
+#define GARDEN_MOTE_OUTLINE 0
+#endif
 // Diagnostic: draw the motes in magenta, bypassing `sun` entirely.
 //
 //   idf.py -B build_magenta -DCMAKE_C_FLAGS="-DGARDEN_MOTE_MAGENTA=1" build
@@ -238,4 +333,7 @@ void garden_row(uint16_t *row,int y,const GardenFrame *frame);
 // tell them apart, which is exactly the number needed to decide what to do
 // next. Reads the cycles spent in the vector half and clears the count.
 uint32_t garden_prof_pixels(void);
+// Cycles spent in the mote touch-up and the number of rows it ran on, measured
+// inside the shipping binary rather than by subtracting two builds. Clears both.
+uint32_t garden_prof_motes(uint32_t *rows);
 #endif

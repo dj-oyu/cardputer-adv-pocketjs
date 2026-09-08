@@ -13,6 +13,27 @@ static uint32_t garden_pixel_cycles;
 uint32_t garden_prof_pixels(void) {
     uint32_t v=garden_pixel_cycles;garden_pixel_cycles=0;return v;
 }
+// TEMPORARY, and the reason it exists is that three builds could not answer
+// what one counter can.
+//
+// GARDEN_NO_MOTES, GARDEN_MOTE_HUSH and the shipping build gave 5.790, 6.161
+// and 6.634 ms with sample bands of 0.7 ms each -- overlapping bands being
+// subtracted to produce differences of 0.37 and 0.47. That is the same method
+// that produced the 1.0 ms which turned out to be alignment noise, applied to
+// a smaller quantity. Two rsr.ccount either side of the mote pass measure it
+// INSIDE one binary, where there is no layout difference to subtract and no
+// second sample to overlap with.
+//
+// It counts rows entered as well as cycles, because cycles per mote-row is the
+// number in dispute: the disassembly says 118 instructions a drawn pixel, and
+// 81 pixels of that is 0.07 ms against a measured 0.47.
+static uint32_t garden_mote_cycles,garden_mote_rows;
+uint32_t garden_prof_motes(uint32_t *rows) {
+    uint32_t v=garden_mote_cycles;
+    if(rows)*rows=garden_mote_rows;
+    garden_mote_cycles=0;garden_mote_rows=0;
+    return v;
+}
 #endif
 
 // No writable statics, LUTs, images or vertex lists. A broad warm scattering
@@ -337,6 +358,42 @@ static int garden_sin(unsigned a) {
 // draws that move them do not carry anything. That is what makes a swarm
 // testable at all.
 static void garden_motes(GardenFrame *f) {
+    // The centroid, and it is the reason the swarm is sixteen rather than
+    // fourteen: a sum of fourteen divided by sixteen is not the centroid scaled
+    // down, it is the centroid TRANSLATED one eighth of the way to the top-left
+    // corner of the screen -- about 16 px left and 9 up for a swarm in the
+    // middle of the beam. That is a bug that would have looked like a tuning
+    // problem. Sixteen makes the shift exact, and it fills the row mask's
+    // sixteen bits exactly too; the eye cannot tell fourteen midges from
+    // sixteen, and nothing else in the file cared about the number.
+    int sx=0,sy=0,live=0;
+    for(int i=0;i<GARDEN_MOTES;i++)
+        if(f->mote[i].speed) { sx+=f->mote[i].x;sy+=f->mote[i].y;live++; }
+    // Before the first cull there is nobody to average. The anchor stands in,
+    // so the first frame's tether pulls toward where the swarm is about to be
+    // rather than toward the corner.
+    int anchor_y=GARDEN_SWARM_Y*16
+        +((garden_motion((unsigned)f->phase,311)-128)*GARDEN_SWARM_DY>>3);
+    int ac,ah;garden_shaft(anchor_y>>4,f,&ac,&ah);
+    int anchor_x=(ac+((garden_motion((unsigned)f->phase,577)-128)*ah>>9))*16;
+    int cx=live==GARDEN_MOTES?sx>>4:anchor_x;
+    int cy=live==GARDEN_MOTES?sy>>4:anchor_y;
+    // Phototaxis, applied once to the group rather than fourteen times to its
+    // members. `q` peaks on the axis, so "toward the light" is "toward offset
+    // zero" and no gradient has to be sampled: the whole of it is pulling the
+    // centroid's own home onto the axis, and cohesion carries everyone else
+    // there. The anchor drifts on garden_motion -- the same integer lattice the
+    // wind and the shaft's warp already ride -- so the swarm wanders the beam
+    // slowly instead of being pinned to one point, with no state and no
+    // trigonometry.
+    int gx=(anchor_x-cx)>>GARDEN_PHOTO_SH;
+    int gy=(anchor_y-cy)>>GARDEN_PHOTO_SH;
+    // One shared excitation. A swarm that is disturbed dashes together, and
+    // that is the whole of the reverberation: one sample of the same noise
+    // field a frame, read by every mote, so the surge passes through the group
+    // at once instead of fourteen independent coincidences.
+    int surge=garden_motion((unsigned)f->phase*3u,929);
+    surge=surge>GARDEN_SURGE_ON?(surge-GARDEN_SURGE_ON):0;
     for(int i=0;i<GARDEN_MOTES;i++) {
         GardenMote *m=&f->mote[i];
         unsigned h=garden_hash((unsigned)f->phase*2654435761u
@@ -360,23 +417,50 @@ static void garden_motes(GardenFrame *f) {
             // every sixty-fourth particle-frame.
             if(((h>>12)&15)==0)m->speed=(uint8_t)(1+((h>>26)&3));
             else if(((h>>12)&3)==0)m->speed=(uint8_t)(10+((h>>24)&11));
+            // The surge rides ON TOP of the speed rather than replacing it, so
+            // a mote that is hovering when the swarm is disturbed still dashes.
+            // Overwriting the speed here would have quietly deleted the hover,
+            // which is most of what makes them read as alive.
+            int sp=m->speed+(surge*GARDEN_SURGE_GAIN>>5);
+            if(sp>63)sp=63;
             // Vertical travel is scaled up by half: they bob more than they
             // wander sideways.
             int a=garden_mote_dir(m);
-            int dx=(garden_sin((unsigned)a+64u)*m->speed)>>8;
-            int dy=(garden_sin((unsigned)a)*m->speed*3)>>9;
-            // The tether, and its gain is the whole of whether this reads as a
-            // swarm or as fourteen things leaving. A step of about a pixel with
-            // a heading that persists some eight frames is a random walk of ~9
-            // px per correlation time, so holding a volume of about thirty
-            // needs a pull near a sixteenth; at 1/128 they reached 113 px from
-            // home, which is most of the screen. Held twice as firmly in y,
-            // because the vertical step is half again the horizontal one and
-            // the bob would otherwise become a drift out of the frame.
-            int hc,hh;garden_shaft(m->hy>>4,f,&hc,&hh);
-            int hx=(hc+m->hoff)*16;
-            m->x=(int16_t)(m->x+dx+((hx-m->x)>>4));
-            m->y=(int16_t)(m->y+dy+((m->hy-m->y)>>3));
+            int dx=(garden_sin((unsigned)a+64u)*sp)>>8;
+            int dy=(garden_sin((unsigned)a)*sp*3)>>9;
+            // Cohesion, and it is not a force added to the tether -- it IS
+            // the tether, moved from a stored home to the swarm's own centre.
+            // Two springs pulling a mote toward two different points is what
+            // makes a swarm either collapse or wobble, and the cheapest way not
+            // to tune one against the other is not to have two.
+            //
+            // The gain is the same sixteenth and eighth the per-mote home used,
+            // for the same reason: a step of about a pixel with a heading that
+            // persists some eight frames is a random walk of ~9 px per
+            // correlation time. What is new is that the target moves, so this
+            // is a feedback loop -- everything pulls toward the average of
+            // everything -- and a gain that looks small can still breathe. The
+            // test measures the diameter every frame and asserts a floor as
+            // well as a ceiling, because a collapse and a dispersal both look
+            // like "the number changed".
+            int ox=cx-m->x,oy=cy-m->y;
+            // The dead zone, which is the whole answer to collapse. Inside it
+            // there is no pull at all, so the swarm holds a size instead of
+            // converging on a point, and it costs one L1 distance rather than
+            // the pairwise repulsion that would make this O(N^2).
+            int d1=(ox<0?-ox:ox)+(oy<0?-oy:oy);
+            int px=0,py=0;
+            if(d1>GARDEN_COHERE_R*16) { px=ox>>4;py=oy>>3; }
+            // Phototaxis at the individual as well: a mote moving away from the
+            // axis is pulled back harder than one moving toward it. A sign test
+            // and a shift, and it reads as reluctance to leave the light rather
+            // than as a rubber band, because it does nothing at all to a mote
+            // heading in.
+            int sc,sh;garden_shaft(m->y>>4,f,&sc,&sh);
+            int u=m->x-sc*16;
+            if((u<0)==(dx<0)&&u)px-=u>>GARDEN_PHOTO_ASYM;
+            m->x=(int16_t)(m->x+dx+px+gx);
+            m->y=(int16_t)(m->y+dy+py+gy);
             if(m->age<255)m->age++;
             // The latch. Set once, never cleared: coming back above the line
             // does not cancel it, which is what stops a particle sitting on the
@@ -399,18 +483,28 @@ static void garden_motes(GardenFrame *f) {
         // the shaft, so the cull is the seeding rule as well as the death rule
         // and there is no separate initialisation to forget.
         unsigned g=garden_hash(h^0xA5A5u);
-        int ny=25+(int)(g%88u);
-        garden_shaft(ny,f,&center,&half);
-        // Biased to the axis by the square: more of them where the light is
-        // strong, which is where the real thing gathers.
+        // Reborn into the swarm rather than at a home of its own: near the
+        // centroid, inside the dead zone, so a replacement joins the group
+        // instead of flying across the beam to it. On the first frame the
+        // centroid is the anchor, which is how a zeroed GardenFrame becomes a
+        // swarm without a separate initialisation.
         int off=(int)((g>>8)&127)-64;
-        off=off*(off<0?-off:off)/64;
-        m->hoff=(int16_t)(off*half/90);
-        m->hy=(int16_t)(ny*16);
-        m->x=(int16_t)((center+m->hoff)*16);m->y=m->hy;
-        m->dir=(int8_t)(1+(int)((g>>16)&126));      /* 1..127: alive, never zero */
+        off=off*(off<0?-off:off)/64;                 /* biased to the middle */
+        int nx=cx+off*GARDEN_COHERE_R/8;
+        int ny=(cy+((int)((g>>16)&63)-32)*GARDEN_COHERE_R/4)>>4;
+        if(ny<GARDEN_BORN_LO)ny=GARDEN_BORN_LO;
+        if(ny>GARDEN_BORN_HI)ny=GARDEN_BORN_HI;
+        garden_shaft(ny,f,&center,&half);
+        // Never outside the light it needs, whatever the centroid was doing.
+        if(nx<(center-half+2)*16)nx=(center-half+2)*16;
+        if(nx>(center+half-2)*16)nx=(center+half-2)*16;
+        m->x=(int16_t)nx;m->y=(int16_t)(ny*16);
+        m->dir=(int8_t)(1+(int)((g>>1)&126));       /* 1..127: alive, never zero */
         m->speed=(uint8_t)(10+((g>>24)&11));
         m->glow=(uint8_t)(GARDEN_GLOW_BASE+((g>>20)&31));
+#if GARDEN_MOTE_HUSH
+        m->glow=0;      /* present, moved, indexed -- and drawing nothing */
+#endif
         m->age=0;m->dim=0;
     }
 }
@@ -966,6 +1060,35 @@ static inline void garden_mote_touch(uint16_t *row,int y,const GardenMote *m,
     }
 }
 
+// The row's whole mote pass, so that GARDEN_MOTE_OUTLINE can decide whether it
+// is inlined into garden_pixels_row or called. Nothing else changes: same
+// order, same arithmetic, same pixels.
+#if !GARDEN_NO_MOTES
+#if GARDEN_MOTE_OUTLINE
+static void __attribute__((noinline))
+garden_mote_rowpass(uint16_t *row,int y,const GardenFrame *f,
+                    const int16_t *dens,const GardenRow *r) {
+#if GARDEN_MOTE_INDEX
+    for(unsigned mask=f->rowmask[y];mask;mask&=mask-1)
+        garden_mote_touch(row,y,&f->mote[__builtin_ctz(mask)],dens,r);
+#else
+    for(int i=0;i<GARDEN_MOTES;i++)
+        garden_mote_touch(row,y,&f->mote[i],dens,r);
+#endif
+}
+#else
+static inline void garden_mote_rowpass(uint16_t *row,int y,const GardenFrame *f,
+                                       const int16_t *dens,const GardenRow *r) {
+#if GARDEN_MOTE_INDEX
+    for(unsigned mask=f->rowmask[y];mask;mask&=mask-1)
+        garden_mote_touch(row,y,&f->mote[__builtin_ctz(mask)],dens,r);
+#else
+    for(int i=0;i<GARDEN_MOTES;i++)
+        garden_mote_touch(row,y,&f->mote[i],dens,r);
+#endif
+}
+#endif
+#endif
 static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
     int center,width;garden_shaft(y,f,&center,&width);
     // Everything below is invariant across the row. It used to be recomputed
@@ -1022,11 +1145,21 @@ static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
 #if GARDEN_NO_MOTES
     /* nothing: garden_mote_touch is a static inline and simply goes away */
 #elif GARDEN_MOTE_INDEX
-    for(unsigned mask=f->rowmask[y];mask;mask&=mask-1)
-        garden_mote_touch(row,y,&f->mote[__builtin_ctz(mask)],dens,&r);
+    // The guard is the whole of the row's cost when nothing is here, and with
+    // GARDEN_MOTE_OUTLINE that is a load and a branch rather than 401 bytes of
+    // code the instruction cache has to walk past.
+    if(f->rowmask[y]) {
+#ifdef ESP_PLATFORM
+        GARDEN_FENCE;uint32_t m0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+        garden_mote_rowpass(row,y,f,dens,&r);
+        GARDEN_FENCE;garden_mote_cycles+=esp_cpu_get_cycle_count()-m0;
+        garden_mote_rows++;GARDEN_FENCE;
 #else
-    for(int i=0;i<GARDEN_MOTES;i++)
-        garden_mote_touch(row,y,&f->mote[i],dens,&r);
+        garden_mote_rowpass(row,y,f,dens,&r);
+#endif
+    }
+#else
+    garden_mote_rowpass(row,y,f,dens,&r);
 #endif
     // Adding something to the light afterwards, per pixel: this is where it
     // goes, and this is why `dens` and `r` are still in scope at the end of a

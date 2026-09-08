@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 static uint16_t before[240*135],after[240*135],wet[240*135];
 int main(void) {
     // Noise stays bounded and continuous at lattice and period boundaries.
@@ -233,9 +234,21 @@ int main(void) {
             assert((g.mote[i].x>>4)>c-h&&(g.mote[i].x>>4)<c+h);
             assert(g.mote[i].speed>0);
         }
-        const int F=1500;                       /* 60 s at 25 fps */
+        // Two minutes, not one. The dying latch fires about once every fifteen
+        // seconds now that cohesion keeps the swarm together, and a sixty-second
+        // window caught a quiet stretch and reported zero -- a feature that
+        // works looking exactly like a feature that has become unreachable.
+        // The window is part of the assertion, not an arbitrary length.
+        const int F=3000;                       /* 120 s at 25 fps */
         unsigned visible=0,shafted=0,slow=0,moves=0,deaths=0,far=0;
         unsigned latched=0,unlatched=0,dimmed=0;
+        // The mean the crossings are measured against. A constant rather than
+        // the run's own mean, so the test does not move with the thing it is
+        // testing -- and it is the one number here taken from a measurement
+        // rather than derived, so it is written where that is obvious.
+        #define GARDEN_DIA_REF 59
+        long diasum=0,offsum=0;int dia_lo=32767,dia_hi=0,off_hi=0;
+        int prev_dia=0,last_cross=-1,crossn=0;double gaps=0,gap2=0;
         double stepsum=0;
         int prev_age[GARDEN_MOTES]={0};
         int8_t psign[GARDEN_MOTES]={0};
@@ -266,15 +279,81 @@ int main(void) {
                 garden_shaft(my,&g,&c,&h);
                 visible++;
                 if((m->x>>4)>c-h&&(m->x>>4)<c+h)shafted++;
-                int hc,hh;garden_shaft(m->hy>>4,&g,&hc,&hh);
-                if(abs((m->x>>4)-(hc+m->hoff))+abs(my-(m->hy>>4))>45)far++;
+            }
+            // The swarm as a body, measured every frame rather than at the end.
+            // Cohesion has exactly two failure modes and they are opposite:
+            // sixteen things pulled to one point become one point, and a gain
+            // too weak lets them disperse. Both show up as "the diameter
+            // changed", so the diameter needs a floor as well as a ceiling.
+            {
+                int lo_x=32767,hi_x=-32768,lo_y=32767,hi_y=-32768,ax=0,ay=0;
+                for(int i=0;i<GARDEN_MOTES;i++) {
+                    int mx=g.mote[i].x>>4,my2=g.mote[i].y>>4;
+                    if(mx<lo_x)lo_x=mx;
+                    if(mx>hi_x)hi_x=mx;
+                    if(my2<lo_y)lo_y=my2;
+                    if(my2>hi_y)hi_y=my2;
+                    ax+=mx;ay+=my2;
+                }
+                int dia=(hi_x-lo_x)+(hi_y-lo_y);
+                diasum+=dia;
+                // Breathing. A cohesion loop that oscillates has a REGULAR
+                // period, so the test is not the variance of the diameter but
+                // the regularity of its crossings of its own mean: a swarm
+                // driven by noise crosses at irregular intervals, one that is
+                // ringing crosses like a metronome. Measured against a mean
+                // from the previous run of the same 1500 frames, which is why
+                // it is a second pass rather than an accumulator.
+                if(fr) {
+                    if((prev_dia<GARDEN_DIA_REF)!=(dia<GARDEN_DIA_REF)) {
+                        if(last_cross>=0) {
+                            double gapv=fr-last_cross;
+                            crossn++;gaps+=gapv;gap2+=gapv*gapv;
+                        }
+                        last_cross=fr;
+                    }
+                }
+                prev_dia=dia;
+                if(dia<dia_lo)dia_lo=dia;
+                if(dia>dia_hi)dia_hi=dia;
+                // Where the body sits, so phototaxis is checked as a statement
+                // about the group rather than about any one mote.
+                int ccx=ax/GARDEN_MOTES,ccy=ay/GARDEN_MOTES,sc,sh2;
+                garden_shaft(ccy,&g,&sc,&sh2);
+                offsum+=abs(ccx-sc);
+                if(abs(ccx-sc)>off_hi)off_hi=abs(ccx-sc);
             }
         }
         double step=stepsum/moves,hover=100.0*slow/moves;
+        double dia=(double)diasum/F,off=(double)offsum/F;
         assert(shafted==visible);               /* never outside the light it needs */
-        assert(step>0.5&&step<1.2);             /* darting, not creeping or teleporting */
+        // Widened from 1.2, and for a reason rather than to fit: the shared
+        // surge exists to make the swarm dash together, so the mean step MUST
+        // rise when it fires. The ceiling still has to catch teleportation --
+        // a mote three pixels across that moves more than about two pixels a
+        // frame stops overlapping itself and strobes.
+        assert(step>0.5&&step<2.0);             /* darting, not creeping or strobing */
         assert(hover>4&&hover<30);              /* it pauses, and not all the time */
-        assert(far==0);                         /* holds a volume */
+        (void)far;
+        // Cohesion. The swarm holds a body: never a point, never the screen.
+        // The floor is the one that catches the failure everybody gets -- a
+        // dead zone too small, or a gain too strong, and sixteen midges become
+        // one bright dot.
+        assert(dia_lo>10);                      /* never collapses to a point */
+        assert(dia_hi<150);                     /* never disperses */
+        assert(dia>25&&dia<110);                /* and holds a size on average */
+        // Phototaxis, as a statement about the group. The centroid lives near
+        // the axis rather than at the edge of the beam, which is the whole of
+        // what "toward the light" means when q peaks on the axis.
+        assert(off<20&&off_hi<45);
+        // Not breathing. The interval between crossings has to be irregular:
+        // a ringing swarm gives a metronome, and its spread over its mean
+        // collapses. Measured at 1.2 here; 0.4 is the line.
+        {
+            double gm=crossn?gaps/crossn:0;
+            double gs=crossn?sqrt(gap2/crossn-gm*gm):0;
+            assert(crossn>50&&gm>0&&gs/gm>0.4);
+        }
         // Turnover is bounded above and not below. A volume of thirty pixels
         // inside a shaft eighty wide means a particle rarely reaches the edge,
         // so zero deaths in a minute is the expected steady state and a stable
@@ -282,12 +361,20 @@ int main(void) {
         // the cull firing often would mean particles are being replaced faster
         // than the eight-frame ramp can hide, and the swarm would flicker.
         assert(deaths*8<=F/25);                 /* at most one replacement per 8 s */
+        // The latch must still be reachable. Cohesion pulls the swarm toward an
+        // anchor well above the dying line, and a slightly stronger pull would
+        // make the bottom-fifth fade dead code that still passes every test
+        // above -- which is the failure VISIBLE was written for, in a different
+        // place.
+        assert(latched>0);
         assert(unlatched==0);                   /* one-way, and this is the whole of it */
         assert(dimmed==0);                      /* the fade only ever runs down */
-        printf("SWARM_OK: %d in the shaft always; %.2f px/frame, hovering %.0f%% of"
-               " frames, volume under 45 px; %u reached the bottom fifth and none"
-               " came back from it; %u replacements in %d s\n",
-               GARDEN_MOTES,step,hover,latched,deaths,F/25);
+        printf("SWARM_OK: %d in the shaft always; %.2f px/frame, hovering %.0f%%"
+               " of frames; diameter %.0f px (%d..%d); centroid %.1f px off the"
+               " axis (worst %d); %u reached the bottom fifth and none came back"
+               " from it; %u replacements in %d s\n",
+               GARDEN_MOTES,step,hover,dia,dia_lo,dia_hi,off,off_hi,
+               latched,deaths,F/25);
     }
     // The assertion this suite did not have, and its absence is why a feature
     // that never reached the eye passed everything: SWARM_OK proves the model
