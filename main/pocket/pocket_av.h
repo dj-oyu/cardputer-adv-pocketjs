@@ -14,7 +14,8 @@
 // What is published:
 //   audio.cue(name)                 sound_play, synchronous, returns bool
 //   audio.tone(spec, options)       sound_tone, Promise<void>
-//   audio.capture.open              present and rejects UNSUPPORTED
+//   audio.capture.open              NOT here -- pocket_capture.c contributes
+//                                   it to the same namespace
 //   audio.player.open(spec)         Promise<Player> — one clip, in RAM, in the
 //                                   host's 24 kHz mono, as PCM16 or IMA ADPCM
 //                                   inside a WAV. Section 9.1's MP3/Opus/FLAC

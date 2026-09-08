@@ -178,6 +178,35 @@ bool board_battery_read(board_battery_t *out) {
     xSemaphoreGive(battery_lock);
     return have;
 }
+// ------------------------------------------------------------------ SPI3 bus
+//
+// The microSD slot (CS=12) and the EXT connector (CS=5) share MOSI=14, CLK=40
+// and MISO=39 (docs/hardware-constraints.md:45). The LCD is wired separately on
+// SPI2, so card traffic can never stall the panel.
+//
+// The bus lives here, beside the LCD's, rather than inside whichever driver
+// happens to come up first. Exactly one caller may spi_bus_initialize a host;
+// two owners is a real failure and putting this next to the other bus owner is
+// what stops it being possible. Drivers add their own DEVICES and interleave at
+// transaction granularity, which the SPI master driver already serialises -- so
+// a mounted card does not exclude io.spi when that arrives, and neither has to
+// know about the other.
+//
+// Lazy: a board that never mounts a card should not pay for a DMA channel. And
+// never torn down, because by then a second device may be sharing it.
+static bool spi3_up;
+
+esp_err_t board_spi3_acquire(void) {
+    if (spi3_up) return ESP_OK;
+    spi_bus_config_t bus = {.mosi_io_num=14, .miso_io_num=39, .sclk_io_num=40,
+        .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=4096};
+    esp_err_t e = spi_bus_initialize(SPI3_HOST, &bus, SPI_DMA_CH_AUTO);
+    if (e != ESP_OK) return e;
+    spi3_up = true;
+    ESP_LOGI("board","SPI3 up: SD CS=12, EXT CS=5 share MOSI=14 CLK=40 MISO=39");
+    return ESP_OK;
+}
+
 esp_err_t board_init(void) {
     gpio_config_t g = {.pin_bit_mask = (1ULL<<33)|(1ULL<<34)|(1ULL<<38), .mode = GPIO_MODE_OUTPUT};
     ESP_ERROR_CHECK(gpio_config(&g));
@@ -248,9 +277,15 @@ bool board_key_event(board_keyevent_t *out) {
 // before every present, so consuming the buffer costs nothing and saves a
 // second one.
 #include "pet_hub.h"
+#include "pocket_capture.h"
 esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
     pet_hub_overlay(pixels,y,rows);
+    // docs/common-api.md 9 makes showing that the microphone is live the
+    // host's obligation, so it is drawn here, at the one transfer to the
+    // panel, rather than by whichever screen happens to be up: an app can
+    // paint the corner it occupies, but not after this.
+    pocket_capture_overlay(pixels,y,rows);
     if(capture) {
         static char line[LCD_W*4+1];
         const char *hex="0123456789abcdef";

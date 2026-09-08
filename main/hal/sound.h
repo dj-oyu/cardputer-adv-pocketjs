@@ -91,3 +91,99 @@ bool sound_clip_stop(int32_t id);
 // Output frames this clip has produced so far. Zero once it is over, so read it
 // before the callback lands or keep your own total.
 uint32_t sound_clip_position(int32_t id);
+
+// ------------------------------------------------------------------ capture
+//
+// The microphone, which reaches the chip the same way the speaker leaves it:
+// through the ES8311 over I2S_NUM_1. It is not a peripheral of its own on this
+// board -- ASDOUT (GPIO46) is the codec's ADC data, and BCLK and WS are the
+// clock this file already drives for playback.
+//
+// The microphone is a PDM part reaching the codec on its DMIC pins, not an
+// analog one on its microphone input -- measured, see mic_reg14 in sound.c.
+//
+// That one shared clock is why capture runs at SOUND_SAMPLE_RATE and not at
+// section 9's 16000. IDF constitutes full duplex on a controller only when the
+// second channel's clock and slot configuration match the first's exactly
+// (i2s_std.c, "Constitude full-duplex on port %d"); differ, and the RX channel
+// stops sharing BCLK/WS and tries to drive pins TX has already reserved. One
+// controller has one sample rate, and the DAC's is 24000.
+//
+// Capture and playback are exclusive here, as docs/common-api.md section 9 asks
+// of this first version: while a recording is open sound_play() answers false
+// and sound_tone()/sound_clip_start() answer SOUND_ERR_BUSY, which is also what
+// makes "UI cues do not sound while recording" a property of this file rather
+// than a rule every caller has to remember.
+
+// Frames one call to sound_capture_read() may ask for. Not a buffer size --
+// the caller's -- but the surface publishes it, so it is stated once here.
+#define SOUND_CAPTURE_MAX_FRAMES 2048
+
+// Opens the RX channel and the codec's input path. False when there is no
+// codec, when a recording is already open, or when the audio task is playing
+// something (a click, a tone or a clip, queued or sounding).
+//
+// The channel is created here and deleted in sound_capture_stop(), so the DMA
+// buffers -- 6 descriptors of 256 stereo frames, 6,144 bytes -- exist only
+// while a recording does. On a board with no PSRAM that is the difference
+// between a feature that costs an app 6 KiB and one that costs it nothing.
+//
+// That property was given up for an afternoon and taken back: see the comment
+// in sound.c for the hypothesis that cost it, and for what an app doing
+// open/close/open three times actually reports.
+bool sound_capture_start(void);
+
+// Copies up to max_frames of mono 16-bit PCM out of the DMA ring and returns
+// how many frames it wrote; 0 means nothing has arrived yet. Negative results:
+//
+//   -1  the DMA overwrote audio nobody had read yet. The recording has a hole
+//       in it, and section 9 refuses to splice across one silently, so the
+//       caller's only move is to report it and close. Reported by the driver's
+//       own on_recv_q_ovf callback, not inferred from timing.
+//   -2  no recording is open, or the read failed.
+//
+// Contiguous by construction: the DMA ring is the only buffer, and everything
+// it holds is handed over in order. Nothing here can skip a frame without the
+// overflow above having fired.
+int sound_capture_read(int16_t *out, int max_frames);
+
+// Closes the recording and gives the DMA buffers back. Idempotent.
+void sound_capture_stop(void);
+
+// Whether a recording is open. The recording indicator on screen is drawn from
+// this, so it is true for exactly as long as the microphone is live.
+bool sound_capture_active(void);
+
+// Whether the DMA has overrun unread audio since this was last asked, and
+// clears the flag. sound_capture_read() consumes the same flag to fail a
+// read with -1, so this is for the diagnostic, which reads the ring itself.
+bool sound_capture_overflowed(void);
+
+// The level of the audio most recently read, for the recording indicator, and
+// whether anything hit the rail in the last second. `peak` is 0..32767 and
+// fades to zero over 150ms if nothing is being read -- so an app that stops
+// reading stops claiming a level, rather than leaving the last one on screen.
+// Safe from any task; the drawing task is the caller that matters.
+void sound_capture_level(unsigned *peak, bool *clipping);
+
+// The microphone diagnostic: sweeps the codec's two input paths and then the
+// ADC's digital volume, logging peak and mean for both I2S slots of each.
+// **Sent as '9' over the USB serial console, not typed on the Cardputer's own
+// keyboard** -- the device keys do not reach it, which looks identical to a
+// diagnostic that does not work. It is what established that
+// this board's MEMS microphone is PDM: the analog path measured a peak of 9
+// over 4,864 frames and the PDM path 227, in the same quiet room. The full
+// reading -- what a healthy row looks like, and what too little or too much
+// gain looks like -- is above the function in sound.c. Takes the codec for
+// about twelve seconds -- ON A TASK OF ITS OWN. It used to run inline on the
+// task that draws, which froze the panel for the whole run and made the
+// recording indicator impossible to see during the only recording long
+// enough to look at. Returns as soon as the task is started.
+void sound_capture_probe(void);
+
+// Frames taken out of the DMA ring since sound_capture_start(). For the CAPTURE
+// STOP log line and for tests; it counts what was read out, not what the codec
+// produced -- and every reader counts, the diagnostic sweep included, so the
+// marker reports the recording that actually happened rather than only the ones
+// that went through sound_capture_read().
+uint32_t sound_capture_frames(void);

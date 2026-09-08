@@ -13,6 +13,7 @@
 #include "pocket_fs.h"
 #include "pocket_imu.h"
 #include "pocket_av.h"
+#include "pocket_capture.h"
 #include "pocket_io.h"
 #include "pocket_net.h"
 #include "pocket_ble.h"
@@ -187,6 +188,9 @@ void app_stop(void) {
     pet_assets_reset();
     pocket_imu_reset();
     pocket_av_reset();
+    // Before pocket_api_reset(): a recorder holds the I2S RX channel and the
+    // codec's ADC, and a read still waiting holds a promise slot.
+    pocket_capture_reset();
     pocket_io_reset();
     // Before pocket_api_reset(): dropping the lease is what asks the radio to
     // come down, and a request still in flight has to be told to stop before
@@ -244,6 +248,9 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"imu",pocket_imu_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
+    // After "av": both contribute to pocket.audio, and the substrate runs
+    // contributors in the order they registered.
+    TRY(pocketjs_guest_quickjs_install_once(guest,"capture",pocket_capture_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"io",pocket_io_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"net",pocket_net_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"ble",pocket_ble_install,NULL));
@@ -366,6 +373,9 @@ esp_err_t app_tick(uint32_t buttons) {
     pocket_net_pump();
     // Between the two, so a tone that finished settles in the same order the
     // one pump in pocket_av.c used to settle it in.
+    // Before pocket_api_pump(): a read that the microphone can satisfy is
+    // filled here and settles below, in the same turn rather than the next.
+    pocket_capture_pump();
     pocket_api_pump();
     pocket_av_pump();
     // The same mask the turn below is handed: pocket.input reports what the

@@ -13,6 +13,7 @@
 #include "pocket_workspace.h"
 #include "app_registry.h"
 #include "pet_hub.h"
+#include "pocket_capture.h"
 #include "pocket_bridge.h"
 #include "pocket_text.h"
 #include "scene_mem.h"
@@ -63,7 +64,12 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // own libm (sound_check_tables), and is handled where the others start. It
     // is not folded into the range because '7' has no diagnostic behind it and
     // would silently start the default app.
-    if((c>='1'&&c<='6')||c=='8') { atomic_store(&diagnostic,c); return false; }
+    // '9' is the same kind of thing for the microphone: it sweeps the codec's
+    // input paths and its ADC volume and prints what each produces, because the
+    // board answered the first register table with silence and guessing again
+    // is not a method. Like every letter in this function it arrives over USB;
+    // the Cardputer's own '9' key goes to the shell and does nothing here.
+    if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
     if(c=='\r'||c=='\n'||c=='e')k->nav=KEY_ENTER;
     else if(c=='q'||c==27)k->nav=KEY_BACK;
     else if(c=='b')k->nav=KEY_RIGHT;
@@ -398,6 +404,10 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     // is 33 ms and is why the check above exists as well -- a keystroke has to
     // be seen in the frame it was typed in.
     if(pocket_text_take_dirty()) app_force_redraw();
+    // The recording indicator is composited into every strip that is sent, so
+    // it needs a strip to be sent: an app that has stopped drawing would
+    // otherwise leave the screen it last drew, with no dot on it.
+    if(pocket_capture_take_dirty()) app_force_redraw();
 
     // Accepted this turn, so no further input reaches the app: the session ends
     // here and end_run() starts what it asked for.
@@ -481,6 +491,11 @@ static void ui_task(void *arg) {
             // Runs in place of starting a guest: it needs no app, and holding
             // 6,480 bytes of scratch is only affordable while none is running.
             if(test=='8') { sound_check_tables(); test=0; }
+            // Returns immediately: the sweep runs on its own task, because
+            // twelve seconds of it inline here is twelve seconds without a
+            // frame reaching the panel. Started from here anyway, so it cannot
+            // begin while a guest owns the display.
+            if(test=='9') { sound_capture_probe(); test=0; }
             if(test && !running && screen==SCREEN_HOME) {
                 owner=SCREEN_HOME;
                 app_registry_select(APP_ID_DEFAULT);

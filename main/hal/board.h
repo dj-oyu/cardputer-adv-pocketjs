@@ -8,6 +8,10 @@
 typedef enum { KEY_NONE, KEY_ENTER, KEY_BACK, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN } board_key_t;
 typedef struct { uint8_t row, col; bool pressed; } board_keyevent_t;
 esp_err_t board_init(void);
+// Brings up the SPI3 bus the microSD slot and the EXT connector share, once.
+// Idempotent, lazy, and never released: callers add a device, they do not own
+// the bus. See the comment at the definition for why it lives here.
+esp_err_t board_spi3_acquire(void);
 bool board_key_event(board_keyevent_t *out);
 // The one strip buffer every screen draws into; board_present consumes it.
 uint16_t *board_strip(void);

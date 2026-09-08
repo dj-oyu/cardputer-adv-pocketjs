@@ -61,3 +61,32 @@ CONFIG_ESP_PHY_ENABLE_USB=y
 # SSL_IN_CONTENT_LEN it does not decide in advance which servers this device can
 # talk to.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+
+# --- SD (fs.volume.sd): FATFS sizing ----------------------------------------
+# Inert until something REQUIRES the fatfs component: MINIMAL_BUILD keeps bt and
+# fatfs out of the build unless a component asks for them, and a CONFIG_ whose
+# Kconfig never loads is dropped in silence. That is how the first BLE
+# measurement here came back as +48 bytes, so it is worth saying once: these
+# three lines change nothing until pocket_fs.c requires fatfs.
+#
+# NOT set here: any sector-size override. Measured on the board 2026-09-08, a
+# mount costs 7,036 bytes at FF_MAX_SS=512 and 7,048 at 4096 -- twelve bytes,
+# and those twelve are a `WORD ssize` field that ff.h adds only when
+# FF_MAX_SS != FF_MIN_SS, plus alignment. FF_MAX_SS buys nothing at runtime
+# because CONFIG_FATFS_USE_DYN_BUFFERS defaults to y, which makes FATFS.win and
+# FIL.buf POINTERS allocated to the medium's real sector size -- 512 on an SD
+# card -- rather than arrays sized by FF_MAX_SS.
+#
+# Recorded because the obvious reading of the header is wrong twice over:
+# CONFIG_FATFS_SECTOR_* configures the fatfsgen.py image generator and not the
+# driver, and the symbol that does reach FF_MAX_SS (CONFIG_WL_SECTOR_SIZE) is
+# then defeated by the dynamic buffers. An earlier version of this comment
+# claimed ~12 KiB of savings from arithmetic on ffconf.h. The board said 12
+# bytes. Sector size is a non-issue on this hardware.
+# pocket_fs.c's name_ok() already refuses a name that would "become a different
+# name on an SD card later". The default ANSI/OEM encoding does exactly that,
+# silently, to every non-ASCII name. The validator and the encoding have to
+# agree or the validation is theatre.
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+# sd: is the only FATFS volume on this board.
+CONFIG_FATFS_VOLUME_COUNT=1
