@@ -1,6 +1,7 @@
 #include "garden.h"
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
 #if GARDEN_MOTE_ONLY
@@ -124,7 +125,7 @@ static int garden_corner(int c,int mask,int y,int shift) {
 #define GARDEN_DKY 26253
 #define GARDEN_DKC 17872
 #define GARDEN_DKM 42589
-static int garden_dither(int x,int y) {
+int garden_dither(int x,int y) {
     unsigned h=((unsigned)(x*GARDEN_DKX)^(unsigned)(y*GARDEN_DKY+GARDEN_DKC))&0xffffu;
     unsigned s=(h*h)>>17;
     return (int)(((s*GARDEN_DKM)>>16)&3u);
@@ -183,11 +184,6 @@ typedef struct {
     int at0,w0,mw0,at1,w1,mw1;
     int ambient_y,kbase,dy;
     int p5,p6;
-    // The tilt-shift's constants. They are exactly the values the pixel pass
-    // was loading anyway -- the two channel masks, the dither's width and the
-    // three channel floors -- so grading them by row costs no instructions at
-    // all. Defaults are the sharp scene.
-    int dmask,qr,qg,fr,fg,fb;
     int vc[4],vf[8];
 } GardenRow;
 static int garden_recip(int d,int sh) { return (int)((((long)1<<sh)+d-1)/d); }
@@ -288,8 +284,8 @@ static inline uint16_t garden_shade_pixel(int x,int dn,const GardenRow *r,int ex
     sun+=garden_shoulder(x,r->at0,r->w0,r->mw0,4,haze);
     sun+=garden_shoulder(x,r->at1,r->w1,r->mw1,7,haze);
     unsigned h=((unsigned)(x*GARDEN_DKX)^(unsigned)r->dy)&0xffffu;
-    int d=(int)((((h*h)>>17)*GARDEN_DKM>>16)&(unsigned)r->dmask);
-    int fr=r->fr,fg=r->fg,fb=r->fb;
+    int d=(int)((((h*h)>>17)*GARDEN_DKM>>16)&3u);
+    int fr=10,fg=22,fb=28;      /* the channel floors, named so the switch can drop them */
 #if GARDEN_MOTE_ONLY
     // Everything the BACKGROUND writes, dropped -- and nothing else. See the
     // switch in garden.h: `q` is computed above and survives untouched, because
@@ -307,7 +303,7 @@ static inline uint16_t garden_shade_pixel(int x,int dn,const GardenRow *r,int ex
     int cr=((ambient+5*sun)>>1)+d+fr;
     int cg=((3*ambient+6*sun)>>2)+d+fg;
     int cb=(ambient+((sun*GARDEN_M3)>>16)+d+fb)>>3;
-    return (uint16_t)((((cr*256)&r->qr)|((cg*8)&r->qg))|cb);
+    return (uint16_t)((((cr*256)&0xF800)|((cg*8)&0x07E0))|cb);
 }
 static void __attribute__((unused))
 garden_pixels(uint16_t *row,const int16_t *dens,const GardenRow *r) {
@@ -324,8 +320,9 @@ garden_pixels(uint16_t *row,const int16_t *dens,const GardenRow *r) {
 // merely wasteful. The warp term is per-row and comes from the phase, so a
 // version of this that left it out would be wrong in the first way.
 static void garden_shaft(int y,const GardenFrame *f,int *center,int *half) {
-    *center=200-(y+40)*3/4+f->sun+(garden_motion((unsigned)(f->phase+y*64),419)-128)/16;
-    *half=58+y/3;
+    *center=200-(y+40)*3/4+f->sun+(garden_motion((unsigned)(f->phase+y*64),419)-128)/16
+        +(y-67)*f->slant/128;
+    *half=58+y/3+f->spread;
 }
 // The only place a mote's heading is written after it is seeded.
 //
@@ -666,13 +663,26 @@ static void garden_mote_index(GardenFrame *f) {
     }
 }
 #endif
-void garden_prepare(GardenFrame *f,float time) {
+static int garden_layout_shape(unsigned seed,int component) {
+    if(!seed)return 0;
+    unsigned h=garden_hash(seed+811u+(unsigned)component*193u);
+    int range=component==1?5:8;
+    return (int)(h%(unsigned)(range*2+1))-range;
+}
+void garden_prepare_layout(GardenFrame *f,float time,unsigned old_seed,unsigned new_seed,unsigned mix) {
     // Fractional advection avoids whole-pixel jumps. All noise is periodic at
     // this wrap, including wind, so long-running animation has no reset seam.
     f->phase=(int)(fmodf(fmaxf(time,0),128.0f)*512);
     f->sun=(garden_motion((unsigned)f->phase,83)-128)/24;
     f->breath=(garden_motion((unsigned)f->phase,193)-128)/24;
-    f->seed=0;
+    if(mix>256)mix=256;
+    int shape[3];
+    for(int i=0;i<3;i++) {
+        int a=garden_layout_shape(old_seed,i),b=garden_layout_shape(new_seed,i);
+        shape[i]=(a*(int)(256-mix)+b*(int)mix)/256;
+    }
+    f->sun+=shape[0];f->spread=shape[1];f->slant=shape[2];
+    f->seed=new_seed;
 #if GARDEN_NO_MOTES
     // The whole feature, gone: no motion, no index, no touch-up. Nothing else
     // in the frame changes, which is the entire point -- see garden.h.
@@ -700,6 +710,9 @@ void garden_prepare(GardenFrame *f,float time) {
     }
 #endif
 }
+void garden_prepare(GardenFrame *f,float time) {
+    garden_prepare_layout(f,time,0,0,256);
+}
 // The pixel loop the three lane passes above replace, kept because it is the
 // only readable statement of what they compute. It is not called: anything
 // that changes here has to change there, and tools/test_garden.c holds the
@@ -707,8 +720,7 @@ void garden_prepare(GardenFrame *f,float time) {
 // statistics -- rather than to bit equality, which the reciprocals give up.
 static void __attribute__((unused))
 garden_row_scalar(uint16_t *row,int y,const GardenFrame *f) {
-    int center=200-(y+40)*3/4+f->sun,width=58+y/3;
-    center+=(garden_motion((unsigned)(f->phase+y*64),419)-128)/16;
+    int center,width;garden_shaft(y,f,&center,&width);
     int ambient_y=20+y/15,ww=width*width;
     int at0=center-18,w0=10+y/13,ww0=w0*w0;
     int at1=center+27,w1=10+y/8,ww1=w1*w1;
@@ -976,14 +988,10 @@ garden_pixels_pie(uint16_t *row,const int16_t *dens,const GardenRow *r) {
         320,                                 /* 4*haze, so the shoulder shifts by 18 */
         (int16_t)(-at0), (int16_t)w0, (int16_t)(-w0), (int16_t)mw0, 256, 4,
         (int16_t)(-at1), (int16_t)w1, (int16_t)(-w1), (int16_t)mw1, 256, 7,
-        // Six of the constants below are graded by row for the tilt-shift --
-        // the dither's width, the two channel masks and the three floors. The
-        // instruction that uses each is unchanged; only the value it loads
-        // moves, which is why the effect is free in the pixel loop.
-        GARDEN_DKX, (int16_t)dy, GARDEN_DKM, (int16_t)r->dmask,
-        128, 640, (int16_t)r->fr, 256, (int16_t)r->qr,   /* red: (ambient+5sun)>>1 */
-        192, 384, (int16_t)r->fg, 8, (int16_t)r->qg,     /* green: (3ambient+6sun)>>2 */
-        GARDEN_M3, (int16_t)r->fb, 32,       /* blue: no left shift to hide the >>3 in */
+        GARDEN_DKX, (int16_t)dy, GARDEN_DKM, 3,
+        128, 640, 10, 256, (int16_t)0xF800,  /* red: (ambient + 5 sun) >> 1, then placed */
+        192, 384, 22, 8, 0x07E0,             /* green: (3 ambient + 6 sun) >> 2 */
+        GARDEN_M3, 28, 32,                   /* blue: no left shift to hide the >>3 in */
         8                                    /* eight pixels on */
     };
     int16_t kv[40][8] __attribute__((aligned(16)));
@@ -1247,64 +1255,12 @@ static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
     r.at0=at0;r.w0=w0;r.mw0=garden_recip(ww0,22);
     r.at1=at1;r.w1=w1;r.mw1=garden_recip(ww1,22);
     r.ambient_y=ambient_y;r.kbase=17+f->breath;
-    r.dmask=3;r.qr=(int16_t)0xF800;r.qg=0x07E0;r.fr=10;r.fg=22;r.fb=28;
     r.dy=(y*GARDEN_DKY+GARDEN_DKC)&0xffff;
     // px>>5 and px>>6 are 8x+(phase>>5) and 4x+(phase>>6) exactly: x*256 is a
     // multiple of 64, so the shift never mixes x with the phase's low bits.
     r.p5=f->phase>>5;r.p6=f->phase>>6;
     for(int i=0;i<4;i++)r.vc[i]=garden_corner(i,3,y,6);
     for(int i=0;i<8;i++)r.vf[i]=garden_corner(i,7,y,5);
-#if GARDEN_FOCUS
-    // The defocus, and the whole of it is here: eight lerps and two constants.
-    //
-    // `soft` is 0 in the sharp band and climbs to focus_amt over the falloff.
-    // Scaling the fine octave's corners toward their own mean is what removes
-    // the detail -- the pixel loop does not know it has happened, runs the same
-    // instructions on the same lattice, and simply has less to draw.
-    if(f->focus_amt) {
-        int d=y-f->focus_y;
-        if(d<0)d=-d;
-        d-=GARDEN_FOCUS_BAND;
-        if(d<0)d=0;
-        int soft=d*255/GARDEN_FOCUS_FALL;
-        if(soft>255)soft=255;
-        soft=soft*f->focus_amt/255;
-        if(soft) {
-            // Toward the mean, not toward zero: an octave scaled to nothing
-            // still has to leave the row at the brightness it had, or the
-            // defocused band would be a stripe of a different colour.
-            int keep=255-(255-GARDEN_FOCUS_KEEP)*soft/255;
-            int m=0;
-            for(int i=0;i<8;i++)m+=r.vf[i];
-            m>>=3;
-            for(int i=0;i<8;i++)r.vf[i]=m+(r.vf[i]-m)*keep/255;
-            // The coarse octave too, and it is the one that matters. Folding
-            // only the fine octave was the obvious move and it did nothing
-            // measurable: `dens` is 3*Dc + Df, so the fine one is a quarter of
-            // the field, and what the eye reads at this scale is the coarse
-            // one. Measured at a sixteen-pixel separation -- the scale the
-            // octaves actually live at -- flattening the fine octave alone
-            // moved the number from 1.93 to 1.88 and in one row moved it the
-            // wrong way.
-            int ckeep=255-(255-GARDEN_FOCUS_CKEEP)*soft/255;
-            int cm=0;
-            for(int i=0;i<4;i++)cm+=r.vc[i];
-            cm>>=2;
-            for(int i=0;i<4;i++)r.vc[i]=cm+(r.vc[i]-cm)*ckeep/255;
-            // The dither half. Coarsening the quantisation throws away tonal
-            // detail; raising the dither with it is what stops that becoming
-            // bands. Both are constants the pixel pass already loads, so they
-            // cost nothing -- and the channel floors come down by half the
-            // dither's span so the defocused region does not also brighten.
-#if GARDEN_FOCUS_DITHER
-            r.dmask=soft>170?7:3;
-            r.qr=soft>128?(int16_t)0xF000:(int16_t)0xF800;
-            r.qg=soft>128?0x07C0:0x07E0;
-            r.fr=10-r.dmask/2;r.fg=22-r.dmask/2;r.fb=28-r.dmask/2;
-#endif
-        }
-    }
-#endif
     int16_t dens[240] __attribute__((aligned(16)));
     garden_octave_row(dens,r.vc,3,r.p6,4,1);
     garden_octave_row(dens,r.vf,7,r.p5,8,0);
@@ -1388,22 +1344,163 @@ static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
     // units where the lobe peaks near 34, and it reaches the three channels
     // through the same >>1, >>2 and /3 as everything else.
 }
-void garden_row(uint16_t *row,int y,const GardenFrame *f) {
+// Visual-only side openings in a nearer cloud layer. Never feed this field
+// back into garden_shaft, density or the swarm's phototaxis. A shared advected
+// density field gives weather-like flow without per-pixel noise or raymarching.
+// Both density and hidden opening renewal preserve the 128-second wrap.
+#ifndef GARDEN_DECOR_RAYS
+#define GARDEN_DECOR_RAYS 1
+#endif
+#ifndef GARDEN_DECOR_EVENTS
+#define GARDEN_DECOR_EVENTS 1
+#endif
+typedef struct { unsigned seed,phase,tick; int side,slope,radius,fade; } GardenDecor;
+// Four opportunities, not four permanent beams. Every opportunity gets a new
+// opening, angle and lifetime only while invisible. Stateless and periodic.
+static GardenDecor garden_decor(unsigned phase,int slot) {
+    unsigned p=(phase+(unsigned)slot*4317u)&65535u;
+    unsigned tick=p&16383u;
+    unsigned h=garden_hash((p>>14)+1709u+(unsigned)slot*313u);
+    GardenDecor d={.seed=h,.phase=phase,.tick=tick,
+        .side=(h&2u)?1:-1,.radius=18+(int)((h>>8)&7u)};
+    unsigned life=9216u+((h>>12)&4095u); // 18..26 seconds, then a dark gap
+    if((h&12u)==0||tick>=life)return d;
+    unsigned edge=tick<life-tick?tick:life-tick;
+    d.fade=garden_smooth((int)(edge<2048u?edge/8u:255u));
+    d.slope=d.side>0?24+(int)((h>>17)&63u):336+(int)((h>>17)&95u);
+    return d;
+}
+// Q8 soft volume profile, with zero slope at both the axis and the edge.
+static int garden_decor_profile(int distance,int inv) {
+    int q=256-((abs(distance)*inv)>>16);
+    if(q<=0)return 0;
+    if(q>255)q=255;
+    return garden_smooth(q);
+}
+static uint16_t garden_decor_mix(uint16_t p,int light,int shadow,int d) {
+    int r=(p>>11)&31,g=(p>>5)&63,b=p&31;
+    int extinction=shadow>>3;
+    // The incident colour is the local, already main-lit air plus a small
+    // warm bias. Each channel follows that pixel, including previous layers.
+    r=(r*(256-extinction)+((light*(r+6))>>1)+d)>>8;
+    g=(g*(256-extinction)+((light*(g+10))>>2)+d)>>8;
+    b=(b*(256-extinction)+((light*(b+4))>>2)+d)>>8;
+    if(r>31)r=31;
+    if(g>63)g=63;
+    if(b>31)b=31;
+    return (uint16_t)(r<<11|g<<5|b);
+}
+// Thin openings more often reveal from above. A soft front crosses the
+// volume in 4..6 seconds; unopened rows skip all profiles and pixel blends.
+static int garden_decor_arrival(const GardenDecor *d,int y,int end) {
+    unsigned h=garden_hash(d->seed+2909u);
+    if((h&255u)>=(unsigned)(26-d->radius)*24u)return 256;
+    unsigned duration=2048u+((h>>8)&1023u);
+    if(d->tick>=duration)return 256;
+    int front=(int)(d->tick*(unsigned)(end+24)*256u/duration);
+    int reach=front-y*256;
+    if(reach<=0)return 0;
+    if(reach>=24*256)return 256;
+    return garden_smooth(reach/24);
+}
+typedef struct { int amount,rim,offset; } GardenDecorOcclusion;
+static GardenDecorOcclusion garden_decor_occlusion(const GardenDecor *d,int y) {
+    GardenDecorOcclusion cut={0};
+    unsigned h=garden_hash(d->seed+3911u);
+    // The chance rises with base width, independently of the reveal choice.
+    if((h&255u)>=(unsigned)(d->radius-17)*20u)return cut;
+    unsigned p=(d->phase+(h>>8))&65535u;
+    unsigned age=p&4095u;
+    if(age>=768u)return cut; // brief event opportunity, every eight seconds
+    unsigned event=garden_hash((p>>12)+h);
+    if(event&1u)return cut;
+    int top=22+(int)((event>>8)&31u),dy=y-top;
+    if(dy<0||dy>=18)return cut;
+    // Two soft shutter pulses, not frame-random flicker. The little shadow
+    // trails the occluder, and its upstream lip catches the incident light.
+    // Use two 0.75-second pulses with smooth zeroes at event boundaries.
+    int pulse=(int)(age%384u);
+    int edge=pulse<192?pulse:384-pulse;
+    int blink=garden_smooth(edge*255/192);
+    cut.amount=blink*(18-dy)/18;
+    cut.rim=dy<2?blink:0;
+    cut.offset=(int)((event>>16)&15u)-7;
+    return cut;
+}
+static void __attribute__((unused))
+garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
+    int center,half;garden_shaft(y,f,&center,&half);
+    for(int layer=0;layer<4;layer++) {
+        GardenDecor decor=garden_decor((unsigned)f->phase,layer);
+        if(!decor.fade)continue;
+        int end=70+(int)((decor.seed>>24)&31u);
+        if(y>=end)continue;
+        int arrival=256;
+        GardenDecorOcclusion cut={0};
+#if GARDEN_DECOR_EVENTS
+        arrival=garden_decor_arrival(&decor,y,end);
+        if(!arrival)continue;
+        cut=garden_decor_occlusion(&decor,y);
+#endif
+        int remaining=end-y;
+        int depth=garden_smooth(remaining<48?remaining*255/48:255);
+        depth=depth*arrival>>8;
+        // One advected weather field shared by all openings. Density moves
+        // down the shaft; it modulates opacity, never the direction of travel.
+        int cloud=garden_motion(decor.phase-(unsigned)y*24u,1726u);
+        int strength=(((128+cloud/2)*decor.fade)>>8)*depth>>8;
+        // All openings travel right at 0.5 pixel/sec under the same wind.
+        // Q8 centres avoid whole-pixel stepping. No sun/warp oscillation is
+        // inherited from the main beam, and renewal is hidden by the fade.
+        int side=decor.side;
+        int cx=240*256-(y+90)*decor.slope+(int)decor.tick/4;
+        // Broad, breathing cross-section carried by the same advected field.
+        // Q8 widths change continuously; the centre still never reverses.
+        int radius=(decor.radius+y/8)*256+(cloud-128)*6;
+        int shadow_radius=radius+radius/2;
+        int shadow_cx=cx-side*radius;
+        int extent=(radius+shadow_radius+255)>>8;
+        int lo=(cx>>8)-extent,hi=(cx>>8)+extent;
+        if(lo<0)lo=0;
+        if(hi>239)hi=239;
+        int inv=garden_recip(radius,24),shadow_inv=garden_recip(shadow_radius,24);
+        for(int x=lo;x<=hi;x++) {
+            // Let only the soft fringe graze six pixels further into the
+            // main beam; a smooth ramp keeps its bright core undisturbed.
+            int gap=abs(x-center)-(half/2-6);
+            if(gap<=0)continue;
+            int protect=gap<24?garden_smooth(gap*255/24):255;
+            int gain=strength*protect>>8;
+            int light=garden_decor_profile(x*256-cx,inv)*gain>>8;
+            int shadow=garden_decor_profile(x*256-shadow_cx,shadow_inv)*gain>>8;
+            if(cut.amount) {
+                // Only a six-pixel-wide fragment, entirely within this ray.
+                // Attenuate its light, not the background or the main shaft.
+                int notch=768-abs(x*256-cx-cut.offset*256);
+                if(notch>0) {
+                    int cover=notch*cut.amount/(3*256);
+                    if(cut.rim)light+=(light*cover)>>8;
+                    else light=light*(256-cover)>>8;
+                }
+            }
+            if(!light&&!shadow)continue;
+            // Attenuate the existing channels, never paint a coloured outline.
+            // Q8 arithmetic approximates transmission plus warm in-scattering;
+            // one final spatially dithered pack avoids repeated RGB565 rounding.
+            int d= garden_dither(x,y)*64+32;
+            row[x]=garden_decor_mix(row[x],light,shadow,d);
+        }
+    }
+}
+static void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsigned seed) {
     // Distant trunks disappear into the air rather than reading as sharp
     // cutouts. Near vegetation below is darker and has greater contrast.
     int trunk[3];
     for(int i=0;i<3;i++) {
-        unsigned h=garden_hash((unsigned)i+901+f->seed);
+        unsigned h=garden_hash((unsigned)i+901+seed);
         trunk[i]=16+i*86+(int)(h%37)+(y-70)*((int)((h>>8)%5)-2)/19;
     }
     const uint16_t bark=garden_rgb(18,36,39),leafy=garden_rgb(9,29,25);
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t pt0=esp_cpu_get_cycle_count();GARDEN_FENCE;
-    garden_pixels_row(row,y,f);
-    GARDEN_FENCE;garden_pixel_cycles+=esp_cpu_get_cycle_count()-pt0;GARDEN_FENCE;
-#else
-    garden_pixels_row(row,y,f);
-#endif
     // The trunks blend each pixel independently and in the same i order, so
     // running them as three short passes after the row is written produces the
     // identical image while touching the fifteen columns where 70-9*dist>0
@@ -1419,7 +1516,7 @@ void garden_row(uint16_t *row,int y,const GardenFrame *f) {
     }
     // Out-of-focus canopy at the top: broad soft ellipses break up the light.
     for(int i=0;i<7;i++) {
-        unsigned h=garden_hash((unsigned)i+301+f->seed);
+        unsigned h=garden_hash((unsigned)i+301+seed);
         int cy=-9+(int)(h%17),dy=y-cy,ry=15+(int)((h>>8)%16);
         if(abs(dy)>=ry)continue;
         int cx=i*40-15+(int)((h>>20)%23)
@@ -1449,10 +1546,10 @@ void garden_row(uint16_t *row,int y,const GardenFrame *f) {
     // Curved grass and paired fern leaflets. Hashes describe plants, not stored
     // geometry. Each row intersects only a few spans, never a screen buffer.
     for(int i=0;i<18;i++) {
-        unsigned h=garden_hash((unsigned)i+71+f->seed);
+        unsigned h=garden_hash((unsigned)i+71+seed);
         int root=(i/2)*30-15+(int)((h>>16)%27);
         // Static density makes clumps and gaps; only the wind evolves in time.
-        if((int)((h>>24)&255)>70+garden_noise((unsigned)(root+32)*5,727+f->seed)*3/4)continue;
+        if((int)((h>>24)&255)>70+garden_noise((unsigned)(root+32)*5,727+seed)*3/4)continue;
         int layer=i&1,height=23+(int)(h%63),base=142+layer*7;
         int up=base-y;if(up<0||up>height)continue;
         int t=up*256/height,lean=(int)((h>>8)%31)-15;
@@ -1472,4 +1569,32 @@ void garden_row(uint16_t *row,int y,const GardenFrame *f) {
             }
         }
     }
+}
+static void garden_atmosphere_row(uint16_t *row,int y,const GardenFrame *f) {
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;uint32_t pt0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+    garden_pixels_row(row,y,f);
+    GARDEN_FENCE;garden_pixel_cycles+=esp_cpu_get_cycle_count()-pt0;GARDEN_FENCE;
+#else
+    garden_pixels_row(row,y,f);
+#endif
+#if GARDEN_DECOR_RAYS && !GARDEN_MOTE_ONLY
+    garden_decor_row(row,y,f);
+#endif
+}
+void garden_row(uint16_t *row,int y,const GardenFrame *f) {
+    garden_atmosphere_row(row,y,f);
+    garden_vegetation_row(row,y,f,f->seed);
+}
+void garden_row_blend(uint16_t *row,int y,const GardenFrame *f,unsigned old_seed,unsigned mix) {
+    if(mix>=256||old_seed==f->seed) {garden_row(row,y,f);return;}
+    garden_atmosphere_row(row,y,f);
+    if(!mix) {garden_vegetation_row(row,y,f,old_seed);return;}
+    // The atmosphere and swarm are evaluated once. Both vegetation layouts
+    // occlude the SAME lit row, then dissolve between those two results.
+    // One 480-byte temporary row, no retained frame or second flower trace.
+    uint16_t next[240];memcpy(next,row,sizeof next);
+    garden_vegetation_row(row,y,f,old_seed);
+    garden_vegetation_row(next,y,f,f->seed);
+    for(int x=0;x<240;x++)row[x]=garden_mix(row[x],next[x],mix);
 }

@@ -1,8 +1,10 @@
 #include "../../main/scene/scene_mem.c"
 #include "../../main/scene/garden.c"
 #include "../../main/scene/flower.c"
+#include "../../main/scene/flower_species.c"
 #include <stdio.h>
 #include <time.h>
+#include "../flower_catalog.h"
 static uint16_t a[W*H],b[W*H];
 static unsigned long long fnv(const uint16_t*p){unsigned long long h=1469598103934665603ULL;
  for(int i=0;i<W*H;i++){h^=p[i];h*=1099511628211ULL;}return h;}
@@ -12,7 +14,7 @@ static unsigned long long fnv(const uint16_t*p){unsigned long long h=14695981039
 #include "flower_ref_body.h"
 int main(void){
     unsigned long diff=0,frames=0,maxstep=0;
-    for(int sp=1;sp<=7;sp++)for(int f=0;f<40;f++){
+    for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++)for(int f=0;f<40;f++){
         elapsed=f*0.83f;flower_prepare(1.0f/30,f%3?180:-180,f%2?180:-180,(flower_species_t)sp);
         flower_draw(a,0,H);
         flower_draw_ref(b,0,H);
@@ -24,10 +26,10 @@ int main(void){
             unsigned m=dr>dg?dr:dg; if((unsigned)db>m)m=db; if(m>maxstep)maxstep=m;}
     }
     printf("frames=%lu differing pixels=%lu  max channel step=%lu\n",frames,diff,maxstep);
-    const char*nm[]={"","VALLEY","SUNFLOWER","SNOWDROP","TULIP","DAFFODIL","CROCUS","CALLA"};
+    const char *const *nm=flower_names;
     double tn=0,to=0;
     puts("");
-    for(int sp=1;sp<=7;sp++){
+    for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++){
         elapsed=7.0f;flower_prepare(1.0f/30,180,180,(flower_species_t)sp);
         const int N=500;clock_t t0,t1;
         t0=clock();for(int i=0;i<N;i++)flower_draw(a,0,H);t1=clock();
@@ -38,14 +40,14 @@ int main(void){
         printf("%-10s flower_draw before %6.3f after %6.3f | ray %6.3f -> %6.3f\n",
                nm[sp],od,nw,od-0.378,nw-0.378);
     }
-    printf("mean before %6.3f after %6.3f\n",to/7,tn/7);
+    printf("mean before %6.3f after %6.3f\n",to/FLOWER_SPECIES_COUNT,tn/FLOWER_SPECIES_COUNT);
     // The decisive number is not host time but how many per-pixel visits the
     // narrowing actually removes.
     puts("");
-    for(int sp=1;sp<=7;sp++){
+    for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++){
         elapsed=7.0f;flower_prepare(1.0f/30,180,180,(flower_species_t)sp);
         unsigned long vo=0,vn=0,pr=0;
-        for(int y=12;y<=119;y++){
+        for(int y=12;y<H;y++){
             for(unsigned i=0;i<count;i++){
                 const Petal *p=&petals[i];if(y<p->ymin||y>p->ymax)continue;
                 pr++;

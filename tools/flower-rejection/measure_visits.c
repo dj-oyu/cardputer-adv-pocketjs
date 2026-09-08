@@ -3,6 +3,7 @@
 #define ray_row ray_row_orig
 #include "../../main/scene/flower.c"
 #undef ray_row
+#include "../../main/scene/flower_species.c"
 #include <stdio.h>
 #include <time.h>
 static uint16_t fb[W*H];
@@ -30,14 +31,15 @@ static void classify(int y){
         }
     }
 }
+#include "../flower_catalog.h"
 int main(void){
-    const char*nm[]={"","VALLEY","SUNFLOWER","SNOWDROP","TULIP","DAFFODIL","CROCUS","CALLA"};
-    for(int sp=1;sp<=7;sp++){
+    const char *const *nm=flower_names;
+    for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++){
         visits=miss_d=miss_depth=shaded=bell_visits=bell_miss=petalrows=ellrows=0;
         for(int f=0;f<30;f++){
             elapsed=f*1.3f;flower_prepare(1.0f/30,180,180,(flower_species_t)sp);
             flower_draw(fb,0,H);
-            for(int y=12;y<=119;y++){for(int x=0;x<FW;x++)depth[x]=-1000;classify(y);}
+            for(int y=12;y<H;y++){for(int x=0;x<FW;x++)depth[x]=-1000;classify(y);}
         }
         unsigned long tot=visits+bell_visits;
         printf("%-10s visits/frame %7lu  ellipsoid %6lu (d<0 %4.1f%%  behind %4.1f%%  shaded %4.1f%%)  bell %6lu (miss %4.1f%%)  part-rows %5lu (ellipsoid %5lu, %5.1f visits each)\n",
@@ -50,12 +52,12 @@ int main(void){
     // happens after a hit? classify() is ray_row's arithmetic with the sqrt,
     // normal, shade and dissolve removed.
     puts("");
-    for(int sp=1;sp<=7;sp++){
+    for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++){
         elapsed=7.0f;flower_prepare(1.0f/30,180,180,(flower_species_t)sp);
         const int N=400;clock_t t0,t1;
-        t0=clock();for(int i=0;i<N;i++){for(int y=12;y<=119;y++){for(int x=0;x<FW;x++)depth[x]=-1000;ray_row_orig(fb+y*W,y);}}t1=clock();
+        t0=clock();for(int i=0;i<N;i++){for(int y=12;y<H;y++){for(int x=0;x<FW;x++)depth[x]=-1000;ray_row_orig(fb+y*W,y);}}t1=clock();
         double full=(double)(t1-t0)/CLOCKS_PER_SEC/N*1000;
-        t0=clock();for(int i=0;i<N;i++){for(int y=12;y<=119;y++){for(int x=0;x<FW;x++)depth[x]=-1000;classify(y);}}t1=clock();
+        t0=clock();for(int i=0;i<N;i++){for(int y=12;y<H;y++){for(int x=0;x<FW;x++)depth[x]=-1000;classify(y);}}t1=clock();
         double setup=(double)(t1-t0)/CLOCKS_PER_SEC/N*1000;
         printf("%-10s ray_row %6.3f ms   quadratic+depth only %6.3f (%4.1f%%)   after-hit %6.3f (%4.1f%%)\n",
             nm[sp],full,setup,100*setup/full,full-setup,100*(full-setup)/full);

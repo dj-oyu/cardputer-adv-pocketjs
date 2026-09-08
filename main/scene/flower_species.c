@@ -14,6 +14,12 @@
 // asserts 8 < count < MAX_PARTS for every species at every pose.
 #include "flower_parts.h"
 
+// Puffy shoulders taper into a tucked-in body and a softly turned open hem.
+// Radii at the seven band boundaries: 0, .91, 1.10, 1.04, .93, .86, .90.
+// Same six-band intersection as the ordinary bell; only 48 bytes of constants.
+const float flower_cloche_slopes[FLOWER_BELL_BANDS]={2.73f,.57f,-.18f,-.33f,-.21f,.12f};
+const float flower_cloche_offsets[FLOWER_BELL_BANDS]={2.73f,1.29f,1.04f,1.04f,1.00f,.78f};
+
 static V cross(V a,V b) {return (V){a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
 // yaw and pitch are fixed for the whole plant, so the four values derived from
 // them are too. flower_build_botanicals sets them once; rotate() read them 124
@@ -97,7 +103,9 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
     rot_c=cosf(yaw);rot_s=sinf(yaw);rot_cp=cosf(pitch);rot_sp=sinf(pitch);
     count=0;
     float sway=FLOWER_SWAY*sinf(elapsed*.7f),breath=FLOWER_BREATH*sinf(elapsed*.8f);
-    V base={-.18f,-1.35f,0};
+    // Match garden.c's offscreen grass roots (screen y=142..149). The old
+    // -1.35 ended near y=115, leaving each plant suspended above the ground.
+    V base={-.18f,-2.2f,0};
     if(species==FLOWER_VALLEY) {
         stem(base,(V){-.55f,.5f,0},(V){.05f,1.2f,0},9,.024f,yaw,pitch);
         part(base,(V){-.9f,.3f,-.08f},.17f,.035f,LEAF,yaw,pitch);
@@ -152,21 +160,29 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
             part(add(head,(V){.09f*cosf(a),.09f*sinf(a),0}),
                  add(head,(V){.73f*cosf(a),.73f*sinf(a),-.08f}),.18f,.045f,IVORY,yaw,pitch);
         }
-        // A short corona faces forward from within the perianth. The old
-        // downward axis projected the whole mouth below the flower centre.
-        trumpet(add(head,(V){0,.015f,-.055f}),(V){0,.12f,1},.32f,.225f,GOLD,1,yaw,pitch);
+        // A narrow neck feeds a broad flared mouth. Two overlapping shells
+        // expose the spreading rim and its inner wall, rather than enlarging
+        // the entire tube into a bulb. Both share the same directed light.
+        V corona_root=add(head,(V){-.095f,-.035f,-.055f});
+        V corona_axis=normal((V){.58f,.35f,1});
+        trumpet(corona_root,corona_axis,.32f,.16f,CORONA,1,yaw,pitch);
+        trumpet(add(corona_root,mul(corona_axis,.20f)),corona_axis,.38f,.35f,CORONA,1,yaw,pitch);
+        // A recessed throat hides the stalk through the corona's tiny basal
+        // opening. It sits behind the lip, so the mouth remains visibly deep.
+        V throat=add(head,(V){-.056f,-.012f,.012f});
+        part(add(throat,(V){-.115f,0,0}),add(throat,(V){.115f,0,0}),.125f,.01f,CORONA,yaw,pitch);
     } else if(species==FLOWER_CROCUS) {
         for(int i=0;i<3;i++) {
             V root={-.52f+i*.49f,-.66f+(i%2)*.27f,(i%2)*.12f};
             // The floral tube continues into the cup; tapering both pieces
             // to the same endpoint left a subpixel gap. Ground all three at
             // the common soil line, including the raised middle flower.
-            part((V){root.x,-1.52f,root.z},add(root,(V){0,.16f,0}),.032f,.025f,LEAF,yaw,pitch);
+            part((V){root.x,base.y,root.z},add(root,(V){0,.16f,0}),.032f,.025f,LEAF,yaw,pitch);
             cup(root,.83f,VIOLET,yaw,pitch);
             for(int j=0;j<3;j++)part(add(root,(V){(j-1)*.035f,.24f,.015f}),
                 add(root,(V){(j-1)*.065f,.72f,.015f}),.023f,.018f,GOLD,yaw,pitch);
         }
-        for(int i=0;i<6;i++)part((V){-.3f+i*.12f,-1.52f,-.15f},
+        for(int i=0;i<6;i++)part((V){-.3f+i*.12f,base.y,-.15f},
             (V){-.88f+i*.34f,-.2f+(i%3)*.15f,-.12f},.026f,.016f,LEAF,yaw,pitch);
     } else if(species==FLOWER_CALLA) {
         // The calla was the one species `sway` never reached: its head is a
@@ -198,14 +214,21 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         part(bud,add(bud,(V){0,.37f,0}),.17f,.15f,VIOLET,yaw,pitch);
     } else if(species==FLOWER_ECHINACEA) {
         // Echinacea purpurea: a raised seed cone above reflexed ray florets.
-        V head={.08f+sway,.51f,.01f};
+        // A brief breeze every 10*pi seconds, then rest. The squared envelope
+        // starts and ends with zero velocity; the period closes at clock wrap.
+        float phase=fmodf(elapsed,10*PI),breeze=0;
+        if(phase<2*PI) {
+            float envelope=sinf(phase*.5f);
+            breeze=FLOWER_SWAY*.28f*sinf(phase)*envelope*envelope;
+        }
+        V head={.08f+breeze,.51f,.01f};
         stem(base,(V){-.04f,-.25f,0},head,7,.035f,yaw,pitch);
         part((V){-.12f,-.8f,0},(V){-.74f,-.33f,-.1f},.13f,.027f,LEAF,yaw,pitch);
         part((V){-.08f,-.56f,0},(V){.65f,-.12f,-.1f},.12f,.027f,LEAF,yaw,pitch);
         for(int i=0;i<14;i++) {
             float a=i*2*PI/14;
             V root=add(head,(V){.20f*cosf(a),.06f*sinf(a),.15f*sinf(a)});
-            V tip=add(head,(V){(.79f+breath)*cosf(a),-.42f+.13f*sinf(a),.38f*sinf(a)});
+            V tip=add(head,(V){.79f*cosf(a),-.42f+.13f*sinf(a),.38f*sinf(a)});
             part(root,tip,.075f,.03f,ROSE,yaw,pitch);
         }
         part(add(head,(V){0,-.04f,.035f}),add(head,(V){0,.44f,.035f}),.28f,.23f,SEED,yaw,pitch);
@@ -232,7 +255,10 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         // Nigella damascena, double form: petaloid sepals, erect styles and
         // divided bracts. The true petals are minute, not the blue structures.
         // Spend the 54-part budget on the lacy involucre and visible centre.
-        V head={.06f+sway,.49f,0};
+        // Keep the fine bracts together: a quiet 63-second drift, not a
+        // separate twitch on each filament. .1 also closes at elapsed's wrap.
+        float lace_sway=FLOWER_SWAY*.35f*sinf(elapsed*.1f);
+        V head={.06f+lace_sway,.49f,0};
         stem(base,(V){-.05f,-.3f,0},head,4,.022f,yaw,pitch);
         // Five bracts fork around and partly in front of the flower, rather
         // than ten isolated radial needles behind it.
@@ -299,7 +325,7 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         for(int i=0;i<2;i++) {
             float side=i?1:-1;V top={side*.46f+sway,.83f-i*.30f,.03f};
             stem((V){-.1f,.98f-i*.14f,0},(V){side*.52f,1.32f-i*.25f,0},top,4,.02f,yaw,pitch);
-            trumpet(top,(V){side*.09f,-1,.08f},.70f,.29f,CHECKER,1,yaw,pitch);
+            trumpet(top,(V){side*.05f,-1,.08f},.76f,.31f,CHECKER,FLOWER_SHAPE_CLOCHE,yaw,pitch);
         }
     } else if(species==FLOWER_IRIS) {
         // Iris ensata: three broad falls with yellow signals, small standards.

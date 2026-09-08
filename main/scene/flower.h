@@ -30,3 +30,7 @@ void flower_prepare_rotating(float dt, int tilt_x, int tilt_y);
 flower_species_t flower_current_species(void);
 float flower_fade(void);
 void flower_draw(uint16_t *pixels, int y, int height);
+// The grain's phase. It advances once a frame, so two renders of the same
+// moment only match if it is pinned -- which is what a test comparing them has
+// to do, and what nothing else should touch.
+extern unsigned flower_grain_frame;

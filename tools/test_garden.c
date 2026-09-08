@@ -1,3 +1,6 @@
+// This suite measures the original main-light/SIMD contract. The independent
+// decorative layer is exercised by test_garden_decor.c.
+#define GARDEN_DECOR_RAYS 0
 #include "../main/scene/garden.c"
 #include "../main/scene/glass_rain.c"
 #include <assert.h>

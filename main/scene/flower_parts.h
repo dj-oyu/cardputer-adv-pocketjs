@@ -15,16 +15,26 @@
 #include <math.h>
 
 #define MAX_PARTS 56
+#define FLOWER_BELL_BANDS 6
+#define FLOWER_SHAPE_CLOCHE 3
+// Species-owned profile coefficients; read-only Flash, no per-part storage.
+extern const float flower_cloche_slopes[FLOWER_BELL_BANDS];
+extern const float flower_cloche_offsets[FLOWER_BELL_BANDS];
 #define PI 3.14159265358979323846f
 
 typedef struct { float x,y,z; } V;
 typedef struct {
     V c,axis[3];
     float radius[3],inv_radius[3],bd[3],oax[3],ba0,inv_a0,inv_d1,q[6],invzz;
+    // Half-extent in world units, on the two screen axes. Kept because the
+    // screen boxes below cannot be computed until the camera is known, and the
+    // camera is chosen by measuring the plant -- so the parts are walked twice
+    // and this is what the first pass leaves for the second.
+    float ex,ey;
     int xmin,xmax,ymin,ymax;
     unsigned material,shape;
 } Petal;
-enum { LEAF, IVORY, GOLD, SEED, INNER, ROSE, VIOLET, BLUE, RED, INK, CHECKER, HERB, FILAMENT };
+enum { LEAF, IVORY, GOLD, SEED, INNER, ROSE, VIOLET, BLUE, RED, INK, CHECKER, HERB, FILAMENT, CORONA };
 
 // The part list. The builders in flower_species.c fill it; flower.c derives
 // the quadric, the reciprocals and the bounding box from what they leave, and

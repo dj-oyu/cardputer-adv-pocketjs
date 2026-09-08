@@ -2,6 +2,7 @@
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"
+#include "../main/scene/flower_species.c"
 #include "../main/scene/glass_rain.c"
 #include <stdio.h>
 #include <assert.h>

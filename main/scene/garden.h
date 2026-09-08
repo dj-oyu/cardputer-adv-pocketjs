@@ -152,56 +152,6 @@ typedef struct {
 #ifndef GARDEN_LIVE_FIXED
 #define GARDEN_LIVE_FIXED 0
 #endif
-// Tilt-shift, and where it is done matters more than what it is.
-//
-// Defocus is the ABSENCE of fine structure, so the honest way to get it is to
-// stop generating the fine structure -- not to add noise on top of it, which
-// reads as grain over a sharp image, and not to blur afterwards, which means
-// reading and writing every pixel a second time. A full-frame pass over
-// 240x135 starts at about 0.7 ms at five cycles a pixel, and this frame is
-// already over its budget.
-//
-// The garden's mist is two octaves of value noise. The fine octave's lattice
-// corners are a PER-ROW input, so pulling them toward their own mean scales
-// that octave's amplitude away to nothing -- genuine loss of high-frequency
-// detail, perfectly graded, and it costs eight lerps a row rather than anything
-// at all per pixel. The mean is preserved by construction, so the defocused
-// band does not change brightness.
-//
-// The dither the owner asked for does the other half: away from the band the
-// quantisation is coarsened by a mask (a constant the pixel pass already loads,
-// so it is free) and the dither amplitude is raised to hide the banding that
-// would otherwise cause. Tonal detail genuinely thrown away, and noise only
-// where there is now less detail than the panel can show.
-//
-// The subject stays sharp because the flower is drawn AFTER the background and
-// is not touched by any of this. That is what a tilt-shift is.
-#ifndef GARDEN_FOCUS
-#define GARDEN_FOCUS 1
-#endif
-// Half-height of the sharp band, and how many rows the falloff takes.
-// How strong the effect is at its worst, 0..255. This is the one knob that is
-// purely a matter of taste, so it is the one to move first.
-#ifndef GARDEN_FOCUS_AMT
-#define GARDEN_FOCUS_AMT 255
-#endif
-#ifndef GARDEN_FOCUS_BAND
-#define GARDEN_FOCUS_BAND 18
-#endif
-#ifndef GARDEN_FOCUS_FALL
-#define GARDEN_FOCUS_FALL 46
-#endif
-// How much of the fine octave survives at full defocus, in 256ths.
-// The quantisation-and-dither half, separable from the octave half so the two
-// can be measured apart. They pull in opposite directions on the one number
-// that says whether this reads as softness -- the roughness between neighbours
-// -- and only measuring them separately shows by how much.
-#ifndef GARDEN_FOCUS_DITHER
-#define GARDEN_FOCUS_DITHER 1
-#endif
-#ifndef GARDEN_FOCUS_KEEP
-#define GARDEN_FOCUS_KEEP 26
-#endif
 // Where a replacement may appear. The centroid can drift; a birth may not
 // follow it off the top or into the dying zone.
 #define GARDEN_BORN_LO 22
@@ -414,20 +364,23 @@ typedef struct {
 // scene_mem zeroes a fresh block; a GardenFrame on the stack has to say so.
 typedef struct {
     int sun,phase,breath;
+    int spread,slant; // slowly changing main-light geometry
     unsigned seed;
     GardenMote mote[GARDEN_MOTES];
     uint8_t born,died;  /* this frame's events */
-    // Tilt-shift. focus_amt 0 is off, and a zeroed GardenFrame is therefore the
-    // scene exactly as it was -- which is what lets every contract in
-    // tools/test_garden.c go on asserting the same numbers.
-    int16_t focus_y;    /* the row that stays sharp */
-    uint8_t focus_amt;  /* 0..255, how strong the effect is at its worst */
 #if GARDEN_MOTE_INDEX
     uint16_t rowmask[GARDEN_ROWS];  /* bit i: mote i draws on this row */
 #endif
 } GardenFrame;
 void garden_prepare(GardenFrame *frame,float time);
+void garden_prepare_layout(GardenFrame *frame,float time,unsigned old_seed,unsigned new_seed,unsigned mix);
 void garden_row(uint16_t *row,int y,const GardenFrame *frame);
+// Blend only vegetation layouts; light, fog and swarm are rendered once.
+void garden_row_blend(uint16_t *row,int y,const GardenFrame *frame,unsigned old_seed,unsigned mix);
+// The scene's dither, 0..3, a function of the pixel and nothing else. Exposed
+// because the flower needs the same one: two surfaces dithered by two different
+// noises separate to the eye as surely as one dithered and one not.
+int garden_dither(int x,int y);
 #ifdef ESP_PLATFORM
 // TEMPORARY, and it goes with flower.c's counters. garden_row is now made of
 // two very different things -- three vector passes over the 240 pixels, then
