@@ -45,6 +45,7 @@
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"
+#include "../main/scene/flower_species.c"
 #include <stdio.h>
 #include <math.h>
 
@@ -93,9 +94,9 @@ static double drift_since(void) {
     return worst;
 }
 
+#include "flower_catalog.h"
 int main(int argc,char**argv) {
-    const char *nm[]={"CRYSTAL","VALLEY","SUNFLOWER","SNOWDROP","TULIP",
-                      "DAFFODIL","CROCUS","CALLA"};
+    const char *const *nm=flower_names;
     // The rate the device actually runs at with the PIE kernel in. Pass a
     // different one to see how the answer moves with it; the whole point is
     // that a slower frame makes staleness worse, not better.
@@ -103,7 +104,7 @@ int main(int argc,char**argv) {
     float dt=(float)(1.0/fps);
     printf("reuse of k traced frames, at %.1f fps (dt=%.4f s)\n\n",fps,dt);
     printf("%-10s %2s  %8s  %8s  %5s\n","species","k","drift px","moved","step");
-    for(int sp=0;sp<8;sp++) {
+    for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++) {
         for(int k=1;k<=6;k++) {
             double worst_drift=0,worst_moved=0;int worst_step=0,worst_edge=0;
             // Several base times, because the yaw is steady but the breathing

@@ -19,19 +19,21 @@
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"
+#include "../main/scene/flower_species.c"
 #include <stdio.h>
 #include <assert.h>
 
 #define PHASES 24
 static uint16_t fb[W*H];
-static const char *NAME[8]={"CRYSTAL","VALLEY","SUNFLOWER","SNOWDROP",
-                            "TULIP","DAFFODIL","CROCUS","CALLA"};
+#include "flower_catalog.h"
+#define NAME flower_names
 
 int main(void) {
     unsigned long all_seen=0,all_rej=0,all_wrong=0;
-    for(int sp=0;sp<8;sp++) {
+    for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++) {
         bell_visits_seen=bell_rejected=bell_rejected_wrongly=0;
         bell_miss_disc=bell_miss_height=bell_miss_depth=bell_miss_clip=0;
+        bell_accepts=bell_hit_visits=0;
         for(int ph=0;ph<PHASES;ph++) {
             elapsed=1.3f+ph*0.83f-1.0f/30;
             flower_prepare(1.0f/30,0,0,(flower_species_t)sp);
@@ -48,6 +50,9 @@ int main(void) {
         }
         else
             printf("%-10s no bell parts\n",NAME[sp]);
+        if(bell_hit_visits)printf("%-10s   %u accepts over %u hit visits = %.2f each\n",
+                                  NAME[sp],bell_accepts,bell_hit_visits,
+                                  (double)bell_accepts/bell_hit_visits);
         all_seen+=bell_visits_seen;all_rej+=bell_rejected;
         all_wrong+=bell_rejected_wrongly;
         // The proof. Anything but zero means the test is not conservative and
@@ -55,8 +60,8 @@ int main(void) {
         assert(bell_rejected_wrongly==0);
     }
     printf("\nBELL_REJECT_OK: %lu/%lu bell visits rejected (%.1f%%), %lu hits dropped,"
-           " over 8 species x %d phases\n",
-           all_rej,all_seen,all_seen?100.0*all_rej/all_seen:0,all_wrong,PHASES);
+           " over %d species x %d phases\n",
+           all_rej,all_seen,all_seen?100.0*all_rej/all_seen:0,all_wrong,FLOWER_SPECIES_COUNT,PHASES);
     assert(all_wrong==0);
     // Worth having as a floor: a test that rejects nothing is safe and useless,
     // and would mean the bound is not tight enough to be worth its fourteen

@@ -124,11 +124,15 @@ def analyse(body):
 
 
 def main():
-    if len(sys.argv) != 3:
+    args = [a for a in sys.argv[1:] if a != '--nofuse']
+    if len(args) != 2:
         print(__doc__)
         sys.exit(2)
-    path, func = sys.argv[1:]
-    body = parse(extract_asm(path, func))
+    path, func = args
+    # --nofuse reads garden.c's fusion macros the other way, so the control
+    # build GARDEN_PIE_FUSE=0 selects can be checked for stalls too. A fusion
+    # that is stall-free only in one of the two spellings is not a control.
+    body = parse(extract_asm(path, func, '--nofuse' not in sys.argv))
     stalls = analyse(body)
     total = len(body)
     mem = sum(op in MEMORY or op.endswith('.ld.incp') for op, _, _ in body)

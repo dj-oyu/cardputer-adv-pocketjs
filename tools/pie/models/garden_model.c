@@ -31,6 +31,7 @@ static int mrecip(int d, int sh) { return (int)((((int64_t)1 << sh) + d - 1) / d
 // q = 256 - n*256/d, as the kernel computes it: one unsigned lane multiply for
 // the square, one QACC pass for the magic, one VMAX against zero.
 static int lobe_pie(int n, int d, int M) {
+    (void)d;                    /* kept in the signature so the call sites read as a pair */
     int t = (int)(((uint64_t)(unsigned)n * (unsigned)M) >> 14);
     int q = 256 - t;
     return q < 0 ? 0 : q;
@@ -217,24 +218,73 @@ static void sweep_dither(void) {
 // sunlight lobe's reciprocals above. The shift is the smallest that is exact
 // (16 and 17 are out by one) and the largest that keeps dx*dx*M inside a signed
 // 32-bit int, which is a two-sided constraint worth stating: there is no slack.
+// int64_t and not long: `long` is 32 bits on Windows, where this model is
+// usually built, and 64 on the WSL side. The widest term here is 67 million
+// and the overflow guard compares against 2^40, which on a 32-bit long is a
+// shift past the width of the type -- the guard would have been the thing
+// that overflowed. Same trap as tools/test_solar_time.c and CLAUDE.md.
 static void sweep_canopy(void) {
-    long checked = 0, maxprod = 0;
+    int64_t checked = 0, maxprod = 0;
     for (int rx = 28; rx <= 44; rx++) {
         int d = rx * rx;
-        long M = ((1L << 26) + d - 1) / d;
+        int64_t M = (((int64_t)1 << 26) + d - 1) / d;
         for (int u = 0; u <= rx; u++) {
-            long n = (long)u * u, prod = n * M;
+            int64_t n = (int64_t)u * u, prod = n * M;
             if (prod > maxprod) maxprod = prod;
-            if (prod > 2147483647L) { printf("canopy: dx*dx*M leaves a signed int\n"); mismatches++; return; }
+            if (prod > INT32_MAX) { printf("canopy: dx*dx*M leaves a signed int\n"); mismatches++; return; }
             if ((prod >> 18) != n * 256 / d) {
-                printf("canopy: rr=%d dx2=%ld gives %ld, not %ld\n", d, n, prod >> 18, n * 256 / d);
+                printf("canopy: rr=%d dx2=%lld gives %lld, not %lld\n", d, (long long)n, (long long)(prod >> 18), (long long)(n * 256 / d));
                 mismatches++;
             }
             checked++;
         }
     }
-    printf("%-10s exact over %ld reachable pairs, rr 784..1936; widest product %ld of 2^31\n",
-           "canopy", checked, maxprod);
+    printf("%-10s exact over %lld reachable pairs, rr 784..1936; widest product %lld of 2^31\n",
+           "canopy", (long long)checked, (long long)maxprod);
+}
+
+// The canopy span, as garden_canopy_row now computes it. Three claims, and all
+// three have to be exact rather than bounded, because this replaced working
+// scalar code that was already exact -- an approximation here would move the
+// picture for nothing.
+//
+// 1. mrr = ceil(2^26/rr) reaches 85,598 and does not fit a 16-bit lane, so a
+//    vector form has to split it. hi*256+lo, with dx2*hi*256 taken as
+//    (dx2*16)*(hi*16): dx2 <= 1936 so dx2*16 fits, hi <= 334 so hi*16 fits.
+// 2. q*3/5 as one multiply and a shift.
+// 3. clamping q at zero replaces the `if(q>0)`, because blending with alpha
+//    zero is the identity: (A*256 + B*0) >> 8 is A.
+static void sweep_canopy_span(void) {
+    int64_t worst_t = 0, widest = 0;
+    for (int rx = 28; rx <= 44; rx++) {
+        int rr = rx * rx;
+        int64_t mrr = (((int64_t)1 << 26) + rr - 1) / rr, hi = mrr >> 8, lo = mrr & 255;
+        if (hi * 16 > 65535) { printf("canopy span: hi*16 leaves a lane\n"); mismatches++; return; }
+        for (int u = 0; u <= rx; u++) {
+            int64_t dx2 = (int64_t)u * u;
+            if (dx2 * 16 > 65535) { printf("canopy span: dx2*16 leaves a lane\n"); mismatches++; return; }
+            int64_t acc = (dx2 * 16) * (hi * 16) + dx2 * lo;
+            if (acc > widest) widest = acc;
+            if (acc >= ((int64_t)1 << 40)) { printf("canopy span: QACC overflows\n"); mismatches++; return; }
+            if ((acc >> 18) != ((dx2 * mrr) >> 18)) {
+                printf("canopy span: rr=%d dx2=%lld split gives %lld, not %lld\n",
+                       rr, (long long)dx2, (long long)(acc >> 18), (long long)((dx2 * mrr) >> 18));
+                mismatches++;
+            }
+            if ((acc >> 18) > worst_t) worst_t = acc >> 18;
+        }
+    }
+    int64_t M = (65536L * 3 + 4) / 5;
+    if (M > 65535) { printf("canopy span: the alpha magic does not fit a lane\n"); mismatches++; }
+    for (int q = 0; q <= 256; q++)
+        if ((((int64_t)q * M) >> 16) != (int64_t)q * 3 / 5) {
+            printf("canopy span: q=%d alpha gives %lld, not %d\n", q, (long long)(((int64_t)q * M) >> 16), q * 3 / 5);
+            mismatches++;
+        }
+    for (int A = 0; A < 64; A++)
+        if (((int64_t)A * 256 + 0) >> 8 != A) { printf("canopy span: zero alpha is not the identity\n"); mismatches++; }
+    printf("%-10s split exact (peak t=%lld, widest QACC term %lld of 2^40); q*3/5 == (q*%lld)>>16;"
+           " zero alpha is the identity\n", "canopy2", (long long)worst_t, (long long)widest, (long long)M);
 }
 
 int main(void) {
@@ -254,6 +304,7 @@ int main(void) {
     sweep_channels();
     sweep_dither();
     sweep_canopy();
+    sweep_canopy_span();
     printf("mismatches=%ld\n", mismatches);
     return mismatches ? 1 : 0;
 }

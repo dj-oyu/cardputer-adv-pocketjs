@@ -2,16 +2,34 @@
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"
+#include "../main/scene/flower_species.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
+#include "flower_catalog.h"
 static uint16_t full[W*H],assembled[W*H],background[W*H];
 static void background_frame(void) {
-    GardenFrame f;garden_prepare(&f,elapsed);
-    if(seed_map)f.seed=((GardenFrame*)(seed_map+32*32))->seed;
+    // The *same* frame flower_draw will use, not a fresh one prepared to the
+    // same time. The garden now carries a swarm, and preparing a second frame
+    // advances a second swarm -- the two would agree everywhere except at
+    // fourteen points of light, which is exactly where this assertion looks.
+    GardenFrame f={0};
+    if(seed_map)f=*(const GardenFrame*)(seed_map+32*32);
+    else garden_prepare(&f,elapsed);
     for(int y=0;y<H;y++)garden_row(background+y*W,y,&f);
+}
+// The swarm's state lives in the shared block, so releasing the block loses it
+// and the next frame seeds a new one. That is correct and unavoidable -- there
+// is nowhere else for it to live -- but the checks below are about whether a
+// *stale seed texture* survives a recycle, and fourteen points of light moving
+// would answer a different question loudly. Silenced for those, not for the
+// frame comparisons that come before them.
+static void hush_swarm(void) {
+    if(!seed_map)return;
+    GardenFrame *g=(GardenFrame*)(seed_map+32*32);
+    for(int i=0;i<GARDEN_MOTES;i++)g->mote[i].glow=0;
 }
 static void ppm(const char *path,const uint16_t *p) {
     FILE *f=fopen(path,"wb");assert(f);fprintf(f,"P6\n%d %d\n255\n",W,H);
@@ -22,18 +40,16 @@ static void ppm(const char *path,const uint16_t *p) {
     assert(fclose(f)==0);
 }
 int main(void) {
+    setvbuf(stdout,NULL,_IOLBF,0);
     struct {uint16_t head[8],data[W*8],tail[8];} band;
-    unsigned long covered_crystal=0;
+    unsigned long covered_sunflower=0;
     clock_t start=clock();
-    // The crystal flower used to be drawn two ways and the two silhouettes
-    // compared. The mesh is gone -- it cost 17,472 bytes of .bss for the whole
-    // life of the boot and the analytic path stores nothing -- so what is left
-    // to check is that the one remaining path is self-consistent: a strip drawn
+    // Use the sunflower's ellipsoids to check that a strip drawn
     // on its own equals the same rows of the whole frame, it writes nothing
     // outside the rows it was given, and it leaves the left half alone.
     for(int frame=0;frame<60;frame++) {
         elapsed=frame*.7f;
-        flower_prepare(1.0f/30,frame%3==0?-180:180,frame%2?-180:180,FLOWER_CRYSTAL);
+        flower_prepare(1.0f/30,frame%3==0?-180:180,frame%2?-180:180,FLOWER_SUNFLOWER);
         flower_draw(full,0,H);
         background_frame();
         for(int y=0;y<H;y+=8) {
@@ -46,25 +62,32 @@ int main(void) {
         assert(memcmp(full,assembled,sizeof full)==0);
         for(int y=0;y<H;y++)for(int x=0;x<X0;x++)assert(full[y*W+x]==background[y*W+x]);
         for(int y=12;y<120;y++)for(int x=X0;x<W;x++)
-            covered_crystal+=full[y*W+x]!=background[y*W+x];
+            covered_sunflower+=full[y*W+x]!=background[y*W+x];
     }
     // The flower is actually on screen rather than a field of background.
-    assert(covered_crystal>60000);
+    assert(covered_sunflower>60000);
     // Center rays hit the front pole; this also detects a wrong quadratic root.
-    for(int i=0;i<PETALS;i++)assert(petals[i].invzz>0&&isfinite(petals[i].invzz));
+    for(unsigned i=0;i<count;i++)assert(petals[i].invzz>0&&isfinite(petals[i].invzz));
     memset(&band,0xa5,sizeof band);flower_draw(band.data,-1,8);
     for(int k=0;k<W*8;k++)assert(band.data[k]==0xa5a5);
-    elapsed=4;flower_prepare(0,0,0,FLOWER_CRYSTAL);
-    flower_draw(full,0,H);ppm(".cache/flower-ray.ppm",full);
-    const char *files[]={"", ".cache/flower-valley.ppm", ".cache/flower-sunflower.ppm", ".cache/flower-snowdrop.ppm",
-        ".cache/flower-tulip.ppm", ".cache/flower-daffodil.ppm", ".cache/flower-crocus.ppm", ".cache/flower-calla.ppm"};
-    _Static_assert(sizeof files/sizeof files[0]==FLOWER_SPECIES_COUNT,"preview list");
-    for(int species=1;species<FLOWER_SPECIES_COUNT;species++) {
+    flower_prepare(0,0,0,(flower_species_t)-1);
+    assert(current_species==FLOWER_VALLEY&&count>0);
+    flower_prepare(0,0,0,FLOWER_SPECIES_COUNT);
+    assert(current_species==FLOWER_VALLEY&&count>0);
+    for(int species=0;species<FLOWER_SPECIES_COUNT;species++) {
         unsigned covered=0;
         for(int frame=0;frame<60;frame++) {
             elapsed=frame*.7f;
             flower_prepare(.033f,frame%3==0?-180:180,frame%2?-180:180,(flower_species_t)species);
             assert(count>8&&count<MAX_PARTS);
+            for(unsigned i=0;i<count;i++) {
+                assert(isfinite(petals[i].invzz)&&petals[i].invzz>0);
+                for(int j=0;j<3;j++) {
+                    assert(petals[i].radius[j]>0&&isfinite(petals[i].radius[j]));
+                    assert(fabsf(dot(petals[i].axis[j],petals[i].axis[j])-1)<.0001f);
+                    assert(fabsf(dot(petals[i].axis[j],petals[i].axis[(j+1)%3]))<.0001f);
+                }
+            }
             flower_draw(full,0,H);
             background_frame();
             for(int y=0;y<H;y+=8) {
@@ -83,8 +106,9 @@ int main(void) {
         }
         assert(covered>18000);
         elapsed=4;flower_prepare(0,0,0,(flower_species_t)species);
-        flower_draw(full,0,H);ppm(files[species],full);
-        printf("SPECIES_OK %d: 60 poses, %u analytic parts, no stored vertices\n",species,count);
+        char path[96];snprintf(path,sizeof path,".cache/flower-%s.ppm",flower_names[species]);
+        flower_draw(full,0,H);ppm(path,full);
+        printf("SPECIES_OK %s: 60 poses, %u analytic parts, no stored vertices\n",flower_names[species],count);
     }
     // Analytic bell sanity checks independent of the assembled plant.
     // Built by hand, so it needs the same derivation flower_prepare does; see
@@ -101,11 +125,11 @@ int main(void) {
     // is the one thing this arrangement can get wrong, and it fails silently --
     // a stale seed_map is a plausible-looking flower with the wrong texture.
     // Drawing the same pose either side of a release must agree exactly.
-    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
+    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);hush_swarm();
     flower_draw(full,0,H);
     memcpy(assembled,full,sizeof full);
     scene_mem_release();
-    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
+    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);hush_swarm();
     flower_draw(full,0,H);
     assert(memcmp(full,assembled,sizeof full)==0);
     // And a foreign owner taking the block in between must not change that.
@@ -114,7 +138,7 @@ int main(void) {
     void *b=scene_mem(&other_owner,64,&stolen);
     assert(b&&stolen);
     memset(b,0x5a,64);
-    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
+    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);hush_swarm();
     flower_draw(full,0,H);
     assert(memcmp(full,assembled,sizeof full)==0);
     // ---- the block is 16-byte aligned ----------------------------------
@@ -151,25 +175,25 @@ int main(void) {
     scene_mem_release();
 
     // ---- the single FLOWER row's rotation ------------------------------
-    // Four menu rows became one that rotates the three botanicals. Changing
+    // The menu row rotates all botanicals. Changing
     // species rebuilds the whole part list between one frame and the next, so
     // the swap is hidden behind a dissolve; what has to be true is that every
-    // swap lands on a frame with nothing of either plant on it, that all three
+    // swap lands on a frame with nothing of either plant on it, that all species
     // are actually reached, and that the part list is valid at every single
     // frame rather than only at the poses the per-species loop above samples.
     unsigned seen[FLOWER_SPECIES_COUNT]={0};
     unsigned swaps=0,dissolving=0,opaque=0;
     flower_species_t previous=flower_current_species();
     unsigned previous_layout=bloom_rng;
-    // Four rotations at 30 fps. Long enough that the generator has to produce
-    // every species rather than happening to.
-    const int ROTATIONS=24;
-    const int FRAMES=(int)(ROTATIONS*FLOWER_ROTATE_S*30)+120;
+    // Cover the enlarged collection. Floating accumulation can put each swap
+    // one frame after 40 seconds, so allow that frame per interval explicitly.
+    const int ROTATIONS=128;
+    const int FRAMES=ROTATIONS*((int)(FLOWER_ROTATE_S*30)+1)+120;
     for(int frame=0;frame<FRAMES;frame++) {
         flower_prepare_rotating(1.0f/30,frame%5==0?-90:90,frame%3?60:-60);
         float fade=flower_fade();
         assert(fade>=0&&fade<=1);
-        // The rotation only ever shows a botanical; CRYSTAL is not in it.
+        // The rotation only ever shows a valid botanical.
         flower_species_t now=flower_current_species();
         unsigned layout=((GardenFrame*)(seed_map+32*32))->seed;
         assert((layout!=previous_layout)==(now!=previous));
@@ -193,17 +217,20 @@ int main(void) {
         }
         if(fade>=1)opaque++; else dissolving++;
     }
-    // Four intervals of 40 s in 4x40x30+120 frames: four swaps, and the extra
+    // One swap per interval, and the extra
     // 120 frames are there so the last one is followed by visible frames.
     assert(swaps==(unsigned)ROTATIONS);
     for(int s=FLOWER_VALLEY;s<FLOWER_SPECIES_COUNT;s++)
-        assert(seen[s]>0);   // all three botanicals actually came up
+        assert(seen[s]>0);   // every botanical actually came up
     // The dissolve happened and was brief: 1.2 s of every 40 at 30 fps is 36
     // frames a swap, so it is a small fraction of the time but not zero.
     assert(dissolving>0&&dissolving<FRAMES/8);
     assert(opaque>FRAMES*3/4);
     // Naming a species directly must be unaffected by any of that.
-    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);
+    // Against the same `assembled` as the recycle checks above, so the swarm is
+    // hushed here for the same reason: 28,920 frames of rotation have advanced
+    // it, and this assertion is about the species and the dissolve.
+    elapsed=4;flower_prepare(0,0,0,FLOWER_SUNFLOWER);hush_swarm();
     assert(flower_fade()==1);
     flower_draw(full,0,H);
     assert(memcmp(full,assembled,sizeof full)==0);

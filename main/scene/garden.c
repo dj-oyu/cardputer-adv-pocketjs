@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
+#if GARDEN_MOTE_ONLY
+#include "esp_log.h"
+#endif
 // TEMPORARY (see garden.h). One rsr.ccount either side of the vector half,
 // twice a row; the fences stop the compiler moving work across them.
 #define GARDEN_FENCE __asm__ __volatile__("":::"memory")
@@ -193,6 +196,42 @@ garden_octave_lanes(int16_t *dens,int n,int rc0,int step,
         dens[x]=(int16_t)(first?3*d:dens[x]+d);
     }
 }
+// The canopy's span, written as lanes.
+//
+// It is 8,299 of the 16,218 blends garden_row's scalar decorations make in a
+// frame -- more than the trunks and the grass together -- and it makes them in
+// 154 runs of about 54 contiguous pixels, one per ellipse-row, which is the
+// shape a vector unit wants. The trunks are 405 spans of fifteen and the grass
+// is spans of four; neither is worth eight lanes.
+//
+// Three things had to be true for this to be expressible without moving a
+// pixel, and all three are swept in tools/pie/models/garden_model.c:
+//
+//   mrr = ceil(2^26/rr) reaches 85,598 and does not fit a 16-bit lane. Split it
+//   as hi*256+lo and take dx2*hi*256 as (dx2*16)*(hi*16), which does fit,
+//   because dx2 <= 1936 and hi <= 334.
+//
+//   q*3/5 is (q*39322)>>16 exactly over q in 0..256.
+//
+//   The `if(q>0)` disappears rather than becoming a mask: clamping q to zero
+//   gives f=0, and (A*256 + B*0)>>8 is A. Blending with zero alpha is the
+//   identity, so the branch is free to go.
+static void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
+                              uint16_t leafy) {
+    int mhi=(mrr>>8)*16,mlo=mrr&255,qbase=256-qy;
+    int lr=(leafy>>11)&31,lg=(leafy>>5)&63,lb=leafy&31;
+    for(int x=lo;x<=hi;x++) {
+        int dx=x-cx,dx2=dx*dx;
+        int t=((dx2*16)*mhi+dx2*mlo)>>18;
+        int q=qbase-t;
+        if(q<0)q=0;
+        int f=(q*39322)>>16,g=256-f;
+        unsigned a=row[x];
+        row[x]=(uint16_t)(((((a>>11)&31)*g+lr*f)>>8)*2048
+                         +((((a>>5)&63)*g+lg*f)>>8)*32
+                         +(((a&31)*g+lb*f)>>8));
+    }
+}
 // One sunlight shoulder. The clamp replaces the scalar `if`: at |d| == w the
 // rounded-up reciprocal makes s exactly 0, so an out-of-band column adds
 // nothing without being tested. s can be 256, so s*s leaves a lane -- it is
@@ -207,40 +246,195 @@ static int garden_shoulder(int x,int at,int w,int m,int gain,int haze4) {
 }
 // The pixel pass. Everything here is a lane operation: the C is the statement
 // of what the assembly does, in the order it does it.
+// One pixel of the light, with `extra` added to the sunlight before the
+// channels are formed. It exists so that the mote touch-up and the pixel pass
+// are the same arithmetic rather than two copies of it -- the approximations in
+// here (the combined shifts, the two-step shoulder) are exactly the ones the
+// PIE kernel makes, and a second copy would drift away from them silently.
+static inline uint16_t garden_shade_pixel(int x,int dn,const GardenRow *r,int extra) {
+    int u=x-r->center;
+    if(u<-r->width)u=-r->width;
+    if(u>r->width)u=r->width;
+    int q=256-((((u*u)&0xffff)*r->mww)>>14);
+    int ambient=r->ambient_y+((dn*GARDEN_M48)>>16);
+    int k=r->kbase+((dn*GARDEN_M80)>>16),haze=320+dn;
+    int sun=(((q*k)&0xffff)*q)>>16;
+    sun+=garden_shoulder(x,r->at0,r->w0,r->mw0,4,haze);
+    sun+=garden_shoulder(x,r->at1,r->w1,r->mw1,7,haze);
+    unsigned h=((unsigned)(x*GARDEN_DKX)^(unsigned)r->dy)&0xffffu;
+    int d=(int)((((h*h)>>17)*GARDEN_DKM>>16)&3u);
+    int fr=10,fg=22,fb=28;      /* the channel floors, named so the switch can drop them */
+#if GARDEN_MOTE_ONLY
+    // Everything the BACKGROUND writes, dropped -- and nothing else. See the
+    // switch in garden.h: `q` is computed above and survives untouched, because
+    // the mote is gated by it and zeroing the shaft by zeroing its lobe would
+    // take the motes with it and prove nothing. The line below is the whole of
+    // the blanking, and it is placed after q and before the mote's term on
+    // purpose. Do not move it up.
+    ambient=0;sun=0;d=0;fr=fg=fb=0;
+#endif
+    // The mote's own light, gated by the shaft it sits in. Adding it flat would
+    // make a mote just as bright over the woodland as inside the beam; scaling
+    // by q means it only exists where the light does, which is both what dust
+    // does and what the effect is for. q is already here, so it is one multiply.
+    sun+=(extra*q)>>8;
+    int cr=((ambient+5*sun)>>1)+d+fr;
+    int cg=((3*ambient+6*sun)>>2)+d+fg;
+    int cb=(ambient+((sun*GARDEN_M3)>>16)+d+fb)>>3;
+    return (uint16_t)((((cr*256)&0xF800)|((cg*8)&0x07E0))|cb);
+}
 static void __attribute__((unused))
 garden_pixels(uint16_t *row,const int16_t *dens,const GardenRow *r) {
-    for(int x=0;x<240;x++) {
-        int u=x-r->center;
-        if(u<-r->width)u=-r->width;
-        if(u>r->width)u=r->width;
-        int q=256-((((u*u)&0xffff)*r->mww)>>14);
-        // dens holds 3Dc+Df. floor(S/48) is floor((S/4)/12) exactly and
-        // floor(S/80) is floor((S/4)/20), so the quarter never has to be
-        // taken; the haze keeps it by staying at four times its value and
-        // shifting by 18 instead of 16.
-        int dn=dens[x];
-        int ambient=r->ambient_y+((dn*GARDEN_M48)>>16);
-        int k=r->kbase+((dn*GARDEN_M80)>>16),haze=320+dn;
-        // q*q*k leaves a lane at both ends; (q*k)*q does not, and is the same
-        // number (garden_model.c sweeps it as an identity, not a bound).
-        int sun=(((q*k)&0xffff)*q)>>16;
-        sun+=garden_shoulder(x,r->at0,r->w0,r->mw0,4,haze);
-        sun+=garden_shoulder(x,r->at1,r->w1,r->mw1,7,haze);
-        // h = x*K ^ (row term): EE.VADDS.S16 saturates, so the row term is
-        // XORed in rather than added. See garden_dither.
-        unsigned h=((unsigned)(x*GARDEN_DKX)^(unsigned)r->dy)&0xffffu;
-        int d=(int)((((h*h)>>17)*GARDEN_DKM>>16)&3u);
-        // ambient/2 and sun*5/2 floor separately in the scalar loop and
-        // together here, which is one QACC pass instead of two and moves the
-        // channel by at most one 8-bit step before the 565 truncation.
-        int cr=((ambient+5*sun)>>1)+d+10;
-        int cg=((3*ambient+6*sun)>>2)+d+22;
-        int cb=(ambient+((sun*GARDEN_M3)>>16)+d+28)>>3;
-        // (v>>3)<<11 is (v<<8) masked, and SAR=0 makes the left shift one
-        // multiply. Blue has no left shift to hide in, so it comes out of QACC.
-        row[x]=(uint16_t)((((cr*256)&0xF800)|((cg*8)&0x07E0))|cb);
+    for(int x=0;x<240;x++)row[x]=garden_shade_pixel(x,dens[x],r,0);
+}
+// Where the light is, at this row. The one definition of it.
+//
+// Two places need it and they must not disagree. The renderer treats a column
+// as lit when |x-center| < half, because that is exactly where the lobe
+// q = 256 - u*u*256/(half*half) is positive; garden_motes uses the same test to
+// decide whether a particle is still alive. If those two drifted apart, midges
+// would either die a few pixels inside the visible edge -- a band where the
+// swarm mysteriously thins -- or be tracked a few pixels outside it, which is
+// merely wasteful. The warp term is per-row and comes from the phase, so a
+// version of this that left it out would be wrong in the first way.
+static void garden_shaft(int y,const GardenFrame *f,int *center,int *half) {
+    *center=200-(y+40)*3/4+f->sun+(garden_motion((unsigned)(f->phase+y*64),419)-128)/16;
+    *half=58+y/3;
+}
+// The only place a mote's heading is written after it is seeded.
+//
+// The dying latch lives in the sign of that byte, so an assignment made without
+// thinking anywhere else would silently resurrect a dying particle -- and the
+// symptom is subtle enough to go unnoticed for a long time. That is the same
+// shape as petal_reciprocals being forgettable in flower.c, and it gets the
+// same fix: one greppable function, and the invariant holds because there is
+// one place rather than because anybody remembered.
+static void garden_mote_turn(GardenMote *m,int turn) {
+    int dying=m->dir<0,h=(dying?-m->dir:m->dir)-1;   /* 0..126 */
+    h+=turn;
+    if(h<0)h+=127;else if(h>=127)h-=127;
+    m->dir=(int8_t)(dying?-(h+1):h+1);
+}
+// The heading in 256ths of a turn, reversed while dying -- which is the whole
+// of the outward nudge, and costs nothing because it is the latch.
+static int garden_mote_dir(const GardenMote *m) {
+    int h=((m->dir<0?-m->dir:m->dir)-1)*2;
+    return m->dir<0?h+128:h;
+}
+// A whole turn in 256, to about 5%: the parabola the ocean kernel uses, which
+// is plenty for something nobody measures the trajectory of, and keeps the
+// swarm out of libm. Derived rather than tabulated, so the file's opening claim
+// about LUTs stays true -- a 64-entry quarter table would have been smaller to
+// read and a promise to break.
+static int garden_sin(unsigned a) {
+    int u=(int)(a&255)-128,v=u<0?-u:u;
+    return (u*(128-v))>>4;                  /* -256..256 */
+}
+// The swarm, advanced one frame.
+//
+// Everything random here is a function of (phase, particle), so the same
+// sequence of times produces the same swarm -- the positions integrate, but the
+// draws that move them do not carry anything. That is what makes a swarm
+// testable at all.
+static void garden_motes(GardenFrame *f) {
+    for(int i=0;i<GARDEN_MOTES;i++) {
+        GardenMote *m=&f->mote[i];
+        unsigned h=garden_hash((unsigned)f->phase*2654435761u
+                               +(unsigned)i*0x9E3779B9u+f->seed);
+        // Move first, then cull, so that when this returns every particle is
+        // inside the shaft. Culling first would leave one outside for the frame
+        // it dies on -- harmless, because the gate by q makes it invisible
+        // there, but it would mean the invariant is only nearly true, and a
+        // nearly-true invariant is not one anything can be checked against.
+        if(m->speed) {
+            // Heading, not position. A small turn most frames and a sharp one
+            // about one frame in eight is what makes it dart rather than
+            // wander; random-walking the position gives noise instead.
+            int turn=(int)(h&15)-8;
+            if(((h>>8)&7)==0)turn=(int)((h>>16)&63)-32;
+            garden_mote_turn(m,turn);
+            // Speed, re-drawn occasionally: mostly a cruise, sometimes a hover
+            // of very nearly nothing. The pauses are most of what reads as
+            // alive. Never zero -- zero is the marker for a particle that has
+            // never been seeded, and a hover that drew it used to kill one
+            // every sixty-fourth particle-frame.
+            if(((h>>12)&15)==0)m->speed=(uint8_t)(1+((h>>26)&3));
+            else if(((h>>12)&3)==0)m->speed=(uint8_t)(10+((h>>24)&11));
+            // Vertical travel is scaled up by half: they bob more than they
+            // wander sideways.
+            int a=garden_mote_dir(m);
+            int dx=(garden_sin((unsigned)a+64u)*m->speed)>>8;
+            int dy=(garden_sin((unsigned)a)*m->speed*3)>>9;
+            // The tether, and its gain is the whole of whether this reads as a
+            // swarm or as fourteen things leaving. A step of about a pixel with
+            // a heading that persists some eight frames is a random walk of ~9
+            // px per correlation time, so holding a volume of about thirty
+            // needs a pull near a sixteenth; at 1/128 they reached 113 px from
+            // home, which is most of the screen. Held twice as firmly in y,
+            // because the vertical step is half again the horizontal one and
+            // the bob would otherwise become a drift out of the frame.
+            int hc,hh;garden_shaft(m->hy>>4,f,&hc,&hh);
+            int hx=(hc+m->hoff)*16;
+            m->x=(int16_t)(m->x+dx+((hx-m->x)>>4));
+            m->y=(int16_t)(m->y+dy+((m->hy-m->y)>>3));
+            if(m->age<255)m->age++;
+            // The latch. Set once, never cleared: coming back above the line
+            // does not cancel it, which is what stops a particle sitting on the
+            // line from flickering between fading and not.
+            if(m->dir>0&&(m->y>>4)>GARDEN_DOOM) {
+                m->dir=(int8_t)-m->dir;
+                m->dim=GARDEN_DYING;
+            } else if(m->dir<0&&m->dim) m->dim--;
+        }
+        int y=m->y>>4,center,half;
+        int alive=0;
+        if(m->speed&&m->dir&&!(m->dir<0&&!m->dim)&&y>=0&&y<135) {
+            garden_shaft(y,f,&center,&half);
+            int u=(m->x>>4)-center;
+            alive=u>-half&&u<half;
+        }
+        if(alive)continue;
+        // Replaced where it can be seen. This is also how the swarm starts: a
+        // zeroed GardenFrame is fourteen particles at (0,0), which is outside
+        // the shaft, so the cull is the seeding rule as well as the death rule
+        // and there is no separate initialisation to forget.
+        unsigned g=garden_hash(h^0xA5A5u);
+        int ny=25+(int)(g%88u);
+        garden_shaft(ny,f,&center,&half);
+        // Biased to the axis by the square: more of them where the light is
+        // strong, which is where the real thing gathers.
+        int off=(int)((g>>8)&127)-64;
+        off=off*(off<0?-off:off)/64;
+        m->hoff=(int16_t)(off*half/90);
+        m->hy=(int16_t)(ny*16);
+        m->x=(int16_t)((center+m->hoff)*16);m->y=m->hy;
+        m->dir=(int8_t)(1+(int)((g>>16)&126));      /* 1..127: alive, never zero */
+        m->speed=(uint8_t)(10+((g>>24)&11));
+        m->glow=(uint8_t)(GARDEN_GLOW_BASE+((g>>20)&31));
+        m->age=0;m->dim=0;
     }
 }
+#if GARDEN_MOTE_INDEX && !GARDEN_NO_MOTES
+// The scan, hoisted out of the row loop. Written here and nowhere else, and
+// read-only from garden_row -- which is what makes it legal at all, given that
+// garden_row takes a const GardenFrame *.
+//
+// The membership rule has to be the same one the row uses, so it is stated in
+// the same terms: a mote lies across rows top and top+1, and the second gets a
+// share of zero when the position is exactly on a row boundary. Get this wrong
+// in the generous direction and the index costs a little; wrong in the mean
+// direction and a mote flickers.
+static void garden_mote_index(GardenFrame *f) {
+    for(int y=0;y<GARDEN_ROWS;y++)f->rowmask[y]=0;
+    for(int i=0;i<GARDEN_MOTES;i++) {
+        const GardenMote *m=&f->mote[i];
+        if(!m->glow)continue;
+        int top=m->y>>4,frac=m->y&15;
+        if(top>=0&&top<GARDEN_ROWS)f->rowmask[top]|=(uint16_t)(1u<<i);
+        if(frac&&top+1>=0&&top+1<GARDEN_ROWS)f->rowmask[top+1]|=(uint16_t)(1u<<i);
+    }
+}
+#endif
 void garden_prepare(GardenFrame *f,float time) {
     // Fractional advection avoids whole-pixel jumps. All noise is periodic at
     // this wrap, including wind, so long-running animation has no reset seam.
@@ -248,6 +442,32 @@ void garden_prepare(GardenFrame *f,float time) {
     f->sun=(garden_motion((unsigned)f->phase,83)-128)/24;
     f->breath=(garden_motion((unsigned)f->phase,193)-128)/24;
     f->seed=0;
+#if GARDEN_NO_MOTES
+    // The whole feature, gone: no motion, no index, no touch-up. Nothing else
+    // in the frame changes, which is the entire point -- see garden.h.
+    (void)garden_motes;
+#else
+    garden_motes(f);
+#if GARDEN_MOTE_INDEX
+    garden_mote_index(f);
+#endif
+#endif
+#if GARDEN_MOTE_ONLY && !GARDEN_NO_MOTES && defined(ESP_PLATFORM)
+    // Where they are, once a second, so a capture can be checked against
+    // arithmetic instead of against an impression. Positions in whole pixels
+    // and the three things that decide whether anything is written: glow, the
+    // birth ramp, and the dying fade. A writable static, which the rest of this
+    // file does not permit -- it is here only in the diagnostic build.
+    {
+        static unsigned tick;
+        if(tick++%25u==0)
+            for(int i=0;i<GARDEN_MOTES;i++) {
+                const GardenMote *m=&f->mote[i];
+                ESP_LOGI("garden","MOTE %d x=%d y=%d frac=%d glow=%u age=%u dim=%u dir=%d",
+                         i,m->x>>4,m->y>>4,m->y&15,m->glow,m->age,m->dim,m->dir);
+            }
+    }
+#endif
 }
 // The pixel loop the three lane passes above replace, kept because it is the
 // only readable statement of what they compute. It is not called: anything
@@ -462,15 +682,52 @@ garden_fine_pie(int16_t *dens,int n,int rc0,int a,int da,int ddb) {
 // purpose -- 256 appears four times because it is wanted four times, and a
 // register kept for it would have to come out of the seven the arithmetic uses.
 //
-// These are plain loads rather than the fused ones the octaves use, because
-// only EE.VADDS/VSUBS/VMUL have a .LD.INCP form and this body has 28 of those
-// against 40 constants. Fusing what can be fused would take the block from 135
-// instructions to about 107; it is left undone deliberately, as a measured step
-// after the device says this shape works, rather than a second untested change
-// folded into the first.
+// Twenty-one of the forty now ride a .LD.INCP form (see the macros below and
+// GARDEN_PIE_FUSE); the other nineteen are plain, because only
+// EE.VADDS/VSUBS/VMUL have that form, the host has to be free at the right
+// point in the walk, and a fusion that would put a stage-2 load next to its
+// consumer is refused. 135 instructions a block, 114 fused. The estimate from
+// counting the arithmetic was ~107; 114 is what the register allocation, the
+// walk order and the stall check actually allow.
+//
+// tools/pie/fuse_pixels.py generated this and can regenerate it. Edit the
+// arithmetic here; do not hand-edit which load rides which instruction.
 //
 // The body is ~470 bytes, well past loopgtz's 256, so it closes with addi/bnez
 // (docs/pie-simd.md 7). Two instructions a block.
+// The fusion, as one spelling with a switch under it.
+//
+// EE.VADDS/VSUBS/VMUL have a .LD.INCP form that loads a vector and advances the
+// pointer in the same slot, and 3.4 measures that load as free -- so a fused
+// load is an instruction that has stopped existing. Twenty-one of the pixel
+// pass's forty constants can ride one: 135 instructions a block become 114.
+//
+// The unfused expansion is the same instruction in the same place followed by
+// the plain load, so the two builds issue identical work in identical order and
+// differ only by the twenty-two slots. That is what makes the switch a control
+// rather than a second kernel: comparing across two builds is exactly how a
+// 1.0 ms figure got produced that turned out to be inside the i-cache
+// alignment envelope.
+//
+// The one invariant that is not local: the constant walk is the PROGRAM ORDER
+// of the loads. A fused load moves to its host instruction, and if that move
+// crossed another load the two would silently swap constants -- a defect that
+// compiles, runs, and shows up as a wrong colour somewhere. The generator that
+// produced this body checked the order of all forty against the original;
+// tools/pie/test_kernels.py checks the result against the scalar loop, which is
+// what would actually catch it.
+#if GARDEN_PIE_FUSE
+#define P_ADD(z,x,y,ld) "  ee.vadds.s16.ld.incp " ld ", %[kp], " z ", " x ", " y "\n"
+#define P_SUB(z,x,y,ld) "  ee.vsubs.s16.ld.incp " ld ", %[kp], " z ", " x ", " y "\n"
+#define P_MUL(z,x,y,ld) "  ee.vmul.s16.ld.incp " ld ", %[kp], " z ", " x ", " y "\n"
+#else
+#define P_ADD(z,x,y,ld) "  ee.vadds.s16 " z ", " x ", " y "\n" \
+                        "  ee.vld.128.ip " ld ", %[kp], 16\n"
+#define P_SUB(z,x,y,ld) "  ee.vsubs.s16 " z ", " x ", " y "\n" \
+                        "  ee.vld.128.ip " ld ", %[kp], 16\n"
+#define P_MUL(z,x,y,ld) "  ee.vmul.s16 " z ", " x ", " y "\n" \
+                        "  ee.vld.128.ip " ld ", %[kp], 16\n"
+#endif
 static void __attribute__((noinline))
 garden_pixels_pie(uint16_t *row,const int16_t *dens,const GardenRow *r) {
     int center=r->center,width=r->width,mww=r->mww;
@@ -507,25 +764,21 @@ garden_pixels_pie(uint16_t *row,const int16_t *dens,const GardenRow *r) {
         "1:\n"
         "  ee.vld.128.ip        q1, %[kp], 16\n"             /* -center */
         "  ee.vld.128.ip        q2, %[kp], 16\n"             /* width */
-        "  ee.vadds.s16         q3, q0, q1\n"                /* u = x - center */
-        "  ee.vld.128.ip        q1, %[kp], 16\n"             /* -width */
+        P_ADD("q3","q0","q1","q1")                  /* u = x - center; load -width */
         "  ee.vmin.s16          q3, q3, q2\n"
-        "  ee.vld.128.ip        q2, %[kp], 16\n"             /* ceil(2^22/ww) */
         "  ee.vmax.s16          q3, q3, q1\n"                /* clamped, so the lobe needs no test */
-        "  ee.vmul.s16          q3, q3, q3\n"                /* u*u, at most 10404 */
+        P_MUL("q3","q3","q3","q2")                  /* u*u, at most 10404; load ceil(2^22/ww) */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q3, q2\n"
         "  ee.vld.128.ip        q2, %[kp], 16\n"             /* 256 */
         "  ee.srcmb.s16.qacc    q3, %[sh14], 0\n"
-        "  ee.vld.128.ip        q4, %[kp], 16\n"             /* ceil(2^16/48) */
-        "  ee.vsubs.s16         q3, q2, q3\n"                /* q, exactly 0 at the clamp */
+        P_SUB("q3","q2","q3","q4")                  /* q, exactly 0 at the clamp; load ceil(2^16/48) */
         "  ee.vld.128.ip        q5, %[dens], 16\n"           /* S = 3Dc + Df */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q5, q4\n"
         "  ee.vld.128.ip        q4, %[kp], 16\n"             /* ambient_y */
         "  ee.srcmb.s16.qacc    q1, %[sh16], 0\n"
-        "  ee.vld.128.ip        q2, %[kp], 16\n"             /* ceil(2^16/80) */
-        "  ee.vadds.s16         q1, q1, q4\n"                /* ambient */
+        P_ADD("q1","q1","q4","q2")                  /* ambient; load ceil(2^16/80) */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q5, q2\n"
         "  ee.vld.128.ip        q4, %[kp], 16\n"             /* 17 + breath */
@@ -533,61 +786,51 @@ garden_pixels_pie(uint16_t *row,const int16_t *dens,const GardenRow *r) {
         "  ee.vld.128.ip        q6, %[kp], 16\n"             /* 320 */
         "  ee.vadds.s16         q2, q2, q4\n"                /* k */
         "  ee.vadds.s16         q5, q5, q6\n"                /* 4*haze */
-        "  ee.vmul.s16          q4, q3, q2\n"                /* q*k, at most 8704 */
+        P_MUL("q4","q3","q2","q2")                  /* q*k, at most 8704; load -at0 */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q4, q3\n"
-        "  ee.vld.128.ip        q2, %[kp], 16\n"             /* -at0 */
         "  ee.srcmb.s16.qacc    q4, %[sh16], 0\n"            /* sun */
-        "  ee.vld.128.ip        q6, %[kp], 16\n"             /* w0 */
-        "  ee.vadds.s16         q3, q0, q2\n"
+        P_ADD("q3","q0","q2","q6")                  /* load w0 */
         "  ee.vld.128.ip        q2, %[kp], 16\n"             /* -w0 */
         "  ee.vmin.s16          q3, q3, q6\n"
-        "  ee.vld.128.ip        q6, %[kp], 16\n"             /* ceil(2^22/ww0) */
         "  ee.vmax.s16          q3, q3, q2\n"
-        "  ee.vmul.s16          q3, q3, q3\n"
+        P_MUL("q3","q3","q3","q6")                  /* load ceil(2^22/ww0) */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q3, q6\n"
         "  ee.vld.128.ip        q6, %[kp], 16\n"             /* 256 */
         "  ee.srcmb.s16.qacc    q3, %[sh14], 0\n"
-        "  ee.vld.128.ip        q7, %[kp], 16\n"             /* 4 */
-        "  ee.vsubs.s16         q3, q6, q3\n"                /* the shoulder, 0..256 */
-        "  ee.vmul.s16          q6, q3, q7\n"                /* s*4 keeps s*s inside a lane */
+        P_SUB("q3","q6","q3","q7")                  /* the shoulder, 0..256; load 4 */
+        "  ee.vld.128.ip        q2, %[kp], 16\n"            /* -at1 */
+        P_MUL("q6","q3","q7","q7")                  /* s*4 keeps s*s inside a lane; load w1 */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q6, q3\n"
-        "  ee.vld.128.ip        q2, %[kp], 16\n"             /* -at1 */
         "  ee.srcmb.s16.qacc    q6, %[sh8], 0\n"
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q6, q5\n"
         "  ee.srcmb.s16.qacc    q6, %[sh18], 0\n"
-        "  ee.vld.128.ip        q7, %[kp], 16\n"             /* w1 */
-        "  ee.vadds.s16         q4, q4, q6\n"                /* sun += the first shoulder */
-        "  ee.vld.128.ip        q3, %[kp], 16\n"             /* -w1 */
+        P_ADD("q4","q4","q6","q3")                  /* sun += the first shoulder; load -w1 */
         "  ee.vadds.s16         q6, q0, q2\n"
         "  ee.vmin.s16          q6, q6, q7\n"
-        "  ee.vld.128.ip        q7, %[kp], 16\n"             /* ceil(2^22/ww1) */
         "  ee.vmax.s16          q6, q6, q3\n"
-        "  ee.vmul.s16          q6, q6, q6\n"
+        P_MUL("q6","q6","q6","q7")                  /* load ceil(2^22/ww1) */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q6, q7\n"
         "  ee.vld.128.ip        q7, %[kp], 16\n"             /* 256 */
         "  ee.srcmb.s16.qacc    q6, %[sh14], 0\n"
-        "  ee.vld.128.ip        q3, %[kp], 16\n"             /* 7 */
-        "  ee.vsubs.s16         q6, q7, q6\n"
-        "  ee.vmul.s16          q7, q6, q3\n"
+        P_SUB("q6","q7","q6","q3")                  /* load the dither's x multiplier; load 7 */
+        "  ee.vld.128.ip        q2, %[kp], 16\n"
+        P_MUL("q7","q6","q3","q3")                  /* load its row term */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q7, q6\n"
-        "  ee.vld.128.ip        q2, %[kp], 16\n"             /* the dither's x multiplier */
         "  ee.srcmb.s16.qacc    q7, %[sh8], 0\n"
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q7, q5\n"
-        "  ee.vld.128.ip        q3, %[kp], 16\n"             /* its row term */
         "  ee.srcmb.s16.qacc    q7, %[sh18], 0\n"
-        "  ee.vmul.s16          q5, q0, q2\n"                /* 4*haze is finished with */
+        P_MUL("q5","q0","q2","q6")                  /* 4*haze is finished with; load the dither's second multiplier */
         "  ee.vadds.s16         q4, q4, q7\n"                /* sun += the second shoulder */
         "  ee.xorq              q5, q5, q3\n"                /* XOR, because EE.VADDS saturates */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q5, q5\n"                    /* the full 32-bit square */
-        "  ee.vld.128.ip        q6, %[kp], 16\n"             /* the dither's second multiplier */
         "  ee.srcmb.s16.qacc    q5, %[sh17], 0\n"   /* 17: SRCMB saturates, h*h reaches 2^32 */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q5, q6\n"
@@ -599,12 +842,10 @@ garden_pixels_pie(uint16_t *row,const int16_t *dens,const GardenRow *r) {
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q1, q7\n"                    /* 128*ambient */
         "  ee.vmulas.u16.qacc   q4, q6\n"                    /* + 640*sun, so >>8 is (a+5s)>>1 */
-        "  ee.vld.128.ip        q7, %[kp], 16\n"             /* 10 */
         "  ee.srcmb.s16.qacc    q2, %[sh8], 0\n"
-        "  ee.vld.128.ip        q6, %[kp], 16\n"             /* 256 */
-        "  ee.vadds.s16         q2, q2, q3\n"
-        "  ee.vadds.s16         q2, q2, q7\n"
-        "  ee.vld.128.ip        q7, %[kp], 16\n"             /* 0xF800 */
+        P_ADD("q2","q2","q3","q7")                  /* load 256; load 10 */
+        "  ee.vld.128.ip        q6, %[kp], 16\n"
+        P_ADD("q2","q2","q7","q7")                  /* load 0xF800 */
         "  ee.vmul.s16          q2, q2, q6\n"                /* (v>>3)<<11 is (v<<8) masked */
         "  ee.vld.128.ip        q5, %[kp], 16\n"             /* 192 */
         "  ee.andq              q2, q2, q7\n"
@@ -612,26 +853,21 @@ garden_pixels_pie(uint16_t *row,const int16_t *dens,const GardenRow *r) {
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q1, q5\n"
         "  ee.vmulas.u16.qacc   q4, q6\n"
-        "  ee.vld.128.ip        q7, %[kp], 16\n"             /* 22 */
         "  ee.srcmb.s16.qacc    q5, %[sh8], 0\n"
-        "  ee.vld.128.ip        q6, %[kp], 16\n"             /* 8 */
-        "  ee.vadds.s16         q5, q5, q3\n"
-        "  ee.vadds.s16         q5, q5, q7\n"
-        "  ee.vld.128.ip        q7, %[kp], 16\n"             /* 0x07E0 */
+        P_ADD("q5","q5","q3","q7")                  /* load 8; load 22 */
+        "  ee.vld.128.ip        q6, %[kp], 16\n"
+        P_ADD("q5","q5","q7","q7")                  /* load 0x07E0 */
         "  ee.vmul.s16          q5, q5, q6\n"
         "  ee.vld.128.ip        q6, %[kp], 16\n"             /* ceil(2^16/3) */
         "  ee.andq              q5, q5, q7\n"
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q4, q6\n"                    /* sun/3 */
-        "  ee.vld.128.ip        q6, %[kp], 16\n"             /* 28 */
         "  ee.srcmb.s16.qacc    q7, %[sh16], 0\n"
-        "  ee.vadds.s16         q7, q7, q1\n"
-        "  ee.vadds.s16         q7, q7, q3\n"
-        "  ee.vadds.s16         q7, q7, q6\n"
-        "  ee.vld.128.ip        q1, %[kp], 16\n"             /* 32 */
+        P_ADD("q7","q7","q1","q6")                  /* load 28 */
+        P_ADD("q7","q7","q3","q1")                  /* load 32 */
+        P_ADD("q7","q7","q6","q6")                  /* load 8 */
         "  ee.zero.qacc\n"
         "  ee.vmulas.u16.qacc   q7, q1\n"                    /* 32*v >> 8 is v >> 3 */
-        "  ee.vld.128.ip        q6, %[kp], 16\n"             /* 8 */
         "  ee.srcmb.s16.qacc    q7, %[sh8], 0\n"
         "  ee.orq               q2, q2, q5\n"
         "  ee.orq               q2, q2, q7\n"
@@ -645,6 +881,9 @@ garden_pixels_pie(uint16_t *row,const int16_t *dens,const GardenRow *r) {
           [sh17]"a"(sh17), [sh18]"a"(sh18), [zero]"a"(zero)
         : "memory");
 }
+#undef P_ADD
+#undef P_SUB
+#undef P_MUL
 #endif
 
 // The run structure both spellings share: blocks that begin in the same
@@ -680,9 +919,55 @@ static void garden_octave_row(int16_t *dens,const int *v,int mask,int p,int step
 // Split out of garden_row so that tools/test_garden.c can hold it against
 // garden_row_scalar pixel for pixel, which it cannot do through the trunks and
 // the canopy drawn on top.
+// One mote, on one row, gated and drawn.
+//
+// Split out so that the two ways of reaching it -- the index, and the scan it
+// replaced -- draw identically by construction. Two copies of this that had to
+// stay in step would be exactly the kind of switch that quietly stops
+// describing the thing it is meant to subtract.
+static inline void garden_mote_touch(uint16_t *row,int y,const GardenMote *m,
+                                     const int16_t *dens,const GardenRow *r) {
+    if(!m->glow)return;
+    // Split between the two rows it lies across, by the sixteenths of its
+    // position. That is what turns a quarter-pixel-a-frame climb into a
+    // drift instead of a stutter: the mote dims on one row as it brightens
+    // on the next, and never sits still.
+    int top=m->y>>4,frac=m->y&15,share;
+    if(top==y)share=16-frac;
+    else if(top+1==y)share=frac;
+    else return;
+    if(!share)return;
+    int glow=m->glow*share>>4;
+    // The ramp still earns its place: deaths are visible now, but a birth
+    // is still a particle appearing where there was none, and a replacement
+    // that blinks on is the one thing left that would read as a glitch.
+    if(m->age<8)glow=glow*(m->age+1)>>3;
+    // And the dying fade, through the same term that gives it the shaft's
+    // colour -- so it dims into the light rather than needing a second
+    // blend path.
+    if(m->dir<0)glow=glow*m->dim/GARDEN_DYING;
+    if(!glow)return;
+    int mx=m->x>>4;
+    // The point and its two neighbours at half. Three across is what a mote
+    // is -- one pixel alone flickers as it crosses a column boundary, and
+    // anything wider stops reading as a point of light.
+    for(int k=-1;k<=1;k++) {
+        int x=mx+k;
+        if(x<0||x>=240)continue;
+#if GARDEN_MOTE_MAGENTA
+        // Straight to the panel, past everything. See the switch in garden.h
+        // for what this can and cannot establish: it is the coordinates and the
+        // write, not the arithmetic.
+        (void)dens;(void)r;(void)glow;
+        row[x]=0xF81Fu;
+#else
+        row[x]=garden_shade_pixel(x,dens[x],r,k?glow/2:glow);
+#endif
+    }
+}
+
 static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
-    int center=200-(y+40)*3/4+f->sun,width=58+y/3;
-    center+=(garden_motion((unsigned)(f->phase+y*64),419)-128)/16;
+    int center,width;garden_shaft(y,f,&center,&width);
     // Everything below is invariant across the row. It used to be recomputed
     // 240 times per row because it sat inside the pixel loop: the trunk hashes
     // and their three integer divisions alone were nine divide instructions per
@@ -712,6 +997,37 @@ static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
 #else
     garden_pixels(row,dens,&r);
 #endif
+#if GARDEN_MOTE_ONLY
+    // The blanking, and it is deliberately here rather than in place of the
+    // kernel call above: the kernel still runs, `dens` and `r` are still what
+    // they always were, and the mote touch-up below reads exactly what it reads
+    // in a shipping build. Only the background's pixels are thrown away.
+    for(int x=0;x<240;x++)row[x]=0;
+#endif
+    // Dust in the shaft, after the light and before the trunks -- so the motes
+    // are in the beam and the trunks and canopy occlude them, which is the
+    // order they should be in. This is where it belongs because `dens` and `r`
+    // are still alive: a mote's pixel is rebuilt from them in about thirty
+    // operations, and storing all 240 lanes of `sun` to avoid that would cost
+    // one extra vector store per block, about 27 us a frame, against roughly
+    // five for the few dozen pixels the motes actually touch.
+    //
+    // That last number is the drawing, and the drawing was never the cost.
+    // The first version tested all fourteen particles on all 135 rows and cost
+    // 1.0 ms of a 41 ms frame -- measured on the board, against 4.6 us
+    // predicted from the pixels touched, which is wrong by a factor of two
+    // hundred. 1,890 tests to find 28 hits: the decision, not the draw. The
+    // index in garden.h is that decision moved into the frame; what is left
+    // here is a bitmask load and the hits.
+#if GARDEN_NO_MOTES
+    /* nothing: garden_mote_touch is a static inline and simply goes away */
+#elif GARDEN_MOTE_INDEX
+    for(unsigned mask=f->rowmask[y];mask;mask&=mask-1)
+        garden_mote_touch(row,y,&f->mote[__builtin_ctz(mask)],dens,&r);
+#else
+    for(int i=0;i<GARDEN_MOTES;i++)
+        garden_mote_touch(row,y,&f->mote[i],dens,&r);
+#endif
     // Adding something to the light afterwards, per pixel: this is where it
     // goes, and this is why `dens` and `r` are still in scope at the end of a
     // function that has finished drawing.
@@ -727,6 +1043,14 @@ static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
     // EE.VST.128.IP a block is 1.6 cycles x 30 x 135, about 27 us a frame,
     // against roughly 5 us to rebuild the few dozen pixels anything sparse
     // would actually touch. So the kernel does not store it, on purpose.
+    //
+    // Both halves of that comparison are pixel counts, and pixel counts turned
+    // out to be the wrong unit for the sparse side: the first swarm cost 1.0 ms
+    // rather than the 5 us this arithmetic gives, because none of it was in the
+    // rebuilding. It was in finding out which pixels to rebuild. The 27 us
+    // stands -- it is a fixed store on every block and nothing decides anything
+    // -- and the choice not to store `sun` still holds, but only once the
+    // deciding is somewhere other than the row.
     //
     // Two scales to get right, because both are four times what the scalar
     // reference above calls by the same name, and a wrong power of two here
@@ -790,20 +1114,11 @@ void garden_row(uint16_t *row,int y,const GardenFrame *f) {
         // exceeds rr) that ceil(2^26/rr) with a shift of 18 reproduces
         // dx*dx*256/rr for every reachable pair. garden_model.c sweeps it.
         int qy=dy*dy*256/(ry*ry),rr=rx*rx;
-#ifndef GARDEN_NO_CANOPY_RECIP
         int mrr=garden_recip(rr,26);
-#endif
         int lo=cx-rx,hi=cx+rx;
         if(lo<0)lo=0;
         if(hi>239)hi=239;
-        for(int x=lo;x<=hi;x++) {
-#ifdef GARDEN_NO_CANOPY_RECIP
-            int dx=x-cx,q=256-dx*dx*256/rr-qy;
-#else
-            int dx=x-cx,q=256-((dx*dx*mrr)>>18)-qy;
-#endif
-            if(q>0)row[x]=garden_mix(row[x],leafy,(unsigned)q*3/5);
-        }
+        garden_canopy_row(row,lo,hi,cx,mrr,qy,leafy);
     }
     // Curved grass and paired fern leaflets. Hashes describe plants, not stored
     // geometry. Each row intersects only a few spans, never a screen buffer.

@@ -230,13 +230,35 @@ def _strip_comments(text):
 _STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
 
-def extract_asm(path, func):
+# garden.c writes the pixel pass's fused constant loads through three macros so
+# that one source can emit both the fused kernel and the control build that has
+# the loads as separate instructions (GARDEN_PIE_FUSE). The tools read C text
+# rather than preprocessed output, so they have to do that expansion themselves
+# -- and they must be able to do it BOTH ways, because the whole point of the
+# switch is that the two spellings can be compared.
+_FUSE = re.compile(r'P_(ADD|SUB|MUL)\("(q[0-7])","(q[0-7])","(q[0-7])","(q[0-7])"\)')
+_FUSE_OP = {'ADD': 'ee.vadds.s16', 'SUB': 'ee.vsubs.s16', 'MUL': 'ee.vmul.s16'}
+
+
+def expand_fuse(src, fuse=True):
+    """Expand garden.c's P_ADD/P_SUB/P_MUL into assembly string literals."""
+    def one(m):
+        op = _FUSE_OP[m.group(1)]
+        z, x, y, ld = m.group(2), m.group(3), m.group(4), m.group(5)
+        if fuse:
+            return '"  ' + op + '.ld.incp ' + ld + ', %[kp], ' + z + ', ' + x + ', ' + y + '\n"'
+        return ('"  ' + op + ' ' + z + ', ' + x + ', ' + y + '\n'
+                '  ee.vld.128.ip ' + ld + ', %[kp], 16\n"')
+    return _FUSE.sub(one, src)
+
+
+def extract_asm(path, func, fuse=True):
     """Return the assembly text of the first `__asm__ volatile(` after the
     definition of `func` in the C file at `path`: the concatenation of its
     string literals up to the operand list (the first ':' that is outside a
     string literal and outside a comment)."""
     with open(path, encoding='utf-8') as f:
-        src = f.read()
+        src = expand_fuse(f.read(), fuse)
     i = src.index(func)
     k = src.index('__asm__ volatile(', i) + len('__asm__ volatile(')
     out, depth = [], 1

@@ -22,15 +22,16 @@
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"
+#include "../main/scene/flower_species.c"
 #include <stdio.h>
 #include <stdlib.h>
 
 #define PHASES 8
-#define SPECIES 8
+#define SPECIES FLOWER_SPECIES_COUNT
 static uint16_t fb[W*H];
 
-static const char *NAME[SPECIES]={"CRYSTAL","VALLEY","SUNFLOWER","SNOWDROP",
-                                  "TULIP","DAFFODIL","CROCUS","CALLA"};
+#include "flower_catalog.h"
+#define NAME flower_names
 
 static void dump(const char *path) {
     FILE *f=fopen(path,"wb");

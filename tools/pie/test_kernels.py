@@ -370,15 +370,24 @@ class GardenRow(unittest.TestCase):
 
             self.broadcast(mem, extract_constants(GARDEN, 'garden_pixels_pie(', env))
             store16(mem, self.XV, list(range(8)))
-            sim = Sim(mem)
-            sim.run(extract_asm(GARDEN, 'garden_pixels_pie('),
-                    {'kp': 0, 'kv': self.KV, 'xp': self.XV, 'dens': self.DENS,
-                     'row': self.ROW, 'cnt': 30,
-                     'sh8': 8, 'sh14': 14, 'sh16': 16, 'sh17': 17, 'sh18': 18,
-                     'zero': 0})
-            self.assertEqual(load16(mem, self.ROW, LCD_W), self.pixels_ref(dens, r))
-            self.assertEqual((sim.ar['row'], sim.ar['dens'], sim.ar['cnt']),
-                             (self.ROW + LCD_W * 2, self.DENS + LCD_W * 2, 0))
+            # Both spellings of the constant walk, against the same reference.
+            # Fusion changes when a constant is fetched and never which one, so
+            # anything but identical output means the transformation is not the
+            # one GARDEN_PIE_FUSE claims -- and the failure it is most likely to
+            # catch is a load that moved past another and swapped two constants,
+            # which no amount of reading the diff would show.
+            for fuse in (True, False):
+                store16(mem, self.XV, list(range(8)))
+                sim = Sim(mem)
+                sim.run(extract_asm(GARDEN, 'garden_pixels_pie(', fuse),
+                        {'kp': 0, 'kv': self.KV, 'xp': self.XV, 'dens': self.DENS,
+                         'row': self.ROW, 'cnt': 30,
+                         'sh8': 8, 'sh14': 14, 'sh16': 16, 'sh17': 17, 'sh18': 18,
+                         'zero': 0})
+                self.assertEqual(load16(mem, self.ROW, LCD_W), self.pixels_ref(dens, r),
+                                 'fused' if fuse else 'unfused')
+                self.assertEqual((sim.ar['row'], sim.ar['dens'], sim.ar['cnt']),
+                                 (self.ROW + LCD_W * 2, self.DENS + LCD_W * 2, 0))
 
 
 
