@@ -510,11 +510,25 @@ void shell_draw(const char *error, unsigned phase) {
         band=esp_timer_get_time();
         HUD_FENCE;uint32_t h0=esp_cpu_get_cycle_count();HUD_FENCE;
         if(sc->overlay)sc->overlay(strip,strip_y,strip_h);
-        // 3.1: an overlay may not cover the shell's own UI. That is settled
-        // here, by order, rather than by choosing a rectangle -- menu_rows.h
-        // shows that no row is safe from the menu during a scroll, so a
-        // geometric answer would be false. Everything the shell draws below
-        // this line lands on top.
+        // THIS ORDER IS THE OLD RULE AND 3.1 NO LONGER ASKS FOR IT.
+        //
+        // It settled "an overlay may not cover the shell's own UI" by painting
+        // the menu on top, rather than by choosing a rectangle -- menu_rows.h
+        // shows no row is safe from the menu during a scroll, so a geometric
+        // answer would have been false.
+        //
+        // 3.1 was rewritten on 2026-09-09 because that sentence had a
+        // requirement and an implementation fused into it. What must stay is
+        // that an overlay cannot cover a CONSENT surface -- a prompt, a
+        // password field, a picker, a confirmation. The menu is not one of
+        // those; it is navigation, and what it was protecting was
+        // reachability, which a reserved key gives more directly. An overlay
+        // is now meant to END the menu and stand in its place.
+        //
+        // The code has not moved yet. Until it does, an overlay is a box under
+        // a menu that is still running, which is the shape the deskclock was
+        // built for and the wrong shape for anything that wants the home
+        // screen. docs/player-overlay.md lists what the move needs.
         overlay_paint(strip,strip_y,strip_h);
         HUD_FENCE;uint32_t h1=esp_cpu_get_cycle_count();HUD_FENCE;
         if(show_fps)text(194,8,meter,1,muted);

@@ -46,7 +46,12 @@ void overlay_release(void);
 void overlay_yield(const char *claimant);
 
 // Composites the overlay's display list. Called from shell_draw() per strip,
-// AFTER the scene and BEFORE the shell's own labels: 3.1 requires that an
-// overlay cannot cover the shell's UI, and painting order settles that for
-// every region and every scroll position, which no choice of rectangle can.
+// AFTER the scene and BEFORE the shell's own labels.
+//
+// That order was 3.1's old rule, and 3.1 no longer asks for it: as of
+// 2026-09-09 an overlay is meant to end the menu and stand in its place, with
+// only the shell's MODAL surfaces above it. What the menu was protecting was
+// reachability, and a reserved key the shell never delegates gives that
+// directly -- see overlay_yield(), which still has no caller. The code is
+// behind the section; shell.c says the same at the call site.
 void overlay_paint(uint16_t *strip, int strip_y, int strip_h);
