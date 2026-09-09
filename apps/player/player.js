@@ -8,7 +8,7 @@
 
   var p = null, sub = null, path = '', state = 'idle', busy = false;
   var pos = 0, gaps = 0, note = 'PRESS ENTER TO CHOOSE', title = 'NO TRACK';
-  var dirty = true, auto = true;
+  var dirty = true, auto = true, total = null, tick = 0;
 
   function leaf(s) { var i = s.lastIndexOf('/'); return i < 0 ? s : s.slice(i + 1); }
 
@@ -48,7 +48,11 @@
     set(leaf(src), 'OPENING');
     pocket.audio.player.open({ source: src }).then(function (h) {
       p = h;
-      console.log('PLAYER_OPEN ' + src);
+      // Real, from the file's own Xing/Info or VBRI tag, or null when the
+      // encoder wrote neither. Two different pictures, below, because a bar
+      // with no end is not a shorter bar -- it is a different claim.
+      total = h.info().durationMs;
+      console.log('PLAYER_OPEN ' + src + ' durationMs=' + total);
       sub = h.onState(function (e) {
         state = e.state; dirty = true;
         if (e.state === 'error') { fail('PLAYBACK', e.error); return; }
@@ -104,13 +108,34 @@
       .then(function () { busy = false; }, function (e) { fail('TRANSPORT', e); });
   }
 
-  // A bar rather than a number, because durationMs is null for MP3 until the
-  // track ends -- there is no total to be a fraction of. This fills over one
-  // minute and repeats, so it says "still going" and never says "how far".
+  // Two pictures, and which one is drawn is decided by whether the file said
+  // how long it is -- never by rounding one into the other.
   function bar(y) {
-    var w = ((pos % 60000) * (W - 24) / 60000) | 0;
-    o.rect(12, y, W - 24, 2, 24, 38, 54);
-    if (w > 0) o.rect(12, y, w, 2, 120, 200, 255);
+    var track = W - 24;
+    o.rect(12, y, track, 2, 24, 38, 54);
+    if (total) {
+      // How far through. Only drawn when there is a real end to be a fraction
+      // of; clamped because the last frames can report past the tag's total.
+      var w = (pos * track / total) | 0;
+      if (w > track) w = track;
+      if (w > 0) o.rect(12, y, w, 2, 120, 200, 255);
+      return;
+    }
+    // No length in the file. A light travels the track instead of filling it:
+    // it says "playing" without ever implying a position, which a partly full
+    // bar cannot help doing. Three segments of falling brightness make the
+    // direction readable at 30 fps without any animation state of its own --
+    // tick is the frame counter, and the position is a function of it.
+    if (state !== 'playing') return;
+    var seg = 18, span = track + seg * 3;
+    var head = (tick * 3) % span - seg * 3;
+    var c = [[120, 200, 255], [60, 120, 170], [30, 60, 90]];
+    for (var i = 0; i < 3; i++) {
+      var x = head + i * seg, w2 = seg;
+      if (x < 0) { w2 += x; x = 0; }
+      if (x + w2 > track) w2 = track - x;
+      if (w2 > 0) o.rect(12 + x, y, w2, 2, c[i][0], c[i][1], c[i][2]);
+    }
   }
 
   var n = 0;
@@ -120,6 +145,18 @@
       if (s.positionMs !== pos || s.underruns !== gaps) dirty = true;
       pos = s.positionMs; gaps = s.underruns;
     }
+    // The travelling light is the one thing here that has to be redrawn on a
+    // frame where nothing else changed, so it is what marks the display dirty
+    // -- and therefore what makes the whole list be rebuilt and recomposited.
+    //
+    // Every OTHER frame, and the honest note is that this DID NOT recover the
+    // frame rate it was written to recover. The home screen runs at 26 fps
+    // while a card track plays, against 30 idle, and halving this changed
+    // nothing measurable: the cost is in `send` (7.1 -> 8.8 ms) and `prep`,
+    // which is the panel transfer and the scene competing with the decoder and
+    // the card, not this. 15 Hz is kept because it is free and smooth enough
+    // for a moving band, NOT because it bought anything.
+    if (!total && state === 'playing' && !(n % 2)) { tick++; dirty = true; }
     if (!dirty) return;
     dirty = false;
     o.begin();
@@ -127,7 +164,8 @@
     o.rect(0, 36, W, 1, 40, 70, 100);
     o.text(8, 4, cut(title), 226, 240, 255);
     o.text(8, 20, state.toUpperCase(), 130, 190, 230);
-    o.text(72, 20, (pos / 1000 | 0) + 's', 150, 170, 190);
+    o.text(72, 20, (pos / 1000 | 0) + 's' +
+                   (total ? ' / ' + (total / 1000 | 0) + 's' : ''), 150, 170, 190);
     if (gaps) o.text(130, 20, 'GAPS ' + gaps, 255, 170, 90);
     bar(42);
     o.text(8, 50, cut(note), 122, 150, 175);

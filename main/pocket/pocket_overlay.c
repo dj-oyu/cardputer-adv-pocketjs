@@ -140,6 +140,15 @@ void pocket_overlay_paint(uint16_t *strip, int strip_y, int strip_h) {
     paint_clip(region.x,region.x+region.w);
     for(unsigned i=0;i<count;i++) {
         const item_t *it=&items[i];
+        // Skip what this strip cannot contain. Measured 5.33 ms a frame before
+        // this line: every item was handed to paint or to the font for every
+        // one of the seventeen strips, and each call clipped it away again.
+        // The clip inside those is still what makes the pixels right; this is
+        // only about not asking seventeen times for an answer that is no
+        // sixteen of them.
+        int top=region.y+it->y;
+        int bottom=top+(it->kind==ITEM_RECT?it->h:12);
+        if(bottom<=strip_y||top>=strip_y+strip_h) continue;
         if(it->kind==ITEM_RECT) paint_fill(region.x+it->x,region.y+it->y,
                                            it->w,it->h,it->colour);
         else {

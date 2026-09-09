@@ -53,6 +53,10 @@ static const scene_ops_t *scene(void) {
     return &SCENES[mode<BACKGROUND_N?mode:0];
 }
 static const char *const toggles[]={"OFF","ON"};
+// Five names rather than five numbers: a percentage would imply a scale the
+// codec does not have (its steps are decibels), and "60%" would be a number
+// nobody measured.
+static const char *const volumes[]={"QUIET","LOW","MID","HIGH","LOUD"};
 static int64_t window_start;
 static unsigned samples, max_us;
 static uint64_t present_sum, prep_sum, loop_sum, hud_sum;
@@ -164,6 +168,9 @@ static void fps_set(unsigned v) {show_fps=v!=0;}
 static unsigned sound_get(void) {return sfx;}
 static void sound_set(unsigned v) {sfx=v!=0;sound_set_enabled(sfx);}
 
+static unsigned volume_get(void) { return sound_volume(); }
+static void volume_set(unsigned v) { sound_set_volume(v); }
+
 static const setting_t settings[]={
     {"BACKGROUND", SETTING_CHOICES, &SCENES[0].name, sizeof SCENES[0], BACKGROUND_N,
      "background",  background_get,  background_set, SHELL_SCREEN_NONE},
@@ -192,6 +199,11 @@ static const setting_t settings[]={
     {"HOME OVERLAY", SETTING_CHOICES, overlay_choice_names, sizeof overlay_choice_names[0],
      1+OVERLAY_APPS,
      "overlay",     overlay_armed_get, overlay_armed_set, SHELL_SCREEN_NONE},
+    // APPENDED, like every row before it: the settings are navigated by counted
+    // key presses in tools/test_settings.py and tools/capture_home.py, and
+    // inserting would move every index below it silently.
+    {"VOLUME",     SETTING_CHOICES, volumes, sizeof volumes[0], SOUND_VOLUME_STEPS,
+     "volume",      volume_get,      volume_set,     SHELL_SCREEN_NONE},
 };
 #define SETTING_N (sizeof(settings)/sizeof(settings[0]))
 // One value name out of a row's list, wherever that list keeps them.

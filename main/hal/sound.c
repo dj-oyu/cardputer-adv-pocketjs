@@ -434,6 +434,31 @@ static esp_err_t codec_write(const uint8_t (*regs)[2], unsigned count) {
     return err;
 }
 
+// ES8311 register 0x32, the DAC volume. The chip's scale is 0x00..0xFF and
+// roughly 0.5 dB a step over most of it; these five are spread across the top
+// two thirds because below about 0x60 the speaker on this board is inaudible
+// under any room noise, so steps down there would be five names for silence.
+//
+// 0xbf is the value the init table wrote and everything measured on this board
+// so far was measured at, which is why it is a step rather than a nearby round
+// number: "the volume the sound tests ran at" has to remain reachable.
+static const uint8_t VOLUME_STEPS[SOUND_VOLUME_STEPS]={0x60,0x8c,0xa8,0xbf,0xd8};
+static unsigned volume_step=3;      // 0xbf, the value this board came up with
+
+unsigned sound_volume(void) { return volume_step; }
+
+void sound_set_volume(unsigned step) {
+    if(step>=SOUND_VOLUME_STEPS) return;
+    volume_step=step;
+    const uint8_t regs[1][2]={{0x32,VOLUME_STEPS[step]}};
+    esp_err_t err=codec_write(regs,1);
+    // Logged rather than returned: the caller is a Settings row, and a row that
+    // could fail is a row that needs somewhere to say so. The stored step still
+    // moves, so the next successful write puts the chip where the person asked.
+    if(err!=ESP_OK) ESP_LOGW("sound","volume write failed: %s",esp_err_to_name(err));
+    else ESP_LOGI("sound","VOLUME %u reg=0x%02x",step,VOLUME_STEPS[step]);
+}
+
 // Reads registers back off the codec. Nothing in this file did that until a
 // diagnostic row reported a dead input as a hot signal, and the first question
 // -- does the chip actually hold the value we wrote? -- turned out to be

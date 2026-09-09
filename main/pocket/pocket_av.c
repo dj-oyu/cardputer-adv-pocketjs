@@ -467,6 +467,13 @@ static struct {
     uint16_t block;         // ADPCM block size, 0 for PCM16
     uint32_t per_block;     // output frames one ADPCM block is worth
     uint32_t frames;        // the clip's length in output frames
+    // MP3 only, and SEPARATE from `frames` on purpose. `frames` drives when
+    // playback ends, and for MP3 that is EOF rather than a count -- setting it
+    // from a header would make the end of the song a prediction, and a file
+    // whose tag disagreed with its contents would stop early or hang. This is
+    // for DISPLAY: it is what info() reports, and nothing reads it back.
+    // 0 means the file did not say.
+    uint32_t mp3_duration_ms;
     uint32_t position;      // frames consumed before the running stream started
     uint32_t feed;          // the next byte of the file the pump will read
     uint32_t underruns;     // carried across pause and seek; see M_STATUS
@@ -646,6 +653,21 @@ static const char *source_parse(uint32_t size) {
         player.codec=C_MP3; player.block=0; player.per_block=1;
         player.offset=offset; player.bytes=end-offset;
         player.frames=PLAYER_MP3_UNKNOWN;
+        // The length, if the encoder wrote one. 64 bytes covers both tags; a
+        // frame shorter than that is not one that carries either.
+        player.mp3_duration_ms=0;
+        uint8_t head[64];
+        unsigned want=h.bytes<sizeof head?h.bytes:sizeof head;
+        if(want>=48&&!player_at(offset,head,want)) {
+            uint32_t total=pocket_mp3_total_frames(head,want,&h);
+            // In the FILE's sample rate, not the output's: the rate converter
+            // downstream changes how many samples come out and not how long the
+            // song is. Rounded rather than truncated because a bar that stops
+            // one millisecond short of the end looks like a bug.
+            if(total&&h.rate)
+                player.mp3_duration_ms=(uint32_t)(((uint64_t)total*h.samples*1000u
+                                                   +h.rate/2)/h.rate);
+        }
         return NULL;
     }
     player.codec=C_PCM16;              // wav_parse promotes this to C_IMA
@@ -970,6 +992,7 @@ static void player_teardown(void) {
     free(player.path); player.path=NULL;
     player.state=P_READY; player.announce=false;
     player.position=0; player.frames=0; player.bytes=0;
+    player.mp3_duration_ms=0;
     player.feed=0; player.underruns=0;
     player.priming=false; player.prime_waits=0;
     player.codec=C_PCM16;
@@ -1125,9 +1148,16 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
                                                     :PLAYER_CODEC_PCM));
             JS_SetPropertyStr(ctx,info,"sampleRate",JS_NewInt32(ctx,SOUND_SAMPLE_RATE));
             JS_SetPropertyStr(ctx,info,"channels",JS_NewInt32(ctx,1));
+            // MP3 answers from its own tag when it has one, because `frames`
+            // is deliberately not a length there (see the field). null is the
+            // honest answer for a file that never said, and it is a different
+            // thing from 0.
             JS_SetPropertyStr(ctx,info,"durationMs",
-                player.frames==PLAYER_MP3_UNKNOWN?JS_NULL:
-                JS_NewInt32(ctx,(int)((uint64_t)player.frames*1000u/SOUND_SAMPLE_RATE)));
+                player.codec==C_MP3
+                  ? (player.mp3_duration_ms?JS_NewInt32(ctx,(int)player.mp3_duration_ms)
+                                           :JS_NULL)
+                  : (player.frames==PLAYER_MP3_UNKNOWN?JS_NULL:
+                     JS_NewInt32(ctx,(int)((uint64_t)player.frames*1000u/SOUND_SAMPLE_RATE))));
             // A network source has no index and no way back to a byte already
             // received, so it says so rather than accepting a seek it would
             // have to fake.

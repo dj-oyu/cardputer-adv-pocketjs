@@ -23,6 +23,21 @@ enum {
 
 void sound_init(i2c_master_bus_handle_t bus);
 void sound_set_enabled(bool enabled);
+
+// The DAC's output level, 0..SOUND_VOLUME_STEPS-1.
+//
+// A DEVICE PROPERTY, NOT AN APP'S. There is no pocket.audio.volume and there
+// should not be: how loud this machine is belongs to the person holding it, not
+// to whichever program is running, and an app that could turn itself up is an
+// app that can be turned up while nobody is looking at it.
+//
+// It writes ES8311 register 0x32, which the init table has held at a constant
+// 0xbf since the codec was brought up -- so the hardware could always do this
+// and only the path was missing. Safe from any task; the codec device handle is
+// added and removed around the write, as everything else here does.
+#define SOUND_VOLUME_STEPS 5
+void sound_set_volume(unsigned step);
+unsigned sound_volume(void);
 // Queues one of the three clicks. False if sound is muted or the queue is full,
 // which is what section 9 asks audio.cue to report; it never means the click
 // was heard, only that it was accepted. Existing callers ignore the result.

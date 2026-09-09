@@ -1,6 +1,7 @@
 """Exercise settings. MP3 PLAYBACK is appended to Apps; category 1 and all
-settings row indices used below are unchanged. The overlay row is now a
-three-way choice (OFF / DESK CLOCK / MUSIC) rather than a toggle."""
+settings row indices used below are unchanged. The overlay row is a three-way
+choice (OFF / DESK CLOCK / MUSIC) rather than a toggle, and VOLUME is appended
+after it."""
 import argparse
 import re
 import time
@@ -88,10 +89,12 @@ finally:
     # An assertion above can abort while SOUND is OFF, which then persists in NVS.
     # Walk back to Settings > SOUND > ON so the device is never left muted.
     try:
-        # home, Settings, top, SOUND, open, choose ON, apply. Four ups, because
-        # an abort can leave the cursor on DESK CLOCK, the last row, and three
-        # would stop short of the top — and the fourth row's Enter opens a
-        # screen, not a value list.
-        for key in 'qbuuuuddede':s.write(key.encode());time.sleep(0.4)
+        # home, Settings, top, SOUND, open, choose ON, apply. FIVE ups, one per
+        # row above SOUND plus one to spare: an abort can leave the cursor on
+        # VOLUME, the last row, and stopping short of the top would mute a
+        # different setting instead of unmuting this one. Ups past the top are
+        # free; ups short of it are not, which is why this is one more than the
+        # count and not exactly it.
+        for key in 'qbuuuuuddede':s.write(key.encode());time.sleep(0.4)
     except Exception:pass
     s.close()

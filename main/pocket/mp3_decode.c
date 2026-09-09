@@ -82,3 +82,35 @@ bool pocket_mp3_decode(pocket_mp3_decoder_t *d, const uint8_t *frame,
     }
     return true;
 }
+
+// ------------------------------------------------------------- the frame count
+
+static uint32_t be32(const uint8_t *p) {
+    return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3];
+}
+
+uint32_t pocket_mp3_total_frames(const uint8_t *first, unsigned len,
+                                 const pocket_mp3_header_t *header) {
+    if(!first||!header) return 0;
+    // Where the tag sits depends on the side information, whose size is fixed
+    // by the version and the channel mode. samples==1152 is MPEG-1; 576 is
+    // MPEG-2 or 2.5, which halve it.
+    unsigned side = header->samples==1152 ? (header->channels==1?17u:32u)
+                                          : (header->channels==1?9u:17u);
+    unsigned at = 4u+side;
+    if(at+8<=len && (!memcmp(first+at,"Xing",4)||!memcmp(first+at,"Info",4))) {
+        uint32_t flags=be32(first+at+4);
+        // Bit 0 is the frame count. The other three fields (bytes, the seek
+        // table, quality) are laid out after it in flag order, and none of them
+        // is wanted here -- the seek table is 100 one-byte fractions, which is
+        // far too coarse to seek with and is not why this is being read.
+        if(!(flags&1u)) return 0;
+        if(at+12>len) return 0;
+        return be32(first+at+8);
+    }
+    // VBRI sits at a fixed offset instead of after the side information, and is
+    // Fraunhofer's rather than the LAME lineage's. Rare, cheap to check.
+    if(4u+32u+18u<=len && !memcmp(first+4+32,"VBRI",4))
+        return be32(first+4+32+14);
+    return 0;
+}
