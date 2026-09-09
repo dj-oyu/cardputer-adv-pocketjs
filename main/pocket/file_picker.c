@@ -160,6 +160,10 @@ static void enter_dir(file_picker_t *fp, const char *name) {
     memcpy(fp->rel+rl,name,nl+1);
     fp->depth++;
     pickmodal_reload(&fp->modal);
+    // Logged because a descent is otherwise invisible: the screen changes and
+    // nothing says so, which made a host-driven test read "the key did not
+    // arrive" and "the row was a folder" as the same event.
+    ESP_LOGI(TAG,"PICK ENTER %s rows=%u",fp->rel,fp->modal.count);
 }
 
 static void leave_dir(file_picker_t *fp) {
@@ -168,6 +172,7 @@ static void leave_dir(file_picker_t *fp) {
     else fp->rel[0]='\0';
     fp->depth--;
     pickmodal_reload(&fp->modal);
+    ESP_LOGI(TAG,"PICK UP %s rows=%u",fp->rel,fp->modal.count);
 }
 
 void file_picker_modal_key(const keystroke_t *key) {

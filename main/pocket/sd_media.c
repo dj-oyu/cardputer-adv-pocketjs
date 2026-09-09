@@ -38,28 +38,48 @@ bool sd_media_mount(void) {
     slot.host_id = SPI3_HOST;
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = SPI3_HOST;
-    // 400 kHz is what the probe negotiated and verified end to end, including a
-    // write. Raising it is a measurement, not an edit: MISO is wired here, so
-    // unlike the LCD a faster clock can at least be checked in software.
+    // 400 kHz was the IDENTIFICATION clock, kept as the transfer clock. That
+    // was never a considered choice about this card: it is the frequency every
+    // SD card is required to answer at before the host raises it, and nothing
+    // here ever raised it. The arithmetic that used to be written out in this
+    // comment was therefore describing a card running fifty times slower than
+    // it can, and drawing conclusions from it:
     //
-    // WHAT THIS NUMBER DECIDES, because it is not obvious from here and the
-    // next person to want it will be someone whose feature does not work.
-    // 400 kHz is 400 kbit/s, so about 50,000 bytes a second before any
-    // per-command overhead. Some arithmetic that follows from it, none of it
-    // measured on this board -- nobody has yet timed a read here:
+    //   400 kbit/s is about 50,000 bytes a second before per-command overhead,
+    //   so ONE 2,048-byte refill takes roughly 41 ms -- longer than the 33 ms
+    //   frame that asked for it. Streamed playback off the card could not have
+    //   worked at any bitrate, and it did not: it came out in pieces, which is
+    //   the shape a ring starved once per refill makes. The old comment read
+    //   that as "the card is too slow for realtime PCM". The card was fine.
     //
-    //   24 kHz mono PCM16 is 48,000 bytes a second. Streaming it off the card
-    //   in realtime needs ~96% of the bus, so it does not fit. Opus at this
-    //   rate is roughly a thirtieth of that and fits with room to spare.
-    //   One 2,048-byte read is ~41 ms of bus time, inside whatever frame asked
-    //   for it -- a dropped frame, not a slow one, on a 30 fps display.
-    //   An fopen walks the directory first, which is at least one more sector.
+    // 20 MHz IS THE CEILING HERE, and the reason is not the SPI clock. Both
+    // 30 MHz and 40 MHz were tried on the board on 2026-09-09 and both failed
+    // the same way, before any data moved:
     //
-    // So "the card is too slow for X" and "this firmware is doing X badly" are
-    // different diagnoses, and this constant is where the first one lives. A
-    // card that negotiates 20 MHz would change every line above; the probe
-    // asked for 400 kHz and got it, and nobody has since asked for more.
-    host.max_freq_khz = 400;
+    //   E sdmmc_sd: sdmmc_enable_hs_mode_and_check: send_csd returned 0x108
+    //   W sd: mount failed: ESP_ERR_INVALID_RESPONSE
+    //
+    // sdmmc_sd.c:522 skips the high-speed switch only when max_freq_khz is
+    // <= SDMMC_FREQ_DEFAULT, so ANY value above 20 MHz makes the driver attempt
+    // HS mode, and here the CMD9 that follows the switch does not answer. The
+    // failure is returned rather than mapped to ESP_ERR_NOT_SUPPORTED, so the
+    // driver's own "card has no HS mode, fall back to 20 MHz" path never runs
+    // and the whole mount fails. 20,001 kHz would fail exactly like 40,000.
+    //
+    // The faster grades sdmmc.h names (SDR50, DDR50, 52M) are not candidates at
+    // all: they belong to the 4-bit SD interface and cannot come out of a
+    // one-wire SPI link.
+    //
+    // Asking was safe in a way it would not have been on a write-only bus. SPI
+    // mode carries a CRC16 on every data block and the driver checks it, so a
+    // clock this wiring could not hold showed up as a refusal rather than as
+    // quiet corruption -- and the refusal surfaced correctly all the way out,
+    // as DISCONNECTED from fs.requestFolder. MISO being wired here is what
+    // makes that possible; the LCD has no such check available to it.
+    //
+    // card->max_freq_khz in the mount log below is what was actually agreed.
+    // Read that line rather than this constant when the number matters.
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
     esp_vfs_fat_sdmmc_mount_config_t cfg = {
         // docs/filesystem-api.md:56 -- never format on mount failure. A card

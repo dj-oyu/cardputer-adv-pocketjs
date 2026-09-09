@@ -18,6 +18,7 @@ static const char *const CAPS_PET_OPT[]= {"sensors.imu", "audio.tone", NULL};
 static const char *const CAPS_WORK[]   = {"workspace", NULL};
 static const char *const CAPS_COMP[]   = {"net.http", "audio.tone", NULL};
 static const char *const CAPS_OVERLAY[]= {"ui.overlay", "time", NULL};
+static const char *const CAPS_PLAY[]    = {"audio.playback", "fs.volume.sd", NULL};
 
 // The one range this build knows. It is written out per row rather than shared
 // so that a row can be moved forward on its own, which is what a version range
@@ -46,6 +47,26 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.companion", .title="PET COMPANION", .entry="apps/companion/companion.js",
      .runtime=APP_RUNTIME_LEGACY, .api=NULL,
      .required=CAPS_KV, .optional=CAPS_COMP, .works=APP_WORKS_NONE},
+
+    // Both of its capabilities are REQUIRED rather than optional, and that is
+    // not strictness for its own sake: without the card there is nothing to
+    // choose and without playback there is nothing to do with a choice, so an
+    // admitted-but-useless session would only be able to draw its own excuse.
+    //
+    // It is also the first of the audio apps to have a row at all. Until now
+    // local.streamplay, local.opusplay, local.mp3play and local.opusfit all
+    // fell through app_registry_select() to local.hello and ran under HELLO
+    // WORLD's identity -- which is why the log said "APP_ID local.hello" while
+    // this app's own source was running. That matters here in a way it did not
+    // for them: identity is what pocket_fs_set_owner() and
+    // pocket_storage_set_owner() are given, so a player that ever remembers a
+    // track would have remembered it as hello's. The other four are left as
+    // they are rather than fixed in passing; each is a diagnostic whose owner
+    // has never mattered, and changing an app's identity moves its stored
+    // files.
+    {.id="local.player", .title="MUSIC PLAYER", .entry="apps/player/player.js",
+     .runtime=APP_RUNTIME_LEGACY, .api=NULL,
+     .required=CAPS_PLAY, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The Playground runs whatever the person typed, so it is the one identity
     // that may reach the whole library: the picker is the person choosing their
