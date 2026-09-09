@@ -41,6 +41,10 @@ static atomic_int diagnostic;
 // everywhere else.
 static atomic_bool text_screen;
 static bool pet_repaint;
+// How long the last full frame took, handed to overlay_tick() so that an
+// over-budget turn can be judged as a share of the frame rather than against a
+// stopwatch that counts other tasks' work. See overlay_core.h.
+static uint32_t last_frame_us;
 
 // USB drives the home screen with single letters, but an editor needs the
 // bytes themselves so a host script can type at it. 0x1b closes either way.
@@ -642,7 +646,11 @@ static void ui_task(void *arg) {
             // ahead of the wants_run test below so that a key which starts a
             // foreground app in this same frame still finds the overlay
             // released by begin_run() rather than half-ticked.
-            if(!running && screen==SCREEN_HOME) overlay_tick();
+            // The previous frame's length, which is the only one that has
+            // finished. This frame's is not knowable here -- the overlay turn
+            // is part of it -- and the scene does not change cost from one
+            // frame to the next by anything like the factor this decides.
+            if(!running && screen==SCREEN_HOME) overlay_tick(last_frame_us);
             const char *source=NULL; size_t len=0;
             if(!running && s->wants_run && s->wants_run(&source,&len)) {
                 const char *pre=NULL; size_t pre_len=0;
@@ -682,7 +690,8 @@ static void ui_task(void *arg) {
         atomic_store(&text_screen,
                      SCREENS[screen].takes_text || pocket_text_active());
 
-        int held=(int)((esp_timer_get_time()-frame_start)/1000);
+        last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
+        int held=(int)(last_frame_us/1000);
         unsigned cap = running ? 33 : SCREENS[screen].frame_ms;
         vTaskDelay(pdMS_TO_TICKS((unsigned)held<cap?cap-held:1));
     }

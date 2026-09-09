@@ -51,7 +51,13 @@ void overlay_key(const keystroke_t *k);
 // One home-screen frame. Starts the overlay if it is armed and not up, runs one
 // guest turn, charges it against the frame budget, and stops it if it has been
 // over budget too long. Only ever called with no foreground guest running.
-void overlay_tick(void);
+//
+// `frame_us` is how long the PREVIOUS whole frame took. The charge is a share
+// of it rather than a stopwatch reading, because both this measurement and the
+// guest's interrupt deadline are wall clock and a busy machine would otherwise
+// be charged to the overlay -- see overlay_core.h, and the FLOWER scene that
+// proved it by stopping a working player.
+void overlay_tick(uint32_t frame_us);
 
 // Ends the session. Called before anything else takes the guest -- a foreground
 // app, a diagnostic, another screen -- and idempotent.

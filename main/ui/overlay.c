@@ -346,7 +346,7 @@ static void start(void) {
     announce("running");
 }
 
-void overlay_tick(void) {
+void overlay_tick(uint32_t frame_us) {
     if(state==OVERLAY_STARTING) { start(); return; }
     if(state!=OVERLAY_RUNNING) return;
 
@@ -354,7 +354,7 @@ void overlay_tick(void) {
     esp_err_t err=app_overlay_tick();
     uint32_t spent=(uint32_t)(esp_timer_get_time()-began);
     if(err!=ESP_OK) { stop_with("FAULTED",OVERLAY_STOPPED); return; }
-    if(overlay_budget_turn(&budget,spent)) {
+    if(overlay_budget_turn(&budget,spent,frame_us)) {
         // 3.1: stopped, and the stop is SHOWN. The Settings row is where the
         // person would go to turn it off, so it is where they are told it
         // already stopped -- a silent stop is indistinguishable from a fault.

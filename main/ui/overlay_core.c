@@ -32,10 +32,20 @@ void overlay_budget_start(overlay_budget_t *b, uint64_t now_us) {
     b->last_us=0; b->worst_us=0; b->turns=0;
 }
 
-bool overlay_budget_turn(overlay_budget_t *b, uint32_t turn_us) {
+bool overlay_budget_turn(overlay_budget_t *b, uint32_t turn_us,
+                         uint32_t frame_us) {
     b->last_us=turn_us; b->turns++;
     if(turn_us>b->worst_us) b->worst_us=turn_us;
     if(turn_us<=b->budget_us) { b->over_run=0; return false; }
+    // Over the budget, but is it over the SHARE? A frame that took four times
+    // this turn was late for reasons this overlay did not cause, and charging
+    // it would be blaming the passenger for the traffic. The run is reset
+    // rather than merely not incremented: sixty of these in a row are sixty
+    // pieces of evidence about the scene, not about the overlay.
+    if(frame_us && (uint64_t)turn_us*OVERLAY_SHARE_DIVISOR<=frame_us) {
+        b->over_run=0;
+        return false;
+    }
     if(b->over_run<0xffffu) b->over_run++;
     return b->over_limit && b->over_run>=b->over_limit;
 }

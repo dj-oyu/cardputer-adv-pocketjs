@@ -134,35 +134,35 @@ static void frame_budget(void) {
 
     // A single slow turn is not a fault: a garbage collection is one turn.
     for(int i=0;i<1000;i++) {
-        CHECK(!overlay_budget_turn(&b,i%100==0?40000:1000),"turn %d must not stop",i);
+        CHECK(!overlay_budget_turn(&b,i%100==0?40000:1000,0),"turn %d must not stop",i);
     }
     CHECK(b.worst_us==40000,"the worst turn is remembered: %u",(unsigned)b.worst_us);
 
     // A run of them is. Exactly at the limit, not before it.
     b=fresh();
-    for(int i=0;i<59;i++) CHECK(!overlay_budget_turn(&b,9000),"stopped early at %d",i);
-    CHECK(overlay_budget_turn(&b,9000),"the 60th consecutive over-budget turn stops it");
+    for(int i=0;i<59;i++) CHECK(!overlay_budget_turn(&b,9000,0),"stopped early at %d",i);
+    CHECK(overlay_budget_turn(&b,9000,0),"the 60th consecutive over-budget turn stops it");
 
     // One good turn resets the run, which is what makes "repeatedly" mean
     // repeatedly and not "sixty times since boot".
     b=fresh();
-    for(int i=0;i<59;i++) overlay_budget_turn(&b,9000);
-    CHECK(!overlay_budget_turn(&b,100),"a healthy turn clears the run");
-    for(int i=0;i<59;i++) CHECK(!overlay_budget_turn(&b,9000),"and the count starts over");
+    for(int i=0;i<59;i++) overlay_budget_turn(&b,9000,0);
+    CHECK(!overlay_budget_turn(&b,100,0),"a healthy turn clears the run");
+    for(int i=0;i<59;i++) CHECK(!overlay_budget_turn(&b,9000,0),"and the count starts over");
 
     // Exactly at the budget is inside it.
     b=fresh();
-    for(int i=0;i<200;i++) CHECK(!overlay_budget_turn(&b,8000),"8000us is within 8000us");
+    for(int i=0;i<200;i++) CHECK(!overlay_budget_turn(&b,8000,0),"8000us is within 8000us");
 
     // A limit of zero disables the stop rather than stopping immediately,
     // which is the reading a caller would expect of "no limit".
     b=fresh(); b.over_limit=0;
-    for(int i=0;i<200;i++) CHECK(!overlay_budget_turn(&b,1000000),"no limit, no stop");
+    for(int i=0;i<200;i++) CHECK(!overlay_budget_turn(&b,1000000,0),"no limit, no stop");
 }
 
 static void healthy_period(void) {
     overlay_budget_t b=fresh();
-    overlay_budget_turn(&b,1000);
+    overlay_budget_turn(&b,1000,0);
     CHECK(!overlay_budget_healthy(&b,4999999),"not healthy before the period is up");
     CHECK(overlay_budget_healthy(&b,5000000),"healthy at the period");
 
@@ -170,9 +170,9 @@ static void healthy_period(void) {
     // been over budget from its first turn must NOT have its crash flag
     // cleared at the five second mark just because it is still alive.
     b=fresh();
-    for(int i=0;i<10;i++) overlay_budget_turn(&b,9000);
+    for(int i=0;i<10;i++) overlay_budget_turn(&b,9000,0);
     CHECK(!overlay_budget_healthy(&b,9000000),"over budget right now is not healthy");
-    overlay_budget_turn(&b,100);
+    overlay_budget_turn(&b,100,0);
     CHECK(overlay_budget_healthy(&b,9000000),"and healthy once it recovers");
 }
 
@@ -205,27 +205,36 @@ static void home_survives_without_the_overlay(void) {
     char *shell=slurp("main/ui/shell.c");
     if(!shell) return;
 
-    // The shell reaches the overlay exactly once, and it is the composite.
-    // Anything else -- a state read that decides a layout, an early return, a
-    // menu row whose text comes from the overlay -- would make the home
-    // screen's drawing depend on a guest, which is the dependency 3.1 forbids.
-    CHECK(occurrences(shell,"overlay_paint(")==1,
-          "shell.c composites the overlay once and does nothing else with it");
+    // The shell reaches the overlay to composite it and to ask whether it is
+    // running. Nothing else: a menu row whose text came from the overlay, or a
+    // layout that depended on it, would make the home screen's drawing depend
+    // on a guest, which is the dependency 3.1 forbids however the painting is
+    // ordered.
+    CHECK(occurrences(shell,"overlay_paint(strip")==1,
+          "shell.c composites the overlay exactly once");
     CHECK(occurrences(shell,"pocket_overlay_")==0,
           "the shell does not reach past ui/overlay.c into the JS surface");
     CHECK(occurrences(shell,"app_overlay_tick")==0 &&
           occurrences(shell,"app_start_overlay")==0,
           "the shell never runs guest code from inside a draw");
 
-    // And the composite is under the shell's own labels. The order is the
-    // whole guarantee that an overlay cannot cover the shell's UI, so it is
-    // asserted rather than left to a reviewer's eye.
-    const char *paint=strstr(shell,"overlay_paint(strip");
+    // THE MENU IS ENDED, NOT COVERED (3.1, revised 2026-09-09). This replaced
+    // "the composite is painted under the labels", which was the old rule and
+    // was asserted here for four months. Painting order is no longer the
+    // guarantee -- an overlay stands in the menu's place -- so what is asserted
+    // is that both halves of the menu are gated on the same question.
+    //
+    // Both halves matter. Laying the menu out and then not painting it would
+    // leave hud_labels holding rows nothing draws, which is a different bug and
+    // a harder one to see than a menu that is simply not there this frame.
+    CHECK(occurrences(shell,"overlay_running()")>=1,
+          "the shell asks whether an overlay is running");
+    const char *layout=strstr(shell,"menu_layout()");
     const char *labels=strstr(shell,"paint_labels()");
-    const char *error_text=strstr(shell,"\"APP ERROR\"");
-    CHECK(paint && labels && paint<labels,"the overlay is painted before the menu");
-    CHECK(paint && error_text && paint<error_text,
-          "and before the app error line, which is how a failed app is reported");
+    CHECK(layout && strstr(layout-120,"xmb"),
+          "the menu layout is gated on there being no overlay");
+    CHECK(labels && strstr(labels-40,"xmb"),
+          "and so is painting its labels");
 
     char *main_c=slurp("main/main.c");
     if(!main_c) return;
@@ -235,9 +244,45 @@ static void home_survives_without_the_overlay(void) {
     // begin_run().
     CHECK(occurrences(main_c,"overlay_release()")==3,
           "every path that takes the guest releases the overlay first");
-    const char *tick=strstr(main_c,"overlay_tick()");
-    CHECK(tick && strstr(tick-200,"!running && screen==SCREEN_HOME"),
+    const char *tick=strstr(main_c,"overlay_tick(");
+    CHECK(tick && strstr(tick-260,"!running && screen==SCREEN_HOME"),
           "and a turn only runs while the home screen owns the display");
+
+    // THE RESERVED KEY IS UNDELIVERABLE BY CONSTRUCTION. 3.1 says the way out
+    // must not depend on the overlay handling it, and this is the line that
+    // makes that true: Back leaves the delivery loop before the call that hands
+    // a keystroke to the guest.
+    //
+    // It was once written in the force-stop branch instead, which only runs for
+    // Ctrl+Alt+Del -- so ordinary Back travelled the normal path and DID reach
+    // overlay_key(). Nothing looked wrong, because Escape has no action name
+    // and was dropped on arrival. The invariant was false for a build and no
+    // test could see it. This is that test.
+    const char *deliver=strstr(main_c,"overlay_key(&stroke)");
+    CHECK(deliver!=NULL,"main.c delivers keys to the overlay");
+    if(deliver) {
+        // Positions in the whole file, not a window: the guard carries the
+        // comment explaining itself, and a fixed lookbehind that fitted the
+        // code would fail the moment somebody explained it better.
+        const char *guard=strstr(main_c,"stroke.nav==KEY_BACK");
+        CHECK(guard && guard<deliver,
+              "Back is taken before the delivery call, not after it");
+        const char *brk=guard?strstr(guard,"break;"):NULL;
+        CHECK(brk && brk<deliver,
+              "and it leaves the loop rather than falling through to delivery");
+    }
+
+    // MODALS ARE DISPATCHED ON THE HOME LOOP TOO. "Shell modals beat the
+    // overlay" is not a property of the modals; it is a property of somebody
+    // drawing and keying them while an overlay owns the screen. Without this
+    // the sentence in 3.1 would have nothing behind it -- a picker an overlay
+    // opened would never appear, and its promise would never settle.
+    CHECK(occurrences(main_c,"sd_picker_modal()")>=2,
+          "the folder picker is driven from the home loop as well as tick_run");
+    CHECK(occurrences(main_c,"file_picker_modal()")>=2,
+          "and the file picker");
+    CHECK(occurrences(main_c,"pocket_workspace_modal()")>=2,
+          "and the works picker");
 }
 
 int main(void) {
@@ -248,6 +293,45 @@ int main(void) {
     healthy_period();
     home_survives_without_the_overlay();
     if(failures) { printf("%d FAILURES\n",failures); return 1; }
+    // ---- the share, which is what a busy machine needs ----------------------
+    //
+    // FLOWER draws at 79 ms with 60 ms of kernel, and the overlay's own
+    // compositing was 3-5 ms of that. The turn still crossed 12 ms sixty times
+    // in a row, because the measurement is wall clock and counts the decoder
+    // and the card. Stopping the overlay bought nothing -- the home screen was
+    // at 14 fps without it -- which is the test of whether the rule fired for
+    // its own reason.
+    {
+        overlay_budget_t b={.budget_us=12000,.over_limit=60,.healthy_us=5000000};
+        overlay_budget_start(&b,0);
+        // Over budget, but a sixth of an 79 ms frame: not this overlay's doing.
+        for(int i=0;i<600;i++)
+            CHECK(!overlay_budget_turn(&b,13000,79000),
+                  "a passenger on a slow frame was charged at turn %d",i);
+        CHECK(b.over_run==0,"the run must not even accumulate");
+        // The same turn on a frame it actually dominates IS charged.
+        overlay_budget_start(&b,0);
+        for(int i=0;i<59;i++)
+            CHECK(!overlay_budget_turn(&b,13000,40000),"stopped early at %d",i);
+        CHECK(overlay_budget_turn(&b,13000,40000),
+              "a turn that is a third of the frame must still stop it");
+        // Exactly at the divisor is NOT over the share: the comparison is
+        // strict so that the boundary case reads as "not proven".
+        overlay_budget_start(&b,0);
+        for(int i=0;i<200;i++)
+            CHECK(!overlay_budget_turn(&b,13000,52000),"exactly a quarter charged");
+        // A wedged overlay eating the whole frame is caught however slow the
+        // machine is, which is the case the rule exists for.
+        overlay_budget_start(&b,0);
+        for(int i=0;i<59;i++) overlay_budget_turn(&b,200000,240000);
+        CHECK(overlay_budget_turn(&b,200000,240000),"a wedged overlay must stop");
+        // frame_us 0 means "no frame known" and keeps the old behaviour, which
+        // is what every case above this block relies on.
+        overlay_budget_start(&b,0);
+        for(int i=0;i<59;i++) overlay_budget_turn(&b,13000,0);
+        CHECK(overlay_budget_turn(&b,13000,0),"zero must skip the share test");
+    }
+
     printf("OVERLAY_OK region, boot valve, room floor, frame budget, shell independence\n");
     return 0;
 }

@@ -77,7 +77,35 @@ void overlay_budget_start(overlay_budget_t *b, uint64_t now_us);
 // cannot be operated is a home screen the person cannot switch it off from.
 // One slow turn is not a fault -- a garbage collection is one turn -- so it is
 // a run of them.
-bool overlay_budget_turn(overlay_budget_t *b, uint32_t turn_us);
+// `frame_us` is how long the WHOLE home frame took, and passing it is what
+// makes this a share rather than a stopwatch.
+//
+// It was a stopwatch, and on 2026-09-09 that stopped a working music player
+// under the FLOWER scene. Both this and the guest's interrupt deadline measure
+// WALL CLOCK, so a turn is charged for every microsecond the ui task spent
+// preempted by the decoder and the card. FLOWER draws at 79 ms a frame; the
+// overlay's own compositing was 3-5 ms of it, and the turn still crossed 12 ms
+// sixty times in a row and was stopped for it.
+//
+// What the stop is FOR is the sentence in 3.1: an overlay must not make the
+// home screen unusable, because the row that turns it off is on the home
+// screen. Under FLOWER the home screen was already at 14 fps WITHOUT the
+// overlay -- stopping it bought nothing, which is the test of whether the rule
+// fired for its own reason. So a turn counts against the overlay only when the
+// overlay is a real share of the frame; a slow turn on a machine where
+// everything is slow is not evidence about the overlay.
+//
+// Pass 0 for frame_us when the frame length is not known, and the share test is
+// skipped -- the old behaviour, for a caller that has no frame.
+bool overlay_budget_turn(overlay_budget_t *b, uint32_t turn_us,
+                         uint32_t frame_us);
+
+// The share an over-budget turn must reach before it is charged, as a divisor:
+// the turn must be more than a QUARTER of the frame. Chosen so that an overlay
+// eating most of a frame is caught in a few turns while one riding along behind
+// a heavy scene is not caught at all -- and it is a ratio rather than a second
+// millisecond number so that it does not have to be re-tuned per scene.
+#define OVERLAY_SHARE_DIVISOR 4
 
 // True once the run has been healthy long enough to clear the starting flag.
 bool overlay_budget_healthy(const overlay_budget_t *b, uint64_t now_us);
