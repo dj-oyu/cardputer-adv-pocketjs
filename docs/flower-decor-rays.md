@@ -24,11 +24,6 @@ Selected openings reveal from the top over 4..6 seconds with a 24-pixel soft
 front. Selection probability falls linearly from 75% at base radius 18 to 9.4%
 at radius 25. Unreached rows skip the pixel pass entirely.
 
-A separate occlusion opportunity becomes more likely with width (7.8% to 62.5%
-selection); half the eight-second opportunities are skipped. A selected event
-has two smooth 0.75-second pulses, limited to a six-pixel-wide, 18-row fragment.
-Its upstream two-row lip catches light; the downstream fragment attenuates only
-the auxiliary ray's own light, never painting a dark mark over the main ray.
 No new image pass or persistent buffer is used. `GARDEN_DECOR_EVENTS=0` disables
 these two events for performance comparisons.
 

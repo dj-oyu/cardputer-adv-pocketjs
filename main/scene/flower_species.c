@@ -225,13 +225,27 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         stem(base,(V){-.04f,-.25f,0},head,7,.035f,yaw,pitch);
         part((V){-.12f,-.8f,0},(V){-.74f,-.33f,-.1f},.13f,.027f,LEAF,yaw,pitch);
         part((V){-.08f,-.56f,0},(V){.65f,-.12f,-.1f},.12f,.027f,LEAF,yaw,pitch);
+        // One tilted flower head: the disk and the ray insertion ring share
+        // an axis. Bury the ray roots inside its broad base, not under a ball.
+        V axis={0,.94f,.341174f};
         for(int i=0;i<14;i++) {
             float a=i*2*PI/14;
-            V root=add(head,(V){.20f*cosf(a),.06f*sinf(a),.15f*sinf(a)});
-            V tip=add(head,(V){.79f*cosf(a),-.42f+.13f*sinf(a),.38f*sinf(a)});
-            part(root,tip,.075f,.03f,ROSE,yaw,pitch);
+            V radial={cosf(a),-.341174f*sinf(a),.94f*sinf(a)};
+            V root=add(head,add(mul(radial,.20f),mul(axis,.035f)));
+            V arch=add(head,add(mul(radial,.85f),mul(axis,.48f)));
+            V tip=add(head,add(mul(radial,1.10f),mul(axis,-.36f)));
+            // Lift out of the disk, open outward, then bend under the tip's
+            // weight. Three overlapping chords preserve a visible arch rather
+            // than the straight, downward spokes of a shuttlecock.
+            for(int j=0;j<3;j++) {
+                float t0=fmaxf(0,(float)j/3-.045f);
+                float t1=fminf(1,(float)(j+1)/3+.045f);
+                part(bezier(root,arch,tip,t0),bezier(root,arch,tip,t1),
+                     j==1?.105f:.08f,.025f,ROSE,yaw,pitch);
+            }
         }
-        part(add(head,(V){0,-.04f,.035f}),add(head,(V){0,.44f,.035f}),.28f,.23f,SEED,yaw,pitch);
+        part(add(head,mul(axis,-.10f)),add(head,mul(axis,.28f)),
+             .32f,.32f,SEED,yaw,pitch);
     } else if(species==FLOWER_ANEMONE) {
         // Anemone coronaria: broad scarlet sepals around dark stamens.
         V head={.08f+sway,.47f,0};

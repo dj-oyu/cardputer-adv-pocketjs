@@ -5,17 +5,11 @@
 #include <time.h>
 
 int main(void) {
-    unsigned thin_reveal=0,wide_reveal=0,thin_cut=0,wide_cut=0,rims=0;
+    unsigned thin_reveal=0,wide_reveal=0;
     for(unsigned seed=0;seed<2048;seed++) {
         GardenDecor thin={.seed=seed,.radius=18},wide=thin;wide.radius=25;
         thin_reveal+=garden_decor_arrival(&thin,40,90)==0;
         wide_reveal+=garden_decor_arrival(&wide,40,90)==0;
-        for(int y=0;y<101;y++) {
-            GardenDecorOcclusion a=garden_decor_occlusion(&thin,y);
-            GardenDecorOcclusion b=garden_decor_occlusion(&wide,y);
-            thin_cut+=a.amount>0;wide_cut+=b.amount>0;rims+=b.rim>0;
-            assert(a.amount>=0&&a.amount<=255&&b.amount>=0&&b.amount<=255);
-        }
         int previous=0;
         for(unsigned tick=0;tick<=3072;tick+=16) {
             thin.tick=tick;
@@ -24,9 +18,8 @@ int main(void) {
         }
         assert(previous==256);
     }
-    assert(thin_reveal>wide_reveal*3&&wide_cut>thin_cut*3&&rims);
-    printf("EVENTS_OK reveal thin/wide=%u/%u cut thin/wide=%u/%u rims=%u\n",
-           thin_reveal,wide_reveal,thin_cut,wide_cut,rims);
+    assert(thin_reveal>wide_reveal*3);
+    printf("EVENTS_OK reveal thin/wide=%u/%u\n",thin_reveal,wide_reveal);
     // In-scattering follows the local lit colour, not a fixed RGB addition.
     uint16_t cool=(uint16_t)(4<<11|14<<5|8),warm=(uint16_t)(12<<11|24<<5|8);
     uint16_t c=garden_decor_mix(cool,192,0,128),w=garden_decor_mix(warm,192,0,128);

@@ -1403,30 +1403,6 @@ static int garden_decor_arrival(const GardenDecor *d,int y,int end) {
     if(reach>=24*256)return 256;
     return garden_smooth(reach/24);
 }
-typedef struct { int amount,rim,offset; } GardenDecorOcclusion;
-static GardenDecorOcclusion garden_decor_occlusion(const GardenDecor *d,int y) {
-    GardenDecorOcclusion cut={0};
-    unsigned h=garden_hash(d->seed+3911u);
-    // The chance rises with base width, independently of the reveal choice.
-    if((h&255u)>=(unsigned)(d->radius-17)*20u)return cut;
-    unsigned p=(d->phase+(h>>8))&65535u;
-    unsigned age=p&4095u;
-    if(age>=768u)return cut; // brief event opportunity, every eight seconds
-    unsigned event=garden_hash((p>>12)+h);
-    if(event&1u)return cut;
-    int top=22+(int)((event>>8)&31u),dy=y-top;
-    if(dy<0||dy>=18)return cut;
-    // Two soft shutter pulses, not frame-random flicker. The little shadow
-    // trails the occluder, and its upstream lip catches the incident light.
-    // Use two 0.75-second pulses with smooth zeroes at event boundaries.
-    int pulse=(int)(age%384u);
-    int edge=pulse<192?pulse:384-pulse;
-    int blink=garden_smooth(edge*255/192);
-    cut.amount=blink*(18-dy)/18;
-    cut.rim=dy<2?blink:0;
-    cut.offset=(int)((event>>16)&15u)-7;
-    return cut;
-}
 static void __attribute__((unused))
 garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
     int center,half;garden_shaft(y,f,&center,&half);
@@ -1436,11 +1412,9 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
         int end=70+(int)((decor.seed>>24)&31u);
         if(y>=end)continue;
         int arrival=256;
-        GardenDecorOcclusion cut={0};
 #if GARDEN_DECOR_EVENTS
         arrival=garden_decor_arrival(&decor,y,end);
         if(!arrival)continue;
-        cut=garden_decor_occlusion(&decor,y);
 #endif
         int remaining=end-y;
         int depth=garden_smooth(remaining<48?remaining*255/48:255);
@@ -1473,16 +1447,6 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
             int gain=strength*protect>>8;
             int light=garden_decor_profile(x*256-cx,inv)*gain>>8;
             int shadow=garden_decor_profile(x*256-shadow_cx,shadow_inv)*gain>>8;
-            if(cut.amount) {
-                // Only a six-pixel-wide fragment, entirely within this ray.
-                // Attenuate its light, not the background or the main shaft.
-                int notch=768-abs(x*256-cx-cut.offset*256);
-                if(notch>0) {
-                    int cover=notch*cut.amount/(3*256);
-                    if(cut.rim)light+=(light*cover)>>8;
-                    else light=light*(256-cover)>>8;
-                }
-            }
             if(!light&&!shadow)continue;
             // Attenuate the existing channels, never paint a coloured outline.
             // Q8 arithmetic approximates transmission plus warm in-scattering;

@@ -397,6 +397,15 @@ static void petal_reciprocals(Petal *p) {
     // before this loop. A Petal whose reciprocals are taken before that gets
     // zeros here rather than stale values, and would draw nothing rather than
     // draw wrongly -- but the ordering is a real requirement, not a nicety.
+    //
+    // Behind the switch, and that was got wrong once: this loop shipped
+    // unconditionally, so FLOWER_NO_BAND_INVA removed the six divisions from
+    // bell_hit and left the six that pay for them in prepare. The pixels were
+    // right either way, and the picture proof did not care -- but `petals=`
+    // then reads flat across the switch, and a consistency check that cannot
+    // move is not a check. A switch that reverts half of a change is worse
+    // than no switch, because it still produces a number.
+#ifndef FLOWER_NO_BAND_INVA
     {
         const float *slopes=p->shape==FLOWER_SHAPE_CLOCHE?flower_cloche_slopes:bell_slopes;
         for(int i=0;i<LAT;i++) {
@@ -411,6 +420,7 @@ static void petal_reciprocals(Petal *p) {
             p->bell_inva[i]=fabsf(a)<1e-7f?0:1.0f/a;
         }
     }
+#endif
 }
 static int clampi(int x,int lo,int hi) { return x<lo?lo:x>hi?hi:x; }
 // floorf and ceilf, to int, without the call.
