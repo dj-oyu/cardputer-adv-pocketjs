@@ -192,6 +192,8 @@ extern const char opusfit_start[] asm("_binary_opusfit_js_start");
 extern const char opusfit_end[] asm("_binary_opusfit_js_end");
 extern const char mp3play_start[] asm("_binary_mp3play_js_start");
 extern const char mp3play_end[] asm("_binary_mp3play_js_end");
+extern const char player_start[] asm("_binary_player_js_start");
+extern const char player_end[] asm("_binary_player_js_end");
 
 // shell_key() cannot say "hand the display to another screen": its bool already
 // means "launch the app shell_app() names". The request is left behind instead,
@@ -232,6 +234,7 @@ static bool home_key(const keystroke_t *k) {
         case 8: begin_run("local.opusplay",NULL,0,opusplay_start,(size_t)(opusplay_end-opusplay_start-1)); break;
         case 9: begin_run("local.opusfit",NULL,0,opusfit_start,(size_t)(opusfit_end-opusfit_start-1)); break;
         case 10: begin_run("local.mp3play",NULL,0,mp3play_start,(size_t)(mp3play_end-mp3play_start-1)); break;
+        case 11: begin_run("local.player",NULL,0,player_start,(size_t)(player_end-player_start-1)); break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;

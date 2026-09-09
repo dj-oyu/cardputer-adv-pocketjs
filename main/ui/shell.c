@@ -97,14 +97,16 @@ static unsigned category,setting,app;
 // MIDDLE would renumber shell_app(), and with it main.c's switch, silently.
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
                           "IMU CALIBRATION","POCKET PET","PET COMPANION",
-                          "AUDIO STREAM","OPUS STREAM","OPUS + WI-FI","MP3 PLAYBACK"};
+                          "AUDIO STREAM","OPUS STREAM","OPUS + WI-FI","MP3 PLAYBACK",
+                          "MUSIC PLAYER"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
                                   "AI USAGE / ALARM / TIMER",
                                   "PLAY A CLIP AND TIME THE FRAMES",
                                   "DECODE OPUS AND TIME THE FRAMES",
-                                  "DECODE WHILE THE RADIO IS UP","DECODE MP3 / PAUSE / RESUME"};
+                                  "DECODE WHILE THE RADIO IS UP","DECODE MP3 / PAUSE / RESUME",
+                                  "PLAY A FILE FROM THE CARD"};
 #define APP_N (sizeof(apps)/sizeof(apps[0]))
 static float app_pos;
 unsigned shell_app(void) { return app; }

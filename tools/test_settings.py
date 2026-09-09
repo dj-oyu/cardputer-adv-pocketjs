@@ -1,4 +1,4 @@
-"""Exercise settings. MP3 PLAYBACK is appended to Apps; category 1 and all
+"""Exercise settings. MUSIC PLAYER is appended to Apps; category 1 and all
 settings row indices used below are unchanged."""
 import argparse
 import re
