@@ -96,6 +96,7 @@ typedef struct {
 static pocket_state_t *state;
 static JSClassID       hub_class;
 static JSClassID       token_class;
+static JSRuntime      *hub_rt, *token_rt;
 
 static const char *TAG = "pocket";
 
@@ -782,10 +783,15 @@ esp_err_t pocket_api_install(JSContext *ctx, void *user_data) {
     // and the next session must not inherit them.
     lazy_count=0;
     JSRuntime *rt=JS_GetRuntime(ctx);
-    JS_NewClassID(rt,&hub_class);
-    JS_NewClassID(rt,&token_class);
-    if(JS_NewClass(rt,hub_class,&hub_class_def)<0) return ESP_FAIL;
-    if(JS_NewClass(rt,token_class,&token_class_def)<0) return ESP_FAIL;
+    // See pocket_api_class_ready(): the id has to come from THIS runtime.
+    if(!pocket_api_class_ready(rt,&hub_rt,&hub_class)) {
+        JS_NewClassID(rt,&hub_class);
+        if(JS_NewClass(rt,hub_class,&hub_class_def)<0) return ESP_FAIL;
+    }
+    if(!pocket_api_class_ready(rt,&token_rt,&token_class)) {
+        JS_NewClassID(rt,&token_class);
+        if(JS_NewClass(rt,token_class,&token_class_def)<0) return ESP_FAIL;
+    }
     // A class with no prototype registered produces objects whose prototype is
     // null, and those have no toString: String(token), `${token}` and print(token)
     // all throw TypeError rather than saying something unhelpful. A debugging

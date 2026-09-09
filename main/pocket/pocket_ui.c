@@ -356,6 +356,7 @@ static uint8_t  depth;
 static uint32_t node_serial=1, screen_serial=1;
 
 static JSClassID screen_class, node_class, text_class, list_class;
+static JSRuntime *screen_rt, *node_rt, *text_rt, *list_rt;
 
 static node_t *node_of(uint32_t handle) {
     node_t *n=&nodes[handle&((1u<<NODE_BITS)-1)];
@@ -1273,12 +1274,15 @@ static const JSClassDef list_def   = {.class_name="PocketListNode"};
 // an opaque and nothing else. Per-node closures instead would put two to five
 // function objects on every rectangle on the screen, and guest heap -- not
 // flash -- is what runs out on this board.
-static bool make_class(JSContext *ctx, JSClassID *id, const JSClassDef *def,
+static bool make_class(JSContext *ctx, JSClassID *id, JSRuntime **owner,
+                       const JSClassDef *def,
                        const JSCFunctionListEntry *methods, int count,
                        JSValueConst parent) {
     JSRuntime *rt=JS_GetRuntime(ctx);
-    JS_NewClassID(rt,id);
-    if(JS_NewClass(rt,*id,def)<0) return false;
+    if(!pocket_api_class_ready(rt,owner,id)) {
+        JS_NewClassID(rt,id);
+        if(JS_NewClass(rt,*id,def)<0) return false;
+    }
     JSValue proto=JS_IsUndefined(parent)?JS_NewObject(ctx)
                                         :JS_NewObjectProto(ctx,parent);
     if(JS_IsException(proto)) return false;
@@ -1372,15 +1376,15 @@ static esp_err_t ensure_realm(JSContext *ctx) {
     action_table.open=0;
     action_table.ctx=ctx;
 
-    if(!make_class(ctx,&screen_class,&screen_def,METHODS(screen_methods),
+    if(!make_class(ctx,&screen_class,&screen_rt,&screen_def,METHODS(screen_methods),
                    JS_UNDEFINED) ||
-       !make_class(ctx,&node_class,&node_def,METHODS(node_methods),JS_UNDEFINED))
+       !make_class(ctx,&node_class,&node_rt,&node_def,METHODS(node_methods),JS_UNDEFINED))
         return ESP_FAIL;
     // TextNode and ListNode are Nodes: remove() is defined once and inherited,
     // which is both the section 6 type shape and one fewer function object.
     JSValue node_proto=JS_GetClassProto(ctx,node_class);
-    bool ok=make_class(ctx,&text_class,&text_def,METHODS(text_methods),node_proto) &&
-            make_class(ctx,&list_class,&list_def,METHODS(list_methods),node_proto);
+    bool ok=make_class(ctx,&text_class,&text_rt,&text_def,METHODS(text_methods),node_proto) &&
+            make_class(ctx,&list_class,&list_rt,&list_def,METHODS(list_methods),node_proto);
     JS_FreeValue(ctx,node_proto);
     if(!ok) return ESP_FAIL;
     realm_ready=true;

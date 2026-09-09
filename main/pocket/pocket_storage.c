@@ -92,6 +92,7 @@ typedef struct {
 
 static storage_state_t *state;
 static JSClassID        hub_class;
+static JSRuntime        *hub_rt;
 
 void pocket_storage_set_owner(const char *app_id) {
     snprintf(owner, sizeof(owner), "%s",
@@ -759,8 +760,10 @@ static JSValue object_prototype(JSContext *ctx) {
 static esp_err_t build_storage(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     JSRuntime *rt=JS_GetRuntime(ctx);
-    JS_NewClassID(rt,&hub_class);
-    if(JS_NewClass(rt,hub_class,&hub_class_def)<0) return ESP_FAIL;
+    if(!pocket_api_class_ready(rt,&hub_rt,&hub_class)) {
+        JS_NewClassID(rt,&hub_class);
+        if(JS_NewClass(rt,hub_class,&hub_class_def)<0) return ESP_FAIL;
+    }
     if(state) return ESP_ERR_INVALID_STATE;
 
     storage_state_t *st=calloc(1,sizeof(*st));

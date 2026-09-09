@@ -1140,6 +1140,11 @@ typedef struct {
 static fs_file_t files[FS_MAX_HANDLES];
 static uint32_t  next_handle=1;
 static JSClassID file_class;
+// Which runtime file_class belongs to. Cleared by pocket_fs_reset() as well as
+// compared against, because the allocator can hand the next session a runtime
+// at the same address -- and skipping registration there would leave the class
+// unregistered in a realm about to use it.
+static JSRuntime *class_rt;
 
 static fs_file_t *file_of(uint32_t handle) {
     if(!handle) return NULL;
@@ -3952,8 +3957,23 @@ static const JSCFunctionListEntry fs_methods[] = {
 static esp_err_t build_fs(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     JSRuntime *rt=JS_GetRuntime(ctx);
-    JS_NewClassID(rt,&file_class);
-    if(JS_NewClass(rt,file_class,&file_class_def)<0) return ESP_FAIL;
+    // Both halves live in pocket_api_class_ready(): the id must come from THIS
+    // runtime's counter, and the registration must not be repeated when
+    // pocket_api_lazy() retries a build that failed.
+    //
+    // This is the file where it was caught. "pocket.fs could not be built:
+    // ESP_FAIL" with file_class=65, on a guest using 97,952 bytes of a
+    // 163,840-byte ceiling -- and the guest was told "no memory", which is what
+    // the lazy wrapper calls every failure. Two wrong diagnoses came out of
+    // that message before the log printed the id.
+    if(!pocket_api_class_ready(rt,&class_rt,&file_class)) {
+        JS_NewClassID(rt,&file_class);
+        if(JS_NewClass(rt,file_class,&file_class_def)<0) {
+            ESP_LOGE(TAG,"JS_NewClass failed for file_class=%u",
+                     (unsigned)file_class);
+            return ESP_FAIL;
+        }
+    }
     JSValue proto=JS_NewObject(ctx);
     if(JS_IsException(proto)) return ESP_ERR_NO_MEM;
     JS_SetPropertyFunctionList(ctx,proto,file_methods,
@@ -3990,6 +4010,7 @@ esp_err_t pocket_fs_install(JSContext *ctx, void *user_data) {
 }
 
 void pocket_fs_reset(void) {
+    class_rt=NULL;
     // A folder or file screen still up goes back to the shell, and its
     // promise is settled by the completion picker_finish() posts.
     sd_picker_reset();

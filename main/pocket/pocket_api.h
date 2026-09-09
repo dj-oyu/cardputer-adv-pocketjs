@@ -269,6 +269,50 @@ void pocket_api_sub_deliver(pocket_sub_table_t *table,
 void pocket_api_sub_mark(pocket_sub_table_t *table, JSRuntime *rt,
                          JS_MarkFunc *mark);
 
+
+// --------------------------------------------------------------- class ids
+//
+// A CLASS ID BELONGS TO ONE RUNTIME, and every surface here got that wrong the
+// same way. pocket_net.c said it out loud -- "JS_NewClassID assigns once for
+// the process" -- and quickjs-ng does not work that way:
+//
+//     JSClassID JS_NewClassID(JSRuntime *rt, JSClassID *pclass_id) {
+//         if (*pclass_id == 0) *pclass_id = rt->js_class_id_alloc++;
+//         return *pclass_id;
+//     }
+//
+// The counter is PER RUNTIME and restarts with each session, while the static
+// keeps whatever a previous session gave it. So a class that is built for the
+// first time in a later session is handed a low, fresh number -- and that
+// number may already belong to a class whose static was filled in earlier and
+// which has already registered in this runtime. JS_NewClass1 then refuses:
+//
+//     if (class_id < rt->class_count && rt->class_array[class_id].class_id)
+//         return -1;
+//
+// It stayed hidden because it needs two sessions with DIFFERENT surface sets to
+// collide, which is exactly what an overlay session is: eight surfaces where a
+// foreground app installs sixteen. On the board it appeared as
+// "pocket.fs could not be built: ESP_FAIL" with file_class=65, on a guest using
+// 97,952 bytes of a 163,840-byte ceiling -- so the message the guest saw, "no
+// memory to build this namespace", was about the wrong thing entirely.
+//
+// The fix is to ask THIS runtime for the id. Call this before JS_NewClassID and
+// the static is cleared whenever the runtime changed, so the id always comes
+// from the counter that is going to validate it.
+//
+// It also makes the registration idempotent within a session, which matters
+// because pocket_api_lazy() deliberately retries a failed build: without the
+// owner check the second attempt would find the class already registered and
+// fail for a reason that had nothing to do with the first failure.
+static inline bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner,
+                                          JSClassID *id) {
+    if(*owner==rt) return true;      // already registered in this runtime
+    *id=0;                           // and this one's counter decides the id
+    *owner=rt;
+    return false;
+}
+
 // --------------------------------------------------------- async completions
 //
 // A driver task -- or an ISR -- finishes work and posts a status; the JS task

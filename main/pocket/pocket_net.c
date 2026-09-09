@@ -191,6 +191,7 @@ static int64_t deadline_from(const net_options_t *o, int32_t fallback_ms) {
 // ------------------------------------------------------------------- state
 
 static JSClassID lease_class, response_class;
+static JSRuntime *lease_rt, *response_rt;
 
 // The lease. One at a time, and a second acquire of the same profile shares it
 // rather than opening another, which is what section 11 means by reference
@@ -1436,12 +1437,18 @@ static const pocket_capability_t http_capability = {
 static esp_err_t build_net(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     JSRuntime *rt=JS_GetRuntime(ctx);
-    // JS_NewClassID assigns once for the process; JS_NewClass is per runtime,
-    // and a session that never reaches here never needs either.
-    JS_NewClassID(rt,&lease_class);
-    JS_NewClassID(rt,&response_class);
-    if(JS_NewClass(rt,lease_class,&lease_class_def)<0 ||
-       JS_NewClass(rt,response_class,&response_class_def)<0) return ESP_FAIL;
+    // This comment used to say "JS_NewClassID assigns once for the process".
+    // It does not -- the counter is per runtime -- and pocket_api.h now carries
+    // the whole of what that cost. A session that never reaches here still
+    // needs neither.
+    if(!pocket_api_class_ready(rt,&lease_rt,&lease_class)) {
+        JS_NewClassID(rt,&lease_class);
+        if(JS_NewClass(rt,lease_class,&lease_class_def)<0) return ESP_FAIL;
+    }
+    if(!pocket_api_class_ready(rt,&response_rt,&response_class)) {
+        JS_NewClassID(rt,&response_class);
+        if(JS_NewClass(rt,response_class,&response_class_def)<0) return ESP_FAIL;
+    }
 
     // One shared prototype each. Per-handle closures would put a function
     // object on the guest heap for every method, and guest heap is what runs

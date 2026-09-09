@@ -40,6 +40,7 @@ typedef struct {
 static session_t *live;
 static bool       dirty;
 static JSClassID  session_class;
+static JSRuntime *session_rt;
 static bool       class_ready;
 // Never reset per session: a handle identifies a session for the life of the
 // firmware run, so a TextSession object the app kept from a closed session can
@@ -390,8 +391,10 @@ static const JSClassDef session_def = {.class_name="PocketTextSession"};
 static bool ensure_class(JSContext *ctx) {
     if(class_ready) return true;
     JSRuntime *rt=JS_GetRuntime(ctx);
-    JS_NewClassID(rt,&session_class);
-    if(JS_NewClass(rt,session_class,&session_def)<0) return false;
+    if(!pocket_api_class_ready(rt,&session_rt,&session_class)) {
+        JS_NewClassID(rt,&session_class);
+        if(JS_NewClass(rt,session_class,&session_def)<0) return false;
+    }
     JSValue proto=JS_NewObject(ctx);
     if(JS_IsException(proto)) return false;
     JS_SetPropertyFunctionList(ctx,proto,session_methods,
