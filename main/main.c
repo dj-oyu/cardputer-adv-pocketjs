@@ -13,6 +13,7 @@
 #include "app_session.h"
 #include "pocket_workspace.h"
 #include "sd_picker.h"
+#include "file_picker.h"
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_capture.h"
@@ -408,6 +409,17 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         if(have) sd_picker_modal_key(stroke);
         if(sd_picker_modal_dirty()) sd_picker_modal_draw();
         if(!sd_picker_modal()) app_force_redraw();
+        return;
+    }
+    // fs.pickFile is the same screen again, one grant further in: the person
+    // choosing a file is choosing convenience rather than permission, so this
+    // one comes after the grant picker for the same reason the grant picker
+    // comes after the works picker -- two questions asked in one turn are
+    // answered in the order they would have to be answered anyway.
+    if(file_picker_modal()) {
+        if(have) file_picker_modal_key(stroke);
+        if(file_picker_modal_dirty()) file_picker_modal_draw();
+        if(!file_picker_modal()) app_force_redraw();
         return;
     }
     // A text session takes the keyboard from the guest for as long as it is

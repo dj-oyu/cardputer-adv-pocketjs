@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include "sd_media.h"
 #include "sd_picker.h"
+#include "file_picker.h"
 
 static const char *TAG = "pocket.fs";
 
@@ -3944,6 +3945,7 @@ static const JSCFunctionListEntry fs_methods[] = {
     JS_CFUNC_DEF("readText",       2, js_read_text),
     JS_CFUNC_DEF("writeText",      3, js_write_text),
     JS_CFUNC_DEF("requestFolder", 2, sd_picker_request),
+    JS_CFUNC_DEF("pickFile",      2, file_picker_request),
 };
 
 static esp_err_t build_fs(JSContext *ctx, JSValueConst ns, void *user) {
@@ -3987,9 +3989,10 @@ esp_err_t pocket_fs_install(JSContext *ctx, void *user_data) {
 }
 
 void pocket_fs_reset(void) {
-    // A folder screen still up goes back to the shell, and its promise is
-    // settled by the completion picker_finish() posts.
+    // A folder or file screen still up goes back to the shell, and its
+    // promise is settled by the completion picker_finish() posts.
     sd_picker_reset();
+    file_picker_reset();
     // Section 8: everything is cancelled when the app ends, and a create or
     // replace that never committed loses its temporary version here. That is
     // flash erases at app_stop() -- up to seven sectors, tens of milliseconds

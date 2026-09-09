@@ -29,11 +29,9 @@
 //    grant is live, because unmounting drops the grant and would silently
 //    invalidate handles the person did authorise.
 #include "sd_picker.h"
+#include "pickmodal.h"
 #include "sd_media.h"
 #include "pocket_api.h"
-#include "board.h"
-#include "paint.h"
-#include "jpfont.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <dirent.h>
@@ -45,13 +43,11 @@
 static const char *TAG = "pocket.sd";
 
 // A row's name. SD_ROOT_MAX bounds what a grant can hold; a name longer than
-// this cannot become a root, so it is not offered rather than offered and then
-// refused at the moment of choosing.
-#define SD_PICK_NAME     64
-#define SD_PICK_ROWS_MAX 12
-#define SD_PICK_ROWS_VISIBLE 6
-#define SD_PICK_LINE_H   15
-#define SD_PICK_TOP      19
+// PICK_NAME_MAX cannot be shown, and a name that cannot be shown cannot be
+// chosen -- so it is not offered rather than offered and then refused at the
+// moment of choosing. The screen itself is ui/pickmodal.h now: the cursor, the
+// scroll window and the deadline were the same code in three files, and what
+// stays here is only what a GRANT means.
 
 // The picker waits for a person, so section 8's 30 s general cap would be a
 // deadline on reading a list. The same two numbers the works picker uses, for
@@ -67,15 +63,12 @@ static const char *TAG = "pocket.sd";
 // Allocated when the screen opens and freed when it closes, so an app that
 // never asks for a folder pays a pointer for it.
 typedef struct {
-    unsigned count, cursor, top;
-    char     names[SD_PICK_ROWS_MAX][SD_PICK_NAME];
-    int64_t  deadline_us;
-    bool     dirty;
+    pickmodal_t modal;
     // Whether a grant was already live when this screen opened. It decides
     // whether a cancel may unmount: dropping the card would take that grant
     // with it, which is right for a removal and wrong for "the person changed
     // their mind about changing their mind".
-    bool     had_grant;
+    bool had_grant;
 } sd_picker_t;
 
 static sd_picker_t     *picker;
@@ -106,41 +99,32 @@ bool sd_picker_modal(void) { return picker!=NULL; }
 
 void sd_picker_modal_key(const keystroke_t *key) {
     if(!picker||!key) return;
-    switch(key->nav) {
-        case KEY_UP:
-            if(picker->cursor) picker->cursor--;
-            break;
-        case KEY_DOWN:
-            if(picker->count&&picker->cursor+1<picker->count) picker->cursor++;
-            break;
-        case KEY_ENTER:
-            if(picker->count) {
-                const char *folder=picker->names[picker->cursor];
-                // The choice is the grant, and this is the only call to
-                // sd_media_grant() in the firmware.
-                if(!sd_media_grant_folder(folder,strlen(folder))) {
-                    // Only a name this screen should not have offered can land
-                    // here. Refusing loudly beats granting something else.
-                    ESP_LOGW(TAG,"grant refused for \"%s\"",folder);
-                    picker_finish(PICK_CANCELLED,false);
-                    return;
-                }
-                ESP_LOGI(TAG,"GRANTED %s",folder);
-                picker_finish(PICK_CHOSE,true);
+    switch(pickmodal_key(&picker->modal,key)) {
+        case PICK_EVENT_CHOSE: {
+            const pick_row_t *row=pickmodal_current(&picker->modal);
+            if(!row) return;
+            // The choice IS the grant, and this is the only call to
+            // sd_media_grant_folder() in the firmware.
+            if(!sd_media_grant_folder(row->name,strlen(row->name))) {
+                // Only a name this screen should not have offered can land
+                // here. Refusing loudly beats granting something else.
+                ESP_LOGW(TAG,"grant refused for \"%s\"",row->name);
+                picker_finish(PICK_CANCELLED,false);
                 return;
             }
-            break;
-        case KEY_BACK:
+            ESP_LOGI(TAG,"GRANTED %s",row->name);
+            picker_finish(PICK_CHOSE,true);
+            return;
+        }
+        case PICK_EVENT_CANCELLED:
+            // No climbing here, unlike fs.pickFile: this screen has one level
+            // by construction, because a grant is one component of the card's
+            // root and nothing deeper can become one.
             ESP_LOGI(TAG,"GRANT DECLINED");
             picker_finish(PICK_CANCELLED,false);
             return;
-        default: return;
-    }
-    if(picker) {
-        if(picker->cursor<picker->top) picker->top=picker->cursor;
-        if(picker->cursor>=picker->top+SD_PICK_ROWS_VISIBLE)
-            picker->top=picker->cursor-SD_PICK_ROWS_VISIBLE+1;
-        picker->dirty=true;
+        default:
+            return;
     }
 }
 
@@ -149,58 +133,17 @@ bool sd_picker_modal_dirty(void) {
     // pocket_api_pump() does not run while the guest is not ticked, so the
     // deadline that armed this promise would not be noticed until the person
     // closed the screen -- which is to say never, for the case that needs it.
-    if(esp_timer_get_time()>picker->deadline_us) {
+    if(pickmodal_expired(&picker->modal,esp_timer_get_time())) {
         ESP_LOGI(TAG,"GRANT EXPIRED");
         picker_finish(PICK_EXPIRED,false);
         return false;
     }
-    return picker->dirty;
-}
-
-static void picker_row(uint16_t *strip, int strip_y, int rows, unsigned row,
-                       int y, bool selected, uint16_t ink, uint16_t dim) {
-    if(selected) {
-        paint_fill(2,y-2,LCD_W-4,SD_PICK_LINE_H-2,dim);
-        paint_ascii(5,y+1,">",ink);
-    }
-    const char *name=picker->names[row];
-    size_t len=strlen(name);
-    if(jpfont_ready(JPFONT_TEXT))
-        jpfont_draw(JPFONT_TEXT,strip,strip_y,rows,14,y-2,name,len,ink);
-    else
-        paint_ascii(14,y+1,name,ink);
+    return picker->modal.dirty;
 }
 
 void sd_picker_modal_draw(void) {
     if(!picker) return;
-    picker->dirty=false;
-    uint16_t *strip=board_strip();
-    uint16_t ink=board_rgb(226,234,244), dim=board_rgb(70,92,120),
-             rule=board_rgb(28,44,66), accent=board_rgb(120,200,255),
-             back=board_rgb(8,13,22);
-
-    for(int strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
-        int rows=LCD_H-strip_y<STRIP_H?LCD_H-strip_y:STRIP_H;
-        paint_begin(strip,strip_y,rows);
-        for(int i=0;i<LCD_W*rows;i++) strip[i]=back;
-
-        paint_ascii(5,3,"SHARE A FOLDER ON THE CARD",accent);
-        paint_fill(0,13,LCD_W,1,rule);
-
-        if(!picker->count)
-            paint_ascii(14,SD_PICK_TOP+2,"NO FOLDERS IN THE CARD ROOT",dim);
-        for(unsigned r=0;r<SD_PICK_ROWS_VISIBLE&&picker->top+r<picker->count;r++) {
-            unsigned row=picker->top+r;
-            picker_row(strip,strip_y,rows,row,SD_PICK_TOP+(int)r*SD_PICK_LINE_H,
-                       row==picker->cursor,ink,
-                       row==picker->cursor?board_rgb(24,48,78):dim);
-        }
-
-        paint_fill(0,LCD_H-11,LCD_W,1,rule);
-        paint_ascii(5,LCD_H-8,
-                    picker->count?"ENTER SHARE   ESC DECLINE":"ESC DECLINE",dim);
-        ESP_ERROR_CHECK(board_present(strip_y,rows,strip));
-    }
+    pickmodal_draw(&picker->modal);
 }
 
 // ------------------------------------------------------------------ the call
@@ -237,9 +180,12 @@ static const pocket_promise_ops_t pick_ops = {
     .settle=pick_settle, .stop=pick_stop,
 };
 
-// The card's root directory, one page of folders deep. Files are skipped: a
-// grant is a folder, so a row that could not become one is not a row.
-static unsigned collect_folders(sd_picker_t *out) {
+// The card's root directory. Files are skipped: a grant is a folder, so a row
+// that could not become one is not a row.
+static unsigned fill(void *user, unsigned from, pick_row_t *out, unsigned max,
+                     bool *more) {
+    (void)user;
+    *more=false;
     DIR *d=opendir(SD_MOUNT_POINT);
     if(!d) {
         sd_media_note_error(ESP_ERR_TIMEOUT);
@@ -247,19 +193,24 @@ static unsigned collect_folders(sd_picker_t *out) {
     }
     struct dirent *de;
     char full[SD_FSPATH_MAX];
-    while((de=readdir(d))!=NULL&&out->count<SD_PICK_ROWS_MAX) {
+    unsigned seen=0,emitted=0;
+    while((de=readdir(d))!=NULL) {
         size_t n=strlen(de->d_name);
         if(!n||de->d_name[0]=='.') continue;      // "." ".." and hidden
-        if(n>=SD_PICK_NAME) continue;             // cannot become a root
+        if(n>=PICK_NAME_MAX) continue;            // cannot become a root
         int w=snprintf(full,sizeof full,"%s/%s",SD_MOUNT_POINT,de->d_name);
         if(w<0||(size_t)w>=sizeof full) continue;
         struct stat st;
         if(stat(full,&st)!=0||!S_ISDIR(st.st_mode)) continue;
-        memcpy(out->names[out->count],de->d_name,n+1);
-        out->count++;
+        if(seen++<from) continue;
+        if(emitted>=max) { *more=true; break; }
+        memcpy(out[emitted].name,de->d_name,n+1);
+        out[emitted].is_dir=true;
+        out[emitted].size=0;
+        emitted++;
     }
     closedir(d);
-    return out->count;
+    return emitted;
 }
 
 // timeoutMs and cancel, which are the only two options this call has anything
@@ -349,9 +300,7 @@ JSValue sd_picker_request(JSContext *ctx, JSValueConst self,
                                  "no card could be mounted",true,
                                  POCKET_OUTCOME_NOT_APPLIED);
     }
-    collect_folders(fresh);
-    fresh->dirty=true;
-    fresh->deadline_us=esp_timer_get_time()+1000LL*ms;
+    int64_t deadline=esp_timer_get_time()+1000LL*ms;
 
     pocket_request_t request=pocket_api_promise_open();
     if(!request) {
@@ -365,8 +314,16 @@ JSValue sd_picker_request(JSContext *ctx, JSValueConst self,
     picker=fresh;
     pick_request=request;
     pick_granted=false;
+    pickmodal_cfg_t cfg={
+        .title="SHARE A FOLDER ON THE CARD",
+        .hint_rows="ENTER SHARE   ESC DECLINE",
+        .hint_empty="ESC DECLINE",
+        .empty="NO FOLDERS IN THE CARD ROOT",
+        .fill=fill, .user=fresh, .deadline_us=deadline,
+    };
+    pickmodal_open(&fresh->modal,&cfg);
     JSValue promise=pocket_api_promise_arm(ctx,request,&pick_ops,NULL,cancel,
-                                           fresh->deadline_us);
+                                           deadline);
     if(JS_IsException(promise)) {
         bool unmount=!fresh->had_grant;
         picker_close();
@@ -374,7 +331,7 @@ JSValue sd_picker_request(JSContext *ctx, JSValueConst self,
         if(unmount) sd_media_unmount();
         return promise;
     }
-    ESP_LOGI(TAG,"PICK %u folders",fresh->count);
+    ESP_LOGI(TAG,"PICK %u folders",fresh->modal.count);
     return promise;
 }
 
