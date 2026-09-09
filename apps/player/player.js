@@ -1,30 +1,43 @@
 // The home screen's music player. Overlay app -- no ui.*, no menu underneath.
 // Why it is shaped this way: README.md. Terse because the guest parses this
-// file and the bytes cost heap; growing it by 2.4 KB once cost the session
-// enough room to build pocket.fs on the first keypress.
+// file and the bytes cost heap.
 (function () {
-  var o = pocket.overlay, W = o.region.width;
+  var o = pocket.overlay, W = o.region.width, H = o.region.height;
   var EXT = ['.mp3', '.wav', '.pok'];
   var MAX = pocket.capabilities.get('ui.overlay').limits.maxTextChars;
 
   var p = null, sub = null, path = '', state = 'idle', busy = false;
-  var pos = 0, gaps = 0, note = 'PRESS ENTER TO CHOOSE', title = 'NO TRACK';
-  var dirty = true, total = null, tick = 0;
+  var pos = 0, gaps = 0, msg = 'ENTER TO CHOOSE', title = 'NO TRACK';
+  var dirty = true, total = null, tick = 0, help = false;
 
-  // overlay.text counts BYTES; String.slice counts code units. README.md.
-  function cut(s) {
-    for (var b = 0, i = 0; i < s.length; i++) {
-      var c = s.charCodeAt(i);
-      b += c < 128 ? 1 : c < 2048 ? 2 : 3;
-      if (b > MAX) break;
+  // The face is 6 px for ASCII and 12 for everything else, and overlay.text
+  // counts BYTES while String.slice counts code units. Both facts are needed
+  // twice: to trim a name to the limit, and to put a box exactly round it.
+  function walk(s, cap) {
+    for (var b = 0, w = 0, i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i), n = c < 128 ? 1 : c < 2048 ? 2 : 3;
+      if (cap && b + n > MAX) break;
+      b += n; w += c < 128 ? 6 : 12;
     }
-    return s.slice(0, i);
+    return cap ? s.slice(0, i) : w;
   }
+  function cut(s) { return walk(s, 1); }
+  function wpx(s) { return walk(s, 0); }
+
+  // Text on its own black plate, sized to the text. No band across the top:
+  // the ground belongs to the scene, and only the letters take any of it.
+  function plate(x, y, s, r, g, b) {
+    if (!s) return;
+    s = cut(s);
+    o.rect(x, y, wpx(s) + 8, 16, 0, 0, 0);
+    o.text(x + 4, y + 2, s, r, g, b);
+  }
+
   function leaf(s) { var i = s.lastIndexOf('/'); return i < 0 ? s : s.slice(i + 1); }
-  function set(t, n) { title = t; note = n; dirty = true; }
+  function say(m) { msg = m; dirty = true; }
 
   function fail(where, e) {
-    set(title, where + ' ' + ((e && e.code) || e));
+    say(where + ' ' + ((e && e.code) || e));
     console.log('PLAYER_FAIL ' + where + ' ' + ((e && e.code) || e));
     busy = false;
   }
@@ -38,7 +51,7 @@
   function open(src, play) {
     drop();
     path = src; busy = true;
-    set(leaf(src), 'OPENING');
+    title = leaf(src); say('OPENING');
     pocket.audio.player.open({ source: src }).then(function (h) {
       p = h;
       // Real, from the file's own Xing/Info or VBRI tag, or null. Two different
@@ -46,7 +59,7 @@
       total = h.info().durationMs;
       console.log('PLAYER_OPEN ' + src + ' durationMs=' + total);
       sub = h.onState(function (e) {
-        state = e.state; dirty = true;
+        state = e.state; say(''); dirty = true;
         if (e.state === 'error') { fail('PLAYBACK', e.error); return; }
         if (e.state === 'ended') next();
       });
@@ -62,20 +75,18 @@
     busy = true;
     pocket.fs.nextFile(path, { extensions: EXT, wrap: true }).then(function (n) {
       busy = false;
-      if (n) open(n, true); else set(title, 'END OF FOLDER');
+      if (n) open(n, true); else say('END OF FOLDER');
     }, function (e) { fail('NEXT', e); });
   }
 
   function chose(f) { busy = false; if (f) open(f, true); else dirty = true; }
 
-  // The grant screen, on its own key. It is NOT only reachable through a
-  // refusal: once a folder is shared there is no refusal left to trigger it,
-  // and a person who shared the wrong one would have had no way back.
+  // The grant screen on its own key: once a folder is shared there is no
+  // refusal left to reach it through, and a wrong choice would be permanent.
   function share() {
-    busy = true;
-    set(title, 'CHOOSING FOLDER');
+    busy = true; say('CHOOSING FOLDER');
     pocket.fs.requestFolder('sd').then(function (r) {
-      if (!r) { busy = false; set(title, 'NO FOLDER SHARED'); return; }
+      if (!r) { busy = false; say('NO FOLDER SHARED'); return; }
       return pocket.fs.pickFile('sd', { extensions: EXT }).then(chose);
     }, function (e) { fail('SHARE', e); });
   }
@@ -83,8 +94,7 @@
   // pickFile first, the grant screen only if it refuses: the refusal is the
   // only signal for "no grant yet". Both are shell modals and win over us.
   function pick() {
-    busy = true;
-    set(title, 'CHOOSING');
+    busy = true; say('CHOOSING');
     pocket.fs.pickFile('sd', { extensions: EXT }).then(chose, function (e) {
       if (e && e.code === 'PERMISSION_DENIED') share(); else fail('PICK', e);
     });
@@ -97,7 +107,9 @@
   }
 
   o.onKey(function (e) {
+    if (e.key === '?') { help = !help; dirty = true; return; }
     if (busy) return;
+    if (help) { help = false; dirty = true; return; }
     if (e.action === 'accept') { if (p) toggle(); else pick(); return; }
     if (e.action === 'right') { if (p) next(); return; }
     if (e.action === 'left') { pick(); return; }
@@ -125,6 +137,23 @@
     }
   }
 
+  // ONE status line. It used to be two -- a transport state and a note -- which
+  // said "PLAYING" and "OPENING" a few pixels apart and left the reader to work
+  // out which was current. A message wins while it stands, and the transport
+  // speaks when there is nothing to report.
+  function status() {
+    if (msg) return msg;
+    if (!p) return '';
+    var t = state.toUpperCase() + '  ' + (pos / 1000 | 0) + 's';
+    if (total) t += ' / ' + (total / 1000 | 0) + 's';
+    if (gaps) t += '  GAPS ' + gaps;
+    return t;
+  }
+
+  var HELP = ['ENTER  PLAY / PAUSE', 'LEFT   CHOOSE A FILE',
+              'UP     CHOOSE A FOLDER', 'RIGHT  NEXT TRACK',
+              '-  =   VOLUME', 'ESC    LEAVE THE PLAYER'];
+
   var n = 0;
   globalThis.frame = function () {
     if (p && !(++n % 5)) {
@@ -138,16 +167,16 @@
     if (!dirty) return;
     dirty = false;
     o.begin();
-    o.rect(0, 0, W, 36, 6, 12, 22);
-    o.rect(0, 36, W, 1, 40, 70, 100);
-    o.text(8, 4, cut(title), 226, 240, 255);
-    o.text(8, 20, state.toUpperCase(), 130, 190, 230);
-    o.text(72, 20, (pos / 1000 | 0) + 's' +
-                   (total ? ' / ' + (total / 1000 | 0) + 's' : ''), 150, 170, 190);
-    if (gaps) o.text(130, 20, 'GAPS ' + gaps, 255, 170, 90);
-    bar(42);
-    o.text(8, 50, cut(note), 122, 150, 175);
-    o.text(8, 104, 'ENTER PLAY  LEFT PICK  UP FOLDER', 90, 110, 130);
-    o.text(8, 118, 'RIGHT NEXT  ESC LEAVE  -/= VOL', 90, 110, 130);
+    if (help) {
+      o.rect(0, 0, W, H, 0, 0, 0);
+      for (var i = 0; i < HELP.length; i++)
+        o.text(14, 14 + i * 18, HELP[i], 226, 240, 255);
+      o.text(14, H - 18, '?  CLOSE', 110, 140, 165);
+      return;
+    }
+    plate(8, 8, title, 226, 240, 255);
+    plate(8, 28, status(), 150, 190, 220);
+    bar(H - 26);
+    plate(8, H - 20, '?: help', 110, 140, 165);
   };
 })();

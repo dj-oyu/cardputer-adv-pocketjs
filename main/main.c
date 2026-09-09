@@ -78,11 +78,12 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // is not a method. Like every letter in this function it arrives over USB;
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
-    // The volume pair, as TEXT rather than as nav, because that is what the
-    // Cardputer's own keys produce and what volume_key() reads. Without these
-    // two a host script could reach every other key on the home screen and not
-    // the only two that are the shell's everywhere.
-    if(c=='-'||c=='=') { k->text[0]=c;k->len=1;return true; }
+    // The volume pair and '?', as TEXT rather than as nav, because that is what
+    // the Cardputer's own keys produce and what volume_key() and an overlay
+    // read. Without them a host script could reach every other key on the home
+    // screen and not these -- the two that are the shell's everywhere, and the
+    // one an overlay uses for its own help.
+    if(c=='-'||c=='='||c=='?') { k->text[0]=c;k->len=1;return true; }
     if(c=='\r'||c=='\n'||c=='e')k->nav=KEY_ENTER;
     else if(c=='q'||c==27)k->nav=KEY_BACK;
     else if(c=='b')k->nav=KEY_RIGHT;
