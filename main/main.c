@@ -14,6 +14,7 @@
 #include "pocket_workspace.h"
 #include "sd_picker.h"
 #include "file_picker.h"
+#include "overlay.h"
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_capture.h"
@@ -192,8 +193,6 @@ extern const char opusfit_start[] asm("_binary_opusfit_js_start");
 extern const char opusfit_end[] asm("_binary_opusfit_js_end");
 extern const char mp3play_start[] asm("_binary_mp3play_js_start");
 extern const char mp3play_end[] asm("_binary_mp3play_js_end");
-extern const char player_start[] asm("_binary_player_js_start");
-extern const char player_end[] asm("_binary_player_js_end");
 
 // shell_key() cannot say "hand the display to another screen": its bool already
 // means "launch the app shell_app() names". The request is left behind instead,
@@ -205,6 +204,14 @@ static void take_pending_screen(void) {
         case SHELL_SCREEN_WIFI: enter(SCREEN_WIFI); break;
         case SHELL_SCREEN_NONE: break;
     }
+}
+
+// Whether a host screen is up over the home screen. 3.1: modals beat the
+// overlay, and that has to include the RESERVED KEY -- Escape on a folder
+// picker means "I decline", and spending it on standing the overlay down would
+// leave the picker up with its promise unsettled and no way to answer it.
+static bool home_modal(void) {
+    return pocket_workspace_modal()||sd_picker_modal()||file_picker_modal();
 }
 
 static bool home_key(const keystroke_t *k) {
@@ -234,7 +241,6 @@ static bool home_key(const keystroke_t *k) {
         case 8: begin_run("local.opusplay",NULL,0,opusplay_start,(size_t)(opusplay_end-opusplay_start-1)); break;
         case 9: begin_run("local.opusfit",NULL,0,opusfit_start,(size_t)(opusfit_end-opusfit_start-1)); break;
         case 10: begin_run("local.mp3play",NULL,0,mp3play_start,(size_t)(mp3play_end-mp3play_start-1)); break;
-        case 11: begin_run("local.player",NULL,0,player_start,(size_t)(player_end-player_start-1)); break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
@@ -505,6 +511,12 @@ static void ui_task(void *arg) {
             if(running) end_run(ESP_OK);
             else if(screen!=SCREEN_HOME) go_home();
             else if(home_error) home_error=NULL;
+            // The force stop stands an overlay down too. This is NOT the
+            // reserved key -- this block only runs for Ctrl+Alt+Del, which is
+            // why putting the reserved key here left Back travelling the
+            // ordinary path and reaching the guest. The reserved key is in the
+            // residue loop below, where every other keystroke is decided.
+            else if(overlay_running()&&!home_modal()) overlay_yield("force stop");
             else { shell_key(KEY_BACK); take_pending_screen(); }
             xQueueReset(keys);
             have=false;
@@ -523,7 +535,61 @@ static void ui_task(void *arg) {
             // the screen it moved to gets its own frame rather than being fed
             // the keys meant for the one before it. Both wants_run predicates
             // are pure, which is what makes asking twice per frame free.
+            // MODALS BEAT THE OVERLAY (3.1). The same three screens tick_run()
+            // drives for a foreground guest, driven here for an overlay one --
+            // and this is not symmetry for its own sake: without it a modal an
+            // overlay opened would never be drawn and never take a key, so
+            // "the shell's prompts win" would be a sentence in a document with
+            // nothing behind it. The order is tick_run()'s, for the reason
+            // given there.
+            if(!running && screen==SCREEN_HOME && overlay_running()) {
+                if(pocket_workspace_modal()) {
+                    if(have) pocket_workspace_modal_key(&stroke);
+                    if(pocket_workspace_modal_dirty()) pocket_workspace_modal_draw();
+                    goto framed;
+                }
+                if(sd_picker_modal()) {
+                    if(have) sd_picker_modal_key(&stroke);
+                    if(sd_picker_modal_dirty()) sd_picker_modal_draw();
+                    goto framed;
+                }
+                if(file_picker_modal()) {
+                    if(have) file_picker_modal_key(&stroke);
+                    if(file_picker_modal_dirty()) file_picker_modal_draw();
+                    goto framed;
+                }
+            }
             screen_id_t was=screen;
+            // The residue. An overlay has ended the menu, so the keys the menu
+            // used to consume are no longer consumed by anything -- that is the
+            // premise 3.1's older text was missing, not a rule it got wrong.
+            // Back never arrives: it was taken above.
+            if(!running && screen==SCREEN_HOME && overlay_running()) {
+                while(have) {
+                    // THE RESERVED KEY, taken before delivery and never after.
+                    // 3.1 asks that the way out be undeliverable to the overlay
+                    // by construction, and this `break` is that construction:
+                    // the loop that hands keys to the guest is the only path
+                    // there is, and Back leaves it before reaching the call.
+                    //
+                    // A modal keeps it -- Escape on a folder picker means "I
+                    // decline", and spending it on standing the overlay down
+                    // would leave that screen up with its promise unsettled.
+                    if(stroke.nav==KEY_BACK&&!home_modal()) {
+                        overlay_yield("the person");
+                        // The menu is back, which is what this marker has
+                        // always meant. Saying it here keeps the contract the
+                        // host scripts read -- they open with Back and wait for
+                        // this line, and an armed overlay would otherwise make
+                        // that wait forever.
+                        ESP_LOGI("shell","HOME_READY");
+                        have=false;
+                        break;
+                    }
+                    overlay_key(&stroke);
+                    have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+                }
+            }
             while(have) {
                 if(!s->key(&stroke)) { go_home(); break; }
                 if(screen!=was) break;
@@ -548,6 +614,8 @@ static void ui_task(void *arg) {
             else if(!running)
                 paint(s);
 
+            framed:
+            {
             int test=atomic_exchange(&diagnostic,0);
             // Runs in place of starting a guest: it needs no app, and holding
             // 6,480 bytes of scratch is only affordable while none is running.
@@ -564,6 +632,7 @@ static void ui_task(void *arg) {
                 run_started=app_start_test(test);
                 running = run_started==ESP_OK;
                 if(!running) { app_stop(); home_error="TEST ERROR"; }
+            }
             }
         }
 

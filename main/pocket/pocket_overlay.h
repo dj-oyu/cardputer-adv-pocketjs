@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 #include "overlay_core.h"
+#include "keymap.h"
 
 // pocket.overlay — the drawing surface of docs/common-api.md 3.1.
 //
@@ -44,6 +45,22 @@ void pocket_overlay_paint(uint16_t *strip, int strip_y, int strip_h);
 // True when the guest published anything this session.
 bool pocket_overlay_drawn(void);
 
-// Drops the display list and the region. Called from app_stop() before the
-// guest dies, with every other surface.
+// Drops the display list, the region and the key listeners. Called from
+// app_stop() before the guest dies, with every other surface.
 void pocket_overlay_reset(void);
+
+// One keystroke from the home screen's loop, queued for the next turn.
+//
+// QUEUED RATHER THAN DELIVERED, and the reason is the same one section 5 gives
+// everywhere else on this host: a listener must not be called from inside the
+// shell's key handling, where the guest could re-enter code that is halfway
+// through a frame. pocket_overlay_pump() runs it at the top of the turn, next
+// to every other pump.
+//
+// The ring is small on purpose. A person cannot outrun a 30 Hz turn by enough
+// to matter, and dropping the oldest is better than growing a buffer for input
+// that has stopped being current.
+void pocket_overlay_key(const keystroke_t *k);
+
+// Delivers what pocket_overlay_key() queued. Called from app_overlay_tick().
+void pocket_overlay_pump(void);

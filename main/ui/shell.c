@@ -97,16 +97,14 @@ static unsigned category,setting,app;
 // MIDDLE would renumber shell_app(), and with it main.c's switch, silently.
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
                           "IMU CALIBRATION","POCKET PET","PET COMPANION",
-                          "AUDIO STREAM","OPUS STREAM","OPUS + WI-FI","MP3 PLAYBACK",
-                          "MUSIC PLAYER"};
+                          "AUDIO STREAM","OPUS STREAM","OPUS + WI-FI","MP3 PLAYBACK"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
                                   "AI USAGE / ALARM / TIMER",
                                   "PLAY A CLIP AND TIME THE FRAMES",
                                   "DECODE OPUS AND TIME THE FRAMES",
-                                  "DECODE WHILE THE RADIO IS UP","DECODE MP3 / PAUSE / RESUME",
-                                  "PLAY A FILE FROM THE CARD"};
+                                  "DECODE WHILE THE RADIO IS UP","DECODE MP3 / PAUSE / RESUME"};
 #define APP_N (sizeof(apps)/sizeof(apps[0]))
 static float app_pos;
 unsigned shell_app(void) { return app; }
@@ -188,7 +186,11 @@ static const setting_t settings[]={
     // decide" the same section asks for. APPENDED, not inserted: the settings
     // rows are navigated by counted key presses in tools/test_settings.py and
     // tools/capture_home.py.
-    {"DESK CLOCK", SETTING_CHOICES, overlay_toggle_names, sizeof overlay_toggle_names[0], 2,
+    // 3.1: the choice is WHICH overlay replaces the menu, not whether one is
+    // drawn on top of it. This is the row a person turns it off from, so it is
+    // also where each overlay's live status appears.
+    {"HOME OVERLAY", SETTING_CHOICES, overlay_choice_names, sizeof overlay_choice_names[0],
+     1+OVERLAY_APPS,
      "overlay",     overlay_armed_get, overlay_armed_set, SHELL_SCREEN_NONE},
 };
 #define SETTING_N (sizeof(settings)/sizeof(settings[0]))
@@ -499,7 +501,13 @@ void shell_draw(const char *error, unsigned phase) {
     char meter[16];snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
     HUD_FENCE;uint32_t f1=esp_cpu_get_cycle_count();HUD_FENCE;
     hud_fmt_cy+=f1-f0;
-    if(!error)menu_layout();
+    // 3.1 (revised 2026-09-09): AN OVERLAY ENDS THE MENU. Not "is drawn under
+    // it" -- the home screen is in one state or the other, and this is where
+    // that is decided. Laying the menu out anyway and then not painting it
+    // would leave hud_labels holding rows nothing draws, which is a different
+    // and worse thing than a menu that does not exist this frame.
+    bool xmb=!overlay_running();
+    if(!error&&xmb)menu_layout();
     HUD_FENCE;hud_menu_cy+=esp_cpu_get_cycle_count()-f1;HUD_FENCE;
     hud_us+=(unsigned)(esp_timer_get_time()-hud_once);
     for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
@@ -510,25 +518,13 @@ void shell_draw(const char *error, unsigned phase) {
         band=esp_timer_get_time();
         HUD_FENCE;uint32_t h0=esp_cpu_get_cycle_count();HUD_FENCE;
         if(sc->overlay)sc->overlay(strip,strip_y,strip_h);
-        // THIS ORDER IS THE OLD RULE AND 3.1 NO LONGER ASKS FOR IT.
-        //
-        // It settled "an overlay may not cover the shell's own UI" by painting
-        // the menu on top, rather than by choosing a rectangle -- menu_rows.h
-        // shows no row is safe from the menu during a scroll, so a geometric
-        // answer would have been false.
-        //
-        // 3.1 was rewritten on 2026-09-09 because that sentence had a
-        // requirement and an implementation fused into it. What must stay is
-        // that an overlay cannot cover a CONSENT surface -- a prompt, a
-        // password field, a picker, a confirmation. The menu is not one of
-        // those; it is navigation, and what it was protecting was
-        // reachability, which a reserved key gives more directly. An overlay
-        // is now meant to END the menu and stand in its place.
-        //
-        // The code has not moved yet. Until it does, an overlay is a box under
-        // a menu that is still running, which is the shape the deskclock was
-        // built for and the wrong shape for anything that wants the home
-        // screen. docs/player-overlay.md lists what the move needs.
+        // Scene, then overlay. Nothing of the shell's own goes on top of it
+        // here any more: 3.1 asks that only MODAL surfaces beat an overlay, and
+        // those are whole screens of their own drawn from main.c's loop, not
+        // rows composited into this frame. The menu that used to land on top of
+        // this line does not exist while an overlay is up (see menu_layout
+        // above), which is what makes the ordering here uninteresting rather
+        // than load bearing.
         overlay_paint(strip,strip_y,strip_h);
         HUD_FENCE;uint32_t h1=esp_cpu_get_cycle_count();HUD_FENCE;
         if(show_fps)text(194,8,meter,1,muted);
@@ -537,7 +533,7 @@ void shell_draw(const char *error, unsigned phase) {
         if(error) {
             text(24,69,"APP ERROR",2,white);text(24,94,error,1,muted);
             text(12,123,"ESC / ENTER TO RETURN",1,muted);
-        } else paint_labels();
+        } else if(xmb) paint_labels();
         HUD_FENCE;hud_menu_cy+=esp_cpu_get_cycle_count()-h3;HUD_FENCE;
         hud_us+=(unsigned)(esp_timer_get_time()-band);
         // Timed apart from the pixels: 240x135x2 bytes at 40 MHz is about

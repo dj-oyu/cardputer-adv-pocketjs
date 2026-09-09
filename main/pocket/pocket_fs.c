@@ -3946,6 +3946,7 @@ static const JSCFunctionListEntry fs_methods[] = {
     JS_CFUNC_DEF("writeText",      3, js_write_text),
     JS_CFUNC_DEF("requestFolder", 2, sd_picker_request),
     JS_CFUNC_DEF("pickFile",      2, file_picker_request),
+    JS_CFUNC_DEF("nextFile",      2, file_picker_next),
 };
 
 static esp_err_t build_fs(JSContext *ctx, JSValueConst ns, void *user) {

@@ -3,6 +3,7 @@
 #include "app_session.h"
 #include "app_registry.h"
 #include "pocket_overlay.h"
+#include "board.h"
 #include "nvs.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -14,25 +15,32 @@ static const char *TAG="overlay";
 
 extern const char deskclock_start[] asm("_binary_deskclock_js_start");
 extern const char deskclock_end[]   asm("_binary_deskclock_js_end");
+extern const char player_start[] asm("_binary_player_js_start");
+extern const char player_end[]   asm("_binary_player_js_end");
 
 // The registration an overlay gets instead of a row in shell.c's apps[]. An
-// overlay is not launched from the Apps list -- it is a thing the home screen
-// keeps running, so what registers it is a Settings row and this table, which
-// carries what 3.1's manifest carries: the id, the region, and the frame
-// budget the shell will hold it to.
+// overlay is not launched from the Apps list -- it is what the home screen runs
+// INSTEAD OF ITS MENU (3.1, revised 2026-09-09) -- so what registers it is a
+// Settings choice and this table, which carries what 3.1's manifest carries:
+// the id, the region, the frame budget and the source.
 typedef struct {
     const char       *id;             // app_registry.c manifest id
+    const char       *title;          // the Settings value name, at rest
+    const char      **source;         // &start, so the linker symbol resolves late
+    const char      **source_end;
     overlay_region_t  region;
     uint32_t          budget_us;
 } overlay_app_t;
 
+static const char *deskclock_src, *deskclock_src_end;
+static const char *player_src, *player_src_end;
+
 static const overlay_app_t DESKCLOCK = {
-    .id="local.deskclock",
-    // The box is right of where the menu's longest label reaches at rest
-    // (IMU CALIBRATION is 15 characters at scale 2 from x=16, so 196) and in
-    // the 44..68 band the menu does not settle on. Neither fact is load
-    // bearing -- overlay_paint() runs before the labels, so the shell cannot be
-    // covered whatever the box is -- they only keep it from looking crowded.
+    .id="local.deskclock", .title="DESK CLOCK",
+    .source=&deskclock_src, .source_end=&deskclock_src_end,
+    // A small box, kept where it was. The clock was written against the old
+    // rule and does not want the screen; it is the proof that a modest overlay
+    // still works now that a large one is allowed.
     .region={.x=140,.y=46,.w=96,.h=22},
     // 8 ms of a 33 ms home frame. shell_draw() already spends 25-41 ms of it
     // depending on the scene, so this is generous rather than tight; what it
@@ -42,17 +50,29 @@ static const overlay_app_t DESKCLOCK = {
     .budget_us=8000,
 };
 
-static const overlay_app_t *const REGISTERED[] = { &DESKCLOCK };
+static const overlay_app_t MUSIC = {
+    .id="local.player", .title="MUSIC",
+    .source=&player_src, .source_end=&player_src_end,
+    // The whole panel, which is what 3.1 now allows and what the old rule made
+    // impossible: with XMB ended there is nothing underneath to stay clear of.
+    // Modals still land on top, and they draw the whole screen themselves.
+    .region={.x=0,.y=0,.w=LCD_W,.h=LCD_H},
+    // More than the clock, because it holds a file open and reads the card
+    // inside its turn. Still a small fraction of the frame: what this catches
+    // is a turn that has stopped returning, not one that is working.
+    .budget_us=12000,
+};
+
+static const overlay_app_t *const REGISTERED[OVERLAY_APPS] = { &DESKCLOCK, &MUSIC };
 // One overlay at a time, and the reason is memory rather than taste: the guest
-// heap below is reserved whole, and two of them do not fit beside a scene.
-_Static_assert(sizeof(REGISTERED)/sizeof(REGISTERED[0])==1,
-               "one overlay may run; the Settings row is a toggle, not a list");
+// heap is sized for one beside a scene, and two of them do not fit. The table
+// has rows so the person can CHOOSE which one, not so two can run.
+static const overlay_app_t *current;
 
 // ---------------------------------------------------------------- state
 
 static nvs_handle_t     prefs;
 static bool             prefs_ready;
-static bool             armed;
 static overlay_state_t  state=OVERLAY_OFF;
 // The non-volatile "starting" flag AS IT STANDS IN NVS, including the value
 // this boot found there. Distinguishing that from "this boot wrote it" is what
@@ -69,11 +89,23 @@ static bool             session_up;       // a guest belonging to us exists
 // chain, and the next boot proves it again from scratch.
 static bool             proven;
 static overlay_budget_t budget;
-static char             on_label[20]="ON";
-const char *const overlay_toggle_names[2]={"OFF",on_label};
+// One live buffer per overlay. Only the selected one is ever written, so a row
+// that is not running keeps its plain title rather than a stale status.
+static char             labels[OVERLAY_APPS][20];
+const char *const overlay_choice_names[1+OVERLAY_APPS]={"OFF",labels[0],labels[1]};
+_Static_assert(OVERLAY_APPS==2,"overlay_choice_names lists one buffer per app");
+// 0 = off, 1..OVERLAY_APPS = REGISTERED[choice-1].
+static unsigned         choice;
+
+static void label_reset(unsigned which) {
+    if(which<1||which>OVERLAY_APPS) return;
+    snprintf(labels[which-1],sizeof labels[0],"%s",REGISTERED[which-1]->title);
+}
 
 static void say(const char *suffix) {
-    snprintf(on_label,sizeof on_label,"ON %s",suffix);
+    if(!choice) return;
+    snprintf(labels[choice-1],sizeof labels[0],"%s %s",
+             REGISTERED[choice-1]->title,suffix);
 }
 // The one line a host script and a person read the same fact from.
 static void announce(const char *what) {
@@ -98,36 +130,45 @@ static bool flag_set(bool on) {
 }
 
 void overlay_init(void) {
+    // The table holds pointers to these rather than the symbols themselves,
+    // because a `.source` initialiser would need the address of an extern array
+    // at file scope and that is fine -- but the END pointer is only ever used as
+    // a length, and keeping both here puts the arithmetic in one place.
+    deskclock_src=deskclock_start; deskclock_src_end=deskclock_end;
+    player_src=player_start;       player_src_end=player_end;
     uint8_t stored=0;
     if(nvs_open("overlay",NVS_READWRITE,&prefs)==ESP_OK) {
         prefs_ready=true;
         if(nvs_get_u8(prefs,"starting",&stored)!=ESP_OK) stored=0;
     }
     flag_stored=stored!=0;
-    state=overlay_boot_state(armed,flag_stored);
+    for(unsigned i=1;i<=OVERLAY_APPS;i++) label_reset(i);
+    state=overlay_boot_state(choice!=0,flag_stored);
     if(state==OVERLAY_BLOCKED) {
         // Deliberately left in NVS. Clearing it here would re-arm the device on
         // the boot after this one without anybody having decided anything.
         say("BLOCKED");
         ESP_LOGW(TAG,"OVERLAY_BLOCKED previous start did not complete");
     } else if(state==OVERLAY_STARTING) say("...");
-    else strcpy(on_label,"ON");
     announce("init");
 }
 
-unsigned overlay_armed_get(void) { return armed?1u:0u; }
+unsigned overlay_armed_get(void) { return choice; }
 
 void overlay_armed_set(unsigned value) {
-    bool want=value!=0;
-    // Choosing ON while it is already up or coming up is not a request for
-    // anything. Choosing it again after a refusal or a stop IS a retry, which
-    // is why those two states fall through.
-    if(want && armed && (state==OVERLAY_RUNNING||state==OVERLAY_STARTING)) return;
-    armed=want;
-    if(!armed) {
+    if(value>OVERLAY_APPS) return;
+    // Choosing the SAME overlay while it is already up or coming up is not a
+    // request for anything. Choosing it again after a refusal or a stop IS a
+    // retry, which is why those two states fall through. Choosing a DIFFERENT
+    // one always acts: the running session has to end for the other to start.
+    if(value && value==choice &&
+       (state==OVERLAY_RUNNING||state==OVERLAY_STARTING)) return;
+    unsigned was=choice;
+    choice=value;
+    if(was && was!=value) { overlay_release(); label_reset(was); }
+    if(!choice) {
         overlay_release();
         state=OVERLAY_OFF;
-        strcpy(on_label,"ON");
         // Turning it off is the human act 3.1 requires before a blocked
         // overlay may run again, so this is where the flag is cleared.
         flag_set(false);
@@ -168,7 +209,7 @@ void overlay_release(void) {
         // gets the frame back. A release is not a fault, so REFUSED and
         // STOPPED are left standing: those are decisions, and giving the
         // display to another screen does not reverse them.
-        if(armed && state==OVERLAY_RUNNING) { state=OVERLAY_STARTING; say("..."); }
+        if(choice && state==OVERLAY_RUNNING) { state=OVERLAY_STARTING; say("..."); }
     }
     if(flag_stored) flag_set(false);
     pocket_overlay_reset();
@@ -233,7 +274,9 @@ static bool plausible(void) {
 }
 
 static void start(void) {
-    const overlay_app_t *o=REGISTERED[0];
+    if(!choice) return;
+    const overlay_app_t *o=REGISTERED[choice-1];
+    current=o;
     uint32_t before=free_internal();
     if(!plausible()) {
         state=OVERLAY_REFUSED;
@@ -255,8 +298,9 @@ static void start(void) {
     }
     pocket_overlay_set_region(&o->region);
     app_registry_select(o->id);
-    esp_err_t err=app_start_overlay(deskclock_start,
-                                    (size_t)(deskclock_end-deskclock_start-1));
+    // The -1 is the NUL that EMBED_TXTFILES appends and the guest must not see.
+    esp_err_t err=app_start_overlay(*o->source,
+                                    (size_t)(*o->source_end-*o->source-1));
     if(err!=ESP_OK) {
         // A refusal the app_session reported is not a crash: the guest never
         // ran, so the flag comes down and the person is told why.
@@ -323,8 +367,10 @@ void overlay_tick(void) {
         ESP_LOGI(TAG,"OVERLAY_HEALTHY worst=%uus",(unsigned)budget.worst_us);
     }
     // The frame cost, where the person deciding whether to keep it can read it.
-    snprintf(on_label,sizeof on_label,"ON %u.%ums",
+    char cost[12];
+    snprintf(cost,sizeof cost,"%u.%ums",
              (unsigned)(budget.last_us/1000),(unsigned)((budget.last_us%1000)/100));
+    say(cost);
 }
 
 // The hook for the direction that dissolves the prediction problem rather than
@@ -353,4 +399,15 @@ void overlay_yield(const char *claimant) {
 void overlay_paint(uint16_t *strip, int strip_y, int strip_h) {
     if(state!=OVERLAY_RUNNING) return;
     pocket_overlay_paint(strip,strip_y,strip_h);
+}
+
+bool overlay_running(void) { return state==OVERLAY_RUNNING; }
+
+// The residue, and nothing else reaches here. main.c takes the reserved key
+// first and never calls this with it -- structurally, by returning before this
+// line, so "the overlay cannot receive the way out" is a property of the call
+// site rather than a filter this file could get wrong.
+void overlay_key(const keystroke_t *k) {
+    if(state!=OVERLAY_RUNNING||!k) return;
+    pocket_overlay_key(k);
 }

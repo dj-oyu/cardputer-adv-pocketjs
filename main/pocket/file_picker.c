@@ -441,3 +441,127 @@ void file_picker_reset(void) {
     pick_request=0;
     pick_chose=false;
 }
+
+// -------------------------------------------------------------- the successor
+
+// Case-folded, because FatFs folds case when it matches a long name: "B.mp3"
+// and "b.mp3" are one file there, so an order that put them in different places
+// would be ordering something the volume does not distinguish. Ties fall back
+// to a byte compare so that the order is total rather than merely consistent.
+static int name_cmp(const char *a, const char *b) {
+    for(;;) {
+        unsigned char x=(unsigned char)*a, y=(unsigned char)*b;
+        unsigned char fx=(x>='A'&&x<='Z')?(unsigned char)(x-'A'+'a'):x;
+        unsigned char fy=(y>='A'&&y<='Z')?(unsigned char)(y-'A'+'a'):y;
+        if(fx!=fy) return fx<fy?-1:1;
+        if(!x) break;
+        a++; b++;
+    }
+    return strcmp(a,b);
+}
+
+// One pass. `after` is the name to beat, or NULL for "the first one".
+static bool successor(file_picker_t *fp, const char *dirpath, const char *after,
+                      char *out, size_t outsz) {
+    DIR *d=opendir(dirpath);
+    if(!d) { sd_media_note_error(errno); return false; }
+    struct dirent *de;
+    bool found=false;
+    while((de=readdir(d))!=NULL) {
+        size_t n=strlen(de->d_name);
+        if(!n||de->d_name[0]=='.') continue;
+        if(n>=PICK_NAME_MAX) continue;
+        if(sd_name_reserved(de->d_name,n)) continue;
+        // Files only. A folder is not a next song, and descending would make
+        // this call answer a different question than the one it was asked.
+        char child[SD_FSPATH_MAX];
+        int w=snprintf(child,sizeof child,"%s/%s",dirpath,de->d_name);
+        if(w<0||(size_t)w>=sizeof child) continue;
+        struct stat st;
+        if(stat(child,&st)!=0||S_ISDIR(st.st_mode)) continue;
+        if(!ext_allowed(fp,de->d_name,n)) continue;
+        if(after&&name_cmp(de->d_name,after)<=0) continue;
+        if(found&&name_cmp(de->d_name,out)>=0) continue;
+        // n was bounded above; memcpy says so where snprintf would only be
+        // told to be careful.
+        if(n+1>outsz) continue;
+        memcpy(out,de->d_name,n+1);
+        found=true;
+    }
+    closedir(d);
+    return found;
+}
+
+JSValue file_picker_next(JSContext *ctx, JSValueConst self,
+                         int argc, JSValueConst *argv) {
+    (void)self;
+    static const char OP[]="fs.nextFile";
+    const char *path=argc>0&&JS_IsString(argv[0])?JS_ToCString(ctx,argv[0]):NULL;
+    if(!path||strncmp(path,"sd:/",4)) {
+        if(path) JS_FreeCString(ctx,path);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                 "nextFile takes an sd: path",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    }
+    // Grant before media, for the reason sd_path.h gives at length.
+    if(!sd_media()->granted) {
+        JS_FreeCString(ctx,path);
+        return pocket_api_reject(ctx,POCKET_ERR_PERMISSION_DENIED,OP,
+                                 "no folder on the card has been shared with "
+                                 "this app",false,POCKET_OUTCOME_NOT_APPLIED);
+    }
+    if(sd_media()->state!=SD_MEDIA_READY) {
+        JS_FreeCString(ctx,path);
+        return pocket_api_reject(ctx,POCKET_ERR_DISCONNECTED,OP,
+                                 "the card is not readable",true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    }
+
+    // Split "sd:/dir/name" into the relative directory and the leaf.
+    file_picker_t fp={0};
+    const char *rel=path+4;
+    const char *slash=strrchr(rel,'/');
+    size_t dirlen=slash?(size_t)(slash-rel):0;
+    const char *leaf=slash?slash+1:rel;
+    if(dirlen>=sizeof fp.rel||strlen(leaf)>=PICK_NAME_MAX) {
+        JS_FreeCString(ctx,path);
+        return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,
+                                 "that path is too long to walk",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    }
+    memcpy(fp.rel,rel,dirlen);
+    fp.rel[dirlen]='\0';
+    char leafname[PICK_NAME_MAX];
+    snprintf(leafname,sizeof leafname,"%s",leaf);
+
+    JSValue bad=JS_UNDEFINED;
+    JSValueConst options=argc>1?argv[1]:JS_UNDEFINED;
+    if(!take_extensions(ctx,options,OP,&fp,&bad)) {
+        JS_FreeCString(ctx,path);
+        return bad;
+    }
+    bool wrap=false;
+    if(JS_IsObject(options)) {
+        JSValue v=JS_GetPropertyStr(ctx,options,"wrap");
+        wrap=JS_ToBool(ctx,v);
+        JS_FreeValue(ctx,v);
+    }
+    JS_FreeCString(ctx,path);
+
+    char dirpath[SD_FSPATH_MAX];
+    if(!here(&fp,dirpath,sizeof dirpath))
+        return pocket_api_reject(ctx,POCKET_ERR_PERMISSION_DENIED,OP,
+                                 "that path is outside the shared folder",false,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+
+    char next[PICK_NAME_MAX];
+    bool found=successor(&fp,dirpath,leafname,next,sizeof next);
+    // Wrapping is a SECOND pass rather than a modulo, because the first pass
+    // never held the list it would have to wrap around.
+    if(!found&&wrap) found=successor(&fp,dirpath,NULL,next,sizeof next);
+    if(!found) return pocket_api_settled(ctx,JS_NULL,false);
+
+    char out[4+PICK_REL_MAX+1+PICK_NAME_MAX+1];
+    snprintf(out,sizeof out,"sd:/%s%s%s",fp.rel,fp.rel[0]?"/":"",next);
+    return pocket_api_settled(ctx,JS_NewString(ctx,out),false);
+}

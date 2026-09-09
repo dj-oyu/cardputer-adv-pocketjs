@@ -281,6 +281,23 @@ esp_err_t app_start_test(char test) {
     if(overlay_session) {
         TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
         TRY(pocketjs_guest_quickjs_install_once(guest,"overlay",pocket_overlay_install,NULL));
+        // fs and av joined this list on 2026-09-09, and the reason is worth
+        // stating because 3.1's narrowing is deliberate and this widens it.
+        //
+        // The narrowing exists because an overlay runs while nobody is looking
+        // at it. That is no longer the whole truth: an overlay now REPLACES the
+        // home screen's menu, so it runs while the person is looking directly
+        // at it and operating it. The surfaces below are the ones a home screen
+        // that plays music needs -- reading the card, and the player -- and
+        // both are things the person started on purpose from a Settings row.
+        //
+        // What is still absent is the list that matters: no net, no ble, no
+        // capture, no io, no bridge, no workspace. Nothing here can reach the
+        // radio, the microphone or the buses, so capabilities.get() answers
+        // supported=false for them, which is the honest answer for this session
+        // and costs the guest nothing.
+        TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
+        TRY(pocketjs_guest_quickjs_install_once(guest,"av",pocket_av_install,NULL));
         goto surfaces_done;
     }
     TRY(pocketjs_guest_quickjs_install_once(guest,"fs",pocket_fs_install,NULL));
@@ -409,7 +426,16 @@ esp_err_t app_overlay_tick(void) {
     if(!guest) return ESP_ERR_INVALID_STATE;
     deadline=esp_timer_get_time()+50000;
     pocket_app_pump();
+    // Before pocket_api_pump(), like every other producer: what these post is
+    // settled by that call, and posting after it would delay every completion
+    // by a frame. The order is app_tick()'s, minus the surfaces an overlay does
+    // not install.
+    pocket_overlay_pump();
     pocket_api_pump();
+    // AFTER pocket_api_pump(), exactly as app_tick() has them: these two post
+    // no completions of their own, they move bytes for work already promised.
+    pocket_fs_pump();
+    pocket_av_pump();
     pocketjs_guest_frame_t f={.struct_size=sizeof(f)};
     esp_err_t e=pocketjs_guest_frame(guest,&f);
     frames++;

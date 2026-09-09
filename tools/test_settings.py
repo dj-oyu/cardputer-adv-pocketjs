@@ -1,5 +1,6 @@
-"""Exercise settings. MUSIC PLAYER is appended to Apps; category 1 and all
-settings row indices used below are unchanged."""
+"""Exercise settings. MP3 PLAYBACK is appended to Apps; category 1 and all
+settings row indices used below are unchanged. The overlay row is now a
+three-way choice (OFF / DESK CLOCK / MUSIC) rather than a toggle."""
 import argparse
 import re
 import time
@@ -67,11 +68,17 @@ try:
     # Waited for, not slept through: the app launched below shares the heap the
     # radio is still holding until the scan task exits.
     expect('SCAN_DONE',20)
-    # DESK CLOCK is the overlay row of docs/common-api.md 3.1, appended after
-    # WI-FI. Opened and left without applying: arming it starts a JS guest on
-    # the home screen, and this script's job is the menu, not the overlay.
+    # HOME OVERLAY is the row of docs/common-api.md 3.1, appended after WI-FI.
+    # Opened and left without applying: choosing one ENDS the menu and starts a
+    # JS guest in its place, and this script's job is the menu.
+    #
+    # The value it opens on is NOT asserted. It used to be `choice=0`, which
+    # read as a contract and was really an assumption that nobody had ever
+    # turned the overlay on -- the moment somebody did, this failed on a device
+    # that was working correctly. What is being checked here is that the row is
+    # at index 4 and that opening and leaving it changes nothing.
     command('d','SELECT 4')
-    line=command('e','OPEN 4');assert 'choice=0' in line,line
+    line=command('e','OPEN 4');assert 'choice=' in line,line
     command('q','HOME_READY')
     command('b','CATEGORY 1');command('u','SELECT 3');command('u','SELECT 2')
     # POCKET PET is appended at index 5; existing settings/Hello indices stay fixed.
