@@ -2,6 +2,7 @@
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = '6a0a1b6c91a506c473fc37a0256a47b12eceeca8'
@@ -38,3 +39,4 @@ if not opus.exists():
     subprocess.run(['git', 'clone', '--branch', OPUS_TAG, '--depth', '1',
                     'https://github.com/xiph/opus.git', str(opus)], check=True)
 print('Prepared libopus', OPUS_TAG)
+subprocess.run([sys.executable, str(ROOT / 'tools/prepare_minimp3.py')], check=True)

@@ -2,6 +2,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "opus.h"
 #include <string.h>
@@ -16,15 +17,32 @@
 // pseudo-stack, which is why libopus costs zero static DIRAM here and why the
 // number lands in this file instead of in the map.
 //
-// 14,336 is that plus 3,916. Our own frame inside the loop is under a kilobyte
-// (no PCM buffer -- opus_decode writes into the ring slot), so the margin is
-// nearly all margin. It is not more because this is heap, taken while playing,
-// out of the same pool the JS guest fragments.
+// It was 14,336 (10,420 plus 3,916) until a board run said what actually binds
+// here, and it is not free heap. MEASURED 2026-09-09 with a linked radio:
 //
-// The task reports its own high-water mark at the end of every stream. If a
-// build ever prints stack_used above about 12,000, this constant is what has to
-// move, and the print is what says so before an overflow does.
-#define DEC_STACK   14336
+//   linked            free 56,204   largest 31,744
+//   play() refused    free 41,872   largest 31,744
+//
+// Free was never the problem -- 56,204 against the 45,060 playback wants. The
+// largest run was. It stayed at 31,744 across the refusal, so the two 6,144
+// rings did not come out of it, and everything outside it totalled 10,128,
+// which holds neither of the two big blocks. So the decoder's 18,436 and this
+// stack must BOTH come out of that one run, and 18,436 + 14,336 = 32,772
+// against 31,744 -- short by about a kilobyte, before per-block overhead.
+//
+// 12,288 is what makes them fit: 30,724 out of 31,744, with about a kilobyte
+// left. The cost is margin. The high-water mark this task prints has been
+// 10,472 to 10,476 across builds (measured), so 12,288 keeps 1,812 bytes --
+// 17%, down from 37%. That is defensible ONLY because the packet gate in
+// opus_feed.h makes CELT 20 ms mono the only code path that can run here, which
+// is the path those 10,476 were measured on. It would not be defensible if this
+// host decoded SILK or hybrid, and it is the reason the gate is not negotiable.
+//
+// The task reports its own high-water at the end of every stream. If a build
+// ever prints stack_used above about 11,300, this constant has to move back up
+// and something else has to give -- and the print is what says so before an
+// overflow does.
+#define DEC_STACK   12288
 #define DEC_PRIO    6
 
 // How many packets go into one PCM slot. A slot is 2,048 bytes = 1,024 frames;
@@ -33,6 +51,10 @@
 // against a decode that costs 3.2 ms per 20 ms. That is the margin the ui task's
 // 39.9 ms frames get spent out of.
 #define PACKETS_PER_SLOT 2
+
+// The one pool everything here competes for: internal 8-bit DRAM. Named so the
+// two refusals below and the numbers they print cannot drift apart.
+#define HEAP_POOL (MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)
 
 static TaskHandle_t     dec_task;
 static sound_stream_t  *dec_pcm, *dec_packets;
@@ -48,6 +70,28 @@ static atomic_uint      dec_faults;
 // length of the only window in which this design can starve without something
 // far more visible being wrong -- see the priming handshake in pocket_av.c.
 static atomic_uint      dec_prime_us;
+// Built by opus_feed_start() on the CALLER's task, not by the task itself, and
+// this is a correctness fix rather than a tidy-up. It used to be created inside
+// dec_task_fn, which put the single largest allocation this feature makes --
+// 18,436 bytes, one block -- on the far side of a boundary the error path does
+// not cross: opus_feed_start() had already returned true, so the only way to
+// report a failure was to set eof and raise a fault, which reaches the app as
+// P_ERROR and therefore as IO_ERROR. An out-of-memory wore the code for a bad
+// read, and cost a board run that could not answer the question it was flashed
+// to answer (2026-09-09, with a linked radio; the app was told IO_ERROR about
+// one frame later, which is the tell -- a real read failure or a prime timeout
+// takes about a second).
+//
+// This is the same shape as the priming bug in docs/common-api.md 9.1.2. There
+// the WORK did not cross the task boundary; here the ERROR did not. A task
+// cannot be primed by calling a function, and it cannot report a failure it has
+// not yet had time to have.
+//
+// The order is deliberate too: the decoder's 18,436 is taken BEFORE the task's
+// 14,336, so the larger block gets first refusal on the largest free run. The
+// two together are 32,772 out of one pool and both are single blocks; which one
+// fails first changes only which number the app is shown.
+static OpusDecoder     *dec_handle;
 
 // One packet out of the compressed ring, gated and decoded straight into `out`.
 // Returns frames produced, 0 for a refusal (dec_faults says which).
@@ -71,18 +115,9 @@ static int decode_one(OpusDecoder *dec, const uint8_t *pkt, uint32_t len,
 
 static void dec_task_fn(void *arg) {
     (void)arg;
-    int err=OPUS_OK;
-    // 18,436 bytes on this board, measured. One block, and the largest single
-    // allocation this feature makes.
-    OpusDecoder *dec=opus_decoder_create(24000,1,&err);
-    if(!dec||err!=OPUS_OK) {
-        ESP_LOGE("opus","opus_decoder_create failed (%d)",err);
-        atomic_fetch_add(&dec_faults,1);
-        atomic_store(&dec_pcm->eof,true);      // let the audio task finish
-        atomic_store(&dec_running,false);
-        vTaskDelete(NULL);
-        return;
-    }
+    // Built and checked by opus_feed_start(); the task owns it from here and
+    // destroys it at the bottom, on every exit.
+    OpusDecoder *dec=dec_handle;
 
     stream_read_t r={0};
     uint32_t produced=0, skip=dec_skip, decoded=0;
@@ -155,23 +190,45 @@ static void dec_task_fn(void *arg) {
              (int)(decoded?total_us/(int64_t)decoded:0),(int)worst_us,
              (unsigned)atomic_load(&dec_prime_us),DEC_STACK-left,DEC_STACK);
     opus_decoder_destroy(dec);
+    dec_handle=NULL;
     atomic_store(&dec_running,false);
     vTaskDelete(NULL);
 }
 
-bool opus_feed_start(sound_stream_t *pcm, sound_stream_t *packets,
-                     uint32_t frames, uint16_t skip) {
-    if(atomic_load(&dec_running)) return false;
+opus_feed_start_t opus_feed_start(sound_stream_t *pcm, sound_stream_t *packets,
+                                  uint32_t frames, uint16_t skip) {
+    if(atomic_load(&dec_running)) return OPUS_FEED_BUSY;
     dec_pcm=pcm; dec_packets=packets; dec_frames=frames; dec_skip=skip;
     atomic_store(&dec_halt,false); atomic_store(&dec_faults,0);
     atomic_store(&dec_prime_us,0);
+
+    // Both refusals below carry the heap they were refused at. "There is no
+    // room for the stream" without a number is the sentence that sent somebody
+    // looking at the filesystem, and the two numbers are not interchangeable:
+    // this feature fails on the LARGEST BLOCK long before it fails on free.
+    int err=OPUS_OK;
+    dec_handle=opus_decoder_create(24000,1,&err);
+    if(!dec_handle||err!=OPUS_OK) {
+        ESP_LOGE("opus","opus_decoder_create failed (%d): %u free, %u largest",
+                 err,(unsigned)heap_caps_get_free_size(HEAP_POOL),
+                 (unsigned)heap_caps_get_largest_free_block(HEAP_POOL));
+        dec_handle=NULL;
+        return OPUS_FEED_NOMEM;
+    }
+
     atomic_store(&dec_running,true);
     if(xTaskCreate(dec_task_fn,"opusdec",DEC_STACK/sizeof(StackType_t),NULL,
                    DEC_PRIO,&dec_task)!=pdPASS) {
+        ESP_LOGE("opus","the decode task (%d of stack) would not start: "
+                        "%u free, %u largest",DEC_STACK,
+                 (unsigned)heap_caps_get_free_size(HEAP_POOL),
+                 (unsigned)heap_caps_get_largest_free_block(HEAP_POOL));
         atomic_store(&dec_running,false);
-        return false;
+        opus_decoder_destroy(dec_handle);
+        dec_handle=NULL;
+        return OPUS_FEED_NOMEM;
     }
-    return true;
+    return OPUS_FEED_OK;
 }
 
 bool opus_feed_stop(void) {

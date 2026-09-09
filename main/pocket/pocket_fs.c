@@ -688,6 +688,12 @@ extern const char asset_chimepok_start[] asm("_binary_chime_pok_start");
 extern const char asset_chimepok_end[]   asm("_binary_chime_pok_end");
 extern const char asset_tonepok_start[]  asm("_binary_tone_pok_start");
 extern const char asset_tonepok_end[]    asm("_binary_tone_pok_end");
+extern const char asset_mp3_start[] asm("_binary_test_tone_mp3_start");
+extern const char asset_mp3_end[] asm("_binary_test_tone_mp3_end");
+extern const char asset_mp348_start[] asm("_binary_test_48k_mp3_start");
+extern const char asset_mp348_end[] asm("_binary_test_48k_mp3_end");
+extern const char asset_mp324_start[] asm("_binary_test_24k_mp3_start");
+extern const char asset_mp324_end[] asm("_binary_test_24k_mp3_end");
 
 // `text` is not decoration: EMBED_TXTFILES appends a NUL and EMBED_FILES does
 // not, and asset_size() has to know which. It is recorded per row rather than
@@ -717,6 +723,9 @@ static const fs_asset_t ASSETS[]={
     // multiple. apps/opusplay/README.md says why a click train, being mostly
     // silence, can only catch a fraction of them.
     {"tone.pok",  asset_tonepok_start,  asset_tonepok_end,  false},
+    {"test-tone.mp3", asset_mp3_start, asset_mp3_end, false},
+    {"test-48k.mp3", asset_mp348_start, asset_mp348_end, false},
+    {"test-24k.mp3", asset_mp324_start, asset_mp324_end, false},
 };
 #define ASSET_COUNT (sizeof(ASSETS)/sizeof(ASSETS[0]))
 

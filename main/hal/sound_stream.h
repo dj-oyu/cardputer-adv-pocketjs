@@ -137,7 +137,12 @@ static inline bool stream_sample(sound_stream_t *s, stream_read_t *r,
     while(!r->held||r->used>=r->bytes) {
         stream_release(s,r);
         if(!stream_take(s,r,block)) {
-            if(atomic_load(&s->eof)) *ended=true;
+            if(atomic_load(&s->eof)) {
+                // A producer can publish its final slot between the first
+                // take and this EOF load. Consume that slot before ending.
+                if(stream_take(s,r,block)) continue;
+                *ended=true;
+            }
             return false;
         }
     }

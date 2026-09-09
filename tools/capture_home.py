@@ -77,7 +77,7 @@ with serial.Serial(a.port, 115200, timeout=0.2) as s:
 
     command('q', 'HOME_READY')
     command('a', 'CATEGORY 0')
-    capture('apps')  # POCKET PET is appended; original navigation indices are unchanged.
+    capture('apps')  # MP3 PLAYBACK is appended; original navigation indices are unchanged.
     command('b', 'CATEGORY 1')
     command('uu', 'SELECT 0')
     command('d', 'SELECT 1')

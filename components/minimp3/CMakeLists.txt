@@ -1,0 +1,6 @@
+set(MINIMP3_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.cache/codecs/minimp3")
+if(NOT EXISTS "${MINIMP3_ROOT}/minimp3.h")
+    message(FATAL_ERROR "Run python tools/prepare_minimp3.py first")
+endif()
+idf_component_register(SRCS "minimp3.c" INCLUDE_DIRS "${MINIMP3_ROOT}")
+target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -fstack-usage)

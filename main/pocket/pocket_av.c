@@ -2,14 +2,23 @@
 #include "pocket_api.h"
 #include "pocket_fs.h"
 #include "opus_feed.h"
+#include "mp3_feed.h"
+#include "mp3_decode.h"
+#include "opus_net.h"
 #include "sound.h"
 #include "board.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <math.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// The pool every allocation in this file competes for, and the one the two
+// numbers in a play() refusal are read from.
+#define AV_HEAP_POOL (MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)
 
 // Section 14 caps a general Promise at 30000ms; storage.kv enforces the same
 // number, and one ceiling for the whole host is easier to teach than one per
@@ -290,11 +299,9 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
 
 // ------------------------------------------------------------ audio.player
 //
-// Section 9.1 asks for MP3, Opus or FLAC off sd:. None of that is here: IDF
-// v6.0.1 ships no decoder, sd: has no driver on this build, and the section
-// carries the 2026-09-08 re-measurement that says heap is no longer the reason.
-// What is here is the same Player bounded to what this host decodes: one
-// source, in the host's own 24 kHz mono, as IMA ADPCM or PCM16 inside a WAV.
+// One Player and one 24 kHz mono output path: WAV is fed directly, Opus and
+// MP3 use playback-only decode workers. MP3 also converts rate and channels.
+// File sources use the existing app/assets/granted-sd readers; HTTP is Opus.
 //
 // IT IS STREAMED. That is the whole of what changed, and it changed because the
 // previous shape was diagnosed backwards. A clip was read into RAM whole at
@@ -416,7 +423,21 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
 // gate in opus_feed.h refuses the rest of Opus by name. An app that feature-tests
 // this string and then hands us a SILK asset would otherwise be surprised at
 // play() instead of at open().
+//
+// WIDENING THIS TO "opus" IS NOT A ONE-LINE CHANGE, AND THIS IS THE LINE
+// SOMEBODY WILL BE STANDING ON WHEN THEY TRY. The decode task's stack is 12,288
+// bytes and the measured high-water behind it is 10,476 -- 17% of margin --
+// which is only defensible because the CELT 20 ms mono gate makes that the only
+// path that can run. SILK and hybrid are different code with a different peak
+// that NOBODY HAS MEASURED on this part. So the order is: measure those peaks
+// first, then move DEC_STACK in opus_feed.c, then find the contiguity that the
+// bigger stack needs (18,436 + DEC_STACK has to come out of one heap run, and on
+// a board with a linked radio that run has been measured at 31,744), and only
+// then widen this string.
 #define PLAYER_CODEC_OPUS "opus/celt"
+#define PLAYER_CODEC_MP3 "mp3"
+// Unknown duration until EOF; leave room for sound.c's 256-frame DMA tail.
+#define PLAYER_MP3_UNKNOWN (UINT32_MAX-256u)
 #define PLAYER_RING_BYTES (SOUND_STREAM_SLOTS*SOUND_STREAM_SLOT_BYTES)
 // The compressed ring, and it is the same struct and the same slot geometry as
 // the PCM one on purpose: those atomics are the part of streaming whose mistakes
@@ -433,7 +454,7 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
 typedef enum { P_READY=0, P_PLAYING, P_PAUSED, P_ENDED, P_ERROR } player_state_t;
 // Which of the three the open source turned out to be. `block` used to carry
 // this on its own (nonzero meant ADPCM); a third codec needs a name.
-typedef enum { C_PCM16=0, C_IMA, C_OPUS } player_codec_t;
+typedef enum { C_PCM16=0, C_IMA, C_OPUS, C_MP3 } player_codec_t;
 static const char *const PLAYER_STATE_NAME[]={
     "ready","playing","paused","ended","error" };
 
@@ -456,11 +477,20 @@ static struct {
     uint8_t *pkt_bytes;
     sound_stream_t pkt;
     opus_pak_t pak;
+    // An http(s) source: the packet ring is filled by opus_net.c's receive task
+    // instead of by player_feed_opus() on this one, and the container header
+    // arrives over the socket rather than from a read at offset 0. Everything
+    // downstream of the ring -- the decode task, the PCM ring, sound.c -- cannot
+    // tell the difference, which is the whole point.
+    bool     net;
+    pocket_request_t open_req;  // the open() this stream has still to settle
     int32_t  stream;        // sound.c's id, 0 when nothing is queued
     // Opus only: the audio task has not been started yet because the decode task
     // has not produced anything yet. See the priming block in player_pump().
     bool     priming;
     uint16_t prime_waits;
+    uint32_t mp3_progress;
+    bool source_fault;
     player_state_t state;
     bool     announce;      // a state change the pump has still to deliver
 } player;
@@ -592,6 +622,32 @@ static const char *source_parse(uint32_t size) {
     const char *why=player_at(0,magic,4);
     if(why) return why;
     if(!memcmp(magic,"POK1",4)) return opus_parse(size);
+    if(!memcmp(magic,"ID3",3)||(magic[0]==255&&(magic[1]&224)==224)) {
+        uint32_t offset=0, end=size;
+        if(!memcmp(magic,"ID3",3)) {
+            uint8_t tag[10];
+            if(size<10||(why=player_at(0,tag,10))) return "truncated ID3 tag";
+            if(tag[3]<2||tag[3]>4||tag[4]==255||
+               (tag[6]|tag[7]|tag[8]|tag[9])&128) return "unsupported ID3 tag";
+            offset=10u+((uint32_t)tag[6]<<21)+((uint32_t)tag[7]<<14)+
+                   ((uint32_t)tag[8]<<7)+tag[9];
+            if(tag[3]==4&&(tag[5]&16)) offset+=10;
+        }
+        if(size>=128) {
+            uint8_t tail[3];
+            if((why=player_at(size-128,tail,3))) return why;
+            if(!memcmp(tail,"TAG",3)) end-=128;
+        }
+        pocket_mp3_header_t h;
+        if(offset>=end||end-offset<4) return "the MP3 has no audio";
+        if((why=player_at(offset,magic,4))) return why;
+        if(!pocket_mp3_header(magic,&h)||h.bytes>end-offset)
+            return "expected MPEG Layer III (free-format is unsupported)";
+        player.codec=C_MP3; player.block=0; player.per_block=1;
+        player.offset=offset; player.bytes=end-offset;
+        player.frames=PLAYER_MP3_UNKNOWN;
+        return NULL;
+    }
     player.codec=C_PCM16;              // wav_parse promotes this to C_IMA
     return wav_parse(size);
 }
@@ -673,12 +729,18 @@ static void player_feed_opus(void) {
 }
 
 static void player_feed(void) {
+    // A network source's producer is opus_net.c's task, not this one. There is
+    // nothing for the pump to do and, more to the point, nothing it MAY do: the
+    // ring has a single producer and that is what makes its atomics correct.
+    if(player.net) return;
     if(player.codec==C_OPUS) { if(player.pkt_bytes) player_feed_opus(); return; }
     if(!player.ring_bytes) return;
+    sound_stream_t *destination=player.codec==C_MP3?&player.pkt:&player.ring;
+    if(player.codec==C_MP3&&!player.pkt_bytes) return;
     uint32_t end=player.offset+player.bytes;
     for(;;) {
         if(player.feed>=end) return;            // the last slot carried `last`
-        uint8_t *slot=sound_stream_slot(&player.ring);
+        uint8_t *slot=sound_stream_slot(destination);
         if(!slot) return;
         uint32_t want=SOUND_STREAM_SLOT_BYTES;
         // A slot holds whole ADPCM blocks; see sound.h for why that is what
@@ -695,12 +757,16 @@ static void player_feed(void) {
             // same "stopped early" P_ERROR an I2S failure does.
             ESP_LOGW("pocket.av","the source stopped reading at %u",
                      (unsigned)player.feed);
-            sound_stream_publish(&player.ring,0,true);
+            player.source_fault=true;
+            sound_stream_publish(destination,0,true);
             player.feed=end;
             return;
         }
         player.feed+=(uint32_t)got;
-        sound_stream_publish(&player.ring,(uint32_t)got,player.feed>=end);
+        if(player.codec==C_MP3) {
+            sound_stream_publish(destination,(uint32_t)got,false);
+            if(player.feed>=end) atomic_store(&destination->eof,true);
+        } else sound_stream_publish(destination,(uint32_t)got,player.feed>=end);
     }
 }
 
@@ -716,11 +782,13 @@ static bool player_halt(void) {
     // for a slot that will never come free. Returning true here without asking
     // it to stop would let teardown free two rings it is still holding.
     if(!player.stream) {
-        if(player.codec!=C_OPUS) return true;
+        if(player.codec!=C_OPUS&&player.codec!=C_MP3) return true;
         // Priming counts as running: the decode task is alive and holding both
         // rings even though nothing is sounding yet.
         player.priming=false;
-        return opus_feed_stop();
+        bool freed=player.codec==C_MP3?mp3_feed_stop():opus_feed_stop();
+        if(player.net) freed=opus_net_stop()&&freed;
+        return freed;
     }
     player.position=player_frames_now();
     player.underruns+=sound_stream_underruns();
@@ -731,6 +799,10 @@ static bool player_halt(void) {
     // either ring can be freed, so the two answers are ANDed rather than the
     // second one overwriting the first.
     if(player.codec==C_OPUS) released=opus_feed_stop()&&released;
+    if(player.codec==C_MP3) released=mp3_feed_stop()&&released;
+    // After the decoder, because the decoder is what reads the packet ring: a
+    // receiver stopped first would leave it blocked on a ring nobody fills.
+    if(player.net) released=opus_net_stop()&&released;
     player.stream=0;
     player_seq++;   // the completion this stop provokes now matches nothing
     return released;
@@ -778,15 +850,25 @@ static const char *player_locate_opus(uint32_t *start, uint32_t *byte,
 static const char *player_launch(void) {
     uint32_t start=player.position, byte=player.offset;
     uint16_t skip=0;
-    if(player.codec==C_OPUS) {
+    // A network source cannot be located: there is no index to consult and no
+    // way back to a byte already received. It plays from where the socket is,
+    // which is the head, and preSkip is the header's -- the same value a file
+    // uses on its first packet.
+    if(player.net) {
+        start=0;
+        skip=player.pak.pre_skip;
+    } else if(player.codec==C_OPUS) {
         const char *why=player_locate_opus(&start,&byte,&skip);
         if(why) return "unavailable";
     } else if(player.block) {
         uint32_t index=start/player.per_block;
         start=index*player.per_block;
         byte+=index*player.block;
-    } else byte+=start*2;
-    if(start>=player.frames||byte>=player.offset+player.bytes) return "ended";
+    } else if(player.codec!=C_MP3) byte+=start*2;
+    // The byte half of this has no meaning for a network source: there is no
+    // data chunk, only a socket that is already delivering.
+    if(start>=player.frames||(!player.net&&byte>=player.offset+player.bytes))
+        return "ended";
     // The ring is taken at the first play and held until close, not taken and
     // given back around every pause: 6,144 bytes churned on each pause would
     // fragment a heap whose largest block is the thing this whole surface has
@@ -794,34 +876,57 @@ static const char *player_launch(void) {
     // nothing, which is the case that matters.
     if(!player.ring_bytes) {
         player.ring_bytes=malloc(PLAYER_RING_BYTES);
-        if(!player.ring_bytes) return "unavailable";
+        if(!player.ring_bytes) return "nomem";
         player.ring.bytes=player.ring_bytes;
     }
     // The compressed ring, and it exists only for an Opus source. Held to close
     // for the same reason the PCM one is: churning 6 KiB on every pause is how a
     // heap whose largest block this whole surface has to fit inside gets
     // fragmented.
-    if(player.codec==C_OPUS&&!player.pkt_bytes) {
+    if((player.codec==C_OPUS||player.codec==C_MP3)&&!player.pkt_bytes) {
         player.pkt_bytes=malloc(PLAYER_PKT_BYTES);
-        if(!player.pkt_bytes) return "unavailable";
+        if(!player.pkt_bytes) return "nomem";
         player.pkt.bytes=player.pkt_bytes;
     }
     player.position=start;
     player_reported=start;
     player.feed=byte;
+    player.source_fault=false;
     sound_stream_rewind(&player.ring);
     uint32_t seq=++player_seq;
     // Primed before the audio task is given anything to play, so the first
     // block is audio rather than an underrun. Three slots is one read of at
     // most 6,144 bytes in total.
-    if(player.codec==C_OPUS) {
+    if(player.codec==C_MP3) {
         sound_stream_rewind(&player.pkt);
+        player_feed();
+        mp3_feed_start_t started=mp3_feed_start(&player.ring,&player.pkt,start);
+        if(started!=MP3_FEED_OK) {
+            player_seq++;
+            return started==MP3_FEED_NOMEM?"nomem":"busy";
+        }
+        player.priming=true; player.prime_waits=0; player.mp3_progress=0;
+        return NULL;
+    }
+    if(player.codec==C_OPUS) {
+        // The packet ring is NOT rewound for a network source: its producer has
+        // been filling it since open() and rewinding under a running task is
+        // exactly the race those atomics are shaped to avoid.
+        if(!player.net) sound_stream_rewind(&player.pkt);
         player_feed();          // compressed slots, so the decoder has work
         // The decode task is created here and deleted when the stream ends, so
         // Opus costs nothing at rest -- 18,436 bytes of decoder state and 14,336
         // of stack are taken now and given back at stop.
-        if(!opus_feed_start(&player.ring,&player.pkt,player.frames-start,skip))
-            { player_seq++; return "unavailable"; }
+        opus_feed_start_t started=opus_feed_start(&player.ring,&player.pkt,
+                                                  player.frames-start,skip);
+        if(started!=OPUS_FEED_OK) {
+            player_seq++;
+            // NOMEM is answered as OUT_OF_MEMORY with numbers rather than as a
+            // flat NOT_AVAILABLE, because on this board running out of room is
+            // the expected failure and "unavailable" is the one word that tells
+            // an app nothing it can act on.
+            return started==OPUS_FEED_NOMEM?"nomem":"busy";
+        }
         // AND THE AUDIO TASK IS NOT STARTED HERE. This line used to be shared
         // with the WAV path below, under a comment claiming that starting the
         // audio task after the decode task meant the ring had samples in it
@@ -859,7 +964,7 @@ static void player_teardown(void) {
     if(player_halt()) { free(player.ring_bytes); free(player.pkt_bytes); }
     else ESP_LOGE("pocket.av","a task still holds the rings; their %u bytes stay",
                   (unsigned)(PLAYER_RING_BYTES+
-                             (player.codec==C_OPUS?PLAYER_PKT_BYTES:0)));
+                             ((player.codec==C_OPUS||player.codec==C_MP3)?PLAYER_PKT_BYTES:0)));
     player.ring_bytes=NULL; player.ring.bytes=NULL;
     player.pkt_bytes=NULL; player.pkt.bytes=NULL;
     free(player.path); player.path=NULL;
@@ -868,6 +973,9 @@ static void player_teardown(void) {
     player.feed=0; player.underruns=0;
     player.priming=false; player.prime_waits=0;
     player.codec=C_PCM16;
+    // Back to the file shape. Left true, this would send the NEXT player's pump
+    // and feed down the network branches for a source that has no receiver.
+    player.net=false; player.open_req=0;
 }
 
 // ---- onState
@@ -900,18 +1008,37 @@ static bool player_payload(JSContext *ctx, int slot, void *user, JSValue *payloa
 }
 
 static void player_pump(void) {
+    // The network open, settled here because opus_net.c runs on its own task and
+    // pocket_api_complete() is the only thing it is allowed to touch. Errors are
+    // checked FIRST: a receiver that failed after publishing its header would
+    // otherwise be reported as a successful open of a stream that is already
+    // dead.
+    if(player.open_req) {
+        if(opus_net_error()) {
+            pocket_api_complete(player.open_req,1);
+        } else if(opus_net_ready()) {
+            player.pak=*opus_net_header();
+            player.offset=player.pak.data_offset;
+            player.bytes=0;                  // no data chunk: there is a socket
+            player.frames=player.pak.total_frames;
+            pocket_api_complete(player.open_req,POCKET_STATUS_OK);
+        }
+    }
     // The Opus start, deferred out of play() -- see player_launch(). One slot is
     // 40 ms of decoded audio, which is a whole frame of head start for a
     // consumer that takes 5.3 ms at a time; eof covers a source so short the
     // decoder finished it before publishing twice.
     if(player.priming) {
         player_feed();          // keep the packet ring full while we wait
+        if(player.codec==C_MP3&&player.mp3_progress!=mp3_feed_progress()) {
+            player.mp3_progress=mp3_feed_progress(); player.prime_waits=0;
+        }
         if(atomic_load(&player.ring.filled)||atomic_load(&player.ring.eof)) {
             player.priming=false;
             int32_t id=sound_stream_start(&player.ring,SOUND_STREAM_PCM16,0,
                                           player.frames-player.position,1.0f,
                                           clip_done,(void *)(uintptr_t)player_seq);
-            if(id<0) { opus_feed_stop(); player_set_state(P_ERROR); }
+            if(id<0) { player_halt(); player_set_state(P_ERROR); }
             else player.stream=id;
         } else if(++player.prime_waits>PLAYER_PRIME_FRAMES) {
             // The decoder never published and never said it was finished. Saying
@@ -919,7 +1046,7 @@ static void player_pump(void) {
             ESP_LOGE("pocket.av","the decoder produced nothing in %u frames",
                      (unsigned)PLAYER_PRIME_FRAMES);
             player.priming=false;
-            opus_feed_stop();
+            player_halt();
             player_set_state(P_ERROR);
         }
     }
@@ -933,6 +1060,10 @@ static void player_pump(void) {
         // count is what separates them. Without this a refused packet would be
         // reported to the app as a clip that simply finished early.
         if(player.codec==C_OPUS&&opus_feed_faults()) ok=false;
+        if(player.codec==C_MP3) {
+            if(mp3_feed_faults()||player.source_fault) ok=false;
+            player.frames=mp3_feed_frames();
+        }
         player.stream=0;
         if(ok) player.position=player.frames;
         if(player.state==P_PLAYING) player_set_state(ok?P_ENDED:P_ERROR);
@@ -988,14 +1119,20 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
             JSValue info=JS_NewObject(ctx);
             if(JS_IsException(info)) return info;
             JS_SetPropertyStr(ctx,info,"codec",
-                JS_NewString(ctx,player.codec==C_OPUS?PLAYER_CODEC_OPUS
+                JS_NewString(ctx,player.codec==C_MP3?PLAYER_CODEC_MP3
+                                :player.codec==C_OPUS?PLAYER_CODEC_OPUS
                                 :player.codec==C_IMA?PLAYER_CODEC_IMA
                                                     :PLAYER_CODEC_PCM));
             JS_SetPropertyStr(ctx,info,"sampleRate",JS_NewInt32(ctx,SOUND_SAMPLE_RATE));
             JS_SetPropertyStr(ctx,info,"channels",JS_NewInt32(ctx,1));
             JS_SetPropertyStr(ctx,info,"durationMs",
+                player.frames==PLAYER_MP3_UNKNOWN?JS_NULL:
                 JS_NewInt32(ctx,(int)((uint64_t)player.frames*1000u/SOUND_SAMPLE_RATE)));
-            JS_SetPropertyStr(ctx,info,"seekable",JS_TRUE);
+            // A network source has no index and no way back to a byte already
+            // received, so it says so rather than accepting a seek it would
+            // have to fake.
+            JS_SetPropertyStr(ctx,info,"seekable",
+                              (player.net||player.codec==C_MP3)?JS_FALSE:JS_TRUE);
             return info;
         }
         case M_PLAY: {
@@ -1014,6 +1151,21 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
                     return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,op,
                         "there is nothing left to play",false,
                         POCKET_OUTCOME_NOT_APPLIED);
+                }
+                if(!strcmp(why,"nomem")) {
+                    // The two numbers, in the message, the way pocket_net.c
+                    // does it for a handshake. Playback needs about 45.6 KiB of
+                    // which 18,436 and 14,336 are single blocks, so free alone
+                    // does not say whether it would have fitted -- and a
+                    // refusal that omits the largest block is a refusal nobody
+                    // can act on.
+                    char said[104];
+                    snprintf(said,sizeof said,
+                             "no room for the stream: %u free, %u largest block",
+                             (unsigned)heap_caps_get_free_size(AV_HEAP_POOL),
+                             (unsigned)heap_caps_get_largest_free_block(AV_HEAP_POOL));
+                    return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,op,
+                                             said,true,POCKET_OUTCOME_NOT_APPLIED);
                 }
                 return pocket_api_reject(ctx,
                     !strcmp(why,"busy")?POCKET_ERR_BUSY:POCKET_ERR_NOT_AVAILABLE,
@@ -1036,6 +1188,14 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
             return pocket_api_settled(ctx,JS_UNDEFINED,false);
         }
         case M_SEEK: {
+            if(player.codec==C_MP3)
+                return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,op,
+                    "MP3 seeking requires an index and is not supported",false,
+                    POCKET_OUTCOME_NOT_APPLIED);
+            if(player.net)
+                return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,op,
+                    "a network stream cannot be seeked",false,
+                    POCKET_OUTCOME_NOT_APPLIED);
             double ms=0;
             if(argc<1||!JS_IsNumber(argv[0])||JS_ToFloat64(ctx,&ms,argv[0])||
                !isfinite(ms)||ms<0)
@@ -1076,6 +1236,15 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
             // audio dropped -- so a nonzero reading means the sound got longer,
             // not that part of it went missing. Accumulated across pause and
             // seek because it is a property of the playback, not of the run.
+            // Reported apart from underruns on purpose: a stall is the socket
+            // being slow while the ring still had audio in it, so nothing was
+            // heard. An underrun is audio that was owed and not delivered. Only
+            // a stall long enough to drain the ring becomes one, and then both
+            // numbers move. Collapsing them would make a healthy stream on a
+            // twitchy network look like a broken decoder.
+            if(player.net)
+                JS_SetPropertyStr(ctx,status,"stalls",
+                                  JS_NewUint32(ctx,opus_net_stalls()));
             JS_SetPropertyStr(ctx,status,"underruns",
                 JS_NewInt32(ctx,(int)(player.underruns+
                     (player.stream?sound_stream_underruns():0))));
@@ -1100,6 +1269,136 @@ static void player_add(JSContext *ctx, JSValue object, const char *name,
     JS_DefinePropertyValueStr(ctx,object,name,
         JS_NewCFunctionData(ctx,js_player_method,length,magic,1,&id),
         JS_PROP_ENUMERABLE);
+}
+
+// The handle an open hands back. Split out of js_player_open because a network
+// source settles LATER, from the pump, and has to build the identical object --
+// an app must not be able to tell where its audio comes from by looking at the
+// methods it was given.
+static JSValue player_handle(JSContext *ctx) {
+    JSValue object=JS_NewObject(ctx);
+    if(JS_IsException(object)) return object;
+    JSValue key=JS_NewInt32(ctx,player.id);
+    player_add(ctx,object,"info",0,M_INFO,key);
+    player_add(ctx,object,"play",0,M_PLAY,key);
+    player_add(ctx,object,"pause",0,M_PAUSE,key);
+    player_add(ctx,object,"seek",2,M_SEEK,key);
+    player_add(ctx,object,"status",0,M_STATUS,key);
+    player_add(ctx,object,"onState",1,M_ON_STATE,key);
+    player_add(ctx,object,"close",0,M_CLOSE,key);
+    JS_FreeValue(ctx,key);
+    return object;
+}
+
+// ---- opening a network source
+//
+// The only asynchronous open this surface has, and it is asynchronous for a
+// reason that cannot be designed away: the container header is the first bytes
+// of the response, so there is nothing to check until the socket has answered.
+// A file states its length before anything is read; a stream does not exist
+// until it is flowing.
+//
+// So open() starts the receiver and arms a promise, and player_pump() settles it
+// when the header has arrived or the receiver has given up. The app sees the
+// same shape either way -- a promise that resolves to a player -- which keeps
+// `source` a string an app can change rather than a branch it has to take.
+#define PLAYER_NET_OPEN_MS 15000
+
+static JSValue open_net_finish(JSContext *ctx, void *user, int32_t status,
+                               const char *stop_code, bool *rejected) {
+    (void)user;
+    player.open_req=0;
+    if(stop_code||status!=POCKET_STATUS_OK) {
+        const char *why=opus_net_error();
+        *rejected=true;
+        JSValue error=pocket_api_error(ctx,
+            stop_code?stop_code:POCKET_ERR_IO_ERROR,"audio.player.open",
+            stop_code?"the open was stopped"
+                     :(why?why:"the stream could not be opened"),
+            false,POCKET_OUTCOME_NOT_APPLIED);
+        player_teardown();
+        return error;
+    }
+    *rejected=false;
+    JSValue object=player_handle(ctx);
+    if(JS_IsException(object)) player_teardown();
+    return object;
+}
+
+static void open_net_stop(void *user, const char *code) {
+    (void)user; (void)code;
+    // Only asks. The completion still has to land before the slot is free, and
+    // the teardown that frees the ring happens in the settle above -- freeing it
+    // here would pull the buffer out from under a task that is still reading.
+    opus_net_stop();
+}
+
+static const pocket_promise_ops_t open_net_ops = {
+    .settle=open_net_finish, .stop=open_net_stop,
+};
+
+static JSValue open_net(JSContext *ctx, const char *OP, av_options_t *options) {
+    // The packet ring is taken HERE rather than at play(), because for a network
+    // source the receiver starts filling it now -- the header is in it. That is
+    // the one place a network player costs more at rest than a file one: 6,144
+    // bytes from open to close instead of from play to close.
+    player.pkt_bytes=malloc(PLAYER_PKT_BYTES);
+    if(!player.pkt_bytes) {
+        JS_FreeValue(ctx,options->cancel);
+        free(player.path); player.path=NULL;
+        char said[104];
+        snprintf(said,sizeof said,
+                 "no room for the packet ring: %u free, %u largest block",
+                 (unsigned)heap_caps_get_free_size(AV_HEAP_POOL),
+                 (unsigned)heap_caps_get_largest_free_block(AV_HEAP_POOL));
+        return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,said,true,
+                                 POCKET_OUTCOME_NOT_APPLIED);
+    }
+    player.pkt.bytes=player.pkt_bytes;
+    sound_stream_rewind(&player.pkt);
+
+    pocket_request_t request=pocket_api_promise_open();
+    if(!request) {
+        JS_FreeValue(ctx,options->cancel);
+        free(player.pkt_bytes); player.pkt_bytes=NULL; player.pkt.bytes=NULL;
+        free(player.path); player.path=NULL;
+        return pocket_api_reject(ctx,POCKET_ERR_BUSY,OP,
+            "too many operations are pending",true,POCKET_OUTCOME_NOT_APPLIED);
+    }
+    opus_net_start_t began=opus_net_start(player.path,&player.pkt);
+    if(began!=OPUS_NET_OK) {
+        pocket_api_promise_abandon(request);
+        JS_FreeValue(ctx,options->cancel);
+        free(player.pkt_bytes); player.pkt_bytes=NULL; player.pkt.bytes=NULL;
+        free(player.path); player.path=NULL;
+        return pocket_api_reject(ctx,
+            began==OPUS_NET_NOMEM?POCKET_ERR_OUT_OF_MEMORY
+                                 :began==OPUS_NET_BUSY?POCKET_ERR_BUSY
+                                                      :POCKET_ERR_INVALID_ARGUMENT,
+            OP,
+            began==OPUS_NET_NOMEM?"no room for the receive task"
+                                 :began==OPUS_NET_BUSY?"a stream is already being received"
+                                                      :"source must be an http:// or https:// url",
+            began!=OPUS_NET_BAD_URL,POCKET_OUTCOME_NOT_APPLIED);
+    }
+    // Open enough to be torn down, not open enough to be used: the handle that
+    // carries the methods is not built until the settle, so nothing can call one.
+    player.open=true; player.net=true; player.id=player_next_id++;
+    player.codec=C_OPUS; player.block=0; player.per_block=1;
+    player.position=0; player_reported=0; player.stream=0;
+    player.feed=0; player.underruns=0; player.frames=0;
+    player.offset=0; player.bytes=0;
+    player.ring_bytes=NULL; player.ring.bytes=NULL;
+    sound_stream_rewind(&player.ring);
+    player.state=P_READY; player.announce=false;
+
+    int64_t deadline=esp_timer_get_time()+
+        (int64_t)(options->timeout_ms?options->timeout_ms:PLAYER_NET_OPEN_MS)*1000;
+    JSValue promise=pocket_api_promise_arm(ctx,request,&open_net_ops,NULL,
+                                           options->cancel,deadline);
+    if(JS_IsException(promise)) { opus_net_stop(); player_teardown(); return promise; }
+    player.open_req=request;
+    return promise;
 }
 
 static JSValue js_player_open(JSContext *ctx, JSValueConst this_val,
@@ -1135,8 +1434,13 @@ static JSValue js_player_open(JSContext *ctx, JSValueConst this_val,
     av_options_t options;
     JSValue bad=take_options(ctx,argc>1?argv[1]:JS_UNDEFINED,OP,&options);
     if(!JS_IsUndefined(bad)) { JS_FreeCString(ctx,source); return bad; }
-    JS_FreeValue(ctx,options.cancel);   // nothing here waits, so nothing polls
+    // A network open really does wait, so it is the one that keeps the token and
+    // polls it. A file open still settles inside this call and cannot observe a
+    // cancellation that has not happened yet.
+    bool net=!strncmp(source,"http://",7)||!strncmp(source,"https://",8);
+    if(!net) JS_FreeValue(ctx,options.cancel);
     if(options.cancelled) {
+        if(net) JS_FreeValue(ctx,options.cancel);
         JS_FreeCString(ctx,source);
         return pocket_api_reject(ctx,POCKET_ERR_CANCELLED,OP,
             "cancelled before the open",false,POCKET_OUTCOME_NOT_APPLIED);
@@ -1154,6 +1458,9 @@ static JSValue js_player_open(JSContext *ctx, JSValueConst this_val,
         return pocket_api_reject(ctx,POCKET_ERR_OUT_OF_MEMORY,OP,
             "no room for the source path",true,POCKET_OUTCOME_NOT_APPLIED);
     player.path=path;
+    player.net=false;
+    player.open_req=0;
+    if(net) return open_net(ctx,OP,&options);
 
     // The size first, and it is the only thing open() reads whole: nothing else
     // about this call scales with the file.
@@ -1181,17 +1488,8 @@ static JSValue js_player_open(JSContext *ctx, JSValueConst this_val,
     sound_stream_rewind(&player.pkt);
     player.state=P_READY; player.announce=false;
 
-    JSValue object=JS_NewObject(ctx);
+    JSValue object=player_handle(ctx);
     if(JS_IsException(object)) { player_teardown(); return object; }
-    JSValue key=JS_NewInt32(ctx,player.id);
-    player_add(ctx,object,"info",0,M_INFO,key);
-    player_add(ctx,object,"play",0,M_PLAY,key);
-    player_add(ctx,object,"pause",0,M_PAUSE,key);
-    player_add(ctx,object,"seek",2,M_SEEK,key);
-    player_add(ctx,object,"status",0,M_STATUS,key);
-    player_add(ctx,object,"onState",1,M_ON_STATE,key);
-    player_add(ctx,object,"close",0,M_CLOSE,key);
-    JS_FreeValue(ctx,key);
     // Section 9.1: open takes the header check and the resources, and does not
     // start the sound. What it no longer takes is the sound itself.
     return pocket_api_settled(ctx,object,false);
@@ -1346,7 +1644,9 @@ static const pocket_limit_t tone_limits[] = {
 // there is no gain on a clip and no mixing, so neither has a limit to state.
 static const pocket_limit_t player_limits[] = {
     {.name="codecs",         .kind=POCKET_LIMIT_TEXT,
-     .text=PLAYER_CODEC_PCM "," PLAYER_CODEC_IMA "," PLAYER_CODEC_OPUS},
+     .text=PLAYER_CODEC_PCM "," PLAYER_CODEC_IMA "," PLAYER_CODEC_OPUS "," PLAYER_CODEC_MP3},
+    {.name="mp3Container", .kind=POCKET_LIMIT_TEXT,.text="mpeg-layer3"},
+    {.name="mp3Seekable", .kind=POCKET_LIMIT_FLAG,.number=0},
     // The Opus entry is "opus/celt" and not "opus", and that is the honest
     // width of it: the decoder in this image will refuse a SILK or a hybrid
     // packet by name, because the 10,420-byte stack it is given was measured

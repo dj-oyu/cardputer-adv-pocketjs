@@ -1,4 +1,5 @@
-"""Exercise the XMB categories, settings and mute option on the device."""
+"""Exercise settings. MP3 PLAYBACK is appended to Apps; category 1 and all
+settings row indices used below are unchanged."""
 import argparse
 import re
 import time

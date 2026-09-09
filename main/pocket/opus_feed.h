@@ -174,8 +174,23 @@ static inline uint32_t opus_pak_whole(const uint8_t *buf, uint32_t len) {
 //
 // `skip` is the encoder lookahead to discard from the first decoded packet; pass
 // 0 when resuming from a seek index, which is already well past it.
-bool     opus_feed_start(sound_stream_t *pcm, sound_stream_t *packets,
-                         uint32_t frames, uint16_t skip);
+//
+// WHY THIS IS NOT A bool ANY MORE. Both of this feature's large allocations --
+// the decoder's 18,436 and the task's 14,336, each one contiguous block -- are
+// made here, and running out of room for them is the single most likely way
+// Opus fails on this board. It used to be indistinguishable from every other
+// refusal, and worse than that: the decoder was built INSIDE the task, after
+// this function had already returned true, so an out-of-memory could only
+// surface as a fault and reached the app as IO_ERROR. Telling a caller "no
+// room" apart from "busy" is what lets pocket_av.c answer OUT_OF_MEMORY with
+// the two numbers that decide it.
+typedef enum {
+    OPUS_FEED_OK=0,
+    OPUS_FEED_NOMEM,    // the decoder or the task stack would not fit
+    OPUS_FEED_BUSY,     // a stream is already decoding
+} opus_feed_start_t;
+opus_feed_start_t opus_feed_start(sound_stream_t *pcm, sound_stream_t *packets,
+                                  uint32_t frames, uint16_t skip);
 // Waits for the task to be gone before returning, so the caller may then free
 // both rings. False means it did not stop and the rings must not be freed.
 bool     opus_feed_stop(void);
