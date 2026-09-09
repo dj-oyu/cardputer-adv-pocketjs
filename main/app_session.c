@@ -424,7 +424,25 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
 // whole of the frame here is the guest's own JavaScript.
 esp_err_t app_overlay_tick(void) {
     if(!guest) return ESP_ERR_INVALID_STATE;
-    deadline=esp_timer_get_time()+50000;
+    // The same runaway guard the foreground gets, and it was 50 ms until a
+    // board run under the FLOWER scene threw "InternalError: interrupted"
+    // inside a five-line loop that counts characters.
+    //
+    // THIS DEADLINE IS WALL CLOCK. It counts every microsecond the ui task
+    // spends preempted -- by the decoder at priority 6, by the audio task at 7,
+    // by a card read -- and none of that is the guest running. FLOWER draws at
+    // 71 ms a frame with 53 ms of kernel, so the machine is contended enough
+    // that a turn doing almost nothing can sit through 50 ms of somebody else's
+    // work and be killed for it.
+    //
+    // The 50 ms was a cost control wearing a runaway guard's clothes. The cost
+    // control already exists and is a different mechanism: budget_us with
+    // over_limit consecutive turns, in ui/overlay.c, which measures the turn
+    // and stops the overlay with a reason a person can read and undo. This one
+    // throws inside whichever line the guest happened to be on, so an app gets
+    // blamed for the system being busy. Two mechanisms, two jobs; this one is
+    // "not coming back" and should be far beyond any honest turn.
+    deadline=esp_timer_get_time()+250000;
     pocket_app_pump();
     // Before pocket_api_pump(), like every other producer: what these post is
     // settled by that call, and posting after it would delay every completion
