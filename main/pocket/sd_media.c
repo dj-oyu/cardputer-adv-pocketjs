@@ -52,30 +52,43 @@ bool sd_media_mount(void) {
     //   the shape a ring starved once per refill makes. The old comment read
     //   that as "the card is too slow for realtime PCM". The card was fine.
     //
-    // 20 MHz IS THE CEILING HERE, and the reason is not the SPI clock. Both
-    // 30 MHz and 40 MHz were tried on the board on 2026-09-09 and both failed
-    // the same way, before any data moved:
+    // 20 MHz IS THE CEILING THIS DRIVER WILL MOUNT, which is NOT the same
+    // statement as "the ceiling this wiring can carry", and the difference is
+    // the whole of what was learned here. 30 MHz and 40 MHz both failed
+    // identically on the board on 2026-09-09:
     //
     //   E sdmmc_sd: sdmmc_enable_hs_mode_and_check: send_csd returned 0x108
     //   W sd: mount failed: ESP_ERR_INVALID_RESPONSE
     //
-    // sdmmc_sd.c:522 skips the high-speed switch only when max_freq_khz is
-    // <= SDMMC_FREQ_DEFAULT, so ANY value above 20 MHz makes the driver attempt
-    // HS mode, and here the CMD9 that follows the switch does not answer. The
-    // failure is returned rather than mapped to ESP_ERR_NOT_SUPPORTED, so the
-    // driver's own "card has no HS mode, fall back to 20 MHz" path never runs
-    // and the whole mount fails. 20,001 kHz would fail exactly like 40,000.
+    // The first reading of that was "the wiring cannot hold the clock, and the
+    // CRC caught it". THAT WAS WRONG, and it was wrong in this project's usual
+    // way: it was an explanation of a different event. sdmmc_init.c runs
+    // sdmmc_init_card_hs_mode at step 156 and sdmmc_init_host_frequency at step
+    // 178, so THE FAILING CSD READ HAPPENS AT THE PROBING CLOCK. Neither 30 nor
+    // 40 MHz ever reached the bus. Nothing here has tested signal integrity at
+    // any speed, and no CRC caught anything.
     //
-    // The faster grades sdmmc.h names (SDR50, DDR50, 52M) are not candidates at
-    // all: they belong to the 4-bit SD interface and cannot come out of a
-    // one-wire SPI link.
+    // What did happen: sdmmc_enter_higher_speed_mode() SUCCEEDED -- so the card
+    // supports high-speed mode and accepted the CMD6 switch -- and the CMD9
+    // that follows it, in SPI mode, at 400 kHz, did not answer. That is this
+    // card's behaviour after the switch, not this board's. sdmmc_sd.c:522 skips
+    // the switch only at or below SDMMC_FREQ_DEFAULT, so any value above 20 MHz
+    // reaches it; and the error is returned rather than mapped to
+    // ESP_ERR_NOT_SUPPORTED, so the driver's own "no HS mode, fall back to
+    // 20 MHz" path never runs and the mount fails outright. 20,001 kHz would
+    // fail exactly like 40,000, and ANOTHER CARD MIGHT NOT FAIL AT ALL.
     //
-    // Asking was safe in a way it would not have been on a write-only bus. SPI
-    // mode carries a CRC16 on every data block and the driver checks it, so a
-    // clock this wiring could not hold showed up as a refusal rather than as
-    // quiet corruption -- and the refusal surfaced correctly all the way out,
-    // as DISCONNECTED from fs.requestFolder. MISO being wired here is what
-    // makes that possible; the LCD has no such check available to it.
+    // The faster grades sdmmc.h names (SDR50, DDR50, 52M) are not candidates:
+    // they belong to the 4-bit SD interface and cannot come out of a one-wire
+    // SPI link.
+    //
+    // THE ROUTE PAST 20 MHz THAT NOBODY HAS TAKEN, recorded so that the next
+    // person does not have to find the ordering above for themselves: SD
+    // Default Speed is specified to 25 MHz and needs no high-speed handshake at
+    // all. Mounting at 20 MHz and then calling sdspi_host_set_card_clk(host,
+    // 25000) would raise the clock without going anywhere near CMD6 -- in
+    // spec, 25% more bus, and untested. Above 25 MHz there is no honest way
+    // around the switch.
     //
     // card->max_freq_khz in the mount log below is what was actually agreed.
     // Read that line rather than this constant when the number matters.
