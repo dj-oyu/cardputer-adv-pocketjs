@@ -106,6 +106,62 @@ bool sd_generation_valid(const sd_media_t *m, uint32_t gen);
 #define SD_TEMP_SUFFIX ".pkt-tmp"
 bool sd_name_reserved(const char *name, size_t len);
 
+// ---------------------------------------------------------------------------
+// THE TRANSFER CLOCK IS FOUND, NOT DECLARED
+//
+// It used to be a constant, and the constant was 400 kHz -- which nobody chose
+// either: it is the identification clock every card must answer at before the
+// host raises it, and this firmware never raised it. Playback off the card came
+// out in pieces for a year of commits because a 2,048-byte refill took 41 ms.
+//
+// A single number cannot be right here. What a card will carry depends on the
+// card, and on this board two of them can differ by a factor of a hundred with
+// no way to tell in advance. So the mount WALKS DOWN a ladder until the card
+// answers, and then, where the specification allows it, walks back UP one step
+// and proves the step with a read.
+//
+// The policy lives here rather than in sd_media.c because it is a decision
+// about what a failure means, and tools/test_sd.c can settle those without a
+// card. sd_media.c holds only the part that touches one.
+#define SD_CLOCK_STEPS 5
+extern const int SD_CLOCK_LADDER[SD_CLOCK_STEPS];
+
+// What a mount attempt did, coarse enough that the policy below can be written
+// without esp_err_t -- which is also what keeps this file host-compilable.
+typedef enum {
+    SD_MOUNT_OK = 0,
+    SD_MOUNT_ABSENT,    // nothing in the slot; a slower clock will not help
+    SD_MOUNT_REFUSED,   // something answered and would not mount at this rate
+} sd_mount_outcome_t;
+
+// The next clock to try after `khz` failed, or 0 to stop.
+//
+// ABSENT STOPS THE WALK, and that is the important half: an empty slot answers
+// nothing at any speed, so walking the whole ladder would make "no card" five
+// times slower than it needs to be, on the one screen where a person is waiting
+// and watching.
+int sd_clock_next(int khz, sd_mount_outcome_t outcome);
+
+// The clock to try RAISING to after a successful mount at `mounted_khz`, or 0
+// to leave it alone.
+//
+// This exists because of a gap between the specification and the driver. SD
+// Default Speed is specified to 25 MHz and needs no handshake, but esp-idf
+// attempts the high-speed switch for any request above 20 MHz
+// (sdmmc_sd.c:522) -- and on a card that accepts CMD6 and then does not answer
+// the CMD9 after it, that failure is fatal rather than a fall-back
+// (sdmmc_common.c:191), so asking the mount for 25 MHz fails the mount. The
+// clock can still be raised afterwards, on a card that is already up.
+//
+// Only from 20 MHz. A card that mounted at 10 MHz or below did so because the
+// faster rungs refused it, and pushing that card further is not a measurement,
+// it is a guess with a filesystem behind it.
+//
+// The caller MUST verify the raise against the card and put the clock back if
+// it does not hold; nothing in the SD protocol does that for you here, which is
+// exactly why the driver refuses to do it in the first place.
+int sd_clock_boost(int mounted_khz);
+
 // Reasons sd_path_build can refuse, so the caller can pick the right error
 // without re-deriving why.
 typedef enum {

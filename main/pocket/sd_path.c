@@ -113,3 +113,37 @@ sd_path_result_t sd_path_build(const sd_media_t *m, const char *rel, size_t len,
     out[rootn + 1 + len] = '\0';
     return SD_PATH_OK;
 }
+
+// ------------------------------------------------------------- clock ladder
+
+// Fastest first. The rungs are not arbitrary:
+//
+//   40,000  SDMMC_FREQ_HIGHSPEED, the ceiling of SPI mode. The grades above it
+//           that sdmmc.h names (SDR50, DDR50, 52M) belong to the 4-bit SD
+//           interface and cannot come out of a one-wire link at all.
+//   20,000  SDMMC_FREQ_DEFAULT, and the highest rung that does NOT make the
+//           driver attempt the high-speed switch. Cards that fail the rung
+//           above usually fail it here, in the switch rather than on the wire.
+//   10,000  and
+//    4,000  for a card or a wiring that will not hold the two above. Nothing
+//           has ever needed these on this board; they are here so that "the
+//           card is unusable" is a conclusion the walk reaches rather than an
+//           assumption the first failure makes.
+//      400  SDMMC_FREQ_PROBING, the identification clock. A card that only
+//           works here works, barely: audio cannot stream off it (one
+//           2,048-byte refill is ~41 ms against a 33 ms frame). Reaching this
+//           rung is worth saying out loud, and sd_media.c does.
+const int SD_CLOCK_LADDER[SD_CLOCK_STEPS] = { 40000, 20000, 10000, 4000, 400 };
+
+int sd_clock_next(int khz, sd_mount_outcome_t outcome) {
+    if (outcome != SD_MOUNT_REFUSED) return 0;
+    for (int i = 0; i + 1 < SD_CLOCK_STEPS; i++)
+        if (SD_CLOCK_LADDER[i] == khz) return SD_CLOCK_LADDER[i + 1];
+    // Off the ladder (the bottom rung, or a rate nobody put here) ends the
+    // walk. Returning the top would loop forever on a card that never mounts.
+    return 0;
+}
+
+int sd_clock_boost(int mounted_khz) {
+    return mounted_khz == 20000 ? 25000 : 0;
+}

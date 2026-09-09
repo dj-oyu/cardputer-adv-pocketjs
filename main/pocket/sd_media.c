@@ -12,6 +12,8 @@
 #include "esp_vfs_fat.h"
 #include "driver/sdspi_host.h"
 #include "sdmmc_cmd.h"
+#include "esp_heap_caps.h"
+#include <string.h>
 
 // docs/hardware-constraints.md:45. The bus itself belongs to board.c; this
 // file only ever adds a device to it.
@@ -24,6 +26,54 @@ static sdmmc_card_t *card;
 void sd_media_init(void) { sd_media_reset(&media); }
 
 const sd_media_t *sd_media(void) { return &media; }
+
+// Walk one step back UP, and PROVE it. sd_path.h says why the mount cannot ask
+// for this rate itself; what it cannot say is that raising a clock behind a
+// filesystem's back is only safe if something checks, because no handshake is
+// involved and a card that cannot hold the rate does not announce it.
+//
+// The check is a real read of a real sector, compared against the same sector
+// read at the rate that already worked. Sector 0 is the MBR: it exists on every
+// card this firmware can mount, it does not move, and reading it costs one
+// command. SPI mode CRCs every data block on top of that, so a mismatch here is
+// two independent failures rather than a coincidence.
+//
+// Failure is not an error. It means the card is staying where it was, which is
+// where it would have been without this function.
+static void raise_clock(void) {
+    if (!card) return;
+    int want = sd_clock_boost(card->max_freq_khz);
+    if (!want) return;
+    int was = card->max_freq_khz;
+
+    // One allocation, two halves, DMA-capable because the driver reads into it.
+    uint8_t *ref = heap_caps_malloc(2 * 512, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    if (!ref) return;                       // no room to check means no raise
+    uint8_t *again = ref + 512;
+
+    esp_err_t e = sdmmc_read_sectors(card, ref, 0, 1);
+    if (e != ESP_OK) { free(ref); return; }
+
+    if ((*card->host.set_card_clk)(card->host.slot, (uint32_t)want) != ESP_OK) {
+        free(ref);
+        return;
+    }
+    e = sdmmc_read_sectors(card, again, 0, 1);
+    if (e == ESP_OK && memcmp(ref, again, 512) == 0) {
+        card->max_freq_khz = want;
+        ESP_LOGI(TAG, "raised %d -> %d kHz and verified a sector at it",
+                 was, want);
+    } else {
+        // Back to what worked, and say which of the two ways it failed: a read
+        // that errored and a read that came back different are different
+        // stories about the card.
+        (*card->host.set_card_clk)(card->host.slot, (uint32_t)was);
+        ESP_LOGI(TAG, "%d kHz did not hold (%s); staying at %d kHz", want,
+                 e != ESP_OK ? esp_err_to_name(e) : "sector read back different",
+                 was);
+    }
+    free(ref);
+}
 
 bool sd_media_mount(void) {
     if (media.state == SD_MEDIA_READY) return true;
@@ -38,62 +88,8 @@ bool sd_media_mount(void) {
     slot.host_id = SPI3_HOST;
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = SPI3_HOST;
-    // 400 kHz was the IDENTIFICATION clock, kept as the transfer clock. That
-    // was never a considered choice about this card: it is the frequency every
-    // SD card is required to answer at before the host raises it, and nothing
-    // here ever raised it. The arithmetic that used to be written out in this
-    // comment was therefore describing a card running fifty times slower than
-    // it can, and drawing conclusions from it:
-    //
-    //   400 kbit/s is about 50,000 bytes a second before per-command overhead,
-    //   so ONE 2,048-byte refill takes roughly 41 ms -- longer than the 33 ms
-    //   frame that asked for it. Streamed playback off the card could not have
-    //   worked at any bitrate, and it did not: it came out in pieces, which is
-    //   the shape a ring starved once per refill makes. The old comment read
-    //   that as "the card is too slow for realtime PCM". The card was fine.
-    //
-    // 20 MHz IS THE CEILING THIS DRIVER WILL MOUNT, which is NOT the same
-    // statement as "the ceiling this wiring can carry", and the difference is
-    // the whole of what was learned here. 30 MHz and 40 MHz both failed
-    // identically on the board on 2026-09-09:
-    //
-    //   E sdmmc_sd: sdmmc_enable_hs_mode_and_check: send_csd returned 0x108
-    //   W sd: mount failed: ESP_ERR_INVALID_RESPONSE
-    //
-    // The first reading of that was "the wiring cannot hold the clock, and the
-    // CRC caught it". THAT WAS WRONG, and it was wrong in this project's usual
-    // way: it was an explanation of a different event. sdmmc_init.c runs
-    // sdmmc_init_card_hs_mode at step 156 and sdmmc_init_host_frequency at step
-    // 178, so THE FAILING CSD READ HAPPENS AT THE PROBING CLOCK. Neither 30 nor
-    // 40 MHz ever reached the bus. Nothing here has tested signal integrity at
-    // any speed, and no CRC caught anything.
-    //
-    // What did happen: sdmmc_enter_higher_speed_mode() SUCCEEDED -- so the card
-    // supports high-speed mode and accepted the CMD6 switch -- and the CMD9
-    // that follows it, in SPI mode, at 400 kHz, did not answer. That is this
-    // card's behaviour after the switch, not this board's. sdmmc_sd.c:522 skips
-    // the switch only at or below SDMMC_FREQ_DEFAULT, so any value above 20 MHz
-    // reaches it; and the error is returned rather than mapped to
-    // ESP_ERR_NOT_SUPPORTED, so the driver's own "no HS mode, fall back to
-    // 20 MHz" path never runs and the mount fails outright. 20,001 kHz would
-    // fail exactly like 40,000, and ANOTHER CARD MIGHT NOT FAIL AT ALL.
-    //
-    // The faster grades sdmmc.h names (SDR50, DDR50, 52M) are not candidates:
-    // they belong to the 4-bit SD interface and cannot come out of a one-wire
-    // SPI link.
-    //
-    // THE ROUTE PAST 20 MHz THAT NOBODY HAS TAKEN, recorded so that the next
-    // person does not have to find the ordering above for themselves: SD
-    // Default Speed is specified to 25 MHz and needs no high-speed handshake at
-    // all. Mounting at 20 MHz and then calling sdspi_host_set_card_clk(host,
-    // 25000) would raise the clock without going anywhere near CMD6 -- in
-    // spec, 25% more bus, and untested. Above 25 MHz there is no honest way
-    // around the switch.
-    //
-    // card->max_freq_khz in the mount log below is what was actually agreed.
-    // Read that line rather than this constant when the number matters.
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
-
+    // The clock is NOT set here. sd_path.h holds the ladder and the reasons;
+    // this file walks it, because walking it means touching a card.
     esp_vfs_fat_sdmmc_mount_config_t cfg = {
         // docs/filesystem-api.md:56 -- never format on mount failure. A card
         // that does not mount is a card with someone's data on it until proven
@@ -103,24 +99,50 @@ bool sd_media_mount(void) {
         .allocation_unit_size = 0,
     };
 
-    esp_err_t e = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot, &cfg, &card);
-    if (e != ESP_OK) {
+    // The walk. Every failed attempt cleans up after itself -- esp-idf's mount
+    // deinits the host on its way out (vfs_fat_sdmmc.c:403) -- so a retry is a
+    // fresh attempt and not a leaked device handle per rung.
+    esp_err_t e = ESP_FAIL;
+    int khz = SD_CLOCK_LADDER[0];
+    sd_mount_outcome_t outcome = SD_MOUNT_REFUSED;
+    while (khz) {
+        host.max_freq_khz = khz;
+        e = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot, &cfg, &card);
+        if (e == ESP_OK) break;
         card = NULL;
-        // ESP_ERR_TIMEOUT / NOT_FOUND is an empty slot; ESP_FAIL is a card that
-        // answered and would not mount. Section 3 keeps those apart, because
-        // one of them is worth telling the person about and the other is just
-        // "no card".
-        if (e == ESP_ERR_NOT_FOUND || e == ESP_ERR_TIMEOUT) sd_media_removed(&media);
+        // ESP_ERR_TIMEOUT / NOT_FOUND is an empty slot; anything else is
+        // something that answered and would not mount at THIS rate. Section 3
+        // keeps those apart because one is worth telling the person about and
+        // the other is just "no card" -- and here it also decides whether a
+        // slower rung could possibly help.
+        outcome = (e == ESP_ERR_NOT_FOUND || e == ESP_ERR_TIMEOUT)
+                  ? SD_MOUNT_ABSENT : SD_MOUNT_REFUSED;
+        int next = sd_clock_next(khz, outcome);
+        if (next)
+            ESP_LOGI(TAG, "%d kHz refused (%s), trying %d kHz",
+                     khz, esp_err_to_name(e), next);
+        khz = next;
+    }
+    if (e != ESP_OK) {
+        if (outcome == SD_MOUNT_ABSENT) sd_media_removed(&media);
         else sd_media_failed(&media);
         ESP_LOGW(TAG, "mount failed: %s", esp_err_to_name(e));
         return false;
     }
+
+    raise_clock();
 
     sd_media_mounted(&media);
     ESP_LOGI(TAG, "mounted generation=%u %llu MB sector=%u %d kHz",
              (unsigned)media.generation,
              ((uint64_t)card->csd.capacity * card->csd.sector_size) >> 20,
              (unsigned)card->csd.sector_size, card->max_freq_khz);
+    // Worth saying out loud rather than leaving in a number nobody reads: at
+    // the bottom rung nothing can stream off this card, so a feature that later
+    // stutters has its explanation here rather than in the feature.
+    if (card->max_freq_khz <= SD_CLOCK_LADDER[SD_CLOCK_STEPS - 1])
+        ESP_LOGW(TAG, "card only answers at the identification clock; "
+                      "streaming from it will not keep up");
     return true;
 }
 

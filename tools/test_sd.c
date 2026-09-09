@@ -129,6 +129,58 @@ int main(void) {
     CHECK(build(&m, "a", buf, sizeof buf) == SD_PATH_DISCONNECTED,
           "failed media wrong reason");
 
+    // ---- the clock ladder ---------------------------------------------------
+    //
+    // The walk is here rather than beside the driver because every question it
+    // asks is about what a failure MEANS, and none of them needs a card. The
+    // one that matters is the second block: an empty slot must not be walked.
+
+    // Fastest first, strictly descending, and the ends are the two named
+    // constants the driver knows. A ladder that is not ordered would make
+    // sd_clock_next walk sideways or upwards for ever.
+    CHECK(SD_CLOCK_LADDER[0] == 40000, "top rung is SPI mode's ceiling");
+    CHECK(SD_CLOCK_LADDER[SD_CLOCK_STEPS - 1] == 400, "bottom rung is the probing clock");
+    for (int i = 0; i + 1 < SD_CLOCK_STEPS; i++)
+        CHECK(SD_CLOCK_LADDER[i] > SD_CLOCK_LADDER[i + 1],
+              "rung %d (%d) is not above rung %d (%d)",
+              i, SD_CLOCK_LADDER[i], i + 1, SD_CLOCK_LADDER[i + 1]);
+
+    // A refusal steps down exactly one rung, and the bottom stops.
+    for (int i = 0; i + 1 < SD_CLOCK_STEPS; i++)
+        CHECK(sd_clock_next(SD_CLOCK_LADDER[i], SD_MOUNT_REFUSED) == SD_CLOCK_LADDER[i + 1],
+              "refusal at %d did not step to %d", SD_CLOCK_LADDER[i], SD_CLOCK_LADDER[i + 1]);
+    CHECK(sd_clock_next(SD_CLOCK_LADDER[SD_CLOCK_STEPS - 1], SD_MOUNT_REFUSED) == 0,
+          "the bottom rung must end the walk");
+
+    // AN EMPTY SLOT ENDS THE WALK AT ONCE. Nothing answers at any speed, and
+    // the whole ladder would make "no card" five mount attempts long on the one
+    // screen where somebody is waiting for it.
+    for (int i = 0; i < SD_CLOCK_STEPS; i++)
+        CHECK(sd_clock_next(SD_CLOCK_LADDER[i], SD_MOUNT_ABSENT) == 0,
+              "absent at %d kept walking", SD_CLOCK_LADDER[i]);
+    CHECK(sd_clock_next(SD_CLOCK_LADDER[0], SD_MOUNT_OK) == 0,
+          "a mount that worked has nothing to try next");
+
+    // A rate that is not on the ladder ends the walk rather than restarting it.
+    // Returning the top rung here is the shape that loops for ever on a card
+    // that never mounts, and it is a one-character mistake away.
+    CHECK(sd_clock_next(26000, SD_MOUNT_REFUSED) == 0, "off-ladder rate must stop");
+    CHECK(sd_clock_next(0, SD_MOUNT_REFUSED) == 0, "zero must stop");
+
+    // The boost is offered from SDMMC_FREQ_DEFAULT and nowhere else: 25 MHz is
+    // the SD Default Speed ceiling, so it needs no handshake, and a card that
+    // could only mount lower down got there by refusing the rungs above.
+    CHECK(sd_clock_boost(20000) == 25000, "20 MHz should offer the 25 MHz step");
+    CHECK(sd_clock_boost(40000) == 0, "a card already above it must be left alone");
+    CHECK(sd_clock_boost(10000) == 0, "a card that failed 20 MHz must not be pushed");
+    CHECK(sd_clock_boost(4000) == 0, "nor one that failed 10 MHz");
+    CHECK(sd_clock_boost(400) == 0, "nor one that only answers the probing clock");
+    // Never above the Default Speed ceiling: past 25 MHz the high-speed switch
+    // is unavoidable, and that switch is what the mount could not get through.
+    for (int i = 0; i < SD_CLOCK_STEPS; i++)
+        CHECK(sd_clock_boost(SD_CLOCK_LADDER[i]) <= 25000,
+              "boost from %d exceeds Default Speed", SD_CLOCK_LADDER[i]);
+
     if (failures == 0) printf("test_sd: all checks passed\n");
     else printf("test_sd: %d FAILURES\n", failures);
     return failures != 0;
