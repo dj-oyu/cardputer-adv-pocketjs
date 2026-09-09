@@ -74,6 +74,11 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // is not a method. Like every letter in this function it arrives over USB;
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
+    // The volume pair, as TEXT rather than as nav, because that is what the
+    // Cardputer's own keys produce and what volume_key() reads. Without these
+    // two a host script could reach every other key on the home screen and not
+    // the only two that are the shell's everywhere.
+    if(c=='-'||c=='=') { k->text[0]=c;k->len=1;return true; }
     if(c=='\r'||c=='\n'||c=='e')k->nav=KEY_ENTER;
     else if(c=='q'||c==27)k->nav=KEY_BACK;
     else if(c=='b')k->nav=KEY_RIGHT;
@@ -204,6 +209,36 @@ static void take_pending_screen(void) {
         case SHELL_SCREEN_WIFI: enter(SCREEN_WIFI); break;
         case SHELL_SCREEN_NONE: break;
     }
+}
+
+// The volume keys, and they belong to the SHELL rather than to whatever is on
+// the home screen. Pressed while the player is up they change the volume, which
+// is what makes volume operable from the player -- but the player is not what
+// changes it, and no app can. An app that could turn itself up is an app that
+// could turn itself up while nobody is watching, and this keeps the practical
+// half of that without the dangerous half.
+//
+// They cost two keys out of the residue 3.1 hands to an overlay, which is a
+// real price and is why it is two and not a row of them. `-` and `=` are the
+// unshifted pair on the top row; the shifted spellings are accepted because a
+// person holding shift meant the same thing.
+//
+// Taken on the home screen only. A foreground app receives every key and having
+// two of them silently disappear is a worse surprise than reaching for Settings.
+static bool volume_key(const keystroke_t *k) {
+    if(!k||k->len!=1) return false;
+    char c=k->text[0];
+    int step=(c=='-'||c=='_')?-1:((c=='='||c=='+')?1:0);
+    if(!step) return false;
+    unsigned now=sound_volume();
+    if(step<0&&now) sound_set_volume(now-1);
+    else if(step>0&&now+1<SOUND_VOLUME_STEPS) sound_set_volume(now+1);
+    // Shown and stored even when the step was clamped: pressing down at the
+    // bottom is a person asking where they are, and answering with nothing is
+    // indistinguishable from a key that did not arrive.
+    shell_volume_touched();
+    shell_settings_save();
+    return true;
 }
 
 // Whether a host screen is up over the home screen. 3.1: modals beat the
@@ -501,6 +536,10 @@ static void ui_task(void *arg) {
         int64_t frame_start=esp_timer_get_time();
         keystroke_t stroke={0};
         bool have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+        // Before everything: the volume is the device's, so it is answered
+        // before any question about who owns the screen.
+        if(have&&!running&&screen==SCREEN_HOME&&!home_modal()&&volume_key(&stroke))
+            have=false;
         pet_repaint=pet_hub_pump();
         if(have&&pet_hub_key(stroke.nav)){have=false;pet_repaint=true;}
         if(pet_repaint&&running)app_force_redraw();

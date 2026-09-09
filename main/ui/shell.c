@@ -8,6 +8,7 @@
 #include "overlay.h"
 #include "glass_rain.h"
 #include "board.h"
+#include "paint.h"
 #include "motion.h"
 #include "sound.h"
 #include "nvs.h"
@@ -248,6 +249,43 @@ shell_screen_t shell_pending_screen(void) {
     pending_screen=SHELL_SCREEN_NONE;
     return requested;
 }
+void shell_settings_save(void) {
+    if(!prefs_ready) return;
+    esp_err_t err=ESP_OK;
+    for(unsigned i=0;i<SETTING_N&&err==ESP_OK;i++)
+        if(settings[i].key)
+            err=nvs_set_u8(prefs,settings[i].key,(uint8_t)settings[i].get());
+    if(!err)err=nvs_commit(prefs);
+    if(err)ESP_LOGW("settings","Save failed: %s",esp_err_to_name(err));
+}
+
+// The volume was changed by its keys rather than by its row, so the row is not
+// on screen to show what happened. This is the shell saying so, and it is the
+// shell's to say: an overlay that drew the volume would be drawing a number it
+// cannot change and might not have.
+//
+// It goes ON TOP of the overlay, which is allowed and is not a hole in 3.1: the
+// rule is that an overlay may not cover the shell's CONSENT surfaces, and this
+// is the shell covering an overlay, which is the direction that was never in
+// question.
+static int64_t volume_shown_us;
+void shell_volume_touched(void) { volume_shown_us=esp_timer_get_time(); }
+
+static void paint_volume(void) {
+    if(!volume_shown_us) return;
+    if(esp_timer_get_time()-volume_shown_us>1500000) { volume_shown_us=0; return; }
+    // paint.c keeps the live strip in module state and overlay_paint() may have
+    // pointed it somewhere else this pass, so it is set again here rather than
+    // assumed.
+    paint_begin(strip,strip_y,strip_h);
+    const uint16_t ink=board_rgb(237,246,255), dim=board_rgb(40,60,84),
+                   back=board_rgb(8,13,22);
+    int w=SOUND_VOLUME_STEPS*10+8, x=LCD_W-w-6, y=6;
+    paint_fill(x,y,w,14,back);
+    for(unsigned i=0;i<SOUND_VOLUME_STEPS;i++)
+        paint_fill(x+4+(int)i*10,y+4,8,6,i<=sound_volume()?ink:dim);
+}
+
 bool shell_key(board_key_t key) {
     if(key==KEY_BACK) {
         choices=false;sound_play(2);
@@ -294,14 +332,7 @@ bool shell_key(board_key_t key) {
         entry->set(choice);
         choices=false;
         sound_play(1);
-        if(prefs_ready) {
-            esp_err_t err=ESP_OK;
-            for(unsigned i=0;i<SETTING_N&&err==ESP_OK;i++)
-                if(settings[i].key)
-                    err=nvs_set_u8(prefs,settings[i].key,(uint8_t)settings[i].get());
-            if(!err)err=nvs_commit(prefs);
-            if(err)ESP_LOGW("settings","Save failed: %s",esp_err_to_name(err));
-        }
+        shell_settings_save();
         char summary[128]={0};
         settings_summary(summary,sizeof summary);
         ESP_LOGI("settings","VALUE %s",summary);
@@ -546,6 +577,7 @@ void shell_draw(const char *error, unsigned phase) {
             text(24,69,"APP ERROR",2,white);text(24,94,error,1,muted);
             text(12,123,"ESC / ENTER TO RETURN",1,muted);
         } else if(xmb) paint_labels();
+        paint_volume();
         HUD_FENCE;hud_menu_cy+=esp_cpu_get_cycle_count()-h3;HUD_FENCE;
         hud_us+=(unsigned)(esp_timer_get_time()-band);
         // Timed apart from the pixels: 240x135x2 bytes at 40 MHz is about

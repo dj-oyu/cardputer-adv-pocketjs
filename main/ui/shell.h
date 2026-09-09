@@ -17,4 +17,12 @@ unsigned shell_app(void);   // which Apps entry Enter would launch
 // after shell_key(); SHELL_SCREEN_NONE means stay on the home screen.
 shell_screen_t shell_pending_screen(void);
 void shell_draw(const char *error, unsigned phase);
+
+// Writes every settings row to NVS. Called when a row is applied, and by the
+// volume keys, which change a setting without going through a row.
+void shell_settings_save(void);
+
+// The volume just moved. Shows a bar for a second and a half, wherever the home
+// screen is -- the menu, or an overlay standing in its place.
+void shell_volume_touched(void);
 void shell_change_background(int direction);

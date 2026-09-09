@@ -32,13 +32,21 @@ esp_err_t app_start_test(char test);
 // what it uses and no more. So this is set clear of every recorded figure --
 // 85,602 bytes for hello/main.js before the pocket surfaces existed, js=86,233
 // measured on the board for a running app -- rather than tuned close to one.
-// The foreground cap is 160 KiB; an overlay installs five surfaces instead of
-// fifteen, so it sits below that and above the realm.
+// It was 128 KiB and that was too close, which took a board run to find: the
+// player asked for pocket.fs on its first keypress, the lazy namespace could
+// not be built, and the error came back as "no memory to build this namespace"
+// from inside a key listener -- nowhere near the allocation that was actually
+// short. A ceiling set near the cost is a ceiling that turns growth in an app
+// into a failure in an unrelated surface.
+//
+// So it is the foreground value now. An overlay installs seven surfaces instead
+// of fifteen and will not reach it; what actually defends the machine is the
+// free-heap check below, which measures instead of predicting.
 //
 // What actually defends the machine is not this number. It is the free-heap
 // check ui/overlay.c takes AFTER the guest is up, which measures what was
 // spent instead of predicting it.
-#define OVERLAY_GUEST_HEAP (128*1024)
+#define OVERLAY_GUEST_HEAP (160*1024)
 esp_err_t app_start_overlay(const char *source, size_t length);
 // One turn of an overlay session. Guest JavaScript only: nothing is rendered
 // or presented here, because the shell composites the overlay's display list

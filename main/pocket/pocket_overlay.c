@@ -53,7 +53,16 @@ static unsigned        key_head, key_tail;
 static pocket_sub_slot_t key_slots[OVERLAY_KEY_SUBS];
 static pocket_sub_table_t key_table = {
     .slots=key_slots, .count=OVERLAY_KEY_SUBS, .tag="pocket.overlay",
-    .what="onKey", .close_on_throw=true,
+    .what="onKey",
+    // FALSE, unlike the polled surfaces. Their reason for closing a listener
+    // that throws is runaway: one that throws every frame fills the log and
+    // costs a call for ever. A key listener fires only when a person presses a
+    // key, so there is nothing to run away -- and closing it costs the person
+    // the keyboard. That happened: a transient out-of-memory inside the
+    // listener took the player's input away permanently, and the failure was
+    // the closing rather than the throw. capabilities.onChange makes the same
+    // call for the same reason.
+    .close_on_throw=false,
 };
 
 static const char *action_of(board_key_t nav) {
