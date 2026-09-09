@@ -8,7 +8,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG="overlay";
@@ -175,27 +174,74 @@ void overlay_release(void) {
     pocket_overlay_reset();
 }
 
-// 3.1: reserve at start, refuse rather than fail later. The reservation is a
-// real allocation of the block the guest is about to want, freed immediately so
-// that the guest gets that same block -- not a reading of the free counter,
-// because what fails on this board is a CONTIGUOUS request and the counter does
-// not say whether one is available.
-static bool reserve(void) {
-    void *block=heap_caps_malloc(OVERLAY_GUEST_HEAP,
-                                 MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-    if(!block) return false;
-    free(block);
-    return true;
+// ------------------------------------------------------- room, before and after
+//
+// WHAT THE RISK ACTUALLY IS. 3.1 asks for a reservation because the Rust UI
+// core does not report running out of memory -- it panics and reboots. That
+// hazard is not present here: an overlay session has no Rust UI core (see
+// pocket_overlay.h for why it was left out), and a guest allocator that runs
+// short raises an OutOfMemory exception, which comes back through
+// app_start_overlay() as an ordinary error and is refused below. The overlay
+// cannot take the device down by running out of room.
+//
+// What it CAN do is DISPOSSESSION: quietly take memory that something else
+// needs later, so that the radio will not come up or a stream will not play,
+// and the failure surfaces somewhere with no visible connection to a clock.
+// That is the risk this pair of checks is for, and naming it correctly is what
+// makes the second one obviously necessary and the first one obviously
+// insufficient.
+//
+// THE FLOOR. NET_RADIO_MIN_FREE in pocket/pocket_net.c: 56 KiB, measured on
+// the board on 2026-09-07, the cost of bringing the radio up. It is the
+// largest recurring claim anything on this device makes, so an overlay that
+// leaves at least that much has not taken away an ability the machine had
+// before it started. The number is repeated here rather than shared through a
+// header because pocket_net.c is another agent's file and is in flight; if
+// that constant moves, this one has to move with it, and that duplication is a
+// debt to settle rather than a design.
+#define OVERLAY_FREE_FLOOR (56*1024)
+
+static uint32_t free_internal(void) {
+    return (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+}
+
+// What an overlay session is EXPECTED to cost the device heap, which is a
+// different quantity from OVERLAY_GUEST_HEAP and must not be confused with it
+// again. That one is a ceiling QuickJS is not allowed to exceed; this one is
+// what it is likely to actually spend, and only this one belongs in a gate
+// about whether there is room.
+//
+// DERIVED, NOT MEASURED, and labelled so deliberately. It comes from the two
+// recorded analogues -- 85,602 bytes of guest heap for hello/main.js before
+// the pocket surfaces existed (app_session.c), and js=86,233 read off the
+// board for a running app -- rounded up for the parse peak. The overlay's own
+// figure has never been taken, because the first attempt to take it refused
+// before it got there. app_report() logs `js=` at the end of every start, so
+// the next successful run replaces this derivation with a measurement, and it
+// should be replaced rather than left standing.
+#define OVERLAY_EXPECTED_COST (96*1024)
+
+// The cheap gate, and NOT the guarantee.
+//
+// Two things it is no longer: it does not ask for one contiguous block, because
+// QuickJS grows in many small allocations and never wants the whole cap in one
+// piece; and it does not use the cap as the cost, because a ceiling is not a
+// price. It asks only whether the total is plausible, so the obvious "no" costs
+// nothing. The answer that counts is taken after the start, from what happened.
+static bool plausible(void) {
+    return free_internal()>=OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR;
 }
 
 static void start(void) {
     const overlay_app_t *o=REGISTERED[0];
-    if(!reserve()) {
+    uint32_t before=free_internal();
+    if(!plausible()) {
         state=OVERLAY_REFUSED;
         say("NO ROOM");
-        ESP_LOGW(TAG,"OVERLAY_REFUSED cannot reserve %u bytes (largest=%u)",
-                 (unsigned)OVERLAY_GUEST_HEAP,
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+        ESP_LOGW(TAG,"OVERLAY_REFUSED_GATE free=%u needs=%u expected=%u floor=%u",
+                 (unsigned)before,
+                 (unsigned)(OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR),
+                 (unsigned)OVERLAY_EXPECTED_COST,(unsigned)OVERLAY_FREE_FLOOR);
         return;
     }
     // Written and committed BEFORE the start, and this ordering is the valve.
@@ -217,13 +263,40 @@ static void start(void) {
         flag_set(false);
         state=OVERLAY_REFUSED;
         say("START FAIL");
-        ESP_LOGW(TAG,"OVERLAY_REFUSED %s",esp_err_to_name(err));
+        // Named apart from the gate's refusal on purpose. These two were both
+        // "OVERLAY_REFUSED ..." for one build, and the board test that followed
+        // was read as the gate having fired when it had passed -- the cause was
+        // inside guest creation, four hundred bytes away in the source and a
+        // long way away in meaning.
+        ESP_LOGW(TAG,"OVERLAY_REFUSED_START %s free=%u cap=%u",
+                 esp_err_to_name(err),(unsigned)free_internal(),
+                 (unsigned)OVERLAY_GUEST_HEAP);
         return;
     }
     session_up=true;
+    // Before the verify below, so a stand-down reports this session's counters
+    // (no turns yet) rather than the previous session's.
     budget=(overlay_budget_t){.budget_us=o->budget_us,.over_limit=60,
                               .healthy_us=5000000};
     overlay_budget_start(&budget,(uint64_t)esp_timer_get_time());
+    // VERIFY, having predicted. The guest is up, so what it cost is no longer a
+    // forecast -- it is a subtraction. Standing down here puts the machine back
+    // exactly where it was, which is the whole reason this check can exist for
+    // an overlay and not for a foreground app.
+    uint32_t after=free_internal();
+    ESP_LOGI(TAG,"OVERLAY_COST free_before=%u free_after=%u took=%d floor=%u",
+             (unsigned)before,(unsigned)after,(int)before-(int)after,
+             (unsigned)OVERLAY_FREE_FLOOR);
+    if(!overlay_room_left(after,OVERLAY_FREE_FLOOR)) {
+        // Not "the overlay failed": the overlay succeeded and the machine is
+        // worse off, which is the case 3.1 had no name for. The reason is
+        // stateable -- the radio could no longer be brought up -- and it is
+        // shown in the row the person would turn it off from.
+        stop_with("NO ROOM",OVERLAY_REFUSED);
+        ESP_LOGW(TAG,"OVERLAY_REFUSED_FLOOR free=%u below floor=%u",
+                 (unsigned)after,(unsigned)OVERLAY_FREE_FLOOR);
+        return;
+    }
     state=OVERLAY_RUNNING;
     say("...");
     announce("running");
@@ -252,6 +325,29 @@ void overlay_tick(void) {
     // The frame cost, where the person deciding whether to keep it can read it.
     snprintf(on_label,sizeof on_label,"ON %u.%ums",
              (unsigned)(budget.last_us/1000),(unsigned)((budget.last_us%1000)/100));
+}
+
+// The hook for the direction that dissolves the prediction problem rather than
+// improving the prediction, and it HAS NO CALL SITES YET on purpose.
+//
+// Every check above is a guess about a future claimant taken at overlay start.
+// The alternative is to stop guessing: let the claimant say so at the moment it
+// actually needs the room, which is a single identifiable point in its own code
+// -- esp_wifi_init in pocket_net.c, the decoder's buffers in pocket_av.c. An
+// overlay that yields there needs no forecast at all, because by then the
+// question is not "will something need this" but "this needs it now".
+//
+// The call sites are not added here because those two files belong to another
+// workstream that is mid-flight on exactly the case this serves (Wi-Fi and
+// Opus playback at once), and where the right moments are may depend on
+// numbers that do not exist yet. This end is ready: it is idempotent, it is
+// safe from any task that already calls into the shell, and it leaves the row
+// saying why.
+void overlay_yield(const char *claimant) {
+    if(state!=OVERLAY_RUNNING && !session_up) return;
+    ESP_LOGW(TAG,"OVERLAY_YIELDED to %s free=%u",
+             claimant?claimant:"?",(unsigned)free_internal());
+    stop_with("YIELDED",OVERLAY_STOPPED);
 }
 
 void overlay_paint(uint16_t *strip, int strip_y, int strip_h) {

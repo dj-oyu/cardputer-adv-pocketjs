@@ -45,6 +45,20 @@ bool overlay_region_holds(const overlay_region_t *region,
 // then a human act.
 overlay_state_t overlay_boot_state(bool armed, bool starting);
 
+// Whether the machine is still able to do what it could do before the overlay
+// started. `free_after` is the internal heap free once the guest is up and
+// `floor` is the largest recurring claim any other subsystem makes.
+//
+// This is the POSTCONDITION, and it is a different thing from the reservation
+// that precedes it. A reservation is a forecast: it says a block existed at
+// the instant it was asked for, and the guest allocates a microsecond later
+// under a scene that is still drawing. This is a measurement of what actually
+// happened, taken after the fact, and an overlay is uniquely able to act on it
+// -- nothing was displaced to start it, so standing down puts the machine back
+// exactly where it was. A foreground app cannot do that: by the time it is up,
+// the screen it replaced is gone.
+bool overlay_room_left(uint32_t free_after, uint32_t floor);
+
 typedef struct {
     uint32_t budget_us;    // what one overlay turn may cost
     uint16_t over_limit;   // consecutive over-budget turns that stop it

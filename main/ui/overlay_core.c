@@ -20,6 +20,13 @@ overlay_state_t overlay_boot_state(bool armed, bool starting) {
     return starting ? OVERLAY_BLOCKED : OVERLAY_STARTING;
 }
 
+bool overlay_room_left(uint32_t free_after, uint32_t floor) {
+    // At the floor is still inside it. The floor is a documented requirement
+    // of somebody else's -- the radio's -- and meeting it exactly is meeting
+    // it; refusing there would be inventing a margin on top of a measurement.
+    return free_after>=floor;
+}
+
 void overlay_budget_start(overlay_budget_t *b, uint64_t now_us) {
     b->over_run=0; b->started_us=now_us;
     b->last_us=0; b->worst_us=0; b->turns=0;

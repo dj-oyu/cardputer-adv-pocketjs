@@ -35,6 +35,16 @@ void overlay_tick(void);
 // app, a diagnostic, another screen -- and idempotent.
 void overlay_release(void);
 
+// Stands the overlay down because something else needs the memory now. NOT a
+// fault and not a budget stop: the overlay was well behaved and is getting out
+// of the way, so the row says YIELDED and the person can turn it on again.
+//
+// Intended for the moment a large recurring claim is actually made -- the radio
+// coming up, an audio stream starting -- rather than for a forecast taken when
+// the overlay started. It has no call sites yet; see the definition for why.
+// Idempotent.
+void overlay_yield(const char *claimant);
+
 // Composites the overlay's display list. Called from shell_draw() per strip,
 // AFTER the scene and BEFORE the shell's own labels: 3.1 requires that an
 // overlay cannot cover the shell's UI, and painting order settles that for

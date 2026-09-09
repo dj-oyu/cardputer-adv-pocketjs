@@ -79,6 +79,48 @@ static void boot_valve(void) {
     CHECK(overlay_boot_state(armed,flag)==OVERLAY_STARTING,"and on again may start");
 }
 
+// ---------------------------------------------------- room after the fact
+//
+// The check that replaced a forecast. The reservation it sits behind used to
+// be the whole answer, and it was the wrong question twice over: it demanded
+// one contiguous 48 KiB block, which QuickJS never asks for because it grows
+// in many small allocations, and it said nothing about what was LEFT. What
+// matters is not that the overlay fitted; it is that the machine can still do
+// what it could do before -- 56 KiB free is what pocket_net.c measured the
+// radio needs to come up.
+
+#define FLOOR (56*1024)
+
+static void room_after_the_fact(void) {
+    CHECK(overlay_room_left(274*1024,FLOOR),"the home screen has room to spare");
+    CHECK(overlay_room_left(FLOOR,FLOOR),"exactly at the floor is inside it");
+    CHECK(!overlay_room_left(FLOOR-1,FLOOR),"one byte under is not");
+    CHECK(!overlay_room_left(0,FLOOR),"nothing left is not");
+
+    // The case the whole check exists for, in the numbers it will meet: a
+    // stream is playing, the heap is down to 32-43 KiB, and the overlay is
+    // armed. Whatever the guest managed to do, what is left is below the
+    // radio's requirement, so it stands down -- and for a reason that can be
+    // said out loud rather than because a contiguous block happened to be
+    // missing.
+    for(uint32_t free_after=32*1024; free_after<=43*1024; free_after+=1024)
+        CHECK(!overlay_room_left(free_after,FLOOR),
+              "a stream leaves %u free, which is below the radio floor",
+              (unsigned)free_after);
+
+    // And the ordinary case, so the check is not merely "always refuse". The
+    // number here is the board's, not a model's: idle_free measured 278,820 on
+    // 2026-09-09. Minus the expected cost of a session, it clears the floor
+    // with well over 100 KiB in hand.
+    //
+    // 48 KiB used to appear on this line as "the cap the guest may grow to",
+    // which was two errors in one phrase: the cap is a ceiling and not a cost,
+    // and 48 KiB was below the price of an empty QuickJS realm, so no guest
+    // could reach it at all.
+    CHECK(overlay_room_left(278820-96*1024,FLOOR),
+          "a session on the measured idle home screen still clears the floor");
+}
+
 // ----------------------------------------------------------- the frame budget
 
 static overlay_budget_t fresh(void) {
@@ -201,10 +243,11 @@ static void home_survives_without_the_overlay(void) {
 int main(void) {
     region_confinement();
     boot_valve();
+    room_after_the_fact();
     frame_budget();
     healthy_period();
     home_survives_without_the_overlay();
     if(failures) { printf("%d FAILURES\n",failures); return 1; }
-    printf("OVERLAY_OK region, boot valve, frame budget, shell independence\n");
+    printf("OVERLAY_OK region, boot valve, room floor, frame budget, shell independence\n");
     return 0;
 }

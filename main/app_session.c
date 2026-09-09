@@ -258,7 +258,12 @@ esp_err_t app_start_test(char test) {
     // what is left rather than for what a foreground app may take. 3.1 asks for
     // the check before the start rather than a failure during it; ui/overlay.c
     // makes the reservation and this is the cap it reserved against.
-    if(overlay_session) { gc.heap_limit=OVERLAY_GUEST_HEAP; gc.stack_limit=8*1024; }
+    // The stack limit stays at the foreground value. It was 8 KiB for one
+    // build, on the reasoning that a small app needs a small stack -- but it
+    // is a recursion depth bound for the parser, not memory that is saved by
+    // being smaller, and lowering it only added a second unknown to a start
+    // that was already failing.
+    if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
     TRY(pocketjs_guest_quickjs_install(guest,install_limits,NULL));
