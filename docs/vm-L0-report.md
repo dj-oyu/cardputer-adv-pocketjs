@@ -133,14 +133,9 @@ python tools\vm_l0_capture.py --port COM3 --workload B --out .cache\vm\l0-B.json
 
 **本報告の作成時に解消した項目:** 03 の「`pocketjs_ui_turn` の実装が見当たらない」。本体は `pocketjs_ui_qjs/src/ui_qjs.c:818` にあり、`pocketjs_guest_frame` を呼んでから UI の tick と draw を行う。03 の fact 62 の順序は正しい。台帳自体はまだ直していない。
 
-**台帳の中にまだ残っている食い違い**（未修正）:
+**台帳の食い違い4件**（04 の箇所数、06 のトレースの内訳、`vmprobe.h` のコメント、vmtest の README）は、コミット前に直した。
 
-- 04 の末尾の節に「全10箇所」が残っている。正しくは 14 箇所。
-- 06 §1 の「28 トレースはすべてコーパス由来」は誤り。5 本は vmprobe 由来。
-- `vmprobe.h` のコメントが「completion-to-handler」と書いている。実際はハンドラではなく、resolve を呼ぶ時点までの時間。
-- vmtest の README の `sdkconfig.h` の説明は古い。今は `__has_include` で分岐するので、空の `sdkconfig.h` を置く必要はない（置いても害は無い）。
-
-**行番号の基準:** 台帳の file:line は、`d9ef1f9` に未コミットの `VM_PROBE` 差分（`quickjs.c` +59 行）を当てた状態を指す。**プローブの差分をこのままコミットすれば、その commit で行番号が正しくなる。** コミット後にハッシュを台帳へ書き足すこと。
+**行番号の基準:** 台帳の file:line は `015fc62`（プローブの差分を当てた取り込み版）の `quickjs.c` を指す。
 
 ## 5. L2 設計への含意（async/generator の機構を一般化できるか）
 
@@ -190,4 +185,4 @@ L2 の価値は、長いジョブの中断のほかに、20 KiB スタックで�
    - 割り込まれた `await` の Promise が pending のまま残る件。
 
    それぞれ、`main` 側で直すか、L1 で扱うか、記録だけにとどめるかを決める。
-7. **コミットとタグ。** L0 の作業を `vm/p0-foundation` にコミットし、`vm/main` へ `--no-ff` で戻す時期を決める。`vm-L0` のタグは、実機の値が揃ってから打つのが仕様どおり。
+7. **コミットとタグ。** L0 の作業は `vm/p0-foundation` にコミットと push を済ませた。`vm/main` へ `--no-ff` で戻す時期を決める。`vm-L0` のタグは、実機の値が揃ってから打つのが仕様どおり。
