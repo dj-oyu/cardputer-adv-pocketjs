@@ -305,13 +305,16 @@ void pocket_api_sub_mark(pocket_sub_table_t *table, JSRuntime *rt,
 // because pocket_api_lazy() deliberately retries a failed build: without the
 // owner check the second attempt would find the class already registered and
 // fail for a reason that had nothing to do with the first failure.
-static inline bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner,
-                                          JSClassID *id) {
-    if(*owner==rt) return true;      // already registered in this runtime
-    *id=0;                           // and this one's counter decides the id
-    *owner=rt;
-    return false;
-}
+//
+// Comparing runtime POINTERS is not enough on its own: the next session's
+// runtime is allocated right after the last one was freed, and can land at the
+// same address. The owner check then says "registered" for a runtime whose
+// class table has never seen the id, and the first JS_SetClassProto asserts
+// (class_id < class_count) and reboots the board -- seen as the boot overlay
+// followed by a USB diagnostic. So every owner handed in here is remembered,
+// and pocket_api_reset(), which app_stop() calls before the guest is
+// destroyed, forgets them all. Within one session the pointer is sound.
+bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id);
 
 // --------------------------------------------------------- async completions
 //

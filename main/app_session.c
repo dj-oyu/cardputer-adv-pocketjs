@@ -237,6 +237,11 @@ void app_stop(void) {
 }
 esp_err_t app_start_test(char test) {
     esp_err_t err;
+    // The USB diagnostics call this directly, so they are the one caller that
+    // has not set these three. Left over from the boot overlay, overlay_session
+    // skipped the test's source and its renderer, and the session died on its
+    // first tick with no error line -- every diagnostic run after boot did.
+    if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     atomic_store(&stop_requested,false); frames=0;
     deadline=esp_timer_get_time()+2000000;
     pocketjs_guest_config_t gc;

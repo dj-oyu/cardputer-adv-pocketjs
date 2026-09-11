@@ -3,6 +3,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <assert.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -490,7 +491,24 @@ void pocket_api_pump(void) {
     }
 }
 
+// Every static that pocket_api_class_ready() has filled in, so the end of a
+// session can clear them (see pocket_api.h). Twelve owners exist today; the
+// assert is for the surface that adds the seventeenth, not for runtime input.
+static JSRuntime **class_owners[16];
+static unsigned class_owner_count;
+
+bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id) {
+    if(*owner==rt) return true;      // already registered in this runtime
+    *id=0;                           // and this one's counter decides the id
+    *owner=rt;
+    for(unsigned i=0;i<class_owner_count;i++) if(class_owners[i]==owner) return false;
+    assert(class_owner_count<sizeof(class_owners)/sizeof(class_owners[0]));
+    class_owners[class_owner_count++]=owner;
+    return false;
+}
+
 void pocket_api_reset(void) {
+    for(unsigned i=0;i<class_owner_count;i++) *class_owners[i]=NULL;
     for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
         pocket_promise_t *p=&promises[i];
         if(!atomic_load(&p->request)) continue;
