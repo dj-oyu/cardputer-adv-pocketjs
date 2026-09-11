@@ -1,0 +1,32 @@
+menu "Pocket VM (L0 measurement probes)"
+
+    config POCKET_VM_PROBE
+        bool "Enable L0 VM probes (docs/quickjs-freertos-vm-spec.md sec.5)"
+        default n
+        help
+            Off by default and meant to stay that way for every normal build.
+            On, this compiles in:
+              - main/pocket/vmprobe.c, which samples the guest's JS memory
+                usage, free heap, largest free block and ui_task's C stack
+                high-water mark every 8th frame (frame time and job counts
+                every frame) and logs a rate-limited
+                "VMPROBE ..." summary (min/median/max over a ~1s window)
+                instead of one line per frame.
+              - a #ifdef-guarded probe block inside the vendored
+                components/quickjs-ng/quickjs-ng/quickjs.c that exposes
+                sizeof(JSStackFrame)/sizeof(JSVarRef) (private to that file)
+                and a job-queue depth counter around JS_EnqueueJob /
+                JS_ExecutePendingJob.
+              - six USB-only diagnostic workloads under apps/vmprobe/,
+                reachable only over the serial diagnostic channel (letters
+                A-F), never from the home screen's app list -- so turning
+                this off leaves tools/test_settings.py and
+                tools/capture_home.py's press counts untouched.
+            Build a separate build_* directory with this on -- and give that
+            directory its OWN sdkconfig file (-D SDKCONFIG=<dir>/sdkconfig;
+            see sdkconfig.vmprobe.defaults), because ESP-IDF's default
+            sdkconfig path is the project root, shared by every build_*
+            directory regardless of -B. Never turn this on in
+            sdkconfig.defaults or in the shared root sdkconfig.
+
+endmenu

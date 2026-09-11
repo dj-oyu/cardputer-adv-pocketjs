@@ -21,6 +21,7 @@
 #include "pocket_bridge.h"
 #include "pocket_text.h"
 #include "scene_mem.h"
+#include "sdkconfig.h"
 #include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -78,6 +79,14 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // is not a method. Like every letter in this function it arrives over USB;
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
+#ifdef CONFIG_POCKET_VM_PROBE
+    // L0 workload triggers (docs/quickjs-freertos-vm-spec.md sec.5), USB-only
+    // and gated by CONFIG_POCKET_VM_PROBE so a normal build's key table is
+    // byte-for-byte unchanged. 'A'..'F' select one of apps/vmprobe/'s six
+    // workloads the same way '1'..'6' select the lifecycle diagnostics above
+    // -- tools/vm_l0_capture.py drives these.
+    if(c>='A'&&c<='F') { atomic_store(&diagnostic,c); return false; }
+#endif
     // The volume pair and '?', as TEXT rather than as nav, because that is what
     // the Cardputer's own keys produce and what volume_key() and an overlay
     // read. Without them a host script could reach every other key on the home

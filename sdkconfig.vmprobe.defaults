@@ -1,0 +1,22 @@
+# L0 VM-probe overlay (docs/quickjs-freertos-vm-spec.md sec.5). NOT part of
+# sdkconfig.defaults -- that file is shared by every build_* directory in
+# this tree (see CLAUDE.md), and this option must stay off there.
+#
+# THE SDKCONFIG FILE ITSELF IS ALSO SHARED, THE SAME WAY: ESP-IDF puts it at
+# the project root (./sdkconfig, gitignored) by default REGARDLESS of -B, so
+# two build_* directories normally read and write the very same file --
+# `idf.py -B build_vm_probe ... build` alone would leave
+# CONFIG_POCKET_VM_PROBE=y sitting in the ROOT sdkconfig, silently turning
+# every OTHER build_* directory's next build (build_vm, build_vm_vendor, ...)
+# into a probe build too. -D SDKCONFIG=<dir>/sdkconfig below is what actually
+# isolates it -- a mistake made and caught while writing this file; see the
+# session notes for how the pollution was found and reverted.
+#
+#   idf.py -B build_vm_probe \
+#       -D SDKCONFIG=build_vm_probe/sdkconfig \
+#       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.vmprobe.defaults" build
+#
+# build_vm_probe_off needs no such flag: it is meant to read the ordinary,
+# shared root sdkconfig, same as every other build_* directory, with this
+# option at its Kconfig default of n.
+CONFIG_POCKET_VM_PROBE=y
