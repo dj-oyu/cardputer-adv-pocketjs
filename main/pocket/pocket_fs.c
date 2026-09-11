@@ -683,18 +683,6 @@ extern const char asset_hello_start[] asm("_binary_main_js_start");
 extern const char asset_hello_end[]   asm("_binary_main_js_end");
 extern const char asset_imucal_start[] asm("_binary_imucal_js_start");
 extern const char asset_imucal_end[]   asm("_binary_imucal_js_end");
-extern const char asset_chime_start[]  asm("_binary_chime_wav_start");
-extern const char asset_chime_end[]    asm("_binary_chime_wav_end");
-extern const char asset_chimepok_start[] asm("_binary_chime_pok_start");
-extern const char asset_chimepok_end[]   asm("_binary_chime_pok_end");
-extern const char asset_tonepok_start[]  asm("_binary_tone_pok_start");
-extern const char asset_tonepok_end[]    asm("_binary_tone_pok_end");
-extern const char asset_mp3_start[] asm("_binary_test_tone_mp3_start");
-extern const char asset_mp3_end[] asm("_binary_test_tone_mp3_end");
-extern const char asset_mp348_start[] asm("_binary_test_48k_mp3_start");
-extern const char asset_mp348_end[] asm("_binary_test_48k_mp3_end");
-extern const char asset_mp324_start[] asm("_binary_test_24k_mp3_start");
-extern const char asset_mp324_end[] asm("_binary_test_24k_mp3_end");
 
 // `text` is not decoration: EMBED_TXTFILES appends a NUL and EMBED_FILES does
 // not, and asset_size() has to know which. It is recorded per row rather than
@@ -704,29 +692,13 @@ typedef struct { const char *name; const char *start, *end; bool text; } fs_asse
 static const fs_asset_t ASSETS[]={
     {"hello.js",  asset_hello_start,  asset_hello_end,  true},
     {"imucal.js", asset_imucal_start, asset_imucal_end, true},
-    // The one piece of audio in the tree, for pocket_av.c's player: 150,554
-    // bytes, which is six times what app: would hold, so a streamed clip and a
-    // clip that had to fit in RAM are visibly different things. apps/chime
-    // holds the file and says why it is PCM16 rather than ADPCM.
-    {"chime.wav", asset_chime_start,  asset_chime_end,  false},
-    // The same click train as Opus: 26,274 bytes for 8.20 s against that file's
-    // 150,554 for 3.14 s. apps/opusplay plays it and times what the decode task
-    // costs the renderer. The `false` is load-bearing here for the second time
-    // -- see asset_size() -- and an Opus packet stream has no terminator to
-    // lose, so a wrong flag would cut the last packet short rather than
-    // announce itself.
-    {"chime.pok", asset_chimepok_start, asset_chimepok_end, false},
-    // 15 s of 541.7 Hz. An underrun is 128 frames = 5.333 ms = 1/187.5 s, so a
-    // tone at a multiple of 187.5 Hz resumes exactly in phase after one and
-    // makes no pop at all -- the defect would be silent in the material chosen
-    // to reveal it. 541.7 Hz is the worst-case-best over one to eight
-    // underruns; tools/make_tone_asset.py refuses anything within 5% of a
-    // multiple. apps/opusplay/README.md says why a click train, being mostly
-    // silence, can only catch a fraction of them.
-    {"tone.pok",  asset_tonepok_start,  asset_tonepok_end,  false},
-    {"test-tone.mp3", asset_mp3_start, asset_mp3_end, false},
-    {"test-48k.mp3", asset_mp348_start, asset_mp348_end, false},
-    {"test-24k.mp3", asset_mp324_start, asset_mp324_end, false},
+    // chime.wav/chime.pok/tone.pok and the three test-*.mp3 fixtures that used
+    // to live here were the dev/test rows for apps/streamplay, apps/opusplay,
+    // apps/opusfit and apps/mp3play -- all four apps and their assets were
+    // removed once the MP3/Opus decoders they exercised were verified
+    // (docs/common-api.md 9.1-9.1.3 keeps the measurements they produced).
+    // apps/player is the shipped feature that uses pocket.audio.player now,
+    // and it supplies its own sources rather than reading from assets:/.
 };
 #define ASSET_COUNT (sizeof(ASSETS)/sizeof(ASSETS[0]))
 
