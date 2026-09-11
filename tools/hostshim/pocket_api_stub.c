@@ -25,7 +25,31 @@ const pocket_capability_t *host_capability(const char *name) {
     for(int i=0;i<ncaps;i++) if(!strcmp(caps[i]->name,name)) return caps[i];
     return NULL;
 }
-void host_capabilities_clear(void) { ncaps=0; }
+static void host_class_owners_forget(void);
+void host_capabilities_clear(void) { ncaps=0; host_class_owners_forget(); }
+
+// The firmware's copy lives in pocket_api.c and remembers every owner, so that
+// the end of a session can clear them: a new runtime can land on the address a
+// freed one had, and a bare pointer compare then claims a class is registered
+// in a table that has never seen it. This test builds and frees runtimes in a
+// loop, which is that case exactly, so it keeps the same bookkeeping -- the
+// forgetting hangs off host_capabilities_clear(), the stub's session end.
+static JSRuntime **class_owners[16];
+static unsigned class_owner_count;
+
+bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id) {
+    if(*owner==rt) return true;
+    *id=0;
+    *owner=rt;
+    for(unsigned i=0;i<class_owner_count;i++) if(class_owners[i]==owner) return false;
+    if(class_owner_count<sizeof(class_owners)/sizeof(class_owners[0]))
+        class_owners[class_owner_count++]=owner;
+    return false;
+}
+
+static void host_class_owners_forget(void) {
+    for(unsigned i=0;i<class_owner_count;i++) *class_owners[i]=NULL;
+}
 
 bool pocket_api_supported(const char *name) { return host_capability(name)!=NULL; }
 
