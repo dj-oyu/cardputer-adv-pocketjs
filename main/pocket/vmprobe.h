@@ -27,6 +27,25 @@
 extern "C" {
 #endif
 
+// The fixed contention conditions sec.5's completion condition asks for
+// ("UI・音声・通信との競合条件、入力データ、反復数を固定"). A bit mask rather
+// than a list of named conditions, so base / ui / audio / wifi / all and every
+// other combination are one mechanism: the host selects one with a single USB
+// byte ('P' + mask, main.c's usb_stroke) before starting a workload, and
+// app_session.c hands the mask to apps/vmprobe/condition.js, evaluated after
+// the workload's own source. What each bit starts is in that file and in
+// apps/vmprobe/README.md.
+#define VMPROBE_COND_UI    1u
+#define VMPROBE_COND_AUDIO 2u
+#define VMPROBE_COND_WIFI  4u
+#define VMPROBE_COND_ALL   7u
+
+// Set from the input task, read on the ui task when a session starts. Sticky:
+// it stays until the host sends another letter, so a capture script sets the
+// condition once and runs all six workloads under it.
+void vmprobe_condition_set(unsigned mask);
+unsigned vmprobe_condition(void);
+
 // Logged at every guest start (app_start_test(), right after the guest
 // exists): engine revision, compiler, optimization level and the struct
 // sizes sec.5 asks for. All of it is a build-time fact; it repeats per
@@ -36,20 +55,17 @@ void vmprobe_static_report(void);
 
 // Called once per app_tick() frame, after the JS turn (frame() call plus
 // whatever job draining pocketjs_ui_turn does around it) has been timed.
-// Accumulates into a ~1s rolling window and logs "VMPROBE WINDOW ..." when
-// the window elapses -- never per frame, so the logging itself cannot
+// Collects the frame's raw samples and writes one "VMPROBE WINDOW ..." block
+// when the window closes -- never per frame, so the logging itself cannot
 // distort the timing it reports (sec.5's own requirement).
 //
-// jobs_this_frame and queue_peak_this_frame come from counters inside the
-// vendored quickjs.c (see quickjs-vmprobe.h) that increment on every
-// JS_EnqueueJob / JS_ExecutePendingJob call in the whole firmware, not just
-// this call site -- so they are exact regardless of which component (this
-// app's own loop, a Promise microtask, pocketjs_ui_qjs internally) is the
-// one draining the queue. What this file cannot isolate, because
-// pocketjs_ui_qjs's internal call to frame()+drain is opaque (a prebuilt
-// component, not vendored here), is drain time held apart from frame()'s
-// own time: turn_us below is their sum, honestly reported as one number
-// rather than a guessed split.
+// The job counters come from the vendored quickjs.c (see quickjs-vmprobe.h)
+// and increment on every JS_EnqueueJob / JS_ExecutePendingJob in the whole
+// firmware, not just at this call site, so they are exact regardless of who
+// drains the queue. turn_us is the whole of pocketjs_ui_turn(); frame() time
+// and drain time are taken separately from the vendored guest.c
+// (pocketjs_guest_vmprobe_take), so the UI core's tick and draw are what is
+// left over rather than a guessed split.
 void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us);
 
 // Called from pocket_api.c's pump, at the moment a completion's resolve/

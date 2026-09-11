@@ -63,6 +63,27 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
 
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
+/* VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare
+ * include: this header is also compiled on the host by tools/vmtest, where
+ * there is no sdkconfig.h. Absent config == probe off, the shipping default. */
+#if defined(__has_include)
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
+#else
+#include "sdkconfig.h"
+#endif
+
+#ifdef CONFIG_POCKET_VM_PROBE
+/** The split sec.5 asks for that main/pocket/vmprobe.c cannot take from
+ * outside: pocketjs_ui_turn() is frame() + drain + the UI core's tick and
+ * draw, and only guest.c sees the boundary between the first two. Both
+ * counters accumulate over every pocketjs_guest_frame() since the previous
+ * take (one per frame today) and are zeroed by it, so the caller reads
+ * "this frame's". Two clock reads per frame, not per job. */
+void pocketjs_guest_vmprobe_take(uint32_t *call_us, uint32_t *drain_us);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -12,6 +12,26 @@
 
 static const char *TAG = "pocketjs_guest";
 
+#ifdef CONFIG_POCKET_VM_PROBE
+/* VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5): frame() time and drain
+ * time, kept apart. main/pocket/vmprobe.c times the whole pocketjs_ui_turn(),
+ * which is frame() + drain + the UI core's tick and draw; sec.5 asks for drain
+ * time on its own and this is the only file that can see where drain starts.
+ * File scope, not a guest field: one guest runs at a time (sec.3 rule 1), and a
+ * field would change the struct layout between probe and shipping builds. */
+#include "esp_timer.h"
+static uint32_t vmprobe_call_us, vmprobe_drain_us;
+
+void pocketjs_guest_vmprobe_take(uint32_t *call_us, uint32_t *drain_us) {
+  if (call_us != NULL)
+    *call_us = vmprobe_call_us;
+  if (drain_us != NULL)
+    *drain_us = vmprobe_drain_us;
+  vmprobe_call_us = 0;
+  vmprobe_drain_us = 0;
+}
+#endif
+
 typedef union {
   size_t size;
   max_align_t alignment;
@@ -391,8 +411,17 @@ esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
       argument_count = 4;
     }
   }
+#ifdef CONFIG_POCKET_VM_PROBE
+  /* VM_PROBE: the clock is read around JS_Call and around drain_jobs only --
+   * the argument marshalling above and the free below stay inside neither, so
+   * the two numbers add up to less than the turn rather than more. */
+  const int64_t vmprobe_call_begin = esp_timer_get_time();
+#endif
   JSValue result = JS_Call(guest->context, guest->frame, JS_UNDEFINED,
                            argument_count, arguments);
+#ifdef CONFIG_POCKET_VM_PROBE
+  vmprobe_call_us += (uint32_t)(esp_timer_get_time() - vmprobe_call_begin);
+#endif
   for (int index = argument_count - 1; index >= 0; --index) {
     JS_FreeValue(guest->context, arguments[index]);
   }
@@ -404,7 +433,13 @@ esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
     return ESP_FAIL;
   }
   JS_FreeValue(guest->context, result);
+#ifdef CONFIG_POCKET_VM_PROBE
+  const int64_t vmprobe_drain_begin = esp_timer_get_time();
+#endif
   const esp_err_t jobs = drain_jobs(guest);
+#ifdef CONFIG_POCKET_VM_PROBE
+  vmprobe_drain_us += (uint32_t)(esp_timer_get_time() - vmprobe_drain_begin);
+#endif
   if (jobs != ESP_OK) {
     guest->frame_errors++;
   }

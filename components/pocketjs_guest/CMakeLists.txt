@@ -2,7 +2,10 @@ idf_component_register(
     SRCS "src/guest.c"
     INCLUDE_DIRS "include"
     REQUIRES quickjs-ng
-    PRIV_REQUIRES heap log
+    # esp_timer is for the VM_PROBE timing in guest.c only. It adds an include
+    # path and a link edge to a component the image already carries, so a
+    # probe-off build's bytes are unchanged (checked with tools/memlog.py).
+    PRIV_REQUIRES heap log esp_timer
     REQUIRED_IDF_TARGETS esp32p4 esp32s3
 )
 
