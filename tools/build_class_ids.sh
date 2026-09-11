@@ -4,7 +4,7 @@
 # under test is.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-QJS=managed_components/espressif__quickjs-ng/quickjs-ng
+QJS=components/quickjs-ng/quickjs-ng
 OUT=${OUT:-/tmp/test-class-ids}
 CACHE=${CACHE:-/tmp/qjs-host}
 mkdir -p "$CACHE"

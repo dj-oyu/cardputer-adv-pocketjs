@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 set(POCKETJS_SOURCE_DIR "${CMAKE_SOURCE_DIR}/.cache/pocketjs" CACHE PATH "Pinned PocketJS checkout")
-list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_SOURCE_DIR}/.cache/components/pocketjs_guest")
+# quickjs-ng and pocketjs_guest are vendored under components/ (default search
+# path, no EXTRA_COMPONENT_DIRS needed); only the UI bindings still build out
+# of the pinned .cache/pocketjs checkout.
 foreach(component pocketjs_ui_core pocketjs_ui_qjs pocketjs_render_rgb565)
     list(APPEND EXTRA_COMPONENT_DIRS "${POCKETJS_SOURCE_DIR}/hosts/esp-idf/components/${component}")
 endforeach()
