@@ -14,7 +14,6 @@
 #include "esp_app_desc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -26,8 +25,11 @@ static const char *TAG = "vmprobe";
 // each window's own min/median/max. That cannot produce an exact p95 over a
 // capture: a median of per-window medians is an estimate, and p95 is not
 // composable from per-window summaries at all. sec.5 asks for median AND p95
-// AND max, so the device now hands every individual sample to the host and
-// tools/vm_l0_capture.py computes all three exactly over the whole capture.
+// AND max, so the device hands every individual sample to the host, which
+// computes all three exactly over the whole capture. (The L0 capture script,
+// tools/vm_l0_capture.py, is retired along with the L0 workloads it drove --
+// `git checkout vm-L0 -- apps/vmprobe tools/vm_l0_capture.py` brings both
+// back. This file's sampling still runs, unattached, for any app.)
 //
 // The cost of being exact is bounded on both sides:
 //   * RAM: the arrays below, all of it in a probe build only (a shipping
@@ -72,17 +74,6 @@ static size_t   js_used_max, js_limit_last;
 static unsigned heap_free_min, heap_largest_min;
 static UBaseType_t stack_hw_min;
 
-// Set from the input task (main.c's usb_stroke), read on the ui task at
-// session start. Plain atomic: it is one word and the two tasks never need
-// more than "the last letter the host sent".
-static atomic_uint condition_mask;
-
-void vmprobe_condition_set(unsigned mask) {
-    atomic_store(&condition_mask, mask & VMPROBE_COND_ALL);
-    ESP_LOGI(TAG, "VMPROBE COND mask=%u", mask & VMPROBE_COND_ALL);
-}
-unsigned vmprobe_condition(void) { return atomic_load(&condition_mask); }
-
 static void window_reset(void) {
     frame_count = 0; lat_count = 0; lat_dropped = 0; qpeak_max = 0;
     js_used_max = 0; heap_free_min = 0; heap_largest_min = 0; stack_hw_min = 0;
@@ -117,10 +108,10 @@ static void flush_window(void) {
     static char line[VMPROBE_LINE];
     size_t at = 0;
     int n = snprintf(line, sizeof line,
-        "VMPROBE WINDOW seq=%u cond=%u ms=%u frames=%u lat_n=%u lat_drop=%u "
+        "VMPROBE WINDOW seq=%u ms=%u frames=%u lat_n=%u lat_drop=%u "
         "qpeak_max=%u heap_free_min=%u heap_largest_min=%u js_used_max=%u "
         "js_limit=%u stack_hw_min=%u flush_us=%u\n",
-        window_seq, vmprobe_condition(),
+        window_seq,
         (unsigned)((began - window_start_us) / 1000),
         frame_count, lat_count, lat_dropped, qpeak_max,
         heap_free_min, heap_largest_min, (unsigned)js_used_max,
@@ -142,7 +133,7 @@ void vmprobe_static_report(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
     ESP_LOGI(TAG,
         "VMPROBE STATIC engine=quickjs-ng-0.14.0+immutable-buffer-patch compiler=%s opt=%s "
-        "sizeof_jsvalue=%u sizeof_stackframe=%u sizeof_varref=%u fw=%s cond=%u",
+        "sizeof_jsvalue=%u sizeof_stackframe=%u sizeof_varref=%u fw=%s",
         __VERSION__,
 #if defined(__OPTIMIZE_SIZE__)
         "Os",
@@ -154,8 +145,7 @@ void vmprobe_static_report(void) {
         (unsigned)sizeof(JSValue),
         (unsigned)qjs_vmprobe_sizeof_stack_frame(),
         (unsigned)qjs_vmprobe_sizeof_var_ref(),
-        desc ? desc->version : "?",
-        vmprobe_condition());
+        desc ? desc->version : "?");
     jobs_executed_base = qjs_vmprobe_jobs_executed_get();
     (void)qjs_vmprobe_job_queue_peak_take();   // rebase before the first window
     window_seq = 0;
