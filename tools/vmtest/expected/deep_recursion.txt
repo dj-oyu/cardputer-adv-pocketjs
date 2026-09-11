@@ -1,0 +1,9 @@
+sum(1000) 500500
+mutual true true
+unwound 501 bottom
+overflow RangeError: Maximum call stack size exceeded
+depth>1000 true
+after 5050
+again true
+again-deep true
+exit=0

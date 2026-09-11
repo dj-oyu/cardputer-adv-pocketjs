@@ -1,0 +1,10 @@
+sync-end
+job-1
+Error: job-2-throws
+    at <anonymous> (job_throw.js:7:34)
+
+frame
+job-3 (runs in the frame-1 drain)
+E pocketjs_guest: Unhandled Promise rejection: Error: rejected-before-throw
+frame
+exit=2

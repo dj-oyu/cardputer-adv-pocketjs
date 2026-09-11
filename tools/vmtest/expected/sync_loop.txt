@@ -1,0 +1,11 @@
+for 562641396
+while 1656114700
+do 90896770
+labeled 1283659122
+for-in 2,10,b,a,c
+for-of 6189846
+hot 784002
+let-per-iter 01234
+var-shared 55555
+switch ab.b.d.ab.b.
+exit=0

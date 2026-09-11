@@ -1,0 +1,148 @@
+# tools/vmtest — VM 改造のホスト側判定基盤
+
+`docs/quickjs-freertos-vm-spec.md` の L1〜L5 は、すべてここで取った L0 の基準に対して判定する。§12「ホスト上の差分実行・sanitizer・対象機能の Test262 を使い、各レベルで既存の合格項目を維持する」の実体。
+
+- **コーパス**（`corpus/*.js` と `expected/*.txt`）: 出力がバイト単位で一致しなければ不合格。L1/L2 が守るべき意味論の基準。
+- **Test262 部分集合**（`test262-baseline.txt`）: L0 で通った (テスト, モード) の一覧。減ったら不合格、増えるのは構わない。
+- **割り当てトレース**: L2a のセグメント寸法を決めるための確保履歴（§7「標準セグメントサイズは L0 の使用量分布から決める」）。
+- **時間の基準**（`timing-baseline.txt`）: ホスト -O2 の中央値・p95・最大。**実測(host)** であり実機の数字ではない。
+
+すべて WSL で動かす（Windows 側に gcc は無い）。実機・シリアルポートには一切触れない。
+
+## コマンド
+
+```bash
+# WSL: cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs-vm
+bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る
+bash tools/vmtest/run.sh                       # コーパス（ASan+UBSan+LSan）
+bash tools/vmtest/run.sh --variant o2          # コーパス（-O2）
+bash tools/vmtest/run.sh --force-yield         # L1 以降: 全チェックポイントで yield させても出力が同じか
+bash tools/vmtest/run.sh --trace               # 同時に .cache/vmtest/traces/<name>.trace を書く
+python3 tools/vmtest/trace_stats.py .cache/vmtest/traces/closures.trace   # トレースの検証と要約
+python3 tools/vmtest/test262.py --fetch        # 固定 revision を .cache/test262 へ（初回のみ、約2分）
+python3 tools/vmtest/test262.py -j 8           # 部分集合を実行し基準と比較（ASan で約1分）
+python3 tools/vmtest/test262.py --variant o2 --force-yield -j 8
+python3 tools/vmtest/timing.py                 # 時間の計測（書き込みは --write）
+```
+
+生成物はすべて `.cache/vmtest/`（git 管理外）: `vmrun-{asan,o2}`、`obj-*/`、`actual-<variant>/<name>.{txt,raw,diff}`、`info-<variant>.txt`、`traces/`、`test262-results-<variant>.txt`。
+
+## vmrun
+
+`vmrun.c` は `components/pocketjs_guest/src/guest.c` の挙動を決める部分を**写したもの**で、作り直していない。
+
+| 項目 | ゲストと同じ点 |
+| --- | --- |
+| アロケータ | ブロック前にサイズヘッダ、`usable_size` は要求サイズ（malloc の実バケットではない）、realloc は常に malloc+copy+free。QuickJS は `malloc_size` を `usable_size` で数えるので、上限と GC 閾値が同じ論理サイズで効く |
+| 上限 | `JS_SetMemoryLimit(160 KiB)` / `JS_SetMaxStackSize(20 KiB)`（`main/app_session.c` の値）。割り込みハンドラも同様に常時 0 を返すものを入れる |
+| 初期化順 | `JS_NewRuntime2` → 上限 → rejection tracker → `js_std_init_handlers` → `JS_NewContext` → `js_std_add_helpers(ctx, 0, NULL)` |
+| `drain_jobs()` | キューが空になるまで実行し、その後で未処理 rejection を報告。ジョブ自体が例外を投げたら dump して即座に失敗を返し、残りのキューと報告は次の drain に回る |
+| 報告文言 | `E pocketjs_guest: Unhandled Promise rejection: <reason>`（ESP_LOGE の時刻部分を除いたもの） |
+
+意図した差分（すべて観測結果を変えないか、明示フラグ）:
+
+- eval の後、`frame` が無くても drain する。ゲストは `frame` が無いと `ESP_ERR_NOT_FOUND` で drain せずに返る。`--require-frame` でゲストと同じにする。
+- ヘッダにトレース用の連番を持つ。x86-64 の `max_align_t` は 32 B なので、`{size_t, uint64_t}` を足してもヘッダ長は変わらない。
+- `$262` は `--test262` の時だけ入れる。トレース時だけ GC 検出用のオブジェクトを 1 個作る（後述）。
+- ホストは 64 bit。`sizeof(JSValue)` はホスト 16 B・実機 8 B（NaN boxing）で、ポインタも倍。**同じプログラムでもホストの方が多く確保する**。`-m32` はこの WSL に multilib が無く使えなかった。
+
+終了コード: 0 正常、1 eval 中の未捕捉例外、2 ジョブの例外または未処理 rejection、3 引数・ファイルの誤り、4 ランタイム生成失敗。
+
+主なオプション: `--profile device|host`、`--heap-limit N[K|M]`、`--stack-limit N[K|M]`、`--frames N`（eval 後に `globalThis.frame()` を N 回、各回の後に drain）、`--fail-alloc N`（N 回目の確保試行を NULL にする。L2c の OOM 検証用）、`--time`、`--stats`、`--module`、`--strict`、`--include FILE`。
+
+### プロファイル
+
+| プロファイル | ヒープ | スタック | 用途 |
+| --- | --- | --- | --- |
+| `device`（vmrun の既定） | 160 KiB | 20 KiB | 実機の値そのもの。資源の振る舞い（OOM、GC、スタック溢れ）の確認 |
+| `host`（`run.sh` の既定） | 64 MiB | 7 MiB | 意味論の確認。上限に当たらないことが前提のコーパスと Test262 |
+
+空のプログラムでホストの `qjs_malloc_size` は 98,680 B（実測(host)、`--stats`）で、160 KiB の 6 割を占める。`device` プロファイルは**実機より余裕が少ない**。実機の空ランタイムの大きさは未計測。
+
+### FORCED-YIELD（L1 以降のためのフック、現状は未実装）
+
+`--force-yield` または環境変数 `VMTEST_FORCE_YIELD=1` を受け取ると、vmrun は弱シンボル
+
+```c
+void vmtest_vm_set_force_yield(JSRuntime *rt, int on);
+```
+
+が定義されていればそれを呼ぶ。L0 の VM には無いので `vmrun: note: force-yield requested; this VM has no checkpoint hook (L0), running unmodified` を出して普通に実行する（この行は diff から除外）。
+
+意図: L2 で opcode のチェックポイント（`docs/vm-ledger/04-opcode-checkpoints.md`）を実装したら、VM 側でこのシンボルを定義し、有効時は**すべての**チェックポイントで中断→ホストへ復帰→再開させる。`run.sh --force-yield` と `test262.py --force-yield` がそのまま「全地点で中断しても出力と合格集合が変わらない」の検査になる（§7 完了条件「各確認地点の直前・直後に中断要求を発生させ、命令や副作用の重複・欠落がない」）。L1 のジョブ単位の予算も同じ入口を使ってよい。VM の中身は L0 では変更していない。
+
+## コーパス
+
+`run.sh` はファイル先頭の `// vmrun-flags: ...` を `--profile host` の後ろに付ける（後勝ちなので上書きできる）。vmrun の終了コードを最終行 `exit=N` として出力に足し、これも diff 対象。`#info` で始まる行（計測値）と `vmrun: note:` 行は diff から外し、`info-<variant>.txt` に集める。cwd は `corpus/` で、ラベルとスタックトレースはファイル名だけになる。
+
+| ファイル | 固定しているもの |
+| --- | --- |
+| `sync_loop.js` | for/while/do/ラベル付き break・continue/for-in 順序/for-of/switch。後方分岐の全形 |
+| `deep_recursion.js` | 7 MiB スタックでの再帰、相互再帰、500 段の finally 巻き戻し、溢れが捕捉可能な RangeError であること、溢れ後の回復 |
+| `deep_recursion_device.js` | 同じことを 20 KiB で。組み込み関数（`map`）のネイティブフレームを跨ぐ溢れ |
+| `closures.js` | 生存中・切り離し後のフレームを共有するクロージャ、3 段の捕捉、sloppy の mapped arguments、generator/async の中断中フレームを捕捉したクロージャ、eval が作った変数の捕捉 |
+| `promise_chain.js` | 3000 段の then、2000 回の await ループ、500 段の reject 伝播、all/allSettled/race/any、ジョブが次のジョブを積み続ける drain、1 つの resolve への 200 本の反応 |
+| `microtask_order.js` | then/catch/finally/await/thenable/queueMicrotask の実行順（`frame()` から出力するので drain 完了後の順序そのもの） |
+| `generators.js` | next/return/throw、finally 内の yield で止まる return、未開始の generator、yield* の転送、再入禁止、async generator の要求キュー・for await・break・throw |
+| `try_finally.js` | 呼び出しを跨ぐ finally、finally による上書き、ループ中の break/continue、スタックトレース文字列（行:列を含む） |
+| `special_calls.js` | getter/setter、Proxy（trap 自体が Proxy のものを含む）、direct/indirect/strict eval、bound（new を含む）、constructor・派生クラス・new.target、apply/call/spread、タグ付きテンプレート、型変換コールバック |
+| `builtin_reentry.js` | sort の比較関数（安定性、例外、配列の変更、入れ子の sort）、反復系コールバック、JSON reviver/replacer/toJSON、replace 関数、Symbol.replace、RegExp サブクラスの exec |
+| `rejections.js` | 未処理のまま / 同じ drain 内で後から処理 / 次の frame で処理（既に報告済み）/ all に吸収 / 非 Error 値。報告の時点と順序 |
+| `job_throw.js` | ジョブが例外を投げた drain の早期復帰と、残りが次の drain に回ること |
+| `error_toplevel.js` | トップレベルの未捕捉例外。drain されずキューが残ること |
+| `memory_device.js` | 160 KiB 下での参照カウント解放、大きな単発確保の OOM が InternalError として捕捉でき回復すること |
+| `gc_threshold_device.js` | **現行設定の性質**: 循環ゴミが上限まで溜まること（後述） |
+| `bench_*.js` | 時間計測用。出力はチェックサムで、これも意味論の基準になる |
+
+**期待値の更新規則**: `run.sh --bless` は新しいファイルを足した時にだけ使う。既存の `expected/*.txt` を書き換えるのは、挙動の変更が意図されたもので理由を説明できる場合だけで、その変更だけの commit にする（§12「新たな失敗を期待値の書き換えだけで処理しない」）。
+
+## トレース形式
+
+`vmrun --trace OUT file.js`（`run.sh --trace` なら `.cache/vmtest/traces/<name>.trace`）。1 行 1 レコード、空白区切り。
+
+| 行 | 意味 |
+| --- | --- |
+| `+ <id> <size>` | malloc / calloc 成功。`<id>` は成功した確保の通し番号（1 から、realloc も番号を 1 つ使う）。ポインタではないので再生できる |
+| `- <id>` | free |
+| `~ <oldid> <newid> <newsize>` | realloc 成功。ゲストの realloc は常に別ブロックなので id が変わる |
+| `! <size>` | malloc / calloc がアロケータで失敗（`--fail-alloc`） |
+| `!~ <oldid> <newsize>` | realloc がアロケータで失敗。旧ブロックは生きたまま |
+| `# gc <live_bytes> <live_blocks>` | GC（`JS_RunGC`）の開始。その時点の生存量 |
+| `# vmtrace 1 file=... heap_limit=... stack_limit=... sizeof_JSValue=... sizeof_ptr=... header=...` | 先頭の見出し |
+| `# ready` / `# teardown` / `# end ...` | 評価開始前・破棄開始・終了。`# end` で生存 0 が正常 |
+
+`#` で始まる行はすべて注記で、再生では読み飛ばしてよい。サイズは QuickJS が要求したバイト数（ヘッダを含まない）で、**ホスト 64 bit の値**。
+
+注意:
+
+- `JS_SetMemoryLimit` による拒否は QuickJS がアロケータを呼ぶ前に行うので、トレースには現れない（`!` は `--fail-alloc` とホストの malloc 失敗だけ）。ゲストでも同じく `heap_caps_malloc` は呼ばれない。
+- GC の検出は VM を変更せずに行っている。`JS_RunGC` の最初の走査（`gc_decref`）は生存オブジェクト全部の class `gc_mark` を呼び、次の走査は別の mark 関数で呼ぶ。GC 観測用のクラスのオブジェクトを 1 個作り、最初に見た mark 関数で呼ばれた時だけ `# gc` を書く。このオブジェクトの確保 1 回（とクラス登録の分）がトレース時だけ増える。`JS_FreeRuntime` の最後の GC はこのオブジェクトを解放した後なので記録されない。
+- `trace_stats.py` は再生して整合（生きていない id の free が無い、id が単調増加、終了時に生存 0）を検査し、確保回数・ピーク生存量・サイズ分布（2 の冪ごと）を出す。
+
+## Test262
+
+- revision: `72faf8ec1445c55149615e8b35187830783aba1a`（2026-09-12 の main）。`test262.py` の `PINNED`。`--fetch` は `harness/` と対象ディレクトリだけを sparse checkout する。
+- 対象: `language/statements/{async-function,async-generator,generators,try,for-of}`、`language/expressions/{call,new,async-arrow-function,async-function,async-generator,await,yield,arrow-function}`、`language/eval-code/direct`、`built-ins/Promise`、`built-ins/Proxy/{apply,construct,get,set,has,revocable}`（JS へ再入する trap を選んだ標本）。4,099 ファイル。
+- 各ファイルを `onlyStrict` / `noStrict` / `raw` / `module` に従って sloppy と strict の両方（またはどちらか）で走らせる。`async` は `doneprintHandle.js` を足し `Test262:AsyncTestComplete` を待つ。`negative` はエラー名と、parse の場合は相（compile のみで失敗したか）を確かめる。`$262` は `global` / `evalScript` / `gc` / `detachArrayBuffer` / `createRealm` を持つ。`IsHTMLDDA`・`SharedArrayBuffer`・`Atomics` と `CanBlockIsTrue` は SKIP。
+- sync テストが意図的に未処理 rejection を残す場合（終了コード 2 で報告行だけ）は合格扱い。報告の時点はコーパスが見る。
+- L0 の結果（実測(host)、asan と o2 で同一、2 回実行で同一）: **7,501 pass / 194 fail / 0 skip**。失敗の内訳は未対応機能で、`Promise.allKeyed`/`allSettledKeyed`（174）、末尾呼び出し最適化（9）、`using`/`await using`（7）、`Promise.try` の一部（4）。
+
+## 時間の基準
+
+`timing-baseline.txt`。各ベンチを 30 回ずつ逐次に走らせ、vmrun の `#info time_ns`（eval + drain + frame、プロセス起動とランタイム生成を除く）の中央値・p95・最大・最小を ms で記録。**実測(host)**: Intel Core Ultra 7 258V、WSL、gcc 13.3 -O2。実機（Xtensa、-Os）の値について何も言わない。同じホスト・同じフラグで L0 と比べるためのもので、実行間のばらつき（p95 と中央値の差）より小さい差は結果と呼ばない。
+
+記録時の `quickjs.c` の sha1 は `271d718782c1`。これは作業ツリーの他作業による未コミットの VM_PROBE 追加を含むファイルで、`CONFIG_POCKET_VM_PROBE` 未定義のため該当部分はコンパイルされていない。
+
+## L0 で分かったこと
+
+いずれも実測(host)。実機の値ではない。
+
+- **再帰の深さ**（`#info max_depth`）: 7 MiB スタックで o2 11,187 段 / asan 6,370 段。実機と同じ 20 KiB の上限では o2 **29 段** / asan 16 段、`map` のコールバック経由では o2 11 段。ホストのフレームは Xtensa のフレームと大きさが違うので実機の段数は分からないが、実機の上限（`gc.stack_limit=20*1024`、ui タスクのスタックは 32 KiB）はホストの既定よりはるかに小さい。実機での段数は未計測。
+- **実機設定では循環ゴミが回収されない**: quickjs-ng の `malloc_gc_threshold` の初期値は 256 KiB（`quickjs.c` の `JS_NewRuntime2`）で、firmware はどこでも `JS_SetGCThreshold` を呼ばない。一方ゲストの上限は 160 KiB なので、自動の循環回収は上限より先に来ない。`gc_threshold_device.js` のトレースには `# gc` が 1 行も無く、2 オブジェクトの循環 265 個で OOM になる（host プロファイルでは `bench_alloc` で GC が 296 回走る）。上限超過で GC をやり直す経路も無い。実機で同じことが起きるかは未確認だが、閾値と上限の大小関係はコードで確定している。
+- **OOM 時の use-after-free（上流の不具合）**: 例外のバックトレースを組み立てる途中でヒープが尽きると、`build_backtrace()` の DynBuf が `js_dbuf_realloc` → `js_realloc` → `JS_ThrowOutOfMemory` を呼び、`JS_Throw` が現在の例外（= 組み立て中の `error_val`、借用参照）を解放し、続く `can_add_backtrace()` が解放済みオブジェクトを読む。ASan で検出（`known/oom_backtrace_uaf.js`、`vmrun-asan --profile device` で再現）。上限にじわじわ近づく OOM で起きうるので、実機でも起きる経路。o2 では何事もなく進むように見える。`known/oom_backtrace_uaf.js` は**1 バイトでも変えると再現しなくなることがある**（ソース長が残りの余裕を変える）。コーパスの OOM は余裕が残る単発の大きな確保に限った。`gc_threshold_device.js` もじわじわ型なので、L2 以降でこれが `build_backtrace` の ASan 報告で落ちたら、まずこの不具合を疑う。
+
+## ビルドの注意
+
+- ASan 版は QuickJS 自体も計装する（`tools/build_pocket_text_test.sh` は QuickJS を計装しない）。L1 以降で変わるのは `quickjs.c` だからで、変更した呼び出し経路の use-after-free を報告させるため。
+- `quickjs-vmprobe.h` は `__has_include("sdkconfig.h")` で分岐し、ホストでは `CONFIG_*` が未定義 = 出荷時の既定になる。`build.sh` が `.cache/vmtest/include/` に置く空の `sdkconfig.h` は、この分岐が入る前の名残で、なくても動く。
+- オブジェクトは `quickjs-ng/*.c`・`*.h`・`build.sh` のいずれかが新しければ作り直す。

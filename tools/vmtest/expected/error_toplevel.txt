@@ -1,0 +1,6 @@
+before
+SyntaxError: top-level 2,4
+    at thrower (error_toplevel.js:4:66)
+    at <eval> (error_toplevel.js:6:1)
+
+exit=1

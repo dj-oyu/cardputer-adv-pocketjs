@@ -1,0 +1,51 @@
+0 basic got 5
+1 b {"value":1,"done":false} {"value":10,"done":false} {"value":12,"done":true} {"done":true}
+2 r1 {"value":"a","done":false}
+3 guarded finally
+4 r2 {"value":"from-finally","done":false}
+5 after finally yield
+6 r3 {"value":"R","done":true}
+7 r4 {"done":true}
+8 guarded finally
+9 caught inside once
+10 t1 {"value":"wait","done":false}
+11 caught inside stop
+12 t2 {"value":"stopped","done":true}
+13 t3 {"done":true}
+14 ret-unstarted {"value":9,"done":true}
+15 throw-unstarted x
+16 inner got V
+17 inner caught E
+18 inner finally
+19 outer saw inner-ret
+20 d1 i1 i2 i-recovered o-last true
+21 inner finally
+22 d-return {"value":"early","done":true}
+23 plain return called
+24 no-throw-method TypeError
+25 reentry TypeError
+26 nums closed
+27 spread 1,2,3
+28 nums closed
+29 destructure 1
+30 nums closed
+31 ag queued {"value":1,"done":false}
+32 ag queued {"value":2,"done":false}
+33 ag queued {"value":3,"done":false}
+34 ag finally
+35 ag finally after await
+36 ag return {"value":"done","done":true}
+37 ag after {"done":true}
+38 ag finally
+39 ag finally after await
+40 for-await 6
+41 for-await-break-done
+42 ag finally
+43 ag finally after await
+44 ag finally
+45 ag finally after await
+46 ag throw into-ag
+47 rej got 1
+48 ag rejects ag-body
+49 for-await-sync xyz
+exit=0

@@ -1,0 +1,13 @@
+# vmtest timing baseline -- 実測(host), NOT device
+# date=2026-09-12 host=Omnibook cpu=Intel(R) Core(TM) Ultra 7 258V
+# gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0; vmrun-o2 (-O2 -g); quickjs.c sha1=271d718782c1; runs=30 each, sequential
+# time = vmrun '#info time_ns' (eval + drains + frames), ms
+benchmark             median       p95       max       min
+bench_alloc            25.01     26.78     30.12     23.93
+bench_calls            53.78     56.03     57.24     51.42
+bench_closure          22.47     27.97     28.24     21.53
+bench_generator        55.18     60.25     60.30     52.76
+bench_loop             53.03     58.22     59.08     49.89
+bench_promise         147.88    161.40    165.88    138.18
+bench_proxy            43.31     45.42     54.56     39.45
+bench_sort             18.99     20.65     28.01     18.23

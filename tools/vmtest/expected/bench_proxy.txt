@@ -1,0 +1,2 @@
+bench_proxy 840003 3392
+exit=0

@@ -1,0 +1,14 @@
+a-try | b-try | c-finally | b-catch from-c | b-finally | a-finally | top rethrown
+override finally-return finally try
+loop-finally 00 f f 02 f 10 f f 12 f f
+inner-finally | caught inner | outer-finally | final replaced
+finally-throw second
+through-native TypeError ctor
+at s2 (try_finally.js:53:28) / at s1 (try_finally.js:52:24) / at <eval> (try_finally.js:54:7)
+destructured-catch 7
+throw-undefined undefined
+completion 1 3
+optional-catch
+async-finally
+async-caught async-e
+exit=0

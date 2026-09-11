@@ -1,0 +1,13 @@
+sync-end
+all 1,2,3
+all-reject x
+allSettled fulfilled:1,rejected:no
+race fast
+any b
+any-agg AggregateError a,b
+fan-out 400
+reject-chain deep
+self-enqueue 1000
+await-loop 1999000
+then-chain 4501500
+exit=0

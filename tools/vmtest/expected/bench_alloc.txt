@@ -1,0 +1,2 @@
+bench_alloc 24600
+exit=0
