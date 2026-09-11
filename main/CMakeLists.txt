@@ -67,6 +67,8 @@ if(CONFIG_POCKET_VM_PROBE)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/vmprobe/promise_chain.js" TEXT)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/vmprobe/io_wait.js" TEXT)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/vmprobe/async_generator.js" TEXT)
+    # Not a workload: the contention conditions, evaluated on top of one.
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/vmprobe/condition.js" TEXT)
 endif()
 
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_mbedtls_add_tx_buffer" "-Wl,-u,__wrap_esp_mbedtls_add_tx_buffer")

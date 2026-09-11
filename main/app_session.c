@@ -50,6 +50,8 @@ extern const char vmp_closures_start[] asm("_binary_closures_js_start");
 extern const char vmp_promise_start[] asm("_binary_promise_chain_js_start");
 extern const char vmp_io_start[] asm("_binary_io_wait_js_start");
 extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
+// The contention conditions, applied on top of whichever workload is running.
+extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
 static pocketjs_guest_t *guest;
 static pocketjs_ui_core_t *core;
@@ -432,6 +434,28 @@ source_ready:;
     } else {
         TRY(pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js"));
     }
+#ifdef CONFIG_POCKET_VM_PROBE
+    // sec.5's fixed contention conditions, applied to an L0 workload only.
+    // Two evaluations rather than one concatenated source: the mask is a
+    // number the host chose at run time, and pocketjs_guest_eval() re-reads
+    // globalThis.frame after each one, which is what lets condition.js wrap
+    // the workload's frame() and have the wrapper actually be called.
+    //
+    // The condition script keeps its own failures to itself (it logs a VMCOND
+    // line and continues), so a Wi-Fi that will not link degrades the
+    // condition and is recorded, instead of ending the session.
+    if(test>='A'&&test<='F') {
+        unsigned mask=vmprobe_condition();
+        ESP_LOGI("app","VMCOND start mask=%u",mask);
+        if(mask) {
+            char select[32];
+            int n=snprintf(select,sizeof select,"globalThis.VMC=%u;",mask);
+            TRY(pocketjs_guest_eval(guest,select,(size_t)n,"vmcond-select.js"));
+            TRY(pocketjs_guest_eval(guest,vmp_cond_start,strlen(vmp_cond_start),
+                                    "condition.js"));
+        }
+    }
+#endif
     if(!overlay_session) {
         pocketjs_rgb565_renderer_config_t rc;
         pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;

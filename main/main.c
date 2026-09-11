@@ -21,6 +21,7 @@
 #include "pocket_bridge.h"
 #include "pocket_text.h"
 #include "scene_mem.h"
+#include "vmprobe.h"
 #include "sdkconfig.h"
 #include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
@@ -86,6 +87,15 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // workloads the same way '1'..'6' select the lifecycle diagnostics above
     // -- tools/vm_l0_capture.py drives these.
     if(c>='A'&&c<='F') { atomic_store(&diagnostic,c); return false; }
+    // The contention condition the NEXT workload runs under (sec.5's "fix the
+    // UI / audio / communication contention"): 'P' + mask, so 'P' is base and
+    // 'W' is all three. Sticky and separate from the workload letter, because
+    // one capture runs all six workloads under one condition. Taken from
+    // letters nothing else in this function reads: 'A'..'F' are the workloads,
+    // '1'..'9' the diagnostics, and the home screen's own keys are lower case.
+    if(c>='P'&&c<=(char)('P'+VMPROBE_COND_ALL)) {
+        vmprobe_condition_set((unsigned)(c-'P')); return false;
+    }
 #endif
     // The volume pair and '?', as TEXT rather than as nav, because that is what
     // the Cardputer's own keys produce and what volume_key() and an overlay
