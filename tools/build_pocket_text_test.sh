@@ -5,7 +5,7 @@
 # what decides whether a read of a freed session is reported.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-QJS=managed_components/espressif__quickjs-ng/quickjs-ng
+QJS=components/quickjs-ng/quickjs-ng
 OUT=${OUT:-/tmp/test-pocket-text}
 CACHE=${CACHE:-/tmp/qjs-host}
 mkdir -p "$CACHE"

@@ -1,0 +1,22 @@
+base-set 4 | base-get | child.v=8 | base-get | w-8
+set a | get f | get a | f=6 | has a | in=true | ownKeys | keys=a,f | delete a
+apply | called p! | construct true | {"made":"q"} | meta get
+revoked TypeError
+eval local,global,intro,undefined
+eval-new-function 42
+eval-nested 3
+bound B/1/9/8 B/1/2/3 bound who 2 1
+bound-new 10 20 true true
+class B>A:from-B B true B>A:from-B true
+ctor-return {"replaced":true} {"kept":true}
+derived-return-object {"notThis":1}
+derived-no-super ReferenceError
+class-call TypeError
+reflect-construct B
+apply 299 C/x// R/y/z/
+spread -1 600
+tagged a|b|\n#1,2#true true
+valueOf | sum=4 | toString | str=S | valueOf | cmp=true | hint number | hint string | hint default | prim=42,p,p
+getter-throw RangeError getter-boom
+toString function named(a) { return a; }
+exit=0

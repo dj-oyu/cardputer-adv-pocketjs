@@ -30,6 +30,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "vmprobe.h"
 #include <stdatomic.h>
 #include <string.h>
 
@@ -38,6 +39,20 @@ extern const char hello_end[] asm("_binary_main_js_end");
 // TEMPORARY: diagnostic 7 proves the legacy node guard fires.
 extern const char nodecap_start[] asm("_binary_nodecap_js_start");
 extern const char pet_start[] asm("_binary_pet_js_start");
+#ifdef CONFIG_POCKET_VM_PROBE
+// L0 workloads (docs/quickjs-freertos-vm-spec.md sec.5), embedded only when
+// this build turned CONFIG_POCKET_VM_PROBE on (main/CMakeLists.txt). Reached
+// over USB only -- test chars 'A'..'F' in main.c's usb_stroke() -- never
+// from the home screen's app list.
+extern const char vmp_sync_start[] asm("_binary_sync_loop_js_start");
+extern const char vmp_recur_start[] asm("_binary_deep_recursion_js_start");
+extern const char vmp_closures_start[] asm("_binary_closures_js_start");
+extern const char vmp_promise_start[] asm("_binary_promise_chain_js_start");
+extern const char vmp_io_start[] asm("_binary_io_wait_js_start");
+extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
+// The contention conditions, applied on top of whichever workload is running.
+extern const char vmp_cond_start[] asm("_binary_condition_js_start");
+#endif
 static pocketjs_guest_t *guest;
 static pocketjs_ui_core_t *core;
 static pocketjs_ui_qjs_t *binding;
@@ -197,6 +212,9 @@ void app_report(void) {
         (unsigned)stats.heap_used,frames);
 }
 void app_stop(void) {
+#ifdef CONFIG_POCKET_VM_PROBE
+    vmprobe_session_reset();
+#endif
     jsfont_detach();
     // Before the guest goes: the watches hold callbacks belonging to it, and a
     // promise still in flight holds its resolvers.
@@ -237,6 +255,11 @@ void app_stop(void) {
 }
 esp_err_t app_start_test(char test) {
     esp_err_t err;
+    // The USB diagnostics call this directly, so they are the one caller that
+    // has not set these three. Left over from the boot overlay, overlay_session
+    // skipped the test's source and its renderer, and the session died on its
+    // first tick with no error line -- every diagnostic run after boot did.
+    if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     atomic_store(&stop_requested,false); frames=0;
     deadline=esp_timer_get_time()+2000000;
     pocketjs_guest_config_t gc;
@@ -267,6 +290,9 @@ esp_err_t app_start_test(char test) {
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
+#ifdef CONFIG_POCKET_VM_PROBE
+    vmprobe_static_report();
+#endif
     TRY(pocketjs_guest_quickjs_install(guest,install_limits,NULL));
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
     jsconsole_clear();
@@ -366,6 +392,21 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+#ifdef CONFIG_POCKET_VM_PROBE
+        // L0 workloads (sec.5): real files under apps/vmprobe/ rather than
+        // inline strings like '1'..'6' above, because tools/vm_l0_capture.py
+        // wants named, reviewable sources and because their byte count is
+        // itself part of what L0 costs the guest heap. Only `source` is set:
+        // TEXT embeds are NUL-terminated, so the strlen() below is exact for
+        // them too, and that line stays the same instruction in a probe-off
+        // build (a `test<'A'` guard here once cost the off build 20 B flash).
+        case 'A': source=vmp_sync_start; break;
+        case 'B': source=vmp_recur_start; break;
+        case 'C': source=vmp_closures_start; break;
+        case 'D': source=vmp_promise_start; break;
+        case 'E': source=vmp_io_start; break;
+        case 'F': source=vmp_asyncgen_start; break;
+#endif
     }
     if(test)length=strlen(source);
     // Section 3's registration check, and the last thing before the app's own
@@ -393,6 +434,28 @@ source_ready:;
     } else {
         TRY(pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js"));
     }
+#ifdef CONFIG_POCKET_VM_PROBE
+    // sec.5's fixed contention conditions, applied to an L0 workload only.
+    // Two evaluations rather than one concatenated source: the mask is a
+    // number the host chose at run time, and pocketjs_guest_eval() re-reads
+    // globalThis.frame after each one, which is what lets condition.js wrap
+    // the workload's frame() and have the wrapper actually be called.
+    //
+    // The condition script keeps its own failures to itself (it logs a VMCOND
+    // line and continues), so a Wi-Fi that will not link degrades the
+    // condition and is recorded, instead of ending the session.
+    if(test>='A'&&test<='F') {
+        unsigned mask=vmprobe_condition();
+        ESP_LOGI("app","VMCOND start mask=%u",mask);
+        if(mask) {
+            char select[32];
+            int n=snprintf(select,sizeof select,"globalThis.VMC=%u;",mask);
+            TRY(pocketjs_guest_eval(guest,select,(size_t)n,"vmcond-select.js"));
+            TRY(pocketjs_guest_eval(guest,vmp_cond_start,strlen(vmp_cond_start),
+                                    "condition.js"));
+        }
+    }
+#endif
     if(!overlay_session) {
         pocketjs_rgb565_renderer_config_t rc;
         pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;
@@ -516,7 +579,13 @@ esp_err_t app_tick(uint32_t buttons) {
     // next to render_ms rather than hidden inside the frame period.
     int64_t turning=esp_timer_get_time();
     esp_err_t e=pocketjs_ui_turn(binding,&input,&frame);
-    turn_sum+=(double)(esp_timer_get_time()-turning); ticks++;
+    int64_t turn_us=esp_timer_get_time()-turning;
+    turn_sum+=(double)turn_us; ticks++;
+#ifdef CONFIG_POCKET_VM_PROBE
+    // turn_us is frame() plus whatever job draining pocketjs_ui_turn() does
+    // around it -- see vmprobe.h for why the two are not split further.
+    vmprobe_frame_sample(guest,turn_us);
+#endif
     if(e)return e;
     pocketjs_rgb565_damage_plan_t plan={.struct_size=sizeof(plan)};
     e=pocketjs_rgb565_prepare(renderer,target,&frame,&plan);if(e)return e;

@@ -1,0 +1,2 @@
+bench_closure 11869440
+exit=0

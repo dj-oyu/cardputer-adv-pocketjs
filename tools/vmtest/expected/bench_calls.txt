@@ -1,0 +1,2 @@
+bench_calls 832040
+exit=0

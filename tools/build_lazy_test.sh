@@ -5,8 +5,8 @@
 #   wsl -e bash -lc "cd tools && ./build_lazy_test.sh && ./test_lazy_namespace"
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-qjs="$here/../managed_components/espressif__quickjs-ng/quickjs-ng"
-[ -d "$qjs" ] || { echo "quickjs-ng not found; run tools/prepare_dependencies.py" >&2; exit 1; }
+qjs="$here/../components/quickjs-ng/quickjs-ng"
+[ -d "$qjs" ] || { echo "quickjs-ng not found at $qjs (vendored, should always be present)" >&2; exit 1; }
 
 # One object per source, cached, because quickjs.c alone is close to a minute.
 out="$here/.lazytest"

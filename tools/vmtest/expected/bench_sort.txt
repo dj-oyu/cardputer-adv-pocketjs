@@ -1,0 +1,2 @@
+bench_sort 0 99968 160981
+exit=0

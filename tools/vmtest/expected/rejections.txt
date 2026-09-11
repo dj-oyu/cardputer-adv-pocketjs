@@ -1,0 +1,13 @@
+sync-end
+all-caught inner
+caught-late handled-same-drain
+E pocketjs_guest: Unhandled Promise rejection: Error: never-handled
+E pocketjs_guest: Unhandled Promise rejection: Error: handled-next-frame
+E pocketjs_guest: Unhandled Promise rejection: 42
+E pocketjs_guest: Unhandled Promise rejection: TypeError: async-dropped
+E pocketjs_guest: Unhandled Promise rejection: RangeError: chain-end
+frame 1
+frame-caught handled-next-frame
+E pocketjs_guest: Unhandled Promise rejection: Error: from-frame-1
+frame 2
+exit=2

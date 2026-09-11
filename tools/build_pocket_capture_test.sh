@@ -9,7 +9,7 @@
 # clock, both in the test file itself.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-QJS=managed_components/espressif__quickjs-ng/quickjs-ng
+QJS=components/quickjs-ng/quickjs-ng
 OUT=${OUT:-/tmp/test-pocket-capture}
 CACHE=${CACHE:-/tmp/qjs-host}
 mkdir -p "$CACHE"

@@ -3,6 +3,8 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "vmprobe.h"
+#include <assert.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -343,6 +345,18 @@ typedef struct {
     const char *stop_code;      // NULL until the host asked the work to stop
     const pocket_promise_ops_t *ops;
     void       *user;
+#ifdef CONFIG_POCKET_VM_PROBE
+    // VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5): when pocket_api_complete()
+    // last wrote `done`, so pocket_api_pump() can report how long the
+    // completion sat here before its resolve/reject actually ran. Absent
+    // from a normal build's struct layout entirely. 32 bits, not 64:
+    // pocket_api_complete() is promised lock-free and ISR-safe, and on Xtensa
+    // a 64-bit atomic store is IDF's libc helper behind a spinlock critical
+    // section (esp_libc/priv_include/esp_stdatomic.h). The low 32 bits of the
+    // microsecond clock wrap every ~71 min; an unsigned difference is exact
+    // for any latency shorter than that.
+    atomic_uint_least32_t done_us;
+#endif
 } pocket_promise_t;
 
 static pocket_promise_t promises[POCKET_MAX_PROMISES];
@@ -442,6 +456,11 @@ void pocket_api_complete(pocket_request_t request, int32_t status) {
     pocket_promise_t *p=promise_of(request);
     if(!p) return;
     atomic_store(&p->status,status);
+#ifdef CONFIG_POCKET_VM_PROBE
+    // Before `done`: pump() only trusts done_us once it has seen done==request,
+    // so this has to be visible first, not after.
+    atomic_store(&p->done_us,(uint32_t)esp_timer_get_time());
+#endif
     // Written last: the pump reads the number first and only then trusts the
     // status beside it.
     atomic_store(&p->done,request);
@@ -476,6 +495,12 @@ void pocket_api_pump(void) {
         uint32_t request=atomic_load(&p->request);
         if(!request || !p->armed) continue;
         if(atomic_load(&p->done)==request) {
+#ifdef CONFIG_POCKET_VM_PROBE
+            // A fresh clock read, not the pump's `now`: a completion posted
+            // after `now` was taken would come out negative.
+            vmprobe_completion_sample((int64_t)(uint32_t)
+                ((uint32_t)esp_timer_get_time()-atomic_load(&p->done_us)));
+#endif
             bool    rejected=false;
             JSValue value=p->ops->settle(p->ctx,p->user,atomic_load(&p->status),
                                          p->stop_code,&rejected);
@@ -490,7 +515,24 @@ void pocket_api_pump(void) {
     }
 }
 
+// Every static that pocket_api_class_ready() has filled in, so the end of a
+// session can clear them (see pocket_api.h). Twelve owners exist today; the
+// assert is for the surface that adds the seventeenth, not for runtime input.
+static JSRuntime **class_owners[16];
+static unsigned class_owner_count;
+
+bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id) {
+    if(*owner==rt) return true;      // already registered in this runtime
+    *id=0;                           // and this one's counter decides the id
+    *owner=rt;
+    for(unsigned i=0;i<class_owner_count;i++) if(class_owners[i]==owner) return false;
+    assert(class_owner_count<sizeof(class_owners)/sizeof(class_owners[0]));
+    class_owners[class_owner_count++]=owner;
+    return false;
+}
+
 void pocket_api_reset(void) {
+    for(unsigned i=0;i<class_owner_count;i++) *class_owners[i]=NULL;
     for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
         pocket_promise_t *p=&promises[i];
         if(!atomic_load(&p->request)) continue;

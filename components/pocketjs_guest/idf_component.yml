@@ -1,0 +1,13 @@
+version: "0.1.0"
+description: Caller-driven QuickJS guest for PocketJS on ESP-IDF
+license: MIT
+repository: https://github.com/pocket-stack/pocketjs
+documentation: https://pocketjs.dev/docs/esp-idf/#guest
+targets:
+  - esp32p4
+  - esp32s3
+# quickjs-ng is vendored locally at components/quickjs-ng and matched by
+# CMakeLists.txt's REQUIRES on plain component name -- no component-manager
+# dependency entry (that would fetch espressif/quickjs-ng from the registry).
+dependencies:
+  idf: ">=6.0,<6.2"

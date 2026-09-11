@@ -1,7 +1,7 @@
 dependencies:
   pocket-stack/pocketjs_guest:
     version: "0.1.0"
-    override_path: "../.cache/components/pocketjs_guest"
+    override_path: "../components/pocketjs_guest"
   pocket-stack/pocketjs_ui_core:
     version: "0.1.0"
     override_path: "../.cache/pocketjs/hosts/esp-idf/components/pocketjs_ui_core"

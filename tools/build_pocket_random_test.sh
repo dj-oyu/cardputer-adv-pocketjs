@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-QJS=managed_components/espressif__quickjs-ng/quickjs-ng
+QJS=components/quickjs-ng/quickjs-ng
 CACHE=${CACHE:-/tmp/qjs-host}
 mkdir -p "$CACHE"
 for f in dtoa libregexp libunicode quickjs; do
