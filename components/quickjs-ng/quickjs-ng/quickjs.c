@@ -47,6 +47,10 @@
 #include "quickjs.h"
 #include "libregexp.h"
 #include "dtoa.h"
+// VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5): declares the handful of
+// accessors this file defines under #ifdef CONFIG_POCKET_VM_PROBE below.
+// Not an upstream file -- see its own header comment.
+#include "quickjs-vmprobe.h"
 
 #if defined(EMSCRIPTEN) || defined(_MSC_VER)
 #define DIRECT_DISPATCH  0
@@ -423,6 +427,20 @@ typedef struct JSVarRef {
         }; /* used when is_detached = false */
     };
 } JSVarRef;
+
+// ---------------------------------------------------------------------------
+// VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5, L0). JSStackFrame and
+// JSVarRef are private to this translation unit -- main/pocket/vmprobe.c has
+// no other way to learn their size -- so this accessor pair is the entire
+// reason to touch quickjs.c for that measurement. Compiles to nothing with
+// CONFIG_POCKET_VM_PROBE off: no symbol, no field, no behavior change. Keep
+// every VM_PROBE addition in this file behind the same guard and comment
+// marker so a future upstream re-vendor only has to find and reapply these.
+#ifdef CONFIG_POCKET_VM_PROBE
+size_t qjs_vmprobe_sizeof_stack_frame(void) { return sizeof(JSStackFrame); }
+size_t qjs_vmprobe_sizeof_var_ref(void) { return sizeof(JSVarRef); }
+#endif
+// --- end VM_PROBE ---
 
 typedef struct JSRefCountHeader {
     int ref_count;
@@ -2134,6 +2152,30 @@ void JS_SetSharedArrayBufferFunctions(JSRuntime *rt,
     rt->sab_funcs = *sf;
 }
 
+// --- VM_PROBE: job queue depth (docs/quickjs-freertos-vm-spec.md sec.5) ---
+// job_list is a plain list_head with no length field, and "max pending queue
+// length" is one of the L0 measurements, so this pair of counters is the
+// probe. One JSRuntime runs at a time in this firmware (sec.3 rule 1), so a
+// file-scope counter -- not a per-runtime field -- is enough and adds no
+// struct layout risk. Compiles to nothing with CONFIG_POCKET_VM_PROBE off.
+#ifdef CONFIG_POCKET_VM_PROBE
+static size_t qjs_vmprobe_job_queue_len;
+static size_t qjs_vmprobe_job_queue_peak;
+static uint64_t qjs_vmprobe_jobs_executed;
+
+size_t qjs_vmprobe_job_queue_len_get(void) { return qjs_vmprobe_job_queue_len; }
+// Returns the peak queue depth observed since the previous call and rebases
+// the peak to the current depth, so a caller polling once a frame gets "the
+// worst this frame saw" rather than "the worst ever".
+size_t qjs_vmprobe_job_queue_peak_take(void) {
+    size_t peak = qjs_vmprobe_job_queue_peak;
+    qjs_vmprobe_job_queue_peak = qjs_vmprobe_job_queue_len;
+    return peak;
+}
+uint64_t qjs_vmprobe_jobs_executed_get(void) { return qjs_vmprobe_jobs_executed; }
+#endif
+// --- end VM_PROBE ---
+
 /* return 0 if OK, < 0 if exception */
 int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
                   int argc, JSValueConst *argv)
@@ -2155,6 +2197,10 @@ int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
         e->argv[i] = js_dup(argv[i]);
     }
     list_add_tail(&e->link, &rt->job_list);
+#ifdef CONFIG_POCKET_VM_PROBE
+    if (++qjs_vmprobe_job_queue_len > qjs_vmprobe_job_queue_peak)
+        qjs_vmprobe_job_queue_peak = qjs_vmprobe_job_queue_len;
+#endif
     return 0;
 }
 
@@ -2188,6 +2234,12 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
     /* get the first pending job and execute it */
     e = list_entry(rt->job_list.next, JSJobEntry, link);
     list_del(&e->link);
+#ifdef CONFIG_POCKET_VM_PROBE
+    // VM_PROBE: see the counter pair above JS_EnqueueJob. Counted here,
+    // before job_func can enqueue more work and re-enter this function.
+    --qjs_vmprobe_job_queue_len;
+    ++qjs_vmprobe_jobs_executed;
+#endif
     ctx = e->ctx;
     res = e->job_func(e->ctx, e->argc, vc(e->argv));
     for (i = 0; i < e->argc; i++) {
@@ -2305,6 +2357,13 @@ void JS_FreeRuntime(JSRuntime *rt)
             JS_FreeValueRT(rt, e->argv[i]);
         }
         js_free_rt(rt, e);
+#ifdef CONFIG_POCKET_VM_PROBE
+        // VM_PROBE: jobs discarded unrun (an app stopped with its queue
+        // non-empty, e.g. USB diagnostic '6') leave the queue here, not via
+        // JS_ExecutePendingJob; without this the depth counter keeps them
+        // forever and every later session's qpeak is inflated by that many.
+        --qjs_vmprobe_job_queue_len;
+#endif
     }
     init_list_head(&rt->job_list);
 
