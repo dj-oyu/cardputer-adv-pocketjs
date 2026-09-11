@@ -1,13 +1,14 @@
 # VM L0 報告（phase 0 / `vm/p0-foundation`）
 
-対象: [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) §5（L0）と、L1/L2 の判断材料。2026-09-12 時点、HEAD `d9ef1f9` + 未コミットの L0 作業。
+対象: [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) §5（L0）と、L1/L2 の判断材料。2026-09-12 時点。
 
-**実機ではまだ何も測っていない。** 書き込みもシリアルポートも使っていない。以下の数値は、ビルド成果物の静的な値（実測(build)）、WSL 上のホスト実行の値（実測(host)）、コード読解の結果、推定、のいずれかで、それぞれ明記する。
+数値は、実機の値（実測(device)、§2.1）、ビルド成果物の静的な値（実測(build)）、WSL 上のホスト実行の値（実測(host)）、コード読解の結果、推定、のいずれかで、それぞれ明記する。
 
 要点:
 
 - quickjs-ng とゲストのリポジトリへの取り込みは完了し、コミット済み。ファームの DIRAM はバイト単位で変わらない。
-- 計測プローブ（既定で無効）、ホストの判定基盤、アロケータ比較、台帳 6 本が揃った。**実機の値が無いので、L0 の完了条件はまだ満たしていない。**
+- 計測プローブ（既定で無効）、ホストの判定基盤、アロケータ比較、台帳 6 本が揃い、実機で 6 本のワークロードを採取した（§2.1）。**p95 と競合条件（UI・音声・Wi-Fi）の固定が無いので、L0 の完了条件はまだ満たしていない。**
+- 実機の採取の途中で、`main` にもある起動直後のクラッシュ 2 件を見つけて直した（`40f8261`。§2.1）。
 - L2 について最も重要な事実: **既存の async/generator 機構はフレームのデータをヒープへ移すだけで、C の再帰は取り除かない。** 「C スタックを JS の深さから切り離す」には、call 系 opcode と `done:` の構造を新しく作る必要がある。
 
 ## 1. できたこと
@@ -15,12 +16,12 @@
 | 項目 | 状態 | ファイル |
 | --- | --- | --- |
 | quickjs-ng 0.14.0 とゲストの取り込み | コミット済み（`10f5185` 無改変の取り込み → `6de51f4` immutable-buffer パッチ → `d9ef1f9` リンク先の切り替え） | `components/quickjs-ng/`、`components/pocketjs_guest/` |
-| L0 プローブ（`CONFIG_POCKET_VM_PROBE`、既定 n） | 未コミット | [main/Kconfig.projbuild](../main/Kconfig.projbuild)、[sdkconfig.vmprobe.defaults](../sdkconfig.vmprobe.defaults)、[main/pocket/vmprobe.c](../main/pocket/vmprobe.c) / `.h`、`quickjs.c` の `VM_PROBE` ブロック 4 つ + [quickjs-vmprobe.h](../components/quickjs-ng/quickjs-ng/quickjs-vmprobe.h)、`app_session.c` / `main.c` / `pocket_api.c` / `main/CMakeLists.txt` の `#ifdef` 部分 |
-| 実機用ワークロード 6 本（USB の `A`〜`F` だけで起動し、ホームの一覧には出ない） | 未コミット | [apps/vmprobe/](../apps/vmprobe/) |
-| 実機の採取スクリプト | 未コミット | [tools/vm_l0_capture.py](../tools/vm_l0_capture.py) |
-| ホストの判定基盤（guest.c を写した vmrun、コーパス 23 本、Test262 部分集合、時間の基準、確保トレース、`--force-yield` の入口） | 未コミット | [tools/vmtest/](../tools/vmtest/)（手順は [README](../tools/vmtest/README.md)） |
-| アロケータ比較（IDF の tlsf 実物 / estalloc / naive） | 未コミット | [tools/vmalloc/](../tools/vmalloc/) |
-| 台帳 | 未コミット | [vm-ledger/01〜06](vm-ledger/) |
+| L0 プローブ（`CONFIG_POCKET_VM_PROBE`、既定 n） | コミット済み | [main/Kconfig.projbuild](../main/Kconfig.projbuild)、[sdkconfig.vmprobe.defaults](../sdkconfig.vmprobe.defaults)、[main/pocket/vmprobe.c](../main/pocket/vmprobe.c) / `.h`、`quickjs.c` の `VM_PROBE` ブロック 4 つ + [quickjs-vmprobe.h](../components/quickjs-ng/quickjs-ng/quickjs-vmprobe.h)、`app_session.c` / `main.c` / `pocket_api.c` / `main/CMakeLists.txt` の `#ifdef` 部分 |
+| 実機用ワークロード 6 本（USB の `A`〜`F` だけで起動し、ホームの一覧には出ない） | コミット済み | [apps/vmprobe/](../apps/vmprobe/) |
+| 実機の採取スクリプト | コミット済み | [tools/vm_l0_capture.py](../tools/vm_l0_capture.py) |
+| ホストの判定基盤（guest.c を写した vmrun、コーパス 23 本、Test262 部分集合、時間の基準、確保トレース、`--force-yield` の入口） | コミット済み | [tools/vmtest/](../tools/vmtest/)（手順は [README](../tools/vmtest/README.md)） |
+| アロケータ比較（IDF の tlsf 実物 / estalloc / naive） | コミット済み | [tools/vmalloc/](../tools/vmalloc/) |
+| 台帳 | コミット済み | [vm-ledger/01〜06](vm-ledger/) |
 
 取り込みで挙動が変わっていないことの根拠:
 
@@ -73,11 +74,38 @@ bash tools/vmalloc/build.sh && bash tools/vmalloc/run_all.sh   # トレース採
 - estalloc の `est_calloc` には乗算オーバーフローの検査が無い。サイズ上限の検査は `assert` 頼み。
 - 「160 KiB プールの最大空きブロック」は、今日の taffy の確保可否とは別の量。ゲストは専用プールを持たず、共有ヒープから確保している。
 
-## 3. 実機で測る手順（ユーザーが実行する）
+## 2.1 実機の基準値（実測(device)、2026-09-12）
+
+`build_vm_probe`（`40f8261`）を COM3 の実機に書き込み、`tools/vm_l0_capture.py` で各 15 秒採取した。生データは `.cache/vm/l0.jsonl`（git 管理外）。無線はリンクしていない。UI・音声との競合条件は固定していない。
+
+`VMPROBE STATIC`: `sizeof(JSValue)`=8、`sizeof(JSStackFrame)`=48、`sizeof(JSVarRef)`=32、`-Os`、gcc 15.2.0。仕様 §11 の仮置き（JSValue 8 B、フレーム 32〜64 B）と合う。
+
+| ワークロード | frame 中央値 / 最大（ms） | jobs/frame | qpeak | 最大空きブロック | 空きヒープ | js_used |
+| --- | --- | --- | --- | --- | --- | --- |
+| A sync_loop（20,000 回の算術ループ） | 118.07 / 118.87 | 0 | 0 | 67,584 | 110,032 | 85,748 |
+| B deep_recursion（上限の 3/4 まで再帰） | 0.66 / 1.70 | 0 | 0 | 67,584 | 109,240 | 86,348 |
+| C closures | 51.67 / 53.05 | 0 | 0 | 67,584 | 109,248 | 86,407 |
+| D promise_chain | 11.84 / 13.53 | 41 | 1 | **43,008** | 109,328 | 86,320 |
+| E io_wait | 1.54 / 2.18 | 2 | 1 | 65,536 | 107,088 | 87,941 |
+| F async_generator | 32.17 / 34.17 | 62 | 1 | 65,536 | 108,520 | 86,965 |
+
+読み方:
+
+- `frame` は `pocketjs_ui_turn` 全体（`frame()`、drain、UI の tick と draw）。窓の中央値は最大 48 標本の近似。
+- E の `lat`（完了の記録から resolve/reject を呼ぶまで）は 0.07 ms（最大 0.09 ms）。L1 で減らす対象は、この後ろの「resolve から JS ハンドラが走るまで」で、今のプローブでは測れない。
+- **qpeak は全ワークロードで 1。** ジョブは 1 件ずつ積まれて即座に消費されており、キューの長さは溜まっていない。drain 1 回の件数（41、62）が L1 の件数予算の元になる。
+- **最大空きブロックは D で 43,008 B まで下がった。** taffy の 2 段目（29,648 B）は入るが、3 段目（59,296 B）は D の最中には入らない（他は 65,536〜67,584 B で入る）。
+- `stack_hw`（ui_task の残りスタックの起動以来の最小値）は B のあと 8,396 B、別起動の E・F では 23,788 B。B の再帰が ui_task の C スタックを約 15 KiB 使った（差からの推定）。
+- A の 118 ms は 1 反復あたり約 5.9 µs（推定。UI の tick と draw を含む）。L2 で確認地点を足したときの性能低下の比較元。
+
+採取の途中で見つけた不具合（どちらも `main` に同じコードがある。`40f8261` で直した）:
+
+1. **起動時のオーバーレイのあとに USB 診断を起動すると再起動する。** `pocket_api_class_ready()` が runtime のポインタで登録済みかを判定しており、次のセッションの runtime が同じアドレスに確保されると、未登録のクラス ID で `JS_SetClassProto` が assert する（`class_id < class_count`）。
+2. **同じ条件で、診断のセッションが最初の tick で黙って終わる。** 起動時のオーバーレイが立てた `overlay_session` が残り、診断のソースとレンダラが用意されない。
+
+## 3. 実機で測る手順
 
 実機はプローブ入りのファームに書き換わる。このファームで変わるのは、USB の `A`〜`F` と `VMPROBE` のログ行が加わることだけ。
-
-**`build_vm_probe/cardputer_pocketjs.bin` は 04:29 のもので、レビューの修正より前の古いファーム。そのまま書き込まないこと。** 下の `flash` コマンドがビルドし直してから書き込む。
 
 ```powershell
 . 'C:\Espressif\tools\Microsoft.v6.0.1.PowerShell_profile.ps1'
