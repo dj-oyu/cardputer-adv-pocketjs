@@ -43935,7 +43935,7 @@ static int js_typed_array_get_length_unsafe(JSContext *ctx, JSValueConst obj)
 
 static JSValue js_typed_array___speciesCreate(JSContext *ctx,
                                               JSValueConst this_val,
-                                              int argc, JSValueConst *argv);
+                                              int argc, JSValueConst *argv, bool writable);
 
 static JSValue js_array_every(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv, int special)
@@ -43995,7 +43995,7 @@ static JSValue js_array_every(JSContext *ctx, JSValueConst this_val,
     case special_map | special_TA:
         args[0] = obj;
         args[1] = js_int32(len);
-        ret = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args);
+        ret = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args, true);
         if (JS_IsException(ret)) {
             goto exception;
         }
@@ -44080,7 +44080,7 @@ done:
         JSValue arr;
         args[0] = obj;
         args[1] = js_int32(n);
-        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args);
+        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args, true);
         if (JS_IsException(arr)) {
             goto exception;
         }
@@ -60870,7 +60870,7 @@ fail:
 
 static JSValue js_typed_array___speciesCreate(JSContext *ctx,
                                               JSValueConst this_val,
-                                              int argc, JSValueConst *argv)
+                                              int argc, JSValueConst *argv, bool writable)
 {
     JSValueConst obj;
     JSObject *p;
@@ -60894,7 +60894,12 @@ static JSValue js_typed_array___speciesCreate(JSContext *ctx,
         ret = js_typed_array_create(ctx, ctor, argc1, argv + 1);
         JS_FreeValue(ctx, ctor);
     }
-    return ret;
+    if (writable && !JS_IsException(ret) &&
+      typed_array_is_immutable(JS_VALUE_GET_OBJ(ret))) {
+    JS_FreeValue(ctx, ret);
+    return JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
+  }
+  return ret;
 }
 
 static JSValue js_typed_array_from(JSContext *ctx, JSValueConst this_val,
@@ -61668,7 +61673,10 @@ static JSValue js_typed_array_reverse(JSContext *ctx, JSValueConst this_val,
     if (len < 0) {
         return JS_EXCEPTION;
     }
-    if (len > 0) {
+    if (typed_array_is_immutable(JS_VALUE_GET_OBJ(this_val))) {
+    return JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
+  }
+  if (len > 0) {
         p = JS_VALUE_GET_OBJ(this_val);
         switch (typed_array_size_log2(p->class_id)) {
         case 0: {
@@ -61769,7 +61777,7 @@ static JSValue js_typed_array_slice(JSContext *ctx, JSValueConst this_val,
 
     args[0] = this_val;
     args[1] = js_int32(count);
-    arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args);
+    arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args, true);
     if (JS_IsException(arr)) {
         goto exception;
     }
@@ -61869,7 +61877,7 @@ range_error:
     if (ta->track_rab && JS_IsUndefined(argv[1])) {
         args[3] = JS_UNDEFINED;
     }
-    arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 4, args);
+    arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 4, args, false);
     JS_FreeValue(ctx, ta_buffer);
     return arr;
 exception:
