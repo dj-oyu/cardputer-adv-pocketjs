@@ -1,5 +1,7 @@
 #pragma once
+#include "../pocket/random_stream.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 // Midges in the shaft. Fourteen of them, and the number is the point: enough to
 // read as a swarm, few enough that the eye can follow one.
@@ -366,6 +368,10 @@ typedef struct {
     int sun,phase,breath;
     int spread,slant; // slowly changing main-light geometry
     unsigned seed;
+    pocket_random_t decor_rng; // zero keeps direct/preview rendering deterministic
+    unsigned decor_seed[4];
+    uint8_t decor_cycle[4];
+    bool decor_ready;
     GardenMote mote[GARDEN_MOTES];
     uint8_t born,died;  /* this frame's events */
 #if GARDEN_MOTE_INDEX
@@ -373,6 +379,8 @@ typedef struct {
 #endif
 } GardenFrame;
 void garden_prepare(GardenFrame *frame,float time);
+// Enable independently seeded decorative-ray births; call before prepare.
+void garden_random_init(GardenFrame *frame,uint32_t seed);
 void garden_prepare_layout(GardenFrame *frame,float time,unsigned old_seed,unsigned new_seed,unsigned mix);
 void garden_row(uint16_t *row,int y,const GardenFrame *frame);
 // Blend only vegetation layouts; light, fog and swarm are rendered once.

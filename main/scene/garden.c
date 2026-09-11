@@ -669,19 +669,38 @@ static int garden_layout_shape(unsigned seed,int component) {
     int range=component==1?5:8;
     return (int)(h%(unsigned)(range*2+1))-range;
 }
+void garden_random_init(GardenFrame *f,uint32_t seed) {
+    pocket_random_init(&f->decor_rng,seed);
+    f->decor_ready=false;
+}
+static void garden_decor_prepare(GardenFrame *f) {
+    if(!f->decor_rng.state)return;
+    for(int slot=0;slot<4;slot++) {
+        unsigned cycle=(((unsigned)f->phase+(unsigned)slot*4317u)&65535u)>>14;
+        if(!f->decor_ready||f->decor_cycle[slot]!=cycle) {
+            f->decor_seed[slot]=pocket_random_next(&f->decor_rng);
+            f->decor_cycle[slot]=(uint8_t)cycle;
+        }
+    }
+    f->decor_ready=true;
+}
 void garden_prepare_layout(GardenFrame *f,float time,unsigned old_seed,unsigned new_seed,unsigned mix) {
     // Fractional advection avoids whole-pixel jumps. All noise is periodic at
     // this wrap, including wind, so long-running animation has no reset seam.
     f->phase=(int)(fmodf(fmaxf(time,0),128.0f)*512);
-    f->sun=(garden_motion((unsigned)f->phase,83)-128)/24;
-    f->breath=(garden_motion((unsigned)f->phase,193)-128)/24;
+    garden_decor_prepare(f);
+    // Keep the four-second weather cadence; increase displacement instead of
+    // speeding it up. The same cloud field opens/closes the main light volume.
+    int opening=garden_motion((unsigned)f->phase,193)-128;
+    f->sun=(garden_motion((unsigned)f->phase,83)-128)/12;
+    f->breath=opening/24;
     if(mix>256)mix=256;
     int shape[3];
     for(int i=0;i<3;i++) {
         int a=garden_layout_shape(old_seed,i),b=garden_layout_shape(new_seed,i);
         shape[i]=(a*(int)(256-mix)+b*(int)mix)/256;
     }
-    f->sun+=shape[0];f->spread=shape[1];f->slant=shape[2];
+    f->sun+=shape[0];f->spread=shape[1]+opening/20;f->slant=shape[2];
     f->seed=new_seed;
 #if GARDEN_NO_MOTES
     // The whole feature, gone: no motion, no index, no touch-up. Nothing else
@@ -1356,11 +1375,11 @@ static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
 #endif
 typedef struct { unsigned seed,phase,tick; int side,slope,radius,fade; } GardenDecor;
 // Four opportunities, not four permanent beams. Every opportunity gets a new
-// opening, angle and lifetime only while invisible. Stateless and periodic.
-static GardenDecor garden_decor(unsigned phase,int slot) {
+// opening, angle and lifetime only while invisible. The seed is cached at
+// prepare time; drawing strips never advances the random stream.
+static GardenDecor garden_decor_seeded(unsigned phase,int slot,unsigned h) {
     unsigned p=(phase+(unsigned)slot*4317u)&65535u;
     unsigned tick=p&16383u;
-    unsigned h=garden_hash((p>>14)+1709u+(unsigned)slot*313u);
     GardenDecor d={.seed=h,.phase=phase,.tick=tick,
         .side=(h&2u)?1:-1,.radius=18+(int)((h>>8)&7u)};
     unsigned life=9216u+((h>>12)&4095u); // 18..26 seconds, then a dark gap
@@ -1369,6 +1388,10 @@ static GardenDecor garden_decor(unsigned phase,int slot) {
     d.fade=garden_smooth((int)(edge<2048u?edge/8u:255u));
     d.slope=d.side>0?24+(int)((h>>17)&63u):336+(int)((h>>17)&95u);
     return d;
+}
+static GardenDecor garden_decor(unsigned phase,int slot) {
+    unsigned p=(phase+(unsigned)slot*4317u)&65535u;
+    return garden_decor_seeded(phase,slot,garden_hash((p>>14)+1709u+(unsigned)slot*313u));
 }
 // Q8 soft volume profile, with zero slope at both the axis and the edge.
 static int garden_decor_profile(int distance,int inv) {
@@ -1407,7 +1430,9 @@ static void __attribute__((unused))
 garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
     int center,half;garden_shaft(y,f,&center,&half);
     for(int layer=0;layer<4;layer++) {
-        GardenDecor decor=garden_decor((unsigned)f->phase,layer);
+        GardenDecor decor=f->decor_ready
+            ?garden_decor_seeded((unsigned)f->phase,layer,f->decor_seed[layer])
+            :garden_decor((unsigned)f->phase,layer);
         if(!decor.fade)continue;
         int end=70+(int)((decor.seed>>24)&31u);
         if(y>=end)continue;

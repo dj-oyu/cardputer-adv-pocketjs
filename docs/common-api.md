@@ -348,6 +348,46 @@ BMI270は6軸なので磁気方位・絶対yawを返さない。実装してい�
 
 電池ADCから電圧は取得候補だが、校正・電池曲線がない状態で残量%を推測表示しない。充電検出も取得経路がなければnull。keepAwakeは期限付きで、終了時に自動解除。deep sleep、シャットダウン、時刻設定はアプリの直接操作ではなくホスト設定画面へ委譲する。
 
+### 8.1 乱数・seed（実装済み、2026-09-10）
+
+演出・ゲーム向けの共通乱数は、**起動ごとの変化を与えるseed取得**と、**seedから再現可能な列を作る軽量PRNG**を分ける。native共通APIと以下のJS公開面を実装し、flowerに導入した。音声・ゲームも独立したstreamを作って利用できる。既存の `Math.random()` の挙動は変更しない。
+
+```ts
+pocket.random.seed(): number; // ホスト由来のuint32。暗号用途の品質は保証しない
+pocket.random.create(seed: number): RandomStream;
+type RandomStream = {
+  nextUint32(): number; // 0以上4294967295以下の整数
+  nextFloat(): number;  // 0以上1未満
+};
+```
+
+- `seed()` はESP32-S3では `esp_random()` を利用する。値の一意性や毎回異なる値は保証しない。主な呼び出し時点はアプリ／シーンの初期化で、描画の各ピクセルや毎フレームのノイズ評価には使わない。
+- `create(seed)` は有限の整数 `0..4294967295` のみ受け付け、それ以外は `INVALID_ARGUMENT`。seed省略や暗黙の整数化は行わない。毎回変えたい場合は `create(pocket.random.seed())`、再現したい場合は保存したseedを渡す。
+- 各streamは独立した状態を持つ。flower、音声、ゲーム間で共有のグローバル乱数列を消費しない。同じseedと同じ呼び出し順なら、native／JSとも同じ結果を返す。他のstreamの生成・消費やWi-Fiの状態に左右されない。
+- 初版の列は `xorshift32-v1` とする。32bit符号なし状態 `x` に順に `x ^= x << 13`、`x ^= x >> 17`、`x ^= x << 5` を適用し、更新した値を返す。右シフトは論理シフト、各演算は32bitで切り詰める。seedが0なら初期状態を `0x6D2B79F5` に置き換えるため、この2つのseedは同じ列になる。アルゴリズムを黙って差し替えない。
+- `nextFloat()` は `nextUint32()` を1回消費し、その上位24bitを `16777216` で割る。nativeの単精度floatでもJSと同じ値を表せる。いずれの取得も生成後のメモリ確保・ハードウェアRNG呼び出し・I/O待ちを行わない。
+- JSのstreamはアプリのセッション内で所有し、終了時に解放する。再開後も列を再現したい場合はseedと呼び出し順をアプリ側で管理する。内部状態の保存／復元APIは初版の対象外。
+
+**nativeの責務と描画負荷。** ハードウェア依存のseed取得を共通層に閉じ込め、呼び出し側所有の状態構造体に対する初期化・uint32取得・float取得を提供する。描画側が直接 `esp_random.h` に依存する構成にはしない。seed取得は連続呼び出し時に待ちが入るため、低頻度に限定する。PRNGは整数のシフト・XOR中心で追加のバッファを必要としないが、FPSへの影響は導入時に実測する。
+
+flowerでは配置・ray誕生時の寿命・幅・演出選択などの離散的な抽選にstreamを使う。光の移ろいは現在の時間・空間的につながったノイズで補間し、画素ごとに独立乱数を引く方式へ置き換えない。共通層は乱数列を提供し、天候の流れやノイズの滑らかさは描画側が設計する。
+
+**エントロピーの扱い。** ESP32-S3のハードウェアRNGでも、真性乱数の条件はWi-Fi/BluetoothのRF有効時、または内部エントロピー源有効時などに限られる。このAPIは無線停止時も演出用seedとして利用するが、暗号鍵・認証token・暗号nonce用には公開しない。乱数のために無線やADCのエントロピー源を自動で有効化せず、既存のADC・音声・無線利用へ干渉させない。[ESP-IDF v6.0.1 ESP32-S3 RNG仕様](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-reference/system/random.html)
+
+`random.seed` と `random.stream` をcapabilityとして登録し、S3版はsupported／availableともtrue。`pocket.random` は最初の参照で構築する。ハードウェアRNGを持たない移植先のseed供給方式は移植時に明示し、供給できない場合は `random.seed` をunsupportedとする。固定seedのstreamは独立して提供できる。
+
+native公開面は `main/pocket/random_stream.h` の `pocket_random_seed()`、`pocket_random_init(&rng, seed)`、`pocket_random_next(&rng)`、`pocket_random_float(&rng)`。`pocket_random_t` は4バイトで、初期化後は呼び出し側が所有し、同じstreamを複数タスクから同時に更新しない。ホストの描画テスト用seed取得は固定値で、エントロピー供給を模擬しない。
+
+flowerは初回利用時にハードウェアseedを1回取得し、花の選択・背景配置・補助ray用に列を分ける。補助rayの抽選結果はフレームに保持し、各slotの32秒周期境界で不可視の間に更新する。主光・霧の滑らかな128秒周期は維持しつつ、補助rayの抽選列は128秒で巻き戻さない。背景時計を花の時計から分離し、花の時計が折り返しても補助rayが途中で跳ばないようにした。追加の背景状態は28バイト。画素ごとの乱数取得や追加描画パスはない。実機FPSの比較は未実施。
+
+```js
+const rng = pocket.random.create(pocket.random.seed());
+const chance = rng.nextFloat();
+const replay = pocket.random.create(12345); // 保存したseedなら同じ列
+```
+
+検証: `tools/test_random.c` で既知の列・zero seed・float範囲と精度を確認。`tools/build_pocket_random_test.sh` は実QuickJSとASan／UBSanで入力検証・capability・30セッションの生成と解放を確認する。`tools/test_garden_random.c` は3周期の誕生更新が不可視の間に行われること、同一seedの再現性、128秒後に列が繰り返さないこと、描画による状態変更がないことを確認する。既存のgarden／装飾ray／背景遷移／flowerテストも通過した。実機での見た目・FPSと無線稼働条件別の確認は別途行う。
+
 ## 9. 音声・マイク・IR
 
 ```ts
@@ -894,7 +934,7 @@ p.app.start({
 
 | 段階 | 実装する公開機能 | 現行コードとの接続／条件 |
 | --- | --- | --- |
-| A: 共通土台 | error、capabilities、session、cancel、lifecycle、input action、基本UI、time、cue | app_session / main / shell / sound。保存・停止・キューの既知課題を先に解消 |
+| A: 共通土台 | error、capabilities、session、cancel、lifecycle、input action、基本UI、time、cue、random | app_session / main / shell / sound。保存・停止・キューの既知課題を先に解消。randomはnative共通層を先行し、JS公開は8.1節に従う |
 | B: 作る・残す | storage、TextSession、workspace、ログ、動的日本語表示 | srcstore / editor / codeedit / jsconsole / jsfont。教材をユーザー領域から分離 |
 | C: 本体を使う | IMU、電池、tone、IR、SD、外部I/O | motion / board / 新規ドライバー。共有バスと電源断の検証 |
 | D: PC接続 | USB bridge、分割転送、ログ、停止、実行 | 診断USBと新protocolを分離。PCアダプターは別コンポーネント |
@@ -914,6 +954,7 @@ p.app.start({
 7. IMUの軸・単位・静止値・時刻・欠落数を実機確認。マイク取得時と停止後の表示・資源解放を確認する。
 8. Wi-Fiのみ、BLEのみ、両方、TLS接続中、フォント再構築中のRAM最小値／最大連続領域／stack／FPS／入力遅延をcommit・profile付きで記録する。成立しない組合せはavailableに反映する。
 9. PC切断・再接続・重複要求・不完全な作品転送で既存作品が変わらない。別アプリの保存領域・許可外の接続先・予約ピンへアクセスできない。
+10. randomは固定seedの既知の列をnative／JSで照合し、seed=0、最大値、不正入力、floatの範囲、stream間の独立性を確認する。無線停止／稼働中ともseedを取得でき、stream消費中にハードウェアRNG呼び出しや確保が発生しない。flower導入前後のFPSとフレーム時間を同条件で比較する。
 
 ## 18. 根拠と今後決めること
 

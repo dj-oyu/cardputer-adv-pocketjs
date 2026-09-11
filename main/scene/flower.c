@@ -1,6 +1,7 @@
 #include "flower_parts.h"
 #include "scene_mem.h"
 #include "garden.h"
+#include "../pocket/random_stream.h"
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -291,17 +292,17 @@ static float bloom_elapsed;              // seconds the current SHOT has been up
 static int bloom_view;                   // which of FLOWER_SHOTS is framed
 static flower_species_t bloom_species=FLOWER_VALLEY;
 
-// xorshift32, seeded by a constant. Deterministic on purpose: the host test
-// drives the same sequence the device does, which is the only way to assert
-// that the botanical collection comes up and every swap is hidden. A per-boot seed
-// would buy unpredictability nobody asked for and cost the test its evidence.
-static uint32_t bloom_rng=0x9e3779b9u;
+// Independent streams: changing botanical draws cannot change the weather.
+// Host seed acquisition is fixed; the device acquires a seed once at first use.
+static pocket_random_t bloom_rng,bloom_layout_rng;
+static uint32_t bloom_weather_seed;
+static float bloom_weather_time;
+static bool bloom_random_ready;
 static uint32_t bloom_garden_seed,bloom_garden_old_seed;
 static unsigned bloom_garden_mix=256;
 #define FLOWER_GARDEN_FADE_S 3.0f
 static uint32_t bloom_random(void) {
-    bloom_rng^=bloom_rng<<13; bloom_rng^=bloom_rng>>17; bloom_rng^=bloom_rng<<5;
-    return bloom_rng;
+    return pocket_random_next(&bloom_rng);
 }
 // One of the other botanicals, so a draw never repeats the plant already up:
 // a rotation that shows the same flower twice looks like it has stopped.
@@ -469,6 +470,19 @@ unsigned flower_grain_frame;
 void flower_prepare_rotating(float dt,int tilt_x,int tilt_y) {
     if(!isfinite(dt)||dt<0)dt=0;
     dt=fminf(dt,.1f);
+    if(!bloom_random_ready) {
+        pocket_random_t root;
+        pocket_random_init(&root,pocket_random_seed());
+        // Domain tags avoid starting the consumers one adjacent PRNG step apart.
+        pocket_random_init(&bloom_rng,pocket_random_next(&root)^0xA511E9B3u);
+        pocket_random_init(&bloom_layout_rng,pocket_random_next(&root)^0x63D83595u);
+        bloom_weather_seed=pocket_random_next(&root)^0xB5297A4Du;
+        bloom_garden_seed=bloom_garden_old_seed=pocket_random_next(&bloom_layout_rng);
+        bloom_random_ready=true;
+    }
+    // The garden's own 128-second phase wrap is seamless. Do not use the
+    // botanical clock, which wraps at 120*pi and jumps midway through a ray.
+    bloom_weather_time=fmodf(bloom_weather_time+dt,128.0f);
     bloom_elapsed+=dt;
     grain_frame++;                       /* the grain moves with the frame */
 #if FLOWER_HORROR
@@ -488,7 +502,7 @@ void flower_prepare_rotating(float dt,int tilt_x,int tilt_y) {
                 bloom_view=0;
                 bloom_species=bloom_next(bloom_species);
                 bloom_garden_old_seed=bloom_garden_seed;
-                bloom_garden_seed=bloom_rng;
+                bloom_garden_seed=pocket_random_next(&bloom_layout_rng);
             }
             bloom_elapsed=0;
         }
@@ -557,11 +571,20 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
     petals=(Petal*)m;
     depth=(float*)(m+sizeof(Petal)*MAX_PARTS);
     seed_map=(uint8_t*)(depth+FW);
+    GardenFrame *garden=(GardenFrame*)(seed_map+32*32);
+    if(view_pending&&(rebuild||!garden->decor_rng.state))
+        garden_random_init(garden,bloom_weather_seed);
+    else if(!view_pending) {
+        // Direct species rendering is the deterministic preview API, including
+        // when the shared block last held a live rotating scene.
+        garden->decor_rng.state=0;
+        garden->decor_ready=false;
+    }
 #ifdef ESP_PLATFORM
     PROF_FENCE;uint32_t q0=esp_cpu_get_cycle_count();PROF_FENCE;
 #endif
     if(view_pending)
-        garden_prepare_layout((GardenFrame*)(seed_map+32*32),elapsed,
+        garden_prepare_layout((GardenFrame*)(seed_map+32*32),bloom_weather_time,
             bloom_garden_old_seed,bloom_garden_seed,bloom_garden_mix);
     else garden_prepare((GardenFrame*)(seed_map+32*32),elapsed);
     // The spiral and the bell profile are cached in that block, so they are as

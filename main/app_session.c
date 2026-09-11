@@ -9,6 +9,7 @@
 #include "jsconsole.h"
 #include "jsfont.h"
 #include "pocket_api.h"
+#include "pocket_random.h"
 #include "pocket_storage.h"
 #include "pocket_fs.h"
 #include "pocket_imu.h"
@@ -272,6 +273,7 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"jsfont",jsfont_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"random",pocket_random_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
     // 3.1: an overlay's default capability set is NARROWER than a foreground
     // app's, because it runs while nobody is looking at it. The narrowing is
