@@ -67,6 +67,10 @@
 
 ### 再現コマンド
 
+**L0完了後、`apps/vmprobe/` と `tools/vm_l0_capture.py` は削除済み**（タグ `vm-L0`）。以下の
+`cd apps/vmprobe` 以降の5本は、`git checkout vm-L0 -- apps/vmprobe` で復元しないと動かない。
+表A〜Dの数値そのものはこのファイルにすでに書いてあるので、再測定が要らない限り復元は不要。
+
 ```bash
 # WSLから、/mnt/c/devs/m5stack/cardputer-adv-pocketjs-vm で
 bash tools/vmtest/build.sh all

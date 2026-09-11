@@ -8,3 +8,9 @@
 *.h text eol=lf
 *.json text eol=lf
 *.sh text eol=lf
+
+# The host VM harness compares program output byte for byte, and it runs under
+# WSL against a Windows checkout: expected output and the recorded baselines
+# must stay LF or every case "fails" on the line endings alone.
+tools/vmtest/expected/*.txt text eol=lf
+tools/vmtest/*.txt text eol=lf

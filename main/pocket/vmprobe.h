@@ -27,30 +27,11 @@
 extern "C" {
 #endif
 
-// The fixed contention conditions sec.5's completion condition asks for
-// ("UI・音声・通信との競合条件、入力データ、反復数を固定"). A bit mask rather
-// than a list of named conditions, so base / ui / audio / wifi / all and every
-// other combination are one mechanism: the host selects one with a single USB
-// byte ('P' + mask, main.c's usb_stroke) before starting a workload, and
-// app_session.c hands the mask to apps/vmprobe/condition.js, evaluated after
-// the workload's own source. What each bit starts is in that file and in
-// apps/vmprobe/README.md.
-#define VMPROBE_COND_UI    1u
-#define VMPROBE_COND_AUDIO 2u
-#define VMPROBE_COND_WIFI  4u
-#define VMPROBE_COND_ALL   7u
-
-// Set from the input task, read on the ui task when a session starts. Sticky:
-// it stays until the host sends another letter, so a capture script sets the
-// condition once and runs all six workloads under it.
-void vmprobe_condition_set(unsigned mask);
-unsigned vmprobe_condition(void);
-
 // Logged at every guest start (app_start_test(), right after the guest
 // exists): engine revision, compiler, optimization level and the struct
 // sizes sec.5 asks for. All of it is a build-time fact; it repeats per
-// session so tools/vm_l0_capture.py sees one at the head of each workload.
-// Also rebases the window and the job counters for the new session.
+// session so a capture sees one at the head of each app run. Also rebases
+// the window and the job counters for the new session.
 void vmprobe_static_report(void);
 
 // Called once per app_tick() frame, after the JS turn (frame() call plus

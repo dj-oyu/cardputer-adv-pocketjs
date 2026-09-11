@@ -17,11 +17,11 @@ menu "Pocket VM (L0 measurement probes)"
                 sizeof(JSStackFrame)/sizeof(JSVarRef) (private to that file)
                 and a job-queue depth counter around JS_EnqueueJob /
                 JS_ExecutePendingJob.
-              - six USB-only diagnostic workloads under apps/vmprobe/,
-                reachable only over the serial diagnostic channel (letters
-                A-F), never from the home screen's app list -- so turning
-                this off leaves tools/test_settings.py and
-                tools/capture_home.py's press counts untouched.
+            The six USB-only L0 workloads that used to live under apps/vmprobe/
+            (letters A-F) were retired once L0 finished (tag vm-L0);
+            `git checkout vm-L0 -- apps/vmprobe tools/vm_l0_capture.py`
+            brings them back for a re-measurement. With this on, the probe
+            above now samples whatever app is actually running.
             Build a separate build_* directory with this on -- and give that
             directory its OWN sdkconfig file (-D SDKCONFIG=<dir>/sdkconfig;
             see sdkconfig.vmprobe.defaults), because ESP-IDF's default
