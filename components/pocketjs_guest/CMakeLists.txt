@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "src/guest.c"
+    SRCS "src/guest.c" "src/vm_sched.c" "src/vm_clock.c"
     INCLUDE_DIRS "include"
     REQUIRES quickjs-ng
     # esp_timer is for the VM_PROBE timing in guest.c only. It adds an include

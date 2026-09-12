@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "pocketjs/vm_sched.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,6 +40,12 @@ typedef struct {
   uint32_t jobs;
   size_t heap_used;
   size_t heap_limit;
+  /* L1 (docs/vm-L1-design.md). struct_size guards the ABI: a caller built
+   * against the shorter struct asks for the shorter struct and gets it. */
+  uint32_t yields;         /* drains cut by the budget */
+  uint32_t continuations;  /* turns that began by finishing a previous drain */
+  bool jobs_pending;       /* the last drain ended with the queue non-empty */
+  bool jobs_dropped;       /* jobs were queued when the session ended */
 } pocketjs_guest_stats_t;
 
 void pocketjs_guest_config_defaults(pocketjs_guest_config_t *config);
@@ -53,6 +60,27 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
 /** Call globalThis.frame(...) once and drain every pending Promise job. */
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame);
+
+/** Arm this turn's job budget (docs/vm-L1-design.md sec.1.3). NULL, or a
+ * budget with limit_us <= 0, restores the pre-L1 "drain until empty"
+ * behaviour exactly. Call once per turn, before any call into the guest. */
+void pocketjs_guest_budget(pocketjs_guest_t *guest, const vm_budget_t *budget);
+
+/** True when the last drain stopped on the budget with jobs still queued.
+ * The host must finish them with pocketjs_guest_continue() at the top of the
+ * next turn, BEFORE delivering anything new into JavaScript (sec.2.1). */
+bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest);
+
+/** Continue the drain the budget cut. Same queue, same order, no frame() and
+ * no new host events in between: this is the rest of one logical drain. */
+esp_err_t pocketjs_guest_continue(pocketjs_guest_t *guest);
+
+/** Install the host's interrupt predicate (sec.5.3). QuickJS has ONE handler
+ * slot and three callers used to overwrite one another; the registration now
+ * lives in the guest and the host swaps only the predicate. NULL restores the
+ * guest's own epoch-based handler. Returns 1 to interrupt, like QuickJS. */
+void pocketjs_guest_set_watchdog(pocketjs_guest_t *guest, int (*fn)(void *),
+                                 void *opaque);
 
 /** Ask the current or next JavaScript turn to stop through QuickJS's handler.
  * This is the only guest API that may be called outside the owner task. */

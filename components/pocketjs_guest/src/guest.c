@@ -1,5 +1,6 @@
 #include "pocketjs/guest.h"
 #include "pocketjs/guest_quickjs.h"
+#include "pocketjs/vm_sched.h"
 
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -62,6 +63,21 @@ struct pocketjs_guest {
   uint32_t frames;
   uint32_t frame_errors;
   uint32_t jobs;
+  /* L1 (docs/vm-L1-design.md). The budget is armed by the host once per turn
+   * and read by every drain in that turn, so the frame()'s drain and the next
+   * turn's continuation drain share one deadline measured from turn start. */
+  vm_budget_t budget;
+  bool jobs_pending;
+  uint32_t yields;
+  uint32_t continuations;
+  /* One bit, not a count: counting what JS_FreeRuntime discards would need a
+   * hook in JS_EnqueueJob, which is a VM change L1 is not allowed to make. */
+  bool jobs_dropped;
+  /* sec.5.3: JS_SetInterruptHandler has a single slot and three callers used
+   * to overwrite each other. The registration stays here; the host swaps the
+   * predicate instead. NULL means the guest's own epoch handler. */
+  int (*watchdog)(void *);
+  void *watchdog_opaque;
 };
 
 static void *guest_malloc(void *opaque, size_t size) {
@@ -139,6 +155,12 @@ static int guest_interrupt(JSRuntime *runtime, void *opaque) {
   pocketjs_guest_t *guest = opaque;
   if (guest == NULL)
     return 0;
+  /* sec.5.3: one registration, a swappable predicate. The host's watchdog (the
+   * 250 ms deadline, or the stop hook's 200 ms one) answers for the whole turn
+   * when it is installed; the epoch handler below is what is left when nobody
+   * has claimed the slot. */
+  if (guest->watchdog != NULL)
+    return guest->watchdog(guest->watchdog_opaque);
   const unsigned int requested =
       atomic_load_explicit(&guest->interrupt_epoch, memory_order_relaxed);
   if (requested == guest->handled_interrupt_epoch)
@@ -176,18 +198,11 @@ static void promise_rejection(JSContext *context, JSValueConst promise,
   *slot = entry;
 }
 
-static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
-  JSContext *context = NULL;
-  int result = 0;
-  while ((result = JS_ExecutePendingJob(guest->runtime, &context)) > 0) {
-    guest->jobs++;
-  }
-  if (result < 0) {
-    if (context != NULL) {
-      js_std_dump_error(context);
-    }
-    return ESP_FAIL;
-  }
+/* The report point, sec.3.1: only at a boundary where the queue actually went
+ * empty. Reporting at a budget boundary would call a rejection unhandled that
+ * a catch two jobs later in the SAME logical drain is about to handle --
+ * rejections.js case 2 is exactly that shape. */
+static esp_err_t report_rejections(pocketjs_guest_t *guest) {
   bool failed = guest->rejection_tracking_failed;
   guest->rejection_tracking_failed = false;
   size_t pending = 0;
@@ -212,6 +227,32 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
     free(entry);
   }
   return failed ? ESP_FAIL : ESP_OK;
+}
+
+/* One pass of the drain under whatever budget the host armed. With an
+ * unlimited budget (limit_us <= 0, backstop 0 -- what the Kconfig switch off
+ * produces) the loop cannot yield, so this is byte-for-byte the pre-L1
+ * behaviour: drain to empty, then report. */
+static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
+  JSContext *context = NULL;
+  unsigned ran = 0;
+  const vm_drain_status_t status =
+      vm_sched_drain(guest->runtime, &guest->budget, &ran, &context);
+  guest->jobs += ran;
+  guest->jobs_pending = (status == VM_DRAIN_YIELDED);
+  if (status == VM_DRAIN_THREW) {
+    if (context != NULL) {
+      js_std_dump_error(context);
+    }
+    return ESP_FAIL;
+  }
+  if (status == VM_DRAIN_YIELDED) {
+    guest->yields++;
+    /* Not a failure: nothing was dropped and nothing threw. The caller runs
+     * its native work and comes back through pocketjs_guest_continue(). */
+    return ESP_OK;
+  }
+  return report_rejections(guest);
 }
 
 void pocketjs_guest_config_defaults(pocketjs_guest_config_t *config) {
@@ -242,6 +283,10 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
   guest->heap_limit = config->heap_limit;
   guest->prefer_psram = config->prefer_psram;
   atomic_init(&guest->interrupt_epoch, 0U);
+  /* Unlimited until a host arms a turn. Evaluation is not a turn: the source
+   * is parsed once, before any frame, and cutting its drain would leave an app
+   * half-initialised before it ever ran. */
+  vm_budget_begin(&guest->budget, 0);
   guest->runtime = JS_NewRuntime2(&GUEST_ALLOCATOR, guest);
   if (guest->runtime == NULL) {
     pocketjs_guest_destroy(guest);
@@ -446,6 +491,42 @@ esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
   return jobs;
 }
 
+/* L1 sec.1.3: one budget per turn, armed by the host, shared by the frame()'s
+ * drain and by every continuation drain of the same turn. Copied rather than
+ * aliased -- the host's struct is a stack local of app_tick(). */
+void pocketjs_guest_budget(pocketjs_guest_t *guest, const vm_budget_t *budget) {
+  if (guest == NULL)
+    return;
+  if (budget != NULL)
+    guest->budget = *budget;
+  else
+    vm_budget_begin(&guest->budget, 0);
+}
+
+bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest) {
+  return guest != NULL && guest->jobs_pending;
+}
+
+/* The continuation drain of sec.2.1. It is the SAME drain as the one the
+ * budget cut: no host code has called into JS between the two, so the job
+ * order the guest observes is the order the pre-L1 single drain produced. */
+esp_err_t pocketjs_guest_continue(pocketjs_guest_t *guest) {
+  if (guest == NULL || guest->context == NULL)
+    return ESP_ERR_INVALID_STATE;
+  if (!guest->jobs_pending)
+    return ESP_OK;
+  guest->continuations++;
+  return drain_jobs(guest);
+}
+
+void pocketjs_guest_set_watchdog(pocketjs_guest_t *guest, int (*fn)(void *),
+                                 void *opaque) {
+  if (guest == NULL)
+    return;
+  guest->watchdog = fn;
+  guest->watchdog_opaque = opaque;
+}
+
 void pocketjs_guest_interrupt(pocketjs_guest_t *guest) {
   if (guest != NULL) {
     (void)atomic_fetch_add_explicit(&guest->interrupt_epoch, 1U,
@@ -469,6 +550,12 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
       .jobs = guest->jobs,
       .heap_used = usage.malloc_size,
       .heap_limit = guest->heap_limit,
+      .yields = guest->yields,
+      .continuations = guest->continuations,
+      .jobs_pending = guest->jobs_pending,
+      /* Live, not latched: app_report() runs before destroy, so the only
+       * honest answer there is "is anything queued right now". */
+      .jobs_dropped = guest->jobs_dropped || JS_IsJobPending(guest->runtime),
   };
   return ESP_OK;
 }
@@ -478,6 +565,11 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
     return;
   }
   if (guest->runtime != NULL) {
+    /* sec.3.2: whatever is still queued is discarded UNRUN, which is what
+     * JS_FreeRuntime does anyway (ledger 03 fact 9) and what pocket_api_reset()
+     * already chose for in-flight promises. Recorded as one bit because
+     * counting would need a VM hook. */
+    guest->jobs_dropped = JS_IsJobPending(guest->runtime);
     js_std_free_handlers(guest->runtime);
   }
   if (guest->context != NULL) {
