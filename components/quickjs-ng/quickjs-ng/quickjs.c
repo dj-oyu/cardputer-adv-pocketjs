@@ -19026,8 +19026,11 @@ has_call_argc:
                 // else (native, bound, proxy, generator/async class, and a
                 // frame whose bytecode is not JS_FUNC_NORMAL -- see the
                 // done_generator: keying below) takes the upstream C call.
-                // Tail calls join in the next stage; until then they recurse.
-                if (opcode != OP_tail_call && js_vm_flat_callable(call_argv[-1])) {
+                // OP_tail_call too: upstream does not elide the caller's
+                // frame for it (it is a call followed by `goto done`), and
+                // neither does this -- the JS_RET_TAIL bit replays that
+                // `goto done` when the callee returns.
+                if (js_vm_flat_callable(call_argv[-1])) {
                     goto flat_call;
                 }
 #endif
@@ -19071,6 +19074,14 @@ has_call_argc:
                 pc += 2;
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+                // L2b, as at has_call_argc; the block reads `this` from
+                // call_argv[-2] and drops one slot more on return
+                // (JS_RET_METHOD), both keyed on `opcode`.
+                if (js_vm_flat_callable(call_argv[-1])) {
+                    goto flat_call;
+                }
+#endif
                 ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
                                           JS_UNDEFINED, call_argc,
                                           vc(call_argv), 0);
