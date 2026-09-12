@@ -1,4 +1,5 @@
 // vmrun-flags: --frames 1 --budget-jobs 4 --host-events
+// vmrun-pin-budget
 // L1 invariant 6 (docs/vm-L1-design.md sec.7): a completion recorded while the
 // queue is still being worked off is neither lost nor delivered early.
 //

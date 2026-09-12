@@ -50,6 +50,37 @@ menu "Pocket VM (L0 measurement probes)"
 
             Measure the cost with tools/memlog.py rather than assuming it.
 
+    config POCKET_VM_FAIR
+        bool "Fair ordering: run the pumps on a continuation turn too"
+        default n
+        help
+            OFF (the shipping default) is COMPAT ORDERING, the rule
+            docs/vm-L1-design.md sec.2.1 states: a turn that ended with jobs
+            queued finishes them at the top of the next turn, and no host event
+            reaches JavaScript until the queue is empty. One logical drain then
+            has exactly the job order the pre-L1 single drain produced, and the
+            only thing that changed is that wall clock passes between two of
+            its jobs. This switch compiles to nothing when it is off.
+
+            ON, a continuation turn that STILL has jobs left runs the same
+            pumps an ordinary turn runs -- everything except frame() and the
+            exit() check -- after its drain has yielded. A completion that a
+            radio, a bus or a timer recorded during the drain is settled there
+            and its reaction is enqueued at the TAIL of the queue, behind the
+            jobs of the unfinished drain, so FIFO inside the queue is exactly
+            what it was; what changes is only that a host event can reach
+            JavaScript between two jobs of one logical drain.
+
+            The cost compat ordering pays is completion latency on an app whose
+            drain needs continuations -- measured (device) at ~1.9x the pre-L1
+            path under audio contention (docs/vm-L1-report.md sec.6). This mode
+            exists so that tradeoff can be measured rather than argued, and so
+            L2 can revisit it with evidence. Two things are deliberately NOT
+            made fair, because neither can be made safe at a job boundary:
+            exit() (delivered as an uncatchable interrupt, it would cut the
+            drain it lands in) and frame() (it would put a frame inside a
+            chain). See docs/vm-L1-report.md sec.10.
+
     config POCKET_UI_TASK_CORE
         int "Core the ui task is pinned to (-1 = let FreeRTOS choose)"
         range -1 1

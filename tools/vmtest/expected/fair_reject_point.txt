@@ -1,0 +1,23 @@
+chain 1
+chain 2
+chain 3
+chain 4
+chain 5
+chain 6
+chain 7
+chain 8
+chain 9
+chain 10
+chain 11
+chain 12
+after 1
+after 2
+after 3
+after 4
+after 5
+after 6
+after 7
+after 8
+caught: caught eight jobs later
+E pocketjs_guest: Unhandled Promise rejection: Error: nobody catches this
+exit=2
