@@ -72,6 +72,16 @@ menu "Pocket VM (L0 measurement probes)"
             an InternalError "out of memory", the error a generator's heap
             frame already produced. Generator / async frames are untouched.
 
+            JS_SetMaxStackSize (app_session.c: 20 KiB) is read twice on this
+            path (design D10): as the C-stack limit it always was, and as a
+            byte budget for the segments -- the sum of every live frame, in
+            bytes, not a frame count. Whichever fills first raises the
+            RangeError; the budget is tested before the heap is asked, so
+            "too deep" stays RangeError and only a frame the heap cannot
+            hold is InternalError. The budget is the guard that survives
+            L2b's removal of the C recursion. tools/vmtest/budget_probe.sh
+            shows it working with the C-stack guard lifted.
+
             Off, JS_CallInternal is the upstream alloca path and JSRuntime
             has no segment state: the pre-L2a behaviour exactly, which is
             what spec sec.12 means by every stage being revertible. The host

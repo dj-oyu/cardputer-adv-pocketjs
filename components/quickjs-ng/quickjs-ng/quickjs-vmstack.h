@@ -145,12 +145,28 @@ typedef struct JSVMStack {
     uint32_t cache_n;
     uint32_t cache_max;
     size_t seg_size;        // standard payload size
+    // D10 (docs/vm-L2-design.md sec.9): the recursion limit that survives
+    // L2b. `used` is the sum of (top - base) over the live chain -- pushed
+    // frame bytes, rounded, NOT counting segment headers or the unused tail
+    // of each segment -- kept incrementally so the budget test is one add
+    // and one compare per call. `budget` is JS_SetMaxStackSize's value (0 =
+    // no limit), mirrored here by update_stack_limit; a push that would take
+    // `used` past it is refused as RangeError BEFORE any segment is asked
+    // for, which is what keeps "too deep" (RangeError) distinguishable from
+    // "no heap for the frame" (InternalError) -- the two answers the corpus
+    // fixes in expected/deep_recursion*.txt and expected/seg_oom_boundary.txt.
+    // Bytes, not frames: a frame is 48 B + 8 B per arg/local/operand slot on
+    // the target, so a frame count would bound memory by nothing.
+    size_t used;
+    size_t budget;
 #ifdef JS_VM_STACK_STATS
-    size_t live_bytes, live_bytes_max;   // frame bytes in use (rounded sizes)
+    size_t live_bytes_max;               // peak of `used`
     size_t frame_max;                    // largest single frame pushed
     uint32_t depth, depth_max;           // frames in use
     uint32_t seg_live, seg_live_max;     // segments on the chain
     uint64_t pushes, seg_mallocs, seg_frees, seg_reuses, dedicated, fallbacks;
+    uint64_t budget_hits;                // pushes refused by the budget
+    uint64_t seg_refused;                // pushes refused by the runtime (no segment)
 #endif
 } JSVMStack;
 
@@ -159,6 +175,27 @@ static inline void js_vm_stack_init(JSVMStack *st)
     memset(st, 0, sizeof(*st));
     st->seg_size = JS_VM_SEG_SIZE;
     st->cache_max = JS_VM_SEG_CACHE_MAX;
+}
+
+static inline size_t js_vm_stack_round(size_t size)
+{
+    return (size + JS_VM_FRAME_ALIGN - 1) & ~(size_t)(JS_VM_FRAME_ALIGN - 1);
+}
+
+// The D10 test, asked by JS_CallInternal before js_vm_stack_push so that
+// the budget is charged for exactly the bytes the push would add (the same
+// rounding) and is consulted before the heap is. Placed here rather than
+// inside push so that push keeps one failure meaning (NULL = the runtime
+// refused memory) and the caller does not have to decode two.
+static inline int js_vm_stack_over_budget(JSVMStack *st, size_t size)
+{
+    size = js_vm_stack_round(size);
+    if (likely(!st->budget || st->used + size <= st->budget))
+        return 0;
+#ifdef JS_VM_STACK_STATS
+    st->budget_hits++;
+#endif
+    return 1;
 }
 
 // Only before the first push: a live chain built on one size cannot be
@@ -260,15 +297,17 @@ static inline void *js_vm_stack_push_slow(JSRuntime *rt, JSVMStack *st, size_t s
 static inline void *js_vm_stack_push(JSRuntime *rt, JSVMStack *st, size_t size)
 {
     JSVMSeg *s = st->cur;
-    size = (size + JS_VM_FRAME_ALIGN - 1) & ~(size_t)(JS_VM_FRAME_ALIGN - 1);
+    size = js_vm_stack_round(size);
+    // `used` is charged up front and refunded on a refused push; the fast
+    // path is then one add, the same as the stats build already paid.
+    st->used += size;
 #ifdef JS_VM_STACK_STATS
     st->pushes++;
     st->depth++;
     if (st->depth > st->depth_max)
         st->depth_max = st->depth;
-    st->live_bytes += size;
-    if (st->live_bytes > st->live_bytes_max)
-        st->live_bytes_max = st->live_bytes;
+    if (st->used > st->live_bytes_max)
+        st->live_bytes_max = st->used;
     if (size > st->frame_max)
         st->frame_max = size;
 #endif
@@ -279,12 +318,13 @@ static inline void *js_vm_stack_push(JSRuntime *rt, JSVMStack *st, size_t size)
         return p;
     }
     void *p = js_vm_stack_push_slow(rt, st, size);
-#ifdef JS_VM_STACK_STATS
     if (!p) {
+        st->used -= size;
+#ifdef JS_VM_STACK_STATS
         st->depth--;
-        st->live_bytes -= size;
-    }
+        st->seg_refused++;
 #endif
+    }
     return p;
 }
 
@@ -308,9 +348,9 @@ static inline void js_vm_stack_pop(JSRuntime *rt, JSVMStack *st, void *block)
 {
     JSVMSeg *s = st->cur;
     assert(s && (uint8_t *)block >= s->base && (uint8_t *)block < s->top);
+    st->used -= (size_t)(s->top - (uint8_t *)block);
 #ifdef JS_VM_STACK_STATS
     st->depth--;
-    st->live_bytes -= (size_t)(s->top - (uint8_t *)block);
 #endif
     JS_VM_POISON(block, (size_t)(s->top - (uint8_t *)block));
     s->top = (uint8_t *)block;

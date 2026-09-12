@@ -827,3 +827,36 @@ frame_total = round_up(sizeof(JSStackFrame) + alloca_size, JS_VM_FRAME_ALIGN)
 **未計測（実機）:** アプリ起動後に 160 KiB のうちどれだけ既に使われているか。ここでの数字は
 `vmrun` の最小ハーネス基準で、実機の実効ヘッドルームは `tools/memlog.py --port --check` が要る。
 実機の TLSF がセグメント1本に付けるブロックヘッダと断片化の分も未検証。
+
+### 9.3 D10 の着地（2026-09-13、`vm/l2b`）
+
+実装は `quickjs-vmstack.h` の `JSVMStack.used` / `budget` と `js_vm_stack_over_budget()`、
+`quickjs.c` の push 直前の判定、`JS_SetMaxStackSize` での `rt->vm_stack.budget = rt->stack_size`
+（`CONFIG_POCKET_VM_SEGFRAMES` のときだけ）。ホストの `vmrun` に `--vm-budget` を足し、
+C スタックのガードと予算を**別々に**動かせるようにした。
+
+**出荷値は変えていない。** host 7 MiB（`--profile host`）、実機 `stack_limit = 20 * 1024`
+（`app_session.c`）。どちらも §9.2 の窓の中にある。
+
+**run.sh だけでは検証にならない。** C 再帰が残っている間は、同じ値を持つ C スタックのガードが
+先に答える（`budget_hits=0`）。**何もしない予算でも run.sh は通る。** そのまま L2b で C 再帰を
+消せば、コーパスの `RangeError` がすべて `InternalError` に変わっていたはず。
+
+そこで `tools/vmtest/budget_probe.sh` が、`--stack-limit 512M` で C スタックのガードを退け
+`--vm-budget` だけを残した走行（= L2b 後の状況）で、期待値3本を検査する。
+**陰性対照を4つ持つ** — 予算 off（ヒープが答え `seg_refused=1`）、小さすぎる予算（host 100K で
+`depth>1000` を満たせない）、ヒープより先に当たりすぎる予算（480 B で `seg_oom_boundary` の
+`InternalError` が `RangeError` に化ける）、ヒープを超える予算（200K でヒープが先に尽きる）。
+**窓の外の値ではちゃんと壊れる**ことが、ガードが本物である証拠。
+
+実測（o2）: 10 項目すべて OK。予算だけを残した走行で host は深さ 70,575、実機プロファイルは
+深さ 195 で `RangeError`、`seg_oom_boundary` は `InternalError` のまま。
+asan でも 10 項目すべて OK（asan は ulimit を上げないので host の予算を 512K にして深さ 5,039 で
+`RangeError`。`depth>1000` は満たす）。
+
+関所: コーパス 43/43（asan・o2・asan-alloca・o2-alloca）、Test262 7,501 / 194 / regressions 0、
+G1 は 528.000（segframes）/ 672.000（alloca）でともに PROPORTIONAL（C 再帰は残っているので正しい）、
+selftest ok、`--force-yield` 3/40 不変、期待値ファイル無変更。
+
+**未計測:** 呼び出しごとに加算1回と比較1回が増えた分の速度（`timing.py` は未実行。
+L2b のフラット化で経路自体が変わるので、そちらと合わせて測る）。ファームのビルドは本線への統合時。

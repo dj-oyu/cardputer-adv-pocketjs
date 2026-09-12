@@ -2877,6 +2877,21 @@ static void update_stack_limit(JSRuntime *rt)
         rt->stack_limit = rt->stack_top - rt->stack_size;
     }
 #endif
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    // D10: JS_SetMaxStackSize is also the byte budget of the frame segments
+    // (docs/vm-L2-design.md sec.9 D10). Same knob, same unit, two resources
+    // for as long as JS_CallInternal still recurses in C: the C-stack test
+    // above and the segment test in JS_CallInternal each hold the whole
+    // value, and whichever fills first ends the recursion with the same
+    // RangeError. Before L2a the one C stack carried both the C frames and
+    // the alloca'd locals, so one number bounded both; L2a moved the locals
+    // into segments where that number no longer reached them -- a function
+    // with a large frame could recurse until the HEAP refused, turning the
+    // RangeError of deep_recursion.txt into an InternalError. This restores
+    // the bound on the moved half, and is the half that will remain once
+    // L2b removes the C recursion and the C-stack test stops measuring depth.
+    rt->vm_stack.budget = rt->stack_size;
+#endif
 }
 
 void JS_SetMaxStackSize(JSRuntime *rt, size_t stack_size)
@@ -18473,6 +18488,19 @@ not_a_function:
     //    always a full heap, not deep recursion. The fallback in
     //    js_vm_stack_push_slow keeps the boundary where alloca had it: the
     //    call fails only when the frame itself does not fit.
+    //  - D10, the segment byte budget (quickjs-vmstack.h, JSVMStack.budget):
+    //    the sum of every frame pushed so far plus this one, against
+    //    JS_SetMaxStackSize. Tested FIRST, before the heap is asked for a
+    //    segment, so that on a deep recursion the budget answers (RangeError)
+    //    and never the allocator (InternalError): the value is chosen so the
+    //    budget fills while the heap still has room (design sec.9.2 -- on
+    //    the board 20 KiB of a 160 KiB heap). Order between this test and
+    //    the C-stack one does not matter (same error); order against the
+    //    push does. One compare on state already in a register -- the
+    //    charge itself is the add push does anyway.
+    if (unlikely(js_vm_stack_over_budget(&rt->vm_stack, sizeof(JSStackFrame) + alloca_size))) {
+        return JS_ThrowStackOverflow(caller_ctx);
+    }
     if (js_check_stack_overflow(rt, 0)) {
         return JS_ThrowStackOverflow(caller_ctx);
     }
