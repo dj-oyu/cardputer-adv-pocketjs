@@ -1,0 +1,19 @@
+# L1 clock-cost bench overlay (docs/vm-l1-clock.md).
+# NOT part of sdkconfig.defaults -- that file is shared by every build_*
+# directory in this tree (see CLAUDE.md), and this option must stay off there.
+#
+# Same isolation trap as sdkconfig.vmprobe.defaults: ESP-IDF puts sdkconfig at
+# the project root by default REGARDLESS of -B, so this needs its own
+# -D SDKCONFIG=<dir>/sdkconfig or it silently turns every other build_*
+# directory's next build into a clockbench build too.
+#
+#   idf.py -B build_bench_clock \
+#       -D SDKCONFIG=build_bench_clock/sdkconfig \
+#       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.vmclockbench.defaults" build
+#
+# The pinned-vs-unpinned pair this overlay once came in is gone: L1 settled
+# that question (core 1, measured -- docs/vm-L1-report.md sec.8) and shipped
+# CONFIG_POCKET_UI_TASK_CORE as a real knob, so the bench's own pin switch had
+# nothing left to decide. What remains is the clock read cost and the
+# migration counter, which now checks that the pin holds.
+CONFIG_POCKET_VM_L1_CLOCKBENCH=y

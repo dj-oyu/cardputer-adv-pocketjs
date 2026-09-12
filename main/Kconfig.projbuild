@@ -124,4 +124,22 @@ menu "Pocket VM (L0 measurement probes)"
             docs/vm-L1-report.md sec.8 records what each clock costs on the
             job-heavy workloads.
 
+    config POCKET_VM_L1_CLOCKBENCH
+        bool "Enable L1 clock-cost bench (docs/vm-l1-clock.md)"
+        default n
+        help
+            A throwaway bench for one question: what does reading the clock
+            cost, and does the ui task migrate cores? NOT part of any normal
+            build. On, this compiles in:
+              - a boot-time loop (main.c) that times esp_cpu_get_cycle_count()
+                (RSR CCOUNT) against esp_timer_get_time() (systimer), logging
+                "CLOCKBENCH ..." lines once, then falls through to the normal
+                boot.
+              - a per-frame xPortGetCoreID() migration counter in ui_task,
+                logging a rate-limited "BENCH_CORE ..." summary.
+            Same isolation rule as POCKET_VM_PROBE: give the build directory
+            its own -D SDKCONFIG=<dir>/sdkconfig, never enable this in the
+            shared root sdkconfig or in sdkconfig.defaults. See
+            sdkconfig.vmclockbench.defaults.
+
 endmenu

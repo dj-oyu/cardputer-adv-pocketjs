@@ -34,6 +34,134 @@
 #include "nvs_flash.h"
 #include <stdatomic.h>
 #include <string.h>
+#if CONFIG_POCKET_VM_L1_CLOCKBENCH
+#include "esp_cpu.h"
+#endif
+
+#if CONFIG_POCKET_VM_L1_CLOCKBENCH
+// ---------------------------------------------------------------------------
+// L1 clock-cost bench (branch vm/l1-clockbench, docs/vm-l1-clock.md). This
+// whole block is a throwaway measurement, not shipping code: it exists only
+// behind CONFIG_POCKET_VM_L1_CLOCKBENCH, which is off in every normal build
+// (see sdkconfig.vmclockbench.defaults / .pin1.defaults for how to turn it
+// on in an isolated build_* directory).
+//
+// Question: what does reading the clock cost, CCOUNT (esp_cpu_get_cycle_count,
+// RSR CCOUNT -- per-core register, already used by main/scene/flower.c) vs
+// systimer (esp_timer_get_time -- APB reads, one shared systimer unit)?
+#define CLOCKBENCH_N 100000
+#define CLOCKBENCH_REPEATS 20
+
+// A plain local the compiler can prove is dead would let it delete the whole
+// loop at -Os. Writing every result through this file-scope volatile forces
+// each read to actually happen.
+static volatile uint32_t clockbench_sink;
+
+static uint32_t clockbench_median_u32(uint32_t *a, int n) {
+    // n is always CLOCKBENCH_REPEATS (20) here -- insertion sort is plenty.
+    for(int i=1;i<n;i++){ uint32_t v=a[i]; int j=i-1; while(j>=0&&a[j]>v){a[j+1]=a[j];j--;} a[j+1]=v; }
+    return (n%2) ? a[n/2] : (a[n/2-1]+a[n/2])/2;
+}
+
+static void clockbench_run(void) {
+    uint32_t empty_cy[CLOCKBENCH_REPEATS];
+    uint32_t ccount_cy[CLOCKBENCH_REPEATS];
+    uint32_t systimer_cy[CLOCKBENCH_REPEATS];
+    uint32_t systimer_direct_ns[CLOCKBENCH_REPEATS];
+
+    for(int r=0;r<CLOCKBENCH_REPEATS;r++) {
+        // Loop overhead alone (no clock read at all), same shape as the two
+        // loops below, so it can be subtracted out of both.
+        uint32_t acc=0;
+        uint32_t c0=esp_cpu_get_cycle_count();
+        for(int i=0;i<CLOCKBENCH_N;i++) acc+=(uint32_t)i;
+        uint32_t c1=esp_cpu_get_cycle_count();
+        clockbench_sink=acc;
+        // Unsigned subtraction on a 32-bit counter wraps correctly by C's
+        // modulo-2^32 rule as long as the true elapsed count is under 2^32 --
+        // true here by a wide margin: at 240 MHz CCOUNT itself wraps only
+        // every ~17.9 s (2^32 / 240e6), and this loop is microseconds.
+        empty_cy[r]=c1-c0;
+
+        uint32_t x=0;
+        c0=esp_cpu_get_cycle_count();
+        for(int i=0;i<CLOCKBENCH_N;i++) x^=esp_cpu_get_cycle_count();
+        c1=esp_cpu_get_cycle_count();
+        clockbench_sink=x;
+        ccount_cy[r]=c1-c0;
+
+        // Timed two ways at once: CCOUNT brackets the loop (matches the
+        // ccount_cy measurement above so the two are directly comparable),
+        // and esp_timer_get_time() brackets it too, as a cross-check that
+        // does not depend on trusting CCOUNT's own conversion to ns.
+        int64_t t0=esp_timer_get_time();
+        uint32_t y=0;
+        c0=esp_cpu_get_cycle_count();
+        for(int i=0;i<CLOCKBENCH_N;i++) y^=(uint32_t)esp_timer_get_time();
+        c1=esp_cpu_get_cycle_count();
+        int64_t t1=esp_timer_get_time();
+        clockbench_sink=y;
+        systimer_cy[r]=c1-c0;
+        // esp_timer_get_time() is in microseconds; ns/read needs *1000 before
+        // the /N so the truncation happens once, at the end, not per read.
+        systimer_direct_ns[r]=(uint32_t)(((t1-t0)*1000)/CLOCKBENCH_N);
+    }
+
+    uint32_t empty_med=clockbench_median_u32(empty_cy,CLOCKBENCH_REPEATS);
+    uint32_t empty_max=empty_cy[0]; for(int r=1;r<CLOCKBENCH_REPEATS;r++) if(empty_cy[r]>empty_max) empty_max=empty_cy[r];
+    uint32_t ccount_med=clockbench_median_u32(ccount_cy,CLOCKBENCH_REPEATS);
+    uint32_t ccount_max=ccount_cy[0]; for(int r=1;r<CLOCKBENCH_REPEATS;r++) if(ccount_cy[r]>ccount_max) ccount_max=ccount_cy[r];
+    uint32_t sys_med=clockbench_median_u32(systimer_cy,CLOCKBENCH_REPEATS);
+    uint32_t sys_max=systimer_cy[0]; for(int r=1;r<CLOCKBENCH_REPEATS;r++) if(systimer_cy[r]>sys_max) sys_max=systimer_cy[r];
+    uint32_t sysns_med=clockbench_median_u32(systimer_direct_ns,CLOCKBENCH_REPEATS);
+    uint32_t sysns_max=systimer_direct_ns[0]; for(int r=1;r<CLOCKBENCH_REPEATS;r++) if(systimer_direct_ns[r]>sysns_max) sysns_max=systimer_direct_ns[r];
+
+    // Per-read cost = (total cycles for N reads / N) - (loop overhead / N).
+    // CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240 -> 1000/240 ns/cycle; done as
+    // (cycles*1000)/240 to keep it integer and avoid truncating to 0 early.
+    uint32_t empty_per_med=empty_med/CLOCKBENCH_N;
+    uint32_t empty_per_max=empty_max/CLOCKBENCH_N;
+    uint32_t ccount_per_cy_med=ccount_med/CLOCKBENCH_N - empty_per_med;
+    uint32_t ccount_per_cy_max=ccount_max/CLOCKBENCH_N - empty_per_max;
+    uint32_t sys_per_cy_med=sys_med/CLOCKBENCH_N - empty_per_med;
+    uint32_t sys_per_cy_max=sys_max/CLOCKBENCH_N - empty_per_max;
+
+    // 240 is this board's fixed CPU_FREQ_MHZ (sdkconfig.defaults,
+    // CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y); not read from Kconfig here
+    // because the *_240 symbol is a bool, not the number itself.
+    ESP_LOGI("clockbench","CLOCKBENCH_STATIC n=%d repeats=%d cpu_mhz=240",
+             CLOCKBENCH_N,CLOCKBENCH_REPEATS);
+    ESP_LOGI("clockbench","CLOCKBENCH_LOOP_OVERHEAD median_cycles_per_iter=%u max_cycles_per_iter=%u",
+             (unsigned)empty_per_med,(unsigned)empty_per_max);
+    ESP_LOGI("clockbench","CLOCKBENCH_CCOUNT median_cycles=%u max_cycles=%u median_ns=%u max_ns=%u",
+             (unsigned)ccount_per_cy_med,(unsigned)ccount_per_cy_max,
+             (unsigned)((ccount_per_cy_med*1000)/240),(unsigned)((ccount_per_cy_max*1000)/240));
+    ESP_LOGI("clockbench","CLOCKBENCH_SYSTIMER median_cycles=%u max_cycles=%u median_ns=%u max_ns=%u direct_median_ns=%u direct_max_ns=%u",
+             (unsigned)sys_per_cy_med,(unsigned)sys_per_cy_max,
+             (unsigned)((sys_per_cy_med*1000)/240),(unsigned)((sys_per_cy_max*1000)/240),
+             (unsigned)sysns_med,(unsigned)sysns_max);
+}
+
+// Per-frame ui_task core-migration counter. CCOUNT is per-core (RSR CCOUNT
+// reads the executing core's own register), so a task that migrates between
+// two CCOUNT reads gets a meaningless delta -- this measures how often that
+// actually happens. A frame count, not a wall-clock window, because frame
+// period is not constant across screens/apps (SCREENS[].frame_ms, or an
+// app's own pace); ~900 frames is a few tens of seconds at the common 30ms
+// cap, longer on slower screens, which is close enough for a migration RATE.
+static void bench_core_tick(void) {
+    static bool have_last; static BaseType_t last_core;
+    static uint32_t frames, migrations;
+    BaseType_t core=xPortGetCoreID();
+    if(have_last && core!=last_core) migrations++;
+    have_last=true; last_core=core;
+    if(++frames>=900) {
+        ESP_LOGI("benchcore","BENCH_CORE frames=%u migrations=%u core=%d",
+                 (unsigned)frames,(unsigned)migrations,(int)core);
+        frames=0; migrations=0;
+    }
+}
+#endif // CONFIG_POCKET_VM_L1_CLOCKBENCH
 
 static QueueHandle_t keys;
 static atomic_bool stop;
@@ -563,6 +691,9 @@ static void ui_task(void *arg) {
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
     while(1) {
+#if CONFIG_POCKET_VM_L1_CLOCKBENCH
+        bench_core_tick();
+#endif
         int64_t frame_start=esp_timer_get_time();
         keystroke_t stroke={0};
         bool have=xQueueReceive(keys,&stroke,0)==pdTRUE;
@@ -812,6 +943,12 @@ static void nvs_init(void) {
 }
 
 void app_main(void) {
+#if CONFIG_POCKET_VM_L1_CLOCKBENCH
+    // First thing, before any peripheral is touched: a pure-CPU measurement
+    // that needs nothing but the cycle counter and the systimer, both already
+    // running at reset.
+    clockbench_run();
+#endif
     ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=512KiB");
     ESP_ERROR_CHECK(board_init());
     nvs_init();
