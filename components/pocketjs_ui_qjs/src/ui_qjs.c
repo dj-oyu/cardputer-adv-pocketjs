@@ -862,6 +862,29 @@ esp_err_t pocketjs_ui_turn(pocketjs_ui_qjs_t *binding,
   return pocketjs_ui_core_draw(binding->core, out_frame);
 }
 
+/* VM L1 (docs/vm-L1-design.md sec.2.4): a turn that finishes the PREVIOUS
+ * turn's job queue instead of calling frame().
+ *
+ * The core's tick and draw still run, in the same order and with the same
+ * arguments pocketjs_ui_turn() gives them. That is deliberate: sec.6 allows
+ * native drawing and I/O between the pieces of one drain, and a display frozen
+ * on the last frame for the duration would be a visible regression where a
+ * still-animating one is not. What does NOT run is frame() -- that is the host
+ * call into JavaScript the continuation rule holds back until the queue is
+ * empty. */
+esp_err_t pocketjs_ui_turn_continue(pocketjs_ui_qjs_t *binding,
+                                    pocketjs_ui_frame_view_t *out_frame) {
+  if (binding == NULL || !binding->mounted || out_frame == NULL ||
+      out_frame->struct_size < sizeof(*out_frame)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  const esp_err_t result = pocketjs_guest_continue(binding->guest);
+  if (result != ESP_OK)
+    return result;
+  pocketjs_ui_core_tick(binding->core);
+  return pocketjs_ui_core_draw(binding->core, out_frame);
+}
+
 uint32_t pocketjs_ui_qjs_tick_hz(const pocketjs_ui_qjs_t *binding) {
   return binding != NULL && binding->mounted ? binding->tick_hz : 0U;
 }

@@ -57,6 +57,15 @@ esp_err_t pocketjs_ui_turn(pocketjs_ui_qjs_t *binding,
                            const pocketjs_ui_input_t *input,
                            pocketjs_ui_frame_view_t *out_frame);
 
+/** One turn that finishes the job queue a previous turn's budget cut, in
+ * place of frame() (docs/vm-L1-design.md sec.2.4). The UI core's tick and draw
+ * still run, so the display keeps animating while the queue is worked off.
+ * Call while pocketjs_guest_jobs_pending() is true, before any host event is
+ * delivered into JavaScript; when it comes back false the ordinary
+ * pocketjs_ui_turn() resumes. */
+esp_err_t pocketjs_ui_turn_continue(pocketjs_ui_qjs_t *binding,
+                                    pocketjs_ui_frame_view_t *out_frame);
+
 /** The cadence inherited from the caller-owned UI core; zero until mounted. */
 uint32_t pocketjs_ui_qjs_tick_hz(const pocketjs_ui_qjs_t *binding);
 
