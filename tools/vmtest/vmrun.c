@@ -341,10 +341,26 @@ static bool stack_probe_enabled;                // --stack-probe
 static uintptr_t stack_probe_first, stack_probe_last;
 static uint64_t stack_probe_calls;
 
+// --stack-probe-fault: make the probe lie, so stack_probe.sh can be shown to
+// produce each verdict rather than only the one today's VM happens to give.
+// G6 has the same shape (verify_all.sh injects five faults and requires all
+// five to be caught); G1 had no such control, and the bug the L2b design
+// review found -- a flat stack reading as PROPORTIONAL -- is exactly what a
+// control would have caught, since nothing could produce a flat stack until
+// L2b lands.
+//   flat  : every level reports the same address -> expect NOT_PROPORTIONAL
+//   silent: never record anything                -> expect UNUSABLE
+static enum { PROBE_FAULT_NONE, PROBE_FAULT_FLAT, PROBE_FAULT_SILENT }
+    stack_probe_fault = PROBE_FAULT_NONE;
+
 static JSValue js_stack_probe(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)ctx; (void)this_val; (void)argc; (void)argv;
   volatile char marker;
   uintptr_t here = (uintptr_t)&marker;
+  if (stack_probe_fault == PROBE_FAULT_SILENT) return JS_UNDEFINED;
+  // A flat C stack is what a finished L2b produces: the address a frame
+  // reports stops depending on how deep the JS call chain is.
+  if (stack_probe_fault == PROBE_FAULT_FLAT && stack_probe_calls) here = stack_probe_first;
   if (stack_probe_calls == 0) stack_probe_first = here;
   stack_probe_last = here;
   stack_probe_calls++;
@@ -702,6 +718,7 @@ static void usage(void) {
           "                         turn too, so a completion is seen mid-drain (default: compat)\n"
           "  --stack-probe          install __vmtest_stack_probe(); print '#info stack_probe ...'\n"
           "                         (G1: bytes of C stack per JS recursion level, see stack_probe.sh)\n"
+          "  --stack-probe-fault W  inject a probe fault: flat | silent (G1 negative control)\n"
           "  --vm-seg-size N[K]     L2a: standard frame-segment payload (default: the build's)\n"
           "  --host-events          install host.request(k) (a completion recorded at the k-th job\n"
           "                         boundary) and host.exit() (pocket.app.exit)\n"
@@ -753,6 +770,13 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--host-events")) host_events = true;
     else if (!strcmp(a, "--fair")) fair_mode = true;
     else if (!strcmp(a, "--stack-probe")) stack_probe_enabled = true;
+    else if (!strcmp(a, "--stack-probe-fault")) {
+      const char *w = NEXT();
+      if (!strcmp(w, "flat")) stack_probe_fault = PROBE_FAULT_FLAT;
+      else if (!strcmp(w, "silent")) stack_probe_fault = PROBE_FAULT_SILENT;
+      else { fprintf(stderr, "unknown --stack-probe-fault: %s\n", w); return 2; }
+      stack_probe_enabled = true;
+    }
     else if (!strcmp(a, "--vm-seg-size")) vm_seg_size = parse_size(NEXT());
     else if (!strcmp(a, "--time")) want_time = true;
     else if (!strcmp(a, "--stats")) want_stats = true;

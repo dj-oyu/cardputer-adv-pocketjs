@@ -26,6 +26,9 @@
 # (see docs/vm-L2-design.md sec.1.1 row #1), not a test failure. A caller
 # that wants "has L2 met condition #1" checks the verdict string.
 set -uo pipefail
+# Absolute, taken BEFORE the cd: the selftest below re-invokes this script,
+# and a relative $0 does not survive having changed directory.
+SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
 cd "$(dirname "$0")"
 HERE=$(pwd)
 OUT=${VMTEST_OUT:-$HERE/../../.cache/vmtest}
@@ -56,6 +59,7 @@ run_at() {
   local stack_cmd="ulimit -s unlimited"
   case "$variant" in asan*) stack_cmd=: ;; esac   # asan and asan-alloca alike
   (eval "$stack_cmd"; cd corpus && "$VMRUN" --profile host --stack-limit 512M --stack-probe \
+      ${PROBE_FAULT:+--stack-probe-fault "$PROBE_FAULT"} \
       --include "$depth_snippet" ../stack_probe.js) 2>&1
 }
 
@@ -83,8 +87,54 @@ echo "depth=$N2  calls=$calls2 bytes_per_call=$bpc2"
 # principled constant; it is "further from 1.0 than build-to-build i-cache
 # alignment noise" (CLAUDE.md notes +-15% on unrelated kernels), so this does
 # not misfire on measurement jitter alone.
-ratio=$(awk -v a="$bpc1" -v b="$bpc2" 'BEGIN { if (a == 0) print "nan"; else printf "%.4f", b / a }')
-verdict="PROPORTIONAL"
-awk -v r="$ratio" 'BEGIN { exit !(r != "nan" && r < 0.85) }' && verdict="NOT_PROPORTIONAL"
+# THE ZERO CASE IS THE SUCCESS CASE, and reading it as a ratio loses it.
+# A finished L2b makes the C stack stop growing per JS call, so bytes_per_call
+# goes to 0 at BOTH depths -- and 0/0 is not a ratio. The first version of
+# this script printed "nan" there and left the verdict at PROPORTIONAL, i.e.
+# it reported the completion condition as unmet exactly when it was met. It
+# was written before anything could produce a zero, so nothing ever exercised
+# that branch (found by the L2b design review, not by a run).
+#
+# So: judge the magnitude first, the ratio second, and refuse to judge at all
+# when the instrument did not run. FLAT_BYTES is per additional call level --
+# one pointer would be 8 on the host -- and is deliberately not 0: a frame
+# pointer or a saved register per level is still "not proportional" in the
+# sense sec.7 asks for, which is that DEPTH does not buy C stack.
+FLAT_BYTES=16
+MIN_CALLS=64
+
+verdict=
+# "The probe never ran" and "the probe ran and measured zero" both arrive here
+# as 0.000 (vmrun divides by calls-1 and prints 0.0 when that is 0), and they
+# mean opposite things. Anything below MIN_CALLS is not a measurement.
+if [ "${calls1:-0}" -lt "$MIN_CALLS" ] || [ "${calls2:-0}" -lt "$MIN_CALLS" ]; then
+  verdict="UNUSABLE"
+  ratio="nan"
+elif awk -v a="$bpc1" -v b="$bpc2" -v f="$FLAT_BYTES"      'BEGIN { exit !(a < f && b < f) }'; then
+  # Both depths cost less than one pointer per level: the C stack is flat.
+  verdict="NOT_PROPORTIONAL"
+  ratio=$(awk -v a="$bpc1" -v b="$bpc2" 'BEGIN { if (a == 0) print "flat"; else printf "%.4f", b / a }')
+else
+  ratio=$(awk -v a="$bpc1" -v b="$bpc2" 'BEGIN { if (a == 0) print "nan"; else printf "%.4f", b / a }')
+  verdict="PROPORTIONAL"
+  # Partial flattening: per-level cost shrinks as depth grows without reaching
+  # zero. Still not proportional, by the same reading.
+  awk -v r="$ratio" 'BEGIN { exit !(r != "nan" && r < 0.85) }' && verdict="NOT_PROPORTIONAL"
+fi
 
 echo "G1 depth=$N bytes_per_call=$bpc1 depth2=$N2 bytes_per_call2=$bpc2 ratio=$ratio verdict=$verdict"
+
+# The instrument has to be able to say something other than what it just said.
+# PROBE_FAULT=... re-runs the same measurement with the probe lying, so each
+# verdict is demonstrated rather than assumed. SELFTEST=1 asserts both.
+if [ "${SELFTEST:-0}" = 1 ]; then
+  fail=0
+  for pair in "flat NOT_PROPORTIONAL" "silent UNUSABLE"; do
+    set -- $pair
+    got=$(PROBE_FAULT=$1 SELFTEST=0 bash "$SELF" "$N" "$variant" 2>/dev/null | sed -n 's/.*verdict=\([A-Z_]*\).*/\1/p')
+    if [ "$got" = "$2" ]; then echo "selftest fault=$1 -> $got (expected)"
+    else echo "selftest fault=$1 -> ${got:-<none>} EXPECTED $2"; fail=1; fi
+  done
+  [ $fail = 0 ] || { echo "G1 selftest FAILED: the verdict does not depend on the measurement" >&2; exit 1; }
+  echo "G1 selftest ok"
+fi
