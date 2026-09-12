@@ -50,4 +50,47 @@ menu "Pocket VM (L0 measurement probes)"
 
             Measure the cost with tools/memlog.py rather than assuming it.
 
+    config POCKET_UI_TASK_CORE
+        int "Core the ui task is pinned to (-1 = let FreeRTOS choose)"
+        range -1 1
+        default 1
+        help
+            main/main.c's ui_task owns the whole UI, every screen and the JS
+            session (docs/vm-L1-design.md sec.4.1), so where it runs decides
+            where every JS job runs. -1 creates it with tskNO_AFFINITY, which
+            is what xTaskCreate() did here before; 0 or 1 pins it.
+
+            The default is 1 because that is what the board measured
+            (docs/vm-L1-report.md sec.8, all 実測(device)): core 1 is
+            indistinguishable from no affinity -- the JS turn medians match to
+            0.1%, the LCD transfer to 0.04%, DIRAM to the byte -- while core 0
+            costs 5.6% of a compute-bound turn, 7.6% of the transfer, and 16%
+            of an HTTP request running on the other core, because core 0 is
+            where ESP-IDF fixes the Wi-Fi driver task. Pinning also removes the
+            one migration the board does take (measured: 1 in 1,800 idle
+            frames, docs/vm-l1-clock.md sec.2), which is what makes a per-core
+            clock (CONFIG_POCKET_VM_CCOUNT) possible at all.
+
+            The three values are the SAME binary with one immediate changed --
+            xTaskCreatePinnedToCore() is the only call site either way -- so a
+            measurement across them is not confounded by a code-path change.
+
+    config POCKET_VM_CCOUNT
+        bool "Read CCOUNT, not esp_timer, for the L1 job budget"
+        default n
+        help
+            The L1 turn budget asks the clock how much of its 8 ms is left,
+            once every VM_JOB_STRIDE jobs (vm_sched.h). CCOUNT --
+            the per-core cycle counter, RSR CCOUNT, the one main/scene/flower.c
+            already uses -- costs 25 ns a read against esp_timer_get_time()'s
+            833 ns (measured (device), docs/vm-l1-clock.md sec.1).
+
+            It is per core, so it is only sound when the task that runs the
+            drain cannot migrate: components/pocketjs_guest/src/vm_clock.c
+            refuses to compile unless CONFIG_POCKET_UI_TASK_CORE >= 0.
+
+            Whether it is worth having is a measurement, not a preference --
+            docs/vm-L1-report.md sec.8 records what each clock costs on the
+            job-heavy workloads.
+
 endmenu

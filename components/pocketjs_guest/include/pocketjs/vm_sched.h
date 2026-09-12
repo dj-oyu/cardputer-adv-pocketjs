@@ -40,7 +40,20 @@ typedef struct JSContext JSContext;
 /* Defaults, from docs/vm-L1-design.md sec.1.2. Each is justified there against
  * a measured (device) number; none of them is a guess dressed as a constant. */
 #define VM_TURN_BUDGET_US 8000  /* 33.3 ms frame - 7.7 ms transfer - 1.5 ms UI, /3 */
-#define VM_JOB_STRIDE 4         /* overrun past the limit <= stride * cost-per-job */
+/* Read the clock before EVERY job past the floor. This was 4, and 4 was
+ * measured (device) to cost 2.5 ms of budget overrun: taking it to 1 moved the
+ * async-generator workload's drain p95 from 6,720 us to 4,184 us and its max
+ * from 7,144 to 4,877 (docs/vm-L1-report.md sec.8). The reason is that the
+ * workload's expensive jobs are not its median job -- three of them fit inside
+ * one stride of 4 -- which is exactly the (stride-1) x cost-per-job the old
+ * comment bounded the overrun by, measured instead of estimated.
+ *
+ * The reads it costs did not appear: the same builds' promise_chain drain is
+ * 730 us at stride 4 and 731 us at stride 1 (41 jobs a turn), and a build with
+ * the floor removed as well -- a clock read before every one of those 41 jobs
+ * -- is 730 us too, on an instrument that resolves 8 us. That is why the
+ * cheaper clock (CONFIG_POCKET_VM_CCOUNT) is not needed to afford this. */
+#define VM_JOB_STRIDE 1
 #define VM_JOB_FLOOR 8          /* runs even when frame() already spent the turn */
 #define VM_JOB_BACKSTOP 64      /* only reachable with a dead clock; max drain was 68 */
 /* The Back turn (main.c calls app_tick(0x2000) once to give the guest a last
@@ -84,21 +97,34 @@ typedef enum {
 } vm_drain_status_t;
 
 typedef struct {
-  /* Whatever vm_clock_fn returns, read once at turn start. ONLY DIFFERENCES
-   * ARE USED, so a 32-bit source that wraps (CCOUNT wraps every ~17.9 s at
-   * 240 MHz) is correct for any turn shorter than its period. */
-  int64_t start;
-  /* What the last vm_sched_drain() on this budget spent, in the clock's units.
-   * Written on every return, and zero in count mode (limit_us <= 0) where the
-   * clock is deliberately never read. The runaway guard sums it across one
-   * logical drain; it costs one extra clock read per drain (measured: 25 ns
-   * CCOUNT, 833 ns systimer) against a drain measured in milliseconds. */
+  /* The clock read once at turn start, in the clock's own ticks. ONLY
+   * DIFFERENCES ARE USED and they are taken as UNSIGNED 32-BIT, so a source
+   * that wraps (CCOUNT wraps every ~17.9 s at 240 MHz) is exactly right for
+   * any turn shorter than its period -- which an 8 ms turn is by three orders
+   * of magnitude. */
+  vm_tick_t start;
+  /* What the last vm_sched_drain() on this budget spent, IN MICROSECONDS --
+   * the unit every caller states its numbers in (VM_RUNAWAY_US, the RUNAWAY
+   * log line). Written on every return, and zero in count mode (limit_us <= 0)
+   * where the clock is deliberately never read. The runaway guard sums it
+   * across one logical drain; it costs one extra clock read per drain
+   * (measured (device): 25 ns CCOUNT, 833 ns esp_timer) plus the one divide
+   * that converts it, against a drain measured in milliseconds. */
   int64_t elapsed;
   int64_t limit_us;   /* <= 0 disables the time check entirely (count mode) */
+  /* limit_us converted to ticks ONCE, when the budget is armed, so the per-job
+   * check is a subtract and a compare and never a multiply. 0 means the time
+   * check is off. Clamped to 2^31 ticks: an unsigned difference can only
+   * distinguish intervals shorter than the counter's period, so a limit at or
+   * past it could never be observed to expire (8.9 s at 240 MHz, against an
+   * 8 ms turn and a 50 ms leave turn -- the clamp is unreachable in this
+   * firmware and exists so that it stays unreachable). */
+  vm_tick_t limit_ticks;
+  uint32_t ticks_per_us;  /* from vm_clock_ticks_per_us() at arm time */
   unsigned stride;    /* clock reads happen every `stride` jobs; 0 means 1 */
   unsigned floor_jobs;
   unsigned backstop;  /* 0 means no count ceiling */
-  vm_clock_fn clock;  /* NULL uses vm_clock_now_us() */
+  vm_clock_fn clock;  /* NULL uses vm_clock_now() */
 } vm_budget_t;
 
 /** Arm a budget with the L1 defaults and read the clock once. `limit_us <= 0`

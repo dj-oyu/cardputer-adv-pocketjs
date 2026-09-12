@@ -1,0 +1,8 @@
+# Restores the pre-decision placement of the ui task: no affinity, FreeRTOS
+# chooses (docs/vm-L1-report.md sec.8 measured this as "pin_none"). The
+# shipping default is core 1; this overlay and sdkconfig.uipin0.defaults are
+# what reproduce the other two arms of that measurement.
+#
+#   idf.py -B build_uipin_off -D SDKCONFIG=build_uipin_off/sdkconfig \
+#          -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.uipinoff.defaults" build
+CONFIG_POCKET_UI_TASK_CORE=-1

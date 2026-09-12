@@ -1,0 +1,9 @@
+# Pins main/main.c's ui_task to core 0 (docs/vm-L1-report.md sec.8). The
+# shipping default is core 1, so this is the arm of that measurement which the
+# board says is the expensive one -- core 0 is where ESP-IDF fixes the Wi-Fi
+# driver task, and sharing it cost 5.6% of a compute-bound JS turn, 7.6% of the
+# LCD transfer and 16% of an HTTP request (実測(device)). Layer it LAST:
+#
+#   idf.py -B build_pin0 -D SDKCONFIG=build_pin0/sdkconfig \
+#          -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.uipin0.defaults" build
+CONFIG_POCKET_UI_TASK_CORE=0

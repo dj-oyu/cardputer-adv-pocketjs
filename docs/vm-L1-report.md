@@ -177,6 +177,8 @@ python tools\memlog.py --map build_l1_dev\cardputer_pocketjs.map --port COM3 --c
 
 ### 5.3 clockbench の結論が取り込まれていない
 
+**2026-09-12 に §8 で決着した**（pin は採用 = core 1、CCOUNT と毎ジョブ読みは不採用、いずれも実測(device)）。以下は決着前の記述として残す。
+
 `vm/l1-clockbench`（[vm-l1-clock.md](vm-l1-clock.md)）は実測(device)で 3 つの結論を出しているが、**`vm/l1-host-sched` には 1 つも入っていない**（ブランチは未マージ、`git merge-base --is-ancestor` で確認）。
 
 | clockbench の結論（実測(device)） | L1 の実装 | 差 |
@@ -201,7 +203,7 @@ python tools\memlog.py --map build_l1_dev\cardputer_pocketjs.map --port COM3 --c
 
 2. **出荷時定数の承認。** `VM_TURN_BUDGET_US=8000` / `VM_JOB_STRIDE=4` / `VM_JOB_FLOOR=8` / `VM_JOB_BACKSTOP=64` / `VM_LEAVE_BUDGET_US=50000` / `VM_LEAVE_BACKSTOP=256` / `VM_RUNAWAY_US=250000` / `VM_RUNAWAY_JOBS=100000` / `VM_MIN_PERIOD_MS=8`。L0 §2.2 の提案（件数 16、時間 8 ms、遅延 p95 8 ms / 最大 20 ms、DIRAM +8 KiB、低下 +5% 以内）を L1 がどう解釈したかは設計 §1.2 にある。**遅延の上限（p95 8 ms / 最大 20 ms）は互換モードでは達成できない**（resolve が継続ターン中は保留されるため）ので、この提案値を L1 に対して適用するのか、L2 以降の目標に送るのかを決める必要がある。
 
-3. **時計の決定（§5.3）。** clockbench の 3 結論（CCOUNT・毎ジョブ読み・ui タスク pin）を L1 に取り込むか。取り込むなら `vm/l1-clockbench` のマージ順と、`vm_budget_t` の単位変更を含めた作業になる。取り込まないなら、その判断（systimer 833 ns × 1/4 件を許容する）を設計書に書き留める。**どちらにせよ、`vm/l1-clockbench` の pin ビルド実行時比較が未完成であることは実機復旧後に片付ける必要がある。**
+3. **時計の決定（§5.3）。決定済み — §8 を参照（pin は採用、CCOUNT と毎ジョブ読みは不採用、いずれも実測(device)による）。** 以下は決定前の記述。clockbench の 3 結論（CCOUNT・毎ジョブ読み・ui タスク pin）を L1 に取り込むか。取り込むなら `vm/l1-clockbench` のマージ順と、`vm_budget_t` の単位変更を含めた作業になる。取り込まないなら、その判断（systimer 833 ns × 1/4 件を許容する）を設計書に書き留める。**どちらにせよ、`vm/l1-clockbench` の pin ビルド実行時比較が未完成であることは実機復旧後に片付ける必要がある。**
 
 4. **`deferred_buttons` の融合（§5.2-1）をどうするか。** (a) 受け入れて文書化する、(b) キュー化する（離鍵フレームの対を作り直す）、(c) 継続ターン中は最初の 1 つだけ保持し残りを捨てる。影響を受けるのは「継続ターンが続くほど忙しいアプリ」だけで、現状そのようなアプリは F 型のプローブしかない。
 
@@ -254,3 +256,141 @@ $ git -C C:\devs\m5stack\cardputer-adv-pocketjs-vm status --short
 | `45610c8` | 設計書 §9（実装の記録と設計との差分） |
 | `dd016a0` | 独立レビュー — ホスト側の欠陥 2 件 + ビルド破壊 1 件の修正、新規コーパス 3 件 |
 | `6482692` | 意味論レビューへの対応 — 暴走ガードの設計変更、`exit()` の位置、`pocket_text` の pump 化、自タスク起床の抑止 |
+
+---
+
+## 8. 時計とコアの決定（2026-09-12、実機で決着）
+
+§5.3 と §6-3 が残した「clockbench の 3 結論を取り込むか」を実機で測って決めた。
+[vm-l1-clock.md](vm-l1-clock.md) §2 の「pin したビルドの実行時コストは未測定」も
+ここで埋まっている。測定はすべて `CONFIG_POCKET_VM_PROBE=y` + `tools/vm_l0_capture.py`
+（ワークロード A/D/F × 条件 base/audio/all × 反復 2 × 15 秒）と、ホーム画面の
+`PERF` 行を 12 秒のウォームアップ後 60 秒プールしたもの。
+
+**3 つの配置は同じ 1 本のバイナリ族**で、`xTaskCreatePinnedToCore()` の即値だけが違う
+（`main.c` の呼び出し口は 1 つ）。静的 DIRAM は 3 つとも **119,788 B でバイト一致**。
+
+### 8.1 pin の実測(device)
+
+| 指標 | 無 pin | core 1 | core 0 |
+| --- | --- | --- | --- |
+| sync_loop / base turn 中央値 | 117.37 ms | 117.36 ms | **123.91 ms (+5.6%)** |
+| sync_loop / all turn 中央値 | 121.31 ms | 121.39 ms | **131.92 ms (+8.7%)** |
+| promise_chain / all turn 中央値 | 13.04 ms | 13.08 ms | **14.03 ms (+7.6%)** |
+| async_generator / all turn 中央値 | 8.16 ms | 8.00 ms | **9.19 ms (+12.6%)** |
+| LCD 転送 `PERF send` 中央値 | 7.66–7.70 ms (5 boot) | 7.67–7.70 ms (5 boot) | **8.25–8.34 ms (3 boot、範囲が重ならない)** |
+| 他コアの仕事: LAN gateway への HTTP GET（`pocket_http` タスク、JS 実行中） | 422 ms (n=14) | 428 ms | **488 ms (+15.6%)** |
+| 音の再武装回数（tone 完了から再発行、15 秒） | 10 | 10 | 10 |
+| 空きヒープ最小（promise_chain/base） | 83,760 B | 83,760 B | 83,760 B |
+| 静的 DIRAM | 119,788 B | 119,788 B | 119,788 B |
+
+**ホーム画面の fps では pin の有無を分離できない。** 同じバイナリの boot 間で
+無 pin が 23.20 / 22.60 / 21.70 / 18.25 / 18.85 fps と **27% ばらつく**（背景が
+毎 boot 違う庭を生成するため）。この幅は無 pin と core 1 の差を丸ごと飲み込むので、
+fps でどちらが速いとは言わない。**分離できたのは `send` と JS 行列の方**で、
+そちらは反復間 0.5% 以内に収まる。
+
+**core 0 が高いのは構造的**: ESP-IDF は Wi-Fi ドライバタスクを core 0 に固定して作る
+（起動ログ `wifi driver task: ..., core=0`、[vm-l1-clock.md](vm-l1-clock.md) §2）。
+ファーム自身のワーカー（`sfx` 優先度 7、`pocket_http`、`wifi_*`）はすべて `xTaskCreate`
+= 無指定なので、ui を core 1 に置くと OS が空いている側へ流せる。core 0 に置くと
+描画・JS・無線が 1 つのコアに積まれ、**JS のターンだけでなく他コアの仕事（HTTP +15.6%）
+まで悪くなる**。
+
+**Wi-Fi は測れた。** [vm-l1-clock.md](vm-l1-clock.md) §2 は「資格情報が無いので
+スキャンしか出来ない」と書いているが、現在は保存されており、`all` 条件の全ランで
+`VMCOND wifi connected 192.168.1.42` が出て実際にリンク・HTTP まで通っている。
+上の HTTP の行がその実測。
+
+### 8.2 時計の実測(device)
+
+`ui_task` を core 1 に固定した 4 ビルド（プローブ付き、他は同一）。drain の µs。
+
+| ビルド | promise_chain/base 中央値 / p95 / 最大 | async_generator/base 中央値 / p95 / 最大 |
+| --- | --- | --- |
+| esp_timer, stride 4（現行の出荷値） | 730 / 897 / 1,053 | 4,138 / 6,720 / 7,144 |
+| CCOUNT, stride 4 | 739 / 865 / 1,046 | 4,056 / 6,551 / 6,844 |
+| esp_timer, stride 1 | 731 / 858 / 1,035 | 3,862 / 4,184 / 4,877 |
+| CCOUNT, stride 1 | 738 / 873 / 1,056 | 3,806 / 4,432 / 4,818 |
+
+**時計を替えても drain は動かない。** stride 4 でも stride 1 でも、CCOUNT と
+esp_timer の差は promise_chain で **+8 µs（CCOUNT が遅い側）**、async_generator で
+**−56 µs（CCOUNT が速い側）** と**符号が揃わず**、どちらも同じ器械が示す
+ビルド間ばらつき（同じソース・違うビルドで turn 中央値が 6.50→5.91 ms と 9% 動く。
+CLAUDE.md の「命令キャッシュのアラインメントで 15%」そのもの）より小さい。
+**33 倍安い読み取りが、drain のどこにも現れない。**
+
+読む回数の側から見ても同じ結論になる（推定、上の実測値から）: promise_chain は
+1 ターン 41 ジョブ・drain 730 µs で、stride 4 なら時計は 9 回、stride 1 でも 33 回。
+esp_timer の 833 ns（実測、vm-l1-clock.md §1）を掛けて 7.5 µs / 27.5 µs、
+つまり最悪でも drain の 3.8%。**その 3.8% すら測定には出ていない。**
+
+### 8.3 決定
+
+1. **`ui_task` を core 1 に pin する（採用）。** `CONFIG_POCKET_UI_TASK_CORE` の既定を
+   `1` にした。実測で core 1 は無 pin と区別できず（JS ターン中央値 0.1% 以内、
+   転送 0.04% 以内、DIRAM 0 B）、core 0 は 5.6〜15.6% 高い。無 pin は「OS が選ぶ」
+   ＝将来の負荷次第で core 0 に載りうる側なので、測って安い方を固定する。
+   これは**時計とは独立に成り立つ判断**で、CCOUNT を採らなくても残る。
+
+2. **CCOUNT は採用しない。** 測定が利益を示さないため（§8.2）。代わりに払う代償は
+   小さくない — CCOUNT はコアごとのレジスタなので `ui_task` の pin と**永久に結び付く**し、
+   `CONFIG_PM_ENABLE`（DFS）を入れた日に**黙って**間違える（CCOUNT は CPU サイクルを
+   数えるので、周波数が動けばレートが動く）。**測って差が出ないものに、静かに壊れる
+   結合を足さない。** clockbench の「無料だからやる」は読み取りコストの比（33 倍）を
+   根拠にしていたが、その比が drain に現れないことがここでの実測。
+
+3. **`VM_JOB_STRIDE` は 4 のまま**（この課題では変えない）。ただし §8.2 の表は
+   stride 1 が async_generator の drain p95 を **6,720 → 4,184 µs（−38%）**、
+   最大を 7,144 → 4,877 µs に縮めることを示している。これは時計の費用ではなく
+   **予算がより早く効くという挙動の差**で、時計の決定とは別の問題。§9 に回す。
+
+4. **実装は残す。** `CONFIG_POCKET_VM_CCOUNT`（既定 `n`）として入っており、
+   `CONFIG_POCKET_UI_TASK_CORE < 0` では**コンパイルを拒否する**（`vm_clock.c` の
+   `#error`）。採らない判断を、次に誰かが測り直せる形で残すため。
+
+### 8.4 単位と折り返し（採否に関わらず正しくした）
+
+CCOUNT は 32 bit で、240 MHz では 2^32/240e6 ≒ **17.9 秒で一周する**。したがって:
+
+- **時計の型を `vm_tick_t = uint32_t` にした。** 差分は `(vm_tick_t)(now - start)` と
+  **符号なし 32 bit** で取る。C の mod-2^32 規則により、真の経過が周期未満である限り
+  折り返しをまたいでも差は正しい。8 ms のターンに対して周期は 3 桁上なので、
+  **折り返しは分岐ではなく型で処理されている**。esp_timer 経路も同じ型に落とし込んで
+  あり（µs を 32 bit に切る）、こちらの周期は 4,295 秒。
+- **µs ↔ tick の変換場所は 2 箇所だけで、どちらもジョブごとではない。**
+  (a) 予算を張るとき（`vm_budget_begin_full`）に `limit_us × vm_clock_ticks_per_us()`
+  で tick へ — **1 ターンに 1 回の掛け算**。(b) drain が返るときに
+  `(vm_tick_t)(now - start) / ticks_per_us` で µs へ — **1 drain に 1 回の割り算**
+  （小さな定数で割る 32 bit 除算、数十サイクル。drain は ms 単位）。
+  **ジョブごとの検査は tick のままの引き算と比較**で、掛け算も割り算も入らない。
+- `limit_ticks` は 2^31 tick で飽和させてある。符号なし差分は周期未満の間隔しか
+  区別できないので、周期以上の予算は「期限切れになったことが観測できない」予算に
+  なるため。240 MHz で 8.9 秒であり、このファームが張る最長の予算（離脱ターンの
+  50 ms = 12e6 tick）から 2 桁離れている — 到達しないことを保つための飽和。
+- 予算の**外向きの単位は µs のまま**（`VM_TURN_BUDGET_US` / `VM_RUNAWAY_US` /
+  `RUNAWAY` のログ行 / `budget.elapsed` を足し込む暴走ガード）。単位が変わったのは
+  `vm_sched.c` の内側だけで、`guest.c` も `app_session.c` も 1 行も変わっていない。
+
+### 8.5 この変更の費用（実測(build) / 実測(device)）
+
+| 項目 | 値 |
+| --- | --- |
+| 静的 DIRAM（素の L1 ビルド） | **115,468 B = §2.2 の L1 と 1 バイトも変わらず（+0 B）** |
+| Flash Code | 1,552,644 B（+32 B） |
+| ホーム画面の空きヒープ（`memlog.py --port --check`） | idle_free 277,052 / app_free 120,856 / app_largest 69,632 → `MEMLOG_OK within budget` |
+| ホスト検査 | corpus 33 件 × {asan, o2} × {既定, `--budget-jobs 1/3/7/16`, `--force-yield`} = **12 通りすべて 33 passed, 0 failed** |
+| 実機検査 | `SETTINGS_OK` / `capture_home` 全モード（mode 0/1/2 は 30.0 fps、mode 3 は 20.7–21.7 fps）/ `SMOKE_OK 20`（`MEM (277052, 139264)` が 10 と 20 周で一致 = リーク無し） |
+
+### 8.6 追わなかった調律（§9 の候補）
+
+- **`VM_JOB_STRIDE` を 1 にするか**（§8.3-3）。実測では async_generator の drain p95 が
+  38% 縮む。時計の決定とは独立で、スケジューラ定数の調律として別に判断すべき。
+- **`VM_JOB_FLOOR=8` が時間検査を事実上無効にしている疑い。** promise_chain は
+  1 ターン 41 ジョブ・stride 1 で時計を 33 回読むはずだが、esp_timer の stride 4→1 で
+  drain が 730→731 µs と**1 µs しか動かない**（同じ器械が 8 µs の差は分離している）。
+  読み取りが予想どおり起きていれば +27 µs 出るはずで、出ていない以上
+  「1 回の `vm_sched_drain` 呼び出しが floor の 8 件に届いていない」可能性がある（推定）。
+  本当なら、時間予算は一部のワークロードで一度も効いていないことになる。
+  **確かめるには floor を外したビルドを 1 本焼けば足りる**が、floor は時計ではなく
+  スケジューラの定数なので、この課題では踏み込んでいない。

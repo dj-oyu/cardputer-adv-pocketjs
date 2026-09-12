@@ -13,7 +13,20 @@ void vm_budget_begin_full(vm_budget_t *budget, int64_t limit_us,
   budget->backstop = backstop;
   budget->clock = NULL;
   budget->elapsed = 0;
-  budget->start = vm_clock_now_us();
+  /* The ONE place microseconds become ticks. Once per turn, not once per job:
+   * what the drain loop compares is two ticks. The clamp is the correctness
+   * bound of an unsigned difference (see vm_sched.h) and is unreachable for
+   * any budget this firmware arms -- 50 ms at 240 MHz is 12e6 ticks against a
+   * ceiling of 2^31. */
+  budget->ticks_per_us = vm_clock_ticks_per_us();
+  if (limit_us > 0) {
+    const int64_t ticks = limit_us * (int64_t)budget->ticks_per_us;
+    budget->limit_ticks = ticks < (int64_t)0x80000000 ? (vm_tick_t)ticks
+                                                      : (vm_tick_t)0x80000000;
+  } else {
+    budget->limit_ticks = 0;
+  }
+  budget->start = vm_clock_now();
 }
 
 void vm_budget_begin(vm_budget_t *budget, int64_t limit_us) {
@@ -23,7 +36,7 @@ void vm_budget_begin(vm_budget_t *budget, int64_t limit_us) {
 
 void vm_budget_restart(vm_budget_t *budget) {
   if (budget != NULL)
-    budget->start = (budget->clock ? budget->clock : vm_clock_now_us)();
+    budget->start = (budget->clock ? budget->clock : vm_clock_now)();
 }
 
 /* One exit for every return, so `elapsed` can never be the previous drain's
@@ -35,7 +48,14 @@ static vm_drain_status_t drain_return(vm_budget_t *budget, vm_clock_fn clock,
                                       unsigned n, unsigned *ran,
                                       vm_drain_status_t status) {
   *ran = n;
-  budget->elapsed = budget->limit_us > 0 ? clock() - budget->start : 0;
+  /* Ticks back to microseconds, once per drain. The subtraction is unsigned so
+   * that a counter which wrapped inside this drain still yields the true
+   * interval; the divide is by a small constant and costs tens of cycles
+   * against a drain measured in milliseconds. */
+  budget->elapsed =
+      budget->limit_ticks != 0
+          ? (int64_t)((vm_tick_t)(clock() - budget->start) / budget->ticks_per_us)
+          : 0;
   return status;
 }
 
@@ -43,7 +63,7 @@ vm_drain_status_t vm_sched_drain(JSRuntime *runtime, vm_budget_t *budget,
                                  unsigned *ran, JSContext **failed_ctx) {
   unsigned n = 0;
   const vm_clock_fn clock =
-      (budget->clock != NULL) ? budget->clock : vm_clock_now_us;
+      (budget->clock != NULL) ? budget->clock : vm_clock_now;
   for (;;) {
     if (!JS_IsJobPending(runtime))
       return drain_return(budget, clock, n, ran, VM_DRAIN_EMPTY);
@@ -54,8 +74,9 @@ vm_drain_status_t vm_sched_drain(JSRuntime *runtime, vm_budget_t *budget,
      * the budget before the drain began (measured (device): frame() alone is
      * 117 ms in the worst L0 workload); the stride is what keeps the overrun
      * past the limit bounded by stride * cost-per-job rather than unbounded. */
-    if (budget->limit_us > 0 && n >= budget->floor_jobs &&
-        (n % budget->stride) == 0U && clock() - budget->start >= budget->limit_us)
+    if (budget->limit_ticks != 0 && n >= budget->floor_jobs &&
+        (n % budget->stride) == 0U &&
+        (vm_tick_t)(clock() - budget->start) >= budget->limit_ticks)
       return drain_return(budget, clock, n, ran, VM_DRAIN_YIELDED);
     /* One job, start to finish. Nothing below this line can observe a partial
      * job, which is the whole reason the budget lives here and not inside an

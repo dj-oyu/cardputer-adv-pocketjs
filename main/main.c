@@ -769,5 +769,12 @@ void app_main(void) {
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
     keys=xQueueCreate(16,sizeof(keystroke_t));configASSERT(keys);
     configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
-    configASSERT(xTaskCreate(ui_task,"ui",32768,NULL,5,NULL)==pdPASS);
+    // Pinned or not, ONE call site (xTaskCreate is itself a wrapper for this
+    // with tskNO_AFFINITY), so CONFIG_POCKET_UI_TASK_CORE changes an immediate
+    // and nothing else -- the three settings are one binary family, which is
+    // what makes a measurement across them mean anything. Why it exists:
+    // CCOUNT is per core, so a budget that reads it needs a task that cannot
+    // migrate between two reads (docs/vm-L1-report.md sec.8).
+    configASSERT(xTaskCreatePinnedToCore(ui_task,"ui",32768,NULL,5,NULL,
+        CONFIG_POCKET_UI_TASK_CORE<0?tskNO_AFFINITY:CONFIG_POCKET_UI_TASK_CORE)==pdPASS);
 }

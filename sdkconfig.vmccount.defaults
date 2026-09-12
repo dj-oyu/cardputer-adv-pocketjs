@@ -1,0 +1,12 @@
+# Makes the L1 job budget read CCOUNT instead of esp_timer.
+#
+# NOT ADOPTED, and this file is what reproduces the measurement that says so
+# (docs/vm-L1-report.md sec.8): with the clock read as often as it ever is
+# (stride 1), CCOUNT and esp_timer differ by less than this board's own
+# build-to-build variation, in both directions. The option is implemented and
+# correct -- wrap-safe, and it refuses to compile unless the ui task is pinned,
+# because CCOUNT is per core -- it simply does not pay for itself here.
+#
+#   idf.py -B build_clk_cc -D SDKCONFIG=build_clk_cc/sdkconfig \
+#     -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.vmccount.defaults" build
+CONFIG_POCKET_VM_CCOUNT=y
