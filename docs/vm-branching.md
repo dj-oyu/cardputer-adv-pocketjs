@@ -9,11 +9,13 @@ main ──────────●──────────────
                 \   (取り込み) ↓ merge            ↑ merge（段階の関所のみ）
 vm/main ─────────●──────●──────●──────●───────────●── 統合。常にビルドが通る
                   \    /        \    /
-vm/p0-foundation   ●──●          ●──●  vm/l1-host-sched …  段階ごとの作業ブランチ
+vm/l2a-segments    ●──●          ●──●  vm/l2b-frames …     段階ごとの作業ブランチ
+                   （戻したら消す。記録はタグとレポート）
 ```
 
 - **`vm/main`**: 改造の統合ブランチ。常にファームがビルドでき、ホストの差分実行が通る状態で保つ。push 済みの履歴は書き換えない（force push しない）。
-- **`vm/<段階>-<題目>`**: 作業ブランチ（例: `vm/p0-foundation`、`vm/l1-host-sched`、`vm/l2a-segments`）。`vm/main` から切り、関所の検査を通したら `--no-ff` で `vm/main` へ戻す。完了した段階には `vm-L0`、`vm-L1` … のタグを打つ。
+- **`vm/<段階>-<題目>`**: 作業ブランチ（例: `vm/l2a-segments`）。`vm/main` から切り、関所の検査を通したら `--no-ff` で `vm/main` へ戻す。完了した段階には `vm-L0`、`vm-L1` … のタグを打つ。
+- **戻した作業ブランチは消す（ローカルも origin も）。** 段階の記録はタグとレポートが持っているので、枝を残す理由は無い。残すと「どこに何があるか」が分からなくなり、実際 L1 完了時点で 5 本の枝と 3 本のツリーが残って、統合されていない成果があるのかどうか誰にも読めない状態になった。2026-09-12 に `vm/p0-foundation`・`vm/l0-retire-workloads`・`vm/l1-fair-mode`・`vm/l1-host-sched`・`chore/drop-audio-dev-apps` を統合のうえ削除済み。
 - **`main` → `vm/main`**: 各段階の開始時に `main` を merge で取り込む。rebase はしない（push 済みのため）。
 - **`vm/main` → `main`**: 段階の関所でのみ、ユーザーが判断して行う。新しい経路はビルド時選択で既定を従来経路にしておき、`main` の挙動を変えない（仕様 §12）。
 
@@ -25,14 +27,28 @@ vm/p0-foundation   ●──●          ●──●  vm/l1-host-sched …  段
 
 ## 作業ツリー
 
-改造は別の作業ツリーで行い、`main` の作業ツリー（他セッションが共有している）には触れない。
+**改造用の作業ツリーは1本にした（2026-09-12、L2 着手前）。**
 
 ```text
-C:\devs\m5stack\cardputer-adv-pocketjs      main（共有）
-C:\devs\m5stack\cardputer-adv-pocketjs-vm   vm/*（本改造専用）
+C:\devs\m5stack\cardputer-adv-pocketjs   vm/main（ここで改造を進める）
 ```
 
-- 改造側の `.cache/` は、読み取りだけの依存（`pocketjs`、`native`、`bmi270`、`codecs`）を `main` 側へのジャンクションで共有し、改変しうる `components/pocketjs_guest` は複製する。
-- ジャンクションにより `dependencies.lock` のパスが書き換わるため、改造側の作業ツリーでは `git update-index --skip-worktree dependencies.lock` を設定してある。コミットに含めない。
-- ビルドディレクトリは `build_vm*` を使う。
+L0・L1 の間は `-vm`（vm/*）・`-bench`（時計ベンチ）・`-chore`（音声アプリ削除）の3本を
+並べていたが、段階が終わっても枝とツリーが残り、**どこに何があるか誰も分からない状態**に
+なった。実際、L1 の成果（`CONFIG_POCKET_UI_TASK_CORE`）が本採用された後も `-bench` には
+それを決めるためだけのベンチ用ノブが残っていて、マージして初めて重複が見つかっている。
+段階が終わったら枝もツリーも畳み、記録はタグ（`vm-L0`、`vm-L1`）とレポートに残す。
+
+- **`main` 側の作業が要るときだけ**、そのとき別の作業ツリーを切る。常設しない。
+- 1本になったので `.cache/` のジャンクション（`pocketjs`、`native`、`bmi270`、`codecs`）は
+  不要になり、全部外した。**ジャンクションを張ったツリーを消すときは、先にリンクを
+  `rmdir` で外すこと** — 削除がリンクを辿ると共有先の依存ごと消える。
+- `dependencies.lock` はこのツリーでも `git update-index --skip-worktree` してある。
+  理由はジャンクションではなく、**quickjs-ng を `components/` に取り込んだのに
+  コミット済みのロックがまだレジストリ版を指しているため**で、ビルドのたびに書き換わる。
+  `main` へ戻すと元に戻るので、コミットしない。
+- ビルドディレクトリは作業ごとに分ける（`build_*`。CLAUDE.md 参照）。
 - 実機（COM3）は1本しかない。書き込みと計測は、ユーザーが実施するか、明示の許可を得てから行う。
+- **段階の生データは `.cache/vm/`**（git 管理外）。L0 の行列（`l0-matrix.jsonl`、1,265 行）と
+  L1 の各計測はここにある。旧 `-vm` ツリーを畳むときに移してある。アロケータ比較と
+  各ツリーの `memlog` 履歴は `.cache/salvage/` に退避した。
