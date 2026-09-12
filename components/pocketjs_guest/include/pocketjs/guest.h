@@ -121,6 +121,18 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest);
  * take (one per frame today) and are zeroed by it, so the caller reads
  * "this frame's". Two clock reads per frame, not per job. */
 void pocketjs_guest_vmprobe_take(uint32_t *call_us, uint32_t *drain_us);
+
+/** vm-l1-tuning: raw `ran` from every vm_sched_drain() call (drain_jobs(),
+ * the choke point both pocketjs_guest_frame() and pocketjs_guest_continue()
+ * share) since the last take, up to `cap` entries -- oldest-first, FIFO by
+ * insertion. Returns how many were written into `out` (NULL to just drain and
+ * count); `*dropped` is how many more happened than the internal buffer
+ * (128) could hold. Resets both counters. This is the ONLY way to see a
+ * continuation call's job count: it never reaches vmprobe_frame_sample(),
+ * whose per-turn "jobs" sample only covers calls a frame() tick made and
+ * folds an unreported continuation into whichever later tick does call it. */
+unsigned pocketjs_guest_vmprobe_drain_calls(uint16_t *out, unsigned cap,
+                                            unsigned *dropped);
 #endif
 
 #ifdef __cplusplus

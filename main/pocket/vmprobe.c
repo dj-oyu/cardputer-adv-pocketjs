@@ -14,6 +14,7 @@
 #include "esp_app_desc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -25,11 +26,8 @@ static const char *TAG = "vmprobe";
 // each window's own min/median/max. That cannot produce an exact p95 over a
 // capture: a median of per-window medians is an estimate, and p95 is not
 // composable from per-window summaries at all. sec.5 asks for median AND p95
-// AND max, so the device hands every individual sample to the host, which
-// computes all three exactly over the whole capture. (The L0 capture script,
-// tools/vm_l0_capture.py, is retired along with the L0 workloads it drove --
-// `git checkout vm-L0 -- apps/vmprobe tools/vm_l0_capture.py` brings both
-// back. This file's sampling still runs, unattached, for any app.)
+// AND max, so the device now hands every individual sample to the host and
+// tools/vm_l0_capture.py computes all three exactly over the whole capture.
 //
 // The cost of being exact is bounded on both sides:
 //   * RAM: the arrays below, all of it in a probe build only (a shipping
@@ -48,16 +46,26 @@ static const char *TAG = "vmprobe";
 // own count so the host can prove nothing was lost.
 #define VMPROBE_FRAME_CAP 64
 #define VMPROBE_LAT_CAP   64
+// vm-l1-tuning (docs/vm-l1-tuning.md): jobs returned by ONE vm_sched_drain()
+// CALL, not one app tick. "jobs" above is folded across a frame() tick and
+// the continuation tick(s) it may spawn (a continuation never reaches
+// vmprobe_frame_sample -- app_session.c returns early while the queue is
+// still non-empty), so it cannot show whether VM_JOB_FLOOR/VM_JOB_STRIDE ever
+// actually cut a call short. This can, and needs its own cap: a floor-limited
+// frame tick plus its continuation is already 2 calls per tick.
+#define VMPROBE_DRAINRUN_CAP 128
 #define VMPROBE_WINDOW_US 1000000
 #define VMPROBE_SAMPLE_EVERY_N_FRAMES 8   // ~4 Hz at a 33 ms frame pace
-#define VMPROBE_LINE 3072
+#define VMPROBE_LINE 4096
 
 static uint32_t frame_us[VMPROBE_FRAME_CAP];   // whole pocketjs_ui_turn()
 static uint32_t call_us[VMPROBE_FRAME_CAP];    // frame() alone (guest.c)
 static uint32_t drain_us[VMPROBE_FRAME_CAP];   // job drain alone (guest.c)
 static uint16_t jobs_n[VMPROBE_FRAME_CAP];     // jobs executed in that frame
 static uint32_t lat_us[VMPROBE_LAT_CAP];       // completion -> resolve/reject
+static uint16_t drainrun_n[VMPROBE_DRAINRUN_CAP]; // ran, one per drain CALL
 static unsigned frame_count, lat_count, lat_dropped;
+static unsigned drainrun_count, drainrun_dropped_device;
 static unsigned qpeak_max;
 
 static uint64_t jobs_executed_base;
@@ -74,8 +82,20 @@ static size_t   js_used_max, js_limit_last;
 static unsigned heap_free_min, heap_largest_min;
 static UBaseType_t stack_hw_min;
 
+// Set from the input task (main.c's usb_stroke), read on the ui task at
+// session start. Plain atomic: it is one word and the two tasks never need
+// more than "the last letter the host sent".
+static atomic_uint condition_mask;
+
+void vmprobe_condition_set(unsigned mask) {
+    atomic_store(&condition_mask, mask & VMPROBE_COND_ALL);
+    ESP_LOGI(TAG, "VMPROBE COND mask=%u", mask & VMPROBE_COND_ALL);
+}
+unsigned vmprobe_condition(void) { return atomic_load(&condition_mask); }
+
 static void window_reset(void) {
     frame_count = 0; lat_count = 0; lat_dropped = 0; qpeak_max = 0;
+    drainrun_count = 0; drainrun_dropped_device = 0;
     js_used_max = 0; heap_free_min = 0; heap_largest_min = 0; stack_hw_min = 0;
     window_start_us = esp_timer_get_time();
     window_ticks = 0;
@@ -108,20 +128,22 @@ static void flush_window(void) {
     static char line[VMPROBE_LINE];
     size_t at = 0;
     int n = snprintf(line, sizeof line,
-        "VMPROBE WINDOW seq=%u ms=%u frames=%u lat_n=%u lat_drop=%u "
+        "VMPROBE WINDOW seq=%u cond=%u ms=%u frames=%u lat_n=%u lat_drop=%u "
         "qpeak_max=%u heap_free_min=%u heap_largest_min=%u js_used_max=%u "
-        "js_limit=%u stack_hw_min=%u flush_us=%u\n",
-        window_seq,
+        "js_limit=%u stack_hw_min=%u flush_us=%u drainrun_drop=%u\n",
+        window_seq, vmprobe_condition(),
         (unsigned)((began - window_start_us) / 1000),
         frame_count, lat_count, lat_dropped, qpeak_max,
         heap_free_min, heap_largest_min, (unsigned)js_used_max,
-        (unsigned)js_limit_last, (unsigned)stack_hw_min, (unsigned)flush_us_last);
+        (unsigned)js_limit_last, (unsigned)stack_hw_min, (unsigned)flush_us_last,
+        drainrun_dropped_device);
     at = (n > 0 && (size_t)n < sizeof line) ? (size_t)n : 0;
     at = put_line(line, at, window_seq, "frame", frame_us, NULL, frame_count);
     at = put_line(line, at, window_seq, "call",  call_us,  NULL, frame_count);
     at = put_line(line, at, window_seq, "drain", drain_us, NULL, frame_count);
     at = put_line(line, at, window_seq, "jobs",  NULL, jobs_n, frame_count);
     at = put_line(line, at, window_seq, "lat",   lat_us,   NULL, lat_count);
+    at = put_line(line, at, window_seq, "drainrun", NULL, drainrun_n, drainrun_count);
     // One call, one vprintf, one lock: see the note at the top of this file.
     ESP_LOGI(TAG, "%s", line);
     window_seq++;
@@ -133,7 +155,7 @@ void vmprobe_static_report(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
     ESP_LOGI(TAG,
         "VMPROBE STATIC engine=quickjs-ng-0.14.0+immutable-buffer-patch compiler=%s opt=%s "
-        "sizeof_jsvalue=%u sizeof_stackframe=%u sizeof_varref=%u fw=%s",
+        "sizeof_jsvalue=%u sizeof_stackframe=%u sizeof_varref=%u fw=%s cond=%u",
         __VERSION__,
 #if defined(__OPTIMIZE_SIZE__)
         "Os",
@@ -145,17 +167,31 @@ void vmprobe_static_report(void) {
         (unsigned)sizeof(JSValue),
         (unsigned)qjs_vmprobe_sizeof_stack_frame(),
         (unsigned)qjs_vmprobe_sizeof_var_ref(),
-        desc ? desc->version : "?");
+        desc ? desc->version : "?",
+        vmprobe_condition());
     jobs_executed_base = qjs_vmprobe_jobs_executed_get();
     (void)qjs_vmprobe_job_queue_peak_take();   // rebase before the first window
     window_seq = 0;
     pocketjs_guest_vmprobe_take(NULL, NULL);
+    (void)pocketjs_guest_vmprobe_drain_calls(NULL, 0, NULL);
     window_reset();
 }
 
 void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us) {
     uint32_t call = 0, drain = 0;
     pocketjs_guest_vmprobe_take(&call, &drain);
+    // vm-l1-tuning: pull whatever accumulated since the last tick that
+    // reached here -- a continuation tick's own call(s) included, since they
+    // wrote through drain_jobs() same as this tick's did, just never got a
+    // vmprobe_frame_sample() of their own to be read at.
+    {
+        unsigned room = VMPROBE_DRAINRUN_CAP - drainrun_count;
+        unsigned dropped = 0;
+        unsigned got = pocketjs_guest_vmprobe_drain_calls(
+            drainrun_n + drainrun_count, room, &dropped);
+        drainrun_count += got;
+        drainrun_dropped_device += dropped;
+    }
     uint64_t now_jobs = qjs_vmprobe_jobs_executed_get();
     unsigned jobs = (unsigned)(now_jobs - jobs_executed_base);
     jobs_executed_base = now_jobs;
@@ -190,6 +226,7 @@ void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us) {
     // is "1 s or 64 frames", never "1 s and whatever fitted".
     if (frame_count >= VMPROBE_FRAME_CAP ||
         lat_count >= VMPROBE_LAT_CAP ||
+        drainrun_count >= VMPROBE_DRAINRUN_CAP ||
         esp_timer_get_time() - window_start_us >= VMPROBE_WINDOW_US)
         flush_window();
 }
@@ -209,6 +246,7 @@ void vmprobe_session_reset(void) {
     jobs_executed_base = qjs_vmprobe_jobs_executed_get();
     (void)qjs_vmprobe_job_queue_peak_take();
     pocketjs_guest_vmprobe_take(NULL, NULL);
+    (void)pocketjs_guest_vmprobe_drain_calls(NULL, 0, NULL);
     window_reset();
 }
 

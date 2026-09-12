@@ -31,6 +31,44 @@ void pocketjs_guest_vmprobe_take(uint32_t *call_us, uint32_t *drain_us) {
   vmprobe_call_us = 0;
   vmprobe_drain_us = 0;
 }
+
+/* vm-l1-tuning (docs/vm-l1-tuning.md): jobs actually returned by ONE
+ * vm_sched_drain() call, recorded from drain_jobs() -- the single choke
+ * point both pocketjs_guest_frame() (the frame()-triggering call) and
+ * pocketjs_guest_continue() (a continuation of the same logical drain, sec.2.1)
+ * go through. The existing "jobs" vmprobe sample cannot answer "does the
+ * floor/stride check ever actually fire": it is a per-APP_TICK sample, and a
+ * continuation tick never reaches vmprobe_frame_sample() (main/app_session.c's
+ * early return at a pending queue), so its job count is invisible until it
+ * gets folded into the NEXT frame-tick's sample -- 8 (floor-cut) + 33
+ * (continuation, unreported) reads as one 41, indistinguishable from a drain
+ * that never yielded. Raw per-call values, not a bucketed count, for the same
+ * reason vmprobe.c gives every other metric raw: the shape (not just the
+ * median) is the question. */
+#define VMPROBE_DRAIN_CALL_CAP 128
+static uint16_t vmprobe_drain_calls[VMPROBE_DRAIN_CALL_CAP];
+static unsigned vmprobe_drain_call_count, vmprobe_drain_call_dropped;
+
+static void vmprobe_drain_call_record(unsigned ran) {
+  if (vmprobe_drain_call_count < VMPROBE_DRAIN_CALL_CAP)
+    vmprobe_drain_calls[vmprobe_drain_call_count++] =
+        ran > 0xffffu ? 0xffffu : (uint16_t)ran;
+  else
+    vmprobe_drain_call_dropped++;
+}
+
+unsigned pocketjs_guest_vmprobe_drain_calls(uint16_t *out, unsigned cap,
+                                            unsigned *dropped) {
+  unsigned n = vmprobe_drain_call_count < cap ? vmprobe_drain_call_count : cap;
+  if (out != NULL)
+    for (unsigned i = 0; i < n; i++)
+      out[i] = vmprobe_drain_calls[i];
+  if (dropped != NULL)
+    *dropped = vmprobe_drain_call_dropped;
+  vmprobe_drain_call_count = 0;
+  vmprobe_drain_call_dropped = 0;
+  return n;
+}
 #endif
 
 typedef union {
@@ -247,6 +285,9 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
   unsigned ran = 0;
   const vm_drain_status_t status =
       vm_sched_drain(guest->runtime, &guest->budget, &ran, &context);
+#ifdef CONFIG_POCKET_VM_PROBE
+  vmprobe_drain_call_record(ran);
+#endif
   guest->jobs += ran;
   guest->drain_us += guest->budget.elapsed;
   guest->drain_jobs += ran;
