@@ -121,6 +121,13 @@ void vmtest_vm_report(JSRuntime *rt, JSContext *ctx, void *out);
 // (nothing when the build has no segment stack).
 int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max);
 void vmtest_vmstack_report(JSRuntime *rt, void *out);
+// D10: set the segment byte budget ALONE, leaving the C-stack limit where
+// JS_SetMaxStackSize put it (which sets both). 0 = no budget. This is how
+// the harness shows which of the two guards answered: with the C-stack
+// limit raised out of the way, a run ends in RangeError only if the budget
+// caught it, and in InternalError if the heap did. Returns -1 when the build
+// keeps frames on the C stack (there is no budget to set).
+int vmtest_vmstack_set_budget(JSRuntime *rt, size_t bytes);
 
 #ifdef __cplusplus
 }

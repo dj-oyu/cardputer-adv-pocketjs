@@ -611,6 +611,11 @@ extern void vmtest_vm_report(JSRuntime *rt, JSContext *ctx, void *out) __attribu
 extern int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max)
     __attribute__((weak));
 extern void vmtest_vmstack_report(JSRuntime *rt, void *out) __attribute__((weak));
+// D10: --vm-budget sets the segment byte budget by itself, after
+// JS_SetMaxStackSize has set both it and the C-stack limit. Together with
+// --stack-limit (which still sets both) this separates the two guards:
+// "--stack-limit 512M --vm-budget 20K" leaves only the budget standing.
+extern int vmtest_vmstack_set_budget(JSRuntime *rt, size_t bytes) __attribute__((weak));
 
 // ---------------------------------------------------------------- helpers
 
@@ -720,6 +725,8 @@ static void usage(void) {
           "                         (G1: bytes of C stack per JS recursion level, see stack_probe.sh)\n"
           "  --stack-probe-fault W  inject a probe fault: flat | silent (G1 negative control)\n"
           "  --vm-seg-size N[K]     L2a: standard frame-segment payload (default: the build's)\n"
+          "  --vm-budget N[K|M]     D10: frame-segment byte budget alone (0 = off), leaving the\n"
+          "                         C-stack limit at --stack-limit; default: same as --stack-limit\n"
           "  --host-events          install host.request(k) (a completion recorded at the k-th job\n"
           "                         boundary) and host.exit() (pocket.app.exit)\n"
           "  --time                 print '#info time_ns=...' (eval + drains + frames)\n"
@@ -742,6 +749,8 @@ int main(int argc, char **argv) {
   bool require_frame = false, module = false, strict = false, test262 = false;
   bool force_yield = false, want_gaps = false, want_time = false, want_stats = false;
   size_t vm_seg_size = 0;  // --vm-seg-size; 0 = whatever the build compiled in
+  size_t vm_budget = 0;    // --vm-budget; the value to set (0 = no budget)
+  bool vm_budget_set = false;
   const char *env_fy = getenv("VMTEST_FORCE_YIELD");
   if (env_fy && *env_fy && strcmp(env_fy, "0") != 0) force_yield = true;
 
@@ -778,6 +787,7 @@ int main(int argc, char **argv) {
       stack_probe_enabled = true;
     }
     else if (!strcmp(a, "--vm-seg-size")) vm_seg_size = parse_size(NEXT());
+    else if (!strcmp(a, "--vm-budget")) vm_budget = parse_size(NEXT()), vm_budget_set = true;
     else if (!strcmp(a, "--time")) want_time = true;
     else if (!strcmp(a, "--stats")) want_stats = true;
     else if (!strcmp(a, "--include")) {
@@ -816,6 +826,11 @@ int main(int argc, char **argv) {
     // Before any JS runs: the bottom segment is pushed by the first call.
     if (!vmtest_vmstack_configure || vmtest_vmstack_configure(G.runtime, vm_seg_size, 1) != 0)
       fprintf(stderr, "vmrun: note: --vm-seg-size ignored, this VM keeps frames on the C stack\n");
+  }
+  if (vm_budget_set) {
+    // After JS_SetMaxStackSize, which would otherwise overwrite it.
+    if (!vmtest_vmstack_set_budget || vmtest_vmstack_set_budget(G.runtime, vm_budget) != 0)
+      fprintf(stderr, "vmrun: note: --vm-budget ignored, this VM keeps frames on the C stack\n");
   }
   // The guest always installs one; it answers "no" until app_stop() bumps the
   // epoch. Installed here so js_poll_interrupts pays the same callback cost.

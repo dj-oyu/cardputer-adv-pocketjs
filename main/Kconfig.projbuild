@@ -66,17 +66,62 @@ menu "Pocket VM (L0 measurement probes)"
 
             What this changes for an app: per JS call the ui task's 20 KiB C
             stack loses the frame (48 B) and the locals block, keeping only
-            JS_CallInternal's own C frame -- C recursion itself is still
-            there (that is L2b), so deep recursion still ends in the same
-            RangeError from JS_SetMaxStackSize; a frame the heap refuses is
-            an InternalError "out of memory", the error a generator's heap
-            frame already produced. Generator / async frames are untouched.
+            JS_CallInternal's own C frame -- and with POCKET_VM_FLATCALLS
+            (L2b, below) not even that for a JS-to-JS call. Deep recursion
+            still ends in the same RangeError from JS_SetMaxStackSize; a
+            frame the heap refuses is an InternalError "out of memory", the
+            error a generator's heap frame already produced. Generator /
+            async frames are untouched.
+
+            JS_SetMaxStackSize (app_session.c: 20 KiB) is read twice on this
+            path (design D10): as the C-stack limit it always was, and as a
+            byte budget for the segments -- the sum of every live frame, in
+            bytes, not a frame count. Whichever fills first raises the
+            RangeError; the budget is tested before the heap is asked, so
+            "too deep" stays RangeError and only a frame the heap cannot
+            hold is InternalError. The budget is the guard that survives
+            L2b's removal of the C recursion. tools/vmtest/budget_probe.sh
+            shows it working with the C-stack guard lifted.
 
             Off, JS_CallInternal is the upstream alloca path and JSRuntime
             has no segment state: the pre-L2a behaviour exactly, which is
             what spec sec.12 means by every stage being revertible. The host
             harness builds the same switch as tools/vmtest/build.sh
             "-alloca" variants.
+
+    config POCKET_VM_FLATCALLS
+        bool "JS-to-JS calls stay in one JS_CallInternal activation (L2b)"
+        depends on POCKET_VM_SEGFRAMES
+        default y
+        help
+            docs/quickjs-freertos-vm-spec.md sec.7 L2b, docs/vm-L2-design.md
+            sec.10. On, a call opcode whose target is a bytecode function
+            (call / call0-3 / call_method / tail_call / tail_call_method)
+            pushes the callee's frame on the segment stack and keeps running
+            in the SAME C activation of JS_CallInternal; the callee's return
+            pops that frame and resumes the caller from the frame chain. No
+            C stack is consumed per JS level, so the recursion limit is the
+            segment byte budget (D10) alone -- the JS_SetMaxStackSize value,
+            in bytes of live frames -- and a frame the heap cannot hold is
+            the InternalError it already was. Constructor calls, apply,
+            eval, and every C-to-JS re-entry (a builtin calling back into
+            JS, getters, Proxy traps) still recurse in C and still meet the
+            C-stack guard at the entry of the new activation: those are
+            "wrapped" synchronous calls in the spec's sense, marked
+            interruption-forbidden.
+
+            Costs, per frame pushed on a segment: one pointer (the caller's
+            operand stack pointer, D12) in front of the JSStackFrame, and
+            three fields folded into JSStackFrame's padding (48 B on the
+            target either way). Per C activation: three saved pointers.
+
+            Off, every JS-to-JS call is a C recursion of JS_CallInternal as
+            in L2a (the C-stack guard answers first, exactly as before).
+            The host harness builds this switch as the "-flat" / "-recur"
+            variants of tools/vmtest/build.sh. Default y since every host
+            gate passed on it (design sec.10.5); NOT yet run on the board,
+            like L2a itself (design sec.8.4) -- that is what the switch is
+            for.
 
     config POCKET_VM_FAIR
         bool "Fair ordering: run the pumps on a continuation turn too"

@@ -72,6 +72,15 @@
 extern "C" {
 #endif
 
+// L2b (CONFIG_POCKET_VM_FLATCALLS, docs/vm-L2-design.md sec.10) is a
+// property of frames that live here: a flat callee's frame is popped by the
+// same JS_CallInternal activation that pushed it, which is only possible
+// when the frame is not on that activation's C stack. Kconfig says
+// "depends on"; the host passes -D by hand, so the header says it too.
+#if defined(CONFIG_POCKET_VM_FLATCALLS) && !defined(CONFIG_POCKET_VM_SEGFRAMES)
+#error "CONFIG_POCKET_VM_FLATCALLS requires CONFIG_POCKET_VM_SEGFRAMES"
+#endif
+
 #define JS_VM_SEG_ALIGN 16
 
 #if defined(ESP_PLATFORM)
@@ -145,12 +154,28 @@ typedef struct JSVMStack {
     uint32_t cache_n;
     uint32_t cache_max;
     size_t seg_size;        // standard payload size
+    // D10 (docs/vm-L2-design.md sec.9): the recursion limit that survives
+    // L2b. `used` is the sum of (top - base) over the live chain -- pushed
+    // frame bytes, rounded, NOT counting segment headers or the unused tail
+    // of each segment -- kept incrementally so the budget test is one add
+    // and one compare per call. `budget` is JS_SetMaxStackSize's value (0 =
+    // no limit), mirrored here by update_stack_limit; a push that would take
+    // `used` past it is refused as RangeError BEFORE any segment is asked
+    // for, which is what keeps "too deep" (RangeError) distinguishable from
+    // "no heap for the frame" (InternalError) -- the two answers the corpus
+    // fixes in expected/deep_recursion*.txt and expected/seg_oom_boundary.txt.
+    // Bytes, not frames: a frame is 48 B + 8 B per arg/local/operand slot on
+    // the target, so a frame count would bound memory by nothing.
+    size_t used;
+    size_t budget;
 #ifdef JS_VM_STACK_STATS
-    size_t live_bytes, live_bytes_max;   // frame bytes in use (rounded sizes)
+    size_t live_bytes_max;               // peak of `used`
     size_t frame_max;                    // largest single frame pushed
     uint32_t depth, depth_max;           // frames in use
     uint32_t seg_live, seg_live_max;     // segments on the chain
     uint64_t pushes, seg_mallocs, seg_frees, seg_reuses, dedicated, fallbacks;
+    uint64_t budget_hits;                // pushes refused by the budget
+    uint64_t seg_refused;                // pushes refused by the runtime (no segment)
 #endif
 } JSVMStack;
 
@@ -159,6 +184,27 @@ static inline void js_vm_stack_init(JSVMStack *st)
     memset(st, 0, sizeof(*st));
     st->seg_size = JS_VM_SEG_SIZE;
     st->cache_max = JS_VM_SEG_CACHE_MAX;
+}
+
+static inline size_t js_vm_stack_round(size_t size)
+{
+    return (size + JS_VM_FRAME_ALIGN - 1) & ~(size_t)(JS_VM_FRAME_ALIGN - 1);
+}
+
+// The D10 test, asked by JS_CallInternal before js_vm_stack_push so that
+// the budget is charged for exactly the bytes the push would add (the same
+// rounding) and is consulted before the heap is. Placed here rather than
+// inside push so that push keeps one failure meaning (NULL = the runtime
+// refused memory) and the caller does not have to decode two.
+static inline int js_vm_stack_over_budget(JSVMStack *st, size_t size)
+{
+    size = js_vm_stack_round(size);
+    if (likely(!st->budget || st->used + size <= st->budget))
+        return 0;
+#ifdef JS_VM_STACK_STATS
+    st->budget_hits++;
+#endif
+    return 1;
 }
 
 // Only before the first push: a live chain built on one size cannot be
@@ -260,15 +306,17 @@ static inline void *js_vm_stack_push_slow(JSRuntime *rt, JSVMStack *st, size_t s
 static inline void *js_vm_stack_push(JSRuntime *rt, JSVMStack *st, size_t size)
 {
     JSVMSeg *s = st->cur;
-    size = (size + JS_VM_FRAME_ALIGN - 1) & ~(size_t)(JS_VM_FRAME_ALIGN - 1);
+    size = js_vm_stack_round(size);
+    // `used` is charged up front and refunded on a refused push; the fast
+    // path is then one add, the same as the stats build already paid.
+    st->used += size;
 #ifdef JS_VM_STACK_STATS
     st->pushes++;
     st->depth++;
     if (st->depth > st->depth_max)
         st->depth_max = st->depth;
-    st->live_bytes += size;
-    if (st->live_bytes > st->live_bytes_max)
-        st->live_bytes_max = st->live_bytes;
+    if (st->used > st->live_bytes_max)
+        st->live_bytes_max = st->used;
     if (size > st->frame_max)
         st->frame_max = size;
 #endif
@@ -279,12 +327,13 @@ static inline void *js_vm_stack_push(JSRuntime *rt, JSVMStack *st, size_t size)
         return p;
     }
     void *p = js_vm_stack_push_slow(rt, st, size);
-#ifdef JS_VM_STACK_STATS
     if (!p) {
+        st->used -= size;
+#ifdef JS_VM_STACK_STATS
         st->depth--;
-        st->live_bytes -= size;
-    }
+        st->seg_refused++;
 #endif
+    }
     return p;
 }
 
@@ -308,9 +357,9 @@ static inline void js_vm_stack_pop(JSRuntime *rt, JSVMStack *st, void *block)
 {
     JSVMSeg *s = st->cur;
     assert(s && (uint8_t *)block >= s->base && (uint8_t *)block < s->top);
+    st->used -= (size_t)(s->top - (uint8_t *)block);
 #ifdef JS_VM_STACK_STATS
     st->depth--;
-    st->live_bytes -= (size_t)(s->top - (uint8_t *)block);
 #endif
     JS_VM_POISON(block, (size_t)(s->top - (uint8_t *)block));
     s->top = (uint8_t *)block;
@@ -350,6 +399,55 @@ static inline void js_vm_stack_free(JSRuntime *rt, JSVMStack *st)
     st->cur = st->cache = NULL;
     st->cache_n = 0;
 }
+
+// ---------------------------------------------------------------- L2b
+//
+// With CONFIG_POCKET_VM_FLATCALLS a JS-to-JS call does not recurse in C:
+// JS_CallInternal pushes the callee's block and carries on in the same
+// activation, and the callee's return pops it and resumes the caller from
+// what the frame chain holds (docs/vm-L2-design.md sec.10). Everything the
+// dispatch loop kept in C locals for the caller must then be recoverable
+// from the caller's frame. Most of it already is: pc is sf->cur_pc (D8),
+// argc is sf->arg_count (D11), the buffers hang off sf, and the return
+// fix-up is sf->ret_shape (D8). The one thing that is not is the caller's
+// OPERAND STACK POINTER, which no field records and nothing can recompute:
+// it goes in this link, in front of the JSStackFrame inside the same pushed
+// block (D12). Not in JSStackFrame.cur_sp, which async_func_mark reads as
+// "suspended" -- a generator frame calling a flat child is RUNNING, and a
+// non-NULL cur_sp would have the GC walk its half-built operand stack.
+//
+// Every block JS_CallInternal pushes carries the link, floor frames too
+// (the floor's is unused; a per-entry-path block layout would cost a branch
+// on every pop for 8 bytes on the floor only). Generator frames live in a
+// JSAsyncFunctionState and have no link; the JS_SF_SEG bit tells them apart.
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+typedef struct JSVMLink {
+    JSValue *caller_sp;     // the caller's sp at the call: func/this/args still on it
+} JSVMLink;
+#define JS_VM_FRAME_PREFIX sizeof(JSVMLink)
+
+// JSStackFrame.l2_flags. Zero for frames JS_CallInternal did not push
+// (generator/async frames come from js_mallocz), so the absence of both bits
+// means "floor, in a JSAsyncFunctionState". A frame walker that reads these
+// must still guard on class_id first (design D4-3): native frames are
+// uninitialised C automatics.
+#define JS_SF_SEG  1u   // pushed on the segment stack; local_buf == (JSValue *)(sf + 1)
+#define JS_SF_FLAT 2u   // pushed by a flat call: its return resumes sf->prev_frame in the same C activation
+
+// JSStackFrame.ret_shape: what the CALLER does with its operand stack when
+// this frame returns (design D8 sec.7.3-2). argc << 2 | bits; neither the
+// caller's cur_pc (already past a variable-length operand) nor the callee's
+// arg_count (declared, not passed) can stand in for it.
+#define JS_RET_METHOD 1u   // call_method: a `this` slot sits below the func slot (drop argc+2, not argc+1)
+#define JS_RET_TAIL   2u   // tail_call: the caller returns the value itself (upstream's `goto done`)
+#define JS_RET_SHAPE(argc, bits) (((uint32_t)(argc) << 2) | (bits))
+#define JS_RET_ARGC(shape) ((int)((shape) >> 2))
+
+_Static_assert(sizeof(JSVMLink) % JS_VM_FRAME_ALIGN == 0,
+               "the link must keep the JSStackFrame behind it frame-aligned");
+#else
+#define JS_VM_FRAME_PREFIX 0
+#endif
 
 // Defined in quickjs.c: the runtime's stack, or NULL when the build keeps
 // frames on the C stack (CONFIG_POCKET_VM_SEGFRAMES off).

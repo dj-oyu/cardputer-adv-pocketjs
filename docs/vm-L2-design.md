@@ -657,10 +657,20 @@ sp -= call_argc + 1;                          // call_constructor は +2
 ### 8.3 直したもの、残した退行
 
 **直した実バグ（Test262 が発見）:** pop の判定に `b->func_kind == JS_FUNC_NORMAL` を使っていたが、
-**モジュール内の直接 `eval` は `JS_FUNC_ASYNC` で組まれ、通常経路で呼ばれて `done_generator:` に
-抜ける**。フレームが積まれたまま残り、`JS_FreeRuntime` の表明で abort していた
+`JS_FUNC_ASYNC` で組まれたバイトコード関数が通常経路で呼ばれて `done_generator:` に抜ける経路がある。
+フレームが積まれたまま残り、`JS_FreeRuntime` の表明で abort していた
 （`language/eval-code/direct/export.js` / `import.js`、regressions 2）。`flags` も opcode が
 スクラッチに再代入するので鍵にできない。セグメントの生存範囲で判定する形に変えて解決。
+
+**訂正（2026-09-13、H7 の実験。§10.1）:** 起案時は「モジュール内の直接 `eval`」と書いたが、**誤り**。
+その経路は**モジュール本体の関数**である — `__JS_EvalInternal` がモジュールを `JS_FUNC_ASYNC` で組み
+（`quickjs.c:38608-38611`、`m != NULL`）、`js_create_module_bytecode_function` が
+`JS_CLASS_BYTECODE_FUNCTION` のオブジェクトにし、**`js_inner_module_linking` が hoisting 済み宣言の
+初期化のために `JS_Call(ctx, m->func_obj, JS_TRUE, 0, NULL)`（`:31791`）で通常呼び出しする**。
+評価本体は `js_async_function_call`（`:32360`）経由でヒープフレームなので通常経路を通らない。
+直接 `eval` は `m == NULL` なので `JS_FUNC_NORMAL` で組まれ、この経路には乗らない。
+2 件だけが落ちたのは、Test262 部分集合で `module` フラグを持つのがその 2 件だったからで、
+`eval` は無関係。モジュール本体も `eval` も関数名アトムが `<eval>`（`JS_ATOM__eval_`）なので読み違えた。
 
 **残した退行（承知のうえで入れた）:** `run.sh --trace`（asan）と `--vm-seg-size 2048`（o2）で
 `gc_threshold_device.js` が落ちる。常駐セグメントがジワジワ型 OOM の「残り」を動かし、
@@ -780,17 +790,17 @@ generator の床が子を呼んでいる間に GC が回ったとき、実行中
 子のオペランドスタックの途中までを mark する（§6.1 の UAF 側）。D4 が決めた専用ビット
 （offset 37-39）への差し替えは L2b が負う。
 
-### 9.1 まだ決めていないこと
+### 9.1 まだ決めていないこと（起案時。**すべて §10 で決着**）
 
 - **予算の値**（ホスト・実機）。**窓が存在することは確認した**（下記 §9.2）。具体値は
-  ガードの実装時に、その実装自身で測って決める。
-- L2b のビルド時スイッチと、`alloca / segframes+再帰 / segframes+フラット` の3経路の検証行列（H5）。
+  ガードの実装時に、その実装自身で測って決める。→ §9.3（出荷値を据え置き）。
+- L2b のビルド時スイッチと、`alloca / segframes+再帰 / segframes+フラット` の3経路の検証行列（H5）。→ §10.2。
 - 床（1回の C 活性で最初に積んだフレーム）の判定方法と、`done`/`done_generator` の鍵を
-  `func_kind` から実行時フラグへ置き換える時期（H6）。
-- legacy constructor の一時 `obj` の置き場、または `OP_call_constructor` を L2b 対象外とする明示（H8）。
-- ネイティブ再入深さを runtime のフィールドにするのは L2b か L2c か（H9）。
+  `func_kind` から実行時フラグへ置き換える時期（H6）。→ §10.3。
+- legacy constructor の一時 `obj` の置き場、または `OP_call_constructor` を L2b 対象外とする明示（H8）。→ §10.4。
+- ネイティブ再入深さを runtime のフィールドにするのは L2b か L2c か（H9）。→ §10.3。
 - §8.3 に記録した「BYTECODE_FUNCTION で非 NORMAL が通常経路で push された」経路は、
-  コードからの再現ができていない（H7）。記録が正しいかを確かめる実験が要る。
+  コードからの再現ができていない（H7）。記録が正しいかを確かめる実験が要る。→ §10.1。
 
 ### 9.2 予算の窓は存在する（実測(host)、2026-09-13）
 
@@ -827,3 +837,184 @@ frame_total = round_up(sizeof(JSStackFrame) + alloca_size, JS_VM_FRAME_ALIGN)
 **未計測（実機）:** アプリ起動後に 160 KiB のうちどれだけ既に使われているか。ここでの数字は
 `vmrun` の最小ハーネス基準で、実機の実効ヘッドルームは `tools/memlog.py --port --check` が要る。
 実機の TLSF がセグメント1本に付けるブロックヘッダと断片化の分も未検証。
+
+### 9.3 D10 の着地（2026-09-13、`vm/l2b`）
+
+実装は `quickjs-vmstack.h` の `JSVMStack.used` / `budget` と `js_vm_stack_over_budget()`、
+`quickjs.c` の push 直前の判定、`JS_SetMaxStackSize` での `rt->vm_stack.budget = rt->stack_size`
+（`CONFIG_POCKET_VM_SEGFRAMES` のときだけ）。ホストの `vmrun` に `--vm-budget` を足し、
+C スタックのガードと予算を**別々に**動かせるようにした。
+
+**出荷値は変えていない。** host 7 MiB（`--profile host`）、実機 `stack_limit = 20 * 1024`
+（`app_session.c`）。どちらも §9.2 の窓の中にある。
+
+**run.sh だけでは検証にならない。** C 再帰が残っている間は、同じ値を持つ C スタックのガードが
+先に答える（`budget_hits=0`）。**何もしない予算でも run.sh は通る。** そのまま L2b で C 再帰を
+消せば、コーパスの `RangeError` がすべて `InternalError` に変わっていたはず。
+
+そこで `tools/vmtest/budget_probe.sh` が、`--stack-limit 512M` で C スタックのガードを退け
+`--vm-budget` だけを残した走行（= L2b 後の状況）で、期待値3本を検査する。
+**陰性対照を4つ持つ** — 予算 off（ヒープが答え `seg_refused=1`）、小さすぎる予算（host 100K で
+`depth>1000` を満たせない）、ヒープより先に当たりすぎる予算（480 B で `seg_oom_boundary` の
+`InternalError` が `RangeError` に化ける）、ヒープを超える予算（200K でヒープが先に尽きる）。
+**窓の外の値ではちゃんと壊れる**ことが、ガードが本物である証拠。
+
+実測（o2）: 10 項目すべて OK。予算だけを残した走行で host は深さ 70,575、実機プロファイルは
+深さ 195 で `RangeError`、`seg_oom_boundary` は `InternalError` のまま。
+asan でも 10 項目すべて OK（asan は ulimit を上げないので host の予算を 512K にして深さ 5,039 で
+`RangeError`。`depth>1000` は満たす）。
+
+関所: コーパス 43/43（asan・o2・asan-alloca・o2-alloca）、Test262 7,501 / 194 / regressions 0、
+G1 は 528.000（segframes）/ 672.000（alloca）でともに PROPORTIONAL（C 再帰は残っているので正しい）、
+selftest ok、`--force-yield` 3/40 不変、期待値ファイル無変更。
+
+**未計測:** 呼び出しごとに加算1回と比較1回が増えた分の速度（`timing.py` は未実行。
+L2b のフラット化で経路自体が変わるので、そちらと合わせて測る）。ファームのビルドは本線への統合時。
+
+---
+
+## 10. L2b の着地（2026-09-13、`vm/l2b`）
+
+実装は `quickjs.c` の `JS_CallInternal`（`flat_call:` ブロック、`frame_pushed:` 共有プロローグ、
+末尾の `JS_SF_FLAT` 復帰）と `quickjs-vmstack.h`（`JSVMLink`、`JS_SF_*`、`JS_RET_*`）。
+スイッチは `CONFIG_POCKET_VM_FLATCALLS`（`depends on POCKET_VM_SEGFRAMES`）。
+**対象は `OP_call` / `OP_call0`〜`3` / `OP_call_method` / `OP_tail_call` / `OP_tail_call_method` で、
+呼び先が `JS_CLASS_BYTECODE_FUNCTION` かつ `func_kind == JS_FUNC_NORMAL` のとき**（`js_vm_flat_callable`）。
+それ以外はすべて従来の C 呼び出しのまま（§10.4）。
+
+呼び出し: 中断ポーリング → D10 の予算判定 → `[JSVMLink][JSStackFrame][slots][var_refs]` を push →
+呼び出し元の `sp` を link に、復帰の形を `ret_shape` に、`ctx` を `caller_ctx` に書く → ループの
+C ローカルを呼び先のものに差し替えて `frame_pushed:` へ。**押せなかった場合（予算・ヒープ）は
+何も積まずに呼び出し元へ throw** — 上流の `if (JS_IsException(ret_val)) goto exception` と同じ場所に落ちる。
+復帰: `done:`（または捕捉されなかった `exception:`）の後、`sf->l2_flags & JS_SF_FLAT` なら
+link を読んでからブロックを pop し、`sf->prev_frame` から呼び出し元のローカルを組み直して、
+例外なら `goto exception`、tail なら `goto done`、それ以外は上流と同じスロット整理をして `goto restart`。
+
+### 10.1 H7: 記録は「機構は正しく、主語が誤り」
+
+`sf->prev_frame` 設定直後に `b->func_kind != JS_FUNC_NORMAL` で abort する実験を置き（コードは戻した）、
+4 入力を走らせた（実測(host)、`-O1`、segframes）:
+
+| 入力 | 結果 |
+| --- | --- |
+| 通常スクリプト内の直接 `eval` | 発火せず |
+| generator / async を含むスクリプト | 発火せず（別クラスの class call 経由） |
+| モジュール `export const x = 1` | **発火**: `func=<eval> kind=2(ASYNC) this_tag=1(BOOL) flags=2(COPY_ARGV) prev_frame=no` |
+| 直接 `eval` を含むモジュール | 同上、**リンク時点**で発火（`eval` に到達する前） |
+
+`this = true`・`flags = COPY_ARGV`・最外フレームは `js_inner_module_linking` の
+`JS_Call(ctx, m->func_obj, JS_TRUE, 0, NULL)` と一致する。§8.3 の訂正参照。
+
+**床の判定を `func_kind` に頼れるか**: 頼らない。フラットで積むフレームは `js_vm_flat_callable` が
+`JS_FUNC_NORMAL` を要求するので、**フラットフレームが `done_generator:` に入ることは構造的に無い**。
+非 NORMAL がセグメントに積まれるのはこのモジュール本体（床）だけで、その場合の pop は
+L2a と同じ `js_vm_stack_holds()` が担う。`done`/`done_generator` の鍵は上流のまま `b->func_kind`。
+
+### 10.2 H5: 3 経路の行列
+
+| 経路 | `build.sh` | Kconfig | 何が違うか |
+| --- | --- | --- | --- |
+| alloca | `asan-alloca` / `o2-alloca` | `SEGFRAMES=n` | L2a 以前。C スタックにフレーム |
+| segframes 再帰 | `asan-recur` / `o2-recur` | `SEGFRAMES=y, FLATCALLS=n` | L2a。C 再帰は残る |
+| segframes フラット | `asan-flat` / `o2-flat` | `SEGFRAMES=y, FLATCALLS=y` | L2b |
+| **無印 `asan` / `o2`** | | **Kconfig の既定を写す**（今は = フラット、§10.5） | 無印の関所 = 出荷経路の関所 |
+
+`run.sh --variant` / `test262.py --variant` / `stack_probe.sh N V` / `budget_probe.sh V` は
+6 つの名前をそのまま受ける。`budget_probe.sh` は最初の 3 項目の期待（どちらのガードが答えるか）を
+バイナリの `#info vmstack flat=` から決める — 名前ではなく実体で。
+
+### 10.3 H6・H9: 床の判定と、ネイティブ再入の床
+
+**H6 — 床は `JSStackFrame.l2_flags` の 1 ビットで判定する（offset 37、D2 の隙間）。**
+`JS_SF_SEG`（セグメントに積んだ）と `JS_SF_FLAT`（フラット呼び出しで積んだ）の 2 ビット。
+C から入った床は `SEG` のみ、generator/async の床は両方 0（`js_mallocz` 由来）、フラットフレームは両方。
+復帰は `FLAT` の 1 ビット比較で「C へ return か、呼び出し元を再開か」を分ける。
+`local_buf` の復元は `SEG` で分ける（generator の床は `local_buf == arg_buf`、再開入口と同じ）。
+セグメント範囲検査（L2a の `js_vm_stack_holds`）は残してある: 床の pop はそれで決まる。
+
+**H9 — ネイティブ再入は新しい C 活性 = 新しい床。** 組み込みが `JS_Call` で JS に戻るたびに
+`JS_CallInternal` の新しい活性が始まり、その最初のフレームが床になる。**深さを数える runtime
+フィールドは L2b では足さない**: 床の入口には L2a と同じ `js_check_stack_overflow(rt, 0)` が残っており、
+これが「ネイティブ再入の深さ」を C スタック残量として直接測っている
+（`deep_recursion_device.js` の `through-map` が `RangeError` のまま通ることがその検査）。
+L2c が「ネイティブが同期の戻り値を待つ区間ではホストに戻らない」を実装するとき、床の持ち主
+（どの C 活性が中断を許すか）はこの活性ごとの C ローカル（`floor_argc` / `floor_argv` / `floor_this` /
+`floor_new_target`）と同じ場所に置くのが自然で、そこで数える。
+
+**床の持ち物（C 活性ごとに 4 スロット、JS の深さには比例しない）:** 入口引数の `argc` / `argv` /
+`this` / `new.target`。フラットフレームには要らない — `argc` は D11 どおり `arg_count`、`argv` は
+自分の link の `caller_sp - arg_count`、`this` は `ret_shape` が method なら func スロットの下、
+`new.target` は常に undefined。
+
+**訂正（L2b の敵対的レビューで発見）:** 最初の版は床の持ち物を 3 つとし、床へ戻るときの `argc` を
+`sf->arg_count` から組み直していた。**C から入った床ならそれで正しい**（D11 で真の `argc` を残して
+いる）が、**generator / async の床のフレームは `JSAsyncFunctionState.frame` で、その `arg_count` は
+`async_func_init` が書く `arg_buf_len = max(宣言数, 渡した数)`** であり、`async_func_resume` が
+入口で渡す `s->argc` とは違う。デフォルト引数の初期化子でフラット呼び出しをした後に `OP_rest` が
+`argc` を読むので、`function* g(a = h(), ...r)` を引数なしで呼ぶと、フラット経路だけ `r` が
+`[undefined]` になっていた（再帰・alloca は `[]`）。`floor_argc` を 4 つ目として退避して直し、
+`corpus/l2b_floor_argc.js`（generator / async / async generator × 引数の過不足）で固定した。
+**L2c が床の状態を保存するときも、この 4 つが床の持ち物である。**
+D11 の「`argv` は `sf->arg_buf`」「`argc` は `sf->arg_count`」は、**フラットフレームについてだけ**成り立つ。
+
+### 10.4 H8 と、囲った経路（従来の同期呼び出し・中断禁止）
+
+- **`OP_call_constructor` は対象外**（H8）。legacy constructor は `JS_CallConstructorInternal` が
+  `js_create_from_ctor` で作った `obj` を呼び出しの外で保持し、戻り値がオブジェクトでなければ
+  それを返す。その `obj` の置き場を L2b では作らない。派生クラスも同じ入口なので同様。
+- `OP_apply` / `OP_apply_eval` / `OP_eval`（間接・直接とも）/ `OP_init_ctor`（`super()` の暗黙形）。
+- 呼び先が非バイトコード（native / bound / Proxy / Promise の resolve 関数）と、
+  generator / async / async generator（別クラス）、モジュール本体（§10.1）。
+- ネイティブから JS への再入すべて（getter / setter / Proxy trap / `sort` の比較関数 / …）。
+  台帳01 §10.1 のとおり列挙可能ではないので、「新しい C 活性 = 床」で機械的に扱う（§10.3）。
+
+これらは仕様 §7 の「未対応経路は従来の同期呼び出しとして囲い、中断禁止を明示」に当たる。
+中断禁止は今のところ暗黙（L2c まで中断そのものが無い）で、L2c は床ごとに明示する。
+
+### 10.5 D11 の補足、費用、既定 on の理由
+
+**D11 の「`argv` は `sf->arg_buf`」は床では成り立たない。** `JS_Call`（`COPY_ARGV`）で宣言より多い引数を
+渡された床は `arg_buf` が `b->arg_count` 個しか無く、`OP_rest` / `arguments` は `argv` の
+`argc` 個を読む（`corpus/l2b_flat_calls.js` の `from-native-more-args` がこれを固定する）。
+だから床の `argv` は C ローカルに退避し（§10.3）、フラットフレームだけが link から引く。
+`sf->arg_count` に真の `argc` を残す決定はそのまま（FLATCALLS ビルドのみ。他は上流の行を残して
+バイト一致を保つ）。
+
+**費用（計算値、実機）:** フレームごとに link 4 B（ホスト 8 B）。`JSStackFrame` は **48 B のまま** —
+`caller_ctx`(4-7)・`l2_flags`(37)・`ret_shape`(44-47) は隙間に入った。**実機コンパイラで確認**
+（`xtensa-esp-elf-gcc 15.2.0`、`quickjs.c` を include した TU の `_Static_assert` が通り、
+`FLATCALLS` を外すと同じ TU が 9 件失敗する = 表明が生きている）。C 活性ごとに 3 スロット。
+フラットビルドの C フレーム自体の大きさは未計測（G1 は段あたりの差分しか出さない）。
+
+**実測(host)、`8833514`〜:**
+
+| 関所 | フラット | segframes 再帰 | alloca |
+| --- | --- | --- | --- |
+| G1 `bytes_per_call`（2000 / 4000） | **0.000 / 0.000 NOT_PROPORTIONAL**、selftest ok | 528.000 PROPORTIONAL | 672.000 PROPORTIONAL |
+| `budget_probe.sh`（o2・asan） | 10/10、**出荷値で `budget_hits=1〜2`**（host depth 57,342、device 158） | 10/10、`budget_hits=0` | 予算なし |
+| コーパス（asan・o2） | 44/44 | 44/44 | 44/44 |
+| Test262 | 7,501 / 194 / regressions 0 | 同左 | 同左 |
+| `--force-yield` | 3 / 41（`l2b_flat_calls.js` の +1 は後方分岐を持つため） | 同左、**出力 43 件バイト一致・safepoint 数一致** | — |
+| G6 `verify_all.sh` | exit 0 | | |
+
+「出荷値で `budget_hits` が 0 でなくなる」が、ガードを先に入れた意味の実証（§9.3 の予告どおり）。
+`seg_oom_boundary` は `InternalError` のまま。
+
+**既定 on にした。** 理由: (1) 上の関所がすべて通り、3 経路とも期待値無変更。(2) `stack_limit = 20 KiB`
+（`app_session.c`）が L2a では「C スタックの残量」と「予算」の二重の意味だったのが、フラットでは
+JS の深さに対して予算だけが答える — §9.2 の窓の中で、ヒープより先に当たる。(3) 戻す手段は
+`CONFIG_POCKET_VM_FLATCALLS=n` の 1 行（`-recur` 変種が同じものを検査している）。
+**実機では走らせていない**（L2a と同じく §8.4）。
+
+**未計測:** 速度（`timing.py` 未実行。呼び出しごとの経路が変わったので L2a 分と合わせて要計測）、
+フラットビルドの `JS_CallInternal` の C フレーム絶対値、実機の段数と DIRAM。
+
+### 10.6 L2c への引き継ぎ
+
+- セーフポイント B（呼び出し地点）は `frame_pushed:` の**後**に置く。`flat_call:` のポーリングから
+  `frame_pushed:` までに止まれる地点は無い（D8 §7.3-3 の保証はコードの順序として実装済み）。
+- 中断中の目印（D4）は `l2_flags` の空きビット（offset 37 の残り 6 ビット）へ。
+- 床の `floor_*` ローカルは C 活性に属する。中断・再開でその活性が消えるなら、床ごとに
+  保存が要るのはこの 3 つと `caller_ctx`（既にフレームにある）。
+- `JS_SF_FLAT` の復帰は `ret_val` を C の変数で運ぶ。再開側が同じ場所に値を置けば、
+  「子から戻ったところから再開」はこのブロックをそのまま通る。

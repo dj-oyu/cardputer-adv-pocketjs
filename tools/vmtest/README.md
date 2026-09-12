@@ -13,7 +13,9 @@
 
 ```bash
 # WSL: cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs-vm
-bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る
+bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る（Kconfig の既定経路。all-alloca / all-recur / all-flat で他の経路）
+bash tools/vmtest/stack_probe.sh 2000 o2       # G1: 1 段あたりの C スタック（L2b 以降は NOT_PROPORTIONAL が正）
+bash tools/vmtest/budget_probe.sh o2           # D10: 予算がヒープより先に答えるか（10 項目）
 bash tools/vmtest/run.sh                       # コーパス（ASan+UBSan+LSan）
 bash tools/vmtest/run.sh --variant o2          # コーパス（-O2）
 bash tools/vmtest/run.sh --force-yield         # L1 以降: 全チェックポイントで yield させても出力が同じか（L2: opcode 粒度。L2c まで赤、FORCED-YIELD の節）
@@ -153,6 +155,7 @@ L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 
 | `seg_return_reuse.js` | 同「返却と再利用」。浅い再帰を何十サイクルも繰り返し、サイクル番号と深さの両方を符号化した値を毎段で読み戻す。後のサイクルが前のサイクルの値を読めば、返却済みの領域が汚れたまま再利用されたことになる |
 | `seg_closure_survives.js` | 同「クロージャがフレームを掴んだまま返却される」。捕捉した変数を読むたびの間に無関係な深い再帰（`churn`）を挟み、返却済みのはずの領域がその再帰に再利用されても捕捉値が無事かを見る |
 | `seg_generator_frames.js` | 同「generator/async のフレーム」。`done_generator` 経由で中断するフレーム（`alloca` を通らない別経路）の再開のたびに、無関係な深い再帰を挟む。2本の generator を交互に進める形も含め、片方の中断領域がもう片方や無関係な再帰に取り違えられないかを見る |
+| `l2b_flat_calls.js` | L2b（設計 §10）。フラット復帰が呼び出し元のローカルをフレーム鎖から組み直す箇所を 1 行ずつ固定する: 既定引数の呼び出しの後で `OP_rest` / `arguments` が読む `argv`・`argc`（D11、宣言より多い引数を native から受けた床を含む）、呼び出し後の `this` / `new.target`、4 つの呼び出し形（plain / method / tail / tail method）の復帰整理、300 段のフラットフレームを跨ぐ例外と finally、generator / async / async generator の床、C 再帰のまま囲った経路（constructor / apply / Proxy / bound / getter / sort / eval）。alloca・再帰・フラットの 3 経路で同じバイトが出る |
 | `seg_oom_boundary.js` | 同「境界の直前・直後の OOM」。固定の浅い再帰（device のスタック上限より十分浅い）の中の1段だけが単発の大きな確保をして 160KiB を超える。`memory_device.js` と同じ「余裕を残した単発確保」の形を保ったまま、確保がコールチェーンの途中で起きる点だけを変えている（`known/oom_backtrace_uaf.js` が記録する上流UAFはジワジワ型OOMで踏むため、あえて避けている） |
 
 **期待値の更新規則**: `run.sh --bless` は新しいファイルを足した時にだけ使う。既存の `expected/*.txt` を書き換えるのは、挙動の変更が意図されたもので理由を説明できる場合だけで、その変更だけの commit にする（§12「新たな失敗を期待値の書き換えだけで処理しない」）。
@@ -207,9 +210,10 @@ L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 
 - ASan 版は QuickJS 自体も計装する（`tools/build_pocket_text_test.sh` は QuickJS を計装しない）。L1 以降で変わるのは `quickjs.c` だからで、変更した呼び出し経路の use-after-free を報告させるため。
 - `quickjs-vmprobe.h` は `__has_include("sdkconfig.h")` で分岐し、ホストでは `CONFIG_*` が未定義 = 出荷時の既定になる。`build.sh` が `.cache/vmtest/include/` に置く空の `sdkconfig.h` は、この分岐が入る前の名残で、なくても動く。**ただし既定 y のスイッチはこの規則に乗らない**: `CONFIG_POCKET_VM_SEGFRAMES`（L2a、`main/Kconfig.projbuild`）は `build.sh` が `-D` で明示的に渡す。渡さなければホストは firmware が出荷しない方の経路（alloca）を検査することになる。
 - **L2a の旧経路（alloca）は `-alloca` 付きバリアントで作る**: `build.sh asan-alloca` / `o2-alloca` / `all-alloca`。コンパイルフラグは同じで define だけが無く、`run.sh --variant asan-alloca`・`stack_probe.sh 2000 o2-alloca`・`test262.py --variant asan-alloca` がそのまま使える。仕様 §12 の「戻せる」はこれで確かめる（L2a 着手前の結果と同一であること）。
+- **L2b は 3 経路になった**（設計 §10.2）: `-alloca`（L2a 以前）、`-recur`（segframes、C 再帰のまま = `CONFIG_POCKET_VM_FLATCALLS=n`）、`-flat`（segframes + フラット呼び出し）。**無印の `asan` / `o2` は `main/Kconfig.projbuild` の既定を写す**（`build.sh` の `segframes=` / `flatcalls=` の 2 行が Kconfig と一致していること）。今は既定 y なので無印 = フラット。関所の読み方: G1 はフラットで `bytes_per_call=0.000 … NOT_PROPORTIONAL`、`-recur` で 528.000、`-alloca` で 672.000（いずれも実測(host) o2）。`budget_probe.sh` は最初の 3 項目の期待を `#info vmstack flat=` から決めるので、フラットでは出荷値の走行で `budget_hits>0`（予算が答えている）、`-recur` では 0（C スタックのガードが先）。フラットビルドに `-DCONFIG_POCKET_VM_SEGFRAMES` が無いと `quickjs-vmstack.h` が `#error` で止める。
 - **L2a のセグメント**（`quickjs-ng/quickjs-vmstack.h`、ヘッダのみ）: `vmrun --stats` が `#info vmstack seg_size=… depth_max=… live_max=… frame_max=… seg_live_max=… seg_mallocs=… dedicated=… fallbacks=… resident_max~=…` を出す。`--vm-seg-size N[K]` で標準セグメントを変えられる（最初の JS 呼び出しの前にだけ効く）。`live_max` はフレームが実際に使った最大バイト、`resident_max~` はその瞬間にセグメントが占めていた概算（ヘッダと整列の余白込み）。ホストの数字は 64bit の値であって実機の値ではない。
 - **L2a のセグメントは asan 版で毒を塗る**: `quickjs-vmstack.h` は ASan ビルドでセグメントの空き領域を `__asan_poison_memory_region` で毒にし、push した分だけ解毒、pop で再び毒にする。返却済みフレームへの生ポインタ（`close_var_refs` が閉じ損ねた `JSVarRef`、死んだフレームを歩くウォーカー、呼び出し先の argv を持ち越した呼び出し元）は、コーパスと Test262 の asan 走行で use-after-poison として鳴る。台帳07 §6 が「確保履歴では検査できない」と書いた、実物のフレームに対する検査がこれ。o2 と実機では何も展開されない。
 - **セグメント境界の総当たり**: `VMTEST_VMRUN_FLAGS="--vm-seg-size N" run.sh` でセグメントサイズを変えてコーパスを回せる（期待値は同じ。サイズは観測できてはならない）。L2a 評価では o2 で 16〜1024B を 8B 刻み（`js_vm_stack_configure` が 16 の倍数へ切り上げるので実効は 16 刻み）、asan で 16 / 88 / 136 を回した。
-- **pop の鍵はフレームを push したかどうかで、`b->func_kind` ではない**: モジュール内の直接 `eval` は `__JS_EvalInternal` が `JS_FUNC_ASYNC` として組むが、呼び出しは通常経路（`JS_CallFree`）で来て `done_generator:` に抜ける。`func_kind` で pop を決めると、この 1 フレームが積まれたまま残り `JS_FreeRuntime` の assert で落ちる（Test262 `language/eval-code/direct/export.js` / `import.js` が見つけた）。`flags` も opcode がスクラッチに使うので鍵にできない。鍵は `js_vm_stack_holds()`（`sf` が先頭セグメントの生存範囲にあるか）。C ローカルで覚える版は G1 が 528→544 B/段に増えた（実測(host) o2）ので採らなかった。
+- **pop の鍵はフレームを push したかどうかで、`b->func_kind` ではない**: モジュール本体の関数は `__JS_EvalInternal` が `JS_FUNC_ASYNC` として組むが、`js_inner_module_linking` が hoisting 済み宣言の初期化のために `JS_Call(ctx, m->func_obj, JS_TRUE, 0, NULL)` で通常経路から呼び、`done_generator:` に抜ける（L2a 時点では「モジュール内の直接 `eval`」と書いていたが、H7 の実験で主語が違うと分かった。設計 §10.1。直接 `eval` は `JS_FUNC_NORMAL`）。`func_kind` で pop を決めると、この 1 フレームが積まれたまま残り `JS_FreeRuntime` の assert で落ちる（Test262 `language/eval-code/direct/export.js` / `import.js` が見つけた）。`flags` も opcode がスクラッチに使うので鍵にできない。鍵は `js_vm_stack_holds()`（`sf` が先頭セグメントの生存範囲にあるか）。C ローカルで覚える版は G1 が 528→544 B/段に増えた（実測(host) o2）ので採らなかった。
 - **`gc_threshold_device.js` はヒープの残量に敏感で、L2a では条件によって落ちる**: `run.sh --trace` の asan 走行、および `--vm-seg-size 2048` の o2 走行で、OOM を catch した後の `print` 自体が OOM して `null` が未捕捉になる（`cycles-exhaust-heap true` の後に `null` が 2 行、exit=1）。常駐セグメント（ホストで 4,143B）がジワジワ型 OOM の「残り」を変えるためで、メモリ破壊ではない（同じ変更で alloca 版は通る）。通常の `run.sh`（4 バリアント）では通る。`--trace` でトレースを採るときはこの 1 件の FAIL を織り込むこと。
 - オブジェクトは `quickjs-ng/*.c`・`*.h`・`build.sh` のいずれかが新しければ作り直す。

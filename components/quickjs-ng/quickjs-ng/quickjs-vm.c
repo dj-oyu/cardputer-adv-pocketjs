@@ -21,6 +21,15 @@ int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max)
     return js_vm_stack_configure(st, seg_size, cache_max);
 }
 
+int vmtest_vmstack_set_budget(JSRuntime *rt, size_t bytes)
+{
+    JSVMStack *st = js_vm_stack_get(rt);
+    if (!st)
+        return -1;
+    st->budget = bytes;
+    return 0;
+}
+
 void vmtest_vmstack_report(JSRuntime *rt, void *out)
 {
     FILE *f = out;
@@ -31,18 +40,44 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
     // resident_max: bytes the segments held at their peak, header and
     // alignment slack included -- what the guest heap actually gave up, as
     // opposed to live_max, the frame bytes that were in use at the peak.
+    // budget / budget_hits / seg_refused: D10 -- the limit in force at the
+    // end, how many pushes it refused (each one a RangeError the C-stack
+    // test did not get to raise first), and how many pushes the RUNTIME
+    // refused (no memory for a segment: each one an InternalError). A run in
+    // which the budget did its job has seg_refused=0; budget_probe.sh reads
+    // both. The harness allocator's own "fails=" counts only injected
+    // --fail-alloc failures, not JS_SetMemoryLimit refusals, which never
+    // reach it.
+    // flat=: whether this binary keeps JS-to-JS calls in one C activation
+    // (CONFIG_POCKET_VM_FLATCALLS). budget_probe.sh reads it to know which
+    // guard is expected to answer under the shipped limits: with C recursion
+    // the C-stack guard fires first (budget_hits=0), flat only the budget can.
     size_t overhead = sizeof(JSVMSeg) + (JS_VM_SEG_ALIGN - 1);
-    fprintf(f, "#info vmstack seg_size=%zu align=%d frame_hdr=%zu pushes=%llu depth_max=%u "
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    const int flat = 1;
+#else
+    const int flat = 0;
+#endif
+    fprintf(f, "#info vmstack flat=%d seg_size=%zu align=%d frame_hdr=%zu pushes=%llu depth_max=%u "
                "live_max=%zu frame_max=%zu seg_live_max=%u seg_mallocs=%llu seg_frees=%llu "
-               "seg_reuses=%llu dedicated=%llu fallbacks=%llu resident_max~=%zu\n",
-            st->seg_size, JS_VM_FRAME_ALIGN, sizeof(JSVMSeg),
+               "seg_reuses=%llu dedicated=%llu fallbacks=%llu resident_max~=%zu "
+               "budget=%zu budget_hits=%llu seg_refused=%llu\n",
+            flat, st->seg_size, JS_VM_FRAME_ALIGN, sizeof(JSVMSeg),
             (unsigned long long)st->pushes, st->depth_max, st->live_bytes_max, st->frame_max,
             st->seg_live_max, (unsigned long long)st->seg_mallocs,
             (unsigned long long)st->seg_frees, (unsigned long long)st->seg_reuses,
             (unsigned long long)st->dedicated, (unsigned long long)st->fallbacks,
-            (size_t)st->seg_live_max * (st->seg_size + overhead));
+            (size_t)st->seg_live_max * (st->seg_size + overhead),
+            st->budget, (unsigned long long)st->budget_hits,
+            (unsigned long long)st->seg_refused);
 #else
-    fprintf(f, "#info vmstack seg_size=%zu (no stats in this build)\n", st->seg_size);
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    fprintf(f, "#info vmstack flat=1 seg_size=%zu budget=%zu (no stats in this build)\n",
+            st->seg_size, st->budget);
+#else
+    fprintf(f, "#info vmstack flat=0 seg_size=%zu budget=%zu (no stats in this build)\n",
+            st->seg_size, st->budget);
+#endif
 #endif
 }
 

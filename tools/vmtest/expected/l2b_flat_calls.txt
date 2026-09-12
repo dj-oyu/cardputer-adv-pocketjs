@@ -1,0 +1,26 @@
+rest-after-default [42,0,0] [1,2,3]
+argv-beyond-declared 4/4
+from-native-more-args 3:2,3:2
+ctor-default true 42
+this-after-call 45 47
+shapes 8 17 bottom 3000 42
+call0-3 42 1 3 6
+throw-through deep true
+finally 200 201
+catch-mid-chain caught@50
+rethrow deep 202
+stack-frames true
+mapped-args 53
+argc 47
+gen-flat-child 42 43 3
+apply 42 2 5
+proxy 43
+bound 101
+getter 42
+sort 1,2,3
+eval 43 42
+new 42
+closure 2
+async-flat-child 86
+asyncgen-flat-child 42,bottom
+exit=0
