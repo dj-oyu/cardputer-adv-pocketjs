@@ -1,0 +1,10 @@
+# L1 clock-cost bench overlay, PINNED variant: ui task pinned to core 1 via
+# xTaskCreatePinnedToCore instead of today's xTaskCreate (no affinity). Used
+# to measure the cost/benefit of pinning against the unpinned
+# sdkconfig.vmclockbench.defaults build -- same binary otherwise.
+#
+#   idf.py -B build_bench_pin1 \
+#       -D SDKCONFIG=build_bench_pin1/sdkconfig \
+#       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.vmclockbench.pin1.defaults" build
+CONFIG_POCKET_VM_L1_CLOCKBENCH=y
+CONFIG_POCKET_UI_TASK_PIN_CORE=1
