@@ -575,6 +575,17 @@ esp_err_t app_overlay_tick(void) {
         esp_err_t ce=pocketjs_guest_continue(guest);
         if(ce) return ce;
         if(pocketjs_guest_jobs_pending(guest)) {
+#ifdef CONFIG_POCKET_VM_FAIR
+            // Fair ordering, the overlay's share of it: the same rule and the
+            // same reasons as app_tick() states at length, over the pumps an
+            // overlay session actually installs. No exit() check and no
+            // frame() here either.
+            pocket_app_pump();
+            pocket_overlay_pump();
+            pocket_api_pump();
+            pocket_fs_pump();
+            pocket_av_pump();
+#endif
             if(drain_runaway()) return ESP_ERR_TIMEOUT;
             continuation_turns++;
             // No display list this turn: the shell composites whatever the
@@ -621,6 +632,52 @@ const char *app_error(void) {
     const char *e=jsconsole_error();
     return e?e:"";
 }
+// Every host surface's pump, in the one order the turn defines, and nothing
+// else: no exit() check and no frame(). Extracted so that the fair-ordering
+// continuation turn (CONFIG_POCKET_VM_FAIR, below) runs THE SAME LIST rather
+// than a copy of it that drifts -- the order these are in is a set of
+// decisions, each written next to its call, and two copies of it would mean
+// two places to get those decisions wrong. Static and called from one place
+// in the shipping build, so it costs nothing there.
+static void run_pumps(uint32_t buttons) {
+    // Watch deliveries before the frame, so a listener that updates a node and
+    // the frame that draws it are the same turn rather than one apart.
+    // First: it posts the sleeps that came due, so pocket_api_pump() settles
+    // them this turn, and it is where Starting becomes Running.
+    pocket_app_pump();
+    // The keystroke that queued these arrived before this turn (main.c hands
+    // the field its key ahead of app_tick), so the guest hears about it ahead
+    // of anything that happened during the turn -- and, unlike a JS_Call made
+    // from the keystroke itself, on a turn whose job queue is empty.
+    pocket_text_pump();
+    pocket_imu_pump();
+    pocket_io_pump();
+    // Before pocket_api_pump(): what the PC answered this turn is posted here
+    // and settled below, rather than a frame late.
+    pocket_bridge_pump();
+    // Same reason: a link that came up or a scan that finished is posted here
+    // and settled below, in the turn that noticed it.
+    pocket_net_pump();
+    // Between the two, so a tone that finished settles in the same order the
+    // one pump in pocket_av.c used to settle it in.
+    // Before pocket_api_pump(): a read that the microphone can satisfy is
+    // filled here and settles below, in the same turn rather than the next.
+    pocket_capture_pump();
+    pocket_api_pump();
+    // AFTER pocket_api_pump(), unlike the ones above it: this one posts no
+    // completion for that pump to settle. It delivers fs.onVolumeChange, which
+    // says the card was granted or has gone, and a listener may call straight
+    // back into pocket.fs -- so it runs in the part of the turn where nothing
+    // of that surface is in flight. While the folder picker is up the guest is
+    // not ticked at all, so a grant is announced on the first frame after the
+    // person chose, which is the first frame the app could act on it.
+    pocket_fs_pump();
+    pocket_av_pump();
+    // The same mask the turn below is handed: pocket.input reports what the
+    // host forwarded, never a second reading of the keyboard.
+    pocket_ui_pump(buttons);
+}
+
 esp_err_t app_tick(uint32_t buttons) {
     // The Back turn is the guest's ONE last chance to save: main.c calls
     // app_tick(0x2000) and requests the stop on the next line, so there is no
@@ -659,8 +716,53 @@ esp_err_t app_tick(uint32_t buttons) {
         turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
         if(ce) return ce;
         if(!leaving && pocketjs_guest_jobs_pending(guest)) {
+#ifdef CONFIG_POCKET_VM_FAIR
+            // FAIR ORDERING (Kconfig POCKET_VM_FAIR, off in the shipping
+            // build; docs/vm-L1-report.md sec.10). The drain has yielded with
+            // work still queued, and this is the one place compat ordering
+            // refuses to let a host event through.
+            //
+            // THE RULE: the pumps run AFTER the drain has had its budget and
+            // only when the queue is still non-empty -- i.e. exactly on the
+            // turns compat ordering would have delivered nothing at all. What
+            // a pump settles is enqueued by JS_Call'ing a resolve function,
+            // and a resolve function APPENDS its reactions to the job queue
+            // (ledger 03 fact 53), so the reaction lands BEHIND every job of
+            // the unfinished drain: FIFO inside the queue is byte for byte
+            // what compat produces. What changes, and the only thing that
+            // changes, is that a subscription delivery and a completion's
+            // resolve happen at a job boundary in the middle of one logical
+            // drain instead of after its end.
+            //
+            // Draining first rather than pumping first is deliberate: a
+            // continuation turn must begin with the continuation, or a
+            // high-rate subscription could keep appending work in front of a
+            // drain that then never reaches its own budget. It also means no
+            // turn ever pumps twice -- if the drain above emptied the queue,
+            // control falls through to the ordinary path below, which pumps
+            // exactly once, at the same point in the turn as ever.
+            //
+            // NOT made fair here, and neither is safe to be:
+            //   - the exit() check: app_request_stop() is delivered as an
+            //     uncatchable interrupt on the next call into JS, so honouring
+            //     it at a job boundary cuts the drain it lands in -- whether
+            //     a .finally ran would depend on where the budget fell. It
+            //     stays below, on a turn that begins with an empty queue.
+            //   - frame(): it is the guest's picture, not a host event, and
+            //     calling it here would put a frame INSIDE a chain, which
+            //     tools/vmtest/corpus/budget_frame_boundary.js exists to
+            //     forbid. A continuation turn still shows no frame() in
+            //     either mode, so main.c's display pacing (commit 3298d0f) is
+            //     untouched: app_turn_continued() is still true here.
+            // The unhandled-rejection report point is untouched as well: the
+            // guest reports only where vm_sched_drain() returned EMPTY, which
+            // is not this boundary.
+            buttons|=deferred_buttons; deferred_buttons=0;
+            run_pumps(buttons);
+#else
             // Nothing new reaches JS this turn. The keys are held, not lost.
             deferred_buttons|=buttons;
+#endif
             // sec.5.2. Not an uncatchable throw: the session ends at a job
             // boundary, where no JavaScript frame is live, so this guard
             // cannot skip a finally or strand an await the way the old
@@ -692,42 +794,7 @@ esp_err_t app_tick(uint32_t buttons) {
     // here, ahead of every other pump, and still does everything else it did).
     if(pocket_app_exit_requested()) app_request_stop();
     buttons|=deferred_buttons; deferred_buttons=0;
-    // Watch deliveries before the frame, so a listener that updates a node and
-    // the frame that draws it are the same turn rather than one apart.
-    // First: it posts the sleeps that came due, so pocket_api_pump() settles
-    // them this turn, and it is where Starting becomes Running.
-    pocket_app_pump();
-    // The keystroke that queued these arrived before this turn (main.c hands
-    // the field its key ahead of app_tick), so the guest hears about it ahead
-    // of anything that happened during the turn -- and, unlike a JS_Call made
-    // from the keystroke itself, on a turn whose job queue is empty.
-    pocket_text_pump();
-    pocket_imu_pump();
-    pocket_io_pump();
-    // Before pocket_api_pump(): what the PC answered this turn is posted here
-    // and settled below, rather than a frame late.
-    pocket_bridge_pump();
-    // Same reason: a link that came up or a scan that finished is posted here
-    // and settled below, in the turn that noticed it.
-    pocket_net_pump();
-    // Between the two, so a tone that finished settles in the same order the
-    // one pump in pocket_av.c used to settle it in.
-    // Before pocket_api_pump(): a read that the microphone can satisfy is
-    // filled here and settles below, in the same turn rather than the next.
-    pocket_capture_pump();
-    pocket_api_pump();
-    // AFTER pocket_api_pump(), unlike the ones above it: this one posts no
-    // completion for that pump to settle. It delivers fs.onVolumeChange, which
-    // says the card was granted or has gone, and a listener may call straight
-    // back into pocket.fs -- so it runs in the part of the turn where nothing
-    // of that surface is in flight. While the folder picker is up the guest is
-    // not ticked at all, so a grant is announced on the first frame after the
-    // person chose, which is the first frame the app could act on it.
-    pocket_fs_pump();
-    pocket_av_pump();
-    // The same mask the turn below is handed: pocket.input reports what the
-    // host forwarded, never a second reading of the keyboard.
-    pocket_ui_pump(buttons);
+    run_pumps(buttons);
     pocketjs_ui_input_t input={.struct_size=sizeof(input),.buttons=buttons};
     pocketjs_ui_frame_view_t frame={.struct_size=sizeof(frame)};
     // The JS side of the frame: frame() in QuickJS plus the UI core's tick and
