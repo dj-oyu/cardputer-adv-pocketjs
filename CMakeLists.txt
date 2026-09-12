@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 set(POCKETJS_SOURCE_DIR "${CMAKE_SOURCE_DIR}/.cache/pocketjs" CACHE PATH "Pinned PocketJS checkout")
-# quickjs-ng and pocketjs_guest are vendored under components/ (default search
-# path, no EXTRA_COMPONENT_DIRS needed); only the UI bindings still build out
-# of the pinned .cache/pocketjs checkout.
-foreach(component pocketjs_ui_core pocketjs_ui_qjs pocketjs_render_rgb565)
+# quickjs-ng, pocketjs_guest and pocketjs_ui_qjs are vendored under components/
+# (default search path, no EXTRA_COMPONENT_DIRS needed); pocketjs_ui_core and
+# pocketjs_render_rgb565 (thin C shims over prebuilt Rust archives, unrelated
+# to the resolve/frame/drain ordering L1 needs to change) still build out of
+# the pinned .cache/pocketjs checkout.
+foreach(component pocketjs_ui_core pocketjs_render_rgb565)
     list(APPEND EXTRA_COMPONENT_DIRS "${POCKETJS_SOURCE_DIR}/hosts/esp-idf/components/${component}")
 endforeach()
 set(POCKETJS_UI_CORE_ARCHIVE "${CMAKE_SOURCE_DIR}/.cache/native/libpocketjs_idf_ui_core.a" CACHE FILEPATH "S3 UI archive")

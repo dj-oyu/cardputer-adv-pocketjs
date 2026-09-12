@@ -1,10 +1,11 @@
 """Fetch pinned upstream for the components this tree still builds out of .cache/.
 
-pocketjs_guest and quickjs-ng are vendored (components/pocketjs_guest,
-components/quickjs-ng) and are NOT touched here -- copying over them would
-silently discard whatever L1+ work has landed on the vendored copy. Only
-pocketjs_ui_core / pocketjs_ui_qjs / pocketjs_render_rgb565, which still
-build in place out of .cache/pocketjs, need this checkout.
+pocketjs_guest, quickjs-ng and pocketjs_ui_qjs are vendored (components/
+pocketjs_guest, components/quickjs-ng, components/pocketjs_ui_qjs) and are
+NOT touched here -- copying over them would silently discard whatever L1+
+work has landed on the vendored copy. Only pocketjs_ui_core /
+pocketjs_render_rgb565, thin C shims over prebuilt Rust archives, still
+build in place out of .cache/pocketjs and need this checkout.
 """
 from pathlib import Path
 import subprocess
@@ -23,7 +24,7 @@ if not bmi.exists():
 subprocess.run(['git','-C',str(bmi),'checkout','--detach','41129fcfe39c583ee5462d79195741945d51c1fe'],check=True)
 # libopus, for pocket.audio.player's Opus decoding. FETCHED AT A TAG, NOT VENDORED:
 # components/opus/CMakeLists.txt compiles these sources in place out of .cache/, the
-# same arrangement pocketjs_ui_core/ui_qjs/render_rgb565 above use, so this tree
+# same arrangement pocketjs_ui_core/render_rgb565 above use, so this tree
 # carries the build recipe and licenses/libopus.txt but none of xiph/opus's ~100 C files.
 #
 # v1.6.1 rather than the 1.5.2 the study named: the only decode-cost measurement

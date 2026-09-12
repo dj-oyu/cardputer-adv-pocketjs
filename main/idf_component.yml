@@ -7,7 +7,7 @@ dependencies:
     override_path: "../.cache/pocketjs/hosts/esp-idf/components/pocketjs_ui_core"
   pocket-stack/pocketjs_ui_qjs:
     version: "0.1.0"
-    override_path: "../.cache/pocketjs/hosts/esp-idf/components/pocketjs_ui_qjs"
+    override_path: "../components/pocketjs_ui_qjs"
   pocket-stack/pocketjs_render_rgb565:
     version: "0.1.0"
     override_path: "../.cache/pocketjs/hosts/esp-idf/components/pocketjs_render_rgb565"
