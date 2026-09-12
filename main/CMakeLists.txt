@@ -23,12 +23,8 @@ idf_component_register(SRCS "pocket/mp3_decode.c" "pocket/mp3_feed.c" "main.c" "
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/streamplay/streamplay.js" "../apps/opusplay/opusplay.js" "../apps/opusfit/opusfit.js" "../apps/player/player.js"
-    EMBED_FILES "../apps/pet/assets/pets-compact.bin" "../apps/chime/chime.wav" "../apps/chime/chime.pok" "../apps/opusplay/tone.pok")
-target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/mp3play/mp3play.js" TEXT)
-target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/mp3play/test-tone.mp3" BINARY)
-target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/mp3play/test-48k.mp3" BINARY)
-target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/mp3play/test-24k.mp3" BINARY)
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js"
+    EMBED_FILES "../apps/pet/assets/pets-compact.bin")
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_font.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_font.py")

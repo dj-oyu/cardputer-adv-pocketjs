@@ -77,7 +77,7 @@ with serial.Serial(a.port, 115200, timeout=0.2) as s:
 
     command('q', 'HOME_READY')
     command('a', 'CATEGORY 0')
-    capture('apps')  # MP3 PLAYBACK is appended; original navigation indices are unchanged.
+    capture('apps')  # just opens the category; no per-row navigation depends on its length.
     command('b', 'CATEGORY 1')
     command('uu', 'SELECT 0')
     command('d', 'SELECT 1')
