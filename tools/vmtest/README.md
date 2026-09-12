@@ -85,7 +85,7 @@ void vmtest_vm_set_force_yield(JSRuntime *rt, int on);
 
 が定義されていれば呼ぶ。L2 で opcode のチェックポイント（`docs/vm-ledger/04-opcode-checkpoints.md`）を実装したら VM 側でこれを定義し、粒度が opcode まで細かくなる。`run.sh --force-yield` と `test262.py --force-yield` は、その時も「全地点で中断しても出力と合格集合が変わらない」の検査のまま使える（§7 完了条件）。
 
-L1 時点の結果（実測(host)）: コーパス 28 件が `--budget-jobs 1 / 3 / 7 / 16`・`--force-yield`・予算なしで、asan と o2 の両方でバイト一致。Test262 は `--force-yield` で両 variant とも 7,501 pass / 194 fail（基準と同じ）。
+L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 3 / 7 / 16`・`--force-yield`・予算なしで、asan と o2 の両方でバイト一致。Test262 は `--force-yield` で両 variant とも 7,501 pass / 194 fail（基準と同じ、`regressions: 0`）。
 
 ## コーパス
 
@@ -112,6 +112,9 @@ L1 時点の結果（実測(host)）: コーパス 28 件が `--budget-jobs 1 / 
 | `budget_completions.js` | 継続ターン中に記録された完了が、落ちず・重複せず・要求順に・**キューが空になったターンでだけ**配送されること |
 | `budget_starve.js` | 毎ターン 41 件積んで予算 8 件でも、次の `frame()` までに必ず片付くこと（1 フレーム 1 連鎖で遅れない） |
 | `runaway_jobs.js` | `f(){Promise.resolve().then(f)}`。キュー長は常に 1、各ジョブは一瞬なので旧来の壁時計ガードには見えない形。終了コード 5、LSan 0 |
+| `budget_reject_far_catch.js` | 報告の時点。catch が 70 件先（backstop の外）／ rejection が drain の途中で生まれて 40 件先で捕まる／`frame()` の連鎖内で完結、の 3 形はどれも報告されず、誰も捕まえない 1 件だけが報告される |
+| `budget_boundary_exact.js` | 境界そのもので記録された完了。ジョブ内から `k=0`、完了ハンドラからの再入、完了が積んだ連鎖の最中の記録。配送はキューが空になったターンだけ、記録順に 1 回ずつ |
+| `budget_teardown_live.js` | キューを残した終了の重い形。await で中断した async、届かない finally、try/finally 内の generator、要求の残った async generator、切断の向こうの thenable、捨てられるジョブの中に catch がある rejection。報告 0 行・`jobs_dropped=1`・LSan 0 |
 | `stop_with_queue.js` | キューを残したままのセッション終了。残りは**実行せず**破棄、`#info jobs_dropped=1`、残っていた rejection は**報告しない**（捨てたジョブの中に catch があったかもしれない）、終了コード 0 |
 | `bench_*.js` | 時間計測用。出力はチェックサムで、これも意味論の基準になる |
 

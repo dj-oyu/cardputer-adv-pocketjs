@@ -237,6 +237,13 @@ static esp_err_t eval_user_source(const char *source, size_t length) {
     // caller's cue to run it as an expression rather than as an app.
     return pocketjs_guest_eval(guest,"0",1,"bind-frame.js");
 }
+// The guest's stats, taken while the guest still exists. app_stop() destroys
+// it and NULLs the pointer BEFORE calling app_report(), so the live read below
+// answers zero at the one call site the warning is written for: sec.3.2's
+// "jobs dropped at stop" could never fire. Latched at the only moment the
+// answer is both known and final -- after the stop hook has had its 200 ms of
+// JS_ExecutePendingJob, before JS_FreeRuntime discards whatever is left.
+static pocketjs_guest_stats_t final_stats;
 void app_report(void) {
     pocketjs_guest_stats_t stats={.struct_size=sizeof(stats)};
     if(guest) pocketjs_guest_stats(guest,&stats);
@@ -245,9 +252,13 @@ void app_report(void) {
     // pocket_api_reset() already makes for in-flight promises. Said out loud
     // because an app whose last Promise never settled would otherwise have no
     // trace of why. A new line; no contracted marker's format is touched.
-    if(stats.jobs_dropped)
+    const pocketjs_guest_stats_t *ended=guest?&stats:&final_stats;
+    if(ended->jobs_dropped)
         ESP_LOGW("app","jobs dropped at stop: queue was not empty (yields=%u continuations=%u)",
-                 (unsigned)stats.yields,(unsigned)stats.continuations);
+                 (unsigned)ended->yields,(unsigned)ended->continuations);
+    // MEM stays on the LIVE stats (zeroes once the guest is gone, as it always
+    // has): tools/memlog.py parses js= out of this line and compares the start
+    // and stop pair, so changing what stop reports would change its budget.
     ESP_LOGI("app","MEM free=%u largest=%u js=%u frames=%u",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
@@ -288,6 +299,14 @@ void app_stop(void) {
     if(renderer && target) pocketjs_rgb565_abort(renderer,target);
     if(target) pocketjs_rgb565_target_destroy(target);
     if(renderer) pocketjs_rgb565_renderer_destroy(renderer);
+    // Read before the runtime goes: app_report() below runs with guest == NULL,
+    // so this is the last point at which "was anything still queued" has an
+    // answer. pocket_app_reset() above has already given the stop hook its
+    // 200 ms, so what is pending here is what really gets discarded.
+    if(guest) {
+        final_stats=(pocketjs_guest_stats_t){.struct_size=sizeof(final_stats)};
+        pocketjs_guest_stats(guest,&final_stats);
+    }
     if(guest) pocketjs_guest_destroy(guest);
     if(binding) pocketjs_ui_qjs_destroy(binding);
     if(core) pocketjs_ui_core_destroy(core);
@@ -304,6 +323,10 @@ esp_err_t app_start_test(char test) {
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     atomic_store(&stop_requested,false); frames=0;
     deferred_buttons=0; continuation_turns=0;
+    // Cleared with them: a start that fails before a guest exists reaches
+    // app_stop() with guest already NULL, and a stale latch would then blame
+    // this session for the previous one's queue.
+    final_stats=(pocketjs_guest_stats_t){.struct_size=sizeof(final_stats)};
     deadline=esp_timer_get_time()+2000000;
     pocketjs_guest_config_t gc;
     pocketjs_guest_config_defaults(&gc);
@@ -566,6 +589,15 @@ const char *app_error(void) {
     return e?e:"";
 }
 esp_err_t app_tick(uint32_t buttons) {
+    // The Back turn is the guest's ONE last chance to save: main.c calls
+    // app_tick(0x2000) and requests the stop on the next line, so there is no
+    // later turn for a deferred 0x2000 to be delivered on. sec.5.2 says so in
+    // as many words -- the leave turn goes on to frame(0x2000) without waiting
+    // for the continuation, and is outside the runaway counter -- and it is
+    // what VM_LEAVE_BUDGET_US/VM_LEAVE_BACKSTOP exist for. Deferring it
+    // instead would drop the save silently, and only for the apps that are
+    // busy enough to still have a queue, which is when saving matters most.
+    const bool leaving=(buttons&0x2000)!=0;
     arm_turn(buttons);
     // L1 sec.2.1: a turn that ended with jobs queued finishes them HERE, ahead
     // of every pump. Until the queue is empty no host call reaches JavaScript
@@ -586,7 +618,7 @@ esp_err_t app_tick(uint32_t buttons) {
         esp_err_t ce=pocketjs_ui_turn_continue(binding,&cont);
         turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
         if(ce) return ce;
-        if(pocketjs_guest_jobs_pending(guest)) {
+        if(!leaving && pocketjs_guest_jobs_pending(guest)) {
             // Nothing new reaches JS this turn. The keys are held, not lost.
             deferred_buttons|=buttons;
             if(++continuation_turns>=VM_RUNAWAY_TURNS) {

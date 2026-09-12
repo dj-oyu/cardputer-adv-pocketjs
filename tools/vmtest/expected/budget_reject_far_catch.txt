@@ -1,0 +1,8 @@
+sync-end
+caught A-far-catch
+caught B-mid-drain
+E pocketjs_guest: Unhandled Promise rejection: Error: D-never-handled
+frame 1
+caught C-inside-frame
+frame 2
+exit=2

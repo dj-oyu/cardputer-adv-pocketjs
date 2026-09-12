@@ -368,3 +368,48 @@ L1 の範囲外だが L2 ではない（別途判断）:
 - **静的 DIRAM（実測(build)）**: 115,372 B（`cd5117d`、L1 前）→ **115,420 B**（`ab2eb11`）= **+48 B**。内訳は `app_session.c.obj +40` / `vm_clock.c.obj +4` / `vm_wake.c.obj +4` で、合計が全差分と一致する（`vm_sched.c` と `guest.c` の DIRAM は 0）。上限 +8 KiB に対して 0.6%。同じ `sdkconfig.defaults` から生成した別々の `sdkconfig` で、probe off の 2 ビルドを比較したもの。
 - **Flash Code（実測(build)）**: 1,550,840 → 1,552,016 = **+1,176 B**。`CONFIG_POCKET_VM_SCHED=n` のビルドは 1,551,812（DIRAM は同じ 115,420）。
 - **実機の数値は 1 つも無い。** ターン長・完了遅延・空きヒープはすべて未測定。
+
+---
+
+## 10. 独立レビューの記録（2026-09-12、ホストのみ）
+
+実装報告を疑って読み直し、ホストの全スイートを自分で走らせた結果。**実機には一切触れていない**ので、§7 の 12 は依然として未実施のままである。
+
+### 10.1 走らせて確認したもの（実測(host)）
+
+| スイート | 結果 |
+| --- | --- |
+| コーパス（新規 3 件込み 31 件）× {asan, o2} × {予算なし, `--force-yield`, `--budget-jobs 1/3/7/16`} | 12 通りすべてで 31/31 バイト一致。既存 `expected/*.txt` は 1 バイトも書き換えていない |
+| Test262 `--force-yield` asan / o2 | 7,501 pass / 194 fail / 0 skip、`regressions: 0`（基準と同一） |
+| `timing.py`（-O2、予算オフ） | 8 本中 6 本の中央値が基準の p95 以内。`bench_alloc` 26.93（p95 26.78）と `bench_calls` 56.48（p95 56.03）は p95 を 0.6〜0.8% 超えたが、基準の p95−中央値（それぞれ 1.77 / 2.25 ms）より小さく、README の規則で「結果」と呼べる差ではない。加えて基準記録時と `quickjs.c` の sha1 が違う（`271d718782c1` → `30877d7c8a45`）ので、そもそも同一バイナリの比較ではない |
+| `tools/build_pocket_text_test.sh` | all passed |
+| `tools/build_pocket_random_test.sh` | **L1 が壊していた**（10.2 の欠陥 3）。直してから `POCKET_RANDOM_OK` |
+| `tools/build_pocket_capture_test.sh` | built |
+| ファーム両ビルド（probe on / `CONFIG_POCKET_VM_SCHED=n`） | どちらも警告なしでビルド成立。sched off の DIRAM 115,452 B は実装報告の 115,420 B + 本レビューの修正 32 B と一致する |
+
+### 10.2 見つけた欠陥
+
+**欠陥 1（修正した）— `jobs dropped at stop` は決して出力されない。** `app_stop()` は `pocketjs_guest_destroy(guest)` を呼び `guest=NULL` を代入した**後**に `app_report()` を呼ぶ（app_session.c）。`app_report()` は `if(guest) pocketjs_guest_stats(...)` なので、そこでの stats は常に全ゼロ = `jobs_dropped` は常に偽。§3.2 がホストに言わせたかった 1 行は、書かれてから一度も出力可能になっていない。実装報告の逸脱 4 は「`app_report()` が `pocketjs_guest_destroy()` より**前**に走るので destroy 時の latch は常に 0 になる」と書いているが、順序は逆である。修正: guest がまだ生きている destroy 直前（= stop hook が 200 ms を使い切った後、捨てられるものが確定した地点）で `final_stats` に latch し、`app_report()` は guest が無いときそれを読む。`MEM` 行は**触っていない** — `tools/memlog.py` が `js=` を正規表現で拾い、start / stop の対を予算検査に使っているため。
+
+**欠陥 2（修正した）— 離脱ターンの `frame(0x2000)` が黙って落ちる。** `main.c:509` は `if(leave) { e=app_tick(0x2000); app_request_stop(); }` で、この 1 回がゲストの最後の保存機会であり、直後にセッションが終わるので「次のターン」は存在しない。しかし `app_tick()` は離脱ターンも他と同じ継続分岐に入れ、キューが空にならなければ `deferred_buttons|=0x2000` して戻っていた = 保存の合図は誰にも配られない。しかも忙しくてキューが残っているアプリ、つまり保存が最も要る側でだけ起きる。設計 §5.2 は明文で逆を書いている（「離脱ターンは継続を待たず `frame(0x2000)` へ進むので、このカウンタの対象外」）。修正: `leaving` のときは継続 drain を（`VM_LEAVE_BUDGET_US` / `VM_LEAVE_BACKSTOP` の広い予算で）走らせた上で、空にならなくても pump → `frame(0x2000)` へ抜ける。継続カウンタにも数えない。
+
+**欠陥 3（修正した）— `tools/build_pocket_random_test.sh` がコンパイルできない。** `main/pocket/pocket_api.c` が新設の `main/vm/vm_wake.h` を include し、そのホストビルドの `-I` に `main/vm` が無いため `fatal error: vm_wake.h: No such file or directory`。CLAUDE.md が名指しで警告している失敗の形そのもの（`main/` にディレクトリを足したら `grep -rn "main/" tools/` で参照元を洗う）で、実装者はこのスイートを走らせていない。修正: `tools/hostshim/vm_wake.h` にスタブを置いた（`vm_wake_post()` の呼び出しは `CONFIG_POCKET_VM_SCHED` の内側で、ホストはそれを定義しないので、必要なのは名前が解決することだけ）。
+
+**欠陥 4（未修正 / 設計の判断）— 出荷時の定数で、正直な長い drain が暴走として殺される。** `VM_JOB_BACKSTOP=64` は時計と無関係の硬い天井なので、1 継続ターンは**どれだけ安くても** 64 件で終わる。すると `VM_RUNAWAY_TURNS=30` は「30 × 64 = 1,920 件を超える 1 本の drain はセッション終了」を意味する。§5.2 は 30 を「30 × 8 ms = 240 ms の JS 時間 ≒ 旧 250 ms ガード」と正当化しているが、その等式は**各ターンを時計が終わらせる場合にだけ**成り立つ。実測の Promise 連鎖（L0 のワークロード D、0.07 ms/件）では 64 件は 4.5 ms で、時計は一度も効かない — つまり新ガードが許すのは 134 ms 相当で、置き換えた旧ガードの 250 ms よりおよそ 2 倍厳しい。
+
+証拠はコーパスの中にある: `promise_chain.js`（3,000 段の then）は `--runaway-turns 30` を明示すると `--budget-jobs 8 / 16 / 64` のいずれでも**終了コード 5**（`#info turns=30 max_run_turns=30 jobs_dropped=1`）になる。コーパスがこれに気づかないのは、vmrun の `--runaway-turns` が既定で無効だからである（実装報告の逸脱 2）。実装者はこの衝突をハーネス側で観測しておきながら（「既定 30 では §7 の 1・2 が全部 runaway で落ちた」）、同じ衝突が実機の 8 ms 予算でも起きることを追っていない。再現は `tools/vmtest/known/runaway_vs_honest_chain.js`。
+
+これを直すには「1 本の論理 drain が消費してよい JS 時間の総量」を決め直す必要がある（ターン数ではなく時間で数える、あるいは backstop が終わらせたターンを数えない、など）。どれも §5 の決定そのものなので、コード側で黙って数字を変えず、実装者・設計者へ差し戻す。
+
+**欠陥 5（未修正 / 設計の判断）— `deferred_buttons` は 2 つの打鍵を 1 フレームに融合する。** `main.c:519` は `app_tick(buttons)` の直後に `app_tick(0)` を呼び、「連続した打鍵が別物として届く」ことを離鍵フレームで保証している。継続ターンが続く間に別々の打鍵が 2 回届くと、`deferred_buttons |= buttons` はそれを 1 つのマスク（例: UP|RIGHT）にまとめ、ゲストは同時押しを 1 フレームで見る — 予算導入前には起こり得ない入力である。設計 §2.2 が `|=` をそのまま指定しているので、これも設計側の判断として差し戻す（キューにするなら離鍵フレームの対も作り直す必要がある）。
+
+**所見（修正不要）— `vm_budget_restart()` は呼び出し元が無い。** 継続ターンは `arm_turn()` が毎ターン新しい予算を張るので、この関数は現状どこからも使われていない。
+
+### 10.3 足したホスト検査（`tools/vmtest/corpus/`）
+
+いずれも「予算をどこで切っても出力が同じ」を要求する形で、上の 12 通りすべてで一致することを確認した。
+
+- `budget_reject_far_catch.js` — 不変条件 5 を `rejections.js` より遠くまで押す。catch が 70 件先（= `VM_JOB_BACKSTOP` の外）、rejection が drain の 30 件目で**生まれて** 40 件先で捕まる、`frame()` が積んだ連鎖の中だけで完結する、の 3 形。どれも報告されてはならない。対照として誰も捕まえない 1 件を置き、これは必ず報告される（報告そのものを止めた実装が通らないようにするため）。
+- `budget_boundary_exact.js` — 不変条件 6 を境界そのもので。ジョブの中から `k=0` で要求した完了（= その drain が到達する境界でちょうど準備できる）、完了ハンドラの中から要求した完了（再入）、その完了が積んだ連鎖の最中に記録された完了。配送は必ず「キューが空になったターン」で、記録順に 1 回ずつ。
+- `budget_teardown_live.js` — §3.2 を `stop_with_queue.js` より重い形で。await で中断した async 関数 4 本（到達しない `finally` 付き）、try/finally の中で止まった generator、要求が残った async generator、切断の向こう側にある thenable、catch が捨てられるジョブの中にある rejection。終了コード 0、報告 0 行、`#info jobs_dropped=1`、LSan 0。
+- `known/runaway_vs_honest_chain.js` — 欠陥 4 の再現。予算に依存する結果なのでコーパスには置けない（`run.sh` は全コーパスを複数の予算で回してバイト一致を要求する）。
