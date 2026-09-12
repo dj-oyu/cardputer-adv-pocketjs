@@ -58,13 +58,17 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
 #else
     const int flat = 0;
 #endif
+    // The (unsigned) casts are not decoration: depth_max and seg_live_max are
+    // uint32_t, which is unsigned int on the x86-64 host but long unsigned int
+    // on xtensa, so a bare %u passed every host build and failed -Werror=format
+    // the first time a CONFIG_POCKET_VM_PROBE firmware compiled this file.
     fprintf(f, "#info vmstack flat=%d seg_size=%zu align=%d frame_hdr=%zu pushes=%llu depth_max=%u "
                "live_max=%zu frame_max=%zu seg_live_max=%u seg_mallocs=%llu seg_frees=%llu "
                "seg_reuses=%llu dedicated=%llu fallbacks=%llu resident_max~=%zu "
                "budget=%zu budget_hits=%llu seg_refused=%llu\n",
             flat, st->seg_size, JS_VM_FRAME_ALIGN, sizeof(JSVMSeg),
-            (unsigned long long)st->pushes, st->depth_max, st->live_bytes_max, st->frame_max,
-            st->seg_live_max, (unsigned long long)st->seg_mallocs,
+            (unsigned long long)st->pushes, (unsigned)st->depth_max, st->live_bytes_max, st->frame_max,
+            (unsigned)st->seg_live_max, (unsigned long long)st->seg_mallocs,
             (unsigned long long)st->seg_frees, (unsigned long long)st->seg_reuses,
             (unsigned long long)st->dedicated, (unsigned long long)st->fallbacks,
             (size_t)st->seg_live_max * (st->seg_size + overhead),
