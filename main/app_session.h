@@ -56,6 +56,12 @@ void app_force_redraw(void);
 esp_err_t app_tick(uint32_t buttons);
 void app_stop(void);
 void app_request_stop(void);
+// Swap the predicate QuickJS's single interrupt slot answers with
+// (docs/vm-L1-design.md sec.5.3). The registration itself lives in the guest;
+// three callers used to overwrite one another in that slot, which is why the
+// guest's own handler had been dead since the first of them. NULL restores the
+// session watchdog (stop requested, or the 250 ms deadline).
+void app_vm_watchdog(int (*fn)(void *), void *opaque);
 void app_report(void);
 // The last exception a Playground run reported, or "" when it ran clean.
 const char *app_error(void);

@@ -29,4 +29,25 @@ menu "Pocket VM (L0 measurement probes)"
             directory regardless of -B. Never turn this on in
             sdkconfig.defaults or in the shared root sdkconfig.
 
+    config POCKET_VM_SCHED
+        bool "Job-boundary scheduling and wake (docs/vm-L1-design.md, L1)"
+        default y
+        help
+            The L1 execution control. On, a turn's Promise job drain may stop
+            BETWEEN two jobs once the turn's time budget is spent, and the rest
+            of that drain runs at the top of the next turn before any host
+            event or frame() reaches JavaScript; a completion posted from
+            another task can also cut short the frame-cap sleep instead of
+            waiting out the whole period.
+
+            Off, every knob it adds is set to "unlimited": the drain cannot
+            yield, so no continuation turn can exist, the unhandled-rejection
+            report point is the one it always was, and the frame cap is the old
+            unconditional vTaskDelay. That is the pre-L1 behaviour exactly,
+            which is what spec sec.12 means by every stage being revertible --
+            if a board run finds something this level broke, this switch puts
+            it back without reverting the code.
+
+            Measure the cost with tools/memlog.py rather than assuming it.
+
 endmenu

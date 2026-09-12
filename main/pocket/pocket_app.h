@@ -1,4 +1,5 @@
 #pragma once
+#include <stdbool.h>
 #include "esp_err.h"
 #include "quickjs.h"
 
@@ -24,4 +25,7 @@ void pocket_app_pump(void);
 // section 5 puts the stop hook ahead of I/O cancellation and unsubscription,
 // and a hook that wants to save something needs the surfaces it is about to
 // lose. Bounded by POCKET_APP_STOP_MS whatever the hook does.
+// Whether the guest called pocket.app.exit(). Hoisted out of
+// pocket_app_pump() so a continuation turn honours it too; see the definition.
+bool pocket_app_exit_requested(void);
 void pocket_app_reset(void);

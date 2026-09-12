@@ -31,6 +31,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "vmprobe.h"
+#include "vm_wake.h"
 #include <stdatomic.h>
 #include <string.h>
 
@@ -46,6 +47,17 @@ static pocketjs_rgb565_renderer_t *renderer;
 static pocketjs_rgb565_target_t *target;
 static atomic_bool stop_requested;
 static int64_t deadline;
+// L1 (docs/vm-L1-design.md). Armed once per turn and handed to the guest, so
+// frame()'s drain and the next turn's continuation drain measure against the
+// same turn start.
+static vm_budget_t budget;
+// Presses that arrived on a turn spent finishing the previous turn's queue.
+// pocket_ui_pump() is a delivery into JavaScript and so is held back with the
+// rest; the mask is OR'd into the first turn that runs the pumps, which is
+// what keeps a keystroke from being dropped instead of merely delayed.
+static uint32_t deferred_buttons;
+// Consecutive turns that ended with the queue still non-empty (sec.5.2).
+static unsigned continuation_turns;
 static unsigned frames;
 static bool redraw;
 static double render_sum, present_sum, kernel_sum, turn_sum;
@@ -80,17 +92,53 @@ static size_t user_prelude_length;
 // pocket_overlay.h for why drawing goes through a host display list instead.
 static bool overlay_session;
 void app_force_redraw(void) { redraw=true; }
+static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame);
 
-static int interrupt(JSRuntime *rt, void *opaque) {
-    (void)rt; (void)opaque;
+// The session watchdog. Registered through the guest rather than with
+// JS_SetInterruptHandler directly: QuickJS has ONE handler slot and three
+// callers used to overwrite each other in it (sec.5.3), which is why the
+// guest's own epoch handler had been dead for as long as this one existed.
+static int interrupt(void *opaque) {
+    (void)opaque;
     return atomic_load(&stop_requested) || esp_timer_get_time()>deadline;
 }
-static esp_err_t install_limits(JSContext *ctx, void *data) {
-    (void)data;
-    JS_SetInterruptHandler(JS_GetRuntime(ctx),interrupt,NULL);
-    return ESP_OK;
+void app_vm_watchdog(int (*fn)(void *), void *opaque) {
+    if(guest) pocketjs_guest_set_watchdog(guest,fn?fn:interrupt,opaque);
 }
 void app_request_stop(void) { atomic_store(&stop_requested,true); }
+
+// One clock read, at the top of every turn, shared by the 250 ms watchdog
+// deadline and by the job budget: sec.1.2 measures the budget from TURN start,
+// not from drain start, because the turn length is what a completion's latency
+// actually is (measured (device), L0 sec.2.1).
+//
+// CONFIG_POCKET_VM_SCHED off makes this an unlimited budget, and an unlimited
+// budget cannot yield -- so nothing below the guest's drain loop can tell the
+// difference from the pre-L1 code. That is the revert switch.
+static void arm_turn(uint32_t buttons) {
+    const int64_t now=esp_timer_get_time();
+    deadline=now+250000;
+#ifdef CONFIG_POCKET_VM_SCHED
+    // The Back turn (main.c calls app_tick(0x2000) once so the guest can save)
+    // gets room to finish rather than be cut: the session ends immediately
+    // after it, so no reordering it causes can be observed.
+    if(buttons&0x2000)
+        vm_budget_begin_full(&budget,VM_LEAVE_BUDGET_US,VM_JOB_STRIDE,
+                             VM_JOB_FLOOR,VM_LEAVE_BACKSTOP);
+    else
+        vm_budget_begin(&budget,VM_TURN_BUDGET_US);
+#else
+    (void)buttons;
+    vm_budget_begin(&budget,0);
+#endif
+    // vm_budget_begin does its own read through vm_clock rather than being
+    // handed `now`: which clock the budget uses is vm_clock's decision (the
+    // measurement says a cycle counter is 33x cheaper than the timer), and
+    // handing it a value in esp_timer's units would silently break the day
+    // that decision changes. One extra read a turn, against a turn measured
+    // in milliseconds.
+    pocketjs_guest_budget(guest,&budget);
+}
 
 // app_registry.c takes this rather than calling pocket_api_supported() itself,
 // so that the registry stays free of the API surface and can be tested on a
@@ -192,6 +240,14 @@ static esp_err_t eval_user_source(const char *source, size_t length) {
 void app_report(void) {
     pocketjs_guest_stats_t stats={.struct_size=sizeof(stats)};
     if(guest) pocketjs_guest_stats(guest,&stats);
+    // sec.3.2: a session can end with work still queued, and that work is
+    // discarded unrun -- JS_FreeRuntime's own behaviour, and the same choice
+    // pocket_api_reset() already makes for in-flight promises. Said out loud
+    // because an app whose last Promise never settled would otherwise have no
+    // trace of why. A new line; no contracted marker's format is touched.
+    if(stats.jobs_dropped)
+        ESP_LOGW("app","jobs dropped at stop: queue was not empty (yields=%u continuations=%u)",
+                 (unsigned)stats.yields,(unsigned)stats.continuations);
     ESP_LOGI("app","MEM free=%u largest=%u js=%u frames=%u",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
@@ -247,6 +303,7 @@ esp_err_t app_start_test(char test) {
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     atomic_store(&stop_requested,false); frames=0;
+    deferred_buttons=0; continuation_turns=0;
     deadline=esp_timer_get_time()+2000000;
     pocketjs_guest_config_t gc;
     pocketjs_guest_config_defaults(&gc);
@@ -279,7 +336,7 @@ esp_err_t app_start_test(char test) {
 #ifdef CONFIG_POCKET_VM_PROBE
     vmprobe_static_report();
 #endif
-    TRY(pocketjs_guest_quickjs_install(guest,install_limits,NULL));
+    pocketjs_guest_set_watchdog(guest,interrupt,NULL);
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
     jsconsole_clear();
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
@@ -456,7 +513,27 @@ esp_err_t app_overlay_tick(void) {
     // throws inside whichever line the guest happened to be on, so an app gets
     // blamed for the system being busy. Two mechanisms, two jobs; this one is
     // "not coming back" and should be far beyond any honest turn.
-    deadline=esp_timer_get_time()+250000;
+    arm_turn(0);
+    // The same continuation rule as app_tick() (sec.2.2), minus the surfaces an
+    // overlay does not install. There is no UI core here, so the drain is
+    // resumed directly instead of through the binding.
+    if(pocket_app_exit_requested()) app_request_stop();
+    if(pocketjs_guest_jobs_pending(guest)) {
+        esp_err_t ce=pocketjs_guest_continue(guest);
+        if(ce) return ce;
+        if(pocketjs_guest_jobs_pending(guest)) {
+            if(++continuation_turns>=VM_RUNAWAY_TURNS) {
+                ESP_LOGE("app","RUNAWAY jobs pending after %u turns",continuation_turns);
+                jsconsole_set_error("JOB QUEUE RUNAWAY");
+                return ESP_ERR_TIMEOUT;
+            }
+            // No display list this turn: the shell composites whatever the
+            // overlay last produced, which is the same thing it does for a
+            // turn the overlay chose not to draw in.
+            return ESP_OK;
+        }
+    }
+    continuation_turns=0;
     pocket_app_pump();
     // Before pocket_api_pump(), like every other producer: what these post is
     // settled by that call, and posting after it would delay every completion
@@ -489,7 +566,45 @@ const char *app_error(void) {
     return e?e:"";
 }
 esp_err_t app_tick(uint32_t buttons) {
-    deadline=esp_timer_get_time()+250000;
+    arm_turn(buttons);
+    // L1 sec.2.1: a turn that ended with jobs queued finishes them HERE, ahead
+    // of every pump. Until the queue is empty no host call reaches JavaScript
+    // at all, so the drain the budget cut and its continuations are one
+    // logical drain with the same job order the pre-L1 single drain produced.
+    //
+    // Hoisted out of pocket_app_pump(): exit() sets its flag inside a job, and
+    // the stop it asks for has to be honoured on a continuation turn too --
+    // otherwise an app that exits from a long chain keeps running until the
+    // chain ends.
+    if(pocket_app_exit_requested()) app_request_stop();
+    if(pocketjs_guest_jobs_pending(guest)) {
+        pocketjs_ui_frame_view_t cont={.struct_size=sizeof(cont)};
+        // Timed into the same turn_ms as an ordinary turn: a continuation IS a
+        // turn as far as the frame period is concerned, and leaving it out
+        // would make PAINT's turn_ms report only the cheap turns.
+        int64_t cont_began=esp_timer_get_time();
+        esp_err_t ce=pocketjs_ui_turn_continue(binding,&cont);
+        turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
+        if(ce) return ce;
+        if(pocketjs_guest_jobs_pending(guest)) {
+            // Nothing new reaches JS this turn. The keys are held, not lost.
+            deferred_buttons|=buttons;
+            if(++continuation_turns>=VM_RUNAWAY_TURNS) {
+                // sec.5.2. Not an uncatchable throw: the session ends at a job
+                // boundary, where no JavaScript frame is live, so this guard
+                // cannot skip a finally or strand an await the way the old
+                // wall-clock interrupt does.
+                ESP_LOGE("app","RUNAWAY jobs pending after %u turns",continuation_turns);
+                jsconsole_set_error("JOB QUEUE RUNAWAY");
+                return ESP_ERR_TIMEOUT;
+            }
+            // The display keeps moving: pocketjs_ui_turn_continue() ran the UI
+            // core's tick and draw, so `cont` is a real frame to present.
+            return present_frame(&cont);
+        }
+    }
+    continuation_turns=0;
+    buttons|=deferred_buttons; deferred_buttons=0;
     // Watch deliveries before the frame, so a listener that updates a node and
     // the frame that draws it are the same turn rather than one apart.
     // First: it posts the sleeps that came due, so pocket_api_pump() settles
@@ -536,8 +651,19 @@ esp_err_t app_tick(uint32_t buttons) {
     vmprobe_frame_sample(guest,turn_us);
 #endif
     if(e)return e;
+    return present_frame(&frame);
+}
+
+// The half of a turn that is not JavaScript: damage plan, strips, bus, and
+// the PAINT accounting. Split out for L1 because a CONTINUATION turn has no
+// frame() of its own but still has a frame to show -- the UI core ticked and
+// drew inside pocketjs_ui_turn_continue() -- and a display frozen for the
+// length of a long drain would be a visible regression the level does not
+// need to cause.
+static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
+    esp_err_t e;
     pocketjs_rgb565_damage_plan_t plan={.struct_size=sizeof(plan)};
-    e=pocketjs_rgb565_prepare(renderer,target,&frame,&plan);if(e)return e;
+    e=pocketjs_rgb565_prepare(renderer,target,frame,&plan);if(e)return e;
     pet_assets_tick();
     if(plan.region_count || redraw) {
         redraw=false;
@@ -554,7 +680,7 @@ esp_err_t app_tick(uint32_t buttons) {
             memset(pixels,0,(size_t)LCD_W*STRIP_H*sizeof(*pixels));
             pocketjs_rgb565_rect_t region={.x=0,.y=y,.width=LCD_W,.height=rows};
             pocketjs_rgb565_render_stats_t stats={.struct_size=sizeof(stats)};
-            e=pocketjs_rgb565_render_strip(renderer,&frame,pixels,LCD_W*rows,region,
+            e=pocketjs_rgb565_render_strip(renderer,frame,pixels,LCD_W*rows,region,
                                            &render_accel,&stats);
             if(e)goto fail;
             pet_assets_overlay(pixels,y,rows);
@@ -583,10 +709,11 @@ esp_err_t app_tick(uint32_t buttons) {
             render_sum=0; present_sum=0; kernel_sum=0; painted=0; turn_sum=0; ticks=0;
         }
     }
-    e=pocketjs_rgb565_commit(renderer,target,&frame);
+    e=pocketjs_rgb565_commit(renderer,target,frame);
     frames++;
     if(frames==1)ESP_LOGI("app","HELLO_FRAME_PRESENTED");
     return e;
 fail:
     pocketjs_rgb565_abort(renderer,target);return e;
 }
+

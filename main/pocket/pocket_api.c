@@ -1,3 +1,4 @@
+#include "vm_wake.h"
 #include "pocket_api.h"
 #include "board.h"
 #include "esp_app_desc.h"
@@ -464,6 +465,13 @@ void pocket_api_complete(pocket_request_t request, int32_t status) {
     // Written last: the pump reads the number first and only then trusts the
     // status beside it.
     atomic_store(&p->done,request);
+#ifdef CONFIG_POCKET_VM_SCHED
+    // AFTER the record is published, never before (vm_wake.h's ordering
+    // contract). The owner task re-checks its own state when it wakes, so a
+    // wake that arrived first would find nothing and go back to sleep for the
+    // rest of the frame period -- which is the delay this is here to remove.
+    vm_wake_post();
+#endif
 }
 
 static void promise_settle(pocket_promise_t *p, JSValue value, bool rejected) {

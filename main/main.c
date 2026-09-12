@@ -11,6 +11,7 @@
 #include "jpfont.h"
 #include "skk_session.h"
 #include "app_session.h"
+#include "vm_wake.h"
 #include "pocket_workspace.h"
 #include "sd_picker.h"
 #include "file_picker.h"
@@ -534,8 +535,20 @@ static void paint(const screen_ops_t *s) {
                  sum=0; peak=0; n=0; }
 }
 
+// The frame period floor for a running guest (vm-L1-design sec.4.2). Without
+// it, an app whose completions arrive back to back (a 10 ms sleep loop, a UART
+// that keeps answering) would be woken from the frame cap over and over and
+// call frame() far faster than 30 fps -- onFrame's dt stays honest, being
+// computed from the clock, but an app that counts frames as a clock would not.
+// 8 ms is the job budget: below it the transfer alone (7.7 ms, measured
+// (device)) cannot keep up anyway.
+#define VM_MIN_PERIOD_MS 8
+
 static void ui_task(void *arg) {
     (void)arg;
+    // Before anything can post: every producer of a completion runs on a task
+    // this one starts, or on an interrupt armed from it.
+    vm_wake_bind();
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
     while(1) {
@@ -695,7 +708,27 @@ static void ui_task(void *arg) {
         last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
         int held=(int)(last_frame_us/1000);
         unsigned cap = running ? 33 : SCREENS[screen].frame_ms;
-        vTaskDelay(pdMS_TO_TICKS((unsigned)held<cap?cap-held:1));
+        unsigned rest = (unsigned)held<cap?cap-held:1;
+#ifdef CONFIG_POCKET_VM_SCHED
+        // The one wait L1 can actually replace (vm-L1-design sec.4.1: this task
+        // cannot stop, because the home screen, the pet and the overlay all
+        // ride on it, so a guest with nothing to do is not a reason to idle).
+        // A completion posted by another task or an ISR cuts the frame cap
+        // short instead of waiting out the period; the measured (device) cost
+        // it removes is the "up to one frame period" term of completion
+        // latency, and nothing else.
+        if(running) {
+            unsigned floor_ms = (unsigned)held<VM_MIN_PERIOD_MS?VM_MIN_PERIOD_MS-(unsigned)held:0;
+            if(floor_ms) {
+                // Not interruptible: this is the rate limit, not the cap.
+                vTaskDelay(pdMS_TO_TICKS(floor_ms));
+                rest = rest>floor_ms ? rest-floor_ms : 0;
+            }
+            if(rest) vm_wake_wait(pdMS_TO_TICKS(rest));
+            continue;
+        }
+#endif
+        vTaskDelay(pdMS_TO_TICKS(rest));
     }
 }
 

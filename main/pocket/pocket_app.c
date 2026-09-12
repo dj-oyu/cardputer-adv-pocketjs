@@ -726,11 +726,15 @@ static void run_hook(JSContext *ctx, JSValue hook, JSValueConst argument, int ar
 
 // -------------------------------------------------------------- pump / reset
 
+// Read by app_tick()/app_overlay_tick() at the very top of the turn, ahead of
+// the continuation drain (vm-L1-design sec.2.2). exit() sets the flag from
+// inside a job, so a turn spent finishing a previous turn's queue is exactly
+// the turn that must still honour it -- leaving the check here, inside a pump
+// that a continuation turn does not run, would keep an exiting app alive until
+// its chain ended.
+bool pocket_app_exit_requested(void) { return exit_requested; }
+
 void pocket_app_pump(void) {
-    // Before anything else in the turn, and before any JS runs in it.
-    // Left standing rather than cleared: app_request_stop() only stores a flag,
-    // and pocket_app_reset() reads this one to know the app ended on its own.
-    if(exit_requested) app_request_stop();
     if(sleeps_open) {
         int64_t now=esp_timer_get_time();
         for(int i=0;i<APP_SLEEPS;i++)
@@ -764,8 +768,8 @@ void pocket_app_pump(void) {
 // destroyed a few lines after this returns, and the next session installs its
 // own from app_session.c.
 static int64_t stop_deadline_us;
-static int stop_interrupt(JSRuntime *rt, void *opaque) {
-    (void)rt; (void)opaque;
+static int stop_interrupt(void *opaque) {
+    (void)opaque;
     return esp_timer_get_time()>stop_deadline_us;
 }
 
@@ -778,7 +782,10 @@ void pocket_app_reset(void) {
        (phase==PHASE_STARTING || phase==PHASE_RUNNING)) {
         JSRuntime *rt=JS_GetRuntime(ctx);
         stop_deadline_us=esp_timer_get_time()+APP_STOP_MS*1000;
-        JS_SetInterruptHandler(rt,stop_interrupt,NULL);
+        // Through the guest's one registration (vm-L1-design sec.5.3) rather
+        // than JS_SetInterruptHandler: the slot is single and three callers
+        // used to overwrite each other in it.
+        app_vm_watchdog(stop_interrupt,NULL);
         // "back" is the only reason this host can give honestly: the shell has
         // one teardown path, taken both when the user leaves an app and when
         // the app calls exit(), and neither "replace" nor "shutdown" exists
