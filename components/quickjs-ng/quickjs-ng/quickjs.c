@@ -51,6 +51,17 @@
 // accessors this file defines under #ifdef CONFIG_POCKET_VM_PROBE below.
 // Not an upstream file -- see its own header comment.
 #include "quickjs-vmprobe.h"
+// L2 harness hooks (forced yield at class-A safepoints, G5 gap recorder).
+// Not an upstream file -- see its own header comment. Everything it adds to
+// this file is behind `js_vm_armed != NULL`, which only the harness sets.
+#include "quickjs-vm.h"
+// File-scope on purpose, not a JSRuntime member: the runtime is allocated
+// from the guest heap, and one more pointer in it moved the outcome of the
+// creeping-OOM corpus case (gc_threshold_device.js -- measured: the original
+// quickjs.c with a single 8-byte pad added to JSRuntime reproduces the
+// failure byte for byte). One runtime exists at a time in both the harness
+// and the firmware, so a process-wide pointer loses nothing.
+static JSVMState *js_vm_armed;
 
 #if defined(EMSCRIPTEN) || defined(_MSC_VER)
 #define DIRECT_DISPATCH  0
@@ -2349,6 +2360,8 @@ void JS_FreeRuntime(JSRuntime *rt)
     int i;
 
     rt->in_free = true;
+    // The harness state owns atoms; release them before the atom table goes.
+    js_vm_arm(rt, 0);
     JS_FreeValueRT(rt, rt->current_exception);
 
     list_for_each_safe(el, el1, &rt->job_list) {
@@ -6471,6 +6484,90 @@ static void js_c_function_data_mark(JSRuntime *rt, JSValueConst val,
     }
 }
 
+// ---- L2 harness hooks (quickjs-vm.h) ----
+
+// Name of the function a frame is running, for the G5 gap report. Only
+// bytecode functions carry a name atom on the frame; a native frame reports
+// JS_ATOM_NULL and the report prints "-" for it.
+static JSAtom js_vm_frame_func(const JSStackFrame *sf)
+{
+    JSObject *p;
+    if (!sf || JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+        return JS_ATOM_NULL;
+    p = JS_VALUE_GET_OBJ(sf->cur_func);
+    if (p->class_id != JS_CLASS_BYTECODE_FUNCTION)
+        return JS_ATOM_NULL;
+    return p->u.func.function_bytecode->func_name;
+}
+
+// Pops a frame. The only thing this adds to the four upstream pop sites is
+// the outermost-frame test: popping the last frame hands control back to the
+// host, which is a stop opportunity (the L1 job boundary) and the end of the
+// interval G5 is measuring. Nested pops pay one predictable branch.
+static inline void js_vm_pop_frame(JSRuntime *rt, JSStackFrame *sf)
+{
+    rt->current_stack_frame = sf->prev_frame;
+    if (unlikely(!sf->prev_frame && js_vm_armed))
+        js_vm_leave(rt, js_vm_armed, js_vm_frame_func(sf));
+}
+
+// The prologue poll records an ENTER before it knows what it is calling, and
+// some callables never push a frame: promise resolving functions, proxies,
+// bound functions, and the not-a-function throw. Their return is the LEAVE
+// the pop hook cannot see. Wraps the class-call return in both call entry
+// points; a nested call (frame present) or an unarmed VM passes straight
+// through. Still unhooked, knowingly: an outermost call that fails the C
+// stack check before pushing a frame -- unreachable from an empty C stack.
+static inline JSValue js_vm_leave_frameless(JSRuntime *rt, JSValue ret)
+{
+    if (unlikely(js_vm_armed) && !rt->current_stack_frame)
+        js_vm_leave(rt, js_vm_armed, JS_ATOM_NULL);
+    return ret;
+}
+
+JSVMState *js_vm_state(JSRuntime *rt)
+{
+    (void)rt;   // one armed state per process, see js_vm_armed
+    return js_vm_armed;
+}
+
+JSVMState *js_vm_arm(JSRuntime *rt, int on)
+{
+    struct list_head *el;
+    if (on) {
+        if (js_vm_armed)
+            return js_vm_armed;
+        // Allocated outside the guest heap (quickjs-vm.c, plain calloc):
+        // harness bookkeeping must neither count against JS_SetMemoryLimit
+        // nor be the allocation that fails when a test is driving the limit.
+        js_vm_armed = js_vm_state_alloc();
+        if (!js_vm_armed)
+            return NULL;
+        // Every context's next poll takes the slow path, which is where
+        // safepoints are observed; the polls the context still had before
+        // its next host-handler call become the shadow cadence (see
+        // __js_poll_interrupts). With several contexts the shadow is shared
+        // and takes the last one's remainder -- the harness has one.
+        js_vm_armed->host_poll_left = JS_INTERRUPT_COUNTER_INIT;
+        list_for_each(el, &rt->context_list) {
+            JSContext *ctx = list_entry(el, JSContext, link);
+            if (ctx->interrupt_counter > 0)
+                js_vm_armed->host_poll_left = ctx->interrupt_counter;
+            ctx->interrupt_counter = 1;
+        }
+        return js_vm_armed;
+    }
+    if (js_vm_armed) {
+        list_for_each(el, &rt->context_list) {
+            JSContext *ctx = list_entry(el, JSContext, link);
+            ctx->interrupt_counter = js_vm_armed->host_poll_left;
+        }
+        js_vm_state_free(rt, js_vm_armed);
+        js_vm_armed = NULL;
+    }
+    return NULL;
+}
+
 static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
                                        JSValueConst this_val,
                                        int argc, JSValueConst *argv, int flags)
@@ -6511,7 +6608,7 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
     ret = s->func(ctx, this_val, argc, arg_buf, s->magic, vc(s->data));
-    rt->current_stack_frame = sf->prev_frame;
+    js_vm_pop_frame(rt, sf);
     return ret;
 }
 
@@ -6642,7 +6739,7 @@ static JSValue js_call_c_closure(JSContext *ctx, JSValueConst func_obj,
     sf->cur_func = unsafe_unconst(func_obj);
     sf->arg_count = argc;
     ret = s->func(ctx, this_val, argc, arg_buf, s->magic, s->opaque);
-    rt->current_stack_frame = sf->prev_frame;
+    js_vm_pop_frame(rt, sf);
 
     return ret;
 }
@@ -8512,10 +8609,42 @@ static void JS_ThrowInterrupted(JSContext *ctx)
     JS_SetUncatchableError(ctx, ctx->rt->current_exception);
 }
 
-static no_inline __exception int __js_poll_interrupts(JSContext *ctx)
+// `at_safepoint` is 1 only from js_poll_safepoint (the seven class-A opcode
+// sites). It is a constant at every call site and this function is not
+// inlined, so the unarmed fast path is unchanged by its existence.
+static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_safepoint)
 {
     JSRuntime *rt = ctx->rt;
-    ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
+    JSVMState *vm = js_vm_armed;
+    if (unlikely(vm)) {
+        // Armed (harness only): every poll comes here, so keep the counter at
+        // 1 and run the host handler on its own shadow cadence instead --
+        // arming must not move the poll at which a session stop is honoured.
+        ctx->interrupt_counter = 1;
+        if (at_safepoint) {
+            if (js_vm_safepoint(rt, vm, js_vm_frame_func(rt->current_stack_frame))) {
+                // Before L2c the VM's only way to stop is the uncatchable
+                // "interrupted" error, which loses the frame (design
+                // sec.4.1). A forced yield therefore kills the job; the
+                // corpus going red under --force-yield is the evidence that
+                // the gate checks something. L2c replaces this line with
+                // save-and-return.
+                JS_ThrowInterrupted(ctx);
+                return -1;
+            }
+        } else if (rt->current_stack_frame == NULL) {
+            // The JS_CallInternal prologue poll with no frame: the host is
+            // entering JS. Not a safepoint (N5), but the start of the interval
+            // G5 measures and an opportunity in its own right (the L1 job
+            // boundary is exactly this point).
+            js_vm_enter(rt, vm);
+        }
+        if (--vm->host_poll_left > 0)
+            return 0;
+        vm->host_poll_left = JS_INTERRUPT_COUNTER_INIT;
+    } else {
+        ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
+    }
     if (rt->interrupt_handler) {
         if (rt->interrupt_handler(rt, rt->interrupt_opaque)) {
             JS_ThrowInterrupted(ctx);
@@ -8528,7 +8657,20 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx)
 static inline __exception int js_poll_interrupts(JSContext *ctx)
 {
     if (unlikely(--ctx->interrupt_counter <= 0)) {
-        return __js_poll_interrupts(ctx);
+        return __js_poll_interrupts(ctx, 0);
+    } else {
+        return 0;
+    }
+}
+
+// The class-A safepoints (goto / goto16 / goto8 / if_true / if_false /
+// if_true8 / if_false8): same fast path as js_poll_interrupts, but the slow
+// path knows it is at a point where the instruction has fully retired
+// (docs/vm-L2-design.md sec.7.2) and may be asked to stop there.
+static inline __exception int js_poll_safepoint(JSContext *ctx)
+{
+    if (unlikely(--ctx->interrupt_counter <= 0)) {
+        return __js_poll_interrupts(ctx, 1);
     } else {
         return 0;
     }
@@ -18104,7 +18246,7 @@ not_a_constructor:
         abort();
     }
 
-    rt->current_stack_frame = sf->prev_frame;
+    js_vm_pop_frame(rt, sf);
     return ret_val;
 }
 
@@ -18256,10 +18398,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         call_func = rt->class_array[p->class_id].call;
         if (!call_func) {
 not_a_function:
-            return JS_ThrowTypeErrorNotAFunction(caller_ctx);
+            return js_vm_leave_frameless(rt, JS_ThrowTypeErrorNotAFunction(caller_ctx));
         }
-        return call_func(caller_ctx, func_obj, this_obj, argc,
-                         argv, flags);
+        return js_vm_leave_frameless(rt, call_func(caller_ctx, func_obj, this_obj, argc,
+                                                   argv, flags));
     }
     b = p->u.func.function_bytecode;
 
@@ -19297,19 +19439,19 @@ non_ctor_call:
 
             CASE(OP_goto):
                 pc += (int32_t)get_u32(pc);
-            if (unlikely(js_poll_interrupts(ctx))) {
+            if (unlikely(js_poll_safepoint(ctx))) {
                 goto exception;
             }
             BREAK;
             CASE(OP_goto16):
                 pc += (int16_t)get_u16(pc);
-            if (unlikely(js_poll_interrupts(ctx))) {
+            if (unlikely(js_poll_safepoint(ctx))) {
                 goto exception;
             }
             BREAK;
             CASE(OP_goto8):
                 pc += (int8_t)pc[0];
-            if (unlikely(js_poll_interrupts(ctx))) {
+            if (unlikely(js_poll_safepoint(ctx))) {
                 goto exception;
             }
             BREAK;
@@ -19328,7 +19470,7 @@ non_ctor_call:
                 if (res) {
                     pc += (int32_t)get_u32(pc - 4) - 4;
                 }
-                if (unlikely(js_poll_interrupts(ctx))) {
+                if (unlikely(js_poll_safepoint(ctx))) {
                     goto exception;
                 }
             }
@@ -19348,7 +19490,7 @@ non_ctor_call:
                 if (!res) {
                     pc += (int32_t)get_u32(pc - 4) - 4;
                 }
-                if (unlikely(js_poll_interrupts(ctx))) {
+                if (unlikely(js_poll_safepoint(ctx))) {
                     goto exception;
                 }
             }
@@ -19368,7 +19510,7 @@ non_ctor_call:
                 if (res) {
                     pc += (int8_t)pc[-1] - 1;
                 }
-                if (unlikely(js_poll_interrupts(ctx))) {
+                if (unlikely(js_poll_safepoint(ctx))) {
                     goto exception;
                 }
             }
@@ -19388,7 +19530,7 @@ non_ctor_call:
                 if (!res) {
                     pc += (int8_t)pc[-1] - 1;
                 }
-                if (unlikely(js_poll_interrupts(ctx))) {
+                if (unlikely(js_poll_safepoint(ctx))) {
                     goto exception;
                 }
             }
@@ -20920,7 +21062,7 @@ done:
             JS_FreeValue(ctx, *pval);
         }
     }
-    rt->current_stack_frame = sf->prev_frame;
+    js_vm_pop_frame(rt, sf);
     return ret_val;
 }
 
@@ -21042,10 +21184,10 @@ static JSValue JS_CallConstructorInternal(JSContext *ctx,
         call_func = ctx->rt->class_array[p->class_id].call;
         if (!call_func) {
 not_a_function:
-            return JS_ThrowTypeErrorNotAFunction(ctx);
+            return js_vm_leave_frameless(ctx->rt, JS_ThrowTypeErrorNotAFunction(ctx));
         }
-        return call_func(ctx, func_obj, new_target, argc,
-                         argv, flags);
+        return js_vm_leave_frameless(ctx->rt, call_func(ctx, func_obj, new_target, argc,
+                                                        argv, flags));
     }
 
     b = p->u.func.function_bytecode;

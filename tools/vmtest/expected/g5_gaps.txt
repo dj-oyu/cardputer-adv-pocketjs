@@ -1,0 +1,7 @@
+n1_regex false
+n2_native_json 477789
+n2_native_sort_callback 0,20010
+n3_forin 2
+n4_direct_eval 20000
+n5_prologues 7
+exit=0

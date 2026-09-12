@@ -6,7 +6,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 OUT=../../.cache/vmalloc
 mkdir -p "$OUT"
 
-SRCS=(replay.c adapter_tlsf.c adapter_estalloc.c adapter_naive.c
+SRCS=(replay.c adapter_tlsf.c adapter_estalloc.c adapter_naive.c adapter_segment.c
       vendor/multi_heap.c vendor/tlsf/tlsf.c vendor/estalloc/estalloc.c)
 INCLUDES=(-I. -Ivendor/include -Ivendor -Ivendor/tlsf -Ivendor/tlsf/include -Ivendor/estalloc)
 # VMALLOC_TLSF_ALIGN_LOG2=3 (8-byte stride): see the VMALLOC PATCH comment in

@@ -316,6 +316,41 @@ static bool host_events;                        // --host-events
 // cut the drain); neither is frame().
 static bool fair_mode;
 
+// G1 (docs/vm-L2-design.md sec.1.3): does C stack use per JS call depend on
+// depth? deep_recursion.js's max_depth answers "how many levels until
+// overflow", which is silent on per-level cost -- a 200-byte frame and a
+// 2000-byte frame both eventually overflow, they just do it at different
+// depths. What actually distinguishes "proportional to depth" (today, since
+// JS_CallInternal recurses in C for every JS call) from "flattened" (the L2
+// goal, where a deep JS call chain uses O(1) C stack) is bytes consumed PER
+// LEVEL, and whether that per-level figure holds steady as depth doubles.
+//
+// __vmtest_stack_probe(), called once per recursion level from JS, records
+// the address of a local in ITS OWN C frame. That frame is nested inside
+// every JS_CallInternal invocation on the current call chain, so its address
+// falls (stacks grow down on every host this runs on: x86-64, arm64) by
+// however many bytes each recursion level actually adds to the C stack --
+// today, one JS_CallInternal frame's worth. Comparing the first and last
+// probe addresses over N calls gives total C-stack growth for that run;
+// dividing by N gives the per-level figure that answers the completion
+// condition. Only first/last are kept (not a full series) because the
+// question is "does the average change between N and 2N", not the shape in
+// between -- G1's own analysis script (stack_probe.sh) is what runs this
+// twice and compares.
+static bool stack_probe_enabled;                // --stack-probe
+static uintptr_t stack_probe_first, stack_probe_last;
+static uint64_t stack_probe_calls;
+
+static JSValue js_stack_probe(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)ctx; (void)this_val; (void)argc; (void)argv;
+  volatile char marker;
+  uintptr_t here = (uintptr_t)&marker;
+  if (stack_probe_calls == 0) stack_probe_first = here;
+  stack_probe_last = here;
+  stack_probe_calls++;
+  return JS_UNDEFINED;
+}
+
 static void arm_budget(guest_t *guest) {
   // Count mode, the only deterministic one on a host: the clock is never read
   // (limit_us <= 0 switches the time check off inside vm_sched_drain), so the
@@ -537,7 +572,23 @@ static JSValue make_262(JSContext *ctx) {
 // From L1 on, --force-yield is serviced at job granularity by --budget-jobs 1
 // regardless of whether this symbol exists -- the L1 checkpoint IS the job
 // boundary -- so the request is never unserviced and the note is gone.
+//
+// Defined since L2 by components/quickjs-ng/quickjs-ng/quickjs-vm.c (linked by
+// build.sh). With it, --force-yield stops at every one of the seven class-A
+// opcode safepoints (docs/vm-L2-design.md sec.7.2). Until L2c gives the VM a
+// way to resume, a stop there is the uncatchable "interrupted" error, so the
+// corpus is EXPECTED to go red under --force-yield -- that is the gate having
+// teeth, not a harness defect. "#info vm ... stops=N" says how often it bit.
 extern void vmtest_vm_set_force_yield(JSRuntime *rt, int on) __attribute__((weak));
+// G5 (design sec.1.3): the VM records the interval between consecutive stop
+// opportunities (safepoint, host entering JS, outermost frame popped) while JS
+// is running, and reports the maximum. Time, not instruction count, because
+// the sections that matter (regex, native-only work, a for-in step, direct
+// eval parse -- N1..N4) contain no bytecode to count. Host nanoseconds under
+// ASan are NOT the device's; the mechanism carries over, the numbers do not.
+extern void vmtest_vm_set_gap_clock(JSRuntime *rt, uint64_t (*clock)(void), int on)
+    __attribute__((weak));
+extern void vmtest_vm_report(JSRuntime *rt, JSContext *ctx, void *out) __attribute__((weak));
 
 // ---------------------------------------------------------------- helpers
 
@@ -618,6 +669,9 @@ static int64_t now_ns(void) {
   return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
+// The clock the G5 recorder samples at every stop opportunity.
+static uint64_t gap_clock(void) { return (uint64_t)now_ns(); }
+
 static void usage(void) {
   fprintf(stderr,
           "usage: vmrun [options] [--include FILE]... FILE.js\n"
@@ -632,12 +686,16 @@ static void usage(void) {
           "  --module               evaluate FILE as a module\n"
           "  --strict               prefix FILE with \"use strict\";\n"
           "  --test262              install $262, report 'vmrun: uncaught <phase> <Name>'\n"
-          "  --force-yield          yield at every checkpoint; at L1 that is every job (= --budget-jobs 1)\n"
+          "  --force-yield          yield at every checkpoint: every job (= --budget-jobs 1) and, since\n"
+          "                         L2, every opcode safepoint (kills the job until L2c can resume)\n"
+          "  --gaps                 G5: record the longest stop-free interval, print '#info g5 ...'\n"
           "  --budget-jobs N        L1 count-mode budget: yield after N jobs, resume next turn (0 = off)\n"
           "  --runaway-jobs N       end the run when ONE logical drain has run N jobs (default off)\n"
           "  --stop-turns N         end the SESSION after N continuation turns, dropping the queue\n"
           "  --fair                 fair ordering (CONFIG_POCKET_VM_FAIR): pump on a continuation\n"
           "                         turn too, so a completion is seen mid-drain (default: compat)\n"
+          "  --stack-probe          install __vmtest_stack_probe(); print '#info stack_probe ...'\n"
+          "                         (G1: bytes of C stack per JS recursion level, see stack_probe.sh)\n"
           "  --host-events          install host.request(k) (a completion recorded at the k-th job\n"
           "                         boundary) and host.exit() (pocket.app.exit)\n"
           "  --time                 print '#info time_ns=...' (eval + drains + frames)\n"
@@ -658,7 +716,7 @@ int main(int argc, char **argv) {
   const char *file = NULL;
   int frames = 0;
   bool require_frame = false, module = false, strict = false, test262 = false;
-  bool force_yield = false, want_time = false, want_stats = false;
+  bool force_yield = false, want_gaps = false, want_time = false, want_stats = false;
   const char *env_fy = getenv("VMTEST_FORCE_YIELD");
   if (env_fy && *env_fy && strcmp(env_fy, "0") != 0) force_yield = true;
 
@@ -680,11 +738,13 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--strict")) strict = true;
     else if (!strcmp(a, "--test262")) test262 = true;
     else if (!strcmp(a, "--force-yield")) force_yield = true;
+    else if (!strcmp(a, "--gaps")) want_gaps = true;
     else if (!strcmp(a, "--budget-jobs")) budget_jobs = (unsigned)parse_size(NEXT());
     else if (!strcmp(a, "--runaway-jobs")) runaway_jobs = (uint64_t)parse_size(NEXT());
     else if (!strcmp(a, "--stop-turns")) stop_turns = (unsigned)parse_size(NEXT());
     else if (!strcmp(a, "--host-events")) host_events = true;
     else if (!strcmp(a, "--fair")) fair_mode = true;
+    else if (!strcmp(a, "--stack-probe")) stack_probe_enabled = true;
     else if (!strcmp(a, "--time")) want_time = true;
     else if (!strcmp(a, "--stats")) want_stats = true;
     else if (!strcmp(a, "--include")) {
@@ -747,8 +807,22 @@ int main(int argc, char **argv) {
     // on its opcode checkpoints through the weak symbol above.
     if (budget_jobs == 0) budget_jobs = 1;
     if (vmtest_vm_set_force_yield) vmtest_vm_set_force_yield(G.runtime, 1);
+    // G5 is recorded whenever yields are forced (design sec.1.3: "always on
+    // during force-yield"); until L2c the record ends at the first stop of
+    // each job, so --gaps alone is how a full run is measured today.
+    want_gaps = true;
+  }
+  if (want_gaps) {
+    if (vmtest_vm_set_gap_clock) vmtest_vm_set_gap_clock(G.runtime, gap_clock, 1);
+    else fprintf(stderr, "vmrun: note: --gaps ignored, this VM has no G5 recorder\n");
   }
   if (host_events) install_host(G.context);
+  if (stack_probe_enabled) {
+    JSValue global = JS_GetGlobalObject(G.context);
+    JS_SetPropertyStr(G.context, global, "__vmtest_stack_probe",
+                       JS_NewCFunction(G.context, js_stack_probe, "__vmtest_stack_probe", 0));
+    JS_FreeValue(G.context, global);
+  }
 
   int status = 0;
   int64_t t0 = now_ns();
@@ -878,11 +952,28 @@ int main(int argc, char **argv) {
             (unsigned long long)G.jobs, G.max_queue_run, sizeof(JSValue),
             sizeof(allocation_header_t));
   }
+  if (stack_probe_enabled) {
+    // calls-1, not calls: the first probe already sits inside one level of
+    // recursion relative to top-level code, so dividing by the call count
+    // would fold that fixed offset into what should be a per-ADDITIONAL-level
+    // figure. With 0 or 1 calls there is no level-to-level delta to report.
+    uint64_t steps = stack_probe_calls > 1 ? stack_probe_calls - 1 : 0;
+    uintptr_t hi = stack_probe_first > stack_probe_last ? stack_probe_first : stack_probe_last;
+    uintptr_t lo = stack_probe_first > stack_probe_last ? stack_probe_last : stack_probe_first;
+    uint64_t span = (uint64_t)(hi - lo);
+    double per_call = steps ? (double)span / (double)steps : 0.0;
+    fprintf(stderr, "#info stack_probe calls=%llu span_bytes=%llu bytes_per_call=%.3f\n",
+            (unsigned long long)stack_probe_calls, (unsigned long long)span, per_call);
+  }
   // Always printed, not only under --stats: the L1 budget cases read these,
   // and "#info" lines are excluded from the corpus diff, so they cost nothing
   // and cannot make an expected file depend on how the budget was set.
   fprintf(stderr, "#info turns=%llu max_run_turns=%u jobs_dropped=%d\n",
           (unsigned long long)G.turns, G.max_run_turns, G.jobs_dropped ? 1 : 0);
+  // "#info vm ..." (safepoints seen, forced stops taken) and "#info g5 ..."
+  // (the longest stop-free interval) whenever the VM was armed. Before
+  // teardown: the report resolves function-name atoms through the context.
+  if (vmtest_vm_report) vmtest_vm_report(G.runtime, G.context, stderr);
   // The count goes on an #info line, not on the diffed one: run.sh re-runs the
   // whole corpus at several budgets, and the job total at which the guard fires
   // is the first multiple of the budget past the limit. The FACT of the runaway

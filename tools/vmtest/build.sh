@@ -38,7 +38,10 @@ build_variant() {
   local GUEST=components/pocketjs_guest
   local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -I $OUT/include -I $GUEST/include"
   local objs=()
-  for f in dtoa libregexp libunicode quickjs quickjs-libc; do
+  # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
+  # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
+  # so it is a separate object rather than a change inside quickjs.c.
+  for f in dtoa libregexp libunicode quickjs quickjs-libc quickjs-vm; do
     # Headers count too: a changed quickjs-*.h (the VM levels add some) must
     # not leave a stale object linked against a new layout.
     if [ ! -f "$obj/$f.o" ] || [ "$QJS/$f.c" -nt "$obj/$f.o" ] || [ "$0" -nt "$obj/$f.o" ] \

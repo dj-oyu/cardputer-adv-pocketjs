@@ -16,7 +16,8 @@
 bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る
 bash tools/vmtest/run.sh                       # コーパス（ASan+UBSan+LSan）
 bash tools/vmtest/run.sh --variant o2          # コーパス（-O2）
-bash tools/vmtest/run.sh --force-yield         # L1 以降: 全チェックポイントで yield させても出力が同じか
+bash tools/vmtest/run.sh --force-yield         # L1 以降: 全チェックポイントで yield させても出力が同じか（L2: opcode 粒度。L2c まで赤、FORCED-YIELD の節）
+bash tools/vmtest/run.sh g5_gaps               # G5: 最長の中断禁止区間を info-<variant>.txt の "#info g5" 行に出す
 bash tools/vmtest/run.sh --budget-jobs 3      # L1: 全 drain を 3 件で切っても出力が同じか
 bash tools/vmtest/run.sh --trace               # 同時に .cache/vmtest/traces/<name>.trace を書く
 python3 tools/vmtest/trace_stats.py .cache/vmtest/traces/closures.trace   # トレースの検証と要約
@@ -57,7 +58,8 @@ L1 の予算まわり:
 | オプション | 意味 |
 | --- | --- |
 | `--budget-jobs N` | 件数モードの予算。N 件走らせたら yield し、残りは次の「ターン」= 継続 drain で片付ける。**時計は一切読まない**（`limit_us<=0` で時間判定が切れる）ので、中断点はプログラムだけで決まる。ホストで時間予算を使うと ASan の下では再現しないので、期待値と比べる検査は全部これ |
-| `--force-yield` | `--budget-jobs 1`。L1 のチェックポイントはジョブ境界なので、この水準で頼める最強の yield がこれ。L2 で opcode チェックポイントが入れば弱シンボル経由でそれも有効になる |
+| `--force-yield` | `--budget-jobs 1` に加え、L2 からは弱シンボル `vmtest_vm_set_force_yield` 経由で **7 地点の opcode セーフポイント（goto×3・if_*×4）で毎回止める**。L2c が保存・再開を作るまで「止める」= 捕捉不能な `interrupted` なので、**ジョブが死ぬ = コーパスが赤くなるのが正しい**（FORCED-YIELD の節） |
+| `--gaps` | G5。JS 実行中の連続する停止機会（セーフポイント／ホストからの進入／最外フレームの復帰）の間隔を VM 側で記録し、最大値と上位 8 件を `#info g5 ...` に出す（`--force-yield` 中は常時オン）。単位は ns（ホスト時計）。理由と読み方は G5 の節 |
 | `--runaway-jobs N` | **1 本の論理 drain**（予算で切られた drain + その継続群）が N 件走ってもキューが空にならなければ終了コード 5。**既定は無効**。ファームの判定は時間（`VM_RUNAWAY_US`）が主で件数（`VM_RUNAWAY_JOBS`）は時計が死んだときの受け皿だが、件数モードのホストでは時計を読まないので、写せるのは件数の側。ターン数では**ない** — ターンは backstop でも終わるので、長いだけの正直な drain を暴走と見なしてしまう（vm-L1-design §5.2・§11.1）|
 | `--stop-turns N` | N 回の継続ターンでセッションを**終わらせる**（終了コード 0、キューは実行せず破棄）。`app_stop()` がキューを残したまま呼ばれる場合の代役で、設計 §3.2 の検査に要るがそこでは機構を指定していなかったため、ここで足したもの |
 | `host.exit()`（`--host-events` に同梱）| `pocket.app.exit()` の写し。停止要求は割り込み経由で届くので、**キューが空になったターンでだけ**読まれる（vm-L1-design §11.2）。`corpus/budget_exit_midchain.js` がその順序を固定する |
@@ -87,6 +89,33 @@ void vmtest_vm_set_force_yield(JSRuntime *rt, int on);
 が定義されていれば呼ぶ。L2 で opcode のチェックポイント（`docs/vm-ledger/04-opcode-checkpoints.md`）を実装したら VM 側でこれを定義し、粒度が opcode まで細かくなる。`run.sh --force-yield` と `test262.py --force-yield` は、その時も「全地点で中断しても出力と合格集合が変わらない」の検査のまま使える（§7 完了条件）。
 
 L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 3 / 7 / 16`・`--force-yield`・予算なしで、asan と o2 の両方でバイト一致。Test262 は `--force-yield` で両 variant とも 7,501 pass / 194 fail（基準と同じ、`regressions: 0`）。
+
+**L2 で弱シンボルが埋まった**（`components/quickjs-ng/quickjs-ng/quickjs-vm.c`、`build.sh` がリンクし、`components/quickjs-ng/CMakeLists.txt` にも載せてある）。止まる地点は設計 §7.2 の分類 A の 7 地点だけ。`quickjs.c` 側の差分は、その 7 行の `js_poll_interrupts` → `js_poll_safepoint` の名前替え、スローパス `__js_poll_interrupts` の armed 分岐、frame pop 4 箇所と class-call の復帰 2 箇所の LEAVE フック、で、**既定経路の高速側（カウンタの減算）は無変更**。状態は `JSRuntime` のメンバではなくファイルスコープの 1 ポインタ — メンバにすると `JSRuntime` が 8 B 育ち、それだけで `gc_threshold_device.js`（じわじわ型 OOM）の結果が動いた（元の `quickjs.c` に 8 B のパディングだけ足して同じ落ち方を再現した。実測(host)）。**`JS_SetInterruptHandler` には乗せていない** — あれはセッション終了の述語で、終了と中断を同じ経路に通すと区別が消える（設計 §1.2）。armed 中はすべてのポーリングがスローパスに入るが、ホストの割り込みハンドラは影のカウンタで従来どおり 10,000 回に 1 回だけ呼ぶので、arm しても終了要求が読まれる地点は動かない。
+
+**L2c までこの関所は赤い。** 今の VM が持つ「止まる」は捕捉不能な `interrupted`（設計 §4.1）だけなので、opcode 粒度で止めると最初の後方分岐でジョブが死ぬ。実測(host、2026-09-13、asan): `run.sh --force-yield` は **37 件中 3 件だけ通る**（`error_toplevel` / `job_throw` / `runaway_jobs` — いずれも `#info vm safepoints=0`、つまり分岐を 1 つも実行しないファイル）。残り 34 件は `#info vm force_yield=1 ... stops=1`（`budget_starve` は 10、`rejections` は 2）で落ちる。**通ってしまったら疑うこと**: `info-<variant>.txt` に `#info vm force_yield=1 safepoints=N stops=N` が出ていなければ弱シンボルがリンクされていない（`nm vmrun-asan | grep vmtest_vm_` で `T` が 3 つ）。通常走行（`--force-yield` なし）は 37/37（asan・o2）、Test262 は 7,501 pass / 194 fail / regressions 0 で変わっていない。
+
+### G5: 最長の中断禁止区間
+
+`--gaps`（`--force-yield` 中は常時）で、VM は**停止機会**のたびに時計を読み、直前の機会からの間隔を記録する。停止機会は 3 種: 7 地点のセーフポイント、ホストからの JS 進入（`JS_CallInternal` のプロローグ・ポーリングで `current_stack_frame == NULL`）、最外フレームの復帰（4 箇所の frame pop と、フレームを積まない callable — Promise の resolve 関数・Proxy・bound — の復帰）。ホストにいる間は数えない（`#info vm enters=N leaves=N` が一致していることが、数え漏れが無いことの検査）。**最大値**が G5 で（設計 §1.3: 平均や中央値では完了条件を満たさない）、上位 8 件を `start=<機会>:<関数名> end=<機会>:<関数名>` 付きで出す。
+
+**単位は時間（ns）で、命令数ではない。** §2 の N1〜N4（正規表現・ネイティブ完結・for-in の 1 ステップ・パース）はバイトコードを 1 つも実行しない区間で、命令数では長さが 0 になる。ホストの ns は実機の値ではなく、ASan 版は素の -O2 より一桁遅い。**機構は実機に持ち越せるが数字は持ち越せない**（`vmtest_vm_set_gap_clock` に時計を渡す形なので、実機側は `esp_timer_get_time` を渡せば同じ記録が取れる。未実装）。
+
+`corpus/g5_gaps.js` が N1〜N5 を関数 1 つずつに閉じ込め、各関数の先頭に自明な分岐を置いて区間の始点にその関数名が出るようにしている。実測(host、2026-09-13、同一バイナリ、他に何も走らせていない状態で 3 回走らせた範囲):
+
+| 区間 | 何をするか | asan（3 回の範囲） | o2（3 回の範囲） |
+| --- | --- | --- | --- |
+| N2 `n2_native_json` | `JSON.stringify` 2 万要素 | 128.7〜137.2 ms | 10.1〜10.7 ms |
+| N2 `n2_native_sort_callback` | JS 比較関数付き `sort` 2 万要素 | 78.7〜80.4 ms | 9.6〜10.9 ms |
+| N4 `n4_direct_eval` | 2 万文の直接 eval（パース＋直線実行） | 60.9〜61.6 ms | 14.7〜15.3 ms |
+| N1 `n1_regex` | `/^(a+)+b$/` に a×18（2^18 回の後戻り） | 14.8〜15.7 ms | 7.2〜8.4 ms |
+| N3 `n3_forin` | 非 enumerable 3000 個を 1 ステップで読み飛ばす for-in | 上位 8 件に入らず | 上位 8 件に入らず（8 位は 0.75 ms） |
+| N5 `n5_prologues` | 8 段の直線呼び出し | 同上 | 同上 |
+
+`#info g5 max_ns` はいずれの回も asan で `n2_native_json`、o2 で `n4_direct_eval` が始点。同じプログラムでも sanitizer の有無で最長区間の**種類**が入れ替わるので、ホストの順位を実機の順位と読まないこと。
+
+**捉えられるもの**: N1・N2・N4 は「セーフポイント→セーフポイント」の 1 区間として現れ、始点の関数名で区別できる。N3 は区間としては存在するが（`for_in_next` の 1 ステップ）、このサイズでは上位 8 件の閾値（コーパス内の普通のループ区間）より短く、一覧に出ない — 出すには対象を大きくするか、上位 8 件ではなく関数名で絞る出力が要る。**ここで新しく分かったこと**: `sort` の比較関数のように**JS を走らせ続けているのに 7 地点を一度も通らない区間**が実在する（呼び出しのプロローグは確認地点だが停止機会ではない）。設計 §7.6 の「A の 7 地点を通らない長い同期実行が実在するか」への答えは**実在する**で、分類 B（呼び出し地点）が C 再帰の解消だけでなく中断のためにも要る。
+
+**捉えられないもの / 限界**: (1) N5 は固定長で短く、`n5_prologues`（8 段の直線呼び出し）は上位 8 件に入らない。区間として存在はするが、「プロローグが原因」とは区間からは読めない。N3 も同じ理由で一覧に出ない（上の表）。(2) 終点はセーフポイントの**関数名**までで、pc は出していない（スローパスが `pc` を受け取らないため。必要なら 7 地点で `sf->cur_pc` を書く 1 行が要る）。(3) 直接 eval のパース（N4）と実行は同じ区間に溶ける。(4) ホスト時計の分解能とスケジューラのノイズがそのまま乗る。既定経路の速度は `timing.py` で HEAD のビルドと交互に 2 往復して比べ、差は往復間のばらつきの中（bench_loop の中央値 66.95/66.72 ms → 63.74/63.34 ms、bench_calls 64.82/66.04 → 62.90/64.20、他は ±3% 以内）。ただし同じ HEAD ビルドが `timing-baseline.txt`（2026-09-12）より 8〜27% 遅い日だったので、基準ファイルとの直接比較は今日の機械の状態を測っているだけで、この変更の性能を測っていない。**他のプロセス（Test262 の `-j 8` や `idf.py build`）と同時に走らせると数字が 5〜20 倍に膨れた**ので、読む値は必ず単独走行のもの。(5) `--force-yield` 中は各ジョブの最初の停止で記録が終わるので、L2c まで G5 の完全な記録は `--gaps` 単独で取る。(6) 実機では未実装・未計測。
 
 ## コーパス
 
@@ -118,6 +147,7 @@ L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 
 | `budget_teardown_live.js` | キューを残した終了の重い形。await で中断した async、届かない finally、try/finally 内の generator、要求の残った async generator、切断の向こうの thenable、捨てられるジョブの中に catch がある rejection。報告 0 行・`jobs_dropped=1`・LSan 0 |
 | `stop_with_queue.js` | キューを残したままのセッション終了。残りは**実行せず**破棄、`#info jobs_dropped=1`、残っていた rejection は**報告しない**（捨てたジョブの中に catch があったかもしれない）、終了コード 0 |
 | `bench_*.js` | 時間計測用。出力はチェックサムで、これも意味論の基準になる |
+| `g5_gaps.js` | G5 の器。§2 の N1〜N5 を関数 1 つずつに閉じ込め、`#info g5 top[k]` の始点関数名で区間を同定する（FORCED-YIELD の節の表）。diff されるのは各区間の返り値だけ |
 
 **期待値の更新規則**: `run.sh --bless` は新しいファイルを足した時にだけ使う。既存の `expected/*.txt` を書き換えるのは、挙動の変更が意図されたもので理由を説明できる場合だけで、その変更だけの commit にする（§12「新たな失敗を期待値の書き換えだけで処理しない」）。
 

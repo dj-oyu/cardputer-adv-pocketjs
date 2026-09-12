@@ -11,6 +11,7 @@ idf_component_register(
         "quickjs-ng/libunicode.c"
         "quickjs-ng/quickjs.c"
         "quickjs-ng/quickjs-libc.c"
+        "quickjs-ng/quickjs-vm.c"
         "port/stub.c"
     INCLUDE_DIRS
         "quickjs-ng"
