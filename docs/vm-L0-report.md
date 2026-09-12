@@ -17,9 +17,9 @@
 | --- | --- | --- |
 | quickjs-ng 0.14.0 とゲストの取り込み | コミット済み（`10f5185` 無改変の取り込み → `6de51f4` immutable-buffer パッチ → `d9ef1f9` リンク先の切り替え） | `components/quickjs-ng/`、`components/pocketjs_guest/` |
 | L0 プローブ（`CONFIG_POCKET_VM_PROBE`、既定 n） | コミット済み | [main/Kconfig.projbuild](../main/Kconfig.projbuild)、[sdkconfig.vmprobe.defaults](../sdkconfig.vmprobe.defaults)、[main/pocket/vmprobe.c](../main/pocket/vmprobe.c) / `.h`、`quickjs.c` の `VM_PROBE` ブロック 4 つ + [quickjs-vmprobe.h](../components/quickjs-ng/quickjs-ng/quickjs-vmprobe.h)、`app_session.c` / `main.c` / `pocket_api.c` / `main/CMakeLists.txt` の `#ifdef` 部分 |
-| 実機用ワークロード 6 本（USB の `A`〜`F` だけで起動し、ホームの一覧には出ない） | L0完了後に削除（タグ `vm-L0` から `git checkout vm-L0 -- apps/vmprobe` で復元可） | 旧 `apps/vmprobe/` |
-| 競合条件 5 種（USB の `P`〜`W`。UI・音声・Wi-Fi を実物の面で動かす） | L0完了後に削除（同上） | 旧 `apps/vmprobe/condition.js`・README、`main.c` / `app_session.c` / `vmprobe.h` の該当部分 |
-| 実機の採取スクリプト（行列・再起動・厳密な統計） | L0完了後に削除（`git checkout vm-L0 -- tools/vm_l0_capture.py` で復元可） | 旧 `tools/vm_l0_capture.py` |
+| 実機用ワークロード 6 本（USB の `A`〜`F` だけで起動し、ホームの一覧には出ない） | L0完了後に一度削除、2026-09-12 に本線へ復帰（常設） | [apps/vmprobe/](../apps/vmprobe/) |
+| 競合条件 5 種（USB の `P`〜`W`。UI・音声・Wi-Fi を実物の面で動かす） | 同上 | [apps/vmprobe/condition.js](../apps/vmprobe/condition.js)・README、`main.c` / `app_session.c` / `vmprobe.h` の該当部分 |
+| 実機の採取スクリプト（行列・再起動・厳密な統計） | 同上 | [tools/vm_l0_capture.py](../tools/vm_l0_capture.py) |
 | ホストの判定基盤（guest.c を写した vmrun、コーパス 23 本、Test262 部分集合、時間の基準、確保トレース、`--force-yield` の入口） | コミット済み | [tools/vmtest/](../tools/vmtest/)（手順は [README](../tools/vmtest/README.md)） |
 | アロケータ比較（IDF の tlsf 実物 / estalloc / naive） | コミット済み | [tools/vmalloc/](../tools/vmalloc/) |
 | 台帳 | コミット済み | [vm-ledger/01〜06](vm-ledger/) |
@@ -77,12 +77,14 @@ bash tools/vmalloc/build.sh && bash tools/vmalloc/run_all.sh   # トレース採
 
 ## 2.1 実機の基準値（実測(device)、2026-09-12）
 
-**L0完了（本タグ `vm-L0`）後、この手順を動かしていたワークロード本体と採取スクリプトは削除した**
+**L0完了（本タグ `vm-L0`）後、この手順を動かしていたワークロード本体と採取スクリプトは一度削除した**
 （`apps/vmprobe/` の6ワークロード・`condition.js`・README、`tools/vm_l0_capture.py`）。
-以下の数値は削除前に採取したもので、そのまま残す。再測定したい場合は
-`git checkout vm-L0 -- apps/vmprobe tools/vm_l0_capture.py` で両方とも復元できる。プローブ本体
-（`main/pocket/vmprobe.c` のサンプリングと `VMPROBE STATIC` / `VMPROBE WINDOW` の報告）は残っていて、
-`CONFIG_POCKET_VM_PROBE` を有効にしたビルドで動く任意のアプリを測る。
+以下の数値は削除前に採取したもの。**2026-09-12 に本線へ戻し、常設にした**（L2 が計測を主戦場に
+するため。仕様書 §14.1）。タグから毎回戻す運用は、L1 が `vmprobe.h` から競合条件の宣言を削った
+時点で既に壊れていた（`VMPROBE_COND_ALL` 未定義でコンパイル不能。probe-off ビルドは当該ファイルを
+ビルドしないので誰も気づかなかった）。プローブ本体
+（`main/pocket/vmprobe.c` のサンプリングと `VMPROBE STATIC` / `VMPROBE WINDOW` の報告）は
+一貫して残っていて、`CONFIG_POCKET_VM_PROBE` を有効にしたビルドで動く任意のアプリを測る。
 
 `build_vm_l0`（プローブ有効）を COM3 の実機に 1 度だけ書き込み、`tools/vm_l0_capture.py` で
 **6 ワークロード × 5 条件 × 3 反復 = 90 マス**を各 15 秒採取した。生データは

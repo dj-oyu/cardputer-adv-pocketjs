@@ -613,6 +613,8 @@ $ git -C C:\devs\m5stack\cardputer-adv-pocketjs-vm status --short
 
 この 8 パスは**すべて L0 のワークロード（6 種 + `condition.js`）と採取スクリプトを実機計測のために一時復元したもの**で、retire コミット `9723327` を逆適用し、`git checkout vm-L0 -- apps/vmprobe tools/vm_l0_capture.py` で戻したもの。L1 の実装とは無関係。**§2 の測定はこれで採った。すべて破棄すべきで、コミットしてはならない。** ただし §6-1(a) を選ぶ場合は、直した後の再測定で同じものがもう一度要るので、再測定が済むまで残す。**いずれにせよ `vm/main` へマージする前に消すこと。** `main/CMakeLists.txt` の該当ブロックには `TEMPORARY (uncommitted)` のコメントが付いている。
 
+**追記（2026-09-12）:** この判断はその後撤回した。L2 が計測を主戦場にするため、8 パスは本線に常設した（仕様書 §14.1、[vm-L0-report.md](vm-L0-report.md) §2.1）。当時の「毎回タグから戻す」前提は、L1 が `vmprobe.h` から競合条件の宣言を削った時点で既に成立していなかった。
+
 `dependencies.lock` は `skip-worktree` のままで、この作業では 1 度も staging していない。
 
 コミット（`vm/main..HEAD`、12 件、未 push）:

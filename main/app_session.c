@@ -40,6 +40,20 @@ extern const char hello_end[] asm("_binary_main_js_end");
 // TEMPORARY: diagnostic 7 proves the legacy node guard fires.
 extern const char nodecap_start[] asm("_binary_nodecap_js_start");
 extern const char pet_start[] asm("_binary_pet_js_start");
+#ifdef CONFIG_POCKET_VM_PROBE
+// VM probe workloads (docs/quickjs-freertos-vm-spec.md sec.5), embedded only
+// when this build turned CONFIG_POCKET_VM_PROBE on (main/CMakeLists.txt).
+// Reached over USB only -- test chars 'A'..'F' in main.c's usb_stroke() --
+// never from the home screen's app list.
+extern const char vmp_sync_start[] asm("_binary_sync_loop_js_start");
+extern const char vmp_recur_start[] asm("_binary_deep_recursion_js_start");
+extern const char vmp_closures_start[] asm("_binary_closures_js_start");
+extern const char vmp_promise_start[] asm("_binary_promise_chain_js_start");
+extern const char vmp_io_start[] asm("_binary_io_wait_js_start");
+extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
+// The contention conditions, applied on top of whichever workload is running.
+extern const char vmp_cond_start[] asm("_binary_condition_js_start");
+#endif
 static pocketjs_guest_t *guest;
 static pocketjs_ui_core_t *core;
 static pocketjs_ui_qjs_t *binding;
@@ -489,6 +503,22 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+#ifdef CONFIG_POCKET_VM_PROBE
+        // VM probe workloads (sec.5): real files under apps/vmprobe/ rather
+        // than inline strings like '1'..'6' above, because
+        // tools/vm_l0_capture.py wants named, reviewable sources and because
+        // their byte count is itself part of what the probe costs the guest
+        // heap. Only `source` is set: TEXT embeds are NUL-terminated, so the
+        // strlen() below is exact for them too, and that line stays the same
+        // instruction in a probe-off build (a `test<'A'` guard here once cost
+        // the off build 20 B flash).
+        case 'A': source=vmp_sync_start; break;
+        case 'B': source=vmp_recur_start; break;
+        case 'C': source=vmp_closures_start; break;
+        case 'D': source=vmp_promise_start; break;
+        case 'E': source=vmp_io_start; break;
+        case 'F': source=vmp_asyncgen_start; break;
+#endif
     }
     if(test)length=strlen(source);
     // Section 3's registration check, and the last thing before the app's own
@@ -516,6 +546,28 @@ source_ready:;
     } else {
         TRY(pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js"));
     }
+#ifdef CONFIG_POCKET_VM_PROBE
+    // sec.5's fixed contention conditions, applied to a probe workload only.
+    // Two evaluations rather than one concatenated source: the mask is a
+    // number the host chose at run time, and pocketjs_guest_eval() re-reads
+    // globalThis.frame after each one, which is what lets condition.js wrap
+    // the workload's frame() and have the wrapper actually be called.
+    //
+    // The condition script keeps its own failures to itself (it logs a VMCOND
+    // line and continues), so a Wi-Fi that will not link degrades the
+    // condition and is recorded, instead of ending the session.
+    if(test>='A'&&test<='F') {
+        unsigned mask=vmprobe_condition();
+        ESP_LOGI("app","VMCOND start mask=%u",mask);
+        if(mask) {
+            char select[32];
+            int n=snprintf(select,sizeof select,"globalThis.VMC=%u;",mask);
+            TRY(pocketjs_guest_eval(guest,select,(size_t)n,"vmcond-select.js"));
+            TRY(pocketjs_guest_eval(guest,vmp_cond_start,strlen(vmp_cond_start),
+                                    "condition.js"));
+        }
+    }
+#endif
     if(!overlay_session) {
         pocketjs_rgb565_renderer_config_t rc;
         pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;

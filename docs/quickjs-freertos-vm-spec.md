@@ -376,7 +376,7 @@ CPU の一律な低下率は設定しない。通常変数、クロージャ、c
 
 - **上流は取り込み済み。** quickjs-ng 0.14.0、pocketjs_guest、pocketjs_ui_qjs を `components/` に取り込んだ。**改変はすべて取り込みコミット以降の差分**なので、`git diff <取り込みコミット>..` が改変の全体になる。`.cache/` の共有チェックアウトを直接編集しない（§3-8）。
 - **ビルド時スイッチ。** `CONFIG_POCKET_VM_SCHED`（既定 y、L1 の実行制御。n で旧経路）、`CONFIG_POCKET_UI_TASK_CORE`（既定 1）、`CONFIG_POCKET_VM_CCOUNT`（既定 n）、`CONFIG_POCKET_VM_PROBE`（既定 n、計測）。
-- **L0 のワークロードと採取スクリプトは tag `vm-L0` にある。** 計測し直すときは `git checkout vm-L0 -- apps/vmprobe tools/vm_l0_capture.py` で戻し、配線を足してから測り、**コミットせずに捨てる**。
+- **計測ハーネスは常設。** ワークロード6本と `condition.js`（`apps/vmprobe/`）、採取スクリプト（`tools/vm_l0_capture.py`）、USB の `A`〜`F` / `P`〜`W` の配線は本線にある。`CONFIG_POCKET_VM_PROBE` が n のビルドには一切入らない（シンボル表が一致することを確認済み、DIRAM ±0）。**tag `vm-L0` から毎回戻す運用はやめた** — L1 が `vmprobe.h` から競合条件の宣言を削ったせいで、その復元手順は `VMPROBE_COND_ALL` 未定義でコンパイルできなくなっており、probe-off ビルドは当該ファイルを一切ビルドしないので誰も気づかなかった。
 - **ホスト側の判定基盤は `tools/vmtest/`。** コーパスはバイト比較で、`--budget-jobs` で予算を小さく強制できる。Test262 の基準は `test262-baseline.txt`。L1 以降の意味論はここで守られている。
 
 ### 14.2 確定した設計判断
