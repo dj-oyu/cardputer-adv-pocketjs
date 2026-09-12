@@ -1,0 +1,3 @@
+start
+done: 2500 honest jobs finished
+exit=0

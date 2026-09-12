@@ -48,6 +48,70 @@ static bool       class_ready;
 // pocket_api.c's request numbers, and the same instruction not to "tidy" it.
 static uint32_t   handle_seed=1;
 
+// ------------------------------------------------- deferred JS delivery
+//
+// WHY A LISTENER DOES NOT RUN INSIDE THE KEYSTROKE ANY MORE.
+//
+// main.c calls pocket_text_key() before app_tick(), so a listener fired from
+// in here was a JS_Call made OUTSIDE the turn -- and from L1 on a turn can
+// begin with half a drain still queued (docs/vm-L1-design.md sec.2.1: nothing
+// reaches JavaScript until that queue is empty). An onEdit fired from the
+// keystroke would land between two halves of one logical drain: it would see
+// state the queued .then handlers have not written yet, and anything it
+// enqueued would sit behind that pending tail. The rule the whole level is
+// built on -- no new JS entry while a drain is unfinished -- has to hold for
+// every entry point, not only for the ten pumps.
+//
+// So the keystroke does the HOST's half now (the IME, the buffer, the caret,
+// the repaint) and records what the guest is owed; pocket_text_pump() delivers
+// it from inside app_tick(), in the pump phase, on a turn whose queue is
+// empty. Latency is unchanged in the ordinary case: the pump runs later in the
+// same frame as the keystroke that queued it.
+//
+// Order is preserved exactly as it was produced -- one keystroke can commit an
+// IME reading (onEdit) and then submit (onSubmit) -- so this is a FIFO and not
+// a set of flags.
+typedef enum { EV_EDIT, EV_SUBMIT, EV_CANCEL } ev_kind_t;
+typedef struct pending_ev {
+    struct pending_ev *next;
+    ev_kind_t kind;
+    uint32_t  handle;       // the session it belongs to
+    session_t *finished;    // EV_SUBMIT/EV_CANCEL: detached, ours to destroy
+    size_t    len;
+    char      text[];       // EV_EDIT only: the buffer as it was when typed
+} pending_ev_t;
+// Heap, not a static array: an entry carries up to TEXT_MAX_BYTES of snapshot
+// and a static queue of them is ~1 KiB of DRAM held for the life of the
+// firmware so that one app, on some frames, can type into a box. A session is
+// already one calloc; so is an event. The board has no PSRAM and 334 KiB of
+// DRAM (CLAUDE.md), which is the whole argument.
+static pending_ev_t *pending_head, *pending_tail;
+
+static pending_ev_t *queue_event(ev_kind_t kind, size_t text_len) {
+    pending_ev_t *e=calloc(1,sizeof(*e)+text_len+1);
+    if(!e) {
+        // Nothing else to do: the callback is what the guest is owed and there
+        // is no memory to remember it with. Logged rather than silent, because
+        // an app whose onEdit never came has no other way to find out.
+        ESP_LOGW(TAG,"TEXT_EVENT_DROPPED kind=%d",(int)kind);
+        return NULL;
+    }
+    e->kind=kind;
+    if(pending_tail) pending_tail->next=e; else pending_head=e;
+    pending_tail=e;
+    return e;
+}
+
+// Takes the head off the queue; the caller owns it and must free() it.
+static pending_ev_t *dequeue_event(void) {
+    pending_ev_t *e=pending_head;
+    if(!e) return NULL;
+    pending_head=e->next;
+    if(!pending_head) pending_tail=NULL;
+    e->next=NULL;
+    return e;
+}
+
 bool pocket_text_active(void) { return live!=NULL; }
 bool pocket_text_take_dirty(void) { bool was=dirty; dirty=false; return was; }
 
@@ -95,6 +159,11 @@ void pocket_text_reset(void) {
     session_t *s=detach();
     if(s) ESP_LOGI(TAG,"TEXT_RESET %u bytes",(unsigned)s->field.len);
     destroy(s);
+    // Undelivered events die here, unfired, for the same reason this function
+    // already closes a live session without onCancel: there is nobody left to
+    // hear it. The sessions they hold still own three JSValues of a realm that
+    // is about to go, so they are destroyed rather than merely forgotten.
+    for(pending_ev_t *e; (e=dequeue_event())!=NULL; ) { destroy(e->finished); free(e); }
     dirty=false;
     // The class belongs to the realm that is going away.
     class_ready=false;
@@ -142,7 +211,20 @@ static bool fire(session_t *s, JSValueConst fn, int argc, JSValueConst *argv) {
 // it, because a preedit never reaches the buffer: ime_feed() returns IME_TEXT
 // only for what the engine has settled, and that is the one string this file
 // ever copies out of the IME.
-static bool fire_edit(session_t *s) {
+//
+// The text is snapshotted when the key is pressed rather than read at delivery
+// time: what the app is told is what the person typed, even if the field has
+// moved on (or gone) by the time the pump reaches it.
+static void queue_edit(session_t *s) {
+    const size_t len=s->field.len<=TEXT_MAX_BYTES?s->field.len:TEXT_MAX_BYTES;
+    pending_ev_t *e=queue_event(EV_EDIT,len);
+    if(!e) return;
+    e->handle=s->handle;
+    e->len=len;
+    memcpy(e->text,s->field.buf,len);
+}
+
+static bool deliver_edit(session_t *s, const char *text, size_t len) {
     // Same rule as fire(): the context is taken before the listener runs,
     // because the event still has to be released after a listener that closed
     // the session out from under us.
@@ -150,8 +232,7 @@ static bool fire_edit(session_t *s) {
     if(!ctx) return true;
     JSValue event=JS_NewObject(ctx);
     if(JS_IsException(event)) { JS_FreeValue(ctx,event); return live==s; }
-    JS_SetPropertyStr(ctx,event,"text",
-                      JS_NewStringLen(ctx,s->field.buf,s->field.len));
+    JS_SetPropertyStr(ctx,event,"text",JS_NewStringLen(ctx,text,len));
     JSValueConst argv[1]={event};
     bool alive=fire(s,s->on_edit,1,argv);
     JS_FreeValue(ctx,event);
@@ -161,29 +242,81 @@ static bool fire_edit(session_t *s) {
 // Both endings close the session automatically, and both do it BEFORE the
 // callback runs: section 6 says onSubmit/onCancelで自動closeし, and an app that
 // opens a second field from inside onSubmit must not be told the first one is
-// still up. The text is copied out first for the same reason.
+// still up. Detaching here rather than at delivery is what keeps that true
+// even though the callback now runs a pump later: pocket_text_active() is
+// false the instant the person pressed Enter, and that is what main.c reads to
+// decide whose keyboard it is.
+//
+// The session itself is kept alive, off the module, until the pump has fired
+// its callback: the three JSValues are still in it, and they are what the
+// guest is owed.
 static void finish_submit(session_t *s) {
-    JSContext *ctx=s->ctx;
-    JSValue event=JS_UNDEFINED;
-    if(ctx) {
-        event=JS_NewObject(ctx);
-        if(!JS_IsException(event))
-            JS_SetPropertyStr(ctx,event,"text",
-                              JS_NewStringLen(ctx,s->field.buf,s->field.len));
-    }
     ESP_LOGI(TAG,"TEXT_SUBMIT %u bytes",(unsigned)s->field.len);
     detach();
-    JSValueConst argv[1]={event};
-    fire(s,s->on_submit,JS_IsUndefined(event)?0:1,argv);
-    if(ctx) JS_FreeValue(ctx,event);
-    destroy(s);
+    // No snapshot: the session is detached, so its own buffer cannot change
+    // again, and the event holds it until the callback has run.
+    pending_ev_t *e=queue_event(EV_SUBMIT,0);
+    if(!e) { destroy(s); return; }
+    e->finished=s;
+    e->handle=s->handle;
 }
 
 static void finish_cancel(session_t *s) {
     ESP_LOGI(TAG,"TEXT_CANCEL");
     detach();
-    fire(s,s->on_cancel,0,NULL);
-    destroy(s);
+    pending_ev_t *e=queue_event(EV_CANCEL,0);
+    if(!e) { destroy(s); return; }
+    e->finished=s;
+    e->handle=s->handle;
+}
+
+// The pump: app_tick() calls this in the pump phase, which is a turn with an
+// empty job queue by construction (sec.2.1). Events are delivered in the order
+// they were produced, and a listener may open, close or submit a field from
+// inside one -- so each entry is taken off the queue BEFORE it is delivered
+// and re-checked against the live session before it is used.
+void pocket_text_pump(void) {
+    for(pending_ev_t *e; (e=dequeue_event())!=NULL; ) {
+        if(e->kind==EV_EDIT) {
+            // The session an edit belongs to is normally the live one, but not
+            // always: a single Enter can edit and then submit, and the submit
+            // takes the session off the module the moment the key is pressed
+            // (finish_submit). The edit still has to be delivered, and to THAT
+            // session -- so look for it among the endings still queued as well.
+            // Matched on the handle, never on the pointer alone: a session that
+            // was closed and replaced can be the same allocation.
+            session_t *owner=NULL;
+            if(live && live->handle==e->handle) owner=live;
+            for(pending_ev_t *q=pending_head; !owner && q; q=q->next)
+                if(q->finished && q->finished->handle==e->handle)
+                    owner=q->finished;
+            // Nothing left to tell: the field was closed from JavaScript before
+            // the pump reached this. Pre-L1 the listener ran before anything
+            // could close it, and the honest equivalent now is not to report an
+            // edit to a field that no longer exists.
+            if(owner) deliver_edit(owner,e->text,e->len);
+            free(e);
+            continue;
+        }
+        session_t *s=e->finished;
+        JSContext *ctx=s?s->ctx:NULL;
+        if(s && e->kind==EV_SUBMIT) {
+            JSValue event=JS_UNDEFINED;
+            if(ctx) {
+                event=JS_NewObject(ctx);
+                if(!JS_IsException(event))
+                    JS_SetPropertyStr(ctx,event,"text",
+                                      JS_NewStringLen(ctx,s->field.buf,s->field.len));
+            }
+            JSValueConst argv[1]={event};
+            fire(s,s->on_submit,JS_IsUndefined(event)?0:1,argv);
+            if(ctx) JS_FreeValue(ctx,event);
+        } else if(s) {
+            fire(s,s->on_cancel,0,NULL);
+        }
+        destroy(s);
+        free(e);
+    }
 }
 
 // ------------------------------------------------------------ the key path
@@ -224,13 +357,13 @@ void pocket_text_key(const keystroke_t *k) {
                 ESP_LOGW(TAG,"TEXT_STALE %u bytes dropped (gen %u != %u)",
                          (unsigned)len,(unsigned)generation,
                          (unsigned)s->field.generation);
-            else if(!fire_edit(s)) return;   // a listener closed or replaced it
+            else queue_edit(s);   // delivered by pocket_text_pump(), not here
             took=true;
         } else took=(d==IME_TAKEN);
     }
 
     switch(tf_key(&s->field,k->text,k->len,took)) {
-        case TF_EDIT:   fire_edit(s); break;
+        case TF_EDIT:   queue_edit(s); break;
         case TF_SUBMIT: finish_submit(s); break;
         case TF_CANCEL: finish_cancel(s); break;
         case TF_NONE:   break;

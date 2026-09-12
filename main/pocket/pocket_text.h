@@ -38,9 +38,19 @@ void pocket_text_reset(void);
 // field rather than "leave the app".
 bool pocket_text_active(void);
 
-// One keystroke, before anything else has looked at it. Fires onEdit, onSubmit
-// or onCancel, and closes the session on the latter two.
+// One keystroke, before anything else has looked at it. Does the host's half
+// immediately -- the IME, the buffer, the caret, the repaint, and the close
+// that onSubmit/onCancel imply -- and QUEUES the guest's callback for
+// pocket_text_pump(). main.c calls this outside app_tick(), and from L1 on a
+// turn may open with an unfinished job queue that nothing may cut into
+// (docs/vm-L1-design.md sec.2.1), which is why the JS_Call is not made here.
 void pocket_text_key(const keystroke_t *key);
+
+// Delivers the callbacks queued by pocket_text_key(), in the order the
+// keystrokes produced them. Called from app_tick()'s pump phase, i.e. only on
+// a turn that began with an empty job queue -- the same rule every other
+// delivery into the guest follows.
+void pocket_text_pump(void);
 
 // Whether the field has changed since the last ask, and clears the flag. The
 // guest's renderer only presents when IT has damage, so a field that moved on

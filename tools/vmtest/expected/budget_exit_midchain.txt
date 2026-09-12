@@ -1,0 +1,13 @@
+start
+job 1
+job 2
+job 3
+exit requested
+job 4
+job 5
+job 6
+job 7
+job 8
+finally
+tail
+exit=0

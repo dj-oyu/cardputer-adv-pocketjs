@@ -48,7 +48,7 @@ python3 tools/vmtest/timing.py                 # 時間の計測（書き込み�
 - `$262` は `--test262` の時だけ入れる。トレース時だけ GC 検出用のオブジェクトを 1 個作る（後述）。
 - ホストは 64 bit。`sizeof(JSValue)` はホスト 16 B・実機 8 B（NaN boxing）で、ポインタも倍。**同じプログラムでもホストの方が多く確保する**。`-m32` はこの WSL に multilib が無く使えなかった。
 
-終了コード: 0 正常、1 eval 中の未捕捉例外、2 ジョブの例外または未処理 rejection、3 引数・ファイルの誤り、4 ランタイム生成失敗、5 ジョブキューの暴走（`--runaway-turns`）。
+終了コード: 0 正常、1 eval 中の未捕捉例外、2 ジョブの例外または未処理 rejection、3 引数・ファイルの誤り、4 ランタイム生成失敗、5 ジョブキューの暴走（`--runaway-jobs`）。
 
 主なオプション: `--profile device|host`、`--heap-limit N[K|M]`、`--stack-limit N[K|M]`、`--frames N`（eval 後に `globalThis.frame()` を N 回、各回の後に drain）、`--fail-alloc N`（N 回目の確保試行を NULL にする。L2c の OOM 検証用）、`--time`、`--stats`、`--module`、`--strict`、`--include FILE`。
 
@@ -58,8 +58,9 @@ L1 の予算まわり:
 | --- | --- |
 | `--budget-jobs N` | 件数モードの予算。N 件走らせたら yield し、残りは次の「ターン」= 継続 drain で片付ける。**時計は一切読まない**（`limit_us<=0` で時間判定が切れる）ので、中断点はプログラムだけで決まる。ホストで時間予算を使うと ASan の下では再現しないので、期待値と比べる検査は全部これ |
 | `--force-yield` | `--budget-jobs 1`。L1 のチェックポイントはジョブ境界なので、この水準で頼める最強の yield がこれ。L2 で opcode チェックポイントが入れば弱シンボル経由でそれも有効になる |
-| `--runaway-turns N` | キューが空にならないまま N 回連続で継続ターンが続いたら終了コード 5。**既定は無効**（ファームの既定は 30）。`--budget-jobs 1` は正当な 200 件の drain を 200 回の継続ターンにするので、実機では暴走のその形が、ここでは検査そのものになる |
+| `--runaway-jobs N` | **1 本の論理 drain**（予算で切られた drain + その継続群）が N 件走ってもキューが空にならなければ終了コード 5。**既定は無効**。ファームの判定は時間（`VM_RUNAWAY_US`）が主で件数（`VM_RUNAWAY_JOBS`）は時計が死んだときの受け皿だが、件数モードのホストでは時計を読まないので、写せるのは件数の側。ターン数では**ない** — ターンは backstop でも終わるので、長いだけの正直な drain を暴走と見なしてしまう（vm-L1-design §5.2・§11.1）|
 | `--stop-turns N` | N 回の継続ターンでセッションを**終わらせる**（終了コード 0、キューは実行せず破棄）。`app_stop()` がキューを残したまま呼ばれる場合の代役で、設計 §3.2 の検査に要るがそこでは機構を指定していなかったため、ここで足したもの |
+| `host.exit()`（`--host-events` に同梱）| `pocket.app.exit()` の写し。停止要求は割り込み経由で届くので、**キューが空になったターンでだけ**読まれる（vm-L1-design §11.2）。`corpus/budget_exit_midchain.js` がその順序を固定する |
 | `--host-events` | `host.request(k)` を入れる。k 番目のジョブ境界で「完了が記録され」、**キューが空になったターンでだけ**配送される Promise を返す。`pocket_api_complete()` / `pocket_api_pump()` の縮小模型 |
 
 `#info turns=… max_run_turns=… jobs_dropped=…` は常に出る（`--stats` 不要）。`run.sh` と `test262.py` はどちらも `#info` 行を diff と判定から外す。

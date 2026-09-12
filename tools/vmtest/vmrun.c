@@ -212,14 +212,21 @@ typedef struct {
   uint64_t turns;          // continuation turns taken, over the whole run
   unsigned max_run_turns;  // most continuation turns spent on one logical drain
   bool jobs_dropped;       // the run ended with jobs still queued
+  uint64_t runaway_jobs;   // jobs the logical drain had run when the guard fired
 } guest_t;
 
 static guest_t G;
 
+// app_session.c's interrupt(): once the host has asked the session to stop,
+// every subsequent call into JavaScript is killed with an uncatchable
+// InternalError. Modelled here because that is exactly what makes WHERE the
+// exit() is honoured observable -- see host_exit() below.
+static bool host_stopping;
+
 static int vm_interrupt(JSRuntime *rt, void *opaque) {
   (void)rt;
   (void)opaque;
-  return 0;
+  return host_stopping ? 1 : 0;
 }
 
 // Copied from guest.c promise_rejection(): one entry per promise, appended at
@@ -282,12 +289,20 @@ static int report_rejections(guest_t *guest) {
 // L1 knobs. Defaults reproduce the pre-L1 drain exactly: no limit, no ceiling,
 // so vm_sched_drain() can only return EMPTY or THREW.
 static unsigned budget_jobs;                    // --budget-jobs / --force-yield
-// OFF by default, unlike the firmware (VM_RUNAWAY_TURNS = 30). The guard
-// counts continuation turns, and --budget-jobs 1 turns any honest 200-job
-// drain into 200 of them: on the device that shape is a runaway, in the
-// harness it is the whole point of the flag. The runaway case asks for the
-// guard explicitly with --runaway-turns.
-static unsigned runaway_turns;                  // --runaway-turns
+// The firmware guard (vm_sched.h VM_RUNAWAY_US / VM_RUNAWAY_JOBS) is a
+// predicate on what ONE LOGICAL DRAIN has spent: microseconds first, jobs as
+// the dead-clock fallback. The harness runs in count mode, where the clock is
+// never read, so what it can model is the job total -- and that is the useful
+// half here anyway, because it is the half that has to tell an honest long
+// chain from a job that requeues itself forever. OFF by default: a corpus file
+// that means to provoke the guard asks for it.
+//
+// It is NOT a turn count, and the difference is the defect this replaced:
+// --budget-jobs 1 turns an honest 200-job drain into 200 continuation turns,
+// and the device's 64-job backstop does the same thing to any drain of cheap
+// jobs, so a turn count condemns programs for being long rather than for
+// failing to finish.
+static uint64_t runaway_jobs;                   // --runaway-jobs
 static unsigned stop_turns;                     // --stop-turns (0 = never)
 static bool host_events;                        // --host-events
 
@@ -336,6 +351,23 @@ static JSValue host_request(JSContext *ctx, JSValueConst this_val, int argc, JSV
   return promise;
 }
 
+// pocket.app.exit() in miniature. The flag is set from inside a job, and the
+// stop it asks for is delivered as an interrupt -- so honouring it at the top
+// of a CONTINUATION turn would kill job k+1 of a drain that pre-L1 ran to its
+// end, and whether an app's .finally ran would depend on where the budget
+// happened to fall. run_turn() therefore reads it only where app_tick() reads
+// it: on a turn that began with an empty queue.
+static bool host_exit_requested;
+
+static JSValue host_exit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)ctx;
+  (void)this_val;
+  (void)argc;
+  (void)argv;
+  host_exit_requested = true;
+  return JS_UNDEFINED;
+}
+
 static bool host_pump(guest_t *guest) {
   (void)guest;
   if (!host_events) return false;
@@ -367,6 +399,7 @@ static void host_requests_free(void) {
 static void install_host(JSContext *ctx) {
   JSValue o = JS_NewObject(ctx);
   JS_SetPropertyStr(ctx, o, "request", JS_NewCFunction(ctx, host_request, "request", 1));
+  JS_SetPropertyStr(ctx, o, "exit", JS_NewCFunction(ctx, host_exit, "exit", 0));
   JSValue global = JS_GetGlobalObject(ctx);
   JS_SetPropertyStr(ctx, global, "host", o);
   JS_FreeValue(ctx, global);
@@ -378,6 +411,7 @@ static void install_host(JSContext *ctx) {
 // or a rejection went unhandled, -5 runaway, -6 stopped with a queue.
 static int run_turn(guest_t *guest) {
   unsigned run_turns = 0;
+  uint64_t drain_jobs = 0;   // this LOGICAL drain, cleared when the queue empties
   for (;;) {
     JSContext *context = NULL;
     unsigned ran = 0;
@@ -385,6 +419,7 @@ static int run_turn(guest_t *guest) {
     const vm_drain_status_t status =
         vm_sched_drain(guest->runtime, &guest->budget, &ran, &context);
     guest->jobs += ran;
+    drain_jobs += ran;
     boundaries++;  // every return from the drain is one job boundary
     if (ran > guest->max_queue_run) guest->max_queue_run = ran;
     if (status == VM_DRAIN_THREW) {
@@ -396,8 +431,20 @@ static int run_turn(guest_t *guest) {
       guest->turns++;
       if (++run_turns > guest->max_run_turns) guest->max_run_turns = run_turns;
       if (stop_turns != 0 && run_turns >= stop_turns) return -6;
-      if (runaway_turns != 0 && run_turns >= runaway_turns) return -5;
-      continue;  // the continuation drain; nothing host-side runs in between
+      if (runaway_jobs != 0 && drain_jobs >= runaway_jobs) {
+        guest->runaway_jobs = drain_jobs;
+        return -5;
+      }
+      // Nothing host-side runs in between, and that includes the exit check:
+      // sec.2.1's rule is that no host call reaches JavaScript until the queue
+      // is empty, and an exit() honoured here reaches it through the interrupt.
+      continue;
+    }
+    drain_jobs = 0;            // the logical drain ended; the next starts at 0
+    // Where app_tick() reads the flag: queue empty, ahead of the pumps.
+    if (host_exit_requested) {
+      host_stopping = true;
+      return -7;
     }
     if (!host_pump(guest)) break;  // queue empty and no completion to deliver
   }
@@ -568,9 +615,10 @@ static void usage(void) {
           "  --test262              install $262, report 'vmrun: uncaught <phase> <Name>'\n"
           "  --force-yield          yield at every checkpoint; at L1 that is every job (= --budget-jobs 1)\n"
           "  --budget-jobs N        L1 count-mode budget: yield after N jobs, resume next turn (0 = off)\n"
-          "  --runaway-turns N      end the run after N consecutive continuation turns (default off)\n"
+          "  --runaway-jobs N       end the run when ONE logical drain has run N jobs (default off)\n"
           "  --stop-turns N         end the SESSION after N continuation turns, dropping the queue\n"
-          "  --host-events          install host.request(k): a completion recorded at the k-th job boundary\n"
+          "  --host-events          install host.request(k) (a completion recorded at the k-th job\n"
+          "                         boundary) and host.exit() (pocket.app.exit)\n"
           "  --time                 print '#info time_ns=...' (eval + drains + frames)\n"
           "  --stats                print '#info' allocator/queue statistics\n"
           "exit: 0 ok, 1 uncaught exception in eval, 2 job threw or unhandled rejection, 3 usage,\n"
@@ -612,7 +660,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--test262")) test262 = true;
     else if (!strcmp(a, "--force-yield")) force_yield = true;
     else if (!strcmp(a, "--budget-jobs")) budget_jobs = (unsigned)parse_size(NEXT());
-    else if (!strcmp(a, "--runaway-turns")) runaway_turns = (unsigned)parse_size(NEXT());
+    else if (!strcmp(a, "--runaway-jobs")) runaway_jobs = (uint64_t)parse_size(NEXT());
     else if (!strcmp(a, "--stop-turns")) stop_turns = (unsigned)parse_size(NEXT());
     else if (!strcmp(a, "--host-events")) host_events = true;
     else if (!strcmp(a, "--time")) want_time = true;
@@ -754,8 +802,9 @@ int main(int argc, char **argv) {
       if (!require_frame || has_frame) {
         const int r = run_turn(&G);
         if (r == -5) status = 5;
-        else if (r == -6) status = 0;
+        else if (r == -6 || r == -7) status = 0;   // stopped: queue dropped / exit()
         else if (r != 0) status = 2;
+        if (r == -7) frames = 0;                   // no frame() after an exit()
       }
       // A module's evaluation promise: a rejected top-level await is the
       // module equivalent of an uncaught exception.
@@ -778,6 +827,7 @@ int main(int argc, char **argv) {
         const int t = run_turn(&G);
         if (t == -5) status = 5;
         else if (t == -6) break;   // session ends here, with a queue (sec.3.2)
+        else if (t == -7) break;   // the guest asked to exit; sec.2.2
         else if (t != 0 && status == 0) status = 2;
       }
       JS_FreeValue(G.context, frame);
@@ -811,10 +861,14 @@ int main(int argc, char **argv) {
   // and cannot make an expected file depend on how the budget was set.
   fprintf(stderr, "#info turns=%llu max_run_turns=%u jobs_dropped=%d\n",
           (unsigned long long)G.turns, G.max_run_turns, G.jobs_dropped ? 1 : 0);
-  if (status == 5)
-    fprintf(stderr,
-            "vmrun: job queue runaway after %u consecutive continuation turns\n",
-            runaway_turns);
+  // The count goes on an #info line, not on the diffed one: run.sh re-runs the
+  // whole corpus at several budgets, and the job total at which the guard fires
+  // is the first multiple of the budget past the limit. The FACT of the runaway
+  // is what must not depend on where the budget fell.
+  if (status == 5) {
+    fprintf(stderr, "#info runaway_jobs=%llu\n", (unsigned long long)G.runaway_jobs);
+    fprintf(stderr, "vmrun: job queue runaway: one drain never emptied\n");
+  }
 
   // Same teardown order as pocketjs_guest_destroy().
   if (A.trace) {

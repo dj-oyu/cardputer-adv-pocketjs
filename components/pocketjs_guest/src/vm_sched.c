@@ -12,6 +12,7 @@ void vm_budget_begin_full(vm_budget_t *budget, int64_t limit_us,
   budget->floor_jobs = floor_jobs;
   budget->backstop = backstop;
   budget->clock = NULL;
+  budget->elapsed = 0;
   budget->start = vm_clock_now_us();
 }
 
@@ -25,45 +26,48 @@ void vm_budget_restart(vm_budget_t *budget) {
     budget->start = (budget->clock ? budget->clock : vm_clock_now_us)();
 }
 
+/* One exit for every return, so `elapsed` can never be the previous drain's
+ * value: the runaway guard adds it up and a stale term there would be a
+ * session ended for work that already finished. Zero in count mode, where the
+ * clock is never read on purpose (the harness needs the yield points to be a
+ * pure function of the program). */
+static vm_drain_status_t drain_return(vm_budget_t *budget, vm_clock_fn clock,
+                                      unsigned n, unsigned *ran,
+                                      vm_drain_status_t status) {
+  *ran = n;
+  budget->elapsed = budget->limit_us > 0 ? clock() - budget->start : 0;
+  return status;
+}
+
 vm_drain_status_t vm_sched_drain(JSRuntime *runtime, vm_budget_t *budget,
                                  unsigned *ran, JSContext **failed_ctx) {
   unsigned n = 0;
   const vm_clock_fn clock =
       (budget->clock != NULL) ? budget->clock : vm_clock_now_us;
   for (;;) {
-    if (!JS_IsJobPending(runtime)) {
-      *ran = n;
-      return VM_DRAIN_EMPTY;
-    }
-    if (budget->backstop != 0U && n >= budget->backstop) {
-      *ran = n;
-      return VM_DRAIN_YIELDED;
-    }
+    if (!JS_IsJobPending(runtime))
+      return drain_return(budget, clock, n, ran, VM_DRAIN_EMPTY);
+    if (budget->backstop != 0U && n >= budget->backstop)
+      return drain_return(budget, clock, n, ran, VM_DRAIN_YIELDED);
     /* The clock is read once per stride and never before the floor. The floor
      * is the forward-progress guarantee for a turn whose frame() already spent
      * the budget before the drain began (measured (device): frame() alone is
      * 117 ms in the worst L0 workload); the stride is what keeps the overrun
      * past the limit bounded by stride * cost-per-job rather than unbounded. */
     if (budget->limit_us > 0 && n >= budget->floor_jobs &&
-        (n % budget->stride) == 0U && clock() - budget->start >= budget->limit_us) {
-      *ran = n;
-      return VM_DRAIN_YIELDED;
-    }
+        (n % budget->stride) == 0U && clock() - budget->start >= budget->limit_us)
+      return drain_return(budget, clock, n, ran, VM_DRAIN_YIELDED);
     /* One job, start to finish. Nothing below this line can observe a partial
      * job, which is the whole reason the budget lives here and not inside an
      * interrupt handler. */
     const int result = JS_ExecutePendingJob(runtime, failed_ctx);
-    if (result < 0) {
-      *ran = n;
-      return VM_DRAIN_THREW;
-    }
+    if (result < 0)
+      return drain_return(budget, clock, n, ran, VM_DRAIN_THREW);
     /* 0 means "there was nothing to run" -- JS_IsJobPending said otherwise a
      * line ago, so this cannot happen today. Treated as empty rather than
      * ignored: the alternative is spinning forever if it ever can. */
-    if (result == 0) {
-      *ran = n;
-      return VM_DRAIN_EMPTY;
-    }
+    if (result == 0)
+      return drain_return(budget, clock, n, ran, VM_DRAIN_EMPTY);
     n++;
   }
 }

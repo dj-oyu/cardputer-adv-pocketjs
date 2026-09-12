@@ -48,12 +48,34 @@ typedef struct JSContext JSContext;
  * immediately after it, so no reordering it causes is observable. */
 #define VM_LEAVE_BUDGET_US 50000
 #define VM_LEAVE_BACKSTOP 256
-/* Consecutive turns that ended with the queue still non-empty before the
- * session is declared runaway. 30 x 8 ms = 240 ms of JS time, about what the
- * old 250 ms wall-clock guard allowed -- but counted in job boundaries, so
- * time this task spent preempted by the audio or decoder task is not charged
- * to the guest the way the old guard charged it. */
-#define VM_RUNAWAY_TURNS 30
+/* Runaway is a property of ONE LOGICAL DRAIN (the drain the budget cut plus
+ * every continuation of it, sec.2.1), not of a turn count.
+ *
+ * Counting turns was the first design and it was wrong: the backstop ends a
+ * turn at 64 jobs however cheap they are, so "30 turns" is "1,920 jobs" for
+ * anything cheaper than 125 us a job -- and the measured (device) Promise
+ * chain is 0.07 ms a job, i.e. 134 ms of JS where the guard it replaced
+ * allowed 250 ms. An honest 2,500-job chain died of it
+ * (tools/vmtest/known/runaway_vs_honest_chain.js). Nor is a turn a unit of
+ * guest work: the time budget that ends a turn is WALL CLOCK, so the turns of
+ * a contended machine are short for reasons the guest has nothing to do with,
+ * and counting them charges the guest for the audio task.
+ *
+ * So the guard totals what the drain actually spent. VM_RUNAWAY_US is summed
+ * over vm_sched_drain() calls only -- not frame(), not the pumps, not the
+ * render, not the transfer -- which makes it strictly more permissive than the
+ * 250 ms wall-clock deadline it replaces: a chain the old guard let live
+ * cannot be ended by this one. Preemption inside the drain is still charged,
+ * because no host-side mechanism can tell that time apart from JS time; the
+ * answer to that is the size of the allowance, not a smaller unit.
+ *
+ * VM_RUNAWAY_JOBS is the dead-clock fallback and nothing else: it is what
+ * stops `function f(){Promise.resolve().then(f)}` when the clock abstraction
+ * returns a constant (count mode on a host, a broken timer on a board). It is
+ * far above any honest drain -- 250 ms at the measured cheapest job is ~3,600
+ * jobs -- so on a live clock the time limit always fires first. */
+#define VM_RUNAWAY_US 250000
+#define VM_RUNAWAY_JOBS 100000
 
 typedef enum {
   VM_DRAIN_EMPTY = 0,   /* JS_IsJobPending() went false: a real end of drain */
@@ -66,6 +88,12 @@ typedef struct {
    * ARE USED, so a 32-bit source that wraps (CCOUNT wraps every ~17.9 s at
    * 240 MHz) is correct for any turn shorter than its period. */
   int64_t start;
+  /* What the last vm_sched_drain() on this budget spent, in the clock's units.
+   * Written on every return, and zero in count mode (limit_us <= 0) where the
+   * clock is deliberately never read. The runaway guard sums it across one
+   * logical drain; it costs one extra clock read per drain (measured: 25 ns
+   * CCOUNT, 833 ns systimer) against a drain measured in milliseconds. */
+  int64_t elapsed;
   int64_t limit_us;   /* <= 0 disables the time check entirely (count mode) */
   unsigned stride;    /* clock reads happen every `stride` jobs; 0 means 1 */
   unsigned floor_jobs;

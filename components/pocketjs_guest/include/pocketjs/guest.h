@@ -71,6 +71,17 @@ void pocketjs_guest_budget(pocketjs_guest_t *guest, const vm_budget_t *budget);
  * next turn, BEFORE delivering anything new into JavaScript (sec.2.1). */
 bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest);
 
+/** What the current LOGICAL drain has cost: microseconds spent inside
+ * vm_sched_drain() and jobs completed, summed over the drain the budget cut
+ * and every continuation of it, both cleared when the queue empties. The host
+ * runaway guard (docs/vm-L1-design.md sec.5.2) is a predicate on these; it
+ * cannot be a turn count, because a turn ends for reasons -- the backstop, a
+ * contended machine shortening the wall-clock budget -- that say nothing about
+ * how much work the guest asked for. `*us` is 0 whenever the budget runs in
+ * count mode (limit_us <= 0), where the clock is deliberately never read. */
+void pocketjs_guest_drain_total(const pocketjs_guest_t *guest, int64_t *us,
+                                uint64_t *jobs);
+
 /** Continue the drain the budget cut. Same queue, same order, no frame() and
  * no new host events in between: this is the rest of one logical drain. */
 esp_err_t pocketjs_guest_continue(pocketjs_guest_t *guest);

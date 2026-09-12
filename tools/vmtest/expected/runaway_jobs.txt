@@ -1,4 +1,4 @@
 arming
 armed
-vmrun: job queue runaway after 30 consecutive continuation turns
+vmrun: job queue runaway: one drain never emptied
 exit=5

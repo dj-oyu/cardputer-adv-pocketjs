@@ -91,12 +91,18 @@ static bool run(const char *src) {
 
 // ---- keystrokes, in the shape main/hal/keymap.c produces -------------------
 
+// ONE FRAME, not one keystroke: main.c hands the field its key and then runs
+// app_tick(), whose pump phase is where the guest's callbacks are delivered
+// from L1 on (docs/vm-L1-design.md sec.2.1 -- nothing may call into JS while a
+// job queue is unfinished, and pocket_text_key() is called outside the turn).
+// Case 8 is the one that drives the two halves apart on purpose.
 static void key(const char *utf8) {
     keystroke_t k;
     memset(&k,0,sizeof k);
     k.len=(uint8_t)strlen(utf8);
     memcpy(k.text,utf8,k.len);
     pocket_text_key(&k);
+    pocket_text_pump();
 }
 static void token(const char *name) {          // a "\0name" key
     keystroke_t k;
@@ -105,6 +111,7 @@ static void token(const char *name) {          // a "\0name" key
     memcpy(k.text+1,name,n);
     k.len=(uint8_t)(n+1);
     pocket_text_key(&k);
+    pocket_text_pump();
 }
 // One keystroke the IME answers with a commit -- the path phase C of
 // apps/textcheck drives, where the commit is computed before the callback and
@@ -277,10 +284,69 @@ static void case7(void) {
     check(!pocket_text_active(),"reset closed it silently");
 }
 
+static void case8(void) {
+    // ---- 8. the keystroke does not call into JavaScript --------------------
+    //
+    // L1 lets a turn begin with half a drain still queued, and until that queue
+    // is empty nothing may enter the guest (sec.2.1). main.c delivers the
+    // keystroke BEFORE app_tick(), so a listener fired from inside
+    // pocket_text_key() would run between two halves of one logical drain: it
+    // would read state the queued .then handlers have not written yet, and the
+    // jobs it queued would land behind that pending tail. This case pins the
+    // split -- key now, callback at the pump -- because nothing else in this
+    // file can tell the two apart.
+    engine_up();
+    check(run("var c=input.text.open({" RECT ",ime:'off',"
+              "  onEdit:function(e){ note('EDIT ['+e.text+']'); },"
+              "  onSubmit:function(e){ note('SUBMIT ['+e.text+']'); }});"),
+          "opens");
+    keystroke_t k;
+    memset(&k,0,sizeof k); k.len=1; k.text[0]='a';
+    pocket_text_key(&k);
+    check(!logged("EDIT"),"the keystroke itself called no listener");
+    // The host's half DID happen: the field has the character and wants paint.
+    check(pocket_text_take_dirty(),"the field repainted on the keystroke");
+    pocket_text_pump();
+    check(logged("EDIT [a]"),"the pump delivered it, with the typed text");
+
+    // Two events out of one keystroke keep their order, and the submit's text
+    // is the text as it was when Enter was pressed.
+    log_len=0; log_buf[0]=0;
+    memset(&k,0,sizeof k); k.len=1; k.text[0]='b';
+    pocket_text_key(&k);
+    memset(&k,0,sizeof k); k.len=1; k.text[0]='\n';
+    pocket_text_key(&k);
+    check(!logged("EDIT"),"still nothing before the pump");
+    check(!pocket_text_active(),"submit closed the field at the keystroke");
+    pocket_text_pump();
+    check(strstr(log_buf,"EDIT [ab];SUBMIT [ab];")!=NULL,
+          "both events arrived, in the order they were produced");
+    engine_down();
+}
+
+static void case9(void) {
+    // ---- 9. teardown with callbacks still queued ---------------------------
+    // app_stop() calls pocket_text_reset() from a turn that may never reach
+    // another pump. The queued session still owns three JSValues of the realm
+    // that is going away; reset destroys it instead of firing it, which is the
+    // same choice the function already makes for a live session (no onCancel:
+    // there is nobody left to hear it). ASan is what checks the rest.
+    engine_up();
+    check(run("input.text.open({" RECT ",ime:'off',"
+              "  onSubmit:function(){ note('SUBMIT-LATE'); }});"),"opens");
+    keystroke_t k;
+    memset(&k,0,sizeof k); k.len=1; k.text[0]='\n';
+    pocket_text_key(&k);                       // queued, never pumped
+    engine_down();
+    check(!logged("SUBMIT-LATE"),"teardown fired no queued callback");
+    check(!pocket_text_active(),"and left nothing live");
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout,NULL,_IONBF,0);      // the report must survive an abort
     host_ime_present(true);
-    void (*cases[])(void)={case1,case2,case3,case4,case5,case6,case7};
+    void (*cases[])(void)={case1,case2,case3,case4,case5,case6,case7,
+                          case8,case9};
     for(int i=0;i<(int)(sizeof cases/sizeof cases[0]);i++) {
         char want[2]={(char)('1'+i),'\0'};
         if(argc>1 && strcmp(argv[1],want)) continue;

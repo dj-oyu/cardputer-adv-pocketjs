@@ -140,6 +140,31 @@ static void arm_turn(uint32_t buttons) {
     pocketjs_guest_budget(guest,&budget);
 }
 
+// sec.5.2: is THIS logical drain a runaway? The question is what the drain has
+// spent, not how many turns it took to spend it. A turn ends when the wall
+// clock says 8 ms -- which on a contended machine is mostly somebody else's
+// time -- or when the 64-job backstop says so, and neither number is a measure
+// of the guest's appetite: counting turns killed an honest 2,500-job chain
+// (tools/vmtest/corpus/budget_honest_long_chain.js) at 134 ms of JS, where the
+// 250 ms guard it replaced would have let it finish.
+//
+// VM_RUNAWAY_US totals only the time inside vm_sched_drain(), so everything
+// the old deadline also charged -- frame(), the pumps, the render, the
+// transfer -- is now free. That makes this guard strictly more permissive than
+// the one it replaces: nothing the pre-L1 firmware ran to completion can be
+// ended by it. Time the drain spent preempted is still charged, because no
+// host-side clock can tell that time from the guest's; the answer to that is
+// the size of the allowance, not a finer unit.
+static bool drain_runaway(void) {
+    int64_t us=0; uint64_t jobs=0;
+    pocketjs_guest_drain_total(guest,&us,&jobs);
+    if(us<VM_RUNAWAY_US && jobs<VM_RUNAWAY_JOBS) return false;
+    ESP_LOGE("app","RUNAWAY one drain spent %lld us over %llu jobs in %u turns",
+             (long long)us,(unsigned long long)jobs,continuation_turns+1u);
+    jsconsole_set_error("JOB QUEUE RUNAWAY");
+    return true;
+}
+
 // app_registry.c takes this rather than calling pocket_api_supported() itself,
 // so that the registry stays free of the API surface and can be tested on a
 // host that has neither.
@@ -540,16 +565,12 @@ esp_err_t app_overlay_tick(void) {
     // The same continuation rule as app_tick() (sec.2.2), minus the surfaces an
     // overlay does not install. There is no UI core here, so the drain is
     // resumed directly instead of through the binding.
-    if(pocket_app_exit_requested()) app_request_stop();
     if(pocketjs_guest_jobs_pending(guest)) {
         esp_err_t ce=pocketjs_guest_continue(guest);
         if(ce) return ce;
         if(pocketjs_guest_jobs_pending(guest)) {
-            if(++continuation_turns>=VM_RUNAWAY_TURNS) {
-                ESP_LOGE("app","RUNAWAY jobs pending after %u turns",continuation_turns);
-                jsconsole_set_error("JOB QUEUE RUNAWAY");
-                return ESP_ERR_TIMEOUT;
-            }
+            if(drain_runaway()) return ESP_ERR_TIMEOUT;
+            continuation_turns++;
             // No display list this turn: the shell composites whatever the
             // overlay last produced, which is the same thing it does for a
             // turn the overlay chose not to draw in.
@@ -557,6 +578,10 @@ esp_err_t app_overlay_tick(void) {
         }
     }
     continuation_turns=0;
+    // Same place as app_tick(): only a turn that starts with an empty queue
+    // may turn an exit() into a stop, because the stop is delivered as an
+    // interrupt and would otherwise cut the drain it lands in.
+    if(pocket_app_exit_requested()) app_request_stop();
     pocket_app_pump();
     // Before pocket_api_pump(), like every other producer: what these post is
     // settled by that call, and posting after it would delay every completion
@@ -604,11 +629,17 @@ esp_err_t app_tick(uint32_t buttons) {
     // at all, so the drain the budget cut and its continuations are one
     // logical drain with the same job order the pre-L1 single drain produced.
     //
-    // Hoisted out of pocket_app_pump(): exit() sets its flag inside a job, and
-    // the stop it asks for has to be honoured on a continuation turn too --
-    // otherwise an app that exits from a long chain keeps running until the
-    // chain ends.
-    if(pocket_app_exit_requested()) app_request_stop();
+    //
+    // exit() is NOT honoured here, and that is the same rule again: the stop it
+    // asks for reaches the guest as an uncatchable interrupt on the next call
+    // into JavaScript, so requesting it at the top of a continuation turn would
+    // kill job k+1 of a drain that pre-L1 ran to its end -- every .then and
+    // every .finally after the exit() would run or not run depending on where
+    // the budget happened to fall, which is exactly what a budget boundary must
+    // never decide. Pre-L1 the flag was read in pocket_app_pump(), i.e. only on
+    // a turn that began with an empty queue, and that is where it is read
+    // below. The chain an exiting app is stuck in is bounded by the runaway
+    // guard, not by this check.
     if(pocketjs_guest_jobs_pending(guest)) {
         pocketjs_ui_frame_view_t cont={.struct_size=sizeof(cont)};
         // Timed into the same turn_ms as an ordinary turn: a continuation IS a
@@ -621,27 +652,33 @@ esp_err_t app_tick(uint32_t buttons) {
         if(!leaving && pocketjs_guest_jobs_pending(guest)) {
             // Nothing new reaches JS this turn. The keys are held, not lost.
             deferred_buttons|=buttons;
-            if(++continuation_turns>=VM_RUNAWAY_TURNS) {
-                // sec.5.2. Not an uncatchable throw: the session ends at a job
-                // boundary, where no JavaScript frame is live, so this guard
-                // cannot skip a finally or strand an await the way the old
-                // wall-clock interrupt does.
-                ESP_LOGE("app","RUNAWAY jobs pending after %u turns",continuation_turns);
-                jsconsole_set_error("JOB QUEUE RUNAWAY");
-                return ESP_ERR_TIMEOUT;
-            }
+            // sec.5.2. Not an uncatchable throw: the session ends at a job
+            // boundary, where no JavaScript frame is live, so this guard
+            // cannot skip a finally or strand an await the way the old
+            // wall-clock interrupt does.
+            if(drain_runaway()) return ESP_ERR_TIMEOUT;
+            continuation_turns++;
             // The display keeps moving: pocketjs_ui_turn_continue() ran the UI
             // core's tick and draw, so `cont` is a real frame to present.
             return present_frame(&cont);
         }
     }
     continuation_turns=0;
+    // The queue is empty, so this is the first moment since the exit() that
+    // pre-L1 would also have acted on it (pocket_app_pump() read the flag
+    // here, ahead of every other pump, and still does everything else it did).
+    if(pocket_app_exit_requested()) app_request_stop();
     buttons|=deferred_buttons; deferred_buttons=0;
     // Watch deliveries before the frame, so a listener that updates a node and
     // the frame that draws it are the same turn rather than one apart.
     // First: it posts the sleeps that came due, so pocket_api_pump() settles
     // them this turn, and it is where Starting becomes Running.
     pocket_app_pump();
+    // The keystroke that queued these arrived before this turn (main.c hands
+    // the field its key ahead of app_tick), so the guest hears about it ahead
+    // of anything that happened during the turn -- and, unlike a JS_Call made
+    // from the keystroke itself, on a turn whose job queue is empty.
+    pocket_text_pump();
     pocket_imu_pump();
     pocket_io_pump();
     // Before pocket_api_pump(): what the PC answered this turn is posted here

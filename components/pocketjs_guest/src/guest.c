@@ -70,6 +70,15 @@ struct pocketjs_guest {
   bool jobs_pending;
   uint32_t yields;
   uint32_t continuations;
+  /* What ONE LOGICAL DRAIN has cost so far (sec.5.2): summed over the drain
+   * the budget cut and every continuation of it, cleared the moment the queue
+   * empties. The runaway guard is a predicate on these two and on nothing
+   * else -- not on a turn count, which measures the machine's contention
+   * rather than the guest's appetite. `drain_us` stays 0 in count mode, where
+   * the clock is never read, and the job total is what catches a runaway
+   * there. */
+  int64_t drain_us;
+  uint64_t drain_jobs;
   /* One bit, not a count: counting what JS_FreeRuntime discards would need a
    * hook in JS_EnqueueJob, which is a VM change L1 is not allowed to make. */
   bool jobs_dropped;
@@ -239,11 +248,18 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
   const vm_drain_status_t status =
       vm_sched_drain(guest->runtime, &guest->budget, &ran, &context);
   guest->jobs += ran;
+  guest->drain_us += guest->budget.elapsed;
+  guest->drain_jobs += ran;
   guest->jobs_pending = (status == VM_DRAIN_YIELDED);
   if (status == VM_DRAIN_THREW) {
     if (context != NULL) {
       js_std_dump_error(context);
     }
+    /* The session ends on this path (main.c end_run), and the queue that is
+     * left is the next drain's, not this logical one's: start the count over
+     * rather than charge the survivor for it. */
+    guest->drain_us = 0;
+    guest->drain_jobs = 0;
     return ESP_FAIL;
   }
   if (status == VM_DRAIN_YIELDED) {
@@ -252,6 +268,10 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
      * its native work and comes back through pocketjs_guest_continue(). */
     return ESP_OK;
   }
+  /* The queue emptied: this logical drain is over and the next one starts at
+   * zero. Cleared before the report, which can itself fail the turn. */
+  guest->drain_us = 0;
+  guest->drain_jobs = 0;
   return report_rejections(guest);
 }
 
@@ -505,6 +525,14 @@ void pocketjs_guest_budget(pocketjs_guest_t *guest, const vm_budget_t *budget) {
 
 bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest) {
   return guest != NULL && guest->jobs_pending;
+}
+
+void pocketjs_guest_drain_total(const pocketjs_guest_t *guest, int64_t *us,
+                                uint64_t *jobs) {
+  if (us != NULL)
+    *us = guest != NULL ? guest->drain_us : 0;
+  if (jobs != NULL)
+    *jobs = guest != NULL ? guest->drain_jobs : 0;
 }
 
 /* The continuation drain of sec.2.1. It is the SAME drain as the one the
