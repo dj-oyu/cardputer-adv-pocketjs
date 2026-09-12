@@ -544,6 +544,11 @@ static void paint(const screen_ops_t *s) {
 // (device)) cannot keep up anyway.
 #define VM_MIN_PERIOD_MS 8
 
+// Start of the display period the current frame() belongs to -- i.e. when the
+// previous frame()'s turn finished waiting. Continuation turns run inside it
+// without restarting it; see the rule at the bottom of ui_task().
+static int64_t period_began;
+
 static void ui_task(void *arg) {
     (void)arg;
     // Before anything can post: every producer of a completion runs on a task
@@ -707,7 +712,7 @@ static void ui_task(void *arg) {
 
         last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
         int held=(int)(last_frame_us/1000);
-        unsigned cap = running ? 33 : SCREENS[screen].frame_ms;
+        unsigned cap = running ? VM_DISPLAY_PERIOD_MS : SCREENS[screen].frame_ms;
         unsigned rest = (unsigned)held<cap?cap-held:1;
 #ifdef CONFIG_POCKET_VM_SCHED
         // The one wait L1 can actually replace (vm-L1-design sec.4.1: this task
@@ -718,16 +723,66 @@ static void ui_task(void *arg) {
         // it removes is the "up to one frame period" term of completion
         // latency, and nothing else.
         if(running) {
-            unsigned floor_ms = (unsigned)held<VM_MIN_PERIOD_MS?VM_MIN_PERIOD_MS-(unsigned)held:0;
-            if(floor_ms) {
-                // Not interruptible: this is the rate limit, not the cap.
-                vTaskDelay(pdMS_TO_TICKS(floor_ms));
-                rest = rest>floor_ms ? rest-floor_ms : 0;
+            // THE RULE (docs/vm-L1-report.md sec.2.4): the display period
+            // paces PICTURES, so it is charged once per frame() and from the
+            // start of that frame's period -- not once per turn. A turn that
+            // only drains jobs shows nothing anyone is waiting for, so it
+            // waits the job budget's floor instead, and the time it spent
+            // counts towards the period of the frame() it works towards.
+            //
+            // Charging every turn was the regression, and it was the WAIT and
+            // not the JavaScript: measured (device) on async_generator, three
+            // continuations of 8 ms held + 23 ms waited, then one ordinary
+            // turn -- 125 ms for one picture, 7.72 fps against legacy's 28.20,
+            // with the same 62 jobs at the same 0.49 ms each.
+            //
+            // The alternatives, and why they lose:
+            //   - keep the period on continuations: the regression above.
+            //   - no wait at all on a continuation: this task is priority 5
+            //     and a long drain would hold its core for the whole drain,
+            //     starving everything below it. The runaway guard would not
+            //     catch it either -- that guard charges drain time, which is
+            //     honest work here. Hence a floor that is never zero.
+            //   - drop the display period and let frame() run at the 8 ms
+            //     floor: four transfers per period on a bus that needs 7.7 ms
+            //     for one (measured (device)), and every app that counts
+            //     frame() calls as a clock changes speed.
+            //   - charge the period from THIS turn's start (the obvious
+            //     one-line version): the continuations already spent inside
+            //     the period get charged to it twice, and the measured result
+            //     is 17 fps where this rule gives 23.
+            const bool cont=app_turn_continued();
+            if(cont) {
+                // Never zero. At CONFIG_FREERTOS_HZ=1000 one tick is a real
+                // yield, and a yield is all a turn that just ran 8 ms of jobs
+                // owes the rest of the machine.
+                rest = (unsigned)held<VM_MIN_PERIOD_MS?VM_MIN_PERIOD_MS-(unsigned)held:1;
+                vTaskDelay(pdMS_TO_TICKS(rest));
+            } else {
+                unsigned since=(unsigned)((esp_timer_get_time()-period_began)/1000);
+                unsigned floor_ms = (unsigned)held<VM_MIN_PERIOD_MS?VM_MIN_PERIOD_MS-(unsigned)held:0;
+                if(floor_ms) {
+                    // Not interruptible: this is the rate limit, not the cap.
+                    vTaskDelay(pdMS_TO_TICKS(floor_ms));
+                    since+=floor_ms;
+                }
+                rest = since<VM_DISPLAY_PERIOD_MS ? VM_DISPLAY_PERIOD_MS-since : 0;
+                // A completion posted by another task or an ISR cuts the frame
+                // cap short instead of waiting out the period; the measured
+                // (device) cost it removes is the "up to one frame period"
+                // term of completion latency, and nothing else.
+                if(rest) vm_wake_wait(pdMS_TO_TICKS(rest));
+                // The next period starts where this one's wait ended, so the
+                // continuations that follow are charged to it exactly once.
+                period_began=esp_timer_get_time();
             }
-            if(rest) vm_wake_wait(pdMS_TO_TICKS(rest));
             continue;
         }
 #endif
+        // No guest, so no display period is running: the next one starts
+        // when a frame() first does, and this keeps a stale `period_began`
+        // from making the first frame of a new session skip its wait.
+        period_began=esp_timer_get_time();
         vTaskDelay(pdMS_TO_TICKS(rest));
     }
 }

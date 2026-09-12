@@ -58,6 +58,11 @@ static vm_budget_t budget;
 static uint32_t deferred_buttons;
 // Consecutive turns that ended with the queue still non-empty (sec.5.2).
 static unsigned continuation_turns;
+// What the LAST app_tick() was, read by main.c to decide what to wait for.
+static bool turn_continued;
+// When present_frame() last reached the panel. Only the continuation path
+// reads it; see there for why the display, unlike the turn, is still paced.
+static int64_t last_present_us;
 static unsigned frames;
 static bool redraw;
 static double render_sum, present_sum, kernel_sum, turn_sum;
@@ -347,7 +352,8 @@ esp_err_t app_start_test(char test) {
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     atomic_store(&stop_requested,false); frames=0;
-    deferred_buttons=0; continuation_turns=0;
+    deferred_buttons=0; continuation_turns=0; turn_continued=false;
+    last_present_us=0;
     // Cleared with them: a start that fails before a guest exists reaches
     // app_stop() with guest already NULL, and a stale latch would then blame
     // this session for the previous one's queue.
@@ -609,6 +615,8 @@ esp_err_t app_start_source(const char *prelude, size_t prelude_length,
     return err;
 }
 
+bool app_turn_continued(void) { return turn_continued; }
+
 const char *app_error(void) {
     const char *e=jsconsole_error();
     return e?e:"";
@@ -623,6 +631,7 @@ esp_err_t app_tick(uint32_t buttons) {
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
     const bool leaving=(buttons&0x2000)!=0;
+    turn_continued=false;
     arm_turn(buttons);
     // L1 sec.2.1: a turn that ended with jobs queued finishes them HERE, ahead
     // of every pump. Until the queue is empty no host call reaches JavaScript
@@ -658,8 +667,22 @@ esp_err_t app_tick(uint32_t buttons) {
             // wall-clock interrupt does.
             if(drain_runaway()) return ESP_ERR_TIMEOUT;
             continuation_turns++;
+            turn_continued=true;
             // The display keeps moving: pocketjs_ui_turn_continue() ran the UI
             // core's tick and draw, so `cont` is a real frame to present.
+            //
+            // At most once per display period, though. main.c no longer
+            // charges a continuation turn a frame period (sec.2.4), so these
+            // now arrive every ~9 ms, and presenting each one would put four
+            // pictures a period on a bus that needs 7.7 ms for one (measured
+            // (device)). Skipping costs no drawing: the damage plan is
+            // computed against the last COMMITTED target, so everything these
+            // turns drew is still in the next present -- this drops frames,
+            // it does not lose pixels. The period is kept rather than dropped
+            // so that a drain long enough to need many continuations still
+            // animates, which is the whole reason a continuation presents.
+            if(esp_timer_get_time()-last_present_us < VM_DISPLAY_PERIOD_MS*1000)
+                return ESP_OK;
             return present_frame(&cont);
         }
     }
@@ -731,6 +754,7 @@ esp_err_t app_tick(uint32_t buttons) {
 // need to cause.
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
     esp_err_t e;
+    last_present_us=esp_timer_get_time();
     pocketjs_rgb565_damage_plan_t plan={.struct_size=sizeof(plan)};
     e=pocketjs_rgb565_prepare(renderer,target,frame,&plan);if(e)return e;
     pet_assets_tick();

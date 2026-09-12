@@ -54,6 +54,17 @@ esp_err_t app_start_overlay(const char *source, size_t length);
 esp_err_t app_overlay_tick(void);
 void app_force_redraw(void);
 esp_err_t app_tick(uint32_t buttons);
+// The display period the shell paces a RUNNING guest at (main.c's ui_task),
+// and the ceiling on how often a continuation turn reaches the panel
+// (app_session.c). One constant because the two are the same decision seen
+// from both ends: how often a person may be shown a new picture.
+#define VM_DISPLAY_PERIOD_MS 33
+// True when the turn app_tick() just ran was a CONTINUATION that returned with
+// the job queue still non-empty -- a turn with no frame() and, after the
+// throttle in app_session.c, usually no transfer either. main.c asks because
+// such a turn has nothing to present and so must not be charged a display
+// period before the next one (docs/vm-L1-report.md sec.2.4).
+bool app_turn_continued(void);
 void app_stop(void);
 void app_request_stop(void);
 // Swap the predicate QuickJS's single interrupt slot answers with
