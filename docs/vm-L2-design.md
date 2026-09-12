@@ -97,8 +97,8 @@ G1・G5・G6 は L2a/L2b/L2c のどれとも独立に着手できる。**実装�
 | N1 | 正規表現マッチ | 無し（入力とパターン次第） | `lre_check_timeout`（`quickjs.c:50400-50406`）は `interrupt_counter` を経由せず `rt->interrupt_handler` を**無条件に直接**呼ぶ。真を返すと `js_regexp_exec` が `JS_ThrowInterrupted` する箇所が2つ（`:50531-50532`、`:50745-50746`）。**opcode 確認の完全な外側にある、既存の唯一の別系統**（台帳03 fact 36、台帳04） |
 | N2 | ネイティブ関数だけで完結する処理 | 無し | `js_call_c_function` 系の呼び出し経路に `js_poll_interrupts` が**1つも無い**（grep 確認）。JS コールバックを介さない大きな `JSON.stringify` などはここに入る |
 | N3 | `for-in` の1ステップ | オブジェクトの `prop_count` / 配列の `array_length` | `js_for_in_next`（`quickjs.c:17054-17118`）の内部に `for (;;)`（`:17073-17108`）があり、非 enumerable なプロパティと `JS_ATOM_NULL` を**中断確認なしに読み飛ばし続ける**（`:17089`）。削除済みプロパティ（`JS_HasProperty` が 0）でも継続する。**上限は有限だが、1回の `OP_for_in_next` が全プロパティ数に比例して長くなりうる** |
-| N5 | 関数プロローグ（`new_target` をローカルへ写すまで） | 固定長・短い | §5.2 の条件。ここで中断しないなら `new_target` を保存しなくてよい。§5.3-3 |
 | N4 | パース | ソース長 | direct eval（`JS_EvalObject` → `__JS_EvalInternal` → `js_parse_program`、`quickjs.c:38358`）のパース段。実行段は `JS_CallFree`（`:38242`）で通常の `JS_CallInternal` に戻るので既存機構に乗る。起動時パースと同種 |
+| N5 | 関数プロローグ（`new_target` をローカルへ写すまで） | 固定長・短い | §5.2 の条件。ここで中断しないなら `new_target` を保存しなくてよい。§5.3-3 |
 
 **届く経路として決着したもの:**
 
