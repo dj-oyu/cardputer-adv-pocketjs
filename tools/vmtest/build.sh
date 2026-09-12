@@ -4,6 +4,14 @@
 #   tools/vmtest/build.sh           # asan (default)
 #   tools/vmtest/build.sh o2        # -O2, for timing
 #   tools/vmtest/build.sh all
+#   tools/vmtest/build.sh asan-alloca   # CONFIG_POCKET_VM_SEGFRAMES off: frames on the C stack
+#   tools/vmtest/build.sh o2-alloca     # (the pre-L2a path; spec sec.12 "revertible")
+#   tools/vmtest/build.sh all-alloca
+#
+# The "-alloca" variants are the same compiler flags without the L2a define.
+# run.sh --variant o2-alloca / stack_probe.sh 2000 o2-alloca / test262.py
+# --variant asan-alloca then exercise the old path, which must keep producing
+# what it produced before L2a landed.
 #
 # Unlike tools/build_pocket_text_test.sh, the asan variant instruments QuickJS
 # itself: the code under test from L1 on IS quickjs.c, so a use-after-free in a
@@ -17,7 +25,16 @@ OUT=${VMTEST_OUT:-$ROOT/.cache/vmtest}
 
 build_variant() {
   local variant=$1 cflags
+  # CONFIG_POCKET_VM_SEGFRAMES defaults to y in main/Kconfig.projbuild. The
+  # host has no sdkconfig (the stub below is empty), so a default-y switch
+  # has to be passed by hand or the host would silently test the OTHER path
+  # from the one the firmware ships. Passed as -D, not written into the stub:
+  # the stub is shared by every variant and the -alloca ones must not see it.
+  local segframes="-DCONFIG_POCKET_VM_SEGFRAMES=1"
   case "$variant" in
+    *-alloca) segframes="" ;;
+  esac
+  case "${variant%-alloca}" in
     asan) cflags="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined" ;;
     o2)   cflags="-O2 -g" ;;
     *) echo "unknown variant $variant" >&2; exit 2 ;;
@@ -36,7 +53,7 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes -I $OUT/include -I $GUEST/include"
   local objs=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
@@ -60,5 +77,6 @@ build_variant() {
 
 case "${1:-asan}" in
   all) build_variant asan; build_variant o2 ;;
+  all-alloca) build_variant asan-alloca; build_variant o2-alloca ;;
   *) build_variant "${1:-asan}" ;;
 esac

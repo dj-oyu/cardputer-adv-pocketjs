@@ -9,6 +9,7 @@
 #   tools/vmtest/run.sh --trace            # also write allocator traces
 #   tools/vmtest/run.sh --bless            # (re)write expected/ -- only for NEW files, see README
 #   tools/vmtest/run.sh closures generators  # a subset, by basename
+#   VMTEST_VMRUN_FLAGS="--vm-seg-size 88" tools/vmtest/run.sh   # L2a: sweep the segment size
 #
 # --fair diffs against expected-fair/<name>.txt when that file exists and
 # against expected/<name>.txt when it does not: the whole corpus must come out
@@ -82,6 +83,13 @@ for name in "${names[@]}"; do
      [ ${#extra[@]} -gt 0 ]; then
     flags+=("${extra[@]}")
   fi
+  # VMTEST_VMRUN_FLAGS: extra vmrun flags for a sweep that must not change
+  # the bytes out, appended after everything else so they win. Added for
+  # L2a: `VMTEST_VMRUN_FLAGS="--vm-seg-size 88" run.sh` runs the corpus with
+  # frame segments of 88 bytes, which puts a segment boundary under nearly
+  # every call (docs/vm-L2-design.md sec.1.1 #6); the expected files are
+  # the same, because the segment size is not allowed to be observable.
+  [ -n "${VMTEST_VMRUN_FLAGS:-}" ] && read -r -a envflags <<< "$VMTEST_VMRUN_FLAGS" && flags+=("${envflags[@]}")
   [ $trace = 1 ] && flags+=(--trace "$OUT/traces/$name.trace")
   raw=$OUT/actual-$variant/$name.raw
   # cwd = corpus/ so every label and stack frame names the file by basename.

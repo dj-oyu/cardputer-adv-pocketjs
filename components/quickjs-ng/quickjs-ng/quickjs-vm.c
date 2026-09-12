@@ -9,6 +9,42 @@
 #include <stdlib.h>
 #include <string.h>
 #include "quickjs-vm.h"
+#include "quickjs-vmstack.h"
+
+// ---------------------------------------------------------------- segment stack
+
+int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max)
+{
+    JSVMStack *st = js_vm_stack_get(rt);
+    if (!st)
+        return -1;
+    return js_vm_stack_configure(st, seg_size, cache_max);
+}
+
+void vmtest_vmstack_report(JSRuntime *rt, void *out)
+{
+    FILE *f = out;
+    JSVMStack *st = js_vm_stack_get(rt);
+    if (!st)
+        return;
+#ifdef JS_VM_STACK_STATS
+    // resident_max: bytes the segments held at their peak, header and
+    // alignment slack included -- what the guest heap actually gave up, as
+    // opposed to live_max, the frame bytes that were in use at the peak.
+    size_t overhead = sizeof(JSVMSeg) + (JS_VM_SEG_ALIGN - 1);
+    fprintf(f, "#info vmstack seg_size=%zu align=%d frame_hdr=%zu pushes=%llu depth_max=%u "
+               "live_max=%zu frame_max=%zu seg_live_max=%u seg_mallocs=%llu seg_frees=%llu "
+               "seg_reuses=%llu dedicated=%llu fallbacks=%llu resident_max~=%zu\n",
+            st->seg_size, JS_VM_FRAME_ALIGN, sizeof(JSVMSeg),
+            (unsigned long long)st->pushes, st->depth_max, st->live_bytes_max, st->frame_max,
+            st->seg_live_max, (unsigned long long)st->seg_mallocs,
+            (unsigned long long)st->seg_frees, (unsigned long long)st->seg_reuses,
+            (unsigned long long)st->dedicated, (unsigned long long)st->fallbacks,
+            (size_t)st->seg_live_max * (st->seg_size + overhead));
+#else
+    fprintf(f, "#info vmstack seg_size=%zu (no stats in this build)\n", st->seg_size);
+#endif
+}
 
 // ---------------------------------------------------------------- gaps
 

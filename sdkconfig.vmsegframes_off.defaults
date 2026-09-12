@@ -1,0 +1,9 @@
+# The L2a revert switch (docs/vm-L2-design.md, spec sec.12: every stage stays
+# revertible). With this layered over sdkconfig.defaults JS_CallInternal is the
+# upstream alloca path again -- JSStackFrame and the locals block on the ui
+# task's C stack, no segment state in JSRuntime -- i.e. the pre-L2a firmware.
+# The host equivalent is tools/vmtest/build.sh's "-alloca" variants.
+#
+#   idf.py -B build_l2a_off -D SDKCONFIG=build_l2a_off/sdkconfig \
+#          -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.vmsegframes_off.defaults" build
+CONFIG_POCKET_VM_SEGFRAMES=n

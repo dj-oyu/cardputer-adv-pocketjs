@@ -115,6 +115,12 @@ void vmtest_vm_set_gap_clock(JSRuntime *rt, JSVMClock clock, int on);
 // Prints "#info vm ..." / "#info g5 ..." lines to `out` (a FILE *) and
 // resolves the recorded atoms through `ctx`. Does not disarm.
 void vmtest_vm_report(JSRuntime *rt, JSContext *ctx, void *out);
+// L2a segment stack (quickjs-vmstack.h). Configure only before the first
+// call runs; returns -1 if the build keeps frames on the C stack or a
+// segment already exists. Report prints one "#info vmstack ..." line
+// (nothing when the build has no segment stack).
+int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max);
+void vmtest_vmstack_report(JSRuntime *rt, void *out);
 
 #ifdef __cplusplus
 }

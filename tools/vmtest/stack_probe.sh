@@ -54,7 +54,7 @@ run_at() {
   # collide with it ("Shadow memory range interleaves"), which is an ASan
   # limitation, not a G1 result -- keep asan runs inside the default 8 MiB.
   local stack_cmd="ulimit -s unlimited"
-  [ "$variant" = asan ] && stack_cmd=:
+  case "$variant" in asan*) stack_cmd=: ;; esac   # asan and asan-alloca alike
   (eval "$stack_cmd"; cd corpus && "$VMRUN" --profile host --stack-limit 512M --stack-probe \
       --include "$depth_snippet" ../stack_probe.js) 2>&1
 }

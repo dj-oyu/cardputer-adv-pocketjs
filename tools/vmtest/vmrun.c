@@ -589,6 +589,12 @@ extern void vmtest_vm_set_force_yield(JSRuntime *rt, int on) __attribute__((weak
 extern void vmtest_vm_set_gap_clock(JSRuntime *rt, uint64_t (*clock)(void), int on)
     __attribute__((weak));
 extern void vmtest_vm_report(JSRuntime *rt, JSContext *ctx, void *out) __attribute__((weak));
+// L2a: the segment stack frames live on (quickjs-vmstack.h). --vm-seg-size
+// picks the standard segment before any JS runs; the report line is what
+// decides the size (segments added, peak resident, largest frame).
+extern int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max)
+    __attribute__((weak));
+extern void vmtest_vmstack_report(JSRuntime *rt, void *out) __attribute__((weak));
 
 // ---------------------------------------------------------------- helpers
 
@@ -696,6 +702,7 @@ static void usage(void) {
           "                         turn too, so a completion is seen mid-drain (default: compat)\n"
           "  --stack-probe          install __vmtest_stack_probe(); print '#info stack_probe ...'\n"
           "                         (G1: bytes of C stack per JS recursion level, see stack_probe.sh)\n"
+          "  --vm-seg-size N[K]     L2a: standard frame-segment payload (default: the build's)\n"
           "  --host-events          install host.request(k) (a completion recorded at the k-th job\n"
           "                         boundary) and host.exit() (pocket.app.exit)\n"
           "  --time                 print '#info time_ns=...' (eval + drains + frames)\n"
@@ -717,6 +724,7 @@ int main(int argc, char **argv) {
   int frames = 0;
   bool require_frame = false, module = false, strict = false, test262 = false;
   bool force_yield = false, want_gaps = false, want_time = false, want_stats = false;
+  size_t vm_seg_size = 0;  // --vm-seg-size; 0 = whatever the build compiled in
   const char *env_fy = getenv("VMTEST_FORCE_YIELD");
   if (env_fy && *env_fy && strcmp(env_fy, "0") != 0) force_yield = true;
 
@@ -745,6 +753,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--host-events")) host_events = true;
     else if (!strcmp(a, "--fair")) fair_mode = true;
     else if (!strcmp(a, "--stack-probe")) stack_probe_enabled = true;
+    else if (!strcmp(a, "--vm-seg-size")) vm_seg_size = parse_size(NEXT());
     else if (!strcmp(a, "--time")) want_time = true;
     else if (!strcmp(a, "--stats")) want_stats = true;
     else if (!strcmp(a, "--include")) {
@@ -779,6 +788,11 @@ int main(int argc, char **argv) {
   JS_SetMemoryLimit(G.runtime, heap_limit);
   JS_SetMaxStackSize(G.runtime, stack_limit);
   JS_SetRuntimeInfo(G.runtime, "PocketJS ESP-IDF guest");
+  if (vm_seg_size) {
+    // Before any JS runs: the bottom segment is pushed by the first call.
+    if (!vmtest_vmstack_configure || vmtest_vmstack_configure(G.runtime, vm_seg_size, 1) != 0)
+      fprintf(stderr, "vmrun: note: --vm-seg-size ignored, this VM keeps frames on the C stack\n");
+  }
   // The guest always installs one; it answers "no" until app_stop() bumps the
   // epoch. Installed here so js_poll_interrupts pays the same callback cost.
   JS_SetInterruptHandler(G.runtime, vm_interrupt, &G);
@@ -974,6 +988,9 @@ int main(int argc, char **argv) {
   // (the longest stop-free interval) whenever the VM was armed. Before
   // teardown: the report resolves function-name atoms through the context.
   if (vmtest_vm_report) vmtest_vm_report(G.runtime, G.context, stderr);
+  // "#info vmstack ..." only under --stats: the corpus does not need it and
+  // the info files stay readable.
+  if (want_stats && vmtest_vmstack_report) vmtest_vmstack_report(G.runtime, stderr);
   // The count goes on an #info line, not on the diffed one: run.sh re-runs the
   // whole corpus at several budgets, and the job total at which the guard fires
   // is the first multiple of the budget past the limit. The FACT of the runaway

@@ -55,6 +55,12 @@
 // Not an upstream file -- see its own header comment. Everything it adds to
 // this file is behind `js_vm_armed != NULL`, which only the harness sets.
 #include "quickjs-vm.h"
+// L2a: the segment stack JS_CallInternal pushes its frame + locals on when
+// CONFIG_POCKET_VM_SEGFRAMES is set (default y, main/Kconfig.projbuild;
+// tools/vmtest/build.sh passes it with -D). Not an upstream file -- see its
+// own header comment. With the config off this file is the upstream alloca
+// path, byte for byte on the call path, and JSRuntime keeps its old size.
+#include "quickjs-vmstack.h"
 // File-scope on purpose, not a JSRuntime member: the runtime is allocated
 // from the guest heap, and one more pointer in it moved the outcome of the
 // creeping-OOM corpus case (gc_threshold_device.js -- measured: the original
@@ -364,6 +370,13 @@ struct JSRuntime {
     int shape_hash_size;
     int shape_hash_count; /* number of hashed shapes */
     JSShape **shape_hash;
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    // L2a frame segments (quickjs-vmstack.h). A member, unlike js_vm_armed,
+    // because it is real per-runtime state that must die with the runtime;
+    // the layout concern noted at js_vm_armed does not apply to a build that
+    // already moves every frame into the guest heap.
+    JSVMStack vm_stack;
+#endif
     void *user_opaque;
     void *libc_opaque;
     JSRuntimeFinalizerState *finalizers;
@@ -2002,6 +2015,11 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     ms.malloc_size += rt->mf.js_malloc_usable_size(rt) + MALLOC_OVERHEAD;
     rt->malloc_state = ms;
     rt->malloc_gc_threshold = 256 * 1024;
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    // No segment yet: the first JS call pushes the bottom one, so a runtime
+    // that never runs bytecode never pays for it.
+    js_vm_stack_init(&rt->vm_stack);
+#endif
 
     init_list_head(&rt->context_list);
     init_list_head(&rt->gc_obj_list);
@@ -2381,6 +2399,13 @@ void JS_FreeRuntime(JSRuntime *rt)
     init_list_head(&rt->job_list);
 
     JS_RunGC(rt);
+
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    // After the GC, before the leak accounting: the segments are js_malloc_rt
+    // blocks and would otherwise be counted as leaked by the malloc_size
+    // check at the end. No frame can be live here (asserted inside).
+    js_vm_stack_free(rt, &rt->vm_stack);
+#endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
     /* leaking objects */
@@ -6529,6 +6554,16 @@ JSVMState *js_vm_state(JSRuntime *rt)
 {
     (void)rt;   // one armed state per process, see js_vm_armed
     return js_vm_armed;
+}
+
+JSVMStack *js_vm_stack_get(JSRuntime *rt)
+{
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    return &rt->vm_stack;
+#else
+    (void)rt;
+    return NULL;
+#endif
 }
 
 JSVMState *js_vm_arm(JSRuntime *rt, int on)
@@ -18330,7 +18365,13 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     JSContext *ctx;
     JSObject *p;
     JSFunctionBytecode *b;
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    // L2a: the frame lives in a segment (or, on the generator path, in the
+    // JSAsyncFunctionState); nothing of it is on this C frame any more.
+    JSStackFrame *sf;
+#else
     JSStackFrame sf_s, *sf = &sf_s;
+#endif
     uint8_t *pc;
     int opcode, arg_allocated_size, i;
     JSValue *local_buf, *stack_buf, *var_buf, *arg_buf, *sp, ret_val, *pval;
@@ -18414,9 +18455,37 @@ not_a_function:
     alloca_size = sizeof(JSValue) * (arg_allocated_size + b->var_count +
                                      b->stack_size) +
                   sizeof(JSVarRef *) * b->var_ref_count;
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    // Two limits now, each with its own error, because they are two
+    // different resources:
+    //  - The C stack. JS_CallInternal still recurses in C (L2b removes
+    //    that), so the JS_SetMaxStackSize check stays; it just no longer
+    //    subtracts an alloca that is not coming. Overflow is the RangeError it
+    //    always was.
+    //  - The guest heap, which is where the frame goes. A refused push means
+    //    js_malloc_rt said no -- JS_SetMemoryLimit, or the allocator -- and
+    //    that is reported as out-of-memory, the same signal async_func_init
+    //    already gives when a generator's heap frame cannot be allocated, and
+    //    the same one the app would have seen from the next object it made.
+    //    Calling it a stack overflow would name the wrong resource: on the
+    //    board the 20 KiB task stack (~50 levels, spec sec.14.3) trips long
+    //    before 144 KiB of heap could, so a heap-refused frame is nearly
+    //    always a full heap, not deep recursion. The fallback in
+    //    js_vm_stack_push_slow keeps the boundary where alloca had it: the
+    //    call fails only when the frame itself does not fit.
+    if (js_check_stack_overflow(rt, 0)) {
+        return JS_ThrowStackOverflow(caller_ctx);
+    }
+    sf = js_vm_stack_push(rt, &rt->vm_stack, sizeof(JSStackFrame) + alloca_size);
+    if (unlikely(!sf)) {
+        return JS_ThrowOutOfMemory(caller_ctx);
+    }
+    local_buf = (JSValue *)(sf + 1);
+#else
     if (js_check_stack_overflow(rt, alloca_size)) {
         return JS_ThrowStackOverflow(caller_ctx);
     }
+#endif
 
     sf->is_strict_mode = b->is_strict_mode;
     arg_buf = (JSValue *)argv;
@@ -18424,7 +18493,9 @@ not_a_function:
     sf->cur_func = unsafe_unconst(func_obj);
     var_refs = p->u.func.var_refs;
 
+#ifndef CONFIG_POCKET_VM_SEGFRAMES
     local_buf = alloca(alloca_size);
+#endif
     if (unlikely(arg_allocated_size)) {
         int n = min_int(argc, b->arg_count);
         arg_buf = local_buf;
@@ -21063,6 +21134,25 @@ done:
         }
     }
     js_vm_pop_frame(rt, sf);
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    // Last, after close_var_refs has detached every JSVarRef that pointed
+    // into the block and after the pop hook has read sf->prev_frame: the
+    // block is dead the moment this returns. "Did this call push" is asked
+    // of the segment stack itself (is sf its top block?) because nothing
+    // else here says so reliably: `flags` is reused as a scratch variable by
+    // several opcodes above (OP_define_field, OP_for_of_start, ...), and
+    // b->func_kind does not say how the frame was ENTERED -- a direct eval
+    // in module code is compiled as an ASYNC function (__JS_EvalInternal)
+    // yet called on the normal path, so it pushed here and then took the
+    // done_generator: branch. Keyed on func_kind, that block stayed pushed
+    // and JS_FreeRuntime asserted (Test262 language/eval-code/direct/
+    // export.js found it). A C local would record it too, but costs a
+    // spill slot per level (measured: G1 528 -> 544 B/call); the range test
+    // is two compares on state already in cache. The generator path (frame
+    // in a JSAsyncFunctionState) never lies inside a segment.
+    if (js_vm_stack_holds(&rt->vm_stack, sf))
+        js_vm_stack_pop(rt, &rt->vm_stack, sf);
+#endif
     return ret_val;
 }
 

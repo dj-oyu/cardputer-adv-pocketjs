@@ -50,6 +50,34 @@ menu "Pocket VM (L0 measurement probes)"
 
             Measure the cost with tools/memlog.py rather than assuming it.
 
+    config POCKET_VM_SEGFRAMES
+        bool "JS frames in runtime-owned segments, not on the C stack (L2a)"
+        default y
+        help
+            docs/quickjs-freertos-vm-spec.md sec.7 L2a, docs/vm-L2-design.md.
+            On, JS_CallInternal takes its JSStackFrame and the block that
+            used to be alloca()'d (arguments, locals, operand stack, var_refs)
+            from a bump-allocated segment chain the runtime owns
+            (components/quickjs-ng/quickjs-ng/quickjs-vmstack.h). Segments come
+            from the guest heap through js_malloc_rt, so they count against
+            JS_SetMemoryLimit; one 4 KiB segment stays resident from the first
+            call to JS_FreeRuntime, a frame that does not fit chains another,
+            and a frame larger than a segment gets one of its own.
+
+            What this changes for an app: per JS call the ui task's 20 KiB C
+            stack loses the frame (48 B) and the locals block, keeping only
+            JS_CallInternal's own C frame -- C recursion itself is still
+            there (that is L2b), so deep recursion still ends in the same
+            RangeError from JS_SetMaxStackSize; a frame the heap refuses is
+            an InternalError "out of memory", the error a generator's heap
+            frame already produced. Generator / async frames are untouched.
+
+            Off, JS_CallInternal is the upstream alloca path and JSRuntime
+            has no segment state: the pre-L2a behaviour exactly, which is
+            what spec sec.12 means by every stage being revertible. The host
+            harness builds the same switch as tools/vmtest/build.sh
+            "-alloca" variants.
+
     config POCKET_VM_FAIR
         bool "Fair ordering: run the pumps on a continuation turn too"
         default n
