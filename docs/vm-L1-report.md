@@ -177,7 +177,7 @@ python tools\memlog.py --map build_l1_dev\cardputer_pocketjs.map --port COM3 --c
 
 ### 5.3 clockbench の結論が取り込まれていない
 
-**2026-09-12 に §8 で決着した**（pin は採用 = core 1、CCOUNT と毎ジョブ読みは不採用、いずれも実測(device)）。以下は決着前の記述として残す。
+**2026-09-12 に §8 で決着した**（pin は採用 = core 1、毎ジョブ読み（`VM_JOB_STRIDE=1`）は採用、CCOUNT は不採用。いずれも実測(device)）。以下は決着前の記述として残す。
 
 `vm/l1-clockbench`（[vm-l1-clock.md](vm-l1-clock.md)）は実測(device)で 3 つの結論を出しているが、**`vm/l1-host-sched` には 1 つも入っていない**（ブランチは未マージ、`git merge-base --is-ancestor` で確認）。
 
@@ -191,6 +191,10 @@ python tools\memlog.py --map build_l1_dev\cardputer_pocketjs.map --port COM3 --c
 
 ### 5.4 実機の状態そのもの
 
+**解消済み（2026-09-12）。** 実機は COM3 に戻り、§8 の測定を経て現在は `build_l1_ship`
+（`sdkconfig.defaults` のみ、プローブ無し、`CONFIG_POCKET_UI_TASK_CORE=1`）が載っている。
+以下は解消前の記述。
+
 実機には `build_bench_clock`（`CONFIG_POCKET_VM_L1_CLOCKBENCH=y`、pin 無し）が載ったまま素のビルドへ戻せていない（[vm-l1-clock.md](vm-l1-clock.md) §5）。**L1 の測定を始める前に、まず素のビルドへ戻す必要がある。**
 
 ---
@@ -203,7 +207,7 @@ python tools\memlog.py --map build_l1_dev\cardputer_pocketjs.map --port COM3 --c
 
 2. **出荷時定数の承認。** `VM_TURN_BUDGET_US=8000` / `VM_JOB_STRIDE=4` / `VM_JOB_FLOOR=8` / `VM_JOB_BACKSTOP=64` / `VM_LEAVE_BUDGET_US=50000` / `VM_LEAVE_BACKSTOP=256` / `VM_RUNAWAY_US=250000` / `VM_RUNAWAY_JOBS=100000` / `VM_MIN_PERIOD_MS=8`。L0 §2.2 の提案（件数 16、時間 8 ms、遅延 p95 8 ms / 最大 20 ms、DIRAM +8 KiB、低下 +5% 以内）を L1 がどう解釈したかは設計 §1.2 にある。**遅延の上限（p95 8 ms / 最大 20 ms）は互換モードでは達成できない**（resolve が継続ターン中は保留されるため）ので、この提案値を L1 に対して適用するのか、L2 以降の目標に送るのかを決める必要がある。
 
-3. **時計の決定（§5.3）。決定済み — §8 を参照（pin は採用、CCOUNT と毎ジョブ読みは不採用、いずれも実測(device)による）。** 以下は決定前の記述。clockbench の 3 結論（CCOUNT・毎ジョブ読み・ui タスク pin）を L1 に取り込むか。取り込むなら `vm/l1-clockbench` のマージ順と、`vm_budget_t` の単位変更を含めた作業になる。取り込まないなら、その判断（systimer 833 ns × 1/4 件を許容する）を設計書に書き留める。**どちらにせよ、`vm/l1-clockbench` の pin ビルド実行時比較が未完成であることは実機復旧後に片付ける必要がある。**
+3. **時計の決定（§5.3）。決定済み — §8 を参照（pin は採用 = core 1、毎ジョブ読みは採用、CCOUNT は不採用。いずれも実測(device)による）。** 以下は決定前の記述。clockbench の 3 結論（CCOUNT・毎ジョブ読み・ui タスク pin）を L1 に取り込むか。取り込むなら `vm/l1-clockbench` のマージ順と、`vm_budget_t` の単位変更を含めた作業になる。取り込まないなら、その判断（systimer 833 ns × 1/4 件を許容する）を設計書に書き留める。**どちらにせよ、`vm/l1-clockbench` の pin ビルド実行時比較が未完成であることは実機復旧後に片付ける必要がある。**
 
 4. **`deferred_buttons` の融合（§5.2-1）をどうするか。** (a) 受け入れて文書化する、(b) キュー化する（離鍵フレームの対を作り直す）、(c) 継続ターン中は最初の 1 つだけ保持し残りを捨てる。影響を受けるのは「継続ターンが続くほど忙しいアプリ」だけで、現状そのようなアプリは F 型のプローブしかない。
 
@@ -264,8 +268,11 @@ $ git -C C:\devs\m5stack\cardputer-adv-pocketjs-vm status --short
 §5.3 と §6-3 が残した「clockbench の 3 結論を取り込むか」を実機で測って決めた。
 [vm-l1-clock.md](vm-l1-clock.md) §2 の「pin したビルドの実行時コストは未測定」も
 ここで埋まっている。測定はすべて `CONFIG_POCKET_VM_PROBE=y` + `tools/vm_l0_capture.py`
-（ワークロード A/D/F × 条件 base/audio/all × 反復 2 × 15 秒）と、ホーム画面の
-`PERF` 行を 12 秒のウォームアップ後 60 秒プールしたもの。
+（配置の比較はワークロード A/D/F × 条件 base/audio/all、時計と stride の比較は
+ジョブの重い D/F × base/all、いずれも反復 2 × 15 秒）と、ホーム画面の
+`PERF` 行を 12 秒のウォームアップ後 60 秒プールしたもの。**決定の結果は
+`CONFIG_POCKET_UI_TASK_CORE=1` / `CONFIG_POCKET_VM_CCOUNT=n` / `VM_JOB_STRIDE=1`** で、
+実機検査（§8.5）はその組み合わせの素のビルドで走らせている。
 
 **3 つの配置は同じ 1 本のバイナリ族**で、`xTaskCreatePinnedToCore()` の即値だけが違う
 （`main.c` の呼び出し口は 1 つ）。静的 DIRAM は 3 つとも **119,788 B でバイト一致**。
@@ -312,6 +319,7 @@ fps でどちらが速いとは言わない。**分離できたのは `send` と
 | CCOUNT, stride 4 | 739 / 865 / 1,046 | 4,056 / 6,551 / 6,844 |
 | esp_timer, stride 1 | 731 / 858 / 1,035 | 3,862 / 4,184 / 4,877 |
 | CCOUNT, stride 1 | 738 / 873 / 1,056 | 3,806 / 4,432 / 4,818 |
+| esp_timer, stride 1, **floor 0**（検査専用、出荷しない） | 729 / 900 / 1,060 | 4,728 / 6,736 / 7,041 |
 
 **時計を替えても drain は動かない。** stride 4 でも stride 1 でも、CCOUNT と
 esp_timer の差は promise_chain で **+8 µs（CCOUNT が遅い側）**、async_generator で
@@ -328,7 +336,8 @@ esp_timer の 833 ns（実測、vm-l1-clock.md §1）を掛けて 7.5 µs / 27.5
 ### 8.3 決定
 
 1. **`ui_task` を core 1 に pin する（採用）。** `CONFIG_POCKET_UI_TASK_CORE` の既定を
-   `1` にした。実測で core 1 は無 pin と区別できず（JS ターン中央値 0.1% 以内、
+   `1` にした。実測で core 1 は無 pin と区別できない（sync_loop と promise_chain の
+   ターン中央値は 0.1% 以内、async_generator は 1.5〜2% で反復間ばらつきと同程度、
    転送 0.04% 以内、DIRAM 0 B）、core 0 は 5.6〜15.6% 高い。無 pin は「OS が選ぶ」
    ＝将来の負荷次第で core 0 に載りうる側なので、測って安い方を固定する。
    これは**時計とは独立に成り立つ判断**で、CCOUNT を採らなくても残る。
@@ -340,10 +349,29 @@ esp_timer の 833 ns（実測、vm-l1-clock.md §1）を掛けて 7.5 µs / 27.5
    結合を足さない。** clockbench の「無料だからやる」は読み取りコストの比（33 倍）を
    根拠にしていたが、その比が drain に現れないことがここでの実測。
 
-3. **`VM_JOB_STRIDE` は 4 のまま**（この課題では変えない）。ただし §8.2 の表は
-   stride 1 が async_generator の drain p95 を **6,720 → 4,184 µs（−38%）**、
-   最大を 7,144 → 4,877 µs に縮めることを示している。これは時計の費用ではなく
-   **予算がより早く効くという挙動の差**で、時計の決定とは別の問題。§9 に回す。
+3. **`VM_JOB_STRIDE` を 1 にする（採用）。** clockbench の 3 結論のうち
+   「毎ジョブ読む」だけは実測が支持した — ただし clockbench の理由（読み取りが安いから）
+   ではなく、**予算の超過が実際に縮むから**である。
+
+   | ワークロード / 条件 | stride 4（drain 中央値 / p95 / 最大 µs） | stride 1 | 差 |
+   | --- | --- | --- | --- |
+   | promise_chain / base | 730 / 897 / 1,053 | 731 / 858 / 1,035 | 変化なし |
+   | promise_chain / all | 730 / 1,104 / 13,210 | 728 / 1,170 / 13,115 | 変化なし |
+   | async_generator / base | 4,138 / 6,720 / 7,144 | 3,862 / **4,184** / **4,877** | **p95 −38%、最大 −32%** |
+   | async_generator / all | 4,424 / 10,964 / 32,982 | 4,429 / 12,377 / 34,610 | 差なし（後述） |
+
+   async_generator の p95 が 2.5 ms 縮むのは、このワークロードの高いジョブが
+   中央値のジョブではないからで、stride 4 の 1 区間に高いジョブが 3 つ入りうるという
+   clockbench の (N−1)×0.49 ms がそのまま出ている。**同じ差が CCOUNT 側の 2 本でも
+   再現する**（6,551 → 4,432 µs、−32%）ので、ビルド間ばらつきではない。
+
+   **`all` 条件では効果が消える。** 音・UI・Wi-Fi が載ると drain の尾を決めるのは
+   予算検査の粒度ではなく**プリエンプション**で（p95 11〜12 ms、最大 33 ms はどちらの
+   stride でも同じ）、細かく測っても縮まない。**改善するのは「他に誰も走っていない
+   ときの超過」だけ**であって、混んだ機械の応答性ではない。
+
+   費用は測定に出ない: promise_chain は 1 ターン 41 ジョブで、stride 4→1 の drain は
+   730 → 731 µs（同じ器械が CCOUNT との 8 µs 差は分離している）。
 
 4. **実装は残す。** `CONFIG_POCKET_VM_CCOUNT`（既定 `n`）として入っており、
    `CONFIG_POCKET_UI_TASK_CORE < 0` では**コンパイルを拒否する**（`vm_clock.c` の
@@ -378,19 +406,25 @@ CCOUNT は 32 bit で、240 MHz では 2^32/240e6 ≒ **17.9 秒で一周する*
 | --- | --- |
 | 静的 DIRAM（素の L1 ビルド） | **115,468 B = §2.2 の L1 と 1 バイトも変わらず（+0 B）** |
 | Flash Code | 1,552,644 B（+32 B） |
-| ホーム画面の空きヒープ（`memlog.py --port --check`） | idle_free 277,052 / app_free 120,856 / app_largest 69,632 → `MEMLOG_OK within budget` |
-| ホスト検査 | corpus 33 件 × {asan, o2} × {既定, `--budget-jobs 1/3/7/16`, `--force-yield`} = **12 通りすべて 33 passed, 0 failed** |
-| 実機検査 | `SETTINGS_OK` / `capture_home` 全モード（mode 0/1/2 は 30.0 fps、mode 3 は 20.7–21.7 fps）/ `SMOKE_OK 20`（`MEM (277052, 139264)` が 10 と 20 周で一致 = リーク無し） |
+| ホーム画面の空きヒープ（`memlog.py --port --check`） | idle_free 277,052 / app_free 120,856 / app_largest 69,632 / js 86,356 → `MEMLOG_OK within budget` |
+| ホスト検査（corpus） | 33 件 × {asan, o2} × {既定, `--force-yield`, `--budget-jobs 1/3/7/16`} = **12 通りすべて 33 passed, 0 failed** |
+| ホスト検査（Test262） | `test262.py --variant o2 --force-yield`: **7,501 pass / 194 fail / 0 skip、regressions: 0**（§3 の基準と一致） |
+| 実機検査 | `SETTINGS_OK sound=ON categories, toggles, mute, app-return` / `capture_home` 4 モード全取得（mode 0/1/2 は 29.6–30.3 fps、mode 3 は 19.1–19.7 fps）/ `SMOKE_OK 20`（`MEM (277052, 159744)` が 10 周目と 20 周目でバイト一致 = リーク無し、`FAULT_RECOVERY_OK` 6 件） |
 
-### 8.6 追わなかった調律（§9 の候補）
+### 8.6 開いたまま残る問い
 
-- **`VM_JOB_STRIDE` を 1 にするか**（§8.3-3）。実測では async_generator の drain p95 が
-  38% 縮む。時計の決定とは独立で、スケジューラ定数の調律として別に判断すべき。
-- **`VM_JOB_FLOOR=8` が時間検査を事実上無効にしている疑い。** promise_chain は
-  1 ターン 41 ジョブ・stride 1 で時計を 33 回読むはずだが、esp_timer の stride 4→1 で
-  drain が 730→731 µs と**1 µs しか動かない**（同じ器械が 8 µs の差は分離している）。
-  読み取りが予想どおり起きていれば +27 µs 出るはずで、出ていない以上
-  「1 回の `vm_sched_drain` 呼び出しが floor の 8 件に届いていない」可能性がある（推定）。
-  本当なら、時間予算は一部のワークロードで一度も効いていないことになる。
-  **確かめるには floor を外したビルドを 1 本焼けば足りる**が、floor は時計ではなく
-  スケジューラの定数なので、この課題では踏み込んでいない。
+- **`VM_JOB_FLOOR=8` と、現れない読み取りコスト。** promise_chain は 1 ターン 41 ジョブで、
+  stride 1 なら時計は 33 回読まれるはずで、esp_timer の 833 ns（実測、vm-l1-clock.md §1）
+  なら +27 µs 出るはずである。**出ない**（730 → 731 µs、同じ器械が 8 µs 差は分離している）。
+  floor が効いて「1 回の drain 呼び出しが 8 件に届いていない」のではないかと疑い、
+  **floor を 0 にしたビルドを焼いて確かめた**（§8.2 の最終行）。結果は promise_chain
+  729 µs で、やはり変わらない — floor は理由ではなかった。残る可能性は 2 つで、
+  どちらも未確認（推定）: (a) この文脈での `esp_timer_get_time()` は clockbench が
+  孤立して測った 833 ns よりずっと安い、(b) 41 ジョブが drain の外でも数えられている。
+  **決定には影響しない** — 高い方の時計で測っても費用が出ない、という向きの疑問だから。
+- **floor 0 は async_generator の尾を広げた**（p95 4,184 → 6,736 µs、stride 1 同士の比較）。
+  予算を早く効かせるはずの変更が逆に働いており、floor は「前進保証」以上の役割を
+  持っている可能性がある。スケジューラ定数の問題で、時計とは別に測るべき。
+- **ホーム画面 mode 3 の fps は boot ごとに 27% 動く。** 背景が毎 boot 違う庭を生成する
+  ため。ホームの描画に関する主張をするなら、この器械では**同一 boot 内の比較**か、
+  庭を固定する手段が要る。
