@@ -181,7 +181,13 @@ UNCAUGHT = re.compile(r"^vmrun: uncaught (\S+) (\S+)$", re.M)
 
 
 def judge(meta, flags, code, out):
-    out = "\n".join(l for l in out.splitlines() if not l.startswith("vmrun: note:"))
+    # Driver annotations, not program output. "#info" is the harness-wide
+    # marker for a measurement (run.sh strips the same two prefixes), and from
+    # L1 vmrun prints "#info turns=..." on every run -- a sync test that
+    # deliberately leaves a rejection behind is judged on its rejection reports
+    # alone, so an annotation left in here would fail it.
+    out = "\n".join(l for l in out.splitlines()
+                    if not l.startswith(("vmrun: note:", "#info")))
     if "AddressSanitizer" in out or "runtime error:" in out or "LeakSanitizer" in out:
         return "FAIL", "sanitizer"
     if code < 0 or code >= 128:

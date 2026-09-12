@@ -1,0 +1,4 @@
+arming
+armed
+vmrun: job queue runaway after 30 consecutive continuation turns
+exit=5

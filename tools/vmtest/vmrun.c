@@ -13,6 +13,9 @@
 //   - the rejection tracker and drain_jobs(): same list discipline, same
 //     "report only after the queue is empty" rule, same early return without
 //     reporting when a job itself throws.
+//   - from L1 on, the drain loop itself is not copied but LINKED:
+//     components/pocketjs_guest/src/vm_sched.c is the same object file the
+//     firmware builds. The harness therefore tests the scheduler that ships.
 //   - JS_SetMemoryLimit / JS_SetMaxStackSize with the device's values
 //     (main/app_session.c: 160 KiB heap, 20 KiB stack) unless overridden.
 //
@@ -35,6 +38,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "pocketjs/vm_clock.h"
+#include "pocketjs/vm_sched.h"
 #include "quickjs-libc.h"
 #include "quickjs.h"
 
@@ -202,6 +207,11 @@ typedef struct {
   size_t max_queue_run;  // longest single drain, in jobs
   JSContext *realms[16]; // $262.createRealm contexts, freed before the main one
   int n_realms;
+  // L1: the budget armed once per turn, exactly as app_tick() arms it.
+  vm_budget_t budget;
+  uint64_t turns;          // continuation turns taken, over the whole run
+  unsigned max_run_turns;  // most continuation turns spent on one logical drain
+  bool jobs_dropped;       // the run ended with jobs still queued
 } guest_t;
 
 static guest_t G;
@@ -241,23 +251,11 @@ static void promise_rejection(JSContext *context, JSValueConst promise, JSValueC
   *slot = entry;
 }
 
-// Copied from guest.c drain_jobs(). Returns 0 on ESP_OK, -1 on ESP_FAIL. The
-// report line keeps the guest's wording; the "E pocketjs_guest:" prefix stands
-// in for ESP_LOGE's "E (ticks) pocketjs_guest:" without the timestamp.
-static int drain_jobs(guest_t *guest) {
-  JSContext *context = NULL;
-  int result = 0;
-  size_t run = 0;
-  while ((result = JS_ExecutePendingJob(guest->runtime, &context)) > 0) {
-    guest->jobs++;
-    run++;
-  }
-  if (run > guest->max_queue_run) guest->max_queue_run = run;
-  if (result < 0) {
-    fflush(stdout);
-    if (context != NULL) js_std_dump_error(context);
-    return -1;
-  }
+// Copied from guest.c report_rejections(). Returns 0 on ESP_OK, -1 on
+// ESP_FAIL. The report line keeps the guest's wording; the "E pocketjs_guest:"
+// prefix stands in for ESP_LOGE's "E (ticks) pocketjs_guest:" without the
+// timestamp.
+static int report_rejections(guest_t *guest) {
   bool failed = guest->rejection_tracking_failed;
   guest->rejection_tracking_failed = false;
   size_t pending = 0;
@@ -279,6 +277,131 @@ static int drain_jobs(guest_t *guest) {
     free(entry);
   }
   return failed ? -1 : 0;
+}
+
+// L1 knobs. Defaults reproduce the pre-L1 drain exactly: no limit, no ceiling,
+// so vm_sched_drain() can only return EMPTY or THREW.
+static unsigned budget_jobs;                    // --budget-jobs / --force-yield
+// OFF by default, unlike the firmware (VM_RUNAWAY_TURNS = 30). The guard
+// counts continuation turns, and --budget-jobs 1 turns any honest 200-job
+// drain into 200 of them: on the device that shape is a runaway, in the
+// harness it is the whole point of the flag. The runaway case asks for the
+// guard explicitly with --runaway-turns.
+static unsigned runaway_turns;                  // --runaway-turns
+static unsigned stop_turns;                     // --stop-turns (0 = never)
+static bool host_events;                        // --host-events
+
+static void arm_budget(guest_t *guest) {
+  // Count mode, the only deterministic one on a host: the clock is never read
+  // (limit_us <= 0 switches the time check off inside vm_sched_drain), so the
+  // yield points are a pure function of the program. A time budget on a host
+  // running under ASan would put them wherever the scheduler felt like.
+  vm_budget_begin_full(&guest->budget, 0, budget_jobs ? budget_jobs : 1,
+                       budget_jobs, budget_jobs);
+}
+
+// ------------------------------------------------------- --host-events
+//
+// The device's completion path in miniature: pocket_api_complete() records a
+// completion from outside JS at any moment, and pocket_api_pump() is what
+// settles it -- and the pump does not run on a continuation turn. host.request(k)
+// asks for a completion that becomes ready at the k-th job boundary, and
+// host_pump() settles every ready one, in the order they were requested, only
+// when the queue has actually emptied. Invariant 6 of the design's sec.7: a
+// completion is never lost and never delivered inside somebody else's drain.
+#define HOST_REQUESTS 32
+typedef struct {
+  JSValue resolve, reject;
+  uint64_t due;   // boundary index at which the completion is "recorded"
+  bool live;
+} host_request_t;
+static host_request_t host_requests[HOST_REQUESTS];
+static int n_host_requests;
+static uint64_t boundaries;
+static uint64_t host_delivered;
+
+static JSValue host_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  int64_t k = 0;
+  if (argc > 0 && JS_ToInt64(ctx, &k, argv[0]) < 0) return JS_EXCEPTION;
+  if (n_host_requests >= HOST_REQUESTS) return JS_ThrowInternalError(ctx, "vmrun: too many host requests");
+  JSValue funcs[2];
+  JSValue promise = JS_NewPromiseCapability(ctx, funcs);
+  if (JS_IsException(promise)) return promise;
+  host_request_t *r = &host_requests[n_host_requests++];
+  r->resolve = funcs[0];
+  r->reject = funcs[1];
+  r->due = boundaries + (uint64_t)(k < 0 ? 0 : k);
+  r->live = true;
+  return promise;
+}
+
+static bool host_pump(guest_t *guest) {
+  (void)guest;
+  if (!host_events) return false;
+  bool any = false;
+  for (int i = 0; i < n_host_requests; i++) {
+    host_request_t *r = &host_requests[i];
+    if (!r->live || r->due > boundaries) continue;
+    r->live = false;
+    JSValue seq = JS_NewInt64(G.context, (int64_t)++host_delivered);
+    JSValue done = JS_Call(G.context, r->resolve, JS_UNDEFINED, 1, (JSValueConst *)&seq);
+    JS_FreeValue(G.context, done);
+    JS_FreeValue(G.context, seq);
+    JS_FreeValue(G.context, r->resolve);
+    JS_FreeValue(G.context, r->reject);
+    any = true;
+  }
+  return any;
+}
+
+static void host_requests_free(void) {
+  for (int i = 0; i < n_host_requests; i++)
+    if (host_requests[i].live) {
+      JS_FreeValue(G.context, host_requests[i].resolve);
+      JS_FreeValue(G.context, host_requests[i].reject);
+      host_requests[i].live = false;
+    }
+}
+
+static void install_host(JSContext *ctx) {
+  JSValue o = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, o, "request", JS_NewCFunction(ctx, host_request, "request", 1));
+  JSValue global = JS_GetGlobalObject(ctx);
+  JS_SetPropertyStr(ctx, global, "host", o);
+  JS_FreeValue(ctx, global);
+}
+
+// One host turn: finish whatever the budget cut last time, then -- and only
+// once the queue is EMPTY -- let the host deliver completions, which is the
+// ordering rule of docs/vm-L1-design.md sec.2.1. Returns 0 ok, -1 a job threw
+// or a rejection went unhandled, -5 runaway, -6 stopped with a queue.
+static int run_turn(guest_t *guest) {
+  unsigned run_turns = 0;
+  for (;;) {
+    JSContext *context = NULL;
+    unsigned ran = 0;
+    arm_budget(guest);
+    const vm_drain_status_t status =
+        vm_sched_drain(guest->runtime, &guest->budget, &ran, &context);
+    guest->jobs += ran;
+    boundaries++;  // every return from the drain is one job boundary
+    if (ran > guest->max_queue_run) guest->max_queue_run = ran;
+    if (status == VM_DRAIN_THREW) {
+      fflush(stdout);
+      if (context != NULL) js_std_dump_error(context);
+      return -1;
+    }
+    if (status == VM_DRAIN_YIELDED) {
+      guest->turns++;
+      if (++run_turns > guest->max_run_turns) guest->max_run_turns = run_turns;
+      if (stop_turns != 0 && run_turns >= stop_turns) return -6;
+      if (runaway_turns != 0 && run_turns >= runaway_turns) return -5;
+      continue;  // the continuation drain; nothing host-side runs in between
+    }
+    if (!host_pump(guest)) break;  // queue empty and no completion to deliver
+  }
+  return report_rejections(guest);
 }
 
 // ---------------------------------------------------------------- $262
@@ -343,10 +466,11 @@ static JSValue make_262(JSContext *ctx) {
 
 // ---------------------------------------------------------------- forced yield
 
-// Placeholder for L1/L2: a VM that grows checkpoints defines this symbol and
-// yields at every checkpoint when it is switched on. Weak, so an L0 VM links
-// and the request is reported as unserviced instead of silently ignored. The
-// corpus must print the same bytes with and without it; that is the test.
+// L2 hook: a VM that grows OPCODE checkpoints defines this symbol and yields at
+// every one of them. Weak, so an L1 VM (which has no such checkpoints) links.
+// From L1 on, --force-yield is serviced at job granularity by --budget-jobs 1
+// regardless of whether this symbol exists -- the L1 checkpoint IS the job
+// boundary -- so the request is never unserviced and the note is gone.
 extern void vmtest_vm_set_force_yield(JSRuntime *rt, int on) __attribute__((weak));
 
 // ---------------------------------------------------------------- helpers
@@ -442,10 +566,15 @@ static void usage(void) {
           "  --module               evaluate FILE as a module\n"
           "  --strict               prefix FILE with \"use strict\";\n"
           "  --test262              install $262, report 'vmrun: uncaught <phase> <Name>'\n"
-          "  --force-yield          ask the VM to yield at every checkpoint (L1+; env VMTEST_FORCE_YIELD=1)\n"
+          "  --force-yield          yield at every checkpoint; at L1 that is every job (= --budget-jobs 1)\n"
+          "  --budget-jobs N        L1 count-mode budget: yield after N jobs, resume next turn (0 = off)\n"
+          "  --runaway-turns N      end the run after N consecutive continuation turns (default off)\n"
+          "  --stop-turns N         end the SESSION after N continuation turns, dropping the queue\n"
+          "  --host-events          install host.request(k): a completion recorded at the k-th job boundary\n"
           "  --time                 print '#info time_ns=...' (eval + drains + frames)\n"
           "  --stats                print '#info' allocator/queue statistics\n"
-          "exit: 0 ok, 1 uncaught exception in eval, 2 job threw or unhandled rejection, 3 usage\n");
+          "exit: 0 ok, 1 uncaught exception in eval, 2 job threw or unhandled rejection, 3 usage,\n"
+          "      4 runtime creation failed, 5 job queue runaway\n");
   exit(3);
 }
 
@@ -482,6 +611,10 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--strict")) strict = true;
     else if (!strcmp(a, "--test262")) test262 = true;
     else if (!strcmp(a, "--force-yield")) force_yield = true;
+    else if (!strcmp(a, "--budget-jobs")) budget_jobs = (unsigned)parse_size(NEXT());
+    else if (!strcmp(a, "--runaway-turns")) runaway_turns = (unsigned)parse_size(NEXT());
+    else if (!strcmp(a, "--stop-turns")) stop_turns = (unsigned)parse_size(NEXT());
+    else if (!strcmp(a, "--host-events")) host_events = true;
     else if (!strcmp(a, "--time")) want_time = true;
     else if (!strcmp(a, "--stats")) want_stats = true;
     else if (!strcmp(a, "--include")) {
@@ -539,9 +672,13 @@ int main(int argc, char **argv) {
     JS_FreeValue(G.context, global);
   }
   if (force_yield) {
+    // L1's checkpoint is the job boundary, so the strongest yield this level
+    // can be asked for is "one job per turn". An L2 VM additionally switches
+    // on its opcode checkpoints through the weak symbol above.
+    if (budget_jobs == 0) budget_jobs = 1;
     if (vmtest_vm_set_force_yield) vmtest_vm_set_force_yield(G.runtime, 1);
-    else fprintf(stderr, "vmrun: note: force-yield requested; this VM has no checkpoint hook (L0), running unmodified\n");
   }
+  if (host_events) install_host(G.context);
 
   int status = 0;
   int64_t t0 = now_ns();
@@ -615,7 +752,10 @@ int main(int argc, char **argv) {
       JS_FreeValue(G.context, global);
       const bool has_frame = JS_IsFunction(G.context, frame);
       if (!require_frame || has_frame) {
-        if (drain_jobs(&G) != 0) status = 2;
+        const int r = run_turn(&G);
+        if (r == -5) status = 5;
+        else if (r == -6) status = 0;
+        else if (r != 0) status = 2;
       }
       // A module's evaluation promise: a rejected top-level await is the
       // module equivalent of an uncaught exception.
@@ -625,14 +765,20 @@ int main(int argc, char **argv) {
         dump_exception(G.context, "runtime", test262);
         status = 1;
       }
-      for (int f = 0; f < frames && has_frame; f++) {
+      for (int f = 0; f < frames && has_frame && status != 5; f++) {
+        // The device's rule: frame() is only ever called on a turn that began
+        // with an empty queue (sec.2.1). run_turn() guarantees that -- it does
+        // not return with work pending except on runaway or --stop-turns.
         JSValue r = JS_Call(G.context, frame, JS_UNDEFINED, 0, NULL);
         if (JS_IsException(r)) {
           dump_exception(G.context, "frame", test262);
           if (status == 0) status = 1;
         }
         JS_FreeValue(G.context, r);
-        if (drain_jobs(&G) != 0 && status == 0) status = 2;
+        const int t = run_turn(&G);
+        if (t == -5) status = 5;
+        else if (t == -6) break;   // session ends here, with a queue (sec.3.2)
+        else if (t != 0 && status == 0) status = 2;
       }
       JS_FreeValue(G.context, frame);
     }
@@ -642,6 +788,9 @@ int main(int argc, char **argv) {
   int64_t t1 = now_ns();
 
   fflush(stdout);
+  // Read before teardown, so "#info jobs_dropped" below is the answer for the
+  // run rather than for the runtime that no longer exists.
+  G.jobs_dropped = JS_IsJobPending(G.runtime);
   if (want_time) fprintf(stderr, "#info time_ns=%lld\n", (long long)(t1 - t0));
   if (want_stats) {
     JSMemoryUsage usage;
@@ -657,12 +806,26 @@ int main(int argc, char **argv) {
             (unsigned long long)G.jobs, G.max_queue_run, sizeof(JSValue),
             sizeof(allocation_header_t));
   }
+  // Always printed, not only under --stats: the L1 budget cases read these,
+  // and "#info" lines are excluded from the corpus diff, so they cost nothing
+  // and cannot make an expected file depend on how the budget was set.
+  fprintf(stderr, "#info turns=%llu max_run_turns=%u jobs_dropped=%d\n",
+          (unsigned long long)G.turns, G.max_run_turns, G.jobs_dropped ? 1 : 0);
+  if (status == 5)
+    fprintf(stderr,
+            "vmrun: job queue runaway after %u consecutive continuation turns\n",
+            runaway_turns);
 
   // Same teardown order as pocketjs_guest_destroy().
   if (A.trace) {
     JS_FreeValue(G.context, probe);
     fprintf(A.trace, "# teardown\n");
   }
+  // sec.3.2: what is still queued is discarded UNRUN. JS_FreeRuntime frees the
+  // job arguments (ledger 03 fact 9), so this leaks nothing -- LSan is the
+  // check -- and the leftover rejections below are freed WITHOUT being
+  // reported, because a catch may well have been in one of the dropped jobs.
+  host_requests_free();
   js_std_free_handlers(G.runtime);
   while (G.rejections) {
     rejection_t *entry = G.rejections;

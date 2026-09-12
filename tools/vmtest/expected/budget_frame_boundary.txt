@@ -1,0 +1,10 @@
+step 25
+step 50
+step 75
+step 100
+frame 1
+t 0
+t 25
+frame 2
+frame 3
+exit=0

@@ -30,7 +30,13 @@ build_variant() {
   # rebuilt for nothing.
   [ -f "$OUT/include/sdkconfig.h" ] || echo "/* vmtest host stub: no CONFIG_* set */" > "$OUT/include/sdkconfig.h"
   # QUICKJS_NG_BUILD/_GNU_SOURCE: the same defines components/quickjs-ng/CMakeLists.txt passes.
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -I $OUT/include"
+  # GUEST: from L1 on the harness LINKS the firmware's scheduler
+  # (components/pocketjs_guest/src/vm_sched.c, vm_clock.c) instead of copying
+  # it, so a change to the drain cannot pass here and fail there. Those two
+  # files deliberately include no esp headers; nothing else from that component
+  # is host-compilable.
+  local GUEST=components/pocketjs_guest
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -I $OUT/include -I $GUEST/include"
   local objs=()
   for f in dtoa libregexp libunicode quickjs quickjs-libc; do
     # Headers count too: a changed quickjs-*.h (the VM levels add some) must
@@ -44,7 +50,8 @@ build_variant() {
   done
   wait
   gcc -std=gnu11 $cflags -Wall -Wextra -Werror $defs -I "$QJS" \
-      tools/vmtest/vmrun.c "${objs[@]}" -lm -lpthread -ldl -o "$OUT/vmrun-$variant"
+      tools/vmtest/vmrun.c "$GUEST/src/vm_sched.c" "$GUEST/src/vm_clock.c" \
+      "${objs[@]}" -lm -lpthread -ldl -o "$OUT/vmrun-$variant"
   echo "built $OUT/vmrun-$variant"
 }
 
