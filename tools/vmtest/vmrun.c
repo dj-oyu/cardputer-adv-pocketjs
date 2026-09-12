@@ -305,6 +305,16 @@ static unsigned budget_jobs;                    // --budget-jobs / --force-yield
 static uint64_t runaway_jobs;                   // --runaway-jobs
 static unsigned stop_turns;                     // --stop-turns (0 = never)
 static bool host_events;                        // --host-events
+// --fair: CONFIG_POCKET_VM_FAIR in miniature (main/app_session.c app_tick()).
+// Off is compat ordering, the shipping default: no host call reaches JS until
+// the queue is empty. On, a continuation turn whose drain yielded with work
+// still queued runs the pump AFTER that drain, so a completion recorded while
+// the drain was running is settled at a job boundary in the middle of one
+// logical drain -- and its reaction is APPENDED, landing behind every job
+// already queued, which is why FIFO inside the queue is unaffected. The exit
+// check is deliberately NOT made fair (it arrives as an interrupt and would
+// cut the drain); neither is frame().
+static bool fair_mode;
 
 static void arm_budget(guest_t *guest) {
   // Count mode, the only deterministic one on a host: the clock is never read
@@ -435,9 +445,18 @@ static int run_turn(guest_t *guest) {
         guest->runaway_jobs = drain_jobs;
         return -5;
       }
-      // Nothing host-side runs in between, and that includes the exit check:
-      // sec.2.1's rule is that no host call reaches JavaScript until the queue
-      // is empty, and an exit() honoured here reaches it through the interrupt.
+      // Compat ordering: nothing host-side runs in between, and that includes
+      // the exit check -- sec.2.1's rule is that no host call reaches
+      // JavaScript until the queue is empty, and an exit() honoured here
+      // reaches it through the interrupt.
+      //
+      // Fair ordering runs the pump here and only here: after the drain has
+      // had its budget, and only on a boundary where work is still queued,
+      // which is precisely the boundary compat ordering delivers nothing on.
+      // host_pump() settles by calling a resolve function, and that appends;
+      // the reaction therefore goes behind the jobs of the unfinished drain.
+      // The exit check stays below in BOTH modes.
+      if (fair_mode) host_pump(guest);
       continue;
     }
     drain_jobs = 0;            // the logical drain ended; the next starts at 0
@@ -617,6 +636,8 @@ static void usage(void) {
           "  --budget-jobs N        L1 count-mode budget: yield after N jobs, resume next turn (0 = off)\n"
           "  --runaway-jobs N       end the run when ONE logical drain has run N jobs (default off)\n"
           "  --stop-turns N         end the SESSION after N continuation turns, dropping the queue\n"
+          "  --fair                 fair ordering (CONFIG_POCKET_VM_FAIR): pump on a continuation\n"
+          "                         turn too, so a completion is seen mid-drain (default: compat)\n"
           "  --host-events          install host.request(k) (a completion recorded at the k-th job\n"
           "                         boundary) and host.exit() (pocket.app.exit)\n"
           "  --time                 print '#info time_ns=...' (eval + drains + frames)\n"
@@ -663,6 +684,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--runaway-jobs")) runaway_jobs = (uint64_t)parse_size(NEXT());
     else if (!strcmp(a, "--stop-turns")) stop_turns = (unsigned)parse_size(NEXT());
     else if (!strcmp(a, "--host-events")) host_events = true;
+    else if (!strcmp(a, "--fair")) fair_mode = true;
     else if (!strcmp(a, "--time")) want_time = true;
     else if (!strcmp(a, "--stats")) want_stats = true;
     else if (!strcmp(a, "--include")) {

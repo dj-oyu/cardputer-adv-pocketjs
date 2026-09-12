@@ -1,4 +1,5 @@
 // vmrun-flags: --frames 2 --budget-jobs 6 --host-events
+// vmrun-pin-budget
 // L1 invariant 6 (docs/vm-L1-design.md sec.2.1, sec.7) at the one place
 // budget_completions.js does not look: the boundary ITSELF.
 //
