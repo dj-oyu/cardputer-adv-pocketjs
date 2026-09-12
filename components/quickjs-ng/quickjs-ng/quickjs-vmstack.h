@@ -400,6 +400,55 @@ static inline void js_vm_stack_free(JSRuntime *rt, JSVMStack *st)
     st->cache_n = 0;
 }
 
+// ---------------------------------------------------------------- L2b
+//
+// With CONFIG_POCKET_VM_FLATCALLS a JS-to-JS call does not recurse in C:
+// JS_CallInternal pushes the callee's block and carries on in the same
+// activation, and the callee's return pops it and resumes the caller from
+// what the frame chain holds (docs/vm-L2-design.md sec.10). Everything the
+// dispatch loop kept in C locals for the caller must then be recoverable
+// from the caller's frame. Most of it already is: pc is sf->cur_pc (D8),
+// argc is sf->arg_count (D11), the buffers hang off sf, and the return
+// fix-up is sf->ret_shape (D8). The one thing that is not is the caller's
+// OPERAND STACK POINTER, which no field records and nothing can recompute:
+// it goes in this link, in front of the JSStackFrame inside the same pushed
+// block (D12). Not in JSStackFrame.cur_sp, which async_func_mark reads as
+// "suspended" -- a generator frame calling a flat child is RUNNING, and a
+// non-NULL cur_sp would have the GC walk its half-built operand stack.
+//
+// Every block JS_CallInternal pushes carries the link, floor frames too
+// (the floor's is unused; a per-entry-path block layout would cost a branch
+// on every pop for 8 bytes on the floor only). Generator frames live in a
+// JSAsyncFunctionState and have no link; the JS_SF_SEG bit tells them apart.
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+typedef struct JSVMLink {
+    JSValue *caller_sp;     // the caller's sp at the call: func/this/args still on it
+} JSVMLink;
+#define JS_VM_FRAME_PREFIX sizeof(JSVMLink)
+
+// JSStackFrame.l2_flags. Zero for frames JS_CallInternal did not push
+// (generator/async frames come from js_mallocz), so the absence of both bits
+// means "floor, in a JSAsyncFunctionState". A frame walker that reads these
+// must still guard on class_id first (design D4-3): native frames are
+// uninitialised C automatics.
+#define JS_SF_SEG  1u   // pushed on the segment stack; local_buf == (JSValue *)(sf + 1)
+#define JS_SF_FLAT 2u   // pushed by a flat call: its return resumes sf->prev_frame in the same C activation
+
+// JSStackFrame.ret_shape: what the CALLER does with its operand stack when
+// this frame returns (design D8 sec.7.3-2). argc << 2 | bits; neither the
+// caller's cur_pc (already past a variable-length operand) nor the callee's
+// arg_count (declared, not passed) can stand in for it.
+#define JS_RET_METHOD 1u   // call_method: a `this` slot sits below the func slot (drop argc+2, not argc+1)
+#define JS_RET_TAIL   2u   // tail_call: the caller returns the value itself (upstream's `goto done`)
+#define JS_RET_SHAPE(argc, bits) (((uint32_t)(argc) << 2) | (bits))
+#define JS_RET_ARGC(shape) ((int)((shape) >> 2))
+
+_Static_assert(sizeof(JSVMLink) % JS_VM_FRAME_ALIGN == 0,
+               "the link must keep the JSStackFrame behind it frame-aligned");
+#else
+#define JS_VM_FRAME_PREFIX 0
+#endif
+
 // Defined in quickjs.c: the runtime's stack, or NULL when the build keeps
 // frames on the C stack (CONFIG_POCKET_VM_SEGFRAMES off).
 JSVMStack *js_vm_stack_get(JSRuntime *rt);

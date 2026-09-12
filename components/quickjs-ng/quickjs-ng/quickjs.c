@@ -394,6 +394,15 @@ struct JSClass {
 
 typedef struct JSStackFrame {
     struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    // L2b (design D2 sec.5.3-4): the JSContext the call was made from. Four
+    // JS_Throw* sites in the dispatch loop create their error in the
+    // CALLER's realm, which the callee's b->realm cannot recover; once a
+    // flat return has to rebuild the caller's C locals this is the only
+    // place the value survives. Sits in the padding after prev_frame on the
+    // target (offset 4-7), so JSStackFrame stays 48 bytes there.
+    JSContext *caller_ctx;
+#endif
     JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
     JSValue *arg_buf; /* arguments */
     JSValue *var_buf; /* variables */
@@ -403,9 +412,15 @@ typedef struct JSStackFrame {
     uint16_t var_ref_count; /* number of var refs */
     uint16_t arg_count;
     bool is_strict_mode;
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    uint8_t l2_flags;  /* JS_SF_* (quickjs-vmstack.h); offset 37, was padding */
+#endif
     /* only used in generators. Current stack pointer value. NULL if
        the function is running. */
     JSValue *cur_sp;
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    uint32_t ret_shape; /* JS_RET_SHAPE (quickjs-vmstack.h); offset 44-47, was tail padding */
+#endif
 } JSStackFrame;
 
 typedef enum {
@@ -18357,6 +18372,26 @@ static void dump_single_byte_code(JSContext *ctx, const uint8_t *pc,
 static void print_func_name(JSFunctionBytecode *b);
 #endif
 
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+// L2b: may this call target run in the caller's C activation? A bytecode
+// function whose bytecode is JS_FUNC_NORMAL. Everything else keeps the
+// upstream C call: native / bound / proxy / promise functions (class call,
+// no JS_CallInternal frame at all), generator and async functions (their own
+// classes: heap frames in a JSAsyncFunctionState), and the one bytecode
+// function that is not NORMAL yet has this class -- a module body, called
+// with this=true by js_inner_module_linking -- so that a flat frame is
+// guaranteed to leave through done: (design sec.10.1, H6).
+static inline bool js_vm_flat_callable(JSValueConst func_obj)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(func_obj);
+    return p->class_id == JS_CLASS_BYTECODE_FUNCTION &&
+           p->u.func.function_bytecode->func_kind == JS_FUNC_NORMAL;
+}
+#endif
+
 static bool needs_backtrace(JSValue exc)
 {
     JSObject *p;
@@ -18392,6 +18427,19 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     JSValue *local_buf, *stack_buf, *var_buf, *arg_buf, *sp, ret_val, *pval;
     JSVarRef **var_refs;
     size_t alloca_size;
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    // L2b, the floor's view (design H9): this C activation's own argv /
+    // this / new.target, i.e. the parameters it was entered with. A flat
+    // callee reuses the parameter variables (the loop reads them by name),
+    // so the floor's values are parked here for the return that resumes it.
+    // A flat frame needs none of this: its argv is one subtraction from its
+    // link, its `this` is the slot below its func slot or undefined, and its
+    // new.target is always undefined (constructors are not flattened, H8).
+    // Three spill slots per C activation, not per JS level -- which is the
+    // whole point.
+    JSValueConst *floor_argv;
+    JSValueConst floor_this, floor_new_target;
+#endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_STEP
 #define DUMP_BYTECODE_OR_DONT(pc) \
@@ -18421,6 +18469,11 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     if (js_poll_interrupts(caller_ctx)) {
         return JS_EXCEPTION;
     }
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    floor_argv = argv;
+    floor_this = this_obj;
+    floor_new_target = new_target;
+#endif
     if (unlikely(JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)) {
         if (flags & JS_CALL_FLAG_GENERATOR) {
             JSAsyncFunctionState *s = JS_VALUE_GET_PTR(func_obj);
@@ -18439,6 +18492,13 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc = sf->cur_pc;
             sf->prev_frame = rt->current_stack_frame;
             rt->current_stack_frame = sf;
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+            // A resumed generator/async frame is the floor of this activation
+            // (H6): l2_flags is 0 from js_mallocz, so a flat child returning
+            // into it takes the floor branch. caller_ctx is per resume, like
+            // prev_frame -- the resumer's realm, not the creator's.
+            sf->caller_ctx = caller_ctx;
+#endif
             if (s->throw_flag) {
                 goto exception;
             } else {
@@ -18473,10 +18533,15 @@ not_a_function:
 #ifdef CONFIG_POCKET_VM_SEGFRAMES
     // Two limits now, each with its own error, because they are two
     // different resources:
-    //  - The C stack. JS_CallInternal still recurses in C (L2b removes
-    //    that), so the JS_SetMaxStackSize check stays; it just no longer
-    //    subtracts an alloca that is not coming. Overflow is the RangeError it
-    //    always was.
+    //  - The C stack. This is the FLOOR of a C activation -- entered from
+    //    C, never from a flat call (that path has its own push below, at
+    //    flat_call:) -- so with CONFIG_POCKET_VM_FLATCALLS the JS depth
+    //    above this frame costs no C stack and this test measures only the
+    //    native re-entry depth (design H9: builtin -> JS_Call -> here).
+    //    Without it, JS_CallInternal recurses in C for every JS call and
+    //    this is the test that ends a deep recursion. Either way it no
+    //    longer subtracts an alloca that is not coming. Overflow is the
+    //    RangeError it always was.
     //  - The guest heap, which is where the frame goes. A refused push means
     //    js_malloc_rt said no -- JS_SetMemoryLimit, or the allocator -- and
     //    that is reported as out-of-memory, the same signal async_func_init
@@ -18498,16 +18563,32 @@ not_a_function:
     //    the C-stack one does not matter (same error); order against the
     //    push does. One compare on state already in a register -- the
     //    charge itself is the add push does anyway.
-    if (unlikely(js_vm_stack_over_budget(&rt->vm_stack, sizeof(JSStackFrame) + alloca_size))) {
+    if (unlikely(js_vm_stack_over_budget(&rt->vm_stack, JS_VM_FRAME_PREFIX + sizeof(JSStackFrame) + alloca_size))) {
         return JS_ThrowStackOverflow(caller_ctx);
     }
     if (js_check_stack_overflow(rt, 0)) {
         return JS_ThrowStackOverflow(caller_ctx);
     }
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    {
+        // The block is [JSVMLink][JSStackFrame][slots][var_refs]; sf points
+        // past the link. (The non-flat build below keeps the upstream shape
+        // of this push verbatim: written as one block with a zero prefix
+        // it cost that build a spill slot -- G1 528 -> 544 B/level.)
+        uint8_t *block = js_vm_stack_push(rt, &rt->vm_stack, JS_VM_FRAME_PREFIX + sizeof(JSStackFrame) + alloca_size);
+        if (unlikely(!block)) {
+            return JS_ThrowOutOfMemory(caller_ctx);
+        }
+        sf = (JSStackFrame *)(block + JS_VM_FRAME_PREFIX);
+    }
+    sf->l2_flags = JS_SF_SEG;     // a floor: entered from C, returns to C
+    sf->caller_ctx = caller_ctx;
+#else
     sf = js_vm_stack_push(rt, &rt->vm_stack, sizeof(JSStackFrame) + alloca_size);
     if (unlikely(!sf)) {
         return JS_ThrowOutOfMemory(caller_ctx);
     }
+#endif
     local_buf = (JSValue *)(sf + 1);
 #else
     if (js_check_stack_overflow(rt, alloca_size)) {
@@ -18515,6 +18596,13 @@ not_a_function:
     }
 #endif
 
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    // From here to restart: the frame is pushed and p / b / sf / local_buf /
+    // argc / argv / func_obj / this_obj / new_target / caller_ctx describe
+    // the callee. The flat call site (flat_call:, in the loop) arrives here
+    // with the same set, so one copy of the prologue serves both entries.
+frame_pushed:
+#endif
     sf->is_strict_mode = b->is_strict_mode;
     arg_buf = (JSValue *)argv;
     sf->arg_count = argc;
@@ -18533,7 +18621,15 @@ not_a_function:
         for (; i < b->arg_count; i++) {
             arg_buf[i] = JS_UNDEFINED;
         }
+#ifndef CONFIG_POCKET_VM_FLATCALLS
+        // D11 (design sec.9): with flat calls sf->arg_count keeps the argc
+        // the caller PASSED, because the return path rebuilds the caller's
+        // `argc` local from it and OP_rest / arguments read that, not the
+        // declared count (which lives in b->arg_count for anyone who needs
+        // it). No reader of sf->arg_count exists in this tree, so the other
+        // builds keep the upstream line only to stay byte-identical.
         sf->arg_count = b->arg_count;
+#endif
     }
     var_buf = local_buf + arg_allocated_size;
     sf->var_buf = var_buf;
@@ -18925,6 +19021,16 @@ normal_this:
 has_call_argc:
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+                // L2b: a bytecode callee runs in this activation. Anything
+                // else (native, bound, proxy, generator/async class, and a
+                // frame whose bytecode is not JS_FUNC_NORMAL -- see the
+                // done_generator: keying below) takes the upstream C call.
+                // Tail calls join in the next stage; until then they recurse.
+                if (opcode != OP_tail_call && js_vm_flat_callable(call_argv[-1])) {
+                    goto flat_call;
+                }
+#endif
                 ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
                                           JS_UNDEFINED, call_argc,
                                           vc(call_argv), 0);
@@ -21112,6 +21218,81 @@ DEFAULT:
                                       (int)(pc - b->byte_code_buf - 1), opcode);
             goto exception;
         }
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+        // Not reached with DIRECT_DISPATCH (BREAK re-dispatches); with a
+        // plain switch every opcode's `break` lands here and must go round.
+        continue;
+flat_call: {
+            // L2b: the JS-to-JS call without the C recursion. What
+            // JS_CallInternal's entry does for a bytecode function -- poll,
+            // budget, push, prologue -- done here, in the CALLER's state, so
+            // that a refusal is thrown into the caller exactly where the
+            // upstream `if (JS_IsException(ret_val)) goto exception` would
+            // have taken it, with nothing pushed. Only after the block
+            // exists are the loop's locals switched to the callee and the
+            // shared prologue (frame_pushed:) entered. The C-stack test is
+            // deliberately absent: this call adds no C frame, and the byte
+            // budget (D10) is the guard that bounds JS depth from here on.
+            //
+            // Safepoint contract (D8 sec.7.3-3): nothing between the poll and
+            // frame_pushed: can stop, so "call not yet made" and "call in
+            // progress" are told apart by whether the callee frame is on the
+            // chain, never by the caller's cur_pc (which already points past
+            // the call).
+            JSObject *np = JS_VALUE_GET_OBJ(call_argv[-1]);
+            JSFunctionBytecode *nb = np->u.func.function_bytecode;
+            uint32_t bits = 0;
+            size_t block_size;
+            JSVMLink *link;
+            JSStackFrame *nsf;
+            if (opcode == OP_call_method || opcode == OP_tail_call_method)
+                bits |= JS_RET_METHOD;
+            if (opcode == OP_tail_call || opcode == OP_tail_call_method)
+                bits |= JS_RET_TAIL;
+            // The prologue poll of the call we are not making. Same counter,
+            // same slow path; rt->current_stack_frame is set, so it is never
+            // mistaken for a host entry.
+            if (unlikely(js_poll_interrupts(ctx))) {
+                goto exception;
+            }
+            // flags == 0 here (no COPY_ARGV, no CONSTRUCTOR): the callee's
+            // arg_buf aliases the caller's operand slots unless it declared
+            // more parameters than were passed -- upstream's rule, verbatim.
+            arg_allocated_size = (call_argc < nb->arg_count) ? nb->arg_count : 0;
+            alloca_size = sizeof(JSValue) * (arg_allocated_size + nb->var_count +
+                                             nb->stack_size) +
+                          sizeof(JSVarRef *) * nb->var_ref_count;
+            block_size = JS_VM_FRAME_PREFIX + sizeof(JSStackFrame) + alloca_size;
+            if (unlikely(js_vm_stack_over_budget(&rt->vm_stack, block_size))) {
+                JS_ThrowStackOverflow(ctx);
+                goto exception;
+            }
+            link = js_vm_stack_push(rt, &rt->vm_stack, block_size);
+            if (unlikely(!link)) {
+                JS_ThrowOutOfMemory(ctx);
+                goto exception;
+            }
+            link->caller_sp = sp;
+            nsf = (JSStackFrame *)(link + 1);
+            nsf->l2_flags = JS_SF_SEG | JS_SF_FLAT;
+            nsf->ret_shape = JS_RET_SHAPE(call_argc, bits);
+            nsf->caller_ctx = ctx;
+            // The switch. Every caller local not listed is rebuilt from the
+            // caller's frame on return (see the JS_SF_FLAT branch at the end
+            // of this function); these are the callee's from here.
+            caller_ctx = ctx;
+            func_obj = call_argv[-1];
+            this_obj = (bits & JS_RET_METHOD) ? call_argv[-2] : JS_UNDEFINED;
+            new_target = JS_UNDEFINED;
+            argc = call_argc;
+            argv = vc(call_argv);
+            p = np;
+            b = nb;
+            sf = nsf;
+            local_buf = (JSValue *)(sf + 1);
+            goto frame_pushed;
+        }
+#endif
     }
 exception:
     if (needs_backtrace(rt->current_exception)
@@ -21161,6 +21342,71 @@ done:
             JS_FreeValue(ctx, *pval);
         }
     }
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    if (sf->l2_flags & JS_SF_FLAT) {
+        // L2b return: this frame was pushed by flat_call: in THIS activation,
+        // so instead of returning to C we resume the caller, sf->prev_frame,
+        // the same way the callee's `return` would have handed ret_val back
+        // to the JS_CallInternal(...) expression in the call opcode. The
+        // caller's locals are rebuilt from its frame (D8: cur_pc; D11:
+        // arg_count; D2: caller_ctx), its link (D12: sp) and, for a floor,
+        // the parked entry parameters. Read the link before the pop: the
+        // block is poisoned/reused the moment it is popped.
+        uint32_t shape = sf->ret_shape;
+        JSVMLink *link = ((JSVMLink *)sf) - 1;
+        JSStackFrame *csf = sf->prev_frame;
+        int n, drop;
+        JSValue *av;
+        sp = link->caller_sp;
+        js_vm_pop_frame(rt, sf);                    // prev_frame != NULL: no LEAVE hook
+        js_vm_stack_pop(rt, &rt->vm_stack, link);
+        sf = csf;
+        p = JS_VALUE_GET_OBJ(sf->cur_func);
+        b = p->u.func.function_bytecode;
+        ctx = b->realm;
+        var_refs = p->u.func.var_refs;
+        arg_buf = sf->arg_buf;
+        var_buf = sf->var_buf;
+        stack_buf = var_buf + b->var_count;
+        // A generator/async floor keeps its locals in the JSAsyncFunctionState
+        // block, where local_buf == arg_buf (see the resume entry above).
+        local_buf = (sf->l2_flags & JS_SF_SEG) ? (JSValue *)(sf + 1) : arg_buf;
+        pc = sf->cur_pc;
+        argc = sf->arg_count;
+        caller_ctx = sf->caller_ctx;
+        func_obj = sf->cur_func;
+        if (sf->l2_flags & JS_SF_FLAT) {
+            // Its argv is the caller's slots below the sp its link saved
+            // (call_argv = sp - call_argc at the call), its `this` the slot
+            // below the func slot for a method call, and it was never a
+            // constructor call.
+            argv = vc((((JSVMLink *)sf) - 1)->caller_sp - argc);
+            this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
+            new_target = JS_UNDEFINED;
+        } else {
+            argv = floor_argv;
+            this_obj = floor_this;
+            new_target = floor_new_target;
+        }
+        // From here on, exactly what the call opcode did after
+        // JS_CallInternal returned (has_call_argc / OP_call_method).
+        if (unlikely(JS_IsException(ret_val))) {
+            goto exception;
+        }
+        if (shape & JS_RET_TAIL) {
+            goto done;
+        }
+        n = JS_RET_ARGC(shape);
+        drop = (shape & JS_RET_METHOD) ? 2 : 1;
+        av = sp - n;
+        for (i = -drop; i < n; i++) {
+            JS_FreeValue(ctx, av[i]);
+        }
+        sp -= n + drop;
+        *sp++ = ret_val;
+        goto restart;
+    }
+#endif
     js_vm_pop_frame(rt, sf);
 #ifdef CONFIG_POCKET_VM_SEGFRAMES
     // Last, after close_var_refs has detached every JSVarRef that pointed
@@ -21169,17 +21415,25 @@ done:
     // of the segment stack itself (is sf its top block?) because nothing
     // else here says so reliably: `flags` is reused as a scratch variable by
     // several opcodes above (OP_define_field, OP_for_of_start, ...), and
-    // b->func_kind does not say how the frame was ENTERED -- a direct eval
-    // in module code is compiled as an ASYNC function (__JS_EvalInternal)
-    // yet called on the normal path, so it pushed here and then took the
-    // done_generator: branch. Keyed on func_kind, that block stayed pushed
-    // and JS_FreeRuntime asserted (Test262 language/eval-code/direct/
-    // export.js found it). A C local would record it too, but costs a
-    // spill slot per level (measured: G1 528 -> 544 B/call); the range test
-    // is two compares on state already in cache. The generator path (frame
-    // in a JSAsyncFunctionState) never lies inside a segment.
-    if (js_vm_stack_holds(&rt->vm_stack, sf))
+    // b->func_kind does not say how the frame was ENTERED -- a module body
+    // is compiled as an ASYNC function (__JS_EvalInternal, `<eval>` name)
+    // yet js_inner_module_linking calls it through plain JS_Call with
+    // this=true to initialise its hoisted declarations, so it pushed here
+    // and then took the done_generator: branch (design sec.8.3 / sec.10.1;
+    // the H7 experiment pinned it to that call, not to a direct eval).
+    // Keyed on func_kind, that block stayed pushed and JS_FreeRuntime
+    // asserted (Test262 language/eval-code/direct/export.js found it). A C
+    // local would record it too, but costs a spill slot per level
+    // (measured: G1 528 -> 544 B/call); the range test is two compares on
+    // state already in cache. The generator path (frame in a
+    // JSAsyncFunctionState) never lies inside a segment.
+    if (js_vm_stack_holds(&rt->vm_stack, sf)) {
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+        js_vm_stack_pop(rt, &rt->vm_stack, ((JSVMLink *)sf) - 1);
+#else
         js_vm_stack_pop(rt, &rt->vm_stack, sf);
+#endif
+    }
 #endif
     return ret_val;
 }
