@@ -88,6 +88,37 @@ menu "Pocket VM (L0 measurement probes)"
             harness builds the same switch as tools/vmtest/build.sh
             "-alloca" variants.
 
+    config POCKET_VM_FLATCALLS
+        bool "JS-to-JS calls stay in one JS_CallInternal activation (L2b)"
+        depends on POCKET_VM_SEGFRAMES
+        default n
+        help
+            docs/quickjs-freertos-vm-spec.md sec.7 L2b, docs/vm-L2-design.md
+            sec.10. On, a call opcode whose target is a bytecode function
+            (call / call0-3 / call_method / tail_call / tail_call_method)
+            pushes the callee's frame on the segment stack and keeps running
+            in the SAME C activation of JS_CallInternal; the callee's return
+            pops that frame and resumes the caller from the frame chain. No
+            C stack is consumed per JS level, so the recursion limit is the
+            segment byte budget (D10) alone -- the JS_SetMaxStackSize value,
+            in bytes of live frames -- and a frame the heap cannot hold is
+            the InternalError it already was. Constructor calls, apply,
+            eval, and every C-to-JS re-entry (a builtin calling back into
+            JS, getters, Proxy traps) still recurse in C and still meet the
+            C-stack guard at the entry of the new activation: those are
+            "wrapped" synchronous calls in the spec's sense, marked
+            interruption-forbidden.
+
+            Costs, per frame pushed on a segment: one pointer (the caller's
+            operand stack pointer, D12) in front of the JSStackFrame, and
+            three fields folded into JSStackFrame's padding (48 B on the
+            target either way). Per C activation: three saved pointers.
+
+            Off, every JS-to-JS call is a C recursion of JS_CallInternal as
+            in L2a (the C-stack guard answers first, exactly as before).
+            The host harness builds this switch as the "-flat" / "-recur"
+            variants of tools/vmtest/build.sh.
+
     config POCKET_VM_FAIR
         bool "Fair ordering: run the pumps on a continuation turn too"
         default n

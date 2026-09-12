@@ -48,12 +48,21 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
     // both. The harness allocator's own "fails=" counts only injected
     // --fail-alloc failures, not JS_SetMemoryLimit refusals, which never
     // reach it.
+    // flat=: whether this binary keeps JS-to-JS calls in one C activation
+    // (CONFIG_POCKET_VM_FLATCALLS). budget_probe.sh reads it to know which
+    // guard is expected to answer under the shipped limits: with C recursion
+    // the C-stack guard fires first (budget_hits=0), flat only the budget can.
     size_t overhead = sizeof(JSVMSeg) + (JS_VM_SEG_ALIGN - 1);
-    fprintf(f, "#info vmstack seg_size=%zu align=%d frame_hdr=%zu pushes=%llu depth_max=%u "
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    const int flat = 1;
+#else
+    const int flat = 0;
+#endif
+    fprintf(f, "#info vmstack flat=%d seg_size=%zu align=%d frame_hdr=%zu pushes=%llu depth_max=%u "
                "live_max=%zu frame_max=%zu seg_live_max=%u seg_mallocs=%llu seg_frees=%llu "
                "seg_reuses=%llu dedicated=%llu fallbacks=%llu resident_max~=%zu "
                "budget=%zu budget_hits=%llu seg_refused=%llu\n",
-            st->seg_size, JS_VM_FRAME_ALIGN, sizeof(JSVMSeg),
+            flat, st->seg_size, JS_VM_FRAME_ALIGN, sizeof(JSVMSeg),
             (unsigned long long)st->pushes, st->depth_max, st->live_bytes_max, st->frame_max,
             st->seg_live_max, (unsigned long long)st->seg_mallocs,
             (unsigned long long)st->seg_frees, (unsigned long long)st->seg_reuses,
@@ -62,8 +71,13 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
             st->budget, (unsigned long long)st->budget_hits,
             (unsigned long long)st->seg_refused);
 #else
-    fprintf(f, "#info vmstack seg_size=%zu budget=%zu (no stats in this build)\n",
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+    fprintf(f, "#info vmstack flat=1 seg_size=%zu budget=%zu (no stats in this build)\n",
             st->seg_size, st->budget);
+#else
+    fprintf(f, "#info vmstack flat=0 seg_size=%zu budget=%zu (no stats in this build)\n",
+            st->seg_size, st->budget);
+#endif
 #endif
 }
 

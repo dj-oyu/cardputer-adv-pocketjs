@@ -72,6 +72,15 @@
 extern "C" {
 #endif
 
+// L2b (CONFIG_POCKET_VM_FLATCALLS, docs/vm-L2-design.md sec.10) is a
+// property of frames that live here: a flat callee's frame is popped by the
+// same JS_CallInternal activation that pushed it, which is only possible
+// when the frame is not on that activation's C stack. Kconfig says
+// "depends on"; the host passes -D by hand, so the header says it too.
+#if defined(CONFIG_POCKET_VM_FLATCALLS) && !defined(CONFIG_POCKET_VM_SEGFRAMES)
+#error "CONFIG_POCKET_VM_FLATCALLS requires CONFIG_POCKET_VM_SEGFRAMES"
+#endif
+
 #define JS_VM_SEG_ALIGN 16
 
 #if defined(ESP_PLATFORM)

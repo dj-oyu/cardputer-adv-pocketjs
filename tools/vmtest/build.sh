@@ -7,11 +7,17 @@
 #   tools/vmtest/build.sh asan-alloca   # CONFIG_POCKET_VM_SEGFRAMES off: frames on the C stack
 #   tools/vmtest/build.sh o2-alloca     # (the pre-L2a path; spec sec.12 "revertible")
 #   tools/vmtest/build.sh all-alloca
+#   tools/vmtest/build.sh asan-recur    # segframes, JS calls still recurse in C (L2a; FLATCALLS off)
+#   tools/vmtest/build.sh asan-flat     # segframes + CONFIG_POCKET_VM_FLATCALLS (L2b)
+#   tools/vmtest/build.sh all-recur / all-flat
 #
-# The "-alloca" variants are the same compiler flags without the L2a define.
-# run.sh --variant o2-alloca / stack_probe.sh 2000 o2-alloca / test262.py
-# --variant asan-alloca then exercise the old path, which must keep producing
-# what it produced before L2a landed.
+# Three paths (spec sec.12 / design H5): "-alloca" is the same compiler flags
+# without the L2a define; "-recur" and "-flat" pin the L2b switch off / on.
+# The PLAIN variants (asan / o2) build what main/Kconfig.projbuild ships by
+# default -- see the two defaults below, which must be kept equal to the
+# Kconfig -- so that every gate run without a suffix is a gate on the
+# firmware's path. run.sh --variant / stack_probe.sh N VARIANT / test262.py
+# --variant / budget_probe.sh VARIANT accept any of the six names.
 #
 # Unlike tools/build_pocket_text_test.sh, the asan variant instruments QuickJS
 # itself: the code under test from L1 on IS quickjs.c, so a use-after-free in a
@@ -31,10 +37,17 @@ build_variant() {
   # from the one the firmware ships. Passed as -D, not written into the stub:
   # the stub is shared by every variant and the -alloca ones must not see it.
   local segframes="-DCONFIG_POCKET_VM_SEGFRAMES=1"
+  # CONFIG_POCKET_VM_FLATCALLS: default n in main/Kconfig.projbuild (L2b,
+  # docs/vm-L2-design.md sec.10). Same rule as above: the plain variant
+  # mirrors the Kconfig default; "-flat" / "-recur" force it on / off.
+  local flatcalls=""
+  local base=${variant%-alloca}; base=${base%-recur}; base=${base%-flat}
   case "$variant" in
     *-alloca) segframes="" ;;
+    *-recur) flatcalls="" ;;
+    *-flat) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1" ;;
   esac
-  case "${variant%-alloca}" in
+  case "$base" in
     asan) cflags="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined" ;;
     o2)   cflags="-O2 -g" ;;
     *) echo "unknown variant $variant" >&2; exit 2 ;;
@@ -53,7 +66,7 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls -I $OUT/include -I $GUEST/include"
   local objs=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
@@ -78,5 +91,7 @@ build_variant() {
 case "${1:-asan}" in
   all) build_variant asan; build_variant o2 ;;
   all-alloca) build_variant asan-alloca; build_variant o2-alloca ;;
+  all-recur) build_variant asan-recur; build_variant o2-recur ;;
+  all-flat) build_variant asan-flat; build_variant o2-flat ;;
   *) build_variant "${1:-asan}" ;;
 esac

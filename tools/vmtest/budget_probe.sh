@@ -88,10 +88,26 @@ check() {
   fi
 }
 
-echo "# both guards at the shipped value (what run.sh runs): while C recursion remains,"
-echo "# the C-stack guard answers first and the budget is not consulted to the end"
-check deep_recursion         match 0 0   --profile host
-check deep_recursion_device  match 0 0   --profile device
+# Which guard the shipped configuration lets answer depends on the build:
+# "#info vmstack flat=1" (CONFIG_POCKET_VM_FLATCALLS, L2b) means a JS-to-JS
+# call consumes no C stack, so under run.sh's limits only the budget can end
+# a deep recursion (budget_hits>0 is then the proof that the budget took the
+# C-stack guard's place); flat=0 means C recursion remains and the C-stack
+# guard fires first (budget_hits=0). Read from the binary, not from the
+# variant name, so a plain "o2" is judged by what it was built as.
+: > "$work/empty.js"
+flat=$(cd "$work" && "$VMRUN" --stats --profile host empty.js 2>&1 | sed -n 's/.*vmstack flat=\([01]\).*/\1/p')
+if [ "$flat" = 1 ]; then
+  shipped_hits='>0'
+  echo "# both guards at the shipped value (what run.sh runs): flat calls (L2b), so the"
+  echo "# C-stack guard cannot see JS depth and the budget must be the one that answers"
+else
+  shipped_hits=0
+  echo "# both guards at the shipped value (what run.sh runs): while C recursion remains,"
+  echo "# the C-stack guard answers first and the budget is not consulted to the end"
+fi
+check deep_recursion         match "$shipped_hits" 0   --profile host
+check deep_recursion_device  match "$shipped_hits" 0   --profile device
 check seg_oom_boundary       match 0 -   --profile device
 
 echo "# budget alone at the shipped value (C-stack guard lifted: the L2b situation)"
@@ -106,5 +122,5 @@ check seg_oom_boundary       differ '>0' 0   --profile device --stack-limit 512M
 check deep_recursion_device  differ 0   '>0' --profile device --stack-limit 512M --vm-budget 200K
 
 verdict=OK; [ $failed = 0 ] || verdict=FAIL
-echo "D10 variant=$variant checks=$checks failed=$failed verdict=$verdict"
+echo "D10 variant=$variant flat=${flat:-?} checks=$checks failed=$failed verdict=$verdict"
 [ $failed = 0 ]
