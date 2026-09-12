@@ -1,0 +1,9 @@
+# The L1 revert switch (docs/vm-L1-design.md, spec sec.12: every stage stays
+# revertible). With this layered over sdkconfig.defaults the job budget is
+# unlimited, so the drain cannot yield, no continuation turn can exist, the
+# unhandled-rejection report point is the pre-L1 one, and the frame cap is the
+# old unconditional vTaskDelay.
+#
+#   idf.py -B build_l1_off -D SDKCONFIG=build_l1_off/sdkconfig \
+#          -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.vmsched_off.defaults" build
+CONFIG_POCKET_VM_SCHED=n

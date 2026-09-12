@@ -326,3 +326,45 @@ L1 の範囲外だが L2 ではない（別途判断）:
 - `frame()` を飛ばす完了専用ターン（§4.2）。`.then` が次の `frame()` より前に走る順序変更を伴う。
 - pump をネイティブ取り込みと JS 配送に二分する改修（§2.3 の表の「取り込み」列を継続ターンでも走らせる）。10 ファイルに触る割に、resolve が保留される以上、観測差は `lat` の数字だけ。
 - GC 閾値（256 KiB > 160 KiB、L0 §2）と OOM 時の use-after-free。`main` にも効く不具合で、L1 と独立。
+
+---
+
+## 9. 実装の記録（2026-09-12、`vm/l1-host-sched`）
+
+本節は設計ではなく**実装したものの記録**で、設計との差分をすべて名指しする。数値は 実測 / 推定 を毎回書く。
+
+### 9.1 どこに何が入ったか
+
+| 場所 | 中身 |
+| --- | --- |
+| `components/pocketjs_guest/include/pocketjs/vm_clock.h` / `src/vm_clock.c` | §1.3 の時計抽象。既定は device が `esp_timer_get_time()`、host が `clock_gettime(CLOCK_MONOTONIC)`。`vm_clock_install()` で差し替え |
+| `.../vm_sched.h` / `src/vm_sched.c` | §1.1 の `vm_sched_drain` と `vm_budget_t`、定数 `VM_TURN_BUDGET_US` 8000 / `VM_JOB_STRIDE` 4 / `VM_JOB_FLOOR` 8 / `VM_JOB_BACKSTOP` 64 / `VM_LEAVE_BUDGET_US` 50000 / `VM_LEAVE_BACKSTOP` 256 / `VM_RUNAWAY_TURNS` 30。esp ヘッダを一切含まない |
+| `guest.c` / `guest.h` | `drain_jobs` が `vm_sched_drain` 経由に。`pocketjs_guest_budget` / `_jobs_pending` / `_continue` / `_set_watchdog` を追加。stats に `yields` / `continuations` / `jobs_pending` / `jobs_dropped` |
+| `components/pocketjs_ui_qjs` | `pocketjs_ui_turn_continue()`（§2.4） |
+| `main/app_session.c` / `.h` | §2.2 の骨格、`arm_turn()`、`deferred_buttons`、`continuation_turns`、離脱ターンの予算、`present_frame()` の切り出し、`app_vm_watchdog()` |
+| `main/pocket/pocket_app.c` / `.h` | `pocket_app_exit_requested()`、stop hook の割り込み登録を `app_vm_watchdog()` 経由に |
+| `main/vm/vm_wake.[ch]` | §4.2 の起床。ISR 文脈は `xPortInIsrContext()` で内部判定 |
+| `main/main.c` | `vm_wake_bind()`、フレームキャップの `vTaskDelay` → `vm_wake_wait`、`VM_MIN_PERIOD_MS` 8 |
+| `main/pocket/pocket_api.c` | `pocket_api_complete()` の末尾（`done` 公開の**後**）に `vm_wake_post()` |
+| `main/Kconfig.projbuild` | `CONFIG_POCKET_VM_SCHED`（既定 y）。off で予算が無制限になり、L1 前の挙動に完全に戻る |
+| `sdkconfig.vmsched_off.defaults` | その off ビルドの重ね方 |
+| `tools/vmtest/` | §7 のフラグと 5 本の新規コーパス |
+
+### 9.2 設計どおりに実装できなかった / 足したもの
+
+1. **`--stop-turns N` は設計に無いフラグ。** §7 の 9（キューを残した終了）は `--frames 1 --budget-jobs 4` で終了コード 0 と `jobs_dropped=1` を求めているが、継続ターンに上限が無ければ 1000 段の連鎖は 250 ターンで**完走してしまう**し、`--runaway-turns` を使えば終了コード 5 になって 0 にならない。「セッションが先に終わる」側の機構が要る。`--stop-turns N` は N 回の継続ターンでセッションを終わらせ、キューを実行せず捨て、終了コード 0 を返す。`app_stop()` の代役。
+2. **vmrun の `--runaway-turns` は既定で無効**（ファームの既定は 30 のまま）。`--budget-jobs 1` は正当な 200 件の drain を 200 回の継続ターンにするので、既定 30 では §7 の 1・2（`promise_chain.js` などを `--force-yield` で）が全部 runaway で落ちた。暴走検査は `--runaway-turns 30` を明示する。
+3. **`present_frame()` の切り出しは設計に無い。** §2.2 の骨格は `goto present` で書かれており、実装では `app_tick()` の後半（damage plan・ストリップ・`board_present`・PAINT 集計）を `present_frame()` に切り出して継続ターンからも呼ぶ形にした。挙動は同じで、`goto` がラベルを跨いで初期化を飛ばす問題を避けるための形の違い。
+4. **`jobs_dropped` は `pocketjs_guest_stats()` が毎回 `JS_IsJobPending()` を読む。** `app_report()` は `pocketjs_guest_destroy()` より**前**に走るので、destroy 時に latch するだけでは常に 0 になる。設計の「1 bit」はそのまま。
+5. **継続ターンも `turn_sum` / `ticks` に数える。** `PERF` / `PAINT` の書式は 1 バイトも変えていないが、`turn_ms` の意味を「JS が走ったターンの平均」に保つために継続ターンも母数に入れた。入れないと安いターンだけの平均になる。
+6. **時計は `arm_turn()` で `deadline` とは別に読む。** §1.3 は「1 回の読みで共有できる」と書いているが、`vm_clock` がどの時計を使うかは `vm_clock` の決定（clock-bench の 実測 では CCOUNT が systimer の 1/33 の費用）であり、`esp_timer` 単位の値を渡すとその決定が変わった日に黙って壊れる。1 ターンあたり時計 1 回の追加で、費用は 実測 25 ns（CCOUNT）〜833 ns（systimer）。
+7. **未実装: §7 の 12（実機）。** ホストのみで完結させる作業だったので、`smoke_device.py` / `test_settings.py` / `capture_home.py` / `benchmark_app.py` と L0 行列の再取得、`memlog.py --port --check` の実測ヒープは**まだ走らせていない**。焼く前にこれが要る。
+8. **未実装: `pocketjs_guest_interrupt()` の epoch 経路。** §5.3 のとおり削らず残し、述語が NULL のときだけ生きる形にした。呼び出し元は今も無い（事実 47）。
+
+### 9.3 測ったもの
+
+- **コーパス（実測(host)）**: 28 件（既存 23 + 新規 5）が、予算なし・`--budget-jobs 1 / 3 / 7 / 16`・`--force-yield` のすべてで、asan と o2 の両方でバイト一致。既存の `expected/*.txt` は 1 バイトも書き換えていない。
+- **Test262（実測(host)）**: `--force-yield` で asan / o2 とも **7,501 pass / 194 fail / 0 skip**。`test262-baseline.txt` から減っていない。
+- **静的 DIRAM（実測(build)）**: 115,372 B（`cd5117d`、L1 前）→ **115,420 B**（`ab2eb11`）= **+48 B**。内訳は `app_session.c.obj +40` / `vm_clock.c.obj +4` / `vm_wake.c.obj +4` で、合計が全差分と一致する（`vm_sched.c` と `guest.c` の DIRAM は 0）。上限 +8 KiB に対して 0.6%。同じ `sdkconfig.defaults` から生成した別々の `sdkconfig` で、probe off の 2 ビルドを比較したもの。
+- **Flash Code（実測(build)）**: 1,550,840 → 1,552,016 = **+1,176 B**。`CONFIG_POCKET_VM_SCHED=n` のビルドは 1,551,812（DIRAM は同じ 115,420）。
+- **実機の数値は 1 つも無い。** ターン長・完了遅延・空きヒープはすべて未測定。

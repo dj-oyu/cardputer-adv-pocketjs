@@ -17,6 +17,7 @@ bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .ca
 bash tools/vmtest/run.sh                       # コーパス（ASan+UBSan+LSan）
 bash tools/vmtest/run.sh --variant o2          # コーパス（-O2）
 bash tools/vmtest/run.sh --force-yield         # L1 以降: 全チェックポイントで yield させても出力が同じか
+bash tools/vmtest/run.sh --budget-jobs 3      # L1: 全 drain を 3 件で切っても出力が同じか
 bash tools/vmtest/run.sh --trace               # 同時に .cache/vmtest/traces/<name>.trace を書く
 python3 tools/vmtest/trace_stats.py .cache/vmtest/traces/closures.trace   # トレースの検証と要約
 python3 tools/vmtest/test262.py --fetch        # 固定 revision を .cache/test262 へ（初回のみ、約2分）
@@ -29,14 +30,15 @@ python3 tools/vmtest/timing.py                 # 時間の計測（書き込み�
 
 ## vmrun
 
-`vmrun.c` は `components/pocketjs_guest/src/guest.c` の挙動を決める部分を**写したもの**で、作り直していない。
+`vmrun.c` は `components/pocketjs_guest/src/guest.c` の挙動を決める部分を**写したもの**で、作り直していない。ただし **drain のループ本体だけは L1 から写しではなく同じもの**で、`components/pocketjs_guest/src/vm_sched.c` と `vm_clock.c` を `build.sh` がそのままリンクする（この 2 ファイルは esp ヘッダを含めない）。つまり予算・yield・継続の判定はファームと同一のコードで検査される。
 
 | 項目 | ゲストと同じ点 |
 | --- | --- |
 | アロケータ | ブロック前にサイズヘッダ、`usable_size` は要求サイズ（malloc の実バケットではない）、realloc は常に malloc+copy+free。QuickJS は `malloc_size` を `usable_size` で数えるので、上限と GC 閾値が同じ論理サイズで効く |
 | 上限 | `JS_SetMemoryLimit(160 KiB)` / `JS_SetMaxStackSize(20 KiB)`（`main/app_session.c` の値）。割り込みハンドラも同様に常時 0 を返すものを入れる |
 | 初期化順 | `JS_NewRuntime2` → 上限 → rejection tracker → `js_std_init_handlers` → `JS_NewContext` → `js_std_add_helpers(ctx, 0, NULL)` |
-| `drain_jobs()` | キューが空になるまで実行し、その後で未処理 rejection を報告。ジョブ自体が例外を投げたら dump して即座に失敗を返し、残りのキューと報告は次の drain に回る |
+| drain | `vm_sched_drain()` そのもの。キューが空になるまで実行し、**空になった境界でだけ**未処理 rejection を報告。予算で切れた境界では報告せず継続する。ジョブ自体が例外を投げたら dump して即座に失敗を返し、残りのキューと報告は次の drain に回る |
+| ターンの順序 | 継続 drain が空になるまで、ホスト側の完了配送（`--host-events` の `host.request`）も `frame()` も呼ばない。`docs/vm-L1-design.md` §2.1 の規則そのもの |
 | 報告文言 | `E pocketjs_guest: Unhandled Promise rejection: <reason>`（ESP_LOGE の時刻部分を除いたもの） |
 
 意図した差分（すべて観測結果を変えないか、明示フラグ）:
@@ -46,9 +48,21 @@ python3 tools/vmtest/timing.py                 # 時間の計測（書き込み�
 - `$262` は `--test262` の時だけ入れる。トレース時だけ GC 検出用のオブジェクトを 1 個作る（後述）。
 - ホストは 64 bit。`sizeof(JSValue)` はホスト 16 B・実機 8 B（NaN boxing）で、ポインタも倍。**同じプログラムでもホストの方が多く確保する**。`-m32` はこの WSL に multilib が無く使えなかった。
 
-終了コード: 0 正常、1 eval 中の未捕捉例外、2 ジョブの例外または未処理 rejection、3 引数・ファイルの誤り、4 ランタイム生成失敗。
+終了コード: 0 正常、1 eval 中の未捕捉例外、2 ジョブの例外または未処理 rejection、3 引数・ファイルの誤り、4 ランタイム生成失敗、5 ジョブキューの暴走（`--runaway-turns`）。
 
 主なオプション: `--profile device|host`、`--heap-limit N[K|M]`、`--stack-limit N[K|M]`、`--frames N`（eval 後に `globalThis.frame()` を N 回、各回の後に drain）、`--fail-alloc N`（N 回目の確保試行を NULL にする。L2c の OOM 検証用）、`--time`、`--stats`、`--module`、`--strict`、`--include FILE`。
+
+L1 の予算まわり:
+
+| オプション | 意味 |
+| --- | --- |
+| `--budget-jobs N` | 件数モードの予算。N 件走らせたら yield し、残りは次の「ターン」= 継続 drain で片付ける。**時計は一切読まない**（`limit_us<=0` で時間判定が切れる）ので、中断点はプログラムだけで決まる。ホストで時間予算を使うと ASan の下では再現しないので、期待値と比べる検査は全部これ |
+| `--force-yield` | `--budget-jobs 1`。L1 のチェックポイントはジョブ境界なので、この水準で頼める最強の yield がこれ。L2 で opcode チェックポイントが入れば弱シンボル経由でそれも有効になる |
+| `--runaway-turns N` | キューが空にならないまま N 回連続で継続ターンが続いたら終了コード 5。**既定は無効**（ファームの既定は 30）。`--budget-jobs 1` は正当な 200 件の drain を 200 回の継続ターンにするので、実機では暴走のその形が、ここでは検査そのものになる |
+| `--stop-turns N` | N 回の継続ターンでセッションを**終わらせる**（終了コード 0、キューは実行せず破棄）。`app_stop()` がキューを残したまま呼ばれる場合の代役で、設計 §3.2 の検査に要るがそこでは機構を指定していなかったため、ここで足したもの |
+| `--host-events` | `host.request(k)` を入れる。k 番目のジョブ境界で「完了が記録され」、**キューが空になったターンでだけ**配送される Promise を返す。`pocket_api_complete()` / `pocket_api_pump()` の縮小模型 |
+
+`#info turns=… max_run_turns=… jobs_dropped=…` は常に出る（`--stats` 不要）。`run.sh` と `test262.py` はどちらも `#info` 行を diff と判定から外す。
 
 ### プロファイル
 
@@ -59,17 +73,19 @@ python3 tools/vmtest/timing.py                 # 時間の計測（書き込み�
 
 空のプログラムでホストの `qjs_malloc_size` は 98,680 B（実測(host)、`--stats`）で、160 KiB の 6 割を占める。`device` プロファイルは**実機より余裕が少ない**。実機の空ランタイムの大きさは未計測。
 
-### FORCED-YIELD（L1 以降のためのフック、現状は未実装）
+### FORCED-YIELD
 
-`--force-yield` または環境変数 `VMTEST_FORCE_YIELD=1` を受け取ると、vmrun は弱シンボル
+`--force-yield` または環境変数 `VMTEST_FORCE_YIELD=1` で、vmrun は**すべてのチェックポイントで中断→ホストへ復帰→再開**させる。L1 のチェックポイントはジョブ境界なので、これは `--budget-jobs 1` と同じ意味になり、L0 の「フックが無いので普通に走らせた」という注記は消えた。
+
+加えて、弱シンボル
 
 ```c
 void vmtest_vm_set_force_yield(JSRuntime *rt, int on);
 ```
 
-が定義されていればそれを呼ぶ。L0 の VM には無いので `vmrun: note: force-yield requested; this VM has no checkpoint hook (L0), running unmodified` を出して普通に実行する（この行は diff から除外）。
+が定義されていれば呼ぶ。L2 で opcode のチェックポイント（`docs/vm-ledger/04-opcode-checkpoints.md`）を実装したら VM 側でこれを定義し、粒度が opcode まで細かくなる。`run.sh --force-yield` と `test262.py --force-yield` は、その時も「全地点で中断しても出力と合格集合が変わらない」の検査のまま使える（§7 完了条件）。
 
-意図: L2 で opcode のチェックポイント（`docs/vm-ledger/04-opcode-checkpoints.md`）を実装したら、VM 側でこのシンボルを定義し、有効時は**すべての**チェックポイントで中断→ホストへ復帰→再開させる。`run.sh --force-yield` と `test262.py --force-yield` がそのまま「全地点で中断しても出力と合格集合が変わらない」の検査になる（§7 完了条件「各確認地点の直前・直後に中断要求を発生させ、命令や副作用の重複・欠落がない」）。L1 のジョブ単位の予算も同じ入口を使ってよい。VM の中身は L0 では変更していない。
+L1 時点の結果（実測(host)）: コーパス 28 件が `--budget-jobs 1 / 3 / 7 / 16`・`--force-yield`・予算なしで、asan と o2 の両方でバイト一致。Test262 は `--force-yield` で両 variant とも 7,501 pass / 194 fail（基準と同じ）。
 
 ## コーパス
 
@@ -92,6 +108,11 @@ void vmtest_vm_set_force_yield(JSRuntime *rt, int on);
 | `error_toplevel.js` | トップレベルの未捕捉例外。drain されずキューが残ること |
 | `memory_device.js` | 160 KiB 下での参照カウント解放、大きな単発確保の OOM が InternalError として捕捉でき回復すること |
 | `gc_threshold_device.js` | **現行設定の性質**: 循環ゴミが上限まで溜まること（後述） |
+| `budget_frame_boundary.js` | 予算が drain を切っても `frame()` が drain の**中**に入らないこと。eval が積んだ連鎖の最後の出力と `frame 1` の間に境界がある |
+| `budget_completions.js` | 継続ターン中に記録された完了が、落ちず・重複せず・要求順に・**キューが空になったターンでだけ**配送されること |
+| `budget_starve.js` | 毎ターン 41 件積んで予算 8 件でも、次の `frame()` までに必ず片付くこと（1 フレーム 1 連鎖で遅れない） |
+| `runaway_jobs.js` | `f(){Promise.resolve().then(f)}`。キュー長は常に 1、各ジョブは一瞬なので旧来の壁時計ガードには見えない形。終了コード 5、LSan 0 |
+| `stop_with_queue.js` | キューを残したままのセッション終了。残りは**実行せず**破棄、`#info jobs_dropped=1`、残っていた rejection は**報告しない**（捨てたジョブの中に catch があったかもしれない）、終了コード 0 |
 | `bench_*.js` | 時間計測用。出力はチェックサムで、これも意味論の基準になる |
 
 **期待値の更新規則**: `run.sh --bless` は新しいファイルを足した時にだけ使う。既存の `expected/*.txt` を書き換えるのは、挙動の変更が意図されたもので理由を説明できる場合だけで、その変更だけの commit にする（§12「新たな失敗を期待値の書き換えだけで処理しない」）。
