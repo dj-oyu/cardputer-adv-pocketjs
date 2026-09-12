@@ -18435,10 +18435,17 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     // A flat frame needs none of this: its argv is one subtraction from its
     // link, its `this` is the slot below its func slot or undefined, and its
     // new.target is always undefined (constructors are not flattened, H8).
-    // Three spill slots per C activation, not per JS level -- which is the
+    // Four spill slots per C activation, not per JS level -- which is the
     // whole point.
     JSValueConst *floor_argv;
     JSValueConst floor_this, floor_new_target;
+    // And argc. A generator/async floor's frame is JSAsyncFunctionState.frame,
+    // whose arg_count async_func_init set to arg_buf_len = max(declared,
+    // passed), while async_func_resume enters with s->argc; so that frame
+    // cannot give the floor's argc back, and OP_rest reads argc after a flat
+    // call made from a default-parameter initializer. Missed in the first
+    // version (three spills), found by the L2b adversarial review.
+    int floor_argc;
 #endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_STEP
@@ -18470,6 +18477,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         return JS_EXCEPTION;
     }
 #ifdef CONFIG_POCKET_VM_FLATCALLS
+    floor_argc = argc;
     floor_argv = argv;
     floor_this = this_obj;
     floor_new_target = new_target;
@@ -21383,10 +21391,11 @@ done:
         // block, where local_buf == arg_buf (see the resume entry above).
         local_buf = (sf->l2_flags & JS_SF_SEG) ? (JSValue *)(sf + 1) : arg_buf;
         pc = sf->cur_pc;
-        argc = sf->arg_count;
         caller_ctx = sf->caller_ctx;
         func_obj = sf->cur_func;
         if (sf->l2_flags & JS_SF_FLAT) {
+            // D11: a flat push leaves the true argc in arg_count.
+            argc = sf->arg_count;
             // Its argv is the caller's slots below the sp its link saved
             // (call_argv = sp - call_argc at the call), its `this` the slot
             // below the func slot for a method call, and it was never a
@@ -21395,6 +21404,9 @@ done:
             this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
             new_target = JS_UNDEFINED;
         } else {
+            // Not sf->arg_count: for a generator/async floor that field is
+            // max(declared, passed), not the count this activation began with.
+            argc = floor_argc;
             argv = floor_argv;
             this_obj = floor_this;
             new_target = floor_new_target;

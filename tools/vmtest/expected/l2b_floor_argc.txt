@@ -1,0 +1,8 @@
+gen 0 []
+gen 0 []
+gen 2 [6,7]
+async 0 []
+async 1 [6]
+asyncgen 0 []
+asyncgen 2 [6,7]
+exit=0

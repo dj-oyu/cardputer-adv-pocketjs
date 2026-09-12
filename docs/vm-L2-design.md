@@ -938,12 +938,24 @@ C から入った床は `SEG` のみ、generator/async の床は両方 0（`js_m
 これが「ネイティブ再入の深さ」を C スタック残量として直接測っている
 （`deep_recursion_device.js` の `through-map` が `RangeError` のまま通ることがその検査）。
 L2c が「ネイティブが同期の戻り値を待つ区間ではホストに戻らない」を実装するとき、床の持ち主
-（どの C 活性が中断を許すか）はこの活性ごとの C ローカル（`floor_argv` / `floor_this` /
+（どの C 活性が中断を許すか）はこの活性ごとの C ローカル（`floor_argc` / `floor_argv` / `floor_this` /
 `floor_new_target`）と同じ場所に置くのが自然で、そこで数える。
 
-**床の持ち物（C 活性ごとに 3 スロット、JS の深さには比例しない）:** 入口引数の `argv` / `this` /
-`new.target`。フラットフレームには要らない — `argv` は自分の link の `caller_sp - arg_count`、
-`this` は `ret_shape` が method なら func スロットの下、`new.target` は常に undefined。
+**床の持ち物（C 活性ごとに 4 スロット、JS の深さには比例しない）:** 入口引数の `argc` / `argv` /
+`this` / `new.target`。フラットフレームには要らない — `argc` は D11 どおり `arg_count`、`argv` は
+自分の link の `caller_sp - arg_count`、`this` は `ret_shape` が method なら func スロットの下、
+`new.target` は常に undefined。
+
+**訂正（L2b の敵対的レビューで発見）:** 最初の版は床の持ち物を 3 つとし、床へ戻るときの `argc` を
+`sf->arg_count` から組み直していた。**C から入った床ならそれで正しい**（D11 で真の `argc` を残して
+いる）が、**generator / async の床のフレームは `JSAsyncFunctionState.frame` で、その `arg_count` は
+`async_func_init` が書く `arg_buf_len = max(宣言数, 渡した数)`** であり、`async_func_resume` が
+入口で渡す `s->argc` とは違う。デフォルト引数の初期化子でフラット呼び出しをした後に `OP_rest` が
+`argc` を読むので、`function* g(a = h(), ...r)` を引数なしで呼ぶと、フラット経路だけ `r` が
+`[undefined]` になっていた（再帰・alloca は `[]`）。`floor_argc` を 4 つ目として退避して直し、
+`corpus/l2b_floor_argc.js`（generator / async / async generator × 引数の過不足）で固定した。
+**L2c が床の状態を保存するときも、この 4 つが床の持ち物である。**
+D11 の「`argv` は `sf->arg_buf`」「`argc` は `sf->arg_count`」は、**フラットフレームについてだけ**成り立つ。
 
 ### 10.4 H8 と、囲った経路（従来の同期呼び出し・中断禁止）
 
