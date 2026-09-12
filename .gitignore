@@ -15,7 +15,9 @@ sdkconfig.*.old
 .env
 .env.*
 !.env.example
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/c_cpp_properties.json
 .idea/
 
 # OS and Python caches
