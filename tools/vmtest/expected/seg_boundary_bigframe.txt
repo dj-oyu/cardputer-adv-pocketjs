@@ -1,0 +1,5 @@
+big-locals 5999
+big-args 7998000
+wrapped 6049
+big-then-deep 8000060
+exit=0

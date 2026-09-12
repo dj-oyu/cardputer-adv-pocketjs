@@ -78,6 +78,22 @@ void vmprobe_completion_sample(int64_t latency_us);
 // does not blend into the next session's head in a captured record.
 void vmprobe_session_reset(void);
 
+// G1's device side (docs/vm-L2-design.md sec.1.3: "host is vmrun/
+// stack_probe.sh; the device is confirmed with uxTaskGetStackHighWaterMark").
+// Call with the JS call depth the caller has JUST reached (i.e. from inside
+// the deepest active JS frame), right next to vmprobe_frame_sample's own
+// stack_hw_min sample above. uxTaskGetStackHighWaterMark reports a
+// monotonically NON-INCREASING low-water mark since the ui task started, so
+// sampling it partway through a single, ever-deepening recursive probe (the
+// shape apps/vmprobe/deep_recursion.js already uses to find the JS-visible
+// stack limit at session start, before any frame() has run) attributes each
+// sample to the depth the caller was actually at: nothing deeper has
+// happened yet in that task's life. Wired from JS through
+// __vmprobe_stack_sample() in main/ui/jsconsole.c (also CONFIG_POCKET_VM_PROBE-
+// only), not from quickjs.c -- this is a probe workload calling out, not an
+// interpreter checkpoint, so it costs nothing on the interpreter's fast path.
+void vmprobe_depth_stack_sample(uint32_t depth);
+
 #ifdef __cplusplus
 }
 #endif

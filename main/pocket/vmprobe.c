@@ -54,6 +54,11 @@ static const char *TAG = "vmprobe";
 // actually cut a call short. This can, and needs its own cap: a floor-limited
 // frame tick plus its continuation is already 2 calls per tick.
 #define VMPROBE_DRAINRUN_CAP 128
+// G1 device side: one sample per depth the probe workload chose to report
+// (apps/vmprobe/deep_recursion.js reports a handful of checkpoints while
+// diving to find its own overflow depth, not one per level), so this cap is
+// small on purpose -- see vmprobe_depth_stack_sample in vmprobe.h.
+#define VMPROBE_DEPTH_CAP 16
 #define VMPROBE_WINDOW_US 1000000
 #define VMPROBE_SAMPLE_EVERY_N_FRAMES 8   // ~4 Hz at a 33 ms frame pace
 #define VMPROBE_LINE 4096
@@ -82,6 +87,16 @@ static size_t   js_used_max, js_limit_last;
 static unsigned heap_free_min, heap_largest_min;
 static UBaseType_t stack_hw_min;
 
+// G1 device side, right next to stack_hw_min above: (depth, stack headroom
+// AT that depth) pairs, reported by a probe workload via
+// vmprobe_depth_stack_sample. Two parallel arrays rather than one struct
+// array so put_line (which takes one value series at a time) can emit both
+// as ordinary "VMPROBE S ... depth ..." / "... depth_hwm ..." lines without
+// a new line format.
+static uint32_t depth_arg[VMPROBE_DEPTH_CAP];
+static uint32_t depth_hwm[VMPROBE_DEPTH_CAP];
+static unsigned depth_count, depth_dropped;
+
 // Set from the input task (main.c's usb_stroke), read on the ui task at
 // session start. Plain atomic: it is one word and the two tasks never need
 // more than "the last letter the host sent".
@@ -97,6 +112,7 @@ static void window_reset(void) {
     frame_count = 0; lat_count = 0; lat_dropped = 0; qpeak_max = 0;
     drainrun_count = 0; drainrun_dropped_device = 0;
     js_used_max = 0; heap_free_min = 0; heap_largest_min = 0; stack_hw_min = 0;
+    depth_count = 0; depth_dropped = 0;
     window_start_us = esp_timer_get_time();
     window_ticks = 0;
 }
@@ -130,15 +146,20 @@ static void flush_window(void) {
     int n = snprintf(line, sizeof line,
         "VMPROBE WINDOW seq=%u cond=%u ms=%u frames=%u lat_n=%u lat_drop=%u "
         "qpeak_max=%u heap_free_min=%u heap_largest_min=%u js_used_max=%u "
-        "js_limit=%u stack_hw_min=%u flush_us=%u drainrun_drop=%u\n",
+        "js_limit=%u stack_hw_min=%u flush_us=%u drainrun_drop=%u depth_drop=%u\n",
         window_seq, vmprobe_condition(),
         (unsigned)((began - window_start_us) / 1000),
         frame_count, lat_count, lat_dropped, qpeak_max,
         heap_free_min, heap_largest_min, (unsigned)js_used_max,
         (unsigned)js_limit_last, (unsigned)stack_hw_min, (unsigned)flush_us_last,
-        drainrun_dropped_device);
+        drainrun_dropped_device, depth_dropped);
     at = (n > 0 && (size_t)n < sizeof line) ? (size_t)n : 0;
     at = put_line(line, at, window_seq, "frame", frame_us, NULL, frame_count);
+    // G1 device side: "depth" and "depth_hwm" share an index (depth[i] was
+    // sampled at stack level depth_hwm[i]), same convention as "jobs"
+    // pairing with "frame"/"call"/"drain" above by frame index.
+    at = put_line(line, at, window_seq, "depth", depth_arg, NULL, depth_count);
+    at = put_line(line, at, window_seq, "depth_hwm", depth_hwm, NULL, depth_count);
     at = put_line(line, at, window_seq, "call",  call_us,  NULL, frame_count);
     at = put_line(line, at, window_seq, "drain", drain_us, NULL, frame_count);
     at = put_line(line, at, window_seq, "jobs",  NULL, jobs_n, frame_count);
@@ -240,6 +261,20 @@ void vmprobe_completion_sample(int64_t latency_us) {
         // Counted and reported rather than silently dropped: a non-zero
         // lat_drop tells the host its p95 for that window is not exact.
         lat_dropped++;
+}
+
+void vmprobe_depth_stack_sample(uint32_t depth) {
+    UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
+    if (depth_count < VMPROBE_DEPTH_CAP) {
+        depth_arg[depth_count] = depth;
+        depth_hwm[depth_count] = (uint32_t)hwm;
+        depth_count++;
+    } else {
+        // Only reachable if a probe workload reports more than
+        // VMPROBE_DEPTH_CAP checkpoints inside one window; counted rather
+        // than silently dropped, same convention as lat_dropped above.
+        depth_dropped++;
+    }
 }
 
 void vmprobe_session_reset(void) {
