@@ -66,11 +66,12 @@ menu "Pocket VM (L0 measurement probes)"
 
             What this changes for an app: per JS call the ui task's 20 KiB C
             stack loses the frame (48 B) and the locals block, keeping only
-            JS_CallInternal's own C frame -- C recursion itself is still
-            there (that is L2b), so deep recursion still ends in the same
-            RangeError from JS_SetMaxStackSize; a frame the heap refuses is
-            an InternalError "out of memory", the error a generator's heap
-            frame already produced. Generator / async frames are untouched.
+            JS_CallInternal's own C frame -- and with POCKET_VM_FLATCALLS
+            (L2b, below) not even that for a JS-to-JS call. Deep recursion
+            still ends in the same RangeError from JS_SetMaxStackSize; a
+            frame the heap refuses is an InternalError "out of memory", the
+            error a generator's heap frame already produced. Generator /
+            async frames are untouched.
 
             JS_SetMaxStackSize (app_session.c: 20 KiB) is read twice on this
             path (design D10): as the C-stack limit it always was, and as a
@@ -91,7 +92,7 @@ menu "Pocket VM (L0 measurement probes)"
     config POCKET_VM_FLATCALLS
         bool "JS-to-JS calls stay in one JS_CallInternal activation (L2b)"
         depends on POCKET_VM_SEGFRAMES
-        default n
+        default y
         help
             docs/quickjs-freertos-vm-spec.md sec.7 L2b, docs/vm-L2-design.md
             sec.10. On, a call opcode whose target is a bytecode function
@@ -117,7 +118,10 @@ menu "Pocket VM (L0 measurement probes)"
             Off, every JS-to-JS call is a C recursion of JS_CallInternal as
             in L2a (the C-stack guard answers first, exactly as before).
             The host harness builds this switch as the "-flat" / "-recur"
-            variants of tools/vmtest/build.sh.
+            variants of tools/vmtest/build.sh. Default y since every host
+            gate passed on it (design sec.10.5); NOT yet run on the board,
+            like L2a itself (design sec.8.4) -- that is what the switch is
+            for.
 
     config POCKET_VM_FAIR
         bool "Fair ordering: run the pumps on a continuation turn too"
