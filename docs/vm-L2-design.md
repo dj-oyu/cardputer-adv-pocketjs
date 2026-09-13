@@ -1155,3 +1155,254 @@ push の後）で、**誰が中断を受け取り、誰が再開を呼ぶか**�
 | D14 | **実機の YIELD 要求は専用の要求ビット。** 他タスク／ISR が atomic に立て、同時に `interrupt_counter` を 0 に寄せて次のポーリングでスローパスへ入れる。TERMINATE は従来の割り込みハンドラ（ウォッチドッグ述語）のまま。 | ホットパスの読み出しは増えず、要求は落ちない（カウンタへの書き込みが競合で失われても、立ったビットは 10,000 ポーリング以内に読まれる）。**§4.3「述語の返り値の型を YIELD/TERMINATE に広げる」はこの決定で置き換える**（`quickjs-vm.h` の「割り込みハンドラに乗せない」側を採る）。 |
 | D15 | **複数ターンにまたがる同期 `frame()` の暴走は、タスクの累積時間で上限を切る。** | 1回の `frame()` 呼び出しが中断をまたいで使った合計時間を数え、上限で TERMINATE。ターンごとの 250 ms 壁時計はそのまま残す。上限値は実機で測って決める。 |
 | D16 | **「キューにジョブが残っている」と「実行途中で中断している」を別のビットにする。** 公平モードは前者のときだけ pump する。 | 中断鎖の上で resolve を同期実行しない。公平モードの意味（ジョブ境界で公平に）が保たれる。 |
+
+---
+
+## 12. L2c の設計（2026-09-13、D13〜D16 の下で。レビュー 1 巡目を反映）
+
+対象は §11 の穴のうち設計が決める側: H1 H2 H3 K1 H4 H6 H9 H10 H11 H12 H13 H14。決定は D17 から番号を振る。
+行番号は本日のワークツリー（`vm/main` 3aee5d9）の `components/quickjs-ng/quickjs-ng/quickjs.c` を指す。
+**ここに書くものはすべて設計であって、実装も実測もまだ無い。** 「実測」と書いていない数字は計算値か推定。
+
+前提（既決、変えない）: D1 YIELD は `done_generator` 形の返り値で確保しない。D2 `JSStackFrame` 48 B。D4 中断フレームは GC が辿れる所有者を持ち、目印は `l2_flags` の専用ビット。D8 A の 7 地点と B = push 後。D9 JSValue 表現を触らない。D11/D12。床の持ち物 4 つ（§10.3）。
+L2c は `CONFIG_POCKET_VM_FLATCALLS` を要求する（`l2_flags` / `ret_shape` / `JSVMLink` はそのビルドにしか無い: `quickjs.c:397-423`）。スイッチは新設の `CONFIG_POCKET_VM_YIELD`（`depends on POCKET_VM_FLATCALLS`）で、n なら A 地点の slow path は今の `JS_ThrowInterrupted` のまま（§1.2 の赤い関所の状態に戻る）。
+
+### 12.1 用語と、1 つの表
+
+| 語 | 意味 |
+| --- | --- |
+| 活性 | `JS_CallInternal` の C 呼び出し 1 回。床（最初に積んだフレーム）と、その上にフラット呼び出しで積まれたフレームの列 |
+| 鎖 | 中断時に生きているフレーム列。top（中断した命令のフレーム）から `prev_frame` を辿って床まで |
+| 止まってよい床 | `l2_flags & JS_SF_MAY_YIELD`（D17）。この活性の中の A/B 地点は YIELD を**受理**できる |
+| 保持 | 要求ビットは立っているが受理できない地点で、ビットを消さずに通常処理を続けること（仕様 §7「要求を保持して通常処理を続け、次の安全な地点で応答」） |
+| 再開の持ち主 | 鎖を再開する C 関数。床の種類で決まる（D18） |
+
+### 12.2 D17: 止まってよい床は `l2_flags` の 1 ビットで、活性の入口で決まる（H2, H4）
+
+**決定: `JS_SF_MAY_YIELD = 4u`（offset 37 の空きビット、§10.6。既存は `JS_SF_SEG=1u` / `JS_SF_FLAT=2u`、`quickjs-vmstack.h:434-435`）。床の push 時に 1 回だけ計算し、フラット子には push 時にマスクして写す。安全地点の判定は現在フレームの 1 ビット比較。**
+
+床が MAY_YIELD になる条件は 2 つの AND で、どちらも O(1):
+
+1. **入口トークン。** 再開の持ち主（12.3 の集合）だけが `JS_CallInternal` を呼ぶ直前に `rt->vm_entry_ok = 1` を書く。`JS_CallInternal` はプロローグ・ポーリングの直後（`:18476-18478` の次）で読んで**必ず 0 に戻す**（class call 経路 `:18520-18528` へ落ちる場合も消費する）。読んだ値はこの活性の C ローカル `entry_ok` になる。
+   **ホストはトークンを直接書かない。** `quickjs-vm.c` に `JS_VMCall(ctx, func, this, argc, argv)` と `JS_VMEval(ctx, src, len, name, flags)` を置き、この 2 つが「トークンを書く → `JS_Call` / `JS_Eval` → トークンを 0 に戻す」を囲う。後半の消去があるので、コンパイルエラーなどで `JS_CallInternal` に達しなかったときにトークンが残って次の無関係な呼び出し（ホストの getter）に MAY_YIELD を与えることは無い。`JS_VMEval` は `flags & JS_EVAL_TYPE_MODULE` ならトークンを書かない（12.14: モジュール本体は止めない。書くと `js_inner_module_linking:32068` の `JS_Call(m->func_obj, JS_TRUE, 0, NULL)` が MAY_YIELD 床を得て、リンク途中で中断した鎖が `:32069` の `goto fail` の下に残る）。
+2. **下にバイトコードのフレームが無いこと。** `rt->current_stack_frame == NULL`（`js_vm_enter` が `:8700` で使っているのと同じ検査）。例外は 1 つだけ: `prev` が `js_async_generator_resolve_function` の C_FUNCTION_DATA ネイティブフレーム（`js_call_c_function_data` の `sf_s`、`:6641`、push `:6668-6670`、pop `:6676`）で、かつ `prev->prev_frame == NULL` のとき。この関数は await 復帰のジョブ（`promise_reaction_job:56600` `JS_Call(handler)` → `js_call_c_function_data` → `js_async_generator_resolve_function:22479` → `js_async_generator_resume_next:22509`）でしか本体に入らず、`resume_next` の後の処理は `return JS_UNDEFINED`（`:22511`）だけなので、その C フレームが待っているものは無い。判定は `prev->cur_func` の class_id と `u.c_function_data_record->func` の比較（D4-3 のとおり class_id を先に見る）。async **関数**の await 復帰は class call `:18527` 直行でネイティブフレームを積まないので、例外扱いは async generator 側だけで足りる。
+
+MAY_YIELD が付く床の書き手は 2 箇所: C 入口の床 `sf->l2_flags = JS_SF_SEG` (`:18592`) と、generator/async の再開入口 `:18503-18509`（`js_mallocz` 由来で 0 のまま。**再開のたびに書き直す** — 活性の性質であって関数の性質ではない）。フラット push `nsf->l2_flags = JS_SF_SEG | JS_SF_FLAT` (`:21296`) は `| (sf->l2_flags & JS_SF_MAY_YIELD)` になる。
+
+**なぜトークンだけで足りないか。** ホストの `JS_GetPropertyStr` が getter を呼ぶ経路も `current_stack_frame == NULL` で入る。トークンは「呼び手が再開の仕組みを持つ」を言い、NULL 検査は「呼び手と本体の間に同期的に待つ JS が居ない」を言う。両方要る。
+
+**なぜ C ローカル `floor` を足さないか。** 現在フレームが床でない（フラット子の中の）安全地点で床の性質を見るには、床へのポインタか、子へ写したビットのどちらかが要る。C ローカルは活性ごとにスピル 1 本（L2b の実測: G1 528 → 544 B/段、§10.5）、ビットの写しはフラット push ごとに AND/OR 1 回。後者を採る。
+
+**この条件が止めないもの（D13 との部分的衝突、12.14 にも記す）:** JS から呼ばれた async 関数の**最初の同期区間**（最初の await まで）。`flat_call` は `js_vm_flat_callable:18384-18392`（`func_kind == JS_FUNC_NORMAL` のみ。コメント `:19033-19036`）で弾いて upstream の C call になり、`js_async_function_call:22134` → `async_func_resume` → `JS_CallInternal(GENERATOR)` は `current_stack_frame` が呼び出し元の JS フレームなので MAY_YIELD にならない。止まるのは (a) ホストが `JS_VMCall` で直接呼んだ async `frame()` の最初の区間と、(b) await 復帰以降（ジョブから）。
+
+### 12.3 D18: YIELD を受け取る C 呼び出し元の集合と、返し方・再開の入口（H1）
+
+**決定: YIELD は `JS_CallInternal` の新ラベル `vm_yield:` で `done_generator` 形に保存して返る。返り値は `JS_EXCEPTION`、ただし `rt->current_exception` は `JS_UNINITIALIZED` のまま（`:21336` が空を表すのと同じ値）で、`rt->vm_susp.top != NULL` が「中断中」の唯一の真偽。呼び出し元は `JS_IsException` の前に `js_vm_suspended(rt)` を見る。再開は床の種類を問わず `JS_CallInternal` の 1 つのラベル `vm_resume:` に集まる。**
+
+なぜ `JS_EXCEPTION` か: D9 で新しいタグは作れない。通常関数の戻り値は任意の JSValue なので値では表せない。`JS_EXCEPTION` を選ぶ理由は「気づいていない呼び出し元は必ず『値を使わない』分岐に落ちる」ため — 黙って進む（`JS_UNDEFINED` を返した場合）より、大きな音で壊れる側に倒す。ただし気づいていない呼び出し元が YIELD を受け取ることは D17 により構造的に無い: MAY_YIELD を与えるのはトークンを書いた関数だけで、その関数自身が受け口を持つ。
+
+**再開の持ち主（= トークンを書く場所）は 3 種:**
+
+| 床の種類 | 入口（トークンを書く場所） | 中断が通って戻る C 関数 | 再開の持ち主 |
+| --- | --- | --- | --- |
+| **SEG 床**（`JS_SF_SEG`、C 入口） | ホスト: `guest.c:526` `JS_Call(frame)` → `JS_VMCall`、`vmrun.c:970` → `JS_VMCall`。スクリプト本体: `vmrun.c:940` `JS_Eval` / `guest.c:427` → `JS_VMEval` — 実体は `JS_EvalFunctionInternal:38779` の `JS_CallFree`（`fun_obj` をその場で解放する。K1 で対処）。`vmrun.c:936` の `JS_EvalFunction`（モジュール）はトークン無し | `JS_CallFree:21471-21477`（`func_obj` を解放）→ `__JS_EvalInternal:38923` → ホスト | ホストが `JS_VMResume(ctx)` を呼ぶ。返り値はその関数の最終値（`frame()` の戻り値、スクリプトの完了値） |
+| **ASYNC 床**（`func_kind == JS_FUNC_ASYNC`、`l2_flags & SEG == 0`） | `async_func_resume:21746` の直前。`js_async_function_call:22134`（`frame` が async 関数のとき、最初の同期区間）と `js_async_function_resume:22007`（await 復帰ジョブ `promise_reaction_job:56600` `JS_Call(handler)` → `js_async_function_resolve_call:22098`。`:56614` の `func = argv[is_reject]` は await では `resolving_funcs1 = JS_UNDEFINED`（`:22057-22058`）なので通らない）の両方 | `async_func_resume` → `js_async_function_resume` → `js_async_function_resolve_call` → `promise_reaction_job` → `JS_ExecutePendingJob`（ジョブは**正常に完了**する。継続は鎖が持つ） | `JS_VMResume` が床から `s = container_of(floor, JSAsyncFunctionData, func_state.frame)` を取り `js_async_function_resume(ctx, s)` を再度呼ぶ。await/return の後処理（`:22029-22071`）はこの関数の中にあるので、そのまま走る |
+| **ASYNC_GENERATOR 床** | `async_func_resume` の直前、`js_async_generator_resume_next:22428`（`resume_exec:`） | `resume_next` → `js_async_generator_resolve_function:22509` → ネイティブフレーム → `promise_reaction_job` | `JS_VMResume` が `s = container_of(floor, JSAsyncGeneratorData, func_state.frame)` を取り `js_async_generator_resume_next(ctx, s)` を呼ぶ。`s->state` は EXECUTING のままにしておくので、既存の `case EXECUTING: goto resume_exec`（`:22387-22389`）がそのまま再開入口になる |
+
+**同期 generator の本体は集合に入らない**（衝突欄に記す）。`js_generator_next:21807` は C 関数メソッドで、`js_call_c_function` のネイティブフレーム（`sf_s`、ledger 02 §2c）を積んでから呼ばれ、しかも `.next()` の呼び手は同期的に C スタック上で待っている。D8 は命令の途中に安全地点を置かない。**D17 の NULL 検査がこれを機械的に弾く**ので、集合に入れないための特別な分岐は要らない。
+
+**受け口側の変更（いずれも「`JS_IsException` の前に中断を見る」）:**
+
+- `js_async_function_resume:22008`: `if (js_vm_suspended(rt)) return true;` を `if (JS_IsException(func_ret))` の前に。`cur_sp[-1]` を触らず、`js_async_function_terminate` を呼ばない。`js_async_function_call:22138` の `js_async_function_free` は yield が戻った後に走るので、`vm_yield:` 内で先に取る持ち主参照（12.5）が生存を守る。
+- `js_async_generator_resume_next:22429`: 同じく `if (js_vm_suspended(rt)) goto done;`。`state` は EXECUTING のまま。
+- `promise_reaction_job`、`js_microtask_job`、`js_finrec_job`、`js_promise_resolve_thenable_job` は**変えない**: これらの handler 呼び出し（`:56600` 等）はトークンを書かないので、handler が通常関数ならその床は MAY_YIELD ではなく保持になる。ジョブが再開単位になるのは async 床を経由するときだけで、そのときジョブ自体は完了する。**ジョブの再投入はしない。** `JS_ExecutePendingJob:2280` が `list_del` して `:2298` で解放する順序を触らずに済む。
+
+**`vm_yield:` の処理（確保ゼロ、O(鎖の深さ)）:**
+
+```
+vm_yield:                                   // A/B 地点から、r > 0 かつ MAY_YIELD のとき
+    sf->cur_pc = pc; sf->cur_sp = sp;       // done_generator と同じ 2 行 (:21351-21352)
+    sf->l2_flags |= JS_SF_SUSPENDED;        // 8u。top の目印 (D4)
+    floor = sf; while (floor->l2_flags & JS_SF_FLAT) { child = floor; floor = floor->prev_frame; }
+    if (floor != sf)                        // 床の sp は子の link が持っている (D12)
+        floor->cur_sp = (((JSVMLink *)child) - 1)->caller_sp;
+    floor->l2_flags |= JS_SF_SUSPENDED;
+    K1 の所有化 (12.5)                        // js_dup / ref_count++ のみ、確保なし
+    rt->vm_susp = { top = sf, floor, ctx = floor->caller_ctx, kind, throw = 0 };
+    rt->current_stack_frame = floor->prev_frame;   // H3 (12.4)
+    js_vm_leave(...);  atomic_store(&rt->vm_yield_req, 0);
+    return JS_EXCEPTION;                    // exception: / done: を通らない
+```
+
+`floor` を辿る while は yield 時だけ走る。フラット子の `cur_pc` は呼び出し時に書かれている（`:21294` の直前、D8 §7.3-1）ので何も足さない。
+
+**再開入口 `vm_resume:`（1 つ。SEG 床と generator 系床の両方がここへ来る）。** 到達の仕方:
+
+- SEG 床: `JS_VMResume` → `JS_CallInternal(susp.ctx, floor->cur_func, spill.this, spill.new_target, spill.argc, spill.argv, JS_CALL_FLAG_VM_RESUME)`（`JS_CALL_FLAG_VM_RESUME = (1 << 3)`、`:18186` の隣に内部定義）。プロローグ・ポーリングと `floor_* = 引数`（`:18476-18483`）の直後、`:18485` の `JS_TAG_OBJECT` 判定の**前**で `if (flags & JS_CALL_FLAG_VM_RESUME) goto vm_resume;`。`:18532`（`arg_allocated_size`）にも `:18574-18586`（予算検査と push）にも達しない — 鎖はもう積んである。
+- ASYNC / ASYNC_GENERATOR 床: 持ち主が `async_func_resume` → `JS_CallInternal(GENERATOR)` を呼ぶ。`:18485` の generator 分岐で `sf = &s->frame` を取った直後、`sf->cur_sp` を読む（`:18498`）より前に `if (sf->l2_flags & JS_SF_SUSPENDED) goto vm_resume;`。`:18499-18509` の組み立て（`current_stack_frame = sf`（床）を書く `:18502` を含む）は通らないので、床を current にしてしまう問題は起きない。
+- **プロローグ・ポーリング（`:18476`）は両経路とも通す**（ENTER を既存の仕組みで記録するため、D23）。ただし `-1`（TERMINATE。`interrupt_handler` = `app_session.c:120-122` の `stop_requested || deadline`）を返したときに**そのまま `return JS_EXCEPTION` してはならない** — `vm_susp.top` が非 NULL のままなので呼び出し元は再中断と読み、次ターンも `JS_VMResume` → 同じ場所で `interrupted` → 鎖は永久に再開も終了もされない。VM_RESUME（または SUSPENDED な generator 床）では、ポーリングの失敗を `rt->vm_susp.throw = 1` に変えて `vm_resume:` へ進む（`JS_ThrowInterrupted` は既に投げてある）。これは D25 の Terminate と同じ道になる。
+
+`vm_resume:` の本体:
+
+```
+vm_resume:
+    top = rt->vm_susp.top; floor = rt->vm_susp.floor;
+    floor->prev_frame = rt->current_stack_frame;     // NULL か、12.2 の例外のネイティブフレーム
+    rt->current_stack_frame = top;
+    floor->cur_sp = NULL;                            // 実行中は NULL (D4 / vmstack.h:414-417)
+    floor->l2_flags &= ~JS_SF_SUSPENDED; top->l2_flags &= ~JS_SF_SUSPENDED;
+    sf = top;  p = JS_VALUE_GET_OBJ(sf->cur_func);  b = p->u.func.function_bytecode;
+    ctx = b->realm;  caller_ctx = sf->caller_ctx;  var_refs = p->u.func.var_refs;
+    arg_buf = sf->arg_buf;  var_buf = sf->var_buf;  stack_buf = var_buf + b->var_count;
+    local_buf = (sf->l2_flags & JS_SF_SEG) ? (JSValue *)(sf + 1) : arg_buf;   // :21392 の規則
+    sp = sf->cur_sp;  sf->cur_sp = NULL;  pc = sf->cur_pc;
+    func_obj = sf->cur_func;
+    if (sf->l2_flags & JS_SF_FLAT) {                 // :21396-21405 の FLAT 復帰と同じ式
+        argc = sf->arg_count;
+        argv = (((JSVMLink *)sf) - 1)->caller_sp - argc;
+        this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
+        new_target = JS_UNDEFINED;
+    }   // else: 引数がそのまま床の argc/argv/this/new_target（floor_* も同じ値）
+    rt->vm_susp.top = NULL;
+    if (rt->vm_susp.throw) { rt->vm_susp.throw = 0; goto exception; }   // 12.10 D25
+    goto restart;
+```
+
+top がフラット子のとき `argc/argv/this_obj/new_target` を組み立て直すのは、読み手が実在するため: `OP_rest` `:18867-18869` と `OP_special_object arguments` `:18813/18819` は `argc/argv`、`OP_push_this` `:18778/18792` は `this_obj`、`NEW_TARGET` `:18829` は `new_target` を読む。D29 の B 地点（`pc == byte_code_buf`）で子が yield すると再開直後の最初の命令が `OP_push_this` でありうる。`floor_*` は常に床のもの（SEG は spill から渡した引数、async は `s->argc / s->frame.arg_buf / s->this_val` `:21746-21747`、`new_target` は undefined）で、`:18479-18483` の代入がそのまま効く。
+
+`JS_VMResume` の返り値契約は元の呼び出しと同じ: `js_vm_suspended(rt)` が真なら再中断、偽で `JS_EXCEPTION` なら例外、それ以外は完了値（ASYNC 系は `JS_UNDEFINED`。promise は最初の呼び出しで既に渡してある）。
+
+### 12.4 D19: 中断中の `rt->current_stack_frame` と、鎖の上に何も積ませないこと（H3）
+
+**決定: yield 後の `rt->current_stack_frame` は `floor->prev_frame`（D17 により NULL か、12.2 の例外のネイティブフレーム）。中断中に JS を走らせる `JS_CallInternal` の入口は 2 つあり、**両方**を `JS_ThrowInternalError(ctx, "VM suspended")` で拒む: (i) バイトコード床の push（`:18592` の直前。`flags & VM_RESUME` を除く）、(ii) generator/async の再開入口（`:18485` の分岐の中、`sf->l2_flags & JS_SF_SUSPENDED` でない `sf` のとき）。再開は床の `prev_frame` を書き直す（12.3）。**
+
+- (ii) が要る理由: ホストが中断中に `JS_ExecutePendingJob`（→ `promise_reaction_job:56600` → `js_async_function_resolve_call` → `async_func_resume`）や `gen.next()`（class call → `js_call_c_function` → `js_generator_next:21846` → `async_func_resume`）を呼ぶと、(i) は通らずに JS が鎖の上で走る。その中のフラット push（`:21289`）は中断鎖のセグメントの上に積まれて LIFO が崩れ、さらに ASYNC 床が MAY_YIELD になれば `rt->vm_susp` が上書きされて最初の鎖が失われる。JS を動かす入口を両方塞げば、純ネイティブのジョブ（何も JS を呼ばないもの）だけが中断中に走れる。`js_generator_next` に置く `assert(!js_vm_suspended(rt))` は要らなくなる（実機では abort であって拒否ではない）。
+- 仕様 §7「VM_YIELDED: runtime 内の他の JS は実行しない」をホストの善意ではなく VM が強制する。拒むのは例外なので確保するが、これは YIELD の道ではない。
+- セグメント LIFO は**構成により**成立する: 鎖はセグメントの top にあり、何も積めないので、再開時にも top のまま。`js_vm_stack_holds`（`quickjs-vmstack.h:346-350`）は変更不要。
+- ledger 02 §2e の懸念（鎖の末端の `prev_frame` が死んだネイティブフレームを指す）は、中断中に `rt->current_stack_frame` から鎖に到達できない（`floor->prev_frame` に付け替えてある）ことで消える。鎖を歩くのは 12.6 の mark と 12.10 の破棄だけで、どちらも床で止まり `floor->prev_frame` を読まない。
+- `JS_EvalInternal:38946` の「フレーム無しなら `error_back_trace` を消す」は中断中も `current_stack_frame == NULL` で真になるが、中断中のホスト eval は (i) で落ちるので到達しない。
+
+### 12.5 D20: 床の持ち物 4 つの所有（K1）
+
+**決定: 所有化に必要な**場所**は床の push 時に、**参照カウント**は yield 時に取る。場所を取るのは MAY_YIELD の床だけ。generator/async 床は場所も参照も既に持っている。spill は link の**前**に置き、床の pop は床の `link->caller_sp` からブロック先頭を読む。**
+
+- **SEG 床（MAY_YIELD のときだけ）:** push するブロックを `[argv[argc]][JSVMFloorSpillHdr][JSVMLink][JSStackFrame][slots][var_refs]` に広げる（D12 と同じ手: `JSStackFrame` は太らせない）。`JSVMFloorSpillHdr = { JSValue this_val; JSValue new_target; int32_t argc; uint8_t taken; }` で、hdr は `((JSVMFloorSpillHdr *)link) - 1`、`argv` は `(JSValue *)hdr - argc`。実機で 24 + 8·argc B。`frame()` は argc ≤ 4（`guest.c:488`）で 56 B、スクリプト本体は argc 0 で 24 B。
+  - **なぜ link の前か。** 床の pop `:21455` は `js_vm_stack_pop(rt, &rt->vm_stack, ((JSVMLink *)sf) - 1)` で、`js_vm_stack_pop`（`quickjs-vmstack.h:356-365`）は `s->top - block` を `used` から引いて `s->top = block` にする。spill を link と sf の間に挟むとこの `block` がブロック先頭でなくなり、spill 分が永久に残って `js_vm_stack_free:391` の `assert(s->top == s->base)` が `JS_FreeRuntime` で落ちる。link の前に置けば sf からの相対位置は L2b と同じで、pop だけがブロック先頭を知ればよい。
+  - **pop がブロック先頭を知る方法。** 床の `link->caller_sp` は未使用（`vmstack.h:420-422`「the floor's is unused」）。**すべての床の push**で `link->caller_sp = (JSValue *)block`（ブロック先頭）を書く — MAY_YIELD でない床では `block == link` なので値は自分自身。pop は `js_vm_stack_pop(rt, st, (((JSVMLink *)sf) - 1)->caller_sp)` に変わる。push に store 1 つ、pop に load 1 つ、分岐は無い。フラット子の link は D12 のまま（呼び出し元の sp）で、子の pop（FLAT 復帰路）は変えない。12.3 の `vm_yield:` と 12.6 の mark が床の sp を読むのは**子の** link であって床の link ではない（床の link を sp と読まない）。
+  - yield 時に `taken` が 0 なら `js_dup` で `cur_func`（ledger 02 §2d: 通常呼び出しは借用）、`this_obj`、`new_target`、`argv[0..argc)` を写して `taken = 1`。**`js_dup` はオブジェクトなら `ref_count++`、それ以外は何もしない — 確保しない**（D1 を満たす）。解放は床の pop（`done:` の後、`:21433` の手前）で `taken` なら 5 種を `JS_FreeValue`。再中断では `taken` を見て二重に取らない。
+  - `argv` を写すのは §10.5 の理由: `JS_Call` は `COPY_ARGV` なので `arg_buf` は `b->arg_count` 個しか無く、`OP_rest`/`arguments` は `argv` の `argc` 個を読む。呼び手の配列（`guest.c:488` の `arguments[4]`、`promise_reaction_job` の `&arg`）は C の巻き戻しで消える。
+  - `JS_CallFree:21476` が `func_obj` を解放する（`JS_EvalFunctionInternal:38779`）のは yield が**戻った後**なので、yield 時の `js_dup(cur_func)` が先に効く。
+- **generator/async 床:** `async_func_init` が `cur_func`（`:21671` `js_dup`）、`this_val`（`:21672`）、`arg_buf`（`arg_buf_len = max(宣言数, 渡した数)`、`:21663`）を所有し、`async_func_resume` はそれらを argv/this として渡す（`:21746-21747`）。`floor_argc = s->argc`。**spill は要らない。**
+- **持ち主の生存（これも K1）:** ASYNC 床は `s->header.ref_count++`（`JSAsyncFunctionData`）。`js_async_function_call:22138` の `js_async_function_free` やジョブの argv 解放で resolve 関数が消えると `js_async_function_free0:21942` → `async_func_free` が鎖ごと本体を解放しうるため（yield 内で先に取れば 1→2→1 で `:21726` の表明に落ちない）。ASYNC_GENERATOR 床は `js_dup(JS_MKPTR(JS_TAG_OBJECT, s->generator))`。どちらも参照カウントのみ。解放は鎖の完了（`JS_VMResume` が「中断中でない」で戻ったとき）と破棄（12.10）。
+- **費用がすべての C 入口にかかるか:** かからない。トークンを書かない入口は spill を持たず、push の大きさは L2b と同じ（床の link への store 1 つだけが全床に増える）。かかるのは MAY_YIELD の床 1 つにつき 24 + 8·argc B の予算（D10 の `used` に乗る）と、push 時の分岐 1 つ。yield の費用は鎖の深さぶんの walk と、床 1 つぶんの `js_dup`。
+
+### 12.6 D21: generator/async 床の上でフラット子が中断したときの GC と表明（H11）
+
+**決定: 床の `cur_sp` は yield 時に子の link の `caller_sp` で埋める（12.3 の疑似コード）。`async_func_mark:21701` と `async_func_free:21726` は変更しない。鎖の所有者は `JS_MarkContext` に足す 1 行で、SEG ビットを持つフレームの `local_buf..sp` と、SEG 床の spill（`taken` のとき 5 種）だけを mark する。フラット子の `cur_func` は mark しない。**
+
+- `async_func_mark` は `cur_sp` が非 NULL なら `arg_buf..cur_sp` を mark する（`:21701-21709`）。床の `cur_sp` に link の `caller_sp` を入れると、それは呼び出し命令が退役した時点の床のオペランドスタック（func/this/args のスロットが乗ったまま、すべて床が所有）で、mark して正しい。**実行中に古い `cur_sp` で歩く D4 の UAF 側にはならない** — 書くのは中断の瞬間で、`vm_resume:` が NULL に戻す。
+- 鎖の所有者: `mark_children` の `JS_GC_OBJ_TYPE_JS_CONTEXT`（`:7373-7375`。`JS_MarkContext` の呼び出し元はここだけ、grep で確認）から `if (rt->vm_susp.top && rt->vm_susp.ctx == ctx) js_vm_susp_mark(rt, mark_func)`。walk は top から `prev_frame` で床まで。**`JS_SF_SEG` のフレームだけ** `local_buf..sp` を mark する（top は `cur_sp`、それ以外は子の `link->caller_sp` まで）。
+  - **フラット子の `cur_func` は mark しない。** それは `:18617` `sf->cur_func = func_obj` で `func_obj = call_argv[-1]`（`:21303`）を借用したもので、参照の実体は呼び出し元のオペランドスロット（`link->caller_sp` より下）にあり、呼び出し元の `local_buf..caller_sp` の mark で 1 回 decref される。`gc_decref_child:7385` は `assert(p->ref_count > 0)` なので、関数の唯一の参照がそのスロットにある IIFE を中断して GC すると 2 回目で abort する。SEG 床の `cur_func` は D20 が yield 時に `js_dup` した所有参照なので、spill の他の 4 種と一緒に 1 回 mark する（`taken` のときだけ）。
+  - SEG でない床（generator 系）は `async_func_mark` が既に mark しているので触らない — **二重 mark は二重 decref で早すぎる解放になる**ので、この分担は表明で固定する（`assert(!(f->l2_flags & SEG) == (f == floor && kind != SEG))`）。
+- `async_func_free` の `assert(sf->cur_sp != NULL)`（`:21726`）は床の `cur_sp` が非 NULL なので通る。ただし通ってよいのは鎖の子が先に畳まれた後だけで、その順序は 12.10 の破棄が守る（12.5 の持ち主参照が、鎖より先に持ち主が消えることを防ぐ）。
+- JS_MarkContext に置く理由: 新しい `JS_GC_OBJ_TYPE` を足すと `mark_children` / `free_gc_object` / `JS_FreeRuntime` の表明が増える。コンテキストは GC オブジェクトで、外部参照を持つので `gc_scan` が子を incref し直す — 実行中フレームが GC 対象にならないのと同じ仕組みに乗る。
+- §6.3 の GC 閾値修正はこの後に入れる（既決）。関所は 12.7 の `--gc-on-yield`（IIFE の中断を含むコーパス `yield_flat_chain` がこの二重 decref を捕まえる側）。
+
+### 12.7 D22: 関所 — vmrun の 4 つの受け口と正の証拠（H9）
+
+**決定: VM を触る前に、`vmrun.c` の 4 受け口それぞれの直後に同じ再開ループを置き、`#info vm` に `resumes=` `held=` `safepoints_yieldable=` を足す。関所の規則は「`safepoints_yieldable > 0` のファイルは `stops > 0` かつ `resumes == stops`」で、`run.sh --force-yield` がこれを `info-<variant>.txt` から判定する。**
+
+- 受け口: include（`vmrun.c:891` `JS_Eval` → `JS_VMEval`）、本体（`:940` `JS_Eval` → `JS_VMEval`。`:936` `JS_EvalFunction`（モジュール）はそのまま、トークン無し）、frame（`:970` `JS_Call` → `JS_VMCall`）、ジョブ（`:481` `vm_sched_drain` の中の `JS_ExecutePendingJob`、`vm_sched.c:84`）。`vmrun.c:534` の `$262.evalScript` は JS から呼ばれる（`current_stack_frame` 非 NULL）ので MAY_YIELD にならず、囲わない。ループは 1 つの static 関数 `resume_until_done(ctx)`: `while (JS_VMSuspended(rt)) { G.resumes++; r = JS_VMResume(ctx); }`、例外なら `dump_exception` して元の受け口と同じ status。
+- ジョブは firmware と共有の `vm_sched.c` に置く: `JS_ExecutePendingJob` の後 `if (JS_VMSuspended(runtime)) return drain_return(..., VM_DRAIN_SUSPENDED)`（新しい status、`vm_sched.h:93-97`）。**ジョブの途中で戻ったのではなく、ジョブは完了し鎖が残った**ので `n++` は行う。vmrun の `run_turn:491` は `VM_DRAIN_SUSPENDED` を受けたら `resume_until_done` してから `continue`（次の drain へ）。`JS_VMSuspended` / `JS_VMResume` / `JS_VMCall` / `JS_VMEval` は `quickjs-vm.h`（`:109-117` の弱シンボル契約と同じ形）に足す。VM 側が無い間、`JS_VMCall`/`JS_VMEval` は `JS_Call`/`JS_Eval` の pass-through。
+- **VM を触る前の状態:** `JS_VMSuspended` は常に偽、41 件は今と同じく `stops=1` で死ぬ。**赤い理由が変わる**: `resumes=0 < stops` を関所が指摘する。これが「止まって死ぬ」から「止まって再開できない」への変化で、本体を入れる前に確認する。
+- 陰性対照: `--force-yield-fault noresume`（ループを通らない）と `--force-yield-fault noyield`（`vmtest_vm_set_force_yield` を呼ばない）で、規則がそれぞれ `resumes==0` と `stops==0` を捕まえること。G1 の `--stack-probe-fault` と同じ形。
+- 本体の後に足す変種（ガード）: `--gc-on-yield`（`JS_VMResume` の前に `JS_RunGC`。完了条件 #4 と §6.3）、`--terminate-after N`（N 回目の再開の代わりに `JS_VMTerminate`。期待: `InternalError: interrupted`、finally は走らない）、`--discard-after N`（中断中に終了。LSan でリークなし）、`--call-while-suspended`（中断中に `JS_Call` と `JS_ExecutePendingJob` の両方 → `InternalError: VM suspended`）。コーパスの追加は `yield_toplevel_loop` / `yield_flat_chain`（IIFE と、`this` を使うメソッドの中の分岐を含む: 12.3 の FLAT 再組み立てと 12.6 の `cur_func` を捕まえる）/ `yield_async_frame` / `yield_async_generator` / `yield_native_reentry`（sort 比較関数の中のループ: `held > 0`、`stops == 0` が期待）/ `yield_terminate` / `yield_discard` / `yield_call_on_chain`。期待値は yield 無しの走行で bless し、**`--force-yield` でバイト一致**が要求（既存規則）。
+- Test262 `--force-yield` は 7,501 / 194 / regressions 0 を**期待**する（`test262.py` は vmrun を駆動するので同じループを通る。モジュールのテストはトークン無しで止まらず、スクリプトのテストは `:940` で止まって再開される。数字は実装後に測る）。
+
+### 12.8 D23: G5 の「停止機会」の再定義（H10）
+
+**決定: 停止機会 = (a) MAY_YIELD の活性で通った A/B 地点、(b) ENTER（最外の進入と再開）、(c) LEAVE（最外の復帰と yield）。MAY_YIELD でない活性の A/B 地点は機会に数えない（`held` に数える）。**
+
+- `js_vm_safepoint(rt, vm, func)` に `can_stop` を足し、`gap_close/open` は `can_stop` のときだけ。`vm->safepoints` は全件、`safepoints_yieldable` は `can_stop` の件数。
+- yield は `js_vm_leave` を明示的に呼ぶ（フレームを pop しないので `js_vm_pop_frame:6562` の LEAVE 検出を通らない）。`js_vm_enter`/`js_vm_leave` は `vm->in_js` で冪等（`quickjs-vm.c:164-165, 174-175`）なので、yield の後に通る `js_vm_leave_frameless`（`:18527`）や `js_call_c_function_data:6676` → `js_vm_pop_frame:6565` の LEAVE と二重に数えられない。再開は `JS_CallInternal` のプロローグ・ポーリングを通る（12.3）ので ENTER が既存の検査（`:8700-8705`）で記録される。よって `enters == leaves` の検査は保たれる。
+- 帰結: §7.6 の `n2_native_sort_callback` の 10.3 ms は L2c 後も区間として残る。**それが正しい** — 比較関数の中の分岐は保持になる。D3 のとおり N1〜N5 は測るだけで機構は作らない。
+
+### 12.9 D24: 3 層の第 3 状態と D16 の 2 ビット（H6）
+
+**決定: guest に `suspended`（実行途中で中断中）と既存の `jobs_pending`（`guest.c:108`）の 2 ビット。`suspended` の起点（FRAME / JOB）も持つ。ui_qjs に `pocketjs_ui_turn_resume` を足し、app_session の `app_tick` は「中断中の再開 → 継続 drain → 通常」の順で分岐する。FAIR の pump は `jobs_pending && !suspended` のときだけ。**
+
+- guest（`guest.c`）: `pocketjs_guest_frame:526` の `JS_Call` を `JS_VMCall` にし、その後 `arguments` の解放（`:531-533`）まで済ませてから `if (JS_VMSuspended(rt)) { JS_FreeValue(result); suspended = 1; origin = FRAME; return ESP_OK; }` を `JS_IsException(result)`（`:535`）の**前**に置く。`result` は床の種類で違う: SEG 床（`frame` が通常関数）なら `JS_EXCEPTION`（`JS_FreeValue` は no-op、`current_exception` は空なので `js_std_dump_error` を呼ばない）、ASYNC 床（`frame` が async 関数）なら `js_async_function_call:22140` が正常に返した **promise** で、これを解放しないと漏れる。1 つの `JS_FreeValue` が両方を扱う。drain は呼ばない。
+  `drain_jobs:283` は `VM_DRAIN_SUSPENDED` で `suspended = 1; origin = JOB; jobs_pending = JS_IsJobPending(rt)`（D16: 別ビットとして別に読む）。新 API `pocketjs_guest_suspended()`、`pocketjs_guest_resume()`: `JS_VMResume` を呼び、まだ中断中なら `ESP_OK`。完了なら例外処理（`js_std_dump_error`、`frame_errors++`、`ESP_FAIL`）、起点が FRAME なら `drain_jobs`（frame の後に走るはずだった drain）、JOB なら何もしない（次の `pocketjs_guest_continue` が続きを引く）。
+- ui_qjs（`ui_qjs.c`）: `pocketjs_ui_turn_resume(binding, out_frame)` = `pocketjs_guest_resume` + `pocketjs_ui_core_tick` + `draw`（`:875-886` の `turn_continue` と同型。表示は止めない — 仕様 §7「ネイティブな別処理には制御を渡せる」）。
+- app_session（`app_tick:733`）: `arm_turn` の後、最初に `if (pocketjs_guest_suspended(guest))` → `pocketjs_ui_turn_resume` → D15 の累積判定（12.11）→ まだ中断中なら **pump なし・exit 判定なし・frame() なし**で `present_frame`（`:838` と同じ表示周期の間引き）して return。完了したら通常の流れへ落ちる（`jobs_pending` の分岐がそのまま続きを扱う）。`#ifdef CONFIG_POCKET_VM_FAIR` の `run_pumps` (`:813`) は `pocketjs_guest_jobs_pending && !pocketjs_guest_suspended` が条件（D16）。`app_overlay_tick:602` も同じ 3 分岐。実機の JS 呼び出しは pump 群と frame/continue に閉じている（`main/pocket` の `JS_Call` は pump から呼ばれる resolve/callback 経路のみ、grep で確認）ので、中断中に pump を止めれば鎖の上で resolve が走らない。走らせてしまっても 12.4 (i)(ii) が拒む。
+- `deferred_buttons` の扱いは継続ターンと同じ（保持、次の pump へ）。Back ターン（`leaving`）中の中断: `app_stop` → `pocketjs_guest_destroy` → 12.10 の破棄。
+
+### 12.10 D25 / D26: TERMINATE と破棄、計測の口（H13, H12, H14）
+
+**決定 D25: 機構は 2 つで役が違う。`JS_VMTerminate(ctx)` は「読み戻して投げ込む」— `rt->vm_susp.throw = 1` として `JS_VMResume` と同じ入口に入り、`JS_ThrowInterrupted` を投げてから `vm_resume:` の末尾で `goto exception`（generator の `s->throw_flag` と同じ形、`:18510-18511`）。再開時のプロローグ・ポーリングが TERMINATE を返した場合もこの道に合流する（12.3）。`JS_VMDiscard(rt)` は「内側から畳む」— インタプリタを走らせず、top から床まで SEG フレームを `close_var_refs` + `local_buf..sp` の `JS_FreeValueRT` + `js_vm_stack_pop`（床は `link->caller_sp` のブロック先頭で、12.5）で畳み、持ち主参照と spill を返す。**
+
+- Terminate が finally を走らせないのは既存のとおり: uncatchable なので `:21323` の catch 探索を丸ごと飛ばし、`done:` が各フレームを解放し、FLAT なら呼び出し元で `goto exception`（`:21416-21417`）、床で `JS_EXCEPTION` を返す。ASYNC 床は `:21349` `func_kind != NORMAL` で `done_generator:` が `cur_sp = sp` を書いてから返り、`js_async_function_resume:22010` の uncatchable 分岐 → `js_async_function_terminate:22027` → `async_func_free` の表明が通る（promise は pending のまま — §4.3 の既知の範囲外）。backtrace は組まれる（`:21317-21321`。TERMINATE は確保してよい、D1 表）。
+- 使い分け: **セッションが続く**終了（D15 の暴走）は Terminate（持ち主の C 末尾が走り、既存のコードで畳まれる）。**セッションが終わる**破棄（`pocketjs_guest_destroy`、`JS_FreeRuntime`）は Discard（死にゆく runtime で JS を 1 命令も動かさない）。
+- **D26 破棄の位置:** `JS_FreeRuntime:2397` の `js_vm_arm(rt, 0)` の直後、ジョブ解放ループ（`:2400`）の前に `JS_VMDiscard(rt)`。`JS_RunGC:2416` と `js_vm_stack_free:2422`（`assert(top == base)`）より前でなければならない。持ち主参照を返すのはここで、`async_func_free` はその後の GC/finalizer で普通に走り（`js_async_generator_free:22185-22188` は EXECUTING なら `async_func_free` を呼ぶ）、床の `cur_sp` は非 NULL なので表明が通る（12.6）。加えて `pocketjs_guest_destroy:653` の `JS_FreeContext` の**前**にも `JS_VMDiscard` を呼ぶ（鎖は `susp.ctx` を借用している。`b->realm` は dup 済み（`:37819`、`:40699`）なので実際には生きているが、順序で守る方が安い）。`vmrun.c:1061` も同じ順。
+- **H14 計測の口:** `#info vm susp_bytes_max=`（yield 時の `rt->vm_stack.used` の最大。予算 D10 に乗っている量そのもの）と `susp_max_depth=`。実機は `VMPROBE` の静的報告に同じ 2 値、`memlog.py --port --check` の `app_largest` を「中断中に採る」モードで採る（§10.8 の 6,240 B の余裕がどう削られるかは、この口で測ってから言う）。
+
+### 12.11 D27 / D28: D14 と D15 の機構
+
+**D27（D14）: 要求ビットは `JSRuntime` の `_Atomic uint8_t vm_yield_req`。書き手は `JS_VMRequestYield(JSContext *ctx)`（quickjs.c で定義、`interrupt_counter` は private のため）: `atomic_store_explicit(&rt->vm_yield_req, 1, memory_order_release); ctx->interrupt_counter = 0;`。読み手は `__js_poll_interrupts:8680` の slow path だけ。**
+
+- slow path の返り値を 3 値にする: -1 = TERMINATE（`rt->interrupt_handler` が真、`:8713-8717`。優先）、+1 = YIELD 要求あり（`at_safepoint` かつ `atomic_load_explicit(acquire)` が真、または harness の `force_yield`）、0 = 続行。`at_safepoint == 0`（プロローグ・ポーリング、`flat_call:` のポーリング、`JS_CallConstructorInternal:21566` 等）では +1 を返さない: 要求は消えず、次の A/B 地点で見える。既存の 2 値の呼び出し元はそのまま。
+- A 地点（`:19666, 19672, 19678, 19697, 19717, 19737, 19757` の 7 箇所）: `r = js_poll_safepoint(ctx); if (unlikely(r)) { if (r < 0) goto exception; if (sf->l2_flags & JS_SF_MAY_YIELD) goto vm_yield; }`。fast path（`--ctx->interrupt_counter`、`:8737`）は 1 バイトも変わらない。
+- **保持:** MAY_YIELD でない活性で +1 を見たときは何もしない（ビットはそのまま、カウンタは `JS_INTERRUPT_COUNTER_INIT` に戻る）。外側の MAY_YIELD 活性に早く届けるため、**MAY_YIELD でない床の pop**（`:21433` の直後、`sf->prev_frame` があるとき）で `if (unlikely(atomic_load_relaxed(&rt->vm_yield_req))) caller_ctx->interrupt_counter = 1;`。分岐 1 つ、pop のたび。
+- カウンタへの書き込みは他コアからの plain store で、VM 側の `--` と競合して失われうる。**それでよい**（D14: ビットは 10,000 ポーリング以内に読まれる）。
+- 実機の書き手: `arm_turn:137` が `frame()` 呼び出しの前に `esp_timer` の one-shot（`VM_TURN_BUDGET_US`）を武装し、コールバック（timer task）が `JS_VMRequestYield(ctx)`。`frame()`/resume が戻ったら `esp_timer_stop`。**これが「他タスク」**で、ISR からは呼ばない。**武装の直前に `atomic_store(&rt->vm_yield_req, 0)`**（`JS_VMClearYield(ctx)`）: コールバックは timer task 上で走るので、前ターンの `frame()` が戻った後・`esp_timer_stop` の前に発火して立ったビットが残りうる。残せば次ターンの最初の A 地点で即 yield してそのフレームが 2 ターンかかる。仕様 §7 の「要求を失わない」側は D14 のビットで守られ、逆向き（余分な要求）は武装時の消去で消える。`esp_timer_stop` と走行中コールバックの競合（stop の後に store が届く）は理論上残るが、費用は余分な 1 ターンで正しさには触れない。
+- N1（正規表現）は `lre_check_timeout:50937-50942` が `interrupt_handler` を直接呼ぶ = TERMINATE 系統のまま。YIELD は届かない（D3 のとおり）。
+
+**D28（D15）: 累積は起点で分ける。起点 FRAME の鎖は guest の `frame_us`（新設。`drain_us:118` と同じ場所・同じ性質）、起点 JOB の鎖は既存の `drain_us` に足す。**
+
+- `pocketjs_guest_frame` の `JS_VMCall` と `pocketjs_guest_resume` の `JS_VMResume` の前後で `vm_clock_now()` を読む。起点 FRAME なら `frame_us` に累積し、鎖が完了した時に 0 に戻す。起点 JOB なら `drain_us` に足す（`drain_jobs` は増やさない: ジョブは完了済みで `n++` 済み）。`drain_us` は論理 drain（`guest.c:292` `budget.elapsed`、継続ターンをまたいで累積し、`drain_runaway:177` が読む）の一部として、鎖の再開時間を含むようになる。
+- **なぜ分けるか。** `drain_runaway` は `vm_sched_drain` の内側だけを数える（`guest.c:292`）ので、`JS_VMResume` を drain の外で走らせるとジョブ起点の鎖（async 関数 / async generator の本体 — D13 で止める対象）は何にも数えられず、ターンごとの 250 ms 壁時計は毎ターン YIELD するので発火せず、`async function` 本体の `for(;;)` はジョブ経由で永久に協調的に回る（pump も exit 判定も走らない）。JOB 起点を `drain_us` に足せば既存の述語（`VM_RUNAWAY_US`）が変更なしに効く。
+- 述語は app_session の `frame_runaway()`（`drain_runaway:177-185` と同型）で、`frame_us >= VM_FRAME_RUNAWAY_US` なら `pocketjs_guest_terminate()`（`JS_VMTerminate` を 1 回呼び、その結果を通常の frame 失敗として扱う）→ `ESP_ERR_TIMEOUT`。JOB 起点は `drain_runaway` がそのまま捕まえ、終了経路は既存（`main.c end_run`）。**値は実機で測る**（`vm_sched.h` に `VM_FRAME_RUNAWAY_US` を置き、初期値は未定のまま `VM_RUNAWAY_US` と同じ桁を仮置き。仮置きであることをコメントに書く）。ターンごとの 250 ms 壁時計（`deadline`、`:139`）はそのまま。
+
+### 12.12 D29: B 地点の位置と、`flat_call:` のポーリングの行き先（H4）
+
+**決定: フラット呼び出しのポーリングを 1 つにする。`flat_call:21274` の `js_poll_interrupts` を外し、`frame_pushed:` のプロローグの末尾（`:18662` `ctx = b->realm` の後、`restart:` の前）に `js_poll_safepoint` を置く。これが分類 B。**
+
+- `restart:` の前なので、catch へのジャンプ（`:21340`）や generator 再開（`:18513`）、`vm_resume:` の `goto restart` はこれを通らない。C 入口の床もここを通るが、そのプロローグ・ポーリング（`:18476`）は `at_safepoint = 0` なので YIELD を返さず、B が最初の受理点になる（`pc == byte_code_buf`、`sp == stack_buf`、`new_target` は spill 済み — 止まって問題ない。フラット子が B で止まれば再開時に 12.3 の FLAT 再組み立てが `this_obj` 等を埋める）。
+- TERMINATE が B で起きると、上流が push 前に投げていたものが push 後になる: `exception:` は空の被呼フレームを畳み、FLAT なら呼び出し元で `goto exception`。**観測できる差は uncatchable `interrupted` の backtrace に被呼関数の 1 行が増えることだけ**で、コーパスにその backtrace を固定した期待値は無い（`stop_with_queue` の停止は C 入口のプロローグで起きる）。もし diff が出たら、両方のポーリングを残す（呼び出しごとにデクリメント 1 回増）に戻す。
+- push 前のポーリング（`flat_call:`）で観測した要求は「行き先」を持たない。ビットは消えないので B が拾う。§10.6「`flat_call:` から `frame_pushed:` の間に止まれる地点は無い」は保たれる。
+
+### 12.13 実装順序（L2b に倣う: 関所 → ガード → 本体 → 実機統合）
+
+各段の後に `run.sh` 4 変種・`--force-yield`・Test262・G1・`budget_probe.sh` を回す。数字は**期待**であって実測ではない。
+
+1. **関所（H9、VM を触らない）。** `quickjs-vm.h/.c` に `JS_VMSuspended` / `JS_VMResume` の弱契約と `JS_VMCall` / `JS_VMEval`（pass-through）、`vmrun.c` の 4 受け口に再開ループ（`:891/:940/:970` は `JS_VMEval`/`JS_VMCall` へ、`:936` はそのまま）、`vm_sched.c` に `VM_DRAIN_SUSPENDED`、`#info vm` の 3 項目、`run.sh --force-yield` の判定規則、陰性対照 2 種。期待: `--force-yield` は 3/41 のまま、ただし 38 件の理由が「`stops=1 resumes=0`」と表示される。通常走行 41/41 不変。
+2. **ガード（コーパスと変種）。** 12.7 の 8 ファイルを yield 無しで bless。`--gc-on-yield` / `--terminate-after` / `--discard-after` / `--call-while-suspended` のフラグを vmrun に足す（VM 側が無い間は note を出して無視）。期待: 通常走行 49/49、`--force-yield` は 3 + 新規のうち分岐を持たないもの。
+3. **本体（quickjs.c、この順で 1 コミットずつ）。** (a) ビット・フラグ・`rt->vm_susp`・トークン・API の骨（何も止まらない: 全関所不変）。床の link にブロック先頭を書き、床の pop がそれを読む（12.5。この段では `block == link` なので挙動不変。G1 と `budget_probe.sh` で確認）。(b) slow path の 3 値化と A 地点の書き換え、`vm_yield:`、`vm_resume:`（FLAT 再組み立てと throw 経路を含む）、SEG 床の `VM_RESUME` 分岐、プロローグ・ポーリング失敗の throw 化。期待: `--force-yield` で「トップレベルと通常関数のフラット鎖だけのファイル」が緑になる（`resumes == stops`）。async を含む `l2b_floor_argc` 等はまだ赤。(c) K1 の spill（link の前）と MAY_YIELD の写し、中断中の 2 入口の拒否。期待: `yield_call_on_chain` が緑、`from-native-more-args` 系が `--force-yield` で一致。(d) B 地点（12.12）。期待: `l2b_flat_calls` の `sort` 経路以外が緑、G5 の `n2_native_sort_callback` は残る。(e) ASYNC / ASYNC_GENERATOR の持ち主（12.3 の 3 箇所と generator 分岐の `goto vm_resume`）と 12.2 の例外ネイティブフレーム。期待: `--force-yield` 全件緑、Test262 `--force-yield` 7,501/194/0。(f) GC 所有者（12.6）と `--gc-on-yield` 緑（IIFE を含む `yield_flat_chain` で）、ASan/LSan 無報告。(g) 破棄と JS_FreeRuntime の順序、`--discard-after` 緑。(h) Terminate、`--terminate-after` 緑。各段で G1 0.000、`budget_probe.sh` 10/10（spill の分だけ `budget_hits` の深さが動く: `device 158` が減る側。値を記録する）。
+4. **実機統合（別の段）。** `CONFIG_POCKET_VM_YIELD`（既定 n で入れ、関所が通ってから y）。D14 の書き手（esp_timer、武装時の消去）、guest の 2 ビットと `resume`（frame の戻り値の解放を含む）、`pocketjs_ui_turn_resume`、`app_tick` の 3 分岐、FAIR の条件、D15 の 2 系統の累積と `VM_FRAME_RUNAWAY_US` の実測、H14 の計測。`smoke_device.py --cycles 20`、`test_settings.py`、`benchmark_app.py`、`memlog.py --port --check` を main と交互 2 周（§10.8 と同じ手順）。**`memlog` の `app_largest` が taffy の段（59,296 B）に対して残す余裕を、中断中に採って書く。**
+
+### 12.14 閉じられなかったもの・既決との衝突
+
+- **同期 generator の本体は止められない**（D13 の「generator」との部分的衝突。12.3）。`.next()` の呼び手が C スタック上で同期的に待っており、D8 の下では再開先が無い。async generator の本体は止まる（ジョブから再開されるとき）。変えるなら D8 か D13 のどちらかで、ここでは変えない。
+- **JS から呼ばれた async 関数の最初の同期区間は止まらない**（D13 との部分的衝突、12.2）。`js_vm_flat_callable:18384-18392` が NORMAL 以外を C call に回し、その `JS_CallInternal(GENERATOR)` は `current_stack_frame` が JS フレームなので MAY_YIELD にならない。止まるのはホスト直呼びの async `frame()` の最初の区間と、await 復帰以降。
+- **`promise_reaction_job` の handler（通常関数の `.then` コールバック）は止まらない**（保持になる）。止めるにはジョブの再投入が要り、`JS_ExecutePendingJob:2280-2298` の解放順序を変えることになる。L2c では入れない。
+- **モジュール本体（`vmrun --module`、Test262 の module フラグ）は止まらない** — `JS_VMEval` がモジュールにトークンを書かない（12.2）。実機はモジュールを使わない（`guest.c:427` の eval フラグは未確認だが、スクリプト以外を読む口が無い）。
+- **TERMINATE で async 関数の promise が pending のまま残る**（§4.3 既知）。L2c でも直さない。
+- **D15 の値**は実機で測るまで決まらない。
+- **B 地点の TERMINATE backtrace の 1 行差**は、コーパスで diff が出るかを実装時に見る（12.12）。
+- **esp_timer_stop と走行中コールバックの競合**で余分な要求が 1 つ残りうる（12.11）。費用は余分なターン 1 つ。
+- 未確認: `js_async_generator_resolve_function` 以外に、ジョブから本体へ至る経路でネイティブフレームを 1 つ挟むものが無いか（`js_async_from_sync_iterator_*` は JS からの呼び出しで、ここでは対象外と判断した）。
+
+### 12.15 レビューで直したこと
+
+- **D18 `vm_resume:` の組み立て不足（成立しない）→ 直した。** 再開入口を 1 つのラベル `vm_resume:` にまとめ、top が FLAT 子なら `:21396-21405` の式で `argc/argv/this_obj/new_target` を組み立て直す。SEG 床の分岐は `:18485` の前（`:18532` / `:18574-18586` に達しない）、generator 床の分岐は `:18485` の中で `sf->cur_sp` を読む前（`:18502` の `current_stack_frame = sf` を通らない）。12.3 に疑似コードを置いた。
+- **D18 再開時のプロローグ・ポーリングが TERMINATE を返すと鎖が永久に残る（穴）→ 直した。** ポーリングは通す（ENTER のため）が、VM_RESUME / SUSPENDED 床では失敗を `vm_susp.throw = 1` に変えて鎖を再設置してから `goto exception`（D25 と同じ道）。12.3 と 12.10。
+- **D21 FLAT 子の `cur_func` の二重 decref（成立しない）→ 直した。** mark するのは SEG フレームの `local_buf..sp` と、SEG 床の spill の 5 種（`taken` のとき）だけ。フラット子の `cur_func` は呼び出し元のスロットが持つ参照の借用なので mark しない。`yield_flat_chain` に IIFE を入れて `--gc-on-yield` で捕まえる。12.6。
+- **D20 spill を link と sf の間に挟むと床の pop がブロック先頭を外す（成立しない）→ 直した。** spill を link の前に置き、すべての床の push で未使用の `link->caller_sp`（`vmstack.h:420-422`）にブロック先頭を書き、pop がそれを読む（store 1 / load 1、分岐なし）。12.5。段 3a で先に入れて挙動不変を確認する。
+- **D19 generator 入口が拒否を素通りする（穴）→ 直した。** 中断中に JS を走らせる入口は 2 つ（バイトコード床の push と generator/async の再開入口）で、両方を `VM suspended` で拒む。`js_generator_next` の assert は不要になった。12.4。`--call-while-suspended` に `JS_ExecutePendingJob` も加えた。
+- **D28 JOB 起点の鎖が何にも数えられない（穴）→ 直した。** 起点 JOB の `JS_VMResume` 時間は `drain_us` に足し、既存の `drain_runaway` がそのまま捕まえる。FRAME 起点だけ `frame_us` + `frame_runaway`。12.11。
+- **D18 モジュール本体がトークンで止まる（事実誤り）→ 直した。** トークンはホストが直接書かず `JS_VMCall` / `JS_VMEval` が囲い、`JS_VMEval` はモジュールに書かない。囲うので `JS_CallInternal` に達しなかった場合にトークンが残ることも無い。`vmrun.c:936` は囲わない。12.2、12.3、12.7。
+- **D18 await 復帰の経路（`:56614` → `:56600`、事実誤り）→ 直した。** 表を `promise_reaction_job:56600 JS_Call(handler)` に改め、`:56614` が通らない理由（`:22057-22058`）を添えた。
+- **D27 `lre_check_timeout` の行（`:50400` → `:50937`、事実誤り）→ 直した。** 12.11。
+- **D24 async な `frame()` の戻り値（promise）の解放が抜ける（抜け）→ 直した。** `JS_VMSuspended` を `JS_IsException` の前に見て、`result` を床の種類によらず 1 回 `JS_FreeValue`（`JS_EXCEPTION` なら no-op、promise なら解放）。12.9。
+- **D27 `vm_yield_req` の消去が `vm_yield:` だけ（抜け）→ 直した。** `arm_turn` が武装の直前に消す。残る競合（stop 後の store）は余分なターン 1 つの費用として 12.14 に記した。
+- **D17 JS から呼ばれた async 関数の最初の同期区間が止まらない（抜け）→ 12.2 と 12.14 に衝突として追記した。** 機構は変えない（`js_vm_flat_callable` の範囲は L2b の既決）。
