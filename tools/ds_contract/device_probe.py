@@ -6,7 +6,9 @@ import struct
 import time
 import zlib
 import serial
+import json
 from frost_reference import snapshot, gallery_pixel
+from stress_reference import source as stress_source, pixel as stress_pixel
 
 
 def chunk(kind, data):
@@ -34,22 +36,29 @@ def main():
             raise RuntimeError('Could not return to HOME_READY')
         port.reset_input_buffer()
         port.write(b'~')
-        deadline = time.monotonic() + 75
+        deadline = time.monotonic() + 240
+        pending = bytearray()
         while time.monotonic() < deadline:
-            data.extend(port.read(65536))
+            incoming = port.read(65536)
+            data.extend(incoming)
+            pending.extend(incoming)
+            while b'\n' in pending:
+                line, _, rest = pending.partition(b'\n')
+                pending = bytearray(rest)
+                text = line.decode(errors='replace')
+                if any(marker in text for marker in ('DS_PROBE', 'PASS', 'failure', 'panic', 'HOME_READY')):
+                    print(text, flush=True)
             if b'HOME_READY' in data:
                 break
     (args.out / 'serial.log').write_bytes(data)
     log = data.decode(errors='replace')
-    for line in log.splitlines():
-        if any(marker in line for marker in ('DS_PROBE', 'PASS', 'failure', 'panic', 'HOME_READY')):
-            print(line)
     if ('DS_PROBE: PASS' not in log or 'HOME_READY' not in log or 'DS_PROBE: FAIL' in log
             or not re.search(r'DS_PROBE: PARTIAL us=\d+ mask=fe0 bytes=26880', log)
             or 'DS_PROBE: UNCHANGED bands=0 bytes=0' not in log
             or 'DS_PROBE: CACHE templates=1 instances=2 commands=2 native=4104' not in log
             or 'DS_PROBE: COMPOSITION group_alpha=128 modal=open-close focus=42 PASS' not in log
-            or 'DS_PROBE: GLASS PASS' not in log):
+            or 'DS_PROBE: GLASS PASS' not in log
+            or 'DS_PROBE: STRESS PASS frames=600' not in log):
         raise RuntimeError('Diagnostic did not pass and return to the home loop; see serial.log')
     rows = {int(y): bytes.fromhex(pixels) for y, pixels in re.findall(r'PIX (\d+) ([0-9a-f]{960})', log.split('GLASS_PIX_BEGIN')[0])}
     if set(rows) != set(range(135)):
@@ -98,6 +107,43 @@ def main():
     png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
     (args.out / 'glass-pre-spi.png').write_bytes(png)
     print('GLASS_PIXELS PASS 32400 pixels (alpha left / frost right)')
+    captures = re.findall(r'STRESS_PIX_BEGIN frame=(\d+) tick=(\d+) radius=(\d+)(.*?)STRESS_PIX_END', log, re.S)
+    if [int(c[0]) for c in captures] != [0, 299, 599]:
+        raise RuntimeError('Missing temporal stress captures')
+    ticks = [int(c[1]) for c in captures]
+    if not ticks[0] < ticks[1] < ticks[2]:
+        raise RuntimeError('Animation time did not advance')
+    for frame, tick, radius, section in captures:
+        t = int(tick)
+        image = snapshot(int(radius), lambda x, y: stress_source(x, y, t))
+        rows = {int(y): bytes.fromhex(p) for y, p in re.findall(r'PIX (\d+) ([0-9a-f]{960})', section)}
+        if set(rows) != set(range(135)):
+            raise RuntimeError(f'Incomplete stress capture {frame}')
+        raw = bytearray()
+        for y in range(135):
+            raw.append(0)
+            for x in range(240):
+                value = struct.unpack_from('>H', rows[y], x*2)[0]
+                expected = stress_pixel(image, x, y, t)
+                if value != expected:
+                    raise RuntimeError(f'Stress frame {frame} mismatch at {x},{y}: {value:04x} != {expected:04x}')
+                raw.extend((((value >> 11) & 31)*255//31, ((value >> 5) & 63)*255//63, (value & 31)*255//31))
+        png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 240, 135, 8, 2, 0, 0, 0))
+        png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+        (args.out / f'stress-{int(frame):03d}.png').write_bytes(png)
+    report = {}
+    for category in ('timing', 'cadence', 'memory'):
+        match = re.search(r'STRESS '+category+r' ([^\r\n]+)', log)
+        if not match:
+            raise RuntimeError(f'Missing stress {category}')
+        report[category] = {key: int(value) for key, value in re.findall(r'(\w+)=(\d+)', match[1])}
+    if report['cadence']['bytes'] != 600*64800:
+        raise RuntimeError('Incomplete stress display workload')
+    report['observed_fps'] = 600*1e6/report['cadence']['elapsed_us']
+    report['capture_frames'] = [int(c[0]) for c in captures]
+    (args.out / 'stress-report.json').write_text(json.dumps(report, indent=2)+'\n')
+    print('STRESS_PIXELS PASS 97200 pixels across frames 0/299/599')
+    print(json.dumps(report, indent=2))
 
 
 if __name__ == '__main__':

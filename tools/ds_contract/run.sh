@@ -40,6 +40,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/ds/ds_frost.c tools/ds_contract/test_frost.c -o "$out/frost"
   "$out/frost" > "$out/frost.bin"
   python3 tools/ds_contract/frost_reference.py "$out/frost.bin"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/ds \
+    main/ui/ds/ds_frost.c tools/ds_contract/test_stress.c -o "$out/stress"
+  "$out/stress" > "$out/stress.bin"
+  python3 tools/ds_contract/stress_reference.py "$out/stress.bin"
 done
 printf '#include "ds_api.h"\n#include "ds_ports.h"\n#include "ds_core.h"\n#include "ds_cache.h"\n#include "ds_modal.h"\n' | \
   c++ -std=c++17 -Wall -Wextra -Werror -Imain/ui/ds -x c++ -fsyntax-only -

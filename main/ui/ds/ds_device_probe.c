@@ -25,6 +25,7 @@
 static ds_core probe_core;
 static ds_cache probe_cache;
 static ds_frost probe_frost;
+ds_result ds_stress_probe_run(ds_frost *frost);
 static uint16_t glass_pattern(int x,int y){
     x%=120;
     if(y<16)return board_rgb(13,23,39);
@@ -202,6 +203,7 @@ void ds_device_probe_run(void){
        ds_modal_route(&modal,&probe_core,false)!=DS_INPUT_APP||modal.focus!=42)goto fail;
     ESP_LOGI(tag,"COMPOSITION group_alpha=128 modal=open-close focus=42 PASS");
     if(glass_demo()!=DS_OK)goto fail;
+    if(ds_stress_probe_run(&probe_frost)!=DS_OK)goto fail;
     ESP_LOGI(tag,"PASS iterations=1000 tx_mean_us=%lld tx_max_us=%lld heap_before=%u heap_after=%u stack_free=%u",
              (long long)(sum/1000),(long long)max,(unsigned)free_before,(unsigned)free_after,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));

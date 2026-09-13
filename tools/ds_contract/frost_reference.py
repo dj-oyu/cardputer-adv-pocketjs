@@ -19,12 +19,12 @@ def pattern(x, y):
     return pack((30, 160, 220) if ((x % 120) // 12 + y // 12) % 2 else (235, 128, 48))
 
 
-def snapshot(radius):
+def snapshot(radius, source=pattern):
     image = []
     for y in range(0, 135, 8):
         row = []
         for x in range(0, 240, 8):
-            pixels = [unpack(pattern(px, py)) for py in range(y, min(y + 8, 135)) for px in range(x, x + 8)]
+            pixels = [unpack(source(px, py)) for py in range(y, min(y + 8, 135)) for px in range(x, x + 8)]
             row.append(pack(tuple((sum(p[c] for p in pixels) + len(pixels) // 2) // len(pixels) for c in range(3))))
         image.append(row)
     for axis in (0, 1):
@@ -40,14 +40,14 @@ def snapshot(radius):
     return image
 
 
-def frost_pixel(image, x, y):
+def frost_pixel(image, x, y, alpha=96):
     sx, sy = max(0, min(464, 2*x - 7)), max(0, min(256, 2*y - 7))
     x0, wx = divmod(sx, 16)
     y0, wy = divmod(sy, 16)
     colors = [unpack(image[py][px]) for py in (y0, min(16, y0+1)) for px in (x0, min(29, x0+1))]
     weights = [(16-wx)*(16-wy), wx*(16-wy), (16-wx)*wy, wx*wy]
     rgb = tuple((sum(p[c]*w for p, w in zip(colors, weights)) + 128)//256 for c in range(3))
-    return pack(tuple((t*96 + v*159 + 127)//255 for t, v in zip((28, 48, 67), rgb)))
+    return pack(tuple((t*alpha + v*(255-alpha) + 127)//255 for t, v in zip((28, 48, 67), rgb)))
 
 
 def gallery_pixel(image, x, y):
