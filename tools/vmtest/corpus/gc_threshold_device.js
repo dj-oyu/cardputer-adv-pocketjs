@@ -15,4 +15,8 @@ try {
   }
 } catch (e) { caught = true; }
 print("cycles-exhaust-heap", caught);
-print("#info cycles_before_oom=" + n);
+// The heap is still full here, so building this string can itself fail with
+// a bare `null`. How much slack the failed loop leaves moves with every byte
+// the runtime holds elsewhere (frame segments, D42/D43), and none of it is the
+// property this file records -- so the measurement is best-effort.
+try { print("#info cycles_before_oom=" + n); } catch (e) {}

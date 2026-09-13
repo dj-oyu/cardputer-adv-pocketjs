@@ -162,10 +162,14 @@ check_async() {
   hits=$(sed -n 's/.*budget_hits=\([0-9]*\).*/\1/p' "$raw")
   depth=$(sed -n 's/^#info max_depth=\([0-9]*\).*/\1/p' "$raw" | head -n1)
   unhandled=$(grep -c '^E pocketjs_guest: Unhandled Promise rejection:' "$raw")
-  # OOM canary (quickjs.h JS_TakeOOMCanary): on flat, "caught null" IS an
-  # allocation rejection that JS_ThrowOutOfMemory could not even wrap in an
-  # error object -- this is the check that a bare `null` here is that, and
-  # not a script `throw null` that happens to look the same from outside.
+  # OOM canary (quickjs.h JS_TakeOOMCanary): on flat the descent ends in heap
+  # exhaustion, and the canary is the positive evidence of that. The output
+  # alone cannot carry it: whether the outer catch even manages to print
+  # ("caught null" when this check was written, nothing once D42/D43 moved
+  # the frame segments' bytes -- docs/vm-L2-design.md sec.13.6) depends on how
+  # many bytes the exhausted heap happens to leave, so expected/ binds only
+  # what does not move -- the sync try is never reached, exit 2 -- and the
+  # canary binds the cause.
   oomn=$(sed -n 's/^#info oom count=\([0-9]*\).*/\1/p' "$raw" | head -n1)
   if grep -q 'AddressSanitizer' "$raw" && grep -q 'build_backtrace' "$raw"; then
     printf 'note %-24s ASan report in build_backtrace: known/oom_backtrace_uaf reproduced (D38), not counted %s[--profile device]\n' \
@@ -174,8 +178,8 @@ check_async() {
   fi
   if diff -q "$exp" "$txt" > /dev/null; then match=match; else match=differ; fi
   checks=$((checks + 1))
-  # On flat (deep_async_recursion.txt, "caught null") the canary must have
-  # fired at least once, in the SAME run whose output matched. On -recur
+  # On flat (deep_async_recursion.txt) the canary must have fired at least
+  # once, in the SAME run whose output matched. On -recur
   # (deep_async_recursion-recur.txt, RangeError -- the C-stack guard answers
   # first, sec.12.2) whether the heap was also under pressure is not part of
   # what this check binds; the count is recorded, not gated.

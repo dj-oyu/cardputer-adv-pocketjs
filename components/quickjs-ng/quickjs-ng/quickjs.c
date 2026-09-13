@@ -6672,6 +6672,15 @@ JSVMStack *js_vm_stack_get(JSRuntime *rt)
 #endif
 }
 
+void JS_VMStackTrim(JSRuntime *rt)
+{
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    js_vm_stack_trim(rt, &rt->vm_stack);
+#else
+    (void)rt;
+#endif
+}
+
 JSVMState *js_vm_arm(JSRuntime *rt, int on)
 {
     struct list_head *el;

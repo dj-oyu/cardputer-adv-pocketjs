@@ -305,6 +305,7 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
      * rather than charge the survivor for it. */
     guest->drain_us = 0;
     guest->drain_jobs = 0;
+    JS_VMStackTrim(guest->runtime);
     return ESP_FAIL;
   }
   if (status == VM_DRAIN_YIELDED) {
@@ -317,6 +318,10 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
    * zero. Cleared before the report, which can itself fail the turn. */
   guest->drain_us = 0;
   guest->drain_jobs = 0;
+  /* D43 (docs/vm-L2-design.md sec.13): the turn is over, so the frame
+   * segments the stack kept for reuse during it go back to the heap. Kept
+   * across a YIELDED drain above, which is the same logical turn. */
+  JS_VMStackTrim(guest->runtime);
   return report_rejections(guest);
 }
 

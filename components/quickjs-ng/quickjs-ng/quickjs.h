@@ -530,6 +530,15 @@ typedef struct JSOOMCanary {
     size_t first_used;   /* malloc_state.malloc_size at that moment */
 } JSOOMCanary;
 JS_EXTERN void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out);
+/* D43 (docs/vm-L2-design.md sec.13): return to the heap the empty frame
+ * segments the segment stack kept for reuse during the turn that just ended.
+ * Within a turn every segment a returning call empties is kept, so a call
+ * depth that goes up and down across segment boundaries reuses them instead
+ * of allocating again; the host calls this once the job queue is empty, so
+ * nothing is held between turns. Only empty, unlinked segments are freed --
+ * safe at any point, including with frames live. No-op when the build keeps
+ * frames on the C stack. Does not allocate. */
+JS_EXTERN void JS_VMStackTrim(JSRuntime *rt);
 JS_EXTERN void JS_SetDumpFlags(JSRuntime *rt, uint64_t flags);
 JS_EXTERN uint64_t JS_GetDumpFlags(JSRuntime *rt);
 JS_EXTERN size_t JS_GetGCThreshold(JSRuntime *rt);
