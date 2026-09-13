@@ -93,8 +93,32 @@ for name in "${names[@]}"; do
   [ $trace = 1 ] && flags+=(--trace "$OUT/traces/$name.trace")
   raw=$OUT/actual-$variant/$name.raw
   # cwd = corpus/ so every label and stack frame names the file by basename.
-  (cd corpus && timeout 300 "$VMRUN" "${flags[@]}" "$name.js") > "$raw" 2>&1
-  code=$?
+  #
+  # TWO GUARDS AGAINST AN ENVIRONMENT FAILURE BEING RECORDED AS A VM FAILURE.
+  # This container's ASan runtime fails to START on roughly 1 run in 4: gcc
+  # 12.2's libasan8 on the WSL2 6.18 kernel leaves the process spinning on a
+  # signal it cannot report, printing "AddressSanitizer:DEADLYSIGNAL" forever
+  # (~13M lines/s -- one 300 s timeout left a 3.9 GB .raw). It is not the VM:
+  # a two-line `int main(){puts("hi");}` built with -fsanitize=address hangs the
+  # same way, 16 times in 60, while the same program without ASan is 60 for 60.
+  # So (a) anything that looks like that startup hang is retried, and (b) every
+  # .raw is capped -- real ASan reports and real output are orders of magnitude
+  # under the cap. VMTEST_HANG_RETRIES=0 turns the retry off.
+  attempts=0
+  while :; do
+    (cd corpus && exec timeout 300 "$VMRUN" "${flags[@]}" "$name.js") 2>&1 \
+      | head -c "${VMTEST_MAX_RAW:-4194304}" > "$raw"
+    code=${PIPESTATUS[0]}
+    attempts=$((attempts + 1))
+    if [ $code -eq 124 ] || [ $code -eq 141 ] || grep -q '^AddressSanitizer:DEADLYSIGNAL' "$raw"; then
+      if [ "$attempts" -lt "${VMTEST_HANG_RETRIES:-5}" ]; then
+        echo "  retry $name (asan startup hang, attempt $attempts)" >&2
+        continue
+      fi
+      echo "  note: $name hit the asan startup hang on all $attempts attempts" >&2
+    fi
+    break
+  done
   echo "exit=$code" >> "$raw"
   grep -E '^(#info|vmrun: note:)' "$raw" | sed "s/^/$name: /" >> "$info"
   grep -vE '^(#info|vmrun: note:)' "$raw" > "$OUT/actual-$variant/$name.txt"
