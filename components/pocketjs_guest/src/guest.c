@@ -10,6 +10,10 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "quickjs-libc.h"
+#ifdef CONFIG_POCKET_VM_PROBE
+#include <stdio.h>
+#include "quickjs-vm.h"
+#endif
 
 static const char *TAG = "pocketjs_guest";
 
@@ -656,6 +660,14 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
      * already chose for in-flight promises. Recorded as one bit because
      * counting would need a VM hook. */
     guest->jobs_dropped = JS_IsJobPending(guest->runtime);
+#ifdef CONFIG_POCKET_VM_PROBE
+    /* D42 sizing: the frame segments' peak for this session, the same line
+     * vmrun --stats prints on the host, so the standard segment size can be
+     * chosen from device frame sizes (8 B JSValue, 48 B frame header) rather
+     * than host ones. Printed before teardown, while the counters still
+     * describe the app rather than JS_FreeRuntime's own pops. */
+    vmtest_vmstack_report(guest->runtime, stdout);
+#endif
     js_std_free_handlers(guest->runtime);
   }
   if (guest->context != NULL) {
