@@ -168,3 +168,47 @@ modal_cancel/focus補正はホスト検証であり、この実機診断では�
 画素回収の合計2,999,242 µsは時間とアニメーションから除外。空き領域は60フレーム間隔で採取した最小値で、瞬間最低値ではない。
 0/299/599フレーム（tick=0/29,899/59,899 ms）の計97,200画素が独立Python式と一致し、HOME_READYへの復帰も確認した。記録は`.cache/ds-device-stress/serial.log`と`stress-report.json`、画素は`stress-000.png`、`stress-299.png`、`stress-599.png`。
 PASSは負荷処理の完走を示し、性能目標達成を意味しない。QuickJS/DS PATCH/音声/Wi-Fi併用を含むアプリ全体の試験とは分ける。
+
+## 2026-09-14: frostのスカラ最適化
+
+`vm/design-contracts`。channel展開を確実にinline化し、feedのRGBループを展開。
+blurは端画素複製を含む移動和へ変更し、各passのRGB565量子化を維持した。
+spanは丸め前の縦補間を先に行い、隣接2列を再利用する。30列180 Bの案を
+2列24 Bへ縮め、const snapshotの内部を書き換えず、追加heapなしで実装した。
+その他の局所配列・コンパイラのspillは別途スタックを使う。保持領域は2,048 Bのまま。
+
+| 600-frame workload | 変更前 | frostのみ初期改善 | 最終版 |
+| --- | ---: | ---: | ---: |
+| mean µs | 88,200 | 64,265 | 29,559 |
+| p95 µs | 89,394 | 64,951 | 29,698 |
+| max µs | 90,158 | 65,599 | 29,882 |
+| observed fps | 10.002 | 15.001 | 30.006 |
+| deadline miss / skipped | 600 / 1200 | 600 / 600 | 0 / 0 |
+
+最終版の平均内訳: 背景生成10,266 µs、feed 4,306 µs、blur 800 µs、
+span+tint 5,790 µs、board_present 7,076 µs。残差は装飾・計時・ループ等。
+計時はesp_timer_get_timeを行/帯単位で使用し、割込みや呼出コストを含む。
+画素回収の再実行を集計から除外する。準備/表示の合計値だけをfilter時間と扱わない。
+初回LCD診断の約13.7msは合成も含み、転送単独の7.1msと区別する。
+
+最終版では試験用背景の時刻・矩形位置・8種類の合成色をprepare/showごとに一度計算する。
+スクロール、2矩形の移動とalpha、パネルの移動とtint、毎フレームrecapture、
+半径1/2切替、全17帯64,800 B転送は維持する。ただし背景の画素ごとのalpha算術は
+8色の事前計算へ減らしたため、総合の約3倍という改善を汎用alphaカーネルの倍率と解釈しない。
+別ビルド・実時間アニメーションの比較であり、同一バイナリ/固定入力のkernel A/Bではない。
+
+ランダム背景16件、両半径、全256 alpha、全135行、部分spanと出力canaryを
+凍結した旧実装と比較。背景生成もランダム時刻100件×全画面で旧式と一致。
+ASan/UBSan、O2/strict-aliasing、独立Pythonの静止64,800画素/動的97,200画素がPASS。
+実機では静止32,400画素・frame 0/299/599の97,200画素が一致しHOME_READYへ復帰。
+LCD読戻しではなく転送前比較である。
+
+最終実機heap before/min/after=246,100 B、最大連続空き73,728 B、stack_free=21,740 B。
+静的DIRAM=130,908 B（以前より48 B増、計測counter40 Bとalignment）。
+app binary=2,170,144 B。nmでprobe_frost=0x800、channelのout-of-line symbol消失を確認。
+記録: `.cache/ds-device-scalar-opt/`、`.cache/ds-device-scalar-final/`。
+
+この負荷ではスカラ変更で30fpsを達成したためPIE追加は保留。
+併用時の余裕が不足したらspan+tint融合を優先し、次にfeedを検討する。
+blurは0.8msなので優先度を下げる。Wi-Fi/音声併用、製品capture/attach、
+静止snapshot再利用の受入はこの試験に含まない。

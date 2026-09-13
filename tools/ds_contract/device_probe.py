@@ -132,7 +132,7 @@ def main():
         png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
         (args.out / f'stress-{int(frame):03d}.png').write_bytes(png)
     report = {}
-    for category in ('timing', 'cadence', 'memory'):
+    for category in ('timing', 'split', 'cadence', 'memory'):
         match = re.search(r'STRESS '+category+r' ([^\r\n]+)', log)
         if not match:
             raise RuntimeError(f'Missing stress {category}')

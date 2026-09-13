@@ -37,6 +37,9 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     tools/ds_contract/test_composition.c -o "$out/composition"
   "$out/composition"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/ds \
+    main/ui/ds/ds_frost.c tools/ds_contract/frost_baseline.c tools/ds_contract/test_frost_equivalence.c -o "$out/equivalence"
+  "$out/equivalence"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/ds \
     main/ui/ds/ds_frost.c tools/ds_contract/test_frost.c -o "$out/frost"
   "$out/frost" > "$out/frost.bin"
   python3 tools/ds_contract/frost_reference.py "$out/frost.bin"
