@@ -1,0 +1,179 @@
+From 7064ef4ac7dd9fb5eb87487acd6378576b5f2d5c Mon Sep 17 00:00:00 2001
+From: dj-oyu <68707227+dj-oyu@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 22:42:50 +0900
+Subject: [PATCH] fix(quickjs): resolving-functions double-free on allocation
+ failure
+
+js_create_resolving_functions() built the resolve/reject pair for a
+promise capability and, when the SECOND function's allocation failed,
+freed resolving_funcs[0] (already built by the first iteration) without
+clearing the slot. Every caller that frees resolving_funcs[0]/[1]
+unconditionally on its own failure path -- js_async_function_call is the
+one that bites here -- then double-frees it: ASan heap-use-after-free.
+
+Stage A2 (8511f6b) found and worked around this locally in
+flat_async_call, on the theory that upstream's js_async_function_call has
+the same bug but is unreachable behind the C-stack-depth test. That
+theory is wrong for this fork: js_vm_flat_callable() only fast-paths a
+DIRECT bytecode call to an async function, so any call that reaches one
+through JS_Call from native glue (Function.prototype.apply/call/bind,
+Reflect.apply, a Proxy trap, a builtin's callback) still runs through
+js_async_function_call regardless of CONFIG_POCKET_VM_FLATCALLS -- reachable
+at recursion depth 1 on the shipped default build, confirmed with
+`f.apply(null, [])` and --fail-alloc.
+
+Fix at the root instead: js_create_resolving_functions's fail: label now
+sets resolving_funcs[0] = JS_UNDEFINED after freeing it, so every caller's
+contract ("failure leaves live values or JS_UNDEFINED, never something
+already freed") actually holds. flat_async_call's local workaround is
+removed as redundant. Also closes a second, previously unnoticed instance
+of the same bug in module evaluation (JSModuleDef.resolving_funcs, freed
+unconditionally by the module finalizer).
+
+Regression: tools/vmtest/corpus/oom_resolving_functions.js, blessed on
+asan-recur (upstream's call shape) and confirmed byte-identical on every
+other build variant including the default flat-calls one.
+
+Gates: build.sh all/all-alloca/all-recur/all-flat (8 variants) + run.sh
+each -- 47/47 corpus; run.sh --force-yield -- 3 pass/44 fail (L2c-expected,
+unchanged shape); test262.py --variant asan -j8 -- 7501 pass/194 fail/0
+regressions; stack_probe.sh 2000 o2 SELFTEST=1 -- 0.000 NOT_PROPORTIONAL;
+budget_probe.sh o2-flat and o2-recur -- checks=11 failed=0 each; vmalloc
+verify_all.sh -- G6 all traces verify clean, all faults caught.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XW6rzPVz92arombQ6VTgZH
+---
+ components/quickjs-ng/quickjs-ng/quickjs.c    | 42 ++++++++++++-----
+ .../vmtest/corpus/oom_resolving_functions.js  | 46 +++++++++++++++++++
+ .../expected/oom_resolving_functions.txt      |  3 ++
+ 3 files changed, 79 insertions(+), 12 deletions(-)
+ create mode 100644 tools/vmtest/corpus/oom_resolving_functions.js
+ create mode 100644 tools/vmtest/expected/oom_resolving_functions.txt
+
+diff --git a/components/quickjs-ng/quickjs-ng/quickjs.c b/components/quickjs-ng/quickjs-ng/quickjs.c
+index 6d48ae4..b14bf7a 100644
+--- a/components/quickjs-ng/quickjs-ng/quickjs.c
++++ b/components/quickjs-ng/quickjs-ng/quickjs.c
+@@ -21421,17 +21421,15 @@ flat_async_call: {
+             s->resolving_funcs[1] = JS_UNDEFINED;
+             promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
+             if (JS_IsException(promise)) {
+-                // Not upstream's fail: verbatim. js_create_resolving_functions
+-                // frees resolving_funcs[0] when the SECOND function's
+-                // allocation fails but leaves the dead value in the slot,
+-                // and js_async_function_free0 would free it again (ASan:
+-                // heap-use-after-free, seen on the host profile, where D38
+-                // makes heap exhaustion the normal end of a deep async
+-                // recursion). Upstream's js_async_function_call has the same
+-                // two lines and the same latent bug; it is unreachable there
+-                // because the C-stack test fires long before the heap.
+-                s->resolving_funcs[0] = JS_UNDEFINED;
+-                s->resolving_funcs[1] = JS_UNDEFINED;
++                // Upstream's fail: verbatim (matches js_async_function_call
++                // below). js_create_resolving_functions now guarantees
++                // s->resolving_funcs[0]/[1] are never left holding a value
++                // it has already freed -- see its fail: label -- so
++                // js_async_function_free's unconditional free of both slots
++                // is safe here even when the second resolving function's
++                // allocation is what failed. D38 makes this reachable in
++                // practice: a synchronous deep async recursion ends in heap
++                // exhaustion here, not in a C-stack test.
+                 js_async_function_free(rt, s);
+                 goto exception;
+             }
+@@ -57026,9 +57024,29 @@ static int js_create_resolving_functions(JSContext *ctx,
+         if (!s) {
+             JS_FreeValue(ctx, obj);
+ fail:
+-
++            // Contract with every caller (JS_NewPromiseCapability and its
++            // users, js_promise_resolve_thenable_job, the promise
++            // constructor): on failure resolving_funcs[0] and
++            // resolving_funcs[1] are always left either holding a live
++            // value or JS_UNDEFINED, never a value this function has
++            // already freed. resolving_funcs[i] itself is never written on
++            // this path (the assignment at the bottom of the loop runs only
++            // after a successful malloc), so it keeps whatever the caller
++            // put there before the call -- callers here pre-initialize both
++            // slots to JS_UNDEFINED. resolving_funcs[0] is the one slot this
++            // function itself can poison: when i==1 fails, index 0 already
++            // holds a real object from the first iteration, and freeing it
++            // here without clearing it left a dangling value in an output
++            // slot the caller believes is still valid. A caller that frees
++            // unconditionally on failure (upstream's js_async_function_call
++            // among them) then double-frees it -- ASan heap-use-after-free,
++            // reachable once a caller stops gating that free on "did this
++            // call fail" and starts doing it unconditionally, which is
++            // exactly what an unwind path through js_async_function_free
++            // does.
+             if (i != 0) {
+                 JS_FreeValue(ctx, resolving_funcs[0]);
++                resolving_funcs[0] = JS_UNDEFINED;
+             }
+             ret = -1;
+             break;
+diff --git a/tools/vmtest/corpus/oom_resolving_functions.js b/tools/vmtest/corpus/oom_resolving_functions.js
+new file mode 100644
+index 0000000..4795841
+--- /dev/null
++++ b/tools/vmtest/corpus/oom_resolving_functions.js
+@@ -0,0 +1,46 @@
++// vmrun-flags: --fail-alloc 1353
++// Regression for the resolving-functions double-free (reports/upstream/
++// quickjs-ng-resolving-functions-double-free.md). js_create_resolving_
++// functions() used to leave a dangling value in resolving_funcs[0] when the
++// SECOND resolve function's allocation failed, and js_async_function_call's
++// fail: path frees both slots unconditionally -- so an allocation failure at
++// exactly the wrong point turned into an ASan heap-use-after-free instead of
++// a clean thrown error.
++//
++// f.apply() is deliberate, not incidental: js_vm_flat_callable() only
++// special-cases a DIRECT bytecode call (OP_call/OP_call_method) to an async
++// function. Every call that reaches JS_Call() from native glue --
++// Function.prototype.apply/call/bind, Reflect.apply, a Proxy trap, a
++// builtin's callback -- goes through js_async_function_call regardless of
++// CONFIG_POCKET_VM_FLATCALLS, so this bug is reachable in the SHIPPED
++// default build (flatcalls on) at recursion depth 1, not only through the
++// deep synchronous recursion that flat calls turn into heap exhaustion
++// (docs/vm-L2-design.md sec.12.2 D38, see budget_probe.sh's
++// deep_async_recursion). A plain `f()` here would go flat and miss the
++// js_async_function_call path entirely on the shipped config.
++//
++// --fail-alloc 1353 targets the js_malloc(sizeof(JSPromiseFunctionData))
++// call for the SECOND (reject) resolving function inside
++// js_create_resolving_functions, reached from JS_NewPromiseCapability inside
++// js_async_function_call. Like every --fail-alloc corpus case, this attempt
++// number is a snapshot of the current allocation sequence up to that call:
++// it depends on how many allocations context bootstrap performs before the
++// script runs, which shifts if bootstrap grows or shrinks. If this file
++// starts passing trivially (no exception, output changes) or with a
++// mismatched failure site, the number needs to be relocated by instrumenting
++// js_create_resolving_functions's attempt count before it -- do not just move
++// the number until something fails.
++//
++// Blessed on asan-recur AND checked to match under the default (flatcalls)
++// variant: the whole point of the fix is that the failure is caught the same
++// way, at the same JS-observable point, on both the path that keeps the C
++// recursion for a call and the path that flattens it (this call never
++// flattens either way, see above).
++async function f() {}
++try {
++  f.apply(null, []);
++  print("no-throw");
++} catch (e) {
++  print("caught", e instanceof Error, e.constructor.name);
++}
++print("done");
+diff --git a/tools/vmtest/expected/oom_resolving_functions.txt b/tools/vmtest/expected/oom_resolving_functions.txt
+new file mode 100644
+index 0000000..74161f0
+--- /dev/null
++++ b/tools/vmtest/expected/oom_resolving_functions.txt
+@@ -0,0 +1,3 @@
++caught true InternalError
++done
++exit=0
+-- 
+2.55.0.windows.3
+
