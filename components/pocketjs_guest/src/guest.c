@@ -10,6 +10,10 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "quickjs-libc.h"
+#ifdef CONFIG_POCKET_VM_PROBE
+#include <stdio.h>
+#include "quickjs-vm.h"
+#endif
 
 static const char *TAG = "pocketjs_guest";
 
@@ -301,6 +305,7 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
      * rather than charge the survivor for it. */
     guest->drain_us = 0;
     guest->drain_jobs = 0;
+    JS_VMStackTrim(guest->runtime);
     return ESP_FAIL;
   }
   if (status == VM_DRAIN_YIELDED) {
@@ -313,6 +318,10 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
    * zero. Cleared before the report, which can itself fail the turn. */
   guest->drain_us = 0;
   guest->drain_jobs = 0;
+  /* D43 (docs/vm-L2-design.md sec.13): the turn is over, so the frame
+   * segments the stack kept for reuse during it go back to the heap. Kept
+   * across a YIELDED drain above, which is the same logical turn. */
+  JS_VMStackTrim(guest->runtime);
   return report_rejections(guest);
 }
 
@@ -656,6 +665,14 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
      * already chose for in-flight promises. Recorded as one bit because
      * counting would need a VM hook. */
     guest->jobs_dropped = JS_IsJobPending(guest->runtime);
+#ifdef CONFIG_POCKET_VM_PROBE
+    /* D42 sizing: the frame segments' peak for this session, the same line
+     * vmrun --stats prints on the host, so the standard segment size can be
+     * chosen from device frame sizes (8 B JSValue, 48 B frame header) rather
+     * than host ones. Printed before teardown, while the counters still
+     * describe the app rather than JS_FreeRuntime's own pops. */
+    vmtest_vmstack_report(guest->runtime, stdout);
+#endif
     js_std_free_handlers(guest->runtime);
   }
   if (guest->context != NULL) {

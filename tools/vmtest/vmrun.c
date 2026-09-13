@@ -486,6 +486,7 @@ static int run_turn(guest_t *guest) {
     if (status == VM_DRAIN_THREW) {
       fflush(stdout);
       if (context != NULL) js_std_dump_error(context);
+      JS_VMStackTrim(guest->runtime);
       return -1;
     }
     if (status == VM_DRAIN_YIELDED) {
@@ -511,6 +512,9 @@ static int run_turn(guest_t *guest) {
       continue;
     }
     drain_jobs = 0;            // the logical drain ended; the next starts at 0
+    // D43: where guest.c's drain_jobs() releases the segments kept for reuse
+    // during the turn -- the queue is empty, so the turn's frames are gone.
+    JS_VMStackTrim(guest->runtime);
     // Where app_tick() reads the flag: queue empty, ahead of the pumps.
     if (host_exit_requested) {
       host_stopping = true;

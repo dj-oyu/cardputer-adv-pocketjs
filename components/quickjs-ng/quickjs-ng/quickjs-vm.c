@@ -37,9 +37,19 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
     if (!st)
         return;
 #ifdef JS_VM_STACK_STATS
-    // resident_max: bytes the segments held at their peak, header and
-    // alignment slack included -- what the guest heap actually gave up, as
-    // opposed to live_max, the frame bytes that were in use at the peak.
+    // resident_max: the tracked peak of st->resident, the real bytes the
+    // LIVE CHAIN's segments held (header and alignment slack included) --
+    // summed incrementally as segments join/leave the chain (design D42),
+    // not the old seg_live_max * (one fixed size + overhead) estimate,
+    // which stopped meaning anything once segment payload started varying
+    // by chain position. What the guest heap actually gave up, as opposed
+    // to live_max, the frame bytes that were in use at the peak.
+    // seg_first / seg_max: the position-based sizing (design D42) -- the
+    // n-th standard segment on the chain gets min(seg_first * n, seg_max).
+    // seg_size mirrors seg_max for anything that only ever read the old
+    // single-value field: with vmtest_vmstack_configure / --vm-seg-size
+    // (seg_first == seg_max) it IS the one size every standard segment
+    // gets, same as before D42.
     // budget / budget_hits / seg_refused: D10 -- the limit in force at the
     // end, how many pushes it refused (each one a RangeError the C-stack
     // test did not get to raise first), and how many pushes the RUNTIME
@@ -52,7 +62,6 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
     // (CONFIG_POCKET_VM_FLATCALLS). budget_probe.sh reads it to know which
     // guard is expected to answer under the shipped limits: with C recursion
     // the C-stack guard fires first (budget_hits=0), flat only the budget can.
-    size_t overhead = sizeof(JSVMSeg) + (JS_VM_SEG_ALIGN - 1);
 #ifdef CONFIG_POCKET_VM_FLATCALLS
     const int flat = 1;
 #else
@@ -62,25 +71,26 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
     // uint32_t, which is unsigned int on the x86-64 host but long unsigned int
     // on xtensa, so a bare %u passed every host build and failed -Werror=format
     // the first time a CONFIG_POCKET_VM_PROBE firmware compiled this file.
-    fprintf(f, "#info vmstack flat=%d seg_size=%zu align=%d frame_hdr=%zu pushes=%llu depth_max=%u "
+    fprintf(f, "#info vmstack flat=%d seg_size=%zu seg_first=%zu seg_max=%zu align=%d frame_hdr=%zu "
+               "pushes=%llu depth_max=%u "
                "live_max=%zu frame_max=%zu seg_live_max=%u seg_mallocs=%llu seg_frees=%llu "
-               "seg_reuses=%llu dedicated=%llu fallbacks=%llu resident_max~=%zu "
+               "seg_reuses=%llu dedicated=%llu fallbacks=%llu resident_max~=%zu held_max=%zu trims=%llu "
                "budget=%zu budget_hits=%llu seg_refused=%llu\n",
-            flat, st->seg_size, JS_VM_FRAME_ALIGN, sizeof(JSVMSeg),
+            flat, st->seg_max, st->seg_first, st->seg_max, JS_VM_FRAME_ALIGN, sizeof(JSVMSeg),
             (unsigned long long)st->pushes, (unsigned)st->depth_max, st->live_bytes_max, st->frame_max,
             (unsigned)st->seg_live_max, (unsigned long long)st->seg_mallocs,
             (unsigned long long)st->seg_frees, (unsigned long long)st->seg_reuses,
             (unsigned long long)st->dedicated, (unsigned long long)st->fallbacks,
-            (size_t)st->seg_live_max * (st->seg_size + overhead),
+            st->resident_max, st->held_max, (unsigned long long)st->trims,
             st->budget, (unsigned long long)st->budget_hits,
             (unsigned long long)st->seg_refused);
 #else
 #ifdef CONFIG_POCKET_VM_FLATCALLS
-    fprintf(f, "#info vmstack flat=1 seg_size=%zu budget=%zu (no stats in this build)\n",
-            st->seg_size, st->budget);
+    fprintf(f, "#info vmstack flat=1 seg_size=%zu seg_first=%zu seg_max=%zu budget=%zu (no stats in this build)\n",
+            st->seg_max, st->seg_first, st->seg_max, st->budget);
 #else
-    fprintf(f, "#info vmstack flat=0 seg_size=%zu budget=%zu (no stats in this build)\n",
-            st->seg_size, st->budget);
+    fprintf(f, "#info vmstack flat=0 seg_size=%zu seg_first=%zu seg_max=%zu budget=%zu (no stats in this build)\n",
+            st->seg_max, st->seg_first, st->seg_max, st->budget);
 #endif
 #endif
 }
