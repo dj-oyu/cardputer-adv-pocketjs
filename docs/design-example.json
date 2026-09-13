@@ -1,0 +1,48 @@
+{
+  "version": "0.1",
+  "target": "cardputer-adv",
+  "tokens": {
+    "colors": {
+      "background": "#0b1727ff", "surface": "#1c3043ff",
+      "edge": "#476275ff", "text": "#f5eedcff",
+      "muted": "#91a6baff", "accent": "#67dfc7ff"
+    },
+    "spacing": [2, 4, 8, 12, 16],
+    "radii": [0, 2, 4, 8],
+    "typography": "cardputer-flash-v1"
+  },
+  "screens": [{
+    "id": "pet-preview",
+    "background": "@color/background",
+    "budget": {"commands": 32, "textBytes": 512, "tracks": 3, "backdropBytes": 2048},
+    "nodes": [
+      {"id": "title", "kind": "label", "rect": [9, 7, 184, 21], "text": "MY PET", "capacity": 48, "font": "caption", "color": "@color/text"},
+      {"id": "panel", "kind": "panel", "rect": [7, 25, 112, 109], "radius": 4,
+        "fill": {"kind": "linear", "axis": "y", "from": "#233d52ff", "to": "#142639ff", "dither": true},
+        "border": {"width": 1, "color": "@color/edge"}},
+      {"id": "pet", "kind": "pet", "rect": [27, 29, 91, 93], "clip": [7, 25, 112, 109], "variant": 0, "mood": 0, "scale": 1},
+      {"id": "food-label", "kind": "label", "rect": [122, 45, 238, 57], "text": "FOOD 80", "capacity": 32, "font": "body", "color": "@color/text"},
+      {"id": "food", "kind": "meter", "rect": [122, 58, 228, 62], "value": 80, "track": "@color/edge", "fill": "@color/accent"},
+      {"id": "open-menu", "kind": "label", "rect": [8, 112, 232, 124], "text": "> MENU", "capacity": 32, "font": "body", "color": "@color/accent"}
+    ],
+    "focus": ["open-menu"],
+    "actions": [{"id": "menu-action", "target": "open-menu", "event": "activate", "command": "open-pet-menu"}],
+    "motions": [{"id": "pet-reaction", "target": "pet", "property": "translateY", "from": 0, "to": -2, "durationMs": 120, "easing": "easeOutCubic", "repeat": "once"}],
+    "modals": [{
+      "id": "pet-menu",
+      "backdrop": {"kind": "frosted-static", "downsample": 8, "blurRadius": 1, "tint": "#dce8ef40", "fallback": "#0b1727ff"},
+      "nodes": [
+        {"id": "dialog", "kind": "panel", "rect": [28, 27, 212, 109], "radius": 8, "fill": "#1c3043d8", "border": {"width": 1, "color": "@color/edge"}},
+        {"id": "heading", "kind": "label", "rect": [40, 38, 200, 52], "text": "PET MENU", "capacity": 32, "font": "body", "color": "@color/text"},
+        {"id": "feed", "kind": "label", "rect": [40, 59, 200, 73], "text": "> FEED", "capacity": 32, "font": "body", "color": "@color/accent"},
+        {"id": "close", "kind": "label", "rect": [40, 82, 200, 96], "text": "CLOSE", "capacity": 32, "font": "body", "color": "@color/text"}
+      ],
+      "focus": ["feed", "close"],
+      "actions": [
+        {"id": "feed-action", "target": "feed", "event": "activate", "command": "feed-pet"},
+        {"id": "close-action", "target": "close", "event": "activate", "command": "close-modal"},
+        {"id": "back-action", "target": "dialog", "event": "back", "command": "close-modal"}
+      ]
+    }]
+  }]
+}
