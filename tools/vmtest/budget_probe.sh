@@ -158,10 +158,15 @@ check_async() {
   echo "exit=$?" >> "$raw"
   # The unhandled-rejection report lines are counted, not diffed.
   grep -vE '^(#info|vmrun: note:|E pocketjs_guest: Unhandled Promise rejection:)' "$raw" > "$txt"
-  local hits depth unhandled match
+  local hits depth unhandled oomn match
   hits=$(sed -n 's/.*budget_hits=\([0-9]*\).*/\1/p' "$raw")
   depth=$(sed -n 's/^#info max_depth=\([0-9]*\).*/\1/p' "$raw" | head -n1)
   unhandled=$(grep -c '^E pocketjs_guest: Unhandled Promise rejection:' "$raw")
+  # OOM canary (quickjs.h JS_TakeOOMCanary): on flat, "caught null" IS an
+  # allocation rejection that JS_ThrowOutOfMemory could not even wrap in an
+  # error object -- this is the check that a bare `null` here is that, and
+  # not a script `throw null` that happens to look the same from outside.
+  oomn=$(sed -n 's/^#info oom count=\([0-9]*\).*/\1/p' "$raw" | head -n1)
   if grep -q 'AddressSanitizer' "$raw" && grep -q 'build_backtrace' "$raw"; then
     printf 'note %-24s ASan report in build_backtrace: known/oom_backtrace_uaf reproduced (D38), not counted %s[--profile device]\n' \
       "$name" "${depth:+depth=$depth }"
@@ -169,13 +174,22 @@ check_async() {
   fi
   if diff -q "$exp" "$txt" > /dev/null; then match=match; else match=differ; fi
   checks=$((checks + 1))
-  if [ "$match" = match ] && [ "${hits:-x}" = 0 ]; then
-    printf 'ok   %-24s %-7s budget_hits=%-3s unhandled=%-3s %s[--profile device, vs %s]\n' \
-      "$name" "$match" "${hits:--}" "$unhandled" "${depth:+depth=$depth }" "$exp"
+  # On flat (deep_async_recursion.txt, "caught null") the canary must have
+  # fired at least once, in the SAME run whose output matched. On -recur
+  # (deep_async_recursion-recur.txt, RangeError -- the C-stack guard answers
+  # first, sec.12.2) whether the heap was also under pressure is not part of
+  # what this check binds; the count is recorded, not gated.
+  local want_oom=0
+  [ "$flat" = 1 ] && want_oom='>0'
+  local oom_ok=1
+  case "$want_oom" in 0) : ;; '>0') [ "${oomn:-0}" -gt 0 ] || oom_ok=0 ;; esac
+  if [ "$match" = match ] && [ "${hits:-x}" = 0 ] && [ $oom_ok = 1 ]; then
+    printf 'ok   %-24s %-7s budget_hits=%-3s unhandled=%-3s oom=%-3s %s[--profile device, vs %s]\n' \
+      "$name" "$match" "${hits:--}" "$unhandled" "${oomn:--}" "${depth:+depth=$depth }" "$exp"
   else
     failed=$((failed + 1))
-    printf 'FAIL %-24s %-7s budget_hits=%-3s unhandled=%-3s %s[--profile device, vs %s]  wanted match hits=0\n' \
-      "$name" "$match" "${hits:--}" "$unhandled" "${depth:+depth=$depth }" "$exp"
+    printf 'FAIL %-24s %-7s budget_hits=%-3s unhandled=%-3s oom=%-3s %s[--profile device, vs %s]  wanted match hits=0 oom=%s\n' \
+      "$name" "$match" "${hits:--}" "$unhandled" "${oomn:--}" "${depth:+depth=$depth }" "$exp" "$want_oom"
     [ "$match" = match ] || diff "$exp" "$txt" | head -n 8
   fi
 }

@@ -55,6 +55,22 @@ extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
 extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
 static pocketjs_guest_t *guest;
+
+// Called after any turn or evaluation that ran JavaScript -- app_tick's two
+// paths, app_overlay_tick's, and eval_reporting's parse -- because an
+// allocation rejection can happen inside any of them. See JS_TakeOOMCanary
+// (quickjs.h): a rejection there can turn into a bare `null` exception once
+// JS_ThrowOutOfMemory's own allocation also fails, indistinguishable from the
+// script's own `throw null` without this. Not a contracted marker (the
+// CLAUDE.md list predates it); a new line costs nothing to add.
+static void report_oom_if_any(void) {
+    if(!guest) return;
+    uint32_t n=0; size_t first_req=0, first_used=0;
+    pocketjs_guest_take_oom(guest,&n,&first_req,&first_used);
+    if(n>0)
+        ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
+                 (unsigned)n,(unsigned)first_req,(unsigned)first_used);
+}
 static pocketjs_ui_core_t *core;
 static pocketjs_ui_qjs_t *binding;
 static pocketjs_rgb565_renderer_t *renderer;
@@ -241,6 +257,13 @@ static esp_err_t eval_reporting(const char *source, size_t length,
         JS_FreeValue(ctx,result);
         jsconsole_set_error(message[0]?message:"evaluation failed");
         ESP_LOGW("app","EVAL_ERROR %s",message);
+        // Parsing counts too (CLAUDE.md: source bytes eat the guest's heap
+        // before a single line runs), so a source too big to parse can throw
+        // this same bare null. Reported here rather than folded into
+        // EVAL_ERROR's own text: that marker's format is read by nothing
+        // today but is exactly the shape test_settings.py etc. treat as
+        // contracted, so a new field goes on a line of its own.
+        report_oom_if_any();
         return ESP_FAIL;
     }
     JS_FreeValue(ctx,result);
@@ -625,6 +648,7 @@ esp_err_t app_overlay_tick(void) {
     // resumed directly instead of through the binding.
     if(pocketjs_guest_jobs_pending(guest)) {
         esp_err_t ce=pocketjs_guest_continue(guest);
+        report_oom_if_any();
         if(ce) return ce;
         if(pocketjs_guest_jobs_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
@@ -665,6 +689,7 @@ esp_err_t app_overlay_tick(void) {
     pocketjs_guest_frame_t f={.struct_size=sizeof(f)};
     esp_err_t e=pocketjs_guest_frame(guest,&f);
     frames++;
+    report_oom_if_any();
     return e;
 }
 
@@ -766,6 +791,7 @@ esp_err_t app_tick(uint32_t buttons) {
         int64_t cont_began=esp_timer_get_time();
         esp_err_t ce=pocketjs_ui_turn_continue(binding,&cont);
         turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
+        report_oom_if_any();
         if(ce) return ce;
         if(!leaving && pocketjs_guest_jobs_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
@@ -856,6 +882,7 @@ esp_err_t app_tick(uint32_t buttons) {
     esp_err_t e=pocketjs_ui_turn(binding,&input,&frame);
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
+    report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
     // turn_us is frame() plus whatever job draining pocketjs_ui_turn() does
     // around it -- see vmprobe.h for why the two are not split further.

@@ -100,6 +100,16 @@ void pocketjs_guest_interrupt(pocketjs_guest_t *guest);
 esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
                                pocketjs_guest_stats_t *out_stats);
 
+/** Read-and-clear count of allocation rejections (QuickJS's malloc_limit
+ * check OR the underlying allocator, either one -- see JS_TakeOOMCanary in
+ * quickjs.h) since the last call, plus the first one's requested size and the
+ * heap usage at that moment. Any argument may be NULL. Call once per turn,
+ * after the turn's JS has run, so a `null` exception thrown that turn can be
+ * told apart from the script's own `throw null` (both look identical from
+ * inside the guest once JS_ThrowOutOfMemory's own allocation also fails). */
+void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
+                             size_t *first_req, size_t *first_used);
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
 /* VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare

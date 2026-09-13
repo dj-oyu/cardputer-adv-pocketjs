@@ -1670,6 +1670,44 @@ static size_t js_malloc_usable_size_unknown(const void *ptr)
     return 0;
 }
 
+/* OOM canary state (JS_TakeOOMCanary, quickjs.h), deliberately NOT a field of
+ * JSMallocState/JSRuntime: JSRuntime itself is allocated through
+ * js_malloc_rt (JS_NewRuntime2's "Inline what js_malloc_rt does" comment) and
+ * its own usable_size counts toward malloc_size, so widening it would move
+ * the byte at which every malloc_limit-driven test in tools/vmtest/corpus
+ * trips -- measured: adding these three fields to JSMallocState alone made
+ * gc_threshold_device.js (which deliberately runs a cyclic-garbage loop to
+ * the last byte of the device's 160 KiB limit) hit the limit one allocation
+ * earlier, inside the uncaught print() after its try/catch instead of inside
+ * it, turning its "caught": true into an uncaught exception. A static here
+ * costs the runtime's accounted footprint nothing.
+ *
+ * One instance for the process, not per-runtime: this firmware never has two
+ * JSRuntimes alive at once (CLAUDE.md: one JS app at a time) and neither does
+ * a single vmrun/test262.py process (one file, one runtime). JS_NewRuntime2
+ * clears it so a later runtime in the same process does not inherit an
+ * earlier one's count. */
+static JSOOMCanary g_oom_canary;
+
+/* Records one allocation rejection for JS_TakeOOMCanary, regardless of which
+ * of the two branches below produced it (accounting limit vs. the real
+ * allocator). Only the FIRST rejection in the current window is kept in
+ * detail -- that is the one whose depth/size a caller investigating a "caught
+ * null" wants, and re-recording every one of a burst would just overwrite it
+ * with the least interesting (deepest-unwound) sample. `used_before` is the
+ * caller's malloc_size at the moment of rejection, passed in rather than
+ * read from a JSMallocState* so this never needs a pointer into the struct
+ * whose size this exists specifically to leave alone. */
+static void js_oom_canary_record(size_t requested, size_t used_before)
+{
+    if (g_oom_canary.count == 0) {
+        g_oom_canary.first_req = requested;
+        g_oom_canary.first_used = used_before;
+    }
+    if (g_oom_canary.count < UINT32_MAX)
+        g_oom_canary.count++;
+}
+
 void *js_calloc_rt(JSRuntime *rt, size_t count, size_t size)
 {
     void *ptr;
@@ -1680,17 +1718,21 @@ void *js_calloc_rt(JSRuntime *rt, size_t count, size_t size)
 
     if (size > 0)
         if (unlikely(count != (count * size) / size)) {
+            /* size_t overflow in count*size, not a memory-pressure rejection:
+             * excluded from the OOM canary on purpose (see js_oom_canary_record). */
             return NULL;
         }
 
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
     if (unlikely(s->malloc_size + (count * size) > s->malloc_limit - 1)) {
+        js_oom_canary_record(count * size, s->malloc_size);
         return NULL;
     }
 
     ptr = rt->mf.js_calloc(s->opaque, count, size);
     if (!ptr) {
+        js_oom_canary_record(count * size, s->malloc_size);
         return NULL;
     }
 
@@ -1712,11 +1754,13 @@ void *js_malloc_rt(JSRuntime *rt, size_t size)
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
     if (unlikely(s->malloc_size + size > s->malloc_limit - 1)) {
+        js_oom_canary_record(size, s->malloc_size);
         return NULL;
     }
 
     ptr = rt->mf.js_malloc(s->opaque, size);
     if (!ptr) {
+        js_oom_canary_record(size, s->malloc_size);
         return NULL;
     }
 
@@ -1763,11 +1807,13 @@ void *js_realloc_rt(JSRuntime *rt, void *ptr, size_t size)
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
     if (s->malloc_size + size - old_size > s->malloc_limit - 1) {
+        js_oom_canary_record(size, s->malloc_size);
         return NULL;
     }
 
     ptr = rt->mf.js_realloc(s->opaque, ptr, size);
     if (!ptr) {
+        js_oom_canary_record(size, s->malloc_size);
         return NULL;
     }
 
@@ -2042,6 +2088,9 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     memset(&ms, 0, sizeof(ms));
     ms.opaque = opaque;
     ms.malloc_limit = 0;
+    /* A fresh runtime starts with a fresh canary: see g_oom_canary's comment
+     * for why this is process-wide state rather than a field of `ms`. */
+    g_oom_canary = (JSOOMCanary){0};
 
     rt = mf->js_calloc(opaque, 1, sizeof(JSRuntime));
     if (!rt) {
@@ -7623,6 +7672,22 @@ static void compute_value_size(JSValue val, JSMemoryUsage_helper *hp)
         /* should track JSBigInt usage */
         break;
     }
+}
+
+/* Read-and-clear, same discipline as guest.c's rejection_tracking_failed:
+ * a null answer's cause (thrown OOM vs. `throw null`) is ambiguous from
+ * inside the guest, so the caller must be able to ask "did an allocation
+ * fail THIS turn" and get a fresh answer next time without carrying an
+ * allocation of its own (a struct on the caller's stack, no malloc). `rt` is
+ * unused: see g_oom_canary's comment for why the state is process-wide
+ * rather than per-runtime, and is kept as a parameter only so this reads
+ * like every other per-runtime query (JS_ComputeMemoryUsage, JS_SetMemoryLimit)
+ * and can be given real per-runtime storage later without an API break. */
+void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out)
+{
+    (void)rt;
+    *out = g_oom_canary;
+    g_oom_canary = (JSOOMCanary){0};
 }
 
 void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)

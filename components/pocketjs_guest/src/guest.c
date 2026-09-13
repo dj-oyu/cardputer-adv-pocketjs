@@ -629,6 +629,23 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
   return ESP_OK;
 }
 
+/* Read-and-clear, same shape as pocketjs_guest_vmprobe_take(): the host
+ * (app_session.c) calls this after every turn so a `caught null` from the
+ * SAME turn can be told apart from a script's own `throw null`. See
+ * JS_TakeOOMCanary for why the count has to come from inside QuickJS rather
+ * than from guest_malloc's own NULL returns -- the malloc_limit accounting
+ * check rejects most device OOMs before guest_malloc is ever called. */
+void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
+                             size_t *first_req, size_t *first_used) {
+  JSOOMCanary canary = {0};
+  if (guest != NULL) {
+    JS_TakeOOMCanary(guest->runtime, &canary);
+  }
+  if (count != NULL) *count = canary.count;
+  if (first_req != NULL) *first_req = canary.first_req;
+  if (first_used != NULL) *first_used = canary.first_used;
+}
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
   if (guest == NULL) {
     return;
