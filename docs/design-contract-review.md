@@ -31,7 +31,7 @@ pet画像は汎用image portへ登録し、variant/frameをペットadapterが�
 
 | 事項 | 評価・次の設計作業 |
 | --- | --- |
-| レイヤーごとの世代 | 固定領域とレイヤー別epochを実装済み。replace開始で世代を消費し、abortでも再利用しない。長期wrapのレビューは残る |
+| レイヤーごとの世代 | 各レイヤーにepochを保持し、発行元はプロセス寿命で共有する。abort/discard/resetで再利用せず、上限ではLIMIT。枯渇境界の回帰検証済み |
 | 2バンクと通知待ち | 共有builderにより通知がBUSYになる。未完トランザクションをJSが長く保持する場合の取消/期限を定める必要がある |
 | 強いJS境界 | clientを生成時にAPP/SYSTEMへ固定し、beginからlayer指定を除去した。QuickJS adapterへAPP clientだけを渡す配線は未実装 |
 | モーダルcapture | 同期APIは呼出順の検証には使えるが、帯ごとの継続・取消・期限応答を表せない。長いcaptureが測定された場合のhost状態機械が必要 |
@@ -42,9 +42,10 @@ pet画像は汎用image portへ登録し、variant/frameをペットadapterが�
 | アニメーション完了 | animate/stopは定義したが、完了ビットのpoll APIは未定義。JS側の寿命・失敗・再利用を含めて設計する |
 | API補助操作 | clip/offsetのbuilder、整数表示、schema生成物、focus/command routingは本prototypeの外。例では座標と文字を明示生成する |
 
-現段階で「APIが完成している」とは評価しない。基本の描画更新と容量境界は動くが、rendererへ提出bankを安全に公開する内部interface、modal寿命、長時間builderの扱いは実アプリ統合前の設計課題。
+現段階で「APIが完成している」とは評価しない。rendererへの提出ID付きコピー読出しを追加したが、資源検証、modal寿命、長時間builderの扱いは実アプリ統合前の設計課題。
 32 Bのstatic_assertは保存候補1件のサイズだけを検査する。native全体16 KiB、stack、JS heapの達成を証明しない。
-現在の内部構造体は8,320 B、呼出側が予約する`ds_core`は9,216 B。公開limits/statsは実際に保持する9,216 Bを返す。
+呼出側が予約する`ds_core`は9,216 B。共有IDカウンタ8 Bを含め、公開limits/statsは9,224 Bを保守的に計上する。複数coreでも共有カウンタは8 Bのみ。
+命令読み出し用の`ds_frame_command`と`ds_frame`は呼出側の一時領域で、この常駐容量には含まない。描画器は命令数分の配列を作らず、比較用2件までを再利用する。
 patch開始時は表示bank全体約4 KiBを構築bankへコピーする。heap確保はないが、局所更新としての実機時間は未測定でありAstraレビュー対象。
 
 ## 検証の範囲
@@ -57,4 +58,32 @@ ESP32-S3向けにはuse_casesとprobeをオブジェクトまでコンパイル�
 今回の結果: WSLのGCCでASan/UBSan実行PASS、C++17 header構文検査PASS。
 `xtensa-esp32s3-elf-gcc` 15.2.0でコア・ユースケース・テストを`-Os -Wall -Wextra -Werror`コンパイルPASS。
 新コアを`main/CMakeLists.txt`へ追加したESP-IDF v6.0.1全体ビルドPASS。コアのインスタンスはまだ作らないため、リンク時のDIRAM増分は測定対象外。
-実装変更はworktree内の未コミット状態。基点へ仕様を取り込んだコミット以外のcommit/push/mergeは行っていない。
+Solの固定コアは`e072ff8`でコミット済み。以下はその実装に対するAstraレビューと修正。vm/mainへのmerge、push、実機書込みはこのレビューに含めない。
+
+## Astraレビュー: 参照寿命と描画への引渡し
+
+2026-09-13。以下の3件は修正前コアに対する`test_review.c`で失敗を再現した。
+
+- **P1: レイヤーを跨ぐ操作。** SYSTEMのtxをAPP endpointに渡すとadd/abortできた。全tx操作でendpointのlayerを検証し、他所有者のトランザクションを変更しない。
+- **P1: PATCH追加の参照再利用。** 追加をabort/discardすると次の追加が同じindex/epochを使用する。構造変更をREPLACEに限定し、PATCHのaddをINVALIDにした。命令ごとの世代表は増設しない。
+- **P1: resetによる参照復活。** initで番号を初期値へ戻していた。プロセス寿命の発行元を用い、再初期化でも世代とtxを再利用しない。上限到達ではwrapせずLIMIT。共有の単一owner taskを前提とする。
+
+併せて修正した点:
+
+- 宣言されたbyte配列を無関係な構造体にcastする保存方式を、unionの型付きmemberに変更した。固定容量は維持。
+- 長すぎるSET_TEXTをUTF-8走査前に拒否し、空文字のNULLをmemcpyへ渡さない。未実装animationのtracks上限は0を返す。
+- 起動時の空APPに黒背景を設定し、APP構築前のSYSTEM通知を可能にした。APP REPLACEには明示背景を要求する。
+- `ds_core_frame/read`は提出IDで旧/新状態を検証し、descriptorと文字を呼出側へコピーする。返したdescriptorの文字ポインタはその出力オブジェクト内を指すため、構造体コピー後には再読出しが必要。
+- `presented/discard/failed`も提出IDを検証する。古いackが次の提出を採用する問題を防ぎ、転送失敗フラグはdiscardでも維持する。初回/reset後も全面描画を要求する。
+
+ASan/UBSanと`-O2 -fstrict-aliasing`で、レイヤー違反、再初期化、ID枯渇、旧ack、文字コピー、旧/新bank読出し、失敗→破棄→再提出を検査する。
+これはLCD転送の実測ではなく、hostが正しくfailed/presentedを呼ぶための状態契約の検証である。
+修正後のホストテスト全件、C++17ヘッダ検査、ESP-IDF v6.0.1の`build_ds_contract`ビルドはPASS。
+最終ELFを`nm`で確認するとDSコアのシンボルはなく、未接続のためリンク時に除去されている。ファームのDIRAM増分0をDSの使用量とは解釈しない。
+
+残る主要な設計課題:
+
+1. **画像の登録・寿命検証が未実装。** 現コアは非ゼロのresource番号を保存するだけで、variant/frame上限を検証しない。ペット例のresource=1は仮値。renderer接続前に登録表・reset・提出中の参照保持を実装する必要がある。
+2. **damageと全帯再送は未実装。** 前後の命令、背景、full_redrawから求める。IO失敗した提出を破棄する場合、ホストが次の提出を予定する責任を持つ。
+3. **アプリの参照公開と提出破棄の連携。** end成功は表示成功ではない。REPLACE提出が破棄された場合、アプリは候補参照を使い続けず最新domain stateから再構築する。JS adapter側への失敗通知契約が必要。
+4. **長時間builder・資源・modal・animation。** SYSTEMがBUSYになる期限、capture handleの所有、font port、track完了のpollは別途設計する。今回の固定コアだけで16 KiB全体予算や実機速度の達成を主張しない。

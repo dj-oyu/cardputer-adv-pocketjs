@@ -6,27 +6,9 @@
 #define DS_REF_GENERATION_MAX ((1u << (32u - DS_REF_INDEX_BITS)) - 1u)
 #define DS_FLAG_VISIBLE 1u
 
-typedef struct ds_core_impl ds_core_impl;
-typedef struct { ds_core_impl *core; ds_layer layer; } ds_endpoint;
-typedef struct {
-    ds_command_storage commands[DS_COMMANDS];
-    uint8_t text[DS_TEXT_BYTES];
-    uint16_t count[2],text_used[2];
-    uint32_t generation[2];
-    ds_rgba background[2];
-    bool background_set[2];
-} ds_bank;
-struct ds_core_impl {
-    ds_bank banks[2];
-    ds_endpoint endpoints[2];
-    uint32_t next_generation[2],next_tx;
-    ds_tx transaction;
-    ds_result poison;
-    ds_layer layer;
-    ds_update_mode mode;
-    uint8_t active,building_bank;
-    bool building,submitted,generation_exhausted[2];
-};
+/* Process-lifetime IDs; all cores use the same owner task. Never reset these
+ * with a guest session. Exhaustion fails closed rather than reviving handles. */
+static uint32_t last_generation,last_transaction;
 
 typedef struct { ds_rgba color; uint8_t radius,width,pad[2]; } shape_payload;
 typedef struct { ds_rgba from,to; uint8_t axis,radius,dither,pad; } gradient_payload;
@@ -44,8 +26,8 @@ _Static_assert(sizeof(gradient_payload)<=sizeof(((ds_command_storage *)0)->paylo
 _Static_assert(sizeof(text_payload)<=sizeof(((ds_command_storage *)0)->payload),"text payload");
 _Static_assert(sizeof(image_payload)<=sizeof(((ds_command_storage *)0)->payload),"image payload");
 
-static ds_core_impl *impl(ds_core *core){return (ds_core_impl *)(void *)core->bytes;}
-static const ds_core_impl *cimpl(const ds_core *core){return (const ds_core_impl *)(const void *)core->bytes;}
+static ds_core_impl *impl(ds_core *core){return &core->state;}
+static const ds_core_impl *cimpl(const ds_core *core){return &core->state;}
 static unsigned command_base(ds_layer layer){return layer==DS_APP?0u:DS_APP_COMMANDS;}
 static unsigned command_limit(ds_layer layer){return layer==DS_APP?DS_APP_COMMANDS:DS_SYSTEM_COMMANDS;}
 static unsigned text_base(ds_layer layer){return layer==DS_APP?0u:DS_APP_TEXT_BYTES;}
@@ -66,8 +48,9 @@ static ds_result poison(ds_core_impl *core,ds_result result){
     if(core->poison==DS_OK)core->poison=result;
     return result;
 }
-static ds_result check_transaction(ds_core_impl *core,ds_tx tx){
-    if(!core->building||tx.value==0||tx.value!=core->transaction.value)return DS_STALE;
+static ds_result check_transaction(void *context,ds_tx tx){
+    ds_endpoint *endpoint=context;ds_core_impl *core=endpoint->core;
+    if(!core->building||endpoint->layer!=core->layer||tx.value==0||tx.value!=core->transaction.value)return DS_STALE;
     return core->poison;
 }
 
@@ -106,16 +89,14 @@ static ds_result core_begin(void *context,ds_update_mode mode,ds_tx *out){
     if(!out||(mode!=DS_REPLACE&&mode!=DS_PATCH))return DS_INVALID;
     if(core->building||core->submitted)return DS_BUSY;
     ds_layer layer=endpoint->layer;
-    if(mode==DS_REPLACE&&core->generation_exhausted[layer])return DS_LIMIT;
+    if(last_transaction==UINT32_MAX||
+       (mode==DS_REPLACE&&last_generation==DS_REF_GENERATION_MAX))return DS_LIMIT;
     core->building_bank=(uint8_t)(core->active^1u);
     memcpy(&core->banks[core->building_bank],&core->banks[core->active],sizeof(ds_bank));
     core->layer=layer;core->mode=mode;core->poison=DS_OK;core->building=true;
-    if(++core->next_tx==0)++core->next_tx;
-    core->transaction=(ds_tx){core->next_tx};*out=core->transaction;
+    core->transaction=(ds_tx){++last_transaction};*out=core->transaction;
     if(mode==DS_REPLACE){
-        uint32_t generation=core->next_generation[layer];
-        if(generation==DS_REF_GENERATION_MAX)core->generation_exhausted[layer]=true;
-        else core->next_generation[layer]=generation+1u;
+        uint32_t generation=++last_generation;
         ds_bank *bank=&core->banks[core->building_bank];
         bank->generation[layer]=generation;bank->count[layer]=0;bank->text_used[layer]=0;
         bank->background_set[layer]=false;
@@ -125,7 +106,7 @@ static ds_result core_begin(void *context,ds_update_mode mode,ds_tx *out){
     return DS_OK;
 }
 static ds_result core_background(void *context,ds_tx tx,ds_rgba color){
-    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(core,tx);
+    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(context,tx);
     if(result!=DS_OK)return result;
     if(core->layer!=DS_APP||(color&0xffu)!=0xffu)return poison(core,DS_INVALID);
     ds_bank *bank=&core->banks[core->building_bank];bank->background[DS_APP]=color;
@@ -142,15 +123,16 @@ static ds_result validate_draw(const ds_draw *draw){
     case DS_TEXT:
         if(draw->data.text.capacity<1||draw->data.text.capacity>128)return DS_LIMIT;
         if(draw->data.text.bytes>draw->data.text.capacity)return DS_LIMIT;
-        if(draw->data.text.font>DS_DISPLAY)return DS_INVALID;
+        if((unsigned)draw->data.text.font>DS_DISPLAY)return DS_INVALID;
         return utf8_count(draw->data.text.utf8,draw->data.text.bytes)==SIZE_MAX?DS_INVALID:DS_OK;
     case DS_IMAGE:return draw->data.image.resource.value?DS_OK:DS_INVALID;
     }
     return DS_INVALID;
 }
 static ds_result core_add(void *context,ds_tx tx,const ds_draw *draw,ds_ref *out){
-    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(core,tx);
+    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(context,tx);
     if(result!=DS_OK)return result;
+    if(core->mode!=DS_REPLACE)return poison(core,DS_INVALID);
     if(!out)return poison(core,DS_INVALID);
     result=validate_draw(draw);if(result!=DS_OK)return poison(core,result);
     ds_bank *bank=&core->banks[core->building_bank];ds_layer layer=core->layer;
@@ -173,7 +155,8 @@ static ds_result core_add(void *context,ds_tx tx,const ds_draw *draw,ds_ref *out
         unsigned used=bank->text_used[layer],capacity=draw->data.text.capacity;
         if(used+capacity>text_limit(layer))return poison(core,DS_LIMIT);
         unsigned offset=text_base(layer)+used;
-        memset(bank->text+offset,0,capacity);memcpy(bank->text+offset,draw->data.text.utf8,draw->data.text.bytes);
+        memset(bank->text+offset,0,capacity);
+        if(draw->data.text.bytes)memcpy(bank->text+offset,draw->data.text.utf8,draw->data.text.bytes);
         text_payload payload={(uint16_t)offset,(uint8_t)draw->data.text.bytes,(uint8_t)capacity,
                               (uint8_t)draw->data.text.font,(uint8_t)utf8_count(draw->data.text.utf8,draw->data.text.bytes),
                               0,draw->data.text.color};
@@ -195,7 +178,7 @@ static ds_result referenced_command(ds_core_impl *core,ds_ref ref,ds_command_sto
     *out=&bank->commands[index];return DS_OK;
 }
 static ds_result core_change(void *context,ds_tx tx,ds_ref ref,const ds_change *change){
-    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(core,tx);
+    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(context,tx);
     if(result!=DS_OK)return result;
     if(!change)return poison(core,DS_INVALID);
     ds_command_storage *command;result=referenced_command(core,ref,&command);
@@ -220,11 +203,12 @@ static ds_result core_change(void *context,ds_tx tx,ds_ref ref,const ds_change *
     case DS_SET_TEXT:{
         if(command->kind!=DS_TEXT)return poison(core,DS_INVALID);
         text_payload p;payload_read(command,&p,sizeof(p));
+        if(change->value.text.bytes>p.capacity)return poison(core,DS_LIMIT);
         size_t count=utf8_count(change->value.text.utf8,change->value.text.bytes);
         if(count==SIZE_MAX)return poison(core,DS_INVALID);
-        if(change->value.text.bytes>p.capacity)return poison(core,DS_LIMIT);
         ds_bank *bank=&core->banks[core->building_bank];
-        memset(bank->text+p.offset,0,p.capacity);memcpy(bank->text+p.offset,change->value.text.utf8,change->value.text.bytes);
+        memset(bank->text+p.offset,0,p.capacity);
+        if(change->value.text.bytes)memcpy(bank->text+p.offset,change->value.text.utf8,change->value.text.bytes);
         p.length=(uint8_t)change->value.text.bytes;p.reveal=(uint8_t)count;payload_write(command,&p,sizeof(p));return DS_OK;
     }
     case DS_SET_REVEAL:{
@@ -246,35 +230,37 @@ static ds_result core_change(void *context,ds_tx tx,ds_ref ref,const ds_change *
     return poison(core,DS_INVALID);
 }
 static ds_result core_animate(void *context,ds_tx tx,const ds_motion *motion,ds_animation *out){
-    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(core,tx);
+    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(context,tx);
     if(result!=DS_OK)return result;
     (void)motion;(void)out;return poison(core,DS_UNSUPPORTED);
 }
 static ds_result core_stop(void *context,ds_tx tx,ds_animation animation){
-    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(core,tx);
+    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(context,tx);
     if(result!=DS_OK)return result;
     (void)animation;return poison(core,DS_UNSUPPORTED);
 }
 static ds_result core_end(void *context,ds_tx tx){
-    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(core,tx);
+    ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(context,tx);
     if(result!=DS_OK)return result;
     if(!core->banks[core->building_bank].background_set[DS_APP])return poison(core,DS_INVALID);
     core->building=false;core->submitted=true;return DS_OK;
 }
 static void core_abort(void *context,ds_tx tx){
     ds_core_impl *core=((ds_endpoint *)context)->core;
-    if(core->building&&tx.value==core->transaction.value)core->building=false;
+    if(core->building&&((ds_endpoint *)context)->layer==core->layer&&
+       tx.value==core->transaction.value)core->building=false;
 }
 static ds_limits core_limits(void *context){
-    (void)context;return (ds_limits){{DS_APP_COMMANDS,DS_APP_TEXT_BYTES,6},
-                                    {DS_SYSTEM_COMMANDS,DS_SYSTEM_TEXT_BYTES,2},
-                                    sizeof(ds_core),0};
+    (void)context;return (ds_limits){{DS_APP_COMMANDS,DS_APP_TEXT_BYTES,0},
+                                    {DS_SYSTEM_COMMANDS,DS_SYSTEM_TEXT_BYTES,0},
+                                    sizeof(ds_core)+sizeof(last_generation)+sizeof(last_transaction),0};
 }
 static ds_stats core_stats(void *context){
     ds_core_impl *core=((ds_endpoint *)context)->core;const ds_bank *bank=&core->banks[core->active];
     ds_stats stats={0};
     for(unsigned layer=0;layer<2;layer++)stats.used[layer]=(ds_capacity){bank->count[layer],bank->text_used[layer],0};
-    stats.native_current=sizeof(ds_core);stats.native_peak=sizeof(ds_core);return stats;
+    stats.native_current=sizeof(ds_core)+sizeof(last_generation)+sizeof(last_transaction);
+    stats.native_peak=stats.native_current;return stats;
 }
 static const ds_api core_api={core_begin,core_background,core_add,core_change,core_animate,
                               core_stop,core_end,core_abort,core_limits,core_stats};
@@ -283,25 +269,29 @@ void ds_core_init(ds_core *storage){
     if(!storage)return;
     memset(storage,0,sizeof(*storage));ds_core_impl *core=impl(storage);
     for(unsigned layer=0;layer<2;layer++){
-        core->endpoints[layer]=(ds_endpoint){core,(ds_layer)layer};core->next_generation[layer]=2;
-        core->banks[0].generation[layer]=1;core->banks[1].generation[layer]=1;
+        core->endpoints[layer]=(ds_endpoint){core,(ds_layer)layer};
     }
+    /* SYSTEM can paint before the first APP submission. APP REPLACE still
+     * requires an explicit opaque background. */
+    core->banks[0].background[DS_APP]=0x000000ff;
+    core->banks[0].background_set[DS_APP]=true;
+    core->full_redraw=true;
 }
 ds_client ds_core_client(ds_core *storage,ds_layer layer){
     if(!storage||!valid_layer(layer))return (ds_client){0};
     ds_core_impl *core=impl(storage);return (ds_client){&core_api,&core->endpoints[layer]};
 }
 bool ds_core_has_submission(const ds_core *storage){return storage&&cimpl(storage)->submitted;}
-ds_result ds_core_presented(ds_core *storage){
+ds_result ds_core_presented(ds_core *storage,ds_tx ticket){
     if(!storage)return DS_INVALID;
     ds_core_impl *core=impl(storage);
-    if(!core->submitted)return DS_STALE;
-    core->active=core->building_bank;core->submitted=false;return DS_OK;
+    if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
+    core->active=core->building_bank;core->submitted=false;core->full_redraw=false;return DS_OK;
 }
-ds_result ds_core_discard(ds_core *storage){
+ds_result ds_core_discard(ds_core *storage,ds_tx ticket){
     if(!storage)return DS_INVALID;
     ds_core_impl *core=impl(storage);
-    if(!core->submitted)return DS_STALE;
+    if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
     core->submitted=false;return DS_OK;
 }
 static ds_capacity usage(const ds_bank *bank,ds_layer layer){
@@ -316,4 +306,63 @@ ds_capacity ds_core_submission_usage(const ds_core *storage,ds_layer layer){
     if(!storage)return (ds_capacity){0};
     const ds_core_impl *core=cimpl(storage);
     return core->submitted?usage(&core->banks[core->building_bank],layer):(ds_capacity){0};
+}
+
+ds_result ds_core_frame(const ds_core *storage,ds_frame *out){
+    if(!storage||!out)return DS_INVALID;
+    const ds_core_impl *core=cimpl(storage);
+    if(!core->submitted)return DS_STALE;
+    const ds_bank *before=&core->banks[core->active],*after=&core->banks[core->building_bank];
+    *out=(ds_frame){.ticket=core->transaction,.previous_background=before->background[DS_APP],
+                    .next_background=after->background[DS_APP],.full_redraw=core->full_redraw};
+    for(unsigned i=0;i<2;i++){
+        out->previous[i]=usage(before,(ds_layer)i);out->next[i]=usage(after,(ds_layer)i);
+    }
+    return DS_OK;
+}
+ds_result ds_core_failed(ds_core *storage,ds_tx ticket){
+    if(!storage)return DS_INVALID;
+    ds_core_impl *core=impl(storage);
+    if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
+    core->full_redraw=true;return DS_OK;
+}
+ds_result ds_core_read(const ds_core *storage,ds_tx ticket,bool previous,
+                       ds_layer layer,uint16_t index,ds_frame_command *out){
+    if(!storage||!out||!valid_layer(layer))return DS_INVALID;
+    const ds_core_impl *core=cimpl(storage);
+    if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
+    const ds_bank *bank=&core->banks[previous?core->active:core->building_bank];
+    if(index>=bank->count[layer])return DS_INVALID;
+    const ds_command_storage *command=&bank->commands[command_base(layer)+index];
+    memset(out,0,sizeof(*out));
+    ds_draw *draw=&out->draw;
+    draw->kind=(ds_kind)command->kind;draw->bounds=command->bounds;
+    draw->clip=command->clip;draw->opacity=command->opacity;
+    out->visible=(command->flags&DS_FLAG_VISIBLE)!=0;
+    switch(draw->kind){
+    case DS_RECT:case DS_ROUND_RECT:case DS_STROKE:{
+        shape_payload p;payload_read(command,&p,sizeof(p));
+        draw->data.shape.color=p.color;draw->data.shape.radius=p.radius;draw->data.shape.width=p.width;break;
+    }
+    case DS_GRADIENT:{
+        gradient_payload p;payload_read(command,&p,sizeof(p));
+        draw->data.gradient.from=p.from;draw->data.gradient.to=p.to;
+        draw->data.gradient.axis=p.axis;draw->data.gradient.radius=p.radius;
+        draw->data.gradient.dither=p.dither!=0;break;
+    }
+    case DS_TEXT:{
+        text_payload p;payload_read(command,&p,sizeof(p));
+        memcpy(out->text,bank->text+p.offset,p.length);
+        draw->data.text.utf8=out->text;draw->data.text.bytes=p.length;
+        draw->data.text.capacity=p.capacity;draw->data.text.font=(ds_font)p.font;
+        draw->data.text.color=p.color;out->reveal=p.reveal;break;
+    }
+    case DS_IMAGE:{
+        image_payload p;payload_read(command,&p,sizeof(p));
+        draw->data.image.resource=(ds_resource){p.resource};
+        draw->data.image.variant=p.variant;draw->data.image.frame=p.frame;break;
+    }
+    default:return DS_INVALID;
+    }
+    return DS_OK;
 }

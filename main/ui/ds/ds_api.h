@@ -18,8 +18,10 @@ typedef struct {
 typedef struct { const ds_api *ops; void *ctx; } ds_client;
 /* A client is bound to APP or SYSTEM when the host creates it; begin cannot
  * select another layer. One builder/submission is shared across both layers.
- * REPLACE clears its bound layer only.
- * Tokens validate session, layer and generation. Errors poison until abort.
+ * REPLACE clears its bound layer only. add is valid only in REPLACE;
+ * PATCH changes values and preserves command topology and reference identity.
+ * Tokens validate session, layer and generation. Errors in the owning
+ * transaction poison until abort; foreign/stale tokens leave it untouched.
  * abort is idempotent. end seals, but does NOT acknowledge LCD presentation.
  * References are usable inside their transaction; publish app handles only
  * after successful end. BUSY must preserve the caller's pending domain state.
