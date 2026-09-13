@@ -239,7 +239,7 @@ instanceは`key/template/offset/clip/visible/opacity`、templateは不変な`nod
 既存`design-schema.json`はv0.1専用のまま維持する。v0.2の実行時表現と生成器が実装されるまでは、新フィールドを既存JSONへ混ぜて「検証済み」としない。
 本書がv0.2の規範であり、機械可読スキーマと生成器の実装は別の完了条件として追跡する。
 
-## 11. 初期cache実装の状態
+## 11. 初期cache実装の状態（2026-09-13時点）
 
 2026-09-13、`ds_cache`を4,096 Bのcaller-owned固定領域として実装した。
 上限はtemplate 8、instance 8、保存命令48、文字領域1,024 B。共有template/instance IDのプロセス寿命カウンタ8 Bを加え、native計上は4,104 B。
@@ -254,3 +254,34 @@ releaseは参照中BUSY、REPLACEで省略してpresentしたinstanceはdetach�
 ESP32-S3実機ではtemplate 1件からinstance 2件を表示し、片方の非表示を7帯・26,880 B・4,419 µsで転送。無変更は0帯・0 B。
 cache操作を含むPATCH→place→end→discard/resolve 1,000回は平均19 µs、最大201 µs、free heapは前後248,196 Bで同値だった。
 最終の転送前32,400画素は期待値と一致しHOME_READYへ復帰した。1回の診断値でありp95や物理LCD readbackではない。
+
+## 12. グループ透過・native modal実装（2026-09-14）
+
+`ds_core_group`は連続する既存命令を1段の隔離グループにする。境界は32 B命令のflags、グループopacityはreservedの1 Bへ保持し、core 9,216 Bを維持する。
+PATCHで変更できるのは既存の正確な範囲のopacityであり、部分重複・入れ子・新しい範囲の作成は拒否してトランザクションを失敗状態にする。
+全子命令のgroup opacityを更新するため、opacityだけ変わった場合も部品の旧/新描画範囲がdamageに含まれる。
+
+cacheの全instanceはopacity=255も含め、常にpremultiplied経路を通る。直接描画との丸め差を、opacityの変更やdirty範囲で切り替えない。
+rendererは可視命令とclipの交差を囲む範囲だけを、最大64画素の`ds_premultiplied_rgba8`タイルで処理する。中間画素は256 Bの自動変数で、heapも全面バッファも追加しない。
+この型を中間形式の識別とし、straight RGBA入力とは関数引数を分ける。既存の矩形rendererに対する拡張であり、roundRect/stroke/text/image/gradientの描画対応を意味しない。
+
+`ds_core_poll`は最後の提出のticket/status/reason/layerを保持する。begin/abortでは前の結果を消さず、次のendで置換する。
+転送失敗ではSUBMITTED/IOのまま、present成功でPRESENTED/OK、取消なら`ds_core_discard_reason(..., DS_CANCELLED)`でDISCARDED/CANCELLEDになる。
+cache.resolveもこの結果を照合するよう改め、呼出元が渡したpresented真偽や古いticketだけで候補を確定させない。
+
+`ds_modal`はownerが保持する20 Bの状態。SOLIDは空のAPP REPLACEに不透明背景を設定し、DIM_LIVEは通常内容の後にscrim 1命令を追加する。
+その後にmodal内容を追加してendする。背景・scrim・modalは同じAPP quotaに収まり、SYSTEMは通常通りその上へ描画する。自動fallbackはない。
+prepare_open/prepare_closeで入力をBLOCKEDとし、対応するpresent結果をresolveしたときだけMODAL/APPへ切り替える。失敗したcloseはOPENを保持する。
+部分転送失敗後のcancelでは、次の表示成功で全帯が修復されるまでAPP/MODAL入力を止め、HOST優先入力は通す。
+focus keyはopen前の値を保存し、close成功後に復元する。ownerが現在scopeの有効key一覧で`ds_modal_focus`を呼び、消失時は先頭、空なら0へ補正する。
+
+ownerは入力到着時にrouteを1回だけ判定し、close/cancelに使った入力を復帰後のAPPへ再配送しない。
+cacheを含むmodal構築の取消は、modal.pendingのticketを保存してmodal_cancelを呼び、builderならcache_abort、提出済みならpollの最終結果に応じたcache_resolveも対で呼ぶ。表示成功後に届いた取消は既表示を巻き戻さず、presented=trueとして解決する。
+表示成功時はcore→cache.resolve→modal.resolve→focus補正を同一owner境界で終えてから次のJS更新を許可する。結果を解決する前に別提出のendでpollを上書きしない。
+
+ホストのASan/UBSanと最適化・strict aliasingで、全256段階のgroup opacityの全面画素比較、重なる半透明子、無変更、部分転送失敗→discard→修復、範囲重複拒否を検証した。
+modalではbuilder取消、表示中の背景更新、SYSTEM重なり、開閉時の失敗と再試行、容量不足、focus消失、SOLIDで背景命令を保持しないことを検査する。
+実機では重なる2命令のtemplateを2箇所へ配置し、片方非表示＋もう片方opacity=128の32,400画素一致とmodal開閉を検証した。詳細は[診断記録](design-device-probe.md)。
+
+残件はQuickJS binding・実アプリの入力配送/owner cleanupへの接続、cacheのtext/image/gradient・fork・Flash定義、矩形以外のrenderer、frosted/capture・軽量JS参照・変形/3Dである。
+native modalの状態機械と診断が完成しても、実アプリへの組込みと通常/音声/Wi-Fi条件の受入を終えるまではMUST全体完了にしない。

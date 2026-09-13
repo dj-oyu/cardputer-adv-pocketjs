@@ -94,4 +94,5 @@ ASan/UBSanと`-O2 -fstrict-aliasing`で、レイヤー違反、再初期化、ID
 部分/全体の重なり、部品全体の透過、solid/dim-live modal、明示cacheの出し入れと複数instance表示をMUSTとした。
 現矩形レンダラの命令alpha試験だけではグループopacityの完成を意味しない。
 固定4 KiB RAM cache、template/instance各8件、矩形系templateの複数表示・移動・非表示・release/abort/resolveは実装・実機検証済み。
-text/image/gradient cache、fork、グループopacity、提出結果poll、modal入力scopeは未実装。軽量JS参照APIとblur/変形/3D平面投影はBETTERとして別に追跡する。
+2026-09-14: 矩形の隔離グループopacity、提出結果poll、native modal入力scopeとfocus復帰を追加した。全256段階の透過画素比較、転送失敗復旧、取消・容量不足をホストで検証し、実機でも透過画素とmodal開閉を検証済み。
+text/image/gradient cache、fork、Flash定義、矩形以外のrenderer、QuickJS bindingと実アプリのowner/input接続は未実装。native modalのみでMUST全体完了とはしない。軽量JS参照APIとblur/変形/3D平面投影はBETTERとして別に追跡する。

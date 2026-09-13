@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 typedef enum { DS_OK, DS_INVALID, DS_LIMIT, DS_OOM, DS_STALE,
-               DS_BUSY, DS_UNSUPPORTED, DS_IO } ds_result;
+               DS_BUSY, DS_UNSUPPORTED, DS_IO, DS_CANCELLED } ds_result;
 typedef struct { int16_t x0,y0,x1,y1; } ds_rect;
 typedef uint32_t ds_rgba;
 typedef struct { uint32_t value; } ds_ref;

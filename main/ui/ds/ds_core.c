@@ -5,6 +5,9 @@
 #define DS_REF_INDEX_MASK ((1u << DS_REF_INDEX_BITS) - 1u)
 #define DS_REF_GENERATION_MAX ((1u << (32u - DS_REF_INDEX_BITS)) - 1u)
 #define DS_FLAG_VISIBLE 1u
+#define DS_FLAG_GROUP 2u
+#define DS_FLAG_GROUP_BEGIN 4u
+#define DS_FLAG_GROUP_END 8u
 
 /* Process-lifetime IDs; all cores use the same owner task. Never reset these
  * with a guest session. Exhaustion fails closed rather than reviving handles. */
@@ -260,7 +263,8 @@ static ds_result core_end(void *context,ds_tx tx){
     ds_core_impl *core=((ds_endpoint *)context)->core;ds_result result=check_transaction(context,tx);
     if(result!=DS_OK)return result;
     if(!core->banks[core->building_bank].background_set[DS_APP])return poison(core,DS_INVALID);
-    core->building=false;core->submitted=true;return DS_OK;
+    core->building=false;core->submitted=true;
+    core->outcome=(ds_submission){tx,DS_SUBMITTED,DS_OK,core->layer};return DS_OK;
 }
 static void core_abort(void *context,ds_tx tx){
     ds_core_impl *core=((ds_endpoint *)context)->core;
@@ -308,17 +312,64 @@ ds_result ds_core_register_image(ds_core *storage,ds_layer layer,const ds_image_
     *entry=(ds_image_entry){*port,{++last_resource},layer};*out=entry->id;return DS_OK;
 }
 bool ds_core_has_submission(const ds_core *storage){return storage&&cimpl(storage)->submitted;}
+ds_submission ds_core_poll(const ds_core *storage){
+    return storage?cimpl(storage)->outcome:(ds_submission){0};
+}
+bool ds_core_needs_repair(const ds_core *storage){return storage&&cimpl(storage)->full_redraw;}
+ds_result ds_core_check_builder(const ds_core *storage,ds_tx ticket,ds_layer layer,ds_update_mode mode){
+    if(!storage)return DS_INVALID;
+    const ds_core_impl *core=cimpl(storage);
+    if(!core->building||!ticket.value||core->transaction.value!=ticket.value)return DS_STALE;
+    if(core->layer!=layer||core->mode!=mode)return DS_INVALID;
+    return core->poison;
+}
+ds_result ds_core_builder_usage(const ds_core *storage,ds_tx ticket,ds_capacity *out){
+    if(!storage||!out)return DS_INVALID;
+    const ds_core_impl *core=cimpl(storage);
+    if(!core->building||!ticket.value||core->transaction.value!=ticket.value)return DS_STALE;
+    const ds_bank *bank=&core->banks[core->building_bank];
+    *out=(ds_capacity){bank->count[core->layer],bank->text_used[core->layer],0};return DS_OK;
+}
+
+ds_result ds_core_group(ds_core *storage,ds_layer layer,ds_tx tx,ds_ref first,uint16_t count,uint8_t opacity){
+    if(!storage||!valid_layer(layer)||!count)return DS_INVALID;
+    ds_core_impl *core=impl(storage);
+    ds_result result=check_transaction(&core->endpoints[layer],tx);
+    if(result!=DS_OK)return result;
+    ds_command_storage *command;
+    result=referenced_command(core,first,&command);
+    if(result!=DS_OK)return poison(core,result);
+    unsigned index=ref_index(first)-command_base(layer);
+    if(count>core->banks[core->building_bank].count[layer]-index)return poison(core,DS_INVALID);
+    bool existing=(command->flags&DS_FLAG_GROUP)!=0;
+    if(!existing&&core->mode!=DS_REPLACE)return poison(core,DS_INVALID);
+    for(unsigned i=0;i<count;i++){
+        unsigned expected=DS_FLAG_GROUP|(i==0?DS_FLAG_GROUP_BEGIN:0)|(i+1==count?DS_FLAG_GROUP_END:0);
+        unsigned flags=command[i].flags&~DS_FLAG_VISIBLE;
+        if(flags!=(existing?expected:0))return poison(core,DS_INVALID);
+    }
+    for(unsigned i=0;i<count;i++){
+        command[i].flags|=DS_FLAG_GROUP|(i==0?DS_FLAG_GROUP_BEGIN:0)|(i+1==count?DS_FLAG_GROUP_END:0);
+        command[i].reserved=opacity;
+    }
+    return DS_OK;
+}
 ds_result ds_core_presented(ds_core *storage,ds_tx ticket){
     if(!storage)return DS_INVALID;
     ds_core_impl *core=impl(storage);
     if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
-    core->active=core->building_bank;core->submitted=false;core->full_redraw=false;return DS_OK;
+    core->active=core->building_bank;core->submitted=false;core->full_redraw=false;
+    core->outcome=(ds_submission){ticket,DS_PRESENTED,DS_OK,core->layer};return DS_OK;
 }
 ds_result ds_core_discard(ds_core *storage,ds_tx ticket){
+    return ds_core_discard_reason(storage,ticket,DS_OK);
+}
+ds_result ds_core_discard_reason(ds_core *storage,ds_tx ticket,ds_result reason){
     if(!storage)return DS_INVALID;
     ds_core_impl *core=impl(storage);
     if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
-    core->submitted=false;return DS_OK;
+    core->submitted=false;
+    core->outcome=(ds_submission){ticket,DS_DISCARDED,reason,core->layer};return DS_OK;
 }
 static ds_capacity usage(const ds_bank *bank,ds_layer layer){
     if(!valid_layer(layer))return (ds_capacity){0};
@@ -357,7 +408,7 @@ ds_result ds_core_failed(ds_core *storage,ds_tx ticket){
     if(!storage)return DS_INVALID;
     ds_core_impl *core=impl(storage);
     if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
-    core->full_redraw=true;return DS_OK;
+    core->full_redraw=true;core->outcome.reason=DS_IO;return DS_OK;
 }
 ds_result ds_core_read(const ds_core *storage,ds_tx ticket,bool previous,
                        ds_layer layer,uint16_t index,ds_frame_command *out){
@@ -372,6 +423,9 @@ ds_result ds_core_read(const ds_core *storage,ds_tx ticket,bool previous,
     draw->kind=(ds_kind)command->kind;draw->bounds=command->bounds;
     draw->clip=command->clip;draw->opacity=command->opacity;
     out->visible=(command->flags&DS_FLAG_VISIBLE)!=0;
+    out->group_begin=(command->flags&DS_FLAG_GROUP_BEGIN)!=0;
+    out->group_end=(command->flags&DS_FLAG_GROUP_END)!=0;
+    out->group_opacity=command->reserved;
     switch(draw->kind){
     case DS_RECT:case DS_ROUND_RECT:case DS_STROKE:{
         shape_payload p;payload_read(command,&p,sizeof(p));

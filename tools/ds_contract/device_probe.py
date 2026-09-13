@@ -46,7 +46,8 @@ def main():
     if ('DS_PROBE: PASS' not in log or 'HOME_READY' not in log or 'DS_PROBE: FAIL' in log
             or not re.search(r'DS_PROBE: PARTIAL us=\d+ mask=fe0 bytes=26880', log)
             or 'DS_PROBE: UNCHANGED bands=0 bytes=0' not in log
-            or 'DS_PROBE: CACHE templates=1 instances=2 commands=1 native=4104' not in log):
+            or 'DS_PROBE: CACHE templates=1 instances=2 commands=2 native=4104' not in log
+            or 'DS_PROBE: COMPOSITION group_alpha=128 modal=open-close focus=42 PASS' not in log):
         raise RuntimeError('Diagnostic did not pass and return to the home loop; see serial.log')
     rows = {int(y): bytes.fromhex(pixels) for y, pixels in re.findall(r'PIX (\d+) ([0-9a-f]{960})', log)}
     if set(rows) != set(range(135)):
@@ -58,7 +59,13 @@ def main():
             value = struct.unpack_from('>H', rows[y], x * 2)[0]
             rgb = (0x0b, 0x17, 0x27)
             if 160 <= x < 224 and 40 <= y < 96:
-                rgb = (0x67, 0xdf, 0xc7)
+                premultiplied = [0x67, 0xdf, 0xc7]
+                if 176 <= x < 208 and 56 <= y < 80:
+                    premultiplied = [(c * 128 + 127) // 255 + (d * 127 + 127) // 255
+                                     for c, d in zip((0xf5, 0xbb, 0x69), premultiplied)]
+                # Group opacity applies once after the two children are composed.
+                rgb = tuple(min(255, (p * 128 + 127) // 255 + (bg * 127 + 127) // 255)
+                            for p, bg in zip(premultiplied, (8, 20, 33)))
             if 8 <= x < 232 and 8 <= y < 24:
                 rgb = (0xf5, 0xbb, 0x69)
             r, g, b = rgb

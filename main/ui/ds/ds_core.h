@@ -12,6 +12,9 @@
 #define DS_TEXT_BYTES (DS_APP_TEXT_BYTES + DS_SYSTEM_TEXT_BYTES)
 #define DS_CORE_STORAGE_BYTES 9216u
 
+typedef enum { DS_SUBMISSION_NONE, DS_SUBMITTED, DS_PRESENTED, DS_DISCARDED } ds_submission_status;
+typedef struct { ds_tx ticket; ds_submission_status status; ds_result reason; ds_layer layer; } ds_submission;
+
 /* Host storage layout, not a guest API. Do not access fields directly.
  * A typed member avoids accessing a declared byte array as an unrelated struct. */
 typedef struct ds_core_impl ds_core_impl;
@@ -31,6 +34,7 @@ struct ds_core_impl {
     ds_image_entry images[DS_RESOURCES];
     uint8_t image_count;
     ds_tx transaction;
+    ds_submission outcome;
     ds_result poison;
     ds_layer layer;
     ds_update_mode mode;
@@ -73,9 +77,21 @@ typedef struct {
     ds_draw draw;
     bool visible;
     uint8_t reveal;
+    bool group_begin,group_end;
+    uint8_t group_opacity;
     char text[128]; /* Counted UTF-8, not NUL terminated. draw points here. */
 } ds_frame_command;
 bool ds_core_has_submission(const ds_core *core);
+/* Last submission only, retained across begin/abort. Poll before next end. */
+ds_submission ds_core_poll(const ds_core *core);
+bool ds_core_needs_repair(const ds_core *core);
+ds_result ds_core_discard_reason(ds_core *core,ds_tx ticket,ds_result reason);
+ds_result ds_core_check_builder(const ds_core *core,ds_tx ticket,ds_layer layer,ds_update_mode mode);
+ds_result ds_core_builder_usage(const ds_core *core,ds_tx ticket,ds_capacity *out);
+/* One isolated group over a consecutive range; no overlaps/nesting. PATCH
+ * may change opacity only on the exact existing range. Owner-task API. */
+ds_result ds_core_group(ds_core *core,ds_layer layer,ds_tx tx,ds_ref first,
+                        uint16_t count,uint8_t opacity);
 ds_result ds_core_frame(const ds_core *core,ds_frame *out);
 ds_result ds_core_read(const ds_core *core,ds_tx ticket,bool previous,
                        ds_layer layer,uint16_t index,ds_frame_command *out);

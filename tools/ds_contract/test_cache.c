@@ -84,12 +84,12 @@ int main(void){
     CHECK(ds_cache_release(&cache,second)==DS_OK);
     usage=ds_cache_get_stats(&cache);CHECK(usage.templates==0&&usage.commands==0);
 
-    /* Unsupported group opacity is rejected before touching the transaction. */
+    /* Group opacity is accepted and can be changed before submission. */
     CHECK(ds_cache_create(&cache,DS_APP,card,2,&first)==DS_OK);
     CHECK(app.ops->begin(app.ctx,DS_REPLACE,&tx)==DS_OK);
     CHECK(app.ops->background(app.ctx,tx,0x000000ff)==DS_OK);left.opacity=128;
-    CHECK(ds_cache_instantiate(&cache,&core,tx,first,&left,&a)==DS_UNSUPPORTED);
-    left.opacity=255;CHECK(ds_cache_instantiate(&cache,&core,tx,first,&left,&a)==DS_OK);
+    CHECK(ds_cache_instantiate(&cache,&core,tx,first,&left,&a)==DS_OK);
+    left.opacity=255;CHECK(ds_cache_place(&cache,&core,tx,a,&left)==DS_OK);
     CHECK(app.ops->end(app.ctx,tx)==DS_OK);CHECK(render_and_resolve(&cache,&core,&display)==DS_OK);
     puts("explicit component cache: PASS");return 0;
 }

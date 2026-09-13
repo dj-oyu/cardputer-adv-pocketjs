@@ -54,8 +54,8 @@ void ds_cache_init(ds_cache *cache);
 ds_result ds_cache_create(ds_cache *cache,ds_layer layer,const ds_draw *draws,
                           uint16_t count,ds_template *out);
 ds_result ds_cache_release(ds_cache *cache,ds_template handle);
-/* Instantiate only in REPLACE. opacity 255 is supported until isolated group
- * composition lands; other values fail without modifying the transaction. */
+/* Instantiate only in REPLACE. Every instance uses isolated premultiplied
+ * composition, including opacity 255, to keep rounding stable under PATCH. */
 ds_result ds_cache_instantiate(ds_cache *cache,ds_core *core,ds_tx tx,
                                ds_template handle,const ds_placement *placement,
                                ds_instance *out);

@@ -29,7 +29,7 @@ static ds_cache_instance_entry *find_instance(ds_cache_impl *cache,ds_instance h
 }
 static ds_result validate_placement(const ds_placement *p){
     if(!p||!valid_rect(p->clip))return DS_INVALID;
-    return p->opacity==255?DS_OK:DS_UNSUPPORTED;
+    return DS_OK;
 }
 static bool translate_rect(ds_rect in,int16_t x,int16_t y,ds_rect *out){
     int32_t x0=(int32_t)in.x0+x,y0=(int32_t)in.y0+y,x1=(int32_t)in.x1+x,y1=(int32_t)in.y1+y;
@@ -81,6 +81,8 @@ static ds_result apply_placement(ds_cache_impl *cache,ds_core *core,ds_tx tx,
         change=(ds_change){.property=DS_SET_VISIBLE,.value.visible=placement->visible};
         result=client.ops->change(client.ctx,tx,ref,&change);if(result!=DS_OK)return result;
     }
+    result=ds_core_group(core,(ds_layer)entry->layer,tx,instance->first,entry->command_count,placement->opacity);
+    if(result!=DS_OK)return result;
     instance->pending=*placement;instance->pending_tx=tx.value;return DS_OK;
 }
 
@@ -156,6 +158,8 @@ ds_result ds_cache_instantiate(ds_cache *storage,ds_core *core,ds_tx tx,
         }
         if(!i)pending.first=ref;
     }
+    result=ds_core_group(core,(ds_layer)entry->layer,tx,pending.first,entry->command_count,placement->opacity);
+    if(result!=DS_OK)return result;
     cache->instances[cache->instance_count++]=pending;*out=(ds_instance){pending.id};return DS_OK;
 }
 ds_result ds_cache_place(ds_cache *storage,ds_core *core,ds_tx tx,
@@ -192,6 +196,9 @@ ds_result ds_cache_abort(ds_cache *storage,ds_tx ticket){
 ds_result ds_cache_resolve(ds_cache *storage,const ds_core *core,ds_tx ticket,bool presented){
     if(!storage||!core||!ticket.value)return DS_INVALID;
     if(ds_core_has_submission(core))return DS_BUSY;
+    ds_submission outcome=ds_core_poll(core);
+    if(outcome.ticket.value!=ticket.value||
+       outcome.status!=(presented?DS_PRESENTED:DS_DISCARDED))return DS_STALE;
     ds_cache_impl *cache=&storage->state;bool found=false,pruned=false;
     for(unsigned i=0;i<cache->instance_count;){
         ds_cache_instance_entry *instance=&cache->instances[i];

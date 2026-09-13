@@ -32,6 +32,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/ds/ds_core.c tools/ds_contract/test_cache_exhaustion.c \
     -o "$out/cache-exhaustion"
   "$out/cache-exhaustion"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/ds \
+    main/ui/ds/ds_core.c main/ui/ds/ds_cache.c main/ui/ds/ds_render.c main/ui/ds/ds_modal.c \
+    tools/ds_contract/test_composition.c -o "$out/composition"
+  "$out/composition"
 done
-printf '#include "ds_api.h"\n#include "ds_ports.h"\n#include "ds_core.h"\n#include "ds_cache.h"\n' | \
+printf '#include "ds_api.h"\n#include "ds_ports.h"\n#include "ds_core.h"\n#include "ds_cache.h"\n#include "ds_modal.h"\n' | \
   c++ -std=c++17 -Wall -Wextra -Werror -Imain/ui/ds -x c++ -fsyntax-only -

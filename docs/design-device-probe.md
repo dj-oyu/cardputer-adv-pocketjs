@@ -99,3 +99,25 @@ python tools/ds_contract/device_probe.py --port COM3 --out .cache/ds-device-prob
 
 ログと画像は`.cache/ds-device-cache/serial.log`と`pre-spi.png`。実機にはcache診断版を書込み済み。
 表示されたinstanceの命令はcore bankへ展開するため、cacheの4,104 Bに加えて通常の命令quotaを消費する。
+
+## グループ透過・modal追加後の実機検証
+
+2026-09-14。2枚の重なる子を持つtemplateから2 instanceを表示し、片方を非表示、残りをgroup opacity=128にした。
+転送前32,400画素を独立したPythonのpremultiplied合成式と比較して一致した。続いてDIM_LIVE modalを開閉し、入力scopeとfocus=42復帰をowner上で検査、HOME_READYへ戻った。
+
+| 検査 | 実測・結果 |
+| --- | --- |
+| 初回表示 | 13,528 µs、64,800 B |
+| 非表示＋group opacity=128 | 6,307 µs、7帯、26,880 B |
+| 無変更 | 0帯、0 B |
+| 2命令instanceの1,000回PATCH/discard | 平均25 µs、最大241 µs |
+| 計時前後free heap | 248,300 / 248,300 B |
+| 診断後stack未使用high-water | 21,756 B |
+| 静的DIRAM | 128,812 B、前回比0 B |
+| app binary / Flash余裕 | 2,163,024 / 982,704 B |
+| core / cache / frame_command | 9,216 / 4,096 / 176 B |
+
+`nm`でcore/cacheの実サイズと`ds_core_group`、`ds_core_poll`、`ds_render_rects`、modalのopen/close/resolve/routeのリンクを確認した。
+modal_cancel/focus補正はホスト検証であり、この実機診断では未実行。物理LCD readback、実キー配送、音声/Wi-Fi併用、p95は未検証。
+今回は前回の1命令instanceから2命令へ変えており、処理時間差を同一負荷での回帰と解釈しない。
+ログと転送前画像は`.cache/ds-device-composition/serial.log`と`pre-spi.png`。実機にはこの診断版を書込み済み。
