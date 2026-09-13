@@ -3,6 +3,7 @@
 #include "ds_core.h"
 #include "ds_cache.h"
 #include "ds_modal.h"
+#include "ds_frost.h"
 #include "ds_render.h"
 #include "board.h"
 #include "esp_heap_caps.h"
@@ -23,6 +24,74 @@
 
 static ds_core probe_core;
 static ds_cache probe_cache;
+static ds_frost probe_frost;
+static uint16_t glass_pattern(int x,int y){
+    x%=120;
+    if(y<16)return board_rgb(13,23,39);
+    if((x/12+y/12)%2)return board_rgb(30,160,220);
+    return board_rgb(235,128,48);
+}
+static uint16_t glass_tint(uint16_t p){
+    unsigned r=p>>11,g=(p>>5)&63,b=p&31;
+    r=(r<<3)|(r>>2);g=(g<<2)|(g>>4);b=(b<<3)|(b>>2);
+    return board_rgb((28*96+r*159+127)/255,(48*96+g*159+127)/255,(67*96+b*159+127)/255);
+}
+static ds_result glass_show(bool blurred,bool capture){
+    board_capture(capture);
+    for(int y=0;y<135;y+=8){
+        int rows=y==128?7:8;uint16_t *pixels=board_strip();
+        for(int row=0;row<rows;row++){
+            int py=y+row;
+            for(int x=0;x<240;x++)pixels[row*240+x]=glass_pattern(x,py);
+            if(blurred&&py>=24&&py<119){
+                ds_result result=ds_frost_span(&probe_frost,(uint16_t)py,124,112,0x1c304360,pixels+row*240+124);
+                if(result!=DS_OK){board_capture(false);return result;}
+            }
+            for(int x=0;x<240;x++){
+                int local=x%120;uint16_t *p=&pixels[row*240+x];
+                if(local>=4&&local<116&&py>=24&&py<119){
+                    if(x<120||!blurred)*p=glass_tint(*p);
+                    /* Modal chrome stays sharp, outside the captured source. */
+                    if(local==4||local==115||py==24||py==118)*p=board_rgb(173,206,225);
+                    if(local>=20&&local<92&&py>=42&&py<46)*p=board_rgb(238,244,250);
+                    if(local>=20&&local<76&&py>=54&&py<57)*p=board_rgb(173,206,225);
+                    if(local>=20&&local<100&&py>=85&&py<105)*p=board_rgb(71,199,174);
+                }
+                /* Left: one marker; right: two markers. */
+                if(py>=5&&py<11&&((local>=8&&local<14)||(x>=120&&local>=19&&local<25)))
+                    *p=board_rgb(238,244,250);
+            }
+        }
+        if(board_present(y,rows,pixels)!=ESP_OK){board_capture(false);return DS_IO;}
+    }
+    board_capture(false);return DS_OK;
+}
+static ds_result glass_demo(void){
+    const char *tag="DS_PROBE";
+    ESP_LOGI(tag,"GLASS left=alpha right=frost start");
+    if(glass_show(false,false)!=DS_OK)return DS_IO;
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    for(unsigned radius=1;radius<=2;radius++){
+        ds_frost_init(&probe_frost);
+        int64_t started=esp_timer_get_time();
+        for(unsigned y=0;y<135;y+=8){
+            unsigned rows=y==128?7:8;uint16_t *pixels=board_strip();
+            for(unsigned row=0;row<rows;row++)for(unsigned x=0;x<240;x++)pixels[row*240+x]=glass_pattern(x,y+row);
+            ds_result result=ds_frost_feed(&probe_frost,y,rows,pixels);if(result!=DS_OK)return result;
+        }
+        ds_result result=ds_frost_blur(&probe_frost,(uint8_t)radius);if(result!=DS_OK)return result;
+        int64_t prepare_us=esp_timer_get_time()-started;
+        started=esp_timer_get_time();result=glass_show(true,false);if(result!=DS_OK)return result;
+        ESP_LOGI(tag,"GLASS radius=%u prepare_us=%lld display_us=%lld bytes=%u",radius,
+                 (long long)prepare_us,(long long)(esp_timer_get_time()-started),(unsigned)sizeof(probe_frost));
+        if(radius==2){
+            ESP_LOGI(tag,"GLASS_PIX_BEGIN");result=glass_show(true,true);
+            ESP_LOGI(tag,"GLASS_PIX_END");if(result!=DS_OK)return result;
+        }
+        vTaskDelay(pdMS_TO_TICKS(radius==1?4000:12000));
+    }
+    ESP_LOGI(tag,"GLASS PASS");return DS_OK;
+}
 static uint16_t *probe_strip(void *ctx){(void)ctx;return board_strip();}
 static ds_result probe_send(void *ctx,uint16_t y,uint16_t rows,const uint16_t *pixels){
     (void)ctx;
@@ -132,6 +201,7 @@ void ds_device_probe_run(void){
        probe_display(&probe_core)!=DS_OK||ds_modal_resolve(&modal,&probe_core)!=DS_OK||
        ds_modal_route(&modal,&probe_core,false)!=DS_INPUT_APP||modal.focus!=42)goto fail;
     ESP_LOGI(tag,"COMPOSITION group_alpha=128 modal=open-close focus=42 PASS");
+    if(glass_demo()!=DS_OK)goto fail;
     ESP_LOGI(tag,"PASS iterations=1000 tx_mean_us=%lld tx_max_us=%lld heap_before=%u heap_after=%u stack_free=%u",
              (long long)(sum/1000),(long long)max,(unsigned)free_before,(unsigned)free_after,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));

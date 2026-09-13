@@ -710,6 +710,13 @@ static void ui_task(void *arg) {
         int64_t frame_start=esp_timer_get_time();
         keystroke_t stroke={0};
         bool have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+#ifdef CONFIG_DS_DEVICE_PROBE
+        /* Replay the visual diagnostic from the physical keyboard as well. */
+        if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
+            atomic_store(&ds_probe_requested,true);
+            continue;
+        }
+#endif
         // Before everything: the volume is the device's, so it is answered
         // before any question about who owns the screen.
         if(have&&!running&&screen==SCREEN_HOME&&!home_modal()&&volume_key(&stroke))

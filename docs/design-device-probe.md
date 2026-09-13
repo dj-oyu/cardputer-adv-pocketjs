@@ -121,3 +121,25 @@ python tools/ds_contract/device_probe.py --port COM3 --out .cache/ds-device-prob
 modal_cancel/focus補正はホスト検証であり、この実機診断では未実行。物理LCD readback、実キー配送、音声/Wi-Fi併用、p95は未検証。
 今回は前回の1命令instanceから2命令へ変えており、処理時間差を同一負荷での回帰と解釈しない。
 ログと転送前画像は`.cache/ds-device-composition/serial.log`と`pre-spi.png`。実機にはこの診断版を書込み済み。
+
+## 半透明・すりガラス比較診断
+
+2026-09-14。`ds_frost`の1/8縮小・分離box blur・bilinear拡大・tintを実機で検証した。
+左パネルはtintのみ、右はblur＋tint。線・ボタン・枠は後から描く。両側tintのみ3秒、右の半径1を4秒、半径2を12秒表示する。
+ホーム画面で本体から`~`を入力すると再実行できる。USBの`~`も従来通り。物理キーボード入口はビルド済みだが、今回の自動実行はUSB経由。
+
+| 検査 | 実測・結果 |
+| --- | --- |
+| 半径1: 背景生成＋縮小＋blur | 29,011 µs |
+| 半径2: 背景生成＋縮小＋blur | 30,210 µs |
+| 半径1/2: 比較画面全体の生成・SPI転送 | 47,079 / 47,154 µs |
+| 専用保持領域 | 2,048 B |
+| 静的DIRAM | 130,860 B、前回から+2,048 B |
+| app binary / Flash余裕 | 2,165,552 / 980,176 B |
+| 半透明部品の既存画素検証 | 32,400画素一致 |
+| 半径2の比較画面 | 32,400画素一致、HOME_READYへ復帰 |
+
+`nm`で`probe_frost=0x800`および`ds_frost_feed/blur/span`のリンクを確認。ホストでもASan/UBSanと最適化の両方で、半径1/2の計64,800画素が独立Python参照式と一致した。
+準備時間には市松模様の背景生成も含む。全画面比較表示時間には模様の再生成、左側tint、右側補間、装飾と転送を含み、blur単体や毎フレームの性能ではない。
+転送前画像は`.cache/ds-device-glass/glass-pre-spi.png`、実ログは同ディレクトリの`serial.log`。物理LCDのreadbackではない。
+この診断は既知の背景からの画素処理検証で、実アプリのcapture handle/attach、期限付き逐次実行、frosted modalへの接続は未実装。

@@ -285,3 +285,16 @@ modalではbuilder取消、表示中の背景更新、SYSTEM重なり、開閉�
 
 残件はQuickJS binding・実アプリの入力配送/owner cleanupへの接続、cacheのtext/image/gradient・fork・Flash定義、矩形以外のrenderer、frosted/capture・軽量JS参照・変形/3Dである。
 native modalの状態機械と診断が完成しても、実アプリへの組込みと通常/音声/Wi-Fi条件の受入を終えるまではMUST全体完了にしない。
+
+## 13. すりガラス画質診断とフィルタ
+
+2026-09-14、`ds_frost`にdownsample=8、blur radius=1/2の画素処理を実装。固定2,048 B内にRGB565 30×17画像、30画素の行/列scratch、進行状態を保持する。
+feedは240×8帯を上から順に受け、最終帯だけ7行で平均する。再初期化まで同じ帯の再投入・未完成画像のblur・blurの二重適用・未完成のsampleをSTALEで拒否する。
+各passは8 bit展開→端画素複製のbox平均→最近接丸め→RGB565。拡大は画素中心を`(x+.5)/8-.5`へ対応させ、四近傍を整数重みで補間し1回だけ丸め、straight tintのsource-over後にRGB565へ戻す。
+半径1/2の全64,800画素を独立Python参照式で確認するホストテストを追加した。
+
+実機診断は同じ市松模様を左右へ置き、左をtintのみ、右をblur＋tintとして比較する。枠・文字風の線・ボタンはsnapshotに入れず、最後に鮮明に描く。
+両側tintのみ3秒→右radius=1を4秒→右radius=2を12秒表示する。本体ホームの`~`またはUSBの`~`で全診断を再実行できる。
+この診断はCPU上の既知の背景を帯ごとに供給する画質比較であり、実アプリのcapture/attach、250 ms期限、ownerへ帯ごとに返すスケジューラ、取消可能なfrosted modalの完成ではない。
+診断の待機はUI ownerを意図的に占有する。製品側ではこの待機ループを使用せず、世代付きcapture handleとmodal提出へのattachを実装する。
+downsample=4と実アプリの背景capture/attachは引き続き未実装。`ds_ports.h`の旧同期backdrop雛形はこのフィルタの公開契約には使用しない。

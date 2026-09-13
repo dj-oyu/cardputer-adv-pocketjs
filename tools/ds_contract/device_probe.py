@@ -6,6 +6,7 @@ import struct
 import time
 import zlib
 import serial
+from frost_reference import snapshot, gallery_pixel
 
 
 def chunk(kind, data):
@@ -33,7 +34,7 @@ def main():
             raise RuntimeError('Could not return to HOME_READY')
         port.reset_input_buffer()
         port.write(b'~')
-        deadline = time.monotonic() + 45
+        deadline = time.monotonic() + 75
         while time.monotonic() < deadline:
             data.extend(port.read(65536))
             if b'HOME_READY' in data:
@@ -47,9 +48,10 @@ def main():
             or not re.search(r'DS_PROBE: PARTIAL us=\d+ mask=fe0 bytes=26880', log)
             or 'DS_PROBE: UNCHANGED bands=0 bytes=0' not in log
             or 'DS_PROBE: CACHE templates=1 instances=2 commands=2 native=4104' not in log
-            or 'DS_PROBE: COMPOSITION group_alpha=128 modal=open-close focus=42 PASS' not in log):
+            or 'DS_PROBE: COMPOSITION group_alpha=128 modal=open-close focus=42 PASS' not in log
+            or 'DS_PROBE: GLASS PASS' not in log):
         raise RuntimeError('Diagnostic did not pass and return to the home loop; see serial.log')
-    rows = {int(y): bytes.fromhex(pixels) for y, pixels in re.findall(r'PIX (\d+) ([0-9a-f]{960})', log)}
+    rows = {int(y): bytes.fromhex(pixels) for y, pixels in re.findall(r'PIX (\d+) ([0-9a-f]{960})', log.split('GLASS_PIX_BEGIN')[0])}
     if set(rows) != set(range(135)):
         raise RuntimeError(f'Incomplete capture: {len(rows)} rows')
     raw = bytearray()
@@ -78,6 +80,24 @@ def main():
     png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
     (args.out / 'pre-spi.png').write_bytes(png)
     print('PRE_SPI_PIXELS PASS 32400 pixels; physical LCD appearance is not read back')
+    glass_log = log.split('GLASS_PIX_BEGIN', 1)[1].split('GLASS_PIX_END', 1)[0]
+    rows = {int(y): bytes.fromhex(pixels) for y, pixels in re.findall(r'PIX (\d+) ([0-9a-f]{960})', glass_log)}
+    if set(rows) != set(range(135)):
+        raise RuntimeError(f'Incomplete glass capture: {len(rows)} rows')
+    blurred = snapshot(2)
+    raw = bytearray()
+    for y in range(135):
+        raw.append(0)
+        for x in range(240):
+            value = struct.unpack_from('>H', rows[y], x*2)[0]
+            expected = gallery_pixel(blurred, x, y)
+            if value != expected:
+                raise RuntimeError(f'Glass pixel mismatch at {x},{y}: {value:04x} != {expected:04x}')
+            raw.extend((((value >> 11) & 31)*255//31, ((value >> 5) & 63)*255//63, (value & 31)*255//31))
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 240, 135, 8, 2, 0, 0, 0))
+    png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+    (args.out / 'glass-pre-spi.png').write_bytes(png)
+    print('GLASS_PIXELS PASS 32400 pixels (alpha left / frost right)')
 
 
 if __name__ == '__main__':
