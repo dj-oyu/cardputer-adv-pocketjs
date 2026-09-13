@@ -41,6 +41,7 @@
 #include "pocketjs/vm_clock.h"
 #include "pocketjs/vm_sched.h"
 #include "quickjs-libc.h"
+#include "quickjs-vm.h"
 #include "quickjs.h"
 
 // ---------------------------------------------------------------- allocator
@@ -466,6 +467,82 @@ static void install_host(JSContext *ctx) {
   JS_FreeValue(ctx, global);
 }
 
+// ---------------------------------------------------------------- L2c gate (design sec.12.4/12.9, D18r/D22r)
+//
+// JS_VMCall / JS_VMEval / JS_VMResume / JS_VMSuspended / JS_VMSuspendedOrigin
+// are declared in quickjs-vm.h and DEFINED (not weak) in quickjs-vm.c, which
+// build.sh links into every variant unconditionally -- unlike the vmtest_vm_*
+// hooks above (weak because an L1-only VM predates quickjs-vm.c existing at
+// all), there is no history here where the symbol could be missing, so these
+// are ordinary externs.
+//
+// Four C call sites receive whatever JS_VMCall/JS_VMEval hands back: the
+// include loop, the main script eval, frame(), and the job drain (inside
+// run_turn(), reading vm_sched_drain's VM_DRAIN_SUSPENDED). All four share
+// resume_until_done() below. Two receivers stay UNWRAPPED per design sec.12.9:
+// $262.evalScript (t262_eval_script) is called FROM JS -- current_stack_frame
+// is non-NULL there, so per D17r it can never sit on a MAY_YIELD floor -- and
+// the module path's JS_EvalFunction, which the design explicitly keeps outside
+// the gate (sec.12.4's table has no module row; a suspended module evaluation
+// is not a case this stage defines).
+//
+// Pass-through build: JS_VMSuspended is always false, so the while loop below
+// never actually iterates. That is deliberate -- see the header comment on
+// JS_VMResume -- and it is exactly what makes run.sh --force-yield's rule
+// read "stops=1 resumes=0" today instead of green: the four receivers know
+// HOW to resume a held chain, but nothing in quickjs.c can hand them one yet.
+static uint64_t g_resumes;      // JS_VMResume calls made by any of the four receivers
+static uint64_t g_held;         // times the job receiver saw VM_DRAIN_SUSPENDED (dead until D36/stage 3f)
+static uint64_t g_held_jobs;    // of those, how many completed as JS_VM_ORIGIN_JOB_HELD (sec.12.6-4/12.9)
+
+// --force-yield-fault (G6-shaped negative control, matching --stack-probe-fault
+// above): proves the run.sh rule actually catches a broken gate rather than
+// passing because nothing ever exercises it.
+//   noresume: the four receivers call JS_VMCall/JS_VMEval/JS_VMResume directly
+//             and never loop -- as if nobody had wired resume_until_done in.
+//             Indistinguishable from the un-faulted run TODAY (resumes is 0
+//             either way, since nothing can be resumed pre-L2c body), which is
+//             the honest answer: "a receiver that cannot resume" and "a
+//             receiver that does not try" produce the same observable trace
+//             until the VM can actually suspend.
+//   noyield:  vmtest_vm_set_force_yield() is never called, but --gaps'
+//             clock still arms js_vm_state (js_vm_safepoint keeps counting
+//             vm->safepoints unconditionally once armed) -- so a file with a
+//             loop shows safepoints_yieldable > 0 with stops == 0, which the
+//             rule below rejects on its OWN clause rather than the
+//             resumes==stops clause noresume trips.
+static enum { FYFAULT_NONE, FYFAULT_NORESUME, FYFAULT_NOYIELD } force_yield_fault = FYFAULT_NONE;
+
+// Stage 2 guard flags (design sec.12.9/12.12, D25/D26r/D19r). All four are
+// meaningless while nothing can ever suspend: with every JS_VM* symbol a
+// pass-through, there is no parked chain for --gc-on-yield to GC around,
+// for --terminate-after / --discard-after to end, or for
+// --call-while-suspended to find JS_VMSuspended() true when it calls in.
+// Each one prints a single "vmrun: note:" line (excluded from run.sh's diff,
+// same as the existing --vm-seg-size / --vm-budget notes) and is otherwise
+// ignored, so the corpus files written against them (yield_terminate,
+// yield_discard, yield_call_on_chain, yield_held_terminate,
+// yield_held_discard) can be blessed WITHOUT yield now and are ready to
+// exercise the real mechanism the moment stage 3 lands it.
+static bool gc_on_yield;
+static int terminate_after = -1;   // -1 = off; N = terminate on the Nth resume
+static int discard_after = -1;     // -1 = off; N = discard on the Nth resume
+static bool call_while_suspended;
+
+// The shared loop (design sec.12.9: "one shared resume_until_done loop").
+// `result` is consumed (freed if the loop runs); returns the final value.
+static JSValue resume_until_done(JSContext *ctx, JSValue result) {
+  if (force_yield_fault == FYFAULT_NORESUME) return result;
+  JSRuntime *rt = JS_GetRuntime(ctx);
+  while (JS_VMSuspended(rt)) {
+    g_resumes++;
+    JS_FreeValue(ctx, result);
+    result = JS_VMResume(ctx);
+  }
+  return result;
+}
+
+
 // One host turn: finish whatever the budget cut last time, then -- and only
 // once the queue is EMPTY -- let the host deliver completions, which is the
 // ordering rule of docs/vm-L1-design.md sec.2.1. Returns 0 ok, -1 a job threw
@@ -488,6 +565,37 @@ static int run_turn(guest_t *guest) {
       if (context != NULL) js_std_dump_error(context);
       JS_VMStackTrim(guest->runtime);
       return -1;
+    }
+    // The job receiver (design sec.12.9's fourth row / sec.12.6-4). Dead
+    // until D36 (stage 3f) gives JS_ExecutePendingJob its own suspend return
+    // -- vm_sched_drain() cannot produce VM_DRAIN_SUSPENDED with every JS_VM*
+    // symbol a pass-through -- but the receiver is written now, against the
+    // eventual contract, the same as the other three.
+    if (status == VM_DRAIN_SUSPENDED) {
+      g_held++;
+      JSValue r = resume_until_done(guest->context, JS_UNDEFINED);
+      const JSVMOrigin origin = JS_VMSuspendedOrigin(guest->runtime);
+      boundaries++;
+      if (JS_IsException(r)) {
+        fflush(stdout);
+        js_std_dump_error(guest->context);
+        JS_FreeValue(guest->context, r);
+        JS_VMStackTrim(guest->runtime);
+        return -1;
+      }
+      JS_FreeValue(guest->context, r);
+      // sec.12.9: a JOB_HELD floor's chain completing IS that job finishing
+      // (JS_ExecutePendingJob had already list_del'd it before it suspended).
+      // An ASYNC-origin floor needs nothing here: async/async-generator jobs
+      // complete normally through JS_ExecutePendingJob's ordinary return, so
+      // vm_sched_drain already counted them in `ran` before this branch could
+      // ever be reached for that case.
+      if (origin == JS_VM_ORIGIN_JOB_HELD) {
+        guest->jobs++;
+        drain_jobs++;
+        g_held_jobs++;
+      }
+      continue;
     }
     if (status == VM_DRAIN_YIELDED) {
       guest->turns++;
@@ -728,6 +836,17 @@ static void usage(void) {
           "  --stack-probe          install __vmtest_stack_probe(); print '#info stack_probe ...'\n"
           "                         (G1: bytes of C stack per JS recursion level, see stack_probe.sh)\n"
           "  --stack-probe-fault W  inject a probe fault: flat | silent (G1 negative control)\n"
+          "  --force-yield-fault W  L2c gate negative control: noresume | noyield (sec.12.9)\n"
+          "  --gc-on-yield          L2c guard: JS_RunGC before every resume (sec.12.8/12.15;\n"
+          "                         a note until the VM can suspend)\n"
+          "  --terminate-after N    L2c guard: JS_VMTerminate instead of the Nth resume\n"
+          "                         (sec.12.12/D25; a note until the VM can suspend)\n"
+          "  --discard-after N      L2c guard: end the session on the Nth resume instead of\n"
+          "                         resuming, as JS_FreeRuntime's teardown would (D26r; a\n"
+          "                         note until the VM can suspend)\n"
+          "  --call-while-suspended L2c guard: probe JS_VMSuspended() before both the eval and\n"
+          "                         frame() receivers, print what it says (sec.12.5/D19r; a\n"
+          "                         note until the VM can suspend)\n"
           "  --vm-seg-size N[K]     L2a: standard frame-segment payload (default: the build's)\n"
           "  --vm-budget N[K|M]     D10: frame-segment byte budget alone (0 = off), leaving the\n"
           "                         C-stack limit at --stack-limit; default: same as --stack-limit\n"
@@ -790,8 +909,19 @@ int main(int argc, char **argv) {
       else { fprintf(stderr, "unknown --stack-probe-fault: %s\n", w); return 2; }
       stack_probe_enabled = true;
     }
+    else if (!strcmp(a, "--force-yield-fault")) {
+      const char *w = NEXT();
+      if (!strcmp(w, "noresume")) force_yield_fault = FYFAULT_NORESUME;
+      else if (!strcmp(w, "noyield")) force_yield_fault = FYFAULT_NOYIELD;
+      else { fprintf(stderr, "unknown --force-yield-fault: %s\n", w); return 2; }
+      force_yield = true;
+    }
     else if (!strcmp(a, "--vm-seg-size")) vm_seg_size = parse_size(NEXT());
     else if (!strcmp(a, "--vm-budget")) vm_budget = parse_size(NEXT()), vm_budget_set = true;
+    else if (!strcmp(a, "--gc-on-yield")) gc_on_yield = true;
+    else if (!strcmp(a, "--terminate-after")) terminate_after = (int)parse_size(NEXT());
+    else if (!strcmp(a, "--discard-after")) discard_after = (int)parse_size(NEXT());
+    else if (!strcmp(a, "--call-while-suspended")) call_while_suspended = true;
     else if (!strcmp(a, "--time")) want_time = true;
     else if (!strcmp(a, "--stats")) want_stats = true;
     else if (!strcmp(a, "--include")) {
@@ -836,6 +966,17 @@ int main(int argc, char **argv) {
     if (!vmtest_vmstack_set_budget || vmtest_vmstack_set_budget(G.runtime, vm_budget) != 0)
       fprintf(stderr, "vmrun: note: --vm-budget ignored, this VM keeps frames on the C stack\n");
   }
+  // Stage 2 guard flags: none of the four can do anything real yet (see the
+  // comment on their globals above) -- print the note once, up front, same
+  // as the --vm-seg-size / --vm-budget notes just above.
+  if (gc_on_yield)
+    fprintf(stderr, "vmrun: note: --gc-on-yield ignored, this VM cannot suspend yet\n");
+  if (terminate_after >= 0)
+    fprintf(stderr, "vmrun: note: --terminate-after ignored, this VM cannot suspend yet\n");
+  if (discard_after >= 0)
+    fprintf(stderr, "vmrun: note: --discard-after ignored, this VM cannot suspend yet\n");
+  if (call_while_suspended)
+    fprintf(stderr, "vmrun: note: --call-while-suspended ignored, this VM cannot suspend yet\n");
   // The guest always installs one; it answers "no" until app_stop() bumps the
   // epoch. Installed here so js_poll_interrupts pays the same callback cost.
   JS_SetInterruptHandler(G.runtime, vm_interrupt, &G);
@@ -863,7 +1004,13 @@ int main(int argc, char **argv) {
     // can be asked for is "one job per turn". An L2 VM additionally switches
     // on its opcode checkpoints through the weak symbol above.
     if (budget_jobs == 0) budget_jobs = 1;
-    if (vmtest_vm_set_force_yield) vmtest_vm_set_force_yield(G.runtime, 1);
+    // --force-yield-fault noyield (negative control, sec.12.9): the arm call
+    // is skipped, but want_gaps below still arms js_vm_state through the gap
+    // clock, so js_vm_safepoint keeps counting vm->safepoints -- a file with
+    // a loop then shows safepoints_yieldable > 0 with stops == 0, which the
+    // run.sh rule rejects.
+    if (vmtest_vm_set_force_yield && force_yield_fault != FYFAULT_NOYIELD)
+      vmtest_vm_set_force_yield(G.runtime, 1);
     // G5 is recorded whenever yields are forced (design sec.1.3: "always on
     // during force-yield"); until L2c the record ends at the first stop of
     // each job, so --gaps alone is how a full run is measured today.
@@ -892,7 +1039,8 @@ int main(int argc, char **argv) {
       status = 3;
       break;
     }
-    JSValue r = JS_Eval(G.context, src, len, base_name(includes[i]), JS_EVAL_TYPE_GLOBAL);
+    JSValue r = resume_until_done(G.context,
+        JS_VMEval(G.context, src, len, base_name(includes[i]), JS_EVAL_TYPE_GLOBAL));
     free(src);
     if (JS_IsException(r)) {
       dump_exception(G.context, "include", test262);
@@ -941,7 +1089,10 @@ int main(int argc, char **argv) {
         }
       }
     } else {
-      result = JS_Eval(G.context, src, len, label, type);
+      // The main-script receiver (design sec.12.9's second row). The
+      // --test262 branch above keeps JS_EvalFunction unwrapped on purpose
+      // (sec.12.4/12.9: module evaluation is not a defined receiver).
+      result = resume_until_done(G.context, JS_VMEval(G.context, src, len, label, type));
     }
     if (status == 0 && JS_IsException(result)) {
       dump_exception(G.context, "runtime", test262);
@@ -971,7 +1122,7 @@ int main(int argc, char **argv) {
         // The device's rule: frame() is only ever called on a turn that began
         // with an empty queue (sec.2.1). run_turn() guarantees that -- it does
         // not return with work pending except on runaway or --stop-turns.
-        JSValue r = JS_Call(G.context, frame, JS_UNDEFINED, 0, NULL);
+        JSValue r = resume_until_done(G.context, JS_VMCall(G.context, frame, JS_UNDEFINED, 0, NULL));
         if (JS_IsException(r)) {
           dump_exception(G.context, "frame", test262);
           if (status == 0) status = 1;
@@ -1042,6 +1193,26 @@ int main(int argc, char **argv) {
   // (the longest stop-free interval) whenever the VM was armed. Before
   // teardown: the report resolves function-name atoms through the context.
   if (vmtest_vm_report) vmtest_vm_report(G.runtime, G.context, stderr);
+  // L2c gate (design sec.12.9): the four receivers' own counters, plus
+  // safepoints_yieldable -- read straight off js_vm_state's `safepoints`
+  // field (always present once armed, force_yield or not: js_vm_safepoint
+  // increments it unconditionally, see quickjs-vm.c). Under a genuine
+  // --force-yield run this equals `stops` one-for-one (every safepoint hit
+  // kills the job immediately, so no more than one is ever seen per job) --
+  // that equality is what --force-yield-fault noyield breaks, since it keeps
+  // counting safepoints without ever setting vm->force_yield.
+  //
+  // Printed under the SAME "#info vm" prefix as vmtest_vm_report's line
+  // above rather than folded into it: this file (vmrun.c) owns resumes/held
+  // (they are per-receiver counters, not part of JSVMState), so this is a
+  // second line rather than a changed function signature.
+  {
+    JSVMState *vmstate = js_vm_state(G.runtime);
+    const uint64_t safepoints_yieldable = vmstate ? vmstate->safepoints : 0;
+    fprintf(stderr, "#info vm resumes=%llu held=%llu safepoints_yieldable=%llu held_jobs=%llu\n",
+            (unsigned long long)g_resumes, (unsigned long long)g_held,
+            (unsigned long long)safepoints_yieldable, (unsigned long long)g_held_jobs);
+  }
   // "#info vmstack ..." only under --stats: the corpus does not need it and
   // the info files stay readable.
   if (want_stats && vmtest_vmstack_report) vmtest_vmstack_report(G.runtime, stderr);

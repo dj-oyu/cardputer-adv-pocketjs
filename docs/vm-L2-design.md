@@ -1543,6 +1543,31 @@ SEG 床の spill（`[argv[argc]][JSVMFloorSpillHdr][JSVMLink][JSStackFrame]…`�
 
 **段 2: ガード。** 初版 12.13-2 の 8 ファイル + 12.9 の 6 ファイル（yield 無しで bless）、フラグ 4 つ。期待: 通常走行 59/59、`--force-yield` は分岐を持たないものだけ緑。
 
+#### 段 1・段 2 の着地（2026-09-14、`vm/l2c`、実測(host)）
+
+`8d025ff`（段 1）、`0020773`（段 2）、`21c12a4`（関所の判定の修正）。`quickjs.c` は触っていない。
+
+- **段 1:** `quickjs-vm.h/.c` に `JS_VMCall` / `JS_VMEval`（`JS_Call` / `JS_Eval` の pass-through）、`JS_VMSuspended`（常に偽）、`JS_VMSuspendedOrigin`（常に NONE）、`JS_VMResume`（到達しない、呼べば例外）。`vm_sched.h` に `VM_DRAIN_SUSPENDED = 3`（ループ先頭で検査）、`guest.c` の `drain_jobs()` は受けて `ESP_FAIL`（到達しない。本当の扱いは段 4）。`vmrun.c` の 4 受け口（include の評価、本体の評価、`frame()`、ジョブ）が 1 つの `resume_until_done()` を通り、モジュールの `JS_EvalFunction` と `$262.evalScript` は囲わない。`#info vm` に `resumes=` `held=` `safepoints_yieldable=` `held_jobs=`。陰性対照 `--force-yield-fault noresume|noyield`。
+- **段 2:** コーパス 15 本（初版の 8 本 + 12.9 の 7 本）を yield 無しで bless、8 変種でバイト一致。`vmrun` に `--gc-on-yield` / `--terminate-after N` / `--discard-after N` / `--call-while-suspended`（VM が止まれない間は note を出して無視）。
+- **本数の食い違い:** 上の「12.9 の 6 ファイル」「59/59」は誤り。12.9 の本文が挙げるのは 7 本（`yield_async_flat` / `yield_then_handler` / `yield_thenable` / `yield_async_in_chain` / `yield_held_terminate` / `yield_held_discard` / `yield_module_tla`）で、段 A と D39〜D43 でコーパスは既に 47 本だったので、**通常走行は 62/62**。
+- **関所の判定を直した（`21c12a4`）:** 実装は `--force-yield` の判定を回数の規則だけに置き換え、期待値とのバイト比較を外していた。初版 12.7 は規則に**加えて**バイト一致を求めている（L1 の不変条件）。止まって再開する回数が合っていても出力が変われば失敗にするため、両方を課し、失敗行にどちらで落ちたか（`rule` / `bytes`）を出す形にした。
+
+| 関所 | 結果 |
+| --- | --- |
+| コーパス 8 変種（段 1 / 段 2） | 47/47 / **62/62** |
+| `--force-yield`（o2） | 3 / 59。失敗行は `safepoints_yieldable=1 stops=1 resumes=0: rule: bytes` |
+| `--force-yield-fault noyield` | `stops=0` を規則で捕まえる（出力は一致するので `rule` だけ） |
+| `--force-yield-fault noresume` | 素の `--force-yield` と同じ結果（VM が再開できない間は区別がつかない。本体後に意味を持つ） |
+| `budget_probe.sh` o2-flat / o2-recur / asan-flat | 11/11 ×3 |
+| `stack_probe.sh` 2000 o2 | NOT_PROPORTIONAL、selftest ok |
+| `oom_canary_probe.sh` o2 / asan | 5/5 ×2 |
+| Test262 asan | **7,501 / 194 / regressions 0**（4,099 ファイル） |
+| ファームのビルド（既定構成） | 通る（`vm_sched.c` は共有） |
+
+- **Test262 の読み違いを 1 件記録する:** 実装側は 6,511 / 191（3,584 ファイル）を「現状の基準」と報告した。作業ツリーの `.cache/test262` が固定リビジョン（`72faf8e`）の checkout ではなく、欠けたコピーだったため。本体の checkout へジャンクションで繋ぎ直して上の数字に戻った。**作業ツリーを作るときは `.cache/test262` も繋ぐ**（`docs/vm-branching.md` の既存のジャンクションの一覧に足すべきもの）。
+- **段 3a で直すもの:** `safepoints_yieldable` は今は「武装後に通った停止点すべて」（`js_vm_state()->safepoints`）。12.9 の定義は「止まってよい床（MAY_YIELD）の中の停止点」で、`yield_module_tla` では TLA 復帰後の分だけを数える必要がある。MAY_YIELD が入る段 3a で数え方を変える。
+- `yield_then_handler` は最後の表示をポーリング（`Promise.resolve().then` で自分を積み直す）で待つ。順序の列そのものは固定で、12.6-6 の検査にはなっている。
+
 **段 3: 本体（quickjs.c、1 コミットずつ）。**
 (a) ビット・`rt->vm_susp`（`kind` / `job` / `tail` / `aux` を含む）・トークンと囲い（D17r-3、読む位置はプロローグ・ポーリングの前、class 分岐の ASYNC_FUNCTION だけ書き直し）・API の骨、床の link にブロック先頭（初版どおり、挙動不変）。
 (b) slow path 3 値化、A 地点、`vm_yield:`（鎖のヒープフレームの `cur_sp` 埋め、`kind` を床の種類で）、`vm_resume:`（3 分岐の再組み立て）、SEG 床の `VM_RESUME`、プロローグ・ポーリング失敗の throw 化。期待: `--force-yield` で「トップレベルと通常関数のフラット鎖だけ」が緑。

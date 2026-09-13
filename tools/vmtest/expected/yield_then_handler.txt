@@ -1,0 +1,2 @@
+order then1:3378700,microtask,resolve-then,then2:2,then3:3
+exit=0

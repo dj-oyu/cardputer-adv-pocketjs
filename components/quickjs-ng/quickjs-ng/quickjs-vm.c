@@ -209,6 +209,45 @@ void js_vm_state_free(JSRuntime *rt, JSVMState *vm)
 
 // ---------------------------------------------------------------- harness
 
+// ---------------------------------------------------------------- L2c gate (D18r/D22r, pass-through)
+//
+// quickjs.c has no rt->vm_susp yet (that is stage 3 of sec.12.15's implementation
+// order); until it does, "suspended" can only ever be false. These four
+// functions exist so the shape of the gate -- the C callers that would receive
+// a yielded chain, and how they resume it -- can be written and exercised
+// (run.sh --force-yield, the corpus guards of stage 2) before the interpreter
+// itself changes. Once quickjs.c grows the real rt->vm_susp / vm_yield: /
+// vm_resume: machinery, JS_VMSuspended and friends move there and read it
+// instead of being constant.
+
+int JS_VMSuspended(JSRuntime *rt) {
+    (void)rt;
+    return 0;
+}
+
+JSVMOrigin JS_VMSuspendedOrigin(JSRuntime *rt) {
+    (void)rt;
+    return JS_VM_ORIGIN_NONE;
+}
+
+JSValue JS_VMResume(JSContext *ctx) {
+    // Never legitimately reachable: every caller checks JS_VMSuspended first,
+    // and that is always false. A caller that gets here anyway has a bug, not
+    // a suspended chain to resume -- report it the same way an internal
+    // invariant violation elsewhere in quickjs.c would.
+    return JS_ThrowInternalError(ctx, "JS_VMResume: nothing suspended");
+}
+
+JSValue JS_VMCall(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
+                  int argc, JSValueConst *argv) {
+    return JS_Call(ctx, func_obj, this_obj, argc, argv);
+}
+
+JSValue JS_VMEval(JSContext *ctx, const char *input, size_t input_len,
+                  const char *filename, int eval_flags) {
+    return JS_Eval(ctx, input, input_len, filename, eval_flags);
+}
+
 void vmtest_vm_set_force_yield(JSRuntime *rt, int on)
 {
     JSVMState *vm = js_vm_arm(rt, 1);

@@ -94,6 +94,21 @@ typedef enum {
   VM_DRAIN_EMPTY = 0,   /* JS_IsJobPending() went false: a real end of drain */
   VM_DRAIN_YIELDED = 1, /* budget spent, jobs remain, nothing was dropped */
   VM_DRAIN_THREW = 2,   /* a job threw; the rest of the queue stays queued */
+  /* L2c (docs/vm-L2-design.md sec.12.6-4/12.9, D22r): the VM has a chain
+   * parked in JS_VMSuspended(). Covers BOTH of sec.12.6-4's cases with one
+   * value: seen at the top of the loop, before the next job is even looked
+   * at (a chain a PRIOR call left held -- no job ran this call, *ran stays
+   * whatever it already was); seen after JS_ExecutePendingJob completes a
+   * job whose OWN handler suspended mid-chain (JS_VMCallJob's JOB_HELD path,
+   * D36) -- that job counts (n++) because it genuinely ran, the chain is
+   * just still open. Only the first case exists before quickjs.c grows
+   * JS_ExecutePendingJob's own suspend return (stage 3f / D36): with every
+   * JS_VM* symbol a pass-through, JS_VMSuspended() is always false, so this
+   * value is a shape the callers can switch on now and never actually see
+   * until the interpreter itself changes. Firmware callers must still
+   * handle it for -Werror (an unhandled enumerator in a switch), even though
+   * it cannot be produced yet -- see guest.c drain_jobs(). */
+  VM_DRAIN_SUSPENDED = 3,
 } vm_drain_status_t;
 
 typedef struct {
