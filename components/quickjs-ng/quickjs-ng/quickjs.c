@@ -21421,17 +21421,15 @@ flat_async_call: {
             s->resolving_funcs[1] = JS_UNDEFINED;
             promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
             if (JS_IsException(promise)) {
-                // Not upstream's fail: verbatim. js_create_resolving_functions
-                // frees resolving_funcs[0] when the SECOND function's
-                // allocation fails but leaves the dead value in the slot,
-                // and js_async_function_free0 would free it again (ASan:
-                // heap-use-after-free, seen on the host profile, where D38
-                // makes heap exhaustion the normal end of a deep async
-                // recursion). Upstream's js_async_function_call has the same
-                // two lines and the same latent bug; it is unreachable there
-                // because the C-stack test fires long before the heap.
-                s->resolving_funcs[0] = JS_UNDEFINED;
-                s->resolving_funcs[1] = JS_UNDEFINED;
+                // Upstream's fail: verbatim (matches js_async_function_call
+                // below). js_create_resolving_functions now guarantees
+                // s->resolving_funcs[0]/[1] are never left holding a value
+                // it has already freed -- see its fail: label -- so
+                // js_async_function_free's unconditional free of both slots
+                // is safe here even when the second resolving function's
+                // allocation is what failed. D38 makes this reachable in
+                // practice: a synchronous deep async recursion ends in heap
+                // exhaustion here, not in a C-stack test.
                 js_async_function_free(rt, s);
                 goto exception;
             }
@@ -57026,9 +57024,29 @@ static int js_create_resolving_functions(JSContext *ctx,
         if (!s) {
             JS_FreeValue(ctx, obj);
 fail:
-
+            // Contract with every caller (JS_NewPromiseCapability and its
+            // users, js_promise_resolve_thenable_job, the promise
+            // constructor): on failure resolving_funcs[0] and
+            // resolving_funcs[1] are always left either holding a live
+            // value or JS_UNDEFINED, never a value this function has
+            // already freed. resolving_funcs[i] itself is never written on
+            // this path (the assignment at the bottom of the loop runs only
+            // after a successful malloc), so it keeps whatever the caller
+            // put there before the call -- callers here pre-initialize both
+            // slots to JS_UNDEFINED. resolving_funcs[0] is the one slot this
+            // function itself can poison: when i==1 fails, index 0 already
+            // holds a real object from the first iteration, and freeing it
+            // here without clearing it left a dangling value in an output
+            // slot the caller believes is still valid. A caller that frees
+            // unconditionally on failure (upstream's js_async_function_call
+            // among them) then double-frees it -- ASan heap-use-after-free,
+            // reachable once a caller stops gating that free on "did this
+            // call fail" and starts doing it unconditionally, which is
+            // exactly what an unwind path through js_async_function_free
+            // does.
             if (i != 0) {
                 JS_FreeValue(ctx, resolving_funcs[0]);
+                resolving_funcs[0] = JS_UNDEFINED;
             }
             ret = -1;
             break;
