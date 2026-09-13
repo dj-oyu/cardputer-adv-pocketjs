@@ -18400,23 +18400,36 @@ static void print_func_name(JSFunctionBytecode *b);
 #endif
 
 #ifdef CONFIG_POCKET_VM_FLATCALLS
-// L2b: may this call target run in the caller's C activation? A bytecode
-// function whose bytecode is JS_FUNC_NORMAL. Everything else keeps the
-// upstream C call: native / bound / proxy / promise functions (class call,
-// no JS_CallInternal frame at all), generator and async functions (their own
-// classes: heap frames in a JSAsyncFunctionState), and the one bytecode
-// function that is not NORMAL yet has this class -- a module body, called
-// with this=true by js_inner_module_linking -- so that a flat frame is
-// guaranteed to leave through done: (design sec.10.1, H6).
+// L2b: may this call target run in the caller's C activation? Two kinds
+// (design D32): a bytecode function whose bytecode is JS_FUNC_NORMAL, and an
+// async function (JS_CLASS_ASYNC_FUNCTION, whose first synchronous stretch
+// -- up to its first await, return or throw -- runs as a flat frame that
+// lives in its JSAsyncFunctionData rather than a segment, flat_async_call:).
+// Everything else keeps the upstream C call: native / bound / proxy /
+// promise functions (class call, no JS_CallInternal frame at all),
+// generators and async generators (D37: their bodies do not run at the call,
+// only up to OP_initial_yield, and .next() is a C method), and the one
+// bytecode function that is not NORMAL yet has the BYTECODE class -- a
+// module body, called with this=true by js_inner_module_linking -- so that
+// a flat SEG frame is guaranteed to leave through done: (sec.10.1, H6).
 static inline bool js_vm_flat_callable(JSValueConst func_obj)
 {
     JSObject *p;
     if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
         return false;
     p = JS_VALUE_GET_OBJ(func_obj);
-    return p->class_id == JS_CLASS_BYTECODE_FUNCTION &&
-           p->u.func.function_bytecode->func_kind == JS_FUNC_NORMAL;
+    return (p->class_id == JS_CLASS_BYTECODE_FUNCTION &&
+            p->u.func.function_bytecode->func_kind == JS_FUNC_NORMAL) ||
+           p->class_id == JS_CLASS_ASYNC_FUNCTION;
 }
+
+static JSValue js_async_flat_settle(JSContext *ctx, JSAsyncFunctionData *s,
+                                    JSValue func_ret, JSValue promise);
+static __exception int async_func_init(JSContext *ctx, JSAsyncFunctionState *s,
+                                       JSValueConst func_obj,
+                                       JSValueConst this_obj,
+                                       int argc, JSValueConst *argv);
+static void js_async_function_free(JSRuntime *rt, JSAsyncFunctionData *s);
 
 // The caller's operand stack pointer saved when `sf` was pushed by a flat
 // call (sf->l2_flags has JS_SF_FLAT). Two homes, one bit apart (D33-2): a
@@ -18490,6 +18503,11 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     // read before the frame is popped (a SEG block is poisoned/reused the
     // moment it is), used after the caller's locals are rebuilt.
     uint32_t ret_shape;
+    // Set only by a flat async frame's return (async_flat_return, D34): the
+    // creator record whose promise has to be settled and handed to the
+    // caller once the caller's locals are back. NULL on every other path
+    // through resume_caller:.
+    JSAsyncFunctionData *settle_s = NULL;
 #endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_STEP
@@ -21308,6 +21326,11 @@ flat_call: {
             size_t block_size;
             JSVMLink *link;
             JSStackFrame *nsf;
+            // D32: an async function's frame is not a segment block; its
+            // push is a different shape (below). Decided here rather than
+            // at the call opcodes so the two share js_vm_flat_callable.
+            if (np->class_id == JS_CLASS_ASYNC_FUNCTION)
+                goto flat_async_call;
             if (opcode == OP_call_method || opcode == OP_tail_call_method)
                 bits |= JS_RET_METHOD;
             if (opcode == OP_tail_call || opcode == OP_tail_call_method)
@@ -21354,6 +21377,110 @@ flat_call: {
             sf = nsf;
             local_buf = (JSValue *)(sf + 1);
             goto frame_pushed;
+        }
+flat_async_call: {
+            // L2b-async (design D33): the call of an async function from JS
+            // without the C recursion. What js_async_function_call does --
+            // creator record, promise capability, async_func_init, then
+            // async_func_resume's JS_CallInternal(GENERATOR) -- done here in
+            // the CALLER's state, so that a refused allocation is thrown
+            // into the caller exactly where the upstream
+            // `if (JS_IsException(ret_val)) goto exception` would have taken
+            // it. The body then runs in THIS activation, with its frame in
+            // the JSAsyncFunctionData (the same heap frame every later
+            // resume will use), until its first await / return / throw
+            // hands the promise to the caller at async_flat_return.
+            //
+            // No C-stack test (this adds no C frame) and no byte budget
+            // (D38: the frame is not in a segment, so D10 does not see it):
+            // a synchronous recursion through async calls ends when the
+            // guest heap does, as an InternalError at the deepest call --
+            // deliberately not a RangeError, see the design's D38 limits.
+            JSObject *np = JS_VALUE_GET_OBJ(call_argv[-1]);
+            JSFunctionBytecode *nb = np->u.func.function_bytecode;
+            uint32_t bits = 0;
+            JSAsyncFunctionData *s;
+            JSStackFrame *nsf;
+            JSValue promise;
+            if (opcode == OP_call_method || opcode == OP_tail_call_method)
+                bits |= JS_RET_METHOD;
+            if (opcode == OP_tail_call || opcode == OP_tail_call_method)
+                bits |= JS_RET_TAIL;
+            if (unlikely(js_poll_interrupts(ctx))) {
+                goto exception;
+            }
+            // js_async_function_call, up to and including async_func_init.
+            s = js_mallocz(ctx, sizeof(*s));
+            if (!s) {
+                goto exception;
+            }
+            s->header.ref_count = 1;
+            add_gc_object(rt, &s->header, JS_GC_OBJ_TYPE_ASYNC_FUNCTION);
+            s->is_active = false;
+            s->resolving_funcs[0] = JS_UNDEFINED;
+            s->resolving_funcs[1] = JS_UNDEFINED;
+            promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
+            if (JS_IsException(promise)) {
+                // Not upstream's fail: verbatim. js_create_resolving_functions
+                // frees resolving_funcs[0] when the SECOND function's
+                // allocation fails but leaves the dead value in the slot,
+                // and js_async_function_free0 would free it again (ASan:
+                // heap-use-after-free, seen on the host profile, where D38
+                // makes heap exhaustion the normal end of a deep async
+                // recursion). Upstream's js_async_function_call has the same
+                // two lines and the same latent bug; it is unreachable there
+                // because the C-stack test fires long before the heap.
+                s->resolving_funcs[0] = JS_UNDEFINED;
+                s->resolving_funcs[1] = JS_UNDEFINED;
+                js_async_function_free(rt, s);
+                goto exception;
+            }
+            if (async_func_init(ctx, &s->func_state, call_argv[-1],
+                                (bits & JS_RET_METHOD) ? call_argv[-2] : JS_UNDEFINED,
+                                call_argc, vc(call_argv))) {
+                JS_FreeValue(ctx, promise);
+                js_async_function_free(rt, s);
+                goto exception;
+            }
+            s->is_active = true;
+            // D33-1: the promise lives in the caller's func slot until the
+            // return. async_func_init has dup'd the function into cur_func,
+            // so the slot's reference is no longer needed by anyone, and the
+            // caller's return fix-up frees that slot in every shape anyway.
+            // The slot is a real reference: the GC needs no new root.
+            JS_FreeValue(ctx, call_argv[-1]);
+            call_argv[-1] = promise;
+            // The push: what JS_CallInternal's GENERATOR entry does for a
+            // resume, plus the flat bookkeeping. SEG is not set (no link, no
+            // segment block); the caller's sp goes in the creator record.
+            nsf = &s->func_state.frame;
+            s->flat_caller_sp = sp;
+            nsf->l2_flags = JS_SF_FLAT;
+            nsf->ret_shape = JS_RET_SHAPE(call_argc, bits);
+            nsf->caller_ctx = ctx;
+            nsf->prev_frame = sf;
+            rt->current_stack_frame = nsf;
+            caller_ctx = ctx;
+            p = np;
+            b = nb;
+            sf = nsf;
+            ctx = nb->realm;
+            var_refs = np->u.func.var_refs;
+            local_buf = arg_buf = nsf->arg_buf;
+            var_buf = nsf->var_buf;
+            stack_buf = var_buf + nb->var_count;
+            sp = nsf->cur_sp;
+            nsf->cur_sp = NULL;         // running: async_func_mark must not walk it
+            pc = nsf->cur_pc;           // byte_code_buf, from async_func_init
+            func_obj = nsf->cur_func;
+            // As async_func_resume passes them: the count the caller
+            // passed (not arg_count, which init set to max(declared,
+            // passed)), the heap arg_buf, the dup'd this, no new.target.
+            argc = s->func_state.argc;
+            argv = vc(nsf->arg_buf);
+            this_obj = s->func_state.this_val;
+            new_target = JS_UNDEFINED;
+            goto restart;
         }
 #endif
     }
@@ -21406,6 +21533,30 @@ done:
         }
     }
 #ifdef CONFIG_POCKET_VM_FLATCALLS
+    if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) == JS_SF_FLAT) {
+        // L2b-async return (design D34): a flat async frame has reached its
+        // first await / return / uncaught throw, and done_generator: has
+        // just parked pc and sp in it -- ret_val is what the upstream
+        // js_async_function_resume would have received from
+        // async_func_resume (FUNC_RET_AWAIT / JS_UNDEFINED / JS_EXCEPTION).
+        // The frame is not popped: it is the async function's heap frame,
+        // which every later resume from a job uses. FLAT comes off so that
+        // when a job resumes it, it is an ordinary async floor (the GENERATOR
+        // entry rewrites prev_frame and caller_ctx per resume) and its next
+        // done_generator: returns to C. The settling itself -- resolve,
+        // reject, or subscribe to the awaited promise -- runs after the
+        // caller's locals are back (resume_caller:), in the caller's realm,
+        // exactly where the upstream call's C frame would have done it.
+        JSAsyncFunctionData *s = container_of(sf, JSAsyncFunctionData, func_state.frame);
+        JSStackFrame *csf = sf->prev_frame;
+        ret_shape = sf->ret_shape;
+        sp = s->flat_caller_sp;
+        sf->l2_flags &= ~JS_SF_FLAT;
+        js_vm_pop_frame(rt, sf);                    // prev_frame != NULL: no LEAVE hook
+        sf = csf;
+        settle_s = s;
+        goto resume_caller;
+    }
     if (sf->l2_flags & JS_SF_FLAT) {
         // L2b return: this frame was pushed by flat_call: in THIS activation,
         // so instead of returning to C we resume the caller, sf->prev_frame,
@@ -21479,15 +21630,25 @@ resume_caller: {
         pc = sf->cur_pc;
         caller_ctx = sf->caller_ctx;
         func_obj = sf->cur_func;
-        if (sf->l2_flags & JS_SF_FLAT) {
-            // D11: a flat push leaves the true argc in arg_count.
+        if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) == (JS_SF_FLAT | JS_SF_SEG)) {
+            // A flat SEG frame. D11: a flat push leaves the true argc in
+            // arg_count. Its argv is the caller's slots below the sp its
+            // link saved (call_argv = sp - call_argc at the call), its
+            // `this` the slot below the func slot for a method call, and it
+            // was never a constructor call.
             argc = sf->arg_count;
-            // Its argv is the caller's slots below the sp its link saved
-            // (call_argv = sp - call_argc at the call), its `this` the slot
-            // below the func slot for a method call, and it was never a
-            // constructor call.
             argv = vc(js_vm_flat_caller_sp(sf) - argc);
             this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
+            new_target = JS_UNDEFINED;
+        } else if (sf->l2_flags & JS_SF_FLAT) {
+            // A flat async frame, still in its first synchronous stretch:
+            // its arguments are what async_func_init copied to the heap and
+            // async_func_resume would pass on a resume (D33), never
+            // arg_count (max(declared, passed)).
+            JSAsyncFunctionState *fs = container_of(sf, JSAsyncFunctionState, frame);
+            argc = fs->argc;
+            argv = vc(sf->arg_buf);
+            this_obj = fs->this_val;
             new_target = JS_UNDEFINED;
         } else {
             // Not sf->arg_count: for a generator/async floor that field is
@@ -21496,6 +21657,21 @@ resume_caller: {
             argv = floor_argv;
             this_obj = floor_this;
             new_target = floor_new_target;
+        }
+        if (settle_s) {
+            // The flat async frame's first stretch is over: settle its
+            // promise (D34) with the caller's locals in place, so that any
+            // JS this re-enters -- a thenable's `then` getter under
+            // js_promise_resolve, say -- sees the caller as the current
+            // frame, as it would under the upstream C call. The promise
+            // comes out of the func slot (D33-1) and becomes the call's
+            // value; the slot is undefined for the fix-up / done: below.
+            JSValue promise;
+            av = sp - JS_RET_ARGC(ret_shape);
+            promise = av[-1];
+            av[-1] = JS_UNDEFINED;
+            ret_val = js_async_flat_settle(ctx, settle_s, ret_val, promise);
+            settle_s = NULL;
         }
         // From here on, exactly what the call opcode did after
         // JS_CallInternal returned (has_call_argc / OP_call_method).
@@ -22143,6 +22319,29 @@ static bool js_async_function_resume(JSContext *ctx, JSAsyncFunctionData *s)
     return js_async_function_settle_core(ctx, s,
                                          async_func_resume(ctx, &s->func_state));
 }
+
+#ifdef CONFIG_POCKET_VM_FLATCALLS
+// L2b-async (design D34): the tail of js_async_function_call for a call that
+// ran flat -- the body has already run in the caller's activation and
+// `func_ret` is what done_generator: produced. Settles, drops the creator's
+// reference (upstream's js_async_function_free at the end of
+// js_async_function_call, or in its fail: path -- one of the two, exactly
+// once), and returns what the caller's call expression gets: the promise, or
+// JS_EXCEPTION only for an uncatchable error. A catchable throw in the
+// synchronous stretch is a REJECTED PROMISE, never an exception in the
+// caller -- the same contract as the upstream call.
+static JSValue js_async_flat_settle(JSContext *ctx, JSAsyncFunctionData *s,
+                                    JSValue func_ret, JSValue promise)
+{
+    if (!js_async_function_settle_core(ctx, s, func_ret)) {
+        JS_FreeValue(ctx, promise);
+        js_async_function_free(ctx->rt, s);
+        return JS_EXCEPTION;
+    }
+    js_async_function_free(ctx->rt, s);
+    return promise;
+}
+#endif
 
 static JSValue js_async_function_resolve_call(JSContext *ctx,
                                               JSValueConst func_obj,

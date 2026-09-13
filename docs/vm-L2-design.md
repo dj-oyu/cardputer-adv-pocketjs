@@ -1309,6 +1309,16 @@ async_flat_return: {
 | 速度 `timing.py` | `bench_promise` を flat / recur 交互 2 周（§10.7 の手順）。差は主張しない | |
 | 実機 | `JSAsyncFunctionData` の `_Static_assert`（実機コンパイラ）。DIRAM は `memlog.py` | |
 
+#### 段 A の着地（2026-09-13、`vm/l2c`、実測(host)）
+
+A1（下拵え、`1bd92d9`）と A2（本体）を入れ、上の表の各行を測った。**予想どおりだったもの:** 8 変種のコーパス 46/46（`l2b_async_flat.js` は `asan-recur` で bless、flat とバイト一致）、`--force-yield` 3/43（+1 は新コーパス）、Test262 `asan` 7,501 / 194 / regressions 0（不変）、G1 通常関数 `o2` 0.000 NOT_PROPORTIONAL（selftest ok）・`o2-recur` 528.000 PROPORTIONAL（不変）、**G1 async `o2` / `o2-flat` 0.000 NOT_PROPORTIONAL、`o2-recur` 1184.000 PROPORTIONAL**（上流経路は 1 段あたり `JS_CallInternal` 2 回分で通常関数の 528 より重い）、`budget_probe.sh` 既存 10 項目は 5 変種とも `budget_hits` の値まで不変、G6 `verify_all.sh` exit 0、`run.sh --trace` 46/46。`JSAsyncFunctionData` は実機コンパイラ（`xtensa-esp32s3-elf-gcc 15.2.0`、`-fsyntax-only`、`ESP_PLATFORM` 定義）で **104 B（+0）**、ホストは 176 → 184 B — どちらも計算値どおり。`_Static_assert` は詰め物から追い出す対照実験で失敗するので生きている。
+
+**予想と違ったもの（D38 の限界の実相）。** `deep_async_recursion`（`--profile device`）は flat で `budget_hits=0`・同期 `try` に届かない、までは予想どおりだが、**`InternalError` は `.catch` に届かない。** 実測: 77 段で `js_mallocz` 等が失敗した時点で鎖全体（1 段あたり約 1.9 KB、`peak_bytes=147,979`）が生きているので、(a) エラーオブジェクトを作る余裕が無く理由は `null`（`JS_ThrowError2` の「out of memory: throw JS_NULL」、`seg_oom_boundary.js` が既に扱う形）、(b) 巻き戻しの途中で各段の `await` が自分の反応登録（`js_async_function_resolve_create` / `perform_promise_then`）に失敗し、その段の promise は誰にも処理されず残る（23 件、vmrun の終了コード 2）、(c) 同期区間の後にトップレベルが行うこと — `p.catch(...)` の付与すら — はヒープが満杯のまま走るので同じく失敗する。外側の async 関数の `catch`（ジョブから走る）には `null` が届く。`-recur` は `:21740` の C スタック検査が 15 段（asan は 8 段）で `RangeError`、終了コード 0。期待値は build ごとに別ファイル（`expected/deep_async_recursion.txt` / `-recur.txt`）に測った値を書き、asan 変種では `build_backtrace` の UAF は今回再現しなかった（再現したら記録扱い、`budget_probe.sh`）。**12.16 の「ヒープ枯渇の `InternalError` で終わる」は「ヒープ枯渇で終わり、そのときの理由は `null` で、未処理の拒否が残る」に訂正する。** 実機の同じ経路（`guest.c` の rejection tracker は vmrun と同じ形）でも同様と推定するが未計測。
+
+**見つけて直したもの。** `JS_NewPromiseCapability` が 2 つ目の resolve 関数の確保で失敗すると `js_create_resolving_functions` は `resolving_funcs[0]` を解放するがスロットに死んだ値を残し、続く `js_async_function_free` がもう一度解放する（ASan: heap-use-after-free、`--profile host` の flat で再現。o2 では core dump）。上流の `js_async_function_call:22121-22130` も同じ 2 行で同じ潜在不具合だが、C スタック検査が先に当たるので届かない。フラット経路（`flat_async_call:`）ではヒープ枯渇が再帰の正常な終わり方なので届く。`flat_async_call:` では失敗時に 2 スロットを `JS_UNDEFINED` に戻してから解放する形にした（上流の関数は触っていない）。
+
+**関所の読み方の注意。** G1 は o2 の数字だけが基準。asan ビルドはプローブ関数のローカルが ASan の fake stack に置かれるため、通常関数の `stack_probe.js` でさえ `asan-flat` で 51.712 PROPORTIONAL と読める（フラット化とは無関係の値）。async 版の asan の読み（354.784 → 33.584）も同じ理由で意味を持たない。
+
 ### 12.3 D17r: 止まってよい床は `l2_flags` の 1 ビットで、活性の入口で決まる（H2, H4）
 
 **決定（初版から変えない部分）: `JS_SF_MAY_YIELD = 4u`（`quickjs-vmstack.h:434-435` の隣）。床の push 時に 1 回だけ計算し、フラット子に写す。判定は現在フレームの 1 ビット比較。** 床が MAY_YIELD になる条件は 2 つの AND:

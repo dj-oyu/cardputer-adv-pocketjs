@@ -1,0 +1,39 @@
+promise-class true true function
+sync-order plain 1,after-call
+same-promise true true
+throw-sync none true
+finally-sync true
+tail-promise true
+nested-order inner 1,outer-mid,inner 2,after-outer
+gen-floor [true,0] [false,1]
+sort-async 1,2,3
+new-async TypeError
+kind true function
+sync-log inner 1,outer-mid,inner 2,after-outer,plain 0,plain 5,plain 6,plain 7,plain 8,plain 3,plain 3,plain 1
+resolved 2
+throw-rejected TypeError early
+catch-inside caught-own
+finally ret
+method-this 13
+plain-this object
+mapped-args 11
+arrow 42
+class-method 3
+class-static static
+stack-names true true true
+tail-value 42
+tail-method 8
+apply 6
+call 7
+bound 102
+proxy 8
+reflect 9
+throw-late RangeError late
+defaults [11,0,0]
+defaults-args [5,2,3]
+return-await 101
+map-async 10,20,30
+nested 3 plain 0,plain 5,plain 6,plain 7,plain 8,plain 3,plain 3,plain 1,outer-resumed
+fan-out 32
+recurse-await 50
+exit=0

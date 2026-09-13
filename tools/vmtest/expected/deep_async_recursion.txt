@@ -1,0 +1,3 @@
+sync-try none
+caught null
+exit=2
