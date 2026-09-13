@@ -2,6 +2,7 @@
 
 2026-09-13。DDDの責務分割を取り入れた実装前の構成案。現状のinclude関係ではなく、移行後の依存を示す。
 [システムruntime](system-runtime.md)と[デザインシステム](design-system.md)の構造を定義する。
+部品cache、modal、効果と更新参照の責務は[v0.2合成仕様](design-composition.md)に従う。cacheは描画定義を所有し、Pet等のdomain stateや永続保存を所有しない。
 図の実線矢印は「依存する側 → 公開契約を提供する側」。破線はportの実装関係で、イベントの流れではない。
 
 ## 1. コンテキストを分ける

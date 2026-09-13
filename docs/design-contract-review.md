@@ -35,7 +35,7 @@ pet画像は汎用image portへ登録し、variant/frameをペットadapterが�
 | 2バンクと通知待ち | 共有builderにより通知がBUSYになる。未完トランザクションをJSが長く保持する場合の取消/期限を定める必要がある |
 | 強いJS境界 | clientを生成時にAPP/SYSTEMへ固定し、beginからlayer指定を除去した。QuickJS adapterへAPP clientだけを渡す配線は未実装 |
 | モーダルcapture | 同期APIは呼出順の検証には使えるが、帯ごとの継続・取消・期限応答を表せない。長いcaptureが測定された場合のhost状態機械が必要 |
-| backdropの所有 | 暗黙の「次replaceへ適用」は使い方を間違えやすい。production実装前に明示的capture handleとtransactionへのattachを検討する |
+| backdropの所有 | v0.2で明示的capture handleとtransactionへのattachに決定。現C prototypeの暗黙「次replaceへ適用」は置換対象 |
 | モーダル復帰 | 最新状態からAPPを再構築し、present成功後にcaptureをreleaseする。古いpet_view参照は再利用不可。復帰失敗時はモーダルを維持する |
 | 画像scratch | read_spanはRGB565とalphaの両出力を要す。ペット64画素で192 Bとなり、従来の128 B行だけとは異なる。512 B共用scratchの使用順を検証する |
 | 任意字形 | font portは未定義。coverage形式、baseline、欠損字形、Flash寿命を既存フォントと接続してから確定する |
@@ -85,5 +85,12 @@ ASan/UBSanと`-O2 -fstrict-aliasing`で、レイヤー違反、再初期化、ID
 
 1. **画像の登録・寿命検証は実装済み。** ホスト登録16件、所有レイヤー、variant/frame・行範囲を検証する。providerはresetまで不変の借用とし、追記のみで提出破棄による解放はしない。実コアのペット例も登録済みIDを使用する。残るのはPPT2等の実providerとcrop/scaleの描画接続。
 2. **damageと矩形の部分転送は実装済み。** 前後の命令・文字の実バイト列・背景・full_redrawから17帯maskを算出。矩形alpha合成、無変更時の転送ゼロ、IO失敗後の全帯修復を実装。ホストでは150回の移動について全面参照描画と全画素一致を確認した。文字・画像・角丸等の画素生成は未実装。IO失敗した提出を破棄する場合、ホストが次の提出を予定する責任は引き続き持つ。
-3. **アプリの参照公開と提出破棄の連携。** end成功は表示成功ではない。REPLACE提出が破棄された場合、アプリは候補参照を使い続けず最新domain stateから再構築する。JS adapter側への失敗通知契約が必要。
-4. **長時間builder・資源・modal・animation。** SYSTEMがBUSYになる期限、capture handleの所有、font port、track完了のpollは別途設計する。今回の固定コアだけで16 KiB全体予算や実機速度の達成を主張しない。
+3. **アプリの参照公開と提出破棄の連携。** v0.2で固定の提出結果stateをpollし、adapterが対応表を確定/破棄してから次更新へ進む契約を決定。実装は未完了。REPLACE提出破棄後は候補参照を捨て最新domain stateから再構築する。
+4. **長時間builder・資源・modal・animation。** v0.2でownerへ戻った未提出builderのabort、captureの250 ms期限と明示handleを定義した。これらの実装、およびfont port・track完了pollは残る。今回の固定コアだけで16 KiB全体予算や実機速度の達成を主張しない。
+
+## v0.2で追加した必須要件
+
+[コンポーネント合成仕様](design-composition.md)を実装の規範とする。
+部分/全体の重なり、部品全体の透過、solid/dim-live modal、明示cacheの出し入れと複数instance表示をMUSTとした。
+現矩形レンダラの命令alpha試験だけではグループopacityの完成を意味しない。
+template/instance metadata、RAM cache、提出結果poll、modal入力scopeは未実装。軽量JS参照APIとblur/変形/3D平面投影はBETTERとして別に追跡する。
