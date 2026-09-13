@@ -513,6 +513,22 @@ static uint64_t g_held_jobs;    // of those, how many completed as JS_VM_ORIGIN_
 //             resumes==stops clause noresume trips.
 static enum { FYFAULT_NONE, FYFAULT_NORESUME, FYFAULT_NOYIELD } force_yield_fault = FYFAULT_NONE;
 
+// Stage 2 guard flags (design sec.12.9/12.12, D25/D26r/D19r). All four are
+// meaningless while nothing can ever suspend: with every JS_VM* symbol a
+// pass-through, there is no parked chain for --gc-on-yield to GC around,
+// for --terminate-after / --discard-after to end, or for
+// --call-while-suspended to find JS_VMSuspended() true when it calls in.
+// Each one prints a single "vmrun: note:" line (excluded from run.sh's diff,
+// same as the existing --vm-seg-size / --vm-budget notes) and is otherwise
+// ignored, so the corpus files written against them (yield_terminate,
+// yield_discard, yield_call_on_chain, yield_held_terminate,
+// yield_held_discard) can be blessed WITHOUT yield now and are ready to
+// exercise the real mechanism the moment stage 3 lands it.
+static bool gc_on_yield;
+static int terminate_after = -1;   // -1 = off; N = terminate on the Nth resume
+static int discard_after = -1;     // -1 = off; N = discard on the Nth resume
+static bool call_while_suspended;
+
 // The shared loop (design sec.12.9: "one shared resume_until_done loop").
 // `result` is consumed (freed if the loop runs); returns the final value.
 static JSValue resume_until_done(JSContext *ctx, JSValue result) {
@@ -821,6 +837,16 @@ static void usage(void) {
           "                         (G1: bytes of C stack per JS recursion level, see stack_probe.sh)\n"
           "  --stack-probe-fault W  inject a probe fault: flat | silent (G1 negative control)\n"
           "  --force-yield-fault W  L2c gate negative control: noresume | noyield (sec.12.9)\n"
+          "  --gc-on-yield          L2c guard: JS_RunGC before every resume (sec.12.8/12.15;\n"
+          "                         a note until the VM can suspend)\n"
+          "  --terminate-after N    L2c guard: JS_VMTerminate instead of the Nth resume\n"
+          "                         (sec.12.12/D25; a note until the VM can suspend)\n"
+          "  --discard-after N      L2c guard: end the session on the Nth resume instead of\n"
+          "                         resuming, as JS_FreeRuntime's teardown would (D26r; a\n"
+          "                         note until the VM can suspend)\n"
+          "  --call-while-suspended L2c guard: probe JS_VMSuspended() before both the eval and\n"
+          "                         frame() receivers, print what it says (sec.12.5/D19r; a\n"
+          "                         note until the VM can suspend)\n"
           "  --vm-seg-size N[K]     L2a: standard frame-segment payload (default: the build's)\n"
           "  --vm-budget N[K|M]     D10: frame-segment byte budget alone (0 = off), leaving the\n"
           "                         C-stack limit at --stack-limit; default: same as --stack-limit\n"
@@ -892,6 +918,10 @@ int main(int argc, char **argv) {
     }
     else if (!strcmp(a, "--vm-seg-size")) vm_seg_size = parse_size(NEXT());
     else if (!strcmp(a, "--vm-budget")) vm_budget = parse_size(NEXT()), vm_budget_set = true;
+    else if (!strcmp(a, "--gc-on-yield")) gc_on_yield = true;
+    else if (!strcmp(a, "--terminate-after")) terminate_after = (int)parse_size(NEXT());
+    else if (!strcmp(a, "--discard-after")) discard_after = (int)parse_size(NEXT());
+    else if (!strcmp(a, "--call-while-suspended")) call_while_suspended = true;
     else if (!strcmp(a, "--time")) want_time = true;
     else if (!strcmp(a, "--stats")) want_stats = true;
     else if (!strcmp(a, "--include")) {
@@ -936,6 +966,17 @@ int main(int argc, char **argv) {
     if (!vmtest_vmstack_set_budget || vmtest_vmstack_set_budget(G.runtime, vm_budget) != 0)
       fprintf(stderr, "vmrun: note: --vm-budget ignored, this VM keeps frames on the C stack\n");
   }
+  // Stage 2 guard flags: none of the four can do anything real yet (see the
+  // comment on their globals above) -- print the note once, up front, same
+  // as the --vm-seg-size / --vm-budget notes just above.
+  if (gc_on_yield)
+    fprintf(stderr, "vmrun: note: --gc-on-yield ignored, this VM cannot suspend yet\n");
+  if (terminate_after >= 0)
+    fprintf(stderr, "vmrun: note: --terminate-after ignored, this VM cannot suspend yet\n");
+  if (discard_after >= 0)
+    fprintf(stderr, "vmrun: note: --discard-after ignored, this VM cannot suspend yet\n");
+  if (call_while_suspended)
+    fprintf(stderr, "vmrun: note: --call-while-suspended ignored, this VM cannot suspend yet\n");
   // The guest always installs one; it answers "no" until app_stop() bumps the
   // epoch. Installed here so js_poll_interrupts pays the same callback cost.
   JS_SetInterruptHandler(G.runtime, vm_interrupt, &G);
