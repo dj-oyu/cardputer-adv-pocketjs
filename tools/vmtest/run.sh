@@ -125,27 +125,22 @@ for name in "${names[@]}"; do
   echo "exit=$code" >> "$raw"
   grep -E '^(#info|vmrun: note:)' "$raw" | sed "s/^/$name: /" >> "$info"
   grep -vE '^(#info|vmrun: note:)' "$raw" > "$OUT/actual-$variant/$name.txt"
-  # L2c gate (design sec.12.9, D22r): under --force-yield the pass/fail
-  # question stops being "is the output byte-identical" (that is L1's
-  # invariant, and it is EXPECTED to break here -- a killed job's uncatchable
-  # "interrupted" text is not what an unforced run prints) and becomes "does
-  # every safepoint this run actually visited get a stop, and every stop a
-  # resume". Read straight off THIS run's own #info lines rather than a
-  # blessed expected file, because the rule is the same for every file: it
-  # needs no per-file expectation to bless.
+  # L2c gate (design sec.12.9, D22r): under --force-yield a file must pass
+  # TWO checks. The rule -- every safepoint this run could yield at got a
+  # stop, and every stop a resume -- read off this run's own #info lines, the
+  # same for every file. AND the existing byte-identity against expected/
+  # below: stopping and resuming must not change what the program prints
+  # (docs/vm-L1-design.md sec.7 invariants; first-version 12.7 "--force-yield
+  # でバイト一致"). Until the VM can resume both fail, and each reason is shown.
+  rule_ok=1 rule_reason=
   if [ $force_yield = 1 ] && [ $bless = 0 ]; then
     sp=$(grep -o 'safepoints_yieldable=[0-9]*' "$raw" | tail -n1 | cut -d= -f2); sp=${sp:-0}
     st=$(grep -o ' stops=[0-9]*' "$raw" | tail -n1 | cut -d= -f2); st=${st:-0}
     rs=$(grep -o ' resumes=[0-9]*' "$raw" | tail -n1 | cut -d= -f2); rs=${rs:-0}
-    reason="safepoints_yieldable=$sp stops=$st resumes=$rs"
+    rule_reason="safepoints_yieldable=$sp stops=$st resumes=$rs"
     if [ "$sp" -gt 0 ] && { [ "$st" -eq 0 ] || [ "$rs" -ne "$st" ]; }; then
-      fail=$((fail+1)); failed+=("$name")
-      echo "FAIL $name ($reason)"
-    else
-      pass=$((pass+1))
-      echo "PASS $name ($reason)"
+      rule_ok=0
     fi
-    continue
   fi
   exp=expected/$name.txt
   # One expected file per mode, but only where the modes genuinely differ.
@@ -155,14 +150,18 @@ for name in "${names[@]}"; do
     echo "blessed $name"
     continue
   fi
-  if [ -f "$exp" ] && diff -u "$exp" "$OUT/actual-$variant/$name.txt" > "$OUT/actual-$variant/$name.diff"; then
+  bytes_ok=0
+  [ -f "$exp" ] && diff -u "$exp" "$OUT/actual-$variant/$name.txt" > "$OUT/actual-$variant/$name.diff" && bytes_ok=1
+  if [ $bytes_ok = 1 ] && [ $rule_ok = 1 ]; then
     pass=$((pass+1))
-    echo "PASS $name"
+    echo "PASS $name${rule_reason:+ ($rule_reason)}"
   else
     fail=$((fail+1))
     failed+=("$name")
-    echo "FAIL $name"
-    [ -f "$exp" ] && head -n 40 "$OUT/actual-$variant/$name.diff" || echo "  (no expected/$name.txt)"
+    echo "FAIL $name${rule_reason:+ ($rule_reason$([ $rule_ok = 0 ] && echo ': rule')$([ $bytes_ok = 0 ] && echo ': bytes'))}"
+    if [ $bytes_ok = 0 ]; then
+      [ -f "$exp" ] && head -n 40 "$OUT/actual-$variant/$name.diff" || echo "  (no expected/$name.txt)"
+    fi
   fi
 done
 [ $bless = 1 ] && exit 0
