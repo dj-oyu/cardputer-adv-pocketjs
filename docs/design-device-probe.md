@@ -82,3 +82,20 @@ python tools/ds_contract/device_probe.py --port COM3 --out .cache/ds-device-prob
 無変更を検査した後、ホストが転送失敗状態を注入して全面再送を要求し、実際の`ds_render_rects`から135行をcaptureする。これは物理SPI障害を発生させた試験ではない。
 ホストでは別途、半透明SYSTEM重なり・画面外移動を含む150回の部分描画と独立した全面参照描画を比較し、途中転送失敗でパネルの一部が変化した状況からの復帰も検査した。
 ログと画像は`.cache/ds-device-partial/serial.log`と`pre-spi.png`。実機にはこの部分転送診断版を書込み済み。
+
+## 明示cache追加後の実機検証
+
+2026-09-13。同じ矩形templateから2 instanceを同時表示し、片方を非表示にした。
+`ds_cache`は4,096 B、共有ID8 B、template 1、instance 2、保存命令1。診断構成の静的DIRAMは128,812 Bで、cache導入前から4,112 B増加した。
+
+| 検査 | 実測・結果 |
+| --- | --- |
+| 片方のinstanceを非表示 | 4,419 µs、mask 0xfe0、7帯、26,880 B |
+| 同じ状態の再提出 | 0帯、0 B |
+| cache操作を含む1,000回の更新 | 平均19 µs、最大201 µs |
+| 計時区間前後のfree heap | 248,196 / 248,196 B |
+| 診断後stack high-water（未使用量） | 21,852 B |
+| 最終転送前画素、HOME_READY | 32,400画素一致、PASS |
+
+ログと画像は`.cache/ds-device-cache/serial.log`と`pre-spi.png`。実機にはcache診断版を書込み済み。
+表示されたinstanceの命令はcore bankへ展開するため、cacheの4,104 Bに加えて通常の命令quotaを消費する。

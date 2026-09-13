@@ -24,6 +24,14 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/ds \
     main/ui/ds/ds_core.c main/ui/ds/ds_render.c tools/ds_contract/test_render.c -o "$out/render"
   "$out/render"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/ds \
+    main/ui/ds/ds_core.c main/ui/ds/ds_render.c main/ui/ds/ds_cache.c \
+    tools/ds_contract/test_cache.c -o "$out/cache"
+  "$out/cache"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/ds \
+    main/ui/ds/ds_core.c tools/ds_contract/test_cache_exhaustion.c \
+    -o "$out/cache-exhaustion"
+  "$out/cache-exhaustion"
 done
-printf '#include "ds_api.h"\n#include "ds_ports.h"\n#include "ds_core.h"\n' | \
+printf '#include "ds_api.h"\n#include "ds_ports.h"\n#include "ds_core.h"\n#include "ds_cache.h"\n' | \
   c++ -std=c++17 -Wall -Wextra -Werror -Imain/ui/ds -x c++ -fsyntax-only -

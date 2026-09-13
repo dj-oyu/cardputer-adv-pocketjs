@@ -91,6 +91,9 @@ ds_result ds_core_presented(ds_core *core,ds_tx ticket);
 ds_result ds_core_discard(ds_core *core,ds_tx ticket);
 ds_capacity ds_core_active_usage(const ds_core *core,ds_layer layer);
 ds_capacity ds_core_submission_usage(const ds_core *core,ds_layer layer);
+/* Host/cache bookkeeping only. Validates a consecutive range against the
+ * displayed bank without exposing that bank. */
+bool ds_core_refs_active(const ds_core *core,ds_layer layer,ds_ref first,uint16_t count);
 
 #ifdef __cplusplus
 }

@@ -333,6 +333,13 @@ ds_capacity ds_core_submission_usage(const ds_core *storage,ds_layer layer){
     const ds_core_impl *core=cimpl(storage);
     return core->submitted?usage(&core->banks[core->building_bank],layer):(ds_capacity){0};
 }
+bool ds_core_refs_active(const ds_core *storage,ds_layer layer,ds_ref first,uint16_t count){
+    if(!storage||!valid_layer(layer)||!count)return false;
+    const ds_core_impl *core=cimpl(storage);const ds_bank *bank=&core->banks[core->active];
+    unsigned index=ref_index(first),base=command_base(layer),limit=command_limit(layer);
+    return index>=base&&index+count<=base+limit&&index+count<=base+bank->count[layer]&&
+           ref_generation(first)==bank->generation[layer];
+}
 
 ds_result ds_core_frame(const ds_core *storage,ds_frame *out){
     if(!storage||!out)return DS_INVALID;

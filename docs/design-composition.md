@@ -79,6 +79,8 @@ Flash定義と、呼出時にコピーして作るRAM定義を提供する。動
 同じtemplateから最低2個のinstanceを同時表示できることをMUSTの受入条件とする。
 各表示でoffset・clip・opacity・visible・表示順は独立し、内容の版は共有する。
 同じtemplateを3回使えば、描画の展開命令数は3回分数える。共有を使って96命令の上限を迂回しない。
+初期実装ではtemplate定義をcacheに1回だけ保存し、instantiate時に各表示の解決済み命令を2bankへ展開する。
+したがってJSで再構築せず再利用できるが、表示中の命令32 Bまで物理共有するものではない。instanceごとのPATCHと単純なdamage比較を優先した選択である。
 文字も表示ごとに展開した予約量でquotaを判定するが、物理保存は不変templateを共有してよい。論理quotaと実保存量を区別して報告する。
 hiddenなinstanceも登録枠を消費する。detachedなtemplateは表示命令枠を消費せず、キャッシュ枠と保存領域を保持する。
 
@@ -102,6 +104,8 @@ IDは生のアドレスではなく所有セッションと世代を検証する
 cache参照はGCだけでは自動破棄しない。releaseとsession resetを基本とし、finalizerは解放要求をownerへ渡すだけで描画状態を変更しない。
 明示キャッシュをLRU等で勝手に追い出さない。容量超過はLIMIT、設定予算内でも確保不能ならOOM。
 一時的な再作成時も旧版＋新版のピークを事前予約し、足りなければ旧表示を維持する。
+cache操作を含むトランザクションをabortした場合は、coreのabortとcache.abortを同じowner境界で対にして呼ぶ。
+present/discard後もcache.resolveを直ちに呼び、候補位置を確定/破棄して、省略されたinstanceをdetachする。
 
 ### ピクセルキャッシュ
 
@@ -234,3 +238,19 @@ instanceは`key/template/offset/clip/visible/opacity`、templateは不変な`nod
 公開キーは制作時だけ文字列で扱い、生成物では数値IDへ変換する。参照切れ・循環・展開後容量・ピーク保持量を生成時に検査する。
 既存`design-schema.json`はv0.1専用のまま維持する。v0.2の実行時表現と生成器が実装されるまでは、新フィールドを既存JSONへ混ぜて「検証済み」としない。
 本書がv0.2の規範であり、機械可読スキーマと生成器の実装は別の完了条件として追跡する。
+
+## 11. 初期cache実装の状態
+
+2026-09-13、`ds_cache`を4,096 Bのcaller-owned固定領域として実装した。
+上限はtemplate 8、instance 8、保存命令48、文字領域1,024 B。共有template/instance IDのプロセス寿命カウンタ8 Bを加え、native計上は4,104 B。
+現段階のcreateはrect/roundRect/strokeのみ。文字領域とstatsは予約・公開済みだが、text/image/gradientのcache encode/decode、fork、グループopacityは未実装。
+opacity=255以外のplacementはUNSUPPORTEDで提出を変更しない。命令opacityと重なりは既存矩形rendererで動作する。
+
+実装済み操作はcreate、instantiate、place、setVisible、release、abort、present/discard後のresolve。
+releaseは参照中BUSY、REPLACEで省略してpresentしたinstanceはdetach、discardした位置変更は確定位置へ戻る。
+解放したtemplate領域は固定配列内でcompactし、IDは再利用しない。LRU、heap確保、GC finalizerはない。
+
+ホストではASan/UBSanと`-O2 -fstrict-aliasing`で、同じtemplateの2表示、片方だけの移動・非表示、abort/discard、参照中release、detach後release、reset後の古いhandle、ID枯渇、unsupported opacityを検査した。
+ESP32-S3実機ではtemplate 1件からinstance 2件を表示し、片方の非表示を7帯・26,880 B・4,419 µsで転送。無変更は0帯・0 B。
+cache操作を含むPATCH→place→end→discard/resolve 1,000回は平均19 µs、最大201 µs、free heapは前後248,196 Bで同値だった。
+最終の転送前32,400画素は期待値と一致しHOME_READYへ復帰した。1回の診断値でありp95や物理LCD readbackではない。

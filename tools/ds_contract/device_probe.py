@@ -45,7 +45,8 @@ def main():
             print(line)
     if ('DS_PROBE: PASS' not in log or 'HOME_READY' not in log or 'DS_PROBE: FAIL' in log
             or not re.search(r'DS_PROBE: PARTIAL us=\d+ mask=fe0 bytes=26880', log)
-            or 'DS_PROBE: UNCHANGED bands=0 bytes=0' not in log):
+            or 'DS_PROBE: UNCHANGED bands=0 bytes=0' not in log
+            or 'DS_PROBE: CACHE templates=1 instances=2 commands=1 native=4104' not in log):
         raise RuntimeError('Diagnostic did not pass and return to the home loop; see serial.log')
     rows = {int(y): bytes.fromhex(pixels) for y, pixels in re.findall(r'PIX (\d+) ([0-9a-f]{960})', log)}
     if set(rows) != set(range(135)):
