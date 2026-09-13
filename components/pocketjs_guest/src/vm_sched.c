@@ -1,5 +1,6 @@
 #include "pocketjs/vm_sched.h"
 
+#include "quickjs-vm.h"
 #include "quickjs.h"
 
 void vm_budget_begin_full(vm_budget_t *budget, int64_t limit_us,
@@ -65,6 +66,18 @@ vm_drain_status_t vm_sched_drain(JSRuntime *runtime, vm_budget_t *budget,
   const vm_clock_fn clock =
       (budget->clock != NULL) ? budget->clock : vm_clock_now;
   for (;;) {
+    /* L2c gate (sec.12.6-4, D22r), case 1: a chain a PREVIOUS call through
+     * here left parked. Checked before anything else in the loop -- even
+     * JS_IsJobPending() -- because a held chain is not a job on the queue at
+     * all (JS_ExecutePendingJob already list_del'd it); touching the queue
+     * while it is open would run the wrong thing first. Always false in this
+     * pass-through build (JS_VMSuspended has no rt->vm_susp to read yet), so
+     * this is dead code until stage 3 of the design's implementation order
+     * lands the real interpreter support -- kept here now so the caller-side
+     * shape (this function's return value, and firmware/vmrun switching on
+     * it) does not have to change again when it does. */
+    if (JS_VMSuspended(runtime))
+      return drain_return(budget, clock, n, ran, VM_DRAIN_SUSPENDED);
     if (!JS_IsJobPending(runtime))
       return drain_return(budget, clock, n, ran, VM_DRAIN_EMPTY);
     if (budget->backstop != 0U && n >= budget->backstop)
@@ -81,6 +94,14 @@ vm_drain_status_t vm_sched_drain(JSRuntime *runtime, vm_budget_t *budget,
     /* One job, start to finish. Nothing below this line can observe a partial
      * job, which is the whole reason the budget lives here and not inside an
      * interrupt handler. */
+    /* L2c gate (sec.12.6-4, D22r), case 2 -- NOT wired here yet: a job whose
+     * own handler suspended mid-chain (JS_VMCallJob's JOB_HELD path, D36)
+     * would have JS_ExecutePendingJob itself return a third value (2) instead
+     * of -1/0/1, at which point this call counts (n++, the job genuinely
+     * ran) before returning VM_DRAIN_SUSPENDED. That needs quickjs.c's own
+     * JS_ExecutePendingJob to grow that return, which is stage 3f of the
+     * design's implementation order -- out of scope for the gate (stage 1)
+     * and the guards (stage 2), both of which leave quickjs.c untouched. */
     const int result = JS_ExecutePendingJob(runtime, failed_ctx);
     if (result < 0)
       return drain_return(budget, clock, n, ran, VM_DRAIN_THREW);

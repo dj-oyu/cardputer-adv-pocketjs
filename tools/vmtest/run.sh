@@ -25,13 +25,14 @@ set -uo pipefail
 cd "$(dirname "$0")"
 HERE=$(pwd)
 OUT=${VMTEST_OUT:-$HERE/../../.cache/vmtest}
-variant=asan bless=0 force_yield=0 trace=0 budget_jobs= fair=0
+variant=asan bless=0 force_yield=0 trace=0 budget_jobs= fair=0 fy_fault=
 names=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --variant) variant=$2; shift ;;
     --bless) bless=1 ;;
     --force-yield) force_yield=1 ;;
+    --force-yield-fault) force_yield=1; fy_fault=$2; shift ;;
     --fair) fair=1 ;;
     --budget-jobs) budget_jobs=$2; shift ;;
     --trace) trace=1 ;;
@@ -68,7 +69,9 @@ for name in "${names[@]}"; do
   # Appended LAST so they beat a per-file "// vmrun-flags:" budget: the
   # point of these two is to re-run the WHOLE corpus at a chosen budget and
   # require the same bytes out (docs/vm-L1-design.md sec.7 invariants 1-5).
-  [ $force_yield = 1 ] && flags+=(--force-yield)
+  if [ -n "$fy_fault" ]; then flags+=(--force-yield-fault "$fy_fault")
+  elif [ $force_yield = 1 ]; then flags+=(--force-yield)
+  fi
   [ -n "$budget_jobs" ] && flags+=(--budget-jobs "$budget_jobs")
   [ $fair = 1 ] && flags+=(--fair)
   # ...unless the file says its budget is part of the case AND we are in fair
@@ -122,6 +125,28 @@ for name in "${names[@]}"; do
   echo "exit=$code" >> "$raw"
   grep -E '^(#info|vmrun: note:)' "$raw" | sed "s/^/$name: /" >> "$info"
   grep -vE '^(#info|vmrun: note:)' "$raw" > "$OUT/actual-$variant/$name.txt"
+  # L2c gate (design sec.12.9, D22r): under --force-yield the pass/fail
+  # question stops being "is the output byte-identical" (that is L1's
+  # invariant, and it is EXPECTED to break here -- a killed job's uncatchable
+  # "interrupted" text is not what an unforced run prints) and becomes "does
+  # every safepoint this run actually visited get a stop, and every stop a
+  # resume". Read straight off THIS run's own #info lines rather than a
+  # blessed expected file, because the rule is the same for every file: it
+  # needs no per-file expectation to bless.
+  if [ $force_yield = 1 ] && [ $bless = 0 ]; then
+    sp=$(grep -o 'safepoints_yieldable=[0-9]*' "$raw" | tail -n1 | cut -d= -f2); sp=${sp:-0}
+    st=$(grep -o ' stops=[0-9]*' "$raw" | tail -n1 | cut -d= -f2); st=${st:-0}
+    rs=$(grep -o ' resumes=[0-9]*' "$raw" | tail -n1 | cut -d= -f2); rs=${rs:-0}
+    reason="safepoints_yieldable=$sp stops=$st resumes=$rs"
+    if [ "$sp" -gt 0 ] && { [ "$st" -eq 0 ] || [ "$rs" -ne "$st" ]; }; then
+      fail=$((fail+1)); failed+=("$name")
+      echo "FAIL $name ($reason)"
+    else
+      pass=$((pass+1))
+      echo "PASS $name ($reason)"
+    fi
+    continue
+  fi
   exp=expected/$name.txt
   # One expected file per mode, but only where the modes genuinely differ.
   [ $fair = 1 ] && [ -f "expected-fair/$name.txt" ] && exp=expected-fair/$name.txt

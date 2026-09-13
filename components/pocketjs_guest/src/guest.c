@@ -296,6 +296,16 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
   guest->drain_us += guest->budget.elapsed;
   guest->drain_jobs += ran;
   guest->jobs_pending = (status == VM_DRAIN_YIELDED);
+  /* L2c gate (docs/vm-L2-design.md sec.12.6-4/12.9): vm_sched_drain() can
+   * report a parked chain now, but nothing in this build can ever park one
+   * (every JS_VM* symbol is a pass-through, stage 1/2 of sec.12.15 do not
+   * touch quickjs.c) -- so this is here only so a real interpreter change
+   * later does not also have to teach this caller a new status value. The
+   * real handling (resume within the leave-turn budget, sec.12.11) lands
+   * with stage 4 (firmware integration). */
+  if (status == VM_DRAIN_SUSPENDED) {
+    return ESP_FAIL;
+  }
   if (status == VM_DRAIN_THREW) {
     if (context != NULL) {
       js_std_dump_error(context);
