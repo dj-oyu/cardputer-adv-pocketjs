@@ -426,11 +426,19 @@ typedef struct JSVMLink {
 } JSVMLink;
 #define JS_VM_FRAME_PREFIX sizeof(JSVMLink)
 
-// JSStackFrame.l2_flags. Zero for frames JS_CallInternal did not push
-// (generator/async frames come from js_mallocz), so the absence of both bits
-// means "floor, in a JSAsyncFunctionState". A frame walker that reads these
-// must still guard on class_id first (design D4-3): native frames are
-// uninitialised C automatics.
+// JSStackFrame.l2_flags. Four states of two bits (design sec.12.16-3):
+//   SEG        a floor entered from C, in a segment block; returns to C
+//   SEG|FLAT   a flat SEG frame: pushed by flat_call:, returns to its caller
+//              in the same C activation, its caller's sp in the JSVMLink
+//   FLAT       a flat async frame (D33): an async function's first
+//              synchronous stretch, running in the caller's activation but
+//              living in its JSAsyncFunctionData, its caller's sp in
+//              JSAsyncFunctionData.flat_caller_sp; returns to its caller
+//              at its first await / return / throw and then drops FLAT
+//   0          a generator/async floor resumed from C (js_mallocz'd frame,
+//              or a flat async frame after its first stretch)
+// A frame walker that reads these must still guard on class_id first
+// (design D4-3): native frames are uninitialised C automatics.
 #define JS_SF_SEG  1u   // pushed on the segment stack; local_buf == (JSValue *)(sf + 1)
 #define JS_SF_FLAT 2u   // pushed by a flat call: its return resumes sf->prev_frame in the same C activation
 

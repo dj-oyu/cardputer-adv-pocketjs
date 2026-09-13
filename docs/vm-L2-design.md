@@ -1320,6 +1320,29 @@ async_flat_return: {
 | 速度 `timing.py` | `bench_promise` を flat / recur 交互 2 周（§10.7 の手順）。差は主張しない | |
 | 実機 | `JSAsyncFunctionData` の `_Static_assert`（実機コンパイラ）。DIRAM は `memlog.py` | |
 
+#### 段 A の着地（2026-09-13、`vm/l2c`、実測(host)）
+
+A1（下拵え、`1bd92d9`）と A2（本体）を入れ、上の表の各行を測った。**予想どおりだったもの:** 8 変種のコーパス 46/46（`l2b_async_flat.js` は `asan-recur` で bless、flat とバイト一致）、`--force-yield` 3/43（+1 は新コーパス）、Test262 `asan` 7,501 / 194 / regressions 0（不変）、G1 通常関数 `o2` 0.000 NOT_PROPORTIONAL（selftest ok）・`o2-recur` 528.000 PROPORTIONAL（不変）、**G1 async `o2` / `o2-flat` 0.000 NOT_PROPORTIONAL、`o2-recur` 1184.000 PROPORTIONAL**（上流経路は 1 段あたり `JS_CallInternal` 2 回分で通常関数の 528 より重い）、`budget_probe.sh` 既存 10 項目は 5 変種とも `budget_hits` の値まで不変、G6 `verify_all.sh` exit 0、`run.sh --trace` 46/46。`JSAsyncFunctionData` は実機コンパイラ（`xtensa-esp32s3-elf-gcc 15.2.0`、`-fsyntax-only`、`ESP_PLATFORM` 定義）で **104 B（+0）**、ホストは 176 → 184 B — どちらも計算値どおり。`_Static_assert` は詰め物から追い出す対照実験で失敗するので生きている。
+
+**予想と違ったもの（D38 の限界の実相）。** `deep_async_recursion`（`--profile device`）は flat で `budget_hits=0`・同期 `try` に届かない、までは予想どおりだが、**`InternalError` は `.catch` に届かない。** 実測: 77 段で `js_mallocz` 等が失敗した時点で鎖全体（1 段あたり約 1.9 KB、`peak_bytes=147,979`）が生きているので、(a) エラーオブジェクトを作る余裕が無く理由は `null`（`JS_ThrowError2` の「out of memory: throw JS_NULL」、`seg_oom_boundary.js` が既に扱う形）、(b) 巻き戻しの途中で各段の `await` が自分の反応登録（`js_async_function_resolve_create` / `perform_promise_then`）に失敗し、その段の promise は誰にも処理されず残る（23 件、vmrun の終了コード 2）、(c) 同期区間の後にトップレベルが行うこと — `p.catch(...)` の付与すら — はヒープが満杯のまま走るので同じく失敗する。外側の async 関数の `catch`（ジョブから走る）には `null` が届く。`-recur` は `:21740` の C スタック検査が 15 段（asan は 8 段）で `RangeError`、終了コード 0。期待値は build ごとに別ファイル（`expected/deep_async_recursion.txt` / `-recur.txt`）に測った値を書き、asan 変種では `build_backtrace` の UAF は今回再現しなかった（再現したら記録扱い、`budget_probe.sh`）。**12.16 の「ヒープ枯渇の `InternalError` で終わる」は「ヒープ枯渇で終わり、そのときの理由は `null` で、未処理の拒否が残る」に訂正する。** 実機の同じ経路（`guest.c` の rejection tracker は vmrun と同じ形）でも同様と推定するが未計測。
+
+**見つけて直したもの。** `JS_NewPromiseCapability` が 2 つ目の resolve 関数の確保で失敗すると `js_create_resolving_functions` は `resolving_funcs[0]` を解放するがスロットに死んだ値を残し、続く `js_async_function_free` がもう一度解放する（ASan: heap-use-after-free、`--profile host` の flat で再現。o2 では core dump）。上流の `js_async_function_call:22121-22130` も同じ 2 行で同じ潜在不具合だが、C スタック検査が先に当たるので届かない。フラット経路（`flat_async_call:`）ではヒープ枯渇が再帰の正常な終わり方なので届く。`flat_async_call:` では失敗時に 2 スロットを `JS_UNDEFINED` に戻してから解放する形にした（上流の関数は触っていない）。
+
+**関所の読み方の注意。** G1 は o2 の数字だけが基準。asan ビルドはプローブ関数のローカルが ASan の fake stack に置かれるため、通常関数の `stack_probe.js` でさえ `asan-flat` で 51.712 PROPORTIONAL と読める（フラット化とは無関係の値）。async 版の asan の読み（354.784 → 33.584）も同じ理由で意味を持たない。
+
+#### 段 A の追補: 攻撃・D39・D41 の結果（2026-09-13、`vm/l2c`）
+
+**上の「見つけて直したもの」の段落は 2 点が誤りで、D41 で置き換えた。** (1)「上流の `js_async_function_call` には C スタック検査が先に当たるので届かない」は誤り。`js_vm_flat_callable()` がフラットにするのは**バイトコードからの直接呼び出し**だけで、`Function.prototype.apply` / `call` / `bind`、`Reflect.apply`、Proxy トラップ、組み込みのコールバックなど C の `JS_Call` を経由する呼び出しは、`CONFIG_POCKET_VM_FLATCALLS` の有無に関係なく上流の `js_async_function_call` を通る。既定ビルドで**再帰の深さ 1** で届く（`f.apply(null, [])` と `--fail-alloc` で実測(host)）。(2) 直し方は `flat_async_call:` の局所回避ではなく、`js_create_resolving_functions` の `fail:` で `resolving_funcs[0] = JS_UNDEFINED` に戻す根本修正にした（`7064ef4`、局所回避は削除）。同じ形の 2 件目としてモジュール評価（`JSModuleDef.resolving_funcs` をファイナライザが無条件に解放）も閉じたが、**こちらは読んで確かめただけで、再現は取っていない。** 回帰はコーパス `oom_resolving_functions.js`（`// vmrun-flags: --fail-alloc 1353`、`asan-recur` で bless、8 変種でバイト一致）。上流向けの報告書と patch は `reports/upstream/` に置き、**送っていない**。上流の素の quickjs-ng での再現は走らせていない（`--fail-alloc` に相当する注入口が上流に無いため）。
+
+**D39 の事後判定。** `JS_TakeOOMCanary()`（読み出して 0 に戻すカウンタ）が `js_malloc_rt` 系の 2 つの拒否 — `malloc_limit` の勘定での拒否（埋め込み側のアロケータは呼ばれない）とアロケータの NULL — の両方を数える。`JSMallocState` のフィールドではなくプロセス全体の静的変数にした。`JSRuntime` 自体が `js_malloc_rt` で確保されるので、構造体を広げると `malloc_limit` に当たるバイト位置がコーパス全体でずれる（実測: `gc_threshold_device.js` の捕まる OOM が捕まらない OOM に変わった）。ランタイムは同時に 1 つなので、プロセス全体で困らない。ファームは `app_session.c` がターンと eval の後に `OOM n=... first_req=... used=...` をログに出す。関所は `oom_canary_probe.sh`（o2 / asan とも 5/5）: アロケータ経路と勘定経路の両方で発火すること、注入しない同じスクリプトと自前の `throw null` で 0 のこと、コーパス全体で 0 のこと（デバイス上限に当てることが主題の 3 件は除外、`--fail-alloc` を自分で注入するファイルは逆に**発火すること**を要求）。`budget_probe.sh` は flat の `deep_async_recursion` が `null` を捕まえたときに発火していることを検査する — D40 で「理由は `null`」と固定した壊れ方が、自前の `throw null` ではなくヒープ枯渇だと区別できるようになった。
+
+**攻撃で見つけたこと。** 未解決のまま残すものも含める。
+- **検査スクリプトの穴:** 攻撃側の等価判定スクリプト（`faeq.sh`、scratch）に出力の衝突があり、その回の一致判定は証拠にならない。コーパスの 8 変種バイト一致（`run.sh`）が等価の根拠。
+- **未確認:** 深さの掃引は N ≤ 300 までしか取っていない。N > 300 で同じ壊れ方（D40）に留まるかは測っていない。
+- **観測のみ:** 攻撃中に `o2-recur` で SIGSEGV を見た。再現条件も原因も特定していない。`-recur` は既定ビルドではない。
+
+**関所の全体（統合前、`77291bd` + vm/main の決定記録）。** コーパス 8 変種 47/47、`--force-yield` 3/44（+1 は `oom_resolving_functions.js`）、G1 o2 0.000 NOT_PROPORTIONAL（selftest ok）・async o2 0.000・`o2-recur` 528 / 1184 PROPORTIONAL、`budget_probe.sh` o2-flat / o2-recur / asan-flat とも 11/11、G6 `verify_all.sh` 全トレース OK、`oom_canary_probe.sh` o2 / asan 5/5、Test262 asan 7,501 / 194 / regressions 0。ファームは 3 構成（flat on / off / probe on）がビルドでき、静的 DIRAM は flat on / off とも 115,484 B（canary の静的変数で +16 B）。**実機での実行は未計測。**
+
 ### 12.3 D17r: 止まってよい床は `l2_flags` の 1 ビットで、活性の入口で決まる（H2, H4）
 
 **決定（初版から変えない部分）: `JS_SF_MAY_YIELD = 4u`（`quickjs-vmstack.h:434-435` の隣）。床の push 時に 1 回だけ計算し、フラット子に写す。判定は現在フレームの 1 ビット比較。** 床が MAY_YIELD になる条件は 2 つの AND:
