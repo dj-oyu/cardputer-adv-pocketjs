@@ -126,7 +126,7 @@ check throw_null_no_injection 0 --profile host "$work/thrownull.js"
 # output, so this adds no new expected/ file and cannot go stale against one;
 # only the new #info line is read, everything else is ignored.
 oom_corpus_exceptions=" gc_threshold_device memory_device seg_oom_boundary "
-corpus_bad=0
+corpus_bad=0 corpus_injected=0
 for f in corpus/*.js; do
   name=$(basename "$f" .js)
   case "$oom_corpus_exceptions" in *" $name "*) continue ;; esac
@@ -138,14 +138,26 @@ for f in corpus/*.js; do
   fi
   out=$(cd corpus && timeout 60 "$VMRUN" --stats "${flags[@]}" "$name.js" 2>&1 |
     sed -n 's/^#info oom count=\([0-9]*\).*/\1/p' | head -n1)
-  if [ "${out:-0}" != 0 ]; then
+  # A file that injects an allocation failure through its own header is the
+  # opposite case: asserting oom=0 for it would fail for the right reason
+  # (first seen with oom_resolving_functions.js, which injects --fail-alloc to
+  # reach the resolving-functions double free). Require the canary to FIRE
+  # there instead -- positive evidence it sees the injection -- so adding the
+  # next injection regression needs no hand edit of the exception list.
+  if [[ " ${flags[*]} " == *" --fail-alloc "* ]]; then
+    corpus_injected=$((corpus_injected + 1))
+    if [ "${out:-0}" = 0 ]; then
+      corpus_bad=$((corpus_bad + 1))
+      echo "  corpus regression: $name injects --fail-alloc but oom=0" >&2
+    fi
+  elif [ "${out:-0}" != 0 ]; then
     corpus_bad=$((corpus_bad + 1))
     echo "  corpus regression: $name oom=$out" >&2
   fi
 done
 checks=$((checks + 1))
 if [ $corpus_bad = 0 ]; then
-  echo "ok   corpus (all files)         oom=0 for every file"
+  echo "ok   corpus (all files)         oom=0 for every file, oom>0 for the $corpus_injected injecting --fail-alloc"
 else
   failed=$((failed + 1))
   echo "FAIL corpus (all files)         $corpus_bad file(s) tripped the canary unexpectedly"
