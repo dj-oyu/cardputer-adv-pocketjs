@@ -1023,6 +1023,17 @@ int main(int argc, char **argv) {
   // and cannot make an expected file depend on how the budget was set.
   fprintf(stderr, "#info turns=%llu max_run_turns=%u jobs_dropped=%d\n",
           (unsigned long long)G.turns, G.max_run_turns, G.jobs_dropped ? 1 : 0);
+  // OOM canary (quickjs.h JS_TakeOOMCanary), always printed like the line
+  // above: this is what distinguishes a "caught null" caused by an
+  // allocation rejection (JS_ThrowOutOfMemory's own allocation also failing)
+  // from a script's own `throw null`, and every corpus/budget case that cares
+  // needs to read it regardless of --stats. Counts every rejection over the
+  // WHOLE run (one process per corpus file), not per turn -- vmrun has no
+  // per-turn boundary to reset it on the way app_session.c does.
+  JSOOMCanary oom = {0};
+  JS_TakeOOMCanary(G.runtime, &oom);
+  fprintf(stderr, "#info oom count=%u first_req=%zu used=%zu\n", oom.count,
+          oom.first_req, oom.first_used);
   // "#info vm ..." (safepoints seen, forced stops taken) and "#info g5 ..."
   // (the longest stop-free interval) whenever the VM was armed. Before
   // teardown: the report resolves function-name atoms through the context.
