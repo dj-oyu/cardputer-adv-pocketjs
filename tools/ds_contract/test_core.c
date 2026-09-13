@@ -32,6 +32,12 @@ static ds_result add_text(ds_client client,ds_tx tx,const char *text,uint16_t by
     return client.ops->add(client.ctx,tx,&draw,ref);
 }
 
+static ds_result test_image_span(void *ctx,uint16_t variant,uint16_t frame,uint16_t y,
+                                 uint16_t x,uint16_t count,uint16_t *rgb,uint8_t *alpha){
+    (void)ctx;(void)variant;(void)frame;(void)y;(void)x;
+    for(unsigned i=0;i<count;i++){rgb[i]=0xffff;alpha[i]=255;}
+    return DS_OK;
+}
 int main(void){
     ds_core core;ds_core_init(&core);
     ds_client app=ds_core_client(&core,DS_APP),system=ds_core_client(&core,DS_SYSTEM);
@@ -39,12 +45,14 @@ int main(void){
     ds_limits limits=app.ops->limits(app.ctx);
     CHECK(limits.app.commands==80&&limits.app.text_bytes==896);
     CHECK(limits.system.commands==16&&limits.system.text_bytes==128);
-    CHECK(limits.native_bytes==DS_CORE_STORAGE_BYTES+2*sizeof(uint32_t));
+    CHECK(limits.native_bytes==DS_CORE_STORAGE_BYTES+3*sizeof(uint32_t));
     CHECK(limits.app.tracks==0&&limits.system.tracks==0);
     printf("core native budget: %lu bytes (including shared IDs)\n",(unsigned long)limits.native_bytes);
 
     pet_view view;
-    CHECK(pet_view_build(app,(ds_resource){1},&view)==DS_OK);
+    ds_image_port image={NULL,64,64,16,16,test_image_span};ds_resource resource;
+    CHECK(ds_core_register_image(&core,DS_APP,&image,&resource)==DS_OK);
+    CHECK(pet_view_build(app,resource,&view)==DS_OK);
     CHECK(ds_core_has_submission(&core));
     CHECK(ds_core_active_usage(&core,DS_APP).commands==0);
     CHECK(ds_core_submission_usage(&core,DS_APP).commands==3);

@@ -1,6 +1,8 @@
 #ifndef DS_CORE_H
 #define DS_CORE_H
 #include "ds_api.h"
+#include "ds_ports.h"
+#define DS_RESOURCES 16u
 
 #define DS_APP_COMMANDS 80u
 #define DS_SYSTEM_COMMANDS 16u
@@ -14,6 +16,7 @@
  * A typed member avoids accessing a declared byte array as an unrelated struct. */
 typedef struct ds_core_impl ds_core_impl;
 typedef struct { ds_core_impl *core; ds_layer layer; } ds_endpoint;
+typedef struct { ds_image_port port; ds_resource id; ds_layer layer; } ds_image_entry;
 typedef struct {
     ds_command_storage commands[DS_COMMANDS];
     uint8_t text[DS_TEXT_BYTES];
@@ -25,6 +28,8 @@ typedef struct {
 struct ds_core_impl {
     ds_bank banks[2];
     ds_endpoint endpoints[2];
+    ds_image_entry images[DS_RESOURCES];
+    uint8_t image_count;
     ds_tx transaction;
     ds_result poison;
     ds_layer layer;
@@ -46,10 +51,14 @@ extern "C" {
 
 /* Reinitialization invalidates handles; destroy guest callbacks first.
  * All core instances share one owner task and process-lifetime ID counters
- * (8 bytes outside this storage, included conservatively in each core's
+ * (12 bytes outside this storage, included conservatively in each core's
  * limits/stats). Storage must not be copied or relocated. */
 void ds_core_init(ds_core *core);
 ds_client ds_core_client(ds_core *core,ds_layer layer);
+/* Host-only append-only registration. Providers stay immutable/alive until
+ * init, which must run outside provider callbacks and invalidate all clients.
+ * Register only between submissions/builders. No per-frame retain/release. */
+ds_result ds_core_register_image(ds_core *core,ds_layer layer,const ds_image_port *port,ds_resource *out);
 
 /* Host-only, synchronous owner-task interface. A submission ticket validates
  * every read/ack, including across discard and reinitialization. No bank
@@ -70,6 +79,11 @@ bool ds_core_has_submission(const ds_core *core);
 ds_result ds_core_frame(const ds_core *core,ds_frame *out);
 ds_result ds_core_read(const ds_core *core,ds_tx ticket,bool previous,
                        ds_layer layer,uint16_t index,ds_frame_command *out);
+ds_result ds_core_image_span(const ds_core *core,ds_tx ticket,bool previous,
+                            ds_layer layer,uint16_t index,uint16_t y,uint16_t x,
+                            uint16_t count,uint16_t *rgb565,uint8_t *alpha);
+/* Cardputer's 17 full-width bands, last one 7 rows. No state mutation. */
+ds_result ds_core_damage(const ds_core *core,ds_tx ticket,uint32_t *bands);
 /* Call failed on any partial/uncertain LCD transfer, before retry or discard.
  * presented attests that all required bands were transferred successfully. */
 ds_result ds_core_failed(ds_core *core,ds_tx ticket);

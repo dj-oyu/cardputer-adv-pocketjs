@@ -1,6 +1,7 @@
 #include "sdkconfig.h"
 #ifdef CONFIG_DS_DEVICE_PROBE
 #include "ds_core.h"
+#include "ds_render.h"
 #include "board.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -19,6 +20,12 @@
 #undef main
 
 static ds_core probe_core;
+static uint16_t *probe_strip(void *ctx){(void)ctx;return board_strip();}
+static ds_result probe_send(void *ctx,uint16_t y,uint16_t rows,const uint16_t *pixels){
+    (void)ctx;
+    if(pixels!=board_strip())return DS_INVALID;
+    return board_present(y,rows,board_strip())==ESP_OK?DS_OK:DS_IO;
+}
 
 /* Diagnostic only: opaque rectangles and full-frame synchronous transfer.
  * This is deliberately not the production compositor or a damage benchmark. */
@@ -95,10 +102,24 @@ void ds_device_probe_run(void){
     ds_change change={.property=DS_SET_RECT,.value.rect={160,40,224,96}};
     if(app.ops->begin(app.ctx,DS_PATCH,&tx)!=DS_OK||app.ops->change(app.ctx,tx,moving,&change)!=DS_OK||
        app.ops->end(app.ctx,tx)!=DS_OK)goto fail;
+    ds_display_port display={NULL,probe_strip,probe_send,240,135,8};ds_render_stats rendered;
+    started=esp_timer_get_time();
+    if(ds_render_rects(&probe_core,&display,&rendered)!=DS_OK||rendered.bands!=0xfe0u||
+       rendered.transferred_bytes!=26880)goto fail;
+    ESP_LOGI(tag,"PARTIAL us=%lld mask=%lx bytes=%lu",(long long)(esp_timer_get_time()-started),
+             (unsigned long)rendered.bands,(unsigned long)rendered.transferred_bytes);
+    if(app.ops->begin(app.ctx,DS_PATCH,&tx)!=DS_OK||app.ops->end(app.ctx,tx)!=DS_OK||
+       ds_render_rects(&probe_core,&display,&rendered)!=DS_OK||rendered.bands||rendered.transferred_bytes)goto fail;
+    ESP_LOGI(tag,"UNCHANGED bands=0 bytes=0");
+    /* Capture all rows separately; capture traffic is outside timing. */
+    if(app.ops->begin(app.ctx,DS_PATCH,&tx)!=DS_OK||app.ops->end(app.ctx,tx)!=DS_OK)goto fail;
+    ds_frame capture_frame;
+    if(ds_core_frame(&probe_core,&capture_frame)!=DS_OK||
+       ds_core_failed(&probe_core,capture_frame.ticket)!=DS_OK)goto fail;
     board_capture(true);
-    ds_result display_result=probe_display(&probe_core);
+    ds_result display_result=ds_render_rects(&probe_core,&display,&rendered);
     board_capture(false);
-    if(display_result!=DS_OK)goto fail;
+    if(display_result!=DS_OK||rendered.transferred_bytes!=64800)goto fail;
     ESP_LOGI(tag,"PASS iterations=1000 tx_mean_us=%lld tx_max_us=%lld heap_before=%u heap_after=%u stack_free=%u",
              (long long)(sum/1000),(long long)max,(unsigned)free_before,(unsigned)free_after,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));

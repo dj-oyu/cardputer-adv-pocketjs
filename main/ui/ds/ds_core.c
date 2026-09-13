@@ -8,7 +8,7 @@
 
 /* Process-lifetime IDs; all cores use the same owner task. Never reset these
  * with a guest session. Exhaustion fails closed rather than reviving handles. */
-static uint32_t last_generation,last_transaction;
+static uint32_t last_generation,last_transaction,last_resource;
 
 typedef struct { ds_rgba color; uint8_t radius,width,pad[2]; } shape_payload;
 typedef struct { ds_rgba from,to; uint8_t axis,radius,dither,pad; } gradient_payload;
@@ -83,6 +83,16 @@ static void payload_write(ds_command_storage *command,const void *payload,size_t
 static void payload_read(const ds_command_storage *command,void *payload,size_t bytes){
     memcpy(payload,command->payload,bytes);
 }
+static const ds_image_entry *find_image(const ds_core_impl *core,ds_layer layer,ds_resource id){
+    for(unsigned i=0;i<core->image_count;i++)
+        if(core->images[i].id.value==id.value&&core->images[i].layer==layer)return &core->images[i];
+    return NULL;
+}
+static ds_result validate_image(const ds_core_impl *core,ds_layer layer,ds_resource id,uint16_t variant,uint16_t frame){
+    const ds_image_entry *entry=find_image(core,layer,id);
+    if(!entry)return DS_STALE;
+    return variant<entry->port.variants&&frame<entry->port.frames?DS_OK:DS_INVALID;
+}
 
 static ds_result core_begin(void *context,ds_update_mode mode,ds_tx *out){
     ds_endpoint *endpoint=context;ds_core_impl *core=endpoint->core;
@@ -135,6 +145,10 @@ static ds_result core_add(void *context,ds_tx tx,const ds_draw *draw,ds_ref *out
     if(core->mode!=DS_REPLACE)return poison(core,DS_INVALID);
     if(!out)return poison(core,DS_INVALID);
     result=validate_draw(draw);if(result!=DS_OK)return poison(core,result);
+    if(draw->kind==DS_IMAGE){
+        result=validate_image(core,core->layer,draw->data.image.resource,draw->data.image.variant,draw->data.image.frame);
+        if(result!=DS_OK)return poison(core,result);
+    }
     ds_bank *bank=&core->banks[core->building_bank];ds_layer layer=core->layer;
     if(bank->count[layer]>=command_limit(layer))return poison(core,DS_LIMIT);
     unsigned index=command_base(layer)+bank->count[layer];
@@ -223,7 +237,10 @@ static ds_result core_change(void *context,ds_tx tx,ds_ref ref,const ds_change *
         return DS_OK;
     case DS_SET_IMAGE_FRAME:{
         if(command->kind!=DS_IMAGE)return poison(core,DS_INVALID);
-        image_payload p;payload_read(command,&p,sizeof(p));p.variant=change->value.image.variant;p.frame=change->value.image.frame;
+        image_payload p;payload_read(command,&p,sizeof(p));
+        result=validate_image(core,core->layer,(ds_resource){p.resource},change->value.image.variant,change->value.image.frame);
+        if(result!=DS_OK)return poison(core,result);
+        p.variant=change->value.image.variant;p.frame=change->value.image.frame;
         payload_write(command,&p,sizeof(p));return DS_OK;
     }
     }
@@ -253,13 +270,13 @@ static void core_abort(void *context,ds_tx tx){
 static ds_limits core_limits(void *context){
     (void)context;return (ds_limits){{DS_APP_COMMANDS,DS_APP_TEXT_BYTES,0},
                                     {DS_SYSTEM_COMMANDS,DS_SYSTEM_TEXT_BYTES,0},
-                                    sizeof(ds_core)+sizeof(last_generation)+sizeof(last_transaction),0};
+                                    sizeof(ds_core)+sizeof(last_generation)+sizeof(last_transaction)+sizeof(last_resource),0};
 }
 static ds_stats core_stats(void *context){
     ds_core_impl *core=((ds_endpoint *)context)->core;const ds_bank *bank=&core->banks[core->active];
     ds_stats stats={0};
     for(unsigned layer=0;layer<2;layer++)stats.used[layer]=(ds_capacity){bank->count[layer],bank->text_used[layer],0};
-    stats.native_current=sizeof(ds_core)+sizeof(last_generation)+sizeof(last_transaction);
+    stats.native_current=sizeof(ds_core)+sizeof(last_generation)+sizeof(last_transaction)+sizeof(last_resource);
     stats.native_peak=stats.native_current;return stats;
 }
 static const ds_api core_api={core_begin,core_background,core_add,core_change,core_animate,
@@ -280,6 +297,15 @@ void ds_core_init(ds_core *storage){
 ds_client ds_core_client(ds_core *storage,ds_layer layer){
     if(!storage||!valid_layer(layer))return (ds_client){0};
     ds_core_impl *core=impl(storage);return (ds_client){&core_api,&core->endpoints[layer]};
+}
+ds_result ds_core_register_image(ds_core *storage,ds_layer layer,const ds_image_port *port,ds_resource *out){
+    if(!storage||!valid_layer(layer)||!port||!out||!port->read_span||
+       !port->width||!port->height||!port->variants||!port->frames)return DS_INVALID;
+    ds_core_impl *core=impl(storage);
+    if(core->building||core->submitted)return DS_BUSY;
+    if(core->image_count==DS_RESOURCES||last_resource==UINT32_MAX)return DS_LIMIT;
+    ds_image_entry *entry=&core->images[core->image_count++];
+    *entry=(ds_image_entry){*port,{++last_resource},layer};*out=entry->id;return DS_OK;
 }
 bool ds_core_has_submission(const ds_core *storage){return storage&&cimpl(storage)->submitted;}
 ds_result ds_core_presented(ds_core *storage,ds_tx ticket){
@@ -363,6 +389,64 @@ ds_result ds_core_read(const ds_core *storage,ds_tx ticket,bool previous,
         draw->data.image.variant=p.variant;draw->data.image.frame=p.frame;break;
     }
     default:return DS_INVALID;
+    }
+    return DS_OK;
+}
+
+ds_result ds_core_image_span(const ds_core *storage,ds_tx ticket,bool previous,
+                            ds_layer layer,uint16_t index,uint16_t y,uint16_t x,
+                            uint16_t count,uint16_t *rgb565,uint8_t *alpha){
+    if(!storage||!valid_layer(layer))return DS_INVALID;
+    const ds_core_impl *core=cimpl(storage);
+    if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
+    const ds_bank *bank=&core->banks[previous?core->active:core->building_bank];
+    if(index>=bank->count[layer])return DS_INVALID;
+    const ds_command_storage *command=&bank->commands[command_base(layer)+index];
+    if(command->kind!=DS_IMAGE)return DS_INVALID;
+    image_payload p;payload_read(command,&p,sizeof(p));
+    const ds_image_entry *entry=find_image(core,layer,(ds_resource){p.resource});
+    if(!entry)return DS_STALE;
+    if(y>=entry->port.height||x>entry->port.width||count>entry->port.width-x||
+       (count&&(!rgb565||!alpha)))return DS_INVALID;
+    if(!count)return DS_OK;
+    return entry->port.read_span(entry->port.ctx,p.variant,p.frame,y,x,count,rgb565,alpha);
+}
+
+static uint32_t command_bands(const ds_command_storage *command){
+    if(!(command->flags&DS_FLAG_VISIBLE)||!command->opacity)return 0;
+    int32_t x0=command->bounds.x0,x1=command->bounds.x1,y0=command->bounds.y0,y1=command->bounds.y1;
+    if(x0<command->clip.x0)x0=command->clip.x0;
+    if(x1>command->clip.x1)x1=command->clip.x1;
+    if(y0<command->clip.y0)y0=command->clip.y0;
+    if(y1>command->clip.y1)y1=command->clip.y1;
+    if(x0<0)x0=0;
+    if(x1>240)x1=240;
+    if(y0<0)y0=0;
+    if(y1>135)y1=135;
+    if(x0>=x1||y0>=y1)return 0;
+    uint32_t mask=0;
+    for(int32_t band=y0/8;band<=(y1-1)/8;band++)mask|=1u<<band;
+    return mask;
+}
+ds_result ds_core_damage(const ds_core *storage,ds_tx ticket,uint32_t *bands){
+    if(!storage||!bands)return DS_INVALID;
+    const ds_core_impl *core=cimpl(storage);
+    if(!core->submitted||ticket.value!=core->transaction.value)return DS_STALE;
+    const ds_bank *old=&core->banks[core->active],*next=&core->banks[core->building_bank];
+    *bands=0;
+    if(core->full_redraw||old->background[DS_APP]!=next->background[DS_APP]||
+       old->generation[0]!=next->generation[0]||old->generation[1]!=next->generation[1]){
+        *bands=(1u<<17)-1u;return DS_OK;
+    }
+    for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<next->count[layer];i++){
+        unsigned index=command_base((ds_layer)layer)+i;
+        const ds_command_storage *a=&old->commands[index],*b=&next->commands[index];
+        bool changed=memcmp(a,b,sizeof(*a))!=0;
+        if(!changed&&b->kind==DS_TEXT){
+            text_payload p;payload_read(b,&p,sizeof(p));
+            changed=memcmp(old->text+p.offset,next->text+p.offset,p.length)!=0;
+        }
+        if(changed)*bands|=command_bands(a)|command_bands(b);
     }
     return DS_OK;
 }
