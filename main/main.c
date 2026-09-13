@@ -34,6 +34,10 @@
 #include "nvs_flash.h"
 #include <stdatomic.h>
 #include <string.h>
+#ifdef CONFIG_DS_DEVICE_PROBE
+static atomic_bool ds_probe_requested;
+void ds_device_probe_run(void);
+#endif
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
 #include "esp_cpu.h"
 #endif
@@ -198,6 +202,9 @@ static bool usb_stroke(char c, keystroke_t *k) {
         k->text[0]=c;k->len=1;return true;
     }
     if(c=='s') { atomic_store(&capture,true); return false; }
+#ifdef CONFIG_DS_DEVICE_PROBE
+    if(c=='~') { atomic_store(&ds_probe_requested,true); return false; }
+#endif
     if(c=='c') { motion_recenter(); return false; }
     // '8' is not an app: it checks the baked sound tables against this chip's
     // own libm (sound_check_tables), and is handled where the others start. It
@@ -691,6 +698,12 @@ static void ui_task(void *arg) {
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
     while(1) {
+#ifdef CONFIG_DS_DEVICE_PROBE
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&ds_probe_requested,false)){
+            ds_device_probe_run();
+            ESP_LOGI("shell","HOME_READY");
+        }
+#endif
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
         bench_core_tick();
 #endif

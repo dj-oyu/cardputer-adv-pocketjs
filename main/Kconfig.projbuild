@@ -1,5 +1,12 @@
 menu "Pocket VM (L0 measurement probes)"
 
+    config DS_DEVICE_PROBE
+        bool "Enable USB-triggered DS core regression and LCD diagnostic"
+        default n
+        help
+            USB '~' on the home screen runs tests and opaque rectangles. Uses extra
+            static storage and stack. Not a production renderer benchmark.
+
     config POCKET_VM_PROBE
         bool "Enable L0 VM probes (docs/quickjs-freertos-vm-spec.md sec.5)"
         default n
