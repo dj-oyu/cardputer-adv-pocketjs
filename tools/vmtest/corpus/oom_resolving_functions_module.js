@@ -1,4 +1,5 @@
 // vmrun-flags: --module --fail-alloc 1290
+// vmrun-skip-variants: asan-alloca o2-alloca -- no frame segment on these builds, so the target allocation is attempt 1289 and 1290 misses it (swept, docs/vm-L2-design.md sec.12.2)
 // Regression for the SECOND instance of the resolving-functions double-free
 // (reports/upstream/quickjs-ng-resolving-functions-double-free.md, "A second
 // instance the fix also closes: module evaluation"). js_evaluate_module's
@@ -34,9 +35,11 @@
 // The module never resolves (evaluation throws before the module body runs),
 // so there is nothing to await -- the observable effect is simply the
 // eval failing with an out-of-memory error and the runtime tearing down
-// cleanly afterward. Blessed on asan-recur and checked to match under the
-// default (flatcalls) variant, matching oom_resolving_functions.js's
-// convention: this call site does not distinguish flat vs. recursive calls
-// (JS_NewPromiseCapability's own C recursion does not depend on
-// CONFIG_POCKET_VM_FLATCALLS), so all six variants are expected to agree.
+// cleanly afterward. Blessed on asan-recur; byte-identical on the six
+// segment-stack variants (asan, o2, *-recur, *-flat). Not on *-alloca: those
+// builds allocate no frame segment, so every allocation after the first call
+// is numbered one lower -- the target is attempt 1289 there, and 1290 lands
+// on a harmless allocation (exit 0). One number cannot hit the same
+// allocation on both, and the shipped path is the segment-stack one, hence
+// the skip header above rather than a different number.
 export const x = 1;
