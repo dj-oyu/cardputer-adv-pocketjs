@@ -19157,8 +19157,17 @@ normal_this:
                 CASE(OP_call3):
                 call_argc = opcode - OP_call0;
             goto has_call_argc;
-            CASE(OP_call):
-                CASE(OP_tail_call): {
+            CASE(OP_tail_call):
+                // Tail-call entry (TCO, docs/vm-L2-design.md sec.14 draft):
+                // its own dispatch label, placed ABOVE OP_call so that a
+                // frame-reusing tail call can be added here without one
+                // extra compare on the ordinary call path. Empty for now:
+                // every tail call falls through into OP_call's body, where
+                // `opcode` still reads OP_tail_call (JS_RET_TAIL / `goto
+                // done`), exactly today's behaviour. Code added here must not
+                // advance pc -- read argc with get_u16(pc) -- so the
+                // fall-through decode below stays valid.
+            CASE(OP_call): {
                 call_argc = get_u16(pc);
                 pc += 2;
                 goto has_call_argc;
@@ -19212,8 +19221,10 @@ has_call_argc:
                 *sp++ = ret_val;
             }
             BREAK;
-            CASE(OP_call_method):
-                CASE(OP_tail_call_method): {
+            CASE(OP_tail_call_method):
+                // Tail-call entry for the method form -- same contract as
+                // OP_tail_call above: empty, falls through, must not move pc.
+            CASE(OP_call_method): {
                 call_argc = get_u16(pc);
                 pc += 2;
                 call_argv = sp - call_argc;
