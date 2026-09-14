@@ -8,6 +8,50 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <string.h>
+
+static ds_result verify_pie(ds_frost *frost){
+    uint16_t scalar[256],vector[256];uint32_t seed=19;
+    ds_frost_init(frost);
+    for(unsigned i=0;i<510;i++){
+        seed=seed*1664525u+1013904223u;frost->state.image[i]=(uint16_t)(seed>>8);
+    }
+    frost->state.phase=1;
+    /* All alpha, every row, arbitrary span starts, all output alignments,
+     * guards before/after the destination. The actual assembly runs here. */
+    for(unsigned alpha=0;alpha<256;alpha++){
+        unsigned x=alpha%241,count=240-x,offset=1+(alpha&7);
+        ds_rgba tint=0x1c304300|alpha;
+        for(unsigned y=0;y<135;y++){
+            for(unsigned i=0;i<256;i++)scalar[i]=vector[i]=0xdead;
+            if(ds_frost_span_scalar(frost,y,x,count,tint,scalar+offset)!=DS_OK||
+               ds_frost_span(frost,y,x,count,tint,vector+offset)!=DS_OK||
+               memcmp(scalar,vector,sizeof(scalar)))return DS_INVALID;
+        }
+        if(alpha%16==15)vTaskDelay(1);
+    }
+    /* Same binary, same snapshot, same arguments. Alternate measurement order
+     * so instruction-cache/interrupt effects don't always favor one path. */
+    uint64_t scalar_us=0,pie_us=0;unsigned checksum=0;
+    for(unsigned trial=0;trial<64;trial++){
+        unsigned x=24+trial%64;ds_rgba tint=0x1c304300|(trial*4);
+        for(unsigned pass=0;pass<2;pass++){
+            bool pie=(pass^(trial&1))!=0;
+            int64_t start=esp_timer_get_time();
+            for(unsigned y=20;y<100;y++){
+                if(pie)ds_frost_span(frost,y,x,112,tint,vector+1);
+                else ds_frost_span_scalar(frost,y,x,112,tint,scalar+1);
+            }
+            uint64_t elapsed=(uint64_t)(esp_timer_get_time()-start);
+            if(pie)pie_us+=elapsed;else scalar_us+=elapsed;
+            checksum+=pie?vector[5]:scalar[5];
+        }
+        vTaskDelay(1);
+    }
+    ESP_LOGI("DS_PROBE","PIE_AB PASS scalar_us=%llu pie_us=%llu trials=64 pixels_per_trial=8960 checksum=%u",
+             (unsigned long long)scalar_us,(unsigned long long)pie_us,checksum);
+    return DS_OK;
+}
 
 /* Diagnostic-only counters; capture replay must not enter these totals. */
 static uint64_t source_us,feed_us,blur_us,span_us,present_us;
@@ -58,6 +102,7 @@ static ds_result show(const ds_frost *frost,unsigned t,bool capture){
     board_capture(false);return DS_OK;
 }
 ds_result ds_stress_probe_run(ds_frost *frost){
+    ds_result verified=verify_pie(frost);if(verified!=DS_OK)return verified;
     source_us=feed_us=blur_us=span_us=present_us=0;
     uint32_t samples[STRESS_FRAMES]; /* 2400 B diagnostic-only timing storage. */
     uint64_t work=0,prepare_total=0,show_total=0,capture_us=0;

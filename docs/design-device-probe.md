@@ -212,3 +212,56 @@ app binary=2,170,144 B。nmでprobe_frost=0x800、channelのout-of-line symbol�
 併用時の余裕が不足したらspan+tint融合を優先し、次にfeedを検討する。
 blurは0.8msなので優先度を下げる。Wi-Fi/音声併用、製品capture/attach、
 静止snapshot再利用の受入はこの試験に含まない。
+
+## 2026-09-14: 利用API再構成と補間・tintのPIE化
+
+前節のPIE保留を撤回し、余裕時間を増やすため`ds_frost_span`をSIMD化した。
+1セル8画素の水平補間とtintをQACCで融合する。丸めは元の順序通りに2段階で行う。
+補間区間の端と短いspanはscalar、128-bitストアは16-byte整列の8画素tileだけに行い、
+呼出元の出力先は2-byte整列でよい。snapshotはconstのまま、追加heapは0。
+
+### 同一バイナリ・固定入力のA/B
+
+同じランダムsnapshot、各回同じ位置/tint、112×80画素の64試行。
+scalar/PIEの実行順を交互に反転し、ログと待機を計測区間から除外した。
+
+| 項目 | scalar | PIE |
+| --- | ---: | ---: |
+| 64試行合計 | 362,219 µs | 145,690 µs |
+| 1試行平均（8,960画素） | 5,659.7 µs | 2,276.4 µs |
+
+2.486倍、時間59.78%減。API呼出・端処理・tileコピーを含むspan全体の比較で、
+アセンブリ本体だけの命令周期ではない。端だけの短いspanでは同じ倍率を期待しない。
+
+### 600フレームの継時負荷
+
+| 項目 | 前回scalar最終版 | 今回PIE |
+| --- | ---: | ---: |
+| frame平均 | 29,559 µs | 26,126 µs |
+| p95 / 最大 | 29,698 / 29,882 µs | 26,315 / 26,474 µs |
+| span+tint平均 | 5,790 µs | 2,336 µs |
+| 33,333 µsまでの平均余裕 | 3,774 µs | 7,207 µs |
+| 期限超過 / skipped | 0 / 0 | 0 / 0 |
+| 観測FPS | 30.006 | 30.013 |
+
+今回の残りの平均内訳: source 10,282、feed 4,313、blur 802、SPI 7,052 µs。
+動く背景、半透明矩形2枚、パネル移動/tint変化、毎フレームrecapture、半径1/2、
+全17帯の転送を維持。フレーム全体の比較は別ビルド・実時間アニメーションであり、
+上の同一入力A/Bと区別する。Wi-Fi/音声/QuickJSアプリ併用の余裕は未検証。
+
+### 画素・API・容量
+
+- ホストのassembly modelで実際のinline asmを4,096セル実行し、全alphaを含め整数除算の参照式と一致。
+- ホストの旧実装比較はランダム背景16件、両半径、全alpha/行、全出力整列位置、短いspanとcanary。
+- 実機の実assemblyでも全256 alpha×135行の部分spanをscalarと比較し、出力先8通りの整列とcanaryが一致。
+- 転送前画素は合成32,400、静止glass32,400、動的3フレーム97,200画素が独立Python式と一致。HOME_READY復帰。
+- `VIEW PASS coordinator=84`。新利用窓口だけでcache2個、yield相当取消、無変更転送0、modal開閉とfocus復帰を検証。
+- heap before/min/after=246,100 B、最大連続空き73,728 B、stack_free=21,548 B。
+- 静的DIRAM=130,908 B（増加0）、app binary=2,174,176 B（前回から+4,032 B、API/診断を含む）、Flash余裕971,552 B。
+- snapshot=2,048 Bのまま。PIE spanのtextは792 B、weightsはFlashに32 B、scalar controlは627 B。
+- S3 GCC `-Os -fstack-usage`でspan自身160 B、scalar自身128 B。端でscalarを呼ぶ経路は合計288 Bを見込む（呼出元を除く）。
+  「追加tileが16 Bだから追加stackも16 B」とは扱わない。
+
+ログ、転送前画像、stress-report.jsonは`.cache/ds-device-pie-view/`。
+ビルド/書込みは`build_ds_contract`のESP-IDF v6.0.1。実測ELFは`38d7312`を基点とする本変更の未コミット状態。
+新APIのnative coordinatorは完成したが、QuickJS binding/実アプリ移行/capture attachまで完了したという結果ではない。

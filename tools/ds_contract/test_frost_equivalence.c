@@ -10,7 +10,7 @@ ds_result reference_span(const ds_frost *,uint16_t,uint16_t,uint16_t,ds_rgba,uin
 static unsigned seed=17;
 static unsigned random_word(void){seed=1664525u*seed+1013904223u;return seed;}
 int main(void){
-    ds_frost a,b;uint16_t input[240*8],actual[242],expected[242];
+    ds_frost a,b;uint16_t input[240*8],actual[256],expected[256];
     for(unsigned trial=0;trial<100;trial++){
         unsigned t=random_word();stress_frame scene=stress_frame_prepare(t);
         for(unsigned y=0;y<135;y++){
@@ -29,11 +29,18 @@ int main(void){
         CHECK(ds_frost_blur(&a,1+trial%2)==reference_blur(&b,1+trial%2));
         CHECK(memcmp(a.state.image,b.state.image,sizeof(a.state.image))==0);
         for(unsigned y=0;y<135;y++)for(unsigned alpha=0;alpha<256;alpha++){
-            unsigned x=alpha%241,count=240-x;
+            unsigned x=alpha%241,count=240-x,offset=1+(alpha&7);
             ds_rgba tint=(random_word()&0xffffff00u)|alpha;
-            for(unsigned i=0;i<242;i++)actual[i]=expected[i]=0xdead;
-            CHECK(ds_frost_span(&a,y,x,count,tint,actual+1)==DS_OK);
-            CHECK(reference_span(&b,y,x,count,tint,expected+1)==DS_OK);
+            for(unsigned i=0;i<256;i++)actual[i]=expected[i]=0xdead;
+            CHECK(ds_frost_span(&a,y,x,count,tint,actual+offset)==DS_OK);
+            CHECK(reference_span(&b,y,x,count,tint,expected+offset)==DS_OK);
+            CHECK(memcmp(actual,expected,sizeof(actual))==0);
+        }
+        for(unsigned x=0;x<=240;x++)for(unsigned count=0;count<=16&&count<=240-x;count++){
+            for(unsigned i=0;i<256;i++)actual[i]=expected[i]=0xdead;
+            unsigned offset=1+(x&7);ds_rgba tint=random_word();
+            CHECK(ds_frost_span(&a,134,x,count,tint,actual+offset)==DS_OK);
+            CHECK(reference_span(&b,134,x,count,tint,expected+offset)==DS_OK);
             CHECK(memcmp(actual,expected,sizeof(actual))==0);
         }
     }

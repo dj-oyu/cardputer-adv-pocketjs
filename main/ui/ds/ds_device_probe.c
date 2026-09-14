@@ -4,6 +4,7 @@
 #include "ds_cache.h"
 #include "ds_modal.h"
 #include "ds_frost.h"
+#include "ds_view_host.h"
 #include "ds_render.h"
 #include "board.h"
 #include "esp_heap_caps.h"
@@ -106,6 +107,38 @@ static ds_result probe_display(ds_core *core){
     ds_render_stats stats;return ds_render_rects(core,&display,&stats);
 }
 
+static ds_result view_demo(void){
+    ds_view_host host;ds_view_host_init(&host,&probe_core,&probe_cache,42);
+    ds_view *app=ds_view_host_endpoint(&host,DS_APP);
+    ds_display_port display={NULL,probe_strip,probe_send,240,135,8};
+    ds_render_stats stats;ds_tx tx;ds_template shape;ds_instance a,b;
+    ds_draw d={.kind=DS_RECT,.bounds={0,0,64,48},.clip={0,0,240,135},
+               .opacity=255,.data.shape={0x67dfc7ff,0,0}};
+    ds_placement p={16,40,{0,0,240,135},128,true};
+#define V(call) do{ds_result result=(call);if(result!=DS_OK)return result;}while(0)
+    V(ds_view_cache_create(app,&d,1,&shape));
+    V(ds_view_begin(app,DS_REPLACE,&tx));V(ds_view_background(app,tx,0x0b1727ff));
+    V(ds_view_instantiate(app,tx,shape,&p,&a));p.x=104;
+    V(ds_view_instantiate(app,tx,shape,&p,&b));V(ds_view_submit(app,tx));
+    V(ds_view_host_present(&host,&display,&stats));
+    V(ds_view_begin(app,DS_PATCH,&tx));V(ds_view_visible(app,tx,a,false));
+    ds_view_host_end_turn(&host); /* Simulated guest yield: visibility rolls back. */
+    V(ds_view_begin(app,DS_PATCH,&tx));V(ds_view_submit(app,tx));
+    V(ds_view_host_present(&host,&display,&stats));if(stats.bands)return DS_INVALID;
+    V(ds_view_begin(app,DS_REPLACE,&tx));
+    V(ds_view_modal_open(app,tx,DS_MODAL_SOLID,0x1c3043ff,7));
+    V(ds_view_submit(app,tx));V(ds_view_host_present(&host,&display,&stats));
+    if(ds_view_host_route(&host,false)!=DS_INPUT_MODAL)return DS_INVALID;
+    V(ds_view_cache_release(app,shape)); /* Omitted instances detached by host. */
+    V(ds_view_begin(app,DS_REPLACE,&tx));V(ds_view_modal_close(app,tx));
+    V(ds_view_background(app,tx,0x0b1727ff));V(ds_view_submit(app,tx));
+    V(ds_view_host_present(&host,&display,&stats));
+    if(ds_view_host_route(&host,false)!=DS_INPUT_APP||host.modal.focus!=42)return DS_INVALID;
+    ESP_LOGI("DS_PROBE","VIEW PASS coordinator=%u cache=two-instances abort=yield modal=open-close",(unsigned)sizeof(host));
+#undef V
+    return DS_OK;
+}
+
 void ds_device_probe_run(void){
     const char *tag="DS_PROBE";
     failures=0;
@@ -202,6 +235,7 @@ void ds_device_probe_run(void){
        probe_display(&probe_core)!=DS_OK||ds_modal_resolve(&modal,&probe_core)!=DS_OK||
        ds_modal_route(&modal,&probe_core,false)!=DS_INPUT_APP||modal.focus!=42)goto fail;
     ESP_LOGI(tag,"COMPOSITION group_alpha=128 modal=open-close focus=42 PASS");
+    if(view_demo()!=DS_OK)goto fail;
     if(glass_demo()!=DS_OK)goto fail;
     if(ds_stress_probe_run(&probe_frost)!=DS_OK)goto fail;
     ESP_LOGI(tag,"PASS iterations=1000 tx_mean_us=%lld tx_max_us=%lld heap_before=%u heap_after=%u stack_free=%u",

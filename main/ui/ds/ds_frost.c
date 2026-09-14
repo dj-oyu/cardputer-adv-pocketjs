@@ -1,4 +1,5 @@
 #include "ds_frost.h"
+#include "ds_frost_kernel.h"
 #include <string.h>
 _Static_assert(sizeof(ds_frost)==DS_FROST_BYTES,"frost budget");
 static inline __attribute__((always_inline)) unsigned channel(uint16_t p,unsigned c){
@@ -46,7 +47,7 @@ ds_result ds_frost_blur(ds_frost *frost,uint8_t radius){
     }
     frost->state.phase=1;return DS_OK;
 }
-ds_result ds_frost_span(const ds_frost *frost,uint16_t y,uint16_t x,uint16_t count,
+ds_result ds_frost_span_scalar(const ds_frost *frost,uint16_t y,uint16_t x,uint16_t count,
                         ds_rgba tint,uint16_t *pixels){
     if(!frost||y>=135||x>240||count>240-x||(count&&!pixels))return DS_INVALID;
     if(frost->state.phase!=1)return DS_STALE;
@@ -75,4 +76,44 @@ ds_result ds_frost_span(const ds_frost *frost,uint16_t y,uint16_t x,uint16_t cou
         pixels[i]=pack(c);
     }
     return DS_OK;
+}
+
+ds_result ds_frost_span(const ds_frost *frost,uint16_t y,uint16_t x,uint16_t count,
+                        ds_rgba tint,uint16_t *pixels){
+#if DS_FROST_VECTOR
+    if(!frost||y>=135||x>240||count>240-x||(count&&!pixels))return DS_INVALID;
+    if(frost->state.phase!=1)return DS_STALE;
+    /* An interpolation cell begins at x=4+8*k. SIMD consumes complete cells;
+     * clamped edges, arbitrary starts and short tails stay scalar. Destination
+     * alignment is independent of x, so only our aligned tile uses VST. */
+    unsigned prefix=0;
+    while(prefix<count&&(x+prefix<4||((x+prefix-4)&7)))prefix++;
+    if(prefix)ds_frost_span_scalar(frost,y,x,prefix,tint,pixels);
+    unsigned i=prefix,a=tint&255;
+    int sy=clamp(2*(int)y-7,256),y0=sy/16,y1=clamp(y0+1,16),wy=sy%16;
+    uint16_t tile[8] __attribute__((aligned(16)));
+    /* Per channel: left, right, tint numerator, mask, packing multiplier.
+     * Broadcast loads require 2-byte alignment only. No persistent scratch. */
+    uint16_t k[19]={255-a,1,128,3};
+    for(unsigned c=0;c<3;c++){
+        k[4+c*5+2]=(uint16_t)(((tint>>(24-8*c))&255)*a+127);
+        k[4+c*5+3]=(uint16_t)(c==0?248:c==1?252:255);
+        k[4+c*5+4]=(uint16_t)(c==0?2048:c==1?64:1);
+    }
+    for(;i+8<=count&&x+i<=228;i+=8){
+        unsigned col=(x+i-4)/8;
+        for(unsigned c=0;c<3;c++){
+            k[4+c*5]=(uint16_t)(channel(frost->state.image[y0*30+col],c)*(16-wy)+
+                                     channel(frost->state.image[y1*30+col],c)*wy);
+            k[4+c*5+1]=(uint16_t)(channel(frost->state.image[y0*30+col+1],c)*(16-wy)+
+                                       channel(frost->state.image[y1*30+col+1],c)*wy);
+        }
+        ds_frost_cell_pie(tile,k);
+        memcpy(pixels+i,tile,sizeof(tile));
+    }
+    if(i<count)ds_frost_span_scalar(frost,y,(uint16_t)(x+i),(uint16_t)(count-i),tint,pixels+i);
+    return DS_OK;
+#else
+    return ds_frost_span_scalar(frost,y,x,count,tint,pixels);
+#endif
 }

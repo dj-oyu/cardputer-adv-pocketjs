@@ -2,6 +2,7 @@
 #define DS_CORE_H
 #include "ds_api.h"
 #include "ds_ports.h"
+#include "ds_composition_types.h"
 #define DS_RESOURCES 16u
 
 #define DS_APP_COMMANDS 80u
@@ -11,9 +12,6 @@
 #define DS_SYSTEM_TEXT_BYTES 128u
 #define DS_TEXT_BYTES (DS_APP_TEXT_BYTES + DS_SYSTEM_TEXT_BYTES)
 #define DS_CORE_STORAGE_BYTES 9216u
-
-typedef enum { DS_SUBMISSION_NONE, DS_SUBMITTED, DS_PRESENTED, DS_DISCARDED } ds_submission_status;
-typedef struct { ds_tx ticket; ds_submission_status status; ds_result reason; ds_layer layer; } ds_submission;
 
 /* Host storage layout, not a guest API. Do not access fields directly.
  * A typed member avoids accessing a declared byte array as an unrelated struct. */

@@ -58,6 +58,8 @@ def main():
             or 'DS_PROBE: CACHE templates=1 instances=2 commands=2 native=4104' not in log
             or 'DS_PROBE: COMPOSITION group_alpha=128 modal=open-close focus=42 PASS' not in log
             or 'DS_PROBE: GLASS PASS' not in log
+            or 'DS_PROBE: VIEW PASS' not in log
+            or 'DS_PROBE: PIE_AB PASS' not in log
             or 'DS_PROBE: STRESS PASS frames=600' not in log):
         raise RuntimeError('Diagnostic did not pass and return to the home loop; see serial.log')
     rows = {int(y): bytes.fromhex(pixels) for y, pixels in re.findall(r'PIX (\d+) ([0-9a-f]{960})', log.split('GLASS_PIX_BEGIN')[0])}

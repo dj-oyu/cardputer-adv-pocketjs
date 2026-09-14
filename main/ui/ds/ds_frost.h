@@ -20,6 +20,9 @@ ds_result ds_frost_feed(ds_frost *frost,uint16_t y,uint16_t rows,const uint16_t 
 ds_result ds_frost_blur(ds_frost *frost,uint8_t radius);
 ds_result ds_frost_span(const ds_frost *frost,uint16_t y,uint16_t x,uint16_t count,
                         ds_rgba tint,uint16_t *pixels);
+/* Scalar control for kernel A/B diagnostics; identical pixel contract. */
+ds_result ds_frost_span_scalar(const ds_frost *frost,uint16_t y,uint16_t x,uint16_t count,
+                               ds_rgba tint,uint16_t *pixels);
 #ifdef __cplusplus
 }
 #endif

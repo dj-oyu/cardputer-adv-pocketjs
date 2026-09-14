@@ -12,6 +12,13 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   tools/ds_contract/use_cases.c tools/ds_contract/test_core.c -o "$out/core"
 "$out/core"
 for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/ds \
+    main/ui/ds/ds_core.c main/ui/ds/ds_render.c main/ui/ds/ds_cache.c \
+    main/ui/ds/ds_modal.c main/ui/ds/ds_view.c tools/ds_contract/test_view.c -o "$out/view"
+  "$out/view"
+  cc -std=c11 -Wall -Wextra -Werror $options -DDS_FROST_PIE_MODEL -Imain/ui/ds \
+    main/ui/ds/ds_frost.c tools/ds_contract/frost_baseline.c tools/ds_contract/test_frost_equivalence.c -o "$out/vector"
+  "$out/vector"
   cc -std=c11 -Wall -Wextra -Werror $options \
     -Imain/ui/ds main/ui/ds/ds_core.c tools/ds_contract/test_review.c -o "$out/review"
   "$out/review"
@@ -48,5 +55,6 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   "$out/stress" > "$out/stress.bin"
   python3 tools/ds_contract/stress_reference.py "$out/stress.bin"
 done
-printf '#include "ds_api.h"\n#include "ds_ports.h"\n#include "ds_core.h"\n#include "ds_cache.h"\n#include "ds_modal.h"\n' | \
+python3 tools/pie/test_frost.py
+printf '#include "ds_api.h"\n#include "ds_ports.h"\n#include "ds_core.h"\n#include "ds_cache.h"\n#include "ds_modal.h"\n#include "ds_view_host.h"\n' | \
   c++ -std=c++17 -Wall -Wextra -Werror -Imain/ui/ds -x c++ -fsyntax-only -

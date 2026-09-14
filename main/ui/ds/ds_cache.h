@@ -8,14 +8,6 @@
 #define DS_CACHE_TEXT_BYTES 1024u
 #define DS_CACHE_STORAGE_BYTES 4096u
 
-typedef struct { uint32_t value; } ds_template;
-typedef struct { uint32_t value; } ds_instance;
-typedef struct {
-    int16_t x,y;
-    ds_rect clip;
-    uint8_t opacity;
-    bool visible;
-} ds_placement;
 typedef struct {
     uint32_t id;
     uint16_t first_command,text_offset,text_bytes;
@@ -40,12 +32,6 @@ typedef union {
     ds_cache_impl state;
     uint8_t bytes[DS_CACHE_STORAGE_BYTES];
 } ds_cache;
-typedef struct {
-    uint16_t commands,text_bytes;
-    uint8_t templates,instances;
-    uint32_t native_bytes;
-} ds_cache_stats;
-
 #ifdef __cplusplus
 extern "C" {
 #endif

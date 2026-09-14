@@ -2,9 +2,6 @@
 #define DS_MODAL_H
 #include "ds_core.h"
 
-typedef enum { DS_MODAL_CLOSED, DS_MODAL_PREPARING, DS_MODAL_OPEN, DS_MODAL_CLOSING } ds_modal_phase;
-typedef enum { DS_MODAL_SOLID, DS_MODAL_DIM_LIVE } ds_modal_backdrop;
-typedef enum { DS_INPUT_BLOCKED, DS_INPUT_APP, DS_INPUT_MODAL, DS_INPUT_HOST } ds_input_scope;
 typedef struct {
     ds_tx pending;
     uint32_t focus,saved_focus,target_focus;

@@ -23,8 +23,10 @@ typedef struct { const ds_api *ops; void *ctx; } ds_client;
  * Tokens validate session, layer and generation. Errors in the owning
  * transaction poison until abort; foreign/stale tokens leave it untouched.
  * abort is idempotent. end seals, but does NOT acknowledge LCD presentation.
- * References are usable inside their transaction; publish app handles only
- * after successful end. BUSY must preserve the caller's pending domain state.
+ * References are usable inside their transaction. Successful end retains
+ * candidate handles; promote them only after PRESENTED, invalidate them on
+ * discard. New adapters use ds_view.h for coordinated result/abort handling.
+ * BUSY must preserve the caller's pending domain state.
  * A submitted state must be presented/discarded before the next begin. */
 typedef struct { uint64_t next_us; bool ready; } ds_schedule;
 typedef struct {
