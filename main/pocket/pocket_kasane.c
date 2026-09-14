@@ -8,7 +8,7 @@
 #define KASANE_REF_STORAGE 64u
 #define KASANE_SCREEN ((ksn_rect){0,0,240,135})
 
-typedef enum { REF_FREE, REF_CANDIDATE, REF_ACTIVE, REF_DEAD } ref_status;
+typedef enum { REF_FREE, REF_CANDIDATE, REF_ACTIVE } ref_status;
 typedef struct {
     uint32_t handle;
     ksn_ref ref;
@@ -20,15 +20,18 @@ typedef struct {
     ksn_cache cache;
     ksn_view_host host;
     /* Two generations let a 32-reference REPLACE be built while the displayed
-     * generation remains valid. Refcount finalizers reclaim the old wrappers. */
+     * generation remains valid. Retiring identities frees slots immediately;
+     * old wrappers/finalizers cannot affect subsequently reused slots. */
     ref_slot refs[KASANE_REF_STORAGE];
-    uint32_t ref_serial;
+    ksn_tx building;
     ksn_tx submitted;
     ksn_update_mode submitted_mode;
     bool active;
 } kasane_state;
 
 static kasane_state *state;
+/* Never recycle identities across host reset while old JS wrappers can live. */
+static uint32_t ref_serial;
 static JSClassID tx_class, modal_class, ref_class, template_class;
 static JSClassID instance_class, ticket_class;
 static JSRuntime *tx_rt, *modal_rt, *ref_rt, *template_rt;
@@ -103,7 +106,7 @@ static ref_slot *ref_from(JSContext *ctx, JSValueConst self, const char *op) {
         return NULL;
     }
     ref_slot *slot=&state->refs[handle&63u];
-    if(slot->handle!=handle||slot->status==REF_FREE||slot->status==REF_DEAD) {
+    if(slot->handle!=handle||slot->status==REF_FREE) {
         pocket_api_throw(ctx,POCKET_ERR_CLOSED,op,"draw reference is stale",false,NULL);
         return NULL;
     }
@@ -123,10 +126,8 @@ static ref_slot *claim_ref(JSContext *ctx, ksn_ref ref, ksn_tx ticket) {
     }
     for(unsigned i=0;i<KASANE_REF_STORAGE;i++) {
         if(state->refs[i].status!=REF_FREE) continue;
-        uint32_t serial=(state->ref_serial+1u)&0x03ffffffu;
-        if(!serial) serial=1;
-        state->ref_serial=serial;
-        uint32_t handle=(serial<<6)|i;
+        if(ref_serial==0x03ffffffu) break;
+        uint32_t handle=(++ref_serial<<6)|i;
         state->refs[i]=(ref_slot){handle,ref,ticket,REF_CANDIDATE};
         return &state->refs[i];
     }
@@ -141,7 +142,7 @@ static void discard_candidates(ksn_tx ticket) {
     for(unsigned i=0;i<KASANE_REF_STORAGE;i++)
         if(state->refs[i].status==REF_CANDIDATE &&
            state->refs[i].ticket.value==ticket.value)
-            state->refs[i].status=REF_DEAD;
+            state->refs[i]=(ref_slot){0};
 }
 
 static void apply_outcome(void) {
@@ -153,7 +154,7 @@ static void apply_outcome(void) {
         if(state->submitted_mode==KSN_REPLACE)
             for(unsigned i=0;i<KASANE_REF_STORAGE;i++)
                 if(state->refs[i].status==REF_ACTIVE)
-                    state->refs[i].status=REF_DEAD;
+                    state->refs[i]=(ref_slot){0};
         for(unsigned i=0;i<KASANE_REF_STORAGE;i++)
             if(state->refs[i].status==REF_CANDIDATE&&
                state->refs[i].ticket.value==result.ticket.value)
@@ -195,7 +196,8 @@ static bool parse_u32(JSContext *ctx, JSValueConst value, uint32_t *out) {
 static bool parse_rect(JSContext *ctx, JSValueConst value, ksn_rect *out,
                        const char *op) {
     int64_t length=0;
-    if(!JS_IsArray(value)||JS_GetLength(ctx,value,&length)<0||length!=4) {
+    if(JS_IsArray(value)&&JS_GetLength(ctx,value,&length)<0) return false;
+    if(!JS_IsArray(value)||length!=4) {
         pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                          "rectangle must be [x0, y0, x1, y1]",false,NULL);
         return false;
@@ -203,6 +205,7 @@ static bool parse_rect(JSContext *ctx, JSValueConst value, ksn_rect *out,
     int16_t coords[4];
     for(unsigned i=0;i<4;i++) {
         JSValue item=JS_GetPropertyUint32(ctx,value,i);
+        if(JS_IsException(item)) return false;
         bool ok=parse_i16(ctx,item,&coords[i]);
         JS_FreeValue(ctx,item);
         if(!ok) {
@@ -258,7 +261,8 @@ static bool parse_draw(JSContext *ctx, JSValueConst value, ksn_draw *out,
     if(!property_rect(ctx,value,"clip",out->bounds,&out->clip,op)) return false;
     if(!property_u8(ctx,value,"opacity",255,&out->opacity,op)) return false;
     JSValue color=JS_GetPropertyStr(ctx,value,"color");
-    ok=!JS_IsException(color)&&parse_u32(ctx,color,&out->data.shape.color);
+    if(JS_IsException(color)) return false;
+    ok=parse_u32(ctx,color,&out->data.shape.color);
     JS_FreeValue(ctx,color);
     if(!ok) {
         pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
@@ -278,16 +282,24 @@ static bool parse_placement(JSContext *ctx, JSValueConst value, ksn_placement *o
         return false;
     }
     JSValue offset=JS_GetPropertyStr(ctx,value,"offset");
+    if(JS_IsException(offset)) return false;
     if(!JS_IsUndefined(offset)) {
         int64_t length=0;
-        if(!JS_IsArray(offset)||JS_GetLength(ctx,offset,&length)<0||length!=2) {
+        if(JS_IsArray(offset)&&JS_GetLength(ctx,offset,&length)<0) {
+            JS_FreeValue(ctx,offset);return false;
+        }
+        if(!JS_IsArray(offset)||length!=2) {
             JS_FreeValue(ctx,offset);
             pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                              "offset must be [x, y]",false,NULL);
             return false;
         }
         JSValue x=JS_GetPropertyUint32(ctx,offset,0);
+        if(JS_IsException(x)) { JS_FreeValue(ctx,offset);return false; }
         JSValue y=JS_GetPropertyUint32(ctx,offset,1);
+        if(JS_IsException(y)) {
+            JS_FreeValue(ctx,x);JS_FreeValue(ctx,offset);return false;
+        }
         bool ok=parse_i16(ctx,x,&out->x)&&parse_i16(ctx,y,&out->y);
         JS_FreeValue(ctx,x);JS_FreeValue(ctx,y);JS_FreeValue(ctx,offset);
         if(!ok) {
@@ -299,6 +311,7 @@ static bool parse_placement(JSContext *ctx, JSValueConst value, ksn_placement *o
     if(!property_rect(ctx,value,"clip",KASANE_SCREEN,&out->clip,op)) return false;
     if(!property_u8(ctx,value,"opacity",255,&out->opacity,op)) return false;
     JSValue visible=JS_GetPropertyStr(ctx,value,"visible");
+    if(JS_IsException(visible)) return false;
     if(!JS_IsUndefined(visible)) {
         if(!JS_IsBool(visible)) {
             JS_FreeValue(ctx,visible);
@@ -343,7 +356,7 @@ static JSValue js_tx_rect(JSContext *ctx, JSValueConst self, int argc,
     ksn_tx tx=tx_from(ctx,self,"kasane.rect");
     if(!tx.value) return JS_EXCEPTION;
     ksn_draw draw={0};
-    if(argc<1||!parse_draw(ctx,argv[0],&draw,"kasane.rect")) return JS_EXCEPTION;
+    if(!parse_draw(ctx,argc?argv[0]:JS_UNDEFINED,&draw,"kasane.rect")) return JS_EXCEPTION;
     ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
     if(result!=KSN_OK) return throw_result(ctx,result,"kasane.rect");
     ref_slot *slot=claim_ref(ctx,ref,tx);
@@ -359,10 +372,12 @@ static JSValue js_tx_group(JSContext *ctx, JSValueConst self, int argc,
                            JSValueConst *argv) {
     ksn_tx tx=tx_from(ctx,self,"kasane.group");
     if(!tx.value) return JS_EXCEPTION;
-    ref_slot *first=argc?ref_from(ctx,argv[0],"kasane.group"):NULL;
+    if(argc<3)
+        return throw_result(ctx,KSN_INVALID,"kasane.group");
+    ref_slot *first=ref_from(ctx,argv[0],"kasane.group");
     double count_number;uint8_t opacity;
     if(!first) return JS_EXCEPTION;
-    if(argc<3||!number_in(ctx,argv[1],1,UINT16_MAX,&count_number)||
+    if(!number_in(ctx,argv[1],1,UINT16_MAX,&count_number)||
        !parse_u8(ctx,argv[2],&opacity))
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.group",
                                 "group(firstRef, count, opacity) requires integer values",
@@ -382,10 +397,14 @@ static JSValue js_tx_instantiate(JSContext *ctx, JSValueConst self, int argc,
                                 "template is closed",false,NULL);
     if(!parse_placement(ctx,argc>1?argv[1]:JS_UNDEFINED,&placement,
                         "kasane.instantiate")) return JS_EXCEPTION;
+    JSValue object=wrap_direct(ctx,instance_class,0);
+    if(JS_IsException(object)) return object;
     ksn_instance instance;ksn_result result=ksn_view_instantiate(
         view(),tx,(ksn_template){raw},&placement,&instance);
-    return result==KSN_OK?wrap_direct(ctx,instance_class,instance.value)
-                        :throw_result(ctx,result,"kasane.instantiate");
+    if(result!=KSN_OK) {
+        JS_FreeValue(ctx,object);return throw_result(ctx,result,"kasane.instantiate");
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)instance.value);return object;
 }
 
 static JSValue change_ref(JSContext *ctx, JSValueConst self, int argc,
@@ -401,7 +420,7 @@ static JSValue change_ref(JSContext *ctx, JSValueConst self, int argc,
                                 false,NULL);
     ksn_change change={.property=property};
     if(property==KSN_SET_RECT||property==KSN_SET_CLIP) {
-        if(argc<2||!parse_rect(ctx,argv[1],&change.value.rect,op)) return JS_EXCEPTION;
+        if(!parse_rect(ctx,argc>1?argv[1]:JS_UNDEFINED,&change.value.rect,op)) return JS_EXCEPTION;
     } else if(property==KSN_SET_COLOR) {
         if(argc<2||!parse_u32(ctx,argv[1],&change.value.color))
             return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
@@ -469,8 +488,10 @@ static JSValue js_modal_open(JSContext *ctx, JSValueConst self, int argc,
                                 "modal spec must be an object",false,NULL);
     ksn_modal_backdrop backdrop=KSN_MODAL_SOLID;
     JSValue mode=JS_GetPropertyStr(ctx,argv[0],"backdrop");
+    if(JS_IsException(mode)) return mode;
     if(!JS_IsUndefined(mode)) {
         const char *text=JS_IsString(mode)?JS_ToCString(ctx,mode):NULL;
+        if(JS_IsString(mode)&&!text) { JS_FreeValue(ctx,mode);return JS_EXCEPTION; }
         if(text&&strcmp(text,"dim-live")==0) backdrop=KSN_MODAL_DIM_LIVE;
         else if(!text||strcmp(text,"solid")!=0) {
             if(text)JS_FreeCString(ctx,text);
@@ -484,6 +505,7 @@ static JSValue js_modal_open(JSContext *ctx, JSValueConst self, int argc,
     JS_FreeValue(ctx,mode);
     uint32_t color=0x00000080u,focus=0;
     JSValue color_value=JS_GetPropertyStr(ctx,argv[0],"color");
+    if(JS_IsException(color_value)) return color_value;
     if(!JS_IsUndefined(color_value)&&!parse_u32(ctx,color_value,&color)) {
         JS_FreeValue(ctx,color_value);
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.modal.open",
@@ -491,6 +513,7 @@ static JSValue js_modal_open(JSContext *ctx, JSValueConst self, int argc,
     }
     JS_FreeValue(ctx,color_value);
     JSValue focus_value=JS_GetPropertyStr(ctx,argv[0],"focus");
+    if(JS_IsException(focus_value)) return focus_value;
     if(!JS_IsUndefined(focus_value)&&!parse_u32(ctx,focus_value,&focus)) {
         JS_FreeValue(ctx,focus_value);
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.modal.open",
@@ -512,54 +535,96 @@ static JSValue js_modal_close(JSContext *ctx, JSValueConst self, int argc,
     return result==KSN_OK?JS_UNDEFINED:throw_result(ctx,result,"kasane.modal.close");
 }
 
+/* Validate ownership before entering any parser (which can invoke JS getters).
+ * Every exception in an owning mutation aborts even when the callback catches
+ * it. A foreign/expired transaction must never cancel the current builder. */
+static JSValue mutate(JSContext *ctx, JSValueConst self, int argc,
+                       JSValueConst *argv, JSClassID class_id, bool tx_argument,
+                       JSCFunction *function, const char *op) {
+    JSValueConst token=tx_argument?(argc?argv[0]:JS_UNDEFINED):self;
+    ksn_tx tx={opaque_value(token,class_id)};
+    if(!state||!tx.value||state->building.value!=tx.value||
+       state->host.builder.value!=tx.value)
+        return throw_result(ctx,KSN_STALE,op);
+    JSValue result=function(ctx,self,argc,argv);
+    if(JS_IsException(result)) {
+        ksn_view_cancel(view(),tx);discard_candidates(tx);
+    }
+    return result;
+}
+
+#define MUTATOR(name,class_id,tx_argument,op) \
+static JSValue name##_checked(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){ \
+    return mutate(ctx,self,argc,argv,class_id,tx_argument,name,op); \
+}
+MUTATOR(js_tx_background,tx_class,false,"kasane.background")
+MUTATOR(js_tx_rect,tx_class,false,"kasane.rect")
+MUTATOR(js_tx_group,tx_class,false,"kasane.group")
+MUTATOR(js_tx_instantiate,tx_class,false,"kasane.instantiate")
+MUTATOR(js_ref_rect,tx_class,true,"kasane.ref.setRect")
+MUTATOR(js_ref_clip,tx_class,true,"kasane.ref.setClip")
+MUTATOR(js_ref_color,tx_class,true,"kasane.ref.setColor")
+MUTATOR(js_ref_visible,tx_class,true,"kasane.ref.setVisible")
+MUTATOR(js_instance_place,tx_class,true,"kasane.instance.place")
+MUTATOR(js_instance_visible,tx_class,true,"kasane.instance.setVisible")
+MUTATOR(js_modal_open,modal_class,false,"kasane.modal.open")
+MUTATOR(js_modal_close,modal_class,false,"kasane.modal.close")
+#undef MUTATOR
+
 static JSValue run_build(JSContext *ctx, int argc, JSValueConst *argv,
                          ksn_update_mode mode, const char *op) {
     if(argc<1||!JS_IsFunction(ctx,argv[0]))
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                 "build must be a synchronous function",false,NULL);
     if(!ensure_state(ctx,op)) return JS_EXCEPTION;
+    /* Keep the callback closed to reentrant builds after an inner abort. */
+    if(state->building.value) return throw_result(ctx,KSN_BUSY,op);
     apply_outcome();
     ksn_tx tx;ksn_result result=ksn_view_begin(view(),mode,&tx);
     if(result!=KSN_OK) return throw_result(ctx,result,op);
-    JSValue tx_object=wrap_direct(ctx,tx_class,tx.value);
-    JSValue modal_object=wrap_direct(ctx,modal_class,tx.value);
-    if(JS_IsException(tx_object)||JS_IsException(modal_object)) {
-        JS_FreeValue(ctx,tx_object);JS_FreeValue(ctx,modal_object);
-        ksn_view_cancel(view(),tx);discard_candidates(tx);return JS_EXCEPTION;
-    }
-    if(JS_SetPropertyStr(ctx,tx_object,"modal",JS_DupValue(ctx,modal_object))<0) {
-        JS_SetOpaque(tx_object,NULL);JS_SetOpaque(modal_object,NULL);
-        JS_FreeValue(ctx,tx_object);JS_FreeValue(ctx,modal_object);
-        ksn_view_cancel(view(),tx);discard_candidates(tx);return JS_EXCEPTION;
-    }
+    state->building=tx;
+    JSValue ticket=JS_UNDEFINED,tx_object=JS_UNDEFINED,modal_object=JS_UNDEFINED;
+    /* No fallible allocation may follow successful native submission. */
+    ticket=wrap_direct(ctx,ticket_class,tx.value);
+    if(JS_IsException(ticket)) goto fail;
+    tx_object=wrap_direct(ctx,tx_class,tx.value);
+    if(JS_IsException(tx_object)) goto fail;
+    modal_object=wrap_direct(ctx,modal_class,tx.value);
+    if(JS_IsException(modal_object)) goto fail;
+    if(JS_DefinePropertyValueStr(ctx,tx_object,"modal",JS_DupValue(ctx,modal_object),
+                                 JS_PROP_C_W_E)<0) goto fail;
     JSValue arg=JS_DupValue(ctx,tx_object);
     JSValue returned=JS_Call(ctx,argv[0],JS_UNDEFINED,1,&arg);
     JS_FreeValue(ctx,arg);
     JS_SetOpaque(tx_object,NULL);JS_SetOpaque(modal_object,NULL);
-    JS_FreeValue(ctx,tx_object);JS_FreeValue(ctx,modal_object);
-    if(JS_IsException(returned)) {
-        ksn_view_cancel(view(),tx);discard_candidates(tx);return returned;
-    }
+    if(JS_IsException(returned)) goto fail;
     bool thenable=false;
     if(JS_IsObject(returned)) {
         JSValue then=JS_GetPropertyStr(ctx,returned,"then");
         if(JS_IsException(then)) {
-            JS_FreeValue(ctx,returned);ksn_view_cancel(view(),tx);
-            discard_candidates(tx);return JS_EXCEPTION;
+            JS_FreeValue(ctx,returned);goto fail;
         }
         thenable=JS_IsFunction(ctx,then);JS_FreeValue(ctx,then);
     }
     JS_FreeValue(ctx,returned);
     if(thenable) {
-        ksn_view_cancel(view(),tx);discard_candidates(tx);
-        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+        pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                 "build must not return a Promise or thenable",false,
                                 POCKET_OUTCOME_NOT_APPLIED);
+        goto fail;
     }
     result=ksn_view_submit(view(),tx);
-    if(result!=KSN_OK) { discard_candidates(tx); return throw_result(ctx,result,op); }
+    if(result!=KSN_OK) { throw_result(ctx,result,op);goto fail; }
+    state->building=(ksn_tx){0};
     state->submitted=tx;state->submitted_mode=mode;state->active=true;
-    return wrap_direct(ctx,ticket_class,tx.value);
+    JS_FreeValue(ctx,tx_object);JS_FreeValue(ctx,modal_object);
+    return ticket;
+fail:
+    if(JS_IsObject(tx_object)) JS_SetOpaque(tx_object,NULL);
+    if(JS_IsObject(modal_object)) JS_SetOpaque(modal_object,NULL);
+    JS_FreeValue(ctx,tx_object);JS_FreeValue(ctx,modal_object);JS_FreeValue(ctx,ticket);
+    ksn_view_cancel(view(),tx);discard_candidates(tx);state->building=(ksn_tx){0};
+    return JS_EXCEPTION;
 }
 
 static JSValue js_replace(JSContext *ctx, JSValueConst self, int argc,
@@ -578,6 +643,7 @@ static JSValue js_cache_create(JSContext *ctx, JSValueConst self, int argc,
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.cache.create",
                                 "definition must be an array of rectangles",false,NULL);
     if(!ensure_state(ctx,"kasane.cache.create")) return JS_EXCEPTION;
+    if(state->building.value) return throw_result(ctx,KSN_BUSY,"kasane.cache.create");
     apply_outcome();
     int64_t length=0;
     if(JS_GetLength(ctx,argv[0],&length)<0) return JS_EXCEPTION;
@@ -592,10 +658,14 @@ static JSValue js_cache_create(JSContext *ctx, JSValueConst self, int argc,
         JS_FreeValue(ctx,item);
         if(!ok) return JS_EXCEPTION;
     }
+    JSValue object=wrap_direct(ctx,template_class,0);
+    if(JS_IsException(object)) return object;
     ksn_template result_handle;
     ksn_result result=ksn_view_cache_create(view(),draws,(uint16_t)length,&result_handle);
-    return result==KSN_OK?wrap_direct(ctx,template_class,result_handle.value)
-                        :throw_result(ctx,result,"kasane.cache.create");
+    if(result!=KSN_OK) {
+        JS_FreeValue(ctx,object);return throw_result(ctx,result,"kasane.cache.create");
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)result_handle.value);return object;
 }
 
 static JSValue js_cache_release(JSContext *ctx, JSValueConst self, int argc,
@@ -605,6 +675,7 @@ static JSValue js_cache_release(JSContext *ctx, JSValueConst self, int argc,
     if(!raw)
         return pocket_api_throw(ctx,POCKET_ERR_CLOSED,"kasane.cache.release",
                                 "template is closed",false,NULL);
+    if(state&&state->building.value) return throw_result(ctx,KSN_BUSY,"kasane.cache.release");
     apply_outcome();
     ksn_result result=ksn_view_cache_release(view(),(ksn_template){raw});
     if(result!=KSN_OK) return throw_result(ctx,result,"kasane.cache.release");
@@ -620,6 +691,14 @@ static const char *status_name(ksn_submission_status status) {
     }
 }
 
+/* Defining own properties avoids invoking user-installed prototype setters.
+ * JS_DefinePropertyValueStr consumes value on both success and failure. */
+static bool put(JSContext *ctx, JSValueConst object, const char *name, JSValue value) {
+    if(JS_IsException(value)) return false;
+    return JS_DefinePropertyValueStr(ctx,object,name,value,JS_PROP_C_W_E)>=0;
+}
+#define PUT(object,name,value) do { if(!put(ctx,object,name,value)) goto fail; } while(0)
+
 static JSValue js_poll(JSContext *ctx, JSValueConst self, int argc,
                        JSValueConst *argv) {
     (void)self;(void)argc;(void)argv;
@@ -627,12 +706,14 @@ static JSValue js_poll(JSContext *ctx, JSValueConst self, int argc,
     ksn_submission submission=state?ksn_view_poll(view()):(ksn_submission){0};
     JSValue out=JS_NewObject(ctx);
     if(JS_IsException(out)) return out;
-    JS_SetPropertyStr(ctx,out,"ticket",submission.ticket.value
+    PUT(out,"ticket",submission.ticket.value
         ?wrap_direct(ctx,ticket_class,submission.ticket.value):JS_NULL);
-    JS_SetPropertyStr(ctx,out,"status",JS_NewString(ctx,status_name(submission.status)));
-    JS_SetPropertyStr(ctx,out,"reason",JS_NewString(ctx,result_code(submission.reason)));
-    JS_SetPropertyStr(ctx,out,"layer",JS_NewString(ctx,"app"));
+    PUT(out,"status",JS_NewString(ctx,status_name(submission.status)));
+    PUT(out,"reason",JS_NewString(ctx,result_code(submission.reason)));
+    PUT(out,"layer",JS_NewString(ctx,"app"));
     return out;
+fail:
+    JS_FreeValue(ctx,out);return JS_EXCEPTION;
 }
 
 static JSValue js_cancel(JSContext *ctx, JSValueConst self, int argc,
@@ -650,21 +731,27 @@ static JSValue js_cancel(JSContext *ctx, JSValueConst self, int argc,
 static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
                            JSValueConst *argv) {
     (void)self;(void)argc;(void)argv;
-    JSValue out=JS_NewObject(ctx),capacity=JS_NewObject(ctx),cache=JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx,out,"rect",JS_NewBool(ctx,true));
-    JS_SetPropertyStr(ctx,out,"groupOpacity",JS_NewBool(ctx,true));
-    JS_SetPropertyStr(ctx,out,"modal",JS_NewBool(ctx,true));
-    JS_SetPropertyStr(ctx,out,"animation",JS_NewBool(ctx,false));
-    JS_SetPropertyStr(ctx,out,"frosted",JS_NewBool(ctx,false));
-    JS_SetPropertyStr(ctx,capacity,"commands",JS_NewInt32(ctx,KSN_APP_COMMANDS));
-    JS_SetPropertyStr(ctx,capacity,"textBytes",JS_NewInt32(ctx,KSN_APP_TEXT_BYTES));
-    JS_SetPropertyStr(ctx,capacity,"refs",JS_NewInt32(ctx,KASANE_REF_LIMIT));
-    JS_SetPropertyStr(ctx,cache,"commands",JS_NewInt32(ctx,KSN_CACHE_COMMANDS));
-    JS_SetPropertyStr(ctx,cache,"templates",JS_NewInt32(ctx,KSN_CACHE_TEMPLATES));
-    JS_SetPropertyStr(ctx,cache,"instances",JS_NewInt32(ctx,KSN_CACHE_INSTANCES));
-    JS_SetPropertyStr(ctx,out,"capacity",capacity);
-    JS_SetPropertyStr(ctx,out,"cache",cache);
-    return out;
+    JSValue out=JS_UNDEFINED,capacity=JS_UNDEFINED,cache=JS_UNDEFINED;
+    out=JS_NewObject(ctx);if(JS_IsException(out)) goto fail;
+    capacity=JS_NewObject(ctx);if(JS_IsException(capacity)) goto fail;
+    cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
+    PUT(out,"rect",JS_NewBool(ctx,true));
+    PUT(out,"groupOpacity",JS_NewBool(ctx,true));
+    PUT(out,"modal",JS_NewBool(ctx,true));
+    PUT(out,"animation",JS_NewBool(ctx,false));
+    PUT(out,"frosted",JS_NewBool(ctx,false));
+    PUT(capacity,"commands",JS_NewInt32(ctx,KSN_APP_COMMANDS));
+    PUT(capacity,"textBytes",JS_NewInt32(ctx,KSN_APP_TEXT_BYTES));
+    PUT(capacity,"refs",JS_NewInt32(ctx,KASANE_REF_LIMIT));
+    PUT(cache,"commands",JS_NewInt32(ctx,KSN_CACHE_COMMANDS));
+    PUT(cache,"templates",JS_NewInt32(ctx,KSN_CACHE_TEMPLATES));
+    PUT(cache,"instances",JS_NewInt32(ctx,KSN_CACHE_INSTANCES));
+    PUT(out,"capacity",JS_DupValue(ctx,capacity));
+    PUT(out,"cache",JS_DupValue(ctx,cache));
+    JS_FreeValue(ctx,capacity);JS_FreeValue(ctx,cache);return out;
+fail:
+    JS_FreeValue(ctx,out);JS_FreeValue(ctx,capacity);JS_FreeValue(ctx,cache);
+    return JS_EXCEPTION;
 }
 
 static JSValue js_stats(JSContext *ctx, JSValueConst self, int argc,
@@ -672,17 +759,24 @@ static JSValue js_stats(JSContext *ctx, JSValueConst self, int argc,
     (void)self;(void)argc;(void)argv;
     apply_outcome();
     ksn_view_stats stats=state?ksn_view_get_stats(view()):(ksn_view_stats){0};
-    JSValue out=JS_NewObject(ctx),displayed=JS_NewObject(ctx),cache=JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx,out,"active",JS_NewBool(ctx,state&&state->active));
-    JS_SetPropertyStr(ctx,out,"nativeBytes",JS_NewUint32(ctx,state?(uint32_t)sizeof(*state):0));
-    JS_SetPropertyStr(ctx,displayed,"commands",JS_NewInt32(ctx,stats.displayed.commands));
-    JS_SetPropertyStr(ctx,displayed,"textBytes",JS_NewInt32(ctx,stats.displayed.text_bytes));
-    JS_SetPropertyStr(ctx,cache,"commands",JS_NewInt32(ctx,stats.shared_cache.commands));
-    JS_SetPropertyStr(ctx,cache,"templates",JS_NewInt32(ctx,stats.shared_cache.templates));
-    JS_SetPropertyStr(ctx,cache,"instances",JS_NewInt32(ctx,stats.shared_cache.instances));
-    JS_SetPropertyStr(ctx,out,"displayed",displayed);JS_SetPropertyStr(ctx,out,"cache",cache);
-    return out;
+    JSValue out=JS_UNDEFINED,displayed=JS_UNDEFINED,cache=JS_UNDEFINED;
+    out=JS_NewObject(ctx);if(JS_IsException(out)) goto fail;
+    displayed=JS_NewObject(ctx);if(JS_IsException(displayed)) goto fail;
+    cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
+    PUT(out,"active",JS_NewBool(ctx,state&&state->active));
+    PUT(out,"nativeBytes",JS_NewUint32(ctx,state?(uint32_t)sizeof(*state):0));
+    PUT(displayed,"commands",JS_NewInt32(ctx,stats.displayed.commands));
+    PUT(displayed,"textBytes",JS_NewInt32(ctx,stats.displayed.text_bytes));
+    PUT(cache,"commands",JS_NewInt32(ctx,stats.shared_cache.commands));
+    PUT(cache,"templates",JS_NewInt32(ctx,stats.shared_cache.templates));
+    PUT(cache,"instances",JS_NewInt32(ctx,stats.shared_cache.instances));
+    PUT(out,"displayed",JS_DupValue(ctx,displayed));PUT(out,"cache",JS_DupValue(ctx,cache));
+    JS_FreeValue(ctx,displayed);JS_FreeValue(ctx,cache);return out;
+fail:
+    JS_FreeValue(ctx,out);JS_FreeValue(ctx,displayed);JS_FreeValue(ctx,cache);
+    return JS_EXCEPTION;
 }
+#undef PUT
 
 static JSValue js_input_scope(JSContext *ctx, JSValueConst self, int argc,
                               JSValueConst *argv) {
@@ -693,21 +787,21 @@ static JSValue js_input_scope(JSContext *ctx, JSValueConst self, int argc,
 }
 
 static const JSCFunctionListEntry tx_methods[]={
-    JS_CFUNC_DEF("background",1,js_tx_background),
-    JS_CFUNC_DEF("rect",1,js_tx_rect),
-    JS_CFUNC_DEF("group",3,js_tx_group),
-    JS_CFUNC_DEF("instantiate",2,js_tx_instantiate),
+    JS_CFUNC_DEF("background",1,js_tx_background_checked),
+    JS_CFUNC_DEF("rect",1,js_tx_rect_checked),
+    JS_CFUNC_DEF("group",3,js_tx_group_checked),
+    JS_CFUNC_DEF("instantiate",2,js_tx_instantiate_checked),
 };
 static const JSCFunctionListEntry modal_methods[]={
-    JS_CFUNC_DEF("open",1,js_modal_open),JS_CFUNC_DEF("close",0,js_modal_close),
+    JS_CFUNC_DEF("open",1,js_modal_open_checked),JS_CFUNC_DEF("close",0,js_modal_close_checked),
 };
 static const JSCFunctionListEntry ref_methods[]={
-    JS_CFUNC_DEF("setRect",2,js_ref_rect),JS_CFUNC_DEF("setClip",2,js_ref_clip),
-    JS_CFUNC_DEF("setColor",2,js_ref_color),JS_CFUNC_DEF("setVisible",2,js_ref_visible),
+    JS_CFUNC_DEF("setRect",2,js_ref_rect_checked),JS_CFUNC_DEF("setClip",2,js_ref_clip_checked),
+    JS_CFUNC_DEF("setColor",2,js_ref_color_checked),JS_CFUNC_DEF("setVisible",2,js_ref_visible_checked),
 };
 static const JSCFunctionListEntry instance_methods[]={
-    JS_CFUNC_DEF("place",2,js_instance_place),
-    JS_CFUNC_DEF("setVisible",2,js_instance_visible),
+    JS_CFUNC_DEF("place",2,js_instance_place_checked),
+    JS_CFUNC_DEF("setVisible",2,js_instance_visible_checked),
 };
 static const JSCFunctionListEntry functions[]={
     JS_CFUNC_DEF("replace",1,js_replace),JS_CFUNC_DEF("patch",1,js_patch),
@@ -746,7 +840,8 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
        (int)(sizeof(functions)/sizeof(functions[0])))<0) return ESP_ERR_NO_MEM;
     JSValue cache=JS_NewObject(ctx);
     if(JS_IsException(cache)) return ESP_ERR_NO_MEM;
-    const JSCFunctionListEntry cache_functions[]={
+    /* QuickJS keeps these entries for lazy function materialization. */
+    static const JSCFunctionListEntry cache_functions[]={
         JS_CFUNC_DEF("create",1,js_cache_create),JS_CFUNC_DEF("release",1,js_cache_release),
     };
     if(JS_SetPropertyFunctionList(ctx,cache,cache_functions,2)<0) {
