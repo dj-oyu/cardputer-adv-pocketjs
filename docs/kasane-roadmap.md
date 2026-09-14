@@ -1,5 +1,9 @@
 # Kasane カバレッジ・完全移行・将来設計 v0.1
 
+> 2026-09-14 Astra評価: 実装順序・完了条件・surface寿命は
+> [Astra実装計画](kasane-astra-plan.md)で改訂した。以後の実装ではそちらを優先し、
+> 各ビルド・試験成功区切りでcommit・pushしてから次へ進む。
+
 2026-09-14。対象は240×135、PSRAMなしのCardputer ADV。
 [Kasane本体仕様](design-system.md)、[合成仕様](design-composition.md)、
 [利用API](design-api.md)に対し、実装済み範囲とTaffy完全除去までの順序を定める。
