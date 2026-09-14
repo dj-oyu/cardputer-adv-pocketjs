@@ -1,4 +1,4 @@
-# 新DS 実機診断
+# Kasane 実機診断
 
 2026-09-13、`vm/design-contracts`、コア基点`770c531`。
 
@@ -19,18 +19,18 @@
 | 計時区間前/後のfree heap | 252,308 / 252,308 B |
 | 初回の矩形合成＋全画面転送 | 12,698 µs / 64,800 B |
 | 診断後UI taskのstack high-water（未使用量） | 22,028 B |
-| ターゲットのsizeof(ds_frame_command) | 172 B |
+| ターゲットのsizeof(ksn_frame_command) | 172 B |
 
 1回の診断実行の値。タイミングには他タスクの割込みを含み、Wi-Fi/音声併用の条件別評価やp95ではない。
 実ログと転送前画像は`.cache/ds-device-probe-usb/serial.log`、`pre-spi.png`に保存した。
 
 ## 実装範囲
 
-`CONFIG_DS_DEVICE_PROBE`は既定で無効。`main/ui/ds/ds_device_probe.c`は実際のコアに対するホスト回帰テストをターゲットABIで実行する。
+`CONFIG_KSN_DEVICE_PROBE`は既定で無効。`main/ui/kasane/ksn_device_probe.c`は実際のコアに対するホスト回帰テストをターゲットABIで実行する。
 続いてAPP矩形、SYSTEM帯、APP矩形の位置変更を既存のboard stripから同期転送し、ホームへ戻る。
 USB起動版はホーム画面で`~`を受け取り、UI owner taskで処理する。実行前にJSアプリを終了する。
 
-初回の描画経路は診断用の不透明矩形・全17帯転送。後続版では位置変更と画素回収を`ds_render_rects`へ接続し、damageに基づく部分転送を検査する。native animation、QuickJS bindingの実装ではない。
+初回の描画経路は診断用の不透明矩形・全17帯転送。後続版では位置変更と画素回収を`ksn_render_rects`へ接続し、damageに基づく部分転送を検査する。native animation、QuickJS bindingの実装ではない。
 1,000回のPATCH→change→end→discardを計時し、平均・最大と前後のfree heapを記録する。
 これは表示を含むフレーム時間でもp95でもない。free heapが同じでも一時確保ゼロの証明にはならない。
 
@@ -43,30 +43,30 @@ captureはSPIのbyte swapと物理転送より前なので、液晶の物理的�
 USB起動版のビルド時実測: app binary 2,155,072 B、Flash上限まで990,656 B。
 map上の静的DIRAMは124,700 B、未接続コア版115,468 Bから9,232 B増加。
 主な内訳はcore本体9,216 B、テスト結果変数4 B、共有ID8 B、USBトリガー1 Bとアラインメント。
-`nm`で`probe_core`が0x2400 B、`ds_core_frame`と`ds_device_probe_run`がリンクされていることを確認した。
-診断用領域を含む数値であり、新DS全体16 KiB予算の達成を意味しない。
+`nm`で`probe_core`が0x2400 B、`ksn_core_frame`と`ksn_device_probe_run`がリンクされていることを確認した。
+診断用領域を含む数値であり、Kasane全体16 KiB予算の達成を意味しない。
 
 ## 再実行
 
-通常ビルドの設定を変更せず、専用sdkconfigに`CONFIG_DS_DEVICE_PROBE=y`を設定する。
+通常ビルドの設定を変更せず、専用sdkconfigに`CONFIG_KSN_DEVICE_PROBE=y`を設定する。
 今回のworktreeでは`build_ds_contract/sdkconfig.dsprobe`を使用する。
 
 ```powershell
 . 'C:\Espressif\tools\Microsoft.v6.0.1.PowerShell_profile.ps1'
 idf.py -B build_ds_contract -D SDKCONFIG=build_ds_contract/sdkconfig.dsprobe build
 idf.py -B build_ds_contract -p COM3 flash
-python tools/ds_contract/device_probe.py --port COM3 --out .cache/ds-device-probe-usb
+python tools/kasane_contract/device_probe.py --port COM3 --out .cache/ds-device-probe-usb
 ```
 
 スクリプトは`q`でHOME_READYを待ってから`~`を送る。
-`DS_PROBE: PASS`とホーム復帰、135行の完全なcapture、全画素一致のすべてを要求する。
+`KSN_PROBE: PASS`とホーム復帰、135行の完全なcapture、全画素一致のすべてを要求する。
 ログは出力先の`serial.log`、一致した場合のみ画像を`pre-spi.png`へ保存する。
 初回の失敗ログは`.cache/ds-device-probe/serial.log`。新しい出力先を使って保持する。
 
 ## 画像登録・damage追加後の実機検証
 
 2026-09-13。画像登録表16件をcoreの9,216 B予約内に追加。共有IDは計12 Bとなり、coreの常駐計上は9,228 B。
-`nm`で`ds_core_damage`と`ds_render_rects`のリンクを確認。ファーム全体の静的DIRAMは124,700 B、app binaryは2,157,520 B。
+`nm`で`ksn_core_damage`と`ksn_render_rects`のリンクを確認。ファーム全体の静的DIRAMは124,700 B、app binaryは2,157,520 B。
 
 | 検査 | 実測・結果 |
 | --- | --- |
@@ -79,14 +79,14 @@ python tools/ds_contract/device_probe.py --port COM3 --out .cache/ds-device-prob
 | 回帰テスト、HOME_READY | PASS |
 
 部分転送時間はこの矩形場面1回の合成＋転送。初回の全面診断は別実装のため、時間比から一般的な高速化率を主張しない。
-無変更を検査した後、ホストが転送失敗状態を注入して全面再送を要求し、実際の`ds_render_rects`から135行をcaptureする。これは物理SPI障害を発生させた試験ではない。
+無変更を検査した後、ホストが転送失敗状態を注入して全面再送を要求し、実際の`ksn_render_rects`から135行をcaptureする。これは物理SPI障害を発生させた試験ではない。
 ホストでは別途、半透明SYSTEM重なり・画面外移動を含む150回の部分描画と独立した全面参照描画を比較し、途中転送失敗でパネルの一部が変化した状況からの復帰も検査した。
 ログと画像は`.cache/ds-device-partial/serial.log`と`pre-spi.png`。実機にはこの部分転送診断版を書込み済み。
 
 ## 明示cache追加後の実機検証
 
 2026-09-13。同じ矩形templateから2 instanceを同時表示し、片方を非表示にした。
-`ds_cache`は4,096 B、共有ID8 B、template 1、instance 2、保存命令1。診断構成の静的DIRAMは128,812 Bで、cache導入前から4,112 B増加した。
+`ksn_cache`は4,096 B、共有ID8 B、template 1、instance 2、保存命令1。診断構成の静的DIRAMは128,812 Bで、cache導入前から4,112 B増加した。
 
 | 検査 | 実測・結果 |
 | --- | --- |
@@ -117,14 +117,14 @@ python tools/ds_contract/device_probe.py --port COM3 --out .cache/ds-device-prob
 | app binary / Flash余裕 | 2,163,024 / 982,704 B |
 | core / cache / frame_command | 9,216 / 4,096 / 176 B |
 
-`nm`でcore/cacheの実サイズと`ds_core_group`、`ds_core_poll`、`ds_render_rects`、modalのopen/close/resolve/routeのリンクを確認した。
+`nm`でcore/cacheの実サイズと`ksn_core_group`、`ksn_core_poll`、`ksn_render_rects`、modalのopen/close/resolve/routeのリンクを確認した。
 modal_cancel/focus補正はホスト検証であり、この実機診断では未実行。物理LCD readback、実キー配送、音声/Wi-Fi併用、p95は未検証。
 今回は前回の1命令instanceから2命令へ変えており、処理時間差を同一負荷での回帰と解釈しない。
 ログと転送前画像は`.cache/ds-device-composition/serial.log`と`pre-spi.png`。実機にはこの診断版を書込み済み。
 
 ## 半透明・すりガラス比較診断
 
-2026-09-14。`ds_frost`の1/8縮小・分離box blur・bilinear拡大・tintを実機で検証した。
+2026-09-14。`ksn_frost`の1/8縮小・分離box blur・bilinear拡大・tintを実機で検証した。
 左パネルはtintのみ、右はblur＋tint。線・ボタン・枠は後から描く。両側tintのみ3秒、右の半径1を4秒、半径2を12秒表示する。
 ホーム画面で本体から`~`を入力すると再実行できる。USBの`~`も従来通り。物理キーボード入口はビルド済みだが、今回の自動実行はUSB経由。
 
@@ -139,7 +139,7 @@ modal_cancel/focus補正はホスト検証であり、この実機診断では�
 | 半透明部品の既存画素検証 | 32,400画素一致 |
 | 半径2の比較画面 | 32,400画素一致、HOME_READYへ復帰 |
 
-`nm`で`probe_frost=0x800`および`ds_frost_feed/blur/span`のリンクを確認。ホストでもASan/UBSanと最適化の両方で、半径1/2の計64,800画素が独立Python参照式と一致した。
+`nm`で`probe_frost=0x800`および`ksn_frost_feed/blur/span`のリンクを確認。ホストでもASan/UBSanと最適化の両方で、半径1/2の計64,800画素が独立Python参照式と一致した。
 準備時間には市松模様の背景生成も含む。全画面比較表示時間には模様の再生成、左側tint、右側補間、装飾と転送を含み、blur単体や毎フレームの性能ではない。
 転送前画像は`.cache/ds-device-glass/glass-pre-spi.png`、実ログは同ディレクトリの`serial.log`。物理LCDのreadbackではない。
 この診断は既知の背景からの画素処理検証で、実アプリのcapture handle/attach、期限付き逐次実行、frosted modalへの接続は未実装。
@@ -163,11 +163,11 @@ modal_cancel/focus補正はホスト検証であり、この実機診断では�
 | 最大連続空き 開始 / 採取最小 / 終了 | 73,728 / 73,728 / 73,728 B |
 | UI task stack未使用high-water | 21,692 B |
 
-600件の時間を保存する診断スタック2,400 Bを追加。静的DIRAMは130,860 Bで増加なし。app binaryは2,169,040 B、Flash余裕976,688 B。`nm`で`ds_stress_probe_run`のリンクを確認した。
+600件の時間を保存する診断スタック2,400 Bを追加。静的DIRAMは130,860 Bで増加なし。app binaryは2,169,040 B、Flash余裕976,688 B。`nm`で`ksn_stress_probe_run`のリンクを確認した。
 この条件では30 fpsを達成していない。約10 fpsには目標周期への待機も含み、処理時間の逆数は約11.34 fps。
 画素回収の合計2,999,242 µsは時間とアニメーションから除外。空き領域は60フレーム間隔で採取した最小値で、瞬間最低値ではない。
 0/299/599フレーム（tick=0/29,899/59,899 ms）の計97,200画素が独立Python式と一致し、HOME_READYへの復帰も確認した。記録は`.cache/ds-device-stress/serial.log`と`stress-report.json`、画素は`stress-000.png`、`stress-299.png`、`stress-599.png`。
-PASSは負荷処理の完走を示し、性能目標達成を意味しない。QuickJS/DS PATCH/音声/Wi-Fi併用を含むアプリ全体の試験とは分ける。
+PASSは負荷処理の完走を示し、性能目標達成を意味しない。QuickJS/Kasane PATCH/音声/Wi-Fi併用を含むアプリ全体の試験とは分ける。
 
 ## 2026-09-14: frostのスカラ最適化
 
@@ -215,7 +215,7 @@ blurは0.8msなので優先度を下げる。Wi-Fi/音声併用、製品capture/
 
 ## 2026-09-14: 利用API再構成と補間・tintのPIE化
 
-前節のPIE保留を撤回し、余裕時間を増やすため`ds_frost_span`をSIMD化した。
+前節のPIE保留を撤回し、余裕時間を増やすため`ksn_frost_span`をSIMD化した。
 1セル8画素の水平補間とtintをQACCで融合する。丸めは元の順序通りに2段階で行う。
 補間区間の端と短いspanはscalar、128-bitストアは16-byte整列の8画素tileだけに行い、
 呼出元の出力先は2-byte整列でよい。snapshotはconstのまま、追加heapは0。

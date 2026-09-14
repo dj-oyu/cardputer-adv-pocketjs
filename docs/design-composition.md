@@ -244,10 +244,10 @@ instanceは`key/template/offset/clip/visible/opacity`、templateは不変な`nod
 
 ## 11. 初期cache実装の状態（2026-09-13時点）
 
-2026-09-13、`ds_cache`を4,096 Bのcaller-owned固定領域として実装した。
+2026-09-13、`ksn_cache`を4,096 Bのcaller-owned固定領域として実装した。
 上限はtemplate 8、instance 8、保存命令48、文字領域1,024 B。共有template/instance IDのプロセス寿命カウンタ8 Bを加え、native計上は4,104 B。
 現段階のcreateはrect/roundRect/strokeのみ。文字領域とstatsは予約・公開済みだが、text/image/gradientのcache encode/decode、fork、グループopacityは未実装。
-opacity=255以外のplacementはUNSUPPORTEDで提出を変更しない。命令opacityと重なりは既存矩形rendererで動作する。
+命令opacityと重なりはKasane rendererで動作する。
 
 実装済み操作はcreate、instantiate、place、setVisible、release、abort、present/discard後のresolve。
 releaseは参照中BUSY、REPLACEで省略してpresentしたinstanceはdetach、discardした位置変更は確定位置へ戻る。
@@ -260,23 +260,23 @@ cache操作を含むPATCH→place→end→discard/resolve 1,000回は平均19 µ
 
 ## 12. グループ透過・native modal実装（2026-09-14）
 
-`ds_core_group`は連続する既存命令を1段の隔離グループにする。境界は32 B命令のflags、グループopacityはreservedの1 Bへ保持し、core 9,216 Bを維持する。
+`ksn_core_group`は連続する既存命令を1段の隔離グループにする。境界は32 B命令のflags、グループopacityはreservedの1 Bへ保持し、core 9,216 Bを維持する。
 PATCHで変更できるのは既存の正確な範囲のopacityであり、部分重複・入れ子・新しい範囲の作成は拒否してトランザクションを失敗状態にする。
 全子命令のgroup opacityを更新するため、opacityだけ変わった場合も部品の旧/新描画範囲がdamageに含まれる。
 
 cacheの全instanceはopacity=255も含め、常にpremultiplied経路を通る。直接描画との丸め差を、opacityの変更やdirty範囲で切り替えない。
-rendererは可視命令とclipの交差を囲む範囲だけを、最大64画素の`ds_premultiplied_rgba8`タイルで処理する。中間画素は256 Bの自動変数で、heapも全面バッファも追加しない。
-この型を中間形式の識別とし、straight RGBA入力とは関数引数を分ける。既存の矩形rendererに対する拡張であり、roundRect/stroke/text/image/gradientの描画対応を意味しない。
+rendererは可視命令とclipの交差を囲む範囲だけを、最大64画素の`ksn_premultiplied_rgba8`タイルで処理する。中間画素は256 Bの自動変数で、heapも全面バッファも追加しない。
+この型を中間形式の識別とし、straight RGBA入力とは関数引数を分ける。roundRect/stroke/gradientも同じ固定タイル経路で描画する。
 
-`ds_core_poll`は最後の提出のticket/status/reason/layerを保持する。begin/abortでは前の結果を消さず、次のendで置換する。
-転送失敗ではSUBMITTED/IOのまま、present成功でPRESENTED/OK、取消なら`ds_core_discard_reason(..., DS_CANCELLED)`でDISCARDED/CANCELLEDになる。
+`ksn_core_poll`は最後の提出のticket/status/reason/layerを保持する。begin/abortでは前の結果を消さず、次のendで置換する。
+転送失敗ではSUBMITTED/IOのまま、present成功でPRESENTED/OK、取消なら`ksn_core_discard_reason(..., KSN_CANCELLED)`でDISCARDED/CANCELLEDになる。
 cache.resolveもこの結果を照合するよう改め、呼出元が渡したpresented真偽や古いticketだけで候補を確定させない。
 
-`ds_modal`はownerが保持する20 Bの状態。SOLIDは空のAPP REPLACEに不透明背景を設定し、DIM_LIVEは通常内容の後にscrim 1命令を追加する。
+`ksn_modal`はownerが保持する20 Bの状態。SOLIDは空のAPP REPLACEに不透明背景を設定し、DIM_LIVEは通常内容の後にscrim 1命令を追加する。
 その後にmodal内容を追加してendする。背景・scrim・modalは同じAPP quotaに収まり、SYSTEMは通常通りその上へ描画する。自動fallbackはない。
 prepare_open/prepare_closeで入力をBLOCKEDとし、対応するpresent結果をresolveしたときだけMODAL/APPへ切り替える。失敗したcloseはOPENを保持する。
 部分転送失敗後のcancelでは、次の表示成功で全帯が修復されるまでAPP/MODAL入力を止め、HOST優先入力は通す。
-focus keyはopen前の値を保存し、close成功後に復元する。ownerが現在scopeの有効key一覧で`ds_modal_focus`を呼び、消失時は先頭、空なら0へ補正する。
+focus keyはopen前の値を保存し、close成功後に復元する。ownerが現在scopeの有効key一覧で`ksn_modal_focus`を呼び、消失時は先頭、空なら0へ補正する。
 
 ownerは入力到着時にrouteを1回だけ判定し、close/cancelに使った入力を復帰後のAPPへ再配送しない。
 cacheを含むmodal構築の取消は、modal.pendingのticketを保存してmodal_cancelを呼び、builderならcache_abort、提出済みならpollの最終結果に応じたcache_resolveも対で呼ぶ。表示成功後に届いた取消は既表示を巻き戻さず、presented=trueとして解決する。
@@ -286,12 +286,12 @@ cacheを含むmodal構築の取消は、modal.pendingのticketを保存してmod
 modalではbuilder取消、表示中の背景更新、SYSTEM重なり、開閉時の失敗と再試行、容量不足、focus消失、SOLIDで背景命令を保持しないことを検査する。
 実機では重なる2命令のtemplateを2箇所へ配置し、片方非表示＋もう片方opacity=128の32,400画素一致とmodal開閉を検証した。詳細は[診断記録](design-device-probe.md)。
 
-残件はQuickJS binding・実アプリの入力配送/owner cleanupへの接続、cacheのtext/image/gradient・fork・Flash定義、矩形以外のrenderer、frosted/capture・軽量JS参照・変形/3Dである。
+残件はroundRect/stroke/gradientのQuickJS binding、実アプリの入力配送/owner cleanupへの接続、cacheのtext/image/gradient・fork・Flash定義、text/image renderer、frosted/capture・軽量JS参照・変形/3Dである。
 native modalの状態機械と診断が完成しても、実アプリへの組込みと通常/音声/Wi-Fi条件の受入を終えるまではMUST全体完了にしない。
 
 ## 13. すりガラス画質診断とフィルタ
 
-2026-09-14、`ds_frost`にdownsample=8、blur radius=1/2の画素処理を実装。固定2,048 B内にRGB565 30×17画像、30画素の行/列scratch、進行状態を保持する。
+2026-09-14、`ksn_frost`にdownsample=8、blur radius=1/2の画素処理を実装。固定2,048 B内にRGB565 30×17画像、30画素の行/列scratch、進行状態を保持する。
 feedは240×8帯を上から順に受け、最終帯だけ7行で平均する。再初期化まで同じ帯の再投入・未完成画像のblur・blurの二重適用・未完成のsampleをSTALEで拒否する。
 各passは8 bit展開→端画素複製のbox平均→最近接丸め→RGB565。拡大は画素中心を`(x+.5)/8-.5`へ対応させ、四近傍を整数重みで補間し1回だけ丸め、straight tintのsource-over後にRGB565へ戻す。
 半径1/2の全64,800画素を独立Python参照式で確認するホストテストを追加した。
@@ -300,7 +300,7 @@ feedは240×8帯を上から順に受け、最終帯だけ7行で平均する。
 両側tintのみ3秒→右radius=1を4秒→右radius=2を12秒表示する。本体ホームの`~`またはUSBの`~`で全診断を再実行できる。
 この診断はCPU上の既知の背景を帯ごとに供給する画質比較であり、実アプリのcapture/attach、250 ms期限、ownerへ帯ごとに返すスケジューラ、取消可能なfrosted modalの完成ではない。
 診断の待機はUI ownerを意図的に占有する。製品側ではこの待機ループを使用せず、世代付きcapture handleとmodal提出へのattachを実装する。
-downsample=4と実アプリの背景capture/attachは引き続き未実装。`ds_ports.h`の旧同期backdrop雛形はこのフィルタの公開契約には使用しない。
+downsample=4と実アプリの背景capture/attachは引き続き未実装。`ksn_ports.h`の旧同期backdrop雛形はこのフィルタの公開契約には使用しない。
 
 ## 14. 継時変化のある負荷診断
 

@@ -1,7 +1,7 @@
 menu "Pocket VM (L0 measurement probes)"
 
-    config DS_DEVICE_PROBE
-        bool "Enable USB-triggered DS core regression and LCD diagnostic"
+    config KSN_DEVICE_PROBE
+        bool "Enable USB-triggered Kasane core regression and LCD diagnostic"
         default n
         help
             USB '~' on the home screen runs tests and opaque rectangles. Uses extra

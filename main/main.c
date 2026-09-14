@@ -34,9 +34,9 @@
 #include "nvs_flash.h"
 #include <stdatomic.h>
 #include <string.h>
-#ifdef CONFIG_DS_DEVICE_PROBE
-static atomic_bool ds_probe_requested;
-void ds_device_probe_run(void);
+#ifdef CONFIG_KSN_DEVICE_PROBE
+static atomic_bool ksn_probe_requested;
+void ksn_device_probe_run(void);
 #endif
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
 #include "esp_cpu.h"
@@ -202,8 +202,8 @@ static bool usb_stroke(char c, keystroke_t *k) {
         k->text[0]=c;k->len=1;return true;
     }
     if(c=='s') { atomic_store(&capture,true); return false; }
-#ifdef CONFIG_DS_DEVICE_PROBE
-    if(c=='~') { atomic_store(&ds_probe_requested,true); return false; }
+#ifdef CONFIG_KSN_DEVICE_PROBE
+    if(c=='~') { atomic_store(&ksn_probe_requested,true); return false; }
 #endif
     if(c=='c') { motion_recenter(); return false; }
     // '8' is not an app: it checks the baked sound tables against this chip's
@@ -215,7 +215,9 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // board answered the first register table with silence and guessing again
     // is not a method. Like every letter in this function it arrives over USB;
     // the Cardputer's own '9' key goes to the shell and does nothing here.
-    if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
+    if((c>='1'&&c<='6')||c=='8'||c=='9'||c=='K') {
+        atomic_store(&diagnostic,c); return false;
+    }
 #ifdef CONFIG_POCKET_VM_PROBE
     // VM probe workload triggers (docs/quickjs-freertos-vm-spec.md sec.5),
     // USB-only and gated by CONFIG_POCKET_VM_PROBE so a normal build's key
@@ -698,9 +700,9 @@ static void ui_task(void *arg) {
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
     while(1) {
-#ifdef CONFIG_DS_DEVICE_PROBE
-        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&ds_probe_requested,false)){
-            ds_device_probe_run();
+#ifdef CONFIG_KSN_DEVICE_PROBE
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&ksn_probe_requested,false)){
+            ksn_device_probe_run();
             ESP_LOGI("shell","HOME_READY");
         }
 #endif
@@ -710,10 +712,10 @@ static void ui_task(void *arg) {
         int64_t frame_start=esp_timer_get_time();
         keystroke_t stroke={0};
         bool have=xQueueReceive(keys,&stroke,0)==pdTRUE;
-#ifdef CONFIG_DS_DEVICE_PROBE
+#ifdef CONFIG_KSN_DEVICE_PROBE
         /* Replay the visual diagnostic from the physical keyboard as well. */
         if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
-            atomic_store(&ds_probe_requested,true);
+            atomic_store(&ksn_probe_requested,true);
             continue;
         }
 #endif

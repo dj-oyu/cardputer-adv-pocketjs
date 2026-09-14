@@ -1,7 +1,7 @@
-# 新DS: 公開契約の試作と評価
+# Kasane: 公開契約の試作と評価
 
 2026-09-14追記: 現行の利用窓口は[利用API v0.3](design-api.md)。
-core/cache/modalの後処理を`ds_view_host`へ統合し、layer別提出結果と未完builder取消を実装した。
+core/cache/modalの後処理を`ksn_view_host`へ統合し、layer別提出結果と未完builder取消を実装した。
 以下の初期prototype・段階別記録は履歴であり、現在の公開API一覧としては同文書を参照する。
 
 2026-09-13。ブランチ`vm/design-contracts`、vm/mainの`d4b1d73`を基点に仕様コミットを取り込んだ。
@@ -9,13 +9,13 @@ core/cache/modalの後処理を`ds_view_host`へ統合し、layer別提出結果
 
 ## 構成
 
-- `main/ui/ds/ds_types.h`: 型、作成/更新の引数、容量、32 B保存形式の候補。
-- `main/ui/ds/ds_api.h`: アプリ向け更新とホスト向けpresent/schedule/resetを分離。
-- `main/ui/ds/ds_ports.h`: 共用LCD帯、Flash画像の行供給、任意backdropの境界。
-- `tools/ds_contract/use_cases.c`: ペット初期表示・育成値更新・通知表示・モーダル表示の呼出例。
-- `tools/ds_contract/probe.c`: API呼出を記録し、失敗を注入する検証専用double。
-- `main/ui/ds/ds_core.c`: 固定2バンク、レイヤー別容量と世代、更新検証、提出/採用/破棄。
-- `tools/ds_contract/test_core.c`: 実コアに対する容量・参照・失敗契約の検証。
+- `main/ui/kasane/ksn_types.h`: 型、作成/更新の引数、容量、32 B保存形式の候補。
+- `main/ui/kasane/ksn_api.h`: アプリ向け更新とホスト向けpresent/schedule/resetを分離。
+- `main/ui/kasane/ksn_ports.h`: 共用LCD帯、Flash画像の行供給、任意backdropの境界。
+- `tools/kasane_contract/use_cases.c`: ペット初期表示・育成値更新・通知表示・モーダル表示の呼出例。
+- `tools/kasane_contract/probe.c`: API呼出を記録し、失敗を注入する検証専用double。
+- `main/ui/kasane/ksn_core.c`: 固定2バンク、レイヤー別容量と世代、更新検証、提出/採用/破棄。
+- `tools/kasane_contract/test_core.c`: 実コアに対する容量・参照・失敗契約の検証。
 
 仮想関数はCの関数表。1 backendにつき1表で、命令ごとのvtableやheapは作らない。
 ヘッダと更新コアにESP-IDF/FreeRTOS/QuickJS/PocketJSのincludeはない。QuickJS binding、ピクセル生成、damage、資源登録、animationは未実装。
@@ -48,13 +48,13 @@ pet画像は汎用image portへ登録し、variant/frameをペットadapterが�
 
 現段階で「APIが完成している」とは評価しない。rendererへの提出ID付きコピー読出しを追加したが、資源検証、modal寿命、長時間builderの扱いは実アプリ統合前の設計課題。
 32 Bのstatic_assertは保存候補1件のサイズだけを検査する。native全体16 KiB、stack、JS heapの達成を証明しない。
-呼出側が予約する`ds_core`は9,216 B。画像登録表16件をこの予約内へ収め、共有IDカウンタ12 Bを含め、公開limits/statsは9,228 Bを保守的に計上する。複数coreでも共有カウンタは12 Bのみ。
-命令読み出し用の`ds_frame_command`と`ds_frame`は呼出側の一時領域で、この常駐容量には含まない。描画器は命令数分の配列を作らず、比較用2件までを再利用する。
+呼出側が予約する`ksn_core`は9,216 B。画像登録表16件をこの予約内へ収め、共有IDカウンタ12 Bを含め、公開limits/statsは9,228 Bを保守的に計上する。複数coreでも共有カウンタは12 Bのみ。
+命令読み出し用の`ksn_frame_command`と`ksn_frame`は呼出側の一時領域で、この常駐容量には含まない。描画器は命令数分の配列を作らず、比較用2件までを再利用する。
 patch開始時は表示bank全体約4 KiBを構築bankへコピーする。heap確保はないが、局所更新としての実機時間は未測定でありAstraレビュー対象。
 
 ## 検証の範囲
 
-`bash tools/ds_contract/run.sh`でC11ホストのASan/UBSan付き実行とC++17からのheader読込みを検査する。
+`bash tools/kasane_contract/run.sh`でC11ホストのASan/UBSan付き実行とC++17からのheader読込みを検査する。
 正常なペット構築、0/100/範囲外更新、通知layer、BUSY、作成各段階とendでのOOM、modal fallbackとabort cleanupを対象とする。
 doubleは画素・世代・本物の2bank・LCD ack・割当を実装しない。実コアの別テストは2bank、レイヤー別世代、固定文字領域、poison/abort、提出の採用/破棄を検査する。画素・LCD ack・animationは検査しない。
 ESP32-S3向けにはuse_casesとprobeをオブジェクトまでコンパイルして型と32 Bサイズを確認する。ファームウェアのリンク/実機表示試験は次段階。
@@ -77,7 +77,7 @@ Solの固定コアは`e072ff8`でコミット済み。以下はその実装に�
 - 宣言されたbyte配列を無関係な構造体にcastする保存方式を、unionの型付きmemberに変更した。固定容量は維持。
 - 長すぎるSET_TEXTをUTF-8走査前に拒否し、空文字のNULLをmemcpyへ渡さない。未実装animationのtracks上限は0を返す。
 - 起動時の空APPに黒背景を設定し、APP構築前のSYSTEM通知を可能にした。APP REPLACEには明示背景を要求する。
-- `ds_core_frame/read`は提出IDで旧/新状態を検証し、descriptorと文字を呼出側へコピーする。返したdescriptorの文字ポインタはその出力オブジェクト内を指すため、構造体コピー後には再読出しが必要。
+- `ksn_core_frame/read`は提出IDで旧/新状態を検証し、descriptorと文字を呼出側へコピーする。返したdescriptorの文字ポインタはその出力オブジェクト内を指すため、構造体コピー後には再読出しが必要。
 - `presented/discard/failed`も提出IDを検証する。古いackが次の提出を採用する問題を防ぎ、転送失敗フラグはdiscardでも維持する。初回/reset後も全面描画を要求する。
 
 ASan/UBSanと`-O2 -fstrict-aliasing`で、レイヤー違反、再初期化、ID枯渇、旧ack、文字コピー、旧/新bank読出し、失敗→破棄→再提出を検査する。

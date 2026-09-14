@@ -12,19 +12,21 @@
 # and for roughly how long.
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 set(POCKET_RANDOM_SOURCES "pocket/random_seed.c" "pocket/pocket_random.c")
-set(DS_PROBE_SOURCES "ui/ds/ds_view.c" "ui/ds/ds_device_probe.c" "ui/ds/ds_render.c" "ui/ds/ds_cache.c" "ui/ds/ds_modal.c" "ui/ds/ds_frost.c" "ui/ds/ds_stress_probe.c")
-idf_component_register(SRCS "pocket/mp3_decode.c" "pocket/mp3_feed.c" "main.c" "ui/ds/ds_core.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
+set(KASANE_SOURCES "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
+# Kept explicit until app_session no longer constructs pocketjs_ui_qjs/core.
+set(LEGACY_UI_COMPONENTS pocketjs_ui_core pocketjs_ui_qjs pocketjs_render_rgb565)
+idf_component_register(SRCS "pocket/mp3_decode.c" "pocket/mp3_feed.c" "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
     "hal/keymap.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/jsfont.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_ui.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c" "scene/render_accel.c"
     "pet/pet_assets.c" "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../.cache/bmi270/bmi2.c" "../.cache/bmi270/bmi270.c"
-    ${POCKET_RANDOM_SOURCES} ${DS_PROBE_SOURCES}
-    INCLUDE_DIRS "." "hal" "pocket" "vm" "pet" "ui" "ui/ds" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../.cache/bmi270"
-    REQUIRES pocketjs_guest pocketjs_ui_core pocketjs_ui_qjs pocketjs_render_rgb565
+    ${POCKET_RANDOM_SOURCES} ${KASANE_SOURCES}
+    INCLUDE_DIRS "." "hal" "pocket" "vm" "pet" "ui" "ui/kasane" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../.cache/bmi270"
+    REQUIRES pocketjs_guest ${LEGACY_UI_COMPONENTS}
              skk_core ime_core
              esp_app_format esp_hw_support esp_driver_spi esp_driver_i2c esp_driver_gpio esp_driver_uart esp_driver_rmt esp_driver_usb_serial_jtag esp_timer esp_partition esp_driver_i2s esp_adc nvs_flash
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin")
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_font.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)

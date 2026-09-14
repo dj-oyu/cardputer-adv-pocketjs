@@ -4,7 +4,7 @@ import random
 from piesim import Sim, extract_asm, store16, load16
 
 root = Path(__file__).resolve().parents[2]
-asm = extract_asm(root / 'main/ui/ds/ds_frost_kernel.h', 'ds_frost_cell_pie(')
+asm = extract_asm(root / 'main/ui/kasane/ksn_frost_kernel.h', 'ksn_frost_cell_pie(')
 rng = random.Random(318)
 for trial in range(4096):
     alpha = trial % 256

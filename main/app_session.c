@@ -24,6 +24,7 @@
 #include "pocket_bridge.h"
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
+#include "pocket_kasane.h"
 #include "app_registry.h"
 #include "pet_assets.h"
 #include "pet_hub.h"
@@ -37,6 +38,7 @@
 
 extern const char hello_start[] asm("_binary_main_js_start");
 extern const char hello_end[] asm("_binary_main_js_end");
+extern const char kasane_demo_start[] asm("_binary_demo_js_start");
 // TEMPORARY: diagnostic 7 proves the legacy node guard fires.
 extern const char nodecap_start[] asm("_binary_nodecap_js_start");
 extern const char pet_start[] asm("_binary_pet_js_start");
@@ -112,6 +114,18 @@ static size_t user_prelude_length;
 static bool overlay_session;
 void app_force_redraw(void) { redraw=true; }
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame);
+typedef struct { unsigned sent_us; } kasane_display_t;
+static uint16_t *kasane_strip(void *opaque) {
+    (void)opaque;return board_strip();
+}
+static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
+                             const uint16_t *pixels) {
+    kasane_display_t *display=opaque;
+    int64_t began=esp_timer_get_time();
+    esp_err_t result=board_present(y,rows,(uint16_t *)pixels);
+    display->sent_us+=(unsigned)(esp_timer_get_time()-began);
+    return result==ESP_OK?KSN_OK:KSN_IO;
+}
 
 // The session watchdog. Registered through the guest rather than with
 // JS_SetInterruptHandler directly: QuickJS has ONE handler slot and three
@@ -333,6 +347,7 @@ void app_stop(void) {
     // Before pocket_api_reset(): a picker still on screen holds a promise slot,
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
+    pocket_kasane_reset();
     pocket_ui_reset();
     pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and
@@ -448,6 +463,7 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"io",pocket_io_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"net",pocket_net_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"ble",pocket_ble_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pui",pocket_ui_install,NULL));
     // After "pui": both contribute to pocket.input, and contributors run in
     // the order they registered.
@@ -503,6 +519,7 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+        case 'K': source=kasane_demo_start; break;
 #ifdef CONFIG_POCKET_VM_PROBE
         // VM probe workloads (sec.5): real files under apps/vmprobe/ rather
         // than inline strings like '1'..'6' above, because
@@ -541,11 +558,10 @@ source_ready:;
         }
         ESP_LOGI("app","APP_ID %s",manifest->id);
     }
-    if(user_source) {
-        TRY(eval_user_source(source,length));
-    } else {
-        TRY(pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js"));
-    }
+    if(user_source) err=eval_user_source(source,length);
+    else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
+    pocket_kasane_end_turn();
+    if(err!=ESP_OK)goto fail;
 #ifdef CONFIG_POCKET_VM_PROBE
     // sec.5's fixed contention conditions, applied to a probe workload only.
     // Two evaluations rather than one concatenated source: the mask is a
@@ -568,7 +584,7 @@ source_ready:;
         }
     }
 #endif
-    if(!overlay_session) {
+    if(!overlay_session&&!pocket_kasane_active()) {
         pocketjs_rgb565_renderer_config_t rc;
         pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;
         TRY(pocketjs_rgb565_renderer_create(&rc,&renderer));
@@ -739,8 +755,22 @@ esp_err_t app_tick(uint32_t buttons) {
     // what VM_LEAVE_BUDGET_US/VM_LEAVE_BACKSTOP exist for. Deferring it
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
-    const bool leaving=(buttons&0x2000)!=0;
     turn_continued=false;
+    // A top-level replace() is submitted while the source is evaluated, before
+    // there is a PocketJS frame to hand to present_frame(). Present that image
+    // as its own owner turn. The same gate retries a partial LCD transfer
+    // without letting another JS update race the repair submission.
+    if(pocket_kasane_has_submission()) {
+        esp_err_t pending=present_frame(NULL);
+        if(pending!=ESP_OK||(buttons&0x2000)==0)return pending;
+        // Back is host-priority and this is the guest's final save turn. Once
+        // repair/presentation has completed, carry it into JS instead of
+        // consuming it at the display gate. Other input during the blocked
+        // interval is deliberately dropped rather than replayed.
+    }
+    if(!(buttons&0x2000)&&pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)
+        buttons=0;
+    const bool leaving=(buttons&0x2000)!=0;
     arm_turn(buttons);
     // L1 sec.2.1: a turn that ended with jobs queued finishes them HERE, ahead
     // of every pump. Until the queue is empty no host call reaches JavaScript
@@ -765,6 +795,7 @@ esp_err_t app_tick(uint32_t buttons) {
         // would make PAINT's turn_ms report only the cheap turns.
         int64_t cont_began=esp_timer_get_time();
         esp_err_t ce=pocketjs_ui_turn_continue(binding,&cont);
+        pocket_kasane_end_turn();
         turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
         if(ce) return ce;
         if(!leaving && pocketjs_guest_jobs_pending(guest)) {
@@ -811,6 +842,7 @@ esp_err_t app_tick(uint32_t buttons) {
             // is not this boundary.
             buttons|=deferred_buttons; deferred_buttons=0;
             run_pumps(buttons);
+            pocket_kasane_end_turn();
 #else
             // Nothing new reaches JS this turn. The keys are held, not lost.
             deferred_buttons|=buttons;
@@ -847,6 +879,7 @@ esp_err_t app_tick(uint32_t buttons) {
     if(pocket_app_exit_requested()) app_request_stop();
     buttons|=deferred_buttons; deferred_buttons=0;
     run_pumps(buttons);
+    pocket_kasane_end_turn();
     pocketjs_ui_input_t input={.struct_size=sizeof(input),.buttons=buttons};
     pocketjs_ui_frame_view_t frame={.struct_size=sizeof(frame)};
     // The JS side of the frame: frame() in QuickJS plus the UI core's tick and
@@ -854,6 +887,7 @@ esp_err_t app_tick(uint32_t buttons) {
     // next to render_ms rather than hidden inside the frame period.
     int64_t turning=esp_timer_get_time();
     esp_err_t e=pocketjs_ui_turn(binding,&input,&frame);
+    pocket_kasane_end_turn();
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
 #ifdef CONFIG_POCKET_VM_PROBE
@@ -874,6 +908,38 @@ esp_err_t app_tick(uint32_t buttons) {
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
     esp_err_t e;
     last_present_us=esp_timer_get_time();
+    if(pocket_kasane_active()) {
+        if(target) { pocketjs_rgb565_target_destroy(target); target=NULL; }
+        if(renderer) { pocketjs_rgb565_renderer_destroy(renderer); renderer=NULL; }
+        kasane_display_t display_state={0};
+        ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
+                              .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H};
+        ksn_render_stats stats;
+        int64_t began=esp_timer_get_time();
+        ksn_result result=pocket_kasane_present(&port,&stats);
+        unsigned whole=(unsigned)(esp_timer_get_time()-began);
+        frames++;
+        if(result==KSN_IO) {
+            ESP_LOGW("kasane","LCD transfer failed; retaining submission for retry");
+            return ESP_OK;
+        }
+        if(result!=KSN_OK) {
+            ESP_LOGE("kasane","present failed: %u",(unsigned)result);
+            return ESP_FAIL;
+        }
+        if(stats.bands) {
+            redraw=false;painted++;render_sum+=whole-display_state.sent_us;
+            present_sum+=display_state.sent_us;
+            if(frames==1)ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");
+            if(painted==30) {
+                ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u",
+                         ticks?turn_sum/ticks/1000.0:0.0,render_sum/30/1000.0,
+                         present_sum/30/1000.0,(unsigned)stats.transferred_bytes);
+                render_sum=0;present_sum=0;painted=0;turn_sum=0;ticks=0;
+            }
+        }
+        return ESP_OK;
+    }
     pocketjs_rgb565_damage_plan_t plan={.struct_size=sizeof(plan)};
     e=pocketjs_rgb565_prepare(renderer,target,frame,&plan);if(e)return e;
     pet_assets_tick();
@@ -928,4 +994,3 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
 fail:
     pocketjs_rgb565_abort(renderer,target);return e;
 }
-
