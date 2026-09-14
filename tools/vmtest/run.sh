@@ -54,11 +54,30 @@ if [ ${#names[@]} -eq 0 ]; then
   for f in corpus/*.js; do names+=("$(basename "$f" .js)"); done
 fi
 
-pass=0 fail=0
-failed=()
+pass=0 fail=0 skipped=0
+failed=() skipped_names=()
 for name in "${names[@]}"; do
   src=corpus/$name.js
   [ -f "$src" ] || { echo "no such corpus file: $src" >&2; fail=$((fail+1)); failed+=("$name"); continue; }
+  # "// vmrun-skip-variants: V... -- reason" in the first 5 lines: the file is
+  # not run on those builds, and says so on every run instead of silently
+  # passing. For cases whose subject is an exact allocation sequence that a
+  # build variant structurally changes -- e.g. a --fail-alloc attempt number
+  # on the *-alloca builds, which allocate no frame segment and so number
+  # every later allocation one lower. Not for hiding a real difference: the
+  # reason is printed, and the skip is counted in the summary.
+  skip_line=$(head -n5 "$src" | grep -m1 '^// vmrun-skip-variants:' || true)
+  if [ -n "$skip_line" ]; then
+    skip_spec=${skip_line#// vmrun-skip-variants:}
+    skip_list=${skip_spec%%--*}
+    skip_reason=${skip_spec#*--}
+    [ "$skip_reason" = "$skip_spec" ] && skip_reason=" (no reason given)"
+    if [[ " $skip_list " == *" $variant "* ]]; then
+      skipped=$((skipped+1)); skipped_names+=("$name")
+      echo "SKIP $name ($variant):$skip_reason"
+      continue
+    fi
+  fi
   flags=(--profile host)
   extra=()
   first=$(head -n1 "$src")
@@ -165,7 +184,7 @@ for name in "${names[@]}"; do
   fi
 done
 [ $bless = 1 ] && exit 0
-echo "corpus [$variant$([ $force_yield = 1 ] && echo ,force-yield)$([ $fair = 1 ] && echo ,fair)${budget_jobs:+,budget-jobs=$budget_jobs}]: $pass passed, $fail failed${failed[*]:+ (${failed[*]})}"
+echo "corpus [$variant$([ $force_yield = 1 ] && echo ,force-yield)$([ $fair = 1 ] && echo ,fair)${budget_jobs:+,budget-jobs=$budget_jobs}]: $pass passed, $fail failed${failed[*]:+ (${failed[*]})}${skipped_names[*]:+, $skipped skipped (${skipped_names[*]})}"
 echo "info: $info"
 [ $trace = 1 ] && echo "traces: $OUT/traces/"
 [ $fail -eq 0 ]

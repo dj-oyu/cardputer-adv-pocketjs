@@ -1363,6 +1363,32 @@ A1（下拵え、`1bd92d9`）と A2（本体）を入れ、上の表の各行を
 - 計測後、サウンド設定を `--sound on` で戻した。実機には vm/main `74e704d` の出荷構成が残る。
 - **計測の事故（記録）:** 1 回目の交互計測は、前のセッションで起動した同じ計測がセッション終了後も走り続けていて COM3 を取り合い、8 本中 7 本がシリアルを開けず無効だった（書き込みだけは通る）。表は他に COM3 を使うプロセスが無いことを確かめてから取り直した値。
 
+#### 段 A の未確認 3 項目の決着（2026-09-14、`vm/checks`、実測(host)）
+
+§12.2「段 A の追補」と D41 で未確認のまま残した 3 つ。調査は sonnet、**核心の再現は本セッションで取り直した**（下の「確認」）。
+
+**1. モジュール評価の二重解放（D41 の 2 件目）— 再現した。根本修正で閉じている。**
+- 注入点: `export const x = 1;` のモジュール評価で、確保の 1,290 回目（2 つ目の resolve 関数の `JSPromiseFunctionData`）を `--fail-alloc` で失敗させる。
+- **確認:** `js_create_resolving_functions` の `resolving_funcs[0] = JS_UNDEFINED;`（`quickjs.c:57123`）だけを戻して asan を別の出力先にビルドすると、2 回とも **ASan: heap-use-after-free**。`JS_FreeRuntime` の GC が `mark_children` → `JS_MarkContext` → `js_mark_module_def:31210` → `JS_MarkValue` → `gc_decref_child:7470` で、解放済みの `JSModuleDef.resolving_funcs[0]` を読む。async 呼び出しの 1 件目（2 回目の `JS_FreeValue`）とは読み手が違い、原因と直す 1 行は同じ。行を戻すと再現は消える（3 回とも ASan 報告なし、カナリア 1 回、終了コード 1）。
+- 回帰: `tools/vmtest/corpus/oom_resolving_functions_module.js`（`// vmrun-flags: --module --fail-alloc 1290`、`asan-recur` で bless、`4a5d46c`）。
+
+**2. 深い async 再帰を N > 300 で — D40 の壊れ方の外には出ない。ただし終了コードは 3 通りある。**
+- sonnet の掃引: 4 形（素、段ごとの局所変数、引数、非 promise の `await`）× ヒープ上限 160K〜64M × device / host × o2-flat / o2-recur の 96 点、最深 86,348 段。全点がヒープ枯渇（理由 `null`、カナリア > 0）か C スタック検査の `RangeError` で終わり、クラッシュ・ハング・ASan 報告は無い（asan-flat の 16 点も同じ）。同期 `try` には一度も届かない。
+- **確認（抜き取り、o2-flat）:** ヒープ 1M では device / host とも終了コード 2・深さ 1,271・未処理 387・カナリア 776。**16M では終了コード 1**: 降下の後のトップレベルの `print("#info max_depth=" + depth)` の文字列を作る余裕すら無く、トップレベルで `null` が上がる（未処理 0、カナリア 13,622）。sonnet の報告の「終了コード 2 か 0」は不正確で、**1 も出る**。どれもヒープ枯渇で終わっており D40 の受け入れの範囲内。D40 の期待値（`budget_probe.sh`）はヒープ上限を固定した 1 点だけを縛っているので影響しない。
+- `await 42; await dive();` の形は、ヒープ上限に関わらず深さ 1 のうちにヒープを使い切る（sonnet の観察、原因は追っていない）。
+
+**3. `o2-recur` の SIGSEGV（攻撃中に 1 度だけ見たもの）— 同じ条件では再現しない。別の、決定的なはみ出しが見つかった。**
+- 既定の設定（device 20 KiB / host 7 MiB）で、深い再帰を扱うコーパスと項目 2 の形を o2-recur / asan-recur、直列・並列・`--force-yield` / `--gc-on-yield` 付きで計 5,260 回流し、異常 0（sonnet）。1 度きりの SIGSEGV の原因は不明のまま。
+- **見つかったこと:** `--stack-limit` をホストの実際のスタック上限（`ulimit -s` 8,192 KiB）の近くまで上げると、C スタック検査（`js_check_stack_overflow`、実行時に `stack_top - stack_size` で固定）が間に合わず、実スタックを先に溢れさせる。**確認:** `vmrun-o2-recur --profile host --stack-limit 8176K deep_recursion.js` は 3 回とも `RangeError`、`8180K` は 3 回とも SIGSEGV（asan-recur では `stack-overflow`、`JS_CallInternal` の再帰）。余裕は約 14〜16 KiB。
+- 影響: `-recur`（`CONFIG_POCKET_VM_FLATCALLS=n`）は出荷しない。実機の `stack_limit` 20 KiB は ui タスクのスタック 32,768 B に対して十分内側で、フラット既定では JS の深さが C スタックを使わない。**直していない**（範囲外）。上限を実スタックの近くに設定する使い方をするなら、検査の余裕を足す必要がある。
+
+**経緯（記録）:** この 3 項目は、同じ依頼を並行して進めていた 2 つのセッションが衝突した。止めたはずのこちらのエージェントは停止の指示の後も作業を続け、相手に任せたブランチへ `4a5d46c` をコミットしていた。依頼者の判断でこちらに戻し、エージェントは停止した。報告の数字は鵜呑みにせず、上の「確認」を取り直した。その途中で、**最初の検査の再実行はビルドが一度も効いておらず、エージェントが 20 時台に作った（一時的な計測コードを入れていた可能性のある）バイナリで走っていた**ことが分かり、HEAD から全変種を作り直して関所を取り直した（下の数字）。
+
+**関所（HEAD から全変種を作り直した後）:** コーパス asan / o2 / asan-recur / o2-recur / asan-flat / o2-flat は 63/63、asan-alloca / o2-alloca は 62 件通過・0 失敗・1 スキップ。`--force-yield`（o2）3 / 60。`budget_probe.sh` o2-flat / o2-recur / asan-flat 11/11。`oom_canary_probe.sh` o2 / asan 5/5（確保失敗を注入する 2 ファイルでカナリアが発火）。項目 1 の回帰は 3 回とも ASan 報告なし。
+
+**alloca 変種を外した理由（`run.sh` に `// vmrun-skip-variants:` を足した）:** `--fail-alloc` の回数は確保の通し番号で、`*-alloca` ビルドはフレームセグメントを確保しない分、最初の呼び出し以降の番号が 1 つ小さい。o2 と o2-alloca で 1,270〜1,310 回目を掃引すると、何も起きない回数が o2 の 1,287 / 1,291 回目に対して alloca では 1,286 / 1,290 回目にずれる。狙いの確保（2 つ目の resolve 関数）は出荷経路で 1,290 回目、alloca では 1,289 回目で、**1 つの番号で両方には当たらない**。出荷経路の番号を守り、そのファイルだけ alloca の 2 変種を理由付きで外した。スキップは毎回表示され、集計にも数える（黙って通さない）。
+- 同じ理由で、先行の `oom_resolving_functions.js`（1,353 回目）が alloca でも通っているのは、**出力が同じになっているだけで、alloca では狙いの確保に当たっていない可能性がある**（未確認）。`VMTEST_VMRUN_FLAGS="--vm-seg-size 88"` の掃引もセグメントの確保回数を変えるので、確保失敗を注入する 2 ファイルはその掃引では狙いを外しうる（未確認）。
+
 ### 12.3 D17r: 止まってよい床は `l2_flags` の 1 ビットで、活性の入口で決まる（H2, H4）
 
 **決定（初版から変えない部分）: `JS_SF_MAY_YIELD = 4u`（`quickjs-vmstack.h:434-435` の隣）。床の push 時に 1 回だけ計算し、フラット子に写す。判定は現在フレームの 1 ビット比較。** 床が MAY_YIELD になる条件は 2 つの AND:
