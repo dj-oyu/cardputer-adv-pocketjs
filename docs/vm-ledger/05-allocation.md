@@ -126,7 +126,7 @@
 - `JSFunctionBytecode`（`b`）自体を対象にした `js_realloc` 呼び出しが本当に一つも無いか、61件のrealloc箇所の分類以外の経路（マクロや別名関数経由）まで含めて確認していない。
 - `JS_ExecutePendingJob`（`JSJobEntry` の実行と解放）を実装コードとして読んでいない。`argv[]` に確保されたJSValueの解放漏れ・二重解放の有無は未確認。
 - `js_realloc_rt` の61件のうち、パーサ/コンパイラ由来に分類したものが本当にすべて「`JS_Eval` 完了までに解放される一時領域」であるか、個別に最後の解放コードまで追ってはいない（`js_free_function_def` 相当の後始末関数は名前ベースで存在を確認していない）。
-- `sizeof(max_align_t)`（`allocation_header_t` のサイズを決める）をESP32-S3のツールチェーンヘッダで実際に確認していない。8バイトだろうという推定（Xtensa/RISC-V32のABIで一般的な値）であり、実測ではない。
+- ~~`sizeof(max_align_t)`（`allocation_header_t` のサイズを決める）をESP32-S3のツールチェーンヘッダで実際に確認していない。8バイトだろうという推定~~ → **確認済み（2026-09-15）: 16バイト**（`xtensa-esp32s3-elf-gcc`、`_Alignof` は8。[vm-L2-design.md](../vm-L2-design.md) §3.3 と同じ値）。推定の8は外れで、ヘッダは1ブロック16B。中身は `size` の4Bだけなので12Bが余分。影響と直し方は仕様 §14.6。
 - CLAUDE.mdに書かれている「JSゲストの上限は144KiB」という数値の出どころ（過去のコミット、別のビルド構成、単なる書き間違い）は未調査。現在の `main/app_session.c` / `app_session.h` の値（160KiB）とだけ突き合わせた。
 - `rt->class_array`/`ctx->class_proto` の拡張（`quickjs.c:3897-3924`）が、`pocket_api_register()` などケーパビリティ登録のたびに実際何回発火するか（＝ `JS_CLASS_INIT_COUNT` の初期値と実際登録されるクラス数の関係)は未確認。
 - Map/Set の `map_hash_resize`（`quickjs.c:54377-54393`）が失敗時に「エラー報告なしで諦める」とコメントされている動作が、`malloc_limit` 到達時に実際どう見えるか（例外にならず単に古いハッシュテーブルのまま動き続けるのか）を実機・ホストいずれでも検証していない。
