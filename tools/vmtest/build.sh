@@ -38,7 +38,7 @@ build_variant() {
   # the stub is shared by every variant and the -alloca ones must not see it.
   local segframes="-DCONFIG_POCKET_VM_SEGFRAMES=1"
   # CONFIG_POCKET_VM_FLATCALLS: default y in main/Kconfig.projbuild (L2b,
-  # docs/vm-L2-design.md sec.10). Same rule as above: the plain variant
+  # docs/vm/vm-L2-design.md sec.10). Same rule as above: the plain variant
   # mirrors the Kconfig default; "-flat" / "-recur" force it on / off.
   local flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"
   local base=${variant%-alloca}; base=${base%-recur}; base=${base%-flat}

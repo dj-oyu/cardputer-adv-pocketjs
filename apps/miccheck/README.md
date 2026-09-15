@@ -1,6 +1,6 @@
 # miccheck
 
-`pocket.audio.capture`（docs/common-api.md §9 のマイク）が実機で立つかを見る1本。表示は
+`pocket.audio.capture`（docs/api/common-api.md §9 のマイク）が実機で立つかを見る1本。表示は
 持たず、`console.log` の行が結果そのもの。`tools/pocket_bridge.py demo --source
 apps/miccheck/miccheck.js` で Playground に打ち込んで走らせる。
 

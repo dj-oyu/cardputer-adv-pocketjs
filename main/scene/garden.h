@@ -252,7 +252,7 @@ typedef struct {
 //   idf.py -B build_nofuse -DCMAKE_C_FLAGS="-DGARDEN_PIE_FUSE=0" build
 //
 // On by default. Twenty-one loads that occupied their own issue slot now ride
-// a .LD.INCP form, which docs/pie-simd.md 3.4 measures as free: 135
+// a .LD.INCP form, which docs/perf/pie-simd.md 3.4 measures as free: 135
 // instructions a block become 114. Both spellings come from one source, so the
 // only difference between the two builds is those twenty-one slots -- which is
 // the point of having the switch rather than two kernels, and the reason this

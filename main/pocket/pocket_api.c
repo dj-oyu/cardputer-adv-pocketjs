@@ -25,7 +25,7 @@
 // truncation the capability table was found doing.
 #define POCKET_MAX_LAZY 28
 
-// The names of docs/common-api.md section 2, all of them. A name that is not
+// The names of docs/api/common-api.md section 2, all of them. A name that is not
 // implemented yet still has to answer get() with supported=false rather than
 // throw, so the whole list is declared here and later stages replace entries
 // through pocket_api_register().
@@ -347,7 +347,7 @@ typedef struct {
     const pocket_promise_ops_t *ops;
     void       *user;
 #ifdef CONFIG_POCKET_VM_PROBE
-    // VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5): when pocket_api_complete()
+    // VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5): when pocket_api_complete()
     // last wrote `done`, so pocket_api_pump() can report how long the
     // completion sat here before its resolve/reject actually ran. Absent
     // from a normal build's struct layout entirely. 32 bits, not 64:

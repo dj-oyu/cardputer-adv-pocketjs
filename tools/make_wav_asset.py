@@ -1,6 +1,6 @@
 """Convert a WAV into the one shape this host plays, for embedding in assets:/.
 
-The firmware has no resampler and no downmixer -- docs/common-api.md 9.1 and
+The firmware has no resampler and no downmixer -- docs/api/common-api.md 9.1 and
 9.2 both explain why, and both come back to one I2S controller having one sample
 rate and the DAC's being 24000. So audio.player refuses anything that is not
 24 kHz mono, and the conversion has to happen here, on a machine that has room

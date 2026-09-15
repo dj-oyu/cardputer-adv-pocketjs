@@ -15,7 +15,7 @@
 #include "esp_heap_caps.h"
 #include <string.h>
 
-// docs/hardware-constraints.md:45. The bus itself belongs to board.c; this
+// docs/platform/hardware-constraints.md:45. The bus itself belongs to board.c; this
 // file only ever adds a device to it.
 #define SD_CS 12
 
@@ -91,7 +91,7 @@ bool sd_media_mount(void) {
     // The clock is NOT set here. sd_path.h holds the ladder and the reasons;
     // this file walks it, because walking it means touching a card.
     esp_vfs_fat_sdmmc_mount_config_t cfg = {
-        // docs/filesystem-api.md:56 -- never format on mount failure. A card
+        // docs/api/filesystem-api.md:56 -- never format on mount failure. A card
         // that does not mount is a card with someone's data on it until proven
         // otherwise, and this API has no way to ask.
         .format_if_mount_failed = false,

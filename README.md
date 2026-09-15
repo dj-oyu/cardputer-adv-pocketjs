@@ -6,20 +6,20 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 
 ## 設計ドキュメント
 
-- [ファイルシステムAPI仕様案](docs/filesystem-api.md)：pocket.fs、ディレクトリとファイル操作、SD、逐次読書き、保存保証、メディア・PC転送との接続。
+- [ファイルシステムAPI仕様案](docs/api/filesystem-api.md)：pocket.fs、ディレクトリとファイル操作、SD、逐次読書き、保存保証、メディア・PC転送との接続。
 
-- [共通JS API仕様案](docs/common-api.md)：将来のアプリ、UI・入力・保存、センサー、Wi-Fi／BLE、外部I/O、PC連携の公開契約と実装段階。実装前の提案です。
+- [共通JS API仕様案](docs/api/common-api.md)：将来のアプリ、UI・入力・保存、センサー、Wi-Fi／BLE、外部I/O、PC連携の公開契約と実装段階。実装前の提案です。
 
-- [Windows / EIM開発環境](docs/build-environment.md)：このPCのIDF v6.0.1、環境切り替え、ビルド・書き込みコマンド。
-- [ハードウェア仕様と制約](docs/hardware-constraints.md)：SoC、メモリ、ピン配置、共有バス、描画・実行時の注意点。
-- [プラットフォーム設計](docs/architecture.md)：責務、アプリの起動・終了、入力、描画、メモリ管理。
-- [ホームUI設計](docs/home-ui.md)：カテゴリと項目の選択、背景、アニメーション、画面遷移。
-- [ESP32-S3 PIE（SIMD）](docs/pie-simd.md)：描画カーネルのベクトル化。命令セットの制約、パイプラインのストール、ビット一致の検証、実測値。
-- [Hello World検証計画](docs/milestone-01.md)：実装順序、測定項目、完了条件。
-- [SKK日本語入力設計](docs/japanese-input.md)：既存Cコアの再利用、入力優先順位、Flash辞書、候補表示、M2検証計画。
+- [Windows / EIM開発環境](docs/platform/build-environment.md)：このPCのIDF v6.0.1、環境切り替え、ビルド・書き込みコマンド。
+- [ハードウェア仕様と制約](docs/platform/hardware-constraints.md)：SoC、メモリ、ピン配置、共有バス、描画・実行時の注意点。
+- [プラットフォーム設計](docs/platform/architecture.md)：責務、アプリの起動・終了、入力、描画、メモリ管理。
+- [ホームUI設計](docs/scenes/home-ui.md)：カテゴリと項目の選択、背景、アニメーション、画面遷移。
+- [ESP32-S3 PIE（SIMD）](docs/perf/pie-simd.md)：描画カーネルのベクトル化。命令セットの制約、パイプラインのストール、ビット一致の検証、実測値。
+- [Hello World検証計画](docs/archive/milestone-01.md)：実装順序、測定項目、完了条件。
+- [SKK日本語入力設計](docs/apps/japanese-input.md)：既存Cコアの再利用、入力優先順位、Flash辞書、候補表示、M2検証計画。
 
-- [実装と設計のレビュー](docs/implementation-audit.md)：現在の保証範囲、未解決事項、次の機能候補。
-- [M1実機検証結果](docs/firmware-m1.md)：初期ファームウェアの検証記録。
+- [実装と設計のレビュー](docs/archive/implementation-audit.md)：現在の保証範囲、未解決事項、次の機能候補。
+- [M1実機検証結果](docs/archive/firmware-m1.md)：初期ファームウェアの検証記録。
 
 設計目標・現在の実装・過去の実機結果を区別して記録します。過去のRAM/FPS・バイナリサイズは最新構成の測定値ではありません。
 
@@ -28,7 +28,7 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 2026-09-07追加: APPS末尾に[POCKET PET](apps/pet/README.md)を実装しました。
 12種類の選択、ごはん・遊び・睡眠、英数字の命名、ペットごとの保存・復元に対応します。
 ホストテストと`build_pet`でのファームウェアビルドを確認済み。実機書き込み・動作確認は未実施です。
-同じペットをCodex／Claude Codeの使用量コンパニオン、リセット通知、目覚まし、タイマーに使える[Pet Companion](docs/pet-companion.md)も追加しました。
+同じペットをCodex／Claude Codeの使用量コンパニオン、リセット通知、目覚まし、タイマーに使える[Pet Companion](docs/apps/pet-companion.md)も追加しました。
 
 ホームからHello Worldを起動し、Enterでカウンターを更新してホームへ戻る経路は実装・検証済みです。
 
@@ -38,7 +38,7 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 - 日本語入力: Ctrl+JまたはOpt+SpaceでIME切替。変換中はIMEが先にキーを処理。
 - Esc: Fn＋左上のバッククォートキー。ホームでは同キー単独も戻るとして扱う。
 
-保存失敗時の未保存表示、空文書の再読込、強制停止・入力キューの扱いには未解決事項があります。[レビュー](docs/implementation-audit.md)を参照してください。
+保存失敗時の未保存表示、空文書の再読込、強制停止・入力キューの扱いには未解決事項があります。[レビュー](docs/archive/implementation-audit.md)を参照してください。
 
 ## プラットフォームの方針
 

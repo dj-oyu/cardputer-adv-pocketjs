@@ -2,7 +2,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.audio and pocket.power — sections 9 and 8 of docs/common-api.md, on
+// pocket.audio and pocket.power — sections 9 and 8 of docs/api/common-api.md, on
 // top of sound.c and board.c's battery ADC.
 //
 // The two surfaces share a file because they were written together: the tone

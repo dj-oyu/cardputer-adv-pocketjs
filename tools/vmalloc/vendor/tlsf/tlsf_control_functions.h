@@ -20,7 +20,7 @@ extern "C" {
  * host, pointers are 8 B and block_header_t itself needs 8-byte alignment;
  * building with ALIGN_SIZE=4 corrupts the free-list bitmap arithmetic and
  * SEGVs inside insert_free_block on the first tlsf_add_pool() (verified
- * 2026-09-12, see docs/vm-ledger/06-allocator-baseline.md). WSL has no
+ * 2026-09-12, see docs/vm/vm-ledger/06-allocator-baseline.md). WSL has no
  * 32-bit multilib here (tools/vmtest/README.md notes the same limit for
  * vmrun), so there is no way to build and run the unmodified 4-byte-aligned
  * version on this host. This override only changes the metadata stride and
@@ -55,7 +55,7 @@ typedef struct control_t
      * and no wider. VMALLOC_TLSF_ALIGN_LOG2=3 (see above) needs shift up to
      * 5+3=8 (wraps to 0 in :3, silently corrupting every fl/sl computation
      * downstream - this is what produced the SEGV in insert_free_block
-     * before this was found, see docs/vm-ledger/06-allocator-baseline.md)
+     * before this was found, see docs/vm/vm-ledger/06-allocator-baseline.md)
      * and small_block_size up to 1<<8=256 (does not fit :8, max 255). Both
      * fields are packing-only bookkeeping never read by a caller across a
      * public API, so widening them changes no observable allocator

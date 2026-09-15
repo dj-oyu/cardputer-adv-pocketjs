@@ -1,6 +1,6 @@
 // The host screen that turns a person's choice into the sd: grant.
 //
-// docs/filesystem-api.md section 2: "sdへのアクセス許可はホストのフォルダー選択
+// docs/api/filesystem-api.md section 2: "sdへのアクセス許可はホストのフォルダー選択
 // で作成し、アプリは物理パスを指定してルートを広げられない". The app names no
 // folder anywhere in this file -- it asks for the screen, the person picks a
 // row, and the row IS the grant. That is the same shape pocket_workspace.c's

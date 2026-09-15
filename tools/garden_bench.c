@@ -12,7 +12,7 @@
 // Without `d` it times the same loop, and on x86 the two are the same to
 // within noise -- 1,890 well-predicted branches over a struct that fits in L1
 // cost nothing here and cost 1.0 ms on the board. The host cannot measure this
-// change; it can only prove the change is invisible. See docs/pie-simd.md 3.8.
+// change; it can only prove the change is invisible. See docs/perf/pie-simd.md 3.8.
 #include "../main/scene/garden.c"
 #include <stdio.h>
 #include <time.h>

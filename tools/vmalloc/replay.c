@@ -4,7 +4,7 @@
 // static state never has to be reset between runs; the shell driver
 // (run_all.sh) forks a fresh process per combination instead.
 //
-// --verify turns the replay into the G6 check of docs/vm-L2-design.md
+// --verify turns the replay into the G6 check of docs/vm/vm-L2-design.md
 // sec.1.3: every block handed out is filled with a pattern derived from its
 // trace id, checked again right before it is freed or reallocated, and --
 // whenever the backend reports a segment event (add / return / cache reuse)

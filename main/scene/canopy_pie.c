@@ -45,8 +45,8 @@
 // Scheduling. Every instruction that defines its result at pipeline stage 2 --
 // a load, a fused load's loaded register, a multiply, the ReLU -- has at least
 // one instruction between it and the first reader of that register (TRM table
-// 1.7-2, docs/pie-simd.md 4), and every constant load that can ride an
-// add, subtract or multiply does, as its .LD.INCP form (docs/pie-simd.md 3.5:
+// 1.7-2, docs/perf/pie-simd.md 4), and every constant load that can ride an
+// add, subtract or multiply does, as its .LD.INCP form (docs/perf/pie-simd.md 3.5:
 // the fused load costs nothing). python tools/pie/stalls.py main/scene/canopy_pie.c
 // canopy_pie reports zero stalls. The constant table below is in the order the
 // loads appear in the program; moving a load past another swaps two constants.

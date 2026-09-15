@@ -36,7 +36,7 @@
 // Nor is it eight call sites. There are 19 across the port -- 11 in
 // esp_ssl_cli.c, 7 in esp_ssl_srv.c, and esp_mbedtls_dynamic_impl.c:161 makes
 // the same mistake on the RX side with MBEDTLS_SSL_IN_BUFFER_LEN. This wrap
-// only covers the TX ones. See docs/idf-tls-txbuffer-report.md.
+// only covers the TX ones. See docs/platform/idf-tls-txbuffer-report.md.
 //
 // Why a linker wrap and not a patched IDF: C:\esp\v6.0.1\esp-idf is shared by
 // every project on this machine and is replaced wholesale on an IDF update, so

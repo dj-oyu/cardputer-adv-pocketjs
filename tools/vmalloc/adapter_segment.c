@@ -1,4 +1,4 @@
-// adapter_segment.c — the L2a shape from docs/quickjs-freertos-vm-spec.md
+// adapter_segment.c — the L2a shape from docs/vm/quickjs-freertos-vm-spec.md
 // sec.7 ("non-moving segments") written as a general allocator so the same
 // traces that drove tlsf/estalloc/naive can drive it, and so the replayer's
 // --verify can watch references across segment add / boundary / return.
@@ -16,7 +16,7 @@
 // fault modes at the bottom of this file deliberately break so that the
 // checker can be shown to fire.
 //
-// Alignment follows docs/vm-L2-design.md sec.3.3 (D7): segment bases on 16
+// Alignment follows docs/vm/vm-L2-design.md sec.3.3 (D7): segment bases on 16
 // bytes (so an L4 compactor can use 128-bit PIE transfers), individual
 // blocks on 4 (Xtensa has no 64-bit load; a JSValue at a 4-byte address is
 // two l32i.n either way). Block header is one uint32_t, so payloads land on

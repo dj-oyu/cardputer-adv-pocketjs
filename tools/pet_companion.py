@@ -1,7 +1,7 @@
 """Read-only Codex/Claude usage adapters and acknowledged USB telemetry.
 
 No prompts, answers, API keys or credentials enter snapshots or USB frames.
-Use --help and docs/pet-companion.md. Python stdlib except pyserial for send.
+Use --help and docs/apps/pet-companion.md. Python stdlib except pyserial for send.
 """
 import argparse
 from contextlib import closing

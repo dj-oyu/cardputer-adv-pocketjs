@@ -22,7 +22,7 @@ static const char *TAG = "wifi";
 #define WIFI_KEY_SSID  "ssid"
 #define WIFI_KEY_PSK   "psk"
 
-// docs/common-api.md:371 budgets 15 s for a Wi-Fi connection and 30 s for the
+// docs/api/common-api.md:371 budgets 15 s for a Wi-Fi connection and 30 s for the
 // longest wireless wait. The two below sit inside that: everything from
 // esp_wifi_start() to an address, then everything from there to a set clock.
 #define CONNECT_TIMEOUT_MS 15000
@@ -420,7 +420,7 @@ static void sync_task(void *arg) {
     status_stage(WIFI_TIME_STAGE_SNTP,0);
     esp_sntp_config_t sntp=ESP_NETIF_SNTP_DEFAULT_CONFIG(NTP_SERVER);
     // IMMED, not smooth: settimeofday() steps the clock once and solar_time.c
-    // reads it on the next frame. docs/solar-sail.md asks that a correction be
+    // reads it on the next frame. docs/scenes/solar-sail.md asks that a correction be
     // complete before it is announced, and a step is complete when it returns.
     sntp.smooth_sync=false;
     err=esp_netif_sntp_init(&sntp);
@@ -429,7 +429,7 @@ static void sync_task(void *arg) {
     if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_SNTP,err); goto done; }
 
     // The only call site. solar_time_set_synchronized(false) is never made
-    // here: docs/solar-sail.md:48-50 keeps a clock that was once set running
+    // here: docs/scenes/solar-sail.md:48-50 keeps a clock that was once set running
     // through a disconnect, and only a clock that has become untrustworthy is
     // withdrawn — a radio going away does not make the seconds wrong.
     solar_time_set_synchronized(true);
@@ -497,7 +497,7 @@ unsigned wifi_time_scan_networks(wifi_time_network_t *out, unsigned max,
 // An SSID is 32 arbitrary bytes on the wire, and this firmware has to draw it
 // and store it as a string. Anything that is not well formed UTF-8 is dropped
 // rather than shown as replacement characters that cannot be typed back in
-// (docs/common-api.md:306); a lone surrogate is rejected for the same reason
+// (docs/api/common-api.md:306); a lone surrogate is rejected for the same reason
 // the storage API rejects one.
 static bool ssid_printable(const uint8_t *s, size_t n) {
     for(size_t i=0;i<n;) {
@@ -569,7 +569,7 @@ static void scan_task(void *arg) {
         if(err==ESP_OK) wifi_started=true;
     }
     if(err==ESP_OK) {
-        // Active scan with the driver's default dwell. docs/common-api.md:306
+        // Active scan with the driver's default dwell. docs/api/common-api.md:306
         // allows 5 s; the default sweep of the 2.4 GHz channels finishes well
         // inside that, and a longer dwell only finds APs too weak to join.
         wifi_scan_config_t cfg={.show_hidden=false,.scan_type=WIFI_SCAN_TYPE_ACTIVE};

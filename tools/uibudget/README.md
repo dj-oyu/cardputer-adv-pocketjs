@@ -122,4 +122,4 @@ step 9: + a toast (everything pocketui.js builds)    15 nodes  block  18240  wor
 - **taffyのバージョンに依存した数字です。** 1853バイトも、16と33の段差も、`taffy 0.11` の性質であって契約ではありません。`.cache/pocketjs` を更新したら測り直すこと。
 - `Cargo.lock` は追跡しています（taffyのバージョンが数字そのものなので）。`cargo update` を通したら、上の表を測り直してから通すこと。数字が動いたら `main/pocket_ui.c` の `layout_block()` と CLAUDE.md を直すのが正しい対応で、ツールを疑うのは後です。
 
-関連: [docs/hardware-constraints.md](../../docs/hardware-constraints.md)、`main/pocket_ui.c` の `layout_block()`、`apps/pocketui/README.md`。
+関連: [docs/platform/hardware-constraints.md](../../docs/platform/hardware-constraints.md)、`main/pocket_ui.c` の `layout_block()`、`apps/pocketui/README.md`。

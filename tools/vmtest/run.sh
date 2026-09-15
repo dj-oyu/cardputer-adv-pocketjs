@@ -87,7 +87,7 @@ for name in "${names[@]}"; do
   fi
   # Appended LAST so they beat a per-file "// vmrun-flags:" budget: the
   # point of these two is to re-run the WHOLE corpus at a chosen budget and
-  # require the same bytes out (docs/vm-L1-design.md sec.7 invariants 1-5).
+  # require the same bytes out (docs/vm/vm-L1-design.md sec.7 invariants 1-5).
   if [ -n "$fy_fault" ]; then flags+=(--force-yield-fault "$fy_fault")
   elif [ $force_yield = 1 ]; then flags+=(--force-yield)
   fi
@@ -109,7 +109,7 @@ for name in "${names[@]}"; do
   # the bytes out, appended after everything else so they win. Added for
   # L2a: `VMTEST_VMRUN_FLAGS="--vm-seg-size 88" run.sh` runs the corpus with
   # frame segments of 88 bytes, which puts a segment boundary under nearly
-  # every call (docs/vm-L2-design.md sec.1.1 #6); the expected files are
+  # every call (docs/vm/vm-L2-design.md sec.1.1 #6); the expected files are
   # the same, because the segment size is not allowed to be observable.
   [ -n "${VMTEST_VMRUN_FLAGS:-}" ] && read -r -a envflags <<< "$VMTEST_VMRUN_FLAGS" && flags+=("${envflags[@]}")
   [ $trace = 1 ] && flags+=(--trace "$OUT/traces/$name.trace")
@@ -149,7 +149,7 @@ for name in "${names[@]}"; do
   # stop, and every stop a resume -- read off this run's own #info lines, the
   # same for every file. AND the existing byte-identity against expected/
   # below: stopping and resuming must not change what the program prints
-  # (docs/vm-L1-design.md sec.7 invariants; first-version 12.7 "--force-yield
+  # (docs/vm/vm-L1-design.md sec.7 invariants; first-version 12.7 "--force-yield
   # でバイト一致"). Until the VM can resume both fail, and each reason is shown.
   rule_ok=1 rule_reason=
   if [ $force_yield = 1 ] && [ $bless = 0 ]; then

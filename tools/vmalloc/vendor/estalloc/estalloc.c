@@ -543,7 +543,7 @@ est_set_critical_section(ESTALLOC *est, void (*enter)(void), void (*exit_func)(v
  * on the O(1) FLI/SLI/bitmap paths (1 each) and once per linked-list node
  * walked on the "change strategy to First-fit" fallback below. Read via
  * vmalloc_estalloc_last_steps() from the replay driver; never touches the
- * allocator's own behavior or fields. See docs/vm-ledger/06-allocator-baseline.md. */
+ * allocator's own behavior or fields. See docs/vm/vm-ledger/06-allocator-baseline.md. */
 static unsigned int vmalloc_estalloc_steps;
 unsigned int vmalloc_estalloc_last_steps(void) { return vmalloc_estalloc_steps; }
 

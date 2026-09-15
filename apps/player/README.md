@@ -1,7 +1,7 @@
 # MUSIC — ホーム画面のプレイヤー
 
 **overlayアプリ**。Appsからは起動しない。Settings → HOME OVERLAY → MUSIC を選ぶと
-**XMBが終了してこれがその場所に立つ**（`docs/common-api.md` 3.1）。背景のシーンは
+**XMBが終了してこれがその場所に立つ**（`docs/api/common-api.md` 3.1）。背景のシーンは
 下で描かれ続ける。
 
 | キー | 動作 |

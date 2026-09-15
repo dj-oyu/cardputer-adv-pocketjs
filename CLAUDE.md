@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 M5Stack Cardputer ADV（ESP32-S3FN8、PSRAMなし、240×135 LCD）向けのESP-IDFファームウェア。QuickJS版PocketJSでJSアプリを1つずつ実行する。設計ドキュメントは日本語、**コード内のコメントは英語**で、密度と「なぜ」を説明する文体に揃える。
 
+**ドキュメントの入口は `docs/README.md`。** 主線は VM の高速化（`docs/vm/`）、PIE と描画の高速化（`docs/perf/`）、デザインシステム Kasane（`docs/kasane/`、開発は `vm/design-contracts`）の3本で、ほかは `api/` `platform/` `scenes/` `apps/` `archive/` に分けてある。新しい文書は該当ディレクトリに置いて索引に1行足す。**ファイル名は変えない** — 本文とCのコメントが名前で参照している。JSソース（`apps/**/*.js`、`tools/vmtest/**/*.js`）のコメントは、ゲストのヒープに効くので2026-09-15の移動前の古いパスのまま残してある。
+
 ## ビルドと書き込み
 
 環境はEIM管理のESP-IDF v6.0.1。PlatformIOのIDF/Pythonを混ぜない。
@@ -55,7 +57,7 @@ python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --chec
 
 **DRAMは `tools/memlog.py` が記録する。** ビルドのたびに静的値を `.cache/memlog/memory.jsonl`（git管理外）へ追記し、**動いたときだけ**書くので、ログはビルドの一覧ではなく変化の一覧になる。`--port` を付けると実機の空きヒープ（アイドル時とアプリ実行中）も一緒に残る。増減はファイル別に出るので「DRAMが6KiB増えた」ではなく「`pocket_io.c.obj +1113`」が読める。
 
-`main/` のPIEカーネルを触ったら、焼く前にこの3層を通す。詳細は `tools/pie/README.md` と `docs/pie-simd.md`。
+`main/` のPIEカーネルを触ったら、焼く前にこの3層を通す。詳細は `tools/pie/README.md` と `docs/perf/pie-simd.md`。
 
 **ホスト側の検査は `main/` のパスを直書きするので、ファイルを動かすと黙って壊れる。** `main/` へディレクトリを切った `e770950` は2種類を壊した — `tools/test_solar_sail.c` の `#include "../main/solar_sail.c"`、および `tools/pie/test_kernels.py` と `tools/pie/models/accel_host_test.c` が指す `main/shell.c` / `main/render_accel.c` / `main/solar_sail.c`。前者はビルド不能、後者は5件すべてが `FileNotFoundError`。つまり**「焼く前に3層を通す」は再編以降ずっと実行できておらず、その間に焼いたものは検査されていない**。誰も走らせていない検査は、失敗しないという意味で通っているように見える。壊れていたのは他に `tools/test_solar_time.c` と `tools/pie/profile_solar.c` と `tools/pie/models/accel_host_test.c`。**`main/` の中でファイルを動かしたら、`grep -rn "main/" tools/` で参照元を洗ってから動かす。**
 
@@ -71,7 +73,7 @@ python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --chec
 
 `main/` は役割ごとに分かれている。`hal/`（LCD・キーボード・IMU・音）、`pocket/`（`pocket.*` API と Wi-Fi）、`pet/`、`ui/`（画面とエディタ）、`text/`（フォント・字句解析・SKK・ソース保存）、`scene/`（背景と描画カーネル）、直下は `main.c` と `app_session.c` のみ。**全サブディレクトリが `INCLUDE_DIRS` に入っているので、`#include "board.h"` のような書き方は変わらない** — 移動でソースを1行も書き換えずに済ませるための構成。
 
-**共通JS API `pocket.*`** は `docs/common-api.md` の実装。`main/pocket/pocket_api.c` が土台（capability登録、`PocketError`、cancelトークン、購読テーブル、Promise完了テーブル、遅延名前空間、`pocket_api_pump()`）で、`pocket_imu.c` / `pocket_av.c` / `pocket_storage.c` などが各面を載せる。**名前空間はアプリが最初に読んだときに構築される**（`pocket_api_lazy()`）。`capabilities` と `apiVersion` だけが eager で、feature-test が何も構築しないことを構造的に保証している。**新しい面は `pocket_api_register()` で capability を差し替えるだけで、`pocket_api.c` を編集しない。** 購読簿記・`settled()`/`reject()`・非同期完了は土台側にあるので、面の側で書き直さない。
+**共通JS API `pocket.*`** は `docs/api/common-api.md` の実装。`main/pocket/pocket_api.c` が土台（capability登録、`PocketError`、cancelトークン、購読テーブル、Promise完了テーブル、遅延名前空間、`pocket_api_pump()`）で、`pocket_imu.c` / `pocket_av.c` / `pocket_storage.c` などが各面を載せる。**名前空間はアプリが最初に読んだときに構築される**（`pocket_api_lazy()`）。`capabilities` と `apiVersion` だけが eager で、feature-test が何も構築しないことを構造的に保証している。**新しい面は `pocket_api_register()` で capability を差し替えるだけで、`pocket_api.c` を編集しない。** 購読簿記・`settled()`/`reject()`・非同期完了は土台側にあるので、面の側で書き直さない。
 
 `capability.supported` は「このファームが `pocket.*` の面を実装している」の意味。レガシーの `ui.createNode` があることを理由に true にしない（feature-testを通したアプリが `UNSUPPORTED` ではなく `TypeError` を食う）。`limits` に出す値は**コードで実際に強制している値だけ**。
 

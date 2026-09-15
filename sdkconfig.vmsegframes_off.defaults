@@ -1,4 +1,4 @@
-# The L2a revert switch (docs/vm-L2-design.md, spec sec.12: every stage stays
+# The L2a revert switch (docs/vm/vm-L2-design.md, spec sec.12: every stage stays
 # revertible). With this layered over sdkconfig.defaults JS_CallInternal is the
 # upstream alloca path again -- JSStackFrame and the locals block on the ui
 # task's C stack, no segment state in JSRuntime -- i.e. the pre-L2a firmware.

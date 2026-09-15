@@ -33,7 +33,7 @@ typedef struct {
     // for the whole frame. bell_hit was computing it, and dividing by it, once
     // per band on every one of ~2,000 visits. A float division on this part is
     // a call into a ROM routine that no disassembly search for `div` will show
-    // (docs/pie-simd.md 3.7), which is how six of them per visit survived the
+    // (docs/perf/pie-simd.md 3.7), which is how six of them per visit survived the
     // pass that hoisted the band bounds out of the same loop.
     float bell_dr[FLOWER_BELL_BANDS],bell_a[FLOWER_BELL_BANDS];
     float bell_inva[FLOWER_BELL_BANDS];

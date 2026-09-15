@@ -80,7 +80,7 @@ void glass_rain_draw(uint16_t *pixels,int y,int height) {
             // Lower-priority PIE candidate: coverage and RGB565 blends share
             // arithmetic, but spans are only 9-11 pixels and displaced reads
             // need gathers. Setup, alignment edges and per-lane loads may cost
-            // more than they save (docs/pie-simd.md). Profile before batching;
+            // more than they save (docs/perf/pie-simd.md). Profile before batching;
             // preserve source_row sampling and overlapping-drop order.
             for(int dx=-d->radius-1;dx<=d->radius+1;dx++) {
                 int x=cx+dx;if(x<0||x>=RAIN_W)continue;

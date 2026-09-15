@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "keymap.h"
 
-// The shell's side of docs/common-api.md 3.1: which overlay may run, whether it
+// The shell's side of docs/api/common-api.md 3.1: which overlay may run, whether it
 // is allowed to start, and when it is stopped.
 //
 // The valves live here rather than in the overlay itself, which is the point of

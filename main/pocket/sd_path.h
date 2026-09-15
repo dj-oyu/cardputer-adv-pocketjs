@@ -23,7 +23,7 @@
 //    DISCONNECTED with the slot empty, PERMISSION_DENIED with a card in. That
 //    is an app the person never authorised learning whether they have a card
 //    inserted, by calling an API that is supposed to tell it nothing. Small
-//    leak, real one, and free to avoid. docs/filesystem-api.md line 176 asks
+//    leak, real one, and free to avoid. docs/api/filesystem-api.md line 176 asks
 //    for the refusal not to reveal what is there; this is what that costs.
 //
 // 2. REMOVAL DROPS THE GRANT.
@@ -45,7 +45,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// docs/filesystem-api.md section 3. ABSENT covers "no card" and "card removed":
+// docs/api/filesystem-api.md section 3. ABSENT covers "no card" and "card removed":
 // both are DISCONNECTED to an app, and neither is distinguishable from the
 // other on this board, which has no card-detect pin.
 typedef enum { SD_MEDIA_ABSENT = 0, SD_MEDIA_READY, SD_MEDIA_ERROR } sd_media_state_t;
@@ -98,7 +98,7 @@ bool sd_media_usable(const sd_media_t *m);
 bool sd_generation_valid(const sd_media_t *m, uint32_t gen);
 
 // The suffix an uncommitted create or replace wears while it is being written.
-// docs/filesystem-api.md section 2 keeps temporary files out of LISTINGS; this
+// docs/api/filesystem-api.md section 2 keeps temporary files out of LISTINGS; this
 // keeps them out of the NAMESPACE, which is stronger and simpler: a name no app
 // can address is a name no app can create, so the rename a commit performs can
 // never land on top of a file the app made itself under the temporary's name,

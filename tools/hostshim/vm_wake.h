@@ -1,6 +1,6 @@
 #pragma once
 
-// Host stub for main/vm/vm_wake.h (VM L1, docs/vm-L1-design.md sec.4).
+// Host stub for main/vm/vm_wake.h (VM L1, docs/vm/vm-L1-design.md sec.4).
 //
 // The real header pulls in freertos/FreeRTOS.h and freertos/task.h, which the
 // host builds do not have. It is reachable from the host only because

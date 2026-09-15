@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D10 (docs/vm-L2-design.md sec.9): is the frame-segment byte budget the
+# D10 (docs/vm/vm-L2-design.md sec.9): is the frame-segment byte budget the
 # thing that stops a deep recursion, and does it stop it BEFORE the heap does?
 #
 # run.sh cannot answer that. Under run.sh every file runs with both guards at
@@ -121,7 +121,7 @@ check deep_recursion         differ '>0' 0   --profile host   --stack-limit 512M
 check seg_oom_boundary       differ '>0' 0   --profile device --stack-limit 512M --vm-budget 480
 check deep_recursion_device  differ 0   '>0' --profile device --stack-limit 512M --vm-budget 200K
 
-# D38 (docs/vm-L2-design.md sec.12.2): an async function's SYNCHRONOUS
+# D38 (docs/vm/vm-L2-design.md sec.12.2): an async function's SYNCHRONOUS
 # recursion (`async function dive() { depth++; await dive(); }`, every level
 # the first stretch of the next) is the one deep recursion the budget does
 # not answer. On the flat builds each level is a flat async frame -- no C
@@ -166,7 +166,7 @@ check_async() {
   # exhaustion, and the canary is the positive evidence of that. The output
   # alone cannot carry it: whether the outer catch even manages to print
   # ("caught null" when this check was written, nothing once D42/D43 moved
-  # the frame segments' bytes -- docs/vm-L2-design.md sec.13.6) depends on how
+  # the frame segments' bytes -- docs/vm/vm-L2-design.md sec.13.6) depends on how
   # many bytes the exhausted heap happens to leave, so expected/ binds only
   # what does not move -- the sync try is never reached, exit 2 -- and the
   # canary binds the cause.

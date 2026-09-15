@@ -44,7 +44,7 @@ bool srcstore_clear(unsigned slot);
 
 // The sequence number of the newest good record in a slot, or 0 when the slot
 // holds nothing. Every save increments it, so it is already the revision
-// docs/common-api.md section 7 asks a work to carry — and being the store's own
+// docs/api/common-api.md section 7 asks a work to carry — and being the store's own
 // counter rather than a number kept beside it, it stays right when the native
 // Playground saves the same slot behind the workspace's back.
 uint32_t srcstore_revision(unsigned slot);

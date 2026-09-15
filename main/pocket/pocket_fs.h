@@ -4,8 +4,8 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.fs — the file surface of docs/common-api.md section 7, specified in
-// detail by docs/filesystem-api.md.
+// pocket.fs — the file surface of docs/api/common-api.md section 7, specified in
+// detail by docs/api/filesystem-api.md.
 //
 // Three volumes are named by that document, and this build serves all three:
 //

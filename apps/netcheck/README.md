@@ -1,6 +1,6 @@
 # netcheck — `pocket.net`（Wi-Fiリースと HTTP）の自己検査
 
-`docs/common-api.md` §11 と、§4 の期限・キャンセル契約が実機で仕様どおりかを、1回の
+`docs/api/common-api.md` §11 と、§4 の期限・キャンセル契約が実機で仕様どおりかを、1回の
 起動で確かめる。実装は `main/pocket_net.c` と `main/wifi_time.c` のリンク部分。
 
 このファイルは `shell.c` にも `main/CMakeLists.txt` にも配線していない（他セッションが

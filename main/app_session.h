@@ -14,7 +14,7 @@ esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length);
 esp_err_t app_start_test(char test);
 
-// docs/common-api.md 3.1: a session the HOME SCREEN owns, running over the
+// docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the
 // background rather than instead of it. It gets no Rust UI core, no font atlas
 // and no rgb565 renderer -- see pocket_overlay.h -- and a guest heap sized for
 // what is left while a scene is drawing rather than for an empty machine.
@@ -63,12 +63,12 @@ esp_err_t app_tick(uint32_t buttons);
 // the job queue still non-empty -- a turn with no frame() and, after the
 // throttle in app_session.c, usually no transfer either. main.c asks because
 // such a turn has nothing to present and so must not be charged a display
-// period before the next one (docs/vm-L1-report.md sec.2.4).
+// period before the next one (docs/vm/vm-L1-report.md sec.2.4).
 bool app_turn_continued(void);
 void app_stop(void);
 void app_request_stop(void);
 // Swap the predicate QuickJS's single interrupt slot answers with
-// (docs/vm-L1-design.md sec.5.3). The registration itself lives in the guest;
+// (docs/vm/vm-L1-design.md sec.5.3). The registration itself lives in the guest;
 // three callers used to overwrite one another in that slot, which is why the
 // guest's own handler had been dead since the first of them. NULL restores the
 // session watchdog (stop requested, or the 250 ms deadline).

@@ -1,5 +1,5 @@
 // L0 measurement probes. See vmprobe.h and
-// docs/quickjs-freertos-vm-spec.md sec.5. This whole file is empty (zero
+// docs/vm/quickjs-freertos-vm-spec.md sec.5. This whole file is empty (zero
 // symbols) unless CONFIG_POCKET_VM_PROBE is on, and main/CMakeLists.txt only
 // adds it to SRCS in that case -- a normal build never compiles it.
 #include "vmprobe.h"
@@ -46,7 +46,7 @@ static const char *TAG = "vmprobe";
 // own count so the host can prove nothing was lost.
 #define VMPROBE_FRAME_CAP 64
 #define VMPROBE_LAT_CAP   64
-// vm-l1-tuning (docs/vm-l1-tuning.md): jobs returned by ONE vm_sched_drain()
+// vm-l1-tuning (docs/vm/vm-l1-tuning.md): jobs returned by ONE vm_sched_drain()
 // CALL, not one app tick. "jobs" above is folded across a frame() tick and
 // the continuation tick(s) it may spawn (a continuation never reaches
 // vmprobe_frame_sample -- app_session.c returns early while the queue is

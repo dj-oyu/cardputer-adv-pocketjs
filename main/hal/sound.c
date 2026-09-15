@@ -41,7 +41,7 @@ static atomic_int cancelled;
 static atomic_int next_id=1;
 // True from sound_capture_start() to sound_capture_stop(). Playback reads it,
 // which is where "recording and app playback are exclusive, and UI cues do not
-// sound while recording" (docs/common-api.md 9) is actually enforced.
+// sound while recording" (docs/api/common-api.md 9) is actually enforced.
 static atomic_bool capturing;
 // True while the audio task is inside a request. Together with the queue's
 // depth it is what sound_capture_start() asks before it takes the codec.

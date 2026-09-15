@@ -2,7 +2,7 @@
 
 garden_pixels_pie walks forty broadcast constants with plain EE.VLD.128.IP.
 EE.VADDS/VSUBS/VMUL have a .LD.INCP form that does the same load in the same
-issue slot for free (docs/pie-simd.md 3.4), so every load that can be given a
+issue slot for free (docs/perf/pie-simd.md 3.4), so every load that can be given a
 host is an instruction that stops existing.
 
 This is a generator rather than a hand edit because three things have to hold at

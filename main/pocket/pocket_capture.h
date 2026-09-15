@@ -4,7 +4,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.audio.capture -- the microphone half of docs/common-api.md section 9.
+// pocket.audio.capture -- the microphone half of docs/api/common-api.md section 9.
 //
 // A separate file from pocket_av.c, which owns the rest of the audio namespace,
 // for two reasons. The substrate lets several contributors add to one namespace

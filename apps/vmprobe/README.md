@@ -1,8 +1,8 @@
 # vmprobe — L0 の負荷とその競合条件
 
-`docs/quickjs-freertos-vm-spec.md` §5 の基準値を実機で採る一式。ホームの一覧には出ず、
+`docs/vm/quickjs-freertos-vm-spec.md` §5 の基準値を実機で採る一式。ホームの一覧には出ず、
 USB の 1 バイトだけで起動する（`main/main.c` の `usb_stroke()`、`main/app_session.c` の
-`app_start_test()`）。採取は `tools/vm_l0_capture.py`、結果は `docs/vm-L0-report.md`。
+`app_start_test()`）。採取は `tools/vm_l0_capture.py`、結果は `docs/vm/vm-L0-report.md`。
 
 **ソースのバイト数はゲストのヒープを直接食う。** 各ファイルのコメントを短く保ち、理由は
 すべてこの README に置く（`CLAUDE.md` の「6.5KB でゲスト 107KiB」）。

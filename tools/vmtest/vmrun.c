@@ -1,6 +1,6 @@
 // vmrun: host runner for the vendored quickjs-ng, shaped like the device guest.
 //
-// Every later VM level (docs/quickjs-freertos-vm-spec.md L1..L5) is judged by
+// Every later VM level (docs/vm/quickjs-freertos-vm-spec.md L1..L5) is judged by
 // running the same corpus and Test262 subset through this driver and comparing
 // against the L0 baseline. So the parts that decide observable behaviour are
 // copied from components/pocketjs_guest/src/guest.c rather than re-imagined:
@@ -317,7 +317,7 @@ static bool host_events;                        // --host-events
 // cut the drain); neither is frame().
 static bool fair_mode;
 
-// G1 (docs/vm-L2-design.md sec.1.3): does C stack use per JS call depend on
+// G1 (docs/vm/vm-L2-design.md sec.1.3): does C stack use per JS call depend on
 // depth? deep_recursion.js's max_depth answers "how many levels until
 // overflow", which is silent on per-level cost -- a 200-byte frame and a
 // 2000-byte frame both eventually overflow, they just do it at different
@@ -545,7 +545,7 @@ static JSValue resume_until_done(JSContext *ctx, JSValue result) {
 
 // One host turn: finish whatever the budget cut last time, then -- and only
 // once the queue is EMPTY -- let the host deliver completions, which is the
-// ordering rule of docs/vm-L1-design.md sec.2.1. Returns 0 ok, -1 a job threw
+// ordering rule of docs/vm/vm-L1-design.md sec.2.1. Returns 0 ok, -1 a job threw
 // or a rejection went unhandled, -5 runaway, -6 stopped with a queue.
 static int run_turn(guest_t *guest) {
   unsigned run_turns = 0;
@@ -703,7 +703,7 @@ static JSValue make_262(JSContext *ctx) {
 //
 // Defined since L2 by components/quickjs-ng/quickjs-ng/quickjs-vm.c (linked by
 // build.sh). With it, --force-yield stops at every one of the seven class-A
-// opcode safepoints (docs/vm-L2-design.md sec.7.2). Until L2c gives the VM a
+// opcode safepoints (docs/vm/vm-L2-design.md sec.7.2). Until L2c gives the VM a
 // way to resume, a stop there is the uncatchable "interrupted" error, so the
 // corpus is EXPECTED to go red under --force-yield -- that is the gate having
 // teeth, not a harness defect. "#info vm ... stops=N" says how often it bit.

@@ -1,4 +1,4 @@
-# --- BLE Central feasibility measurement (docs/common-api.md section 12) -----
+# --- BLE Central feasibility measurement (docs/api/common-api.md section 12) -----
 #
 # NOT referenced by any default build. It is applied on top of
 # sdkconfig.defaults only when a build is configured with

@@ -41,7 +41,7 @@ extern const char hello_end[] asm("_binary_main_js_end");
 extern const char nodecap_start[] asm("_binary_nodecap_js_start");
 extern const char pet_start[] asm("_binary_pet_js_start");
 #ifdef CONFIG_POCKET_VM_PROBE
-// VM probe workloads (docs/quickjs-freertos-vm-spec.md sec.5), embedded only
+// VM probe workloads (docs/vm/quickjs-freertos-vm-spec.md sec.5), embedded only
 // when this build turned CONFIG_POCKET_VM_PROBE on (main/CMakeLists.txt).
 // Reached over USB only -- test chars 'A'..'F' in main.c's usb_stroke() --
 // never from the home screen's app list.
@@ -77,7 +77,7 @@ static pocketjs_rgb565_renderer_t *renderer;
 static pocketjs_rgb565_target_t *target;
 static atomic_bool stop_requested;
 static int64_t deadline;
-// L1 (docs/vm-L1-design.md). Armed once per turn and handed to the guest, so
+// L1 (docs/vm/vm-L1-design.md). Armed once per turn and handed to the guest, so
 // frame()'s drain and the next turn's continuation drain measure against the
 // same turn start.
 static vm_budget_t budget;
@@ -114,7 +114,7 @@ static size_t user_prelude_length;
 //
 // Until now a session was bounded by entering and leaving an app screen: the
 // home screen's loop built a guest when somebody pressed Enter on a row and
-// destroyed it when they pressed Back. docs/common-api.md 3.1 adds a second
+// destroyed it when they pressed Back. docs/api/common-api.md 3.1 adds a second
 // bound -- the HOME SCREEN owns a session for as long as it is on show -- and
 // that is the whole of the difference. Everything else about the contract is
 // unchanged and deliberately so: app_stop() below still tears the surfaces
@@ -796,7 +796,7 @@ esp_err_t app_tick(uint32_t buttons) {
         if(!leaving && pocketjs_guest_jobs_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
             // FAIR ORDERING (Kconfig POCKET_VM_FAIR, off in the shipping
-            // build; docs/vm-L1-report.md sec.10). The drain has yielded with
+            // build; docs/vm/vm-L1-report.md sec.10). The drain has yielded with
             // work still queued, and this is the one place compat ordering
             // refuses to let a host event through.
             //

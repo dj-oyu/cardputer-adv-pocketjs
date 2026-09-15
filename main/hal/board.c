@@ -225,7 +225,7 @@ bool board_battery_read(board_battery_t *out) {
 // ------------------------------------------------------------------ SPI3 bus
 //
 // The microSD slot (CS=12) and the EXT connector (CS=5) share MOSI=14, CLK=40
-// and MISO=39 (docs/hardware-constraints.md:45). The LCD is wired separately on
+// and MISO=39 (docs/platform/hardware-constraints.md:45). The LCD is wired separately on
 // SPI2, so card traffic can never stall the panel.
 //
 // The bus lives here, beside the LCD's, rather than inside whichever driver
@@ -325,7 +325,7 @@ bool board_key_event(board_keyevent_t *out) {
 esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
     pet_hub_overlay(pixels,y,rows);
-    // docs/common-api.md 9 makes showing that the microphone is live the
+    // docs/api/common-api.md 9 makes showing that the microphone is live the
     // host's obligation, so it is drawn here, at the one transfer to the
     // panel, rather than by whichever screen happens to be up: an app can
     // paint the corner it occupies, but not after this.

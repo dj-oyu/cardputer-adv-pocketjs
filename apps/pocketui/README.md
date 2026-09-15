@@ -1,6 +1,6 @@
 # pocket.ui / pocket.input セルフチェック
 
-`pocketui.js` は `docs/common-api.md` §6 の実装（`main/pocket_ui.c`）を、
+`pocketui.js` は `docs/api/common-api.md` §6 の実装（`main/pocket_ui.c`）を、
 実機のログだけで検証するためのアプリ。ソースは 3071 bytes。ゲストは起動時に
 ソースを解析するので、この数字自体がゲストヒープのコストになる。
 

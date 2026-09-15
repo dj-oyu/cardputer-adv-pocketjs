@@ -1,6 +1,6 @@
 # bridge — `pocket.bridge` のデモ
 
-`docs/common-api.md` §13 の PC link を、ケーブル1本だけで一往復させるためのアプリ。
+`docs/api/common-api.md` §13 の PC link を、ケーブル1本だけで一往復させるためのアプリ。
 実装は `main/pocket_bridge.c` / `main/pocket_bridge.h`、PC側は `tools/pocket_bridge.py`。
 
 ## 動かす

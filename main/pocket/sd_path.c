@@ -64,7 +64,7 @@ bool sd_name_reserved(const char *name, size_t len) {
 
 sd_path_result_t sd_path_build(const sd_media_t *m, const char *rel, size_t len,
                                char *out, size_t outsz) {
-    // Order matters and is a contract, not a preference. docs/filesystem-api.md
+    // Order matters and is a contract, not a preference. docs/api/filesystem-api.md
     // line 176: refuse before authorisation without revealing whether anything
     // is there. So the grant is checked BEFORE the media state -- otherwise an
     // ungranted app could tell a mounted card from an empty slot by which error

@@ -161,7 +161,7 @@ uint32_t sound_stream_underruns(void);
 // stops sharing BCLK/WS and tries to drive pins TX has already reserved. One
 // controller has one sample rate, and the DAC's is 24000.
 //
-// Capture and playback are exclusive here, as docs/common-api.md section 9 asks
+// Capture and playback are exclusive here, as docs/api/common-api.md section 9 asks
 // of this first version: while a recording is open sound_play() answers false
 // and sound_tone()/sound_stream_start() answer SOUND_ERR_BUSY, which is also what
 // makes "UI cues do not sound while recording" a property of this file rather

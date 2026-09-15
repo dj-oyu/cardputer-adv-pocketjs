@@ -5,7 +5,7 @@
 #include "quickjs.h"
 #include "keymap.h"
 
-// pocket.workspace — the works service of docs/common-api.md section 7, and the
+// pocket.workspace — the works service of docs/api/common-api.md section 7, and the
 // half of section 3 that decides what an app may reach.
 //
 // This is not a second filesystem and does not want to be one. A work is a

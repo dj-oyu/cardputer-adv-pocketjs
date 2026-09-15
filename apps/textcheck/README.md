@@ -1,6 +1,6 @@
 # textcheck — `pocket.input.text` を実機で確かめる
 
-`docs/common-api.md` §6 の TextOptions 段落が**実際に強制されているか**を1行1主張で出す。
+`docs/api/common-api.md` §6 の TextOptions 段落が**実際に強制されているか**を1行1主張で出す。
 表示は持たない（編集欄はホストが描く）。出力の各行は `TXT ...`。
 
 ```

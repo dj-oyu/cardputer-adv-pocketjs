@@ -47,7 +47,7 @@
 #include "quickjs.h"
 #include "libregexp.h"
 #include "dtoa.h"
-// VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5): declares the handful of
+// VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5): declares the handful of
 // accessors this file defines under #ifdef CONFIG_POCKET_VM_PROBE below.
 // Not an upstream file -- see its own header comment.
 #include "quickjs-vmprobe.h"
@@ -468,7 +468,7 @@ typedef struct JSVarRef {
 } JSVarRef;
 
 // ---------------------------------------------------------------------------
-// VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5, L0). JSStackFrame and
+// VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5, L0). JSStackFrame and
 // JSVarRef are private to this translation unit -- main/pocket/vmprobe.c has
 // no other way to learn their size -- so this accessor pair is the entire
 // reason to touch quickjs.c for that measurement. Compiles to nothing with
@@ -2272,7 +2272,7 @@ void JS_SetSharedArrayBufferFunctions(JSRuntime *rt,
     rt->sab_funcs = *sf;
 }
 
-// --- VM_PROBE: job queue depth (docs/quickjs-freertos-vm-spec.md sec.5) ---
+// --- VM_PROBE: job queue depth (docs/vm/quickjs-freertos-vm-spec.md sec.5) ---
 // job_list is a plain list_head with no length field, and "max pending queue
 // length" is one of the L0 measurements, so this pair of counters is the
 // probe. One JSRuntime runs at a time in this firmware (sec.3 rule 1), so a
@@ -2970,7 +2970,7 @@ static void update_stack_limit(JSRuntime *rt)
 #endif
 #ifdef CONFIG_POCKET_VM_SEGFRAMES
     // D10: JS_SetMaxStackSize is also the byte budget of the frame segments
-    // (docs/vm-L2-design.md sec.9 D10). Same knob, same unit, two resources
+    // (docs/vm/vm-L2-design.md sec.9 D10). Same knob, same unit, two resources
     // for as long as JS_CallInternal still recurses in C: the C-stack test
     // above and the segment test in JS_CallInternal each hold the whole
     // value, and whichever fills first ends the recursion with the same
@@ -8832,7 +8832,7 @@ static inline __exception int js_poll_interrupts(JSContext *ctx)
 // The class-A safepoints (goto / goto16 / goto8 / if_true / if_false /
 // if_true8 / if_false8): same fast path as js_poll_interrupts, but the slow
 // path knows it is at a point where the instruction has fully retired
-// (docs/vm-L2-design.md sec.7.2) and may be asked to stop there.
+// (docs/vm/vm-L2-design.md sec.7.2) and may be asked to stop there.
 static inline __exception int js_poll_safepoint(JSContext *ctx)
 {
     if (unlikely(--ctx->interrupt_counter <= 0)) {
@@ -19158,7 +19158,7 @@ normal_this:
                 call_argc = opcode - OP_call0;
             goto has_call_argc;
             CASE(OP_tail_call):
-                // Tail-call entry (TCO, docs/vm-L2-design.md sec.14 draft):
+                // Tail-call entry (TCO, docs/vm/vm-L2-design.md sec.14 draft):
                 // its own dispatch label, placed ABOVE OP_call so that a
                 // frame-reusing tail call can be added here without one
                 // extra compare on the ordinary call path. Empty for now:

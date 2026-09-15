@@ -6,7 +6,7 @@
 #include "overlay_core.h"
 #include "keymap.h"
 
-// pocket.overlay — the drawing surface of docs/common-api.md 3.1.
+// pocket.overlay — the drawing surface of docs/api/common-api.md 3.1.
 //
 // WHY THIS IS NOT ui.basic, which is what 3.1 names.
 //

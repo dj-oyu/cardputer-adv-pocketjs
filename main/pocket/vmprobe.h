@@ -1,4 +1,4 @@
-// L0 measurement probes (docs/quickjs-freertos-vm-spec.md sec.5). Every
+// L0 measurement probes (docs/vm/quickjs-freertos-vm-spec.md sec.5). Every
 // declaration here is only meaningful, and only compiled in, with
 // CONFIG_POCKET_VM_PROBE on -- see main/Kconfig.projbuild. Call sites in
 // app_session.c and pocket_api.c include this unconditionally and wrap the
@@ -71,14 +71,14 @@ void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us);
 // Called from pocket_api.c's pump, at the moment a completion's resolve/
 // reject actually runs, with (now - the timestamp pocket_api_complete()
 // recorded). This stops at the resolve/reject call, not at the JS handler:
-// reactions run later, in drain_jobs() after frame() (docs/vm-ledger/03).
+// reactions run later, in drain_jobs() after frame() (docs/vm/vm-ledger/03).
 void vmprobe_completion_sample(int64_t latency_us);
 
 // Called from app_stop(): resets the rolling window so one session's tail
 // does not blend into the next session's head in a captured record.
 void vmprobe_session_reset(void);
 
-// G1's device side (docs/vm-L2-design.md sec.1.3: "host is vmrun/
+// G1's device side (docs/vm/vm-L2-design.md sec.1.3: "host is vmrun/
 // stack_probe.sh; the device is confirmed with uxTaskGetStackHighWaterMark").
 // Call with the JS call depth the caller has JUST reached (i.e. from inside
 // the deepest active JS frame), right next to vmprobe_frame_sample's own

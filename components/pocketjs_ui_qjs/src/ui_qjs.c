@@ -862,7 +862,7 @@ esp_err_t pocketjs_ui_turn(pocketjs_ui_qjs_t *binding,
   return pocketjs_ui_core_draw(binding->core, out_frame);
 }
 
-/* VM L1 (docs/vm-L1-design.md sec.2.4): a turn that finishes the PREVIOUS
+/* VM L1 (docs/vm/vm-L1-design.md sec.2.4): a turn that finishes the PREVIOUS
  * turn's job queue instead of calling frame().
  *
  * The core's tick and draw still run, in the same order and with the same

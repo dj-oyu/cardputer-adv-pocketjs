@@ -1,6 +1,6 @@
 #pragma once
 
-// VM L1 (docs/vm-L1-design.md sec.4): how a completion recorded outside the
+// VM L1 (docs/vm/vm-L1-design.md sec.4): how a completion recorded outside the
 // owner task gets the owner task running again.
 //
 // The honest scope, stated here because the name promises more than the level

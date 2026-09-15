@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# G1 (docs/vm-L2-design.md sec.1.3): does C stack use per JS call depend on
+# G1 (docs/vm/vm-L2-design.md sec.1.3): does C stack use per JS call depend on
 # depth? deep_recursion.js's "max_depth" only says how many levels overflow
 # the stack -- a 100 B/level implementation and a 1 KB/level implementation
 # both eventually overflow, just at different depths. That is not the
@@ -32,7 +32,7 @@
 # Exit: 0 if the measurement ran and produced a verdict, 1 if vmrun is
 # missing or a run failed. The VERDICT is reported, not encoded as pass/fail
 # exit status -- "PROPORTIONAL" on the current tree is the CORRECT answer
-# (see docs/vm-L2-design.md sec.1.1 row #1), not a test failure. A caller
+# (see docs/vm/vm-L2-design.md sec.1.1 row #1), not a test failure. A caller
 # that wants "has L2 met condition #1" checks the verdict string.
 set -uo pipefail
 # Absolute, taken BEFORE the cd: the selftest below re-invokes this script,

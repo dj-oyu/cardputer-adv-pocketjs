@@ -1,6 +1,6 @@
 # tools/vmtest — VM 改造のホスト側判定基盤
 
-`docs/quickjs-freertos-vm-spec.md` の L1〜L5 は、すべてここで取った L0 の基準に対して判定する。§12「ホスト上の差分実行・sanitizer・対象機能の Test262 を使い、各レベルで既存の合格項目を維持する」の実体。
+`docs/vm/quickjs-freertos-vm-spec.md` の L1〜L5 は、すべてここで取った L0 の基準に対して判定する。§12「ホスト上の差分実行・sanitizer・対象機能の Test262 を使い、各レベルで既存の合格項目を維持する」の実体。
 
 - **コーパス**（`corpus/*.js` と `expected/*.txt`）: 出力がバイト単位で一致しなければ不合格。L1/L2 が守るべき意味論の基準。
 - **Test262 部分集合**（`test262-baseline.txt`）: L0 で通った (テスト, モード) の一覧。減ったら不合格、増えるのは構わない。
@@ -42,7 +42,7 @@ python3 tools/vmtest/timing.py                 # 時間の計測（書き込み�
 | 上限 | `JS_SetMemoryLimit(160 KiB)` / `JS_SetMaxStackSize(20 KiB)`（`main/app_session.c` の値）。割り込みハンドラも同様に常時 0 を返すものを入れる |
 | 初期化順 | `JS_NewRuntime2` → 上限 → rejection tracker → `js_std_init_handlers` → `JS_NewContext` → `js_std_add_helpers(ctx, 0, NULL)` |
 | drain | `vm_sched_drain()` そのもの。キューが空になるまで実行し、**空になった境界でだけ**未処理 rejection を報告。予算で切れた境界では報告せず継続する。ジョブ自体が例外を投げたら dump して即座に失敗を返し、残りのキューと報告は次の drain に回る |
-| ターンの順序 | 継続 drain が空になるまで、ホスト側の完了配送（`--host-events` の `host.request`）も `frame()` も呼ばない。`docs/vm-L1-design.md` §2.1 の規則そのもの |
+| ターンの順序 | 継続 drain が空になるまで、ホスト側の完了配送（`--host-events` の `host.request`）も `frame()` も呼ばない。`docs/vm/vm-L1-design.md` §2.1 の規則そのもの |
 | 報告文言 | `E pocketjs_guest: Unhandled Promise rejection: <reason>`（ESP_LOGE の時刻部分を除いたもの） |
 
 意図した差分（すべて観測結果を変えないか、明示フラグ）:
@@ -89,7 +89,7 @@ L1 の予算まわり:
 void vmtest_vm_set_force_yield(JSRuntime *rt, int on);
 ```
 
-が定義されていれば呼ぶ。L2 で opcode のチェックポイント（`docs/vm-ledger/04-opcode-checkpoints.md`）を実装したら VM 側でこれを定義し、粒度が opcode まで細かくなる。`run.sh --force-yield` と `test262.py --force-yield` は、その時も「全地点で中断しても出力と合格集合が変わらない」の検査のまま使える（§7 完了条件）。
+が定義されていれば呼ぶ。L2 で opcode のチェックポイント（`docs/vm/vm-ledger/04-opcode-checkpoints.md`）を実装したら VM 側でこれを定義し、粒度が opcode まで細かくなる。`run.sh --force-yield` と `test262.py --force-yield` は、その時も「全地点で中断しても出力と合格集合が変わらない」の検査のまま使える（§7 完了条件）。
 
 L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 3 / 7 / 16`・`--force-yield`・予算なしで、asan と o2 の両方でバイト一致。Test262 は `--force-yield` で両 variant とも 7,501 pass / 194 fail（基準と同じ、`regressions: 0`）。
 

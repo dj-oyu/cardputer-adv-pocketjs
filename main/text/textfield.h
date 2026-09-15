@@ -6,7 +6,7 @@
 // The editing rules of a small host-owned text field, with no board, no IME and
 // no allocation of its own.
 //
-// docs/common-api.md section 6 gives pocket.input.text a field the HOST owns:
+// docs/api/common-api.md section 6 gives pocket.input.text a field the HOST owns:
 // the guest never sees a keystroke and never holds the buffer. Almost every
 // requirement in that paragraph is a decision about one keystroke -- does Enter
 // submit or insert a newline, does Escape cancel the conversion or the session,

@@ -1,6 +1,6 @@
 #pragma once
 
-/* VM L1 (docs/vm-L1-design.md sec.1.3): the one place the scheduler learns
+/* VM L1 (docs/vm/vm-L1-design.md sec.1.3): the one place the scheduler learns
  * what time it is. Everything else takes DIFFERENCES of whatever this returns,
  * so the unit only has to be a monotonic tick -- which counter supplies the
  * ticks, and how many of them make a microsecond, is a build decision (CCOUNT
@@ -20,7 +20,7 @@ extern "C" {
  *
  * The cheapest clock this chip has is CCOUNT -- 6 cycles = 25 ns a read
  * against esp_timer_get_time()'s 200 cycles = 833 ns, measured (device),
- * docs/vm-l1-clock.md sec.1 -- and CCOUNT is a 32-bit cycle counter that wraps
+ * docs/vm/vm-l1-clock.md sec.1 -- and CCOUNT is a 32-bit cycle counter that wraps
  * every 2^32/240e6 ~= 17.9 s at 240 MHz. An UNSIGNED 32-bit subtraction is
  * still exactly right across that wrap (C's mod-2^32 arithmetic returns the
  * true difference for any interval shorter than the period), and a turn budget

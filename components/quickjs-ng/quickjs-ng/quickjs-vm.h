@@ -1,4 +1,4 @@
-// L2 VM harness hooks (docs/vm-L2-design.md sec.1.2 / sec.1.3 G5 / sec.7).
+// L2 VM harness hooks (docs/vm/vm-L2-design.md sec.1.2 / sec.1.3 G5 / sec.7).
 //
 // NOT part of the upstream quickjs-ng import. Like quickjs-vmprobe.h it sits
 // next to the vendored sources so quickjs.c can reach it with a plain include,
@@ -131,7 +131,7 @@ int vmtest_vmstack_set_budget(JSRuntime *rt, size_t bytes);
 
 // ---------------------------------------------------------------- L2c (D18r / D22r)
 //
-// The gate (docs/vm-L2-design.md sec.12.4/12.9): a fixed set of C callers that
+// The gate (docs/vm/vm-L2-design.md sec.12.4/12.9): a fixed set of C callers that
 // can receive a "yielded" result from the VM and must know how to resume it.
 // Before the VM can actually suspend (stage 3 of sec.12.15), every one of
 // these is a plain pass-through -- JS_VMCall === JS_Call, JS_VMEval ===

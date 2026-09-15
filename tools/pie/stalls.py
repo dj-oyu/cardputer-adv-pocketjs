@@ -15,7 +15,7 @@ stall cycle; one independent instruction in between costs nothing.
 The report lists every such pair (including pairs that wrap from the end of
 the loop body to its start), counts memory instructions, estimates the loop
 body size against the 256-byte limit of `loopgtz`, and gives the expected
-cycles per block from the measured machine floor (docs/pie-simd.md 3.5):
+cycles per block from the measured machine floor (docs/perf/pie-simd.md 3.5):
 instructions + 0.6 per store + stalls. Every PIE instruction issues in one
 cycle whatever it is -- sweeping the count of fused loads and of EE.LDXQ.32
 from 0 to 32 changed nothing -- so only the 128-bit store and the stalls are
@@ -40,7 +40,7 @@ STAGE2 = {'ee.vld.128.ip', 'ee.vld.l.64.ip', 'ee.vldbc.16', 'ee.vldbc.16.ip', 'e
           'ee.vmul.s16', 'ee.vmul.u16', 'ee.vrelu.s16', 'ee.vprelu.s16'}
 MEMORY = {'ee.vld.128.ip', 'ee.vld.l.64.ip', 'ee.vldbc.16', 'ee.vldbc.16.ip', 'ee.ldxq.32',
           'ee.vst.128.ip'}
-# Measured machine floor (docs/pie-simd.md 3.5): one cycle per instruction, of
+# Measured machine floor (docs/perf/pie-simd.md 3.5): one cycle per instruction, of
 # any kind -- loads, fused loads and indexed loads included. The store is the
 # only instruction that was measurably more.
 STORE = 0.6           # each EE.VST.128.IP

@@ -1,6 +1,6 @@
 # appcheck — `pocket.app` / `pocket.time` / `pocket.log` の自己検査
 
-`docs/common-api.md` §5（ライフサイクル・フレーム・時刻）と §7 の「ログと診断」が
+`docs/api/common-api.md` §5（ライフサイクル・フレーム・時刻）と §7 の「ログと診断」が
 実機で仕様どおりかを、1回の起動で確かめる。実装は `main/pocket_app.c`。
 
 このファイルは `shell.c` に配線していない（別セッションが同じファイルを持っている

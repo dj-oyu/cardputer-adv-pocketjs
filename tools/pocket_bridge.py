@@ -1,4 +1,4 @@
-"""PC side of pocket.bridge -- docs/common-api.md section 13, USB transport.
+"""PC side of pocket.bridge -- docs/api/common-api.md section 13, USB transport.
 
     python tools/pocket_bridge.py selftest                 # no board, no port
     python tools/pocket_bridge.py serve --port COM3        # answer a running app

@@ -5,7 +5,7 @@
 #include "quickjs.h"
 #include "keymap.h"
 
-// pocket.input.text — the TextSession of docs/common-api.md section 6.
+// pocket.input.text — the TextSession of docs/api/common-api.md section 6.
 //
 // The field is the HOST's: main.c takes the keystrokes away from the guest for
 // as long as a session is open, main/text/textfield.c decides what each one
@@ -43,7 +43,7 @@ bool pocket_text_active(void);
 // that onSubmit/onCancel imply -- and QUEUES the guest's callback for
 // pocket_text_pump(). main.c calls this outside app_tick(), and from L1 on a
 // turn may open with an unfinished job queue that nothing may cut into
-// (docs/vm-L1-design.md sec.2.1), which is why the JS_Call is not made here.
+// (docs/vm/vm-L1-design.md sec.2.1), which is why the JS_Call is not made here.
 void pocket_text_key(const keystroke_t *key);
 
 // Delivers the callbacks queued by pocket_text_key(), in the order the

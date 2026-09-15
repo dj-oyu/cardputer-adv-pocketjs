@@ -18,7 +18,7 @@
 static const char *TAG = "pocketjs_guest";
 
 #ifdef CONFIG_POCKET_VM_PROBE
-/* VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5): frame() time and drain
+/* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5): frame() time and drain
  * time, kept apart. main/pocket/vmprobe.c times the whole pocketjs_ui_turn(),
  * which is frame() + drain + the UI core's tick and draw; sec.5 asks for drain
  * time on its own and this is the only file that can see where drain starts.
@@ -36,7 +36,7 @@ void pocketjs_guest_vmprobe_take(uint32_t *call_us, uint32_t *drain_us) {
   vmprobe_drain_us = 0;
 }
 
-/* vm-l1-tuning (docs/vm-l1-tuning.md): jobs actually returned by ONE
+/* vm-l1-tuning (docs/vm/vm-l1-tuning.md): jobs actually returned by ONE
  * vm_sched_drain() call, recorded from drain_jobs() -- the single choke
  * point both pocketjs_guest_frame() (the frame()-triggering call) and
  * pocketjs_guest_continue() (a continuation of the same logical drain, sec.2.1)
@@ -105,7 +105,7 @@ struct pocketjs_guest {
   uint32_t frames;
   uint32_t frame_errors;
   uint32_t jobs;
-  /* L1 (docs/vm-L1-design.md). The budget is armed by the host once per turn
+  /* L1 (docs/vm/vm-L1-design.md). The budget is armed by the host once per turn
    * and read by every drain in that turn, so the frame()'s drain and the next
    * turn's continuation drain share one deadline measured from turn start. */
   vm_budget_t budget;
@@ -296,7 +296,7 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
   guest->drain_us += guest->budget.elapsed;
   guest->drain_jobs += ran;
   guest->jobs_pending = (status == VM_DRAIN_YIELDED);
-  /* L2c gate (docs/vm-L2-design.md sec.12.6-4/12.9): vm_sched_drain() can
+  /* L2c gate (docs/vm/vm-L2-design.md sec.12.6-4/12.9): vm_sched_drain() can
    * report a parked chain now, but nothing in this build can ever park one
    * (every JS_VM* symbol is a pass-through, stage 1/2 of sec.12.15 do not
    * touch quickjs.c) -- so this is here only so a real interpreter change
@@ -328,7 +328,7 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
    * zero. Cleared before the report, which can itself fail the turn. */
   guest->drain_us = 0;
   guest->drain_jobs = 0;
-  /* D43 (docs/vm-L2-design.md sec.13): the turn is over, so the frame
+  /* D43 (docs/vm/vm-L2-design.md sec.13): the turn is over, so the frame
    * segments the stack kept for reuse during it go back to the heap. Kept
    * across a YIELDED drain above, which is the same logical turn. */
   JS_VMStackTrim(guest->runtime);
