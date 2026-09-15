@@ -22,6 +22,7 @@ TARGETS = {
     'blend': (['blend_model.c'], []),
     'accel': (['accel_host_test.c'], ['-DRENDER_ACCEL_HOST_MODEL', '-I' + os.path.join(MODELS, 'stub')]),
     'garden': (['garden_model.c'], []),
+    'fir': (['fir_model.c'], []),
 }
 
 
