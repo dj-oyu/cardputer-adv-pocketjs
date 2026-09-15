@@ -837,6 +837,128 @@ static uint16_t pack565(unsigned r,unsigned g,unsigned b,bool dither,int x,int y
     return (uint16_t)(quantize(r,31,threshold)<<11|
                       quantize(g,63,threshold)<<5|quantize(b,31,threshold));
 }
+#ifdef KSN_COUNT_VISIBLE
+/* ---- Candidate 4e "visible threshold skip": the measurement -------------- */
+static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int x,int y);
+static uint16_t rgb565(ksn_rgba c);
+/* A 5/6/5 panel quantizes every channel to 32/64/32 levels, so a blend whose
+ * source and destination name the same level (or a neighbour) can be left
+ * unwritten. This counts how often that is true, per command kind and per
+ * dither arm, and what skipping would actually cost in the written word: the
+ * criteria are evaluated against the SOURCE, `moved`/`worst` are the chain's
+ * own word on the pixels a criterion would skip -- moved pixels and the worst
+ * channel step in 5/6/5 levels. No arithmetic here changes a pixel: these are
+ * reads of the word the chain was about to write. Only compiled in with
+ * -DKSN_COUNT_VISIBLE, so the shipping render path keeps its instruction
+ * stream (main/ui/kasane/ksn_render.c object is byte-identical without it).
+ *
+ * Three arms, all sound for a non-dithering command (the proof is in the
+ * commit message and the test):
+ *   0 `step`: the source's own levels are within one step of dst in every
+ *     channel. The blend output lies between src and the destination's
+ *     expanded 8-bit channels, and quantizing is monotone, so the written
+ *     level is between the two levels and never further than one step.
+ *   1 `bound`: (alpha * max channel |src8 - dst8|) <= 2*255. The blend output
+ *     is within alpha/255 * that distance + 0.5 of dst8; any 8-bit distance
+ *     <= 3 keeps the g level (step 4) and the r/b levels (step 8) within one
+ *     step. This arm catches the anti-aliased text edge (tiny alpha, any
+ *     source) that arm 0 misses and arm 0 catches the case arm 1 misses
+ *     (opaque source, same level).
+ *   2 both: arms 0 and 1 together, the criterion the skip would ship with.
+ *   3 exact: arm 0 with zero steps. This is the only arm a dithering command
+ *     may use: quantize() adds at most one level on top of the written level,
+ *     so an arm that already allows one step reaches two with dither on.
+ * Arms 0 and 1 are not nested, which is why the union has to be counted. */
+#define KSN_VIS_TEXT 0
+#define KSN_VIS_RECT 1
+#define KSN_VIS_ROUND_RECT 2
+#define KSN_VIS_STROKE 3
+#define KSN_VIS_GRADIENT 4
+#define KSN_VIS_GROUP 5
+#define KSN_VIS_KINDS 6
+#define KSN_VIS_ARMS 4 /* step, bound, both, exact */
+typedef struct {
+    uint64_t empty;       /* chain returned dst because alpha was 0 (already free) */
+    uint64_t pixels;      /* blend points that reached the chain */
+    uint64_t exact;       /* the source's own levels equal dst in all three channels */
+    uint64_t chain_moved; /* every counted pixel: the chain's word differed from dst */
+    uint64_t chain_worst; /* every counted pixel: worst channel step */
+    uint64_t sel[KSN_VIS_ARMS];   /* pixels each arm would skip */
+    uint64_t moved[KSN_VIS_ARMS]; /* of those: the chain's word differed from dst */
+    uint64_t worst[KSN_VIS_ARMS]; /* of those: worst channel step the chain moved */
+} ksn_visible_slot;
+ksn_visible_slot g_ksn_visible[KSN_VIS_KINDS*2];
+void ksn_visible_reset(void){memset(g_ksn_visible,0,sizeof(g_ksn_visible));}
+static unsigned visible_kind(unsigned kind){
+    switch(kind){
+    case KSN_TEXT:return KSN_VIS_TEXT;
+    case KSN_ROUND_RECT:return KSN_VIS_ROUND_RECT;
+    case KSN_STROKE:return KSN_VIS_STROKE;
+    case KSN_GRADIENT:return KSN_VIS_GRADIENT;
+    default:return KSN_VIS_RECT;
+    }
+}
+static unsigned step_of(uint16_t value,unsigned shift,unsigned mask){return (value>>shift)&mask;}
+static unsigned abs_diff(unsigned a,unsigned b){return a>b?a-b:b-a;}
+/* Worst per-channel step between two 5/6/5 words. */
+static unsigned visible_steps(uint16_t a,uint16_t b){
+    const unsigned shifts[3]={11,5,0},masks[3]={31,63,31};
+    unsigned worst=0;
+    for(unsigned n=0;n<3;n++){
+        unsigned d=abs_diff(step_of(a,shifts[n],masks[n]),step_of(b,shifts[n],masks[n]));
+        if(d>worst)worst=d;
+    }
+    return worst;
+}
+/* dst expanded back to 8 bits per channel, as blend() does before it mixes. */
+static void visible_expand(uint16_t dst,unsigned *r,unsigned *g,unsigned *b){
+    unsigned qr=step_of(dst,11,31),qg=step_of(dst,5,63),qb=step_of(dst,0,31);
+    *r=(qr<<3)|(qr>>2);*g=(qg<<2)|(qg>>4);*b=(qb<<3)|(qb>>2);
+}
+static unsigned visible_span(ksn_rgba src,uint16_t dst){
+    unsigned r,g,b;visible_expand(dst,&r,&g,&b);
+    unsigned worst=abs_diff((src>>24)&255u,r);
+    unsigned d=abs_diff((src>>16)&255u,g);if(d>worst)worst=d;
+    d=abs_diff((src>>8)&255u,b);if(d>worst)worst=d;
+    return worst;
+}
+static unsigned visible_alpha(ksn_rgba src,uint8_t opacity){
+    return ((src&255u)*opacity+127u)/255u;
+}
+static void visible_count(unsigned slot,uint16_t dst,ksn_rgba src,uint8_t opacity,uint16_t out){
+    ksn_visible_slot *s=&g_ksn_visible[slot];
+    unsigned alpha=visible_alpha(src,opacity);
+    uint16_t src565=rgb565(src);
+    unsigned src_step=visible_steps(src565,dst),out_step=visible_steps(out,dst);
+    bool arm[KSN_VIS_ARMS];
+    arm[0]=src_step<=1u;
+    arm[1]=alpha*visible_span(src,dst)<=2u*255u;
+    arm[2]=arm[0]||arm[1];
+    arm[3]=src_step==0u;
+    s->pixels++;
+    if(!src_step)s->exact++;
+    if(out!=dst)s->chain_moved++;
+    if(out_step>s->chain_worst)s->chain_worst=out_step;
+    for(unsigned n=0;n<KSN_VIS_ARMS;n++)if(arm[n]){
+        s->sel[n]++;
+        if(out!=dst)s->moved[n]++;
+        if(out_step>s->worst[n])s->worst[n]=out_step;
+    }
+}
+static uint16_t visible_blend(unsigned slot,uint16_t dst,ksn_rgba src,uint8_t opacity,
+                              bool dither,int x,int y){
+    if(!visible_alpha(src,opacity)){g_ksn_visible[slot].empty++;return dst;}
+    uint16_t out=blend(dst,src,opacity,dither,x,y);
+    visible_count(slot,dst,src,opacity,out);
+    return out;
+}
+#define KSN_BLEND(slot,dst,src,opacity,dither,x,y) \
+    visible_blend((slot),(dst),(src),(opacity),(dither),(x),(y))
+#define KSN_SLOT(kind,dither) (visible_kind(kind)*2u+((dither)?1u:0u))
+#else
+#define KSN_BLEND(slot,dst,src,opacity,dither,x,y) blend((dst),(src),(opacity),(dither),(x),(y))
+#define KSN_SLOT(kind,dither) 0u
+#endif
 static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opacity,
                            bool dither,int x,int y){
     unsigned alpha=mul8(src.a,opacity);
@@ -857,7 +979,22 @@ static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opac
         g=clamp8(mul8(src.g,opacity)+mul8((g<<2)|(g>>4),inverse));
         b=clamp8(mul8(src.b,opacity)+mul8((b<<3)|(b>>2),inverse));
     }
+#ifdef KSN_COUNT_VISIBLE
+    /* The group's own candidate word: the composite before dither, which is
+     * what a cheap test inside this function could compare with dst. The
+     * source for the counting criteria is the tile colour as the straight
+     * 8-bit channels plus alpha, so the bound arm sees the same alpha this
+     * function used. Pixels whose tile alpha is 0 returned above as `empty`. */
+    {
+        uint16_t out=pack565(r,g,b,dither,x,y);
+        ksn_rgba straight=(ksn_rgba)((uint32_t)src.r<<24|(uint32_t)src.g<<16|
+                                     (uint32_t)src.b<<8|src.a);
+        visible_count(KSN_VIS_GROUP*2u+(dither?1u:0u),dst,straight,opacity,out);
+        return out;
+    }
+#else
     return pack565(r,g,b,dither,x,y);
+#endif
 }
 /* ------------------------------------------------------------------------- *
  * Boundary 4 of docs/perf/kasane-opt-survey.md: the direct blend chain as a
@@ -1740,7 +1877,8 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                             continue;
                         }
                         ksn_rgba color=(d->data.text.color&0xffffff00u)|mul8(d->data.text.color&255,scratch.text[i]);
-                        pixels[index]=blend(pixels[index],color,d->opacity,false,x+(int)i,py);
+                        pixels[index]=KSN_BLEND(KSN_SLOT(KSN_TEXT,false),pixels[index],color,
+                                                d->opacity,false,x+(int)i,py);
                     }
                     KSN_PROF_END(blend);}
                 }
@@ -1786,7 +1924,12 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                      * always run, kept for the switch off and for any row the
                      * builder declines. The lut arm is tried first and only
                      * engages for a constant-colour command -- the same colour
-                     * the table would hold -- so the two arms agree. */
+                     * the table would hold -- so the two arms agree. The chain
+                     * calls go through KSN_BLEND, which is `blend` unless the
+                     * counting build (-DKSN_COUNT_VISIBLE) is measuring the
+                     * candidates for boundary 4e; the table read replaces the
+                     * chain for its pixels, so those are not counted (the
+                     * counting arm turns the table off to see the whole chain). */
                     const ksn_row_table *row=run_count?
                         row_table_for(command,py,runs[0].x0,runs[run_count-1].x1):NULL;
                     for(unsigned run=0;run<run_count;run++){
@@ -1795,13 +1938,15 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                             unsigned index=(unsigned)((py-y)*240+x);
                             if(lut)pixels[index]=blend_lut_pack(pixels[index],
                                 lut[bayer_row?(unsigned)bayer_row[(unsigned)x&3u]:0u]);
-                            else pixels[index]=blend(pixels[index],row_table_value(row,x),d->opacity,
+                            else pixels[index]=KSN_BLEND(KSN_SLOT(d->kind,dither),
+                                                     pixels[index],row_table_value(row,x),d->opacity,
                                                      dither,x,py);
                         }else for(int x=from;x<to;x++){
                             unsigned index=(unsigned)((py-y)*240+x);
                             if(lut)pixels[index]=blend_lut_pack(pixels[index],
                                 lut[bayer_row?(unsigned)bayer_row[(unsigned)x&3u]:0u]);
-                            else pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
+                            else pixels[index]=KSN_BLEND(KSN_SLOT(d->kind,dither),
+                                                     pixels[index],sample(command,x,py),d->opacity,
                                                      dither,x,py);
                         }
                     }
@@ -1809,7 +1954,8 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     unsigned index=(unsigned)((py-y)*240+x);
                     if(lut)pixels[index]=blend_lut_pack(pixels[index],
                         lut[bayer_row?(unsigned)bayer_row[(unsigned)x&3u]:0u]);
-                    else pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
+                    else pixels[index]=KSN_BLEND(KSN_SLOT(d->kind,dither),
+                                             pixels[index],sample(command,x,py),d->opacity,
                                              dither,x,py);
                 }
             }
