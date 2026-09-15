@@ -2,11 +2,15 @@
 compiler is available (gcc, clang, cc, or `zig cc`).
 
     python tools/pie/run_models.py            every model
-    python tools/pie/run_models.py blendpack  one of: ocean, wave, blend, accel, garden, blendpack
+    python tools/pie/run_models.py blendpack  one of: ocean, wave, blend, accel, garden, blendpack, scale256
 
 Each model prints its own verdict; this script fails if any of them reports a
 mismatch or a non-zero exit. The ocean and blendpack models need a few seconds,
-the others about a second.
+the others about a second. scale256 is the one whose sweep is expected to find
+moved pixels (it is an approximation being measured, not an identity being
+proved): it prints those counts and still exits 0, because the claims it does
+assert -- the scale's identities, the off arm against the pre-change formula,
+and the alphas that must not move -- all hold.
 """
 import os
 import shutil
@@ -23,6 +27,7 @@ TARGETS = {
     'accel': (['accel_host_test.c'], ['-DRENDER_ACCEL_HOST_MODEL', '-I' + os.path.join(MODELS, 'stub')]),
     'garden': (['garden_model.c'], []),
     'blendpack': (['blend_pack_model.c'], []),
+    'scale256': (['scale256_model.c'], []),
 }
 
 
