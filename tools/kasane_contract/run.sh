@@ -12,6 +12,11 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   tools/kasane_contract/use_cases.c tools/kasane_contract/test_core.c -o "$out/core"
 "$out/core"
 for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
+  for fill_mode in '' '-DKSN_PIE_FILL_MODEL'; do
+    cc -std=c11 -Wall -Wextra -Werror $options $fill_mode -Imain/ui/kasane \
+      main/ui/kasane/ksn_core.c tools/kasane_contract/test_fill.c -o "$out/fill"
+    "$out/fill"
+  done
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_view.c -o "$out/view"
@@ -66,5 +71,6 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   python3 tools/kasane_contract/stress_reference.py "$out/stress.bin"
 done
 python3 tools/pie/test_frost.py
+python3 tools/kasane_contract/fill_pie.py
 printf '#include "ksn_api.h"\n#include "ksn_ports.h"\n#include "ksn_core.h"\n#include "ksn_cache.h"\n#include "ksn_modal.h"\n#include "ksn_view_host.h"\n' | \
   c++ -std=c++17 -Wall -Wextra -Werror -Imain/ui/kasane -x c++ -fsyntax-only -

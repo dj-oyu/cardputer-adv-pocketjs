@@ -57,6 +57,30 @@ commit・pushして進める。実機未確認は各記録に残す。
 - ESP-IDF `-B build_ds_contract build`: PASS。app2,172,032 B、空き973,696 B、DIRAM123,404 B。
   static DIRAM増分0。実機未確認、シリアル操作なし。
 
+## PIE追補 — 背景と不透明矩形の連続塗りつぶし（2026-09-15）
+
+- ユーザーのPIE推奨を受け、CP3a `af8da25`のpush後に追加。CP3bのcore分割は次の課題。
+- 背景帯と不透明RECTを連続RGB565 fillへまとめる。矩形の色変換は範囲ごとに1回。
+  半透明、group、角丸、gradientの量子化は既存経路で処理する。
+- S3では先頭をscalarで16-byte境界へ揃え、8画素単位をPIEでstore、端数はscalar。
+  出力の先頭画素へ色を置いて`EE.VLDBC.16`でbroadcastするため、色表や追加scratchはない。
+  q0とハードウェアループを使うowner-task専用関数。ポインタはearly-clobber制約を持つ。
+- ESP32-S3 HW MCPへstdio接続し、`knowledge_routes`、`get_instruction`、
+  `example_measured_semantics`、`analyze_sequence`、`pie_cost_estimate`を利用。
+  サーバーは`dj-oyu/esp32s3-hw-mcp`の`fb3561ee79c6b5af3a2dbe01d18e04d8e8d804cb`。
+  TRM v1.8 p170のVLDBC.16と、同MCPの実機記録が確認した128-bit accessの下位4bit切捨てに従う。
+  TRM: https://documentation.espressif.com/esp32-s3_technical_reference_manual_en.pdf
+- コストモデルのstore増分0.6を使うと、240×8画素帯のvector本体は240×1.6=384 cyclesという
+  **推定**になる。整列処理・関数呼出し・色seed・タスク切替は別。速度の実測値ではない。
+- H: `bash tools/kasane_contract/run.sh` PASS。Cのscalar/model両経路で0..1,920画素、
+  全8種のuint16開始alignment、7色、両端guardを検査（ASan/UBSanとO2）。
+  `fill_pie.py`は実asmをpiesimで実行し、1/2/3/29/30/210/240ブロックの画素・ポインタ・guard一致を確認。
+  既存合成・repair・ディザ・frost・C++ヘッダもPASS。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane` PASS。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,172,256 B、空き973,472 B。
+  DIRAM123,404 Bで増分0。objdumpでbroadcast→loopgtz→単一VST→returnを確認。
+  asm loop本体3 B、追加vector領域なし。実機速度・画素確認は後日。シリアル操作なし。
+
 ## checkpoint 0 — JS失敗の原子性（2026-09-15）
 
 - 有効な所有transactionで起きた引数検証・getter・確保失敗は、JSでcatchしても更新全体をabortする。

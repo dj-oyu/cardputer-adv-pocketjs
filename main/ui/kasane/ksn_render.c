@@ -1,5 +1,42 @@
 #include "ksn_render.h"
 #include <string.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(KSN_PIE_FILL_MODEL)
+/* The caller seeds the first aligned destination pixel. Broadcasting from
+ * the output avoids a stack vector or a persistent colour table. Owner task
+ * only: PIE is coprocessor 3. blocks is positive and dst is 16-byte aligned. */
+static void __attribute__((noinline)) fill_blocks(uint16_t *dst,unsigned blocks){
+#ifdef KSN_PIE_FILL_MODEL
+    uint16_t color=*dst;
+    for(unsigned i=0;i<blocks*8;i++)dst[i]=color;
+#else
+    __asm__ volatile(
+        "ee.vldbc.16 q0, %[dst]\n"
+        "loopgtz %[blocks], 1f\n"
+        "  ee.vst.128.ip q0, %[dst], 16\n"
+        "1:\n"
+        : [dst] "+&a"(dst)
+        : [blocks] "a"(blocks)
+        : "memory");
+#endif
+}
+#endif
+
+static void fill565(uint16_t *dst,unsigned count,uint16_t color){
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(KSN_PIE_FILL_MODEL)
+    /* PIE rounds the address down; peel up to seven pixels before using it. */
+    while(count&&((uintptr_t)dst&15u)){*dst++=color;count--;}
+    unsigned blocks=count/8;
+    if(blocks){
+        *dst=color;fill_blocks(dst,blocks);
+        dst+=blocks*8;count%=8;
+    }
+#endif
+    while(count--)*dst++=color;
+}
 
 /* The type is the format tag: these channels are premultiplied, never straight. */
 typedef struct { uint8_t r,g,b,a; } ksn_premultiplied_rgba8;
@@ -169,7 +206,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     for(unsigned band=0;band<17;band++){
         if(!(mask&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
-        for(int i=0;i<240*rows;i++)pixels[i]=rgb565(frame.next_background);
+        fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
             result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,i,&command);
             if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
@@ -195,6 +232,13 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             if(x1>240)x1=240;
             if(y0<y)y0=y;
             if(y1>y+rows)y1=y+rows;
+            if(x0>=x1||y0>=y1)continue;
+            if(d->kind==KSN_RECT&&d->opacity==255&&(d->data.shape.color&255)==255){
+                uint16_t color=rgb565(d->data.shape.color);
+                for(int py=y0;py<y1;py++)
+                    fill565(pixels+(py-y)*240+x0,(unsigned)(x1-x0),color);
+                continue;
+            }
             for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x++)if(covers(&command,x,py)){
                 unsigned index=(unsigned)((py-y)*240+x);
                 pixels[index]=blend(pixels[index],sample(&command,x,py),d->opacity,
