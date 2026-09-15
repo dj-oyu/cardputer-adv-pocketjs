@@ -109,7 +109,9 @@ bool ime_on(const ime_t *im);      /* kana input armed */
  *
  * Nothing is persisted on this edge, or on any other: an IME session is
  * entirely in memory (the learning store that used to be written back
- * here was removed 2026-07-30, docs/skk-ime-design.md §S7). */
+ * here was removed 2026-07-30 — persisting per-user state clashed with
+ * the caller-owned, zero-allocation design skk_core and this component
+ * both hold to; see skk_core.h). */
 void ime_set_on(ime_t *im, bool on);
 
 /* Feed one key, exactly as the surface produced it — the same bytes

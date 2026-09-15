@@ -106,10 +106,3 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 - **JS のソース**（`apps/**/*.js`、`tools/vmtest/**/*.js`）。ゲストは起動時にソースを解析するので、バイト数がそのままヒープを使う。OOM の境界を突くテストは、ヒープの余りがバイト単位で動くと結果が変わる。節番号の書き換えは同じバイト長で行った。
 - **上流へ出すパッチ**（`reports/upstream/*.patch`）。レビューした内容のまま保つ。
-
-## 既知の切れた参照
-
-どのブランチの履歴にも存在しない文書を、コードのコメントが参照している。書いた文書が別の場所にあるのか、書かれなかったのかは未確認。
-
-- `docs/skk-ime-design.md` — `components/ime_core/include/ime_core.h`、`components/skk_core/include/skk_core.h`
-- `docs/keyboard-ime-unification.md` — `components/skk_core/include/skk_core.h`
