@@ -1481,7 +1481,7 @@ static int garden_decor_profile(int distance,int inv) {
 // the group's first column, so widening the group doubles how far a pixel's profile is
 // from its own column. Eight is the default; four is the old behaviour, and the way
 // back if the wider group reads as banding on the device.
-int g_garden_decor_group=4;   /* 8 makes the host test abort; see the note below the definition */
+int g_garden_decor_group=8;
 
 static uint16_t garden_decor_mix(uint16_t p,int light,int shadow,int d) {
     int r=(p>>11)&31,g=(p>>5)&63,b=p&31;
@@ -1556,6 +1556,14 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
         // 31.0 fps.
         for(int x=lo;x<=hi;) {
             int nx=x+g_garden_decor_group;if(nx>hi+1)nx=hi+1;   /* the group, clipped to the span */
+            // A group must not straddle the beam's core. Every pixel in the group uses
+            // the profile evaluated at the group's first column, so a group that reached
+            // into the core would light the core with a value from outside it -- and the
+            // core staying untouched is an invariant, not a preference
+            // (tools/test_garden_decor.c asserts it over 256 frames). This clip is what
+            // makes a wider group safe: the group stops at the core's near edge and the
+            // next one starts after it.
+            {int cl=center-(half/2-6);if(x<cl&&nx>cl)nx=cl;}
             int n=nx-x;
             // Let only the soft fringe graze six pixels further into the
             // main beam; a smooth ramp keeps its bright core undisturbed.
