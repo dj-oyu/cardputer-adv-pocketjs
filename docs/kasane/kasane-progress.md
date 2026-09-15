@@ -15,6 +15,10 @@
 - System/実QuickJS host試験ASan/UBSan・O2 PASS。60秒無期限、未poll dirty、時計要求、
   timer/snooze、電源購読解除、満杯timerのACK再試行、tick切上げ・極大値を検証。
 - 通常/Kasane-only build・link監査PASS。DIRAM137,964 / 136,604 Bで増加なし。
+- COM3に書込み、`system_device_test.py --kasane`の満杯/ACK/retry/snooze/消去PASS。
+  続くKasane起動終了2回はfree255,848 / largest81,920 Bで一致。
+  `.cache/system-deadline-device`と`.cache/system-deadline-cycles`に記録。
+  SNTPの実機到着競合・遅延や端末全体の静止wake数は今回の実機試験では測定していない。
 
 ## checkpoint 14d2 — 録音SYSTEM部品（2026-09-16）
 
