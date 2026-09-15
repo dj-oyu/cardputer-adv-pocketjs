@@ -37,6 +37,41 @@ uint32_t garden_prof_motes(uint32_t *rows) {
     garden_mote_cycles=0;garden_mote_rows=0;
     return v;
 }
+// TEMPORARY, and it exists because `decor` is four jobs added together. SPLIT
+// subtracts the vector kernel from garden_row_blend and calls the remainder
+// decor -- 14 to 16 ms of trunks, canopy, grass, decorative rays, the dissolve
+// between two layouts and the row scaffolding, with no way to say which. The
+// instruction-count floor can only explain 6.3 ms of it (rays 3.9 + canopy 2.0 +
+// trunks 0.30 + grass 0.12), so the missing 8 to 10 ms is either one of those
+// jobs being far more expensive than its instruction count or the scaffolding
+// nobody counted. Two counters inside the shipping binary answer that; the row
+// counts are printed rather than assumed, because the last two attributions in
+// flower.c both divided by a number nobody had counted.
+//
+// `garden_dissolve_rows` is the third number and it is not optional: during a
+// layout cross-fade (FLOWER_GARDEN_FADE_S = 3 s out of a 40 s hold) every row
+// runs the vegetation pass twice and then blends, so a 60-frame average of
+// vegetation is the average of two different amounts of work unless the reader
+// knows how many rows were in each state.
+static uint32_t garden_veg_cycles,garden_veg_rows,garden_veg_passes;
+static uint32_t garden_ray_cycles,garden_ray_rows;
+static uint32_t garden_dissolve_rows;
+uint32_t garden_prof_vegetation(uint32_t *rows,uint32_t *passes) {
+    uint32_t v=garden_veg_cycles;
+    if(rows)*rows=garden_veg_rows;
+    if(passes)*passes=garden_veg_passes;
+    garden_veg_cycles=0;garden_veg_rows=0;garden_veg_passes=0;
+    return v;
+}
+uint32_t garden_prof_rays(uint32_t *rows) {
+    uint32_t v=garden_ray_cycles;
+    if(rows)*rows=garden_ray_rows;
+    garden_ray_cycles=0;garden_ray_rows=0;
+    return v;
+}
+uint32_t garden_prof_dissolve(void) {
+    uint32_t v=garden_dissolve_rows;garden_dissolve_rows=0;return v;
+}
 #endif
 
 // No writable statics, LUTs, images or vertex lists. A broad warm scattering
@@ -1732,22 +1767,53 @@ static void garden_atmosphere_row(uint16_t *row,int y,const GardenFrame *f) {
     garden_pixels_row(row,y,f);
 #endif
 #if GARDEN_DECOR_RAYS && !GARDEN_MOTE_ONLY
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;uint32_t rt0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#endif
     garden_decor_row(row,y,f);
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;garden_ray_cycles+=esp_cpu_get_cycle_count()-rt0;garden_ray_rows++;GARDEN_FENCE;
+#endif
 #endif
 }
 void garden_row(uint16_t *row,int y,const GardenFrame *f) {
     garden_atmosphere_row(row,y,f);
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;uint32_t vt0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#endif
     garden_vegetation_row(row,y,f,f->seed);
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;garden_veg_cycles+=esp_cpu_get_cycle_count()-vt0;
+    garden_veg_rows++;garden_veg_passes++;GARDEN_FENCE;
+#endif
 }
 void garden_row_blend(uint16_t *row,int y,const GardenFrame *f,unsigned old_seed,unsigned mix) {
     if(mix>=256||old_seed==f->seed) {garden_row(row,y,f);return;}
     garden_atmosphere_row(row,y,f);
-    if(!mix) {garden_vegetation_row(row,y,f,old_seed);return;}
+    if(!mix) {
+#ifdef ESP_PLATFORM
+        GARDEN_FENCE;uint32_t vt1=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#endif
+        garden_vegetation_row(row,y,f,old_seed);
+#ifdef ESP_PLATFORM
+        GARDEN_FENCE;garden_veg_cycles+=esp_cpu_get_cycle_count()-vt1;
+        garden_veg_rows++;garden_veg_passes++;GARDEN_FENCE;
+#endif
+        return;
+    }
     // The atmosphere and swarm are evaluated once. Both vegetation layouts
     // occlude the SAME lit row, then dissolve between those two results.
     // One 480-byte temporary row, no retained frame or second flower trace.
     uint16_t next[240];memcpy(next,row,sizeof next);
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;uint32_t vt2=esp_cpu_get_cycle_count();GARDEN_FENCE;
+    garden_dissolve_rows++;
+#endif
     garden_vegetation_row(row,y,f,old_seed);
     garden_vegetation_row(next,y,f,f->seed);
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;garden_veg_cycles+=esp_cpu_get_cycle_count()-vt2;
+    garden_veg_rows++;garden_veg_passes+=2;GARDEN_FENCE;
+#endif
     for(int x=0;x<240;x++)row[x]=garden_mix(row[x],next[x],mix);
 }

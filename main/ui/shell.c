@@ -542,7 +542,8 @@ void shell_draw(const char *error, unsigned phase) {
     hud_label_t labels[HUD_LABEL_MAX];hud_labels=labels;
     int64_t hud_once=esp_timer_get_time();
     HUD_FENCE;uint32_t f0=esp_cpu_get_cycle_count();HUD_FENCE;
-    char meter[16];snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
+    char meter[16];meter[0]=0;
+    if(show_fps)snprintf(meter,sizeof(meter),"%2.0f FPS",fps);
     HUD_FENCE;uint32_t f1=esp_cpu_get_cycle_count();HUD_FENCE;
     hud_fmt_cy+=f1-f0;
     // 3.1 (revised 2026-09-09): AN OVERLAY ENDS THE MENU. Not "is drawn under

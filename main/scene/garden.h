@@ -404,6 +404,15 @@ uint32_t garden_prof_motes(uint32_t *rows);
 // TEMPORARY: the canopy blend's own cycles since the last call, and the number of
 // ellipse-rows they cover. Clears both.
 uint32_t garden_prof_canopy(uint32_t *rows);
+// TEMPORARY, same block. decor (garden minus the vector kernel) is four jobs
+// added together; these are the two that can be measured without a second build.
+// Vegetation returns its cycles with the rows and the vegetation passes it ran
+// (a cross-fading row runs two passes, so cycles/row is only readable beside
+// them); rays returns its cycles and rows; dissolve returns the number of rows
+// that took the two-layout path this report. All clear on read.
+uint32_t garden_prof_vegetation(uint32_t *rows,uint32_t *passes);
+uint32_t garden_prof_rays(uint32_t *rows);
+uint32_t garden_prof_dissolve(void);
 #endif
 // TEMPORARY A/B switch, defined in garden.c and flipped by whatever is measuring
 // it. 1 = the shipping path: the canopy blend skips the pixels whose alpha is
