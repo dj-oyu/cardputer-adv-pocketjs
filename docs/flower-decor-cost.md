@@ -38,8 +38,43 @@ row decisions and a conditional narrow-fragment operation, partly offset by
 skipped reveal rows. A sub-millisecond event budget is a hypothesis to measure,
 not a validated upper bound.
 
+## Measured on the device (2026-09-15)
+
+The 6..12 ms band above is an estimate built from instruction counts. It now has a
+measurement: `decor` -- `garden_row_blend`'s row time minus the vector pixel pass,
+the one number in SPLIT that had never been split -- is bracketed into its two
+jobs by `garden_prof_vegetation()` / `garden_prof_rays()` and reported as SPLIT3
+(`main/scene/garden.c`, `main/scene/flower.c`). 36 sixty-frame windows on the
+Cardputer ADV (`vm-L1-60-g8779e3e` + the brackets), species 1 / 10 / 11 / 12,
+log `\.cache/hosttests/logs/flower-instrument-20260915.log`, re-read with
+`python tools/flower_instrument_summary.py <log>`:
+
+| term | measured (ms/frame) | cycles/row | instruction-count floor |
+| --- | ---: | ---: | ---: |
+| rays (the auxiliary pass) | 7.6 .. 13.7, typical ~10 | 13,450 .. 24,300 | 3.9 |
+| vegetation (canopy + trunks + grass) | 5.0 .. 5.9 | 8,900 .. 10,460 | 2.4 |
+| rest (row scaffolding, dissolve memcpy + mix) | 0.24 .. 0.36 | -- | not counted |
+
+Three things follow.
+
+1. **The rays are the largest single term in `decor`, and the estimate holds.**
+   7.6..13.7 measured against a 6..12 estimate: the auxiliary pass was the piece
+   to instrument, and it was measured, not guessed, at the top of its band.
+2. **The two bracketed jobs are each about 2.4x their instruction-count floor.**
+   That is where the 8..10 ms of unattributed `decor` went -- not into a fourth
+   job and not into the row scaffolding, which is 0.24 ms. A 1-cycle-per-
+   instruction count on this scalar row code underestimates by ~2.4x (branch,
+   load and cache costs), and that factor is now measured rather than assumed.
+3. **A cross-fade is visible in the same report.** During a dissolve the
+   vegetation pass runs twice, which the counters show directly: rows dissolving
+   105 of 135 gave veg 9.61 ms with 240 passes and rest 3.37 ms, against 5.7 ms /
+   135 passes / 0.26 ms for the settled windows. A bare cycles-per-row average
+   would have been the mean of two different amounts of work.
+
+
 The existing `SPLIT decor` is garden minus pixels and includes vegetation as
-well as these rays. It must not be reported as isolated auxiliary-ray timing.
-Device cycle-counter measurements around the auxiliary pass, inside one build,
-are needed for a reliable number. Host ratios must not be scaled from the PIE
-main-background time: the host uses scalar code where the device uses SIMD.
+well as these rays, so it must not be read as isolated auxiliary-ray timing.
+SPLIT3 (above) is what isolates them: `rays=` is a bracket around
+`garden_decor_row` alone, and `veg=` around the vegetation pass; `rest` is what
+neither bracket covers. Host ratios must not be scaled from the PIE main-background
+time: the host uses scalar code where the device uses SIMD.

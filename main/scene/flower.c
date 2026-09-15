@@ -1668,6 +1668,36 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  prof_pgarden/240000.0/prof_frames,prof_pseeds/240000.0/prof_frames,
                  prof_pbuild/240000.0/prof_frames,prof_ppetal/240000.0/prof_frames,
                  prof_ppetaln?prof_ppetal/prof_ppetaln:0);
+        // The third decomposition of the same frame, and it is a separate line
+        // for the reason given above SPLIT2: SPLIT reconciles with `kernel=`
+        // and SPLIT2 with the species, and neither of those pairs is worth
+        // risking to carry a new term. `decor` is the one number in SPLIT that
+        // has never been split -- 14 to 16 ms of four different jobs -- and the
+        // instruction-count floor accounts for 6.3 ms of it (rays 3.9, canopy
+        // 2.0, trunks 0.30, grass 0.12), so 8 to 10 ms is unattributed. This
+        // line brackets two of the four inside the shipping binary; `rest` is
+        // what is left (the row scaffolding, the dissolve's memcpy of the
+        // 480-byte temporary row and the 240-iteration mix loop).
+        //
+        // Every figure here is divided by a row count printed beside it, and
+        // `dissolve_rows` is printed because a cross-fading row runs the
+        // vegetation pass TWICE: FLOWER_GARDEN_FADE_S is 3 s inside a 40 s hold,
+        // so roughly 7% of rows are doing double work and a bare cycles/row
+        // would be the average of two different amounts of it.
+        uint32_t vegrows=0,vegpasses=0,rayrows=0;
+        uint32_t vegcy=garden_prof_vegetation(&vegrows,&vegpasses);
+        uint32_t raycy=garden_prof_rays(&rayrows);
+        uint32_t dissolverows=garden_prof_dissolve();
+        double veg=vegcy/240000.0/prof_frames,rays=raycy/240000.0/prof_frames;
+        ESP_LOGI("garden","SPLIT3 frames=%u decor=%.2f veg=%.2f (%u rows, %u passes, %u cy/row) "
+                 "rays=%.2f (%u rows, %u cy/row) rest=%.2f | dissolve=%u of %u rows (%.1f%%) "
+                 "(ms/frame; rest = decor - veg - rays = row scaffolding + dissolve memcpy/mix; "
+                 "veg rows in a dissolve run two vegetation passes)",
+                 prof_frames,gar-pix,veg,vegrows/prof_frames,vegpasses/prof_frames,
+                 vegrows?vegcy/vegrows:0,
+                 rays,rayrows/prof_frames,rayrows?raycy/rayrows:0,
+                 gar-pix-veg-rays,dissolverows/prof_frames,vegrows/prof_frames,
+                 vegrows?100.0*dissolverows/vegrows:0.0);
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
         prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;
