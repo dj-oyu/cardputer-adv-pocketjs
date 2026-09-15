@@ -785,6 +785,21 @@ static void run_pumps(uint32_t buttons) {
     pocket_input_pump(buttons);
 }
 
+// Guest execution has no dependency on the legacy binding. The Cardputer
+// supplies a pad mask, centered analog axes and no touches. Retain the old
+// tick/draw path only until a successful Kasane submission owns the display.
+static esp_err_t dispatch_guest(bool continuing,uint32_t buttons,
+                                pocketjs_ui_frame_view_t *out) {
+    const pocketjs_guest_frame_t input={.struct_size=sizeof(input),
+                                       .buttons=buttons,.analog=0x8080};
+    esp_err_t result=continuing?pocketjs_guest_continue(guest):
+                                pocketjs_guest_frame(guest,&input);
+    if(result!=ESP_OK)return result;
+    if(pocket_kasane_active())return ESP_OK;
+    pocketjs_ui_core_tick(core);
+    return pocketjs_ui_core_draw(core,out);
+}
+
 esp_err_t app_tick(uint32_t buttons) {
     // The Back turn is the guest's ONE last chance to save: main.c calls
     // app_tick(0x2000) and requests the stop on the next line, so there is no
@@ -841,7 +856,7 @@ esp_err_t app_tick(uint32_t buttons) {
         // turn as far as the frame period is concerned, and leaving it out
         // would make PAINT's turn_ms report only the cheap turns.
         int64_t cont_began=esp_timer_get_time();
-        esp_err_t ce=pocketjs_ui_turn_continue(binding,&cont);
+        esp_err_t ce=dispatch_guest(true,0,&cont);
         pocket_kasane_end_turn();
         turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
         report_oom_if_any();
@@ -905,8 +920,8 @@ esp_err_t app_tick(uint32_t buttons) {
             if(drain_runaway()) return ESP_ERR_TIMEOUT;
             continuation_turns++;
             turn_continued=true;
-            // The display keeps moving: pocketjs_ui_turn_continue() ran the UI
-            // core's tick and draw, so `cont` is a real frame to present.
+            // The display keeps moving: dispatch_guest updated the selected
+            // backend, so the owner can present the latest state.
             //
             // At most once per display period, though. main.c no longer
             // charges a continuation turn a frame period (sec.2.4), so these
@@ -931,19 +946,18 @@ esp_err_t app_tick(uint32_t buttons) {
     buttons|=deferred_buttons; deferred_buttons=0;
     run_pumps(buttons);
     pocket_kasane_end_turn();
-    pocketjs_ui_input_t input={.struct_size=sizeof(input),.buttons=buttons};
     pocketjs_ui_frame_view_t frame={.struct_size=sizeof(frame)};
     // The JS side of the frame: frame() in QuickJS plus the UI core's tick and
     // draw. Timed on every tick, painted or not, so turn_ms is its own number
     // next to render_ms rather than hidden inside the frame period.
     int64_t turning=esp_timer_get_time();
-    esp_err_t e=pocketjs_ui_turn(binding,&input,&frame);
+    esp_err_t e=dispatch_guest(false,buttons,&frame);
     pocket_kasane_end_turn();
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
     report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
-    // turn_us is frame() plus whatever job draining pocketjs_ui_turn() does
+    // turn_us is frame() plus whatever job draining dispatch_guest() does
     // around it -- see vmprobe.h for why the two are not split further.
     vmprobe_frame_sample(guest,turn_us);
 #endif

@@ -37,7 +37,26 @@
   PASS。modal開始・終了と300ターンの描画を確認。10計測窓の平均turn 3.29 ms、
   render 12.60 ms、send 3.38 ms、Kasane nativeBytes 12,908 B。終了後HOME_READY、port解放済み。
 
-次の実装対象はCP6（guest frame/continueの直接dispatch）。
+## checkpoint 6 — guestの直接dispatch（2026-09-15）
+
+- `app_tick`は旧UI bindingのturn関数を経由せずguest frame/continueを直接呼ぶ。
+  buttons、analog中央0x8080、touchなしを従来と同じ引数で渡す。
+  JS実行後にKasaneがactiveなら旧core tick/drawを省略し、旧UIアプリでは維持する。
+- 継続jobを先に処理する順序、Backの最終保存turn、deferred入力、cleanup、OOM報告、
+  watchdogと表示間隔は保持。guestの実行中に初めてKasaneへ切り替わる場合も同じ判定を使う。
+- `python3 tools/test_session_dispatch.py`: 実run_pumps/dispatch_guest/app_tickを抽出し、
+  ASan/UBSan・O2、compat/fairの4構成でPASS。旧/Kasane経路、切替、frame/continue/draw失敗、
+  cleanup順序、Back、deferred、runaway、repairと表示間隔をdeterministic portで検証。
+- `VMTEST_OUT=/tmp/kasane-sync-vm bash tools/vmtest/build.sh o2`と同OUTの
+  `bash tools/vmtest/run.sh --variant o2`: 63 PASS、0 FAIL。
+- 通常ESP-IDF構成: PASS。S3、PSRAMなし、native probe有効、VM probe無効。
+  app 2,195,968 B、DIRAM137,276 B。CP5比flash -1,520 B、DIRAM増分0。
+- 通常構成実機: `kasane_input_device_test.py` PASS（hello/pet/K/text、2回再起動）。
+  `kasane_device_test.py --ticks 300` PASS。10窓平均turn 2.88 ms、render 12.59 ms、
+  send 3.38 ms。直前CP5のturn 3.29 msから約12%減（同診断の観測値）。
+  記録は`.cache/kasane-cp6-input`と`.cache/kasane-cp6-animation`。
+- VM probe構成: `-B build_ds_vmprobe -D SDKCONFIG=build_ds_vmprobe/sdkconfig build` PASS。
+  app 2,205,264 B、DIRAM143,276 B。通常比6,000 Bは計測buffer等。実機probeは次に確認する。
 
 ## vm/main同期 — 2026-09-15
 

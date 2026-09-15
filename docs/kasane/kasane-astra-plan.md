@@ -39,6 +39,22 @@ JS座標は現実装が小数拒否、仕様が最近接丸め（tieは0から�
 
 ## 完了条件を三段階に分ける
 
+### このセッションの到達点（2026-09-15ユーザー指定）
+
+Taffyを依存から最終削除する直前まで進める。CP25の出荷依存削除は留保し、
+CP6–24とCP26–30の呼出し経路を完成させる。旧レイアウトエンジンのflex/gridを
+再実装する意味ではなく、座標・矩形ベースの合意済み設計で既存画面を表現できること。
+
+- 表現: 文字・日本語・画像・角丸・線・gradient・clip・重なり・透過・modal・cacheと
+  既存アプリのアニメーションをnative/JS両方から利用できる。capture/frostも結線する。
+- 経路: JSアプリ、教材、probe、SYSTEM通知・textfield、native home/overlay/picker/editorを
+  Kasaneへ接続する。旧保存プログラムは黙って壊さず明示的に扱う。
+- メモリ: 基本/任意領域とstack、JS heap、SPI buffer、画像/文字scratchを同時ピークで集計。
+  PSRAMなしで100回起動・終了、最大連続空き、Wi-Fi/audio併用、OOM回復を測定し、
+  必要な最大個別確保を満たす余裕を実測で示す。基本arenaのサイズだけで安全とは判定しない。
+- 最終確認: Kasane-only構成のclean build・link/map/nm検査と実機の全画面遷移を通す。
+  出荷の旧依存削除を残しても、各機能の未確認を完了扱いにはしない。
+
 1. **診断Taffy-free**: K診断と非UIサービスが旧core/archiveなしで動く。未移植アプリは明示的に利用不可。
 2. **出荷Taffy-free**: アプリ・埋込み教材・probe・保存プログラムの扱いを解決し、clean buildから旧依存を除去。
 3. **全UIのKasane所有**: native home、overlay、picker、editor等も含め、全描画をcommand/resourceで管理。
@@ -56,7 +72,8 @@ CP4は4a（SYSTEMを保持するAPP終了機構）と4b（host領域所有、世
 JS/session接続）へ分割する。4aのみではAPP attach/detach完了とはしない。
 CP4bのhost runtime/JS接続まで実装。host/QuickJS試験ではguest破棄後のSYSTEM継続を確認し、
 CP5のinput service抽出、host試験、S3ビルドと実機hello/pet/K/text入力確認まで完了。
-次の実装対象はCP6。scope別購読とmodal Back配送はCP15で扱う。
+CP6の直接dispatch、host/VM corpus試験、通常/probeビルドと通常構成の実機確認まで完了。
+probe実機確認後、次の実装対象はCP7。scope別購読とmodal Back配送はCP15で扱う。
 数値と検証範囲は[kasane-progress.md](kasane-progress.md)の各checkpointを参照。
 
 各行を1 commit以上とし、大きい場合は行内もビルド可能な単位へ分割する。
