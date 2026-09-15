@@ -17,7 +17,6 @@ static pet_hub_t hub;
 static QueueHandle_t inbox;
 static nvs_handle_t prefs;
 static bool opened, changed;
-static uint64_t ringing, next_tone;
 static char alert[PET_LABEL_CHARS+1];
 static uint32_t alert_id,alert_owner;
 static bool overlay_suppressed;
@@ -47,6 +46,7 @@ void pet_hub_init(void) {
            s.selected<12&&s.wake_minute>=-1&&s.wake_minute<1440&&s.utc_offset>=-50400&&s.utc_offset<=50400)hub.saved=s;
     }
     sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
+    pet_hub_bind_wall(&hub,sys_device_wall());
     inbox=xQueueCreate(4,PET_WIRE_BYTES);
 }
 bool pet_hub_usb(uint8_t c) {
@@ -65,7 +65,7 @@ bool pet_hub_usb(uint8_t c) {
 }
 bool pet_hub_pump(void) {
     uint64_t now=now_ms();
-    if(pet_hub_tick(&hub,now,utc_now()))persist();
+    if(sys_wall_take_changed(sys_device_wall()))persist();
     uint8_t d[PET_WIRE_BYTES];
     while(inbox&&xQueueReceive(inbox,d,0)==pdTRUE) {
         if(d[0]==1&&d[1]==2&&pet_crc(d,44)==read32(d+44)) {
@@ -74,6 +74,7 @@ bool pet_hub_pump(void) {
                 if(offset!=hub.saved.utc_offset){hub.saved.utc_offset=offset;persist();}
                 sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
                 sys_clock_offer_pc(sys_device_state(),stamp,(uint64_t)esp_timer_get_time());changed=true;
+                sys_wall_invalidate(sys_device_wall());
                 ESP_LOGI("pet","PET_ACK 2 %lu",(unsigned long)read32(d+4));
             }
             continue;
@@ -81,6 +82,7 @@ bool pet_hub_pump(void) {
         pet_hub_saved_t before=hub.saved;
         if(pet_hub_packet(&hub,d)) {
             if(!persist()){hub.saved=before;continue;}
+            sys_wall_invalidate(sys_device_wall());
             pet_usage_t *p=&hub.saved.usage[d[2]];
             sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
             sys_clock_offer_pc(sys_device_state(),read32(d+40),(uint64_t)esp_timer_get_time());changed=true;
@@ -98,12 +100,10 @@ bool pet_hub_pump(void) {
     if(sys_notify_active(hub.notifications,&notice)){
         if(alert_id!=notice.id){
             alert_id=notice.id;alert_owner=notice.owner;memcpy(alert,notice.label,sizeof(alert));
-            ringing=now;next_tone=now;changed=true;
+            changed=true;
         }
     }else if(alert_id){alert_id=0;alert[0]=0;changed=true;}
-    if(alert[0]&&now-ringing<30000&&now>=next_tone) {
-        sound_tone(1046,200,0.35f,NULL,NULL);next_tone=now+2000;
-    }
+    if(sys_device_take_tone())sound_tone(1046,200,0.35f,NULL,NULL);
     bool result=changed;changed=false;return result;
 }
 bool pet_hub_key(board_key_t key) {
@@ -173,6 +173,7 @@ static JSValue wake(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
         return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.wake","invalid alarm time",false,NULL);
     int32_t old=hub.saved.wake_minute;hub.saved.wake_minute=hour<0?-1:hour*60+minute;
     if(!persist()){hub.saved.wake_minute=old;return save_failed(c,"pet.wake");}
+    sys_wall_invalidate(sys_device_wall());
     return JS_UNDEFINED;
 }
 static JSValue alarm_set(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {

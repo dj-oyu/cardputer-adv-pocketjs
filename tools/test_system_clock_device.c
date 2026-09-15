@@ -16,6 +16,8 @@ static int fake_gettimeofday(struct timeval *out,void *zone){
 #include "../main/system/sys_state.c"
 #include "../main/system/sys_notify.c"
 #include "../main/system/sys_timer.c"
+#include "../main/system/sys_ringer.c"
+#include "../main/system/sys_wall.c"
 #include "../main/system/sys_device.c"
 int main(void){
     sys_clock_state out;uint32_t dirty;sys_sub sub;
@@ -52,6 +54,7 @@ int main(void){
     assert(sys_poll(&state,b,&dirty)==SYS_OK&&dirty==SYS_NOTIFY);
     assert(sys_notify_post(&notifications,1,0,"NOTICE",0,&id)==NOTICE_OK);
     sys_device_step();
+    assert(sys_device_take_tone());
     assert(sys_poll(&state,a,&dirty)==SYS_OK&&dirty==SYS_NOTIFY);
     assert(sys_poll(&state,a,&dirty)==SYS_OK&&!dirty);
     assert(sys_poll(&state,b,&dirty)==SYS_OK&&dirty==SYS_NOTIFY);
@@ -71,7 +74,8 @@ int main(void){
     assert(sys_timer_deadline(&timers)==UINT64_MAX);
     assert(sys_notify_ack(&notifications,1,id)==NOTICE_OK);sys_device_step();
     sys_notice active;assert(sys_notify_active(&notifications,&active)&&active.owner==2);
-    assert(sys_device_next_deadline()==SYS_NEVER);
+    assert(sys_device_next_deadline()==0&&sys_device_take_tone());
+    assert(sys_device_next_deadline()==(uint64_t)mono+2000000);
     assert(sys_notify_snooze(&notifications,2,active.id,(uint64_t)mono+25001)==NOTICE_OK);
     sys_device_step();
     assert(sys_device_next_deadline()==(uint64_t)mono+25001);
@@ -91,10 +95,11 @@ int main(void){
     sys_timer_release_owner(&timers,2);sys_device_step();
     assert(sys_device_next_deadline()==SYS_NEVER);
     assert(sys_notify_post(&notifications,3,0,"ACTIVE",0,&id)==NOTICE_OK);sys_device_step();
+    assert(sys_device_take_tone());
     uint32_t queued;
     for(unsigned i=0;i<8;i++)assert(sys_notify_post(&notifications,3,0,"QUEUED",0,&queued)==NOTICE_OK);
     assert(sys_timer_set(&timers,3,"blocked","BLOCKED",mono)==NOTICE_OK);sys_device_step();
-    assert(sys_device_next_deadline()==SYS_NEVER); /* Full queue cannot busy-wake. */
+    assert(sys_device_next_deadline()==(uint64_t)mono+2000000); /* Only the audible tone, not blocked timer. */
     assert(sys_notify_ack(&notifications,3,id)==NOTICE_OK);
     assert(sys_device_next_deadline()==0);sys_device_step();
     assert(sys_timer_deadline(&timers)==SYS_NEVER);

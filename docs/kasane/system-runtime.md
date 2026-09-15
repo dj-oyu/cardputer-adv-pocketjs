@@ -230,7 +230,8 @@ System adapterが所有し、pethubの旧timer配列224 Bを撤去。owner＋文
 未来の未発火timerはその期限を返すので、blocked timerのための過去期限busy loopを作らない。
 SYS_TIMERは設定・取消・blocked移行・受付成功をdirtyへ合流する。
 既存`pet.alarm`はSYSTEM owner=1の互換adapterで、秒/ミリ秒を共通期限へ変換する。
-NVS保存対象と壁時計alarmの意味判定はpethubに残す。鳴動期限・owner wake統合は次段階。
+NVS保存対象はpethubに残す。壁時計alarm/usage期限の意味判定と鳴動期限は、後述の
+`sys_wall` / `sys_ringer`へ移管した。
 
 実機診断（CONFIG_KSN_DEVICE_PROBEのみ）: USB Nで診断専用ownerの8待機＋1表示と
 100 ms timerを作り、Oでstate/heap、Zで診断ownerを回収する。NVSや既存ownerを変更しない。
@@ -269,7 +270,19 @@ runtimeは`step(now, input_mask)`と`next_deadline()`を提供する。期限な
 UI ownerのnative待機とVM frame-cap待機へ接続。VM継続turnのyieldと最小実行周期は維持する。
 SNTP等の更新は状態公開後に既存`vm_wake_post`へ送る（pending要求を合流）。待機直前の
 到着は既存カウンタに保持される。System用task/queue/timer/stackの追加はない。
-native画面の周期、PetHubの壁時計alarm・usage判定・鳴動期限、VMの最小周期内の遅延は残る。
+native画面の周期とVMの最小周期内の遅延は残る。
+
+壁時計と鳴動（2026-09-16）: `sys_wall`が固定5規則（usage reset 4件、毎朝1件）を管理。
+規則はnative ownerの永続領域を参照し、guestメモリを借用しない。期限・発火済み値・設定・
+ラベルの寿命はサービス以上とし、設定更新成功後にinvalidateする。通知登録成功時だけ
+発火済み値を更新し、PetHubがchangedを消費してNVS保存する。保存形式と失敗時のRAM状態維持は従来どおり。
+usageは期限超過をcatch-up、毎朝は指定分内だけ発火。日付を巻き戻しても発火済み日以前は
+再発火しない。満杯usageは通知state変更待ち、満杯毎朝は指定分終了も期限として保持する。
+時計更新・設定変更・期限到来・blocked時の通知変更以外は全規則の走査や時刻変換を行わない。
+`sys_ringer`は通知IDと再queueの順序を識別し、最大30秒・2秒間隔でtone権を1回ずつ返す。
+遅延分の連続再生はしない。ACK/消去/snoozeで鳴動期限を外し、再表示では新しい鳴動期間を開始。
+共通next_deadlineへ両方の期限を統合。PetHubに残るのはwire検証・報酬算出・NVS・音声port・入力/旧描画adapter。
+`pet_hub_tick`はhost互換試験用で、firmware pumpからは呼ばず、発火規則自体はSystemの共通評価関数を使う。
 
 ## 10. RAM予算と検証
 

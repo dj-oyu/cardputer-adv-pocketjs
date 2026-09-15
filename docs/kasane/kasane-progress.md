@@ -4,6 +4,22 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14e2 — 壁時計・usage期限・鳴動の移管（2026-09-16）
+
+- `sys_wall`が固定5規則をSystem ownerで実行。時計/設定変更、期限到来、blocked通知の
+  状態変化で再評価し、PetHubの毎frame時刻変換・期限走査を撤去。
+- usage resetは期限超過をcatch-up、毎朝は指定分のみ。発火済み日以前への巻戻しで
+  二重発火しない。通知満杯では発火済みにせず、毎朝の指定分終了後は遅延発火しない。
+- NVS配置不変。native永続領域への固定bindingを使い、登録成功でwatermark更新→
+  PetHubがchangedを取り出して保存。wire検証・報酬処理はPetHubのdomain責務として維持。
+- `sys_ringer`へ30秒/2秒の鳴動期限を移管。tone権をpollし音声portが再生する。
+  遅延分を連打せず、snooze中にpollできなくても再表示時に新しい期間を開始。
+- 両サービスの期限をSystem待機へ統合。追加heap/taskなし、System状態全体に2 KiB static_assert。
+- System/実QuickJS host試験ASan/UBSan・O2 PASS。小数秒、期限超過、日付巻戻し、満杯・
+  指定分終了、snooze未poll区間、極大watermarkを検証。既存wire/報酬/タイマー回帰もPASS。
+- 通常/Kasane-only buildとlink監査PASS。DIRAM138,108 / 136,748 B（前段階比+144 B）。
+  System owner状態1,208 B。旧PetHub鳴動state16 Bを撤去。
+
 ## checkpoint 14e1 — System期限とowner待機（2026-09-16）
 
 - 時計更新要求と通知/timerの未publish変更は即時、通知・timer・電源の期限は最小値へ集約。
