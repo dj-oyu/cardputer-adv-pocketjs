@@ -411,4 +411,7 @@ uint32_t garden_prof_dissolve(void);
 // TEMPORARY, the A/B switch for the decor profile gate, defined in garden.c and
 // flipped by flower.c's SPLIT3 report (see the comment there). 1 = gated.
 extern int g_garden_decor_gate;
+// TEMPORARY, same block: the A/B switch for the two exact scalar tweaks (the
+// unsigned support test in the decor loop and the canopy's f==0 short circuit).
+extern int g_garden_scalar_tweaks;
 #endif

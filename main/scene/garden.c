@@ -273,6 +273,11 @@ garden_octave_lanes(int16_t *dens,int n,int rc0,int step,
 //   The `if(q>0)` disappears rather than becoming a mask: clamping q to zero
 //   gives f=0, and (A*256 + B*0)>>8 is A. Blending with zero alpha is the
 //   identity, so the branch is free to go.
+// TEMPORARY A/B switch for the two exact scalar tweaks below (the unsigned range
+// test in the decor loop and the f==0 short circuit in garden_canopy_row), same
+// arrangement as the gate: flipped once per SPLIT3 window and printed, so both
+// paths are measured inside one binary.
+int g_garden_scalar_tweaks=1;
 static void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
                               uint16_t leafy) {
     int mhi=(mrr>>8)*16,mlo=mrr&255,qbase=256-qy;
@@ -283,6 +288,12 @@ static void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
         int q=qbase-t;
         if(q<0)q=0;
         int f=(q*39322)>>16,g=256-f;
+        // f == 0 is the identity: with g == 256 every channel comes back
+        // unchanged (r*256>>8 == r), so this pixel's blend and store were a
+        // no-op. Rows near an ellipse's vertical edge spend most of their clipped
+        // span here, and the compare is one instruction against a load, ~20
+        // instructions of blend and a store.
+        if(g_garden_scalar_tweaks&&!f)continue;
         unsigned a=row[x];
         row[x]=(uint16_t)(((((a>>11)&31)*g+lr*f)>>8)*2048
                          +((((a>>5)&63)*g+lg*f)>>8)*32
@@ -1534,7 +1545,19 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
         int l0=(cx>>8)-lreach,l1=(cx>>8)+lreach;
         int s0=(shadow_cx>>8)-sreach,s1=(shadow_cx>>8)+sreach;
         for(int x=lo;x<=hi;x++) {
-            int inl=(x>=l0&&x<=l1),ins=(x>=s0&&x<=s1);
+            // One unsigned compare per support instead of two signed ones each.
+            // The signed form was compiled to a salt/neg/and/extui chain of
+            // about twenty instructions, which is what the single profile
+            // evaluation it saves costs -- measured as no gain at all
+            // (docs/flower-decor-cost.md, "Attempted"). l1 >= l0 always, because
+            // the reach adds +2 to both sides, so the wrap is a range test.
+            int inl,ins;
+            if(g_garden_scalar_tweaks) {
+                inl=(unsigned)(x-l0)<=(unsigned)(l1-l0);
+                ins=(unsigned)(x-s0)<=(unsigned)(s1-s0);
+            } else {
+                inl=(x>=l0&&x<=l1);ins=(x>=s0&&x<=s1);
+            }
             if(g_garden_decor_gate&&!inl&&!ins)continue;
             // Let only the soft fringe graze six pixels further into the
             // main beam; a smooth ramp keeps its bright core undisturbed.
