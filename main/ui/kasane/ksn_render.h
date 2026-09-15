@@ -41,6 +41,13 @@ void ksn_render_prof_read(ksn_render_prof *out);
  * (kasane-opt-survey.md 10.1, and board.c re-windows on every discontinuity). */
 unsigned ksn_render_band_count(uint32_t mask);
 unsigned ksn_render_band_runs(uint32_t mask);
+/* Boundary 2a switch: 1 (default) decodes each frame command once per frame
+ * into a renderer-owned view (KSN_COMMANDS views + a KSN_TEXT_BYTES frame text
+ * pool, static); 0 reads the command again for every band, which is the pre-2a
+ * reference path. Both paths live in one binary so a same-binary A/B can
+ * compare read counts and frame time without a rebuild. Rendering is
+ * pixel-neutral either way; only the number of ksn_core_read calls changes. */
+extern int g_ksn_decode_once;
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT coverage, command alpha and
  * isolated group opacity. The borrowed text port and its immutable resources
