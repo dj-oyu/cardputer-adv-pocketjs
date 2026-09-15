@@ -305,7 +305,7 @@ static inline void garden_canopy_pixel(uint16_t *row,int x,int cx,int mhi,int ml
     // ellipse's vertical edge spend most of their clipped span here, and the
     // compare is one instruction against a load, ~20 instructions of blend and a
     // store. The kernel has no branch to spend on it and stores the identity
-    // instead, which is the same bytes.
+    // instead, which is the same bytes (canopy_model.c D).
     if(g_garden_scalar_tweaks&&!f)return;
     unsigned a=row[x];
     row[x]=(uint16_t)(((((a>>11)&31)*g+lr*f)>>8)*2048
@@ -353,7 +353,7 @@ static void garden_canopy_row_body(uint16_t *row,int lo,int hi,int cx,int mrr,in
         // what is left at either end goes through the scalar statement above. The
         // kernel asks nothing of the row pointer beyond x being a multiple of
         // eight; every pixel it touches is inside |x - cx| <= rx, which is what
-        // the model sweeps.
+        // tools/pie/models/canopy_model.c sweeps.
         int s=(lo+7)&~7,e=(hi+1)&~7;
         if(e>s) {
             canopy_pie(row+s,(e-s)>>3,cx,mrr,qy,leafy,s);
