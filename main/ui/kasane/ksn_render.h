@@ -19,8 +19,13 @@ extern bool g_ksn_image_rotate_step;
  *   g_ksn_tile_reach  -- exact, default on: a child's loop runs over its own
  *                        clipped x interval and a block no child can reach is
  *                        skipped whole (survey 3a).
+ *   g_ksn_tile_smooth -- smooth layers: one exact anchor per block plus a
+ *                        per-pixel increment instead of the per-pixel sample.
+ *                        Exact where the child does not vary along x, approximate
+ *                        where it does; default off until the doc's measured
+ *                        step says otherwise.
  * All three are read once per render; 0 restores the path each one replaces. */
-extern int g_ksn_tile_pixels,g_ksn_tile_reach;
+extern int g_ksn_tile_pixels,g_ksn_tile_reach,g_ksn_tile_smooth;
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT, source-span IMAGE, alpha and
  * isolated group opacity. The borrowed text port and its immutable resources
