@@ -225,6 +225,11 @@ SYS_TIMERは設定・取消・blocked移行・受付成功をdirtyへ合流す�
 既存`pet.alarm`はSYSTEM owner=1の互換adapterで、秒/ミリ秒を共通期限へ変換する。
 NVS保存対象と壁時計alarmの意味判定はpethubに残す。鳴動期限・owner wake統合は次段階。
 
+実機診断（CONFIG_KSN_DEVICE_PROBEのみ）: USB Nで診断専用ownerの8待機＋1表示と
+100 ms timerを作り、Oでstate/heap、Zで診断ownerを回収する。NVSや既存ownerを変更しない。
+他ownerの通知がある場合NはBUSY。`tools/system_device_test.py`は満杯snooze拒否、ACK後の
+timer再試行、snooze成功、cleanupと表示キャプチャを検査する。
+
 共通タイマー枠は現行相当4件。owner/key、単調期限、固定通知内容を持ち、IDやlabelの既存上限を維持する。
 pethubは利用量reset・目覚まし等の意味を判定し、次の意味のある期限をruntimeへ提示する。毎フレーム全条件を検査しない。
 通知キュー満杯で期限発火に失敗したタイマーはdue状態を保持する。
