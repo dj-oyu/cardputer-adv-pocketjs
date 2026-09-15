@@ -58,6 +58,11 @@ extern int g_ksn_decode_once;
  * otherwise mutate the core or reenter JS/presentation. prepare_frame consumes
  * preexisting invalidation; later invalidation survives the acknowledgement. */
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats);
+/* TEMPORARY A/B switch for that renderer's coverage solver: 1 = solve a row's
+ * covered x set as runs once per row per command, 0 = ask the per-pixel
+ * predicate for every pixel. Both arms live in one binary and produce the same
+ * pixels (test_coverage_spans.c compares them exhaustively and frame by frame). */
+extern int g_ksn_row_coverage;
 #ifdef __cplusplus
 }
 #endif

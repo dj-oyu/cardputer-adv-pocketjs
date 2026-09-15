@@ -141,6 +141,98 @@ static bool covers(const ksn_frame_view *c,int x,int y){
     default:return false;
     }
 }
+/* TEMPORARY A/B switch for the row solver below: 1 = solve a row's covered x
+ * set once per row per command (the shipping path), 0 = ask the predicate
+ * above for every pixel, as this file has always done. Both arms have to run
+ * in ONE binary: the same kernel moves 15% between builds from instruction
+ * cache alignment alone (CLAUDE.md), and this change is smaller than that. */
+int g_ksn_row_coverage = 1;
+
+/* Coverage as per-row x intervals. `covers` above is the reference for the
+ * pixel set; this solves the same set in closed form, so a row costs one solve
+ * instead of one predicate call per pixel. Shapes are the ones `covers` names:
+ * rect, text, stroke edges, and the round-rect/gradient arc (radius 0 is the
+ * full box, as inside_round_rect returns true without looking at x). A row
+ * never needs more than two runs: the two stroke edges, or the single interval
+ * a rounded row always collapses to. Inside the clamp window the predicate's
+ * dx is 1 (odd), so a covered pixel needs dd >= 1; with dd >= 1 the left arc,
+ * the clamped middle and the right arc meet end to end, and when the two clamp
+ * windows overlap (a box narrower than 2*radius) both arcs hang off the same
+ * clamp point and still meet. */
+#define KSN_ROW_RUNS 2
+typedef struct { int x0,x1; } ksn_x_run; /* Half open, [x0,x1), like the bounds. */
+
+/* Floor square root, bit by bit. The input is small (radius <= 255, so
+ * dd <= 260,100) and this rounds down exactly, which is what the arc needs. */
+static unsigned isqrt_u32(uint32_t value){
+    uint32_t root=0,bit=1u<<30;
+    while(bit>value)bit>>=2;
+    while(bit){
+        if(value>=root+bit){value-=root+bit;root=(root>>1)+bit;}
+        else root>>=1;
+        bit>>=2;
+    }
+    return (unsigned)root;
+}
+/* The arc row: pixel centres as inside_round_rect measures them. left/right
+ * are already the caller's box and clip intersection. */
+static unsigned round_rect_runs(ksn_rect bounds,unsigned radius,int y,int left,int right,
+                                ksn_x_run *runs){
+    int near=bounds.x0+(int)radius,far=bounds.x1-(int)radius;
+    int cy=y<bounds.y0+(int)radius?bounds.y0+(int)radius:
+           y>=bounds.y1-(int)radius?bounds.y1-(int)radius:y;
+    int dy=2*y+1-2*cy,limit=2*(int)radius,remaining=limit*limit-dy*dy;
+    if(remaining<1)return 0; /* dx is odd: dx*dx+dy*dy is at least 1+dy*dy. */
+    unsigned reach=isqrt_u32((unsigned)remaining);
+    int start=near-(int)((reach+1)/2);
+    int end=far+(int)((reach-1)/2)+1;
+    if(end<near)end=near; /* Overlapping clamp windows: the middle is empty. */
+    if(start<left)start=left;
+    if(end>right)end=right;
+    if(start>=end)return 0;
+    runs[0].x0=start;runs[0].x1=end;return 1;
+}
+/* Runs of x in [left,right) that `covers` would accept on row y. Returns 0, 1
+ * or 2; the runs are ascending and disjoint, so a caller can composite them in
+ * order exactly as the per-pixel loop would. Takes the same borrowed view the
+ * predicate does after boundary 2a was integrated: the decoded fields are the
+ * ones this solver reads, and the pixel set is unchanged. */
+static unsigned coverage_runs(const ksn_frame_view *command,int y,int left,int right,
+                              ksn_x_run *runs){
+    const ksn_draw *d=&command->draw;
+    if(!command->visible)return 0;
+    if(left<d->bounds.x0)left=d->bounds.x0;
+    if(left<d->clip.x0)left=d->clip.x0;
+    if(right>d->bounds.x1)right=d->bounds.x1;
+    if(right>d->clip.x1)right=d->clip.x1;
+    if(left>=right)return 0;
+    if(y<d->bounds.y0||y>=d->bounds.y1||y<d->clip.y0||y>=d->clip.y1)return 0;
+    switch(d->kind){
+    case KSN_RECT:case KSN_TEXT:
+        runs[0].x0=left;runs[0].x1=right;return 1;
+    case KSN_STROKE:{
+        int width=d->data.shape.width;
+        if(y<d->bounds.y0+width||y>=d->bounds.y1-width){
+            runs[0].x0=left;runs[0].x1=right;return 1;
+        }
+        int near_end=d->bounds.x0+width;if(near_end>right)near_end=right;
+        int far_start=d->bounds.x1-width;if(far_start<left)far_start=left;
+        if(far_start<=near_end){ /* A stroke wide enough to meet itself. */
+            runs[0].x0=left;runs[0].x1=right;return 1;
+        }
+        unsigned count=0;
+        if(left<near_end){runs[count].x0=left;runs[count].x1=near_end;count++;}
+        if(far_start<right){runs[count].x0=far_start;runs[count].x1=right;count++;}
+        return count;
+    }
+    case KSN_ROUND_RECT:case KSN_GRADIENT:{
+        unsigned radius=d->kind==KSN_GRADIENT?d->data.gradient.radius:d->data.shape.radius;
+        if(!radius){runs[0].x0=left;runs[0].x1=right;return 1;}
+        return round_rect_runs(d->bounds,radius,y,left,right,runs);
+    }
+    default:return 0;
+    }
+}
 static unsigned channel(ksn_rgba color,unsigned shift){return (color>>shift)&255u;}
 static ksn_rgba interpolate(ksn_rgba from,ksn_rgba to,unsigned i,unsigned length){
     if(length<=1)return from;
@@ -169,6 +261,22 @@ static unsigned premultiply_over(ksn_premultiplied_rgba8 *dst,ksn_rgba color,uin
     dst->b=(uint8_t)clamp8(mul8((color>>8)&255,a)+mul8(dst->b,inverse));
     dst->a=(uint8_t)clamp8(a+mul8(dst->a,inverse));
     return a;
+}
+/* One covered group pixel: premultiplied RGBA into the tile, then the text
+ * coverage word and the dither provenance bits. Both coverage arms call this,
+ * so the pixels a row's runs name go through the same code the pixel-at-a-time
+ * predicate path runs. `x` is the tile-local column. */
+static void group_pixel(ksn_premultiplied_rgba8 *tile,const uint8_t *coverage,int x,
+                        const ksn_frame_view *command,int px,int py,bool has_dither,
+                        bool child_dither,uint32_t *dither_pixels){
+    ksn_rgba color=sample(command,px,py);
+    if(command->draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage[x]);
+    unsigned alpha=premultiply_over(&tile[x],color,command->draw.opacity);
+    if(has_dither&&alpha){
+        uint32_t bit=1u<<((unsigned)x&31u);
+        if(child_dither)dither_pixels[(unsigned)x>>5]|=bit;
+        else if(alpha==255)dither_pixels[(unsigned)x>>5]&=~bit;
+    }
 }
 static unsigned quantize(unsigned value,unsigned maximum,unsigned bayer){
     unsigned q=value*maximum/255u,remainder=value*maximum-255u*q;
@@ -292,16 +400,15 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx t
                 if(result!=KSN_OK)return result;
             }
             {KSN_PROF_BEGIN();
-            for(int x=0;x<count;x++)if(covers(command,x0+x,py)){
-                ksn_rgba color=sample(command,x0+x,py);
-                if(command->draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage[x]);
-                unsigned alpha=premultiply_over(&tile[x],color,command->draw.opacity);
-                if(has_dither&&alpha){
-                    uint32_t bit=1u<<((unsigned)x&31u);
-                    if(child_dither)dither_pixels[(unsigned)x>>5]|=bit;
-                    else if(alpha==255)dither_pixels[(unsigned)x>>5]&=~bit;
-                }
-            }
+            if(g_ksn_row_coverage){
+                ksn_x_run runs[KSN_ROW_RUNS];
+                unsigned run_count=coverage_runs(command,py,x0,x0+count,runs);
+                for(unsigned run=0;run<run_count;run++)
+                    for(int px=runs[run].x0;px<runs[run].x1;px++)
+                        group_pixel(tile,coverage,px-x0,command,px,py,has_dither,child_dither,
+                                    dither_pixels);
+            }else for(int x=0;x<count;x++)if(covers(command,x0+x,py))
+                group_pixel(tile,coverage,x,command,x0+x,py,has_dither,child_dither,dither_pixels);
             KSN_PROF_END(blend);}
         }
         {KSN_PROF_BEGIN();
@@ -422,10 +529,20 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                 continue;
             }
             {KSN_PROF_BEGIN();
-            for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x++)if(covers(command,x,py)){
-                unsigned index=(unsigned)((py-y)*240+x);
-                pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
-                                    d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
+            for(int py=y0;py<y1;py++){
+                if(g_ksn_row_coverage){
+                    ksn_x_run runs[KSN_ROW_RUNS];
+                    unsigned run_count=coverage_runs(command,py,x0,x1,runs);
+                    for(unsigned run=0;run<run_count;run++)for(int x=runs[run].x0;x<runs[run].x1;x++){
+                        unsigned index=(unsigned)((py-y)*240+x);
+                        pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
+                                            d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
+                    }
+                }else for(int x=x0;x<x1;x++)if(covers(command,x,py)){
+                    unsigned index=(unsigned)((py-y)*240+x);
+                    pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
+                                        d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
+                }
             }
             KSN_PROF_END(blend);}
         }
