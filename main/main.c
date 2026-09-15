@@ -523,6 +523,7 @@ static void nvs_init(void) {
 
 void app_main(void) {
     ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=512KiB");
+    { extern void ble_probe(void); ble_probe(); }
     ESP_ERROR_CHECK(board_init());
     nvs_init();
     pet_hub_init();
@@ -533,6 +534,8 @@ void app_main(void) {
     skk_session_init();
     usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
+    { extern void opus_probe(void); opus_probe(); }
+    { extern void sd_probe(void); sd_probe(); }
     keys=xQueueCreate(16,sizeof(keystroke_t));configASSERT(keys);
     configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
     configASSERT(xTaskCreate(ui_task,"ui",32768,NULL,5,NULL)==pdPASS);

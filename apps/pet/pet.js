@@ -2,7 +2,7 @@
   var names=['TABBY','CALICO','BLACK','NEON CAT','PINK','IVORY','MINT','NEON AXO','GRAY','YELLOW','BLUE','NEON BIRD'];
   var kinds=['CAT','AXOLOTL','COCKATIEL'], actions=['FEED','PLAY','SLEEP','NAME','PETS'];
   var s={v:1,selected:0,pets:[]}, ready=false, mode=1, choice=0, action=0;
-  var last=__petNow(), saved=last, anim=0, prev=0, note='LOADING', until=0, pos=0, draft='';
+  var last=__petNow(), saved=last, anim=0, painted=0, prev=0, note='LOADING', until=0, pos=0, draft='';
   var chars=' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   function node(k,x,y,w,h,c,t) {
     var n=ui.createNode(k);
@@ -106,6 +106,10 @@
       }
     }
     if(now-saved>=60000)save();
-    if(now-anim>=100||edge){anim=now;pocket.pet.place(mode===1?choice:s.selected,27,29+(p.sleep?2:Math.floor(now/500)%2),p.sleep?1:now%5000<150?5:p.food<25?4:until>now?2:0);draw();}
+    if(now-anim>=100||edge){
+      anim=now;var id=mode===1?choice:s.selected,v=s.pets[id];
+      pocket.pet.place(id,27,29+(v.sleep?2:Math.floor(now/1000)%2),v.sleep?1:mode===0&&until>now?2:now%5000<200?1:v.food<25?4:0);
+    }
+    if(now-painted>=500||edge){painted=now;draw();}
   };
 })();
