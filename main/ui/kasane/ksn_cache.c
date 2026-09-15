@@ -140,6 +140,20 @@ ksn_result ksn_cache_release(ksn_cache *storage,ksn_template handle){
     memmove(entry,entry+1,(cache->template_count-template_index-1)*sizeof(*entry));cache->template_count--;
     return KSN_OK;
 }
+void ksn_cache_reset_layer(ksn_cache *storage,ksn_layer layer){
+    if(!bound(storage)||!valid_layer(layer))return;
+    ksn_cache_impl *cache=&storage->state;
+    unsigned kept=0;
+    for(unsigned i=0;i<cache->instance_count;i++)
+        if(cache->instances[i].layer!=layer)cache->instances[kept++]=cache->instances[i];
+    memset(cache->instances+kept,0,(cache->instance_count-kept)*sizeof(*cache->instances));
+    cache->instance_count=(uint8_t)kept;
+    for(unsigned i=0;i<cache->template_count;){
+        if(cache->templates[i].layer!=layer){i++;continue;}
+        /* All instances of these templates were removed above. */
+        ksn_cache_release(storage,(ksn_template){cache->templates[i].id});
+    }
+}
 ksn_result ksn_cache_instantiate(ksn_cache *storage,ksn_core *core,ksn_tx tx,
                                ksn_template handle,const ksn_placement *placement,ksn_instance *out){
     if(!bound(storage)||!core||!out)return KSN_INVALID;

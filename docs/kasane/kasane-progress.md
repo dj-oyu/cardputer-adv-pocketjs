@@ -102,6 +102,24 @@ commit・pushして進める。実機未確認は各記録に残す。
   CP3のhost/build側は完了。実機100回起動とstack/断片化確認は保留、シリアル操作なし。
   次はCP4のhost core/coordinator所有とAPP attach/detach。
 
+## checkpoint 4a — SYSTEMを保持するAPP終了機構（2026-09-15）
+
+- `ksn_view_host_reset_app`を追加。APP builder/submissionを取消し、両bankのAPP、
+  APP cache/画像登録、modal/focusを解放。予約ブロックは維持し、終了でheap確保・ID発行をしない。
+- SYSTEMの確定済み表示、構築中/送信待ち更新、cache instance、画像登録、pollを維持。
+  APPを黒背景に戻し、全面repairを要求。display/provider callbackからの終了・present再入はBUSY。
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、既存描画/PIE、C++）。
+  新規test_app_teardownは6状態、全画素、部分転送失敗、再入拒否、cache compaction後のSYSTEM
+  PATCH、各状態100回のAPP資源確保/終了でquota回収を確認する。実機100回起動とは別。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane` PASS（ASan/UBSan）。
+  新終了APIはまだJS/session未接続のため、Qは既存adapter回帰確認に限定。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,172,240 B、空き973,488 B、DIRAM123,404 B。
+  S3 coordinatorは88 B（+4）、adapter基本9,840 B、cache込み12,896 B。個別確保上限は維持。
+- **CP4全体は未完**。次の4bで領域所有をJS adapterからhostへ移し、世代付きAPP lease、
+  attach/detachとsession終了を接続する。現在の低レベルendpointポインタ自体は失効しない。
+  native homeへの遷移やSYSTEM実サービスへの接続は、この基盤だけでは変更しない。
+- 実機確認は保留。シリアル操作なし。
+
 ## checkpoint 0 — JS失敗の原子性（2026-09-15）
 
 - 有効な所有transactionで起きた引数検証・getter・確保失敗は、JSでcatchしても更新全体をabortする。

@@ -43,6 +43,10 @@ extern "C" {
 ksn_result ksn_cache_bind(ksn_cache *cache,ksn_cache_command_block *commands,ksn_cache_text_block *text);
 /* Reset a bound cache, retaining its borrowed block addresses. No allocation. */
 void ksn_cache_init(ksn_cache *cache);
+/* Owner-only teardown after removing this layer from BOTH core banks.
+ * Reclaims its instances/templates without disturbing other-layer pending work.
+ * Keeps all reserved blocks. No allocation, callbacks, or new identities. */
+void ksn_cache_reset_layer(ksn_cache *,ksn_layer);
 /* v0.2 initial subset: RECT, ROUND_RECT and STROKE. Definitions are copied. */
 ksn_result ksn_cache_create(ksn_cache *cache,ksn_layer layer,const ksn_draw *draws,
                           uint16_t count,ksn_template *out);

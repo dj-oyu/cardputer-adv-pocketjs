@@ -52,6 +52,8 @@ JS座標は現実装が小数拒否、仕様が最近接丸め（tieは0から�
 2026-09-15進捗: CP0–2とCP3a/bのhost試験・S3ビルドを完了。
 CP3は基本5ブロック/cache任意3ブロックとも個別3,072 B以下。実機のstack・断片化・
 100回起動試験はシリアル使用可能後にまとめて実施する。次の実装はCP4。
+CP4は4a（SYSTEMを保持するAPP終了機構）と4b（host領域所有、世代付きAPP lease、
+JS/session接続）へ分割する。4aのみではAPP attach/detach完了とはしない。
 数値と検証範囲は[kasane-progress.md](kasane-progress.md)の各checkpointを参照。
 
 各行を1 commit以上とし、大きい場合は行内もビルド可能な単位へ分割する。

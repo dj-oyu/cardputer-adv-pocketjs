@@ -12,6 +12,10 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   tools/kasane_contract/use_cases.c tools/kasane_contract/test_core.c -o "$out/core"
 "$out/core"
 for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_app_teardown.c -o "$out/teardown"
+  "$out/teardown"
   for fill_mode in '' '-DKSN_PIE_FILL_MODEL'; do
     cc -std=c11 -Wall -Wextra -Werror $options $fill_mode -Imain/ui/kasane \
       main/ui/kasane/ksn_core.c tools/kasane_contract/test_fill.c -o "$out/fill"

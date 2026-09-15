@@ -148,11 +148,30 @@ void ksn_view_host_end_turn(ksn_view_host *h){if(h)abort_builder(h);}
 ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,ksn_render_stats *stats){
     if(!h||!h->core||!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
+    if(h->presenting)return KSN_BUSY;
     bool submitted=ksn_core_has_submission(h->core);
     if(!submitted&&!ksn_core_needs_repair(h->core))return KSN_OK;
+    h->presenting=true;
     ksn_result r=ksn_render_rects(h->core,port,stats);
+    h->presenting=false;
     if(r==KSN_OK&&submitted)resolve(h);
     return r;
+}
+ksn_result ksn_view_host_reset_app(ksn_view_host *h){
+    if(!h||!h->core)return KSN_INVALID;
+    if(h->presenting||h->core->state.repairing)return KSN_BUSY;
+    if(h->builder.value&&h->building_layer==KSN_APP)abort_builder(h);
+    ksn_submission s=ksn_core_poll(h->core);
+    if(s.status==KSN_SUBMITTED&&s.layer==KSN_APP){
+        ksn_result r=ksn_view_cancel(&h->views[KSN_APP],s.ticket);
+        if(r!=KSN_OK)return r;
+    }
+    ksn_result r=ksn_core_reset_layer(h->core,KSN_APP);
+    if(r!=KSN_OK)return r;
+    ksn_cache_reset_layer(h->cache,KSN_APP);
+    ksn_modal_init(&h->modal,0);
+    h->views[KSN_APP].outcome=(ksn_submission){.layer=KSN_APP};
+    return KSN_OK;
 }
 ksn_result ksn_view_host_attach_cache(ksn_view_host *h,ksn_cache *cache){
     if(!h||!h->core||!cache||!cache->state.commands||!cache->state.text)return KSN_INVALID;

@@ -327,6 +327,25 @@ ksn_client ksn_core_client(ksn_core *storage,ksn_layer layer){
     if(!storage||!valid_layer(layer))return (ksn_client){0};
     ksn_core_impl *core=impl(storage);return (ksn_client){&core_api,&core->endpoints[layer]};
 }
+ksn_result ksn_core_reset_layer(ksn_core *storage,ksn_layer layer){
+    if(!storage||!valid_layer(layer))return KSN_INVALID;
+    ksn_core_impl *core=impl(storage);
+    if(core->repairing||((core->building||core->submitted)&&core->layer==layer))return KSN_BUSY;
+    for(unsigned i=0;i<2;i++){
+        ksn_bank *bank=&core->banks[i];
+        memset(bank->commands+command_base(layer),0,command_limit(layer)*sizeof(ksn_command_storage));
+        memset(bank->text+text_base(layer),0,text_limit(layer));
+        bank->count[layer]=bank->text_used[layer]=0;bank->generation[layer]=0;
+        bank->background[layer]=layer==KSN_APP?0x000000ff:0;
+        bank->background_set[layer]=layer==KSN_APP;
+    }
+    unsigned kept=0;
+    for(unsigned i=0;i<core->image_count;i++)
+        if(core->images[i].layer!=layer)core->images[kept++]=core->images[i];
+    memset(core->images+kept,0,(core->image_count-kept)*sizeof(*core->images));
+    core->image_count=(uint8_t)kept;core->invalidated=true;
+    return KSN_OK;
+}
 ksn_result ksn_core_register_image(ksn_core *storage,ksn_layer layer,const ksn_image_port *port,ksn_resource *out){
     if(!storage||!valid_layer(layer)||!port||!out||!port->read_span||
        !port->width||!port->height||!port->variants||!port->frames)return KSN_INVALID;

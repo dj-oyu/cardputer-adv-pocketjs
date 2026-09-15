@@ -62,6 +62,10 @@ ksn_result ksn_core_bind(ksn_core *,ksn_core_command_block *,ksn_core_command_bl
  * (12 bytes outside this storage, included conservatively in each core's
  * limits/stats). Storage must not be copied or relocated. */
 void ksn_core_init(ksn_core *core);
+/* Owner-only teardown outside rendering. Cancel this layer's builder/submission
+ * first. Clear both banks and image providers; preserve the other layer, even
+ * when it has pending work. Forces a full repaint without consuming an ID. */
+ksn_result ksn_core_reset_layer(ksn_core *,ksn_layer);
 ksn_client ksn_core_client(ksn_core *core,ksn_layer layer);
 /* Host-only append-only registration. Providers stay immutable/alive until
  * init, which must run outside provider callbacks and invalidate all clients.

@@ -13,6 +13,7 @@ struct ksn_view_host {
     ksn_view views[2];
     ksn_tx builder;
     ksn_layer building_layer;
+    bool presenting;
 };
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,12 @@ ksn_view *ksn_view_host_endpoint(ksn_view_host *,ksn_layer);
 /* Enable an optional bound cache only between guest updates. Does not reset
  * it or allocate; failure leaves the coordinator and supplied cache unchanged. */
 ksn_result ksn_view_host_attach_cache(ksn_view_host *,ksn_cache *);
+/* Owner-only APP teardown. Cancels APP work and drops its two banks, images,
+ * cache entries and modal/focus. SYSTEM builders/submissions/refs survive.
+ * Forces full repaint before input resumes. No allocation or guest callback.
+ * Stop guest access first: this operation does not revoke endpoint pointers.
+ * Calling from a display/provider callback returns BUSY without mutation. */
+ksn_result ksn_view_host_reset_app(ksn_view_host *);
 /* Call on EVERY return from JS, including exception/yield. Aborts unfinished
  * builders; submitted transactions survive. No JS invocation during cleanup. */
 void ksn_view_host_end_turn(ksn_view_host *);

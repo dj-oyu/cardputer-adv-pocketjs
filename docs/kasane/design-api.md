@@ -144,12 +144,14 @@ ASan/UBSan、O2 strict-aliasing、C++17ヘッダ検査を`run.sh`へ組み込ん
 
 coreは借用4ブロック（commands 3,072 B×2、text 1,024 B×2）と管理領域に分割する。
 利用前に`ksn_core_bind`で結び、resetは同じブロックを再使用する。ブロックとcoreは移動不可。
-S3のcore管理領域は516 B、合計8,708 B。追加coordinatorはホスト64-bitで112 B、S3で84 B。共有IDカウンタは20 B。
+S3のcore管理領域は516 B、合計8,708 B。CP4aの描画中guard追加後のcoordinatorは
+ホスト64-bitで120 B、S3で88 B。共有IDカウンタは20 B。
 Cのstats.native_bytesはcore/coordinator/共有IDと有効なcache予約を合算する。
 JSのstats.nativeBytesは参照2世代分を含むadapterの予約heapで、共有staticを含まない。
 どちらもLCD帯・JS heap・frost snapshotを含まない。
 CP3bのS3 ELF型情報では基本領域9,836 B（adapter管理1,644 B＋借用4ブロック）、
 cacheは496+1,536+1,024=3,056 B。cacheありは12,892 B。CP3aより両方508 B減。
+CP4aでは描画中guardとalignmentにより基本/cache込みとも4 B増（9,840 / 12,896 B）。
 基本/cacheとも個別確保は3,072 B以下。基本5確保の途中失敗では全回収し、初期化完了後にのみ公開する。
 数値はallocator管理情報・alignment overheadを除く要求サイズ。ブロック分割で管理情報の個数は増える。
 cacheの文字1,024 Bは予約済みだが文字templateは未対応。cache.createのdraw配列はS3で
@@ -158,6 +160,18 @@ ensure_state/core_begin/core_init各48 B、core_bind 32 B。子関数・VMを含
 Kasaneを使わないsessionの予約heapは0 B。board共用描画帯3,840 Bと転送buffer7,680 Bは
 別途同時ピークに含める。CP3aでstatic DIRAM増分はない。
 部品数ごとのnative追加heap確保は0。PIE側も保持snapshotは2,048 Bのまま。
+
+### APP終了のhost境界（CP4a）
+
+`ksn_view_host_reset_app`はAPPのbuilder/submissionを取消し、両bankのAPP命令・文字・
+画像provider、APPのcache template/instance、modal/focusを破棄する。基本/cacheの予約は保持し、
+SYSTEMの確定済み表示・参照・pollと構築中/送信待ち更新は残す。APP背景はopaque blackへ戻す。
+部分LCD転送後も次のpresentで全面を再描画し、修復完了まではAPP入力をblockする。
+この終了処理は新しいID・heap・guest callbackを必要としない。
+
+owner taskがguestアクセスを止めた後、描画呼出しの外で実行する。display/provider callbackからの
+再入はBUSYで無変更。これは低レベルの終了機構であり、endpointポインタの失効機構ではない。
+CP4bでhostの領域所有、APP attach/detachの世代付きlease、JS adapter/session終了を接続する。
 
 `tools/test_pocket_kasane.c`は実QuickJSとASan/UBSanでreplace/patch、group、cache、modal、
 参照失効、cancel、LCD失敗と全修復、thenable拒否、参照上限を検証する。
