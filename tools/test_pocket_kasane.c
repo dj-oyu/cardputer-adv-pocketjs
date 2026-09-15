@@ -3,6 +3,7 @@
 #include "pocket_kasane.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "text/ksn_font.h"
+#include "pet/ksn_pet.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -314,19 +315,26 @@ static void fault_sweep(const char *label,const char *exercise,bool arm_inside) 
         fault_after=-1;
         if(fault_hit) {
             injected++;
-            if(!JS_IsException(result)||!JS_HasException(ctx)||pocket_kasane_has_submission())
+            if(!JS_IsException(result)||!JS_HasException(ctx)||pocket_kasane_has_submission()){
+                printf("    fault index=%u exception=%d pendingException=%d submission=%d\n",fault_index,
+                       JS_IsException(result),JS_HasException(ctx),pocket_kasane_has_submission());
                 passed=false;
+            }
             JSValue error=JS_GetException(ctx);JS_FreeValue(ctx,error);
             if(!run("let s=kasane.stats();if(s.displayed.commands!==2||s.cache.instances!==1||"
                     "s.cache.templates!==1||s.cache.commands!==1)throw Error('fault quota');"
                     "kasane.patch(tx=>baseRef.setColor(tx,0x00ff00ff));"
                     "kasane.cancel(kasane.poll().ticket);")) passed=false;
         } else {
-            if(JS_IsException(result)||JS_HasException(ctx)) passed=false;
+            if(JS_IsException(result)||JS_HasException(ctx)) {
+                JSValue error=JS_GetException(ctx);const char *message=JS_ToCString(ctx,error);
+                printf("    non-injected failure index=%u: %s\n",fault_index,message?message:"?");
+                JS_FreeCString(ctx,message);JS_FreeValue(ctx,error);passed=false;
+            }
             finished=true;
         }
         JS_FreeValue(ctx,result);JS_FreeValue(ctx,function);close_fault_runtime();
-        if(live_allocations) passed=false;
+        if(live_allocations){printf("    leaked=%zu at fault=%u\n",live_allocations,fault_index);passed=false;}
         if(finished||!passed) break;
     }
     printf("    %s: %u allocation failures injected\n",label,injected);
@@ -334,6 +342,11 @@ static void fault_sweep(const char *label,const char *exercise,bool arm_inside) 
 }
 
 static void allocator_tests(void) {
+    fault_sweep("image resource allocation failures reserve no native slot",
+                "globalThis.exercise=()=>kasane.petImage();",false);
+    fault_sweep("image draw allocation failures abort the candidate",
+                "globalThis.asset=kasane.petImage();globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
+                "return tx.image({resource:asset,bounds:[0,0,32,32],scale:0.5})});",false);
     fault_sweep("text conversion and wrapper allocation failures reclaim the candidate",
                 "globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
                 "tx.text({bounds:[0,0,100,16],text:'日本語',capacity:24,color:0xffffffff})});",false);
@@ -589,6 +602,70 @@ static void text_tests(void){
     close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"text teardown frees guest and native owner");
 }
 
+static uint16_t image_over_black(uint16_t rgb,uint8_t alpha){
+    unsigned r=rgb>>11,g=(rgb>>5)&63,b=rgb&31;
+    r=((r*8+r/4)*alpha+127)/255;
+    g=((g*4+g/16)*alpha+127)/255;
+    b=((b*8+b/4)*alpha+127)/255;
+    return (uint16_t)((r/8)*2048+(g/4)*32+b/8);
+}
+static void image_tests(void){
+    check(open_fault_runtime(""),"image fixture opens");
+    ksn_render_stats stats;ksn_image_port port;
+    check(ksn_pet_builtin_image(&port)==KSN_OK,"real embedded PPT2 provider validates");
+    check(run("globalThis.asset=kasane.petImage();globalThis.sprite=null;"
+              "if(!kasane.features().image||asset.width!==64||asset.frames!==6||asset.variants!==12)throw Error('metadata');"
+              "for(let i=0;i<100;i++)kasane.petImage();"
+              "kasane.replace(tx=>{tx.background(255);sprite=tx.image({resource:asset,bounds:[0,0,64,64]})});"),
+          "JS exposes a borrowed image and repeated handles");
+    check(present(&stats)==KSN_OK,"JS image presents");
+    bool pixels=true;uint16_t rgb[64];uint8_t alpha[64];
+    for(unsigned y=0;y<64;y++){
+        port.read_span(port.ctx,0,0,y,0,64,rgb,alpha);
+        for(unsigned x=0;x<64;x++){
+            if(panel_pixels[y*240+x]!=image_over_black(rgb[x],alpha[x])){
+                if(pixels)printf("    pixel %u,%u actual=%04x expected=%04x rgb=%04x alpha=%u\n",x,y,
+                    panel_pixels[y*240+x],image_over_black(rgb[x],alpha[x]),rgb[x],alpha[x]);
+                pixels=false;
+            }
+        }
+    }
+    check(pixels,"JS image pixels match real PPT2 span");
+    check(run("kasane.patch(tx=>sprite.setImageFrame(tx,11,5));"),"JS frame PATCH submitted");
+    fail_band=1;check(present(&stats)==KSN_IO,"image partial transfer retains snapshot");fail_band=-1;
+    check(run("for(let i=0;i<20;i++)kasane.petImage();"),"borrowing existing resource while pending does not mutate source");
+    check(present(&stats)==KSN_OK,"image repair presents fixed variant and frame");
+    pixels=true;
+    for(unsigned y=0;y<64;y++){
+        port.read_span(port.ctx,11,5,y,0,64,rgb,alpha);
+        for(unsigned x=0;x<64;x++)if(panel_pixels[y*240+x]!=image_over_black(rgb[x],alpha[x]))pixels=false;
+    }
+    check(pixels,"repaired image uses submitted mood");
+    check(run("for(const bad of [{variant:12},{frame:6},{sourceX:33,scale:0.5},{scale:3},{sourceY:-1},{resource:{}},"
+              "{get sourceX(){throw Error('getter')}}]){let failed=false;try{kasane.replace(tx=>{"
+              "try{tx.image(Object.assign({resource:asset,bounds:[0,0,32,32]},bad))}catch(e){};"
+              "tx.rect(shape)})}catch(e){failed=true}if(!failed)throw Error('accepted bad image')}"
+              "let failed=false;try{kasane.patch(tx=>sprite.setImageFrame(tx,0,6))}catch(e){failed=true}"
+              "if(!failed)throw Error('bad mood');"),"image validation and caught getter errors abort whole update");
+    ksn_view *system;ksn_resource resources[15];
+    check(ksn_runtime_system_acquire(&system)==KSN_OK,"SYSTEM image owner acquired");
+    bool quota=true;for(unsigned i=0;i<15;i++)
+        if(ksn_view_host_register_image(system,&port,&resources[i])!=KSN_OK)quota=false;
+    ksn_resource extra;
+    check(quota&&ksn_view_host_register_image(system,&port,&extra)==KSN_LIMIT,
+          "120 JS handles consume exactly one of 16 native resources");
+    pocket_kasane_reset();
+    check(run("failed=false;try{kasane.replace(tx=>tx.image({resource:asset,bounds:[0,0,64,64]}))}"
+              "catch(e){failed=e.code==='CLOSED'}if(!failed)throw Error('stale asset revived');"
+              "asset=kasane.petImage();"),"APP reset invalidates old resource and reclaims its slot");
+    ksn_draw draw={.kind=KSN_IMAGE,.bounds={0,0,32,32},.clip={0,0,240,135},.opacity=255,
+        .data.image={.resource=resources[14],.variant=4,.frame=3,.scale=KSN_IMAGE_HALF}};
+    ksn_tx tx;ksn_ref ref;
+    check(ksn_view_begin(system,KSN_REPLACE,&tx)==KSN_OK&&ksn_view_add(system,tx,&draw,&ref)==KSN_OK&&
+          ksn_view_submit(system,tx)==KSN_OK&&present(&stats)==KSN_OK,"SYSTEM images survive APP reset");
+    close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"image owners and guest teardown release all storage");
+}
+
 int main(void) {
     rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
     check(pocket_kasane_install(ctx,NULL)==ESP_OK,"namespace installs");
@@ -678,6 +755,7 @@ int main(void) {
     system_lifetime_tests();
     primitive_tests();
     text_tests();
+    image_tests();
     printf("%s: %u failure(s)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

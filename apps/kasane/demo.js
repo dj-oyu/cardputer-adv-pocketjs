@@ -8,11 +8,12 @@
     throw Error('Kasane host services unavailable');
   console.log('KASANE_SERVICES PASS legacy=' + (typeof globalThis.ui !== 'undefined'));
   const view = pocket.kasane;
+  const pets = view.petImage();
   const tile = view.cache.create([
     {bounds: [0, 0, 42, 24], color: 0x185071ff},
     {bounds: [4, 4, 38, 20], color: 0x63d7bccc, opacity: 220}
   ]);
-  let orb, meter, groupFirst, left, right, panel, title, counter;
+  let orb, meter, groupFirst, left, right, panel, title, counter, pet;
   let phase = 'app';
   let tick = 0;
 
@@ -53,6 +54,8 @@
     tx.strokeRect({bounds: [10, 117, 232, 129], width: 1, color: 0x80b5cfaa});
     left = tx.instantiate(tile, {offset: [142, 28], opacity: 230});
     right = tx.instantiate(tile, {offset: [188, 72], opacity: 175});
+    pet = tx.image({resource: pets, bounds: [188, 25, 220, 57], scale: 0.5,
+      variant: Math.floor(tick / 24) % 12, frame: Math.floor(tick / 4) % 6});
   }
 
   view.replace(base);
@@ -80,6 +83,8 @@
         right.setVisible(tx, (tick % 40) < 31);
         title.setReveal(tx, Math.floor(tick / 6) % 11);
         counter.setText(tx, 'tick ' + tick);
+        if ((tick % 4) === 0)
+          pet.setImageFrame(tx, Math.floor(tick / 24) % 12, Math.floor(tick / 4) % 6);
         if (phase === 'modal')
           panel.setColor(tx, (tick & 8) ? 0x397391dc : 0x316781dc);
       });

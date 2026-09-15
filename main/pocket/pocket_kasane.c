@@ -1,6 +1,7 @@
 #include "pocket_kasane.h"
 #include "pocket_api.h"
 #include "ui/kasane/ksn_runtime.h"
+#include "pet/ksn_pet.h"
 #include "kasane_scene_js.h"
 #include <math.h>
 #include <stdlib.h>
@@ -26,6 +27,7 @@ typedef struct {
     ksn_tx building;
     ksn_tx submitted;
     ksn_update_mode submitted_mode;
+    ksn_resource pet_resource;
     bool active;
 } kasane_state;
 
@@ -35,9 +37,9 @@ static kasane_state *state;
 /* Never recycle identities across host reset while old JS wrappers can live. */
 static uint32_t ref_serial;
 static JSClassID tx_class, modal_class, ref_class, template_class;
-static JSClassID instance_class, ticket_class;
+static JSClassID instance_class, ticket_class, image_class;
 static JSRuntime *tx_rt, *modal_rt, *ref_rt, *template_rt;
-static JSRuntime *instance_rt, *ticket_rt;
+static JSRuntime *instance_rt, *ticket_rt, *image_rt;
 
 static const char *result_code(ksn_result result) {
     switch(result) {
@@ -108,6 +110,7 @@ static const JSClassDef ref_def={.class_name="KasaneDrawRef",.finalizer=ref_fina
 static const JSClassDef template_def={.class_name="KasaneTemplate"};
 static const JSClassDef instance_def={.class_name="KasaneInstanceRef"};
 static const JSClassDef ticket_def={.class_name="KasaneTicket"};
+static const JSClassDef image_def={.class_name="KasaneImageResource"};
 
 static ref_slot *ref_from(JSContext *ctx, JSValueConst self, const char *op) {
     uint32_t handle=opaque_value(self,ref_class);
@@ -445,6 +448,62 @@ static const char *text_string(JSContext *ctx,JSValueConst value,uint16_t *bytes
     *bytes=(uint16_t)length;return text;
 }
 
+static bool property_u16(JSContext *ctx,JSValueConst spec,const char *key,uint16_t fallback,
+                         uint16_t *out,const char *op){
+    JSValue value=JS_GetPropertyStr(ctx,spec,key);
+    if(JS_IsException(value))return false;
+    double n=fallback;bool ok=JS_IsUndefined(value)||number_in(ctx,value,0,65535,&n);
+    JS_FreeValue(ctx,value);
+    if(!ok){throw_result(ctx,KSN_INVALID,op);return false;}
+    *out=(uint16_t)n;return true;
+}
+
+static JSValue js_pet_image(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;const char *op="kasane.petImage";
+    if(state&&state->building.value)return throw_result(ctx,KSN_BUSY,op);
+    /* Finish every fallible JS allocation before reserving a native resource. */
+    JSValue object=JS_NewObjectClass(ctx,image_class);
+    if(JS_IsException(object))return object;
+    static const struct {const char *name;int value;} metadata[]={
+        {"width",64},{"height",64},{"variants",12},{"frames",6}};
+    for(unsigned i=0;i<sizeof(metadata)/sizeof(metadata[0]);i++)
+        if(JS_DefinePropertyValueStr(ctx,object,metadata[i].name,
+                JS_NewInt32(ctx,metadata[i].value),JS_PROP_ENUMERABLE)<0){
+            JS_FreeValue(ctx,object);return JS_EXCEPTION;
+        }
+    if(!ensure_state(ctx,op)){JS_FreeValue(ctx,object);return JS_EXCEPTION;}
+    if(!state->pet_resource.value){
+        ksn_image_port port;ksn_result result=ksn_pet_builtin_image(&port);
+        if(result==KSN_OK)result=ksn_view_host_register_image(view(),&port,&state->pet_resource);
+        if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)state->pet_resource.value);return object;
+}
+
+static JSValue js_tx_image(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="kasane.image";ksn_tx tx=tx_from(ctx,self,op);
+    if(!tx.value)return JS_EXCEPTION;
+    JSValueConst spec=argc?argv[0]:JS_UNDEFINED;ksn_draw draw={0};
+    if(!parse_draw_base(ctx,spec,&draw,op))return JS_EXCEPTION;
+    draw.kind=KSN_IMAGE;
+    JSValue resource=JS_GetPropertyStr(ctx,spec,"resource");
+    if(JS_IsException(resource))return resource;
+    draw.data.image.resource.value=opaque_value(resource,image_class);JS_FreeValue(ctx,resource);
+    if(!draw.data.image.resource.value)return throw_result(ctx,KSN_INVALID,op);
+    if(!property_u16(ctx,spec,"variant",0,&draw.data.image.variant,op)||
+       !property_u16(ctx,spec,"frame",0,&draw.data.image.frame,op)||
+       !property_u16(ctx,spec,"sourceX",0,&draw.data.image.source_x,op)||
+       !property_u16(ctx,spec,"sourceY",0,&draw.data.image.source_y,op))return JS_EXCEPTION;
+    JSValue scale=JS_GetPropertyStr(ctx,spec,"scale");
+    if(JS_IsException(scale))return scale;
+    double n=1;bool ok=JS_IsUndefined(scale)||(JS_IsNumber(scale)&&JS_ToFloat64(ctx,&n,scale)==0);
+    JS_FreeValue(ctx,scale);
+    if(!ok||(n!=0.5&&n!=1&&n!=2))return throw_result(ctx,KSN_INVALID,op);
+    draw.data.image.scale=n==0.5?KSN_IMAGE_HALF:n==2?KSN_IMAGE_2X:KSN_IMAGE_1X;
+    ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
+    return result==KSN_OK?expose_ref(ctx,tx,ref):throw_result(ctx,result,op);
+}
+
 static JSValue js_tx_text(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     const char *op="kasane.text";ksn_tx tx=tx_from(ctx,self,op);
     if(!tx.value)return JS_EXCEPTION;
@@ -552,6 +611,11 @@ static JSValue change_ref(JSContext *ctx, JSValueConst self, int argc,
         ksn_result result=ksn_view_change(view(),tx,slot->ref,&change);
         JS_FreeCString(ctx,text);
         return result==KSN_OK?JS_UNDEFINED:throw_result(ctx,result,op);
+    } else if(property==KSN_SET_IMAGE_FRAME) {
+        double variant,frame;
+        if(argc<3||!number_in(ctx,argv[1],0,65535,&variant)||!number_in(ctx,argv[2],0,65535,&frame))
+            return throw_result(ctx,KSN_INVALID,op);
+        change.value.image.variant=(uint16_t)variant;change.value.image.frame=(uint16_t)frame;
     } else if(property==KSN_SET_REVEAL) {
         double n;
         if(argc<2||!number_in(ctx,argv[1],0,128,&n))return throw_result(ctx,KSN_INVALID,op);
@@ -576,6 +640,7 @@ REF_SETTER(js_ref_color,KSN_SET_COLOR,"kasane.ref.setColor")
 REF_SETTER(js_ref_visible,KSN_SET_VISIBLE,"kasane.ref.setVisible")
 REF_SETTER(js_ref_text,KSN_SET_TEXT,"kasane.ref.setText")
 REF_SETTER(js_ref_reveal,KSN_SET_REVEAL,"kasane.ref.setReveal")
+REF_SETTER(js_ref_image,KSN_SET_IMAGE_FRAME,"kasane.ref.setImageFrame")
 
 static JSValue js_instance_place(JSContext *ctx, JSValueConst self, int argc,
                                  JSValueConst *argv) {
@@ -696,6 +761,7 @@ MUTATOR(js_tx_round_rect,tx_class,false,"kasane.roundRect")
 MUTATOR(js_tx_stroke_rect,tx_class,false,"kasane.strokeRect")
 MUTATOR(js_tx_gradient,tx_class,false,"kasane.gradient")
 MUTATOR(js_tx_text,tx_class,false,"kasane.text")
+MUTATOR(js_tx_image,tx_class,false,"kasane.image")
 MUTATOR(js_tx_group,tx_class,false,"kasane.group")
 MUTATOR(js_tx_instantiate,tx_class,false,"kasane.instantiate")
 MUTATOR(js_ref_rect,tx_class,true,"kasane.ref.setRect")
@@ -704,6 +770,7 @@ MUTATOR(js_ref_color,tx_class,true,"kasane.ref.setColor")
 MUTATOR(js_ref_visible,tx_class,true,"kasane.ref.setVisible")
 MUTATOR(js_ref_text,tx_class,true,"kasane.ref.setText")
 MUTATOR(js_ref_reveal,tx_class,true,"kasane.ref.setReveal")
+MUTATOR(js_ref_image,tx_class,true,"kasane.ref.setImageFrame")
 MUTATOR(js_instance_place,tx_class,true,"kasane.instance.place")
 MUTATOR(js_instance_visible,tx_class,true,"kasane.instance.setVisible")
 MUTATOR(js_modal_open,modal_class,false,"kasane.modal.open")
@@ -880,6 +947,7 @@ static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
     PUT(out,"strokeRect",JS_NewBool(ctx,true));
     PUT(out,"gradient",JS_NewBool(ctx,true));
     PUT(out,"text",JS_NewBool(ctx,true));
+    PUT(out,"image",JS_NewBool(ctx,true));
     PUT(out,"groupOpacity",JS_NewBool(ctx,true));
     PUT(out,"modal",JS_NewBool(ctx,true));
     PUT(out,"animation",JS_NewBool(ctx,false));
@@ -938,6 +1006,7 @@ static const JSCFunctionListEntry tx_methods[]={
     JS_CFUNC_DEF("strokeRect",1,js_tx_stroke_rect_checked),
     JS_CFUNC_DEF("gradient",1,js_tx_gradient_checked),
     JS_CFUNC_DEF("text",1,js_tx_text_checked),
+    JS_CFUNC_DEF("image",1,js_tx_image_checked),
     JS_CFUNC_DEF("group",3,js_tx_group_checked),
     JS_CFUNC_DEF("instantiate",2,js_tx_instantiate_checked),
 };
@@ -948,6 +1017,7 @@ static const JSCFunctionListEntry ref_methods[]={
     JS_CFUNC_DEF("setRect",2,js_ref_rect_checked),JS_CFUNC_DEF("setClip",2,js_ref_clip_checked),
     JS_CFUNC_DEF("setColor",2,js_ref_color_checked),JS_CFUNC_DEF("setVisible",2,js_ref_visible_checked),
     JS_CFUNC_DEF("setText",2,js_ref_text_checked),JS_CFUNC_DEF("setReveal",2,js_ref_reveal_checked),
+    JS_CFUNC_DEF("setImageFrame",3,js_ref_image_checked),
 };
 static const JSCFunctionListEntry instance_methods[]={
     JS_CFUNC_DEF("place",2,js_instance_place_checked),
@@ -962,6 +1032,7 @@ static JSValue js_create_scene(JSContext *ctx,JSValueConst self,int argc,JSValue
     JS_FreeValue(ctx,factory);return result;
 }
 static const JSCFunctionListEntry functions[]={
+    JS_CFUNC_DEF("petImage",0,js_pet_image),
     JS_CFUNC_DEF("createScene",1,js_create_scene),
     JS_CFUNC_DEF("replace",1,js_replace),JS_CFUNC_DEF("patch",1,js_patch),
     JS_CFUNC_DEF("poll",0,js_poll),JS_CFUNC_DEF("cancel",1,js_cancel),
@@ -993,6 +1064,7 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
        !MAKE(ref_class,ref_rt,ref_def,ref_methods)||
        !MAKE(instance_class,instance_rt,instance_def,instance_methods)||
        !make_class(ctx,&template_class,&template_rt,&template_def,NULL,0)||
+       !make_class(ctx,&image_class,&image_rt,&image_def,NULL,0)||
        !make_class(ctx,&ticket_class,&ticket_rt,&ticket_def,NULL,0)) return ESP_ERR_NO_MEM;
 #undef MAKE
     if(JS_SetPropertyFunctionList(ctx,ns,functions,

@@ -8,6 +8,11 @@ CACHE=${CACHE:-/tmp/qjs-kasane-host}
 mkdir -p "$CACHE"
 python3 tools/make_font.py "$CACHE"
 python3 tools/make_kasane_scene.py "$CACHE"
+python3 - "$CACHE/kasane_pet_test_data.h" <<'PY'
+import pathlib, sys
+data = pathlib.Path('apps/pet/assets/pets-compact.bin').read_bytes()
+pathlib.Path(sys.argv[1]).write_text('static const uint8_t pet_test_data[] = {' + ','.join(map(str, data)) + '};\n')
+PY
 # Match the shipping VM path. Keep this cache separate from harnesses with
 # different defines, and invalidate it on header or build-script changes.
 DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1"
@@ -24,6 +29,7 @@ gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Wer
   -I main/text -I main/hal -I "$CACHE" \
   "$TEST_SOURCE" tools/hostshim/pocket_api_stub.c \
   main/text/ksn_font.c tools/hostshim/jpfont.c \
+  main/pet/ksn_pet.c main/pet/pet_pixels.c tools/hostshim/ksn_pet_builtin.c \
   main/pocket/pocket_kasane.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
   main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \

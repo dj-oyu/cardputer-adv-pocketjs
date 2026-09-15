@@ -114,7 +114,27 @@ source登録はowner/layer固定、APP終了時にはSYSTEM資源を残してAPP
 命令は32 Bのまま。crop原点をpayloadの空き4 B、scaleを未使用flag bitへ格納する。
 pixel scratchはgroup tile256＋span共用96＋dither8＋provider行最大128＝488 B。
 command snapshotや呼出しstackは別に実機high-waterと併せて計上する。
-JS resourceの公開とPPT2 adapterはCP13。frame中にproviderの選択を変えてはならない。
+frame中にproviderの選択を変えてはならない。
+
+### JS IMAGE / PPT2（CP13）
+
+`view.petImage()`はFlash上の組込みPPT2を借りる不透明handleを返す。
+readonlyのwidth/height=64、variants=12、frames=6を持つ。APP session内のnative登録は一度だけ。
+取得はbuilder外で行う。初回登録はpending/repair中BUSY、登録済みhandleの再取得は可能。
+JS wrapperをGCしてもnative登録は残り、APP detachでまとめて失効する。
+SYSTEMの資源は残す。古いwrapperを次sessionで使用するとCLOSED。
+
+`tx.image({resource, bounds, clip?, opacity?, variant?:0, frame?:0,
+sourceX?:0, sourceY?:0, scale?:1})`はDrawRefを返す。scaleは0.5/1/2のみ。
+source座標・variant・frameは非負整数。nativeと同じcrop制限を適用する。
+`ref.setImageFrame(tx, variant, frame)`でペット種と表情をPATCHする。
+setRect/setClip/setVisibleも使用可能。資源/source/scaleの変更はREPLACE。
+`features().image`が対応を示す。画像は現時点のcache template対象外。
+
+PPT2 providerは不変bytesを登録時に検証し、128 Bの行でRGB565/straight alphaへ変換する。
+全画像をheapへ展開せず、ペット選択のglobal状態に依存しない。
+native所有者は`ksn_view_host_register_image`でAPP/SYSTEMごとに登録する。
+display/provider callbackからの登録はBUSY。登録はtransactionのrollback対象外。
 
 ### JS scene controller（CP11）
 

@@ -78,7 +78,8 @@ CP7実機100回起動と描画を確認。CP8のJSプリミティブ公開とhos
 CP8実機確認済み。CP9 native TEXTのH/Qと両ビルドが完了し、実機比較を追加した。
 CP9実機比較もPASS。CP10 JS TEXTのQ/両ビルド/実機100回起動が完了。
 CP11 hello/scene helperのhost試験、両ビルドと実機100回起動が完了。
-CP12 native IMAGEのH/Qと両ビルドが完了。次はCP13 PPT2/JS resource。
+CP12 native IMAGEのH/Qと両ビルド・実機比較が完了。
+CP13a PPT2 provider、CP13b JS resourceのH/Q・両ビルドが完了。実機確認後はCP14 SYSTEM。
 scope別購読とmodal Back配送はCP15で扱う。
 数値と検証範囲は[kasane-progress.md](kasane-progress.md)の各checkpointを参照。
 

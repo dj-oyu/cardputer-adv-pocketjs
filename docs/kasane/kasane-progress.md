@@ -4,6 +4,17 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 13b — JS image resourceとframe PATCH（2026-09-16）
+
+- petImage/tx.image/setImageFrameを接続。readonly metadata、APP sessionごとのnative登録重複排除、
+  全JS確保成功後の登録、APP reset失効を実装。source座標/scaleはREPLACEで固定する。
+- Q ASan/UBSan・O2 PASS。120 wrapperでnative登録1枠、残る15枠をSYSTEMが使用可能。
+  APP reset後のSYSTEM資源保持、古いhandle拒否、getter/範囲外の全体取消、OOM sweep、
+  実PPT2全64×64画素と転送失敗後の別表情比較を確認。H全回帰/PIE参照もPASS。
+- 通常/Kasane-onlyビルドとlink監査PASS。app2,208,640 B / 1,912,704 B、
+  DIRAM137,292 B / 135,932 B（各+16 B）。JS adapter動的stateはresource ID分+4 B。
+- Kデモに全12種×6表情の時間変化を追加。実機確認結果は次の記録に追記する。
+
 ## checkpoint 13a — PPT2 native provider（2026-09-16）
 
 - 既存PPT2のimmutable Flash bytesを借り、variantをペット番号、frameを表情として読む

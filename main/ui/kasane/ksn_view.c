@@ -33,6 +33,11 @@ void ksn_view_host_init(ksn_view_host *h,ksn_core *core,ksn_cache *cache,uint32_
 ksn_view *ksn_view_host_endpoint(ksn_view_host *h,ksn_layer layer){
     return h&&h->core&&(layer==KSN_APP||layer==KSN_SYSTEM)?&h->views[layer]:NULL;
 }
+ksn_result ksn_view_host_register_image(ksn_view *v,const ksn_image_port *port,ksn_resource *out){
+    if(!valid(v)||(v->layer!=KSN_APP&&v->layer!=KSN_SYSTEM))return KSN_INVALID;
+    if(v->host->presenting)return KSN_BUSY;
+    return ksn_core_register_image(v->host->core,v->layer,port,out);
+}
 ksn_view_capabilities ksn_view_features(const ksn_view *v){
     if(!valid(v))return (ksn_view_capabilities){0};
     return (ksn_view_capabilities){.draw_kinds=(1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
