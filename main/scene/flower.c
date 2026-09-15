@@ -1689,15 +1689,20 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         uint32_t raycy=garden_prof_rays(&rayrows);
         uint32_t dissolverows=garden_prof_dissolve();
         double veg=vegcy/240000.0/prof_frames,rays=raycy/240000.0/prof_frames;
-        ESP_LOGI("garden","SPLIT3 frames=%u decor=%.2f veg=%.2f (%u rows, %u passes, %u cy/row) "
+        ESP_LOGI("garden","SPLIT3 gate=%d frames=%u decor=%.2f veg=%.2f (%u rows, %u passes, %u cy/row) "
                  "rays=%.2f (%u rows, %u cy/row) rest=%.2f | dissolve=%u of %u rows (%.1f%%) "
                  "(ms/frame; rest = decor - veg - rays = row scaffolding + dissolve memcpy/mix; "
                  "veg rows in a dissolve run two vegetation passes)",
-                 prof_frames,gar-pix,veg,vegrows/prof_frames,vegpasses/prof_frames,
+                 g_garden_decor_gate,prof_frames,gar-pix,veg,vegrows/prof_frames,vegpasses/prof_frames,
                  vegrows?vegcy/vegrows:0,
                  rays,rayrows/prof_frames,rayrows?raycy/rayrows:0,
                  gar-pix-veg-rays,dissolverows/prof_frames,vegrows/prof_frames,
                  vegrows?100.0*dissolverows/vegrows:0.0);
+        // The A/B: the window just reported ran with the gate as printed, and the
+        // next one runs with it flipped. Adjacent 60-frame windows are three
+        // seconds apart in the same scene, in the same binary, so the paired
+        // difference is the gate and not the phase or the layout.
+        g_garden_decor_gate=!g_garden_decor_gate;
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
         prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;

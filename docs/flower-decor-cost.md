@@ -71,6 +71,33 @@ Three things follow.
    135 passes / 0.26 ms for the settled windows. A bare cycles-per-row average
    would have been the mean of two different amounts of work.
 
+### Attempted: gating the profiles by their support (2026-09-15, branch `perf/flower-decor`)
+
+`garden_decor_profile()` returns exactly 0 outside its radius, so the light and
+the shadow are each a compact support, and the span the loop walks is their
+union -- up to 3.5 radii where each profile owns part of it. A gate that
+evaluates a profile only inside its own reach is exact (**both arms byte-identical
+to the previous revision over 120 frames x 135 rows x 7.8 MB**, harness
+`tools/flower_decor_identity.c`), and on the host it removes **35.6% of the
+profile evaluations** (4,304,780 -> 2,772,750 over the same 120 frames, counted
+with `-DGARDEN_COUNT_PROFILE`).
+
+On the device it is **not measurable**. The switch was alternated once per
+60-frame window inside one binary (`SPLIT3 gate=`) so the pairs differ only by
+the gate, 41 pairs: rays delta mean **-0.19 ms**, median -0.03, with the
+*unchanged* vegetation pass as a control at mean -0.09 ms. The effect is inside
+the noise, and a ~0.7 ms effect is what the removed instruction count predicts
+(12,767 evaluations a frame at ~14 instructions).
+
+What that means: **the decorative-ray pass is not bound by the profile
+arithmetic.** Removing a third of it moves nothing, so the per-pixel cost is
+dominated by the rest of the pipeline (the dither, the pack, the load/store) or
+by stalls -- consistent with the pass running ~60..150 cycles per visited pixel
+against a ~70-instruction body. Micro-optimising this loop further is a dead end;
+the way to move `rays` is to vectorise the whole per-pixel pipeline, not to shave
+its arithmetic.
+
+
 
 The existing `SPLIT decor` is garden minus pixels and includes vegetation as
 well as these rays, so it must not be read as isolated auxiliary-ray timing.
