@@ -34,6 +34,7 @@
 #include "ksn_font.h"
 #include "app_registry.h"
 #include "pet_hub.h"
+#include "system/sys_device.h"
 #include "scene_mem.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -157,7 +158,9 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
     kasane_display_t *display=opaque;
     int64_t began=esp_timer_get_time();
     // Kasane promotes its command bank only after acknowledged transfers.
+    pet_hub_overlay_suppress(pocket_kasane_notice_composited());
     esp_err_t result=board_present_sync(y,rows,(uint16_t *)pixels);
+    pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
 }
@@ -868,13 +871,18 @@ esp_err_t app_tick(uint32_t buttons) {
     // busy enough to still have a queue, which is when saving matters most.
     turn_continued=false;
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
+    sys_notice notice;
+    bool have_notice=sys_notify_active(sys_device_notifications(),&notice);
+    /* BUSY/limits leave the legacy overlay available until SYSTEM can submit.
+     * The next owner turn retries without interrupting the guest. */
+    (void)pocket_kasane_update_notice(have_notice?&notice:NULL,pet_hub_selected());
     // A top-level replace() is submitted while the source is evaluated, before
     // there is a PocketJS frame to hand to present_frame(). Present that image
     // as its own owner turn. The same gate retries a partial LCD transfer
     // without letting another JS update race repair. An invalidated committed
     // screen also reaches this gate when no JS submission exists.
     if(pocket_kasane_needs_present()) {
-        bool guest_submission=pocket_kasane_has_submission()&&!pocket_kasane_animation_pending();
+        bool guest_submission=pocket_kasane_has_submission()&&!pocket_kasane_animation_pending()&&!pocket_kasane_system_pending();
         esp_err_t pending=present_frame(NULL);
         if(pending!=ESP_OK)return pending;
         // A completed owner-only redraw must allow this tick's JS turn. Live

@@ -465,6 +465,34 @@ static void lazy_cache_tests(void) {
     track_native=false;close_fault_runtime();
 }
 
+static void notice_lifetime_tests(void){
+    check(open_fault_runtime(""),"notice fixture opens");
+    pocket_kasane_reset();track_native=true;ksn_render_stats stats;
+    for(unsigned i=0;i<10;i++){
+        check(run("kasane.replace(tx=>{tx.background(0x0000ffff);tx.rect(shape)});"),"notice APP starts");
+        sys_notice notice={.id=i+1,.owner=1,.phase=NOTICE_ACTIVE,.label="SYSTEM NOTICE"};
+        check(pocket_kasane_update_notice(&notice,0)==KSN_BUSY,"APP submission defers SYSTEM notice");
+        check(present(&stats)==KSN_OK,"notice APP presents");
+        size_t before=native_bytes;
+        check(pocket_kasane_update_notice(&notice,0)==KSN_OK&&pocket_kasane_system_pending(),"notice submits SYSTEM");
+        fail_once=true;check(present(&stats)==KSN_IO,"notice transfer failure retained");
+        if(i==9){
+            pocket_kasane_reset();check(native_bytes==0,"APP exit frees a failed pending SYSTEM notice");
+            continue;
+        }
+        check(pocket_kasane_update_notice(NULL,0)==KSN_BUSY,"notice removal waits for frozen candidate");
+        check(present(&stats)==KSN_OK,"notice retry presents");
+        check(pocket_kasane_update_notice(&notice,0)==KSN_OK&&pocket_kasane_notice_composited(),"notice acknowledged independently");
+        check(ksn_runtime_stats(KSN_SYSTEM).displayed.commands==5&&native_bytes==before,"notice fits SYSTEM quota without extra allocation");
+        if(i%2==0){
+            check(pocket_kasane_update_notice(NULL,0)==KSN_OK,"notice removal submits");
+            check(present(&stats)==KSN_OK,"notice removal presents");
+            check(pocket_kasane_update_notice(NULL,0)==KSN_OK&&!pocket_kasane_notice_composited(),"legacy overlay can resume after removal");
+        }
+        pocket_kasane_reset();check(native_bytes==0,"notice resources do not pin APP runtime after exit");
+    }
+    track_native=false;close_fault_runtime();
+}
 static void system_lifetime_tests(void) {
     check(open_fault_runtime(""),"SYSTEM coexistence fixture opens");
     pocket_kasane_reset();track_native=true;
@@ -486,6 +514,9 @@ static void system_lifetime_tests(void) {
     for(unsigned i=0;i<4;i++) {
         check(run("kasane.replace(tx=>{tx.background(0x102030ff);globalThis.oldR=tx.rect(shape)});"),
               "APP attaches beside native SYSTEM");
+        sys_notice notice={.id=1,.owner=1,.phase=NOTICE_ACTIVE,.label="NOTICE"};
+        check(pocket_kasane_update_notice(&notice,0)==KSN_BUSY&&!pocket_kasane_notice_composited(),
+              "APP-scoped notice does not overwrite an explicit native SYSTEM owner");
         if(i==0||i==3)check(present(&stats)==KSN_OK,"APP commits beside SYSTEM");
         if(i==2){fail_band=1;check(present(&stats)==KSN_IO,"APP partially transfers before exit");fail_band=-1;}
         if(i==3){pocket_kasane_invalidate();fail_band=1;
@@ -860,6 +891,7 @@ int main(void) {
     base_block_tests();
     lazy_cache_tests();
     system_lifetime_tests();
+    notice_lifetime_tests();
     primitive_tests();
     text_tests();
     image_tests();

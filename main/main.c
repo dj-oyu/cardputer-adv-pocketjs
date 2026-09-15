@@ -37,6 +37,8 @@
 #include <string.h>
 #ifdef CONFIG_KSN_DEVICE_PROBE
 #include "esp_heap_caps.h"
+#include "pocket_kasane.h"
+#include "ui/kasane/ksn_runtime.h"
 static atomic_bool ksn_probe_requested;
 static atomic_int system_probe_requested;
 void ksn_device_probe_run(void);
@@ -67,10 +69,11 @@ static void system_probe(int command){
     for(unsigned i=0;i<SYS_TIMER_SLOTS;i++){
         count+=timers->records[i].due_us!=0;blocked+=timers->records[i].blocked;
     }
-    printf("SYS_PROBE active=%u queued=%u snoozed=%u timers=%u blocked=%u id=%lu free=%lu largest=%lu\n",
+    printf("SYS_PROBE active=%u queued=%u snoozed=%u timers=%u blocked=%u id=%lu free=%lu largest=%lu system=%u composited=%u\n",
         have,queued,snoozed,count,blocked,(unsigned long)(have?active.id:0),
         (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+        ksn_runtime_stats(KSN_SYSTEM).displayed.commands,pocket_kasane_notice_composited());
 }
 #endif
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH

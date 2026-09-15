@@ -43,6 +43,13 @@ JS sourceはhost、RTC/SNTPはnetworkの互換名を維持する。healthに未�
 保持する。TLSはOS時計を使うため、補完anchorではなく実OS時計providerを検査する。
 時刻を読むだけの処理はplatform時計を再取得しない。同期要求はowner stepで消費する。
 
+CP14d1: Kasane APP上の通知はSYSTEM命令へ合成する。`ksn_notice_emit`はcallerのtransactionに
+追加する部品で、runtime・notice・resourceを所有しない。APP側coordinatorがpending/displayedを
+分けて表示成功を追跡し、APPのbusy/IO中にcandidateを書き換えない。
+APP寿命のSYSTEM借用は明示的なnative SYSTEM pinと区別する。後者がいる場合はそのownerを
+上書きしない。APP終了で描画資源は回収するが、通知stateはSystemに残りnative HOMEへ引き継ぐ。
+native HOME/picker/editorは旧overlay経路を維持。録音表示・汎用JS時計購読・wake統合は未完了。
+
 `sys_power_read`はsampledの有無を返し、valid/errorを含むsnapshotをコピーする。
 `sys_power_step`は購読またはrefresh要求があり期限到達した時だけHALを呼ぶ。
 解除後の再購読でも直前の測定から1秒の間隔を守り、初回dirtyで最新cacheを読める。

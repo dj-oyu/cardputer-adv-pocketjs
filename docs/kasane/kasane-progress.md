@@ -4,6 +4,39 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14d1 — Kasaneアプリ上のSYSTEM通知（2026-09-16）
+
+- `ksn_notice_emit`が通知snapshotから5命令/文字41 Bを追加。pet画像はSYSTEM resource、
+  他のSYSTEM部品と共通transactionへ合成できる。文字/descriptorの借用は呼出中のみ。
+- Kasaneアプリでは通知の追加/変更/除去をSYSTEM REPLACEへ接続。APP提出中はBUSYで待ち、
+  転送失敗時はcandidateを保持。表示成功後に通知id/選択petを確定する。
+- APP寿命に限定したSYSTEM endpointを借り、通知のためにruntimeをpinしない。
+  明示的native SYSTEM ownerが存在する場合は上書きせず既存overlayへ戻す。
+  native HOME等はまだboard overlay経路。全native画面のKasane所有は後続工程。
+- Kasane転送中だけ旧pet overlayを抑止し、二重描画を防止。SYSTEM更新でJS turnを
+  不要にスキップしない。通知stateはAPP終了後もSystem側で保持される。
+- Hと実QuickJS ASan/UBSan・O2 PASS。文字コピー、APP BUSY、quota、IO再試行、表示除去、
+  independent poll、10回APP終了と失敗中の終了でnative全回収、別SYSTEM ownerとの非干渉を検査。
+- 通常/Kasane-only buildとlink監査PASS。DIRAM137,964 / 136,604 B。
+- COM3実機`system_device_test.py --kasane` PASS。SYSTEM 5命令で動くAPP上へ合成し、
+  8+1満杯、snooze拒否、ACK後timer再試行、snooze、消去後SYSTEM 0命令を確認。
+  `.cache/system-runtime-kasane-notice/notice.png`で送信前画素を確認（パネル目視とは区別）。
+- 実行中free129,868→129,708 B、largest79,872 B。JS実行中の160 B変動を含む。
+  終了後の再起動/終了2回はfree255,848 / largest81,920 Bで一致し、通知状態も全件0。
+
+## System統合の実機診断（2026-09-16）
+
+- probe限定USB N/O/Zと`tools/system_device_test.py`を追加。診断ownerのみを生成・回収しNVS不変。
+- 通常/Kasane-only build・link監査PASS。probe追加後DIRAM137,964 / 136,604 B。
+- 実機PASS: 8待機＋1表示、満杯snoozeのACTIVE維持、ACK後のblocked timer再試行、
+  snooze成功（active1/queued6/snoozed1）、cleanup後全件0。
+- `.cache/system-runtime-device/serial.log`と`notice.png`。実機送信前ピクセルに
+  SYSTEM NOTICE、ペット、確認/snooze案内を確認。パネルそのものの目視確認とは区別する。
+- 診断中のfree240,404 / largest69,632 Bは一定。HOME背景scratchを保持する時点の値であり、
+  前景APP終了後の値とは直接比較しない。通知は現行board overlay経路で描画し、
+  Kasane SYSTEM presenterへの置換は次段階。
+- 診断後Kasaneアプリ2回起動/終了PASS。終了後free255,848 / largest81,920 Bが両回同値。
+
 ## checkpoint 14c2 — 共通相対timer・満杯再試行（2026-09-16）
 
 - `sys_timer`へ4件固定の期限・owner/key・labelを抽出。store240 B、pethubの旧224 B配列を撤去。

@@ -31,7 +31,7 @@ gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Wer
   main/text/ksn_font.c tools/hostshim/jpfont.c \
   main/pet/ksn_pet.c main/pet/pet_pixels.c tools/hostshim/ksn_pet_builtin.c \
   main/pocket/pocket_kasane.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
-  main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c \
+  main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_notice.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \
   "$CACHE/quickjs-vm.o" \
   -Wl,--wrap=calloc -Wl,--wrap=free -lm -o "$OUT"

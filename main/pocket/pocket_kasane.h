@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 #include "ui/kasane/ksn_view_host.h"
+#include "system/sys_notify.h"
 
 /* QuickJS-facing APP lease into the native Kasane runtime. Allocation is lazy;
  * reading features costs no arena. Reset detaches APP and releases its wrapper
@@ -13,6 +14,9 @@ esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data);
 void pocket_kasane_reset(void);
 
 bool pocket_kasane_active(void);
+ksn_result pocket_kasane_update_notice(const sys_notice *,uint16_t variant);
+bool pocket_kasane_notice_composited(void);
+bool pocket_kasane_system_pending(void);
 bool pocket_kasane_has_submission(void);
 ksn_result pocket_kasane_advance(uint64_t now_us);
 bool pocket_kasane_animation_pending(void);

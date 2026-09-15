@@ -10,6 +10,7 @@ import serial
 p = argparse.ArgumentParser()
 p.add_argument('--port', required=True)
 p.add_argument('--out', type=Path, required=True)
+p.add_argument('--kasane', action='store_true', help='run over the animated Kasane app')
 a = p.parse_args()
 a.out.mkdir(parents=True, exist_ok=True)
 log = []
@@ -62,10 +63,16 @@ with serial.Serial(a.port, 115200, timeout=0.1) as port:
         time.sleep(1)
         state('Z')
         press('q')
+        if a.kasane:
+            port.write(b'K')
+            wait('KASANE_READY active=true')
+            time.sleep(0.4)
         state('N')
-        time.sleep(0.5)
+        time.sleep(1)
         full = state()
         assert (full['active'], full['queued'], full['blocked']) == (1, 8, 1), full
+        if a.kasane:
+            assert full['system'] == 5 and full['composited'] == 1, full
         capture()
         press('b')
         refused = state()
@@ -79,8 +86,15 @@ with serial.Serial(a.port, 115200, timeout=0.1) as port:
         assert (snoozed['active'], snoozed['queued'], snoozed['snoozed']) == (1, 6, 1), snoozed
         cleared = state('Z')
         assert all(cleared[k] == 0 for k in ('active', 'queued', 'snoozed', 'timers', 'blocked')), cleared
+        if a.kasane:
+            time.sleep(0.5)
+            empty = state()
+            assert empty['system'] == 0 and empty['composited'] == 0, empty
         print('SYSTEM_DEVICE_OK 8+1, full snooze refusal, timer retry, ACK, snooze, owner cleanup', flush=True)
     finally:
         port.write(b'Z')
         time.sleep(0.2)
+        if a.kasane:
+            port.write(b'q')
+            time.sleep(0.5)
         (a.out / 'serial.log').write_text('\n'.join(log), encoding='utf-8')

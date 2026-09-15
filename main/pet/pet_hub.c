@@ -20,6 +20,9 @@ static bool opened, changed;
 static uint64_t ringing, next_tone;
 static char alert[PET_LABEL_CHARS+1];
 static uint32_t alert_id,alert_owner;
+static bool overlay_suppressed;
+void pet_hub_overlay_suppress(bool suppress){overlay_suppressed=suppress;}
+uint16_t pet_hub_selected(void){return (uint16_t)hub.saved.selected;}
 #include "pet_assets.h"
 #include "pet_pixels.h"
 static uint64_t now_ms(void){return esp_timer_get_time()/1000;}
@@ -113,7 +116,7 @@ bool pet_hub_key(board_key_t key) {
     alert_id=0;alert[0]=0;changed=true;return true;
 }
 void pet_hub_overlay(uint16_t *pixels, int y, int rows) {
-    if(!alert[0]||y>=48)return;
+    if(overlay_suppressed||!alert[0]||y>=48)return;
     paint_begin(pixels,y,rows);paint_fill(0,0,240,48,board_rgb(8,12,32));
     paint_fill(0,46,240,2,board_rgb(62,220,208));
     paint_ascii(42,10,alert,board_rgb(240,247,230));
