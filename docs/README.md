@@ -35,6 +35,8 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | --- | --- | --- |
 | [pie-simd.md](perf/pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [kasane-image-transform-stretch-step.md](perf/kasane-image-transform-stretch-step.md) | 記録 | 拡大縮小画像スパンの画素ごとの 32bit 除算 2 本を、商と剰余の加算ステップ（切替つき・厳密・既定は有効）へ。1 画素 18 命令/除算 2 本 → 15-16 命令/0 本。調査は [kasane-image-transform-recon.md](perf/kasane-image-transform-recon.md)、回転側の同型の仕事は [kasane-image-transform-step.md](perf/kasane-image-transform-step.md) |
+| [kasane-image-transform-anchor.md](perf/kasane-image-transform-anchor.md) | 記録 | 回転スパンのアンカーを行ごとの表にし、libgcc の `__divdi3` 2 本を消した（切替つき・厳密・既定は有効）。アンカー代 37.8 → 10.0 命令/画素、表は実行時構築で `.bss` +308 B（flash は 0 B 増） |
+| [kasane-image-transform-reject.md](perf/kasane-image-transform-reject.md) | 記録 | 回転スパンの域外判定をスパン単位の区間判定にした（切替つき・厳密・既定は有効）。棄却画素の処理 −5.0 命令/転送画素、新しいデータは 1 バイトも持たない |
 | [backlog.md](perf/backlog.md) | backlog | 未着手の性能候補（テキストのマスク合成、MP3 FIR、整数平方根、装飾光線の PIE 化など） |
 | [kasane-pet-row-cache.md](perf/kasane-pet-row-cache.md) | 記録 | PET 画像 provider の重複復号を 64 行キャッシュで消した（切替つき、8,208 B、−70.4%） |
 | [kasane-tile.md](perf/kasane-tile.md) | 記録 | 群のタイル面: 到達判定（3a）・ブロック幅（3b、16 画素は却下）・滑らかな層のブロック定数＋画素増分（厳密と近似の 2 段、命令数と動く画素の実測） |

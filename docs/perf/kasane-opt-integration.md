@@ -75,7 +75,7 @@ ASan に期待できるのは「たまたま通った 1 本の観測」までで
 | --- | --- |
 | `test_render_prof`（段 1、段 2a 以降も） | `RENDER_PROF pixels_off=0x88762a0f pixels_on=0x88762a0f identical=1 fill=35/0 span=31/0 tile=17/0 blend=225/0 read=284/0` → `render prof PASS: arms byte-identical, counts move only with the switch on`（`_cy` はホストに `rsr.ccount` が無いので 0 のまま） |
 | `test_decode_reuse`（段 2b 以降） | `120 frames, 135 renders, 3 arms (on/off/alternating) byte-identical, 13 commands` / `read calls: switched on=1770 reference=32912 ratio=18.6x; worst render on=26 reference=375` / `script hash 010143045af205e4` |
-| `test_coverage_runs`（段 3 以降） | `predicate and runs agree on 157111512 pixels over 10668504 rows (rect/text/round rect/gradient/stroke, radius 0..255, clipped)` / `120 frames identical both ways, 16 of them full 64,800-byte repaints (rolling hash a73ff47f)` / 計数版 `calls per full REPLACE frame: predicate arm covers=17672 runs=0; runs arm covers=0 runs=250 (switch on)` / `calls over 120 mixed frames: predicate arm covers=1744560 runs=0; runs arm covers=0 runs=27134` |
+| `test_coverage_runs`（段 3 以降） | `predicate and runs agree on 157111512 pixels over 10668504 rows (rect/text/round rect/gradient/stroke, radius 0..255, clipped)` / `120 frames identical both ways, 16 of them full 64,800-byte repaints (rolling hash a73ff47f)` / 計数版 `calls per full REPLACE frame: predicate arm covers=17672 runs=0; runs arm covers=0 runs=250 (switch on)` / `calls over 120 mixed frames: predicate arm covers=1744560 runs=0; runs arm covers=0 runs=27134`。**この表の値は第 1 次統合の時点のもの**。タイル段のあとは述語の回数だけが 16,184 / 1,569,456 へ減る（画素の 2 行は不変。§5.4） |
 | `tools/pie/run_models.py`（段 4） | `all models agree`、`mismatches=0`。blend/pack の行: `kernel thin 1572864 blocks, 24 parameter sets x all 65,536 words: differing=0 worst step r/g/b=0/0/0`、`kernel dith 6291456 blocks ... differing=0 worst step r/g/b=0/0/0`、`kernel runs 331272 blocks ... differing=0` |
 | `tools/pie/test_kernels.py`（段 4） | `Ran 10 tests ... OK`。`KasaneBlend8.test_thin` / `test_dither` / 2 アーム共通前置の比較が `ok`。`test_piesim.py` `OK`、`test_frost.py` `PASS` |
 
@@ -183,3 +183,130 @@ decode 込み 576 B。decode 単独なら 944−368 = 576、基点からは 928�
 6. `main/app_session.c` は IDF ヘッダが要るのでこの容器ではコンパイルできない。
    確認できたのは measure 分岐との**バイト一致**まで（中身の変更は分岐の作者が
    ビルド無しで書いたもので、こちらも同じ）。
+
+## 5. 第 2 次統合（画像変換とタイル）の記録
+
+画像変換の 5 分岐（`perf/kasane-imgopt` / `-anchor` / `-stretch` / `-pet` /
+`-tile`）を `perf/kasane-opt` へ取り込んだ統合。前回（§1〜§4）と同じ手順で、
+1 段ごとに suite を走らせ、分岐が持つ専用ハーネスもその木で回し、
+**分岐の報告の数値が動かないことを確かめてから**次へ進んだ。
+
+### 5.1 統合の順序と各段の結果
+
+| 段 | 分岐とコミット | 元 → 統合後 | 衝突 | その段で走らせたもの |
+| ---: | --- | --- | ---: | --- |
+| 0 | 基点（`origin/vm/design-contracts` `8655363`） | — → `3394f8e` | 0 | suite（前段とバイト一致） |
+| 1 | `perf/kasane-imgopt`: `b17262a` / `8e57dcb` | `4bd388e` / `d9a17d1` | 1 | suite + `test_image_rotate_arms`（2,104 場面 / 4,207 ハッシュ） |
+| 2 | `perf/kasane-anchor`: `590f5aa` / `55b3c74` | `ca59e21` / `b2968af` | 0 | suite + 同ハーネス（5,917 → 11,833 場面、`-DKSN_ANCHOR_COUNT`） |
+| 3 | `perf/kasane-stretch`: `d025d9d` | `b9e65e4` | 2 | suite + `test_image_stretch_arms`（131 場面 / 259 ハッシュ） |
+| 4 | `perf/kasane-pet`: `b93dcf1` ＋ 結線 | `dc0bb19` / `8486bbb` | 0 | suite + `test_pet_row_cache_arms`（48,495 比較、hash `d6eb4edb`） |
+| 5 | `perf/kasane-tile`: `e7282ed` / `ca2e3fd` / `a3e6426` | `a84b118` / `d0bf4a1` / `7391fab` | 5 + 2 + 1 | suite + `run_group_tile.sh`（到達判定・16 画素・滑らかな層の 8 アーム） |
+
+段 0 の基点統合は衝突 0 だったが、前回と同じ手順で自動併合を手検査した:
+`main/app_session.c` が両側の差分（先方の `scene_mem_release` と `scene_mem.h`、
+こちらの計器）をちょうど持つこと、`main/CMakeLists.txt` が先方の
+`SYSTEM_SOURCES` を足しつつ `KASANE_SOURCES` を変えていないこと（`ksn_blend_pie.c`
+は未結線のまま）、`ksn_render.h` が 1 バイトも変わっていないこと（4 つの extern は
+すべて `ksn_render.c` に定義がある）。
+
+### 5.2 衝突と解決（すべて両側を残した）
+
+| # | ファイル | 何が衝突したか | 解いた形 |
+| --- | --- | --- | --- |
+| 5.2.1 | `ksn_render.h`（`8e57dcb` / `d025d9d` / `e7282ed`） | 新しい切替の extern が、どれも「同じ位置（`g_ksn_row_coverage` の後ろ）」に挿入された | 先方の塊をこちらの塊の後ろへ順に並べた。落ちた切替は 1 つも無い（`g_ksn_prof` / `g_ksn_decode_once` / `g_ksn_row_coverage` / `g_ksn_image_rotate_step` / `_anchor` / `_reject` / `_stretch_step` / `g_ksn_pet_row_cache` / `g_ksn_tile_pixels` / `g_ksn_tile_reach` / `g_ksn_tile_smooth`） |
+| 5.2.2 | `ksn_render.c`（`e7282ed`） 境界パス | こちらはクリップ済み箱から左右上下を取り、先方は同じ箱を到達表 `reach[]` へ入れる | 先方の表を採り、`command.draw` を `command->draw` に（2a の retype を戻さない）。こちらの「見えない・不透明でない子を落とす」は先方の `if(command->visible&&d->opacity)` に含まれる |
+| 5.2.3 | `ksn_render.c`（`e7282ed`） 子ごとの窓 | こちらのブロック単位の棄却（箱がこのブロックと交わらない子を読まない）と、先方の `lo..hi`（子の窓） | 両方。棄却は無条件、窓は `if(g_ksn_tile_reach||g_ksn_tile_smooth)` の中（`ca2e3fd` で滑らかな層も同じ窓を要るため） |
+| 5.2.4 | `ksn_render.c`（`e7282ed` / `ca2e3fd`） 合成ループ | こちらの `g_ksn_row_coverage` の 2 腕と、先方の `smooth_block` ＋ 先方の述語ループ | 先方の `smooth_block`（半径 0 の勾配だけ）を先に置いて `continue` し、その後ろに 2 腕を残した。滑らかな層の呼び出しも `KSN_PROF_BEGIN/END(blend)` の中 |
+| 5.2.5 | `ksn_render.c` / `ksn_render.h` **`group_pixel` の名前の衝突** | どちらも同名・同目的の関数を別の署名で持っていた（こちらは `const uint8_t *coverage`、先方は `uint8_t coverage` の値）。git は別々の挿入として見るが、そのまま並べると二重定義 | **先方の実装を残し**（`KSN_TILE_MEASURE` の out-of-line 属性と、`kasane-tile.md` が objdump で数える名前はそちら）、こちらの 2 つの呼び出し側をその署名へ寄せた（`coverage` を `scratch->text[dest]` で渡す）。合成の中身は 1 命令も変わらない（同じ `sample`・`premultiply_over`・同じ provenance ビット）。切替 `g_ksn_row_coverage` の 2 腕は両方生きている |
+| 5.2.6 | `docs/README.md`（`a3e6426`） | 索引の 1 行が同じ位置 | 両方の行を残した（pet の行、その下に tile の行） |
+
+`ksn_render.c` の関数ブロックでは、git が共通文脈として残した `}` が
+`tile_row_over` を閉じてしまうため、`frame_command` の閉じ括弧を統合側で補った
+（`a84b118`）。
+
+### 5.3 統合後のハーネス出力（分岐の報告と一致したもの）
+
+- `image rotate arms PASS: 11833 configs, 23665 panel hashes, worst pixel step 0,
+  fetches identical`（5 アーム）。`-DKSN_ANCHOR_COUNT` の腕は
+  `span rejection: 2089935 interval tests, 1521819 whole spans skipped`、
+  `anchor table: 990409 builds, largest row served 15 entries`（報告の数値そのまま）。
+- `image stretch arms PASS: 131 configs, 259 panel hashes, worst pixel step 0,
+  fetches identical`、`stretched panel: 2025 spans`、
+  `animated stretch track: 120 frames both arms, alternating arm identical,
+  43692 fetches`。
+- `pet row cache arms PASS: 48495 panel comparisons, worst pixel step 0,
+  hash d6eb4edb, cache decodes 0.019% of the fetches, 64 of 330420`
+  （provider 直接 46,080 取得で復号 46,080 → 4,608、animated 330,420 → 64、
+  取得回数は 4 アームすべて同一）。
+- `group tile: PASS`。`arithmetic: 5439488 blocks swept; chord worst 8-bit
+  deviation 1 ...; exact stepping deviation 0`、
+  `parameter space: 1555200 pixels compared, 9942 moved (0.64%)`、
+  `exact arms: 4050000 pixels identical (reach on/off, tile 64/16, smooth=1)`、
+  `120 frames: 73388 of 3888000 pixels (1.89%), worst frame 902 of 32400 (2.78%)`、
+  `tile64 reach-on ... blocks 100 skipped 23 | child loop 4770`。
+- 動いた数は 1 つだけ: 計数腕の reach-off の行の「子ループ画素」が tile64 で
+  17,040 → 6,312、tile16 で 17,040 → 5,608。5.2.3 で残したこちらのブロック棄却が
+  `g_ksn_tile_reach=0` の腕でも効くため。画素の一致（4,050,000＋120 フレーム）と
+  タイル画素・被覆・ブロック数・飛ばした数は動いていない。
+
+### 5.4 計器の値が統合で動いた 1 箇所
+
+§1 の表にある `test_coverage_runs` の計数腕は、タイル段（`e7282ed`）のあと
+`predicate arm covers=17672` → **`16184`**、`calls over 120 mixed frames:
+predicate arm covers=1744560` → **`1569456`** になる（runs 腕の `runs=250` /
+`27134` は不変）。理由はタイル段が「子の箱の外の画素」で述語を呼ばなくしたためで、
+**比較している画素は 1 つも動いていない**（`predicate and runs agree on
+157111512 pixels` と `120 frames identical both ways, rolling hash a73ff47f` は
+不変）。テストの非空虚性も `frame0_runs[1] < frame0_covers[0]`（250 < 16184）で
+成り立っている。
+
+### 5.5 統合木のオブジェクト（xtensa-esp32s3-elf-gcc 15.2.0、`-Os`、`size -A`）
+
+`main/ui/kasane/ksn_render.c` と `main/pet/ksn_pet.c` を単体でコンパイルした値。
+
+| 段 | `ksn_render.o` `.text` | `.rodata` | `.data` | `.bss` | `ksn_pet.o` `.text` | `.bss` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `fcc7e5a`（統合前） | 7,119 | 586 | 8 | 6,644 | 258 | 0 |
+| 段 0 のあと | 7,119 | 586 | 8 | 6,644 | 258 | 0 |
+| 段 1 imgopt | 7,767 | **586** | 12 | 6,644 | 258 | 0 |
+| 段 2 anchor | 8,795 | **586** | 12 | 6,952 | 258 | 0 |
+| 段 3 stretch | 8,911 | **586** | 12 | 6,952 | 258 | 0 |
+| 段 4 pet | 8,911 | **586** | 12 | 6,952 | 406 | 8,208 |
+| 段 5a tile（到達判定） | 9,083 | **586** | 20 | 6,952 | 406 | 8,208 |
+| 段 5b tile（滑らかな層） | 10,007 | **586** | 24 | 6,952 | 406 | 8,208 |
+
+- **`.rodata` は統合のどの段でも 586 B のまま**（flash に静的表を 1 つも足して
+  いない）。増えたのは `.text`（実行時構築のコード）、`.data`（切替の既定値）、
+  `.bss`（アンカー表 308 B と PET の行キャッシュ 8,208 B、いずれも SRAM）で、
+  これは各分岐が選んだ内訳のまま。
+- `.bss` の 2 つの増分は分岐の主張と 1 バイトまで一致する（`g_anchor_row` =
+  `0x134` = 308、`cache_rows` 0x2000 + キー 16 = 8,208）。
+- `ksn_render_rects` のスタック（`-fstack-usage`）: 656 B（段 3 のあと）→
+  800 B（段 5a、到達表 16 × 8 B）→ 896 B（段 5b）。
+- 未定義シンボルは統合木でも `__divdi3` のみ（`__moddi3` は出さない）。
+- `-DKSN_TILE_MEASURE` の計測ビルドでは `smooth_block` / `smooth_chord_block$isra$0`
+  / `smooth_exact_block` / `group_pixel` / `tile_row_over` が out-of-line に出る
+  （分岐の計測と同じ形）。
+
+### 5.6 既定値
+
+**統合で既定を 1 つも変えていない。** 各分岐が自分の木で決めた値をそのまま
+採用した: `g_ksn_prof=0`、`g_ksn_decode_once=1`、`g_ksn_row_coverage=1`、
+`g_ksn_image_rotate_step=1`、`g_ksn_image_rotate_anchor=1`、
+`g_ksn_image_rotate_reject=1`、`g_ksn_image_stretch_step=1`、
+`g_ksn_pet_row_cache=1`、`g_ksn_tile_pixels=64`、`g_ksn_tile_reach=1`、
+`g_ksn_tile_smooth=1`（近似の 2 は分岐自身の判断で既定 OFF）。
+
+### 5.7 まだ負っているもの（この段で閉じていない）
+
+1. **sanitizer の腕**（§0）。この段も `/tmp` の写しで旗の文字列だけ外して走らせた。
+2. **実機の時間**。`/dev/ttyACM0` は別セッション。5 分岐とも時間の主張はしていない。
+3. **PET の行キャッシュ 8,208 B を払う判断**は `tools/memlog.py --port --check` の
+   実機実測待ち（`kasane-pet-row-cache.md` §7）。
+4. **タイルの `run_group_tile.sh` は run.sh に結線していない**（分岐の判断。
+   `run_group_tile.sh` の冒頭コメントのとおり、sanitizer が回るセッションの仕事）。
+5. **`perf/kasane-affine` との衝突は先送り**（次段）。あちらは
+   `render_group` の per-pixel 合成を `group_pixel` として切り出すので、この段で
+   `group_pixel` を 1 本に統合したことがその 1 箇所に重なる。合意した順序は
+   「タイル（この段）→ affine」。
+
