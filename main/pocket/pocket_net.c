@@ -1,7 +1,7 @@
 #include "pocket_net.h"
 #include "pocket_api.h"
 #include "wifi_time.h"
-#include "solar_time.h"
+#include "system/sys_clock.h"
 #include "esp_crt_bundle.h"
 
 #include "esp_tls_errors.h"
@@ -314,10 +314,9 @@ static const char *url_check(const char *url, bool *tls, const char **why) {
     if(*tls) {
         // Section 11: certificate validation needs a clock, and a wrong clock
         // rejects a good certificate or accepts an expired one.
-        // UTC is solar_time.c's "the wall clock is believable", whether it was
-        // set by SNTP this run or carried across a reset by the RTC. That is
-        // the same question a certificate's validity window asks.
-        if(solar_time_now(0).source!=SOLAR_TIME_UTC) {
+        // TLS uses the platform clock, not the display's PC fallback anchor.
+        sys_clock_sample clock=sys_clock_read();
+        if(!clock.available||!clock.trusted||clock.seconds<INT64_C(946684800)) {
             *why="the clock is not set, so a certificate cannot be checked";
             return POCKET_ERR_TLS_ERROR;
         }

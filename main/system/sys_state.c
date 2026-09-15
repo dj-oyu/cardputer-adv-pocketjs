@@ -48,20 +48,20 @@ static void publish_clock(sys_state *s){
 }
 bool sys_clock_snapshot(const sys_state *s,uint64_t now,sys_clock_state *out){
     if(!s||!out)return false;
-    *out=(sys_clock_state){.utc_offset=s->utc_offset,.revision=s->clock_revision};
+    *out=(sys_clock_state){.utc_offset=s->utc_offset,.revision=s->clock_revision,.health=s->clock_health};
     const sys_clock_anchor *a=s->clock.source?&s->clock:&s->pc_clock;
     if(!a->source||now<a->mono_us)return false;
     uint64_t delta=now-a->mono_us;
     uint64_t seconds=delta/1000000;
     int32_t micros=a->microseconds+(int32_t)(delta%1000000);
     if(micros>=1000000){micros-=1000000;seconds++;}
-    if(seconds>(uint64_t)(INT64_MAX-a->seconds))return false;
+    if(seconds>(uint64_t)(INT64_MAX-a->seconds)){out->health=SYS_CLOCK_OUT_OF_RANGE;return false;}
     out->seconds=a->seconds+(int64_t)seconds;out->microseconds=micros;
-    out->source=a->source;out->trusted=a->source!=SYS_CLOCK_PC;out->valid=true;
+    out->source=a->source;out->trusted=a->source!=SYS_CLOCK_PC;out->valid=true;out->health=SYS_CLOCK_OK;
     return true;
 }
 static bool same_clock(sys_clock_state a,sys_clock_state b){
-    return a.valid==b.valid&&a.source==b.source&&a.seconds==b.seconds&&
+    return a.health==b.health&&a.valid==b.valid&&a.source==b.source&&a.seconds==b.seconds&&
         a.microseconds==b.microseconds;
 }
 sys_result sys_clock_update(sys_state *s,sys_clock_anchor a){
@@ -71,7 +71,16 @@ sys_result sys_clock_update(sys_state *s,sys_clock_anchor a){
     sys_clock_state before,after;
     sys_clock_snapshot(s,a.mono_us,&before);
     s->clock=a;
+    s->clock_health=a.source?SYS_CLOCK_OK:SYS_CLOCK_UNSET;
     sys_clock_snapshot(s,a.mono_us,&after);
+    if(!same_clock(before,after))publish_clock(s);
+    return SYS_OK;
+}
+sys_result sys_clock_fail(sys_state *s,uint64_t now,sys_clock_health health){
+    if(!s||(health!=SYS_CLOCK_UNAVAILABLE&&health!=SYS_CLOCK_OUT_OF_RANGE))return SYS_INVALID;
+    sys_clock_state before,after;sys_clock_snapshot(s,now,&before);
+    s->clock=(sys_clock_anchor){0};s->clock_health=health;
+    sys_clock_snapshot(s,now,&after);
     if(!same_clock(before,after))publish_clock(s);
     return SYS_OK;
 }

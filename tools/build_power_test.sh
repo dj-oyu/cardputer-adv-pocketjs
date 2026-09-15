@@ -21,6 +21,11 @@ for options in '-O1 -g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   /tmp/test-system-clock-device
   gcc -std=c11 $options -Wall -Wextra -Werror tools/test_system_state.c -o /tmp/test-system-state
   /tmp/test-system-state
+  gcc -std=gnu11 $options -Wall -Wextra -Werror -I "$QJS" -I main -I main/pocket \
+    tools/test_pocket_clock.c main/pocket/pocket_clock.c main/system/sys_state.c \
+    "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" "$CACHE/quickjs-vm.o" \
+    -lm -o /tmp/test-pocket-clock
+  /tmp/test-pocket-clock
   gcc -std=gnu11 $options -Wall -Wextra -Werror -fno-omit-frame-pointer \
     -I "$QJS" -I tools/hostshim -I main -I main/hal -I main/pocket -I main/vm \
     tools/test_pocket_power.c main/pocket/pocket_power.c main/pocket/pocket_api.c \

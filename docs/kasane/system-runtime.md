@@ -38,6 +38,11 @@ timezoneのNVS保存はpethub互換adapterに残す。solarと既存pocket.app/n
 platform時計provider経路を維持し、PC補完・anchor snapshotへはまだ切り替えていない。
 JS時計の汎用onChange、壁時計alarmの補正時再評価、通知presenterも次段階。
 
+CP14b3でsolar/`pocket.time.wall()`も共通anchorへ接続。PC補完を表示へ反映し、
+JS sourceはhost、RTC/SNTPはnetworkの互換名を維持する。healthに未同期/取得不能/範囲外を
+保持する。TLSはOS時計を使うため、補完anchorではなく実OS時計providerを検査する。
+時刻を読むだけの処理はplatform時計を再取得しない。同期要求はowner stepで消費する。
+
 `sys_power_read`はsampledの有無を返し、valid/errorを含むsnapshotをコピーする。
 `sys_power_step`は購読またはrefresh要求があり期限到達した時だけHALを呼ぶ。
 解除後の再購読でも直前の測定から1秒の間隔を守り、初回dirtyで最新cacheを読める。

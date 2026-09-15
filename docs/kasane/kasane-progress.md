@@ -4,6 +4,19 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14b3 — solar・JS時計統合（2026-09-16）
+
+- solarと`pocket.time.wall()`を共通anchorへ統合。PC補完も同じUTC表示に使い、
+  JS sourceはhost、RTC/SNTPは互換のnetwork。天文範囲は引き続きsolarだけで制限。
+- 時計healthで未同期・取得不能・範囲外を区別。良好なholdoverは取得失敗で失わない。
+- TLSの事前検査は実OS時計providerへ直接接続。PC補完だけでTLSを許可しない。
+- JS変換を`pocket_clock.c`へ分離。実QuickJSでnull/source/2050年/安全数値範囲と
+  30セッションをASan/UBSan・O2検査。System時計・電源回帰、solar時刻/描画試験PASS。
+- solar試験は実anchor coreへ接続。providerのRTC再発見・同期・取消試験は
+  `test_system_clock.c`と`test_system_clock_device.c`に分担する。
+- 通常/Kasane-only buildとlink監査PASS。共通state208 B、配置後DIRAMは
+  137,516 / 136,156 Bで直前と同値。実機確認は後続の通知実装とまとめて行う。
+
 ## checkpoint 14b2 — 時計anchor・dirty・PC補完（2026-09-16）
 
 - `sys_state`にRTC/SNTPとPCのanchor、timezone、revisionを保持。pethub内の補完時計を撤去。

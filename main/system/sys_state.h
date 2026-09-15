@@ -18,6 +18,7 @@ typedef struct {
 } sys_power_state;
 
 typedef enum { SYS_CLOCK_NONE, SYS_CLOCK_RTC, SYS_CLOCK_SNTP, SYS_CLOCK_PC } sys_clock_source;
+typedef enum { SYS_CLOCK_UNSET, SYS_CLOCK_OK, SYS_CLOCK_UNAVAILABLE, SYS_CLOCK_OUT_OF_RANGE } sys_clock_health;
 typedef struct {
     int64_t seconds;
     uint64_t mono_us;
@@ -30,6 +31,7 @@ typedef struct {
     uint32_t revision;
     sys_clock_source source;
     bool valid, trusted;
+    sys_clock_health health;
 } sys_clock_state;
 typedef struct {
     sys_subscription subscriptions[SYS_SUBSCRIPTIONS];
@@ -37,6 +39,7 @@ typedef struct {
     sys_clock_anchor clock, pc_clock;
     int32_t utc_offset;
     uint32_t clock_revision;
+    sys_clock_health clock_health;
     uint64_t power_next;
     int32_t announced_mv,announced_error;
     uint8_t power_users;
@@ -52,6 +55,7 @@ sys_result sys_poll(sys_state *,sys_sub,uint32_t *changed);
  * PC is format-validated input, not authenticated time; RTC/SNTP wins. */
 bool sys_clock_snapshot(const sys_state *,uint64_t now_us,sys_clock_state *out);
 sys_result sys_clock_update(sys_state *,sys_clock_anchor);
+sys_result sys_clock_fail(sys_state *,uint64_t now_us,sys_clock_health);
 sys_result sys_clock_offer_pc(sys_state *,uint32_t seconds,uint64_t now_us);
 sys_result sys_clock_timezone(sys_state *,int32_t utc_offset);
 bool sys_power_read(const sys_state *,sys_power_state *out);

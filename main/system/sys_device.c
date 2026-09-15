@@ -5,6 +5,9 @@
 #include <stddef.h>
 static sys_state state;
 sys_state *sys_device_state(void){return &state;}
+bool sys_device_clock_read(sys_clock_state *out){
+    return sys_clock_snapshot(&state,(uint64_t)esp_timer_get_time(),out);
+}
 static sys_power_state read_power(void *ctx,uint64_t now){
     (void)ctx;board_battery_t battery;
     bool valid=board_battery_read(&battery);
@@ -19,8 +22,12 @@ void sys_device_step(void){
             sys_clock_update(&state,(sys_clock_anchor){.seconds=wall.seconds,
                 .microseconds=wall.microseconds,.mono_us=now,
                 .source=wall.synchronized?SYS_CLOCK_SNTP:SYS_CLOCK_RTC});
-        else if(wall.available||!wall.trusted)
+        else if(!wall.trusted)
             sys_clock_update(&state,(sys_clock_anchor){.mono_us=now});
+        else if(wall.available)
+            sys_clock_fail(&state,now,SYS_CLOCK_OUT_OF_RANGE);
+        else if(!state.clock.source)
+            sys_clock_fail(&state,now,SYS_CLOCK_UNAVAILABLE);
         /* A read error after synchronization does not discard good holdover. */
     }
     if(sys_power_deadline(&state)!=SYS_NEVER)

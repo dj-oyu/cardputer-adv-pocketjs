@@ -241,7 +241,7 @@ pocket.time.wall(): {unixMs: number | null; source: "unsynced" | "host" | "netwo
 pocket.time.sleep(ms: number, options?: Options): Promise<void>;
 ```
 
-`time.wall()`の`source`は、現在`network`（SNTPで同期した時計）か`unsynced`だけを返す。`host`は手で設定できる時計のために型に残してあり、このビルドは返さない。Pet CompanionがPCから受け取る時刻は`pocket.pet`内部の補完にしか使われず、`wall()`には反映されない。時刻の出所の統合と名前の対応は[システムランタイム移行設計](../kasane/system-runtime-migration.md)で決める。
+`time.wall()`はSystemの共通anchorを読む。`source`はRTC/SNTPなら互換表記`network`、検証済みPC packetの補完なら`host`、利用できる時刻がなければ`unsynced`。RTC/SNTPを優先し、PC補完はOS時計を書き換えない。PC packetのCRCは時刻の真正性保証ではない。TLSは別に実際のOS時計の信頼状態を検査する。`unixMs`は丸めた整数ミリ秒で、安全な数値範囲を越える場合もnullを返す。
 
 startはソース評価中に1回登録する。新ランタイムではglobalThis.frameをホストが用意し、Promiseだけを待つアプリもイベント処理を継続できる。start hook終了まで状態はStartingだが、I/O完了とキャンセルは配送する。onFrameはRunningでのみ呼ぶ。
 

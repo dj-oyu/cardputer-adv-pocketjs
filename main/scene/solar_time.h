@@ -17,10 +17,11 @@ typedef struct {
 // only when the clock itself becomes untrustworthy; starts false.
 void solar_time_set_synchronized(bool synchronized);
 
-// Reads the System clock provider, which recovers a modern RTC after reset.
+// Reads the System anchor snapshot (RTC/SNTP or the PC fallback).
 // Solar alone enforces the ephemeris window (2000 <= year < 2050).
 // Does not start Wi-Fi,
 // set system time, persist timestamps, or depend on the local timezone. A clock
 // that fails or leaves the window after sync or RTC recovery returns demo days
-// with UNAVAILABLE or OUT_OF_RANGE; an untrusted clock yields DEMO.
+// with UNAVAILABLE or OUT_OF_RANGE; an unset clock yields DEMO. The owner must
+// consume synchronization requests before drawing; reads never poll the RTC.
 solar_time_sample_t solar_time_now(double demo_elapsed_seconds);
