@@ -33,7 +33,7 @@ uint16_t *board_strip(void) { return shared; }
 // placement, so a build-to-build comparison is not a measurement). 1 = queue and
 // come back for the result on the next strip (the shipping path), 0 = the
 // blocking polling transfer this file has always used.
-int g_board_async = 1;   /* VISUAL BUILD: the async path is the one that swaps the bytes once */
+int g_board_async = 1;   /* the queued strip transfer, DC raised before the queue */
 int board_async_get(void) { return g_board_async; }
 void board_async_set(int on) { g_board_async = on ? 1 : 0; }
 // The panel's own copies. `shared` stays the one buffer every screen draws into
@@ -386,6 +386,13 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         size_t bytes = (size_t)LCD_W * rows * 2;
         memcpy(tx_buf[tx_front], pixels, bytes);
         tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = tx_buf[tx_front]};
+        /* The DC line has to be raised BEFORE the queue, not inside tx(): the last
+           thing command() did was a RAMWR with no payload, which leaves DC low, so a
+           strip queued in that state is latched as commands by the panel -- 3,840
+           bytes of pixel data read as an opcode stream, which is what a picture that
+           inverts and disappears actually is. tx() sets DC and then transmits /
+           synchronously, and cannot be used here. */
+        gpio_set_level(34, 1);
         e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
         tx_inflight = (e == ESP_OK);
         tx_front ^= 1;
