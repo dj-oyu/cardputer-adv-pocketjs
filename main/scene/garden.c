@@ -280,10 +280,10 @@ garden_octave_lanes(int16_t *dens,int n,int rc0,int step,
 // between builds from instruction-cache alignment alone (CLAUDE.md), and this
 // change is smaller than that. 1 is the shipping arm.
 // The other half of the change this was ported with, the unsigned support test in
-// the decor loop, has no counterpart in this tree: the decorative light here is
-// the grouped-by-four revision (its per-column terms are evaluated once per group
-// and the light and shadow reaches are never formed), so this file has no such
-// test to rewrite.
+// the decor loop, is the one below: this file ported the canopy tweak first, when
+// the decorative light here was the grouped-by-four revision and the two reaches
+// were never formed (so there was no test to rewrite). The reaches came in with
+// the support gate, so the test has been applied to the group loop's gate.
 int g_garden_scalar_tweaks=1;
 // The canopy blend on the PIE unit (scene/canopy_pie.c). Exact, so the picture
 // cannot move: the scalar tweak above skips work, this one changes which unit
@@ -1683,7 +1683,18 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
             // outside a profile's reach makes it literally 0, so a group whose own
             // column is outside both is the identity the `!light && !shadow` test
             // below already skips -- all the gate saves is evaluating them.
-            int inl=(x>=l0&&x<=l1),ins=(x>=s0&&x<=s1);
+            // One unsigned compare per support instead of two signed ones each.
+            // The signed form was compiled to a salt/neg/and/extui chain of
+            // about twenty instructions, which is what the single profile
+            // evaluation it saves costs. l1 >= l0 always, because the reach adds
+            // +2 to both sides, so the wrap is a range test.
+            int inl,ins;
+            if(g_garden_scalar_tweaks) {
+                inl=(unsigned)(x-l0)<=(unsigned)(l1-l0);
+                ins=(unsigned)(x-s0)<=(unsigned)(s1-s0);
+            } else {
+                inl=(x>=l0&&x<=l1);ins=(x>=s0&&x<=s1);
+            }
             if(g_garden_decor_gate&&!inl&&!ins)goto grp;
             // Let only the soft fringe graze six pixels further into the
             // main beam; a smooth ramp keeps its bright core undisturbed.

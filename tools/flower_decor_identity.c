@@ -20,9 +20,13 @@ unsigned long g_profile_calls;
 int main(void) {
     static uint16_t fb[135 * 240];
     GardenFrame g = {0};
-    // GATE0=1 runs the pre-2026-09-15 path, so both arms can be compared
-    // against the previous revision and not just the shipping one.
+    // OLD=1 runs both pre-2026-09-15 paths, GATE0=1 only the decor gate,
+    // TWEAK0=1 only the two scalar tweaks. Every arm has to be byte-identical to
+    // the previous revision: all three changes are claims about which work can
+    // be skipped, never about what the picture is.
+    if (getenv("OLD")) { g_garden_decor_gate = 0; g_garden_scalar_tweaks = 0; }
     if (getenv("GATE0")) g_garden_decor_gate = 0;
+    if (getenv("TWEAK0")) g_garden_scalar_tweaks = 0;
     for (int w = 0; w < 16; w++) garden_prepare(&g, w * 0.04f);
     for (int fr = 0; fr < 120; fr++) {
         garden_prepare(&g, fr * 0.37f);
