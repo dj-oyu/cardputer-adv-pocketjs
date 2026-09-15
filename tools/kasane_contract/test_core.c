@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 #include "ksn_core.h"
 #include "use_cases.h"
 #include <stdio.h>
@@ -39,13 +40,15 @@ static ksn_result test_image_span(void *ctx,uint16_t variant,uint16_t frame,uint
     return KSN_OK;
 }
 int main(void){
-    ksn_core core;ksn_core_init(&core);
+    KSN_TEST_CORE(core,);
+    CHECK(ksn_core_bind(&core,&core_commands[0],&core_commands[1],
+                        &core_text[0],&core_text[1])==KSN_OK);
     ksn_client app=ksn_core_client(&core,KSN_APP),system=ksn_core_client(&core,KSN_SYSTEM);
     CHECK(app.ops&&system.ops&&ksn_core_client(&core,(ksn_layer)9).ops==NULL);
     ksn_limits limits=app.ops->limits(app.ctx);
     CHECK(limits.app.commands==80&&limits.app.text_bytes==896);
     CHECK(limits.system.commands==16&&limits.system.text_bytes==128);
-    CHECK(limits.native_bytes==KSN_CORE_STORAGE_BYTES+3*sizeof(uint32_t));
+    CHECK(limits.native_bytes==KSN_CORE_RESERVED_BYTES+3*sizeof(uint32_t));
     CHECK(limits.app.tracks==0&&limits.system.tracks==0);
     printf("core native budget: %lu bytes (including shared IDs)\n",(unsigned long)limits.native_bytes);
 
@@ -80,6 +83,15 @@ int main(void){
     CHECK(discard(&core)==KSN_OK);
     CHECK(ksn_core_active_usage(&core,KSN_APP).commands==3);
     CHECK(pet_view_update(app,&view,40)==KSN_OK);
+    CHECK(presented(&core)==KSN_OK);
+
+    /* Invalid rebinding must preserve both banks and the displayed refs. */
+    ksn_core saved=core;
+    CHECK(ksn_core_bind(&core,NULL,&core_commands[1],&core_text[0],&core_text[1])==KSN_INVALID);
+    CHECK(ksn_core_bind(&core,&core_commands[0],&core_commands[0],&core_text[0],&core_text[1])==KSN_INVALID);
+    CHECK(ksn_core_bind(&core,&core_commands[0],&core_commands[1],&core_text[0],&core_text[0])==KSN_INVALID);
+    CHECK(memcmp(&saved,&core,sizeof(core))==0);
+    CHECK(pet_view_update(app,&view,35)==KSN_OK);
     CHECK(presented(&core)==KSN_OK);
 
     /* APP replace invalidates prior APP refs after presentation. */
@@ -120,5 +132,13 @@ int main(void){
     CHECK(add_rect(app,tx,&replacement)==KSN_LIMIT);
     app.ops->abort(app.ctx,tx);
 
-    puts("fixed core: PASS");return 0;
+    ksn_core_init(&core);
+    for(unsigned i=0;i<2;i++) {
+        CHECK(core.state.banks[i].commands==core_commands[i].commands);
+        CHECK(core.state.banks[i].text==core_text[i].bytes);
+        const unsigned char *bytes=(const unsigned char *)&core_commands[i];
+        for(size_t n=0;n<sizeof(core_commands[i]);n++)CHECK(bytes[n]==0);
+        for(size_t n=0;n<sizeof(core_text[i].bytes);n++)CHECK(core_text[i].bytes[n]==0);
+    }
+    puts("fixed core: PASS (borrowed banks, failed bind, reset)");return 0;
 }

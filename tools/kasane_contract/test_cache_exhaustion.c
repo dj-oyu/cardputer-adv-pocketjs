@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 /* White-box boundary test: process-lifetime IDs have no production test hook. */
 #include "../../main/ui/kasane/ksn_cache.c"
 #include <stdio.h>
@@ -10,7 +11,7 @@
 } while (0)
 
 int main(void) {
-    ksn_core core;
+    KSN_TEST_CORE(core,);
     ksn_cache cache;
     ksn_cache_command_block commands;ksn_cache_text_block text;
     ksn_core_init(&core);

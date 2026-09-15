@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 #include "ksn_cache.h"
 #include "ksn_modal.h"
 #include "ksn_render.h"
@@ -28,7 +29,7 @@ static uint16_t reference(unsigned opacity,int x,int y){
     return (uint16_t)((c[0]>>3)<<11|(c[1]>>2)<<5|(c[2]>>3));
 }
 static int groups(void){
-    ksn_core core;ksn_cache cache;ksn_cache_command_block commands;ksn_cache_text_block text;
+    KSN_TEST_CORE(core,);ksn_cache cache;ksn_cache_command_block commands;ksn_cache_text_block text;
     ksn_core_init(&core);CHECK(ksn_cache_bind(&cache,&commands,&text)==KSN_OK);
     ksn_client app=ksn_core_client(&core,KSN_APP);ksn_tx tx;
     ksn_draw draw[2]={
@@ -82,7 +83,7 @@ static int groups(void){
     return 0;
 }
 static int modals(void){
-    ksn_core core;ksn_core_init(&core);ksn_modal modal;ksn_modal_init(&modal,42);
+    KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_modal modal;ksn_modal_init(&modal,42);
     ksn_client app=ksn_core_client(&core,KSN_APP),system=ksn_core_client(&core,KSN_SYSTEM);ksn_tx tx;
     ksn_display_port display={NULL,get_strip,send_strip,240,135,8};ksn_render_stats stats;
     CHECK(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);

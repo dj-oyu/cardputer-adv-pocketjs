@@ -23,7 +23,10 @@ typedef struct {
 } text_payload;
 typedef struct { uint32_t resource; uint16_t variant,frame; uint32_t pad; } image_payload;
 
-_Static_assert(sizeof(ksn_core_impl)<=KSN_CORE_STORAGE_BYTES,"core storage budget");
+_Static_assert(KSN_CORE_RESERVED_BYTES<=KSN_CORE_STORAGE_BYTES,"core storage budget");
+_Static_assert(sizeof(ksn_core)<=3072,"core control allocation budget");
+_Static_assert(sizeof(ksn_core_command_block)==3072,"core command allocation budget");
+_Static_assert(sizeof(ksn_core_text_block)<=3072,"core text allocation budget");
 _Static_assert(sizeof(shape_payload)<=sizeof(((ksn_command_storage *)0)->payload),"shape payload");
 _Static_assert(sizeof(gradient_payload)<=sizeof(((ksn_command_storage *)0)->payload),"gradient payload");
 _Static_assert(sizeof(text_payload)<=sizeof(((ksn_command_storage *)0)->payload),"text payload");
@@ -105,7 +108,12 @@ static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
     if(last_transaction==UINT32_MAX||
        (mode==KSN_REPLACE&&last_generation==KSN_REF_GENERATION_MAX))return KSN_LIMIT;
     core->building_bank=(uint8_t)(core->active^1u);
-    memcpy(&core->banks[core->building_bank],&core->banks[core->active],sizeof(ksn_bank));
+    ksn_bank *next=&core->banks[core->building_bank];
+    const ksn_bank *active=&core->banks[core->active];
+    ksn_command_storage *commands=next->commands;uint8_t *text=next->text;
+    *next=*active;next->commands=commands;next->text=text;
+    memcpy(commands,active->commands,sizeof(ksn_core_command_block));
+    memcpy(text,active->text,sizeof(ksn_core_text_block));
     core->layer=layer;core->mode=mode;core->poison=KSN_OK;core->building=true;
     core->transaction=(ksn_tx){++last_transaction};*out=core->transaction;
     if(mode==KSN_REPLACE){
@@ -274,13 +282,13 @@ static void core_abort(void *context,ksn_tx tx){
 static ksn_limits core_limits(void *context){
     (void)context;return (ksn_limits){{KSN_APP_COMMANDS,KSN_APP_TEXT_BYTES,0},
                                     {KSN_SYSTEM_COMMANDS,KSN_SYSTEM_TEXT_BYTES,0},
-                                    sizeof(ksn_core)+sizeof(last_generation)+sizeof(last_transaction)+sizeof(last_resource),0};
+                                    KSN_CORE_RESERVED_BYTES+sizeof(last_generation)+sizeof(last_transaction)+sizeof(last_resource),0};
 }
 static ksn_stats core_stats(void *context){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;const ksn_bank *bank=&core->banks[core->active];
     ksn_stats stats={0};
     for(unsigned layer=0;layer<2;layer++)stats.used[layer]=(ksn_capacity){bank->count[layer],bank->text_used[layer],0};
-    stats.native_current=sizeof(ksn_core)+sizeof(last_generation)+sizeof(last_transaction)+sizeof(last_resource);
+    stats.native_current=KSN_CORE_RESERVED_BYTES+sizeof(last_generation)+sizeof(last_transaction)+sizeof(last_resource);
     stats.native_peak=stats.native_current;return stats;
 }
 static const ksn_api core_api={core_begin,core_background,core_add,core_change,core_animate,
@@ -288,7 +296,16 @@ static const ksn_api core_api={core_begin,core_background,core_add,core_change,c
 
 void ksn_core_init(ksn_core *storage){
     if(!storage)return;
-    memset(storage,0,sizeof(*storage));ksn_core_impl *core=impl(storage);
+    ksn_core_impl *core=impl(storage);
+    ksn_command_storage *commands[2]={core->banks[0].commands,core->banks[1].commands};
+    uint8_t *text[2]={core->banks[0].text,core->banks[1].text};
+    if(!commands[0]||!commands[1]||!text[0]||!text[1])return;
+    memset(storage,0,sizeof(*storage));
+    for(unsigned i=0;i<2;i++){
+        core->banks[i].commands=commands[i];core->banks[i].text=text[i];
+        memset(commands[i],0,sizeof(ksn_core_command_block));
+        memset(text[i],0,sizeof(ksn_core_text_block));
+    }
     for(unsigned layer=0;layer<2;layer++){
         core->endpoints[layer]=(ksn_endpoint){core,(ksn_layer)layer};
     }
@@ -297,6 +314,14 @@ void ksn_core_init(ksn_core *storage){
     core->banks[0].background[KSN_APP]=0x000000ff;
     core->banks[0].background_set[KSN_APP]=true;
     core->full_redraw=true;
+}
+ksn_result ksn_core_bind(ksn_core *storage,ksn_core_command_block *c0,ksn_core_command_block *c1,
+                         ksn_core_text_block *t0,ksn_core_text_block *t1){
+    if(!storage||!c0||!c1||!t0||!t1||c0==c1||t0==t1)return KSN_INVALID;
+    *storage=(ksn_core){0};
+    storage->state.banks[0].commands=c0->commands;storage->state.banks[1].commands=c1->commands;
+    storage->state.banks[0].text=t0->bytes;storage->state.banks[1].text=t1->bytes;
+    ksn_core_init(storage);return KSN_OK;
 }
 ksn_client ksn_core_client(ksn_core *storage,ksn_layer layer){
     if(!storage||!valid_layer(layer))return (ksn_client){0};

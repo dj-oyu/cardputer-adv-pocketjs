@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 #include "ksn_core.h"
 #include <stdio.h>
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"resource line %d: %s\n",__LINE__,#x);return 1;}} while(0)
@@ -9,7 +10,7 @@ static ksn_result span(void *ctx,uint16_t variant,uint16_t frame,uint16_t y,uint
     return KSN_OK;
 }
 int main(void){
-    ksn_core core;ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP),sys=ksn_core_client(&core,KSN_SYSTEM);
+    KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP),sys=ksn_core_client(&core,KSN_SYSTEM);
     ksn_image_port port={NULL,64,64,2,3,span};ksn_resource image,other;
     CHECK(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
     port.width=1; /* The descriptor was copied. */

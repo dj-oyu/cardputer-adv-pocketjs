@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 #include "ksn_core.h"
 #include <stdio.h>
 #include <string.h>
@@ -9,7 +10,7 @@ static ksn_draw rectangle(void){
     d.data.shape.color=0xffffffff;return d;
 }
 int main(void){
-    ksn_core core;ksn_core_init(&core);
+    KSN_TEST_CORE(core,);ksn_core_init(&core);
     ksn_client app=ksn_core_client(&core,KSN_APP),system=ksn_core_client(&core,KSN_SYSTEM);
     ksn_tx tx,old_tx;ksn_ref ref,old_ref;ksn_draw d=rectangle();
     EXPECT(system.ops->begin(system.ctx,KSN_REPLACE,&tx)==KSN_OK);

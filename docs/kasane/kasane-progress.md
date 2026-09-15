@@ -81,6 +81,27 @@ commit・pushして進める。実機未確認は各記録に残す。
   DIRAM123,404 Bで増分0。objdumpでbroadcast→loopgtz→単一VST→returnを確認。
   asm loop本体3 B、追加vector領域なし。実機速度・画素確認は後日。シリアル操作なし。
 
+## checkpoint 3b — 基本領域の分割予約（2026-09-15）
+
+- coreを移動不可の借用commands/text各2ブロックへ分割。resetはアドレスを保持し、
+  bank切替はメタデータと内容をコピーして候補bankと表示bankを独立に保つ。
+- JS adapterは基本5ブロックの全確保・初期化後に公開。途中失敗では全回収、resetも全解放。
+  通常PATCH/presentではnative追加確保なし。cacheの遅延3ブロック確保は維持する。
+- S3 ELF型情報: 管理1,644 B、commands 3,072 B×2、text 1,024 B×2、基本合計9,836 B。
+  cache込み12,892 B。CP3aから各508 B減、個別確保上限3,072 Bを満たす。
+  allocator管理情報は別。core単体は管理516 B＋借用8,192 B、C statsの共有IDも引き続き計上。
+- S3 objdumpの関数単体stack frame: ensure_state/core_begin/core_init 48 B、core_bind 32 B。
+  cache.createは1,984 B（draw配列1,920 Bを含む）。描画追加stack 1 KiB目標の達成は未認定。
+  VM・子関数・board buffer・Wi-Fi/audioを含む同時ピークとlargest blockは実機確認待ち。
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、PIE、C++）。
+  追加bind失敗・reset試験はtest_coreをASan/UBSanとO2で別途実行しPASS。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`と
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  および生成exeはPASS。基本5確保＋cache3確保の各失敗、再試行、全回収、stats実予約一致を確認。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,172,240 B、空き973,488 B、DIRAM123,404 B（増分0）。
+  CP3のhost/build側は完了。実機100回起動とstack/断片化確認は保留、シリアル操作なし。
+  次はCP4のhost core/coordinator所有とAPP attach/detach。
+
 ## checkpoint 0 — JS失敗の原子性（2026-09-15）
 
 - 有効な所有transactionで起きた引数検証・getter・確保失敗は、JSでcatchしても更新全体をabortする。

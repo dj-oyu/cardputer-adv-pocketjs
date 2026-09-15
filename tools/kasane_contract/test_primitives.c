@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 #include "ksn_render.h"
 #include <stdio.h>
 #include <string.h>
@@ -66,7 +67,7 @@ static uint32_t source(const ksn_draw *draw,int x,int y){
 }
 
 int main(void){
-    ksn_core core;ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP);
+    KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP);
     ksn_draw draws[]={
         {.kind=KSN_ROUND_RECT,.bounds={3,3,17,15},.clip={4,2,17,14},.opacity=201,
          .data.shape={0xf07878d7,4,0}},

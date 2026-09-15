@@ -142,15 +142,19 @@ VM yield相当の未完modal、新instanceのcleanup、別layerの干渉拒否�
 ASan/UBSan、O2 strict-aliasing、C++17ヘッダ検査を`run.sh`へ組み込んだ。
 実機の`VIEW PASS`も同じ窓口で二つのinstance、取消、無変更の転送ゼロ、modal開閉を通す。
 
-coreは9,216 B。追加coordinatorはホスト64-bitで112 B、S3で84 B。共有IDカウンタは20 B。
+coreは借用4ブロック（commands 3,072 B×2、text 1,024 B×2）と管理領域に分割する。
+利用前に`ksn_core_bind`で結び、resetは同じブロックを再使用する。ブロックとcoreは移動不可。
+S3のcore管理領域は516 B、合計8,708 B。追加coordinatorはホスト64-bitで112 B、S3で84 B。共有IDカウンタは20 B。
 Cのstats.native_bytesはcore/coordinator/共有IDと有効なcache予約を合算する。
 JSのstats.nativeBytesは参照2世代分を含むadapterの予約heapで、共有staticを含まない。
 どちらもLCD帯・JS heap・frost snapshotを含まない。
-CP3aのS3 ELF型情報では基本領域10,344 B、cacheは496+1,536+1,024=3,056 B。
-cacheなしは旧14,440 Bから4,096 B減、cacheありは13,400 Bで1,040 B減。
-cache用個別確保は3,072 B以下。基本領域の10,344 B単一確保はCP3bで分割する未解決事項。
+CP3bのS3 ELF型情報では基本領域9,836 B（adapter管理1,644 B＋借用4ブロック）、
+cacheは496+1,536+1,024=3,056 B。cacheありは12,892 B。CP3aより両方508 B減。
+基本/cacheとも個別確保は3,072 B以下。基本5確保の途中失敗では全回収し、初期化完了後にのみ公開する。
+数値はallocator管理情報・alignment overheadを除く要求サイズ。ブロック分割で管理情報の個数は増える。
 cacheの文字1,024 Bは予約済みだが文字templateは未対応。cache.createのdraw配列はS3で
-48×40=1,920 Bのstackを使い、呼出し全体のstack peakは実機で後日確認する。
+48×40=1,920 Bのstackを使う。S3生成コードの関数単体frameはcache.create 1,984 B、
+ensure_state/core_begin/core_init各48 B、core_bind 32 B。子関数・VMを含むstack peakは実機で後日確認する。
 Kasaneを使わないsessionの予約heapは0 B。board共用描画帯3,840 Bと転送buffer7,680 Bは
 別途同時ピークに含める。CP3aでstatic DIRAM増分はない。
 部品数ごとのnative追加heap確保は0。PIE側も保持snapshotは2,048 Bのまま。

@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 #include "ksn_render.h"
 #include <stdio.h>
 #include <string.h>
@@ -31,7 +32,7 @@ static int compare_panel(ksn_rect rect,uint32_t color){
     return 1;
 }
 int main(void){
-    ksn_core core;ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP),sys=ksn_core_client(&core,KSN_SYSTEM);
+    KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP),sys=ksn_core_client(&core,KSN_SYSTEM);
     ksn_display_port display={NULL,get_strip,send_strip,240,135,8};ksn_render_stats stats;
     ksn_tx tx;ksn_ref moving,overlay;
     ksn_draw d={.kind=KSN_RECT,.bounds={0,0,32,16},.clip={0,0,240,135},.opacity=255};

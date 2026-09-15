@@ -29,6 +29,10 @@ typedef struct {
     bool active;
 } kasane_state;
 
+_Static_assert(sizeof(kasane_state)<=3072,"Kasane control allocation budget");
+#define KASANE_BASE_RESERVED_BYTES (sizeof(kasane_state)+ \
+    2*sizeof(ksn_core_command_block)+2*sizeof(ksn_core_text_block))
+
 static kasane_state *state;
 /* Never recycle identities across host reset while old JS wrappers can live. */
 static uint32_t ref_serial;
@@ -61,15 +65,27 @@ static JSValue throw_result(JSContext *ctx, ksn_result result, const char *op) {
 
 static bool ensure_state(JSContext *ctx, const char *op) {
     if(state) return true;
-    state=calloc(1,sizeof(*state));
-    if(!state) {
-        pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,op,
-                         "Kasane native arena could not be allocated",true,
-                         POCKET_OUTCOME_NOT_APPLIED);
-        return false;
+    kasane_state *candidate=calloc(1,sizeof(*candidate));
+    ksn_core_command_block *commands[2]={NULL,NULL};
+    ksn_core_text_block *text[2]={NULL,NULL};
+    if(!candidate) goto fail;
+    for(unsigned i=0;i<2;i++) {
+        commands[i]=calloc(1,sizeof(*commands[i]));
+        if(!commands[i]) goto fail;
+        text[i]=calloc(1,sizeof(*text[i]));
+        if(!text[i]) goto fail;
     }
-    ksn_view_host_init(&state->host,&state->core,NULL,0);
+    ksn_core_bind(&candidate->core,commands[0],commands[1],text[0],text[1]);
+    ksn_view_host_init(&candidate->host,&candidate->core,NULL,0);
+    state=candidate;
     return true;
+fail:
+    for(unsigned i=0;i<2;i++) { free(commands[i]);free(text[i]); }
+    free(candidate);
+    pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,op,
+                     "Kasane native blocks could not be allocated",true,
+                     POCKET_OUTCOME_NOT_APPLIED);
+    return false;
 }
 
 static void free_cache(ksn_cache *cache) {
@@ -789,7 +805,7 @@ static JSValue js_stats(JSContext *ctx, JSValueConst self, int argc,
     displayed=JS_NewObject(ctx);if(JS_IsException(displayed)) goto fail;
     cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
     PUT(out,"active",JS_NewBool(ctx,state&&state->active));
-    PUT(out,"nativeBytes",JS_NewUint32(ctx,state?(uint32_t)(sizeof(*state)+
+    PUT(out,"nativeBytes",JS_NewUint32(ctx,state?(uint32_t)(KASANE_BASE_RESERVED_BYTES+
         (state->cache?KSN_CACHE_RESERVED_BYTES:0)):0));
     PUT(displayed,"commands",JS_NewInt32(ctx,stats.displayed.commands));
     PUT(displayed,"textBytes",JS_NewInt32(ctx,stats.displayed.text_bytes));
@@ -895,7 +911,13 @@ esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data) {
 }
 
 void pocket_kasane_reset(void) {
-    if(state) free_cache(state->cache);
+    if(state) {
+        free_cache(state->cache);
+        for(unsigned i=0;i<2;i++) {
+            free(state->core.state.banks[i].commands);
+            free(state->core.state.banks[i].text);
+        }
+    }
     free(state);state=NULL;
 }
 bool pocket_kasane_active(void) { return state&&state->active; }

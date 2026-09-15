@@ -1,8 +1,9 @@
+#include "core_fixture.h"
 #include "ksn_view_host.h"
 #include <stdio.h>
 #include <string.h>
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"view line %d: %s\n",__LINE__,#x);return 1;}}while(0)
-static ksn_core core;
+KSN_TEST_CORE(core,static);
 static ksn_cache cache;
 static ksn_cache_command_block cache_commands;
 static ksn_cache_text_block cache_text;
@@ -115,7 +116,7 @@ int main(void){
     /* A coordinator can draw and repair without reserving a RAM cache. */
     ksn_view_host_init(&host,&core,NULL,0);
     CHECK(ksn_view_get_stats(app).shared_cache.native_bytes==0);
-    CHECK(ksn_view_get_stats(app).native_bytes==sizeof(core)+sizeof(host)+20);
+    CHECK(ksn_view_get_stats(app).native_bytes==KSN_CORE_RESERVED_BYTES+sizeof(host)+20);
     d.kind=KSN_RECT;
     CHECK(ksn_view_cache_create(app,&d,1,&t)==KSN_UNSUPPORTED);
     CHECK(ksn_view_begin(app,KSN_REPLACE,&tx)==KSN_OK);

@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 #include "ksn_cache.h"
 #include "ksn_render.h"
 #include <stdio.h>
@@ -19,7 +20,7 @@ static ksn_result render_and_resolve(ksn_cache *cache,ksn_core *core,const ksn_d
     return ksn_cache_resolve(cache,core,frame.ticket,true);
 }
 int main(void){
-    ksn_core core;ksn_cache cache;ksn_cache_command_block commands;ksn_cache_text_block text;
+    KSN_TEST_CORE(core,);ksn_cache cache;ksn_cache_command_block commands;ksn_cache_text_block text;
     ksn_core_init(&core);CHECK(ksn_cache_bind(&cache,&commands,&text)==KSN_OK);
     ksn_client app=ksn_core_client(&core,KSN_APP);
     ksn_display_port display={NULL,get_strip,present,240,135,8};

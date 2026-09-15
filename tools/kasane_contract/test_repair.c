@@ -1,9 +1,10 @@
+#include "core_fixture.h"
 #include "ksn_view_host.h"
 #include <stdio.h>
 #include <string.h>
 
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"repair line %d: %s\n",__LINE__,#x);return 1;}}while(0)
-static ksn_core core;
+KSN_TEST_CORE(core,static);
 static ksn_cache cache;
 static ksn_cache_command_block cache_commands;
 static ksn_cache_text_block cache_text;

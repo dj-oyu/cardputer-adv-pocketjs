@@ -49,6 +49,11 @@ JS座標は現実装が小数拒否、仕様が最近接丸め（tieは0から�
 
 ## 実装チェックポイント
 
+2026-09-15進捗: CP0–2とCP3a/bのhost試験・S3ビルドを完了。
+CP3は基本5ブロック/cache任意3ブロックとも個別3,072 B以下。実機のstack・断片化・
+100回起動試験はシリアル使用可能後にまとめて実施する。次の実装はCP4。
+数値と検証範囲は[kasane-progress.md](kasane-progress.md)の各checkpointを参照。
+
 各行を1 commit以上とし、大きい場合は行内もビルド可能な単位へ分割する。
 基本依存は直前の行。H=Kasane host契約（ASan/UBSan、O2）、Q=実QuickJS adapter試験、
 V=VM corpusに加えて実session dispatchの順序試験。全コード行でESP-IDFビルド必須。

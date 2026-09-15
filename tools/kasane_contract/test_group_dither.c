@@ -1,10 +1,11 @@
+#include "core_fixture.h"
 #include "ksn_render.h"
 #include <stdio.h>
 #include <string.h>
 
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"group dither line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 #define COUNT(a) (sizeof(a)/sizeof((a)[0]))
-static ksn_core core;
+KSN_TEST_CORE(core,static);
 static uint16_t strip[240*8],panel[240*135],patch_pixels[240*135];
 static ksn_draw draws[12];
 static bool visible[12];

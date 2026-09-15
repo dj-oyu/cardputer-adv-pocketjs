@@ -47,7 +47,7 @@ ksn_view_stats ksn_view_get_stats(const ksn_view *v){
     if(!valid(v))return (ksn_view_stats){0};
     ksn_cache_stats cache=ksn_cache_get_stats(v->host->cache);
     return (ksn_view_stats){ksn_core_active_usage(v->host->core,v->layer),cache,
-                          sizeof(ksn_core)+sizeof(ksn_view_host)+20+
+                          KSN_CORE_RESERVED_BYTES+sizeof(ksn_view_host)+20+
                           (v->host->cache?KSN_CACHE_RESERVED_BYTES:0)};
 }
 ksn_result ksn_view_begin(ksn_view *v,ksn_update_mode mode,ksn_tx *out){

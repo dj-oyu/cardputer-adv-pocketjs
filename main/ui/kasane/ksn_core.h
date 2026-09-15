@@ -19,8 +19,8 @@ typedef struct ksn_core_impl ksn_core_impl;
 typedef struct { ksn_core_impl *core; ksn_layer layer; } ksn_endpoint;
 typedef struct { ksn_image_port port; ksn_resource id; ksn_layer layer; } ksn_image_entry;
 typedef struct {
-    ksn_command_storage commands[KSN_COMMANDS];
-    uint8_t text[KSN_TEXT_BYTES];
+    ksn_command_storage *commands;
+    uint8_t *text;
     uint16_t count[2],text_used[2];
     uint32_t generation[2];
     ksn_rgba background[2];
@@ -40,18 +40,24 @@ struct ksn_core_impl {
     bool building,submitted,full_redraw,repairing,invalidated;
 };
 
-/* Caller-owned, fixed storage. The implementation performs no heap allocation. */
-typedef union {
-    max_align_t alignment;
+/* Borrowed, immovable blocks. The core itself never allocates. */
+typedef struct { ksn_command_storage commands[KSN_COMMANDS]; } ksn_core_command_block;
+typedef struct { uint8_t bytes[KSN_TEXT_BYTES]; } ksn_core_text_block;
+typedef struct {
     ksn_core_impl state;
-    uint8_t bytes[KSN_CORE_STORAGE_BYTES];
 } ksn_core;
+#define KSN_CORE_RESERVED_BYTES (sizeof(ksn_core)+2*sizeof(ksn_core_command_block)+2*sizeof(ksn_core_text_block))
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Reinitialization invalidates handles; destroy guest callbacks first.
+/* Bind distinct, non-overlapping blocks before first use. Failed validation
+ * leaves all blocks unchanged. Their lifetimes cover the entire core session. */
+ksn_result ksn_core_bind(ksn_core *,ksn_core_command_block *,ksn_core_command_block *,
+                         ksn_core_text_block *,ksn_core_text_block *);
+/* Reset an already bound core, preserving borrowed block addresses.
+ * Reinitialization invalidates handles; destroy guest callbacks first.
  * All core instances share one owner task and process-lifetime ID counters
  * (12 bytes outside this storage, included conservatively in each core's
  * limits/stats). Storage must not be copied or relocated. */

@@ -1,3 +1,4 @@
+#include "core_fixture.h"
 /* White-box boundary test: no mutable test hooks in the production API. */
 #include "../../main/ui/kasane/ksn_core.c"
 #include <stdio.h>
@@ -7,7 +8,7 @@ static ksn_result dummy_span(void *c,uint16_t v,uint16_t f,uint16_t y,uint16_t x
     (void)c;(void)v;(void)f;(void)y;(void)x;(void)n;(void)p;(void)a;return KSN_OK;
 }
 int main(void){
-    ksn_core core;ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP);
+    KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP);
     ksn_tx tx;ksn_ref ref;
     last_generation=KSN_REF_GENERATION_MAX-1;
     CHECK(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);

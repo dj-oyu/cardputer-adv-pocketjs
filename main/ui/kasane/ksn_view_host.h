@@ -17,7 +17,7 @@ struct ksn_view_host {
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Initializes borrowed core/cache too. Cache may be NULL; a supplied cache
+/* Resets the already bound borrowed core/cache. Cache may be NULL; a supplied cache
  * must already be bound, and reset preserves its block addresses.
  * One coordinator owns them exclusively;
  * do not mix low-level mutations with view calls. Storage cannot move. Destroy

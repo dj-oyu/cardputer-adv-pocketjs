@@ -26,7 +26,7 @@ static bool fault_hit,native_fault;
 static size_t live_allocations;
 static bool track_native;
 static long native_after=-1;
-static size_t native_bytes,native_max;
+static size_t native_bytes,native_max,native_calls;
 static struct { void *ptr;size_t bytes; } native_blocks[16];
 
 void *__real_calloc(size_t count,size_t size);
@@ -38,6 +38,7 @@ void __wrap_free(void *ptr) {
     __real_free(ptr);
 }
 void *__wrap_calloc(size_t count,size_t size) {
+    if(track_native) native_calls++;
     if(native_fault) { native_fault=false;return NULL; }
     if(track_native&&native_after>=0&&native_after--==0) return NULL;
     void *ptr=__real_calloc(count,size);
@@ -367,6 +368,36 @@ static void allocator_tests(void) {
     check(live_allocations==0,"all fault-test runtimes release every guest allocation");
 }
 
+static void base_block_tests(void) {
+    check(open_fault_runtime(""),"base block fixture opens");
+    pocket_kasane_reset();track_native=true;
+    ksn_render_stats stats;
+    for(int fault=0;fault<5;fault++) {
+        native_after=fault;native_max=0;
+        check(run("var failed=false;try{kasane.replace(tx=>tx.rect(shape))}"
+                  "catch(e){failed=e.code==='OUT_OF_MEMORY'}if(!failed)throw Error('missing OOM');"
+                  "if(kasane.stats().nativeBytes!==0||kasane.stats().active)throw Error('partial state');"),
+              "each base allocation failure leaves no published state");
+        native_after=-1;
+        check(native_bytes==0&&native_max<=3072&&!pocket_kasane_has_submission(),
+              "failed base blocks reclaimed and bounded");
+        check(run("kasane.replace(tx=>{tx.background(0x000000ff);globalThis.r=tx.rect(shape)});"),
+              "base allocation retries successfully");
+        check(present(&stats)==KSN_OK,"retried base presents");
+        char accounting[160];
+        snprintf(accounting,sizeof(accounting),
+                 "if(kasane.stats().nativeBytes!==%zu)throw Error('base accounting');",native_bytes);
+        check(run(accounting),"base stats match allocated block sizes");
+        check(native_max<=3072,"all successful base allocations are bounded");
+        size_t calls=native_calls;
+        check(run("kasane.patch(tx=>r.setColor(tx,0xabcdef80));"),"patch uses reserved blocks");
+        check(present(&stats)==KSN_OK,"patch presents from reserved blocks");
+        check(native_calls==calls,"patch and present allocate no native blocks");
+        pocket_kasane_reset();check(native_bytes==0,"reset releases all base blocks");
+    }
+    track_native=false;close_fault_runtime();
+}
+
 static void lazy_cache_tests(void) {
     check(open_fault_runtime(""),"lazy cache fixture opens");
     pocket_kasane_reset();track_native=true;
@@ -480,12 +511,13 @@ int main(void) {
           "draw-reference exposure is capped at 32");
     check(!pocket_kasane_has_submission(),"limit failure aborts the whole replace");
 
-    check(run("if(kasane.stats().nativeBytes<13000)throw Error('native accounting')"),
+    check(run("if(kasane.stats().nativeBytes<=kasane.stats().cache.reservedBytes)throw Error('native accounting')"),
           "stats reports the allocated native arena");
     atomicity_tests();
     repair_tests();
     pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     allocator_tests();
+    base_block_tests();
     lazy_cache_tests();
     printf("%s: %u failure(s)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;

@@ -24,6 +24,8 @@
 #undef main
 
 static ksn_core probe_core;
+static ksn_core_command_block probe_commands[2];
+static ksn_core_text_block probe_text[2];
 static ksn_cache probe_cache;
 static ksn_cache_command_block probe_cache_commands;
 static ksn_cache_text_block probe_cache_text;
@@ -111,6 +113,7 @@ static ksn_result probe_display(ksn_core *core){
 
 static ksn_result view_demo(void){
     ksn_cache_bind(&probe_cache,&probe_cache_commands,&probe_cache_text);
+    ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
     ksn_view_host host;ksn_view_host_init(&host,&probe_core,&probe_cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP);
     ksn_display_port display={NULL,probe_strip,probe_send,240,135,8};
@@ -145,10 +148,10 @@ static ksn_result view_demo(void){
 void ksn_device_probe_run(void){
     const char *tag="KSN_PROBE";
     failures=0;
-    ESP_LOGI(tag,"START core=%u frame_command=%u",(unsigned)sizeof(ksn_core),(unsigned)sizeof(ksn_frame_command));
+    ESP_LOGI(tag,"START core=%u frame_command=%u",(unsigned)KSN_CORE_RESERVED_BYTES,(unsigned)sizeof(ksn_frame_command));
     int core_result=ksn_probe_core_tests(),review_result=ksn_probe_review_tests();
     if(core_result||review_result){ESP_LOGE(tag,"FAIL regression core=%d review=%d",core_result,review_result);return;}
-    ksn_core_init(&probe_core);
+    ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
     ksn_cache_bind(&probe_cache,&probe_cache_commands,&probe_cache_text);
     ksn_client app=ksn_core_client(&probe_core,KSN_APP),system=ksn_core_client(&probe_core,KSN_SYSTEM);
     ksn_tx tx;ksn_ref banner;
