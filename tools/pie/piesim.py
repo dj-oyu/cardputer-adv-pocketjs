@@ -162,6 +162,8 @@ class Sim:
 
             if op == 'wsr.sar':
                 self.sar = arv(a[0]) & 63
+                # SAR[3:0] is the byte offset EE.SRC.Q shifts by; the USAR load sets the same field.
+                self.sar_byte = self.sar & 15
             elif op == 'mov':
                 arset(a[0], arv(a[1]))
             elif op == 'addi':
@@ -250,7 +252,9 @@ class Sim:
             elif op == 'ee.src.q':
                 # 1.8.52: qa = {qs1[127:0], qs0[127:0]} >> (SAR_BYTE << 3), low 128 bits taken.
                 # qs0 is the *low* half, so the pair reads as the 16 bytes at the unaligned address
-                # when qs0 came from the USAR load that contained it.
+                # when qs0 came from the USAR load that contained it. SAR_BYTE is SAR[3:0], so it is
+                # whatever wrote the shift last -- a USAR load or a plain `wsr.sar` (the FIR kernel
+                # walks the byte offset with wsr.sar and never loads through USAR).
                 low, high = Q[qi(a[1])], Q[qi(a[2])]
                 bits = 0
                 for i in range(8):

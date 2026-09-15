@@ -1,38 +1,77 @@
 #!/usr/bin/env python3
 """Emit main/pocket/fir_pie.c: the MP3 downsample FIR as an eight-output PIE kernel.
 
-The tap loop is unrolled because a 32-tap window walk is not loop-shaped: the
-window address moves two bytes per tap, and `ee.ld.128.usar.ip` can only step a
-pointer by a multiple of sixteen, so the two-byte walk is a core `addi` and the
-window is read as the unaligned pair of aligned blocks that contain it
-(docs/perf/pie-simd.md 1.4). Written out by this script rather than by hand so
-the tap order, the coefficient walk and the pointer walks cannot drift apart.
+The tap loop is unrolled because a 32-tap window walk is not loop-shaped. It is
+written out by this script rather than by hand so the tap order, the coefficient
+walk, the block rotation and the shift walk cannot drift apart.
+
+Two things make it cheap (docs/perf/pie-opt-plan.md 6, A1):
+
+  * the window of tap k starts two bytes below the window of tap k-1, so the
+    aligned 16-byte block that *contains* the window only changes every eight
+    taps. One load per group of eight taps therefore covers the whole group, and
+    the pair of blocks a group needs is two of three registers that rotate;
+  * the byte offset inside that block walks 0, 14, 12, ... 2 and repeats, which
+    is one register that steps by -2 per tap: the hardware takes SAR[3:0] as the
+    byte offset, so the underflow at -16 wraps to 0 by itself.
+
+Per tap that leaves wsr.sar, addi, EE.SRC.Q, EE.VLDBC.16.IP and
+EE.VMULAS.S16.QACC -- five instructions, and 6 loads per eight outputs instead
+of 64. The shift is exact (whole bytes), so this version is still bit-identical
+to the scalar form; tools/pie/test_kernels.py checks that on every run.
+
+The caller must keep the window start 16-byte aligned: the ring is written twice
+(buf[t] and buf[t + 32]) and the caller pushes whole groups of eight, so
+(cursor + 25) is a multiple of eight for every block -- one phase chosen when the
+ring starts, and it stays true.
 """
 import os
 
 TAPS = 32
+LANES = 8
 HERE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # repository root
 
+# The registers the generated loop uses.
+BLK = ('q5', 'q6', 'q7')      # the three rotating blocks; index 0 is the highest address
+WIN = 'q2'                    # the window an EE.SRC.Q produces
+COEF = ('q3', 'q4')           # the broadcast coefficient, double buffered
+
 body = []
+
+
+def load_block(reg, first=False):
+    """Load the next aligned block into `reg`. The pointer walks downwards by one
+    block at a time, and EE.VLD.128.IP's immediate is not used for that walk so
+    the kernel does not depend on a negative immediate being accepted."""
+    if first:
+        body.append('        "  ee.vld.128.ip %s, %%[p], 0\\n"' % reg)
+    else:
+        body.append('        "  addi %[p], %[p], -16\\n"')
+        body.append('        "  ee.vld.128.ip %s, %%[p], 0\\n"' % reg)
+
+
+# Prologue: the three blocks the first group needs, highest address first.
+load_block(BLK[0], first=True)          # B(-1)
+load_block(BLK[1])                      # B(0)
+load_block(BLK[2])                      # B(1)
+
 for k in range(TAPS):
-    # The coefficient is double buffered: it is loaded one tap ahead of its use,
-    # because a load's result is a stage-2 def and reading it in the next
-    # instruction stalls for a cycle (docs/perf/pie-simd.md 2.2). The last tap
-    # has no "next" coefficient to fetch, which is also what keeps the pointer
-    # walk at exactly two bytes per tap.
-    cur, nxt = ('q3', 'q4') if k % 2 == 0 else ('q4', 'q3')
-    body += [
-        '        "  ee.ld.128.usar.ip q0, %[p], 0\\n"',
-        '        "  ee.ld.128.usar.ip q1, %[q], 0\\n"',
-        '        "  ee.src.q q2, q0, q1\\n"',
-    ]
+    # The window's block pair changes when the window start crosses a 16-byte
+    # boundary, which happens at taps 1, 9, 17, 25 ... -- not at 8, 16, 24 -- so
+    # the group index is (k + 7) // 8. The pair is (B(g), B(g-1)) with the low
+    # half first, and group g >= 2 needs a new block, loaded into the register
+    # that becomes its low half.
+    group = (k + LANES - 1) // LANES
+    if k > 0 and (k - 1) % LANES == 0 and group >= 2:
+        load_block(BLK[(group + 1) % 3])
+    low, high = BLK[(group + 1) % 3], BLK[group % 3]
+    cur, nxt = COEF[k % 2], COEF[(k + 1) % 2]
+    body.append('        "  wsr.sar %[sh]\\n"')
+    body.append('        "  ee.src.q %s, %s, %s\\n"' % (WIN, low, high))
     if k + 1 < TAPS:
         body.append('        "  ee.vldbc.16.ip %s, %%[h], 2\\n"' % nxt)
-    body += [
-        '        "  ee.vmulas.s16.qacc q2, %s\\n"' % cur,
-        '        "  addi %[p], %[p], -2\\n"',
-        '        "  addi %[q], %[q], -2\\n"',
-    ]
+    body.append('        "  ee.vmulas.s16.qacc %s, %s\\n"' % (WIN, cur))
+    body.append('        "  addi %[sh], %[sh], -2\\n"')
 
 HEAD = r'''/* The MP3 downsample FIR as an eight-output PIE kernel.
  *
@@ -50,21 +89,29 @@ HEAD = r'''/* The MP3 downsample FIR as an eight-output PIE kernel.
  * fir_model.c proves both over 1.6M cases, and tools/pie/test_kernels.py proves
  * that this assembly is that arithmetic.
  *
- * The window of tap k starts two bytes below the window of tap k-1, and
- * `EE.LD.128.USAR.IP` can only move a pointer by a multiple of sixteen bytes
- * (the Espressif assembler rejects 2 and accepts 16 -- see tools/pie/piesim.py),
- * so the two-byte walk is a core `addi` and the window is read as the unaligned
- * pair: a USAR load of the aligned block that contains the window, a USAR load of
- * the next block, and `EE.SRC.Q` shifting the concatenation right by the byte
- * offset the load left in SAR_BYTE. The first operand of SRC.Q is the *low*
- * half; swapping the two reads the window sixteen bytes away, and
- * tools/pie/test_piesim.py asserts that failure direction explicitly.
+ * Addressing, which is where the cost is (docs/perf/pie-opt-plan.md 6, A1):
  *
- * The caller owns the ring. The eight most recent samples must be resident, and
- * the windows reach seven samples back from the oldest output and seven forward
- * of the newest, so the buffer holds the ring twice (buf[t] and buf[t + 32] both
- * hold history[t mod 32]) and a block is computed after its whole group of eight
- * has been pushed. FIR_RING_SPAN is how many int16 that needs.
+ *   - the window of tap k starts two bytes below the window of tap k-1, so the
+ *     aligned 16-byte block containing it changes only every eight taps. Three
+ *     block registers rotate, one new block is loaded per group of eight taps,
+ *     and the pair a group needs is two of them;
+ *   - the byte offset inside the block walks 0, 14, 12, ... 2 and repeats. It is
+ *     one register stepping by -2 per tap: the shift comes from SAR[3:0], so the
+ *     underflow wraps to zero on its own;
+ *   - `EE.SRC.Q` concatenates the pair (the first operand is the *low* half) and
+ *     shifts it right by that byte offset. Swapping the halves reads the window
+ *     sixteen bytes away; tools/pie/test_piesim.py asserts that failure
+ *     direction explicitly.
+ *
+ * That is five instructions per tap and six loads per eight outputs, and because
+ * the shift is a whole number of bytes this version is bit-identical to the
+ * scalar form -- the models and the instruction-level test are the contract.
+ *
+ * The caller owns the ring: it holds the ring twice (buf[t] and buf[t + 32] both
+ * hold history[t mod 32]), it pushes whole groups of eight samples, and the
+ * window start it passes must be 16-byte aligned -- true for every block once
+ * the first one is, since the cursor advances by eight. FIR_RING_SPAN is how
+ * many int16 the buffer needs.
  */
 #include <stdint.h>
 
@@ -85,28 +132,30 @@ static int16_t fir_scalar_sample(const int16_t *hist, int cursor, const int16_t 
     return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
 }
 
-/* Eight outputs at once. `window` is the byte address of the newest sample of the
- * OLDEST output, i.e. &ring[(cursor - 7) + FIR_TAPS] in the doubled buffer; the
- * kernel walks the taps downwards from there (tap 0 at the highest address,
- * matching the coefficient table's order). `h` is the Q14 table, `out` receives
+/* Eight outputs at once. `window` is the 16-byte aligned byte address of the
+ * newest sample of the OLDEST output, i.e. &ring[(cursor - 7) + FIR_TAPS] in the
+ * doubled buffer; the taps are walked downwards from there, so tap 0 sits at the
+ * highest address and matches the coefficient table's order. `out` receives
  * eight int16 in time order (oldest first). */
 __attribute__((noinline))
 static void fir8_pie(const int16_t *window, const int16_t *h, int16_t *out) {
     __asm__ volatile(
         "  ee.zero.qacc\n"
-        "  ee.vldbc.16.ip q3, %[h], 2\n"
+        "  ee.vldbc.16.ip __COEF0__, %[h], 2\n"
 @@BODY@@
         "  ee.srcmb.s16.qacc q0, %[sh14], 0\n"
         "  ee.vst.128.ip q0, %[out], 16\n"
         :
-        : [p] "a"(window), [q] "a"((const char *)window + 16), [h] "a"(h), [out] "a"(out),
-          [sh14] "a"(14)
+        : [p] "a"((const char *)window + 16), [h] "a"(h), [out] "a"(out),
+          [sh] "a"(0), [sh14] "a"(14)
         : "memory");
 }
 '''
 
-src = HEAD.replace('@@TAPS@@', str(TAPS)).replace('@@BODY@@', '\n'.join(body))
-out = os.path.join(HERE, "main", "pocket", "fir_pie.c")
-with open(out, 'w', encoding='utf-8') as fh:
+src = (HEAD.replace('@@TAPS@@', str(TAPS))
+           .replace('@@BODY@@', '\n'.join(body))
+           .replace("__COEF0__", COEF[0]))
+out_path = os.path.join(HERE, 'main', 'pocket', 'fir_pie.c')
+with open(out_path, 'w', encoding='utf-8') as fh:
     fh.write(src)
-print(f'wrote {out}: {len(body) // 7} taps unrolled, {len(body)} asm lines')
+print(f'wrote {out_path}: {len(body)} asm lines, 5 per tap + 1 block load per group')

@@ -505,7 +505,9 @@ class FirKernel(unittest.TestCase):
         asm = extract_asm(FIR, 'fir8_pie(')
         rng = random.Random(23)
         for _ in range(200):
-            cursor = rng.randrange(7, 32)
+            # The window start must be 16-byte aligned, and the cursor advances by
+            # eight per block, so the caller fixes one phase: cursor = 7 mod 8.
+            cursor = 7 + 8 * rng.randrange(0, 4)
             hist = [rng.randrange(-32768, 32768) for _ in range(32)]
             h = [rng.randrange(-16384, 16385) for _ in range(32)]
             mem = bytearray(0x8000)
@@ -514,12 +516,13 @@ class FirKernel(unittest.TestCase):
                 store16(mem, self.RINGBUF + 2 * t, [hist[t % 32]])
             store16(mem, self.H, h)
             base = cursor + 25                      # the model's base; lane 7 is the newest sample
+            window = self.RINGBUF + 2 * base
+            self.assertEqual(window % 16, 0, 'the ring layout must align the window start')
             sim = Sim(mem)
-            sim.run(asm, {'p': self.RINGBUF + 2 * base, 'q': self.RINGBUF + 2 * base + 16,
-                          'h': self.H, 'out': self.OUT, 'sh14': 14})
+            sim.run(asm, {'p': window + 16, 'h': self.H, 'out': self.OUT, 'sh': 0, 'sh14': 14})
             self.assertEqual(load16(mem, self.OUT, 8), self.scalar(hist, cursor, h),
                              f'cursor={cursor}')
-            self.assertEqual(sim.ar['p'], self.RINGBUF + 2 * base - 64, 'the window walked the taps')
+            self.assertEqual(sim.ar['p'], window - 64, 'the block pointer walked six blocks')
             self.assertEqual(sim.ar['h'], self.H + 64, 'the coefficient pointer walked the taps')
             self.assertEqual(sim.ar['out'], self.OUT + 16, 'one block of eight stored')
 
