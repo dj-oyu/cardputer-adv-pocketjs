@@ -24,6 +24,10 @@ void pocket_mp3_init(pocket_mp3_decoder_t *d, int16_t *pcm) {
     d->pcm=pcm;
 }
 
+// See mp3_decode.h: 1 uses the eight-output block kernel, 0 the scalar filter the
+// rate converter's rounding was written against.
+int g_mp3_fir_pie=1;
+
 static void filter_init(pocket_mp3_decoder_t *d, unsigned rate) {
     // A 32-tap windowed sinc precedes downsampling. Linear interpolation alone
     // folds treble into the audible band at 44.1/48 kHz. Coefficients live in
@@ -58,14 +62,47 @@ bool pocket_mp3_decode(pocket_mp3_decoder_t *d, const uint8_t *frame,
     if(n!=(int)h.samples||info.frame_bytes!=(int)bytes||info.layer!=3||
        info.hz!=(int)h.rate||info.channels!=(int)h.channels) return false;
     for(int i=0;i<n;i++) {
+        // Eight outputs at a time when the kernel is switched on and the ring's phase
+        // allows it (docs/perf/pie-opt-plan.md 6, A1/T3). The phase rule is the
+        // kernel's: a block starts where cursor % 8 == 0, and that is what puts the
+        // window on a 16-byte boundary. MPEG Layer III frames are 1152 or 576 samples
+        // -- both multiples of eight -- so with the ring started at cursor 0 the block
+        // path covers whole frames; anything else falls through to the scalar path
+        // below.
+        if(h.rate>24000&&g_mp3_fir_pie&&i+FIR_LANES<=n&&FIR_PHASE_OK(d->cursor)) {
+            int16_t out8[FIR_LANES];
+            for(int j=0;j<FIR_LANES;j++) {
+                int s=d->pcm[(i+j)*h.channels];
+                if(h.channels==2) s=(s+d->pcm[(i+j)*2+1])/2;
+                fir_ring_push(d->history,(int)((d->cursor+(unsigned)j)%FIR_RING_SLOTS),(int16_t)s);
+            }
+            fir8_pie(fir_window(d->history,(int)d->cursor),d->filter,out8);
+            d->cursor=(d->cursor+FIR_LANES)%FIR_RING_SLOTS;
+            // The phase advance and its rounding are the per-sample path's, eight
+            // times over, in the same order: keep the two copies in step.
+            for(int j=0;j<FIR_LANES;j++) {
+                int sample=out8[j];
+                d->phase+=24000;
+                while(d->phase>=h.rate) {
+                    d->phase-=h.rate;
+                    int out=sample+(int)((int64_t)(d->previous-sample)*d->phase/24000);
+                    if(!emit(ctx,(int16_t)out)) return false;
+                }
+                d->previous=sample;
+            }
+            i+=FIR_LANES-1;
+            continue;
+        }
         int sample=d->pcm[i*h.channels];
         if(h.channels==2) sample=(sample+d->pcm[i*2+1])/2;
         if(h.rate>24000) {
-            d->history[d->cursor]=(int16_t)sample;
+            fir_ring_push(d->history,(int)d->cursor,(int16_t)sample);
             int32_t sum=0;
             for(unsigned k=0;k<32;k++)
-                sum+=(int32_t)d->history[(d->cursor-k)&31]*d->filter[k];
-            d->cursor=(d->cursor+1)&31;
+                // The ring is not a power of two any more, so the wrap has to be added
+                // before the modulo: cursor - k alone is an unsigned underflow.
+                sum+=(int32_t)d->history[(d->cursor+FIR_RING_SLOTS-k)%FIR_RING_SLOTS]*d->filter[k];
+            d->cursor=(d->cursor+1)%FIR_RING_SLOTS;
             // Floor, not truncation toward zero: an arithmetic shift is what the
             // PIE accumulator readout (EE.SRS.ACCX) computes, so a vector version
             // of this loop can match it bit for bit. It differs from sum/16384

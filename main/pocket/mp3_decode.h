@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "minimp3.h"
+#include "fir_pie.h"
 
 // No ESP dependencies: the host tests run the actual decoder and rate converter.
 typedef struct {
@@ -32,10 +33,20 @@ typedef bool (*pocket_mp3_emit_t)(void *ctx, int16_t sample);
 typedef struct {
     mp3dec_t decoder;
     int16_t *pcm;
-    int16_t history[32], filter[32];
+    // FIR_RING_SPAN (80), not 32: the ring holds FIR_TAPS + FIR_LANES slots (the block
+    // of eight outputs must not overwrite any sample it reads) and is stored twice so a
+    // window is contiguous (fir_pie.h). The 16-byte alignment is the kernel's
+    // requirement -- the window it is handed must land on a 16-byte boundary, and
+    // 2*(FIR_RING_SLOTS + block_start) with block_start % 8 == 0 only gets there if the
+    // ring itself starts aligned.
+    int16_t history[FIR_RING_SPAN] __attribute__((aligned(16))), filter[32];
     unsigned rate, phase, cursor;
     int previous;
 } pocket_mp3_decoder_t;
+// The A/B arm for the block kernel: 0 keeps the scalar per-sample filter that the
+// rate converter's rounding was tuned against, 1 uses fir8_pie. Runtime, so one
+// binary can be measured both ways.
+extern int g_mp3_fir_pie;
 void pocket_mp3_init(pocket_mp3_decoder_t *d, int16_t *pcm);
 // One complete MPEG Layer III frame. Free-format and changing rates are refused.
 bool pocket_mp3_decode(pocket_mp3_decoder_t *d, const uint8_t *frame,
