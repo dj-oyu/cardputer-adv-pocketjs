@@ -14,17 +14,27 @@ for the pipeline side.
 Supported instructions (TRM section in brackets):
     wsr.sar, mov, addi, bnez, loopgtz                         (Xtensa core)
     ee.vld.128.ip [1.8.88]   ee.vst.128.ip [1.8.192]  ee.vld.l.64.ip [1.8.92]
+    ee.vld.128.usar.ip [1.8.90]  ee.src.q [1.8.52]  ee.srs.accx [1.8.65]
+    ee.st.qacc_l.l.128.ip [1.8.145]
     ee.vldbc.16 [1.8.94]     ee.vldbc.16.ip [1.8.95]  ee.ldxq.32 [1.8.37]
     ee.vadds.s16 [1.8.70]    ee.vsubs.s16 [1.8.198]   ee.vmax.s16 [1.8.104]
     ee.vmin.s16 [1.8.113]    ee.vcmp.lt.s16 [1.8.85]  ee.vrelu.s16 [1.8.184]
     ee.vmul.s16 [1.8.122]    ee.vmul.u16 [1.8.128]
     ee.andq [1.8.1]          ee.orq [1.8.45]          ee.xorq [1.8.214]
     ee.vunzip.16 [1.8.207]   ee.vzip.8 [1.8.212]      ee.zero.q [1.8.216]
-    ee.zero.qacc [1.8.217]   ee.vmulas.u16.qacc [1.8.163]  ee.srcmb.s16.qacc [1.8.54]
+    ee.zero.qacc [1.8.217]   ee.vmulas.u16.qacc [1.8.163]  ee.vmulas.s16.qacc [1.8.160]
+    ee.srcmb.s16.qacc [1.8.54]
     ee.vprelu.s16 [1.8.182]  and the fused forms ee.vadds.s16.ld.incp [1.8.71],
     ee.vsubs.s16.ld.incp [1.8.199], ee.vmul.s16.ld.incp [1.8.123], ee.vmul.u16.ld.incp [1.8.129]
 Anything else raises NotImplementedError, on purpose: add the instruction here
 from its TRM pseudocode before relying on a kernel that uses it.
+
+An unaligned 128-bit window (`ee.ld.128.usar.ip` + `ee.src.q`) is the pair the
+FIR kernel needs: the USAR load brings in the aligned 16 bytes and leaves the
+byte offset in SAR_BYTE, and `ee.src.q` concatenates two of those loads and
+shifts the pair right by that many bytes -- the first operand is the *low* half
+(the lower address), which is what makes a descending window readable without
+copying it (docs/perf/pie-simd.md 1.4).
 
 Lane convention: q registers are lists of eight unsigned 16-bit lanes, lane 0
 being bits 15:0 (little-endian, the order EE.VLD.128 reads memory in). QACC is
@@ -54,6 +64,7 @@ class Sim:
         self.q = [[0] * 8 for _ in range(8)]
         self.qacc = [0] * 8
         self.sar = 0
+        self.sar_byte = 0
         self.ar = {}
         self.count = 0
 
@@ -221,6 +232,41 @@ class Sim:
             elif op == 'ee.vmulas.u16.qacc':
                 x, y = Q[qi(a[0])], Q[qi(a[1])]
                 self.qacc = [min(self.qacc[i] + x[i] * y[i], (1 << 40) - 1) for i in range(8)]
+            elif op == 'ee.vmulas.s16.qacc':
+                # 1.8.160: QACC_L[i] = clamp(QACC_L[i] + qx[16i+15:16i] * qy[16i+15:16i], -2^39, 2^39-1).
+                # Signed lanes, and the clamp is two-sided -- the unsigned form above is not a substitute.
+                x, y = Q[qi(a[0])], Q[qi(a[1])]
+                lim = (1 << 39) - 1
+                self.qacc = [max(-(1 << 39), min(self.qacc[i] + s16(x[i]) * s16(y[i]), lim))
+                             for i in range(8)]
+            elif op == 'ee.ld.128.usar.ip':
+                # 1.8.90: qu = load128(as & ~15); SAR_BYTE = as[3:0]; as += imm.
+                # The immediate is in bytes and a multiple of 16 -- checked against the Espressif
+                # assembler, which rejects 1 and accepts 16 (tools/pie/piesim.py's header).
+                addr = arv(a[1])
+                Q[qi(a[0])] = self.ldq(addr)
+                self.sar_byte = addr & 15
+                arset(a[1], addr + int(a[2]))
+            elif op == 'ee.src.q':
+                # 1.8.52: qa = {qs1[127:0], qs0[127:0]} >> (SAR_BYTE << 3), low 128 bits taken.
+                # qs0 is the *low* half, so the pair reads as the 16 bytes at the unaligned address
+                # when qs0 came from the USAR load that contained it.
+                low, high = Q[qi(a[1])], Q[qi(a[2])]
+                bits = 0
+                for i in range(8):
+                    bits |= low[i] << (16 * i)
+                    bits |= high[i] << (128 + 16 * i)
+                bits >>= (self.sar_byte & 15) * 8
+                Q[qi(a[0])] = [(bits >> (16 * i)) & 0xFFFF for i in range(8)]
+            elif op == 'ee.srs.accx':
+                # 1.8.65: ACCX >>= as[5:0] (in place); au = clamp(that, -2^31, 2^31-1).
+                n = arv(a[1]) & 63
+                self.qacc[0] = self.qacc[0] >> n
+                arset(a[0], max(-(1 << 31), min(self.qacc[0], (1 << 31) - 1)))
+            elif op == 'ee.st.qacc_l.l.128.ip':
+                # 1.8.145: store128(as & ~15, QACC_L[127:0]); as += imm (bytes, multiple of 16).
+                self.stq(arv(a[0]), [v & 0xFFFF for v in self.qacc])
+                arset(a[0], arv(a[0]) + int(a[1]))
             elif op == 'ee.srcmb.s16.qacc':
                 n = arv(a[1]) & 63
                 self.qacc = [v >> n for v in self.qacc]
