@@ -75,7 +75,8 @@ CP5のinput service抽出、host試験、S3ビルドと実機hello/pet/K/text入
 CP6の直接dispatch、host/VM corpus試験、通常/probeビルドと通常構成の実機確認まで完了。
 probe実機も確認済み。CP7のKasane-only構成と旧依存なしlink検査、通常/診断ビルドが完了。
 CP7実機100回起動と描画を確認。CP8のJSプリミティブ公開とhost試験・両ビルドが完了。
-CP8実機確認後、次の実装対象はCP9。scope別購読とmodal Back配送はCP15で扱う。
+CP8実機確認済み。CP9 native TEXTのH/Qと両ビルドが完了し、実機比較を追加した。
+次はCP10 JS TEXT。scope別購読とmodal Back配送はCP15で扱う。
 数値と検証範囲は[kasane-progress.md](kasane-progress.md)の各checkpointを参照。
 
 各行を1 commit以上とし、大きい場合は行内もビルド可能な単位へ分割する。

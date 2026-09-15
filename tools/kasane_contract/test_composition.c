@@ -42,7 +42,7 @@ static int groups(void){
     CHECK(app.ops->background(app.ctx,tx,0x18416bff)==KSN_OK);
     CHECK(ksn_cache_instantiate(&cache,&core,tx,t,&place,&instance)==KSN_OK);
     CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
-    ksn_display_port display={NULL,get_strip,send_strip,240,135,8};ksn_render_stats stats;
+    ksn_display_port display={NULL,get_strip,send_strip,240,135,8,NULL};ksn_render_stats stats;
     CHECK(ksn_render_rects(&core,&display,&stats)==KSN_OK);
     CHECK(ksn_cache_resolve(&cache,&core,tx,true)==KSN_OK);
     /* Exhaust every group opacity, including 0/1/127/128/254/255 and tile edges. */
@@ -85,7 +85,7 @@ static int groups(void){
 static int modals(void){
     KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_modal modal;ksn_modal_init(&modal,42);
     ksn_client app=ksn_core_client(&core,KSN_APP),system=ksn_core_client(&core,KSN_SYSTEM);ksn_tx tx;
-    ksn_display_port display={NULL,get_strip,send_strip,240,135,8};ksn_render_stats stats;
+    ksn_display_port display={NULL,get_strip,send_strip,240,135,8,NULL};ksn_render_stats stats;
     CHECK(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
     CHECK(app.ops->background(app.ctx,tx,0xffffffff)==KSN_OK);CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
     CHECK(ksn_core_poll(&core).status==KSN_SUBMITTED);

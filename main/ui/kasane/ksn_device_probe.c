@@ -6,6 +6,8 @@
 #include "ksn_frost.h"
 #include "ksn_view_host.h"
 #include "ksn_render.h"
+#include "ksn_font.h"
+#include "jpfont.h"
 #include "board.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -107,8 +109,41 @@ static ksn_result probe_send(void *ctx,uint16_t y,uint16_t rows,const uint16_t *
 
 /* Use the production compositor in diagnostics, including initial frames. */
 static ksn_result probe_display(ksn_core *core){
-    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8};
+    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL};
     ksn_render_stats stats;return ksn_render_rects(core,&display,&stats);
+}
+
+static ksn_result text_demo(void){
+    ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
+    ksn_client app=ksn_core_client(&probe_core,KSN_APP);ksn_tx tx;ksn_ref ref;
+    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,&ksn_font_port};
+    ksn_draw d={.kind=KSN_TEXT,.bounds={8,7,232,23},.clip={0,0,240,135},.opacity=255,
+        .data.text={.utf8="Kasane: 日本語 あいう",.bytes=28,.capacity=48,.font=KSN_BODY,.color=0xf5bb69ff}};
+    d.data.text.bytes=(uint16_t)strlen(d.data.text.utf8);
+    uint8_t expanded[144],coverage[12];
+    if(!jpfont_ready(JPFONT_TEXT)||jpfont_cell_w(JPFONT_TEXT)!=12||jpfont_cell_h(JPFONT_TEXT)!=12)return KSN_INVALID;
+    jpfont_glyph(JPFONT_TEXT,0x3042,expanded);
+    ksn_draw glyph=d;glyph.data.text.utf8="あ";glyph.data.text.bytes=3;
+    for(int y=0;y<12;y++){
+        if(ksn_font_port.span(NULL,&glyph,1,8,7+y,12,coverage)!=KSN_OK||
+           memcmp(coverage,expanded+12*y,12))return KSN_INVALID;
+    }
+#define T(call) do{ksn_result r=(call);if(r!=KSN_OK)return r;}while(0)
+    T(app.ops->begin(app.ctx,KSN_REPLACE,&tx));T(app.ops->background(app.ctx,tx,0x193c63ff));
+    T(app.ops->add(app.ctx,tx,&d,&ref));
+    d.bounds=(ksn_rect){8,31,232,48};d.data.text.font=KSN_CAPTION;d.opacity=160;
+    T(app.ops->add(app.ctx,tx,&d,&ref));
+    d.bounds=(ksn_rect){-3,55,232,75};d.clip.x0=8;d.data.text.font=KSN_DISPLAY;d.opacity=255;
+    T(app.ops->add(app.ctx,tx,&d,&ref));
+    T(app.ops->end(app.ctx,tx));ksn_render_stats stats;
+    ESP_LOGI("KSN_PROBE","TEXT_PIX_BEGIN");
+    board_capture(true);ksn_result result=ksn_render_rects(&probe_core,&display,&stats);board_capture(false);
+    ESP_LOGI("KSN_PROBE","TEXT_PIX_END");
+    T(result);
+    ESP_LOGI("KSN_PROBE","TEXT PASS glyph=U+3042 pixels=144 coverage_scratch=64 bytes=%lu",(unsigned long)stats.transferred_bytes);
+    vTaskDelay(pdMS_TO_TICKS(3000));
+#undef T
+    return KSN_OK;
 }
 
 static ksn_result view_demo(void){
@@ -116,7 +151,7 @@ static ksn_result view_demo(void){
     ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
     ksn_view_host host;ksn_view_host_init(&host,&probe_core,&probe_cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP);
-    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8};
+    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL};
     ksn_render_stats stats;ksn_tx tx;ksn_template shape;ksn_instance a,b;
     ksn_draw d={.kind=KSN_RECT,.bounds={0,0,64,48},.clip={0,0,240,135},
                .opacity=255,.data.shape={0x67dfc7ff,0,0}};
@@ -201,7 +236,7 @@ void ksn_device_probe_run(void){
        ksn_cache_place(&probe_cache,&probe_core,tx,right_instance,&right)!=KSN_OK||
        app.ops->end(app.ctx,tx)!=KSN_OK)goto fail;
     ksn_frame partial_frame;if(ksn_core_frame(&probe_core,&partial_frame)!=KSN_OK)goto fail;
-    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8};ksn_render_stats rendered;
+    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL};ksn_render_stats rendered;
     started=esp_timer_get_time();
     if(ksn_render_rects(&probe_core,&display,&rendered)!=KSN_OK||rendered.bands!=0xfe0u||
        rendered.transferred_bytes!=26880||
@@ -244,6 +279,7 @@ void ksn_device_probe_run(void){
     ESP_LOGI(tag,"COMPOSITION group_alpha=128 modal=open-close focus=42 PASS");
     if(view_demo()!=KSN_OK)goto fail;
     if(glass_demo()!=KSN_OK)goto fail;
+    if(text_demo()!=KSN_OK)goto fail;
     if(ksn_stress_probe_run(&probe_frost)!=KSN_OK)goto fail;
     ESP_LOGI(tag,"PASS iterations=1000 tx_mean_us=%lld tx_max_us=%lld heap_before=%u heap_after=%u stack_free=%u",
              (long long)(sum/1000),(long long)max,(unsigned)free_before,(unsigned)free_after,

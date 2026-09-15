@@ -125,6 +125,15 @@ unsigned jpfont_glyph(jpfont_id_t id, uint32_t cp, uint8_t *out) {
     return f->cmap[gid].advance;
 }
 
+bool jpfont_bitmap(jpfont_id_t id,uint32_t cp,jpfont_bitmap_view *out) {
+    face_t *f=face(id);
+    if(!f||!out)return false;
+    uint32_t gid=gid_of(f,cp);
+    *out=(jpfont_bitmap_view){f->bitmap+(size_t)gid*f->glyph_bytes,
+        f->hdr.cell_w,f->hdr.cell_h,f->stride,f->cmap[gid].advance};
+    return true;
+}
+
 unsigned jpfont_advance(jpfont_id_t id, const char *s, size_t len, size_t i,
                         size_t *adv) {
     uint32_t cp=utf8_decode(s,len,i,adv);

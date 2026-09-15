@@ -17,13 +17,13 @@ int main(void){
     CHECK(ksn_cache_bind(&cache,&cache_commands,&cache_text)==KSN_OK);
     ksn_view_host host;ksn_view_host_init(&host,&core,&cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP),*sys=ksn_view_host_endpoint(&host,KSN_SYSTEM);
-    ksn_display_port port={NULL,buffer,transfer,240,135,8};ksn_render_stats stats;
+    ksn_display_port port={NULL,buffer,transfer,240,135,8,NULL};ksn_render_stats stats;
     ksn_draw d={.kind=KSN_RECT,.bounds={0,0,16,16},.clip={0,0,240,135},.opacity=255,.data.shape={0xff0000ff,0,0}};
     ksn_placement p={8,8,{0,0,240,135},128,true};
     ksn_template t;ksn_instance a,b;ksn_tx tx,other;ksn_ref ref;
     CHECK(ksn_view_features(app).modal&&!ksn_view_features(sys).modal);
     CHECK(ksn_view_features(app).draw_kinds==((1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
-                                             (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)));
+                                             (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)|(1u<<KSN_TEXT)));
     CHECK(ksn_view_features(app).cache_kinds==((1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
                                                (1u<<KSN_STROKE)));
     CHECK(!ksn_view_features(app).animation&&!ksn_view_features(app).frosted);
@@ -104,7 +104,7 @@ int main(void){
     CHECK(ksn_view_host_route(&host,false)==KSN_INPUT_APP&&host.modal.focus==42);
     /* Unsupported commands fail before a submission and release the builder. */
     CHECK(ksn_view_begin(app,KSN_REPLACE,&tx)==KSN_OK);
-    d.kind=KSN_TEXT;CHECK(ksn_view_add(app,tx,&d,&ref)==KSN_UNSUPPORTED);
+    d.kind=KSN_IMAGE;CHECK(ksn_view_add(app,tx,&d,&ref)==KSN_UNSUPPORTED);
     CHECK(ksn_view_submit(app,tx)==KSN_STALE);
     CHECK(ksn_view_begin(sys,KSN_PATCH,&tx)==KSN_OK);
     CHECK(ksn_view_instantiate(sys,tx,t,&p,&b)==KSN_STALE);

@@ -17,7 +17,7 @@ static uint16_t *buffer(void *ctx){(void)ctx;return strip;}
 static ksn_result transfer(void *ctx,uint16_t y,uint16_t rows,const uint16_t *pixels){
     (void)ctx;memcpy(panel+y*240,pixels,rows*240*sizeof(*pixels));return KSN_OK;
 }
-static const ksn_display_port display={NULL,buffer,transfer,240,135,8};
+static const ksn_display_port display={NULL,buffer,transfer,240,135,8,NULL};
 
 /* Scalar reference reads only the input scene, never native commands or
  * renderer helpers. Round coverage uses pixel-center distances; quantization

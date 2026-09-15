@@ -58,6 +58,7 @@ static bool covers(const ksn_frame_command *c,int x,int y){
        x<d->clip.x0||x>=d->clip.x1||y<d->clip.y0||y>=d->clip.y1)return false;
     switch(d->kind){
     case KSN_RECT:return true;
+    case KSN_TEXT:return true;
     case KSN_ROUND_RECT:return inside_round_rect(d->bounds,d->data.shape.radius,x,y);
     case KSN_STROKE:{
         int width=d->data.shape.width;
@@ -81,6 +82,7 @@ static ksn_rgba interpolate(ksn_rgba from,ksn_rgba to,unsigned i,unsigned length
 }
 static ksn_rgba sample(const ksn_frame_command *command,int x,int y){
     const ksn_draw *draw=&command->draw;
+    if(draw->kind==KSN_TEXT)return draw->data.text.color;
     if(draw->kind!=KSN_GRADIENT)return draw->data.shape.color;
     bool vertical=draw->data.gradient.axis!=0;
     unsigned length=(unsigned)(vertical?draw->bounds.y1-draw->bounds.y0:
@@ -118,10 +120,11 @@ static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opac
     b=clamp8(mul8(src.b,opacity)+mul8((b<<3)|(b>>2),inverse));
     return pack565(r,g,b,dither,x,y);
 }
-static ksn_result render_group(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
+static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
                                uint8_t opacity,int y,int rows,uint16_t *pixels){
     if(!opacity)return KSN_OK;
     ksn_premultiplied_rgba8 tile[64]; /* 256 bytes; no full component surface. */
+    uint8_t coverage[64];
     ksn_frame_command command;
     bool has_dither=false;
     int left=240,right=0,top=y+rows,bottom=y;
@@ -155,8 +158,18 @@ static ksn_result render_group(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsi
             ksn_result result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
             if(result!=KSN_OK)return result;
             bool child_dither=command.draw.kind==KSN_GRADIENT&&command.draw.data.gradient.dither;
+            const ksn_draw *d=&command.draw;
+            if(!command.visible||!d->opacity||py<d->bounds.y0||py>=d->bounds.y1||
+               py<d->clip.y0||py>=d->clip.y1||x0>=d->bounds.x1||x0>=d->clip.x1||
+               x0+count<=d->bounds.x0||x0+count<=d->clip.x0)continue;
+            if(command.draw.kind==KSN_TEXT){
+                result=text->span(text->ctx,&command.draw,command.reveal,x0,py,(unsigned)count,coverage);
+                if(result!=KSN_OK)return result;
+            }
             for(int x=0;x<count;x++)if(covers(&command,x0+x,py)){
-                unsigned alpha=premultiply_over(&tile[x],sample(&command,x0+x,py),command.draw.opacity);
+                ksn_rgba color=sample(&command,x0+x,py);
+                if(command.draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage[x]);
+                unsigned alpha=premultiply_over(&tile[x],color,command.draw.opacity);
                 if(has_dither&&alpha){
                     uint32_t bit=1u<<((unsigned)x&31u);
                     if(child_dither)dither_pixels[(unsigned)x>>5]|=bit;
@@ -197,8 +210,13 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
         result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,i,&command);
         if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
-        if(command.draw.kind<KSN_RECT||command.draw.kind>KSN_GRADIENT){
+        if(command.draw.kind<KSN_RECT||command.draw.kind>KSN_TEXT){
             ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
+        }
+        if(command.draw.kind==KSN_TEXT){
+            result=display->text&&display->text->span?
+                display->text->span(display->text->ctx,&command.draw,command.reveal,0,0,0,NULL):KSN_UNSUPPORTED;
+            if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
         }
     }
     uint16_t *pixels=display->strip(display->ctx);
@@ -217,7 +235,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,(uint16_t)i,&command);
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 }
-                result=render_group(core,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,pixels);
+                result=render_group(core,display->text,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,pixels);
                 if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 continue;
             }
@@ -233,6 +251,20 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             if(y0<y)y0=y;
             if(y1>y+rows)y1=y+rows;
             if(x0>=x1||y0>=y1)continue;
+            if(d->kind==KSN_TEXT){
+                uint8_t coverage[64];
+                for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=64){
+                    unsigned count=(unsigned)(x1-x);if(count>64)count=64;
+                    result=display->text->span(display->text->ctx,d,command.reveal,x,py,count,coverage);
+                    if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+                    for(unsigned i=0;i<count;i++)if(coverage[i]){
+                        unsigned index=(unsigned)((py-y)*240+x)+i;
+                        ksn_rgba color=(d->data.text.color&0xffffff00u)|mul8(d->data.text.color&255,coverage[i]);
+                        pixels[index]=blend(pixels[index],color,d->opacity,false,x+(int)i,py);
+                    }
+                }
+                continue;
+            }
             if(d->kind==KSN_RECT&&d->opacity==255&&(d->data.shape.color&255)==255){
                 uint16_t color=rgb565(d->data.shape.color);
                 for(int py=y0;py<y1;py++)

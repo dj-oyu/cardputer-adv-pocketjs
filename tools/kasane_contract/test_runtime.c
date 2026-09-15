@@ -52,7 +52,7 @@ int main(void){
     CHECK(ksn_view_instantiate(system,tx,tpl,&p,&instance)==KSN_OK);
     CHECK(ksn_view_submit(system,tx)==KSN_OK);
     CHECK(ksn_runtime_shutdown()==KSN_BUSY);
-    ksn_display_port port={NULL,buffer,send,240,135,8};ksn_render_stats stats;
+    ksn_display_port port={NULL,buffer,send,240,135,8,NULL};ksn_render_stats stats;
     CHECK(ksn_runtime_present(&port,&stats)==KSN_OK&&pixels[0]==0x07e0);
     CHECK(ksn_runtime_input_scope(false)==KSN_INPUT_HOST);
     ksn_app_lease old={0},current={0};

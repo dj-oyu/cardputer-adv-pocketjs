@@ -59,6 +59,7 @@ def main():
             or 'KSN_PROBE: COMPOSITION group_alpha=128 modal=open-close focus=42 PASS' not in log
             or 'KSN_PROBE: GLASS PASS' not in log
             or 'KSN_PROBE: VIEW PASS' not in log
+            or 'KSN_PROBE: TEXT PASS glyph=U+3042 pixels=144 coverage_scratch=64 bytes=64800' not in log
             or 'KSN_PROBE: PIE_AB PASS' not in log
             or 'KSN_PROBE: STRESS PASS frames=600' not in log):
         raise RuntimeError('Diagnostic did not pass and return to the home loop; see serial.log')
@@ -109,6 +110,20 @@ def main():
     png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
     (args.out / 'glass-pre-spi.png').write_bytes(png)
     print('GLASS_PIXELS PASS 32400 pixels (alpha left / frost right)')
+    text_log = log.split('TEXT_PIX_BEGIN', 1)[1].split('TEXT_PIX_END', 1)[0]
+    rows = {int(y): bytes.fromhex(p) for y, p in re.findall(r'PIX (\d+) ([0-9a-f]{960})', text_log)}
+    if set(rows) != set(range(135)):
+        raise RuntimeError('Incomplete text capture')
+    raw = bytearray()
+    for y in range(135):
+        raw.append(0)
+        for x in range(240):
+            value = struct.unpack_from('>H', rows[y], x*2)[0]
+            raw.extend((((value >> 11) & 31)*255//31, ((value >> 5) & 63)*255//63, (value & 31)*255//31))
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 240, 135, 8, 2, 0, 0, 0))
+    png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+    (args.out / 'text-pre-spi.png').write_bytes(png)
+    print('TEXT capture complete; target verified 144 coverage pixels against mapped font')
     captures = re.findall(r'STRESS_PIX_BEGIN frame=(\d+) tick=(\d+) radius=(\d+)(.*?)STRESS_PIX_END', log, re.S)
     if [int(c[0]) for c in captures] != [0, 299, 599]:
         raise RuntimeError('Missing temporal stress captures')

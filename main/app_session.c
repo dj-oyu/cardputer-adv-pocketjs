@@ -31,6 +31,7 @@
 #include "pocket_overlay.h"
 #include "pocket_kasane.h"
 #include "pocket_input.h"
+#include "ksn_font.h"
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "esp_heap_caps.h"
@@ -1027,7 +1028,7 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
 #endif
         kasane_display_t display_state={0};
         ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
-                              .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H};
+                              .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H,.text=&ksn_font_port};
         ksn_render_stats stats;
         int64_t began=esp_timer_get_time();
         ksn_result result=pocket_kasane_present(&port,&stats);

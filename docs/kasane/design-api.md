@@ -61,10 +61,22 @@ begin引数にlayerを渡さない。template/instanceも発行側layerに限定
 | 部品の配置 | `ksn_view_instantiate/place/visible` | 複数同時表示、位置・clip・opacity・表示のPATCH |
 | modal | `ksn_view_modal_open/close` | APP REPLACE内。solid/dim-live、表示成功後に入力scopeとfocusを確定 |
 
-`draw_kinds`はRECT、ROUND_RECT、STROKE、GRADIENT、`cache_kinds`は先頭3種を公開する。
-グループ透明度は対応、native animationとfrosted modalはfalse。文字・画像はコアに
+`draw_kinds`はRECT、ROUND_RECT、STROKE、GRADIENT、TEXT、`cache_kinds`は先頭3種を公開する。
+グループ透明度は対応、native animationとfrosted modalはfalse。画像はコアに
 保存できても描画APIではUNSUPPORTEDを返し、LCD提出まで進めない。
 すりガラス画素フィルタのPIE対応はfrosted modalの完成を意味しない。
+
+CP9のnative TEXTは`ksn_display_port.text`のcoverage portを必須とする。省略時は
+最初の転送前にUNSUPPORTED。`span`は絶対画面座標の最大64画素を読み、count=0は
+可用性確認で出力なし。render中のI/O・heap確保・JS・core変更は禁止。pending/committedの
+再描画でも同じ字形を返す不変データをownerが保持する。productionは`ksn_font_port`を接続。
+Flashの1bpp cellを直接読み、文字bufferや展開glyphを常設しない。coverage scratchは64 B、
+隔離groupでは既存256 B tileと併存する。alphaは色alpha→coverage→command opacity→group。
+
+captionはLatin6×8/全角8×8、bodyはLatin6×12/全角12×12、displayはLatin12×16/全角16×16。
+displayは8px字形の2倍。欠字/faceなしでも送り幅を維持し、ASCIIはbuiltin、全角は豆腐を描く。
+1命令は単行のcounted UTF-8で、revealはUnicode scalar数（サロゲート組も1）。改行・折返しは
+利用側で行を分割する。文字のJS公開はCP10で別途検証する。
 
 ## 3. 原子的な更新と参照
 

@@ -6,7 +6,10 @@ extern "C" {
 #endif
 typedef struct { uint32_t bands,transferred_bytes; } ksn_render_stats;
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
- * horizontal/vertical gradient, command alpha and isolated group opacity.
+ * horizontal/vertical gradient, font-port TEXT coverage, command alpha and
+ * isolated group opacity. The borrowed text port and its immutable resources
+ * must remain replayable for pending and committed frames. Coverage scratch is
+ * 64 bytes (plus the existing 256-byte group tile), never a text surface.
  * Unsupported commands are rejected before the first transfer. The caller
  * schedules retry/discard; callbacks may request invalidation, but must not
  * otherwise mutate the core or reenter JS/presentation. prepare_frame consumes

@@ -3,9 +3,19 @@
 #include "ksn_types.h"
 typedef struct {
     void *ctx;
+    /* Absolute destination coordinates, at most 64 coverage bytes. count=0
+     * validates availability before the first transfer (out may be NULL).
+     * Immutable font data, no heap/I/O/JS or owner mutation in this callback.
+     * reveal counts Unicode scalars. Text starts at bounds.x0/bounds.y0. */
+    ksn_result (*span)(void *,const ksn_draw *,uint16_t reveal,int x,int y,
+                       unsigned count,uint8_t *out);
+} ksn_text_port;
+typedef struct {
+    void *ctx;
     uint16_t *(*strip)(void *);
     ksn_result (*present)(void *,uint16_t y,uint16_t rows,const uint16_t *pixels);
     uint16_t width,height,strip_rows;
+    const ksn_text_port *text;
 } ksn_display_port;
 /* Borrow the existing board strip. No second framebuffer. */
 typedef struct {

@@ -4,6 +4,22 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 9 — native TEXT coverage（2026-09-15）
+
+- native view/rendererがTEXTを受理し、通常合成・隔離groupともcoverageを色alphaへ乗算。
+  provider欠落/失敗は転送前の確認またはrepairへ進み、確定済み字形を再生する。
+- production `ksn_font_port`は既存Flashの1bpp cellを借用し、最大64画素ずつ読む。
+  日本語/body、caption/display、欠字、UTF-8 scalar reveal、固定送り幅を実装。
+  常設arena・DIRAM増分0、64 B stack scratch（groupの256 B tileと併存）。
+- H: `bash tools/kasane_contract/run.sh` ASan/UBSanとO2 PASS。文字は全256 opacity、
+  fractional coverage、group、clip、帯境界、provider不在/転送途中失敗/repairを独立参照比較。
+  実jpfont readerに合成font imageを渡し、展開版との一致、UTF-8、fallback送り幅も確認。
+- Q: `bash tools/build_kasane_test.sh`と生成exe、ASan/UBSanとO2 PASS（既存API回帰）。
+- 通常/診断ESP-IDFビルドPASS。app 2,200,400 B / 1,904,432 B、
+  DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。
+- native probeにFlash字形144画素の比較と3書体のcaptureを追加。実機結果は後記。
+  JS text APIはCP10。全文字の描画時間・全UI併用時のメモリ安全性を確認済みとはしない。
+
 ## checkpoint 5 — input service分離（2026-09-15）
 
 - `pocket_input.c/.h`へonAction/onKey/held、購読4枠、repeat、capabilityとlazy namespaceを抽出。
