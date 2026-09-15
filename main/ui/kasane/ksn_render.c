@@ -69,6 +69,70 @@ static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destinat
  * rem is in [0,B). Only the span anchor (one pixel in sixteen) divides, with
  * the truncating quotient corrected to floor for negative numerators. */
 bool g_ksn_image_rotate_step=true;
+bool g_ksn_image_rotate_anchor=true;
+/* One destination row of rotated-span anchors, built at run time in DRAM.
+ * The per-span anchor costs the same two 64-bit divisions the scalar path
+ * takes, but the anchors are affine in x: with the 16-pixel numerator step
+ * D = 16*du*source_width written as D = q*B + r (0 <= r < B), floor(U/B) and
+ * U mod B advance by the carry rule the per-pixel loop already uses. Entry j
+ * is therefore *exactly* the quotient and remainder of the division at
+ * x = base_x + 16j, so the renderer reads it instead of dividing. The table is
+ * filled lazily as a row is read left to right. Nothing in it is constant, so
+ * it costs SRAM and .text only: 0 bytes of flash (.rodata unchanged) and
+ * sizeof(ksn_anchor_row) of .bss. */
+#define KSN_ANCHOR_SPANS 16
+typedef struct {
+    int32_t rotation,bounds_x,bounds_y,window; /* affine inputs, packed pairwise */
+    int32_t row;                               /* destination row of the entries */
+    int32_t base_x;                            /* destination x of entry 0 */
+    int32_t spans;                             /* entries built */
+    int32_t um,vm,q16u,r16u,q16v,r16v;         /* 16-pixel increment pair */
+    int32_t sx[KSN_ANCHOR_SPANS],remu[KSN_ANCHOR_SPANS]; /* 16 spans cover a 240-wide row */
+    int32_t sy[KSN_ANCHOR_SPANS],remv[KSN_ANCHOR_SPANS];
+} ksn_anchor_row;
+static ksn_anchor_row g_anchor_row;
+#ifdef KSN_ANCHOR_COUNT
+uint32_t g_ksn_image_anchor_builds;
+#endif
+/* Entries after the first advance by the span step: one comparison and one
+ * conditional subtraction per axis, the same rule as the per-pixel loop.
+ * remu and r16u are both in [0,um), so the carry is at most one and the test
+ * against um-r16u keeps every intermediate inside int32 (um itself can reach
+ * 2^31, which is why the sum is never formed before the comparison). */
+static void anchor_extend(ksn_anchor_row *t,int last){
+    while(t->spans<=last){
+        int i=t->spans,ux=t->sx[i-1],ru=t->remu[i-1],uy=t->sy[i-1],rv=t->remv[i-1];
+        if(ru>=t->um-t->r16u){ru-=t->um-t->r16u;ux+=t->q16u+1;}else{ru+=t->r16u;ux+=t->q16u;}
+        if(rv>=t->vm-t->r16v){rv-=t->vm-t->r16v;uy+=t->q16v+1;}else{rv+=t->r16v;uy+=t->q16v;}
+        t->sx[i]=ux;t->remu[i]=ru;t->sy[i]=uy;t->remv[i]=rv;t->spans=i+1;
+    }
+}
+/* Seed entry 0 with the exact division the caller computed for this pixel and
+ * remember the affine inputs it came from (bounds packed pairwise so the
+ * per-span check is four word compares). */
+static void anchor_put(int32_t rotation,int32_t bx,int32_t by,int32_t window,int x,int y,
+                       int step_u,int step_v,unsigned sw,unsigned sh,int um,int vm,
+                       int sx,int remu,int sy,int remv){
+    ksn_anchor_row *t=&g_anchor_row;
+    int su=step_u*16*(int)sw,sv=step_v*16*(int)sh;
+    int q16u=su/um,r16u=su-q16u*um,q16v=sv/vm,r16v=sv-q16v*vm;
+    if(r16u<0){q16u--;r16u+=um;}                  /* truncating quotient -> floor */
+    if(r16v<0){q16v--;r16v+=vm;}
+    t->rotation=rotation;t->bounds_x=bx;t->bounds_y=by;t->window=window;t->row=y;
+    t->base_x=x;t->spans=1;
+    t->um=um;t->vm=vm;t->q16u=q16u;t->r16u=r16u;t->q16v=q16v;t->r16v=r16v;
+    t->sx[0]=sx;t->remu[0]=remu;t->sy[0]=sy;t->remv[0]=remv;
+#ifdef KSN_ANCHOR_COUNT
+    g_ksn_image_anchor_builds++;
+#endif
+}
+/* Host diagnostics: the entries the last rotated row built and the x they
+ * start at. The renderer never reads this; it exists so a harness can assert
+ * the table was actually served rather than rebuilt per span. */
+uint32_t ksn_render_rotate_anchor_state(int *base_x){
+    if(base_x)*base_x=g_anchor_row.base_x;
+    return (uint32_t)g_anchor_row.spans;
+}
 static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
                              const ksn_draw *d,int x,int y,unsigned *count,ksn_span_scratch *scratch){
     if(d->data.image.rotation){
@@ -76,13 +140,13 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
          * Keep the original rational division/rounding at source lookup. */
         int c=ksn_image_sin(d->data.image.rotation+256),s=ksn_image_sin(d->data.image.rotation);
         int64_t w=(int)d->bounds.x1-d->bounds.x0,h=(int)d->bounds.y1-d->bounds.y0;
-        int64_t qx=2ll*x+1-d->bounds.x0-d->bounds.x1,qy=2ll*y+1-d->bounds.y0-d->bounds.y1;
-        int64_t u=w*16384+qx*c+qy*s,v=h*16384-qx*s+qy*c;
         int64_t umax=w*32768,vmax=h*32768;
         unsigned cached_y=UINT32_MAX,cached_x=UINT32_MAX;
         unsigned sw=d->data.image.source_width,sh=d->data.image.source_height;
         if(!g_ksn_image_rotate_step||!sw||!sh||!w||!h){
             /* Rational division at source lookup, once per destination pixel. */
+            int64_t qx=2ll*x+1-d->bounds.x0-d->bounds.x1,qy=2ll*y+1-d->bounds.y0-d->bounds.y1;
+            int64_t u=w*16384+qx*c+qy*s,v=h*16384-qx*s+qy*c;
             for(unsigned i=0;i<*count;i++,u+=2*c,v-=2*s){
                 unsigned sx,sy;scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;
                 if(u<0||v<0||u>=umax||v>=vmax)continue;
@@ -117,11 +181,48 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
         int qv=sv/vm,remv_step=sv-qv*vm;
         if(remu_step<0){qu--;remu_step+=um;}          /* truncating quotient -> floor */
         if(remv_step<0){qv--;remv_step+=vm;}
-        int64_t U=u*(int64_t)sw,V=v*(int64_t)sh;
-        int sx=(int)(U/umax),sy=(int)(V/vmax);
-        int remu=(int)(U-(int64_t)sx*umax),remv=(int)(V-(int64_t)sy*vmax);
-        if(remu<0){sx--;remu+=um;}
-        if(remv<0){sy--;remv+=vm;}
+        /* The anchors of this span. Both arms leave sx/sy/remu/remv as
+         * floor(U/B) and U mod B, so the pixel loop below cannot tell them
+         * apart: the table arm reads what the division arm would compute. */
+        int sx,sy,remu,remv;
+        bool served=false;
+        if(g_ksn_image_rotate_anchor){
+            /* The row table: entries at x = base_x + 16j, so a match on the
+             * command's affine inputs and the row plus a delta that is a
+             * non-negative multiple of 16 below the table's reach is all that
+             * has to be checked. Nothing else is evaluated when the switch is
+             * off, so the per-span division arm keeps its own cost. */
+            int32_t key_bx=(uint16_t)d->bounds.x0|((int32_t)(uint16_t)d->bounds.x1<<16);
+            int32_t key_by=(uint16_t)d->bounds.y0|((int32_t)(uint16_t)d->bounds.y1<<16);
+            unsigned delta=(unsigned)(x-g_anchor_row.base_x);
+            if(g_anchor_row.rotation==(int32_t)d->data.image.rotation&&
+               g_anchor_row.bounds_x==key_bx&&g_anchor_row.bounds_y==key_by&&
+               g_anchor_row.window==(int32_t)(sw|(sh<<16))&&g_anchor_row.row==y&&
+               delta<16u*KSN_ANCHOR_SPANS&&!(delta&15u)){
+                int j=delta>>4;
+                if(j>=g_anchor_row.spans)anchor_extend(&g_anchor_row,j);
+                sx=g_anchor_row.sx[j];remu=g_anchor_row.remu[j];
+                sy=g_anchor_row.sy[j];remv=g_anchor_row.remv[j];
+                served=true;
+            }
+        }
+        if(!served){
+            /* The exact per-span division, and the seed for a fresh row table:
+             * the affine numerator is only needed here, so the served arm
+             * never computes it. */
+            int64_t qx=2ll*x+1-d->bounds.x0-d->bounds.x1,qy=2ll*y+1-d->bounds.y0-d->bounds.y1;
+            int64_t u=w*16384+qx*c+qy*s,v=h*16384-qx*s+qy*c;
+            int64_t U=u*(int64_t)sw,V=v*(int64_t)sh;
+            sx=(int)(U/umax);sy=(int)(V/vmax);
+            remu=(int)(U-(int64_t)sx*umax);remv=(int)(V-(int64_t)sy*vmax);
+            if(remu<0){sx--;remu+=um;}
+            if(remv<0){sy--;remv+=vm;}
+            if(g_ksn_image_rotate_anchor)
+                anchor_put((int32_t)d->data.image.rotation,
+                           (uint16_t)d->bounds.x0|((int32_t)(uint16_t)d->bounds.x1<<16),
+                           (uint16_t)d->bounds.y0|((int32_t)(uint16_t)d->bounds.y1<<16),
+                           (int32_t)(sw|(sh<<16)),x,y,step_u,step_v,sw,sh,um,vm,sx,remu,sy,remv);
+        }
         for(unsigned i=0;i<*count;i++){
             scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;
             if(sx>=0&&sy>=0&&sx<(int)sw&&sy<(int)sh){

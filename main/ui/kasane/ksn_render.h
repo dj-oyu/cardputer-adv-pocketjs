@@ -13,6 +13,23 @@ typedef struct { uint32_t bands,transferred_bytes; } ksn_render_stats;
  * identical in both arms. Off restores the per-pixel rational division.
  * Owner task only; read once per rotated span. */
 extern bool g_ksn_image_rotate_step;
+/* Rotated spans take their two span anchors from a per-row table built at run
+ * time in DRAM. The entries are the same quotient and remainder the per-pixel
+ * division produces at x = base_x + 16j (the span anchors are affine in x and
+ * advance by the identical carry rule), so the source index, the block fetched
+ * and the composited pixel are bit-identical in both arms: on the table when a
+ * row and its command still match and x is on the table's grid, off the
+ * per-span 64-bit division otherwise. Off restores it for every span. Owner
+ * task only; read once per rotated span. */
+extern bool g_ksn_image_rotate_anchor;
+/* Host diagnostics for the anchor table: entries built for the last rotated
+ * row, and its starting x. The renderer never calls this. */
+uint32_t ksn_render_rotate_anchor_state(int *base_x);
+#ifdef KSN_ANCHOR_COUNT
+/* Counters for harnesses compiled with -DKSN_ANCHOR_COUNT; absent from the
+ * shipping object (they exist so a test can assert the table path is live). */
+extern uint32_t g_ksn_image_anchor_builds;
+#endif
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT, source-span IMAGE, alpha and
  * isolated group opacity. The borrowed text port and its immutable resources
