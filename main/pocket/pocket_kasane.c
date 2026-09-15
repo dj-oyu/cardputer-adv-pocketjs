@@ -1,6 +1,7 @@
 #include "pocket_kasane.h"
 #include "pocket_api.h"
 #include "ui/kasane/ksn_runtime.h"
+#include "kasane_scene_js.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -952,7 +953,16 @@ static const JSCFunctionListEntry instance_methods[]={
     JS_CFUNC_DEF("place",2,js_instance_place_checked),
     JS_CFUNC_DEF("setVisible",2,js_instance_visible_checked),
 };
+static JSValue js_create_scene(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    JSValue factory=JS_Eval(ctx,KSN_SCENE_FACTORY,sizeof(KSN_SCENE_FACTORY)-1,
+                           "kasane/create_scene.js",JS_EVAL_TYPE_GLOBAL);
+    if(JS_IsException(factory))return factory;
+    JSValueConst args[]={self,argc?argv[0]:JS_UNDEFINED};
+    JSValue result=JS_Call(ctx,factory,JS_UNDEFINED,2,args);
+    JS_FreeValue(ctx,factory);return result;
+}
 static const JSCFunctionListEntry functions[]={
+    JS_CFUNC_DEF("createScene",1,js_create_scene),
     JS_CFUNC_DEF("replace",1,js_replace),JS_CFUNC_DEF("patch",1,js_patch),
     JS_CFUNC_DEF("poll",0,js_poll),JS_CFUNC_DEF("cancel",1,js_cancel),
     JS_CFUNC_DEF("features",0,js_features),JS_CFUNC_DEF("stats",0,js_stats),

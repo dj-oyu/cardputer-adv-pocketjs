@@ -4,6 +4,22 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 11 — hello移植とscene controller（2026-09-15）
+
+- helloの旧node生成を廃止し、文字4命令＋角丸1命令へ移行。入力は独立input service。
+  `createScene`はPRESENTED後に候補参照を昇格し、BUSY/cancel後は最新domain stateを反映。
+  helperは初めて作成する時だけJS factoryを評価し、未使用アプリにclosureを常設しない。
+- 通常構成でもhost既知のhello/Kは旧core/bindingを確保しない。source由来で判定し、
+  user sourceのmanifest名から移植済みと推測しない。Kasane-onlyでhelloを許可。
+  初回BUSYでまだactiveになっていなくても旧描画へ落ちないsession flagを用いる。
+- 実hello source＋実QuickJS/native owner試験（ASan/UBSan、O2）PASS。
+  SYSTEM BUSY、入力保持、初回REPLACEの部分転送失敗/cancel、候補破棄、最新state再構築、
+  idle提出0、counterだけ3帯PATCH、非同期builder拒否、終了解放を確認。
+  input配送は既存サービス試験と分離し、このアプリ試験ではactionをdeterministicに注入。
+- Q全回帰ASan/UBSan PASS、session dispatch4構成PASS、registry101 checks PASS。
+- 通常/診断ESP-IDFビルドPASS。app2,204,256 B / 1,908,272 B、
+  DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。実機結果は後記。
+
 ## checkpoint 10 — JS TEXTと固定容量PATCH（2026-09-15）
 
 - tx.text、DrawRef.setText/setReveal、features.textを公開。既存setterと同じtransaction原子性。
@@ -16,6 +32,11 @@
   DIRAM137,276 B / 135,916 B、常設増分0。Kasane-only link監査PASS。
 - K診断へ日本語のrevealとtick文字列PATCHを追加。実機結果は後記。
   次はCP11のhello移植・表示確定後の参照昇格helper。
+- `9b5252c`をpush後、実機K 300ターンPASS。mean turn3.54/render19.18/send4.53 ms。
+  modal区間にはrender30–33 msの窓があり、30 Hzの余裕不足は未解決。
+  文字の毎turn更新でdirty範囲と隔離groupの再描画が増える診断条件。CP8と同一負荷ではない。
+  100回起動・終了は全回free241,004 B、最大連続空き120,832 Bで一定。
+  `.cache/kasane-cp10-text`と`.cache/kasane-cp10-restarts`に保存。
 
 ## checkpoint 9 — native TEXT coverage（2026-09-15）
 

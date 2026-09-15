@@ -96,6 +96,25 @@ features.textはtrue。cacheのTEXT公開と整数値の直接更新APIはまだ
 
 ## 3. 原子的な更新と参照
 
+### JS scene controller（CP11）
+
+`view.createScene({build(tx,state), patch(tx,refs,state)?})`をアプリ初期化時に一度作る。
+buildは候補DrawRef等を含むobjectを返す。patchは確定済みrefsだけを使う。
+`scene.invalidate()`で表示をdirtyにし、`scene.invalidate(true)`で次回REPLACEを指定する。
+ownerの通常turnで`scene.flush(domainState)`を呼ぶ。trueはdirty/pendingなし、falseは提出待ち
+またはBUSY。inputでdomain stateを進めてからinvalidateし、display失敗を理由に状態を戻さない。
+
+controllerはPRESENTEDまで候補refsを公開せず、SUBMITTED中は新たなAPP更新を始めない。
+DISCARDEDなら最新stateで再試行し、REPLACEの候補refsは捨てる。BUSYだけを内部で再試行扱いとし、
+検証・quota・OOM・callback例外はdirtyを保持して呼出元へ送出する。build/patchは同期限定。
+idle時はpoll/提出をせず、timer・frame queue・毎flushのclosureを作らない。
+controller自体のJS関数/状態はcreateScene時のguest heapに計上する（未使用時は作らない）。
+
+APP提出の単独所有者として使う。他のcontrollerや直接replace/patchを混ぜない。
+修復中のownerによるpresent、SYSTEM提出、hostのcancelは併用可能。
+`flush`の再入は拒否し、callback中のinvalidateは次の更新要求として残る。
+native animationのwakeやmodal専用状態機械の代わりではない。
+
 新APIでは、所有中builderの変更に失敗した時点でcore/cache/modalをまとめてabortする。
 旧低レベルAPIの「poisonをabortまで保持」は内部契約として残す。
 別layerや古いticketでの呼出しは正しいbuilderを取消しない。

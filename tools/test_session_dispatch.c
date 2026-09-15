@@ -13,6 +13,7 @@ typedef struct {size_t struct_size;} pocketjs_ui_frame_view_t;
 static void *guest,*core;
 static bool turn_continued,pending,remain,active,activate,need_present,submission;
 static bool runaway,exit_requested,stopped;
+static bool kasane_session;
 static unsigned continuation_turns,ticks;
 static uint32_t deferred_buttons,delivered,armed;
 static int scope,guest_error,draw_error;
@@ -53,6 +54,7 @@ static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
 #include "session_dispatch_impl.inc"
 static void reset(void){
     calls[0]=0;pending=remain=active=activate=need_present=submission=false;
+    kasane_session=false;
     runaway=exit_requested=stopped=turn_continued=false;scope=KSN_INPUT_APP;
     deferred_buttons=delivered=armed=continuation_turns=ticks=0;
     guest_error=draw_error=0;now=40000;last_present_us=0;turn_sum=0;
@@ -61,6 +63,7 @@ int main(void){
     reset();assert(app_tick(0x4000)==0);assert(delivered==0x4000&&armed==0x4000);
     assert(!strcmp(calls,"AatiobncpfvukEFTDEOP"));
     reset();active=true;assert(app_tick(0)==0);assert(!strchr(calls,'T')&&!strchr(calls,'D'));
+    reset();kasane_session=true;assert(app_tick(0)==0);assert(!active&&!strchr(calls,'T')&&!strchr(calls,'D'));
     reset();activate=true;assert(app_tick(0)==0);assert(active&&!strchr(calls,'T'));
     reset();guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
     assert(strstr(calls,"FEO")&&!strchr(calls,'T')&&!strchr(calls,'P'));

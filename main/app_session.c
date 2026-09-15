@@ -144,6 +144,7 @@ static size_t user_prelude_length;
 // atlas, no rgb565 renderer, and a much smaller guest heap. See
 // pocket_overlay.h for why drawing goes through a host display list instead.
 static bool overlay_session;
+static bool kasane_session,kasane_presented;
 void app_force_redraw(void) { redraw=true;pocket_kasane_invalidate(); }
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame);
 typedef struct { unsigned sent_us; } kasane_display_t;
@@ -432,10 +433,14 @@ esp_err_t app_start_test(char test) {
     // skipped the test's source and its renderer, and the session died on its
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
+    // Source provenance, not the manifest identity: user programs can run under
+    // the default identity and must not bypass compatibility handling.
+    kasane_session=test=='K'||(!test&&!user_source&&!overlay_session);
+    kasane_presented=false;
 #ifdef CONFIG_KSN_ONLY
-    if(!overlay_session && test!='K') {
+    if(!overlay_session && !kasane_session) {
         jsconsole_set_error("Not migrated to Kasane in this diagnostic build");
-        ESP_LOGW("app","APP_REFUSED KASANE_ONLY: use USB K diagnostic");
+        ESP_LOGW("app","APP_REFUSED KASANE_ONLY: use migrated app or USB K diagnostic");
         return ESP_ERR_NOT_SUPPORTED;
     }
 #endif
@@ -541,7 +546,7 @@ esp_err_t app_start_test(char test) {
 surfaces_done:
     if(overlay_session) goto source_ready;
 #ifndef CONFIG_KSN_ONLY
-    {
+    if(!kasane_session) {
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
     cc.logical_width=LCD_W;cc.logical_height=LCD_H;cc.raster_density=1;cc.tick_hz=30;
@@ -657,7 +662,7 @@ source_ready:;
     }
 #endif
 #ifndef CONFIG_KSN_ONLY
-    if(!overlay_session&&!pocket_kasane_active()) {
+    if(!overlay_session&&!kasane_session&&!pocket_kasane_active()) {
         pocketjs_rgb565_renderer_config_t rc;
         pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;
         TRY(pocketjs_rgb565_renderer_create(&rc,&renderer));
@@ -838,7 +843,7 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons,
     esp_err_t result=continuing?pocketjs_guest_continue(guest):
                                 pocketjs_guest_frame(guest,&input);
     if(result!=ESP_OK)return result;
-    if(pocket_kasane_active())return ESP_OK;
+    if(kasane_session||pocket_kasane_active())return ESP_OK;
 #ifndef CONFIG_KSN_ONLY
     pocketjs_ui_core_tick(core);
     return pocketjs_ui_core_draw(core,out);
@@ -1021,7 +1026,7 @@ esp_err_t app_tick(uint32_t buttons) {
 // need to cause.
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
     last_present_us=esp_timer_get_time();
-    if(pocket_kasane_active()) {
+    if(kasane_session||pocket_kasane_active()) {
 #ifndef CONFIG_KSN_ONLY
         if(target) { pocketjs_rgb565_target_destroy(target); target=NULL; }
         if(renderer) { pocketjs_rgb565_renderer_destroy(renderer); renderer=NULL; }
@@ -1045,7 +1050,7 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
         if(stats.bands) {
             redraw=false;painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
-            if(frames==1)ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");
+            if(!kasane_presented){kasane_presented=true;ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");}
             if(painted==30) {
                 ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u",
                          ticks?turn_sum/ticks/1000.0:0.0,render_sum/30/1000.0,

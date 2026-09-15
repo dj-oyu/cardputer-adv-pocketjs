@@ -12,6 +12,7 @@
 // board cannot do it and not because of a typo here.
 
 static const char *const CAPS_NONE[]   = {NULL};
+static const char *const CAPS_KASANE[] = {"display.kasane", "input.action", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
 static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
 // pet.companion is optional rather than required so that a board without NVS
@@ -29,10 +30,10 @@ static const char *const CAPS_PLAY[]    = {"audio.playback", "fs.volume.sd", NUL
 #define API_0_1 ">=0.1.0 <0.2.0"
 
 static const app_manifest_t MANIFESTS[] = {
-    // The built-in demo. Legacy, no storage, no works: it draws and counts.
+    // The built-in Kasane demo, no storage or works: it draws and counts.
     {.id="local.hello", .title="HELLO WORLD", .entry="apps/hello/main.js",
-     .runtime=APP_RUNTIME_LEGACY, .api=NULL,
-     .required=CAPS_NONE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The calibration program exists for a board whose sensor is wrong, so the
     // sensor is required: starting it without one would show axes that are not

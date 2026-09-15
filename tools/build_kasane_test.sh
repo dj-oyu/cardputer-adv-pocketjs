@@ -7,6 +7,7 @@ TEST_SOURCE=${TEST_SOURCE:-tools/test_pocket_kasane.c}
 CACHE=${CACHE:-/tmp/qjs-kasane-host}
 mkdir -p "$CACHE"
 python3 tools/make_font.py "$CACHE"
+python3 tools/make_kasane_scene.py "$CACHE"
 # Match the shipping VM path. Keep this cache separate from harnesses with
 # different defines, and invalidate it on header or build-script changes.
 DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1"

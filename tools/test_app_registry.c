@@ -73,6 +73,11 @@ static void test_admission(void) {
     const app_manifest_t *pet=app_registry_find("local.pet");
     const app_manifest_t *cal=app_registry_find("local.imucal");
     const app_manifest_t *play=app_registry_find("local.playground");
+    const app_manifest_t *hello=app_registry_find("local.hello");
+    CHECK(hello&&hello->runtime==APP_RUNTIME_POCKET);
+    missing="display.kasane";
+    CHECK(!app_registry_admit(hello,"0.1.0",supported,NULL,reason,sizeof reason));
+    CHECK(!strcmp(reason,"NEEDS display.kasane"));
     CHECK(pet && cal && play);
     CHECK(app_registry_find("local.nothing")==NULL);
     CHECK(app_registry_find(NULL)==NULL);
