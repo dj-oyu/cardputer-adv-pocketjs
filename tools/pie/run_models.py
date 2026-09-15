@@ -24,6 +24,7 @@ TARGETS = {
     'garden': (['garden_model.c'], []),
     'fir': (['fir_model.c'], []),
     'canopy': (['canopy_model.c'], []),
+    'disc': (['disc_model.c'], []),
 }
 
 
