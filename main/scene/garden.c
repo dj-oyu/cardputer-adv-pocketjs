@@ -1494,12 +1494,14 @@ int g_garden_decor_group=8;
 // contract is a FULL group of eight pixels from a 16-byte-aligned pointer. Both
 // EE.VLD.128 and EE.VST.128 force the low four address bits of the pointer to
 // zero (TRM 1.8.88, 1.8.192), so a group starting anywhere else would read and
-// write its neighbour. The groups here start at `lo`, an arbitrary column, so
-// the alignment is tested per group and the ones that fail it stay on the scalar
-// statement. Over four frames that is 42% of the mixed pixels (3,016 blocks of
-// the 7,355 groups that blend at all); moving a group's start to align it
-// instead would put that group's constants on a different first column, which is
-// the 13%/33-level change of §9 and not this commit's to make.
+// write its neighbour. garden_decor_row therefore walks its span on the row's
+// own alignment phase -- x == ((-(uintptr_t)row)/2)&7 (mod 8), which exists for
+// every row -- instead of from lo: every full group is then aligned by
+// construction, and only a leading partial group of at most seven columns, the
+// group the core clip cuts, and the tail stay on the scalar statement. With the
+// groups started at lo, an arbitrary column, 58% of the mixed pixels fell back
+// to it (4,339 scalar groups against 3,016 kernel ones, of the 7,355 groups that
+// blend at all over four frames).
 int g_garden_decor_pie=1;
 
 static uint16_t garden_decor_mix(uint16_t p,int light,int shadow,int d) {
@@ -1573,8 +1575,30 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
         // pixel by four. Measured on the part, rays -5.0 ms/frame (median -4.7)
         // against a control band of +-1.3, and the frame 39.2 -> 32.2 ms, 25.5 ->
         // 31.0 fps.
+        //
+        // The group grid is the row's own alignment phase, so a full group can take
+        // the kernel. The kernel's load and store force the low four address bits of
+        // the pointer to zero (TRM 1.8.88/1.8.192), i.e. a full group is only legal
+        // when (row+x) is 16-byte aligned; with row an int16_t pointer that is
+        // x == phase (mod 8) for this row's phase, ((-(uintptr_t)row)/2)&7, which
+        // exists for every even row address. The span starts at lo, an arbitrary
+        // column, so walking it from lo throws away every full group whose start is
+        // off the phase (58% of the mixed pixels). Starting from `grid`, the first
+        // aligned column at or after lo, leaves only the leading partial group of at
+        // most seven columns off the grid -- and, where the clip below cuts a group,
+        // the cut itself -- and both are shorter than eight, so both stay scalar. The
+        // clip's cut column is arbitrary, so after it the loop snaps back onto the
+        // phase rather than drifting: otherwise no following group would be aligned
+        // and the kernel would never run again in that row.
+        int phase=(int)(((-(uintptr_t)row)/2)&7u);
+        int grid=lo+(int)((phase-(unsigned)lo)&7u);
         for(int x=lo;x<=hi;) {
-            int nx=x+g_garden_decor_group;if(nx>hi+1)nx=hi+1;   /* the group, clipped to the span */
+            // On the grid: the group width, so every full group is aligned. Left of
+            // it: the leading (or post-clip) partial group, up to the grid.
+            int nx;
+            if(x<grid)nx=grid;
+            else nx=x+g_garden_decor_group;
+            if(nx>hi+1)nx=hi+1;                     /* the group, clipped to the span */
             // A group must not straddle the beam's core. Every pixel in the group uses
             // the profile evaluated at the group's first column, so a group that reached
             // into the core would light the core with a value from outside it -- and the
@@ -1602,9 +1626,11 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
                same light, shadow and d the scalar statement would be -- but only when
                the pointer is 16-byte aligned, because the kernel's load and store
                force the low four address bits to zero and would otherwise read and
-               write the neighbouring eight pixels. Clipped and tail groups of fewer
-               pixels, a narrower g_garden_decor_group, and every unaligned group keep
-               the scalar statement, so the two arms differ in nothing but the mix. */
+               write the neighbouring eight pixels. On this grid every full group is
+               aligned, so the test is a guard and not a filter; it keeps a group whose
+               start the clip moved off the phase (see below) scalar. Clipped and tail
+               groups of fewer pixels and a narrower g_garden_decor_group keep the
+               scalar statement, so the two arms differ in nothing but the mix. */
             if(g_garden_decor_pie&&n==8&&!((uintptr_t)(row+x)&15u)) {
                 garden_decor_mix8(row+x,light,shadow,d);
             } else {
@@ -1612,6 +1638,10 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
             }
         grp:
             x=nx;
+            // Back onto the phase after a clip (or a skip) that left x off it, so the
+            // groups after the core are aligned again. On the grid this is a no-op:
+            // nx is x plus the group width.
+            if(x>=grid){int off=(x-phase)&7;if(off)x+=8-off;}
         }
     }
 }
