@@ -62,10 +62,19 @@ static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destinat
 static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
                              const ksn_draw *d,int x,int y,unsigned *count,ksn_span_scratch *scratch){
     if(d->data.image.rotation){
+        /* The affine numerator advances exactly by addition along a span.
+         * Keep the original rational division/rounding at source lookup. */
+        int c=ksn_image_sin(d->data.image.rotation+256),s=ksn_image_sin(d->data.image.rotation);
+        int64_t w=(int)d->bounds.x1-d->bounds.x0,h=(int)d->bounds.y1-d->bounds.y0;
+        int64_t qx=2ll*x+1-d->bounds.x0-d->bounds.x1,qy=2ll*y+1-d->bounds.y0-d->bounds.y1;
+        int64_t u=w*16384+qx*c+qy*s,v=h*16384-qx*s+qy*c;
+        int64_t umax=w*32768,vmax=h*32768;
         unsigned cached_y=UINT32_MAX,cached_x=UINT32_MAX;
-        for(unsigned i=0;i<*count;i++){
+        for(unsigned i=0;i<*count;i++,u+=2*c,v-=2*s){
             unsigned sx,sy;scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;
-            if(!ksn_image_sample(d,x+(int)i,y,&sx,&sy))continue;
+            if(u<0||v<0||u>=umax||v>=vmax)continue;
+            sx=d->data.image.source_x+(unsigned)(u*d->data.image.source_width/umax);
+            sy=d->data.image.source_y+(unsigned)(v*d->data.image.source_height/vmax);
             unsigned bx=d->data.image.source_x+((sx-d->data.image.source_x)/16)*16;
             if(sy!=cached_y||bx!=cached_x){
                 unsigned n=d->data.image.source_x+d->data.image.source_width-bx;if(n>16)n=16;

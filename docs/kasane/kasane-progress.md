@@ -4,6 +4,18 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 17b — 回転座標の反復計算削減（2026-09-16）
+
+- 回転spanの先頭で変換座標の分子を計算し、後続画素はu+=2*cos、v-=2*sinで進める。
+  画素ごとの座標積和を削減。source選択の有理数除算・丸め・clipは維持する。
+  常設領域・画像バッファ・heap確保の追加なし。PIE化や除算の近似置換は行わない。
+- H ASan/UBSan・O2全回帰PASS。360ケースの回転＋拡縮PATCH/full画素比較を含む。
+  通常/Kasane-only IDF build、link監査PASS。
+- 実機300ターンPASS、native13,840 Bで一定。ログ窓平均turn3.81 ms、render45.72 ms、
+  send6.00 ms。`.cache/kasane-cp17-span/serial.log`。前回render47.24 msだが、
+  別ビルド・実時間駆動で姿勢とdamageも変わるため、改善率の証明には使わない。
+  30 Hz目標は引き続き未達。今回は反復演算の削減に範囲を限定する。
+
 ## checkpoint 17a — 画像のnative自動補間（2026-09-16）
 
 - CP17–18を前倒し。DrawRef.animate(tx,{from,to,durationMs,easing,repeat})と
