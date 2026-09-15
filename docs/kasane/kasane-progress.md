@@ -90,6 +90,18 @@
   平均turn2.92 ms、render12.65 ms、send3.44 ms。`.cache/kasane-cp7-animation`に保存。
   CP7実装は`76dac40`としてpush済み。出荷からTaffyを削除するCP25は未実施。
 
+## checkpoint 8 — JS角丸・枠線・gradient（2026-09-15）
+
+- tx.roundRect/strokeRect/gradientとfeaturesを公開。既存DrawRefのPATCH・取消・例外原子性を利用。
+  色/opacity等の整数検証は保持し、座標だけ仕様どおり最近接・half-away-from-zeroへ変更。
+  APIのフィールド、既定値、上限は[design-api.md](design-api.md)に記載。
+- Q: `tools/build_kasane_test.sh`と生成exe、ASan/UBSan・O2 strict-aliasingでPASS。
+  新APIのnative記述子、正負の半分、gradient両端の画素、PATCH、clip、不正radius/width/axis/
+  dither、NaN/overflow、throwing getter、catch後の全体取消、committed画素維持、cancelを追加確認。
+- 通常/診断ESP-IDFビルドPASS。appは2,197,600 B / 1,901,664 B、
+  DIRAM137,276 B / 135,916 Bで増分0。Kasane-onlyのlink監査も再度PASS。
+- K診断を動く角丸・内側枠・ディザ付き水平gradientへ更新。実機確認は続けて記録する。
+
 ## vm/main同期 — 2026-09-15
 
 - 同名リモートの`77e95c8`をfast-forward後、`origin/vm/main`の`bd0fa43`を統合。

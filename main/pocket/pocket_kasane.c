@@ -183,7 +183,9 @@ static bool number_in(JSContext *ctx, JSValueConst value, double lo, double hi,
 
 static bool parse_i16(JSContext *ctx, JSValueConst value, int16_t *out) {
     double n;
-    if(!number_in(ctx,value,INT16_MIN,INT16_MAX,&n)) return false;
+    if(!JS_IsNumber(value)||JS_ToFloat64(ctx,&n,value)<0||!isfinite(n)) return false;
+    n=round(n);
+    if(n<INT16_MIN||n>INT16_MAX)return false;
     *out=(int16_t)n;
     return true;
 }
@@ -219,7 +221,7 @@ static bool parse_rect(JSContext *ctx, JSValueConst value, ksn_rect *out,
         JS_FreeValue(ctx,item);
         if(!ok) {
             pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
-                             "rectangle coordinates must be int16 values",false,NULL);
+                             "rounded coordinates must fit int16",false,NULL);
             return false;
         }
     }
@@ -250,12 +252,12 @@ static bool property_u8(JSContext *ctx, JSValueConst object, const char *name,
     bool ok=parse_u8(ctx,value,out);
     JS_FreeValue(ctx,value);
     if(!ok) pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
-                             "opacity must be an integer from 0 to 255",false,NULL);
+                             "value must be an integer from 0 to 255",false,NULL);
     return ok;
 }
 
-static bool parse_draw(JSContext *ctx, JSValueConst value, ksn_draw *out,
-                       const char *op) {
+static bool parse_draw_base(JSContext *ctx, JSValueConst value, ksn_draw *out,
+                            const char *op) {
     if(!JS_IsObject(value)) {
         pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                          "rectangle must be an object",false,NULL);
@@ -269,9 +271,14 @@ static bool parse_draw(JSContext *ctx, JSValueConst value, ksn_draw *out,
     out->clip=out->bounds;
     if(!property_rect(ctx,value,"clip",out->bounds,&out->clip,op)) return false;
     if(!property_u8(ctx,value,"opacity",255,&out->opacity,op)) return false;
-    JSValue color=JS_GetPropertyStr(ctx,value,"color");
+    return true;
+}
+
+static bool property_color(JSContext *ctx,JSValueConst value,const char *name,
+                           ksn_rgba *out,const char *op) {
+    JSValue color=JS_GetPropertyStr(ctx,value,name);
     if(JS_IsException(color)) return false;
-    ok=parse_u32(ctx,color,&out->data.shape.color);
+    bool ok=parse_u32(ctx,color,out);
     JS_FreeValue(ctx,color);
     if(!ok) {
         pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
@@ -279,6 +286,50 @@ static bool parse_draw(JSContext *ctx, JSValueConst value, ksn_draw *out,
         return false;
     }
     return true;
+}
+
+static bool parse_draw(JSContext *ctx, JSValueConst value, ksn_draw *out,
+                       const char *op) {
+    return parse_draw_base(ctx,value,out,op)&&
+           property_color(ctx,value,"color",&out->data.shape.color,op);
+}
+
+static bool parse_primitive(JSContext *ctx,JSValueConst value,ksn_kind kind,
+                            ksn_draw *out,const char *op) {
+    if(kind!=KSN_GRADIENT) {
+        if(!parse_draw(ctx,value,out,op))return false;
+        out->kind=kind;
+        if(kind==KSN_ROUND_RECT)
+            return property_u8(ctx,value,"radius",0,&out->data.shape.radius,op);
+        if(kind==KSN_STROKE)
+            return property_u8(ctx,value,"width",1,&out->data.shape.width,op);
+        return true;
+    }
+    if(!parse_draw_base(ctx,value,out,op))return false;
+    out->kind=kind;
+    if(!property_color(ctx,value,"from",&out->data.gradient.from,op)||
+       !property_color(ctx,value,"to",&out->data.gradient.to,op)||
+       !property_u8(ctx,value,"radius",0,&out->data.gradient.radius,op))return false;
+    JSValue axis=JS_GetPropertyStr(ctx,value,"axis");
+    if(JS_IsException(axis))return false;
+    bool valid=JS_IsUndefined(axis);
+    out->data.gradient.axis=1;
+    if(JS_IsString(axis)) {
+        const char *name=JS_ToCString(ctx,axis);
+        if(!name){JS_FreeValue(ctx,axis);return false;}
+        valid=!strcmp(name,"x")||!strcmp(name,"y");
+        out->data.gradient.axis=!strcmp(name,"y");
+        JS_FreeCString(ctx,name);
+    }
+    JS_FreeValue(ctx,axis);
+    if(!valid){throw_result(ctx,KSN_INVALID,op);return false;}
+    JSValue dither=JS_GetPropertyStr(ctx,value,"dither");
+    if(JS_IsException(dither))return false;
+    valid=JS_IsUndefined(dither)||JS_IsBool(dither);
+    out->data.gradient.dither=JS_IsBool(dither)&&JS_ToBool(ctx,dither);
+    JS_FreeValue(ctx,dither);
+    if(!valid)throw_result(ctx,KSN_INVALID,op);
+    return valid;
 }
 
 static bool parse_placement(JSContext *ctx, JSValueConst value, ksn_placement *out,
@@ -360,14 +411,14 @@ static JSValue js_tx_background(JSContext *ctx, JSValueConst self, int argc,
     return result==KSN_OK?JS_UNDEFINED:throw_result(ctx,result,"kasane.background");
 }
 
-static JSValue js_tx_rect(JSContext *ctx, JSValueConst self, int argc,
-                          JSValueConst *argv) {
-    ksn_tx tx=tx_from(ctx,self,"kasane.rect");
+static JSValue js_tx_primitive(JSContext *ctx, JSValueConst self, int argc,
+                               JSValueConst *argv,ksn_kind kind,const char *op) {
+    ksn_tx tx=tx_from(ctx,self,op);
     if(!tx.value) return JS_EXCEPTION;
     ksn_draw draw={0};
-    if(!parse_draw(ctx,argc?argv[0]:JS_UNDEFINED,&draw,"kasane.rect")) return JS_EXCEPTION;
+    if(!parse_primitive(ctx,argc?argv[0]:JS_UNDEFINED,kind,&draw,op)) return JS_EXCEPTION;
     ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
-    if(result!=KSN_OK) return throw_result(ctx,result,"kasane.rect");
+    if(result!=KSN_OK) return throw_result(ctx,result,op);
     ref_slot *slot=claim_ref(ctx,ref,tx);
     if(!slot) { ksn_view_cancel(view(),tx); discard_candidates(tx); return JS_EXCEPTION; }
     JSValue object=wrap_direct(ctx,ref_class,slot->handle);
@@ -376,6 +427,16 @@ static JSValue js_tx_rect(JSContext *ctx, JSValueConst self, int argc,
     }
     return object;
 }
+
+#define PRIMITIVE(name,kind,op) \
+static JSValue name(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){ \
+    return js_tx_primitive(ctx,self,argc,argv,kind,op); \
+}
+PRIMITIVE(js_tx_rect,KSN_RECT,"kasane.rect")
+PRIMITIVE(js_tx_round_rect,KSN_ROUND_RECT,"kasane.roundRect")
+PRIMITIVE(js_tx_stroke_rect,KSN_STROKE,"kasane.strokeRect")
+PRIMITIVE(js_tx_gradient,KSN_GRADIENT,"kasane.gradient")
+#undef PRIMITIVE
 
 static JSValue js_tx_group(JSContext *ctx, JSValueConst self, int argc,
                            JSValueConst *argv) {
@@ -568,6 +629,9 @@ static JSValue name##_checked(JSContext *ctx,JSValueConst self,int argc,JSValueC
 }
 MUTATOR(js_tx_background,tx_class,false,"kasane.background")
 MUTATOR(js_tx_rect,tx_class,false,"kasane.rect")
+MUTATOR(js_tx_round_rect,tx_class,false,"kasane.roundRect")
+MUTATOR(js_tx_stroke_rect,tx_class,false,"kasane.strokeRect")
+MUTATOR(js_tx_gradient,tx_class,false,"kasane.gradient")
 MUTATOR(js_tx_group,tx_class,false,"kasane.group")
 MUTATOR(js_tx_instantiate,tx_class,false,"kasane.instantiate")
 MUTATOR(js_ref_rect,tx_class,true,"kasane.ref.setRect")
@@ -746,6 +810,9 @@ static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
     capacity=JS_NewObject(ctx);if(JS_IsException(capacity)) goto fail;
     cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
     PUT(out,"rect",JS_NewBool(ctx,true));
+    PUT(out,"roundRect",JS_NewBool(ctx,true));
+    PUT(out,"strokeRect",JS_NewBool(ctx,true));
+    PUT(out,"gradient",JS_NewBool(ctx,true));
     PUT(out,"groupOpacity",JS_NewBool(ctx,true));
     PUT(out,"modal",JS_NewBool(ctx,true));
     PUT(out,"animation",JS_NewBool(ctx,false));
@@ -800,6 +867,9 @@ static JSValue js_input_scope(JSContext *ctx, JSValueConst self, int argc,
 static const JSCFunctionListEntry tx_methods[]={
     JS_CFUNC_DEF("background",1,js_tx_background_checked),
     JS_CFUNC_DEF("rect",1,js_tx_rect_checked),
+    JS_CFUNC_DEF("roundRect",1,js_tx_round_rect_checked),
+    JS_CFUNC_DEF("strokeRect",1,js_tx_stroke_rect_checked),
+    JS_CFUNC_DEF("gradient",1,js_tx_gradient_checked),
     JS_CFUNC_DEF("group",3,js_tx_group_checked),
     JS_CFUNC_DEF("instantiate",2,js_tx_instantiate_checked),
 };

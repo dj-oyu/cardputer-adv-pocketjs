@@ -39,12 +39,14 @@
 
   function base(tx) {
     tx.background(0x071425ff);
-    tx.rect({bounds: [0, 0, 240, 18], color: 0x0d2940ff});
+    tx.gradient({bounds: [0, 0, 240, 18], axis: 'x',
+      from: 0x0d2940ff, to: 0x498781ff, dither: true});
     groupFirst = tx.rect({bounds: [12, 28, 112, 56], color: 0x164c70d8});
     tx.rect({bounds: [34, 36, 134, 64], color: 0x65d7bcac});
     tx.group(groupFirst, 2, 208);
-    orb = tx.rect({bounds: [16, 76, 36, 96], color: 0xf5bd4fff, opacity: 210});
-    meter = tx.rect({bounds: [12, 119, 24, 127], color: 0x62e0a8ff});
+    orb = tx.roundRect({bounds: [16, 76, 36, 96], radius: 6, color: 0xf5bd4fff, opacity: 210});
+    meter = tx.roundRect({bounds: [12, 119, 24, 127], radius: 3, color: 0x62e0a8ff});
+    tx.strokeRect({bounds: [10, 117, 232, 129], width: 1, color: 0x80b5cfaa});
     left = tx.instantiate(tile, {offset: [142, 28], opacity: 230});
     right = tx.instantiate(tile, {offset: [188, 72], opacity: 175});
   }

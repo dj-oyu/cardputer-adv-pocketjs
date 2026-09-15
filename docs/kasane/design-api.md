@@ -7,6 +7,24 @@
 
 ## 1. 再構成の理由と境界
 
+### JSプリミティブ（CP8、2026-09-15）
+
+`replace`/`patch`のtxに次を公開する。戻り値は既存と同じDrawRefで、setRect/setClip/
+setVisible、shapeのsetColorを利用できる。gradientの端点色変更はREPLACEで行う。
+
+| メソッド | 共通指定以外のフィールド |
+| --- | --- |
+| `tx.rect(spec)` | `color: RRGGBBAA` |
+| `tx.roundRect(spec)` | `color`、`radius`（整数0–8、既定0、幅/高さの半分以下） |
+| `tx.strokeRect(spec)` | `color`、`width`（整数1または2、既定1、内側の枠） |
+| `tx.gradient(spec)` | `from`/`to: RRGGBBAA`、`axis: 'x'/'y'`（既定y）、`radius`（既定0）、`dither: boolean`（既定false） |
+
+共通は`bounds: [x0,y0,x1,y1]`、任意`clip`（既定bounds）、`opacity`（整数0–255、既定255）。
+bounds/clip/placement offset/DrawRef更新の有限数は最近接丸め、半分は0から遠い側へ揃える。
+丸めた結果がint16外なら拒否。色・opacity・radius・widthは丸めず整数として検証する。
+featuresのroundRect/strokeRect/gradientはtrue。cache.createは現段階では引き続き矩形のみ。
+不正引数やgetter例外をcallback内でcatchしても、そのtransaction全体を取消す。
+
 従来はcoreのabort/present/discard、cacheのabort/resolve、modalのcancel/resolveを
 利用側が正しい順序で呼ぶ必要があった。更新失敗やVM yieldで一つでも漏れると、
 画面・instance参照・入力scopeの状態が食い違う。

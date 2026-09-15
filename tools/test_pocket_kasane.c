@@ -481,6 +481,59 @@ static void system_lifetime_tests(void) {
     track_native=false;
 }
 
+static void primitive_tests(void) {
+    check(open_fault_runtime(""),"primitive fixture opens");
+    ksn_view *system=NULL;
+    check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect primitive descriptors through native owner");
+    check(run("var f=kasane.features();if(!f.roundRect||!f.strokeRect||!f.gradient)throw Error('features');"
+              "kasane.replace(tx=>{tx.background(0x000000ff);"
+              "globalThis.pr=tx.roundRect({bounds:[0.5,0.5,20.5,20.5],radius:8,color:0xff0000ff});"
+              "tx.strokeRect({bounds:[24,1,44,21],width:2,color:0x00ff00ff});"
+              "globalThis.pg=tx.gradient({bounds:[50,0,60,8],axis:'x',from:0xff0000ff,to:0x0000ffff});"
+              "tx.rect({bounds:[-2.5,-1.5,-0.5,0.49],color:0xffffffff});});"),
+          "JS exposes rounded rectangle, stroke and gradient with signed rounding");
+    ksn_frame frame;ksn_frame_command cmd;
+    check(ksn_core_frame(system->host->core,&frame)==KSN_OK,"primitive submission is readable");
+    check(ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,0,&cmd)==KSN_OK&&
+          cmd.draw.kind==KSN_ROUND_RECT&&cmd.draw.bounds.x0==1&&cmd.draw.bounds.x1==21&&
+          cmd.draw.data.shape.radius==8,"positive half ties round away from zero");
+    check(ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,1,&cmd)==KSN_OK&&
+          cmd.draw.kind==KSN_STROKE&&cmd.draw.data.shape.width==2,"stroke width reaches native descriptor");
+    check(ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,2,&cmd)==KSN_OK&&
+          cmd.draw.kind==KSN_GRADIENT&&cmd.draw.data.gradient.axis==0&&
+          cmd.draw.data.gradient.to==0x0000ffff&&!cmd.draw.data.gradient.dither,
+          "gradient colors, axis and default dither reach native descriptor");
+    check(ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,3,&cmd)==KSN_OK&&
+          cmd.draw.bounds.x0==-3&&cmd.draw.bounds.y0==-2&&cmd.draw.bounds.x1==-1,
+          "negative half ties round away from zero");
+    ksn_render_stats stats;
+    check(present(&stats)==KSN_OK&&panel_pixels[50]==0xf800&&panel_pixels[59]==0x001f,
+          "JS gradient renders both exact endpoint colors");
+    check(run("kasane.patch(tx=>{pr.setRect(tx,[1.4,1.4,22.5,22.5]);"
+              "pg.setClip(tx,[52.5,0,57.5,8]);});"),"new primitives support existing PATCH references");
+    check(present(&stats)==KSN_OK,"primitive patch presents");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    check(run("var bad=["
+              "tx=>tx.roundRect({bounds:[0,0,10,10],radius:6,color:255}),"
+              "tx=>tx.strokeRect({bounds:[0,0,20,20],width:3,color:255}),"
+              "tx=>tx.gradient({bounds:[0,0,20,20],from:255,to:255,axis:'z'}),"
+              "tx=>tx.gradient({bounds:[0,0,20,20],from:255,to:255,dither:1}),"
+              "tx=>tx.gradient({bounds:[0,0,20,20],from:255,get to(){throw Error('getter')}}),"
+              "tx=>tx.rect({bounds:[NaN,0,1,1],color:255}),"
+              "tx=>tx.rect({bounds:[0,0,32767.5,1],color:255})];"
+              "for(var badDraw of bad){let failed=false,inner=false;try{kasane.replace(tx=>{"
+              "tx.background(0xffffffff);try{badDraw(tx)}catch(e){inner=true;}})}catch(e){failed=true}"
+              "if(!failed||!inner)throw Error('caught invalid primitive submitted');}"),
+          "invalid primitive fields, getters and coordinate overflow poison transaction");
+    pocket_kasane_invalidate();
+    check(present(&stats)==KSN_OK&&!memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels)),
+          "rejected primitives leave committed pixels intact");
+    check(run("var t=kasane.replace(tx=>{tx.background(255);tx.gradient({bounds:[0,0,20,20],from:255,to:255,"
+              "radius:4,dither:true});});kasane.cancel(t);"),"rounded dither gradient can be cancelled");
+    close_fault_runtime();
+    check(ksn_runtime_shutdown()==KSN_OK,"primitive native owner shuts down");
+}
+
 int main(void) {
     rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
     check(pocket_kasane_install(ctx,NULL)==ESP_OK,"namespace installs");
@@ -568,6 +621,7 @@ int main(void) {
     base_block_tests();
     lazy_cache_tests();
     system_lifetime_tests();
+    primitive_tests();
     printf("%s: %u failure(s)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }
