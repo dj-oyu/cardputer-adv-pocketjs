@@ -37,6 +37,8 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [backlog.md](perf/backlog.md) | backlog | 未着手の性能候補（テキストのマスク合成、MP3 FIR、整数平方根、装飾光線の PIE 化など） |
 
 作業ブランチの装飾光線コストと部分別計測は[flower-decor-cost.md](perf/flower-decor-cost.md)に保持する。
+群の合成を 1 枚のアフィン写像へ畳む候補 3c（不透明群はビット一致、非不透明への近似拡張は別段）は
+[kasane-group-affine.md](perf/kasane-group-affine.md)。
 検証の道具は [`tools/pie/README.md`](../tools/pie/README.md)。
 
 ## 主線3: デザインシステム Kasane — [`kasane/`](kasane/)
