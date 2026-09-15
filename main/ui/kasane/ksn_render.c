@@ -586,22 +586,6 @@ static unsigned premultiply_over(ksn_premultiplied_rgba8 *dst,ksn_rgba color,uin
     dst->a=(uint8_t)clamp8(a+mul8(dst->a,inverse));
     return a;
 }
-/* One covered group pixel: premultiplied RGBA into the tile, then the text
- * coverage word and the dither provenance bits. Both coverage arms call this,
- * so the pixels a row's runs name go through the same code the pixel-at-a-time
- * predicate path runs. `x` is the tile-local column. */
-static void group_pixel(ksn_premultiplied_rgba8 *tile,const uint8_t *coverage,int x,
-                        const ksn_frame_view *command,int px,int py,bool has_dither,
-                        bool child_dither,uint32_t *dither_pixels){
-    ksn_rgba color=sample(command,px,py);
-    if(command->draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage[x]);
-    unsigned alpha=premultiply_over(&tile[x],color,command->draw.opacity);
-    if(has_dither&&alpha){
-        uint32_t bit=1u<<((unsigned)x&31u);
-        if(child_dither)dither_pixels[(unsigned)x>>5]|=bit;
-        else if(alpha==255)dither_pixels[(unsigned)x>>5]&=~bit;
-    }
-}
 static unsigned quantize(unsigned value,unsigned maximum,unsigned bayer){
     unsigned q=value*maximum/255u,remainder=value*maximum-255u*q;
     if(q<maximum&&32u*remainder>(2u*bayer+1u)*255u)q++;
@@ -669,6 +653,77 @@ static ksn_result frame_command(ksn_core *core,ksn_tx ticket,ksn_layer layer,uin
     decode_view(view_slot(slot),&decoded.read);*out=view_slot(slot);
     return KSN_OK;
 }
+/* ---- tile-level switches and instrument (docs/perf/kasane-tile.md) -------- */
+/* A group's children are composited into a 64-pixel scratch tile, block by
+ * block. These three switches change how that block is walked. Each keeps the
+ * old path reachable and is read once per render, so the arms of a same-binary
+ * A/B differ only in the technique. Sizes, error bounds and measured numbers are
+ * in docs/perf/kasane-tile.md. */
+int g_ksn_tile_pixels=64;   /* the tile's block: 64 or 16 pixels */
+int g_ksn_tile_reach=1;     /* exact (default): a child's loop runs over its own
+                             * clipped x interval, and a block no child can
+                             * reach is skipped whole -- no clear, no read, no
+                             * drop */
+#ifdef KSN_TILE_COUNT
+/* Host-only: compiled out of every production build (-DKSN_TILE_COUNT, set by
+ * tools/kasane_contract/run_group_tile.sh). "covered" is a tile pixel whose
+ * accumulated alpha is non-zero, i.e. one a child actually wrote into. */
+uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
+         ksn_tile_child_pixels;
+#endif
+/* Objdump can only attribute a per-pixel cost to a function that is not inlined
+ * away. The measurement build (-DKSN_TILE_MEASURE, tools/kasane_contract/
+ * run_group_tile.sh) keeps the tile's per-pixel steps out of line so their
+ * instruction counts are read off the object; the production build lets the
+ * compiler inline them exactly as before. The attribute changes no pixel. */
+#ifdef KSN_TILE_MEASURE
+#define KSN_TILE_MEASURED __attribute__((noinline))
+#else
+#define KSN_TILE_MEASURED
+#endif
+/* A group with more children than this falls back to the unconditional tile:
+ * the reach table exists to skip work, never to decide which pixels are drawn. */
+#define KSN_TILE_REACH_BOXES 16
+typedef struct { int16_t x0,y0,x1,y1; } ksn_tile_reach;
+static bool tile_block_reached(const ksn_tile_reach *box,unsigned count,
+                               int x0,int width,int py){
+    for(unsigned k=0;k<count;k++)
+        if(py>=box[k].y0&&py<box[k].y1&&x0<box[k].x1&&x0+width>box[k].x0)return true;
+    return false;
+}
+/* One covered pixel of one child: sample it, composite it into the
+ * premultiplied tile and maintain the dither provenance. Both coverage arms
+ * (g_ksn_row_coverage on = the row's runs, off = the per-pixel predicate) call
+ * this, so the pixels a row's runs name go through the same code the
+ * pixel-at-a-time path runs. Out of line so that objdump can attribute the
+ * tile's per-pixel cost (the doc counts it). `dest` is the pixel's index inside
+ * the tile, x/y are absolute (Bayer and gradient phase) and `coverage` is the
+ * text port's ink at that pixel. Owner task: the decoded frame view, like every
+ * other helper in this renderer (2a retype). */
+KSN_TILE_MEASURED static void group_pixel(ksn_premultiplied_rgba8 *tile,const ksn_frame_view *command,
+                        int dest,int x,int y,bool has_dither,bool child_dither,
+                        uint32_t *provenance,uint8_t coverage){
+    ksn_rgba color=sample(command,x,y);
+    if(command->draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage);
+    unsigned alpha=premultiply_over(&tile[dest],color,command->draw.opacity);
+    if(has_dither&&alpha){
+        uint32_t bit=1u<<((unsigned)dest&31u);
+        if(child_dither)provenance[(unsigned)dest>>5]|=bit;
+        else if(alpha==255)provenance[(unsigned)dest>>5]&=~bit;
+    }
+}
+
+/* The tile's last step: group opacity, the premultiplied drop into RGB565 and
+ * the dither provenance. Out of line for the same reason as group_pixel. */
+KSN_TILE_MEASURED static void tile_row_over(uint16_t *pixels,const ksn_premultiplied_rgba8 *tile,int count,
+                          uint8_t opacity,bool has_dither,const uint32_t *provenance,
+                          int x0,int y,int py){
+    for(int x=0;x<count;x++){
+        unsigned index=(unsigned)((py-y)*240+x0+x);
+        bool dither=has_dither&&(provenance[(unsigned)x>>5]&(1u<<((unsigned)x&31u)))!=0;
+        pixels[index]=group_over(pixels[index],tile[x],opacity,dither,x0+x,py);
+    }
+}
 static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span_scratch *scratch,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
                                uint8_t opacity,int y,int rows,uint16_t *pixels){
     if(!opacity)return KSN_OK;
@@ -679,6 +734,13 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
     const ksn_frame_view *command;
     bool has_dither=false;
     int left=240,right=0,top=y+rows,bottom=y;
+    /* The reach table holds the clipped box of each child of this group. The
+     * bounds pass already has every child in hand, so filling it costs no extra
+     * ksn_core_read; testing the blocks against the children instead would cost
+     * one per child per block (139 instructions plus a 176-byte clear each). */
+    ksn_tile_reach reach[KSN_TILE_REACH_BOXES];
+    unsigned reach_count=0;
+    bool reach_all=true;
     for(unsigned i=first;i<=end;i++){
         ksn_result result;
         {KSN_PROF_BEGIN();
@@ -686,25 +748,44 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
         KSN_PROF_END(read);}
         if(result!=KSN_OK)return result;
         const ksn_draw *d=&command->draw;
-        if(!command->visible||!d->opacity)continue;
-        ksn_rect bounds=footprint(d);
-        int x0=bounds.x0>d->clip.x0?bounds.x0:d->clip.x0;
-        int x1=bounds.x1<d->clip.x1?bounds.x1:d->clip.x1;
-        int y0=bounds.y0>d->clip.y0?bounds.y0:d->clip.y0;
-        int y1=bounds.y1<d->clip.y1?bounds.y1:d->clip.y1;
-        if(x0>=x1||y0>=y1)continue;
-        if(d->kind==KSN_GRADIENT&&d->data.gradient.dither)has_dither=true;
-        if(x0<left)left=x0;
-        if(x1>right)right=x1;
-        if(y0<top)top=y0;
-        if(y1>bottom)bottom=y1;
+        ksn_tile_reach box={0,0,0,0};
+        if(command->visible&&d->opacity){
+            ksn_rect bounds=footprint(d);
+            int x0=bounds.x0>d->clip.x0?bounds.x0:d->clip.x0;
+            int x1=bounds.x1<d->clip.x1?bounds.x1:d->clip.x1;
+            int y0=bounds.y0>d->clip.y0?bounds.y0:d->clip.y0;
+            int y1=bounds.y1<d->clip.y1?bounds.y1:d->clip.y1;
+            if(x0<x1&&y0<y1){
+                /* The reach table caches exactly the clipped box this pass
+                 * already computed, so a block no child overlaps can be skipped
+                 * without re-reading a child (see the comment at `reach`). */
+                box=(ksn_tile_reach){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
+                if(d->kind==KSN_GRADIENT&&d->data.gradient.dither)has_dither=true;
+                if(x0<left)left=x0;
+                if(x1>right)right=x1;
+                if(y0<top)top=y0;
+                if(y1>bottom)bottom=y1;
+            }
+        }
+        if(i-first<KSN_TILE_REACH_BOXES)reach[i-first]=box;else reach_all=false;
+        reach_count++;
     }
     if(left<0)left=0;
     if(right>240)right=240;
     if(top<y)top=y;
     if(bottom>y+rows)bottom=y+rows;
-    for(int py=top;py<bottom;py++)for(int x0=left;x0<right;x0+=64){
-        int count=right-x0;if(count>64)count=64;
+    int tile_pixels=g_ksn_tile_pixels>0&&g_ksn_tile_pixels<=64?g_ksn_tile_pixels:64;
+    for(int py=top;py<bottom;py++)for(int x0=left;x0<right;x0+=tile_pixels){
+        int count=right-x0;if(count>tile_pixels)count=tile_pixels;
+        if(g_ksn_tile_reach&&reach_all&&!tile_block_reached(reach,reach_count,x0,count,py)){
+#ifdef KSN_TILE_COUNT
+            ksn_tile_skipped++;
+#endif
+            continue;
+        }
+#ifdef KSN_TILE_COUNT
+        ksn_tile_blocks++;
+#endif
         memset(tile,0,sizeof(tile));
         /* Boolean provenance survives partial coverage but is replaced by an
          * opaque child. Two words avoid variable 64-bit shifts on ESP32-S3. */
@@ -719,8 +800,28 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
             const ksn_draw *d=&command->draw;
             ksn_rect bounds=footprint(d);
             if(!command->visible||!d->opacity||py<bounds.y0||py>=bounds.y1||
-               py<d->clip.y0||py>=d->clip.y1||x0>=bounds.x1||x0>=d->clip.x1||
-               x0+count<=bounds.x0||x0+count<=d->clip.x0)continue;
+               py<d->clip.y0||py>=d->clip.y1)continue;
+            /* The child's own window inside this block: outside it `covers` is
+             * false everywhere, so the generic loop must not visit those pixels
+             * at all. Off, the loop runs the whole block as before. */
+            int lo=0,hi=count;
+            {
+                int cx0=bounds.x0>d->clip.x0?bounds.x0:d->clip.x0;
+                int cx1=bounds.x1<d->clip.x1?bounds.x1:d->clip.x1;
+                /* Block-level rejection: a child whose clipped box misses this
+                 * block entirely draws nothing here, so its read, its span and
+                 * its composite are all skipped. The window below is the same
+                 * test per child, one sub-block at a time. */
+                if(x0>=cx1||x0+count<=cx0)continue;
+                if(g_ksn_tile_reach){
+                    lo=cx0-x0;if(lo<0)lo=0;
+                    hi=cx1-x0;if(hi>count)hi=count;
+                    if(lo>=hi)continue;
+                }
+            }
+#ifdef KSN_TILE_COUNT
+            ksn_tile_child_pixels+=(uint32_t)(hi-lo);
+#endif
             if(d->kind==KSN_IMAGE){
                 int left=x0,right=x0+count;
                 if(left<bounds.x0)left=bounds.x0;
@@ -752,18 +853,19 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
                 unsigned run_count=coverage_runs(command,py,x0,x0+count,runs);
                 for(unsigned run=0;run<run_count;run++)
                     for(int px=runs[run].x0;px<runs[run].x1;px++)
-                        group_pixel(tile,scratch->text,px-x0,command,px,py,has_dither,child_dither,
-                                    dither_pixels);
-            }else for(int x=0;x<count;x++)if(covers(command,x0+x,py))
-                group_pixel(tile,scratch->text,x,command,x0+x,py,has_dither,child_dither,dither_pixels);
+                        group_pixel(tile,command,px-x0,px,py,has_dither,child_dither,
+                                    dither_pixels,scratch->text[px-x0]);
+            }else for(int x=lo;x<hi;x++)if(covers(command,x0+x,py))
+                group_pixel(tile,command,x,x0+x,py,has_dither,child_dither,
+                            dither_pixels,scratch->text[x]);
             KSN_PROF_END(blend);}
         }
+#ifdef KSN_TILE_COUNT
+        ksn_tile_visited+=(uint32_t)count;
+        for(int x=0;x<count;x++)if(tile[x].a)ksn_tile_covered++;
+#endif
         {KSN_PROF_BEGIN();
-        for(int x=0;x<count;x++){
-            unsigned index=(unsigned)((py-y)*240+x0+x);
-            bool dither=has_dither&&(dither_pixels[(unsigned)x>>5]&(1u<<((unsigned)x&31u)))!=0;
-            pixels[index]=group_over(pixels[index],tile[x],opacity,dither,x0+x,py);
-        }
+        tile_row_over(pixels,tile,count,opacity,has_dither,dither_pixels,x0,y,py);
         KSN_PROF_END(blend);}
     }
     return KSN_OK;
