@@ -1153,6 +1153,121 @@ static bool child_opaque(const ksn_frame_view *command){
     default:return false;
     }
 }
+/* Candidate 3c, step 2 of docs/perf/kasane-group-affine.md: the same fold for a
+ * chain that is NOT opaque, which is where the floors it drops can move a pixel.
+ * The chain's tile write is `mul8(src, a) + mul8(tile, 255-a)`, one floor to the
+ * nearest 8-bit value per child per channel. Keeping the same expression in 8.8
+ * fixed point moves that floor eight bits down, and re-associating it
+ *
+ *     acc = acc + (((src<<8) - acc) * w + 128) >> 8,   w = round(a*256/255)
+ *
+ * (since acc*(256-w) == acc*256 - acc*w) is one multiply per channel per child
+ * instead of two, with no clamp: the accumulator stays inside 0..255<<8 by
+ * construction. `w` is exactly 256 at a = 255, so an opaque child still
+ * overwrites the accumulator exactly (acc = src<<8, delta 0, nothing to round)
+ * and the group stage reads back the very 8-bit value the old chain stored.
+ * Step 2 is therefore bit-exact on every chain step 1 folds, and a pixel can only
+ * move if a child with a < 255 covers it -- the harness measures that subset.
+ *
+ * The alpha accumulator and the group stage keep the old 8-bit formulas bit for
+ * bit (clamp8(a + mul8(alpha, 255-a)) and alpha = mul8(tile.a, group opacity)),
+ * so the dst weight, the transparency decision and the dither provenance rule are
+ * unchanged: what moves is the premultiplied colour's floor and nothing else. */
+#define KSN_ACC_ONE 256u
+typedef struct { uint16_t r[32],g[32],b[32]; uint8_t a[32]; } ksn_fold_acc;
+/* a in 8.8: 255 maps to 256 ("one"), which is what makes an opaque child an
+ * exact overwrite of the accumulator. */
+static unsigned fixed8(unsigned value){return (value*KSN_ACC_ONE+127u)/255u;}
+/* One covered pixel of one child: the colour accumulator's single multiply-chain
+ * step per channel, the pre-3c alpha step, and the same provenance rule
+ * `group_pixel` applies (a child with a == 255 clears the bit, a dithered
+ * gradient sets it). `i` is the pixel's index inside the chunk, which is also its
+ * provenance bit. */
+static void fold_pixel(ksn_fold_acc *acc,uint32_t *provenance,const ksn_frame_view *command,
+                       const uint8_t *coverage,int i,int x,int y,bool has_dither,bool child_dither){
+    const ksn_draw *d=&command->draw;
+    ksn_rgba color=sample(command,x,y);
+    unsigned source_alpha=color&255u;
+    if(d->kind==KSN_TEXT)source_alpha=mul8(source_alpha,coverage[i]);
+    unsigned a=mul8(source_alpha,d->opacity);
+    unsigned w=fixed8(a);
+    {
+        int delta_r=((int)(color>>24)<<8)-(int)acc->r[i];
+        int delta_g=((int)((color>>16)&255u)<<8)-(int)acc->g[i];
+        int delta_b=((int)((color>>8)&255u)<<8)-(int)acc->b[i];
+        acc->r[i]=(uint16_t)((int)acc->r[i]+(((delta_r*(int)w)+128)>>8));
+        acc->g[i]=(uint16_t)((int)acc->g[i]+(((delta_g*(int)w)+128)>>8));
+        acc->b[i]=(uint16_t)((int)acc->b[i]+(((delta_b*(int)w)+128)>>8));
+    }
+    acc->a[i]=(uint8_t)clamp8(a+mul8(acc->a[i],255u-a));
+    if(has_dither&&a){
+        uint32_t bit=1u<<(unsigned)i;
+        if(child_dither)*provenance|=bit;
+        else if(a==255)*provenance&=~bit;
+    }
+}
+/* One 32-pixel chunk of one row of a folded group. 32 and not 64 because the
+ * accumulators (3 x 32 x 2 + 32 = 224 B) live in the 256 bytes the isolated tile
+ * already occupied, so the stack grows by nothing. The gate -- command list,
+ * clip tests, the coverage solver, the span call for TEXT -- is the pre-3c path's
+ * own gate, so only the arithmetic between them differs. A TEXT child's span is
+ * taken for the chunk (32 pixels) where the pre-3c path took it for 64; the port
+ * is per-pixel by contract, and the pixels are compared either way. */
+static ksn_result group_folded_chunk(ksn_core *core,const ksn_text_port *text,ksn_tx ticket,
+                                     ksn_layer layer,unsigned first,unsigned end,uint8_t opacity,
+                                     int py,int x0,int band_y,int count,uint8_t *coverage,
+                                     bool has_dither,ksn_fold_acc *acc,uint16_t *pixels){
+    memset(acc->r,0,sizeof(acc->r));memset(acc->g,0,sizeof(acc->g));
+    memset(acc->b,0,sizeof(acc->b));memset(acc->a,0,sizeof(acc->a));
+    uint32_t provenance=0;
+    const ksn_frame_view *command;
+    for(unsigned i=first;i<=end;i++){
+        ksn_result result=frame_command(core,ticket,layer,(uint16_t)i,&command);
+        if(result!=KSN_OK)return result;
+        const ksn_draw *d=&command->draw;
+        if(!command->visible||!d->opacity||py<d->bounds.y0||py>=d->bounds.y1||
+           py<d->clip.y0||py>=d->clip.y1||x0>=d->bounds.x1||x0>=d->clip.x1||
+           x0+count<=d->bounds.x0||x0+count<=d->clip.x0)continue;
+        if(d->kind==KSN_TEXT){
+            {KSN_PROF_BEGIN();
+            result=text->span(text->ctx,d,command->reveal,x0,py,(unsigned)count,coverage);
+            KSN_PROF_END(span);}
+            if(result!=KSN_OK)return result;
+        }
+        bool child_dither=d->kind==KSN_GRADIENT&&d->data.gradient.dither;
+        int left=d->bounds.x0>d->clip.x0?d->bounds.x0:d->clip.x0;
+        int right=d->bounds.x1<d->clip.x1?d->bounds.x1:d->clip.x1;
+        if(left<x0)left=x0;
+        if(right>x0+count)right=x0+count;
+        {KSN_PROF_BEGIN();
+        if(g_ksn_row_coverage){
+            ksn_x_run runs[KSN_ROW_RUNS];
+            unsigned run_count=coverage_runs(command,py,left,right,runs);
+            for(unsigned run=0;run<run_count;run++)for(int x=runs[run].x0;x<runs[run].x1;x++)
+                fold_pixel(acc,&provenance,command,coverage,x-x0,x,py,has_dither,child_dither);
+        }else for(int x=left;x<right;x++)if(covers(command,x,py))
+            fold_pixel(acc,&provenance,command,coverage,x-x0,x,py,has_dither,child_dither);
+        KSN_PROF_END(blend);}
+    }
+    /* The group's own stage: the pre-3c `group_over`, on the folded accumulator.
+     * alpha == 0 leaves the pixel alone, which is the old chain's early return. */
+    {KSN_PROF_BEGIN();
+    for(int i=0;i<count;i++){
+        unsigned alpha=mul8(acc->a[i],opacity);
+        if(!alpha)continue;
+        unsigned inverse=255-alpha;
+        uint16_t dst=pixels[(py-band_y)*240+x0+i];
+        unsigned dr=dst>>11,dg=(dst>>5)&63,db=dst&31;
+        dr=(dr<<3)|(dr>>2);dg=(dg<<2)|(dg>>4);db=(db<<3)|(db>>2);
+        unsigned r=clamp8(mul8(acc->r[i]>>8,opacity)+mul8(dr,inverse));
+        unsigned g=clamp8(mul8(acc->g[i]>>8,opacity)+mul8(dg,inverse));
+        unsigned b=clamp8(mul8(acc->b[i]>>8,opacity)+mul8(db,inverse));
+        bool dither=has_dither&&((provenance>>(unsigned)i)&1u)!=0;
+        pixels[(py-band_y)*240+x0+i]=pack565(r,g,b,dither,x0+i,py);
+    }
+    KSN_PROF_END(blend);}
+    return KSN_OK;
+}
 /* One row of a folded opaque group. A*src is the topmost covering child's own
  * channels and B and C are 0, so applying the group's map is one store; children
  * ascend and a later write wins, which is what "the tile's last writer" was.
@@ -1195,10 +1310,16 @@ static ksn_result group_opaque_row(ksn_core *core,ksn_tx ticket,ksn_layer layer,
 static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span_scratch *scratch,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
                                uint8_t opacity,int y,int rows,uint16_t *pixels){
     if(!opacity)return KSN_OK;
-    ksn_premultiplied_rgba8 tile[64]; /* 256 bytes; no full component surface. */
-    /* 2a's borrowed view and design-contracts' shared scratch in one body: the
-     * decoded form stays `const ksn_frame_view *`, and the span coverage word
-     * is scratch->text rather than a local (the 512-byte scratch budget). */
+    /* One 256-byte scratch for both arms, so the fold costs no stack: the
+     * isolated premultiplied tile of the pre-3c chain, or step 2's 8.8
+     * accumulators (3 x 32 x 2 + 32 = 224 B). Never both at once.
+     * The tile arm is written against a plain array, so `tile` names the union's
+     * tile member; the coverage word is scratch->text (2a retype), not a local. */
+    union {
+        ksn_premultiplied_rgba8 tile[64]; /* no full component surface. */
+        ksn_fold_acc acc;
+    } buf;
+    ksn_premultiplied_rgba8 *const tile=buf.tile;
     const ksn_frame_view *command;
     bool has_dither=false;
     /* Step 1's precondition, collected where the children are already in hand:
@@ -1252,6 +1373,23 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
     if(right>240)right=240;
     if(top<y)top=y;
     if(bottom>y+rows)bottom=y+rows;
+    /* Candidate 3c, step 2: every group, folded, with the colour chain's floor
+     * moved from 8 bits to 8.8 and the alpha chain and group stage kept exact.
+     * Bit-exact wherever every covering child is opaque (see group_folded_chunk),
+     * so the harness checks both this arm's exactness there and the pixels it
+     * moves elsewhere. 2 is not the default: this arm is the measured
+     * approximation, and it is reached only when the switch asks for it. */
+    if(g_ksn_group_affine>=2){
+        {KSN_PROF_BEGIN();
+        for(int py=top;py<bottom;py++)for(int x0=left;x0<right;x0+=32){
+            int count=right-x0;if(count>32)count=32;
+            ksn_result result=group_folded_chunk(core,text,ticket,layer,first,end,opacity,py,x0,y,
+                                                 count,scratch->text,has_dither,&buf.acc,pixels);
+            if(result!=KSN_OK)return result;
+        }
+        KSN_PROF_END(blend);}
+        return KSN_OK;
+    }
     /* Candidate 3c, step 1: opacity 255 over a chain of opaque children has no
      * floor to lose, so the tile, the per-child premultiply_over and the
      * per-pixel group_over are all dropped for one store per covered pixel. The
@@ -1282,7 +1420,7 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
 #ifdef KSN_TILE_COUNT
         ksn_tile_blocks++;
 #endif
-        memset(tile,0,sizeof(tile));
+        memset(buf.tile,0,sizeof(buf.tile));
         /* Boolean provenance survives partial coverage but is replaced by an
          * opaque child. Two words avoid variable 64-bit shifts on ESP32-S3. */
         uint32_t dither_pixels[2]={0,0};
