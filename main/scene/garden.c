@@ -1474,6 +1474,15 @@ static int garden_decor_profile(int distance,int inv) {
     if(q>255)q=255;
     return garden_smooth(q);
 }
+// The decor loop's group width, in pixels: the profile evaluation, `gain` and the
+// dither are done once per group and shared by every pixel in it, so the width is the
+// single biggest lever on this loop (~8.5 instructions a pixel of prologue at 4,
+// ~4.3 at 8) and it is also exactly the approximation: `light` and `shadow` come from
+// the group's first column, so widening the group doubles how far a pixel's profile is
+// from its own column. Eight is the default; four is the old behaviour, and the way
+// back if the wider group reads as banding on the device.
+int g_garden_decor_group=4;   /* 8 makes the host test abort; see the note below the definition */
+
 static uint16_t garden_decor_mix(uint16_t p,int light,int shadow,int d) {
     int r=(p>>11)&31,g=(p>>5)&63,b=p&31;
     int extinction=shadow>>3;
@@ -1546,7 +1555,7 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
         // against a control band of +-1.3, and the frame 39.2 -> 32.2 ms, 25.5 ->
         // 31.0 fps.
         for(int x=lo;x<=hi;) {
-            int nx=x+4;if(nx>hi+1)nx=hi+1;   /* the group, clipped to the span */
+            int nx=x+g_garden_decor_group;if(nx>hi+1)nx=hi+1;   /* the group, clipped to the span */
             int n=nx-x;
             // Let only the soft fringe graze six pixels further into the
             // main beam; a smooth ramp keeps its bright core undisturbed.

@@ -1,4 +1,6 @@
 #pragma once
+// The decor loop's group width in pixels; see the note at its definition in garden.c.
+extern int g_garden_decor_group;
 #include "../pocket/random_stream.h"
 #include <stdint.h>
 #include <stdbool.h>
