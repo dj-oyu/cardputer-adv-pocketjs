@@ -1,4 +1,5 @@
 #include "garden.h"
+#include "canopy_pie.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -238,21 +239,63 @@ garden_octave_lanes(int16_t *dens,int n,int rc0,int step,
 //   The `if(q>0)` disappears rather than becoming a mask: clamping q to zero
 //   gives f=0, and (A*256 + B*0)>>8 is A. Blending with zero alpha is the
 //   identity, so the branch is free to go.
+// TEMPORARY A/B switch for the exact scalar tweak below -- the canopy's f == 0
+// short circuit. Both arms have to run in one binary: the same kernel moves 15%
+// between builds from instruction-cache alignment alone (CLAUDE.md), and this
+// change is smaller than that. 1 is the shipping arm.
+// The other half of the change this was ported with, the unsigned support test in
+// the decor loop, has no counterpart in this tree: the decorative light here is
+// the grouped-by-four revision (its per-column terms are evaluated once per group
+// and the light and shadow reaches are never formed), so this file has no such
+// test to rewrite.
+int g_garden_scalar_tweaks=1;
+// The canopy blend on the PIE unit (scene/canopy_pie.c). Exact, so the picture
+// cannot move: the scalar tweak above skips work, this one changes which unit
+// does it. 0 selects the scalar statement below, and both arms live in one binary
+// for the same reason.
+int g_garden_canopy_pie=1;
+// One pixel of the canopy blend: the statement the kernel in scene/canopy_pie.c is
+// the lane version of. It is its own function because the kernel only takes whole
+// eight-pixel interiors, so the clipped span's head and tail come through here.
+static inline void garden_canopy_pixel(uint16_t *row,int x,int cx,int mhi,int mlo,
+                                       int qbase,int lr,int lg,int lb) {
+    int dx=x-cx,dx2=dx*dx;
+    int t=((dx2*16)*mhi+dx2*mlo)>>18;
+    int q=qbase-t;
+    if(q<0)q=0;
+    int f=(q*39322)>>16,g=256-f;
+    // f == 0 is the identity: with g == 256 every channel comes back unchanged
+    // (r*256>>8 == r), so this pixel's blend and store were a no-op. Rows near an
+    // ellipse's vertical edge spend most of their clipped span here, and the
+    // compare is one instruction against a load, ~20 instructions of blend and a
+    // store. The kernel has no branch to spend on it and stores the identity
+    // instead, which is the same bytes.
+    if(g_garden_scalar_tweaks&&!f)return;
+    unsigned a=row[x];
+    row[x]=(uint16_t)(((((a>>11)&31)*g+lr*f)>>8)*2048
+                     +((((a>>5)&63)*g+lg*f)>>8)*32
+                     +(((a&31)*g+lb*f)>>8));
+}
 static void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
                               uint16_t leafy) {
     int mhi=(mrr>>8)*16,mlo=mrr&255,qbase=256-qy;
     int lr=(leafy>>11)&31,lg=(leafy>>5)&63,lb=leafy&31;
-    for(int x=lo;x<=hi;x++) {
-        int dx=x-cx,dx2=dx*dx;
-        int t=((dx2*16)*mhi+dx2*mlo)>>18;
-        int q=qbase-t;
-        if(q<0)q=0;
-        int f=(q*39322)>>16,g=256-f;
-        unsigned a=row[x];
-        row[x]=(uint16_t)(((((a>>11)&31)*g+lr*f)>>8)*2048
-                         +((((a>>5)&63)*g+lg*f)>>8)*32
-                         +(((a&31)*g+lb*f)>>8));
+    if(g_garden_canopy_pie) {
+        // Where the ellipse was clipped is not where eight divides the row, so the
+        // kernel takes the first whole block that starts on an eight boundary and
+        // what is left at either end goes through the scalar statement above. The
+        // kernel asks nothing of the row pointer beyond x being a multiple of
+        // eight; every pixel it touches is inside |x - cx| <= rx, which is what
+        // the model sweeps.
+        int s=(lo+7)&~7,e=(hi+1)&~7;
+        if(e>s) {
+            canopy_pie(row+s,(e-s)>>3,cx,mrr,qy,leafy,s);
+            for(int x=lo;x<s;x++)garden_canopy_pixel(row,x,cx,mhi,mlo,qbase,lr,lg,lb);
+            for(int x=e;x<=hi;x++)garden_canopy_pixel(row,x,cx,mhi,mlo,qbase,lr,lg,lb);
+            return;
+        }
     }
+    for(int x=lo;x<=hi;x++)garden_canopy_pixel(row,x,cx,mhi,mlo,qbase,lr,lg,lb);
 }
 // One sunlight shoulder. The clamp replaces the scalar `if`: at |d| == w the
 // rounded-up reciprocal makes s exactly 0, so an out-of-band column adds
@@ -1463,21 +1506,34 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
         if(lo<0)lo=0;
         if(hi>239)hi=239;
         int inv=garden_recip(radius,24),shadow_inv=garden_recip(shadow_radius,24);
-        for(int x=lo;x<=hi;x++) {
+        // Four columns at a time. Everything in this block except the mix is a
+        // function of x alone -- the protection ramp, the two profiles and the
+        // dither -- so it is evaluated once for the group and shared. The light is
+        // an effect and not geometry, so this changes its slope, not its shape:
+        // 13.6% of pixels move, 94% of those by one RGB565 level, the worst single
+        // pixel by four. Measured on the part, rays -5.0 ms/frame (median -4.7)
+        // against a control band of +-1.3, and the frame 39.2 -> 32.2 ms, 25.5 ->
+        // 31.0 fps.
+        for(int x=lo;x<=hi;) {
+            int nx=x+4;if(nx>hi+1)nx=hi+1;   /* the group, clipped to the span */
+            int n=nx-x;
             // Let only the soft fringe graze six pixels further into the
             // main beam; a smooth ramp keeps its bright core undisturbed.
+            // Attenuate the existing channels, never paint a coloured outline.
+            // Q8 arithmetic approximates transmission plus warm in-scattering;
+            // one final spatially dithered pack avoids repeated RGB565 rounding.
             int gap=abs(x-center)-(half/2-6);
-            if(gap<=0)continue;
+            if(gap<=0)goto grp;
             int protect=gap<24?garden_smooth(gap*255/24):255;
             int gain=strength*protect>>8;
             int light=garden_decor_profile(x*256-cx,inv)*gain>>8;
             int shadow=garden_decor_profile(x*256-shadow_cx,shadow_inv)*gain>>8;
-            if(!light&&!shadow)continue;
-            // Attenuate the existing channels, never paint a coloured outline.
-            // Q8 arithmetic approximates transmission plus warm in-scattering;
-            // one final spatially dithered pack avoids repeated RGB565 rounding.
+            if(!light&&!shadow)goto grp;
             int d= garden_dither(x,y)*64+32;
-            row[x]=garden_decor_mix(row[x],light,shadow,d);
+            /* Only the mix is per pixel: it is the one term that reads the row. */
+            for(int j=0;j<n;j++)row[x+j]=garden_decor_mix(row[x+j],light,shadow,d);
+        grp:
+            x=nx;
         }
     }
 }
