@@ -310,3 +310,157 @@ predicate arm covers=1744560` → **`1569456`** になる（runs 腕の `runs=25
    `group_pixel` を 1 本に統合したことがその 1 箇所に重なる。合意した順序は
    「タイル（この段）→ affine」。
 
+
+## 6. 第 3 次統合（旧基点の 5 分岐: 行テーブル・LUT・アフィン畳み・alpha256・可視しきい値）
+
+`perf/kasane-opt` の基点を最新（`origin/vm/design-contracts` `d2d4d21`）へ進めたうえで、
+旧基点（`87eb92a`、design-contracts の統合前）から切られていた 5 分岐
+（`perf/kasane-rowtable` / `-lut` / `-affine` / `-alpha256` / `-visible`）を取り込んだ段。
+手順は前 2 段と同じ: 1 本ずつ cherry-pick し、**両側を残して**衝突を解き、
+その木で契約スイート（`/tmp` の写しから sanitizer の旗の文字列だけ外したもの、§0）と
+**分岐が持つ専用ハーネス**を回し、分岐の報告値が動かないことを確かめてから次へ進んだ。
+
+### 6.1 統合の順序と各段の結果
+
+| 段 | 分岐とコミット | 元 → 統合後 | 衝突 | その段で走らせたもの |
+| ---: | --- | --- | ---: | --- |
+| 0 | 基点（`origin/vm/design-contracts` `d2d4d21`、4 コミット） | — → `5019bf8` | 0 | suite（exit 0・66 PASS / 0 FAIL） |
+| 1 | `perf/kasane-rowtable`: `0896f47` | `f7e46dc` | 2 | suite + `test_row_table`（4 アーム・120 フレーム・起動回数腕） |
+| 2 | `perf/kasane-lut`: `ce56f69` / `12ecdd5` ＋ 結線 | `930e0bc` / `983268b` / `1688e7b` | 4 | suite（exit 0・66 PASS）+ `test_blend_lut`（全パラメータ掃引・起動回数腕） |
+| 3 | `perf/kasane-affine`: `1b643a2` / `eb22dfb` | `b6a8211` / `7795bb9` | 4 + 4 | suite（66 PASS）+ `run_group_affine.sh`（2 段）+ `run_group_tile.sh` |
+| 4 | `perf/kasane-alpha256`: `58b717a` ＋ 結線 | `1af4a90` / `21bd6cf` | 1 | suite（66 PASS）+ `run_models.py scale256`（exit 0・mismatches=0） |
+| 5 | `perf/kasane-visible`: `286573d` ＋ 結線 | `9ad51f2` / `607a897` | 3 | suite（exit 0・69 PASS / 0 FAIL、可視しきい値の 2 腕を含む） |
+
+段 0 の基点統合は衝突 0 だったが、前段と同じ手順で自動併合を手検査した:
+`main/CMakeLists.txt` が `SYSTEM_SOURCES` に `sys_notify.c` / `sys_timer.c` /
+`pocket_clock.c` を足すだけで `KASANE_SOURCES` に触っていないこと（`ksn_blend_pie.c` は
+未結線のまま）、`docs/kasane/*.md` は基点側の文書更新だけであること、そして**この統合が
+触ったファイル（`main/ui/kasane/*`、`main/app_session.c`、`tools/kasane_contract/*`、
+`docs/perf/*`）は基点側の 4 コミットから 1 つも触られていない**こと（差分の名前で確認）。
+
+### 6.2 衝突と解決（すべて両側を残した）
+
+| # | ファイル | 何が衝突したか | 解いた形 |
+| --- | --- | --- | --- |
+| 6.2.1 | `ksn_render.h`（`ce56f69` / `1b643a2` / `58b717a`） | 新しい切替の extern がどれも同じ位置（`g_ksn_row_coverage` の後ろ）に挿入された | 統合木側の塊（行テーブル、LUT の 2 つ）を先に、先方の塊（`g_ksn_group_affine`、`g_ksn_scale256`）をその後に並べた。落ちた切替は 1 つも無い |
+| 6.2.2 | `ksn_render.c`（`ce56f69`）直接経路の合成ループ | 統合木側は LUT の腕（定色の行を引く）／行テーブルの腕／画素ごとの `sample` の 3 段、先方は LUT だけの 2 段 | **LUT を先、行テーブルを後ろ**にして 3 段を保った。LUT は定色コマンド（`one_color`）でしか成立せず、その行は行テーブルが持つ値と同じ色なので、どちらの腕でも画素は一致する |
+| 6.2.3 | `ksn_render.c`（`ce56f69`）TEXT ループ | 統合木側は `scratch.text[i]`（2a の retype で共有スクラッチ）、先方はローカルの `coverage[64]` | 共有スクラッチのまま。ローカル配列は復活させない（512 B のスクラッチ予算） |
+| 6.2.4 | `ksn_render.c` / `ksn_render.h` **`group_pixel` の名前の衝突**（`1b643a2`） | どちらも同名・同目的で署名が違う（統合木側は `command` と `coverage` の値、先方は `coverage` のポインタ） | §5.2.5 で決めたとおり**統合木側の定義 1 つ**を残した（`objdump` がその名前で計測する側）。先方の呼び出しは最初からこの定義を使っているので、この段では追加の寄せは不要だった |
+| 6.2.5 | `ksn_render.c`（`1b643a2`）前提走査 | 統合木側は子ごとに到達表 `reach[]` を埋める（見えない子も箱 `{0,0,0,0}` で 1 エントリ）、先方は見えない子を `continue` で落として `opaque_chain` を集める | 到達表を残したまま、`opaque_chain` の判定を `if(command->visible&&d->opacity)` の内側に置いた。`continue` は採らない（表の添字が子の添字と一致している必要がある） |
+| 6.2.6 | `ksn_render.c`（`1b643a2`）反復側 | 統合木側のタイルループ（ブロック幅・到達判定）と、先方の畳みの早期 return | 畳み（`g_ksn_group_affine==1` かつ `opacity==255` かつ `opaque_chain`）をタイルループの**前**に置いて早期 return。畳みが成立する場面ではタイルは使われないが、画素集合と算術はスイッチ OFF の腕と同じもので、ハーネスが両腕を全画素比較している |
+| 6.2.7 | `ksn_render.c`（`eb22dfb`）スクラッチ | 先方は `union {tile; ksn_fold_acc}` を `scratch` の名で導入（関数引数の `ksn_span_scratch *scratch` と同名になる） | union を採り、名前を **`buf`** にした。タイル側の本文は配列名 `tile` で書かれているので `ksn_premultiplied_rgba8 *const tile=buf.tile;` を 1 行置いて本文は無改変。`coverage[64]` は復活させない |
+| 6.2.8 | `ksn_render.c`（`eb22dfb`）合成ループ | 統合木側の行テーブル・ブロック幅・`tile_row_over` と、先方の 64 固定ループ・インラインの `group_over` | 統合木側を残した（同じ画素集合を別の算術で書いたもの。行テーブルと LUT は統合木側にしかない）。`memset` の対象だけ `buf.tile` に合わせた |
+| 6.2.9 | `ksn_render.c`（`286573d`）`group_over` ほか 2 箇所 | 統合木側の 3 箇所（`g_ksn_scale256` の分岐、LUT／行テーブルを持つ合成ループ、TEXT ループ）と、先方の計数呼び出し | 計数ブロックを `scale256` の分岐の後ろへ。合成と TEXT は統合木側の構造を保ち、**連鎖の呼び出しだけを `KSN_BLEND`（計数ビルドでだけ計器を通るマクロ）へ通した** |
+
+段 2 では `blend_lut_build_row` に 1 つ足した（6.3 の末尾）。段 5 では
+`tools/kasane_contract/test_visible_skip.c` に 1 つ足した（6.4）。
+どちらも分岐のファイルそのものへの適応で、コミットメッセージに理由を書いてある。
+
+### 6.3 統合後のハーネス出力（分岐の報告と一致したもの）
+
+- `row table PASS: every arm byte-identical over the whole panel`、
+  `rolling hashes 1a4ab349`（4 アーム同一）、
+  `sample calls in one full REPLACE frame: (1,0) reference=18930 (1,1) table=28
+  (0,0) predicate=18930 (0,1) predicate=18930; row builds: 328/328/0/0`。
+- `blend lut: solid arm, 214499328 per-channel comparisons over 1110016
+  (alpha, value, threshold) parameters, 72417280 whole words ...: 0 moved, worst
+  channel step 0`、`alpha arm 16 levels, 8355840 ...: 2047578 moved (24.505%),
+  worst channel step 2`、`120 frames ... rolling hash 1c401d77`（solid は
+  フレーム一致）、起動回数腕は `1,258,651 → 456,797 → 161,280`（旧連鎖）、
+  `0 → 801,854 → 1,097,371`（表）、`0 → 2,522 → 6,362`（行生成）。
+- `group affine: folded arm and isolated tile chain agree on 6966000 pixels ...;
+  rolling hash 3db0d222`（第 1 段）、段 2 は `7b68ea32`・
+  `step 2 moved 86650 of 3888000 pixels over the parameter space (worst 8-bit
+  channel step r/g/b=9/5/9, worst 565 step 1; 53498 of 224736 pixels under a
+  covering child with a<255 moved, 0 elsewhere)`、
+  `folded rows: switch off=0, on=10575`。`run_group_tile.sh` も第 2 段の値で
+  PASS（`waste 27.25%`、`blocks 214564 skipped 39773`、`smooth blocks 84118
+  pixels 3427220`）。
+- `run_models.py scale256` は exit 0・`mismatches=0 / all models agree`。
+  `120 full REPLACE frames ...: 3888000 pixels, moved 140838 (3.622%), frames
+  with a moved pixel 120, worst 565 step r/g/b=0/1/1`、`old path`: `OFF arm over
+  256 opacities x 8 colours x 256 words x 16 phases (8388608 calls) equals the
+  pre-change reference: 0 differences`、群の経路は最悪 2 段差（α は両アーム不変）。
+- 可視しきい値（計数ビルド）: `CORPUS 5 scenes x 120 frames, 11221760 blend
+  pixels (empty=0 already free): step=1.2% bound=6.0% both=6.7% exact=0.5%;
+  moved(both)=74931 worst(both)=1 moved(exact)=0`、種別では `TEXT both 28.0%`、
+  `RECT` / `ROUND_RECT` / `STROKE` は 0%、`GRADIENT 0.9%`（dither 2.1%）、
+  `GROUP 3.5%`。**計器あり／なしの 5 シーン・ハッシュが一致**（`diff` で検査）＝
+  「計器は画素を変えない」が主張ではなく差分になっている。
+
+**段 2 で足した適応（LUT と粗スケールの整合）**: `blend_lut_build_row` は
+`blend()` の式を書き写しているので、`g_ksn_scale256` にも従わせた（src と dst の
+重みは相補なので、粗いアームでは `mix256` がそのまま使える）。これが無いと
+「表は厳密・比較相手の連鎖は粗い」になり、solid 腕が粗いアーム自身の 1 段差を
+「移動」として報告する。検査は run.sh の新しい腕（`-DKSN_SCALE256_ARM=1` で
+`test_blend_lut` を再ビルド）で、**solid は両アームで 0 移動**（強制した粗いアームは
+`214,499,328` 比較で移動 0・最悪段差 0、ハッシュ `2e2c06a8`）。
+
+### 6.4 統合の帰結として直したもの（分岐のハーネス側）
+
+可視しきい値の計数器は連鎖の中（`blend`、`group_over`）に居る。出荷既定の LUT
+（`g_ksn_blend_lut=1`）は定色コマンドを連鎖に入れずに答えるため、**固体の種別
+（RECT / ROUND_RECT / STROKE）が計数 0 画素**になり、このハーネスの非空虚性チェック
+（種別ごとに 1 画素以上）で落ちる。このハーネスが測っているのは「連鎖の画素に対する
+閾値の当たり率」なので、ハーネス側で LUT を切った（両ビルドで同じ腕にして、
+「計器は画素を変えない」のシーン・ハッシュ比較も成立させる）。行テーブルは連鎖では
+なく `sample()` を置き換えるので切っていない（計数の母集団は変わらない）。
+この 1 行を入れると CORPUS の数値は分岐の報告値と一致する（6.3）。
+
+### 6.5 計器の値が統合で動いた箇所
+
+- `run_models.py scale256` が印字する 1 フレームの内訳: 分岐の報告は
+  `blend 497 / read 560`、統合木では **`blend 476 / read 518`**。行テーブルと LUT が
+  画素あたりの `sample()` 呼び出しを減らしたぶんである。**画素の主張は変わらない**
+  （同じモデルが「既定アームは変更前の式と一致」を 8,388,608 呼び出しで検査している）。
+- それ以外に動いた計器の値は無い（`test_coverage_runs` の `predicate arm covers=16184`、
+  `test_row_table` の起動回数、`test_blend_lut` の 3 アーム、タイルの全項目が
+  段 1〜2 と同じ値のまま）。
+
+### 6.6 統合木のオブジェクト（xtensa-esp32s3-elf-gcc 15.2.0、`-Os`、`size -A`）
+
+`main/ui/kasane/ksn_render.c` を単体でコンパイルした値。この段が触ったのは
+`ksn_render.c` / `ksn_render.h` と `tools/kasane_contract/*`、`docs/*` だけなので、
+他のオブジェクト（`ksn_pet.o` など）は段 5 の値のまま。
+
+| 段 | `.text` | `.rodata` | `.data` | `.bss` |
+| --- | ---: | ---: | ---: | ---: |
+| `2ed9ed6`（第 2 次統合の先端） | 9,475 | 586 | 24 | 6,952 |
+| 段 0（基点を `d2d4d21` へ） | 9,475 | 586 | 24 | 6,952 |
+| 段 1 rowtable | 10,263 | **586** | 28 | 7,928 |
+| 段 2 lut | 10,951 | **586** | 32 | 12,044 |
+| 段 3 affine（2 段） | 12,655 | **586** | 36 | 12,044 |
+| 段 4 alpha256 | 12,655 | **586** | 36 | 12,044 |
+| 段 5 visible（計数は `-DKSN_COUNT_VISIBLE` の中だけ） | 13,039 | **586** | 36 | 12,048 |
+
+- **`.rodata` は 586 B のまま**（flash に静的表を 1 つも足していない）。増えたのは
+  `.text`（実行時構築のコードと切替）、`.data`（切替の既定値）、`.bss`（SRAM）だけ:
+  `row_table` 976 B（`0x3d0`）、`blend_lut_solid` 2,048 B、`blend_lut_alpha` 2,048 B、
+  鍵 2 × 8 B、`g_anchor_row` 308 B（第 2 次統合）、PET の行キャッシュ 8,208 B（同）。
+- `ksn_render_rects` のスタック（`-fstack-usage`）: **880 B で段 0〜5 を通して不変**。
+  アフィン段の union（タイル 256 B / 8.8 アキュムレータ 224 B）を採ったので、
+  畳みを足してもスタックは増えていない（6.2.7）。
+- 未定義シンボルは `__divdi3` のみ（段 2 の anchor が消した `__moddi3` は出ない）。
+
+### 6.7 既定値（統合後の全一覧）
+
+**統合で既定を 1 つも変えていない。** 各分岐が自分の木で決めた値をそのまま採用した:
+`g_ksn_prof=0`、`g_ksn_decode_once=1`、`g_ksn_row_coverage=1`、`g_ksn_row_table=1`、
+`g_ksn_blend_lut=1`、`g_ksn_blend_lut_alpha=0`、`g_ksn_group_affine=1`（近似の 2 は
+分岐の判断で既定 OFF）、`g_ksn_scale256=0`（厳密経路）、
+`g_ksn_image_rotate_step=1` / `_anchor=1` / `_reject=1`、`g_ksn_image_stretch_step=1`、
+`g_ksn_pet_row_cache=1`、`g_ksn_tile_pixels=64`、`g_ksn_tile_reach=1`、
+`g_ksn_tile_smooth=1`。可視しきい値スキップは**実装を持たない**（計数のみ、既定の
+ビルドでは 1 命令も入らない）。
+
+### 6.8 まだ負っているもの（この段で閉じていない）
+
+1. **sanitizer の腕**（§0）。この段も `/tmp` の写しで旗の文字列だけ外して走らせた。
+2. **実機の時間**。`/dev/ttyACM0` が無い（ノード自体が無い）ため、この段も時間の
+   主張はしていない。実機の A/B（同一バイナリでスイッチを窓ごとに落とす）は
+   挿し直しのあとの仕事。
+3. **`ksn_blend_pie.c` のカーネルは厳密な `/255` を再現する**。粗いアーム
+   （`g_ksn_scale256=1`）を既定にするなら、カーネル側も粗い版に揃える必要がある
+   （`kasane-alpha256.md` の注記のまま。この統合では既定を動かしていないので未処理）。
+4. **`run_group_tile.sh` は run.sh に結線していない**（前段からの持ち越し。
+   sanitizer が回るセッションの仕事）。
