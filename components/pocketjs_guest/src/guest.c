@@ -75,10 +75,23 @@ unsigned pocketjs_guest_vmprobe_drain_calls(uint16_t *out, unsigned cap,
 }
 #endif
 
+/* The header in front of every guest allocation records the requested size.
+ * On the part it is one size_t, 4 B: the union with max_align_t made it 16 B
+ * to buy an 8-byte alignment that the IDF tlsf beneath never provides (its
+ * blocks are 4-aligned; vm-ledger/06), so the other 12 B bought nothing and
+ * came out of the system heap once per live block (spec vm/backlog.md item 8).
+ * Host builds keep the union: there malloc and QuickJS do rely on
+ * max_align_t alignment. */
+#ifdef ESP_PLATFORM
+typedef struct {
+  size_t size;
+} allocation_header_t;
+#else
 typedef union {
   size_t size;
   max_align_t alignment;
 } allocation_header_t;
+#endif
 
 typedef struct rejection {
   JSValue promise;
