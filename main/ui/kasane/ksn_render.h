@@ -74,8 +74,10 @@ extern int g_ksn_row_coverage;
  * channel, applied as a store -- instead of the isolated premultiplied tile
  * chain; 0 keeps the pre-3c chain (tile, premultiply_over, group_over). The fold
  * moves no pixel: every mul8 on the way is exact for these operands. Step 2 of
- * the same workstream extends the map to non-opaque children, where dropping the
- * intermediate floors does move pixels; that arm is 2 and is NOT the default. */
+ * the same workstream extends the map to non-opaque chains, where dropping the
+ * intermediate floors does move pixels; that arm is 2 and is NOT the default
+ * (measured: 2.2% of pixels, never more than one 5/6/5 level, and no instruction
+ * win -- see the document). */
 extern int g_ksn_group_affine;
 #ifdef __cplusplus
 }

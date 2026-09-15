@@ -388,6 +388,139 @@ static int nonfoldable_scenes(void){
     return 0;
 }
 /* ---- 3: PATCH/full invariance and 120 frames ----------------------------- */
+/* ---- step 2: what the approximate fold moves ----------------------------- */
+/* The fold's second step drops the chain's 8-bit floors, so pixels can move.
+ * This section measures that, in the same binary and against the pre-3c arm:
+ * how many pixels, the worst channel step (8-bit, after expanding both 565
+ * words) and the worst 565 step, and which pixels -- classified by the covering
+ * children the scene itself names, because the claim is "a pixel can only move
+ * under a child with a < 255, and step 2 is exact on the chains step 1 folds". */
+static unsigned moved_pixels,approx_pixels,worst_step_r,worst_step_g,worst_step_b;
+static unsigned worst_565,class_moved[4],class_pixels[4],nonopaque_moved,nonopaque_pixels;
+static unsigned moved_unexplained;
+static void unpack565(uint16_t value,unsigned out[3]){
+    unsigned r=value>>11,g=(value>>5)&63,b=value&31;
+    out[0]=(r<<3)|(r>>2);out[1]=(g<<2)|(g>>4);out[2]=(b<<3)|(b>>2);
+}
+/* The child's own alpha at this pixel as the chain defines it: coverage-scaled
+ * for TEXT (which this reference cannot model, so TEXT scenes are not
+ * classified), mul8(color alpha, child opacity) otherwise. */
+static bool child_semi(const ksn_draw *d,int x,int y){
+    if(d->kind==KSN_TEXT)return true; /* unmodelled: treat as if it could move */
+    unsigned rgba[4];sample_rgba(d,x,y,rgba);
+    return product(rgba[3],d->opacity)!=255;
+}
+static void measure_move(const uint16_t *old,const uint16_t *folded,bool classify,const char *what){
+    static unsigned reported;
+    for(int y=0;y<135;y++)for(int x=0;x<240;x++){
+        uint16_t a=old[y*240+x],b=folded[y*240+x];
+        unsigned covering=0;bool semi=false;
+        if(classify){
+            for(unsigned i=0;i<ref_count;i++)if(ref_visible[i]&&ref_scene[i].opacity&&
+                                             covered(&ref_scene[i],x,y)){
+                covering++;
+                if(child_semi(&ref_scene[i],x,y))semi=true;
+            }
+            class_pixels[covering>2?3:covering]++;
+            if(semi)nonopaque_pixels++;
+        }
+        if(a==b)continue;
+        moved_pixels++;
+        if(classify){
+            unsigned cls=covering>2?3:covering;
+            class_moved[cls]++;if(semi)nonopaque_moved++;else moved_unexplained++;
+            if(!semi&&reported<4){reported++;fprintf(stderr,"%s: moved at %d,%d under %u opaque "
+                "covering child(ren): %04x vs %04x\n",what,x,y,covering,a,b);}
+        }
+        unsigned pa[3],pb[3];unpack565(a,pa);unpack565(b,pb);
+        unsigned dr=pa[0]>pb[0]?pa[0]-pb[0]:pb[0]-pa[0];
+        unsigned dg=pa[1]>pb[1]?pa[1]-pb[1]:pb[1]-pa[1];
+        unsigned db=pa[2]>pb[2]?pa[2]-pb[2]:pb[2]-pa[2];
+        if(dr>worst_step_r)worst_step_r=dr;
+        if(dg>worst_step_g)worst_step_g=dg;
+        if(db>worst_step_b)worst_step_b=db;
+        unsigned sa=a>>11,sb=b>>11,ga=(a>>5)&63,gb=(b>>5)&63,ba=a&31,bb=b&31;
+        unsigned step=sa>sb?sa-sb:sb-sa;
+        unsigned gstep=ga>gb?ga-gb:gb-ga;
+        unsigned bstep=ba>bb?ba-bb:bb-ba;
+        if(gstep>step)step=gstep;
+        if(bstep>step)step=bstep;
+        if(step>worst_565)worst_565=step;
+    }
+}
+static unsigned approximate_pixels;
+static int approx_scenes(void){
+    /* The chains that step 1 folds: step 2 has to be exact on them, whatever the
+     * group's opacity is (its alpha chain and group stage are the old formulas). */
+    const ksn_draw opaque_group[]={
+        {.kind=KSN_RECT,.bounds={4,4,140,44},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0xd98672ff,0,0}},
+        {.kind=KSN_ROUND_RECT,.bounds={38,10,90,36},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0x357ecbff,6,0}},
+        {.kind=KSN_STROKE,.bounds={10,6,232,129},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0x80b5cfff,0,2}},
+        {.kind=KSN_GRADIENT,.bounds={9,5,138,40},.clip={11,7,130,34},.opacity=255,
+         .data.gradient={0x253849ff,0xe0a972ff,1,0,true}},
+        {.kind=KSN_RECT,.bounds={100,20,130,40},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0x123456ff,0,0}}};
+    /* ... and the chains it does not: one semi-transparent child at a time, a
+     * fully mixed scene, an alpha ramp, and a TEXT child. */
+    const ksn_draw semi_first[]={
+        {.kind=KSN_RECT,.bounds={4,4,140,44},.clip={0,0,240,135},.opacity=200,
+         .data.shape={0xd98672d0,0,0}},
+        {.kind=KSN_ROUND_RECT,.bounds={38,10,90,36},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0x357ecbff,6,0}},
+        {.kind=KSN_RECT,.bounds={100,20,130,40},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0x123456ff,0,0}}};
+    const ksn_draw semi_last[]={
+        {.kind=KSN_RECT,.bounds={4,4,140,44},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0xd98672ff,0,0}},
+        {.kind=KSN_ROUND_RECT,.bounds={38,10,90,36},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0x357ecbff,6,0}},
+        {.kind=KSN_RECT,.bounds={100,20,130,40},.clip={0,0,240,135},.opacity=211,
+         .data.shape={0x12345680,0,0}}};
+    const ksn_draw ramp[]={
+        {.kind=KSN_GRADIENT,.bounds={6,6,234,120},.clip={0,0,240,135},.opacity=255,
+         .data.gradient={0x7788ff00,0xffeeaa88,0,0,true}},
+        {.kind=KSN_ROUND_RECT,.bounds={40,30,200,90},.clip={0,0,240,135},.opacity=219,
+         .data.shape={0x357ecbbb,7,0}}};
+    const ksn_draw text_group[]={
+        {.kind=KSN_RECT,.bounds={4,4,180,60},.clip={0,0,240,135},.opacity=255,
+         .data.shape={0xd98672ff,0,0}},
+        {.kind=KSN_TEXT,.bounds={-3,5,145,29},.clip={2,7,77,22},.opacity=255,
+         .data.text={.utf8=title_text,.bytes=sizeof(title_text)-1,.capacity=64,
+                     .font=KSN_BODY,.color=0xa15f3780}}};
+    struct { const ksn_draw *draws; unsigned count; uint8_t opacity; bool classify;
+             const char *name; } cases[]={
+        {opaque_group,COUNT(opaque_group),255,true,"opaque chain"},
+        {opaque_group,COUNT(opaque_group),254,true,"opaque chain, group 254"},
+        {opaque_group,COUNT(opaque_group),1,true,"opaque chain, group 1"},
+        {semi_first,COUNT(semi_first),255,true,"semi-transparent first child"},
+        {semi_last,COUNT(semi_last),255,true,"semi-transparent last child"},
+        {ramp,COUNT(ramp),255,true,"alpha ramp + translucent round rect"},
+        {ramp,COUNT(ramp),128,true,"alpha ramp + translucent round rect, group 128"},
+        {text_group,COUNT(text_group),255,false,"TEXT child"},
+        {text_group,COUNT(text_group),200,false,"TEXT child, group 200"}};
+    const int origins[4][2]={{0,0},{1,2},{3,3},{-20,-12}};
+    for(unsigned c=0;c<COUNT(cases);c++)for(unsigned o=0;o<COUNT(origins);o++){
+        memcpy(scene,cases[c].draws,cases[c].count*sizeof(ksn_draw));
+        scene_count=cases[c].count;
+        for(unsigned i=0;i<scene_count;i++)visible[i]=true;
+        translate(origins[o][0],origins[o][1]);
+        g_ksn_group_affine=0;
+        ref_scene=scene;ref_visible=visible;ref_count=scene_count;ref_opacity=cases[c].opacity;
+        ref_background=0x315d7bff;
+        CHECK(render_scene(scene,visible,scene_count,cases[c].opacity,0x315d7bff,0,left_arm)==0);
+        CHECK(render_scene(scene,visible,scene_count,cases[c].opacity,0x315d7bff,2,right_arm)==0);
+        /* ref_* still names the translated scene the two arms just rendered, so
+         * measure_move classifies pixels against the same geometry. */
+        measure_move(left_arm,right_arm,cases[c].classify,cases[c].name);
+        approximate_pixels+=240u*135u;
+    }
+    CHECK(moved_unexplained==0);
+    CHECK(worst_565<=1);   /* one 5/6/5 level is the whole of it */
+    return 0;
+}
 static ksn_cache cache;
 static ksn_cache_command_block cache_commands;
 static ksn_cache_text_block cache_text;
@@ -468,13 +601,18 @@ static const ksn_draw frame_scene[]={
      .data.text={.utf8=title_text,.bytes=sizeof(title_text)-1,.capacity=24,
                  .font=KSN_CAPTION,.color=0xa8d8efff}}};
 #define FRAMES 120
-static uint32_t frame_hash[2][FRAMES],arm_hash[2];
+static uint32_t frame_hash[3][FRAMES],arm_hash[3];
+/* The pre-3c arm's own frames, so the approximate arm can be measured frame by
+ * frame in the same run order (7.8 MB of host memory; a test-static panel is
+ * what the existing harnesses already use). */
+static uint16_t frame_store[FRAMES][240*135];
+static unsigned frame_moved[FRAMES];
 static uint32_t hash_panel(void){
     uint32_t hash=2166136261u;
     for(unsigned i=0;i<240*135;i++){hash^=panel[i];hash*=16777619u;}
     return hash;
 }
-static int run_frames(unsigned arm){
+static int run_frames(unsigned arm,uint16_t (*store)[240*135],bool measure){
     g_ksn_group_affine=arm;
     ksn_core_init(&core);ksn_cache_init(&cache);
     ksn_client app=ksn_core_client(&core,KSN_APP);ksn_tx tx;ksn_ref refs[6];
@@ -533,8 +671,14 @@ static int run_frames(unsigned arm){
         CHECK(ksn_core_frame(&core,&frame)==KSN_OK);
         CHECK(ksn_render_rects(&core,&display,&stats)==KSN_OK);
         CHECK(ksn_cache_resolve(&cache,&core,frame.ticket,true)==KSN_OK);
-        if(!tick||tick%17==0){CHECK(stats.transferred_bytes==64800);frames_full++;}
+        if((!tick||tick%17==0)&&arm<2){CHECK(stats.transferred_bytes==64800);frames_full++;}
         frame_hash[arm][tick]=hash_panel();
+        if(store&&arm==0)memcpy(store[tick],panel,sizeof(panel));
+        else if(measure){
+            unsigned before=moved_pixels;
+            measure_move(store[tick],panel,false,"120 frames");
+            frame_moved[tick]=moved_pixels-before;
+        }
         arm_hash[arm]=arm_hash[arm]*31u+frame_hash[arm][tick];
     }
     return 0;
@@ -547,8 +691,10 @@ int main(void){
     CHECK(patch_and_full(255,&place)==0);
     place.opacity=254;
     CHECK(patch_and_full(254,&place)==0);
-    CHECK(run_frames(0)==0);
-    CHECK(run_frames(1)==0);
+    CHECK(approx_scenes()==0);
+    CHECK(run_frames(0,frame_store,false)==0);
+    CHECK(run_frames(1,NULL,false)==0);
+    CHECK(run_frames(2,frame_store,true)==0);
     for(unsigned tick=0;tick<FRAMES;tick++)if(frame_hash[0][tick]!=frame_hash[1][tick]){
         fprintf(stderr,"frame %u differs: old %08x folded %08x\n",tick,
                 frame_hash[0][tick],frame_hash[1][tick]);
@@ -557,8 +703,27 @@ int main(void){
     printf("group affine: folded arm and isolated tile chain agree on %u pixels "
            "(whole panel, independent scalar reference, both arms; %u dither differences)\n",
            compared_pixels+nonfold_pixels,ref_dither_differences);
-    printf("group affine: %u frames identical both ways, %u of them full 64,800-byte "
-           "repaints (rolling hash %08x)\n",FRAMES,frames_full,arm_hash[1]);
+    printf("group affine: %u frames identical both ways (arms 0/1), %u of them full "
+           "64,800-byte repaints (rolling hash %08x); the measured arm 2 has its own "
+           "hash %08x\n",FRAMES,frames_full,arm_hash[1],arm_hash[2]);
+    printf("group affine: step 2 moved %u of %u pixels over the parameter space "
+           "(worst 8-bit channel step r/g/b=%u/%u/%u, worst 565 step %u; %u of %u "
+           "pixels under a covering child with a<255 moved, %u elsewhere)\n",
+           moved_pixels,approx_pixels+FRAMES*240u*135u,worst_step_r,worst_step_g,worst_step_b,
+           worst_565,nonopaque_moved,nonopaque_pixels,moved_unexplained);
+    printf("group affine: step 2 covering-child classes (moved/total): none=%u/%u, "
+           "one=%u/%u, two=%u/%u, three+=%u/%u\n",
+           class_moved[0],class_pixels[0],class_moved[1],class_pixels[1],
+           class_moved[2],class_pixels[2],class_moved[3],class_pixels[3]);
+    {
+        unsigned frames_with_move=0,worst_frame=0;
+        for(unsigned tick=0;tick<FRAMES;tick++){
+            if(frame_moved[tick])frames_with_move++;
+            if(frame_moved[tick]>worst_frame)worst_frame=frame_moved[tick];
+        }
+        printf("group affine: step 2 over 120 frames: %u frames moved a pixel, worst "
+               "frame %u of 32,400\n",frames_with_move,worst_frame);
+    }
 #ifdef KSN_AFFINE_COUNT
     printf("group affine: folded rows: switch off=%" PRIu64 ", on=%" PRIu64
            " (entries into group_opaque_row)\n",fold_rows[0],fold_rows[1]);
