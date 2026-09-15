@@ -12,7 +12,7 @@
  * CONFIG_POCKET_UI_TASK_CORE is what pins it, so the two options are not
  * independent -- refuse the combination at compile time rather than ship a
  * budget that is wrong once in a few thousand frames (measured (device):
- * 1 migration in 1,800 idle frames, docs/vm/vm-l1-clock.md sec.2). */
+ * 1 migration in 1,800 idle frames, docs/vm/vm-L1-report.md sec.8.8). */
 #if CONFIG_POCKET_UI_TASK_CORE < 0
 #error "CONFIG_POCKET_VM_CCOUNT needs CONFIG_POCKET_UI_TASK_CORE >= 0: CCOUNT is per core, so a task that migrates between two reads makes their difference meaningless."
 #endif

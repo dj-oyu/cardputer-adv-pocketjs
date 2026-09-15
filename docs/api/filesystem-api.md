@@ -1,6 +1,6 @@
-# ファイルシステムAPI仕様案 v0.1
+# ファイルシステムAPI仕様
 
-作成: 2026-09-06。**実装前の提案**。[共通API](common-api.md)の保存・ファイル節を具体化する。公開名は `pocket.fs` に統一し、初稿の `pocket.files` は採用しない。現行srcstoreをファイルシステムと見なさず、進行中のアプリ実装にも変更を要求しない。
+[共通API](common-api.md)7節（`pocket.fs`）を具体化する正規仕様。**`app:`/`assets:`/`sd:`の3ボリュームとも実装済み**（`main/pocket/pocket_fs.c`、`sd_media.c`、`sd_path.c`、`sd_picker.c`）。公開名は `pocket.fs` に統一し、初稿の `pocket.files` は採用しなかった。現行srcstore（`pocket.workspace`のバックエンド）はこの`pocket.fs`とは別の保存領域。未実装・未決の残件は[docs/api/backlog.md](backlog.md)を参照。
 
 ## 1. 役割と境界
 
@@ -223,15 +223,11 @@ nativeプレイヤーやcopyも同じ全体資源仲介で数え、JS用2件と�
 
 PC転送はcreate/replaceの一時版へ分割writeし、長さ・hash・対応版を検証してからcommitする。未完了ファイルを作品一覧やプレイヤーに公開しない。転送中断で既存ファイルを消さない。PCへSDをmass storageで共有する方式は別機能であり、初版bridgeに含めない。
 
-## 10. 実装順序と受け入れ試験
+## 10. 実装の到達点と受け入れ試験
 
-1. volume／path／所有者／世代／errorを定義し、assetsのstat/list/read/seekで読取経路を通す。
-2. SDはread-onlyで一覧・メディア読取・抜去を検証する。
-3. appの永続バックエンドを導入してcreate/replace/commit、空ファイル、quota、電源断復旧を検証する。
-4. SDのmkdir/copy/rename/remove/appendを段階追加し、保証レベルをvolumeに反映する。
-5. workspace・プレイヤー・PC bridgeを同じホスト層へ接続する。
+導入は5段階で計画した: (1) volume／path／所有者／世代／errorの定義とassetsの読取経路、(2) SD read-only、(3) appの永続バックエンド（create/replace/commit）、(4) SDのmkdir/copy/rename/remove/append、(5) workspace・プレイヤー・PC bridgeの接続。(1)〜(4)はSDのcopy以外実装済み、(5)も接続済み（common-api.md 7節・9節・13節）。未実装・未決の残件は[docs/api/backlog.md](backlog.md)に集約した。
 
-**実行されたものとされていないもの（2026-09-09）。** 実機で動いたのは**ドライバ**（マウント・アンマウント・ルート列挙・作成/書込/削除）と、2026-09-08時点の `stat`/`list` まで。**その後に足した面は一度も実機で走っていない**——picker、open、書込、commit、mkdir/remove/rename、volumes/space、pump、nativeのranged read。ホスト側で検査できるのは認可規則だけ（`tools/test_sd.c`）で、残りはカードが要る。`apps/pocketfs/README.md` にカードと人が要る5手順を書いた。
+**実機検証の到達点（2026-09-09時点の記録）。** 実機で動いたのは**ドライバ**（マウント・アンマウント・ルート列挙・作成/書込/削除）と、2026-09-08時点の `stat`/`list` まで。**その後に足した面は一度も実機で走っていない**——picker、open、書込、commit、mkdir/remove/rename、volumes/space、pump、nativeのranged read。ホスト側で検査できるのは認可規則だけ（`tools/test_sd.c`）で、残りはカードが要る。`apps/pocketfs/README.md` にカードと人が要る5手順を書いた。
 
 **400kHzが決めること。** バス帯域は約50,000バイト/秒。24kHzモノラルPCM16は48,000バイト/秒なので、**カードからの実時間ストリーミングは成立しない**（Opusなら約1/30で余裕がある）。2,048バイトの1回読みは約41msで、これは呼んだフレームの中で消える時間である。以上は**計算であって実測ではない**——この機体でカード読み出しを計時した者はまだいない。速度を上げるのは編集ではなく測定で、`main/pocket/sd_media.c` の `max_freq_khz` に理由を書いた。
 

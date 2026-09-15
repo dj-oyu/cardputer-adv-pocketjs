@@ -796,7 +796,7 @@ esp_err_t app_tick(uint32_t buttons) {
         if(!leaving && pocketjs_guest_jobs_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
             // FAIR ORDERING (Kconfig POCKET_VM_FAIR, off in the shipping
-            // build; docs/vm/vm-L1-report.md sec.10). The drain has yielded with
+            // build; docs/vm/vm-L1-report.md sec.9). The drain has yielded with
             // work still queued, and this is the one place compat ordering
             // refuses to let a host event through.
             //

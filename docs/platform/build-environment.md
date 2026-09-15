@@ -1,7 +1,7 @@
 # Windows / EIM 開発環境とビルド手順
 
-確認日: 2026-09-06。このPCはEIMでESP-IDFを管理する。PlatformIOのIDF・Pythonを本プロジェクトのビルドに混在させない。
-環境の起動と各ツールのバージョン、ファームウェアのビルド・実機書き込みを確認済み。機能の基準はcommit `2b053b7`。チュートリアル統合は進行中で、作業ツリーのビルド結果は統合後に記録する。
+このPCはEIMでESP-IDFを管理する。PlatformIOのIDF・Pythonを本プロジェクトのビルドに混在させない。
+環境の起動と各ツールのバージョン、ファームウェアのビルド・実機書き込みを確認済み。本書の手順自体はコード側の機能追加とは独立で、特定commitに紐付かない。
 
 ## このPCで確認した構成
 
@@ -19,8 +19,7 @@
 | CMake / Ninja | 4.0.3 / 1.12.1 |
 
 PocketJS調査版のIDF要求 `>=6.0,<6.2` にv6.0.1は含まれる。このバージョンを最初のビルド基準とする。
-依存取得、S3 Rustアーカイブ生成、ドライバー統合はM1でビルド・書き込み済み。[当時の結果](../archive/firmware-m1.md)を参照する。
-SKKの先行sizeof調査は別のGCC 14.2.0で実施しているため、取り込み時はこのEIM環境で再確認する。
+依存取得、S3 Rustアーカイブ生成、ドライバー統合はM1でビルド・書き込み済み（当時の知見は[archive/findings.md](../archive/findings.md)）。
 
 ## 方法A: 現在のPowerShellを有効化（確認済み）
 
@@ -132,9 +131,8 @@ IDF_PATHだけを書き換えてビルドしない。Python依存、compiler、C
 
 ## 検証記録の位置付け
 
-- 実行済み: EIM一覧、設定参照、dot-source、IDF/Python/GCC/CMake/Ninjaのバージョン、EIM runによるIDF/Python起動。
-- M1以降に実施済み: firmwareビルド、依存解決、Rustアーカイブ構築、flash、実機ログ。[M1記録](../archive/firmware-m1.md)と[XMB記録](../archive/xmb-research.md)を参照。
-- 現在の日本語入力・Playground構成、および進行中チュートリアルの性能は、各統合commitに対して別途記録する。過去のRAM/FPSを転用しない。
+- 実行済み: EIM一覧、設定参照、dot-source、IDF/Python/GCC/CMake/Ninjaのバージョン、EIM runによるIDF/Python起動、firmwareビルド、依存解決、Rustアーカイブ構築、flash、実機ログ。
+- 過去のRAM/FPS実測は当時のcommit時点のもので、現在の数値として転用しない。現在値は`tools/memlog.py`が持つ。
 - インストールや既存IDFの更新は行っていない。
 
 ## 設定記号は名前どおりに効かない——測る前にビルドを指紋する

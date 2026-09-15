@@ -530,7 +530,7 @@ typedef struct JSOOMCanary {
     size_t first_used;   /* malloc_state.malloc_size at that moment */
 } JSOOMCanary;
 JS_EXTERN void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out);
-/* D43 (docs/vm/vm-L2-design.md sec.13): return to the heap the empty frame
+/* D43 (docs/vm/vm-L2-design.md sec.7.3): return to the heap the empty frame
  * segments the segment stack kept for reuse during the turn that just ended.
  * Within a turn every segment a returning call empties is kept, so a call
  * depth that goes up and down across segment boundaries reuses them instead

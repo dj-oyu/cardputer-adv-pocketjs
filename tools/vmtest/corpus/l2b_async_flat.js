@@ -1,4 +1,4 @@
-// L2b-async (docs/vm-L2-design.md sec.12.2, D32-D34): an async function
+// L2b-async (docs/vm-L2-design.md sec.10.1, D32-D34): an async function
 // called from JS runs its first synchronous stretch as a flat frame in the
 // caller's C activation, and the promise it returns travels through the
 // caller's func slot instead of a C return value. Every line is a place

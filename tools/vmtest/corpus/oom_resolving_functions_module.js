@@ -1,5 +1,5 @@
 // vmrun-flags: --module --fail-alloc 1290
-// vmrun-skip-variants: asan-alloca o2-alloca -- no frame segment on these builds, so the target allocation is attempt 1289 and 1290 misses it (swept, docs/vm-L2-design.md sec.12.2)
+// vmrun-skip-variants: asan-alloca o2-alloca -- no frame segment on these builds, so the target allocation is attempt 1289 and 1290 misses it (swept, docs/vm-L2-design.md sec.10.3)
 // Regression for the SECOND instance of the resolving-functions double-free
 // (reports/upstream/quickjs-ng-resolving-functions-double-free.md, "A second
 // instance the fix also closes: module evaluation"). js_evaluate_module's

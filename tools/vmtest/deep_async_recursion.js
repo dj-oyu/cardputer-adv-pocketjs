@@ -1,4 +1,4 @@
-// D38 (docs/vm-L2-design.md sec.12.2): what ends an async function's
+// D38 (docs/vm-L2-design.md sec.10.3): what ends an async function's
 // synchronous recursion. `dive` awaits its own call, so every level is a
 // first synchronous stretch nested inside the previous one. On the flat
 // variants that stretch is a flat frame -- no C frame and no segment byte per

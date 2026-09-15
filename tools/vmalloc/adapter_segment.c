@@ -16,7 +16,7 @@
 // fault modes at the bottom of this file deliberately break so that the
 // checker can be shown to fire.
 //
-// Alignment follows docs/vm/vm-L2-design.md sec.3.3 (D7): segment bases on 16
+// Alignment follows docs/vm/vm-L2-design.md sec.2.2 (D7): segment bases on 16
 // bytes (so an L4 compactor can use 128-bit PIE transfers), individual
 // blocks on 4 (Xtensa has no 64-bit load; a JSValue at a 4-byte address is
 // two l32i.n either way). Block header is one uint32_t, so payloads land on

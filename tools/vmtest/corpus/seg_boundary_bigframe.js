@@ -14,7 +14,7 @@ print("big-locals", bigLocals());
 
 // Same idea via arguments: a call with N actual arguments grows arg_buf
 // instead of var_buf. build_arg_list enforces the same JS_MAX_LOCAL_VARS cap
-// (quickjs.c:42909-42914, docs/vm-L2-design.md sec.2's "apply is bounded").
+// (quickjs.c:42909-42914, docs/vm-L2-design.md sec.1.3 "apply is bounded").
 function sumArgs() {
   let s = 0;
   for (let i = 0; i < arguments.length; i++) s += arguments[i];

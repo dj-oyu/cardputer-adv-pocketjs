@@ -14,7 +14,7 @@
 | 2 | 残ったジョブは次ターンの**冒頭**、どの pump より前に片付ける。空になるまで新しい JS 呼び出し（pump の配送・`frame()`・キー）は保留 | `app_tick()` の `deadline` 再武装（app_session.c:492）の直後 | 台帳 03 事実 62 の順序 intake → resolve → `frame()` → drain を「1 本の drain」として保つ |
 | 3 | 未処理 rejection は**キューが空になった境界**でだけ報告する。予算切れの境界では報告しない | `drain` が `JS_IsJobPending()==false` で終わったときのみ | rejections.js の「同じ drain 内で後から catch」が誤報になる |
 | 4 | 起床は FreeRTOS の直接タスク通知（カウント型）。ui タスクは待てないので、L1 が置き換えるのはフレーム待ちの `vTaskDelay` だけ | main.c:698 の `vTaskDelay` → `ulTaskNotifyTake(pdTRUE, 残り)` | 完了→resolve の遅延の下限が「ターン長 + フレーム周期の残り」（audio 条件で A 98.58 ms、B 15.40 ms）|
-| 5 | 暴走は「1 本の論理 drain が drain の中で使った時間」で検出し、ジョブ境界でセッションを終える。例外は投げない | `VM_RUNAWAY_US=250000` / `VM_RUNAWAY_JOBS=100000`（時計が死んだときの受け皿）| §5.2 の改訂。ターン数で数えた初版は正直な長い連鎖を殺した（§11.1）|
+| 5 | 暴走は「1 本の論理 drain が drain の中で使った時間」で検出し、ジョブ境界でセッションを終える。例外は投げない | `VM_RUNAWAY_US=250000` / `VM_RUNAWAY_JOBS=100000`（時計が死んだときの受け皿）| §5.2 の改訂。ターン数で数えた初版は正直な長い連鎖を殺した |
 | 6 | 不変条件は `tools/vmtest/` で件数モード（決定的）の予算を掛けて既存コーパスとバイト一致で検査する | §7 の点検表 | 期待値の書き換えは新規ファイルだけ（README の規則）|
 
 VM 本体（`quickjs.c`）は変更しない（§6 完了条件）。変更するのは `components/pocketjs_guest/src/guest.c`、新設の `components/pocketjs_guest/src/vm_sched.c` / `vm_clock.c`、取り込む `pocketjs_ui_qjs`、`main/app_session.c`、`main/main.c`、`main/pocket/pocket_app.c` の 1 行、`tools/vmtest/vmrun.c`。
@@ -92,12 +92,15 @@ void    vm_clock_install(vm_clock_fn fn);      /* tests and clock-bench swap it 
 
 `vm_budget_t` は 1 ターンに 1 個、`app_tick()` / `app_overlay_tick()` の冒頭で `vm_budget_begin(&b, VM_TURN_BUDGET_US)` が時計を 1 回読んで作る。guest.c はそれを `pocketjs_guest_budget(guest, &b)` で受け取り、同じターンの `frame()` 後の drain と、次ターンの継続 drain（§2）が同じ構造体を見る。
 
+**実装は `arm_turn()` で `deadline`（暴走ガード用の壁時計デッドライン）とは別に時計を読む。** 「1 回の読みで共有できる」という上の理由づけは、`vm_clock` が使う時計の選び方（clock-bench の決定）から独立ではない — `esp_timer` 単位の値をそのまま渡すと、後で CCOUNT に切り替えた日に黙って壊れる。1 ターンあたり時計 1 回の追加コストは実測 25 ns（CCOUNT）〜833 ns（esp_timer）で、無視できる。
+
 ### 1.4 尽きたら何が起きるか
 
 - `vm_sched_drain` が `VM_DRAIN_YIELDED` を返す。`drain_jobs()` は **`ESP_OK`** を返す（失敗ではない）。guest に `jobs_pending=true`、`yields++`。
 - 例外を投げない。ジョブを捨てない。rejection の報告は行わない（§3）。
 - ターンはそのまま UI コアの tick と draw（ui_qjs.c:861-862）へ進み、描画と転送（app_session.c:539 以降）が走る。§6「未完了の drain の間にネイティブな描画・I/O 処理を許す」。
 - 統計は `pocketjs_guest_stats_t` に `yields` / `continuations` / `jobs_pending` / `jobs_dropped` を足す（`struct_size` 付きなので ABI は保てる）。**既存のログ標識（`PERF …` など）の書式は 1 バイトも変えない。** 追加の観測は `CONFIG_POCKET_VM_PROBE` 時の `VMSCHED` 行だけ。
+- **継続ターンも `PERF` の `turn_ms` の母数（`turn_sum`/`ticks`）に数える。** 入れないと安いターン（drain が空か 1 件）だけの平均になり、`turn_ms` が「JS が走ったターンの平均」という意味を保てない。
 
 ## 2. 継続の保証と互換モード
 
@@ -115,7 +118,7 @@ esp_err_t app_tick(uint32_t buttons) {
     vm_budget_begin(&budget, VM_TURN_BUDGET_US);       /* one clock read; see sec.1.3 */
     pocketjs_guest_budget(guest, &budget);
     /* NOTE (2026-09-12): the first implementation read pocket_app_exit_requested()
-     * HERE, and that was wrong -- see sec.11.2. The stop it asks for reaches the
+     * HERE, and that was wrong (found in review, fixed the same day). The stop it asks for reaches the
      * guest as an uncatchable interrupt, so honouring it at the top of a
      * continuation turn kills job k+1 of a drain that pre-L1 ran to its end.
      * The flag is read below, on a turn that begins with an empty queue, which
@@ -132,10 +135,10 @@ esp_err_t app_tick(uint32_t buttons) {
         }
     }
     continuation_turns = 0;
-    if (pocket_app_exit_requested()) app_request_stop();   /* sec.11.2 */
+    if (pocket_app_exit_requested()) app_request_stop();   /* see the NOTE above */
     buttons |= deferred_buttons; deferred_buttons = 0;
     pocket_app_pump();          /* app_session.c:497-523, unchanged from here on */
-    pocket_text_pump();         /* sec.11.3: the key path's JS half, deferred to here */
+    pocket_text_pump();         /* the key path's JS half (onEdit/onSubmit/onCancel), deferred to here */
     ...
     e = pocketjs_ui_turn(binding, &input, &frame);
 present:
@@ -161,7 +164,7 @@ L1 での「JS への配送」= ホストが `JS_Call` でゲストのコード�
 | `pocket_fs_pump` (pocket_fs.c:1880) | — | volume 購読へ `sub_deliver` | 遅れる |
 | `pocket_av_pump` (pocket_av.c:1629) | — | player / power 購読へ `sub_deliver` | 遅れる |
 | `pocket_ui_pump(buttons)` (pocket_ui.c:1130-1155) | `held_mask` の更新 | action 購読（press / release / repeat）へ `sub_deliver` | **押下は落とさない**: `deferred_buttons` に OR して、最初の通常ターンに `buttons | deferred_buttons` を渡す。エッジ検出は `held_mask`（pump 内でしか更新されない）との差なので、押下→通常ターンで press、次の `app_tick(0)`（main.c:500 の release フレーム、または次周の無キー）で release が出る。`input.held()` はジョブから読むと継続中は古い値を返す（文書化のみ）|
-| `pocket_text_pump`（pocket_text.c、§11.3 で新設）| `pocket_text_key()` が main.c:499 で（= `app_tick()` の**外**で）行う IME・バッファ・キャレット・再描画 | onEdit / onSubmit / onCancel の `JS_Call` | 遅れる。打鍵は落とさない（イベントはキューに積まれ、空になったターンの pump で順番どおり配送される）|
+| `pocket_text_pump`（pocket_text.c、新設）| `pocket_text_key()` が main.c:499 で（= `app_tick()` の**外**で）行う IME・バッファ・キャレット・再描画。ホスト側のこの半分は打鍵の瞬間に走る。ゲスト側のコールバックだけをキューに積み、ここで配送する（打鍵の瞬間に `app_tick()` の外から `JS_Call` していた初期実装の欠陥を、レビューで見つけて直した形） | onEdit / onSubmit / onCancel の `JS_Call` | 遅れる。打鍵は落とさない（イベントはキューに積まれ、空になったターンの pump で順番どおり配送される）|
 | `frame()`（`pocketjs_ui_turn` → `pocketjs_guest_frame`、ui_qjs.c:858）| — | `JS_Call`（guest.c:420）と、その中の `onFrame` 配送（pocket_app.c:567）| 呼ばない。UI コアの tick/draw は呼ぶ（§2.4）|
 
 **離脱ターンの例外**: `tick_run()` は Back で `app_tick(0x2000)` を 1 回呼んでから `app_request_stop()` する（main.c:490。ゲストに最後の保存機会を与える）。このターンが継続だけで終わるとアプリは保存フレームを失う。決定: `buttons` に `0x2000` を含むターンは継続の予算を `VM_LEAVE_BUDGET_US=50000` / backstop 256 に広げ、それでも残れば残したまま `frame(0x2000)` を呼ぶ。セッションはこの直後に終わる（§3.2）ので、順序の乱れが観測される機会は無い。50 ms は旧ガード 250 ms の 1/5 で、F の単価なら約 100 件（**推定**）。
@@ -198,7 +201,7 @@ esp_err_t pocketjs_ui_turn_continue(pocketjs_ui_qjs_t *binding, pocketjs_ui_fram
 
 決定: **この「実行せずに捨てる」を維持する。** 理由は §3-7（解放は所有規則に従う）と、既に `pocket_api_reset` が同じ選択をしている整合性。加えて:
 
-- 捨てた件数を数えて `jobs_dropped` に入れ、`app_report()`（app_session.c:192）が `ESP_LOGW("app","jobs dropped at stop: %u")` を出す。新しい行であり、契約済み標識の書式には触れない。
+- 捨てた件数を数えて `jobs_dropped` に入れ、`app_report()`（app_session.c:192）が `ESP_LOGW("app","jobs dropped at stop: %u")` を出す。新しい行であり、契約済み標識の書式には触れない。**実装は `pocketjs_guest_stats()` が毎回 `JS_IsJobPending()` を読むだけなので、件数ではなく「キューが空でなかったか」の 1 bit である。** また `app_stop()` は `pocketjs_guest_destroy()` を呼んで `guest=NULL` にした**後**に `app_report()` を呼ぶため、素朴な実装では `if(guest)` の分岐が常に false になり、この警告は一度も出力されない（レビューで見つかった欠陥）。正しい実装は、guest がまだ生きている destroy 直前（stop hook が使い切った後、捨てるものが確定した地点）で `final_stats` に latch し、`app_report()` は guest が無いときそれを読む。
 - 残っていた `rejections` エントリは**報告しない**で解放する。捨てたジョブの中に catch があったかもしれず、報告は推測になる。これは今日の `pocketjs_guest_destroy` が既にしていること（guest.c の destroy 内、`while (guest->rejections)` で `JS_FreeValue` して `free` するだけ）で、L1 はそれを規則として書き留める。今日の `VMPROBE` 条件スクリプトが踏んだ「未処理 rejection 1 件でセッション終了」（L0 §2.1.1-2）とは別の話で、こちらは終了が先に決まっている場合。
 - stop hook（pocket_app.c:772-797）は独自に `JS_ExecutePendingJob` を 200 ms 回す（793-796）。これは残ったジョブも hook のジョブも FIFO で走らせる。予算は掛けない: セッション終了中で、`APP_STOP_MS` と `stop_interrupt`（767-770）が既に上限。ただし §5.3 のとおりハンドラの登録経路は 1 本化する。
 
@@ -225,7 +228,7 @@ uint32_t vm_wake_wait(TickType_t max);   /* owner only: ulTaskNotifyTake(pdTRUE,
 ```
 
 - `pocket_api_complete()`（pocket_api.c:455-467）が `done` を書いた**後**に `vm_wake_post()` を呼ぶ。完了記録の公開が先、起床が後（§7 の「通知側は完了記録を公開した後に起床要求を送る」）。
-- **所有タスク自身が投稿した完了では起床しない**（`vm_wake_post()` が `xTaskGetCurrentTaskHandle()==owner` を捨てる、§11.4）。完了の大半は ui タスク自身が記録するもの（`pocket_app_pump` の sleep 期限、`pocket_io_pump` の UART、`pocket_net_pump` のリンク／スキャン、`tick_run` のピッカー結果）で、それらは**同じターンの** `pocket_api_pump()` が settle する。カウント型通知はそのまま残るので、除外しないとフレームキャップが毎回すぐ返り、周期が 33 ms ではなく下限の 8 ms に落ちる。縮めるべき待ちは「このタスクが予期できない完了」=別タスクと ISR のものだけ。
+- **所有タスク自身が投稿した完了では起床しない**（`vm_wake_post()` が `xTaskGetCurrentTaskHandle()==owner` を捨てる。レビューで見つけた抜け: これを入れないと自タスクの完了投稿でカウントが残り、フレームキャップが毎回すぐ返って周期が下限 8 ms に潰れる）。完了の大半は ui タスク自身が記録するもの（`pocket_app_pump` の sleep 期限、`pocket_io_pump` の UART、`pocket_net_pump` のリンク／スキャン、`tick_run` のピッカー結果）で、それらは**同じターンの** `pocket_api_pump()` が settle する。カウント型通知はそのまま残るので、除外しないとフレームキャップが毎回すぐ返り、周期が 33 ms ではなく下限の 8 ms に落ちる。縮めるべき待ちは「このタスクが予期できない完了」=別タスクと ISR のものだけ。
 - `main.c:698` の `vTaskDelay(pdMS_TO_TICKS(rest))` を、ゲスト実行中（`running`）に限り `vm_wake_wait(pdMS_TO_TICKS(rest))` に置き換える。非実行時は今までどおり `vTaskDelay`（通知は誰も送らないので、送られても次周で消費されるだけ）。
 - 早く起きたターンは `app_tick()` を普通に回す（pump → `frame()` → drain）。**`frame()` を飛ばした「完了専用ターン」は作らない。** 作ると「resolve → drain → `frame()`」の順になり、`.then` が次の `frame()` より前に走るという観測可能な変化がアプリに入る。互換モードを既定とする §6 の趣旨に反するので、L1 では入れない（§8）。
 - 副作用: 完了が連続して届くアプリ（UART、10 ms の sleep ループ）は `frame()` が 30 fps より速く呼ばれる。`onFrame` の `dt`（pocket_app.c:557、実測時刻から計算）は正しい値を運ぶが、`frame()` の回数を時計代わりにするアプリは速くなる。**フレーム周期の下限 `VM_MIN_PERIOD_MS=8`** を置く: 早起きしても前回のターン開始から 8 ms 経つまでは `vTaskDelay` で埋める。8 ms は予算と同じで、これより短い周期で回しても転送（7.7 ms、実測）が追いつかない。
@@ -264,7 +267,7 @@ ui タスクは優先度 5、input 6、デコーダ 6、音声 7（main.c:738-73
 
 決定: **1 本の論理 drain（予算で切られた drain + その継続群、§2.1）が `vm_sched_drain` の中で使った時間**で検出する。`VM_RUNAWAY_US = 250,000 µs`。時計が働かない環境（ホストの件数モード、壊れたタイマ）のための受け皿として、同じ論理 drain のジョブ総数 `VM_RUNAWAY_JOBS = 100,000` も見る。どちらも `pocketjs_guest_drain_total()` が持ち、キューが空になった時点で 0 に戻る。
 
-**初版（`VM_RUNAWAY_TURNS = 30`）を捨てた理由。** ターンは「ゲストがどれだけ仕事を頼んだか」の単位ではない。ターンが終わるのは (a) 壁時計が 8 ms を告げたとき — 混んだ機械ではその大半は他タスクの時間である — か、(b) 64 件の backstop が告げたときで、後者は**ジョブがどれだけ安くても**効く。したがって「30 ターン」は安いジョブなら「1,920 件」を意味し、実測 0.07 ms/件（L0 のワークロード D）では JS 時間 134 ms、置き換えたはずの旧 250 ms ガードのおよそ 2 倍厳しい。実際に 2,500 段の正直な連鎖が終了コード 5 になった（§10.2 の欠陥 4、再現は `tools/vmtest/corpus/budget_honest_long_chain.js`）。**予算が壁時計であること自体はここでの欠陥ではない**が、「プリエンプトされた時間はゲストに課金されない」という `vm_sched.h` の旧コメントは誤りだった（壁時計の予算を通してターン数に変換され、課金されていた）。修正済み。
+**初版（`VM_RUNAWAY_TURNS = 30`）を捨てた理由。** ターンは「ゲストがどれだけ仕事を頼んだか」の単位ではない。ターンが終わるのは (a) 壁時計が 8 ms を告げたとき — 混んだ機械ではその大半は他タスクの時間である — か、(b) 64 件の backstop が告げたときで、後者は**ジョブがどれだけ安くても**効く。したがって「30 ターン」は安いジョブなら「1,920 件」を意味し、実測 0.07 ms/件（L0 のワークロード D）では JS 時間 134 ms、置き換えたはずの旧 250 ms ガードのおよそ 2 倍厳しい。初版のこの設計を実装した直後の独立レビューで、実際に 2,500 段の正直な連鎖が終了コード 5 になることが分かった（再現は `tools/vmtest/corpus/budget_honest_long_chain.js`）。**予算が壁時計であること自体はここでの欠陥ではない**が、「プリエンプトされた時間はゲストに課金されない」という `vm_sched.h` の旧コメントは誤りだった（壁時計の予算を通してターン数に変換され、課金されていた）。修正済み。
 
 新しい数え方の性質:
 
@@ -288,18 +291,22 @@ void pocketjs_guest_set_watchdog(pocketjs_guest_t *g, int (*fn)(void *), void *o
 
 `install_limits`（app_session.c:88-92）と `pocket_app_reset`（781）はこれを呼ぶ。挙動は同じ、登録の経路が 1 本になるだけ。`pocketjs_guest_interrupt()`（guest.c:449-454）は `pocketjs_ui_qjs_interrupt` から呼べるが呼び出し元が無い（事実 47）。L1 では削らず、述語が NULL のときだけ生きる形にする。
 
-## 6. 変更点の一覧（実装順）
+## 6. 変更点の一覧（実装済み、最終形）
 
-1. `components/pocketjs_guest/src/vm_clock.[ch]` — §1.3。ホストで `-DVM_HOST` ならライブラリ非依存。
-2. `components/pocketjs_guest/src/vm_sched.[ch]` — §1.1 の `vm_sched_drain` と `vm_budget_t`。**esp ヘッダを含めない**。vmrun はこれを写さずリンクする（README の「写したもの」が L1 からは「同じもの」になる）。
-3. `guest.c` — `drain_jobs` を `vm_sched_drain` 経由に、`pocketjs_guest_continue` / `pocketjs_guest_jobs_pending` / `pocketjs_guest_budget` / `pocketjs_guest_set_watchdog` を追加、stats のフィールド追加、destroy 時の `jobs_dropped` 集計（`JS_IsJobPending` を見てから `JS_FreeRuntime`。件数は `JS_ExecutePendingJob` を呼ばずに数える手段が無いので **pending だったか否かの 1 bit**。件数が要るなら L2 のフック）。
-4. `pocketjs_ui_qjs` の取り込みと `pocketjs_ui_turn_continue` — §2.4。
-5. `main/app_session.c` — §2.2 の骨格を `app_tick` と `app_overlay_tick` に。`deferred_buttons`、`continuation_turns`、離脱ターンの予算。
-6. `main/pocket/pocket_app.c` — `exit_requested` の読み出しを関数に出す 1 行。
+1. `components/pocketjs_guest/include/pocketjs/vm_clock.h` / `src/vm_clock.c` — §1.3。既定は device が `esp_timer_get_time()`、host が `clock_gettime(CLOCK_MONOTONIC)`。esp ヘッダを含めないのでホストでもそのままビルドできる。
+2. `components/pocketjs_guest/include/pocketjs/vm_sched.h` / `src/vm_sched.c` — §1.1 の `vm_sched_drain` と `vm_budget_t`、全定数。**esp ヘッダを含まない**ので `tools/vmtest/vmrun.c` はこれを写さず**リンクする**（ハーネスが出荷するスケジューラそのものを検査する）。
+3. `guest.c` / `guest.h` — `drain_jobs` を `vm_sched_drain` 経由に、`pocketjs_guest_continue` / `_jobs_pending` / `_budget` / `_set_watchdog` / `_drain_total` を追加、stats に `yields` / `continuations` / `jobs_pending` / `jobs_dropped`（件数ではなく **pending だったか否かの 1 bit** — `JS_ExecutePendingJob` を呼ばずに数える手段が無いため。件数が要るなら L2 のフック）。
+4. `components/pocketjs_ui_qjs/` — **新規に取り込み**（最初のコミットが無改変のバイト列、以後が改変）。`pocketjs_ui_turn_continue()` を追加（§2.4）。
+5. `main/app_session.c` / `.h` — §2.2 の骨格を `app_tick` と `app_overlay_tick` に。`deferred_buttons`、`continuation_turns`、離脱ターンの予算、`arm_turn()`、`present_frame()`（`goto` ではなく関数切り出しにした — `goto` がラベルを跨いで初期化を飛ばす問題を避けるため、挙動は骨格と同じ）、`drain_runaway()`、`final_stats`（§3.2 参照）。
+6. `main/vm/vm_wake.[ch]`（新規）— §4.2 の起床 API。ISR 文脈は `xPortInIsrContext()` で内部判定。
 7. `main/main.c` — §4.2 の `vm_wake_wait` と `VM_MIN_PERIOD_MS`。`vm_wake_bind()` を `ui_task` 冒頭に。
-8. `main/pocket/pocket_api.c` — `pocket_api_complete` 末尾に `vm_wake_post()`。ISR から呼ばれる面（IR 送信など）があれば `_from_isr` 版。呼び出し元を `grep -rn pocket_api_complete main/` で洗い、ISR 文脈のものを列挙してから。
-9. `tools/vmtest/vmrun.c` — §7 のフラグ。
-10. 計測: `tools/memlog.py --map … --port COM3 --check`（DIRAM 増分、**推定 +200 B 未満**、上限 +8 KiB）、L0 の行列を `vm-L0` から復元して同一バイナリで F / E / D の turn と lat を取り直す。ターン中央値 +5% 以内（ばらつき 5.6% の実測があるので、それ未満の差は主張しない）。
+8. `main/pocket/pocket_api.c` — `pocket_api_complete` 末尾（`done` 公開の**後**）に `vm_wake_post()`。
+9. `main/pocket/pocket_app.c` / `.h` — `pocket_app_exit_requested()` を関数に出す。stop hook の割り込み登録を `app_vm_watchdog()`（§5.3）経由に。
+10. `main/pocket/pocket_text.c` — `pocket_text_pump()`（§2.3）。
+11. `main/Kconfig.projbuild` — `CONFIG_POCKET_VM_SCHED`（既定 y）。`n` で予算無制限・継続ターン無し・L1 前と同じ挙動に戻る。`sdkconfig.vmsched_off.defaults` がその重ね方。
+12. `tools/vmtest/vmrun.c` — §7 のフラグ、新規コーパス。
+13. `tools/hostshim/vm_wake.h`（新規）— ホストビルド用のスタブ。`main/pocket/pocket_api.c` が `main/vm/vm_wake.h` を include するようになったため、`-I main/vm` を持たないホストの `tools/build_pocket_random_test.sh` 等がリンクできなくなっていた（レビューで発見。CLAUDE.md が警告する「`main/` にディレクトリを足したら `grep -rn "main/" tools/` で参照元を洗う」を怠った具体例）。中身は名前を解決するだけの空スタブで足りる（`vm_wake_post()` の呼び出しは `CONFIG_POCKET_VM_SCHED` の内側にあり、ホストはそれを定義しないため）。
+14. 計測: `tools/memlog.py --map … --port COM3 --check`。実測は静的 DIRAM +112 B（`vm/main` 統合後の最終値）、上限 +8 KiB の 1.4%。詳細は [vm-L1-report.md](vm-L1-report.md) §2・§8。
 
 ## 7. 不変条件と検査（実装者とレビュアーの共通点検表）
 
@@ -318,9 +325,11 @@ void pocketjs_guest_set_watchdog(pocketjs_guest_t *g, int (*fn)(void *), void *o
 | 9 | ジョブを残した終了 | 新規 `stop_with_queue.js`: 1000 段の連鎖 + `--frames 1 --budget-jobs 4` | 終了コード 0、LSan 0、`E pocketjs_guest: Unhandled Promise rejection` が **1 行も出ない**（残った rejection は報告しない、§3.2）。`#info jobs_dropped=1` |
 | 10 | Test262 の合格集合 | `test262.py --force-yield -j 8` と `--variant o2 --force-yield` | `test262-baseline.txt` から減らない（7,501 pass） |
 | 11 | 予算無効時の費用 | `timing.py` を予算無効（`limit_us=0, backstop=UINT_MAX`）で | `bench_*` の中央値が `timing-baseline.txt` の p95 以内（README: p95 と中央値の差より小さい差は結果と呼ばない）|
-| 12 | 実機（ホストでは不可） | `smoke_device.py --cycles 20`、`test_settings.py`、`capture_home.py`、`benchmark_app.py` | 全標識バイト一致。`memlog.py --port --check` の予算内。L0 行列の F / E / D を同一バイナリで再取得し、F の turn 中央値 ≤ 12 ms（**推定**の目標）、E の lat 中央値が 33 ms のフレーム周期成分を失っていること |
+| 12 | 実機（ホストでは不可） | `smoke_device.py --cycles 20`、`test_settings.py`、`capture_home.py`、`benchmark_app.py` | 全標識バイト一致。`memlog.py --port --check` の予算内。L0 行列の F / E / D を同一バイナリで再取得し、F の turn 中央値 ≤ 12 ms（**推定**の目標）、E の lat 中央値が 33 ms のフレーム周期成分を失っていること。**実施済み（2026-09-12）— [vm-L1-report.md](vm-L1-report.md) §2** |
 
 レビュアーは 1〜5・10 を「予算あり／なしで出力が同一」の観点で、6〜9 を「新規の期待値が §2・§3・§5 の文と一致するか」の観点で読む。
+
+**実装は上のフラグ一覧に 1 つ足した: `--stop-turns N`。** 不変条件 9（キューを残した終了）は `--frames 1 --budget-jobs 4` を要求するが、継続ターンに上限が無いと 1000 段の連鎖は 250 ターンで完走してしまい、`--runaway-turns` を使えば逆に終了コード 5 になって 0 にならない。`--stop-turns N` は N 回の継続ターンでセッションを終わらせ、キューを実行せず捨て、終了コード 0 を返す（`app_stop()` の代役）。**`--runaway-turns` は vmrun の既定では無効**（ファームの既定は 30 のまま）— `--budget-jobs 1` は正当な 200 件の drain を 200 回の継続ターンにするので、既定 30 のままだと不変条件 1・2 のコーパスが軒並み runaway で落ちる。暴走検査（不変条件 8）だけ `--runaway-turns 30` を明示する。
 
 ## 8. L1 に含めないもの
 
@@ -336,151 +345,9 @@ L1 の範囲外だが L2 ではない（別途判断）:
 - 公平モード: 継続 drain より前に `pocket_api_pump` の resolve だけを許す（FIFO は壊れないが旧 drain 完了前の resolve になる）。F 型のアプリの完了遅延を縮めるのはこれだが、互換モードを既定とする §6 の下では build 時選択の候補として記録に留める。
 - `frame()` を飛ばす完了専用ターン（§4.2）。`.then` が次の `frame()` より前に走る順序変更を伴う。
 - pump をネイティブ取り込みと JS 配送に二分する改修（§2.3 の表の「取り込み」列を継続ターンでも走らせる）。10 ファイルに触る割に、resolve が保留される以上、観測差は `lat` の数字だけ。
-- GC 閾値（256 KiB > 160 KiB、L0 §2）と OOM 時の use-after-free。`main` にも効く不具合で、L1 と独立。
+- GC 閾値（256 KiB > 160 KiB、L0 §2）と OOM 時の use-after-free。`main` にも効く不具合で、L1 と独立（backlog.md）。
 
 ---
 
-## 9. 実装の記録（2026-09-12、`vm/l1-host-sched`）
+**実装・検証の結果はこの文書の該当節に直接畳み込んである**（§1.3・§1.4・§2.2・§2.3・§3.2・§4.2・§5.2・§6・§7 の各所）。独立レビューと第二次レビューで見つかった欠陥はすべて修正済みで、その修正後の姿が上の各節の内容である。ホストの最終検証結果（コーパス・Test262・timing の全件）と実機の測定・結論は [vm-L1-report.md](vm-L1-report.md) を参照。
 
-本節は設計ではなく**実装したものの記録**で、設計との差分をすべて名指しする。数値は 実測 / 推定 を毎回書く。
-
-### 9.1 どこに何が入ったか
-
-| 場所 | 中身 |
-| --- | --- |
-| `components/pocketjs_guest/include/pocketjs/vm_clock.h` / `src/vm_clock.c` | §1.3 の時計抽象。既定は device が `esp_timer_get_time()`、host が `clock_gettime(CLOCK_MONOTONIC)`。`vm_clock_install()` で差し替え |
-| `.../vm_sched.h` / `src/vm_sched.c` | §1.1 の `vm_sched_drain` と `vm_budget_t`、定数 `VM_TURN_BUDGET_US` 8000 / `VM_JOB_STRIDE` 4 / `VM_JOB_FLOOR` 8 / `VM_JOB_BACKSTOP` 64 / `VM_LEAVE_BUDGET_US` 50000 / `VM_LEAVE_BACKSTOP` 256 / `VM_RUNAWAY_TURNS` 30。esp ヘッダを一切含まない |
-| `guest.c` / `guest.h` | `drain_jobs` が `vm_sched_drain` 経由に。`pocketjs_guest_budget` / `_jobs_pending` / `_continue` / `_set_watchdog` を追加。stats に `yields` / `continuations` / `jobs_pending` / `jobs_dropped` |
-| `components/pocketjs_ui_qjs` | `pocketjs_ui_turn_continue()`（§2.4） |
-| `main/app_session.c` / `.h` | §2.2 の骨格、`arm_turn()`、`deferred_buttons`、`continuation_turns`、離脱ターンの予算、`present_frame()` の切り出し、`app_vm_watchdog()` |
-| `main/pocket/pocket_app.c` / `.h` | `pocket_app_exit_requested()`、stop hook の割り込み登録を `app_vm_watchdog()` 経由に |
-| `main/vm/vm_wake.[ch]` | §4.2 の起床。ISR 文脈は `xPortInIsrContext()` で内部判定 |
-| `main/main.c` | `vm_wake_bind()`、フレームキャップの `vTaskDelay` → `vm_wake_wait`、`VM_MIN_PERIOD_MS` 8 |
-| `main/pocket/pocket_api.c` | `pocket_api_complete()` の末尾（`done` 公開の**後**）に `vm_wake_post()` |
-| `main/Kconfig.projbuild` | `CONFIG_POCKET_VM_SCHED`（既定 y）。off で予算が無制限になり、L1 前の挙動に完全に戻る |
-| `sdkconfig.vmsched_off.defaults` | その off ビルドの重ね方 |
-| `tools/vmtest/` | §7 のフラグと 5 本の新規コーパス |
-
-### 9.2 設計どおりに実装できなかった / 足したもの
-
-1. **`--stop-turns N` は設計に無いフラグ。** §7 の 9（キューを残した終了）は `--frames 1 --budget-jobs 4` で終了コード 0 と `jobs_dropped=1` を求めているが、継続ターンに上限が無ければ 1000 段の連鎖は 250 ターンで**完走してしまう**し、`--runaway-turns` を使えば終了コード 5 になって 0 にならない。「セッションが先に終わる」側の機構が要る。`--stop-turns N` は N 回の継続ターンでセッションを終わらせ、キューを実行せず捨て、終了コード 0 を返す。`app_stop()` の代役。
-2. **vmrun の `--runaway-turns` は既定で無効**（ファームの既定は 30 のまま）。`--budget-jobs 1` は正当な 200 件の drain を 200 回の継続ターンにするので、既定 30 では §7 の 1・2（`promise_chain.js` などを `--force-yield` で）が全部 runaway で落ちた。暴走検査は `--runaway-turns 30` を明示する。
-3. **`present_frame()` の切り出しは設計に無い。** §2.2 の骨格は `goto present` で書かれており、実装では `app_tick()` の後半（damage plan・ストリップ・`board_present`・PAINT 集計）を `present_frame()` に切り出して継続ターンからも呼ぶ形にした。挙動は同じで、`goto` がラベルを跨いで初期化を飛ばす問題を避けるための形の違い。
-4. **`jobs_dropped` は `pocketjs_guest_stats()` が毎回 `JS_IsJobPending()` を読む。** `app_report()` は `pocketjs_guest_destroy()` より**前**に走るので、destroy 時に latch するだけでは常に 0 になる。設計の「1 bit」はそのまま。
-5. **継続ターンも `turn_sum` / `ticks` に数える。** `PERF` / `PAINT` の書式は 1 バイトも変えていないが、`turn_ms` の意味を「JS が走ったターンの平均」に保つために継続ターンも母数に入れた。入れないと安いターンだけの平均になる。
-6. **時計は `arm_turn()` で `deadline` とは別に読む。** §1.3 は「1 回の読みで共有できる」と書いているが、`vm_clock` がどの時計を使うかは `vm_clock` の決定（clock-bench の 実測 では CCOUNT が systimer の 1/33 の費用）であり、`esp_timer` 単位の値を渡すとその決定が変わった日に黙って壊れる。1 ターンあたり時計 1 回の追加で、費用は 実測 25 ns（CCOUNT）〜833 ns（systimer）。
-7. **未実装: §7 の 12（実機）。** ホストのみで完結させる作業だったので、`smoke_device.py` / `test_settings.py` / `capture_home.py` / `benchmark_app.py` と L0 行列の再取得、`memlog.py --port --check` の実測ヒープは**まだ走らせていない**。焼く前にこれが要る。
-8. **未実装: `pocketjs_guest_interrupt()` の epoch 経路。** §5.3 のとおり削らず残し、述語が NULL のときだけ生きる形にした。呼び出し元は今も無い（事実 47）。
-
-### 9.3 測ったもの
-
-- **コーパス（実測(host)）**: 28 件（既存 23 + 新規 5）が、予算なし・`--budget-jobs 1 / 3 / 7 / 16`・`--force-yield` のすべてで、asan と o2 の両方でバイト一致。既存の `expected/*.txt` は 1 バイトも書き換えていない。
-- **Test262（実測(host)）**: `--force-yield` で asan / o2 とも **7,501 pass / 194 fail / 0 skip**。`test262-baseline.txt` から減っていない。
-- **静的 DIRAM（実測(build)）**: 115,372 B（`cd5117d`、L1 前）→ **115,420 B**（`ab2eb11`）= **+48 B**。内訳は `app_session.c.obj +40` / `vm_clock.c.obj +4` / `vm_wake.c.obj +4` で、合計が全差分と一致する（`vm_sched.c` と `guest.c` の DIRAM は 0）。上限 +8 KiB に対して 0.6%。同じ `sdkconfig.defaults` から生成した別々の `sdkconfig` で、probe off の 2 ビルドを比較したもの。
-- **Flash Code（実測(build)）**: 1,550,840 → 1,552,016 = **+1,176 B**。`CONFIG_POCKET_VM_SCHED=n` のビルドは 1,551,812（DIRAM は同じ 115,420）。
-- **実機の数値は 1 つも無い。** ターン長・完了遅延・空きヒープはすべて未測定。
-
----
-
-## 10. 独立レビューの記録（2026-09-12、ホストのみ）
-
-実装報告を疑って読み直し、ホストの全スイートを自分で走らせた結果。**実機には一切触れていない**ので、§7 の 12 は依然として未実施のままである。
-
-### 10.1 走らせて確認したもの（実測(host)）
-
-| スイート | 結果 |
-| --- | --- |
-| コーパス（新規 3 件込み 31 件）× {asan, o2} × {予算なし, `--force-yield`, `--budget-jobs 1/3/7/16`} | 12 通りすべてで 31/31 バイト一致。既存 `expected/*.txt` は 1 バイトも書き換えていない |
-| Test262 `--force-yield` asan / o2 | 7,501 pass / 194 fail / 0 skip、`regressions: 0`（基準と同一） |
-| `timing.py`（-O2、予算オフ） | 8 本中 6 本の中央値が基準の p95 以内。`bench_alloc` 26.93（p95 26.78）と `bench_calls` 56.48（p95 56.03）は p95 を 0.6〜0.8% 超えたが、基準の p95−中央値（それぞれ 1.77 / 2.25 ms）より小さく、README の規則で「結果」と呼べる差ではない。加えて基準記録時と `quickjs.c` の sha1 が違う（`271d718782c1` → `30877d7c8a45`）ので、そもそも同一バイナリの比較ではない |
-| `tools/build_pocket_text_test.sh` | all passed |
-| `tools/build_pocket_random_test.sh` | **L1 が壊していた**（10.2 の欠陥 3）。直してから `POCKET_RANDOM_OK` |
-| `tools/build_pocket_capture_test.sh` | built |
-| ファーム両ビルド（probe on / `CONFIG_POCKET_VM_SCHED=n`） | どちらも警告なしでビルド成立。sched off の DIRAM 115,452 B は実装報告の 115,420 B + 本レビューの修正 32 B と一致する |
-
-### 10.2 見つけた欠陥
-
-**欠陥 1（修正した）— `jobs dropped at stop` は決して出力されない。** `app_stop()` は `pocketjs_guest_destroy(guest)` を呼び `guest=NULL` を代入した**後**に `app_report()` を呼ぶ（app_session.c）。`app_report()` は `if(guest) pocketjs_guest_stats(...)` なので、そこでの stats は常に全ゼロ = `jobs_dropped` は常に偽。§3.2 がホストに言わせたかった 1 行は、書かれてから一度も出力可能になっていない。実装報告の逸脱 4 は「`app_report()` が `pocketjs_guest_destroy()` より**前**に走るので destroy 時の latch は常に 0 になる」と書いているが、順序は逆である。修正: guest がまだ生きている destroy 直前（= stop hook が 200 ms を使い切った後、捨てられるものが確定した地点）で `final_stats` に latch し、`app_report()` は guest が無いときそれを読む。`MEM` 行は**触っていない** — `tools/memlog.py` が `js=` を正規表現で拾い、start / stop の対を予算検査に使っているため。
-
-**欠陥 2（修正した）— 離脱ターンの `frame(0x2000)` が黙って落ちる。** `main.c:509` は `if(leave) { e=app_tick(0x2000); app_request_stop(); }` で、この 1 回がゲストの最後の保存機会であり、直後にセッションが終わるので「次のターン」は存在しない。しかし `app_tick()` は離脱ターンも他と同じ継続分岐に入れ、キューが空にならなければ `deferred_buttons|=0x2000` して戻っていた = 保存の合図は誰にも配られない。しかも忙しくてキューが残っているアプリ、つまり保存が最も要る側でだけ起きる。設計 §5.2 は明文で逆を書いている（「離脱ターンは継続を待たず `frame(0x2000)` へ進むので、このカウンタの対象外」）。修正: `leaving` のときは継続 drain を（`VM_LEAVE_BUDGET_US` / `VM_LEAVE_BACKSTOP` の広い予算で）走らせた上で、空にならなくても pump → `frame(0x2000)` へ抜ける。継続カウンタにも数えない。
-
-**欠陥 3（修正した）— `tools/build_pocket_random_test.sh` がコンパイルできない。** `main/pocket/pocket_api.c` が新設の `main/vm/vm_wake.h` を include し、そのホストビルドの `-I` に `main/vm` が無いため `fatal error: vm_wake.h: No such file or directory`。CLAUDE.md が名指しで警告している失敗の形そのもの（`main/` にディレクトリを足したら `grep -rn "main/" tools/` で参照元を洗う）で、実装者はこのスイートを走らせていない。修正: `tools/hostshim/vm_wake.h` にスタブを置いた（`vm_wake_post()` の呼び出しは `CONFIG_POCKET_VM_SCHED` の内側で、ホストはそれを定義しないので、必要なのは名前が解決することだけ）。
-
-**欠陥 4（未修正 / 設計の判断）— 出荷時の定数で、正直な長い drain が暴走として殺される。** `VM_JOB_BACKSTOP=64` は時計と無関係の硬い天井なので、1 継続ターンは**どれだけ安くても** 64 件で終わる。すると `VM_RUNAWAY_TURNS=30` は「30 × 64 = 1,920 件を超える 1 本の drain はセッション終了」を意味する。§5.2 は 30 を「30 × 8 ms = 240 ms の JS 時間 ≒ 旧 250 ms ガード」と正当化しているが、その等式は**各ターンを時計が終わらせる場合にだけ**成り立つ。実測の Promise 連鎖（L0 のワークロード D、0.07 ms/件）では 64 件は 4.5 ms で、時計は一度も効かない — つまり新ガードが許すのは 134 ms 相当で、置き換えた旧ガードの 250 ms よりおよそ 2 倍厳しい。
-
-証拠はコーパスの中にある: `promise_chain.js`（3,000 段の then）は `--runaway-turns 30` を明示すると `--budget-jobs 8 / 16 / 64` のいずれでも**終了コード 5**（`#info turns=30 max_run_turns=30 jobs_dropped=1`）になる。コーパスがこれに気づかないのは、vmrun の `--runaway-turns` が既定で無効だからである（実装報告の逸脱 2）。実装者はこの衝突をハーネス側で観測しておきながら（「既定 30 では §7 の 1・2 が全部 runaway で落ちた」）、同じ衝突が実機の 8 ms 予算でも起きることを追っていない。再現は `tools/vmtest/known/runaway_vs_honest_chain.js`。
-
-これを直すには「1 本の論理 drain が消費してよい JS 時間の総量」を決め直す必要がある（ターン数ではなく時間で数える、あるいは backstop が終わらせたターンを数えない、など）。どれも §5 の決定そのものなので、コード側で黙って数字を変えず、実装者・設計者へ差し戻す。
-
-**欠陥 5（未修正 / 設計の判断）— `deferred_buttons` は 2 つの打鍵を 1 フレームに融合する。** `main.c:519` は `app_tick(buttons)` の直後に `app_tick(0)` を呼び、「連続した打鍵が別物として届く」ことを離鍵フレームで保証している。継続ターンが続く間に別々の打鍵が 2 回届くと、`deferred_buttons |= buttons` はそれを 1 つのマスク（例: UP|RIGHT）にまとめ、ゲストは同時押しを 1 フレームで見る — 予算導入前には起こり得ない入力である。設計 §2.2 が `|=` をそのまま指定しているので、これも設計側の判断として差し戻す（キューにするなら離鍵フレームの対も作り直す必要がある）。
-
-**所見（修正不要）— `vm_budget_restart()` は呼び出し元が無い。** 継続ターンは `arm_turn()` が毎ターン新しい予算を張るので、この関数は現状どこからも使われていない。
-
-### 10.3 足したホスト検査（`tools/vmtest/corpus/`）
-
-いずれも「予算をどこで切っても出力が同じ」を要求する形で、上の 12 通りすべてで一致することを確認した。
-
-- `budget_reject_far_catch.js` — 不変条件 5 を `rejections.js` より遠くまで押す。catch が 70 件先（= `VM_JOB_BACKSTOP` の外）、rejection が drain の 30 件目で**生まれて** 40 件先で捕まる、`frame()` が積んだ連鎖の中だけで完結する、の 3 形。どれも報告されてはならない。対照として誰も捕まえない 1 件を置き、これは必ず報告される（報告そのものを止めた実装が通らないようにするため）。
-- `budget_boundary_exact.js` — 不変条件 6 を境界そのもので。ジョブの中から `k=0` で要求した完了（= その drain が到達する境界でちょうど準備できる）、完了ハンドラの中から要求した完了（再入）、その完了が積んだ連鎖の最中に記録された完了。配送は必ず「キューが空になったターン」で、記録順に 1 回ずつ。
-- `budget_teardown_live.js` — §3.2 を `stop_with_queue.js` より重い形で。await で中断した async 関数 4 本（到達しない `finally` 付き）、try/finally の中で止まった generator、要求が残った async generator、切断の向こう側にある thenable、catch が捨てられるジョブの中にある rejection。終了コード 0、報告 0 行、`#info jobs_dropped=1`、LSan 0。
-- `known/runaway_vs_honest_chain.js` — 欠陥 4 の再現。予算に依存する結果なのでコーパスには置けない（`run.sh` は全コーパスを複数の予算で回してバイト一致を要求する）。
-
----
-
-## 11. 第二次レビューへの対応（2026-09-12、ホストのみ）
-
-外部レビューが L1 に対して 4 件を挙げた。3 件は再現し、1 件は根拠が一部誤っていたので、正しい部分だけを直した。**実機には触れていない**（§7 の 12 は依然として未実施）。
-
-### 11.1 暴走ガードが正直なアプリを殺す（再現・設計変更で修正）
-
-指摘: 8 ms 予算は壁時計なので、プリエンプトされた時間もターンに課金され、ターン数で数える暴走ガードは正当なアプリを殺す。
-
-再現（実測(host)）: 出荷時の定数に相当する `--runaway-turns 30 --budget-jobs 64` で、2,500 段の正直な連鎖が**終了コード 5**。これは §10.2 の欠陥 4 が「設計へ差し戻す」と書いて放置していたもので、今回設計を決め直した。
-
-修正: §5.2 を改訂し、ガードを「1 本の論理 drain が `vm_sched_drain` の中で使った時間」（`VM_RUNAWAY_US=250000`、時計が死んだときの受け皿として `VM_RUNAWAY_JOBS=100000`）に置き換えた。実装は `vm_budget_t.elapsed`（drain 1 回の所要時間、返り道 1 本で必ず書く）→ `guest.c` が論理 drain ごとに合算 → `pocketjs_guest_drain_total()` → `app_session.c` の `drain_runaway()`。合計するのは drain の中の時間だけなので、`frame()`・pump・描画・転送を全部含んでいた旧 250 ms 壁時計ガードより必ず緩い。
-
-レビューの主張のうち**誤っていた点**: 「`vm_sched.h` のコメントが言う『プリエンプトはゲストに課金されない』は偽」は正しい（コメントを直した）。一方「予算切れのターンは常に floor 8 件になる」は一般には成り立たない — floor を超えた件数は `n >= floor && n % stride == 0` の刻みでしか判定されないので、時計が既に超過していれば 8 件で止まるのは事実だが、それが「暴走判定の原因」ではない。原因は backstop とターン計数の組み合わせ（§5.2）で、時計が一度も効かない安いジョブでも起きる。
-
-検査: `tools/vmtest/corpus/budget_honest_long_chain.js`（新規、旧 `known/runaway_vs_honest_chain.js` を格上げ。出荷時の `--runaway-jobs 100000` で全予算で完走）、`corpus/runaway_jobs.js`（`--runaway-jobs 2000` に変更。期待値ファイルは判定文の変更に合わせて書き換えた。件数は予算で変わるので `#info runaway_jobs=` へ移した）。
-
-### 11.2 `exit()` の冒頭読みは順序を変える（再現・修正）
-
-指摘: `app_tick()` の冒頭に持ち出した `pocket_app_exit_requested()` は、継続ターンで `app_request_stop()` を呼び、次の JS 呼び出し = 同じ論理 drain のジョブ k+1 を捕捉不能な `InternalError` で殺す。予算の落ちた位置で `.finally` が走ったり走らなかったりする。
-
-確認: `stop_requested` は `interrupt()`（app_session.c）が読み、発火は捕捉不能（事実 27）。旧実装では `exit_requested` を読むのは `pocket_app_pump()`（cd5117d の pocket_app.c:733）だけで、それはキューが空になったターンでしか走らない。つまり冒頭読みは**保存ではなく意味変更**で、レビューの指摘どおり。
-
-修正: 読み出しを継続分岐の**後ろ**（pump の直前）に戻した。`app_tick()` と `app_overlay_tick()` の両方。「長い連鎖から exit したアプリが連鎖の終わりまで生き続ける」という冒頭読みの理由づけは旧来の挙動そのものであり、その連鎖は §5.2 の暴走ガードが有界にする。
-
-検査: `tools/vmtest/corpus/budget_exit_midchain.js`（新規）。vmrun に `host.exit()`（`--host-events`）と、停止要求後に 1 を返す割り込みハンドラを入れて実機の経路を写した。8 段の連鎖の 3 件目で exit し、4〜8 件目・`finally`・その後の `then` が**どの予算でも**同じ順序で走ることを要求する。冒頭読みに戻すと出力が exit の行で切れる（実測(host): 実際に戻して確認した）。
-
-### 11.3 `pocket.input.text` の打鍵は `app_tick()` の外から JS を呼んでいた（再現・修正）
-
-指摘: `main.c:499` の `pocket_text_key()` は `app_tick()` より前に走り、`fire()` が `JS_Call` でゲストの onEdit / onSubmit / onCancel を呼ぶ。ジョブが残っているターンでは、1 本の論理 drain の途中に JS が入る。§2.3 の表は 10 の pump と `frame()` しか数えていなかった。
-
-確認: そのとおり。ただしレビューが併記した「`pocket_text_reset()` の on_cancel も同じ経路」は**誤り** — `pocket_text_reset()` は onCancel を**発火しない**（pocket_text.h の契約「Closes any open session WITHOUT firing onCancel」、実装は `detach(); destroy(s);`）。
-
-修正: 打鍵はホスト側の半分（IME・バッファ・キャレット・再描画・submit/cancel の自動 close）をその場で行い、ゲストのコールバックは**キューに積む**。`pocket_text_pump()` が `app_tick()` の pump 段（= キューが空のターン）で、積まれた順に配送する。イベントはヒープ（セッションと同じく 1 件 1 確保）で、静的 DRAM は 8 B しか増えない — 静的配列にすると 1,108 B 増えることを実測(build)したので捨てた。遅延は通常時変わらない（同じフレームの後半で配送される）。
-
-検査: `tools/test_pocket_text.c` に case 8（打鍵では誰も呼ばれず、pump で、打った文字のまま届く。1 打鍵が生む 2 イベントの順序も）と case 9（配送前に `pocket_text_reset()` が来たら発火せずに解放する）を追加。既存 7 ケースのヘルパは「1 打鍵 = key + pump」= 1 フレームに直した。ASan/UBSan/LSan つきで 9 ケース全通過（実測(host)）。
-
-### 11.4 所有タスク自身の完了で起床していた（再現・修正）
-
-指摘: 完了の大半は ui タスク自身が投稿する。`vm_wake_post()` は `xTaskNotifyGive(owner)` を無条件に呼ぶので、投稿した本人が待つときカウントが 1 のまま残り、`vm_wake_wait()` が即座に返る。フレームキャップが下限 8 ms に潰れる。
-
-確認: `main/vm/vm_wake.c` に自タスク判定は無く、`pocket_api_complete()` は ui タスクの pump 群（sleep 期限・UART・net・ピッカー）から呼ばれる。同じターンの `pocket_api_pump()` が settle するので、その通知は「もう配ったものを取りに行く」ための起床になる。
-
-修正: ISR でない、かつ現在のタスクが所有タスクなら投稿しない。縮めるべきなのは「このタスクが予期できない完了」（別タスク・ISR）の待ちだけ。
-
-**未測定**: この 4 件の効果はすべてホストとコードの上での確認で、フレーム周期・完了遅延・空きヒープの実機値は取っていない。§7 の 12 は焼く前に必要。
-
-### 11.5 走らせたスイート（実測(host)）
-
-| スイート | 結果 |
-| --- | --- |
-| コーパス 33 件 × {asan, o2} × {予算なし, `--force-yield`, `--budget-jobs 1/3/7/16`} | 12 通りすべて 33/33 バイト一致。既存の `expected/*.txt` は `runaway_jobs.txt` を除き 1 バイトも変えていない（その 1 件は §5.2 の判定文の変更に伴うもの）|
-| Test262 `--force-yield` asan / o2 | どちらも 7,501 pass / 194 fail / 0 skip、`regressions: 0` |
-| `tools/build_pocket_text_test.sh` | 9/9 all passed（ASan/UBSan/LSan）|
-| `tools/build_pocket_random_test.sh` / `_capture_test.sh` | `POCKET_RANDOM_OK` / built |
-| ファーム両ビルド（既定 / `CONFIG_POCKET_VM_SCHED=n`）| 警告なしで成立。DIRAM 115,468 B（前回記録 115,452 B から **+16 B**）、Flash 1,552,612 B |
-
-`--budget-jobs 64` は元から文書化された行列の外で、`stop_with_queue.js`（自前で `--budget-jobs 4 --stop-turns 20` を指定している）が 1,000 段の連鎖を走り切ってしまい不一致になる。予算を上書きされたときのそのファイルの性質で、本修正とは無関係。

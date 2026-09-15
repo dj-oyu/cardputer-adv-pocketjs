@@ -79,8 +79,12 @@ S3でworker状態6,896B、別途PCM4,608B、圧縮フレーム2,048B、stack24,5
 . 'C:\Espressif\tools\Microsoft.v6.0.1.PowerShell_profile.ps1'
 idf.py -B build_mp3 build
 idf.py -B build_mp3 -p COM3 flash
-python tools/test_mp3_device.py --port COM3 --cycles 20
 ```
+
+上の実機実測は専用の`apps/mp3play`診断アプリと`tools/test_mp3_device.py`で取った。両方とも
+復号器の検証を終えた後、commit `1fea03f`でdev/test資産ごと削除済み。現在の実機経路は
+`apps/player`（ホーム画面のMUSICオーバーレイ、[player-overlay.md](player-overlay.md)）で、
+MP3固有の往復試験を新たに走らせるにはその経路を使う。
 
 ホストでは `bash tools/test_mp3.sh <MP3ファイル...>`。ASan/UBSanで実物のデコーダーと
 レート変換を実行し、24kHzのPCM一致と、各入力レートの整数出力サンプル数を照合する。
@@ -88,6 +92,6 @@ python tools/test_mp3_device.py --port COM3 --cycles 20
 16/22.05/32kHzの上流ベクトルも同じ検査を通過した。
 既存の`tools/test_stream.c`もASan/UBSanで通過。
 
-最終ビルドのFlash予算: app=2,521,296B、上限3,145,728B、spare=624,432B。
-MP3テスト音源3本も含む。これはビルド全体の実測で、他の未コミット変更を含むため
-MP3デコーダー単独の増分とは扱わない。ソースの変更前から存在した変更は保持した。
+最終ビルドのFlash予算: app=2,521,296B、上限3,145,728B、spare=624,432B（2026-09-09、`apps/mp3play`のMP3テスト音源3本を含む）。これはビルド全体の実測で、他の未コミット変更を含むため
+MP3デコーダー単独の増分とは扱わない。`apps/mp3play`自体は`1fea03f`で削除済みなので、
+この数字は現在のビルドのFlash予算と一致しない。

@@ -69,7 +69,7 @@ python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --chec
 
 `main/app_session.c` がJSセッションのすべてを所有する。`app_start_test()` がゲスト生成 → `pocketjs_guest_quickjs_install_once()` で各ネイティブ面を注入 → UIコア・バインディング・レンダラ生成、の順に組み立て、`app_stop()` が逆順に壊す。`app_tick()` が毎フレーム `pocket_*_pump()` を呼んでからゲストの `frame()` を回す。**ゲストのコールバックを保持するモジュールは、ゲストが死ぬ前に `app_stop()` から reset される必要がある。**
 
-`main/board.c` がLCD・キーボード・I2Cバスを所有し、`board_present()` が唯一の転送口。ストリップバッファは firmware 全体で1本（`board_strip()`）で、同期転送だから成立している。非同期DMA化するならここを2本に割る必要がある。
+`main/hal/board.c` がLCD・キーボード・I2Cバスを所有し、`board_present()` が唯一の転送口。描画用のストリップバッファは firmware 全体で1本（`board_strip()`）。転送は非同期で、`board_present()` がバイトスワップしながら転送用バッファ2本（`tx_buf`、1本が送信中のあいだにもう1本へ書く）へ写して queue し、前のストリップの結果を次の呼び出しで回収する。コマンドを送る前には必ず回収する（RAMWRセッションを終わらせるため）。
 
 `main/` は役割ごとに分かれている。`hal/`（LCD・キーボード・IMU・音）、`pocket/`（`pocket.*` API と Wi-Fi）、`pet/`、`ui/`（画面とエディタ）、`text/`（フォント・字句解析・SKK・ソース保存）、`scene/`（背景と描画カーネル）、直下は `main.c` と `app_session.c` のみ。**全サブディレクトリが `INCLUDE_DIRS` に入っているので、`#include "board.h"` のような書き方は変わらない** — 移動でソースを1行も書き換えずに済ませるための構成。
 
@@ -77,17 +77,17 @@ python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --chec
 
 `capability.supported` は「このファームが `pocket.*` の面を実装している」の意味。レガシーの `ui.createNode` があることを理由に true にしない（feature-testを通したアプリが `UNSUPPORTED` ではなく `TypeError` を食う）。`limits` に出す値は**コードで実際に強制している値だけ**。
 
-`main/solar_time.c` が天体計算の時刻源で、`solar_time_set_synchronized(true)` はSNTP成功時にのみ呼ばれる。`false` はどこからも呼ばない（一度合った時計は同期失敗後も正しい）。タイムゾーン変換はこの層に足さない。
+`main/scene/solar_time.c` が天体計算の時刻源で、`solar_time_set_synchronized(true)` はSNTP成功時にのみ呼ばれる。`false` はどこからも呼ばない（一度合った時計は同期失敗後も正しい）。タイムゾーン変換はこの層に足さない。
 
-JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EMBED_TXTFILES` で埋め込み、`main/shell.c` の `apps[]`／`app_details[]` に行を足し、`main/main.c` の `shell_app()` switch で起動する。**埋め込みシンボルはファイル名から作られるので、ファイル名を重複させない**（`main.js` は既にhelloが使用）。
+JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EMBED_TXTFILES` で埋め込み、`main/ui/shell.c` の `apps[]`／`app_details[]` に行を足し、`main/main.c` の `shell_app()` switch で起動する。**埋め込みシンボルはファイル名から作られるので、ファイル名を重複させない**（`main.js` は既にhelloが使用）。
 
 ## この機体で繰り返し踏む制約
 
-- **PSRAMなし、DRAMは約334KiB。** ホーム画面の空きヒープは実測274KiB（`idle_free=280,932`、Wi-Fiリンク後）。静的DIRAMを197,847→111,383Bまで削った結果で、**この数字は削減のたびに動くので `tools/memlog.py --port --check` の実測を見ること。** JSゲストの上限は144KiB — 128KiBだった頃、ネイティブAPIの `.bss` が増えてアプリが解析すら通らなくなった（システムには59KiBの空きがあった）。**capabilityを足すたびにゲストの部屋が減る。** 増減の記録は `tools/memlog.py` が持つ。
+- **PSRAMなし、DRAMは約334KiB。** ホーム画面の空きヒープは実測274KiB（`idle_free=280,932`、Wi-Fiリンク後）。静的DIRAMを197,847→111,383Bまで削った結果で、**この数字は削減のたびに動くので `tools/memlog.py --port --check` の実測を見ること。** JSゲストの上限は160KiB（`main/app_session.c` の `heap_limit`。128→144→160KiB と上げてきた） — 128KiBだった頃、ネイティブAPIの `.bss` が増えてアプリが解析すら通らなくなった（システムには59KiBの空きがあった）。**capabilityを足すたびにゲストの部屋が減る。** 増減の記録は `tools/memlog.py` が持つ。
 - **ゲストは起動時にJSソースを解析するので、ソースのバイト数がヒープを食う。** 実測で6.5KBのアプリはゲスト107KiB、7.6KBは評価に失敗する。アプリのコメントは短く、理由は隣の `README.md` へ。
 - **Rust UIコアはメモリ不足を報告せずパニックして再起動する。** `ui.setText` が引き起こすフォントアトラス再構築が小さなアプリの最大の単発確保。
 - **レイアウトが要求する単一連続ブロックは taffy ノード数で段階的に跳ねる。** taffyノード = ルート + 木に繋がっている**全View** + 本文が空でないText。空になるのは `NodeType::Text` のときだけで（`layout.rs:256`）、Viewは無条件に `new_with_children` へ入る。**テキストだけ数えると足りない。****16以下 → 2,048B / 17〜33 → 29,648B / 34以上 → 59,296B。** **この段差に対する余裕は測り直しが要る。** 23.5KiBという数字が長く書かれていて、それを根拠に「34ノード以上は到達不能」と結論していたが、`memlog.py --port --check` の実測は **70KiB台**（2026-09-08に73,728、機能を足した2026-09-09に71,680）で、59,296Bの段も入る。静的DIRAMを86KiB削った結果なので、古い数字は単に現状と合っていない。**この値をここに正確な数字として書かない** — capabilityを足すたびに動くので、書いた瞬間から古くなり、しかも古いことに誰も気づかない。段に対して余裕があるかを知りたいなら `memlog.py --port --check` を走らせること。ここにあるのは桁の目安で、判断の根拠ではない。**到達不能だったのは事実で、今も不能かは未検証** — どちらも主張する前に測ること。段を跨いで確保に失敗すればRust側はメモリ不足を報告せずabortするので、失敗の仕方だけは変わらない。`pocket_ui.c` は空ランを区別せず多めに数えるので、崖の手前で断る側に倒れている。`tools/uibudget/` で焼く前に確認できる（`cargo run --release --bin screen 9 3` が実機の失敗をそのまま再現する）。
-- **`main/keymap.c` は素の `` ` `` `;` `,` `.` `/` に `nav` を立てる。** テキストを受ける画面は `k->text` だけを読み `k->nav` を無視する（`codeedit.c` / `editor.c` / `wifi_ui.c` がそうしている）。
+- **`main/hal/keymap.c` は素の `` ` `` `;` `,` `.` `/` に `nav` を立てる。** テキストを受ける画面は `k->text` だけを読み `k->nav` を無視する（`codeedit.c` / `editor.c` / `wifi_ui.c` がそうしている）。
 - **命令キャッシュのアラインメントで、同じカーネルがビルド間で15%動く。** それ未満の差を主張するなら同一バイナリでの比較が要る。
 - **`board_capture` は byte swap と転送の前にバッファを写し、MISOは未配線。** 表示が正しいことをソフトウェアだけでは確認できない。物理確認を依頼する。
 - **Wi-Fiをリンクするだけで空きヒープが約37KiB減る。** 内訳は `.bss` だけでなく `.data` とIRAM常駐コード（S3ではDRAMと同じプール）。`esp_netif_deinit()` はIDF v6.0.1で `ESP_ERR_NOT_SUPPORTED` なので、一度無線を起動すると約4.8KiBは戻らない。

@@ -1,4 +1,4 @@
-# L1 clock-cost bench overlay (docs/vm/vm-l1-clock.md).
+# L1 clock-cost bench overlay (docs/vm/vm-L1-report.md sec.8.7).
 # NOT part of sdkconfig.defaults -- that file is shared by every build_*
 # directory in this tree (see CLAUDE.md), and this option must stay off there.
 #

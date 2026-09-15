@@ -78,7 +78,7 @@ void vmprobe_completion_sample(int64_t latency_us);
 // does not blend into the next session's head in a captured record.
 void vmprobe_session_reset(void);
 
-// G1's device side (docs/vm/vm-L2-design.md sec.1.3: "host is vmrun/
+// G1's device side (docs/vm/vm-L2-design.md sec.1.2: "host is vmrun/
 // stack_probe.sh; the device is confirmed with uxTaskGetStackHighWaterMark").
 // Call with the JS call depth the caller has JUST reached (i.e. from inside
 // the deepest active JS frame), right next to vmprobe_frame_sample's own

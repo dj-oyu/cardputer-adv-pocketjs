@@ -54,7 +54,7 @@ const char *wifi_time_stage_name(wifi_time_stage_t stage);
 // Credentials live in NVS namespace "wifi", keys "ssid" and "psk".
 //
 // The PSK goes in and never comes back out: there is no getter for it, and no
-// code path logs it at any level. docs/api/common-api.md:73 requires that a Wi-Fi
+// code path logs it at any level. docs/api/common-api.md section 3 requires that a Wi-Fi
 // password stay out of the ordinary logs, and a truncated password is still a
 // password with its search space cut down.
 esp_err_t wifi_time_credentials_set(const char *ssid, const char *psk);
@@ -83,7 +83,7 @@ bool wifi_time_radio_is_up(void);
 // typed SSID fails as WIFI_REASON_NO_AP_FOUND whether the network is absent or
 // the spelling is wrong, and those want opposite things from the person.
 
-#define WIFI_TIME_SCAN_MAX 16   // docs/api/common-api.md:306 caps a scan at 16
+#define WIFI_TIME_SCAN_MAX 16   // docs/api/common-api.md section 11 caps a scan at 16
 
 typedef struct {
     char   ssid[WIFI_TIME_SSID_MAX+1];
@@ -101,7 +101,7 @@ wifi_time_state_t wifi_time_scan_state(void);
 // entry per SSID — a mesh answering from three radios is one network to choose.
 // truncated, when given, reports that something was dropped: more than
 // WIFI_TIME_SCAN_MAX distinct networks, or an SSID that was not valid UTF-8 and
-// so could not be drawn or stored (docs/api/common-api.md:306).
+// so could not be drawn or stored (docs/api/common-api.md section 4).
 unsigned wifi_time_scan_networks(wifi_time_network_t *out, unsigned max,
                                  bool *truncated);
 

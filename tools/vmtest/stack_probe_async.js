@@ -1,4 +1,4 @@
-// G1 for the async path (docs/vm-L2-design.md sec.12.2, D34): the same
+// G1 for the async path (docs/vm-L2-design.md sec.10.2, D34): the same
 // measurement as stack_probe.js with the recursing function declared async.
 // No await anywhere, so every level is the first synchronous stretch of an
 // async call made from JS -- the stretch L2b-async runs as a flat frame in

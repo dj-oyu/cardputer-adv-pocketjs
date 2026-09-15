@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# G1 (docs/vm/vm-L2-design.md sec.1.3): does C stack use per JS call depend on
+# G1 (docs/vm/vm-L2-design.md sec.1.2): does C stack use per JS call depend on
 # depth? deep_recursion.js's "max_depth" only says how many levels overflow
 # the stack -- a 100 B/level implementation and a 1 KB/level implementation
 # both eventually overflow, just at different depths. That is not the

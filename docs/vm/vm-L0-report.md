@@ -80,7 +80,7 @@ bash tools/vmalloc/build.sh && bash tools/vmalloc/run_all.sh   # トレース採
 **L0完了（本タグ `vm-L0`）後、この手順を動かしていたワークロード本体と採取スクリプトは一度削除した**
 （`apps/vmprobe/` の6ワークロード・`condition.js`・README、`tools/vm_l0_capture.py`）。
 以下の数値は削除前に採取したもの。**2026-09-12 に本線へ戻し、常設にした**（L2 が計測を主戦場に
-するため。仕様書 §14.1）。タグから毎回戻す運用は、L1 が `vmprobe.h` から競合条件の宣言を削った
+するため。仕様書 §2）。タグから毎回戻す運用は、L1 が `vmprobe.h` から競合条件の宣言を削った
 時点で既に壊れていた（`VMPROBE_COND_ALL` 未定義でコンパイル不能。probe-off ビルドは当該ファイルを
 ビルドしないので誰も気づかなかった）。プローブ本体
 （`main/pocket/vmprobe.c` のサンプリングと `VMPROBE STATIC` / `VMPROBE WINDOW` の報告）は

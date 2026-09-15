@@ -22,7 +22,7 @@ static const char *TAG = "wifi";
 #define WIFI_KEY_SSID  "ssid"
 #define WIFI_KEY_PSK   "psk"
 
-// docs/api/common-api.md:371 budgets 15 s for a Wi-Fi connection and 30 s for the
+// docs/api/common-api.md section 14 budgets 15 s for a Wi-Fi connection and 30 s for the
 // longest wireless wait. The two below sit inside that: everything from
 // esp_wifi_start() to an address, then everything from there to a set clock.
 #define CONNECT_TIMEOUT_MS 15000
@@ -497,7 +497,7 @@ unsigned wifi_time_scan_networks(wifi_time_network_t *out, unsigned max,
 // An SSID is 32 arbitrary bytes on the wire, and this firmware has to draw it
 // and store it as a string. Anything that is not well formed UTF-8 is dropped
 // rather than shown as replacement characters that cannot be typed back in
-// (docs/api/common-api.md:306); a lone surrogate is rejected for the same reason
+// (docs/api/common-api.md section 4); a lone surrogate is rejected for the same reason
 // the storage API rejects one.
 static bool ssid_printable(const uint8_t *s, size_t n) {
     for(size_t i=0;i<n;) {
@@ -569,7 +569,7 @@ static void scan_task(void *arg) {
         if(err==ESP_OK) wifi_started=true;
     }
     if(err==ESP_OK) {
-        // Active scan with the driver's default dwell. docs/api/common-api.md:306
+        // Active scan with the driver's default dwell. docs/api/common-api.md section 11
         // allows 5 s; the default sweep of the 2.4 GHz channels finishes well
         // inside that, and a longer dwell only finds APs too weak to join.
         wifi_scan_config_t cfg={.show_hidden=false,.scan_type=WIFI_SCAN_TYPE_ACTIVE};

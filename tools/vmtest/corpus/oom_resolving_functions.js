@@ -15,7 +15,7 @@
 // CONFIG_POCKET_VM_FLATCALLS, so this bug is reachable in the SHIPPED
 // default build (flatcalls on) at recursion depth 1, not only through the
 // deep synchronous recursion that flat calls turn into heap exhaustion
-// (docs/vm-L2-design.md sec.12.2 D38, see budget_probe.sh's
+// (docs/vm-L2-design.md sec.10.3 D38, see budget_probe.sh's
 // deep_async_recursion). A plain `f()` here would go flat and miss the
 // js_async_function_call path entirely on the shipped config.
 //

@@ -152,12 +152,12 @@ static uint16_t garden_mix(uint16_t a,uint16_t b,unsigned f) {
 // pass needs more than eight, no value spills, and the store pointer stays
 // 16-byte aligned across the whole row -- which matters because a 128-bit store
 // to a misaligned address does not fault, it silently rounds down (TRM 1.7, and
-// docs/perf/pie-simd.md 5).
+// docs/perf/pie-simd.md 1.3).
 //
 // The row's constants -- forty in the pixel pass, seven or eight in each
 // octave -- never take a register at all. They are broadcast once into a table
 // that the loop walks in issue order, and the pass reads each one where it is
-// used. In the octaves that walk is free: docs/perf/pie-simd.md:70-76 swept the
+// used. In the octaves that walk is free: docs/perf/pie-simd.md 2.1 swept the
 // count of fused loads from 0 to 32 per block and measured the coefficient at
 // zero, so every constant there rides an arithmetic instruction that was
 // happening anyway. The pixel pass has 28 instructions with a .LD.INCP form
@@ -167,7 +167,7 @@ static uint16_t garden_mix(uint16_t a,uint16_t b,unsigned f) {
 //
 // Holding constants in registers instead was never an option: there is no
 // instruction that distributes one element of a vector register to all lanes
-// (docs/perf/pie-simd.md line 20), so a constant either comes from memory or is
+// (docs/perf/pie-simd.md 1.1), so a constant either comes from memory or is
 // built. What the table buys is the eight registers -- only the x ramp, the
 // ambient, the haze and the accumulating sunlight live across more than a few
 // instructions, and nothing spills.
@@ -280,7 +280,7 @@ static inline void garden_canopy_pixel(uint16_t *row,int x,int cx,int mhi,int ml
 // exact (21.3% of the span is the identity, swept over every reachable
 // ellipse-row) and was SLOWER on the part, +102 cycles per ellipse-row in 26 of
 // 26 same-binary pairs. The kernel passes an identity pixel for a few cycles; the
-// cut paid a divide and a count-down per row. docs/perf/pie-simd.md 11.6.
+// cut paid a divide and a count-down per row. docs/perf/pie-simd.md 7.
 static void garden_canopy_row_body(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
                                    uint16_t leafy);
 #ifdef ESP_PLATFORM
@@ -903,7 +903,7 @@ garden_broadcast(const int16_t *k,int16_t *kv,int nk) {
 // nothing else survives a block, because a, da and ddb ride the constant walk
 // like every other constant instead of sitting in registers. That is what
 // brings the live set inside eight, and it costs nothing: the sweep at
-// docs/perf/pie-simd.md:70-76 measured a fused load at zero cycles over 0..32 of
+// docs/perf/pie-simd.md 2.1 measured a fused load at zero cycles over 0..32 of
 // them per block.
 static void __attribute__((noinline))
 garden_coarse_pie(int16_t *dens,int n,int rc0,int a,int da,int ddb) {
@@ -1030,7 +1030,7 @@ garden_fine_pie(int16_t *dens,int n,int rc0,int a,int da,int ddb) {
 // arithmetic here; do not hand-edit which load rides which instruction.
 //
 // The body is ~470 bytes, well past loopgtz's 256, so it closes with addi/bnez
-// (docs/perf/pie-simd.md 7). Two instructions a block.
+// (docs/perf/pie-simd.md 1.3). Two instructions a block.
 // The fusion, as one spelling with a switch under it.
 //
 // EE.VADDS/VSUBS/VMUL have a .LD.INCP form that loads a vector and advances the
@@ -1249,7 +1249,7 @@ static void garden_octave_row(int16_t *dens,const int *v,int mask,int p,int step
 // The row's whole share of the lane pipeline: fill in the constants, lay the
 // two noise octaves into `dens`, then turn them into pixels. `dens` is 16-byte
 // aligned because the vector store rounds a misaligned address down instead of
-// faulting (docs/perf/pie-simd.md 5), and it is on the stack rather than in the
+// faulting (docs/perf/pie-simd.md 1.3), and it is on the stack rather than in the
 // scene block because it lives for one row and the ui task has 32 KB to spare.
 //
 // Split out of garden_row so that tools/test_garden.c can hold it against

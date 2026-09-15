@@ -5,7 +5,7 @@
 // this part is `l32r`+`callx8` into a ROM routine, and the cast it replaces it
 // with is one `trunc.s` (docs/perf/pie-simd.md 3.7).
 //
-// docs/perf/flower-perf-handoff.md proposed a bare `(int)` cast justified by an
+// A 2026-09-09 handoff (now docs/perf/pie-simd.md 3.7) proposed a bare `(int)` cast justified by an
 // argument that the argument is never negative, and named the one way that
 // breaks: a longitudinal coordinate that rounds a hair below -1 makes
 // (longitudinal+1)*4 slightly negative, floorf says -1, the cast says 0, and

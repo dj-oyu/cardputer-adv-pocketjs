@@ -36,7 +36,7 @@ void pocketjs_guest_vmprobe_take(uint32_t *call_us, uint32_t *drain_us) {
   vmprobe_drain_us = 0;
 }
 
-/* vm-l1-tuning (docs/vm/vm-l1-tuning.md): jobs actually returned by ONE
+/* vm-l1-tuning (docs/vm/vm-L1-report.md sec.10): jobs actually returned by ONE
  * vm_sched_drain() call, recorded from drain_jobs() -- the single choke
  * point both pocketjs_guest_frame() (the frame()-triggering call) and
  * pocketjs_guest_continue() (a continuation of the same logical drain, sec.2.1)
@@ -296,7 +296,7 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
   guest->drain_us += guest->budget.elapsed;
   guest->drain_jobs += ran;
   guest->jobs_pending = (status == VM_DRAIN_YIELDED);
-  /* L2c gate (docs/vm/vm-L2-design.md sec.12.6-4/12.9): vm_sched_drain() can
+  /* L2c gate (docs/vm/vm-L2-design.md sec.11.5/13): vm_sched_drain() can
    * report a parked chain now, but nothing in this build can ever park one
    * (every JS_VM* symbol is a pass-through, stage 1/2 of sec.12.15 do not
    * touch quickjs.c) -- so this is here only so a real interpreter change
@@ -328,7 +328,7 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
    * zero. Cleared before the report, which can itself fail the turn. */
   guest->drain_us = 0;
   guest->drain_jobs = 0;
-  /* D43 (docs/vm/vm-L2-design.md sec.13): the turn is over, so the frame
+  /* D43 (docs/vm/vm-L2-design.md sec.7.3): the turn is over, so the frame
    * segments the stack kept for reuse during it go back to the heap. Kept
    * across a YIELDED drain above, which is the same logical turn. */
   JS_VMStackTrim(guest->runtime);

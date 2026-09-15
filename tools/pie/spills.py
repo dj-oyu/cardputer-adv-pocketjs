@@ -7,7 +7,7 @@ range and puts several non-overlapping temporaries in the same one, so `a1+0
 x68` means "the compiler wanted one scratch location sixty-eight times", not
 "one value spilled sixty-eight times". Everything below reports traffic and
 location. It is a better proxy than the store-to-arithmetic ratio and it is
-still a proxy, and proxies have been expensive here (docs/perf/pie-simd.md 3.8).
+still a proxy, and proxies have been expensive here (docs/perf/pie-simd.md 3.5).
 
 To learn which *variables* lost their registers you need more than the
 disassembly. `-fdump-rtl-ira` says which pseudos were given memory

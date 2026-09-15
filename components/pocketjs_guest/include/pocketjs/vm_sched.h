@@ -94,7 +94,7 @@ typedef enum {
   VM_DRAIN_EMPTY = 0,   /* JS_IsJobPending() went false: a real end of drain */
   VM_DRAIN_YIELDED = 1, /* budget spent, jobs remain, nothing was dropped */
   VM_DRAIN_THREW = 2,   /* a job threw; the rest of the queue stays queued */
-  /* L2c (docs/vm/vm-L2-design.md sec.12.6-4/12.9, D22r): the VM has a chain
+  /* L2c (docs/vm/vm-L2-design.md sec.11.5/13, D22r): the VM has a chain
    * parked in JS_VMSuspended(). Covers BOTH of sec.12.6-4's cases with one
    * value: seen at the top of the loop, before the next job is even looked
    * at (a chain a PRIOR call left held -- no job ran this call, *ran stays

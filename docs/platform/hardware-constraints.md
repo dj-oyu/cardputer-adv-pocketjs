@@ -1,8 +1,8 @@
 # ハードウェア仕様と開発上の制約
 
-対象: 標準のM5Stack Cardputer-Adv（K132-Adv）。確認日: 2026-09-06。
-仕様は末尾の公式資料、数値計算は本ドキュメントの式に基づく。実機性能は未測定。
+対象: 標準のM5Stack Cardputer-Adv（K132-Adv）。仕様は末尾の公式資料、数値計算は本ドキュメントの式に基づく。
 旧Cardputer、Cardputer v1.1、PSRAM搭載の別のESP32-S3ボードを同一視しない。
+実機の現在値（ヒープ・FPS・段差の余裕など）はビルドのたびに動くため本書では固定しない。`tools/memlog.py --port --check`が最新の実測を持ち、`CLAUDE.md`の「この機体で繰り返し踏む制約」がその要約を保つ。
 
 ## 基本仕様
 
@@ -104,10 +104,9 @@ PocketJSのRust側レイアウト（taffy）はノードを1本の倍々Vecに�
 
 `pocket.ui`は`safeNodes`（この値までは必ず作れる）と`maxNodes`を公開し、段差を跨ぐ生成を`OUT_OF_MEMORY`で事前に断る。焼く前の確認は`tools/uibudget/`で行う。
 
-## 未確定・実機で決める項目
+## 決着した項目・まだ動く項目
 
-JS heap上限、各タスクstack、フォント量、最大アプリサイズ、LCDのSPI速度、安定FPS、停止応答、消費電力は未測定。
-[M1検証計画](../archive/milestone-01.md)に従い、空きRAM・最大連続領域・描画時間・入力遅延を記録してから決定する。
+LCDのSPI速度は`main/hal/board.c`で80MHzに固定済み。JS heap上限・各タスクstack・アプリ最大サイズは現在値が存在するが、capabilityを足すたびに動くため本書では数値を固定しない（`CLAUDE.md`と`tools/memlog.py`を見る）。安定FPS・停止応答・消費電力は背景・アプリの組合せに依存し、組合せごとに実測する性質のもので、単一の確定値を持たない。未解決として残っている個別項目は[docs/platform/backlog.md](backlog.md)を参照。
 
 ## 公式資料
 

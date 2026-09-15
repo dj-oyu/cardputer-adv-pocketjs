@@ -2,35 +2,24 @@
 
 M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェアプロジェクトです。
 
-文字主体のXMBホーム、QuickJS製Hello World、SKK Practice、JavaScript Playgroundを実装しています。Playgroundは編集・実行・保存・構文色分け・ログ／エラー表示に対応します。機能記述の基準は確定済みcommit `2b053b7`です。開発チュートリアルは実装進行中です。
+XMBホーム（背景は LEVEL WAVE / OCEAN + STARS / SOLAR SAIL / FLOWER）、JSアプリ、SKK日本語入力、JavaScript Playground、共通JS API `pocket.*` を実装しています。アプリの一覧は `main/ui/shell.c` の `apps[]` が正です。
 
 ## 設計ドキュメント
 
-- [ファイルシステムAPI仕様案](docs/api/filesystem-api.md)：pocket.fs、ディレクトリとファイル操作、SD、逐次読書き、保存保証、メディア・PC転送との接続。
+入口は [docs/README.md](docs/README.md) です。いまの主線は VM の高速化（[docs/vm/](docs/vm/)）、PIE と描画の高速化（[docs/perf/](docs/perf/)）、デザインシステム Kasane（[docs/kasane/](docs/kasane/)）の3本です。よく使うもの:
 
-- [共通JS API仕様案](docs/api/common-api.md)：将来のアプリ、UI・入力・保存、センサー、Wi-Fi／BLE、外部I/O、PC連携の公開契約と実装段階。実装前の提案です。
+- [共通JS API](docs/api/common-api.md)：`pocket.*` の仕様。冒頭に節ごとの実装状況。
+- [ファイルシステムAPI](docs/api/filesystem-api.md)：`pocket.fs`、`app:` / `assets:` / `sd:`。
+- [Windows / EIM開発環境](docs/platform/build-environment.md)：IDF v6.0.1、ビルド・書き込み。
+- [ハードウェア仕様と制約](docs/platform/hardware-constraints.md)：SoC、メモリ、ピン配置、共有バス。
+- [プラットフォーム設計](docs/platform/architecture.md)：ディレクトリ構成、責務、アプリの起動と終了。
+- [ESP32-S3 PIE（SIMD）](docs/perf/pie-simd.md)：描画カーネルの書き方と実測値。
 
-- [Windows / EIM開発環境](docs/platform/build-environment.md)：このPCのIDF v6.0.1、環境切り替え、ビルド・書き込みコマンド。
-- [ハードウェア仕様と制約](docs/platform/hardware-constraints.md)：SoC、メモリ、ピン配置、共有バス、描画・実行時の注意点。
-- [プラットフォーム設計](docs/platform/architecture.md)：責務、アプリの起動・終了、入力、描画、メモリ管理。
-- [ホームUI設計](docs/scenes/home-ui.md)：カテゴリと項目の選択、背景、アニメーション、画面遷移。
-- [ESP32-S3 PIE（SIMD）](docs/perf/pie-simd.md)：描画カーネルのベクトル化。命令セットの制約、パイプラインのストール、ビット一致の検証、実測値。
-- [Hello World検証計画](docs/archive/milestone-01.md)：実装順序、測定項目、完了条件。
-- [SKK日本語入力設計](docs/apps/japanese-input.md)：既存Cコアの再利用、入力優先順位、Flash辞書、候補表示、M2検証計画。
+設計目標・現在の実装・過去の実機結果を区別して記録します。数値は測った時点のもので、現在の空きヒープなどは `tools/memlog.py` で測り直します。
 
-- [実装と設計のレビュー](docs/archive/implementation-audit.md)：現在の保証範囲、未解決事項、次の機能候補。
-- [M1実機検証結果](docs/archive/firmware-m1.md)：初期ファームウェアの検証記録。
+## 操作
 
-設計目標・現在の実装・過去の実機結果を区別して記録します。過去のRAM/FPS・バイナリサイズは最新構成の測定値ではありません。
-
-## 最初の到達点と現在の操作
-
-2026-09-07追加: APPS末尾に[POCKET PET](apps/pet/README.md)を実装しました。
-12種類の選択、ごはん・遊び・睡眠、英数字の命名、ペットごとの保存・復元に対応します。
-ホストテストと`build_pet`でのファームウェアビルドを確認済み。実機書き込み・動作確認は未実施です。
-同じペットをCodex／Claude Codeの使用量コンパニオン、リセット通知、目覚まし、タイマーに使える[Pet Companion](docs/apps/pet-companion.md)も追加しました。
-
-ホームからHello Worldを起動し、Enterでカウンターを更新してホームへ戻る経路は実装・検証済みです。
+アプリには [POCKET PET](apps/pet/README.md) と、同じペットを Codex／Claude Code の使用量コンパニオン・リセット通知・目覚まし・タイマーに使う [Pet Companion](docs/apps/pet-companion.md) も含まれます。
 
 - ホーム: 矢印刻印のキーでカテゴリ／項目、Enterで開く。Fn付き矢印にも対応。
 - 設定: Enterで選択肢を開き、上下で選択、Enterで保存、Escで取消。
@@ -38,7 +27,7 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 - 日本語入力: Ctrl+JまたはOpt+SpaceでIME切替。変換中はIMEが先にキーを処理。
 - Esc: Fn＋左上のバッククォートキー。ホームでは同キー単独も戻るとして扱う。
 
-保存失敗時の未保存表示、空文書の再読込、強制停止・入力キューの扱いには未解決事項があります。[レビュー](docs/archive/implementation-audit.md)を参照してください。
+保存失敗時の未保存表示、空文書の再読込、強制停止・入力キューの扱いには未解決事項があります。[docs/platform/backlog.md](docs/platform/backlog.md)を参照してください。
 
 ## プラットフォームの方針
 
@@ -48,27 +37,15 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 - UI管理は、入力の受け渡し、PocketJS描画、液晶更新を担当します。
 - ネイティブ側にホームとエラー画面を置き、アプリは一度に1つ動かします。
 - 終了やエラー時はアプリの資源を解放し、元のホーム選択位置へ戻します。
-- JSヒープ上限は128KiB。ネイティブ側のメモリはこの制限と別で、任意アプリのOOM復帰は保証していません。
-- Flashはアプリ3MiB、辞書2MiB、日本語フォント512KiB、storage 2496KiB。辞書・フォントは別アセットです。
+- JSヒープの上限・空きヒープ・Flash配分はビルドごとに動くので、ここに数字を書きません。現在値は `CLAUDE.md` と `tools/memlog.py`、パーティションは `partitions.csv` を見てください。任意アプリのOOM復帰は保証していません。
 
 ## ホームのデザイン
 
-PSPのXMBの情報整理を参考に、左右でカテゴリ、上下で項目を選ぶ文字主体のホームです。
+PSPのXMBの情報整理を参考に、左右でカテゴリ、上下で項目を選ぶ文字主体のホームです。アイコンを使わず、文字列が選択位置へ移動し、明暗で選択を表示します。アプリ実行中はホーム背景の更新を止めます。詳細は [ホームUI](docs/scenes/home-ui.md)。
 
-- 暗い青を基調とした、リアルタイム描画の穏やかな波の背景。
-- アイコンを使わず、文字列が選択位置へ移動し、明暗で選択を表示。
-- 短いスライド遷移と、アニメーション中も反応するキー操作。
-- アプリ実行中はホーム背景の更新を停止。
-- AppsにHello World、SKK Practice、Playground。Settingsに背景・FPS・操作音。波／海面背景とパーティクル、IMU連動、リアルタイム合成音を実装。
+## まだ無いもの
 
-## 将来の機能
-
-- 名前付き作品管理、保存の復旧強化、動作中JSへの共通文字入力・方向入力API。
-- 検索と実行可能なサンプルを備えたオフラインDocs。
-- ペットの日本語命名と、コピーして改造できる同梱アプリの拡充。
-- PC中継ソフトを介したClaude Code／Codex連携。まずUSB、その後Wi-Fiを検討。
-
-この節は未実装の構想です。オフラインDocs／開発チュートリアルは別途実装進行中で、統合完了後に機能一覧と検証結果へ反映します。
+開いている作業は各ディレクトリの `backlog.md` にあります（例: [docs/apps/backlog.md](docs/apps/backlog.md)、[docs/platform/backlog.md](docs/platform/backlog.md)）。
 
 ## 参考
 

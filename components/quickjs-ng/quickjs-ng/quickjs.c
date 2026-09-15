@@ -2970,7 +2970,7 @@ static void update_stack_limit(JSRuntime *rt)
 #endif
 #ifdef CONFIG_POCKET_VM_SEGFRAMES
     // D10: JS_SetMaxStackSize is also the byte budget of the frame segments
-    // (docs/vm/vm-L2-design.md sec.9 D10). Same knob, same unit, two resources
+    // (docs/vm/vm-L2-design.md sec.8 D10). Same knob, same unit, two resources
     // for as long as JS_CallInternal still recurses in C: the C-stack test
     // above and the segment test in JS_CallInternal each hold the whole
     // value, and whichever fills first ends the recursion with the same
@@ -8832,7 +8832,7 @@ static inline __exception int js_poll_interrupts(JSContext *ctx)
 // The class-A safepoints (goto / goto16 / goto8 / if_true / if_false /
 // if_true8 / if_false8): same fast path as js_poll_interrupts, but the slow
 // path knows it is at a point where the instruction has fully retired
-// (docs/vm/vm-L2-design.md sec.7.2) and may be asked to stop there.
+// (docs/vm/vm-L2-design.md sec.4.1) and may be asked to stop there.
 static inline __exception int js_poll_safepoint(JSContext *ctx)
 {
     if (unlikely(--ctx->interrupt_counter <= 0)) {
@@ -18692,7 +18692,7 @@ not_a_function:
     //    already gives when a generator's heap frame cannot be allocated, and
     //    the same one the app would have seen from the next object it made.
     //    Calling it a stack overflow would name the wrong resource: on the
-    //    board the 20 KiB task stack (~50 levels, spec sec.14.3) trips long
+    //    board the 20 KiB task stack (~50 levels, spec sec.7) trips long
     //    before 144 KiB of heap could, so a heap-refused frame is nearly
     //    always a full heap, not deep recursion. The fallback in
     //    js_vm_stack_push_slow keeps the boundary where alloca had it: the
@@ -19158,7 +19158,7 @@ normal_this:
                 call_argc = opcode - OP_call0;
             goto has_call_argc;
             CASE(OP_tail_call):
-                // Tail-call entry (TCO, docs/vm/vm-L2-design.md sec.14 draft):
+                // Tail-call entry (TCO, docs/vm/vm-tco-design.md, a draft):
                 // its own dispatch label, placed ABOVE OP_call so that a
                 // frame-reusing tail call can be added here without one
                 // extra compare on the ordinary call path. Empty for now:

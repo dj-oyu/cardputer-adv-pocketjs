@@ -1,6 +1,6 @@
 // vmrun-flags: --host-events --budget-jobs 4
 // vmrun-pin-budget
-// Fair ordering, the case it exists for (docs/vm-L1-report.md sec.10).
+// Fair ordering, the case it exists for (docs/vm-L1-report.md §9.1). 
 //
 // A completion is recorded two job boundaries into a 24-job chain. The chain
 // is SEQUENTIAL -- each .then enqueues the next, so the queue is never more

@@ -317,7 +317,7 @@ static bool host_events;                        // --host-events
 // cut the drain); neither is frame().
 static bool fair_mode;
 
-// G1 (docs/vm/vm-L2-design.md sec.1.3): does C stack use per JS call depend on
+// G1 (docs/vm/vm-L2-design.md sec.1.2): does C stack use per JS call depend on
 // depth? deep_recursion.js's max_depth answers "how many levels until
 // overflow", which is silent on per-level cost -- a 200-byte frame and a
 // 2000-byte frame both eventually overflow, they just do it at different
@@ -703,7 +703,7 @@ static JSValue make_262(JSContext *ctx) {
 //
 // Defined since L2 by components/quickjs-ng/quickjs-ng/quickjs-vm.c (linked by
 // build.sh). With it, --force-yield stops at every one of the seven class-A
-// opcode safepoints (docs/vm/vm-L2-design.md sec.7.2). Until L2c gives the VM a
+// opcode safepoints (docs/vm/vm-L2-design.md sec.4.1). Until L2c gives the VM a
 // way to resume, a stop there is the uncatchable "interrupted" error, so the
 // corpus is EXPECTED to go red under --force-yield -- that is the gate having
 // teeth, not a harness defect. "#info vm ... stops=N" says how often it bit.

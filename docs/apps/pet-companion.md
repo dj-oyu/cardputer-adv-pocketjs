@@ -64,6 +64,16 @@ pocket.pet.clock();                   // UTC、ローカル分、目覚まし設
 
 認証・アカウント接続・リセットクレジットの消費はこの機能から行いません。Codexのリセットクレジット消費は別の明示的な操作であり、通知はリセット時刻を知らせるだけです。Claude Codeの使用量を取得できない環境でも、目覚ましとローカルタイマーは動作します。
 
+## 実装メモ
+
+`pocket.pet`は`docs/api/common-api.md` §2の作法に沿う。`limits`は`main/pet/pet_hub.c`の`pet_limits[]`で公開し（`maxPets`, `maxNotifications`, `maxTimers`, `maxLabelChars`, `maxTimerIdChars`, `maxAlarmSeconds`, `maxSpeechChars`）、`capability.available`はNVSオープンの成否を返す`probe`の観測値です（決め打ちのtrueではありません）。範囲外の引数・上限超過はすべて`PocketError`（`INVALID_ARGUMENT` / `LIMIT_EXCEEDED` / `NOT_AVAILABLE`）として届き、生のQuickJS例外は`main/pet/pet_hub.c`と`pet_assets.c`からは出ません。
+
+`pet.js`は`pocket.ui`ではなくレガシーの`ui.createNode`を直接使うため、`main/pocket/pocket_ui.c`のノード数ガード（`UI_SAFE_NODES 15`）を通ります。2026-09-07にノード数がこの上限を1つ超え（18 taffyノード）、レイアウトが要求する単一連続ブロックの段差を跨いで確保に失敗し、Rust側がエラーを返さず再起動する形で表面化しました（`CLAUDE.md`のtaffyノード段差を参照）。装飾用のバー3本を落として15ノードに戻し、実機で299フレームの描画とキー操作を確認しています。ノード数を増やす変更をするときは`tools/uibudget/`で先に確認すること。
+
+`pet_hub_pump()`は`app_tick()`の外（`main.c`）で走るため、通知・アラーム発火からJSへ届く処理は`app_tick()`の中に置く必要があります（QuickJSの割り込み期限は`app_tick()`先頭で更新されるため）。データ変化のpush通知（`pocket_api_capability_changed()`相当）は建てていません。`rewards()`はfloatを返し確保ゼロで、`frame()`はアニメーションのため毎フレーム走る必要があるので、購読にしてもポーリングと大差が無いためです。
+
+PC↔デバイスの双方向通信は`pocket.pet`ではなく`pocket.bridge`（`main/pocket/pocket_bridge.c`、[docs/api/common-api.md](../api/common-api.md) §13、`apps/bridge`）が担います。`pet_hub_usb()`の48バイト固定フレームは今も一方向（PC→デバイス）で、デバイス側からのレスポンス経路は`pocket.bridge`の役割です。
+
 ## 検証
 
 `python -B tools/test_pet_companion.py` はスナップショット、未知の窓、Claude累計の扱い、重複・部分transcript、CRCを確認します。`node tools/test_pet.cjs` は育成・命名・保存復元を確認します。`idf.py -B build_pet_companion build` はフラッシュ制限内で成功しています。

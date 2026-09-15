@@ -1,10 +1,37 @@
-# Pocket共通JS API仕様案 v0.1
+# Pocket共通JS API仕様
 
-作成: 2026-09-06。状態: **実装前の設計提案**。本書の `pocket.*` は新設する公開APIで、現在のファームウェアに存在するAPIではない。型表記は説明用TypeScriptで、デバイスのアプリは素のJavaScriptとする。
+`globalThis.pocket` の公開契約。型表記は説明用TypeScriptで、デバイスのアプリは素のJavaScriptとする。`main/pocket/` がこの文書の実装で、土台（capability登録・エラー・非同期契約）は `pocket_api.c`、各面はその他の `pocket_*.c` にある。節番号はコード・アプリ・tools から `docs/api/common-api.md section N` の形で約58箇所参照されているため、**この文書の節番号は動かさない**。
 
-基準実装: `2b053b7`。進行中のチュートリアル実装を変更・前提化しない。[現在の構成](../platform/architecture.md)、[未解決事項](../archive/implementation-audit.md)、[ハードウェア制約](../platform/hardware-constraints.md)も参照する。
+## 実装状況（節ごと）
 
-「必須」はこのAPI版を提供するときの契約。「初期上限案」は実測前の値で、現行ファームウェアの保証ではない。Wi-Fi/BLEを含む全機能の同時搭載・同時利用を約束しない。
+ほぼ全ての節は `pocket_api_register()` で実際にcapability登録され、`supported=true` を返す形で実装済み。未実装・意図的に断っている面は明記する。
+
+| 節 | 面 | 状態 | 実装 |
+| --- | --- | --- | --- |
+| 2 | capabilities／apiVersion | 実装済み | `pocket_api.c` |
+| 3 | アプリ登録（静的テーブル） | 実装済み | `main/pocket/app_registry.c` |
+| 3.1 | オーバーレイ | 実装済み（`pocket.overlay`。§3.1本文に改訂履歴） | `pocket_overlay.c`、`main/ui/overlay*.c` |
+| 4 | 共通エラー・cancel・Options | 実装済み | `pocket_api.c` |
+| 5 | app／time／log | 実装済み | `pocket_app.c` |
+| 6 | ui／input／input.text | 実装済み | `pocket_ui.c`、`pocket_text.c` |
+| 7 | storage | 実装済み | `pocket_storage.c` |
+| 7 | fs（`pocket.fs`） | 実装済み。詳細は[ファイルシステムAPI](filesystem-api.md) | `pocket_fs.c` |
+| 7 | workspace（`pocket.workspace`） | 実装済み。srcstore 16スロットの上に構築 | `pocket_workspace.c` |
+| 8 | sensors.imu | 実装済み | `pocket_imu.c` |
+| 8 | power | 実装済み | `pocket_av.c` |
+| 8.1 | random | 実装済み | `pocket_random.c` |
+| 9 | audio.cue／tone／playback（WAV, IMA ADPCM, Opus CELT, MP3）、power | 実装済み | `pocket_av.c`、`opus_feed.c`、`mp3_feed.c`／`mp3_decode.c` |
+| 9 | io.ir（送信） | 実装済み | `pocket_io.c` |
+| 9.2 | audio.capture（マイク） | 実装済み | `pocket_capture.c` |
+| 10 | io.i2c／spi／uart／gpio | 実装済み | `pocket_io.c` |
+| 11 | net.wifi／net.http | 実装済み | `pocket_net.c` |
+| 12 | ble.central／ble.peripheral | **未実装（意図的）**。名前空間はあるが全メソッドがUNSUPPORTEDを返す | `pocket_ble.c`（76行、capabilityは登録しない設計） |
+| 13 | bridge（PC link、USB transport） | 実装済み | `pocket_bridge.c`、`tools/pocket_bridge.py` |
+| 14 | 資源上限 | 一部は`limits`として実測値を公開、残りは初期案のまま | 各面の`limits` |
+
+BLE（12節）だけが「未実装」で、`pocket_ble.c` は意図的に全メソッドをUNSUPPORTEDにして名前空間だけ生かしている。それ以外はfeature-testを通れば実際に動く。「必須」はこのAPI版を提供するときの契約。`limits` に出す値のうち「初期上限案」と書いたものは実測前の見積りで、コードが強制している値だけを`limits`が返すという規則（CLAUDE.md）は変わらない。Wi-Fi/BLEを含む全機能の同時搭載・同時利用を約束しない。
+
+未実装・未決の残件は[docs/api/backlog.md](backlog.md)にまとめた。ハードウェア前提は[ハードウェア制約](../platform/hardware-constraints.md)、プラットフォーム全体の構成は[プラットフォーム設計](../platform/architecture.md)を参照する。
 
 ## 1. 対象アプリと必要な機能
 
@@ -53,7 +80,7 @@ availableは予約ではなく観測値。確認直後に資源が変わり得�
 
 ## 3. アプリ登録と権限
 
-初期はビルド内の登録情報で十分。将来のインストールでも同じ情報モデルを使う。以下は登録形式の案であり、現状のmanifestや.pocket形式の変更ではない。
+初期はビルド内の登録情報で十分。将来のインストールでも同じ情報モデルを使う。以下の形は`main/pocket/app_registry.c`の静的テーブル（`app_manifest_t`）として実装済みで、動的インストールや`.pocket`受け入れは未実装のまま。
 
 ```json
 {
@@ -270,11 +297,11 @@ fsは `app:/`（アプリの永続ファイル）、`assets:/`（同梱の読取
 
 openはread/create/replace/append。create/replaceは一時版へ書き、commitで公開して自動close。空ファイルとNOT_FOUNDを区別する。appendは末尾追記で、電源断による部分書込を許容する用途に分ける。通常運転中のatomicReplaceと電源断復旧のcrashSafeReplaceを別featureとし、既定の安全な保存を黙って弱い保証へ落とさない。媒体抜去でハンドルを無効化し、再挿入でも復活させない。JSへformatや生Flash操作は提供しない。
 
-作品管理は別のホストサービスとする。`pocket.workspace.pick({kind:"source"}) -> Promise<SourceRef|null>`、`read(ref) -> Promise<{text,revision}>`、`create({title,text}) -> Promise<SourceRef>`、`save(ref,text,{ifRevision}) -> Promise<{revision}>`、`run(ref,{returnState}) -> void`を後段で追加する。SourceRefはホスト発行の不透明参照。教材はcreateでコピーし、既存作品へのsaveは明示的な選択とrevision確認を必要とする。
+作品管理は別のホストサービス`pocket.workspace`として実装済み（`main/pocket/pocket_workspace.c`）。`pick({kind:"source"}) -> Promise<SourceRef|null>`、`read(ref) -> Promise<{text,revision}>`、`create({title,text}) -> Promise<SourceRef>`、`save(ref,text,{ifRevision}) -> Promise<{revision}>`、`run(ref,{returnState}) -> void`を持つ。SourceRefはホスト発行の不透明参照。教材はcreateでコピーし、既存作品へのsaveは明示的な選択とrevision確認を必要とする。バックエンドは現行srcstoreの16スロット（次段落）。
 
 runは参照・能力・JSON互換returnState（最大1024bytes）を同期検証し、失敗時はthrow、受付後は新規入力を止めて現在のセッションを終了し対象へ遷移する。同時JS実行や、破棄したJSのPromiseを後から解決する仕組みは使わない。呼出元へ戻る場合は新セッションを作り、`pocket.app.launchContext()`が `{returnState, result:{reason,errorCode?}}` を返す。通常起動時は両方null。対象の起動失敗もホストが同じ復帰経路へ渡す。編集カーソル等はreturnState、作品本文は保存サービスが所有する。ネイティブPlaygroundの既存復帰はこのJSセッション規則とは別のホスト実装である。
 
-現行srcstoreの16スロットは初期バックエンドであり、公開APIにスロット番号を露出しない。保存失敗・空文書・破損復旧の課題を解消してからstorage/workspaceの契約を提供する。
+現行srcstoreの16スロット（0はユーザー、1以降は教材用）が`storage`/`workspace`のバックエンドで、公開APIにスロット番号は露出しない。保存失敗・空文書・破損復旧の既知課題は[docs/platform/backlog.md](../platform/backlog.md)を参照。
 
 ### ログと診断
 
@@ -901,7 +928,7 @@ ESP32-S3はWi-FiとBLEでRF資源を共有し、IDFの共存機構にも組合�
 
 無線使用中に背景品質を下げる判断はホストが行う。アプリの論理時刻をFPSから推測しない。消費電力・接続速度・センサー精度はAPIシグネチャとは別の性能表で記録する。
 
-## 15. アプリ例（提案API。現行では実行不可）
+## 15. アプリ例（実行可能。app/time/log/storage/ui/inputは実装済み）
 
 ```js
 const p = pocket;
@@ -935,18 +962,20 @@ p.app.start({
 
 この例は保存成功後に表示を確定する。終了時保存の保証に頼らない。UI生成失敗・startのrejectはホストの起動エラー画面へ戻る。
 
-## 16. 実装段階と対応表
+## 16. 実装段階（現状）
 
-| 段階 | 実装する公開機能 | 現行コードとの接続／条件 |
+当初はA〜Fの段階計画として書かれていたが、A〜Dと録音・Wi-Fi/HTTPは実装済みで段階分けの意味が薄れた。現状のみを記す。
+
+| 段階 | 内容 | 状態 |
 | --- | --- | --- |
-| A: 共通土台 | error、capabilities、session、cancel、lifecycle、input action、基本UI、time、cue、random | app_session / main / shell / sound。保存・停止・キューの既知課題を先に解消。randomはnative共通層を先行し、JS公開は8.1節に従う |
-| B: 作る・残す | storage、TextSession、workspace、ログ、動的日本語表示 | srcstore / editor / codeedit / jsconsole / jsfont。教材をユーザー領域から分離 |
-| C: 本体を使う | IMU、電池、tone、IR、SD、外部I/O | motion / board / 新規ドライバー。共有バスと電源断の検証 |
-| D: PC接続 | USB bridge、分割転送、ログ、停止、実行 | 診断USBと新protocolを分離。PCアダプターは別コンポーネント |
-| E: 無線 | Wi-Fi STA＋HTTP、BLE Centralを各単独で提供 | 新規native services、stack/RAM測定、TLS／bond管理 |
-| F: 拡張 | 無線共存、BLE Peripheral/HID、録音、必要ならAP・WebSocket・TCP/UDP・ESP-NOW | 個別capabilityとprofile。詳細仕様・資源上限・受け入れ試験を追加 |
+| A: 共通土台 | error、capabilities、session、cancel、lifecycle、input action、基本UI、time、cue、random | 実装済み |
+| B: 作る・残す | storage、TextSession、workspace、ログ、動的日本語表示 | 実装済み |
+| C: 本体を使う | IMU、電池、tone、IR、SD、外部I/O、録音 | 実装済み |
+| D: PC接続 | USB bridge | 実装済み（`pocket_bridge.c`、[apps/bridge](../../apps/bridge/README.md)） |
+| E: 無線 | Wi-Fi STA＋HTTP | 実装済み。BLE Centralは未実装（12節） |
+| F: 拡張 | BLE Peripheral/HID、無線共存、AP・WebSocket・TCP/UDP・ESP-NOW | 未着手。[docs/api/backlog.md](backlog.md) |
 
-すべての名前を最初に実装する必要はない。AをHello World、Bを小さなメモ、Cをペット／水平器で確認する。チュートリアルにはそのビルドでsupported=trueの機能だけを実行可能として掲載し、将来APIは別ページへ分ける。
+チュートリアルにはそのビルドでsupported=trueの機能だけを実行可能として掲載し、未実装APIは別ページへ分ける。
 
 ## 17. 受け入れ条件
 
@@ -967,4 +996,4 @@ p.app.start({
 
 BLEスタック候補と共存の制約はIDF v6.0.1を基準に確認した。NimBLEはBLE向けの軽量スタックとして記載されているが、本ファームウェアでの実測採用は未実施。[IDF Bluetooth API](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-reference/bluetooth/index.html)
 
-実装時に固定する残件: native回復用のRAM余裕、ポート一覧と電気的制約、SDの復旧方式、証明書・時刻の供給方式、Wi-Fi/BLE profile、PC wire形式、画像／スプライトAPI、任意アプリ向け文字・UIリソース予算の強制経路。後段機能はこの仕様の保証を緩めず、版とcapabilityを増やして追加する。
+残件（BLE以外）は[docs/api/backlog.md](backlog.md)にまとめた。後段機能はこの仕様の保証を緩めず、版とcapabilityを増やして追加する。

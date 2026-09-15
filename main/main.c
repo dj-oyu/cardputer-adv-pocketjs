@@ -40,7 +40,7 @@
 
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
 // ---------------------------------------------------------------------------
-// L1 clock-cost bench (branch vm/l1-clockbench, docs/vm/vm-l1-clock.md). This
+// L1 clock-cost bench (branch vm/l1-clockbench, docs/vm/vm-L1-report.md sec.8.7). This
 // whole block is a throwaway measurement, not shipping code: it exists only
 // behind CONFIG_POCKET_VM_L1_CLOCKBENCH, which is off in every normal build
 // (see sdkconfig.vmclockbench.defaults / .pin1.defaults for how to turn it

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify_all.sh — the G6 gate (docs/vm/vm-L2-design.md sec.1.3): replays every
+# verify_all.sh — the G6 gate (docs/vm/vm-L2-design.md sec.1.2): replays every
 # trace through the segment allocator under ASan+UBSan with --verify, then
 # runs the fault modes as negative controls and REQUIRES each to be caught.
 # A gate that only shows the good allocator passing has not shown that it

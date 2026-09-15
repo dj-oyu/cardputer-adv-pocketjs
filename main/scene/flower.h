@@ -11,7 +11,7 @@
 // which is a ray tracer and has nothing to say about plants. The rotation
 // picks up a new row on its own; nothing else needs telling.
 //
-// Every entry represents a real botanical species. See docs/scenes/flower-home.md
+// Every entry represents a real botanical species. See docs/scenes/flower.md
 // for the scientific names and the features retained at display resolution.
 typedef enum {
     FLOWER_VALLEY, FLOWER_SUNFLOWER, FLOWER_SNOWDROP,

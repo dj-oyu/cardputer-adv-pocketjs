@@ -146,13 +146,13 @@ menu "Pocket VM (L0 measurement probes)"
 
             The cost compat ordering pays is completion latency on an app whose
             drain needs continuations -- measured (device) at ~1.9x the pre-L1
-            path under audio contention (docs/vm/vm-L1-report.md sec.6). This mode
+            path under audio contention (docs/vm/vm-L1-report.md sec.2.8). This mode
             exists so that tradeoff can be measured rather than argued, and so
             L2 can revisit it with evidence. Two things are deliberately NOT
             made fair, because neither can be made safe at a job boundary:
             exit() (delivered as an uncatchable interrupt, it would cut the
             drain it lands in) and frame() (it would put a frame inside a
-            chain). See docs/vm/vm-L1-report.md sec.10.
+            chain). See docs/vm/vm-L1-report.md sec.9.3.
 
     config POCKET_UI_TASK_CORE
         int "Core the ui task is pinned to (-1 = let FreeRTOS choose)"
@@ -172,7 +172,7 @@ menu "Pocket VM (L0 measurement probes)"
             of an HTTP request running on the other core, because core 0 is
             where ESP-IDF fixes the Wi-Fi driver task. Pinning also removes the
             one migration the board does take (measured: 1 in 1,800 idle
-            frames, docs/vm/vm-l1-clock.md sec.2), which is what makes a per-core
+            frames, docs/vm/vm-L1-report.md sec.8.8), which is what makes a per-core
             clock (CONFIG_POCKET_VM_CCOUNT) possible at all.
 
             The three values are the SAME binary with one immediate changed --
@@ -187,7 +187,7 @@ menu "Pocket VM (L0 measurement probes)"
             once every VM_JOB_STRIDE jobs (vm_sched.h). CCOUNT --
             the per-core cycle counter, RSR CCOUNT, the one main/scene/flower.c
             already uses -- costs 25 ns a read against esp_timer_get_time()'s
-            833 ns (measured (device), docs/vm/vm-l1-clock.md sec.1).
+            833 ns (measured (device), docs/vm/vm-L1-report.md sec.8.7).
 
             It is per core, so it is only sound when the task that runs the
             drain cannot migrate: components/pocketjs_guest/src/vm_clock.c
@@ -198,7 +198,7 @@ menu "Pocket VM (L0 measurement probes)"
             job-heavy workloads.
 
     config POCKET_VM_L1_CLOCKBENCH
-        bool "Enable L1 clock-cost bench (docs/vm/vm-l1-clock.md)"
+        bool "Enable L1 clock-cost bench (docs/vm/vm-L1-report.md 8.7)"
         default n
         help
             A throwaway bench for one question: what does reading the clock

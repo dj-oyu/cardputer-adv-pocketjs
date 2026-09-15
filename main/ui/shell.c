@@ -84,10 +84,10 @@ static uint64_t kernel_cycles;
 // births and deaths -- and the pair of counters that replaced the known zero
 // (this one and the trace's own) had to agree instead. The trace measured 3.3
 // to 4.0 ms and came out again, so the zero is back, and the episode is in
-// docs/perf/pie-simd.md 3.9 rather than in a comment here.
+// docs/perf/pie-simd.md 4.3 rather than in a comment here.
 //
 // Cycle counts, not esp_timer_get_time(): the timer is 0.90 us a call
-// (docs/perf/pie-simd.md 3.5), and eight of those per strip would be 0.12 ms of
+// (docs/perf/pie-simd.md 6.5), and eight of those per strip would be 0.12 ms of
 // measurement on a 6.2 ms subject, concentrated on whichever piece is smallest.
 // `rsr.ccount` is one instruction.
 static uint64_t hud_fmt_cy,hud_ovl_cy,hud_fps_cy,hud_menu_cy;
@@ -622,7 +622,7 @@ void shell_draw(const char *error, unsigned phase) {
         // the paired difference is that one switch. The AB line carries the
         // window's own canopy cycles next to draw and send, because SPLIT's
         // 60-frame window does not line up with this 2-second one. Pair it with
-        // the neighbours' mean; docs/perf/pie-simd.md 11.6 has the numbers it gave.
+        // the neighbours' mean; docs/perf/pie-simd.md 7 has the numbers it gave.
         {
             extern int g_garden_canopy_pie,g_board_swap_into;
             extern uint32_t garden_prof_canopy(uint32_t *rows);

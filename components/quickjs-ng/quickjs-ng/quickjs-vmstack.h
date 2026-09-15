@@ -1,5 +1,5 @@
 // L2a: bytecode-function frames in runtime-owned, non-moving segments
-// (docs/vm/quickjs-freertos-vm-spec.md sec.7 "L2a", docs/vm/vm-L2-design.md sec.3).
+// (docs/vm/quickjs-freertos-vm-spec.md sec.7 "L2a", docs/vm/vm-L2-design.md sec.2).
 //
 // NOT part of the upstream quickjs-ng import. Header-only on purpose: the only
 // includer that instantiates anything is quickjs.c (every function is `static
@@ -12,7 +12,7 @@
 // arg_buf / var_buf / stack_buf / var_refs (ledger 02 sec.2a). Both are what a
 // JSVarRef and rt->current_stack_frame point at with raw pointers, so both must
 // live somewhere that neither moves nor disappears when this C frame returns
-// early -- spec sec.14.5: "L2a moves the JSStackFrame itself, not only the
+// early -- spec sec.7: "L2a moves the JSStackFrame itself, not only the
 // alloca block". With CONFIG_POCKET_VM_SEGFRAMES the two become ONE block here,
 // [JSStackFrame][JSValue slots...][JSVarRef *...], carved from a segment.
 //
@@ -41,8 +41,8 @@
 // histories, not frame lifetimes) caps how large any one of them gets --
 // taffy's biggest contiguous request (59,296 B, the top node-count step in
 // CLAUDE.md's taffy table) must still find room, so the standard segment can
-// never grow past what it was before this change (docs/vm/vm-L2-design.md
-// sec.10.8 measured 6,240 B of headroom against that step at today's 4,096).
+// never grow past what it was before this change (docs/vm/vm-L2-results.md
+// sec.3.4 measured 6,240 B of headroom against that step at today's 4,096).
 // Position, not history: the size is read off
 // st->seg_live (segments CURRENTLY on the chain), never a cumulative
 // counter, so one deep recursion does not make a later, shallow one pay for
@@ -98,7 +98,7 @@
 extern "C" {
 #endif
 
-// L2b (CONFIG_POCKET_VM_FLATCALLS, docs/vm/vm-L2-design.md sec.10) is a
+// L2b (CONFIG_POCKET_VM_FLATCALLS, docs/vm/vm-L2-design.md sec.9) is a
 // property of frames that live here: a flat callee's frame is popped by the
 // same JS_CallInternal activation that pushed it, which is only possible
 // when the frame is not on that activation's C stack. Kconfig says
@@ -123,7 +123,7 @@ extern "C" {
 // taffy needs a 59,296 B contiguous block on the device (CLAUDE.md's taffy
 // node-count table, the 34-node-or-more step), and that request goes through
 // js_malloc_rt like everything else here, so a bigger standard segment would
-// eat into the same headroom (docs/vm/vm-L2-design.md sec.10.8 measured 6,240 B
+// eat into the same headroom (docs/vm/vm-L2-results.md sec.3.4 measured 6,240 B
 // of headroom against that step at today's 4,096). "#info vmstack" from
 // vmrun (--stats) reports what the corpus actually needed; see the L2a
 // report.
@@ -210,7 +210,7 @@ typedef struct JSVMSeg {
     // is padded to pointer alignment), which is what frame_hdr= in
     // "#info vmstack" reports. Per segment, so hello's single resident
     // segment pays +4 B against the ~3.5 KiB the smaller JS_VM_SEG_FIRST
-    // payload saves (docs/vm/vm-L2-design.md sec.13.3, calculated).
+    // payload saves (docs/vm/vm-L2-design.md sec.7.2, calculated).
     int standard;
 } JSVMSeg;
 
@@ -221,7 +221,7 @@ typedef struct JSVMStack {
     uint32_t cache_max;
     size_t seg_first;       // payload of the bottom (n=1) standard segment
     size_t seg_max;         // ceiling every standard segment's payload is capped at
-    // D10 (docs/vm/vm-L2-design.md sec.9): the recursion limit that survives
+    // D10 (docs/vm/vm-L2-design.md sec.8): the recursion limit that survives
     // L2b. `used` is the sum of (top - base) over the live chain -- pushed
     // frame bytes, rounded, NOT counting segment headers or the unused tail
     // of each segment -- kept incrementally so the budget test is one add
@@ -622,7 +622,7 @@ static inline void js_vm_stack_trim(JSRuntime *rt, JSVMStack *st)
 // With CONFIG_POCKET_VM_FLATCALLS a JS-to-JS call does not recurse in C:
 // JS_CallInternal pushes the callee's block and carries on in the same
 // activation, and the callee's return pops it and resumes the caller from
-// what the frame chain holds (docs/vm/vm-L2-design.md sec.10). Everything the
+// what the frame chain holds (docs/vm/vm-L2-design.md sec.9). Everything the
 // dispatch loop kept in C locals for the caller must then be recoverable
 // from the caller's frame. Most of it already is: pc is sf->cur_pc (D8),
 // argc is sf->arg_count (D11), the buffers hang off sf, and the return

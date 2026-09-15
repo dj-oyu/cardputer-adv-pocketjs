@@ -1,4 +1,4 @@
-// L2b (docs/vm-L2-design.md sec.10): JS-to-JS calls that run in one C
+// L2b (docs/vm-L2-design.md sec.9): JS-to-JS calls that run in one C 
 // activation must be indistinguishable from the C-recursive ones. Every line
 // here is a place where the flat return rebuilds a caller local from the
 // frame chain, and the value it prints depends on that rebuild being right:

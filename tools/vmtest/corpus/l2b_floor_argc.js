@@ -1,4 +1,4 @@
-// L2b (docs/vm-L2-design.md sec.10.3): a generator/async floor's argc.
+// L2b (docs/vm-L2-design.md sec.9.3): a generator/async floor's argc. 
 // A flat call made from a default-parameter initializer returns into the
 // floor before OP_rest binds the rest parameter, so OP_rest reads the argc
 // the flat return rebuilt. The floor's frame is JSAsyncFunctionState.frame,
