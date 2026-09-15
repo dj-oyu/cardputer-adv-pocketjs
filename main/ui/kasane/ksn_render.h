@@ -127,6 +127,19 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
  * predicate for every pixel. Both arms live in one binary and produce the same
  * pixels (test_coverage_spans.c compares them exhaustively and frame by frame). */
 extern int g_ksn_row_coverage;
+/* Candidate 4c switch: 1 (default) builds the row's sampled colours once per
+ * row -- a 240-entry table for a horizontal gradient's ramp, one value for a
+ * vertical gradient's row, one value for the shape and text commands -- and
+ * reads them per pixel; 0 asks sample() for every pixel, which is the path this
+ * file ran before the table existed. The ramp is the same integer expression
+ * rearranged, not a rounded copy of it, so both arms must produce byte
+ * identical panels: test_row_table.c checks them pixel by pixel over the whole
+ * 240x135 panel for 120 frames, and against `interpolate` over a sweep. The
+ * table is only consulted where a row's covered window has been solved, i.e.
+ * under g_ksn_row_coverage = 1; with that off there is no window and the
+ * predicate path samples as it always did. DRAM cost: one 960-byte table in
+ * .bss, against a budget of ~334 KiB (CLAUDE.md). */
+extern int g_ksn_row_table;
 #ifdef __cplusplus
 }
 #endif

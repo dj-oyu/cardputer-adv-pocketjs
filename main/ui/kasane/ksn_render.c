@@ -578,6 +578,170 @@ static ksn_rgba sample(const ksn_frame_view *command,int x,int y){
     unsigned i=(unsigned)(vertical?y-draw->bounds.y0:x-draw->bounds.x0);
     return interpolate(draw->data.gradient.from,draw->data.gradient.to,i,length);
 }
+/* Candidate 4c of docs/perf/kasane-opt-survey.md, generalised to a row profile:
+ * the colour `sample` returns is a function of x alone for a horizontal
+ * gradient, of y alone for a vertical one (one value for the whole row) and of
+ * neither for the shape and text commands. Evaluating it per pixel pays an
+ * out-of-line call (sample is 57 instructions at -Os) and, for a gradient, four
+ * hardware divisions per pixel (the divider is 16-18 cycles,
+ * docs/perf/pie-simd.md:233) for a value the row already knows. Build the row's
+ * values once into a small table and the per-pixel work becomes a load.
+ *
+ * The ramp is bit-exact, not an approximation of the pixel path: it is the same
+ * integer expression rearranged. `interpolate` computes, with a and b the two
+ * channel bytes of from/to and last = length-1,
+ *
+ *     f(i) = (a*(last-i) + b*i + last/2) / last = (C + i*D) / last
+ *     C = a*last + last/2,  D = b - a
+ *
+ * every operand of which is non-negative, so the truncating division it emits
+ * is floor. With D = m*last + s (0 <= s < last) and i0 the row's first index,
+ *
+ *     f(i) = i*m + floor((C + i*s) / last) = i*m + q(i)
+ *
+ * and q moves by a carry of at most one per column, because r < last and
+ * s < last give r + s < 2*last. So two divisions per channel set the step up
+ * (m and the first index) and every further column is an add, a compare and a
+ * conditional subtract: the divisions leave the pixel loop entirely and the
+ * pixel loop is left with a load. test_row_table.c checks the two writings
+ * agree over a sweep of channel pairs and lengths, and over 120 whole frames.
+ *
+ * Bounds: ksn_rect is int16_t, so length <= 65535 and last <= 65534, and the
+ * window starts at most 33,008 columns into the ramp. D = b - a is within
+ * +-255, and truncating division keeps |s| <= 255 and |m| <= 255/last, which
+ * puts the numerator C + i0*s under 2^25 and every quotient in the byte range:
+ * nothing here needs 64-bit arithmetic. */
+int g_ksn_row_table=1;
+#define KSN_ROW_TABLE_MAX 240 /* One panel row: the strip is 240 wide. */
+typedef struct {
+    bool constant;              /* One value for every x of the row. */
+    uint32_t color;             /* That value, and the clamp for any other x. */
+    int first;                  /* x of value[0] when not constant. */
+    unsigned count;             /* Entries in value[] when not constant. */
+    uint32_t value[KSN_ROW_TABLE_MAX];
+} ksn_row_table;
+/* One table for the whole renderer, not one per call site: the renderer is
+ * owner-task only, the direct path's row loop and a group's child loop never
+ * overlap, and the only code that runs between a build and its reads is the
+ * composite itself (ksn_ports.h forbids a callback from re-entering the
+ * renderer). Two tables would be 1,920 B of DRAM, one is 960 B: the integration
+ * record prices boundary 2a's decode cache at 5,868 B of .bss against a DRAM
+ * budget of ~334 KiB with 280,932 B idle free (CLAUDE.md, この機体で繰り返し踏む制約). */
+static ksn_row_table row_table;
+/* Floor division for a possibly negative numerator: the ramp's step is b - a
+ * and can point down. The source makes two of these calls per channel per row
+ * (m, and the first index's quotient); at -Os each becomes a `quos` and the
+ * `m*last` subtraction next to it a `rems` of the same operands, so the divider
+ * runs four times per channel, sixteen per row -- against the four per pixel
+ * the pixel path spent (measured, see test_row_table.c's call counts and the
+ * commit message's instruction accounting). */
+static int floor_div(int numerator,int divisor){
+    int quotient=numerator/divisor;
+    if(numerator-quotient*divisor<0)quotient--;
+    return quotient;
+}
+/* Fills `table` with the values `sample` returns on row y over the columns
+ * [left,right) the caller's runs cover. False when this row is not one the
+ * table covers, in which case the caller asks `sample` per pixel as before and
+ * the pixels are the ones the old path produced. */
+static bool row_table_build(ksn_row_table *table,const ksn_frame_view *command,
+                            int y,int left,int right){
+    const ksn_draw *draw=&command->draw;
+    if(left>=right)return false;
+    if(draw->kind!=KSN_GRADIENT){
+        /* Every other supported kind returns one colour for every pixel: rect,
+         * text, round rect, stroke, and whatever the union holds for a kind the
+         * renderer rejects before its first transfer. */
+        table->constant=true;
+        table->color=draw->kind==KSN_TEXT?draw->data.text.color:draw->data.shape.color;
+        table->count=0;
+        return true;
+    }
+    const ksn_rgba from=draw->data.gradient.from,to=draw->data.gradient.to;
+    unsigned length=(unsigned)(draw->data.gradient.axis!=0?draw->bounds.y1-draw->bounds.y0:
+                                                           draw->bounds.x1-draw->bounds.x0);
+    if(length<=1){ /* interpolate returns `from` without dividing. */
+        table->constant=true;table->color=from;table->count=0;
+        return true;
+    }
+    if(draw->data.gradient.axis!=0){
+        int index=y-draw->bounds.y0;
+        if(index<0||(unsigned)index>=length)return false; /* Not this row's box. */
+        /* A vertical gradient's index is the row, so `sample` returns one
+         * colour for the whole row; asking it once is the reference value by
+         * definition, and it keeps `interpolate` to the call site it had. */
+        table->constant=true;
+        table->color=sample(command,left,y);
+        table->count=0;
+        return true;
+    }
+    unsigned last=length-1,index=(unsigned)(left-draw->bounds.x0),count=(unsigned)(right-left);
+    if(left<draw->bounds.x0||count>KSN_ROW_TABLE_MAX)return false;
+    if(index>last||index+count-1>last)return false; /* Asks for columns the ramp
+                                                     * does not define; the
+                                                     * covered window never
+                                                     * does, but a caller that
+                                                     * widened it must fall back. */
+    const unsigned shifts[4]={24,16,8,0};
+    int quotient[4],remainder[4],step[4],carry[4];
+    for(unsigned n=0;n<4;n++){
+        int a=(int)channel(from,shifts[n]),b=(int)channel(to,shifts[n]);
+        int numerator=a*(int)last+(int)(last/2),delta=b-a;
+        /* D = m*last + s by TRUNCATING division, not floor: the step s then
+         * keeps D's sign and |s| <= min(255, last-1), which is what holds the
+         * numerator below 2^25. A floor would give s close to `last` for a
+         * descending ramp and overflow the numerator of a window far into a
+         * long one (measured: alpha 255->0, last 65534, i0 32768, which produced
+         * 0xffff807d instead of 0x8800807f before this line used `/`). The floor
+         * the ramp needs is applied once, to the first index, where the quotient
+         * can be negative. */
+        int m=delta/(int)last,s=delta-m*(int)last;
+        int first=numerator+(int)index*s;
+        int q=floor_div(first,(int)last),r=first-q*(int)last;
+        quotient[n]=(int)index*m+q;step[n]=m;remainder[n]=r;carry[n]=s;
+    }
+    /* The four channels step in lockstep, one byte each, in scalars rather than
+     * through the arrays above: the measured column loop was 105 instructions
+     * (-Os, xtensa-esp32s3-elf-objdump) when the state was indexed, against the
+     * 57-instruction `sample` call this build replaces. Indexing the state
+     * costs a load and a store per channel per column and turns each channel's
+     * shift into a variable one. One carry and no borrow per column is enough
+     * there: r is in [0,last) and |s| < last. */
+    int q0=quotient[0],q1=quotient[1],q2=quotient[2],q3=quotient[3];
+    int r0=remainder[0],r1=remainder[1],r2=remainder[2],r3=remainder[3];
+    int m0=step[0],m1=step[1],m2=step[2],m3=step[3];
+    int s0=carry[0],s1=carry[1],s2=carry[2],s3=carry[3];
+    int limit=(int)last;
+    for(unsigned i=0;i<count;i++){
+        table->value[i]=(uint32_t)q0<<24|(uint32_t)q1<<16|(uint32_t)q2<<8|(uint32_t)q3;
+        q0+=m0;r0+=s0;if(r0>=limit){r0-=limit;q0++;}else if(r0<0){r0+=limit;q0--;}
+        q1+=m1;r1+=s1;if(r1>=limit){r1-=limit;q1++;}else if(r1<0){r1+=limit;q1--;}
+        q2+=m2;r2+=s2;if(r2>=limit){r2-=limit;q2++;}else if(r2<0){r2+=limit;q2--;}
+        q3+=m3;r3+=s3;if(r3>=limit){r3-=limit;q3++;}else if(r3<0){r3+=limit;q3--;}
+    }
+    table->constant=false;table->first=left;table->count=count;
+    table->color=table->value[0]; /* The clamp value, so it is never unset. */
+    return true;
+}
+/* The value `sample` would return for x. The callers ask only for the x their
+ * runs cover, which is inside the window the table was built for; the clamp
+ * keeps the read defined and in range if that ever stops being true. Inline,
+ * because this is the per-pixel work the table exists to make a load: an
+ * out-of-line call here would carry a call8, the argument moves and the result
+ * move into every pixel. */
+static inline __attribute__((always_inline))
+ksn_rgba row_table_value(const ksn_row_table *table,int x){
+    if(table->constant)return (ksn_rgba)table->color;
+    unsigned index=(unsigned)(x-table->first);
+    return (ksn_rgba)table->value[index<table->count?index:0];
+}
+/* The row's values, or NULL when the caller has to ask `sample` per pixel: the
+ * switch is off, or this row is not one the builder covers (an empty window, a
+ * window outside the command's own index range). */
+static const ksn_row_table *row_table_for(const ksn_frame_view *command,int y,int left,int right){
+    if(!g_ksn_row_table)return NULL;
+    return row_table_build(&row_table,command,y,left,right)?&row_table:NULL;
+}
 static unsigned premultiply_over(ksn_premultiplied_rgba8 *dst,ksn_rgba color,uint8_t opacity){
     unsigned a=mul8(color&255,opacity),inverse=255-a;
     dst->r=(uint8_t)clamp8(mul8(color>>24,a)+mul8(dst->r,inverse));
@@ -697,19 +861,26 @@ static bool tile_block_reached(const ksn_tile_reach *box,unsigned count,
         if(py>=box[k].y0&&py<box[k].y1&&x0<box[k].x1&&x0+width>box[k].x0)return true;
     return false;
 }
-/* One covered pixel of one child: sample it, composite it into the
- * premultiplied tile and maintain the dither provenance. Both coverage arms
+/* One covered pixel of one child: composite the colour the caller produced into
+ * the premultiplied tile and maintain the dither provenance. Both coverage arms
  * (g_ksn_row_coverage on = the row's runs, off = the per-pixel predicate) call
  * this, so the pixels a row's runs name go through the same code the
  * pixel-at-a-time path runs. Out of line so that objdump can attribute the
  * tile's per-pixel cost (the doc counts it). `dest` is the pixel's index inside
- * the tile, x/y are absolute (Bayer and gradient phase) and `coverage` is the
- * text port's ink at that pixel. Owner task: the decoded frame view, like every
- * other helper in this renderer (2a retype). */
+ * the tile -- the index the dither provenance bit keys off -- and `coverage` is
+ * the text port's ink at that pixel. Owner task: the decoded frame view, like
+ * every other helper in this renderer (2a retype).
+ *
+ * `color` is an argument rather than a `sample(command,x,y)` call in here:
+ * candidate 4c's row table (g_ksn_row_table) hands this the row's value and
+ * must not re-enter `sample` per pixel -- its counting arm asserts the per-pixel
+ * sampling is gone (test_row_table.c). Callers without a table pass
+ * `sample(command,px,py)`, the same call with the same arguments this function
+ * used to make itself, which is why merging the tile branch's composite and the
+ * rowtable branch's copy into this one definition moved no pixel. */
 KSN_TILE_MEASURED static void group_pixel(ksn_premultiplied_rgba8 *tile,const ksn_frame_view *command,
-                        int dest,int x,int y,bool has_dither,bool child_dither,
-                        uint32_t *provenance,uint8_t coverage){
-    ksn_rgba color=sample(command,x,y);
+                        int dest,bool has_dither,bool child_dither,
+                        uint32_t *provenance,uint8_t coverage,ksn_rgba color){
     if(command->draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage);
     unsigned alpha=premultiply_over(&tile[dest],color,command->draw.opacity);
     if(has_dither&&alpha){
@@ -966,13 +1137,24 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
             if(g_ksn_row_coverage){
                 ksn_x_run runs[KSN_ROW_RUNS];
                 unsigned run_count=coverage_runs(command,py,x0,x0+count,runs);
-                for(unsigned run=0;run<run_count;run++)
-                    for(int px=runs[run].x0;px<runs[run].x1;px++)
-                        group_pixel(tile,command,px-x0,px,py,has_dither,child_dither,
-                                    dither_pixels,scratch->text[px-x0]);
+                /* This row's colours, built once for the window the runs cover
+                 * (the window the solver just named), then read per pixel. The
+                 * predicate arm below has no such window -- solving one is what
+                 * g_ksn_row_coverage does -- so it asks `sample` as always. */
+                const ksn_row_table *row=run_count?
+                    row_table_for(command,py,runs[0].x0,runs[run_count-1].x1):NULL;
+                for(unsigned run=0;run<run_count;run++){
+                    int from=runs[run].x0,to=runs[run].x1;
+                    if(row)for(int px=from;px<to;px++)
+                        group_pixel(tile,command,px-x0,has_dither,child_dither,dither_pixels,
+                                    scratch->text[px-x0],row_table_value(row,px));
+                    else for(int px=from;px<to;px++)
+                        group_pixel(tile,command,px-x0,has_dither,child_dither,dither_pixels,
+                                    scratch->text[px-x0],sample(command,px,py));
+                }
             }else for(int x=lo;x<hi;x++)if(covers(command,x0+x,py))
-                group_pixel(tile,command,x,x0+x,py,has_dither,child_dither,
-                            dither_pixels,scratch->text[x]);
+                group_pixel(tile,command,x,has_dither,child_dither,dither_pixels,
+                            scratch->text[x],sample(command,x0+x,py));
             KSN_PROF_END(blend);}
         }
 #ifdef KSN_TILE_COUNT
@@ -1116,10 +1298,23 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                 if(g_ksn_row_coverage){
                     ksn_x_run runs[KSN_ROW_RUNS];
                     unsigned run_count=coverage_runs(command,py,x0,x1,runs);
-                    for(unsigned run=0;run<run_count;run++)for(int x=runs[run].x0;x<runs[run].x1;x++){
-                        unsigned index=(unsigned)((py-y)*240+x);
-                        pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
-                                            d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
+                    /* One row's colours over the window the runs cover, then a
+                     * load per pixel; the else side is the path this file has
+                     * always run, kept for the switch off and for any row the
+                     * builder declines. */
+                    const ksn_row_table *row=run_count?
+                        row_table_for(command,py,runs[0].x0,runs[run_count-1].x1):NULL;
+                    for(unsigned run=0;run<run_count;run++){
+                        int from=runs[run].x0,to=runs[run].x1;
+                        if(row)for(int x=from;x<to;x++){
+                            unsigned index=(unsigned)((py-y)*240+x);
+                            pixels[index]=blend(pixels[index],row_table_value(row,x),d->opacity,
+                                                d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
+                        }else for(int x=from;x<to;x++){
+                            unsigned index=(unsigned)((py-y)*240+x);
+                            pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
+                                                d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
+                        }
                     }
                 }else for(int x=x0;x<x1;x++)if(covers(command,x,py)){
                     unsigned index=(unsigned)((py-y)*240+x);
