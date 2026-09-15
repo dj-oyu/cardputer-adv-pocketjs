@@ -190,6 +190,34 @@ int main(void) {
     printf("E: eight-lane row == scalar row over every rx/clip/leafy, %s\n",
            mismatches == ebad ? "ok" : "MISMATCH");
 
+    // F. The steps the scheduled kernel took out of the lanes, each over its whole
+    //    domain: the blend written around f alone, the unpack at SAR 16, and the
+    //    pack summed with a saturating add.
+    long fbad = mismatches;
+    for (int f = 0; f <= 153; f++)
+        for (int c = 0; c <= 63; c++)
+            for (int l = 0; l <= 63; l++) {
+                int g = 256 - f;
+                int plain = (c * g + l * f) >> 8, lane = c + (((l - c) * f) >> 8);
+                if (plain != lane) bad("blend around f", lane, plain, c, l, f);
+            }
+    for (uint32_t p = 0; p <= 0xFFFFu; p++) {
+        if (((p * 32u) >> 16) != (p >> 11)) bad("p*32>>16", (p * 32u) >> 16, p >> 11, p, 0, 0);
+        if ((((p * 2048u) >> 16) & 63) != ((p >> 5) & 63)) bad("p*2048>>16", p, 0, p, 0, 0);
+    }
+    for (int r = 0; r <= 31; r++)
+        for (int g6 = 0; g6 <= 63; g6++)
+            for (int b = 0; b <= 31; b++) {
+                int s = (int16_t)(uint16_t)(r * 2048);           /* the lanes are signed */
+                s += g6 * 32; if (s > 32767) s = 32767; if (s < -32768) s = -32768;
+                s += b;       if (s > 32767) s = 32767; if (s < -32768) s = -32768;
+                if ((uint16_t)s != (uint16_t)((r << 11) | (g6 << 5) | b))
+                    bad("saturating pack", (uint16_t)s, (r << 11) | (g6 << 5) | b, r, g6, b);
+            }
+    printf("F: blend around f, SAR-16 unpack, saturating pack == OR, %s\n",
+           mismatches == fbad ? "ok" : "MISMATCH");
+
+
     printf("%s: mismatches=%ld\n", mismatches ? "FAIL" : "PASS", mismatches);
     return mismatches ? 1 : 0;
 }

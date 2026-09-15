@@ -612,6 +612,31 @@ void shell_draw(const char *error, unsigned phase) {
             (double)hud_ovl_cy/samples/240000.0,(double)hud_fmt_cy/samples/240000.0,
             (double)hud_fps_cy/samples/240000.0,(double)hud_menu_cy/samples/240000.0,
             (double)present_sum/samples/1000.0);
+#ifndef SCENE_AB
+#define SCENE_AB 0
+#endif
+#if SCENE_AB
+        // Same-binary A/B, one PERF window per arm, off in the shipping build.
+        // The arms rotate all-on / kernel off / all-on / swap-into off, so every
+        // "off" window has an all-on neighbour on each side in the same scene and
+        // the paired difference is that one switch. The AB line carries the
+        // window's own canopy cycles next to draw and send, because SPLIT's
+        // 60-frame window does not line up with this 2-second one. Pair it with
+        // the neighbours' mean; docs/pie-simd.md 11.6 has the numbers it gave.
+        {
+            extern int g_garden_canopy_pie,g_board_swap_into;
+            extern uint32_t garden_prof_canopy(uint32_t *rows);
+            static unsigned ab_arm;
+            uint32_t crows=0,ccy=garden_prof_canopy(&crows);
+            ESP_LOGI("background","AB arm=%u pie=%d swap=%d frames=%u canopy=%.3f (%u rows, %u cy/row) draw=%.2f send=%.2f",
+                     ab_arm%4,g_garden_canopy_pie,g_board_swap_into,
+                     samples,(double)ccy/samples/240000.0,crows/samples,crows?ccy/crows:0,
+                     (double)draw_sum/samples/1000.0,(double)present_sum/samples/1000.0);
+            ab_arm++;
+            g_garden_canopy_pie=ab_arm%4!=1;
+            g_board_swap_into=ab_arm%4!=3;
+        }
+#endif
         samples=0;draw_sum=0;present_sum=0;prep_sum=0;loop_sum=0;hud_sum=0;kernel_cycles=0;
         hud_fmt_cy=hud_ovl_cy=hud_fps_cy=hud_menu_cy=0;
         max_us=0;window_start=now;

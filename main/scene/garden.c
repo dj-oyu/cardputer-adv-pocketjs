@@ -276,8 +276,39 @@ static inline void garden_canopy_pixel(uint16_t *row,int x,int cx,int mhi,int ml
                      +((((a>>5)&63)*g+lg*f)>>8)*32
                      +(((a&31)*g+lb*f)>>8));
 }
-static void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
-                              uint16_t leafy) {
+// Not done here, and measured: cutting the span to the pixels with f != 0 is
+// exact (21.3% of the span is the identity, swept over every reachable
+// ellipse-row) and was SLOWER on the part, +102 cycles per ellipse-row in 26 of
+// 26 same-binary pairs. The kernel passes an identity pixel for a few cycles; the
+// cut paid a divide and a count-down per row. docs/pie-simd.md 11.6.
+static void garden_canopy_row_body(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
+                                   uint16_t leafy);
+#ifdef ESP_PLATFORM
+// TEMPORARY (see garden.h). The canopy on its own, because `decor` holds it
+// together with the trunks, the grass and the light, and the last canopy A/B
+// could not see past that: its difference was smaller than the drift of the
+// terms it was averaged with. Two cycle reads per ellipse-row, 154 a frame.
+static uint32_t garden_canopy_cycles,garden_canopy_rows;
+uint32_t garden_prof_canopy(uint32_t *rows) {
+    uint32_t v=garden_canopy_cycles;
+    if(rows)*rows=garden_canopy_rows;
+    garden_canopy_cycles=garden_canopy_rows=0;
+    return v;
+}
+#endif
+static inline void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
+                                     uint16_t leafy) {
+#ifdef ESP_PLATFORM
+    GARDEN_FENCE;uint32_t c0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+    garden_canopy_row_body(row,lo,hi,cx,mrr,qy,leafy);
+    GARDEN_FENCE;garden_canopy_cycles+=esp_cpu_get_cycle_count()-c0;
+    garden_canopy_rows++;GARDEN_FENCE;
+#else
+    garden_canopy_row_body(row,lo,hi,cx,mrr,qy,leafy);
+#endif
+}
+static void garden_canopy_row_body(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
+                                   uint16_t leafy) {
     int mhi=(mrr>>8)*16,mlo=mrr&255,qbase=256-qy;
     int lr=(leafy>>11)&31,lg=(leafy>>5)&63,lb=leafy&31;
     if(g_garden_canopy_pie) {

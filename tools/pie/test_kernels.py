@@ -459,12 +459,13 @@ class TestCanopyKernel(unittest.TestCase):
             mem = bytearray(0x8000)
             env = {'cx': cx, 'mrr': mrr, 'qy': qy, 'leafy': leafy}
             self.broadcast(mem, extract_constants(CANOPY, 'canopy_pie(', env))
-            store16(mem, self.XV, [x0 + i for i in range(8)])   # one block's worth
+            # dx = x - cx for the first block; the kernel moves it on by eight.
+            store16(mem, self.XV, [(x0 + i - cx) & 0xFFFF for i in range(8)])
             store16(mem, self.ROW, words)
             sim = Sim(mem)
             sim.run(extract_asm(CANOPY, 'canopy_pie('),
                     {'kp': 0, 'xp': self.XV, 'row': self.ROW, 'n': nblk, 'kv': self.KV,
-                     'sh0': 0, 'sh5': 5, 'sh8': 8, 'sh11': 11, 'sh16': 16, 'sh18': 18})
+                     'sh0': 0, 'sh8': 8, 'sh16': 16, 'sh18': 18})
             got = load16(mem, self.ROW, 8 * nblk)
             want = [self.pixel_ref(x0 + i, cx, mrr, qy, lr, lg, lb, words[i]) for i in range(8 * nblk)]
             self.assertEqual(got, want, f'rx={rx} cx={cx} x0={x0} blocks={nblk} mrr={mrr} qy={qy} leafy={leafy}')

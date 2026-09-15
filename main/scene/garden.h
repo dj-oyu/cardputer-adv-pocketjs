@@ -399,6 +399,9 @@ uint32_t garden_prof_pixels(void);
 // Cycles spent in the mote touch-up and the number of rows it ran on, measured
 // inside the shipping binary rather than by subtracting two builds. Clears both.
 uint32_t garden_prof_motes(uint32_t *rows);
+// TEMPORARY: the canopy blend's own cycles since the last call, and the number of
+// ellipse-rows they cover. Clears both.
+uint32_t garden_prof_canopy(uint32_t *rows);
 #endif
 // TEMPORARY A/B switch, defined in garden.c and flipped by whatever is measuring
 // it. 1 = the shipping path: the canopy blend skips the pixels whose alpha is
