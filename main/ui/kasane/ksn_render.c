@@ -300,6 +300,113 @@ static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opac
     b=clamp8(mul8(src.b,opacity)+mul8((b<<3)|(b>>2),inverse));
     return pack565(r,g,b,dither,x,y);
 }
+/* ------------------------------------------------------------------------- *
+ * Boundary 4 of docs/perf/kasane-opt-survey.md: the direct blend chain as a
+ * quantized-key lookup table.
+ *
+ * `blend` is called once per pixel and, per channel, is a pure function of
+ * three things: the destination's own channel value (five or six bits, so 32 or
+ * 64 of them), the command's sampled colour plus its effective alpha, and -- on
+ * the dithered arm -- the 4x4 bayer threshold `pack565` quantizes against (16
+ * values). A row of the table is one (colour, alpha, threshold) triple costed
+ * once for all 32/64 destination values: 128 bytes for the three channels
+ * (5+6+5 bits packed back). Two arms, both built here and both optional at
+ * run time:
+ *
+ *  - solid: one sampled colour for the command, which is
+ *    RECT/ROUND_RECT/STROKE and also a gradient whose `from` equals its `to`
+ *    (`interpolate` returns `from` for every i). Rows = the 16 bayer thresholds
+ *    when the command dithers, so the dither is inside the table and the pixel
+ *    only does the bayer index the pack used to do itself; rows = 1 for the
+ *    thin pack. This arm is exact by construction: each entry runs blend()'s own
+ *    expression, and the harness compares it against blend() over the whole
+ *    per-channel space and over 120 frames.
+ *  - alpha: the text path, whose three source channels are constant per command
+ *    but whose effective alpha mul8(mul8(colour alpha, coverage), opacity)
+ *    varies with the coverage byte. That is where a 16-level parameter
+ *    quantization lives: the row is a>>4, built with the bucket midpoint
+ *    (level*16+8, at most 248), so the approximation is bounded by 8 in the
+ *    effective alpha and the harness measures what it does to pixels. This is
+ *    the only arm that can move a pixel.
+ *
+ * The rows are rebuilt only when the (colour, opacity, dither) key changes; the
+ * band loop repeats the same commands once per 8-row strip, so a full-frame
+ * command builds its rows once a frame. The tables are static: the render path
+ * has no allocator, and this is the layer the 5,824-byte decode cache already
+ * lives in. 16+16 rows x 128 B = 4,096 B of table plus 16 B of keys = 4,112 B of
+ * .bss, the size the survey's budget check named (a 32/64-value x 16-level table
+ * per channel is 512-1,024 B); `nm -S` prints both arrays at 0x800.
+ *
+ * Both switches are A/B arms in ONE binary, the way g_ksn_row_coverage and
+ * g_ksn_decode_once are: the same kernel moves ~15% between builds from
+ * instruction cache alignment alone (CLAUDE.md), which is larger than anything
+ * this change can win, so it has to be flipped inside one build. g_ksn_blend_lut
+ * defaults to 1 (the solid arm is measured pixel-exact, worst step 0) and
+ * g_ksn_blend_lut_alpha to 0 (the 16-level alpha quantization moves pixels by
+ * more than one step; docs/perf/kasane-lut.md has the counts). */
+int g_ksn_blend_lut=1;
+int g_ksn_blend_lut_alpha=0;
+
+#define KSN_BLEND_LUT_ROWS 16
+#define KSN_BLEND_LUT_ROW 128 /* [0,32) red 5 bits, [32,96) green 6, [96,128) blue 5 */
+static uint8_t blend_lut_solid[KSN_BLEND_LUT_ROWS][KSN_BLEND_LUT_ROW];
+static uint8_t blend_lut_alpha[KSN_BLEND_LUT_ROWS][KSN_BLEND_LUT_ROW];
+/* The parameters the current rows were built for. Two keys, one per arm: the
+ * band loop revisits the same commands, and a rebuild is 128 stores a row. */
+static struct { ksn_rgba color; uint8_t opacity; bool dither,valid; } blend_lut_solid_key,
+                                                                     blend_lut_alpha_key;
+/* One row: blend()'s three channel expressions and pack565()'s narrowing, for
+ * one effective alpha and one bayer threshold. `opacity` is the command's, so a
+ * == mul8(colour alpha, opacity) exactly as blend computes it -- except in the
+ * alpha arm, which passes opacity 255 and an already-scaled alpha so that this
+ * expression reproduces the level's own a. */
+static void blend_lut_build_row(uint8_t *row,ksn_rgba color,uint8_t opacity,
+                                unsigned threshold,bool dither){
+    unsigned a=mul8(color&255u,opacity),inverse=255u-a;
+    unsigned sr=color>>24u,sg=(color>>16u)&255u,sb=(color>>8u)&255u;
+    for(unsigned index=0;index<32;index++){
+        unsigned d=(index<<3)|(index>>2),v=(sr*a+d*inverse+127u)/255u;
+        row[index]=(uint8_t)(dither?quantize(v,31,threshold):(v>>3));
+    }
+    for(unsigned index=0;index<64;index++){
+        unsigned d=(index<<2)|(index>>4),v=(sg*a+d*inverse+127u)/255u;
+        row[32+index]=(uint8_t)(dither?quantize(v,63,threshold):(v>>2));
+    }
+    for(unsigned index=0;index<32;index++){
+        unsigned d=(index<<3)|(index>>2),v=(sb*a+d*inverse+127u)/255u;
+        row[96+index]=(uint8_t)(dither?quantize(v,31,threshold):(v>>3));
+    }
+}
+/* The per-pixel work of both arms: three reads where the chain was. `row` is
+ * the 128-byte row for this pixel's parameter set. Same-binary A/B builds this
+ * file without inlining so the harness can count how many pixels took it. */
+static uint16_t blend_lut_pack(uint16_t dst,const uint8_t *row){
+    return (uint16_t)((row[dst>>11]<<11)|(row[32+((dst>>5)&63u)]<<5)|row[96+(dst&31u)]);
+}
+/* False when the effective alpha is zero: blend() then returns the destination
+ * for every pixel, so the caller keeps the reference chain and the pixels (and
+ * the counts) stay exactly what they were. */
+static bool blend_lut_solid_prime(ksn_rgba color,uint8_t opacity,bool dither){
+    if(!mul8(color&255u,opacity))return false;
+    if(blend_lut_solid_key.valid&&blend_lut_solid_key.color==color&&
+       blend_lut_solid_key.opacity==opacity&&blend_lut_solid_key.dither==dither)return true;
+    unsigned rows=dither?KSN_BLEND_LUT_ROWS:1;
+    for(unsigned threshold=0;threshold<rows;threshold++)
+        blend_lut_build_row(blend_lut_solid[threshold],color,opacity,threshold,dither);
+    blend_lut_solid_key.color=color;blend_lut_solid_key.opacity=opacity;
+    blend_lut_solid_key.dither=dither;blend_lut_solid_key.valid=true;
+    return true;
+}
+static bool blend_lut_alpha_prime(ksn_rgba color,uint8_t opacity){
+    if(!(color&255u))return false; /* every level's a is zero: nothing to draw */
+    if(blend_lut_alpha_key.valid&&blend_lut_alpha_key.color==color&&
+       blend_lut_alpha_key.opacity==opacity)return true;
+    for(unsigned level=0;level<KSN_BLEND_LUT_ROWS;level++)
+        blend_lut_build_row(blend_lut_alpha[level],(color&0xffffff00u)|(level*16u+8u),255,0,false);
+    blend_lut_alpha_key.color=color;blend_lut_alpha_key.opacity=opacity;
+    blend_lut_alpha_key.dither=false;blend_lut_alpha_key.valid=true;
+    return true;
+}
 /* One decode, shared by both paths: the cache stores it for the frame, the
  * reference path stores it for the next read only. */
 static void decode_view(ksn_frame_view *view,const ksn_frame_command *command){
@@ -503,6 +610,8 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             if(x0>=x1||y0>=y1)continue;
             if(d->kind==KSN_TEXT){
                 uint8_t coverage[64];
+                /* The alpha arm's rows are the 16 effective-alpha buckets. */
+                bool lut=g_ksn_blend_lut_alpha!=0&&blend_lut_alpha_prime(d->data.text.color,d->opacity);
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=64){
                     unsigned count=(unsigned)(x1-x);if(count>64)count=64;
                     {KSN_PROF_BEGIN();
@@ -512,6 +621,11 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     {KSN_PROF_BEGIN();
                     for(unsigned i=0;i<count;i++)if(coverage[i]){
                         unsigned index=(unsigned)((py-y)*240+x)+i;
+                        if(lut){
+                            unsigned a=mul8(mul8(d->data.text.color&255,coverage[i]),d->opacity);
+                            if(a)pixels[index]=blend_lut_pack(pixels[index],blend_lut_alpha[a>>4]);
+                            continue;
+                        }
                         ksn_rgba color=(d->data.text.color&0xffffff00u)|mul8(d->data.text.color&255,coverage[i]);
                         pixels[index]=blend(pixels[index],color,d->opacity,false,x+(int)i,py);
                     }
@@ -529,19 +643,30 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                 continue;
             }
             {KSN_PROF_BEGIN();
+            bool dither=d->kind==KSN_GRADIENT&&d->data.gradient.dither;
+            /* A gradient whose ends are equal samples the same colour for every
+             * pixel, so its rows fit the table as well. */
+            bool one_color=d->kind!=KSN_GRADIENT||d->data.gradient.from==d->data.gradient.to;
+            const uint8_t (*lut)[KSN_BLEND_LUT_ROW]=(g_ksn_blend_lut&&one_color&&
+                blend_lut_solid_prime(sample(command,x0,y0),d->opacity,dither))?blend_lut_solid:NULL;
             for(int py=y0;py<y1;py++){
+                const uint8_t *bayer_row=dither?bayer4[(unsigned)py&3u]:NULL;
                 if(g_ksn_row_coverage){
                     ksn_x_run runs[KSN_ROW_RUNS];
                     unsigned run_count=coverage_runs(command,py,x0,x1,runs);
                     for(unsigned run=0;run<run_count;run++)for(int x=runs[run].x0;x<runs[run].x1;x++){
                         unsigned index=(unsigned)((py-y)*240+x);
-                        pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
-                                            d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
+                        if(lut)pixels[index]=blend_lut_pack(pixels[index],
+                            lut[bayer_row?(unsigned)bayer_row[(unsigned)x&3u]:0u]);
+                        else pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
+                                                 dither,x,py);
                     }
                 }else for(int x=x0;x<x1;x++)if(covers(command,x,py)){
                     unsigned index=(unsigned)((py-y)*240+x);
-                    pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
-                                        d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
+                    if(lut)pixels[index]=blend_lut_pack(pixels[index],
+                        lut[bayer_row?(unsigned)bayer_row[(unsigned)x&3u]:0u]);
+                    else pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
+                                             dither,x,py);
                 }
             }
             KSN_PROF_END(blend);}

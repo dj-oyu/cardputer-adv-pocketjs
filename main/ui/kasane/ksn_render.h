@@ -68,6 +68,18 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
  * predicate for every pixel. Both arms live in one binary and produce the same
  * pixels (test_coverage_spans.c compares them exhaustively and frame by frame). */
 extern int g_ksn_row_coverage;
+/* Boundary 4's quantized-key table for the direct blend chain (ksn_render.c,
+ * "Boundary 4"): the per-pixel chain is a function of the destination's channel
+ * value, the command's sampled colour and effective alpha, and the bayer
+ * threshold, so each of those costed once per command becomes a row of 32/64
+ * values. g_ksn_blend_lut = the solid arm (RECT/ROUND_RECT/STROKE, and a
+ * gradient whose from == to), exact, default 1.
+ * g_ksn_blend_lut_alpha = the text arm, whose parameter (the coverage-driven
+ * effective alpha) is quantized to 16 levels, default 0 because that arm moves
+ * pixels; the counts are in docs/perf/kasane-lut.md. Both 0 = the pre-LUT
+ * reference chain, which is what test_blend_lut.c compares against. */
+extern int g_ksn_blend_lut;
+extern int g_ksn_blend_lut_alpha;
 #ifdef __cplusplus
 }
 #endif
