@@ -4,6 +4,16 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 13a — PPT2 native provider（2026-09-16）
+
+- 既存PPT2のimmutable Flash bytesを借り、variantをペット番号、frameを表情として読む
+  stateless providerを追加。行128 BからRGB565/straight alphaの要求spanだけを返す。
+  資源登録前にPPT2全体を検証し、全画像展開や可変のglobal選択状態を持たない。
+- 実assetsの12種×6表情×64行、端数span、guard、無効引数をASan/UBSan・O2で確認。
+  既存PPT2 decoderの独立参照試験もPASS。通常/Kasane-onlyビルドPASS。
+- この段階はprovider単体。JS接続とresource lifetime試験はCP13b。
+  未使用providerはlink時に除去され、app/DIRAMはCP12と同値。
+
 ## checkpoint 12 — native IMAGE crop/scale/span（2026-09-16）
 
 - 32 B命令の未使用部分へsource原点とscaleを格納。1x/2x/half、pixel-center最近傍、
@@ -16,6 +26,10 @@
   DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。
 - native probeに60フレームの画像切替と2世代の全画素capture比較を追加。実機結果は後記。
   JS resource/PPT2 providerはCP13。
+- `ec37a10`をpush後、Kasane-only実機で画像60フレームと2世代64,800画素比較PASS。
+  非captureの描画＋転送はmean6,546 µs/max6,901 µs、heap241,092 Bで前後一定。
+  文字・group・PIE・600フレームfrostも回帰PASS、frost deadline miss0、stack high-water21,468 B。
+  `.cache/kasane-cp12-native`に保存。この画像試験はPPT2ではなく決定的test pattern。
 
 ## checkpoint 11 — hello移植とscene controller（2026-09-15）
 
