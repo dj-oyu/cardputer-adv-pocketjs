@@ -475,5 +475,54 @@ class TestCanopyKernel(unittest.TestCase):
             # assert about a pointer the assembly does not advance.
 
 
+FIR = os.path.join(ROOT, 'main', 'pocket', 'fir_pie.c')
+
+
+class FirKernel(unittest.TestCase):
+    """fir8_pie against the scalar form it replaces (main/pocket/mp3_decode.c).
+
+    Eight outputs in one pass, one tap at a time, with the window read as the
+    unaligned pair of aligned blocks (EE.LD.128.USAR.IP + EE.SRC.Q). The
+    arithmetic is proven in tools/pie/models/fir_model.c; this checks that the
+    assembly is that arithmetic -- that the taps are walked in the coefficient
+    table's order, that the window pointer moves two bytes per tap, and that the
+    eight lanes come out in time order.
+    """
+
+    RINGBUF, H, OUT = 0x1000, 0x2000, 0x3000
+    TAPS = 32
+
+    @staticmethod
+    def scalar(hist, cursor, h):
+        out = []
+        for j in range(-7, 1):
+            s = sum(hist[(cursor + j - k) % 32] * h[k] for k in range(32))
+            v = s >> 14
+            out.append(max(-32768, min(32767, v)))
+        return [o & 0xFFFF for o in out]
+
+    def test_block(self):
+        asm = extract_asm(FIR, 'fir8_pie(')
+        rng = random.Random(23)
+        for _ in range(200):
+            cursor = rng.randrange(7, 32)
+            hist = [rng.randrange(-32768, 32768) for _ in range(32)]
+            h = [rng.randrange(-16384, 16385) for _ in range(32)]
+            mem = bytearray(0x8000)
+            # the caller's doubled ring: buf[t] and buf[t + 32] hold hist[t % 32]
+            for t in range(64):
+                store16(mem, self.RINGBUF + 2 * t, [hist[t % 32]])
+            store16(mem, self.H, h)
+            base = cursor + 25                      # the model's base; lane 7 is the newest sample
+            sim = Sim(mem)
+            sim.run(asm, {'p': self.RINGBUF + 2 * base, 'q': self.RINGBUF + 2 * base + 16,
+                          'h': self.H, 'out': self.OUT, 'sh14': 14})
+            self.assertEqual(load16(mem, self.OUT, 8), self.scalar(hist, cursor, h),
+                             f'cursor={cursor}')
+            self.assertEqual(sim.ar['p'], self.RINGBUF + 2 * base - 64, 'the window walked the taps')
+            self.assertEqual(sim.ar['h'], self.H + 64, 'the coefficient pointer walked the taps')
+            self.assertEqual(sim.ar['out'], self.OUT + 16, 'one block of eight stored')
+
+
 if __name__ == '__main__':
     unittest.main()
