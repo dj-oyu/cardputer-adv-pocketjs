@@ -287,6 +287,126 @@ static void sweep_canopy_span(void) {
            " zero alpha is the identity\n", "canopy2", (long long)worst_t, (long long)widest, (long long)M);
 }
 
+// The decor mix, folded. garden_decor_row's per-pixel call is
+//
+//     r=(p>>11)&31; g=(p>>5)&63; b=p&31;  extinction=shadow>>3;
+//     r=(r*(256-extinction)+((light*(r+6))>>1)+d)>>8;   (and g, b likewise)
+//     clamp each field, then pack
+//
+// and the kernel computes it as one multiply, one add and one shift a channel:
+//
+//     r_out = (r*Mr + Kr) >> 9     Mr = 2E+light,    Kr = 6*light+2*d
+//     g_out = (g*Mg + Kg) >> 10    Mg = 4E+light,    Kg = 4*((10*light)>>2)+4*d
+//     b_out = (b*Mg + Kb) >> 10                      Kb = 4*((4*light)>>2)+4*d
+//
+// with E = 256-extinction. Red is not an approximation at all, in three steps
+// that are each exact and each swept here on its own:
+//
+//   (light*(r+6))>>1 == (light*r)>>1 + 3*light        (6*light is even)
+//   r*E + (light*r)>>1 == (r*(2E+light))>>1           (2E*r is even)
+//   ((r*Mr)>>1 + Kr/2 ... ) the two nested floors: floor(floor(t/2)/256) == floor(t/512)
+//
+// Green and blue keep a constant inside their >>2 that is not a multiple of 4
+// (10*light, 4*light), so floor((light*g + 10*light)/4) cannot be split at the
+// floor without a correction that depends on the low two bits of light*g. The
+// kernel floors that constant on its own -- it keeps it, rather than dropping
+// it -- and that is the whole approximation: the channel moves by at most one
+// step, measured below. The last step is again two nested floors, this one
+// inside the folded form, so the folded statement the kernel is checked against
+// is written the same way and the comparison against the scalar loop is the
+// measurement of the whole difference.
+//
+// The domain is every (light, shadow) the row can hand down, 0..255 each, and
+// every d: garden_dither can only produce 32, 96, 160, 224, but a channel is a
+// function of d alone here and the extra values are free to sweep, so the model
+// covers the cube. light and shadow are never independent in practice (both come
+// from the same gain), so this is a superset of what the scene reaches.
+static void sweep_decor(void) {
+    long moved_r = 0, moved_g = 0, moved_b = 0, total = 0, fold_r = 0, fold_g = 0, fold_b = 0;
+    long triples = 0;
+    int worst_g = 0, worst_b = 0, peak_m = 0, peak_k = 0;
+    long peak_acc = 0, peak_pre = 0, field_r = 0, field_g = 0, field_b = 0;
+    for (int light = 0; light <= 255; light++)
+        for (int shadow = 0; shadow <= 255; shadow++)
+            for (int d = 0; d <= 255; d++) {
+                int e = 256 - (shadow >> 3), extinction = shadow >> 3;
+                triples++;
+                int mr = 2 * e + light, mg = 4 * e + light;
+                int kr = 6 * light + 2 * d, kg = 4 * ((10 * light) >> 2) + 4 * d,
+                    kb = 4 * ((4 * light) >> 2) + 4 * d;
+                // Every constant has to survive its own encoding: the multiply
+                // operands and the accumulator preload travel as unsigned 16-bit
+                // lanes (EE.MOV.U16.QACC zero-extends, 1.8.116).
+                if (mr > 65535 || mg > 65535 || kr > 65535 || kg > 65535 || kb > 65535) {
+                    printf("decor: a constant does not fit a lane at light=%d shadow=%d\n", light, shadow);
+                    mismatches++;
+                }
+                if (mr > peak_m) peak_m = mr;
+                if (mg > peak_m) peak_m = mg;
+                if (kg > peak_k) peak_k = kg;
+                long acc = (long)kb + 63L * mg;          // the tallest accumulator run
+                long pre = acc >> 10;                    // and what leaves EE.SRCMB
+                if (acc > peak_acc) peak_acc = acc;
+                if (pre > peak_pre) peak_pre = pre;
+                if (pre > 32767 || (long)kr + 31L * mr > 32767) {
+                    printf("decor: the accumulator readout saturates at light=%d shadow=%d\n", light, shadow);
+                    mismatches++;
+                }
+                for (int r = 0; r < 32; r++) {
+                    int a = (r * mr + kr) >> 9;
+                    int ref = (r * (256 - extinction) + ((light * (r + 6)) >> 1) + d) >> 8;
+                    int half = (r * e + ((light * r) >> 1));      // E*r + (light*r)>>1
+                    if (half != ((r * mr) >> 1)) { printf("decor: the red fold is not (r*M)>>1\n"); mismatches++; }
+                    if (((light * (r + 6)) >> 1) != ((light * r) >> 1) + 3 * light) {
+                        printf("decor: 6*light did not split at the shift\n"); mismatches++;
+                    }
+                    if (a < 0 || a > 32767) { printf("decor: red left the lane\n"); mismatches++; }
+                    if (a != ref) { moved_r++; fold_r++; }
+                    if (a > 31) a = 31;
+                    if ((unsigned)a > field_r) field_r = a;
+                    total++;
+                }
+                for (int g = 0; g < 64; g++) {
+                    int a = (g * mg + kg) >> 10;
+                    int two = ((g * mg) >> 2) + ((10 * light) >> 2) + d;   // the correction floored on its own
+                    int ref = (g * (256 - extinction) + ((light * (g + 10)) >> 2) + d) >> 8;
+                    if (a != (two >> 8)) { printf("decor: green's two spellings disagree\n"); mismatches++; }
+                    if (a > ref) fold_g++;
+                    int e2 = abs(a - ref);
+                    if (e2 > worst_g) worst_g = e2;
+                    if (e2) moved_g++;
+                    if (a > 63) a = 63;
+                    if ((unsigned)a > field_g) field_g = a;
+                }
+                for (int b = 0; b < 32; b++) {
+                    int a = (b * mg + kb) >> 10;
+                    int ref = (b * (256 - extinction) + ((light * (b + 4)) >> 2) + d) >> 8;
+                    if (a > ref) fold_b++;
+                    int e2 = abs(a - ref);
+                    if (e2 > worst_b) worst_b = e2;
+                    if (e2) moved_b++;
+                    if (a > 31) a = 31;
+                    if ((unsigned)a > field_b) field_b = a;
+                }
+            }
+    // The pack is an OR of three fields, so it is the scalar loop's | only while
+    // each field stays inside its five or six bits. The percentages are per
+    // channel case: a channel that differs moves its own five or six bits and
+    // nothing else, because the fold never crosses a field.
+    printf("%-10s red exact (%ld of %ld differ); green differs in %.3f%% of cases (worst %d step),"
+           " blue in %.3f%% (worst %d)\n",
+           "decor", moved_r, total, 100.0 * moved_g / (64.0 * triples), worst_g,
+           100.0 * moved_b / (32.0 * triples), worst_b);
+    printf("%-10s peaks: multiply %d, addend %d, QACC %ld of 2^40, readout %ld of 32767;"
+           " folded fields %ld/%ld/%ld of 31/63/31\n",
+           "", peak_m, peak_k, peak_acc, peak_pre, field_r, field_g, field_b);
+    printf("%-10s the folded form is never above the scalar loop: %s\n", "",
+           fold_r + fold_g + fold_b ? "NO" : "yes");
+    if (worst_g > 1 || worst_b > 1 || moved_r) { printf("decor: the fold moved a channel by more than a step\n"); mismatches++; }
+    if (field_r > 31 || field_g > 63 || field_b > 31) { printf("decor: a folded field leaves its bits\n"); mismatches++; }
+    if (fold_r + fold_g + fold_b) { printf("decor: the folded form reads above the scalar loop\n"); mismatches++; }
+}
+
 int main(void) {
     sweep_smooth();
     sweep_lerp();
@@ -305,6 +425,7 @@ int main(void) {
     sweep_dither();
     sweep_canopy();
     sweep_canopy_span();
+    sweep_decor();
     printf("mismatches=%ld\n", mismatches);
     return mismatches ? 1 : 0;
 }

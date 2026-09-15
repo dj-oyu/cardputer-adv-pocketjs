@@ -22,7 +22,8 @@ Supported instructions (TRM section in brackets):
     ee.vmul.s16 [1.8.122]    ee.vmul.u16 [1.8.128]
     ee.andq [1.8.1]          ee.orq [1.8.45]          ee.xorq [1.8.214]
     ee.vunzip.16 [1.8.207]   ee.vzip.8 [1.8.212]      ee.zero.q [1.8.216]
-    ee.zero.qacc [1.8.217]   ee.vmulas.u16.qacc [1.8.163]  ee.vmulas.s16.qacc [1.8.160]
+    ee.zero.qacc [1.8.217]   ee.mov.u16.qacc [1.8.116]
+    ee.vmulas.u16.qacc [1.8.163]  ee.vmulas.s16.qacc [1.8.160]
     ee.srcmb.s16.qacc [1.8.54]
     ee.vprelu.s16 [1.8.182]  and the fused forms ee.vadds.s16.ld.incp [1.8.71],
     ee.vsubs.s16.ld.incp [1.8.199], ee.vmul.s16.ld.incp [1.8.123], ee.vmul.u16.ld.incp [1.8.129]
@@ -211,6 +212,14 @@ class Sim:
                 Q[qi(a[0])] = [0] * 8
             elif op == 'ee.zero.qacc':
                 self.qacc = [0] * 8
+            elif op == 'ee.mov.u16.qacc':
+                # 1.8.116: each 16-bit lane of qs is *zero*-extended to the 40-bit
+                # lane of QACC it lands in (the .S16 form sign-extends instead;
+                # the decor kernel needs the unsigned one, and needs it to be
+                # unsigned: a 16-bit constant above 32767 would come out negative
+                # under the other form and the accumulator test below would not
+                # have caught it).
+                self.qacc = [Q[qi(a[0])][i] for i in range(8)]
             elif op in ALU:
                 Q[qi(a[0])] = self._alu(op, Q[qi(a[1])], Q[qi(a[2])])
             elif op.endswith('.ld.incp'):

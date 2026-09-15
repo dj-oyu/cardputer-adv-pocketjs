@@ -527,5 +527,89 @@ class FirKernel(unittest.TestCase):
             self.assertEqual(sim.ar['out'], self.OUT + 16, 'one block of eight stored')
 
 
+DECOR = os.path.join(ROOT, 'main', 'scene', 'garden_decor_pie.c')
+
+
+class GardenDecorMix(unittest.TestCase):
+    """garden_decor_mix8 against the folded statement beside it (scene/garden_decor_pie.c).
+
+    One call is eight pixels with the group's light, shadow and d as operands,
+    and the constants come from the C initializer in the source -- which is the
+    load order, so a load moved past another swaps two of them and this notices.
+
+    The arithmetic behind the fold -- red exact in three steps, green's
+    correction floored on its own, the accumulator's range -- is proven in
+    tools/pie/models/garden_model.c over every (light, shadow) the row can hand
+    down. What is checked here is the other half: that the assembly is that
+    arithmetic, with those registers, unpacking those fields, priming the
+    accumulator with the constant it claims and moving the row pointer on by
+    exactly one block.
+    """
+
+    ROW, K = 0x1000, 0x2000
+
+    @staticmethod
+    def folded(p, light, shadow, d):
+        """Transcription of garden_decor_mix_folded next to the kernel."""
+        r, g, b = (p >> 11) & 31, (p >> 5) & 63, p & 31
+        e = 256 - (shadow >> 3)
+        ro = (r * (2 * e + light) + 6 * light + 2 * d) >> 9
+        go = (g * (4 * e + light) + 4 * ((10 * light) >> 2) + 4 * d) >> 10
+        bo = (b * (4 * e + light) + 4 * ((4 * light) >> 2) + 4 * d) >> 10
+        return (min(ro, 31) << 11) | (min(go, 63) << 5) | min(bo, 31)
+
+    @staticmethod
+    def scalar(p, light, shadow, d):
+        """garden_decor_mix in garden.c: the statement the kernel replaces, one
+        step of green away from the folded form and never more (garden_model.c)."""
+        r, g, b = (p >> 11) & 31, (p >> 5) & 63, p & 31
+        ext = shadow >> 3
+        r = (r * (256 - ext) + ((light * (r + 6)) >> 1) + d) >> 8
+        g = (g * (256 - ext) + ((light * (g + 10)) >> 2) + d) >> 8
+        b = (b * (256 - ext) + ((light * (b + 4)) >> 2) + d) >> 8
+        return (min(r, 31) << 11) | (min(g, 63) << 5) | min(b, 31)
+
+    def test_block(self):
+        asm = extract_asm(DECOR, 'garden_decor_mix8(')
+        rng = random.Random(41)
+        # The reachable corners first, then the rectangle light, shadow, d can
+        # each move in (d is one of the four garden_dither values; the extremes
+        # are past it, to hold the arithmetic to the folded line rather than to
+        # the dither's own four values).
+        cases = [(0, 0, 32), (255, 0, 32), (0, 255, 224), (255, 255, 224),
+                 (250, 3, 160), (1, 8, 96), (0, 0, 0), (255, 255, 255)]
+        for _ in range(60):
+            cases.append((rng.randrange(256), rng.randrange(256), rng.choice((32, 96, 160, 224))))
+        worst, moved = [0, 0, 0], 0
+        for light, shadow, d in cases:
+            px = [rng.getrandbits(16) for _ in range(8)]
+            mem = bytearray(0x8000)
+            store16(mem, self.ROW, px)
+            k = extract_constants(DECOR, 'garden_decor_mix8(', dict(light=light, shadow=shadow, d=d))
+            self.assertEqual(len(k), 11, 'the constant walk reads eleven words')
+            store16(mem, self.K, k)
+            sim = Sim(mem)
+            sim.run(asm, {'row': self.ROW, 'kp': 0, 'k': self.K,
+                          'sh0': 0, 'sh9': 9, 'sh10': 10, 'sh16': 16})
+            got = load16(mem, self.ROW, 8)
+            self.assertEqual(got, [self.folded(p, light, shadow, d) for p in px],
+                             f'light={light} shadow={shadow} d={d}')
+            self.assertEqual(sim.ar['row'], self.ROW + 16, 'one block of eight stored')
+            self.assertEqual(sim.ar['kp'] - self.K, 2 * len(k), 'the walk consumed k[]')
+            for p, g in zip(px, got):
+                s = self.scalar(p, light, shadow, d)
+                for c, (sh, m) in enumerate(((11, 31), (5, 63), (0, 31))):
+                    worst[c] = max(worst[c], abs(((g >> sh) & m) - ((s >> sh) & m)))
+                moved += g != s
+        # The fold's own contract: red cannot move, and green and blue move by at
+        # most one step of their fields. Measured over the whole domain in
+        # tools/pie/models/garden_model.c; here it is the assembled kernel.
+        self.assertEqual(worst[0], 0, 'the folded red channel is not exact')
+        self.assertLessEqual(worst[1], 1, 'green moved by more than one step')
+        self.assertLessEqual(worst[2], 1, 'blue moved by more than one step')
+        print(f'decor: {moved}/{len(cases) * 8} pixels differ from the scalar loop, '
+              f'worst step r/g/b = {worst}')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -115,5 +115,36 @@ class FirInstructions(unittest.TestCase):
         self.assertEqual(sim.ar['a5'], 0)
 
 
+class DecorInstructions(unittest.TestCase):
+    """The instruction the decor-mix kernel needs, against its TRM pseudocode.
+
+    1.8.116 `ee.mov.u16.qacc` loads the accumulator with a *zero*-extended copy
+    of a lane register. The kernel uses it to preload QACC with the group's
+    additive constant before the accumulating multiply, so the constant is
+    added before the shift and not after it -- and it has to be this form: the
+    constants are at most a few thousand, but a 16-bit lane above 32767 would
+    come out negative through the sign-extending twin (1.8.114), which would
+    move the constant into the wrong place rather than fail.
+    """
+
+    def test_mov_u16_qacc_zero_extends_and_replaces_the_whole_accumulator(self):
+        mem = bytearray(0x100)
+        # 0x8000 is -32768 signed and 32768 unsigned: the lane that tells the
+        # two forms apart. The last lane is a marker for the "replaces, does not
+        # add" half of the instruction.
+        store16(mem, 0x80, [0x8000, 5, 0xFFFF, 1, 2, 3, 4, 0x1234])
+        sim = Sim(mem)
+        sim.run('ee.vld.128.ip q0, a3, 16\n'
+                'ee.zero.qacc\nee.vmulas.u16.qacc q0, q0\n'
+                'ee.vld.128.ip q1, a4, 16\n'
+                'ee.mov.u16.qacc q1\n', {'a3': 0x80, 'a4': 0x80})
+        self.assertEqual(sim.qacc, [0x8000, 5, 0xFFFF, 1, 2, 3, 4, 0x1234])
+        # Not the sign-extending form: lane 0 must be +32768, not -32768.
+        self.assertGreater(sim.qacc[0], 0)
+        # Not an accumulation either: the marker lane is 0x1234, not the sum of
+        # the two loads.
+        self.assertEqual(sim.qacc[7], 0x1234)
+
+
 if __name__ == '__main__':
     unittest.main()
