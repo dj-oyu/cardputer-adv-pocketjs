@@ -40,9 +40,15 @@
 //      subtract, one multiply, one add, per channel.
 //   7. The three fields are shifted back into place and ORQ'd into one word.
 //
-// Register plan: q0 is dx2 and dies; q1 walks the constants and doubles as the
-// blend scratch; q2 is q and dies into the f multiply; q3 is a mask, then f, then
-// one l at a time; q4 is g and lives to the last channel; q5/q6/q7 are r5/g6/b5.
+// Register plan: q7 carries the running x vector across blocks -- eight lanes
+// that move on by eight, so no x table is walked and the stack has one eight-lane
+// vector in it rather than one per block. That fixed a crash: the first version
+// advanced a pointer through xv, which ran off the end after the first block, and
+// it declared that pointer as a write-only asm operand, so the compiler owed it no
+// initial value and the part loaded from 0x340. q0 is dx2 and then b5; q1 walks
+// the constants and doubles as the blend scratch; q2 is q, then g6; q3 is a mask,
+// then f, then one l at a time; q4 is g and lives to the last channel; q5 is the
+// row word; q6 is r5.
 // Eight names, and no more: this project's simulator carries eight vector
 // registers (piesim's qi() also reads a name as the character after the q, so a
 // q10 would alias q1 rather than fail), and the kernels in garden.c live inside
@@ -54,6 +60,7 @@
 // that have to happen anyway.
 #include <stdint.h>
 #include <stddef.h>
+#include "canopy_pie.h"
 
 // The scalar statement, kept here so the kernel and its reference cannot drift:
 // this is garden_canopy_row with the A/B switch removed (a caller-side choice).
@@ -106,8 +113,9 @@ canopy_broadcast(const int16_t *k,int16_t *kv,int nk) {
 // where in the row it is.
 void __attribute__((noinline))
 canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
-    int16_t k[16] __attribute__((aligned(4))) = {
+    int16_t k[17] __attribute__((aligned(4))) = {
         (int16_t)(-cx),                  /* dx = x - cx */
+        8,                               /* how far the eight lanes move on, per block */
         (int16_t)(mrr&255),              /* mlo, the term that does not need the x256 */
         16,                              /* dx2*16, which is what fits the lane */
         (int16_t)((mrr>>8)*16),          /* mhi, already multiplied by sixteen */
@@ -122,20 +130,22 @@ canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
         (int16_t)(leafy&31),             /* lb */
         2048, 32                         /* the two packing shifts */
     };
-    int16_t kv[16][8] __attribute__((aligned(16)));
+    int16_t kv[17][8] __attribute__((aligned(16)));
     int16_t xv[8] __attribute__((aligned(16)));
     for (int i=0;i<8;i++) xv[i]=(int16_t)(x0+i);
-    const int16_t *kp,*xp=xv;
-    int nk=16,sh0=0,sh5=5,sh8=8,sh11=11,sh16=16,sh18=18;
+    const int16_t *kp;
+    int nk=17,sh0=0,sh5=5,sh8=8,sh11=11,sh16=16,sh18=18;
     canopy_broadcast(k,&kv[0][0],nk);
     __asm__ volatile(
         "mov              %[kp], %[kv]\n"
+        "ee.vld.128.ip   q7, %[xp], 0\n"            /* x, one per lane: q7 walks on by 8 */
         "loopgtz          %[n], 9f\n"
         "  mov            %[kp], %[kv]\n"
         "  wsr.sar        %[sh0]\n"
-        "  ee.vld.128.ip  q0, %[xp], 16\n"          /* x, one per lane */
         "  ee.vld.128.ip  q1, %[kp], 16\n"          /* -cx */
-        "  ee.vadds.s16   q0, q0, q1\n"             /* dx */
+        "  ee.vadds.s16   q0, q7, q1\n"             /* dx */
+        "  ee.vld.128.ip  q1, %[kp], 16\n"          /* 8 */
+        "  ee.vadds.s16   q7, q7, q1\n"             /* the next block's x: no table is walked */
         "  ee.vmul.s16    q0, q0, q0\n"             /* dx2, at most 1936: exact at SAR=0 */
         "  ee.zero.qacc\n"
         "  ee.vld.128.ip  q1, %[kp], 16\n"          /* mlo */
@@ -161,44 +171,71 @@ canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
         "  ee.vld.128.ip  q3, %[kp], 16\n"          /* 31 */
         "  ee.andq        q6, q6, q3\n"             /* r5 */
         "  wsr.sar        %[sh5]\n"
-        "  ee.vmul.u16    q7, q5, q1\n"             /* p >> 5 */
+        "  ee.vmul.u16    q2, q5, q1\n"             /* p >> 5 */
         "  ee.vld.128.ip  q3, %[kp], 16\n"          /* 63 */
-        "  ee.andq        q7, q7, q3\n"             /* g6 */
-        "  ee.andq        q5, q5, q3\n"             /* the blue field, one AND from 31 */
+        "  ee.andq        q2, q2, q3\n"             /* g6 */
+        "  ee.andq        q0, q5, q3\n"             /* the blue field, one AND from 31 */
         "  ee.vld.128.ip  q3, %[kp], 16\n"          /* 31 */
-        "  ee.andq        q5, q5, q3\n"             /* b5, in the word's own register */
+        "  ee.andq        q0, q0, q3\n"             /* b5 */
         "  wsr.sar        %[sh8]\n"
         "  ee.vld.128.ip  q3, %[kp], 16\n"          /* lr */
         "  ee.vsubs.s16   q1, q6, q3\n"             /* c - l */
         "  ee.vmul.s16    q1, q1, q4\n"             /* (c-l)*g >> 8 */
         "  ee.vadds.s16   q6, q1, q3\n"             /* + l */
         "  ee.vld.128.ip  q3, %[kp], 16\n"          /* lg */
-        "  ee.vsubs.s16   q1, q7, q3\n"
+        "  ee.vsubs.s16   q1, q2, q3\n"
         "  ee.vmul.s16    q1, q1, q4\n"
-        "  ee.vadds.s16   q7, q1, q3\n"
+        "  ee.vadds.s16   q2, q1, q3\n"
         "  ee.vld.128.ip  q3, %[kp], 16\n"          /* lb */
-        "  ee.vsubs.s16   q1, q5, q3\n"
+        "  ee.vsubs.s16   q1, q0, q3\n"
         "  ee.vmul.s16    q1, q1, q4\n"
-        "  ee.vadds.s16   q5, q1, q3\n"
+        "  ee.vadds.s16   q0, q1, q3\n"
         "  wsr.sar        %[sh0]\n"
         "  ee.vld.128.ip  q1, %[kp], 16\n"          /* 2048 */
         "  ee.vmul.u16    q6, q6, q1\n"             /* r << 11 */
         "  ee.vld.128.ip  q1, %[kp], 16\n"          /* 32 */
-        "  ee.vmul.u16    q7, q7, q1\n"             /* g << 5 */
-        "  ee.orq         q6, q6, q7\n"
-        "  ee.orq         q6, q6, q5\n"
+        "  ee.vmul.u16    q2, q2, q1\n"             /* g << 5 */
+        "  ee.orq         q6, q6, q2\n"
+        "  ee.orq         q6, q6, q0\n"
         "  ee.vst.128.ip  q6, %[row], 16\n"
         "9:\n"
-        : [kp]"=&a"(kp), [xp]"=&a"(xp), [row]"+a"(row)
-        : [n]"a"(n), [kv]"a"(&kv[0][0]), [sh0]"a"(sh0), [sh5]"a"(sh5), [sh8]"a"(sh8),
-          [sh11]"a"(sh11), [sh16]"a"(sh16), [sh18]"a"(sh18)
+        : [kp]"=&a"(kp), [row]"+a"(row)
+        : [n]"a"(n), [kv]"a"(&kv[0][0]), [xp]"a"(xv), [sh0]"a"(sh0), [sh5]"a"(sh5),
+          [sh8]"a"(sh8), [sh11]"a"(sh11), [sh16]"a"(sh16), [sh18]"a"(sh18)
         : "memory");
 }
 #else
-// Host builds take the scalar path, so anything that includes this file still
-// works off-device and the model keeps being the only arithmetic in play.
+// Host builds take the lane model in C: the same eight-lane arithmetic, the same
+// order, with the SAR shifts written as shifts. It is not a copy of the scalar
+// reference -- it is the thing piesim checks the assembly against in
+// tools/pie/test_kernels.py, so the byte comparison the harness makes on the host
+// is a statement about the kernel and not about a different program.
 void __attribute__((unused))
 canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
-    canopy_scalar(row,x0,x0+n*8-1,cx,mrr,qy,leafy);
+    int mhi=(mrr>>8)*16, mlo=mrr&255, qbase=256-qy;
+    int lr=(leafy>>11)&31, lg=(leafy>>5)&63, lb=leafy&31;
+    for(int b=0;b<n;b++) {
+        int16_t dx2[8],q[8],f[8],g[8],r5[8],g6[8],b5[8],o[8];
+        for(int i=0;i<8;i++){ int dx=(x0+b*8+i)-cx; dx2[i]=(int16_t)(dx*dx); }
+        for(int i=0;i<8;i++){                       /* the two accumulator passes */
+            int64_t acc=(int64_t)dx2[i]*mlo + (int64_t)(dx2[i]*16)*mhi;
+            int t=(int)(acc>>18);
+            int qq=qbase-t; if(qq<0)qq=0;           /* VRELU in place */
+            q[i]=(int16_t)qq;
+            f[i]=(int16_t)((q[i]*39322)>>16);
+            g[i]=(int16_t)(256-f[i]);
+        }
+        for(int i=0;i<8;i++) {
+            unsigned w=row[b*8+i];          /* the pointer is the block's first pixel */
+            r5[i]=(int16_t)((w>>11)&31);
+            g6[i]=(int16_t)((w>>5)&63);
+            b5[i]=(int16_t)(w&31);
+            int r=(((r5[i]-lr)*g[i])>>8)+lr;        /* VMUL.S16 at SAR 8 */
+            int gg=(((g6[i]-lg)*g[i])>>8)+lg;
+            int bb=(((b5[i]-lb)*g[i])>>8)+lb;
+            o[i]=(int16_t)(r*2048+gg*32+bb);        /* the packing shifts, ORQ */
+            row[b*8+i]=(uint16_t)o[i];
+        }
+    }
 }
 #endif
