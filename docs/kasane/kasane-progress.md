@@ -82,7 +82,13 @@
   component graph、build.ninja、compile_commands、map、demangle済みELFに旧UI/Taffyがなく、
   Kasane/guest/inputの実シンボルが存在する。旧ソースやarchiveの削除はしていない。
 - session dispatchのhost回帰4構成PASS。Kはdevice情報、seeded random、input capabilityを
-  実際に使い`KASANE_SERVICES PASS legacy=false`を出す。実機100回起動と描画検証は別途記録する。
+  実際に使い`KASANE_SERVICES PASS legacy=false`を出す。
+- `kasane_only_device_test.py --cycles 100`: 実機PASS。未移植helloの明示拒否、Kのサービスと
+  right press/releaseを毎回確認。終了後heapは全100回241,004 B、最大連続空き120,832 Bで一定。
+  `.cache/kasane-cp7-only`に全ログとmemory.jsonを保存。全機能併用時の安全性を示す値ではない。
+- 同構成`kasane_device_test.py --ticks 300`: PASS。modal/透過/patchとhome復帰、
+  平均turn2.92 ms、render12.65 ms、send3.44 ms。`.cache/kasane-cp7-animation`に保存。
+  CP7実装は`76dac40`としてpush済み。出荷からTaffyを削除するCP25は未実施。
 
 ## vm/main同期 — 2026-09-15
 
