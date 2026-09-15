@@ -100,7 +100,10 @@
   dither、NaN/overflow、throwing getter、catch後の全体取消、committed画素維持、cancelを追加確認。
 - 通常/診断ESP-IDFビルドPASS。appは2,197,600 B / 1,901,664 B、
   DIRAM137,276 B / 135,916 Bで増分0。Kasane-onlyのlink監査も再度PASS。
-- K診断を動く角丸・内側枠・ディザ付き水平gradientへ更新。実機確認は続けて記録する。
+- K診断を動く角丸・内側枠・ディザ付き水平gradientへ更新。
+  Kasane-only実機で300ターン・modal遷移・home復帰PASS。
+  平均turn3.09 ms、render13.62 ms、send3.36 ms。10/13命令でnativeBytes12,908 B。
+  `.cache/kasane-cp8-gallery`に保存。実装commitは`4e07887`、push済み。
 
 ## vm/main同期 — 2026-09-15
 
