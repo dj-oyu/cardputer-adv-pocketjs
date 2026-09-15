@@ -456,6 +456,10 @@ static void lazy_cache_tests(void) {
               "old refs survive OOM and cache retries successfully");
         check(present(&stats)==KSN_OK,"retried cache instance presents");
         check(native_max<=3072,"successful cache allocations are bounded");
+        if(fault==2){
+            pocket_kasane_invalidate();fail_band=1;
+            check(present(&stats)==KSN_IO,"committed cache repair fails before guest exit");fail_band=-1;
+        }
         pocket_kasane_reset();check(native_bytes==0,"reset frees base and all cache blocks");
     }
     track_native=false;close_fault_runtime();
@@ -479,11 +483,13 @@ static void system_lifetime_tests(void) {
           "APP adapter OOM preserves acquired SYSTEM");
     native_after=-1;
     check(native_bytes==base,"APP failure releases only its allocation");
-    for(unsigned i=0;i<3;i++) {
+    for(unsigned i=0;i<4;i++) {
         check(run("kasane.replace(tx=>{tx.background(0x102030ff);globalThis.oldR=tx.rect(shape)});"),
               "APP attaches beside native SYSTEM");
-        if(i==0)check(present(&stats)==KSN_OK,"APP commits beside SYSTEM");
+        if(i==0||i==3)check(present(&stats)==KSN_OK,"APP commits beside SYSTEM");
         if(i==2){fail_band=1;check(present(&stats)==KSN_IO,"APP partially transfers before exit");fail_band=-1;}
+        if(i==3){pocket_kasane_invalidate();fail_band=1;
+            check(present(&stats)==KSN_IO,"committed APP/SYSTEM repair fails before exit");fail_band=-1;}
         pocket_kasane_reset();
         check(native_bytes==base&&ksn_runtime_stats(KSN_SYSTEM).displayed.commands==1,
               "APP detach preserves SYSTEM reservation and commands");

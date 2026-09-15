@@ -21,6 +21,7 @@
 #include "pocket_capture.h"
 #include "pocket_bridge.h"
 #include "pocket_text.h"
+#include "system/sys_device.h"
 #include "scene_mem.h"
 #include "vmprobe.h"
 #include "sdkconfig.h"
@@ -556,12 +557,8 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
     // overwrite a live guest pointer; the one that exists (the USB
     // diagnostics) releases the overlay itself.
     overlay_release();
-    // The home screen's background is about to stop being drawn for as long as
-    // the guest owns the display, so its scratch stops being worth anything to
-    // it and starts being worth a great deal to the guest, the font atlas and
-    // the radio. Here rather than in enter(): this is the moment the memory
-    // changes hands, and the next prepare() after the run takes it back.
-    scene_mem_release();
+    // app_session releases background scratch before every foreground start,
+    // including diagnostics, while preserving it for background overlays.
     app_registry_select(app_id);
     run_started = source ? app_start_source(prelude,prelude_len,source,len)
                          : app_start();
@@ -723,6 +720,7 @@ static void ui_task(void *arg) {
         // before any question about who owns the screen.
         if(have&&!running&&screen==SCREEN_HOME&&!home_modal()&&volume_key(&stroke))
             have=false;
+        sys_device_step();
         pet_repaint=pet_hub_pump();
         if(have&&pet_hub_key(stroke.nav)){have=false;pet_repaint=true;}
         if(pet_repaint&&running)app_force_redraw();

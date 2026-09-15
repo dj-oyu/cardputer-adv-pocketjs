@@ -3,7 +3,7 @@
 #include "pocket_api.h"
 #include "paint.h"
 #include "sound.h"
-#include "solar_time.h"
+#include "system/sys_clock.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "nvs.h"
@@ -25,8 +25,9 @@ static char alert[PET_LABEL_CHARS+1];
 static uint64_t now_ms(void){return esp_timer_get_time()/1000;}
 static uint32_t read32(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static uint32_t utc_now(void) {
-    solar_time_sample_t t=solar_time_now(0);
-    if(t.source==SOLAR_TIME_UTC)return (uint32_t)(t.days*86400.0+946728000.0);
+    sys_clock_sample t=sys_clock_read();
+    if(t.available&&t.trusted&&t.seconds>=INT64_C(946684800)&&t.seconds<=UINT32_MAX)
+        return (uint32_t)t.seconds;
     return clock_utc?clock_utc+(uint32_t)((now_ms()-clock_ms)/1000):0;
 }
 static bool persist(void) {

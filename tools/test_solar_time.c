@@ -17,6 +17,7 @@ static int fake_gettimeofday(struct timeval *out,void *zone) {
 }
 #define gettimeofday fake_gettimeofday
 #include "../main/scene/scene_mem.c"
+#include "../main/system/sys_clock.c"
 #include "../main/scene/solar_time.c"
 #include "../main/scene/solar_sail.c"
 

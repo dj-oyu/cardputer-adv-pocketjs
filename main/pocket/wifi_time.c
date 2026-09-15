@@ -1,5 +1,5 @@
 #include "wifi_time.h"
-#include "solar_time.h"
+#include "system/sys_clock.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -419,7 +419,7 @@ static void sync_task(void *arg) {
 
     status_stage(WIFI_TIME_STAGE_SNTP,0);
     esp_sntp_config_t sntp=ESP_NETIF_SNTP_DEFAULT_CONFIG(NTP_SERVER);
-    // IMMED, not smooth: settimeofday() steps the clock once and solar_time.c
+    // IMMED, not smooth: settimeofday() steps the clock once and the System provider
     // reads it on the next frame. docs/scenes/solar-sail.md asks that a correction be
     // complete before it is announced, and a step is complete when it returns.
     sntp.smooth_sync=false;
@@ -428,11 +428,11 @@ static void sync_task(void *arg) {
     err=esp_netif_sntp_sync_wait(pdMS_TO_TICKS(SNTP_TIMEOUT_MS));
     if(err!=ESP_OK) { finish(WIFI_TIME_STAGE_SNTP,err); goto done; }
 
-    // The only call site. solar_time_set_synchronized(false) is never made
+    // The only call site. sys_clock_set_synchronized(false) is never made
     // here: docs/scenes/solar-sail.md:48-50 keeps a clock that was once set running
     // through a disconnect, and only a clock that has become untrustworthy is
     // withdrawn — a radio going away does not make the seconds wrong.
-    solar_time_set_synchronized(true);
+    sys_clock_set_synchronized(true);
     status_stage(WIFI_TIME_STAGE_NONE,0);
     status_state(WIFI_TIME_OK);
     {

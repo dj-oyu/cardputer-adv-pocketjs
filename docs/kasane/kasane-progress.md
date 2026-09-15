@@ -4,6 +4,76 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14b1 — System時計provider抽出（2026-09-16）
+
+- 実時計の取得・信頼フラグを`system/sys_clock`へ移動。SNTP → System、
+  solar/pethub → Systemの依存に変更。solarのsetterは互換wrapperとして維持。
+- pethubのUTCは整数で取得し、天文計算の2050年上限に依存しない。
+  uint32の範囲外は既存PC補完へ戻す。solarは天文範囲を引き続き検査する。
+- RTC再発見時のatomic CASで、同時に届いた明示的な信頼取消を上書きしない。
+- 時計provider、solar時刻、solar描画のhost検査PASS。RTC再発見、2038/2050/2106、
+  小数秒、読み取り失敗、不信頼指定、初回発見中の取消を検査。
+- 時計/solar時刻はASan/UBSanでもPASS。通常/Kasane-only buildとlink監査PASS。
+  静的DIRAM137,468 / 136,108 B（直前比それぞれ+16 B）。heap確保・専用task追加なし。
+  今回は実機書込み・SNTP通信試験を追加していない。
+- まだCLOCK_CONFIG購読、monotonic anchor、PC補完の共通化は行っていない。
+  pocket.app/pocket.netのsolar互換経路も次段階。CP14全体の完了ではない。
+
+## ライフタイム監査と修正（2026-09-16）
+
+Sol追加調査: 最初のK前free256,536 / largest147,456 Bから、初回終了後
+256,360 / 81,920 Bとなり以後100回一定。保持176 Bに対して連続領域65,536 B減のため、
+小さい常設確保による分断が有力。初回`adc_oneshot_read`のADC1 lazy lock生成と時点が
+一致するが、確保address/size未測定なので未確定。初回ADC前後のheap値と短いheap traceが
+次の切り分け。過去largest120,832 Bは同一条件の記録がなく、現在値との差を漏れとは断定しない。
+
+| 対象 | 所有者・返却時点 | 確認結果 |
+| --- | --- | --- |
+| 背景core/bulk | ホーム描画。前景guest開始前に返却 | USB診断だけ返却を迂回していたためapp_sessionへ集約 |
+| JS購読・callback | guest session。JSRuntime破棄より前 | 既存registryでclose/reset。電源native購読も最後のcloseで解除 |
+| Kasane APP領域 | APP lease。最後のowner終了時に破棄 | 確定画面の修復失敗後にBUSYが残る解放漏れを修正 |
+| SYSTEM共有領域 | host owner。APP終了から独立 | SYSTEM命令を残し、APPだけ消去・次の全面修復を保持 |
+| font/PPT2 bytes | firmware内の不変資源 | Flashを借用。APP終了で登録を失効、画像全体のheap所有なし |
+| 電源snapshot・ID | boot / process | 144 B＋4 Bの明示的常設。guest終了時に破棄しない |
+
+- `ae36f99`: 背景scratch返却を前景起動の共通入口へ移動。overlayは背景と共存するので保持。
+  通常/Kasane-only build、overlay契約、session dispatch 4構成PASS。
+  実機100回終了後free256,360 B / largest81,920 Bが全回一定。
+  修正前240,740 / 65,536 Bから+15,620 / +16,384 B。
+  `.cache/kasane-lifetime-cycles`。以前のlargest120,832 Bとの差は残り、
+  初回HAL等の常駐確保・起動時の配置を別途切り分ける。連続領域の安全性全体は未完了。
+- 修復失敗後のAPP終了: 再描画中のborrowと、ownerへ戻った後の修復待ちを区別する。
+  実描画中は引き続きBUSY。待機中はrepair borrowを返してからAPPを消し、SYSTEMの
+  full-redraw要求を保持する。旧コードで追加テストの失敗を再現し、修正後H/Q ASan/UBSan・O2 PASS。
+  APP単独時のcache含むnative全回収、SYSTEM共存時のAPP回収・旧JS参照失効を検査。
+  通常/Kasane-only build PASS。転送失敗の注入試験はhostで行い、実機のSPI障害は注入していない。
+- 今後の方針: 複数ownerの共有領域とframe中の借用を混同しない。SYSTEM常駐化後は
+  cache/animation arenaもruntimeと同じ寿命で保持されるため、両owner未使用時の返却要否を
+  明示する。上限内の保持とリーク、空き総量と最大連続領域を別々に評価する。
+
+## checkpoint 14a — System電源・購読基盤（2026-09-16）
+
+- `system/sys_state`へ8件の購読・各購読のdirty mask・電源snapshot・測定期限を実装。
+  `system/sys_device`がHALを接続。状態144 B＋process ID4 B、heap/task追加なし。
+- JS電源APIを`pocket_av.c`から`pocket_power.c`へ抽出。既存の購読registryを再利用し、
+  native購読1件を共有。close/throw/resetで即時解除、SYSTEM等の別購読を維持する。
+  同期status/probeの互換性を維持。1秒間隔・最後に通知した値から20 mVの閾値を共通化。
+- H/Q ASan/UBSan・O2 PASS。60秒無購読のHAL呼出0、独立poll、初回・合流・変更閾値、
+  refresh合流、stale/枯渇、2 JS listener、例外、nativeとの共存、30 session終了を検査。
+- 通常/Kasane-onlyのC実装build PASS。DIRAM137,452 / 136,092 B、いずれも直前から+128 B。
+  実機の2購読・繰り返し起動検証をK診断へ追加。
+- 最新K診断を含む両buildとKasane-only link監査PASS。実機300ターンで2購読の初回配送、
+  アニメーション・modal往復を確認。turn3.71 / render46.05 / send6.12 ms。
+  `.cache/kasane-cp14-power/serial.log`。描画30 Hzの性能未達は引き続き別課題。
+- 実機100回の2購読初回配送・終了PASS。終了後free240,740 B / largest65,536 Bが全回一定。
+  `.cache/kasane-cp14-power-cycles`。再起動後2回でも同値（`-cold` / `-early`）。
+  以前のlargest120,832 Bとの差は未解決。今回のbootでは電源診断前のhome overlay終了時に
+  既にfree240,916 B / largest69,632 Bであり、差全体をこの変更に帰属させない。
+  初回使用時の永続確保・配置とhome overlayを切り分ける必要がある。
+  反復リークなしは確認したが、大きな連続確保の安全性を達成済みとはしない。
+- 時計・通知レコード・recordingのSYSTEM表示とdeadline待機統合は未完了。
+  CP14全体の完了ではなく、共通状態の最初の実経路として電源を接続した段階。
+
 ## checkpoint 17b — 回転座標の反復計算削減（2026-09-16）
 
 - 回転spanの先頭で変換座標の分子を計算し、後続画素はu+=2*cos、v-=2*sinで進める。
@@ -15,6 +85,9 @@
   send6.00 ms。`.cache/kasane-cp17-span/serial.log`。前回render47.24 msだが、
   別ビルド・実時間駆動で姿勢とdamageも変わるため、改善率の証明には使わない。
   30 Hz目標は引き続き未達。今回は反復演算の削減に範囲を限定する。
+- Solレビュー: 加算化のcorrectness blockerなし。次の計測は64 bit除算とPPT2行展開の
+  分離。90度近傍の行展開回数、S3 call-chain stack peak、固定姿勢の同一firmware A/Bを
+  優先し、PIE化はアクセス形態を確認してから判断する。追加実装は保留。
 
 ## checkpoint 17a — 画像のnative自動補間（2026-09-16）
 

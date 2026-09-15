@@ -45,6 +45,7 @@ try:
                 "KASANE_TICK 120 scope=modal", "KASANE_TICK 180 scope=modal",
                 "KASANE_TICK 240 scope=app", f"KASANE_TICK {args.ticks} scope=app"]
     required.append("KASANE_IMAGE nativeAnimation=running jsTransformUpdates=0")
+    required.append("KASANE_POWER initial=2")
     missing = [marker for marker in required if marker not in text]
     if missing or "START_FAILED" in text or "panic" in text.lower():
         raise RuntimeError(f"Kasane diagnostic failed; missing={missing}")
