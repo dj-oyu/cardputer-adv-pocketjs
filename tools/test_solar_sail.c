@@ -5,7 +5,7 @@
 // and the block contract is checked at the end of main().
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/solar_sail.c"
-#include "../main/system/sys_clock.c"
+#include "hostshim/solar_clock.h"
 #include "../main/scene/solar_time.c"
 #include <assert.h>
 #include <stdio.h>

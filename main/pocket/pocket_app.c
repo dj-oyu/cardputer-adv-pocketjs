@@ -2,7 +2,7 @@
 #include "pocket_api.h"
 #include "app_session.h"
 #include "jsconsole.h"
-#include "solar_time.h"
+#include "pocket_clock.h"
 #include "utf8.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -358,33 +358,6 @@ static JSValue js_time_now(JSContext *ctx, JSValueConst this_val,
     // Section 4's monotonic milliseconds, the same clock every other timeMs on
     // this host is read from.
     return JS_NewFloat64(ctx,esp_timer_get_time()/1000.0);
-}
-
-// J2000 noon in Unix seconds; solar_time.c counts its days from there.
-#define J2000_UNIX_SECONDS 946728000.0
-
-static JSValue js_time_wall(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv) {
-    (void)this_val; (void)argc; (void)argv;
-    // The trust decision stays in solar_time.c, which reports a UTC source only
-    // after a successful SNTP sync set the clock. Its demo epoch is a number
-    // for the sail to animate with and not a wall clock, so it comes back here
-    // as unixMs null -- section 5 types it that way, and a program that shows a
-    // date has to be able to tell the two apart. No timezone is applied: that
-    // is reserved to a future ephemeris provider, not to this layer.
-    solar_time_sample_t sample=solar_time_now(0);
-    JSValue object=JS_NewObject(ctx);
-    if(JS_IsException(object)) return object;
-    bool utc=sample.source==SOLAR_TIME_UTC;
-    JS_SetPropertyStr(ctx,object,"unixMs",
-        utc?JS_NewFloat64(ctx,round((sample.days*86400.0+J2000_UNIX_SECONDS)*1000.0))
-           :JS_NULL);
-    // "host" is never returned: nothing on this device sets the clock by hand,
-    // so a synchronised clock came from the network and an unsynchronised one
-    // is unsynced. The third value stays in the type for a host that gains a
-    // settable clock.
-    JS_SetPropertyStr(ctx,object,"source",JS_NewString(ctx,utc?"network":"unsynced"));
-    return object;
 }
 
 // ------------------------------------------------------------------- sleep
@@ -888,7 +861,7 @@ static esp_err_t build_app(JSContext *ctx, JSValueConst ns, void *user) {
 static esp_err_t build_time(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     define(ctx,ns,"now",JS_NewCFunction(ctx,js_time_now,"now",0));
-    define(ctx,ns,"wall",JS_NewCFunction(ctx,js_time_wall,"wall",0));
+    define(ctx,ns,"wall",JS_NewCFunction(ctx,pocket_clock_wall,"wall",0));
     define(ctx,ns,"sleep",JS_NewCFunction(ctx,js_sleep,"sleep",2));
     return ESP_OK;
 }

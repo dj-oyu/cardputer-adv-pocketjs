@@ -10,7 +10,7 @@
 #define SOLAR_SOURCE "../../main/scene/solar_sail.c"
 #endif
 #include SOLAR_SOURCE
-#include "../../main/system/sys_clock.c"
+#include "../hostshim/solar_clock.h"
 #include "../../main/scene/solar_time.c"
 static uint64_t ns(void) {
     struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);

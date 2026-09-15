@@ -14,12 +14,29 @@ for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   fi
 done
 for options in '-O1 -g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
+  gcc -std=c11 $options -Wall -Wextra -Werror tools/test_system_notify.c -o /tmp/test-system-notify
+  /tmp/test-system-notify
+  gcc -std=c11 $options -Wall -Wextra -Werror tools/test_system_timer.c -o /tmp/test-system-timer
+  /tmp/test-system-timer
+  gcc -std=c11 $options -Wall -Wextra -Werror -I main/pet \
+    tools/test_pet_hub.c main/pet/pet_hub_core.c main/system/sys_notify.c main/system/sys_timer.c -o /tmp/test-pet-hub
+  /tmp/test-pet-hub
+  gcc -std=c11 $options -Wall -Wextra -Werror tools/test_system_clock_state.c -o /tmp/test-system-clock-state
+  /tmp/test-system-clock-state
+  gcc -std=gnu11 $options -Wall -Wextra -Werror -I tools/hostshim -I main/hal \
+    tools/test_system_clock_device.c -o /tmp/test-system-clock-device
+  /tmp/test-system-clock-device
   gcc -std=c11 $options -Wall -Wextra -Werror tools/test_system_state.c -o /tmp/test-system-state
   /tmp/test-system-state
+  gcc -std=gnu11 $options -Wall -Wextra -Werror -I "$QJS" -I main -I main/pocket \
+    tools/test_pocket_clock.c main/pocket/pocket_clock.c main/system/sys_state.c \
+    "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" "$CACHE/quickjs-vm.o" \
+    -lm -o /tmp/test-pocket-clock
+  /tmp/test-pocket-clock
   gcc -std=gnu11 $options -Wall -Wextra -Werror -fno-omit-frame-pointer \
     -I "$QJS" -I tools/hostshim -I main -I main/hal -I main/pocket -I main/vm \
     tools/test_pocket_power.c main/pocket/pocket_power.c main/pocket/pocket_api.c \
-    main/system/sys_state.c main/system/sys_device.c tools/hostshim/hostshim_board.c \
+    main/system/sys_state.c main/system/sys_device.c main/system/sys_clock.c main/system/sys_notify.c main/system/sys_timer.c tools/hostshim/hostshim_board.c \
     "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" "$CACHE/quickjs-vm.o" \
     -lm -o /tmp/test-pocket-power
   /tmp/test-pocket-power

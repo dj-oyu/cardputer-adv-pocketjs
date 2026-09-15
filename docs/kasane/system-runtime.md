@@ -6,8 +6,8 @@
 
 2026-09-16 CP14a: `main/system/sys_state.c`に固定購読・独立dirty・電源snapshotを実装。
 `sys_device.c`がHALを接続し、`pocket_power.c`が既存JSコールバックへ配送する。
-現在のtopicはSYS_POWERのみ。時計・通知・timer・SYSTEM描画は以降のcheckpoint。
-stateは144 B、購読ID管理4 B（sizeof/ELFで確認する）。動的確保・専用taskは追加しない。
+CP14a時点のtopicはSYS_POWERのみ、stateは144 B、購読ID管理4 B。
+動的確保・専用taskは追加しない。
 
 2026-09-16 CP14b1: `system/sys_clock`へ実時計の読み取りとatomicな信頼判定を抽出。
 SNTP成功はSystemへ通知し、solarとpethubはSystemを読む。solarの互換setterは維持する。
@@ -16,9 +16,32 @@ SNTP成功はSystemへ通知し、solarとpethubはSystemを読む。solarの互
 `available`は読み取り成功、`trusted`は信頼判定であり、利用側の日時範囲検査は別に必要。
 solarは2000〜2050年の範囲を維持。pethubはuint32のwire範囲までUTCを利用し、
 天文計算の年範囲や浮動小数の往復変換に依存しなくなった。
-これは互換provider抽出段階であり、以下のmonotonic anchor・CLOCK_CONFIG dirty・
-source/revision・PC fallback共通化は未実装。PC補完時計は引き続きpethub所有。
+この時点では互換provider抽出のみ。後続CP14b2でstate/PC補完を共通化する。
 追加heap/taskはなく、従来solarが所有したatomic intをSystemへ移した。
+
+2026-09-16 CP14b2: `sys_state`へUTC/mono anchor、PC補完anchor、timezone、revisionと
+SYS_CLOCK_CONFIGを実装。`sys_clock_snapshot`は経過時間を加算してコピーし、stateを書かず、
+自然な時間経過をpublishしない。時計補正・有効なsource変更・timezone変更だけdirtyになる。
+revisionはUINT32_MAXで飽和し、その後もdirty配送は継続する。変更検出はrevisionだけに依存しない。
+PC packetを検証したpethubが`sys_clock_offer_pc`を呼ぶ。RTC/SNTPが有効なら表の時刻を
+変えず、PC anchorだけ更新。RTC/SNTPの明示的無効化後は最新のPC anchorへ切り替わる。
+PC sourceのvalidは利用可能という意味で、trustedはfalse（CRCは真正性を保証しない）。
+uint32 wire範囲を越えたpethub時刻は0へ戻し、2106年にwrapさせない。
+
+`sys_device_step`はbootまたは同期/不信頼通知時だけplatform時計を読む。
+別taskはatomicな要求bitを立て、ownerがexchangeして最新platform時計を取得する。
+同期成功後の読取り失敗だけでは既存のholdoverを破棄しない。失敗時の自動再試行は未実装で、
+次の同期通知で再取得する。通知に伴う専用task/wakeは増やさず、既存owner loopで消費する。
+外部からplatform時計を変更する経路には`sys_clock_set_synchronized`の通知が必要。
+共通stateは200 B（host sizeof）、購読96 Bを含む。heap/task追加なし。
+timezoneのNVS保存はpethub互換adapterに残す。solarと既存pocket.app/netは現状の
+platform時計provider経路を維持し、PC補完・anchor snapshotへはまだ切り替えていない。
+JS時計の汎用onChange、壁時計alarmの補正時再評価、通知presenterも次段階。
+
+CP14b3でsolar/`pocket.time.wall()`も共通anchorへ接続。PC補完を表示へ反映し、
+JS sourceはhost、RTC/SNTPはnetworkの互換名を維持する。healthに未同期/取得不能/範囲外を
+保持する。TLSはOS時計を使うため、補完anchorではなく実OS時計providerを検査する。
+時刻を読むだけの処理はplatform時計を再取得しない。同期要求はowner stepで消費する。
 
 `sys_power_read`はsampledの有無を返し、valid/errorを含むsnapshotをコピーする。
 `sys_power_step`は購読またはrefresh要求があり期限到達した時だけHALを呼ぶ。
@@ -146,6 +169,22 @@ ADCの500 msキャッシュ等のHAL事情は提供側に閉じ込める。従�
 
 ## 7. 通知レコードとstate
 
+CP14c1実装: `sys_notify`は64 B×9件＋管理24 B＝600 B。System adapterが所有し、
+pethubの旧待機配列を撤去した。post/active snapshot/ack/cancel/snooze/release_ownerと
+期限stepを提供し、SYS_NOTIFYへ独立dirtyを配送する。操作はowner task限定、heap確保なし。
+active snapshotはコピーで、内部レコードの参照を外へ貸さない。
+
+IDはprocess全体のuint32連番で再利用せず、枯渇後はFULL。別owner/終了済み/未知idはGONE。
+slot世代型ではないためSTALEを別に返さない。終端は操作の戻り値で確定し、その場で回収する。
+TTLによる回収後もIDは再利用しない。履歴・終端レコードの長期保持は行わない。
+owner/key重複は既存IDを返し、label・TTL・鳴動を更新しない。明示的な内容更新APIは未実装。
+snoozeは待機枠を使用し、8件満杯ならACTIVEを維持してFULLを返す。
+期限なしのstepは即return、active取得はcached indexから1件をコピーする。
+
+既存pethubの確認・5分snoozeは新stateを使い、鳴動30秒/2秒間隔は既存adapterに残す。
+既存pet通知は互換のSYSTEM owner=1。汎用APP ownerの発行・JS session終了との接続は次段階。
+相対timer4件、wall alarm、表示描画はまだpethub内。通知SYSTEM presenterへは未接続。
+
 固定配列9レコードで、現行相当の待機8件＋表示中1件を保持する。文字列やpayloadをJSから借用しない。
 1件80 B以内を目標とし、id/世代、owner、dedupe key、state、reason、revision、作成時刻、期限、表示方針、短いlabelを収める。
 labelは現行互換のASCII24文字＋終端。日本語/長文はこの容量を暗黙に拡張せず、別仕様で資源参照等を検討する。
@@ -176,6 +215,15 @@ pub/subは終端履歴の全件配送を保証しない。後からidを読む�
 通知操作は冪等性を定義し、既に終了したidへの操作はGONE、別世代にはSTALEを返す。
 
 ## 8. タイマー・pethub・保存
+
+CP14c2実装: `sys_timer`へ4件の相対timerを移管。1件56 B、管理込み240 B。
+System adapterが所有し、pethubの旧timer配列224 Bを撤去。owner＋文字列key（16文字）で
+設定/更新/取消し、label24文字を保持する。期限は単調時計の絶対マイクロ秒。
+通知満杯ではdueを保持してblockedにし、deadlineから外す。通知state変更時だけ再試行する。
+未来の未発火timerはその期限を返すので、blocked timerのための過去期限busy loopを作らない。
+SYS_TIMERは設定・取消・blocked移行・受付成功をdirtyへ合流する。
+既存`pet.alarm`はSYSTEM owner=1の互換adapterで、秒/ミリ秒を共通期限へ変換する。
+NVS保存対象と壁時計alarmの意味判定はpethubに残す。鳴動期限・owner wake統合は次段階。
 
 共通タイマー枠は現行相当4件。owner/key、単調期限、固定通知内容を持ち、IDやlabelの既存上限を維持する。
 pethubは利用量reset・目覚まし等の意味を判定し、次の意味のある期限をruntimeへ提示する。毎フレーム全条件を検査しない。

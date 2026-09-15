@@ -4,6 +4,60 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14c2 — 共通相対timer・満杯再試行（2026-09-16）
+
+- `sys_timer`へ4件固定の期限・owner/key・labelを抽出。store240 B、pethubの旧224 B配列を撤去。
+- 満杯時のdueを保持し、blocked期限はNEVER扱い。通知state変更で再試行し、未来timerは
+  自分の期限で起床候補を維持する。SYS_TIMER dirtyを追加しSystem ownerへ接続。
+- ASan/UBSan・O2で4枠、owner分離、更新/取消、満杯保持、60秒相当の再試行停止、
+  容量解放後の受付とpethub互換を検査。System adapterから発火/dirty配送する試験もPASS。
+- 時計208＋通知600＋timer240＝1,048 B。共通runtimeの2 KiB予算内。
+  旧NVSスキーマ・壁時計alarm・鳴動adapterは維持。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,948 / 136,588 B（+16 B）。
+  `pet.timer()`の残り時間もowner別snapshotへ接続済み。
+
+## checkpoint 14c1 — 共通通知state・pethub接続（2026-09-16）
+
+- `sys_notify`を追加。9件固定、FIFO、ACTIVE、8待機枠、snooze、TTL、owner/key重複抑制、
+  owner解放、process ID枯渇時FULLを実装。snapshotはコピー、期限なしのstepは走査しない。
+- System adapterが600 Bのstoreを所有し、SYS_NOTIFYへdirtyを配送。
+  pethubから旧待機配列208 Bを撤去し、表示/確認/5分snoozeを明示的な通知stateへ接続。
+- ASan/UBSan・O2で8+1容量、満杯snoozeのACTIVE維持、TTL、ID/順序枯渇、100回owner解放、
+  独立dirty、60秒相当の静止、pethub packet/保存対象状態/相対timer/朝alarmの互換を検査。
+  既存System時計・JS電源/時計試験もPASS。
+- 終端idはGONE。汎用JS owner寿命、相対timer移管、鳴動期限移管、SYSTEM presenterは次段階。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,932 / 136,572 B（+416 B）。
+  System store +600 B、pethub集計-192 B、process ID4 Bと配置差を含む。追加heap/taskなし。
+
+## checkpoint 14b3 — solar・JS時計統合（2026-09-16）
+
+- solarと`pocket.time.wall()`を共通anchorへ統合。PC補完も同じUTC表示に使い、
+  JS sourceはhost、RTC/SNTPは互換のnetwork。天文範囲は引き続きsolarだけで制限。
+- 時計healthで未同期・取得不能・範囲外を区別。良好なholdoverは取得失敗で失わない。
+- TLSの事前検査は実OS時計providerへ直接接続。PC補完だけでTLSを許可しない。
+- JS変換を`pocket_clock.c`へ分離。実QuickJSでnull/source/2050年/安全数値範囲と
+  30セッションをASan/UBSan・O2検査。System時計・電源回帰、solar時刻/描画試験PASS。
+- solar試験は実anchor coreへ接続。providerのRTC再発見・同期・取消試験は
+  `test_system_clock.c`と`test_system_clock_device.c`に分担する。
+- 通常/Kasane-only buildとlink監査PASS。共通state208 B、配置後DIRAMは
+  137,516 / 136,156 Bで直前と同値。実機確認は後続の通知実装とまとめて行う。
+
+## checkpoint 14b2 — 時計anchor・dirty・PC補完（2026-09-16）
+
+- `sys_state`にRTC/SNTPとPCのanchor、timezone、revisionを保持。pethub内の補完時計を撤去。
+  UTC/monoからsnapshotを計算し、PCはRTC/SNTPより低い優先度で保持する。
+- SYS_CLOCK_CONFIGを追加。初期値と補正/source/timezoneの変更を独立dirtyへ合流し、
+  秒経過だけでは通知しない。PC入力・timezoneの検証/NVS互換はpethub側に残す。
+- SNTP側はatomic要求bitのみを更新。ownerはboot/通知時にplatform時計を読み、普段は
+  anchorで進める。既存holdoverは一時的な取得失敗で破棄しない。
+- clock state/deviceとJS電源のASan/UBSan・O2 PASS。60秒相当で追加wall/ADC読取り0、
+  dirty0、100通知の合流、RTC/PC優先度、SNTP後退補正、独立poll、timezone、桁溢れを検査。
+  solar時刻のASan/UBSan、platform providerのO2回帰もPASS。
+- 通常/Kasane-only buildとlink監査PASS。静的DIRAM137,516 / 136,156 Bで直前比+48 B。
+  共通state200 B（+56）、pethubの時計12 B撤去、要求bit1 Bと配置調整を含む。
+  heap/task追加なし。今回は実機書込み・SNTP通信試験を追加していない。
+- solar/既存JS時計のanchor統合、汎用JS時計購読、壁時計alarmの補正対応、通知SYSTEM描画は残る。
+
 ## checkpoint 14b1 — System時計provider抽出（2026-09-16）
 
 - 実時計の取得・信頼フラグを`system/sys_clock`へ移動。SNTP → System、
