@@ -655,6 +655,9 @@ esp_err_t app_overlay_tick(void) {
     if(pocketjs_guest_jobs_pending(guest)) {
         esp_err_t ce=pocketjs_guest_continue(guest);
         report_oom_if_any();
+#ifdef CONFIG_POCKET_VM_PROBE
+        vmprobe_continuation_sample(guest);
+#endif
         if(ce) return ce;
         if(pocketjs_guest_jobs_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
@@ -798,6 +801,9 @@ esp_err_t app_tick(uint32_t buttons) {
         esp_err_t ce=pocketjs_ui_turn_continue(binding,&cont);
         turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
         report_oom_if_any();
+#ifdef CONFIG_POCKET_VM_PROBE
+        vmprobe_continuation_sample(guest);
+#endif
         if(ce) return ce;
         if(!leaving && pocketjs_guest_jobs_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR

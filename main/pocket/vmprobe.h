@@ -68,6 +68,11 @@ void vmprobe_static_report(void);
 // left over rather than a guessed split.
 void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us);
 
+// Called from app_session.c on a continuation turn (a drain the budget cut,
+// resumed with no frame()). Samples the heap, stack and guest heap on the same
+// every-Nth cadence as the frame sample, and nothing else.
+void vmprobe_continuation_sample(pocketjs_guest_t *guest);
+
 // Called from pocket_api.c's pump, at the moment a completion's resolve/
 // reject actually runs, with (now - the timestamp pocket_api_complete()
 // recorded). This stops at the resolve/reject call, not at the JS handler:
