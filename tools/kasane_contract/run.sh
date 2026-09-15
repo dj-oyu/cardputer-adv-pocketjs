@@ -71,6 +71,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     -o "$out/cache-exhaustion"
   "$out/cache-exhaustion"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
+    tools/kasane_contract/test_coverage_runs.c -o "$out/coverage-runs"
+  "$out/coverage-runs"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_modal.c \
     tools/kasane_contract/test_composition.c -o "$out/composition"
   "$out/composition"
@@ -88,5 +92,12 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
 done
 python3 tools/pie/test_frost.py
 python3 tools/kasane_contract/fill_pie.py
+# Measured, not estimated: -finstrument-functions counts entries into the pixel
+# predicate and into the row solver, so this arm prints the before/after call
+# counts per frame (see the reporter in test_coverage_runs.c).
+cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_COUNT_CALLS \
+  -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
+  tools/kasane_contract/test_coverage_runs.c -o "$out/coverage-count"
+"$out/coverage-count"
 printf '#include "ksn_api.h"\n#include "ksn_ports.h"\n#include "ksn_core.h"\n#include "ksn_cache.h"\n#include "ksn_modal.h"\n#include "ksn_view_host.h"\n#include "ksn_runtime.h"\n' | \
   c++ -std=c++17 -Wall -Wextra -Werror -Imain/ui/kasane -x c++ -fsyntax-only -
