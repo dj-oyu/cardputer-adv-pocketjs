@@ -104,7 +104,7 @@ canopy_broadcast(const int16_t *k,int16_t *kv,int nk) {
 // the head and tail scalar, and only calls this with |x - cx| <= rx inside.
 // `x0` is the x of row[0], because dx = x - cx and the lane vector has to know
 // where in the row it is.
-static void __attribute__((noinline))
+void __attribute__((noinline))
 canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
     int16_t k[16] __attribute__((aligned(4))) = {
         (int16_t)(-cx),                  /* dx = x - cx */
@@ -197,7 +197,7 @@ canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
 #else
 // Host builds take the scalar path, so anything that includes this file still
 // works off-device and the model keeps being the only arithmetic in play.
-static void __attribute__((unused))
+void __attribute__((unused))
 canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
     canopy_scalar(row,x0,x0+n*8-1,cx,mrr,qy,leafy);
 }
