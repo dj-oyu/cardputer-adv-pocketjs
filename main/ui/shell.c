@@ -604,15 +604,19 @@ void shell_draw(const char *error, unsigned phase) {
         // took: the label it reports is drawn on the sail scene and nothing
         // else logs it, so checking it used to mean reading pixels.
         ESP_LOGI("background",
-            "PERF mode=%u clock=%s fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f "
+            "PERF mode=%u async=%d clock=%s fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f "
             "hud=%.2f (ovl=%.2f fmt=%.2f fps=%.2f menu=%.2f) send=%.2f",
-            mode,solar_sail_time_label(),fps,(double)draw_sum/samples/1000.0,
+            mode,board_async_get(),solar_sail_time_label(),fps,(double)draw_sum/samples/1000.0,
             (double)prep_sum/samples/1000.0,(double)loop_sum/samples/1000.0,
             (double)kernel_cycles/samples/240000.0,
             (double)hud_sum/samples/1000.0,
             (double)hud_ovl_cy/samples/240000.0,(double)hud_fmt_cy/samples/240000.0,
             (double)hud_fps_cy/samples/240000.0,(double)hud_menu_cy/samples/240000.0,
             (double)present_sum/samples/1000.0);
+        // The A/B: the numbers just reported came from the mode printed on that
+        // line, and the next window runs the other one -- same binary, same
+        // scene, eight seconds later.
+        board_async_set(!board_async_get());
         samples=0;draw_sum=0;present_sum=0;prep_sum=0;loop_sum=0;hud_sum=0;kernel_cycles=0;
         hud_fmt_cy=hud_ovl_cy=hud_fps_cy=hud_menu_cy=0;
         max_us=0;window_start=now;

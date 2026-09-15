@@ -28,6 +28,36 @@ static i2c_master_dev_handle_t keyboard;
 // row start lands correctly once the base does.
 static uint16_t shared[LCD_W * STRIP_H] __attribute__((aligned(16)));
 uint16_t *board_strip(void) { return shared; }
+// TEMPORARY A/B switch for the asynchronous transfer below, flipped by the PERF
+// report so both paths run in ONE binary (builds differ by up to 15% from code
+// placement, so a build-to-build comparison is not a measurement). 1 = queue and
+// come back for the result on the next strip (the shipping path), 0 = the
+// blocking polling transfer this file has always used.
+int g_board_async = 1;
+int board_async_get(void) { return g_board_async; }
+void board_async_set(int on) { g_board_async = on ? 1 : 0; }
+// The panel's own copies. `shared` stays the one buffer every screen draws into
+// (17 call sites hold that pointer for a whole frame), so the asynchronous path
+// COPIES a strip here instead of handing the caller a second buffer: 3,840 bytes
+// of memcpy is ~10 us against the ~440 us of SPI the copy lets the CPU skip.
+// Two buffers, because one is in flight while the next strip is copied.
+static uint16_t tx_buf[2][LCD_W * STRIP_H] __attribute__((aligned(16)));
+static int tx_front;
+static bool tx_inflight;
+// The descriptor must outlive the queued transaction: spi_device_queue_trans
+// keeps the pointer until the result is reaped.
+static spi_transaction_t tx_pending;
+// Reap the strip queued last time. One transaction is in flight at a time
+// (the LCD device is configured with queue_size=1), so this is also the barrier
+// every command goes through before it ends the RAMWR session. Returns the
+// transfer's own error, or ESP_OK when there was nothing in flight.
+static esp_err_t tx_reap(void) {
+    if (!tx_inflight) return ESP_OK;
+    spi_transaction_t *done = NULL;
+    esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+    tx_inflight = false;
+    return e;
+}
 static bool capture;
 void board_capture(bool enabled) {
     capture=enabled;
@@ -47,6 +77,10 @@ static esp_err_t tx(bool data, const void *bytes, size_t n) {
 static int next_row = -1;
 
 static esp_err_t command(uint8_t c, const void *data, size_t n) {
+    // Any command at all ends the RAMWR session, so nothing may be in flight
+    // when one starts: reap first (the queued strip is still ordered before it).
+    // next_row is -1 either way, because a command ends the session.
+    (void)tx_reap();
     next_row = -1;
     esp_err_t e = tx(false, &c, 1);
     return e == ESP_OK && n ? tx(true, data, n) : e;
@@ -335,7 +369,24 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     int count=LCD_W*rows;
     if(pie_swap) swap_pie(pixels,(unsigned)(count*2/32));
     else swap_scalar(pixels,count);
-    esp_err_t e=tx(true,pixels,(size_t)LCD_W*rows*2);
+    // THE PIPELINE. The strip queued on the previous call has been going out
+    // during everything above (~440 us of SPI against ~2.2 ms of drawing and
+    // layout), so its result is reaped here: one transfer in flight at a time,
+    // which is what the device's queue_size=1 allows and all this needs.
+    // Then the strip just drawn is copied into the panel's own buffer and
+    // queued. The copy is the price of not touching the 17 call sites that hold
+    // `shared` for a whole frame, and it is ~10 us against the ~440 us skipped.
+    esp_err_t e = tx_reap();
+    if (e == ESP_OK && g_board_async) {
+        size_t bytes = (size_t)LCD_W * rows * 2;
+        memcpy(tx_buf[tx_front], pixels, bytes);
+        tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = tx_buf[tx_front]};
+        e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+        tx_inflight = (e == ESP_OK);
+        tx_front ^= 1;
+    } else if (e == ESP_OK) {
+        e = tx(true, pixels, (size_t)LCD_W * rows * 2);
+    }
     // Where the pointer lands once these rows are in. At the bottom of the
     // window it wraps to the window's own top, which is only row 0 when this
     // frame started there, so the end of the panel always re-windows. A failed
