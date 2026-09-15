@@ -4,6 +4,32 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## ライフタイム監査と修正（2026-09-16）
+
+| 対象 | 所有者・返却時点 | 確認結果 |
+| --- | --- | --- |
+| 背景core/bulk | ホーム描画。前景guest開始前に返却 | USB診断だけ返却を迂回していたためapp_sessionへ集約 |
+| JS購読・callback | guest session。JSRuntime破棄より前 | 既存registryでclose/reset。電源native購読も最後のcloseで解除 |
+| Kasane APP領域 | APP lease。最後のowner終了時に破棄 | 確定画面の修復失敗後にBUSYが残る解放漏れを修正 |
+| SYSTEM共有領域 | host owner。APP終了から独立 | SYSTEM命令を残し、APPだけ消去・次の全面修復を保持 |
+| font/PPT2 bytes | firmware内の不変資源 | Flashを借用。APP終了で登録を失効、画像全体のheap所有なし |
+| 電源snapshot・ID | boot / process | 144 B＋4 Bの明示的常設。guest終了時に破棄しない |
+
+- `ae36f99`: 背景scratch返却を前景起動の共通入口へ移動。overlayは背景と共存するので保持。
+  通常/Kasane-only build、overlay契約、session dispatch 4構成PASS。
+  実機100回終了後free256,360 B / largest81,920 Bが全回一定。
+  修正前240,740 / 65,536 Bから+15,620 / +16,384 B。
+  `.cache/kasane-lifetime-cycles`。以前のlargest120,832 Bとの差は残り、
+  初回HAL等の常駐確保・起動時の配置を別途切り分ける。連続領域の安全性全体は未完了。
+- 修復失敗後のAPP終了: 再描画中のborrowと、ownerへ戻った後の修復待ちを区別する。
+  実描画中は引き続きBUSY。待機中はrepair borrowを返してからAPPを消し、SYSTEMの
+  full-redraw要求を保持する。旧コードで追加テストの失敗を再現し、修正後H/Q ASan/UBSan・O2 PASS。
+  APP単独時のcache含むnative全回収、SYSTEM共存時のAPP回収・旧JS参照失効を検査。
+  通常/Kasane-only build PASS。転送失敗の注入試験はhostで行い、実機のSPI障害は注入していない。
+- 今後の方針: 複数ownerの共有領域とframe中の借用を混同しない。SYSTEM常駐化後は
+  cache/animation arenaもruntimeと同じ寿命で保持されるため、両owner未使用時の返却要否を
+  明示する。上限内の保持とリーク、空き総量と最大連続領域を別々に評価する。
+
 ## checkpoint 14a — System電源・購読基盤（2026-09-16）
 
 - `system/sys_state`へ8件の購読・各購読のdirty mask・電源snapshot・測定期限を実装。

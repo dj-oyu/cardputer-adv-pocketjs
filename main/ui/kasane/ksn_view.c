@@ -184,7 +184,11 @@ ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,k
 }
 ksn_result ksn_view_host_reset_app(ksn_view_host *h){
     if(!h||!h->core)return KSN_INVALID;
-    if(h->presenting||h->core->state.repairing)return KSN_BUSY;
+    if(h->presenting)return KSN_BUSY;
+    /* A failed committed-frame repair is suspended between owner turns.
+     * End its borrow before clearing APP; full-redraw remains due for SYSTEM. */
+    if(h->core->state.repairing)
+        ksn_core_defer_repair(h->core,h->core->state.transaction);
     if(h->builder.value&&h->building_layer==KSN_APP)abort_builder(h);
     ksn_submission s=ksn_core_poll(h->core);
     if(s.status==KSN_SUBMITTED&&s.layer==KSN_APP){

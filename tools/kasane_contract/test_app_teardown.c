@@ -27,7 +27,7 @@ static ksn_result image_span(void *ctx,uint16_t v,uint16_t f,uint16_t y,
     return KSN_OK;
 }
 int main(void){
-    for(unsigned scenario=0;scenario<6;scenario++){
+    for(unsigned scenario=0;scenario<7;scenario++){
         KSN_TEST_CORE(core,);
         ksn_cache cache;ksn_cache_command_block commands;ksn_cache_text_block text;
         CHECK(ksn_cache_bind(&cache,&commands,&text)==KSN_OK);
@@ -65,11 +65,17 @@ int main(void){
             p.x=32;CHECK(ksn_view_instantiate(app,tx,a2,&p,&ai)==KSN_OK);
             if(scenario>=2)CHECK(ksn_view_submit(app,tx)==KSN_OK);
             if(scenario==3){fail_band=1;CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_IO);fail_band=-1;}
-        }else if(scenario>=4){
+        }else if(scenario>=4&&scenario<=5){
             CHECK(ksn_view_begin(sys,KSN_PATCH,&tx)==KSN_OK);
             p.x=24;CHECK(ksn_view_place(sys,tx,si,&p)==KSN_OK);
             if(scenario==5)CHECK(ksn_view_submit(sys,tx)==KSN_OK);
             system_before=ksn_view_poll(sys);
+        }else if(scenario==6){
+            /* No pending guest submission: repair borrows the active bank.
+             * IO failure must not keep the dead APP leased indefinitely. */
+            ksn_view_host_invalidate(&host);fail_band=1;
+            CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_IO);
+            CHECK(core.state.repairing);fail_band=-1;
         }
         CHECK(ksn_view_host_reset_app(&host)==KSN_OK);
         CHECK(ksn_core_active_usage(&core,KSN_APP).commands==0);
@@ -86,7 +92,7 @@ int main(void){
         ksn_result result=ksn_view_host_present(&host,&port,&stats);
         if(result!=KSN_OK||stats.bands!=0x1ffff)fprintf(stderr,"scenario=%u result=%d bands=%u\n",scenario,result,stats.bands);
         CHECK(result==KSN_OK&&stats.bands==0x1ffff);
-        unsigned sx=scenario>=4?24:16;
+        unsigned sx=scenario>=4&&scenario<=5?24:16;
         for(unsigned y=0;y<135;y++)for(unsigned x=0;x<240;x++)
             CHECK(panel[y*240+x]==(y<8&&x>=sx&&x<sx+8?0x07e0:0));
         /* The survivor still patches after cache compaction and bank swaps. */
