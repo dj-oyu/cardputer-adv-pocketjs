@@ -1772,10 +1772,14 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
  * pack or the run's eight bayer values (the 4-cycle column phase the scalar
  * pack reads per pixel). PIE is coprocessor 3: owner task only, and the
  * destination must be 16-byte aligned.
- * Default off: the arms are pixel identical (the kernel is exact, not an
- * approximation), so which one runs is a device measurement.
+ * Default on: the arms are pixel identical (the kernel is exact, not an
+ * approximation), so which one runs was a device measurement. Measured on the
+ * board (tools/host_kasane_opt_ab.py, one binary, 200 windows, 3 runs): with the
+ * kernel arm off the app's render_ms is 3.41 vs 2.32 with it on, i.e. the arm is
+ * worth 1.09 ms per frame on the 30-painted-frame window the harness samples
+ * (row_cov, the coarser switch, is the other one above the noise floor at 2.78).
  * ------------------------------------------------------------------------- */
-int g_ksn_blend_pie=0;
+int g_ksn_blend_pie=1;
 void ksn_blend8_pie(uint16_t *pixels,int blocks,ksn_rgba src,uint8_t opacity,
                     const uint16_t *thresholds);
 /* The kernel for one row's aligned window [first, first+8*blocks). The bayer
