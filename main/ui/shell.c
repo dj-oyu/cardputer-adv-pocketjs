@@ -624,12 +624,20 @@ void shell_draw(const char *error, unsigned phase) {
         // 60-frame window does not line up with this 2-second one. Pair it with
         // the neighbours' mean; docs/perf/pie-simd.md 7 has the numbers it gave.
         {
-            extern int g_garden_canopy_pie,g_board_swap_into;
+            extern int g_garden_canopy_pie,g_board_swap_into,g_garden_decor_group;
+            // The decor group width is the other knob this scene has: the profile
+            // evaluation, gain and dither are per group, so the width divides them
+            // (~8.5 instructions a pixel at 4, ~4.3 at 8) and it is also the whole of
+            // the approximation -- the group shares its first column's profile, which
+            // moves 13% of pixels by up to 33/255 between 4 and 8 (pie-opt-plan 9).
+            // One full four-arm cycle per width, so the canopy/swap A/B above stays
+            // unconfounded and the width still walks 8 -> 6 -> 4 over twelve arms.
+            g_garden_decor_group=(ab_arm/4)%3==1?6:(ab_arm/4)%3==2?4:8;
             extern uint32_t garden_prof_canopy(uint32_t *rows);
             static unsigned ab_arm;
             uint32_t crows=0,ccy=garden_prof_canopy(&crows);
-            ESP_LOGI("background","AB arm=%u pie=%d swap=%d frames=%u canopy=%.3f (%u rows, %u cy/row) draw=%.2f send=%.2f",
-                     ab_arm%4,g_garden_canopy_pie,g_board_swap_into,
+            ESP_LOGI("background","AB arm=%u pie=%d swap=%d decor=%d frames=%u canopy=%.3f (%u rows, %u cy/row) draw=%.2f send=%.2f",
+                     ab_arm%4,g_garden_canopy_pie,g_board_swap_into,g_garden_decor_group,
                      samples,(double)ccy/samples/240000.0,crows/samples,crows?ccy/crows:0,
                      (double)draw_sum/samples/1000.0,(double)present_sum/samples/1000.0);
             ab_arm++;
