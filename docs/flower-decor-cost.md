@@ -38,6 +38,34 @@ row decisions and a conditional narrow-fragment operation, partly offset by
 skipped reveal rows. A sub-millisecond event budget is a hypothesis to measure,
 not a validated upper bound.
 
+## The fixed-point square root bought the picture's 0.02% and no time (2026-09-15)
+
+`sqrtf` is the largest named single cost in the scene: 154 cycles a call, 4,010
+calls a frame, 2.1 ms of a 45 ms frame. Replacing it with an integer restoration
+root is a nine-fold cut in *instructions* (7 a step against 88; tools/flower_sqrt_variants.c)
+and costs the picture 0.02% of its pixels -- a few white pixels where the ellipsoid
+root feeds the depth test at a silhouette, and at B=14 one pixel of 32,400 differing
+by <=4/255 (tools/flower_frame_dump.c).
+
+On the board it is worth nothing. 79 adjacent 60-frame windows, only
+`g_flower_fixed_sqrt` moving (`sq=` in SPLIT3), paired differences in ms/frame:
+
+    ellipsoid root (sqrt=)     +0.03      bell root (bell:sqrt=)   -0.08
+    shade (control)            +0.31      garden (control)         -0.37
+    total                      -0.11      decor (control)          -0.36
+
+The signal is a tenth of the control band, so the answer is "no difference", not
+"a small win". The reason is in the code and not in the timing: `d` arrives as a
+float and the root leaves as one, and on a part with no FPU each conversion in and
+out of the integer loop is a call into soft-float. The loop got nine times cheaper
+and the two conversions around it cost what the loop used to.
+
+So the fixed point has to be carried by the caller -- `d` computed as an integer and
+the root consumed as one -- or the round trip eats the saving. That is the same
+conclusion the PIE work reached from the other side: the root is now integer and
+ready to sit in a lane (56 PIE instructions for eight roots, at the lane width's
+precision), and what is missing is the integer geometry around it.
+
 ## Measured on the device (2026-09-15)
 
 The 6..12 ms band above is an estimate built from instruction counts. It now has a
