@@ -19,6 +19,11 @@
   指定分終了、snooze未poll区間、極大watermarkを検証。既存wire/報酬/タイマー回帰もPASS。
 - 通常/Kasane-only buildとlink監査PASS。DIRAM138,108 / 136,748 B（前段階比+144 B）。
   System owner状態1,208 B。旧PetHub鳴動state16 Bを撤去。
+- COM3書込み後、通知8+1・満杯snooze拒否・ACK後timer retry・snooze・消去の実機試験PASS。
+  `.cache/system-wall-device`。Kasane起動終了2回はfree256,536 / largest81,920 Bで一致
+  （`.cache/system-wall-cycles`）。前回とのfree差を今回の静的RAM削減とは解釈しない。
+- 実時計を書き換える実機alarm試験や鳴動音の収録は未実施。時刻補正・指定分・鳴動周期は
+  hostの実装直接試験で確認し、実機では既存通知経路との統合回帰を確認した。
 
 ## checkpoint 14e1 — System期限とowner待機（2026-09-16）
 
