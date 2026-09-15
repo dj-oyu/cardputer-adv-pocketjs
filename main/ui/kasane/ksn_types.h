@@ -28,15 +28,15 @@ typedef struct {
         struct { ksn_rgba from,to; uint8_t axis,radius; bool dither; } gradient;
         struct { const char *utf8; uint16_t bytes,capacity; ksn_font font; ksn_rgba color; } text;
         struct { ksn_resource resource; uint16_t variant,frame,source_x,source_y; ksn_image_scale scale;
-                 uint16_t source_width,source_height; } image;
+                 uint16_t source_width,source_height,rotation; } image;
     } data;
 } ksn_draw;
 typedef enum { KSN_SET_RECT, KSN_SET_CLIP, KSN_SET_COLOR, KSN_SET_TEXT,
-               KSN_SET_REVEAL, KSN_SET_VISIBLE, KSN_SET_IMAGE_FRAME } ksn_property;
+               KSN_SET_REVEAL, KSN_SET_VISIBLE, KSN_SET_IMAGE_FRAME, KSN_SET_ROTATION } ksn_property;
 typedef struct {
     ksn_property property;
     union {
-        ksn_rect rect; ksn_rgba color; uint16_t reveal; bool visible;
+        ksn_rect rect; ksn_rgba color; uint16_t reveal,rotation; bool visible;
         struct { const char *utf8; uint16_t bytes; } text;
         struct { uint16_t variant,frame; } image;
     } value;

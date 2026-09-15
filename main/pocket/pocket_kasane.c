@@ -458,6 +458,14 @@ static bool property_u16(JSContext *ctx,JSValueConst spec,const char *key,uint16
     *out=(uint16_t)n;return true;
 }
 
+static bool parse_rotation(JSContext *ctx,JSValueConst value,uint16_t *out,const char *op){
+    double degrees;
+    if(!JS_IsNumber(value)||JS_ToFloat64(ctx,&degrees,value)<0||!isfinite(degrees)||degrees<-32768||degrees>32767){
+        throw_result(ctx,KSN_INVALID,op);return false;
+    }
+    long turns=lround(degrees*(1024.0/360.0));
+    *out=(uint16_t)((turns%1024+1024)%1024);return true;
+}
 static JSValue js_pet_image(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;const char *op="kasane.petImage";
     if(state&&state->building.value)return throw_result(ctx,KSN_BUSY,op);
@@ -507,6 +515,10 @@ static JSValue js_tx_image(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     uint16_t height=draw.data.image.source_y<64?64-draw.data.image.source_y:0;
     if(!property_u16(ctx,spec,"sourceWidth",width,&draw.data.image.source_width,op)||
        !property_u16(ctx,spec,"sourceHeight",height,&draw.data.image.source_height,op))return JS_EXCEPTION;
+    JSValue rotation=JS_GetPropertyStr(ctx,spec,"rotation");
+    if(JS_IsException(rotation))return rotation;
+    ok=JS_IsUndefined(rotation)||parse_rotation(ctx,rotation,&draw.data.image.rotation,op);
+    JS_FreeValue(ctx,rotation);if(!ok)return JS_EXCEPTION;
     ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
     return result==KSN_OK?expose_ref(ctx,tx,ref):throw_result(ctx,result,op);
 }
@@ -618,6 +630,9 @@ static JSValue change_ref(JSContext *ctx, JSValueConst self, int argc,
         ksn_result result=ksn_view_change(view(),tx,slot->ref,&change);
         JS_FreeCString(ctx,text);
         return result==KSN_OK?JS_UNDEFINED:throw_result(ctx,result,op);
+    } else if(property==KSN_SET_ROTATION) {
+        if(argc<2)return throw_result(ctx,KSN_INVALID,op);
+        if(!parse_rotation(ctx,argv[1],&change.value.rotation,op))return JS_EXCEPTION;
     } else if(property==KSN_SET_IMAGE_FRAME) {
         double variant,frame;
         if(argc<3||!number_in(ctx,argv[1],0,65535,&variant)||!number_in(ctx,argv[2],0,65535,&frame))
@@ -648,6 +663,7 @@ REF_SETTER(js_ref_visible,KSN_SET_VISIBLE,"kasane.ref.setVisible")
 REF_SETTER(js_ref_text,KSN_SET_TEXT,"kasane.ref.setText")
 REF_SETTER(js_ref_reveal,KSN_SET_REVEAL,"kasane.ref.setReveal")
 REF_SETTER(js_ref_image,KSN_SET_IMAGE_FRAME,"kasane.ref.setImageFrame")
+REF_SETTER(js_ref_rotation,KSN_SET_ROTATION,"kasane.ref.setRotation")
 
 static JSValue js_instance_place(JSContext *ctx, JSValueConst self, int argc,
                                  JSValueConst *argv) {
@@ -778,6 +794,7 @@ MUTATOR(js_ref_visible,tx_class,true,"kasane.ref.setVisible")
 MUTATOR(js_ref_text,tx_class,true,"kasane.ref.setText")
 MUTATOR(js_ref_reveal,tx_class,true,"kasane.ref.setReveal")
 MUTATOR(js_ref_image,tx_class,true,"kasane.ref.setImageFrame")
+MUTATOR(js_ref_rotation,tx_class,true,"kasane.ref.setRotation")
 MUTATOR(js_instance_place,tx_class,true,"kasane.instance.place")
 MUTATOR(js_instance_visible,tx_class,true,"kasane.instance.setVisible")
 MUTATOR(js_modal_open,modal_class,false,"kasane.modal.open")
@@ -956,7 +973,7 @@ static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
     PUT(out,"text",JS_NewBool(ctx,true));
     PUT(out,"image",JS_NewBool(ctx,true));
     PUT(out,"imageStretch",JS_NewBool(ctx,true));
-    PUT(out,"imageRotation",JS_NewBool(ctx,false));
+    PUT(out,"imageRotation",JS_NewBool(ctx,true));
     PUT(out,"groupOpacity",JS_NewBool(ctx,true));
     PUT(out,"modal",JS_NewBool(ctx,true));
     PUT(out,"animation",JS_NewBool(ctx,false));
@@ -1027,6 +1044,7 @@ static const JSCFunctionListEntry ref_methods[]={
     JS_CFUNC_DEF("setColor",2,js_ref_color_checked),JS_CFUNC_DEF("setVisible",2,js_ref_visible_checked),
     JS_CFUNC_DEF("setText",2,js_ref_text_checked),JS_CFUNC_DEF("setReveal",2,js_ref_reveal_checked),
     JS_CFUNC_DEF("setImageFrame",3,js_ref_image_checked),
+    JS_CFUNC_DEF("setRotation",2,js_ref_rotation_checked),
 };
 static const JSCFunctionListEntry instance_methods[]={
     JS_CFUNC_DEF("place",2,js_instance_place_checked),

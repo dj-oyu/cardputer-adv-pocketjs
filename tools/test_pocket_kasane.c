@@ -658,7 +658,20 @@ static void image_tests(void){
         }
         check(pixels,"stretched image and old footprint match pixel-center reference");
     }
-    check(run("for(const bad of [{variant:12},{frame:6},{sourceX:33,scale:0.5},{scale:3},{sourceY:-1},{resource:{}},"
+    check(run("kasane.patch(tx=>{sprite.setRect(tx,[20,20,84,84]);sprite.setRotation(tx,90)});"),
+          "JS rotates the image around its destination center");
+    check(present(&stats)==KSN_OK,"rotated image presents");
+    pixels=true;
+    for(unsigned y=0;y<135;y++)for(unsigned x=0;x<240;x++){
+        uint16_t want=0;
+        if(x>=20&&x<84&&y>=20&&y<84){
+            port.read_span(port.ctx,11,5,83-x,y-20,1,rgb,alpha);want=image_over_black(rgb[0],alpha[0]);
+        }
+        if(panel_pixels[y*240+x]!=want)pixels=false;
+    }
+    check(pixels,"90-degree JS rotation matches independent transposed PPT2 coordinates");
+    check(run("for(const bad of [{rotation:NaN},{rotation:Infinity},{rotation:40000},{scale:1,rotation:45},"
+              "{sourceWidth:257},{variant:12},{frame:6},{sourceX:33,scale:0.5},{scale:3},{sourceY:-1},{resource:{}},"
               "{get sourceX(){throw Error('getter')}}]){let failed=false;try{kasane.replace(tx=>{"
               "try{tx.image(Object.assign({resource:asset,bounds:[0,0,32,32]},bad))}catch(e){};"
               "tx.rect(shape)})}catch(e){failed=true}if(!failed)throw Error('accepted bad image')}"

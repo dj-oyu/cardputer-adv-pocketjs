@@ -1,4 +1,5 @@
 #include "ksn_render.h"
+#include "ksn_image_transform.h"
 #include <string.h>
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
@@ -45,6 +46,7 @@ typedef struct { uint8_t r,g,b,a; } ksn_premultiplied_rgba8;
 typedef union {
     uint8_t text[64];
     struct { uint16_t rgb[32];uint8_t alpha[32]; } image;
+    struct { uint16_t rgb[16];uint8_t alpha[16];uint16_t block_rgb[16];uint8_t block_alpha[16]; } rotated;
 } ksn_span_scratch;
 _Static_assert(sizeof(ksn_span_scratch)+256+8+128<=512,"compositor/provider pixel scratch budget");
 static ksn_rgba image_color(uint16_t rgb,uint8_t alpha){
@@ -59,6 +61,24 @@ static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destinat
 }
 static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
                              const ksn_draw *d,int x,int y,unsigned *count,ksn_span_scratch *scratch){
+    if(d->data.image.rotation){
+        unsigned cached_y=UINT32_MAX,cached_x=UINT32_MAX;
+        for(unsigned i=0;i<*count;i++){
+            unsigned sx,sy;scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;
+            if(!ksn_image_sample(d,x+(int)i,y,&sx,&sy))continue;
+            unsigned bx=d->data.image.source_x+((sx-d->data.image.source_x)/16)*16;
+            if(sy!=cached_y||bx!=cached_x){
+                unsigned n=d->data.image.source_x+d->data.image.source_width-bx;if(n>16)n=16;
+                ksn_result r=ksn_core_image_span(core,ticket,false,layer,(uint16_t)index,(uint16_t)sy,(uint16_t)bx,
+                    (uint16_t)n,scratch->rotated.block_rgb,scratch->rotated.block_alpha);
+                if(r!=KSN_OK)return r;
+                cached_y=sy;cached_x=bx;
+            }
+            scratch->rotated.rgb[i]=scratch->rotated.block_rgb[sx-bx];
+            scratch->rotated.alpha[i]=scratch->rotated.block_alpha[sx-bx];
+        }
+        return KSN_OK;
+    }
     unsigned dx=(unsigned)(x-d->bounds.x0),dy=(unsigned)(y-d->bounds.y0),n=*count;
     if(d->data.image.scale==KSN_IMAGE_2X){n=((dx&1u)+*count+1)/2;dx/=2;dy/=2;}
     else if(d->data.image.scale==KSN_IMAGE_HALF){n=2*(*count)-1;dx=2*dx+1;dy=2*dy+1;}
@@ -73,6 +93,7 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
         (uint16_t)n,scratch->image.rgb,scratch->image.alpha);
 }
 static unsigned image_sample_index(const ksn_draw *d,int x,unsigned offset){
+    if(d->data.image.rotation)return offset;
     if(d->data.image.scale==KSN_IMAGE_STRETCH){
         unsigned dx=(unsigned)(x-d->bounds.x0),width=(unsigned)(d->bounds.x1-d->bounds.x0);
         return stretch_sample(dx+offset,d->data.image.source_width,width)-stretch_sample(dx,d->data.image.source_width,width);
@@ -82,6 +103,13 @@ static unsigned image_sample_index(const ksn_draw *d,int x,unsigned offset){
     return offset;
 }
 static const uint8_t bayer4[4][4]={{0,8,2,10},{12,4,14,6},{3,11,1,9},{15,7,13,5}};
+static ksn_rect footprint(const ksn_draw *d){
+    return d->kind==KSN_IMAGE?ksn_image_footprint(d->bounds,d->data.image.rotation):d->bounds;
+}
+static ksn_rgba image_sample_color(const ksn_draw *d,const ksn_span_scratch *s,unsigned index){
+    return d->data.image.rotation?image_color(s->rotated.rgb[index],s->rotated.alpha[index]):
+                                  image_color(s->image.rgb[index],s->image.alpha[index]);
+}
 static unsigned mul8(unsigned a,unsigned b){return (a*b+127)/255;}
 static unsigned clamp8(unsigned value){return value>255?255:value;}
 static bool inside_round_rect(ksn_rect bounds,uint8_t radius,int x,int y){
@@ -173,10 +201,11 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
         if(result!=KSN_OK)return result;
         const ksn_draw *d=&command.draw;
         if(!command.visible||!d->opacity)continue;
-        int x0=d->bounds.x0>d->clip.x0?d->bounds.x0:d->clip.x0;
-        int x1=d->bounds.x1<d->clip.x1?d->bounds.x1:d->clip.x1;
-        int y0=d->bounds.y0>d->clip.y0?d->bounds.y0:d->clip.y0;
-        int y1=d->bounds.y1<d->clip.y1?d->bounds.y1:d->clip.y1;
+        ksn_rect bounds=footprint(d);
+        int x0=bounds.x0>d->clip.x0?bounds.x0:d->clip.x0;
+        int x1=bounds.x1<d->clip.x1?bounds.x1:d->clip.x1;
+        int y0=bounds.y0>d->clip.y0?bounds.y0:d->clip.y0;
+        int y1=bounds.y1<d->clip.y1?bounds.y1:d->clip.y1;
         if(x0>=x1||y0>=y1)continue;
         if(d->kind==KSN_GRADIENT&&d->data.gradient.dither)has_dither=true;
         if(x0<left)left=x0;
@@ -199,14 +228,15 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
             if(result!=KSN_OK)return result;
             bool child_dither=command.draw.kind==KSN_GRADIENT&&command.draw.data.gradient.dither;
             const ksn_draw *d=&command.draw;
-            if(!command.visible||!d->opacity||py<d->bounds.y0||py>=d->bounds.y1||
-               py<d->clip.y0||py>=d->clip.y1||x0>=d->bounds.x1||x0>=d->clip.x1||
-               x0+count<=d->bounds.x0||x0+count<=d->clip.x0)continue;
+            ksn_rect bounds=footprint(d);
+            if(!command.visible||!d->opacity||py<bounds.y0||py>=bounds.y1||
+               py<d->clip.y0||py>=d->clip.y1||x0>=bounds.x1||x0>=d->clip.x1||
+               x0+count<=bounds.x0||x0+count<=d->clip.x0)continue;
             if(d->kind==KSN_IMAGE){
                 int left=x0,right=x0+count;
-                if(left<d->bounds.x0)left=d->bounds.x0;
+                if(left<bounds.x0)left=bounds.x0;
                 if(left<d->clip.x0)left=d->clip.x0;
-                if(right>d->bounds.x1)right=d->bounds.x1;
+                if(right>bounds.x1)right=bounds.x1;
                 if(right>d->clip.x1)right=d->clip.x1;
                 for(int x=left;x<right;){
                     unsigned n=(unsigned)(right-x);if(n>16)n=16;
@@ -214,8 +244,7 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
                     if(result!=KSN_OK)return result;
                     for(unsigned j=0;j<n;j++){
                         unsigned source=image_sample_index(d,x,j),dest=(unsigned)(x-x0)+j;
-                        unsigned alpha=premultiply_over(&tile[dest],image_color(scratch->image.rgb[source],
-                            scratch->image.alpha[source]),d->opacity);
+                        unsigned alpha=premultiply_over(&tile[dest],image_sample_color(d,scratch,source),d->opacity);
                         if(has_dither&&alpha==255)dither_pixels[dest>>5]&=~(1u<<(dest&31));
                     }
                     x+=(int)n;
@@ -306,7 +335,8 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             }
             ksn_draw *d=&command.draw;
             if(!command.visible||!d->opacity)continue;
-            int x0=d->bounds.x0,x1=d->bounds.x1,y0=d->bounds.y0,y1=d->bounds.y1;
+            ksn_rect bounds=footprint(d);
+            int x0=bounds.x0,x1=bounds.x1,y0=bounds.y0,y1=bounds.y1;
             if(x0<d->clip.x0)x0=d->clip.x0;
             if(x1>d->clip.x1)x1=d->clip.x1;
             if(y0<d->clip.y0)y0=d->clip.y0;
@@ -336,7 +366,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     for(unsigned j=0;j<count;j++){
                         unsigned source=image_sample_index(d,x,j),index=(unsigned)((py-y)*240+x)+j;
-                        pixels[index]=blend(pixels[index],image_color(scratch.image.rgb[source],scratch.image.alpha[source]),
+                        pixels[index]=blend(pixels[index],image_sample_color(d,&scratch,source),
                                             d->opacity,false,x+(int)j,py);
                     }
                     x+=(int)count;

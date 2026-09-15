@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 static uint16_t panel[240*135],strip[240*8],saved[240*135];
 static unsigned calls,sends;static int failure_y=-1;
 static uint16_t *buffer(void *p){(void)p;return strip;}
@@ -18,8 +19,8 @@ static ksn_result source(void *p,uint16_t variant,uint16_t frame,uint16_t y,uint
 }
 static unsigned mul(unsigned a,unsigned b){return (a*b+127)/255;}
 static uint16_t expected(const ksn_draw *d,int x,int y,bool group){
-    if(x<d->bounds.x0||x>=d->bounds.x1||y<d->bounds.y0||y>=d->bounds.y1||
-       x<d->clip.x0||x>=d->clip.x1||y<d->clip.y0||y>=d->clip.y1)return 0x19ec;
+    if(x<d->clip.x0||x>=d->clip.x1||y<d->clip.y0||y>=d->clip.y1)return 0x19ec;
+    if(!d->data.image.rotation&&(x<d->bounds.x0||x>=d->bounds.x1||y<d->bounds.y0||y>=d->bounds.y1))return 0x19ec;
     // Independent pixel-center nearest-neighbor mapping, not span indexing.
     unsigned dx=(unsigned)(x-d->bounds.x0),dy=(unsigned)(y-d->bounds.y0);
     unsigned denominator=d->data.image.scale==KSN_IMAGE_2X?4:2;
@@ -28,6 +29,16 @@ static uint16_t expected(const ksn_draw *d,int x,int y,bool group){
     if(d->data.image.scale==KSN_IMAGE_STRETCH){
         sx=d->data.image.source_x+(unsigned)((2ull*dx+1)*d->data.image.source_width/(2u*(unsigned)(d->bounds.x1-d->bounds.x0)));
         sy=d->data.image.source_y+(unsigned)((2ull*dy+1)*d->data.image.source_height/(2u*(unsigned)(d->bounds.y1-d->bounds.y0)));
+    }
+    if(d->data.image.rotation){
+        double angle=d->data.image.rotation*(2*acos(-1.0)/1024);
+        double c=round(cos(angle)*16384),s=round(sin(angle)*16384);
+        double w=d->bounds.x1-d->bounds.x0,h=d->bounds.y1-d->bounds.y0;
+        double px=2*x+1-d->bounds.x0-d->bounds.x1,py=2*y+1-d->bounds.y0-d->bounds.y1;
+        double u=w*16384+px*c+py*s,v=h*16384-px*s+py*c;
+        if(u<0||v<0||u>=w*32768||v>=h*32768)return 0x19ec;
+        sx=d->data.image.source_x+(unsigned)floor(u*d->data.image.source_width/(w*32768));
+        sy=d->data.image.source_y+(unsigned)floor(v*d->data.image.source_height/(h*32768));
     }
     uint16_t rgb=color(sx,sy,d->data.image.frame);
     unsigned src[]={((rgb>>11)&31)*255/31,((rgb>>5)&63)*255/63,(rgb&31)*255/31};
@@ -127,6 +138,9 @@ int main(void){
             d.bounds=(ksn_rect){x,y,x+step,y+(step%89)+1};
             assert(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
             change=(ksn_change){.property=KSN_SET_RECT,.value.rect=d.bounds};
+            assert(app.ops->change(app.ctx,tx,ref,&change)==KSN_OK);
+            d.data.image.rotation=(uint16_t)((step*37)&1023);
+            change=(ksn_change){.property=KSN_SET_ROTATION,.value.rotation=d.data.image.rotation};
             assert(app.ops->change(app.ctx,tx,ref,&change)==KSN_OK);
             assert(app.ops->end(app.ctx,tx)==KSN_OK);
             assert(ksn_render_rects(&core,&display,&stats)==KSN_OK);verify(&d,group!=0);

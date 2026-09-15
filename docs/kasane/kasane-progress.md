@@ -4,6 +4,16 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 13d — 回転画像とdamage（2026-09-16）
+
+- 画像の中心回転とsetRotationを追加。1/1024回転・Q14正弦表で変換し、回転後の旧/新AABBを
+  damageへ含める。伸縮画像のvariant/frameを8 bitとして命令32 Bを維持する。
+  回転spanは16画素のsource blockを共用scratch内に保持。pixel scratch上限488 Bは不変。
+- H/Q ASan/UBSan・O2 PASS。独立sin/cos参照と360フレームの回転＋移動＋拡縮、
+  通常/group合成とPATCH/full一致、JSの90度PPT2比較、入力拒否、OOMを確認。
+- 通常/Kasane-only build、link監査PASS。app2,213,456 B / 1,917,584 B、
+  DIRAM137,292 B / 135,932 B。実機負荷とnative自動補間の確認は次のcheckpoint。
+
 ## checkpoint 13c — 固定sourceの矩形伸縮（2026-09-16）
 
 - setRectで画像全体の移動・拡縮・縦横比を変更できるSTRETCHを追加。

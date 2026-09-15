@@ -136,6 +136,13 @@ source座標・variant・frameは非負整数。nativeと同じcrop制限を適�
 setRect/setClip/setVisibleも使用可能。資源/source/scaleの変更はREPLACE。
 `features().image`が対応を示す。画像は現時点のcache template対象外。
 
+伸縮画像は`rotation`（時計回りdegree、既定0）と`ref.setRotation(tx,degrees)`に対応。
+矩形の中心回転、clip固定、最近傍。角度は有限の-32768..32767 degreeを受け、
+1/1024回転へ丸める。正弦はFlashのQ14表。pixel centerをこの基底の転置でsourceへ写像する。
+回転後のAABBをdamageへ含める。命令32 Bを維持するため伸縮/回転モードのvariant/frameは
+0..255（かつ資源の実範囲内）。従来の明示scaleモードは回転非対応、16 bit indexを維持する。
+`features().imageStretch/imageRotation`で確認する。自動補間の公開はCP17–18。
+
 PPT2 providerは不変bytesを登録時に検証し、128 Bの行でRGB565/straight alphaへ変換する。
 全画像をheapへ展開せず、ペット選択のglobal状態に依存しない。
 native所有者は`ksn_view_host_register_image`でAPP/SYSTEMごとに登録する。

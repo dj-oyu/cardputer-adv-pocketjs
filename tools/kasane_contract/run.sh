@@ -55,7 +55,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_text_render.c -o "$out/text"
   "$out/text"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
-    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_image_render.c -o "$out/image"
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_image_render.c -lm -o "$out/image"
   "$out/image"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Imain/pet \
     main/pet/ksn_pet.c main/pet/pet_pixels.c tools/kasane_contract/test_pet_provider.c -o "$out/pet-provider"

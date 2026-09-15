@@ -1,4 +1,5 @@
 #include "ksn_core.h"
+#include "ksn_image_transform.h"
 #include <string.h>
 
 #define KSN_REF_INDEX_BITS 7u
@@ -23,6 +24,7 @@ typedef struct {
     ksn_rgba color;
 } text_payload;
 typedef struct { uint32_t resource; uint16_t variant,frame,source_x,source_y; } image_payload;
+typedef struct { uint32_t resource; uint8_t variant,frame; uint16_t rotation; uint8_t x,y,w,h; } stretch_payload;
 
 _Static_assert(KSN_CORE_RESERVED_BYTES<=KSN_CORE_STORAGE_BYTES,"core storage budget");
 _Static_assert(sizeof(ksn_core)<=3072,"core control allocation budget");
@@ -32,6 +34,7 @@ _Static_assert(sizeof(shape_payload)<=sizeof(((ksn_command_storage *)0)->payload
 _Static_assert(sizeof(gradient_payload)<=sizeof(((ksn_command_storage *)0)->payload),"gradient payload");
 _Static_assert(sizeof(text_payload)<=sizeof(((ksn_command_storage *)0)->payload),"text payload");
 _Static_assert(sizeof(image_payload)<=sizeof(((ksn_command_storage *)0)->payload),"image payload");
+_Static_assert(sizeof(stretch_payload)==12,"stretch/rotation payload");
 
 static ksn_core_impl *impl(ksn_core *core){return &core->state;}
 static const ksn_core_impl *cimpl(const ksn_core *core){return &core->state;}
@@ -163,7 +166,12 @@ static ksn_result validate_draw(const ksn_draw *draw){
         if(draw->data.text.bytes>draw->data.text.capacity)return KSN_LIMIT;
         if((unsigned)draw->data.text.font>KSN_DISPLAY)return KSN_INVALID;
         return utf8_count(draw->data.text.utf8,draw->data.text.bytes)==SIZE_MAX?KSN_INVALID:KSN_OK;
-    case KSN_IMAGE:return draw->data.image.resource.value?KSN_OK:KSN_INVALID;
+    case KSN_IMAGE:
+        if(draw->data.image.rotation>1023||
+           (draw->data.image.rotation&&draw->data.image.scale!=KSN_IMAGE_STRETCH))return KSN_INVALID;
+        if(draw->data.image.scale==KSN_IMAGE_STRETCH&&
+           (draw->data.image.variant>255||draw->data.image.frame>255))return KSN_INVALID;
+        return draw->data.image.resource.value?KSN_OK:KSN_INVALID;
     }
     return KSN_INVALID;
 }
@@ -209,13 +217,15 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
         payload_write(&command,&payload,sizeof(payload));bank->text_used[layer]=(uint16_t)(used+capacity);break;
     }
     case KSN_IMAGE:{
+        command.flags|=(uint8_t)((unsigned)draw->data.image.scale<<KSN_IMAGE_SCALE_SHIFT);
+        if(draw->data.image.scale==KSN_IMAGE_STRETCH){
+            stretch_payload p={draw->data.image.resource.value,draw->data.image.variant,draw->data.image.frame,
+                draw->data.image.rotation,draw->data.image.source_x,draw->data.image.source_y,
+                draw->data.image.source_width-1,draw->data.image.source_height-1};
+            payload_write(&command,&p,sizeof(p));break;
+        }
         image_payload payload={draw->data.image.resource.value,draw->data.image.variant,draw->data.image.frame,
                                draw->data.image.source_x,draw->data.image.source_y};
-        if(draw->data.image.scale==KSN_IMAGE_STRETCH){
-            payload.source_x|=(uint16_t)((draw->data.image.source_width-1)<<8);
-            payload.source_y|=(uint16_t)((draw->data.image.source_height-1)<<8);
-        }
-        command.flags|=(uint8_t)((unsigned)draw->data.image.scale<<KSN_IMAGE_SCALE_SHIFT);
         payload_write(&command,&payload,sizeof(payload));break;
     }
     }
@@ -242,7 +252,8 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
             image_payload p;payload_read(command,&p,sizeof(p));
             ksn_image_scale scale=(ksn_image_scale)(command->flags>>KSN_IMAGE_SCALE_SHIFT);
             uint16_t width=0,height=0;
-            if(scale==KSN_IMAGE_STRETCH){width=(p.source_x>>8)+1;height=(p.source_y>>8)+1;p.source_x&=255;p.source_y&=255;}
+            if(scale==KSN_IMAGE_STRETCH){stretch_payload s;payload_read(command,&s,sizeof(s));
+                width=(uint16_t)s.w+1;height=(uint16_t)s.h+1;p.source_x=s.x;p.source_y=s.y;}
             result=validate_image_window(core,core->layer,(ksn_resource){p.resource},change->value.rect,
                                          p.source_x,p.source_y,scale,width,height);
             if(result!=KSN_OK)return poison(core,result);
@@ -282,11 +293,23 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
     case KSN_SET_VISIBLE:
         if(change->value.visible)command->flags|=KSN_FLAG_VISIBLE;else command->flags&=(uint8_t)~KSN_FLAG_VISIBLE;
         return KSN_OK;
+    case KSN_SET_ROTATION:{
+        if(command->kind!=KSN_IMAGE||command->flags>>KSN_IMAGE_SCALE_SHIFT!=KSN_IMAGE_STRETCH||
+           change->value.rotation>1023)return poison(core,KSN_INVALID);
+        stretch_payload p;payload_read(command,&p,sizeof(p));p.rotation=change->value.rotation;
+        payload_write(command,&p,sizeof(p));return KSN_OK;
+    }
     case KSN_SET_IMAGE_FRAME:{
         if(command->kind!=KSN_IMAGE)return poison(core,KSN_INVALID);
         image_payload p;payload_read(command,&p,sizeof(p));
         result=validate_image(core,core->layer,(ksn_resource){p.resource},change->value.image.variant,change->value.image.frame);
         if(result!=KSN_OK)return poison(core,result);
+        if(command->flags>>KSN_IMAGE_SCALE_SHIFT==KSN_IMAGE_STRETCH){
+            if(change->value.image.variant>255||change->value.image.frame>255)return poison(core,KSN_INVALID);
+            stretch_payload s;payload_read(command,&s,sizeof(s));
+            s.variant=(uint8_t)change->value.image.variant;s.frame=(uint8_t)change->value.image.frame;
+            payload_write(command,&s,sizeof(s));return KSN_OK;
+        }
         p.variant=change->value.image.variant;p.frame=change->value.image.frame;
         payload_write(command,&p,sizeof(p));return KSN_OK;
     }
@@ -560,8 +583,10 @@ ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
         draw->data.image.source_x=p.source_x;draw->data.image.source_y=p.source_y;
         draw->data.image.scale=(ksn_image_scale)(command->flags>>KSN_IMAGE_SCALE_SHIFT);
         if(draw->data.image.scale==KSN_IMAGE_STRETCH){
-            draw->data.image.source_width=(p.source_x>>8)+1;draw->data.image.source_height=(p.source_y>>8)+1;
-            draw->data.image.source_x&=255;draw->data.image.source_y&=255;
+            stretch_payload s;payload_read(command,&s,sizeof(s));
+            draw->data.image.variant=s.variant;draw->data.image.frame=s.frame;draw->data.image.rotation=s.rotation;
+            draw->data.image.source_width=(uint16_t)s.w+1;draw->data.image.source_height=(uint16_t)s.h+1;
+            draw->data.image.source_x=s.x;draw->data.image.source_y=s.y;
         }
         break;
     }
@@ -581,6 +606,8 @@ ksn_result ksn_core_image_span(const ksn_core *storage,ksn_tx ticket,bool previo
     const ksn_command_storage *command=&bank->commands[command_base(layer)+index];
     if(command->kind!=KSN_IMAGE)return KSN_INVALID;
     image_payload p;payload_read(command,&p,sizeof(p));
+    if(command->flags>>KSN_IMAGE_SCALE_SHIFT==KSN_IMAGE_STRETCH){stretch_payload s;
+        payload_read(command,&s,sizeof(s));p.variant=s.variant;p.frame=s.frame;}
     const ksn_image_entry *entry=find_image(core,layer,(ksn_resource){p.resource});
     if(!entry)return KSN_STALE;
     if(y>=entry->port.height||x>entry->port.width||count>entry->port.width-x||
@@ -591,7 +618,11 @@ ksn_result ksn_core_image_span(const ksn_core *storage,ksn_tx ticket,bool previo
 
 static uint32_t command_bands(const ksn_command_storage *command){
     if(!(command->flags&KSN_FLAG_VISIBLE)||!command->opacity)return 0;
-    int32_t x0=command->bounds.x0,x1=command->bounds.x1,y0=command->bounds.y0,y1=command->bounds.y1;
+    ksn_rect bounds=command->bounds;
+    if(command->kind==KSN_IMAGE&&command->flags>>KSN_IMAGE_SCALE_SHIFT==KSN_IMAGE_STRETCH){
+        stretch_payload p;payload_read(command,&p,sizeof(p));bounds=ksn_image_footprint(bounds,p.rotation);
+    }
+    int32_t x0=bounds.x0,x1=bounds.x1,y0=bounds.y0,y1=bounds.y1;
     if(x0<command->clip.x0)x0=command->clip.x0;
     if(x1>command->clip.x1)x1=command->clip.x1;
     if(y0<command->clip.y0)y0=command->clip.y0;
