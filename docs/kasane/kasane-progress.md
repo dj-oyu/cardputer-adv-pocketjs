@@ -4,6 +4,18 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 13c — 固定sourceの矩形伸縮（2026-09-16）
+
+- setRectで画像全体の移動・拡縮・縦横比を変更できるSTRETCHを追加。
+  source原点/extentを4 Bに格納し、命令32 B・常設DIRAMを維持。
+  強い縮小でもproviderへのspan要求を32画素以内へ分割する。
+- H/Q ASan/UBSan・O2 PASS。移動240＋伸縮360ケースのPATCH/full一致、独立画素参照、
+  offscreen・clip・alpha/group、JSの同一参照による伸縮と消去を確認。両IDFビルドPASS。
+- CP13b実機K 300ターンPASS、native12,912 B。render mean20.85 ms、modal32–35 msの
+  余裕不足は継続。`.cache/kasane-cp13-images`。この時点の実機は表情切替のみ。
+- ユーザー指定により毎frameのJS座標更新を完成形とせず、nativeの開始/終点/時間指定へ進む。
+  回転描画とCP17–18を前倒しする。自動補間・回転の実機確認は未完了。
+
 ## checkpoint 13b — JS image resourceとframe PATCH（2026-09-16）
 
 - petImage/tx.image/setImageFrameを接続。readonly metadata、APP sessionごとのnative登録重複排除、

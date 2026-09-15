@@ -25,6 +25,10 @@ static uint16_t expected(const ksn_draw *d,int x,int y,bool group){
     unsigned denominator=d->data.image.scale==KSN_IMAGE_2X?4:2;
     unsigned numerator=d->data.image.scale==KSN_IMAGE_HALF?2:1;
     unsigned sx=3+(2*dx+1)*numerator/denominator,sy=2+(2*dy+1)*numerator/denominator;
+    if(d->data.image.scale==KSN_IMAGE_STRETCH){
+        sx=d->data.image.source_x+(unsigned)((2ull*dx+1)*d->data.image.source_width/(2u*(unsigned)(d->bounds.x1-d->bounds.x0)));
+        sy=d->data.image.source_y+(unsigned)((2ull*dy+1)*d->data.image.source_height/(2u*(unsigned)(d->bounds.y1-d->bounds.y0)));
+    }
     uint16_t rgb=color(sx,sy,d->data.image.frame);
     unsigned src[]={((rgb>>11)&31)*255/31,((rgb>>5)&63)*255/63,(rgb&31)*255/31};
     // RGB565 expansion uses bit replication, not normalized multiply/divide.
@@ -82,5 +86,53 @@ int main(void){
     assert(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
     d.bounds.x1=29;d.data.image.source_x=65535;
     assert(app.ops->add(app.ctx,tx,&d,&ref)==KSN_INVALID);app.ops->abort(app.ctx,tx);
-    puts("image render PASS: independent 1x/2x/half crop, alpha/group, negative clip, frames, provider retry, overflow");
+    // Moving an image must erase its previous footprint even across clipped
+    // and fully off-screen positions. Compare PATCH with an independent full
+    // screen oracle at every step, not just the final visible image.
+    d.data.image.source_x=3;d.data.image.source_y=2;d.opacity=193;
+    d.clip=(ksn_rect){9,11,225,122};
+    for(unsigned scale=0;scale<3;scale++)for(unsigned group=0;group<2;group++){
+        d.data.image.scale=(ksn_image_scale)scale;
+        int w=scale==1?128:scale==2?32:64,h=w/2;
+        d.bounds=(ksn_rect){-w,-h,0,0};
+        assert(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
+        assert(app.ops->background(app.ctx,tx,0x183c60ff)==KSN_OK);
+        assert(app.ops->add(app.ctx,tx,&d,&ref)==KSN_OK);
+        if(group)assert(ksn_core_group(&core,KSN_APP,tx,ref,1,137)==KSN_OK);
+        assert(app.ops->end(app.ctx,tx)==KSN_OK);
+        assert(ksn_render_rects(&core,&display,&stats)==KSN_OK);verify(&d,group!=0);
+        for(int step=0;step<40;step++){
+            int x=-w+step*11,y=-h+step*6;
+            d.bounds=(ksn_rect){x,y,x+w,y+h};
+            assert(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
+            change=(ksn_change){.property=KSN_SET_RECT,.value.rect=d.bounds};
+            assert(app.ops->change(app.ctx,tx,ref,&change)==KSN_OK);
+            assert(app.ops->end(app.ctx,tx)==KSN_OK);
+            assert(ksn_render_rects(&core,&display,&stats)==KSN_OK);verify(&d,group!=0);
+            memcpy(saved,panel,sizeof(panel));ksn_core_invalidate(&core);
+            assert(ksn_render_rects(&core,&display,&stats)==KSN_OK&&!memcmp(saved,panel,sizeof(panel)));
+        }
+    }
+    d.data.image.scale=KSN_IMAGE_STRETCH;d.data.image.source_width=64;d.data.image.source_height=32;
+    for(unsigned group=0;group<2;group++){
+        d.bounds=(ksn_rect){20,12,84,44};
+        assert(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
+        assert(app.ops->background(app.ctx,tx,0x183c60ff)==KSN_OK);
+        assert(app.ops->add(app.ctx,tx,&d,&ref)==KSN_OK);
+        if(group)assert(ksn_core_group(&core,KSN_APP,tx,ref,1,137)==KSN_OK);
+        assert(app.ops->end(app.ctx,tx)==KSN_OK);
+        assert(ksn_render_rects(&core,&display,&stats)==KSN_OK);verify(&d,group!=0);
+        for(int step=1;step<=180;step++){
+            int x=step-70,y=step/4-12;
+            d.bounds=(ksn_rect){x,y,x+step,y+(step%89)+1};
+            assert(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
+            change=(ksn_change){.property=KSN_SET_RECT,.value.rect=d.bounds};
+            assert(app.ops->change(app.ctx,tx,ref,&change)==KSN_OK);
+            assert(app.ops->end(app.ctx,tx)==KSN_OK);
+            assert(ksn_render_rects(&core,&display,&stats)==KSN_OK);verify(&d,group!=0);
+            memcpy(saved,panel,sizeof(panel));ksn_core_invalidate(&core);
+            assert(ksn_render_rects(&core,&display,&stats)==KSN_OK&&!memcmp(saved,panel,sizeof(panel)));
+        }
+    }
+    puts("image render PASS: crop/scale/alpha/group/retry, 240 moving and 360 stretch PATCH/full comparisons");
 }

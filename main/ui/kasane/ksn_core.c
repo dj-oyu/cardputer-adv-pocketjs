@@ -101,12 +101,16 @@ static ksn_result validate_image(const ksn_core_impl *core,ksn_layer layer,ksn_r
     return variant<entry->port.variants&&frame<entry->port.frames?KSN_OK:KSN_INVALID;
 }
 static ksn_result validate_image_window(const ksn_core_impl *core,ksn_layer layer,ksn_resource id,
-                                       ksn_rect bounds,uint16_t x,uint16_t y,ksn_image_scale scale){
+                                       ksn_rect bounds,uint16_t x,uint16_t y,ksn_image_scale scale,
+                                       uint16_t source_width,uint16_t source_height){
     const ksn_image_entry *entry=find_image(core,layer,id);
     if(!entry)return KSN_STALE;
-    if((unsigned)scale>KSN_IMAGE_HALF)return KSN_INVALID;
+    if((unsigned)scale>KSN_IMAGE_STRETCH)return KSN_INVALID;
     uint32_t width=rect_width(bounds),height=rect_height(bounds);
-    if(scale==KSN_IMAGE_2X){
+    if(scale==KSN_IMAGE_STRETCH){
+        if(x>255||y>255||!source_width||source_width>256||!source_height||source_height>256)return KSN_INVALID;
+        width=source_width;height=source_height;
+    }else if(scale==KSN_IMAGE_2X){
         if((width|height)&1u)return KSN_INVALID;
         width/=2;height/=2;
     }else if(scale==KSN_IMAGE_HALF){width*=2;height*=2;}
@@ -173,7 +177,8 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
         result=validate_image(core,core->layer,draw->data.image.resource,draw->data.image.variant,draw->data.image.frame);
         if(result!=KSN_OK)return poison(core,result);
         result=validate_image_window(core,core->layer,draw->data.image.resource,draw->bounds,
-                                     draw->data.image.source_x,draw->data.image.source_y,draw->data.image.scale);
+                                     draw->data.image.source_x,draw->data.image.source_y,draw->data.image.scale,
+                                     draw->data.image.source_width,draw->data.image.source_height);
         if(result!=KSN_OK)return poison(core,result);
     }
     ksn_bank *bank=&core->banks[core->building_bank];ksn_layer layer=core->layer;
@@ -206,6 +211,10 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
     case KSN_IMAGE:{
         image_payload payload={draw->data.image.resource.value,draw->data.image.variant,draw->data.image.frame,
                                draw->data.image.source_x,draw->data.image.source_y};
+        if(draw->data.image.scale==KSN_IMAGE_STRETCH){
+            payload.source_x|=(uint16_t)((draw->data.image.source_width-1)<<8);
+            payload.source_y|=(uint16_t)((draw->data.image.source_height-1)<<8);
+        }
         command.flags|=(uint8_t)((unsigned)draw->data.image.scale<<KSN_IMAGE_SCALE_SHIFT);
         payload_write(&command,&payload,sizeof(payload));break;
     }
@@ -231,8 +240,11 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
         if(!valid_rect(change->value.rect))return poison(core,KSN_INVALID);
         if(command->kind==KSN_IMAGE){
             image_payload p;payload_read(command,&p,sizeof(p));
+            ksn_image_scale scale=(ksn_image_scale)(command->flags>>KSN_IMAGE_SCALE_SHIFT);
+            uint16_t width=0,height=0;
+            if(scale==KSN_IMAGE_STRETCH){width=(p.source_x>>8)+1;height=(p.source_y>>8)+1;p.source_x&=255;p.source_y&=255;}
             result=validate_image_window(core,core->layer,(ksn_resource){p.resource},change->value.rect,
-                                         p.source_x,p.source_y,(ksn_image_scale)(command->flags>>KSN_IMAGE_SCALE_SHIFT));
+                                         p.source_x,p.source_y,scale,width,height);
             if(result!=KSN_OK)return poison(core,result);
         }
         if(command->kind==KSN_ROUND_RECT){shape_payload p;payload_read(command,&p,sizeof(p));
@@ -546,7 +558,12 @@ ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
         draw->data.image.resource=(ksn_resource){p.resource};
         draw->data.image.variant=p.variant;draw->data.image.frame=p.frame;
         draw->data.image.source_x=p.source_x;draw->data.image.source_y=p.source_y;
-        draw->data.image.scale=(ksn_image_scale)(command->flags>>KSN_IMAGE_SCALE_SHIFT);break;
+        draw->data.image.scale=(ksn_image_scale)(command->flags>>KSN_IMAGE_SCALE_SHIFT);
+        if(draw->data.image.scale==KSN_IMAGE_STRETCH){
+            draw->data.image.source_width=(p.source_x>>8)+1;draw->data.image.source_height=(p.source_y>>8)+1;
+            draw->data.image.source_x&=255;draw->data.image.source_y&=255;
+        }
+        break;
     }
     default:return KSN_INVALID;
     }

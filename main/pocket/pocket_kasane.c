@@ -496,10 +496,17 @@ static JSValue js_tx_image(JSContext *ctx,JSValueConst self,int argc,JSValueCons
        !property_u16(ctx,spec,"sourceY",0,&draw.data.image.source_y,op))return JS_EXCEPTION;
     JSValue scale=JS_GetPropertyStr(ctx,spec,"scale");
     if(JS_IsException(scale))return scale;
-    double n=1;bool ok=JS_IsUndefined(scale)||(JS_IsNumber(scale)&&JS_ToFloat64(ctx,&n,scale)==0);
+    bool stretch=JS_IsUndefined(scale);
+    double n=1;bool ok=stretch||(JS_IsNumber(scale)&&JS_ToFloat64(ctx,&n,scale)==0);
     JS_FreeValue(ctx,scale);
     if(!ok||(n!=0.5&&n!=1&&n!=2))return throw_result(ctx,KSN_INVALID,op);
-    draw.data.image.scale=n==0.5?KSN_IMAGE_HALF:n==2?KSN_IMAGE_2X:KSN_IMAGE_1X;
+    draw.data.image.scale=stretch?KSN_IMAGE_STRETCH:n==0.5?KSN_IMAGE_HALF:n==2?KSN_IMAGE_2X:KSN_IMAGE_1X;
+    /* The currently exposed resource class contains only the 64x64 pet atlas.
+     * Source extents stay fixed when setRect changes the destination. */
+    uint16_t width=draw.data.image.source_x<64?64-draw.data.image.source_x:0;
+    uint16_t height=draw.data.image.source_y<64?64-draw.data.image.source_y:0;
+    if(!property_u16(ctx,spec,"sourceWidth",width,&draw.data.image.source_width,op)||
+       !property_u16(ctx,spec,"sourceHeight",height,&draw.data.image.source_height,op))return JS_EXCEPTION;
     ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
     return result==KSN_OK?expose_ref(ctx,tx,ref):throw_result(ctx,result,op);
 }
@@ -948,6 +955,8 @@ static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
     PUT(out,"gradient",JS_NewBool(ctx,true));
     PUT(out,"text",JS_NewBool(ctx,true));
     PUT(out,"image",JS_NewBool(ctx,true));
+    PUT(out,"imageStretch",JS_NewBool(ctx,true));
+    PUT(out,"imageRotation",JS_NewBool(ctx,false));
     PUT(out,"groupOpacity",JS_NewBool(ctx,true));
     PUT(out,"modal",JS_NewBool(ctx,true));
     PUT(out,"animation",JS_NewBool(ctx,false));

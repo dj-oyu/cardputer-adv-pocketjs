@@ -125,7 +125,12 @@ JS wrapperをGCしてもnative登録は残り、APP detachでまとめて失効�
 SYSTEMの資源は残す。古いwrapperを次sessionで使用するとCLOSED。
 
 `tx.image({resource, bounds, clip?, opacity?, variant?:0, frame?:0,
-sourceX?:0, sourceY?:0, scale?:1})`はDrawRefを返す。scaleは0.5/1/2のみ。
+sourceX?:0, sourceY?:0, sourceWidth?, sourceHeight?, scale?})`はDrawRefを返す。
+scale省略時は固定sourceをbounds全体へ伸縮する。sourceWidth/Height省略時は組込み画像の
+source原点から右下端までを使う。setRectで移動と連続的な拡縮・縦横比変更ができる。
+明示scaleは従来のcropモード0.5/1/2。伸縮モードのnative名はKSN_IMAGE_STRETCH。
+32 B命令を維持するため伸縮source原点は0..255、extentは1..256。
+sourceの実寸を超える範囲は拒否する。最近傍のpixel-center規則を使い、補間用画像を確保しない。
 source座標・variant・frameは非負整数。nativeと同じcrop制限を適用する。
 `ref.setImageFrame(tx, variant, frame)`でペット種と表情をPATCHする。
 setRect/setClip/setVisibleも使用可能。資源/source/scaleの変更はREPLACE。

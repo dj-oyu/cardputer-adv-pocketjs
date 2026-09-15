@@ -16,6 +16,11 @@
   let orb, meter, groupFirst, left, right, panel, title, counter, pet;
   let phase = 'app';
   let tick = 0;
+  function petBounds() {
+    const size = 24 + 2 * (60 - Math.abs(tick % 120 - 60));
+    const x = tick * 3 % 288 - 48, y = 20 + tick % 24;
+    return [x, y, x + size, y + Math.floor(size * 0.75)];
+  }
 
   // Optional input-service smoke test, independent of the legacy node API.
   // Text composition stays in the host until the SYSTEM textfield migration.
@@ -54,8 +59,17 @@
     tx.strokeRect({bounds: [10, 117, 232, 129], width: 1, color: 0x80b5cfaa});
     left = tx.instantiate(tile, {offset: [142, 28], opacity: 230});
     right = tx.instantiate(tile, {offset: [188, 72], opacity: 175});
-    pet = tx.image({resource: pets, bounds: [188, 25, 220, 57], scale: 0.5,
+    pet = tx.image({resource: pets, bounds: petBounds(), clip: [8, 20, 232, 100],
       variant: Math.floor(tick / 24) % 12, frame: Math.floor(tick / 4) % 6});
+  }
+
+  function scene(tx) {
+    base(tx);
+    if (phase === 'modal') {
+      tx.modal.open({backdrop: 'dim-live', color: 0x06101a9c, focus: 1});
+      panel = tx.rect({bounds: [40, 35, 200, 105], color: 0x397391dc, opacity: 232});
+      tx.rect({bounds: [48, 43, 192, 97], color: 0xb8efff42, opacity: 150});
+    } else tx.modal.close();
   }
 
   view.replace(base);
@@ -64,16 +78,11 @@
     const x = 12 + (tick * 3 % 184);
     const width = 12 + (tick * 5 % 208);
     if (tick === 90) {
-      view.replace(function (tx) {
-        base(tx);
-        tx.modal.open({backdrop: 'dim-live', color: 0x06101a9c, focus: 1});
-        panel = tx.rect({bounds: [40, 35, 200, 105], color: 0x397391dc, opacity: 232});
-        tx.rect({bounds: [48, 43, 192, 97], color: 0xb8efff42, opacity: 150});
-      });
       phase = 'modal';
+      view.replace(scene);
     } else if (tick === 210) {
-      view.replace(function (tx) { base(tx); tx.modal.close(); });
       phase = 'app';
+      view.replace(scene);
     } else {
       view.patch(function (tx) {
         orb.setRect(tx, [x, 76, x + 20, 96]);
@@ -83,6 +92,7 @@
         right.setVisible(tx, (tick % 40) < 31);
         title.setReveal(tx, Math.floor(tick / 6) % 11);
         counter.setText(tx, 'tick ' + tick);
+        pet.setRect(tx, petBounds());
         if ((tick % 4) === 0)
           pet.setImageFrame(tx, Math.floor(tick / 24) % 12, Math.floor(tick / 4) % 6);
         if (phase === 'modal')
@@ -93,6 +103,7 @@
       const s = view.stats();
       console.log('KASANE_TICK ' + tick + ' scope=' + view.inputScope() +
                   ' commands=' + s.displayed.commands + ' native=' + s.nativeBytes);
+      console.log('KASANE_IMAGE stretch=true moving=true clipped=true bounds=' + petBounds().join(','));
     }
     if (buttons & 0x4000) console.log('KASANE_ENTER ' + tick);
   };

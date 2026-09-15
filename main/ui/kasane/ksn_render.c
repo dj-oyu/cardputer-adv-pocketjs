@@ -53,16 +53,30 @@ static ksn_rgba image_color(uint16_t rgb,uint8_t alpha){
 }
 /* At most 16 destination pixels -> at most 31 contiguous source pixels. Half
  * scale samples pixel centers (source 1,3,...), double scale replicates 2x2. */
+static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destination){
+    /* Pixel centers, exact integer mapping. Source <=256 and dest <=65535. */
+    return (offset*source+source/2)/destination;
+}
 static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
-                             const ksn_draw *d,int x,int y,unsigned count,ksn_span_scratch *scratch){
-    unsigned dx=(unsigned)(x-d->bounds.x0),dy=(unsigned)(y-d->bounds.y0),n=count;
-    if(d->data.image.scale==KSN_IMAGE_2X){n=((dx&1u)+count+1)/2;dx/=2;dy/=2;}
-    else if(d->data.image.scale==KSN_IMAGE_HALF){n=2*count-1;dx=2*dx+1;dy=2*dy+1;}
+                             const ksn_draw *d,int x,int y,unsigned *count,ksn_span_scratch *scratch){
+    unsigned dx=(unsigned)(x-d->bounds.x0),dy=(unsigned)(y-d->bounds.y0),n=*count;
+    if(d->data.image.scale==KSN_IMAGE_2X){n=((dx&1u)+*count+1)/2;dx/=2;dy/=2;}
+    else if(d->data.image.scale==KSN_IMAGE_HALF){n=2*(*count)-1;dx=2*dx+1;dy=2*dy+1;}
+    else if(d->data.image.scale==KSN_IMAGE_STRETCH){
+        unsigned width=(unsigned)(d->bounds.x1-d->bounds.x0),start=stretch_sample(dx,d->data.image.source_width,width);
+        while(*count>1&&stretch_sample(dx+*count-1,d->data.image.source_width,width)-start>=32)(*count)--;
+        n=stretch_sample(dx+*count-1,d->data.image.source_width,width)-start+1;dx=start;
+        dy=stretch_sample(dy,d->data.image.source_height,(unsigned)(d->bounds.y1-d->bounds.y0));
+    }
     return ksn_core_image_span(core,ticket,false,layer,(uint16_t)index,
         (uint16_t)(d->data.image.source_y+dy),(uint16_t)(d->data.image.source_x+dx),
         (uint16_t)n,scratch->image.rgb,scratch->image.alpha);
 }
 static unsigned image_sample_index(const ksn_draw *d,int x,unsigned offset){
+    if(d->data.image.scale==KSN_IMAGE_STRETCH){
+        unsigned dx=(unsigned)(x-d->bounds.x0),width=(unsigned)(d->bounds.x1-d->bounds.x0);
+        return stretch_sample(dx+offset,d->data.image.source_width,width)-stretch_sample(dx,d->data.image.source_width,width);
+    }
     if(d->data.image.scale==KSN_IMAGE_HALF)return 2*offset;
     if(d->data.image.scale==KSN_IMAGE_2X)return (((unsigned)(x-d->bounds.x0)&1u)+offset)/2;
     return offset;
@@ -194,9 +208,9 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
                 if(left<d->clip.x0)left=d->clip.x0;
                 if(right>d->bounds.x1)right=d->bounds.x1;
                 if(right>d->clip.x1)right=d->clip.x1;
-                for(int x=left;x<right;x+=16){
+                for(int x=left;x<right;){
                     unsigned n=(unsigned)(right-x);if(n>16)n=16;
-                    result=image_read(core,ticket,layer,i,d,x,py,n,scratch);
+                    result=image_read(core,ticket,layer,i,d,x,py,&n,scratch);
                     if(result!=KSN_OK)return result;
                     for(unsigned j=0;j<n;j++){
                         unsigned source=image_sample_index(d,x,j),dest=(unsigned)(x-x0)+j;
@@ -204,6 +218,7 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
                             scratch->image.alpha[source]),d->opacity);
                         if(has_dither&&alpha==255)dither_pixels[dest>>5]&=~(1u<<(dest&31));
                     }
+                    x+=(int)n;
                 }
                 continue;
             }
@@ -315,15 +330,16 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                 continue;
             }
             if(d->kind==KSN_IMAGE){
-                for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=16){
+                for(int py=y0;py<y1;py++)for(int x=x0;x<x1;){
                     unsigned count=(unsigned)(x1-x);if(count>16)count=16;
-                    result=image_read(core,frame.ticket,(ksn_layer)layer,i,d,x,py,count,&scratch);
+                    result=image_read(core,frame.ticket,(ksn_layer)layer,i,d,x,py,&count,&scratch);
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     for(unsigned j=0;j<count;j++){
                         unsigned source=image_sample_index(d,x,j),index=(unsigned)((py-y)*240+x)+j;
                         pixels[index]=blend(pixels[index],image_color(scratch.image.rgb[source],scratch.image.alpha[source]),
                                             d->opacity,false,x+(int)j,py);
                     }
+                    x+=(int)count;
                 }
                 continue;
             }

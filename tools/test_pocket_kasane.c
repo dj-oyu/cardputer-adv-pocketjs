@@ -616,7 +616,7 @@ static void image_tests(void){
     check(run("globalThis.asset=kasane.petImage();globalThis.sprite=null;"
               "if(!kasane.features().image||asset.width!==64||asset.frames!==6||asset.variants!==12)throw Error('metadata');"
               "for(let i=0;i<100;i++)kasane.petImage();"
-              "kasane.replace(tx=>{tx.background(255);sprite=tx.image({resource:asset,bounds:[0,0,64,64]})});"),
+              "kasane.replace(tx=>{tx.background(255);sprite=tx.image({resource:asset,bounds:[0,0,64,64],clip:[0,0,240,135]})});"),
           "JS exposes a borrowed image and repeated handles");
     check(present(&stats)==KSN_OK,"JS image presents");
     bool pixels=true;uint16_t rgb[64];uint8_t alpha[64];
@@ -641,6 +641,23 @@ static void image_tests(void){
         for(unsigned x=0;x<64;x++)if(panel_pixels[y*240+x]!=image_over_black(rgb[x],alpha[x]))pixels=false;
     }
     check(pixels,"repaired image uses submitted mood");
+    for(unsigned size=1;size<=135;size+=7){
+        char js[160];
+        /* Signed formatting is important for the one-pixel destination. */
+        snprintf(js,sizeof(js),"kasane.patch(tx=>sprite.setRect(tx,[-3,7,%d,%d]));",(int)size-3,(int)size+7);
+        check(run(js)&&present(&stats)==KSN_OK,"JS setRect stretches the same source without REPLACE");
+        pixels=true;
+        for(unsigned y=0;y<135;y++)for(unsigned x=0;x<240;x++){
+            uint16_t want=0;
+            if((int)x<(int)size-3&&y>=7&&y<size+7){
+                unsigned sx=(unsigned)((2ull*(x+3)+1)*64/(2*size));
+                unsigned sy=(unsigned)((2ull*(y-7)+1)*64/(2*size));
+                port.read_span(port.ctx,11,5,sy,sx,1,rgb,alpha);want=image_over_black(rgb[0],alpha[0]);
+            }
+            if(panel_pixels[y*240+x]!=want)pixels=false;
+        }
+        check(pixels,"stretched image and old footprint match pixel-center reference");
+    }
     check(run("for(const bad of [{variant:12},{frame:6},{sourceX:33,scale:0.5},{scale:3},{sourceY:-1},{resource:{}},"
               "{get sourceX(){throw Error('getter')}}]){let failed=false;try{kasane.replace(tx=>{"
               "try{tx.image(Object.assign({resource:asset,bounds:[0,0,32,32]},bad))}catch(e){};"
