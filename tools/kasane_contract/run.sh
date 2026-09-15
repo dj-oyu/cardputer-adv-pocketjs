@@ -125,6 +125,14 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
     tools/kasane_contract/test_blend_lut.c -o "$out/blend-lut"
   "$out/blend-lut"
+  # The same table with the coarse 255 -> 256 arm forced on (KSN_SCALE256_ARM=1,
+  # see docs/perf/kasane-alpha256.md): a row has to be built from the arm that is
+  # running, so the solid arm must still move nothing. Without the switch in
+  # blend_lut_build_row this arm reports the coarse chain's own one-step error.
+  cc -std=c11 -Wall -Wextra -Werror $options -DKSN_SCALE256_ARM=1 -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
+    tools/kasane_contract/test_blend_lut.c -o "$out/blend-lut-coarse"
+  "$out/blend-lut-coarse"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_modal.c \
     tools/kasane_contract/test_composition.c -o "$out/composition"
@@ -143,6 +151,12 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
 done
 python3 tools/pie/test_frost.py
 python3 tools/kasane_contract/fill_pie.py
+# Boundary 4a's coarse 255 -> 256 arm (g_ksn_scale256, default 0 = the exact
+# path). The model flips the switch inside one binary and renders 120 frames
+# through the real ksn_render_rects, so the moved pixels and the worst step are
+# measured rather than asserted; the exact arm is checked against the pre-change
+# reference over the whole domain (0 differences).
+python3 tools/pie/run_models.py scale256
 # Measured, not estimated: -finstrument-functions counts entries into the pixel
 # predicate and into the row solver, so this arm prints the before/after call
 # counts per frame (see the reporter in test_coverage_runs.c).
