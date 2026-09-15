@@ -79,7 +79,9 @@ CP8実機確認済み。CP9 native TEXTのH/Qと両ビルドが完了し、実�
 CP9実機比較もPASS。CP10 JS TEXTのQ/両ビルド/実機100回起動が完了。
 CP11 hello/scene helperのhost試験、両ビルドと実機100回起動が完了。
 CP12 native IMAGEのH/Qと両ビルド・実機比較が完了。
-CP13a PPT2 provider、CP13b JS resourceのH/Q・両ビルドが完了。実機確認後はCP14 SYSTEM。
+CP13a/bの実機確認後、CP13c/dの伸縮・回転とCP17a/bの自動補間・座標加算化を前倒しした。
+CP14aはSystem電源state/購読と既存JS経路の抽出まで実装。次は時計・通知・recordingの
+SYSTEM表示。CP17/18の待機期限・電源policy統合は残る。
 scope別購読とmodal Back配送はCP15で扱う。
 数値と検証範囲は[kasane-progress.md](kasane-progress.md)の各checkpointを参照。
 

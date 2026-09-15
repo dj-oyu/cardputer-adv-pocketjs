@@ -15,6 +15,15 @@
   refresh合流、stale/枯渇、2 JS listener、例外、nativeとの共存、30 session終了を検査。
 - 通常/Kasane-onlyのC実装build PASS。DIRAM137,452 / 136,092 B、いずれも直前から+128 B。
   実機の2購読・繰り返し起動検証をK診断へ追加。
+- 最新K診断を含む両buildとKasane-only link監査PASS。実機300ターンで2購読の初回配送、
+  アニメーション・modal往復を確認。turn3.71 / render46.05 / send6.12 ms。
+  `.cache/kasane-cp14-power/serial.log`。描画30 Hzの性能未達は引き続き別課題。
+- 実機100回の2購読初回配送・終了PASS。終了後free240,740 B / largest65,536 Bが全回一定。
+  `.cache/kasane-cp14-power-cycles`。再起動後2回でも同値（`-cold` / `-early`）。
+  以前のlargest120,832 Bとの差は未解決。今回のbootでは電源診断前のhome overlay終了時に
+  既にfree240,916 B / largest69,632 Bであり、差全体をこの変更に帰属させない。
+  初回使用時の永続確保・配置とhome overlayを切り分ける必要がある。
+  反復リークなしは確認したが、大きな連続確保の安全性を達成済みとはしない。
 - 時計・通知レコード・recordingのSYSTEM表示とdeadline待機統合は未完了。
   CP14全体の完了ではなく、共通状態の最初の実経路として電源を接続した段階。
 
