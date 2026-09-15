@@ -35,6 +35,11 @@ uint16_t *board_strip(void) { return shared; }
 // ONE binary: the same kernel moves 15% between builds from instruction-cache
 // alignment alone (CLAUDE.md), and this change is smaller than that.
 int g_board_async = 1;
+// TEMPORARY A/B switch inside the queued path: 1 = byte-swap straight into the
+// panel buffer that is not in flight (one pass, `shared` left as drawn), 0 = swap
+// `shared` in place and memcpy it across, as 7fd965f shipped. Same pixels on the
+// wire either way; one binary for the same reason as g_board_async.
+int g_board_swap_into = 1;
 // The panel's own copies. `shared` stays the one buffer every screen draws into
 // (17 call sites hold that pointer for a whole frame), so the asynchronous path
 // COPIES a strip here instead of handing the caller a second buffer: 3,840 bytes
@@ -109,8 +114,10 @@ static esp_err_t kread(uint8_t reg, uint8_t *value) {
 // bytes and only enables this one if they agree exactly.
 static bool pie_swap;
 
-static void __attribute__((noinline)) swap_pie(uint16_t *pixels, unsigned blocks) {
-    uint16_t *out=pixels;
+// `in` and `out` may be the same buffer (the blocking path swaps in place) or
+// two different aligned buffers (the queued path swaps straight into the panel's
+// own copy): each block is loaded whole before either half is stored.
+static void __attribute__((noinline)) swap_pie(uint16_t *in, uint16_t *out, unsigned blocks) {
     __asm__ volatile(
         "loopgtz %2, 1f\n"
         "  ee.vld.128.ip q0, %0, 16\n"
@@ -120,23 +127,27 @@ static void __attribute__((noinline)) swap_pie(uint16_t *pixels, unsigned blocks
         "  ee.vst.128.ip q1, %1, 16\n"
         "  ee.vst.128.ip q0, %1, 16\n"
         "1:\n"
-        : "+a"(pixels), "+a"(out)
+        : "+a"(in), "+a"(out)
         : "a"(blocks)
         : "memory");
 }
 
-static void swap_scalar(uint16_t *pixels, int count) {
-    for(int i=0;i<count;i++) pixels[i]=(uint16_t)((pixels[i]<<8)|(pixels[i]>>8));
+static void swap_scalar(uint16_t *out, const uint16_t *in, int count) {
+    for(int i=0;i<count;i++) out[i]=(uint16_t)((in[i]<<8)|(in[i]>>8));
 }
 
 // 32 pixels is 64 bytes, two of the 32-byte blocks the vector loop consumes.
+// Both spellings the transfer uses are checked: in place, and into another buffer.
 static bool swap_agrees(void) {
     static uint16_t reference[32] __attribute__((aligned(16)));
     static uint16_t vectored[32]  __attribute__((aligned(16)));
+    static uint16_t copied[32]    __attribute__((aligned(16)));
     for(int i=0;i<32;i++) reference[i]=vectored[i]=(uint16_t)(i*2477u+0x1234u);
-    swap_scalar(reference,32);
-    swap_pie(vectored,sizeof(vectored)/32);
-    return memcmp(reference,vectored,sizeof(reference))==0;
+    swap_pie(vectored,copied,sizeof(vectored)/32);
+    swap_scalar(reference,reference,32);
+    swap_pie(vectored,vectored,sizeof(vectored)/32);
+    return memcmp(reference,vectored,sizeof(reference))==0 &&
+           memcmp(reference,copied,sizeof(reference))==0;
 }
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b) {
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
@@ -366,28 +377,43 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     // at -Os, where the four-byte memcpy that expresses an aligned wide access
     // stayed a call and the transfer went from 16.5 ms to 24.2 ms.
     int count=LCD_W*rows;
-    if(pie_swap) swap_pie(pixels,(unsigned)(count*2/32));
-    else swap_scalar(pixels,count);
-    // THE PIPELINE. The strip queued on the previous call has been going out
-    // during everything above (~440 us of SPI against ~2.2 ms of drawing and
-    // layout), so its result is reaped here: one transfer in flight at a time,
-    // which is what the device's queue_size=1 allows and all this needs. Then
-    // the strip just drawn -- already byte-swapped above, once, where it has
-    // always been -- is copied into the panel's own buffer and queued.
-    esp_err_t e = tx_reap();
-    if (e == ESP_OK && g_board_async) {
-        size_t bytes = (size_t)LCD_W * rows * 2;
-        // DC high: these bytes are pixel data and not a command. tx() is the
-        // only other place that touches the line and it cannot be used here,
-        // because it would block on the transfer this path exists to overlap.
-        gpio_set_level(34, 1);
-        memcpy(tx_buf[tx_front], pixels, bytes);
-        tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = tx_buf[tx_front]};
-        e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
-        tx_inflight = (e == ESP_OK);
-        tx_front ^= 1;
-    } else if (e == ESP_OK) {
-        e = tx(true, pixels, (size_t)LCD_W * rows * 2);
+    size_t bytes = (size_t)LCD_W * rows * 2;
+    esp_err_t e;
+    if (g_board_async) {
+        // THE PIPELINE. The strip queued on the previous call has been going out
+        // during everything above (~440 us of SPI against ~2.2 ms of drawing and
+        // layout). The panel buffer that is NOT in flight is tx_buf[tx_front], so
+        // the swap writes straight into it while that transfer is still going:
+        // the swap and the copy are one pass, and neither waits for the wire.
+        // `shared` is left as drawn. Then the previous result is reaped (one
+        // transfer in flight at a time, which is what queue_size=1 allows) and
+        // this strip is queued.
+        uint16_t *panel = tx_buf[tx_front];
+        if (g_board_swap_into) {
+            if(pie_swap) swap_pie(pixels,panel,(unsigned)(count*2/32));
+            else swap_scalar(panel,pixels,count);
+        } else {
+            // The A/B arm: swap in place, then copy, the way 7fd965f shipped it.
+            if(pie_swap) swap_pie(pixels,pixels,(unsigned)(count*2/32));
+            else swap_scalar(pixels,pixels,count);
+            memcpy(panel, pixels, bytes);
+        }
+        e = tx_reap();
+        if (e == ESP_OK) {
+            // DC high: these bytes are pixel data and not a command. tx() is the
+            // only other place that touches the line and it cannot be used here,
+            // because it would block on the transfer this path exists to overlap.
+            gpio_set_level(34, 1);
+            tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+            e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+            tx_inflight = (e == ESP_OK);
+            tx_front ^= 1;
+        }
+    } else {
+        if(pie_swap) swap_pie(pixels,pixels,(unsigned)(count*2/32));
+        else swap_scalar(pixels,pixels,count);
+        e = tx_reap();
+        if (e == ESP_OK) e = tx(true, pixels, bytes);
     }
     // Where the pointer lands once these rows are in. At the bottom of the
     // window it wraps to the window's own top, which is only row 0 when this

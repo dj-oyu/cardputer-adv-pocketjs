@@ -20,6 +20,9 @@ uint16_t *board_strip(void);
 // 0 = the blocking polling transfer this file has always used. Both paths live in
 // one binary so a later A/B measures the path and not the code placement.
 extern int g_board_async;
+// TEMPORARY A/B switch (see board.c): 1 = the queued path swaps straight into the
+// panel buffer, 0 = swap in place and memcpy.
+extern int g_board_swap_into;
 esp_err_t board_present(int y, int rows, uint16_t *pixels);
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 void board_capture(bool enabled);
