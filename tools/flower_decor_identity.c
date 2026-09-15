@@ -10,6 +10,7 @@
 // 1..255 (two layouts and the dissolve), mix>=256 and old_seed==seed (the plain
 // garden_row path), over 120 frames of animation.
 #include "../main/scene/garden.c"
+#include "../main/scene/canopy_pie.c"
 #include <stdio.h>
 
 // Only used when the harness is built with -DGARDEN_COUNT_PROFILE: how many
@@ -27,6 +28,10 @@ int main(void) {
     if (getenv("OLD")) { g_garden_decor_gate = 0; g_garden_scalar_tweaks = 0; }
     if (getenv("GATE0")) g_garden_decor_gate = 0;
     if (getenv("TWEAK0")) g_garden_scalar_tweaks = 0;
+    // PIE0 runs the scalar canopy loop; the default runs the eight-lane model the
+    // kernel in scene/canopy_pie.c is checked against. Exact arithmetic either way,
+    // so this arm has to come out byte for byte identical.
+    if (getenv("PIE0")) g_garden_canopy_pie = 0;
     for (int w = 0; w < 16; w++) garden_prepare(&g, w * 0.04f);
     for (int fr = 0; fr < 120; fr++) {
         garden_prepare(&g, fr * 0.37f);

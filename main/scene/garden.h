@@ -414,4 +414,5 @@ extern int g_garden_decor_gate;
 // TEMPORARY, same block: the A/B switch for the two exact scalar tweaks (the
 // unsigned support test in the decor loop and the canopy's f==0 short circuit).
 extern int g_garden_scalar_tweaks;
+extern int g_garden_canopy_pie;
 #endif

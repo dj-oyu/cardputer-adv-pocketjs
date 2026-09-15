@@ -54,6 +54,7 @@
 // that have to happen anyway.
 #include <stdint.h>
 #include <stddef.h>
+#include "canopy_pie.h"
 
 // The scalar statement, kept here so the kernel and its reference cannot drift:
 // this is garden_canopy_row with the A/B switch removed (a caller-side choice).
@@ -104,7 +105,7 @@ canopy_broadcast(const int16_t *k,int16_t *kv,int nk) {
 // the head and tail scalar, and only calls this with |x - cx| <= rx inside.
 // `x0` is the x of row[0], because dx = x - cx and the lane vector has to know
 // where in the row it is.
-static void __attribute__((noinline))
+void __attribute__((noinline))
 canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
     int16_t k[16] __attribute__((aligned(4))) = {
         (int16_t)(-cx),                  /* dx = x - cx */
@@ -195,10 +196,37 @@ canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
         : "memory");
 }
 #else
-// Host builds take the scalar path, so anything that includes this file still
-// works off-device and the model keeps being the only arithmetic in play.
-static void __attribute__((unused))
+// Host builds take the lane model in C: the same eight-lane arithmetic, the same
+// order, with the SAR shifts written as shifts. It is not a copy of the scalar
+// reference -- it is the thing piesim checks the assembly against in
+// tools/pie/test_kernels.py, so the byte comparison the harness makes on the host
+// is a statement about the kernel and not about a different program.
+void __attribute__((unused))
 canopy_pie(uint16_t *row,int n,int cx,int mrr,int qy,uint16_t leafy,int x0) {
-    canopy_scalar(row,x0,x0+n*8-1,cx,mrr,qy,leafy);
+    int mhi=(mrr>>8)*16, mlo=mrr&255, qbase=256-qy;
+    int lr=(leafy>>11)&31, lg=(leafy>>5)&63, lb=leafy&31;
+    for(int b=0;b<n;b++) {
+        int16_t dx2[8],q[8],f[8],g[8],r5[8],g6[8],b5[8],o[8];
+        for(int i=0;i<8;i++){ int dx=(x0+b*8+i)-cx; dx2[i]=(int16_t)(dx*dx); }
+        for(int i=0;i<8;i++){                       /* the two accumulator passes */
+            int64_t acc=(int64_t)dx2[i]*mlo + (int64_t)(dx2[i]*16)*mhi;
+            int t=(int)(acc>>18);
+            int qq=qbase-t; if(qq<0)qq=0;           /* VRELU in place */
+            q[i]=(int16_t)qq;
+            f[i]=(int16_t)((q[i]*39322)>>16);
+            g[i]=(int16_t)(256-f[i]);
+        }
+        for(int i=0;i<8;i++) {
+            unsigned w=row[b*8+i];          /* the pointer is the block's first pixel */
+            r5[i]=(int16_t)((w>>11)&31);
+            g6[i]=(int16_t)((w>>5)&63);
+            b5[i]=(int16_t)(w&31);
+            int r=(((r5[i]-lr)*g[i])>>8)+lr;        /* VMUL.S16 at SAR 8 */
+            int gg=(((g6[i]-lg)*g[i])>>8)+lg;
+            int bb=(((b5[i]-lb)*g[i])>>8)+lb;
+            o[i]=(int16_t)(r*2048+gg*32+bb);        /* the packing shifts, ORQ */
+            row[b*8+i]=(uint16_t)o[i];
+        }
+    }
 }
 #endif
