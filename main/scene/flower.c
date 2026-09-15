@@ -451,6 +451,50 @@ static int clampi(int x,int lo,int hi) { return x<lo?lo:x>hi?hi:x; }
 static inline int ifloor(float x) { int t=(int)x;return t-(x<0.0f&&(float)t!=x); }
 static inline int iceil (float x) { int t=(int)x;return t+(x>0.0f&&(float)t!=x); }
 #endif
+// The fixed-point square root. Q16 in, Q8 out -- the classic pair, because the
+// integer square root of a 16.16 value is an 8.8 value -- and it exists to be
+// looked at before it is believed: sqrtf() on this part is an 88-instruction
+// software routine behind a two-level call, measured at 154 cycles a call with
+// 4,010 calls a frame (2.1 ms, 6% of the frame, the largest single named cost in
+// the scene). This costs ~16 shift/compare/subtract steps and no float.
+//
+// The error is the price: FLOWER_SQRT_BITS fractional bits out of a Q2B input,
+// so at most 1/(2^B) absolute on a root that is typically 0.3..3 here -- ~1%
+// relative on the smallest roots at B=8, ~0.2% at B=10, for the same 16 loop
+// steps. The ellipsoid path feeds the root straight into the depth test, which
+// is where the error can flip a pixel's visibility, so the picture is compared,
+// not argued about (tools/flower_frame_dump.c): at B=8, 0.0..0.2% of the pixels
+// of a frame differ, 1..3 of them by a lot (the flip), everything else by <=33
+// of 255; at B=10 see docs/flower-decor-cost.md.
+#ifndef FLOWER_SQRT_BITS
+#define FLOWER_SQRT_BITS 8
+#endif
+static inline float flower_isqrt_q(float d) {
+    if (d <= 0.0f) return 0.0f;
+    // The range check comes BEFORE the cast: d * 2^2B is a float, and casting a
+    // float above UINT32_MAX to uint32_t is undefined -- measured at B=12,
+    // before this line existed, the wrap produced a small x for large d and the
+    // image had 6x the differing pixels of B=8 for 16x the precision. The
+    // threshold is the largest float below 2^32, so every d that would overflow
+    // takes sqrtf() instead.
+    float scaled = d * (float)(1u << (2 * FLOWER_SQRT_BITS));
+    if (!(scaled < 4294000000.0f)) return sqrtf(d);
+    uint32_t x = (uint32_t)(scaled + 0.5f);
+    if (x > 0x3FFFFFFFu) return sqrtf(d);      // out of the scene's range: not this path's call
+    uint32_t rem = x, root = 0, bit = 1u << 30;
+    while (bit > rem) bit >>= 2;
+    while (bit) {
+        if (rem >= root + bit) { rem -= root + bit; root = (root >> 1) + bit; }
+        else root >>= 1;
+        bit >>= 2;
+    }
+    return (float)root * (1.0f / (float)(1u << FLOWER_SQRT_BITS));
+}
+#ifdef FLOWER_FIXED_SQRT
+#define FLOWER_SQRT(d) flower_isqrt_q(d)
+#else
+#define FLOWER_SQRT(d) sqrtf(d)
+#endif
 static uint16_t rgb(int r,int g,int b) {
     return (uint16_t)((clampi(r,0,255)>>3)<<11 |
                       (clampi(g,0,255)>>2)<<5 | (clampi(b,0,255)>>3));
@@ -1169,7 +1213,7 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
 #ifdef FLOWER_BELL_CHECK
             saw_root=true;if(!rejected)bell_discs++;   /* the shipping build never walks a rejected visit */
 #endif
-            float sd=sqrtf(disc);
+            float sd=FLOWER_SQRT(disc);
 #ifdef ESP_PLATFORM
             PROF_FENCE;prof_div+=esp_cpu_get_cycle_count()-bs;prof_divn++;PROF_FENCE;
 #endif
@@ -1361,7 +1405,7 @@ static void ray_row(uint16_t *row,int y) {
 #ifdef ESP_PLATFORM
             PROF_FENCE;uint32_t s0=esp_cpu_get_cycle_count();PROF_FENCE;
 #endif
-            float root=sqrtf(d);
+            float root=FLOWER_SQRT(d);
 #ifdef ESP_PLATFORM
             PROF_FENCE;prof_sqrt+=esp_cpu_get_cycle_count()-s0;prof_sqrtn++;PROF_FENCE;
 #endif
