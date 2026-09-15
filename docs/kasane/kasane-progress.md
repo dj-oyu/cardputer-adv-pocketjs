@@ -4,6 +4,19 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 10 — JS TEXTと固定容量PATCH（2026-09-15）
+
+- tx.text、DrawRef.setText/setReveal、features.textを公開。既存setterと同じtransaction原子性。
+  文字はcall中にnative bankへコピーし、変換用文字列を成功/失敗とも解放する。
+  UTF-16長の事前上限で変換の一時領域もbounded。詳細はdesign-api.md参照。
+- Q ASan/UBSan・O2 PASS。実QuickJSとbuiltin coverage rendererを結線し、UTF-8/scalar reveal、
+  空文字、予約容量、孤立サロゲート、NUL/改行、stale ref、getter例外、OOM各点、300回更新を確認。
+  guestの生存確保数・native予約が増えず、guest/native終了で全解放。mapped日本語はCP9で検証。
+- 通常/診断ESP-IDFビルドPASS、app2,201,840 B / 1,905,888 B。
+  DIRAM137,276 B / 135,916 B、常設増分0。Kasane-only link監査PASS。
+- K診断へ日本語のrevealとtick文字列PATCHを追加。実機結果は後記。
+  次はCP11のhello移植・表示確定後の参照昇格helper。
+
 ## checkpoint 9 — native TEXT coverage（2026-09-15）
 
 - native view/rendererがTEXTを受理し、通常合成・隔離groupともcoverageを色alphaへ乗算。
@@ -19,6 +32,11 @@
   DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。
 - native probeにFlash字形144画素の比較と3書体のcaptureを追加。実機結果は後記。
   JS text APIはCP10。全文字の描画時間・全UI併用時のメモリ安全性を確認済みとはしない。
+- `8872011`をpush後、Kasane-onlyでCOM3実機確認PASS。`device_probe.py`の文字144画素比較、
+  3書体capture、既存合成/PIE/600フレームfrost試験を通過。
+  frostはmean20.052 ms/p95 20.259 ms、deadline miss0、heap241,092 B・最大連続空き69,632 Bが一定、
+  stack high-water21,484 B。文字の連続負荷計測ではない。`.cache/kasane-cp9-native`へ保存。
+  text-pre-spi.pngで日本語・半透明caption・2倍displayを確認。LCD読戻しではない。
 
 ## checkpoint 5 — input service分離（2026-09-15）
 

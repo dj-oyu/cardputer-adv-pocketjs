@@ -6,6 +6,7 @@ OUT=${OUT:-/tmp/test-pocket-kasane}
 TEST_SOURCE=${TEST_SOURCE:-tools/test_pocket_kasane.c}
 CACHE=${CACHE:-/tmp/qjs-kasane-host}
 mkdir -p "$CACHE"
+python3 tools/make_font.py "$CACHE"
 # Match the shipping VM path. Keep this cache separate from harnesses with
 # different defines, and invalidate it on header or build-script changes.
 DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1"
@@ -19,7 +20,9 @@ done
 gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Werror \
   -fno-omit-frame-pointer \
   -I "$QJS" -I tools/hostshim -I main -I main/pocket -I main/ui -I main/ui/kasane \
+  -I main/text -I main/hal -I "$CACHE" \
   "$TEST_SOURCE" tools/hostshim/pocket_api_stub.c \
+  main/text/ksn_font.c tools/hostshim/jpfont.c \
   main/pocket/pocket_kasane.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
   main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \

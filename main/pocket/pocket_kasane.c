@@ -411,14 +411,7 @@ static JSValue js_tx_background(JSContext *ctx, JSValueConst self, int argc,
     return result==KSN_OK?JS_UNDEFINED:throw_result(ctx,result,"kasane.background");
 }
 
-static JSValue js_tx_primitive(JSContext *ctx, JSValueConst self, int argc,
-                               JSValueConst *argv,ksn_kind kind,const char *op) {
-    ksn_tx tx=tx_from(ctx,self,op);
-    if(!tx.value) return JS_EXCEPTION;
-    ksn_draw draw={0};
-    if(!parse_primitive(ctx,argc?argv[0]:JS_UNDEFINED,kind,&draw,op)) return JS_EXCEPTION;
-    ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
-    if(result!=KSN_OK) return throw_result(ctx,result,op);
+static JSValue expose_ref(JSContext *ctx,ksn_tx tx,ksn_ref ref) {
     ref_slot *slot=claim_ref(ctx,ref,tx);
     if(!slot) { ksn_view_cancel(view(),tx); discard_candidates(tx); return JS_EXCEPTION; }
     JSValue object=wrap_direct(ctx,ref_class,slot->handle);
@@ -426,6 +419,62 @@ static JSValue js_tx_primitive(JSContext *ctx, JSValueConst self, int argc,
         *slot=(ref_slot){0};ksn_view_cancel(view(),tx);discard_candidates(tx);
     }
     return object;
+}
+
+static JSValue js_tx_primitive(JSContext *ctx, JSValueConst self, int argc,
+                               JSValueConst *argv,ksn_kind kind,const char *op) {
+    ksn_tx tx=tx_from(ctx,self,op);
+    if(!tx.value) return JS_EXCEPTION;
+    ksn_draw draw={0};
+    if(!parse_primitive(ctx,argc?argv[0]:JS_UNDEFINED,kind,&draw,op)) return JS_EXCEPTION;
+    ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
+    return result==KSN_OK?expose_ref(ctx,tx,ref):throw_result(ctx,result,op);
+}
+
+/* Bound conversion before QuickJS allocates UTF-8 storage (at most 384 bytes
+ * plus its string header). Core rejects lone surrogates and control scalars. */
+static const char *text_string(JSContext *ctx,JSValueConst value,uint16_t *bytes,const char *op){
+    if(!JS_IsString(value)){throw_result(ctx,KSN_INVALID,op);return NULL;}
+    int64_t units;
+    if(JS_GetLength(ctx,value,&units)<0)return NULL;
+    if(units>128){throw_result(ctx,KSN_LIMIT,op);return NULL;}
+    size_t length;const char *text=JS_ToCStringLen(ctx,&length,value);
+    if(!text)return NULL;
+    if(length>128){JS_FreeCString(ctx,text);throw_result(ctx,KSN_LIMIT,op);return NULL;}
+    *bytes=(uint16_t)length;return text;
+}
+
+static JSValue js_tx_text(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="kasane.text";ksn_tx tx=tx_from(ctx,self,op);
+    if(!tx.value)return JS_EXCEPTION;
+    JSValueConst spec=argc?argv[0]:JS_UNDEFINED;ksn_draw draw={0};
+    if(!parse_draw_base(ctx,spec,&draw,op)||
+       !property_color(ctx,spec,"color",&draw.data.text.color,op))return JS_EXCEPTION;
+    draw.kind=KSN_TEXT;draw.data.text.font=KSN_BODY;
+    JSValue font=JS_GetPropertyStr(ctx,spec,"font");
+    if(JS_IsException(font))return font;
+    if(!JS_IsUndefined(font)){
+        uint16_t bytes=0;const char *name=text_string(ctx,font,&bytes,op);
+        if(!name){JS_FreeValue(ctx,font);return JS_EXCEPTION;}
+        bool valid=true;
+        if(bytes==7&&!memcmp(name,"caption",7))draw.data.text.font=KSN_CAPTION;
+        else if(bytes==4&&!memcmp(name,"body",4))draw.data.text.font=KSN_BODY;
+        else if(bytes==7&&!memcmp(name,"display",7))draw.data.text.font=KSN_DISPLAY;
+        else valid=false;
+        JS_FreeCString(ctx,name);JS_FreeValue(ctx,font);
+        if(!valid)return throw_result(ctx,KSN_INVALID,op);
+    }else JS_FreeValue(ctx,font);
+    JSValue value=JS_GetPropertyStr(ctx,spec,"text");
+    if(JS_IsException(value))return value;
+    const char *text=text_string(ctx,value,&draw.data.text.bytes,op);JS_FreeValue(ctx,value);
+    if(!text)return JS_EXCEPTION;
+    draw.data.text.utf8=text;
+    uint8_t capacity=draw.data.text.bytes?draw.data.text.bytes:1;
+    if(!property_u8(ctx,spec,"capacity",capacity,&capacity,op)){JS_FreeCString(ctx,text);return JS_EXCEPTION;}
+    draw.data.text.capacity=capacity;
+    ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
+    JS_FreeCString(ctx,text);
+    return result==KSN_OK?expose_ref(ctx,tx,ref):throw_result(ctx,result,op);
 }
 
 #define PRIMITIVE(name,kind,op) \
@@ -495,6 +544,17 @@ static JSValue change_ref(JSContext *ctx, JSValueConst self, int argc,
         if(argc<2||!parse_u32(ctx,argv[1],&change.value.color))
             return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                     "color must be an RRGGBBAA uint32",false,NULL);
+    } else if(property==KSN_SET_TEXT) {
+        const char *text=text_string(ctx,argc>1?argv[1]:JS_UNDEFINED,&change.value.text.bytes,op);
+        if(!text)return JS_EXCEPTION;
+        change.value.text.utf8=text;
+        ksn_result result=ksn_view_change(view(),tx,slot->ref,&change);
+        JS_FreeCString(ctx,text);
+        return result==KSN_OK?JS_UNDEFINED:throw_result(ctx,result,op);
+    } else if(property==KSN_SET_REVEAL) {
+        double n;
+        if(argc<2||!number_in(ctx,argv[1],0,128,&n))return throw_result(ctx,KSN_INVALID,op);
+        change.value.reveal=(uint16_t)n;
     } else {
         if(argc<2||!JS_IsBool(argv[1]))
             return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
@@ -513,6 +573,8 @@ REF_SETTER(js_ref_rect,KSN_SET_RECT,"kasane.ref.setRect")
 REF_SETTER(js_ref_clip,KSN_SET_CLIP,"kasane.ref.setClip")
 REF_SETTER(js_ref_color,KSN_SET_COLOR,"kasane.ref.setColor")
 REF_SETTER(js_ref_visible,KSN_SET_VISIBLE,"kasane.ref.setVisible")
+REF_SETTER(js_ref_text,KSN_SET_TEXT,"kasane.ref.setText")
+REF_SETTER(js_ref_reveal,KSN_SET_REVEAL,"kasane.ref.setReveal")
 
 static JSValue js_instance_place(JSContext *ctx, JSValueConst self, int argc,
                                  JSValueConst *argv) {
@@ -632,12 +694,15 @@ MUTATOR(js_tx_rect,tx_class,false,"kasane.rect")
 MUTATOR(js_tx_round_rect,tx_class,false,"kasane.roundRect")
 MUTATOR(js_tx_stroke_rect,tx_class,false,"kasane.strokeRect")
 MUTATOR(js_tx_gradient,tx_class,false,"kasane.gradient")
+MUTATOR(js_tx_text,tx_class,false,"kasane.text")
 MUTATOR(js_tx_group,tx_class,false,"kasane.group")
 MUTATOR(js_tx_instantiate,tx_class,false,"kasane.instantiate")
 MUTATOR(js_ref_rect,tx_class,true,"kasane.ref.setRect")
 MUTATOR(js_ref_clip,tx_class,true,"kasane.ref.setClip")
 MUTATOR(js_ref_color,tx_class,true,"kasane.ref.setColor")
 MUTATOR(js_ref_visible,tx_class,true,"kasane.ref.setVisible")
+MUTATOR(js_ref_text,tx_class,true,"kasane.ref.setText")
+MUTATOR(js_ref_reveal,tx_class,true,"kasane.ref.setReveal")
 MUTATOR(js_instance_place,tx_class,true,"kasane.instance.place")
 MUTATOR(js_instance_visible,tx_class,true,"kasane.instance.setVisible")
 MUTATOR(js_modal_open,modal_class,false,"kasane.modal.open")
@@ -813,6 +878,7 @@ static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
     PUT(out,"roundRect",JS_NewBool(ctx,true));
     PUT(out,"strokeRect",JS_NewBool(ctx,true));
     PUT(out,"gradient",JS_NewBool(ctx,true));
+    PUT(out,"text",JS_NewBool(ctx,true));
     PUT(out,"groupOpacity",JS_NewBool(ctx,true));
     PUT(out,"modal",JS_NewBool(ctx,true));
     PUT(out,"animation",JS_NewBool(ctx,false));
@@ -870,6 +936,7 @@ static const JSCFunctionListEntry tx_methods[]={
     JS_CFUNC_DEF("roundRect",1,js_tx_round_rect_checked),
     JS_CFUNC_DEF("strokeRect",1,js_tx_stroke_rect_checked),
     JS_CFUNC_DEF("gradient",1,js_tx_gradient_checked),
+    JS_CFUNC_DEF("text",1,js_tx_text_checked),
     JS_CFUNC_DEF("group",3,js_tx_group_checked),
     JS_CFUNC_DEF("instantiate",2,js_tx_instantiate_checked),
 };
@@ -879,6 +946,7 @@ static const JSCFunctionListEntry modal_methods[]={
 static const JSCFunctionListEntry ref_methods[]={
     JS_CFUNC_DEF("setRect",2,js_ref_rect_checked),JS_CFUNC_DEF("setClip",2,js_ref_clip_checked),
     JS_CFUNC_DEF("setColor",2,js_ref_color_checked),JS_CFUNC_DEF("setVisible",2,js_ref_visible_checked),
+    JS_CFUNC_DEF("setText",2,js_ref_text_checked),JS_CFUNC_DEF("setReveal",2,js_ref_reveal_checked),
 };
 static const JSCFunctionListEntry instance_methods[]={
     JS_CFUNC_DEF("place",2,js_instance_place_checked),

@@ -12,7 +12,7 @@
     {bounds: [0, 0, 42, 24], color: 0x185071ff},
     {bounds: [4, 4, 38, 20], color: 0x63d7bccc, opacity: 220}
   ]);
-  let orb, meter, groupFirst, left, right, panel;
+  let orb, meter, groupFirst, left, right, panel, title, counter;
   let phase = 'app';
   let tick = 0;
 
@@ -41,6 +41,10 @@
     tx.background(0x071425ff);
     tx.gradient({bounds: [0, 0, 240, 18], axis: 'x',
       from: 0x0d2940ff, to: 0x498781ff, dither: true});
+    title = tx.text({bounds: [8, 3, 232, 17], text: 'Kasane 日本語',
+      font: 'body', color: 0xffffffff});
+    counter = tx.text({bounds: [12, 100, 180, 113], text: 'tick 0',
+      capacity: 24, font: 'caption', color: 0xa8d8efff});
     groupFirst = tx.rect({bounds: [12, 28, 112, 56], color: 0x164c70d8});
     tx.rect({bounds: [34, 36, 134, 64], color: 0x65d7bcac});
     tx.group(groupFirst, 2, 208);
@@ -74,6 +78,8 @@
         groupFirst.setColor(tx, (tick & 16) ? 0x295d86d8 : 0x164c70d8);
         left.place(tx, {offset: [142, 28 + (tick % 18)], opacity: 230});
         right.setVisible(tx, (tick % 40) < 31);
+        title.setReveal(tx, Math.floor(tick / 6) % 11);
+        counter.setText(tx, 'tick ' + tick);
         if (phase === 'modal')
           panel.setColor(tx, (tick & 8) ? 0x397391dc : 0x316781dc);
       });

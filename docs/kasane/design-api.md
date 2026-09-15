@@ -76,7 +76,23 @@ Flashの1bpp cellを直接読み、文字bufferや展開glyphを常設しない�
 captionはLatin6×8/全角8×8、bodyはLatin6×12/全角12×12、displayはLatin12×16/全角16×16。
 displayは8px字形の2倍。欠字/faceなしでも送り幅を維持し、ASCIIはbuiltin、全角は豆腐を描く。
 1命令は単行のcounted UTF-8で、revealはUnicode scalar数（サロゲート組も1）。改行・折返しは
-利用側で行を分割する。文字のJS公開はCP10で別途検証する。
+利用側で行を分割する。
+
+### JS文字（CP10）
+
+`tx.text({bounds, clip?, opacity?, text, capacity?, font?, color})`はDrawRefを返す。
+fontは`caption`/`body`/`display`、既定body。textはstringのみ。capacityはUTF-8の予約バイト数
+（1–128、既定max(1,初期UTF-8長)）で、アプリ合計896 Bの枠内に固定予約する。
+空文字は可、孤立サロゲート・NUL・改行等の未対応制御文字は拒否する。
+`ref.setText(tx,string)`は予約内で更新しrevealを全文へ戻す。
+`ref.setReveal(tx,count)`は0から現在のUnicode scalar数までの整数を受け取る。
+`setColor/setRect/setClip/setVisible`も利用できる。構造変更・capacity変更はREPLACE。
+
+JSのUTF-16長128単位を変換前に確認するので、UTF-8変換の一時文字領域は最大384 B＋
+QuickJS headerに限定される。変換後にも128 B上限とnative容量を検証する。
+`setReveal`は文字列変換を伴わず、コピー済み文字列に対する数値のPATCHだけになる。
+setTextで作った一時文字列をnative側に保持せず、成功・失敗ともJS変換用領域を解放する。
+features.textはtrue。cacheのTEXT公開と整数値の直接更新APIはまだ含まない。
 
 ## 3. 原子的な更新と参照
 

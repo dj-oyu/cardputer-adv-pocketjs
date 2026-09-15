@@ -2,6 +2,7 @@
 // real fixed-storage DS core/cache/modal/renderer.
 #include "pocket_kasane.h"
 #include "ui/kasane/ksn_runtime.h"
+#include "text/ksn_font.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -123,7 +124,7 @@ static ksn_result send_strip(void *opaque,uint16_t y,uint16_t rows,
 }
 static ksn_result present(ksn_render_stats *stats) {
     ksn_display_port port={.strip=get_strip,.present=send_strip,
-                          .width=240,.height=135,.strip_rows=8};
+                          .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
     return pocket_kasane_present(&port,stats);
 }
 
@@ -333,6 +334,9 @@ static void fault_sweep(const char *label,const char *exercise,bool arm_inside) 
 }
 
 static void allocator_tests(void) {
+    fault_sweep("text conversion and wrapper allocation failures reclaim the candidate",
+                "globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
+                "tx.text({bounds:[0,0,100,16],text:'日本語',capacity:24,color:0xffffffff})});",false);
     fault_sweep("ticket, transaction, modal and property allocation failures abort",
                 "globalThis.exercise=()=>kasane.replace(tx=>tx.background(0x000000ff));",false);
     fault_sweep("draw wrapper allocation failures abort and recover refs",
@@ -534,6 +538,57 @@ static void primitive_tests(void) {
     check(ksn_runtime_shutdown()==KSN_OK,"primitive native owner shuts down");
 }
 
+static void text_tests(void){
+    check(open_fault_runtime(""),"text fixture opens");
+    ksn_view *system=NULL;check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect text through native owner");
+    check(run("if(!kasane.features().text)throw Error('feature');"
+              "kasane.replace(tx=>{tx.background(255);globalThis.label=tx.text({bounds:[0,7,240,23],"
+              "text:'Aあ😀B',capacity:32,font:'caption',color:0xffffffff});label.setReveal(tx,3)});"),
+          "JS text submits counted UTF-8 and scalar reveal");
+    ksn_frame frame;ksn_frame_command cmd;ksn_render_stats stats;
+    check(ksn_core_frame(system->host->core,&frame)==KSN_OK&&
+          ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,0,&cmd)==KSN_OK&&
+          cmd.draw.kind==KSN_TEXT&&cmd.draw.data.text.bytes==9&&cmd.draw.data.text.capacity==32&&
+          cmd.draw.data.text.font==KSN_CAPTION&&cmd.reveal==3&&!memcmp(cmd.text,"Aあ😀B",9),
+          "native text snapshot owns bytes, capacity and reveal");
+    check(present(&stats)==KSN_OK&&panel_pixels[7*240+1]==0xffff&&panel_pixels[7*240+22]==0,
+          "JS text reaches coverage renderer and hides unrevealed scalar");
+    check(run("kasane.patch(tx=>{label.setText(tx,'AA');label.setColor(tx,0xff0000ff)});"),
+          "setText restores full reveal and accepts color patch");
+    check(present(&stats)==KSN_OK&&panel_pixels[7*240+7]==0xf800,"text patch renders new bytes and color");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    check(run("var invalid=['\\ud800','\\udc00','a\\n','a\\0',42,'あ'.repeat(43),'x'.repeat(129)];"
+              "for(var value of invalid){let inner=false,outer=false;try{kasane.patch(tx=>{"
+              "label.setColor(tx,0x00ff00ff);try{label.setText(tx,value)}catch(e){inner=true}})}"
+              "catch(e){outer=true}if(!inner||!outer)throw Error('invalid text committed');}"
+              "var mutations=[tx=>label.setReveal(tx,3),tx=>label.setReveal(tx,1.5),"
+              "tx=>label.setText(tx,'x'.repeat(33))];for(var mutate of mutations){"
+              "let failed=false;try{kasane.patch(mutate)}catch(e){failed=true}if(!failed)throw Error('limit');}"
+              "var specs=[{text:'A',capacity:0},{text:'A',capacity:129},{text:'あ',capacity:2},"
+              "{text:'A',font:'body\\0'},{text:'A',get capacity(){throw Error('capacity getter')}},"
+              "{get text(){throw Error('text getter')}}];for(var spec of specs){let a=false,b=false;"
+              "spec.bounds=[0,0,50,20];spec.color=0xffffffff;"
+              "try{kasane.replace(tx=>{tx.background(255);try{tx.text(spec)}catch(e){a=true}})}catch(e){b=true}"
+              "if(!a||!b)throw Error('bad spec');}"),
+          "lone surrogates, controls, byte capacity, bad fonts/reveal and caught getters abort atomically");
+    pocket_kasane_invalidate();check(present(&stats)==KSN_OK&&!memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels)),
+          "failed text changes preserve committed pixels");
+    check(run("globalThis.oldLabel=label;kasane.replace(tx=>{tx.background(255);"
+              "globalThis.label=tx.text({bounds:[0,7,240,23],text:'',capacity:128,color:0xffffffff})});"),
+          "empty text reserves explicit update capacity");
+    check(present(&stats)==KSN_OK,"empty text presents");
+    check(run("let failed=false;try{kasane.patch(tx=>oldLabel.setText(tx,'A'))}catch(e){failed=e.code==='CLOSED'}"
+              "if(!failed)throw Error('stale');globalThis.sequence=0;"),"stale text reference rejected");
+    size_t live=live_allocations;uint32_t native=ksn_runtime_reserved_bytes();
+    for(unsigned i=0;i<300;i++){
+        if(!run("kasane.patch(tx=>{label.setText(tx,(++sequence&1)?'日本語':'A😀');label.setReveal(tx,1)});")||
+           present(&stats)!=KSN_OK){check(false,"repeated text PATCH");break;}
+    }
+    JS_RunGC(rt);
+    check(ksn_runtime_reserved_bytes()==native&&live_allocations<=live+2,"300 text updates keep native reservation and JS allocations bounded");
+    close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"text teardown frees guest and native owner");
+}
+
 int main(void) {
     rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
     check(pocket_kasane_install(ctx,NULL)==ESP_OK,"namespace installs");
@@ -622,6 +677,7 @@ int main(void) {
     lazy_cache_tests();
     system_lifetime_tests();
     primitive_tests();
+    text_tests();
     printf("%s: %u failure(s)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }
