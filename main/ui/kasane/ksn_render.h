@@ -152,6 +152,15 @@ extern int g_ksn_row_table;
  * reference chain, which is what test_blend_lut.c compares against. */
 extern int g_ksn_blend_lut;
 extern int g_ksn_blend_lut_alpha;
+/* Boundary 3/4 candidate 3c (docs/perf/kasane-group-affine.md): 1 (default)
+ * folds a group whose opacity is 255 and whose children are all opaque into one
+ * affine map per group -- out = A*src + B*dst + C with A=255, B=C=0 on every
+ * channel, applied as a store -- instead of the isolated premultiplied tile
+ * chain; 0 keeps the pre-3c chain (tile, premultiply_over, group_over). The fold
+ * moves no pixel: every mul8 on the way is exact for these operands. Step 2 of
+ * the same workstream extends the map to non-opaque children, where dropping the
+ * intermediate floors does move pixels; that arm is 2 and is NOT the default. */
+extern int g_ksn_group_affine;
 #ifdef __cplusplus
 }
 #endif

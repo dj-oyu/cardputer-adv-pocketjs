@@ -1102,6 +1102,96 @@ KSN_TILE_MEASURED static void tile_row_over(uint16_t *pixels,const ksn_premultip
         pixels[index]=group_over(pixels[index],tile[x],opacity,dither,x0+x,py);
     }
 }
+/* Candidate 3c of docs/perf/kasane-opt-survey.md, boundary 3 and 4
+ * (docs/perf/kasane-group-affine.md). A group's chain is a chain of
+ * premultiplied `over` writes into one tile followed by one `group_over`, and
+ * every step of it floors: mul8 rounds to the nearest 8-bit value. When the
+ * group's opacity is 255 and every one of its children is opaque, none of those
+ * floors can move a pixel, and the whole chain collapses into a single affine
+ * map per group,
+ *
+ *     out = A*src + B*dst + C
+ *
+ * with A, B and C combined once per group instead of once per child per pixel:
+ * for an opaque chain A is 255 and B and C are 0 on every channel, so the map
+ * is `out = src` -- a store of the topmost covering child's own value. That is
+ * step 1 of this workstream and it is bit-exact (see `child_opaque` below); the
+ * approximate extension to non-opaque children is step 2 and lives behind
+ * g_ksn_group_affine==2, off by default.
+ *
+ * 1 (default) = fold the fully opaque chain, 0 = the pre-3c path: tile,
+ * premultiply_over per child pixel, group_over per pixel. Both arms live in one
+ * binary so a same-binary A/B compares pixels (test_group_affine.c does) and so
+ * a switch that silently never matches cannot look like a speedup. Alignment
+ * caveat: this change is smaller than the 15% instruction-cache drift CLAUDE.md
+ * records, so the arms' *speed* is a device question; their pixels and their
+ * instruction counts are host questions. */
+int g_ksn_group_affine=1;
+
+/* A child whose tile write is a plain overwrite at every pixel its geometry
+ * covers: opacity 255 and a colour alpha of 255. Then a = mul8(255,255) = 255
+ * and inverse = 0, so mul8(x,255) == x and mul8(y,0) == 0 on every channel and
+ * the tile ends at this child's own values -- the previous tile contents cannot
+ * survive, and `clamp8` never bites (every operand is at most 255). The same
+ * `alpha == 255` is what clears the dither provenance bit in `group_pixel`, so
+ * the folded arm can name the topmost covering child as the only source of a
+ * pixel's dither too.
+ *
+ * TEXT is excluded: its alpha is mul8(colour alpha, coverage[x]), which is 255
+ * only on the pixels whose coverage happens to be 255, and that set belongs to a
+ * font rather than to this renderer. A GRADIENT interpolates per channel, and
+ * with both ends at alpha 255 every interpolated alpha is exactly 255
+ * (`interpolate`: (255*(last-i)+255*i+last/2)/last == 255 for length >= 1). */
+static bool child_opaque(const ksn_frame_view *command){
+    const ksn_draw *d=&command->draw;
+    if(!command->visible||d->opacity!=255)return false;
+    switch(d->kind){
+    case KSN_RECT:case KSN_ROUND_RECT:case KSN_STROKE:
+        return (d->data.shape.color&255u)==255u;
+    case KSN_GRADIENT:
+        return (d->data.gradient.from&255u)==255u&&(d->data.gradient.to&255u)==255u;
+    default:return false;
+    }
+}
+/* One row of a folded opaque group. A*src is the topmost covering child's own
+ * channels and B and C are 0, so applying the group's map is one store; children
+ * ascend and a later write wins, which is what "the tile's last writer" was.
+ * `dither` is the topmost covering child's own provenance, and only when some
+ * child of the group is a dithered gradient at all -- with has_dither false the
+ * old chain's provenance bit was never set either. */
+static ksn_result group_opaque_row(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned first,
+                                   unsigned end,int py,int band_y,bool has_dither,uint16_t *pixels){
+    const ksn_frame_view *command;
+    for(unsigned i=first;i<=end;i++){
+        ksn_result result=frame_command(core,ticket,layer,(uint16_t)i,&command);
+        if(result!=KSN_OK)return result;
+        const ksn_draw *d=&command->draw;
+        if(!command->visible||!d->opacity||py<d->bounds.y0||py>=d->bounds.y1||
+           py<d->clip.y0||py>=d->clip.y1)continue;
+        int left=d->bounds.x0>d->clip.x0?d->bounds.x0:d->clip.x0;
+        int right=d->bounds.x1<d->clip.x1?d->bounds.x1:d->clip.x1;
+        if(left<0)left=0;
+        if(right>240)right=240;
+        if(left>=right)continue;
+        bool dither=has_dither&&d->kind==KSN_GRADIENT&&d->data.gradient.dither;
+        {KSN_PROF_BEGIN();
+        if(g_ksn_row_coverage){
+            ksn_x_run runs[KSN_ROW_RUNS];
+            unsigned run_count=coverage_runs(command,py,left,right,runs);
+            for(unsigned run=0;run<run_count;run++)for(int x=runs[run].x0;x<runs[run].x1;x++){
+                ksn_rgba color=sample(command,x,py);
+                pixels[(py-band_y)*240+x]=pack565(color>>24,(color>>16)&255u,(color>>8)&255u,
+                                                  dither,x,py);
+            }
+        }else for(int x=left;x<right;x++)if(covers(command,x,py)){
+            ksn_rgba color=sample(command,x,py);
+            pixels[(py-band_y)*240+x]=pack565(color>>24,(color>>16)&255u,(color>>8)&255u,
+                                              dither,x,py);
+        }
+        KSN_PROF_END(blend);}
+    }
+    return KSN_OK;
+}
 static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span_scratch *scratch,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
                                uint8_t opacity,int y,int rows,uint16_t *pixels){
     if(!opacity)return KSN_OK;
@@ -1111,6 +1201,10 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
      * is scratch->text rather than a local (the 512-byte scratch budget). */
     const ksn_frame_view *command;
     bool has_dither=false;
+    /* Step 1's precondition, collected where the children are already in hand:
+     * one more call per child costs no read, and a group that fails it keeps the
+     * pre-3c chain below bit for bit. */
+    bool opaque_chain=true;
     int left=240,right=0,top=y+rows,bottom=y;
     /* The reach table holds the clipped box of each child of this group. The
      * bounds pass already has every child in hand, so filling it costs no extra
@@ -1128,6 +1222,12 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
         const ksn_draw *d=&command->draw;
         ksn_tile_reach box={0,0,0,0};
         if(command->visible&&d->opacity){
+            /* Step 1's precondition is collected here, where the children are
+             * already in hand: one more call per child costs no read, and a group
+             * that fails it keeps the pre-3c chain bit for bit. The reach table
+             * still gets an entry for every child (an invisible one reaches
+             * nothing), so the block skip below keeps its own bookkeeping. */
+            if(!child_opaque(command))opaque_chain=false;
             ksn_rect bounds=footprint(d);
             int x0=bounds.x0>d->clip.x0?bounds.x0:d->clip.x0;
             int x1=bounds.x1<d->clip.x1?bounds.x1:d->clip.x1;
@@ -1152,6 +1252,24 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
     if(right>240)right=240;
     if(top<y)top=y;
     if(bottom>y+rows)bottom=y+rows;
+    /* Candidate 3c, step 1: opacity 255 over a chain of opaque children has no
+     * floor to lose, so the tile, the per-child premultiply_over and the
+     * per-pixel group_over are all dropped for one store per covered pixel. The
+     * map is the identity on the source with the destination dropped (A=255,
+     * B=C=0), which is why no pixel moves; the pixel set is the same solver the
+     * switch-off arm below uses, so only the arithmetic between them differs.
+     * It runs before the tile loops: where the fold's precondition holds, the
+     * tile (and with it the block width and the reach table) is not consulted --
+     * the pixel set and the arithmetic are the ones the switch-off arm proves. */
+    if(g_ksn_group_affine&&opacity==255&&opaque_chain){
+        {KSN_PROF_BEGIN();
+        for(int py=top;py<bottom;py++){
+            ksn_result result=group_opaque_row(core,ticket,layer,first,end,py,y,has_dither,pixels);
+            if(result!=KSN_OK)return result;
+        }
+        KSN_PROF_END(blend);}
+        return KSN_OK;
+    }
     int tile_pixels=g_ksn_tile_pixels>0&&g_ksn_tile_pixels<=64?g_ksn_tile_pixels:64;
     for(int py=top;py<bottom;py++)for(int x0=left;x0<right;x0+=tile_pixels){
         int count=right-x0;if(count>tile_pixels)count=tile_pixels;
