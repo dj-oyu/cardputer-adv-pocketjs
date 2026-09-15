@@ -56,7 +56,12 @@
   send 3.38 ms。直前CP5のturn 3.29 msから約12%減（同診断の観測値）。
   記録は`.cache/kasane-cp6-input`と`.cache/kasane-cp6-animation`。
 - VM probe構成: `-B build_ds_vmprobe -D SDKCONFIG=build_ds_vmprobe/sdkconfig build` PASS。
-  app 2,205,264 B、DIRAM143,276 B。通常比6,000 Bは計測buffer等。実機probeは次に確認する。
+  app 2,205,264 B、DIRAM143,276 B。通常比6,000 Bは計測buffer等。
+- probe実機: `vm_l0_capture.py --conditions base --workloads DF --seconds 4 --reps 1`
+  成功。Promise chainとasync generatorの各3窓を収集。最大連続空きの観測最小は36,864 Bと
+  55,296 B、stack high-waterはともに23,804 B。全VM機能の実機網羅試験とは区別する。
+  同構成のK 300ターンもPASS。ログは`.cache/kasane-cp6-vmprobe.jsonl`と
+  `.cache/kasane-cp6-probe-k`。CP6実装commitは`380e1d6`、push済み。
 
 ## vm/main同期 — 2026-09-15
 
