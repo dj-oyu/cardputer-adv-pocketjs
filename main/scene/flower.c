@@ -1760,10 +1760,14 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         // next one runs with it flipped. Adjacent 60-frame windows are three
         // seconds apart in the same scene, in the same binary, so the paired
         // difference is the gate and not the phase or the layout.
-        g_garden_decor_gate=!g_garden_decor_gate;
-        g_garden_scalar_tweaks=!g_garden_scalar_tweaks;
+        // This run measures one thing: which unit does the canopy blend. The
+        // other three switches stay at their shipping values (all 1) so the paired
+        // difference between adjacent windows is the canopy and nothing else. They
+        // have their own measurements; flip them here again to repeat those.
+        //g_garden_decor_gate=!g_garden_decor_gate;
+        //g_garden_scalar_tweaks=!g_garden_scalar_tweaks;
         g_garden_canopy_pie=!g_garden_canopy_pie;
-        g_flower_fixed_sqrt=!g_flower_fixed_sqrt;
+        //g_flower_fixed_sqrt=!g_flower_fixed_sqrt;
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
         prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;
