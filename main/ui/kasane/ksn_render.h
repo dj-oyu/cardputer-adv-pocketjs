@@ -22,13 +22,23 @@ extern bool g_ksn_image_rotate_step;
  * per-span 64-bit division otherwise. Off restores it for every span. Owner
  * task only; read once per rotated span. */
 extern bool g_ksn_image_rotate_anchor;
+/* Rotated spans: the anchors are monotone along a span (the per-pixel quotient
+ * has the sign of the numerator step and the carry only adds to it), so a span
+ * whose first pixel is outside the source rectangle is decided by one interval
+ * test on the two span anchors - no pixel of it can be accepted when the
+ * extreme pixel on the failing side is out. Such a span costs the test and
+ * clearing the span scratch instead of the per-pixel work the loop pays to
+ * discard each pixel. No pixel can change: the loop this replaces is the one
+ * that writes those zeroes. Off restores the per-pixel test for every span.
+ * Owner task only; read once per rotated span. */
+extern bool g_ksn_image_rotate_reject;
 /* Host diagnostics for the anchor table: entries built for the last rotated
  * row, and its starting x. The renderer never calls this. */
 uint32_t ksn_render_rotate_anchor_state(int *base_x);
 #ifdef KSN_ANCHOR_COUNT
 /* Counters for harnesses compiled with -DKSN_ANCHOR_COUNT; absent from the
  * shipping object (they exist so a test can assert the table path is live). */
-extern uint32_t g_ksn_image_anchor_builds;
+extern uint32_t g_ksn_image_anchor_builds,g_ksn_image_reject_tests,g_ksn_image_reject_spans;
 #endif
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT, source-span IMAGE, alpha and

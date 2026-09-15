@@ -51,13 +51,17 @@ typedef struct {
 } config;
 
 /* One arm of the rotated span path: 0 reads a row's anchors from the per-row
- * table, 1 divides per pixel (the pre-optimisation path), 2 divides per span.
- * All three must produce the same panel, the same number of source fetches and
- * the same frame hashes; the host builds every scene from scratch per arm. */
+ * table and rejects whole spans (the default), 1 divides per pixel (the
+ * pre-optimisation path), 2 divides per span with span rejection, 4 reads the
+ * table without span rejection, 5 divides per span without it. Every arm must
+ * produce the same panel, the same number of source fetches and the same frame
+ * hashes; the host builds every scene from scratch per arm. */
+static const unsigned arms[]={0,2,4,5};
 static unsigned long long anchor_served;   /* biggest table the renderer served */
 static void set_arm(unsigned arm){
     g_ksn_image_rotate_step=arm!=1;
-    g_ksn_image_rotate_anchor=arm==0;
+    g_ksn_image_rotate_anchor=arm==0||arm==4;
+    g_ksn_image_rotate_reject=arm!=4&&arm!=5;
 }
 static void note_anchor(void){
     int base_x=0;
@@ -143,7 +147,7 @@ static uint32_t animate_120(unsigned arm_mode,unsigned long long *fetch_count,un
         assert(ksn_core_advance_animations(&core,(uint64_t)f*33334u,false,&atx)==KSN_OK);
         if(!atx.value)continue;
         frames++;
-        if(arm_mode==3)set_arm(f&1u);else set_arm(arm_mode);
+        if(arm_mode==10)set_arm((f&1u)?2u:0u);else set_arm(arm_mode);
         assert(ksn_render_rects(&core,&display,&stats)==KSN_OK);
         note_anchor();
         hash^=hash_bytes(panel,PANEL);hash*=16777619u;
@@ -161,7 +165,8 @@ static void compare(const config *c,const char *what,unsigned field,
     /* The per-pixel division arm is the reference: render it once, then every
      * optimised arm against its panel, frame hash and fetch count. */
     uint32_t hb=scene(c,1,&fb);memcpy(first,panel,sizeof(panel));
-    for(unsigned arm=0;arm<3;arm+=2){
+    for(unsigned a=0;a<sizeof(arms)/sizeof(arms[0]);a++){
+        unsigned arm=arms[a];
         uint32_t ha=scene(c,arm,&fa);
         (*compared)+=2;(*configs)++;
         if(ha!=hb||memcmp(first,panel,sizeof(panel))!=0||fa!=fb){
@@ -248,35 +253,41 @@ int main(void){
     c.clip=(ksn_rect){0,0,240,135};c.opacity=255;
     /* 7. 120-frame animated track: table arm, per-span arm and an arm that
      *    alternates per frame, all against the per-pixel division arm. */
-    {unsigned long long f_tab,f_span,f_alt;unsigned frames_tab=0,frames_span=0,frames_alt=0;
-     uint32_t h_tab=animate_120(0,&f_tab,&frames_tab);memcpy(first,panel,sizeof(panel));
-     uint32_t h_div=animate_120(1,&f_span,&frames_span);
-     unsigned long long diff=panel_diff(first,panel,&worst_step);
-     compared+=2;
-     if(h_tab!=h_div||diff||f_tab!=f_span||frames_tab!=120||frames_span!=120){
-         printf("image rotate arms MISMATCH animated frames=%u/%u diff=%llu fetches=%llu/%llu hash=%08x/%08x\n",
-             frames_tab,frames_span,diff,f_tab,f_span,h_tab,h_div);assert(false);}
-     uint32_t h_alt=animate_120(2,&f_alt,&frames_alt);
+    {unsigned frames=0;
+     unsigned long long f_ref,f_alt;
+     uint32_t h_ref=animate_120(1,&f_ref,&frames);memcpy(first,panel,sizeof(panel));
+     assert(frames==120);
+     for(unsigned a=0;a<sizeof(arms)/sizeof(arms[0]);a++){
+         unsigned long long f_arm;
+         uint32_t h=animate_120(arms[a],&f_arm,&frames);
+         unsigned long long diff=panel_diff(first,panel,&worst_step);
+         compared+=2;
+         if(h!=h_ref||diff||f_arm!=f_ref||frames!=120){
+             printf("image rotate arms MISMATCH animated arm=%u frames=%u diff=%llu fetches=%llu/%llu hash=%08x/%08x\n",
+                 arms[a],frames,diff,f_arm,f_ref,h,h_ref);assert(false);}
+         configs++;
+     }
+     uint32_t h_alt=animate_120(10,&f_alt,&frames);
      compared+=1;
-     if(h_alt!=h_tab||f_alt!=f_tab){
-         printf("image rotate arms MISMATCH animated per-span fetches=%llu hash=%08x/%08x\n",
-             f_alt,h_alt,h_tab);assert(false);}
-     uint32_t h_alt2=animate_120(3,&f_alt,&frames_alt);
-     compared+=1;
-     if(h_alt2!=h_tab||f_alt!=f_tab){
-         printf("image rotate arms MISMATCH animated alternating fetches=%llu hash=%08x/%08x\n",
-             f_alt,h_alt2,h_tab);assert(false);}
-     printf("animated track: %u frames in all arms, alternating arm identical\n",frames_tab);
-     configs+=3;}
-    /* 8. Non-vacuity: the table arm is only evidence if the table actually
-     *    served spans. The largest row it built is read out of the renderer. */
+     if(h_alt!=h_ref||f_alt!=f_ref||frames!=120){
+         printf("image rotate arms MISMATCH animated alternating fetch"
+                "es=%llu hash=%08x/%08x\n",f_alt,h_alt,h_ref);assert(false);}
+     printf("animated track: 120 frames in every arm, alternating arm identical\n");
+     configs++;}
+    /* 8. Non-vacuity: the optimised arms are only evidence if the table really
+     *    served spans and the span rejection really fired. The table's own
+     *    state is read out of the renderer; the two counters exist only with
+     *    -DKSN_ANCHOR_COUNT so the shipping object stays free of them. */
     assert(anchor_served>1);
 #ifdef KSN_ANCHOR_COUNT
     printf("anchor table: %u builds, largest row served %llu entries\n",
         g_ksn_image_anchor_builds,anchor_served);
+    printf("span rejection: %u interval tests, %u whole spans skipped\n",
+        g_ksn_image_reject_tests,g_ksn_image_reject_spans);
     assert(g_ksn_image_anchor_builds>0);
+    assert(g_ksn_image_reject_spans>0);
 #else
-    printf("anchor table: largest row served %llu entries (build count needs -DKSN_ANCHOR_COUNT)\n",
+    printf("anchor table: largest row served %llu entries (build and skip counts need -DKSN_ANCHOR_COUNT)\n",
         anchor_served);
 #endif
     printf("image rotate arms PASS: %llu configs, %llu panel hashes, worst pixel step %llu, fetches identical\n",
