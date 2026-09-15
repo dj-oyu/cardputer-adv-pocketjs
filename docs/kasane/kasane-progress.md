@@ -4,6 +4,18 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14e1 — System期限とowner待機（2026-09-16）
+
+- 時計更新要求と通知/timerの未publish変更は即時、通知・timer・電源の期限は最小値へ集約。
+  未poll dirtyと満杯blocked timerをready扱いせず、不要な再起床を防ぐ。
+- 既存native待機・VM frame-cap待機へ統合。SNTPはpublish後に既存counted wakeへ通知。
+  tick端数は切り上げ、極大期限はoverflowせず既存wait上限へ制限する。
+- 追加task/queue/stackなし。VMの公平性yieldと最小周期を維持。HOME等の周期停止や
+  PetHub壁時計alarm/usage/鳴動の期限化は未完了であり、端末全体の無周期化ではない。
+- System/実QuickJS host試験ASan/UBSan・O2 PASS。60秒無期限、未poll dirty、時計要求、
+  timer/snooze、電源購読解除、満杯timerのACK再試行、tick切上げ・極大値を検証。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,964 / 136,604 Bで増加なし。
+
 ## checkpoint 14d2 — 録音SYSTEM部品（2026-09-16）
 
 - `ksn_recording_emit`を追加。pad、常時赤色dot、6段の対数レベル表示を8矩形で表現。

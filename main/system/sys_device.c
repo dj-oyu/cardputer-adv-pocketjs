@@ -9,6 +9,23 @@ static sys_timer timers;
 sys_timer *sys_device_timers(void){return &timers;}
 sys_notify *sys_device_notifications(void){return &notifications;}
 sys_state *sys_device_state(void){return &state;}
+uint64_t sys_device_next_deadline(void){
+    if(sys_clock_update_pending()||notifications.changed||timers.changed)return 0;
+    uint64_t next=sys_notify_deadline(&notifications),timer=sys_timer_deadline(&timers);
+    uint64_t power=sys_power_deadline(&state);
+    if(timer<next)next=timer;
+    return power<next?power:next;
+}
+uint32_t sys_device_wait_ticks(uint64_t now,uint32_t cap,uint32_t hz){
+    uint64_t next=sys_device_next_deadline();
+    if(next==SYS_NEVER)return cap;
+    if(next<=now||!hz)return 0;
+    uint64_t delta=next-now,seconds=delta/1000000;
+    /* Saturate before multiplying even for a caller near UINT64_MAX. */
+    if(seconds>cap/hz)return cap;
+    uint64_t ticks=seconds*hz+((delta%1000000)*hz+999999)/1000000;
+    return ticks<cap?(uint32_t)ticks:cap;
+}
 bool sys_device_clock_read(sys_clock_state *out){
     return sys_clock_snapshot(&state,(uint64_t)esp_timer_get_time(),out);
 }

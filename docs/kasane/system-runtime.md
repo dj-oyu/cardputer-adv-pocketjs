@@ -262,6 +262,15 @@ runtimeは`step(now, input_mask)`と`next_deadline()`を提供する。期限な
 現行VM/画面ループが周期駆動である間は、その周期全体の停止を達成済みとはしない。
 長時間JS/native処理中の期限保証も別問題。専用大スタックを追加せず、VMの安全な制御返却点に統合する。
 
+実装（2026-09-16）: `sys_device_next_deadline()`は時計更新要求・未publish変更を即時0、
+通知/snooze/TTL・相対timer・電源取得の最小単調期限を返す。期限なしはSYS_NEVER。
+購読者が未pollのdirtyはreadyに含めず、満杯でblockedのtimerも再試行契機までは期限なし。
+`sys_device_wait_ticks`は既存待機上限と期限を統合し、端数tickを切り上げてoverflowを避ける。
+UI ownerのnative待機とVM frame-cap待機へ接続。VM継続turnのyieldと最小実行周期は維持する。
+SNTP等の更新は状態公開後に既存`vm_wake_post`へ送る（pending要求を合流）。待機直前の
+到着は既存カウンタに保持される。System用task/queue/timer/stackの追加はない。
+native画面の周期、PetHubの壁時計alarm・usage判定・鳴動期限、VMの最小周期内の遅延は残る。
+
 ## 10. RAM予算と検証
 
 | 領域 | 設計予算 B |

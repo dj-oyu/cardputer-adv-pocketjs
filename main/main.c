@@ -970,7 +970,8 @@ static void ui_task(void *arg) {
                 // cap short instead of waiting out the period; the measured
                 // (device) cost it removes is the "up to one frame period"
                 // term of completion latency, and nothing else.
-                if(rest) vm_wake_wait(pdMS_TO_TICKS(rest));
+                if(rest) vm_wake_wait(sys_device_wait_ticks(
+                    (uint64_t)esp_timer_get_time(),pdMS_TO_TICKS(rest),configTICK_RATE_HZ));
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.
                 period_began=esp_timer_get_time();
@@ -982,7 +983,8 @@ static void ui_task(void *arg) {
         // when a frame() first does, and this keeps a stale `period_began`
         // from making the first frame of a new session skip its wait.
         period_began=esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(rest));
+        vm_wake_wait(sys_device_wait_ticks((uint64_t)esp_timer_get_time(),
+            pdMS_TO_TICKS(rest),configTICK_RATE_HZ));
     }
 }
 
