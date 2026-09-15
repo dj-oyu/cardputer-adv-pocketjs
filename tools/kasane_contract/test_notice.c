@@ -1,6 +1,7 @@
 #include "core_fixture.h"
 #include "ksn_view_host.h"
 #include "ksn_notice.h"
+#include "ksn_indicator.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -42,5 +43,33 @@ int main(void){
     assert(ksn_view_submit(system,tx)==KSN_OK);
     assert(ksn_view_host_present(&host,&port,&stats)==KSN_OK);
     assert(panel[0]==31&&panel[10*240+42]==31);
+    /* Check every pixel of the legacy geometry for all cell/clip states.
+     * Compose over the notice, so removal must restore the banner as well. */
+    for(unsigned lit=0;lit<=6;lit++)for(unsigned clipping=0;clipping<2;clipping++){
+        assert(ksn_view_begin(system,KSN_REPLACE,&tx)==KSN_OK);
+        assert(ksn_notice_emit(system,tx,&notice,(ksn_resource){0},0)==KSN_OK);
+        assert(ksn_recording_emit(system,tx,(ksn_recording_indicator){true,lit,clipping})==KSN_OK);
+        assert(ksn_view_submit(system,tx)==KSN_OK);
+        assert(ksn_view_host_present(&host,&port,&stats)==KSN_OK);
+        assert(ksn_view_get_stats(system).displayed.commands==12);
+        for(int y=0;y<15;y++)for(int x=216;x<240;x++){
+            uint16_t expected=0x1041; /* RGB565(16,8,8) */
+            if(x>=226&&x<234&&y>=4&&y<12)expected=0xe986;
+            if(x>=219&&x<223&&y<=10&&!(y&1)){
+                unsigned cell=5-(unsigned)y/2;
+                expected=cell<lit?(clipping&&cell==5?0xfd80:0xd6fc):0x2924;
+            }
+            assert(panel[y*240+x]==expected);
+        }
+    }
+    assert(ksn_view_begin(system,KSN_REPLACE,&tx)==KSN_OK);
+    assert(ksn_recording_emit(system,tx,(ksn_recording_indicator){true,7,false})==KSN_INVALID);
+    assert(ksn_view_cancel(system,tx)==KSN_OK);
+    assert(ksn_view_begin(system,KSN_REPLACE,&tx)==KSN_OK);
+    assert(ksn_notice_emit(system,tx,&notice,(ksn_resource){0},0)==KSN_OK);
+    assert(ksn_recording_emit(system,tx,(ksn_recording_indicator){0})==KSN_OK);
+    assert(ksn_view_submit(system,tx)==KSN_OK);
+    assert(ksn_view_host_present(&host,&port,&stats)==KSN_OK);
+    assert(panel[226]==panel[0]&&ksn_view_get_stats(system).displayed.commands==4);
     puts("KASANE_NOTICE_OK APP busy, copied text, IO retry, quota, removal, independent outcome");
 }

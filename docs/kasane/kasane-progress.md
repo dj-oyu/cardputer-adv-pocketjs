@@ -4,6 +4,16 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14d2 — 録音SYSTEM部品（2026-09-16）
+
+- `ksn_recording_emit`を追加。pad、常時赤色dot、6段の対数レベル表示を8矩形で表現。
+  heap、文字、画像resourceは使わず、通知の後に同じSYSTEM transactionへ追加できる。
+  通知5命令との同時表示は13/16命令。クリッピングは最上段のみamber。
+- active、量子化済みlit（0..6）、clippingのsnapshotを受け、マイクや時計へ依存しない。
+  全14状態のpad内360画素を独立RGB565期待値と照合し、通知復元と入力範囲も検査。
+- H全体ASan/UBSan・O2、通常/Kasane-only build PASS。実アプリの録音状態接続は次段階。
+  現時点では録音表示の既存board overlayを維持する。
+
 ## checkpoint 14d1 — Kasaneアプリ上のSYSTEM通知（2026-09-16）
 
 - `ksn_notice_emit`が通知snapshotから5命令/文字41 Bを追加。pet画像はSYSTEM resource、
