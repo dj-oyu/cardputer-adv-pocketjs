@@ -66,7 +66,12 @@ bool pocket_mp3_decode(pocket_mp3_decoder_t *d, const uint8_t *frame,
             for(unsigned k=0;k<32;k++)
                 sum+=(int32_t)d->history[(d->cursor-k)&31]*d->filter[k];
             d->cursor=(d->cursor+1)&31;
-            sample=sum/16384;
+            // Floor, not truncation toward zero: an arithmetic shift is what the
+            // PIE accumulator readout (EE.SRS.ACCX) computes, so a vector version
+            // of this loop can match it bit for bit. It differs from sum/16384
+            // only for a negative sum with a remainder, by one LSB, and costs
+            // four fewer instructions a sample on this core.
+            sample=sum>>14;
             if(sample>32767) sample=32767;
             if(sample< -32768) sample= -32768;
         }
