@@ -13,10 +13,20 @@ typedef struct { uint32_t bands,transferred_bytes; } ksn_render_stats;
  * identical in both arms. Off restores the per-pixel rational division.
  * Owner task only; read once per rotated span. */
 extern bool g_ksn_image_rotate_step;
+/* Stretched image spans map a destination column to
+ * floor((x-source_x)*source_width + source_width/2)/width) and take the
+ * difference of that quotient inside a span. The numerator advances by the
+ * constant source_width = q*width + r, so with this switch on (default) the
+ * quotient and the remainder advance by one comparison and one conditional
+ * subtraction per pixel instead of dividing twice; the source index, the
+ * source block fetched and the composited pixel are identical in both arms.
+ * Off restores the per-pixel rational division. Owner task only; read once
+ * per stretched span. */
+extern bool g_ksn_image_stretch_step;
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT, source-span IMAGE, alpha and
  * isolated group opacity. The borrowed text port and its immutable resources
- * must remain replayable for pending and committed frames. One shared 96-byte
+ * must remain replayable for pending and committed frames. One shared 112-byte
  * span scratch plus group tile/provenance (264) and provider row (up to 128)
  * fit the 512-byte pixel scratch budget. No component surface.
  * Unsupported commands are rejected before the first transfer. The caller

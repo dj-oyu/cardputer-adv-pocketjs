@@ -42,10 +42,10 @@ static void fill565(uint16_t *dst,unsigned count,uint16_t color){
 /* The type is the format tag: these channels are premultiplied, never straight. */
 typedef struct { uint8_t r,g,b,a; } ksn_premultiplied_rgba8;
 /* One shared span scratch across normal/group paths. Together with the group
- * tile (256), dither bits (8), and a provider's 128-byte row: 488 <= 512 bytes. */
+ * tile (256), dither bits (8), and a provider's 128-byte row: 504 <= 512 bytes. */
 typedef union {
     uint8_t text[64];
-    struct { uint16_t rgb[32];uint8_t alpha[32]; } image;
+    struct { uint16_t rgb[32];uint8_t alpha[32];uint8_t stretch[16]; } image;
     struct { uint16_t rgb[16];uint8_t alpha[16];uint16_t block_rgb[16];uint8_t block_alpha[16]; } rotated;
 } ksn_span_scratch;
 _Static_assert(sizeof(ksn_span_scratch)+256+8+128<=512,"compositor/provider pixel scratch budget");
@@ -59,6 +59,20 @@ static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destinat
     /* Pixel centers, exact integer mapping. Source <=256 and dest <=65535. */
     return (offset*source+source/2)/destination;
 }
+/* Stretched spans: a destination column maps to the source index
+ * floor((dx*source_width + source_width/2)/width), and the index used inside a
+ * span is the difference of that quotient between the span's first column and
+ * the pixel itself. The numerator advances by the constant source_width;
+ * writing source_width = q*width + r (q = floor(source_width/width),
+ * 0 <= r < width), the quotient and the remainder of the SAME division advance
+ * by q + (rem+r >= width) and rem+r-(width if carried). rem and r are both in
+ * [0,width), so the carry is at most one and the stepping reproduces the
+ * per-pixel division exactly, not approximately. The span fills its indices
+ * once (one comparison and one conditional subtraction a pixel, plus one
+ * division a span for q and r) and the caller reads them back beside the pixel
+ * it composites. Bounds: source_width <= 256 and width <= 65535, so the
+ * numerator (<= 2^25) and every intermediate stay in 32 bits, and the span's
+ * own 32-source-pixel clamp keeps an index under 32. */
 /* Rotated spans: step the source quotient instead of dividing per pixel.
  * U = u*source_width is affine in x, so with D = du*source_width written as
  * D = q*B + r (q = floor(D/B), 0 <= r < B) the floor/mod pair of the same
@@ -69,6 +83,7 @@ static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destinat
  * rem is in [0,B). Only the span anchor (one pixel in sixteen) divides, with
  * the truncating quotient corrected to floor for negative numerators. */
 bool g_ksn_image_rotate_step=true;
+bool g_ksn_image_stretch_step=true;
 static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
                              const ksn_draw *d,int x,int y,unsigned *count,ksn_span_scratch *scratch){
     if(d->data.image.rotation){
@@ -148,18 +163,38 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
     if(d->data.image.scale==KSN_IMAGE_2X){n=((dx&1u)+*count+1)/2;dx/=2;dy/=2;}
     else if(d->data.image.scale==KSN_IMAGE_HALF){n=2*(*count)-1;dx=2*dx+1;dy=2*dy+1;}
     else if(d->data.image.scale==KSN_IMAGE_STRETCH){
-        unsigned width=(unsigned)(d->bounds.x1-d->bounds.x0),start=stretch_sample(dx,d->data.image.source_width,width);
-        while(*count>1&&stretch_sample(dx+*count-1,d->data.image.source_width,width)-start>=32)(*count)--;
-        n=stretch_sample(dx+*count-1,d->data.image.source_width,width)-start+1;dx=start;
+        unsigned source=d->data.image.source_width;
+        unsigned width=(unsigned)(d->bounds.x1-d->bounds.x0);
+        /* One numerator for both arms: the lookup divides it, the stepped arm
+         * takes its quotient here and advances the remainder by addition. */
+        unsigned numerator=dx*source+source/2,start=numerator/width,last=start;
+        if(*count>1){
+            last=stretch_sample(dx+*count-1,source,width);
+            while(*count>1&&last-start>=32){
+                (*count)--;
+                last=stretch_sample(dx+*count-1,source,width);
+            }
+        }
+        if(g_ksn_image_stretch_step){
+            /* Source index of each destination column of this span, stepped. */
+            unsigned q=source/width,r=source-q*width,rem=numerator-start*width,index=0;
+            for(unsigned i=0;i<*count;i++){
+                scratch->image.stretch[i]=(uint8_t)index;
+                if(rem>=width-r){rem-=width-r;index+=q+1;}else{rem+=r;index+=q;}
+            }
+        }
+        n=last-start+1;dx=start;
         dy=stretch_sample(dy,d->data.image.source_height,(unsigned)(d->bounds.y1-d->bounds.y0));
     }
     return ksn_core_image_span(core,ticket,false,layer,(uint16_t)index,
         (uint16_t)(d->data.image.source_y+dy),(uint16_t)(d->data.image.source_x+dx),
         (uint16_t)n,scratch->image.rgb,scratch->image.alpha);
 }
-static unsigned image_sample_index(const ksn_draw *d,int x,unsigned offset){
+static unsigned image_sample_index(const ksn_draw *d,const ksn_span_scratch *scratch,int x,unsigned offset){
     if(d->data.image.rotation)return offset;
     if(d->data.image.scale==KSN_IMAGE_STRETCH){
+        /* The span stepped these indices; the division arm re-derives them. */
+        if(g_ksn_image_stretch_step)return scratch->image.stretch[offset];
         unsigned dx=(unsigned)(x-d->bounds.x0),width=(unsigned)(d->bounds.x1-d->bounds.x0);
         return stretch_sample(dx+offset,d->data.image.source_width,width)-stretch_sample(dx,d->data.image.source_width,width);
     }
@@ -308,7 +343,7 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
                     result=image_read(core,ticket,layer,i,d,x,py,&n,scratch);
                     if(result!=KSN_OK)return result;
                     for(unsigned j=0;j<n;j++){
-                        unsigned source=image_sample_index(d,x,j),dest=(unsigned)(x-x0)+j;
+                        unsigned source=image_sample_index(d,scratch,x,j),dest=(unsigned)(x-x0)+j;
                         unsigned alpha=premultiply_over(&tile[dest],image_sample_color(d,scratch,source),d->opacity);
                         if(has_dither&&alpha==255)dither_pixels[dest>>5]&=~(1u<<(dest&31));
                     }
@@ -430,7 +465,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     result=image_read(core,frame.ticket,(ksn_layer)layer,i,d,x,py,&count,&scratch);
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     for(unsigned j=0;j<count;j++){
-                        unsigned source=image_sample_index(d,x,j),index=(unsigned)((py-y)*240+x)+j;
+                        unsigned source=image_sample_index(d,&scratch,x,j),index=(unsigned)((py-y)*240+x)+j;
                         pixels[index]=blend(pixels[index],image_sample_color(d,&scratch,source),
                                             d->opacity,false,x+(int)j,py);
                     }
