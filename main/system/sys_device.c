@@ -4,6 +4,8 @@
 #include "esp_timer.h"
 #include <stddef.h>
 static sys_state state;
+static sys_notify notifications;
+sys_notify *sys_device_notifications(void){return &notifications;}
 sys_state *sys_device_state(void){return &state;}
 bool sys_device_clock_read(sys_clock_state *out){
     return sys_clock_snapshot(&state,(uint64_t)esp_timer_get_time(),out);
@@ -15,6 +17,9 @@ static sys_power_state read_power(void *ctx,uint64_t now){
         .millivolts=valid?battery.millivolts:0,.error=valid?0:1,.valid=valid,.sampled=true};
 }
 void sys_device_step(void){
+    if(sys_notify_deadline(&notifications)!=UINT64_MAX)
+        sys_notify_step(&notifications,(uint64_t)esp_timer_get_time());
+    if(sys_notify_take_changed(&notifications))sys_notify_publish(&state);
     if(sys_clock_take_update()){
         sys_clock_sample wall=sys_clock_read();
         uint64_t now=(uint64_t)esp_timer_get_time();

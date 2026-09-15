@@ -14,6 +14,7 @@ static int fake_gettimeofday(struct timeval *out,void *zone){
 #define gettimeofday fake_gettimeofday
 #include "../main/system/sys_clock.c"
 #include "../main/system/sys_state.c"
+#include "../main/system/sys_notify.c"
 #include "../main/system/sys_device.c"
 int main(void){
     sys_clock_state out;uint32_t dirty;sys_sub sub;
@@ -38,4 +39,14 @@ int main(void){
     assert(sys_clock_snapshot(&state,mono,&out)&&out.source==SYS_CLOCK_PC);
     assert(sys_poll(&state,sub,&dirty)==SYS_OK&&dirty==SYS_CLOCK_CONFIG);
     puts("SYSTEM_CLOCK_DEVICE_OK boot, no periodic wall/ADC IO, coalesced SNTP, holdover, PC fallback");
+    sys_sub a,b;uint32_t id;
+    assert(sys_subscribe(&state,SYS_NOTIFY,&a)==SYS_OK&&sys_subscribe(&state,SYS_NOTIFY,&b)==SYS_OK);
+    assert(sys_poll(&state,a,&dirty)==SYS_OK&&dirty==SYS_NOTIFY);
+    assert(sys_poll(&state,b,&dirty)==SYS_OK&&dirty==SYS_NOTIFY);
+    assert(sys_notify_post(&notifications,1,0,"NOTICE",0,&id)==NOTICE_OK);
+    sys_device_step();
+    assert(sys_poll(&state,a,&dirty)==SYS_OK&&dirty==SYS_NOTIFY);
+    assert(sys_poll(&state,a,&dirty)==SYS_OK&&!dirty);
+    assert(sys_poll(&state,b,&dirty)==SYS_OK&&dirty==SYS_NOTIFY);
+    sys_device_step();assert(sys_poll(&state,b,&dirty)==SYS_OK&&!dirty);
 }

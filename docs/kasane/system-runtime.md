@@ -169,6 +169,22 @@ ADCの500 msキャッシュ等のHAL事情は提供側に閉じ込める。従�
 
 ## 7. 通知レコードとstate
 
+CP14c1実装: `sys_notify`は64 B×9件＋管理24 B＝600 B。System adapterが所有し、
+pethubの旧待機配列を撤去した。post/active snapshot/ack/cancel/snooze/release_ownerと
+期限stepを提供し、SYS_NOTIFYへ独立dirtyを配送する。操作はowner task限定、heap確保なし。
+active snapshotはコピーで、内部レコードの参照を外へ貸さない。
+
+IDはprocess全体のuint32連番で再利用せず、枯渇後はFULL。別owner/終了済み/未知idはGONE。
+slot世代型ではないためSTALEを別に返さない。終端は操作の戻り値で確定し、その場で回収する。
+TTLによる回収後もIDは再利用しない。履歴・終端レコードの長期保持は行わない。
+owner/key重複は既存IDを返し、label・TTL・鳴動を更新しない。明示的な内容更新APIは未実装。
+snoozeは待機枠を使用し、8件満杯ならACTIVEを維持してFULLを返す。
+期限なしのstepは即return、active取得はcached indexから1件をコピーする。
+
+既存pethubの確認・5分snoozeは新stateを使い、鳴動30秒/2秒間隔は既存adapterに残す。
+既存pet通知は互換のSYSTEM owner=1。汎用APP ownerの発行・JS session終了との接続は次段階。
+相対timer4件、wall alarm、表示描画はまだpethub内。通知SYSTEM presenterへは未接続。
+
 固定配列9レコードで、現行相当の待機8件＋表示中1件を保持する。文字列やpayloadをJSから借用しない。
 1件80 B以内を目標とし、id/世代、owner、dedupe key、state、reason、revision、作成時刻、期限、表示方針、短いlabelを収める。
 labelは現行互換のASCII24文字＋終端。日本語/長文はこの容量を暗黙に拡張せず、別仕様で資源参照等を検討する。

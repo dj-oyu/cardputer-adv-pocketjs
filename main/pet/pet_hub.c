@@ -19,6 +19,7 @@ static nvs_handle_t prefs;
 static bool opened, changed;
 static uint64_t ringing, next_tone;
 static char alert[PET_LABEL_CHARS+1];
+static uint32_t alert_id,alert_owner;
 #include "pet_assets.h"
 #include "pet_pixels.h"
 static uint64_t now_ms(void){return esp_timer_get_time()/1000;}
@@ -34,7 +35,8 @@ static bool persist(void) {
     ESP_LOGW("pet","PET_SAVE_FAILED");return false;
 }
 void pet_hub_init(void) {
-    pet_hub_defaults(&hub);opened=nvs_open("pet_hub",NVS_READWRITE,&prefs)==ESP_OK;
+    pet_hub_defaults(&hub);hub.notifications=sys_device_notifications();
+    opened=nvs_open("pet_hub",NVS_READWRITE,&prefs)==ESP_OK;
     if(opened) {
         pet_hub_saved_t s;size_t n=sizeof(s);
         if(nvs_get_blob(prefs,"state",&s,&n)==ESP_OK&&n==sizeof(s)&&s.magic==PET_HUB_MAGIC&&
@@ -88,7 +90,13 @@ bool pet_hub_pump(void) {
                 ESP_LOGI("pet","PET_ACK %u %lu",d[2],(unsigned long)seq);
         }
     }
-    if(!alert[0]&&pet_hub_take(&hub,alert)){ringing=now;next_tone=now;changed=true;}
+    sys_notify_step(hub.notifications,now*1000);sys_notice notice;
+    if(sys_notify_active(hub.notifications,&notice)){
+        if(alert_id!=notice.id){
+            alert_id=notice.id;alert_owner=notice.owner;memcpy(alert,notice.label,sizeof(alert));
+            ringing=now;next_tone=now;changed=true;
+        }
+    }else if(alert_id){alert_id=0;alert[0]=0;changed=true;}
     if(alert[0]&&now-ringing<30000&&now>=next_tone) {
         sound_tone(1046,200,0.35f,NULL,NULL);next_tone=now+2000;
     }
@@ -97,9 +105,11 @@ bool pet_hub_pump(void) {
 bool pet_hub_key(board_key_t key) {
     if(!alert[0]||key==KEY_NONE)return false;
     if(key==KEY_RIGHT) {
-        if(!pet_hub_timer(&hub,"snooze",alert,now_ms()+300000))return true;
+        if(sys_notify_snooze(hub.notifications,alert_owner,alert_id,
+            (uint64_t)esp_timer_get_time()+UINT64_C(300000000))!=NOTICE_OK)return true;
     } else if(key!=KEY_ENTER&&key!=KEY_BACK)return true;
-    alert[0]=0;changed=true;return true;
+    else if(sys_notify_ack(hub.notifications,alert_owner,alert_id)!=NOTICE_OK)return true;
+    alert_id=0;alert[0]=0;changed=true;return true;
 }
 void pet_hub_overlay(uint16_t *pixels, int y, int rows) {
     if(!alert[0]||y>=48)return;

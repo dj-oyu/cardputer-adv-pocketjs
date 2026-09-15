@@ -1,6 +1,8 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "../system/sys_notify.h"
+#define PET_NOTICE_OWNER UINT32_C(1)
 
 #define PET_WIRE_BYTES 48
 // The four limits pet_hub.c publishes through capabilities.get(). They live
@@ -30,8 +32,7 @@ typedef struct {
 typedef struct {
     pet_hub_saved_t saved;
     pet_timer_t timers[PET_MAX_TIMERS];
-    char alerts[PET_MAX_ALERTS][PET_LABEL_CHARS+1];
-    unsigned read, count;
+    sys_notify *notifications;
 } pet_hub_t;
 uint32_t pet_crc(const uint8_t *p, unsigned n);
 void pet_hub_defaults(pet_hub_t *h);

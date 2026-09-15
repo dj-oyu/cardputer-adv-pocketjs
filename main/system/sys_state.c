@@ -41,6 +41,10 @@ bool sys_power_read(const sys_state *s,sys_power_state *out){
     if(!s||!out)return false;
     *out=s->power;return out->sampled;
 }
+void sys_notify_publish(sys_state *s){
+    if(s)for(unsigned i=0;i<SYS_SUBSCRIPTIONS;i++)
+        s->subscriptions[i].pending|=s->subscriptions[i].interest&SYS_NOTIFY;
+}
 static void publish_clock(sys_state *s){
     if(s->clock_revision!=UINT32_MAX)s->clock_revision++;
     for(unsigned i=0;i<SYS_SUBSCRIPTIONS;i++)

@@ -18,14 +18,16 @@ void pet_hub_defaults(pet_hub_t *h) {
     for(unsigned p=0;p<2;p++)for(unsigned w=0;w<2;w++)h->saved.usage[p].used[w]=-1;
 }
 bool pet_hub_notify(pet_hub_t *h, const char *label) {
-    if(h->count==PET_MAX_ALERTS)return false;
-    snprintf(h->alerts[(h->read+h->count)%PET_MAX_ALERTS],PET_LABEL_CHARS+1,"%s",label);
-    h->count++;return true;
+    uint32_t id;
+    return sys_notify_post(h->notifications,PET_NOTICE_OWNER,0,label,0,&id)==NOTICE_OK;
 }
 bool pet_hub_take(pet_hub_t *h, char label[PET_LABEL_CHARS+1]) {
-    if(!h->count)return false;
-    memcpy(label,h->alerts[h->read],PET_LABEL_CHARS+1);
-    h->read=(h->read+1)%PET_MAX_ALERTS;h->count--;return true;
+    /* Destructive legacy queue adapter. The firmware presenter uses active
+     * snapshots and explicit acknowledgement instead. */
+    sys_notify_step(h->notifications,0);sys_notice notice;
+    if(!sys_notify_active(h->notifications,&notice))return false;
+    memcpy(label,notice.label,PET_LABEL_CHARS+1);
+    return sys_notify_ack(h->notifications,PET_NOTICE_OWNER,notice.id)==NOTICE_OK;
 }
 bool pet_hub_packet(pet_hub_t *h, const uint8_t d[PET_WIRE_BYTES]) {
     if(d[0]!=1||d[1]!=1||d[2]>1||(d[3]&~7)||pet_crc(d,44)!=u32(d+44))return false;

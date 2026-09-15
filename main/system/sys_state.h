@@ -5,7 +5,8 @@
 #define SYS_SUBSCRIPTIONS 8
 #define SYS_POWER UINT32_C(1)
 #define SYS_CLOCK_CONFIG UINT32_C(2)
-#define SYS_TOPICS (SYS_POWER|SYS_CLOCK_CONFIG)
+#define SYS_NOTIFY UINT32_C(4)
+#define SYS_TOPICS (SYS_POWER|SYS_CLOCK_CONFIG|SYS_NOTIFY)
 #define SYS_NEVER UINT64_MAX
 #define SYS_POWER_PERIOD_US UINT64_C(1000000)
 typedef struct { uint32_t value; } sys_sub;
@@ -51,6 +52,7 @@ sys_result sys_subscribe(sys_state *,uint32_t interest,sys_sub *out);
 sys_result sys_set_interest(sys_state *,sys_sub,uint32_t interest);
 sys_result sys_unsubscribe(sys_state *,sys_sub);
 sys_result sys_poll(sys_state *,sys_sub,uint32_t *changed);
+void sys_notify_publish(sys_state *);
 /* Owner-only. Snapshot advances an anchor without mutation or wall-clock IO.
  * PC is format-validated input, not authenticated time; RTC/SNTP wins. */
 bool sys_clock_snapshot(const sys_state *,uint64_t now_us,sys_clock_state *out);

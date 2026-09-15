@@ -4,6 +4,19 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14c1 — 共通通知state・pethub接続（2026-09-16）
+
+- `sys_notify`を追加。9件固定、FIFO、ACTIVE、8待機枠、snooze、TTL、owner/key重複抑制、
+  owner解放、process ID枯渇時FULLを実装。snapshotはコピー、期限なしのstepは走査しない。
+- System adapterが600 Bのstoreを所有し、SYS_NOTIFYへdirtyを配送。
+  pethubから旧待機配列208 Bを撤去し、表示/確認/5分snoozeを明示的な通知stateへ接続。
+- ASan/UBSan・O2で8+1容量、満杯snoozeのACTIVE維持、TTL、ID/順序枯渇、100回owner解放、
+  独立dirty、60秒相当の静止、pethub packet/保存対象状態/相対timer/朝alarmの互換を検査。
+  既存System時計・JS電源/時計試験もPASS。
+- 終端idはGONE。汎用JS owner寿命、相対timer移管、鳴動期限移管、SYSTEM presenterは次段階。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,932 / 136,572 B（+416 B）。
+  System store +600 B、pethub集計-192 B、process ID4 Bと配置差を含む。追加heap/taskなし。
+
 ## checkpoint 14b3 — solar・JS時計統合（2026-09-16）
 
 - solarと`pocket.time.wall()`を共通anchorへ統合。PC補完も同じUTC表示に使い、

@@ -13,7 +13,7 @@
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 set(POCKET_RANDOM_SOURCES "pocket/random_seed.c" "pocket/pocket_random.c")
 set(POCKET_INPUT_SOURCES "pocket/pocket_input.c")
-set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.c" "pocket/pocket_power.c" "pocket/pocket_clock.c")
+set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.c" "system/sys_notify.c" "pocket/pocket_power.c" "pocket/pocket_clock.c")
 set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")

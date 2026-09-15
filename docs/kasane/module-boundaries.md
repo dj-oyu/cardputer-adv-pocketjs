@@ -18,6 +18,9 @@ flowchart LR
 ```
 
 Systemにsolar型・pethub型・QuickJS依存はない。CP14b3でsolar/JS時計もanchorへ統合済み。
+
+CP14c1: pethub → sys_notify（受付・確認・snooze）。sys_deviceが通知storeを所有し、
+期限処理とSYS_NOTIFY dirtyを配送する。pethubには通知内容の判断と既存表示・鳴動を残す。
 部品cache、modal、効果と更新参照の責務は[v0.2合成仕様](design-composition.md)に従う。cacheは描画定義を所有し、Pet等のdomain stateや永続保存を所有しない。
 図の実線矢印は「依存する側 → 公開契約を提供する側」。破線はportの実装関係で、イベントの流れではない。
 
