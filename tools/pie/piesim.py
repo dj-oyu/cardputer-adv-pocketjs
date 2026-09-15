@@ -131,8 +131,17 @@ class Sim:
             op, *a = t.replace(',', ' ').split()
             Q = self.q
 
-            def qi(x):
-                return int(x[1])
+            def qi(x, _op=op, _line=t):
+                # The ESP32-S3 PIE unit has exactly q0..q7 (TRM 1.8): a
+                # register name outside that range is either a typo or a
+                # scheduling bug, and int(x[1]) used to silently truncate
+                # "q10" into q1 instead of catching it.
+                m = re.fullmatch(r'q([0-7])', x.strip(','))
+                if not m:
+                    raise ValueError(
+                        f'bad q-register operand {x!r} in {_op!r} ({_line!r}): '
+                        'expected q0..q7')
+                return int(m.group(1))
 
             def arv(x):
                 return self.ar[x.strip('%[]')]

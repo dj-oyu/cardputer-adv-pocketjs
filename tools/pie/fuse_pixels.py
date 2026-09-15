@@ -24,17 +24,31 @@ selects -- and rejected if either gains a stall. The result is written back into
 the asm block as P_ADD/P_SUB/P_MUL macros, which piesim.expand_fuse expands
 either way so the tools can read both.
 
-    python tools/pie/fuse_pixels.py            # report
-    python tools/pie/fuse_pixels.py --write    # rewrite the asm block
+    python tools/pie/fuse_pixels.py                                      # report, garden.c's pixel pass
+    python tools/pie/fuse_pixels.py --write                              # rewrite the asm block
+    python tools/pie/fuse_pixels.py main/scene/canopy_pie.c canopy_pie   # point it at another kernel
+
+`src` and `func` are positional and both default to today's target (garden.c,
+garden_pixels_pie), so the defaults reproduce exactly what this script has
+always done. Pointing it elsewhere is safe but not guaranteed useful: the
+generator assumes a specific shape -- a branch-back loop (`"1:\n"` ... a line
+containing `bnez`) whose body is either raw `EE.VADDS/VSUBS/VMUL` beside plain
+`ee.vld.128.ip %[kp], 16` loads, or the P_ADD/P_SUB/P_MUL macro form those
+unfuse back into. A kernel that already writes every arithmetic op straight in
+`.ld.incp` form (nothing left to fuse), or that walks its constants with a
+hardware `loopgtz` loop instead of `bnez`, does not have that shape, and this
+script says "not applicable: ..." and exits nonzero instead of reporting a
+count that would not mean what it means for garden.c.
 """
 import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 from stalls import operands
 
-SRC = 'main/scene/garden.c'
-AR = re.compile(r'^ee\.(vadds\.s16|vsubs\.s16|vmul\.s16)\s+(q\d), (q\d), (q\d)$')
-KPLD = re.compile(r'^ee\.vld\.128\.ip\s+(q\d), %\[kp\], 16$')
+DEFAULT_SRC = 'main/scene/garden.c'
+DEFAULT_FUNC = 'garden_pixels_pie'
+AR = re.compile(r'^ee\.(vadds\.s16|vsubs\.s16|vmul\.s16)\s+(q[0-7]), (q[0-7]), (q[0-7])$')
+KPLD = re.compile(r'^ee\.vld\.128\.ip\s+(q[0-7]), %\[kp\], 16$')
 MAC = {'vadds.s16': 'P_ADD', 'vsubs.s16': 'P_SUB', 'vmul.s16': 'P_MUL'}
 
 
@@ -50,7 +64,7 @@ def comment_of(line):
 
 def rw(a):
     op = a.split()[0]
-    qs = ['q' + x for x in re.findall(r'\bq(\d)\b', a)]
+    qs = ['q' + x for x in re.findall(r'\bq([0-7])\b', a)]
     defs, uses = operands(op, qs)
     return defs, set(uses)
 
@@ -81,17 +95,42 @@ def plain_pair(op, z, x, y, ld):
     return ['ee.%s %s, %s, %s' % (op, z, x, y), 'ee.vld.128.ip %s, %%[kp], 16' % ld]
 
 
+def not_applicable(msg):
+    print('not applicable: ' + msg)
+    sys.exit(1)
+
+
 def main():
-    lines = open(SRC, encoding='utf-8').read().split('\n')
-    top = [i for i, l in enumerate(lines) if 'garden_pixels_pie(uint16_t' in l][0]
-    lab = [i for i in range(top, len(lines)) if lines[i].strip() == '"1:' + chr(92) + 'n"'][0]
-    end = [i for i in range(lab, len(lines)) if 'bnez' in lines[i]][0]
+    argv = [a for a in sys.argv[1:] if a != '--write']
+    src = argv[0] if len(argv) > 0 else DEFAULT_SRC
+    func = argv[1] if len(argv) > 1 else DEFAULT_FUNC
+
+    lines = open(src, encoding='utf-8').read().split('\n')
+    top_candidates = [i for i, l in enumerate(lines)
+                      if (func + '(') in l and l.rstrip().endswith('{')]
+    if not top_candidates:
+        not_applicable("function '%s' not found in %s" % (func, src))
+    top = top_candidates[0]
+    lab_candidates = [i for i in range(top, len(lines)) if lines[i].strip() == '"1:' + chr(92) + 'n"']
+    if not lab_candidates:
+        not_applicable(
+            "no branch-back loop label ('\"1:\\n\"') found after %s in %s -- "
+            "this generator only understands a bnez loop like garden.c's "
+            "pixel pass, not e.g. a hardware loopgtz loop" % (func, src))
+    lab = lab_candidates[0]
+    end_candidates = [i for i in range(lab, len(lines)) if 'bnez' in lines[i]]
+    if not end_candidates:
+        not_applicable(
+            "no 'bnez' loop-back branch found after the loop label in %s -- "
+            "this generator only understands a bnez loop, not e.g. a "
+            "hardware loopgtz loop" % src)
+    end = end_candidates[0]
     # Idempotent: if the block is already fused, unfuse it first. A generator
     # that only runs on virgin input is one nobody can re-run after editing the
     # arithmetic, which is the case it exists for.
     raw = []
     for t in lines[lab + 1:end + 1]:
-        m = re.match(r'\s*P_(ADD|SUB|MUL)\("(q\d)","(q\d)","(q\d)","(q\d)"\)', t)
+        m = re.match(r'\s*P_(ADD|SUB|MUL)\("(q[0-7])","(q[0-7])","(q[0-7])","(q[0-7])"\)', t)
         if not m:
             raw.append(t)
             continue
@@ -107,6 +146,12 @@ def main():
     n = len(body)
     loads = [i for i in range(n) if KPLD.match(body[i])]
     hosts = [i for i in range(n) if AR.match(body[i])]
+    if not loads:
+        not_applicable(
+            "no plain 'ee.vld.128.ip qN, %%[kp], 16' constant loads in the loop "
+            "body of %s in %s -- either every load is already written straight "
+            "in .ld.incp form (nothing left for this generator to fuse) or the "
+            "constant walk does not use %%[kp] the way garden.c's does" % (func, src))
     base_stalls = stalls(body)
 
     assign, taken, prev = {}, set(), -1
@@ -181,7 +226,7 @@ def main():
         else:
             out.append(raw[i])
     lines[lab + 1:end + 1] = out
-    open(SRC, 'w', encoding='utf-8', newline='\n').write('\n'.join(lines))
+    open(src, 'w', encoding='utf-8', newline='\n').write('\n'.join(lines))
     print('written')
 
 
