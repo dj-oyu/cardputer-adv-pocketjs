@@ -43,8 +43,37 @@
 #define FIR_TAPS  32
 #define FIR_LANES 8
 
-/* The ring twice, plus the window the oldest lane of the oldest output reaches. */
-#define FIR_RING_SPAN (2 * FIR_TAPS + 2 * FIR_LANES)
+/* The ring, held twice: buf[t] and buf[t + FIR_TAPS] both hold history[t % FIR_TAPS],
+ * so an eight-sample window never wraps in the middle of a load. 64 int16 covers
+ * every window the kernel reads (the oldest lane reaches six samples back from
+ * the newest and the widest tap reaches thirty-one below that). */
+#define FIR_RING_SPAN (2 * FIR_TAPS)
+
+/* Push one sample into the doubled ring. `cursor` is where this sample goes, in
+ * the ring's own 0..31 numbering; the second copy is what makes the window
+ * contiguous. */
+static inline void fir_ring_push(int16_t *ring, int cursor, int16_t sample) {
+    ring[cursor] = sample;
+    ring[cursor + FIR_TAPS] = sample;
+}
+
+/* The window the kernel wants for the eight outputs ending at `cursor`: the byte
+ * address of the newest sample of the OLDEST output, i.e. &ring[cursor - 7 + FIR_TAPS].
+ * It must land on a 16-byte boundary, which is a property of the ring's phase
+ * rather than of this call: blocks advance by eight samples, so
+ * (cursor + 25) % 8 is the same for every block once the first one is right
+ * (cursor = 7, 15, 23, 31 ...). The firmware checks that phase once, when the
+ * ring is set up -- FIR_PHASE_OK below -- because a wrong phase would make the
+ * kernel read the wrong samples silently, with no fault to notice. */
+static inline const int16_t *fir_window(const int16_t *ring, int cursor) {
+    const int16_t *w = ring + cursor - (FIR_LANES - 1) + FIR_TAPS;
+    /* No <assert.h> in the firmware's hot path: the caller checks the phase once. */
+    return w;
+}
+
+/* The caller's phase rule, as a constant the ring setup can check: the newest
+ * sample of a block has (cursor % 8) == 7. */
+#define FIR_PHASE_OK(cursor) (((cursor) % FIR_LANES) == (FIR_LANES - 1))
 
 /* The shipping scalar form, kept as the definition the kernel is checked
  * against (tools/pie/test_kernels.py mirrors it). */
