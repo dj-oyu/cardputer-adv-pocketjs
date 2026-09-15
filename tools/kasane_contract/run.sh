@@ -86,6 +86,13 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
     tools/kasane_contract/test_coverage_runs.c -o "$out/coverage-runs"
   "$out/coverage-runs"
+  # Candidate 4c: the row profile. The test includes ksn_render.c -- the table
+  # and `sample` it is compared against are statics there -- so only the core and
+  # the cache are linked beside it.
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
+    tools/kasane_contract/test_row_table.c -o "$out/row-table"
+  "$out/row-table"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_modal.c \
     tools/kasane_contract/test_composition.c -o "$out/composition"
@@ -111,5 +118,11 @@ cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_C
   -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
   tools/kasane_contract/test_coverage_runs.c -o "$out/coverage-count"
 "$out/coverage-count"
+# The same arm for the row table: entries into `sample` per frame and into the
+# builder, so "the per-pixel sampling became a load" is a count of calls.
+cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_COUNT_CALLS \
+  -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
+  tools/kasane_contract/test_row_table.c -o "$out/row-table-count"
+"$out/row-table-count"
 printf '#include "ksn_api.h"\n#include "ksn_ports.h"\n#include "ksn_core.h"\n#include "ksn_cache.h"\n#include "ksn_modal.h"\n#include "ksn_view_host.h"\n#include "ksn_runtime.h"\n' | \
   c++ -std=c++17 -Wall -Wextra -Werror -Imain/ui/kasane -x c++ -fsyntax-only -
