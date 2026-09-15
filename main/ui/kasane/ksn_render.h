@@ -5,6 +5,42 @@
 extern "C" {
 #endif
 typedef struct { uint32_t bands,transferred_bytes; } ksn_render_stats;
+/* Per-phase render counters, the measurement boundary 7 of
+ * docs/perf/kasane-opt-survey.md says is missing. Every field is a COUNT of
+ * events that happened, never a duration: `_cy` sums the CPU cycle reads
+ * (`rsr.ccount`, esp_cpu_get_cycle_count) taken either side of one bracket and
+ * `_n` is how many times that bracket was entered. They are logged as counts
+ * and are never divided by the clock in this layer, because a counter that
+ * reports microseconds reports the measurement as much as the subject
+ * (docs/perf/pie-simd.md 4.2, 6.5). A host build has no `rsr.ccount`, so there
+ * `_cy` stays 0 and only the entry counts are available (pie-simd.md 6.7):
+ * time is a device question, counts are a host question.
+ *
+ * The five brackets: fill = one fill565 call (a band background, or one row of
+ * an opaque rect), span = one text->span, tile = one whole render_group,
+ * blend = one per-pixel composite loop entered (covers+sample+blend, or the
+ * group's child loop), read = one ksn_core_read made by the renderer. `tile`
+ * brackets the group's composite as a whole and so contains the reads, spans
+ * and blends the group makes, which is why the five sums are not additive.
+ *
+ * g_ksn_prof gates the reads and defaults to 0. With it off the render path
+ * pays a load and a branch per bracket and no cycle read, and the pixels are
+ * exactly what they were before this existed; the instrument and every
+ * optimization it is used to judge go in separate commits (pie-simd.md 6.1). */
+typedef struct {
+    uint32_t fill_cy,span_cy,tile_cy,blend_cy,read_cy;
+    uint32_t fill_n,span_n,tile_n,blend_n,read_n;
+} ksn_render_prof;
+extern int g_ksn_prof;
+extern ksn_render_prof g_ksn_render_prof;
+/* Snapshot and zero, so one log window can print its own counts. */
+void ksn_render_prof_read(ksn_render_prof *out);
+/* ksn_render_stats.bands is one bit per 8-row strip. The band count and the
+ * number of contiguous runs are what the log line was missing: a 3.37 ms send
+ * can be 7 bands or 14, and `bytes` alone cannot say which
+ * (kasane-opt-survey.md 10.1, and board.c re-windows on every discontinuity). */
+unsigned ksn_render_band_count(uint32_t mask);
+unsigned ksn_render_band_runs(uint32_t mask);
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT coverage, command alpha and
  * isolated group opacity. The borrowed text port and its immutable resources

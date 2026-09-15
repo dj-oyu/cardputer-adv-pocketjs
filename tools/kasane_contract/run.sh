@@ -48,6 +48,12 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_render.c -o "$out/render"
   "$out/render"
+  # Boundary 7: the render path's phase counts, and the pixel identity of the
+  # two arms inside one binary -- the switch off must not move a pixel, and the
+  # counts must not move with it off.
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_render_prof.c -o "$out/render-prof"
+  "$out/render-prof"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_primitives.c -o "$out/primitives"
   "$out/primitives"

@@ -40,6 +40,7 @@
 #include "vmprobe.h"
 #include "vm_wake.h"
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
 extern const char hello_start[] asm("_binary_main_js_start");
@@ -113,6 +114,20 @@ static double render_sum, present_sum, turn_sum;
 static double kernel_sum;
 #endif
 static unsigned painted, ticks;
+// Boundary 7 of docs/perf/kasane-opt-survey.md: the render path's own counts,
+// summed over the same 30 frames the millisecond terms cover. Counts only --
+// `cy` is rsr.ccount read inside the renderer and 0 with g_ksn_prof off, and
+// nothing here is divided by the clock (ksn_render.h says what each field is
+// and why a counter is not a duration).
+static ksn_render_prof prof_sum;
+static unsigned band_count_last, band_runs_last, band_mask_last;
+static void prof_accumulate(const ksn_render_prof *frame){
+    prof_sum.fill_cy+=frame->fill_cy;prof_sum.fill_n+=frame->fill_n;
+    prof_sum.span_cy+=frame->span_cy;prof_sum.span_n+=frame->span_n;
+    prof_sum.tile_cy+=frame->tile_cy;prof_sum.tile_n+=frame->tile_n;
+    prof_sum.blend_cy+=frame->blend_cy;prof_sum.blend_n+=frame->blend_n;
+    prof_sum.read_cy+=frame->read_cy;prof_sum.read_n+=frame->read_n;
+}
 // Hand-written PIE kernels for the two ops this renderer actually asks for
 // (opaque fill, coverage-mask blend); anything they cannot honour exactly is
 // declined and the Rust software path draws it.
@@ -1045,12 +1060,74 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
         if(stats.bands) {
             redraw=false;painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
+            // This frame's counts into the window's. The millisecond columns on
+            // the line are averages and these are sums, which the line says with
+            // `frames=`; the renderer resets its accumulators on read, so the
+            // window cannot inherit a frame from the last one.
+            {ksn_render_prof frame_prof;ksn_render_prof_read(&frame_prof);prof_accumulate(&frame_prof);}
+            // Band distribution of the frame whose `bytes=` is printed. `bands`
+            // is a count and `band_runs` the number of contiguous runs, because
+            // 7 bands of 8 rows and 14 of 4 leave the same bytes behind and the
+            // send average cannot tell them apart (kasane-opt-survey.md 10.1).
+            band_mask_last=stats.bands;
+            band_count_last=ksn_render_band_count(stats.bands);
+            band_runs_last=ksn_render_band_runs(stats.bands);
             if(frames==1)ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");
             if(painted==30) {
-                ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f bytes=%u",
+                ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f "
+                         "bytes=%u bands=%u band_runs=%u band_mask=0x%05x prof=%d "
+                         "fill_n=%u fill_cy=%u span_n=%u span_cy=%u tile_n=%u tile_cy=%u "
+                         "blend_n=%u blend_cy=%u read_n=%u read_cy=%u frames=%u",
                          ticks?turn_sum/ticks/1000.0:0.0,render_sum/30/1000.0,
-                         present_sum/30/1000.0,(unsigned)stats.transferred_bytes);
+                         present_sum/30/1000.0,(unsigned)stats.transferred_bytes,
+                         band_count_last,band_runs_last,band_mask_last,g_ksn_prof,
+                         (unsigned)prof_sum.fill_n,(unsigned)prof_sum.fill_cy,
+                         (unsigned)prof_sum.span_n,(unsigned)prof_sum.span_cy,
+                         (unsigned)prof_sum.tile_n,(unsigned)prof_sum.tile_cy,
+                         (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
+                         (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,painted);
+#ifndef KASANE_AB
+#define KASANE_AB 0
+#endif
+#if KASANE_AB
+                // Same-binary A/B, one window per arm, off in the shipping
+                // build -- shell.c's SCENE_AB is the same shape for the home
+                // screen. The arms rotate the render path's runtime switches one
+                // at a time: every "off" window has an all-on neighbour on each
+                // side in the same scene, so the paired difference is that one
+                // switch, and two builds are not a measurement
+                // (docs/perf/pie-simd.md 6.2, 6.3). Each optimization appends one
+                // row; the line carries this window's own counts next to the
+                // terms that must not move, which are its control column. In the
+                // prof-off arm the count columns read 0 by construction, because
+                // that arm is what defines the control.
+                {
+                    static const struct {const char *name;int *flag;} switches[]={
+                        {"prof",&g_ksn_prof},
+                    };
+                    const unsigned rows=sizeof(switches)/sizeof(switches[0]);
+                    static unsigned ab_arm;
+                    const unsigned arm=ab_arm%(rows+1);
+                    char states[64]={0};
+                    for(unsigned r=0;r<rows;r++) {
+                        char one[24];
+                        snprintf(one,sizeof(one),"%s%s=%d",r?" ":"",switches[r].name,*switches[r].flag);
+                        strncat(states,one,sizeof(states)-strlen(states)-1);
+                    }
+                    ESP_LOGI("kasane","AB arm=%u %s turn_ms=%.2f render_ms=%.2f send_ms=%.2f "
+                             "bands=%u band_runs=%u fill_n=%u span_n=%u tile_n=%u blend_n=%u "
+                             "read_n=%u frames=%u",
+                             arm,states,ticks?turn_sum/ticks/1000.0:0.0,render_sum/30/1000.0,
+                             present_sum/30/1000.0,band_count_last,band_runs_last,
+                             (unsigned)prof_sum.fill_n,(unsigned)prof_sum.span_n,
+                             (unsigned)prof_sum.tile_n,(unsigned)prof_sum.blend_n,
+                             (unsigned)prof_sum.read_n,painted);
+                    for(unsigned r=0;r<rows;r++)*switches[r].flag=arm!=r+1;
+                    ab_arm++;
+                }
+#endif
                 render_sum=0;present_sum=0;painted=0;turn_sum=0;ticks=0;
+                prof_sum=(ksn_render_prof){0};
             }
         }
         return ESP_OK;

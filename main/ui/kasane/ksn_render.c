@@ -2,7 +2,52 @@
 #include <string.h>
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
+#include "esp_cpu.h"
 #endif
+
+/* Boundary 7a-7b of docs/perf/kasane-opt-survey.md: the render path's own
+ * counts. See ksn_render.h for what each field is and what it is not. */
+int g_ksn_prof=0;
+ksn_render_prof g_ksn_render_prof;
+void ksn_render_prof_read(ksn_render_prof *out){
+    *out=g_ksn_render_prof;
+    g_ksn_render_prof=(ksn_render_prof){0};
+}
+unsigned ksn_render_band_count(uint32_t mask){
+    unsigned count=0;
+    while(mask){mask&=mask-1u;count++;}
+    return count;
+}
+unsigned ksn_render_band_runs(uint32_t mask){
+    unsigned runs=0;bool in_run=false;
+    for(unsigned band=0;band<17;band++){
+        bool set=((mask>>band)&1u)!=0;
+        if(set&&!in_run)runs++;
+        in_run=set;
+    }
+    return runs;
+}
+#ifdef ESP_PLATFORM
+/* One cycle read. The fences keep the compiler from moving work across the
+ * bracket, the same shape main/scene/garden.c and flower.c use; `rsr.ccount` is
+ * one instruction, unlike esp_timer_get_time at 0.90 us a call. */
+static uint32_t ksn_cycles(void){
+    uint32_t cycles;
+    __asm__ __volatile__("":::"memory");
+    cycles=esp_cpu_get_cycle_count();
+    __asm__ __volatile__("":::"memory");
+    return cycles;
+}
+#else
+/* No rsr.ccount without IDF headers, so the cycle columns stay 0 and only the
+ * entry counts are available on host (docs/perf/pie-simd.md 6.7). */
+static uint32_t ksn_cycles(void){return 0;}
+#endif
+/* The switch is cached per bracket: these sit in per-row and per-pixel loops,
+ * and a global load inside a bracket would be part of what it measures. Each
+ * BEGIN opens a block and declares its own ksn_t0, so nesting cannot collide. */
+#define KSN_PROF_BEGIN() bool ksn_on=g_ksn_prof!=0;uint32_t ksn_t0=ksn_on?ksn_cycles():0u
+#define KSN_PROF_END(field) do{if(ksn_on){g_ksn_render_prof.field##_cy+=ksn_cycles()-ksn_t0;g_ksn_render_prof.field##_n++;}}while(0)
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(KSN_PIE_FILL_MODEL)
 /* The caller seeds the first aligned destination pixel. Broadcasting from
@@ -129,7 +174,10 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx t
     bool has_dither=false;
     int left=240,right=0,top=y+rows,bottom=y;
     for(unsigned i=first;i<=end;i++){
-        ksn_result result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
+        ksn_result result;
+        {KSN_PROF_BEGIN();
+        result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
+        KSN_PROF_END(read);}
         if(result!=KSN_OK)return result;
         const ksn_draw *d=&command.draw;
         if(!command.visible||!d->opacity)continue;
@@ -155,7 +203,10 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx t
          * opaque child. Two words avoid variable 64-bit shifts on ESP32-S3. */
         uint32_t dither_pixels[2]={0,0};
         for(unsigned i=first;i<=end;i++){
-            ksn_result result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
+            ksn_result result;
+            {KSN_PROF_BEGIN();
+            result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
+            KSN_PROF_END(read);}
             if(result!=KSN_OK)return result;
             bool child_dither=command.draw.kind==KSN_GRADIENT&&command.draw.data.gradient.dither;
             const ksn_draw *d=&command.draw;
@@ -163,9 +214,12 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx t
                py<d->clip.y0||py>=d->clip.y1||x0>=d->bounds.x1||x0>=d->clip.x1||
                x0+count<=d->bounds.x0||x0+count<=d->clip.x0)continue;
             if(command.draw.kind==KSN_TEXT){
+                {KSN_PROF_BEGIN();
                 result=text->span(text->ctx,&command.draw,command.reveal,x0,py,(unsigned)count,coverage);
+                KSN_PROF_END(span);}
                 if(result!=KSN_OK)return result;
             }
+            {KSN_PROF_BEGIN();
             for(int x=0;x<count;x++)if(covers(&command,x0+x,py)){
                 ksn_rgba color=sample(&command,x0+x,py);
                 if(command.draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage[x]);
@@ -176,12 +230,15 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx t
                     else if(alpha==255)dither_pixels[(unsigned)x>>5]&=~bit;
                 }
             }
+            KSN_PROF_END(blend);}
         }
+        {KSN_PROF_BEGIN();
         for(int x=0;x<count;x++){
             unsigned index=(unsigned)((py-y)*240+x0+x);
             bool dither=has_dither&&(dither_pixels[(unsigned)x>>5]&(1u<<((unsigned)x&31u)))!=0;
             pixels[index]=group_over(pixels[index],tile[x],opacity,dither,x0+x,py);
         }
+        KSN_PROF_END(blend);}
     }
     return KSN_OK;
 }
@@ -208,14 +265,18 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     if(!mask)return ksn_core_presented(core,frame.ticket);
     ksn_frame_command command;
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
+        {KSN_PROF_BEGIN();
         result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,i,&command);
+        KSN_PROF_END(read);}
         if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
         if(command.draw.kind<KSN_RECT||command.draw.kind>KSN_TEXT){
             ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
         }
         if(command.draw.kind==KSN_TEXT){
+            {KSN_PROF_BEGIN();
             result=display->text&&display->text->span?
                 display->text->span(display->text->ctx,&command.draw,command.reveal,0,0,0,NULL):KSN_UNSUPPORTED;
+            KSN_PROF_END(span);}
             if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
         }
     }
@@ -224,18 +285,26 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     for(unsigned band=0;band<17;band++){
         if(!(mask&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
+        {KSN_PROF_BEGIN();
         fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
+        KSN_PROF_END(fill);}
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
+            {KSN_PROF_BEGIN();
             result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,i,&command);
+            KSN_PROF_END(read);}
             if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
             if(command.group_begin){
                 unsigned first=i;uint8_t opacity=command.group_opacity;
                 while(!command.group_end){
                     if(++i>=frame.next[layer].commands){ksn_core_failed(core,frame.ticket);return KSN_INVALID;}
+                    {KSN_PROF_BEGIN();
                     result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,(uint16_t)i,&command);
+                    KSN_PROF_END(read);}
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 }
+                {KSN_PROF_BEGIN();
                 result=render_group(core,display->text,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,pixels);
+                KSN_PROF_END(tile);}
                 if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 continue;
             }
@@ -255,27 +324,36 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                 uint8_t coverage[64];
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=64){
                     unsigned count=(unsigned)(x1-x);if(count>64)count=64;
+                    {KSN_PROF_BEGIN();
                     result=display->text->span(display->text->ctx,d,command.reveal,x,py,count,coverage);
+                    KSN_PROF_END(span);}
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+                    {KSN_PROF_BEGIN();
                     for(unsigned i=0;i<count;i++)if(coverage[i]){
                         unsigned index=(unsigned)((py-y)*240+x)+i;
                         ksn_rgba color=(d->data.text.color&0xffffff00u)|mul8(d->data.text.color&255,coverage[i]);
                         pixels[index]=blend(pixels[index],color,d->opacity,false,x+(int)i,py);
                     }
+                    KSN_PROF_END(blend);}
                 }
                 continue;
             }
             if(d->kind==KSN_RECT&&d->opacity==255&&(d->data.shape.color&255)==255){
                 uint16_t color=rgb565(d->data.shape.color);
-                for(int py=y0;py<y1;py++)
+                for(int py=y0;py<y1;py++){
+                    {KSN_PROF_BEGIN();
                     fill565(pixels+(py-y)*240+x0,(unsigned)(x1-x0),color);
+                    KSN_PROF_END(fill);}
+                }
                 continue;
             }
+            {KSN_PROF_BEGIN();
             for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x++)if(covers(&command,x,py)){
                 unsigned index=(unsigned)((py-y)*240+x);
                 pixels[index]=blend(pixels[index],sample(&command,x,py),d->opacity,
                                     d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
             }
+            KSN_PROF_END(blend);}
         }
         result=display->present(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
         if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
