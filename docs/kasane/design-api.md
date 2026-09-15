@@ -62,7 +62,7 @@ begin引数にlayerを渡さない。template/instanceも発行側layerに限定
 | modal | `ksn_view_modal_open/close` | APP REPLACE内。solid/dim-live、表示成功後に入力scopeとfocusを確定 |
 
 `draw_kinds`はRECT、ROUND_RECT、STROKE、GRADIENT、TEXT、IMAGE、`cache_kinds`は先頭3種を公開する。
-グループ透明度は対応、native animationとfrosted modalはfalse。CP12からIMAGEもnativeで描画する。
+グループ透明度と画像のnative animationは対応、frosted modalはfalse。CP12からIMAGEもnativeで描画する。
 すりガラス画素フィルタのPIE対応はfrosted modalの完成を意味しない。
 
 CP9のnative TEXTは`ksn_display_port.text`のcoverage portを必須とする。省略時は
@@ -141,7 +141,38 @@ setRect/setClip/setVisibleも使用可能。資源/source/scaleの変更はREPLA
 1/1024回転へ丸める。正弦はFlashのQ14表。pixel centerをこの基底の転置でsourceへ写像する。
 回転後のAABBをdamageへ含める。命令32 Bを維持するため伸縮/回転モードのvariant/frameは
 0..255（かつ資源の実範囲内）。従来の明示scaleモードは回転非対応、16 bit indexを維持する。
-`features().imageStretch/imageRotation`で確認する。自動補間の公開はCP17–18。
+`features().imageStretch/imageRotation`で確認する。
+
+### 画像の自動補間（CP17a）
+
+```js
+const motion = image.animate(tx, {
+  from: {bounds: [16, 20, 48, 52], rotation: 0},
+  to: {bounds: [100, 24, 196, 120], rotation: 720},
+  durationMs: 1200,
+  easing: 'ease-in-out',
+  repeat: 'ping-pong'
+});
+// 後の更新で停止／終端へ移動する。
+scene.patch(tx => motion.stop(tx));
+scene.patch(tx => motion.finish(tx));
+const status = motion.poll();
+```
+
+STRETCH画像1命令の4辺と中心回転を一緒に補間する。clipは固定。
+from/toのboundsは必須、rotationは既定0。角度は-32768..32767 degree、
+0→720は2回転。durationMsは整数1..86400000、easingはlinear（既定）、
+ease-out、ease-in-out、step。repeatはonce（既定）、loop、ping-pong。
+開始姿勢のLCD表示確定から時間を計る。JSで毎frameの座標更新をする必要はない。
+提出中・転送再試行中の姿勢は固定し、次回に現在時刻へ追いつく。
+
+stopは最後に表示確定した姿勢を維持、finishはtoを提出する。どちらもtxの取消対象。
+動作中のsetRect/setRotationはBUSYでtx全体を取り消す。同じtxでstopしてから手動更新できる。
+pollはpending/running/finished/stopped/discardedを返す。完了は表示確定後に見える。
+終了済み枠が再利用された場合やREPLACE/APP終了後はdiscarded。完了履歴は無制限に保持しない。
+APP 6件、SYSTEM 2件。初回使用時に2バンク合計896 Bを確保し、補間中は確保しない。
+`features().animation`とcapacity.animationsで能力を確認する。
+native deadline/hidden/reduce-motion窓口はあるが、電源管理・mainの待機期限への統合は残る。
 
 PPT2 providerは不変bytesを登録時に検証し、128 Bの行でRGB565/straight alphaへ変換する。
 全画像をheapへ展開せず、ペット選択のglobal状態に依存しない。

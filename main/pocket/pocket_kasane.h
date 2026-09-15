@@ -14,6 +14,10 @@ void pocket_kasane_reset(void);
 
 bool pocket_kasane_active(void);
 bool pocket_kasane_has_submission(void);
+ksn_result pocket_kasane_advance(uint64_t now_us);
+bool pocket_kasane_animation_pending(void);
+void pocket_kasane_animations_presented(uint64_t now_us);
+void pocket_kasane_set_animation_time(uint64_t now_us);
 bool pocket_kasane_needs_present(void);
 void pocket_kasane_invalidate(void);
 ksn_result pocket_kasane_present(const ksn_display_port *display,

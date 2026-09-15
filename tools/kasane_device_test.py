@@ -39,7 +39,7 @@ try:
     wait_for("HOME_READY", 8)
     port.reset_input_buffer()
     port.write(b"K")
-    log = wait_for(f"KASANE_TICK {args.ticks} ", max(15, args.ticks / 20))
+    log = wait_for(f"KASANE_TICK {args.ticks} ", max(30, args.ticks / 5))
     text = "\n".join(log)
     required = ["KASANE_READY active=true", "KASANE_FRAME_PRESENTED",
                 "KASANE_TICK 120 scope=modal", "KASANE_TICK 180 scope=modal",

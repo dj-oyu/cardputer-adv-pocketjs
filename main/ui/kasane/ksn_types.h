@@ -41,10 +41,14 @@ typedef struct {
         struct { uint16_t variant,frame; } image;
     } value;
 } ksn_change;
-typedef enum { KSN_TRANSLATE, KSN_OPACITY, KSN_COLOR, KSN_REVEAL } ksn_motion_property;
+typedef enum { KSN_TRANSLATE, KSN_OPACITY, KSN_COLOR, KSN_REVEAL, KSN_TRANSFORM } ksn_motion_property;
 typedef enum { KSN_LINEAR, KSN_EASE_OUT_CUBIC, KSN_EASE_IN_OUT_CUBIC, KSN_STEP } ksn_easing;
 typedef enum { KSN_ONCE, KSN_LOOP, KSN_PINGPONG } ksn_repeat;
-typedef union { struct { int16_t x,y; } offset; ksn_rgba color; uint16_t scalar; } ksn_motion_value;
+/* Unwrapped rotation in 1/1024 turns. Two turns are 2048, not zero. */
+typedef struct { ksn_rect bounds; int32_t rotation; } ksn_pose;
+typedef union { struct { int16_t x,y; } offset; ksn_rgba color; uint16_t scalar; ksn_pose pose; } ksn_motion_value;
+typedef enum { KSN_ANIMATION_DISCARDED, KSN_ANIMATION_PENDING, KSN_ANIMATION_RUNNING,
+               KSN_ANIMATION_FINISHED, KSN_ANIMATION_STOPPED } ksn_animation_status;
 typedef struct {
     ksn_ref first; uint16_t count; ksn_motion_property property;
     ksn_motion_value from,to; uint32_t duration_ms; ksn_easing easing; ksn_repeat repeat;

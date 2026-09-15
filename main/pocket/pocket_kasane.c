@@ -37,9 +37,9 @@ static kasane_state *state;
 /* Never recycle identities across host reset while old JS wrappers can live. */
 static uint32_t ref_serial;
 static JSClassID tx_class, modal_class, ref_class, template_class;
-static JSClassID instance_class, ticket_class, image_class;
+static JSClassID instance_class, ticket_class, image_class, animation_class;
 static JSRuntime *tx_rt, *modal_rt, *ref_rt, *template_rt;
-static JSRuntime *instance_rt, *ticket_rt, *image_rt;
+static JSRuntime *instance_rt, *ticket_rt, *image_rt, *animation_rt;
 
 static const char *result_code(ksn_result result) {
     switch(result) {
@@ -111,6 +111,7 @@ static const JSClassDef template_def={.class_name="KasaneTemplate"};
 static const JSClassDef instance_def={.class_name="KasaneInstanceRef"};
 static const JSClassDef ticket_def={.class_name="KasaneTicket"};
 static const JSClassDef image_def={.class_name="KasaneImageResource"};
+static const JSClassDef animation_def={.class_name="KasaneAnimation"};
 
 static ref_slot *ref_from(JSContext *ctx, JSValueConst self, const char *op) {
     uint32_t handle=opaque_value(self,ref_class);
@@ -458,12 +459,15 @@ static bool property_u16(JSContext *ctx,JSValueConst spec,const char *key,uint16
     *out=(uint16_t)n;return true;
 }
 
-static bool parse_rotation(JSContext *ctx,JSValueConst value,uint16_t *out,const char *op){
+static bool parse_angle(JSContext *ctx,JSValueConst value,int32_t *out,const char *op){
     double degrees;
     if(!JS_IsNumber(value)||JS_ToFloat64(ctx,&degrees,value)<0||!isfinite(degrees)||degrees<-32768||degrees>32767){
         throw_result(ctx,KSN_INVALID,op);return false;
     }
-    long turns=lround(degrees*(1024.0/360.0));
+    *out=(int32_t)lround(degrees*(1024.0/360.0));return true;
+}
+static bool parse_rotation(JSContext *ctx,JSValueConst value,uint16_t *out,const char *op){
+    int32_t turns;if(!parse_angle(ctx,value,&turns,op))return false;
     *out=(uint16_t)((turns%1024+1024)%1024);return true;
 }
 static JSValue js_pet_image(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -665,6 +669,59 @@ REF_SETTER(js_ref_reveal,KSN_SET_REVEAL,"kasane.ref.setReveal")
 REF_SETTER(js_ref_image,KSN_SET_IMAGE_FRAME,"kasane.ref.setImageFrame")
 REF_SETTER(js_ref_rotation,KSN_SET_ROTATION,"kasane.ref.setRotation")
 
+static bool parse_pose(JSContext *ctx,JSValueConst spec,const char *key,ksn_pose *out,const char *op){
+    JSValue value=JS_GetPropertyStr(ctx,spec,key);
+    if(JS_IsException(value))return false;
+    if(!JS_IsObject(value)){JS_FreeValue(ctx,value);throw_result(ctx,KSN_INVALID,op);return false;}
+    JSValue bounds=JS_GetPropertyStr(ctx,value,"bounds");
+    bool ok=!JS_IsException(bounds)&&parse_rect(ctx,bounds,&out->bounds,op);JS_FreeValue(ctx,bounds);
+    if(ok){JSValue angle=JS_GetPropertyStr(ctx,value,"rotation");
+        ok=!JS_IsException(angle)&&(JS_IsUndefined(angle)||parse_angle(ctx,angle,&out->rotation,op));
+        JS_FreeValue(ctx,angle);}
+    JS_FreeValue(ctx,value);return ok;
+}
+static bool parse_choice(JSContext *ctx,JSValueConst spec,const char *key,const char *const *names,unsigned count,
+                          unsigned *out,const char *op){
+    JSValue value=JS_GetPropertyStr(ctx,spec,key);if(JS_IsException(value))return false;
+    if(JS_IsUndefined(value)){*out=0;JS_FreeValue(ctx,value);return true;}
+    uint16_t bytes;const char *s=text_string(ctx,value,&bytes,op);JS_FreeValue(ctx,value);if(!s)return false;
+    unsigned i=0;while(i<count&&(strlen(names[i])!=bytes||memcmp(names[i],s,bytes)))i++;
+    JS_FreeCString(ctx,s);if(i==count){throw_result(ctx,KSN_INVALID,op);return false;}*out=i;return true;
+}
+static JSValue js_ref_animate(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    const char *op="kasane.ref.animate";ref_slot *slot=ref_from(ctx,self,op);if(!slot)return JS_EXCEPTION;
+    ksn_tx tx=argc?tx_from(ctx,argv[0],op):(ksn_tx){0};if(!tx.value)return JS_EXCEPTION;
+    if(argc<2||!JS_IsObject(argv[1]))return throw_result(ctx,KSN_INVALID,op);
+    if(slot->status==REF_CANDIDATE&&slot->ticket.value!=tx.value)return throw_result(ctx,KSN_STALE,op);
+    ksn_motion motion={.first=slot->ref,.count=1,.property=KSN_TRANSFORM};
+    if(!parse_pose(ctx,argv[1],"from",&motion.from.pose,op)||!parse_pose(ctx,argv[1],"to",&motion.to.pose,op))return JS_EXCEPTION;
+    JSValue duration=JS_GetPropertyStr(ctx,argv[1],"durationMs");if(JS_IsException(duration))return duration;
+    double n;bool ok=number_in(ctx,duration,1,86400000,&n);JS_FreeValue(ctx,duration);
+    if(!ok)return throw_result(ctx,KSN_INVALID,op);
+    motion.duration_ms=(uint32_t)n;
+    static const char *const easings[]={"linear","ease-out","ease-in-out","step"};
+    static const char *const repeats[]={"once","loop","ping-pong"};unsigned easing,repeat;
+    if(!parse_choice(ctx,argv[1],"easing",easings,4,&easing,op)||!parse_choice(ctx,argv[1],"repeat",repeats,3,&repeat,op))return JS_EXCEPTION;
+    motion.easing=(ksn_easing)easing;motion.repeat=(ksn_repeat)repeat;
+    JSValue object=JS_NewObjectClass(ctx,animation_class);if(JS_IsException(object))return object;
+    ksn_animation id;ksn_result result=ksn_runtime_animate(view(),tx,&motion,&id);
+    if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
+    JS_SetOpaque(object,(void *)(uintptr_t)id.value);return object;
+}
+static JSValue animation_stop(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,bool finish){
+    const char *op=finish?"kasane.animation.finish":"kasane.animation.stop";
+    ksn_animation id={opaque_value(self,animation_class)};if(!id.value)return throw_result(ctx,KSN_STALE,op);
+    ksn_tx tx=argc?tx_from(ctx,argv[0],op):(ksn_tx){0};if(!tx.value)return JS_EXCEPTION;
+    ksn_result result=ksn_view_stop_animation(view(),tx,id,finish);
+    return result==KSN_OK?JS_UNDEFINED:throw_result(ctx,result,op);
+}
+static JSValue js_animation_stop(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){return animation_stop(ctx,self,argc,argv,false);}
+static JSValue js_animation_finish(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){return animation_stop(ctx,self,argc,argv,true);}
+static JSValue js_animation_poll(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)argc;(void)argv;static const char *const names[]={"discarded","pending","running","finished","stopped"};
+    ksn_animation_status status=ksn_view_poll_animation(view(),(ksn_animation){opaque_value(self,animation_class)});
+    return JS_NewString(ctx,names[status]);
+}
 static JSValue js_instance_place(JSContext *ctx, JSValueConst self, int argc,
                                  JSValueConst *argv) {
     uint32_t raw=opaque_value(self,instance_class);
@@ -795,6 +852,9 @@ MUTATOR(js_ref_text,tx_class,true,"kasane.ref.setText")
 MUTATOR(js_ref_reveal,tx_class,true,"kasane.ref.setReveal")
 MUTATOR(js_ref_image,tx_class,true,"kasane.ref.setImageFrame")
 MUTATOR(js_ref_rotation,tx_class,true,"kasane.ref.setRotation")
+MUTATOR(js_ref_animate,tx_class,true,"kasane.ref.animate")
+MUTATOR(js_animation_stop,tx_class,true,"kasane.animation.stop")
+MUTATOR(js_animation_finish,tx_class,true,"kasane.animation.finish")
 MUTATOR(js_instance_place,tx_class,true,"kasane.instance.place")
 MUTATOR(js_instance_visible,tx_class,true,"kasane.instance.setVisible")
 MUTATOR(js_modal_open,modal_class,false,"kasane.modal.open")
@@ -976,11 +1036,12 @@ static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
     PUT(out,"imageRotation",JS_NewBool(ctx,true));
     PUT(out,"groupOpacity",JS_NewBool(ctx,true));
     PUT(out,"modal",JS_NewBool(ctx,true));
-    PUT(out,"animation",JS_NewBool(ctx,false));
+    PUT(out,"animation",JS_NewBool(ctx,true));
     PUT(out,"frosted",JS_NewBool(ctx,false));
     PUT(capacity,"commands",JS_NewInt32(ctx,KSN_APP_COMMANDS));
     PUT(capacity,"textBytes",JS_NewInt32(ctx,KSN_APP_TEXT_BYTES));
     PUT(capacity,"refs",JS_NewInt32(ctx,KASANE_REF_LIMIT));
+    PUT(capacity,"animations",JS_NewInt32(ctx,KSN_APP_TRACKS));
     PUT(cache,"commands",JS_NewInt32(ctx,KSN_CACHE_COMMANDS));
     PUT(cache,"templates",JS_NewInt32(ctx,KSN_CACHE_TEMPLATES));
     PUT(cache,"instances",JS_NewInt32(ctx,KSN_CACHE_INSTANCES));
@@ -1045,6 +1106,11 @@ static const JSCFunctionListEntry ref_methods[]={
     JS_CFUNC_DEF("setText",2,js_ref_text_checked),JS_CFUNC_DEF("setReveal",2,js_ref_reveal_checked),
     JS_CFUNC_DEF("setImageFrame",3,js_ref_image_checked),
     JS_CFUNC_DEF("setRotation",2,js_ref_rotation_checked),
+    JS_CFUNC_DEF("animate",2,js_ref_animate_checked),
+};
+static const JSCFunctionListEntry animation_methods[]={
+    JS_CFUNC_DEF("stop",1,js_animation_stop_checked),JS_CFUNC_DEF("finish",1,js_animation_finish_checked),
+    JS_CFUNC_DEF("poll",0,js_animation_poll),
 };
 static const JSCFunctionListEntry instance_methods[]={
     JS_CFUNC_DEF("place",2,js_instance_place_checked),
@@ -1090,6 +1156,7 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
        !MAKE(modal_class,modal_rt,modal_def,modal_methods)||
        !MAKE(ref_class,ref_rt,ref_def,ref_methods)||
        !MAKE(instance_class,instance_rt,instance_def,instance_methods)||
+       !MAKE(animation_class,animation_rt,animation_def,animation_methods)||
        !make_class(ctx,&template_class,&template_rt,&template_def,NULL,0)||
        !make_class(ctx,&image_class,&image_rt,&image_def,NULL,0)||
        !make_class(ctx,&ticket_class,&ticket_rt,&ticket_def,NULL,0)) return ESP_ERR_NO_MEM;
@@ -1133,6 +1200,12 @@ bool pocket_kasane_active(void) { return state&&state->active; }
 bool pocket_kasane_has_submission(void) {
     return ksn_runtime_has_submission();
 }
+ksn_result pocket_kasane_advance(uint64_t now_us){
+    apply_outcome();return ksn_runtime_advance_animations(now_us);
+}
+bool pocket_kasane_animation_pending(void){return ksn_runtime_animation_pending();}
+void pocket_kasane_animations_presented(uint64_t now_us){ksn_runtime_animations_presented(now_us);}
+void pocket_kasane_set_animation_time(uint64_t now_us){ksn_runtime_set_animation_time(now_us);}
 bool pocket_kasane_needs_present(void) {
     return ksn_runtime_needs_present();
 }

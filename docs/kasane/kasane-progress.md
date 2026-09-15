@@ -4,6 +4,21 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 17a — 画像のnative自動補間（2026-09-16）
+
+- CP17–18を前倒し。DrawRef.animate(tx,{from,to,durationMs,easing,repeat})と
+  motion.stop/finish/pollを実装。移動・拡縮・複数回転を1trackで補間する。
+- 開始は初回LCD ack。提出中のsampleを固定し、retry後は現在時刻へ追いつく。
+  JS patchと同一提出へ合流し、native更新がguestの提出結果を上書きしない。
+- trackは56 B、APP 6件/SYSTEM 2件の2bankで896 Bを初回のみ確保。
+  APP resetはSYSTEM trackを維持。hidden/reduce-motionのnative窓口を追加。
+- H全回帰、Q ASan/UBSan・O2、hello/controller、session dispatch 4構成PASS。
+  通常/Kasane-only IDF build・link監査PASS。
+  fake clockでeasing/loop/ping-pong/停止/完了、quota、転送失敗、OOM、
+  JS呼出しなし25回の補間とメモリ不変、既存JS更新との合流を検査。
+- 実機での自動回転・拡縮の負荷測定は未完了。mainのdeadline待機、電源管理との
+  hidden/reduce-motion結線も残る。CP17/18全体の完了とはしない。
+
 ## checkpoint 13d — 回転画像とdamage（2026-09-16）
 
 - 画像の中心回転とsetRotationを追加。1/1024回転・Q14正弦表で変換し、回転後の旧/新AABBを

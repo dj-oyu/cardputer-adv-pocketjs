@@ -13,7 +13,9 @@
 
 /* Process-lifetime IDs; all cores use the same owner task. Never reset these
  * with a guest session. Exhaustion fails closed rather than reviving handles. */
-static uint32_t last_generation,last_transaction,last_resource;
+static uint32_t last_generation,last_transaction,last_resource,last_animation;
+_Static_assert(sizeof(ksn_track)<=64,"animation track budget");
+_Static_assert(2*sizeof(ksn_core_animation_block)<=1024,"animation bank budget");
 
 typedef struct { ksn_rgba color; uint8_t radius,width,pad[2]; } shape_payload;
 typedef struct { ksn_rgba from,to; uint8_t axis,radius,dither,pad; } gradient_payload;
@@ -42,6 +44,9 @@ static unsigned command_base(ksn_layer layer){return layer==KSN_APP?0u:KSN_APP_C
 static unsigned command_limit(ksn_layer layer){return layer==KSN_APP?KSN_APP_COMMANDS:KSN_SYSTEM_COMMANDS;}
 static unsigned text_base(ksn_layer layer){return layer==KSN_APP?0u:KSN_APP_TEXT_BYTES;}
 static unsigned text_limit(ksn_layer layer){return layer==KSN_APP?KSN_APP_TEXT_BYTES:KSN_SYSTEM_TEXT_BYTES;}
+static unsigned track_base(ksn_layer layer){return layer==KSN_APP?0:KSN_APP_TRACKS;}
+static unsigned track_limit(ksn_layer layer){return layer==KSN_APP?KSN_APP_TRACKS:KSN_SYSTEM_TRACKS;}
+static bool running(const ksn_track *t){return t->status==KSN_ANIMATION_RUNNING||t->status==KSN_ANIMATION_PENDING;}
 static bool valid_layer(ksn_layer layer){return layer==KSN_APP||layer==KSN_SYSTEM;}
 static bool valid_rect(ksn_rect r){return r.x0<=r.x1&&r.y0<=r.y1;}
 static unsigned rect_width(ksn_rect r){return (unsigned)((int32_t)r.x1-r.x0);}
@@ -130,8 +135,9 @@ static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
     core->building_bank=(uint8_t)(core->active^1u);
     ksn_bank *next=&core->banks[core->building_bank];
     const ksn_bank *active=&core->banks[core->active];
-    ksn_command_storage *commands=next->commands;uint8_t *text=next->text;
-    *next=*active;next->commands=commands;next->text=text;
+    ksn_command_storage *commands=next->commands;uint8_t *text=next->text;ksn_track *tracks=next->tracks;
+    *next=*active;next->commands=commands;next->text=text;next->tracks=tracks;
+    if(tracks)memcpy(tracks,active->tracks,sizeof(ksn_core_animation_block));
     memcpy(commands,active->commands,sizeof(ksn_core_command_block));
     memcpy(text,active->text,sizeof(ksn_core_text_block));
     core->layer=layer;core->mode=mode;core->poison=KSN_OK;core->building=true;
@@ -143,6 +149,7 @@ static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
         bank->background_set[layer]=false;
         memset(bank->commands+command_base(layer),0,command_limit(layer)*sizeof(ksn_command_storage));
         memset(bank->text+text_base(layer),0,text_limit(layer));
+        if(bank->tracks)memset(bank->tracks+track_base(layer),0,track_limit(layer)*sizeof(ksn_track));
     }
     return KSN_OK;
 }
@@ -245,6 +252,11 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
     if(!change)return poison(core,KSN_INVALID);
     ksn_command_storage *command;result=referenced_command(core,ref,&command);
     if(result!=KSN_OK)return poison(core,result);
+    if(change->property==KSN_SET_RECT||change->property==KSN_SET_ROTATION){
+        ksn_track *tracks=core->banks[core->building_bank].tracks;
+        if(tracks)for(unsigned i=track_base(core->layer);i<track_base(core->layer)+track_limit(core->layer);i++)
+            if(running(&tracks[i])&&tracks[i].target.value==ref.value)return poison(core,KSN_BUSY);
+    }
     switch(change->property){
     case KSN_SET_RECT:
         if(!valid_rect(change->value.rect))return poison(core,KSN_INVALID);
@@ -316,20 +328,57 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
     }
     return poison(core,KSN_INVALID);
 }
+static void apply_pose(ksn_command_storage *command,ksn_pose pose){
+    stretch_payload p;payload_read(command,&p,sizeof(p));
+    command->bounds=pose.bounds;p.rotation=(uint16_t)((pose.rotation%1024+1024)%1024);
+    payload_write(command,&p,sizeof(p));
+}
+static ksn_track *find_track(ksn_bank *bank,ksn_layer layer,ksn_animation id){
+    if(!bank->tracks||!id.value)return NULL;
+    for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)
+        if(bank->tracks[i].id.value==id.value)return &bank->tracks[i];
+    return NULL;
+}
 static ksn_result core_animate(void *context,ksn_tx tx,const ksn_motion *motion,ksn_animation *out){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;ksn_result result=check_transaction(context,tx);
     if(result!=KSN_OK)return result;
-    (void)motion;(void)out;return poison(core,KSN_UNSUPPORTED);
+    if(!motion||!out||motion->count!=1||motion->property!=KSN_TRANSFORM||
+       !valid_rect(motion->from.pose.bounds)||!valid_rect(motion->to.pose.bounds)||
+       !motion->duration_ms||motion->duration_ms>86400000u||
+       (unsigned)motion->easing>KSN_STEP||(unsigned)motion->repeat>KSN_PINGPONG)return poison(core,KSN_INVALID);
+    ksn_command_storage *command;result=referenced_command(core,motion->first,&command);
+    if(result!=KSN_OK)return poison(core,result);
+    if(command->kind!=KSN_IMAGE||command->flags>>KSN_IMAGE_SCALE_SHIFT!=KSN_IMAGE_STRETCH)
+        return poison(core,KSN_UNSUPPORTED);
+    ksn_bank *bank=&core->banks[core->building_bank];
+    if(!bank->tracks)return poison(core,KSN_UNSUPPORTED);
+    ksn_track *slot=NULL;
+    for(unsigned i=track_base(core->layer);i<track_base(core->layer)+track_limit(core->layer);i++){
+        ksn_track *t=&bank->tracks[i];
+        if(running(t)&&t->target.value==motion->first.value)return poison(core,KSN_BUSY);
+        if(!running(t)&&!slot)slot=t;
+    }
+    if(!slot||last_animation==UINT32_MAX)return poison(core,KSN_LIMIT);
+    *slot=(ksn_track){.from=motion->from.pose,.to=motion->to.pose,.id={++last_animation},.target=motion->first,
+        .duration_ms=motion->duration_ms,.easing=(uint8_t)motion->easing,.repeat=(uint8_t)motion->repeat,
+        .status=KSN_ANIMATION_PENDING};
+    apply_pose(command,slot->from);*out=slot->id;return KSN_OK;
 }
 static ksn_result core_stop(void *context,ksn_tx tx,ksn_animation animation){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;ksn_result result=check_transaction(context,tx);
     if(result!=KSN_OK)return result;
-    (void)animation;return poison(core,KSN_UNSUPPORTED);
+    ksn_track *t=find_track(&core->banks[core->building_bank],core->layer,animation);
+    if(!t)return poison(core,KSN_STALE);
+    if(running(t))t->status=KSN_ANIMATION_STOPPED;
+    return KSN_OK;
 }
+static void sample_tracks(ksn_core_impl *core,uint64_t now,bool reduce);
 static ksn_result core_end(void *context,ksn_tx tx){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;ksn_result result=check_transaction(context,tx);
     if(result!=KSN_OK)return result;
     if(!core->banks[core->building_bank].background_set[KSN_APP])return poison(core,KSN_INVALID);
+    /* Coalesce native motion into a guest update before sealing the bank. */
+    sample_tracks(core,core->animation_now_us,false);
     core->building=false;core->submitted=true;
     core->outcome=(ksn_submission){tx,KSN_SUBMITTED,KSN_OK,core->layer};return KSN_OK;
 }
@@ -339,15 +388,21 @@ static void core_abort(void *context,ksn_tx tx){
        tx.value==core->transaction.value)core->building=false;
 }
 static ksn_limits core_limits(void *context){
-    (void)context;return (ksn_limits){{KSN_APP_COMMANDS,KSN_APP_TEXT_BYTES,0},
-                                    {KSN_SYSTEM_COMMANDS,KSN_SYSTEM_TEXT_BYTES,0},
-                                    KSN_CORE_RESERVED_BYTES+sizeof(last_generation)+sizeof(last_transaction)+sizeof(last_resource),0};
+    ksn_core_impl *core=((ksn_endpoint *)context)->core;
+    return (ksn_limits){{KSN_APP_COMMANDS,KSN_APP_TEXT_BYTES,KSN_APP_TRACKS},
+                       {KSN_SYSTEM_COMMANDS,KSN_SYSTEM_TEXT_BYTES,KSN_SYSTEM_TRACKS},
+                       KSN_CORE_RESERVED_BYTES+4*sizeof(uint32_t)+(core->banks[0].tracks?2*sizeof(ksn_core_animation_block):0),0};
+}
+static uint8_t track_usage(const ksn_bank *bank,ksn_layer layer){
+    uint8_t count=0;
+    if(bank->tracks)for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)count+=running(&bank->tracks[i]);
+    return count;
 }
 static ksn_stats core_stats(void *context){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;const ksn_bank *bank=&core->banks[core->active];
     ksn_stats stats={0};
-    for(unsigned layer=0;layer<2;layer++)stats.used[layer]=(ksn_capacity){bank->count[layer],bank->text_used[layer],0};
-    stats.native_current=KSN_CORE_RESERVED_BYTES+sizeof(last_generation)+sizeof(last_transaction)+sizeof(last_resource);
+    for(unsigned layer=0;layer<2;layer++)stats.used[layer]=(ksn_capacity){bank->count[layer],bank->text_used[layer],track_usage(bank,(ksn_layer)layer)};
+    stats.native_current=KSN_CORE_RESERVED_BYTES+4*sizeof(uint32_t)+(bank->tracks?2*sizeof(ksn_core_animation_block):0);
     stats.native_peak=stats.native_current;return stats;
 }
 static const ksn_api core_api={core_begin,core_background,core_add,core_change,core_animate,
@@ -358,10 +413,13 @@ void ksn_core_init(ksn_core *storage){
     ksn_core_impl *core=impl(storage);
     ksn_command_storage *commands[2]={core->banks[0].commands,core->banks[1].commands};
     uint8_t *text[2]={core->banks[0].text,core->banks[1].text};
+    ksn_track *tracks[2]={core->banks[0].tracks,core->banks[1].tracks};
     if(!commands[0]||!commands[1]||!text[0]||!text[1])return;
     memset(storage,0,sizeof(*storage));
     for(unsigned i=0;i<2;i++){
         core->banks[i].commands=commands[i];core->banks[i].text=text[i];
+        core->banks[i].tracks=tracks[i];
+        if(tracks[i])memset(tracks[i],0,sizeof(ksn_core_animation_block));
         memset(commands[i],0,sizeof(ksn_core_command_block));
         memset(text[i],0,sizeof(ksn_core_text_block));
     }
@@ -395,6 +453,7 @@ ksn_result ksn_core_reset_layer(ksn_core *storage,ksn_layer layer){
         memset(bank->commands+command_base(layer),0,command_limit(layer)*sizeof(ksn_command_storage));
         memset(bank->text+text_base(layer),0,text_limit(layer));
         bank->count[layer]=bank->text_used[layer]=0;bank->generation[layer]=0;
+        if(bank->tracks)memset(bank->tracks+track_base(layer),0,track_limit(layer)*sizeof(ksn_track));
         bank->background[layer]=layer==KSN_APP?0x000000ff:0;
         bank->background_set[layer]=layer==KSN_APP;
     }
@@ -405,6 +464,107 @@ ksn_result ksn_core_reset_layer(ksn_core *storage,ksn_layer layer){
     core->image_count=(uint8_t)kept;core->invalidated=true;
     return KSN_OK;
 }
+ksn_result ksn_core_enable_animation(ksn_core *storage,ksn_core_animation_block *a,ksn_core_animation_block *b){
+    if(!storage||!a||!b||a==b)return KSN_INVALID;
+    ksn_core_impl *core=impl(storage);
+    if(core->submitted||core->repairing||core->banks[0].tracks||core->banks[1].tracks)return KSN_BUSY;
+    memset(a,0,sizeof(*a));memset(b,0,sizeof(*b));
+    core->banks[0].tracks=a->tracks;core->banks[1].tracks=b->tracks;return KSN_OK;
+}
+uint32_t ksn_core_animation_bytes(const ksn_core *storage){
+    return storage&&cimpl(storage)->banks[0].tracks?2*sizeof(ksn_core_animation_block):0;
+}
+ksn_result ksn_core_finish_animation(ksn_core *storage,ksn_layer layer,ksn_tx tx,ksn_animation id){
+    if(!storage||!valid_layer(layer))return KSN_INVALID;
+    ksn_core_impl *core=impl(storage);ksn_result r=check_transaction(&core->endpoints[layer],tx);
+    if(r!=KSN_OK)return r;
+    ksn_track *t=find_track(&core->banks[core->building_bank],layer,id);
+    if(!t)return poison(core,KSN_STALE);
+    ksn_command_storage *command;r=referenced_command(core,t->target,&command);
+    if(r!=KSN_OK)return poison(core,r);
+    apply_pose(command,t->to);t->status=KSN_ANIMATION_FINISHED;return KSN_OK;
+}
+ksn_animation_status ksn_core_poll_animation(const ksn_core *storage,ksn_layer layer,ksn_animation id){
+    if(!storage||!valid_layer(layer)||!id.value)return KSN_ANIMATION_DISCARDED;
+    const ksn_core_impl *core=cimpl(storage);const ksn_bank *active=&core->banks[core->active];
+    if(active->tracks)for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)
+        if(active->tracks[i].id.value==id.value)return (ksn_animation_status)active->tracks[i].status;
+    const ksn_bank *next=&core->banks[core->building_bank];
+    if((core->building||core->submitted)&&next->tracks)
+        for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)
+            if(next->tracks[i].id.value==id.value)return KSN_ANIMATION_PENDING;
+    return KSN_ANIMATION_DISCARDED;
+}
+void ksn_core_start_animations(ksn_core *storage,uint64_t now){
+    if(!storage)return;
+    ksn_core_impl *core=impl(storage);
+    core->animation_now_us=now;
+    if(core->building||core->submitted||core->repairing)return;
+    ksn_track *tracks=core->banks[core->active].tracks;if(!tracks)return;
+    for(unsigned i=0;i<KSN_TRACKS;i++)if(tracks[i].status==KSN_ANIMATION_PENDING){
+        tracks[i].started_us=tracks[i].sampled_us=now;tracks[i].status=KSN_ANIMATION_RUNNING;
+    }
+}
+uint64_t ksn_core_animation_deadline(const ksn_core *storage){
+    if(!storage)return UINT64_MAX;
+    const ksn_track *tracks=cimpl(storage)->banks[cimpl(storage)->active].tracks;
+    uint64_t next=UINT64_MAX;if(!tracks)return next;
+    for(unsigned i=0;i<KSN_TRACKS;i++)if(tracks[i].status==KSN_ANIMATION_RUNNING){
+        uint64_t due=tracks[i].sampled_us>UINT64_MAX-33334?UINT64_MAX:tracks[i].sampled_us+33334;
+        if(tracks[i].easing==KSN_STEP&&tracks[i].repeat==KSN_ONCE){
+            uint64_t duration=(uint64_t)tracks[i].duration_ms*1000;
+            uint64_t end=tracks[i].started_us>UINT64_MAX-duration?UINT64_MAX:tracks[i].started_us+duration;
+            if(end>due)due=end;
+        }
+        if(due<next)next=due;
+    }
+    return next;
+}
+static int32_t motion_lerp(int32_t a,int32_t b,uint32_t q){
+    int64_t value=(int64_t)a*65536+((int64_t)b-a)*q;
+    return (int32_t)(value<0?-((-value+32768)/65536):(value+32768)/65536);
+}
+static uint32_t motion_progress(const ksn_track *t,uint64_t elapsed,bool reduce,bool *done){
+    uint64_t duration=(uint64_t)t->duration_ms*1000;
+    *done=reduce||(t->repeat==KSN_ONCE&&elapsed>=duration);
+    if(*done)return 65536;
+    if(t->repeat==KSN_LOOP)elapsed%=duration;
+    else if(t->repeat==KSN_PINGPONG){elapsed%=duration*2;if(elapsed>duration)elapsed=duration*2-elapsed;}
+    uint64_t q=elapsed*65536/duration,r=65536-q;
+    if(t->easing==KSN_EASE_OUT_CUBIC)q=65536-(r*r*r>>32);
+    else if(t->easing==KSN_EASE_IN_OUT_CUBIC)q=q<32768?(4*q*q*q>>32):65536-(4*r*r*r>>32);
+    else if(t->easing==KSN_STEP)q=q==65536?65536:0;
+    return (uint32_t)q;
+}
+static void sample_tracks(ksn_core_impl *core,uint64_t now,bool reduce){
+    ksn_bank *bank=&core->banks[core->building_bank];
+    if(!bank->tracks)return;
+    for(unsigned i=0;i<KSN_TRACKS;i++){
+        ksn_track *t=&bank->tracks[i];if(t->status!=KSN_ANIMATION_RUNNING)continue;
+        if(!reduce&&(now<t->sampled_us||now-t->sampled_us<33334))continue;
+        uint64_t elapsed=now>=t->started_us?now-t->started_us:0;bool done;
+        uint32_t q=motion_progress(t,elapsed,reduce,&done);
+        ksn_pose p={.bounds={motion_lerp(t->from.bounds.x0,t->to.bounds.x0,q),motion_lerp(t->from.bounds.y0,t->to.bounds.y0,q),
+            motion_lerp(t->from.bounds.x1,t->to.bounds.x1,q),motion_lerp(t->from.bounds.y1,t->to.bounds.y1,q)},
+            .rotation=motion_lerp(t->from.rotation,t->to.rotation,q)};
+        apply_pose(&bank->commands[ref_index(t->target)],p);t->sampled_us=now;
+        if(done)t->status=KSN_ANIMATION_FINISHED;
+    }
+}
+void ksn_core_set_animation_time(ksn_core *storage,uint64_t now){if(storage)impl(storage)->animation_now_us=now;}
+ksn_result ksn_core_advance_animations(ksn_core *storage,uint64_t now,bool reduce,ksn_tx *out){
+    if(!storage||!out)return KSN_INVALID;
+    *out=(ksn_tx){0};ksn_core_impl *core=impl(storage);core->animation_now_us=now;
+    if(core->building||core->submitted||core->repairing)return KSN_BUSY;
+    uint64_t deadline=ksn_core_animation_deadline(storage);
+    if(deadline==UINT64_MAX||(!reduce&&now<deadline))return KSN_OK;
+    ksn_tx tx;ksn_result r=core_begin(&core->endpoints[KSN_APP],KSN_PATCH,&tx);if(r!=KSN_OK)return r;
+    sample_tracks(core,now,reduce);
+    r=core_end(&core->endpoints[KSN_APP],tx);
+    if(r==KSN_OK)*out=tx;else core_abort(&core->endpoints[KSN_APP],tx);
+    return r;
+}
+
 ksn_result ksn_core_register_image(ksn_core *storage,ksn_layer layer,const ksn_image_port *port,ksn_resource *out){
     if(!storage||!valid_layer(layer)||!port||!out||!port->read_span||
        !port->width||!port->height||!port->variants||!port->frames)return KSN_INVALID;
@@ -482,7 +642,7 @@ ksn_result ksn_core_discard_reason(ksn_core *storage,ksn_tx ticket,ksn_result re
 }
 static ksn_capacity usage(const ksn_bank *bank,ksn_layer layer){
     if(!valid_layer(layer))return (ksn_capacity){0};
-    return (ksn_capacity){bank->count[layer],bank->text_used[layer],0};
+    return (ksn_capacity){bank->count[layer],bank->text_used[layer],track_usage(bank,layer)};
 }
 ksn_capacity ksn_core_active_usage(const ksn_core *storage,ksn_layer layer){
     if(!storage)return (ksn_capacity){0};

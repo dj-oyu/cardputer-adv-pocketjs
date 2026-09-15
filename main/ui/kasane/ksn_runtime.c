@@ -5,8 +5,9 @@ typedef struct {
     ksn_core core;
     ksn_view_host host;
     ksn_cache *cache;
+    ksn_core_animation_block *animations;
     ksn_app_lease app;
-    bool system_owned,app_active;
+    bool system_owned,app_active,hidden,reduce_motion;
 } runtime_storage;
 static runtime_storage *runtime;
 /* Process-lifetime identities prevent leases reviving after heap address reuse. */
@@ -18,6 +19,7 @@ static void free_cache(ksn_cache *cache){
     if(cache){free(cache->state.commands);free(cache->state.text);free(cache);}
 }
 static void destroy(void){
+    free(runtime->animations);
     free_cache(runtime->cache);
     for(unsigned i=0;i<2;i++){
         free(runtime->core.state.banks[i].commands);
@@ -95,11 +97,34 @@ ksn_result ksn_runtime_cache_create(ksn_view *v,const ksn_draw *draws,uint16_t c
     if(r!=KSN_OK){free_cache(cache);return r;}
     runtime->cache=cache;*out=candidate;return KSN_OK;
 }
+ksn_result ksn_runtime_animate(ksn_view *v,ksn_tx tx,const ksn_motion *m,ksn_animation *out){
+    if(!runtime||!v||v->host!=&runtime->host||!out)return KSN_INVALID;
+    if(runtime->host.presenting||!tx.value||runtime->host.builder.value!=tx.value||runtime->host.building_layer!=v->layer)return KSN_STALE;
+    if(!runtime->animations){
+        ksn_core_animation_block *blocks=calloc(2,sizeof(*blocks));
+        if(!blocks){ksn_view_cancel(v,tx);return KSN_OOM;}
+        ksn_result r=ksn_core_enable_animation(&runtime->core,&blocks[0],&blocks[1]);
+        if(r!=KSN_OK){free(blocks);ksn_view_cancel(v,tx);return r;}runtime->animations=blocks;
+    }
+    return ksn_view_animate(v,tx,m,out);
+}
+ksn_result ksn_runtime_advance_animations(uint64_t now){
+    return runtime&&!runtime->hidden?ksn_view_host_advance_animations(&runtime->host,now,runtime->reduce_motion):KSN_OK;
+}
+void ksn_runtime_animations_presented(uint64_t now){if(runtime)ksn_core_start_animations(&runtime->core,now);}
+void ksn_runtime_set_animation_time(uint64_t now){if(runtime&&!runtime->hidden)ksn_core_set_animation_time(&runtime->core,now);}
+uint64_t ksn_runtime_animation_deadline(void){
+    uint64_t next=runtime&&!runtime->hidden?ksn_core_animation_deadline(&runtime->core):UINT64_MAX;
+    return next!=UINT64_MAX&&runtime->reduce_motion?0:next;
+}
+void ksn_runtime_set_hidden(bool hidden){if(runtime)runtime->hidden=hidden;}
+void ksn_runtime_set_reduce_motion(bool enabled){if(runtime)runtime->reduce_motion=enabled;}
+bool ksn_runtime_animation_pending(void){return runtime&&runtime->host.animation_submission.value;}
 uint32_t ksn_runtime_cache_bytes(void){return runtime&&runtime->cache?KSN_CACHE_RESERVED_BYTES:0;}
 ksn_view_stats ksn_runtime_stats(ksn_layer layer){
     return runtime?ksn_view_get_stats(ksn_view_host_endpoint(&runtime->host,layer)):(ksn_view_stats){0};
 }
-uint32_t ksn_runtime_reserved_bytes(void){return runtime?BASE_BYTES+ksn_runtime_cache_bytes():0;}
+uint32_t ksn_runtime_reserved_bytes(void){return runtime?BASE_BYTES+ksn_runtime_cache_bytes()+ksn_core_animation_bytes(&runtime->core):0;}
 bool ksn_runtime_has_submission(void){return runtime&&ksn_core_has_submission(&runtime->core);}
 bool ksn_runtime_needs_present(void){
     return runtime&&(runtime->system_owned||runtime->app_active)&&ksn_view_host_needs_present(&runtime->host);

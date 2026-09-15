@@ -863,13 +863,14 @@ esp_err_t app_tick(uint32_t buttons) {
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
     turn_continued=false;
+    pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
     // A top-level replace() is submitted while the source is evaluated, before
     // there is a PocketJS frame to hand to present_frame(). Present that image
     // as its own owner turn. The same gate retries a partial LCD transfer
     // without letting another JS update race repair. An invalidated committed
     // screen also reaches this gate when no JS submission exists.
     if(pocket_kasane_needs_present()) {
-        bool guest_submission=pocket_kasane_has_submission();
+        bool guest_submission=pocket_kasane_has_submission()&&!pocket_kasane_animation_pending();
         esp_err_t pending=present_frame(NULL);
         if(pending!=ESP_OK)return pending;
         // A completed owner-only redraw must allow this tick's JS turn. Live
@@ -1027,6 +1028,8 @@ esp_err_t app_tick(uint32_t buttons) {
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
     last_present_us=esp_timer_get_time();
     if(kasane_session||pocket_kasane_active()) {
+        ksn_result advanced=pocket_kasane_advance((uint64_t)esp_timer_get_time());
+        if(advanced!=KSN_OK&&advanced!=KSN_BUSY)return ESP_FAIL;
 #ifndef CONFIG_KSN_ONLY
         if(target) { pocketjs_rgb565_target_destroy(target); target=NULL; }
         if(renderer) { pocketjs_rgb565_renderer_destroy(renderer); renderer=NULL; }
@@ -1037,6 +1040,7 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
         ksn_render_stats stats;
         int64_t began=esp_timer_get_time();
         ksn_result result=pocket_kasane_present(&port,&stats);
+        if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         frames++;
         if(result==KSN_IO) {

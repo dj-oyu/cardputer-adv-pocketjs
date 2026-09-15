@@ -48,8 +48,8 @@ int main(void){
     ksn_limits limits=app.ops->limits(app.ctx);
     CHECK(limits.app.commands==80&&limits.app.text_bytes==896);
     CHECK(limits.system.commands==16&&limits.system.text_bytes==128);
-    CHECK(limits.native_bytes==KSN_CORE_RESERVED_BYTES+3*sizeof(uint32_t));
-    CHECK(limits.app.tracks==0&&limits.system.tracks==0);
+    CHECK(limits.native_bytes==KSN_CORE_RESERVED_BYTES+4*sizeof(uint32_t));
+    CHECK(limits.app.tracks==6&&limits.system.tracks==2);
     printf("core native budget: %lu bytes (including shared IDs)\n",(unsigned long)limits.native_bytes);
 
     pet_view view;

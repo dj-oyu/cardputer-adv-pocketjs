@@ -13,14 +13,9 @@
     {bounds: [0, 0, 42, 24], color: 0x185071ff},
     {bounds: [4, 4, 38, 20], color: 0x63d7bccc, opacity: 220}
   ]);
-  let orb, meter, groupFirst, left, right, panel, title, counter, pet;
+  let orb, meter, groupFirst, left, right, panel, title, counter, pet, motion;
   let phase = 'app';
   let tick = 0;
-  function petBounds() {
-    const size = 24 + 2 * (60 - Math.abs(tick % 120 - 60));
-    const x = tick * 3 % 288 - 48, y = 20 + tick % 24;
-    return [x, y, x + size, y + Math.floor(size * 0.75)];
-  }
 
   // Optional input-service smoke test, independent of the legacy node API.
   // Text composition stays in the host until the SYSTEM textfield migration.
@@ -59,8 +54,13 @@
     tx.strokeRect({bounds: [10, 117, 232, 129], width: 1, color: 0x80b5cfaa});
     left = tx.instantiate(tile, {offset: [142, 28], opacity: 230});
     right = tx.instantiate(tile, {offset: [188, 72], opacity: 175});
-    pet = tx.image({resource: pets, bounds: petBounds(), clip: [8, 20, 232, 100],
+    pet = tx.image({resource: pets, bounds: [-16, 30, 16, 62], clip: [8, 20, 232, 110],
       variant: Math.floor(tick / 24) % 12, frame: Math.floor(tick / 4) % 6});
+    motion = pet.animate(tx, {
+      from: {bounds: [-16, 30, 16, 62], rotation: 0},
+      to: {bounds: [114, 22, 210, 118], rotation: 720},
+      durationMs: 2400, easing: 'ease-in-out', repeat: 'ping-pong'
+    });
   }
 
   function scene(tx) {
@@ -92,7 +92,6 @@
         right.setVisible(tx, (tick % 40) < 31);
         title.setReveal(tx, Math.floor(tick / 6) % 11);
         counter.setText(tx, 'tick ' + tick);
-        pet.setRect(tx, petBounds());
         if ((tick % 4) === 0)
           pet.setImageFrame(tx, Math.floor(tick / 24) % 12, Math.floor(tick / 4) % 6);
         if (phase === 'modal')
@@ -103,7 +102,7 @@
       const s = view.stats();
       console.log('KASANE_TICK ' + tick + ' scope=' + view.inputScope() +
                   ' commands=' + s.displayed.commands + ' native=' + s.nativeBytes);
-      console.log('KASANE_IMAGE stretch=true moving=true clipped=true bounds=' + petBounds().join(','));
+      console.log('KASANE_IMAGE nativeAnimation=' + motion.poll() + ' jsTransformUpdates=0');
     }
     if (buttons & 0x4000) console.log('KASANE_ENTER ' + tick);
   };

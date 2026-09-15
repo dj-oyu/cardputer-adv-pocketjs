@@ -26,7 +26,7 @@ int main(void){
                                              (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)|(1u<<KSN_TEXT)|(1u<<KSN_IMAGE)));
     CHECK(ksn_view_features(app).cache_kinds==((1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
                                                (1u<<KSN_STROKE)));
-    CHECK(!ksn_view_features(app).animation&&!ksn_view_features(app).frosted);
+    CHECK(ksn_view_features(app).animation&&!ksn_view_features(app).frosted);
     CHECK(ksn_view_cache_create(app,&d,1,&t)==KSN_OK);
     CHECK(ksn_view_cache_release(sys,t)==KSN_STALE);
     CHECK(ksn_view_begin(app,KSN_REPLACE,&tx)==KSN_OK);
@@ -116,7 +116,7 @@ int main(void){
     /* A coordinator can draw and repair without reserving a RAM cache. */
     ksn_view_host_init(&host,&core,NULL,0);
     CHECK(ksn_view_get_stats(app).shared_cache.native_bytes==0);
-    CHECK(ksn_view_get_stats(app).native_bytes==KSN_CORE_RESERVED_BYTES+sizeof(host)+20);
+    CHECK(ksn_view_get_stats(app).native_bytes==KSN_CORE_RESERVED_BYTES+sizeof(host)+24);
     d.kind=KSN_RECT;
     CHECK(ksn_view_cache_create(app,&d,1,&t)==KSN_UNSUPPORTED);
     CHECK(ksn_view_begin(app,KSN_REPLACE,&tx)==KSN_OK);
