@@ -38,6 +38,33 @@ static void fill565(uint16_t *dst,unsigned count,uint16_t color){
     while(count--)*dst++=color;
 }
 
+/* Boundary 2a: a frame command is decoded once per frame, not once per band.
+ * ksn_core_read costs 139 instructions plus memset(176)/memcpy and the band
+ * loop asks for the same command once per band, twice per group child, so a
+ * full frame decodes the same few commands hundreds of times
+ * (docs/perf/kasane-opt-survey.md, boundary 2). This cache holds the fields the
+ * band loop and the group composition read, plus the counted text bytes a
+ * cached command needs to stay alive; no pointer into a command bank ever
+ * escapes the borrowed view of ksn_core.h. The banks cannot change while a
+ * frame is in flight: the renderer holds the sealed ticket, a guest cannot
+ * start another builder before it is presented or discarded, and the port
+ * contract already forbids a callback from mutating the core or reentering
+ * presentation. Validity covers one ksn_render_rects call, so a retried frame
+ * decodes again from scratch. Owner task only, like every entry point here. */
+int g_ksn_decode_once=1;
+typedef struct {
+    ksn_draw draw;
+    bool visible,group_begin,group_end;
+    uint8_t group_opacity,reveal;
+} ksn_frame_view;
+static struct {
+    ksn_frame_view view[KSN_COMMANDS];
+    uint32_t valid[(KSN_COMMANDS+31u)/32u];
+    char text[KSN_TEXT_BYTES];
+    unsigned text_used;
+    ksn_frame_command read; /* The ABI storage of the reference read path. */
+} decoded;
+
 /* The type is the format tag: these channels are premultiplied, never straight. */
 typedef struct { uint8_t r,g,b,a; } ksn_premultiplied_rgba8;
 static const uint8_t bayer4[4][4]={{0,8,2,10},{12,4,14,6},{3,11,1,9},{15,7,13,5}};
@@ -52,7 +79,7 @@ static bool inside_round_rect(ksn_rect bounds,uint8_t radius,int x,int y){
     int dx=2*x+1-2*cx,dy=2*y+1-2*cy,r=2*radius;
     return dx*dx+dy*dy<=r*r;
 }
-static bool covers(const ksn_frame_command *c,int x,int y){
+static bool covers(const ksn_frame_view *c,int x,int y){
     const ksn_draw *d=&c->draw;
     if(!c->visible||x<d->bounds.x0||x>=d->bounds.x1||y<d->bounds.y0||y>=d->bounds.y1||
        x<d->clip.x0||x>=d->clip.x1||y<d->clip.y0||y>=d->clip.y1)return false;
@@ -80,7 +107,7 @@ static ksn_rgba interpolate(ksn_rgba from,ksn_rgba to,unsigned i,unsigned length
     }
     return result;
 }
-static ksn_rgba sample(const ksn_frame_command *command,int x,int y){
+static ksn_rgba sample(const ksn_frame_view *command,int x,int y){
     const ksn_draw *draw=&command->draw;
     if(draw->kind==KSN_TEXT)return draw->data.text.color;
     if(draw->kind!=KSN_GRADIENT)return draw->data.shape.color;
@@ -120,19 +147,64 @@ static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opac
     b=clamp8(mul8(src.b,opacity)+mul8((b<<3)|(b>>2),inverse));
     return pack565(r,g,b,dither,x,y);
 }
+/* One decode, shared by both paths: the cache stores it for the frame, the
+ * reference path stores it for the next read only. */
+static void decode_view(ksn_frame_view *view,const ksn_frame_command *command){
+    view->draw=command->draw;
+    view->visible=command->visible;
+    view->group_begin=command->group_begin;
+    view->group_end=command->group_end;
+    view->group_opacity=command->group_opacity;
+    view->reveal=command->reveal;
+}
+static ksn_frame_view *view_slot(unsigned slot){
+    /* The core bounds the index, the clamp only keeps the name total. */
+    return &decoded.view[slot<KSN_COMMANDS?slot:0];
+}
+/* False when this command's text does not fit the frame pool; the caller then
+ * falls back to the reference read. The bank's own text pool is the same
+ * total, so a full frame pool cannot happen in practice. */
+static bool cache_view(unsigned slot,const ksn_frame_command *command){
+    ksn_frame_view *view=view_slot(slot);
+    decode_view(view,command);
+    if(view->draw.kind==KSN_TEXT){
+        unsigned bytes=view->draw.data.text.bytes;
+        if(bytes>sizeof(decoded.text)-decoded.text_used)return false;
+        memcpy(decoded.text+decoded.text_used,command->text,bytes);
+        view->draw.data.text.utf8=bytes?decoded.text+decoded.text_used:decoded.text;
+        decoded.text_used+=bytes;
+    }
+    decoded.valid[slot>>5]|=1u<<(slot&31u);
+    return true;
+}
+/* previous=false only: the renderer never reads the displayed bank. */
+static ksn_result frame_command(ksn_core *core,ksn_tx ticket,ksn_layer layer,uint16_t index,
+                                const ksn_frame_view **out){
+    unsigned slot=(layer==KSN_APP?0u:KSN_APP_COMMANDS)+index;
+    if(g_ksn_decode_once&&slot<KSN_COMMANDS&&(decoded.valid[slot>>5]&(1u<<(slot&31u)))){
+        *out=view_slot(slot);return KSN_OK;
+    }
+    ksn_result result=ksn_core_read(core,ticket,false,layer,index,&decoded.read);
+    if(result!=KSN_OK)return result;
+    if(g_ksn_decode_once&&slot<KSN_COMMANDS&&cache_view(slot,&decoded.read)){
+        *out=view_slot(slot);return KSN_OK;
+    }
+    decode_view(view_slot(slot),&decoded.read);*out=view_slot(slot);
+    return KSN_OK;
+}
 static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
                                uint8_t opacity,int y,int rows,uint16_t *pixels){
     if(!opacity)return KSN_OK;
     ksn_premultiplied_rgba8 tile[64]; /* 256 bytes; no full component surface. */
     uint8_t coverage[64];
-    ksn_frame_command command;
+    const ksn_frame_view *command;
     bool has_dither=false;
     int left=240,right=0,top=y+rows,bottom=y;
     for(unsigned i=first;i<=end;i++){
-        ksn_result result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
+        ksn_result result=frame_command(core,ticket,layer,(uint16_t)i,&command);
         if(result!=KSN_OK)return result;
-        const ksn_draw *d=&command.draw;
-        if(!command.visible||!d->opacity)continue;
+        const ksn_draw *d=&command->draw;
+        if(!command->visible||!d->opacity)continue;
         int x0=d->bounds.x0>d->clip.x0?d->bounds.x0:d->clip.x0;
         int x1=d->bounds.x1<d->clip.x1?d->bounds.x1:d->clip.x1;
         int y0=d->bounds.y0>d->clip.y0?d->bounds.y0:d->clip.y0;
@@ -155,21 +227,21 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx t
          * opaque child. Two words avoid variable 64-bit shifts on ESP32-S3. */
         uint32_t dither_pixels[2]={0,0};
         for(unsigned i=first;i<=end;i++){
-            ksn_result result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
+            ksn_result result=frame_command(core,ticket,layer,(uint16_t)i,&command);
             if(result!=KSN_OK)return result;
-            bool child_dither=command.draw.kind==KSN_GRADIENT&&command.draw.data.gradient.dither;
-            const ksn_draw *d=&command.draw;
-            if(!command.visible||!d->opacity||py<d->bounds.y0||py>=d->bounds.y1||
+            bool child_dither=command->draw.kind==KSN_GRADIENT&&command->draw.data.gradient.dither;
+            const ksn_draw *d=&command->draw;
+            if(!command->visible||!d->opacity||py<d->bounds.y0||py>=d->bounds.y1||
                py<d->clip.y0||py>=d->clip.y1||x0>=d->bounds.x1||x0>=d->clip.x1||
                x0+count<=d->bounds.x0||x0+count<=d->clip.x0)continue;
-            if(command.draw.kind==KSN_TEXT){
-                result=text->span(text->ctx,&command.draw,command.reveal,x0,py,(unsigned)count,coverage);
+            if(command->draw.kind==KSN_TEXT){
+                result=text->span(text->ctx,&command->draw,command->reveal,x0,py,(unsigned)count,coverage);
                 if(result!=KSN_OK)return result;
             }
-            for(int x=0;x<count;x++)if(covers(&command,x0+x,py)){
-                ksn_rgba color=sample(&command,x0+x,py);
-                if(command.draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage[x]);
-                unsigned alpha=premultiply_over(&tile[x],color,command.draw.opacity);
+            for(int x=0;x<count;x++)if(covers(command,x0+x,py)){
+                ksn_rgba color=sample(command,x0+x,py);
+                if(command->draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage[x]);
+                unsigned alpha=premultiply_over(&tile[x],color,command->draw.opacity);
                 if(has_dither&&alpha){
                     uint32_t bit=1u<<((unsigned)x&31u);
                     if(child_dither)dither_pixels[(unsigned)x>>5]|=bit;
@@ -201,21 +273,23 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
+    /* One frame's worth of decoded commands; a retried frame starts over. */
+    memset(decoded.valid,0,sizeof(decoded.valid));decoded.text_used=0;
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
     uint32_t mask;result=ksn_core_damage(core,frame.ticket,&mask);
     if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
     if(!mask)return ksn_core_presented(core,frame.ticket);
-    ksn_frame_command command;
+    const ksn_frame_view *command;
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
-        result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,i,&command);
+        result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
         if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
-        if(command.draw.kind<KSN_RECT||command.draw.kind>KSN_TEXT){
+        if(command->draw.kind<KSN_RECT||command->draw.kind>KSN_TEXT){
             ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
         }
-        if(command.draw.kind==KSN_TEXT){
+        if(command->draw.kind==KSN_TEXT){
             result=display->text&&display->text->span?
-                display->text->span(display->text->ctx,&command.draw,command.reveal,0,0,0,NULL):KSN_UNSUPPORTED;
+                display->text->span(display->text->ctx,&command->draw,command->reveal,0,0,0,NULL):KSN_UNSUPPORTED;
             if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
         }
     }
@@ -226,21 +300,21 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
         int y=(int)band*8,rows=band==16?7:8;
         fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
-            result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,i,&command);
+            result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
             if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
-            if(command.group_begin){
-                unsigned first=i;uint8_t opacity=command.group_opacity;
-                while(!command.group_end){
+            if(command->group_begin){
+                unsigned first=i;uint8_t opacity=command->group_opacity;
+                while(!command->group_end){
                     if(++i>=frame.next[layer].commands){ksn_core_failed(core,frame.ticket);return KSN_INVALID;}
-                    result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,(uint16_t)i,&command);
+                    result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 }
                 result=render_group(core,display->text,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,pixels);
                 if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 continue;
             }
-            ksn_draw *d=&command.draw;
-            if(!command.visible||!d->opacity)continue;
+            const ksn_draw *d=&command->draw;
+            if(!command->visible||!d->opacity)continue;
             int x0=d->bounds.x0,x1=d->bounds.x1,y0=d->bounds.y0,y1=d->bounds.y1;
             if(x0<d->clip.x0)x0=d->clip.x0;
             if(x1>d->clip.x1)x1=d->clip.x1;
@@ -255,7 +329,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                 uint8_t coverage[64];
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=64){
                     unsigned count=(unsigned)(x1-x);if(count>64)count=64;
-                    result=display->text->span(display->text->ctx,d,command.reveal,x,py,count,coverage);
+                    result=display->text->span(display->text->ctx,d,command->reveal,x,py,count,coverage);
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     for(unsigned i=0;i<count;i++)if(coverage[i]){
                         unsigned index=(unsigned)((py-y)*240+x)+i;
@@ -271,9 +345,9 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     fill565(pixels+(py-y)*240+x0,(unsigned)(x1-x0),color);
                 continue;
             }
-            for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x++)if(covers(&command,x,py)){
+            for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x++)if(covers(command,x,py)){
                 unsigned index=(unsigned)((py-y)*240+x);
-                pixels[index]=blend(pixels[index],sample(&command,x,py),d->opacity,
+                pixels[index]=blend(pixels[index],sample(command,x,py),d->opacity,
                                     d->kind==KSN_GRADIENT&&d->data.gradient.dither,x,py);
             }
         }
