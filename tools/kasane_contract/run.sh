@@ -62,6 +62,12 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_group_dither.c -o "$out/group-dither"
   "$out/group-dither"
+  # One script, one binary, three arms of g_ksn_decode_once; ksn_core_read is
+  # wrapped so the read counts are counted call sites, not estimates.
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c \
+    tools/kasane_contract/test_decode_reuse.c -Wl,--wrap=ksn_core_read -o "$out/decode-reuse"
+  "$out/decode-reuse"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_cache.c \
     tools/kasane_contract/test_cache.c -o "$out/cache"
