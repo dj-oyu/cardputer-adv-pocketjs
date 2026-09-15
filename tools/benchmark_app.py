@@ -45,7 +45,7 @@ try:
         s.write(b'e'); wait('VALUE')
         s.write(b'u'); wait('SELECT'); s.write(b'u'); wait('SELECT 0')
     s.write(b'a'); wait('CATEGORY 0')
-    s.write(b'e'); wait('HELLO_FRAME_PRESENTED')
+    s.write(b'e'); wait('FRAME_PRESENTED')
     got, fields = [], []
     last = time.monotonic()
     while len(got) < a.samples:
