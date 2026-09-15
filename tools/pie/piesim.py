@@ -21,6 +21,7 @@ Supported instructions (TRM section in brackets):
     ee.andq [1.8.1]          ee.orq [1.8.45]          ee.xorq [1.8.214]
     ee.vunzip.16 [1.8.207]   ee.vzip.8 [1.8.212]      ee.zero.q [1.8.216]
     ee.zero.qacc [1.8.217]   ee.vmulas.u16.qacc [1.8.163]  ee.srcmb.s16.qacc [1.8.54]
+    ee.mov.u16.qacc [1.8.116]
     ee.vprelu.s16 [1.8.182]  and the fused forms ee.vadds.s16.ld.incp [1.8.71],
     ee.vsubs.s16.ld.incp [1.8.199], ee.vmul.s16.ld.incp [1.8.123], ee.vmul.u16.ld.incp [1.8.129]
 Anything else raises NotImplementedError, on purpose: add the instruction here
@@ -218,6 +219,12 @@ class Sim:
                 ax, ay, q = arv(a[1]) & 0xFFFF, arv(a[2]) & 63, Q[qi(a[0])]
                 Q[qi(a[0])] = [q[i] if s16(q[i]) > 0 else ((s16(q[i]) * s16(ax)) >> ay) & 0xFFFF
                                for i in range(8)]
+            elif op == 'ee.mov.u16.qacc':
+                # QACC_L/H = zero-extended 16-bit lanes of qs (1.8.116): a
+                # replacement, not an accumulation, and unsigned -- which is why
+                # kasane's blend preloads 32,896 with this and not its
+                # sign-extending twin.
+                self.qacc = [v for v in Q[qi(a[0])]]
             elif op == 'ee.vmulas.u16.qacc':
                 x, y = Q[qi(a[0])], Q[qi(a[1])]
                 self.qacc = [min(self.qacc[i] + x[i] * y[i], (1 << 40) - 1) for i in range(8)]
