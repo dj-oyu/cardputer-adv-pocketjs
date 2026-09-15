@@ -117,6 +117,11 @@ static esp_err_t kread(uint8_t reg, uint8_t *value) {
 //
 // Nothing here is trusted on faith: board_init runs both versions over the same
 // bytes and only enables this one if they agree exactly.
+// The display path was suspected of racing commands against a strip transfer. It
+// does not: tx_reap() waits with portMAX_DELAY, command() calls it before every
+// command, and tx()'s first argument is the DC line rather than a byte swap. The
+// instruments that were going to prove otherwise measured nothing (they were taken
+// while the UI task was blocked, see the note in shell.c) and are not kept.
 static bool pie_swap;
 
 // `in` and `out` may be the same buffer (the blocking path swaps in place) or
