@@ -36,7 +36,7 @@ ksn_view *ksn_view_host_endpoint(ksn_view_host *h,ksn_layer layer){
 ksn_view_capabilities ksn_view_features(const ksn_view *v){
     if(!valid(v))return (ksn_view_capabilities){0};
     return (ksn_view_capabilities){.draw_kinds=(1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
-        (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)|(1u<<KSN_TEXT),
+        (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)|(1u<<KSN_TEXT)|(1u<<KSN_IMAGE),
         .cache_kinds=(1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|(1u<<KSN_STROKE),
         .group_opacity=true,.modal=v->layer==KSN_APP,
         .capacity={v->layer==KSN_APP?KSN_APP_COMMANDS:KSN_SYSTEM_COMMANDS,
@@ -63,7 +63,7 @@ ksn_result ksn_view_background(ksn_view *v,ksn_tx tx,ksn_rgba color){
 ksn_result ksn_view_add(ksn_view *v,ksn_tx tx,const ksn_draw *d,ksn_ref *out){
     if(!owns(v,tx))return KSN_STALE;
     if(!d||!out)return mutation(v,tx,KSN_INVALID);
-    if(d->kind<KSN_RECT||d->kind>KSN_TEXT)return mutation(v,tx,KSN_UNSUPPORTED);
+    if(d->kind<KSN_RECT||d->kind>KSN_IMAGE)return mutation(v,tx,KSN_UNSUPPORTED);
     ksn_client c=client(v);return mutation(v,tx,c.ops->add(c.ctx,tx,d,out));
 }
 ksn_result ksn_view_change(ksn_view *v,ksn_tx tx,ksn_ref ref,const ksn_change *change){

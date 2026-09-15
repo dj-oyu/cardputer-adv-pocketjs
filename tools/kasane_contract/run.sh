@@ -54,6 +54,9 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_text_render.c -o "$out/text"
   "$out/text"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_image_render.c -o "$out/image"
+  "$out/image"
   python3 tools/make_font.py "$out"
   cc -std=c11 -Wall -Wextra -Werror $options -Itools/kasane_contract/fontshim \
     -Itools/hostshim -Imain/hal -Imain/text -Imain/ui/kasane -I"$out" \

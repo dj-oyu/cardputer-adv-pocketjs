@@ -61,17 +61,17 @@ begin引数にlayerを渡さない。template/instanceも発行側layerに限定
 | 部品の配置 | `ksn_view_instantiate/place/visible` | 複数同時表示、位置・clip・opacity・表示のPATCH |
 | modal | `ksn_view_modal_open/close` | APP REPLACE内。solid/dim-live、表示成功後に入力scopeとfocusを確定 |
 
-`draw_kinds`はRECT、ROUND_RECT、STROKE、GRADIENT、TEXT、`cache_kinds`は先頭3種を公開する。
-グループ透明度は対応、native animationとfrosted modalはfalse。画像はコアに
-保存できても描画APIではUNSUPPORTEDを返し、LCD提出まで進めない。
+`draw_kinds`はRECT、ROUND_RECT、STROKE、GRADIENT、TEXT、IMAGE、`cache_kinds`は先頭3種を公開する。
+グループ透明度は対応、native animationとfrosted modalはfalse。CP12からIMAGEもnativeで描画する。
 すりガラス画素フィルタのPIE対応はfrosted modalの完成を意味しない。
 
 CP9のnative TEXTは`ksn_display_port.text`のcoverage portを必須とする。省略時は
 最初の転送前にUNSUPPORTED。`span`は絶対画面座標の最大64画素を読み、count=0は
 可用性確認で出力なし。render中のI/O・heap確保・JS・core変更は禁止。pending/committedの
 再描画でも同じ字形を返す不変データをownerが保持する。productionは`ksn_font_port`を接続。
-Flashの1bpp cellを直接読み、文字bufferや展開glyphを常設しない。coverage scratchは64 B、
-隔離groupでは既存256 B tileと併存する。alphaは色alpha→coverage→command opacity→group。
+Flashの1bpp cellを直接読み、文字bufferや展開glyphを常設しない。coverageは最大64 B、
+CP12の共用96 B span scratchを使い、隔離groupでは256 B tileと併存する。
+alphaは色alpha→coverage→command opacity→group。
 
 captionはLatin6×8/全角8×8、bodyはLatin6×12/全角12×12、displayはLatin12×16/全角16×16。
 displayは8px字形の2倍。欠字/faceなしでも送り幅を維持し、ASCIIはbuiltin、全角は豆腐を描く。
@@ -95,6 +95,26 @@ setTextで作った一時文字列をnative側に保持せず、成功・失敗�
 features.textはtrue。cacheのTEXT公開と整数値の直接更新APIはまだ含まない。
 
 ## 3. 原子的な更新と参照
+
+### native IMAGE（CP12）
+
+image descriptorはresource、variant/frame、source_x/source_y、scaleを持つ。
+scaleは`KSN_IMAGE_1X`（既定0）、`KSN_IMAGE_2X`、`KSN_IMAGE_HALF`。
+source原点からのcrop範囲はboundsの幅/高さとscaleで決める。2倍はbounds幅/高さが偶数、
+1/2倍はsource範囲がbounds幅/高さの2倍となる。範囲外・未知scaleは提出前に拒否する。
+最近傍は画素中心で選ぶため、1/2倍はsource原点から1,3,5…をsampleする。
+setRectは移動と有効なcrop範囲のサイズ変更を許し、source原点/scaleの変更はREPLACE。
+
+providerは不変のsource座標を受け、RGB565とstraight alphaを必ずcount個返す。
+通常/隔離groupとも16 destination画素ごとに最大31 source画素を読む。RGBはbit replicationで
+8bitへ展開し、alphaへcommand opacity、その後group opacityを掛ける。providerのI/O・heap・JSは禁止。
+エラー後はpending世代を保持し、全帯再描画または取消後のcommitted修復を行う。
+source登録はowner/layer固定、APP終了時にはSYSTEM資源を残してAPP資源だけ失効する。
+
+命令は32 Bのまま。crop原点をpayloadの空き4 B、scaleを未使用flag bitへ格納する。
+pixel scratchはgroup tile256＋span共用96＋dither8＋provider行最大128＝488 B。
+command snapshotや呼出しstackは別に実機high-waterと併せて計上する。
+JS resourceの公開とPPT2 adapterはCP13。frame中にproviderの選択を変えてはならない。
 
 ### JS scene controller（CP11）
 

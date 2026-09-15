@@ -23,7 +23,7 @@ int main(void){
     ksn_template t;ksn_instance a,b;ksn_tx tx,other;ksn_ref ref;
     CHECK(ksn_view_features(app).modal&&!ksn_view_features(sys).modal);
     CHECK(ksn_view_features(app).draw_kinds==((1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
-                                             (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)|(1u<<KSN_TEXT)));
+                                             (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)|(1u<<KSN_TEXT)|(1u<<KSN_IMAGE)));
     CHECK(ksn_view_features(app).cache_kinds==((1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
                                                (1u<<KSN_STROKE)));
     CHECK(!ksn_view_features(app).animation&&!ksn_view_features(app).frosted);
@@ -104,7 +104,7 @@ int main(void){
     CHECK(ksn_view_host_route(&host,false)==KSN_INPUT_APP&&host.modal.focus==42);
     /* Unsupported commands fail before a submission and release the builder. */
     CHECK(ksn_view_begin(app,KSN_REPLACE,&tx)==KSN_OK);
-    d.kind=KSN_IMAGE;CHECK(ksn_view_add(app,tx,&d,&ref)==KSN_UNSUPPORTED);
+    d.kind=(ksn_kind)(KSN_IMAGE+1);CHECK(ksn_view_add(app,tx,&d,&ref)==KSN_UNSUPPORTED);
     CHECK(ksn_view_submit(app,tx)==KSN_STALE);
     CHECK(ksn_view_begin(sys,KSN_PATCH,&tx)==KSN_OK);
     CHECK(ksn_view_instantiate(sys,tx,t,&p,&b)==KSN_STALE);

@@ -40,6 +40,33 @@ static void fill565(uint16_t *dst,unsigned count,uint16_t color){
 
 /* The type is the format tag: these channels are premultiplied, never straight. */
 typedef struct { uint8_t r,g,b,a; } ksn_premultiplied_rgba8;
+/* One shared span scratch across normal/group paths. Together with the group
+ * tile (256), dither bits (8), and a provider's 128-byte row: 488 <= 512 bytes. */
+typedef union {
+    uint8_t text[64];
+    struct { uint16_t rgb[32];uint8_t alpha[32]; } image;
+} ksn_span_scratch;
+_Static_assert(sizeof(ksn_span_scratch)+256+8+128<=512,"compositor/provider pixel scratch budget");
+static ksn_rgba image_color(uint16_t rgb,uint8_t alpha){
+    unsigned r=rgb>>11,g=(rgb>>5)&63,b=rgb&31;
+    return ((r<<3|r>>2)<<24)|((g<<2|g>>4)<<16)|((b<<3|b>>2)<<8)|alpha;
+}
+/* At most 16 destination pixels -> at most 31 contiguous source pixels. Half
+ * scale samples pixel centers (source 1,3,...), double scale replicates 2x2. */
+static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
+                             const ksn_draw *d,int x,int y,unsigned count,ksn_span_scratch *scratch){
+    unsigned dx=(unsigned)(x-d->bounds.x0),dy=(unsigned)(y-d->bounds.y0),n=count;
+    if(d->data.image.scale==KSN_IMAGE_2X){n=((dx&1u)+count+1)/2;dx/=2;dy/=2;}
+    else if(d->data.image.scale==KSN_IMAGE_HALF){n=2*count-1;dx=2*dx+1;dy=2*dy+1;}
+    return ksn_core_image_span(core,ticket,false,layer,(uint16_t)index,
+        (uint16_t)(d->data.image.source_y+dy),(uint16_t)(d->data.image.source_x+dx),
+        (uint16_t)n,scratch->image.rgb,scratch->image.alpha);
+}
+static unsigned image_sample_index(const ksn_draw *d,int x,unsigned offset){
+    if(d->data.image.scale==KSN_IMAGE_HALF)return 2*offset;
+    if(d->data.image.scale==KSN_IMAGE_2X)return (((unsigned)(x-d->bounds.x0)&1u)+offset)/2;
+    return offset;
+}
 static const uint8_t bayer4[4][4]={{0,8,2,10},{12,4,14,6},{3,11,1,9},{15,7,13,5}};
 static unsigned mul8(unsigned a,unsigned b){return (a*b+127)/255;}
 static unsigned clamp8(unsigned value){return value>255?255:value;}
@@ -120,11 +147,10 @@ static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opac
     b=clamp8(mul8(src.b,opacity)+mul8((b<<3)|(b>>2),inverse));
     return pack565(r,g,b,dither,x,y);
 }
-static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
+static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span_scratch *scratch,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
                                uint8_t opacity,int y,int rows,uint16_t *pixels){
     if(!opacity)return KSN_OK;
     ksn_premultiplied_rgba8 tile[64]; /* 256 bytes; no full component surface. */
-    uint8_t coverage[64];
     ksn_frame_command command;
     bool has_dither=false;
     int left=240,right=0,top=y+rows,bottom=y;
@@ -162,13 +188,32 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_tx t
             if(!command.visible||!d->opacity||py<d->bounds.y0||py>=d->bounds.y1||
                py<d->clip.y0||py>=d->clip.y1||x0>=d->bounds.x1||x0>=d->clip.x1||
                x0+count<=d->bounds.x0||x0+count<=d->clip.x0)continue;
+            if(d->kind==KSN_IMAGE){
+                int left=x0,right=x0+count;
+                if(left<d->bounds.x0)left=d->bounds.x0;
+                if(left<d->clip.x0)left=d->clip.x0;
+                if(right>d->bounds.x1)right=d->bounds.x1;
+                if(right>d->clip.x1)right=d->clip.x1;
+                for(int x=left;x<right;x+=16){
+                    unsigned n=(unsigned)(right-x);if(n>16)n=16;
+                    result=image_read(core,ticket,layer,i,d,x,py,n,scratch);
+                    if(result!=KSN_OK)return result;
+                    for(unsigned j=0;j<n;j++){
+                        unsigned source=image_sample_index(d,x,j),dest=(unsigned)(x-x0)+j;
+                        unsigned alpha=premultiply_over(&tile[dest],image_color(scratch->image.rgb[source],
+                            scratch->image.alpha[source]),d->opacity);
+                        if(has_dither&&alpha==255)dither_pixels[dest>>5]&=~(1u<<(dest&31));
+                    }
+                }
+                continue;
+            }
             if(command.draw.kind==KSN_TEXT){
-                result=text->span(text->ctx,&command.draw,command.reveal,x0,py,(unsigned)count,coverage);
+                result=text->span(text->ctx,&command.draw,command.reveal,x0,py,(unsigned)count,scratch->text);
                 if(result!=KSN_OK)return result;
             }
             for(int x=0;x<count;x++)if(covers(&command,x0+x,py)){
                 ksn_rgba color=sample(&command,x0+x,py);
-                if(command.draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,coverage[x]);
+                if(command.draw.kind==KSN_TEXT)color=(color&0xffffff00u)|mul8(color&255,scratch->text[x]);
                 unsigned alpha=premultiply_over(&tile[x],color,command.draw.opacity);
                 if(has_dither&&alpha){
                     uint32_t bit=1u<<((unsigned)x&31u);
@@ -210,7 +255,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
         result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,i,&command);
         if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
-        if(command.draw.kind<KSN_RECT||command.draw.kind>KSN_TEXT){
+        if(command.draw.kind<KSN_RECT||command.draw.kind>KSN_IMAGE){
             ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
         }
         if(command.draw.kind==KSN_TEXT){
@@ -218,9 +263,14 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                 display->text->span(display->text->ctx,&command.draw,command.reveal,0,0,0,NULL):KSN_UNSUPPORTED;
             if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
         }
+        if(command.draw.kind==KSN_IMAGE){
+            result=ksn_core_image_span(core,frame.ticket,false,(ksn_layer)layer,i,0,0,0,NULL,NULL);
+            if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+        }
     }
     uint16_t *pixels=display->strip(display->ctx);
     if(!pixels){ksn_core_defer_repair(core,frame.ticket);return KSN_OOM;}
+    ksn_span_scratch scratch;
     for(unsigned band=0;band<17;band++){
         if(!(mask&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
@@ -235,7 +285,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,(uint16_t)i,&command);
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 }
-                result=render_group(core,display->text,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,pixels);
+                result=render_group(core,display->text,&scratch,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,pixels);
                 if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 continue;
             }
@@ -252,15 +302,27 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             if(y1>y+rows)y1=y+rows;
             if(x0>=x1||y0>=y1)continue;
             if(d->kind==KSN_TEXT){
-                uint8_t coverage[64];
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=64){
                     unsigned count=(unsigned)(x1-x);if(count>64)count=64;
-                    result=display->text->span(display->text->ctx,d,command.reveal,x,py,count,coverage);
+                    result=display->text->span(display->text->ctx,d,command.reveal,x,py,count,scratch.text);
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
-                    for(unsigned i=0;i<count;i++)if(coverage[i]){
+                    for(unsigned i=0;i<count;i++)if(scratch.text[i]){
                         unsigned index=(unsigned)((py-y)*240+x)+i;
-                        ksn_rgba color=(d->data.text.color&0xffffff00u)|mul8(d->data.text.color&255,coverage[i]);
+                        ksn_rgba color=(d->data.text.color&0xffffff00u)|mul8(d->data.text.color&255,scratch.text[i]);
                         pixels[index]=blend(pixels[index],color,d->opacity,false,x+(int)i,py);
+                    }
+                }
+                continue;
+            }
+            if(d->kind==KSN_IMAGE){
+                for(int py=y0;py<y1;py++)for(int x=x0;x<x1;x+=16){
+                    unsigned count=(unsigned)(x1-x);if(count>16)count=16;
+                    result=image_read(core,frame.ticket,(ksn_layer)layer,i,d,x,py,count,&scratch);
+                    if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+                    for(unsigned j=0;j<count;j++){
+                        unsigned source=image_sample_index(d,x,j),index=(unsigned)((py-y)*240+x)+j;
+                        pixels[index]=blend(pixels[index],image_color(scratch.image.rgb[source],scratch.image.alpha[source]),
+                                            d->opacity,false,x+(int)j,py);
                     }
                 }
                 continue;

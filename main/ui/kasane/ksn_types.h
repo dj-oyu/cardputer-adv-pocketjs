@@ -15,6 +15,9 @@ typedef enum { KSN_APP, KSN_SYSTEM } ksn_layer;
 typedef enum { KSN_REPLACE, KSN_PATCH } ksn_update_mode;
 typedef enum { KSN_RECT, KSN_ROUND_RECT, KSN_STROKE, KSN_GRADIENT, KSN_TEXT, KSN_IMAGE } ksn_kind;
 typedef enum { KSN_CAPTION, KSN_BODY, KSN_DISPLAY } ksn_font;
+/* Crop origin in source pixels; its extent follows bounds and scale. 2X
+ * requires even destination extents. HALF samples source pixel centers. */
+typedef enum { KSN_IMAGE_1X, KSN_IMAGE_2X, KSN_IMAGE_HALF } ksn_image_scale;
 /* Descriptors and strings are borrowed for the call only. Colors: RRGGBBAA. */
 typedef struct {
     ksn_kind kind;
@@ -24,7 +27,7 @@ typedef struct {
         struct { ksn_rgba color; uint8_t radius,width; } shape;
         struct { ksn_rgba from,to; uint8_t axis,radius; bool dither; } gradient;
         struct { const char *utf8; uint16_t bytes,capacity; ksn_font font; ksn_rgba color; } text;
-        struct { ksn_resource resource; uint16_t variant,frame; } image;
+        struct { ksn_resource resource; uint16_t variant,frame,source_x,source_y; ksn_image_scale scale; } image;
     } data;
 } ksn_draw;
 typedef enum { KSN_SET_RECT, KSN_SET_CLIP, KSN_SET_COLOR, KSN_SET_TEXT,

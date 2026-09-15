@@ -47,7 +47,18 @@ with serial.Serial(a.port, 115200, timeout=0.15) as port:
             command(b'e', 'HELLO_COUNT 1')
             command(b'e', 'HELLO_COUNT 2')
             if i == 0:
-                command(b's', 'CAPTURE_END')
+                # read large chunks: byte-at-a-time readline can overflow the
+                # USB receive queue during a 130 KB pre-SPI capture.
+                time.sleep(0.15)
+                port.write(b's')
+                capture = bytearray()
+                deadline = time.monotonic() + 10
+                while b'CAPTURE_END' not in capture and time.monotonic() < deadline:
+                    capture.extend(port.read(65536))
+                text = capture.decode(errors='replace')
+                log.extend(text.splitlines())
+                rows = re.findall(r'PIX (\d+) [0-9a-f]{960}', text)
+                assert set(map(int, rows)) == set(range(135)), 'incomplete capture'
             end = command(b'q', 'HOME_READY')
             match = re.search(r'MEM free=(\d+) largest=(\d+) js=0', end)
             assert match, end

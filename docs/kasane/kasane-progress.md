@@ -4,6 +4,19 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 12 — native IMAGE crop/scale/span（2026-09-16）
+
+- 32 B命令の未使用部分へsource原点とscaleを格納。1x/2x/half、pixel-center最近傍、
+  clip、straight alpha、group opacityとframe PATCHに対応。範囲外と2xの奇数extentを拒否。
+- normal/groupで96 B span scratchを共用。group tile256＋dither8＋provider行128を含め488 B。
+  sourceを最大31画素ずつ読み、コンポーネントのsurfaceを作らない。常設arena増分0。
+- H ASan/UBSan・O2 PASS。3倍率×256 opacity×normal/groupを独立座標/合成参照で全画面比較。
+  negative clip、source offset、frame固定、帯途中provider失敗→全帯repair、overflow、旧機能を確認。
+- Q ASan/UBSan・O2 PASS。通常/診断ビルドPASS、app2,206,560 B / 1,910,416 B、
+  DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。
+- native probeに60フレームの画像切替と2世代の全画素capture比較を追加。実機結果は後記。
+  JS resource/PPT2 providerはCP13。
+
 ## checkpoint 11 — hello移植とscene controller（2026-09-15）
 
 - helloの旧node生成を廃止し、文字4命令＋角丸1命令へ移行。入力は独立input service。
@@ -19,6 +32,15 @@
 - Q全回帰ASan/UBSan PASS、session dispatch4構成PASS、registry101 checks PASS。
 - 通常/診断ESP-IDFビルドPASS。app2,204,256 B / 1,908,272 B、
   DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。実機結果は後記。
+- `bb2b0df`をpush後、Kasane-only実機でhello100回起動/Enter2回/終了PASS。
+  全回の終了後free256,624 B・最大連続空き135,168 Bで一定。初回起動後の観測値は
+  free149,036 B/最大連続空き104,448 B/JS92,825 B（parser中のpeakではない）。
+  `.cache/kasane-cp11-hello-only`にログと初回captureを保存。
+  通常構成も`kasane_input_device_test.py`でhello/旧pet/K/text編集の共存PASS。
+  `.cache/kasane-cp11-input-normal`に保存。Wi-Fi/audio併用の安全性確認は引き続き未完了。
+- 最初のhello captureはUSBのbyte単位読取りによる欠落を検出。診断ツールをchunk読取りへ直し、
+  通常構成で取り直した135行全体を`.cache/kasane-cp11-hello-normal-capture`に保存。
+  この再取得も起動/入力/終了PASS。100回再起動のメモリ記録とは分ける。
 
 ## checkpoint 10 — JS TEXTと固定容量PATCH（2026-09-15）
 

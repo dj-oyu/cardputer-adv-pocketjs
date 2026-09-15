@@ -8,6 +8,7 @@
 #define KSN_FLAG_GROUP 2u
 #define KSN_FLAG_GROUP_BEGIN 4u
 #define KSN_FLAG_GROUP_END 8u
+#define KSN_IMAGE_SCALE_SHIFT 4u
 
 /* Process-lifetime IDs; all cores use the same owner task. Never reset these
  * with a guest session. Exhaustion fails closed rather than reviving handles. */
@@ -21,7 +22,7 @@ typedef struct {
     uint16_t flags;
     ksn_rgba color;
 } text_payload;
-typedef struct { uint32_t resource; uint16_t variant,frame; uint32_t pad; } image_payload;
+typedef struct { uint32_t resource; uint16_t variant,frame,source_x,source_y; } image_payload;
 
 _Static_assert(KSN_CORE_RESERVED_BYTES<=KSN_CORE_STORAGE_BYTES,"core storage budget");
 _Static_assert(sizeof(ksn_core)<=3072,"core control allocation budget");
@@ -99,6 +100,18 @@ static ksn_result validate_image(const ksn_core_impl *core,ksn_layer layer,ksn_r
     if(!entry)return KSN_STALE;
     return variant<entry->port.variants&&frame<entry->port.frames?KSN_OK:KSN_INVALID;
 }
+static ksn_result validate_image_window(const ksn_core_impl *core,ksn_layer layer,ksn_resource id,
+                                       ksn_rect bounds,uint16_t x,uint16_t y,ksn_image_scale scale){
+    const ksn_image_entry *entry=find_image(core,layer,id);
+    if(!entry)return KSN_STALE;
+    if((unsigned)scale>KSN_IMAGE_HALF)return KSN_INVALID;
+    uint32_t width=rect_width(bounds),height=rect_height(bounds);
+    if(scale==KSN_IMAGE_2X){
+        if((width|height)&1u)return KSN_INVALID;
+        width/=2;height/=2;
+    }else if(scale==KSN_IMAGE_HALF){width*=2;height*=2;}
+    return (uint32_t)x+width<=entry->port.width&&(uint32_t)y+height<=entry->port.height?KSN_OK:KSN_INVALID;
+}
 
 static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
     ksn_endpoint *endpoint=context;ksn_core_impl *core=endpoint->core;
@@ -159,6 +172,9 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
     if(draw->kind==KSN_IMAGE){
         result=validate_image(core,core->layer,draw->data.image.resource,draw->data.image.variant,draw->data.image.frame);
         if(result!=KSN_OK)return poison(core,result);
+        result=validate_image_window(core,core->layer,draw->data.image.resource,draw->bounds,
+                                     draw->data.image.source_x,draw->data.image.source_y,draw->data.image.scale);
+        if(result!=KSN_OK)return poison(core,result);
     }
     ksn_bank *bank=&core->banks[core->building_bank];ksn_layer layer=core->layer;
     if(bank->count[layer]>=command_limit(layer))return poison(core,KSN_LIMIT);
@@ -188,7 +204,9 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
         payload_write(&command,&payload,sizeof(payload));bank->text_used[layer]=(uint16_t)(used+capacity);break;
     }
     case KSN_IMAGE:{
-        image_payload payload={draw->data.image.resource.value,draw->data.image.variant,draw->data.image.frame,0};
+        image_payload payload={draw->data.image.resource.value,draw->data.image.variant,draw->data.image.frame,
+                               draw->data.image.source_x,draw->data.image.source_y};
+        command.flags|=(uint8_t)((unsigned)draw->data.image.scale<<KSN_IMAGE_SCALE_SHIFT);
         payload_write(&command,&payload,sizeof(payload));break;
     }
     }
@@ -211,6 +229,12 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
     switch(change->property){
     case KSN_SET_RECT:
         if(!valid_rect(change->value.rect))return poison(core,KSN_INVALID);
+        if(command->kind==KSN_IMAGE){
+            image_payload p;payload_read(command,&p,sizeof(p));
+            result=validate_image_window(core,core->layer,(ksn_resource){p.resource},change->value.rect,
+                                         p.source_x,p.source_y,(ksn_image_scale)(command->flags>>KSN_IMAGE_SCALE_SHIFT));
+            if(result!=KSN_OK)return poison(core,result);
+        }
         if(command->kind==KSN_ROUND_RECT){shape_payload p;payload_read(command,&p,sizeof(p));
             if(!valid_radius(change->value.rect,p.radius))return poison(core,KSN_INVALID);}
         if(command->kind==KSN_GRADIENT){gradient_payload p;payload_read(command,&p,sizeof(p));
@@ -392,7 +416,7 @@ ksn_result ksn_core_group(ksn_core *storage,ksn_layer layer,ksn_tx tx,ksn_ref fi
     if(!existing&&core->mode!=KSN_REPLACE)return poison(core,KSN_INVALID);
     for(unsigned i=0;i<count;i++){
         unsigned expected=KSN_FLAG_GROUP|(i==0?KSN_FLAG_GROUP_BEGIN:0)|(i+1==count?KSN_FLAG_GROUP_END:0);
-        unsigned flags=command[i].flags&~KSN_FLAG_VISIBLE;
+        unsigned flags=command[i].flags&(KSN_FLAG_GROUP|KSN_FLAG_GROUP_BEGIN|KSN_FLAG_GROUP_END);
         if(flags!=(existing?expected:0))return poison(core,KSN_INVALID);
     }
     for(unsigned i=0;i<count;i++){
@@ -520,7 +544,9 @@ ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
     case KSN_IMAGE:{
         image_payload p;payload_read(command,&p,sizeof(p));
         draw->data.image.resource=(ksn_resource){p.resource};
-        draw->data.image.variant=p.variant;draw->data.image.frame=p.frame;break;
+        draw->data.image.variant=p.variant;draw->data.image.frame=p.frame;
+        draw->data.image.source_x=p.source_x;draw->data.image.source_y=p.source_y;
+        draw->data.image.scale=(ksn_image_scale)(command->flags>>KSN_IMAGE_SCALE_SHIFT);break;
     }
     default:return KSN_INVALID;
     }
