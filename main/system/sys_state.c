@@ -3,14 +3,14 @@
 /* Process-lifetime IDs fail closed at exhaustion, even across service reuse. */
 static uint32_t last_subscription;
 _Static_assert(sizeof(sys_subscription)<=16,"subscription budget");
-_Static_assert(sizeof(sys_state)<=256,"power and subscriptions budget");
+_Static_assert(sizeof(sys_state)<=256,"system state budget");
 static sys_subscription *find(sys_state *s,sys_sub id){
     if(s&&id.value)for(unsigned i=0;i<SYS_SUBSCRIPTIONS;i++)
         if(s->subscriptions[i].id==id.value)return &s->subscriptions[i];
     return NULL;
 }
 sys_result sys_subscribe(sys_state *s,uint32_t interest,sys_sub *out){
-    if(!s||!out||(interest&~SYS_POWER))return SYS_INVALID;
+    if(!s||!out||(interest&~SYS_TOPICS))return SYS_INVALID;
     if(last_subscription==UINT32_MAX)return SYS_FULL;
     for(unsigned i=0;i<SYS_SUBSCRIPTIONS;i++)if(!s->subscriptions[i].id){
         s->subscriptions[i]=(sys_subscription){++last_subscription,interest,interest};
@@ -20,7 +20,7 @@ sys_result sys_subscribe(sys_state *s,uint32_t interest,sys_sub *out){
     return SYS_FULL;
 }
 sys_result sys_set_interest(sys_state *s,sys_sub id,uint32_t interest){
-    if(interest&~SYS_POWER)return SYS_INVALID;
+    if(interest&~SYS_TOPICS)return SYS_INVALID;
     sys_subscription *sub=find(s,id);if(!sub)return SYS_STALE;
     s->power_users-=(sub->interest&SYS_POWER)!=0;
     s->power_users+=(interest&SYS_POWER)!=0;
@@ -40,6 +40,54 @@ sys_result sys_poll(sys_state *s,sys_sub id,uint32_t *changed){
 bool sys_power_read(const sys_state *s,sys_power_state *out){
     if(!s||!out)return false;
     *out=s->power;return out->sampled;
+}
+static void publish_clock(sys_state *s){
+    if(s->clock_revision!=UINT32_MAX)s->clock_revision++;
+    for(unsigned i=0;i<SYS_SUBSCRIPTIONS;i++)
+        s->subscriptions[i].pending|=s->subscriptions[i].interest&SYS_CLOCK_CONFIG;
+}
+bool sys_clock_snapshot(const sys_state *s,uint64_t now,sys_clock_state *out){
+    if(!s||!out)return false;
+    *out=(sys_clock_state){.utc_offset=s->utc_offset,.revision=s->clock_revision};
+    const sys_clock_anchor *a=s->clock.source?&s->clock:&s->pc_clock;
+    if(!a->source||now<a->mono_us)return false;
+    uint64_t delta=now-a->mono_us;
+    uint64_t seconds=delta/1000000;
+    int32_t micros=a->microseconds+(int32_t)(delta%1000000);
+    if(micros>=1000000){micros-=1000000;seconds++;}
+    if(seconds>(uint64_t)(INT64_MAX-a->seconds))return false;
+    out->seconds=a->seconds+(int64_t)seconds;out->microseconds=micros;
+    out->source=a->source;out->trusted=a->source!=SYS_CLOCK_PC;out->valid=true;
+    return true;
+}
+static bool same_clock(sys_clock_state a,sys_clock_state b){
+    return a.valid==b.valid&&a.source==b.source&&a.seconds==b.seconds&&
+        a.microseconds==b.microseconds;
+}
+sys_result sys_clock_update(sys_state *s,sys_clock_anchor a){
+    if(!s||(a.source!=SYS_CLOCK_NONE&&a.source!=SYS_CLOCK_RTC&&a.source!=SYS_CLOCK_SNTP)||
+       (a.source&&(a.seconds<INT64_C(946684800)||a.microseconds<0||a.microseconds>=1000000)))
+        return SYS_INVALID;
+    sys_clock_state before,after;
+    sys_clock_snapshot(s,a.mono_us,&before);
+    s->clock=a;
+    sys_clock_snapshot(s,a.mono_us,&after);
+    if(!same_clock(before,after))publish_clock(s);
+    return SYS_OK;
+}
+sys_result sys_clock_offer_pc(sys_state *s,uint32_t seconds,uint64_t now){
+    if(!s||seconds<UINT32_C(1577836800))return SYS_INVALID;
+    sys_clock_state before,after;
+    sys_clock_snapshot(s,now,&before);
+    s->pc_clock=(sys_clock_anchor){.seconds=seconds,.mono_us=now,.source=SYS_CLOCK_PC};
+    sys_clock_snapshot(s,now,&after);
+    if(!same_clock(before,after))publish_clock(s);
+    return SYS_OK;
+}
+sys_result sys_clock_timezone(sys_state *s,int32_t offset){
+    if(!s||offset < -50400||offset>50400)return SYS_INVALID;
+    if(s->utc_offset!=offset){s->utc_offset=offset;publish_clock(s);}
+    return SYS_OK;
 }
 void sys_power_refresh(sys_state *s){if(s)s->refresh=true;}
 uint64_t sys_power_deadline(const sys_state *s){

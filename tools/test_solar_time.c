@@ -65,7 +65,7 @@ int main(void) {
     // stops the sail scene from reverting to demo time after a restart.
     trust=TRUST_UNKNOWN;
     assert(solar_time_now(4).source==SOLAR_TIME_UTC);
-    assert(atomic_load(&trust)==TRUST_YES);
+    assert(atomic_load(&trust)==TRUST_RTC);
     // Failures stay distinguishable from never having synced, both ways round.
     trust=TRUST_UNKNOWN;fake_error=1;
     assert(solar_time_now(4).source==SOLAR_TIME_DEMO);

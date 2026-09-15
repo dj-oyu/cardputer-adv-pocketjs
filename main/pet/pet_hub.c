@@ -3,7 +3,7 @@
 #include "pocket_api.h"
 #include "paint.h"
 #include "sound.h"
-#include "system/sys_clock.h"
+#include "system/sys_device.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "nvs.h"
@@ -17,18 +17,17 @@ static pet_hub_t hub;
 static QueueHandle_t inbox;
 static nvs_handle_t prefs;
 static bool opened, changed;
-static uint32_t clock_utc;
-static uint64_t clock_ms, ringing, next_tone;
+static uint64_t ringing, next_tone;
 static char alert[PET_LABEL_CHARS+1];
 #include "pet_assets.h"
 #include "pet_pixels.h"
 static uint64_t now_ms(void){return esp_timer_get_time()/1000;}
 static uint32_t read32(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static uint32_t utc_now(void) {
-    sys_clock_sample t=sys_clock_read();
-    if(t.available&&t.trusted&&t.seconds>=INT64_C(946684800)&&t.seconds<=UINT32_MAX)
+    sys_clock_state t;
+    if(sys_clock_snapshot(sys_device_state(),(uint64_t)esp_timer_get_time(),&t)&&t.seconds<=UINT32_MAX)
         return (uint32_t)t.seconds;
-    return clock_utc?clock_utc+(uint32_t)((now_ms()-clock_ms)/1000):0;
+    return 0;
 }
 static bool persist(void) {
     if(opened&&nvs_set_blob(prefs,"state",&hub.saved,sizeof(hub.saved))==ESP_OK&&nvs_commit(prefs)==ESP_OK)return true;
@@ -41,6 +40,7 @@ void pet_hub_init(void) {
         if(nvs_get_blob(prefs,"state",&s,&n)==ESP_OK&&n==sizeof(s)&&s.magic==PET_HUB_MAGIC&&
            s.selected<12&&s.wake_minute>=-1&&s.wake_minute<1440&&s.utc_offset>=-50400&&s.utc_offset<=50400)hub.saved=s;
     }
+    sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
     inbox=xQueueCreate(4,PET_WIRE_BYTES);
 }
 bool pet_hub_usb(uint8_t c) {
@@ -66,7 +66,8 @@ bool pet_hub_pump(void) {
             int32_t offset=(int32_t)read32(d+36);uint32_t stamp=read32(d+40);
             if(offset>=-50400&&offset<=50400&&stamp>=1577836800u) {
                 if(offset!=hub.saved.utc_offset){hub.saved.utc_offset=offset;persist();}
-                clock_utc=stamp;clock_ms=now;changed=true;
+                sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
+                sys_clock_offer_pc(sys_device_state(),stamp,(uint64_t)esp_timer_get_time());changed=true;
                 ESP_LOGI("pet","PET_ACK 2 %lu",(unsigned long)read32(d+4));
             }
             continue;
@@ -75,7 +76,8 @@ bool pet_hub_pump(void) {
         if(pet_hub_packet(&hub,d)) {
             if(!persist()){hub.saved=before;continue;}
             pet_usage_t *p=&hub.saved.usage[d[2]];
-            clock_utc=read32(d+40);clock_ms=now;changed=true;
+            sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
+            sys_clock_offer_pc(sys_device_state(),read32(d+40),(uint64_t)esp_timer_get_time());changed=true;
             ESP_LOGI("pet","PET_ACK %u %lu",d[2],(unsigned long)p->sequence);
         } else if(d[2]<2&&pet_crc(d,44)==((uint32_t)d[44]|(uint32_t)d[45]<<8|(uint32_t)d[46]<<16|(uint32_t)d[47]<<24)) {
             // A lost ACK is safe to retry. Invalid/newer frames get no ACK.

@@ -81,7 +81,7 @@ CP11 hello/scene helperのhost試験、両ビルドと実機100回起動が完�
 CP12 native IMAGEのH/Qと両ビルド・実機比較が完了。
 CP13a/bの実機確認後、CP13c/dの伸縮・回転とCP17a/bの自動補間・座標加算化を前倒しした。
 CP14aはSystem電源state/購読と既存JS経路、CP14b1は時計providerの抽出まで実装。
-次は時計のanchor/dirty/PC補完共通化と、通知・recordingの
+CP14b2は時計のanchor/dirty/PC補完を共通化。次はsolar/JS時計経路の統合と、通知・recordingの
 SYSTEM表示。CP17/18の待機期限・電源policy統合は残る。
 scope別購読とmodal Back配送はCP15で扱う。
 数値と検証範囲は[kasane-progress.md](kasane-progress.md)の各checkpointを参照。

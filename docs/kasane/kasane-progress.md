@@ -4,6 +4,22 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14b2 — 時計anchor・dirty・PC補完（2026-09-16）
+
+- `sys_state`にRTC/SNTPとPCのanchor、timezone、revisionを保持。pethub内の補完時計を撤去。
+  UTC/monoからsnapshotを計算し、PCはRTC/SNTPより低い優先度で保持する。
+- SYS_CLOCK_CONFIGを追加。初期値と補正/source/timezoneの変更を独立dirtyへ合流し、
+  秒経過だけでは通知しない。PC入力・timezoneの検証/NVS互換はpethub側に残す。
+- SNTP側はatomic要求bitのみを更新。ownerはboot/通知時にplatform時計を読み、普段は
+  anchorで進める。既存holdoverは一時的な取得失敗で破棄しない。
+- clock state/deviceとJS電源のASan/UBSan・O2 PASS。60秒相当で追加wall/ADC読取り0、
+  dirty0、100通知の合流、RTC/PC優先度、SNTP後退補正、独立poll、timezone、桁溢れを検査。
+  solar時刻のASan/UBSan、platform providerのO2回帰もPASS。
+- 通常/Kasane-only buildとlink監査PASS。静的DIRAM137,516 / 136,156 Bで直前比+48 B。
+  共通state200 B（+56）、pethubの時計12 B撤去、要求bit1 Bと配置調整を含む。
+  heap/task追加なし。今回は実機書込み・SNTP通信試験を追加していない。
+- solar/既存JS時計のanchor統合、汎用JS時計購読、壁時計alarmの補正対応、通知SYSTEM描画は残る。
+
 ## checkpoint 14b1 — System時計provider抽出（2026-09-16）
 
 - 実時計の取得・信頼フラグを`system/sys_clock`へ移動。SNTP → System、
