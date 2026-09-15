@@ -6,6 +6,7 @@
 #include "mp3_decode.h"
 #include "opus_net.h"
 #include "sound.h"
+#include "wav_scan.h"
 #include "board.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -405,11 +406,10 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
 // Each step in that chain looked like the answer until somebody measured the
 // next one. Assume there is another.
 
-// How much of the file the header walk may look at. The walk itself is ranged
-// -- eight bytes to read a chunk header, then a skip -- so a big LIST in front
-// of the data costs reads and not RAM; this bounds how many chunks a file may
-// make us walk before it is called malformed.
-#define PLAYER_MAX_CHUNKS 64
+// How many chunks the WAV walk may cross before it is called malformed:
+// WAV_SCAN_MAX_CHUNKS in wav_scan.h. The walk itself is ranged -- eight bytes
+// to read a chunk header, then a skip -- so a big LIST in front of the data
+// costs reads and not RAM.
 // Pump calls to wait for the decoder's first slot before calling it a failure.
 // Priming is measured in a couple of frames (prime_us in the OPUSDEC line says
 // how many microseconds it really took); 30 frames is about a second, which is
@@ -528,7 +528,7 @@ static void clip_done(void *ctx, bool completed) {
 // header, sixteen or twenty more for a fmt body, and a skip for everything
 // else. Every length is checked against the file size before it is used, so a
 // truncated or lying header ends as a refusal rather than as a read past the
-// end. PLAYER_MAX_CHUNKS bounds the walk itself.
+// end. WAV_SCAN_MAX_CHUNKS in wav_scan.h bounds the walk itself.
 static const char *player_at(uint32_t at, uint8_t *out, uint32_t want) {
     const char *code=NULL;
     int32_t got=pocket_fs_read_at(player.path,at,out,want,&code);
@@ -536,64 +536,27 @@ static const char *player_at(uint32_t at, uint8_t *out, uint32_t want) {
     return NULL;
 }
 
+// The wire between wav_scan()'s callback and player_at(): the scan does not
+// know about player.path or pocket_fs_read_at(), only that some read can fail.
+static const char *wav_scan_read(void *ctx, uint32_t at, uint8_t *out,
+                                 uint32_t want) {
+    (void)ctx;
+    return player_at(at,out,want);
+}
+
+// The chunk walk itself is wav_scan.h now -- tools/test_wav_scan.c compiles
+// those exact lines on a host over an in-memory file. This is the thin wire
+// back into player: which read to use, which device facts to enforce
+// (SOUND_SAMPLE_RATE, the streaming slot size), and where the result lands.
 static const char *wav_parse(uint32_t size) {
-    uint8_t head[24];
-    if(size<44) return "not a WAV file";
-    const char *why=player_at(0,head,12);
+    wav_scan_t scan;
+    const char *why=wav_scan(wav_scan_read,NULL,size,SOUND_SAMPLE_RATE,
+                             SOUND_STREAM_SLOT_BYTES,&scan);
     if(why) return why;
-    if(memcmp(head,"RIFF",4)||memcmp(head+8,"WAVE",4)) return "not a WAV file";
-    uint32_t at=12, rate=0, per_block=0;
-    uint16_t format=0, channels=0, bits=0, align=0;
-    bool have_fmt=false;
-    player.offset=player.bytes=0;
-    for(unsigned n=0;n<PLAYER_MAX_CHUNKS&&at+8<=size;n++) {
-        if((why=player_at(at,head,8))) return why;
-        uint32_t body=(uint32_t)head[4]|((uint32_t)head[5]<<8)|
-                      ((uint32_t)head[6]<<16)|((uint32_t)head[7]<<24);
-        if(body>size-at-8) return "a chunk runs past the end of the file";
-        if(!memcmp(head,"fmt ",4)&&body>=16) {
-            uint8_t f[20];
-            uint32_t want=body>=20?20:16;
-            if((why=player_at(at+8,f,want))) return why;
-            format=(uint16_t)(f[0]|(f[1]<<8));
-            channels=(uint16_t)(f[2]|(f[3]<<8));
-            rate=(uint32_t)f[4]|((uint32_t)f[5]<<8)|
-                 ((uint32_t)f[6]<<16)|((uint32_t)f[7]<<24);
-            align=(uint16_t)(f[12]|(f[13]<<8));
-            bits=(uint16_t)(f[14]|(f[15]<<8));
-            // IMA carries its samples-per-block in the fmt extension. Trusting
-            // it rather than deriving it is what lets a file made by a tool
-            // that pads its blocks still decode where its blocks really begin.
-            if(want==20) per_block=(uint32_t)(f[18]|(f[19]<<8));
-            have_fmt=true;
-        } else if(!memcmp(head,"data",4)) {
-            player.offset=at+8; player.bytes=body;
-        }
-        at+=8+body+(body&1);    // chunks are padded to an even length
-    }
-    if(!have_fmt) return "the file has no fmt chunk";
-    if(!player.bytes) return "the file has no audio in it";
-    if(channels!=1) return "this host plays one channel";
-    if(rate!=SOUND_SAMPLE_RATE) return "this host plays 24000 Hz and has no resampler";
-    if(format==1&&bits==16) {
-        player.block=0; player.per_block=1;
-        player.frames=player.bytes/2;
-    } else if(format==0x11&&bits==4) {
-        player.codec=C_IMA;
-        if(align<8||(align&1)||align>player.bytes) return "the ADPCM block size is not usable";
-        // A block has to fit one slot whole or a slot boundary would land
-        // mid-block, where there is nothing to reseed the predictor from. This
-        // is the one thing streaming refuses that the RAM clip did not, and it
-        // is 2,048 bytes: 4,093 output frames, 170 ms of audio in one block.
-        if(align>SOUND_STREAM_SLOT_BYTES) return "the ADPCM block is larger than the stream slot";
-        player.block=align;
-        player.per_block=per_block?per_block:(uint32_t)(align-4)*2+1;
-        uint32_t blocks=player.bytes/align, tail=player.bytes%align;
-        player.frames=blocks*player.per_block;
-        // A short last block is still worth its header sample and its nibbles.
-        if(tail>=4) player.frames+=1+(tail-4)*2;
-    } else return "the codec is not one this host decodes";
-    if(!player.frames) return "the file has no audio in it";
+    player.offset=scan.offset; player.bytes=scan.bytes;
+    player.block=scan.block;   player.per_block=scan.per_block;
+    player.frames=scan.frames;
+    if(scan.ima) player.codec=C_IMA;   // else the C_PCM16 source_parse set
     return NULL;
 }
 

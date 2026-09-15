@@ -15,8 +15,6 @@
   出典: common-api.md 9.1「未完了として残っているもの」、[opus-feasibility.md](../apps/opus-feasibility.md)。
 - **`sd:` 上のストリーミング再生が未成立。** 400kHzバス帯域（約50,000B/s）に対しPCM16は48,000B/s必要で実時間に間に合わない。出口は「SDクロックを上げる」（`sd_media.c` の `max_freq_khz`）か「供給を優先度4の専用タスクへ移す」（fs面のスレッド安全化が先）の2つで、どちらも着手前にカード読み出しの実測が必要。
   出典: common-api.md 9.1.1。
-- **WAVヘッダの範囲走査（`wav_parse` / `player_at`）にホストテストが無い。** `tools/test_stream.c` はリング・スロット走査のみを検査。`JUNK` チャンクや `data` が離れた位置にあるファイルは実機でしか通っていない。
-  出典: common-api.md 9.1.1。
 - **音そのものを人が聴いて確認する作業が残っている。** `board_capture` はフレームバッファしか見えず、音声の正しさはソフトウェアだけでは確認できない（WAV/ADPCM/Opus/MP3いずれも）。
   出典: common-api.md 9.1.1, 9.1.2, 9.1.3。
 - **MP3のギャップレス（encoder delay/padding除去）、free-format、途中レート変更、破損フレーム、APEタグは未対応。**
