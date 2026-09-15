@@ -58,6 +58,9 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_image_render.c -lm -o "$out/image"
   "$out/image"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_image_rotate_arms.c -o "$out/image-rotate-arms"
+  "$out/image-rotate-arms"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_animation.c -o "$out/animation"
   "$out/animation"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Imain/pet \

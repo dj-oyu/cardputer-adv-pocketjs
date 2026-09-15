@@ -5,6 +5,14 @@
 extern "C" {
 #endif
 typedef struct { uint32_t bands,transferred_bytes; } ksn_render_stats;
+/* Rotated image spans map a destination pixel to a source column by
+ * floor(u*source_width/(w*32768)) with u affine in x. With this switch on
+ * (default) the quotient and remainder of that division are advanced by one
+ * comparison and one conditional subtraction per pixel instead of dividing
+ * twice; the source index, the block fetched and the composited pixel are
+ * identical in both arms. Off restores the per-pixel rational division.
+ * Owner task only; read once per rotated span. */
+extern bool g_ksn_image_rotate_step;
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT, source-span IMAGE, alpha and
  * isolated group opacity. The borrowed text port and its immutable resources
