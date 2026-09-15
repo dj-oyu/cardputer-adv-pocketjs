@@ -53,6 +53,14 @@ unsigned ksn_render_band_runs(uint32_t mask);
  * compare read counts and frame time without a rebuild. Rendering is
  * pixel-neutral either way; only the number of ksn_core_read calls changes. */
 extern int g_ksn_decode_once;
+/* Rotated image spans map a destination pixel to a source column by
+ * floor(u*source_width/(w*32768)) with u affine in x. With this switch on
+ * (default) the quotient and remainder of that division are advanced by one
+ * comparison and one conditional subtraction per pixel instead of dividing
+ * twice; the source index, the block fetched and the composited pixel are
+ * identical in both arms. Off restores the per-pixel rational division.
+ * Owner task only; read once per rotated span. */
+extern bool g_ksn_image_rotate_step;
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT, source-span IMAGE, alpha and
  * isolated group opacity. The borrowed text port and its immutable resources

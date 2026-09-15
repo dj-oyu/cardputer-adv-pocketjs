@@ -131,6 +131,16 @@ static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destinat
     /* Pixel centers, exact integer mapping. Source <=256 and dest <=65535. */
     return (offset*source+source/2)/destination;
 }
+/* Rotated spans: step the source quotient instead of dividing per pixel.
+ * U = u*source_width is affine in x, so with D = du*source_width written as
+ * D = q*B + r (q = floor(D/B), 0 <= r < B) the floor/mod pair of the same
+ * division advances by q + (rem+r >= B) and rem+r-(-B). That reproduces
+ * floor(U/B) exactly for every pixel, so the source index and the block left
+ * for the compositor are bit-identical to the per-pixel division. The range
+ * test moves with it: 0 <= u < umax is exactly 0 <= sx < source_width because
+ * rem is in [0,B). Only the span anchor (one pixel in sixteen) divides, with
+ * the truncating quotient corrected to floor for negative numerators. */
+bool g_ksn_image_rotate_step=true;
 static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned index,
                              const ksn_draw *d,int x,int y,unsigned *count,ksn_span_scratch *scratch){
     if(d->data.image.rotation){
@@ -142,21 +152,67 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
         int64_t u=w*16384+qx*c+qy*s,v=h*16384-qx*s+qy*c;
         int64_t umax=w*32768,vmax=h*32768;
         unsigned cached_y=UINT32_MAX,cached_x=UINT32_MAX;
-        for(unsigned i=0;i<*count;i++,u+=2*c,v-=2*s){
-            unsigned sx,sy;scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;
-            if(u<0||v<0||u>=umax||v>=vmax)continue;
-            sx=d->data.image.source_x+(unsigned)(u*d->data.image.source_width/umax);
-            sy=d->data.image.source_y+(unsigned)(v*d->data.image.source_height/vmax);
-            unsigned bx=d->data.image.source_x+((sx-d->data.image.source_x)/16)*16;
-            if(sy!=cached_y||bx!=cached_x){
-                unsigned n=d->data.image.source_x+d->data.image.source_width-bx;if(n>16)n=16;
-                ksn_result r=ksn_core_image_span(core,ticket,false,layer,(uint16_t)index,(uint16_t)sy,(uint16_t)bx,
-                    (uint16_t)n,scratch->rotated.block_rgb,scratch->rotated.block_alpha);
-                if(r!=KSN_OK)return r;
-                cached_y=sy;cached_x=bx;
+        unsigned sw=d->data.image.source_width,sh=d->data.image.source_height;
+        if(!g_ksn_image_rotate_step||!sw||!sh||!w||!h){
+            /* Rational division at source lookup, once per destination pixel. */
+            for(unsigned i=0;i<*count;i++,u+=2*c,v-=2*s){
+                unsigned sx,sy;scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;
+                if(u<0||v<0||u>=umax||v>=vmax)continue;
+                sx=d->data.image.source_x+(unsigned)(u*sw/umax);
+                sy=d->data.image.source_y+(unsigned)(v*sh/vmax);
+                unsigned bx=d->data.image.source_x+((sx-d->data.image.source_x)/16)*16;
+                if(sy!=cached_y||bx!=cached_x){
+                    unsigned n=d->data.image.source_x+sw-bx;if(n>16)n=16;
+                    ksn_result r=ksn_core_image_span(core,ticket,false,layer,(uint16_t)index,(uint16_t)sy,(uint16_t)bx,
+                        (uint16_t)n,scratch->rotated.block_rgb,scratch->rotated.block_alpha);
+                    if(r!=KSN_OK)return r;
+                    cached_y=sy;cached_x=bx;
+                }
+                scratch->rotated.rgb[i]=scratch->rotated.block_rgb[sx-bx];
+                scratch->rotated.alpha[i]=scratch->rotated.block_alpha[sx-bx];
             }
-            scratch->rotated.rgb[i]=scratch->rotated.block_rgb[sx-bx];
-            scratch->rotated.alpha[i]=scratch->rotated.block_alpha[sx-bx];
+            return KSN_OK;
+        }
+        /* Step the quotient and remainder of the same divisions. All of the
+         * stepping state stays in 32 bits, which is provable here: the source
+         * extent is at most 256 and the sine is Q14, so |2c*sw| is at most
+         * 8,388,608 and |q*um| <= |2c*sw|; the denominators are w*32768 with
+         * w <= 65535 (int16 bounds), so they fit int32; and the remainder is
+         * compared against um-remu_step before adding, which keeps every
+         * intermediate inside [0,um). Only the span anchor divides a 64-bit
+         * numerator, once per axis, and takes the remainder back out with an
+         * inline multiply instead of a second library call. */
+        int step_u=2*c,step_v=-2*s;
+        int su=step_u*(int)sw,sv=step_v*(int)sh;
+        int um=(int)umax,vm=(int)vmax;
+        int qu=su/um,remu_step=su-qu*um;
+        int qv=sv/vm,remv_step=sv-qv*vm;
+        if(remu_step<0){qu--;remu_step+=um;}          /* truncating quotient -> floor */
+        if(remv_step<0){qv--;remv_step+=vm;}
+        int64_t U=u*(int64_t)sw,V=v*(int64_t)sh;
+        int sx=(int)(U/umax),sy=(int)(V/vmax);
+        int remu=(int)(U-(int64_t)sx*umax),remv=(int)(V-(int64_t)sy*vmax);
+        if(remu<0){sx--;remu+=um;}
+        if(remv<0){sy--;remv+=vm;}
+        for(unsigned i=0;i<*count;i++){
+            scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;
+            if(sx>=0&&sy>=0&&sx<(int)sw&&sy<(int)sh){
+                unsigned column=(unsigned)(sx/16)*16;
+                unsigned bx=(unsigned)d->data.image.source_x+column;
+                unsigned source=(unsigned)d->data.image.source_x+(unsigned)sx;
+                unsigned row=(unsigned)d->data.image.source_y+(unsigned)sy;
+                if(row!=cached_y||bx!=cached_x){
+                    unsigned n=(unsigned)d->data.image.source_x+sw-bx;if(n>16)n=16;
+                    ksn_result r=ksn_core_image_span(core,ticket,false,layer,(uint16_t)index,(uint16_t)row,(uint16_t)bx,
+                        (uint16_t)n,scratch->rotated.block_rgb,scratch->rotated.block_alpha);
+                    if(r!=KSN_OK)return r;
+                    cached_y=row;cached_x=bx;
+                }
+                scratch->rotated.rgb[i]=scratch->rotated.block_rgb[source-bx];
+                scratch->rotated.alpha[i]=scratch->rotated.block_alpha[source-bx];
+            }
+            if(remu>=um-remu_step){remu-=um-remu_step;sx+=qu+1;}else{remu+=remu_step;sx+=qu;}
+            if(remv>=vm-remv_step){remv-=vm-remv_step;sy+=qv+1;}else{remv+=remv_step;sy+=qv;}
         }
         return KSN_OK;
     }
