@@ -15,6 +15,7 @@ static int fake_gettimeofday(struct timeval *out,void *zone){
 #include "../main/system/sys_clock.c"
 #include "../main/system/sys_state.c"
 #include "../main/system/sys_notify.c"
+#include "../main/system/sys_timer.c"
 #include "../main/system/sys_device.c"
 int main(void){
     sys_clock_state out;uint32_t dirty;sys_sub sub;
@@ -49,4 +50,13 @@ int main(void){
     assert(sys_poll(&state,a,&dirty)==SYS_OK&&!dirty);
     assert(sys_poll(&state,b,&dirty)==SYS_OK&&dirty==SYS_NOTIFY);
     sys_device_step();assert(sys_poll(&state,b,&dirty)==SYS_OK&&!dirty);
+    sys_sub timer_sub;assert(sys_subscribe(&state,SYS_TIMER,&timer_sub)==SYS_OK);
+    assert(sys_poll(&state,timer_sub,&dirty)==SYS_OK&&dirty==SYS_TIMER);
+    assert(sys_timer_set(&timers,2,"device","TIMER",(uint64_t)mono+1000)==NOTICE_OK);
+    sys_device_step();assert(sys_poll(&state,timer_sub,&dirty)==SYS_OK&&dirty==SYS_TIMER);
+    mono+=1000;sys_device_step();
+    assert(sys_poll(&state,timer_sub,&dirty)==SYS_OK&&dirty==SYS_TIMER);
+    assert(sys_timer_deadline(&timers)==UINT64_MAX);
+    assert(sys_notify_ack(&notifications,1,id)==NOTICE_OK);sys_device_step();
+    sys_notice active;assert(sys_notify_active(&notifications,&active)&&active.owner==2);
 }

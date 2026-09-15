@@ -45,6 +45,10 @@ void sys_notify_publish(sys_state *s){
     if(s)for(unsigned i=0;i<SYS_SUBSCRIPTIONS;i++)
         s->subscriptions[i].pending|=s->subscriptions[i].interest&SYS_NOTIFY;
 }
+void sys_timer_publish(sys_state *s){
+    if(s)for(unsigned i=0;i<SYS_SUBSCRIPTIONS;i++)
+        s->subscriptions[i].pending|=s->subscriptions[i].interest&SYS_TIMER;
+}
 static void publish_clock(sys_state *s){
     if(s->clock_revision!=UINT32_MAX)s->clock_revision++;
     for(unsigned i=0;i<SYS_SUBSCRIPTIONS;i++)

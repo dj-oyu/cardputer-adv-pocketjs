@@ -4,6 +4,18 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14c2 — 共通相対timer・満杯再試行（2026-09-16）
+
+- `sys_timer`へ4件固定の期限・owner/key・labelを抽出。store240 B、pethubの旧224 B配列を撤去。
+- 満杯時のdueを保持し、blocked期限はNEVER扱い。通知state変更で再試行し、未来timerは
+  自分の期限で起床候補を維持する。SYS_TIMER dirtyを追加しSystem ownerへ接続。
+- ASan/UBSan・O2で4枠、owner分離、更新/取消、満杯保持、60秒相当の再試行停止、
+  容量解放後の受付とpethub互換を検査。System adapterから発火/dirty配送する試験もPASS。
+- 時計208＋通知600＋timer240＝1,048 B。共通runtimeの2 KiB予算内。
+  旧NVSスキーマ・壁時計alarm・鳴動adapterは維持。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,948 / 136,588 B（+16 B）。
+  `pet.timer()`の残り時間もowner別snapshotへ接続済み。
+
 ## checkpoint 14c1 — 共通通知state・pethub接続（2026-09-16）
 
 - `sys_notify`を追加。9件固定、FIFO、ACTIVE、8待機枠、snooze、TTL、owner/key重複抑制、

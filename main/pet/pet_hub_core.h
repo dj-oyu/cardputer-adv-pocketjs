@@ -2,12 +2,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "../system/sys_notify.h"
+#include "../system/sys_timer.h"
 #define PET_NOTICE_OWNER UINT32_C(1)
 
 #define PET_WIRE_BYTES 48
 // The four limits pet_hub.c publishes through capabilities.get(). They live
 // here because the structs below are what actually enforces them: an app that
-// reads maxLabelChars is reading the size of pet_timer_t::label.
+// reads maxLabelChars is reading the size of sys_timer_record::label.
 #define PET_MAX_ALERTS  8
 #define PET_MAX_TIMERS  4
 #define PET_ID_CHARS    16
@@ -26,12 +27,8 @@ typedef struct {
     pet_usage_t usage[2];
 } pet_hub_saved_t;
 typedef struct {
-    char id[PET_ID_CHARS+1], label[PET_LABEL_CHARS+1];
-    uint64_t due;
-} pet_timer_t;
-typedef struct {
     pet_hub_saved_t saved;
-    pet_timer_t timers[PET_MAX_TIMERS];
+    sys_timer *timers;
     sys_notify *notifications;
 } pet_hub_t;
 uint32_t pet_crc(const uint8_t *p, unsigned n);

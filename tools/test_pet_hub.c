@@ -3,8 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 static sys_notify notices;
+static sys_timer timers;
 static void reset_hub(pet_hub_t *h){
-    notices=(sys_notify){0};pet_hub_defaults(h);h->notifications=&notices;
+    notices=(sys_notify){0};timers=(sys_timer){0};pet_hub_defaults(h);
+    h->notifications=&notices;h->timers=&timers;
 }
 static void put32(uint8_t *p,uint32_t n){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(n>>(i*8));}
 static void packet(uint8_t *d,uint32_t seq,uint32_t tokens,uint32_t reset) {

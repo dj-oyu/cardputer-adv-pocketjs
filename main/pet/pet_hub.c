@@ -36,6 +36,7 @@ static bool persist(void) {
 }
 void pet_hub_init(void) {
     pet_hub_defaults(&hub);hub.notifications=sys_device_notifications();
+    hub.timers=sys_device_timers();
     opened=nvs_open("pet_hub",NVS_READWRITE,&prefs)==ESP_OK;
     if(opened) {
         pet_hub_saved_t s;size_t n=sizeof(s);
@@ -212,8 +213,10 @@ static JSValue timer_read(JSContext *c,JSValueConst self,int argc,JSValueConst *
                                                 "timer id required",false,NULL);
     const char *id=JS_ToCString(c,a[0]);if(!id)return JS_EXCEPTION;
     JSValue result=JS_NULL;
-    for(unsigned i=0;i<PET_MAX_TIMERS;i++)if(hub.timers[i].due&&!strcmp(hub.timers[i].id,id)) {
-        uint64_t now=now_ms();result=JS_NewFloat64(c,hub.timers[i].due>now?(hub.timers[i].due-now)/1000.0:0);break;
+    sys_timer_record timer;
+    if(sys_timer_read(hub.timers,PET_NOTICE_OWNER,id,&timer)) {
+        uint64_t now=(uint64_t)esp_timer_get_time();
+        result=JS_NewFloat64(c,timer.due_us>now?(timer.due_us-now)/1000000.0:0);
     }
     JS_FreeCString(c,id);return result;
 }

@@ -216,6 +216,15 @@ pub/subは終端履歴の全件配送を保証しない。後からidを読む�
 
 ## 8. タイマー・pethub・保存
 
+CP14c2実装: `sys_timer`へ4件の相対timerを移管。1件56 B、管理込み240 B。
+System adapterが所有し、pethubの旧timer配列224 Bを撤去。owner＋文字列key（16文字）で
+設定/更新/取消し、label24文字を保持する。期限は単調時計の絶対マイクロ秒。
+通知満杯ではdueを保持してblockedにし、deadlineから外す。通知state変更時だけ再試行する。
+未来の未発火timerはその期限を返すので、blocked timerのための過去期限busy loopを作らない。
+SYS_TIMERは設定・取消・blocked移行・受付成功をdirtyへ合流する。
+既存`pet.alarm`はSYSTEM owner=1の互換adapterで、秒/ミリ秒を共通期限へ変換する。
+NVS保存対象と壁時計alarmの意味判定はpethubに残す。鳴動期限・owner wake統合は次段階。
+
 共通タイマー枠は現行相当4件。owner/key、単調期限、固定通知内容を持ち、IDやlabelの既存上限を維持する。
 pethubは利用量reset・目覚まし等の意味を判定し、次の意味のある期限をruntimeへ提示する。毎フレーム全条件を検査しない。
 通知キュー満杯で期限発火に失敗したタイマーはdue状態を保持する。

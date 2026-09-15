@@ -61,22 +61,13 @@ bool pet_hub_packet(pet_hub_t *h, const uint8_t d[PET_WIRE_BYTES]) {
     return true;
 }
 bool pet_hub_timer(pet_hub_t *h, const char *id, const char *label, uint64_t due) {
-    int slot=-1;
-    for(unsigned i=0;i<PET_MAX_TIMERS;i++) {
-        if(!strcmp(h->timers[i].id,id)){slot=i;break;}
-        if(!h->timers[i].due)slot=i;
-    }
-    if(slot<0)return due==0;
-    pet_timer_t *t=&h->timers[slot];
-    snprintf(t->id,sizeof(t->id),"%s",id);
-    snprintf(t->label,sizeof(t->label),"%s",label);t->due=due;return true;
+    if(due>UINT64_MAX/1000)return false;
+    return sys_timer_set(h->timers,PET_NOTICE_OWNER,id,label,due*1000)==NOTICE_OK;
 }
 bool pet_hub_tick(pet_hub_t *h, uint64_t ms, uint32_t utc) {
     bool dirty=false;
-    for(unsigned i=0;i<PET_MAX_TIMERS;i++) {
-        pet_timer_t *t=&h->timers[i];
-        if(t->due&&ms>=t->due&&pet_hub_notify(h,t->label))t->due=0;
-    }
+    if(ms<=UINT64_MAX/1000)
+        sys_timer_step(h->timers,h->notifications,ms*1000,h->notifications&&h->notifications->changed);
     if(!utc)return false;
     for(unsigned p=0;p<2;p++)for(unsigned w=0;w<2;w++) {
         pet_usage_t *u=&h->saved.usage[p];uint32_t r=u->reset[w];
