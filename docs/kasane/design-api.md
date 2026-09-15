@@ -152,12 +152,16 @@ JSのstats.nativeBytesは参照2世代分を含むadapterの予約heapで、共�
 CP3bのS3 ELF型情報では基本領域9,836 B（adapter管理1,644 B＋借用4ブロック）、
 cacheは496+1,536+1,024=3,056 B。cacheありは12,892 B。CP3aより両方508 B減。
 CP4aでは描画中guardとalignmentにより基本/cache込みとも4 B増（9,840 / 12,896 B）。
+CP4bではhost基本8,808 B（管理616 B＋借用8,192 B）とAPP adapter1,044 Bへ分離する。
+APP使用時合計9,852 B、cache込み12,908 B。SYSTEMのみならadapter分を確保しない。
+host基本5確保＋adapter1確保となり、CP4a比は要求サイズ12 B増とallocator管理情報1件増。
+新runtimeの共有staticはpointer/lease issuerの8 B。JS統計はこれを含まない。
 基本/cacheとも個別確保は3,072 B以下。基本5確保の途中失敗では全回収し、初期化完了後にのみ公開する。
 数値はallocator管理情報・alignment overheadを除く要求サイズ。ブロック分割で管理情報の個数は増える。
 cacheの文字1,024 Bは予約済みだが文字templateは未対応。cache.createのdraw配列はS3で
 48×40=1,920 Bのstackを使う。S3生成コードの関数単体frameはcache.create 1,984 B、
 ensure_state/core_begin/core_init各48 B、core_bind 32 B。子関数・VMを含むstack peakは実機で後日確認する。
-Kasaneを使わないsessionの予約heapは0 B。board共用描画帯3,840 Bと転送buffer7,680 Bは
+APP/SYSTEMのどちらもKasaneを取得していない場合の予約heapは0 B。board共用描画帯3,840 Bと転送buffer7,680 Bは
 別途同時ピークに含める。CP3aでstatic DIRAM増分はない。
 部品数ごとのnative追加heap確保は0。PIE側も保持snapshotは2,048 Bのまま。
 
@@ -171,7 +175,41 @@ SYSTEMの確定済み表示・参照・pollと構築中/送信待ち更新は残
 
 owner taskがguestアクセスを止めた後、描画呼出しの外で実行する。display/provider callbackからの
 再入はBUSYで無変更。これは低レベルの終了機構であり、endpointポインタの失効機構ではない。
-CP4bでhostの領域所有、APP attach/detachの世代付きlease、JS adapter/session終了を接続する。
+CP4bで追加したruntimeがhostの領域所有とAPP leaseを担い、JS adapter/session終了から利用する。
+
+### ネイティブruntimeとAPP lease（CP4b）
+
+`ksn_runtime`がcore/coordinator/cacheの領域を所有する。QuickJSへの依存はなく、
+JS adapterは参照wrapper管理と4 Bの`ksn_app_lease`だけを持つ。既存のsession終了の
+`pocket_kasane_reset`はAPP detachへ委譲する。
+
+```mermaid
+flowchart LR
+    JS[QuickJS APP] --> Adapter[pocket_kasane: wrapperとlease]
+    Adapter --> Runtime[ksn_runtime: 領域と寿命の所有]
+    Native[SYSTEMのネイティブ呼出側] --> Runtime
+    Runtime --> View[core / coordinator / optional cache]
+    View --> Port[display port]
+```
+
+- `ksn_runtime_app_attach`は同時に1接続を認め、process lifetimeで単調増加するIDを返す。
+  `ksn_runtime_app_view(lease)`を**操作ごとに**解決する。古いleaseはNULL、detachはSTALE。
+  ID上限ではLIMITで無変更とし、メモリアドレスが再利用されてもIDは復活しない。
+  生のviewポインタはその操作中だけ借用し、detach/shutdownをまたいで保持しない。
+- `ksn_runtime_system_acquire`はguestなしで領域とSYSTEM endpointを取得する。
+  SYSTEM取得済みならAPP終了後も領域とSYSTEMを保持する。APPだけが利用した領域はdetachで全解放する。
+  SYSTEMはネイティブownerが共有する単一endpointで、参照count付き多重leaseではない。
+- APPからのreturn/yieldはAPPの未完builderだけをabortし、SYSTEM builderには触れない。
+  detachはCP4aの終了処理を使う。描画callback中のdetachはBUSYで接続を維持する。
+- SYSTEM呼出側はguestの有無に依存せず`needs_present`/`present`をpumpする。
+  `shutdown`はAPP接続・builder・submission・描画中ならBUSY、停止後は全領域を解放する。
+  runtimeはタスク・タイマー・framebufferを追加しない。
+- cache初回確保もruntimeへ移し、最初のtemplateが成立してからattachする。
+  `reserved_bytes`はruntimeの実予約heap、JS `nativeBytes`はそれに現在のadapter予約を加算する。
+  SYSTEMが生存していれば、JSが未使用でも予約量は0とは限らない。
+
+これは所有権と呼出し境界の実装。home/通知の実サービス移植とそのメインループへの
+SYSTEM描画pump組込みは後続checkpointで行う。既存のlegacy homeへ自動でSYSTEMを重ねない。
 
 `tools/test_pocket_kasane.c`は実QuickJSとASan/UBSanでreplace/patch、group、cache、modal、
 参照失効、cancel、LCD失敗と全修復、thenable拒否、参照上限を検証する。

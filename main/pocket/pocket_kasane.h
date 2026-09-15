@@ -5,9 +5,10 @@
 #include "quickjs.h"
 #include "ui/kasane/ksn_view_host.h"
 
-/* QuickJS-facing APP endpoint for the Kasane design system. Native storage is
- * allocated lazily on the first mutating call; reading features costs no Kasane
- * arena. All functions run on the JS owner task. */
+/* QuickJS-facing APP lease into the native Kasane runtime. Allocation is lazy;
+ * reading features costs no arena. Reset detaches APP and releases its wrapper
+ * bookkeeping; a native SYSTEM owner keeps the shared storage alive.
+ * Owner task only, reset outside guest/render callbacks. */
 esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data);
 void pocket_kasane_reset(void);
 

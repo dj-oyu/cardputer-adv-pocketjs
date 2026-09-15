@@ -19,7 +19,7 @@ gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Wer
   -fno-omit-frame-pointer \
   -I "$QJS" -I tools/hostshim -I main -I main/pocket -I main/ui -I main/ui/kasane \
   tools/test_pocket_kasane.c tools/hostshim/pocket_api_stub.c \
-  main/pocket/pocket_kasane.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
+  main/pocket/pocket_kasane.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
   main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \
   "$CACHE/quickjs-vm.o" \

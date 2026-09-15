@@ -1,5 +1,6 @@
 #include "pocket_kasane.h"
 #include "pocket_api.h"
+#include "ui/kasane/ksn_runtime.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,9 +17,7 @@ typedef struct {
     ref_status status;
 } ref_slot;
 typedef struct {
-    ksn_core core;
-    ksn_cache *cache;
-    ksn_view_host host;
+    ksn_app_lease lease;
     /* Two generations let a 32-reference REPLACE be built while the displayed
      * generation remains valid. Retiring identities frees slots immediately;
      * old wrappers/finalizers cannot affect subsequently reused slots. */
@@ -30,8 +29,6 @@ typedef struct {
 } kasane_state;
 
 _Static_assert(sizeof(kasane_state)<=3072,"Kasane control allocation budget");
-#define KASANE_BASE_RESERVED_BYTES (sizeof(kasane_state)+ \
-    2*sizeof(ksn_core_command_block)+2*sizeof(ksn_core_text_block))
 
 static kasane_state *state;
 /* Never recycle identities across host reset while old JS wrappers can live. */
@@ -64,57 +61,28 @@ static JSValue throw_result(JSContext *ctx, ksn_result result, const char *op) {
 }
 
 static bool ensure_state(JSContext *ctx, const char *op) {
-    if(state) return true;
-    kasane_state *candidate=calloc(1,sizeof(*candidate));
-    ksn_core_command_block *commands[2]={NULL,NULL};
-    ksn_core_text_block *text[2]={NULL,NULL};
-    if(!candidate) goto fail;
-    for(unsigned i=0;i<2;i++) {
-        commands[i]=calloc(1,sizeof(*commands[i]));
-        if(!commands[i]) goto fail;
-        text[i]=calloc(1,sizeof(*text[i]));
-        if(!text[i]) goto fail;
+    if(state) {
+        if(ksn_runtime_app_view(state->lease))return true;
+        throw_result(ctx,KSN_STALE,op);return false;
     }
-    ksn_core_bind(&candidate->core,commands[0],commands[1],text[0],text[1]);
-    ksn_view_host_init(&candidate->host,&candidate->core,NULL,0);
+    kasane_state *candidate=calloc(1,sizeof(*candidate));
+    ksn_result result=candidate?ksn_runtime_app_attach(&candidate->lease):KSN_OOM;
+    if(result!=KSN_OK) {
+        free(candidate);throw_result(ctx,result,op);return false;
+    }
     state=candidate;
     return true;
-fail:
-    for(unsigned i=0;i<2;i++) { free(commands[i]);free(text[i]); }
-    free(candidate);
-    pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,op,
-                     "Kasane native blocks could not be allocated",true,
-                     POCKET_OUTCOME_NOT_APPLIED);
-    return false;
-}
-
-static void free_cache(ksn_cache *cache) {
-    if(!cache) return;
-    free(cache->state.commands);free(cache->state.text);free(cache);
 }
 
 /* No JS calls after allocation: attach only a complete first definition, so
  * failures cannot alter the displayed bank or reserve an unused cache. */
 static ksn_result create_template(const ksn_draw *draws,uint16_t count,ksn_template *out) {
-    if(state->building.value||ksn_core_has_submission(&state->core)) return KSN_BUSY;
-    if(state->cache)
-        return ksn_view_cache_create(ksn_view_host_endpoint(&state->host,KSN_APP),draws,count,out);
-    ksn_cache *cache=calloc(1,sizeof(*cache));
-    if(!cache) return KSN_OOM;
-    ksn_cache_command_block *commands=calloc(1,sizeof(*commands));
-    if(!commands) { free(cache);return KSN_OOM; }
-    ksn_cache_text_block *text=calloc(1,sizeof(*text));
-    if(!text) { free(commands);free(cache);return KSN_OOM; }
-    ksn_cache_bind(cache,commands,text);
-    ksn_template candidate={0};
-    ksn_result result=ksn_cache_create(cache,KSN_APP,draws,count,&candidate);
-    if(result==KSN_OK) result=ksn_view_host_attach_cache(&state->host,cache);
-    if(result!=KSN_OK) { free_cache(cache);return result; }
-    state->cache=cache;*out=candidate;return KSN_OK;
+    if(state->building.value) return KSN_BUSY;
+    return ksn_runtime_cache_create(ksn_runtime_app_view(state->lease),draws,count,out);
 }
 
 static ksn_view *view(void) {
-    return state?ksn_view_host_endpoint(&state->host,KSN_APP):NULL;
+    return state?ksn_runtime_app_view(state->lease):NULL;
 }
 
 static uint32_t opaque_value(JSValueConst value, JSClassID class_id) {
@@ -585,7 +553,7 @@ static JSValue mutate(JSContext *ctx, JSValueConst self, int argc,
     JSValueConst token=tx_argument?(argc?argv[0]:JS_UNDEFINED):self;
     ksn_tx tx={opaque_value(token,class_id)};
     if(!state||!tx.value||state->building.value!=tx.value||
-       state->host.builder.value!=tx.value)
+       !view()||view()->host->builder.value!=tx.value)
         return throw_result(ctx,KSN_STALE,op);
     JSValue result=function(ctx,self,argc,argv);
     if(JS_IsException(result)) {
@@ -658,6 +626,7 @@ static JSValue run_build(JSContext *ctx, int argc, JSValueConst *argv,
     if(result!=KSN_OK) { throw_result(ctx,result,op);goto fail; }
     state->building=(ksn_tx){0};
     state->submitted=tx;state->submitted_mode=mode;state->active=true;
+    ksn_runtime_app_activate(state->lease);
     JS_FreeValue(ctx,tx_object);JS_FreeValue(ctx,modal_object);
     return ticket;
 fail:
@@ -799,20 +768,19 @@ static JSValue js_stats(JSContext *ctx, JSValueConst self, int argc,
                         JSValueConst *argv) {
     (void)self;(void)argc;(void)argv;
     apply_outcome();
-    ksn_view_stats stats=state?ksn_view_get_stats(view()):(ksn_view_stats){0};
+    ksn_view_stats stats=ksn_runtime_stats(KSN_APP);
     JSValue out=JS_UNDEFINED,displayed=JS_UNDEFINED,cache=JS_UNDEFINED;
     out=JS_NewObject(ctx);if(JS_IsException(out)) goto fail;
     displayed=JS_NewObject(ctx);if(JS_IsException(displayed)) goto fail;
     cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
     PUT(out,"active",JS_NewBool(ctx,state&&state->active));
-    PUT(out,"nativeBytes",JS_NewUint32(ctx,state?(uint32_t)(KASANE_BASE_RESERVED_BYTES+
-        (state->cache?KSN_CACHE_RESERVED_BYTES:0)):0));
+    PUT(out,"nativeBytes",JS_NewUint32(ctx,ksn_runtime_reserved_bytes()+(state?sizeof(*state):0)));
     PUT(displayed,"commands",JS_NewInt32(ctx,stats.displayed.commands));
     PUT(displayed,"textBytes",JS_NewInt32(ctx,stats.displayed.text_bytes));
     PUT(cache,"commands",JS_NewInt32(ctx,stats.shared_cache.commands));
     PUT(cache,"templates",JS_NewInt32(ctx,stats.shared_cache.templates));
     PUT(cache,"instances",JS_NewInt32(ctx,stats.shared_cache.instances));
-    PUT(cache,"reservedBytes",JS_NewUint32(ctx,state&&state->cache?KSN_CACHE_RESERVED_BYTES:0));
+    PUT(cache,"reservedBytes",JS_NewUint32(ctx,ksn_runtime_cache_bytes()));
     PUT(out,"displayed",JS_DupValue(ctx,displayed));PUT(out,"cache",JS_DupValue(ctx,cache));
     JS_FreeValue(ctx,displayed);JS_FreeValue(ctx,cache);return out;
 fail:
@@ -911,36 +879,29 @@ esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data) {
 }
 
 void pocket_kasane_reset(void) {
-    if(state) {
-        free_cache(state->cache);
-        for(unsigned i=0;i<2;i++) {
-            free(state->core.state.banks[i].commands);
-            free(state->core.state.banks[i].text);
-        }
-    }
+    if(state&&ksn_runtime_app_detach(state->lease)==KSN_BUSY)return;
     free(state);state=NULL;
 }
 bool pocket_kasane_active(void) { return state&&state->active; }
 bool pocket_kasane_has_submission(void) {
-    return state&&ksn_core_has_submission(&state->core);
+    return ksn_runtime_has_submission();
 }
 bool pocket_kasane_needs_present(void) {
-    return state&&state->active&&ksn_view_host_needs_present(&state->host);
+    return ksn_runtime_needs_present();
 }
 void pocket_kasane_invalidate(void) {
-    if(state)ksn_view_host_invalidate(&state->host);
+    ksn_runtime_invalidate();
 }
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
     if(!stats) return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     if(!pocket_kasane_needs_present()) return KSN_OK;
-    ksn_result result=ksn_view_host_present(&state->host,display,stats);
+    ksn_result result=ksn_runtime_present(display,stats);
     apply_outcome();return result;
 }
 void pocket_kasane_end_turn(void) {
-    if(state) { ksn_view_host_end_turn(&state->host); apply_outcome(); }
+    if(state) { ksn_runtime_app_end_turn(state->lease); apply_outcome(); }
 }
 ksn_input_scope pocket_kasane_input_scope(bool host_priority) {
-    return state?ksn_view_host_route(&state->host,host_priority)
-                :(host_priority?KSN_INPUT_HOST:KSN_INPUT_APP);
+    return ksn_runtime_input_scope(host_priority);
 }

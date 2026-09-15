@@ -1,6 +1,7 @@
 // End-to-end host contract for pocket.kasane with the real QuickJS and the
 // real fixed-storage DS core/cache/modal/renderer.
 #include "pocket_kasane.h"
+#include "ui/kasane/ksn_runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -372,7 +373,7 @@ static void base_block_tests(void) {
     check(open_fault_runtime(""),"base block fixture opens");
     pocket_kasane_reset();track_native=true;
     ksn_render_stats stats;
-    for(int fault=0;fault<5;fault++) {
+    for(int fault=0;fault<6;fault++) {
         native_after=fault;native_max=0;
         check(run("var failed=false;try{kasane.replace(tx=>tx.rect(shape))}"
                   "catch(e){failed=e.code==='OUT_OF_MEMORY'}if(!failed)throw Error('missing OOM');"
@@ -431,6 +432,53 @@ static void lazy_cache_tests(void) {
         pocket_kasane_reset();check(native_bytes==0,"reset frees base and all cache blocks");
     }
     track_native=false;close_fault_runtime();
+}
+
+static void system_lifetime_tests(void) {
+    check(open_fault_runtime(""),"SYSTEM coexistence fixture opens");
+    pocket_kasane_reset();track_native=true;
+    ksn_view *system=NULL;ksn_tx tx;ksn_ref ref;ksn_render_stats stats;
+    ksn_draw d={.kind=KSN_RECT,.bounds={0,0,8,8},.clip={0,0,240,135},.opacity=255,
+                .data.shape={0x00ff00ff,0,0}};
+    check(ksn_runtime_system_acquire(&system)==KSN_OK,"native SYSTEM acquires without APP");
+    check(ksn_view_begin(system,KSN_REPLACE,&tx)==KSN_OK&&
+          ksn_view_add(system,tx,&d,&ref)==KSN_OK&&ksn_view_submit(system,tx)==KSN_OK,
+          "SYSTEM builds without guest submission");
+    check(present(&stats)==KSN_OK&&panel_pixels[0]==0x07e0,"SYSTEM presents without active APP");
+    size_t base=native_bytes;
+    native_after=0;
+    check(run("var failed=false;try{kasane.replace(tx=>tx.rect(shape))}"
+              "catch(e){failed=e.code==='OUT_OF_MEMORY'}if(!failed)throw Error('missing OOM');"),
+          "APP adapter OOM preserves acquired SYSTEM");
+    native_after=-1;
+    check(native_bytes==base,"APP failure releases only its allocation");
+    for(unsigned i=0;i<3;i++) {
+        check(run("kasane.replace(tx=>{tx.background(0x102030ff);globalThis.oldR=tx.rect(shape)});"),
+              "APP attaches beside native SYSTEM");
+        if(i==0)check(present(&stats)==KSN_OK,"APP commits beside SYSTEM");
+        if(i==2){fail_band=1;check(present(&stats)==KSN_IO,"APP partially transfers before exit");fail_band=-1;}
+        pocket_kasane_reset();
+        check(native_bytes==base&&ksn_runtime_stats(KSN_SYSTEM).displayed.commands==1,
+              "APP detach preserves SYSTEM reservation and commands");
+        check(present(&stats)==KSN_OK,"SYSTEM repairs after APP exit without JS");
+        bool pixels=true;
+        for(unsigned y=0;y<135;y++)for(unsigned x=0;x<240;x++)
+            if(panel_pixels[y*240+x]!=(x<8&&y<8?0x07e0:0))pixels=false;
+        check(pixels,"APP pixels vanish while all SYSTEM pixels survive");
+        check(run("var failed=false;try{kasane.patch(tx=>oldR.setColor(tx,0xffffffff))}"
+                  "catch(e){failed=e.code==='CLOSED'}if(!failed)throw Error('revived ref');"),
+              "old JS DrawRef cannot affect reattached APP");
+        pocket_kasane_reset();
+    }
+    close_fault_runtime();
+    check(live_allocations==0,"guest heap fully released while SYSTEM survives");
+    ksn_change change={.property=KSN_SET_COLOR,.value.color=0xff0000ff};
+    check(ksn_view_begin(system,KSN_PATCH,&tx)==KSN_OK&&
+          ksn_view_change(system,tx,ref,&change)==KSN_OK&&ksn_view_submit(system,tx)==KSN_OK,
+          "SYSTEM reference remains usable after QuickJS destruction");
+    check(present(&stats)==KSN_OK&&panel_pixels[0]==0xf800,"SYSTEM renders with no QuickJS runtime");
+    check(ksn_runtime_shutdown()==KSN_OK&&native_bytes==0,"native shutdown releases host blocks");
+    track_native=false;
 }
 
 int main(void) {
@@ -519,6 +567,7 @@ int main(void) {
     allocator_tests();
     base_block_tests();
     lazy_cache_tests();
+    system_lifetime_tests();
     printf("%s: %u failure(s)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

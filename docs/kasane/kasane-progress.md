@@ -120,6 +120,32 @@ commit・pushして進める。実機未確認は各記録に残す。
   native homeへの遷移やSYSTEM実サービスへの接続は、この基盤だけでは変更しない。
 - 実機確認は保留。シリアル操作なし。
 
+## checkpoint 4b — host runtime所有とAPP lease（2026-09-15）
+
+- `ksn_runtime.c/.h`へcore/coordinator/cacheの所有を移した。QuickJS依存なし。
+  JS adapterはwrapper管理＋4 BのAPP leaseのみ。初回mutating callでattachし、
+  既存app_sessionの`pocket_kasane_reset`経由でAPPのみdetachする。
+- SYSTEM取得後はguest終了・QuickJS破棄後も領域とSYSTEMを保持。SYSTEM取得のない
+  APP-only利用はdetachで全解放する。native shutdownはAPP/pending/drawing中BUSY。
+- APP leaseはprocess lifetimeで再利用せず、操作ごとにviewを解決する。
+  古いleaseのdetach/end_turnは新しいAPPへ影響しない。ID枯渇は確保前にLIMIT、wrapなし。
+  生viewは呼出し中の借用であり、lifecycleをまたいでキャッシュしない。
+- APPのreturn/yield cleanupはSYSTEM builderをabortしない。cache初回3確保と原子的attachもhostへ移管。
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、PIE）。
+  新規test_runtimeはhost5確保の各OOM、SYSTEM-only描画、APP再接続、古いlease、
+  SYSTEM builder維持、描画再入拒否、shutdown、ID枯渇を検証。runtimeヘッダのC++17検査もPASS。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`、
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  と生成exeはPASS。基本6確保・cache3確保の各OOM、SYSTEM併存時APP OOM、確定済み/
+  pending/部分IO状態のAPP終了、古いJS参照、guest heap全解放後のSYSTEM PATCH/描画を確認。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,173,536 B、空き972,192 B、DIRAM123,404 B。
+  S3 ELF型情報: host管理616 B＋借用8,192 B＝8,808 B、APP adapter1,044 B。
+  APPあり9,852 B、cache込み12,908 B。CP4a比12 B＋allocator1件増。個別3,072 B以下を維持。
+  runtime staticは8 B追加だが、ELF全体DIRAMはalignment込みで増分0。
+- CP4のhost/build側は完了。実機home/app往復は保留、シリアル操作なし。
+  home/通知実サービスとguestなしの描画pumpのproduction接続は後続checkpoint。
+  次の実装はCP5（入力service切り出し）。
+
 ## checkpoint 0 — JS失敗の原子性（2026-09-15）
 
 - 有効な所有transactionで起きた引数検証・getter・確保失敗は、JSでcatchしても更新全体をabortする。

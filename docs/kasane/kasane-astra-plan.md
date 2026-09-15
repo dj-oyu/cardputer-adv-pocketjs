@@ -54,6 +54,8 @@ CP3は基本5ブロック/cache任意3ブロックとも個別3,072 B以下。�
 100回起動試験はシリアル使用可能後にまとめて実施する。次の実装はCP4。
 CP4は4a（SYSTEMを保持するAPP終了機構）と4b（host領域所有、世代付きAPP lease、
 JS/session接続）へ分割する。4aのみではAPP attach/detach完了とはしない。
+CP4bのhost runtime/JS接続まで実装。host/QuickJS試験ではguest破棄後のSYSTEM継続を確認し、
+次の実装対象はCP5。実機home/app往復はシリアル使用可能後に確認する。
 数値と検証範囲は[kasane-progress.md](kasane-progress.md)の各checkpointを参照。
 
 各行を1 commit以上とし、大きい場合は行内もビルド可能な単位へ分割する。

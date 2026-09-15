@@ -12,7 +12,7 @@
 # and for roughly how long.
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 set(POCKET_RANDOM_SOURCES "pocket/random_seed.c" "pocket/pocket_random.c")
-set(KASANE_SOURCES "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
+set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
 # Kept explicit until app_session no longer constructs pocketjs_ui_qjs/core.
 set(LEGACY_UI_COMPONENTS pocketjs_ui_core pocketjs_ui_qjs pocketjs_render_rgb565)
 idf_component_register(SRCS "pocket/mp3_decode.c" "pocket/mp3_feed.c" "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
