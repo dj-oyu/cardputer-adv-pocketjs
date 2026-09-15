@@ -68,6 +68,37 @@ def main():
     # species mix, because a species swap changes every number above
     species = sorted({int(r["species"]) for r in split2 if "species" in r})
     print(f"species seen in SPLIT2: {species}")
+    # The gate A/B: adjacent SPLIT3 windows alternate the switch, so each pair is
+    # three seconds apart in the same scene and the paired difference is the
+    # switch. Reported per pair rather than as two group means, because the scene
+    # drifts between windows and that drift is what a group mean would absorb.
+    rows3 = [l for l in lines if "SPLIT3" in l and "decor" in l and "gate=" in l]
+    if rows3:
+        print("\n-- gate A/B (adjacent windows, same binary)")
+        pairs = []
+        for i in range(len(rows3) - 1):
+            a, b = kv(rows3[i]), kv(rows3[i + 1])
+            if a.get("gate") == b.get("gate"):
+                continue
+            pairs.append((a, b))
+        print(f"   {'pair':>4} {'gateA':>5} {'raysA':>7} {'raysB':>7} {'d_rays':>7} "
+              f"{'vegA':>6} {'vegB':>6} {'d_veg':>6} {'decorA':>7} {'decorB':>7} {'d_decor':>7}")
+        drows, dveg, ddec = [], [], []
+        for n, (a, b) in enumerate(pairs):
+            dr = a["rays"] - b["rays"]
+            dv = a["veg"] - b["veg"]
+            dd = a["decor"] - b["decor"]
+            drows.append(dr)
+            dveg.append(dv)
+            ddec.append(dd)
+            print(f"   {n:>4} {int(a['gate']):>5} {a['rays']:>7.2f} {b['rays']:>7.2f} {dr:>+7.2f} "
+                  f"{a['veg']:>6.2f} {b['veg']:>6.2f} {dv:>+6.2f} "
+                  f"{a['decor']:>7.2f} {b['decor']:>7.2f} {dd:>+7.2f}")
+        if drows:
+            print(f"   pairs={len(pairs)}  rays: mean delta={st.mean(drows):+.2f} median={st.median(drows):+.2f} "
+                  f"min={min(drows):+.2f} max={max(drows):+.2f}")
+            print(f"   control veg (unchanged code): mean={st.mean(dveg):+.2f} median={st.median(dveg):+.2f}")
+            print(f"   decor: mean={st.mean(ddec):+.2f} median={st.median(ddec):+.2f}")
     # Join each SPLIT3 report with the SPLIT2 line that precedes it (same 60-frame
     # window), so every row figure can be read beside the plant that produced it.
     print("\n-- SPLIT3 by species (SPLIT2 joined: same 60-frame window)")

@@ -413,6 +413,9 @@ uint32_t garden_prof_canopy(uint32_t *rows);
 uint32_t garden_prof_vegetation(uint32_t *rows,uint32_t *passes);
 uint32_t garden_prof_rays(uint32_t *rows);
 uint32_t garden_prof_dissolve(void);
+// TEMPORARY, the A/B switch for the decor profile gate, defined in garden.c and
+// flipped by flower.c's SPLIT3 report (see the comment there). 1 = gated.
+extern int g_garden_decor_gate;
 #endif
 // TEMPORARY A/B switch, defined in garden.c and flipped by whatever is measuring
 // it. 1 = the shipping path: the canopy blend skips the pixels whose alpha is

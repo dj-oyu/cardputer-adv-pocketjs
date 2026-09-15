@@ -1505,6 +1505,10 @@ static GardenDecor garden_decor(unsigned phase,int slot) {
 }
 // Q8 soft volume profile, with zero slope at both the axis and the edge.
 static int garden_decor_profile(int distance,int inv) {
+#ifdef GARDEN_COUNT_PROFILE
+    extern unsigned long g_profile_calls;
+    g_profile_calls++;
+#endif
     int q=256-((abs(distance)*inv)>>16);
     if(q<=0)return 0;
     if(q>255)q=255;
@@ -1565,6 +1569,14 @@ static int garden_decor_arrival(const GardenDecor *d,int y,int end) {
     if(reach>=24*256)return 256;
     return garden_smooth(reach/24);
 }
+// TEMPORARY A/B switch, and it exists because this board cannot measure a change
+// like the gate below any other way: two builds of the same function differ by up
+// to 15% from code placement (docs/pie-simd.md 3.13), and the decorative rays'
+// own workload varies with the scene's phase, so the only honest comparison is
+// one binary alternating the two paths inside one run. flower.c's SPLIT3 report
+// flips it once per 60-frame window and prints which way that window ran.
+//   1 = the gated path (the shipping one)   0 = the pre-2026-09-15 path
+int g_garden_decor_gate=1;
 static void __attribute__((unused))
 garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
     int center,half;garden_shaft(y,f,&center,&half);
@@ -1602,6 +1614,29 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
         if(lo<0)lo=0;
         if(hi>239)hi=239;
         int inv=garden_recip(radius,24),shadow_inv=garden_recip(shadow_radius,24);
+        // profile() returns exactly 0 once |distance| >= its radius (the
+        // reciprocal rounds up, so the reach is never more than radius), which
+        // makes each of the two profiles a compact support: outside it the term
+        // is a literal 0 and identity to the mix below. Both used to be
+        // evaluated across their whole union -- the span above -- and that
+        // union is much wider than either support, because the shadow reaches
+        // 1.5 radii to one side of a centre that is itself one radius off the
+        // light's: for one side the union is 3.5 radii where each profile owns
+        // 2.0 and 3.0 of it. Evaluating a profile only where it can be non-zero
+        // is exact, and a pixel outside both is skipped for the price of two
+        // comparisons instead of two profiles (~14 instructions each).
+        //
+        // `rays` is 7.6..13.7 ms/frame of the 14..16 ms `decor` (SPLIT3), so
+        // this is the largest single scalar term in the frame; the gate removes
+        // one of the two profile evaluations on the ~55% of visited pixels that
+        // only one of them can reach.
+        //
+        // +2 on each reach, because the reach is Q8 and the shift floors: a
+        // bound one pixel too wide only evaluates a profile that returns 0, one
+        // too narrow changes the picture.
+        int lreach=(radius>0?radius>>8:0)+2,sreach=(shadow_radius>0?shadow_radius>>8:0)+2;
+        int l0=(cx>>8)-lreach,l1=(cx>>8)+lreach;
+        int s0=(shadow_cx>>8)-sreach,s1=(shadow_cx>>8)+sreach;
         // Four columns at a time. Everything in this block except the mix is a
         // function of x alone -- the protection ramp, the two profiles and the
         // dither -- so it is evaluated once for the group and shared. The light is
@@ -1643,6 +1678,13 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
             // next one starts after it.
             {int cl=center-(half/2-6);if(x<cl&&nx>cl)nx=cl;}
             int n=nx-x;
+            // The support gate, evaluated at the group's first column because this
+            // loop forms the two profiles once per group (above). Exact: a column
+            // outside a profile's reach makes it literally 0, so a group whose own
+            // column is outside both is the identity the `!light && !shadow` test
+            // below already skips -- all the gate saves is evaluating them.
+            int inl=(x>=l0&&x<=l1),ins=(x>=s0&&x<=s1);
+            if(g_garden_decor_gate&&!inl&&!ins)goto grp;
             // Let only the soft fringe graze six pixels further into the
             // main beam; a smooth ramp keeps its bright core undisturbed.
             // Attenuate the existing channels, never paint a coloured outline.
@@ -1652,8 +1694,20 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
             if(gap<=0)goto grp;
             int protect=gap<24?garden_smooth(gap*255/24):255;
             int gain=strength*protect>>8;
-            int light=garden_decor_profile(x*256-cx,inv)*gain>>8;
-            int shadow=garden_decor_profile(x*256-shadow_cx,shadow_inv)*gain>>8;
+            // gain == 0 makes both terms 0 whatever the profiles say, and it is
+            // the common case at the far end of the fade and for a layer that
+            // is still arriving.
+            if(g_garden_decor_gate&&!gain)goto grp;
+            int light,shadow;
+            if(g_garden_decor_gate) {
+                light=inl?garden_decor_profile(x*256-cx,inv)*gain>>8:0;
+                shadow=ins?garden_decor_profile(x*256-shadow_cx,shadow_inv)*gain>>8:0;
+            } else {
+                // The pre-2026-09-15 path, kept call for call so the A/B is a
+                // measurement of the gate and not of a rewrite.
+                light=garden_decor_profile(x*256-cx,inv)*gain>>8;
+                shadow=garden_decor_profile(x*256-shadow_cx,shadow_inv)*gain>>8;
+            }
             if(!light&&!shadow)goto grp;
             int d= garden_dither(x,y)*64+32;
             /* Only the mix is per pixel: it is the one term that reads the row. A
