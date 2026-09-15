@@ -4,6 +4,22 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14f — Taffyなしフルシステム受入試験（2026-09-16）
+
+- `tools/system_full_test.py`を追加。System host、Kasane native/JS、専用KSN_ONLY build、
+  Taffy排除監査、flash、実機animation/通知圧力/既定100回lifecycleを一つの入口で実行。
+- 存在しないlegacy sourceを指定し、component/map/ninja/compile commands/ELFを監査。
+  監査失敗ならflashせず停止する。host-onlyは明示的な部分成功でFULL_PASSにはしない。
+- report.jsonにcommit/開始時差分/command/exit code/時間/firmware SHA-256/全cycleメモリ。
+  段階別ログ・captureを保持し、失敗時もprobe回収/HOME復帰を試みる。
+- 実行器と混入監査の9試験PASS。初回runはIDF出力回収の停止でFAILとして保存し、
+  `--no-hints`直接実行経路で再実行。仕様と範囲は[system-full-test.md](system-full-test.md)。
+- `.cache/system-full-20260916-r2/report.json`: FULL_PASS、全10段階成功。新規build213.969秒、
+  実機animation18.953秒、通知7.922秒、100回lifecycle78.141秒。
+- 100回すべてfree256,536 / largest81,920 B、終了時JS=0。送信前captureの通知重なりも確認。
+  実LCD/音声の物理確認、SNTP実時刻変更、sleep電流は対象外としてreportへ明記。
+- firmware SHA-256: `1ce385522c412ae7f96f1e029a1132e5fcdd35d3747ca49176264b43a7719ecf`。
+
 ## checkpoint 14e2 — 壁時計・usage期限・鳴動の移管（2026-09-16）
 
 - `sys_wall`が固定5規則をSystem ownerで実行。時計/設定変更、期限到来、blocked通知の

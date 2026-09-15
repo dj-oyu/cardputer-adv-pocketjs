@@ -49,6 +49,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [design-schema.md](kasane/design-schema.md) | 仕様 | デザイン定義スキーマ（[JSON Schema](kasane/design-schema.json)、[例](kasane/design-example.json)） |
 | [design-system-pet.md](kasane/design-system-pet.md) | 仕様 | ペットへの適用 |
 | [system-runtime.md](kasane/system-runtime.md) | 設計 | 時計・電源・通知の共通ランタイム |
+| [system-full-test.md](kasane/system-full-test.md) | 検証 | TaffyなしのSystem/Kasane host・新規build・実機受入試験 |
 | [module-boundaries.md](kasane/module-boundaries.md) | 設計 | モジュール境界と依存の向き |
 | [system-runtime-migration.md](kasane/system-runtime-migration.md) | 設計 | pet_hub から時計・通知・タイマー・鳴動を取り出す手順（S1〜S4、Kasane の checkpoint との対応） |
 
