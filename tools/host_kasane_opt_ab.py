@@ -56,14 +56,34 @@ def idf_py():
     return Path(idf) / 'tools' / 'idf.py'
 
 
-def drive(port, out, minutes):
-    """Home, open the sample app, then let the app run while the windows rotate."""
+def drive(port, out, minutes, period):
+    """Home, open the sample app, then let the app run while the windows rotate.
+
+    The key rate is the sampling rate: only a *dirty* frame enters the render
+    path, and an arm window closes on 30 painted frames, so 'e' is what buys
+    samples.  This used to send 'e' and wait for a 'PAINT' marker with a 0.6 s
+    limit, but this app never prints a bare 'PAINT' (its marker is
+    KASANE_PAINT, once per 30 painted frames), so every press cost the 0.6 s
+    timeout: 1.6 presses/s, one window per 18.5 s, 13 windows in the default
+    4 minutes -- fewer than --min-samples needs, so the harness could not pass.
+    Measured on the board: 40 ms is accepted without losing a press (500
+    presses, 500 HELLO_COUNT, 16 windows in 20 s) and render_ms is unchanged
+    (2.26 both ways), so the default run now yields ~190 windows.
+    """
     import serial  # imported here so --help works without pyserial
 
     lines = []
-    with serial.Serial(port, 115200, timeout=0.05) as s, \
+    with serial.Serial(port, 115200, timeout=0.02) as s, \
             (out / 'raw.log').open('w', encoding='utf-8') as raw:
         s.reset_input_buffer()
+
+        def note(text):
+            text = text.rstrip('\r\n')
+            if text:
+                raw.write(text + '\n')
+                raw.flush()
+                lines.append(text)
+            return text
 
         def wait(marker, limit=8.0, press=None):
             end = time.monotonic() + limit
@@ -71,13 +91,8 @@ def drive(port, out, minutes):
                 if press and time.monotonic() > end - limit / 2:
                     s.write(press)
                     press = None
-                text = s.readline().decode('utf-8', 'replace').rstrip('\r\n')
-                if text:
-                    raw.write(text + '\n')
-                    raw.flush()
-                    lines.append(text)
-                    if marker in text:
-                        return True
+                if marker in note(s.readline().decode('utf-8', 'replace')):
+                    return True
             return False
 
         s.write(b'q')
@@ -85,11 +100,14 @@ def drive(port, out, minutes):
         s.write(b'a')
         wait('CATEGORY 0')
         s.write(b'e')
-        wait('HELLO_FRAME_PRESENTED')
+        wait('FRAME_PRESENTED')   # app_session.c:1098 logs KASANE_FRAME_PRESENTED
         deadline = time.monotonic() + minutes * 60.0
+        next_send = time.monotonic()
         while time.monotonic() < deadline:
-            s.write(b'e')          # keep the app's frame pump busy
-            wait('PAINT', limit=0.6)
+            if time.monotonic() >= next_send:
+                s.write(b'e')      # keep the app's frame pump busy
+                next_send += period
+            note(s.readline().decode('utf-8', 'replace'))
         s.write(b'q')
         wait('HOME_READY')
     return lines
@@ -98,12 +116,21 @@ def drive(port, out, minutes):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--out', type=Path, required=True, help='new or empty directory for the evidence')
-    p.add_argument('--port', required=True, help='serial port, e.g. COM3 or /dev/ttyACM0')
+    p.add_argument('--port', help='serial port, e.g. COM3 or /dev/ttyACM0')
+    p.add_argument('--replay', type=Path,
+                   help='re-analyse the raw.log of an earlier --out directory instead of '
+                        'driving the device (no board needed, so a corrected reading of an '
+                        'old log costs nothing)')
     p.add_argument('--build', type=Path, default=Path('build_ab'))
     p.add_argument('--flash', action='store_true', help='build and flash before measuring')
     p.add_argument('--minutes', type=float, default=4.0, help='how long to let the windows rotate')
     p.add_argument('--min-samples', type=int, default=3, help='windows per arm required')
+    p.add_argument('--key-period-ms', type=float, default=40.0,
+                   help="seconds between 'e' presses: this is the sampling rate "
+                        '(one arm window closes on 30 painted frames)')
     args = p.parse_args()
+    if not args.replay and not args.port:
+        p.error('--port is required unless --replay is given')
 
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
@@ -111,6 +138,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     log = out / 'commands.log'
     report = {'schema': 1, 'status': 'RUNNING', 'port': args.port, 'build': str(args.build),
+              'key_period_ms': args.key_period_ms,
               'not_measured': ['physical LCD/audio output', 'host-side pixel proofs (see run.sh)']}
     (out / 'report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     try:
@@ -120,61 +148,74 @@ def main():
                                                    cwd=ROOT, text=True).strip()
         report['working_tree'] = subprocess.check_output(['git', 'status', '--short'], cwd=ROOT,
                                                          text=True).strip()
-        if args.flash:
-            rc = sh([idf_py(), '-B', args.build, '-D', 'CMAKE_C_FLAGS=-DKASANE_AB=1', 'build'], log=log)
-            if rc:
-                raise RuntimeError('build failed; see commands.log')
-            rc = sh([idf_py(), '-B', args.build, '-p', args.port, 'flash'], log=log)
-            if rc:
-                raise RuntimeError('flash failed; see commands.log')
-        lines = drive(args.port, out, args.minutes)
+        if args.replay:
+            lines = (args.replay.resolve() / 'raw.log').read_text(encoding='utf-8').splitlines()
+            report['replayed_from'] = str(args.replay.resolve())
+        else:
+            if args.flash:
+                rc = sh([idf_py(), '-B', args.build, '-D', 'CMAKE_C_FLAGS=-DKASANE_AB=1', 'build'], log=log)
+                if rc:
+                    raise RuntimeError('build failed; see commands.log')
+                rc = sh([idf_py(), '-B', args.build, '-p', args.port, 'flash'], log=log)
+                if rc:
+                    raise RuntimeError('flash failed; see commands.log')
+            lines = drive(args.port, out, args.minutes, args.key_period_ms / 1000.0)
         report['serial_lines'] = len(lines)
 
-        arms = {}
-        states_by_arm = {}
+        windows = []
         for line in lines:
             m = AB_RE.search(line)
             if not m:
                 continue
-            arm = int(m.group('arm'))
-            states = dict((k, int(v)) for k, v in STATE_RE.findall(m.group('states')))
-            states_by_arm[arm] = states
-            arms.setdefault(arm, []).append({'turn_ms': float(m.group('turn')),
-                                             'render_ms': float(m.group('render')),
-                                             'send_ms': float(m.group('send'))})
-        if not arms:
+            windows.append({'arm': int(m.group('arm')),
+                            'states': dict((k, int(v)) for k, v in STATE_RE.findall(m.group('states'))),
+                            'turn_ms': float(m.group('turn')),
+                            'render_ms': float(m.group('render')),
+                            'send_ms': float(m.group('send'))})
+        if not windows:
             raise RuntimeError('no AB arm lines on the wire: was the binary built with '
                                '-DKASANE_AB=1 and did the app run?')
-        switches = sorted(states_by_arm[max(states_by_arm)])            # arm with most states
+        switches = sorted(windows[0]['states'])
+        report['windows'] = len(windows)
         report['switches'] = switches
         report['arms'] = {str(a): {'windows': len(v),
                                    'render_ms_median': statistics.median(x['render_ms'] for x in v),
                                    'turn_ms_median': statistics.median(x['turn_ms'] for x in v)}
-                          for a, v in sorted(arms.items())}
+                          for a, v in sorted({w['arm']: [x for x in windows if x['arm'] == w['arm']]
+                                              for w in windows}.items())}
+        report['all_on_windows'] = sum(1 for w in windows
+                                       if all(v == 1 for v in w['states'].values()))
 
-        # Arm 0 is all-on; arm r+1 turns switch r off. The paired difference is the
-        # switch's own cost, window by window, so a drifting clock cancels.
-        def med_by_arm(arm, key):
-            return [x[key] for x in arms.get(arm, [])]
+        # A window's own state columns say which switch it has off; the arm
+        # number does not. "arm r+1 turns switch r off" holds only in the source
+        # order of app_session.c's switches[] table, which is not the sorted
+        # order of the names, and arm 0 is the all-on window only on the first
+        # rotation -- a restart resumes the cycle where it stopped, so the run
+        # before this one began at arm 5. Pairing by arm index therefore read
+        # row_cov's +2.79 ms as 'lut' and pie's +1.10 ms as 'scale256'. So the
+        # off/on sets come from the state columns, and the baseline is every
+        # window in which that one switch was on (n-1 of them, not just arm 0).
+        def col(name, value, key):
+            return [w[key] for w in windows if w['states'][name] == value]
 
         table = []
         problems = []
-        for r, name in enumerate(switches):
-            off, on = r + 1, 0
-            if len(arms.get(off, [])) < args.min_samples or len(arms.get(on, [])) < args.min_samples:
-                problems.append(f'{name}: too few windows (on={len(arms.get(on, []))}, '
-                                f'off={len(arms.get(off, []))}, need {args.min_samples})')
+        for name in switches:
+            on, off = col(name, 1, 'render_ms'), col(name, 0, 'render_ms')
+            if len(on) < args.min_samples or len(off) < args.min_samples:
+                problems.append(f'{name}: too few windows (on={len(on)}, '
+                                f'off={len(off)}, need {args.min_samples})')
                 table.append({'switch': name, 'status': 'INSUFFICIENT'})
                 continue
-            on_med = statistics.median(med_by_arm(on, 'render_ms'))
-            off_med = statistics.median(med_by_arm(off, 'render_ms'))
+            on_med = statistics.median(on)
+            off_med = statistics.median(off)
             table.append({'switch': name, 'status': 'OK',
                           'render_ms_on_median': round(on_med, 3),
                           'render_ms_off_median': round(off_med, 3),
                           'render_ms_delta_off_minus_on': round(off_med - on_med, 3),
-                          'turn_ms_on_median': round(statistics.median(med_by_arm(on, 'turn_ms')), 3),
-                          'turn_ms_off_median': round(statistics.median(med_by_arm(off, 'turn_ms')), 3),
-                          'windows_on': len(arms[on]), 'windows_off': len(arms[off])})
+                          'turn_ms_on_median': round(statistics.median(col(name, 1, 'turn_ms')), 3),
+                          'turn_ms_off_median': round(statistics.median(col(name, 0, 'turn_ms')), 3),
+                          'windows_on': len(on), 'windows_off': len(off)})
         report['table'] = table
         report['suggested_range_of_used_window'] = 'see turn_ms: it is the frame budget the app had'
         if problems:
