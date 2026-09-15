@@ -13,6 +13,14 @@ typedef struct { uint32_t bands,transferred_bytes; } ksn_render_stats;
  * identical in both arms. Off restores the per-pixel rational division.
  * Owner task only; read once per rotated span. */
 extern bool g_ksn_image_rotate_step;
+/* Tile-level work (docs/perf/kasane-tile.md). The group's children are
+ * composited into a 64-pixel scratch tile block by block:
+ *   g_ksn_tile_pixels -- the block's size, 64 or 16 (survey 3b).
+ *   g_ksn_tile_reach  -- exact, default on: a child's loop runs over its own
+ *                        clipped x interval and a block no child can reach is
+ *                        skipped whole (survey 3a).
+ * All three are read once per render; 0 restores the path each one replaces. */
+extern int g_ksn_tile_pixels,g_ksn_tile_reach;
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
  * horizontal/vertical gradient, font-port TEXT, source-span IMAGE, alpha and
  * isolated group opacity. The borrowed text port and its immutable resources
