@@ -664,12 +664,18 @@ int g_ksn_tile_reach=1;     /* exact (default): a child's loop runs over its own
                              * clipped x interval, and a block no child can
                              * reach is skipped whole -- no clear, no read, no
                              * drop */
+int g_ksn_tile_smooth=1;    /* smooth layers: one exact anchor per block plus a
+                             * per-pixel increment instead of a per-pixel sample.
+                             * 1 = the exact remainder stepping (bit-identical to
+                             * the chain, default), 2 = the 8.16 approximate
+                             * increment (off by default: it moves pixels), 0 =
+                             * the per-pixel chain */
 #ifdef KSN_TILE_COUNT
 /* Host-only: compiled out of every production build (-DKSN_TILE_COUNT, set by
  * tools/kasane_contract/run_group_tile.sh). "covered" is a tile pixel whose
  * accumulated alpha is non-zero, i.e. one a child actually wrote into. */
 uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
-         ksn_tile_child_pixels;
+         ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels;
 #endif
 /* Objdump can only attribute a per-pixel cost to a function that is not inlined
  * away. The measurement build (-DKSN_TILE_MEASURE, tools/kasane_contract/
@@ -712,7 +718,101 @@ KSN_TILE_MEASURED static void group_pixel(ksn_premultiplied_rgba8 *tile,const ks
         else if(alpha==255)provenance[(unsigned)dest>>5]&=~bit;
     }
 }
-
+/* A smooth layer varies slowly across the block. A gradient is affine in its
+ * axis, and with radius 0 `covers` is true over its whole clipped box, so the
+ * run can be produced from one exact anchor instead of a sample per pixel. Two
+ * ways, chosen by g_ksn_tile_smooth:
+ *
+ *   1 (exact): the value steps by the chain's own rational slope,
+ *     D/last = q + rs/last with q = floor(D/last) and rs = D - q*last in
+ *     [0,last). Stepping the remainder by rs and the value by q (carrying when
+ *     the remainder reaches last) reproduces the quotient of
+ *     from*last + i*D + last/2 by last at every pixel, i.e. exactly what
+ *     `sample`'s interpolate returns -- no clamp, no drift, bit-identical.
+ *   2 (approximate): one 8.16 increment taken from the run's two exact end
+ *     values, truncated towards zero, so |offset| <= |span|<<16 at every pixel
+ *     and the value cannot leave the closed interval the two ends span. What is
+ *     left is the quantised increment; the doc measures it (at most one 8-bit
+ *     level of deviation, so a fraction of a percent of covered pixels move by
+ *     one 5/6/5 level) and it is off by default.
+ *
+ * A child that cannot vary along x -- a vertical gradient, or a length of one --
+ * is a constant run under both modes, which is exact. */
+KSN_TILE_MEASURED static void smooth_chord_block(ksn_premultiplied_rgba8 *tile,const ksn_frame_view *command,
+                               int dest0,int count,ksn_rgba anchor,ksn_rgba end,uint8_t opacity,
+                               bool has_dither,bool child_dither,uint32_t *provenance){
+    (void)command;
+    int32_t step[4];unsigned base[4];
+    for(unsigned c=0;c<4;c++){
+        unsigned shift=24-8*c;
+        int32_t span=(int32_t)(((end>>shift)&255u)-((anchor>>shift)&255u));
+        step[c]=count>1?(int32_t)(((int64_t)span<<16)/(count-1)):0;
+        base[c]=(anchor>>shift)&255u;
+    }
+    int32_t offset[4]={0,0,0,0};
+    for(int j=0;j<count;j++){
+        ksn_rgba color=0;
+        for(unsigned c=0;c<4;c++){
+            color|=(ksn_rgba)((int)base[c]+((offset[c]+32768)>>16))<<(24-8*c);
+            offset[c]+=step[c];
+        }
+        unsigned alpha=premultiply_over(&tile[dest0+j],color,opacity);
+        if(has_dither&&alpha){
+            uint32_t bit=1u<<((unsigned)(dest0+j)&31u);
+            if(child_dither)provenance[(unsigned)(dest0+j)>>5]|=bit;
+            else if(alpha==255)provenance[(unsigned)(dest0+j)>>5]&=~bit;
+        }
+    }
+}
+KSN_TILE_MEASURED static void smooth_exact_block(ksn_premultiplied_rgba8 *tile,const ksn_draw *d,ksn_rgba anchor,
+                               int dest0,int count,int i0,int32_t last,bool has_dither,
+                               bool child_dither,uint32_t *provenance){
+    int32_t quotient[4],remainder_step[4],rem[4],offset[4];
+    unsigned base[4];
+    for(unsigned c=0;c<4;c++){
+        unsigned shift=24-8*c;
+        int32_t first=(int32_t)((d->data.gradient.from>>shift)&255u);
+        int32_t span=(int32_t)((d->data.gradient.to>>shift)&255u)-first;
+        int32_t q=span/last,rs=span-q*last;
+        if(rs<0){q--;rs+=last;}                       /* q = floor(span/last) */
+        base[c]=(anchor>>shift)&255u;
+        quotient[c]=q;remainder_step[c]=rs;offset[c]=0;
+        rem[c]=first*last+i0*span+last/2-(int32_t)base[c]*last;  /* in [0,last) */
+    }
+    for(int j=0;j<count;j++){
+        ksn_rgba color=0;
+        for(unsigned c=0;c<4;c++){
+            color|=(ksn_rgba)((int)base[c]+offset[c])<<(24-8*c);
+            rem[c]+=remainder_step[c];offset[c]+=quotient[c];
+            if(rem[c]>=last){rem[c]-=last;offset[c]++;}
+        }
+        unsigned alpha=premultiply_over(&tile[dest0+j],color,d->opacity);
+        if(has_dither&&alpha){
+            uint32_t bit=1u<<((unsigned)(dest0+j)&31u);
+            if(child_dither)provenance[(unsigned)(dest0+j)>>5]|=bit;
+            else if(alpha==255)provenance[(unsigned)(dest0+j)>>5]&=~bit;
+        }
+    }
+}
+/* The dispatcher: one sample for the anchor both ways start from, then the arm
+ * g_ksn_tile_smooth names. Kept small so it inlines into render_group and the two
+ * bodies above stay out of line, which is what makes their objdump counts the
+ * tile's per-pixel cost rather than a guess. */
+KSN_TILE_MEASURED static void smooth_block(ksn_premultiplied_rgba8 *tile,const ksn_frame_view *command,
+                         int dest0,int count,int x0,int y,bool has_dither,
+                         bool child_dither,uint32_t *provenance){
+    const ksn_draw *d=&command->draw;
+    ksn_rgba anchor=sample(command,x0,y);
+    int32_t last=(int32_t)(d->data.gradient.axis?d->bounds.y1-d->bounds.y0:d->bounds.x1-d->bounds.x0)-1;
+    if(g_ksn_tile_smooth>=2||d->data.gradient.axis||last<1||count<2){
+        ksn_rgba end=d->data.gradient.axis||last<1?anchor:(count>1?sample(command,x0+count-1,y):anchor);
+        smooth_chord_block(tile,command,dest0,count,anchor,end,d->opacity,has_dither,
+                           child_dither,provenance);
+        return;
+    }
+    smooth_exact_block(tile,d,anchor,dest0,count,x0-d->bounds.x0,last,has_dither,
+                       child_dither,provenance);
+}
 /* The tile's last step: group opacity, the premultiplied drop into RGB565 and
  * the dither provenance. Out of line for the same reason as group_pixel. */
 KSN_TILE_MEASURED static void tile_row_over(uint16_t *pixels,const ksn_premultiplied_rgba8 *tile,int count,
@@ -803,7 +903,9 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
                py<d->clip.y0||py>=d->clip.y1)continue;
             /* The child's own window inside this block: outside it `covers` is
              * false everywhere, so the generic loop must not visit those pixels
-             * at all. Off, the loop runs the whole block as before. */
+             * at all. Off, the loop runs the whole block as before. The smooth
+             * block below needs the same window whether or not the reach switch
+             * is on -- it has no per-pixel `covers` to reject a stray column. */
             int lo=0,hi=count;
             {
                 int cx0=bounds.x0>d->clip.x0?bounds.x0:d->clip.x0;
@@ -813,7 +915,7 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
                  * its composite are all skipped. The window below is the same
                  * test per child, one sub-block at a time. */
                 if(x0>=cx1||x0+count<=cx0)continue;
-                if(g_ksn_tile_reach){
+                if(g_ksn_tile_reach||g_ksn_tile_smooth){
                     lo=cx0-x0;if(lo<0)lo=0;
                     hi=cx1-x0;if(hi>count)hi=count;
                     if(lo>=hi)continue;
@@ -846,6 +948,19 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
                 result=text->span(text->ctx,&command->draw,command->reveal,x0,py,(unsigned)count,scratch->text);
                 KSN_PROF_END(span);}
                 if(result!=KSN_OK)return result;
+            }
+            /* A radius-0 gradient covers lo..hi exactly, so its value alone has
+             * to be produced per pixel. This replaces the per-pixel arm below
+             * for that one command kind; the two coverage arms of
+             * g_ksn_row_coverage keep serving every other child. */
+            if(g_ksn_tile_smooth&&d->kind==KSN_GRADIENT&&!d->data.gradient.radius){
+                {KSN_PROF_BEGIN();
+                smooth_block(tile,command,lo,hi-lo,x0+lo,py,has_dither,child_dither,dither_pixels);
+                KSN_PROF_END(blend);}
+#ifdef KSN_TILE_COUNT
+                ksn_tile_smooth_blocks++;ksn_tile_smooth_pixels+=(uint32_t)(hi-lo);
+#endif
+                continue;
             }
             {KSN_PROF_BEGIN();
             if(g_ksn_row_coverage){
