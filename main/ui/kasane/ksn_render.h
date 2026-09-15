@@ -68,6 +68,17 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
  * predicate for every pixel. Both arms live in one binary and produce the same
  * pixels (test_coverage_spans.c compares them exhaustively and frame by frame). */
 extern int g_ksn_row_coverage;
+/* Boundary 4a's arithmetic trade, in the scalar blend/pack path: 1 = every RGB
+ * mix takes the 255 -> 256 coarse scale (scale256(b) = b + (b>>7), then a plain
+ * >>8, and a complementary pair collapses into one rounded mix); 0 = the exact
+ * /255 this file has always used, which is also the reference the lane model
+ * and the eight-lane kernel are written against. Every *alpha* stays exact in
+ * both arms: a 1 -> 0 flip there is not a one-step error but a pixel composited
+ * or not, so the coarse arm touches only the three channels that land in
+ * pack565. Both paths live in one binary for a same-binary A/B. The default is
+ * the measured arm, not the hoped-for one; tools/pie/models/scale256_model.c and
+ * docs/perf/kasane-alpha256.md carry the moved-pixel counts and the objdump. */
+extern int g_ksn_scale256;
 #ifdef __cplusplus
 }
 #endif

@@ -115,6 +115,63 @@ typedef struct { uint8_t r,g,b,a; } ksn_premultiplied_rgba8;
 static const uint8_t bayer4[4][4]={{0,8,2,10},{12,4,14,6},{3,11,1,9},{15,7,13,5}};
 static unsigned mul8(unsigned a,unsigned b){return (a*b+127)/255;}
 static unsigned clamp8(unsigned value){return value>255?255:value;}
+/* Boundary 4a's arithmetic: the 255 -> 256 coarse scale.
+ *
+ * The scalar blend/pack path divides by 255 exactly, through the compiler's
+ * magic reciprocal (objdump: l32r + muluh + srli 7) or, in the lane model, the
+ * (257*(y+1))>>16 identity (docs/perf/kasane-blend-pie.md 2.3). The panel is
+ * 240x135 RGB565, so a one-step error in an eight-bit channel is not something
+ * the panel can show, and the user accepted that trade for this family; the 256
+ * scale is also the shape the eight-lane kernel wants (a sixteen-bit product
+ * and a shift, no reciprocal). This switch is that trade, with the exact form
+ * kept beside it:
+ *
+ *   g_ksn_scale256 = 0  every /255 stays exact: the pre-change reference.
+ *   g_ksn_scale256 = 1  every 255-weighted term becomes 256-weighted --
+ *                       scale256(b) = b + (b>>7) = round(b*256/255), then a
+ *                       plain >>8. A pair of complementary weights (b and
+ *                       255-b) collapses into ONE rounded mix rather than two
+ *                       rounded products, so it cannot move by more than the
+ *                       single floor.
+ *
+ * What does not move, in either arm: every alpha. `mul8` on a colour alpha, the
+ * group tile's alpha accumulation, the span coverage scaling and the tile
+ * alpha group_over reads are all zero/non-zero tests somewhere downstream
+ * (blend's `if(!a)`, group_over's `if(!alpha)`, group_pixel's dither
+ * provenance). A 1 -> 0 flip there is not a one-step error, it is a pixel that
+ * is composited or is not, so the coarse arm only touches the three RGB mixes,
+ * whose result lands in pack565 and nowhere else.
+ *
+ * The default is the measured one, not the hoped-for one: the sweep in
+ * tools/pie/models/scale256_model.c moves 140,838 of 3,888,000 panel pixels
+ * (3.622%) over 120 whole frames, 13.4% of the direct path's pixels (17.9% when
+ * dithered) and touches the group path's channels by up to 2 steps, so the
+ * exact path stays the default and the coarse arm is switch-only. The numbers
+ * and the objdump are in docs/perf/kasane-alpha256.md;
+ * KSN_SCALE256_ARM=0|1 pins one arm at compile time so an instruction count is
+ * the count of the arm that runs. */
+int g_ksn_scale256=0;
+#if defined(KSN_SCALE256_ARM) && KSN_SCALE256_ARM
+#define KSN_SCALE256() (true)
+#elif defined(KSN_SCALE256_ARM)
+#define KSN_SCALE256() (false)
+#else
+#define KSN_SCALE256() (g_ksn_scale256!=0)
+#endif
+/* round(b*256/255), 0..256, in two instructions. Its complement is itself:
+ * 256 - scale256(b) == scale256(255-b) for all 256 b (the model proves it, and
+ * that identity is what makes the complementary pair below a single mix). */
+static inline __attribute__((always_inline)) unsigned scale256(unsigned b){return b+(b>>7);}
+/* The mix of two terms weighted b and 255-b, in the 256 domain. The result is
+ * a weighted average of x and y, so it stays within max(x,y) and needs no
+ * clamp8 -- the model checks that over the whole domain. */
+static inline __attribute__((always_inline)) unsigned mix256(unsigned x,unsigned y,unsigned b){
+    unsigned w=scale256(b);
+    return (x*w+y*(256-w))>>8;
+}
+/* x*b/255 as one product, for the place where the two weights do not
+ * complement (group_over: the tile has already had src.a applied). */
+static inline __attribute__((always_inline)) unsigned mul8_256(unsigned x,unsigned b){return (x*scale256(b))>>8;}
 static bool inside_round_rect(ksn_rect bounds,uint8_t radius,int x,int y){
     if(!radius)return true;
     int cx=x<bounds.x0+radius?bounds.x0+radius:
@@ -256,9 +313,18 @@ static ksn_rgba sample(const ksn_frame_view *command,int x,int y){
 }
 static unsigned premultiply_over(ksn_premultiplied_rgba8 *dst,ksn_rgba color,uint8_t opacity){
     unsigned a=mul8(color&255,opacity),inverse=255-a;
-    dst->r=(uint8_t)clamp8(mul8(color>>24,a)+mul8(dst->r,inverse));
-    dst->g=(uint8_t)clamp8(mul8((color>>16)&255,a)+mul8(dst->g,inverse));
-    dst->b=(uint8_t)clamp8(mul8((color>>8)&255,a)+mul8(dst->b,inverse));
+    if(KSN_SCALE256()){
+        /* The two weights are a and 255-a: they complement, so each channel is
+         * one rounded mix. No clamp8: mix256 cannot leave 0..255. The alpha
+         * below stays exact in both arms. */
+        dst->r=(uint8_t)mix256(color>>24,dst->r,a);
+        dst->g=(uint8_t)mix256((color>>16)&255u,dst->g,a);
+        dst->b=(uint8_t)mix256((color>>8)&255u,dst->b,a);
+    }else{
+        dst->r=(uint8_t)clamp8(mul8(color>>24,a)+mul8(dst->r,inverse));
+        dst->g=(uint8_t)clamp8(mul8((color>>16)&255,a)+mul8(dst->g,inverse));
+        dst->b=(uint8_t)clamp8(mul8((color>>8)&255,a)+mul8(dst->b,inverse));
+    }
     dst->a=(uint8_t)clamp8(a+mul8(dst->a,inverse));
     return a;
 }
@@ -279,6 +345,16 @@ static void group_pixel(ksn_premultiplied_rgba8 *tile,const uint8_t *coverage,in
     }
 }
 static unsigned quantize(unsigned value,unsigned maximum,unsigned bayer){
+    if(KSN_SCALE256()){
+        /* floor(v*M/255) as (scale256(v)*M)>>8, with the dither test folded
+         * into the same domain: 32*rem > (2b+1)*255 is rem > 8*(2b+1) once the
+         * remainder counts in 256ths. The model checks the fold and the
+         * quotient over the whole (value,maximum,bayer) space. */
+        unsigned product=scale256(value)*maximum;
+        unsigned q=product>>8,remainder=product&255u;
+        if(q<maximum&&remainder>8u*(2u*bayer+1u))q++;
+        return q;
+    }
     unsigned q=value*maximum/255u,remainder=value*maximum-255u*q;
     if(q<maximum&&32u*remainder>(2u*bayer+1u)*255u)q++;
     return q;
@@ -295,9 +371,20 @@ static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opac
     if(!alpha)return dst;
     unsigned inverse=255-alpha;
     unsigned r=dst>>11,g=(dst>>5)&63,b=dst&31;
-    r=clamp8(mul8(src.r,opacity)+mul8((r<<3)|(r>>2),inverse));
-    g=clamp8(mul8(src.g,opacity)+mul8((g<<2)|(g>>4),inverse));
-    b=clamp8(mul8(src.b,opacity)+mul8((b<<3)|(b>>2),inverse));
+    if(KSN_SCALE256()){
+        /* Here the weights (opacity, 255-alpha) do not complement: the tile is
+         * already premultiplied by src.a, so opacity and the tile's inverse are
+         * independent. Each term takes the 256 scale on its own, the two floors
+         * add, and the clamp stays. */
+        unsigned wo=scale256(opacity),wi=scale256(inverse);
+        r=clamp8(((src.r*wo)>>8)+((((r<<3)|(r>>2))*wi)>>8));
+        g=clamp8(((src.g*wo)>>8)+((((g<<2)|(g>>4))*wi)>>8));
+        b=clamp8(((src.b*wo)>>8)+((((b<<3)|(b>>2))*wi)>>8));
+    }else{
+        r=clamp8(mul8(src.r,opacity)+mul8((r<<3)|(r>>2),inverse));
+        g=clamp8(mul8(src.g,opacity)+mul8((g<<2)|(g>>4),inverse));
+        b=clamp8(mul8(src.b,opacity)+mul8((b<<3)|(b>>2),inverse));
+    }
     return pack565(r,g,b,dither,x,y);
 }
 /* One decode, shared by both paths: the cache stores it for the frame, the
@@ -428,9 +515,16 @@ static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int 
     if(!a)return dst;
     unsigned r=(dst>>11)&31,g=(dst>>5)&63,b=dst&31;
     r=(r<<3)|(r>>2);g=(g<<2)|(g>>4);b=(b<<3)|(b>>2);
-    r=((src>>24)*a+r*(255-a)+127)/255;
-    g=(((src>>16)&255)*a+g*(255-a)+127)/255;
-    b=(((src>>8)&255)*a+b*(255-a)+127)/255;
+    if(KSN_SCALE256()){
+        /* a and 255-a complement, so this is one rounded mix per channel. */
+        r=mix256((unsigned)(src>>24),r,a);
+        g=mix256(((src>>16)&255u),g,a);
+        b=mix256(((src>>8)&255u),b,a);
+    }else{
+        r=((src>>24)*a+r*(255-a)+127)/255;
+        g=(((src>>16)&255)*a+g*(255-a)+127)/255;
+        b=(((src>>8)&255)*a+b*(255-a)+127)/255;
+    }
     return pack565(r,g,b,dither,x,y);
 }
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
