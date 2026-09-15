@@ -490,11 +490,24 @@ static inline float flower_isqrt_q(float d) {
     }
     return (float)root * (1.0f / (float)(1u << FLOWER_SQRT_BITS));
 }
-#ifdef FLOWER_FIXED_SQRT
-#define FLOWER_SQRT(d) flower_isqrt_q(d)
-#else
-#define FLOWER_SQRT(d) sqrtf(d)
-#endif
+// The route is a runtime switch, not a compile-time one, so one binary measures
+// both sides: the SPLIT counters bracket the call and every window logs which
+// side ran (SPLIT3's sq=). 1 ships the fixed-point root at B=8 -- the B that was
+// chosen with the picture's cost known (0.02% of pixels, a few white pixels where
+// the depth test flips at a silhouette; docs/flower-decor-cost.md). Set B=14 if
+// that ever reads as a defect on the glass: same loop, four more steps.
+//
+// And the conversions around it cost what the loop saved. Measured on the board,
+// 79 adjacent 60-frame pairs with only this switch moving: the ellipsoid root
+// came out 0.03 ms/frame apart and the bell root 0.08 ms apart, against a control
+// band (shade, garden, decor) of 0.3..0.4 ms -- the loop is 7 instructions a step
+// against an 88-instruction software routine, but d arrives as a float and the
+// root leaves as one, and each of those conversions is a call into soft-float on
+// a part with no FPU. Carry the fixed point through the caller -- d as an integer,
+// the root consumed as one -- and the conversions go with it. Until then this
+// switch buys the picture's 0.02% and no time.
+int g_flower_fixed_sqrt = 1;
+#define FLOWER_SQRT(d) (g_flower_fixed_sqrt ? flower_isqrt_q(d) : sqrtf(d))
 static uint16_t rgb(int r,int g,int b) {
     return (uint16_t)((clampi(r,0,255)>>3)<<11 |
                       (clampi(g,0,255)>>2)<<5 | (clampi(b,0,255)>>3));
@@ -1733,11 +1746,11 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         uint32_t raycy=garden_prof_rays(&rayrows);
         uint32_t dissolverows=garden_prof_dissolve();
         double veg=vegcy/240000.0/prof_frames,rays=raycy/240000.0/prof_frames;
-        ESP_LOGI("garden","SPLIT3 gate=%d tweaks=%d frames=%u decor=%.2f veg=%.2f (%u rows, %u passes, %u cy/row) "
+        ESP_LOGI("garden","SPLIT3 gate=%d tweaks=%d sq=%d frames=%u decor=%.2f veg=%.2f (%u rows, %u passes, %u cy/row) "
                  "rays=%.2f (%u rows, %u cy/row) rest=%.2f | dissolve=%u of %u rows (%.1f%%) "
                  "(ms/frame; rest = decor - veg - rays = row scaffolding + dissolve memcpy/mix; "
                  "veg rows in a dissolve run two vegetation passes)",
-                 g_garden_decor_gate,g_garden_scalar_tweaks,prof_frames,gar-pix,veg,vegrows/prof_frames,
+                 g_garden_decor_gate,g_garden_scalar_tweaks,g_flower_fixed_sqrt,prof_frames,gar-pix,veg,vegrows/prof_frames,
                  vegpasses/prof_frames,
                  vegrows?vegcy/vegrows:0,
                  rays,rayrows/prof_frames,rayrows?raycy/rayrows:0,
@@ -1749,6 +1762,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         // difference is the gate and not the phase or the layout.
         g_garden_decor_gate=!g_garden_decor_gate;
         g_garden_scalar_tweaks=!g_garden_scalar_tweaks;
+        g_flower_fixed_sqrt=!g_flower_fixed_sqrt;
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
         prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;
