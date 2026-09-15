@@ -19,7 +19,12 @@ typedef struct { uint32_t bands,transferred_bytes; } ksn_render_stats;
  * The five brackets: fill = one fill565 call (a band background, or one row of
  * an opaque rect), span = one text->span, tile = one whole render_group,
  * blend = one per-pixel composite loop entered (covers+sample+blend, or the
- * group's child loop), read = one ksn_core_read made by the renderer. `tile`
+ * group's child loop), read = one command decode the renderer asked for: a
+ * ksn_core_read on its own, or, now that boundary 2a is integrated, one
+ * frame_command() call, of which only the first per command per frame reaches
+ * the core. The switch off makes every frame_command() call a real read again,
+ * so read_n is not comparable across those two arms; the other four brackets
+ * are unaffected by 2a. `tile`
  * brackets the group's composite as a whole and so contains the reads, spans
  * and blends the group makes, which is why the five sums are not additive.
  *
