@@ -28,7 +28,7 @@ static const char *TAG = "pocket.fs";
 // reserved by tools/check_flash.py, and `storage` already holds srcstore's 16
 // source slots at a fixed offset that predates slots existing. Reformatting
 // `storage` would take the person's saved programs with it, which section 10 of
-// docs/filesystem-api.md names as the thing not to do.
+// docs/api/filesystem-api.md names as the thing not to do.
 //
 // So app:/ is a small copy-on-write store written here, in the region behind
 // srcstore's slots. One sector is one block; a block is a 24-byte header and up
@@ -514,7 +514,7 @@ static bool mount(void) {
 
 // -------------------------------------------------------------------- paths
 //
-// Section 2 of docs/filesystem-api.md, enforced literally. No percent decoding,
+// Section 2 of docs/api/filesystem-api.md, enforced literally. No percent decoding,
 // no Unicode normalisation, no `.` or `..`: "%2e%2e" is a name of six
 // characters here and cannot climb out of a volume, which is the whole point.
 
@@ -696,7 +696,7 @@ static const fs_asset_t ASSETS[]={
     // to live here were the dev/test rows for apps/streamplay, apps/opusplay,
     // apps/opusfit and apps/mp3play -- all four apps and their assets were
     // removed once the MP3/Opus decoders they exercised were verified
-    // (docs/common-api.md 9.1-9.1.3 keeps the measurements they produced).
+    // (docs/api/common-api.md 9.1-9.1.3 keeps the measurements they produced).
     // apps/player is the shipped feature that uses pocket.audio.player now,
     // and it supplies its own sources rather than reading from assets:/.
 };
@@ -1658,7 +1658,7 @@ static JSValue js_file_close(JSContext *ctx, JSValueConst self,
 
 // -------------------------------------------------------------- fs errors
 //
-// Section 8 of docs/filesystem-api.md adds these to the common set. They are
+// Section 8 of docs/api/filesystem-api.md adds these to the common set. They are
 // spelled here rather than in pocket_api.h because that header belongs to the
 // foundation and this surface is the only thing that raises them. The
 // consequence worth knowing: pocket.errorCodes lists the common codes only, so
@@ -2359,7 +2359,7 @@ static JSValue js_rename(JSContext *ctx, JSValueConst self,
 // default move together.
 // `must_ask` is the sd: case, and it is the one place the two volumes differ:
 // there the default IS refused, exactly as section 6 writes it, because FAT
-// cannot give the guarantee the default names. docs/filesystem-api.md section 6
+// cannot give the guarantee the default names. docs/api/filesystem-api.md section 6
 // calls that an intended surprise and asks for the refusal to name the value it
 // accepts -- a spec-lookup UNSUPPORTED and a self-correcting one differ by one
 // string, and this is that string.
@@ -3165,7 +3165,7 @@ done:
 // One thing that IS here and was not planned: the native readers below --
 // pocket_fs_read_all() and pocket_fs_read_at(), which pocket_av.c's player uses
 // -- now serve sd: as well. A native surface reading the card is not borrowing
-// a permission it does not have: docs/filesystem-api.md section 9 puts the
+// a permission it does not have: docs/api/filesystem-api.md section 9 puts the
 // player's permission check and read on this side deliberately, and the grant
 // it uses is the one the person made for the app the player is running inside.
 // It goes through the same ordering an app's call does, in native_reader(),
@@ -3782,7 +3782,7 @@ static JSValue sd_write_text(JSContext *ctx, const fs_path_t *p, const char *op,
 //
 // fs.volume.sd is supported=true as of this build, and the bar it had to clear
 // was not "a card mounts". It mounted on 2026-09-08 -- 64 GB SDHC, 512-byte
-// sectors, FATFS at 400 kHz over the pin map in docs/hardware-constraints.md
+// sectors, FATFS at 400 kHz over the pin map in docs/platform/hardware-constraints.md
 // (CS=12, MOSI=14, CLK=40, MISO=39, on the SPI bus the EXT connector shares),
 // root enumerated, files written and removed -- and the capability stayed false
 // for months afterwards on purpose. `supported` says whether an APP can use

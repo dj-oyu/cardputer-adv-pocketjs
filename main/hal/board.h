@@ -15,7 +15,18 @@ esp_err_t board_spi3_acquire(void);
 bool board_key_event(board_keyevent_t *out);
 // The one strip buffer every screen draws into; board_present consumes it.
 uint16_t *board_strip(void);
+// TEMPORARY A/B switch for the panel transfer (see board.c): 1 = queue the strip
+// and reap the previous one on the next call (asynchronous, the shipping path),
+// 0 = the blocking polling transfer this file has always used. Both paths live in
+// one binary so a later A/B measures the path and not the code placement.
+extern int g_board_async;
+// TEMPORARY A/B switch (see board.c): 1 = the queued path swaps straight into the
+// panel buffer, 0 = swap in place and memcpy.
+extern int g_board_swap_into;
 esp_err_t board_present(int y, int rows, uint16_t *pixels);
+// Owner-task barrier: acknowledges completed transfer, including prior work.
+// A transfer failure invalidates the panel write position.
+esp_err_t board_present_sync(int y, int rows, uint16_t *pixels);
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 void board_capture(bool enabled);
 

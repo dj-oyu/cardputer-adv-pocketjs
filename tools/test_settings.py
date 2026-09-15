@@ -69,7 +69,7 @@ try:
     # Waited for, not slept through: the app launched below shares the heap the
     # radio is still holding until the scan task exits.
     expect('SCAN_DONE',20)
-    # HOME OVERLAY is the row of docs/common-api.md 3.1, appended after WI-FI.
+    # HOME OVERLAY is the row of docs/api/common-api.md 3.1, appended after WI-FI.
     # Opened and left without applying: choosing one ENDS the menu and starts a
     # JS guest in its place, and this script's job is the menu.
     #

@@ -1,4 +1,4 @@
-// The safety valves of docs/common-api.md 3.1, on the host.
+// The safety valves of docs/api/common-api.md 3.1, on the host.
 //
 // These are settled here rather than on the board because of what they
 // protect against: the crash flag exists so that an overlay which faults

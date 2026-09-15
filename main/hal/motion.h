@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "driver/i2c_master.h"
 
-// One IMU reading in the frame docs/common-api.md section 8 publishes: x to the
+// One IMU reading in the frame docs/api/common-api.md section 8 publishes: x to the
 // right, y up, z out of the screen toward the viewer, with the display upright.
 // Acceleration is the accelerometer's own output including gravity, in m/s^2;
 // angular rate is right-handed, in rad/s. roll and pitch are the resting

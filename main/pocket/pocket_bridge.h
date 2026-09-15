@@ -5,7 +5,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.bridge -- the PC link of docs/common-api.md section 13.
+// pocket.bridge -- the PC link of docs/api/common-api.md section 13.
 //
 // There is no second wire on this board. The bridge rides the USB Serial/JTAG
 // byte stream that already carries the console and ESP_LOGI, so the whole

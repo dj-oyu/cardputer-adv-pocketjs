@@ -252,7 +252,7 @@ typedef struct {
 //   idf.py -B build_nofuse -DCMAKE_C_FLAGS="-DGARDEN_PIE_FUSE=0" build
 //
 // On by default. Twenty-one loads that occupied their own issue slot now ride
-// a .LD.INCP form, which docs/pie-simd.md 3.4 measures as free: 135
+// a .LD.INCP form, which docs/perf/pie-simd.md 2.1 measures as free: 135
 // instructions a block become 114. Both spellings come from one source, so the
 // only difference between the two builds is those twenty-one slots -- which is
 // the point of having the switch rather than two kernels, and the reason this
@@ -408,4 +408,14 @@ uint32_t garden_prof_motes(uint32_t *rows);
 uint32_t garden_prof_vegetation(uint32_t *rows,uint32_t *passes);
 uint32_t garden_prof_rays(uint32_t *rows);
 uint32_t garden_prof_dissolve(void);
+// TEMPORARY: the canopy blend's own cycles since the last call, and the number of
+// ellipse-rows they cover. Clears both.
+uint32_t garden_prof_canopy(uint32_t *rows);
 #endif
+// TEMPORARY A/B switch, defined in garden.c and flipped by whatever is measuring
+// it. 1 = the shipping path: the canopy blend skips the pixels whose alpha is
+// zero, where the blend is the identity.
+extern int g_garden_scalar_tweaks;
+// The canopy blend on the PIE unit (scene/canopy_pie.c) instead of the scalar
+// statement in garden_canopy_row: 1 = the kernel, 0 = the scalar statement.
+extern int g_garden_canopy_pie;

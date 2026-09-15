@@ -1,4 +1,4 @@
-// L2 VM harness hooks (docs/vm-L2-design.md sec.1.2 / sec.1.3 G5 / sec.7).
+// L2 VM harness hooks (docs/vm/vm-L2-design.md sec.1.2 / sec.1.2 G5 / sec.4).
 //
 // NOT part of the upstream quickjs-ng import. Like quickjs-vmprobe.h it sits
 // next to the vendored sources so quickjs.c can reach it with a plain include,
@@ -128,6 +128,58 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out);
 // caught it, and in InternalError if the heap did. Returns -1 when the build
 // keeps frames on the C stack (there is no budget to set).
 int vmtest_vmstack_set_budget(JSRuntime *rt, size_t bytes);
+
+// ---------------------------------------------------------------- L2c (D18r / D22r)
+//
+// The gate (docs/vm/vm-L2-design.md sec.11.3/13): a fixed set of C callers that
+// can receive a "yielded" result from the VM and must know how to resume it.
+// Before the VM can actually suspend (stage 3 of sec.12.15), every one of
+// these is a plain pass-through -- JS_VMCall === JS_Call, JS_VMEval ===
+// JS_Eval, JS_VMSuspended is always false -- so wiring the gate in first
+// (stage 1) and the corpus guards second (stage 2) changes nothing about what
+// today's VM does. The point is to have the shape in place, and the harness
+// exercising it (run.sh --force-yield's rule below), before quickjs.c grows a
+// single suspend point.
+//
+// Where a suspended chain's resume ended up starting from. The four rows of
+// sec.12.4's table: a host-owned SEG floor is either a plain eval/call
+// (ORIGIN_HOST) or a job the scheduler put on hold mid-chain (ORIGIN_JOB_HELD,
+// D36); an async-function or async-generator floor completes its OWN job
+// normally, so the host never receives a suspended return for those --
+// ORIGIN_JOB_ASYNC is reported only after the fact, so a caller that fell
+// through JS_VMResume already knows which of the three just happened.
+typedef enum {
+    JS_VM_ORIGIN_NONE = 0,       // not suspended (or never has been this call)
+    JS_VM_ORIGIN_HOST,           // JS_VMCall / JS_VMEval floor
+    JS_VM_ORIGIN_JOB_HELD,       // JS_VMCallJob floor, chain outlived the job
+    JS_VM_ORIGIN_JOB_ASYNC,      // async function/generator floor
+} JSVMOrigin;
+
+// True while a chain is parked in rt->vm_susp. Pass-through build: always 0
+// (there is no vm_susp to set it), so every C caller that guards a suspend-
+// sensitive section with this check behaves exactly as before the gate
+// existed.
+int JS_VMSuspended(JSRuntime *rt);
+
+// Where the most recently completed (or still-parked) chain's floor sits.
+// Pass-through build: always JS_VM_ORIGIN_NONE, since JS_VMSuspended is
+// always false and there is never a floor to report.
+JSVMOrigin JS_VMSuspendedOrigin(JSRuntime *rt);
+
+// Resume a parked chain. Pass-through build: never called with anything
+// parked (JS_VMSuspended is always false), so this has no real body yet --
+// it exists so the four vmrun receivers (sec.12.9) can be written once,
+// against the eventual contract, rather than twice.
+JSValue JS_VMResume(JSContext *ctx);
+
+// JS_Call, wrapped so a caller that receives a suspended chain back can tell
+// it apart from a normal return. Pass-through build: identical to JS_Call.
+JSValue JS_VMCall(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
+                  int argc, JSValueConst *argv);
+
+// JS_Eval, wrapped the same way. Pass-through build: identical to JS_Eval.
+JSValue JS_VMEval(JSContext *ctx, const char *input, size_t input_len,
+                  const char *filename, int eval_flags);
 
 #ifdef __cplusplus
 }

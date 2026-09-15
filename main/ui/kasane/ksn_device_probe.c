@@ -64,7 +64,7 @@ static ksn_result glass_show(bool blurred,bool capture){
                     *p=board_rgb(238,244,250);
             }
         }
-        if(board_present(y,rows,pixels)!=ESP_OK){board_capture(false);return KSN_IO;}
+        if(board_present_sync(y,rows,pixels)!=ESP_OK){board_capture(false);return KSN_IO;}
     }
     board_capture(false);return KSN_OK;
 }
@@ -98,7 +98,7 @@ static uint16_t *probe_strip(void *ctx){(void)ctx;return board_strip();}
 static ksn_result probe_send(void *ctx,uint16_t y,uint16_t rows,const uint16_t *pixels){
     (void)ctx;
     if(pixels!=board_strip())return KSN_INVALID;
-    return board_present(y,rows,board_strip())==ESP_OK?KSN_OK:KSN_IO;
+    return board_present_sync(y,rows,board_strip())==ESP_OK?KSN_OK:KSN_IO;
 }
 
 /* Use the production compositor in diagnostics, including initial frames. */

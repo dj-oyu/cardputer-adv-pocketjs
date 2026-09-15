@@ -1,4 +1,4 @@
-# L0 VM-probe overlay (docs/quickjs-freertos-vm-spec.md sec.5). NOT part of
+# L0 VM-probe overlay (docs/vm/quickjs-freertos-vm-spec.md sec.5). NOT part of
 # sdkconfig.defaults -- that file is shared by every build_* directory in
 # this tree (see CLAUDE.md), and this option must stay off there.
 #

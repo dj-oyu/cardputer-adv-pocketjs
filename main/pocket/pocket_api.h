@@ -4,7 +4,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// globalThis.pocket — the common JS API surface described in docs/common-api.md.
+// globalThis.pocket — the common JS API surface described in docs/api/common-api.md.
 //
 // This is stage A of that document and covers only the shared foundation:
 // apiVersion, device.info, capabilities and cancel, plus the PocketError shape
@@ -19,7 +19,7 @@
 
 #define POCKET_API_VERSION "0.1.0"
 
-// The common error codes of docs/common-api.md section 4. The JS side sees the
+// The common error codes of docs/api/common-api.md section 4. The JS side sees the
 // same strings through pocket.errorCodes.
 #define POCKET_ERR_INVALID_ARGUMENT  "INVALID_ARGUMENT"
 #define POCKET_ERR_UNSUPPORTED       "UNSUPPORTED"

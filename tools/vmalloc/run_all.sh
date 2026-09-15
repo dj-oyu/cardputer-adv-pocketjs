@@ -2,7 +2,7 @@
 # run_all.sh — drives every (allocator x trace) combination for the ledger.
 # WSL only. Traces must already exist (tools/vmtest/run.sh --trace, plus
 # apps/vmprobe/*.js run through vmrun --trace directly - see
-# docs/vm-ledger/06-allocator-baseline.md for the exact commands).
+# docs/vm/vm-ledger/06-allocator-baseline.md for the exact commands).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT=../..

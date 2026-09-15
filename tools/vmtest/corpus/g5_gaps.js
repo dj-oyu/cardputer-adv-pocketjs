@@ -1,5 +1,5 @@
 // vmrun-flags: --gaps
-// G5 (docs/vm-L2-design.md sec.1.3): does the gap recorder see the sections
+// G5 (docs/vm-L2-design.md sec.1.2): does the gap recorder see the sections
 // sec.2 lists as unreachable by opcode checkpoints? One named function per
 // section, each opening with a trivial branch so the section's gap STARTS at a
 // safepoint inside it (start=safepoint:<name> in "#info g5 top[k]") and ends

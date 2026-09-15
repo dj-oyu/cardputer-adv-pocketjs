@@ -9,7 +9,7 @@
 // first-fit fallback counts 1 per node) and segment (segments + free blocks
 // visited), structurally 0-or-fixed for TLSF (its malloc path is O(1)
 // bitmap lookups with no per-block scan — see
-// docs/vm-ledger/06-allocator-baseline.md). Wall-clock ns is measured for
+// docs/vm/vm-ledger/06-allocator-baseline.md). Wall-clock ns is measured for
 // all of them the same way regardless, since it is the only comparable unit
 // when one candidate has no scan to count.
 #ifndef VMALLOC_H

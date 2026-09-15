@@ -1,5 +1,5 @@
 // L0 measurement probes. See vmprobe.h and
-// docs/quickjs-freertos-vm-spec.md sec.5. This whole file is empty (zero
+// docs/vm/quickjs-freertos-vm-spec.md sec.5. This whole file is empty (zero
 // symbols) unless CONFIG_POCKET_VM_PROBE is on, and main/CMakeLists.txt only
 // adds it to SRCS in that case -- a normal build never compiles it.
 #include "vmprobe.h"
@@ -46,7 +46,7 @@ static const char *TAG = "vmprobe";
 // own count so the host can prove nothing was lost.
 #define VMPROBE_FRAME_CAP 64
 #define VMPROBE_LAT_CAP   64
-// vm-l1-tuning (docs/vm-l1-tuning.md): jobs returned by ONE vm_sched_drain()
+// vm-l1-tuning (docs/vm/vm-L1-report.md sec.10): jobs returned by ONE vm_sched_drain()
 // CALL, not one app tick. "jobs" above is folded across a frame() tick and
 // the continuation tick(s) it may spawn (a continuation never reaches
 // vmprobe_frame_sample -- app_session.c returns early while the queue is
@@ -198,6 +198,40 @@ void vmprobe_static_report(void) {
     window_reset();
 }
 
+// The heap, stack and guest-heap minima/maxima the window reports. Shared by
+// the frame sample and the continuation sample below, so a turn that ran only a
+// continuation of a drain still contributes to heap_free_min and js_used_max.
+static void heap_sample(pocketjs_guest_t *guest) {
+    unsigned free_now =
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    unsigned largest =
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    UBaseType_t stack = uxTaskGetStackHighWaterMark(NULL);
+    if (!heap_free_min || free_now < heap_free_min) heap_free_min = free_now;
+    if (!heap_largest_min || largest < heap_largest_min) heap_largest_min = largest;
+    if (!stack_hw_min || stack < stack_hw_min) stack_hw_min = stack;
+    if (guest) {
+        pocketjs_guest_stats_t stats = {.struct_size = sizeof(stats)};
+        if (pocketjs_guest_stats(guest, &stats) == ESP_OK) {
+            if (stats.heap_used > js_used_max) js_used_max = stats.heap_used;
+            js_limit_last = stats.heap_limit;
+        }
+    }
+}
+
+// A continuation turn has no frame() of its own, so it records no turn time,
+// call/drain split or job count here -- those stay per frame tick, as
+// vm_l0_capture.py reads them, and the drain calls are already collected
+// through pocketjs_guest_vmprobe_drain_calls(). What it does add is the heap
+// sample, on its own every-Nth cadence so the frame cadence is unchanged. Before
+// this, a session with L1 on never sampled the heap while a long drain was
+// being continued, which is exactly when it is fullest, and its minima could
+// not be compared with a legacy build's (vm/backlog.md item 4).
+static unsigned continuation_ticks;
+void vmprobe_continuation_sample(pocketjs_guest_t *guest) {
+    if ((++continuation_ticks % VMPROBE_SAMPLE_EVERY_N_FRAMES) == 0) heap_sample(guest);
+}
+
 void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us) {
     uint32_t call = 0, drain = 0;
     pocketjs_guest_vmprobe_take(&call, &drain);
@@ -226,23 +260,7 @@ void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us) {
         frame_count++;
     }
     window_ticks++;
-    if ((window_ticks % VMPROBE_SAMPLE_EVERY_N_FRAMES) == 0) {
-        unsigned free_now =
-            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        unsigned largest =
-            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        UBaseType_t stack = uxTaskGetStackHighWaterMark(NULL);
-        if (!heap_free_min || free_now < heap_free_min) heap_free_min = free_now;
-        if (!heap_largest_min || largest < heap_largest_min) heap_largest_min = largest;
-        if (!stack_hw_min || stack < stack_hw_min) stack_hw_min = stack;
-        if (guest) {
-            pocketjs_guest_stats_t stats = {.struct_size = sizeof(stats)};
-            if (pocketjs_guest_stats(guest, &stats) == ESP_OK) {
-                if (stats.heap_used > js_used_max) js_used_max = stats.heap_used;
-                js_limit_last = stats.heap_limit;
-            }
-        }
-    }
+    if ((window_ticks % VMPROBE_SAMPLE_EVERY_N_FRAMES) == 0) heap_sample(guest);
     // Early flush on a full array is what makes the capture exact: the window
     // is "1 s or 64 frames", never "1 s and whatever fitted".
     if (frame_count >= VMPROBE_FRAME_CAP ||

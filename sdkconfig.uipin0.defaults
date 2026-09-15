@@ -1,4 +1,4 @@
-# Pins main/main.c's ui_task to core 0 (docs/vm-L1-report.md sec.8). The
+# Pins main/main.c's ui_task to core 0 (docs/vm/vm-L1-report.md sec.8). The
 # shipping default is core 1, so this is the arm of that measurement which the
 # board says is the expensive one -- core 0 is where ESP-IDF fixes the Wi-Fi
 # driver task, and sharing it cost 5.6% of a compute-bound JS turn, 7.6% of the

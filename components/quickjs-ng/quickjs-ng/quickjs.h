@@ -515,6 +515,30 @@ JS_EXTERN JSRuntime *JS_NewRuntime(void);
 JS_EXTERN void JS_SetRuntimeInfo(JSRuntime *rt, const char *info);
 /* use 0 to disable memory limit */
 JS_EXTERN void JS_SetMemoryLimit(JSRuntime *rt, size_t limit);
+
+/* OOM canary: an allocation rejection (whether from the malloc_limit
+ * accounting check or from the underlying allocator itself -- both paths
+ * funnel through js_malloc_rt/js_calloc_rt/js_realloc_rt, so this is the one
+ * place that sees either) is otherwise invisible once JS_ThrowOutOfMemory's
+ * own allocation fails too and the resulting exception is a bare `null`,
+ * indistinguishable from a script's own `throw null`. JS_TakeOOMCanary reads
+ * the count/first-rejection since the last call and clears it, so a caller
+ * can tell the two apart without JS_TakeOOMCanary itself allocating. */
+typedef struct JSOOMCanary {
+    uint32_t count;      /* rejections since the last JS_TakeOOMCanary */
+    size_t first_req;    /* requested size of the first one this window */
+    size_t first_used;   /* malloc_state.malloc_size at that moment */
+} JSOOMCanary;
+JS_EXTERN void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out);
+/* D43 (docs/vm/vm-L2-design.md sec.7.3): return to the heap the empty frame
+ * segments the segment stack kept for reuse during the turn that just ended.
+ * Within a turn every segment a returning call empties is kept, so a call
+ * depth that goes up and down across segment boundaries reuses them instead
+ * of allocating again; the host calls this once the job queue is empty, so
+ * nothing is held between turns. Only empty, unlinked segments are freed --
+ * safe at any point, including with frames live. No-op when the build keeps
+ * frames on the C stack. Does not allocate. */
+JS_EXTERN void JS_VMStackTrim(JSRuntime *rt);
 JS_EXTERN void JS_SetDumpFlags(JSRuntime *rt, uint64_t flags);
 JS_EXTERN uint64_t JS_GetDumpFlags(JSRuntime *rt);
 JS_EXTERN size_t JS_GetGCThreshold(JSRuntime *rt);

@@ -1,5 +1,5 @@
 # Restores the pre-decision placement of the ui task: no affinity, FreeRTOS
-# chooses (docs/vm-L1-report.md sec.8 measured this as "pin_none"). The
+# chooses (docs/vm/vm-L1-report.md sec.8 measured this as "pin_none"). The
 # shipping default is core 1; this overlay and sdkconfig.uipin0.defaults are
 # what reproduce the other two arms of that measurement.
 #

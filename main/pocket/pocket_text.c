@@ -54,7 +54,7 @@ static uint32_t   handle_seed=1;
 //
 // main.c calls pocket_text_key() before app_tick(), so a listener fired from
 // in here was a JS_Call made OUTSIDE the turn -- and from L1 on a turn can
-// begin with half a drain still queued (docs/vm-L1-design.md sec.2.1: nothing
+// begin with half a drain still queued (docs/vm/vm-L1-design.md sec.2.1: nothing
 // reaches JavaScript until that queue is empty). An onEdit fired from the
 // keystroke would land between two halves of one logical drain: it would see
 // state the queued .then handlers have not written yet, and anything it

@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// The decisions of docs/common-api.md 3.1 that do not need a board.
+// The decisions of docs/api/common-api.md 3.1 that do not need a board.
 //
 // Everything here is a pure function of its arguments, the way
 // pet/pet_hub_core.c and pocket/app_registry.c are, so tools/test_overlay.c

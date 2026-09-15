@@ -27,7 +27,7 @@ static inline uint32_t utf8_decode(const char *s, size_t len, size_t i, size_t *
 
 // Strict validation, which utf8_decode() deliberately does not do: it never
 // fails, so that a display loop cannot desynchronise. An API that accepts text
-// from a program has the opposite duty — section 4 of docs/common-api.md
+// from a program has the opposite duty — section 4 of docs/api/common-api.md
 // refuses malformed UTF-8 and lone surrogates at a text API — and this is that
 // check. Overlong forms, truncated tails, surrogates and anything past
 // U+10FFFF are all rejected.

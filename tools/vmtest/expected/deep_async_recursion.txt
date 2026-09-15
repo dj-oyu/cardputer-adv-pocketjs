@@ -1,0 +1,2 @@
+sync-try none
+exit=2

@@ -6,7 +6,7 @@
 # it excludes, and licenses/libopus.txt.
 #
 # WHICH TAG, AND WHY IT IS NOT 1.5.2. The only decode-cost measurement this project
-# has (3,208 us mean per 20 ms frame, 2026-09-07, docs/opus-feasibility.md §2) was
+# has (3,208 us mean per 20 ms frame, 2026-09-07, docs/apps/opus-feasibility.md §2) was
 # taken on master a6128f4 of 2026-09-06. v1.6.1 (2026-01-13) is the nearest release
 # behind that commit; v1.5.2 is 2024-04-10, two and a half years of CELT changes
 # further away. Pinning to the release closest to the tree that was measured is what
@@ -56,7 +56,7 @@ idf_component_register(
                       "${OPUS_DIR}/silk/fixed")
 
 # FIXED_POINT: no FPU reliance, and the configuration every number in
-# docs/opus-feasibility.md was taken under.
+# docs/apps/opus-feasibility.md was taken under.
 # VAR_ARRAYS=1: CELT's scratch goes on the CALLER'S stack rather than into a static
 # pseudo-stack. That is why libopus costs 0 bytes of static DIRAM here (measured),
 # and it is why the decode task's stack has to be sized for the codec rather than
@@ -71,7 +71,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
 #
 # The project builds -Os (CONFIG_COMPILER_OPTIMIZATION_SIZE), and this component is
 # the one place worth re-asking, because it is the only code in the image with a
-# realtime deadline. R1 (docs/opus-feasibility.md §6) asked it on the board, same
+# realtime deadline. R1 (docs/apps/opus-feasibility.md §6) asked it on the board, same
 # tree, two build directories, one variable:
 #
 #   -Os   mean 3,208 us   worst 3,670   stack 10,420

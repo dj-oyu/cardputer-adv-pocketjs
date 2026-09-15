@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The app registration record of docs/common-api.md section 3, as C data.
+// The app registration record of docs/api/common-api.md section 3, as C data.
 //
 // Section 3 says the host settles the app identity and that JS never claims
 // another app's storage. Until now that was one ternary in main.c —
@@ -28,7 +28,7 @@
 // be a rule with no subject.
 typedef enum {
     APP_RUNTIME_LEGACY = 0,   // ui.createNode and globalThis.frame
-    APP_RUNTIME_POCKET,       // pocket.* — the surface of docs/common-api.md
+    APP_RUNTIME_POCKET,       // pocket.* — the surface of docs/api/common-api.md
 } app_runtime_t;
 
 // What the host lets an app do with the works library (section 3's `access`,

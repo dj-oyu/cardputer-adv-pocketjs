@@ -43,7 +43,7 @@ extern const char kasane_demo_start[] asm("_binary_demo_js_start");
 extern const char nodecap_start[] asm("_binary_nodecap_js_start");
 extern const char pet_start[] asm("_binary_pet_js_start");
 #ifdef CONFIG_POCKET_VM_PROBE
-// VM probe workloads (docs/quickjs-freertos-vm-spec.md sec.5), embedded only
+// VM probe workloads (docs/vm/quickjs-freertos-vm-spec.md sec.5), embedded only
 // when this build turned CONFIG_POCKET_VM_PROBE on (main/CMakeLists.txt).
 // Reached over USB only -- test chars 'A'..'F' in main.c's usb_stroke() --
 // never from the home screen's app list.
@@ -57,13 +57,29 @@ extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
 extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
 static pocketjs_guest_t *guest;
+
+// Called after any turn or evaluation that ran JavaScript -- app_tick's two
+// paths, app_overlay_tick's, and eval_reporting's parse -- because an
+// allocation rejection can happen inside any of them. See JS_TakeOOMCanary
+// (quickjs.h): a rejection there can turn into a bare `null` exception once
+// JS_ThrowOutOfMemory's own allocation also fails, indistinguishable from the
+// script's own `throw null` without this. Not a contracted marker (the
+// CLAUDE.md list predates it); a new line costs nothing to add.
+static void report_oom_if_any(void) {
+    if(!guest) return;
+    uint32_t n=0; size_t first_req=0, first_used=0;
+    pocketjs_guest_take_oom(guest,&n,&first_req,&first_used);
+    if(n>0)
+        ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
+                 (unsigned)n,(unsigned)first_req,(unsigned)first_used);
+}
 static pocketjs_ui_core_t *core;
 static pocketjs_ui_qjs_t *binding;
 static pocketjs_rgb565_renderer_t *renderer;
 static pocketjs_rgb565_target_t *target;
 static atomic_bool stop_requested;
 static int64_t deadline;
-// L1 (docs/vm-L1-design.md). Armed once per turn and handed to the guest, so
+// L1 (docs/vm/vm-L1-design.md). Armed once per turn and handed to the guest, so
 // frame()'s drain and the next turn's continuation drain measure against the
 // same turn start.
 static vm_budget_t budget;
@@ -100,7 +116,7 @@ static size_t user_prelude_length;
 //
 // Until now a session was bounded by entering and leaving an app screen: the
 // home screen's loop built a guest when somebody pressed Enter on a row and
-// destroyed it when they pressed Back. docs/common-api.md 3.1 adds a second
+// destroyed it when they pressed Back. docs/api/common-api.md 3.1 adds a second
 // bound -- the HOME SCREEN owns a session for as long as it is on show -- and
 // that is the whole of the difference. Everything else about the contract is
 // unchanged and deliberately so: app_stop() below still tears the surfaces
@@ -122,7 +138,8 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
                              const uint16_t *pixels) {
     kasane_display_t *display=opaque;
     int64_t began=esp_timer_get_time();
-    esp_err_t result=board_present(y,rows,(uint16_t *)pixels);
+    // Kasane promotes its command bank only after acknowledged transfers.
+    esp_err_t result=board_present_sync(y,rows,(uint16_t *)pixels);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
 }
@@ -255,6 +272,13 @@ static esp_err_t eval_reporting(const char *source, size_t length,
         JS_FreeValue(ctx,result);
         jsconsole_set_error(message[0]?message:"evaluation failed");
         ESP_LOGW("app","EVAL_ERROR %s",message);
+        // Parsing counts too (CLAUDE.md: source bytes eat the guest's heap
+        // before a single line runs), so a source too big to parse can throw
+        // this same bare null. Reported here rather than folded into
+        // EVAL_ERROR's own text: that marker's format is read by nothing
+        // today but is exactly the shape test_settings.py etc. treat as
+        // contracted, so a new field goes on a line of its own.
+        report_oom_if_any();
         return ESP_FAIL;
     }
     JS_FreeValue(ctx,result);
@@ -505,8 +529,14 @@ surfaces_done:
             pocket_ui_attach(ctx);
         }
     }
-    TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"pet-assets",pet_assets_install,core));
+    // pocket.pet is the surface of two native apps, Pocket Pet and Pet
+    // Companion, not part of the common API. It goes only to a session whose
+    // manifest names pet.companion, so no other app can reach the pet's
+    // notifications, timers or NVS through it (docs/api/common-api.md section 2).
+    if(app_registry_wants(app_registry_current(),"pet.companion")) {
+        TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
+        TRY(pocketjs_guest_quickjs_install_once(guest,"pet-assets",pet_assets_install,core));
+    }
     }
 source_ready:;
     const char *source=user_source?user_source:hello_start;
@@ -641,6 +671,10 @@ esp_err_t app_overlay_tick(void) {
     // resumed directly instead of through the binding.
     if(pocketjs_guest_jobs_pending(guest)) {
         esp_err_t ce=pocketjs_guest_continue(guest);
+        report_oom_if_any();
+#ifdef CONFIG_POCKET_VM_PROBE
+        vmprobe_continuation_sample(guest);
+#endif
         if(ce) return ce;
         if(pocketjs_guest_jobs_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
@@ -681,6 +715,7 @@ esp_err_t app_overlay_tick(void) {
     pocketjs_guest_frame_t f={.struct_size=sizeof(f)};
     esp_err_t e=pocketjs_guest_frame(guest,&f);
     frames++;
+    report_oom_if_any();
     return e;
 }
 
@@ -805,11 +840,15 @@ esp_err_t app_tick(uint32_t buttons) {
         esp_err_t ce=pocketjs_ui_turn_continue(binding,&cont);
         pocket_kasane_end_turn();
         turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
+        report_oom_if_any();
+#ifdef CONFIG_POCKET_VM_PROBE
+        vmprobe_continuation_sample(guest);
+#endif
         if(ce) return ce;
         if(!leaving && pocketjs_guest_jobs_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
             // FAIR ORDERING (Kconfig POCKET_VM_FAIR, off in the shipping
-            // build; docs/vm-L1-report.md sec.10). The drain has yielded with
+            // build; docs/vm/vm-L1-report.md sec.9). The drain has yielded with
             // work still queued, and this is the one place compat ordering
             // refuses to let a host event through.
             //
@@ -898,6 +937,7 @@ esp_err_t app_tick(uint32_t buttons) {
     pocket_kasane_end_turn();
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
+    report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
     // turn_us is frame() plus whatever job draining pocketjs_ui_turn() does
     // around it -- see vmprobe.h for why the two are not split further.

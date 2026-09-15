@@ -2,7 +2,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.io -- the external interfaces of docs/common-api.md section 10, plus
+// pocket.io -- the external interfaces of docs/api/common-api.md section 10, plus
 // io.ir from section 9.
 //
 // Everything here runs on the JS owner task, inside app_tick()'s turn. That is
@@ -54,7 +54,7 @@
 // ---------------------------------------------------------------- io.ir
 //
 // The board does have an IR emitter. M5Stack's official Cardputer-Adv pin map
-// lists "G44 -> IR TX", docs/hardware-constraints.md records the same GPIO from
+// lists "G44 -> IR TX", docs/platform/hardware-constraints.md records the same GPIO from
 // the same source, and GPIO44 is free here because the console is USB
 // Serial/JTAG (CONFIG_ESP_CONSOLE_UART_NUM=-1), so UART0's pins are unused.
 // There is no receiver: nothing in the pin map, the product page or M5Unified

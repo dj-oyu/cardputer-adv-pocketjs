@@ -84,10 +84,10 @@ static uint64_t kernel_cycles;
 // births and deaths -- and the pair of counters that replaced the known zero
 // (this one and the trace's own) had to agree instead. The trace measured 3.3
 // to 4.0 ms and came out again, so the zero is back, and the episode is in
-// docs/pie-simd.md 3.9 rather than in a comment here.
+// docs/perf/pie-simd.md 4.3 rather than in a comment here.
 //
 // Cycle counts, not esp_timer_get_time(): the timer is 0.90 us a call
-// (docs/pie-simd.md 3.5), and eight of those per strip would be 0.12 ms of
+// (docs/perf/pie-simd.md 6.5), and eight of those per strip would be 0.12 ms of
 // measurement on a 6.2 ms subject, concentrated on whichever piece is smallest.
 // `rsr.ccount` is one instruction.
 static uint64_t hud_fmt_cy,hud_ovl_cy,hud_fps_cy,hud_menu_cy;
@@ -109,7 +109,7 @@ static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL"
 // AUDIO STREAM / OPUS STREAM / OPUS + WI-FI / MP3 PLAYBACK used to be appended
 // here (apps/streamplay, apps/opusplay, apps/opusfit, apps/mp3play) -- dev/test
 // apps for the MP3 and Opus decoders, removed once those decoders were verified
-// (docs/common-api.md 9.1-9.1.3). apps/player, the shipped feature that uses the
+// (docs/api/common-api.md 9.1-9.1.3). apps/player, the shipped feature that uses the
 // same decoders, is a MUSIC overlay reached from the home screen, not a row here.
 #define APP_N (sizeof(apps)/sizeof(apps[0]))
 static float app_pos;
@@ -186,7 +186,7 @@ static const setting_t settings[]={
     // clock is one action on that screen, not the whole of what it is for.
     {"WI-FI",      SETTING_ACTION,  NULL,    0,                 0,
      NULL,          NULL,            NULL,           SHELL_SCREEN_WIFI},
-    // The overlay of docs/common-api.md 3.1, and the only way to it. 3.1 asks
+    // The overlay of docs/api/common-api.md 3.1, and the only way to it. 3.1 asks
     // that revoking permission be reachable from the home screen even while
     // the overlay is broken, so it is a row here and not a screen of its own:
     // this list draws with nothing of the overlay's on the path. The ON label
@@ -613,6 +613,31 @@ void shell_draw(const char *error, unsigned phase) {
             (double)hud_ovl_cy/samples/240000.0,(double)hud_fmt_cy/samples/240000.0,
             (double)hud_fps_cy/samples/240000.0,(double)hud_menu_cy/samples/240000.0,
             (double)present_sum/samples/1000.0);
+#ifndef SCENE_AB
+#define SCENE_AB 0
+#endif
+#if SCENE_AB
+        // Same-binary A/B, one PERF window per arm, off in the shipping build.
+        // The arms rotate all-on / kernel off / all-on / swap-into off, so every
+        // "off" window has an all-on neighbour on each side in the same scene and
+        // the paired difference is that one switch. The AB line carries the
+        // window's own canopy cycles next to draw and send, because SPLIT's
+        // 60-frame window does not line up with this 2-second one. Pair it with
+        // the neighbours' mean; docs/perf/pie-simd.md 7 has the numbers it gave.
+        {
+            extern int g_garden_canopy_pie,g_board_swap_into;
+            extern uint32_t garden_prof_canopy(uint32_t *rows);
+            static unsigned ab_arm;
+            uint32_t crows=0,ccy=garden_prof_canopy(&crows);
+            ESP_LOGI("background","AB arm=%u pie=%d swap=%d frames=%u canopy=%.3f (%u rows, %u cy/row) draw=%.2f send=%.2f",
+                     ab_arm%4,g_garden_canopy_pie,g_board_swap_into,
+                     samples,(double)ccy/samples/240000.0,crows/samples,crows?ccy/crows:0,
+                     (double)draw_sum/samples/1000.0,(double)present_sum/samples/1000.0);
+            ab_arm++;
+            g_garden_canopy_pie=ab_arm%4!=1;
+            g_board_swap_into=ab_arm%4!=3;
+        }
+#endif
         samples=0;draw_sum=0;present_sum=0;prep_sum=0;loop_sum=0;hud_sum=0;kernel_cycles=0;
         hud_fmt_cy=hud_ovl_cy=hud_fps_cy=hud_menu_cy=0;
         max_us=0;window_start=now;

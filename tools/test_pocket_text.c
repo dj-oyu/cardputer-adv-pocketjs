@@ -93,7 +93,7 @@ static bool run(const char *src) {
 
 // ONE FRAME, not one keystroke: main.c hands the field its key and then runs
 // app_tick(), whose pump phase is where the guest's callbacks are delivered
-// from L1 on (docs/vm-L1-design.md sec.2.1 -- nothing may call into JS while a
+// from L1 on (docs/vm/vm-L1-design.md sec.2.1 -- nothing may call into JS while a
 // job queue is unfinished, and pocket_text_key() is called outside the turn).
 // Case 8 is the one that drives the two halves apart on purpose.
 static void key(const char *utf8) {

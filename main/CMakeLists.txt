@@ -48,10 +48,10 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 # The small procedural renderer benefits from speed optimization; the JS engine
 # and other components retain the project's size optimization.
-target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c")
-set_source_files_properties(ui/shell.c scene/solar_sail.c scene/render_accel.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c PROPERTIES COMPILE_OPTIONS "-O2")
+target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c" "scene/canopy_pie.c")
+set_source_files_properties(ui/shell.c scene/solar_sail.c scene/render_accel.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
 
-# The VM probe (docs/quickjs-freertos-vm-spec.md sec.5), off by default
+# The VM probe (docs/vm/quickjs-freertos-vm-spec.md sec.5), off by default
 # (main/Kconfig.projbuild's CONFIG_POCKET_VM_PROBE). Both the source file and
 # the six workload apps are added ONLY in this branch -- not just guarded by
 # #ifdef inside them -- so a normal build embeds none of it: same object

@@ -12,9 +12,16 @@ mkdir -p "$CACHE"
 # main/ui/paint.c compiles against the generated 5x7 face, the same way
 # tools/test_codeedit.c gets it.
 python3 tools/make_font.py "$CACHE/gen" >/dev/null
-for f in dtoa libregexp libunicode quickjs; do
-  if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ]; then
-    gcc -c -O1 -g -w -D_GNU_SOURCE -I "$QJS" "$QJS/$f.c" -o "$CACHE/$f.o"
+# The VM levels added quickjs-vm.c (quickjs.c calls js_vm_leave from it) and
+# two default-y Kconfig switches the host has no sdkconfig for. Same defines
+# as tools/vmtest/build.sh, so this tests the call path the firmware ships.
+DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1"
+for f in dtoa libregexp libunicode quickjs quickjs-vm; do
+  # A changed header or a changed define list must not leave a stale object.
+  if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] || [ "$0" -nt "$CACHE/$f.o" ] \
+     || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
+    gcc -std=gnu11 -c -O1 -g -w $DEFS -I "$QJS" -I components/pocketjs_guest/include \
+        "$QJS/$f.c" -o "$CACHE/$f.o"
   fi
 done
 gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
@@ -25,6 +32,6 @@ gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
     tools/hostshim/hostshim.c main/pocket/pocket_text.c main/text/textfield.c \
     main/ui/paint.c \
     "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" \
-    "$CACHE/quickjs.o" \
+    "$CACHE/quickjs.o" "$CACHE/quickjs-vm.o" \
     -lm -o "$OUT"
 echo "built $OUT"

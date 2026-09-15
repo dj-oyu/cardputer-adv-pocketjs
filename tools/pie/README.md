@@ -1,6 +1,6 @@
 # PIE カーネルのチューニングツール
 
-`main/shell.c` と `main/render_accel.c` にある ESP32-S3 PIE（SIMD）カーネルを、**実機に焼く前にホストで検証・解析する**ためのツール群です。背景と設計判断は [docs/pie-simd.md](../../docs/pie-simd.md) を参照してください。ここではツールの使い方と、どの局面で何を走らせるかだけを書きます。
+`main/shell.c` と `main/render_accel.c` にある ESP32-S3 PIE（SIMD）カーネルを、**実機に焼く前にホストで検証・解析する**ためのツール群です。背景と設計判断は [docs/perf/pie-simd.md](../../docs/perf/pie-simd.md) を参照してください。ここではツールの使い方と、どの局面で何を走らせるかだけを書きます。
 
 すべて Python 3 標準ライブラリだけで動きます（C モデルのみホストの C コンパイラが要ります）。実行はリポジトリのルートから。
 
@@ -67,7 +67,7 @@ no stage-2 producer followed immediately by its consumer: 0 data stalls
 estimated cycles per block: 62.6 (62 issue + 1 store x0.6 + 0 stalls)
 ```
 
-`estimated cycles per block` は実機で測った機械の下限（[docs/pie-simd.md §3.5](../../docs/pie-simd.md)）から出しています: **PIE は命令の種類を問わず 1 命令 1 サイクルで発行します**。融合ロード（`.LD.INCP`）も索引ロード（`EE.LDXQ.32`）も、本数を 0 から 32 まで振っても追加コストは出ませんでした。払うのは 128bit ストア 1 本あたり 0.6 サイクルと、ストール 1 つあたり 1 サイクルだけです。
+`estimated cycles per block` は実機で測った機械の下限（[docs/perf/pie-simd.md §2.1](../../docs/perf/pie-simd.md)）から出しています: **PIE は命令の種類を問わず 1 命令 1 サイクルで発行します**。融合ロード（`.LD.INCP`）も索引ロード（`EE.LDXQ.32`）も、本数を 0 から 32 まで振っても追加コストは出ませんでした。払うのは 128bit ストア 1 本あたり 0.6 サイクルと、ストール 1 つあたり 1 サイクルだけです。
 
 ```
 cycles/block = 命令数 + 0.6 x ストア数 + ストール数

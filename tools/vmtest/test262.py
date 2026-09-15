@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -33,6 +34,10 @@ BASELINE = os.path.join(HERE, "test262-baseline.txt")
 # tc39/test262 main as of 2026-09-12. Pinned so the baseline stays comparable;
 # moving it means re-recording the baseline in its own commit.
 PINNED = "72faf8ec1445c55149615e8b35187830783aba1a"
+
+# Attempts per (test, mode) before an ASan startup hang is accepted as a result.
+# See run_one: the hang is the container's libasan, not the VM.
+T262_HANG_RETRIES = int(os.environ.get("T262_HANG_RETRIES", "5"))
 
 # The subset the spec's L1/L2 touch: call paths, frames, generators/async,
 # exceptions, Promise jobs, eval. Directories are relative to test/.
@@ -165,12 +170,46 @@ def run_one(vmrun, rel, timeout):
         elif mode == "strict":
             cmd.append("--strict")
         cmd.append(path)
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                               errors="replace", cwd=os.path.dirname(path))
-            out = p.stdout + p.stderr
-            code = p.returncode
-        except subprocess.TimeoutExpired:
+        # This container's ASan runtime fails to START on roughly 1 run in 4:
+        # the process never reaches main and prints
+        # "AddressSanitizer:DEADLYSIGNAL" forever (see the comment in
+        # tools/vmtest/run.sh for the measurements). Two consequences here:
+        # such a run must be retried (otherwise hundreds of Test262 cases turn
+        # into spurious FAILs under --variant asan), and it must be killed as
+        # soon as the signature appears -- waiting out the 30 s timeout for
+        # every one of them would make the asan run take hours instead of
+        # minutes. A real ASan report does not contain that line, so it is
+        # neither killed nor retried.
+        def run_once():
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True, errors="replace", cwd=os.path.dirname(path))
+            lines = []
+
+            def reader():
+                for line in p.stdout:
+                    lines.append(line)
+                    if "AddressSanitizer:DEADLYSIGNAL" in line or len(lines) > 4000:
+                        p.kill()
+                        break
+
+            th = threading.Thread(target=reader, daemon=True)
+            th.start()
+            try:
+                code = p.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+                th.join(1)
+                return None, "".join(lines)
+            th.join(1)
+            return code, "".join(lines)
+
+        for attempt in range(T262_HANG_RETRIES):
+            code, out = run_once()
+            if "AddressSanitizer:DEADLYSIGNAL" in out and attempt + 1 < T262_HANG_RETRIES:
+                continue
+            break
+        if code is None:
             results.append((f"{rel} {mode}", "FAIL", "timeout"))
             continue
         results.append((f"{rel} {mode}",) + judge(meta, flags, code, out))

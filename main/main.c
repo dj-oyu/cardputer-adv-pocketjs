@@ -44,7 +44,7 @@ void ksn_device_probe_run(void);
 
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
 // ---------------------------------------------------------------------------
-// L1 clock-cost bench (branch vm/l1-clockbench, docs/vm-l1-clock.md). This
+// L1 clock-cost bench (branch vm/l1-clockbench, docs/vm/vm-L1-report.md sec.8.7). This
 // whole block is a throwaway measurement, not shipping code: it exists only
 // behind CONFIG_POCKET_VM_L1_CLOCKBENCH, which is off in every normal build
 // (see sdkconfig.vmclockbench.defaults / .pin1.defaults for how to turn it
@@ -219,7 +219,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
         atomic_store(&diagnostic,c); return false;
     }
 #ifdef CONFIG_POCKET_VM_PROBE
-    // VM probe workload triggers (docs/quickjs-freertos-vm-spec.md sec.5),
+    // VM probe workload triggers (docs/vm/quickjs-freertos-vm-spec.md sec.5),
     // USB-only and gated by CONFIG_POCKET_VM_PROBE so a normal build's key
     // table is byte-for-byte unchanged. 'A'..'F' select one of apps/vmprobe/'s
     // six workloads the same way '1'..'6' select the lifecycle diagnostics
@@ -488,7 +488,7 @@ static const screen_ops_t SCREENS[SCREEN_COUNT]={
 };
 
 static void enter(screen_id_t next) {
-    // docs/common-api.md 3.1 moves the guest's lifetime from "entering and
+    // docs/api/common-api.md 3.1 moves the guest's lifetime from "entering and
     // leaving the app screen" to "the home screen owning the frame", and this
     // is the leaving half: the home screen is giving the display away, so the
     // session it owns ends here. It has to be before the screen changes,
@@ -882,7 +882,7 @@ static void ui_task(void *arg) {
         // it removes is the "up to one frame period" term of completion
         // latency, and nothing else.
         if(running) {
-            // THE RULE (docs/vm-L1-report.md sec.2.4): the display period
+            // THE RULE (docs/vm/vm-L1-report.md sec.2.4): the display period
             // paces PICTURES, so it is charged once per frame() and from the
             // start of that frame's period -- not once per turn. A turn that
             // only drains jobs shows nothing anyone is waiting for, so it
@@ -994,7 +994,7 @@ void app_main(void) {
     // and nothing else -- the three settings are one binary family, which is
     // what makes a measurement across them mean anything. Why it exists:
     // CCOUNT is per core, so a budget that reads it needs a task that cannot
-    // migrate between two reads (docs/vm-L1-report.md sec.8).
+    // migrate between two reads (docs/vm/vm-L1-report.md sec.8).
     configASSERT(xTaskCreatePinnedToCore(ui_task,"ui",32768,NULL,5,NULL,
         CONFIG_POCKET_UI_TASK_CORE<0?tskNO_AFFINITY:CONFIG_POCKET_UI_TASK_CORE)==pdPASS);
 }

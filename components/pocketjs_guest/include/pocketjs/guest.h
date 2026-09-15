@@ -40,7 +40,7 @@ typedef struct {
   uint32_t jobs;
   size_t heap_used;
   size_t heap_limit;
-  /* L1 (docs/vm-L1-design.md). struct_size guards the ABI: a caller built
+  /* L1 (docs/vm/vm-L1-design.md). struct_size guards the ABI: a caller built
    * against the shorter struct asks for the shorter struct and gets it. */
   uint32_t yields;         /* drains cut by the budget */
   uint32_t continuations;  /* turns that began by finishing a previous drain */
@@ -61,7 +61,7 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame);
 
-/** Arm this turn's job budget (docs/vm-L1-design.md sec.1.3). NULL, or a
+/** Arm this turn's job budget (docs/vm/vm-L1-design.md sec.1.3). NULL, or a
  * budget with limit_us <= 0, restores the pre-L1 "drain until empty"
  * behaviour exactly. Call once per turn, before any call into the guest. */
 void pocketjs_guest_budget(pocketjs_guest_t *guest, const vm_budget_t *budget);
@@ -74,7 +74,7 @@ bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest);
 /** What the current LOGICAL drain has cost: microseconds spent inside
  * vm_sched_drain() and jobs completed, summed over the drain the budget cut
  * and every continuation of it, both cleared when the queue empties. The host
- * runaway guard (docs/vm-L1-design.md sec.5.2) is a predicate on these; it
+ * runaway guard (docs/vm/vm-L1-design.md sec.5.2) is a predicate on these; it
  * cannot be a turn count, because a turn ends for reasons -- the backstop, a
  * contended machine shortening the wall-clock budget -- that say nothing about
  * how much work the guest asked for. `*us` is 0 whenever the budget runs in
@@ -100,9 +100,19 @@ void pocketjs_guest_interrupt(pocketjs_guest_t *guest);
 esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
                                pocketjs_guest_stats_t *out_stats);
 
+/** Read-and-clear count of allocation rejections (QuickJS's malloc_limit
+ * check OR the underlying allocator, either one -- see JS_TakeOOMCanary in
+ * quickjs.h) since the last call, plus the first one's requested size and the
+ * heap usage at that moment. Any argument may be NULL. Call once per turn,
+ * after the turn's JS has run, so a `null` exception thrown that turn can be
+ * told apart from the script's own `throw null` (both look identical from
+ * inside the guest once JS_ThrowOutOfMemory's own allocation also fails). */
+void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
+                             size_t *first_req, size_t *first_used);
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
-/* VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare
+/* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare
  * include: this header is also compiled on the host by tools/vmtest, where
  * there is no sdkconfig.h. Absent config == probe off, the shipping default. */
 #if defined(__has_include)

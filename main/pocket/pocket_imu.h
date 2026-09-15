@@ -2,7 +2,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.sensors.imu — section 8 of docs/common-api.md, on top of motion.c.
+// pocket.sensors.imu — section 8 of docs/api/common-api.md, on top of motion.c.
 //
 // Everything here runs on the JS owner task. pocket_imu_pump() is what drives
 // the watch subscriptions and must be called once per frame from that same

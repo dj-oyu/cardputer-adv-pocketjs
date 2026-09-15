@@ -373,7 +373,7 @@ def summarize(records, out=sys.stdout):
 
 
 def markdown(records, out=sys.stdout):
-    """The same numbers as summarize(), as the tables docs/vm-L0-report.md
+    """The same numbers as summarize(), as the tables docs/vm/vm-L0-report.md
     carries, so the report is pasted from the data rather than retyped."""
     g = group(records)
     spread = per_rep_medians(records, "frame")

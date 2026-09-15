@@ -8,7 +8,7 @@ menu "Pocket VM (L0 measurement probes)"
             static storage and stack. Not a production renderer benchmark.
 
     config POCKET_VM_PROBE
-        bool "Enable L0 VM probes (docs/quickjs-freertos-vm-spec.md sec.5)"
+        bool "Enable L0 VM probes (docs/vm/quickjs-freertos-vm-spec.md sec.5)"
         default n
         help
             Off by default and meant to stay that way for every normal build.
@@ -37,7 +37,7 @@ menu "Pocket VM (L0 measurement probes)"
             sdkconfig.defaults or in the shared root sdkconfig.
 
     config POCKET_VM_SCHED
-        bool "Job-boundary scheduling and wake (docs/vm-L1-design.md, L1)"
+        bool "Job-boundary scheduling and wake (docs/vm/vm-L1-design.md, L1)"
         default y
         help
             The L1 execution control. On, a turn's Promise job drain may stop
@@ -61,7 +61,7 @@ menu "Pocket VM (L0 measurement probes)"
         bool "JS frames in runtime-owned segments, not on the C stack (L2a)"
         default y
         help
-            docs/quickjs-freertos-vm-spec.md sec.7 L2a, docs/vm-L2-design.md.
+            docs/vm/quickjs-freertos-vm-spec.md sec.7 L2a, docs/vm/vm-L2-design.md.
             On, JS_CallInternal takes its JSStackFrame and the block that
             used to be alloca()'d (arguments, locals, operand stack, var_refs)
             from a bump-allocated segment chain the runtime owns
@@ -101,7 +101,7 @@ menu "Pocket VM (L0 measurement probes)"
         depends on POCKET_VM_SEGFRAMES
         default y
         help
-            docs/quickjs-freertos-vm-spec.md sec.7 L2b, docs/vm-L2-design.md
+            docs/vm/quickjs-freertos-vm-spec.md sec.7 L2b, docs/vm/vm-L2-design.md
             sec.10. On, a call opcode whose target is a bytecode function
             (call / call0-3 / call_method / tail_call / tail_call_method)
             pushes the callee's frame on the segment stack and keeps running
@@ -135,7 +135,7 @@ menu "Pocket VM (L0 measurement probes)"
         default n
         help
             OFF (the shipping default) is COMPAT ORDERING, the rule
-            docs/vm-L1-design.md sec.2.1 states: a turn that ended with jobs
+            docs/vm/vm-L1-design.md sec.2.1 states: a turn that ended with jobs
             queued finishes them at the top of the next turn, and no host event
             reaches JavaScript until the queue is empty. One logical drain then
             has exactly the job order the pre-L1 single drain produced, and the
@@ -153,13 +153,13 @@ menu "Pocket VM (L0 measurement probes)"
 
             The cost compat ordering pays is completion latency on an app whose
             drain needs continuations -- measured (device) at ~1.9x the pre-L1
-            path under audio contention (docs/vm-L1-report.md sec.6). This mode
+            path under audio contention (docs/vm/vm-L1-report.md sec.2.8). This mode
             exists so that tradeoff can be measured rather than argued, and so
             L2 can revisit it with evidence. Two things are deliberately NOT
             made fair, because neither can be made safe at a job boundary:
             exit() (delivered as an uncatchable interrupt, it would cut the
             drain it lands in) and frame() (it would put a frame inside a
-            chain). See docs/vm-L1-report.md sec.10.
+            chain). See docs/vm/vm-L1-report.md sec.9.3.
 
     config POCKET_UI_TASK_CORE
         int "Core the ui task is pinned to (-1 = let FreeRTOS choose)"
@@ -167,19 +167,19 @@ menu "Pocket VM (L0 measurement probes)"
         default 1
         help
             main/main.c's ui_task owns the whole UI, every screen and the JS
-            session (docs/vm-L1-design.md sec.4.1), so where it runs decides
+            session (docs/vm/vm-L1-design.md sec.4.1), so where it runs decides
             where every JS job runs. -1 creates it with tskNO_AFFINITY, which
             is what xTaskCreate() did here before; 0 or 1 pins it.
 
             The default is 1 because that is what the board measured
-            (docs/vm-L1-report.md sec.8, all 実測(device)): core 1 is
+            (docs/vm/vm-L1-report.md sec.8, all 実測(device)): core 1 is
             indistinguishable from no affinity -- the JS turn medians match to
             0.1%, the LCD transfer to 0.04%, DIRAM to the byte -- while core 0
             costs 5.6% of a compute-bound turn, 7.6% of the transfer, and 16%
             of an HTTP request running on the other core, because core 0 is
             where ESP-IDF fixes the Wi-Fi driver task. Pinning also removes the
             one migration the board does take (measured: 1 in 1,800 idle
-            frames, docs/vm-l1-clock.md sec.2), which is what makes a per-core
+            frames, docs/vm/vm-L1-report.md sec.8.8), which is what makes a per-core
             clock (CONFIG_POCKET_VM_CCOUNT) possible at all.
 
             The three values are the SAME binary with one immediate changed --
@@ -194,18 +194,18 @@ menu "Pocket VM (L0 measurement probes)"
             once every VM_JOB_STRIDE jobs (vm_sched.h). CCOUNT --
             the per-core cycle counter, RSR CCOUNT, the one main/scene/flower.c
             already uses -- costs 25 ns a read against esp_timer_get_time()'s
-            833 ns (measured (device), docs/vm-l1-clock.md sec.1).
+            833 ns (measured (device), docs/vm/vm-L1-report.md sec.8.7).
 
             It is per core, so it is only sound when the task that runs the
             drain cannot migrate: components/pocketjs_guest/src/vm_clock.c
             refuses to compile unless CONFIG_POCKET_UI_TASK_CORE >= 0.
 
             Whether it is worth having is a measurement, not a preference --
-            docs/vm-L1-report.md sec.8 records what each clock costs on the
+            docs/vm/vm-L1-report.md sec.8 records what each clock costs on the
             job-heavy workloads.
 
     config POCKET_VM_L1_CLOCKBENCH
-        bool "Enable L1 clock-cost bench (docs/vm-l1-clock.md)"
+        bool "Enable L1 clock-cost bench (docs/vm/vm-L1-report.md 8.7)"
         default n
         help
             A throwaway bench for one question: what does reading the clock

@@ -25,7 +25,7 @@
 // truncation the capability table was found doing.
 #define POCKET_MAX_LAZY 28
 
-// The names of docs/common-api.md section 2, all of them. A name that is not
+// The names of docs/api/common-api.md section 2, all of them. A name that is not
 // implemented yet still has to answer get() with supported=false rather than
 // throw, so the whole list is declared here and later stages replace entries
 // through pocket_api_register().
@@ -347,7 +347,7 @@ typedef struct {
     const pocket_promise_ops_t *ops;
     void       *user;
 #ifdef CONFIG_POCKET_VM_PROBE
-    // VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5): when pocket_api_complete()
+    // VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5): when pocket_api_complete()
     // last wrote `done`, so pocket_api_pump() can report how long the
     // completion sat here before its resolve/reject actually ran. Absent
     // from a normal build's struct layout entirely. 32 bits, not 64:
@@ -540,6 +540,14 @@ bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id) {
 }
 
 void pocket_api_reset(void) {
+    // Registrations belong to the session that made them. Every surface
+    // registers from its install function, and a session installs only what it
+    // was given: an overlay gets no radio or buses, and pocket.pet goes only to
+    // the apps whose manifest names pet.companion. A table that outlived the
+    // session would answer supported=true for whatever the previous session
+    // installed -- the wrong answer, and exactly the one section 2 exists to
+    // prevent.
+    override_count=0;
     for(unsigned i=0;i<class_owner_count;i++) *class_owners[i]=NULL;
     for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
         pocket_promise_t *p=&promises[i];

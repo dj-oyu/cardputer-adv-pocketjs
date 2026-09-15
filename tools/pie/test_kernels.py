@@ -391,5 +391,89 @@ class GardenRow(unittest.TestCase):
 
 
 
+CANOPY = os.path.join(ROOT, 'main', 'scene', 'canopy_pie.c')
+
+
+class TestCanopyKernel(unittest.TestCase):
+    """canopy_pie against the scalar blend it replaces.
+
+    The arithmetic of the loop is proven in tools/pie/models/canopy_model.c (the
+    radicand split, the exact reciprocal, q*3/5, the deleted branch, the channel
+    bounds, and eight lanes against the scalar row). This is the other half: that
+    the assembly is that lane model -- that it reads the constants in the order
+    the C initializer declares, unpacks the fields it claims to unpack, and
+    advances the row pointer by exactly one block.
+    """
+
+    KV, XV, ROW, K = 0x1000, 0x2000, 0x4000, 0x5000
+
+    @staticmethod
+    def recip(d, sh):
+        return ((1 << sh) + d - 1) // d
+
+    @staticmethod
+    def blend(word, lr, lg, lb, f):
+        g = 256 - f
+        r = (((word >> 11) & 31) * g + lr * f) >> 8
+        gg = (((word >> 5) & 63) * g + lg * f) >> 8
+        b = ((word & 31) * g + lb * f) >> 8
+        return (r << 11) | (gg << 5) | b
+
+    @classmethod
+    def pixel_ref(cls, x, cx, mrr, qy, lr, lg, lb, word):
+        qbase = 256 - qy
+        dx = x - cx
+        t = (((dx * dx) * 16) * ((mrr >> 8) * 16) + (dx * dx) * (mrr & 255)) >> 18
+        q = max(0, qbase - t)
+        f = (q * 39322) >> 16
+        return cls.blend(word, lr, lg, lb, f)
+
+    def broadcast(self, mem, values):
+        store16(mem, self.K, values)
+        Sim(mem).run(extract_asm(CANOPY, 'canopy_broadcast('),
+                     {'k': self.K, 'kv': self.KV, 'ks': 0, 'kp': 0, 'nk': len(values)})
+
+    def test_block(self):
+        rng = random.Random(7)
+        for _ in range(120):
+            rx = rng.randrange(28, 45)
+            rr = rx * rx
+            mrr = self.recip(rr, 26)
+            cx = rng.randrange(40, 200)
+            cx = max(rx, min(239 - rx, cx))
+            # an interior block: every pixel inside |x - cx| <= rx
+            # More than one block: the first version of this test used a single
+            # block, and the kernel's x vector ran off its own stack array on the
+            # second one exactly as the part did.
+            nblk = rng.randrange(1, 6)
+            k = rng.randrange(0, max(1, (2 * rx + 1) // 8 - nblk))
+            x0 = cx - rx + 8 * k
+            while x0 + 8 * nblk - 1 > cx + rx:
+                x0 -= 8
+            if x0 < cx - rx:
+                x0 = cx - rx
+            qy = rng.randrange(0, 257)
+            leafy = rng.randrange(0, 1 << 16)
+            lr, lg, lb = (leafy >> 11) & 31, (leafy >> 5) & 63, leafy & 31
+            words = [rng.randrange(0, 1 << 16) for _ in range(8 * 6)]
+            mem = bytearray(0x8000)
+            env = {'cx': cx, 'mrr': mrr, 'qy': qy, 'leafy': leafy}
+            self.broadcast(mem, extract_constants(CANOPY, 'canopy_pie(', env))
+            # dx = x - cx for the first block; the kernel moves it on by eight.
+            store16(mem, self.XV, [(x0 + i - cx) & 0xFFFF for i in range(8)])
+            store16(mem, self.ROW, words)
+            sim = Sim(mem)
+            sim.run(extract_asm(CANOPY, 'canopy_pie('),
+                    {'kp': 0, 'xp': self.XV, 'row': self.ROW, 'n': nblk, 'kv': self.KV,
+                     'sh0': 0, 'sh8': 8, 'sh16': 16, 'sh18': 18})
+            got = load16(mem, self.ROW, 8 * nblk)
+            want = [self.pixel_ref(x0 + i, cx, mrr, qy, lr, lg, lb, words[i]) for i in range(8 * nblk)]
+            self.assertEqual(got, want, f'rx={rx} cx={cx} x0={x0} blocks={nblk} mrr={mrr} qy={qy} leafy={leafy}')
+            self.assertEqual(sim.ar['row'], self.ROW + 16 * nblk, 'row advance')
+            # xp is an input-only operand now: the kernel keeps the lanes in q7 and
+            # moves them on by eight, so there is nothing to walk and nothing to
+            # assert about a pointer the assembly does not advance.
+
+
 if __name__ == '__main__':
     unittest.main()

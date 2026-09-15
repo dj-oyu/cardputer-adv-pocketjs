@@ -317,7 +317,7 @@ static flower_species_t bloom_next(flower_species_t from) {
 // the call into `l32r` + `callx8` into a ROM address -- so it is invisible to a
 // mnemonic search and to a `call8 <symbol>` search alike, which is why two
 // rounds of planning here were built on "ray_row has no divisions". It has
-// sixteen. See docs/pie-simd.md 3.7.
+// sixteen. See docs/perf/pie-simd.md 3.1.
 //
 // A call is worse than its own cycles. `__divsf3` and `fmaxf` take their
 // arguments in *integer* registers, so each one costs an `rfr`/`wfr` pair and
@@ -391,8 +391,8 @@ static void petal_reciprocals(Petal *p) {
     // across every pixel of every row. bell_hit was paying a software division
     // for 1/a on each of six bands on each visit -- and because that division
     // is `l32r`+`callx8` into __divsf3 rather than an instruction, it is
-    // invisible to every way anybody has looked at this loop (docs/pie-simd.md
-    // 3.7).
+    // invisible to every way anybody has looked at this loop (docs/perf/pie-simd.md
+    // 3.1).
     //
     // bell_slopes is filled by prepare_seeds, which flower_prepare calls
     // before this loop. A Petal whose reciprocals are taken before that gets
@@ -428,7 +428,7 @@ static int clampi(int x,int lo,int hi) { return x<lo?lo:x>hi?hi:x; }
 //
 // `floorf` compiles to `l32r`+`callx8` into a ROM routine on this part -- it is
 // a call, and no search of the disassembly for a mnemonic will show it
-// (docs/pie-simd.md 3.7). A C cast to int is `trunc.s`, one instruction, and
+// (docs/perf/pie-simd.md 3.7). A C cast to int is `trunc.s`, one instruction, and
 // differs from floorf only in which way it rounds negatives.
 //
 // The obvious spelling of this is a plain `(int)x` justified by an argument
@@ -758,7 +758,7 @@ static void prepare_seeds(void) {
         // The band's height bounds are a function of the band index and
         // nothing else, so they belong here and not in bell_hit -- where they
         // were two `2.0f*band/LAT` divisions, and a division on this part is a
-        // call into a ROM routine (docs/pie-simd.md 3.7). Six bands, twice
+        // call into a ROM routine (docs/perf/pie-simd.md 3.6). Six bands, twice
         // each, on every one of ~2,000 bell visits a frame.
         bell_lo[i]=-1+2.0f*i/LAT;
         bell_hi[i]=-1+2.0f*(i+1)/LAT;
@@ -1131,11 +1131,10 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
         // things and the device can only answer one question per flash. With
         // DOTS alone reverted, the difference against the default is thirty
         // float operations a visit and nothing else; with INVA reverted, it is
-        // ~4.8 software divisions a visit and nothing else. Nobody has ever
-        // measured what a float division costs on this part -- every figure in
-        // docs/pie-simd.md 3.7 for it is an estimate -- and this is the first
-        // change whose removed count is known exactly (it equals the square
-        // root count, which the SPLIT line already prints).
+        // ~4.8 software divisions a visit and nothing else. This is the change
+        // that priced a float division on this part (docs/perf/pie-simd.md 3.2):
+        // its removed count is known exactly, because it equals the square root
+        // count the SPLIT line already prints.
 #ifdef FLOWER_NO_BAND_DOTS
         float b=o[0]*d[0]+o[2]*d[2]-r*dr;
         float c=o[0]*o[0]+o[2]*o[2]-r*r;

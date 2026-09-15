@@ -2,7 +2,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.ble — section 12 of docs/common-api.md: BLE Central.
+// pocket.ble — section 12 of docs/api/common-api.md: BLE Central.
 //
 // The surface is NOT implemented on this board, and this file exists so that an
 // app can find that out the way section 2 asks: a name it can feature-test and

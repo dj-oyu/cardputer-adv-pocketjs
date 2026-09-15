@@ -14,9 +14,12 @@
 static const char *const CAPS_NONE[]   = {NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
 static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
-static const char *const CAPS_PET_OPT[]= {"sensors.imu", "audio.tone", NULL};
+// pet.companion is optional rather than required so that a board without NVS
+// still starts the pet and shows why it cannot save, but naming it is what
+// gets the session pocket.pet at all (app_session.c installs it only then).
+static const char *const CAPS_PET_OPT[]= {"sensors.imu", "audio.tone", "pet.companion", NULL};
 static const char *const CAPS_WORK[]   = {"workspace", NULL};
-static const char *const CAPS_COMP[]   = {"net.http", "audio.tone", NULL};
+static const char *const CAPS_COMP[]   = {"net.http", "audio.tone", "pet.companion", NULL};
 static const char *const CAPS_OVERLAY[]= {"ui.overlay", "time", NULL};
 static const char *const CAPS_PLAY[]    = {"audio.playback", "fs.volume.sd", NULL};
 

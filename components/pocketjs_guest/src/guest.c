@@ -10,11 +10,15 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "quickjs-libc.h"
+#ifdef CONFIG_POCKET_VM_PROBE
+#include <stdio.h>
+#include "quickjs-vm.h"
+#endif
 
 static const char *TAG = "pocketjs_guest";
 
 #ifdef CONFIG_POCKET_VM_PROBE
-/* VM_PROBE (docs/quickjs-freertos-vm-spec.md sec.5): frame() time and drain
+/* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5): frame() time and drain
  * time, kept apart. main/pocket/vmprobe.c times the whole pocketjs_ui_turn(),
  * which is frame() + drain + the UI core's tick and draw; sec.5 asks for drain
  * time on its own and this is the only file that can see where drain starts.
@@ -32,7 +36,7 @@ void pocketjs_guest_vmprobe_take(uint32_t *call_us, uint32_t *drain_us) {
   vmprobe_drain_us = 0;
 }
 
-/* vm-l1-tuning (docs/vm-l1-tuning.md): jobs actually returned by ONE
+/* vm-l1-tuning (docs/vm/vm-L1-report.md sec.10): jobs actually returned by ONE
  * vm_sched_drain() call, recorded from drain_jobs() -- the single choke
  * point both pocketjs_guest_frame() (the frame()-triggering call) and
  * pocketjs_guest_continue() (a continuation of the same logical drain, sec.2.1)
@@ -71,10 +75,23 @@ unsigned pocketjs_guest_vmprobe_drain_calls(uint16_t *out, unsigned cap,
 }
 #endif
 
+/* The header in front of every guest allocation records the requested size.
+ * On the part it is one size_t, 4 B: the union with max_align_t made it 16 B
+ * to buy an 8-byte alignment that the IDF tlsf beneath never provides (its
+ * blocks are 4-aligned; vm-ledger/06), so the other 12 B bought nothing and
+ * came out of the system heap once per live block (spec vm/backlog.md item 8).
+ * Host builds keep the union: there malloc and QuickJS do rely on
+ * max_align_t alignment. */
+#ifdef ESP_PLATFORM
+typedef struct {
+  size_t size;
+} allocation_header_t;
+#else
 typedef union {
   size_t size;
   max_align_t alignment;
 } allocation_header_t;
+#endif
 
 typedef struct rejection {
   JSValue promise;
@@ -101,7 +118,7 @@ struct pocketjs_guest {
   uint32_t frames;
   uint32_t frame_errors;
   uint32_t jobs;
-  /* L1 (docs/vm-L1-design.md). The budget is armed by the host once per turn
+  /* L1 (docs/vm/vm-L1-design.md). The budget is armed by the host once per turn
    * and read by every drain in that turn, so the frame()'s drain and the next
    * turn's continuation drain share one deadline measured from turn start. */
   vm_budget_t budget;
@@ -292,6 +309,16 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
   guest->drain_us += guest->budget.elapsed;
   guest->drain_jobs += ran;
   guest->jobs_pending = (status == VM_DRAIN_YIELDED);
+  /* L2c gate (docs/vm/vm-L2-design.md sec.11.5/13): vm_sched_drain() can
+   * report a parked chain now, but nothing in this build can ever park one
+   * (every JS_VM* symbol is a pass-through, stage 1/2 of sec.12.15 do not
+   * touch quickjs.c) -- so this is here only so a real interpreter change
+   * later does not also have to teach this caller a new status value. The
+   * real handling (resume within the leave-turn budget, sec.12.11) lands
+   * with stage 4 (firmware integration). */
+  if (status == VM_DRAIN_SUSPENDED) {
+    return ESP_FAIL;
+  }
   if (status == VM_DRAIN_THREW) {
     if (context != NULL) {
       js_std_dump_error(context);
@@ -301,6 +328,7 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
      * rather than charge the survivor for it. */
     guest->drain_us = 0;
     guest->drain_jobs = 0;
+    JS_VMStackTrim(guest->runtime);
     return ESP_FAIL;
   }
   if (status == VM_DRAIN_YIELDED) {
@@ -313,6 +341,10 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
    * zero. Cleared before the report, which can itself fail the turn. */
   guest->drain_us = 0;
   guest->drain_jobs = 0;
+  /* D43 (docs/vm/vm-L2-design.md sec.7.3): the turn is over, so the frame
+   * segments the stack kept for reuse during it go back to the heap. Kept
+   * across a YIELDED drain above, which is the same logical turn. */
+  JS_VMStackTrim(guest->runtime);
   return report_rejections(guest);
 }
 
@@ -629,6 +661,23 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
   return ESP_OK;
 }
 
+/* Read-and-clear, same shape as pocketjs_guest_vmprobe_take(): the host
+ * (app_session.c) calls this after every turn so a `caught null` from the
+ * SAME turn can be told apart from a script's own `throw null`. See
+ * JS_TakeOOMCanary for why the count has to come from inside QuickJS rather
+ * than from guest_malloc's own NULL returns -- the malloc_limit accounting
+ * check rejects most device OOMs before guest_malloc is ever called. */
+void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
+                             size_t *first_req, size_t *first_used) {
+  JSOOMCanary canary = {0};
+  if (guest != NULL) {
+    JS_TakeOOMCanary(guest->runtime, &canary);
+  }
+  if (count != NULL) *count = canary.count;
+  if (first_req != NULL) *first_req = canary.first_req;
+  if (first_used != NULL) *first_used = canary.first_used;
+}
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
   if (guest == NULL) {
     return;
@@ -639,6 +688,14 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
      * already chose for in-flight promises. Recorded as one bit because
      * counting would need a VM hook. */
     guest->jobs_dropped = JS_IsJobPending(guest->runtime);
+#ifdef CONFIG_POCKET_VM_PROBE
+    /* D42 sizing: the frame segments' peak for this session, the same line
+     * vmrun --stats prints on the host, so the standard segment size can be
+     * chosen from device frame sizes (8 B JSValue, 48 B frame header) rather
+     * than host ones. Printed before teardown, while the counters still
+     * describe the app rather than JS_FreeRuntime's own pops. */
+    vmtest_vmstack_report(guest->runtime, stdout);
+#endif
     js_std_free_handlers(guest->runtime);
   }
   if (guest->context != NULL) {

@@ -21,15 +21,18 @@
  *     candidates.
  *
  * There is no personal dictionary. One existed (an MRU that reordered
- * candidates by recency) and was removed on 2026-07-30 — see
- * docs/skk-ime-design.md §S7 for why, and for the shape a user
- * dictionary would take if one comes back. It would not be this one.
+ * candidates by recency) and was removed on 2026-07-30: it needed
+ * mutable, persisted per-user state, which cuts against the
+ * zero-allocation, single-owner design below — every buffer here is
+ * caller-owned and fixed length, and nothing in this component persists
+ * across sessions. If a user dictionary comes back it will not be this
+ * one; it belongs in whatever layer already owns persistence, not here.
  *
  * WHO CALLS THIS. Not an app — ime_core does, on the one task that owns
- * the device's IME session, and mqjs hands the result to whichever sink
- * has focus (see docs/keyboard-ime-unification.md). Nothing above this
- * file has to know the status bitmask, the accessor lifetimes, or the
- * order keys must be offered in.
+ * the device's IME session, and it hands the result to whichever sink
+ * has focus (see docs/apps/japanese-input.md, "入力経路"). Nothing
+ * above this file has to know the status bitmask, the accessor
+ * lifetimes, or the order keys must be offered in.
  *
  * It was not always so. Until 2026-07-30 the `skk.*` JS bindings let an
  * app drive this engine directly, and three of them did — each with its

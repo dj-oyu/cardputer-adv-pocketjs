@@ -1,4 +1,4 @@
-// VM_PROBE declarations (docs/quickjs-freertos-vm-spec.md sec.5, L0).
+// VM_PROBE declarations (docs/vm/quickjs-freertos-vm-spec.md sec.5, L0).
 //
 // This file is NOT part of the upstream quickjs-ng import -- it is new, added
 // alongside the vendored sources so main/pocket/vmprobe.c can reach the few

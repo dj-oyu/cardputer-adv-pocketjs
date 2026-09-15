@@ -1,6 +1,6 @@
 # pocket.fs セルフチェック
 
-`pocketfs.js` は `docs/common-api.md` §7 と `docs/filesystem-api.md` の実装
+`pocketfs.js` は `docs/api/common-api.md` §7 と `docs/api/filesystem-api.md` の実装
 （`main/pocket/pocket_fs.c`）を、実機のログだけで検証するためのアプリ。ソースは
 **3717 bytes**。ゲストは起動時にソースを解析するので、この数字自体がゲスト
 ヒープのコストになる（`apps/pocketui/README.md` と同じ理由で短く書いてある）。

@@ -1,4 +1,4 @@
-// G1 (docs/vm-L2-design.md sec.1.3): pure JS recursion, C stack per level.
+// G1 (docs/vm-L2-design.md sec.1.2): pure JS recursion, C stack per level.
 //
 // Not part of corpus/ on purpose: this file's OUTPUT (the max depth reached
 // by "dive") is meant to change as __VMTEST_PROBE_DEPTH changes, so it cannot

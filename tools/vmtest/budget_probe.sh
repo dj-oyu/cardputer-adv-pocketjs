@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D10 (docs/vm-L2-design.md sec.9): is the frame-segment byte budget the
+# D10 (docs/vm/vm-L2-design.md sec.8): is the frame-segment byte budget the
 # thing that stops a deep recursion, and does it stop it BEFORE the heap does?
 #
 # run.sh cannot answer that. Under run.sh every file runs with both guards at
@@ -120,6 +120,85 @@ check deep_recursion_device  differ 0   '>0' --profile device --stack-limit 512M
 check deep_recursion         differ '>0' 0   --profile host   --stack-limit 512M --vm-budget 100K
 check seg_oom_boundary       differ '>0' 0   --profile device --stack-limit 512M --vm-budget 480
 check deep_recursion_device  differ 0   '>0' --profile device --stack-limit 512M --vm-budget 200K
+
+# D38 (docs/vm/vm-L2-design.md sec.10.3): an async function's SYNCHRONOUS
+# recursion (`async function dive() { depth++; await dive(); }`, every level
+# the first stretch of the next) is the one deep recursion the budget does
+# not answer. On the flat builds each level is a flat async frame -- no C
+# frame, no segment block -- so the budget never sees it (budget_hits must
+# be 0) and the descent ends when the 160 KiB guest heap does. Measured
+# (2026-09-13, host), that end is messier than "an InternalError reaches the
+# catch": the error object cannot be built either (the reason is null), and
+# some levels' own await cannot register its reaction on the way out, so
+# their promises are left unhandled (exit 2). The probe file's header has
+# the full account. The diffed lines fix what is stable: the synchronous
+# try sees nothing, which class the outer async catch sees, and the exit
+# code. The depth and the unhandled count are info (they move with every
+# byte the allocator's layout moves). On -recur each level is the upstream
+# C chain and async_func_resume's C-stack test answers first; that variant
+# is held to what was MEASURED when this check was written
+# (expected/deep_async_recursion-recur.txt: RangeError, exit 0), never to an
+# assumption.
+#
+# The probe is ../deep_async_recursion.js, not a corpus file: the right
+# answer differs by build, and under --profile device it is a creeping OOM,
+# the shape in which upstream's build_backtrace use-after-free shows
+# (known/oom_backtrace_uaf.js, README.md). So on an asan variant an ASan
+# report from build_backtrace is RECORDED as that known bug, not counted as
+# a failure and not counted as a check: the o2 variants are the ones this
+# check binds.
+check_async() {
+  # Assigned one per line: `local a=x b=$a` expands $a before a is set.
+  local name=deep_async_recursion
+  local raw=$work/$name.raw
+  local txt=$work/$name.txt
+  local exp
+  if [ "$flat" = 1 ]; then exp=expected/$name.txt; else exp=expected/$name-recur.txt; fi
+  (eval "$stack_cmd"; timeout 300 "$VMRUN" --stats --profile device "$name.js") > "$raw" 2>&1
+  echo "exit=$?" >> "$raw"
+  # The unhandled-rejection report lines are counted, not diffed.
+  grep -vE '^(#info|vmrun: note:|E pocketjs_guest: Unhandled Promise rejection:)' "$raw" > "$txt"
+  local hits depth unhandled oomn match
+  hits=$(sed -n 's/.*budget_hits=\([0-9]*\).*/\1/p' "$raw")
+  depth=$(sed -n 's/^#info max_depth=\([0-9]*\).*/\1/p' "$raw" | head -n1)
+  unhandled=$(grep -c '^E pocketjs_guest: Unhandled Promise rejection:' "$raw")
+  # OOM canary (quickjs.h JS_TakeOOMCanary): on flat the descent ends in heap
+  # exhaustion, and the canary is the positive evidence of that. The output
+  # alone cannot carry it: whether the outer catch even manages to print
+  # ("caught null" when this check was written, nothing once D42/D43 moved
+  # the frame segments' bytes -- docs/vm/vm-L2-results.md sec.5.4) depends on how
+  # many bytes the exhausted heap happens to leave, so expected/ binds only
+  # what does not move -- the sync try is never reached, exit 2 -- and the
+  # canary binds the cause.
+  oomn=$(sed -n 's/^#info oom count=\([0-9]*\).*/\1/p' "$raw" | head -n1)
+  if grep -q 'AddressSanitizer' "$raw" && grep -q 'build_backtrace' "$raw"; then
+    printf 'note %-24s ASan report in build_backtrace: known/oom_backtrace_uaf reproduced (D38), not counted %s[--profile device]\n' \
+      "$name" "${depth:+depth=$depth }"
+    return
+  fi
+  if diff -q "$exp" "$txt" > /dev/null; then match=match; else match=differ; fi
+  checks=$((checks + 1))
+  # On flat (deep_async_recursion.txt) the canary must have fired at least
+  # once, in the SAME run whose output matched. On -recur
+  # (deep_async_recursion-recur.txt, RangeError -- the C-stack guard answers
+  # first, sec.12.2) whether the heap was also under pressure is not part of
+  # what this check binds; the count is recorded, not gated.
+  local want_oom=0
+  [ "$flat" = 1 ] && want_oom='>0'
+  local oom_ok=1
+  case "$want_oom" in 0) : ;; '>0') [ "${oomn:-0}" -gt 0 ] || oom_ok=0 ;; esac
+  if [ "$match" = match ] && [ "${hits:-x}" = 0 ] && [ $oom_ok = 1 ]; then
+    printf 'ok   %-24s %-7s budget_hits=%-3s unhandled=%-3s oom=%-3s %s[--profile device, vs %s]\n' \
+      "$name" "$match" "${hits:--}" "$unhandled" "${oomn:--}" "${depth:+depth=$depth }" "$exp"
+  else
+    failed=$((failed + 1))
+    printf 'FAIL %-24s %-7s budget_hits=%-3s unhandled=%-3s oom=%-3s %s[--profile device, vs %s]  wanted match hits=0 oom=%s\n' \
+      "$name" "$match" "${hits:--}" "$unhandled" "${oomn:--}" "${depth:+depth=$depth }" "$exp" "$want_oom"
+    [ "$match" = match ] || diff "$exp" "$txt" | head -n 8
+  fi
+}
+echo "# D38: an async function's synchronous recursion is ended by the heap, not the budget"
+check_async
 
 verdict=OK; [ $failed = 0 ] || verdict=FAIL
 echo "D10 variant=$variant flat=${flat:-?} checks=$checks failed=$failed verdict=$verdict"

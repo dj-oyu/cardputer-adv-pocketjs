@@ -3,7 +3,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.ui and pocket.input — section 6 of docs/common-api.md.
+// pocket.ui and pocket.input — section 6 of docs/api/common-api.md.
 //
 // This is the surface that replaces ui.setProp(id, 97, ...) for teaching. It
 // does not remove the legacy globals: pocket.ui is built ON TOP of globalThis.ui

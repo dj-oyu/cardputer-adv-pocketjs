@@ -82,7 +82,7 @@ static atomic_uint      dec_prime_us;
 // one frame later, which is the tell -- a real read failure or a prime timeout
 // takes about a second).
 //
-// This is the same shape as the priming bug in docs/common-api.md 9.1.2. There
+// This is the same shape as the priming bug in docs/api/common-api.md 9.1.2. There
 // the WORK did not cross the task boundary; here the ERROR did not. A task
 // cannot be primed by calling a function, and it cannot report a failure it has
 // not yet had time to have.

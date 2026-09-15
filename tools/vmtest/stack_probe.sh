@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# G1 (docs/vm-L2-design.md sec.1.3): does C stack use per JS call depend on
+# G1 (docs/vm/vm-L2-design.md sec.1.2): does C stack use per JS call depend on
 # depth? deep_recursion.js's "max_depth" only says how many levels overflow
 # the stack -- a 100 B/level implementation and a 1 KB/level implementation
 # both eventually overflow, just at different depths. That is not the
@@ -16,6 +16,15 @@
 #   tools/vmtest/stack_probe.sh                # depth 2000 vs 4000, o2 build
 #   tools/vmtest/stack_probe.sh 5000            # depth 5000 vs 10000
 #   tools/vmtest/stack_probe.sh 5000 asan       # pick the variant explicitly
+#   tools/vmtest/stack_probe.sh 2000 o2 stack_probe_async.js   # the async path (L2b-async, D34)
+#
+# The third argument names the probe file (relative to tools/vmtest/):
+# stack_probe.js recurses through a normal function, stack_probe_async.js
+# through an async one with no await -- the first synchronous stretch that
+# design sec.12.2 flattens. Both must read NOT_PROPORTIONAL on the flat
+# variants and PROPORTIONAL on -recur; the two are separate gates because
+# they take separate paths through JS_CallInternal (flat_call: vs
+# flat_async_call:).
 #
 # Machine-readable line on stdout (last line), for scripts/CI:
 #   G1 depth=N bytes_per_call=A depth2=2N bytes_per_call2=B ratio=B/A verdict=PROPORTIONAL|NOT_PROPORTIONAL
@@ -23,7 +32,7 @@
 # Exit: 0 if the measurement ran and produced a verdict, 1 if vmrun is
 # missing or a run failed. The VERDICT is reported, not encoded as pass/fail
 # exit status -- "PROPORTIONAL" on the current tree is the CORRECT answer
-# (see docs/vm-L2-design.md sec.1.1 row #1), not a test failure. A caller
+# (see docs/vm/vm-L2-design.md sec.1.1 row #1), not a test failure. A caller
 # that wants "has L2 met condition #1" checks the verdict string.
 set -uo pipefail
 # Absolute, taken BEFORE the cd: the selftest below re-invokes this script,
@@ -34,8 +43,10 @@ HERE=$(pwd)
 OUT=${VMTEST_OUT:-$HERE/../../.cache/vmtest}
 N=${1:-2000}
 variant=${2:-o2}
+probe=${3:-stack_probe.js}
 VMRUN=$OUT/vmrun-$variant
 [ -x "$VMRUN" ] || { echo "missing $VMRUN; run tools/vmtest/build.sh $variant" >&2; exit 1; }
+[ -f "$probe" ] || { echo "no such probe file: tools/vmtest/$probe" >&2; exit 1; }
 
 N2=$((N * 2))
 depth_snippet=$(mktemp "${TMPDIR:-/tmp}/vmtest-probe-depth.XXXXXX.js")
@@ -60,7 +71,7 @@ run_at() {
   case "$variant" in asan*) stack_cmd=: ;; esac   # asan and asan-alloca alike
   (eval "$stack_cmd"; cd corpus && "$VMRUN" --profile host --stack-limit 512M --stack-probe \
       ${PROBE_FAULT:+--stack-probe-fault "$PROBE_FAULT"} \
-      --include "$depth_snippet" ../stack_probe.js) 2>&1
+      --include "$depth_snippet" "../$probe") 2>&1
 }
 
 out1=$(run_at "$N") || { echo "vmrun failed at depth=$N:" >&2; echo "$out1" >&2; exit 1; }
@@ -131,7 +142,7 @@ if [ "${SELFTEST:-0}" = 1 ]; then
   fail=0
   for pair in "flat NOT_PROPORTIONAL" "silent UNUSABLE"; do
     set -- $pair
-    got=$(PROBE_FAULT=$1 SELFTEST=0 bash "$SELF" "$N" "$variant" 2>/dev/null | sed -n 's/.*verdict=\([A-Z_]*\).*/\1/p')
+    got=$(PROBE_FAULT=$1 SELFTEST=0 bash "$SELF" "$N" "$variant" "$probe" 2>/dev/null | sed -n 's/.*verdict=\([A-Z_]*\).*/\1/p')
     if [ "$got" = "$2" ]; then echo "selftest fault=$1 -> $got (expected)"
     else echo "selftest fault=$1 -> ${got:-<none>} EXPECTED $2"; fail=1; fi
   done

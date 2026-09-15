@@ -2,7 +2,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.storage — the small per-app key/value store of docs/common-api.md
+// pocket.storage — the small per-app key/value store of docs/api/common-api.md
 // section 7, published as the storage.kv capability.
 //
 // The backing store is NVS. Nothing is cached: every get reads flash and every

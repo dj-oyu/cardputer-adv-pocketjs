@@ -2,7 +2,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.net — section 11 of docs/common-api.md: a Wi-Fi lease and HTTP over it.
+// pocket.net — section 11 of docs/api/common-api.md: a Wi-Fi lease and HTTP over it.
 //
 // The radio on this board is not a service that stays up. Linking it costs
 // about 37 KiB of DRAM, running it costs a further 4.8 KiB that

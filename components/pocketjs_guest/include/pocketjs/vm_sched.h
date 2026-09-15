@@ -1,6 +1,6 @@
 #pragma once
 
-/* VM L1 (docs/vm-L1-design.md sec.1): a Promise job queue drain that can stop
+/* VM L1 (docs/vm/vm-L1-design.md sec.1): a Promise job queue drain that can stop
  * BETWEEN jobs and be resumed by a later call.
  *
  * The whole point of the level is where the check sits. JS_ExecutePendingJob()
@@ -37,13 +37,13 @@ extern "C" {
 typedef struct JSRuntime JSRuntime;
 typedef struct JSContext JSContext;
 
-/* Defaults, from docs/vm-L1-design.md sec.1.2. Each is justified there against
+/* Defaults, from docs/vm/vm-L1-design.md sec.1.2. Each is justified there against
  * a measured (device) number; none of them is a guess dressed as a constant. */
 #define VM_TURN_BUDGET_US 8000  /* 33.3 ms frame - 7.7 ms transfer - 1.5 ms UI, /3 */
 /* Read the clock before EVERY job past the floor. This was 4, and 4 was
  * measured (device) to cost 2.5 ms of budget overrun: taking it to 1 moved the
  * async-generator workload's drain p95 from 6,720 us to 4,184 us and its max
- * from 7,144 to 4,877 (docs/vm-L1-report.md sec.8). The reason is that the
+ * from 7,144 to 4,877 (docs/vm/vm-L1-report.md sec.8). The reason is that the
  * workload's expensive jobs are not its median job -- three of them fit inside
  * one stride of 4 -- which is exactly the (stride-1) x cost-per-job the old
  * comment bounded the overrun by, measured instead of estimated.
@@ -94,6 +94,21 @@ typedef enum {
   VM_DRAIN_EMPTY = 0,   /* JS_IsJobPending() went false: a real end of drain */
   VM_DRAIN_YIELDED = 1, /* budget spent, jobs remain, nothing was dropped */
   VM_DRAIN_THREW = 2,   /* a job threw; the rest of the queue stays queued */
+  /* L2c (docs/vm/vm-L2-design.md sec.11.5/13, D22r): the VM has a chain
+   * parked in JS_VMSuspended(). Covers BOTH of sec.12.6-4's cases with one
+   * value: seen at the top of the loop, before the next job is even looked
+   * at (a chain a PRIOR call left held -- no job ran this call, *ran stays
+   * whatever it already was); seen after JS_ExecutePendingJob completes a
+   * job whose OWN handler suspended mid-chain (JS_VMCallJob's JOB_HELD path,
+   * D36) -- that job counts (n++) because it genuinely ran, the chain is
+   * just still open. Only the first case exists before quickjs.c grows
+   * JS_ExecutePendingJob's own suspend return (stage 3f / D36): with every
+   * JS_VM* symbol a pass-through, JS_VMSuspended() is always false, so this
+   * value is a shape the callers can switch on now and never actually see
+   * until the interpreter itself changes. Firmware callers must still
+   * handle it for -Werror (an unhandled enumerator in a switch), even though
+   * it cannot be produced yet -- see guest.c drain_jobs(). */
+  VM_DRAIN_SUSPENDED = 3,
 } vm_drain_status_t;
 
 typedef struct {

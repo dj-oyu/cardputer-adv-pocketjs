@@ -3,7 +3,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.app / pocket.time / pocket.log — section 5 of docs/common-api.md plus
+// pocket.app / pocket.time / pocket.log — section 5 of docs/api/common-api.md plus
 // the "ログと診断" part of section 7, on top of pocket_api.c.
 //
 // Everything here runs on the JS owner task. Install this surface AFTER the
