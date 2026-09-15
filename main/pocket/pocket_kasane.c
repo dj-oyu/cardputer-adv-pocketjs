@@ -1,6 +1,7 @@
 #include "pocket_kasane.h"
 #include "pocket_api.h"
 #include "ui/kasane/ksn_runtime.h"
+#include "ui/kasane/ksn_notice.h"
 #include "pet/ksn_pet.h"
 #include "kasane_scene_js.h"
 #include <math.h>
@@ -28,6 +29,10 @@ typedef struct {
     ksn_tx submitted;
     ksn_update_mode submitted_mode;
     ksn_resource pet_resource;
+    ksn_resource notice_resource;
+    ksn_tx notice_tx;
+    uint32_t notice_displayed,notice_pending;
+    uint16_t notice_variant,notice_pending_variant;
     bool active;
 } kasane_state;
 
@@ -1197,6 +1202,40 @@ void pocket_kasane_reset(void) {
     free(state);state=NULL;
 }
 bool pocket_kasane_active(void) { return state&&state->active; }
+ksn_result pocket_kasane_update_notice(const sys_notice *notice,uint16_t variant){
+    if(!state||!state->active)return KSN_OK;
+    ksn_view *system=ksn_runtime_app_system_view(state->lease);
+    if(!system)return KSN_BUSY;
+    if(state->notice_tx.value){
+        ksn_submission outcome=ksn_view_poll(system);
+        if(outcome.ticket.value!=state->notice_tx.value)return KSN_STALE;
+        if(outcome.status==KSN_SUBMITTED)return KSN_BUSY;
+        if(outcome.status==KSN_PRESENTED){
+            state->notice_displayed=state->notice_pending;
+            state->notice_variant=state->notice_pending_variant;
+        }
+        state->notice_tx=(ksn_tx){0};
+    }
+    uint32_t id=notice?notice->id:0;
+    if(id==state->notice_displayed&&(!id||variant==state->notice_variant))return KSN_OK;
+    if(notice&&!state->notice_resource.value){
+        ksn_image_port image;ksn_result result=ksn_pet_builtin_image(&image);
+        if(result==KSN_OK)result=ksn_view_host_register_image(system,&image,&state->notice_resource);
+        if(result!=KSN_OK)return result;
+    }
+    ksn_tx tx;ksn_result result=ksn_view_begin(system,KSN_REPLACE,&tx);
+    if(result!=KSN_OK)return result;
+    result=ksn_notice_emit(system,tx,notice,state->notice_resource,variant);
+    if(result==KSN_OK)result=ksn_view_submit(system,tx);
+    if(result!=KSN_OK){ksn_view_cancel(system,tx);return result;}
+    state->notice_tx=tx;state->notice_pending=id;state->notice_pending_variant=variant;
+    return KSN_OK;
+}
+bool pocket_kasane_notice_composited(void){
+    return state&&ksn_runtime_app_system_view(state->lease)&&
+        (state->notice_displayed||(state->notice_tx.value&&state->notice_pending));
+}
+bool pocket_kasane_system_pending(void){return state&&ksn_runtime_app_system_view(state->lease)&&state->notice_tx.value;}
 bool pocket_kasane_has_submission(void) {
     return ksn_runtime_has_submission();
 }

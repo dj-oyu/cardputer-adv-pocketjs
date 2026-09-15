@@ -12,7 +12,7 @@ args = parser.parse_args()
 build = args.build.resolve()
 description = json.loads((build / 'project_description.json').read_text())
 for component in description['build_components']:
-    assert not re.search(r'pocketjs_(ui_core|ui_qjs|render_rgb565)', component), component
+    assert not re.search(r'taffy|pocketjs_(ui_core|ui_qjs|render_rgb565)', component, re.I), component
 cache = (build / 'CMakeCache.txt').read_text()
 assert re.search(r'^KSN_ONLY:BOOL=ON$', cache, re.M), 'not a Kasane-only configuration'
 for filename in ('cardputer_pocketjs.map', 'build.ninja', 'compile_commands.json'):

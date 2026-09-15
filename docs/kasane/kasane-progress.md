@@ -4,6 +4,102 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14f — Taffyなしフルシステム受入試験（2026-09-16）
+
+- `tools/system_full_test.py`を追加。System host、Kasane native/JS、専用KSN_ONLY build、
+  Taffy排除監査、flash、実機animation/通知圧力/既定100回lifecycleを一つの入口で実行。
+- 存在しないlegacy sourceを指定し、component/map/ninja/compile commands/ELFを監査。
+  監査失敗ならflashせず停止する。host-onlyは明示的な部分成功でFULL_PASSにはしない。
+- report.jsonにcommit/開始時差分/command/exit code/時間/firmware SHA-256/全cycleメモリ。
+  段階別ログ・captureを保持し、失敗時もprobe回収/HOME復帰を試みる。
+- 実行器と混入監査の9試験PASS。初回runはIDF出力回収の停止でFAILとして保存し、
+  `--no-hints`直接実行経路で再実行。仕様と範囲は[system-full-test.md](system-full-test.md)。
+- `.cache/system-full-20260916-r2/report.json`: FULL_PASS、全10段階成功。新規build213.969秒、
+  実機animation18.953秒、通知7.922秒、100回lifecycle78.141秒。
+- 100回すべてfree256,536 / largest81,920 B、終了時JS=0。送信前captureの通知重なりも確認。
+  実LCD/音声の物理確認、SNTP実時刻変更、sleep電流は対象外としてreportへ明記。
+- firmware SHA-256: `1ce385522c412ae7f96f1e029a1132e5fcdd35d3747ca49176264b43a7719ecf`。
+
+## checkpoint 14e2 — 壁時計・usage期限・鳴動の移管（2026-09-16）
+
+- `sys_wall`が固定5規則をSystem ownerで実行。時計/設定変更、期限到来、blocked通知の
+  状態変化で再評価し、PetHubの毎frame時刻変換・期限走査を撤去。
+- usage resetは期限超過をcatch-up、毎朝は指定分のみ。発火済み日以前への巻戻しで
+  二重発火しない。通知満杯では発火済みにせず、毎朝の指定分終了後は遅延発火しない。
+- NVS配置不変。native永続領域への固定bindingを使い、登録成功でwatermark更新→
+  PetHubがchangedを取り出して保存。wire検証・報酬処理はPetHubのdomain責務として維持。
+- `sys_ringer`へ30秒/2秒の鳴動期限を移管。tone権をpollし音声portが再生する。
+  遅延分を連打せず、snooze中にpollできなくても再表示時に新しい期間を開始。
+- 両サービスの期限をSystem待機へ統合。追加heap/taskなし、System状態全体に2 KiB static_assert。
+- System/実QuickJS host試験ASan/UBSan・O2 PASS。小数秒、期限超過、日付巻戻し、満杯・
+  指定分終了、snooze未poll区間、極大watermarkを検証。既存wire/報酬/タイマー回帰もPASS。
+- 通常/Kasane-only buildとlink監査PASS。DIRAM138,108 / 136,748 B（前段階比+144 B）。
+  System owner状態1,208 B。旧PetHub鳴動state16 Bを撤去。
+- COM3書込み後、通知8+1・満杯snooze拒否・ACK後timer retry・snooze・消去の実機試験PASS。
+  `.cache/system-wall-device`。Kasane起動終了2回はfree256,536 / largest81,920 Bで一致
+  （`.cache/system-wall-cycles`）。前回とのfree差を今回の静的RAM削減とは解釈しない。
+- 実時計を書き換える実機alarm試験や鳴動音の収録は未実施。時刻補正・指定分・鳴動周期は
+  hostの実装直接試験で確認し、実機では既存通知経路との統合回帰を確認した。
+
+## checkpoint 14e1 — System期限とowner待機（2026-09-16）
+
+- 時計更新要求と通知/timerの未publish変更は即時、通知・timer・電源の期限は最小値へ集約。
+  未poll dirtyと満杯blocked timerをready扱いせず、不要な再起床を防ぐ。
+- 既存native待機・VM frame-cap待機へ統合。SNTPはpublish後に既存counted wakeへ通知。
+  tick端数は切り上げ、極大期限はoverflowせず既存wait上限へ制限する。
+- 追加task/queue/stackなし。VMの公平性yieldと最小周期を維持。HOME等の周期停止や
+  PetHub壁時計alarm/usage/鳴動の期限化は未完了であり、端末全体の無周期化ではない。
+- System/実QuickJS host試験ASan/UBSan・O2 PASS。60秒無期限、未poll dirty、時計要求、
+  timer/snooze、電源購読解除、満杯timerのACK再試行、tick切上げ・極大値を検証。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,964 / 136,604 Bで増加なし。
+- COM3に書込み、`system_device_test.py --kasane`の満杯/ACK/retry/snooze/消去PASS。
+  続くKasane起動終了2回はfree255,848 / largest81,920 Bで一致。
+  `.cache/system-deadline-device`と`.cache/system-deadline-cycles`に記録。
+  SNTPの実機到着競合・遅延や端末全体の静止wake数は今回の実機試験では測定していない。
+
+## checkpoint 14d2 — 録音SYSTEM部品（2026-09-16）
+
+- `ksn_recording_emit`を追加。pad、常時赤色dot、6段の対数レベル表示を8矩形で表現。
+  heap、文字、画像resourceは使わず、通知の後に同じSYSTEM transactionへ追加できる。
+  通知5命令との同時表示は13/16命令。クリッピングは最上段のみamber。
+- active、量子化済みlit（0..6）、clippingのsnapshotを受け、マイクや時計へ依存しない。
+  全14状態のpad内360画素を独立RGB565期待値と照合し、通知復元と入力範囲も検査。
+- H全体ASan/UBSan・O2、通常/Kasane-only build PASS。実アプリの録音状態接続は次段階。
+  現時点では録音表示の既存board overlayを維持する。
+
+## checkpoint 14d1 — Kasaneアプリ上のSYSTEM通知（2026-09-16）
+
+- `ksn_notice_emit`が通知snapshotから5命令/文字41 Bを追加。pet画像はSYSTEM resource、
+  他のSYSTEM部品と共通transactionへ合成できる。文字/descriptorの借用は呼出中のみ。
+- Kasaneアプリでは通知の追加/変更/除去をSYSTEM REPLACEへ接続。APP提出中はBUSYで待ち、
+  転送失敗時はcandidateを保持。表示成功後に通知id/選択petを確定する。
+- APP寿命に限定したSYSTEM endpointを借り、通知のためにruntimeをpinしない。
+  明示的native SYSTEM ownerが存在する場合は上書きせず既存overlayへ戻す。
+  native HOME等はまだboard overlay経路。全native画面のKasane所有は後続工程。
+- Kasane転送中だけ旧pet overlayを抑止し、二重描画を防止。SYSTEM更新でJS turnを
+  不要にスキップしない。通知stateはAPP終了後もSystem側で保持される。
+- Hと実QuickJS ASan/UBSan・O2 PASS。文字コピー、APP BUSY、quota、IO再試行、表示除去、
+  independent poll、10回APP終了と失敗中の終了でnative全回収、別SYSTEM ownerとの非干渉を検査。
+- 通常/Kasane-only buildとlink監査PASS。DIRAM137,964 / 136,604 B。
+- COM3実機`system_device_test.py --kasane` PASS。SYSTEM 5命令で動くAPP上へ合成し、
+  8+1満杯、snooze拒否、ACK後timer再試行、snooze、消去後SYSTEM 0命令を確認。
+  `.cache/system-runtime-kasane-notice/notice.png`で送信前画素を確認（パネル目視とは区別）。
+- 実行中free129,868→129,708 B、largest79,872 B。JS実行中の160 B変動を含む。
+  終了後の再起動/終了2回はfree255,848 / largest81,920 Bで一致し、通知状態も全件0。
+
+## System統合の実機診断（2026-09-16）
+
+- probe限定USB N/O/Zと`tools/system_device_test.py`を追加。診断ownerのみを生成・回収しNVS不変。
+- 通常/Kasane-only build・link監査PASS。probe追加後DIRAM137,964 / 136,604 B。
+- 実機PASS: 8待機＋1表示、満杯snoozeのACTIVE維持、ACK後のblocked timer再試行、
+  snooze成功（active1/queued6/snoozed1）、cleanup後全件0。
+- `.cache/system-runtime-device/serial.log`と`notice.png`。実機送信前ピクセルに
+  SYSTEM NOTICE、ペット、確認/snooze案内を確認。パネルそのものの目視確認とは区別する。
+- 診断中のfree240,404 / largest69,632 Bは一定。HOME背景scratchを保持する時点の値であり、
+  前景APP終了後の値とは直接比較しない。通知は現行board overlay経路で描画し、
+  Kasane SYSTEM presenterへの置換は次段階。
+- 診断後Kasaneアプリ2回起動/終了PASS。終了後free255,848 / largest81,920 Bが両回同値。
+
 ## checkpoint 14c2 — 共通相対timer・満杯再試行（2026-09-16）
 
 - `sys_timer`へ4件固定の期限・owner/key・labelを抽出。store240 B、pethubの旧224 B配列を撤去。

@@ -12,6 +12,9 @@ extern "C" {
 ksn_result ksn_runtime_app_attach(ksn_app_lease *);
 ksn_result ksn_runtime_app_detach(ksn_app_lease);
 ksn_view *ksn_runtime_app_view(ksn_app_lease);
+/* APP-lifetime SYSTEM compositor. Does not pin storage or replace an explicit
+ * native SYSTEM owner. Resolve again after every lifecycle operation. */
+ksn_view *ksn_runtime_app_system_view(ksn_app_lease);
 void ksn_runtime_app_end_turn(ksn_app_lease);
 void ksn_runtime_app_activate(ksn_app_lease);
 /* Acquire pins native storage beyond guest lifetimes. The caller pumps native

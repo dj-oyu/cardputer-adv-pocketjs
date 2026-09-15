@@ -48,6 +48,10 @@ ksn_view *ksn_runtime_app_view(ksn_app_lease lease){
     return runtime&&lease.value&&lease.value==runtime->app.value?
            ksn_view_host_endpoint(&runtime->host,KSN_APP):NULL;
 }
+ksn_view *ksn_runtime_app_system_view(ksn_app_lease lease){
+    return ksn_runtime_app_view(lease)&&!runtime->system_owned?
+        ksn_view_host_endpoint(&runtime->host,KSN_SYSTEM):NULL;
+}
 ksn_result ksn_runtime_app_attach(ksn_app_lease *out){
     if(!out)return KSN_INVALID;
     if(runtime&&(runtime->app.value||runtime->host.presenting))return KSN_BUSY;

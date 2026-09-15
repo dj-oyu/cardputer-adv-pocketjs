@@ -2,6 +2,9 @@
 #include <stdatomic.h>
 #include <stddef.h>
 #include <sys/time.h>
+#ifdef ESP_PLATFORM
+#include "vm_wake.h"
+#endif
 
 enum { TRUST_UNKNOWN=0, TRUST_YES=1, TRUST_RTC=2, TRUST_NO=-1 };
 static atomic_int trust;
@@ -9,8 +12,15 @@ static atomic_bool update_requested=true;
 
 void sys_clock_set_synchronized(bool value) {
     atomic_store_explicit(&trust,value?TRUST_YES:TRUST_NO,memory_order_release);
-    atomic_store_explicit(&update_requested,true,memory_order_release);
+    bool pending=atomic_exchange_explicit(&update_requested,true,memory_order_acq_rel);
+#ifdef ESP_PLATFORM
+    /* Publish first. The existing counted wake covers arrival before wait. */
+    if(!pending)vm_wake_post();
+#else
+    (void)pending;
+#endif
 }
+bool sys_clock_update_pending(void){return atomic_load_explicit(&update_requested,memory_order_acquire);}
 bool sys_clock_take_update(void){
     return atomic_exchange_explicit(&update_requested,false,memory_order_acq_rel);
 }

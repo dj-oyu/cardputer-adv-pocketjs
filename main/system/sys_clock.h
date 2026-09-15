@@ -18,4 +18,5 @@ void sys_clock_set_synchronized(bool synchronized);
 /* Single owner consumes a coalesced boot/configuration request. No payload is
  * shared across tasks: the owner reads the platform clock after consumption. */
 bool sys_clock_take_update(void);
+bool sys_clock_update_pending(void);
 #endif

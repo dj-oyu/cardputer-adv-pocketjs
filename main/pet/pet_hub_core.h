@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "../system/sys_notify.h"
 #include "../system/sys_timer.h"
+#include "../system/sys_wall.h"
 #define PET_NOTICE_OWNER UINT32_C(1)
 
 #define PET_WIRE_BYTES 48
@@ -38,3 +39,4 @@ bool pet_hub_timer(pet_hub_t *h, const char *id, const char *label, uint64_t due
 bool pet_hub_notify(pet_hub_t *h, const char *label);
 bool pet_hub_take(pet_hub_t *h, char label[PET_LABEL_CHARS+1]);
 bool pet_hub_tick(pet_hub_t *h, uint64_t ms, uint32_t utc);
+void pet_hub_bind_wall(pet_hub_t *,sys_wall *);

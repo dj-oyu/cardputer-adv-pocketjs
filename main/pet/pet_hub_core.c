@@ -64,24 +64,26 @@ bool pet_hub_timer(pet_hub_t *h, const char *id, const char *label, uint64_t due
     if(due>UINT64_MAX/1000)return false;
     return sys_timer_set(h->timers,PET_NOTICE_OWNER,id,label,due*1000)==NOTICE_OK;
 }
+void pet_hub_bind_wall(pet_hub_t *h,sys_wall *s){
+    *s=(sys_wall){.owner=PET_NOTICE_OWNER,.invalid=true};
+    static const char *const labels[4]={"CODEX RESET TIME","CODEX SECOND RESET TIME",
+        "CLAUDE 5H RESET TIME","CLAUDE WEEK RESET TIME"};
+    for(unsigned p=0;p<2;p++)for(unsigned w=0;w<2;w++)
+        s->rules[p*2+w]=(sys_wall_rule){.due=&h->saved.usage[p].reset[w],
+            .last=&h->saved.usage[p].notified[w],.label=labels[p*2+w]};
+    s->rules[4]=(sys_wall_rule){.last=&h->saved.wake_day,.minute=&h->saved.wake_minute,
+        .offset=&h->saved.utc_offset,.label="GOOD MORNING!"};
+}
 bool pet_hub_tick(pet_hub_t *h, uint64_t ms, uint32_t utc) {
     bool dirty=false;
     if(ms<=UINT64_MAX/1000)
         sys_timer_step(h->timers,h->notifications,ms*1000,h->notifications&&h->notifications->changed);
-    if(!utc)return false;
-    for(unsigned p=0;p<2;p++)for(unsigned w=0;w<2;w++) {
-        pet_usage_t *u=&h->saved.usage[p];uint32_t r=u->reset[w];
-        if(r&&utc>=r&&u->notified[w]!=r) {
-            const char *label=p?(w?"CLAUDE WEEK RESET TIME":"CLAUDE 5H RESET TIME"):
-                                (w?"CODEX SECOND RESET TIME":"CODEX RESET TIME");
-            if(pet_hub_notify(h,label)){u->notified[w]=r;dirty=true;}
-        }
-    }
-    int64_t local=(int64_t)utc+h->saved.utc_offset;
-    uint32_t day=(uint32_t)(local/86400), seconds=local%86400;
-    if(h->saved.wake_minute>=0&&h->saved.wake_day!=day&&
-       seconds/60==(uint32_t)h->saved.wake_minute&&pet_hub_notify(h,"GOOD MORNING!")) {
-        h->saved.wake_day=day;dirty=true;
+    /* Legacy host adapter. Firmware binds the long-lived scheduler once. */
+    sys_wall s;pet_hub_bind_wall(h,&s);
+    for(unsigned i=0;i<SYS_WALL_RULES;i++){
+        sys_wall_rule *r=&s.rules[i];uint32_t before=*r->last;
+        sys_wall_evaluate(r,h->notifications,PET_NOTICE_OWNER,utc,NULL);
+        dirty|=before!=*r->last;
     }
     return dirty;
 }

@@ -1,14 +1,44 @@
 #include "sys_device.h"
 #include "sys_clock.h"
+#include "sys_ringer.h"
 #include "board.h"
 #include "esp_timer.h"
 #include <stddef.h>
 static sys_state state;
 static sys_notify notifications;
 static sys_timer timers;
+static sys_ringer ringer;
+static sys_wall wall_scheduler;
+_Static_assert(sizeof(state)+sizeof(notifications)+sizeof(timers)+sizeof(ringer)+sizeof(wall_scheduler)<=2048,
+               "System owner state exceeds its 2 KiB budget");
+sys_wall *sys_device_wall(void){return &wall_scheduler;}
+bool sys_device_take_tone(void){
+    return sys_ringer_poll(&ringer,&notifications,(uint64_t)esp_timer_get_time());
+}
 sys_timer *sys_device_timers(void){return &timers;}
 sys_notify *sys_device_notifications(void){return &notifications;}
 sys_state *sys_device_state(void){return &state;}
+uint64_t sys_device_next_deadline(void){
+    if(sys_clock_update_pending()||notifications.changed||timers.changed)return 0;
+    uint64_t next=sys_notify_deadline(&notifications),timer=sys_timer_deadline(&timers);
+    uint64_t power=sys_power_deadline(&state);
+    uint64_t tone=sys_ringer_deadline(&ringer,&notifications);
+    if(tone<next)next=tone;
+    uint64_t wall=sys_wall_deadline(&wall_scheduler,&state,&notifications);
+    if(wall<next)next=wall;
+    if(timer<next)next=timer;
+    return power<next?power:next;
+}
+uint32_t sys_device_wait_ticks(uint64_t now,uint32_t cap,uint32_t hz){
+    uint64_t next=sys_device_next_deadline();
+    if(next==SYS_NEVER)return cap;
+    if(next<=now||!hz)return 0;
+    uint64_t delta=next-now,seconds=delta/1000000;
+    /* Saturate before multiplying even for a caller near UINT64_MAX. */
+    if(seconds>cap/hz)return cap;
+    uint64_t ticks=seconds*hz+((delta%1000000)*hz+999999)/1000000;
+    return ticks<cap?(uint32_t)ticks:cap;
+}
 bool sys_device_clock_read(sys_clock_state *out){
     return sys_clock_snapshot(&state,(uint64_t)esp_timer_get_time(),out);
 }
@@ -30,6 +60,7 @@ void sys_device_step(void){
     }
     if(sys_timer_take_changed(&timers))sys_timer_publish(&state);
     if(sys_clock_take_update()){
+        sys_wall_invalidate(&wall_scheduler);
         sys_clock_sample wall=sys_clock_read();
         uint64_t now=(uint64_t)esp_timer_get_time();
         if(wall.available&&wall.trusted&&wall.seconds>=INT64_C(946684800))
@@ -46,4 +77,5 @@ void sys_device_step(void){
     }
     if(sys_power_deadline(&state)!=SYS_NEVER)
         sys_power_step(&state,(uint64_t)esp_timer_get_time(),read_power,NULL);
+    sys_wall_step(&wall_scheduler,&state,&notifications,(uint64_t)esp_timer_get_time());
 }
