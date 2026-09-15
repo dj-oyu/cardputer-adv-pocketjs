@@ -35,6 +35,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | --- | --- | --- |
 | [pie-simd.md](perf/pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
 | [backlog.md](perf/backlog.md) | backlog | 未着手の性能候補（テキストのマスク合成、MP3 FIR、整数平方根、装飾光線の PIE 化など） |
+| [kasane-pet-row-cache.md](perf/kasane-pet-row-cache.md) | 記録 | PET 画像 provider の重複復号を 64 行キャッシュで消した（切替つき、8,208 B、−70.4%） |
 
 作業ブランチの装飾光線コストと部分別計測は[flower-decor-cost.md](perf/flower-decor-cost.md)に保持する。
 検証の道具は [`tools/pie/README.md`](../tools/pie/README.md)。
