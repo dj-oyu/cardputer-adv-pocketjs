@@ -1,8 +1,8 @@
 """Build and run the exhaustive C models in models/ with whatever host C
 compiler is available (gcc, clang, cc, or `zig cc`).
 
-    python tools/pie/run_models.py            all four
-    python tools/pie/run_models.py blend      one of: ocean, wave, blend, accel, garden
+    python tools/pie/run_models.py            all seven
+    python tools/pie/run_models.py blend      one of: ocean, wave, blend, accel, garden, fir, canopy
 
 Each model prints its own verdict; this script fails if any of them reports a
 mismatch or a non-zero exit. The ocean model needs a few seconds, the others
@@ -23,6 +23,7 @@ TARGETS = {
     'accel': (['accel_host_test.c'], ['-DRENDER_ACCEL_HOST_MODEL', '-I' + os.path.join(MODELS, 'stub')]),
     'garden': (['garden_model.c'], []),
     'fir': (['fir_model.c'], []),
+    'canopy': (['canopy_model.c'], []),
 }
 
 
