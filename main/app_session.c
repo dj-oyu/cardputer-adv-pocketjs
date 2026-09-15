@@ -25,6 +25,7 @@
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
 #include "pocket_kasane.h"
+#include "pocket_input.h"
 #include "app_registry.h"
 #include "pet_assets.h"
 #include "pet_hub.h"
@@ -84,7 +85,7 @@ static int64_t deadline;
 // same turn start.
 static vm_budget_t budget;
 // Presses that arrived on a turn spent finishing the previous turn's queue.
-// pocket_ui_pump() is a delivery into JavaScript and so is held back with the
+// pocket_input_pump() delivers into JavaScript and so is held back with the
 // rest; the mask is OR'd into the first turn that runs the pumps, which is
 // what keeps a keystroke from being dropped instead of merely delayed.
 static uint32_t deferred_buttons;
@@ -372,6 +373,7 @@ void app_stop(void) {
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
     pocket_kasane_reset();
+    pocket_input_reset();
     pocket_ui_reset();
     pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and
@@ -489,7 +491,8 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"ble",pocket_ble_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pui",pocket_ui_install,NULL));
-    // After "pui": both contribute to pocket.input, and contributors run in
+    TRY(pocketjs_guest_quickjs_install_once(guest,"input",pocket_input_install,NULL));
+    // After "input": both contribute to pocket.input, and contributors run in
     // the order they registered.
     TRY(pocketjs_guest_quickjs_install_once(guest,"text",pocket_text_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"bridge",pocket_bridge_install,NULL));
@@ -778,7 +781,8 @@ static void run_pumps(uint32_t buttons) {
     pocket_av_pump();
     // The same mask the turn below is handed: pocket.input reports what the
     // host forwarded, never a second reading of the keyboard.
-    pocket_ui_pump(buttons);
+    pocket_ui_pump();
+    pocket_input_pump(buttons);
 }
 
 esp_err_t app_tick(uint32_t buttons) {

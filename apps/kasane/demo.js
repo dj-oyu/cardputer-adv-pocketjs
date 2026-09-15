@@ -11,6 +11,27 @@
   let phase = 'app';
   let tick = 0;
 
+  // Optional input-service smoke test, independent of the legacy node API.
+  // Text composition stays in the host until the SYSTEM textfield migration.
+  let textSession;
+  pocket.input.onAction(function (event) {
+    console.log('KASANE_ACTION ' + event.action + ' ' + event.phase +
+                ' held=' + pocket.input.held(event.action));
+    if (event.action !== 'accept' || event.phase !== 'press' || textSession) return;
+    textSession = pocket.input.text.open({
+      rect: {x: 8, y: 56, width: 224, height: 20}, maxBytes: 24, ime: 'off',
+      onEdit: function (e) { console.log('KASANE_TEXT_EDIT ' + e.text); },
+      onSubmit: function (e) {
+        textSession = null;
+        console.log('KASANE_TEXT_SUBMIT ' + e.text);
+      },
+      onCancel: function () {
+        textSession = null;
+        console.log('KASANE_TEXT_CANCEL');
+      }
+    });
+  });
+
   function base(tx) {
     tx.background(0x071425ff);
     tx.rect({bounds: [0, 0, 240, 18], color: 0x0d2940ff});

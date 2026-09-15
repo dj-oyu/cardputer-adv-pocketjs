@@ -1,8 +1,43 @@
 # Kasane実装記録
 
-実機確認方針（2026-09-15ユーザー指示）: シリアルポートは別タスクで使用中。
-書込み・シリアル診断は後でまとめて実施し、各checkpointはhost試験とESP-IDFビルド後に
-commit・pushして進める。実機未確認は各記録に残す。
+実機確認方針（2026-09-15更新）: ユーザーから実機利用可能の連絡を受け、COM3での
+書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
+各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
+
+## checkpoint 5 — input service分離（2026-09-15）
+
+- `pocket_input.c/.h`へonAction/onKey/held、購読4枠、repeat、capabilityとlazy namespaceを抽出。
+  input初回参照から旧nodeクラス初期化への依存を除去。UI pumpはtoastの期限更新だけを担当。
+- sessionはinputをtextより先に登録し、guest破棄前にinputをresetする。
+  pump順序、press/release/repeat、listener例外時close、既存ログtagは維持。
+  scope別購読・modal Back配送はCP15。既存capabilityのactions表記がacceptのみという
+  過少申告も今回は維持しており、配送契約の整備時に合わせて修正する。
+- K診断のEnterでtext sessionを開く。Kasaneとinputを使い、旧node APIは呼ばない。
+  text描画のSYSTEM移植はCP16であり、今回のtext試験は入力とcallbackの接続を検証する。
+
+検証:
+
+- `bash tools/build_input_test.sh && /tmp/test-pocket-input`: ASan/UBSan PASS。
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-input-o2 bash tools/build_input_test.sh`
+  と生成exeもPASS。出荷VMスイッチの実QuickJSと実subscription実装を使用し、
+  node/Taffyなしで2 realm、held、400/120 ms repeat境界、例外、自身のclose、quota、reset、
+  古いclose handleを検証。namespace登録はhost stubなのでproduction lazy順序の試験ではない。
+- `bash tools/build_pocket_text_test.sh && /tmp/test-pocket-text`: 全9ケースPASS。
+- ESP-IDF 6.0.1 `-B build_ds_contract build`: PASS。ESP32-S3、PSRAMなし、native probe有効。
+  app 2,197,488 B、partition空き948,240 B、DIRAM137,276 B。
+  inputの静的156 Bは旧UIからの移動でDIRAM増分0。既存GNU-stack警告のみ。
+- COM3へflashしhash一致。`tools/kasane_input_device_test.py --port COM3
+  --out .cache/kasane-cp5-input-final`: PASS。helloのEnterカウント1/2、pet起動・左右移動・
+  home復帰、Kのright/accept press/releaseとheld、text編集hi/submit/cancelを確認。
+  K終了・再起動を含む2回とも成功。petへの給餌や選択変更はしていない。
+- USB試験はログ直後の画面切替前に入力すると取りこぼすため、host側の入力間隔を150 msにした。
+  初回失敗ログも`.cache/kasane-cp5-input*`へ保持。repeatの時間境界はhost fake clockで確認し、
+  USBの瞬間押下を長押し試験とは数えない。実LCDのtext描画の目視確認は含まない。
+- `tools/kasane_device_test.py --port COM3 --ticks 300 --out .cache/kasane-cp5-animation`:
+  PASS。modal開始・終了と300ターンの描画を確認。10計測窓の平均turn 3.29 ms、
+  render 12.60 ms、send 3.38 ms、Kasane nativeBytes 12,908 B。終了後HOME_READY、port解放済み。
+
+次の実装対象はCP6（guest frame/continueの直接dispatch）。
 
 ## vm/main同期 — 2026-09-15
 

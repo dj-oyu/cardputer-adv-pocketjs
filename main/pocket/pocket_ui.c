@@ -30,7 +30,6 @@ static const char *TAG = "pocket.ui";
 #define UI_LIST_ROWS       8    // rows drawn at once, whatever the item count
 #define UI_MAX_LIST_ITEMS 128   // bounds select()'s linear scan by id
 #define UI_MAX_TEXT_BYTES 1024
-#define UI_ACTION_SUBS     4
 #define UI_TOAST_MAX_MS 5000
 #define UI_TOAST_MS     1500
 
@@ -58,18 +57,6 @@ static const char *TAG = "pocket.ui";
 #define P_TEXT_COLOR 96u
 #define P_FONT_SLOT  97u
 #define P_TEXT_ALIGN 98u  // 2 = right
-
-// The pad bits pocketjs_ui_input_t.buttons carries, from
-// .cache/pocketjs/contracts/generated/pocket_spec.h.
-#define BTN_UP     0x0010u
-#define BTN_RIGHT  0x0020u
-#define BTN_DOWN   0x0040u
-#define BTN_LEFT   0x0080u
-#define BTN_CIRCLE 0x2000u
-#define BTN_CROSS  0x4000u
-
-#define REPEAT_DELAY_US  400000
-#define REPEAT_PERIOD_US 120000
 
 // ------------------------------------------------------- the layout cliff
 //
@@ -136,15 +123,6 @@ static const font_t FONTS[] = {
 #define FONT_COUNT (int)(sizeof(FONTS)/sizeof(FONTS[0]))
 #define FONT_BODY  2
 
-// ----------------------------------------------------------------- actions
-
-static const struct { const char *name; uint32_t bit; } ACTIONS[] = {
-    {"left",   BTN_LEFT},   {"right", BTN_RIGHT},
-    {"up",     BTN_UP},     {"down",  BTN_DOWN},
-    {"accept", BTN_CROSS},  {"back",  BTN_CIRCLE},
-};
-#define ACTION_COUNT (int)(sizeof(ACTIONS)/sizeof(ACTIONS[0]))
-
 // ------------------------------------------------------- the legacy binding
 //
 // See the header for why every mutation goes through globalThis.ui. The lookup
@@ -162,10 +140,7 @@ static JSValue    ui_obj;
 static JSValue    ui_fn[F_COUNT];
 static bool       ui_ready;
 // Whether the four classes and the node/list/screen tables have been made for
-// this realm. They are, on the first read of either pocket.ui or pocket.input:
-// both namespaces are this file's and both can reach the same state -- an
-// input.text prompt opens a node -- so whichever is read first pays for them
-// and the second finds them done.
+// this realm, on the first read of pocket.ui. Input has its own lifecycle.
 static bool       realm_ready;
 static JSContext *ui_ctx;
 static unsigned   live_nodes;
@@ -1052,113 +1027,18 @@ static JSValue js_ui_toast(JSContext *ctx, JSValueConst self,
     return JS_UNDEFINED;
 }
 
-// ------------------------------------------------------------ pocket.input
-
-static pocket_sub_slot_t  action_slots[UI_ACTION_SUBS];
-static pocket_sub_table_t action_table = {
-    .slots=action_slots, .count=UI_ACTION_SUBS,
-    .tag="pocket.ui", .what="onAction",
-    // A listener throwing on every press would fill the log and keep costing a
-    // call; the app keeps its other subscriptions. Same reasoning as imu.watch.
-    .close_on_throw=true,
-};
-static uint32_t held_mask;
-static int64_t  repeat_at[ACTION_COUNT];
-
-typedef struct { int action; const char *phase; int64_t now; } action_event_t;
-
-static bool action_payload(JSContext *ctx, int slot, void *user, JSValue *payload) {
-    const action_event_t *e=user;
-    (void)slot;
-    JSValue object=JS_NewObject(ctx);
-    if(JS_IsException(object)) return false;
-    JS_SetPropertyStr(ctx,object,"action",
-                      JS_NewString(ctx,ACTIONS[e->action].name));
-    JS_SetPropertyStr(ctx,object,"phase",JS_NewString(ctx,e->phase));
-    JS_SetPropertyStr(ctx,object,"timeMs",JS_NewFloat64(ctx,e->now/1000.0));
-    *payload=object;
-    return true;
-}
-
-static JSValue js_on_action(JSContext *ctx, JSValueConst self,
-                            int argc, JSValueConst *argv) {
-    (void)self;
-    if(argc<1 || !JS_IsFunction(ctx,argv[0]))
-        return bad(ctx,"input.onAction","listener must be a function");
-    return pocket_api_sub_open(ctx,&action_table,argv[0],"input.onAction",
-                               "too many input subscriptions",NULL);
-}
-
-static JSValue js_held(JSContext *ctx, JSValueConst self,
-                       int argc, JSValueConst *argv) {
-    (void)self;
-    if(argc<1 || !JS_IsString(argv[0]))
-        return bad(ctx,"input.held","held(action) takes an action name");
-    const char *name=JS_ToCString(ctx,argv[0]);
-    if(!name) return JS_EXCEPTION;
-    for(int i=0;i<ACTION_COUNT;i++) {
-        if(strcmp(name,ACTIONS[i].name)) continue;
-        JS_FreeCString(ctx,name);
-        return JS_NewBool(ctx,(held_mask&ACTIONS[i].bit)!=0);
-    }
-    JS_FreeCString(ctx,name);
-    return bad(ctx,"input.held","no such action");
-}
-
-// Section 6 gives onKey a key/code/modifiers shape, and this host has no channel
-// for it: main.c's keymap consumes the keyboard for the shell and hands a running
-// app a pad mask alone. Section 2 says an unimplemented feature keeps its name
-// and fails with UNSUPPORTED, which is a better answer than a subscription that
-// silently never fires.
-static JSValue js_on_key(JSContext *ctx, JSValueConst self,
-                         int argc, JSValueConst *argv) {
-    (void)self; (void)argc; (void)argv;
-    return pocket_api_throw(ctx,POCKET_ERR_UNSUPPORTED,"input.onKey",
-                            "this host delivers actions, not key events",
-                            false,NULL);
-}
-
-// input.text used to be a second UNSUPPORTED stub here, on the argument that
-// only a screen declaring takes_text gets the IME. That argument was wrong
-// about where the field has to live, not about the machinery: pocket_text.c
-// puts the field in the HOST and composites it over the guest's own frame, and
-// main.c hands it the keyboard for as long as it is open. It contributes to
-// this same namespace and defines input.text itself.
-
 // -------------------------------------------------------------- pump/reset
 
-void pocket_ui_pump(uint32_t buttons) {
+void pocket_ui_pump(void) {
     int64_t now=0;
     if(toast_until) {
         now=esp_timer_get_time();
         if(now>=toast_until && ui_ctx) toast_hide(ui_ctx);
     }
-    uint32_t before=held_mask;
-    held_mask=buttons;                    // held() works with no listener at all
-    if(!action_table.open || !(buttons|before)) return;
-    if(!now) now=esp_timer_get_time();
-    for(int i=0;i<ACTION_COUNT;i++) {
-        uint32_t bit=ACTIONS[i].bit;
-        bool down=(buttons&bit)!=0, was=(before&bit)!=0;
-        action_event_t event={.action=i,.now=now};
-        if(down && !was) {
-            event.phase="press";
-            repeat_at[i]=now+REPEAT_DELAY_US;
-        } else if(!down && was) {
-            event.phase="release";
-            repeat_at[i]=0;
-        } else if(down && now>=repeat_at[i]) {
-            event.phase="repeat";
-            repeat_at[i]=now+REPEAT_PERIOD_US;
-        } else continue;
-        pocket_api_sub_deliver(&action_table,action_payload,&event);
-    }
 }
 
 void pocket_ui_reset(void) {
     JSContext *ctx=ui_ctx;
-    pocket_api_sub_close_all(&action_table);
-    action_table.ctx=NULL;
     if(ctx) {
         // No node is destroyed here: app_stop() takes the whole core down a few
         // lines later, and the only thing that must not outlive the realm is a
@@ -1187,12 +1067,11 @@ void pocket_ui_reset(void) {
     memset(nodes,0,sizeof(nodes));
     memset(lists,0,sizeof(lists));
     memset(screens,0,sizeof(screens));
-    memset(repeat_at,0,sizeof(repeat_at));
-    depth=0; live_nodes=0; held_mask=0;
+    depth=0; live_nodes=0;
     toast_box=0; toast_label=0; toast_until=0;
     ui_ready=false; ui_ctx=NULL;
     // The classes belong to the realm that is going away, so the next session
-    // builds its own on the first read of either namespace.
+    // builds its own on the first read of pocket.ui.
     realm_ready=false;
 }
 
@@ -1215,28 +1094,9 @@ static const pocket_limit_t ui_limits[] = {
     {0},
 };
 
-// The honest half of this surface. The pad mask a running app is handed carries
-// one button today -- main.c maps Enter to it and consumes every other key for
-// the shell -- so accept is the only action that can fire, and a program that
-// feature-tests learns it here rather than by waiting for an event that never
-// comes. onAction, held() and the repeat pacing are written against the whole
-// mask, so the day tick_run() forwards the arrow keys, this line is the only
-// thing that has to change.
-static const pocket_limit_t input_limits[] = {
-    {.name="actions",       .kind=POCKET_LIMIT_TEXT, .text="accept"},
-    {.name="maxWatches",    .kind=POCKET_LIMIT_INT,  .number=UI_ACTION_SUBS},
-    {.name="repeatDelayMs", .kind=POCKET_LIMIT_INT,  .number=REPEAT_DELAY_US/1000},
-    {.name="keyEvents",     .kind=POCKET_LIMIT_FLAG, .number=0},
-    {0},
-};
-
 static const pocket_capability_t ui_capability = {
     .name="ui.basic", .supported=true, .available=true, .limits=ui_limits,
 };
-static const pocket_capability_t input_capability = {
-    .name="input.action", .supported=true, .available=true, .limits=input_limits,
-};
-
 // ------------------------------------------------------------------ install
 
 static const JSCFunctionListEntry screen_methods[] = {
@@ -1366,15 +1226,9 @@ static esp_err_t ensure_realm(JSContext *ctx) {
     memset(nodes,0,sizeof(nodes));
     memset(lists,0,sizeof(lists));
     memset(screens,0,sizeof(screens));
-    memset(repeat_at,0,sizeof(repeat_at));
-    depth=0; held_mask=0;
+    depth=0;
     toast_box=0; toast_label=0; toast_until=0;
-    for(int i=0;i<UI_ACTION_SUBS;i++) {
-        action_slots[i].callback=JS_UNDEFINED;
-        action_slots[i].handle=0;
-    }
-    action_table.open=0;
-    action_table.ctx=ctx;
+
 
     if(!make_class(ctx,&screen_class,&screen_rt,&screen_def,METHODS(screen_methods),
                    JS_UNDEFINED) ||
@@ -1406,25 +1260,9 @@ static esp_err_t build_ui(JSContext *ctx, JSValueConst ns, void *user) {
     return ESP_OK;
 }
 
-static esp_err_t build_input(JSContext *ctx, JSValueConst ns, void *user) {
-    (void)user;
-    esp_err_t err=ensure_realm(ctx);
-    if(err!=ESP_OK) return err;
-    JS_DefinePropertyValueStr(ctx,ns,"onAction",
-        JS_NewCFunction(ctx,js_on_action,"onAction",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,ns,"onKey",
-        JS_NewCFunction(ctx,js_on_key,"onKey",1),JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx,ns,"held",
-        JS_NewCFunction(ctx,js_held,"held",1),JS_PROP_ENUMERABLE);
-    // input.text belongs to pocket_text.c, which contributes to this namespace
-    // after this does. See the note where the stub used to be.
-    return ESP_OK;
-}
-
 esp_err_t pocket_ui_install(JSContext *ctx, void *user_data) {
     (void)user_data;
     pocket_api_register(&ui_capability);
-    pocket_api_register(&input_capability);
 
     // Eager, and it has to be: the node budget guards every app, including the
     // ones that never read pocket.ui and build their display with the legacy
@@ -1436,7 +1274,5 @@ esp_err_t pocket_ui_install(JSContext *ctx, void *user_data) {
     ui_ready=false; ui_ctx=ctx;
     realm_ready=false;
 
-    esp_err_t err=pocket_api_lazy(ctx,"ui",build_ui,NULL);
-    if(err!=ESP_OK) return err;
-    return pocket_api_lazy(ctx,"input",build_input,NULL);
+    return pocket_api_lazy(ctx,"ui",build_ui,NULL);
 }
