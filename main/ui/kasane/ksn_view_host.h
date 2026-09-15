@@ -17,11 +17,16 @@ struct ksn_view_host {
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Initializes borrowed core/cache too. One coordinator owns them exclusively;
+/* Initializes borrowed core/cache too. Cache may be NULL; a supplied cache
+ * must already be bound, and reset preserves its block addresses.
+ * One coordinator owns them exclusively;
  * do not mix low-level mutations with view calls. Storage cannot move. Destroy
  * guest endpoints before reset. Existing process-wide ID issuers stay intact. */
 void ksn_view_host_init(ksn_view_host *,ksn_core *,ksn_cache *,uint32_t initial_focus);
 ksn_view *ksn_view_host_endpoint(ksn_view_host *,ksn_layer);
+/* Enable an optional bound cache only between guest updates. Does not reset
+ * it or allocate; failure leaves the coordinator and supplied cache unchanged. */
+ksn_result ksn_view_host_attach_cache(ksn_view_host *,ksn_cache *);
 /* Call on EVERY return from JS, including exception/yield. Aborts unfinished
  * builders; submitted transactions survive. No JS invocation during cleanup. */
 void ksn_view_host_end_turn(ksn_view_host *);

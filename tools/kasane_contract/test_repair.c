@@ -5,6 +5,8 @@
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"repair line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static ksn_core core;
 static ksn_cache cache;
+static ksn_cache_command_block cache_commands;
+static ksn_cache_text_block cache_text;
 static ksn_view_host host;
 static uint16_t strip[240*8],panel[240*135],committed[240*135];
 static int fail_y=-1,invalidate_y=-1;
@@ -26,6 +28,7 @@ static bool same_cache(ksn_cache_stats a,ksn_cache_stats b){
            a.templates==b.templates&&a.instances==b.instances;
 }
 int main(void){
+    CHECK(ksn_cache_bind(&cache,&cache_commands,&cache_text)==KSN_OK);
     ksn_view_host_init(&host,&core,&cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP),*system=ksn_view_host_endpoint(&host,KSN_SYSTEM);
     ksn_display_port port={NULL,buffer,transfer,240,135,8};ksn_render_stats stats;

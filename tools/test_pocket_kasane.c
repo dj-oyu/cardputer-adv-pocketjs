@@ -24,11 +24,30 @@ static long fault_after=-1;
 static unsigned fault_index;
 static bool fault_hit,native_fault;
 static size_t live_allocations;
+static bool track_native;
+static long native_after=-1;
+static size_t native_bytes,native_max;
+static struct { void *ptr;size_t bytes; } native_blocks[16];
 
 void *__real_calloc(size_t count,size_t size);
+void __real_free(void *ptr);
+void __wrap_free(void *ptr) {
+    for(unsigned i=0;i<16;i++) if(ptr&&native_blocks[i].ptr==ptr) {
+        native_bytes-=native_blocks[i].bytes;native_blocks[i].ptr=NULL;break;
+    }
+    __real_free(ptr);
+}
 void *__wrap_calloc(size_t count,size_t size) {
     if(native_fault) { native_fault=false;return NULL; }
-    return __real_calloc(count,size);
+    if(track_native&&native_after>=0&&native_after--==0) return NULL;
+    void *ptr=__real_calloc(count,size);
+    if(track_native&&ptr) {
+        unsigned i=0;while(i<16&&native_blocks[i].ptr)i++;
+        if(i==16) abort();
+        native_blocks[i].ptr=ptr;native_blocks[i].bytes=count*size;
+        native_bytes+=count*size;if(count*size>native_max)native_max=count*size;
+    }
+    return ptr;
 }
 static bool allocation_fails(void) {
     if(fault_after<0) return false;
@@ -348,6 +367,41 @@ static void allocator_tests(void) {
     check(live_allocations==0,"all fault-test runtimes release every guest allocation");
 }
 
+static void lazy_cache_tests(void) {
+    check(open_fault_runtime(""),"lazy cache fixture opens");
+    pocket_kasane_reset();track_native=true;
+    ksn_render_stats stats;
+    for(int fault=0;fault<3;fault++) {
+        check(run("kasane.replace(tx=>{tx.background(0x000000ff);globalThis.r=tx.rect(shape)});"),
+              "ordinary drawing builds without cache");
+        check(present(&stats)==KSN_OK,"ordinary drawing presents without cache");
+        size_t base=native_bytes;
+        check(run("globalThis.baseBytes=kasane.stats().nativeBytes;"
+                  "if(kasane.stats().cache.reservedBytes!==0)throw Error('eager cache');"
+                  "globalThis.oldTicket=kasane.poll().ticket;"),"cache reservation is zero before use");
+        native_max=0;native_after=fault;
+        check(run("var failed=false;try{kasane.cache.create([shape])}"
+                  "catch(e){failed=e.code==='OUT_OF_MEMORY'}if(!failed)throw Error('missing OOM');"
+                  "if(kasane.stats().nativeBytes!==baseBytes||kasane.stats().cache.reservedBytes!==0)"
+                  "throw Error('reservation leak');"),"each cache allocation failure rolls back reservation");
+        native_after=-1;
+        check(native_bytes==base&&native_max<=3072,"partial native blocks reclaimed and bounded");
+        pocket_kasane_invalidate();
+        check(present(&stats)==KSN_OK,"committed frame repairs after cache OOM");
+        check(run("kasane.patch(tx=>r.setColor(tx,0xabcdef80));"
+                  "kasane.cancel(kasane.poll().ticket);"
+                  "globalThis.newTpl=kasane.cache.create([shape]);"
+                  "var s=kasane.stats();if(s.cache.reservedBytes<=0||"
+                  "s.nativeBytes!==baseBytes+s.cache.reservedBytes)throw Error('accounting');"
+                  "kasane.replace(tx=>{tx.background(0x000000ff);tx.instantiate(newTpl)});"),
+              "old refs survive OOM and cache retries successfully");
+        check(present(&stats)==KSN_OK,"retried cache instance presents");
+        check(native_max<=3072,"successful cache allocations are bounded");
+        pocket_kasane_reset();check(native_bytes==0,"reset frees base and all cache blocks");
+    }
+    track_native=false;close_fault_runtime();
+}
+
 int main(void) {
     rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
     check(pocket_kasane_install(ctx,NULL)==ESP_OK,"namespace installs");
@@ -432,6 +486,7 @@ int main(void) {
     repair_tests();
     pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     allocator_tests();
+    lazy_cache_tests();
     printf("%s: %u failure(s)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

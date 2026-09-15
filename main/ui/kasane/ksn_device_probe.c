@@ -25,6 +25,8 @@
 
 static ksn_core probe_core;
 static ksn_cache probe_cache;
+static ksn_cache_command_block probe_cache_commands;
+static ksn_cache_text_block probe_cache_text;
 static ksn_frost probe_frost;
 ksn_result ksn_stress_probe_run(ksn_frost *frost);
 static uint16_t glass_pattern(int x,int y){
@@ -108,6 +110,7 @@ static ksn_result probe_display(ksn_core *core){
 }
 
 static ksn_result view_demo(void){
+    ksn_cache_bind(&probe_cache,&probe_cache_commands,&probe_cache_text);
     ksn_view_host host;ksn_view_host_init(&host,&probe_core,&probe_cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP);
     ksn_display_port display={NULL,probe_strip,probe_send,240,135,8};
@@ -145,7 +148,8 @@ void ksn_device_probe_run(void){
     ESP_LOGI(tag,"START core=%u frame_command=%u",(unsigned)sizeof(ksn_core),(unsigned)sizeof(ksn_frame_command));
     int core_result=ksn_probe_core_tests(),review_result=ksn_probe_review_tests();
     if(core_result||review_result){ESP_LOGE(tag,"FAIL regression core=%d review=%d",core_result,review_result);return;}
-    ksn_core_init(&probe_core);ksn_cache_init(&probe_cache);
+    ksn_core_init(&probe_core);
+    ksn_cache_bind(&probe_cache,&probe_cache_commands,&probe_cache_text);
     ksn_client app=ksn_core_client(&probe_core,KSN_APP),system=ksn_core_client(&probe_core,KSN_SYSTEM);
     ksn_tx tx;ksn_ref banner;
     ksn_draw d={.kind=KSN_RECT,.bounds={0,0,64,56},.clip={0,0,64,56},.opacity=255};

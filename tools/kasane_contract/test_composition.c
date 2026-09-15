@@ -28,7 +28,8 @@ static uint16_t reference(unsigned opacity,int x,int y){
     return (uint16_t)((c[0]>>3)<<11|(c[1]>>2)<<5|(c[2]>>3));
 }
 static int groups(void){
-    ksn_core core;ksn_cache cache;ksn_core_init(&core);ksn_cache_init(&cache);
+    ksn_core core;ksn_cache cache;ksn_cache_command_block commands;ksn_cache_text_block text;
+    ksn_core_init(&core);CHECK(ksn_cache_bind(&cache,&commands,&text)==KSN_OK);
     ksn_client app=ksn_core_client(&core,KSN_APP);ksn_tx tx;
     ksn_draw draw[2]={
         {.kind=KSN_RECT,.bounds={6,5,74,29},.clip={0,0,240,135},.opacity=211,.data.shape={0xff1f07b3,0,0}},

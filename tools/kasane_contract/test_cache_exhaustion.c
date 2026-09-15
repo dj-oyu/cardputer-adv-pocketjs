@@ -12,8 +12,9 @@
 int main(void) {
     ksn_core core;
     ksn_cache cache;
+    ksn_cache_command_block commands;ksn_cache_text_block text;
     ksn_core_init(&core);
-    ksn_cache_init(&cache);
+    CHECK(ksn_cache_bind(&cache,&commands,&text)==KSN_OK);
     ksn_client app = ksn_core_client(&core, KSN_APP);
     ksn_draw draw = {
         .kind = KSN_RECT,

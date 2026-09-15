@@ -120,7 +120,10 @@ schemaの文字列ID解決は構築時に行い、毎PATCHで名前検索しな�
 画面への自動レイアウト、暗黙cache、Reactiveな依存追跡は追加しない。
 
 `main/pocket/pocket_kasane.c`がAPP endpointを`pocket.kasane`として遅延公開する。
-features/statsだけではnative arenaを確保せず、最初のreplace/patch/cache.createで一括確保する。
+features/statsだけではnative領域を確保せず、最初のreplace/patch/cache.createで基本領域を確保する。
+RAM cacheは最初のcache.create成功時だけ追加する。管理情報・命令・文字の3ブロックを
+全確保・検証してから公開し、失敗時は追加ブロックを回収する。最後のtemplateをreleaseしても
+予約はsession resetまで保持する。stats.cache.reservedBytesは現在のcache予約量を返す。
 公開DrawRefは32件。原子的REPLACE中に旧世代と候補世代を同時保持できるようnative slotは
 2世代分を持つが、1更新が新規公開できる参照は32件を超えない。
 
@@ -139,11 +142,17 @@ VM yield相当の未完modal、新instanceのcleanup、別layerの干渉拒否�
 ASan/UBSan、O2 strict-aliasing、C++17ヘッダ検査を`run.sh`へ組み込んだ。
 実機の`VIEW PASS`も同じ窓口で二つのinstance、取消、無変更の転送ゼロ、modal開閉を通す。
 
-core 9,216 B、cache 4,096 Bは維持。追加coordinatorはホスト64-bitで112 B。
-S3の実サイズは実機診断で84 B。共有IDカウンタは20 B。
-statsのnative_bytesはこれらの合計で、LCD帯・JS heap・frost snapshotを含まない。
-QuickJS adapterの参照2世代分を含むS3実測は14,440 B。既存LCD帯3,840 Bを合算すると
-18,280 Bになる。arenaはKasaneを使わないsessionでは0 Bで、静的DIRAM増分は52 B。
+coreは9,216 B。追加coordinatorはホスト64-bitで112 B、S3で84 B。共有IDカウンタは20 B。
+Cのstats.native_bytesはcore/coordinator/共有IDと有効なcache予約を合算する。
+JSのstats.nativeBytesは参照2世代分を含むadapterの予約heapで、共有staticを含まない。
+どちらもLCD帯・JS heap・frost snapshotを含まない。
+CP3aのS3 ELF型情報では基本領域10,344 B、cacheは496+1,536+1,024=3,056 B。
+cacheなしは旧14,440 Bから4,096 B減、cacheありは13,400 Bで1,040 B減。
+cache用個別確保は3,072 B以下。基本領域の10,344 B単一確保はCP3bで分割する未解決事項。
+cacheの文字1,024 Bは予約済みだが文字templateは未対応。cache.createのdraw配列はS3で
+48×40=1,920 Bのstackを使い、呼出し全体のstack peakは実機で後日確認する。
+Kasaneを使わないsessionの予約heapは0 B。board共用描画帯3,840 Bと転送buffer7,680 Bは
+別途同時ピークに含める。CP3aでstatic DIRAM増分はない。
 部品数ごとのnative追加heap確保は0。PIE側も保持snapshotは2,048 Bのまま。
 
 `tools/test_pocket_kasane.c`は実QuickJSとASan/UBSanでreplace/patch、group、cache、modal、

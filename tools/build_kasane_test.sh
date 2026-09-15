@@ -23,5 +23,5 @@ gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Wer
   main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \
   "$CACHE/quickjs-vm.o" \
-  -Wl,--wrap=calloc -lm -o "$OUT"
+  -Wl,--wrap=calloc -Wl,--wrap=free -lm -o "$OUT"
 echo "built $OUT"

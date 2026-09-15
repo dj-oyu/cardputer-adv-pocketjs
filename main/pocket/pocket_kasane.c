@@ -17,7 +17,7 @@ typedef struct {
 } ref_slot;
 typedef struct {
     ksn_core core;
-    ksn_cache cache;
+    ksn_cache *cache;
     ksn_view_host host;
     /* Two generations let a 32-reference REPLACE be built while the displayed
      * generation remains valid. Retiring identities frees slots immediately;
@@ -68,8 +68,33 @@ static bool ensure_state(JSContext *ctx, const char *op) {
                          POCKET_OUTCOME_NOT_APPLIED);
         return false;
     }
-    ksn_view_host_init(&state->host,&state->core,&state->cache,0);
+    ksn_view_host_init(&state->host,&state->core,NULL,0);
     return true;
+}
+
+static void free_cache(ksn_cache *cache) {
+    if(!cache) return;
+    free(cache->state.commands);free(cache->state.text);free(cache);
+}
+
+/* No JS calls after allocation: attach only a complete first definition, so
+ * failures cannot alter the displayed bank or reserve an unused cache. */
+static ksn_result create_template(const ksn_draw *draws,uint16_t count,ksn_template *out) {
+    if(state->building.value||ksn_core_has_submission(&state->core)) return KSN_BUSY;
+    if(state->cache)
+        return ksn_view_cache_create(ksn_view_host_endpoint(&state->host,KSN_APP),draws,count,out);
+    ksn_cache *cache=calloc(1,sizeof(*cache));
+    if(!cache) return KSN_OOM;
+    ksn_cache_command_block *commands=calloc(1,sizeof(*commands));
+    if(!commands) { free(cache);return KSN_OOM; }
+    ksn_cache_text_block *text=calloc(1,sizeof(*text));
+    if(!text) { free(commands);free(cache);return KSN_OOM; }
+    ksn_cache_bind(cache,commands,text);
+    ksn_template candidate={0};
+    ksn_result result=ksn_cache_create(cache,KSN_APP,draws,count,&candidate);
+    if(result==KSN_OK) result=ksn_view_host_attach_cache(&state->host,cache);
+    if(result!=KSN_OK) { free_cache(cache);return result; }
+    state->cache=cache;*out=candidate;return KSN_OK;
 }
 
 static ksn_view *view(void) {
@@ -661,7 +686,7 @@ static JSValue js_cache_create(JSContext *ctx, JSValueConst self, int argc,
     JSValue object=wrap_direct(ctx,template_class,0);
     if(JS_IsException(object)) return object;
     ksn_template result_handle;
-    ksn_result result=ksn_view_cache_create(view(),draws,(uint16_t)length,&result_handle);
+    ksn_result result=create_template(draws,(uint16_t)length,&result_handle);
     if(result!=KSN_OK) {
         JS_FreeValue(ctx,object);return throw_result(ctx,result,"kasane.cache.create");
     }
@@ -764,12 +789,14 @@ static JSValue js_stats(JSContext *ctx, JSValueConst self, int argc,
     displayed=JS_NewObject(ctx);if(JS_IsException(displayed)) goto fail;
     cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
     PUT(out,"active",JS_NewBool(ctx,state&&state->active));
-    PUT(out,"nativeBytes",JS_NewUint32(ctx,state?(uint32_t)sizeof(*state):0));
+    PUT(out,"nativeBytes",JS_NewUint32(ctx,state?(uint32_t)(sizeof(*state)+
+        (state->cache?KSN_CACHE_RESERVED_BYTES:0)):0));
     PUT(displayed,"commands",JS_NewInt32(ctx,stats.displayed.commands));
     PUT(displayed,"textBytes",JS_NewInt32(ctx,stats.displayed.text_bytes));
     PUT(cache,"commands",JS_NewInt32(ctx,stats.shared_cache.commands));
     PUT(cache,"templates",JS_NewInt32(ctx,stats.shared_cache.templates));
     PUT(cache,"instances",JS_NewInt32(ctx,stats.shared_cache.instances));
+    PUT(cache,"reservedBytes",JS_NewUint32(ctx,state&&state->cache?KSN_CACHE_RESERVED_BYTES:0));
     PUT(out,"displayed",JS_DupValue(ctx,displayed));PUT(out,"cache",JS_DupValue(ctx,cache));
     JS_FreeValue(ctx,displayed);JS_FreeValue(ctx,cache);return out;
 fail:
@@ -868,6 +895,7 @@ esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data) {
 }
 
 void pocket_kasane_reset(void) {
+    if(state) free_cache(state->cache);
     free(state);state=NULL;
 }
 bool pocket_kasane_active(void) { return state&&state->active; }

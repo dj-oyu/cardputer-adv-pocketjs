@@ -20,21 +20,28 @@ typedef struct {
     uint8_t command_count,layer,flags;
 } ksn_cache_instance_entry;
 typedef struct {
-    ksn_command_storage commands[KSN_CACHE_COMMANDS];
-    uint8_t text[KSN_CACHE_TEXT_BYTES];
+    ksn_command_storage *commands;
+    uint8_t *text;
     ksn_cache_template_entry templates[KSN_CACHE_TEMPLATES];
     ksn_cache_instance_entry instances[KSN_CACHE_INSTANCES];
     uint16_t command_used,text_used;
     uint8_t template_count,instance_count;
 } ksn_cache_impl;
-typedef union {
-    max_align_t alignment;
+/* Borrowed blocks: the host owns allocation and lifetime. Each block is below
+ * the 3072-byte allocation ceiling; static callers may declare them directly. */
+typedef struct { ksn_command_storage commands[KSN_CACHE_COMMANDS]; } ksn_cache_command_block;
+typedef struct { uint8_t bytes[KSN_CACHE_TEXT_BYTES]; } ksn_cache_text_block;
+typedef struct {
     ksn_cache_impl state;
-    uint8_t bytes[KSN_CACHE_STORAGE_BYTES];
 } ksn_cache;
+#define KSN_CACHE_RESERVED_BYTES (sizeof(ksn_cache)+sizeof(ksn_cache_command_block)+sizeof(ksn_cache_text_block))
 #ifdef __cplusplus
 extern "C" {
 #endif
+/* Bind all three blocks before first use. Failure leaves the descriptor
+ * untouched. Rebinding/reset requires the host to stop all users first. */
+ksn_result ksn_cache_bind(ksn_cache *cache,ksn_cache_command_block *commands,ksn_cache_text_block *text);
+/* Reset a bound cache, retaining its borrowed block addresses. No allocation. */
 void ksn_cache_init(ksn_cache *cache);
 /* v0.2 initial subset: RECT, ROUND_RECT and STROKE. Definitions are copied. */
 ksn_result ksn_cache_create(ksn_cache *cache,ksn_layer layer,const ksn_draw *draws,

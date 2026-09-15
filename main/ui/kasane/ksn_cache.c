@@ -5,10 +5,14 @@
 static uint32_t last_template,last_instance;
 typedef struct { ksn_rgba color; uint8_t radius,width,pad[2]; } shape_payload;
 
-_Static_assert(sizeof(ksn_cache_impl)<=KSN_CACHE_STORAGE_BYTES,"cache storage budget");
+_Static_assert(KSN_CACHE_RESERVED_BYTES<=KSN_CACHE_STORAGE_BYTES,"cache storage budget");
+_Static_assert(sizeof(ksn_cache)<=3072,"cache metadata allocation budget");
+_Static_assert(sizeof(ksn_cache_command_block)<=3072,"cache command allocation budget");
+_Static_assert(sizeof(ksn_cache_text_block)<=3072,"cache text allocation budget");
 _Static_assert(sizeof(shape_payload)<=sizeof(((ksn_command_storage *)0)->payload),"shape payload");
 
 static bool valid_layer(ksn_layer layer){return layer==KSN_APP||layer==KSN_SYSTEM;}
+static bool bound(const ksn_cache *cache){return cache&&cache->state.commands&&cache->state.text;}
 static bool valid_rect(ksn_rect r){return r.x0<=r.x1&&r.y0<=r.y1;}
 static unsigned width(ksn_rect r){return (unsigned)((int32_t)r.x1-r.x0);}
 static unsigned height(ksn_rect r){return (unsigned)((int32_t)r.y1-r.y0);}
@@ -86,10 +90,20 @@ static ksn_result apply_placement(ksn_cache_impl *cache,ksn_core *core,ksn_tx tx
     instance->pending=*placement;instance->pending_tx=tx.value;return KSN_OK;
 }
 
-void ksn_cache_init(ksn_cache *storage){if(storage)memset(storage,0,sizeof(*storage));}
+void ksn_cache_init(ksn_cache *storage){
+    if(!bound(storage))return;
+    ksn_command_storage *commands=storage->state.commands;uint8_t *text=storage->state.text;
+    *storage=(ksn_cache){.state={.commands=commands,.text=text}};
+    memset(commands,0,sizeof(ksn_cache_command_block));memset(text,0,sizeof(ksn_cache_text_block));
+}
+ksn_result ksn_cache_bind(ksn_cache *storage,ksn_cache_command_block *commands,ksn_cache_text_block *text){
+    if(!storage||!commands||!text)return KSN_INVALID;
+    *storage=(ksn_cache){.state={.commands=commands->commands,.text=text->bytes}};
+    ksn_cache_init(storage);return KSN_OK;
+}
 ksn_result ksn_cache_create(ksn_cache *storage,ksn_layer layer,const ksn_draw *draws,
                           uint16_t count,ksn_template *out){
-    if(!storage||!valid_layer(layer)||!draws||!count||!out)return KSN_INVALID;
+    if(!bound(storage)||!valid_layer(layer)||!draws||!count||!out)return KSN_INVALID;
     ksn_cache_impl *cache=&storage->state;
     if(cache->template_count==KSN_CACHE_TEMPLATES||count>KSN_CACHE_COMMANDS-cache->command_used||
        last_template==UINT32_MAX)return KSN_LIMIT;
@@ -114,7 +128,7 @@ ksn_result ksn_cache_create(ksn_cache *storage,ksn_layer layer,const ksn_draw *d
     *out=(ksn_template){entry->id};return KSN_OK;
 }
 ksn_result ksn_cache_release(ksn_cache *storage,ksn_template handle){
-    if(!storage||!handle.value)return KSN_INVALID;
+    if(!bound(storage)||!handle.value)return KSN_INVALID;
     ksn_cache_impl *cache=&storage->state;
     ksn_cache_template_entry *entry=find_template(cache,handle);
     if(!entry)return KSN_STALE;
@@ -128,7 +142,7 @@ ksn_result ksn_cache_release(ksn_cache *storage,ksn_template handle){
 }
 ksn_result ksn_cache_instantiate(ksn_cache *storage,ksn_core *core,ksn_tx tx,
                                ksn_template handle,const ksn_placement *placement,ksn_instance *out){
-    if(!storage||!core||!out)return KSN_INVALID;
+    if(!bound(storage)||!core||!out)return KSN_INVALID;
     ksn_result result=validate_placement(placement);
     if(result!=KSN_OK)return result;
     ksn_cache_impl *cache=&storage->state;
@@ -164,14 +178,14 @@ ksn_result ksn_cache_instantiate(ksn_cache *storage,ksn_core *core,ksn_tx tx,
 }
 ksn_result ksn_cache_place(ksn_cache *storage,ksn_core *core,ksn_tx tx,
                          ksn_instance handle,const ksn_placement *placement){
-    if(!storage||!core)return KSN_INVALID;
+    if(!bound(storage)||!core)return KSN_INVALID;
     ksn_cache_impl *cache=&storage->state;
     ksn_cache_instance_entry *instance=find_instance(cache,handle);
     if(!instance)return KSN_STALE;
     return apply_placement(cache,core,tx,instance,placement);
 }
 ksn_result ksn_cache_set_visible(ksn_cache *storage,ksn_core *core,ksn_tx tx,ksn_instance handle,bool visible){
-    if(!storage||!core)return KSN_INVALID;
+    if(!bound(storage)||!core)return KSN_INVALID;
     ksn_cache_impl *cache=&storage->state;
     ksn_cache_instance_entry *instance=find_instance(cache,handle);
     if(!instance)return KSN_STALE;
@@ -179,7 +193,7 @@ ksn_result ksn_cache_set_visible(ksn_cache *storage,ksn_core *core,ksn_tx tx,ksn
     placement.visible=visible;return apply_placement(cache,core,tx,instance,&placement);
 }
 ksn_result ksn_cache_abort(ksn_cache *storage,ksn_tx ticket){
-    if(!storage||!ticket.value)return KSN_INVALID;
+    if(!bound(storage)||!ticket.value)return KSN_INVALID;
     ksn_cache_impl *cache=&storage->state;bool found=false;
     for(unsigned i=0;i<cache->instance_count;){
         ksn_cache_instance_entry *instance=&cache->instances[i];
@@ -194,7 +208,7 @@ ksn_result ksn_cache_abort(ksn_cache *storage,ksn_tx ticket){
     return found?KSN_OK:KSN_STALE;
 }
 ksn_result ksn_cache_resolve(ksn_cache *storage,const ksn_core *core,ksn_tx ticket,bool presented){
-    if(!storage||!core||!ticket.value)return KSN_INVALID;
+    if(!bound(storage)||!core||!ticket.value)return KSN_INVALID;
     if(ksn_core_has_submission(core))return KSN_BUSY;
     ksn_submission outcome=ksn_core_poll(core);
     if(outcome.ticket.value!=ticket.value||
@@ -219,8 +233,8 @@ ksn_result ksn_cache_resolve(ksn_cache *storage,const ksn_core *core,ksn_tx tick
     return found||pruned?KSN_OK:KSN_STALE;
 }
 ksn_cache_stats ksn_cache_get_stats(const ksn_cache *storage){
-    if(!storage)return (ksn_cache_stats){0};
+    if(!bound(storage))return (ksn_cache_stats){0};
     const ksn_cache_impl *cache=&storage->state;
     return (ksn_cache_stats){cache->command_used,cache->text_used,cache->template_count,cache->instance_count,
-                            sizeof(ksn_cache)+sizeof(last_template)+sizeof(last_instance)};
+                            KSN_CACHE_RESERVED_BYTES+sizeof(last_template)+sizeof(last_instance)};
 }

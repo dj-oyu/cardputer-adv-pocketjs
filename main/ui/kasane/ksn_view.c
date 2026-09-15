@@ -1,6 +1,6 @@
 #include "ksn_view_host.h"
 
-static bool valid(const ksn_view *v){return v&&v->host&&v->host->core&&v->host->cache;}
+static bool valid(const ksn_view *v){return v&&v->host&&v->host->core;}
 static bool owns(const ksn_view *v,ksn_tx tx){
     return valid(v)&&tx.value&&v->host->builder.value==tx.value&&v->host->building_layer==v->layer;
 }
@@ -25,13 +25,13 @@ static void resolve(ksn_view_host *h){
     h->views[s.layer].outcome=s;
 }
 void ksn_view_host_init(ksn_view_host *h,ksn_core *core,ksn_cache *cache,uint32_t focus){
-    if(!h||!core||!cache)return;
+    if(!h||!core)return;
     *h=(ksn_view_host){.core=core,.cache=cache};
     ksn_core_init(core);ksn_cache_init(cache);ksn_modal_init(&h->modal,focus);
     for(unsigned i=0;i<2;i++)h->views[i]=(ksn_view){.host=h,.layer=(ksn_layer)i,.outcome.layer=(ksn_layer)i};
 }
 ksn_view *ksn_view_host_endpoint(ksn_view_host *h,ksn_layer layer){
-    return h&&h->core&&h->cache&&(layer==KSN_APP||layer==KSN_SYSTEM)?&h->views[layer]:NULL;
+    return h&&h->core&&(layer==KSN_APP||layer==KSN_SYSTEM)?&h->views[layer]:NULL;
 }
 ksn_view_capabilities ksn_view_features(const ksn_view *v){
     if(!valid(v))return (ksn_view_capabilities){0};
@@ -45,8 +45,10 @@ ksn_view_capabilities ksn_view_features(const ksn_view *v){
 }
 ksn_view_stats ksn_view_get_stats(const ksn_view *v){
     if(!valid(v))return (ksn_view_stats){0};
-    return (ksn_view_stats){ksn_core_active_usage(v->host->core,v->layer),ksn_cache_get_stats(v->host->cache),
-                          sizeof(ksn_core)+sizeof(ksn_cache)+sizeof(ksn_view_host)+20};
+    ksn_cache_stats cache=ksn_cache_get_stats(v->host->cache);
+    return (ksn_view_stats){ksn_core_active_usage(v->host->core,v->layer),cache,
+                          sizeof(ksn_core)+sizeof(ksn_view_host)+20+
+                          (v->host->cache?KSN_CACHE_RESERVED_BYTES:0)};
 }
 ksn_result ksn_view_begin(ksn_view *v,ksn_update_mode mode,ksn_tx *out){
     if(!valid(v)||!out)return KSN_INVALID;
@@ -90,11 +92,13 @@ ksn_result ksn_view_cancel(ksn_view *v,ksn_tx tx){
 ksn_submission ksn_view_poll(const ksn_view *v){return valid(v)?v->outcome:(ksn_submission){0};}
 static bool idle(const ksn_view *v){return !v->host->builder.value&&!ksn_core_has_submission(v->host->core);}
 static bool template_owned(const ksn_view *v,ksn_template t){
+    if(!v->host->cache)return false;
     const ksn_cache_impl *c=&v->host->cache->state;
     for(unsigned i=0;i<c->template_count;i++)if(c->templates[i].id==t.value)return c->templates[i].layer==v->layer;
     return false;
 }
 static bool instance_owned(const ksn_view *v,ksn_instance t){
+    if(!v->host->cache)return false;
     const ksn_cache_impl *c=&v->host->cache->state;
     for(unsigned i=0;i<c->instance_count;i++)if(c->instances[i].id==t.value)return c->instances[i].layer==v->layer;
     return false;
@@ -102,6 +106,7 @@ static bool instance_owned(const ksn_view *v,ksn_instance t){
 ksn_result ksn_view_cache_create(ksn_view *v,const ksn_draw *d,uint16_t count,ksn_template *out){
     if(!valid(v)||!d||!count||!out)return KSN_INVALID;
     if(!idle(v))return KSN_BUSY;
+    if(!v->host->cache)return KSN_UNSUPPORTED;
     if(count>KSN_CACHE_COMMANDS)return KSN_LIMIT;
     for(unsigned i=0;i<count;i++)
         if(d[i].kind!=KSN_RECT&&d[i].kind!=KSN_ROUND_RECT&&d[i].kind!=KSN_STROKE)
@@ -141,13 +146,20 @@ ksn_result ksn_view_modal_close(ksn_view *v,ksn_tx tx){
 }
 void ksn_view_host_end_turn(ksn_view_host *h){if(h)abort_builder(h);}
 ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,ksn_render_stats *stats){
-    if(!h||!h->core||!h->cache||!stats)return KSN_INVALID;
+    if(!h||!h->core||!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     bool submitted=ksn_core_has_submission(h->core);
     if(!submitted&&!ksn_core_needs_repair(h->core))return KSN_OK;
     ksn_result r=ksn_render_rects(h->core,port,stats);
     if(r==KSN_OK&&submitted)resolve(h);
     return r;
+}
+ksn_result ksn_view_host_attach_cache(ksn_view_host *h,ksn_cache *cache){
+    if(!h||!h->core||!cache||!cache->state.commands||!cache->state.text)return KSN_INVALID;
+    if(h->cache||h->builder.value||ksn_core_has_submission(h->core))return KSN_BUSY;
+    /* The host may have prepared the first template in these blocks. Attach
+     * without reset, and leave both layer outcomes and committed core intact. */
+    h->cache=cache;return KSN_OK;
 }
 void ksn_view_host_invalidate(ksn_view_host *h){if(h)ksn_core_invalidate(h->core);}
 bool ksn_view_host_needs_present(const ksn_view_host *h){

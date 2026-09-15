@@ -4,6 +4,8 @@
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"view line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 static ksn_core core;
 static ksn_cache cache;
+static ksn_cache_command_block cache_commands;
+static ksn_cache_text_block cache_text;
 static uint16_t strip[240*8],panel[240*135];
 static int fail_y=-1;
 static uint16_t *buffer(void *ctx){(void)ctx;return strip;}
@@ -11,6 +13,7 @@ static ksn_result transfer(void *ctx,uint16_t y,uint16_t rows,const uint16_t *p)
     (void)ctx;memcpy(panel+y*240,p,rows*240*sizeof(*p));return y==fail_y?KSN_IO:KSN_OK;
 }
 int main(void){
+    CHECK(ksn_cache_bind(&cache,&cache_commands,&cache_text)==KSN_OK);
     ksn_view_host host;ksn_view_host_init(&host,&core,&cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP),*sys=ksn_view_host_endpoint(&host,KSN_SYSTEM);
     ksn_display_port port={NULL,buffer,transfer,240,135,8};ksn_render_stats stats;
@@ -109,6 +112,28 @@ int main(void){
     ksn_view_host_init(&host,&core,&cache,0);
     CHECK(ksn_view_cancel(app,app_ticket)==KSN_STALE);
     CHECK(ksn_view_cache_release(app,t)==KSN_STALE);
-    printf("view: PASS (coordinator=%zu B, cache/modal/IO/owner boundaries)\n",sizeof(host));
+    /* A coordinator can draw and repair without reserving a RAM cache. */
+    ksn_view_host_init(&host,&core,NULL,0);
+    CHECK(ksn_view_get_stats(app).shared_cache.native_bytes==0);
+    CHECK(ksn_view_get_stats(app).native_bytes==sizeof(core)+sizeof(host)+20);
+    d.kind=KSN_RECT;
+    CHECK(ksn_view_cache_create(app,&d,1,&t)==KSN_UNSUPPORTED);
+    CHECK(ksn_view_begin(app,KSN_REPLACE,&tx)==KSN_OK);
+    CHECK(ksn_view_background(app,tx,0x112233ff)==KSN_OK);
+    CHECK(ksn_view_host_attach_cache(&host,&cache)==KSN_BUSY);
+    CHECK(ksn_view_submit(app,tx)==KSN_OK);
+    CHECK(ksn_view_host_attach_cache(&host,&cache)==KSN_BUSY);
+    CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK);
+    ksn_submission before=ksn_view_poll(app);
+    ksn_view_host_invalidate(&host);
+    CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK);
+    CHECK(ksn_view_poll(app).ticket.value==before.ticket.value);
+    CHECK(ksn_cache_bind(&cache,&cache_commands,&cache_text)==KSN_OK);
+    CHECK(ksn_cache_create(&cache,KSN_APP,&d,1,&t)==KSN_OK);
+    CHECK(ksn_view_host_attach_cache(&host,&cache)==KSN_OK);
+    CHECK(ksn_view_poll(app).ticket.value==before.ticket.value);
+    CHECK(ksn_view_get_stats(app).shared_cache.templates==1);
+    CHECK(ksn_view_cache_release(app,t)==KSN_OK);
+    printf("view: PASS (coordinator=%zu B, optional cache/modal/IO/owner boundaries)\n",sizeof(host));
     return 0;
 }

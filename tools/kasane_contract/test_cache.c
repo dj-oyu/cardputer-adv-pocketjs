@@ -19,7 +19,8 @@ static ksn_result render_and_resolve(ksn_cache *cache,ksn_core *core,const ksn_d
     return ksn_cache_resolve(cache,core,frame.ticket,true);
 }
 int main(void){
-    ksn_core core;ksn_cache cache;ksn_core_init(&core);ksn_cache_init(&cache);
+    ksn_core core;ksn_cache cache;ksn_cache_command_block commands;ksn_cache_text_block text;
+    ksn_core_init(&core);CHECK(ksn_cache_bind(&cache,&commands,&text)==KSN_OK);
     ksn_client app=ksn_core_client(&core,KSN_APP);
     ksn_display_port display={NULL,get_strip,present,240,135,8};
     ksn_draw card[2]={
@@ -32,7 +33,7 @@ int main(void){
     card[0].data.shape.color=0xf5bb69ff;
     CHECK(ksn_cache_create(&cache,KSN_APP,card,2,&second)==KSN_OK);
     ksn_cache_stats usage=ksn_cache_get_stats(&cache);
-    CHECK(usage.native_bytes==KSN_CACHE_STORAGE_BYTES+2*sizeof(uint32_t));
+    CHECK(usage.native_bytes==KSN_CACHE_RESERVED_BYTES+2*sizeof(uint32_t));
     CHECK(usage.templates==2&&usage.commands==4&&usage.text_bytes==0);
     ksn_placement left={8,8,{0,0,240,135},255,true},right={128,8,{0,0,240,135},255,true};
     ksn_tx tx;ksn_instance a,b;

@@ -39,6 +39,24 @@ commit・pushして進める。実機未確認は各記録に残す。
   16 KiB基本予算の達成値として扱わず、次のメモリ設計で同時ピークへ加算する。
 - 実機検証はユーザー指示で保留。シリアル操作なし。
 
+## checkpoint 3a — optional/lazy cache（2026-09-15）
+
+- stashの途中変更を引き継ぎ、cacheなしのcoordinatorとJS初回cache.createの遅延確保を完成。
+  cacheはdescriptor/metadata、commands、textの借用3ブロック。固定領域callerもbindして利用する。
+- 初回template検証・JS wrapper確保・native確保後にのみhostへattachする。
+  失敗時は追加領域を回収し、表示済みbank、参照、pollを保持。release後の予約はresetまで保持。
+- C統計は共有ID20 Bをcache未使用時も計上。JS nativeBytesは実際の予約heapを示し、
+  cache.reservedBytesで任意cache分を確認できる。仕様のメモリ節に計上境界を記録した。
+- S3 ELF型情報: 基本10,344 B、cache追加3,056 B（496/1,536/1,024）。
+  cacheなし4,096 B減、cacheあり1,040 B減。base単一確保10,344 Bとstack peakはCP3の未完部分。
+  cache.createのdraw配列はstack1,920 B。CP3bでcoreを分割し、実機stackは後日確認する。
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、PIEモデル、C++ヘッダ）。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`と
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  および生成exeはPASS。3個別確保の各失敗、全回収、再試行、既存ref、JSなしrepairを確認。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,172,032 B、空き973,696 B、DIRAM123,404 B。
+  static DIRAM増分0。実機未確認、シリアル操作なし。
+
 ## checkpoint 0 — JS失敗の原子性（2026-09-15）
 
 - 有効な所有transactionで起きた引数検証・getter・確保失敗は、JSでcatchしても更新全体をabortする。
