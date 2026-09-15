@@ -75,6 +75,16 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Imain/pet \
     main/pet/ksn_pet.c main/pet/pet_pixels.c tools/kasane_contract/test_pet_provider.c -o "$out/pet-provider"
   "$out/pet-provider"
+  # Both arms of the PET provider's decoded-row cache in one binary. The
+  # counters exist only under -DKSN_PET_ROW_STATS (the shipping object has
+  # none) and the harness needs the core and the renderer because it mounts and
+  # renders real scenes. docs/perf/kasane-pet-row-cache.md 7 asks for exactly
+  # this line: it was left out of the provider commit so the wiring is its own
+  # change.
+  cc -std=c11 -Wall -Wextra -Werror $options -DKSN_PET_ROW_STATS -Imain/ui/kasane -Imain/pet \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/pet/ksn_pet.c main/pet/pet_pixels.c \
+    tools/kasane_contract/test_pet_row_cache_arms.c -o "$out/pet-row-cache"
+  "$out/pet-row-cache"
   python3 tools/make_font.py "$out"
   cc -std=c11 -Wall -Wextra -Werror $options -Itools/kasane_contract/fontshim \
     -Itools/hostshim -Imain/hal -Imain/text -Imain/ui/kasane -I"$out" \
