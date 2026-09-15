@@ -33,7 +33,7 @@ uint16_t *board_strip(void) { return shared; }
 // placement, so a build-to-build comparison is not a measurement). 1 = queue and
 // come back for the result on the next strip (the shipping path), 0 = the
 // blocking polling transfer this file has always used.
-int g_board_async = 1;
+int g_board_async = 1;   /* VISUAL BUILD: the async path is the one that swaps the bytes once */
 int board_async_get(void) { return g_board_async; }
 void board_async_set(int on) { g_board_async = on ? 1 : 0; }
 // The panel's own copies. `shared` stays the one buffer every screen draws into
@@ -108,6 +108,11 @@ static esp_err_t kread(uint8_t reg, uint8_t *value) {
 //
 // Nothing here is trusted on faith: board_init runs both versions over the same
 // bytes and only enables this one if they agree exactly.
+// The display path was suspected of racing commands against a strip transfer. It
+// does not: tx_reap() waits with portMAX_DELAY, command() calls it before every
+// command, and tx()'s first argument is the DC line rather than a byte swap. The
+// instruments that were going to prove otherwise measured nothing (they were taken
+// while the UI task was blocked, see the note in shell.c) and are not kept.
 static bool pie_swap;
 
 static void __attribute__((noinline)) swap_pie(uint16_t *pixels, unsigned blocks) {
@@ -356,8 +361,8 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     if(y!=next_row) {
         uint16_t x0=40, x1=279, y0=53+(uint16_t)y, y1=53+LCD_H-1;
         uint8_t xs[]={x0>>8,x0,x1>>8,x1}, ys[]={y0>>8,y0,y1>>8,y1};
-        esp_err_t e=command(0x2a,xs,4); if(e) return e;
-        e=command(0x2b,ys,4); if(e) return e;
+        esp_err_t ce=command(0x2a,xs,4); if(ce) return ce;
+        ce=command(0x2b,ys,4); if(ce) return ce;
         e=command(0x2c,NULL,0); if(e) return e;   // RAMWR: opens the write session
     }
     // The byte swap goes after the capture block above, which wants the pixels
