@@ -8,11 +8,12 @@
     throw Error('Kasane host services unavailable');
   console.log('KASANE_SERVICES PASS legacy=' + (typeof globalThis.ui !== 'undefined'));
   const view = pocket.kasane;
+  const pets = view.petImage();
   const tile = view.cache.create([
     {bounds: [0, 0, 42, 24], color: 0x185071ff},
     {bounds: [4, 4, 38, 20], color: 0x63d7bccc, opacity: 220}
   ]);
-  let orb, meter, groupFirst, left, right, panel, title, counter;
+  let orb, meter, groupFirst, left, right, panel, title, counter, pet, motion;
   let phase = 'app';
   let tick = 0;
 
@@ -53,6 +54,22 @@
     tx.strokeRect({bounds: [10, 117, 232, 129], width: 1, color: 0x80b5cfaa});
     left = tx.instantiate(tile, {offset: [142, 28], opacity: 230});
     right = tx.instantiate(tile, {offset: [188, 72], opacity: 175});
+    pet = tx.image({resource: pets, bounds: [-16, 30, 16, 62], clip: [8, 20, 232, 110],
+      variant: Math.floor(tick / 24) % 12, frame: Math.floor(tick / 4) % 6});
+    motion = pet.animate(tx, {
+      from: {bounds: [-16, 30, 16, 62], rotation: 0},
+      to: {bounds: [114, 22, 210, 118], rotation: 720},
+      durationMs: 2400, easing: 'ease-in-out', repeat: 'ping-pong'
+    });
+  }
+
+  function scene(tx) {
+    base(tx);
+    if (phase === 'modal') {
+      tx.modal.open({backdrop: 'dim-live', color: 0x06101a9c, focus: 1});
+      panel = tx.rect({bounds: [40, 35, 200, 105], color: 0x397391dc, opacity: 232});
+      tx.rect({bounds: [48, 43, 192, 97], color: 0xb8efff42, opacity: 150});
+    } else tx.modal.close();
   }
 
   view.replace(base);
@@ -61,16 +78,11 @@
     const x = 12 + (tick * 3 % 184);
     const width = 12 + (tick * 5 % 208);
     if (tick === 90) {
-      view.replace(function (tx) {
-        base(tx);
-        tx.modal.open({backdrop: 'dim-live', color: 0x06101a9c, focus: 1});
-        panel = tx.rect({bounds: [40, 35, 200, 105], color: 0x397391dc, opacity: 232});
-        tx.rect({bounds: [48, 43, 192, 97], color: 0xb8efff42, opacity: 150});
-      });
       phase = 'modal';
+      view.replace(scene);
     } else if (tick === 210) {
-      view.replace(function (tx) { base(tx); tx.modal.close(); });
       phase = 'app';
+      view.replace(scene);
     } else {
       view.patch(function (tx) {
         orb.setRect(tx, [x, 76, x + 20, 96]);
@@ -80,6 +92,8 @@
         right.setVisible(tx, (tick % 40) < 31);
         title.setReveal(tx, Math.floor(tick / 6) % 11);
         counter.setText(tx, 'tick ' + tick);
+        if ((tick % 4) === 0)
+          pet.setImageFrame(tx, Math.floor(tick / 24) % 12, Math.floor(tick / 4) % 6);
         if (phase === 'modal')
           panel.setColor(tx, (tick & 8) ? 0x397391dc : 0x316781dc);
       });
@@ -88,6 +102,7 @@
       const s = view.stats();
       console.log('KASANE_TICK ' + tick + ' scope=' + view.inputScope() +
                   ' commands=' + s.displayed.commands + ' native=' + s.nativeBytes);
+      console.log('KASANE_IMAGE nativeAnimation=' + motion.poll() + ' jsTransformUpdates=0');
     }
     if (buttons & 0x4000) console.log('KASANE_ENTER ' + tick);
   };

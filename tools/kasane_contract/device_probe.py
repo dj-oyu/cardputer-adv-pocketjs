@@ -60,6 +60,7 @@ def main():
             or 'KSN_PROBE: GLASS PASS' not in log
             or 'KSN_PROBE: VIEW PASS' not in log
             or 'KSN_PROBE: TEXT PASS glyph=U+3042 pixels=144 coverage_scratch=64 bytes=64800' not in log
+            or 'KSN_PROBE: IMAGE PASS frames=60' not in log
             or 'KSN_PROBE: PIE_AB PASS' not in log
             or 'KSN_PROBE: STRESS PASS frames=600' not in log):
         raise RuntimeError('Diagnostic did not pass and return to the home loop; see serial.log')
@@ -124,6 +125,38 @@ def main():
     png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
     (args.out / 'text-pre-spi.png').write_bytes(png)
     print('TEXT capture complete; target verified 144 coverage pixels against mapped font')
+    captures = re.findall(r'IMAGE_PIX_BEGIN frame=(\d+)(.*?)IMAGE_PIX_END', log, re.S)
+    if [int(frame) for frame, _ in captures] != [0, 1]:
+        raise RuntimeError('Missing image animation captures')
+    def mul(a, b):
+        return (a*b+127)//255
+    for frame, section in captures:
+        rows = {int(y): bytes.fromhex(p) for y, p in re.findall(r'PIX (\d+) ([0-9a-f]{960})', section)}
+        if set(rows) != set(range(135)):
+            raise RuntimeError('Incomplete image capture')
+        raw = bytearray()
+        for y in range(135):
+            raw.append(0)
+            for x in range(240):
+                expected = 0x19ec
+                for left, size, num, den, opacity, group in ((8,24,1,2,255,False), (80,48,1,4,200,True), (164,12,2,2,255,False)):
+                    if left <= x < left+size and 45 <= y < 45+size:
+                        sx, sy = 3+(2*(x-left)+1)*num//den, 2+(2*(y-45)+1)*num//den
+                        rgb = (sx*313+sy*937+int(frame)*3001)&0xffff
+                        channels = ((rgb>>11)<<3|(rgb>>13), ((rgb>>5)&63)<<2|((rgb>>9)&3), (rgb&31)<<3|((rgb&31)>>2))
+                        a = mul((0,1,127,128,254,255)[(sx+sy*3)%6], opacity)
+                        if a and (not group or mul(a,137)):
+                            result = [min(255, mul(mul(c,a),137)+mul(b,255-mul(a,137))) if group
+                                      else (c*a+b*(255-a)+127)//255 for c,b in zip(channels,(24,60,99))]
+                            expected = (result[0]>>3)<<11|(result[1]>>2)<<5|(result[2]>>3)
+                value = struct.unpack_from('>H', rows[y], x*2)[0]
+                if value != expected:
+                    raise RuntimeError(f'Image {frame} mismatch at {x},{y}: {value:04x} != {expected:04x}')
+                raw.extend((((value>>11)&31)*255//31, ((value>>5)&63)*255//63, (value&31)*255//31))
+        png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB',240,135,8,2,0,0,0))
+        png += chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND',b'')
+        (args.out / f'image-{frame}.png').write_bytes(png)
+    print('IMAGE_PIXELS PASS 64800 pixels: crop/scale, alpha/group, frame selection')
     captures = re.findall(r'STRESS_PIX_BEGIN frame=(\d+) tick=(\d+) radius=(\d+)(.*?)STRESS_PIX_END', log, re.S)
     if [int(c[0]) for c in captures] != [0, 299, 599]:
         raise RuntimeError('Missing temporal stress captures')

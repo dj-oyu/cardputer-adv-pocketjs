@@ -20,6 +20,9 @@ static ksn_result mutation(ksn_view *v,ksn_tx tx,ksn_result result){
 static void resolve(ksn_view_host *h){
     ksn_submission s=ksn_core_poll(h->core);
     if(s.status!=KSN_PRESENTED&&s.status!=KSN_DISCARDED)return;
+    if(s.ticket.value&&s.ticket.value==h->animation_submission.value){
+        h->animation_submission=(ksn_tx){0};return;
+    }
     ksn_cache_resolve(h->cache,h->core,s.ticket,s.status==KSN_PRESENTED);
     if(h->modal.pending.value==s.ticket.value)ksn_modal_resolve(&h->modal,h->core);
     h->views[s.layer].outcome=s;
@@ -33,22 +36,27 @@ void ksn_view_host_init(ksn_view_host *h,ksn_core *core,ksn_cache *cache,uint32_
 ksn_view *ksn_view_host_endpoint(ksn_view_host *h,ksn_layer layer){
     return h&&h->core&&(layer==KSN_APP||layer==KSN_SYSTEM)?&h->views[layer]:NULL;
 }
+ksn_result ksn_view_host_register_image(ksn_view *v,const ksn_image_port *port,ksn_resource *out){
+    if(!valid(v)||(v->layer!=KSN_APP&&v->layer!=KSN_SYSTEM))return KSN_INVALID;
+    if(v->host->presenting)return KSN_BUSY;
+    return ksn_core_register_image(v->host->core,v->layer,port,out);
+}
 ksn_view_capabilities ksn_view_features(const ksn_view *v){
     if(!valid(v))return (ksn_view_capabilities){0};
     return (ksn_view_capabilities){.draw_kinds=(1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
-        (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)|(1u<<KSN_TEXT),
+        (1u<<KSN_STROKE)|(1u<<KSN_GRADIENT)|(1u<<KSN_TEXT)|(1u<<KSN_IMAGE),
         .cache_kinds=(1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|(1u<<KSN_STROKE),
-        .group_opacity=true,.modal=v->layer==KSN_APP,
+        .group_opacity=true,.modal=v->layer==KSN_APP,.animation=true,
         .capacity={v->layer==KSN_APP?KSN_APP_COMMANDS:KSN_SYSTEM_COMMANDS,
-                   v->layer==KSN_APP?KSN_APP_TEXT_BYTES:KSN_SYSTEM_TEXT_BYTES,0},
+                   v->layer==KSN_APP?KSN_APP_TEXT_BYTES:KSN_SYSTEM_TEXT_BYTES,v->layer==KSN_APP?KSN_APP_TRACKS:KSN_SYSTEM_TRACKS},
         .cache_commands=KSN_CACHE_COMMANDS,.cache_templates=KSN_CACHE_TEMPLATES,.cache_instances=KSN_CACHE_INSTANCES};
 }
 ksn_view_stats ksn_view_get_stats(const ksn_view *v){
     if(!valid(v))return (ksn_view_stats){0};
     ksn_cache_stats cache=ksn_cache_get_stats(v->host->cache);
     return (ksn_view_stats){ksn_core_active_usage(v->host->core,v->layer),cache,
-                          KSN_CORE_RESERVED_BYTES+sizeof(ksn_view_host)+20+
-                          (v->host->cache?KSN_CACHE_RESERVED_BYTES:0)};
+                          KSN_CORE_RESERVED_BYTES+sizeof(ksn_view_host)+24+
+                          (v->host->cache?KSN_CACHE_RESERVED_BYTES:0)+ksn_core_animation_bytes(v->host->core)};
 }
 ksn_result ksn_view_begin(ksn_view *v,ksn_update_mode mode,ksn_tx *out){
     if(!valid(v)||!out)return KSN_INVALID;
@@ -63,12 +71,29 @@ ksn_result ksn_view_background(ksn_view *v,ksn_tx tx,ksn_rgba color){
 ksn_result ksn_view_add(ksn_view *v,ksn_tx tx,const ksn_draw *d,ksn_ref *out){
     if(!owns(v,tx))return KSN_STALE;
     if(!d||!out)return mutation(v,tx,KSN_INVALID);
-    if(d->kind<KSN_RECT||d->kind>KSN_TEXT)return mutation(v,tx,KSN_UNSUPPORTED);
+    if(d->kind<KSN_RECT||d->kind>KSN_IMAGE)return mutation(v,tx,KSN_UNSUPPORTED);
     ksn_client c=client(v);return mutation(v,tx,c.ops->add(c.ctx,tx,d,out));
 }
 ksn_result ksn_view_change(ksn_view *v,ksn_tx tx,ksn_ref ref,const ksn_change *change){
     if(!owns(v,tx))return KSN_STALE;
     ksn_client c=client(v);return mutation(v,tx,c.ops->change(c.ctx,tx,ref,change));
+}
+ksn_result ksn_view_animate(ksn_view *v,ksn_tx tx,const ksn_motion *motion,ksn_animation *out){
+    if(!owns(v,tx))return KSN_STALE;
+    ksn_client c=client(v);return mutation(v,tx,c.ops->animate(c.ctx,tx,motion,out));
+}
+ksn_result ksn_view_stop_animation(ksn_view *v,ksn_tx tx,ksn_animation id,bool finish){
+    if(!owns(v,tx))return KSN_STALE;
+    ksn_client c=client(v);
+    return mutation(v,tx,finish?ksn_core_finish_animation(v->host->core,v->layer,tx,id):c.ops->stop(c.ctx,tx,id));
+}
+ksn_animation_status ksn_view_poll_animation(const ksn_view *v,ksn_animation id){
+    return valid(v)?ksn_core_poll_animation(v->host->core,v->layer,id):KSN_ANIMATION_DISCARDED;
+}
+ksn_result ksn_view_host_advance_animations(ksn_view_host *h,uint64_t now,bool reduce){
+    if(!h||!h->core)return KSN_INVALID;
+    if(h->presenting||h->builder.value||ksn_core_has_submission(h->core))return KSN_BUSY;
+    return ksn_core_advance_animations(h->core,now,reduce,&h->animation_submission);
 }
 ksn_result ksn_view_group(ksn_view *v,ksn_tx tx,ksn_ref first,uint16_t count,uint8_t opacity){
     if(!owns(v,tx))return KSN_STALE;

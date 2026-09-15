@@ -26,6 +26,9 @@ ksn_result ksn_view_begin(ksn_view *,ksn_update_mode,ksn_tx *);
 ksn_result ksn_view_background(ksn_view *,ksn_tx,ksn_rgba);
 ksn_result ksn_view_add(ksn_view *,ksn_tx,const ksn_draw *,ksn_ref *);
 ksn_result ksn_view_change(ksn_view *,ksn_tx,ksn_ref,const ksn_change *);
+ksn_result ksn_view_animate(ksn_view *,ksn_tx,const ksn_motion *,ksn_animation *);
+ksn_result ksn_view_stop_animation(ksn_view *,ksn_tx,ksn_animation,bool finish);
+ksn_animation_status ksn_view_poll_animation(const ksn_view *,ksn_animation);
 ksn_result ksn_view_group(ksn_view *,ksn_tx,ksn_ref first,uint16_t count,uint8_t opacity);
 /* A mutation failure in the current owning builder aborts all its changes.
  * A foreign/stale ticket never cancels another builder. Submit seals only:

@@ -113,6 +113,53 @@ static ksn_result probe_display(ksn_core *core){
     ksn_render_stats stats;return ksn_render_rects(core,&display,&stats);
 }
 
+static ksn_result image_probe_span(void *ctx,uint16_t variant,uint16_t frame,uint16_t y,uint16_t x,
+                                   uint16_t count,uint16_t *rgb,uint8_t *alpha){
+    (void)ctx;
+    static const uint8_t levels[]={0,1,127,128,254,255};
+    if(variant||frame>1||y>=32||x+count>32)return KSN_INVALID;
+    for(unsigned i=0;i<count;i++){
+        rgb[i]=(uint16_t)((x+i)*313+y*937+frame*3001);
+        alpha[i]=levels[(x+i+y*3)%6];
+    }
+    return KSN_OK;
+}
+static ksn_result image_demo(void){
+    ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
+    ksn_image_port source={NULL,32,32,1,2,image_probe_span};ksn_resource resource;
+    ksn_client app=ksn_core_client(&probe_core,KSN_APP);ksn_tx tx;ksn_ref refs[3];
+#define I(call) do{ksn_result r=(call);if(r!=KSN_OK)return r;}while(0)
+    I(ksn_core_register_image(&probe_core,KSN_APP,&source,&resource));
+    I(app.ops->begin(app.ctx,KSN_REPLACE,&tx));I(app.ops->background(app.ctx,tx,0x183c60ff));
+    for(unsigned i=0;i<3;i++){
+        const int x[]={8,80,164},size[]={24,48,12};
+        ksn_draw d={.kind=KSN_IMAGE,.bounds={x[i],45,x[i]+size[i],45+size[i]},
+            .clip={0,0,240,135},.opacity=i==1?200:255,
+            .data.image={.resource=resource,.source_x=3,.source_y=2,.scale=(ksn_image_scale)i}};
+        I(app.ops->add(app.ctx,tx,&d,&refs[i]));
+    }
+    I(ksn_core_group(&probe_core,KSN_APP,tx,refs[1],1,137));I(app.ops->end(app.ctx,tx));
+    int64_t sum=0,max=0;size_t before=heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    for(unsigned frame=0;frame<60;frame++){
+        if(frame){
+            I(app.ops->begin(app.ctx,KSN_PATCH,&tx));
+            ksn_change change={.property=KSN_SET_IMAGE_FRAME,.value.image={0,frame&1}};
+            for(unsigned i=0;i<3;i++)I(app.ops->change(app.ctx,tx,refs[i],&change));
+            I(app.ops->end(app.ctx,tx));
+        }
+        bool capture=frame==0||frame==59;
+        if(capture){ksn_core_invalidate(&probe_core);ESP_LOGI("KSN_PROBE","IMAGE_PIX_BEGIN frame=%u",frame&1);board_capture(true);}
+        int64_t start=esp_timer_get_time();ksn_result result=probe_display(&probe_core);
+        int64_t elapsed=esp_timer_get_time()-start;
+        if(capture){board_capture(false);ESP_LOGI("KSN_PROBE","IMAGE_PIX_END");}
+        else{sum+=elapsed;if(elapsed>max)max=elapsed;}
+        I(result);vTaskDelay(pdMS_TO_TICKS(33));
+    }
+    ESP_LOGI("KSN_PROBE","IMAGE PASS frames=60 mean_us=%lld max_us=%lld before=%u after=%u",
+        (long long)(sum/58),(long long)max,(unsigned)before,(unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+#undef I
+    return KSN_OK;
+}
 static ksn_result text_demo(void){
     ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
     ksn_client app=ksn_core_client(&probe_core,KSN_APP);ksn_tx tx;ksn_ref ref;
@@ -280,6 +327,7 @@ void ksn_device_probe_run(void){
     if(view_demo()!=KSN_OK)goto fail;
     if(glass_demo()!=KSN_OK)goto fail;
     if(text_demo()!=KSN_OK)goto fail;
+    if(image_demo()!=KSN_OK)goto fail;
     if(ksn_stress_probe_run(&probe_frost)!=KSN_OK)goto fail;
     ESP_LOGI(tag,"PASS iterations=1000 tx_mean_us=%lld tx_max_us=%lld heap_before=%u heap_after=%u stack_free=%u",
              (long long)(sum/1000),(long long)max,(unsigned)free_before,(unsigned)free_after,

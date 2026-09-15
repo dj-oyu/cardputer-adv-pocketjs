@@ -3,6 +3,7 @@
 #include "pocket_kasane.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "text/ksn_font.h"
+#include "pet/ksn_pet.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -303,7 +304,7 @@ static bool open_fault_runtime(const char *exercise) {
 }
 
 static void fault_sweep(const char *label,const char *exercise,bool arm_inside) {
-    unsigned injected=0;bool passed=true,finished=false;
+    unsigned injected=0,recovered=0;bool passed=true,finished=false;
     for(fault_index=0;fault_index<256;fault_index++) {
         if(!open_fault_runtime(exercise)) { passed=false;close_fault_runtime();break; }
         JSValue global=JS_GetGlobalObject(ctx);
@@ -312,28 +313,50 @@ static void fault_sweep(const char *label,const char *exercise,bool arm_inside) 
         fault_hit=false;fault_after=arm_inside?-1:(long)fault_index;
         JSValue result=JS_Call(ctx,function,JS_UNDEFINED,0,NULL);
         fault_after=-1;
-        if(fault_hit) {
+        if(fault_hit&&!JS_IsException(result)&&!JS_HasException(ctx)){
+            /* QuickJS's optional shape-hash resize may fail without failing
+             * object creation. A complete successful operation is valid. */
+            injected++;recovered++;
+            ksn_render_stats stats;
+            if(pocket_kasane_has_submission()&&present(&stats)!=KSN_OK)passed=false;
+        } else if(fault_hit) {
             injected++;
-            if(!JS_IsException(result)||!JS_HasException(ctx)||pocket_kasane_has_submission())
+            if(!JS_IsException(result)||!JS_HasException(ctx)||pocket_kasane_has_submission()){
+                printf("    fault index=%u exception=%d pendingException=%d submission=%d\n",fault_index,
+                       JS_IsException(result),JS_HasException(ctx),pocket_kasane_has_submission());
                 passed=false;
+            }
             JSValue error=JS_GetException(ctx);JS_FreeValue(ctx,error);
             if(!run("let s=kasane.stats();if(s.displayed.commands!==2||s.cache.instances!==1||"
                     "s.cache.templates!==1||s.cache.commands!==1)throw Error('fault quota');"
                     "kasane.patch(tx=>baseRef.setColor(tx,0x00ff00ff));"
                     "kasane.cancel(kasane.poll().ticket);")) passed=false;
         } else {
-            if(JS_IsException(result)||JS_HasException(ctx)) passed=false;
+            if(JS_IsException(result)||JS_HasException(ctx)) {
+                JSValue error=JS_GetException(ctx);const char *message=JS_ToCString(ctx,error);
+                printf("    non-injected failure index=%u: %s\n",fault_index,message?message:"?");
+                JS_FreeCString(ctx,message);JS_FreeValue(ctx,error);passed=false;
+            }
             finished=true;
         }
         JS_FreeValue(ctx,result);JS_FreeValue(ctx,function);close_fault_runtime();
-        if(live_allocations) passed=false;
+        if(live_allocations){printf("    leaked=%zu at fault=%u\n",live_allocations,fault_index);passed=false;}
         if(finished||!passed) break;
     }
-    printf("    %s: %u allocation failures injected\n",label,injected);
+    printf("    %s: %u allocation failures injected (%u engine recoveries)\n",label,injected,recovered);
     check(passed&&finished&&injected>0,label);
 }
 
 static void allocator_tests(void) {
+    fault_sweep("animation spec and wrapper failures abort the whole scene",
+                "globalThis.asset=kasane.petImage();globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
+                "tx.image({resource:asset,bounds:[0,0,32,32]}).animate(tx,{from:{bounds:[0,0,32,32],rotation:0},"
+                "to:{bounds:[20,20,84,84],rotation:720},durationMs:1200,easing:'ease-in-out',repeat:'once'})});",false);
+    fault_sweep("image resource allocation failures reserve no native slot",
+                "globalThis.exercise=()=>kasane.petImage();",false);
+    fault_sweep("image draw allocation failures abort the candidate",
+                "globalThis.asset=kasane.petImage();globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
+                "return tx.image({resource:asset,bounds:[0,0,32,32],scale:0.5})});",false);
     fault_sweep("text conversion and wrapper allocation failures reclaim the candidate",
                 "globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
                 "tx.text({bounds:[0,0,100,16],text:'日本語',capacity:24,color:0xffffffff})});",false);
@@ -589,6 +612,161 @@ static void text_tests(void){
     close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"text teardown frees guest and native owner");
 }
 
+static uint16_t image_over_black(uint16_t rgb,uint8_t alpha){
+    unsigned r=rgb>>11,g=(rgb>>5)&63,b=rgb&31;
+    r=((r*8+r/4)*alpha+127)/255;
+    g=((g*4+g/16)*alpha+127)/255;
+    b=((b*8+b/4)*alpha+127)/255;
+    return (uint16_t)((r/8)*2048+(g/4)*32+b/8);
+}
+static void image_tests(void){
+    check(open_fault_runtime(""),"image fixture opens");
+    ksn_render_stats stats;ksn_image_port port;
+    check(ksn_pet_builtin_image(&port)==KSN_OK,"real embedded PPT2 provider validates");
+    check(run("globalThis.asset=kasane.petImage();globalThis.sprite=null;"
+              "if(!kasane.features().image||asset.width!==64||asset.frames!==6||asset.variants!==12)throw Error('metadata');"
+              "for(let i=0;i<100;i++)kasane.petImage();"
+              "kasane.replace(tx=>{tx.background(255);sprite=tx.image({resource:asset,bounds:[0,0,64,64],clip:[0,0,240,135]})});"),
+          "JS exposes a borrowed image and repeated handles");
+    check(present(&stats)==KSN_OK,"JS image presents");
+    bool pixels=true;uint16_t rgb[64];uint8_t alpha[64];
+    for(unsigned y=0;y<64;y++){
+        port.read_span(port.ctx,0,0,y,0,64,rgb,alpha);
+        for(unsigned x=0;x<64;x++){
+            if(panel_pixels[y*240+x]!=image_over_black(rgb[x],alpha[x])){
+                if(pixels)printf("    pixel %u,%u actual=%04x expected=%04x rgb=%04x alpha=%u\n",x,y,
+                    panel_pixels[y*240+x],image_over_black(rgb[x],alpha[x]),rgb[x],alpha[x]);
+                pixels=false;
+            }
+        }
+    }
+    check(pixels,"JS image pixels match real PPT2 span");
+    check(run("kasane.patch(tx=>sprite.setImageFrame(tx,11,5));"),"JS frame PATCH submitted");
+    fail_band=1;check(present(&stats)==KSN_IO,"image partial transfer retains snapshot");fail_band=-1;
+    check(run("for(let i=0;i<20;i++)kasane.petImage();"),"borrowing existing resource while pending does not mutate source");
+    check(present(&stats)==KSN_OK,"image repair presents fixed variant and frame");
+    pixels=true;
+    for(unsigned y=0;y<64;y++){
+        port.read_span(port.ctx,11,5,y,0,64,rgb,alpha);
+        for(unsigned x=0;x<64;x++)if(panel_pixels[y*240+x]!=image_over_black(rgb[x],alpha[x]))pixels=false;
+    }
+    check(pixels,"repaired image uses submitted mood");
+    for(unsigned size=1;size<=135;size+=7){
+        char js[160];
+        /* Signed formatting is important for the one-pixel destination. */
+        snprintf(js,sizeof(js),"kasane.patch(tx=>sprite.setRect(tx,[-3,7,%d,%d]));",(int)size-3,(int)size+7);
+        check(run(js)&&present(&stats)==KSN_OK,"JS setRect stretches the same source without REPLACE");
+        pixels=true;
+        for(unsigned y=0;y<135;y++)for(unsigned x=0;x<240;x++){
+            uint16_t want=0;
+            if((int)x<(int)size-3&&y>=7&&y<size+7){
+                unsigned sx=(unsigned)((2ull*(x+3)+1)*64/(2*size));
+                unsigned sy=(unsigned)((2ull*(y-7)+1)*64/(2*size));
+                port.read_span(port.ctx,11,5,sy,sx,1,rgb,alpha);want=image_over_black(rgb[0],alpha[0]);
+            }
+            if(panel_pixels[y*240+x]!=want)pixels=false;
+        }
+        check(pixels,"stretched image and old footprint match pixel-center reference");
+    }
+    check(run("kasane.patch(tx=>{sprite.setRect(tx,[20,20,84,84]);sprite.setRotation(tx,90)});"),
+          "JS rotates the image around its destination center");
+    check(present(&stats)==KSN_OK,"rotated image presents");
+    pixels=true;
+    for(unsigned y=0;y<135;y++)for(unsigned x=0;x<240;x++){
+        uint16_t want=0;
+        if(x>=20&&x<84&&y>=20&&y<84){
+            port.read_span(port.ctx,11,5,83-x,y-20,1,rgb,alpha);want=image_over_black(rgb[0],alpha[0]);
+        }
+        if(panel_pixels[y*240+x]!=want)pixels=false;
+    }
+    check(pixels,"90-degree JS rotation matches independent transposed PPT2 coordinates");
+    check(run("for(const bad of [{rotation:NaN},{rotation:Infinity},{rotation:40000},{scale:1,rotation:45},"
+              "{sourceWidth:257},{variant:12},{frame:6},{sourceX:33,scale:0.5},{scale:3},{sourceY:-1},{resource:{}},"
+              "{get sourceX(){throw Error('getter')}}]){let failed=false;try{kasane.replace(tx=>{"
+              "try{tx.image(Object.assign({resource:asset,bounds:[0,0,32,32]},bad))}catch(e){};"
+              "tx.rect(shape)})}catch(e){failed=true}if(!failed)throw Error('accepted bad image')}"
+              "let failed=false;try{kasane.patch(tx=>sprite.setImageFrame(tx,0,6))}catch(e){failed=true}"
+              "if(!failed)throw Error('bad mood');"),"image validation and caught getter errors abort whole update");
+    ksn_view *system;ksn_resource resources[15];
+    check(ksn_runtime_system_acquire(&system)==KSN_OK,"SYSTEM image owner acquired");
+    bool quota=true;for(unsigned i=0;i<15;i++)
+        if(ksn_view_host_register_image(system,&port,&resources[i])!=KSN_OK)quota=false;
+    ksn_resource extra;
+    check(quota&&ksn_view_host_register_image(system,&port,&extra)==KSN_LIMIT,
+          "120 JS handles consume exactly one of 16 native resources");
+    pocket_kasane_reset();
+    check(run("failed=false;try{kasane.replace(tx=>tx.image({resource:asset,bounds:[0,0,64,64]}))}"
+              "catch(e){failed=e.code==='CLOSED'}if(!failed)throw Error('stale asset revived');"
+              "asset=kasane.petImage();"),"APP reset invalidates old resource and reclaims its slot");
+    ksn_draw draw={.kind=KSN_IMAGE,.bounds={0,0,32,32},.clip={0,0,240,135},.opacity=255,
+        .data.image={.resource=resources[14],.variant=4,.frame=3,.scale=KSN_IMAGE_HALF}};
+    ksn_tx tx;ksn_ref ref;
+    check(ksn_view_begin(system,KSN_REPLACE,&tx)==KSN_OK&&ksn_view_add(system,tx,&draw,&ref)==KSN_OK&&
+          ksn_view_submit(system,tx)==KSN_OK&&present(&stats)==KSN_OK,"SYSTEM images survive APP reset");
+    close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"image owners and guest teardown release all storage");
+}
+
+static void animation_tests(void){
+    check(open_fault_runtime("globalThis.asset=kasane.petImage();globalThis.sprite=null;globalThis.motion=null;"
+          "globalThis.motionSpec={from:{bounds:[10,20,42,52],rotation:0},to:{bounds:[110,30,206,126],rotation:720},"
+          "durationMs:1000,easing:'linear',repeat:'once'};"),"animation fixture opens");
+    ksn_render_stats stats;size_t before=ksn_runtime_reserved_bytes();
+    native_fault=true;
+    check(run("let failed=false;try{kasane.replace(tx=>{tx.background(255);"
+              "sprite=tx.image({resource:asset,bounds:[0,0,32,32]});sprite.animate(tx,motionSpec)})}"
+              "catch(e){failed=e.code==='OUT_OF_MEMORY'}if(!failed)throw Error('native allocation');"),
+          "native track allocation OOM aborts scene");
+    check(ksn_runtime_reserved_bytes()==before&&!pocket_kasane_has_submission(),"native track allocation rollback preserves reservation");
+    check(run("globalThis.animationTicket=kasane.replace(tx=>{tx.background(255);"
+              "sprite=tx.image({resource:asset,bounds:[0,0,32,32],clip:[0,0,240,135]});motion=sprite.animate(tx,motionSpec)});"
+              "if(motion.poll()!=='pending')throw Error('premature running');"),"JS submits a declarative multi-turn animation");
+    check(ksn_runtime_reserved_bytes()-before<=1024,"optional animation banks stay within 1 KiB");
+    check(present(&stats)==KSN_OK,"start pose presents");pocket_kasane_animations_presented(1000000);
+    check(run("if(motion.poll()!=='running')throw Error('not started')"),"animation starts on presentation acknowledgement");
+    JS_RunGC(rt);size_t live=live_allocations,native=ksn_runtime_reserved_bytes();transfers=0;
+    for(uint64_t now=1040000;now<=2040000;now+=40000){
+        if(pocket_kasane_advance(now)!=KSN_OK||!pocket_kasane_animation_pending()||present(&stats)!=KSN_OK){
+            check(false,"native automatic animation tick");break;
+        }
+        pocket_kasane_animations_presented(now);
+        if(now==2000000)break;
+    }
+    check(transfers>0&&live_allocations==live&&ksn_runtime_reserved_bytes()==native,
+          "movement scaling and rotation advance with no JS calls or allocations");
+    check(run("if(motion.poll()!=='finished'||kasane.poll().status!=='PRESENTED')throw Error('completion');"
+              "kasane.patch(tx=>sprite.setImageFrame(tx,3,2));"),"completion keeps guest outcome and DrawRef usable");
+    check(present(&stats)==KSN_OK,"ordinary JS patch follows automatic completion");
+    check(run("kasane.patch(tx=>{motion= sprite.animate(tx,Object.assign({},motionSpec,{repeat:'ping-pong'}))});"),"ping-pong can restart on same DrawRef");
+    check(present(&stats)==KSN_OK,"restart presents");pocket_kasane_animations_presented(3000000);
+    check(pocket_kasane_advance(3400000)==KSN_OK,"automatic sample prepares");
+    fail_once=true;check(present(&stats)==KSN_IO,"automatic transfer failure retained");
+    check(pocket_kasane_advance(3700000)==KSN_BUSY,"no sampling over failed automatic frame");
+    check(present(&stats)==KSN_OK,"automatic repair succeeds");
+    pocket_kasane_set_animation_time(3800000);
+    check(run("kasane.patch(tx=>sprite.setImageFrame(tx,4,3));")&&!pocket_kasane_animation_pending(),
+          "guest update includes due animation sample in one submission");
+    check(present(&stats)==KSN_OK&&ksn_runtime_animation_deadline()==3833334,"coalesced guest frame advances animation clock");
+    check(run("let t=kasane.patch(tx=>motion.stop(tx));kasane.cancel(t);"
+              "if(motion.poll()!=='running')throw Error('cancelled stop');"
+              "kasane.patch(tx=>{motion.stop(tx);sprite.setRect(tx,[1,2,33,34])});"),"stop cancellation and explicit manual takeover");
+    check(present(&stats)==KSN_OK&&ksn_runtime_animation_deadline()==UINT64_MAX,"stopped animation schedules no further wake");
+    check(run("if(motion.poll()!=='stopped')throw Error('stop state');"
+              "kasane.patch(tx=>motion.finish(tx));"),"finish moves stopped animation to its explicit endpoint");
+    check(present(&stats)==KSN_OK,"finish presents endpoint");
+    check(run("kasane.patch(tx=>{motion=sprite.animate(tx,motionSpec)});"),"hidden animation fixture restarts");
+    check(present(&stats)==KSN_OK,"hidden start presents");pocket_kasane_animations_presented(6000000);
+    ksn_runtime_set_hidden(true);
+    check(pocket_kasane_advance(6800000)==KSN_OK&&!pocket_kasane_has_submission()&&ksn_runtime_animation_deadline()==UINT64_MAX,
+          "hidden animation neither samples nor schedules a display wake");
+    ksn_runtime_set_hidden(false);
+    check(pocket_kasane_advance(6800000)==KSN_OK&&present(&stats)==KSN_OK,"visible animation catches up to current time");
+    ksn_runtime_set_reduce_motion(true);
+    check(pocket_kasane_advance(6800001)==KSN_OK&&present(&stats)==KSN_OK,"reduce-motion advances to endpoint");
+    check(run("if(motion.poll()!=='finished')throw Error('reduce motion')"),"reduce-motion completion commits");
+    pocket_kasane_reset();check(run("if(motion.poll()!=='discarded')throw Error('old animation')"),"APP exit invalidates animation wrapper");
+    close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"animation teardown releases all guest and native storage");
+}
+
 int main(void) {
     rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
     check(pocket_kasane_install(ctx,NULL)==ESP_OK,"namespace installs");
@@ -678,6 +856,8 @@ int main(void) {
     system_lifetime_tests();
     primitive_tests();
     text_tests();
+    image_tests();
+    animation_tests();
     printf("%s: %u failure(s)\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }

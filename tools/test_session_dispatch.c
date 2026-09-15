@@ -7,12 +7,15 @@
 #include <string.h>
 typedef int esp_err_t;
 enum {ESP_OK=0,ESP_FAIL=-1,ESP_ERR_TIMEOUT=-2,KSN_INPUT_APP,KSN_INPUT_BLOCKED};
+typedef int ksn_result;
+enum { KSN_OK, KSN_BUSY };
 typedef struct {size_t struct_size;uint32_t buttons,analog;const uint32_t *touches;
     const int32_t *touch_hits;size_t touch_count;} pocketjs_guest_frame_t;
 typedef struct {size_t struct_size;} pocketjs_ui_frame_view_t;
 static void *guest,*core;
 static bool turn_continued,pending,remain,active,activate,need_present,submission;
 static bool runaway,exit_requested,stopped;
+static bool kasane_session;
 static unsigned continuation_turns,ticks;
 static uint32_t deferred_buttons,delivered,armed;
 static int scope,guest_error,draw_error;
@@ -37,6 +40,9 @@ static int pocketjs_ui_core_draw(void *c,pocketjs_ui_frame_view_t *f){
 static bool pocket_kasane_active(void){return active;}
 static bool pocket_kasane_needs_present(void){return need_present;}
 static bool pocket_kasane_has_submission(void){return submission;}
+static void pocket_kasane_set_animation_time(uint64_t now){(void)now;}
+static bool native_animation;
+static bool pocket_kasane_animation_pending(void){return native_animation;}
 static int pocket_kasane_input_scope(bool b){(void)b;return scope;}
 static void pocket_kasane_end_turn(void){call('E');}
 static void report_oom_if_any(void){call('O');}
@@ -53,6 +59,8 @@ static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
 #include "session_dispatch_impl.inc"
 static void reset(void){
     calls[0]=0;pending=remain=active=activate=need_present=submission=false;
+    kasane_session=false;
+    native_animation=false;
     runaway=exit_requested=stopped=turn_continued=false;scope=KSN_INPUT_APP;
     deferred_buttons=delivered=armed=continuation_turns=ticks=0;
     guest_error=draw_error=0;now=40000;last_present_us=0;turn_sum=0;
@@ -61,6 +69,7 @@ int main(void){
     reset();assert(app_tick(0x4000)==0);assert(delivered==0x4000&&armed==0x4000);
     assert(!strcmp(calls,"AatiobncpfvukEFTDEOP"));
     reset();active=true;assert(app_tick(0)==0);assert(!strchr(calls,'T')&&!strchr(calls,'D'));
+    reset();kasane_session=true;assert(app_tick(0)==0);assert(!active&&!strchr(calls,'T')&&!strchr(calls,'D'));
     reset();activate=true;assert(app_tick(0)==0);assert(active&&!strchr(calls,'T'));
     reset();guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
     assert(strstr(calls,"FEO")&&!strchr(calls,'T')&&!strchr(calls,'P'));
@@ -86,6 +95,7 @@ int main(void){
     reset();pending=true;guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
     assert(!strcmp(calls,"ACEO"));
     reset();active=need_present=submission=true;assert(app_tick(0)==0);assert(!strcmp(calls,"P"));
+    reset();active=need_present=submission=native_animation=true;assert(app_tick(0)==0);assert(calls[0]=='P'&&strchr(calls,'F'));
     reset();active=need_present=true;assert(app_tick(0)==0);assert(calls[0]=='P'&&strchr(calls,'F'));
     reset();active=need_present=submission=true;assert(app_tick(0x2000)==0);assert(delivered==0x2000);
     reset();active=true;scope=KSN_INPUT_BLOCKED;assert(app_tick(0x4000)==0);assert(!delivered);

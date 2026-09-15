@@ -12,6 +12,7 @@ struct ksn_view_host {
     ksn_modal modal;
     ksn_view views[2];
     ksn_tx builder;
+    ksn_tx animation_submission;
     ksn_layer building_layer;
     bool presenting;
 };
@@ -25,6 +26,10 @@ extern "C" {
  * guest endpoints before reset. Existing process-wide ID issuers stay intact. */
 void ksn_view_host_init(ksn_view_host *,ksn_core *,ksn_cache *,uint32_t initial_focus);
 ksn_view *ksn_view_host_endpoint(ksn_view_host *,ksn_layer);
+/* Register immutable borrowed sources between updates. Owner reset releases
+ * descriptors; source bytes must outlive that reset. No per-frame selection. */
+ksn_result ksn_view_host_register_image(ksn_view *,const ksn_image_port *,ksn_resource *);
+ksn_result ksn_view_host_advance_animations(ksn_view_host *,uint64_t now_us,bool reduce_motion);
 /* Enable an optional bound cache only between guest updates. Does not reset
  * it or allocate; failure leaves the coordinator and supplied cache unchanged. */
 ksn_result ksn_view_host_attach_cache(ksn_view_host *,ksn_cache *);

@@ -4,6 +4,17 @@
 #include "ksn_ports.h"
 #include "ksn_composition_types.h"
 #define KSN_RESOURCES 16u
+#define KSN_APP_TRACKS 6u
+#define KSN_SYSTEM_TRACKS 2u
+#define KSN_TRACKS (KSN_APP_TRACKS+KSN_SYSTEM_TRACKS)
+typedef struct {
+    uint64_t started_us,sampled_us;
+    ksn_pose from,to;
+    ksn_animation id;ksn_ref target;
+    uint32_t duration_ms;
+    uint8_t easing,repeat,status,pad;
+} ksn_track;
+typedef struct { ksn_track tracks[KSN_TRACKS]; } ksn_core_animation_block;
 
 #define KSN_APP_COMMANDS 80u
 #define KSN_SYSTEM_COMMANDS 16u
@@ -21,6 +32,7 @@ typedef struct { ksn_image_port port; ksn_resource id; ksn_layer layer; } ksn_im
 typedef struct {
     ksn_command_storage *commands;
     uint8_t *text;
+    ksn_track *tracks;
     uint16_t count[2],text_used[2];
     uint32_t generation[2];
     ksn_rgba background[2];
@@ -31,6 +43,7 @@ struct ksn_core_impl {
     ksn_endpoint endpoints[2];
     ksn_image_entry images[KSN_RESOURCES];
     uint8_t image_count;
+    uint64_t animation_now_us;
     ksn_tx transaction;
     ksn_submission outcome;
     ksn_result poison;
@@ -71,6 +84,15 @@ ksn_client ksn_core_client(ksn_core *core,ksn_layer layer);
  * init, which must run outside provider callbacks and invalidate all clients.
  * Register only between submissions/builders. No per-frame retain/release. */
 ksn_result ksn_core_register_image(ksn_core *core,ksn_layer layer,const ksn_image_port *port,ksn_resource *out);
+/* Optional caller-owned blocks, attached before the first animation. */
+ksn_result ksn_core_enable_animation(ksn_core *,ksn_core_animation_block *,ksn_core_animation_block *);
+ksn_result ksn_core_finish_animation(ksn_core *,ksn_layer,ksn_tx,ksn_animation);
+ksn_animation_status ksn_core_poll_animation(const ksn_core *,ksn_layer,ksn_animation);
+void ksn_core_start_animations(ksn_core *,uint64_t presented_us);
+void ksn_core_set_animation_time(ksn_core *,uint64_t now_us);
+uint64_t ksn_core_animation_deadline(const ksn_core *);
+ksn_result ksn_core_advance_animations(ksn_core *,uint64_t now_us,bool reduce_motion,ksn_tx *out);
+uint32_t ksn_core_animation_bytes(const ksn_core *);
 
 /* Host-only, synchronous owner-task interface. A submission ticket validates
  * every read/ack, including across discard and reinitialization. No bank

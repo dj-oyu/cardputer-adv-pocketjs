@@ -159,6 +159,7 @@ static size_t user_prelude_length;
 // atlas, no rgb565 renderer, and a much smaller guest heap. See
 // pocket_overlay.h for why drawing goes through a host display list instead.
 static bool overlay_session;
+static bool kasane_session,kasane_presented;
 void app_force_redraw(void) { redraw=true;pocket_kasane_invalidate(); }
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame);
 typedef struct { unsigned sent_us; } kasane_display_t;
@@ -447,10 +448,14 @@ esp_err_t app_start_test(char test) {
     // skipped the test's source and its renderer, and the session died on its
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
+    // Source provenance, not the manifest identity: user programs can run under
+    // the default identity and must not bypass compatibility handling.
+    kasane_session=test=='K'||(!test&&!user_source&&!overlay_session);
+    kasane_presented=false;
 #ifdef CONFIG_KSN_ONLY
-    if(!overlay_session && test!='K') {
+    if(!overlay_session && !kasane_session) {
         jsconsole_set_error("Not migrated to Kasane in this diagnostic build");
-        ESP_LOGW("app","APP_REFUSED KASANE_ONLY: use USB K diagnostic");
+        ESP_LOGW("app","APP_REFUSED KASANE_ONLY: use migrated app or USB K diagnostic");
         return ESP_ERR_NOT_SUPPORTED;
     }
 #endif
@@ -556,7 +561,7 @@ esp_err_t app_start_test(char test) {
 surfaces_done:
     if(overlay_session) goto source_ready;
 #ifndef CONFIG_KSN_ONLY
-    {
+    if(!kasane_session) {
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
     cc.logical_width=LCD_W;cc.logical_height=LCD_H;cc.raster_density=1;cc.tick_hz=30;
@@ -672,7 +677,7 @@ source_ready:;
     }
 #endif
 #ifndef CONFIG_KSN_ONLY
-    if(!overlay_session&&!pocket_kasane_active()) {
+    if(!overlay_session&&!kasane_session&&!pocket_kasane_active()) {
         pocketjs_rgb565_renderer_config_t rc;
         pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;
         TRY(pocketjs_rgb565_renderer_create(&rc,&renderer));
@@ -853,7 +858,7 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons,
     esp_err_t result=continuing?pocketjs_guest_continue(guest):
                                 pocketjs_guest_frame(guest,&input);
     if(result!=ESP_OK)return result;
-    if(pocket_kasane_active())return ESP_OK;
+    if(kasane_session||pocket_kasane_active())return ESP_OK;
 #ifndef CONFIG_KSN_ONLY
     pocketjs_ui_core_tick(core);
     return pocketjs_ui_core_draw(core,out);
@@ -873,13 +878,14 @@ esp_err_t app_tick(uint32_t buttons) {
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
     turn_continued=false;
+    pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
     // A top-level replace() is submitted while the source is evaluated, before
     // there is a PocketJS frame to hand to present_frame(). Present that image
     // as its own owner turn. The same gate retries a partial LCD transfer
     // without letting another JS update race repair. An invalidated committed
     // screen also reaches this gate when no JS submission exists.
     if(pocket_kasane_needs_present()) {
-        bool guest_submission=pocket_kasane_has_submission();
+        bool guest_submission=pocket_kasane_has_submission()&&!pocket_kasane_animation_pending();
         esp_err_t pending=present_frame(NULL);
         if(pending!=ESP_OK)return pending;
         // A completed owner-only redraw must allow this tick's JS turn. Live
@@ -1036,7 +1042,9 @@ esp_err_t app_tick(uint32_t buttons) {
 // need to cause.
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
     last_present_us=esp_timer_get_time();
-    if(pocket_kasane_active()) {
+    if(kasane_session||pocket_kasane_active()) {
+        ksn_result advanced=pocket_kasane_advance((uint64_t)esp_timer_get_time());
+        if(advanced!=KSN_OK&&advanced!=KSN_BUSY)return ESP_FAIL;
 #ifndef CONFIG_KSN_ONLY
         if(target) { pocketjs_rgb565_target_destroy(target); target=NULL; }
         if(renderer) { pocketjs_rgb565_renderer_destroy(renderer); renderer=NULL; }
@@ -1047,6 +1055,7 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
         ksn_render_stats stats;
         int64_t began=esp_timer_get_time();
         ksn_result result=pocket_kasane_present(&port,&stats);
+        if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         frames++;
         if(result==KSN_IO) {
@@ -1072,7 +1081,9 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
             band_mask_last=stats.bands;
             band_count_last=ksn_render_band_count(stats.bands);
             band_runs_last=ksn_render_band_runs(stats.bands);
-            if(frames==1)ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");
+            // Session-scoped rather than process-scoped: design-contracts resets
+            // the flag when a kasane session starts.
+            if(!kasane_presented){kasane_presented=true;ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");}
             if(painted==30) {
                 ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f "
                          "bytes=%u bands=%u band_runs=%u band_mask=0x%05x prof=%d "

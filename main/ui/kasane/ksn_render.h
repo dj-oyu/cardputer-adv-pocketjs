@@ -54,10 +54,11 @@ unsigned ksn_render_band_runs(uint32_t mask);
  * pixel-neutral either way; only the number of ksn_core_read calls changes. */
 extern int g_ksn_decode_once;
 /* Bounded production subset: rect, round rect, 1/2 px stroke, two-color
- * horizontal/vertical gradient, font-port TEXT coverage, command alpha and
+ * horizontal/vertical gradient, font-port TEXT, source-span IMAGE, alpha and
  * isolated group opacity. The borrowed text port and its immutable resources
- * must remain replayable for pending and committed frames. Coverage scratch is
- * 64 bytes (plus the existing 256-byte group tile), never a text surface.
+ * must remain replayable for pending and committed frames. One shared 96-byte
+ * span scratch plus group tile/provenance (264) and provider row (up to 128)
+ * fit the 512-byte pixel scratch budget. No component surface.
  * Unsupported commands are rejected before the first transfer. The caller
  * schedules retry/discard; callbacks may request invalidation, but must not
  * otherwise mutate the core or reenter JS/presentation. prepare_frame consumes

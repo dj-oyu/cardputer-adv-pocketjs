@@ -61,17 +61,17 @@ begin引数にlayerを渡さない。template/instanceも発行側layerに限定
 | 部品の配置 | `ksn_view_instantiate/place/visible` | 複数同時表示、位置・clip・opacity・表示のPATCH |
 | modal | `ksn_view_modal_open/close` | APP REPLACE内。solid/dim-live、表示成功後に入力scopeとfocusを確定 |
 
-`draw_kinds`はRECT、ROUND_RECT、STROKE、GRADIENT、TEXT、`cache_kinds`は先頭3種を公開する。
-グループ透明度は対応、native animationとfrosted modalはfalse。画像はコアに
-保存できても描画APIではUNSUPPORTEDを返し、LCD提出まで進めない。
+`draw_kinds`はRECT、ROUND_RECT、STROKE、GRADIENT、TEXT、IMAGE、`cache_kinds`は先頭3種を公開する。
+グループ透明度と画像のnative animationは対応、frosted modalはfalse。CP12からIMAGEもnativeで描画する。
 すりガラス画素フィルタのPIE対応はfrosted modalの完成を意味しない。
 
 CP9のnative TEXTは`ksn_display_port.text`のcoverage portを必須とする。省略時は
 最初の転送前にUNSUPPORTED。`span`は絶対画面座標の最大64画素を読み、count=0は
 可用性確認で出力なし。render中のI/O・heap確保・JS・core変更は禁止。pending/committedの
 再描画でも同じ字形を返す不変データをownerが保持する。productionは`ksn_font_port`を接続。
-Flashの1bpp cellを直接読み、文字bufferや展開glyphを常設しない。coverage scratchは64 B、
-隔離groupでは既存256 B tileと併存する。alphaは色alpha→coverage→command opacity→group。
+Flashの1bpp cellを直接読み、文字bufferや展開glyphを常設しない。coverageは最大64 B、
+CP12の共用96 B span scratchを使い、隔離groupでは256 B tileと併存する。
+alphaは色alpha→coverage→command opacity→group。
 
 captionはLatin6×8/全角8×8、bodyはLatin6×12/全角12×12、displayはLatin12×16/全角16×16。
 displayは8px字形の2倍。欠字/faceなしでも送り幅を維持し、ASCIIはbuiltin、全角は豆腐を描く。
@@ -95,6 +95,108 @@ setTextで作った一時文字列をnative側に保持せず、成功・失敗�
 features.textはtrue。cacheのTEXT公開と整数値の直接更新APIはまだ含まない。
 
 ## 3. 原子的な更新と参照
+
+### native IMAGE（CP12）
+
+image descriptorはresource、variant/frame、source_x/source_y、scaleを持つ。
+scaleは`KSN_IMAGE_1X`（既定0）、`KSN_IMAGE_2X`、`KSN_IMAGE_HALF`。
+source原点からのcrop範囲はboundsの幅/高さとscaleで決める。2倍はbounds幅/高さが偶数、
+1/2倍はsource範囲がbounds幅/高さの2倍となる。範囲外・未知scaleは提出前に拒否する。
+最近傍は画素中心で選ぶため、1/2倍はsource原点から1,3,5…をsampleする。
+setRectは移動と有効なcrop範囲のサイズ変更を許し、source原点/scaleの変更はREPLACE。
+
+providerは不変のsource座標を受け、RGB565とstraight alphaを必ずcount個返す。
+通常/隔離groupとも16 destination画素ごとに最大31 source画素を読む。RGBはbit replicationで
+8bitへ展開し、alphaへcommand opacity、その後group opacityを掛ける。providerのI/O・heap・JSは禁止。
+エラー後はpending世代を保持し、全帯再描画または取消後のcommitted修復を行う。
+source登録はowner/layer固定、APP終了時にはSYSTEM資源を残してAPP資源だけ失効する。
+
+命令は32 Bのまま。crop原点をpayloadの空き4 B、scaleを未使用flag bitへ格納する。
+pixel scratchはgroup tile256＋span共用96＋dither8＋provider行最大128＝488 B。
+command snapshotや呼出しstackは別に実機high-waterと併せて計上する。
+frame中にproviderの選択を変えてはならない。
+
+### JS IMAGE / PPT2（CP13）
+
+`view.petImage()`はFlash上の組込みPPT2を借りる不透明handleを返す。
+readonlyのwidth/height=64、variants=12、frames=6を持つ。APP session内のnative登録は一度だけ。
+取得はbuilder外で行う。初回登録はpending/repair中BUSY、登録済みhandleの再取得は可能。
+JS wrapperをGCしてもnative登録は残り、APP detachでまとめて失効する。
+SYSTEMの資源は残す。古いwrapperを次sessionで使用するとCLOSED。
+
+`tx.image({resource, bounds, clip?, opacity?, variant?:0, frame?:0,
+sourceX?:0, sourceY?:0, sourceWidth?, sourceHeight?, scale?})`はDrawRefを返す。
+scale省略時は固定sourceをbounds全体へ伸縮する。sourceWidth/Height省略時は組込み画像の
+source原点から右下端までを使う。setRectで移動と連続的な拡縮・縦横比変更ができる。
+明示scaleは従来のcropモード0.5/1/2。伸縮モードのnative名はKSN_IMAGE_STRETCH。
+32 B命令を維持するため伸縮source原点は0..255、extentは1..256。
+sourceの実寸を超える範囲は拒否する。最近傍のpixel-center規則を使い、補間用画像を確保しない。
+source座標・variant・frameは非負整数。nativeと同じcrop制限を適用する。
+`ref.setImageFrame(tx, variant, frame)`でペット種と表情をPATCHする。
+setRect/setClip/setVisibleも使用可能。資源/source/scaleの変更はREPLACE。
+`features().image`が対応を示す。画像は現時点のcache template対象外。
+
+伸縮画像は`rotation`（時計回りdegree、既定0）と`ref.setRotation(tx,degrees)`に対応。
+矩形の中心回転、clip固定、最近傍。角度は有限の-32768..32767 degreeを受け、
+1/1024回転へ丸める。正弦はFlashのQ14表。pixel centerをこの基底の転置でsourceへ写像する。
+回転後のAABBをdamageへ含める。命令32 Bを維持するため伸縮/回転モードのvariant/frameは
+0..255（かつ資源の実範囲内）。従来の明示scaleモードは回転非対応、16 bit indexを維持する。
+`features().imageStretch/imageRotation`で確認する。
+
+### 画像の自動補間（CP17a）
+
+```js
+const motion = image.animate(tx, {
+  from: {bounds: [16, 20, 48, 52], rotation: 0},
+  to: {bounds: [100, 24, 196, 120], rotation: 720},
+  durationMs: 1200,
+  easing: 'ease-in-out',
+  repeat: 'ping-pong'
+});
+// 後の更新で停止／終端へ移動する。
+scene.patch(tx => motion.stop(tx));
+scene.patch(tx => motion.finish(tx));
+const status = motion.poll();
+```
+
+STRETCH画像1命令の4辺と中心回転を一緒に補間する。clipは固定。
+from/toのboundsは必須、rotationは既定0。角度は-32768..32767 degree、
+0→720は2回転。durationMsは整数1..86400000、easingはlinear（既定）、
+ease-out、ease-in-out、step。repeatはonce（既定）、loop、ping-pong。
+開始姿勢のLCD表示確定から時間を計る。JSで毎frameの座標更新をする必要はない。
+提出中・転送再試行中の姿勢は固定し、次回に現在時刻へ追いつく。
+
+stopは最後に表示確定した姿勢を維持、finishはtoを提出する。どちらもtxの取消対象。
+動作中のsetRect/setRotationはBUSYでtx全体を取り消す。同じtxでstopしてから手動更新できる。
+pollはpending/running/finished/stopped/discardedを返す。完了は表示確定後に見える。
+終了済み枠が再利用された場合やREPLACE/APP終了後はdiscarded。完了履歴は無制限に保持しない。
+APP 6件、SYSTEM 2件。初回使用時に2バンク合計896 Bを確保し、補間中は確保しない。
+`features().animation`とcapacity.animationsで能力を確認する。
+native deadline/hidden/reduce-motion窓口はあるが、電源管理・mainの待機期限への統合は残る。
+
+PPT2 providerは不変bytesを登録時に検証し、128 Bの行でRGB565/straight alphaへ変換する。
+全画像をheapへ展開せず、ペット選択のglobal状態に依存しない。
+native所有者は`ksn_view_host_register_image`でAPP/SYSTEMごとに登録する。
+display/provider callbackからの登録はBUSY。登録はtransactionのrollback対象外。
+
+### JS scene controller（CP11）
+
+`view.createScene({build(tx,state), patch(tx,refs,state)?})`をアプリ初期化時に一度作る。
+buildは候補DrawRef等を含むobjectを返す。patchは確定済みrefsだけを使う。
+`scene.invalidate()`で表示をdirtyにし、`scene.invalidate(true)`で次回REPLACEを指定する。
+ownerの通常turnで`scene.flush(domainState)`を呼ぶ。trueはdirty/pendingなし、falseは提出待ち
+またはBUSY。inputでdomain stateを進めてからinvalidateし、display失敗を理由に状態を戻さない。
+
+controllerはPRESENTEDまで候補refsを公開せず、SUBMITTED中は新たなAPP更新を始めない。
+DISCARDEDなら最新stateで再試行し、REPLACEの候補refsは捨てる。BUSYだけを内部で再試行扱いとし、
+検証・quota・OOM・callback例外はdirtyを保持して呼出元へ送出する。build/patchは同期限定。
+idle時はpoll/提出をせず、timer・frame queue・毎flushのclosureを作らない。
+controller自体のJS関数/状態はcreateScene時のguest heapに計上する（未使用時は作らない）。
+
+APP提出の単独所有者として使う。他のcontrollerや直接replace/patchを混ぜない。
+修復中のownerによるpresent、SYSTEM提出、hostのcancelは併用可能。
+`flush`の再入は拒否し、callback中のinvalidateは次の更新要求として残る。
+native animationのwakeやmodal専用状態機械の代わりではない。
 
 新APIでは、所有中builderの変更に失敗した時点でcore/cache/modalをまとめてabortする。
 旧低レベルAPIの「poisonをabortまで保持」は内部契約として残す。

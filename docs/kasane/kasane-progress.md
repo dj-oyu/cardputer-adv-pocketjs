@@ -4,6 +4,126 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 17b — 回転座標の反復計算削減（2026-09-16）
+
+- 回転spanの先頭で変換座標の分子を計算し、後続画素はu+=2*cos、v-=2*sinで進める。
+  画素ごとの座標積和を削減。source選択の有理数除算・丸め・clipは維持する。
+  常設領域・画像バッファ・heap確保の追加なし。PIE化や除算の近似置換は行わない。
+- H ASan/UBSan・O2全回帰PASS。360ケースの回転＋拡縮PATCH/full画素比較を含む。
+  通常/Kasane-only IDF build、link監査PASS。
+- 実機300ターンPASS、native13,840 Bで一定。ログ窓平均turn3.81 ms、render45.72 ms、
+  send6.00 ms。`.cache/kasane-cp17-span/serial.log`。前回render47.24 msだが、
+  別ビルド・実時間駆動で姿勢とdamageも変わるため、改善率の証明には使わない。
+  30 Hz目標は引き続き未達。今回は反復演算の削減に範囲を限定する。
+
+## checkpoint 17a — 画像のnative自動補間（2026-09-16）
+
+- CP17–18を前倒し。DrawRef.animate(tx,{from,to,durationMs,easing,repeat})と
+  motion.stop/finish/pollを実装。移動・拡縮・複数回転を1trackで補間する。
+- 開始は初回LCD ack。提出中のsampleを固定し、retry後は現在時刻へ追いつく。
+  JS patchと同一提出へ合流し、native更新がguestの提出結果を上書きしない。
+- trackは56 B、APP 6件/SYSTEM 2件の2bankで896 Bを初回のみ確保。
+  APP resetはSYSTEM trackを維持。hidden/reduce-motionのnative窓口を追加。
+- H全回帰、Q ASan/UBSan・O2、hello/controller、session dispatch 4構成PASS。
+  通常/Kasane-only IDF build・link監査PASS。
+  fake clockでeasing/loop/ping-pong/停止/完了、quota、転送失敗、OOM、
+  JS呼出しなし25回の補間とメモリ不変、既存JS更新との合流を検査。
+- 実機K 300ターンPASS。JS座標更新なしの自動回転・拡縮とmodal往復が継続し、
+  報告nativeは13,840 Bで一定。`.cache/kasane-cp17-animation/serial.log`。
+  ログ窓の平均turn3.83 ms、render47.24 ms、send6.00 ms（renderとsendは別計測）。
+  renderの窓平均最大82.31 ms。30 Hz目標は未達で、動作PASSを性能達成とはしない。
+  回転経路には画素ごとの64 bit除算とsource行変更時のPPT2再展開が残る。
+- 起動・終了100回PASS。終了後free240,956 B / largest120,832 Bは全回一定。
+  `.cache/kasane-cp17-cycles/memory.json`。この試験は終了時の回収を検査し、
+  実行中の瞬間ピークやWi-Fi/audio併用時の安全性を保証するものではない。
+- mainのdeadline待機、電源管理とのhidden/reduce-motion結線も残る。
+  CP17/18全体の完了とはしない。
+
+## checkpoint 13d — 回転画像とdamage（2026-09-16）
+
+- 画像の中心回転とsetRotationを追加。1/1024回転・Q14正弦表で変換し、回転後の旧/新AABBを
+  damageへ含める。伸縮画像のvariant/frameを8 bitとして命令32 Bを維持する。
+  回転spanは16画素のsource blockを共用scratch内に保持。pixel scratch上限488 Bは不変。
+- H/Q ASan/UBSan・O2 PASS。独立sin/cos参照と360フレームの回転＋移動＋拡縮、
+  通常/group合成とPATCH/full一致、JSの90度PPT2比較、入力拒否、OOMを確認。
+- 通常/Kasane-only build、link監査PASS。app2,213,456 B / 1,917,584 B、
+  DIRAM137,292 B / 135,932 B。実機負荷とnative自動補間の確認は次のcheckpoint。
+
+## checkpoint 13c — 固定sourceの矩形伸縮（2026-09-16）
+
+- setRectで画像全体の移動・拡縮・縦横比を変更できるSTRETCHを追加。
+  source原点/extentを4 Bに格納し、命令32 B・常設DIRAMを維持。
+  強い縮小でもproviderへのspan要求を32画素以内へ分割する。
+- H/Q ASan/UBSan・O2 PASS。移動240＋伸縮360ケースのPATCH/full一致、独立画素参照、
+  offscreen・clip・alpha/group、JSの同一参照による伸縮と消去を確認。両IDFビルドPASS。
+- CP13b実機K 300ターンPASS、native12,912 B。render mean20.85 ms、modal32–35 msの
+  余裕不足は継続。`.cache/kasane-cp13-images`。この時点の実機は表情切替のみ。
+- ユーザー指定により毎frameのJS座標更新を完成形とせず、nativeの開始/終点/時間指定へ進む。
+  回転描画とCP17–18を前倒しする。自動補間・回転の実機確認は未完了。
+
+## checkpoint 13b — JS image resourceとframe PATCH（2026-09-16）
+
+- petImage/tx.image/setImageFrameを接続。readonly metadata、APP sessionごとのnative登録重複排除、
+  全JS確保成功後の登録、APP reset失効を実装。source座標/scaleはREPLACEで固定する。
+- Q ASan/UBSan・O2 PASS。120 wrapperでnative登録1枠、残る15枠をSYSTEMが使用可能。
+  APP reset後のSYSTEM資源保持、古いhandle拒否、getter/範囲外の全体取消、OOM sweep、
+  実PPT2全64×64画素と転送失敗後の別表情比較を確認。H全回帰/PIE参照もPASS。
+- 通常/Kasane-onlyビルドとlink監査PASS。app2,208,640 B / 1,912,704 B、
+  DIRAM137,292 B / 135,932 B（各+16 B）。JS adapter動的stateはresource ID分+4 B。
+- Kデモに全12種×6表情の時間変化を追加。実機確認結果は次の記録に追記する。
+
+## checkpoint 13a — PPT2 native provider（2026-09-16）
+
+- 既存PPT2のimmutable Flash bytesを借り、variantをペット番号、frameを表情として読む
+  stateless providerを追加。行128 BからRGB565/straight alphaの要求spanだけを返す。
+  資源登録前にPPT2全体を検証し、全画像展開や可変のglobal選択状態を持たない。
+- 実assetsの12種×6表情×64行、端数span、guard、無効引数をASan/UBSan・O2で確認。
+  既存PPT2 decoderの独立参照試験もPASS。通常/Kasane-onlyビルドPASS。
+- この段階はprovider単体。JS接続とresource lifetime試験はCP13b。
+  未使用providerはlink時に除去され、app/DIRAMはCP12と同値。
+
+## checkpoint 12 — native IMAGE crop/scale/span（2026-09-16）
+
+- 32 B命令の未使用部分へsource原点とscaleを格納。1x/2x/half、pixel-center最近傍、
+  clip、straight alpha、group opacityとframe PATCHに対応。範囲外と2xの奇数extentを拒否。
+- normal/groupで96 B span scratchを共用。group tile256＋dither8＋provider行128を含め488 B。
+  sourceを最大31画素ずつ読み、コンポーネントのsurfaceを作らない。常設arena増分0。
+- H ASan/UBSan・O2 PASS。3倍率×256 opacity×normal/groupを独立座標/合成参照で全画面比較。
+  negative clip、source offset、frame固定、帯途中provider失敗→全帯repair、overflow、旧機能を確認。
+- Q ASan/UBSan・O2 PASS。通常/診断ビルドPASS、app2,206,560 B / 1,910,416 B、
+  DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。
+- native probeに60フレームの画像切替と2世代の全画素capture比較を追加。実機結果は後記。
+  JS resource/PPT2 providerはCP13。
+- `ec37a10`をpush後、Kasane-only実機で画像60フレームと2世代64,800画素比較PASS。
+  非captureの描画＋転送はmean6,546 µs/max6,901 µs、heap241,092 Bで前後一定。
+  文字・group・PIE・600フレームfrostも回帰PASS、frost deadline miss0、stack high-water21,468 B。
+  `.cache/kasane-cp12-native`に保存。この画像試験はPPT2ではなく決定的test pattern。
+
+## checkpoint 11 — hello移植とscene controller（2026-09-15）
+
+- helloの旧node生成を廃止し、文字4命令＋角丸1命令へ移行。入力は独立input service。
+  `createScene`はPRESENTED後に候補参照を昇格し、BUSY/cancel後は最新domain stateを反映。
+  helperは初めて作成する時だけJS factoryを評価し、未使用アプリにclosureを常設しない。
+- 通常構成でもhost既知のhello/Kは旧core/bindingを確保しない。source由来で判定し、
+  user sourceのmanifest名から移植済みと推測しない。Kasane-onlyでhelloを許可。
+  初回BUSYでまだactiveになっていなくても旧描画へ落ちないsession flagを用いる。
+- 実hello source＋実QuickJS/native owner試験（ASan/UBSan、O2）PASS。
+  SYSTEM BUSY、入力保持、初回REPLACEの部分転送失敗/cancel、候補破棄、最新state再構築、
+  idle提出0、counterだけ3帯PATCH、非同期builder拒否、終了解放を確認。
+  input配送は既存サービス試験と分離し、このアプリ試験ではactionをdeterministicに注入。
+- Q全回帰ASan/UBSan PASS、session dispatch4構成PASS、registry101 checks PASS。
+- 通常/診断ESP-IDFビルドPASS。app2,204,256 B / 1,908,272 B、
+  DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。実機結果は後記。
+- `bb2b0df`をpush後、Kasane-only実機でhello100回起動/Enter2回/終了PASS。
+  全回の終了後free256,624 B・最大連続空き135,168 Bで一定。初回起動後の観測値は
+  free149,036 B/最大連続空き104,448 B/JS92,825 B（parser中のpeakではない）。
+  `.cache/kasane-cp11-hello-only`にログと初回captureを保存。
+  通常構成も`kasane_input_device_test.py`でhello/旧pet/K/text編集の共存PASS。
+  `.cache/kasane-cp11-input-normal`に保存。Wi-Fi/audio併用の安全性確認は引き続き未完了。
+- 最初のhello captureはUSBのbyte単位読取りによる欠落を検出。診断ツールをchunk読取りへ直し、
+  通常構成で取り直した135行全体を`.cache/kasane-cp11-hello-normal-capture`に保存。
+  この再取得も起動/入力/終了PASS。100回再起動のメモリ記録とは分ける。
+
 ## checkpoint 10 — JS TEXTと固定容量PATCH（2026-09-15）
 
 - tx.text、DrawRef.setText/setReveal、features.textを公開。既存setterと同じtransaction原子性。
@@ -16,6 +136,11 @@
   DIRAM137,276 B / 135,916 B、常設増分0。Kasane-only link監査PASS。
 - K診断へ日本語のrevealとtick文字列PATCHを追加。実機結果は後記。
   次はCP11のhello移植・表示確定後の参照昇格helper。
+- `9b5252c`をpush後、実機K 300ターンPASS。mean turn3.54/render19.18/send4.53 ms。
+  modal区間にはrender30–33 msの窓があり、30 Hzの余裕不足は未解決。
+  文字の毎turn更新でdirty範囲と隔離groupの再描画が増える診断条件。CP8と同一負荷ではない。
+  100回起動・終了は全回free241,004 B、最大連続空き120,832 Bで一定。
+  `.cache/kasane-cp10-text`と`.cache/kasane-cp10-restarts`に保存。
 
 ## checkpoint 9 — native TEXT coverage（2026-09-15）
 

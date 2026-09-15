@@ -1,4 +1,4 @@
-"""Kasane-only admission, services, display and repeated teardown memory check."""
+"""Exercise migrated hello input, display, idle and repeated memory recovery."""
 import argparse
 import json
 from pathlib import Path
@@ -23,11 +23,11 @@ with serial.Serial(a.port, 115200, timeout=0.15) as port:
             if line:
                 lines.append(line)
                 log.append(line)
-            if 'Guru Meditation' in line or 'START_FAILED' in line:
+            if any(word in line for word in ('Guru Meditation', 'START_FAILED', 'listener failed')):
                 raise RuntimeError(line)
             if marker in line:
                 return '\n'.join(lines)
-        raise RuntimeError('missing ' + marker + ': ' + repr(lines[-6:]))
+        raise RuntimeError('missing ' + marker + ': ' + repr(lines[-8:]))
 
     def command(key, marker):
         time.sleep(0.15)
@@ -41,24 +41,33 @@ with serial.Serial(a.port, 115200, timeout=0.15) as port:
         command(b'a', 'CATEGORY 0')
         for _ in range(8):
             command(b'u', 'APP ')
-        # Hello is migrated; IMU calibration remains deliberately unavailable.
-        for _ in range(4):
-            command(b'd', 'APP ')
-        command(b'e', 'APP_REFUSED KASANE_ONLY')
-        command(b'q', 'HOME_READY')
         for i in range(a.cycles):
-            boot = command(b'K', 'KASANE_FRAME_PRESENTED')
-            assert 'KASANE_SERVICES PASS legacy=false' in boot, boot
-            command(b'b', 'KASANE_ACTION right release held=false')
+            boot = command(b'e', 'KASANE_FRAME_PRESENTED')
+            assert 'HELLO_READY' in boot and 'APP_ID local.hello' in boot, boot
+            command(b'e', 'HELLO_COUNT 1')
+            command(b'e', 'HELLO_COUNT 2')
+            if i == 0:
+                # read large chunks: byte-at-a-time readline can overflow the
+                # USB receive queue during a 130 KB pre-SPI capture.
+                time.sleep(0.15)
+                port.write(b's')
+                capture = bytearray()
+                deadline = time.monotonic() + 10
+                while b'CAPTURE_END' not in capture and time.monotonic() < deadline:
+                    capture.extend(port.read(65536))
+                text = capture.decode(errors='replace')
+                log.extend(text.splitlines())
+                rows = re.findall(r'PIX (\d+) [0-9a-f]{960}', text)
+                assert set(map(int, rows)) == set(range(135)), 'incomplete capture'
             end = command(b'q', 'HOME_READY')
             match = re.search(r'MEM free=(\d+) largest=(\d+) js=0', end)
             assert match, end
             memory.append(tuple(map(int, match.groups())))
             if (i + 1) % 10 == 0:
-                print('KASANE_CYCLES', i + 1, 'free/largest', memory[-1], flush=True)
+                print('HELLO_CYCLES', i + 1, 'free/largest', memory[-1], flush=True)
         assert min(m[0] for m in memory) >= memory[0][0] - 256, memory
         assert min(m[1] for m in memory) >= memory[0][1] - 256, memory
-        print('KASANE_ONLY_DEVICE PASS', a.cycles, memory[-1], flush=True)
+        print('HELLO_DEVICE PASS', a.cycles, memory[-1], flush=True)
     finally:
         (a.out / 'serial.log').write_text('\n'.join(log) + '\n', encoding='utf-8')
         (a.out / 'memory.json').write_text(json.dumps(memory), encoding='utf-8')
