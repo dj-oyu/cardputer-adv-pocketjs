@@ -124,7 +124,22 @@ int main(void){
             assert(ksn_render_rects(&core,&display,&stats)==KSN_OK&&!memcmp(saved,panel,sizeof(panel)));
         }
     }
-    d.data.image.scale=KSN_IMAGE_STRETCH;d.data.image.source_width=64;d.data.image.source_height=32;
+    d.data.image.scale=KSN_IMAGE_STRETCH;
+    /* The pure stretch mapping (rotation 0) over destination sizes and source
+     * windows the rotated block below cannot reach, each against the oracle's
+     * independent pixel-center form. */
+    for(unsigned w=0;w<8;w++)for(unsigned v=0;v<5;v++){
+        const int widths[8]={1,2,3,16,63,64,65,96};
+        const unsigned sources[5]={1,2,3,16,38};
+        d.data.image.source_width=(uint16_t)sources[v];d.data.image.source_height=(uint16_t)sources[v];
+        d.bounds=(ksn_rect){20,12,(int16_t)(20+widths[w]),(int16_t)(12+widths[w]/2+1)};
+        assert(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
+        assert(app.ops->background(app.ctx,tx,0x183c60ff)==KSN_OK);
+        assert(app.ops->add(app.ctx,tx,&d,&ref)==KSN_OK);
+        assert(app.ops->end(app.ctx,tx)==KSN_OK);
+        assert(ksn_render_rects(&core,&display,&stats)==KSN_OK);verify(&d,false);
+    }
+    d.data.image.source_width=64;d.data.image.source_height=32;
     for(unsigned group=0;group<2;group++){
         d.bounds=(ksn_rect){20,12,84,44};
         assert(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
@@ -148,5 +163,5 @@ int main(void){
             assert(ksn_render_rects(&core,&display,&stats)==KSN_OK&&!memcmp(saved,panel,sizeof(panel)));
         }
     }
-    puts("image render PASS: crop/scale/alpha/group/retry, 240 moving and 360 stretch PATCH/full comparisons");
+    puts("image render PASS: crop/scale/alpha/group/retry, 240 moving and 360 stretch PATCH/full comparisons, 40 pure-stretch windows");
 }
