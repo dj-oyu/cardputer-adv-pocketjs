@@ -68,8 +68,8 @@ typedef struct JSVMState {
     int host_poll_left;
     JSVMClock clock;
     // counters (reported as #info by the harness)
-    uint64_t safepoints;   // class-A polls observed
-    uint64_t stops;        // forced yields taken (each one killed a job)
+    uint64_t safepoints;   // yieldable class-A polls (all polls before L2c)
+    uint64_t stops;        // forced stops accepted
     uint64_t enters, leaves;
     uint64_t gaps;         // gaps closed inside JS
     uint64_t gap_ns_total;
@@ -155,10 +155,8 @@ typedef enum {
     JS_VM_ORIGIN_JOB_ASYNC,      // async function/generator floor
 } JSVMOrigin;
 
-// True while a chain is parked in rt->vm_susp. Pass-through build: always 0
-// (there is no vm_susp to set it), so every C caller that guards a suspend-
-// sensitive section with this check behaves exactly as before the gate
-// existed.
+// True while a chain is parked in rt->vm_susp. With POCKET_VM_YIELD off this
+// is the stage-1 pass-through and always returns 0.
 int JS_VMSuspended(JSRuntime *rt);
 
 // Where the most recently completed (or still-parked) chain's floor sits.

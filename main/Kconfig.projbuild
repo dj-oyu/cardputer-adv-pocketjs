@@ -123,6 +123,17 @@ menu "Pocket VM (L0 measurement probes)"
             like L2a itself (design sec.8.4) -- that is what the switch is
             for.
 
+    config POCKET_VM_YIELD
+        bool "Suspend and resume JS at audited opcode safepoints (L2c)"
+        depends on POCKET_VM_FLATCALLS
+        default n
+        help
+            Implements the L2c save-and-resume path described by
+            docs/vm/vm-L2-design.md sec.11. The switch stays off while the
+            mechanism is landing in independently testable stages. With it
+            off, forced VM stops retain the pre-L2c uncatchable-interrupt
+            behaviour and the shipping path is unchanged.
+
     config POCKET_VM_FAIR
         bool "Fair ordering: run the pumps on a continuation turn too"
         default n

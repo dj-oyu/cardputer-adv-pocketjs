@@ -220,6 +220,7 @@ void js_vm_state_free(JSRuntime *rt, JSVMState *vm)
 // vm_resume: machinery, JS_VMSuspended and friends move there and read it
 // instead of being constant.
 
+#ifndef CONFIG_POCKET_VM_YIELD
 int JS_VMSuspended(JSRuntime *rt) {
     (void)rt;
     return 0;
@@ -247,6 +248,7 @@ JSValue JS_VMEval(JSContext *ctx, const char *input, size_t input_len,
                   const char *filename, int eval_flags) {
     return JS_Eval(ctx, input, input_len, filename, eval_flags);
 }
+#endif
 
 void vmtest_vm_set_force_yield(JSRuntime *rt, int on)
 {

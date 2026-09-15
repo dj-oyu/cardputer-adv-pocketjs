@@ -10,6 +10,8 @@
 #   tools/vmtest/build.sh asan-recur    # segframes, JS calls still recurse in C (L2a; FLATCALLS off)
 #   tools/vmtest/build.sh asan-flat     # segframes + CONFIG_POCKET_VM_FLATCALLS (L2b)
 #   tools/vmtest/build.sh all-recur / all-flat
+#   tools/vmtest/build.sh asan-yield   # flat calls + the staged L2c body
+#   tools/vmtest/build.sh all-yield
 #
 # Three paths (spec sec.12 / design H5): "-alloca" is the same compiler flags
 # without the L2a define; "-recur" and "-flat" pin the L2b switch off / on.
@@ -41,11 +43,13 @@ build_variant() {
   # docs/vm/vm-L2-design.md sec.9). Same rule as above: the plain variant
   # mirrors the Kconfig default; "-flat" / "-recur" force it on / off.
   local flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"
-  local base=${variant%-alloca}; base=${base%-recur}; base=${base%-flat}
+  local yield=""
+  local base=${variant%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}
   case "$variant" in
     *-alloca) segframes=""; flatcalls="" ;;
     *-recur) flatcalls="" ;;
     *-flat) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1" ;;
+    *-yield) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"; yield="-DCONFIG_POCKET_VM_YIELD=1" ;;
   esac
   case "$base" in
     asan) cflags="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined" ;;
@@ -66,7 +70,7 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $yield -I $OUT/include -I $GUEST/include"
   local objs=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
@@ -93,5 +97,6 @@ case "${1:-asan}" in
   all-alloca) build_variant asan-alloca; build_variant o2-alloca ;;
   all-recur) build_variant asan-recur; build_variant o2-recur ;;
   all-flat) build_variant asan-flat; build_variant o2-flat ;;
+  all-yield) build_variant asan-yield; build_variant o2-yield ;;
   *) build_variant "${1:-asan}" ;;
 esac

@@ -536,6 +536,7 @@ static JSValue resume_until_done(JSContext *ctx, JSValue result) {
   JSRuntime *rt = JS_GetRuntime(ctx);
   while (JS_VMSuspended(rt)) {
     g_resumes++;
+    if (gc_on_yield) JS_RunGC(rt);
     JS_FreeValue(ctx, result);
     result = JS_VMResume(ctx);
   }
@@ -969,7 +970,11 @@ int main(int argc, char **argv) {
   // Stage 2 guard flags: none of the four can do anything real yet (see the
   // comment on their globals above) -- print the note once, up front, same
   // as the --vm-seg-size / --vm-budget notes just above.
-  if (gc_on_yield)
+  if (gc_on_yield
+#ifdef CONFIG_POCKET_VM_YIELD
+      && false
+#endif
+     )
     fprintf(stderr, "vmrun: note: --gc-on-yield ignored, this VM cannot suspend yet\n");
   if (terminate_after >= 0)
     fprintf(stderr, "vmrun: note: --terminate-after ignored, this VM cannot suspend yet\n");

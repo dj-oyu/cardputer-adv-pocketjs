@@ -160,6 +160,24 @@ Stage Aの攻撃で見つかった二重解放（`JS_NewPromiseCapability` の2�
 | Test262 asan | 7,501/194/regressions 0（4,099ファイル） |
 | ファームのビルド（既定構成） | 通る |
 
+### 4.3 段3a: ホスト所有SEG鎖の保存・再開（実測(host)、2026-09-16）
+
+`CONFIG_POCKET_VM_YIELD`（既定n）を追加し、`JS_VMCall` / global の`JS_VMEval`から入ったSEG床と、その上のフラットSEG・最初の同期区間にいるflat asyncフレームを、分類Aの7地点で保存・再開する本体を実装した。yieldは例外を作らず、`cur_pc` / `cur_sp`と鎖を公開して`JS_EXCEPTION`を返す。再開時は同じフレーム鎖を`restart:`へ戻す。床は実行開始時に関数・`this`・`new.target`・渡された全引数を所有するため、yield地点での確保はない。モジュール本体はD17rどおり対象外。
+
+停止中のSEGフレームは`JS_MarkContext`からmarkし、鎖の途中のflat asyncフレームは既存の`async_func_mark`へ分担する。最初の同期区間を終えたasyncフレームは、まだasync所有者側の再開囲いを実装していないため`MAY_YIELD`を落とす。
+
+| 関所 | 結果 |
+| --- | --- |
+| o2-yield 通常コーパス | 63/63 |
+| o2-yield `--force-yield` | 63/63。全対象で`safepoints_yieldable == stops == resumes` |
+| 最大の強制再開回数 | `bench_loop` 6,000,001回、`bench_calls` 2,692,537回 |
+| asan-yield 強制中断（寿命・例外・async混在の代表10件） | 10/10 |
+| asan-yield `--gc-on-yield`（async混在、closure、深いSEG保持） | 3/3 |
+| 既定offのo2コーパス | 63/63 |
+| ESP-IDF 既定offビルド | 成功。app 2,143,040 bytes、最小app領域32%空き、DIRAM増加0 |
+
+未実装は分類B、async/async-generatorが床になる再開、D36の保留ジョブ、Terminate/Discard、実機統合。したがって出荷既定はまだoffであり、本節はL2c全体の完了を意味しない。
+
 Test262の読み違いを1件記録する: 作業ツリーの `.cache/test262` が固定リビジョンのcheckoutではなく欠けたコピーだったため、一時的に6,511/191という誤った基準を報告した。ジャンクションで繋ぎ直して7,501/194に復帰。**作業ツリーを作るときは `.cache/test262` もジャンクションで繋ぐこと**（[vm-branching.md](vm-branching.md) の既存の一覧に追加すべきもの）。
 
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）

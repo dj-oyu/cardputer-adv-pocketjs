@@ -13,7 +13,7 @@
 | L2b | 通常関数のフラット呼び出し | 実装済み（`CONFIG_POCKET_VM_FLATCALLS`、既定 on） |
 | L2b 拡張 | JS から呼ぶ async 関数のフラット化（D31〜D38） | 実装済み |
 | L2c | 中断・再開の関所とガード（`vmrun` の受け口、コーパス） | 実装済み（pass-through。`JS_VMResume` は常に例外を返す） |
-| L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | **未着手**（本書 §12 が設計、backlog.md #7） |
+| L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | **段3aまで実装済み**（ホスト所有SEG床、分類A、GC保護。`CONFIG_POCKET_VM_YIELD=n`が既定。async/job所有と破棄はbacklog.md #7） |
 | L2c 実機統合 | 要求ビット・guest 側3状態・Back ターン対応 | 未着手（backlog.md #11） |
 | TCO | 末尾呼び出しでのフレーム再利用 | 設計下書きのみ（[vm-tco-design.md](vm-tco-design.md)） |
 

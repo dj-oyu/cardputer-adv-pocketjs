@@ -14,7 +14,7 @@
 | 4 | `-recur` 変種で `deep_async_recursion` がどのガード（C スタック検査の RangeError か、ヒープの InternalError）で終わるかは段 A2 で測って期待値に書く | design §10.3, results §4.1 | 未着手 |
 | 5 | Test262 に「async 再帰が C スタック検査で失敗する深さ」依存のテストが無いか（D38 で flat の答えが InternalError に変わる影響）は測る必要がある | design §10.3 | 未着手 |
 | 6 | `js_async_from_sync_iterator_*` など、ジョブから本体へ至る経路で他にネイティブフレームを挟むものが無いかは未確認 | design §11.9 | 未着手 |
-| 7 | L2c 本体（`rt->vm_susp`／`vm_yield:`／`vm_resume:` の実装）そのものが未着手。現在は関所とガード（pass-through）まで着地（`quickjs-vm.c` の `JS_VMResume` は常に例外を返す） | design §11（冒頭の実装状況表）, results §4.2 | 未着手（本体） |
+| 7 | L2c 本体は段3a（ホスト所有SEG床、分類Aの保存・再開、停止中GC保護）まで実装。残りは分類B、async/async-generator所有者、D36の保留ジョブ、Terminate/Discardと破棄時の鎖解体。既定は`CONFIG_POCKET_VM_YIELD=n`のまま | design §11（冒頭の実装状況表）, results §4.3 | 実装中（段3a完了） |
 | 8 | D42+D43 後、実機の最大連続空きブロックが taffy 59,296B 段への余裕を 6,240→4,192B まで減らした原因は未確認（総空き量は増えたのに最大ブロックが減った＝配置の問題と推定。1周だけの計測で再現性は未確認） | results §5.4 | 未着手 |
 | 9 | `stack_hw_min`（ui タスクの最高到達点）が全アプリで同値なのは「セッションをまたいだ最小値」の可能性があり、読みが未確認。正しければ L2b で浮いた C スタックの回収余地になる | results §5.1, §5.4 | 未着手 |
 | 10 | 末尾呼び出し最適化（TCO）は設計下書きのみで未決・未実装。sloppy モードを含めるか、既存コーパス・`budget_probe.sh` に末尾再帰で `RangeError` を固定した項目が無いかの確認、Test262 の見込みの実測、`CONFIG_POCKET_VM_TCO` の既定値決定がすべて未着手 | vm-tco-design.md §4（全体） | 未着手 |
