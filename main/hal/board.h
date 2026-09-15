@@ -23,6 +23,11 @@ extern int g_board_async;
 // TEMPORARY A/B switch (see board.c): 1 = the queued path swaps straight into the
 // panel buffer, 0 = swap in place and memcpy.
 extern int g_board_swap_into;
+// The same switch through a function, for the PERF report: shell.c flips it once
+// per 2-second window so the queued and the blocking path are measured inside one
+// binary (see shell.c). Reported as `async=` on the PERF line.
+int board_async_get(void);
+void board_async_set(int on);
 esp_err_t board_present(int y, int rows, uint16_t *pixels);
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 void board_capture(bool enabled);

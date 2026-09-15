@@ -42,6 +42,46 @@ def show(rows, keys, label):
 def main():
     lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
     perf = collect(lines, "background: PERF")
+    # PERF prints fps= twice -- the frame rate after clock=, then the HUD's own
+    # fps sub-term inside the parentheses -- and kv() keeps the last, so take the
+    # first for the frame rate.
+    for l, r in zip([x for x in lines if "background: PERF" in x], perf):
+        m = re.search(r"\bfps=([0-9.]+)", l)
+        if m:
+            r["fps"] = float(m.group(1))
+    # The panel-transfer A/B: the PERF report flips the mode every window and
+    # prints which one it used, so adjacent windows are a paired measurement in
+    # one binary (see docs/flower-optimisation-options.md A).
+    if perf and "async" in perf[0]:
+        print("-- panel transfer A/B (adjacent PERF windows, same binary)")
+        pairs = [(a, b) for a, b in zip(perf, perf[1:]) if a.get("async") != b.get("async")]
+        drows, dsend, dfps = [], [], []
+        print(f"   {'pair':>4} {'A':>2} {'drawA':>7} {'drawB':>7} {'d_draw':>7} {'sendA':>6} {'sendB':>6} "
+              f"{'d_send':>7} {'fpsA':>6} {'fpsB':>6}")
+        for n, (a, b) in enumerate(pairs):
+            dd = a.get("draw", 0) - b.get("draw", 0)
+            ds = a.get("send", 0) - b.get("send", 0)
+            drows.append(dd)
+            dsend.append(ds)
+            dfps.append(b.get("fps", 0) - a.get("fps", 0))
+            print(f"   {n:>4} {int(a.get('async', -1)):>2} {a.get('draw', 0):>7.2f} {b.get('draw', 0):>7.2f} "
+                  f"{dd:>+7.2f} {a.get('send', 0):>6.2f} {b.get('send', 0):>6.2f} {ds:>+7.2f} "
+                  f"{a.get('fps', 0):>6.1f} {b.get('fps', 0):>6.1f}")
+        if drows:
+            print(f"   pairs={len(pairs)}  draw: mean={st.mean(drows):+.2f} median={st.median(drows):+.2f} "
+                  f"min={min(drows):+.2f} max={max(drows):+.2f}   (A = async=1 minus async=0)")
+            print(f"              send: mean={st.mean(dsend):+.2f} median={st.median(dsend):+.2f}")
+            print(f"              fps : mean={st.mean(dfps):+.2f} (B minus A)")
+        # group means, for the reader who wants the two modes side by side
+        for label, want in (("async=1", 1), ("async=0", 0)):
+            g = [r for r in perf if r.get("async") == want]
+            if g:
+                print(f"   {label}: n={len(g)} draw={st.mean([r['draw'] for r in g]):.2f} "
+                      f"send={st.mean([r['send'] for r in g]):.2f} "
+                      f"loop={st.mean([r['loop'] for r in g]):.2f} "
+                      f"kernel={st.mean([r['kernel'] for r in g]):.2f} "
+                      f"fps={st.mean([r['fps'] for r in g]):.1f}")
+    perf = [r for r in perf if r.get("mode") == 3]
     split = [r for r in collect(lines, "garden: SPLIT ") if "decor" in r]
     split2 = collect(lines, "garden: SPLIT2")
     split3 = [r for r in collect(lines, "garden: SPLIT3") if "decor" in r]

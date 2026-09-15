@@ -604,9 +604,9 @@ void shell_draw(const char *error, unsigned phase) {
         // took: the label it reports is drawn on the sail scene and nothing
         // else logs it, so checking it used to mean reading pixels.
         ESP_LOGI("background",
-            "PERF mode=%u clock=%s fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f "
+            "PERF mode=%u async=%d clock=%s fps=%.1f draw=%.2f prep=%.2f loop=%.2f kernel=%.2f "
             "hud=%.2f (ovl=%.2f fmt=%.2f fps=%.2f menu=%.2f) send=%.2f",
-            mode,solar_sail_time_label(),fps,(double)draw_sum/samples/1000.0,
+            mode,board_async_get(),solar_sail_time_label(),fps,(double)draw_sum/samples/1000.0,
             (double)prep_sum/samples/1000.0,(double)loop_sum/samples/1000.0,
             (double)kernel_cycles/samples/240000.0,
             (double)hud_sum/samples/1000.0,
@@ -645,6 +645,13 @@ void shell_draw(const char *error, unsigned phase) {
             g_garden_canopy_pie=ab_arm%4!=1;
             g_board_swap_into=ab_arm%4!=3;
         }
+#else
+        // The queued-against-blocking A/B when SCENE_AB is off: the PERF line above
+        // printed `async=` for the window that just ended, and the next window runs
+        // the other path -- same binary, same scene, eight seconds later
+        // (docs/flower-decor-cost.md). With SCENE_AB on, the knob rotation above is
+        // the A/B instead and this flip would confound it.
+        board_async_set(!board_async_get());
 #endif
         samples=0;draw_sum=0;present_sum=0;prep_sum=0;loop_sum=0;hud_sum=0;kernel_cycles=0;
         hud_fmt_cy=hud_ovl_cy=hud_fps_cy=hud_menu_cy=0;

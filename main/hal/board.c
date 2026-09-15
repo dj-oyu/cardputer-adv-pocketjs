@@ -35,6 +35,11 @@ uint16_t *board_strip(void) { return shared; }
 // ONE binary: the same kernel moves 15% between builds from instruction-cache
 // alignment alone (CLAUDE.md), and this change is smaller than that.
 int g_board_async = 1;
+// The same switch through a function, for the PERF report: shell.c flips it once
+// per window, which is how the queued path was measured against the blocking one
+// (docs/flower-decor-cost.md).
+int board_async_get(void) { return g_board_async; }
+void board_async_set(int on) { g_board_async = on ? 1 : 0; }
 // TEMPORARY A/B switch inside the queued path: 1 = byte-swap straight into the
 // panel buffer that is not in flight (one pass, `shared` left as drawn), 0 = swap
 // `shared` in place and memcpy it across, as 7fd965f shipped. Same pixels on the
