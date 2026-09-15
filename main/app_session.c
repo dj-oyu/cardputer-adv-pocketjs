@@ -1127,11 +1127,27 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
                 {
                     static const struct {const char *name;int *flag;} switches[]={
                         {"prof",&g_ksn_prof},
+                        /* One row per optimisation of the perf/kasane-opt integration, so
+                         * one binary compares each switch against an all-on window on
+                         * either side: render_ms is the render path's own cost and the
+                         * control columns (bands/fill/span/tile/blend/read) show that
+                         * nothing else moved. rows+1 arms, a window each, so a switch's
+                         * off window is ~1 s from its all-on neighbours. */
+                        {"row_cov",&g_ksn_row_coverage},
+                        {"row_tbl",&g_ksn_row_table},
+                        {"lut",&g_ksn_blend_lut},
+                        {"lut_alpha",&g_ksn_blend_lut_alpha},
+                        {"affine",&g_ksn_group_affine},
+                        {"scale256",&g_ksn_scale256},
+                        {"pie",&g_ksn_blend_pie},
+                        {"tile_reach",&g_ksn_tile_reach},
+                        {"tile_smooth",&g_ksn_tile_smooth},
+                        {"decode1",&g_ksn_decode_once},
                     };
                     const unsigned rows=sizeof(switches)/sizeof(switches[0]);
                     static unsigned ab_arm;
                     const unsigned arm=ab_arm%(rows+1);
-                    char states[64]={0};
+                    char states[256]={0};
                     for(unsigned r=0;r<rows;r++) {
                         char one[24];
                         snprintf(one,sizeof(one),"%s%s=%d",r?" ":"",switches[r].name,*switches[r].flag);

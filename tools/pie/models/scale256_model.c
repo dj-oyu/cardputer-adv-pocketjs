@@ -58,6 +58,7 @@
 #include <stdint.h>
 #include "../../../main/ui/kasane/ksn_core.c"
 #include "../../../main/ui/kasane/ksn_render.c"
+#include "../../../main/ui/kasane/ksn_blend_pie.c"
 
 static long mismatches=0;
 static void fail(const char *what,long a,long b){

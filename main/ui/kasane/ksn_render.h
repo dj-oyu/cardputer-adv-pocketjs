@@ -174,6 +174,18 @@ extern int g_ksn_group_affine;
  * the measured arm, not the hoped-for one; tools/pie/models/scale256_model.c and
  * docs/perf/kasane-alpha256.md carry the moved-pixel counts and the objdump. */
 extern int g_ksn_scale256;
+/* Candidate 4a's kernel, the one place where the render path leaves C: 1 = an
+ * aligned run of eight pixels of a constant-colour command is handed to
+ * `ksn_blend8_pie` (main/ui/kasane/ksn_blend_pie.c) instead of the per-pixel
+ * chain; 0 = the chain only. The kernel is exact -- it reproduces blend()'s own
+ * expressions, proven over the whole per-channel space and over random multi
+ * block runs (test_kernels.py, docs/perf/kasane-blend-pie.md sections 4 and 6) --
+ * so both arms must produce byte identical panels. It is default 0 because the
+ * win is a device measurement (same binary, the switch flipped per window), and
+ * because PIE is coprocessor 3, which is the owner task's here. The kernel needs
+ * a 16-byte aligned destination, so the caller hands over only the 8-aligned
+ * window of a run and keeps head and tail on the chain. */
+extern int g_ksn_blend_pie;
 #ifdef __cplusplus
 }
 #endif

@@ -1765,6 +1765,35 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
     return KSN_OK;
 }
 
+/* ------------------------------------------------------------------------- *
+ * Candidate 4a of docs/perf/kasane-opt-survey.md: the 565 blend/pack kernel
+ * (docs/perf/kasane-blend-pie.md). One call blends eight destination pixels of a
+ * run from one source colour and one opacity; `thresholds` is NULL for the thin
+ * pack or the run's eight bayer values (the 4-cycle column phase the scalar
+ * pack reads per pixel). PIE is coprocessor 3: owner task only, and the
+ * destination must be 16-byte aligned.
+ * Default off: the arms are pixel identical (the kernel is exact, not an
+ * approximation), so which one runs is a device measurement.
+ * ------------------------------------------------------------------------- */
+int g_ksn_blend_pie=0;
+void ksn_blend8_pie(uint16_t *pixels,int blocks,ksn_rgba src,uint8_t opacity,
+                    const uint16_t *thresholds);
+/* The kernel for one row's aligned window [first, first+8*blocks). The bayer
+ * phase is built here because it depends on the absolute column: the scalar
+ * pack reads bayer4[y&3][x&3], and the 4-cycle pattern is the same for every
+ * 8-pixel block of the row, so the vector is built once per block start. */
+static void blend_pie_row(uint16_t *row,int first,int count,int py,bool dither,
+                          ksn_rgba color,uint8_t opacity){
+    if(count<8)return;
+    uint16_t thresholds[8];
+    const uint16_t *thr=NULL;
+    if(dither){
+        for(unsigned i=0;i<8;i++)
+            thresholds[i]=bayer4[(unsigned)py&3u][(unsigned)(first+(int)i)&3u];
+        thr=thresholds;
+    }
+    ksn_blend8_pie(row+first,count>>3,color,opacity,thr);
+}
 static uint16_t rgb565(ksn_rgba c){return (uint16_t)((c>>27)<<11|((c>>18)&63)<<5|((c>>11)&31));}
 static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int x,int y){
     unsigned a=((src&255)*opacity+127)/255;
@@ -1914,8 +1943,15 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             bool one_color=d->kind!=KSN_GRADIENT||d->data.gradient.from==d->data.gradient.to;
             const uint8_t (*lut)[KSN_BLEND_LUT_ROW]=(g_ksn_blend_lut&&one_color&&
                 blend_lut_solid_prime(sample(command,x0,y0),d->opacity,dither))?blend_lut_solid:NULL;
+            /* Candidate 4a: a constant-colour command's aligned 8-pixel blocks go
+             * to the PIE kernel. It needs a 16-byte aligned destination, so the
+             * band row's base is checked once here and the head and tail of each
+             * run stay on the arms below. All three arms are exact, so which one
+             * runs is a measurement, not a pixel decision. */
+            bool pie=g_ksn_blend_pie&&one_color;
             for(int py=y0;py<y1;py++){
                 const uint8_t *bayer_row=dither?bayer4[(unsigned)py&3u]:NULL;
+                bool pie_row=pie&&(((uintptr_t)(pixels+(py-y)*240)&15u)==0u);
                 if(g_ksn_row_coverage){
                     ksn_x_run runs[KSN_ROW_RUNS];
                     unsigned run_count=coverage_runs(command,py,x0,x1,runs);
@@ -1934,20 +1970,30 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                         row_table_for(command,py,runs[0].x0,runs[run_count-1].x1):NULL;
                     for(unsigned run=0;run<run_count;run++){
                         int from=runs[run].x0,to=runs[run].x1;
-                        if(row)for(int x=from;x<to;x++){
+                        /* The kernel takes one colour for the whole block, so it
+                         * is given only this run's 8-aligned window; the head,
+                         * the tail, and every pixel when the switch is off, go
+                         * through the arms -- whose value is the same one. */
+                        int pie_first=from,pie_last=from;
+                        if(pie_row){
+                            pie_first=(from+7)&~7;
+                            pie_last=to&~7;
+                            if(pie_last-pie_first<8)pie_first=pie_last=from;
+                        }
+                        for(int x=from;x<to;){
+                            if(x>=pie_first&&x<pie_last){
+                                blend_pie_row(pixels+(py-y)*240,pie_first,pie_last-pie_first,py,
+                                              dither,sample(command,pie_first,py),d->opacity);
+                                x=pie_last;
+                                continue;
+                            }
                             unsigned index=(unsigned)((py-y)*240+x);
                             if(lut)pixels[index]=blend_lut_pack(pixels[index],
                                 lut[bayer_row?(unsigned)bayer_row[(unsigned)x&3u]:0u]);
-                            else pixels[index]=KSN_BLEND(KSN_SLOT(d->kind,dither),
-                                                     pixels[index],row_table_value(row,x),d->opacity,
-                                                     dither,x,py);
-                        }else for(int x=from;x<to;x++){
-                            unsigned index=(unsigned)((py-y)*240+x);
-                            if(lut)pixels[index]=blend_lut_pack(pixels[index],
-                                lut[bayer_row?(unsigned)bayer_row[(unsigned)x&3u]:0u]);
-                            else pixels[index]=KSN_BLEND(KSN_SLOT(d->kind,dither),
-                                                     pixels[index],sample(command,x,py),d->opacity,
-                                                     dither,x,py);
+                            else pixels[index]=KSN_BLEND(KSN_SLOT(d->kind,dither),pixels[index],
+                                                     row?row_table_value(row,x):sample(command,x,py),
+                                                     d->opacity,dither,x,py);
+                            x++;
                         }
                     }
                 }else for(int x=x0;x<x1;x++)if(covers(command,x,py)){

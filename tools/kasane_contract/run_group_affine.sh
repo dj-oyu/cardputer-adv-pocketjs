@@ -17,11 +17,11 @@ trap 'rm -rf "$out"' EXIT
 # ksn_render.c into this binary.
 cc -std=c11 -Wall -Wextra -Werror -O2 -fstrict-aliasing -Imain/ui/kasane \
   main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
-  tools/kasane_contract/test_group_affine.c -o "$out/group-affine"
+  tools/kasane_contract/test_group_affine.c -o "$out/group-affine" main/ui/kasane/ksn_blend_pie.c
 "$out/group-affine"
 # The counting arm: -finstrument-functions turns "the fold ran, and the scene
 # that must not fold did not" into a number per render.
 cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_AFFINE_COUNT \
   -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
-  tools/kasane_contract/test_group_affine.c -o "$out/group-affine-count"
+  tools/kasane_contract/test_group_affine.c -o "$out/group-affine-count" main/ui/kasane/ksn_blend_pie.c
 "$out/group-affine-count"

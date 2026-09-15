@@ -17,13 +17,13 @@ trap 'rm -rf "$out"' EXIT
 # test_group_tile.c links ksn_render.c as a translation unit (it only needs the
 # three switches, which ksn_render.h declares): do NOT also include it.
 cc -std=c11 -Wall -Wextra -Werror -O2 -fstrict-aliasing -Imain/ui/kasane \
-  main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c \
+  main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
   tools/kasane_contract/test_group_tile.c -o "$out/group-tile"
 "$out/group-tile"
 # The counting arm: the tile's waste rate and how often each arm is entered.
 # A shortcut that is never taken passes a two-arm comparison by comparing the
 # old path with itself, so this arm is what makes the other one mean something.
 cc -std=c11 -Wall -Wextra -Werror -O2 -fstrict-aliasing -DKSN_TILE_COUNT \
-  -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c \
+  -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
   tools/kasane_contract/test_group_tile.c -o "$out/group-tile-count"
 "$out/group-tile-count"
