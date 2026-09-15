@@ -49,7 +49,8 @@ with serial.Serial(a.port, 115200, timeout=0.15) as port:
         for i in range(a.cycles):
             boot = command(b'K', 'KASANE_FRAME_PRESENTED')
             assert 'KASANE_SERVICES PASS legacy=false' in boot, boot
-            command(b'b', 'KASANE_ACTION right release held=false')
+            ready = command(b'b', 'KASANE_ACTION right release held=false')
+            assert 'KASANE_POWER initial=2' in boot + ready, boot + ready
             end = command(b'q', 'HOME_READY')
             match = re.search(r'MEM free=(\d+) largest=(\d+) js=0', end)
             assert match, end

@@ -4,6 +4,20 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14a — System電源・購読基盤（2026-09-16）
+
+- `system/sys_state`へ8件の購読・各購読のdirty mask・電源snapshot・測定期限を実装。
+  `system/sys_device`がHALを接続。状態144 B＋process ID4 B、heap/task追加なし。
+- JS電源APIを`pocket_av.c`から`pocket_power.c`へ抽出。既存の購読registryを再利用し、
+  native購読1件を共有。close/throw/resetで即時解除、SYSTEM等の別購読を維持する。
+  同期status/probeの互換性を維持。1秒間隔・最後に通知した値から20 mVの閾値を共通化。
+- H/Q ASan/UBSan・O2 PASS。60秒無購読のHAL呼出0、独立poll、初回・合流・変更閾値、
+  refresh合流、stale/枯渇、2 JS listener、例外、nativeとの共存、30 session終了を検査。
+- 通常/Kasane-onlyのC実装build PASS。DIRAM137,452 / 136,092 B、いずれも直前から+128 B。
+  実機の2購読・繰り返し起動検証をK診断へ追加。
+- 時計・通知レコード・recordingのSYSTEM表示とdeadline待機統合は未完了。
+  CP14全体の完了ではなく、共通状態の最初の実経路として電源を接続した段階。
+
 ## checkpoint 17b — 回転座標の反復計算削減（2026-09-16）
 
 - 回転spanの先頭で変換座標の分子を計算し、後続画素はu+=2*cos、v-=2*sinで進める。
@@ -15,6 +29,9 @@
   send6.00 ms。`.cache/kasane-cp17-span/serial.log`。前回render47.24 msだが、
   別ビルド・実時間駆動で姿勢とdamageも変わるため、改善率の証明には使わない。
   30 Hz目標は引き続き未達。今回は反復演算の削減に範囲を限定する。
+- Solレビュー: 加算化のcorrectness blockerなし。次の計測は64 bit除算とPPT2行展開の
+  分離。90度近傍の行展開回数、S3 call-chain stack peak、固定姿勢の同一firmware A/Bを
+  優先し、PIE化はアクセス形態を確認してから判断する。追加実装は保留。
 
 ## checkpoint 17a — 画像のnative自動補間（2026-09-16）
 

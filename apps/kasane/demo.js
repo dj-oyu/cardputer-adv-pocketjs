@@ -7,6 +7,16 @@
       !pocket.capabilities.get('input.action').supported || !pocket.device.info())
     throw Error('Kasane host services unavailable');
   console.log('KASANE_SERVICES PASS legacy=' + (typeof globalThis.ui !== 'undefined'));
+  let powerSeen = 0;
+  for (let i = 0; i < 2; i++) {
+    let first = true;
+    pocket.power.onChange(function (value) {
+      if (value.percent !== null || value.charging !== null) throw Error('power metadata');
+      if (!first) return;
+      first = false;
+      if (++powerSeen === 2) console.log('KASANE_POWER initial=2');
+    });
+  }
   const view = pocket.kasane;
   const pets = view.petImage();
   const tile = view.cache.create([

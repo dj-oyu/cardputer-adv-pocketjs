@@ -21,6 +21,7 @@
 #include "pocket_capture.h"
 #include "pocket_bridge.h"
 #include "pocket_text.h"
+#include "system/sys_device.h"
 #include "scene_mem.h"
 #include "vmprobe.h"
 #include "sdkconfig.h"
@@ -723,6 +724,7 @@ static void ui_task(void *arg) {
         // before any question about who owns the screen.
         if(have&&!running&&screen==SCREEN_HOME&&!home_modal()&&volume_key(&stroke))
             have=false;
+        sys_device_step();
         pet_repaint=pet_hub_pump();
         if(have&&pet_hub_key(stroke.nav)){have=false;pet_repaint=true;}
         if(pet_repaint&&running)app_force_redraw();

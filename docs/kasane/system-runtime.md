@@ -4,6 +4,24 @@
 目的は時計・電源・通知の共通化と、poll + dirty mask + pub/subによる不要な起床・再計算・割当の削減。
 本書の容量・性能は設計予算であり、実測値ではない。
 
+2026-09-16 CP14a: `main/system/sys_state.c`に固定購読・独立dirty・電源snapshotを実装。
+`sys_device.c`がHALを接続し、`pocket_power.c`が既存JSコールバックへ配送する。
+現在のtopicはSYS_POWERのみ。時計・通知・timer・SYSTEM描画は以降のcheckpoint。
+stateは144 B、購読ID管理4 B（sizeof/ELFで確認する）。動的確保・専用taskは追加しない。
+
+`sys_power_read`はsampledの有無を返し、valid/errorを含むsnapshotをコピーする。
+`sys_power_step`は購読またはrefresh要求があり期限到達した時だけHALを呼ぶ。
+解除後の再購読でも直前の測定から1秒の間隔を守り、初回dirtyで最新cacheを読める。
+未変更・初回配送済みならJS配送処理へ入らない。購読IDはprocess全体で単調増加し、
+UINT32_MAX到達後は新規受付をFULLにする（再起動まで古いIDを復活させない）。
+
+互換性: `pocket.power.status()`とcapability probeは従来通り同期HAL読取りを維持する。
+`onChange`はnative購読1件を全JS listenerで共有し、payloadはcacheから作る。
+最後のclose/例外/guest終了で即座にnative購読も解除する。nativeの別購読は存続する。
+初回値は次のowner pumpで配送し、再購読だけで測定期限を前倒ししない。
+現在は既存owner loopからstepする。runtime専用の周期wakeは追加せず、既存の画面・VMの
+周期待機そのものを停止したとはしない。
+
 ## 1. 現状と依存の向き
 
 現状の`main/pet/pet_hub.c`は時計補完、USB入力、NVS、タイマー、通知キュー、鳴動、入力処理、描画、JS bindingを持つ。

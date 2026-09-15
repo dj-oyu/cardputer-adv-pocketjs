@@ -7,6 +7,22 @@
 
 ## 1. コンテキストを分ける
 
+CP14a（2026-09-16）時点の実装済み電源経路:
+
+```mermaid
+flowchart LR
+  LOOP["owner loop: main.c"] --> DEVICE["sys_device: HAL adapter"]
+  AV["pocket_av: 互換入口"] --> JS["pocket_power: JS adapter"]
+  JS --> DEVICE
+  JS --> STATE["sys_state: snapshot / dirty / deadline"]
+  DEVICE --> STATE
+  DEVICE --> BOARD["board_battery_read"]
+```
+
+`sys_state`は描画・QuickJS・ESP-IDFをincludeしない。`pocket_av`に時計や通知を追加せず、
+電源の実装も独立moduleへ移した。同期status/probeのHAL呼出しだけはJS adapterに互換経路を残す。
+以下の全体図は引き続き移行先であり、時計・通知・SYSTEM presenterの移植完了を意味しない。
+
 | 境界 | 所有する意味・状態 | 外へ持ち出さないもの |
 | --- | --- | --- |
 | Device/System | 時計の品質・source、電源・センサーの観測値、取得方針 | ADC/RTC/I2C/RTOSの実装型 |
