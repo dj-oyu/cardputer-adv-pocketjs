@@ -40,6 +40,10 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [backlog.md](perf/backlog.md) | backlog | 未着手の性能候補（テキストのマスク合成、MP3 FIR、整数平方根、装飾光線の PIE 化など） |
 | [kasane-pet-row-cache.md](perf/kasane-pet-row-cache.md) | 記録 | PET 画像 provider の重複復号を 64 行キャッシュで消した（切替つき、8,208 B、−70.4%） |
 | [kasane-tile.md](perf/kasane-tile.md) | 記録 | 群のタイル面: 到達判定（3a）・ブロック幅（3b、16 画素は却下）・滑らかな層のブロック定数＋画素増分（厳密と近似の 2 段、命令数と動く画素の実測） |
+| [kasane-lut.md](perf/kasane-lut.md) | 記録 | 群の直接ブレンド連鎖を量子化キーの表へ（solid は厳密・既定 ON、TEXT は 16 段の近似・既定 OFF。画素あたり命令と動く画素の実測） |
+| [kasane-alpha256.md](perf/kasane-alpha256.md) | 記録 | スカラー 565 ブレンド／パックの /255 を 255→256 の粗スケールへ（切替つき・既定は厳密。α は両アームで不変、動く画素の実測） |
+| [kasane-opt-survey.md](perf/kasane-opt-survey.md) | 調査 | 描画経路の棚卸しと候補の選別（境界ごとに「何が律速か」と却下の理由） |
+| [kasane-opt-integration.md](perf/kasane-opt-integration.md) | 記録 | 最適化分岐の統合記録（順序・衝突の解決・各段の数値・オブジェクト増減・既定値の一覧） |
 
 作業ブランチの装飾光線コストと部分別計測は[flower-decor-cost.md](perf/flower-decor-cost.md)に保持する。
 群の合成を 1 枚のアフィン写像へ畳む候補 3c（不透明群はビット一致、非不透明への近似拡張は別段）は
