@@ -39,6 +39,9 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_primitives.c -o "$out/primitives"
   "$out/primitives"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c tools/kasane_contract/test_group_dither.c -o "$out/group-dither"
+  "$out/group-dither"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_cache.c \
     tools/kasane_contract/test_cache.c -o "$out/cache"
   "$out/cache"

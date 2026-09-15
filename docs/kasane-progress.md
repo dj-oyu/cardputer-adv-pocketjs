@@ -51,5 +51,27 @@ commit: `0227ac0`。`origin/vm/design-contracts`へpush済み。
 - ESP-IDF 6.0.1 `-B build_ds_contract build`: PASS。S3、PSRAMなし。
   app 2,168,048 B、partition空き977,680 B、DIRAM 115,548 B。既存GNU-stack警告のみ。
 
-次のcheckpoint 2はgroup内gradientのdither規則。
-実機利用可能後に0/1の確認（K診断、静止app再描画、recording、picker/capture）をまとめて行う。
+commit: `c787a6c`。`origin/vm/design-contracts`へpush済み。
+
+## checkpoint 2 — group内gradientの最終ディザ（2026-09-15）
+
+- グループの中間premultiplied RGBA8にはディザを適用せず、背景への最終合成後だけRGB565へ量子化する。
+- 画素ごとのbitで、最後の不透明上書き以降のディザ付きgradientの寄与を記録する。
+  半透明の子はbitを維持し、不透明なディザなしの子はbitを消す。
+  不可視・clip外・実効alpha 0のgradientや離れたrect領域へ適用を広げない。
+- 実効group alphaが0ならRGB565背景をそのまま返す。Bayer位相は絶対画面座標へ固定する。
+- 64画素のRGBA8タイルは256 Bのまま。追加は2×uint32のディザbit 8 Bで、heap確保はない。
+  正確な規則は[合成仕様](design-composition.md)の「グループ内gradientのディザ」に記載した。
+
+検証:
+
+- H: `bash tools/kasane_contract/run.sh`、ASan/UBSan・`-O2 -fstrict-aliasing`ともPASS。
+  独立scalar参照で全256 group opacity、16 Bayer位相、混合子、透明画素、角丸・clip、
+  32/64画素境界、PATCHとfullの画素一致を確認。既存rectグループの全opacity試験もPASS。
+- 修正前rendererでは、新試験の画素(12,7)で`0x532f`と参照`0x532e`の不一致を再現した。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`、および
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  と生成exeはPASS。JSのgradient公開はcheckpoint 8であり、このQは既存APIの回帰確認。
+- ESP-IDF 6.0.1 `-B build_ds_contract build`: PASS。S3、PSRAMなし。
+  app 2,168,208 B（0x211590）、partition空き977,520 B、DIRAM 115,548 Bで前checkpointと同量。
+- 実機画素比較はユーザー指示により後日まとめて実施。シリアル操作は行っていない。

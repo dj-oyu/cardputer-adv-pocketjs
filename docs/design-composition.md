@@ -64,7 +64,31 @@ instance opacityは合成済みPとAの両方へmul8で適用する。
 premultipliedであることを表す形式タグを必須とし、straightとの二重乗算を禁止する。
 RGB565直接経路とグループ経路では中間丸めが異なり得る。各経路に独立した参照式を持ち、同じ意味の描画内ではdirty範囲やキャッシュ有無で経路を切り替えない。
 
-全画面の中間画像は不要。最大64画素×RGBA8=256 Bの行タイルへ部品を再生して合成し、既存の共用512 B scratch内で逐次処理する。
+### グループ内gradientのディザ（2026-09-15）
+
+gradientの`dither`指定は、中間premultiplied RGBA8には適用しない。
+背景への最終source-overとinstance opacityを適用した後、RGB565へ戻す1回だけに適用する。
+グループ全体の実効alpha `mul8(Agroup, instanceOpacity)` が0なら、背景のRGB565値をそのまま返す。
+背景の8 bit展開や再量子化による変更も禁止する。これは透明な穴、角丸の外、group opacityの丸めで0になった画素にも適用する。
+
+ディザの適用は画素ごとの1 bit `D` で決める。各タイルの`D`はfalseから始め、子を描画順に処理する。
+その画素を覆わない子、不可視の子、実効alphaが0の子は`D`を変更しない。
+覆う子の実効alphaは、通常と同じcoverage・color alpha・command opacityの丸め順で求める。
+
+- `dither=true`のgradientが実効alpha 1..255で覆う場合、`D=true`にする。
+- それ以外の子が実効alpha 255で覆う場合、`D=false`にする。ディザなしの不透明gradientも含む。
+- それ以外の子が実効alpha 1..254で覆う場合、以前の`D`を保つ。
+
+これは「最後の不透明上書き以降に、寄与したディザ付きgradientがある」というbooleanの規則である。
+半透明の前景を重ねて中間色の寄与が丸めで消えても、`D`は不透明上書きまで残る。
+サブLSBの寄与量を追跡する契約ではない。gradientと離れたrectのみの領域にはディザを広げない。
+instance opacityはこのbitを変えず、実効group alphaが非0の最終画素でのみ`D`を使用する。
+
+`D=true`なら[基本仕様](design-system.md)の4×4 BayerとRGB565量子化式を最終RGB8へ適用する。
+位相は絶対画面座標の`x mod 4, y mod 4`であり、gradient原点、clip、tile、strip、PATCH/fullで再起算しない。
+`D=false`なら従来のRGB565切捨てを使う。ディザのないグループは従来の整数合成結果を維持する。
+
+全画面の中間画像は不要。最大64画素×RGBA8=256 Bの行タイルと、64画素分のディザbit 8 Bへ部品を再生して合成し、既存の共用512 B scratch内で逐次処理する。
 初期版の実行時グループ隔離は1段。template内のtemplate参照は生成時に平坦化し、循環参照と隔離グループの入れ子はINVALID。
 グループ内の命令数も展開後の80/16命令予算に数える。タイルごとの再走査によるCPUコストは別途測る。
 
@@ -265,7 +289,7 @@ PATCHで変更できるのは既存の正確な範囲のopacityであり、部�
 全子命令のgroup opacityを更新するため、opacityだけ変わった場合も部品の旧/新描画範囲がdamageに含まれる。
 
 cacheの全instanceはopacity=255も含め、常にpremultiplied経路を通る。直接描画との丸め差を、opacityの変更やdirty範囲で切り替えない。
-rendererは可視命令とclipの交差を囲む範囲だけを、最大64画素の`ksn_premultiplied_rgba8`タイルで処理する。中間画素は256 Bの自動変数で、heapも全面バッファも追加しない。
+rendererは可視命令とclipの交差を囲む範囲だけを、最大64画素の`ksn_premultiplied_rgba8`タイルで処理する。中間画素は256 B、ディザbitは2×uint32=8 Bの自動変数で、heapも全面バッファも追加しない。
 この型を中間形式の識別とし、straight RGBA入力とは関数引数を分ける。roundRect/stroke/gradientも同じ固定タイル経路で描画する。
 
 `ksn_core_poll`は最後の提出のticket/status/reason/layerを保持する。begin/abortでは前の結果を消さず、次のendで置換する。

@@ -51,12 +51,13 @@ static ksn_rgba sample(const ksn_frame_command *command,int x,int y){
     unsigned i=(unsigned)(vertical?y-draw->bounds.y0:x-draw->bounds.x0);
     return interpolate(draw->data.gradient.from,draw->data.gradient.to,i,length);
 }
-static void premultiply_over(ksn_premultiplied_rgba8 *dst,ksn_rgba color,uint8_t opacity){
+static unsigned premultiply_over(ksn_premultiplied_rgba8 *dst,ksn_rgba color,uint8_t opacity){
     unsigned a=mul8(color&255,opacity),inverse=255-a;
     dst->r=(uint8_t)clamp8(mul8(color>>24,a)+mul8(dst->r,inverse));
     dst->g=(uint8_t)clamp8(mul8((color>>16)&255,a)+mul8(dst->g,inverse));
     dst->b=(uint8_t)clamp8(mul8((color>>8)&255,a)+mul8(dst->b,inverse));
     dst->a=(uint8_t)clamp8(a+mul8(dst->a,inverse));
+    return a;
 }
 static unsigned quantize(unsigned value,unsigned maximum,unsigned bayer){
     unsigned q=value*maximum/255u,remainder=value*maximum-255u*q;
@@ -71,7 +72,9 @@ static uint16_t pack565(unsigned r,unsigned g,unsigned b,bool dither,int x,int y
 }
 static uint16_t group_over(uint16_t dst,ksn_premultiplied_rgba8 src,uint8_t opacity,
                            bool dither,int x,int y){
-    unsigned inverse=255-mul8(src.a,opacity);
+    unsigned alpha=mul8(src.a,opacity);
+    if(!alpha)return dst;
+    unsigned inverse=255-alpha;
     unsigned r=dst>>11,g=(dst>>5)&63,b=dst&31;
     r=clamp8(mul8(src.r,opacity)+mul8((r<<3)|(r>>2),inverse));
     g=clamp8(mul8(src.g,opacity)+mul8((g<<2)|(g>>4),inverse));
@@ -83,6 +86,7 @@ static ksn_result render_group(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsi
     if(!opacity)return KSN_OK;
     ksn_premultiplied_rgba8 tile[64]; /* 256 bytes; no full component surface. */
     ksn_frame_command command;
+    bool has_dither=false;
     int left=240,right=0,top=y+rows,bottom=y;
     for(unsigned i=first;i<=end;i++){
         ksn_result result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
@@ -94,6 +98,7 @@ static ksn_result render_group(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsi
         int y0=d->bounds.y0>d->clip.y0?d->bounds.y0:d->clip.y0;
         int y1=d->bounds.y1<d->clip.y1?d->bounds.y1:d->clip.y1;
         if(x0>=x1||y0>=y1)continue;
+        if(d->kind==KSN_GRADIENT&&d->data.gradient.dither)has_dither=true;
         if(x0<left)left=x0;
         if(x1>right)right=x1;
         if(y0<top)top=y0;
@@ -106,15 +111,26 @@ static ksn_result render_group(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsi
     for(int py=top;py<bottom;py++)for(int x0=left;x0<right;x0+=64){
         int count=right-x0;if(count>64)count=64;
         memset(tile,0,sizeof(tile));
+        /* Boolean provenance survives partial coverage but is replaced by an
+         * opaque child. Two words avoid variable 64-bit shifts on ESP32-S3. */
+        uint32_t dither_pixels[2]={0,0};
         for(unsigned i=first;i<=end;i++){
             ksn_result result=ksn_core_read(core,ticket,false,layer,(uint16_t)i,&command);
             if(result!=KSN_OK)return result;
-            for(int x=0;x<count;x++)if(covers(&command,x0+x,py))
-                premultiply_over(&tile[x],sample(&command,x0+x,py),command.draw.opacity);
+            bool child_dither=command.draw.kind==KSN_GRADIENT&&command.draw.data.gradient.dither;
+            for(int x=0;x<count;x++)if(covers(&command,x0+x,py)){
+                unsigned alpha=premultiply_over(&tile[x],sample(&command,x0+x,py),command.draw.opacity);
+                if(has_dither&&alpha){
+                    uint32_t bit=1u<<((unsigned)x&31u);
+                    if(child_dither)dither_pixels[(unsigned)x>>5]|=bit;
+                    else if(alpha==255)dither_pixels[(unsigned)x>>5]&=~bit;
+                }
+            }
         }
         for(int x=0;x<count;x++){
             unsigned index=(unsigned)((py-y)*240+x0+x);
-            pixels[index]=group_over(pixels[index],tile[x],opacity,false,x0+x,py);
+            bool dither=has_dither&&(dither_pixels[(unsigned)x>>5]&(1u<<((unsigned)x&31u)))!=0;
+            pixels[index]=group_over(pixels[index],tile[x],opacity,dither,x0+x,py);
         }
     }
     return KSN_OK;
