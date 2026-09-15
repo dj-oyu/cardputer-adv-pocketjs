@@ -442,28 +442,36 @@ class TestCanopyKernel(unittest.TestCase):
             cx = rng.randrange(40, 200)
             cx = max(rx, min(239 - rx, cx))
             # an interior block: every pixel inside |x - cx| <= rx
-            k = rng.randrange(0, max(1, (2 * rx + 1) // 8))
+            # More than one block: the first version of this test used a single
+            # block, and the kernel's x vector ran off its own stack array on the
+            # second one exactly as the part did.
+            nblk = rng.randrange(1, 6)
+            k = rng.randrange(0, max(1, (2 * rx + 1) // 8 - nblk))
             x0 = cx - rx + 8 * k
-            if x0 + 7 > cx + rx:
-                x0 = cx + rx - 7
+            while x0 + 8 * nblk - 1 > cx + rx:
+                x0 -= 8
+            if x0 < cx - rx:
+                x0 = cx - rx
             qy = rng.randrange(0, 257)
             leafy = rng.randrange(0, 1 << 16)
             lr, lg, lb = (leafy >> 11) & 31, (leafy >> 5) & 63, leafy & 31
-            words = [rng.randrange(0, 1 << 16) for _ in range(8)]
+            words = [rng.randrange(0, 1 << 16) for _ in range(8 * 6)]
             mem = bytearray(0x8000)
             env = {'cx': cx, 'mrr': mrr, 'qy': qy, 'leafy': leafy}
             self.broadcast(mem, extract_constants(CANOPY, 'canopy_pie(', env))
-            store16(mem, self.XV, [x0 + i for i in range(8)])
+            store16(mem, self.XV, [x0 + i for i in range(8)])   # one block's worth
             store16(mem, self.ROW, words)
             sim = Sim(mem)
             sim.run(extract_asm(CANOPY, 'canopy_pie('),
-                    {'kp': 0, 'xp': self.XV, 'row': self.ROW, 'n': 1, 'kv': self.KV,
+                    {'kp': 0, 'xp': self.XV, 'row': self.ROW, 'n': nblk, 'kv': self.KV,
                      'sh0': 0, 'sh5': 5, 'sh8': 8, 'sh11': 11, 'sh16': 16, 'sh18': 18})
-            got = load16(mem, self.ROW, 8)
-            want = [self.pixel_ref(x0 + i, cx, mrr, qy, lr, lg, lb, words[i]) for i in range(8)]
-            self.assertEqual(got, want, f'rx={rx} cx={cx} x0={x0} mrr={mrr} qy={qy} leafy={leafy}')
-            self.assertEqual(sim.ar['row'], self.ROW + 16, 'row advance')
-            self.assertEqual(sim.ar['xp'], self.XV + 16, 'x vector advance')
+            got = load16(mem, self.ROW, 8 * nblk)
+            want = [self.pixel_ref(x0 + i, cx, mrr, qy, lr, lg, lb, words[i]) for i in range(8 * nblk)]
+            self.assertEqual(got, want, f'rx={rx} cx={cx} x0={x0} blocks={nblk} mrr={mrr} qy={qy} leafy={leafy}')
+            self.assertEqual(sim.ar['row'], self.ROW + 16 * nblk, 'row advance')
+            # xp is an input-only operand now: the kernel keeps the lanes in q7 and
+            # moves them on by eight, so there is nothing to walk and nothing to
+            # assert about a pointer the assembly does not advance.
 
 
 if __name__ == '__main__':
