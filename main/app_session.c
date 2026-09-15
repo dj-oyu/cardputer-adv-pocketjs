@@ -3,11 +3,16 @@
 #include "fonts.h"
 #include "pocketjs/guest.h"
 #include "pocketjs/guest_quickjs.h"
+#ifndef CONFIG_KSN_ONLY
 #include "pocketjs/ui_core.h"
 #include "pocketjs/ui_qjs.h"
 #include "pocketjs/render_rgb565.h"
+#endif
 #include "jsconsole.h"
+#ifndef CONFIG_KSN_ONLY
 #include "jsfont.h"
+#include "pet_assets.h"
+#endif
 #include "pocket_api.h"
 #include "pocket_random.h"
 #include "pocket_storage.h"
@@ -27,7 +32,6 @@
 #include "pocket_kasane.h"
 #include "pocket_input.h"
 #include "app_registry.h"
-#include "pet_assets.h"
 #include "pet_hub.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -74,10 +78,15 @@ static void report_oom_if_any(void) {
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
                  (unsigned)n,(unsigned)first_req,(unsigned)first_used);
 }
+#ifndef CONFIG_KSN_ONLY
 static pocketjs_ui_core_t *core;
 static pocketjs_ui_qjs_t *binding;
 static pocketjs_rgb565_renderer_t *renderer;
 static pocketjs_rgb565_target_t *target;
+#else
+// No legacy headers or ABI structs are needed by the Kasane display path.
+typedef struct { size_t struct_size; } pocketjs_ui_frame_view_t;
+#endif
 static atomic_bool stop_requested;
 static int64_t deadline;
 // L1 (docs/vm/vm-L1-design.md). Armed once per turn and handed to the guest, so
@@ -98,13 +107,18 @@ static bool turn_continued;
 static int64_t last_present_us;
 static unsigned frames;
 static bool redraw;
-static double render_sum, present_sum, kernel_sum, turn_sum;
+static double render_sum, present_sum, turn_sum;
+#ifndef CONFIG_KSN_ONLY
+static double kernel_sum;
+#endif
 static unsigned painted, ticks;
 // Hand-written PIE kernels for the two ops this renderer actually asks for
 // (opaque fill, coverage-mask blend); anything they cannot honour exactly is
 // declined and the Rust software path draws it.
+#ifndef CONFIG_KSN_ONLY
 extern const pocketjs_rgb565_accelerator_t render_accel;
 extern uint32_t render_accel_cycles;
+#endif
 // Borrowed for the length of a start; the Playground owns the bytes and does
 // not edit them while a run is up.
 static const char *user_source;
@@ -351,13 +365,17 @@ void app_stop(void) {
 #ifdef CONFIG_POCKET_VM_PROBE
     vmprobe_session_reset();
 #endif
+#ifndef CONFIG_KSN_ONLY
     jsfont_detach();
+#endif
     // Before the guest goes: the watches hold callbacks belonging to it, and a
     // promise still in flight holds its resolvers.
     // First: section 5 runs the stop hook before I/O cancellation and before
     // the subscriptions it may still want to use are taken away.
     pocket_app_reset();
+#ifndef CONFIG_KSN_ONLY
     pet_assets_reset();
+#endif
     pocket_imu_reset();
     pocket_av_reset();
     // Before pocket_api_reset(): a recorder holds the I2S RX channel and the
@@ -374,16 +392,20 @@ void app_stop(void) {
     pocket_workspace_reset();
     pocket_kasane_reset();
     pocket_input_reset();
+#ifndef CONFIG_KSN_ONLY
     pocket_ui_reset();
+#endif
     pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and
     // a screen change closes the session -- which is what the end of a run is.
     pocket_text_reset();
     pocket_bridge_reset();
     pocket_api_reset();
+#ifndef CONFIG_KSN_ONLY
     if(renderer && target) pocketjs_rgb565_abort(renderer,target);
     if(target) pocketjs_rgb565_target_destroy(target);
     if(renderer) pocketjs_rgb565_renderer_destroy(renderer);
+#endif
     // Read before the runtime goes: app_report() below runs with guest == NULL,
     // so this is the last point at which "was anything still queued" has an
     // answer. pocket_app_reset() above has already given the stop hook its
@@ -393,9 +415,12 @@ void app_stop(void) {
         pocketjs_guest_stats(guest,&final_stats);
     }
     if(guest) pocketjs_guest_destroy(guest);
+#ifndef CONFIG_KSN_ONLY
     if(binding) pocketjs_ui_qjs_destroy(binding);
     if(core) pocketjs_ui_core_destroy(core);
     target=NULL;renderer=NULL;guest=NULL;binding=NULL;core=NULL;
+#endif
+    guest=NULL;
     app_report();
     ESP_LOGI("app","APP_STOPPED");
 }
@@ -406,6 +431,13 @@ esp_err_t app_start_test(char test) {
     // skipped the test's source and its renderer, and the session died on its
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
+#ifdef CONFIG_KSN_ONLY
+    if(!overlay_session && test!='K') {
+        jsconsole_set_error("Not migrated to Kasane in this diagnostic build");
+        ESP_LOGW("app","APP_REFUSED KASANE_ONLY: use USB K diagnostic");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+#endif
     atomic_store(&stop_requested,false); frames=0;
     deferred_buttons=0; continuation_turns=0; turn_continued=false;
     last_present_us=0;
@@ -449,7 +481,9 @@ esp_err_t app_start_test(char test) {
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
     jsconsole_clear();
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
+#ifndef CONFIG_KSN_ONLY
     TRY(pocketjs_guest_quickjs_install_once(guest,"jsfont",jsfont_install,NULL));
+#endif
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"random",pocket_random_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
@@ -490,7 +524,9 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"net",pocket_net_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"ble",pocket_ble_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
+#ifndef CONFIG_KSN_ONLY
     TRY(pocketjs_guest_quickjs_install_once(guest,"pui",pocket_ui_install,NULL));
+#endif
     TRY(pocketjs_guest_quickjs_install_once(guest,"input",pocket_input_install,NULL));
     // After "input": both contribute to pocket.input, and contributors run in
     // the order they registered.
@@ -503,6 +539,7 @@ esp_err_t app_start_test(char test) {
     TRY(pocketjs_guest_quickjs_install_once(guest,"workspace",pocket_workspace_install,NULL));
 surfaces_done:
     if(overlay_session) goto source_ready;
+#ifndef CONFIG_KSN_ONLY
     {
     pocketjs_ui_core_config_t cc;
     pocketjs_ui_core_config_defaults(&cc);
@@ -541,6 +578,7 @@ surfaces_done:
         TRY(pocketjs_guest_quickjs_install_once(guest,"pet-assets",pet_assets_install,core));
     }
     }
+#endif
 source_ready:;
     const char *source=user_source?user_source:hello_start;
     size_t length=user_source?user_length:(size_t)(hello_end-hello_start-1);
@@ -617,12 +655,14 @@ source_ready:;
         }
     }
 #endif
+#ifndef CONFIG_KSN_ONLY
     if(!overlay_session&&!pocket_kasane_active()) {
         pocketjs_rgb565_renderer_config_t rc;
         pocketjs_rgb565_renderer_config_defaults(&rc);rc.scale=1;
         TRY(pocketjs_rgb565_renderer_create(&rc,&renderer));
         TRY(pocketjs_rgb565_target_create(&target));
     }
+#endif
     app_report();
     return ESP_OK;
 fail:
@@ -781,7 +821,9 @@ static void run_pumps(uint32_t buttons) {
     pocket_av_pump();
     // The same mask the turn below is handed: pocket.input reports what the
     // host forwarded, never a second reading of the keyboard.
+#ifndef CONFIG_KSN_ONLY
     pocket_ui_pump();
+#endif
     pocket_input_pump(buttons);
 }
 
@@ -796,8 +838,13 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons,
                                 pocketjs_guest_frame(guest,&input);
     if(result!=ESP_OK)return result;
     if(pocket_kasane_active())return ESP_OK;
+#ifndef CONFIG_KSN_ONLY
     pocketjs_ui_core_tick(core);
     return pocketjs_ui_core_draw(core,out);
+#else
+    (void)out;
+    return ESP_OK;
+#endif
 }
 
 esp_err_t app_tick(uint32_t buttons) {
@@ -972,11 +1019,12 @@ esp_err_t app_tick(uint32_t buttons) {
 // length of a long drain would be a visible regression the level does not
 // need to cause.
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
-    esp_err_t e;
     last_present_us=esp_timer_get_time();
     if(pocket_kasane_active()) {
+#ifndef CONFIG_KSN_ONLY
         if(target) { pocketjs_rgb565_target_destroy(target); target=NULL; }
         if(renderer) { pocketjs_rgb565_renderer_destroy(renderer); renderer=NULL; }
+#endif
         kasane_display_t display_state={0};
         ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
                               .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H};
@@ -1006,6 +1054,8 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
         }
         return ESP_OK;
     }
+#ifndef CONFIG_KSN_ONLY
+    esp_err_t e;
     pocketjs_rgb565_damage_plan_t plan={.struct_size=sizeof(plan)};
     e=pocketjs_rgb565_prepare(renderer,target,frame,&plan);if(e)return e;
     pet_assets_tick();
@@ -1059,4 +1109,8 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
     return e;
 fail:
     pocketjs_rgb565_abort(renderer,target);return e;
+#else
+    (void)frame;
+    return ESP_OK;
+#endif
 }

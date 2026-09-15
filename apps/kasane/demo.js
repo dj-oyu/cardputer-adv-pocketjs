@@ -2,6 +2,11 @@
 // scene changing so timing captures include alpha, grouped opacity, cache
 // placement, replace/patch reference turnover, and modal transitions.
 (function () {
+  const rngA = pocket.random.create(123), rngB = pocket.random.create(123);
+  if (rngA.nextUint32() !== rngB.nextUint32() ||
+      !pocket.capabilities.get('input.action').supported || !pocket.device.info())
+    throw Error('Kasane host services unavailable');
+  console.log('KASANE_SERVICES PASS legacy=' + (typeof globalThis.ui !== 'undefined'));
   const view = pocket.kasane;
   const tile = view.cache.create([
     {bounds: [0, 0, 42, 24], color: 0x185071ff},

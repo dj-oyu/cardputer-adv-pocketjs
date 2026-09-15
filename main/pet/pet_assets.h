@@ -3,7 +3,6 @@
 // cannot drift apart.
 #define PET_SPEECH_CHARS 22
 #include "pocketjs/guest_quickjs.h"
-#include "pocketjs/ui_core.h"
 
 esp_err_t pet_assets_install(JSContext *ctx, void *core);
 void pet_assets_reset(void);

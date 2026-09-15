@@ -63,6 +63,27 @@
   同構成のK 300ターンもPASS。ログは`.cache/kasane-cp6-vmprobe.jsonl`と
   `.cache/kasane-cp6-probe-k`。CP6実装commitは`380e1d6`、push済み。
 
+## checkpoint 7 — Kasane-only診断profile（2026-09-15）
+
+- root CMakeの`-D KSN_ONLY=ON`で旧UI core/binding/RGB565 rendererを依存探索から除外。
+  選択をIDF build propertyで早期の別プロセスにも伝える。通常構成は既定OFF。
+  manifestの無条件旧UI edgeを除き、通常構成のCMake REQUIRESに集約する。
+- Kasane-onlyでは旧node API、jsfont、petの旧texture adapter、旧render acceleratorをコンパイルしない。
+  native pet通知の共有ヘッダから不要なui_core includeも除く。入力・text serviceは独立して残す。
+- この段階で未移植のforeground appは、評価前に`APP_REFUSED KASANE_ONLY`と表示理由を返す。
+  USB Kと既存のTaffy非依存overlayだけを許可する。native home/editor等の描画はまだ旧native経路。
+- `tools/prepare_dependencies.py --kasane-only`は旧PocketJS checkout/Rustを準備しない。
+  BMI270、opus、minimp3は従来どおり。`tools/test_kasane_prepare.py`はsubprocessをmockして検証。
+- clean診断build: `idf.py -B build_ksn_only -D SDKCONFIG=build_ksn_only/sdkconfig
+  -D KSN_ONLY=ON -D POCKETJS_SOURCE_DIR=C:/devs/m5stack/design-contracts-wt/.cache/absent-legacy-ui build`
+  PASS。指定した旧checkoutのパスは存在しない。native probe有効、VM probe無効、PSRAMなし。
+  app 1,900,384 B、DIRAM135,916 B。通常構成はapp2,196,352 B、DIRAM137,276 BでビルドPASS。
+- `tools/check_kasane_link.py --build build_ksn_only --nm <S3-toolchain-nm>` PASS。
+  component graph、build.ninja、compile_commands、map、demangle済みELFに旧UI/Taffyがなく、
+  Kasane/guest/inputの実シンボルが存在する。旧ソースやarchiveの削除はしていない。
+- session dispatchのhost回帰4構成PASS。Kはdevice情報、seeded random、input capabilityを
+  実際に使い`KASANE_SERVICES PASS legacy=false`を出す。実機100回起動と描画検証は別途記録する。
+
 ## vm/main同期 — 2026-09-15
 
 - 同名リモートの`77e95c8`をfast-forward後、`origin/vm/main`の`bd0fa43`を統合。
