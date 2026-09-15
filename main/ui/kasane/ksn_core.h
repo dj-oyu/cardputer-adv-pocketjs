@@ -37,7 +37,7 @@ struct ksn_core_impl {
     ksn_layer layer;
     ksn_update_mode mode;
     uint8_t active,building_bank;
-    bool building,submitted,full_redraw;
+    bool building,submitted,full_redraw,repairing,invalidated;
 };
 
 /* Caller-owned, fixed storage. The implementation performs no heap allocation. */
@@ -83,6 +83,9 @@ bool ksn_core_has_submission(const ksn_core *core);
 /* Last submission only, retained across begin/abort. Poll before next end. */
 ksn_submission ksn_core_poll(const ksn_core *core);
 bool ksn_core_needs_repair(const ksn_core *core);
+/* Owner invalidation is independent of guest submissions. Requests received
+ * during a transfer remain pending until a subsequent complete frame. */
+void ksn_core_invalidate(ksn_core *core);
 ksn_result ksn_core_discard_reason(ksn_core *core,ksn_tx ticket,ksn_result reason);
 ksn_result ksn_core_check_builder(const ksn_core *core,ksn_tx ticket,ksn_layer layer,ksn_update_mode mode);
 ksn_result ksn_core_builder_usage(const ksn_core *core,ksn_tx ticket,ksn_capacity *out);
@@ -91,6 +94,13 @@ ksn_result ksn_core_builder_usage(const ksn_core *core,ksn_tx ticket,ksn_capacit
 ksn_result ksn_core_group(ksn_core *core,ksn_layer layer,ksn_tx tx,ksn_ref first,
                         uint16_t count,uint8_t opacity);
 ksn_result ksn_core_frame(const ksn_core *core,ksn_frame *out);
+/* Renderer-only start: consume the current invalidation request. If no guest
+ * submission exists, pin the committed bank with a private repair token.
+ * Repair never changes reference generations or the last guest outcome. */
+ksn_result ksn_core_prepare_frame(ksn_core *core,ksn_frame *out);
+/* Renderer preflight failed before any transfer. Release only a private
+ * repair pin, keeping invalidation pending; guest submissions stay sealed. */
+void ksn_core_defer_repair(ksn_core *core,ksn_tx ticket);
 ksn_result ksn_core_read(const ksn_core *core,ksn_tx ticket,bool previous,
                        ksn_layer layer,uint16_t index,ksn_frame_command *out);
 ksn_result ksn_core_image_span(const ksn_core *core,ksn_tx ticket,bool previous,

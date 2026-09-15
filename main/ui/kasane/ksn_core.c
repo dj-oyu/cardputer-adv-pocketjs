@@ -100,7 +100,7 @@ static ksn_result validate_image(const ksn_core_impl *core,ksn_layer layer,ksn_r
 static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
     ksn_endpoint *endpoint=context;ksn_core_impl *core=endpoint->core;
     if(!out||(mode!=KSN_REPLACE&&mode!=KSN_PATCH))return KSN_INVALID;
-    if(core->building||core->submitted)return KSN_BUSY;
+    if(core->building||core->submitted||core->repairing)return KSN_BUSY;
     ksn_layer layer=endpoint->layer;
     if(last_transaction==UINT32_MAX||
        (mode==KSN_REPLACE&&last_generation==KSN_REF_GENERATION_MAX))return KSN_LIMIT;
@@ -306,7 +306,7 @@ ksn_result ksn_core_register_image(ksn_core *storage,ksn_layer layer,const ksn_i
     if(!storage||!valid_layer(layer)||!port||!out||!port->read_span||
        !port->width||!port->height||!port->variants||!port->frames)return KSN_INVALID;
     ksn_core_impl *core=impl(storage);
-    if(core->building||core->submitted)return KSN_BUSY;
+    if(core->building||core->submitted||core->repairing)return KSN_BUSY;
     if(core->image_count==KSN_RESOURCES||last_resource==UINT32_MAX)return KSN_LIMIT;
     ksn_image_entry *entry=&core->images[core->image_count++];
     *entry=(ksn_image_entry){*port,{++last_resource},layer};*out=entry->id;return KSN_OK;
@@ -315,7 +315,10 @@ bool ksn_core_has_submission(const ksn_core *storage){return storage&&cimpl(stor
 ksn_submission ksn_core_poll(const ksn_core *storage){
     return storage?cimpl(storage)->outcome:(ksn_submission){0};
 }
-bool ksn_core_needs_repair(const ksn_core *storage){return storage&&cimpl(storage)->full_redraw;}
+bool ksn_core_needs_repair(const ksn_core *storage){
+    return storage&&(cimpl(storage)->full_redraw||cimpl(storage)->invalidated);
+}
+void ksn_core_invalidate(ksn_core *storage){if(storage)impl(storage)->invalidated=true;}
 ksn_result ksn_core_check_builder(const ksn_core *storage,ksn_tx ticket,ksn_layer layer,ksn_update_mode mode){
     if(!storage)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
@@ -357,7 +360,10 @@ ksn_result ksn_core_group(ksn_core *storage,ksn_layer layer,ksn_tx tx,ksn_ref fi
 ksn_result ksn_core_presented(ksn_core *storage,ksn_tx ticket){
     if(!storage)return KSN_INVALID;
     ksn_core_impl *core=impl(storage);
-    if(!core->submitted||ticket.value!=core->transaction.value)return KSN_STALE;
+    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
+    if(core->repairing){
+        core->repairing=false;core->full_redraw=false;return KSN_OK;
+    }
     core->active=core->building_bank;core->submitted=false;core->full_redraw=false;
     core->outcome=(ksn_submission){ticket,KSN_PRESENTED,KSN_OK,core->layer};return KSN_OK;
 }
@@ -395,27 +401,50 @@ bool ksn_core_refs_active(const ksn_core *storage,ksn_layer layer,ksn_ref first,
 ksn_result ksn_core_frame(const ksn_core *storage,ksn_frame *out){
     if(!storage||!out)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
-    if(!core->submitted)return KSN_STALE;
-    const ksn_bank *before=&core->banks[core->active],*after=&core->banks[core->building_bank];
+    if(!core->submitted&&!core->repairing)return KSN_STALE;
+    const ksn_bank *before=&core->banks[core->active];
+    const ksn_bank *after=&core->banks[core->repairing?core->active:core->building_bank];
     *out=(ksn_frame){.ticket=core->transaction,.previous_background=before->background[KSN_APP],
-                    .next_background=after->background[KSN_APP],.full_redraw=core->full_redraw};
+                    .next_background=after->background[KSN_APP],
+                    .full_redraw=core->full_redraw||core->invalidated};
     for(unsigned i=0;i<2;i++){
         out->previous[i]=usage(before,(ksn_layer)i);out->next[i]=usage(after,(ksn_layer)i);
     }
     return KSN_OK;
 }
+ksn_result ksn_core_prepare_frame(ksn_core *storage,ksn_frame *out){
+    if(!storage||!out)return KSN_INVALID;
+    ksn_core_impl *core=impl(storage);
+    if(core->building)return KSN_BUSY;
+    if(!core->submitted&&!core->repairing){
+        if(!ksn_core_needs_repair(storage))return KSN_STALE;
+        if(last_transaction==UINT32_MAX)return KSN_LIMIT;
+        core->transaction=(ksn_tx){++last_transaction};core->repairing=true;
+    }
+    /* A later invalidate, including one inside the display callback, survives
+     * the current acknowledgement. IO failure keeps full_redraw set too. */
+    core->full_redraw|=core->invalidated;core->invalidated=false;
+    return ksn_core_frame(storage,out);
+}
+void ksn_core_defer_repair(ksn_core *storage,ksn_tx ticket){
+    if(!storage)return;
+    ksn_core_impl *core=impl(storage);
+    if(core->repairing&&ticket.value==core->transaction.value)core->repairing=false;
+}
 ksn_result ksn_core_failed(ksn_core *storage,ksn_tx ticket){
     if(!storage)return KSN_INVALID;
     ksn_core_impl *core=impl(storage);
-    if(!core->submitted||ticket.value!=core->transaction.value)return KSN_STALE;
-    core->full_redraw=true;core->outcome.reason=KSN_IO;return KSN_OK;
+    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
+    core->full_redraw=true;
+    if(core->submitted)core->outcome.reason=KSN_IO;
+    return KSN_OK;
 }
 ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
                        ksn_layer layer,uint16_t index,ksn_frame_command *out){
     if(!storage||!out||!valid_layer(layer))return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
-    if(!core->submitted||ticket.value!=core->transaction.value)return KSN_STALE;
-    const ksn_bank *bank=&core->banks[previous?core->active:core->building_bank];
+    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
+    const ksn_bank *bank=&core->banks[(previous||core->repairing)?core->active:core->building_bank];
     if(index>=bank->count[layer])return KSN_INVALID;
     const ksn_command_storage *command=&bank->commands[command_base(layer)+index];
     memset(out,0,sizeof(*out));
@@ -459,8 +488,8 @@ ksn_result ksn_core_image_span(const ksn_core *storage,ksn_tx ticket,bool previo
                             uint16_t count,uint16_t *rgb565,uint8_t *alpha){
     if(!storage||!valid_layer(layer))return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
-    if(!core->submitted||ticket.value!=core->transaction.value)return KSN_STALE;
-    const ksn_bank *bank=&core->banks[previous?core->active:core->building_bank];
+    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
+    const ksn_bank *bank=&core->banks[(previous||core->repairing)?core->active:core->building_bank];
     if(index>=bank->count[layer])return KSN_INVALID;
     const ksn_command_storage *command=&bank->commands[command_base(layer)+index];
     if(command->kind!=KSN_IMAGE)return KSN_INVALID;
@@ -492,10 +521,10 @@ static uint32_t command_bands(const ksn_command_storage *command){
 ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,uint32_t *bands){
     if(!storage||!bands)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
-    if(!core->submitted||ticket.value!=core->transaction.value)return KSN_STALE;
+    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
     const ksn_bank *old=&core->banks[core->active],*next=&core->banks[core->building_bank];
     *bands=0;
-    if(core->full_redraw||old->background[KSN_APP]!=next->background[KSN_APP]||
+    if(core->repairing||core->full_redraw||core->invalidated||old->background[KSN_APP]!=next->background[KSN_APP]||
        old->generation[0]!=next->generation[0]||old->generation[1]!=next->generation[1]){
         *bands=(1u<<17)-1u;return KSN_OK;
     }

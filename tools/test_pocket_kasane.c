@@ -12,8 +12,10 @@ static JSRuntime *rt;
 static JSContext *ctx;
 static unsigned failures;
 static uint16_t strip_pixels[240*8];
+static uint16_t panel_pixels[240*135],committed_pixels[240*135];
 static unsigned transfers;
 static bool fail_once;
+static int fail_band=-1,invalidate_band=-1;
 
 /* Single-shot failures let QuickJS construct/catch its OOM exception. Track
  * every guest allocation so each fresh-runtime sweep also checks leaks. */
@@ -91,9 +93,11 @@ static bool run(const char *source) {
 static uint16_t *get_strip(void *opaque) {(void)opaque;return strip_pixels;}
 static ksn_result send_strip(void *opaque,uint16_t y,uint16_t rows,
                             const uint16_t *pixels) {
-    (void)opaque;(void)y;(void)rows;(void)pixels;
+    (void)opaque;
     transfers++;
-    if(fail_once){fail_once=false;return KSN_IO;}
+    memcpy(panel_pixels+y*240,pixels,rows*240*sizeof(*pixels));
+    if(y/8==invalidate_band){invalidate_band=-1;pocket_kasane_invalidate();}
+    if(fail_once||y/8==fail_band){fail_once=false;return KSN_IO;}
     return KSN_OK;
 }
 static ksn_result present(ksn_render_stats *stats) {
@@ -186,6 +190,67 @@ static void atomicity_tests(void) {
               "try{if(kasane.poll().status!=='DISCARDED')throw Error('own status')}"
               "finally{delete Object.prototype.status;}"),
           "adapter properties do not invoke inherited setters");
+}
+
+static void repair_tests(void) {
+    pocket_kasane_reset();pocket_kasane_invalidate();
+    check(!pocket_kasane_needs_present()&&!pocket_kasane_active(),
+          "invalidation before APP ownership does not allocate or paint");
+    check(run("globalThis.tpl=kasane.cache.create([shape]);"
+              "kasane.replace(tx=>{tx.background(0x102030ff);"
+              "globalThis.baseRef=tx.rect(shape);globalThis.baseInst=tx.instantiate(tpl);"
+              "tx.modal.open({backdrop:'dim-live',color:0x00000080,focus:7});});"),
+          "repair baseline builds cached content and modal");
+    ksn_render_stats stats;
+    check(present(&stats)==KSN_OK,"repair baseline presents");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    bool all_bands=true;
+    for(unsigned band=0;band<17;band++) {
+        if(!run("globalThis.ticket=kasane.replace(tx=>{tx.background(0xff00ffff);"
+                "tx.modal.close();globalThis.candidate=tx.rect(shape);tx.instantiate(tpl);});")) {
+            all_bands=false;break;
+        }
+        fail_band=(int)band;transfers=0;
+        if(present(&stats)!=KSN_IO||transfers!=band+1||!pocket_kasane_has_submission())
+            all_bands=false;
+        if(!run("kasane.cancel(ticket);if(kasane.poll().status!=='DISCARDED'||"
+                "kasane.poll().reason!=='CANCELLED')throw Error('cancel');")) all_bands=false;
+        if(pocket_kasane_has_submission()||!pocket_kasane_needs_present()||
+           pocket_kasane_input_scope(false)!=KSN_INPUT_BLOCKED) all_bands=false;
+        /* No JS callback/update from cancel through failed repair and retry. */
+        transfers=0;
+        if(present(&stats)!=KSN_IO||transfers!=band+1||pocket_kasane_has_submission())
+            all_bands=false;
+        fail_band=-1;transfers=0;
+        if(present(&stats)!=KSN_OK||transfers!=17||stats.transferred_bytes!=64800||
+           memcmp(panel_pixels,committed_pixels,sizeof(panel_pixels))||
+           pocket_kasane_needs_present()||pocket_kasane_input_scope(false)!=KSN_INPUT_MODAL)
+            all_bands=false;
+        if(!run("if(kasane.poll().status!=='DISCARDED'||kasane.poll().reason!=='CANCELLED')"
+                "throw Error('repair changed poll');var s=kasane.stats();"
+                "if(s.displayed.commands!==3||s.cache.templates!==1||s.cache.instances!==1)"
+                "throw Error('repair changed quota');"
+                "kasane.patch(tx=>{baseRef.setColor(tx,0x00ff00ff);baseInst.place(tx,{offset:[4,4]})});"
+                "kasane.cancel(kasane.poll().ticket);")) all_bands=false;
+        if(!all_bands)break;
+    }
+    fail_band=-1;
+    check(all_bands,"all 17 failed bands cancel and repair without JS; old refs/cache/modal/poll survive");
+    /* Static apps still repaint external screen damage and indicator changes. */
+    memset(panel_pixels,0x5a,sizeof(panel_pixels));pocket_kasane_invalidate();transfers=0;
+    check(!pocket_kasane_has_submission()&&pocket_kasane_needs_present()&&
+          present(&stats)==KSN_OK&&transfers==17&&
+          memcmp(panel_pixels,committed_pixels,sizeof(panel_pixels))==0,
+          "host invalidation restores a static committed screen without JS");
+    pocket_kasane_invalidate();invalidate_band=16;transfers=0;
+    check(present(&stats)==KSN_OK&&transfers==17&&pocket_kasane_needs_present(),
+          "invalidation during final transfer survives current acknowledgement");
+    transfers=0;
+    check(present(&stats)==KSN_OK&&transfers==17&&!pocket_kasane_needs_present(),
+          "deferred invalidation triggers exactly one more full redraw");
+    transfers=0;
+    check(present(&stats)==KSN_OK&&transfers==0&&stats.bands==0&&stats.transferred_bytes==0,
+          "idle present returns empty stats after repair");
 }
 
 static void close_fault_runtime(void) {
@@ -364,6 +429,7 @@ int main(void) {
     check(run("if(kasane.stats().nativeBytes<13000)throw Error('native accounting')"),
           "stats reports the allocated native arena");
     atomicity_tests();
+    repair_tests();
     pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     allocator_tests();
     printf("%s: %u failure(s)\n",failures?"FAIL":"PASS",failures);

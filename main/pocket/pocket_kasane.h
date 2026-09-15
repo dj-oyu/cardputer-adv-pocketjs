@@ -13,6 +13,8 @@ void pocket_kasane_reset(void);
 
 bool pocket_kasane_active(void);
 bool pocket_kasane_has_submission(void);
+bool pocket_kasane_needs_present(void);
+void pocket_kasane_invalidate(void);
 ksn_result pocket_kasane_present(const ksn_display_port *display,
                                  ksn_render_stats *stats);
 void pocket_kasane_end_turn(void);

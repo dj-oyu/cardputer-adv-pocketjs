@@ -16,6 +16,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_view.c -o "$out/view"
   "$out/view"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_repair.c -o "$out/repair"
+  "$out/repair"
   cc -std=c11 -Wall -Wextra -Werror $options -DKSN_FROST_PIE_MODEL -Imain/ui/kasane \
     main/ui/kasane/ksn_frost.c tools/kasane_contract/frost_baseline.c tools/kasane_contract/test_frost_equivalence.c -o "$out/vector"
   "$out/vector"

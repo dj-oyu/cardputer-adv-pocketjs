@@ -135,19 +135,21 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
-    ksn_frame frame;ksn_result result=ksn_core_frame(core,&frame);
+    ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
     uint32_t mask;result=ksn_core_damage(core,frame.ticket,&mask);
-    if(result!=KSN_OK)return result;
+    if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
     if(!mask)return ksn_core_presented(core,frame.ticket);
     ksn_frame_command command;
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
         result=ksn_core_read(core,frame.ticket,false,(ksn_layer)layer,i,&command);
-        if(result!=KSN_OK)return result;
-        if(command.draw.kind<KSN_RECT||command.draw.kind>KSN_GRADIENT)return KSN_UNSUPPORTED;
+        if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+        if(command.draw.kind<KSN_RECT||command.draw.kind>KSN_GRADIENT){
+            ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
+        }
     }
     uint16_t *pixels=display->strip(display->ctx);
-    if(!pixels)return KSN_OOM;
+    if(!pixels){ksn_core_defer_repair(core,frame.ticket);return KSN_OOM;}
     for(unsigned band=0;band<17;band++){
         if(!(mask&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;

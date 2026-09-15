@@ -112,7 +112,7 @@ static size_t user_prelude_length;
 // atlas, no rgb565 renderer, and a much smaller guest heap. See
 // pocket_overlay.h for why drawing goes through a host display list instead.
 static bool overlay_session;
-void app_force_redraw(void) { redraw=true; }
+void app_force_redraw(void) { redraw=true;pocket_kasane_invalidate(); }
 static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame);
 typedef struct { unsigned sent_us; } kasane_display_t;
 static uint16_t *kasane_strip(void *opaque) {
@@ -759,13 +759,21 @@ esp_err_t app_tick(uint32_t buttons) {
     // A top-level replace() is submitted while the source is evaluated, before
     // there is a PocketJS frame to hand to present_frame(). Present that image
     // as its own owner turn. The same gate retries a partial LCD transfer
-    // without letting another JS update race the repair submission.
-    if(pocket_kasane_has_submission()) {
+    // without letting another JS update race repair. An invalidated committed
+    // screen also reaches this gate when no JS submission exists.
+    if(pocket_kasane_needs_present()) {
+        bool guest_submission=pocket_kasane_has_submission();
         esp_err_t pending=present_frame(NULL);
-        if(pending!=ESP_OK||(buttons&0x2000)==0)return pending;
-        // Back is host-priority and this is the guest's final save turn. Once
-        // repair/presentation has completed, carry it into JS instead of
-        // consuming it at the display gate. Other input during the blocked
+        if(pending!=ESP_OK)return pending;
+        // A completed owner-only redraw must allow this tick's JS turn. Live
+        // indicators can invalidate every tick; returning here unconditionally
+        // would starve the guest for the entire recording. Guest submissions
+        // retain their existing dedicated display turn, and IO keeps retrying.
+        if(!(buttons&0x2000)&&(guest_submission||pocket_kasane_needs_present()))
+            return ESP_OK;
+        // Back is host-priority and this is the guest's final save turn. Carry
+        // it into JS even if LCD IO still needs retry, so display trouble cannot
+        // swallow the final save. Other input during the blocked
         // interval is deliberately dropped rather than replayed.
     }
     if(!(buttons&0x2000)&&pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)
@@ -920,7 +928,7 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         frames++;
         if(result==KSN_IO) {
-            ESP_LOGW("kasane","LCD transfer failed; retaining submission for retry");
+            ESP_LOGW("kasane","LCD transfer failed; retaining display work for retry");
             return ESP_OK;
         }
         if(result!=KSN_OK) {

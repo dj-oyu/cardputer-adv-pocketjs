@@ -26,8 +26,11 @@ ksn_view *ksn_view_host_endpoint(ksn_view_host *,ksn_layer);
  * builders; submitted transactions survive. No JS invocation during cleanup. */
 void ksn_view_host_end_turn(ksn_view_host *);
 /* Render then resolve cache/modal before guest/input resumes. IO retains the
- * submission for retry/cancel; partial transfer blocks app input until repair. */
+ * submission for retry/cancel; partial transfer blocks app input until repair.
+ * Without a submission, redraw the committed bank when repair is pending. */
 ksn_result ksn_view_host_present(ksn_view_host *,const ksn_display_port *,ksn_render_stats *);
+void ksn_view_host_invalidate(ksn_view_host *);
+bool ksn_view_host_needs_present(const ksn_view_host *);
 ksn_input_scope ksn_view_host_route(const ksn_view_host *,bool host_priority);
 ksn_result ksn_view_host_focus(ksn_view_host *,const uint32_t *,uint16_t);
 #ifdef __cplusplus

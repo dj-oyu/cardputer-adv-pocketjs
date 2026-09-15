@@ -141,10 +141,17 @@ ksn_result ksn_view_modal_close(ksn_view *v,ksn_tx tx){
 }
 void ksn_view_host_end_turn(ksn_view_host *h){if(h)abort_builder(h);}
 ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,ksn_render_stats *stats){
-    if(!h||!h->core||!h->cache)return KSN_INVALID;
+    if(!h||!h->core||!h->cache||!stats)return KSN_INVALID;
+    *stats=(ksn_render_stats){0};
+    bool submitted=ksn_core_has_submission(h->core);
+    if(!submitted&&!ksn_core_needs_repair(h->core))return KSN_OK;
     ksn_result r=ksn_render_rects(h->core,port,stats);
-    if(r==KSN_OK)resolve(h);
+    if(r==KSN_OK&&submitted)resolve(h);
     return r;
+}
+void ksn_view_host_invalidate(ksn_view_host *h){if(h)ksn_core_invalidate(h->core);}
+bool ksn_view_host_needs_present(const ksn_view_host *h){
+    return h&&h->core&&(ksn_core_has_submission(h->core)||ksn_core_needs_repair(h->core));
 }
 ksn_input_scope ksn_view_host_route(const ksn_view_host *h,bool priority){
     return ksn_modal_route(h?&h->modal:NULL,h?h->core:NULL,priority);

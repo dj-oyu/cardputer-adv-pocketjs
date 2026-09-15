@@ -874,10 +874,16 @@ bool pocket_kasane_active(void) { return state&&state->active; }
 bool pocket_kasane_has_submission(void) {
     return state&&ksn_core_has_submission(&state->core);
 }
+bool pocket_kasane_needs_present(void) {
+    return state&&state->active&&ksn_view_host_needs_present(&state->host);
+}
+void pocket_kasane_invalidate(void) {
+    if(state)ksn_view_host_invalidate(&state->host);
+}
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
     if(!stats) return KSN_INVALID;
     *stats=(ksn_render_stats){0};
-    if(!state||!state->active||!ksn_core_has_submission(&state->core)) return KSN_OK;
+    if(!pocket_kasane_needs_present()) return KSN_OK;
     ksn_result result=ksn_view_host_present(&state->host,display,stats);
     apply_outcome();return result;
 }
