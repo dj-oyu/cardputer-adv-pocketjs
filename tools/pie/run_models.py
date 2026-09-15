@@ -23,6 +23,7 @@ TARGETS = {
     'accel': (['accel_host_test.c'], ['-DRENDER_ACCEL_HOST_MODEL', '-I' + os.path.join(MODELS, 'stub')]),
     'garden': (['garden_model.c'], []),
     'canopy': (['canopy_model.c'], []),
+    'disc': (['disc_model.c'], []),
 }
 
 
