@@ -170,6 +170,23 @@ cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_C
   -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
   tools/kasane_contract/test_row_table.c -o "$out/row-table-count"
 "$out/row-table-count"
+# Boundary 4e's measurement: the visible threshold skip, counted before it is
+# implemented (docs/perf/kasane-opt-survey.md). Two builds of the same harness --
+# with and without the counters -- must print the same scene hashes, so "the
+# counters change no pixel" is a diff rather than a claim. The harness turns the
+# blend table off: what it counts is the chain's own pixels, which is the
+# population a threshold skip would be judged on (see the harness header).
+cc -std=c11 -Wall -Wextra -Werror -O2 -Imain/ui/kasane -Itools/kasane_contract \
+  main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
+  tools/kasane_contract/test_visible_skip.c -o "$out/visible"
+"$out/visible" > "$out/visible.plain"
+cc -std=c11 -Wall -Wextra -Werror -O2 -DKSN_COUNT_VISIBLE -Imain/ui/kasane -Itools/kasane_contract \
+  main/ui/kasane/ksn_core.c main/ui/kasane/ksn_cache.c \
+  tools/kasane_contract/test_visible_skip.c -o "$out/visible-count"
+"$out/visible-count" > "$out/visible.count"
+diff <(grep '^scene' "$out/visible.plain") <(grep '^scene' "$out/visible.count")
+grep '^CORPUS' "$out/visible.count"
+echo "visible skip PASS: the counters change no pixel (5 scene hashes identical)"
 # The same arm for the blend LUT: entries into the per-pixel chain and into the
 # table read, so "the chain became a row lookup" is a count of calls.
 cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_COUNT_LUT \
