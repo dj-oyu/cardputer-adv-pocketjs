@@ -5,7 +5,7 @@
 // Scratch for the home screen's background scenes, in two tiers.
 //
 // No two scenes can be live at once -- `mode` picks one of seven backgrounds --
-// and main.c's loop paints no screen at all while a guest owns the display. As
+// and the loop paints no background while a foreground guest owns the display. As
 // separate .bss arrays they were nonetheless resident from boot to power-off:
 // 30,671 bytes for solar_sail and 7,845 for flower, on a board where an app
 // cannot bring the radio up because esp_wifi_init is reached with 9 KB free and
@@ -23,14 +23,14 @@
 //         picking solar_sail once does not leave its 23 KB sitting behind the
 //         next background for the rest of the boot.
 //
-// Both are given back when an app takes the display. The memory is then simply
+// Both are given back when a foreground app takes the display. The memory is then simply
 // in the heap again, which is where the JS guest, the font atlas and the Wi-Fi
 // driver take theirs: sharing with the guest needs no arena inside the guest,
 // only that this one is not being held.
 //
-// Both are taken at the home screen, where about 228 KiB is free, so the
-// contiguity even a 23 KB bulk request needs is not in doubt. Neither is ever
-// taken while an app runs.
+// Both are taken at the home screen. A background overlay guest can coexist
+// with them, so allocation may fail and the scene must keep its fallback.
+// Foreground startup releases them centrally, including USB diagnostics.
 
 // Both blocks are 16-byte aligned. That is part of the contract rather than
 // something each scene arranges, because of how the failure looks: the vector

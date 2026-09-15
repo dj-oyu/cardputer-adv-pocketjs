@@ -34,6 +34,7 @@
 #include "ksn_font.h"
 #include "app_registry.h"
 #include "pet_hub.h"
+#include "scene_mem.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -444,6 +445,9 @@ esp_err_t app_start_test(char test) {
         return ESP_ERR_NOT_SUPPORTED;
     }
 #endif
+    /* Foreground ownership ends the background scratch lifetime on every
+     * entry path, including USB diagnostics. Overlays still share the scene. */
+    if(!overlay_session)scene_mem_release();
     atomic_store(&stop_requested,false); frames=0;
     deferred_buttons=0; continuation_turns=0; turn_continued=false;
     last_present_us=0;

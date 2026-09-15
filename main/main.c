@@ -557,12 +557,8 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
     // overwrite a live guest pointer; the one that exists (the USB
     // diagnostics) releases the overlay itself.
     overlay_release();
-    // The home screen's background is about to stop being drawn for as long as
-    // the guest owns the display, so its scratch stops being worth anything to
-    // it and starts being worth a great deal to the guest, the font atlas and
-    // the radio. Here rather than in enter(): this is the moment the memory
-    // changes hands, and the next prepare() after the run takes it back.
-    scene_mem_release();
+    // app_session releases background scratch before every foreground start,
+    // including diagnostics, while preserving it for background overlays.
     app_registry_select(app_id);
     run_started = source ? app_start_source(prelude,prelude_len,source,len)
                          : app_start();
