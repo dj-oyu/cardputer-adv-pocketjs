@@ -18,7 +18,7 @@
 | 7 | fs（`pocket.fs`） | 実装済み。詳細は[ファイルシステムAPI](filesystem-api.md) | `pocket_fs.c` |
 | 7 | workspace（`pocket.workspace`） | 実装済み。srcstore 16スロットの上に構築 | `pocket_workspace.c` |
 | 8 | sensors.imu | 実装済み | `pocket_imu.c` |
-| 8 | power | 実装済み | `pocket_av.c` |
+| 8 | power | 実装済み（`keepAwake` だけはUNSUPPORTED。§8） | `pocket_av.c` |
 | 8.1 | random | 実装済み | `pocket_random.c` |
 | 9 | audio.cue／tone／playback（WAV, IMA ADPCM, Opus CELT, MP3）、power | 実装済み | `pocket_av.c`、`opus_feed.c`、`mp3_feed.c`／`mp3_decode.c` |
 | 9 | io.ir（送信） | 実装済み | `pocket_io.c` |
@@ -73,6 +73,10 @@ type DeviceInfo = {
 ```
 
 名前例: `ui.basic`, `input.text`, `storage.kv`, `fs.volume.app`, `fs.volume.assets`, `fs.volume.sd`, `sensors.imu`, `audio.tone`, `audio.capture`, `audio.playback`, `net.wifi`, `net.http`, `ble.central`, `ble.peripheral`, `io.i2c`, `io.spi`, `io.uart`, `io.gpio`, `io.ir`, `bridge.pc`。未知名はsupported=falseで返す。supported=falseの機能も名前空間／メソッドを持ち、呼出しはUNSUPPORTEDで失敗する。
+
+**capabilityの登録はセッションごと。** 各面は注入時に登録し、`pocket_api_reset()`がセッション終了時に表を空にする。したがって`capabilities.get()`は「このセッションに注入された面」を答え、前のセッションが注入した面を引き継がない（オーバーレイは無線・バス等を注入しないので、それらはsupported=false）。
+
+**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[システムランタイム移行設計](../kasane/system-runtime-migration.md)に従う。
 
 availableは予約ではなく観測値。確認直後に資源が変わり得るため、open/acquireの結果が最終判断となる。認可状態は別であり、available=trueだけでは利用権を得ない。limitsはそのビルドのハード上限、取得ハンドルは実際に割り当てられた値を返す。
 
@@ -237,6 +241,8 @@ pocket.time.wall(): {unixMs: number | null; source: "unsynced" | "host" | "netwo
 pocket.time.sleep(ms: number, options?: Options): Promise<void>;
 ```
 
+`time.wall()`の`source`は、現在`network`（SNTPで同期した時計）か`unsynced`だけを返す。`host`は手で設定できる時計のために型に残してあり、このビルドは返さない。Pet CompanionがPCから受け取る時刻は`pocket.pet`内部の補完にしか使われず、`wall()`には反映されない。時刻の出所の統合と名前の対応は[システムランタイム移行設計](../kasane/system-runtime-migration.md)で決める。
+
 startはソース評価中に1回登録する。新ランタイムではglobalThis.frameをホストが用意し、Promiseだけを待つアプリもイベント処理を継続できる。start hook終了まで状態はStartingだが、I/O完了とキャンセルは配送する。onFrameはRunningでのみ呼ぶ。
 
 1ターンは停止要求→入力／I/O完了→上限付きPromise job→frame→描画の順。Promise連鎖を含むJSターン全体に期限を設ける。frameは同期関数で、Promiseを返したらINVALID_ARGUMENTとしてアプリを停止する。I/Oのawaitはstart、別のasync関数、イベントから開始する。
@@ -373,7 +379,7 @@ IMUの公開座標は画面を正立させた本体基準でx右、y上、z画�
 
 BMI270は6軸なので磁気方位・絶対yawを返さない。実装していないgyro/tiltはnull。latestは新たなI²C読取を行わない。watchは購読レートで最新値を配送し、古いサンプルをキューへ溜めない。droppedは購読開始からの配送省略数、sequenceは取得順、アプリはtimeMsで鮮度判定する。要求レートを満たせなければopen時にLIMIT_EXCEEDED、実行中の低下はtimestampとdroppedで分かるようにする。
 
-電池ADCから電圧は取得候補だが、校正・電池曲線がない状態で残量%を推測表示しない。充電検出も取得経路がなければnull。keepAwakeは期限付きで、終了時に自動解除。deep sleep、シャットダウン、時刻設定はアプリの直接操作ではなくホスト設定画面へ委譲する。
+電池ADCから電圧は取得候補だが、校正・電池曲線がない状態で残量%を推測表示しない。充電検出も取得経路がなければnull。**このビルドは自動スリープもバックライト消灯も持たないので、`keepAwake`は呼ぶと`UNSUPPORTED`を投げ、`limits.keepAwake=false`を返す**（抑止する対象が無い）。実装する場合は期限付きで、終了時に自動解除する。deep sleep、シャットダウン、時刻設定はアプリの直接操作ではなくホスト設定画面へ委譲する。
 
 ### 8.1 乱数・seed（実装済み、2026-09-10）
 
@@ -906,21 +912,21 @@ peerIdはホストでペアリングしたPC参照。方式とサービスを切
 
 | 資源 | 初期上限案 |
 | --- | --- |
-| JS | 現行128KiBヒープ・20KiB stackを出発点に再測定 |
+| JS | ゲストヒープ上限160KiB・stack 20KiB（`main/app_session.c`）。空きは`tools/memlog.py`で測る |
 | UI | 生存64ノード、画面深度4、JS字形160字、1文字列1024 UTF-8 bytes |
 | 非同期 | アプリ全体8操作、最大16購読。完了通知は別の固定領域を確保 |
 | TextSession | 1個、最大1024 bytes |
 | KV | 1値4096 bytes、合計16KiB/アプリ。変更ごとのFlash書込頻度を制限 |
 | File | 開いているハンドル2、read/write 1回1024 bytes |
 | IMU | watch最大50Hz、通常10〜25Hz推奨。高レート要求は別profile |
-| 音 | tone 1声、20〜4000Hz、最大2000ms、gain 0〜1。録音は16kHz mono、read最大512 frames |
+| 音 | tone 1声、20〜4000Hz、最大2000ms、gain 0〜1。録音は24kHz mono、read最大2048 frames（§9.2） |
 | I²C / SPI / UART | 1transfer 256 / 1024 / 1024 bytes。待ち既定100 / 100 / 1000ms |
 | IR | 最大256 durations、合計200ms、carrier 20〜60kHz |
 | HTTP | 同時1要求、送信body4096bytes、header合計2048bytes、受信総量64KiB |
 | 無線期限 | Wi-Fi接続15秒、BLE接続10秒、HTTP全体15秒、body read 5秒。最大30秒 |
 | その他のPromise | 既定1000ms、最大30000ms。sleepは指定msが終了時刻で、timeoutはms以上を要求 |
 
-HTTPの全体期限はbody読み終わりまで継続し、各read期限との早い方を採用する。独立したイベント購読はtimeoutで終了せず、close/アプリ終了まで有効。keepAwakeは最大60秒で更新可能、toneはduration+500msを既定期限とする。
+HTTPの全体期限はbody読み終わりまで継続し、各read期限との早い方を採用する。独立したイベント購読はtimeoutで終了せず、close/アプリ終了まで有効。keepAwakeは実装する場合に最大60秒で更新可能とする（現ビルドは未実装、§8）。toneはduration+500msを既定期限とする。
 
 GPIO割込の上限や録音リング容量など未固定の値はcapability.limitsで公開し、初期化時に決まっていない値を無制限として扱わない。
 
