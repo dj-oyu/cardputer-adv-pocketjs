@@ -146,6 +146,33 @@ commit・pushして進める。実機未確認は各記録に残す。
   home/通知実サービスとguestなしの描画pumpのproduction接続は後続checkpoint。
   次の実装はCP5（入力service切り出し）。
 
+## UI smoke — native / JS同画面比較（2026-09-15）
+
+- `tools/kasane_ui_smoke.c`のnative APP lease呼出しと、`tools/kasane_ui_smoke.js`の
+  実QuickJS呼出しで同じUIを描く。SYSTEMの右上indicatorは両経路でnativeから構築。
+- 5状態: 通常、メーターPATCH、dim-live modal、modal close、APP detach。
+  各経路162,000画素のRGB565と転送量が一致。PATCH対象外不変、PATCHとclose時の
+  全再構築の一致、scopeのAPP→MODAL→APP→HOST、無変更時転送0を確認。
+- 各経路の転送Bは64,800 / 7,680 / 64,800 / 64,800 / 64,800。
+  PATCHは全面比約88%削減。これは転送量であり実機処理時間の測定ではない。
+- ASan/UBSanとO2 strict-aliasingでPASS。出力PNGを目視し、矩形の透過重なり、
+  modal背景の減光、SYSTEM indicator維持、終了時APP消去を確認。
+  hostの実レンダラ試験であり、実LCD確認ではない。シリアル未使用。
+
+再実行（WSL、repository root）:
+
+```sh
+mkdir -p .cache/kasane-ui-smoke
+TEST_SOURCE=tools/kasane_ui_smoke.c OUT=/tmp/kasane-ui-smoke bash tools/build_kasane_test.sh
+/tmp/kasane-ui-smoke .cache/kasane-ui-smoke
+python3 tools/kasane_ui_preview.py .cache/kasane-ui-smoke
+```
+
+O2はbuild時に`CFLAGS="-O2 -fstrict-aliasing"`を追加する。
+previewは上段native・下段JS、左から上記5状態。標準PythonのみでPNG化し、画像はgit対象外。
+firmwareコードに変更なし。テスト用build scriptは`TEST_SOURCE`未指定時に従来のQ試験を構築する。
+ESP-IDF `-B build_ds_contract build`もPASS。app2,173,536 B、DIRAM123,404 Bで前回から変化なし。
+
 ## checkpoint 0 — JS失敗の原子性（2026-09-15）
 
 - 有効な所有transactionで起きた引数検証・getter・確保失敗は、JSでcatchしても更新全体をabortする。
