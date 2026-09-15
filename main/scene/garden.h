@@ -404,3 +404,6 @@ uint32_t garden_prof_motes(uint32_t *rows);
 // it. 1 = the shipping path: the canopy blend skips the pixels whose alpha is
 // zero, where the blend is the identity.
 extern int g_garden_scalar_tweaks;
+// The canopy blend on the PIE unit (scene/canopy_pie.c) instead of the scalar
+// statement in garden_canopy_row: 1 = the kernel, 0 = the scalar statement.
+extern int g_garden_canopy_pie;

@@ -1,4 +1,5 @@
 #include "garden.h"
+#include "canopy_pie.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -248,27 +249,53 @@ garden_octave_lanes(int16_t *dens,int n,int rc0,int step,
 // and the light and shadow reaches are never formed), so this file has no such
 // test to rewrite.
 int g_garden_scalar_tweaks=1;
+// The canopy blend on the PIE unit (scene/canopy_pie.c). Exact, so the picture
+// cannot move: the scalar tweak above skips work, this one changes which unit
+// does it. 0 selects the scalar statement below, and both arms live in one binary
+// for the same reason.
+int g_garden_canopy_pie=1;
+// One pixel of the canopy blend: the statement the kernel in scene/canopy_pie.c is
+// the lane version of. It is its own function because the kernel only takes whole
+// eight-pixel interiors, so the clipped span's head and tail come through here.
+static inline void garden_canopy_pixel(uint16_t *row,int x,int cx,int mhi,int mlo,
+                                       int qbase,int lr,int lg,int lb) {
+    int dx=x-cx,dx2=dx*dx;
+    int t=((dx2*16)*mhi+dx2*mlo)>>18;
+    int q=qbase-t;
+    if(q<0)q=0;
+    int f=(q*39322)>>16,g=256-f;
+    // f == 0 is the identity: with g == 256 every channel comes back unchanged
+    // (r*256>>8 == r), so this pixel's blend and store were a no-op. Rows near an
+    // ellipse's vertical edge spend most of their clipped span here, and the
+    // compare is one instruction against a load, ~20 instructions of blend and a
+    // store. The kernel has no branch to spend on it and stores the identity
+    // instead, which is the same bytes.
+    if(g_garden_scalar_tweaks&&!f)return;
+    unsigned a=row[x];
+    row[x]=(uint16_t)(((((a>>11)&31)*g+lr*f)>>8)*2048
+                     +((((a>>5)&63)*g+lg*f)>>8)*32
+                     +(((a&31)*g+lb*f)>>8));
+}
 static void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
                               uint16_t leafy) {
     int mhi=(mrr>>8)*16,mlo=mrr&255,qbase=256-qy;
     int lr=(leafy>>11)&31,lg=(leafy>>5)&63,lb=leafy&31;
-    for(int x=lo;x<=hi;x++) {
-        int dx=x-cx,dx2=dx*dx;
-        int t=((dx2*16)*mhi+dx2*mlo)>>18;
-        int q=qbase-t;
-        if(q<0)q=0;
-        int f=(q*39322)>>16,g=256-f;
-        // f == 0 is the identity: with g == 256 every channel comes back
-        // unchanged (r*256>>8 == r), so this pixel's blend and store were a
-        // no-op. Rows near an ellipse's vertical edge spend most of their clipped
-        // span here, and the compare is one instruction against a load, ~20
-        // instructions of blend and a store.
-        if(g_garden_scalar_tweaks&&!f)continue;
-        unsigned a=row[x];
-        row[x]=(uint16_t)(((((a>>11)&31)*g+lr*f)>>8)*2048
-                         +((((a>>5)&63)*g+lg*f)>>8)*32
-                         +(((a&31)*g+lb*f)>>8));
+    if(g_garden_canopy_pie) {
+        // Where the ellipse was clipped is not where eight divides the row, so the
+        // kernel takes the first whole block that starts on an eight boundary and
+        // what is left at either end goes through the scalar statement above. The
+        // kernel asks nothing of the row pointer beyond x being a multiple of
+        // eight; every pixel it touches is inside |x - cx| <= rx, which is what
+        // the model sweeps.
+        int s=(lo+7)&~7,e=(hi+1)&~7;
+        if(e>s) {
+            canopy_pie(row+s,(e-s)>>3,cx,mrr,qy,leafy,s);
+            for(int x=lo;x<s;x++)garden_canopy_pixel(row,x,cx,mhi,mlo,qbase,lr,lg,lb);
+            for(int x=e;x<=hi;x++)garden_canopy_pixel(row,x,cx,mhi,mlo,qbase,lr,lg,lb);
+            return;
+        }
     }
+    for(int x=lo;x<=hi;x++)garden_canopy_pixel(row,x,cx,mhi,mlo,qbase,lr,lg,lb);
 }
 // One sunlight shoulder. The clamp replaces the scalar `if`: at |d| == w the
 // rounded-up reciprocal makes s exactly 0, so an out-of-band column adds
