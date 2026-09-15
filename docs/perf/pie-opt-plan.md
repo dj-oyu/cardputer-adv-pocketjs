@@ -304,3 +304,63 @@ group4 vs group8: differing=16,881 (13.025%) worst_step=33
 これは幅の効果だけ）。前処理の削減（8.5→4.3命令/画素）と引き換えにこの大きさなので、
 実機で見て悪ければ **6 → 4** に必ず撤退する。6 なら差はおおよそ半減する見込み（幅の効果は
 グループ内の列ずれに比例するため）だが、それは測ってから言う。
+
+## 11. A6 の結線（T2 の混合、稼働。既定はカーネル）
+
+`g_garden_decor_pie`（`garden.c` に定義、`garden.h` に extern、既定 1）。0 は `garden_decor_mix` の
+スカラーの式で、両方の腕が同じバイナリに入る（`g_garden_canopy_pie` と同じ理由＝このループ単体の差は
+ビルド間の 15% より小さい）。`garden_decor_mix` は参照として残してある（削除していない）。
+
+呼び出し側（`garden_decor_row`）:
+
+- グループが**ちょうど8画素**（`n==8`。幅6/4では `n` が 6/4 までなので起きない）で、かつ
+  `row+x` が**16バイト整列**のときだけ `garden_decor_mix8(row+x,light,shadow,d)` を1回呼ぶ。
+  それ以外（クリップされた端、尾、整列しないグループ）は今までどおり1画素ずつスカラー。
+- グループ境界は**1画素も動かしていない**ので、`light`/`shadow`/`d` がどの列で評価されるかは
+  両腕で同じ。芯クリップ（§9）も `y>=101` の早期脱出も無変更。
+- 整列判定はポインタ（`(uintptr_t)(row+x)&15`）で行う。TRM 1.8.88 / 1.8.192 のとおり
+  `EE.VLD.128.IP`/`EE.VST.128.IP` は**下位4ビットを0に固定する**ので、整列していないグループを
+  渡すと隣の8画素を読んで書く（＝黙って別の絵になる）。実機の行は `board_strip()` の
+  `aligned(16)` バッファ（`LCD_W*2=480B` ストライド＝どの行も16B整列）なので、実質は「x が8の倍数」。
+- 到達率: 4フレームで混合に到達した 7,355 グループのうち **3,016 がカーネル＝混合画素の 42%**。
+  残りは短い/クリップされたグループと、開始列が `lo`（任意の列）で整列しない8画素グループ。
+
+**2つの腕の画素一致（`tools/test_garden_decor_pie_ab.c`、ホスト、canopy は no-op 代役）**
+```
+4フレーム 129,600画素: differing=4 (0.003%) worst_step=4/255 worst_r/g/b=0/1/0 kernel_blocks=3,016
+256フレーム 8,294,400画素: differing=523 (0.006%) worst_step=4/255 worst_r/g/b=0/1/0 kernel_blocks=167,252
+```
+＝ 差は**赤と青が厳密一致、緑が63段階の1段**（4/255）。モデルの 0.098% は light・shadow・d を
+0..255 ずつ動かした立方体全域での率で、シーンが実際に作る値はその一部（256フレームで
+`max light=249`・`max shadow=249`、`d` は dither の4値 32/96/160/224 のみ）なので、実測の方が低い。
+`kernel_blocks` を数えて assert しているのは、整列しないバッファだと腕が両方スカラーになって
+「差0」で通ってしまうため（空振り検出）。
+
+命令数:
+
+- カーネル: `objdump` は 6bbba9f と同一で **73命令/呼び出し・33 EE・最初の EE まで37命令**。
+  `stalls.py` も **36命令/ブロック・0ストール**のまま。
+- 判定は最大7命令/グループ（グローバル1本・`n==8`・整列の load+addx2+extui+bnez）。整列した8画素で
+  はスカラーの 168命令（21×8）→ 79命令で**約53%減**、整列しないグループは判定の分だけ損をする。
+  フレーム全体の効果は §10 の 2.2倍 ではなく到達率 42% に薄まるので、実機の `PERF kernel=` を見てから
+  言うこと。
+
+検証（すべてホスト、実機なし）:
+
+- `tools/test_garden_decor.c`: `GRAZING_OK ... protected core unchanged`（芯の不変条件、256フレーム）と
+  `DECOR_OK changed=... shadow=... light=...` が通る。`#include garden.c` するのでリンクに
+  `main/scene/garden_decor_pie.c` が要るようになった（canopy の代役は `tools/host_canopy_noop.c`
+  として追加した＝元から必要だったものが repo に入っただけ）。`test_garden.c` /
+  `test_garden_random.c` / `test_garden_transition.c` / `test_flower.c` も同じリンクで通る。
+- `tools/pie/test_kernels.py` / `test_piesim.py` / `run_models.py`: 全緑（カーネルは無変更）。
+- `xtensa-esp32s3-elf-gcc -DESP_PLATFORM -O2 -Wall -Wextra -Werror -c`: `garden.c` は `esp_cpu.h`
+  だけが無いので2行のスタブ（`.cache/idfstub`、使い捨て）で通し、`garden_decor_pie.c` は素で通る。
+  objdump は `beqi a4,8`（n==8）→ `extui a3,a10,0,4` + `bnez`（整列）→ `call8 garden_decor_mix8` を出す。
+
+残り（**実機が要る。このセッションでは見た目も時間も測っていない**）:
+
+- `PERF kernel=` と `capture_home.py` の絵。`g_garden_decor_pie` を `shell.c` の `SCENE_AB` の腕に
+  足す（IDF ヘッダが要るのでこのセッションでは触っていない）。同じバイナリで on/off を交互に測る。
+- 整列しない 58% を拾う唯一の方法はグループ境界を8の倍数に動かすことで、それは**グループの開始列が
+  変わる＝§9 の 13%/33段の見た目の変更**。別コミットにして実機で見てから。
+

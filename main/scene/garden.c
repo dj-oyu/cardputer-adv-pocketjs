@@ -1,5 +1,6 @@
 #include "garden.h"
 #include "canopy_pie.h"
+#include "garden_decor_pie.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1482,6 +1483,24 @@ static int garden_decor_profile(int distance,int inv) {
 // from its own column. Eight is the default; four is the old behaviour, and the way
 // back if the wider group reads as banding on the device.
 int g_garden_decor_group=8;
+// The decor mix on the PIE unit (scene/garden_decor_pie.c) instead of the scalar
+// statement garden_decor_mix below: 0 selects the scalar statement, and both arms
+// live in one binary for the reason g_garden_canopy_pie does -- this loop's own
+// share of the frame is smaller than the 15% that two builds of the same code
+// move apart from instruction-cache alignment alone (CLAUDE.md).
+//
+// The kernel takes the group's light, shadow and d -- the same three values the
+// group's scalar mixes use, evaluated once at its first column -- and its
+// contract is a FULL group of eight pixels from a 16-byte-aligned pointer. Both
+// EE.VLD.128 and EE.VST.128 force the low four address bits of the pointer to
+// zero (TRM 1.8.88, 1.8.192), so a group starting anywhere else would read and
+// write its neighbour. The groups here start at `lo`, an arbitrary column, so
+// the alignment is tested per group and the ones that fail it stay on the scalar
+// statement. Over four frames that is 42% of the mixed pixels (3,016 blocks of
+// the 7,355 groups that blend at all); moving a group's start to align it
+// instead would put that group's constants on a different first column, which is
+// the 13%/33-level change of §9 and not this commit's to make.
+int g_garden_decor_pie=1;
 
 static uint16_t garden_decor_mix(uint16_t p,int light,int shadow,int d) {
     int r=(p>>11)&31,g=(p>>5)&63,b=p&31;
@@ -1578,8 +1597,19 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
             int shadow=garden_decor_profile(x*256-shadow_cx,shadow_inv)*gain>>8;
             if(!light&&!shadow)goto grp;
             int d= garden_dither(x,y)*64+32;
-            /* Only the mix is per pixel: it is the one term that reads the row. */
-            for(int j=0;j<n;j++)row[x+j]=garden_decor_mix(row[x+j],light,shadow,d);
+            /* Only the mix is per pixel: it is the one term that reads the row. A
+               full group of eight is exactly one kernel block, and it is handed the
+               same light, shadow and d the scalar statement would be -- but only when
+               the pointer is 16-byte aligned, because the kernel's load and store
+               force the low four address bits to zero and would otherwise read and
+               write the neighbouring eight pixels. Clipped and tail groups of fewer
+               pixels, a narrower g_garden_decor_group, and every unaligned group keep
+               the scalar statement, so the two arms differ in nothing but the mix. */
+            if(g_garden_decor_pie&&n==8&&!((uintptr_t)(row+x)&15u)) {
+                garden_decor_mix8(row+x,light,shadow,d);
+            } else {
+                for(int j=0;j<n;j++)row[x+j]=garden_decor_mix(row[x+j],light,shadow,d);
+            }
         grp:
             x=nx;
         }
