@@ -16,8 +16,16 @@
   通常/Kasane-only IDF build・link監査PASS。
   fake clockでeasing/loop/ping-pong/停止/完了、quota、転送失敗、OOM、
   JS呼出しなし25回の補間とメモリ不変、既存JS更新との合流を検査。
-- 実機での自動回転・拡縮の負荷測定は未完了。mainのdeadline待機、電源管理との
-  hidden/reduce-motion結線も残る。CP17/18全体の完了とはしない。
+- 実機K 300ターンPASS。JS座標更新なしの自動回転・拡縮とmodal往復が継続し、
+  報告nativeは13,840 Bで一定。`.cache/kasane-cp17-animation/serial.log`。
+  ログ窓の平均turn3.83 ms、render47.24 ms、send6.00 ms（renderとsendは別計測）。
+  renderの窓平均最大82.31 ms。30 Hz目標は未達で、動作PASSを性能達成とはしない。
+  回転経路には画素ごとの64 bit除算とsource行変更時のPPT2再展開が残る。
+- 起動・終了100回PASS。終了後free240,956 B / largest120,832 Bは全回一定。
+  `.cache/kasane-cp17-cycles/memory.json`。この試験は終了時の回収を検査し、
+  実行中の瞬間ピークやWi-Fi/audio併用時の安全性を保証するものではない。
+- mainのdeadline待機、電源管理とのhidden/reduce-motion結線も残る。
+  CP17/18全体の完了とはしない。
 
 ## checkpoint 13d — 回転画像とdamage（2026-09-16）
 
