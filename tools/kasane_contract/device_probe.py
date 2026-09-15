@@ -55,7 +55,7 @@ def main():
     if ('KSN_PROBE: PASS' not in log or 'HOME_READY' not in log or 'KSN_PROBE: FAIL' in log
             or not re.search(r'KSN_PROBE: PARTIAL us=\d+ mask=fe0 bytes=26880', log)
             or 'KSN_PROBE: UNCHANGED bands=0 bytes=0' not in log
-            or 'KSN_PROBE: CACHE templates=1 instances=2 commands=2 native=4104' not in log
+            or 'KSN_PROBE: CACHE templates=1 instances=2 commands=2 native=3064' not in log
             or 'KSN_PROBE: COMPOSITION group_alpha=128 modal=open-close focus=42 PASS' not in log
             or 'KSN_PROBE: GLASS PASS' not in log
             or 'KSN_PROBE: VIEW PASS' not in log

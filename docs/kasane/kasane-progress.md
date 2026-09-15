@@ -173,6 +173,17 @@ previewは上段native・下段JS、左から上記5状態。標準Pythonのみ�
 firmwareコードに変更なし。テスト用build scriptは`TEST_SOURCE`未指定時に従来のQ試験を構築する。
 ESP-IDF `-B build_ds_contract build`もPASS。app2,173,536 B、DIRAM123,404 Bで前回から変化なし。
 
+## CP4b後の実機UI確認（2026-09-15）
+
+ユーザーから実機利用可能との指示を受け、COM3へnative診断有効のfirmwareを書込み・照合。
+native `~`とJS `K`（300 tick）ともPASS、home復帰。ユーザー目視も正常。
+native転送前162,000画素一致、600フレームでheap/min/largest変化なし。
+JS側のnative予約12,908 Bを実機ログで確認。診断スクリプトのcache期待値を更新し、
+JS側に`--out`で全serialログの保存を追加した。
+実測値、再実行コマンド、実機に残した診断構成のメモリ差は
+[design-device-probe.md](design-device-probe.md)の2026-09-15節を参照。
+100回起動やWi-Fi/audio併用試験は未実施。次の実装対象は引き続きCP5。
+
 ## checkpoint 0 — JS失敗の原子性（2026-09-15）
 
 - 有効な所有transactionで起きた引数検証・getter・確保失敗は、JSでcatchしても更新全体をabortする。

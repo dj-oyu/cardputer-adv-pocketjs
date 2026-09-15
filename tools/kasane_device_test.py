@@ -3,12 +3,17 @@ import argparse
 import re
 import time
 import serial
+from pathlib import Path
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", required=True)
 parser.add_argument("--ticks", type=int, default=300)
+parser.add_argument("--out", type=Path, help="directory for the full serial log")
 args = parser.parse_args()
+if args.out:
+    args.out.mkdir(parents=True, exist_ok=True)
+serial_log = []
 port = serial.Serial(args.port, 115200, timeout=0.15)
 
 
@@ -18,6 +23,7 @@ def wait_for(marker, timeout):
     while time.monotonic() < deadline:
         line = port.readline().decode(errors="replace").strip()
         if line:
+            serial_log.append(line)
             seen.append(line)
             if any(word in line for word in ("KASANE", "START_FAILED", "panic")):
                 print(line, flush=True)
@@ -52,3 +58,5 @@ try:
     wait_for("HOME_READY", 8)
 finally:
     port.close()
+    if args.out:
+        (args.out / "serial.log").write_text("\n".join(serial_log)+"\n", encoding="utf-8")

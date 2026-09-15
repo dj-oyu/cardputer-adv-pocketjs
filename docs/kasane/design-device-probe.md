@@ -4,6 +4,42 @@
 
 ## 現在の結果
 
+### 2026-09-15: CP4b後のnative / JS再確認
+
+`93872a4`のfirmwareを`CONFIG_KSN_DEVICE_PROBE=y`でビルドし、COM3のESP32-S3
+（MAC ac:a7:04:01:2e:80）へ書込み。bootloader/partition/appのFlashハッシュ照合成功。
+PSRAMなし、出荷VMのSEGFRAMES/FLATCALLS有効。ユーザーから実LCDの矩形移動・透過・
+ぼかしは「正常に見える」と回答を受けた。
+
+- native `~`: core/review、矩形差分、cache2 instance、group/modal、view、glass、PIE A/B、
+  600フレームstressがPASS。HOME_READY復帰。転送前画素は通常32,400＋glass32,400＋
+  stress97,200＝162,000画素すべて独立期待値と一致。
+- native stress: mean20,053 µs、p95 20,276 µs、max20,438 µs、misses/skippedとも0。
+  free heapはbefore/min/afterすべて240,308 B、largestはすべて65,536 B。
+  stack未使用量21,580 Bは診断全体の値で、production描画の追加stackではない。
+- native PIE A/B: 64試行×8,960画素でscalar361,721 µs、PIE144,678 µs、checksum一致。
+  この診断カーネルの対照試験であり、UI全体の高速化倍率ではない。
+- JS `K`: 実QuickJSで300 tick、初回表示、通常→半透明modal→通常、HOME_READY復帰がPASS。
+  tick120/180はmodal（12 commands）、240/300はapp（9 commands）。native予約は12,908 Bで
+  CP4bのS3型情報と一致。10窓の平均はturn3.21 ms/render12.59 ms/send3.37 ms。
+  通常/modalが混在する平均であり、p95や最大値ではない。JS版は今回ログでの確認で、
+  native版のような画素回収比較はしていない。
+- app2,196,592 B、Flash余裕949,136 B、DIRAM137,276 B。通常構成に対する13,872 B増は
+  native診断領域等のため。診断ファームは実機に残し、両テスト後はhomeへ戻した。
+
+実行:
+
+```sh
+python tools/kasane_contract/device_probe.py --port COM3 --out .cache/kasane-device-20260915-native
+python tools/kasane_device_test.py --port COM3 --ticks 300 --out .cache/kasane-device-20260915-js
+```
+
+各ディレクトリにserial.log、native側にはpre-spi.png、glass-pre-spi.png、stress画像3枚と
+stress-report.jsonを保存。cache統計の期待値をCP3分割後の3,064 B（予約3,056＋共有ID8）へ更新。
+今回の確認はUI診断1巡。100回起動、Wi-Fi/audio併用、全CPの実機検証完了とはしない。
+
+以下は過去の診断履歴。
+
 - COM3のESP32-S3、240 MHz、Flash 8 MBに診断ファームを書込み、Flashハッシュ照合成功。
 - ユーザーが矩形の動きとホーム画面への復帰を目視確認した。
 - 最初の起動時診断ではUSBログが欠落したため、コアテストのPASS、更新時間、heap差分、全画素一致は未確認。目視での成功をこれらの代わりにしない。
