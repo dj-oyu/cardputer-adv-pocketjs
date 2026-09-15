@@ -4,7 +4,28 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 14b1 — System時計provider抽出（2026-09-16）
+
+- 実時計の取得・信頼フラグを`system/sys_clock`へ移動。SNTP → System、
+  solar/pethub → Systemの依存に変更。solarのsetterは互換wrapperとして維持。
+- pethubのUTCは整数で取得し、天文計算の2050年上限に依存しない。
+  uint32の範囲外は既存PC補完へ戻す。solarは天文範囲を引き続き検査する。
+- RTC再発見時のatomic CASで、同時に届いた明示的な信頼取消を上書きしない。
+- 時計provider、solar時刻、solar描画のhost検査PASS。RTC再発見、2038/2050/2106、
+  小数秒、読み取り失敗、不信頼指定、初回発見中の取消を検査。
+- 時計/solar時刻はASan/UBSanでもPASS。通常/Kasane-only buildとlink監査PASS。
+  静的DIRAM137,468 / 136,108 B（直前比それぞれ+16 B）。heap確保・専用task追加なし。
+  今回は実機書込み・SNTP通信試験を追加していない。
+- まだCLOCK_CONFIG購読、monotonic anchor、PC補完の共通化は行っていない。
+  pocket.app/pocket.netのsolar互換経路も次段階。CP14全体の完了ではない。
+
 ## ライフタイム監査と修正（2026-09-16）
+
+Sol追加調査: 最初のK前free256,536 / largest147,456 Bから、初回終了後
+256,360 / 81,920 Bとなり以後100回一定。保持176 Bに対して連続領域65,536 B減のため、
+小さい常設確保による分断が有力。初回`adc_oneshot_read`のADC1 lazy lock生成と時点が
+一致するが、確保address/size未測定なので未確定。初回ADC前後のheap値と短いheap traceが
+次の切り分け。過去largest120,832 Bは同一条件の記録がなく、現在値との差を漏れとは断定しない。
 
 | 対象 | 所有者・返却時点 | 確認結果 |
 | --- | --- | --- |

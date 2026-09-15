@@ -9,6 +9,17 @@
 現在のtopicはSYS_POWERのみ。時計・通知・timer・SYSTEM描画は以降のcheckpoint。
 stateは144 B、購読ID管理4 B（sizeof/ELFで確認する）。動的確保・専用taskは追加しない。
 
+2026-09-16 CP14b1: `system/sys_clock`へ実時計の読み取りとatomicな信頼判定を抽出。
+SNTP成功はSystemへ通知し、solarとpethubはSystemを読む。solarの互換setterは維持する。
+時計は秒int64＋マイクロ秒のsnapshotで、天文用の2050年上限を持たない。
+2000年以降のRTCをboot時に再発見し、明示的な不信頼指定を自動発見で上書きしない。
+`available`は読み取り成功、`trusted`は信頼判定であり、利用側の日時範囲検査は別に必要。
+solarは2000〜2050年の範囲を維持。pethubはuint32のwire範囲までUTCを利用し、
+天文計算の年範囲や浮動小数の往復変換に依存しなくなった。
+これは互換provider抽出段階であり、以下のmonotonic anchor・CLOCK_CONFIG dirty・
+source/revision・PC fallback共通化は未実装。PC補完時計は引き続きpethub所有。
+追加heap/taskはなく、従来solarが所有したatomic intをSystemへ移した。
+
 `sys_power_read`はsampledの有無を返し、valid/errorを含むsnapshotをコピーする。
 `sys_power_step`は購読またはrefresh要求があり期限到達した時だけHALを呼ぶ。
 解除後の再購読でも直前の測定から1秒の間隔を守り、初回dirtyで最新cacheを読める。
@@ -25,8 +36,8 @@ UINT32_MAX到達後は新規受付をFULLにする（再起動まで古いIDを�
 ## 1. 現状と依存の向き
 
 現状の`main/pet/pet_hub.c`は時計補完、USB入力、NVS、タイマー、通知キュー、鳴動、入力処理、描画、JS bindingを持つ。
-UTC取得は`solar_time_now()`経由で、`main/main.c`はループごとに`pet_hub_pump()`を呼ぶ。
-`main/scene/solar_time.c`は実時計の信頼状態と天文表示用の日時範囲・demo時間を同時に扱う。
+UTC取得はCP14b1から`sys_clock_read()`経由で、`main/main.c`はループごとに`pet_hub_pump()`を呼ぶ。
+`main/scene/solar_time.c`には天文表示用の日時範囲・demo時間を残した。
 `main/pocket/pocket_av.c`の電源購読は既に無購読時の早期return、1秒poll、20 mVの変化閾値を持つ。
 この省資源の性質と既存の通知・保存契約を保ちながら責務を分ける。
 
