@@ -129,6 +129,14 @@ static void test_wants(void) {
     CHECK(!app_registry_wants(companion,"net.wifi"));   // named neither list
     CHECK(!app_registry_wants(pet,"net.http"));
     CHECK(app_registry_wants(pet,"sensors.imu"));
+    // pocket.pet is installed only for the manifests that name pet.companion
+    // (app_session.c); every other app must not be handed it.
+    CHECK(app_registry_wants(pet,"pet.companion"));
+    CHECK(app_registry_wants(companion,"pet.companion"));
+    for(const char *const *id=(const char *const[]){"local.hello","local.imucal",APP_ID_WORK,NULL};*id;id++) {
+        const app_manifest_t *m=app_registry_find(*id);
+        CHECK(!m || !app_registry_wants(m,"pet.companion"));
+    }
 
     CHECK(!app_registry_wants(NULL,"net.http"));
     CHECK(!app_registry_wants(companion,NULL));

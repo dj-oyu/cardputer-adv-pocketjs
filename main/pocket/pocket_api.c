@@ -540,6 +540,14 @@ bool pocket_api_class_ready(JSRuntime *rt, JSRuntime **owner, JSClassID *id) {
 }
 
 void pocket_api_reset(void) {
+    // Registrations belong to the session that made them. Every surface
+    // registers from its install function, and a session installs only what it
+    // was given: an overlay gets no radio or buses, and pocket.pet goes only to
+    // the apps whose manifest names pet.companion. A table that outlived the
+    // session would answer supported=true for whatever the previous session
+    // installed -- the wrong answer, and exactly the one section 2 exists to
+    // prevent.
+    override_count=0;
     for(unsigned i=0;i<class_owner_count;i++) *class_owners[i]=NULL;
     for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
         pocket_promise_t *p=&promises[i];

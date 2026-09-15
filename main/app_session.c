@@ -512,8 +512,14 @@ surfaces_done:
             pocket_ui_attach(ctx);
         }
     }
-    TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
-    TRY(pocketjs_guest_quickjs_install_once(guest,"pet-assets",pet_assets_install,core));
+    // pocket.pet is the surface of two native apps, Pocket Pet and Pet
+    // Companion, not part of the common API. It goes only to a session whose
+    // manifest names pet.companion, so no other app can reach the pet's
+    // notifications, timers or NVS through it (docs/api/common-api.md section 2).
+    if(app_registry_wants(app_registry_current(),"pet.companion")) {
+        TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
+        TRY(pocketjs_guest_quickjs_install_once(guest,"pet-assets",pet_assets_install,core));
+    }
     }
 source_ready:;
     const char *source=user_source?user_source:hello_start;
