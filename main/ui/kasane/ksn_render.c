@@ -142,6 +142,7 @@ static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destinat
  * the truncating quotient corrected to floor for negative numerators. */
 bool g_ksn_image_rotate_step=true;
 bool g_ksn_image_rotate_anchor=true;
+bool g_ksn_image_rotate_reject=true;
 /* One destination row of rotated-span anchors, built at run time in DRAM.
  * The per-span anchor costs the same two 64-bit divisions the scalar path
  * takes, but the anchors are affine in x: with the 16-pixel numerator step
@@ -164,7 +165,7 @@ typedef struct {
 } ksn_anchor_row;
 static ksn_anchor_row g_anchor_row;
 #ifdef KSN_ANCHOR_COUNT
-uint32_t g_ksn_image_anchor_builds;
+uint32_t g_ksn_image_anchor_builds,g_ksn_image_reject_tests,g_ksn_image_reject_spans;
 #endif
 /* Entries after the first advance by the span step: one comparison and one
  * conditional subtraction per axis, the same rule as the per-pixel loop.
@@ -258,6 +259,7 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
          * apart: the table arm reads what the division arm would compute. */
         int sx,sy,remu,remv;
         bool served=false;
+        int j=0;
         if(g_ksn_image_rotate_anchor){
             /* The row table: entries at x = base_x + 16j, so a match on the
              * command's affine inputs and the row plus a delta that is a
@@ -271,7 +273,7 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
                g_anchor_row.bounds_x==key_bx&&g_anchor_row.bounds_y==key_by&&
                g_anchor_row.window==(int32_t)(sw|(sh<<16))&&g_anchor_row.row==y&&
                delta<16u*KSN_ANCHOR_SPANS&&!(delta&15u)){
-                int j=delta>>4;
+                j=(int)(delta>>4);
                 if(j>=g_anchor_row.spans)anchor_extend(&g_anchor_row,j);
                 sx=g_anchor_row.sx[j];remu=g_anchor_row.remu[j];
                 sy=g_anchor_row.sy[j];remv=g_anchor_row.remv[j];
@@ -294,6 +296,58 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
                            (uint16_t)d->bounds.x0|((int32_t)(uint16_t)d->bounds.x1<<16),
                            (uint16_t)d->bounds.y0|((int32_t)(uint16_t)d->bounds.y1<<16),
                            (int32_t)(sw|(sh<<16)),x,y,step_u,step_v,sw,sh,um,vm,sx,remu,sy,remv);
+        }
+        /* Whole-span rejection. A span whose first pixel is accepted has an
+         * accepted pixel, so the interval test only has to run when the first
+         * pixel is outside; and the anchors are monotone along the span (the
+         * per-pixel quotient has the sign of step_u and step_v, the carry only
+         * adds), so the extreme pixel on the failing side decides the whole
+         * span: with the two anchors at x and x+count, "every pixel below
+         * zero" is the maximum below zero and "every pixel at or above the
+         * source extent" is the minimum, and each of the two is known from the
+         * anchor on its side plus one subtraction of the per-pixel quotient.
+         * The end anchors come from the next table entry when the span is 16
+         * pixels wide (which the next span reads anyway), otherwise from one
+         * span-wide carry step of the same increment. Nothing here can change
+         * a pixel: the loop it replaces is the one that rejects them. */
+        if(g_ksn_image_rotate_reject&&(sx<0||sy<0||sx>=(int)sw||sy>=(int)sh)){
+            int ux_end,uy_end;
+#ifdef KSN_ANCHOR_COUNT
+            g_ksn_image_reject_tests++;
+#endif
+            if(served&&*count==16){
+                /* The row table already carries the 16-pixel increment pair of
+                 * this command's affine line, so the end anchor is one carry
+                 * step of it: no second division and no new table entry. */
+                ux_end=sx+g_anchor_row.q16u+(remu>=g_anchor_row.um-g_anchor_row.r16u);
+                uy_end=sy+g_anchor_row.q16v+(remv>=g_anchor_row.vm-g_anchor_row.r16v);
+            }else{
+                int du=step_u*(int)*count*(int)sw,dv=step_v*(int)*count*(int)sh;
+                int qu_n=du/um,ru_n=du-qu_n*um,qv_n=dv/vm,rv_n=dv-qv_n*vm;
+                if(ru_n<0){qu_n--;ru_n+=um;}          /* truncating quotient -> floor */
+                if(rv_n<0){qv_n--;rv_n+=vm;}
+                ux_end=sx+qu_n+(remu>=um-ru_n);uy_end=sy+qv_n+(remv>=vm-rv_n);
+            }
+            /* The interval the span's anchors can take, as a min/max pair per
+             * axis: increasing anchors have min at the first pixel and max at
+             * the end anchor, decreasing ones the other way round (the end
+             * anchor of a decreasing axis is its value one pixel past the
+             * span, so the minimum back one pixel is one quotient above it).
+             * The span is out when the interval misses [0, extent) on either
+             * axis. */
+            int lo_u,hi_u,lo_v,hi_v;
+            if(step_u>0){lo_u=sx;hi_u=ux_end;}else{lo_u=ux_end-qu-1;hi_u=sx;}
+            if(step_v>0){lo_v=sy;hi_v=uy_end;}else{lo_v=uy_end-qv-1;hi_v=sy;}
+            if(hi_u<0||hi_v<0||lo_u>=(int)sw||lo_v>=(int)sh){
+#ifdef KSN_ANCHOR_COUNT
+                g_ksn_image_reject_spans++;
+#endif
+                /* Exactly what the loop's reject path writes for a pixel: the
+                 * caller reads only the first count entries, and a zero alpha
+                 * makes the composited result a no-op in both callers. */
+                for(unsigned i=0;i<*count;i++){scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;}
+                return KSN_OK;
+            }
         }
         for(unsigned i=0;i<*count;i++){
             scratch->rotated.rgb[i]=0;scratch->rotated.alpha[i]=0;
