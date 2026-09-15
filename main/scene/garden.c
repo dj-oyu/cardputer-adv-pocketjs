@@ -238,6 +238,16 @@ garden_octave_lanes(int16_t *dens,int n,int rc0,int step,
 //   The `if(q>0)` disappears rather than becoming a mask: clamping q to zero
 //   gives f=0, and (A*256 + B*0)>>8 is A. Blending with zero alpha is the
 //   identity, so the branch is free to go.
+// TEMPORARY A/B switch for the exact scalar tweak below -- the canopy's f == 0
+// short circuit. Both arms have to run in one binary: the same kernel moves 15%
+// between builds from instruction-cache alignment alone (CLAUDE.md), and this
+// change is smaller than that. 1 is the shipping arm.
+// The other half of the change this was ported with, the unsigned support test in
+// the decor loop, has no counterpart in this tree: the decorative light here is
+// the grouped-by-four revision (its per-column terms are evaluated once per group
+// and the light and shadow reaches are never formed), so this file has no such
+// test to rewrite.
+int g_garden_scalar_tweaks=1;
 static void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
                               uint16_t leafy) {
     int mhi=(mrr>>8)*16,mlo=mrr&255,qbase=256-qy;
@@ -248,6 +258,12 @@ static void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
         int q=qbase-t;
         if(q<0)q=0;
         int f=(q*39322)>>16,g=256-f;
+        // f == 0 is the identity: with g == 256 every channel comes back
+        // unchanged (r*256>>8 == r), so this pixel's blend and store were a
+        // no-op. Rows near an ellipse's vertical edge spend most of their clipped
+        // span here, and the compare is one instruction against a load, ~20
+        // instructions of blend and a store.
+        if(g_garden_scalar_tweaks&&!f)continue;
         unsigned a=row[x];
         row[x]=(uint16_t)(((((a>>11)&31)*g+lr*f)>>8)*2048
                          +((((a>>5)&63)*g+lg*f)>>8)*32
