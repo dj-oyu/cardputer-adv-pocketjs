@@ -38,6 +38,16 @@
 #include "quickjs-vm.h"
 // UI-task-only diagnostic state; never expose or mutate JS while it is parked.
 static bool vm_storage_active, vm_storage_leaving, vm_storage_parked;
+static JSValue vm_finite_done(JSContext *ctx, JSValueConst self,
+                              int argc, JSValueConst *argv) {
+    (void)self;
+    int32_t n;
+    double sum;
+    if(argc!=2 || JS_ToInt32(ctx,&n,argv[0]) || JS_ToFloat64(ctx,&sum,argv[1]))
+        return JS_EXCEPTION;
+    ESP_LOGI("app","VM_FINITE_DONE n=%ld sum=%.0f",(long)n,sum);
+    return JS_UNDEFINED;
+}
 static JSValue vm_storage_wait(JSContext *ctx, JSValueConst self,
                                int argc, JSValueConst *argv) {
     (void)self; (void)argc; (void)argv;
@@ -568,6 +578,10 @@ source_ready:;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
 #ifdef CONFIG_POCKET_VM_SELFTEST
+        case '[': case '\\': case ']': source=
+            "let ran=false;globalThis.frame=b=>{if(ran||(b&8192))return;ran=true;"
+            "let s=0,n=vmFiniteN;for(let i=0;i<n;i++)s+=i;vmFiniteDone(n,s)};";
+            break;
         // Dedicated owner and create-only writes keep diagnostics out of the
         // selected app's store. A pre-existing test key is never overwritten.
         case 'Y': source=
@@ -641,6 +655,16 @@ source_ready:;
         ESP_LOGI("app","APP_ID %s",manifest->id);
     }
 #ifdef CONFIG_POCKET_VM_SELFTEST
+    if(test=='['||test=='\\'||test==']') {
+        JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+        JSValue global=JS_GetGlobalObject(ctx);
+        int n=test=='['?20000:test=='\\'?40000:100000;
+        int installed=JS_SetPropertyStr(ctx,global,"vmFiniteN",JS_NewInt32(ctx,n));
+        installed|=JS_SetPropertyStr(ctx,global,"vmFiniteDone",
+                                    JS_NewCFunction(ctx,vm_finite_done,"vmFiniteDone",2));
+        JS_FreeValue(ctx,global);
+        if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
+    }
     if(test=='Y'||test=='Z') {
         pocket_storage_set_owner("vm.back.selftest.20260916");
         JSContext *ctx=pocketjs_guest_quickjs_context(guest);
