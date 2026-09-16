@@ -1143,6 +1143,7 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
                         {"tile_reach",&g_ksn_tile_reach},
                         {"tile_smooth",&g_ksn_tile_smooth},
                         {"decode1",&g_ksn_decode_once},
+                        {"span_narrow",&g_ksn_span_narrow},
                     };
                     const unsigned rows=sizeof(switches)/sizeof(switches[0]);
                     static unsigned ab_arm;

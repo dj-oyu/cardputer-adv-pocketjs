@@ -59,15 +59,23 @@ KASANE_PAINT turn_ms=1.25 render_ms=2.18 send_ms=1.59 bytes=11520 bands=3 band_r
 
 ## 3. 置いたもの
 
-`main/text/ksn_font.c` の `span` だけ。
+`main/text/ksn_font.c` の `span` だけ（＋`ksn_font.h` の宣言、`app_session.c` の
+切替一覧に 1 行）。
 
 - セルが担当する列を先に解く: `left = pen - x`、`right = left + width`、
   `first = max(0, left)`、`end = min(count, right)`。`i - left` が `gx` になるので、
   ループ内の `gx < 0 || gx >= width` の判定は**範囲そのものに吸収される**。
 - `scale` は 1 か 2 なので `gy >> shift` / `gx >> shift`（`shift = font == KSN_DISPLAY`）。
   この範囲では `gx` も `gy` も非負なので、シフトは除算と同じ値。
+- `g_ksn_span_narrow`（既定 1 = 上の歩き方）と **0 = 変更前の歩き方**を同じバイナリに
+  置き、`app_session.c` の `switches[]` に 1 行足した。この規模はビルド間の比較では
+  判定できない（配置で 15% 動く、[pie-simd.md](pie-simd.md) §6.3）ので、
+  `tools/host_kasane_opt_ab.py` が 13 番目の腕として 0 を回し、同じフレーム列の中で
+  新旧を比べる。制御腕の本文は変更前の逐語コピーで、コメントでその旨を明示してある。
 - `#ifdef KSN_SPAN_COUNT` のカウンタ（`KSN_TILE_COUNT` と同じ流儀）で
-  「歩いた列数」と「復号したセル数」を数えられるようにした。
+  「歩いた列数」と「復号したセル数」を数えられるようにした。契約テスト
+  `tools/kasane_contract/test_span_count.c` は**両腕**の列数を固定する
+  （制御腕が変更前の歩き方でなくなったら、A/B が 2 つの変更を同時に測ることになる）。
 
 **捨てなかったもの**: チャンクの外にあるセルも `reveal` を 1 つ消費する（`reveal` は
 「何文字目まで表示するか」なので、列を 1 つも書かないセルも数えなければならない）。
@@ -79,17 +87,19 @@ KASANE_PAINT turn_ms=1.25 render_ms=2.18 send_ms=1.59 bytes=11520 bands=3 band_r
 逐語コピーして同じ 2 カウンタを持たせ、フォント 3 種 × テキスト 11 種（空・ASCII・
 全角・4 バイト・DEL・空白のみ・顔あり/なし）× 原点 3 種（−3 を含む）× 行 18 種
 （負・範囲内・範囲外）× チャンク開始 169 種 × `count` 10 種（1..64）× `reveal` 8 種
-（0..255）を総当たりし、64 バイトのマスクを比較:
+（0..255）を総当たりし、64 バイトのマスクを比較。**新旧の両腕 × 顔あり/なし**で:
 
 ```
-span PASS: 47900160 calls identical in both face states
-  cells decoded      old 42799008  new 42799008
-  ink-loop columns   old 1309712352  new 99297408  (7.6% of the old walk)
+span PASS: 71850240 calls identical (both arms, both face states)
 ```
 
-**アプリ自身の 4 つのテキストを 1 回再描画したときの列数**（同じハーネス、64 列チャンク）:
+狭い腕だけを見たときの歩く列数は 1,309,712,352 → 99,297,408（**7.6%**）。
+制御腕の列数は逐語コピーと**完全に一致**する（下の表の `chunk` 列がその値）。
 
-| テキスト（`apps/hello/main.js`） | span 呼び出し | 旧 | 新 |
+**アプリ自身の 4 つのテキストを 1 回再描画したときの列数**（同じハーネス、64 列チャンク。
+`tools/kasane_contract/test_span_count.c` が契約として固定している値）:
+
+| テキスト（`apps/hello/main.js`） | span 呼び出し | 制御腕（変更前） | 狭い腕（出荷） |
 | --- | ---: | ---: | ---: |
 | `KASANE / JAVASCRIPT`（caption） | 32 | 27,824 | **912** |
 | `Hello, World!`（display） | 64 | 36,544 | **2,496** |
@@ -98,9 +108,8 @@ span PASS: 47900160 calls identical in both face states
 
 **命令数**（`objdump`、`-Os`、対象ツールチェーン。`/tmp/spancheck/loopins.py`）:
 
-| | 旧 | 新 |
+| | 変更前 | 狭い腕 |
 | --- | ---: | ---: |
-| `span` 全体 | 255 命令 | 284 命令 |
 | インクループ 1 列 | 70 命令 | **27 命令** |
 | うち除算（`quou`） | 4 | **0** |
 
@@ -111,11 +120,12 @@ ASan 腕がループに入る）が全通し。`test_font.c` には「チャン�
 ## 5. 測っていないこと / 主張しないこと
 
 - **実機のミリ秒**。上の 2.18 ms はこの変更の**前**の測定で、変更後の `render_ms` は
-  まだ取っていない（`/dev/ttyACM0` がこのコンテナに見えない）。判定は
-  `tools/host_kasane_opt_ab.py` の同一バイナリ A/B で行う —— この変更は
-  ビルドを跨いだ比較では判定できない（配置で 15% 動く、`docs/perf/pie-simd.md` §6.3）。
+  まだ取っていない（`/dev/ttyACM0` がこのコンテナに見えない）。取ったら
+  `tools/host_kasane_opt_ab.py`（13 腕）の `span_narrow` 列を読む。
 - 括りの内訳と「何列歩いたか」の対応は 1 対 1 ではない。40 span/フレームという回数は
   わかるが、そのうち何回がどのテキストかはログからは決まらない。上の表の列数は
   「1 回の再描画がそのテキストに要求する量」であって「1 フレームの合計」ではない。
 - jpfont（本文・全角）の字形読みが flash cache 越しにどれだけ高いかは未計測
   （survey §10-5）。この変更はその費用を減らさない —— 減らすのはインクループの列数。
+- 制御腕をバイナリに残す代償はコードサイズ（`span` が 2 本書き分けになる）。
+  flash の増分は `idf.py size` の実測を見ること。
