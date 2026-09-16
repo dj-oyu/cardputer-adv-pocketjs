@@ -166,6 +166,28 @@ float fx_cosf(float x) { float c, s; fx_core(x, &c, &s); return c; }
 float fx_sinf(float x) { float c, s; fx_core(x, &c, &s); return s; }
 
 // The tangent is the one the middle of the picture has no use for (only
-// scene/wave.c's horizon asks), so it stays a division of the two above rather
-// than a third table.
-float fx_tanf(float x) { float c, s; fx_core(x, &c, &s); return s / c; }
+// scene/wave.c's horizon asks), and on this core s/c is a call into
+// compiler_builtins' __divsf3 -- the one symbol this file used to leave
+// undefined. The reciprocal is built here instead, from a bit-trick seed: the
+// exponent field inverted gives 1/|c| to within 5%, and each Newton step squares
+// the error, so three steps are past the float's own 2^-24 (5% -> 2.5e-3 ->
+// 6e-6 -> 4e-11). A reciprocal *table* was the other candidate and is worse than
+// it sounds: 1/cos has a pole at the far end of the quadrant, where no table
+// holds it, so the same seeding would be needed anyway to cover the angles the
+// table cannot.
+static inline float fx_rcp(float c) {
+    union { float f; uint32_t u; } v;
+    v.f = c;
+    uint32_t m = v.u & 0x7FFFFFFFu;      // |c| as bits
+    uint32_t s = v.u ^ m;                // its sign bit, and 0 for c = 0
+    v.u = 0x7EF127EAu - m;               // seed: 1/|c| to within 5%
+    float r = v.f;
+    v.u = m;
+    float a = v.f;                       // |c| as a float
+    r = r * (2.0f - a * r);
+    r = r * (2.0f - a * r);
+    r = r * (2.0f - a * r);
+    v.f = r; v.u ^= s;
+    return v.f;
+}
+float fx_tanf(float x) { float c, s; fx_core(x, &c, &s); return s * fx_rcp(c); }

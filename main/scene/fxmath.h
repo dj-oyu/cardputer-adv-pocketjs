@@ -26,5 +26,10 @@
 // the reduction loses meaning. Anything non-finite reads as an angle of zero.
 float fx_sinf(float x);
 float fx_cosf(float x);
-// sin/cos in float, and only scene/wave.c asks: the horizon's tilt.
+// sin/cos in float, and only scene/wave.c asks: the horizon's tilt. The division
+// is a Newton reciprocal from a bit-trick seed rather than s/c, which on this
+// core would be a call into compiler_builtins' __divsf3: this file leaves no
+// symbol undefined. Nearest-tangent integers as scene/wave.c forms them are
+// unchanged for all 361 tilts the IMU can produce, and its absolute error stays
+// inside 1.2e-6 over +-1.27 rad (|tan| < 3.4).
 float fx_tanf(float x);

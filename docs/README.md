@@ -34,6 +34,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | 文書 | 種別 | 中身 |
 | --- | --- | --- |
 | [pie-simd.md](perf/pie-simd.md) | 設計・記録 | PIE の性質（§1）、コストモデル（§2）、スカラーコードの値段（§3）、何を最適化するかの決め方（§4）、正確性（§5）、測定方法（§6）、出荷済みカーネルと実測（§7）、チェックリスト（§8） |
+| [trig-lut.md](perf/trig-lut.md) | 記録 | シーンの三角関数の LUT 化（`main/scene/fxmath.c`）: 表の大きさ×型×次数の掃引、Q31/Q15 の精度の床、採用した 216 区間 2 次、tan の除算を消した結果、ダンプハーネスの罠 |
 | [backlog.md](perf/backlog.md) | backlog | 未着手の性能候補（テキストのマスク合成、MP3 FIR、整数平方根、装飾光線の PIE 化など） |
 
 検証の道具は [`tools/pie/README.md`](../tools/pie/README.md)。
