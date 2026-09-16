@@ -8,10 +8,18 @@
 // decoder's filter once per file, so dropping the last C reference is the whole
 // of the change and --gc-sections drops the rest.
 //
-// Q31, with a 65-entry cosine table covering one quadrant and a degree-5
-// correction on the table point. Measured against the true value it is 0.27
-// ulp(1) out at worst over the sweeps in tools/test_fxmath.c, and differs from
-// this part's libm sinf in the last bit on about 3.7% of arguments.
+// The implementation is a Q31 table of one quadrant of the cosine (218 entries,
+// 872 bytes, tools/gen_fx_lut.py's output in fx_lut_gen.h) with a three-point
+// Lagrange through the entry either side of the angle. Measured over the sweeps
+// in tools/test_fxmath.c it is 0.97 ulp(1) from the true value at worst -- the
+// floor set by the table's own half-LSB rounding, and reached at 218 entries
+// where a linear interpolation would need 2,275 (9,104 bytes) for 0.99 ulp. It
+// differs from this part's libm in the last bit on about 48% of arguments, of
+// which the visible effect is: 14 pixels of the 84,661,200 in the scene dump
+// harnesses (flower 5, solar 9, stars and glass_rain none), every one of them a
+// single shading step. The degree-5 polynomial this replaced ran at 0.27 ulp and
+// moved 45; both move the same few last-bit differences, which is why the
+// cheaper table was taken.
 //
 // Accurate for |x| up to about 10^6 radians, which is a day of any scene clock;
 // beyond that it keeps returning something in [-1,1] rather than failing, but

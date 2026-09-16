@@ -9,53 +9,61 @@
 //
 // The representation is Q31 (one in 2^31), which is what a single-precision
 // result can use and no more: converting the Q31 value to float through
-// `(float)v * 2^-31` is exactly the rounding the float result needs, and the
-// fixmath table is fine enough that this conversion, not the table, is the
-// error term. The angle reduction is done in integers: `(float)v` and every
-// float multiply are soft-float calls on this core, and a reduction through
-// `(int32_t)(x * 1/(2pi))` would have been one, so the fraction of a turn is
-// taken from the float's own bits instead.
+// `(float)v * 2^-31` is exactly the rounding the float result needs. The angle
+// reduction is done in integers: `(float)v` and every float multiply are
+// soft-float calls on this core, and a reduction through `(int32_t)(x*1/(2pi))`
+// would have been one, so the fraction of a turn is taken from the float's own
+// bits instead.
+//
+// The table is one quadrant of the cosine, FX_LUT_INTERVALS intervals wide, and
+// the value between its entries comes from a three-point Lagrange through the
+// entry either side: no polynomial, and no per-entry correction table. sin is
+// the same table read backwards -- sin(j*h + t*h) = cos((N-j-1 + 1-t)*h) --
+// because the two are a quarter turn apart. The table itself is
+// tools/gen_fx_lut.py's output and is committed beside this file.
+//
+// What the two orders buy, measured with tools/test_fxmath.c's sweep (worst
+// error against the true value, in ulp of magnitude 1, and the .rodata the
+// generated table takes):
+//
+//   linear     64 intervals   631.9 ulp  ( 65 entries,  260 B)
+//   linear    512 intervals    10.3 ulp  (513 entries, 2052 B)
+//   linear    1024 intervals    2.9 ulp  (1025 entries, 4100 B)
+//   linear    2275 intervals    0.99 ulp (2276 entries, 9104 B)
+//   quadratic   64 intervals     8.0 ulp  ( 66 entries,  264 B)
+//   quadratic  216 intervals     0.97 ulp (218 entries,  872 B)
+//   quadratic  512 intervals     0.95 ulp (514 entries, 2056 B)
+//   the degree-5 polynomial this replaces ran at 0.27 ulp with 65 entries.
+//
+// The quadratic is what makes the table small: a straight line needs ten times
+// the entries to reach the same place (2275 intervals, 9,104 B, for the 0.99 ulp
+// the quadratic gets from 218 entries at 872 B). And the ~0.96 ulp both land on
+// is a *floor* rather than a slope -- it does not move when the table gets
+// finer, because it is the half-LSB rounding of the Q31 entries themselves.
+// Q15 does not have this shape at all: its own least significant bit is 256 ulp,
+// which is what a Q15 table measures at every size.
+//
+// So the choice this file makes is "the smallest table that reaches the floor"
+// rather than "0.27 ulp": the polynomial's extra three digits cost 57 more
+// instructions per call (194 against 137, real build, -Os) and are invisible on
+// this panel -- see fxmath.h for the picture that was measured.
 #include "fxmath.h"
 #include <stdint.h>
+#include "fx_lut_gen.h"
 
-// cos over one quadrant, TABLE[j] = round(cos(j*h) * 2^31) for h = pi/128, so
-// TABLE[0] is one and TABLE[64] is zero. sin(j*h) is the same table read
-// backwards -- TABLE[64-j] -- because the two are a quarter turn apart, which
-// is what makes one table serve both.
-//
-// TABLE[0] is 2^31-1 rather than 2^31: the exact value does not fit in int32,
-// and 2^31-1 converts to 1.0f exactly anyway.
-static const int32_t fx_quarter[65] = {
-    2147483647, 2146836866, 2144896910, 2141664948,
-    2137142927, 2131333572, 2124240380, 2115867626,
-    2106220352, 2095304370, 2083126254, 2069693342,
-    2055013723, 2039096241, 2021950484, 2003586779,
-    1984016189, 1963250501, 1941302225, 1918184581,
-    1893911494, 1868497586, 1841958164, 1814309216,
-    1785567396, 1755750017, 1724875040, 1692961062,
-    1660027308, 1626093616, 1591180426, 1555308768,
-    1518500250, 1480777044, 1442161874, 1402678000,
-    1362349204, 1321199781, 1279254516, 1236538675,
-    1193077991, 1148898640, 1104027237, 1058490808,
-    1012316784,  965532978,  918167572,  870249095,
-     821806413,  772868706,  723465451,  673626408,
-     623381598,  572761285,  521795963,  470516330,
-     418953276,  367137861,  315101295,  262874923,
-     210490206,  157978697,  105372028,   52701887,
-             0,
-};
+// Q31 (int32) or Q15 (int16) as tools/gen_fx_lut.py wrote it.
+#if FX_LUT_SHIFT == 31
+#define FX_LUT_SCALE 0x1p-31f
+#else
+#define FX_LUT_SCALE 0x1p-15f
+#endif
 
-// One table step in Q31 radians: round(pi/128 * 2^31). The correction's error
-// term is the seventh power of this over 5040, i.e. 1e-15, so degree 5 is
-// already past what Q31 can hold.
-#define FX_STEP   52707179
 // 1/(2pi) as 2^31*FX_INV_HI + FX_INV_LO, split because the product with a
 // 24-bit mantissa is 53 bits wide and one integer cannot hold 62 bits. Two
 // terms leave 2^-60 of relative error, which at the largest angle a scene can
 // reach is 1e-9 radians.
 #define FX_INV_HI 341782637
 #define FX_INV_LO 1692680576
-#define FX_Q31    0x1p-31f
 
 static uint32_t fx_bits(float x) {
     // Not a float-to-int conversion: on this core that would be a soft-float
@@ -90,50 +98,74 @@ static uint32_t fx_frac_turns(uint32_t b) {
     return 0;                                       // under a denormal angle
 }
 
-// cos and sin of x, Q31.
-static void fx_core(float x, int32_t *cout, int32_t *sout) {
+// One table entry as a float. The int-to-float convert is a single FPU
+// instruction on this part; doing the whole interpolation in int64 instead would
+// be a 62-bit product per output.
+static inline float fx_at(unsigned m) { return (float)fx_quarter[m] * FX_LUT_SCALE; }
+
+#if FX_LUT_ORDER >= 2
+// Three-point Lagrange through the nodes (m-1, a), (m, b), (m+1, c) at m+u:
+// b + u*(c-a)/2 + u^2*((a+c)/2 - b). The error term is the third power of the
+// step, so this is the quadratic correction that buys two more digits than the
+// straight line through the same pair of entries.
+static inline float fx_quad(float a, float b, float c, float u) {
+    float half = (c - a) * 0.5f;
+    float curv = (a + c) * 0.5f - b;
+    return b + u * half + (u * u) * curv;
+}
+#endif
+
+// cos and sin of x, in float.
+//
+// The interpolation runs in float rather than in fixed point: this part has a
+// single-precision FPU, so the converts, the subtract, the multiply and the add
+// are a handful of instructions, while the same interpolation in int64 would be
+// a 62-bit product per output. The float's own 24-bit mantissa is wider than the
+// interpolation error at every table size here, which is what makes that safe
+// rather than merely cheap.
+static void fx_core(float x, float *cout, float *sout) {
     uint32_t b = fx_bits(x);
-    int neg = (int)(b >> 31);
+    int neg = (int)(b >> 31);               // sin is odd, cos is even
     uint32_t u = fx_frac_turns(b);
     int quad = (int)(u >> 30);              // which quarter turn
     uint32_t o = u & 0x3FFFFFFFu;           // the rest of it, Q30 of a quarter
-    int j = (int)(o >> 24);                 // table index, 0..63
-    uint32_t f = o & 0xFFFFFFu;             // and the remainder, Q24 of a step
-    int32_t d = (int32_t)(((int64_t)f * FX_STEP) >> 24);   // Q31 radians past the point
-    // cos(d) and sin(d) about the table point: 1 - d^2/2 + d^4/24 and d - d^3/6.
-    // d^5/120 is under half an LSB of Q31 and is dropped. The two divisions are
-    // by reciprocal multiplies: an int64 division here would be a call to
-    // compiler_builtins' __divdi3 -- 223 instructions, and a new claim on the
-    // very member this file exists to let go of. 43691 = ceil(2^18/6) =
-    // ceil(2^20/24), and the identity floor(x/6) == (x*43691)>>18 is exact for
-    // every x < 131,072: d^3 peaks at 31,750 and d^4 at 779 over the whole
-    // domain of d, so both are three orders of magnitude inside that.
-    int64_t d2 = ((int64_t)d * d) >> 31;
-    int64_t d3 = (d2 * d) >> 31;
-    int64_t cd = (int64_t)(1u << 31) - (d2 >> 1) + (((d2 * d2) >> 31) * 43691 >> 20);
-    int64_t sd = (int64_t)d - ((d3 * 43691) >> 18);
-    int64_t cj = fx_quarter[j], sj = fx_quarter[64 - j];
-    // cos(a+d) and sin(a+d) from the table point: the rotation, in Q62 and
-    // rounded back to Q31. The products are bounded by 2^31 * 2^31, so the sum
-    // fits int64 with a factor of two to spare.
-    int64_t cq = ((cj * cd - sj * sd) + (int64_t)(1u << 30)) >> 31;
-    int64_t sq = ((sj * cd + cj * sd) + (int64_t)(1u << 30)) >> 31;
-    // The quadrant's reflection, applied before narrowing: a quarter turn's sine
-    // is exactly 2^31, which int32 cannot hold. Clamped to 2^31-1, which is 1.0f
-    // exactly, so the clamp costs nothing.
-    int64_t cc = (quad & 1) ? sq : cq;
-    int64_t ss = (quad & 1) ? cq : sq;
+    // Interval index and the fraction across it, in one multiply: o < 2^30 and
+    // FX_LUT_INTERVALS < 2^16, so the product fits 64 bits and the split is
+    // exact. A power-of-two table turns this into a shift and a mask.
+    uint64_t q = (uint64_t)o * FX_LUT_INTERVALS;
+    unsigned j = (unsigned)(q >> 30);
+    float t = (float)(int32_t)((uint32_t)q & 0x3FFFFFFFu) * 0x1p-30f;
+    // sin(j*h + t*h) = cos((N-j-1 + 1-t)*h): the same table, the neighbour pair
+    // the other way round, and the fraction measured from the other end.
+    unsigned k = FX_LUT_INTERVALS - 1u - j;
+#if FX_LUT_ORDER == 1
+    float c0 = fx_at(j), c1 = fx_at(j + 1);
+    float c = c0 + (c1 - c0) * t;
+    // s1 + (s0-s1)*t is the same line as s0 + (s1-s0)*(1-t), without ever
+    // forming 1-t: at t=0 it is the entry at k+1, at t=1 the one at k.
+    float s0 = fx_at(k), s1 = fx_at(k + 1);
+    float s = s1 + (s0 - s1) * t;
+#else
+    // The cosine's nodes j-1, j, j+1 are entries j, j+1, j+2 of the shifted
+    // table; the sine's are the same three around k, with the fraction 1-t.
+    float c = fx_quad(fx_at(j), fx_at(j + 1), fx_at(j + 2), t);
+    float s = fx_quad(fx_at(k), fx_at(k + 1), fx_at(k + 2), 1.0f - t);
+#endif
+    // The quadrant's reflection. Both ends of an interval are inside the
+    // quadrant, so nothing here can leave [-1,1] and no clamp is needed.
+    float cc = (quad & 1) ? s : c;
+    float ss = (quad & 1) ? c : s;
     if (quad == 1 || quad == 2) cc = -cc;
     if (quad >= 2) ss = -ss;
     if (neg) ss = -ss;
-    if (cc > (int64_t)0x7FFFFFFF) cc = (int64_t)0x7FFFFFFF;
-    if (ss > (int64_t)0x7FFFFFFF) ss = (int64_t)0x7FFFFFFF;
-    *cout = (int32_t)cc;
-    *sout = (int32_t)ss;
+    *cout = cc;
+    *sout = ss;
 }
 
-float fx_cosf(float x) { int32_t c, s; fx_core(x, &c, &s); return (float)c * FX_Q31; }
-float fx_sinf(float x) { int32_t c, s; fx_core(x, &c, &s); return (float)s * FX_Q31; }
-// The tangent is the one the middle of the picture has no use for, so it stays
-// a division of the two above rather than a third table.
-float fx_tanf(float x) { int32_t c, s; fx_core(x, &c, &s); return (float)s / (float)c; }
+float fx_cosf(float x) { float c, s; fx_core(x, &c, &s); return c; }
+float fx_sinf(float x) { float c, s; fx_core(x, &c, &s); return s; }
+
+// The tangent is the one the middle of the picture has no use for (only
+// scene/wave.c's horizon asks), so it stays a division of the two above rather
+// than a third table.
+float fx_tanf(float x) { float c, s; fx_core(x, &c, &s); return s / c; }
