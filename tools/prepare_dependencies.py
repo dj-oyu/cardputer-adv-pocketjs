@@ -1,11 +1,10 @@
 """Fetch pinned upstream for the components this tree still builds out of .cache/.
 
-pocketjs_guest, quickjs-ng and pocketjs_ui_qjs are vendored (components/
-pocketjs_guest, components/quickjs-ng, components/pocketjs_ui_qjs) and are
-NOT touched here -- copying over them would silently discard whatever L1+
-work has landed on the vendored copy. Only pocketjs_ui_core /
-pocketjs_render_rgb565, thin C shims over prebuilt Rust archives, still
-build in place out of .cache/pocketjs and need this checkout.
+pocketjs_guest and quickjs-ng are vendored (components/pocketjs_guest,
+components/quickjs-ng) and are NOT touched here -- copying over them would
+silently discard whatever L1+ work has landed on the vendored copy. The
+PocketJS checkout and the Rust UI archives are no longer needed: the legacy
+UI core, its binding and the rgb565 renderer were removed from the firmware.
 """
 from pathlib import Path
 import argparse
@@ -13,24 +12,17 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-REVISION = '6a0a1b6c91a506c473fc37a0256a47b12eceeca8'
-source = ROOT / '.cache/pocketjs'
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--kasane-only', action='store_true',
-                    help='prepare non-UI dependencies without a PocketJS/Rust checkout')
-args = parser.parse_args()
-if not args.kasane_only:
-    if not source.exists():
-        subprocess.run(['git', 'clone', 'https://github.com/pocket-stack/pocketjs.git', str(source)], check=True)
-    subprocess.run(['git', '-C', str(source), 'checkout', '--detach', REVISION], check=True)
-    print('Fetched PocketJS', REVISION)
+# Accepted and ignored: every preparation is Kasane-only now.
+parser.add_argument('--kasane-only', action='store_true', help=argparse.SUPPRESS)
+parser.parse_args()
 bmi = ROOT / '.cache/bmi270'
 if not bmi.exists():
     subprocess.run(['git','clone','https://github.com/boschsensortec/BMI270_SensorAPI.git',str(bmi)],check=True)
 subprocess.run(['git','-C',str(bmi),'checkout','--detach','41129fcfe39c583ee5462d79195741945d51c1fe'],check=True)
 # libopus, for pocket.audio.player's Opus decoding. FETCHED AT A TAG, NOT VENDORED:
 # components/opus/CMakeLists.txt compiles these sources in place out of .cache/, the
-# same arrangement pocketjs_ui_core/render_rgb565 above use, so this tree
+# same arrangement minimp3 uses, so this tree
 # carries the build recipe and licenses/libopus.txt but none of xiph/opus's ~100 C files.
 #
 # v1.6.1 rather than the 1.5.2 the study named: the only decode-cost measurement

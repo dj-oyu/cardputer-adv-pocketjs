@@ -1,23 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
-option(KSN_ONLY "Kasane-only diagnostic, without legacy UI/Taffy" OFF)
-if(KSN_ONLY)
-    set(EXCLUDE_COMPONENTS pocketjs_ui_qjs)
-endif()
-set(POCKETJS_SOURCE_DIR "${CMAKE_SOURCE_DIR}/.cache/pocketjs" CACHE PATH "Pinned PocketJS checkout")
-# quickjs-ng, pocketjs_guest and pocketjs_ui_qjs are vendored under components/
-# (default search path, no EXTRA_COMPONENT_DIRS needed); pocketjs_ui_core and
-# pocketjs_render_rgb565 (thin C shims over prebuilt Rust archives, unrelated
-# to the resolve/frame/drain ordering L1 needs to change) still build out of
-# the pinned .cache/pocketjs checkout.
-if(NOT KSN_ONLY)
-foreach(component pocketjs_ui_core pocketjs_render_rgb565)
-    list(APPEND EXTRA_COMPONENT_DIRS "${POCKETJS_SOURCE_DIR}/hosts/esp-idf/components/${component}")
-endforeach()
-set(POCKETJS_UI_CORE_ARCHIVE "${CMAKE_SOURCE_DIR}/.cache/native/libpocketjs_idf_ui_core.a" CACHE FILEPATH "S3 UI archive")
-set(POCKETJS_RENDER_RGB565_ARCHIVE "${CMAKE_SOURCE_DIR}/.cache/native/libpocketjs_idf_render_rgb565.a" CACHE FILEPATH "S3 renderer archive")
-endif()
+# quickjs-ng and pocketjs_guest are vendored under components/ (default search
+# path, no EXTRA_COMPONENT_DIRS needed). Every app draws through Kasane
+# (main/ui/kasane); the Rust UI core, its QuickJS binding and the rgb565
+# renderer are no longer part of the image, so nothing is built out of the
+# pinned .cache/pocketjs checkout.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-idf_build_set_property(KSN_ONLY "${KSN_ONLY}")
 idf_build_set_property(MINIMAL_BUILD ON)
 project(cardputer_pocketjs)
 add_custom_target(flash_budget ALL

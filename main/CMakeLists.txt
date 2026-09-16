@@ -25,13 +25,6 @@ set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.
 set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_notice.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
-# Kept explicit until app_session no longer constructs pocketjs_ui_qjs/core.
-# Requirement discovery runs in a separate CMake process before sdkconfig.
-idf_build_get_property(KSN_ONLY KSN_ONLY)
-if(NOT KSN_ONLY)
-    set(LEGACY_UI_COMPONENTS pocketjs_ui_core pocketjs_ui_qjs pocketjs_render_rgb565)
-    set(LEGACY_UI_SOURCES "text/jsfont.c" "pocket/pocket_ui.c" "scene/render_accel.c" "pet/pet_assets.c")
-endif()
 # ``scene/fxmath.c`` and ``pocket/fir_pie.c`` sit in the first row rather than the
 # trailing variables because both are called from files listed beside them (the
 # scenes and mp3_decode.c) -- see the note at the top of this file about a row
@@ -39,9 +32,9 @@ endif()
 idf_component_register(SRCS "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
     "hal/keymap.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
     "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../.cache/bmi270/bmi2.c" "../.cache/bmi270/bmi270.c"
-    ${LEGACY_UI_SOURCES} ${POCKET_RANDOM_SOURCES} ${POCKET_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${POCKET_PROBE_SOURCES}
+    ${POCKET_RANDOM_SOURCES} ${POCKET_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${POCKET_PROBE_SOURCES}
     INCLUDE_DIRS "." "hal" "pocket" "vm" "pet" "ui" "ui/kasane" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../.cache/bmi270"
-    REQUIRES pocketjs_guest ${LEGACY_UI_COMPONENTS}
+    REQUIRES pocketjs_guest
              skk_core ime_core
              esp_app_format esp_hw_support esp_driver_spi esp_driver_i2c esp_driver_gpio esp_driver_uart esp_driver_rmt esp_driver_usb_serial_jtag esp_timer esp_partition esp_driver_i2s esp_adc nvs_flash
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
@@ -75,14 +68,11 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 if(POCKET_PROBES)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_PROBES=1)
 endif()
-if(KSN_ONLY)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE CONFIG_KSN_ONLY=1)
-endif()
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 # The small procedural renderer benefits from speed optimization; the JS engine
 # and other components retain the project's size optimization.
 target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c" "scene/canopy_pie.c" "scene/garden_decor_pie.c")
-set_source_files_properties(ui/shell.c scene/solar_sail.c scene/render_accel.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c scene/garden_decor_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(ui/shell.c scene/solar_sail.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c scene/garden_decor_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
 
 # The VM probe (docs/vm/quickjs-freertos-vm-spec.md sec.5), off by default
 # (main/Kconfig.projbuild's CONFIG_POCKET_VM_PROBE). Both the source file and
