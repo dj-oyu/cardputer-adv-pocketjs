@@ -1,0 +1,8 @@
+gen-default-closure 41
+gen-arguments 41
+gen-prologue-escaped 43
+gen-mixed-cycle 5 10
+agen-default-closure 42
+agen-arguments 42
+agen-mixed-cycle 6 12
+exit=0
