@@ -1,6 +1,6 @@
 # PIE カーネルのチューニングツール
 
-`main/shell.c` と `main/render_accel.c` にある ESP32-S3 PIE（SIMD）カーネルを、**実機に焼く前にホストで検証・解析する**ためのツール群です。背景と設計判断は [docs/perf/pie-simd.md](../../docs/perf/pie-simd.md) を参照してください。ここではツールの使い方と、どの局面で何を走らせるかだけを書きます。
+`main/scene/` と `main/ui/kasane/` にある ESP32-S3 PIE（SIMD）カーネルを、**実機に焼く前にホストで検証・解析する**ためのツール群です。背景と設計判断は [docs/perf/pie-simd.md](../../docs/perf/pie-simd.md) を参照してください。ここではツールの使い方と、どの局面で何を走らせるかだけを書きます。
 
 すべて Python 3 標準ライブラリだけで動きます（C モデルのみホストの C コンパイラが要ります）。実行はリポジトリのルートから。
 
@@ -12,7 +12,6 @@
 | `test_kernels.py` | **命令レベルの実行検証。** C ソースからアセンブリと定数配列 `k[]` を抜き出し、`piesim.py` で実行してスカラー参照（`ocean_row_scalar` / `wave_row_scalar` / Rust の合成式）と全画素比較する | 約 1 秒 |
 | `piesim.py` | 上記 2 つが使うライブラリ。TRM 1.8 の擬似コードどおりに q0〜q7・QACC・SAR・メモリを模倣する解釈実行器と、C ソースからアセンブリ文字列・`k[]` 初期化子を取り出す関数 | — |
 | `run_models.py` + `models/*.c` | **算術の総当たり証明。** カーネルが使う式（表の畳み込み、逆数乗算、/255 の恒等式、565↔888 の展開）が参照実装とビット一致することを入力の全域で確認する C プログラム | 数秒 |
-| `models/accel_host_test.c` | `render_accel.c` の入口関数（`accel_fill` / `accel_blend`）を `-DRENDER_ACCEL_HOST_MODEL` でホストビルドし、行頭・行末のスカラー処理とポインタ計算をランダム矩形で検証する | 約 1 秒 |
 
 3 つの層で守っているものが違います。
 
@@ -27,9 +26,8 @@ stalls.py       … 「その並びは速いか」      データ依存ストー
 | 局面 | 走らせるもの |
 | --- | --- |
 | カーネルの**命令を並べ替えた**（スケジューリング、レジスタの付け替え） | `test_kernels.py` → `stalls.py`。ビット一致のまま 0 ストールになるまで往復する |
-| **定数 `k[]` の順序や値**を変えた | `test_kernels.py`。`k[]` 初期化子は C ソースから評価されるので、アセンブリ側の読み順とずれれば落ちる。blend は `blend_constants()` を `test_kernels.py` の `blend_k()` に手で写す |
+| **定数 `k[]` の順序や値**を変えた | `test_kernels.py`。`k[]` 初期化子は C ソースから評価されるので、アセンブリ側の読み順とずれれば落ちる |
 | **式・表・スケーリング**を変えた（例: 表に定数を畳み込む、シフト量を変える） | `run_models.py` で該当モデルを更新して総当たり → `test_kernels.py` |
-| `render_accel.c` の**ラッパー**（矩形の頭・尾、整列判定）を触った | `run_models.py accel` |
 | **新しい命令**を使った | `piesim.py` にその命令を TRM の擬似コードから追加してから `test_kernels.py`。未対応命令は `NotImplementedError` で止まる（黙って素通りはしない） |
 | 実機で「命令数のわりにサイクルが多い」 | まず `stalls.py`。その `estimated cycles per block` と実測（`PERF` の `kernel=` を 30×行数で割る）を突き合わせる。一致すればカーネルは下限で走っており、次に効くのは命令数削減だけ。大きく外れるなら計測にカーネル以外が混ざっている |
 | 実機に焼く直前 | 3 つ全部 |
@@ -40,14 +38,13 @@ stalls.py       … 「その並びは速いか」      データ依存ストー
 # ストール解析（関数名は C ソース内の名前）
 python tools/pie/stalls.py main/shell.c ocean_row_pie
 python tools/pie/stalls.py main/shell.c wave_row_pie
-python tools/pie/stalls.py main/render_accel.c blend_blocks_pie
 
 # 実行検証（4 カーネル）
 python tools/pie/test_kernels.py
 
-# 算術の総当たり（ocean / wave / blend / accel を個別指定も可）
+# 算術の総当たり（ocean / wave / blendpack などを個別指定も可）
 python tools/pie/run_models.py
-python tools/pie/run_models.py blend
+python tools/pie/run_models.py blendpack
 ```
 
 `stalls.py` の出力例（海面 v1 → v2 の差）:
@@ -94,3 +91,5 @@ cycles/block = 命令数 + 0.6 x ストア数 + ストール数
 - `test_kernels.py` の海面テストは、`shell.c` に `ocean_sine16`（表引き版）があればビット一致を要求し、無ければ放物線近似版とみなして、そのカーネルのコメントが約束する範囲（r/b は 1 段、g は 2 段まで、動く画素は 2 割未満）で判定します。近似の許容を変えたらテスト側の閾値も更新すること。
 - C の `/` は `extract_constants()` で `//` に置き換えます。現在の `k[]` に負の被除数はありませんが、増やすときは注意してください。
 - 資料: [ESP32-S3 TRM](https://documentation.espressif.com/esp32-s3_technical_reference_manual_en.pdf) 第 1 章（1.7 パイプライン、表 1.7-2、1.8 各命令）。表 1.7-2 はテキスト抽出で列が崩れるので `pdftotext -raw` で読むこと。
+
+旧レンダラ（Rust UI コア）の塗り・合成カーネル `render_accel.c` と、その検証（`models/accel_host_test.c`、`models/blend_model.c`、`test_kernels.py` の BlendBlocks / FillBlocks）は、旧 UI 経路の削除とともに外した。

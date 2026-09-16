@@ -1,4 +1,4 @@
-"""Kasane-only system acceptance suite; never builds the legacy UI/Taffy graph."""
+"""Kasane system acceptance suite; audits that no legacy UI/Taffy reaches the image."""
 import argparse
 import hashlib
 import json
@@ -78,14 +78,10 @@ def main():
             report['status'] = 'HOST_PASS_DEVICE_NOT_RUN'
             return 0
         idf = Path(os.environ['IDF_PATH']) / 'tools' / 'idf.py'
-        absent = build / 'absent-legacy-ui'
-        if absent.exists():
-            raise RuntimeError('legacy exclusion sentinel must not exist: ' + str(absent))
         defaults = ROOT / 'tools' / 'system_full_test.defaults'
         # Direct IDF subprocess mode avoids nested asyncio pipe collection
         # hanging after CMake exits on Windows with redirected output.
         stage('firmware-build', [sys.executable, str(idf), '--no-hints', '-B', str(build),
-              '-D', 'KSN_ONLY=ON', '-D', 'POCKETJS_SOURCE_DIR=' + absent.as_posix(),
               '-D', 'SDKCONFIG=' + (build / 'sdkconfig').as_posix(),
               '-D', 'SDKCONFIG_DEFAULTS=' + (ROOT / 'sdkconfig.defaults').as_posix() + ';' + defaults.as_posix(),
               'build'])

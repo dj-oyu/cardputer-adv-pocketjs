@@ -2,7 +2,7 @@
 compiler is available (gcc, clang, cc, or `zig cc`).
 
     python tools/pie/run_models.py            every model
-    python tools/pie/run_models.py blend      one of: ocean, wave, blend, accel, garden,
+    python tools/pie/run_models.py ocean      one of: ocean, wave, garden,
                                               fir, canopy, disc, blendpack, scale256
 
 Each model prints its own verdict; this script fails if any of them reports a
@@ -24,8 +24,6 @@ MODELS = os.path.join(HERE, 'models')
 TARGETS = {
     'ocean': (['ocean_model.c'], []),
     'wave': (['wave_model.c'], []),
-    'blend': (['blend_model.c'], []),
-    'accel': (['accel_host_test.c'], ['-DRENDER_ACCEL_HOST_MODEL', '-I' + os.path.join(MODELS, 'stub')]),
     'garden': (['garden_model.c'], []),
     'fir': (['fir_model.c'], []),
     'canopy': (['canopy_model.c'], []),

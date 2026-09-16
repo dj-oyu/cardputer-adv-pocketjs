@@ -1,4 +1,8 @@
-"""Prove a configured Kasane-only ELF has no legacy UI components or symbols."""
+"""Prove a firmware build has no legacy UI components, sources or symbols.
+
+The legacy UI was removed from the tree; this keeps it from coming back through
+a component, an archive or a source row.
+"""
 import argparse
 import json
 from pathlib import Path
@@ -13,8 +17,6 @@ build = args.build.resolve()
 description = json.loads((build / 'project_description.json').read_text())
 for component in description['build_components']:
     assert not re.search(r'taffy|pocketjs_(ui_core|ui_qjs|render_rgb565)', component, re.I), component
-cache = (build / 'CMakeCache.txt').read_text()
-assert re.search(r'^KSN_ONLY:BOOL=ON$', cache, re.M), 'not a Kasane-only configuration'
 for filename in ('cardputer_pocketjs.map', 'build.ninja', 'compile_commands.json'):
     data = (build / filename).read_text()
     assert not re.search(r'libpocketjs_idf_|libpocketjs_ui_|libpocketjs_render_|taffy', data, re.I), filename
