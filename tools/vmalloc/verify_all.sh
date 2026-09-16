@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # verify_all.sh — the G6 gate (docs/vm/vm-L2-design.md sec.1.2): replays every
-# trace through the segment allocator under ASan+UBSan with --verify, then
-# runs the fault modes as negative controls and REQUIRES each to be caught.
+# trace through the segment allocator -- and the slab allocator of
+# docs/vm/vm-ledger/08-slab-study.md -- under ASan+UBSan with --verify, then
+# runs each one's fault modes as negative controls and REQUIRES each to be caught.
 # A gate that only shows the good allocator passing has not shown that it
 # can fail; the second half is what makes the first half mean something.
 #
 #   bash tools/vmalloc/verify_all.sh              # all traces, default segment size
 #   bash tools/vmalloc/verify_all.sh --seg-size 8192
 #   bash tools/vmalloc/verify_all.sh --quick      # skip bench_* (multi-million-line traces)
+#   bash tools/vmalloc/verify_all.sh --only segment   # or --only slab
 #
 # Exit 0 only if every trace verifies clean AND every fault is detected.
 # Results: .cache/vmalloc/verify.txt (one line per run, replay.c's format).
@@ -26,10 +28,12 @@ CONTROL=$TRACES/closures.trace
 POOL=${VMALLOC_POOL:-100663296}
 quick=0
 extra=()
+allocators=(segment slab)
 while [ $# -gt 0 ]; do
   case "$1" in
     --quick) quick=1 ;;
     --seg-size|--seg-cache) extra+=("$1" "$2"); shift ;;
+    --only) allocators=("$2"); shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -41,6 +45,7 @@ export UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}
 : > "$OUT"
 
 fail=0
+for alloc in "${allocators[@]}"; do
 # ---- positive runs: every trace must verify clean and pass check().
 for t in "$TRACES"/*.trace; do
   name=$(basename "$t")
@@ -56,13 +61,13 @@ for t in "$TRACES"/*.trace; do
     lines=$(wc -l < "$t")
     opts=(--verify-gap $(( lines / 2000 + 1 )) --sample-every $(( lines / 2000 + 1 )))
   fi
-  line=$("$BIN" --allocator segment --pool "$POOL" --verify "${opts[@]}" "${extra[@]}" "$t" 2>>"$OUT.stderr")
+  line=$("$BIN" --allocator "$alloc" --pool "$POOL" --verify "${opts[@]}" "${extra[@]}" "$t" 2>>"$OUT.stderr")
   rc=$?
   echo "$line" >> "$OUT"
   if [ $rc -ne 0 ] || [[ "$line" != *"verify=OK"* ]] || [[ "$line" != *"check=1"* ]]; then
-    echo "FAIL  $name (rc=$rc): $line"; fail=1
+    echo "FAIL  $alloc $name (rc=$rc): $line"; fail=1
   else
-    echo "ok    $name: $(echo "$line" | grep -o 'seg_added=[0-9]* seg_returned=[0-9]* seg_reused=[0-9]* seg_dedicated_added=[0-9]* verify=OK verify_sweeps=[0-9]*')"
+    echo "ok    $alloc $name: $(echo "$line" | grep -o 'seg_added=[0-9]* seg_returned=[0-9]* seg_reused=[0-9]* seg_dedicated_added=[0-9]*') $(echo "$line" | grep -o 'verify=OK verify_sweeps=[0-9]*')"
   fi
 done
 
@@ -70,19 +75,30 @@ done
 # (exit 3), by check() (exit 2), or by the sanitizer (abort, rc>=128 or 1).
 # Swept after EVERY op here (--verify-every 1) so the report names the op
 # that broke the reference instead of a later crash inside the allocator.
-for fault in early-return overlap misalign pool-overlap compact; do
-  line=$("$BIN" --allocator segment --pool "$POOL" --sample-every 0 --verify --verify-every 1 --fault "$fault" "${extra[@]}" "$CONTROL" 2>"$OUT.fault-$fault.stderr")
+# The slab's faults differ from the segment's: it has no block headers to
+# misplace (overlap = a slot handed out twice) and no in-segment compaction,
+# but it has a ledger that free() binary-searches and bitmaps that must agree
+# with it (ledger-order, bitmap).
+case "$alloc" in
+  segment) faults=(early-return overlap misalign pool-overlap compact) ;;
+  slab)    faults=(early-return overlap pool-overlap ledger-order bitmap) ;;
+esac
+for fault in "${faults[@]}"; do
+  err="$OUT.$alloc.fault-$fault.stderr"
+  line=$("$BIN" --allocator "$alloc" --pool "$POOL" --sample-every 0 --verify --verify-every 1 --fault "$fault" "${extra[@]}" "$CONTROL" 2>"$err")
   rc=$?
-  echo "fault=$fault rc=$rc $line" >> "$OUT"
+  echo "allocator=$alloc fault=$fault rc=$rc $line" >> "$OUT"
   if [ $rc -eq 0 ]; then
-    echo "MISSED fault=$fault: the gate did not detect it"; fail=1
+    echo "MISSED $alloc fault=$fault: the gate did not detect it"; fail=1
   else
     how="rc=$rc"
     [ $rc -eq 3 ] && how="verify: $(echo "$line" | grep -o 'first_error=.*')"
-    [ $rc -eq 2 ] && how="check(): $(tail -n1 "$OUT.fault-$fault.stderr")"
-    [ $rc -eq 1 ] && how="sanitizer: $(grep -m1 -o 'AddressSanitizer: [a-z-]*\|runtime error: .*' "$OUT.fault-$fault.stderr")"
-    echo "caught fault=$fault ($how)"
+    [ $rc -eq 2 ] && how="check(): $(tail -n1 "$err")"
+    [ $rc -eq 1 ] && how="sanitizer: $(grep -m1 -o 'AddressSanitizer: [a-z-]*\|runtime error: .*' "$err")"
+    [ $rc -ge 128 ] && how="abort: $(grep -m1 -o 'slab: .*\|segment: .*\|AddressSanitizer: [a-z-]*' "$err")"
+    echo "caught $alloc fault=$fault ($how)"
   fi
+done
 done
 
 [ $fail = 0 ] && echo "G6: all traces verify clean; all faults caught" || echo "G6: FAILED"

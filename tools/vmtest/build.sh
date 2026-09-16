@@ -63,6 +63,10 @@ build_variant() {
     o2)   cflags="-O2 -g" ;;
     *) echo "unknown variant $variant" >&2; exit 2 ;;
   esac
+  # VMTEST_CFLAGS: extra flags for every compile and the link, e.g. the -m32
+  # sysroot flags from tools/vmtest/m32_sysroot.sh (with VMTEST_OUT pointing at
+  # a separate cache so 32- and 64-bit objects never mix).
+  cflags="$cflags ${VMTEST_CFLAGS:-}"
   local obj=$OUT/obj-$variant
   mkdir -p "$obj" "$OUT/include"
   # quickjs-vmprobe.h includes sdkconfig.h to see CONFIG_POCKET_VM_PROBE. The

@@ -46,15 +46,27 @@
 
 // ---------------------------------------------------------------- allocator
 
-// Same union as guest.c plus an id. {size_t,uint64_t} is 16 B, max_align_t is
-// 32 B on x86-64 glibc, so the id rides in padding the guest already pays for.
+// The device has no header any more (guest.c, backlog #9): QuickJS's usable
+// size is the tlsf block length and realloc is heap_caps_realloc. The host has
+// no tlsf to ask, so the header stays here and carries a MODEL of that length:
+// `usable` = the request rounded up to 4 B with a 12 B minimum
+// (tlsf_control_functions.h adjust_request_size). What is not modelled: the
+// up-to-15 B tlsf keeps when a free block's remainder is too small to split,
+// which depends on the device heap's layout. {size_t,size_t,uint64_t} is 24 B,
+// under max_align_t's 32 B on x86-64 glibc, so the header length is unchanged.
 typedef union {
   struct {
-    size_t size;
+    size_t size;    // requested, for the trace and live_bytes
+    size_t usable;  // what vm_usable_size reports, see above
     uint64_t id;
   } h;
   max_align_t alignment;
 } allocation_header_t;
+
+static size_t tlsf_usable(size_t size) {
+  size_t aligned = (size + 3U) & ~(size_t)3U;
+  return aligned < 12U ? 12U : aligned;
+}
 
 typedef struct {
   FILE *trace;          // NULL unless --trace
@@ -90,9 +102,11 @@ static allocation_header_t *raw_alloc(size_t size) {
   if (size == 0U || size > SIZE_MAX - sizeof(allocation_header_t)) return NULL;
   A.attempts++;
   if (A.fail_at != 0 && A.attempts == A.fail_at) return NULL;
-  allocation_header_t *header = malloc(sizeof(allocation_header_t) + size);
+  const size_t usable = tlsf_usable(size);
+  allocation_header_t *header = malloc(sizeof(allocation_header_t) + usable);
   if (header == NULL) return NULL;
   header->h.size = size;
+  header->h.usable = usable;
   header->h.id = ++A.next_id;
   return header;
 }
@@ -130,12 +144,16 @@ static void vm_free(void *opaque, void *pointer) {
 }
 
 static size_t vm_usable_size(const void *pointer) {
-  return pointer == NULL ? 0U : (((const allocation_header_t *)pointer) - 1)->h.size;
+  return pointer == NULL ? 0U : (((const allocation_header_t *)pointer) - 1)->h.usable;
 }
 
-// Mirrors guest_realloc: always a fresh block, never in-place. A VM level that
-// assumes realloc keeps the address (L2/L3 segment growth) fails here as it
-// would on the device.
+// Mirrors heap_caps_realloc as far as the host can: a request that fits the
+// block's modelled length stays in place (tlsf_realloc never moves then; a
+// shrink that leaves too little to split keeps the old length), and every
+// growth past it moves to a fresh block. tlsf would also grow in place into a
+// free neighbour; the host cannot know the neighbour, so it always moves --
+// which keeps a VM level that assumes realloc keeps the address failing here.
+// The id changes either way so trace consumers need no new record kind.
 static void *vm_realloc(void *opaque, void *pointer, size_t size) {
   if (pointer == NULL) return vm_malloc(opaque, size);
   if (size == 0U) {
@@ -144,13 +162,36 @@ static void *vm_realloc(void *opaque, void *pointer, size_t size) {
   }
   allocation_header_t *old = ((allocation_header_t *)pointer) - 1;
   const size_t previous_size = old->h.size;
+  if (tlsf_usable(size) <= old->h.usable) {
+    A.attempts++;  // same attempt numbering as a moving realloc (--fail-alloc)
+    if (A.fail_at != 0 && A.attempts == A.fail_at) {
+      A.n_fail++;
+      if (A.trace) fprintf(A.trace, "!~ %llu %zu\n", (unsigned long long)old->h.id, size);
+      return NULL;
+    }
+    // tlsf splits the tail off only when it can hold a block header (16 B).
+    if (old->h.usable - tlsf_usable(size) >= 16U) old->h.usable = tlsf_usable(size);
+    const uint64_t old_id = old->h.id;
+    old->h.size = size;
+    old->h.id = ++A.next_id;
+    A.n_realloc++;
+    account_sub(previous_size);
+    account_add(size);
+    if (A.trace)
+      fprintf(A.trace, "~ %llu %llu %zu\n", (unsigned long long)old_id,
+              (unsigned long long)old->h.id, size);
+    return pointer;
+  }
   allocation_header_t *next = raw_alloc(size);
   if (next == NULL) {
     A.n_fail++;
     if (A.trace) fprintf(A.trace, "!~ %llu %zu\n", (unsigned long long)old->h.id, size);
     return NULL;
   }
-  memcpy(next + 1, pointer, previous_size < size ? previous_size : size);
+  // The OLD BLOCK's length, not the old request: QuickJS writes into the slack
+  // vm_usable_size reported (js_realloc2), and heap_caps_realloc copies
+  // MIN(size, old block size) too. Copying the request lost that tail.
+  memcpy(next + 1, pointer, old->h.usable < size ? old->h.usable : size);
   A.n_realloc++;
   account_sub(previous_size);
   account_add(size);
@@ -984,6 +1025,11 @@ int main(int argc, char **argv) {
   G.runtime = JS_NewRuntime2(&VM_ALLOCATOR, &G);
   if (!G.runtime) return 4;
   JS_SetMemoryLimit(G.runtime, heap_limit);
+  // guest.c: first cycle collection at half the limit (backlog #5), only ever
+  // lowered, so --profile host keeps upstream's 256 KiB.
+  // heap_limit 0 means unlimited here (guest.c rejects 0), not "collect always".
+  if (heap_limit != 0 && heap_limit / 2U < JS_GetGCThreshold(G.runtime))
+    JS_SetGCThreshold(G.runtime, heap_limit / 2U);
   JS_SetMaxStackSize(G.runtime, stack_limit);
   JS_SetRuntimeInfo(G.runtime, "PocketJS ESP-IDF guest");
   if (call_mode != -1) {

@@ -119,13 +119,16 @@ check throw_null_no_injection 0 --profile host "$work/thrownull.js"
 # (what run.sh already exercises every gate) must never trip the canary --
 # EXCEPT the handful of files whose whole subject IS the device's 160 KiB
 # limit (device-profile files with a memory/oom-shaped name, at the time this
-# was written: gc_threshold_device, memory_device, seg_oom_boundary). Those
+# was written: memory_device, seg_oom_boundary, gc_threshold_near_limit,
+# oom_creep_backtrace). Those
 # already assert their own exact behaviour against expected/, byte for byte;
 # asserting oom=0 for them too would be asserting they never hit the limit
-# they exist to hit. Reruns the files rather than reusing run.sh's own .raw
+# they exist to hit. gc_threshold_device left this list with backlog #5: it
+# used to run cyclic garbage into the limit, and now that the collector runs
+# under the limit its oom=0 is exactly the property to hold. Reruns the files rather than reusing run.sh's own .raw
 # output, so this adds no new expected/ file and cannot go stale against one;
 # only the new #info line is read, everything else is ignored.
-oom_corpus_exceptions=" gc_threshold_device memory_device seg_oom_boundary "
+oom_corpus_exceptions=" memory_device seg_oom_boundary gc_threshold_near_limit oom_creep_backtrace "
 corpus_bad=0 corpus_injected=0
 for f in corpus/*.js; do
   name=$(basename "$f" .js)

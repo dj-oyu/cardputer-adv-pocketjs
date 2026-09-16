@@ -34,7 +34,7 @@
 ### 1.3 修正したバグと既知の退行
 
 - **直したバグ（Test262が発見）:** pop の判定に `b->func_kind == JS_FUNC_NORMAL` を使っていたが、`JS_FUNC_ASYNC` で組まれたバイトコード関数が通常経路で呼ばれて `done_generator:` に抜ける経路があった（モジュール本体、[vm-L2-design.md](vm-L2-design.md) §10 参照）。フレームが積まれたまま残り、`JS_FreeRuntime` の表明で abort していた（`language/eval-code/direct/export.js`/`import.js`、regressions 2）。セグメントの生存範囲で判定する形に変えて解決。
-- **既知の退行（承知の上）:** `run.sh --trace`（asan）と `--vm-seg-size 2048`（o2）で `gc_threshold_device.js` が落ちる。常駐セグメントがジワジワ型OOMの「残り」を動かし、catchした後の `print` 自体がOOMする。期待値は書き換えていない。通常の `run.sh` 4バリアントでは通る。詳細は [tools/vmtest/README.md](../../tools/vmtest/README.md) の既知の脆さの節。
+- **既知の退行（承知の上）:** `run.sh --trace`（asan）と `--vm-seg-size 2048`（o2）で `gc_threshold_device.js` が落ちる。常駐セグメントがジワジワ型OOMの「残り」を動かし、catchした後の `print` 自体がOOMする。期待値は書き換えていない。通常の `run.sh` 4バリアントでは通る。詳細は [tools/vmtest/README.md](../../tools/vmtest/README.md) の既知の脆さの節。（backlog #5の修正で同ファイルはOOMしなくなり解消、§4.19）
 
 ### 1.4 未実施だった検証（実施済み分は本文書の他節、未着手分は backlog.md）
 
@@ -620,6 +620,186 @@ SELFTEST/YIELD/LAZY_INPUTS=y、FAIR=n、app2,160,160B、DIRAM123,356B、Flash Co
 候補のsmoke3周・故障回復6種成功（`finite-timing-smoke.log`）。閾値と通常設定は未変更。
 元appをhash一致で復元後もsmoke3周・故障回復6種・HOME_READYを確認
 （`finite-timing-restored-smoke.log`）。競合・閾値近傍・総合関所は引き続き未完了。
+
+### 4.19 循環ゴミのGC閾値（backlog #5、2026-09-16、`vm/l2-memory-safety`）
+
+**不具合**: quickjs-ngの`malloc_gc_threshold`は初期256 KiB、GC後は生存量×1.5。ゲスト上限160 KiBより先に来ないため、循環ゴミは一度も回収されずOOMになっていた。`js_malloc_rt`は確保失敗時にGCしない。
+
+**修正（2か所）**:
+- `quickjs.c` `js_gc_effective_threshold`: 上限があるとき、`js_trigger_gc`の比較に使う閾値を「上限−上限/32」（160 KiBで155 KiB）で頭打ちにする。保存値をGC後にクランプする案は、満杯近くで計算された値が次のGCまで残るので不採用。余白を0にする（上限−1）案も不採用: 判定はオブジェクト生成時だけで、その間のshape・プロパティ配列の確保が最後の数バイトを越える。どちらも`gc_threshold_near_limit.js`がOOMのままだった（実測(host)）。
+- `guest.c`（写しの`vmrun.c`も同じ）: `JS_SetMemoryLimit`直後に初期閾値を上限の半分（80 KiB）へ**下げる**。キャップだけでも回収は起きるが、その場合ゲストは共有DRAMを155 KiBまで使ってから回収する。下げるだけなので64 MiBのhostプロファイルは上流と同じ時機。
+- GCが走る地点は上流と同じ`JS_NewObjectFromShape`の`js_trigger_gc`だけで、確保フック内からは呼ばない。変わるのは頻度だけ。
+
+**ホスト（実測(host)、WSL、出力は/tmp）**:
+- 修正前（HEAD `8ef5b25`のコピー）: `gc_threshold_device.js`は循環262個でOOM、`gc_threshold_near_limit.js`もOOM（asan/o2とも2件FAIL）。修正後: 100,000個完走（GC 465回）、上限寄りも完走（GC 669回）。
+- コーパス8変種（asan/o2 × 無印/recur/flat/alloca）全合格（69件、allocaは既存skip 1）。Test262 asan/o2とも7,501 pass / 194 fail、regressions 0。`budget_probe.sh o2` 11/11、`oom_canary_probe.sh` o2/asan 5/5（`gc_threshold_device`はOOM例外リストから外し、oom=0を縛る側に移した）。`run.sh --trace`、`--vm-seg-size 2048`でもGC系2件は合格。
+- GCストレス: 別コピーで`FORCE_GC_AT_MALLOC`（全オブジェクト生成でGC）を有効にしたasanコーパスは68/69、残る`bench_promise`は300秒タイムアウト（exit=124）で、ASan報告・クラッシュは無し。L2a/L2b（セグメント・フラット呼び出し）下の任意のオブジェクト生成地点でのGCの安全性の傍証であり、`--force-yield`中断中の毎回GCは既存の§4.10の検査に依る。
+- 時間: o2コーパス（GC系2件を除く）の合計は修正前792〜841ms、修正後795〜804ms（各3回）で差は雑音内。**最悪ケース**: 生存量がキャップを超えた状態（OOMまで埋めて8個だけ解放）でオブジェクトを2,000個作ると、修正前0ms・修正後42ms（毎回GC）。ホスト値であり実機値ではない。
+
+**実機（実測(device)、COM3、前=`vm/main`と同一の`8ef5b25`を別worktreeでビルド、後=`build_gcthr`）**:
+- `smoke_device.py --cycles 20`: 前後ともSMOKE_OK 20・故障回復6種。
+- `memlog.py --check`: DIRAM 144,588B不変、idle_free 248,752B・app_free 139,320B・app_largest 94,208B・js 93,902Bで前後同値。Flash +76B。
+- `benchmark_app.py --samples 12`（hello、音設定は変更せず）: turn_ms 0.64→0.62、render_ms 1.55→1.54、send_ms 1.61→1.60。悪化なし。
+- helloは生存量が小さく、フレーム中にGCが走らないので、上のbenchmarkは前後比較になっていない（下の追加計測で確認）。
+
+**実機の追加計測（実測(device)、2026-09-16）**: 前=`8ef5b25`、後=`6fa205d`。それぞれに計測パッチ（コミットしない。`js_trigger_gc`のGC回数・時間、`malloc_size`のピーク・GC後の生存量、`app_tick`1回の時間の0.25ms刻みヒストグラム。`app_stop`で`GCPROBE`行を出す）を当てて、別worktreeでビルドした。
+- 対象の2本: 5本（hello／IMU CALIBRATION／POCKET PET／PET COMPANION／Kasane demo）を無操作で20秒ずつ走らせ、ゲストヒープのピークが大きい2本を選んだ。IMU CALIBRATION 129,562B、POCKET PET 127,735B（以下Kasane demo 115,654B、companion 111,977B、hello 99,921B）。
+- 手順: 無操作で30秒走らせて終了。p99は`app_tick`時間の最近順位法で、0.25ms刻みの上端。
+
+| ビルド | アプリ（周回数） | frame max | frame p99 | GC回数（うちフレーム中） | GC 1回 |
+| --- | --- | --- | --- | --- | --- |
+| 前 | IMU CALIBRATION（6） | 26.9〜27.5ms | 20.75〜21.75ms | 0（0） | — |
+| 後 | IMU CALIBRATION（14） | 27.0〜28.8ms | 20.75〜22.75ms | 各1（0） | 1.03〜1.22ms |
+| 前 | POCKET PET（6） | 26.9〜56.2ms | 7.5〜8.5ms | 0（0） | — |
+| 後 | POCKET PET（6） | 26.5〜58.4ms | 7.75〜8.75ms | 各1（0） | 1.03〜1.18ms |
+
+- 修正後のGCは、アプリ起動時のソース評価中に走る1回だけ（初期閾値80KiBを越えた時点）。フレーム中のGCは0回で、max/p99の差は周回間のばらつきの範囲。PETの56〜58msのmaxは修正前にもある。
+- 毎回GC領域（155KiB超）: GC後の生存量は最大81,881B、ピークは129,562Bで、2本とも届かない。無操作での値で、操作中の生存量は測っていない。
+
+**ハング1件（未解決）**: 修正後の計測ビルドを焼いた後、12回目の起動（5本を順に→キー操作ありの2本→交互の3周目のIMU CALIBRATION）で機体が応答しなくなった。USB-JTAGは列挙されたままで出力は無く、esptoolも接続できず、物理リセットで復帰。パニックのログは取れていない。切り分け（いずれも再現せず）: 前の計測ビルドで12回（IMU 6）、後の計測ビルドで20回（IMU 14）、同じビルドでハングした順序を再生して14回（キー操作ありのIMUを含む。PETは無操作。当該の12回目も通過）、計測パッチ無しの`build_gcthr`で14回（IMU 12）。発生は1回だけで、修正・計測パッチ・既存の問題のどれが原因かは特定できていない。関係ないとは判断していない。前の計測ビルドの1回目でもホスト側のシリアルエラー（ClearCommError）が1回出たが、機体は生きていて別の事象。キー操作ありの計測をPETでも1回行ったので、`pet.v1`の保存内容が変わった可能性がある（元の値は控えていない）。
+
+**残る懸念**: 上記のハング1件（未解決）。生存量が上限の31/32を超えたアプリは、オブジェクト生成のたびにGCする（上記hostの最悪ケース）。修正前はその状態から数回の確保でOOMだったが、循環ゴミを作らず上限際で長く生きるアプリは修正前より遅くなりうる。実機での該当アプリの有無とGC 1回の費用は未確認。
+
+### 4.20 ゲスト確保の実長報告と realloc のその場伸長（backlog #8(b)・#9、2026-09-16、`vm/l2-memory-safety`）
+
+**変更**: `guest.c`（実機）は確保ヘッダを廃止し、`js_malloc_usable_size` に `heap_caps_get_allocated_size()`（tlsf の実ブロック長）を返す。`realloc` は `heap_caps_realloc()`。
+- QuickJS は `usable − 要求` を slack として使う（`js_realloc2`・文字列連結の高速経路）。要求サイズを返していた間は slack が常に0で、伸長のたびに realloc になっていた。
+- tlsf の実長は要求を4Bに切り上げ、最小12B、分割できない余り最大15Bまで（`adjust_request_size`・`block_can_split`）。`malloc_limit` はこの実長で課金されるので、160 KiB は実際に渡した量に近づく。同じ理由で、上限に当たるバイト位置はヒープの空きブロック配置にも依存するようになった。
+- 失敗時の意味論: tlsf 内の realloc は失敗しても元ブロックを解放せず、別ヒープへの移動は新ブロックができてから旧ブロックを解放する（IDF v6.0.1 `heap_caps_base.c`・`tlsf.c` を読んで確認）。`js_realloc_rt` の前提どおり。
+- `heap_caps_get_allocated_size` の実機コスト: 48Bの生存ブロックへ2万回呼んで 1回 316〜454 ns（計測ビルド、実測）。ヘッダを読むだけだった旧経路との差で、malloc・free・realloc 1回ごとに1〜2回かかる。下のフレーム時間には差が出ていないので、ヘッダは戻していない。
+
+**ホスト（`vmrun.c`）**: ヘッダは残し、実機の実長を**模型**で持つ（4B切り上げ・最小12B。分割できない余りは模擬しない）。realloc は、模型の長さに収まればその場で返す（縮小で余りが16B以上なら長さも縮める）。超える伸長は常に移動する（隣の空きをホストは知らないので、その場伸長は模擬しない）。
+- **模型の最初の版には誤りがあった**: 移動時に旧**要求**サイズしかコピーせず、QuickJS が slack に書いた内容を落として、コーパス24件がクラッシュ・破損した（ASan `compute_stack_size` の SEGV）。実機の `heap_caps_realloc` は旧ブロック長までコピーするので、実機コードの誤りではない。ホスト側を旧ブロック長のコピーに直した。
+- コーパスの調整3件（期待値は変えていない）:
+  - `oom_resolving_functions{,_module}.js`: `--fail-alloc` の対象（`js_create_resolving_functions` の2つ目の確保）が1つ前へずれたので、計装して 1353→1352、1290→1289 に置き直した。alloca 版は修正前から 1352 を指しておらず（対象は1352、指定は1353）、今も隣を指す。
+  - `memory_device.js` の array-oom: `new Array(1<<18).fill(0)` は 1.5 倍ずつ伸びて上限の 388B 手前まで這い寄る（163,452/163,840B、host）。そのため InternalError を作れるかがバイトの偶然で決まり、今回 `null` に変わった。単発の大きな確保になる `Array.apply(null,{length:60000})` に置き換えた。
+- 結果: コーパス8変種全合格（alloca は既存 skip 1）、Test262 asan/o2 とも 7,501 pass・regressions 0、`budget_probe.sh o2` 11/11、`oom_canary_probe.sh` o2 5/5。**asan は 4/5**: `limit_rejected_by_accounting`（`--heap-limit 100K` で push し続ける）が、上限際で既知の上流 UAF（backlog #6、`build_backtrace`→`can_add_backtrace`）を踏むようになった。修正前の asan では同じ検査が通る。検査の値は動かしていない。
+
+**実機（実測(device)、前=`b54b71d`、後=作業ツリー。同じ計測パッチ〈コミットしない〉を当てて別worktreeでビルド。無操作30秒×各3回）**:
+
+| アプリ | | 起動後の空き / 最大連続 | js課金 | 走行中の最小空き | realloc / 移動 / コピーB | frame max / p99 |
+| --- | --- | --- | --- | --- | --- | --- |
+| IMU CALIBRATION | 前 | 85,164 / 31,744 | 106,371 | 66,824〜66,848 | 5,543〜5,550 / 全数 / 252,805 | 27.2〜27.5 / 20.75〜21.0ms |
+| | 後 | 91,560〜91,596 / 31,744 | 108,932〜108,980 | 73,820〜73,868 | 5,507〜5,520 / 3,602〜3,942 / 142,740〜170,828 | 27.2〜27.3 / 20.75ms |
+| POCKET PET | 前 | 82,196〜82,224 / 36,864 | 112,548 | 77,568〜77,584 | 1,413 / 全数 / 104,757 | 26.3〜56.5 / 8.5ms |
+| | 後 | 89,116〜89,132 / 45,056 | 115,440〜115,456 | 84,504〜84,520 | 1,371〜1,372 / 570〜579 / 62,636〜62,964 | 26.6〜55.2 / 8.5ms |
+
+- 空きは IMU で +6.4〜7.0 KiB、PET で +6.9 KiB。PET の最大連続は +8 KiB。コピー量は IMU −32〜44%、PET −40%。移動は IMU で約3割、PET で約6割減った。realloc の呼び出し回数は IMU −0.8%、PET −2.9% で、slack で消えた分は少ない。
+- js 課金は +2.6〜2.9 KiB。実長課金になったぶんで、同じアプリの課金は約2〜3%増え、上限にそのぶん早く近づく。IMU は課金ピークが 1.5×82K を越えて、起動時の GC が1回から2回になった（2回目は GC 前 123K、どちらも評価中で、フレーム中の GC は0回）。
+- `memlog.py --check`（hello、素のビルド。前=`b54b71d` を worktree でビルド、後=`build_rp`）: app_free 139,296→145,092B（+5,796）、app_largest 94,208→102,400B、js 93,902→96,068B。idle_free は同値。静的 DIRAM +120B（`xtensa_vectors.S.obj` に計上、原因は未確認）。
+- `smoke_device.py --cycles 20`: 後のビルドで SMOKE_OK 20・故障回復6種。
+- 手順の誤りを1件記録する: 修正前の memlog を最初は `build_gcthr` で採ったが、`idf.py flash` が作業ツリーの変更込みで再ビルドしていたので、前後とも修正後の値になっていた。上の前の値は、変更を含まない worktree のビルドで採り直したもの。
+
+### 4.21 backtrace 組み立て中の OOM：UAF と CallSite 二重解放（backlog #6、2026-09-16、`vm/l2-memory-safety`）
+
+**§4.20 の訂正**: `memory_device.js` の array-oom（`new Array(1<<18).fill(0)`、少しずつ伸びて上限で OOM）を単発確保に替えた件の説明が不十分だった。この元の形は #9 の後、o2 では `null`（捕捉され、後続も正常）だったが、**asan では下の UAF** だった。当時は o2 の差分しか見ておらず、置き換えで UAF の再現をテストから消していた。`memory_device.js` は単発確保のまま、元の経路は新ケース `oom_creep_backtrace.js` で守る。
+
+**不具合1（上流 e1c1e416、#1469）**: `build_backtrace(ctx, error_val, ...)` は `rt->current_exception` を借用参照で受け取る（`JS_CallInternal` の `exception:` ラベル、パーサ、正規表現）。中の確保が上限で失敗すると `JS_ThrowOutOfMemory`→`JS_Throw` が `rt->current_exception` を解放する。巻き戻し中はそれが唯一の参照なので、その後の `can_add_backtrace(error_val)`・`JS_DefinePropertyValue` が解放済みを読んでいた。修正は、入口で `error_obj = js_dup(error_val)` を取り、出口で解放する形（上流の移植、`JS_ToObject` の無関係な1行は除外、`49edcc4`）。
+- 回帰 `oom_creep_backtrace.js`（device プロファイル）: ヒープを小オブジェクトで上限まで埋め、r=0〜47 個解放してから3段下で大きな確保をする。当たる窓が狭いので余白を掃引する形にした。修正前の asan で UAF、修正後は48回とも捕捉（null 9回、`#info`）。
+- 別モデル（sonnet）の敵対的レビュー: この修正は正しく完全（解放は1回、借用参照の残存使用なし、8呼び出し元すべてに効く）。同じ関数に次の不具合を見つけた。
+
+**不具合2（上流 c846cb13）**: `Error.prepareStackTrace` を設定していると、`build_backtrace` は CallSite の配列を作る。配列への挿入が失敗した場合、`JS_DefinePropertyValueUint32` は失敗時も値を消費する（`JS_DefinePropertyValue` → `JS_FreeValue`）のに、呼び出し側でもう一度 `JS_FreeValue(v)` していた。さらに `js_new_callsite` が `csd` の値を移したのにクリアせず、後始末のループが二重に解放していた。修正は上流の移植（`780cd25`）。
+- 回帰 `oom_callsite_double_free.js`: 上限際の余白掃引（最大1,200回×3通り）では、CallSite の確保が失敗するか全部収まるかで、この分岐に届かなかった。両分岐を計装して `--fail-alloc` を掃引し、1458 を index 0 の挿入時の配列伸長として特定した（alloca 版は番号が違うので skip）。修正前の asan/asan-recur/asan-flat で UAF、修正後は `returned object`。
+
+**検証（最終状態）**: コーパス8変種全合格（71件。alloca は skip 2）、Test262 asan/o2 とも 7,501 pass・regressions 0、`budget_probe.sh o2` 11/11、`oom_canary_probe.sh` asan/o2 とも 5/5、`known/oom_backtrace_uaf.js` は asan で UAF なし。実機 `build_uaf`: smoke 20周・故障回復6種。
+
+### 4.22 上流の memory-safety 修正の追加移植と棚卸し（2026-09-16、`vm/l2-memory-safety`）
+
+v0.14.0（`3c051980ab`）以降に上流へ入った use-after-free / double free / OOM 系の修正を読み、こちらの該当箇所を確認した。上流1コミット＝こちら1コミットで移植している。
+
+| 上流 | 内容 | 判定 | こちら |
+| --- | --- | --- | --- |
+| e1c1e4163e / c846cb1364 | build_backtrace の UAF / CallSite 二重解放 | 移植済み | §4.21（`49edcc4`・`780cd25`） |
+| d98ff101c6 | `.length` を伸ばした fast array への push | 移植 | `8af66ab`。回帰 `array_push_length_hole.js`: 修正前は `hasOwnProperty(1)` が真、`Object.keys` に穴が出る（o2 では未初期化スロットに `3` が見えた）。ASan は未初期化読みなので検出しない。修正後は正しい |
+| 49131a6315 | Promise.withResolvers の OOM 時二重解放 | 移植 | `0a869c7`。回帰 `oom_with_resolvers.js`（`--fail-alloc 1370`、1250〜1400 を修正前 ASan で掃引し 1370/1371 が該当）: 修正前は asan/recur/flat で UAF、修正後は捕捉 |
+| 776d724cfa | resolving functions 生成時 OOM の UAF | 不要 | `js_create_resolving_functions` は独自修正（失敗時に [0] を解放して UNDEFINED にする）で同等。async 関数・async generator 側の3つの呼び出し元（`js_async_function_settle_core` 23293、`js_async_generator_await` 23552、`js_async_generator_completed_return` 23647）は、失敗時に `resolving_funcs` を解放しない |
+| 7955cfd49e | 中断中コルーチンの closure 経由 UAF | 移植 | §4.23（分析時点では分析のみ。上流テスト3本が asan / recur / flat / alloca の全変種で UAF を再現。移植設計とリスクは backlog #13） |
+| 4369dd6488 | detach 済み ArrayBuffer の二重解放 | 不要 | ファイナライザは detach 後 `free_func(NULL)` を呼ぶだけ。ファームは free_func に NULL を渡している（`ui_qjs.c:770`） |
+| 396e1e0b4f | JS_FreeCStringUTF16 と slice 文字列 | 不要 | ファームから使っていない API |
+| 05b2db95d9 / d0c2272126 | (Async)DisposableStack の UAF | 該当なし | 機能自体がない |
+| a65377157e ほか5件、ef7a3a748b | 整数オーバーフロー、循環 re-export | 記録のみ | backlog #14 |
+
+リーク系の修正（9b58030f60 など）は範囲外。
+
+**7955cfd49e の分析（移植前、別モデルの敵対的レビュー済み）**:
+- **機構**: closure がコルーチンのローカルを捕捉した open var_ref は GC オブジェクトではない。holder の mark（`js_bytecode_function_mark`、オブジェクトの VARREF プロパティ、`js_mapped_arguments_mark`）も detached しか辿らない。そのため closure → コルーチンの辺が cycle collector から見えず、中断中コルーチンが生存中に回収される。
+- **L2 との関係**: フレームは移動しない（`stack_frame`/`pvalue` の書き込みは `get_var_ref` と `close_var_ref` だけ）。async 関数のフレームは flat 経路でもヒープ埋め込み（22112）。中断中の SEG フレームは `js_vm_mark_suspended` が context の子として mark するので、この修正の対象外で、穴もない。穴は L2 前からのもの。
+- **移植設計**: JSStackFrame に上流の `cur_gc_obj` ポインタを足すと 48→52B で、`sizeof(JSAsyncFunctionData)==104` のアサートが壊れ、全 JS フレームも +4B になる。代わりに空きバイト（offset 38、全変種で空きを確認）に `coro_kind` を置き、所有者は container_of で求める。generator 用に `JSGeneratorData` へ逆ポインタを足す。`is_coro` は JSVarRef の open 側 union のパディングに置く（上流の新しいヘッダ配置は前提にできない）。
+- **壊しうる不変条件**:
+  - 上の2つのサイズ（アサートを新設する）。
+  - `mark_children(VAR_REF)` の `assert(is_detached)`（7599）を緩める。
+  - `gc_obj_list` の一貫性。
+  - **再入**: `close_var_refs` で所有者の参照カウントが0になり、同じフレームへ再入しうる。L2c の Discard に固有ではなく、通常完了（`async_func_free` 22952）でも起きる。ガードは `close_var_ref` 自体に置き、22952 と 22556 の両方の呼び出しに効かせる（レビューで訂正）。
+  - 毎中断GC・force-yield・asan-tco との組み合わせ。
+
+移植は §4.23。上の「再入」のガードは、レビュー後の設計で「到達不能、assert で不変条件として書く」に改めた（§4.23）。
+
+### 4.23 中断中コルーチンの closure 経由 UAF：上流 7955cfd49e の移植（backlog #13、2026-09-17、`vm/l2-memory-safety`）
+
+上流の設計（コルーチンのローカルを捕捉した open var_ref を GC オブジェクトにし、所有コルーチンへの参照を持たせる）をそのまま使い、置き場所だけ変えた。
+
+| 上流 | こちら | 理由 |
+| --- | --- | --- |
+| `JSStackFrame.cur_gc_obj`（ポインタ） | `coro_kind`（1B、パディング）＋ `js_coro_owner()` が container_of で所有者を求める | 48→52B を避ける。`JSStackFrame==48`（新設）と `JSAsyncFunctionData==104`（FLATCALLS 以外にも新設）のアサートで固定 |
+| — | `JSGeneratorData.generator`（逆ポインタ、+4B） | generator だけ Data から JSObject へ戻る手段がなかった。async generator は既存 |
+| `JSVarRef.is_coro`（ヘッダ隣） | open 側 union のパディング | 空きがない。close 時の `value` 書き込みで潰れるので、`close_var_ref` は `js_dup` より前に所有者と `is_coro` を読み、全読者は `is_detached` を先に判定 |
+
+レビュー（別モデル、敵対的）で必須とされ、入れた5点:
+1. `coro_kind` は**所有 JSObject の生成後**に立てる（generator・async generator は生成直後、async 関数は `is_active=true` の後、flat 経路も同じ）。プロローグ（`OP_initial_yield` まで）の mapped arguments・既定引数 closure は通常の open var_ref のまま。失敗経路は kind 0 のまま閉じる。
+2. SEG ブロックも JSVarRef も zero 化されないので、フレーム生成の全箇所（`JS_CallInternal`、`async_func_init`、TCO の再利用）で `coro_kind=0`、`get_var_ref` で `is_coro` を必ず書く。
+3. リスト操作: `close_var_ref` は `is_coro` なら `add_gc_object` しない（既に登録済み）。`free_var_ref` の open 経路は「slot を NULL → `remove_gc_object` → 所有者 release → free」の順（release が arg_buf を解放しうる）。
+4. 再入: `close_var_refs` 走査中に所有者が解放される経路は、open var_ref 自身が参照を持つので到達不能。上流の `close_var_ref` 冒頭にある「既に detached なら return」は入れず、`close_var_ref` の release 地点に置いた assert「REMOVE_CYCLES 以外では release 前の refcount>1」で不変条件として書いた（専用の release ヘルパ `js_coro_release` には置いていない）。
+5. `mark_children(VAR_REF)` の `assert(is_detached)` を、open なら `is_coro` を assert して所有者を mark する形に緩めた。holder 側の mark（`js_bytecode_function_mark`・VARREF プロパティ・`js_mapped_arguments_mark`）は `is_detached || is_coro` を辿る。
+
+**回帰**（実測(host)。コミット `5e6d244` のファイルを、修正前＝vm/main から `aa602e1` の quickjs.c 変更だけを逆適用したビルド、修正後＝vm/main で実行。2026-09-17 に測り直した）:
+
+| ケース | 修正前（asan / -alloca / -recur / -flat / -yield / -tco） | 修正後 |
+| --- | --- | --- |
+| `coro_closure_gc.js` 全体（上流3本、async generator の closure と循環） | 6変種すべて heap-use-after-free | asan・-alloca とも一致、ASan なし |
+| `coro_prologue_gc.js` のうち、プロローグだけで捕捉する単独ケース（generator・async generator の arguments と既定引数 closure、逃げた既定引数 closure） | 6変種すべて鳴らない | asan で一致、ASan なし |
+| `coro_prologue_gc.js` のうち、プロローグの捕捉と本体の closure が同じフレームにある循環（generator） | 6変種すべて heap-use-after-free | asan で一致、ASan なし |
+| 同上（async generator、ジョブを2段送ってから GC） | 6変種すべて heap-use-after-free | asan で一致、ASan なし |
+
+`coro_prologue_gc.js` の単独ケースは修正前にも穴がなく、1. の順序を守るガードとして置いている。`coro_kind` をプロローグ前（`async_func_resume` の前）に立てる変異を一時コピーに入れると、asan ビルドで UBSan が `js_coro_owner` の NULL 参照（`JSGeneratorData.generator` がまだ無い）を報告して落ちる（実測(host)）。
+
+**訂正（2026-09-17）**: この節の初版は、`coro_prologue_gc.js` 全体を「修正前も鳴らない」、`coro_closure_gc.js` を「修正前に鳴るのは asan・-alloca だけ」と書いていた。どちらも誤り。
+- 前者はテストの世代差による。初版の計測は、並行セッションが混在循環2件を足す前の版で行った。
+- 後者は変種漏れによる。初版は2変種しか回していなかった。
+- 並行セッションのエージェント coro-uaf の実測（「混在循環は修正前に6変種すべてで UAF、単独ケースは鳴らない」）が正しい。
+
+**関所**（実測(host)、コミット済みの `aa602e1` をビルド。修正前は HEAD=`75cc6c7` のコピー）:
+
+| 検査 | 修正前 | 修正後 |
+| --- | --- | --- |
+| コーパス asan・o2・-recur・-flat | — | 各 75/75 |
+| コーパス -alloca（asan・o2） | — | 72/72＋skip 3（既存） |
+| `--force-yield`（asan-yield、全件） | 73/75（`coro_closure_gc`・`seg_oom_boundary`） | 74/75（`seg_oom_boundary`） |
+| `--gc-on-yield --force-yield`（asan-yield、中断・コルーチン・TCO 関連27件） | 25/27（`coro_closure_gc`・`tco_guards`） | 26/27（`tco_guards`） |
+| asan-tco（全件） | 73/75（`coro_closure_gc`・`seg_oom_boundary`） | 74/75（`seg_oom_boundary`） |
+| asan-tco `--gc-on-yield`（同27件） | 26/27（`coro_closure_gc`） | 27/27 |
+| `tco_probe.py`（n=100000 gc=0、n=100 gc=1） | OK | OK |
+| Test262 asan / o2 | — | 7,501 pass、regressions 0 |
+| `budget_probe.sh o2` / `oom_canary_probe.sh` asan・o2 | — | 11/11 / 5/5・5/5 |
+
+修正前後で結果が変わったのは `coro_closure_gc` だけ。修正後も残る2件は、修正前と差分がバイト一致の既存失敗で、この移植とは独立（原因は未調査、backlog #15）:
+- `seg_oom_boundary`: -yield / -tco / `--force-yield` で2回目の OOM が `InternalError` でなく `null`。
+- `tco_guards`: `--gc-on-yield --force-yield` で 300 秒のタイムアウト（exit=124）。
+
+毎中断GC＋強制中断を全件で回す最初の試行は、ベンチ系が 300 秒上限まで走って片側1時間を超え、Windows 側のメモリ不足でジョブが止められた。そのため関連27件に絞った（§4.10 などと同じ運用）。
+
+**実機**（実測(device)、COM3、hello）: 修正後の `build_coro` で smoke 20周・故障回復6種 OK。`memlog.py --check` を、修正前 `build_uaf`（`75cc6c7` と同じコード、同じ作業ツリーのパス）と修正後 `build_coro` で比べた:
+
+| | 修正前 | 修正後 | 差 |
+| --- | ---: | ---: | ---: |
+| Flash | 1,611,164 | 1,611,484 | +320 |
+| 静的 DIRAM | 144,708 | 144,708 | 0 |
+| `idle_free` / `app_free` / `app_largest` / `js` | 248,720 / 145,092 / 102,400 / 96,068 | 同値 | 0 |
+
+- Flash の比較元は揃える必要がある。並行セッションの草稿の +272B は、別 worktree（`.claude/worktrees/coro-head/build_base`、1,611,216B）を比較元にしていた。同じコードの `build_uaf` は 1,611,164B で、ビルドディレクトリのパスによる 52B の差を含むので採らない。`build_coro` の map は後で同じソースから再ビルドされ、今は 1,611,488B（`build_uaf` 比 +324）。
+- 同じ草稿にあった `app_free` −68B・`js` +68B は、こちらの測定（差 0）では再現していない。
+- generator 1個あたり +4B（`JSGeneratorData.generator`）は、generator を使わない hello では測れていない。
+
+**コミット `aa602e1` の本文の訂正**: 本文の「close_var_ref guards re-entry」は誤り。コミットされた `close_var_ref`（quickjs.c:18551〜）には再入ガード（detached なら return）が無い。代わりに release 地点で `assert(rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES || js_coro_owner(sf)->ref_count > 1)`（18575 付近）を置き、「`close_var_refs` 走査中の再入は、open var_ref 自身が所有者の参照を持つので到達不能」という不変条件を形にしている。これは別モデルレビューの結論（ガードではなく release 前 refcount>1 の assert で書く）と一致し、assert は専用の release ヘルパではなく `close_var_ref` の release 地点にある。経緯: 同じ作業ツリーで並行セッションが同じ移植を進めていて、その quickjs.c の編集（ガードの削除と assert への置き換え、FLATCALLS 以外向けの `JSAsyncFunctionData==104` アサートの追加、コメントの拡張）が、気づかれないまま `aa602e1` に入った。本文はその前の版の説明のまま。履歴は書き換えず、ここで訂正する。
 
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 

@@ -24,7 +24,7 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [vm-L0-report.md](vm/vm-L0-report.md) | 記録 | L0 の実機計測（ターン内訳、ヒープ、ジョブ単価） |
 | [vm-L1-report.md](vm/vm-L1-report.md) | 記録 | L1 の実測。時計読み出しのコスト（§8.7）、コア移行（§8.8）、スケジューラ定数の調律（§10） |
 | [vm-L2-results.md](vm/vm-L2-results.md) | 記録 | L2 の実測と関所の結果（段ごと、host/device の別つき） |
-| [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜07（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査） |
+| [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜08（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック） |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
 
 ## 主線2: PIE と描画の高速化 — [`perf/`](perf/)

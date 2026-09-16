@@ -81,11 +81,18 @@ typedef struct {
   // configure(): "seg_size" / "cache" / "fault" tuning before init(). Returns
   // 0 on success, -1 on an unknown key or value.
   int (*configure)(const char *key, const char *value);
+  // usable_size(): what a guest's js_malloc_usable_size() could honestly
+  // report for a live block (>= its requested size). QuickJS's js_realloc2()
+  // turns the difference into capacity; replay.c uses it to count reallocs
+  // whose new size was already covered (docs/vm/vm-ledger/08-slab-study.md).
+  // NULL if the backend cannot say.
+  size_t (*usable_size)(const void *p);
 } vmalloc_backend_t;
 
 const vmalloc_backend_t *vmalloc_tlsf_backend(void);
 const vmalloc_backend_t *vmalloc_estalloc_backend(void);
 const vmalloc_backend_t *vmalloc_naive_backend(void);
 const vmalloc_backend_t *vmalloc_segment_backend(void);
+const vmalloc_backend_t *vmalloc_slab_backend(void);
 
 #endif

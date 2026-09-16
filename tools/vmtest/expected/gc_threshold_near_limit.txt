@@ -1,0 +1,3 @@
+near-limit-cycles-oom false
+live true true
+exit=0
