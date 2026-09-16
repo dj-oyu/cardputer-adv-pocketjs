@@ -519,6 +519,30 @@ static inline float flower_isqrt_q(float d) {
 // the caller carries integers end to end.
 int g_flower_fixed_sqrt = 0;
 #define FLOWER_SQRT(d) (g_flower_fixed_sqrt ? flower_isqrt_q(d) : sqrtf(d))
+// The A/B arms this file's 60-frame report walks, one switch per window. Arm 0
+// is the shipping setting of all four (garden.c's gate, scalar tweaks and canopy
+// kernel, and this file's sqrtf), and arms 1..4 each turn exactly one of them to
+// the other side, so a window's paired neighbour differs by one switch. The
+// arm's own index is the first field of the SPLIT3 line; the four `name=value`
+// fields beside it are kept so a reader can still see which way the window ran.
+// What each arm means in terms of the printed fields:
+//
+//   arm 0   gate=1 tweaks=1 sq=0 canopy=1   shipping
+//   arm 1   gate=0 tweaks=1 sq=0 canopy=1   the support gate off
+//   arm 2   gate=1 tweaks=0 sq=0 canopy=1   unsigned test / identity skip off
+//   arm 3   gate=1 tweaks=1 sq=0 canopy=0   canopy blend on the scalar statement
+//   arm 4   gate=1 tweaks=1 sq=1 canopy=1   fixed-point sqrt instead of libm
+#define DECOR_ARMS 5
+#define DECOR_ARM_GATE 1
+#define DECOR_ARM_TWEAKS 2
+#define DECOR_ARM_CANOPY 3
+#define DECOR_ARM_SQRT 4
+// Only the on-device 60-frame report walks the arms (the rotation is inside
+// `#ifdef ESP_PLATFORM`, where the profilers are), and the host builds include
+// this file with -Werror: an arm counter with no reader is a warning there.
+#ifdef ESP_PLATFORM
+static unsigned decor_arm;
+#endif
 static uint16_t rgb(int r,int g,int b) {
     return (uint16_t)((clampi(r,0,255)>>3)<<11 |
                       (clampi(g,0,255)>>2)<<5 | (clampi(b,0,255)>>3));
@@ -1756,24 +1780,40 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         uint32_t raycy=garden_prof_rays(&rayrows);
         uint32_t dissolverows=garden_prof_dissolve();
         double veg=vegcy/240000.0/prof_frames,rays=raycy/240000.0/prof_frames;
-        ESP_LOGI("garden","SPLIT3 gate=%d tweaks=%d sq=%d canopy=%d frames=%u decor=%.2f veg=%.2f (%u rows, %u passes, %u cy/row) "
+        ESP_LOGI("garden","SPLIT3 arm=%u gate=%d tweaks=%d sq=%d canopy=%d frames=%u decor=%.2f veg=%.2f (%u rows, %u passes, %u cy/row) "
                  "rays=%.2f (%u rows, %u cy/row) rest=%.2f | dissolve=%u of %u rows (%.1f%%) "
                  "(ms/frame; rest = decor - veg - rays = row scaffolding + dissolve memcpy/mix; "
                  "veg rows in a dissolve run two vegetation passes)",
-                 g_garden_decor_gate,g_garden_scalar_tweaks,g_flower_fixed_sqrt,g_garden_canopy_pie,prof_frames,gar-pix,veg,vegrows/prof_frames,
+                 decor_arm,g_garden_decor_gate,g_garden_scalar_tweaks,g_flower_fixed_sqrt,g_garden_canopy_pie,prof_frames,gar-pix,veg,vegrows/prof_frames,
                  vegpasses/prof_frames,
                  vegrows?vegcy/vegrows:0,
                  rays,rayrows/prof_frames,rayrows?raycy/rayrows:0,
                  gar-pix-veg-rays,dissolverows/prof_frames,vegrows/prof_frames,
                  vegrows?100.0*dissolverows/vegrows:0.0);
-        // The A/B: the window just reported ran with the gate as printed, and the
-        // next one runs with it flipped. Adjacent 60-frame windows are three
-        // seconds apart in the same scene, in the same binary, so the paired
-        // difference is the gate and not the phase or the layout.
-        g_garden_decor_gate=!g_garden_decor_gate;
-        g_garden_scalar_tweaks=!g_garden_scalar_tweaks;
-        g_garden_canopy_pie=!g_garden_canopy_pie;
-        g_flower_fixed_sqrt=!g_flower_fixed_sqrt;
+        // The A/B: the window just reported ran with the arm printed above, and
+        // the next one runs the next arm. Adjacent 60-frame windows are three
+        // seconds apart in the same scene, in the same binary, so a paired
+        // difference is a switch and not the phase or the layout.
+        //
+        // ONE switch moves per window, and arm 0 is the shipping setting of all
+        // four. The first rotation here flipped all four together, which made
+        // every pair a sum: sq= is anti-correlated with the other three (its
+        // shipping value is 0 while the others' is 1), so the gate/tweaks/canopy
+        // pair came out as their gain MINUS whatever the fixed-point sqrt was
+        // worth, and no pair could be attributed to a switch. The one-at-a-time
+        // form is what the incoming measurement used ("触っていない項目を同時に
+        // 出す" -- the untouched ones are the noise floor) and it is what makes
+        // the canopy's "exact, free, no speed" claim checkable here.
+        //
+        // Arm 0 recurs every five windows, so each switch's pairs are drawn from
+        // the same drift as every other switch's, and the scene's own drift (the
+        // plant rotates on a 40 s hold) is why the decision uses the median of
+        // many pairs rather than one -- see tools/flower_instrument_summary.py.
+        decor_arm=(decor_arm+1)%DECOR_ARMS;
+        g_garden_decor_gate   =decor_arm!=DECOR_ARM_GATE;
+        g_garden_scalar_tweaks=decor_arm!=DECOR_ARM_TWEAKS;
+        g_garden_canopy_pie   =decor_arm!=DECOR_ARM_CANOPY;
+        g_flower_fixed_sqrt   =decor_arm==DECOR_ARM_SQRT;
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
         prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;

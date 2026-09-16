@@ -1,4 +1,13 @@
-// Host: gcc -O2 -Wall -Wextra tools/test_flower.c -lm -o .cache/test_flower
+// Host: gcc -O2 -Wall -Wextra tools/test_flower.c main/scene/canopy_pie.c
+//       main/scene/garden_decor_pie.c -I main/scene -I tools/hostshim -lm
+//       -o .cache/test_flower
+//
+// The two kernel files are separate translation units, and the one-liner this
+// file used to carry (flower.c alone) does not link without them: garden.c calls
+// garden_decor_mix8 and canopy_pie, which are defined in those two files. A host
+// check that cannot build is a host check nobody ran -- the same failure as the
+// moved paths CLAUDE.md records, and the reason the command is written out here
+// rather than shortened.
 #include "../main/scene/fxmath.c"
 // The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
 // .c files below are included whole, so the definition has to be in this TU too.
