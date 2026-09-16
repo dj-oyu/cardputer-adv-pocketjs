@@ -70,6 +70,19 @@ python3 $T/map_census.py <map> --library-targets --top 32
 ```
 「own（会員の持ち主）」が `rust-builtins` / `libc` / `rust` で、`kinds` が `1xours` だけの行が ①。
 
+### Step 2.5: 会員が「本当に落ちるか」を機械で判定する（inclusion の理由は「最初の参照元」にすぎない）
+```bash
+python3 $T/member_bytes.py <map> --droppable 200
+```
+判定規則は**その会員が持つ配置シンボル全部の参照元が我々だけ**であること。マップの
+`Archive member included to satisfy reference by file (symbol)` は**最初に要求した参照元を1つ**
+書くだけなので、あとから入った会員が同じ会員の別シンボルを要求していても出てこない。
+実例: `libfatfs.a(ff.c.obj)` 6,863 B は理由が `sd_media.c (f_getfree)` で我々だけに見えるが、
+`vfs_fat.c.obj`（`esp_vfs_fat_register` が引き込む）が `f_open` / `f_read` / `f_write` を
+要求しているので、`f_getfree` を消しても 0 B。
+`--droppable` はこの規則で「落ちる会員」と「見た目だけの会員（他人が同じ会員を押さえている）」の
+2つのリストを出す。
+
 ### Step 3: 入口の呼び出し箇所をソース行まで落とす
 ```bash
 O=build_base/esp-idf/main/CMakeFiles/__idf_main.dir/<path>.obj
@@ -106,6 +119,12 @@ stat -c %s build_new/cardputer_pocketjs.bin
 コミットメッセージには「何を選んだか・実測値（bin / flash / DIRAM / 落ちた会員とバイト数）・
 実機で未確認の点」を書く。1 関心 1 コミット。
 
+**`memlog` の `flash` は DROM（rodata）を含まない。** rodata の塊を消す変更では、memlog の
+flash がほとんど動かないのに bin が大きく減る。実測例（公開 CA 束 67.5 KB を一時的に外した
+スタブ）: bin **−70,624 B** / 配置合計 **−69,798 B**（DROM −68,492、IROM ±0）に対し、
+memlog の flash は −1,312 B しか動かなかった。**主張に使うのは bin と配置合計**、
+領域別に見たいときは DROM（0x3C0…）/ IROM（0x420…）に分けて数える。
+
 ### Step 7: 統合して再計測する
 並立枝は**単独では落ちない組み合わせ**がある（例: `sinf` は 7 ファイル＋別会員の内部呼び出し）。
 統合枝で `member_bytes.py` を回し直し、合計が「各枝の和」になるとは限らない前提で測る。
@@ -132,6 +151,24 @@ libgcc は 102 B（_ffsdi2.o 35 B ← GPIO、_popcountsi2.o 67 B ← efuse。ど
 `tanf` −1,925 B は落ち、`sinf` は ±0 B で残った ── 残った理由は cgu.04 の内部呼び出しで、
 cgu.04 は我々の `pocket_av.c` の `__gedf2` が入口だった。「薄い＝落ちる」ではなく
 「**入口が全部消えて、かつ生き残る会員が内部で呼んでいない**」が落ちる条件である。
+
+### 3.1 薄さランキングの外にあった最大の獲物（公開 CA 束 = データの塊）
+
+```
+69,730 B = libmbedtls.a(x509_crt_bundle.S.obj) 67,536 + libmbedtls.a(esp_crt_bundle.c.obj) 2,194
+入口は main/pocket/pocket_net.c の1箇所だけ:
+    .crt_bundle_attach = http.tls ? esp_crt_bundle_attach : NULL
+スタブ実測（その1行を NULL に差し替えて 1 ビルド）:
+    bin        2,142,864 -> 2,072,240   （−70,624 B = 画像の 3.3%）
+    配置合計   1,820,667 -> 1,750,869   （−69,798 B。DROM −68,492 / IROM ±0）
+    消えた会員 x509_crt_bundle.S.obj −67,536 / esp_crt_bundle.c.obj −2,194 / mbedtls の糊 −136
+```
+参照元は我々の 1 行だけなので**置き換えは同じ 1 行**でできる。選択肢は
+(a) CA を付けない（`http.tls` でも検証しない）、(b) **自分の CA をピン留め**
+（`esp_http_client_config_t.cert_pem` に PEM を1本 = 1〜2 KB、検証は維持）、
+(c) 計測用ビルドにだけ入れる。ただしファーム内の `apps/netcheck` は example.com / google /
+github / letsencrypt / badssl に HTTPS するアプリなので、公開 CA を外すとあの診断は成立しない。
+採否は製品判断（機能の話）で、この方法の「余剰」ではない。
 
 ## 4. 機能と余剰を混同しない
 

@@ -66,6 +66,37 @@ libgcc 合計                     102 B（_ffsdi2.o 35 B ← GPIO、_popcountsi2
   QuickJS・picolibc と共有。**64bit 除算（`__udivdi3` 等）は我々が 36 箇所すべて消しても 0 B**
   （40 以上の参照元が居るため）── サイクルの話であってサイズの話ではない。
 
+## 4.5 会員単位で「本当に落ちるか」を判定した結果
+
+inclusion の理由は**最初の参照元**しか書かないので、会員が持つ配置シンボル全部の参照元が
+我々だけかどうかで判定し直した（`tools/size/member_bytes.py --droppable`）。
+落ちる（我々が入口を全部外せば消える）会員は 20 個で 109,168 B:
+
+```
+67536 B  libmbedtls.a(x509_crt_bundle.S.obj)   公開 CA 束（データ）。入口は pocket_net.c の1行 ★
+ 9537 B  libesp_driver_i2c.a(i2c_master.c.obj)
+ 9088 B  libesp_driver_uart.a(uart.c.obj)
+ 6182 B  libesp_driver_rmt.a(rmt_tx.c.obj)
+ 5874 B  libesp_http_client.a(esp_http_client.c.obj)
+ 2223 B  libesp_driver_i2s.a(i2s_std.c.obj)
+ 1274 B  libfatfs.a(vfs_fat_sdmmc.c.obj)
+ 1103 B  libesp_wifi.a(wifi_default.c.obj)
+ 1049 B  libesp_adc.a(adc_oneshot.c.obj)
+  951 B  libesp_netif.a(esp_netif_sntp.c.obj)
+  828 B  libesp_adc.a(adc_cali_curve_fitting.c.obj)
+  788 B  libvfs.a(nullfs.c.obj)   529 B  libime_core.a(ime_core.c.obj)
+  512 B  libesp_stdio.a(stdio_vfs.c.obj)   402 B  libc.a(libm_math_s_remainder.c.o)
+  ＋ 289/289/258/251/205 B（net80211 の暗号、phy 較正、efuse）
+```
+**この大半は「機能」**（I2C / UART / RMT / HTTP / I2S / ADC / WiFi / SD / 日本語入力）で、消すなら
+機能を捨てる判断になる。**余剰として落とせるのは CA 束（69,730 B、スタブ実測で bin −70,624 B）と
+`remainder` 402 B だけ**で、残りは我々の書き換えでは減らない。
+
+逆に「落ちない」と判定された例（理由だけ見ると我々だけに見える）:
+`libfatfs.a(ff.c.obj)` 6,863 B（`vfs_fat.c.obj` が `f_open` / `f_read` を要求）、
+`libfreertos.a(tasks.c.obj)` 9,694 B（IDF が `pcTaskGetName` 等を要求）、
+`libhttp_parser.a(http_parser.c.obj)` 10,640 B、`libmbedtls.a(ssl_tls.c.obj)` 8,152 B。
+
 ## 5. 参照元の広がり（inclusion 節の全数）
 
 「我々を参照元に含む会員」は 137、そのうち **137 すべてが我々だけを参照元にしている**。
