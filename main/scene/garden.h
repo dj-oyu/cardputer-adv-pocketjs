@@ -1,4 +1,6 @@
 #pragma once
+// The decor loop's group width in pixels; see the note at its definition in garden.c.
+extern int g_garden_decor_group;
 #include "../pocket/random_stream.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -410,3 +412,9 @@ extern int g_garden_scalar_tweaks;
 // The canopy blend on the PIE unit (scene/canopy_pie.c) instead of the scalar
 // statement in garden_canopy_row: 1 = the kernel, 0 = the scalar statement.
 extern int g_garden_canopy_pie;
+// The decor mix on the PIE unit (scene/garden_decor_pie.c) instead of the scalar
+// statement in garden_decor_row: 1 = the kernel, 0 = the scalar statement. The
+// kernel only takes a full group of eight pixels from a 16-byte-aligned pointer,
+// so every other group (clipped, tail, unaligned, or a narrower
+// g_garden_decor_group) is scalar in both arms -- the switch is the mix alone.
+extern int g_garden_decor_pie;
