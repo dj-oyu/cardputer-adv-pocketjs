@@ -703,6 +703,35 @@ SELFTEST/YIELD/LAZY_INPUTS=y、FAIR=n、app2,160,160B、DIRAM123,356B、Flash Co
 
 **検証（最終状態）**: コーパス8変種全合格（71件。alloca は skip 2）、Test262 asan/o2 とも 7,501 pass・regressions 0、`budget_probe.sh o2` 11/11、`oom_canary_probe.sh` asan/o2 とも 5/5、`known/oom_backtrace_uaf.js` は asan で UAF なし。実機 `build_uaf`: smoke 20周・故障回復6種。
 
+### 4.22 上流の memory-safety 修正の追加移植と棚卸し（2026-09-16、`vm/l2-memory-safety`）
+
+v0.14.0（`3c051980ab`）以降に上流へ入った use-after-free / double free / OOM 系の修正を読み、こちらの該当箇所を確認した。上流1コミット＝こちら1コミットで移植している。
+
+| 上流 | 内容 | 判定 | こちら |
+| --- | --- | --- | --- |
+| e1c1e4163e / c846cb1364 | build_backtrace の UAF / CallSite 二重解放 | 移植済み | §4.21（`49edcc4`・`780cd25`） |
+| d98ff101c6 | `.length` を伸ばした fast array への push | 移植 | `8af66ab`。回帰 `array_push_length_hole.js`: 修正前は `hasOwnProperty(1)` が真、`Object.keys` に穴が出る（o2 では未初期化スロットに `3` が見えた）。ASan は未初期化読みなので検出しない。修正後は正しい |
+| 49131a6315 | Promise.withResolvers の OOM 時二重解放 | 移植 | `0a869c7`。回帰 `oom_with_resolvers.js`（`--fail-alloc 1370`、1250〜1400 を修正前 ASan で掃引し 1370/1371 が該当）: 修正前は asan/recur/flat で UAF、修正後は捕捉 |
+| 776d724cfa | resolving functions 生成時 OOM の UAF | 不要 | `js_create_resolving_functions` は独自修正（失敗時に [0] を解放して UNDEFINED にする）で同等。async 関数・async generator 側の3つの呼び出し元（`js_async_function_settle_core` 23293、`js_async_generator_await` 23552、`js_async_generator_completed_return` 23647）は、失敗時に `resolving_funcs` を解放しない |
+| 7955cfd49e | 中断中コルーチンの closure 経由 UAF | 分析のみ | 上流テスト3本が asan / recur / flat / alloca の全変種で UAF を再現。移植設計とリスクは backlog #13 |
+| 4369dd6488 | detach 済み ArrayBuffer の二重解放 | 不要 | ファイナライザは detach 後 `free_func(NULL)` を呼ぶだけ。ファームは free_func に NULL を渡している（`ui_qjs.c:770`） |
+| 396e1e0b4f | JS_FreeCStringUTF16 と slice 文字列 | 不要 | ファームから使っていない API |
+| 05b2db95d9 / d0c2272126 | (Async)DisposableStack の UAF | 該当なし | 機能自体がない |
+| a65377157e ほか5件、ef7a3a748b | 整数オーバーフロー、循環 re-export | 記録のみ | backlog #14 |
+
+リーク系の修正（9b58030f60 など）は範囲外。
+
+**7955cfd49e の分析（移植前、別モデルの敵対的レビュー済み）**:
+- **機構**: closure がコルーチンのローカルを捕捉した open var_ref は GC オブジェクトではない。holder の mark（`js_bytecode_function_mark`、オブジェクトの VARREF プロパティ、`js_mapped_arguments_mark`）も detached しか辿らない。そのため closure → コルーチンの辺が cycle collector から見えず、中断中コルーチンが生存中に回収される。
+- **L2 との関係**: フレームは移動しない（`stack_frame`/`pvalue` の書き込みは `get_var_ref` と `close_var_ref` だけ）。async 関数のフレームは flat 経路でもヒープ埋め込み（22112）。中断中の SEG フレームは `js_vm_mark_suspended` が context の子として mark するので、この修正の対象外で、穴もない。穴は L2 前からのもの。
+- **移植設計**: JSStackFrame に上流の `cur_gc_obj` ポインタを足すと 48→52B で、`sizeof(JSAsyncFunctionData)==104` のアサートが壊れ、全 JS フレームも +4B になる。代わりに空きバイト（offset 38、全変種で空きを確認）に `coro_kind` を置き、所有者は container_of で求める。generator 用に `JSGeneratorData` へ逆ポインタを足す。`is_coro` は JSVarRef の open 側 union のパディングに置く（上流の新しいヘッダ配置は前提にできない）。
+- **壊しうる不変条件**:
+  - 上の2つのサイズ（アサートを新設する）。
+  - `mark_children(VAR_REF)` の `assert(is_detached)`（7599）を緩める。
+  - `gc_obj_list` の一貫性。
+  - **再入**: `close_var_refs` で所有者の参照カウントが0になり、同じフレームへ再入しうる。L2c の Discard に固有ではなく、通常完了（`async_func_free` 22952）でも起きる。ガードは `close_var_ref` 自体に置き、22952 と 22556 の両方の呼び出しに効かせる（レビューで訂正）。
+  - 毎中断GC・force-yield・asan-tco との組み合わせ。
+
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 
 ### 5.1 実機のフレーム使用量（実測(device)、プローブビルド、hello他6本を各4秒走行）
