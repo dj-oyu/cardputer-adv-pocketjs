@@ -8466,7 +8466,7 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
                             int line_num, int col_num, int backtrace_flags)
 {
     JSStackFrame *sf, *sf_start;
-    JSValue stack, prepare, saved_exception;
+    JSValue stack, prepare, saved_exception, error_obj;
     DynBuf dbuf;
     const char *func_name_str;
     const char *str1;
@@ -8484,6 +8484,16 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
         return;
     }
     rt->in_build_stack_trace = true;
+    /* PocketJS: backport of quickjs-ng e1c1e416 ("heap-use-after-free in
+     * build_backtrace when dbuf OOM frees current_exception", upstream
+     * #1469; docs/vm/backlog.md #6). Callers pass rt->current_exception as a
+     * BORROWED error_val. Any allocation that fails below goes through
+     * JS_ThrowOutOfMemory -> JS_Throw, which frees rt->current_exception --
+     * on the unwinding path the only reference to that object -- and the
+     * tail then read the freed
+     * object in can_add_backtrace() and JS_DefinePropertyValue(). Holding our
+     * own reference keeps it alive until the end of this function. */
+    error_obj = js_dup(error_val);
 
     // Save exception because conversion to double may fail.
     saved_exception = JS_GetException(ctx);
@@ -8639,7 +8649,7 @@ done:
             JS_FreeValue(ctx, csd[k].func_name);
         }
         JSValueConst args[] = {
-            error_val,
+            error_obj,
             stack,
         };
         JSValue stack2 = JS_Call(ctx, prepare, ctx->error_ctor, countof(args), args);
@@ -8663,13 +8673,14 @@ done:
     if (JS_IsUndefined(ctx->error_back_trace)) {
         ctx->error_back_trace = js_dup(stack);
     }
-    if (has_filter_func || can_add_backtrace(error_val)) {
-        JS_DefinePropertyValue(ctx, error_val, JS_ATOM_stack, stack,
+    if (has_filter_func || can_add_backtrace(error_obj)) {
+        JS_DefinePropertyValue(ctx, error_obj, JS_ATOM_stack, stack,
                                JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     } else {
         JS_FreeValue(ctx, stack);
     }
 
+    JS_FreeValue(ctx, error_obj);
     rt->in_build_stack_trace = false;
 }
 
