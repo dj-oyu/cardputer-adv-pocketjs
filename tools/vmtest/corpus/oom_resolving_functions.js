@@ -1,4 +1,4 @@
-// vmrun-flags: --fail-alloc 1353
+// vmrun-flags: --fail-alloc 1352
 // Regression for the resolving-functions double-free (reports/upstream/
 // quickjs-ng-resolving-functions-double-free.md). js_create_resolving_
 // functions() used to leave a dangling value in resolving_funcs[0] when the
@@ -19,7 +19,7 @@
 // deep_async_recursion). A plain `f()` here would go flat and miss the
 // js_async_function_call path entirely on the shipped config.
 //
-// --fail-alloc 1353 targets the js_malloc(sizeof(JSPromiseFunctionData))
+// --fail-alloc 1352 targets the js_malloc(sizeof(JSPromiseFunctionData))
 // call for the SECOND (reject) resolving function inside
 // js_create_resolving_functions, reached from JS_NewPromiseCapability inside
 // js_async_function_call. Like every --fail-alloc corpus case, this attempt
@@ -30,6 +30,12 @@
 // mismatched failure site, the number needs to be relocated by instrumenting
 // js_create_resolving_functions's attempt count before it -- do not just move
 // the number until something fails.
+//
+// Relocated 1353 -> 1352 with backlog #9 (guest usable size = tlsf block
+// length: the allocation sequence before it is one attempt shorter), by the
+// instrumentation described above. The -alloca builds number it 1351 (and
+// numbered it 1352 before the relocation too), so there this case exercises
+// a neighbouring allocation, as it already did.
 //
 // Blessed on asan-recur AND checked to match under the default (flatcalls)
 // variant: the whole point of the fix is that the failure is caught the same
