@@ -21,7 +21,7 @@ idf.py -B build_api -p COM3 monitor
 
 `idf.py -B <dir> size` / `size-files` / `size-components` がサイズ計測の入口。`tools/check_flash.py` がSKK辞書・フォント領域の侵食をビルド時に止める。
 
-初回セットアップ: `python tools/prepare_dependencies.py`（PocketJS上流を固定revisionで取得）、`tools/build_native.sh`（WSLでS3用Rustアーカイブをビルド）。
+初回セットアップ: `python tools/prepare_dependencies.py`（BMI270・libopus・minimp3を固定revisionで取得）。Rust UIアーカイブとPocketJS上流のcheckoutは不要（旧UI経路は削除済み）。
 
 ## 実機テスト
 
@@ -49,8 +49,7 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/bui
 python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
 python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで模擬実行しスカラーと全画素比較
 python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
-wsl -e bash -lc "cd tools/uibudget && cargo run --release --bin sweep"    # レイアウト確保の段差
-wsl -e bash -lc "cd tools/uibudget && cargo run --release --bin screen 9 3"  # この画面は載るか
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_lessons_test.sh && /tmp/test-lessons"   # TUTORIALの全章とPlaygroundの既定ソースを実物のQuickJSとpocket.kasaneで実行（WSLのみ）
 python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
 python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
 ```
@@ -67,7 +66,7 @@ python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --chec
 
 **描画タスクは1つ、JSアプリは同時に1つ。** `main/main.c` の `ui_task` が全画面を回す。画面は `SCREENS[]` の記述子テーブル（`open` / `key` / `dirty` / `draw` / `wants_run` / `ended` / `frame_ms` / `takes_text`）で、ループ側が取り込み・再描画判定・フレーム配分を一度だけ行う。画面を足すときは分岐ではなく行を足す。
 
-`main/app_session.c` がJSセッションのすべてを所有する。`app_start_test()` がゲスト生成 → `pocketjs_guest_quickjs_install_once()` で各ネイティブ面を注入 → UIコア・バインディング・レンダラ生成、の順に組み立て、`app_stop()` が逆順に壊す。`app_tick()` が毎フレーム `pocket_*_pump()` を呼んでからゲストの `frame()` を回す。**ゲストのコールバックを保持するモジュールは、ゲストが死ぬ前に `app_stop()` から reset される必要がある。**
+`main/app_session.c` がJSセッションのすべてを所有する。`app_start_test()` がゲスト生成 → `pocketjs_guest_quickjs_install_once()` で各ネイティブ面を注入 → ソース評価、の順に組み立て、`app_stop()` が逆順に壊す。`app_tick()` が毎フレーム `pocket_*_pump()` を呼んでからゲストの `frame()` を回し、描画は `pocket.kasane`（`main/ui/kasane/`）が提出したものを `present_frame()` が転送する。旧 `ui.*`（Rust UIコア・Taffy・rgb565レンダラ）はファームから削除済みで、それを呼ぶ保存済みプログラムは起動前に `APP_LEGACY_UI` で断る。**ゲストのコールバックを保持するモジュールは、ゲストが死ぬ前に `app_stop()` から reset される必要がある。**
 
 `main/hal/board.c` がLCD・キーボード・I2Cバスを所有し、`board_present()` が唯一の転送口。描画用のストリップバッファは firmware 全体で1本（`board_strip()`）。転送は非同期で、`board_present()` がバイトスワップしながら転送用バッファ2本（`tx_buf`、1本が送信中のあいだにもう1本へ書く）へ写して queue し、前のストリップの結果を次の呼び出しで回収する。コマンドを送る前には必ず回収する（RAMWRセッションを終わらせるため）。
 
@@ -75,7 +74,7 @@ python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --chec
 
 **共通JS API `pocket.*`** は `docs/api/common-api.md` の実装。`main/pocket/pocket_api.c` が土台（capability登録、`PocketError`、cancelトークン、購読テーブル、Promise完了テーブル、遅延名前空間、`pocket_api_pump()`）で、`pocket_imu.c` / `pocket_av.c` / `pocket_storage.c` などが各面を載せる。**名前空間はアプリが最初に読んだときに構築される**（`pocket_api_lazy()`）。`capabilities` と `apiVersion` だけが eager で、feature-test が何も構築しないことを構造的に保証している。**新しい面は `pocket_api_register()` で capability を差し替えるだけで、`pocket_api.c` を編集しない。** 購読簿記・`settled()`/`reject()`・非同期完了は土台側にあるので、面の側で書き直さない。
 
-`capability.supported` は「このファームが `pocket.*` の面を実装している」の意味。レガシーの `ui.createNode` があることを理由に true にしない（feature-testを通したアプリが `UNSUPPORTED` ではなく `TypeError` を食う）。`limits` に出す値は**コードで実際に強制している値だけ**。
+`capability.supported` は「このファームが `pocket.*` の面を実装している」の意味。実装の無い面を true にしない（feature-testを通したアプリが `UNSUPPORTED` ではなく `TypeError` を食う）。`ui.basic` は実装が無いので false。`limits` に出す値は**コードで実際に強制している値だけ**。
 
 `main/scene/solar_time.c` が天体計算の時刻源で、`solar_time_set_synchronized(true)` はSNTP成功時にのみ呼ばれる。`false` はどこからも呼ばない（一度合った時計は同期失敗後も正しい）。タイムゾーン変換はこの層に足さない。
 
@@ -85,8 +84,7 @@ JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EM
 
 - **PSRAMなし、DRAMは約334KiB。** ホーム画面の空きヒープは実測274KiB（`idle_free=280,932`、Wi-Fiリンク後）。静的DIRAMを197,847→111,383Bまで削った結果で、**この数字は削減のたびに動くので `tools/memlog.py --port --check` の実測を見ること。** JSゲストの上限は160KiB（`main/app_session.c` の `heap_limit`。128→144→160KiB と上げてきた） — 128KiBだった頃、ネイティブAPIの `.bss` が増えてアプリが解析すら通らなくなった（システムには59KiBの空きがあった）。**capabilityを足すたびにゲストの部屋が減る。** 増減の記録は `tools/memlog.py` が持つ。
 - **ゲストは起動時にJSソースを解析するので、ソースのバイト数がヒープを食う。** 実測で6.5KBのアプリはゲスト107KiB、7.6KBは評価に失敗する。アプリのコメントは短く、理由は隣の `README.md` へ。
-- **Rust UIコアはメモリ不足を報告せずパニックして再起動する。** `ui.setText` が引き起こすフォントアトラス再構築が小さなアプリの最大の単発確保。
-- **レイアウトが要求する単一連続ブロックは taffy ノード数で段階的に跳ねる。** taffyノード = ルート + 木に繋がっている**全View** + 本文が空でないText。空になるのは `NodeType::Text` のときだけで（`layout.rs:256`）、Viewは無条件に `new_with_children` へ入る。**テキストだけ数えると足りない。****16以下 → 2,048B / 17〜33 → 29,648B / 34以上 → 59,296B。** **この段差に対する余裕は測り直しが要る。** 23.5KiBという数字が長く書かれていて、それを根拠に「34ノード以上は到達不能」と結論していたが、`memlog.py --port --check` の実測は **70KiB台**（2026-09-08に73,728、機能を足した2026-09-09に71,680）で、59,296Bの段も入る。静的DIRAMを86KiB削った結果なので、古い数字は単に現状と合っていない。**この値をここに正確な数字として書かない** — capabilityを足すたびに動くので、書いた瞬間から古くなり、しかも古いことに誰も気づかない。段に対して余裕があるかを知りたいなら `memlog.py --port --check` を走らせること。ここにあるのは桁の目安で、判断の根拠ではない。**到達不能だったのは事実で、今も不能かは未検証** — どちらも主張する前に測ること。段を跨いで確保に失敗すればRust側はメモリ不足を報告せずabortするので、失敗の仕方だけは変わらない。`pocket_ui.c` は空ランを区別せず多めに数えるので、崖の手前で断る側に倒れている。`tools/uibudget/` で焼く前に確認できる（`cargo run --release --bin screen 9 3` が実機の失敗をそのまま再現する）。
+- **Rust UIコアとTaffyレイアウトはファームから削除した（2026-09-17）。** 以前ここにあった「Rust UIコアはメモリ不足を報告せずパニックする」「taffyノード数で連続ブロックが段階的に跳ねる」という制約は、その経路と一緒に無くなった。
 - **`main/hal/keymap.c` は素の `` ` `` `;` `,` `.` `/` に `nav` を立てる。** テキストを受ける画面は `k->text` だけを読み `k->nav` を無視する（`codeedit.c` / `editor.c` / `wifi_ui.c` がそうしている）。
 - **命令キャッシュのアラインメントで、同じカーネルがビルド間で15%動く。** それ未満の差を主張するなら同一バイナリでの比較が要る。
 - **`board_capture` は byte swap と転送の前にバッファを写し、MISOは未配線。** 表示が正しいことをソフトウェアだけでは確認できない。物理確認を依頼する。

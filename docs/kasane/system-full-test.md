@@ -1,7 +1,7 @@
 # Kasaneフルシステム受入試験
 
 入口は`tools/system_full_test.py`。System managerとKasaneを、Taffyなしのfirmwareとして
-hostから実機まで検証する。通常のlegacy混在buildはこのsuiteに含めない。
+hostから実機まで検証する。旧UI経路とTaffyは2026-09-17にファームから削除したので、対象は通常buildそのもの。
 
 ## 実行
 
@@ -30,11 +30,11 @@ python tools/system_full_test.py --out .cache/system-full-run `
 | System host | clock/power、独立dirty/poll、通知8+1、timer満杯再試行、壁時計/snooze/鳴動期限、時刻巻戻し、tick換算、JS powerの寿命。ASan/UBSanとO2 |
 | Kasane native | 合成・透明・gradient・画像・cache・modal・animation・SYSTEM重なり・IO失敗/修復・quota・PIE/scalar一致・ヘッダ互換 |
 | Kasane JS | 実QuickJS経由のAPI、確保失敗、APP/SYSTEM寿命、解放。ASan/UBSanとO2 |
-| firmware | `KSN_ONLY=ON`、legacy sourceを存在しない場所に指定してbuild。PSRAMなし・native probeあり |
+| firmware | 通常構成でbuild（`KSN_ONLY`は削除済み）。PSRAMなし・native probeあり |
 | Taffy排除 | component graph、map、ninja、compile commands、ELF symbolsにTaffy/旧UIがないこと。失敗したらflashしない |
 | 実機animation | 300 tickの変化、画像変形、modal→APP復帰、power初期配送、複数計測窓 |
 | 実機System | 動くAPP上の通知、満杯snooze拒否、ACK後timer再試行、snooze、消去、SYSTEM命令数とcapture |
-| 実機lifetime | 未移行APPの拒否、Kasane共通サービス、入力release、既定100回の終了時JS=0とheap/最大連続領域の非劣化（許容256 B） |
+| 実機lifetime | IMU calibrationの起動（`APP_ID local.imucal`）、Kasane共通サービス、入力release、既定100回の終了時JS=0とheap/最大連続領域の非劣化（許容256 B） |
 
 全段階成功時だけ`FULL_PASS`。途中失敗は即終了し、後続段階を成功として埋めない。
 flash後は失敗時もprobe回収とHOME復帰を試み、cleanup失敗も失敗として記録する。

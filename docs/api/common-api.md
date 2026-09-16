@@ -52,7 +52,7 @@ Docs・チュートリアル自身を直ちにJS化する必要はない。ネ�
 
 ## 2. 公開面・互換性・機能検出
 
-公開ルートは読み取り専用の `globalThis.pocket`。内部の `ui.setProp(id, 97, ...)` や `__pjs_*` を教材の安定APIにしない。DOM、Node.js、ブラウザーfetch、Web Bluetooth互換を名乗らない。
+公開ルートは読み取り専用の `globalThis.pocket`。`__pjs_*` を教材の安定APIにしない（旧 `ui.setProp` などの `ui.*` はファームから削除済み）。DOM、Node.js、ブラウザーfetch、Web Bluetooth互換を名乗らない。
 
 ```ts
 pocket.apiVersion: string;                    // 例 "0.1.0"
@@ -80,7 +80,7 @@ type DeviceInfo = {
 
 availableは予約ではなく観測値。確認直後に資源が変わり得るため、open/acquireの結果が最終判断となる。認可状態は別であり、available=trueだけでは利用権を得ない。limitsはそのビルドのハード上限、取得ハンドルは実際に割り当てられた値を返す。
 
-版0.xでは破壊的変更をminor版で明示する。アプリ登録情報に対応APIの範囲を持ち、不適合なら起動前に表示する。既存アプリは `legacy-pocketjs` 実行モードのまま維持し、共通APIを使う `pocket-app` へ明示的に移行する。同一アプリ内でlegacy frameと新しいフレーム登録を併用しない。
+版0.xでは破壊的変更をminor版で明示する。アプリ登録情報に対応APIの範囲を持ち、不適合なら起動前に表示する。旧 `legacy-pocketjs` 実行モード（`ui.createNode` などの `ui.*`、Rust UIコアとTaffyレイアウト）は、全アプリの移行後にファームから削除した（2026-09-17）。全アプリが `pocket-app` で、描画は `pocket.kasane`（[Kasane利用API](../kasane/design-api.md)）。旧APIを呼ぶ保存済みプログラムは変換せず、起動前に「旧API(ui.*)のため実行できません」と表示してログに `APP_LEGACY_UI` を出し、実行しない。
 
 ## 3. アプリ登録と権限
 
@@ -93,7 +93,7 @@ availableは予約ではなく観測値。確認直後に資源が変わり得�
   "entry": "main.js",
   "runtime": "pocket-app",
   "api": ">=0.1.0 <0.2.0",
-  "required": ["ui.basic", "storage.kv"],
+  "required": ["storage.kv"],
   "optional": ["sensors.imu", "audio.tone"],
   "access": {"storage": "self", "sensors": ["imu"], "audio": ["tone"]}
 }
@@ -254,6 +254,8 @@ startはソース評価中に1回登録する。新ランタイムではglobalTh
 イベント／completion用の制御領域は一般データキューと分け、Promise完了や停止通知を黙って落とさない。センサーの最新値は統合できるが、入力・通信の欠落はカウンターとoverflow状態で通知する。入力overflow時はheld状態をリセットして古いイベントを破棄する。
 
 ## 6. UI・画面遷移・入力
+
+**`pocket.ui`（capability `ui.basic`）は実装していない。** 下の `pocket.ui.*` は当初案で、旧UIコアの上に載せた実装（`pocket_ui.c`）は旧UI経路とともに削除した。`capabilities.get("ui.basic")` は supported=false を返す。画面の描画は `pocket.kasane` を使う。入力（`pocket.input.*`）とTextSessionは実装済みで、TextSessionの編集欄はKasaneが描いた帯へホストが合成する。
 
 ```ts
 pocket.ui.screen({background: number}): Screen;
@@ -984,7 +986,7 @@ p.app.start({
 
 ## 17. 受け入れ条件
 
-1. 旧Hello Worldがlegacyで動き、新API版が同じ表示・操作を行える。数値prop IDをアプリが書かずに済む。
+1. 旧Hello Worldがlegacyで動き、新API版が同じ表示・操作を行える。数値prop IDをアプリが書かずに済む。（legacy実行モード削除により、新API版＝Kasane版のみが対象）
 2. 起動・終了100回、途中終了、I/O待ち中ForceStop、例外、Promise連鎖の後にホームへ復帰し、資源・購読・Wi-Fi参照数が増え続けない。
 3. 終了後のI/O完了、BLE通知、IME確定が次のアプリに届かない。キュー満杯時に完了Promiseが消失しない。
 4. 保存失敗で未保存状態を維持し、空文書を保持する。二面の片側破損→復旧→次回保存の電源断でも正常版を残す。
