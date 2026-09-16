@@ -504,8 +504,8 @@ static void print_external_tail(const vmalloc_backend_t *be, const run_result_t 
          r->peak_external_frag, r->min_pool_largest, r->app_ext_frag, r->app_min_pool_largest);
 }
 
-static unsigned long series_sum(const u32series_t *s) {
-  unsigned long t = 0;
+static unsigned long long series_sum(const u32series_t *s) {
+  unsigned long long t = 0; // x100 below would wrap a 32-bit long on a -m32 build
   for (size_t i = 0; i < s->n; i++) t += s->v[i];
   return t;
 }
@@ -513,10 +513,10 @@ static unsigned long series_sum(const u32series_t *s) {
 // Appended for every backend so 08-slab-study.md compares them on one row
 // format. Means are x100 integers (pctl() sorts in place; sums do not care).
 static void print_study_tail(const vmalloc_backend_t *be, run_result_t *r) {
-  unsigned long ms = series_sum(&r->malloc_steps), fs = series_sum(&r->free_steps);
-  printf(" malloc_steps_mean_x100=%lu free_steps_max=%u free_steps_mean_x100=%lu realloc_calls=%lu realloc_in_place=%lu",
-         r->malloc_steps.n ? ms * 100 / r->malloc_steps.n : 0, pctl(&r->free_steps, 1.0),
-         r->free_steps.n ? fs * 100 / r->free_steps.n : 0, r->realloc_calls, r->realloc_in_place);
+  unsigned long long ms = series_sum(&r->malloc_steps), fs = series_sum(&r->free_steps);
+  printf(" malloc_steps_mean_x100=%llu free_steps_max=%u free_steps_mean_x100=%llu realloc_calls=%lu realloc_in_place=%lu",
+         r->malloc_steps.n ? ms * 100 / r->malloc_steps.n : 0ULL, pctl(&r->free_steps, 1.0),
+         r->free_steps.n ? fs * 100 / r->free_steps.n : 0ULL, r->realloc_calls, r->realloc_in_place);
   printf(" realloc_grows=%lu", r->realloc_grows);
   if (be->usable_size)
     printf(" realloc_covered=%lu realloc_grow_covered=%lu app_usable_waste=%zu", r->realloc_covered,

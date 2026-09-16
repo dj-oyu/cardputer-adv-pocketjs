@@ -109,7 +109,9 @@ extern "C" {
 
 #define JS_VM_SEG_ALIGN 16
 
-#if defined(ESP_PLATFORM)
+// A 32-bit host (tools/vmtest/m32_sysroot.sh) takes the device's value: its
+// frame link is one 4-byte pointer, and 8 would fail the assert below.
+#if defined(ESP_PLATFORM) || UINTPTR_MAX == 0xFFFFFFFFu
 #define JS_VM_FRAME_ALIGN 4
 #else
 #define JS_VM_FRAME_ALIGN 8

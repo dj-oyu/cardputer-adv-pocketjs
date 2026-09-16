@@ -68,10 +68,12 @@ def main():
     ap.add_argument('--bisect-limit', type=int, default=1_500_000,
                     help='skip --bisect for traces with more lines than this (it replays ~30 times)')
     ap.add_argument('--binary', default='o2', help="replay variant: o2 (numbers) or asan (sanitizer pass)")
+    ap.add_argument('--binary-dir', default='.cache/vmalloc',
+                    help='where vmalloc_replay-* lives; .cache/vmalloc32 for the -m32 build (08 sec.9)')
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('traces', type=Path, nargs='+')
     a = ap.parse_args()
-    binary = ROOT / f'.cache/vmalloc/vmalloc_replay-{a.binary}'
+    binary = ROOT / a.binary_dir / f'vmalloc_replay-{a.binary}'
     variants = a.variants.split(',')
     traces = [t for t in a.traces if not t.name.startswith('bench_')]
     lines = {t: sum(1 for _ in open(t)) for t in traces}

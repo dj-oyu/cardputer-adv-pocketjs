@@ -3,7 +3,7 @@
 # WSL only (no gcc on Windows), same as tools/vmtest/build.sh.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-OUT=../../.cache/vmalloc
+OUT=${VMALLOC_OUT:-../../.cache/vmalloc}
 mkdir -p "$OUT"
 
 SRCS=(replay.c adapter_tlsf.c adapter_estalloc.c adapter_naive.c adapter_segment.c adapter_slab.c
@@ -12,15 +12,18 @@ INCLUDES=(-I. -Ivendor/include -Ivendor -Ivendor/tlsf -Ivendor/tlsf/include -Ive
 # VMALLOC_TLSF_ALIGN_LOG2=3 (8-byte stride): see the VMALLOC PATCH comment in
 # vendor/tlsf/tlsf_control_functions.h for why this host build cannot use
 # the stock 4-byte stride (ALIGN_SIZE_LOG2=2, the device's actual value).
-DEFS=(-DVMALLOC_TLSF_ALIGN_LOG2=3)
+# A -m32 build (VMALLOC_CFLAGS from tools/vmtest/m32_sysroot.sh) sets
+# VMALLOC_TLSF_ALIGN_LOG2=2: 4-byte pointers, the device's stock stride.
+DEFS=(-DVMALLOC_TLSF_ALIGN_LOG2=${VMALLOC_TLSF_ALIGN_LOG2:-3})
+EXTRA=(${VMALLOC_CFLAGS:-})
 
 echo "building vmalloc_replay-asan (ASan+UBSan)"
-gcc -std=gnu11 -O1 -g -Wall -Wextra "${DEFS[@]}" "${INCLUDES[@]}" \
+gcc -std=gnu11 -O1 -g -Wall -Wextra "${EXTRA[@]}" "${DEFS[@]}" "${INCLUDES[@]}" \
     -fsanitize=address,undefined -fno-omit-frame-pointer \
     "${SRCS[@]}" -o "$OUT/vmalloc_replay-asan"
 
 echo "building vmalloc_replay-o2"
-gcc -std=gnu11 -O2 -Wall -Wextra "${DEFS[@]}" "${INCLUDES[@]}" \
+gcc -std=gnu11 -O2 -Wall -Wextra "${EXTRA[@]}" "${DEFS[@]}" "${INCLUDES[@]}" \
     "${SRCS[@]}" -o "$OUT/vmalloc_replay-o2"
 
 echo "done: $OUT/vmalloc_replay-{asan,o2}"
