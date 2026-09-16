@@ -664,6 +664,9 @@ source_ready:;
                                     JS_NewCFunction(ctx,vm_finite_done,"vmFiniteDone",2));
         JS_FreeValue(ctx,global);
         if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
+#ifdef CONFIG_POCKET_VM_YIELD
+        pocketjs_guest_trace_frame(guest);
+#endif
     }
     if(test=='Y'||test=='Z') {
         pocket_storage_set_owner("vm.back.selftest.20260916");

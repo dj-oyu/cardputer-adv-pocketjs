@@ -603,6 +603,24 @@ app2,159,920B、DIRAM123,356B、Flash Code1,567,728B。
 互換側の検証後も元appを書込hash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認した。
 復元後ログ`finite-compat-restored-smoke.log`。閾値と通常設定は変更していない。
 
+### 4.18 完走frameの累積時間（2026-09-16、互換順序）
+
+SELFTEST/YIELD限定で、指定した次のframeがJS_VMCallまたはJS_VMResumeから戻った際、
+既存の累積`frame_us`を消去する前に一度だけ記録する口を追加。
+`device_finite_frame.py --timing`は総和ログだけで終了せず、正常復帰マーカーとその順序も検査する。
+ホスト検査5件成功。通常ビルドにはフラグ・分岐・ログを追加しない。
+
+実測image SHA256 `66955a6a59910cfddb4cdce7c1b37a3615abc0b484582ae9c920631049838d22`。
+SELFTEST/YIELD/LAZY_INPUTS=y、FAIR=n、app2,160,160B、DIRAM123,356B、Flash Code1,567,908B。
+1回の採取で2万回は総和199,990,000・累積103,575µs、4万回は総和799,980,000・累積206,034µsで正常復帰。
+10万回は累積257,136µsでframeガード停止。ログ`.cache/vmtest/finite-timing-compat.log`。
+4万回は250,000µsまで43,966µsの差があったが、1標本であり安全余裕の下限とは扱わない。
+値はpark中のホスト待機を除く累積壁時計時間で、プリエンプションとnative完了ログの費用を含む。
+`VM_FRAME_COMPLETE`自身のログ出力は計時後。音声・ネットワーク競合を制御した測定ではない。
+候補のsmoke3周・故障回復6種成功（`finite-timing-smoke.log`）。閾値と通常設定は未変更。
+元appをhash一致で復元後もsmoke3周・故障回復6種・HOME_READYを確認
+（`finite-timing-restored-smoke.log`）。競合・閾値近傍・総合関所は引き続き未完了。
+
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 
 ### 5.1 実機のフレーム使用量（実測(device)、プローブビルド、hello他6本を各4秒走行）

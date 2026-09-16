@@ -77,6 +77,11 @@ bool pocketjs_guest_suspended(const pocketjs_guest_t *guest);
 bool pocketjs_guest_work_pending(const pocketjs_guest_t *guest);
 /** Accumulated time inside the current parked frame call, not host waits. */
 int64_t pocketjs_guest_frame_total(const pocketjs_guest_t *guest);
+#if defined(CONFIG_POCKET_VM_SELFTEST) && defined(CONFIG_POCKET_VM_YIELD)
+/** Log the next completed frame's accumulated call time, excluding host waits.
+ * Includes preemption and native calls; not a CPU-time measurement. */
+void pocketjs_guest_trace_frame(pocketjs_guest_t *guest);
+#endif
 /** Stop the yield producer first. Close a parked chain without catch/finally
  * before entering a shutdown hook; queued jobs remain queued. */
 void pocketjs_guest_prepare_stop(pocketjs_guest_t *guest);
