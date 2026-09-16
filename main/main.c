@@ -171,6 +171,9 @@ static atomic_int diagnostic;
 extern void vmtest_callbench_device(void);
 extern void vmtest_callinputs_device(void);
 #endif
+#ifdef CONFIG_POCKET_FX_BENCH
+extern void fxbench_run(void);
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
 extern void vmtest_lifecycle_device(void);
 #endif
@@ -218,6 +221,14 @@ static bool usb_stroke(char c, keystroke_t *k) {
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
 #ifdef CONFIG_POCKET_VM_CALLBENCH
     if(c=='N'||c=='U') { atomic_store(&diagnostic,c); return false; }
+#endif
+#ifdef CONFIG_POCKET_FX_BENCH
+    // The per-call trig bench (main/scene/fxbench.c). 'T' because the probe's
+    // workloads already hold 'A'..'F' and 'G'..'K', the probe conditions 'P'..,
+    // the selftest 'L','M','Y','Z', and the Cardputer's own keys are lower case.
+    // Like every letter here it arrives over USB; a real 'T' keypress goes to
+    // the shell and does nothing.
+    if(c=='T') { atomic_store(&diagnostic,c); return false; }
 #endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
     if(c=='L'||c=='M'||c=='Y'||c=='Z') { atomic_store(&diagnostic,c); return false; }
@@ -864,6 +875,13 @@ static void ui_task(void *arg) {
             // Runs in place of starting a guest: it needs no app, and holding
             // 6,480 bytes of scratch is only affordable while none is running.
             if(test=='8') { sound_check_tables(); test=0; }
+#ifdef CONFIG_POCKET_FX_BENCH
+            // The trig bench is the one diagnostic that wants neither an app nor
+            // a guest nor the scratch: a couple of seconds of arithmetic on this
+            // task, holding nothing. It blocks the frame loop for that long, the
+            // same as '8' above.
+            if(test=='T') { fxbench_run(); test=0; }
+#endif
             // Returns immediately: the sweep runs on its own task, because
             // twelve seconds of it inline here is twelve seconds without a
             // frame reaching the panel. Started from here anyway, so it cannot
