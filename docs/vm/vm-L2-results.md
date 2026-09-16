@@ -34,7 +34,7 @@
 ### 1.3 修正したバグと既知の退行
 
 - **直したバグ（Test262が発見）:** pop の判定に `b->func_kind == JS_FUNC_NORMAL` を使っていたが、`JS_FUNC_ASYNC` で組まれたバイトコード関数が通常経路で呼ばれて `done_generator:` に抜ける経路があった（モジュール本体、[vm-L2-design.md](vm-L2-design.md) §10 参照）。フレームが積まれたまま残り、`JS_FreeRuntime` の表明で abort していた（`language/eval-code/direct/export.js`/`import.js`、regressions 2）。セグメントの生存範囲で判定する形に変えて解決。
-- **既知の退行（承知の上）:** `run.sh --trace`（asan）と `--vm-seg-size 2048`（o2）で `gc_threshold_device.js` が落ちる。常駐セグメントがジワジワ型OOMの「残り」を動かし、catchした後の `print` 自体がOOMする。期待値は書き換えていない。通常の `run.sh` 4バリアントでは通る。詳細は [tools/vmtest/README.md](../../tools/vmtest/README.md) の既知の脆さの節。
+- **既知の退行（承知の上）:** `run.sh --trace`（asan）と `--vm-seg-size 2048`（o2）で `gc_threshold_device.js` が落ちる。常駐セグメントがジワジワ型OOMの「残り」を動かし、catchした後の `print` 自体がOOMする。期待値は書き換えていない。通常の `run.sh` 4バリアントでは通る。詳細は [tools/vmtest/README.md](../../tools/vmtest/README.md) の既知の脆さの節。（backlog #5の修正で同ファイルはOOMしなくなり解消、§4.19）
 
 ### 1.4 未実施だった検証（実施済み分は本文書の他節、未着手分は backlog.md）
 
@@ -620,6 +620,29 @@ SELFTEST/YIELD/LAZY_INPUTS=y、FAIR=n、app2,160,160B、DIRAM123,356B、Flash Co
 候補のsmoke3周・故障回復6種成功（`finite-timing-smoke.log`）。閾値と通常設定は未変更。
 元appをhash一致で復元後もsmoke3周・故障回復6種・HOME_READYを確認
 （`finite-timing-restored-smoke.log`）。競合・閾値近傍・総合関所は引き続き未完了。
+
+### 4.19 循環ゴミのGC閾値（backlog #5、2026-09-16、`vm/l2-memory-safety`）
+
+**不具合**: quickjs-ngの`malloc_gc_threshold`は初期256 KiB、GC後は生存量×1.5。ゲスト上限160 KiBより先に来ないため、循環ゴミは一度も回収されずOOMになっていた。`js_malloc_rt`は確保失敗時にGCしない。
+
+**修正（2か所）**:
+- `quickjs.c` `js_gc_effective_threshold`: 上限があるとき、`js_trigger_gc`の比較に使う閾値を「上限−上限/32」（160 KiBで155 KiB）で頭打ちにする。保存値をGC後にクランプする案は、満杯近くで計算された値が次のGCまで残るので不採用。余白を0にする（上限−1）案も不採用: 判定はオブジェクト生成時だけで、その間のshape・プロパティ配列の確保が最後の数バイトを越える。どちらも`gc_threshold_near_limit.js`がOOMのままだった（実測(host)）。
+- `guest.c`（写しの`vmrun.c`も同じ）: `JS_SetMemoryLimit`直後に初期閾値を上限の半分（80 KiB）へ**下げる**。キャップだけでも回収は起きるが、その場合ゲストは共有DRAMを155 KiBまで使ってから回収する。下げるだけなので64 MiBのhostプロファイルは上流と同じ時機。
+- GCが走る地点は上流と同じ`JS_NewObjectFromShape`の`js_trigger_gc`だけで、確保フック内からは呼ばない。変わるのは頻度だけ。
+
+**ホスト（実測(host)、WSL、出力は/tmp）**:
+- 修正前（HEAD `8ef5b25`のコピー）: `gc_threshold_device.js`は循環262個でOOM、`gc_threshold_near_limit.js`もOOM（asan/o2とも2件FAIL）。修正後: 100,000個完走（GC 465回）、上限寄りも完走（GC 669回）。
+- コーパス8変種（asan/o2 × 無印/recur/flat/alloca）全合格（69件、allocaは既存skip 1）。Test262 asan/o2とも7,501 pass / 194 fail、regressions 0。`budget_probe.sh o2` 11/11、`oom_canary_probe.sh` o2/asan 5/5（`gc_threshold_device`はOOM例外リストから外し、oom=0を縛る側に移した）。`run.sh --trace`、`--vm-seg-size 2048`でもGC系2件は合格。
+- GCストレス: 別コピーで`FORCE_GC_AT_MALLOC`（全オブジェクト生成でGC）を有効にしたasanコーパスは68/69、残る`bench_promise`は300秒タイムアウト（exit=124）で、ASan報告・クラッシュは無し。L2a/L2b（セグメント・フラット呼び出し）下の任意のオブジェクト生成地点でのGCの安全性の傍証であり、`--force-yield`中断中の毎回GCは既存の§4.10の検査に依る。
+- 時間: o2コーパス（GC系2件を除く）の合計は修正前792〜841ms、修正後795〜804ms（各3回）で差は雑音内。**最悪ケース**: 生存量がキャップを超えた状態（OOMまで埋めて8個だけ解放）でオブジェクトを2,000個作ると、修正前0ms・修正後42ms（毎回GC）。ホスト値であり実機値ではない。
+
+**実機（実測(device)、COM3、前=`vm/main`と同一の`8ef5b25`を別worktreeでビルド、後=`build_gcthr`）**:
+- `smoke_device.py --cycles 20`: 前後ともSMOKE_OK 20・故障回復6種。
+- `memlog.py --check`: DIRAM 144,588B不変、idle_free 248,752B・app_free 139,320B・app_largest 94,208B・js 93,902Bで前後同値。Flash +76B。
+- `benchmark_app.py --samples 12`（hello、音設定は変更せず）: turn_ms 0.64→0.62、render_ms 1.55→1.54、send_ms 1.61→1.60。悪化なし。
+- 実機で循環ゴミを作るアプリは走らせておらず、実機上のGC 1回あたりの時間は未計測。
+
+**残る懸念**: 生存量が上限の31/32を超えたアプリは、オブジェクト生成のたびにGCする（上記hostの最悪ケース）。修正前はその状態から数回の確保でOOMだったが、循環ゴミを作らず上限際で長く生きるアプリは修正前より遅くなりうる。実機での該当アプリの有無とGC 1回の費用は未確認。
 
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 
