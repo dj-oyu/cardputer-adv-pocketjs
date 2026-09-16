@@ -157,10 +157,63 @@ bash tools/test_mp3.sh m44100.mp3     # MP3_OK … hash=…
 ID3v2 と Xing を切るのは必須 —— `tools/test_mp3.c` は先頭からフレームを読み、タグや
 Xing フレームに当たると `packets>0` の assert で落ちる。
 
-## 6. 測っていないこと
+## 6. builtins を誰が生かしているか — cref と 1 回の実験
 
-- サイズの候補（soft-float / libm を消したときの減少量）は**推定すらしていない**。
-  §4 の 46,381 B は「いま入っている量」であって「削れる量」ではない。
+「builtins を減らせるか」は、リンカの相互参照表（`map` の Cross Reference Table）と、
+**我々の参照だけを外したビルド 1 回**で決着する。`-Wl,--gc-sections` はリンク行に入って
+いるので、最後の参照が消えた関数のセクションは落ちる。
+
+### 6.1 参照元（cref の実測）
+
+| シンボル | サイズ | 参照元 |
+| --- | ---: | --- |
+| `pow` | 3,040 B | **`quickjs.c`** ＋ cgu.02 |
+| `cbrt` | 1,764 B | **`quickjs.c`** |
+| `hypot` | 1,231+652 B | **`quickjs.c`** |
+| `fmod` | 835 B | **`quickjs.c`**、`ocean` / `solar_sail` / `stars` / `wave`、picolibc の remainder |
+| `sinf` | 2,490 B | 我々の 7 ファイル（flower / flower_species / glass_rain / mp3_decode / solar_sail / sound / stars）＋ cgu.04 |
+| `cosf` | 2,402 B | 我々の 4 ファイル（flower / flower_species / mp3_decode / solar_sail）＋ cgu.08 |
+| `tanf` | 1,925 B | **`wave.c` だけ**（＋ cgu.10） |
+| soft-float 演算（`__muldf3` / `__divdf3` / `__adddf3` / `__divsf3` …） | — | 我々の C **＋ Rust（`pocketjs_core` / `ui_core` / `render_rgb565`）＋ IDF（pm / phy / mesh / i2s / sdmmc）＋ `quickjs.c` ＋ picolibc** |
+
+`pow` / `cbrt` / `hypot` / `fmod` は **JS の `Math.*` の意味論そのもの**（QuickJS）が保持して
+いる。soft-float も Rust・IDF・QuickJS が共有している。つまり**この 2 つは減らせない**。
+
+### 6.2 実験（我々の参照だけ外して 1 ビルド）
+
+`sinf` / `cosf` / `tanf` / `fmod` / `sqrtf` を参照している 11 ファイル
+（`main/hal/motion.c` / `sound.c`、`main/pocket/mp3_decode.c`、`main/scene/{flower,flower_species,garden,glass_rain,ocean,solar_sail,stars,wave}.c`）で
+**その 5 つを `0.0f` にマクロ上書き**して 1 回ビルドした（挙動は壊れる。サイズを測るだけの
+実験で、実装はコミットしていない）。
+
+| 何を | 基準 | スタブ後 | 差 |
+| --- | ---: | ---: | ---: |
+| `compiler_builtins` の配置済みセクション | 46,381 B（70 シンボル） | 42,042 B（67 シンボル） | **−4,339 B** |
+| うち `cosf` | 2,402 B | 0 B | **−2,402 B（消えた）** |
+| うち `tanf` | 1,925 B | 0 B | **−1,925 B（消えた）** |
+| うち `sinf` | 2,490 B | 2,490 B | **±0（残った）** |
+| picolibc の libm | 904 B | 904 B | ±0 |
+| バイナリ全体 | 2,210,576 B | 2,199,136 B | −11,440 B |
+
+**`sinf` が残った理由が結論そのもの**である: `sinf` の参照元の 1 つ cgu.04 は、我々の
+`pocket_av.c` が `__gedf2`（double の比較）を要求したために入っているメンバで、その中身が
+内部で `sinf` を呼んでいる。つまり
+
+> 落ちる条件は ①我々の最後の参照が消えること **かつ** ②まだ必要な compiler_builtins の
+> メンバが内部でその関数を呼んでいないこと の両方。
+
+`cosf` / `tanf` は両方を満たして落ち、`sinf` は ② で残った。したがって次の一手は
+**JS ブリッジ（`pocket_av` など）の double 比較を整数比較へ落とす**ことで、そこまで行けば
+`sinf` も連鎖で落ちる見込みがある（同じ理屈で、`__muldf3` / `__divdf3` を要求している側を
+1 つずつ外していくと、cgu メンバの数だけ builtins が減る）。
+
+## 7. 測っていないこと
+
+
+- サイズの候補（soft-float / libm を消したときの減少量）: §6.2 で**三角関数についてだけ**
+  1 回測った（−4,339 B）。soft-float 演算（`__muldf3` 等）を消したときに何 B 落ちるかは
+  **まだ測っていない** —— Rust・IDF・QuickJS が共有しているので、我々の側を全部外しても
+  0 B の可能性がある。§4 の 46,381 B は「いま入っている量」であって「削れる量」ではない。
 - `__divdi3` = 223 **命令**は命令数であってサイクルではない。
 - 実行頻度はコードから読んだ見込みで、実機で数えたものではない。
 - Rust 側（`libpocketjs_idf_ui_core.a`）は上流の成果物なので、本稿の対象外。
