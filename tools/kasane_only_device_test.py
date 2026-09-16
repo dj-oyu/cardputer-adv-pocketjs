@@ -45,6 +45,9 @@ with serial.Serial(a.port, 115200, timeout=0.15) as port:
         for _ in range(4):
             command(b'd', 'APP ')
         command(b'e', 'APP_ID local.imucal')
+        # Its first frame, before leaving: otherwise that marker arrives after
+        # HOME_READY and is read as the next session's.
+        wait('KASANE_FRAME_PRESENTED')
         command(b'q', 'HOME_READY')
         for i in range(a.cycles):
             boot = command(b'K', 'KASANE_FRAME_PRESENTED')
