@@ -1571,7 +1571,7 @@ static int garden_decor_arrival(const GardenDecor *d,int y,int end) {
 }
 // TEMPORARY A/B switch, and it exists because this board cannot measure a change
 // like the gate below any other way: two builds of the same function differ by up
-// to 15% from code placement (docs/pie-simd.md 3.13), and the decorative rays'
+// to 15% from code placement (docs/perf/pie-simd.md 3.13), and the decorative rays'
 // own workload varies with the scene's phase, so the only honest comparison is
 // one binary alternating the two paths inside one run. flower.c's SPLIT3 report
 // flips it once per 60-frame window and prints which way that window ran.

@@ -1,5 +1,5 @@
 // Three integer square roots for this part, read as [obj] rather than timed on
-// the host (host microseconds say nothing here: docs/pie-simd.md 3.13).
+// the host (host microseconds say nothing here: docs/perf/pie-simd.md 3.13).
 //
 //   source /opt/esp-idf/export.sh
 //   xtensa-esp32s3-elf-gcc -O2 -c tools/flower_sqrt_variants.c -o /tmp/sqrt.o
