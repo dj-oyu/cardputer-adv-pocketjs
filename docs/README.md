@@ -45,6 +45,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [kasane-alpha256.md](perf/kasane-alpha256.md) | 記録 | スカラー 565 ブレンド／パックの /255 を 255→256 の粗スケールへ（切替つき・既定は厳密。α は両アームで不変、動く画素の実測） |
 | [kasane-opt-survey.md](perf/kasane-opt-survey.md) | 調査 | 描画経路の棚卸しと候補の選別（境界ごとに「何が律速か」と却下の理由） |
 | [kasane-opt-integration.md](perf/kasane-opt-integration.md) | 記録 | 最適化分岐の統合記録（順序・衝突の解決・各段の数値・オブジェクト増減・既定値の一覧） |
+| [kasane-consolidation.md](perf/kasane-consolidation.md) | 記録 | kasane 系統の一本化の判定。12 分岐のユニーク 14 コミットは **すべて `perf/kasane-opt` に内容として入っており cherry-pick は 0 本**（`git cherry` の `+` 18 行は統合が衝突を両側残しで解いたため patch-id が一致しないだけ）。元→統合コミットの対応・切替と既定・ホスト検証（suite 71 PASS / ビルド rc=0 / bin 2,210,544 B）・削除してよい 12 枝の一覧 |
 
 作業ブランチの装飾光線コストと部分別計測は[flower-decor-cost.md](perf/flower-decor-cost.md)に保持する。
 群の合成を 1 枚のアフィン写像へ畳む候補 3c（不透明群はビット一致、非不透明への近似拡張は別段）は
