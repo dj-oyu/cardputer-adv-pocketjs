@@ -3,7 +3,6 @@
 #include "ui/kasane/ksn_runtime.h"
 #include "ui/kasane/ksn_notice.h"
 #include "pet/ksn_pet.h"
-#include "kasane_scene_js.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,14 +108,17 @@ static void ref_finalizer(JSRuntime *rt, JSValue value) {
     release_ref_handle(opaque_value(value,ref_class));
 }
 
-static const JSClassDef tx_def={.class_name="KasaneTransaction"};
-static const JSClassDef modal_def={.class_name="KasaneModalTransaction"};
-static const JSClassDef ref_def={.class_name="KasaneDrawRef",.finalizer=ref_finalizer};
-static const JSClassDef template_def={.class_name="KasaneTemplate"};
-static const JSClassDef instance_def={.class_name="KasaneInstanceRef"};
-static const JSClassDef ticket_def={.class_name="KasaneTicket"};
-static const JSClassDef image_def={.class_name="KasaneImageResource"};
-static const JSClassDef animation_def={.class_name="KasaneAnimation"};
+/* One shared class name: QuickJS interns each distinct name as an atom in the
+ * guest, and the name is only ever printed by its debug dumps. */
+#define KASANE_CLASS "Kasane"
+static const JSClassDef tx_def={.class_name=KASANE_CLASS};
+static const JSClassDef modal_def={.class_name=KASANE_CLASS};
+static const JSClassDef ref_def={.class_name=KASANE_CLASS,.finalizer=ref_finalizer};
+static const JSClassDef template_def={.class_name=KASANE_CLASS};
+static const JSClassDef instance_def={.class_name=KASANE_CLASS};
+static const JSClassDef ticket_def={.class_name=KASANE_CLASS};
+static const JSClassDef image_def={.class_name=KASANE_CLASS};
+static const JSClassDef animation_def={.class_name=KASANE_CLASS};
 
 static ref_slot *ref_from(JSContext *ctx, JSValueConst self, const char *op) {
     uint32_t handle=opaque_value(self,ref_class);
@@ -402,6 +404,12 @@ static ksn_tx tx_from(JSContext *ctx, JSValueConst value, const char *op) {
     return (ksn_tx){raw};
 }
 
+/* Built on the first wrapper that needs them rather than with the namespace:
+ * an app that never instantiates or animates keeps neither prototype, its
+ * shape, nor the method-name atoms. Defined after the method tables. */
+static bool instance_proto(JSContext *ctx);
+static bool animation_proto(JSContext *ctx);
+
 static JSValue wrap_direct(JSContext *ctx, JSClassID class_id, uint32_t handle) {
     JSValue object=JS_NewObjectClass(ctx,class_id);
     if(JS_IsException(object)) return object;
@@ -604,6 +612,7 @@ static JSValue js_tx_instantiate(JSContext *ctx, JSValueConst self, int argc,
                                 "template is closed",false,NULL);
     if(!parse_placement(ctx,argc>1?argv[1]:JS_UNDEFINED,&placement,
                         "kasane.instantiate")) return JS_EXCEPTION;
+    if(!instance_proto(ctx)) return JS_EXCEPTION;
     JSValue object=wrap_direct(ctx,instance_class,0);
     if(JS_IsException(object)) return object;
     ksn_instance instance;ksn_result result=ksn_view_instantiate(
@@ -708,6 +717,7 @@ static JSValue js_ref_animate(JSContext *ctx,JSValueConst self,int argc,JSValueC
     static const char *const repeats[]={"once","loop","ping-pong"};unsigned easing,repeat;
     if(!parse_choice(ctx,argv[1],"easing",easings,4,&easing,op)||!parse_choice(ctx,argv[1],"repeat",repeats,3,&repeat,op))return JS_EXCEPTION;
     motion.easing=(ksn_easing)easing;motion.repeat=(ksn_repeat)repeat;
+    if(!animation_proto(ctx))return JS_EXCEPTION;
     JSValue object=JS_NewObjectClass(ctx,animation_class);if(JS_IsException(object))return object;
     ksn_animation id;ksn_result result=ksn_runtime_animate(view(),tx,&motion,&id);
     if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
@@ -866,9 +876,49 @@ MUTATOR(js_modal_open,modal_class,false,"kasane.modal.open")
 MUTATOR(js_modal_close,modal_class,false,"kasane.modal.close")
 #undef MUTATOR
 
-static JSValue run_build(JSContext *ctx, int argc, JSValueConst *argv,
+/* The scene controller of createScene(), native since the guest-memory work
+ * (docs/kasane/kasane-guest-memory-reduce.md). As JS it cost each Kasane app
+ * four closures, their bytecode and source copies, a dozen var_refs and the
+ * atoms of every local name; here it is one opaque holder and two bound
+ * functions. apps/kasane/create_scene.js remains as the reference model the
+ * node tests drive, and the flush below is that file transcribed statement by
+ * statement: keep the two in step. */
+typedef struct {
+    JSValue build,patch,refs,candidate,model;
+    bool pending,pending_replace,dirty,rebuild,running;
+} kasane_scene;
+static JSClassID scene_class;
+static JSRuntime *scene_rt;
+
+static void scene_set(JSContext *ctx,JSValue *slot,JSValue value) {
+    JSValue old=*slot;*slot=value;JS_FreeValue(ctx,old);
+}
+
+/* build(tx, model) must yield a non-null, non-callable object (the candidate
+ * refs); patch(tx, refs, model) promotes the displayed refs unchanged. */
+static JSValue scene_callback(JSContext *ctx,kasane_scene *scene,JSValueConst tx,
+                              ksn_update_mode mode) {
+    if(mode==KSN_PATCH) {
+        JSValueConst args[]={tx,scene->refs,scene->model};
+        JSValue returned=JS_Call(ctx,scene->patch,JS_UNDEFINED,3,args);
+        if(!JS_IsException(returned))
+            scene_set(ctx,&scene->candidate,JS_DupValue(ctx,scene->refs));
+        return returned;
+    }
+    JSValueConst args[]={tx,scene->model};
+    JSValue returned=JS_Call(ctx,scene->build,JS_UNDEFINED,2,args);
+    if(JS_IsException(returned)) return returned;
+    scene_set(ctx,&scene->candidate,JS_DupValue(ctx,returned));
+    if(JS_IsObject(returned)&&!JS_IsFunction(ctx,returned)) return returned;
+    JS_FreeValue(ctx,returned);
+    return JS_ThrowTypeError(ctx,"scene build must return an object containing candidate refs");
+}
+
+/* scene is NULL for view.replace/patch(build): the ticket is created and the
+ * JS function called. A scene discards the ticket, so none is allocated. */
+static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene,
                          ksn_update_mode mode, const char *op) {
-    if(argc<1||!JS_IsFunction(ctx,argv[0]))
+    if(!scene&&!JS_IsFunction(ctx,build))
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                 "build must be a synchronous function",false,NULL);
     if(!ensure_state(ctx,op)) return JS_EXCEPTION;
@@ -880,8 +930,10 @@ static JSValue run_build(JSContext *ctx, int argc, JSValueConst *argv,
     state->building=tx;
     JSValue ticket=JS_UNDEFINED,tx_object=JS_UNDEFINED,modal_object=JS_UNDEFINED;
     /* No fallible allocation may follow successful native submission. */
-    ticket=wrap_direct(ctx,ticket_class,tx.value);
-    if(JS_IsException(ticket)) goto fail;
+    if(!scene) {
+        ticket=wrap_direct(ctx,ticket_class,tx.value);
+        if(JS_IsException(ticket)) goto fail;
+    }
     tx_object=wrap_direct(ctx,tx_class,tx.value);
     if(JS_IsException(tx_object)) goto fail;
     modal_object=wrap_direct(ctx,modal_class,tx.value);
@@ -889,7 +941,8 @@ static JSValue run_build(JSContext *ctx, int argc, JSValueConst *argv,
     if(JS_DefinePropertyValueStr(ctx,tx_object,"modal",JS_DupValue(ctx,modal_object),
                                  JS_PROP_C_W_E)<0) goto fail;
     JSValue arg=JS_DupValue(ctx,tx_object);
-    JSValue returned=JS_Call(ctx,argv[0],JS_UNDEFINED,1,&arg);
+    JSValue returned=scene?scene_callback(ctx,scene,arg,mode)
+                          :JS_Call(ctx,build,JS_UNDEFINED,1,&arg);
     JS_FreeValue(ctx,arg);
     JS_SetOpaque(tx_object,NULL);JS_SetOpaque(modal_object,NULL);
     if(JS_IsException(returned)) goto fail;
@@ -925,11 +978,102 @@ fail:
 
 static JSValue js_replace(JSContext *ctx, JSValueConst self, int argc,
                           JSValueConst *argv) {
-    (void)self;return run_build(ctx,argc,argv,KSN_REPLACE,"kasane.replace");
+    (void)self;
+    return run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_REPLACE,"kasane.replace");
 }
 static JSValue js_patch(JSContext *ctx, JSValueConst self, int argc,
                         JSValueConst *argv) {
-    (void)self;return run_build(ctx,argc,argv,KSN_PATCH,"kasane.patch");
+    (void)self;
+    return run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
+}
+
+static void scene_finalizer(JSRuntime *rt, JSValue value) {
+    kasane_scene *scene=JS_GetOpaque(value,scene_class);
+    if(!scene) return;
+    JS_FreeValueRT(rt,scene->build);JS_FreeValueRT(rt,scene->patch);
+    JS_FreeValueRT(rt,scene->refs);JS_FreeValueRT(rt,scene->candidate);
+    JS_FreeValueRT(rt,scene->model);js_free_rt(rt,scene);
+}
+static void scene_mark(JSRuntime *rt, JSValueConst value, JS_MarkFunc *mark) {
+    kasane_scene *scene=JS_GetOpaque(value,scene_class);
+    if(!scene) return;
+    JS_MarkValue(rt,scene->build,mark);JS_MarkValue(rt,scene->patch,mark);
+    JS_MarkValue(rt,scene->refs,mark);JS_MarkValue(rt,scene->candidate,mark);
+    JS_MarkValue(rt,scene->model,mark);
+}
+static const JSClassDef scene_def={.class_name=KASANE_CLASS,.finalizer=scene_finalizer,
+                                   .gc_mark=scene_mark};
+
+static JSValue scene_invalidate(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,
+                                int magic,JSValueConst *data) {
+    (void)self;(void)magic;
+    kasane_scene *scene=JS_GetOpaque(data[0],scene_class);
+    scene->dirty=true;
+    if(argc&&JS_ToBool(ctx,argv[0])) scene->rebuild=true;
+    return JS_UNDEFINED;
+}
+
+static JSValue scene_flush_turn(JSContext *ctx,kasane_scene *scene,JSValueConst model) {
+    if(scene->pending) {
+        apply_outcome();
+        ksn_submission outcome=state?ksn_view_poll(view()):(ksn_submission){0};
+        if(outcome.status==KSN_SUBMITTED) return JS_FALSE;
+        if(outcome.status==KSN_PRESENTED)
+            scene_set(ctx,&scene->refs,JS_DupValue(ctx,scene->candidate));
+        else if(outcome.status==KSN_DISCARDED) {
+            scene->dirty=true;
+            if(scene->pending_replace) scene->rebuild=true;
+        } else return JS_ThrowPlainError(ctx,"scene lost its submission");
+        scene_set(ctx,&scene->candidate,JS_NULL);
+        scene->pending=false;
+    }
+    if(!scene->dirty) return JS_TRUE;
+    bool replacing=scene->rebuild||JS_IsNull(scene->refs)||JS_IsUndefined(scene->patch);
+    scene->dirty=false;
+    scene->rebuild=false;
+    scene_set(ctx,&scene->model,JS_DupValue(ctx,model));
+    JSValue submitted=replacing?run_build(ctx,JS_UNDEFINED,scene,KSN_REPLACE,"kasane.replace")
+                               :run_build(ctx,JS_UNDEFINED,scene,KSN_PATCH,"kasane.patch");
+    JSValue out=JS_FALSE;
+    if(!JS_IsException(submitted)) {
+        scene->pending_replace=replacing;
+        scene->pending=true;
+        goto done;
+    }
+    JSValue error=JS_GetException(ctx);
+    /* An interrupt skips catch and finally in JS too: pass it straight on. */
+    if(JS_IsUncatchableError(error)) { JS_Throw(ctx,error);return JS_EXCEPTION; }
+    scene_set(ctx,&scene->candidate,JS_NULL);
+    scene->dirty=true;
+    if(replacing) scene->rebuild=true;
+    bool busy=false;
+    if(JS_ToBool(ctx,error)) {
+        JSValue code=JS_GetPropertyStr(ctx,error,"code");
+        if(JS_IsException(code)) { JS_FreeValue(ctx,error);out=JS_EXCEPTION;goto done; }
+        if(JS_IsString(code)) {
+            size_t length;const char *text=JS_ToCStringLen(ctx,&length,code);
+            if(!text) { JS_FreeValue(ctx,code);JS_FreeValue(ctx,error);out=JS_EXCEPTION;goto done; }
+            busy=length==4&&!memcmp(text,"BUSY",4);
+            JS_FreeCString(ctx,text);
+        }
+        JS_FreeValue(ctx,code);
+    }
+    if(busy) JS_FreeValue(ctx,error);
+    else { JS_Throw(ctx,error);out=JS_EXCEPTION; }
+done:
+    scene_set(ctx,&scene->model,JS_UNDEFINED);
+    return out;
+}
+
+static JSValue scene_flush(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv,
+                           int magic,JSValueConst *data) {
+    (void)self;(void)magic;
+    kasane_scene *scene=JS_GetOpaque(data[0],scene_class);
+    if(scene->running) return JS_ThrowPlainError(ctx,"scene flush is not reentrant");
+    scene->running=true;
+    JSValue out=scene_flush_turn(ctx,scene,argc?argv[0]:JS_UNDEFINED);
+    scene->running=false;
+    return out;
 }
 
 static JSValue js_cache_create(JSContext *ctx, JSValueConst self, int argc,
@@ -1121,13 +1265,49 @@ static const JSCFunctionListEntry instance_methods[]={
     JS_CFUNC_DEF("place",2,js_instance_place_checked),
     JS_CFUNC_DEF("setVisible",2,js_instance_visible_checked),
 };
+/* Returns {invalidate, flush} as own data properties holding bound functions,
+ * the shape the JS factory's object literal had, so detached calls still work. */
 static JSValue js_create_scene(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    JSValue factory=JS_Eval(ctx,KSN_SCENE_FACTORY,sizeof(KSN_SCENE_FACTORY)-1,
-                           "kasane/create_scene.js",JS_EVAL_TYPE_GLOBAL);
-    if(JS_IsException(factory))return factory;
-    JSValueConst args[]={self,argc?argv[0]:JS_UNDEFINED};
-    JSValue result=JS_Call(ctx,factory,JS_UNDEFINED,2,args);
-    JS_FreeValue(ctx,factory);return result;
+    (void)self;
+    JSValueConst options=argc?argv[0]:JS_UNDEFINED;
+    JSValue build=JS_UNDEFINED,patch=JS_UNDEFINED;
+    bool valid=false;
+    if(JS_ToBool(ctx,options)) {
+        build=JS_GetPropertyStr(ctx,options,"build");
+        if(JS_IsException(build)) return build;
+        if(JS_IsFunction(ctx,build)) {
+            patch=JS_GetPropertyStr(ctx,options,"patch");
+            if(JS_IsException(patch)) { JS_FreeValue(ctx,build);return patch; }
+            valid=JS_IsUndefined(patch)||JS_IsFunction(ctx,patch);
+        }
+    }
+    if(!valid) {
+        JS_FreeValue(ctx,build);JS_FreeValue(ctx,patch);
+        return JS_ThrowTypeError(ctx,"createScene requires build and optional patch callbacks");
+    }
+    JSValue holder=JS_NewObjectProtoClass(ctx,JS_NULL,scene_class);
+    kasane_scene *scene=JS_IsException(holder)?NULL:js_mallocz(ctx,sizeof(*scene));
+    if(!scene) {
+        JS_FreeValue(ctx,holder);JS_FreeValue(ctx,build);JS_FreeValue(ctx,patch);
+        return JS_EXCEPTION;
+    }
+    *scene=(kasane_scene){.build=build,.patch=patch,.refs=JS_NULL,.candidate=JS_NULL,
+                          .model=JS_UNDEFINED,.dirty=true,.rebuild=true};
+    JS_SetOpaque(holder,scene);
+    JSValue out=JS_NewObject(ctx);
+    if(JS_IsException(out)) { JS_FreeValue(ctx,holder);return out; }
+    JSValueConst data[]={holder};
+    JSValue invalidate=JS_NewCFunctionData2(ctx,scene_invalidate,"invalidate",1,0,1,data);
+    if(JS_IsException(invalidate)||
+       JS_DefinePropertyValueStr(ctx,out,"invalidate",invalidate,JS_PROP_C_W_E)<0) goto fail;
+    JSValue flush=JS_NewCFunctionData2(ctx,scene_flush,"flush",1,0,1,data);
+    if(JS_IsException(flush)||
+       JS_DefinePropertyValueStr(ctx,out,"flush",flush,JS_PROP_C_W_E)<0) goto fail;
+    JS_FreeValue(ctx,holder);
+    return out;
+fail:
+    JS_FreeValue(ctx,holder);JS_FreeValue(ctx,out);
+    return JS_EXCEPTION;
 }
 static const JSCFunctionListEntry functions[]={
     JS_CFUNC_DEF("petImage",0,js_pet_image),
@@ -1138,34 +1318,64 @@ static const JSCFunctionListEntry functions[]={
     JS_CFUNC_DEF("inputScope",0,js_input_scope),
 };
 
-static bool make_class(JSContext *ctx, JSClassID *id, JSRuntime **owner,
-                       const JSClassDef *def, const JSCFunctionListEntry *methods,
-                       int count) {
+static bool register_class(JSContext *ctx, JSClassID *id, JSRuntime **owner,
+                           const JSClassDef *def) {
     JSRuntime *rt=JS_GetRuntime(ctx);
-    if(!pocket_api_class_ready(rt,owner,id)) {
-        JS_NewClassID(rt,id);
-        if(JS_NewClass(rt,*id,def)<0) return false;
-    }
+    if(pocket_api_class_ready(rt,owner,id)) return true;
+    JS_NewClassID(rt,id);
+    return JS_NewClass(rt,*id,def)>=0;
+}
+static bool set_proto(JSContext *ctx, JSClassID id, const JSCFunctionListEntry *methods,
+                      int count) {
     JSValue proto=JS_NewObject(ctx);
     if(JS_IsException(proto)) return false;
-    if(count&&JS_SetPropertyFunctionList(ctx,proto,methods,count)<0) {
+    /* JS_InstantiateFunctionListItem drops the result of adding an autoinit
+     * property, so an out-of-memory shows only as a pending exception. */
+    if(JS_SetPropertyFunctionList(ctx,proto,methods,count)<0||JS_HasException(ctx)) {
         JS_FreeValue(ctx,proto);return false;
     }
-    JS_SetClassProto(ctx,*id,proto);return true;
+    JS_SetClassProto(ctx,id,proto);return true;
+}
+static bool lazy_proto(JSContext *ctx, JSClassID id, const JSCFunctionListEntry *methods,
+                       int count) {
+    JSValue proto=JS_GetClassProto(ctx,id);
+    bool ready=!JS_IsNull(proto);
+    JS_FreeValue(ctx,proto);
+    return ready||set_proto(ctx,id,methods,count);
+}
+#define COUNT(methods) ((int)(sizeof(methods)/sizeof(methods[0])))
+static bool instance_proto(JSContext *ctx) {
+    return lazy_proto(ctx,instance_class,instance_methods,COUNT(instance_methods));
+}
+static bool animation_proto(JSContext *ctx) {
+    return lazy_proto(ctx,animation_class,animation_methods,COUNT(animation_methods));
 }
 
 static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
-#define MAKE(id,owner,def,methods) make_class(ctx,&id,&owner,&def,methods,(int)(sizeof(methods)/sizeof(methods[0])))
-    if(!MAKE(tx_class,tx_rt,tx_def,tx_methods)||
-       !MAKE(modal_class,modal_rt,modal_def,modal_methods)||
-       !MAKE(ref_class,ref_rt,ref_def,ref_methods)||
-       !MAKE(instance_class,instance_rt,instance_def,instance_methods)||
-       !MAKE(animation_class,animation_rt,animation_def,animation_methods)||
-       !make_class(ctx,&template_class,&template_rt,&template_def,NULL,0)||
-       !make_class(ctx,&image_class,&image_rt,&image_def,NULL,0)||
-       !make_class(ctx,&ticket_class,&ticket_rt,&ticket_def,NULL,0)) return ESP_ERR_NO_MEM;
-#undef MAKE
+    /* The scene holder is never reachable from JS, so it needs no prototype;
+     * instance and animation prototypes are built on first use (above). */
+    if(!register_class(ctx,&tx_class,&tx_rt,&tx_def)||
+       !register_class(ctx,&modal_class,&modal_rt,&modal_def)||
+       !register_class(ctx,&ref_class,&ref_rt,&ref_def)||
+       !register_class(ctx,&instance_class,&instance_rt,&instance_def)||
+       !register_class(ctx,&animation_class,&animation_rt,&animation_def)||
+       !register_class(ctx,&template_class,&template_rt,&template_def)||
+       !register_class(ctx,&image_class,&image_rt,&image_def)||
+       !register_class(ctx,&ticket_class,&ticket_rt,&ticket_def)||
+       !register_class(ctx,&scene_class,&scene_rt,&scene_def)||
+       !set_proto(ctx,tx_class,tx_methods,COUNT(tx_methods))||
+       !set_proto(ctx,modal_class,modal_methods,COUNT(modal_methods))||
+       !set_proto(ctx,ref_class,ref_methods,COUNT(ref_methods))) return ESP_ERR_NO_MEM;
+    /* Handles with no methods inherit Object.prototype directly instead of
+     * each owning an empty object. */
+    JSValue plain=JS_NewObject(ctx);
+    if(JS_IsException(plain)) return ESP_ERR_NO_MEM;
+    JSValue object_proto=JS_GetPrototype(ctx,plain);
+    JS_FreeValue(ctx,plain);
+    JS_SetClassProto(ctx,template_class,JS_DupValue(ctx,object_proto));
+    JS_SetClassProto(ctx,image_class,JS_DupValue(ctx,object_proto));
+    JS_SetClassProto(ctx,ticket_class,object_proto);
     if(JS_SetPropertyFunctionList(ctx,ns,functions,
        (int)(sizeof(functions)/sizeof(functions[0])))<0) return ESP_ERR_NO_MEM;
     JSValue cache=JS_NewObject(ctx);

@@ -44,10 +44,6 @@ idf_component_register(SRCS "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_p
     EMBED_FILES "../apps/pet/assets/pets-compact.bin")
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_font.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
-execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_kasane_scene.py" "${CMAKE_BINARY_DIR}/generated"
-    COMMAND_ERROR_IS_FATAL ANY)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/tools/make_kasane_scene.py" "${CMAKE_SOURCE_DIR}/apps/kasane/create_scene.js")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_font.py")
 # The click PCM and the tone sine table used to be built into .bss at boot; they
 # depend on nothing but compile-time constants, so they are baked here and land

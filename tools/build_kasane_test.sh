@@ -7,7 +7,6 @@ TEST_SOURCE=${TEST_SOURCE:-tools/test_pocket_kasane.c}
 CACHE=${CACHE:-/tmp/qjs-kasane-host}
 mkdir -p "$CACHE"
 python3 tools/make_font.py "$CACHE"
-python3 tools/make_kasane_scene.py "$CACHE"
 python3 - "$CACHE/kasane_pet_test_data.h" <<'PY'
 import pathlib, sys
 data = pathlib.Path('apps/pet/assets/pets-compact.bin').read_bytes()

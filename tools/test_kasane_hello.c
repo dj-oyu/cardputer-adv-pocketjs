@@ -48,7 +48,56 @@ int main(void){
               "let caught=false;try{s.flush({})}catch(e){caught=e.code==='INVALID_ARGUMENT'}"
               "if(!caught)throw Error('async build accepted')"),"controller does not hide asynchronous build results");
     check(!pocket_kasane_has_submission(),"async controller leaves no partial submission");
+    /* The controller is native (pocket_kasane.c); these pin the statements of
+     * apps/kasane/create_scene.js it transcribes. */
+    check(run("for(const bad of [undefined,null,0,1,{},{build:1},{build(){},patch:1},{build(){},patch:null}]){"
+              "let t=false;try{kasane.createScene(bad)}catch(e){t=e instanceof TypeError}"
+              "if(!t)throw Error('accepted '+JSON.stringify(bad))}"
+              "let got=0;const lazy={get build(){got++;return 1},get patch(){got+=10}};"
+              "try{kasane.createScene(lazy)}catch(e){}if(got!==1)throw Error('patch read after bad build');"
+              "const plain=kasane.createScene({build(tx){tx.background(255);return {}}});"
+              "if(Object.keys(plain).join()!=='invalidate,flush'||plain.flush.length!==1||"
+              "plain.invalidate.length!==1||plain.flush.name!=='flush')throw Error('shape');"),
+          "createScene validates options and returns the object-literal shape");
+    check(present(&stats)==KSN_OK&&run(
+              "let n=0;const s2=kasane.createScene({build(tx,m){n++;tx.background(255);"
+              "if(m==='fn')return function(){};if(m==='null')return null;return {}}});"
+              "for(const m of ['fn','null']){let t=false;try{s2.flush(m)}catch(e){t=e instanceof TypeError}"
+              "if(!t||kasane.poll().status==='SUBMITTED')throw Error('bad build return '+m)}"
+              "if(s2.flush('ok')!==false||n!==3)throw Error('dirty kept after error');"),
+          "a build returning a function or null throws TypeError and stays dirty");
+    check(present(&stats)==KSN_OK&&run(
+              "let inner;const s3=kasane.createScene({build(tx){tx.background(255);"
+              "try{s3.flush()}catch(e){inner=e}return {}}});const f=s3.flush;"
+              "if(f()!==false||!(inner instanceof Error)||inner.message!=='scene flush is not reentrant')"
+              "throw Error('reentry');"),
+          "flush rejects reentry and works when detached");
+    check(present(&stats)==KSN_OK&&run(
+              "const marker={code:'LIMIT_EXCEEDED'};let calls=0;"
+              "const s4=kasane.createScene({build(tx){calls++;tx.background(255);return {}},"
+              "patch(tx){calls++;if(calls===2)throw marker}});"
+              "s4.flush();globalThis.s4=s4;globalThis.marker=marker;"),"patch fixture presents");
+    check(present(&stats)==KSN_OK&&run(
+              "if(s4.flush()!==true)throw Error('idle');s4.invalidate();"
+              "let t;try{s4.flush()}catch(e){t=e}if(t!==marker)throw Error('rethrow identity');"
+              "if(s4.flush()!==false||kasane.poll().status!=='SUBMITTED')throw Error('retry after throw');"
+              "kasane.cancel(kasane.poll().ticket);if(s4.flush()!==false)throw Error('discard retry');"
+              "kasane.cancel(kasane.poll().ticket);"
+              "const busy=kasane.createScene({build(){throw {code:'BUSY'}}});"
+              "if(busy.flush()!==false)throw Error('BUSY swallowed');"
+              "const bad=kasane.createScene({build(){throw 0}});let z=1;try{bad.flush()}catch(e){z=e}"
+              "if(z!==0)throw Error('falsy rethrown');"),
+          "non-BUSY errors propagate by identity; BUSY and DISCARDED retry");
+    check(present(&stats)==KSN_OK,"controller error fixture presents");
     close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"hello/controller teardown frees memory");
+    fault_sweep("scene controller allocation failures publish nothing",
+                "globalThis.exercise=()=>{const s=kasane.createScene({build(tx,m){tx.background(255);"
+                "return {r:tx.rect(shape),m}},patch(tx,r){r.r.setColor(tx,1)}});s.flush(1)};",false);
+    /* A build that captures its own scene forms a cycle through the holder;
+     * only gc_mark lets the collector free it. */
+    check(open_fault_runtime("for(let i=0;i<20;i++){const s=kasane.createScene({build(tx){"
+              "s.invalidate();tx.background(255);return {s}}});s.flush(s);}"),"cyclic scenes build");
+    close_fault_runtime();check(live_allocations==0,"cyclic scene graphs are collected");
     printf("HELLO_APP %s failures=%u\n",failures?"FAIL":"PASS",failures);
     return failures?1:0;
 }
