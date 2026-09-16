@@ -46644,7 +46644,12 @@ static JSValue js_array_push(JSContext *ctx, JSValueConst this_val,
                        (p->shape->prop->flags & JS_PROP_WRITABLE))) {
                 array_len = JS_VALUE_GET_INT(p->prop[0].u.value);
                 new_len = array_len + argc;
-                if (likely(new_len >= array_len)) { /* no overflow */
+                /* PocketJS: backport of quickjs-ng d98ff101c6. Growing
+                 * `.length` leaves a fast array with count < length; writing
+                 * at `.length` here skipped the slots in between and then
+                 * claimed them through `count`, uninitialised. */
+                if (likely(array_len == p->u.array.count &&
+                           new_len >= array_len)) { /* no overflow */
                     if (unlikely(new_len > p->u.array.u1.size)) {
                         if (expand_fast_array(ctx, p, new_len)) {
                             return JS_EXCEPTION;
