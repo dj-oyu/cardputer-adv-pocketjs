@@ -2,8 +2,8 @@
 
 リンクマップを3つの視点で突き合わせた調査。目的は「フラッシュを減らすとき、どのシンボルが
 **我々の C の参照だけを理由にリンクに入っている**のか」を、推測ではなく数字で特定すること。
-計器は [`scripts/member_bytes.py`](../../tools/) 相当（この枝では `tools/` に置いていないため、
-下の「再現」にある `/workspace/knscratch/size/tools/` を使う）。
+計器は [`tools/size/`](../../tools/size/) の2本（`member_bytes.py` / `map_census.py`）。
+手順そのものは [flash-size-method.md](flash-size-method.md) にある。
 
 ## 1. 方法 — マップの3箇所を突き合わせる
 
@@ -95,8 +95,8 @@ libm / builtins の family は「値で証明できる書き換え」で機能�
 
 ```bash
 # 基準マップ（vm/main の素のビルド）
-cp /workspace/pjs-vm/build_base/cardputer_pocketjs.map /workspace/knscratch/size/base/bd0fa43.map
-T=/workspace/knscratch/size/tools
+cp /workspace/pjs-vm/build_base/cardputer_pocketjs.map <scratch>/bd0fa43.map
+T=tools/size
 python3 $T/member_bytes.py <map> compiler_builtins     # 会員ごとの配置バイト
 python3 $T/member_bytes.py <map>                       # 画像全体
 python3 $T/map_census.py <map> --library-targets --top 20
