@@ -215,3 +215,32 @@ s(t+1)…s(t+7) が上書きする。タップ k=31..25 の7本が未来のサ�
 
 層4: fir8_pie は非 static になったので単体で xtensa-esp32s3-elf-gcc -O2 -Wall -Wextra -Werror が通り、
 objdump に PIE 命令が出る（呼び出しを付けた検査は不要になった）。
+
+## 9. 着地（`perf/mp3-fir`）— FIR を本体線へ、補間の int64 除算も一緒に
+
+T3 の一式（上の 1〜10 番目のコミット）は `vm/main`（実機が走らせている系統、基点 `bd0fa43`）から
+**直線 10 コミット**だったので、分岐も衝突も無しで切り出せた。枝 `perf/mp3-fir` =
+`vm/main` + その 10 コミット + 補間の int32 化 1 コミット。
+
+補間（`mp3_decode.c`）は FIR と同じ関数の中に**2 箇所**あった（ブロック路とスカラー路）。別々に
+書くと片方だけ直して食い違い得るので、`mp3_interpolate()`（always_inline）1 箇所に寄せた。
+`a*phase/24000` は int64 の `__divdi3`（223 命令）で、44.1/48 kHz では出力サンプルごとに踏まれる。
+
+実測（`vm/main` の基準ビルドと比べて、両方 ESP-IDF の素の `idf.py build`）:
+
+| | 基準 `bd0fa43` | `perf/mp3-fir` `3558e7e` | 差 |
+| --- | --- | --- | --- |
+| `cardputer_pocketjs.bin` | 2,142,864 B | 2,143,760 B | **+896 B** |
+| flash（memlog） | 1,557,328 | 1,558,220 | +892 B |
+| DIRAM（memlog） | 123,308 | 123,324 | **+16 B**（リング 32→40 スロット = 64→80 B） |
+| `fir8_pie` の実物（実ビルドの `.obj`） | — | 179 命令 / うち PIE オペコード 105 / call8 0 | スカラーは 1 サンプル 284 命令 |
+| `mp3_decode.c.obj` の 64bit 除算 | `__divdi3` あり | **未定義シンボル 0** | 補間 233 → 約 12 命令 |
+
+ホストの4層（着地後の枝で再実行）:
+- `tools/test_mp3.sh` 実 MP3 10 本（22.05/24/32/44.1/48 kHz × モノ/ステレオ）→ 10 本とも
+  `block==scalar`、**ハッシュは FIR も補間書き換えも入っていない基準と完全一致**（1 サンプルも変わらない）。
+- `tools/pie/test_kernels.py` 8 tests OK / `test_piesim.py` 8 tests OK /
+  `run_models.py` FIR モデル 1,600,000 ケース `mismatches=0` / `stalls.py fir8_pie` 174 命令＋0 ストール。
+
+未確認（実機が要る）: 耳で聴いた音、`MP3DEC mean_us` の差、`g_mp3_fir_pie` を切ったときの実機の差。
+この枝では実機の数字を主張しない。
