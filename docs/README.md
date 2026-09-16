@@ -89,6 +89,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [design-composition.md](kasane/design-composition.md) | 仕様 | 重なり、透過、cache、modal、効果 |
 | [design-contract-review.md](kasane/design-contract-review.md) | 記録 | 公開契約の評価 |
 | [design-device-probe.md](kasane/design-device-probe.md) | 記録 | 実機診断と計測 |
+| [kasane-guest-memory-reduce.md](kasane/kasane-guest-memory-reduce.md) | 記録 | Kasane のゲスト生存量を 3 アプリで −6.2 KiB（シーンコントローラを C へ −5.0、proto の遅延・共有 −1.1）、native arena を評価前の 1 確保に（ゲスト不変、最大ブロック ±4 KiB） |
 
 ## JS API — [`api/`](api/)
 
