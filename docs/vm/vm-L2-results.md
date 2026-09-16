@@ -569,7 +569,7 @@ APP_STOPPEDを要求する観測ツール。ループ回数は§3.6の2万回約
 この追加時点では有限診断の実機採取は未実施（次節でFAIR構成を採取）。
 既存の無限負荷採取や通常アプリsmokeを代わりの証拠にはしない。
 
-### 4.17 有限frameの初回実機採取（2026-09-16、FAIRのみ）
+### 4.17 有限frameの実機採取（2026-09-16、互換/FAIR）
 
 SELFTEST/YIELD/FAIR/LAZY_INPUTS=yのimage SHA256
 `a94add02c8c79a71b95d698967e57c24947274413cd006afebbac47db521d961`、
@@ -588,9 +588,20 @@ app2,159,984B、DIRAM123,356B、Flash Code1,567,796B。閾値は250,000µsのま
 有限frameが完走する例にはなる。完走frameの累積実行時間は現在のログでは取得できておらず、
 閾値まで何µsの余裕があったかは断定しない。10万回は有限でも停止するため、「有限なら必ず完走」
 という判定をこのガードへ持ち込まない。ログ`.cache/vmtest/finite-fair-{1,2,3}.log`。
-正常負荷の初回証拠であり、互換順序・競合条件・閾値近傍の確認は残る。
+FAIR側の初回証拠であり、この時点では互換順序・競合条件・閾値近傍の確認は残る。
 検証imageのsmoke3周・故障回復6種成功後、元appをhash一致で復元し、同じsmoke3周・故障回復6種と
 HOME_READYを確認した。ログ`finite-fair-smoke.log` / `finite-restored-smoke.log`。
+
+**互換順序での追試:** 検証SDKCONFIGのFAIRだけをnへ変更し、同じ診断ソースをビルド。
+image SHA256 `f0da067f90caa22b6505fb3fb7ced6068acf4dbd248294f2cce268a601315610`、
+app2,159,920B、DIRAM123,356B、Flash Code1,567,728B。
+別serial openの3回すべてで2万/4万回は同じ総和で完走し、10万回は累積256,751 / 256,798 / 256,484µsで停止。
+4万回のHELLO_FRAME_PRESENTED→完了は全回261ms。FAIRと同じ定性的結果だが、別imageなので
+小さな時間差をモードの性能差へ帰属させない。検証用imageのsmoke3周・故障回復6種も成功。
+ログ`.cache/vmtest/finite-compat-{1,2,3}.log`、`finite-compat-smoke.log`。
+これでこの3負荷の互換/FAIR対照は採取済み。競合条件と閾値近傍の確認、総合関所は残る。
+互換側の検証後も元appを書込hash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認した。
+復元後ログ`finite-compat-restored-smoke.log`。閾値と通常設定は変更していない。
 
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 
