@@ -292,6 +292,9 @@ CALLBENCH/YIELD/TCOを含めない通常経路の検査変種。
 `run.sh`は`VMTEST_START_MARKER=1`でrunnerのmain到達をstderrに記録する。
 main到達後のtimeout/ASan異常はstartupとして再試行しない（`test_runner_retry.py`で検査）。
 runnerを更新した後は再ビルドしてから使う。
+`build.sh`は並列コンパイラをPIDごとに待ち、1件でも失敗したらリンクしない。
+引数なし`wait`では失敗を見逃して古いobjectをリンクしうるため、
+`test_build_failures.py`で6コンパイル単位それぞれの失敗と全成功の7条件を検査する。
 
 実機は専用ビルドで
 `idf.py -B build_vm_callbench -D SDKCONFIG=build_vm_callbench/sdkconfig -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.vm-callbench.defaults" build`。

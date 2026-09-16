@@ -78,7 +78,7 @@ build_variant() {
   # is host-compilable.
   local GUEST=components/pocketjs_guest
   local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield -I $OUT/include -I $GUEST/include"
-  local objs=()
+  local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
   # so it is a separate object rather than a change inside quickjs.c.
@@ -89,10 +89,19 @@ build_variant() {
        || [ -n "$(find "$QJS" -name '*.h' -newer "$obj/$f.o" -print -quit)" ]; then
       echo "  cc [$variant] $f.c"
       gcc -std=gnu11 -c $cflags -w $defs -I "$QJS" "$QJS/$f.c" -o "$obj/$f.o" &
+      compile_pids+=("$!")
     fi
     objs+=("$obj/$f.o")
   done
-  wait
+  # Bare wait returns success even if a compiler failed; never link stale objects.
+  local compile_failed=0 pid
+  for pid in "${compile_pids[@]}"; do
+    wait "$pid" || compile_failed=1
+  done
+  if ((compile_failed)); then
+    echo "compile failed [$variant]; link skipped" >&2
+    return 1
+  fi
   gcc -std=gnu11 $cflags -Wall -Wextra -Werror $defs -I "$QJS" \
       tools/vmtest/vmrun.c "$GUEST/src/vm_sched.c" "$GUEST/src/vm_clock.c" \
       "${objs[@]}" -lm -lpthread -ldl -o "$OUT/vmrun-$variant"
