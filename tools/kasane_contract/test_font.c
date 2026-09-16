@@ -49,6 +49,19 @@ int main(void){
     const uint8_t a[6]={0,255,255,255,0,0};assert(!memcmp(actual,a,6)&&!memcmp(actual+6,a,6));
     d.data.text.font=KSN_DISPLAY;read_span(&d,2,-3,8,24,actual);
     for(int i=0;i<24;i++)assert(actual[i]==a[(i/2)%6]);
+    /* Chunks that start inside a cell, and the reveal count that decides
+     * whether that cell is reached at all: cells left of the chunk own none of
+     * its columns and still consume one reveal position each. The origin is 0
+     * here so the cells sit at 0, 6 and 12. */
+    d.data.text.font=KSN_CAPTION;d.data.text.utf8="AAA";d.data.text.bytes=3;
+    d.bounds.x0=0;
+    read_span(&d,1,7,7,4,actual);                       /* cell 1 is not reached */
+    for(int i=0;i<4;i++)assert(actual[i]==0);
+    read_span(&d,2,7,7,4,actual);                       /* cell 1, columns 1..4 */
+    assert(actual[0]==255&&actual[1]==255&&actual[2]==255&&actual[3]==0);
+    read_span(&d,3,11,7,4,actual);                      /* cell 2, columns 0..2 */
+    assert(actual[0]==0&&actual[1]==0&&actual[2]==255&&actual[3]==255);
+    d.bounds.x0=-3;
     /* Missing Japanese face: visible tofu with the documented 8-pixel advance. */
     d.data.text.font=KSN_CAPTION;d.data.text.utf8="\xe3\x81\x82" "A";d.data.text.bytes=4;
     read_span(&d,2,-3,7,16,actual);assert(actual[0]==255&&actual[6]==255&&actual[7]==0);
