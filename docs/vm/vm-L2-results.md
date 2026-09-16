@@ -751,14 +751,21 @@ v0.14.0（`3c051980ab`）以降に上流へ入った use-after-free / double fre
 4. 再入: `close_var_refs` 走査中に所有者が解放される経路は、open var_ref 自身が参照を持つので到達不能。上流の `close_var_ref` 冒頭にある「既に detached なら return」は入れず、`close_var_ref` の release 地点に置いた assert「REMOVE_CYCLES 以外では release 前の refcount>1」で不変条件として書いた（専用の release ヘルパ `js_coro_release` には置いていない）。
 5. `mark_children(VAR_REF)` の `assert(is_detached)` を、open なら `is_coro` を assert して所有者を mark する形に緩めた。holder 側の mark（`js_bytecode_function_mark`・VARREF プロパティ・`js_mapped_arguments_mark`）は `is_detached || is_coro` を辿る。
 
-**回帰**（実測(host)。コミット `5e6d244`）:
+**回帰**（実測(host)。コミット `5e6d244` のファイルを、修正前＝vm/main から `aa602e1` の quickjs.c 変更だけを逆適用したビルド、修正後＝vm/main で実行。2026-09-17 に測り直した）:
 
-| ファイル | 内容 | 修正前 | 修正後 |
-| --- | --- | --- | --- |
-| `coro_closure_gc.js` | 上流3本（async closure、async mapped arguments、generator の循環）＋ async generator の closure、各ケースの後で `$262.gc()` | asan・asan-alloca とも heap-use-after-free。上流3本は切り出して asan / -recur / -flat / -alloca の4変種で UAF（§4.22） | asan・asan-alloca・asan-flat とも正しい出力、ASan 報告なし |
-| `coro_prologue_gc.js` | generator・async generator のプロローグで mapped arguments と既定引数 closure を捕捉 | **鳴らない**（プロローグの var_ref は修正前後とも通常の open var_ref） | 正しい出力 |
+| ケース | 修正前（asan / -alloca / -recur / -flat / -yield / -tco） | 修正後 |
+| --- | --- | --- |
+| `coro_closure_gc.js` 全体（上流3本、async generator の closure と循環） | 6変種すべて heap-use-after-free | asan・-alloca とも一致、ASan なし |
+| `coro_prologue_gc.js` のうち、プロローグだけで捕捉する単独ケース（generator・async generator の arguments と既定引数 closure、逃げた既定引数 closure） | 6変種すべて鳴らない | asan で一致、ASan なし |
+| `coro_prologue_gc.js` のうち、プロローグの捕捉と本体の closure が同じフレームにある循環（generator） | 6変種すべて heap-use-after-free | asan で一致、ASan なし |
+| 同上（async generator、ジョブを2段送ってから GC） | 6変種すべて heap-use-after-free | asan で一致、ASan なし |
 
-`coro_prologue_gc.js` は修正前の穴を再現するケースではなく、1. の順序を守るガード。`coro_kind` をプロローグ前（`async_func_resume` の前）に立てる変異を一時コピーに入れると、asan ビルドで UBSan が `js_coro_owner` の NULL 参照（`JSGeneratorData.generator` がまだ無い）を報告して落ちる（実測(host)）。プロローグで捕捉したものを generator 自身と循環させた追加の試行も、修正前後とも鳴らなかった。
+`coro_prologue_gc.js` の単独ケースは修正前にも穴がなく、1. の順序を守るガードとして置いている。`coro_kind` をプロローグ前（`async_func_resume` の前）に立てる変異を一時コピーに入れると、asan ビルドで UBSan が `js_coro_owner` の NULL 参照（`JSGeneratorData.generator` がまだ無い）を報告して落ちる（実測(host)）。
+
+**訂正（2026-09-17）**: この節の初版は、`coro_prologue_gc.js` 全体を「修正前も鳴らない」、`coro_closure_gc.js` を「修正前に鳴るのは asan・-alloca だけ」と書いていた。どちらも誤り。
+- 前者はテストの世代差による。初版の計測は、並行セッションが混在循環2件を足す前の版で行った。
+- 後者は変種漏れによる。初版は2変種しか回していなかった。
+- 並行セッションのエージェント coro-uaf の実測（「混在循環は修正前に6変種すべてで UAF、単独ケースは鳴らない」）が正しい。
 
 **関所**（実測(host)、コミット済みの `aa602e1` をビルド。修正前は HEAD=`75cc6c7` のコピー）:
 
