@@ -463,6 +463,19 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
     return ESP_ERR_NO_MEM;
   }
   JS_SetMemoryLimit(guest->runtime, config->heap_limit);
+  /* quickjs-ng starts the cycle collector's threshold at 256 KiB, above the
+   * device's 160 KiB limit, so before this no collection ever ran and cyclic
+   * garbage grew into an OOM (docs/vm/backlog.md #5). Half the limit puts the
+   * first collection well inside the heap, so cyclic garbage is first
+   * collected at half the limit of the shared DRAM rather than near all of it
+   * (later thresholds follow upstream's 1.5x of the survivors); quickjs.c's
+   * js_gc_effective_threshold keeps every collection under the limit. Only
+   * lowered, never raised: a large host limit keeps upstream's timing, which
+   * tools/vmtest's expected outputs depend on.
+   * tools/vmtest/vmrun.c mirrors this call. */
+  if (config->heap_limit / 2U < JS_GetGCThreshold(guest->runtime)) {
+    JS_SetGCThreshold(guest->runtime, config->heap_limit / 2U);
+  }
   JS_SetMaxStackSize(guest->runtime, config->stack_limit);
   JS_SetRuntimeInfo(guest->runtime, "PocketJS ESP-IDF guest");
   JS_SetInterruptHandler(guest->runtime, guest_interrupt, guest);

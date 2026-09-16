@@ -984,6 +984,11 @@ int main(int argc, char **argv) {
   G.runtime = JS_NewRuntime2(&VM_ALLOCATOR, &G);
   if (!G.runtime) return 4;
   JS_SetMemoryLimit(G.runtime, heap_limit);
+  // guest.c: first cycle collection at half the limit (backlog #5), only ever
+  // lowered, so --profile host keeps upstream's 256 KiB.
+  // heap_limit 0 means unlimited here (guest.c rejects 0), not "collect always".
+  if (heap_limit != 0 && heap_limit / 2U < JS_GetGCThreshold(G.runtime))
+    JS_SetGCThreshold(G.runtime, heap_limit / 2U);
   JS_SetMaxStackSize(G.runtime, stack_limit);
   JS_SetRuntimeInfo(G.runtime, "PocketJS ESP-IDF guest");
   if (call_mode != -1) {
