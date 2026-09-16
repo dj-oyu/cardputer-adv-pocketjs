@@ -89,6 +89,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [design-composition.md](kasane/design-composition.md) | 仕様 | 重なり、透過、cache、modal、効果 |
 | [design-contract-review.md](kasane/design-contract-review.md) | 記録 | 公開契約の評価 |
 | [design-device-probe.md](kasane/design-device-probe.md) | 記録 | 実機診断と計測 |
+| [kasane-guest-memory.md](kasane/kasane-guest-memory.md) | 記録 | Kasane 移植で増えたゲスト +14KiB の内訳（実測）。GC 前後の差は 0 B で全部が生存量。主因はアトム・名前空間オブジェクト・関数（ソース複写 2.1〜3.1KiB）・確保ヘッダ。関数ソース保持をやめると 4.8〜7.1KiB 減る。計測パッチ同梱 |
 
 ## JS API — [`api/`](api/)
 
