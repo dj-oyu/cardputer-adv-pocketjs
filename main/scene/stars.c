@@ -1,4 +1,5 @@
 #include "stars.h"
+#include "fxmath.h"
 #include "board.h"
 #include <math.h>
 
@@ -22,7 +23,7 @@ void stars_prepare(star_t *stars,double clock,int tilt_x,int tilt_y,bool paralla
         // long the device has been on; only the fraction reaches a float.
         stars[i].x=(int)fmod((seed%240)+clock*speed,240);
         stars[i].y=(int)fmod(((seed>>8)%135)+clock*(0.4+speed*0.2),135);
-        float twinkle=0.5f+0.5f*sinf((float)fmod(clock*(0.5+(i%5)*0.13),6.283185307)+i*2.7f);
+        float twinkle=0.5f+0.5f*fx_sinf((float)fmod(clock*(0.5+(i%5)*0.13),6.283185307)+i*2.7f);
         stars[i].color=board_rgb(45+twinkle*100,80+twinkle*120,105+twinkle*130);
         if(parallax) {
             int depth=4+(i%3)*12;

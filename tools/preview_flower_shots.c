@@ -5,6 +5,9 @@
 // actually shows -- mid-dwell, fully faded in.
 //
 //   bash tools/preview_flower_shots.sh          # driven from there, per variant
+#include "../main/scene/fxmath.c"
+// The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
+// .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #ifndef PFS_FLOWER_SRC

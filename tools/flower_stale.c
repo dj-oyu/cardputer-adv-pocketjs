@@ -42,6 +42,9 @@
 // to flower.c. Its one blind spot is a flower pixel that happens to equal the
 // garden pixel behind it: it is called "not covered" and takes the current
 // garden instead, which is the same colour to within the reason it was missed.
+#include "../main/scene/fxmath.c"
+// The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
+// .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"

@@ -12,6 +12,7 @@
 // flower.c and read in flower.c; the builders here only ever write c, axis[],
 // radius[], material and shape, which is what a plant actually is.
 #include "flower.h"
+#include "fxmath.h"
 #include <math.h>
 
 #define MAX_PARTS 56

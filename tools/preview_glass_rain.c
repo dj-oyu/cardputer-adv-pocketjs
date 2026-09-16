@@ -1,4 +1,7 @@
 // Generate host-rendered frames; none of these images are firmware assets.
+#include "../main/scene/fxmath.c"
+// The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
+// .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"

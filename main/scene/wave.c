@@ -1,4 +1,5 @@
 #include "wave.h"
+#include "fxmath.h"
 #include "scene_mem.h"
 #include "scene_tables.h"
 #include "stars.h"
@@ -170,7 +171,7 @@ void wave_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
     wave_cols=wb->wave_cols;
 
     // tan of the tilt, so the horizon rolls with the board rather than sliding.
-    int level_slope=(int)(tanf(tilt_x/256.0f)*256);
+    int level_slope=(int)(fx_tanf(tilt_x/256.0f)*256);
     // The clock is folded to under an hour above and narrowed to float exactly
     // once, here. This core's FPU is single precision -- solar_sail's Kepler
     // comment says the same thing -- so a double that reaches the loop below

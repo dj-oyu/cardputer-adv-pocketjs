@@ -19,6 +19,9 @@
 // its state in file statics and the arithmetic is spread across bell_hit,
 // shade and ray_row; a runtime switch would have to reach all three and would
 // be a different program from the one that ships.
+#include "../main/scene/fxmath.c"
+// The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
+// .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"
