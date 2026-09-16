@@ -5,7 +5,7 @@ import sys
 
 root = Path(__file__).resolve().parents[2]
 binary = root / '.cache/vmalloc' / ('vmalloc_replay-' + (sys.argv[1] if len(sys.argv) > 1 else 'o2'))
-for allocator in ('tlsf', 'estalloc', 'naive', 'segment'):
+for allocator in ('tlsf', 'estalloc', 'naive', 'segment', 'slab'):
     for case in ('contiguous', 'fragmented', 'teardown_only'):
         trace = root / 'tools/vmalloc/tests' / (case + '.trace')
         output = subprocess.check_output([
