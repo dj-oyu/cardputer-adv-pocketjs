@@ -70,6 +70,8 @@
 
 （`objdump` は reloc を 2 行で出すので生の行数は 72。上の表は呼び出し単位に畳んだもの。）
 
+**この表の 1 行目は解消済み**（`mp3_decode.c` `pocket_mp3_decode`、§5）。
+
 **消して効くのはサイズではなくサイクル**で、効く順は実行頻度が決める:
 `image_read`（画像変換のスパン＝画素に近い）→ `sound` / `mp3` / `opus`（音声のサンプル路）
 → `pet_hub` / `ui_task` / `motion_poll`（フレーム毎）→ `sys_*`（フレーム毎に 1 回、
@@ -106,7 +108,56 @@ JS ブリッジの `pocket_av.c` / `pocket_io.c` / `pocket_ui.c` / `pocket_kasan
 `__muldf3` を要求したために cgu.01 の `__udivdi3` 26 B も一緒に入っている、という形）。
 したがって「float を固定小数へ移したら何 B 減るか」は、**移して map を差分するまで確定しない**。
 
-## 5. 測っていないこと
+## 5. 解消済み — `pocket_mp3_decode` の補間（1 サンプルごとの `__divdi3`）
+
+位相 `phase` は出力サンプルごとに 24000 ずつ進み、`rate` を超えるたびに減算される。
+補間は `previous` から `sample` への線形で、旧コードは
+
+```c
+int out=sample+(int)((int64_t)(d->previous-sample)*d->phase/24000);
+```
+
+—— これを **出力サンプルごとに 1〜2 回**（44.1/48 kHz では毎秒 4.4〜9.6 万回）踏んでいた。
+`(previous-sample)*phase` は最大 65535×47999 で int32 に収まらないため、コンパイラは
+libgcc の `__divdi3`（223 命令）を呼ぶ。
+
+`phase = high*24000 + low` と割ると、`high` の項は 24000 で**割り切れる**ので
+
+```
+(previous-sample)*phase/24000
+  == (previous-sample)*high + (previous-sample)*low/24000
+```
+
+が厳密に成り立つ（`X` が `24000` の倍数のとき `trunc((X+Y)/24000) = X/24000 + trunc(Y/24000)`）。
+減算直後は `phase < rate ≤ 48000` なので `high` は 0 か 1、`low < 24000` で
+`|previous-sample| ≤ 65535` だから第 2 項の積は最大 `65535*23999 = 1,573,405,665 < 2^31`
+—— **全て int32 で厳密、溢れない**。
+
+検証（すべてホスト）:
+
+| 何を | どう | 結果 |
+| --- | --- | --- |
+| 式の総当たり | `a ∈ [-65535,65535]` × `phase ∈ [0,48000)` の全 6,291,408,000 組を int64 の旧式と比較（`/tmp/mp3sweep/sweep.c`） | **不一致 0**、積の溢れも 0 |
+| 実データ | `ffmpeg` で作った 44.1k/48k/32k/24k/22.05k × モノ/ステレオ 10 本を `tools/test_mp3.c` で復号し、**前後の出力ハッシュを比較** | 10 本すべて**完全一致**（`output` サンプル数も同一） |
+| 対象オブジェクト | `nm -u` | `__divdi3` が**消えた**（残るのは `__divsf3`/`sinf`/`cosf`/`lroundf` = フィルタ初期化の 1 回だけ） |
+| 命令数（`-Os`、`objdump`） | 補間 1 回 | 旧: 223（libgcc）+ 前後 ≈ **233 命令** → 新: `sub`/`mull`/`mulsh`/`saltu` ほか ≈ **12 命令** |
+| ファーム | `idf.py -B build_kasane build` | rc=0、`cardputer_pocketjs.bin` **2,210,576 B**（旧 2,210,544 B） |
+
+**flash は減らない**（`__divdi3` の実体は Rust core が保持したまま。§2）。減るのは実行時間で、
+その測り方は既存の `MP3DEC mean_us=…`（パケット毎）がそのまま使える —— 実機は未取得。
+
+フィクスチャの作り方（`tools/test_mp3.sh` は引数でファイルを取る）:
+
+```
+ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=2" -ac 1 -b:a 128k \
+       -write_id3v2 0 -write_xing 0 -id3v2_version 0 m44100.mp3
+bash tools/test_mp3.sh m44100.mp3     # MP3_OK … hash=…
+```
+
+ID3v2 と Xing を切るのは必須 —— `tools/test_mp3.c` は先頭からフレームを読み、タグや
+Xing フレームに当たると `packets>0` の assert で落ちる。
+
+## 6. 測っていないこと
 
 - サイズの候補（soft-float / libm を消したときの減少量）は**推定すらしていない**。
   §4 の 46,381 B は「いま入っている量」であって「削れる量」ではない。

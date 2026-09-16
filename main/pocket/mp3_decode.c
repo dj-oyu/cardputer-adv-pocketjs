@@ -80,7 +80,24 @@ bool pocket_mp3_decode(pocket_mp3_decoder_t *d, const uint8_t *frame,
         d->phase+=24000;
         while(d->phase>=h.rate) {
             d->phase-=h.rate;
-            int out=sample+(int)((int64_t)(d->previous-sample)*d->phase/24000);
+            /* The interpolation from `previous` to `sample`. It used to be one
+             * int64 expression, which on this part is a libgcc `__divdi3` call
+             * (223 instructions, docs/perf/kasane-image-transform-recon.md):
+             * at 44.1 and 48 kHz that ran once or twice per emitted sample.
+             * Splitting the phase into its 24000s and its remainder keeps every
+             * term in int32 -- phase = high*24000 + low, and the high term is
+             * exactly divisible, so
+             *   (previous-sample)*phase/24000
+             *     == (previous-sample)*high + (previous-sample)*low/24000.
+             * The subtraction above leaves phase < rate, and the header table
+             * caps rate at 48000, so high is 0 or 1; low < 24000 with
+             * |previous-sample| <= 65535 puts the second product at most
+             * 65535*23999 = 1,573,405,665 < 2^31, so both products and the
+             * int32 division are exact and cannot overflow. */
+            int a=d->previous-sample;
+            unsigned high=d->phase>=24000u;
+            unsigned low=d->phase-24000u*high;
+            int out=sample+a*(int)high+a*(int)low/24000;
             if(!emit(ctx,(int16_t)out)) return false;
         }
         d->previous=sample;
