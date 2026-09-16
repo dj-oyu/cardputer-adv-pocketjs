@@ -12,6 +12,7 @@
 #   tools/vmtest/build.sh all-recur / all-flat
 #   tools/vmtest/build.sh asan-yield   # flat calls + the staged L2c body
 #   tools/vmtest/build.sh all-yield
+#   tools/vmtest/build.sh o2-keepsrc   # any variant + "-keepsrc": function source text kept (upstream toString)
 #
 # Three paths (spec sec.12 / design H5): "-alloca" is the same compiler flags
 # without the L2a define; "-recur" and "-flat" pin the L2b switch off / on.
@@ -46,8 +47,15 @@ build_variant() {
   # Match the validated firmware default; -eager retains the old return path.
   local lazy="-DCONFIG_POCKET_VM_LAZY_INPUTS=1"
   local yield=""
-  local base=${variant%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}
-  case "$variant" in
+  # CONFIG_POCKET_VM_STRIP_FN_SOURCE: default y (no function source text kept,
+  # Function.prototype.toString prints the name-only fallback). A trailing
+  # "-keepsrc" on ANY variant builds the upstream behaviour instead; it is
+  # peeled off first so the suffix rules below see the rest unchanged.
+  local strip="-DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1"
+  if [[ $variant == *-keepsrc ]]; then strip=""; fi
+  local core=${variant%-keepsrc}
+  local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}
+  case "$core" in
     *-lazy-flat) ;;
     *-eager) lazy="" ;;
     *-callbench) yield="-DCONFIG_POCKET_VM_CALLBENCH=1" ;;
@@ -81,7 +89,7 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield $strip -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
