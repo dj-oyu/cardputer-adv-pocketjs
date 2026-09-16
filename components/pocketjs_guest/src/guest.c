@@ -82,18 +82,37 @@ unsigned pocketjs_guest_vmprobe_drain_calls(uint16_t *out, unsigned cap,
 }
 #endif
 
-/* The header in front of every guest allocation records the requested size.
- * On the part it is one size_t, 4 B: the union with max_align_t made it 16 B
- * to buy an 8-byte alignment that the IDF tlsf beneath never provides (its
- * blocks are 4-aligned; vm-ledger/06), so the other 12 B bought nothing and
- * came out of the system heap once per live block (spec vm/backlog.md item 8).
- * Host builds keep the union: there malloc and QuickJS do rely on
- * max_align_t alignment. */
-#ifdef ESP_PLATFORM
-typedef struct {
-  size_t size;
-} allocation_header_t;
-#else
+/* Guest allocations. On the part there is no header in front of a block
+ * (vm/backlog.md items 8 and 9): QuickJS's usable size is the block length
+ * tlsf actually handed out, read back with heap_caps_get_allocated_size(),
+ * and realloc is heap_caps_realloc().
+ *
+ * Why the real length and not the requested one: QuickJS treats
+ * `usable - requested` as slack (js_realloc2 hands it back to dbuf, strings
+ * and arrays; the string concatenation fast path extends into it), so
+ * reporting the request threw that slack away and turned every growth that
+ * would have fitted into a realloc. And malloc_limit is charged in usable
+ * sizes, so the 160 KiB limit now counts what the heap really gives the guest
+ * instead of the requests: tlsf rounds a request up to 4 B with a 12 B
+ * minimum, and keeps up to 15 B more when the rest of the free block is too
+ * small to split off (tlsf_control_functions.h adjust_request_size,
+ * block_can_split). The old 4 B header was outside the usable size; only
+ * QuickJS's flat per-block MALLOC_OVERHEAD stood for it. One consequence: the
+ * charged size of a block now depends on the heap's free-block layout, so the
+ * exact byte at which the limit trips is no longer a function of the program
+ * alone.
+ *
+ * Why heap_caps_realloc: tlsf_realloc grows a block in place when the
+ * physical block after it is free and large enough, and shrinks in place
+ * always. The old malloc+memcpy+free held both copies at once and copied
+ * every time. On failure heap_caps_realloc returns NULL and leaves the
+ * original block allocated and unchanged (heap_caps_base.c: the in-heap
+ * tlsf_realloc fails without freeing, and the cross-heap fallback frees the
+ * old block only after the new one exists), which is what js_realloc_rt
+ * expects.
+ *
+ * Host builds keep a size header: there is no tlsf to ask. */
+#ifndef ESP_PLATFORM
 typedef union {
   size_t size;
   max_align_t alignment;
@@ -219,6 +238,62 @@ static esp_err_t guest_run_begin(pocketjs_guest_t *guest) {
 static void guest_run_end(pocketjs_guest_t *guest) { (void)guest; }
 #endif
 
+#ifdef ESP_PLATFORM
+#define GUEST_CAPS_INTERNAL (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#define GUEST_CAPS_PSRAM (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+
+static void *guest_malloc(void *opaque, size_t size) {
+  pocketjs_guest_t *guest = opaque;
+  if (size == 0U) {
+    return NULL;
+  }
+  void *memory = NULL;
+  if (guest != NULL && guest->prefer_psram) {
+    memory = heap_caps_malloc(size, GUEST_CAPS_PSRAM);
+  }
+  if (memory == NULL) {
+    memory = heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+  }
+  return memory;
+}
+
+static void *guest_calloc(void *opaque, size_t count, size_t size) {
+  if (count != 0U && size > SIZE_MAX / count) {
+    return NULL;
+  }
+  const size_t total = count * size;
+  void *memory = guest_malloc(opaque, total);
+  if (memory != NULL) {
+    memset(memory, 0, total);
+  }
+  return memory;
+}
+
+static void guest_free(void *opaque, void *pointer) {
+  (void)opaque;
+  heap_caps_free(pointer);
+}
+
+static size_t guest_usable_size(const void *pointer) {
+  return pointer == NULL ? 0U : heap_caps_get_allocated_size((void *)pointer);
+}
+
+static void *guest_realloc(void *opaque, void *pointer, size_t size) {
+  pocketjs_guest_t *guest = opaque;
+  if (pointer == NULL) {
+    return guest_malloc(opaque, size);
+  }
+  if (size == 0U) {
+    guest_free(opaque, pointer);
+    return NULL;
+  }
+  if (guest != NULL && guest->prefer_psram) {
+    return heap_caps_realloc_prefer(pointer, size, 2, GUEST_CAPS_PSRAM,
+                                    GUEST_CAPS_INTERNAL);
+  }
+  return heap_caps_realloc(pointer, size, GUEST_CAPS_INTERNAL);
+}
+#else
 static void *guest_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;
   if (size == 0U || size > SIZE_MAX - sizeof(allocation_header_t)) {
@@ -280,6 +355,8 @@ static void *guest_realloc(void *opaque, void *pointer, size_t size) {
   guest_free(opaque, pointer);
   return next;
 }
+
+#endif
 
 static const JSMallocFunctions GUEST_ALLOCATOR = {
     .js_calloc = guest_calloc,
