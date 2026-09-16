@@ -2,6 +2,23 @@
 #include <math.h>
 #include <string.h>
 
+/* The linear interpolation from `previous` to `sample` at phase/24000. As one
+ * int64 expression -- (previous-sample)*phase, up to 65535*47999 -- this is a
+ * libgcc __divdi3 call (223 instructions, docs/perf/kasane-image-transform-
+ * recon.md 62), taken once or twice per *emitted sample* at 44.1 and 48 kHz.
+ * Splitting the phase into its 24000s and its remainder keeps every term in
+ * int32: phase = high*24000 + low, the high term is exactly divisible, so
+ *     a*phase/24000 == a*high + a*low/24000,
+ * and phase < rate <= 48000 (the header table's cap) makes high 0 or 1, while
+ * low < 24000 and |a| <= 65535 bound the second product at
+ * 65535*23999 = 1,573,405,665 < 2^31. Both spellings agree over the whole
+ * domain, which the commit that introduced this swept exhaustively; both call
+ * sites below share this one definition so the two arms cannot drift. */
+static inline __attribute__((always_inline)) int mp3_interpolate(int a,unsigned phase){
+    unsigned high=phase>=24000u;
+    return a*(int)high+a*(int)(phase-24000u*high)/24000;
+}
+
 bool pocket_mp3_header(const uint8_t h[4], pocket_mp3_header_t *out) {
     static const unsigned rates[]={44100,48000,32000};
     static const unsigned br1[]={0,32,40,48,56,64,80,96,112,128,160,192,224,256,320};
@@ -85,7 +102,7 @@ bool pocket_mp3_decode(pocket_mp3_decoder_t *d, const uint8_t *frame,
                 d->phase+=24000;
                 while(d->phase>=h.rate) {
                     d->phase-=h.rate;
-                    int out=sample+(int)((int64_t)(d->previous-sample)*d->phase/24000);
+                    int out=sample+mp3_interpolate(d->previous-sample,d->phase);
                     if(!emit(ctx,(int16_t)out)) return false;
                 }
                 d->previous=sample;
@@ -117,7 +134,7 @@ bool pocket_mp3_decode(pocket_mp3_decoder_t *d, const uint8_t *frame,
         d->phase+=24000;
         while(d->phase>=h.rate) {
             d->phase-=h.rate;
-            int out=sample+(int)((int64_t)(d->previous-sample)*d->phase/24000);
+            int out=sample+mp3_interpolate(d->previous-sample,d->phase);
             if(!emit(ctx,(int16_t)out)) return false;
         }
         d->previous=sample;
