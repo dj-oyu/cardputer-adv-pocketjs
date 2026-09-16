@@ -270,4 +270,25 @@ menu "Pocket VM (L0 measurement probes)"
             shared root sdkconfig or in sdkconfig.defaults. See
             sdkconfig.vmclockbench.defaults.
 
+    config POCKET_VM_STRIP_FN_SOURCE
+        bool "Do not keep function source text in the guest heap"
+        default y
+        help
+            Upstream QuickJS copies the full source text of every function it
+            compiles (an inner function's text a second time, inside its
+            parent's) so that Function.prototype.toString can return it. On
+            the 160 KiB guest those copies measured 2.5-7.1 KiB per app
+            (docs/kasane/kasane-guest-memory.md, docs/vm/vm-L2-results.md
+            sec.6), and nothing else reads them.
+
+            On (default), no copy is made. What is lost: toString of a JS
+            function returns upstream's no-source fallback,
+            "function <name>() {\n    [native code]\n}", for every kind of
+            function (async, generator, arrow and class included), instead of
+            its source. Code that parses a function's own text breaks; calling,
+            error messages, stack traces and line numbers are unaffected.
+
+            Off, the upstream behaviour exactly. The host harness mirrors the
+            default; tools/vmtest/build.sh's "-keepsrc" suffix builds it off.
+
 endmenu

@@ -15,6 +15,8 @@
 # against expected/<name>.txt when it does not: the whole corpus must come out
 # byte-identical in both modes EXCEPT the handful of files written to show the
 # difference, which have one expected file per mode.
+# A "-keepsrc" variant (function source text kept) does the same with
+# expected-keepsrc/<name>.txt.
 #
 # Per-file flags come from a first-line "// vmrun-flags: ..." comment and are
 # appended after the default "--profile host", so they override it.
@@ -84,6 +86,17 @@ for name in "${names[@]}"; do
   if [[ "$first" == "// vmrun-flags:"* ]]; then
     read -r -a extra <<< "${first#// vmrun-flags:}"
     flags+=("${extra[@]}")
+  fi
+  # A "-keepsrc" variant parses one js_strndup per function more than the
+  # shipping build, so a --fail-alloc attempt number shifts by the functions
+  # defined before its target. "// vmrun-keepsrc-flags: ..." in the first 5
+  # lines is appended after the above (last one wins) for those variants.
+  if [[ $variant == *-keepsrc ]]; then
+    keep_line=$(head -n5 "$src" | grep -m1 '^// vmrun-keepsrc-flags:' || true)
+    if [ -n "$keep_line" ]; then
+      read -r -a extra <<< "${keep_line#// vmrun-keepsrc-flags:}"
+      flags+=("${extra[@]}")
+    fi
   fi
   # Appended LAST so they beat a per-file "// vmrun-flags:" budget: the
   # point of these two is to re-run the WHOLE corpus at a chosen budget and
@@ -166,6 +179,10 @@ for name in "${names[@]}"; do
   exp=expected/$name.txt
   # One expected file per mode, but only where the modes genuinely differ.
   [ $fair = 1 ] && [ -f "expected-fair/$name.txt" ] && exp=expected-fair/$name.txt
+  # Same rule for CONFIG_POCKET_VM_STRIP_FN_SOURCE: expected/ is the shipping
+  # default (no source text); a "-keepsrc" variant reads expected-keepsrc/
+  # for the files whose output is a function's source.
+  [[ $variant == *-keepsrc ]] && [ -f "expected-keepsrc/$name.txt" ] && exp=expected-keepsrc/$name.txt
   if [ $bless = 1 ]; then
     cp "$OUT/actual-$variant/$name.txt" "$exp"
     echo "blessed $name"

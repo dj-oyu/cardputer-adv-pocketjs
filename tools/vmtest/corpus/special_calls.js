@@ -119,5 +119,7 @@ function pathA() { return pathB(); }
 function pathB() { return thrower.boom; }
 try { pathA(); } catch (e) { print("getter-throw", e.constructor.name, e.message); }
 
-// Function.prototype.toString for a user function is source text.
+// Function.prototype.toString for a user function: the name-only fallback by
+// default (CONFIG_POCKET_VM_STRIP_FN_SOURCE), source text on -keepsrc
+// (expected-keepsrc/special_calls.txt).
 print("toString", (function named(a) { return a; }).toString());
