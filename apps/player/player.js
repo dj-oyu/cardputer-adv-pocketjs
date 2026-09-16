@@ -1,6 +1,6 @@
 // The home screen's music player. Overlay app -- no ui.*, no menu underneath.
-// Why it is shaped this way: README.md. Terse because the guest parses this
-// file and the bytes cost heap.
+// KSN-MISSING(overlay.attach): app_session.c never installs "kasane" for an
+// overlay_session, so this stays on pocket.overlay. README.md "Kasane missing".
 (function () {
   var o = pocket.overlay, W = o.region.width, H = o.region.height;
   var EXT = ['.mp3', '.wav', '.pok'];
@@ -81,8 +81,7 @@
 
   function chose(f) { busy = false; if (f) open(f, true); else dirty = true; }
 
-  // The grant screen on its own key: once a folder is shared there is no
-  // refusal left to reach it through, and a wrong choice would be permanent.
+  // The grant screen on its own key. README.md.
   function share() {
     busy = true; say('CHOOSING FOLDER');
     pocket.fs.requestFolder('sd').then(function (r) {
@@ -91,8 +90,7 @@
     }, function (e) { fail('SHARE', e); });
   }
 
-  // pickFile first, the grant screen only if it refuses: the refusal is the
-  // only signal for "no grant yet". Both are shell modals and win over us.
+  // pickFile first, the grant screen only if it refuses. README.md.
   function pick() {
     busy = true; say('CHOOSING');
     pocket.fs.pickFile('sd', { extensions: EXT }).then(chose, function (e) {

@@ -54,6 +54,23 @@ NVSへ保存されるので再起動しても残る。段が5つで上寄りな�
 overlayセッションにRust UIコアは無い（`pocket_overlay.h` に理由）。描画は
 `pocket.overlay` の表示リストで、矩形と文字列だけ。シェルがシーンの上へ合成する。
 
+## Kasane missing
+
+CP28（`docs/kasane/kasane-astra-plan.md` 行124）はdeskclock/playerのoverlay移植を
+求めるが、**現状ではoverlayセッションにKasaneを載せる経路が無い**。
+`main/app_session.c` の `app_start_test()` は `overlay_session` が真のとき
+`kasane_session` を強制的に偽にし（501行）、`"kasane"`（`pocket_kasane_install`）の
+`pocketjs_guest_quickjs_install_once` 呼び出しは非overlay経路にしかなく（599行）、
+overlayは588行の `goto surfaces_done` でそこを素通りする。したがって overlay ゲストの
+グローバルに `pocket.kasane` は存在しない。`docs/kasane/design-api.md` の endpoint も
+APP/SYSTEM固定で、OVERLAYという第三の宛先はまだ定義されていない
+（roadmap自体がCP28を「未達」の列に置いている——2026-09-17時点の進捗はCP17a台）。
+
+このファイルは推測でAPIを作らず、旧 `pocket.overlay` 実装のまま据え置いた。
+コード中のマーカーは1箇所（1〜3行目、`KSN-MISSING(overlay.attach)`）。
+ネイティブ側で overlay 用の Kasane endpoint と `pocket.kasane` インストールが
+用意されたら、このマーカーを起点に本移植を書く。
+
 **はみ出しは切り取られず拒否される。** これは仕様であって不便ではない——1文字はみ出した
 行は作者が知るべき間違いで、末尾が消えた表示は知らせたことにならない。実際この
 アプリは実機で2回それに落ちた:
