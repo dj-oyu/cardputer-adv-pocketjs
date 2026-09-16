@@ -492,10 +492,10 @@ static inline float flower_isqrt_q(float d) {
 }
 // The route is a runtime switch, not a compile-time one, so one binary measures
 // both sides: the SPLIT counters bracket the call and every window logs which
-// side ran (SPLIT3's sq=). 1 ships the fixed-point root at B=8 -- the B that was
-// chosen with the picture's cost known (0.02% of pixels, a few white pixels where
-// the depth test flips at a silhouette; docs/flower-decor-cost.md). Set B=14 if
-// that ever reads as a defect on the glass: same loop, four more steps.
+// side ran (SPLIT3's sq=). B=8 is the B that was chosen with the picture's cost
+// known (0.02% of pixels, a few white pixels where the depth test flips at a
+// silhouette; docs/flower-decor-cost.md). Set B=14 if that ever reads as a
+// defect on the glass: same loop, four more steps.
 //
 // And the conversions around it cost what the loop saved. Measured on the board,
 // 79 adjacent 60-frame pairs with only this switch moving: the ellipsoid root
@@ -506,7 +506,18 @@ static inline float flower_isqrt_q(float d) {
 // a part with no FPU. Carry the fixed point through the caller -- d as an integer,
 // the root consumed as one -- and the conversions go with it. Until then this
 // switch buys the picture's 0.02% and no time.
-int g_flower_fixed_sqrt = 1;
+//
+// DEFAULT IS 0 HERE (exact sqrtf), and it is a decision rather than a preference.
+// The branch this came from shipped it at 1 and is red on tools/test_flower.c:
+// the analytic bell check asserts the depth bell_hit returns to within 1e-4
+// (z == 0.88), and the B=8 root moves it past that -- the same 0.02% of pixels
+// the measurement above pays for, and it is a test that was passing before. Its
+// own author's note is the other half: "set it to 0 to ship sqrtf until the caller
+// carries the fixed point". So: the arithmetic, the tools and the switch are all
+// here and the A/B is one console flip, but the shipping default keeps the picture
+// the test proves. Turn it on with -DFLOWER_SQRT_BITS=14 (or set this to 1) once
+// the caller carries integers end to end.
+int g_flower_fixed_sqrt = 0;
 #define FLOWER_SQRT(d) (g_flower_fixed_sqrt ? flower_isqrt_q(d) : sqrtf(d))
 static uint16_t rgb(int r,int g,int b) {
     return (uint16_t)((clampi(r,0,255)>>3)<<11 |
