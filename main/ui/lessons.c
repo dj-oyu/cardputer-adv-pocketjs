@@ -1,18 +1,17 @@
 #include "lessons.h"
 
-// Building a text node takes eight lines, and the editor shows six. Chapters
-// that work on one are given it already made, prepended at run time and never
-// shown, so the lines the learner sees are only the ones they change. The
-// property numbers match apps/hello/main.js.
+// The counting chapter changes one piece of text again and again, and the scene
+// that holds it is five lines the editor has no room for once the frame
+// function is there. It is given already made, run before the learner's lines
+// and never shown, so the lines they see are only the ones they change. The
+// drawing is apps/hello/main.js's, cut down to one piece of text.
 static const char PRELUDE_T[] =
-    "ui.setProp(1, 64, 0x2050a0ff);\n"
-    "const t = ui.createNode(1);\n"
-    "ui.setProp(t, 24, 1);\n"
-    "ui.setProp(t, 28, 40); ui.setProp(t, 25, 60);\n"
-    "ui.setProp(t, 1, 200); ui.setProp(t, 2, 18);\n"
-    "ui.setProp(t, 96, 0xffffffff); ui.setProp(t, 97, 1);\n"
-    "ui.setText(t, '');\n"
-    "ui.insertBefore(1, t, 0);\n";
+    "let t\n"
+    "pocket.kasane.replace(tx => {\n"
+    "  tx.background(0x2050a0ff)\n"
+    "  t = tx.text({bounds: [40, 60, 240, 78], color: 0xffffffff,\n"
+    "    text: 'COUNT 0', capacity: 32})\n"
+    "})\n";
 
 static const lesson_t LESSONS[] = {
 {
@@ -65,74 +64,86 @@ static const lesson_t LESSONS[] = {
 },
 {
     .title="画面を塗る",
-    .body={"最後の行は「画面を見せ",
-           "続ける係」。無いと絵は出",
-           "ません。1は画面、64は背",
-           "景の色。0x000000ff を",
-           "0x2050a0ff に変えて実行。"},
+    .body={"replace は画面を描き直",
+           "す係、background は背",
+           "景の色。最後の行は見せ",
+           "続ける係。0x000000ff",
+           "を 0x2050a0ff に変えて実行"},
     .hint="Escで戻る。色は 0xRRGGBBff",
-    .code="ui.setProp(1, 64, 0x000000ff)\nglobalThis.frame = () => {}\n",
+    .code="pocket.kasane.replace(tx => {\n"
+          "  tx.background(0x000000ff)\n"
+          "})\n"
+          "globalThis.frame = () => {}\n",
     .preload=true, .prelude=NULL,
     .check=CHECK_CHANGED, .want="0x000000ff",
 },
 {
     .title="文字を置く",
-    .body={"t は画面に貼った文字の札",
-           "です。setText は「札の",
-           "文字を書き換える」。まず",
-           "実行、次に HELLO を好きな",
-           "英字に変えて実行。"},
+    .body={"tx.text は文字を置く係。",
+           "bounds は置く場所、color",
+           "は色、text は中身です。",
+           "まず実行、次に HELLO を",
+           "好きな英字に変えて実行。"},
     .hint="日本語は9章で。まず英字で",
-    .code="ui.setText(t, 'HELLO')\nglobalThis.frame = () => {}\n",
-    .preload=true, .prelude=PRELUDE_T,
+    .code="pocket.kasane.replace(tx => {\n"
+          "  tx.background(0x2050a0ff)\n"
+          "  tx.text({bounds: [40, 60, 240, 78],\n"
+          "    color: 0xffffffff, text: 'HELLO'})\n"
+          "})\n"
+          "globalThis.frame = () => {}\n",
+    .preload=true, .prelude=NULL,
     .check=CHECK_CHANGED, .want="'HELLO'",
 },
 {
     .title="色と場所を変える",
-    .body={"28 は左から、25 は上から",
-           "何ドット目か。画面は横240",
-           "縦135。96 は文字の色。",
-           "数字を変えて、文字を",
-           "右下の赤にしてみよう。"},
-    .hint="赤は 0xff4040ff",
-    .code="ui.setProp(t, 28, 40)\n"
-          "ui.setProp(t, 25, 60)\n"
-          "ui.setProp(t, 96, 0xffffffff)\n"
-          "ui.setText(t, 'HELLO')\n"
+    .body={"bounds は [左,上,右,下]",
+           "のドット位置。画面は横",
+           "240 縦135。color は文字",
+           "の色。数字を変えて、文字",
+           "を右下の赤にしてみよう。"},
+    .hint="赤は 0xff4040ff。下は135まで",
+    .code="pocket.kasane.replace(tx => {\n"
+          "  tx.background(0x2050a0ff)\n"
+          "  tx.text({bounds: [40, 60, 240, 78],\n"
+          "    color: 0xffffffff, text: 'HELLO'})\n"
+          "})\n"
           "globalThis.frame = () => {}\n",
-    .preload=true, .prelude=PRELUDE_T,
+    .preload=true, .prelude=NULL,
     .check=CHECK_CHANGED, .want="0xffffffff",
 },
 {
     .title="ボタンで数える",
-    .body={"最後の行の係は、画面が出て",
-           "いる間ずっと呼ばれ、b に",
-           "押されたキーが入ります。",
-           "if (b & 0x4000) は「もし",
-           "Enter が押されたら」。"},
+    .body={"frame の係は画面が出てい",
+           "る間ずっと呼ばれ、b には",
+           "押されたキー。b & 0x4000",
+           "は Enter のこと。patch は",
+           "t の文字だけを書き換える。"},
     .hint="Enter で数が増えれば合格",
     .code="let n = 0\n"
           "globalThis.frame = (b) => {\n"
           "  if (b & 0x4000) {\n"
           "    n = n + 1\n"
-          "    ui.setText(t, 'COUNT ' + n)\n"
+          "    pocket.kasane.patch(tx => t.setText(tx, 'COUNT ' + n))\n"
           "    print('ENTER ' + n) } }\n",
     .preload=true, .prelude=PRELUDE_T,
     .check=CHECK_PRINTS_PREFIX, .want="ENTER ",
 },
 {
     .title="おまけ 日本語",
-    .body={"97 は字体の番号。2 に",
-           "すると日本語が使えます。",
-           "Ctrl+J でかな入力に切替",
-           "（もう一度押すと戻る）。",
+    .body={"日本語もそのまま書けます。",
+           "font は字体で 'body' が",
+           "日本語向き。Ctrl+J で",
+           "かな入力（もう一度で戻る）",
            "'こんにちは' を名前に。"},
     .hint="そのまま実行でも合格",
-    .code="ui.setProp(t, 97, 2)\n"
-          "ui.setText(t, 'こんにちは')\n"
+    .code="pocket.kasane.replace(tx => {\n"
+          "  tx.background(0x2050a0ff)\n"
+          "  tx.text({bounds: [40, 60, 240, 78], font: 'body',\n"
+          "    color: 0xffffffff, text: 'こんにちは'})\n"
+          "})\n"
           "globalThis.frame = () => {}\n",
-    .preload=true, .prelude=PRELUDE_T,
-    .check=CHECK_JAPANESE, .want="97, 2)",
+    .preload=true, .prelude=NULL,
+    .check=CHECK_JAPANESE, .want="'body'",
 },
 };
 
@@ -144,16 +155,16 @@ const lesson_t *lesson_at(unsigned index) {
     return index<LESSON_N ? &LESSONS[index] : &LESSONS[0];
 }
 
-// Numbers stay opaque however carefully a chapter explains them, so they are
-// also gathered where Tab can reach them from any chapter.
+// The calls and numbers stay opaque however carefully a chapter explains them,
+// so they are also gathered where Tab can reach them from any chapter.
 static const char *const REFERENCE[LESSON_REF_ROWS] = {
-    "番号の意味 (ui.setProp)",
-    " 1  画面そのもの",
-    "64  背景の色",
-    "28  左から何ドット",
-    "25  上から何ドット",
-    "96  文字の色",
-    "97  字体 0:小 1:大 2:日本語",
+    "pocket.kasane の書き方",
+    "replace(tx=>{}) 描き直す",
+    "patch(tx=>{}) 一部だけ",
+    "tx.background(色) 背景",
+    "tx.text({...}) 文字",
+    "bounds [左,上,右,下]",
+    "色 0xRRGGBBff 画面240x135",
 };
 
 const char *lesson_reference(unsigned row) {

@@ -76,18 +76,17 @@ static code_state_t state;
 #define HSCROLL_EDGE 24
 
 // Draws something on the first frame, so a run that works looks like it did.
-// The property numbers are the host's; see apps/hello/main.js for the full set.
+// It draws through pocket.kasane, as apps/hello/main.js does at greater length.
 static const char TEMPLATE[] =
-    "const t = ui.createNode(1);\n"
-    "ui.setProp(t, 24, 1);\n"
-    "ui.setProp(t, 28, 16); ui.setProp(t, 25, 40);\n"
-    "ui.setProp(t, 1, 208); ui.setProp(t, 2, 18);\n"
-    "ui.setProp(t, 96, 0xf0f8ffff); ui.setProp(t, 97, 1);\n"
-    "ui.setText(t, 'Hello!');\n"
-    "ui.insertBefore(1, t, 0);\n"
-    "let n = 0;\n"
+    "const view = pocket.kasane;\n"
+    "let n = 0, t;\n"
+    "view.replace(tx => {\n"
+    "  tx.background(0x071425ff);\n"
+    "  t = tx.text({bounds: [16, 40, 224, 58], font: 'display',\n"
+    "    color: 0xf0f8ffff, text: 'Hello!', capacity: 32});\n"
+    "});\n"
     "globalThis.frame = (b) => {\n"
-    "  if (b & 0x4000) ui.setText(t, 'ENTER ' + (++n));\n"
+    "  if (b & 0x4000) view.patch(tx => t.setText(tx, 'ENTER ' + (++n)));\n"
     "};\n";
 
 code_state_t code_state(void) { return state; }

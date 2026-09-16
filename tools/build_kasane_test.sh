@@ -27,7 +27,7 @@ gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Wer
   -fno-omit-frame-pointer \
   -I "$QJS" -I tools/hostshim -I main -I main/pocket -I main/ui -I main/ui/kasane \
   -I main/text -I main/hal -I "$CACHE" \
-  "$TEST_SOURCE" tools/hostshim/pocket_api_stub.c \
+  "$TEST_SOURCE" ${EXTRA_SOURCES:-} tools/hostshim/pocket_api_stub.c \
   main/text/ksn_font.c tools/hostshim/jpfont.c \
   main/pet/ksn_pet.c main/pet/pet_pixels.c tools/hostshim/ksn_pet_builtin.c \
   main/pocket/pocket_kasane.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
