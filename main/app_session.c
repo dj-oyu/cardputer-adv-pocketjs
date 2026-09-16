@@ -166,6 +166,15 @@ static bool uses_legacy_ui(const char *s, size_t n) {
     return false;
 }
 
+// Whether a source can reach pocket.kasane at all. A plain substring and not a
+// parse: a hit in a comment only costs that session the arena a little early,
+// and a program that builds the name at run time still gets it lazily at its
+// first call, only with the heap already split around the guest.
+static bool names_kasane(const char *s, size_t n) {
+    for(size_t i=0;i+6<=n;i++) if(!memcmp(s+i,"kasane",6)) return true;
+    return false;
+}
+
 // THE ONE PLACE THE GUEST'S LIFETIME CHANGES.
 //
 // Until now a session was bounded by entering and leaving an app screen: the
@@ -704,6 +713,14 @@ source_ready:;
         if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
     }
 #endif
+    // The native Kasane arena is ~9.9 KiB. Taken at the guest's first Kasane
+    // call it lands between allocations the guest has just made and splits the
+    // largest free block; taken here, before evaluation, it is one block from
+    // an unbroken heap (docs/kasane/kasane-guest-memory-reduce.md). Overlays
+    // have no pocket.kasane, and a source that never names it pays nothing.
+    if(!overlay_session&&(names_kasane(source,length)||
+       (user_prelude&&names_kasane(user_prelude,user_prelude_length))))
+        pocket_kasane_prepare();
     if(user_source) err=eval_user_source(source,length);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
     pocket_kasane_end_turn();

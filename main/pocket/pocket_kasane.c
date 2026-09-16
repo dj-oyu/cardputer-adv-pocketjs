@@ -67,18 +67,29 @@ static JSValue throw_result(JSContext *ctx, ksn_result result, const char *op) {
                             POCKET_OUTCOME_NOT_APPLIED);
 }
 
+/* The state lives in the runtime's single block (attach_tail), so the whole
+ * native arena is one allocation and the runtime frees it on detach. */
+static ksn_result attach_state(const char *op) {
+    kasane_state *candidate=NULL;ksn_app_lease lease;
+    ksn_result result=ksn_runtime_app_attach_tail(&lease,sizeof(*candidate),(void **)&candidate);
+    (void)op;
+    if(result!=KSN_OK) return result;
+    candidate->lease=lease;state=candidate;
+    return KSN_OK;
+}
+
 static bool ensure_state(JSContext *ctx, const char *op) {
     if(state) {
         if(ksn_runtime_app_view(state->lease))return true;
         throw_result(ctx,KSN_STALE,op);return false;
     }
-    kasane_state *candidate=calloc(1,sizeof(*candidate));
-    ksn_result result=candidate?ksn_runtime_app_attach(&candidate->lease):KSN_OOM;
-    if(result!=KSN_OK) {
-        free(candidate);throw_result(ctx,result,op);return false;
-    }
-    state=candidate;
+    ksn_result result=attach_state(op);
+    if(result!=KSN_OK) { throw_result(ctx,result,op);return false; }
     return true;
+}
+
+void pocket_kasane_prepare(void) {
+    if(!state) (void)attach_state("prepare");
 }
 
 /* No JS calls after allocation: attach only a complete first definition, so
@@ -1410,7 +1421,7 @@ esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data) {
 
 void pocket_kasane_reset(void) {
     if(state&&ksn_runtime_app_detach(state->lease)==KSN_BUSY)return;
-    free(state);state=NULL;
+    state=NULL;   /* the runtime released it with the lease */
 }
 bool pocket_kasane_active(void) { return state&&state->active; }
 ksn_result pocket_kasane_update_notice(const sys_notice *notice,uint16_t variant){

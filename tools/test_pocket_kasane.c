@@ -400,15 +400,16 @@ static void base_block_tests(void) {
     check(open_fault_runtime(""),"base block fixture opens");
     pocket_kasane_reset();track_native=true;
     ksn_render_stats stats;
-    for(int fault=0;fault<6;fault++) {
+    /* One allocation: runtime control, both banks and the adapter state. */
+    for(int fault=0;fault<1;fault++) {
         native_after=fault;native_max=0;
         check(run("var failed=false;try{kasane.replace(tx=>tx.rect(shape))}"
                   "catch(e){failed=e.code==='OUT_OF_MEMORY'}if(!failed)throw Error('missing OOM');"
                   "if(kasane.stats().nativeBytes!==0||kasane.stats().active)throw Error('partial state');"),
               "each base allocation failure leaves no published state");
-        native_after=-1;
-        check(native_bytes==0&&native_max<=3072&&!pocket_kasane_has_submission(),
-              "failed base blocks reclaimed and bounded");
+        native_after=-1;size_t calls_before=native_calls;
+        check(native_bytes==0&&native_max<=KSN_RUNTIME_BASE_BUDGET+KSN_RUNTIME_TAIL_BUDGET&&
+              !pocket_kasane_has_submission(),"failed base blocks reclaimed and bounded");
         check(run("kasane.replace(tx=>{tx.background(0x000000ff);globalThis.r=tx.rect(shape)});"),
               "base allocation retries successfully");
         check(present(&stats)==KSN_OK,"retried base presents");
@@ -416,13 +417,30 @@ static void base_block_tests(void) {
         snprintf(accounting,sizeof(accounting),
                  "if(kasane.stats().nativeBytes!==%zu)throw Error('base accounting');",native_bytes);
         check(run(accounting),"base stats match allocated block sizes");
-        check(native_max<=3072,"all successful base allocations are bounded");
+        check(native_max<=KSN_RUNTIME_BASE_BUDGET+KSN_RUNTIME_TAIL_BUDGET&&native_calls==calls_before+1,
+              "the base arena is one bounded allocation");
         size_t calls=native_calls;
         check(run("kasane.patch(tx=>r.setColor(tx,0xabcdef80));"),"patch uses reserved blocks");
         check(present(&stats)==KSN_OK,"patch presents from reserved blocks");
         check(native_calls==calls,"patch and present allocate no native blocks");
         pocket_kasane_reset();check(native_bytes==0,"reset releases all base blocks");
     }
+    /* prepare(): the same block before any guest call, silent on failure. */
+    native_after=0;pocket_kasane_prepare();native_after=-1;
+    check(native_bytes==0&&!pocket_kasane_active(),"prepare under OOM reserves nothing and stays silent");
+    size_t calls=native_calls;
+    pocket_kasane_prepare();pocket_kasane_prepare();
+    check(native_calls==calls+1&&native_bytes>0&&!pocket_kasane_active()&&!pocket_kasane_has_submission(),
+          "prepare reserves the arena once without claiming the display");
+    char prepared[160];
+    snprintf(prepared,sizeof(prepared),"if(kasane.stats().nativeBytes!==%zu||kasane.stats().active)"
+             "throw Error('prepared accounting');",native_bytes);
+    check(run(prepared),"prepared arena is reported before first use");
+    calls=native_calls;
+    check(run("kasane.petImage();kasane.replace(tx=>{tx.background(0x000000ff);tx.rect(shape)});")&&
+          native_calls==calls&&pocket_kasane_active(),"first Kasane calls reuse the prepared arena");
+    check(present(&stats)==KSN_OK,"prepared arena presents");
+    pocket_kasane_reset();check(native_bytes==0,"reset releases a prepared arena");
     track_native=false;close_fault_runtime();
 }
 

@@ -1,5 +1,6 @@
 #include "ksn_runtime.h"
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
     ksn_core core;
@@ -7,42 +8,53 @@ typedef struct {
     ksn_cache *cache;
     ksn_core_animation_block *animations;
     ksn_app_lease app;
+    /* The APP owner's control state (pocket_kasane.c's kasane_state): inside
+     * this block when the block was created for the APP, else its own calloc. */
+    void *tail;
+    uint32_t tail_capacity;
+    bool tail_separate;
     bool system_owned,app_active,hidden,reduce_motion;
 } runtime_storage;
+/* One allocation for the control state, both command banks and both text
+ * banks (and the APP tail). They used to be five callocs made while the guest
+ * was evaluating, and each cut a hole in the largest free block
+ * (docs/kasane/kasane-guest-memory-reduce.md). */
+typedef struct {
+    runtime_storage control;
+    ksn_core_command_block commands[2];
+    ksn_core_text_block text[2];
+} runtime_block;
 static runtime_storage *runtime;
 /* Process-lifetime identities prevent leases reviving after heap address reuse. */
 static uint32_t last_lease;
 _Static_assert(sizeof(runtime_storage)<=3072,"runtime control allocation budget");
-#define BASE_BYTES (sizeof(runtime_storage)+2*sizeof(ksn_core_command_block)+2*sizeof(ksn_core_text_block))
+#define BASE_BYTES ((sizeof(runtime_block)+KSN_RUNTIME_TAIL_ALIGN-1)&~(size_t)(KSN_RUNTIME_TAIL_ALIGN-1))
+_Static_assert(BASE_BYTES<=KSN_RUNTIME_BASE_BUDGET,"runtime block budget");
+_Static_assert(_Alignof(runtime_block)<=KSN_RUNTIME_TAIL_ALIGN,"tail offset alignment");
 
 static void free_cache(ksn_cache *cache){
     if(cache){free(cache->state.commands);free(cache->state.text);free(cache);}
 }
+static void release_tail(void){
+    if(runtime->tail_separate)free(runtime->tail);
+    runtime->tail=NULL;runtime->tail_separate=false;
+}
 static void destroy(void){
     free(runtime->animations);
     free_cache(runtime->cache);
-    for(unsigned i=0;i<2;i++){
-        free(runtime->core.state.banks[i].commands);
-        free(runtime->core.state.banks[i].text);
-    }
+    release_tail();
     free(runtime);runtime=NULL;
 }
-static ksn_result ensure(void){
+/* tail: bytes reserved after the block for the APP owner, 0 for SYSTEM. */
+static ksn_result ensure(uint32_t tail){
     if(runtime)return KSN_OK;
-    runtime_storage *r=calloc(1,sizeof(*r));
-    ksn_core_command_block *commands[2]={NULL,NULL};
-    ksn_core_text_block *text[2]={NULL,NULL};
-    if(!r)goto fail;
-    for(unsigned i=0;i<2;i++){
-        commands[i]=calloc(1,sizeof(*commands[i]));if(!commands[i])goto fail;
-        text[i]=calloc(1,sizeof(*text[i]));if(!text[i])goto fail;
-    }
-    ksn_core_bind(&r->core,commands[0],commands[1],text[0],text[1]);
+    runtime_block *b=calloc(1,BASE_BYTES+tail);
+    if(!b)return KSN_OOM;
+    runtime_storage *r=&b->control;
+    ksn_core_bind(&r->core,&b->commands[0],&b->commands[1],&b->text[0],&b->text[1]);
     ksn_view_host_init(&r->host,&r->core,NULL,0);
+    r->tail_capacity=tail;
     runtime=r;return KSN_OK;
-fail:
-    for(unsigned i=0;i<2;i++){free(commands[i]);free(text[i]);}
-    free(r);return KSN_OOM;
 }
 ksn_view *ksn_runtime_app_view(ksn_app_lease lease){
     return runtime&&lease.value&&lease.value==runtime->app.value?
@@ -52,11 +64,20 @@ ksn_view *ksn_runtime_app_system_view(ksn_app_lease lease){
     return ksn_runtime_app_view(lease)&&!runtime->system_owned?
         ksn_view_host_endpoint(&runtime->host,KSN_SYSTEM):NULL;
 }
-ksn_result ksn_runtime_app_attach(ksn_app_lease *out){
-    if(!out)return KSN_INVALID;
+ksn_result ksn_runtime_app_attach(ksn_app_lease *out){return ksn_runtime_app_attach_tail(out,0,NULL);}
+ksn_result ksn_runtime_app_attach_tail(ksn_app_lease *out,uint32_t bytes,void **tail){
+    if(!out||(bytes&&!tail)||bytes>KSN_RUNTIME_TAIL_BUDGET)return KSN_INVALID;
     if(runtime&&(runtime->app.value||runtime->host.presenting))return KSN_BUSY;
     if(last_lease==UINT32_MAX)return KSN_LIMIT;
-    ksn_result r=ensure();if(r!=KSN_OK)return r;
+    bool created=!runtime;
+    ksn_result r=ensure(bytes);if(r!=KSN_OK)return r;
+    if(bytes){
+        void *p;
+        if(runtime->tail_capacity>=bytes){p=(char *)runtime+BASE_BYTES;memset(p,0,bytes);}
+        else if(!(p=calloc(1,bytes))){if(created)destroy();return KSN_OOM;}
+        else runtime->tail_separate=true;
+        runtime->tail=p;*tail=p;
+    }
     runtime->app=(ksn_app_lease){++last_lease};*out=runtime->app;return KSN_OK;
 }
 ksn_result ksn_runtime_app_detach(ksn_app_lease lease){
@@ -64,6 +85,7 @@ ksn_result ksn_runtime_app_detach(ksn_app_lease lease){
     ksn_result r=ksn_view_host_reset_app(&runtime->host);if(r!=KSN_OK)return r;
     runtime->app=(ksn_app_lease){0};runtime->app_active=false;
     if(!runtime->system_owned)destroy();
+    else release_tail();
     return KSN_OK;
 }
 void ksn_runtime_app_end_turn(ksn_app_lease lease){
@@ -75,7 +97,7 @@ void ksn_runtime_app_activate(ksn_app_lease lease){
 }
 ksn_result ksn_runtime_system_acquire(ksn_view **out){
     if(!out)return KSN_INVALID;
-    ksn_result r=ensure();if(r!=KSN_OK)return r;
+    ksn_result r=ensure(0);if(r!=KSN_OK)return r;
     runtime->system_owned=true;*out=ksn_view_host_endpoint(&runtime->host,KSN_SYSTEM);
     return KSN_OK;
 }

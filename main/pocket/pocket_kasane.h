@@ -6,12 +6,17 @@
 #include "ui/kasane/ksn_view_host.h"
 #include "system/sys_notify.h"
 
-/* QuickJS-facing APP lease into the native Kasane runtime. Allocation is lazy;
- * reading features costs no arena. Reset detaches APP and releases its wrapper
+/* QuickJS-facing APP lease into the native Kasane runtime. Allocation is lazy
+ * (first Kasane call, or pocket_kasane_prepare); reading features costs no arena. Reset detaches APP and releases its wrapper
  * bookkeeping; a native SYSTEM owner keeps the shared storage alive.
  * Owner task only, reset outside guest/render callbacks. */
 esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data);
 void pocket_kasane_reset(void);
+/* Takes the native arena now, as one block, instead of at the guest's first
+ * Kasane call. The session calls it before evaluating a source that names
+ * kasane, while the heap is still unbroken. Failure is silent: the first call
+ * then retries and reports OUT_OF_MEMORY where the app can see it. */
+void pocket_kasane_prepare(void);
 
 bool pocket_kasane_active(void);
 ksn_result pocket_kasane_update_notice(const sys_notice *,uint16_t variant);
