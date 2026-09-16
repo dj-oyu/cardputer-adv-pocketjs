@@ -713,7 +713,7 @@ v0.14.0（`3c051980ab`）以降に上流へ入った use-after-free / double fre
 | d98ff101c6 | `.length` を伸ばした fast array への push | 移植 | `8af66ab`。回帰 `array_push_length_hole.js`: 修正前は `hasOwnProperty(1)` が真、`Object.keys` に穴が出る（o2 では未初期化スロットに `3` が見えた）。ASan は未初期化読みなので検出しない。修正後は正しい |
 | 49131a6315 | Promise.withResolvers の OOM 時二重解放 | 移植 | `0a869c7`。回帰 `oom_with_resolvers.js`（`--fail-alloc 1370`、1250〜1400 を修正前 ASan で掃引し 1370/1371 が該当）: 修正前は asan/recur/flat で UAF、修正後は捕捉 |
 | 776d724cfa | resolving functions 生成時 OOM の UAF | 不要 | `js_create_resolving_functions` は独自修正（失敗時に [0] を解放して UNDEFINED にする）で同等。async 関数・async generator 側の3つの呼び出し元（`js_async_function_settle_core` 23293、`js_async_generator_await` 23552、`js_async_generator_completed_return` 23647）は、失敗時に `resolving_funcs` を解放しない |
-| 7955cfd49e | 中断中コルーチンの closure 経由 UAF | 分析のみ | 上流テスト3本が asan / recur / flat / alloca の全変種で UAF を再現。移植設計とリスクは backlog #13 |
+| 7955cfd49e | 中断中コルーチンの closure 経由 UAF | 移植 | §4.23（分析時点では分析のみ。上流テスト3本が asan / recur / flat / alloca の全変種で UAF を再現。移植設計とリスクは backlog #13） |
 | 4369dd6488 | detach 済み ArrayBuffer の二重解放 | 不要 | ファイナライザは detach 後 `free_func(NULL)` を呼ぶだけ。ファームは free_func に NULL を渡している（`ui_qjs.c:770`） |
 | 396e1e0b4f | JS_FreeCStringUTF16 と slice 文字列 | 不要 | ファームから使っていない API |
 | 05b2db95d9 / d0c2272126 | (Async)DisposableStack の UAF | 該当なし | 機能自体がない |
@@ -731,6 +731,68 @@ v0.14.0（`3c051980ab`）以降に上流へ入った use-after-free / double fre
   - `gc_obj_list` の一貫性。
   - **再入**: `close_var_refs` で所有者の参照カウントが0になり、同じフレームへ再入しうる。L2c の Discard に固有ではなく、通常完了（`async_func_free` 22952）でも起きる。ガードは `close_var_ref` 自体に置き、22952 と 22556 の両方の呼び出しに効かせる（レビューで訂正）。
   - 毎中断GC・force-yield・asan-tco との組み合わせ。
+
+移植は §4.23。上の「再入」のガードは、レビュー後の設計で「到達不能、assert で不変条件として書く」に改めた（§4.23）。
+
+### 4.23 中断中コルーチンの closure 経由 UAF：上流 7955cfd49e の移植（backlog #13、2026-09-17、`vm/l2-memory-safety`）
+
+上流の設計（コルーチンのローカルを捕捉した open var_ref を GC オブジェクトにし、所有コルーチンへの参照を持たせる）をそのまま使い、置き場所だけ変えた。
+
+| 上流 | こちら | 理由 |
+| --- | --- | --- |
+| `JSStackFrame.cur_gc_obj`（ポインタ） | `coro_kind`（1B、パディング）＋ `js_coro_owner()` が container_of で所有者を求める | 48→52B を避ける。`JSStackFrame==48`（新設）と `JSAsyncFunctionData==104`（FLATCALLS 以外にも新設）のアサートで固定 |
+| — | `JSGeneratorData.generator`（逆ポインタ、+4B） | generator だけ Data から JSObject へ戻る手段がなかった。async generator は既存 |
+| `JSVarRef.is_coro`（ヘッダ隣） | open 側 union のパディング | 空きがない。close 時の `value` 書き込みで潰れるので、`close_var_ref` は `js_dup` より前に所有者と `is_coro` を読み、全読者は `is_detached` を先に判定 |
+
+レビュー（別モデル、敵対的）で必須とされ、入れた5点:
+1. `coro_kind` は**所有 JSObject の生成後**に立てる（generator・async generator は生成直後、async 関数は `is_active=true` の後、flat 経路も同じ）。プロローグ（`OP_initial_yield` まで）の mapped arguments・既定引数 closure は通常の open var_ref のまま。失敗経路は kind 0 のまま閉じる。
+2. SEG ブロックも JSVarRef も zero 化されないので、フレーム生成の全箇所（`JS_CallInternal`、`async_func_init`、TCO の再利用）で `coro_kind=0`、`get_var_ref` で `is_coro` を必ず書く。
+3. リスト操作: `close_var_ref` は `is_coro` なら `add_gc_object` しない（既に登録済み）。`free_var_ref` の open 経路は「slot を NULL → `remove_gc_object` → 所有者 release → free」の順（release が arg_buf を解放しうる）。
+4. 再入: `close_var_refs` 走査中に所有者が解放される経路は、open var_ref 自身が参照を持つので到達不能。上流の `close_var_ref` 冒頭にある「既に detached なら return」は入れず、`close_var_ref` の release 地点に置いた assert「REMOVE_CYCLES 以外では release 前の refcount>1」で不変条件として書いた（専用の release ヘルパ `js_coro_release` には置いていない）。
+5. `mark_children(VAR_REF)` の `assert(is_detached)` を、open なら `is_coro` を assert して所有者を mark する形に緩めた。holder 側の mark（`js_bytecode_function_mark`・VARREF プロパティ・`js_mapped_arguments_mark`）は `is_detached || is_coro` を辿る。
+
+**回帰**（実測(host)。コミット `5e6d244`）:
+
+| ファイル | 内容 | 修正前 | 修正後 |
+| --- | --- | --- | --- |
+| `coro_closure_gc.js` | 上流3本（async closure、async mapped arguments、generator の循環）＋ async generator の closure、各ケースの後で `$262.gc()` | asan・asan-alloca とも heap-use-after-free。上流3本は切り出して asan / -recur / -flat / -alloca の4変種で UAF（§4.22） | asan・asan-alloca・asan-flat とも正しい出力、ASan 報告なし |
+| `coro_prologue_gc.js` | generator・async generator のプロローグで mapped arguments と既定引数 closure を捕捉 | **鳴らない**（プロローグの var_ref は修正前後とも通常の open var_ref） | 正しい出力 |
+
+`coro_prologue_gc.js` は修正前の穴を再現するケースではなく、1. の順序を守るガード。`coro_kind` をプロローグ前（`async_func_resume` の前）に立てる変異を一時コピーに入れると、asan ビルドで UBSan が `js_coro_owner` の NULL 参照（`JSGeneratorData.generator` がまだ無い）を報告して落ちる（実測(host)）。プロローグで捕捉したものを generator 自身と循環させた追加の試行も、修正前後とも鳴らなかった。
+
+**関所**（実測(host)、コミット済みの `aa602e1` をビルド。修正前は HEAD=`75cc6c7` のコピー）:
+
+| 検査 | 修正前 | 修正後 |
+| --- | --- | --- |
+| コーパス asan・o2・-recur・-flat | — | 各 75/75 |
+| コーパス -alloca（asan・o2） | — | 72/72＋skip 3（既存） |
+| `--force-yield`（asan-yield、全件） | 73/75（`coro_closure_gc`・`seg_oom_boundary`） | 74/75（`seg_oom_boundary`） |
+| `--gc-on-yield --force-yield`（asan-yield、中断・コルーチン・TCO 関連27件） | 25/27（`coro_closure_gc`・`tco_guards`） | 26/27（`tco_guards`） |
+| asan-tco（全件） | 73/75（`coro_closure_gc`・`seg_oom_boundary`） | 74/75（`seg_oom_boundary`） |
+| asan-tco `--gc-on-yield`（同27件） | 26/27（`coro_closure_gc`） | 27/27 |
+| `tco_probe.py`（n=100000 gc=0、n=100 gc=1） | OK | OK |
+| Test262 asan / o2 | — | 7,501 pass、regressions 0 |
+| `budget_probe.sh o2` / `oom_canary_probe.sh` asan・o2 | — | 11/11 / 5/5・5/5 |
+
+修正前後で結果が変わったのは `coro_closure_gc` だけ。修正後も残る2件は、修正前と差分がバイト一致の既存失敗で、この移植とは独立（原因は未調査、backlog #15）:
+- `seg_oom_boundary`: -yield / -tco / `--force-yield` で2回目の OOM が `InternalError` でなく `null`。
+- `tco_guards`: `--gc-on-yield --force-yield` で 300 秒のタイムアウト（exit=124）。
+
+毎中断GC＋強制中断を全件で回す最初の試行は、ベンチ系が 300 秒上限まで走って片側1時間を超え、Windows 側のメモリ不足でジョブが止められた。そのため関連27件に絞った（§4.10 などと同じ運用）。
+
+**実機**（実測(device)、COM3、hello）: 修正後の `build_coro` で smoke 20周・故障回復6種 OK。`memlog.py --check` を、修正前 `build_uaf`（`75cc6c7` と同じコード、同じ作業ツリーのパス）と修正後 `build_coro` で比べた:
+
+| | 修正前 | 修正後 | 差 |
+| --- | ---: | ---: | ---: |
+| Flash | 1,611,164 | 1,611,484 | +320 |
+| 静的 DIRAM | 144,708 | 144,708 | 0 |
+| `idle_free` / `app_free` / `app_largest` / `js` | 248,720 / 145,092 / 102,400 / 96,068 | 同値 | 0 |
+
+- Flash の比較元は揃える必要がある。並行セッションの草稿の +272B は、別 worktree（`.claude/worktrees/coro-head/build_base`、1,611,216B）を比較元にしていた。同じコードの `build_uaf` は 1,611,164B で、ビルドディレクトリのパスによる 52B の差を含むので採らない。`build_coro` の map は後で同じソースから再ビルドされ、今は 1,611,488B（`build_uaf` 比 +324）。
+- 同じ草稿にあった `app_free` −68B・`js` +68B は、こちらの測定（差 0）では再現していない。
+- generator 1個あたり +4B（`JSGeneratorData.generator`）は、generator を使わない hello では測れていない。
+
+**コミット `aa602e1` の本文の訂正**: 本文の「close_var_ref guards re-entry」は誤り。コミットされた `close_var_ref`（quickjs.c:18551〜）には再入ガード（detached なら return）が無い。代わりに release 地点で `assert(rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES || js_coro_owner(sf)->ref_count > 1)`（18575 付近）を置き、「`close_var_refs` 走査中の再入は、open var_ref 自身が所有者の参照を持つので到達不能」という不変条件を形にしている。これは別モデルレビューの結論（ガードではなく release 前 refcount>1 の assert で書く）と一致し、assert は専用の release ヘルパではなく `close_var_ref` の release 地点にある。経緯: 同じ作業ツリーで並行セッションが同じ移植を進めていて、その quickjs.c の編集（ガードの削除と assert への置き換え、FLATCALLS 以外向けの `JSAsyncFunctionData==104` アサートの追加、コメントの拡張）が、気づかれないまま `aa602e1` に入った。本文はその前の版の説明のまま。履歴は書き換えず、ここで訂正する。
 
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 
