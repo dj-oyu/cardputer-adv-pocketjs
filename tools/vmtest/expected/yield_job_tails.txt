@@ -1,0 +1,5 @@
+finally 66
+values 4,9,rejected
+order handler:66,species:66,thenable:66,microtask,species:66
+generator [{"value":66,"done":false},"generator",{"done":true}]
+exit=0

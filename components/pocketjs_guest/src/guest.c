@@ -10,6 +10,13 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "quickjs-libc.h"
+#include "quickjs-vm.h"
+#if defined(CONFIG_POCKET_VM_YIELD) || defined(CONFIG_POCKET_VM_PROBE)
+#include "esp_timer.h"
+#endif
+#ifdef CONFIG_POCKET_VM_YIELD
+#include "freertos/FreeRTOS.h"
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
 #include <stdio.h>
 #include "quickjs-vm.h"
@@ -123,6 +130,13 @@ struct pocketjs_guest {
    * turn's continuation drain share one deadline measured from turn start. */
   vm_budget_t budget;
   bool jobs_pending;
+#ifdef CONFIG_POCKET_VM_YIELD
+  bool suspended;
+  JSVMOrigin origin; /* HOST means the logical frame call, including async */
+  int64_t frame_us;
+  esp_timer_handle_t yield_timer;
+  bool yield_disabled;
+#endif
   uint32_t yields;
   uint32_t continuations;
   /* What ONE LOGICAL DRAIN has cost so far (sec.5.2): summed over the drain
@@ -143,6 +157,64 @@ struct pocketjs_guest {
   int (*watchdog)(void *);
   void *watchdog_opaque;
 };
+
+#ifdef CONFIG_POCKET_VM_YIELD
+/* The callback never keeps a guest pointer. Clearing this slot under the
+ * same lock joins its last runtime access even if stop races a fired timer.
+ * Only one guest executes JS at a time, as required by the host contract. */
+static portMUX_TYPE yield_mux = portMUX_INITIALIZER_UNLOCKED;
+static JSRuntime *yield_runtime;
+static int64_t yield_deadline;
+
+static void yield_alarm(void *unused) {
+  (void)unused;
+  portENTER_CRITICAL(&yield_mux);
+  if (yield_runtime && esp_timer_get_time() >= yield_deadline)
+    JS_VMRequestYield(yield_runtime);
+  portEXIT_CRITICAL(&yield_mux);
+}
+
+static void guest_run_end(pocketjs_guest_t *guest) {
+  if (!guest || !guest->runtime) return;
+  portENTER_CRITICAL(&yield_mux);
+  if (yield_runtime == guest->runtime) yield_runtime = NULL;
+  portEXIT_CRITICAL(&yield_mux);
+  if (guest->yield_timer) (void)esp_timer_stop(guest->yield_timer);
+  JS_VMClearYield(guest->runtime);
+}
+
+static esp_err_t guest_run_begin(pocketjs_guest_t *guest) {
+  if (!guest || !guest->runtime || guest->yield_disabled ||
+      guest->budget.limit_ticks == 0) return ESP_OK;
+  if (!guest->yield_timer) {
+    const esp_timer_create_args_t args = {
+      .callback = yield_alarm, .name = "vm-yield"};
+    esp_err_t err = esp_timer_create(&args, &guest->yield_timer);
+    if (err != ESP_OK) return err;
+  }
+  const vm_clock_fn clock = guest->budget.clock ? guest->budget.clock : vm_clock_now;
+  const vm_tick_t elapsed = clock() - guest->budget.start;
+  if (elapsed >= guest->budget.limit_ticks) {
+    JS_VMRequestYield(guest->runtime);
+    return ESP_OK;
+  }
+  uint64_t delay = (guest->budget.limit_ticks - elapsed) / guest->budget.ticks_per_us;
+  if (!delay) delay = 1;
+  portENTER_CRITICAL(&yield_mux);
+  yield_runtime = guest->runtime;
+  yield_deadline = esp_timer_get_time() + delay;
+  portEXIT_CRITICAL(&yield_mux);
+  esp_err_t err = esp_timer_start_once(guest->yield_timer, delay);
+  if (err != ESP_OK) guest_run_end(guest);
+  return err;
+}
+#else
+static esp_err_t guest_run_begin(pocketjs_guest_t *guest) {
+  (void)guest;
+  return ESP_OK;
+}
+static void guest_run_end(pocketjs_guest_t *guest) { (void)guest; }
+#endif
 
 static void *guest_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;
@@ -309,15 +381,17 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
   guest->drain_us += guest->budget.elapsed;
   guest->drain_jobs += ran;
   guest->jobs_pending = (status == VM_DRAIN_YIELDED);
-  /* L2c gate (docs/vm/vm-L2-design.md sec.11.5/13): vm_sched_drain() can
-   * report a parked chain now, but nothing in this build can ever park one
-   * (every JS_VM* symbol is a pass-through, stage 1/2 of sec.12.15 do not
-   * touch quickjs.c) -- so this is here only so a real interpreter change
-   * later does not also have to teach this caller a new status value. The
-   * real handling (resume within the leave-turn budget, sec.12.11) lands
-   * with stage 4 (firmware integration). */
   if (status == VM_DRAIN_SUSPENDED) {
+#ifdef CONFIG_POCKET_VM_YIELD
+    guest->suspended = true;
+    guest->origin = JS_VMSuspendedOrigin(guest->runtime);
+    guest->jobs_pending = JS_IsJobPending(guest->runtime) ||
+                          guest->origin == JS_VM_ORIGIN_JOB_HELD;
+    guest->yields++;
+    return ESP_OK;
+#else
     return ESP_FAIL;
+#endif
   }
   if (status == VM_DRAIN_THREW) {
     if (context != NULL) {
@@ -506,7 +580,7 @@ static JSValue make_i32_array(JSContext *context, const int32_t *values,
   return array;
 }
 
-esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
+static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame) {
   if (guest == NULL || guest->context == NULL || frame == NULL ||
       frame->struct_size < sizeof(*frame) ||
@@ -517,6 +591,8 @@ esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
   if (!JS_IsFunction(guest->context, guest->frame)) {
     return ESP_ERR_INVALID_STATE;
   }
+  if (pocketjs_guest_suspended(guest))
+    return ESP_ERR_INVALID_STATE;
   JSValue arguments[4] = {
       JS_NewUint32(guest->context, frame->buttons),
       JS_NewUint32(guest->context, frame->analog),
@@ -555,8 +631,14 @@ esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
    * the two numbers add up to less than the turn rather than more. */
   const int64_t vmprobe_call_begin = esp_timer_get_time();
 #endif
-  JSValue result = JS_Call(guest->context, guest->frame, JS_UNDEFINED,
+#ifdef CONFIG_POCKET_VM_YIELD
+  const int64_t frame_begin = esp_timer_get_time();
+#endif
+  JSValue result = JS_VMCall(guest->context, guest->frame, JS_UNDEFINED,
                            argument_count, arguments);
+#ifdef CONFIG_POCKET_VM_YIELD
+  guest->frame_us = esp_timer_get_time() - frame_begin;
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
   vmprobe_call_us += (uint32_t)(esp_timer_get_time() - vmprobe_call_begin);
 #endif
@@ -564,6 +646,17 @@ esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
     JS_FreeValue(guest->context, arguments[index]);
   }
   guest->frames++;
+#ifdef CONFIG_POCKET_VM_YIELD
+  if (JS_VMSuspended(guest->runtime)) {
+    guest->suspended = true;
+    guest->origin = JS_VM_ORIGIN_HOST;
+    guest->jobs_pending = JS_IsJobPending(guest->runtime);
+    guest->yields++;
+    JS_FreeValue(guest->context, result);
+    return ESP_OK;
+  }
+  guest->frame_us = 0;
+#endif
   if (JS_IsException(result)) {
     js_std_dump_error(guest->context);
     JS_FreeValue(guest->context, result);
@@ -584,6 +677,14 @@ esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
   return jobs;
 }
 
+esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
+                               const pocketjs_guest_frame_t *frame) {
+  esp_err_t err = guest_run_begin(guest);
+  if (err == ESP_OK) err = guest_frame_impl(guest, frame);
+  guest_run_end(guest);
+  return err;
+}
+
 /* L1 sec.1.3: one budget per turn, armed by the host, shared by the frame()'s
  * drain and by every continuation drain of the same turn. Copied rather than
  * aliased -- the host's struct is a stack local of app_tick(). */
@@ -600,6 +701,51 @@ bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest) {
   return guest != NULL && guest->jobs_pending;
 }
 
+bool pocketjs_guest_suspended(const pocketjs_guest_t *guest) {
+#ifdef CONFIG_POCKET_VM_YIELD
+  return guest != NULL && guest->suspended;
+#else
+  (void)guest;
+  return false;
+#endif
+}
+
+bool pocketjs_guest_work_pending(const pocketjs_guest_t *guest) {
+  return pocketjs_guest_jobs_pending(guest) || pocketjs_guest_suspended(guest);
+}
+
+int64_t pocketjs_guest_frame_total(const pocketjs_guest_t *guest) {
+#ifdef CONFIG_POCKET_VM_YIELD
+  return guest != NULL ? guest->frame_us : 0;
+#else
+  (void)guest;
+  return 0;
+#endif
+}
+
+void pocketjs_guest_prepare_stop(pocketjs_guest_t *guest) {
+  if (!guest || !guest->runtime)
+    return;
+  guest_run_end(guest);
+#ifdef CONFIG_POCKET_VM_YIELD
+  if (JS_VMSuspended(guest->runtime)) {
+    JS_VMTerminate(guest->runtime);
+    JSValue result = JS_VMResume(guest->context);
+    JS_FreeValue(guest->context, result);
+    if (JS_HasException(guest->context))
+      JS_FreeValue(guest->context, JS_GetException(guest->context));
+    /* An async owner's C entry can reject a resume for stack exhaustion.
+     * Teardown must still close the chain before invoking any stop hook. */
+    if (JS_VMSuspended(guest->runtime))
+      JS_VMDiscard(guest->runtime);
+  }
+  guest->suspended = JS_VMSuspended(guest->runtime);
+  guest->origin = JS_VM_ORIGIN_NONE;
+  guest->frame_us = 0;
+#endif
+  guest->jobs_pending = JS_IsJobPending(guest->runtime);
+}
+
 void pocketjs_guest_drain_total(const pocketjs_guest_t *guest, int64_t *us,
                                 uint64_t *jobs) {
   if (us != NULL)
@@ -611,13 +757,68 @@ void pocketjs_guest_drain_total(const pocketjs_guest_t *guest, int64_t *us,
 /* The continuation drain of sec.2.1. It is the SAME drain as the one the
  * budget cut: no host code has called into JS between the two, so the job
  * order the guest observes is the order the pre-L1 single drain produced. */
-esp_err_t pocketjs_guest_continue(pocketjs_guest_t *guest) {
+static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
   if (guest == NULL || guest->context == NULL)
     return ESP_ERR_INVALID_STATE;
-  if (!guest->jobs_pending)
+  if (!pocketjs_guest_work_pending(guest))
     return ESP_OK;
   guest->continuations++;
+#ifdef CONFIG_POCKET_VM_YIELD
+  if (guest->suspended) {
+    const bool frame = guest->origin == JS_VM_ORIGIN_HOST;
+    const bool held = guest->origin == JS_VM_ORIGIN_JOB_HELD;
+    const int64_t began = esp_timer_get_time();
+    JSValue result = JS_VMResume(guest->context);
+    const int64_t elapsed = esp_timer_get_time() - began;
+    if (frame)
+      guest->frame_us += elapsed;
+    else if (guest->budget.limit_ticks != 0)
+      guest->drain_us += elapsed;
+#ifdef CONFIG_POCKET_VM_PROBE
+    if (frame) vmprobe_call_us += (uint32_t)elapsed;
+    else vmprobe_drain_us += (uint32_t)elapsed;
+#endif
+    guest->suspended = JS_VMSuspended(guest->runtime);
+    guest->jobs_pending = JS_IsJobPending(guest->runtime) ||
+                          (guest->suspended && held);
+    if (guest->suspended) {
+      guest->yields++;
+      JS_FreeValue(guest->context, result);
+      return ESP_OK;
+    }
+    guest->origin = JS_VM_ORIGIN_NONE;
+    guest->frame_us = 0;
+    if (JS_IsException(result)) {
+      js_std_dump_error(guest->context);
+      JS_FreeValue(guest->context, result);
+      guest->frame_errors++;
+      return ESP_FAIL;
+    }
+    JS_FreeValue(guest->context, result);
+    if (held) {
+      guest->jobs++;
+      guest->drain_jobs++;
+    }
+  }
+#endif
   return drain_jobs(guest);
+}
+
+esp_err_t pocketjs_guest_continue(pocketjs_guest_t *guest) {
+  esp_err_t err = guest_run_begin(guest);
+  if (err == ESP_OK) err = guest_continue_impl(guest);
+  guest_run_end(guest);
+  return err;
+}
+
+void pocketjs_guest_yield_enabled(pocketjs_guest_t *guest, bool enabled) {
+#ifdef CONFIG_POCKET_VM_YIELD
+  if (!guest) return;
+  guest->yield_disabled = !enabled;
+  if (!enabled) guest_run_end(guest);
+#else
+  (void)guest; (void)enabled;
+#endif
 }
 
 void pocketjs_guest_set_watchdog(pocketjs_guest_t *guest, int (*fn)(void *),
@@ -656,7 +857,7 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
       .jobs_pending = guest->jobs_pending,
       /* Live, not latched: app_report() runs before destroy, so the only
        * honest answer there is "is anything queued right now". */
-      .jobs_dropped = guest->jobs_dropped || JS_IsJobPending(guest->runtime),
+      .jobs_dropped = guest->jobs_dropped || guest->jobs_pending || JS_IsJobPending(guest->runtime),
   };
   return ESP_OK;
 }
@@ -682,12 +883,16 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
   if (guest == NULL) {
     return;
   }
+  guest_run_end(guest);
+#ifdef CONFIG_POCKET_VM_YIELD
+  if (guest->yield_timer) (void)esp_timer_delete(guest->yield_timer);
+#endif
   if (guest->runtime != NULL) {
     /* sec.3.2: whatever is still queued is discarded UNRUN, which is what
      * JS_FreeRuntime does anyway (ledger 03 fact 9) and what pocket_api_reset()
      * already chose for in-flight promises. Recorded as one bit because
      * counting would need a VM hook. */
-    guest->jobs_dropped = JS_IsJobPending(guest->runtime);
+    guest->jobs_dropped = guest->jobs_pending || JS_IsJobPending(guest->runtime);
 #ifdef CONFIG_POCKET_VM_PROBE
     /* D42 sizing: the frame segments' peak for this session, the same line
      * vmrun --stats prints on the host, so the standard segment size can be

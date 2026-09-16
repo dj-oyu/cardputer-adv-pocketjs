@@ -36,10 +36,16 @@
 extern "C" {
 #endif
 
+// Diagnostic-only, idle-runtime dispatch selection. No shipping symbol/field.
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+int vmtest_call_mode(JSRuntime *rt, int recursive);
+int vmtest_call_inputs_eager(JSRuntime *rt, int eager);
+#endif
+
 // Where a stop opportunity was: what ended (and what started) a gap.
 typedef enum {
     JS_VM_OPP_NONE = 0,
-    JS_VM_OPP_SAFEPOINT,   // one of the seven class-A opcode sites
+    JS_VM_OPP_SAFEPOINT,   // class-A branch or class-B completed push
     JS_VM_OPP_ENTER,       // JS entered from the host (outermost JS_CallInternal)
     JS_VM_OPP_LEAVE,       // outermost frame popped, control back in the host
 } JSVMOpportunity;
@@ -57,7 +63,7 @@ typedef struct {
 typedef uint64_t (*JSVMClock)(void);
 
 typedef struct JSVMState {
-    uint8_t force_yield;   // stop at every safepoint (kills the job before L2c)
+    uint8_t force_yield;   // stop at every yieldable A/B safepoint
     uint8_t gap_on;        // record gaps (needs a clock)
     uint8_t in_js;         // between an outermost ENTER and its LEAVE
     // Host-handler cadence while armed. Armed mode forces every poll into the
@@ -68,9 +74,14 @@ typedef struct JSVMState {
     int host_poll_left;
     JSVMClock clock;
     // counters (reported as #info by the harness)
-    uint64_t safepoints;   // class-A polls observed
-    uint64_t stops;        // forced yields taken (each one killed a job)
+    uint64_t safepoints;   // yieldable A/B sites (A polls before L2c)
+    uint64_t stops;        // forced stops accepted
     uint64_t enters, leaves;
+    // H14: sampled only at actual parks while the harness is armed. Segment
+    // bytes are live rounded frame bytes, not capacity or allocator overhead.
+    uint64_t susp_samples;
+    uint64_t susp_bytes_max;
+    uint64_t susp_async_frames; // maximum heap frames in any one parked chain
     uint64_t gaps;         // gaps closed inside JS
     uint64_t gap_ns_total;
     // G5 proper
@@ -83,7 +94,7 @@ typedef struct JSVMState {
 
 // ---- called by quickjs.c (definitions in quickjs-vm.c) ----
 
-// A class-A safepoint was reached while armed. `func` is the running
+// A class-A/B safepoint was reached while armed. `func` is the running
 // function's name atom (JS_ATOM_NULL if not bytecode); borrowed, not owned.
 // Returns nonzero when the VM must stop here.
 int js_vm_safepoint(JSRuntime *rt, JSVMState *vm, JSAtom func);
@@ -120,6 +131,7 @@ void vmtest_vm_report(JSRuntime *rt, JSContext *ctx, void *out);
 // segment already exists. Report prints one "#info vmstack ..." line
 // (nothing when the build has no segment stack).
 int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max);
+int vmtest_vmstack_configure_growth(JSRuntime *rt, size_t first, size_t maximum);
 void vmtest_vmstack_report(JSRuntime *rt, void *out);
 // D10: set the segment byte budget ALONE, leaving the C-stack limit where
 // JS_SetMaxStackSize put it (which sets both). 0 = no budget. This is how
@@ -133,21 +145,15 @@ int vmtest_vmstack_set_budget(JSRuntime *rt, size_t bytes);
 //
 // The gate (docs/vm/vm-L2-design.md sec.11.3/13): a fixed set of C callers that
 // can receive a "yielded" result from the VM and must know how to resume it.
-// Before the VM can actually suspend (stage 3 of sec.12.15), every one of
-// these is a plain pass-through -- JS_VMCall === JS_Call, JS_VMEval ===
-// JS_Eval, JS_VMSuspended is always false -- so wiring the gate in first
-// (stage 1) and the corpus guards second (stage 2) changes nothing about what
-// today's VM does. The point is to have the shape in place, and the harness
-// exercising it (run.sh --force-yield's rule below), before quickjs.c grows a
-// single suspend point.
+// With CONFIG_POCKET_VM_YIELD disabled these entry points remain plain
+// pass-throughs and JS_VMSuspended is always false.
 //
 // Where a suspended chain's resume ended up starting from. The four rows of
 // sec.12.4's table: a host-owned SEG floor is either a plain eval/call
 // (ORIGIN_HOST) or a job the scheduler put on hold mid-chain (ORIGIN_JOB_HELD,
-// D36); an async-function or async-generator floor completes its OWN job
-// normally, so the host never receives a suspended return for those --
-// ORIGIN_JOB_ASYNC is reported only after the fact, so a caller that fell
-// through JS_VMResume already knows which of the three just happened.
+// D36). An internal async continuation completes its job before the heap
+// owner resumes (ORIGIN_JOB_ASYNC). An async handler's initial stretch can
+// instead hold the enclosing job's tail, and reports ORIGIN_JOB_HELD.
 typedef enum {
     JS_VM_ORIGIN_NONE = 0,       // not suspended (or never has been this call)
     JS_VM_ORIGIN_HOST,           // JS_VMCall / JS_VMEval floor
@@ -155,10 +161,8 @@ typedef enum {
     JS_VM_ORIGIN_JOB_ASYNC,      // async function/generator floor
 } JSVMOrigin;
 
-// True while a chain is parked in rt->vm_susp. Pass-through build: always 0
-// (there is no vm_susp to set it), so every C caller that guards a suspend-
-// sensitive section with this check behaves exactly as before the gate
-// existed.
+// True while a chain is parked in rt->vm_susp. With POCKET_VM_YIELD off this
+// is the stage-1 pass-through and always returns 0.
 int JS_VMSuspended(JSRuntime *rt);
 
 // Where the most recently completed (or still-parked) chain's floor sits.
@@ -166,11 +170,23 @@ int JS_VMSuspended(JSRuntime *rt);
 // always false and there is never a floor to report.
 JSVMOrigin JS_VMSuspendedOrigin(JSRuntime *rt);
 
-// Resume a parked chain. Pass-through build: never called with anything
-// parked (JS_VMSuspended is always false), so this has no real body yet --
-// it exists so the four vmrun receivers (sec.12.9) can be written once,
-// against the eventual contract, rather than twice.
+// Resume a parked chain through its owner and finish any held job tail.
+// Check JS_VMSuspended again: JS_EXCEPTION alone is not an exception while
+// parked. A completed held job consumes its result and returns undefined.
 JSValue JS_VMResume(JSContext *ctx);
+
+// Terminate on the next resume, bypassing catch/finally even under OOM.
+// Discard releases a parked chain without running JS (also used at teardown).
+// Both are no-ops when no chain is parked, including pass-through builds.
+void JS_VMTerminate(JSRuntime *rt);
+void JS_VMDiscard(JSRuntime *rt);
+
+// Request may be called by another thread/timer while the runtime is alive.
+// Requests coalesce; only a retired A/B boundary on a yieldable floor accepts
+// one. Clear before a non-yielding leave turn. Stop/join the producer before
+// freeing the runtime. Neither function allocates or touches a JS context.
+void JS_VMRequestYield(JSRuntime *rt);
+void JS_VMClearYield(JSRuntime *rt);
 
 // JS_Call, wrapped so a caller that receives a suspended chain back can tell
 // it apart from a normal return. Pass-through build: identical to JS_Call.

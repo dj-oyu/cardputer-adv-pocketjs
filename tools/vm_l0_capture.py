@@ -68,6 +68,7 @@ import sys
 import time
 
 WORKLOADS = {
+    "X": "hello",
     "A": "sync_loop",
     "B": "deep_recursion",
     "C": "closures",
@@ -78,6 +79,8 @@ WORKLOADS = {
 # name -> mask, and the USB byte is chr(ord('P') + mask). Keep in step with
 # main/pocket/vmprobe.h's VMPROBE_COND_* and main.c's usb_stroke().
 CONDITIONS = {"base": 0, "ui": 1, "audio": 2, "wifi": 4, "all": 7}
+SEGMENT_SIZES = [(256, 1024), (256, 2048), (512, 2048), (512, 4096),
+                 (1024, 4096), (4096, 4096)]
 
 # Matched against main/pocket/vmprobe.c's format strings byte for byte. If one
 # of those changes, this is the other half of the change (the same rule
@@ -92,6 +95,8 @@ WINDOW_RE = re.compile(
     # L1 added this field (vm-l1-tuning): optional, so a log captured before
     # it exists still parses instead of being counted as a corrupted line.
     r"(?: drainrun_drop=(?P<drainrun_drop>\d+))?"
+    r"(?: depth_drop=(?P<depth_drop>\d+))?"
+    r"(?: frame_heap_n=(?P<frame_heap_n>\d+) continuation_heap_n=(?P<continuation_heap_n>\d+))?"
 )
 SAMPLES_RE = re.compile(r"VMPROBE S (?P<seq>\d+) (?P<name>\w+) (?P<n>\d+) (?P<values>[\d,]+)")
 STATIC_RE = re.compile(
@@ -99,6 +104,7 @@ STATIC_RE = re.compile(
     r"opt=(?P<opt>\S+) sizeof_jsvalue=(?P<sizeof_jsvalue>\d+) "
     r"sizeof_stackframe=(?P<sizeof_stackframe>\d+) "
     r"sizeof_varref=(?P<sizeof_varref>\d+) fw=(?P<fw>\S+) cond=(?P<cond>\d+)"
+    r"(?: stack_scope=(?P<stack_scope>\S+) stack_unit=(?P<stack_unit>\S+))?"
 )
 # Any of these in the stream means the run did not survive, and a short run
 # must never be reported as a clean one.
@@ -189,6 +195,9 @@ class Collector:
         self.static = None
         self.notes = []      # VMCOND / console lines, kept verbatim
         self.bad = 0
+        self.segment = None
+        self.segment_apply = None
+        self.recent = []
 
     def close(self):
         if self.current:
@@ -196,6 +205,15 @@ class Collector:
             self.current = None
 
     def feed(self, line):
+        if line:
+            self.recent.append(line[:200])
+            self.recent = self.recent[-12:]
+        if 'VMSEG APPLY ' in line:
+            self.segment_apply = {k: int(v) for k, v in re.findall(r'(\w+)=(-?\d+)', line)}
+            return
+        if '#info vmstack ' in line:
+            self.segment = {k: int(v) for k, v in re.findall(r'(\w+)=(\d+)', line)}
+            return
         if "VMPROBE STATIC" in line:
             m = STATIC_RE.search(line)
             if m:
@@ -224,7 +242,7 @@ class Collector:
             self.current["samples"][m.group("name")] = values
 
 
-def run_one(ser, letter, cond_name, seconds, reset):
+def run_one(ser, letter, cond_name, seconds, reset, segment_policy=None):
     """One (condition, workload) run: boot, set the condition, start the
     workload, listen for `seconds`, stop. Returns (collector, ended_early, ser)
     -- the port object because a stalled one is replaced rather than nursed."""
@@ -234,12 +252,18 @@ def run_one(ser, letter, cond_name, seconds, reset):
             hard_reset(ser)
             wait(ser, "HOME_READY", limit=15)
         else:
+            # Opening the USB serial device can leave a boot HOME_READY in
+            # the queue. It is not the acknowledgement of the q below.
+            ser.reset_input_buffer()
             ser.write(b"q")
             wait(ser, "HOME_READY")
     except Exception:
         ser = reopen(ser)
         hard_reset(ser)
         wait(ser, "HOME_READY", limit=15)
+    if segment_policy is not None:
+        ser.write('GHIJKO'[segment_policy].encode())
+        wait(ser, f'VMSEG SELECT policy={segment_policy}')
     ser.write(bytes([ord("P") + mask]))
     time.sleep(0.2)
     ser.write(letter.encode())
@@ -264,15 +288,22 @@ def run_one(ser, letter, cond_name, seconds, reset):
             early = True
             break
         c.feed(line)
-    c.close()
     if crash:
         raise RuntimeError(f"device crashed during {WORKLOADS[letter]}/{cond_name}: {crash}")
     if not early:
         ser.write(b"q")
         try:
-            wait(ser, "HOME_READY", limit=6)
+            deadline = time.monotonic() + 6
+            while True:
+                line = ser.readline().decode(errors='replace').strip()
+                c.feed(line)
+                if 'HOME_READY' in line:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('waiting for HOME_READY after stop')
         except RuntimeError as e:
             print(f"  (warning: {e})", flush=True)
+    c.close()
     return c, early, ser
 
 
@@ -325,6 +356,7 @@ def per_rep_medians(records, metric):
 
 
 def summarize(records, out=sys.stdout):
+    print("stack_hw_min is task-lifetime headroom, not per-app stack use; depth_fp is a separate instantaneous C-frame sample.", file=out)
     g = group(records)
     spread = per_rep_medians(records, "frame")
     order = [w for w in WORKLOADS.values() if any(k[0] == w for k in g)]
@@ -375,6 +407,7 @@ def summarize(records, out=sys.stdout):
 def markdown(records, out=sys.stdout):
     """The same numbers as summarize(), as the tables docs/vm/vm-L0-report.md
     carries, so the report is pasted from the data rather than retyped."""
+    print("`stack_hw_min`はUIタスク生涯の最小余裕であり、アプリ単独のスタック使用量ではない。\n", file=out)
     g = group(records)
     spread = per_rep_medians(records, "frame")
     order = [w for w in WORKLOADS.values() if any(k[0] == w for k in g)]
@@ -422,6 +455,9 @@ def main():
     p.add_argument("--workloads", default="ABCDEF",
                    help="letters to run, in order (default all six)")
     p.add_argument("--conditions", default="base,ui,audio,wifi,all")
+    p.add_argument('--segment-policy', type=int, choices=range(6),
+                   help='D42 probe sizes: 0=256/1024, 1=256/2048, 2=512/2048, '
+                        '3=512/4096, 4=1024/4096, 5=4096/4096')
     p.add_argument("--reps", type=int, default=1,
                    help="repetitions of the whole matrix in this invocation")
     p.add_argument("--rep-offset", type=int, default=0,
@@ -456,12 +492,14 @@ def main():
     for c in conds:
         if c not in CONDITIONS:
             p.error(f"unknown condition {c}")
+    if 'X' in letters and conds != ['base']:
+        p.error('hello requires --conditions base (no contention wrapper)')
 
     out_path = pathlib.Path(a.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     run_id = time.strftime("%Y%m%dT%H%M%S")
     ser = serial.Serial(a.port, 115200, timeout=0.2, write_timeout=3)
-    time.sleep(1.0)
+    time.sleep(1.5)  # allow the USB-open boot (~1.2 s) to finish before q
     written = []
     failures = []
     try:
@@ -474,13 +512,22 @@ def main():
                               f"({a.seconds:.0f}s) ===", flush=True)
                         try:
                             c, early, ser = run_one(ser, letter, cond,
-                                                    a.seconds, not a.no_reset)
+                                                    a.seconds, not a.no_reset, a.segment_policy)
                         except RuntimeError as e:
                             # One dead run must not take the other 89 with it:
                             # the failure is printed and the matrix goes on to
                             # the next cell, which starts from a fresh boot.
                             print(f"  FAILED: {e}", flush=True)
                             failures.append((rep, cond, letter, str(e)))
+                            continue
+                        if a.segment_policy is not None and (
+                            not c.segment_apply or c.segment_apply.get('policy') != a.segment_policy
+                            or c.segment_apply.get('result') != 0 or not c.segment
+                            or (c.segment_apply.get('first'), c.segment_apply.get('max')) != SEGMENT_SIZES[a.segment_policy]
+                            or (c.segment.get('seg_first'), c.segment.get('seg_max')) != SEGMENT_SIZES[a.segment_policy]):
+                            failures.append((rep, cond, letter, 'missing/failed segment configuration or report'))
+                            print('  FAILED: segment configuration/report not verified', flush=True)
+                            print(f'  apply={c.segment_apply} segment={c.segment} recent={c.recent!r}', flush=True)
                             continue
                         for note in c.notes:
                             print("  " + note, flush=True)
@@ -494,6 +541,9 @@ def main():
                             print("  WARNING: no VMPROBE WINDOW block seen -- is "
                                   "this a CONFIG_POCKET_VM_PROBE build?", flush=True)
                         for r in c.records:
+                            r['sample_errors'] = c.bad
+                            r['segment'] = c.segment
+                            r['segment_apply'] = c.segment_apply
                             r.update(run_id=run_id, rep=rep, condition=cond,
                                      workload=name, letter=letter,
                                      ended_early=early, static=c.static,
@@ -514,6 +564,8 @@ def main():
             summarize(written)
     finally:
         ser.close()
+    if failures:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

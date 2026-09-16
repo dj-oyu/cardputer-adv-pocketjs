@@ -1,0 +1,2 @@
+# Experimental strict tail-call reuse; use only with an isolated sdkconfig.
+CONFIG_POCKET_VM_TCO=y

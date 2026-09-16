@@ -45,6 +45,8 @@ static void est_stats(vmalloc_stats_t *out) {
   out->free_bytes = g_est->stat.free;
   out->largest_free_block = g_est->stat.max_free;
   out->blocks_used = 0; // est_take_statistics does not count blocks; left 0, not fabricated.
+  out->pool_free_bytes = g_est->stat.free;
+  out->pool_largest_free = g_est->stat.max_free;
 }
 
 static int est_do_check(void) {

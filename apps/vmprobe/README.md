@@ -18,6 +18,22 @@ USB の 1 バイトだけで起動する（`main/main.c` の `usb_stroke()`、`m
 | E | `io_wait.js` | `pocket.time.sleep(10)` を自分の `.then` から張り直す。完了遅延 |
 | F | `async_generator.js` | `for await` で async generator を 20 回。中断・再開と await の往復 |
 
+## フレームセグメント比較（診断ビルドのみ）
+
+`tools/vm_l0_capture.py --segment-policy 0..5`で、次に開始するセッションのFIRST/MAXを選ぶ。
+0=256/1024、1=256/2048、2=512/2048、3=512/4096（起動時の既定）、4=1024/4096、5=4096/4096B。
+USB文字は順に`G H I J K O`。キャッシュ方針は変更せず、実行中のゲストには触れない。
+入力を受けた`VMSEG SELECT`だけで成功扱いせず、生成直後の`VMSEG APPLY result=0`と
+終了時の`#info vmstack`のサイズ一致まで採取器が確認する。統計はJSONLの`segment`、
+適用値は`segment_apply`に残る。測定には各回再起動を使い、元のファームウェアへ復元する。
+
+通常アプリの比較は`--workloads XABCDEF --conditions base`で行う。`X`はhelloを直接指定する
+診断入口で、ホームの選択状態に依存しない。競合条件のwrapperは付かないためbase以外は拒否する。
+正順/逆順の2反復（`--rep-offset 0`/`1`）を6方針で採り、
+`tools/vm_segment_report.py`で84runの欠け・重複・設定不一致・標本欠落を検査して集計する。
+欠落した回を取り直した場合は元ログを残し、`--repair-pattern`で別の再採取ログを指定する。
+正常な回の差し替えは拒否される。採取器はstop待ち終了までWINDOWを閉じず、期限をまたぐS行も回収する。
+
 ## 競合条件（USB の `P`〜`W`）
 
 `P` + マスク（1=UI、2=音声、4=Wi-Fi）。**ワークロードの字とは別で、指定は残る** ——

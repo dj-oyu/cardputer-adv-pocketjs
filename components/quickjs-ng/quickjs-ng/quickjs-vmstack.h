@@ -307,6 +307,19 @@ static inline int js_vm_stack_configure(JSVMStack *st, size_t seg_size, uint32_t
     return 0;
 }
 
+// Diagnostic D42 sweep: retain the production cache policy while varying
+// FIRST/MAX in one binary. Refuse a live or cached chain without mutation.
+static inline int js_vm_stack_configure_growth(JSVMStack *st, size_t first, size_t maximum)
+{
+    if (st->cur || st->cache || first < JS_VM_SEG_ALIGN || maximum < first ||
+        maximum > SIZE_MAX / 2 || first % JS_VM_SEG_ALIGN ||
+        maximum % first)
+        return -1;
+    st->seg_first = first;
+    st->seg_max = maximum;
+    return 0;
+}
+
 static inline size_t js_vm_seg_payload(const JSVMSeg *s)
 {
     return (size_t)(s->end - s->base);
@@ -656,8 +669,12 @@ typedef struct JSVMLink {
 //              or a flat async frame after its first stretch)
 // A frame walker that reads these must still guard on class_id first
 // (design D4-3): native frames are uninitialised C automatics.
-#define JS_SF_SEG  1u   // pushed on the segment stack; local_buf == (JSValue *)(sf + 1)
-#define JS_SF_FLAT 2u   // pushed by a flat call: its return resumes sf->prev_frame in the same C activation
+#define JS_SF_SEG        1u   // pushed on the segment stack; local_buf == (JSValue *)(sf + 1)
+#define JS_SF_FLAT       2u   // pushed by a flat call: its return resumes sf->prev_frame in the same C activation
+#define JS_SF_MAY_YIELD  4u   // this activation has a C owner that can resume it (D17r)
+#define JS_SF_SUSPENDED  8u   // cur_pc/cur_sp describe a parked frame (D18r)
+#define JS_SF_OWNS_FUNC 16u   // a yieldable floor owns cur_func across host turns
+#define JS_SF_TAIL      32u   // local slots own [func, this, args...] after tail replacement
 
 // JSStackFrame.ret_shape: what the CALLER does with its operand stack when
 // this frame returns (design D8 sec.7.3-2). argc << 2 | bits; neither the

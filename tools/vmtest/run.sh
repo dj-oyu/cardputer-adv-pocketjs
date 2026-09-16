@@ -128,11 +128,13 @@ for name in "${names[@]}"; do
   # under the cap. VMTEST_HANG_RETRIES=0 turns the retry off.
   attempts=0
   while :; do
-    (cd corpus && exec timeout 300 "$VMRUN" "${flags[@]}" "$name.js") 2>&1 \
+    (cd corpus && export VMTEST_START_MARKER=1 && exec timeout 300 "$VMRUN" "${flags[@]}" "$name.js") 2>&1 \
       | head -c "${VMTEST_MAX_RAW:-4194304}" > "$raw"
     code=${PIPESTATUS[0]}
     attempts=$((attempts + 1))
-    if [ $code -eq 124 ] || [ $code -eq 141 ] || grep -q '^AddressSanitizer:DEADLYSIGNAL' "$raw"; then
+    # A VM timeout/crash after main is a failure, not an ASan startup retry.
+    if [[ "$variant" == asan* ]] && ! grep -q '^#info vmrun-start$' "$raw" && \
+       { [ $code -eq 124 ] || [ $code -eq 141 ] || grep -q '^AddressSanitizer:DEADLYSIGNAL' "$raw"; }; then
       if [ "$attempts" -lt "${VMTEST_HANG_RETRIES:-5}" ]; then
         echo "  retry $name (asan startup hang, attempt $attempts)" >&2
         continue

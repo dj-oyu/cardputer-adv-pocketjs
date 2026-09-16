@@ -8,6 +8,8 @@
 
 #include "quickjs-vmprobe.h"
 #include "quickjs.h"
+#include "quickjs-vm.h"
+#include "pocketjs/guest_quickjs.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -76,6 +78,8 @@ static unsigned qpeak_max;
 static uint64_t jobs_executed_base;
 static int64_t  window_start_us;
 static unsigned window_ticks, window_seq;
+static unsigned continuation_ticks;
+static unsigned frame_heap_n, continuation_heap_n;
 static uint32_t flush_us_last;   // the probe's own cost, last window
 
 // Sampled at a low rate (sec.5 asks for this explicitly): JS_ComputeMemoryUsage
@@ -86,21 +90,45 @@ static uint32_t flush_us_last;   // the probe's own cost, last window
 static size_t   js_used_max, js_limit_last;
 static unsigned heap_free_min, heap_largest_min;
 static UBaseType_t stack_hw_min;
+// HWM belongs to the task's entire lifetime; resetting our window cannot
+// repaint FreeRTOS's stack. Keep a separate instantaneous frame-address probe.
 
-// G1 device side, right next to stack_hw_min above: (depth, stack headroom
-// AT that depth) pairs, reported by a probe workload via
+// G1 device side: pair depth with historical task HWM and the current C
+// probe frame address, reported by a probe workload via
 // vmprobe_depth_stack_sample. Two parallel arrays rather than one struct
 // array so put_line (which takes one value series at a time) can emit both
 // as ordinary "VMPROBE S ... depth ..." / "... depth_hwm ..." lines without
 // a new line format.
 static uint32_t depth_arg[VMPROBE_DEPTH_CAP];
 static uint32_t depth_hwm[VMPROBE_DEPTH_CAP];
+static uint32_t depth_fp[VMPROBE_DEPTH_CAP];
 static unsigned depth_count, depth_dropped;
 
 // Set from the input task (main.c's usb_stroke), read on the ui task at
 // session start. Plain atomic: it is one word and the two tasks never need
 // more than "the last letter the host sent".
 static atomic_uint condition_mask;
+static atomic_uint segment_policy = 3;
+static const uint16_t segment_sizes[][2] = {
+    {256, 1024}, {256, 2048}, {512, 2048},
+    {512, 4096}, {1024, 4096}, {4096, 4096},
+};
+
+void vmprobe_segment_set(unsigned policy) {
+    if (policy >= sizeof(segment_sizes)/sizeof(segment_sizes[0])) return;
+    atomic_store(&segment_policy, policy);
+    ESP_LOGI(TAG, "VMSEG SELECT policy=%u", policy);
+}
+
+int vmprobe_segment_apply(pocketjs_guest_t *guest) {
+    unsigned policy = atomic_load(&segment_policy);
+    JSContext *ctx = pocketjs_guest_quickjs_context(guest);
+    int result = ctx ? vmtest_vmstack_configure_growth(JS_GetRuntime(ctx),
+        segment_sizes[policy][0], segment_sizes[policy][1]) : -1;
+    ESP_LOGI(TAG, "VMSEG APPLY policy=%u first=%u max=%u result=%d", policy,
+        segment_sizes[policy][0], segment_sizes[policy][1], result);
+    return result;
+}
 
 void vmprobe_condition_set(unsigned mask) {
     atomic_store(&condition_mask, mask & VMPROBE_COND_ALL);
@@ -115,6 +143,7 @@ static void window_reset(void) {
     depth_count = 0; depth_dropped = 0;
     window_start_us = esp_timer_get_time();
     window_ticks = 0;
+    frame_heap_n = 0; continuation_heap_n = 0;
 }
 
 // Appends "name count v,v,v\n" for one metric. Bounds are checked against the
@@ -146,13 +175,14 @@ static void flush_window(void) {
     int n = snprintf(line, sizeof line,
         "VMPROBE WINDOW seq=%u cond=%u ms=%u frames=%u lat_n=%u lat_drop=%u "
         "qpeak_max=%u heap_free_min=%u heap_largest_min=%u js_used_max=%u "
-        "js_limit=%u stack_hw_min=%u flush_us=%u drainrun_drop=%u depth_drop=%u\n",
+        "js_limit=%u stack_hw_min=%u flush_us=%u drainrun_drop=%u depth_drop=%u "
+        "frame_heap_n=%u continuation_heap_n=%u\n",
         window_seq, vmprobe_condition(),
         (unsigned)((began - window_start_us) / 1000),
         frame_count, lat_count, lat_dropped, qpeak_max,
         heap_free_min, heap_largest_min, (unsigned)js_used_max,
         (unsigned)js_limit_last, (unsigned)stack_hw_min, (unsigned)flush_us_last,
-        drainrun_dropped_device, depth_dropped);
+        drainrun_dropped_device, depth_dropped, frame_heap_n, continuation_heap_n);
     at = (n > 0 && (size_t)n < sizeof line) ? (size_t)n : 0;
     at = put_line(line, at, window_seq, "frame", frame_us, NULL, frame_count);
     // G1 device side: "depth" and "depth_hwm" share an index (depth[i] was
@@ -160,6 +190,7 @@ static void flush_window(void) {
     // pairing with "frame"/"call"/"drain" above by frame index.
     at = put_line(line, at, window_seq, "depth", depth_arg, NULL, depth_count);
     at = put_line(line, at, window_seq, "depth_hwm", depth_hwm, NULL, depth_count);
+    at = put_line(line, at, window_seq, "depth_fp", depth_fp, NULL, depth_count);
     at = put_line(line, at, window_seq, "call",  call_us,  NULL, frame_count);
     at = put_line(line, at, window_seq, "drain", drain_us, NULL, frame_count);
     at = put_line(line, at, window_seq, "jobs",  NULL, jobs_n, frame_count);
@@ -176,7 +207,8 @@ void vmprobe_static_report(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
     ESP_LOGI(TAG,
         "VMPROBE STATIC engine=quickjs-ng-0.14.0+immutable-buffer-patch compiler=%s opt=%s "
-        "sizeof_jsvalue=%u sizeof_stackframe=%u sizeof_varref=%u fw=%s cond=%u",
+        "sizeof_jsvalue=%u sizeof_stackframe=%u sizeof_varref=%u fw=%s cond=%u "
+        "stack_scope=task_lifetime stack_unit=bytes",
         __VERSION__,
 #if defined(__OPTIMIZE_SIZE__)
         "Os",
@@ -193,6 +225,7 @@ void vmprobe_static_report(void) {
     jobs_executed_base = qjs_vmprobe_jobs_executed_get();
     (void)qjs_vmprobe_job_queue_peak_take();   // rebase before the first window
     window_seq = 0;
+    continuation_ticks = 0;
     pocketjs_guest_vmprobe_take(NULL, NULL);
     (void)pocketjs_guest_vmprobe_drain_calls(NULL, 0, NULL);
     window_reset();
@@ -227,9 +260,15 @@ static void heap_sample(pocketjs_guest_t *guest) {
 // this, a session with L1 on never sampled the heap while a long drain was
 // being continued, which is exactly when it is fullest, and its minima could
 // not be compared with a legacy build's (vm/backlog.md item 4).
-static unsigned continuation_ticks;
 void vmprobe_continuation_sample(pocketjs_guest_t *guest) {
-    if ((++continuation_ticks % VMPROBE_SAMPLE_EVERY_N_FRAMES) == 0) heap_sample(guest);
+    if ((++continuation_ticks % VMPROBE_SAMPLE_EVERY_N_FRAMES) == 0) {
+        heap_sample(guest);
+        continuation_heap_n++;
+    }
+    // A long drain may never reach the next frame hook. Publish its memory
+    // samples on time without inventing frame/call/drain timing samples.
+    if (esp_timer_get_time() - window_start_us >= VMPROBE_WINDOW_US)
+        flush_window();
 }
 
 void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us) {
@@ -260,7 +299,10 @@ void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us) {
         frame_count++;
     }
     window_ticks++;
-    if ((window_ticks % VMPROBE_SAMPLE_EVERY_N_FRAMES) == 0) heap_sample(guest);
+    if ((window_ticks % VMPROBE_SAMPLE_EVERY_N_FRAMES) == 0) {
+        heap_sample(guest);
+        frame_heap_n++;
+    }
     // Early flush on a full array is what makes the capture exact: the window
     // is "1 s or 64 frames", never "1 s and whatever fitted".
     if (frame_count >= VMPROBE_FRAME_CAP ||
@@ -282,10 +324,13 @@ void vmprobe_completion_sample(int64_t latency_us) {
 }
 
 void vmprobe_depth_stack_sample(uint32_t depth) {
+    uintptr_t frame = (uintptr_t)__builtin_frame_address(0);
+    _Static_assert(sizeof(uintptr_t) <= sizeof(uint32_t), "device frame sample width");
     UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
     if (depth_count < VMPROBE_DEPTH_CAP) {
         depth_arg[depth_count] = depth;
         depth_hwm[depth_count] = (uint32_t)hwm;
+        depth_fp[depth_count] = (uint32_t)frame;
         depth_count++;
     } else {
         // Only reachable if a probe workload reports more than
@@ -296,6 +341,7 @@ void vmprobe_depth_stack_sample(uint32_t depth) {
 }
 
 void vmprobe_session_reset(void) {
+    continuation_ticks = 0;
     jobs_executed_base = qjs_vmprobe_jobs_executed_get();
     (void)qjs_vmprobe_job_queue_peak_take();
     pocketjs_guest_vmprobe_take(NULL, NULL);

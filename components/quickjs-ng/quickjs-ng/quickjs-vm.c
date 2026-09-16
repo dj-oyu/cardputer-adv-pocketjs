@@ -21,6 +21,12 @@ int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max)
     return js_vm_stack_configure(st, seg_size, cache_max);
 }
 
+int vmtest_vmstack_configure_growth(JSRuntime *rt, size_t first, size_t maximum)
+{
+    JSVMStack *st = js_vm_stack_get(rt);
+    return st ? js_vm_stack_configure_growth(st, first, maximum) : -1;
+}
+
 int vmtest_vmstack_set_budget(JSRuntime *rt, size_t bytes)
 {
     JSVMStack *st = js_vm_stack_get(rt);
@@ -220,6 +226,12 @@ void js_vm_state_free(JSRuntime *rt, JSVMState *vm)
 // vm_resume: machinery, JS_VMSuspended and friends move there and read it
 // instead of being constant.
 
+#ifndef CONFIG_POCKET_VM_YIELD
+void JS_VMRequestYield(JSRuntime *rt) { (void)rt; }
+void JS_VMClearYield(JSRuntime *rt) { (void)rt; }
+void JS_VMTerminate(JSRuntime *rt) { (void)rt; }
+void JS_VMDiscard(JSRuntime *rt) { (void)rt; }
+
 int JS_VMSuspended(JSRuntime *rt) {
     (void)rt;
     return 0;
@@ -247,6 +259,7 @@ JSValue JS_VMEval(JSContext *ctx, const char *input, size_t input_len,
                   const char *filename, int eval_flags) {
     return JS_Eval(ctx, input, input_len, filename, eval_flags);
 }
+#endif
 
 void vmtest_vm_set_force_yield(JSRuntime *rt, int on)
 {
@@ -295,6 +308,10 @@ void vmtest_vm_report(JSRuntime *rt, JSContext *ctx, void *out)
             vm->force_yield, (unsigned long long)vm->safepoints,
             (unsigned long long)vm->stops, (unsigned long long)vm->enters,
             (unsigned long long)vm->leaves);
+    fprintf(f, "#info vm susp_samples=%llu susp_bytes_max=%llu susp_async_frames=%llu\n",
+            (unsigned long long)vm->susp_samples,
+            (unsigned long long)vm->susp_bytes_max,
+            (unsigned long long)vm->susp_async_frames);
     if (!vm->gap_on)
         return;
     // G5 is the maximum. The total and count are context for reading it, not

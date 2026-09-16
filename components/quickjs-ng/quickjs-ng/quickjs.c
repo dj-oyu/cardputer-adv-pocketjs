@@ -52,8 +52,8 @@
 // Not an upstream file -- see its own header comment.
 #include "quickjs-vmprobe.h"
 // L2 harness hooks (forced yield at class-A safepoints, G5 gap recorder).
-// Not an upstream file -- see its own header comment. Everything it adds to
-// this file is behind `js_vm_armed != NULL`, which only the harness sets.
+// Not an upstream file -- see its own header comment. Harness measurement
+// uses js_vm_armed; production yield requests use the runtime's atomic bit.
 #include "quickjs-vm.h"
 // L2a: the segment stack JS_CallInternal pushes its frame + locals on when
 // CONFIG_POCKET_VM_SEGFRAMES is set (default y, main/Kconfig.projbuild;
@@ -61,6 +61,10 @@
 // own header comment. With the config off this file is the upstream alloca
 // path, byte for byte on the call path, and JSRuntime keeps its old size.
 #include "quickjs-vmstack.h"
+#ifdef CONFIG_POCKET_VM_YIELD
+#include <stdatomic.h>
+_Static_assert(ATOMIC_CHAR_LOCK_FREE == 2, "yield requests must not take a lock");
+#endif
 // File-scope on purpose, not a JSRuntime member: the runtime is allocated
 // from the guest heap, and one more pointer in it moved the outcome of the
 // creeping-OOM corpus case (gc_threshold_device.js -- measured: the original
@@ -327,8 +331,31 @@ struct JSRuntime {
     bool in_build_stack_trace;
     /* true if inside JS_FreeRuntime */
     bool in_free;
+#ifdef CONFIG_POCKET_VM_YIELD
+    _Atomic uint8_t vm_yield_req; /* fills the flags' alignment padding */
+#endif
 
     struct JSStackFrame *current_stack_frame;
+
+#ifdef CONFIG_POCKET_VM_YIELD
+    /* L2c host-owned suspension. `top != NULL` is the only parked-state
+       predicate; the floor values are duplicated before execution starts so
+       the no-allocation yield path merely publishes pointers. */
+    struct {
+        struct JSStackFrame *top;
+        struct JSStackFrame *floor;
+        JSVMOrigin origin;
+        struct JSJobEntry *job;
+        JSValue (*tail)(JSContext *, JSValue, JSValueConst *, JSValue *);
+        JSValue aux[2];
+    } vm_susp;
+    uint8_t vm_entry_ok;
+    bool vm_terminating; /* shares the entry token's alignment padding */
+    uint8_t vm_owner_kind; /* 0: SEG, 1: async function, 2: async generator */
+    uint8_t vm_entry_block; /* native completion tails cannot park */
+    JSValue vm_floor_this;
+    JSValue vm_floor_new_target;
+#endif
 
     JSInterruptHandler *interrupt_handler;
     void *interrupt_opaque;
@@ -376,6 +403,10 @@ struct JSRuntime {
     // the layout concern noted at js_vm_armed does not apply to a build that
     // already moves every frame into the guest heap.
     JSVMStack vm_stack;
+#endif
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+    bool vm_bench_recursive;
+    bool vm_bench_eager_inputs;
 #endif
     void *user_opaque;
     void *libc_opaque;
@@ -2097,6 +2128,9 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
         return NULL;
     }
     rt->mf = *mf;
+#ifdef CONFIG_POCKET_VM_YIELD
+    atomic_init(&rt->vm_yield_req, 0);
+#endif
     if (!rt->mf.js_malloc_usable_size) {
         /* use dummy function if none provided */
         rt->mf.js_malloc_usable_size = js_malloc_usable_size_unknown;
@@ -2155,6 +2189,10 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     JS_UpdateStackTop(rt);
 
     rt->current_exception = JS_UNINITIALIZED;
+#ifdef CONFIG_POCKET_VM_YIELD
+    rt->vm_floor_this = JS_UNDEFINED;
+    rt->vm_floor_new_target = JS_UNDEFINED;
+#endif
 
     return rt;
 fail:
@@ -2346,6 +2384,15 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
     JSValue res;
     int i, ret;
 
+#ifdef CONFIG_POCKET_VM_YIELD
+    /* Reject before removing the entry: a parked chain owns the next turn. */
+    if (rt->vm_susp.top) {
+        *pctx = rt->vm_susp.floor->caller_ctx;
+        JS_ThrowInternalError(*pctx, "VM suspended");
+        return -1;
+    }
+#endif
+
     if (list_empty(&rt->job_list)) {
         *pctx = NULL;
         return 0;
@@ -2362,6 +2409,13 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
 #endif
     ctx = e->ctx;
     res = e->job_func(e->ctx, e->argc, vc(e->argv));
+#ifdef CONFIG_POCKET_VM_YIELD
+    if (rt->vm_susp.top && rt->vm_susp.origin == JS_VM_ORIGIN_JOB_HELD) {
+        rt->vm_susp.job = e;
+        *pctx = ctx;
+        return 2;
+    }
+#endif
     for (i = 0; i < e->argc; i++) {
         JS_FreeValue(ctx, e->argv[i]);
     }
@@ -2469,6 +2523,9 @@ void JS_FreeRuntime(JSRuntime *rt)
     int i;
 
     rt->in_free = true;
+#ifdef CONFIG_POCKET_VM_YIELD
+    JS_VMDiscard(rt);
+#endif
     // The harness state owns atoms; release them before the atom table goes.
     js_vm_arm(rt, 0);
     JS_FreeValueRT(rt, rt->current_exception);
@@ -2810,6 +2867,45 @@ JSContext *JS_DupContext(JSContext *ctx)
     return ctx;
 }
 
+#ifdef CONFIG_POCKET_VM_YIELD
+static JSValue js_vm_resume_owner(JSContext *ctx);
+
+static void js_vm_mark_suspended(JSRuntime *rt, JSContext *ctx,
+                                 JS_MarkFunc *mark_func)
+{
+    JSStackFrame *sf, *child = NULL;
+    JSStackFrame *floor = rt->vm_susp.floor;
+
+    if (!rt->vm_susp.top || !floor || ctx != floor->caller_ctx)
+        return;
+    if (floor->l2_flags & JS_SF_SEG)
+        JS_MarkValue(rt, floor->cur_func, mark_func);
+    else if (rt->vm_owner_kind == 1)
+        mark_func(rt, &container_of(floor, JSAsyncFunctionData, func_state.frame)->header);
+    JS_MarkValue(rt, rt->vm_floor_this, mark_func);
+    JS_MarkValue(rt, rt->vm_floor_new_target, mark_func);
+    if (rt->vm_susp.job) {
+        JS_MarkValue(rt, rt->vm_susp.aux[0], mark_func);
+        JS_MarkValue(rt, rt->vm_susp.aux[1], mark_func);
+    }
+    for (sf = rt->vm_susp.top; ; child = sf, sf = sf->prev_frame) {
+        if (sf->l2_flags & JS_SF_SEG) {
+            JSValue *p;
+            JSValue *end = child
+                ? ((child->l2_flags & JS_SF_SEG)
+                    ? (((JSVMLink *)child) - 1)->caller_sp
+                    : container_of(child, JSAsyncFunctionData,
+                                   func_state.frame)->flat_caller_sp)
+                : sf->cur_sp;
+            for (p = (JSValue *)(sf + 1); p < end; p++)
+                JS_MarkValue(rt, *p, mark_func);
+        }
+        if (sf == floor)
+            break;
+    }
+}
+#endif
+
 /* used by the GC */
 static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
                            JS_MarkFunc *mark_func)
@@ -2869,6 +2965,11 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     if (ctx->regexp_result_shape) {
         mark_func(rt, &ctx->regexp_result_shape->header);
     }
+#ifdef CONFIG_POCKET_VM_YIELD
+    /* A parked SEG chain is deliberately detached from current_stack_frame;
+       its values remain context roots until its host owner resumes it. */
+    js_vm_mark_suspended(rt, ctx, mark_func);
+#endif
 }
 
 void JS_FreeContext(JSContext *ctx)
@@ -6672,6 +6773,28 @@ JSVMStack *js_vm_stack_get(JSRuntime *rt)
 #endif
 }
 
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+#if !defined(CONFIG_POCKET_VM_FLATCALLS) || !defined(CONFIG_POCKET_VM_LAZY_INPUTS) || defined(CONFIG_POCKET_VM_YIELD)
+#error "CALLBENCH requires FLATCALLS/LAZY_INPUTS and excludes YIELD"
+#endif
+int vmtest_call_mode(JSRuntime *rt, int recursive)
+{
+    // Do not change dispatch under live frames, including native callbacks.
+    if (rt->current_stack_frame || (recursive != 0 && recursive != 1))
+        return -1;
+    rt->vm_bench_recursive = recursive;
+    return 0;
+}
+
+int vmtest_call_inputs_eager(JSRuntime *rt, int eager)
+{
+    if (rt->current_stack_frame || (eager != 0 && eager != 1))
+        return -1;
+    rt->vm_bench_eager_inputs = eager;
+    return 0;
+}
+#endif
+
 void JS_VMStackTrim(JSRuntime *rt)
 {
 #ifdef CONFIG_POCKET_VM_SEGFRAMES
@@ -8777,7 +8900,7 @@ static void JS_ThrowInterrupted(JSContext *ctx)
 
 // `at_safepoint` is 1 only from js_poll_safepoint (the seven class-A opcode
 // sites). It is a constant at every call site and this function is not
-// inlined, so the unarmed fast path is unchanged by its existence.
+// inlined. The yield-disabled fast path remains the upstream counter check.
 static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_safepoint)
 {
     JSRuntime *rt = ctx->rt;
@@ -8787,7 +8910,29 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_saf
         // 1 and run the host handler on its own shadow cadence instead --
         // arming must not move the poll at which a session stop is honoured.
         ctx->interrupt_counter = 1;
+#ifdef CONFIG_POCKET_VM_YIELD
+        /* A yield returns below. Account for this poll first, otherwise a
+           branch-only loop can yield forever without checking termination. */
+        if (--vm->host_poll_left <= 0) {
+            vm->host_poll_left = JS_INTERRUPT_COUNTER_INIT;
+            if (rt->interrupt_handler &&
+                rt->interrupt_handler(rt, rt->interrupt_opaque)) {
+                JS_ThrowInterrupted(ctx);
+                return -1;
+            }
+        }
+#endif
         if (at_safepoint) {
+#ifdef CONFIG_POCKET_VM_YIELD
+            JSStackFrame *sf = rt->current_stack_frame;
+            if (sf && (sf->l2_flags & JS_SF_MAY_YIELD) &&
+                js_vm_safepoint(rt, vm, js_vm_frame_func(sf))) {
+                /* Distinct from an exception: the opcode is fully retired
+                   and JS_CallInternal must publish the live chain without
+                   entering exception unwinding. */
+                return 2;
+            }
+#else
             if (js_vm_safepoint(rt, vm, js_vm_frame_func(rt->current_stack_frame))) {
                 // Before L2c the VM's only way to stop is the uncatchable
                 // "interrupted" error, which loses the frame (design
@@ -8798,6 +8943,7 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_saf
                 JS_ThrowInterrupted(ctx);
                 return -1;
             }
+#endif
         } else if (rt->current_stack_frame == NULL) {
             // The JS_CallInternal prologue poll with no frame: the host is
             // entering JS. Not a safepoint (N5), but the start of the interval
@@ -8805,9 +8951,13 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_saf
             // boundary is exactly this point).
             js_vm_enter(rt, vm);
         }
+#ifdef CONFIG_POCKET_VM_YIELD
+        return 0;
+#else
         if (--vm->host_poll_left > 0)
             return 0;
         vm->host_poll_left = JS_INTERRUPT_COUNTER_INIT;
+#endif
     } else {
         ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
     }
@@ -8836,11 +8986,44 @@ static inline __exception int js_poll_interrupts(JSContext *ctx)
 static inline __exception int js_poll_safepoint(JSContext *ctx)
 {
     if (unlikely(--ctx->interrupt_counter <= 0)) {
-        return __js_poll_interrupts(ctx, 1);
-    } else {
-        return 0;
+        int result = __js_poll_interrupts(ctx, 1);
+        if (result)
+            return result;
     }
+#ifdef CONFIG_POCKET_VM_YIELD
+    /* Only the VM thread owns interrupt_counter. A timer publishes just the
+       atomic bit; polling it here avoids a racing write to that counter or
+       an atomic read-modify-write on every branch. Termination still polls
+       on its original cadence above, even if every request is accepted. */
+    if (unlikely(atomic_load_explicit(&ctx->rt->vm_yield_req, memory_order_relaxed))) {
+        JSStackFrame *sf = ctx->rt->current_stack_frame;
+        if (sf && (sf->l2_flags & JS_SF_MAY_YIELD))
+            return 2;
+    }
+#endif
+    return 0;
 }
+
+#ifdef CONFIG_POCKET_VM_YIELD
+static inline bool js_vm_push_yield(JSRuntime *rt, JSStackFrame *sf)
+{
+    if (!(sf->l2_flags & JS_SF_MAY_YIELD))
+        return false;
+    if (js_vm_armed && js_vm_safepoint(rt, js_vm_armed, js_vm_frame_func(sf)))
+        return true;
+    return atomic_load_explicit(&rt->vm_yield_req, memory_order_relaxed) != 0;
+}
+#endif
+
+#ifdef CONFIG_POCKET_VM_YIELD
+#define JS_VM_POLL_SAFEPOINT() do {                 \
+        int _vm_poll = js_poll_safepoint(ctx);      \
+        if (unlikely(_vm_poll == 2))                \
+            goto vm_yield;                          \
+        if (unlikely(_vm_poll != 0))                \
+            goto exception;                         \
+    } while (0)
+#endif
 
 /* return -1 (exception) or true/false */
 static int JS_SetPrototypeInternal(JSContext *ctx, JSValueConst obj,
@@ -18285,6 +18468,9 @@ static void close_lexical_var(JSContext *ctx, JSFunctionBytecode *b,
 
 #define JS_CALL_FLAG_COPY_ARGV   (1 << 1)
 #define JS_CALL_FLAG_GENERATOR   (1 << 2)
+#ifdef CONFIG_POCKET_VM_YIELD
+#define JS_CALL_FLAG_VM_RESUME   (1 << 3)
+#endif
 
 static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
                                   JSValueConst this_obj,
@@ -18486,9 +18672,15 @@ static void print_func_name(JSFunctionBytecode *b);
 // bytecode function that is not NORMAL yet has the BYTECODE class -- a
 // module body, called with this=true by js_inner_module_linking -- so that
 // a flat SEG frame is guaranteed to leave through done: (sec.10.1, H6).
-static inline bool js_vm_flat_callable(JSValueConst func_obj)
+static inline bool js_vm_flat_callable(JSRuntime *rt, JSValueConst func_obj)
 {
     JSObject *p;
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+    if (rt->vm_bench_recursive)
+        return false;
+#else
+    (void)rt;
+#endif
     if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
         return false;
     p = JS_VALUE_GET_OBJ(func_obj);
@@ -18517,6 +18709,105 @@ static inline JSValue *js_vm_flat_caller_sp(JSStackFrame *sf)
         return (((JSVMLink *)sf) - 1)->caller_sp;
     return container_of(sf, JSAsyncFunctionData, func_state.frame)->flat_caller_sp;
 }
+
+#ifdef CONFIG_POCKET_VM_TCO
+#ifndef CONFIG_POCKET_VM_YIELD
+#error "CONFIG_POCKET_VM_TCO requires CONFIG_POCKET_VM_YIELD"
+#endif
+// No allocation and no intermediate safepoint. A successful replacement
+// keeps the parent link/return shape, but owns its new call operands in the
+// block itself. This also makes the existing suspended GC/discard slot walk
+// sufficient; cur_func borrows slot zero, not a vanished parent's operand.
+static no_inline int js_vm_tail_reuse(JSContext *ctx, JSStackFrame *sf,
+                                     JSValue *sp, int argc, bool method)
+{
+    JSRuntime *rt = ctx->rt;
+    JSValue *av = sp - argc, saved[10], *local = (JSValue *)(sf + 1);
+    JSObject *callee;
+    JSFunctionBytecode *nb;
+    JSVMSeg *seg = rt->vm_stack.cur;
+    uint8_t *block;
+    size_t size, old_size, used;
+    int nargs, i;
+    if (!sf->is_strict_mode || argc > 8 ||
+        (sf->l2_flags & (JS_SF_SEG | JS_SF_FLAT)) != (JS_SF_SEG | JS_SF_FLAT) ||
+        JS_VALUE_GET_TAG(av[-1]) != JS_TAG_OBJECT)
+        return 0;
+    callee = JS_VALUE_GET_OBJ(av[-1]);
+    if (callee->class_id != JS_CLASS_BYTECODE_FUNCTION)
+        return 0;
+    nb = callee->u.func.function_bytecode;
+    if (nb->func_kind != JS_FUNC_NORMAL)
+        return 0;
+    // Tail syntax alone does not make a protected call discardable. The
+    // parser wraps catch bodies in a synthetic rethrow handler. Only those
+    // transparent handlers may disappear; real catches/finally/iterators
+    // keep the ordinary call-and-return path, including its exception path.
+    JSFunctionBytecode *old = JS_VALUE_GET_OBJ(sf->cur_func)->u.func.function_bytecode;
+    for (JSValue *slot = sf->var_buf + old->var_count; slot < sp; slot++) {
+        if (JS_VALUE_GET_TAG(*slot) == JS_TAG_CATCH_OFFSET) {
+            int target = JS_VALUE_GET_INT(*slot);
+            if (target <= 0 || target >= old->byte_code_len)
+                return 0;
+            const uint8_t *at = old->byte_code_buf + target;
+            const uint8_t *end = old->byte_code_buf + old->byte_code_len;
+            while (at < end && *at == OP_close_loc) {
+                if (end - at < 3) return 0;
+                at += 3;
+            }
+            if (at >= end || *at != OP_throw)
+                return 0;
+        }
+    }
+    block = (uint8_t *)(((JSVMLink *)sf) - 1);
+    nargs = max_int(argc, nb->arg_count);
+    size = js_vm_stack_round(JS_VM_FRAME_PREFIX + sizeof(*sf) +
+           sizeof(JSValue) * (2 + nargs + nb->var_count + nb->stack_size) +
+           sizeof(JSVarRef *) * nb->var_ref_count);
+    old_size = (size_t)(seg->top - block);
+    used = rt->vm_stack.used - old_size + size;
+    if (size > (size_t)(seg->end - block) ||
+        (rt->vm_stack.budget && used > rt->vm_stack.budget))
+        return 0;
+    if (unlikely(js_poll_interrupts(ctx)))
+        return -1;
+    saved[0] = js_dup(av[-1]);
+    saved[1] = method ? js_dup(av[-2]) : JS_UNDEFINED;
+    for (i = 0; i < argc; i++)
+        saved[i + 2] = js_dup(av[i]);
+    close_var_refs(rt, sf);
+    for (JSValue *slot = local; slot < sp; slot++)
+        JS_FreeValue(ctx, *slot);
+    // Commit only after every test above; no failing operation follows.
+    JS_VM_POISON(block, old_size);
+    JS_VM_UNPOISON(block, size);
+    seg->top = block + size;
+    rt->vm_stack.used = used;
+#ifdef JS_VM_STACK_STATS
+    if (used > rt->vm_stack.live_bytes_max)
+        rt->vm_stack.live_bytes_max = used;
+    if (size > rt->vm_stack.frame_max)
+        rt->vm_stack.frame_max = size;
+#endif
+    for (i = 0; i < argc + 2; i++)
+        local[i] = saved[i];
+    for (; i < 2 + nargs + nb->var_count; i++)
+        local[i] = JS_UNDEFINED;
+    sf->l2_flags |= JS_SF_TAIL;
+    sf->cur_func = local[0];
+    sf->is_strict_mode = nb->is_strict_mode;
+    sf->arg_count = argc;
+    sf->arg_buf = local + 2;
+    sf->var_buf = local + 2 + nargs;
+    sf->var_refs = (JSVarRef **)(sf->var_buf + nb->var_count + nb->stack_size);
+    sf->var_ref_count = nb->var_ref_count;
+    for (i = 0; i < nb->var_ref_count; i++)
+        sf->var_refs[i] = NULL;
+    sf->cur_pc = nb->byte_code_buf;
+    sf->cur_sp = sf->var_buf + nb->var_count;
+    return 1;
+}
+#endif
 #endif
 
 static bool needs_backtrace(JSValue exc)
@@ -18583,6 +18874,22 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     // through resume_caller:.
     JSAsyncFunctionData *settle_s = NULL;
 #endif
+#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
+#ifndef CONFIG_POCKET_VM_FLATCALLS
+#error "LAZY_INPUTS requires FLATCALLS"
+#endif
+    bool call_inputs_valid = true;
+    // Restore before consuming operands/immediates, then enter the reader
+    // directly: no extra dispatch, debug dump, JS execution or poll.
+#define ENSURE_CALL_INPUTS(op) \
+    if (!call_inputs_valid) goto restore_call_inputs; \
+    inputs_ready_ ## op:
+#else
+#define ENSURE_CALL_INPUTS(op) ((void)0)
+#endif
+#ifdef CONFIG_POCKET_VM_YIELD
+    bool vm_floor_may_yield;
+#endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_STEP
 #define DUMP_BYTECODE_OR_DONT(pc) \
@@ -18609,6 +18916,89 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 #define BREAK           SWITCH(pc)
 #endif
 
+#ifdef CONFIG_POCKET_VM_YIELD
+    if ((flags & JS_CALL_FLAG_VM_RESUME) ||
+        ((flags & JS_CALL_FLAG_GENERATOR) &&
+         (((JSAsyncFunctionState *)JS_VALUE_GET_PTR(func_obj))->frame.l2_flags & JS_SF_SUSPENDED))) {
+        JSStackFrame *floor = rt->vm_susp.floor;
+        JSStackFrame *top = rt->vm_susp.top;
+        JSStackFrame *walk;
+        JSValue *resume_sp;
+        if (!top || !floor)
+            return JS_ThrowInternalError(caller_ctx, "VM resume without a chain");
+        floor_argc = floor->arg_count;
+        floor_argv = vc(floor->arg_buf);
+        floor_this = rt->vm_floor_this;
+        floor_new_target = rt->vm_floor_new_target;
+        if (!(floor->l2_flags & JS_SF_SEG)) {
+            JSAsyncFunctionState *fs = container_of(floor, JSAsyncFunctionState, frame);
+            floor_argc = fs->argc;
+            floor_this = fs->this_val;
+            floor_new_target = JS_UNDEFINED;
+        }
+        resume_sp = top->cur_sp;
+        for (walk = top; ; walk = walk->prev_frame) {
+            walk->l2_flags &= ~JS_SF_SUSPENDED;
+            if (walk != top && !(walk->l2_flags & JS_SF_SEG))
+                walk->cur_sp = NULL;
+            if (walk == floor)
+                break;
+        }
+        sf = top;
+        /* A running chain is protected by current_stack_frame, not by the
+           parked-state bit. Clear the latter before bytecode can call a
+           native that re-enters JS; only a later vm_yield publishes it. */
+        rt->vm_susp.top = NULL;
+        rt->current_stack_frame = sf;
+        p = JS_VALUE_GET_OBJ(sf->cur_func);
+        b = p->u.func.function_bytecode;
+        ctx = b->realm;
+        var_refs = p->u.func.var_refs;
+        arg_buf = sf->arg_buf;
+        var_buf = sf->var_buf;
+        stack_buf = var_buf + b->var_count;
+        local_buf = (sf->l2_flags & JS_SF_SEG) ? (JSValue *)(sf + 1) : arg_buf;
+        pc = sf->cur_pc;
+        sp = resume_sp;
+        sf->cur_sp = NULL;
+        func_obj = sf->cur_func;
+        caller_ctx = sf->caller_ctx;
+        if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) ==
+            (JS_SF_FLAT | JS_SF_SEG)) {
+            argc = sf->arg_count;
+#ifdef CONFIG_POCKET_VM_TCO
+            if (sf->l2_flags & JS_SF_TAIL) {
+                argv = vc(sf->arg_buf);
+                this_obj = sf->arg_buf[-1];
+            } else
+#endif
+            {
+                argv = vc(js_vm_flat_caller_sp(sf) - argc);
+                this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
+            }
+            new_target = JS_UNDEFINED;
+        } else if (sf->l2_flags & JS_SF_FLAT) {
+            JSAsyncFunctionState *fs = container_of(sf, JSAsyncFunctionState, frame);
+            argc = fs->argc;
+            argv = vc(sf->arg_buf);
+            this_obj = fs->this_val;
+            new_target = JS_UNDEFINED;
+        } else {
+            argc = floor_argc;
+            argv = floor_argv;
+            this_obj = floor_this;
+            new_target = floor_new_target;
+        }
+        if (js_vm_armed)
+            js_vm_enter(rt, js_vm_armed);
+        if (rt->vm_terminating) {
+            JS_ThrowInterrupted(ctx);
+            goto exception;
+        }
+        goto restart;
+    }
+    vm_floor_may_yield = rt->vm_entry_ok && rt->current_stack_frame == NULL;
+#endif
     if (js_poll_interrupts(caller_ctx)) {
         return JS_EXCEPTION;
     }
@@ -18621,6 +19011,10 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     if (unlikely(JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)) {
         if (flags & JS_CALL_FLAG_GENERATOR) {
             JSAsyncFunctionState *s = JS_VALUE_GET_PTR(func_obj);
+#ifdef CONFIG_POCKET_VM_YIELD
+            if (unlikely(rt->vm_susp.top))
+                return JS_ThrowInternalError(caller_ctx, "VM suspended");
+#endif
             /* func_obj get contains a pointer to JSFuncAsyncState */
             /* the stack frame is already allocated */
             sf = &s->frame;
@@ -18643,6 +19037,11 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             // prev_frame -- the resumer's realm, not the creator's.
             sf->caller_ctx = caller_ctx;
 #endif
+#ifdef CONFIG_POCKET_VM_YIELD
+            sf->l2_flags = vm_floor_may_yield ? JS_SF_MAY_YIELD : 0;
+            if (vm_floor_may_yield)
+                rt->vm_susp.floor = sf;
+#endif
             if (s->throw_flag) {
                 goto exception;
             } else {
@@ -18660,13 +19059,30 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 not_a_function:
             return js_vm_leave_frameless(rt, JS_ThrowTypeErrorNotAFunction(caller_ctx));
         }
+#ifdef CONFIG_POCKET_VM_YIELD
+        /* Only the async class has an owner that can receive a parked body.
+           Other native entries must not lend the host's token to JS reentry. */
+        rt->vm_entry_ok = p->class_id == JS_CLASS_ASYNC_FUNCTION && !rt->vm_entry_block;
+        ret_val = call_func(caller_ctx, func_obj, this_obj, argc, argv, flags);
+        rt->vm_entry_ok = 0;
+        return js_vm_leave_frameless(rt, ret_val);
+#else
         return js_vm_leave_frameless(rt, call_func(caller_ctx, func_obj, this_obj, argc,
                                                    argv, flags));
+#endif
     }
+#ifdef CONFIG_POCKET_VM_YIELD
+    if (unlikely(rt->vm_susp.top))
+        return JS_ThrowInternalError(caller_ctx, "VM suspended");
+#endif
     b = p->u.func.function_bytecode;
 
     if (unlikely(argc < b->arg_count || (flags & JS_CALL_FLAG_COPY_ARGV))) {
         arg_allocated_size = b->arg_count;
+#ifdef CONFIG_POCKET_VM_YIELD
+        if (vm_floor_may_yield && argc > arg_allocated_size)
+            arg_allocated_size = argc;
+#endif
     } else {
         arg_allocated_size = 0;
     }
@@ -18726,6 +19142,14 @@ not_a_function:
         sf = (JSStackFrame *)(block + JS_VM_FRAME_PREFIX);
     }
     sf->l2_flags = JS_SF_SEG;     // a floor: entered from C, returns to C
+#ifdef CONFIG_POCKET_VM_YIELD
+    if (vm_floor_may_yield) {
+        sf->l2_flags |= JS_SF_MAY_YIELD | JS_SF_OWNS_FUNC;
+        rt->vm_susp.floor = sf;
+        rt->vm_floor_this = js_dup(this_obj);
+        rt->vm_floor_new_target = js_dup(new_target);
+    }
+#endif
     sf->caller_ctx = caller_ctx;
 #else
     sf = js_vm_stack_push(rt, &rt->vm_stack, sizeof(JSStackFrame) + alloca_size);
@@ -18747,22 +19171,29 @@ not_a_function:
     // with the same set, so one copy of the prologue serves both entries.
 frame_pushed:
 #endif
+#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
+    call_inputs_valid = true;
+#endif
     sf->is_strict_mode = b->is_strict_mode;
     arg_buf = (JSValue *)argv;
     sf->arg_count = argc;
     sf->cur_func = unsafe_unconst(func_obj);
+#ifdef CONFIG_POCKET_VM_YIELD
+    if (sf->l2_flags & JS_SF_OWNS_FUNC)
+        sf->cur_func = js_dup(func_obj);
+#endif
     var_refs = p->u.func.var_refs;
 
 #ifndef CONFIG_POCKET_VM_SEGFRAMES
     local_buf = alloca(alloca_size);
 #endif
     if (unlikely(arg_allocated_size)) {
-        int n = min_int(argc, b->arg_count);
+        int n = min_int(argc, arg_allocated_size);
         arg_buf = local_buf;
         for (i = 0; i < n; i++) {
             arg_buf[i] = js_dup(argv[i]);
         }
-        for (; i < b->arg_count; i++) {
+        for (; i < arg_allocated_size; i++) {
             arg_buf[i] = JS_UNDEFINED;
         }
 #ifndef CONFIG_POCKET_VM_FLATCALLS
@@ -18796,6 +19227,13 @@ frame_pushed:
     sf->prev_frame = rt->current_stack_frame;
     rt->current_stack_frame = sf;
     ctx = b->realm; /* set the current realm */
+
+#ifdef CONFIG_POCKET_VM_YIELD
+    /* Class B is after the complete push, so resuming never repeats a call.
+       The prologue already polled the watchdog; do not count it twice. */
+    if (js_vm_push_yield(rt, sf))
+        goto vm_yield;
+#endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_STEP
     if (check_dump_flag(ctx->rt, JS_DUMP_BYTECODE_STEP)) {
@@ -18907,6 +19345,7 @@ get_length_slow_path:
                 *sp++ = JS_NULL;
             BREAK;
             CASE(OP_push_this):
+                ENSURE_CALL_INPUTS(OP_push_this);
                 /* OP_push_this is only called at the start of a function */
             {
                 JSValue val;
@@ -18943,6 +19382,7 @@ normal_this:
             }
             BREAK;
             CASE(OP_special_object): {
+                ENSURE_CALL_INPUTS(OP_special_object);
                 int arg = *pc++;
                 switch (arg) {
                 case OP_SPECIAL_OBJECT_ARGUMENTS:
@@ -18998,6 +19438,7 @@ normal_this:
             }
             BREAK;
             CASE(OP_rest): {
+                ENSURE_CALL_INPUTS(OP_rest);
                 int i, n, first = get_u16(pc);
                 pc += 2;
                 i = min_int(first, argc);
@@ -19158,6 +19599,9 @@ normal_this:
                 call_argc = opcode - OP_call0;
             goto has_call_argc;
             CASE(OP_tail_call):
+#ifdef CONFIG_POCKET_VM_TCO
+                goto try_tail_reuse;
+#endif
                 // Tail-call entry (TCO, docs/vm/vm-tco-design.md, a draft):
                 // its own dispatch label, placed ABOVE OP_call so that a
                 // frame-reusing tail call can be added here without one
@@ -19183,7 +19627,7 @@ has_call_argc:
                 // frame for it (it is a call followed by `goto done`), and
                 // neither does this -- the JS_RET_TAIL bit replays that
                 // `goto done` when the callee returns.
-                if (js_vm_flat_callable(call_argv[-1])) {
+                if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
 #endif
@@ -19222,6 +19666,47 @@ has_call_argc:
             }
             BREAK;
             CASE(OP_tail_call_method):
+#ifdef CONFIG_POCKET_VM_TCO
+try_tail_reuse: {
+                int reused;
+                sf->cur_pc = pc + 2;
+                reused = js_vm_tail_reuse(ctx, sf, sp, get_u16(pc),
+                                          opcode == OP_tail_call_method);
+                if (reused < 0) {
+                    pc += 2;
+                    goto exception;
+                }
+                if (reused) {
+tail_reused:
+#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
+                    call_inputs_valid = true;
+#endif
+                    func_obj = sf->cur_func;
+                    p = JS_VALUE_GET_OBJ(func_obj);
+                    b = p->u.func.function_bytecode;
+                    ctx = b->realm;
+                    var_refs = p->u.func.var_refs;
+                    arg_buf = sf->arg_buf;
+                    var_buf = sf->var_buf;
+                    local_buf = (JSValue *)(sf + 1);
+                    stack_buf = var_buf + b->var_count;
+                    argc = sf->arg_count;
+                    argv = vc(arg_buf);
+                    this_obj = arg_buf[-1];
+                    new_target = JS_UNDEFINED;
+                    pc = sf->cur_pc;
+                    sp = stack_buf;
+                    if (js_vm_push_yield(rt, sf))
+                        goto vm_yield;
+                    goto restart;
+                }
+                if (opcode == OP_tail_call) {
+                    call_argc = get_u16(pc);
+                    pc += 2;
+                    goto has_call_argc;
+                }
+            }
+#endif
                 // Tail-call entry for the method form -- same contract as
                 // OP_tail_call above: empty, falls through, must not move pc.
             CASE(OP_call_method): {
@@ -19233,7 +19718,7 @@ has_call_argc:
                 // L2b, as at has_call_argc; the block reads `this` from
                 // call_argv[-2] and drops one slot more on return
                 // (JS_RET_METHOD), both keyed on `opcode`.
-                if (js_vm_flat_callable(call_argv[-1])) {
+                if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
 #endif
@@ -19304,6 +19789,7 @@ has_call_argc:
             sp++;
             BREAK;
             CASE(OP_check_ctor):
+                ENSURE_CALL_INPUTS(OP_check_ctor);
                 if (JS_IsUndefined(new_target)) {
 non_ctor_call:
                 JS_ThrowTypeError(ctx, "class constructors must be invoked with 'new'");
@@ -19311,6 +19797,7 @@ non_ctor_call:
             }
             BREAK;
             CASE(OP_init_ctor): {
+                ENSURE_CALL_INPUTS(OP_init_ctor);
                 JSValue super, ret;
                 sf->cur_pc = pc;
                 if (JS_IsUndefined(new_target)) {
@@ -19397,6 +19884,13 @@ non_ctor_call:
                     ret_val = JS_EvalObject(ctx, JS_UNDEFINED, obj,
                                             JS_EVAL_TYPE_DIRECT, scope_idx);
                 } else {
+#ifdef CONFIG_POCKET_VM_TCO
+                    if (*pc == OP_return) {
+                        int reused = js_vm_tail_reuse(ctx, sf, sp, call_argc, false);
+                        if (reused < 0) goto exception;
+                        if (reused) goto tail_reused;
+                    }
+#endif
                     ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
                                               JS_UNDEFINED, call_argc,
                                               vc(call_argv), 0);
@@ -19810,21 +20304,33 @@ non_ctor_call:
 
             CASE(OP_goto):
                 pc += (int32_t)get_u32(pc);
+#ifdef CONFIG_POCKET_VM_YIELD
+            JS_VM_POLL_SAFEPOINT();
+#else
             if (unlikely(js_poll_safepoint(ctx))) {
                 goto exception;
             }
+#endif
             BREAK;
             CASE(OP_goto16):
                 pc += (int16_t)get_u16(pc);
+#ifdef CONFIG_POCKET_VM_YIELD
+            JS_VM_POLL_SAFEPOINT();
+#else
             if (unlikely(js_poll_safepoint(ctx))) {
                 goto exception;
             }
+#endif
             BREAK;
             CASE(OP_goto8):
                 pc += (int8_t)pc[0];
+#ifdef CONFIG_POCKET_VM_YIELD
+            JS_VM_POLL_SAFEPOINT();
+#else
             if (unlikely(js_poll_safepoint(ctx))) {
                 goto exception;
             }
+#endif
             BREAK;
             CASE(OP_if_true): {
                 int res;
@@ -19841,9 +20347,13 @@ non_ctor_call:
                 if (res) {
                     pc += (int32_t)get_u32(pc - 4) - 4;
                 }
+#ifdef CONFIG_POCKET_VM_YIELD
+                JS_VM_POLL_SAFEPOINT();
+#else
                 if (unlikely(js_poll_safepoint(ctx))) {
                     goto exception;
                 }
+#endif
             }
             BREAK;
             CASE(OP_if_false): {
@@ -19861,9 +20371,13 @@ non_ctor_call:
                 if (!res) {
                     pc += (int32_t)get_u32(pc - 4) - 4;
                 }
+#ifdef CONFIG_POCKET_VM_YIELD
+                JS_VM_POLL_SAFEPOINT();
+#else
                 if (unlikely(js_poll_safepoint(ctx))) {
                     goto exception;
                 }
+#endif
             }
             BREAK;
             CASE(OP_if_true8): {
@@ -19881,9 +20395,13 @@ non_ctor_call:
                 if (res) {
                     pc += (int8_t)pc[-1] - 1;
                 }
+#ifdef CONFIG_POCKET_VM_YIELD
+                JS_VM_POLL_SAFEPOINT();
+#else
                 if (unlikely(js_poll_safepoint(ctx))) {
                     goto exception;
                 }
+#endif
             }
             BREAK;
             CASE(OP_if_false8): {
@@ -19901,9 +20419,13 @@ non_ctor_call:
                 if (!res) {
                     pc += (int8_t)pc[-1] - 1;
                 }
+#ifdef CONFIG_POCKET_VM_YIELD
+                JS_VM_POLL_SAFEPOINT();
+#else
                 if (unlikely(js_poll_safepoint(ctx))) {
                     goto exception;
                 }
+#endif
             }
             BREAK;
             CASE(OP_catch): {
@@ -21445,7 +21967,8 @@ flat_call: {
             }
             link->caller_sp = sp;
             nsf = (JSStackFrame *)(link + 1);
-            nsf->l2_flags = JS_SF_SEG | JS_SF_FLAT;
+            nsf->l2_flags = JS_SF_SEG | JS_SF_FLAT |
+                            (sf->l2_flags & JS_SF_MAY_YIELD);
             nsf->ret_shape = JS_RET_SHAPE(call_argc, bits);
             nsf->caller_ctx = ctx;
             // The switch. Every caller local not listed is rebuilt from the
@@ -21538,7 +22061,7 @@ flat_async_call: {
             // segment block); the caller's sp goes in the creator record.
             nsf = &s->func_state.frame;
             s->flat_caller_sp = sp;
-            nsf->l2_flags = JS_SF_FLAT;
+            nsf->l2_flags = JS_SF_FLAT | (sf->l2_flags & JS_SF_MAY_YIELD);
             nsf->ret_shape = JS_RET_SHAPE(call_argc, bits);
             nsf->caller_ctx = ctx;
             nsf->prev_frame = sf;
@@ -21563,10 +22086,99 @@ flat_async_call: {
             argv = vc(nsf->arg_buf);
             this_obj = s->func_state.this_val;
             new_target = JS_UNDEFINED;
+#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
+            call_inputs_valid = true;
+#endif
+#ifdef CONFIG_POCKET_VM_YIELD
+            if (js_vm_push_yield(rt, sf))
+                goto vm_yield;
+#endif
             goto restart;
         }
 #endif
     }
+#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
+restore_call_inputs:
+    // Entry-only inputs are not needed by ordinary body opcodes. A default
+    // initializer can call JS before rest/arguments are built, so reconstruct
+    // from the *current* frame when one of the five input readers runs.
+    if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) == (JS_SF_FLAT | JS_SF_SEG)) {
+        argc = sf->arg_count;
+#ifdef CONFIG_POCKET_VM_TCO
+        if (sf->l2_flags & JS_SF_TAIL) {
+            argv = vc(sf->arg_buf);
+            this_obj = sf->arg_buf[-1];
+        } else
+#endif
+        {
+            argv = vc(js_vm_flat_caller_sp(sf) - argc);
+            this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
+        }
+        new_target = JS_UNDEFINED;
+    } else if (sf->l2_flags & JS_SF_FLAT) {
+        JSAsyncFunctionState *fs = container_of(sf, JSAsyncFunctionState, frame);
+        argc = fs->argc;
+        argv = vc(sf->arg_buf);
+        this_obj = fs->this_val;
+        new_target = JS_UNDEFINED;
+    } else {
+        argc = floor_argc;
+        argv = floor_argv;
+        this_obj = floor_this;
+        new_target = floor_new_target;
+    }
+    call_inputs_valid = true;
+    switch (opcode) {
+    case OP_push_this: goto inputs_ready_OP_push_this;
+    case OP_special_object: goto inputs_ready_OP_special_object;
+    case OP_rest: goto inputs_ready_OP_rest;
+    case OP_check_ctor: goto inputs_ready_OP_check_ctor;
+    case OP_init_ctor: goto inputs_ready_OP_init_ctor;
+    default: abort();
+    }
+#endif
+#ifdef CONFIG_POCKET_VM_YIELD
+vm_yield: {
+        JSStackFrame *walk = sf;
+        sf->cur_pc = pc;
+        sf->cur_sp = sp;
+        for (;;) {
+            JSStackFrame *parent;
+            walk->l2_flags |= JS_SF_SUSPENDED;
+            if (walk == rt->vm_susp.floor)
+                break;
+            parent = walk->prev_frame;
+            assert(parent != NULL);
+            if (!(parent->l2_flags & JS_SF_SEG))
+                parent->cur_sp = js_vm_flat_caller_sp(walk);
+            walk = parent;
+        }
+        rt->vm_susp.top = sf;
+        rt->vm_susp.origin = (rt->vm_susp.floor->l2_flags & JS_SF_SEG)
+            ? JS_VM_ORIGIN_HOST : JS_VM_ORIGIN_JOB_ASYNC;
+        rt->current_stack_frame = rt->vm_susp.floor->prev_frame;
+        JS_VMClearYield(rt);
+        if (js_vm_armed) {
+            // No extra runtime fields and no walk in an unarmed build. The
+            // existing stack charge excludes heap async/generator frames;
+            // count those separately rather than guessing their byte size.
+            uint64_t heap_frames = 0;
+            for (walk = sf;; walk = walk->prev_frame) {
+                if (!(walk->l2_flags & JS_SF_SEG))
+                    heap_frames++;
+                if (walk == rt->vm_susp.floor)
+                    break;
+            }
+            js_vm_armed->susp_samples++;
+            if (rt->vm_stack.used > js_vm_armed->susp_bytes_max)
+                js_vm_armed->susp_bytes_max = rt->vm_stack.used;
+            if (heap_frames > js_vm_armed->susp_async_frames)
+                js_vm_armed->susp_async_frames = heap_frames;
+            js_vm_leave(rt, js_vm_armed, js_vm_frame_func(sf));
+        }
+        return JS_EXCEPTION;
+    }
+#endif
 exception:
     if (needs_backtrace(rt->current_exception)
             || JS_IsUndefined(ctx->error_back_trace)) {
@@ -21574,7 +22186,11 @@ exception:
         build_backtrace(ctx, rt->current_exception, JS_UNDEFINED,
                         NULL, 0, 0, 0);
     }
-    if (!JS_IsUncatchableError(rt->current_exception)) {
+    if (
+#ifdef CONFIG_POCKET_VM_YIELD
+        !rt->vm_terminating &&
+#endif
+        !JS_IsUncatchableError(rt->current_exception)) {
         while (sp > stack_buf) {
             JSValue val = *--sp;
             JS_FreeValue(ctx, val);
@@ -21634,7 +22250,11 @@ done:
         JSStackFrame *csf = sf->prev_frame;
         ret_shape = sf->ret_shape;
         sp = s->flat_caller_sp;
-        sf->l2_flags &= ~JS_SF_FLAT;
+        /* The first synchronous stretch belonged to the host-owned chain.
+           After await/return the same heap frame is owned by the async
+           continuation. Stage 3a does not yet give that owner a resume
+           wrapper, so do not let its later job inherit the host token. */
+        sf->l2_flags &= ~(JS_SF_FLAT | JS_SF_MAY_YIELD | JS_SF_SUSPENDED);
         js_vm_pop_frame(rt, sf);                    // prev_frame != NULL: no LEAVE hook
         sf = csf;
         settle_s = s;
@@ -21659,7 +22279,26 @@ done:
         goto resume_caller;
     }
 #endif
-    js_vm_pop_frame(rt, sf);
+    {
+#ifdef CONFIG_POCKET_VM_YIELD
+        const bool owns_func = (sf->l2_flags & JS_SF_OWNS_FUNC) != 0;
+        if (!(sf->l2_flags & JS_SF_SEG))
+            sf->l2_flags &= ~(JS_SF_MAY_YIELD | JS_SF_SUSPENDED);
+#endif
+        js_vm_pop_frame(rt, sf);
+#ifdef CONFIG_POCKET_VM_YIELD
+        if (owns_func) {
+            JS_FreeValueRT(rt, sf->cur_func);
+            JS_FreeValueRT(rt, rt->vm_floor_this);
+            JS_FreeValueRT(rt, rt->vm_floor_new_target);
+            rt->vm_floor_this = JS_UNDEFINED;
+            rt->vm_floor_new_target = JS_UNDEFINED;
+            rt->vm_susp.top = NULL;
+            rt->vm_susp.floor = NULL;
+            rt->vm_terminating = false;
+        }
+#endif
+    }
 #ifdef CONFIG_POCKET_VM_SEGFRAMES
     // Last, after close_var_refs has detached every JSVarRef that pointed
     // into the block and after the pop hook has read sf->prev_frame: the
@@ -21713,6 +22352,13 @@ resume_caller: {
         pc = sf->cur_pc;
         caller_ctx = sf->caller_ctx;
         func_obj = sf->cur_func;
+#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
+        call_inputs_valid = false;
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+        if (!rt->vm_bench_eager_inputs)
+#endif
+            goto call_inputs_ready;
+#endif
         if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) == (JS_SF_FLAT | JS_SF_SEG)) {
             // A flat SEG frame. D11: a flat push leaves the true argc in
             // arg_count. Its argv is the caller's slots below the sp its
@@ -21720,8 +22366,16 @@ resume_caller: {
             // `this` the slot below the func slot for a method call, and it
             // was never a constructor call.
             argc = sf->arg_count;
-            argv = vc(js_vm_flat_caller_sp(sf) - argc);
-            this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
+#ifdef CONFIG_POCKET_VM_TCO
+            if (sf->l2_flags & JS_SF_TAIL) {
+                argv = vc(sf->arg_buf);
+                this_obj = sf->arg_buf[-1];
+            } else
+#endif
+            {
+                argv = vc(js_vm_flat_caller_sp(sf) - argc);
+                this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
+            }
             new_target = JS_UNDEFINED;
         } else if (sf->l2_flags & JS_SF_FLAT) {
             // A flat async frame, still in its first synchronous stretch:
@@ -21741,6 +22395,10 @@ resume_caller: {
             this_obj = floor_this;
             new_target = floor_new_target;
         }
+#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
+        call_inputs_valid = true;
+call_inputs_ready:
+#endif
         if (settle_s) {
             // The flat async frame's first stretch is over: settle its
             // promise (D34) with the caller's locals in place, so that any
@@ -21775,6 +22433,7 @@ resume_caller: {
         goto restart;
     }
 #endif
+#undef ENSURE_CALL_INPUTS
 }
 
 JSValue JS_Call(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
@@ -21782,6 +22441,211 @@ JSValue JS_Call(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
 {
     return JS_CallInternal(ctx, func_obj, this_obj, JS_UNDEFINED,
                            argc, argv, JS_CALL_FLAG_COPY_ARGV);
+}
+
+#ifdef CONFIG_POCKET_VM_YIELD
+void JS_VMRequestYield(JSRuntime *rt)
+{
+    atomic_store_explicit(&rt->vm_yield_req, 1, memory_order_relaxed);
+}
+
+void JS_VMClearYield(JSRuntime *rt)
+{
+    atomic_store_explicit(&rt->vm_yield_req, 0, memory_order_relaxed);
+}
+
+static void js_vm_release_job(JSRuntime *rt)
+{
+    JSJobEntry *e = rt->vm_susp.job;
+    if (!e)
+        return;
+    rt->vm_susp.job = NULL;
+    for (int i = 0; i < e->argc; i++)
+        JS_FreeValueRT(rt, e->argv[i]);
+    JS_FreeValueRT(rt, rt->vm_susp.aux[0]);
+    JS_FreeValueRT(rt, rt->vm_susp.aux[1]);
+    rt->vm_susp.aux[0] = rt->vm_susp.aux[1] = JS_UNDEFINED;
+    rt->vm_susp.tail = NULL;
+    js_free_rt(rt, e);
+}
+
+int JS_VMSuspended(JSRuntime *rt)
+{
+    return rt->vm_susp.top != NULL;
+}
+
+JSVMOrigin JS_VMSuspendedOrigin(JSRuntime *rt)
+{
+    return rt->vm_susp.origin;
+}
+
+void JS_VMTerminate(JSRuntime *rt)
+{
+    if (rt->vm_susp.top)
+        rt->vm_terminating = true;
+}
+
+void JS_VMDiscard(JSRuntime *rt)
+{
+    JSStackFrame *sf = rt->vm_susp.top;
+    JSStackFrame *floor = rt->vm_susp.floor;
+    JSValue *sp;
+    if (!sf)
+        return;
+    assert(rt->current_stack_frame == NULL);
+    sp = sf->cur_sp;
+    /* No JS executes and no allocation is needed. Read each link before
+       releasing its block; operand aliases belong only to the parent. */
+    rt->vm_susp.top = NULL;
+    for (;;) {
+        JSStackFrame *parent = sf->prev_frame;
+        bool at_floor = sf == floor;
+        JSValue *parent_sp = at_floor ? NULL : js_vm_flat_caller_sp(sf);
+        if (sf->l2_flags & JS_SF_SEG) {
+            JSValue *slot;
+            close_var_refs(rt, sf);
+            for (slot = (JSValue *)(sf + 1); slot < sp; slot++)
+                JS_FreeValueRT(rt, *slot);
+            if (sf->l2_flags & JS_SF_OWNS_FUNC)
+                JS_FreeValueRT(rt, sf->cur_func);
+            js_vm_stack_pop(rt, &rt->vm_stack, ((JSVMLink *)sf) - 1);
+        } else {
+            sf->l2_flags &= ~(JS_SF_FLAT | JS_SF_SUSPENDED | JS_SF_MAY_YIELD);
+            /* The heap owner closes its variables and releases its slots. */
+            sf->cur_sp = sp;
+            if (!at_floor || rt->vm_owner_kind == 1)
+                js_async_function_free(rt, container_of(sf, JSAsyncFunctionData, func_state.frame));
+        }
+        if (at_floor)
+            break;
+        sf = parent;
+        sp = parent_sp;
+    }
+    JS_FreeValueRT(rt, rt->vm_floor_this);
+    JS_FreeValueRT(rt, rt->vm_floor_new_target);
+    rt->vm_floor_this = JS_UNDEFINED;
+    rt->vm_floor_new_target = JS_UNDEFINED;
+    js_vm_release_job(rt);
+    rt->vm_susp.floor = NULL;
+    rt->vm_susp.origin = JS_VM_ORIGIN_NONE;
+    rt->vm_terminating = false;
+    rt->vm_owner_kind = 0;
+}
+
+JSValue JS_VMResume(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    JSValue ret;
+    bool async_owner = rt->vm_owner_kind != 0;
+    bool terminating = rt->vm_terminating;
+    if (!rt->vm_susp.top)
+        return JS_ThrowInternalError(ctx, "JS_VMResume: nothing suspended");
+    ret = async_owner ? js_vm_resume_owner(ctx)
+        : JS_CallInternal(ctx, JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED,
+                          0, NULL, JS_CALL_FLAG_VM_RESUME);
+    if (rt->vm_susp.job) {
+        rt->vm_susp.origin = JS_VM_ORIGIN_JOB_HELD;
+        if (!rt->vm_susp.top) {
+            JSJobEntry *e = rt->vm_susp.job;
+            if (async_owner) {
+                /* An async handler returned its promise before parking its
+                   initial stretch. The reaction tail still needs that value. */
+                if (JS_IsException(ret))
+                    JS_FreeValueRT(rt, rt->vm_floor_new_target);
+                else
+                    ret = rt->vm_floor_new_target;
+                rt->vm_floor_new_target = JS_UNDEFINED;
+            }
+            if (rt->vm_susp.tail) {
+                rt->vm_terminating = terminating;
+                rt->vm_entry_block++;
+                ret = rt->vm_susp.tail(e->ctx, ret, vc(e->argv), rt->vm_susp.aux);
+                rt->vm_entry_block--;
+                rt->vm_terminating = false;
+            }
+            js_vm_release_job(rt);
+            bool failed = JS_IsException(ret);
+            JS_FreeValue(ctx, ret);
+            ret = failed ? JS_EXCEPTION : JS_UNDEFINED;
+        }
+    }
+    return ret;
+}
+
+JSValue JS_VMCall(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
+                  int argc, JSValueConst *argv)
+{
+    JSRuntime *rt = ctx->rt;
+    JSValue ret;
+    uint8_t old_entry;
+    if (rt->vm_susp.top)
+        return JS_ThrowInternalError(ctx, "VM suspended");
+    old_entry = rt->vm_entry_ok;
+    rt->vm_entry_ok = !rt->vm_entry_block;
+    rt->vm_susp.origin = JS_VM_ORIGIN_NONE;
+    ret = JS_Call(ctx, func_obj, this_obj, argc, argv);
+    rt->vm_entry_ok = old_entry;
+    return ret;
+}
+
+JSValue JS_VMEval(JSContext *ctx, const char *input, size_t input_len,
+                  const char *filename, int eval_flags)
+{
+    JSRuntime *rt = ctx->rt;
+    JSValue ret;
+    uint8_t old_entry;
+    if (rt->vm_susp.top)
+        return JS_ThrowInternalError(ctx, "VM suspended");
+    /* A module body has no host-side continuation owner before its first
+       top-level await. Keeping it outside the token is D17r's module rule. */
+    if ((eval_flags & JS_EVAL_TYPE_MASK) == JS_EVAL_TYPE_MODULE)
+        return JS_Eval(ctx, input, input_len, filename, eval_flags);
+    old_entry = rt->vm_entry_ok;
+    rt->vm_entry_ok = !rt->vm_entry_block;
+    rt->vm_susp.origin = JS_VM_ORIGIN_NONE;
+    ret = JS_Eval(ctx, input, input_len, filename, eval_flags);
+    rt->vm_entry_ok = old_entry;
+    return ret;
+}
+#endif
+
+/* A job tail consumes its result, but borrows job argv and optional aux.
+   Aux belongs to the job until the tail finishes, including across yields. */
+static JSValue JS_VMCallJob(JSContext *ctx, JSValueConst func, JSValueConst this_val,
+                            int argc, JSValueConst *argv,
+                            JSValue (*tail)(JSContext *, JSValue, JSValueConst *, JSValue *),
+                            JSValueConst *job_argv, JSValue *aux)
+{
+    JSValue ret;
+#ifdef CONFIG_POCKET_VM_YIELD
+    JSRuntime *rt = ctx->rt;
+    rt->vm_entry_ok = !rt->vm_entry_block;
+#endif
+    ret = JS_Call(ctx, func, this_val, argc, argv);
+#ifdef CONFIG_POCKET_VM_YIELD
+    rt->vm_entry_ok = 0;
+    if (rt->vm_susp.top &&
+        (rt->vm_owner_kind == 0 || !JS_IsUndefined(ret))) {
+        rt->vm_susp.origin = JS_VM_ORIGIN_JOB_HELD;
+        rt->vm_susp.tail = tail;
+        rt->vm_susp.aux[0] = aux ? aux[0] : JS_UNDEFINED;
+        rt->vm_susp.aux[1] = aux ? aux[1] : JS_UNDEFINED;
+        if (rt->vm_owner_kind)
+            rt->vm_floor_new_target = ret;
+        return JS_EXCEPTION;
+    }
+    rt->vm_entry_block++;
+#endif
+    if (tail)
+        ret = tail(ctx, ret, job_argv, aux);
+#ifdef CONFIG_POCKET_VM_YIELD
+    rt->vm_entry_block--;
+#endif
+    if (aux) {
+        JS_FreeValue(ctx, aux[0]);
+        JS_FreeValue(ctx, aux[1]);
+    }
+    return ret;
 }
 
 static JSValue JS_CallFree(JSContext *ctx, JSValue func_obj, JSValueConst this_obj,
@@ -22332,7 +23196,11 @@ static bool js_async_function_settle_core(JSContext *ctx, JSAsyncFunctionData *s
 
     if (JS_IsException(func_ret)) {
 fail:
-        if (unlikely(JS_IsUncatchableError(ctx->rt->current_exception))) {
+        if (unlikely(
+#ifdef CONFIG_POCKET_VM_YIELD
+            ctx->rt->vm_terminating ||
+#endif
+            JS_IsUncatchableError(ctx->rt->current_exception))) {
             is_success = false;
         } else {
             JSValue error = JS_GetException(ctx);
@@ -22399,8 +23267,17 @@ resolved:
 
 static bool js_async_function_resume(JSContext *ctx, JSAsyncFunctionData *s)
 {
-    return js_async_function_settle_core(ctx, s,
-                                         async_func_resume(ctx, &s->func_state));
+    JSValue ret = async_func_resume(ctx, &s->func_state);
+#ifdef CONFIG_POCKET_VM_YIELD
+    ctx->rt->vm_entry_ok = 0;
+    if (ctx->rt->vm_susp.top) {
+        /* The current job/creator can release its references after return. */
+        s->header.ref_count++;
+        ctx->rt->vm_owner_kind = 1;
+        return true;
+    }
+#endif
+    return js_async_function_settle_core(ctx, s, ret);
 }
 
 #ifdef CONFIG_POCKET_VM_FLATCALLS
@@ -22449,9 +23326,18 @@ static JSValue js_async_function_resolve_call(JSContext *ctx,
         /* return value of await */
         s->func_state.frame.cur_sp[-1] = js_dup(arg);
     }
+#ifdef CONFIG_POCKET_VM_YIELD
+    ctx->rt->vm_entry_ok = !ctx->rt->vm_entry_block;
+#endif
     if (!js_async_function_resume(ctx, s)) {
+#ifdef CONFIG_POCKET_VM_YIELD
+        ctx->rt->vm_entry_ok = 0;
+#endif
         return JS_EXCEPTION;
     }
+#ifdef CONFIG_POCKET_VM_YIELD
+    ctx->rt->vm_entry_ok = 0;
+#endif
     return JS_UNDEFINED;
 }
 
@@ -22731,6 +23617,9 @@ static void js_async_generator_resume_next(JSContext *ctx,
 {
     JSAsyncGeneratorRequest *next;
     JSValue func_ret, value;
+#ifdef CONFIG_POCKET_VM_YIELD
+    bool may_yield = ctx->rt->vm_entry_ok && ctx->rt->current_stack_frame == NULL;
+#endif
 
     for (;;) {
         if (list_empty(&s->queue)) {
@@ -22779,7 +23668,18 @@ exec_no_arg:
             }
             s->state = JS_ASYNC_GENERATOR_STATE_EXECUTING;
 resume_exec:
+#ifdef CONFIG_POCKET_VM_YIELD
+            ctx->rt->vm_entry_ok = may_yield;
+#endif
             func_ret = async_func_resume(ctx, &s->func_state);
+#ifdef CONFIG_POCKET_VM_YIELD
+            ctx->rt->vm_entry_ok = 0;
+            if (ctx->rt->vm_susp.top) {
+                ctx->rt->vm_owner_kind = 2;
+                ctx->rt->vm_floor_this = js_dup(JS_MKPTR(JS_TAG_OBJECT, s->generator));
+                return;
+            }
+#endif
             if (JS_IsException(func_ret)) {
                 value = JS_GetException(ctx);
                 js_async_generator_complete(ctx, s);
@@ -22838,6 +23738,9 @@ static JSValue js_async_generator_resolve_function(JSContext *ctx,
     bool is_reject = magic & 1;
     JSAsyncGeneratorData *s = JS_GetOpaque(func_data[0], JS_CLASS_ASYNC_GENERATOR);
     JSValueConst arg = argv[0];
+#ifdef CONFIG_POCKET_VM_YIELD
+    JSStackFrame *native_frame = ctx->rt->current_stack_frame;
+#endif
 
     /* XXX: what if s == NULL */
 
@@ -22860,10 +23763,55 @@ static JSValue js_async_generator_resolve_function(JSContext *ctx,
             /* return value of await */
             s->func_state.frame.cur_sp[-1] = js_dup(arg);
         }
+#ifdef CONFIG_POCKET_VM_YIELD
+        /* C_FUNCTION_DATA installs a native frame even for this internal
+           continuation. Its only remaining action is to return undefined;
+           detach it while the heap owner runs, then restore it for C's pop.
+           A real caller below that frame still makes this non-yieldable. */
+        if (native_frame && native_frame->prev_frame == NULL)
+            ctx->rt->current_stack_frame = NULL;
+        ctx->rt->vm_entry_ok = !ctx->rt->vm_entry_block;
+#endif
         js_async_generator_resume_next(ctx, s);
+#ifdef CONFIG_POCKET_VM_YIELD
+        ctx->rt->vm_entry_ok = 0;
+        ctx->rt->current_stack_frame = native_frame;
+#endif
     }
     return JS_UNDEFINED;
 }
+
+#ifdef CONFIG_POCKET_VM_YIELD
+static JSValue js_vm_resume_owner(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    bool ok = true;
+    if (rt->vm_owner_kind == 1) {
+        JSAsyncFunctionData *s = container_of(rt->vm_susp.floor,
+                                              JSAsyncFunctionData, func_state.frame);
+        ok = js_async_function_resume(ctx, s);
+        /* A second yield acquired its own reference before this one goes. */
+        if (!rt->vm_susp.top)
+            rt->vm_susp.floor = NULL;
+        js_async_function_free(rt, s);
+    } else {
+        JSValue owner = rt->vm_floor_this;
+        JSAsyncGeneratorData *s = JS_GetOpaque(owner, JS_CLASS_ASYNC_GENERATOR);
+        rt->vm_floor_this = JS_UNDEFINED;
+        rt->vm_entry_ok = 1;
+        js_async_generator_resume_next(ctx, s);
+        rt->vm_entry_ok = 0;
+        if (!rt->vm_susp.top)
+            rt->vm_susp.floor = NULL;
+        JS_FreeValue(ctx, owner);
+    }
+    if (!rt->vm_susp.top) {
+        rt->vm_owner_kind = 0;
+        rt->vm_terminating = false;
+    }
+    return ok ? JS_UNDEFINED : JS_EXCEPTION;
+}
+#endif
 
 /* magic = GEN_MAGIC_x */
 static JSValue js_async_generator_next(JSContext *ctx, JSValueConst this_val,
@@ -36509,6 +37457,47 @@ static bool code_has_label(CodeContext *s, int pos, int label)
 /* return the target label, following the OP_goto jumps
    the first opcode at destination is stored in *pop
  */
+#ifdef CONFIG_POCKET_VM_TCO
+// Pass-2 code still has labels. Follow only control transfers and lexical
+// closes on the way to returning the call's value. nip_catch is only a
+// stack cleanup; runtime reuse additionally verifies transparent handlers.
+// Never cross gosub: that executes a finally after the call returns.
+// Do not change label refcounts; other predecessors still use this code.
+static bool js_vm_tail_return_path(JSFunctionDef *s, int pos)
+{
+    const uint8_t *code = s->byte_code.buf;
+    int limit = s->byte_code.size;
+    // Bound compile work even for cyclic or adversarial jump chains.
+    // Longer continuations conservatively keep an ordinary call.
+    for (int steps = 0; steps < 64 && pos >= 0 && pos < limit; steps++) {
+        int op = code[pos];
+        int size = opcode_info[op].size;
+        if (size > limit - pos)
+            return false;
+        switch (op) {
+        case OP_return:
+            return true;
+        case OP_source_loc:
+        case OP_label:
+        case OP_close_loc:
+        case OP_nip_catch:
+            pos += size;
+            break;
+        case OP_goto: {
+            int label = get_u32(code + pos + 1);
+            if (label < 0 || label >= s->label_count)
+                return false;
+            pos = s->label_slots[label].pos2;
+            break;
+        }
+        default:
+            return false;
+        }
+    }
+    return false;
+}
+#endif
+
 static int find_jump_target(JSFunctionDef *s, int label, int *pop)
 {
     int i, pos, op;
@@ -36775,6 +37764,14 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
             /* detect and transform tail calls */
             int argc;
             argc = get_u16(bc_buf + pos + 1);
+#ifdef CONFIG_POCKET_VM_TCO
+            if (s->is_strict_mode && js_vm_tail_return_path(s, pos_next)) {
+                add_pc2line_info(s, bc_out.size, line_num, col_num);
+                put_short_code(&bc_out, op + 1, argc);
+                // Keep the continuation for any other incoming labels.
+                break;
+            }
+#endif
             if (code_match(&cc, pos_next, OP_return, -1)) {
                 if (cc.line_num >= 0) {
                     line_num = cc.line_num;
@@ -42237,7 +43234,7 @@ static JSValue js_global_isFinite(JSContext *ctx, JSValueConst this_val,
 static JSValue js_microtask_job(JSContext *ctx,
                                 int argc, JSValueConst *argv)
 {
-    return JS_Call(ctx, argv[0], ctx->global_obj, 0, NULL);
+    return JS_VMCallJob(ctx, argv[0], ctx->global_obj, 0, NULL, NULL, argv, NULL);
 }
 
 static JSValue js_global_queueMicrotask(JSContext *ctx, JSValueConst this_val,
@@ -56929,33 +57926,18 @@ static void promise_reaction_data_free(JSRuntime *rt,
 #define promise_trace(...)
 #endif
 
-static JSValue promise_reaction_job(JSContext *ctx, int argc,
-                                    JSValueConst *argv)
+static JSValue promise_reaction_tail(JSContext *ctx, JSValue res,
+                                     JSValueConst *argv, JSValue *aux)
 {
-    JSValueConst handler, func;
-    JSValue res, res2;
-    JSValueConst arg;
-    bool is_reject;
-
-    assert(argc == 5);
-    handler = argv[2];
-    is_reject = JS_ToBool(ctx, argv[3]);
-    arg = argv[4];
-
-    promise_trace(ctx, "promise_reaction_job: is_reject=%d\n", is_reject);
-
-    if (JS_IsUndefined(handler)) {
-        if (is_reject) {
-            res = JS_Throw(ctx, js_dup(arg));
-        } else {
-            res = js_dup(arg);
-        }
-    } else {
-        res = JS_Call(ctx, handler, JS_UNDEFINED, 1, &arg);
-    }
-    is_reject = JS_IsException(res);
+    JSValueConst func;
+    JSValue res2;
+    bool is_reject = JS_IsException(res);
     if (is_reject) {
-        if (unlikely(JS_IsUncatchableError(ctx->rt->current_exception))) {
+        if (unlikely(
+#ifdef CONFIG_POCKET_VM_YIELD
+            ctx->rt->vm_terminating ||
+#endif
+            JS_IsUncatchableError(ctx->rt->current_exception))) {
             return JS_EXCEPTION;
         }
         res = JS_GetException(ctx);
@@ -56972,6 +57954,21 @@ static JSValue promise_reaction_job(JSContext *ctx, int argc,
     JS_FreeValue(ctx, res);
 
     return res2;
+}
+
+static JSValue promise_reaction_job(JSContext *ctx, int argc,
+                                    JSValueConst *argv)
+{
+    JSValueConst handler = argv[2], arg = argv[4];
+    bool is_reject = JS_ToBool(ctx, argv[3]);
+    assert(argc == 5);
+    promise_trace(ctx, "promise_reaction_job: is_reject=%d\n", is_reject);
+    if (JS_IsUndefined(handler)) {
+        JSValue res = is_reject ? JS_Throw(ctx, js_dup(arg)) : js_dup(arg);
+        return promise_reaction_tail(ctx, res, argv, NULL);
+    }
+    return JS_VMCallJob(ctx, handler, JS_UNDEFINED, 1, &arg,
+                        promise_reaction_tail, argv, NULL);
 }
 
 void JS_SetPromiseHook(JSRuntime *rt, JSPromiseHook promise_hook, void *opaque)
@@ -57038,6 +58035,26 @@ static void fulfill_or_reject_promise(JSContext *ctx, JSValueConst promise,
     }
 }
 
+static JSValue js_promise_thenable_tail(JSContext *ctx, JSValue res,
+                                       JSValueConst *argv, JSValue *args)
+{
+    JSRuntime *rt = ctx->rt;
+    if (rt->promise_hook) {
+        rt->promise_hook(ctx, JS_PROMISE_HOOK_AFTER, argv[0], JS_UNDEFINED,
+                         rt->promise_hook_opaque);
+    }
+    if (JS_IsException(res)) {
+#ifdef CONFIG_POCKET_VM_YIELD
+        if (rt->vm_terminating)
+            return JS_EXCEPTION;
+#endif
+        JSValue error = JS_GetException(ctx);
+        res = JS_Call(ctx, args[1], JS_UNDEFINED, 1, vc(&error));
+        JS_FreeValue(ctx, error);
+    }
+    return res;
+}
+
 static JSValue js_promise_resolve_thenable_job(JSContext *ctx,
                                                int argc, JSValueConst *argv)
 {
@@ -57059,19 +58076,8 @@ static JSValue js_promise_resolve_thenable_job(JSContext *ctx,
         rt->promise_hook(ctx, JS_PROMISE_HOOK_BEFORE, promise, JS_UNDEFINED,
                          rt->promise_hook_opaque);
     }
-    res = JS_Call(ctx, then, thenable, 2, vc(args));
-    if (rt->promise_hook) {
-        rt->promise_hook(ctx, JS_PROMISE_HOOK_AFTER, promise, JS_UNDEFINED,
-                         rt->promise_hook_opaque);
-    }
-    if (JS_IsException(res)) {
-        JSValue error = JS_GetException(ctx);
-        res = JS_Call(ctx, args[1], JS_UNDEFINED, 1, vc(&error));
-        JS_FreeValue(ctx, error);
-    }
-    JS_FreeValue(ctx, args[0]);
-    JS_FreeValue(ctx, args[1]);
-    return res;
+    return JS_VMCallJob(ctx, then, thenable, 2, vc(args),
+                        js_promise_thenable_tail, argv, args);
 }
 
 static void js_promise_resolve_function_free_resolved(JSRuntime *rt,
@@ -65068,7 +66074,7 @@ static const JSClassShortDef js_finrec_class_def[] = {
 
 static JSValue js_finrec_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
-    return JS_Call(ctx, argv[0], JS_UNDEFINED, 1, &argv[1]);
+    return JS_VMCallJob(ctx, argv[0], JS_UNDEFINED, 1, &argv[1], NULL, argv, NULL);
 }
 
 int JS_AddIntrinsicWeakRef(JSContext *ctx)

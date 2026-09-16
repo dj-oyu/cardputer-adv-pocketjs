@@ -123,9 +123,137 @@ main 3607e84（改変なし）と vm/main 983eabe（L2b、フラット既定on�
 
 `kernel_ms`（描画カーネルはL2a/L2bで一切未変更）が4%動いたのが陰性対照。`turn_ms` の+3%も同じ大きさで、CLAUDE.mdの「命令キャッシュ配置だけで15%動く」の床の内側 — コードの変化による差とは言えない。安定性: 両方とも `SMOKE_OK 20`、故障回復6種OK。未計測: 呼び出しが多いアプリでの差、深い再帰を含むアプリでの予算20KiBの効き方、同一バイナリでの切り替え比較。
 
+### 3.5 同一バイナリ内のflat/recur速度比較（2026-09-16）
+
+`CONFIG_POCKET_VM_CALLBENCH`（既定n、FLATCALLS必須・YIELD禁止）で、idle runtimeの
+通常call/method callを既存の`JS_CallInternal`再帰fallbackへ切り替える口を追加した。
+通常ビルドではフィールド・分岐・APIを前処理で除去する。これは同じflatインタープリタの
+dispatch比較であり、コンパイル時にFLATCALLSを外したL2a全体との同一性は主張しない。
+async第一同期区間もselectorの対象だが、速度測定は同期呼び出しだけ。
+
+`tools/vmtest/callbench.c`をhost/device共通で実行。独立のPATH検査で17回のnative callbackを呼び、
+live frame中の切り替え拒否とCフレーム位置を確認する。速度は4負荷×8組ABBA/BAABの128標本/run。
+各blockはGC後に同じ関数を2回ウォームアップ、3回目の`JS_Call`だけを計測し、毎回戻り値を照合する。
+コンパイル・GC・ログ出力は区間外。runtime標準allocator、ヒープ160KiB、実機Cスタック上限20KiB。
+guest allocator・スケジューラ・描画を含まない。集計器は128標本の完全性・重複・順序・値・PATH・PASSを検査する。
+
+実機は240MHz、`-Os`、YIELD/FAIR/PROBE=n、SEGFRAMES/FLATCALLS/CALLBENCH=y。
+image SHA256 `9d90ff8e0a9bc4ba34514dd69ad364278ebcacb9656d633aa54fe547647245d7`、
+app 2,145,264B、DIRAM 123,324B、flash 1,558,752B。ELFでselectorとbenchの残存も確認した。
+COM3の同じimageで2回、計256標本。各組のflat平均時間/recur平均時間の中央値（小さい方が速い）は以下。
+
+| 負荷 | 比率 run1 / run2 | flat時間中央値 run1 / run2 (ms) | recur時間中央値 run1 / run2 (ms) |
+| --- | --- | --- | --- |
+| callなしのloop 20,000回 | 1.00023 / 0.99985 | 93.011 / 93.005 | 93.002 / 93.009 |
+| 通常call 20,000回 | 1.03997 / 1.04017 | 161.897 / 161.927 | 155.667 / 155.659 |
+| method call 20,000回 | 1.03161 / 1.03256 | 228.380 / 228.538 | 221.311 / 221.354 |
+| 16段再帰×1,000回 | 1.05414 / 1.05419 | 72.781 / 72.736 | 69.024 / 69.010 |
+
+**実測(device): この同期小関数群ではflatは3.2〜5.4%遅い。高速化したとは主張しない。**
+対照loopの組ごとの比率は2run全体で0.99792〜1.00074。
+PATHの16段Cスタック増加は両runともflat 0B、recur 4,864B（304B/段）。
+診断用分岐を含む今回imageの値であり、§4.11の別imageの288B/段と混ぜない。
+flatの価値はC再帰依存を除くことと中断可能な鎖を作ることにあり、ここでは既定を変更しない。
+総アプリ速度、async速度、異なる関数形状・最適化フラグへの一般化はしない。
+
+実測(host): o2/ASanでPATH・戻り値・反復解放が成功（16段recur増加9,728/15,872B、flat 0B）。
+host時間は対照loopも揺れ、速度結論には使わない。通常o2とcallbench既定flatは各67/67、
+selector=recurのclosure/generator/promise/job重点9件はo2/ASan各9/9。
+通常o2の`nm`にselectorなし、診断オプション指定は拒否。集計器の正常系と欠落等の拒否テストも合格。
+生ログは`.cache/vmtest/callbench-{host,host-2,asan,device-1,device-2}.log`、
+再現手順は`tools/vmtest/README.md`。実機比較後は元のapp領域を復元し書込hash一致、
+通常smoke 3周・故障回復6種・`HOME_READY`まで確認した。NVS・storage・font領域は変更していない。
+
+### 3.6 復帰時のcall inputs遅延復元の試作（2026-09-16、既定OFF）
+
+`CONFIG_POCKET_VM_LAZY_INPUTS`を追加。flat returnで`argc/argv/this/new.target`を即時復元せず、
+無効フラグだけ置く。読者は`push_this/special_object/rest/check_ctor/init_ctor`の5 opcode入口。
+必要時に現在のsf・floor・async所有者・TCO保持スロットから復元してその命令へ直接戻る。
+命令の再dispatch・debug dump・poll・確保・JS実行は増やさない。default引数のcall後にrest等を
+生成する場合も復元する。通常push・flat async・TCO reuseは入力が既知なので有効化する。
+VM resumeは既存の完全復元を維持。JSフレームやバイトコードの構造は増やさず、C activationにboolを持つ。
+
+CALLBENCHにはruntime毎の即時復元対照を追加し、USB `U` / host `--inputs`でlazy/eagerを比較する。
+同一image SHA256 `9c93f7818caae77904010da5a4c9a2e7a9ad0f212c55dfa40d0067ecca716f8a`、
+app 2,145,888B、DIRAM 123,324B、flash 1,559,340B。240MHz/-Os、YIELD=n。
+Kconfig追加後の単なるbuildでは古い設定が残ったため、reconfigure後のLAZY_INPUTS=yと
+sourceより新しいengine objectを確認したimageだけを実機へ書き込んだ。
+2run×128標本、各組のlazy平均/eager平均の中央値（§3.5と同じ手順）は以下。
+
+| 負荷 | 比率 run1 / run2 | 時間短縮率 |
+| --- | --- | --- |
+| callなしloop | 1.00015 / 1.00020 | 有意な改善とは扱わない |
+| 通常call | 0.98496 / 0.98522 | 1.50% / 1.48% |
+| method | 0.98810 / 0.98829 | 1.19% / 1.17% |
+| 再帰 | 0.96542 / 0.96605 | 3.46% / 3.39% |
+
+実測(device): 16段のCフレーム位置差は両方式とも0B。これは復元処理が費用の一部である証拠だが、
+flat全体の遅さの全原因を特定したものではない。旧imageとの時間の引き算はしない。
+今回imageの`JS_CallInternal`は`entry a1,0x130`、再帰は`call8`、復帰は`retw.n`。
+Cフレーム304Bを戻るたびコピーするわけではなく、VMの汎用的な状態再構築とは処理が異なる。
+
+実測(host): 最終コードのo2-callbench/asan-lazyコーパス各68/68。
+asan-lazyはYIELD/TCOも有効な実験変種。毎中断GCの重点8件に加え、64KiB VM予算のtco_guards
+（686中断/再開）が成功、寿命・GC・terminate/discardは900ケース成功。
+既存Test262部分集合4,099ファイルは7,501 pass/194 fail/0 skip、baseline退行0。
+この試作時点では追加対照・通常buildの検証前なので既定n。後続の検証と既定yへの採用は§3.7。
+
+検査系でも修正: 毎中断GCのtco_guardsを7MiB host予算で走らせると300秒timeoutになり、
+旧run.shが無条件に「ASan startup hang」として再試行した。2回目を明示停止し、完走とは記録しない。
+runnerのmain到達markerをstderrへ出す方式にし、到達後のtimeout/crashは再試行しない。
+実際のrun.shをfake runnerで動かす5条件で分類を検査した。
+64KiBでの再走は、深さを広げる検査ではなく、fallbackの予算拒否・解放を検査するもの。
+
+生ログ: `.cache/vmtest/lazy-{device-1,device-2,host-final}.log`、
+`lazy-{o2-corpus-final,asan-corpus-final,asan-yield-final,asan-tco-final,asan-marker,test262,lifecycle}.log`。
+実機は元appを書込hash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認。保存領域は変更していない。
+
+### 3.7 遅延復元の通常構成検証と採用（2026-09-16）
+
+実測(host): 診断・YIELD・TCOなしの`o2-lazy-flat` / `asan-lazy-flat`でコーパス68/68、
+セグメント成長6方針×6負荷の36比較も両方成功。o2のG1は通常/asyncとも深さ2000/4000で0B/段、
+D10予算検査は11/11。重点コーパスのtail呼出しをspreadから固定arityへ改め、実際にTCO reuseを
+通る形にした後もeager/lazyの出力は一致し、asan-lazyの毎中断GC・64KiB予算で98中断/再開が成功。
+
+固定Test262 `72faf8ec1445c55149615e8b35187830783aba1a`の追加範囲は
+`language/{statements,expressions}/{function,class}`、`language/arguments-object`、`built-ins/Function`。
+9,913ファイル、19,307判定を即時復元o2とo2-lazy-flatで直接対照し、両方19,259 pass/46 fail/2 skip。
+全判定と失敗詳細を含む結果ファイルが一致（SHA256 `0872f9fa4a1b02c83eb456cede7eedd6b0fa6c38846a050473f0944c30690282`）。
+既存baselineの範囲外なので「baseline退行0」だけを根拠にせず、対照ファイルの完全一致を確認した。
+共通失敗とskipは残り、Test262全体の合格を意味しない。
+
+実測(device build): 独立`build_vm_lazy_release`のSDKCONFIGでLAZY_INPUTSだけをn→yに変更。
+両方SEG/FLAT=y、CALLBENCH/PROBE/YIELD/TCO/SELFTEST=n。root設定は変更していない。
+
+| 資源 | 即時復元 | 遅延復元 |
+| --- | ---: | ---: |
+| app image | 2,143,456B | 2,143,584B |
+| Flash Code | 1,557,652B | 1,557,784B |
+| 静的DIRAM | 123,308B | 123,308B |
+| JS_CallInternal Cフレーム | 304B | 304B |
+
+ELFに診断用selector/benchmarkが含まれないことも確認。image SHA256は即時復元
+`6514a93d0c951462fca284202671ce262b9e8babbd881e3b58b2062713701a63`、遅延復元
+`db55575c449e67fde7873ae230105113cb1b4f75fe038aa16d7c0b29c43dd32a`。
+COM3で両imageのmemlogを実測し、idle free269,232B、app free128,564B、largest79,872B、JS86,571Bで一致、予算内。
+これは当該アプリの標本で、任意負荷の断片化の保証ではない。遅延復元版のsmoke20周・故障回復6種が成功。
+10/20周の停止後free269,232B・largest147,456Bも一致した。
+
+採用判断: §3.6の同一image速度対照、追加互換検査、静的RAM増加なし・Flash Code +132Bを根拠に
+LAZY_INPUTSを既定yへ変更する。無印host変種も揃え、`-eager`で旧経路を検査可能に保つ。
+既存SDKCONFIGの明示nは上書きしない。YIELD/TCO/FAIRの既定は変更しない。
+別image間の速度比較はしておらず、flatがC再帰を上回ったとは主張しない。
+採用後に無印o2とo2-eagerを再ビルドし、両方コーパス68/68を確認した。
+検証後は元app（SHA256 `b7a41c57626e45b6ade42d7c752d0f2909c03eda75f582690b1774b87659f073`）を
+書込hash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認。app以外の領域は書き込んでいない。
+
+ログ: `.cache/vmtest/lazy-release-{corpus,asan-corpus,g1,g1-async,budget,segments,asan-segments}.log`、
+`lazy-extra-{eager,release}-results.txt`、`lazy-extra-{eager,release}.log`、`lazy-release-memory.jsonl`、
+`lazy-{default,eager}-corpus.log`。
+
 ## 4. L2c: 中断・再開の進捗
 
-L2cの本体（`rt->vm_susp`/`vm_yield:`/`vm_resume:`）は未実装（backlog.md #7）。以下は済んでいる段の結果。
+L2cの本体は段3bまで部分実装済み（backlog.md #7）。以下は済んでいる段の結果。
 
 ### 4.1 段A: async関数のフラット化（[vm-L2-design.md](vm-L2-design.md) §11、実測(host)、`vm/l2c`）
 
@@ -136,7 +264,7 @@ L2cの本体（`rt->vm_susp`/`vm_yield:`/`vm_resume:`）は未実装（backlog.m
 | 関所 | flat | -recur |
 | --- | --- | --- |
 | G1（async） | NOT_PROPORTIONAL | PROPORTIONAL |
-| `budget_probe.sh`（`deep_async_recursion`） | `budget_hits=0` + `InternalError`（ヒープ枯渇。D38の帰結） | `RangeError`（Cスタック検査） |
+| `budget_probe.sh`（`deep_async_recursion`） | `budget_hits=0` + OOM記録 + exit 2（エラー生成・catch到達も保証できない。§4.12） | `RangeError`（Cスタック検査） |
 | Test262 | 7,501/194/regressions 0（不変） | 同左 |
 | `--force-yield` | 3/45 | 同左 |
 
@@ -160,7 +288,279 @@ Stage Aの攻撃で見つかった二重解放（`JS_NewPromiseCapability` の2�
 | Test262 asan | 7,501/194/regressions 0（4,099ファイル） |
 | ファームのビルド（既定構成） | 通る |
 
+### 4.3 段3a: ホスト所有SEG鎖の保存・再開（実測(host)、2026-09-16）
+
+`CONFIG_POCKET_VM_YIELD`（既定n）を追加し、`JS_VMCall` / global の`JS_VMEval`から入ったSEG床と、その上のフラットSEG・最初の同期区間にいるflat asyncフレームを、分類Aの7地点で保存・再開する本体を実装した。yieldは例外を作らず、`cur_pc` / `cur_sp`と鎖を公開して`JS_EXCEPTION`を返す。再開時は同じフレーム鎖を`restart:`へ戻す。床は実行開始時に関数・`this`・`new.target`・渡された全引数を所有するため、yield地点での確保はない。モジュール本体はD17rどおり対象外。
+
+停止中のSEGフレームは`JS_MarkContext`からmarkし、鎖の途中のflat asyncフレームは既存の`async_func_mark`へ分担する。最初の同期区間を終えたasyncフレームは、まだasync所有者側の再開囲いを実装していないため`MAY_YIELD`を落とす。
+
+| 関所 | 結果 |
+| --- | --- |
+| o2-yield 通常コーパス | 63/63 |
+| o2-yield `--force-yield` | 63/63。全対象で`safepoints_yieldable == stops == resumes` |
+| 最大の強制再開回数 | `bench_loop` 6,000,001回、`bench_calls` 2,692,537回 |
+| asan-yield 強制中断（寿命・例外・async混在の代表10件） | 10/10 |
+| asan-yield `--gc-on-yield`（async混在、closure、深いSEG保持） | 3/3 |
+| 既定offのo2コーパス | 63/63 |
+| ESP-IDF 既定offビルド | 成功。app 2,143,040 bytes、最小app領域32%空き、DIRAM増加0 |
+
+未実装は分類B、async/async-generatorが床になる再開、D36の保留ジョブ、Terminate/Discard、実機統合。したがって出荷既定はまだoffであり、本節はL2c全体の完了を意味しない。
+
 Test262の読み違いを1件記録する: 作業ツリーの `.cache/test262` が固定リビジョンのcheckoutではなく欠けたコピーだったため、一時的に6,511/191という誤った基準を報告した。ジャンクションで繋ぎ直して7,501/194に復帰。**作業ツリーを作るときは `.cache/test262` もジャンクションで繋ぐこと**（[vm-branching.md](vm-branching.md) の既存の一覧に追加すべきもの）。
+
+### 4.4 段3b: 分類Bとホスト鎖の終了・破棄（2026-09-16、`ab71b71`からの差分）
+
+呼び出しのpush完了後にも強制yieldできるようにした。呼び出し前のwatchdogポーリングはそのままで、分類Bは二度目のwatchdogポーリングを行わない。`JS_VMTerminate`は次のresumeで捕捉不能な終了へ入り、エラーの確保もできないOOM時には専用ビットでcatch/finallyを迂回する。`JS_VMDiscard`は内側からSEGを解放し、ヒープ上のflat asyncフレームは持ち主へ返す。`JS_FreeRuntime`も同じ破棄経路を使う。停止中の`JS_ExecutePendingJob`は先頭を取り外す前に拒否する。
+
+強制yieldの早期returnがwatchdogのカウント更新を飛ばしていた問題も修正。分岐だけの無限ループが9,999回のresume後にwatchdogで終了することを固定した。
+
+| 関所 | 結果（host、ASan/UBSan） |
+| --- | --- |
+| コーパス `--force-yield` | 63/63、全対象で中断数と再開数が一致 |
+| `lifecycle.sh asan-yield` | 22中断位置×5モード=110成功、watchdog検査も成功 |
+| 5モード | 再開、Terminate、Discard、runtime解放、OOM下のTerminate。各中断でGC、キュー拒否と保持、捕捉変数の寿命を検査 |
+| Test262 通常/強制yield | 両方7,501成功・194既知失敗、4,099ファイル、退行0 |
+| 既定offのo2コーパス | 63/63 |
+
+実機コンパイラのELF型情報: `sizeof(JSRuntime)=344`、`JSStackFrame=48`、`JSAsyncFunctionData=104` bytes。終了フラグはoffset 173で、入口トークン172と床の値176の間の詰め物に収まる。フレームは増えていない。yield時とDiscardは確保を行わない。async/async-generator所有床、保留job、要求ビットと実機スケジューラ接続は次工程。
+
+**実測(device、ESP32-S3、240 MHz、ESP-IDF 6.0.1):** `CONFIG_POCKET_VM_YIELD=y, POCKET_VM_SELFTEST=y`、独立した`build_vm_l2c_selftest/sdkconfig`でビルドし、COM3の実機へアプリ領域のみを書き込んで確認した。
+
+| 関所 | 結果 |
+| --- | --- |
+| USB `L`（同じ`lifecycle.c`） | 110ケース×3周すべて成功、watchdogも3周成功 |
+| 各周の空きヒープ | 全周とも前後269,320→269,320B。終了後の最大連続ブロック163,840B |
+| 検査時間 | 5,861,834 / 5,861,447 / 5,872,546 µs（runtime生成と検査内の待機を含む。VM速度比較ではない） |
+| 通常アプリ smoke | 起動・終了20周、故障回復6種すべて成功。10/20周目の空き269,232B、最大連続147,456Bで一致 |
+| 実行中メモリ（`memlog --check`） | `idle_free=269232 app_free=128524 app_largest=79872 js=86603`、予算内 |
+| hello `PAINT` 10標本の平均 | `turn_ms=1.82 render_ms=7.91 kernel_ms=3.19 send_ms=1.94`（sound設定変更なし、速度差の主張には使わない） |
+| 検証ビルド | app 2,147,328B、DIRAM 123,308B、領域32%空き |
+| 既定offビルド | app 2,143,024B、DIRAM 123,308B、成功。`JSRuntime=312B`なのでyield有効時+32B。off時はDiscard呼び出しもコンパイルから除外 |
+
+元の実機は別系統のKasane版（image version `vm-pre-stack-74e704d-131-g0ad90`）だった。変更前もsmoke20周・故障回復6種は成功。描画系が異なるため、この実機との差をエンジンの性能差・省メモリ効果として扱わない。検証前にアプリ領域3MiBを読み出し、image checksum/hashと実機digest一致を確認して保存した。stub経由のreadが途中で止まったため、ROM経由の`--no-stub`で読み出し・書き込みを行った。
+
+検証後は保存したアプリを復元し、書き込みhash照合、Kasaneのsmoke3周と故障回復6種、`HOME_READY`まで確認した。設定・辞書・フォント・storage領域は書き換えていない。実機で検査したselftestバイナリのSHA256は`8a55812544e031579c2c1349adac71d2242bdf51bee2fec9392a1ff968ae75d4`。
+
+### 4.5 L2c: async所有床と保留job（2026-09-16）
+
+async/async-generatorのheap所有床を保持・再開・破棄できるようにした。Promise reaction、thenable、microtask、FinalizationRegistryのjob入口を囲い、完了tailとauxを必要な間だけruntimeで所有する。jobを再enqueueせずFIFOを維持する。async handlerの初期区間も中断できるため、先に返されたPromiseをtailまで保持する（独自speciesのresolveがJSである場合にも対応）。内部async generator継続に挟まるnative frameは、実際の呼び出し元が無い時だけ一時的に外す。
+
+`JS_ExecutePendingJob`の保留戻り値2はschedulerで未完了として扱い、resumeとtailの完了後に一度だけ数える。検査中、`vmrun`の旧受け口が中断のたびにジョブ予算をリセットし、停止指定を越えて実行する不備を検出して修正した。FAIRの仮想ホストイベント境界もopcode中断数ではなく従来の予算区切りに維持する。既存期待値は変更していない。
+
+ホストの寿命検査は7所有形態×22〜23地点×5モード、計790ケースに拡張し、ASan/UBSan下ですべて成功。GCを各中断で実行するasync/held-job重点検査12件も成功。全コーパス強制yieldは互換順序・FAIRとも64/64、通常と強制yieldのTest262はいずれも7,501成功・194既知失敗、退行0。既定offのo2コーパス64/64。追加の`yield_job_tails`はspecies、thenableのresolve後throw、reject、async generatorの連続要求とfinallyの出力をoff版で固定した。全コーパスへの毎中断GCは大規模benchmarkの費用が大きいため途中で止め、重点検査と全地点寿命検査でGCを行った。
+
+**実測(device):** COM3へアプリ領域のみ書き込み、同じC寿命検査790ケース×3周=2,370ケースとwatchdog検査3周すべて成功。各周とも空き269,320→269,320B、最大連続159,744B。所要46,308,916 / 46,341,436 / 46,309,214µs（検査内の待機を含み、VM速度ではない）。通常アプリsmoke20周と故障回復6種も成功し、空き269,232B・最大連続147,456Bは10/20周で一致。`memlog --check`: idle269,232、app128,500、largest79,872、JS86,635B、予算内。
+
+ELF型情報は`JSRuntime=376`、`JSStackFrame=48`、`JSAsyncFunctionData=104`B。runtimeは段3b比+32B、yield無効比+64Bで、フレームあたりの増加なし。実機検査imageはSHA256 `7e3c8139b78c9867f4c3ba01bca9da63e329f6acda68903b51de062bfd6477f4`、app2,149,216B、DIRAM123,308B。これはschedulerの戻り値2接続修正前のimageであり、直接VM APIを使う寿命検査と通常アプリを測ったもの。scheduler接続修正はホストで検査し、実機ゲストの時分割接続は引き続きbacklog #11。既定offビルドも成功（app2,143,120B、DIRAM123,308B）。
+
+実機の変更前imageが保存済みbackupと一致することをdigest照合した上で検査を開始した。検査後は元のKasane版アプリを復元し、書き込みhash一致、smoke3周・故障回復6種、`HOME_READY`を確認。設定・辞書・フォント・storageは変更していない。
+
+### 4.6 D27: 別スレッドからの中断要求（2026-09-16）
+
+`JS_VMRequestYield` / `JS_VMClearYield`を追加。要求のatomic byteだけをproducerが操作し、A/B境界で受理する。禁止床では消さず、実際に中断した時に合流した要求を消す。通常整数の`interrupt_counter`をtimerが変更する当初案はdata raceになるので撤回し、カウンタのatomic RMW化も避けた（design §11.8）。要求フラグはruntime offset155のpaddingに入り、`sizeof(JSRuntime)=376B`のまま。実機逆アセンブルでRequest/Clearは`memw`＋`s8i`、ロック関数呼び出しなし。通常A地点にatomic loadが追加される費用の同一バイナリ比較は未実施で、性能向上は主張しない。
+
+ホストASan/UBSanで、要求の合流・Clear・native map callbackでの保持を検査。JS実行中にpthreadから要求を送る10ケースも成功。寿命検査790ケース、強制yieldコーパス64/64、既定offのo2コーパス64/64、強制yield Test2627,501成功・194既知失敗・退行0。既定offの実機ビルドも成功（app2,143,120B、DIRAM123,308B）。
+
+**実測(device):** ESP one-shot timerから、既に実行中の無限ループへ要求を送って中断し、その後Terminateする検査10回×3周=30回すべて成功。要求API単体検査と寿命検査790×3も成功。全周とも空き269,320→269,320B、最大連続159,744B。総所要45,970,243 / 45,953,387 / 45,947,522µs（待機込みで速度比較不可）。image SHA256 `99fae8df5eb581c4c3e7985b4596c73f0a64ae5fb4beb2d3e8dc42c7f9d563ef`、app2,150,928B、DIRAM123,308B。
+
+通常アプリsmoke20周・故障回復6種も成功。`memlog --check`はidle269,232、app128,500、largest79,872、JS86,635Bで予算内。FAIR強制yieldも64/64、通常Test262も7,501/194・退行0。検査後はdigest確認済みの元Kasane版アプリを復元し、書き込みhash一致、smoke3周・故障回復6種、`HOME_READY`を確認した。
+
+これは要求の配送とエンジン受理の検査であり、通常アプリのターンtimer・guestの再開状態・Back停止処理の接続はまだ含まない（backlog #11）。
+
+### 4.7 D24r/D28r: guestの再開・実行ターンtimer（2026-09-16）
+
+guestに`suspended`とorigin（FRAME/JOB_HELD/JOB_ASYNC）を追加し、`work_pending`で継続を選ぶ。frameの呼び直しを拒否し、保留jobはtail完了後に一度だけ数える。FAIRも中断中はpumpしない。frame/continue APIの内側だけで残り予算のone-shot timerを張り、出口で解除する。callbackはguestポインタを保持せず、共有runtimeスロットのロックで解放競合を避ける。Backターンはtimerを無効化し、`pocket_app_reset`は中断鎖を先にTerminate/Resumeする。Cスタック不足でasync ownerの再開が拒まれた場合はDiscardで閉じる。
+
+累積frame時間と従来250ms相当のguardを追加（閾値の調律実測は未完了）。drainの締切と実行時間を分離した。従来の`budget.elapsed`はターン開始からを測り、frameやresumeを含んでいたので、call開始からへ訂正して二重計上を防いだ。`sched_clock.c`で先行処理を除くこと・32bit wrap・count modeでclockを読まないことを固定した。
+
+**実測(device、互換順序、yield有効):** guest APIを使う4起点×4モードの16ケース×3周、100µs timerでの完走/leave相当/途中停止各3周、既存790ケース×3周とproducer/watchdog検査が成功。100µsで2万反復を完走する再開数は1,211 / 1,215 / 1,224回。leave相当でtimerを止めた後は全周1回で完了し、finallyは1回。各周の空き269,288→269,288B、最大連続159,744B。総所要48,367,648 / 48,357,622 / 48,376,749µs（待機・GC込み、速度比較不可）。初期検査の1千回上限では16,421反復・累積109,609µsで止まったため、進捗を確認した上で上限を1万回へ変更した。期待する最終値と副作用は変更していない。
+
+検証image SHA256 `9d08a4af17ffe59d49698b3922e387ec3f62fe0a46875c8f9123dc497ea09ad9`、app2,155,760B、DIRAM123,340B（前段比+32B、runtime slot/lock/deadlineの実サイズ20Bと整列）。ELF型情報: guest168B、yield無効guest152B、ESP timer本体32B（システムallocator分は別）。timerは初回の実行ターンで1つだけ作り、guest終了時に解放。`JSRuntime=376B`とフレーム48Bは据え置き。
+
+通常アプリsmoke20周・故障回復6種成功（frame無限ループとjob無限連鎖を含む）。空き269,200B・最大連続147,456Bは10/20周で一致。`memlog --check`: idle269,200、app128,452、largest79,872、JS86,635Bで予算内。
+
+**実測(device、FAIR、yield有効):** 独立した`build_vm_l2c_fair`でguest16ケース、timer3モード、既存790ケースとproducer/watchdog検査が成功。timer完走は1,298再開、leave相当は1再開。空き269,288→269,288B、最大連続159,744B、所要48,645,058µs（速度比較不可）。smoke20周・故障回復6種成功、10/20周の空き269,200B・最大連続147,456Bは一致。`memlog --check`も互換順序と同値で予算内。image SHA256 `0e3f6162a5e4de0f65a3d3d08130f5c9729f769d2e17d48ba7d8656032235674`、app2,155,824B、DIRAM123,340B。
+
+検証後、保存済みの元Kasane版アプリ3MiBのみを0x10000へ復元し、書き込みhash一致、smoke3周・故障回復6種、`HOME_READY`を確認した。パーティション表・NVS・フォント・保存領域は書き換えていない。
+
+ホストの強制yieldコーパスは互換順序・FAIRとも64/64、Test262強制yield7,501成功・194既知失敗・退行0、既定off o2コーパス64/64。既定offのfirmwareもビルド成功（app2,143,424B、DIRAM123,308B）。実際のBackによる保存/stop-hook順序の専用検査、H14、閾値調律、既定yieldを有効化する総合関所は残る。
+
+### 4.8 Back／stop hookのホスト経路検査（2026-09-16）
+
+SELFTEST専用USB `M`を追加。通常frame・保留Promise job・asyncの3起点について、初回`app_tick(0)`後の中断を必須にし、実物の`app_tick(0x2000)`→`app_request_stop()`→`app_stop()`を通す。再開本体、Back内の保存相当マーカー、そのPromise完了、stop hook、そのPromise完了をC側の記録で順序比較する。期待値は`123456`。Backターンなしで中断中に停止する対照では`156`を要求する。診断はホーム・非実行時に限定した（既存`L`も同様）。通常ビルドには追加コードを含めない。
+
+**実測(device):** 互換順序・FAIRとも6ケース×3周、全件成功。両構成とも初周の空き269,272→269,184B、2/3周は269,184→269,184B。初回88B差の原因は未特定であり、完全な無リークの証明とはしない。実際のNVS保存や物理キー入力は未検証（本検査はNVSへ書かない）。これらを本検査の成功で閉じない。
+
+検証image SHA256: 互換`57e392b360f4535adfa46d56dfb65b2eb594679fddf0c1b8a480770e1c7e0b3d`（app2,156,848B）、FAIR`9efa1ff99db0afcc643f184295207d39fe1da7f41d38daba6338b203a1b3eeef`（app2,156,912B）。DIRAMは両方123,356B、記録用static4Bと整列を含む診断専用増分16B。
+
+既定off構成もビルド成功し、DIRAM123,308B・flash1,557,616Bは前段と同値。検証後は元Kasane版アプリを復元し、書き込みhash一致・smoke3周・故障回復6種・`HOME_READY`を再確認した。
+
+### 4.9 H14: 中断時のフレーム保持量（2026-09-16）
+
+実際のpark地点に計測を追加。`susp_bytes_max`は生存SEGフレームの整列済み容量、`susp_async_frames`は鎖の非SEGフレーム数の独立した最大値。総ヒープ保持量ではない（定義はdesign §11.7）。検査をarmしたときだけ追加走査し、検査用`JSVMState`は24B増。runtimeフィールドは増やさない。
+
+**実測(host/device):** 同一の7起点×5終了モード・790地点で全件成功。各起点は5モードとも同じ最大値だった。
+
+| 起点 | host SEG容量(B) | device SEG容量(B) | 非SEGフレーム数（両方） |
+| --- | ---: | ---: | ---: |
+| 同期tree→async middle | 1,224 | 644 | 1 |
+| await後→tree | 1,080 | 568 | 2 |
+| async generator→tree | 1,080 | 568 | 2 |
+| Promise handler→tree | 1,224 | 644 | 1 |
+| async handler→tree | 1,080 | 568 | 2 |
+| thenable→tree | 1,240 | 652 | 1 |
+| microtask→tree | 1,208 | 636 | 1 |
+
+同期無限ループの対照ではasync数0、park数と再開数9,999の一致を要求。ASan/UBSanの全コーパス強制yield64/64成功、レポートのpark数＝再開数も64件で一致した。実機ではguest16ケース、timer3モード、producer10回も成功し、空き269,272→269,272B、最大連続159,744B。全検査所要47,756,305µs（待機・GC込み、速度比較不可）。
+
+実機image SHA256 `558f84f5695671978d34c8b90233346b4286cd0a86663edf506e0816a59eab31`、app2,157,584B、DIRAM123,356B（前段と同値）。既定yield無効ビルドも成功し、app2,143,424B・DIRAM123,308Bは同値、mapのflashは1,557,624B（+8B）。この検査鎖の値を一般アプリの分布や最適なセグメントサイズの根拠とはしない。実アプリの分布・外部断片化・速度比較は別途残る。
+
+検証後は保存済みの元Kasane版アプリを復元し、書き込みhash一致、smoke3周、故障回復6種、`HOME_READY`を確認した。永続データ領域への書き込みは行っていない。
+
+### 4.10 ジョブから本体へのネイティブ経路監査（2026-09-16）
+
+vendored `quickjs.c`の`JS_EnqueueJob`全呼び出しを列挙した。内部のjob種は次の5種で、単なるCフレームを安全な床と取り違えないことを確認した。
+
+| job種 | 本体への経路／中断の扱い |
+| --- | --- |
+| Promise reaction | `JS_VMCallJob`。通常JS handlerは保留tail、async handler初区間はheap owner＋保留tail、内部await継続はownerに委譲 |
+| thenable resolve | `JS_VMCallJob`。then本体を保留し、resolve/rejectの後処理は中断禁止 |
+| microtask | `JS_VMCallJob`。本体終了までjobを保留 |
+| FinalizationRegistry | `JS_VMCallJob`。cleanup callbackの本体を保留 |
+| dynamic import | `JS_LoadModuleInternal`→`JS_EvalFunction`→module実行。初区間は入口トークンなし。await後はPromise reaction経由のasync ownerで再開 |
+
+`js_async_from_sync_iterator_next`はCのmagic function入口なのでトークンを失効させ、iteratorのnext/return/throw・done/value getter・PromiseResolveを含むC後処理中はparkしない。unwrapは新規iterator resultを作るだけ。内部async generatorのawait継続だけは「native frameの下に呼び出し元が無い」と確認して外す既存の専用経路を通る。通常のgenerator.next、module依存の完了callback、外部Cからの再入はnative境界を残したままなので中断不可。この監査は組込みjob経路の確認であり、外部埋込み側が独自に登録するjobの保留tailを自動生成するものではない。
+
+`yield_async_from_sync`を追加し、通常完了・break・next/getter例外・thenable拒否・不正return値・async generatorのyield*からのreturn/throwを固定した。非中断o2基準とASan/UBSan強制yield、FAIRで出力・終了コードが一致。558地点でpark/resumeし、毎中断GCでも成功。不正return値は基準版でも未処理拒否を報告してexit=2になるため、その既存挙動を保存した（規格適合性の修正ではない）。
+
+`yield_dynamic_import`と`.mjs` fixtureは同一moduleの二重import、評価1回、トップレベルawaitを検査し、204地点の強制yield・毎中断GC・FAIRでも基準と一致した。この工程ではエンジンの経路は変更していない。実機には書き込まず、前工程で復元した元ファームウェアのまま。
+
+現ソースでo2を再ビルド後、全コーパスはo2・ASan/UBSan強制yieldとも66/66成功。FAIR・毎中断GCは新規2ケースを重点検査した。design §1.1の古い「L2c本体待ち」表記も実績と残件に訂正した。最大中断遅延の実機測定・通知なし性能比較・断片化は依然未完了である。
+
+### 4.11 スタックHWMの意味とG1実機対照（2026-09-16）
+
+IDF v6.0.1 `FreeRTOS-Kernel/tasks.c`の`prvTaskCheckFreeStackSpace`は、タスク作成時の`0xa5`塗りが残る領域を走査する。`window_reset()`は集計変数を戻すだけで、タスクのスタック塗りを戻さない。Xtensaの`StackType_t`はuint8なので、この構成の値はbytes。従来の`stack_hw_min`はUIタスク生涯の最小余裕であり、各アプリの使用量ではなかった。
+
+ログ互換性のため旧欄を残し、STATICに`stack_scope=task_lifetime stack_unit=bytes`を追加。深さサンプルは`__builtin_frame_address(0)`による現在のC計測関数のフレーム位置`depth_fp`も記録する。絶対位置そのものは空き容量ではなく、同一呼び出し列の深さ間差だけを比較する。追加配列はprobe専用64B。通常ビルドのUIタスク32768Bは変更しない。
+
+**実測(device):** `build_vm_stack_flat`と`build_vm_stack_recur`は独立sdkconfigでPROBE=y、SEGFRAMES=y、yield無効。後者だけFLATCALLS=n。再起動なしで`B deep_recursion`を各2回、base条件・4秒ずつ採取。
+
+| 構成 | 深さサンプル | Cフレーム位置の全幅 | 隣接深さ間の増分/段 | 2回目のHWM |
+| --- | --- | ---: | ---: | --- |
+| flat | 1,2,4,8,16,32,64,128,256 | 0B（両回） | 0B（両回） | 全地点23,788B |
+| recur対照 | 1,2,4,8,16,32,64 | 18,144B（両回） | 288B（全区間・両回） | 全地点8,348B |
+
+recurの初回HWMは23,788→21,340→12,124Bと下がったが、2回目は深さに関係なく8,348B。現在のCフレーム位置は両回とも同じ288B/段なので、過去の使用履歴がHWMの読みを隠すことを実証できた。flatのゼロ幅は対照で感度を確認した上でのG1追認である。この負荷は構成ごとに限界深さを探索して実行深さを変えるため、frame所要時間を速度比較に使わない。
+
+採取開始時に古いHOME_READYを拾って最初の試行が欠けたログは除外。USB-open待ちを1.5秒にし、q前に入力バッファを空にした。`vm_stack_report.py --curves 2`は1回しかないログを実際に拒否し、完全なflat/recur各2回は成功。解析の単体検査3件も成功。完全ログは`.cache/vm/stack-flat-complete.jsonl`と`stack-recur-complete.jsonl`。
+
+image SHA256: flat `70d945090f30a2b534192c146f8de320a6844939050e618b85478ec9005cee5d`（app2,152,816B）、recur `be0d92f49dde2fab8038d232b2dd4f314d20450996b7f51a4d3a4fbdd1a441df`（app2,151,232B）。DIRAMは両方129,372B。recurはsmoke1周・故障回復6種も成功した。これはスタック回収可能量の証明ではなく、解析・native再入・割り込み等を含むUIタスク全体の予算を縮小する根拠にはしない。
+
+検証後は元Kasane版アプリを復元し、書き込みhash一致・smoke3周・故障回復6種・`HOME_READY`を確認した。
+
+### 4.12 async再帰のガードとTest262対照の再検証（2026-09-16）
+
+現行ソースから`build.sh o2-recur` / `build.sh o2`で再ビルドし、各`budget_probe.sh`は11/11成功。既存の変種別期待値が既に終了条件を固定していたため、未着手のまま残っていたbacklog #4を整理した。hostの`--profile device`による制限模擬であり、実機の深さではない。
+
+| async再帰 | C再帰版 | flat版 |
+| --- | ---: | ---: |
+| 到達深さ | 15 | 82 |
+| budget_hits | 0 | 0 |
+| OOM記録回数 | 0 | 54 |
+| 未処理拒否 | 0 | 26 |
+| 安定出力 | sync-try none / caught RangeError / exit=0 | sync-try none / exit=2 |
+
+flat版では今回も外側catchの出力自体がない。ヒープ枯渇由来という判定は確保を伴わないOOM記録に依存し、`InternalError`や`null`がcatchへ届くとは主張しない。深さ・OOM回数・拒否数は観測値で、期待値として固定しない。
+
+Test262は固定revision `72faf8ec1445c55149615e8b35187830783aba1a`の既存subset（4,099ファイル）を両版で実行。各7,501成功・194既知失敗・0 skip・baselineからの後退0。結果ファイルは`.cache/vmtest/test262-results-o2{,-recur}.txt`。これは64MiBヒープ/7MiBスタックの意味論検査で、デバイス制限の検査を代替しない。async関数・async generatorの宣言/式、async arrow、awaitの取得済みディレクトリには`recurs|RangeError|stack.?overflow`の大文字小文字を無視した検索一致なし。ただしcheckoutはsparseであり、クラスのasyncメソッド等の未取得範囲を含め「Test262全体に依存テストがない」とは結論しない（backlog #5）。
+
+### 4.13 Test262全体からのasync・再帰関連監査（2026-09-16）
+
+§4.12の未取得範囲を展開し、同じ固定revisionの全53,582 JavaScriptテスト（`_FIXTURE`除外）からasync/await本文・async機能名、または再帰/スタック深さ制限の文言に一致する8,332ファイルを抽出。ファイル名やディレクトリに依存させず、クラス/privateメソッド、オブジェクトメソッド、stagingも含めた。`async_audit.py`がrevision・追跡ファイルの無変更・非sparseを検査し、Git archiveを展開せずストリームで読む。WSLからWindows上の全小ファイルを個別stat/readする初版はI/O待ちのためテスト開始前に終了し、同じ対象の連続読み取りへ切り替えた。
+
+実測(host、`--profile host`、既存ハーネス): `o2-recur` / `o2`とも**14,340成功・1,359失敗・98 skip、全15,797判定の種類と詳細に差0**。共通失敗は新たな成功として扱わず記録する。skipは既存ハーネスが提供しないfeature/flagで、未実行の意味。既存subsetのbaselineは書き換えていない。再帰等に言及する267候補も選択に含む。全体の`stack.{0,30}(overflow|limit|depth)|maximum.{0,20}stack`検索はURIErrorテストのStack Overflowサイトへの参考リンクだけで、async名のファイルの`recurs`は構文規則の説明だった。文言検索だけでなく、選択ケースの実行比較を根拠として、このrevisionの監査ではasync再帰制限変更の影響を検出しなかったと結論する。無言の深さ依存や任意プログラムの不在証明ではない。
+
+再現: `git -C .cache/test262 sparse-checkout disable`後、両版をビルドし`python3 tools/vmtest/async_audit.py --output .cache/vmtest/async-audit.json -j 8`。抽出条件の単体検査3件成功。同一変種を2回比較する誤用は非0で拒否。JSONには全対象名、再帰候補、個別判定、差分、バイナリSHA256を保存。今回のrecur `4638ad71b6975278890acead17be84c61099ffb3187f74efe34b73fee85ee061`、flat `806d37cfe5226f9fbf4e020d0658f4b1bd5c1fd13165e4bc4b23669aefbc0460`。実機コード・既定設定はこの工程では変更していない。
+
+### 4.14 継続ターンのメモリ採取と出力（2026-09-16）
+
+backlogのL1範囲外項目4を現行ソースで再監査。`app_tick`とoverlayの継続経路には既に`vmprobe_continuation_sample`が接続されていたが、採取周期のcounterがセッション間で引き継がれ、継続だけが長く続くとwindowを出力しない穴が残っていた。セッション開始/終了で周期をリセットし、継続経路でも1秒経過時にwindowを出力する。frame/call/drainの時間やjob数を継続ターン用に捏造せず、従来どおりframe側で回収する。メモリは8ターンごとの低頻度標本であり、実行中の真の最大値の保証ではない。
+
+採取元を判別できる`frame_heap_n` / `continuation_heap_n`をwindowへ追加。診断用counterは8B、全体のDIRAM増分は整列込み16B。通常のPROBE無効ビルドには追加しない。hostのログ読取は旧形式にも対応。`test_vmprobe_continuation.py`は実際のC関数本体を偽時計と採取/出力stubで動かし、8回周期、継続だけの1秒出力、window境界での周期保持、セッションリセットを検査する。メモリだけのwindowの読取を含む2件と既存stack読取3件が成功。allocatorや実機時計をstub検査で保証したとは扱わない。
+
+独立`build_vm_stack_flat`（PROBE/SCHED/SEGFRAMES/FLATCALLS=y、YIELD/FAIR=n）をビルドしCOM3でF/base（async_generator）を8秒×2回、各回再起動して採取。image SHA256 `184d09d20c339c945a360a0309e90433a392a883e58c3d8b8a63c2a2e9618fcc`、app2,152,960B、DIRAM129,388B、flash1,560,660B。生ログ`.cache/vm/continuation-memory.jsonl`は各8window、通常採取16回ずつ、継続採取87/86回、drainrun drop=0。全windowで継続採取を確認し、js_used最大89,415B、free最小121,692B、largest最小79,872B。要約器は既存仕様で各回のseq0を除くため14windowと表示する。今回のFはframeも進むため、frames=0の継続専用windowの出力境界はhost検査の根拠に限る。旧版との性能比較や512/4096Bの最適性の証明には使わない。
+
+検証後に元Kasane appを復元し、書き込みhash一致、起動3周・故障回復6種・HOME_READYを確認。変更対象はapp領域のみで、NVS/storage/パーティションは書き換えていない。
+
+### 4.15 USB Back入力と再起動を跨ぐ保存（2026-09-16）
+
+SELFTEST専用のUSB `Y`（書込待機）/`Z`（読取・後片付け）を追加。
+`device_back_storage.py --stage write`は起動後にUSB `q`を送り、`usb_stroke`→`KEY_BACK`→
+通常のアプリ入力処理→`app_tick(0x2000)`を通す。専用owner `vm.back.selftest.20260916`の
+`back-save-20260916`だけを使い、存在確認と`ifRevision:0`で既存キーへの上書きを拒否する。
+読取側は値全体とrevision=1が一致した場合だけ診断キーを削除し、不在まで再確認する。
+通常buildに追加のコード・入力割当は含まれない。プロトコルのホスト単体検査5件も成功。
+
+実測(device、互換順序、YIELD/LAZY_INPUTS=y): 専用image SHA256
+`f8bb9d0746a14eb580ae4e208e5438ea2c17ba608bd47f6219a3a41f084220fa`、
+app2,159,072B、静的DIRAM123,356B、Flash Code1,567,192B。
+初回writeで待機/Back/保存Promise完了/stop hook/そのPromise完了の`1,2,3,4,5`が順番どおり。
+続いてesptoolのROM接続・hard resetを実行し、起動後の新guestから読取/削除/不在の`6,7,8`が成功。
+電源断耐性や物理キーボード走査の検査ではない。また、このwrite負荷は中断中であることを要求しない。
+中断中の順序は別の既存USB `M`で同じimageの3起点×2終了方式×3周、全18ケースを再確認した。
+Mの初回free269,240→269,152B、2/3周は269,152→269,152Bで、従来の初回88B差は引き続き未帰属。
+この初回時点ではUSB入力・中断・実保存を同時に組み合わせた検査は未実施（下記で追加）。
+FAIRでの実保存は後続の下記検証で確認。物理入力確認は残る。
+
+通常アプリsmoke20周・故障回復6種成功、10/20周のfree269,152B・largest147,456Bが一致。
+memlogはidle269,152B、app128,388B、largest77,824B、JS86,635Bで予算内。
+診断キーは削除済み。NVS namespaceメタデータは残りうるが、パーティション消去はしていない。
+ログは`.cache/vmtest/back-storage-{write,reboot,read,smoke,suspended}.log`、`back-storage-memory.jsonl`。
+最後に元app（§3.7の退避SHA256）を書込hash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認。
+復元時のログは`back-storage-restored-smoke.log`。診断キーの削除以外の保存データは変更していない。
+
+**複合条件の追加検証:** `Y`の通常frameを診断専用の明示yieldループにし、実際にparkした後の
+marker10を待ってUSB Backを送る。受信時にもsuspendedを必須にしてmarker11を出し、
+UIタスク専用Cフラグで待機を解除してから通常leave再開処理へ進む。JSへ再入して解除しない。
+ホストprotocol検査は、中断確認欠落・中断なしBackの拒否も含む7件に拡張し成功。
+実測(device、互換順序): image SHA256 `0a6aa7c1e6112fa68d9e520eaf9539f16f3cc01bcf5b30f3376fd57a04af3390`、
+app2,159,440B、DIRAM123,356B、Flash Code1,567,448B。
+`1,10,11,2,3,4,5`の順序、hard reset後の`6,7,8`が成功。診断キー削除済み。
+通常アプリsmoke20周・故障回復6種も成功（10/20周free269,152B、largest147,456B）。
+ログ`.cache/vmtest/back-parked-compat-{write,reboot,read,smoke}.log`。
+これはFRAME起点の明示yieldとUSB入力の複合検査であり、timer中断・全起点・物理キーを含む検証ではない。
+複合検査後も元appへhash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認した。
+
+**FAIR構成での複合検査:** 同じソースの独立SDKCONFIGだけをFAIR=yへ変更して実施。
+image SHA256 `8269a67749eabf9a0473c8f37c690a00a7846fb3db531ff8945d7d9385829d73`、
+app2,159,504B、DIRAM123,356B、Flash Code1,567,516B。
+`1,10,11,2,3,4,5`の順序、hard reset後の`6,7,8`が成功し、診断キー削除済み。
+smoke20周・故障回復6種成功（10/20周free269,152B、largest147,456B）。
+memlogはidle269,152B、app128,388B、largest77,824B、JS86,635Bで予算内。
+ログ`.cache/vmtest/back-parked-fair-{write,reboot,read,smoke}.log`、`back-parked-fair-memory.jsonl`。
+FAIRの既定nは変更していない。物理キー確認は引き続き未実施。
+
+### 4.16 暴走ガードの停止時間採取（2026-09-16、調律は継続）
+
+`device_runaway.py`を追加。USB `3`の無限frameと`6`の無限job連鎖を各3回実行し、
+対応する起点のRUNAWAY報告が1件だけあることとAPP_STOPPEDを必須にして生ログとJSONを出す。
+抽出器は起点違い・欠落・重複を含む5件のホスト単体検査で確認した。
+§4.15の最終互換/FAIR imageを使い、250,000µsの定数は変更していない。
+
+| 実測(device) | frame累積µs（3回） | drain累積µs（3回） |
+| --- | --- | --- |
+| 互換 | 256899 / 256857 / 256895 | 250377 / 250531 / 257673 |
+| FAIR | 257016 / 256933 / 256984 | 257301 / 257117 / 258315 |
+
+frameの超過は6.86〜7.02ms、drainは0.38〜8.32ms。8msターン後の検査という構造と整合するが、
+あらゆる負荷の最悪停止時間を保証する値ではない。host側の送信開始→APP_STOPPED受信は391〜422msで、
+USB・起動・表示待ち・終了を含む。firmwareの累積時間も実行区間の経過時間で、プリエンプトを除いたCPU時間ではない。
+本採取は通常ホームから開始し、背景mode1/DEMO・音声通知等が動く条件。統制した同一image内の
+速度比較ではないので、FAIR/互換の速度優劣やjob件数あたりの性能には使わない。
+両構成とも全6回で終了を確認。正常な長いframeの閾値近傍・負荷競合・誤停止の検査は未実施で、
+これだけで閾値調律を完了扱いにはしない。ログ`.cache/vmtest/runaway-{compat,fair}.log`。
+FAIR保存検査と本採取の終了後、元appをhash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認。
+復元後ログは`runaway-restored-smoke.log`。通常設定のFAIR/YIELD既定と暴走閾値は変更していない。
 
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 
@@ -217,3 +617,84 @@ D43: ターンの間はキャッシュ本数無制限、ジョブキューが空
 プローブ統計: hello `resident_max=547 held_max=547 trims=0`。予算まで毎フレーム潜る`deep_recursion`系ワークロードは `seg_mallocs` 360→821、`seg_reuses` 118→0、`trims=117`（D43設計どおりの費用: ターン間に20KiBを抱えない代わりにターンごとに取り直す）。`stack_hw_min` は26,492（前回23,788）で今回もアプリをまたいで同一（backlog.md #9）。
 
 **計測の副作用（記録）:** `benchmark_app.py --sound off` は設定を戻さない。本節の計測後、実機は無音のままだった。`--sound on` で復元済み。
+
+### 5.5 同一バイナリでのD42成長サイズ比較（2026-09-16、host）
+
+従来の`--vm-seg-size`はFIRST=MAXの固定サイズにし、cache_maxも1へ変えるため、D42/D43の初期サイズと上限だけを比較する口ではなかった。`--vm-seg-growth FIRST MAX`を追加し、cache方針を保持したまま、最初のフレームより前にサイズだけを指定する。FIRSTは16B整列、MAXはFIRSTの整数倍とし、無効値・生存chain/cacheは状態を変えず拒否。固定サイズ指定との併用もエラーにする。既定512/4096Bと旧固定サイズAPIの動作は変更していない。
+
+`segment_growth_check.c`で範囲・整列・倍数・大きな値・live/cache拒否・失敗時不変性・旧APIの切り上げを検証。`segment_growth_probe.py`は同一runnerで6workload×6方針を既定と比較し、JS出力と終了値の一致、指定の反映、統計の存在を要求する。`o2`と`asan-yield`で各36比較成功、ASan/UBSan報告なし。既定o2の全コーパス67/67も成功。強制yieldのサイズ掃引ではなく、ASan版も通常実行である。
+
+主な実測(host、保持ピークB / segment確保回数):
+
+| FIRST/MAX | closures | 深いflat calls | bench_calls |
+| --- | ---: | ---: | ---: |
+| 256/1024 | 1701 / 3 | 540378 / 502 | 6017 / 7 |
+| 256/2048 | 1701 / 3 | 527250 / 254 | 5706 / 6 |
+| 512/2048 | 1646 / 2 | 526884 / 252 | 7443 / 5 |
+| 512/4096（既定） | 1646 / 2 | 500388 / 124 | 7955 / 5 |
+| 1024/4096 | 3182 / 2 | 500278 / 122 | 6309 / 3 |
+| 4096/4096 | 4151 / 1 | 502271 / 121 | 8302 / 2 |
+
+上限を小さくするだけでは深い鎖の保持量と確保回数が増える。初期1024Bは浅いclosuresでは約倍、短いfib再帰では小さくなるため、単一ケースから最適値を決めない。各workloadのlive最大値は方針間で同じ。device profileの深い再帰も20,448Bで一致したが、これは64bit host上の20KiB予算検査でありESP32-S3の使用量ではない。
+
+生結果は`.cache/vmtest/segment-growth{,-asan}.json`（全42run/変種、runner SHA256付き）。o2 SHA256 `42a7e12bed623e78645572b93e2478ff41b23a8475cceab78f98edd1343e3f00`。これは容量/確保回数比較で、速度測定や実機の最大連続空き/外部断片化の証明ではない。次工程は同じ設定口を実機プローブに接続して分布と配置を測ること。実機と既定設定は本工程では変更していない。
+
+### 5.6 D42実機サイズ比較の初回（2026-09-16）
+
+PROBEのみのUSB選択（G/H/I/J/K/O）を追加し、ゲスト生成直後・最初のJSより前に§5.5の設定口へ接続。選択はatomicな次セッション用状態であり、現在動いているruntimeを変更しない。起動時はpolicy3=512/4096B。`VMSEG APPLY`の戻り値と、終了時の実際の`#info vmstack`のFIRST/MAXを採取器が照合する。従来はstop待ちの途中で捨てていた終了時統計もJSONLの`segment`へ保存する。fake serialによる終了時回収・拒否値の検査2件、継続/stackの既存5件を通過。
+
+同一`build_vm_stack_flat` image SHA256 `93b954fbd0c132f9ef12cc1fe38953cffb3573362ec1fb17136a1156633a39ea`（app2,153,392B、DIRAM129,404B、flash1,560,972B）をCOM3へ書き、B/F×6方針を各4秒・各回再起動、base条件で実行した。初回のみの12runで、反復性・順序効果はまだ未検証。全runで適用値と最終統計の一致、早期終了なしを確認。
+
+| FIRST/MAX | B保持ピークB | B確保回数 | F保持ピークB | B/F最大連続空きの標本最小B |
+| --- | ---: | ---: | ---: | --- |
+| 256/1024 | 22821 | 2201 | 291 | 81920 / 79872 |
+| 256/2048 | 21994 | 1345 | 291 | 81920 / 79872 |
+| 512/2048 | 21924 | 1101 | 547 | 81920 / 79872 |
+| 512/4096 | 22843 | 856 | 547 | 81920 / 79872 |
+| 1024/4096 | 22773 | 612 | 1059 | 81920 / 79872 |
+| 4096/4096 | 24786 | 490 | 4131 | 77824 / 75776 |
+
+Bのpush数は全方針24,834、深さ269、live最大20,460B、最大frame92Bで一致。Fはlive最大148B・最大frame84B、segment確保1回、push94〜95回。Fの浅い鎖では初期256Bが保持量を減らすが、helloなど他のアプリも含む最適性は未確定。固定4096Bで最大連続空きが4096B減ったことは今回の配置差であり、旧§5.4の反対方向の差の原因を特定したものではない。保持ピークはターン中のsegment容量統計、空きヒープは低頻度標本なので同時点の値とも限らない。
+
+生ログ`.cache/vm/segment-device-{0..5}.jsonl`。再現例: `python tools/vm_l0_capture.py --port COM3 --workloads BF --conditions base --seconds 4 --reps 1 --segment-policy 3 --out .cache/vm/segment-device-3.jsonl`。サイズ以外は同一バイナリだが、今回の短い1反復だけで速度差は主張しない。既定512/4096Bは維持し、残る工程は他アプリと反復・順序を含む分布/配置比較。
+
+検証後は元Kasane appへ復元し、書き込みhash一致、起動3周・故障回復6種・HOME_READYを確認。app領域以外（NVS/storage/パーティション）は変更していない。
+
+### 5.7 反復行列の採取入口の修正（2026-09-16、行列未完了）
+
+§5.6と同一バイナリで、6方針×7対象×正逆2順序の84runを企図した。A〜Fに通常のUSB決定キー`e`を足してhelloを起動する方式は不適切だった。逆順のpolicy5/4/3/2で`e`のstop応答と最終segment統計が得られず、policy2の追加診断ログではSDの`PICK 2 folders`、`GRANT DECLINED`とoverlay実行を確認した。ホームの選択状態に依存する入口であり、helloを指定した証拠にならない。SDアクセス許可は与えていない。forwardの`e`に統計があってもhelloとしての採用判断には使用しない。
+
+旧ログ`.cache/vm/segments-repeat-{0,1}-{policy}.jsonl`は調査用に残す。正順42試行と逆順28試行までで、hello終了統計なし4件、後続14runは未実行。A〜Fの60runには適用値と終了統計があるが、84run行列成功とは扱わない。サイズの既定値も変更しない。
+
+診断PROBE限定の`X`を追加し、他の診断と同じ`APP_ID_DEFAULT`選択経路から`hello_start`を明示して起動する。これは通常キーバインドや出荷設定を変えない。採取器は`e`を受け付けず、`X`はbase条件のみ。採取失敗を表示するだけで終了コード0だった穴も修正し、失敗時はserialを閉じて1を返す。直近ログも失敗の説明に残す。
+
+`vm_segment_report.py`は新しい`segments-repeat-v2-*`だけを既定で読み、84runの完全性、window重複、適用サイズ、終了統計、標本数とdropを検証する。legacyの不完全な行列を成功扱いしない。単体検査は集計5件・採取3件・継続2件・stack3件の計13件成功。X追加ビルドはapp2,153,408B、DIRAM129,404B（増加0）、flash1,560,976B。X入口の実機確認と新行列の採取は次工程である。
+
+調査後は元Kasane appを復元し、書き込みhash一致、起動3周・故障回復6種・HOME_READYを確認。app領域以外は変更していない。
+
+### 5.8 代表7負荷の反復比較とサイズ決定（2026-09-16）
+
+X入口をAの後に実機確認してから、hello(X)/A〜F×6方針を正順・逆順で各1回、計84条件実行した。全条件base、各3秒・毎回再起動、同じimage SHA256 `4e825e62ec5fa7981b5ddd32decbcbfce1e9e7c199e149961eb8852a05e3aeb5`（§5.7のX追加build）。これは各負荷の最大frame/live容量分布であり、すべてのframeサイズの頻度ヒストグラムではない。
+
+最初の集計は標本不足で失敗した。採取期限がWINDOWヘッダとS行の間に来ると、stop待ち前の`Collector.close()`がcurrentを消し、後続のS行が捨てられることを再現。closeをstop待ち後だけにし、期限がヘッダ直後に来るfake serial検査を追加した。不完全だった23条件だけを同一imageで取り直し、正常な61条件はそのまま使用した。元ログを編集せず、再採取は`segments-repair-v2-*`へ別保存。`merge_repairs`は元が不完全な条件だけを丸ごと置換し、正常な条件の置換・再採取の欠落・firmware metadata不一致を拒否する。最終検査は**84run・225window成功**、設定一致、早期終了/dropなし、各frame/call/drain/jobsの標本数一致。修正と取り直しのため、連続した2周がそのまま全件成功したという意味ではない。
+
+実測(device、2回の範囲):
+
+| FIRST/MAX | hello保持ピークB | A/C/D/E/F保持ピークB | 再帰B保持ピークB | 再帰Bの確保回数 |
+| --- | ---: | ---: | ---: | --- |
+| 256/1024 | 838 | 291 | 22821 | 1625〜1643 |
+| 256/2048 | 838 | 291 | 21994 | 993〜1004 |
+| 512/2048 | 547 | 547 | 21924 | 813〜822 |
+| 512/4096 | 547 | 547 | 22843 | 639 |
+| 1024/4096 | 1059 | 1059 | 22773 | 452〜457 |
+| 4096/4096 | 4131 | 4131 | 24786 | 362 |
+
+live最大は全方針でhello456B、A148B、B20460B、C172B、D148B、E160B、F148B。最大単体frameはhello188B、A/C100B、B/D92B、E/F84B。helloはFIRST256で2segment、512以上で1segment。再帰Bのpush数は18,338〜18,541なので、時間窓内の呼び出し回数にはわずかな差がある。確保回数を実行速度そのものとは扱わない。
+
+**決定: 現行のFIRST512/MAX4096Bを維持する。** FIRST256は単純負荷で256B節約するが、helloの保持ピークを291B増やして2segmentに分割する。FIRST1024以上は浅い負荷の常駐余白を増やす。MAX2048は再帰ピークを919B減らす一方、確保回数が約27〜29%増える。hostの深い鎖でも2048上限は保持量・確保回数とも増えた（§5.5）。典型的なUIアプリを1本に収め、浅い負荷の余白と深い鎖の確保コストを均衡させる出荷方針として512/4096を採る。あらゆるアプリの大域的最適値を証明したものではなく、負荷構成が変われば再測定する。
+
+配置の観測も容量と分離する。helloのlargest標本最小はpolicy3で69,632B、policy4で65,536〜67,584B。同じpolicy4・総空き112,548Bでもlargestが2,048B違った。旧§5.4の単発差をD42由来と断定する根拠にはならず、旧差の原因特定は残る。全7負荷中のlargest最小はpolicy0〜4で62,464B、固定4096で59,392B。taffy59,296Bとの差は名目3,168B対96Bであり、今後の追加確保やヘッダ/整列分まで保証する余裕ではない。heap値は低頻度標本、segment保持ピークとは同時点とは限らない。
+
+再現集計: `python tools/vm_segment_report.py --repair-pattern 'segments-repair-v2-*.jsonl'`。元は`.cache/vm/segments-repeat-v2-*`、取り直しは`.cache/vm/segments-repair-v2-*`、統合した出所と84条件の要約は`.cache/vm/segments-repeat-v2-summary.json`。速度改善の数値は主張しない。既定値・JS挙動は変更せず、backlogのサイズ再検証項目2を完了とする。
+
+最終のhost採取/集計検査15件成功。実機は元Kasane appへ復元し、書き込みhash一致、起動3周・故障回復6種・HOME_READYを確認。app以外の領域は書き換えていない。

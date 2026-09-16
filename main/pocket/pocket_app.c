@@ -774,6 +774,7 @@ static int stop_interrupt(void *opaque) {
 }
 
 void pocket_app_reset(void) {
+    app_vm_prepare_stop();
     JSContext *ctx=js_ctx;
     // Cleared first, so what it says below is this hook's outcome and not a
     // start hook's from many frames ago.

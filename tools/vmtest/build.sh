@@ -10,11 +10,13 @@
 #   tools/vmtest/build.sh asan-recur    # segframes, JS calls still recurse in C (L2a; FLATCALLS off)
 #   tools/vmtest/build.sh asan-flat     # segframes + CONFIG_POCKET_VM_FLATCALLS (L2b)
 #   tools/vmtest/build.sh all-recur / all-flat
+#   tools/vmtest/build.sh asan-yield   # flat calls + the staged L2c body
+#   tools/vmtest/build.sh all-yield
 #
 # Three paths (spec sec.12 / design H5): "-alloca" is the same compiler flags
 # without the L2a define; "-recur" and "-flat" pin the L2b switch off / on.
 # The PLAIN variants (asan / o2) build what main/Kconfig.projbuild ships by
-# default -- see the two defaults below, which must be kept equal to the
+# default -- see the three defaults below, which must be kept equal to the
 # Kconfig -- so that every gate run without a suffix is a gate on the
 # firmware's path. run.sh --variant / stack_probe.sh N VARIANT / test262.py
 # --variant / budget_probe.sh VARIANT accept any of the six names.
@@ -41,11 +43,20 @@ build_variant() {
   # docs/vm/vm-L2-design.md sec.9). Same rule as above: the plain variant
   # mirrors the Kconfig default; "-flat" / "-recur" force it on / off.
   local flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"
-  local base=${variant%-alloca}; base=${base%-recur}; base=${base%-flat}
+  # Match the validated firmware default; -eager retains the old return path.
+  local lazy="-DCONFIG_POCKET_VM_LAZY_INPUTS=1"
+  local yield=""
+  local base=${variant%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}
   case "$variant" in
-    *-alloca) segframes=""; flatcalls="" ;;
-    *-recur) flatcalls="" ;;
+    *-lazy-flat) ;;
+    *-eager) lazy="" ;;
+    *-callbench) yield="-DCONFIG_POCKET_VM_CALLBENCH=1" ;;
+    *-lazy) yield="-DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_TCO=1" ;;
+    *-tco) yield="-DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_TCO=1" ;;
+    *-alloca) segframes=""; flatcalls=""; lazy="" ;;
+    *-recur) flatcalls=""; lazy="" ;;
     *-flat) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1" ;;
+    *-yield) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"; yield="-DCONFIG_POCKET_VM_YIELD=1" ;;
   esac
   case "$base" in
     asan) cflags="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined" ;;
@@ -66,8 +77,8 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls -I $OUT/include -I $GUEST/include"
-  local objs=()
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield -I $OUT/include -I $GUEST/include"
+  local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
   # so it is a separate object rather than a change inside quickjs.c.
@@ -78,10 +89,19 @@ build_variant() {
        || [ -n "$(find "$QJS" -name '*.h' -newer "$obj/$f.o" -print -quit)" ]; then
       echo "  cc [$variant] $f.c"
       gcc -std=gnu11 -c $cflags -w $defs -I "$QJS" "$QJS/$f.c" -o "$obj/$f.o" &
+      compile_pids+=("$!")
     fi
     objs+=("$obj/$f.o")
   done
-  wait
+  # Bare wait returns success even if a compiler failed; never link stale objects.
+  local compile_failed=0 pid
+  for pid in "${compile_pids[@]}"; do
+    wait "$pid" || compile_failed=1
+  done
+  if ((compile_failed)); then
+    echo "compile failed [$variant]; link skipped" >&2
+    return 1
+  fi
   gcc -std=gnu11 $cflags -Wall -Wextra -Werror $defs -I "$QJS" \
       tools/vmtest/vmrun.c "$GUEST/src/vm_sched.c" "$GUEST/src/vm_clock.c" \
       "${objs[@]}" -lm -lpthread -ldl -o "$OUT/vmrun-$variant"
@@ -93,5 +113,6 @@ case "${1:-asan}" in
   all-alloca) build_variant asan-alloca; build_variant o2-alloca ;;
   all-recur) build_variant asan-recur; build_variant o2-recur ;;
   all-flat) build_variant asan-flat; build_variant o2-flat ;;
+  all-yield) build_variant asan-yield; build_variant o2-yield ;;
   *) build_variant "${1:-asan}" ;;
 esac

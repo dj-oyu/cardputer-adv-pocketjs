@@ -1,5 +1,13 @@
 menu "Pocket VM (L0 measurement probes)"
 
+    config POCKET_VM_SELFTEST
+        bool "Enable USB L lifecycle self-test"
+        depends on POCKET_VM_YIELD
+        default n
+        help
+            Runs the host lifecycle test on the device via USB command L.
+            Use a private sdkconfig in a dedicated build directory.
+
     config POCKET_VM_PROBE
         bool "Enable L0 VM probes (docs/vm/quickjs-freertos-vm-spec.md sec.5)"
         default n
@@ -123,6 +131,27 @@ menu "Pocket VM (L0 measurement probes)"
             like L2a itself (design sec.8.4) -- that is what the switch is
             for.
 
+    config POCKET_VM_YIELD
+        bool "Suspend and resume JS at audited opcode safepoints (L2c)"
+        depends on POCKET_VM_FLATCALLS
+        default n
+        help
+            Implements the L2c save-and-resume path described by
+            docs/vm/vm-L2-design.md sec.11. The switch stays off while the
+            mechanism is landing in independently testable stages. With it
+            off, forced VM stops retain the pre-L2c uncatchable-interrupt
+            behaviour and the shipping path is unchanged.
+
+    config POCKET_VM_TCO
+        bool "Experimental strict tail-call frame reuse"
+        depends on POCKET_VM_YIELD
+        default n
+        help
+            Reuse flat segment frames at strict tail calls to ordinary
+            bytecode functions. Sloppy calls and unsupported shapes keep
+            the existing path. Changes strict Error.stack and recursion
+            limits, so this stays opt-in during compatibility validation.
+
     config POCKET_VM_FAIR
         bool "Fair ordering: run the pumps on a continuation turn too"
         default n
@@ -196,6 +225,25 @@ menu "Pocket VM (L0 measurement probes)"
             Whether it is worth having is a measurement, not a preference --
             docs/vm/vm-L1-report.md sec.8 records what each clock costs on the
             job-heavy workloads.
+
+    config POCKET_VM_LAZY_INPUTS
+        bool "Lazy restoration of flat call inputs"
+        depends on POCKET_VM_FLATCALLS
+        default y
+        help
+            Reconstruct argc/argv/this/new.target on their next bytecode use,
+            instead of at every flat return. Disable to restore eagerly.
+
+    config POCKET_VM_CALLBENCH
+        bool "Diagnostic same-binary flat/recursive call benchmark"
+        depends on POCKET_VM_FLATCALLS && !POCKET_VM_YIELD
+        select POCKET_VM_LAZY_INPUTS
+        default n
+        help
+            Adds an idle-runtime dispatch selector and the USB N benchmark.
+            Use an isolated build directory and SDKCONFIG. This compares the
+            two dispatch paths inside the flat interpreter, not two complete
+            compile-time engine configurations. Never enable for shipping.
 
     config POCKET_VM_L1_CLOCKBENCH
         bool "Enable L1 clock-cost bench (docs/vm/vm-L1-report.md 8.7)"

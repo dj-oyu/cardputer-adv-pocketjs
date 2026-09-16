@@ -2,9 +2,9 @@
 
 対象: [quickjs-freertos-vm-spec.md](quickjs-freertos-vm-spec.md) §7（L2）。方式は仕様どおり **L2a（非移動セグメント）→ L2b（明示フレームと単一実行ループ）→ L2c（セーフポイント・保存・再開）** の3段。
 
-この文書は**現時点で決定していること**（何を、なぜ）を書く。事実の根拠は台帳（[vm-ledger/](vm-ledger/)）、実測値と関所の通過結果は [vm-L2-results.md](vm-L2-results.md)、末尾呼び出し最適化（TCO、未着手）は [vm-tco-design.md](vm-tco-design.md)、未着手・未確認の項目は [backlog.md](backlog.md) にある。決定は D1〜D43 の番号で管理し、コード側のコメントがこの番号と本書の節番号を引用する（§15 決定表）。**D番号は固定。節番号は本書の版で変わりうる** — コードから `sec.N` で参照している箇所は、この文書の改版ごとに突き合わせて直す。
+この文書は**現時点で決定していること**（何を、なぜ）を書く。事実の根拠は台帳（[vm-ledger/](vm-ledger/)）、実測値と関所の通過結果は [vm-L2-results.md](vm-L2-results.md)、末尾呼び出し最適化（TCO、既定nの実験実装・検証済み）は [vm-tco-design.md](vm-tco-design.md)、未着手・未確認の項目は [backlog.md](backlog.md) にある。決定は D1〜D43 の番号で管理し、コード側のコメントがこの番号と本書の節番号を引用する（§15 決定表）。**D番号は固定。節番号は本書の版で変わりうる** — コードから `sec.N` で参照している箇所は、この文書の改版ごとに突き合わせて直す。
 
-## 実装状況（2026-09-15 時点）
+## 実装状況（2026-09-16 時点）
 
 | 段 | 内容 | 状態 |
 | --- | --- | --- |
@@ -12,9 +12,9 @@
 | L2a 追補 | セグメントサイズの線形成長・ターン単位キャッシュ（D42/D43） | 実装済み |
 | L2b | 通常関数のフラット呼び出し | 実装済み（`CONFIG_POCKET_VM_FLATCALLS`、既定 on） |
 | L2b 拡張 | JS から呼ぶ async 関数のフラット化（D31〜D38） | 実装済み |
-| L2c | 中断・再開の関所とガード（`vmrun` の受け口、コーパス） | 実装済み（pass-through。`JS_VMResume` は常に例外を返す） |
-| L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | **未着手**（本書 §12 が設計、backlog.md #7） |
-| L2c 実機統合 | 要求ビット・guest 側3状態・Back ターン対応 | 未着手（backlog.md #11） |
+| L2c | 中断・再開の関所とガード（`vmrun` の受け口、コーパス） | 実装済み（yield無効時はpass-through） |
+| L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | **async所有・保留jobまで実装済み**（分類A/B、GC保護、Terminate/Discardを含む。実測はresults §4.5。`CONFIG_POCKET_VM_YIELD=n`が既定） |
+| L2c 実機統合 | 要求ビット・guest 側3状態・Back ターン対応 | 実装・実機検証中。総合関所と計測はbacklog.md #11 |
 | TCO | 末尾呼び出しでのフレーム再利用 | 設計下書きのみ（[vm-tco-design.md](vm-tco-design.md)） |
 
 ---
@@ -28,20 +28,20 @@
 | # | 完了条件（仕様§7） | 判定手段 | 現状 |
 | --- | --- | --- | --- |
 | 1 | 純粋な JS の深い呼び出しで C スタック使用量が深さに比例しない | G1（§1.2） | 判定機構あり。L2b（フラット化）以降で NOT_PROPORTIONAL（[vm-L2-results.md](vm-L2-results.md) §3.3） |
-| 2 | 監査済みセーフポイントで停止し、再開後の値・副作用・例外が非中断実行と一致する | `--force-yield` + バイト比較 | 関所は動く（[vm-L2-results.md](vm-L2-results.md) §4.2）。L2c 本体が無いので実際の中断・再開はまだ判定できない |
-| 3 | 同期 JS の途中に別 JS を挟まない。中断で共有オブジェクトの状態が不意に変化しない | 同上 | L2c 本体待ち |
-| 4 | 中断状態での GC・OOM・終了・例外・finally・クロージャ保持 | 同上 + コーパス | ジョブ境界での該当ケースはコーパスが既に固定（`gc_threshold_device.js`、`try_finally.js`、`closures.js`、`stop_with_queue.js` 等）。opcode 粒度の中断状態は L2c 本体待ち |
+| 2 | 監査済みセーフポイントで停止し、再開後の値・副作用・例外が非中断実行と一致する | `--force-yield` + バイト比較 | L2c本体実装済み。強制yieldコーパス・Test262の比較結果はresults §4.5〜4.10。未検査入力も含む一般的な証明ではない |
+| 3 | 同期 JS の途中に別 JS を挟まない。中断で共有オブジェクトの状態が不意に変化しない | 同上 | 中断中のJS入口拒否とpump抑止を実装。実機のguest再開・Back経路を検査済み（results §4.7〜4.8）。外部埋込み側もこの入口契約を守る必要がある |
+| 4 | 中断状態での GC・OOM・終了・例外・finally・クロージャ保持 | 同上 + コーパス | opcode中断の7起点×5モード790ケースをhost ASan/UBSan・deviceで検証済み。毎中断GCの重点コーパスも実施（results §4.5〜4.10） |
 | 5 | 正確な最大中断遅延を主張するなら、最長の中断禁止区間も測定する | G5（§1.3） | 判定機構あり。§2 の N1〜N5 が対象、G5 が実測している |
-| 6 | セグメント追加・境界越え・返却で値とクロージャの参照が壊れない | **G6**: `tools/vmalloc/verify_all.sh`（[台帳07](vm-ledger/07-segment-g6.md)） | 判定機構は完成（アロケータ単体で36トレース＋故障注入5種）。実物のVMフレームをこのアロケータの上で検査するのはL2a実装後の課題（未着手、backlog.md #1） |
-| 7 | 各確認地点の直前・直後に中断要求を発生させ、命令や副作用の重複・欠落がない／通知なし通常経路の性能低下も測る | 前半: `--force-yield`／後半: `timing.py` | 後半は既存インフラで足りる。前半は#2と同じ前提 |
+| 6 | セグメント追加・境界越え・返却で値とクロージャの参照が壊れない | **G6**: `tools/vmalloc/verify_all.sh`（[台帳07](vm-ledger/07-segment-g6.md)） | 単体36トレース＋故障注入5種。実物VMもASan poison付きの境界サイズ掃引・中断寿命検査済み（vmtest README、results §4）。現行6トレース×4方式の内部余白・外部断片化のhost比較は台帳07 §7。実機の断片化はbacklog.md #8 |
+| 7 | 各確認地点の直前・直後に中断要求を発生させ、命令や副作用の重複・欠落がない／通知なし通常経路の性能低下も測る | 前半: `--force-yield`／後半: `timing.py` | A/B地点の強制yield比較と実機timer要求検査を実施。通知なし通常経路の性能比較は未完了 |
 
 ### 1.2 G1・G5・G6
 
-- **G1（Cスタック比例性）**: 再帰の各段でスタックポインタ相当（ローカルのアドレス）を記録し、深さNと2Nで消費が2倍にならないことを判定する（「溢れない」ではない）。ホスト（vmrun）で判定、実機は `uxTaskGetStackHighWaterMark` で追認。
+- **G1（Cスタック比例性）**: 再帰の各段でスタックポインタ相当を記録し、深さNと2Nで消費が2倍にならないことを判定する（「溢れない」ではない）。ホスト（vmrun）に加え、実機も`depth_fp`（現在のC計測関数のフレーム位置）でflat/recur対照を検査済み（results §4.11）。`uxTaskGetStackHighWaterMark`はタスク生涯値なので単独では深さ別の追認にならない。
 - **G5（最長中断禁止区間）**: 中断を要求した時点から実際に停止した時点までをVM側でカウントし、その**最大値**を出す（平均・中央値では完了条件を満たさない）。ホストは `vmrun --gaps` / `corpus/g5_gaps.js` が、連続する停止機会（§2のA/B地点・ENTER・LEAVE）の間隔をns単位で最大値と上位8件（始点・終点の関数名付き）で出す。実機側は時計を渡す口のみで未実装。
 - **G6（セグメント参照整合性）**: セグメント方式のアロケータ（`tools/vmalloc/adapter_segment.c`）を36トレースで再生し、追加・境界越え・返却のたびに全生存ブロックの内容・非重複・所属を検査する。故障注入5種が全部捕まることを同じスクリプトが要求する。詳細は[台帳07](vm-ledger/07-segment-g6.md)。
 
-**強制yieldフック（`vmtest_vm_set_force_yield`）は埋まっている。** `components/quickjs-ng/quickjs-ng/quickjs-vm.c` が定義し `tools/vmtest/build.sh` がリンクする。止まる地点は§2の分類Aの7地点だけで、「止まる」は現状の捕捉不能な `interrupted` 例外のまま（L2c本体が置き換える）。埋める先をVM側の新設ファイルにしたのは、`quickjs.c` 自体に置くと `tools/vmtest/build.sh` の変更は不要になる一方、上流との差分が広がるため。
+**強制yieldフック（`vmtest_vm_set_force_yield`）は実装済み。** `components/quickjs-ng/quickjs-ng/quickjs-vm.c` が定義し `tools/vmtest/build.sh` がリンクする。L2c有効時は§2の分類Aの7地点とBの完全push後で実際に中断・再開する。捕捉不能な`interrupted`は終了専用であり、中断の代用ではない。既定yield無効版は従来実行の基準として残す。
 
 **流用してはいけないもの:** `vmrun.c` の `JS_SetInterruptHandler(...)` は `host_stopping`（セッション終了検知）専用。ここに相乗りすると終了と中断が同じ経路で混線する（台帳03が記録する「割り込みが捕捉できない例外として実装されている」現状との衝突そのもの。§4で正面から決める）。
 
@@ -260,6 +260,8 @@ L2が作る「普通の関数の中断フレーム」はセグメントの中に
 
 セグメントは動かさない（`JSVarRef.pvalue`・`argv`・`sp`がフレームの中を指すため）。ヘッダは実機20B（`standard`ビットを`JSVMSeg`に足した分、16→20B）。
 
+2026-09-16の再検証で512/4096Bを維持する判断を確定した（results §5.5〜5.8）。同一バイナリの6方針×代表7負荷×正逆2回を実機比較し、FIRST256のhello分割・FIRST1024以上の浅い負荷の余白・MAX2048の深い鎖での確保増を確認。一般オブジェクトの分布だけでなく、実機frame/live容量と保持量・確保回数に基づく採用判断。低頻度の空きヒープ標本を真のピークや任意負荷の保証とは扱わない。
+
 ### 7.3 キャッシュの持ち方（D43）
 
 線形成長を入れると、キャッシュ1本では「戻って空いた大きさ」と「再度潜るときに要る大きさ」が位置ごとに食い違い、確保・解放の嵐になる（[vm-L2-results.md](vm-L2-results.md) §5.2）。
@@ -361,11 +363,11 @@ L2bの初版はJSから呼ばれたasync関数の最初の同期区間（await�
 
 **決定: フラット化したasync関数のフレーム（ヒープ上）は、再帰の予算（D10）に数えない。** 検討した代案（ヒープ上のasyncフレームのバイト数も同じ予算に乗せる）は採らない。
 
-**この限界を受け入れる:** 深いasync再帰はヒープが尽きた時点で`InternalError: out of memory`になり、asyncについてだけ「予算がヒープより先に当たる」（D10）は成り立たない。ヒープ満杯時の上流`build_backtrace`のuse-after-free（[backlog.md](backlog.md) の独立の不具合 項目6）にも到達しやすくなる。深いasync再帰の検査は`RangeError`ではなく、ヒープで止まることを固定する側で書く。
+**この限界を受け入れる:** 深いasync再帰はヒープ枯渇で止まり、asyncについてだけ「予算がヒープより先に当たる」（D10）は成り立たない。`InternalError: out of memory`の生成やcatchへの到達も保証できない（§10.4）。ヒープ満杯時の上流`build_backtrace`のuse-after-free（[backlog.md](backlog.md) の独立の不具合 項目6）にも到達しやすくなる。深いasync再帰の検査は`RangeError`ではなく、ヒープで止まることを固定する側で書く。
 
 ### 10.4 D40: 深いasync再帰の壊れ方を期待値に固定する
 
-flatで深さ77（1段約1.9KB、ホスト`--profile device`）でヒープが尽き、エラーオブジェクトを作れず理由`null`、巻き戻し中に23段のawait登録が失敗して未処理の拒否が残りexit 2（D42/D43適用後は深さ82・未処理26、[vm-L2-results.md](vm-L2-results.md) §4.1）。仕様が予告していた「`InternalError`が`.catch`に届く」形とは違う。配置に敏感で深さや件数は動きうるので、比較は種類（`null`）と終了コードだけで縛る。**確保を伴わない事後判定（D39、失敗地点での回数・最初の失敗の要求サイズ・使用量の記録）と組み合わせて枯渇由来と判別する。予備ブロック（最初の失敗で解放するカナリア）は入れない**（実機の空きを常に削るため）。
+初期のflat測定では深さ77（1段約1.9KB、ホスト`--profile device`）でヒープが尽き、理由`null`、未処理拒否23件、exit 2だった。D42/D43後および現行版では深さ82・未処理26件となり、外側catchの出力もなくなった（[vm-L2-results.md](vm-L2-results.md) §4.12）。比較は安定出力`sync-try none`とexit 2、`budget_hits=0`、OOM記録が正であることを固定し、catchの種類や深さ・件数は固定しない。C再帰版は別期待値で`caught RangeError`・exit 0を検査する。**確保を伴わない事後判定（D39、失敗地点での回数・最初の失敗の要求サイズ・使用量の記録）と組み合わせて枯渇由来と判別する。予備ブロック（最初の失敗で解放するカナリア）は入れない**（実機の空きを常に削るため）。
 
 ### 10.5 D41: 上流の二重解放を根本修正
 
@@ -379,7 +381,7 @@ generator/async generatorの呼び出しは分けて扱い、どちらも囲っ�
 
 ## 11. 中断・再開の機構 — L2c設計
 
-**この節は設計であり、実装はまだ無い**（実装状況は文書冒頭の表、backlog.md #7）。「実測」と明記していない数字は計算値または推定。前提（既決、変えない）: D1（YIELDは`done_generator`形の返り値で確保しない）、D2（`JSStackFrame`48B）、D4（所有者と`l2_flags`の専用ビット）、D8（Aの7地点とB=push後）、D9（JSValue表現を触らない）、D10（予算は文字どおりセグメントのバイト数、D38によりフラットasyncフレームは対象外）、D11・D12、床の持ち物4つ（§9.3）、D31〜D41。
+**この節はL2c全体の設計であり、部分実装済み**（実装状況は文書冒頭の表、実機統合はbacklog.md #11）。「実測」と明記していない数字は計算値または推定。前提（既決、変えない）: D1（YIELDは`done_generator`形の返り値で確保しない）、D2（`JSStackFrame`48B）、D4（所有者と`l2_flags`の専用ビット）、D8（Aの7地点とB=push後）、D9（JSValue表現を触らない）、D10（予算は文字どおりセグメントのバイト数、D38によりフラットasyncフレームは対象外）、D11・D12、床の持ち物4つ（§9.3）、D31〜D41。
 
 スイッチ: L2b拡張は既存の`CONFIG_POCKET_VM_FLATCALLS`の中。L2c本体は新設の`CONFIG_POCKET_VM_YIELD`（`depends on POCKET_VM_FLATCALLS`）で、offならA地点のslow pathは今の`JS_ThrowInterrupted`のまま。
 
@@ -395,7 +397,7 @@ generator/async generatorの呼び出しは分けて扱い、どちらも囲っ�
 | 止まってよい床 | `l2_flags & JS_SF_MAY_YIELD`（D17r、§11.2）。フラット子（SEG/asyncとも）にはpush時に写す |
 | 保持 | 要求ビットは立っているが受理できない地点で、ビットを消さずに続けること |
 | 再開の持ち主 | 鎖を再開する側。SEG床はホスト、async系床は`JSAsyncFunctionData`/`JSAsyncGeneratorData`、保留ジョブ（D36）はruntimeが握る`JSJobEntry`と tail関数 |
-| 保留ジョブ | 通常関数のhandlerが中断したとき、`JS_ExecutePendingJob`が解放せず`rt->vm_susp.job`に預けた`JSJobEntry`。論理的にはキューの先頭のまま |
+| 保留ジョブ | handlerが中断して完了tailをまだ実行できないとき、`JS_ExecutePendingJob`が解放せず`rt->vm_susp.job`に預けた`JSJobEntry`。論理的にはキューの先頭のまま |
 | 囲い | 入口トークンを書く側が、呼び先から戻ったときに必ず0に戻す構造（D17r-3）。トークンは囲いの外に漏れない |
 
 **依頼者の追加決定（D13〜D16）:**
@@ -459,6 +461,8 @@ generator/async generatorの呼び出しは分けて扱い、どちらも囲っ�
 
 **D20: SEG床のspill**（`[argv[argc]][JSVMFloorSpillHdr][JSVMLink][JSStackFrame]…`）はyield時に`js_dup`するだけ。generator系床は`JSAsyncFunctionState`が既に所有、ASYNC床は参照カウント++、ASYNC_GENERATOR床はgeneratorオブジェクトをdup。保留ジョブの床はSEG床なので同じspillを使う。フラットasyncフレームは床になれる（活性を抜けた後）が、そのときは`JSAsyncFunctionData`が所有者でspillは要らない。
 
+**実装時の補足（2026-09-16）:** async handlerの最初の区間もjobの中で中断できる。この場合はheap所有床のままjobを保留し、先に返されたPromiseをruntimeに保持して再開後のtailへ渡す。tailのresolveは独自`Symbol.species`経由のJS関数にもなれるため、中断したまま呼んではならない。内部await継続（返り値undefined）は従来どおりjob自体を完了扱いにする。tail中は入口トークンを抑止し、二重の保留tailを作らない。async generatorの内部`C_FUNCTION_DATA`継続は、下に実際の呼び出し元が無い場合だけnative frameを一時的に外し、所有者の再開後にC側のpop用に戻す。
+
 **D21r: 鎖のGCは所有者側`JS_MarkContext`に足す1行。** topから床までwalkし、`JS_SF_SEG`のフレームだけ`local_buf..sp`（topは`cur_sp`、それ以外は子の`caller_sp`）をmarkし、SEG床のspill5種をmarkする。**ヒープに居るフレーム（generator系床、フラットasyncフレーム）はwalkが触らない** — それぞれの持ち主（`JSAsyncFunctionData`/generator/async generator）が`cur_sp != NULL`のときだけmarkする既存の仕組みに乗る。§11.3の`vm_yield:`が鎖の全ヒープフレームの`cur_sp`を埋めるのはこのため。フラットSEG子の`arg_buf`はヒープ親のオペランドスロットをaliasするが、walkはSEGの`local_buf..sp`（aliasを含まない）だけを見るので二重にはならない。
 
 ### 11.7 TERMINATEと破棄（D25、D26r）
@@ -467,11 +471,15 @@ generator/async generatorの呼び出しは分けて扱い、どちらも囲っ�
 
 **D26r: 鎖にヒープフレームと保留ジョブがある形での破棄。** Discard（`JS_FreeRuntime`直後、ジョブ解放ループの前）はtopから床へ歩き、SEGフレームは通常どおり畳む。**ヒープフレームは畳まない** — `l2_flags`からFLAT/SUSPENDED/MAY_YIELDを落とし`cur_sp`はyieldが置いた値のままにして持ち主に返す（フラットasyncフレームは`JSAsyncFunctionData`の生成者参照を解放。**予算の払い戻しは無い**、D38）。保留ジョブは`argv`/`e`/`aux`を解放。H14の計測口として`#info vm susp_bytes_max=`（セグメントのbytesだけ、D38）と別に`susp_async_frames=`（鎖の中のヒープフレーム数）を出す。
 
+**H14計測口の定義（2026-09-16実装）:** `susp_samples`は実際にparkした回数、`susp_bytes_max`はその時点の`vm_stack.used`の最大値（整列済みの生存SEGフレーム容量、セグメント予約容量・ヘッダ・allocator余白を含まない）。`susp_async_frames`はtopからfloorまでの非SEGフレーム数の最大値で、async generatorの床も含む。2つの最大値が同じ中断地点で生じるとは限らない。`JSVMState`をarmした検査のみで採取し、追加の24Bは検査用状態に置く。runtimeのサイズは増やさない。これを総ヒープ保持量や外部断片化の計測とは呼ばない。
+
 ### 11.8 実機統合の設計（D14、D27、D28r、D24r）
 
-**D27: 要求ビットと3値化。** `_Atomic uint8_t vm_yield_req`、`JS_VMRequestYield`（`interrupt_counter=0`）、slow pathの3値化、A地点7箇所の書き換え、保持（MAY_YIELDでない床のpopで`caller_ctx->interrupt_counter=1`）。**leaveターン（Back操作、0x2000）はtimerを張らず`JS_VMClearYield`で要求ビットを消す**（yieldの意味が無いターンのため）。N1（正規表現）はTERMINATE系統のまま。
+**D27: 要求ビットと3値化。** `_Atomic uint8_t vm_yield_req`を`JS_VMRequestYield`が立て、A地点7箇所と完全なpush後のB地点が読む。MAY_YIELDでない床では要求を保持し、実際に中断した時だけ消す。**実装時訂正（2026-09-16）:** 当初の「timer側で`interrupt_counter=0`、禁止床のpopで1へ戻す」は採らない。通常整数への別スレッド書き込みはdata raceであり、カウンタ全体をatomic化すると毎pollにread-modify-writeの費用が掛かる。代わりにA/B地点でrelaxed atomic loadを追加する。要求は関連データを公開しない1bitなのでacquire/releaseは不要。watchdogのカウンタと呼び出し頻度は変えない。要求byteはruntimeの既存paddingに置き、実機ELFではruntime376Bのまま。**leaveターン（Back操作、0x2000）はtimerを張らず`JS_VMClearYield`で要求ビットを消す**（yieldの意味が無いターンのため）。producer停止・終了確認をruntime解放より先に行う。N1（正規表現）はTERMINATE系統のまま。
 
 **D28r: 累積時間の計測。** 起点JOB_HELDの`JS_VMResume`時間は起点JOB_ASYNCと同じく`drain_us`に足し、完了時に`drain_jobs`を1件足してから既存の`drain_jobs()`に委ねる（EMPTY判定・`report_rejections`を既存位置で通すため）。起点FRAMEは`frame_us`/`frame_runaway`。1つの保留ジョブが最大約30ターン居座りうる計算（`VM_TURN_BUDGET_US` 8ms × `VM_RUNAWAY_US` 250ms）。
+
+**実装時補足:** timerはguestのframe/continue APIを実行している間だけ張る（同じターンの残り予算）。pump・描画・起動evalでは張らず、API出口で必ず止める。timer callbackはguestを引数に保持せず、短いcritical section内のruntimeスロットだけに要求を送る。終了側も同じロックでスロットを空にしてからtimerを止め、runtime解放との競合を防ぐ。古いcallbackが遅れて来ても、新しいdeadlineより前には要求しない。stop準備はTerminate/Resumeし、asyncのC入口がスタック不足で再開を拒んだ場合にはDiscardで閉じてからhookへ進む。`vm_sched_drain`の締切はターン開始基準のまま、`budget.elapsed`は呼び出し開始からの時間へ訂正し、resume時間の二重計上を防ぐ。count modeではdrain累積時間を0のままにする。
 
 **D24r: guestの3状態と3起点。** `suspended`/`jobs_pending`の2ビットと`origin`（FRAME/JOB_HELD/JOB_ASYNC）。`jobs_pending = JS_IsJobPending(rt) || origin==JOB_HELD`（保留ジョブはリストに無いが論理的には先頭）。FAIRの`run_pumps`は`jobs_pending && !suspended`。実機の起動時evalは`JS_Eval`のままにする（§11.9）。**Backターン・stop hookの扱い**: `pocket_app_reset`のstop hook呼び出し（`run_hook`とペンディングジョブのdrainループ）はleaveターンと同様に武装しない・中断中なら先に鎖を完了させる・後ろ盾（中断中なら`JS_VMTerminate`+`JS_VMResume`で畳んでから進む）の3点で保護する。
 

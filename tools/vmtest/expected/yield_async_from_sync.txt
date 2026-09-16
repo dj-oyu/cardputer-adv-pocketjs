@@ -1,0 +1,11 @@
+normal iterator:21,get-next:21,next-0:21,done-1:21,value-1:21,get-then-1:21,then-1:21,body-10:21,next-1:21,done-2:21,value-2:21,get-then-2:21,then-2:21,body-20:21,next-2:21,done-3:21,value-3:21,get-then-3:21,then-3:21,get-return:21,return-undefined:21,complete:21,finally:21
+break iterator:21,get-next:21,next-0:21,done-1:21,value-1:21,get-then-1:21,then-1:21,body-10:21,get-return:21,return-undefined:21,complete:21,finally:21
+next-throw iterator:21,get-next:21,next-0:21,get-return:21,return-undefined:21,caught-next:21,finally:21
+value-throw iterator:21,get-next:21,next-0:21,done-1:21,value-1:21,get-return:21,return-undefined:21,caught-value:21,finally:21
+reject iterator:21,get-next:21,next-0:21,done-1:21,value-1:21,get-then-1:21,then-1:21,get-return:21,return-undefined:21,caught-rejected:21,finally:21
+return-primitive iterator:21,get-next:21,next-0:21,done-1:21,value-1:21,get-then-1:21,then-1:21,body-10:21,get-return:21,return-undefined:21,complete:21,finally:21
+delegate-return iterator:21,get-next:21,next-0:21,done-1:21,value-1:21,get-then-1:21,then-1:21,first-10:21,get-return:21,return-99:21,delegate-finally:21,last-closed-true:21
+delegate-throw iterator:21,get-next:21,next-0:21,done-1:21,value-1:21,get-then-1:21,then-1:21,first-10:21,get-return:21,return-undefined:21,delegate-finally:21,delegate-caught-TypeError:21
+async-from-sync-complete
+E pocketjs_guest: Unhandled Promise rejection: TypeError: iterator must return an object
+exit=2

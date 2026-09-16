@@ -112,3 +112,37 @@ bash tools/vmalloc/sweep_segsize.sh                           # §4 の表（約
 - 内部余白の「app 区間」は `# teardown` マーカーで切っているが、GC 直後の一時的な空きは含む（意図どおり: それは実行中に起きる）。
 - `early-return` の故障はキャッシュに空きがあると返却ではなくキャッシュ化になる。検出は `lies in a CACHED segment` 側で起きた。返却経路（poison）の検出は `pool-overlap` / `misalign` で `check()` と整列検査が先に鳴るため、**ASan の use-after-poison が単独で鳴った実行はこの関所には無い**（開発中に misalign で一度観測したのみ）。
 - 実機（COM3）には触れていない。
+
+## 7. 現行VMトレースの方式間比較（2026-09-16）
+
+旧§4もセグメント内部余白と外部断片化を分けていた。ただし他方式の`pool_free_bytes`/`pool_largest_free`は未実装で、外部断片化の方式間比較には使えなかった。今回TLSFは`multi_heap_walk`の空きブロック長＋ブロックヘッダ、estallocは物理ブロック長の統計、naiveは空きpayload＋ヘッダを採る。全方式で外部断片化を「空き物理領域の総量−最大の空き物理領域」とし、最大malloc要求サイズとは区別する（TLSFのbucket丸めやヘッダ控除は後者に効く）。segmentではセグメントの外側だけが対象で、内部空き・キャッシュは従来の別欄に残す。独立した時点の最大値を足して総消費量にしない。
+
+`test_fragmentation.py`の負の対照は単一確保/解放で外部0、正の対照は3つの4096B確保の中央を解放して外部>=4096を要求する。o2・ASan/UBSanとも全4方式で成功。正の対照はTLSF/estallocが4104B、naive/segmentが4144Bだった。差は各方式の物理ブロック管理分を含むためで、架空の共通ヘッダへ補正しない。
+
+`compare_fragmentation.py`は同じトレース・プール量で4方式を全操作サンプルし、`--verify`を併用する。容量不足は`result=FAIL`としてJSONへ残し、ドライバも失敗終了するため成功走行と混ざらない。バイナリと各トレースのSHA256をJSONに含める。既定segmentは4096B・空セグメントcache2であり、実物VMの512〜4096BのLIFOフレームスタックではない。ここから実機のメモリ削減や速度改善を主張しない。
+
+**実測(host replay):** 現行o2で採取した6トレース、同一4MiBプール、毎操作サンプルの結果。各欄は`# teardown`前の外部断片化最大値、最後の欄だけsegment内部空き最大値（bytes）。
+
+| トレース | TLSF 外部 | estalloc 外部 | naive 外部 | segment 外部 | segment 内部 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| closures | 13,312 | 14,168 | 43,568 | 0 | 24,176 |
+| promise_chain | 1,379,144 | 1,285,328 | 容量不足 | 1,444,256 | 233,296 |
+| seg_add_deep | 1,214,552 | 1,193,632 | 1,218,872 | 1,232,944 | 15,088 |
+| seg_return_reuse | 160,928 | 158,608 | 183,432 | 159,008 | 17,948 |
+| yield_async_from_sync | 9,968 | 10,240 | 54,744 | 0 | 21,292 |
+| memory_device | 5,880 | 5,472 | 55,720 | 41,264 | 14,312 |
+
+23/24組は完走して参照検査・構造検査とも成功。naive/promise_chainはop59,869で容量不足、peak_used4,193,080B・その時点の最大malloc領域32Bだった。そこまでの参照検査に破損は無いが、全走行の成功ではなく途中値を表に混ぜない。raw結果とSHA256は`.cache/vmalloc/fragmentation-current.json`。`memory_device`という名前でもこの表の型サイズはhost（JSValue16B・pointer8B）である。
+
+外部0の2例でもsegmentは内部に約21〜24KiBを保持し、promise_chainでは外部・内部とも増えた。単一方式が常に省メモリとは言えず、実機allocatorやフレームセグメントサイズはこの比較だけで変更しない。対照テストにはteardownでだけ中央ブロックを解放する3例目も追加し、アプリ区間は0・全区間は>=4096になることをo2/ASanの全方式で確認した。
+
+```bash
+bash tools/vmalloc/build.sh
+python3 tools/vmalloc/test_fragmentation.py
+python3 tools/vmalloc/test_fragmentation.py asan
+bash tools/vmtest/run.sh --variant o2 --trace closures promise_chain seg_add_deep seg_return_reuse yield_async_from_sync memory_device
+python3 tools/vmalloc/compare_fragmentation.py --output .cache/vmalloc/fragmentation-current.json \
+  .cache/vmtest/traces/closures.trace .cache/vmtest/traces/promise_chain.trace \
+  .cache/vmtest/traces/seg_add_deep.trace .cache/vmtest/traces/seg_return_reuse.trace \
+  .cache/vmtest/traces/yield_async_from_sync.trace .cache/vmtest/traces/memory_device.trace
+```
