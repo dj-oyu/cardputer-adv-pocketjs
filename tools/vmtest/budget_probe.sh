@@ -197,7 +197,7 @@ check_async() {
     [ "$match" = match ] || diff "$exp" "$txt" | head -n 8
   fi
 }
-echo "# D38: an async function's synchronous recursion is ended by the heap, not the budget"
+echo "# D38: async synchronous recursion ends at the heap (flat) or C-stack guard (recur)"
 check_async
 
 verdict=OK; [ $failed = 0 ] || verdict=FAIL

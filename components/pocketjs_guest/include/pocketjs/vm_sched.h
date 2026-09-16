@@ -88,6 +88,7 @@ typedef struct JSContext JSContext;
  * far above any honest drain -- 250 ms at the measured cheapest job is ~3,600
  * jobs -- so on a live clock the time limit always fires first. */
 #define VM_RUNAWAY_US 250000
+#define VM_FRAME_RUNAWAY_US 250000 /* accumulated frame execution, excludes host waits */
 #define VM_RUNAWAY_JOBS 100000
 
 typedef enum {
@@ -98,16 +99,11 @@ typedef enum {
    * parked in JS_VMSuspended(). Covers BOTH of sec.12.6-4's cases with one
    * value: seen at the top of the loop, before the next job is even looked
    * at (a chain a PRIOR call left held -- no job ran this call, *ran stays
-   * whatever it already was); seen after JS_ExecutePendingJob completes a
-   * job whose OWN handler suspended mid-chain (JS_VMCallJob's JOB_HELD path,
-   * D36) -- that job counts (n++) because it genuinely ran, the chain is
-   * just still open. Only the first case exists before quickjs.c grows
-   * JS_ExecutePendingJob's own suspend return (stage 3f / D36): with every
-   * JS_VM* symbol a pass-through, JS_VMSuspended() is always false, so this
-   * value is a shape the callers can switch on now and never actually see
-   * until the interpreter itself changes. Firmware callers must still
-   * handle it for -Werror (an unhandled enumerator in a switch), even though
-   * it cannot be produced yet -- see guest.c drain_jobs(). */
+   * whatever it already was); or JS_ExecutePendingJob returns 2 for a held
+   * job whose handler parked before its completion tail. That job is NOT
+   * included in *ran: the receiver counts it once after resume + tail.
+   * Internal async continuation jobs returning 1 ARE counted here, even
+   * when their heap-owned body then needs a separate resume. */
   VM_DRAIN_SUSPENDED = 3,
 } vm_drain_status_t;
 
@@ -122,7 +118,7 @@ typedef struct {
    * the unit every caller states its numbers in (VM_RUNAWAY_US, the RUNAWAY
    * log line). Written on every return, and zero in count mode (limit_us <= 0)
    * where the clock is deliberately never read. The runaway guard sums it
-   * across one logical drain; it costs one extra clock read per drain
+   * across one logical drain; it costs two timestamp reads per drain
    * (measured (device): 25 ns CCOUNT, 833 ns esp_timer) plus the one divide
    * that converts it, against a drain measured in milliseconds. */
   int64_t elapsed;

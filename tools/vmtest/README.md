@@ -14,6 +14,14 @@
 ```bash
 # WSL: cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs-vm
 bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る（Kconfig の既定経路。all-alloca / all-recur / all-flat で他の経路）
+bash tools/vmtest/build.sh asan-tco            # 実験用strict TCO（yieldも有効、既定構成には入らない）
+python3 tools/vmtest/tco_probe.py              # 100/100000段の容量一致、値・所有権、毎中断GC
+bash tools/vmtest/tco_oom.sh asan-tco          # 大きいcalleeへのfallbackでOOM、捕捉値と再実行の回復
+bash tools/vmtest/tco_oom.sh asan-yield        # 同じ検査のTCO無効対照（各スクリプト内で再ビルド）
+bash tools/vmtest/build.sh o2
+python3 tools/vmtest/segment_growth_probe.py  # 同一バイナリ、D42の6サイズ方針×6 workload（host値）
+# --vm-seg-growth FIRST MAX はcache方針を保持。固定サイズ用 --vm-seg-size と併用不可。
+# bytecode_dump.cはobj-o2-tco/*.oとリンクして、JSを実行せずpass2/finalを表示する診断用
 bash tools/vmtest/stack_probe.sh 2000 o2       # G1: 1 段あたりの C スタック（L2b 以降は NOT_PROPORTIONAL が正）
 bash tools/vmtest/stack_probe.sh 2000 o2 stack_probe_async.js   # G1 の async 版（L2b-async、設計 §12.2。flat で NOT_PROPORTIONAL、-recur で PROPORTIONAL）
 bash tools/vmtest/budget_probe.sh o2           # D10: 予算がヒープより先に答えるか（10 項目 + D38 の deep_async_recursion）
@@ -27,10 +35,15 @@ python3 tools/vmtest/trace_stats.py .cache/vmtest/traces/closures.trace   # ト�
 python3 tools/vmtest/test262.py --fetch        # 固定 revision を .cache/test262 へ（初回のみ、約2分）
 python3 tools/vmtest/test262.py -j 8           # 部分集合を実行し基準と比較（ASan で約1分）
 python3 tools/vmtest/test262.py --variant o2 --force-yield -j 8
+git -C .cache/test262 sparse-checkout disable # async全体監査用。固定revisionは変更しない
+python3 tools/vmtest/async_audit.py --output .cache/vmtest/async-audit.json -j 8
+python3 tools/vmtest/test_async_audit.py       # 監査の抽出条件
 python3 tools/vmtest/timing.py                 # 時間の計測（書き込みは --write）
 ```
 
 生成物はすべて `.cache/vmtest/`（git 管理外）: `vmrun-{asan,o2}`、`obj-*/`、`actual-<variant>/<name>.{txt,raw,diff}`、`info-<variant>.txt`、`traces/`、`test262-results-<variant>.txt`。
+
+`async_audit.py`は全checkoutの存在と固定revisionを検査し、async/await関連および再帰・スタック制限に言及するテストをファイル名によらず抽出する。既定の`o2-recur`/`o2`（先に両方ビルドする）を同じ集合で比較し、判定・失敗詳細に差があれば非0終了。JSONには全選択パス・再帰候補・各結果・実行バイナリSHA256を残す。両版共通の失敗は成功へ読み替えず記録し、baselineを更新しない。全文検索による選択は無言の深さ依存を数学的に排除する証明ではない。
 
 ## vmrun
 
@@ -95,7 +108,34 @@ L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 
 
 **L2 で弱シンボルが埋まった**（`components/quickjs-ng/quickjs-ng/quickjs-vm.c`、`build.sh` がリンクし、`components/quickjs-ng/CMakeLists.txt` にも載せてある）。止まる地点は設計 §7.2 の分類 A の 7 地点だけ。`quickjs.c` 側の差分は、その 7 行の `js_poll_interrupts` → `js_poll_safepoint` の名前替え、スローパス `__js_poll_interrupts` の armed 分岐、frame pop 4 箇所と class-call の復帰 2 箇所の LEAVE フック、で、**既定経路の高速側（カウンタの減算）は無変更**。状態は `JSRuntime` のメンバではなくファイルスコープの 1 ポインタ — メンバにすると `JSRuntime` が 8 B 育ち、それだけで `gc_threshold_device.js`（じわじわ型 OOM）の結果が動いた（元の `quickjs.c` に 8 B のパディングだけ足して同じ落ち方を再現した。実測(host)）。**`JS_SetInterruptHandler` には乗せていない** — あれはセッション終了の述語で、終了と中断を同じ経路に通すと区別が消える（設計 §1.2）。armed 中はすべてのポーリングがスローパスに入るが、ホストの割り込みハンドラは影のカウンタで従来どおり 10,000 回に 1 回だけ呼ぶので、arm しても終了要求が読まれる地点は動かない。
 
-**既定off経路ではこの関所は意図的に赤い。** `asan` / `o2` は出荷既定（`CONFIG_POCKET_VM_YIELD=n`）なので、強制停止は従来の捕捉不能な`interrupted`になる。段3aを検査する専用変種は`asan-yield` / `o2-yield`（`build.sh all-yield`）。実測(host、2026-09-16): o2-yieldは通常63/63、`--force-yield`も63/63で、全対象の`safepoints_yieldable == stops == resumes`。asan-yieldは寿命・例外・async混在の代表10件が10/10、さらに`--gc-on-yield`の3件が3/3。段3aはホスト所有SEG床だけで、async/job所有と破棄はまだ未実装なので既定はoffのまま。
+**既定off経路ではこの関所は意図的に赤い。** `asan` / `o2` は出荷既定（`CONFIG_POCKET_VM_YIELD=n`）なので、強制停止は従来の捕捉不能な`interrupted`になる。L2cを検査する専用変種は`asan-yield` / `o2-yield`（`build.sh all-yield`）。段3bでは分類Aの分岐と分類Bのpush完了後で中断し、ホスト所有鎖のTerminate/Discardを実装。実測(host、2026-09-16): asan-yieldの`--force-yield`は63/63、Test262は通常・強制yieldとも退行0。async/job所有床は次工程のため既定はoffのまま。
+
+### 中断鎖の寿命検査（段3b）
+
+`bash tools/vmtest/lifecycle.sh asan-yield`（先に同変種をbuild）で、7種類の所有形態（ホスト、await復帰、async generator、通常/async Promise handler、thenable、microtask）の各22〜23中断位置を再開・Terminate・Discard・runtime解放・OOM下のTerminateの5モードで検査する（計790ケース）。中断ごとにGCを走らせ、キューの先頭が拒否時に失われないこと、破棄後も捕捉変数が有効なこと、終了時にcatch/finallyを実行しないことを確認する。分岐だけの無限ループでwatchdogが動くことも検査する。
+
+同じCテストを実機で走らせるには、独立sdkconfigで`SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.vm-l2c-selftest.defaults"`を使ってビルドする。`CONFIG_POCKET_VM_SELFTEST=y`のときだけUSBの`L`が有効になり、`python tools/vmtest/device_lifecycle.py --port COM3 --cycles 3`で駆動できる。通常ビルドにはテスト本体もUSBコマンドも入らない。
+
+同じビルドのUSB `M`は`python tools/vmtest/device_lifecycle.py --port COM3 --back --cycles 3`で駆動する。実際の`app_tick(0x2000)`→`app_request_stop()`→`app_stop()`を使い、通常frame・保留Promise job・asyncの中断から再開完了、Back保存相当のマーカーとPromise完了、stop hookとそのPromise完了が`123456`順になることを検査する。中断中にBackターンなしで終了する場合は`156`（残りの本体を実行しない）を要求する。開始直後の中断状態も検査するため、中断せずたまたま順序が合った走行は成功しない。NVSには書かず、実際の保存内容や物理キー入力の検証を代替しない。`L`/`M`はホームでアプリが動いていないときだけ受理する。
+
+要求APIの検査も同じハーネスで行う。要求の合流・Clear・native再入中の保留に加え、実行中の無限ループへ別producer（ホストはpthread、実機はESP one-shot timer）から要求を送り、中断後にTerminateする検査を10回実施する。強制yieldの計測ブロックには依存しない。producerの最終runtimeアクセス完了を確認してからruntimeを解放する。
+
+実機の`L`には`guest_lifecycle.c`も含む。実際のguest APIを使い、4起点×4モード（再開・停止・中断中destroy・スタック不足下の停止）の16ケースと、100µsの実タイマーでの完走・leave相当の無効化・途中停止を検査する。短予算検査は2万反復を最終値で検査し、1万回の再開を上限とする（初期上限1千回では実機で16,421反復までしか進まず、検査上限を見直した）。ホストの`sched_clock.c`はdrain実行時間から先行処理を除くこと、32bit wrap、count modeの時計読み取りゼロを固定する。
+
+```bash
+gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Icomponents/quickjs-ng/quickjs-ng tools/vmtest/sched_clock.c components/pocketjs_guest/src/vm_sched.c components/pocketjs_guest/src/vm_clock.c -o .cache/vmtest/sched-clock
+.cache/vmtest/sched-clock
+```
+
+### H14: 中断時の保持フレーム
+
+`--force-yield`を指定した走行の`#info vm`に`susp_samples`（実際のpark回数）、`susp_bytes_max`（park時のSEGフレーム容量の最大値）、`susp_async_frames`（parkした鎖の非SEGフレーム数の最大値）を出す。セグメントの予約容量・allocator余白・asyncオブジェクトのバイト数は含まない。2つの最大値は独立であり、同時点の値とは限らない。`lifecycle.sh`と実機USB `L`にも起点ごとの最大値を出し、同期だけの対照でasync数0、async起点で正、park回数と再開回数の一致を検査する。数値はホストと実機で型サイズが違うため別々に扱う。
+
+### G1実機: 瞬時Cフレーム位置とタスク生涯HWM
+
+`sdkconfig.vmprobe.defaults`の独立ビルドで`vm_l0_capture.py --port COM3 --workloads B --conditions base --seconds 4 --reps 2 --no-reset --out .cache/vm/stack-flat.jsonl`を実行し、`vm_stack_report.py .cache/vm/stack-flat.jsonl --expect flat --curves 2`で検査する。対照ビルドには`sdkconfig.vm-recur.defaults`を追加し`--expect recur`を使う。再書き込み時は保存済みアプリの復元を忘れない。
+
+`depth_fp`は同一呼び出し列のC計測関数フレーム位置の差を見る欄で、空き容量ではない。`depth_hwm`/`stack_hw_min`はタスク生涯の最小余裕で、アプリ切替では戻らない。判定器はflatの幅<=64B、recurの各区間>=64B/段を要求する（実測は0B対288B/段）。欠落・深さ不整合・depth_drop・途中終了・scopeなしを拒否する。`python tools/test_vmprobe_stack.py`で解析器と正負対照を検査できる。
 
 ### G5: 最長の中断禁止区間
 
@@ -162,6 +202,8 @@ L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 
 
 **期待値の更新規則**: `run.sh --bless` は新しいファイルを足した時にだけ使う。既存の `expected/*.txt` を書き換えるのは、挙動の変更が意図されたもので理由を説明できる場合だけで、その変更だけの commit にする（§12「新たな失敗を期待値の書き換えだけで処理しない」）。
 
+追加の`yield_async_from_sync`は同期iteratorをasyncへ変換するnative境界のgetter/例外/thenable/close/yield*を、`yield_dynamic_import`は同じ`.mjs` fixtureの二重importとトップレベルawaitを固定する。前者の不正return値は非中断版でも未処理拒否・exit=2になる既存挙動を含む。`VMTEST_VMRUN_FLAGS=--gc-on-yield run.sh --variant asan-yield --force-yield yield_async_from_sync yield_dynamic_import`で重点GC検査を再実行できる。
+
 ## トレース形式
 
 `vmrun --trace OUT file.js`（`run.sh --trace` なら `.cache/vmtest/traces/<name>.trace`）。1 行 1 レコード、空白区切り。
@@ -220,3 +262,71 @@ L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 
 - **pop の鍵はフレームを push したかどうかで、`b->func_kind` ではない**: モジュール本体の関数は `__JS_EvalInternal` が `JS_FUNC_ASYNC` として組むが、`js_inner_module_linking` が hoisting 済み宣言の初期化のために `JS_Call(ctx, m->func_obj, JS_TRUE, 0, NULL)` で通常経路から呼び、`done_generator:` に抜ける（L2a 時点では「モジュール内の直接 `eval`」と書いていたが、H7 の実験で主語が違うと分かった。設計 §10.1。直接 `eval` は `JS_FUNC_NORMAL`）。`func_kind` で pop を決めると、この 1 フレームが積まれたまま残り `JS_FreeRuntime` の assert で落ちる（Test262 `language/eval-code/direct/export.js` / `import.js` が見つけた）。`flags` も opcode がスクラッチに使うので鍵にできない。鍵は `js_vm_stack_holds()`（`sf` が先頭セグメントの生存範囲にあるか）。C ローカルで覚える版は G1 が 528→544 B/段に増えた（実測(host) o2）ので採らなかった。
 - **`gc_threshold_device.js` はヒープの残量に敏感で、L2a では条件によって落ちる**: `run.sh --trace` の asan 走行、および `--vm-seg-size 2048` の o2 走行で、OOM を catch した後の `print` 自体が OOM して `null` が未捕捉になる（`cycles-exhaust-heap true` の後に `null` が 2 行、exit=1）。常駐セグメント（ホストで 4,143B）がジワジワ型 OOM の「残り」を変えるためで、メモリ破壊ではない（同じ変更で alloca 版は通る）。通常の `run.sh`（4 バリアント）では通る。`--trace` でトレースを採るときはこの 1 件の FAIL を織り込むこと。
 - オブジェクトは `quickjs-ng/*.c`・`*.h`・`build.sh` のいずれかが新しければ作り直す。
+
+## 同一バイナリの呼び出し比較
+
+`build.sh o2-callbench` と `callbench.sh o2-callbench` で診断専用の比較を実行する。
+ASan検査は両方の引数を `asan-callbench` にする。通常ビルドには切り替え状態・分岐・APIは入らない。
+`vmrun-*-callbench --vm-call-mode flat|recur` で同じ実行ファイルの経路を選べる。
+idle runtimeだけで変更でき、実行中のnative callbackからの変更は拒否する。
+YIELDとの併用はコンパイル時に拒否する。
+
+現在のcallbenchビルドは`LAZY_INPUTS`も有効にする（旧ログ§3.5のimageは導入前）。
+`callbench.sh o2-callbench --inputs`は両側ともflatのまま、遅延復元／従来の即時復元を比較する。
+実機では集計コマンドに`--inputs`を付けるとUSB `U`を送る。`KIND inputs`とlazy/eagerの
+PATH（両方0B）を検査する。`KIND`のない旧ログはdispatch比較として読める。
+Kconfigを追加・変更した作業ツリーでは、既存の専用buildを`idf.py -B build_vm_callbench reconfigure build`
+で更新し、`sdkconfig`の`LAZY_INPUTS=y`と実際のimageを確認する。rootのsdkconfigは変更しない。
+
+`build.sh asan-lazy`は遅延復元・YIELD・TCOを合わせて検査する実験変種。
+`build.sh o2-lazy-flat` / `asan-lazy-flat`はLAZY_INPUTSだけを有効にし、
+CALLBENCH/YIELD/TCOを含めない通常経路の検査変種。
+2026-09-16の採用後は無印`o2` / `asan`もLAZY_INPUTS有効（Kconfig既定yと一致）。
+`o2-eager` / `asan-eager`は即時復元の対照を残す。`-alloca` / `-recur`では遅延復元を無効にする。
+既定の対応箇所は`build.sh`の`segframes` / `flatcalls` / `lazy`の3変数。
+`lifecycle.sh asan-lazy`もTCO検査を含める。出荷の3スイッチの既定を表す変種ではない。
+`lazy_call_inputs.js`はdefault引数のcall後のrest、arguments、generator/async、constructorを検査する。
+毎中断GCの`tco_guards`は`VMTEST_VMRUN_FLAGS='--gc-on-yield --vm-budget 64K'`で予算拒否を検査できる。
+7MiBのhost既定予算で同じ検査を行うと深い鎖への反復GCで300秒を超えたため、完走とは扱わない。
+
+`run.sh`は`VMTEST_START_MARKER=1`でrunnerのmain到達をstderrに記録する。
+main到達後のtimeout/ASan異常はstartupとして再試行しない（`test_runner_retry.py`で検査）。
+runnerを更新した後は再ビルドしてから使う。
+
+実機は専用ビルドで
+`idf.py -B build_vm_callbench -D SDKCONFIG=build_vm_callbench/sdkconfig -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.vm-callbench.defaults" build`。
+アプリ領域だけを書き込み、`python tools/vmtest/callbench_report.py .cache/vmtest/callbench-device.log --port COM3`
+でHOMEからUSB `N` を実行・採取する。検証後は元のアプリ領域を復元する。
+保存済みログの集計は `--port` なし。同じrunにPATH 2行・SAMPLE 128行・PASS 1行が必要。
+
+4負荷それぞれ8組のABBA/BAAB、各blockで2回ウォームアップして1回測定する。
+コンパイル・GC・出力は測定区間外。戻り値を毎回照合し、独立のnative callbackでCスタック増加
+（flat=0、recur>0）を実測して切り替えを証明する。通常ループは対照。
+これはflatインタープリタ内のdispatch比較であり、別コンパイルのL2a全体やアプリ全体の高速化率ではない。
+standalone runtimeの標準allocatorを使い、guestのallocator・スケジューラ・描画は計測しない。
+
+### 実機Back入力と永続保存（SELFTEST専用）
+
+`device_back_storage.py --port COM3 --stage write`はUSB `Y`で専用アプリを起動し、
+USB `q`を実際の`KEY_BACK`入力として送る。保存のPromise完了が同期/非同期stop hookより前であることを
+マーカー列`1,10,11,2,3,4,5`で検査する。10は実際の中断確認、11はBack受信時の再確認。
+診断専用ループが明示yield要求を繰り返し、Back入力を受けたUIタスクがCのフラグを変更してから
+通常のleave再開経路を通る。中断中のJSへの再入は行わない。既存の`M`検査と違いNVSへ書くが、ownerは
+`vm.back.selftest.20260916`、キーは`back-save-20260916`に限定。存在確認と`ifRevision:0`により
+既存レコードを上書きしない（既存キーがあると検査は失敗する）。通常ビルドに`Y`/`Z`は含まれない。
+
+**書込後に機体を再起動してから**`device_back_storage.py --port COM3 --stage read`を実行する。
+USB `Z`は別guestから正確な値・revisionを読み戻し、一致した診断レコードだけを削除し、
+再読込で不在を検査する（マーカー列`6,7,8`）。再起動はスクリプトの外側で実施・記録する必要がある。
+読取失敗時は削除しない。NVS namespaceのメタデータは残りうる。パーティション消去は行わない。
+この検査はUSB入力経路の検証であり、物理キーボード走査やtimerによる中断を単独では証明しない。
+`test_device_back_storage.py`の7件はシリアルプロトコルのホスト単体検査で、実機成功を代替しない。
+
+### 暴走ガードの実測
+
+`device_runaway.py --port COM3 --cycles 3`は既存USB `3`（無限frame）/`6`（無限job連鎖）を
+各3回実行し、正しい起点の`RUNAWAY`報告と`APP_STOPPED`を必須にする。YIELD有効の診断imageで使う。
+末尾の`DEVICE_RUNAWAY_SAMPLES`はJSON。`execution_us`はfirmwareが集計した実行区間の経過時間
+（プリエンプトされた時間も含む）、`host_elapsed_ms`はUSB往復・起動・終了込みでありCPU時間ではない。
+15秒で応答しなければ失敗。閾値を変えるツールではなく、正常負荷の誤停止検査も代替しない。
+`test_device_runaway.py`は計測ログの起点・欠落・重複検出を5件で検査する。

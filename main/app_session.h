@@ -13,6 +13,7 @@ esp_err_t app_start(void);
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length);
 esp_err_t app_start_test(char test);
+void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
 
 // docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the
 // background rather than instead of it. It gets no Rust UI core, no font atlas
@@ -73,6 +74,8 @@ void app_request_stop(void);
 // guest's own handler had been dead since the first of them. NULL restores the
 // session watchdog (stop requested, or the 250 ms deadline).
 void app_vm_watchdog(int (*fn)(void *), void *opaque);
+// Close any parked bytecode chain before entering a shutdown hook.
+void app_vm_prepare_stop(void);
 void app_report(void);
 // The last exception a Playground run reported, or "" when it ran clean.
 const char *app_error(void);

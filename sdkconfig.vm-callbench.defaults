@@ -1,0 +1,6 @@
+# Isolate both -B build_vm_callbench and -D SDKCONFIG=build_vm_callbench/sdkconfig.
+CONFIG_POCKET_VM_SEGFRAMES=y
+CONFIG_POCKET_VM_FLATCALLS=y
+# CONFIG_POCKET_VM_YIELD is not set
+CONFIG_POCKET_VM_CALLBENCH=y
+CONFIG_POCKET_VM_LAZY_INPUTS=y

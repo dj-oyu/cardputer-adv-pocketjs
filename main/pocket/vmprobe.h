@@ -52,6 +52,9 @@ unsigned vmprobe_condition(void);
 // session so tools/vm_l0_capture.py sees one at the head of each workload.
 // Also rebases the window and the job counters for the new session.
 void vmprobe_static_report(void);
+// USB-only D42 sizing selection for the next session, never a live runtime.
+void vmprobe_segment_set(unsigned policy);
+int vmprobe_segment_apply(pocketjs_guest_t *guest);
 
 // Called once per app_tick() frame, after the JS turn (frame() call plus
 // whatever job draining pocketjs_ui_turn does around it) has been timed.
@@ -70,7 +73,8 @@ void vmprobe_frame_sample(pocketjs_guest_t *guest, int64_t turn_us);
 
 // Called from app_session.c on a continuation turn (a drain the budget cut,
 // resumed with no frame()). Samples the heap, stack and guest heap on the same
-// every-Nth cadence as the frame sample, and nothing else.
+// every-Nth cadence as the frame sample. Publishes an elapsed window even if
+// no new frame() arrives; it never invents a frame timing or consumes jobs.
 void vmprobe_continuation_sample(pocketjs_guest_t *guest);
 
 // Called from pocket_api.c's pump, at the moment a completion's resolve/
@@ -89,11 +93,11 @@ void vmprobe_session_reset(void);
 // the deepest active JS frame), right next to vmprobe_frame_sample's own
 // stack_hw_min sample above. uxTaskGetStackHighWaterMark reports a
 // monotonically NON-INCREASING low-water mark since the ui task started, so
-// sampling it partway through a single, ever-deepening recursive probe (the
-// shape apps/vmprobe/deep_recursion.js already uses to find the JS-visible
-// stack limit at session start, before any frame() has run) attributes each
-// sample to the depth the caller was actually at: nothing deeper has
-// happened yet in that task's life. Wired from JS through
+// it cannot attribute a sample to this session: boot, parsing, or a previous
+// app may already have gone deeper. depth_fp separately samples the current
+// C probe frame address; differences between depths of the SAME invocation
+// show C-stack growth without that historical floor. It is neither free stack
+// capacity nor a high-water mark. Wired from JS through
 // __vmprobe_stack_sample() in main/ui/jsconsole.c (also CONFIG_POCKET_VM_PROBE-
 // only), not from quickjs.c -- this is a probe workload calling out, not an
 // interpreter checkpoint, so it costs nothing on the interpreter's fast path.

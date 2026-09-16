@@ -7,6 +7,8 @@ import serial
 p = argparse.ArgumentParser()
 p.add_argument('--port', required=True)
 p.add_argument('--cycles', type=int, default=100)
+p.add_argument('--frame-marker', default='HELLO_FRAME_PRESENTED',
+               help='frame-presented marker of the installed renderer')
 args = p.parse_args()
 s = serial.Serial(args.port, 115200, timeout=0.2)
 time.sleep(1.5)
@@ -29,7 +31,7 @@ try:
     command('a', 'CATEGORY 0')
     memory = []
     for i in range(args.cycles):
-        command('e', 'HELLO_FRAME_PRESENTED')
+        command('e', args.frame_marker)
         command('e', 'HELLO_COUNT 1')
         result = command('q', 'HOME_READY')
         match = re.search(r'MEM free=(\d+) largest=(\d+)', result)
@@ -42,10 +44,10 @@ try:
     for case in '123456':
         command(case, 'APP_STOPPED')
         command('q', 'HOME_READY')
-        command('e', 'HELLO_FRAME_PRESENTED')
+        command('e', args.frame_marker)
         command('q', 'HOME_READY')
         print('FAULT_RECOVERY_OK', case, flush=True)
-    command('e', 'HELLO_FRAME_PRESENTED')
+    command('e', args.frame_marker)
     print('SMOKE_OK', args.cycles, flush=True)
 finally:
     s.close()

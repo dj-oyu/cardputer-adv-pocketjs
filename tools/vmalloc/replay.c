@@ -140,7 +140,7 @@ typedef struct {
   u32series_t malloc_steps, malloc_ns;
   u32series_t realloc_steps, realloc_ns;
   u32series_t free_ns;
-  // Segment-style breakdown (all 0 for backends without segments). The
+  // Segment-style breakdown, plus physical external extents for all backends. The
   // peaks are taken independently, each at its own worst sample; they do
   // not describe one moment and must not be summed.
   size_t peak_reserved;        // pool bytes held by segments at the worst sample
@@ -190,13 +190,13 @@ static void take_sample(const vmalloc_backend_t *be, run_result_t *out) {
   if (st.pool_free_bytes > st.pool_largest_free &&
       st.pool_free_bytes - st.pool_largest_free > out->peak_external_frag)
     out->peak_external_frag = st.pool_free_bytes - st.pool_largest_free;
-  if (st.reserved_bytes && st.pool_largest_free < out->min_pool_largest) out->min_pool_largest = st.pool_largest_free;
+  if (st.pool_largest_free < out->min_pool_largest) out->min_pool_largest = st.pool_largest_free;
   if (g_cur_op < g_teardown_op) {
     if (st.pool_free_bytes > st.pool_largest_free &&
         st.pool_free_bytes - st.pool_largest_free > out->app_ext_frag)
       out->app_ext_frag = st.pool_free_bytes - st.pool_largest_free;
     if (st.seg_free_inside > out->app_slack_inside) out->app_slack_inside = st.seg_free_inside;
-    if (st.reserved_bytes && st.pool_largest_free < out->app_min_pool_largest) out->app_min_pool_largest = st.pool_largest_free;
+    if (st.pool_largest_free < out->app_min_pool_largest) out->app_min_pool_largest = st.pool_largest_free;
   }
   if (st.segments_live > out->peak_segments_live) out->peak_segments_live = st.segments_live;
   if (st.segments_dedicated > out->peak_segments_dedicated) out->peak_segments_dedicated = st.segments_dedicated;
@@ -459,6 +459,13 @@ static void print_segment_tail(const run_result_t *r) {
          r->last.seg_added, r->last.seg_returned, r->last.seg_reused, r->last.seg_dedicated_added);
 }
 
+static void print_external_tail(const vmalloc_backend_t *be, const run_result_t *r) {
+  // Segment output already contains these four fields.
+  if (be->owner) return;
+  printf(" peak_external_frag=%zu min_pool_largest=%zu app_ext_frag=%zu app_min_pool_largest=%zu",
+         r->peak_external_frag, r->min_pool_largest, r->app_ext_frag, r->app_min_pool_largest);
+}
+
 static void print_verify_tail(const run_result_t *r) {
   if (!g_verify) return;
   printf(" verify=%s verify_sweeps=%lu verify_errors=%lu", r->verify_errors ? "BROKEN" : "OK",
@@ -556,6 +563,7 @@ int main(int argc, char **argv) {
     printf("allocator=%s trace=%s min_pool=%zu peak_used=%zu peak_blocks=%zu check=%d",
            allocator, trace_base, hi, r.peak_used_bytes, r.peak_blocks, r.check_ok);
     if (be->owner) print_segment_tail(&r);
+    print_external_tail(be, &r);
     print_verify_tail(&r);
     printf("\n");
     if (r.check_ok == 0) rc = 2;
@@ -578,6 +586,7 @@ int main(int argc, char **argv) {
            pctl(&r.realloc_steps, 1.0), pctl(&r.realloc_ns, 1.0), pctl(&r.free_ns, 1.0),
            r.check_ok);
     if (be->owner) print_segment_tail(&r);
+    print_external_tail(be, &r);
     print_verify_tail(&r);
     printf("\n");
     if (r.check_ok == 0) rc = 2;

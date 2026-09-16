@@ -58,6 +58,14 @@ set_source_files_properties(ui/shell.c scene/solar_sail.c scene/render_accel.c s
 # noticed because a probe-off build never builds the file. CONFIG_POCKET_VM_PROBE
 # reaches this file as an ordinary CMake variable; ESP-IDF injects every
 # sdkconfig value that way for every component's CMakeLists.txt.
+if(CONFIG_POCKET_VM_SELFTEST)
+    target_sources(${COMPONENT_LIB} PRIVATE "../tools/vmtest/lifecycle.c" "../tools/vmtest/guest_lifecycle.c")
+endif()
+
+if(CONFIG_POCKET_VM_CALLBENCH)
+    target_sources(${COMPONENT_LIB} PRIVATE "../tools/vmtest/callbench.c")
+endif()
+
 if(CONFIG_POCKET_VM_PROBE)
     target_sources(${COMPONENT_LIB} PRIVATE "pocket/vmprobe.c")
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/vmprobe/sync_loop.js" TEXT)

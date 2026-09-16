@@ -154,12 +154,17 @@ static void naive_stats(vmalloc_stats_t *out) {
   size_t used = 0, free_b = 0, largest = 0, blocks = 0;
   for (block_t *b = g_first; b; b = b->phys_next) {
     if (b->used) { used += HDR + b->size; blocks++; }
-    else { free_b += HDR + b->size; if (b->size > largest) largest = b->size; }
+    else {
+      free_b += HDR + b->size;
+      if (b->size > largest) largest = b->size;
+      if (HDR + b->size > out->pool_largest_free) out->pool_largest_free = HDR + b->size;
+    }
   }
   out->used_bytes = used;
   out->free_bytes = free_b;
   out->largest_free_block = largest;
   out->blocks_used = blocks;
+  out->pool_free_bytes = free_b;
 }
 
 static int naive_check(void) {

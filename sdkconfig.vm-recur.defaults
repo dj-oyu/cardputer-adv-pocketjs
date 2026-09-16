@@ -1,0 +1,2 @@
+# Diagnostic contrast for C-stack depth measurements; never a shipping default.
+CONFIG_POCKET_VM_FLATCALLS=n

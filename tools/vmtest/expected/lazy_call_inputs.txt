@@ -1,0 +1,9 @@
+default-rest 7:3:2/3:receiver
+missing-rest 7:0::receiver
+generator 7:3:4/5:receiver receiver
+constructor 7:9/10:Child Child
+implicit 7:11:Implicit
+mapped 12:2:2
+tail 7:13/14
+async 7:3:6/8:receiver
+exit=0

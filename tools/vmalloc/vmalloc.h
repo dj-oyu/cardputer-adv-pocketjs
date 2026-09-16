@@ -23,8 +23,8 @@ typedef struct {
   size_t largest_free_block; // largest single free extent an app malloc could use
   size_t blocks_used;
 
-  // Segment-style backends only. The replayer zeroes the struct before
-  // calling stats(), so backends without segments simply leave these 0.
+  // Segment-style fields (except the all-backend pool extent pair below).
+  // The replayer zeroes the struct before stats(); unsupported fields stay 0.
   // The split below is what spec sec.7 asks for: "internal slack" (bytes a
   // segment holds but no block uses) and "external fragmentation" (pool
   // bytes no segment can be carved from) reported as separate quantities,
@@ -34,8 +34,11 @@ typedef struct {
   size_t seg_header_bytes;   // part of reserved_bytes that is segment descriptors
   size_t seg_free_inside;    // free-block bytes inside live segments: internal slack, reusable only from inside
   size_t seg_cached_bytes;   // empty segments retained by the cache instead of returned: internal slack of a second kind
-  size_t pool_free_bytes;    // pool bytes held by no segment
-  size_t pool_largest_free;  // largest contiguous pool extent: whether one more standard segment fits
+  // ALL backends: physical free extents, including reclaimable block headers.
+  // Segment backend: outside segments only; internal slack remains separate.
+  // These are not the largest user malloc size (headers/bins can reduce it).
+  size_t pool_free_bytes;
+  size_t pool_largest_free;
   size_t segments_live, segments_cached, segments_dedicated;
   // Running event counter and its breakdown. The replayer's --verify sweeps
   // every live block whenever `events` changes, which is how "the check

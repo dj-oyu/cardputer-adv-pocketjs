@@ -486,13 +486,10 @@ static void install_host(JSContext *ctx) {
 // the gate (sec.12.4's table has no module row; a suspended module evaluation
 // is not a case this stage defines).
 //
-// Pass-through build: JS_VMSuspended is always false, so the while loop below
-// never actually iterates. That is deliberate -- see the header comment on
-// JS_VMResume -- and it is exactly what makes run.sh --force-yield's rule
-// read "stops=1 resumes=0" today instead of green: the four receivers know
-// HOW to resume a held chain, but nothing in quickjs.c can hand them one yet.
+// Pass-through builds never iterate the resume loop. Yield-enabled builds
+// must match every recorded stop with a real resume.
 static uint64_t g_resumes;      // JS_VMResume calls made by any of the four receivers
-static uint64_t g_held;         // times the job receiver saw VM_DRAIN_SUSPENDED (dead until D36/stage 3f)
+static uint64_t g_held;         // times the job receiver saw VM_DRAIN_SUSPENDED
 static uint64_t g_held_jobs;    // of those, how many completed as JS_VM_ORIGIN_JOB_HELD (sec.12.6-4/12.9)
 
 // --force-yield-fault (G6-shaped negative control, matching --stack-probe-fault
@@ -551,15 +548,18 @@ static JSValue resume_until_done(JSContext *ctx, JSValue result) {
 static int run_turn(guest_t *guest) {
   unsigned run_turns = 0;
   uint64_t drain_jobs = 0;   // this LOGICAL drain, cleared when the queue empties
+  unsigned slice_jobs = 0;  // completed jobs, including resumed held jobs
   for (;;) {
     JSContext *context = NULL;
     unsigned ran = 0;
     arm_budget(guest);
-    const vm_drain_status_t status =
+    if (budget_jobs && slice_jobs < budget_jobs)
+      guest->budget.backstop = budget_jobs - slice_jobs;
+    vm_drain_status_t status =
         vm_sched_drain(guest->runtime, &guest->budget, &ran, &context);
     guest->jobs += ran;
     drain_jobs += ran;
-    boundaries++;  // every return from the drain is one job boundary
+    slice_jobs += ran;
     if (ran > guest->max_queue_run) guest->max_queue_run = ran;
     if (status == VM_DRAIN_THREW) {
       fflush(stdout);
@@ -567,16 +567,11 @@ static int run_turn(guest_t *guest) {
       JS_VMStackTrim(guest->runtime);
       return -1;
     }
-    // The job receiver (design sec.12.9's fourth row / sec.12.6-4). Dead
-    // until D36 (stage 3f) gives JS_ExecutePendingJob its own suspend return
-    // -- vm_sched_drain() cannot produce VM_DRAIN_SUSPENDED with every JS_VM*
-    // symbol a pass-through -- but the receiver is written now, against the
-    // eventual contract, the same as the other three.
+    // Finish the parked owner before draining or pumping any other JS.
     if (status == VM_DRAIN_SUSPENDED) {
       g_held++;
       JSValue r = resume_until_done(guest->context, JS_UNDEFINED);
       const JSVMOrigin origin = JS_VMSuspendedOrigin(guest->runtime);
-      boundaries++;
       if (JS_IsException(r)) {
         fflush(stdout);
         js_std_dump_error(guest->context);
@@ -595,10 +590,18 @@ static int run_turn(guest_t *guest) {
         guest->jobs++;
         drain_jobs++;
         g_held_jobs++;
+        slice_jobs++;
       }
-      continue;
+      if (!budget_jobs || slice_jobs < budget_jobs ||
+          !JS_IsJobPending(guest->runtime))
+        continue;
+      status = VM_DRAIN_YIELDED;
     }
+    // Opcode parks are not host-event boundaries: keep the original
+    // count-mode budget slice visible to deterministic completion delivery.
+    boundaries++;
     if (status == VM_DRAIN_YIELDED) {
+      slice_jobs = 0;
       guest->turns++;
       if (++run_turns > guest->max_run_turns) guest->max_run_turns = run_turns;
       if (stop_turns != 0 && run_turns >= stop_turns) return -6;
@@ -621,6 +624,7 @@ static int run_turn(guest_t *guest) {
       continue;
     }
     drain_jobs = 0;            // the logical drain ended; the next starts at 0
+    slice_jobs = 0;
     // D43: where guest.c's drain_jobs() releases the segments kept for reuse
     // during the turn -- the queue is empty, so the turn's frames are gone.
     JS_VMStackTrim(guest->runtime);
@@ -722,6 +726,8 @@ extern void vmtest_vm_report(JSRuntime *rt, JSContext *ctx, void *out) __attribu
 // picks the standard segment before any JS runs; the report line is what
 // decides the size (segments added, peak resident, largest frame).
 extern int vmtest_vmstack_configure(JSRuntime *rt, size_t seg_size, unsigned cache_max)
+    __attribute__((weak));
+extern int vmtest_vmstack_configure_growth(JSRuntime *rt, size_t first, size_t maximum)
     __attribute__((weak));
 extern void vmtest_vmstack_report(JSRuntime *rt, void *out) __attribute__((weak));
 // D10: --vm-budget sets the segment byte budget by itself, after
@@ -849,6 +855,8 @@ static void usage(void) {
           "                         frame() receivers, print what it says (sec.12.5/D19r; a\n"
           "                         note until the VM can suspend)\n"
           "  --vm-seg-size N[K]     L2a: standard frame-segment payload (default: the build's)\n"
+            "  --vm-seg-growth FIRST MAX  D42 sizing sweep, retains the build's cache policy\n"
+            "  --vm-call-mode flat|recur  diagnostic callbench builds only\n"
           "  --vm-budget N[K|M]     D10: frame-segment byte budget alone (0 = off), leaving the\n"
           "                         C-stack limit at --stack-limit; default: same as --stack-limit\n"
           "  --host-events          install host.request(k) (a completion recorded at the k-th job\n"
@@ -863,6 +871,9 @@ static void usage(void) {
 // ---------------------------------------------------------------- main
 
 int main(int argc, char **argv) {
+  // An unbuffered marker distinguishes pre-main ASan failures from a slow
+  // running VM. Program stdout may remain buffered until normal exit.
+  if (getenv("VMTEST_START_MARKER")) fprintf(stderr, "#info vmrun-start\n");
   size_t heap_limit = 160U * 1024U;  // main/app_session.c gc.heap_limit
   size_t stack_limit = 20U * 1024U;  // main/app_session.c gc.stack_limit
   const char *trace_path = NULL;
@@ -873,6 +884,9 @@ int main(int argc, char **argv) {
   bool require_frame = false, module = false, strict = false, test262 = false;
   bool force_yield = false, want_gaps = false, want_time = false, want_stats = false;
   size_t vm_seg_size = 0;  // --vm-seg-size; 0 = whatever the build compiled in
+  size_t vm_seg_first = 0, vm_seg_max = 0;
+  bool vm_seg_growth_set = false, vm_seg_size_set = false;
+  int call_mode = -1;
   size_t vm_budget = 0;    // --vm-budget; the value to set (0 = no budget)
   bool vm_budget_set = false;
   const char *env_fy = getenv("VMTEST_FORCE_YIELD");
@@ -917,7 +931,18 @@ int main(int argc, char **argv) {
       else { fprintf(stderr, "unknown --force-yield-fault: %s\n", w); return 2; }
       force_yield = true;
     }
-    else if (!strcmp(a, "--vm-seg-size")) vm_seg_size = parse_size(NEXT());
+    else if (!strcmp(a, "--vm-call-mode")) {
+      const char *mode = NEXT();
+      if (!strcmp(mode, "flat")) call_mode = 0;
+      else if (!strcmp(mode, "recur")) call_mode = 1;
+      else { fprintf(stderr, "vmrun: invalid call mode\n"); return 3; }
+    }
+    else if (!strcmp(a, "--vm-seg-size")) vm_seg_size = parse_size(NEXT()), vm_seg_size_set = true;
+    else if (!strcmp(a, "--vm-seg-growth")) {
+      vm_seg_first = parse_size(NEXT());
+      vm_seg_max = parse_size(NEXT());
+      vm_seg_growth_set = true;
+    }
     else if (!strcmp(a, "--vm-budget")) vm_budget = parse_size(NEXT()), vm_budget_set = true;
     else if (!strcmp(a, "--gc-on-yield")) gc_on_yield = true;
     else if (!strcmp(a, "--terminate-after")) terminate_after = (int)parse_size(NEXT());
@@ -934,6 +959,10 @@ int main(int argc, char **argv) {
 #undef NEXT
   }
   if (!file) usage();
+  if (vm_seg_growth_set && vm_seg_size_set) {
+    fprintf(stderr, "vmrun: --vm-seg-growth and --vm-seg-size are mutually exclusive\n");
+    return 3;
+  }
 
   if (trace_path) {
     A.trace = fopen(trace_path, "w");
@@ -957,6 +986,23 @@ int main(int argc, char **argv) {
   JS_SetMemoryLimit(G.runtime, heap_limit);
   JS_SetMaxStackSize(G.runtime, stack_limit);
   JS_SetRuntimeInfo(G.runtime, "PocketJS ESP-IDF guest");
+  if (call_mode != -1) {
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+    if (vmtest_call_mode(G.runtime, call_mode) != 0) {
+#else
+    {
+#endif
+      fprintf(stderr, "vmrun: unsupported call mode\n");
+      JS_FreeRuntime(G.runtime);
+      return 3;
+    }
+  }
+  if (vm_seg_growth_set && (!vmtest_vmstack_configure_growth ||
+      vmtest_vmstack_configure_growth(G.runtime, vm_seg_first, vm_seg_max) != 0)) {
+    fprintf(stderr, "vmrun: invalid or unsupported --vm-seg-growth\n");
+    JS_FreeRuntime(G.runtime);
+    return 3;
+  }
   if (vm_seg_size) {
     // Before any JS runs: the bottom segment is pushed by the first call.
     if (!vmtest_vmstack_configure || vmtest_vmstack_configure(G.runtime, vm_seg_size, 1) != 0)

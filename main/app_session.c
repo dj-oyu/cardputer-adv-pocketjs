@@ -34,6 +34,25 @@
 #include "vm_wake.h"
 #include <stdatomic.h>
 #include <string.h>
+#ifdef CONFIG_POCKET_VM_SELFTEST
+#include "quickjs-vm.h"
+// UI-task-only diagnostic state; never expose or mutate JS while it is parked.
+static bool vm_storage_active, vm_storage_leaving, vm_storage_parked;
+static JSValue vm_storage_wait(JSContext *ctx, JSValueConst self,
+                               int argc, JSValueConst *argv) {
+    (void)self; (void)argc; (void)argv;
+    if(!vm_storage_leaving) JS_VMRequestYield(JS_GetRuntime(ctx));
+    return JS_NewBool(ctx,!vm_storage_leaving);
+}
+static JSValue vm_storage_mark(JSContext *ctx, JSValueConst self,
+                               int argc, JSValueConst *argv) {
+    (void)self;
+    int32_t mark=0;
+    if(argc && JS_ToInt32(ctx,&mark,argv[0])) return JS_EXCEPTION;
+    ESP_LOGI("app","VM_SAVE_MARK %ld",(long)mark);
+    return JS_UNDEFINED;
+}
+#endif
 
 extern const char hello_start[] asm("_binary_main_js_start");
 extern const char hello_end[] asm("_binary_main_js_end");
@@ -140,6 +159,10 @@ static int interrupt(void *opaque) {
 void app_vm_watchdog(int (*fn)(void *), void *opaque) {
     if(guest) pocketjs_guest_set_watchdog(guest,fn?fn:interrupt,opaque);
 }
+
+void app_vm_prepare_stop(void) {
+    if(guest) pocketjs_guest_prepare_stop(guest);
+}
 void app_request_stop(void) { atomic_store(&stop_requested,true); }
 
 // One clock read, at the top of every turn, shared by the 250 ms watchdog
@@ -173,6 +196,7 @@ static void arm_turn(uint32_t buttons) {
     // that decision changes. One extra read a turn, against a turn measured
     // in milliseconds.
     pocketjs_guest_budget(guest,&budget);
+    pocketjs_guest_yield_enabled(guest,(buttons&0x2000)==0);
 }
 
 // sec.5.2: is THIS logical drain a runaway? The question is what the drain has
@@ -191,6 +215,12 @@ static void arm_turn(uint32_t buttons) {
 // host-side clock can tell that time from the guest's; the answer to that is
 // the size of the allowance, not a finer unit.
 static bool drain_runaway(void) {
+    if(pocketjs_guest_frame_total(guest)>=VM_FRAME_RUNAWAY_US) {
+        ESP_LOGE("app","RUNAWAY one frame spent %lld us",
+                 (long long)pocketjs_guest_frame_total(guest));
+        jsconsole_set_error("FRAME RUNAWAY");
+        return true;
+    }
     int64_t us=0; uint64_t jobs=0;
     pocketjs_guest_drain_total(guest,&us,&jobs);
     if(us<VM_RUNAWAY_US && jobs<VM_RUNAWAY_JOBS) return false;
@@ -383,6 +413,10 @@ void app_stop(void) {
 }
 esp_err_t app_start_test(char test) {
     esp_err_t err;
+#ifdef CONFIG_POCKET_VM_SELFTEST
+    vm_storage_active=test=='Y';
+    vm_storage_leaving=vm_storage_parked=false;
+#endif
     // The USB diagnostics call this directly, so they are the one caller that
     // has not set these three. Left over from the boot overlay, overlay_session
     // skipped the test's source and its renderer, and the session died on its
@@ -425,6 +459,7 @@ esp_err_t app_start_test(char test) {
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
 #ifdef CONFIG_POCKET_VM_PROBE
+    TRY(vmprobe_segment_apply(guest) == 0 ? ESP_OK : ESP_ERR_INVALID_STATE);
     vmprobe_static_report();
 #endif
     pocketjs_guest_set_watchdog(guest,interrupt,NULL);
@@ -532,6 +567,40 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+#ifdef CONFIG_POCKET_VM_SELFTEST
+        // Dedicated owner and create-only writes keep diagnostics out of the
+        // selected app's store. A pre-existing test key is never overwritten.
+        case 'Y': source=
+            "let ready=false,saved=false;const key='back-save-20260916';"
+            "pocket.storage.get(key).then(r=>{if(r!==null)throw Error('test key exists');"
+            "ready=true;vmSaveMark(1)}).catch(()=>vmSaveMark(9));"
+            "pocket.app.start({stop:()=>{if(!saved){vmSaveMark(9);return}"
+            "vmSaveMark(4);return Promise.resolve().then(()=>vmSaveMark(5))}});"
+            "globalThis.frame=b=>{if(!(b&8192)){"
+            "if(ready)while(vmStorageWait()){}return}"
+            "if(!ready){vmSaveMark(9);return}ready=false;vmSaveMark(2);"
+            "return pocket.storage.set(key,{token:'vm-back-20260916',back:b},"
+            "{ifRevision:0}).then(()=>{saved=true;vmSaveMark(3)})"
+            ".catch(()=>vmSaveMark(9))};";
+            break;
+        case 'Z': source=
+            "const key='back-save-20260916';pocket.storage.get(key).then(r=>{"
+            "if(!r||r.revision!==1||JSON.stringify(r.value)!=="
+            "'{\"token\":\"vm-back-20260916\",\"back\":8192}')"
+            "throw Error('unexpected test record');vmSaveMark(6);"
+            "return pocket.storage.remove(key)}).then(()=>{vmSaveMark(7);"
+            "return pocket.storage.get(key)}).then(r=>{if(r!==null)"
+            "throw Error('test record remains');vmSaveMark(8)})"
+            ".catch(()=>vmSaveMark(9));globalThis.frame=()=>{};";
+            break;
+        case 'M': source=
+            "pocket.app.start({stop:()=>{vmMark(5);return Promise.resolve().then(()=>vmMark(6))}});"
+            "function work(){vmMark(1);vmRequest();for(let i=0;i<3;i++){}vmMark(2)}"
+            "globalThis.frame=b=>{if(b&8192){vmMark(3);Promise.resolve().then(()=>vmMark(4));return}"
+            "if(vmMode===0)work();else if(vmMode===1)Promise.resolve().then(work);"
+            "else return (async()=>{await 0;work()})()};";
+            break;
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
         // VM probe workloads (sec.5): real files under apps/vmprobe/ rather
         // than inline strings like '1'..'6' above, because
@@ -542,6 +611,7 @@ source_ready:;
         // instruction in a probe-off build (a `test<'A'` guard here once cost
         // the off build 20 B flash).
         case 'A': source=vmp_sync_start; break;
+        case 'X': source=hello_start; break;
         case 'B': source=vmp_recur_start; break;
         case 'C': source=vmp_closures_start; break;
         case 'D': source=vmp_promise_start; break;
@@ -570,6 +640,19 @@ source_ready:;
         }
         ESP_LOGI("app","APP_ID %s",manifest->id);
     }
+#ifdef CONFIG_POCKET_VM_SELFTEST
+    if(test=='Y'||test=='Z') {
+        pocket_storage_set_owner("vm.back.selftest.20260916");
+        JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+        JSValue global=JS_GetGlobalObject(ctx);
+        int installed=JS_SetPropertyStr(ctx,global,"vmSaveMark",
+                                       JS_NewCFunction(ctx,vm_storage_mark,"vmSaveMark",1));
+        installed|=JS_SetPropertyStr(ctx,global,"vmStorageWait",
+                                    JS_NewCFunction(ctx,vm_storage_wait,"vmStorageWait",0));
+        JS_FreeValue(ctx,global);
+        if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
+    }
+#endif
     if(user_source) {
         TRY(eval_user_source(source,length));
     } else {
@@ -652,15 +735,16 @@ esp_err_t app_overlay_tick(void) {
     // The same continuation rule as app_tick() (sec.2.2), minus the surfaces an
     // overlay does not install. There is no UI core here, so the drain is
     // resumed directly instead of through the binding.
-    if(pocketjs_guest_jobs_pending(guest)) {
+    if(pocketjs_guest_work_pending(guest)) {
         esp_err_t ce=pocketjs_guest_continue(guest);
         report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
         vmprobe_continuation_sample(guest);
 #endif
         if(ce) return ce;
-        if(pocketjs_guest_jobs_pending(guest)) {
+        if(pocketjs_guest_work_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
+            if(!pocketjs_guest_suspended(guest)) {
             // Fair ordering, the overlay's share of it: the same rule and the
             // same reasons as app_tick() states at length, over the pumps an
             // overlay session actually installs. No exit() check and no
@@ -670,6 +754,7 @@ esp_err_t app_overlay_tick(void) {
             pocket_api_pump();
             pocket_fs_pump();
             pocket_av_pump();
+            }
 #endif
             if(drain_runaway()) return ESP_ERR_TIMEOUT;
             continuation_turns++;
@@ -774,6 +859,12 @@ esp_err_t app_tick(uint32_t buttons) {
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
     const bool leaving=(buttons&0x2000)!=0;
+#ifdef CONFIG_POCKET_VM_SELFTEST
+    if(leaving && vm_storage_active) {
+        ESP_LOGI("app","VM_SAVE_MARK %d",pocketjs_guest_suspended(guest)?11:9);
+        vm_storage_leaving=true;
+    }
+#endif
     turn_continued=false;
     arm_turn(buttons);
     // L1 sec.2.1: a turn that ended with jobs queued finishes them HERE, ahead
@@ -792,7 +883,7 @@ esp_err_t app_tick(uint32_t buttons) {
     // a turn that began with an empty queue, and that is where it is read
     // below. The chain an exiting app is stuck in is bounded by the runaway
     // guard, not by this check.
-    if(pocketjs_guest_jobs_pending(guest)) {
+    if(pocketjs_guest_work_pending(guest)) {
         pocketjs_ui_frame_view_t cont={.struct_size=sizeof(cont)};
         // Timed into the same turn_ms as an ordinary turn: a continuation IS a
         // turn as far as the frame period is concerned, and leaving it out
@@ -805,7 +896,7 @@ esp_err_t app_tick(uint32_t buttons) {
         vmprobe_continuation_sample(guest);
 #endif
         if(ce) return ce;
-        if(!leaving && pocketjs_guest_jobs_pending(guest)) {
+        if(!leaving && pocketjs_guest_work_pending(guest)) {
 #ifdef CONFIG_POCKET_VM_FAIR
             // FAIR ORDERING (Kconfig POCKET_VM_FAIR, off in the shipping
             // build; docs/vm/vm-L1-report.md sec.9). The drain has yielded with
@@ -847,16 +938,20 @@ esp_err_t app_tick(uint32_t buttons) {
             // The unhandled-rejection report point is untouched as well: the
             // guest reports only where vm_sched_drain() returned EMPTY, which
             // is not this boundary.
-            buttons|=deferred_buttons; deferred_buttons=0;
-            run_pumps(buttons);
+            if(!pocketjs_guest_suspended(guest)) {
+                buttons|=deferred_buttons; deferred_buttons=0;
+                run_pumps(buttons);
+            } else {
+                deferred_buttons|=buttons;
+            }
 #else
             // Nothing new reaches JS this turn. The keys are held, not lost.
             deferred_buttons|=buttons;
 #endif
-            // sec.5.2. Not an uncatchable throw: the session ends at a job
-            // boundary, where no JavaScript frame is live, so this guard
-            // cannot skip a finally or strand an await the way the old
-            // wall-clock interrupt does.
+            // sec.5.2 plus the L2c frame guard: a timed-out suspended chain
+            // is terminated by pocket_app_reset() before stop-hook JS entry.
+            // A job boundary has no live chain; an opcode park can still have
+            // one, and termination there deliberately skips its finally.
             if(drain_runaway()) return ESP_ERR_TIMEOUT;
             continuation_turns++;
             turn_continued=true;
@@ -892,6 +987,12 @@ esp_err_t app_tick(uint32_t buttons) {
     // next to render_ms rather than hidden inside the frame period.
     int64_t turning=esp_timer_get_time();
     esp_err_t e=pocketjs_ui_turn(binding,&input,&frame);
+#ifdef CONFIG_POCKET_VM_SELFTEST
+    if(vm_storage_active && !vm_storage_parked && pocketjs_guest_suspended(guest)) {
+        vm_storage_parked=true;
+        ESP_LOGI("app","VM_SAVE_MARK 10");
+    }
+#endif
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
     report_oom_if_any();
@@ -903,6 +1004,56 @@ esp_err_t app_tick(uint32_t buttons) {
     if(e)return e;
     return present_frame(&frame);
 }
+
+#ifdef CONFIG_POCKET_VM_SELFTEST
+// Exercise the production Back path without writing user storage. The marks
+// stand for the save and its completion; they must precede both stop-hook parts.
+static unsigned vm_back_trace;
+static JSValue vm_back_mark(JSContext *ctx, JSValueConst self,
+                            int argc, JSValueConst *argv) {
+    (void)self;
+    int32_t mark=0;
+    if(argc && JS_ToInt32(ctx,&mark,argv[0])) return JS_EXCEPTION;
+    vm_back_trace=vm_back_trace*10+(unsigned)mark;
+    return JS_UNDEFINED;
+}
+static JSValue vm_back_request(JSContext *ctx, JSValueConst self,
+                               int argc, JSValueConst *argv) {
+    (void)self; (void)argc; (void)argv;
+    JS_VMRequestYield(JS_GetRuntime(ctx));
+    return JS_UNDEFINED;
+}
+void app_vm_back_selftest(void) {
+    bool ok=true;
+    const unsigned before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    for(int mode=0;mode<3;mode++) for(int aborting=0;aborting<2;aborting++) {
+        vm_back_trace=0;
+        esp_err_t err=app_start_test('M');
+        if(!err) {
+            JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+            JSValue global=JS_GetGlobalObject(ctx);
+            int installed=JS_SetPropertyStr(ctx,global,"vmMode",JS_NewInt32(ctx,mode));
+            installed|=JS_SetPropertyStr(ctx,global,"vmMark",JS_NewCFunction(ctx,vm_back_mark,"vmMark",1));
+            installed|=JS_SetPropertyStr(ctx,global,"vmRequest",JS_NewCFunction(ctx,vm_back_request,"vmRequest",0));
+            JS_FreeValue(ctx,global);
+            if(installed<0) err=ESP_FAIL;
+            if(!err) err=app_tick(0);
+            if(!err && (!pocketjs_guest_suspended(guest) || vm_back_trace!=1)) err=ESP_FAIL;
+            if(!err && !aborting) err=app_tick(0x2000);
+        }
+        app_request_stop();
+        app_stop();
+        const unsigned expected=aborting?156:123456;
+        bool passed=!err && vm_back_trace==expected;
+        ESP_LOGI("app","VM_BACK mode=%d abort=%d trace=%u expected=%u err=%d %s",
+                 mode,aborting,vm_back_trace,expected,err,passed?"OK":"FAIL");
+        ok &= passed;
+    }
+    const unsigned after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    ESP_LOGI("app","VM_BACK_%s free_before=%u free_after=%u",
+             ok?"OK":"FAIL",before,after);
+}
+#endif
 
 // The half of a turn that is not JavaScript: damage plan, strips, bus, and
 // the PAINT accounting. Split out for L1 because a CONTINUATION turn has no
@@ -967,4 +1118,3 @@ static esp_err_t present_frame(pocketjs_ui_frame_view_t *frame) {
 fail:
     pocketjs_rgb565_abort(renderer,target);return e;
 }
-

@@ -167,6 +167,13 @@ static QueueHandle_t keys;
 static atomic_bool stop;
 static atomic_bool capture;
 static atomic_int diagnostic;
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+extern void vmtest_callbench_device(void);
+extern void vmtest_callinputs_device(void);
+#endif
+#ifdef CONFIG_POCKET_VM_SELFTEST
+extern void vmtest_lifecycle_device(void);
+#endif
 // Whether the screen on show consumes typed bytes. Only the USB reading needs
 // it: the same byte is a menu direction on the home screen and a character
 // everywhere else.
@@ -209,6 +216,12 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // is not a method. Like every letter in this function it arrives over USB;
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+    if(c=='N'||c=='U') { atomic_store(&diagnostic,c); return false; }
+#endif
+#ifdef CONFIG_POCKET_VM_SELFTEST
+    if(c=='L'||c=='M'||c=='Y'||c=='Z') { atomic_store(&diagnostic,c); return false; }
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
     // VM probe workload triggers (docs/vm/quickjs-freertos-vm-spec.md sec.5),
     // USB-only and gated by CONFIG_POCKET_VM_PROBE so a normal build's key
@@ -216,6 +229,9 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // six workloads the same way '1'..'6' select the lifecycle diagnostics
     // above -- tools/vm_l0_capture.py drives these.
     if(c>='A'&&c<='F') { atomic_store(&diagnostic,c); return false; }
+    if(c=='X') { atomic_store(&diagnostic,c); return false; }
+    if(c>='G'&&c<='K') { vmprobe_segment_set((unsigned)(c-'G')); return false; }
+    if(c=='O') { vmprobe_segment_set(5); return false; }
     // The contention condition the NEXT workload runs under (sec.5's "fix the
     // UI / audio / communication contention"): 'P' + mask, so 'P' is base and
     // 'W' is all three. Sticky and separate from the workload letter, because
@@ -821,6 +837,29 @@ static void ui_task(void *arg) {
             framed:
             {
             int test=atomic_exchange(&diagnostic,0);
+#ifdef CONFIG_POCKET_VM_CALLBENCH
+            if(test=='N'||test=='U') {
+                if(!running && screen==SCREEN_HOME) {
+                    overlay_release();
+                    scene_mem_release();
+                    if(test=='N') vmtest_callbench_device();
+                    else vmtest_callinputs_device();
+                }
+                test=0;
+            }
+#endif
+#ifdef CONFIG_POCKET_VM_SELFTEST
+            if((test=='L'||test=='M') && !running && screen==SCREEN_HOME) {
+                overlay_release();
+                scene_mem_release();
+                if(test=='L') vmtest_lifecycle_device();
+                else {
+                    app_registry_select(APP_ID_DEFAULT);
+                    app_vm_back_selftest();
+                }
+                test=0;
+            }
+#endif
             // Runs in place of starting a guest: it needs no app, and holding
             // 6,480 bytes of scratch is only affordable while none is running.
             if(test=='8') { sound_check_tables(); test=0; }

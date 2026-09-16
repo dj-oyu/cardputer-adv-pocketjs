@@ -12,6 +12,7 @@
 // this adapter does.
 #include "vmalloc.h"
 #include "vendor/include/multi_heap.h"
+#include "vendor/tlsf/include/tlsf.h"
 #include <string.h>
 
 static multi_heap_handle_t g_heap;
@@ -42,6 +43,17 @@ static void tlsf_do_free(void *ptr, unsigned *out_steps) {
   multi_heap_free(g_heap, ptr);
 }
 
+static bool free_extent(void *ptr, size_t size, int used, void *opaque) {
+  (void)ptr;
+  vmalloc_stats_t *out = opaque;
+  if (!used) {
+    size += tlsf_alloc_overhead();
+    out->pool_free_bytes += size;
+    if (size > out->pool_largest_free) out->pool_largest_free = size;
+  }
+  return true;
+}
+
 static void tlsf_stats(vmalloc_stats_t *out) {
   multi_heap_info_t info;
   multi_heap_get_info(g_heap, &info);
@@ -49,6 +61,7 @@ static void tlsf_stats(vmalloc_stats_t *out) {
   out->free_bytes = info.total_free_bytes;
   out->largest_free_block = info.largest_free_block;
   out->blocks_used = info.allocated_blocks;
+  multi_heap_walk(g_heap, free_extent, out);
 }
 
 static int tlsf_do_check(void) { return multi_heap_check(g_heap, true) ? 1 : 0; }
