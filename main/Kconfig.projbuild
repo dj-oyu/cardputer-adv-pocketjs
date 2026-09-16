@@ -263,28 +263,4 @@ menu "Pocket VM (L0 measurement probes)"
             shared root sdkconfig or in sdkconfig.defaults. See
             sdkconfig.vmclockbench.defaults.
 
-    config POCKET_FX_BENCH
-        bool "Enable the per-call trig bench (main/scene/fxbench.c)"
-        default n
-        help
-            A throwaway bench for one question the frame instruments cannot
-            answer: what does one fixed-point sin/cos/tan call cost, against the
-            degree-5 polynomial implementation it replaced and against libm?
-            NOT part of any normal build, and it is the opposite of a size
-            change: it links sinf/cosf/tanf (compiler_builtins, 6,789 bytes)
-            back into the image to have something to compare against. On, this
-            compiles in:
-              - main/scene/fxbench.c: three arms x three functions, timed in one
-                binary round-robin over 15 rounds of 20,000 calls, with an empty
-                loop of the same shape subtracted, logging "FXBENCH ..." lines
-                (and the arms' divergence from libm, so a wrong arm cannot pass
-                as a cheap one).
-              - a key on the home screen: 'T' runs it and prints once.
-            The arms' polynomial is a copy of c66f401's file and
-            tools/test_fxmath_poly.c proves the copy bit-identical.
-            Same isolation rule as POCKET_VM_PROBE: give the build directory its
-            own -D SDKCONFIG=<dir>/sdkconfig, never enable this in the shared
-            root sdkconfig or in sdkconfig.defaults. See
-            sdkconfig.fxbench.defaults.
-
 endmenu

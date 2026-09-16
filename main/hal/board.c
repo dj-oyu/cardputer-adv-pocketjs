@@ -29,15 +29,21 @@ static i2c_master_dev_handle_t keyboard;
 // row start lands correctly once the base does.
 static uint16_t shared[LCD_W * STRIP_H] __attribute__((aligned(16)));
 uint16_t *board_strip(void) { return shared; }
-// TEMPORARY A/B switch for the asynchronous transfer below: 1 = queue the strip
-// and come back for its result on the next call (the shipping path), 0 = the
-// blocking polling transfer this file has always used. Both paths have to run in
-// ONE binary: the same kernel moves 15% between builds from instruction-cache
-// alignment alone (CLAUDE.md), and this change is smaller than that.
+// The A/B switch for the asynchronous transfer below: 1 = queue the strip and
+// come back for its result on the next call (the shipping path), 0 = the
+// blocking polling transfer this file has always used. Both paths are in ONE
+// binary because the same kernel moves 15% between builds from instruction-cache
+// alignment alone (CLAUDE.md), and the queued-vs-blocking question was smaller
+// than that.
+//
+// It is FIXED at 1 now. shell.c used to invert it once per 2-second PERF window
+// so adjacent windows of the same run were the two paths; that measurement is
+// done (docs/perf/pie-consolidation.md 3b: FLOWER draw 38.73 -> 33.30 ms, fps
+// 24.95 -> 28.80) and a shipped build must not spend every other window on the
+// path it rejected. The setter stays for the next A/B -- nothing calls it in
+// this build.
 int g_board_async = 1;
-// The same switch through a function, for the PERF report: shell.c flips it once
-// per window, which is how the queued path was measured against the blocking one
-// (docs/flower-decor-cost.md).
+// The same switch through a function, for the PERF report.
 int board_async_get(void) { return g_board_async; }
 void board_async_set(int on) { g_board_async = on ? 1 : 0; }
 // TEMPORARY A/B switch inside the queued path: 1 = byte-swap straight into the

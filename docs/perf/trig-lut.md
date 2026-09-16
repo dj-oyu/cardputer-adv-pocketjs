@@ -132,6 +132,11 @@ Rust/IDF/QuickJS が共有しているため消しても 0 B）だった。こ�
 
 ## 7. 実機で測った: 1呼び出しのコスト（2026-09-16、`POCKET_FX_BENCH`）
 
+> **この計器は計測の直後に削除した**（出荷ビルドにベンチを持たない、という判断）。
+> 数字はここに残る。実装は `git show dbe74cc:main/scene/fxbench.c`（Kconfig は
+> `POCKET_FX_BENCH`、`sdkconfig.fxbench.defaults`、ホスト側の移植証明は
+> `tools/test_fxmath_poly.c`）で復元できる。以下は当時の記録のまま。
+
 フレーム計器では測れない（この変更にスイッチが無く、期待値 0.05 ms は SPLIT3 の
 ノイズ床の下）ので、**1バイナリの中で1呼び出しを数えた**。`main/scene/fxbench.c`、
 区間 `CONFIG_POCKET_FX_BENCH`（`sdkconfig.fxbench.defaults`、既定 off）、
