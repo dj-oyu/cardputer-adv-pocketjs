@@ -26,25 +26,40 @@ Escで保存してホームへ戻ります。
 Esc時にはキャンセル前に0x2000の終了フレームを1度配送します。
 描画時刻はフレーム数ではなく単調時計を使用し、入力でフレーム数が増えても育成速度を変えません。
 
-`pocket.pet.place(index,x,y,mood)`で共有のペットオーバーレイを表示します。
-基本形3種・配色12組・模様だけの差分をPPT2形式にまとめ、画像データは7,601バイトです。
-同梱ペット／連携アプリではテクスチャを作らず、1行128バイトの作業領域で直接描画します。
-目の表情6種は図形描画、吹き出しは`pocket.pet.say(text)`で文字送りを表示します。
-英数字UIは`ui.replaceText`を使い、不要な日本語フォントアトラスの増加を避けます。
-旧`pocket.pet.show(node,index)`は互換用で、8 KiBの展開用一時領域と8 KiBのテクスチャが必要です。
-省メモリ目的では`place`を使ってください。表示位置は画面座標で、通常UIの上・通知の下に重ねます。
-ブラウザプレビューは同じJSと画像データを使いますが、実機のフォントとメモリ制約は再現しません。
+2026-09-17、`pocket.kasane`（Kasane）へ移植しました。旧`ui.createNode`/`setProp`/
+`insertBefore`/`replaceText`と旧`pocket.pet.place`/`say`/`show`オーバーレイは呼びません。
+`view.createScene({build,patch})`を1個所有し、`build`が固定トポロジ（タイトル・バッジ・
+パネル・地面・種名・状態・バー3本・フッタ・ヒント）を1回作ります。ペット画像と吹き出しは
+ロード成功後の`scene.invalidate(true)`による再`build`でトポロジへ加わります
+（未ロード中は旧UIと同様に何も出ません）。以降は`patch`が値だけ更新します。
 
-`pet.js`が作るノードは14個（View 5・Text 9）で、ルートを足してtaffy 15ノードです。
-バーの後ろにトラックを敷くと3個増えてtaffy 18になり、17〜33の段は連続29,648バイトを要求します。
-アプリ実行中の最大連続空きは実測23.5KiB程度なので確保に失敗し、Rustコアは
-報告せずabortするため、アプリが起動せず端末が再起動しました。taffy 16以下なら要求は2,048バイトです。
-`ui.createNode`で作れるのは15個まで（ルートと合わせてtaffy 16、段の上限）で、16個目は
-`pocket_ui.c`の`budget_ok()`が断ります。断られると`pet.js`は即時関数の途中なので評価が失敗し、
-`EVAL_ERROR`でホームに戻ります（再起動はしません）。
-実行時の回避策は入れていません。崖はノード数だけの関数なので、
-`tools/test_pet.cjs`と`tools/test_companion.cjs`の`createNode`モックがビルド前に止めます。
-段の値は`tools/uibudget`の`sweep`で確認でき、動いたらテストの定数も直します。
+ペット画像は`view.petImage()`で借りるopaque handleと`tx.image({resource,bounds})`、
+色・表情の更新は`ref.setImageFrame(tx,variant,frame)`です。variantが0–11の配色番号、
+frameが表情0–5で、旧`pocket.pet.place`の第1引数・第4引数とそれぞれ対応します。
+吹き出しは旧`pocket.pet.say`のネイティブオーバーレイに依存できないため
+（Kasaneが最初のsubmitで旧RGB565 rendererを解放し、以後そのオーバーレイは描画されない）、
+`tx.rect`の吹き出し本体1枚と`tx.text`＋`setReveal`で文字送りをJS側から再実装しました。
+枠と内側の二色塗りだった旧デザインは単色1枚に簡略化しています（`KSN-MISSING`参照）。
+英数字UIは`font:'caption'`で日本語フォントアトラスの増加を避けます。
+
+ブラウザプレビュー`preview.html`は旧`ui`/`pocket.pet.place/say`をモックしており、
+この移植後の`pet.js`とは非互換です（`pocket.kasane`を呼ぶため即エラーになります）。
+`pocket.kasane`のブラウザ側モックは未着手で、修正はこのコミットに含めていません。
+
+### Kasane missing
+
+移植時点でKasaneに無く、JS側で代替した／簡略化した点です。
+
+- `KSN-MISSING(text.animate)`: 文字列のreveal（文字送り）を進める native track が無く、
+  `patch`が呼ばれるたびにJSで経過時間から表示文字数を計算しています。旧`pocket.pet.say`は
+  ネイティブ側が70ms刻みで進めていました。
+- 吹き出しの二色塗り（外枠+内側ハイライト）は単色矩形1枚に簡略化しました。Kasane側の
+  制約ではなく、ゲストソースのバイト数予算（移植元以下を維持）を優先した判断です。
+
+旧`ui.createNode`で作っていたノード数上限（taffy段差）の節はKasane移植で意味を失った
+ため削除しました。Kasaneのcommand/text予算は`docs/kasane/design-api.md`の
+`KSN_APP_COMMANDS`(80)・`KSN_APP_TEXT_BYTES`(896)で、pet.jsの使用量はどちらも
+1/3未満です（命令17、文字予約252 B）。
 
 `assets/concepts.png`はこの会話で内蔵画像生成ツールを使って作成・承認された下絵です。
 最終指示: 「3行4列。猫は茶トラ・三毛・黒猫・濃紺にシアン／マゼンタのサイバーパンク。
@@ -60,8 +75,9 @@ Esc時にはキャンセル前に0x2000の終了フレームを1度配送しま�
 
 ネイティブ描画のソースは再編後の`main/pet/pet_pixels.c`、ヘッダー検索パスは`-Imain/pet`です。
 
-`node tools/test_pet.cjs`で選択、育成、名前、保存復元、時間経過、破損データ、保存失敗を確認。
-`node tools/test_companion.cjs`で連携アプリの切り替え、目覚まし、タイマーを確認します。
+`node tools/test_pet.cjs`は旧`ui`/`pocket.pet.place`APIをモックしており、Kasane移植後の
+`pet.js`とは非互換で失敗します（2026-09-17時点で未更新、要`pocket.kasane`モック書き直し）。
+`node tools/test_companion.cjs`（companion、未移植）は引き続き旧APIのままです。
 `tools/test_pet_pixels.c`はホストCコンパイラーで`main/pet/pet_pixels.c`とリンクし、
 引数に`apps/pet/assets/pets-compact.bin`を指定すると全画素・表情・クリップ境界を確認できます。
 `idf.py -B build_pet_compact build`で専用ディレクトリにビルドします。
