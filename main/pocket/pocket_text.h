@@ -10,7 +10,7 @@
 // The field is the HOST's: main.c takes the keystrokes away from the guest for
 // as long as a session is open, main/text/textfield.c decides what each one
 // means, skk_session.c converts, and app_session.c composites the result over
-// the guest's own frame in the same strip loop pet_assets.c draws into. The
+// each band Kasane has just drawn, before it goes down the bus. The
 // guest sees committed text and nothing else -- no keystrokes, no preedit, no
 // buffer. That is not an implementation detail; it is the first sentence of the
 // paragraph this file implements.
@@ -23,7 +23,7 @@
 // callback fired straight out of a keystroke is on the right task already.
 
 // pocket.input.text.open. Registers the input.text capability and contributes
-// to the lazily-built `input` namespace pocket_ui.c also feeds.
+// to the lazily-built `input` namespace pocket_input.c also feeds.
 esp_err_t pocket_text_install(JSContext *ctx, void *user_data);
 
 // Closes any open session WITHOUT firing onCancel -- there is nobody left to
@@ -58,6 +58,6 @@ void pocket_text_pump(void);
 bool pocket_text_take_dirty(void);
 
 // Composites the field into one strip of the guest's frame. Called from
-// app_tick()'s strip loop after the renderer and pet_assets_overlay(); a no-op
+// app_session.c's Kasane present port after the band is rendered; a no-op
 // when no session is open, which is every frame of every other app.
 void pocket_text_overlay(uint16_t *pixels, int y, int rows);

@@ -8,9 +8,9 @@
 //
 // This is stage A of that document and covers only the shared foundation:
 // apiVersion, device.info, capabilities and cancel, plus the PocketError shape
-// every later API is expected to reject and throw with. Nothing here replaces
-// the existing ui.createNode globals; those keep working as legacy-pocketjs and
-// are untouched.
+// every later API is expected to reject and throw with. The legacy
+// ui.createNode globals this once sat beside have been removed from the
+// firmware; drawing is pocket.kasane's.
 //
 // Everything in this header runs on the JS owner task. The registry itself is
 // plain data and may be filled in from any task before a session starts, but
@@ -139,7 +139,7 @@ bool pocket_api_supported(const char *name);
 // Adds to a namespace that is being built. `ns` is the object the property will
 // become; fill it in and return ESP_OK. It is NOT owned by the contributor and
 // must not be freed. More than one contributor may register the same name --
-// pet_hub.c makes pocket.pet and pet_assets.c adds to it -- and they run in the
+// pocket_input.c makes pocket.input and pocket_text.c adds to it -- and they run in the
 // order they registered.
 //
 // Return anything but ESP_OK when the namespace cannot be built: the partial

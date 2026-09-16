@@ -16,8 +16,8 @@ esp_err_t app_start_test(char test);
 void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
 
 // docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the
-// background rather than instead of it. It gets no Rust UI core, no font atlas
-// and no rgb565 renderer -- see pocket_overlay.h -- and a guest heap sized for
+// background rather than instead of it. It gets no Kasane display -- see
+// pocket_overlay.h -- and a guest heap sized for
 // what is left while a scene is drawing rather than for an empty machine.
 //
 // The bytes must outlive the start, as with app_start_source().

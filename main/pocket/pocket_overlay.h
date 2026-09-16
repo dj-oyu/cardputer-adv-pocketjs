@@ -10,9 +10,10 @@
 //
 // WHY THIS IS NOT ui.basic, which is what 3.1 names.
 //
-// ui.basic is pocket_ui.c, which is built on globalThis.ui, which is the Rust
-// UI core and the rgb565 renderer. Two properties of that path make it the
-// wrong one for something that lives ON TOP of the home screen's background:
+// When this was written, ui.basic was pocket_ui.c, built on globalThis.ui, the
+// Rust UI core and the rgb565 renderer (all since removed from the firmware).
+// Two properties of that path made it the wrong one for something that lives
+// ON TOP of the home screen's background:
 //
 //   * render_strip fills its region with 0 before it draws anything
 //     (engine/backends/rgb565/src/lib.rs, the fill_rgb565(.., 0) before

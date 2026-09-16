@@ -22,8 +22,8 @@ static uint32_t alert_id,alert_owner;
 static bool overlay_suppressed;
 void pet_hub_overlay_suppress(bool suppress){overlay_suppressed=suppress;}
 uint16_t pet_hub_selected(void){return (uint16_t)hub.saved.selected;}
-#include "pet_assets.h"
 #include "pet_pixels.h"
+extern const uint8_t pet_compact_start[] asm("_binary_pets_compact_bin_start");
 static uint64_t now_ms(void){return esp_timer_get_time()/1000;}
 static uint32_t read32(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static uint32_t utc_now(void) {
@@ -249,7 +249,6 @@ static const pocket_limit_t pet_limits[]={
     {.name="maxLabelChars",   .kind=POCKET_LIMIT_INT,.number=PET_LABEL_CHARS},  // notify() and alarm()
     {.name="maxTimerIdChars", .kind=POCKET_LIMIT_INT,.number=PET_ID_CHARS},
     {.name="maxAlarmSeconds", .kind=POCKET_LIMIT_INT,.number=604800},
-    {.name="maxSpeechChars",  .kind=POCKET_LIMIT_INT,.number=PET_SPEECH_CHARS}, // pet_assets.c say()
     {0},
 };
 // Without NVS the hub keeps nothing and drops every usage frame, so rewards()
@@ -262,19 +261,31 @@ static void pet_probe(const pocket_capability_t *cap,bool *available,const char 
 }
 static const pocket_capability_t capability={.name="pet.companion",.supported=true,
     .available=false,.reason=PET_REASON_NO_STORAGE,.limits=pet_limits,.probe=pet_probe};
-// pet_assets.c contributes to the same namespace, second, so the eight methods
-// here are defined before its four -- the order the object had when one file
-// built it and the other reached in afterwards.
+// Milliseconds on the monotonic clock. The apps pace their animation and
+// autosave by it, so it is a plain reading rather than wall time.
+static JSValue now_read(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
+    (void)self;(void)argc;(void)argv;
+    return JS_NewFloat64(c,esp_timer_get_time()/1000.0);
+}
+// The sprite, speech-bubble and texture methods (place/say/show) drew through
+// the legacy renderer and went with it; the apps draw the pet through
+// pocket.kasane.petImage() instead.
 static esp_err_t build_pet(JSContext *ctx,JSValueConst ns,void *user) {
     (void)user;
     JSValue pet=(JSValue)ns;
 #define FN(name,func,n) JS_SetPropertyStr(ctx,pet,name,JS_NewCFunction(ctx,func,name,n))
     FN("select",select_pet,1);FN("rewards",rewards,1);FN("clock",clock_read,0);
     FN("wake",wake,2);FN("alarm",alarm_set,3);FN("notify",notify,1);FN("usage",usage,1);FN("timer",timer_read,1);
+    FN("now",now_read,0);
 #undef FN
     return ESP_OK;
 }
 esp_err_t pet_hub_install(JSContext *ctx,void *unused) {
     (void)unused;pocket_api_register(&capability);
+    // Eager and outside the namespace: Pocket Pet calls it directly, so reading
+    // the clock must not build pocket.pet.
+    JSValue global=JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx,global,"__petNow",JS_NewCFunction(ctx,now_read,"__petNow",0));
+    JS_FreeValue(ctx,global);
     return pocket_api_lazy(ctx,"pet",build_pet,NULL);
 }

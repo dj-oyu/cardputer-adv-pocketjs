@@ -373,9 +373,9 @@ void pocket_text_key(const keystroke_t *k) {
 // ---------------------------------------------------------------- the overlay
 //
 // Drawn into the guest's own strips, after the renderer has filled them: this
-// is "ホスト所有の小さな編集欄を画面へ合成する" and it is the same seam
-// pet_assets_overlay() uses, for the same reason -- one strip buffer exists on
-// this board and the frame is already in it.
+// is "ホスト所有の小さな編集欄を画面へ合成する", drawn at the one seam where
+// a band exists in memory -- one strip buffer exists on this board and the
+// frame is already in it.
 
 // How far the text is scrolled left so the cursor stays inside the box. Kept
 // across frames because it must not jitter while a wide character is typed.
@@ -751,7 +751,7 @@ static const pocket_capability_t text_capability = {
 
 // ------------------------------------------------------------------ install
 
-// A second contributor to `input`; pocket_ui.c registered the first, and
+// A second contributor to `input`; pocket_input.c registered the first, and
 // contributors run in the order they registered. Neither file has to know what
 // the other put on the namespace.
 static esp_err_t build_text(JSContext *ctx, JSValueConst ns, void *user) {
