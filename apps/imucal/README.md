@@ -78,3 +78,28 @@ flash**. Measured on the device: a 7,228-byte source leaves the guest at 104,244
 bytes of its 131,072 limit; at 8,406 bytes it fails to evaluate at all. Linking
 Wi-Fi took about 37 KB of DRAM and that headroom went with it. This document
 exists so the reasoning does not have to live inside the budget.
+
+## Kasane port (CP19)
+
+`imucal.js` uses `pocket.kasane` (`view.createScene`, `tx.text`, `tx.roundRect`,
+`ref.setText`) instead of the legacy `ui.createNode`/`setProp`/`insertBefore`.
+Every field the app ever draws (`head`/`live`/`stat`/`spin`/`foot`) is declared
+once in the `F` table with its Kasane `capacity` (UTF-8 reserved bytes); `say()`
+only marks the scene dirty when the string actually changes, same as the old
+`shown` cache. The one required behavior change: Kasane never renders on its
+own, so `frame()` must call `scene.flush(state)` every turn (including the
+`NO_IMU` early-return path) to drain the submission — the legacy immediate-mode
+`ui.setText` never needed that pump.
+
+Text uses the default font (`body`) everywhere instead of the legacy single
+built-in font, since that is the closest Kasane size to the original ~10-12px
+row heights; there is no attempt to reproduce the old renderer's metrics pixel
+for pixel.
+
+Nothing needed for this port is missing from `pocket.kasane`: no key/ESC
+handling, no text input, and no animation are used by this app, so CP15
+(scope/focus) and CP16-18 (textfield/animation) are not blockers here.
+
+### Kasane missing
+
+None. Grep for `KSN-MISSING` in this file — there are no matches.
