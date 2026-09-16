@@ -40,6 +40,13 @@
 （動く画素 ≤0.1% かつ最大段差 ≤1）に入らず、9,104 B/2,276 エントリでも 32 画素・段差 11 だったため
 **2次補間が採用条件**。掃引表と決定の記録は [trig-lut.md](trig-lut.md)、生成器は `tools/gen_fx_lut.py`。
 
+**VM の中断・復帰（`codex/vm-improve` の3本、2026-09-16 追加）**: QuickJS VM の中断と遅延復帰
+（L2c stage 3a）＋ `tools/vmtest` の整備（segment growth / tco / async audit / build failures /
+callbench / device runaway / runner retry、`vmrun.c` の再試行）。`main/` は CMakeLists・
+Kconfig.projbuild・app_session・main.c・pocket_app・vmprobe の6ファイル。この枝での検証は
+ビルド rc=0 と `tools/vmtest/run.sh --variant o2` の **68 passed / 0 failed**（bin +512 B、
+実機は未確認）。設計と実測の記録は `docs/vm/vm-L2-design.md` / `vm-L2-results.md`。
+
 ## §2 この枝で実際に走らせた検査（実機なし・2026-09-16）
 
 ファーム:
