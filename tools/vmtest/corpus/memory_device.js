@@ -20,7 +20,13 @@ function tryBig(label, f) {
   catch (e) { print(label, e === null ? "null" : e.constructor.name + ": " + e.message); }
 }
 tryBig("string-oom", () => "x".repeat(1 << 20));
-tryBig("array-oom", () => new Array(1 << 18).fill(0));
+// Not `new Array(1 << 18).fill(0)`: that grows the array 1.5x at a time and
+// creeps up on the limit before the growth that fails (measured on the host,
+// device profile: 163,452 of 163,840 B charged at the rejection), so whether
+// the InternalError could still be allocated was a byte-margin coincidence;
+// the charged sizes moving with backlog #9 turned it into `null`. apply()
+// builds its argument array in one request (host: 960,000 B).
+tryBig("array-oom", () => Array.apply(null, { length: 60000 }));
 tryBig("buffer-oom", () => new Uint8Array(1 << 20));
 
 // And the runtime works after them.

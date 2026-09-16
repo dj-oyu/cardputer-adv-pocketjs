@@ -180,7 +180,8 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 | `job_throw.js` | ジョブが例外を投げた drain の早期復帰と、残りが次の drain に回ること |
 | `error_toplevel.js` | トップレベルの未捕捉例外。drain されずキューが残ること |
 | `memory_device.js` | 160 KiB 下での参照カウント解放、大きな単発確保の OOM が InternalError として捕捉でき回復すること |
-| `gc_threshold_device.js` | **現行設定の性質**: 循環ゴミが上限まで溜まること（後述） |
+| `gc_threshold_device.js` | backlog #5 の回帰: 160 KiB 下で循環ゴミを 100,000 個作っても OOM にならず完走すること（修正前は数百個で OOM） |
+| `gc_threshold_near_limit.js` | backlog #5 の回帰（上限寄り）: 上限の約 3/4 が生存した状態でも循環ゴミが回収されること。初期閾値を下げるだけでは OOM になる |
 | `budget_frame_boundary.js` | 予算が drain を切っても `frame()` が drain の**中**に入らないこと。eval が積んだ連鎖の最後の出力と `frame 1` の間に境界がある |
 | `budget_completions.js` | 継続ターン中に記録された完了が、落ちず・重複せず・要求順に・**キューが空になったターンでだけ**配送されること |
 | `budget_starve.js` | 毎ターン 41 件積んで予算 8 件でも、次の `frame()` までに必ず片付くこと（1 フレーム 1 連鎖で遅れない） |
@@ -246,7 +247,7 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 いずれも実測(host)。実機の値ではない。
 
 - **再帰の深さ**（`#info max_depth`）: 7 MiB スタックで o2 11,187 段 / asan 6,370 段。実機と同じ 20 KiB の上限では o2 **29 段** / asan 16 段、`map` のコールバック経由では o2 11 段。ホストのフレームは Xtensa のフレームと大きさが違うので実機の段数は分からないが、実機の上限（`gc.stack_limit=20*1024`、ui タスクのスタックは 32 KiB）はホストの既定よりはるかに小さい。実機での段数は未計測。
-- **実機設定では循環ゴミが回収されない**: quickjs-ng の `malloc_gc_threshold` の初期値は 256 KiB（`quickjs.c` の `JS_NewRuntime2`）で、firmware はどこでも `JS_SetGCThreshold` を呼ばない。一方ゲストの上限は 160 KiB なので、自動の循環回収は上限より先に来ない。`gc_threshold_device.js` のトレースには `# gc` が 1 行も無く、2 オブジェクトの循環 265 個で OOM になる（host プロファイルでは `bench_alloc` で GC が 296 回走る）。上限超過で GC をやり直す経路も無い。実機で同じことが起きるかは未確認だが、閾値と上限の大小関係はコードで確定している。
+- **循環ゴミの回収（backlog #5、2026-09-16 修正）**: quickjs-ng の `malloc_gc_threshold` は初期値 256 KiB・GC 後は生存量の 1.5 倍で、ゲストの上限 160 KiB より先に来なかった（修正前は `gc_threshold_device.js` のトレースに `# gc` が 1 行も無く、循環 262 個で OOM）。修正は 2 か所: `guest.c`（と写しの `vmrun.c`）が初期閾値を上限の半分へ下げ、`quickjs.c` の `js_gc_effective_threshold` が比較時に閾値を「上限 − 上限/32」で頭打ちにする。host プロファイル（64 MiB）では両方とも効かず、上流の時機のまま。記録は `docs/vm/vm-L2-results.md` §4.19。
 - **OOM 時の use-after-free（上流の不具合）**: 例外のバックトレースを組み立てる途中でヒープが尽きると、`build_backtrace()` の DynBuf が `js_dbuf_realloc` → `js_realloc` → `JS_ThrowOutOfMemory` を呼び、`JS_Throw` が現在の例外（= 組み立て中の `error_val`、借用参照）を解放し、続く `can_add_backtrace()` が解放済みオブジェクトを読む。ASan で検出（`known/oom_backtrace_uaf.js`、`vmrun-asan --profile device` で再現）。上限にじわじわ近づく OOM で起きうるので、実機でも起きる経路。o2 では何事もなく進むように見える。`known/oom_backtrace_uaf.js` は**1 バイトでも変えると再現しなくなることがある**（ソース長が残りの余裕を変える）。コーパスの OOM は余裕が残る単発の大きな確保に限った。`gc_threshold_device.js` もじわじわ型なので、L2 以降でこれが `build_backtrace` の ASan 報告で落ちたら、まずこの不具合を疑う。
 
 ## ビルドの注意
@@ -260,7 +261,7 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 - **L2a のセグメントは asan 版で毒を塗る**: `quickjs-vmstack.h` は ASan ビルドでセグメントの空き領域を `__asan_poison_memory_region` で毒にし、push した分だけ解毒、pop で再び毒にする。返却済みフレームへの生ポインタ（`close_var_refs` が閉じ損ねた `JSVarRef`、死んだフレームを歩くウォーカー、呼び出し先の argv を持ち越した呼び出し元）は、コーパスと Test262 の asan 走行で use-after-poison として鳴る。台帳07 §6 が「確保履歴では検査できない」と書いた、実物のフレームに対する検査がこれ。o2 と実機では何も展開されない。
 - **セグメント境界の総当たり**: `VMTEST_VMRUN_FLAGS="--vm-seg-size N" run.sh` でセグメントサイズを変えてコーパスを回せる（期待値は同じ。サイズは観測できてはならない）。L2a 評価では o2 で 16〜1024B を 8B 刻み（`js_vm_stack_configure` が 16 の倍数へ切り上げるので実効は 16 刻み）、asan で 16 / 88 / 136 を回した。
 - **pop の鍵はフレームを push したかどうかで、`b->func_kind` ではない**: モジュール本体の関数は `__JS_EvalInternal` が `JS_FUNC_ASYNC` として組むが、`js_inner_module_linking` が hoisting 済み宣言の初期化のために `JS_Call(ctx, m->func_obj, JS_TRUE, 0, NULL)` で通常経路から呼び、`done_generator:` に抜ける（L2a 時点では「モジュール内の直接 `eval`」と書いていたが、H7 の実験で主語が違うと分かった。設計 §10.1。直接 `eval` は `JS_FUNC_NORMAL`）。`func_kind` で pop を決めると、この 1 フレームが積まれたまま残り `JS_FreeRuntime` の assert で落ちる（Test262 `language/eval-code/direct/export.js` / `import.js` が見つけた）。`flags` も opcode がスクラッチに使うので鍵にできない。鍵は `js_vm_stack_holds()`（`sf` が先頭セグメントの生存範囲にあるか）。C ローカルで覚える版は G1 が 528→544 B/段に増えた（実測(host) o2）ので採らなかった。
-- **`gc_threshold_device.js` はヒープの残量に敏感で、L2a では条件によって落ちる**: `run.sh --trace` の asan 走行、および `--vm-seg-size 2048` の o2 走行で、OOM を catch した後の `print` 自体が OOM して `null` が未捕捉になる（`cycles-exhaust-heap true` の後に `null` が 2 行、exit=1）。常駐セグメント（ホストで 4,143B）がジワジワ型 OOM の「残り」を変えるためで、メモリ破壊ではない（同じ変更で alloca 版は通る）。通常の `run.sh`（4 バリアント）では通る。`--trace` でトレースを採るときはこの 1 件の FAIL を織り込むこと。
+- **`gc_threshold_device.js` はヒープの残量に敏感だった**（backlog #5 の修正前）: 上限までジワジワ OOM させる形だったため、`run.sh --trace`（asan）や `--vm-seg-size 2048`（o2）で catch 後の `print` 自体が OOM した。修正後は OOM に至らないのでこの脆さは無い。`gc_threshold_near_limit.js` は前半でヒープを OOM まで埋めるが、1/4 を解放してから出力する。
 - オブジェクトは `quickjs-ng/*.c`・`*.h`・`build.sh` のいずれかが新しければ作り直す。
 
 ## 同一バイナリの呼び出し比較

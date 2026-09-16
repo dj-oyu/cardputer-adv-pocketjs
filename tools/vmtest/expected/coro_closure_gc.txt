@@ -1,0 +1,6 @@
+async-closure function
+async-arguments 123
+generator-cycle true 2
+async-generator-closure 7
+async-generator-cycle 7 2
+exit=0
