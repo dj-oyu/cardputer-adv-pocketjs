@@ -2,6 +2,7 @@
 
 2026-09-13。実装前の仕様。機械可読の型は[design-schema.json](design-schema.json)、記述例は[design-example.json](design-example.json)。
 共通の描画契約は[デザインシステム仕様](design-system.md)に従う。
+v0.2の重なり・透過・cache・modal・effectsは[合成仕様](design-composition.md)で定義する。本書とJSON Schemaはv0.1の交換形式として残し、新要件の全機能を表せるとはしない。
 JSON Schemaは型・必須項目の検証用であり、コンパイラや端末上のローダーはまだ実装していない。
 例はペットとすりガラスモーダルの表現を示す縮小例で、既存ペットアプリの全機能を置き換えるものではない。
 
@@ -35,7 +36,7 @@ QuickJSへJSON全体、token辞書、不要画面を常駐させない。ソー�
 | budget | 当該画面とモーダル遷移時に守る最大使用量 |
 
 色は`#RRGGBBAA`または`@color/name`。token値はリテラルだけで、参照連鎖や継承を作らない。
-透明度は色のalphaで指定する。複数命令の合成グループへのopacity指定は用意しない。
+このv0.1形式では透明度は色のalphaで指定し、合成グループへのopacityフィールドは持たない。v0.2の必須グループopacityは後続形式と生成器で追加する。
 rect/clipは整数の`[x0,y0,x1,y1]`。clip省略は画面全体。visible省略はtrue。
 spacing/radiiは共通語彙であり、自動paddingを適用しない。panelの内側へ文字を置く座標も明示する。
 未知propertyは拒否し、CSS互換の曖昧な指定を黙って無視しない。
@@ -73,6 +74,8 @@ from/toは元座標からのoffset。onceは終端保持、loopは同じ区間�
 色・opacity・revealのnative演出も、型と必要な検査を定義した後にスキーマへ追加する。
 
 ## 5. すりガラスモーダル拡張
+
+本節は任意のfrosted-staticに限る。必須のsolid/dim-live、明示capture handle、入力scopeの遷移はv0.2合成仕様に従う。
 
 `frosted-static`はv0.1の任意機能。汎用blur命令とは分け、背後の画面全体を静止した縮小画像として保存する。
 モーダルを開く時点の背景を帯単位で再合成し、縮小→ぼかし→拡大→tintの順に処理する。

@@ -438,3 +438,11 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
     return e;
 }
+
+esp_err_t board_present_sync(int y, int rows, uint16_t *pixels) {
+    esp_err_t e=tx_reap();
+    if(e==ESP_OK) e=board_present(y,rows,pixels);
+    if(e==ESP_OK) e=tx_reap();
+    if(e!=ESP_OK) next_row=-1;
+    return e;
+}

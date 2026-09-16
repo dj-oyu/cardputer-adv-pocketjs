@@ -1,0 +1,740 @@
+# Kasane実装記録
+
+実機確認方針（2026-09-15更新）: ユーザーから実機利用可能の連絡を受け、COM3での
+書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
+各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
+
+## checkpoint 14f — Taffyなしフルシステム受入試験（2026-09-16）
+
+- `tools/system_full_test.py`を追加。System host、Kasane native/JS、専用KSN_ONLY build、
+  Taffy排除監査、flash、実機animation/通知圧力/既定100回lifecycleを一つの入口で実行。
+- 存在しないlegacy sourceを指定し、component/map/ninja/compile commands/ELFを監査。
+  監査失敗ならflashせず停止する。host-onlyは明示的な部分成功でFULL_PASSにはしない。
+- report.jsonにcommit/開始時差分/command/exit code/時間/firmware SHA-256/全cycleメモリ。
+  段階別ログ・captureを保持し、失敗時もprobe回収/HOME復帰を試みる。
+- 実行器と混入監査の9試験PASS。初回runはIDF出力回収の停止でFAILとして保存し、
+  `--no-hints`直接実行経路で再実行。仕様と範囲は[system-full-test.md](system-full-test.md)。
+- `.cache/system-full-20260916-r2/report.json`: FULL_PASS、全10段階成功。新規build213.969秒、
+  実機animation18.953秒、通知7.922秒、100回lifecycle78.141秒。
+- 100回すべてfree256,536 / largest81,920 B、終了時JS=0。送信前captureの通知重なりも確認。
+  実LCD/音声の物理確認、SNTP実時刻変更、sleep電流は対象外としてreportへ明記。
+- firmware SHA-256: `1ce385522c412ae7f96f1e029a1132e5fcdd35d3747ca49176264b43a7719ecf`。
+
+## checkpoint 14e2 — 壁時計・usage期限・鳴動の移管（2026-09-16）
+
+- `sys_wall`が固定5規則をSystem ownerで実行。時計/設定変更、期限到来、blocked通知の
+  状態変化で再評価し、PetHubの毎frame時刻変換・期限走査を撤去。
+- usage resetは期限超過をcatch-up、毎朝は指定分のみ。発火済み日以前への巻戻しで
+  二重発火しない。通知満杯では発火済みにせず、毎朝の指定分終了後は遅延発火しない。
+- NVS配置不変。native永続領域への固定bindingを使い、登録成功でwatermark更新→
+  PetHubがchangedを取り出して保存。wire検証・報酬処理はPetHubのdomain責務として維持。
+- `sys_ringer`へ30秒/2秒の鳴動期限を移管。tone権をpollし音声portが再生する。
+  遅延分を連打せず、snooze中にpollできなくても再表示時に新しい期間を開始。
+- 両サービスの期限をSystem待機へ統合。追加heap/taskなし、System状態全体に2 KiB static_assert。
+- System/実QuickJS host試験ASan/UBSan・O2 PASS。小数秒、期限超過、日付巻戻し、満杯・
+  指定分終了、snooze未poll区間、極大watermarkを検証。既存wire/報酬/タイマー回帰もPASS。
+- 通常/Kasane-only buildとlink監査PASS。DIRAM138,108 / 136,748 B（前段階比+144 B）。
+  System owner状態1,208 B。旧PetHub鳴動state16 Bを撤去。
+- COM3書込み後、通知8+1・満杯snooze拒否・ACK後timer retry・snooze・消去の実機試験PASS。
+  `.cache/system-wall-device`。Kasane起動終了2回はfree256,536 / largest81,920 Bで一致
+  （`.cache/system-wall-cycles`）。前回とのfree差を今回の静的RAM削減とは解釈しない。
+- 実時計を書き換える実機alarm試験や鳴動音の収録は未実施。時刻補正・指定分・鳴動周期は
+  hostの実装直接試験で確認し、実機では既存通知経路との統合回帰を確認した。
+
+## checkpoint 14e1 — System期限とowner待機（2026-09-16）
+
+- 時計更新要求と通知/timerの未publish変更は即時、通知・timer・電源の期限は最小値へ集約。
+  未poll dirtyと満杯blocked timerをready扱いせず、不要な再起床を防ぐ。
+- 既存native待機・VM frame-cap待機へ統合。SNTPはpublish後に既存counted wakeへ通知。
+  tick端数は切り上げ、極大期限はoverflowせず既存wait上限へ制限する。
+- 追加task/queue/stackなし。VMの公平性yieldと最小周期を維持。HOME等の周期停止や
+  PetHub壁時計alarm/usage/鳴動の期限化は未完了であり、端末全体の無周期化ではない。
+- System/実QuickJS host試験ASan/UBSan・O2 PASS。60秒無期限、未poll dirty、時計要求、
+  timer/snooze、電源購読解除、満杯timerのACK再試行、tick切上げ・極大値を検証。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,964 / 136,604 Bで増加なし。
+- COM3に書込み、`system_device_test.py --kasane`の満杯/ACK/retry/snooze/消去PASS。
+  続くKasane起動終了2回はfree255,848 / largest81,920 Bで一致。
+  `.cache/system-deadline-device`と`.cache/system-deadline-cycles`に記録。
+  SNTPの実機到着競合・遅延や端末全体の静止wake数は今回の実機試験では測定していない。
+
+## checkpoint 14d2 — 録音SYSTEM部品（2026-09-16）
+
+- `ksn_recording_emit`を追加。pad、常時赤色dot、6段の対数レベル表示を8矩形で表現。
+  heap、文字、画像resourceは使わず、通知の後に同じSYSTEM transactionへ追加できる。
+  通知5命令との同時表示は13/16命令。クリッピングは最上段のみamber。
+- active、量子化済みlit（0..6）、clippingのsnapshotを受け、マイクや時計へ依存しない。
+  全14状態のpad内360画素を独立RGB565期待値と照合し、通知復元と入力範囲も検査。
+- H全体ASan/UBSan・O2、通常/Kasane-only build PASS。実アプリの録音状態接続は次段階。
+  現時点では録音表示の既存board overlayを維持する。
+
+## checkpoint 14d1 — Kasaneアプリ上のSYSTEM通知（2026-09-16）
+
+- `ksn_notice_emit`が通知snapshotから5命令/文字41 Bを追加。pet画像はSYSTEM resource、
+  他のSYSTEM部品と共通transactionへ合成できる。文字/descriptorの借用は呼出中のみ。
+- Kasaneアプリでは通知の追加/変更/除去をSYSTEM REPLACEへ接続。APP提出中はBUSYで待ち、
+  転送失敗時はcandidateを保持。表示成功後に通知id/選択petを確定する。
+- APP寿命に限定したSYSTEM endpointを借り、通知のためにruntimeをpinしない。
+  明示的native SYSTEM ownerが存在する場合は上書きせず既存overlayへ戻す。
+  native HOME等はまだboard overlay経路。全native画面のKasane所有は後続工程。
+- Kasane転送中だけ旧pet overlayを抑止し、二重描画を防止。SYSTEM更新でJS turnを
+  不要にスキップしない。通知stateはAPP終了後もSystem側で保持される。
+- Hと実QuickJS ASan/UBSan・O2 PASS。文字コピー、APP BUSY、quota、IO再試行、表示除去、
+  independent poll、10回APP終了と失敗中の終了でnative全回収、別SYSTEM ownerとの非干渉を検査。
+- 通常/Kasane-only buildとlink監査PASS。DIRAM137,964 / 136,604 B。
+- COM3実機`system_device_test.py --kasane` PASS。SYSTEM 5命令で動くAPP上へ合成し、
+  8+1満杯、snooze拒否、ACK後timer再試行、snooze、消去後SYSTEM 0命令を確認。
+  `.cache/system-runtime-kasane-notice/notice.png`で送信前画素を確認（パネル目視とは区別）。
+- 実行中free129,868→129,708 B、largest79,872 B。JS実行中の160 B変動を含む。
+  終了後の再起動/終了2回はfree255,848 / largest81,920 Bで一致し、通知状態も全件0。
+
+## System統合の実機診断（2026-09-16）
+
+- probe限定USB N/O/Zと`tools/system_device_test.py`を追加。診断ownerのみを生成・回収しNVS不変。
+- 通常/Kasane-only build・link監査PASS。probe追加後DIRAM137,964 / 136,604 B。
+- 実機PASS: 8待機＋1表示、満杯snoozeのACTIVE維持、ACK後のblocked timer再試行、
+  snooze成功（active1/queued6/snoozed1）、cleanup後全件0。
+- `.cache/system-runtime-device/serial.log`と`notice.png`。実機送信前ピクセルに
+  SYSTEM NOTICE、ペット、確認/snooze案内を確認。パネルそのものの目視確認とは区別する。
+- 診断中のfree240,404 / largest69,632 Bは一定。HOME背景scratchを保持する時点の値であり、
+  前景APP終了後の値とは直接比較しない。通知は現行board overlay経路で描画し、
+  Kasane SYSTEM presenterへの置換は次段階。
+- 診断後Kasaneアプリ2回起動/終了PASS。終了後free255,848 / largest81,920 Bが両回同値。
+
+## checkpoint 14c2 — 共通相対timer・満杯再試行（2026-09-16）
+
+- `sys_timer`へ4件固定の期限・owner/key・labelを抽出。store240 B、pethubの旧224 B配列を撤去。
+- 満杯時のdueを保持し、blocked期限はNEVER扱い。通知state変更で再試行し、未来timerは
+  自分の期限で起床候補を維持する。SYS_TIMER dirtyを追加しSystem ownerへ接続。
+- ASan/UBSan・O2で4枠、owner分離、更新/取消、満杯保持、60秒相当の再試行停止、
+  容量解放後の受付とpethub互換を検査。System adapterから発火/dirty配送する試験もPASS。
+- 時計208＋通知600＋timer240＝1,048 B。共通runtimeの2 KiB予算内。
+  旧NVSスキーマ・壁時計alarm・鳴動adapterは維持。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,948 / 136,588 B（+16 B）。
+  `pet.timer()`の残り時間もowner別snapshotへ接続済み。
+
+## checkpoint 14c1 — 共通通知state・pethub接続（2026-09-16）
+
+- `sys_notify`を追加。9件固定、FIFO、ACTIVE、8待機枠、snooze、TTL、owner/key重複抑制、
+  owner解放、process ID枯渇時FULLを実装。snapshotはコピー、期限なしのstepは走査しない。
+- System adapterが600 Bのstoreを所有し、SYS_NOTIFYへdirtyを配送。
+  pethubから旧待機配列208 Bを撤去し、表示/確認/5分snoozeを明示的な通知stateへ接続。
+- ASan/UBSan・O2で8+1容量、満杯snoozeのACTIVE維持、TTL、ID/順序枯渇、100回owner解放、
+  独立dirty、60秒相当の静止、pethub packet/保存対象状態/相対timer/朝alarmの互換を検査。
+  既存System時計・JS電源/時計試験もPASS。
+- 終端idはGONE。汎用JS owner寿命、相対timer移管、鳴動期限移管、SYSTEM presenterは次段階。
+- 通常/Kasane-only build・link監査PASS。DIRAM137,932 / 136,572 B（+416 B）。
+  System store +600 B、pethub集計-192 B、process ID4 Bと配置差を含む。追加heap/taskなし。
+
+## checkpoint 14b3 — solar・JS時計統合（2026-09-16）
+
+- solarと`pocket.time.wall()`を共通anchorへ統合。PC補完も同じUTC表示に使い、
+  JS sourceはhost、RTC/SNTPは互換のnetwork。天文範囲は引き続きsolarだけで制限。
+- 時計healthで未同期・取得不能・範囲外を区別。良好なholdoverは取得失敗で失わない。
+- TLSの事前検査は実OS時計providerへ直接接続。PC補完だけでTLSを許可しない。
+- JS変換を`pocket_clock.c`へ分離。実QuickJSでnull/source/2050年/安全数値範囲と
+  30セッションをASan/UBSan・O2検査。System時計・電源回帰、solar時刻/描画試験PASS。
+- solar試験は実anchor coreへ接続。providerのRTC再発見・同期・取消試験は
+  `test_system_clock.c`と`test_system_clock_device.c`に分担する。
+- 通常/Kasane-only buildとlink監査PASS。共通state208 B、配置後DIRAMは
+  137,516 / 136,156 Bで直前と同値。実機確認は後続の通知実装とまとめて行う。
+
+## checkpoint 14b2 — 時計anchor・dirty・PC補完（2026-09-16）
+
+- `sys_state`にRTC/SNTPとPCのanchor、timezone、revisionを保持。pethub内の補完時計を撤去。
+  UTC/monoからsnapshotを計算し、PCはRTC/SNTPより低い優先度で保持する。
+- SYS_CLOCK_CONFIGを追加。初期値と補正/source/timezoneの変更を独立dirtyへ合流し、
+  秒経過だけでは通知しない。PC入力・timezoneの検証/NVS互換はpethub側に残す。
+- SNTP側はatomic要求bitのみを更新。ownerはboot/通知時にplatform時計を読み、普段は
+  anchorで進める。既存holdoverは一時的な取得失敗で破棄しない。
+- clock state/deviceとJS電源のASan/UBSan・O2 PASS。60秒相当で追加wall/ADC読取り0、
+  dirty0、100通知の合流、RTC/PC優先度、SNTP後退補正、独立poll、timezone、桁溢れを検査。
+  solar時刻のASan/UBSan、platform providerのO2回帰もPASS。
+- 通常/Kasane-only buildとlink監査PASS。静的DIRAM137,516 / 136,156 Bで直前比+48 B。
+  共通state200 B（+56）、pethubの時計12 B撤去、要求bit1 Bと配置調整を含む。
+  heap/task追加なし。今回は実機書込み・SNTP通信試験を追加していない。
+- solar/既存JS時計のanchor統合、汎用JS時計購読、壁時計alarmの補正対応、通知SYSTEM描画は残る。
+
+## checkpoint 14b1 — System時計provider抽出（2026-09-16）
+
+- 実時計の取得・信頼フラグを`system/sys_clock`へ移動。SNTP → System、
+  solar/pethub → Systemの依存に変更。solarのsetterは互換wrapperとして維持。
+- pethubのUTCは整数で取得し、天文計算の2050年上限に依存しない。
+  uint32の範囲外は既存PC補完へ戻す。solarは天文範囲を引き続き検査する。
+- RTC再発見時のatomic CASで、同時に届いた明示的な信頼取消を上書きしない。
+- 時計provider、solar時刻、solar描画のhost検査PASS。RTC再発見、2038/2050/2106、
+  小数秒、読み取り失敗、不信頼指定、初回発見中の取消を検査。
+- 時計/solar時刻はASan/UBSanでもPASS。通常/Kasane-only buildとlink監査PASS。
+  静的DIRAM137,468 / 136,108 B（直前比それぞれ+16 B）。heap確保・専用task追加なし。
+  今回は実機書込み・SNTP通信試験を追加していない。
+- まだCLOCK_CONFIG購読、monotonic anchor、PC補完の共通化は行っていない。
+  pocket.app/pocket.netのsolar互換経路も次段階。CP14全体の完了ではない。
+
+## ライフタイム監査と修正（2026-09-16）
+
+Sol追加調査: 最初のK前free256,536 / largest147,456 Bから、初回終了後
+256,360 / 81,920 Bとなり以後100回一定。保持176 Bに対して連続領域65,536 B減のため、
+小さい常設確保による分断が有力。初回`adc_oneshot_read`のADC1 lazy lock生成と時点が
+一致するが、確保address/size未測定なので未確定。初回ADC前後のheap値と短いheap traceが
+次の切り分け。過去largest120,832 Bは同一条件の記録がなく、現在値との差を漏れとは断定しない。
+
+| 対象 | 所有者・返却時点 | 確認結果 |
+| --- | --- | --- |
+| 背景core/bulk | ホーム描画。前景guest開始前に返却 | USB診断だけ返却を迂回していたためapp_sessionへ集約 |
+| JS購読・callback | guest session。JSRuntime破棄より前 | 既存registryでclose/reset。電源native購読も最後のcloseで解除 |
+| Kasane APP領域 | APP lease。最後のowner終了時に破棄 | 確定画面の修復失敗後にBUSYが残る解放漏れを修正 |
+| SYSTEM共有領域 | host owner。APP終了から独立 | SYSTEM命令を残し、APPだけ消去・次の全面修復を保持 |
+| font/PPT2 bytes | firmware内の不変資源 | Flashを借用。APP終了で登録を失効、画像全体のheap所有なし |
+| 電源snapshot・ID | boot / process | 144 B＋4 Bの明示的常設。guest終了時に破棄しない |
+
+- `ae36f99`: 背景scratch返却を前景起動の共通入口へ移動。overlayは背景と共存するので保持。
+  通常/Kasane-only build、overlay契約、session dispatch 4構成PASS。
+  実機100回終了後free256,360 B / largest81,920 Bが全回一定。
+  修正前240,740 / 65,536 Bから+15,620 / +16,384 B。
+  `.cache/kasane-lifetime-cycles`。以前のlargest120,832 Bとの差は残り、
+  初回HAL等の常駐確保・起動時の配置を別途切り分ける。連続領域の安全性全体は未完了。
+- 修復失敗後のAPP終了: 再描画中のborrowと、ownerへ戻った後の修復待ちを区別する。
+  実描画中は引き続きBUSY。待機中はrepair borrowを返してからAPPを消し、SYSTEMの
+  full-redraw要求を保持する。旧コードで追加テストの失敗を再現し、修正後H/Q ASan/UBSan・O2 PASS。
+  APP単独時のcache含むnative全回収、SYSTEM共存時のAPP回収・旧JS参照失効を検査。
+  通常/Kasane-only build PASS。転送失敗の注入試験はhostで行い、実機のSPI障害は注入していない。
+- 今後の方針: 複数ownerの共有領域とframe中の借用を混同しない。SYSTEM常駐化後は
+  cache/animation arenaもruntimeと同じ寿命で保持されるため、両owner未使用時の返却要否を
+  明示する。上限内の保持とリーク、空き総量と最大連続領域を別々に評価する。
+
+## checkpoint 14a — System電源・購読基盤（2026-09-16）
+
+- `system/sys_state`へ8件の購読・各購読のdirty mask・電源snapshot・測定期限を実装。
+  `system/sys_device`がHALを接続。状態144 B＋process ID4 B、heap/task追加なし。
+- JS電源APIを`pocket_av.c`から`pocket_power.c`へ抽出。既存の購読registryを再利用し、
+  native購読1件を共有。close/throw/resetで即時解除、SYSTEM等の別購読を維持する。
+  同期status/probeの互換性を維持。1秒間隔・最後に通知した値から20 mVの閾値を共通化。
+- H/Q ASan/UBSan・O2 PASS。60秒無購読のHAL呼出0、独立poll、初回・合流・変更閾値、
+  refresh合流、stale/枯渇、2 JS listener、例外、nativeとの共存、30 session終了を検査。
+- 通常/Kasane-onlyのC実装build PASS。DIRAM137,452 / 136,092 B、いずれも直前から+128 B。
+  実機の2購読・繰り返し起動検証をK診断へ追加。
+- 最新K診断を含む両buildとKasane-only link監査PASS。実機300ターンで2購読の初回配送、
+  アニメーション・modal往復を確認。turn3.71 / render46.05 / send6.12 ms。
+  `.cache/kasane-cp14-power/serial.log`。描画30 Hzの性能未達は引き続き別課題。
+- 実機100回の2購読初回配送・終了PASS。終了後free240,740 B / largest65,536 Bが全回一定。
+  `.cache/kasane-cp14-power-cycles`。再起動後2回でも同値（`-cold` / `-early`）。
+  以前のlargest120,832 Bとの差は未解決。今回のbootでは電源診断前のhome overlay終了時に
+  既にfree240,916 B / largest69,632 Bであり、差全体をこの変更に帰属させない。
+  初回使用時の永続確保・配置とhome overlayを切り分ける必要がある。
+  反復リークなしは確認したが、大きな連続確保の安全性を達成済みとはしない。
+- 時計・通知レコード・recordingのSYSTEM表示とdeadline待機統合は未完了。
+  CP14全体の完了ではなく、共通状態の最初の実経路として電源を接続した段階。
+
+## checkpoint 17b — 回転座標の反復計算削減（2026-09-16）
+
+- 回転spanの先頭で変換座標の分子を計算し、後続画素はu+=2*cos、v-=2*sinで進める。
+  画素ごとの座標積和を削減。source選択の有理数除算・丸め・clipは維持する。
+  常設領域・画像バッファ・heap確保の追加なし。PIE化や除算の近似置換は行わない。
+- H ASan/UBSan・O2全回帰PASS。360ケースの回転＋拡縮PATCH/full画素比較を含む。
+  通常/Kasane-only IDF build、link監査PASS。
+- 実機300ターンPASS、native13,840 Bで一定。ログ窓平均turn3.81 ms、render45.72 ms、
+  send6.00 ms。`.cache/kasane-cp17-span/serial.log`。前回render47.24 msだが、
+  別ビルド・実時間駆動で姿勢とdamageも変わるため、改善率の証明には使わない。
+  30 Hz目標は引き続き未達。今回は反復演算の削減に範囲を限定する。
+- Solレビュー: 加算化のcorrectness blockerなし。次の計測は64 bit除算とPPT2行展開の
+  分離。90度近傍の行展開回数、S3 call-chain stack peak、固定姿勢の同一firmware A/Bを
+  優先し、PIE化はアクセス形態を確認してから判断する。追加実装は保留。
+
+## checkpoint 17a — 画像のnative自動補間（2026-09-16）
+
+- CP17–18を前倒し。DrawRef.animate(tx,{from,to,durationMs,easing,repeat})と
+  motion.stop/finish/pollを実装。移動・拡縮・複数回転を1trackで補間する。
+- 開始は初回LCD ack。提出中のsampleを固定し、retry後は現在時刻へ追いつく。
+  JS patchと同一提出へ合流し、native更新がguestの提出結果を上書きしない。
+- trackは56 B、APP 6件/SYSTEM 2件の2bankで896 Bを初回のみ確保。
+  APP resetはSYSTEM trackを維持。hidden/reduce-motionのnative窓口を追加。
+- H全回帰、Q ASan/UBSan・O2、hello/controller、session dispatch 4構成PASS。
+  通常/Kasane-only IDF build・link監査PASS。
+  fake clockでeasing/loop/ping-pong/停止/完了、quota、転送失敗、OOM、
+  JS呼出しなし25回の補間とメモリ不変、既存JS更新との合流を検査。
+- 実機K 300ターンPASS。JS座標更新なしの自動回転・拡縮とmodal往復が継続し、
+  報告nativeは13,840 Bで一定。`.cache/kasane-cp17-animation/serial.log`。
+  ログ窓の平均turn3.83 ms、render47.24 ms、send6.00 ms（renderとsendは別計測）。
+  renderの窓平均最大82.31 ms。30 Hz目標は未達で、動作PASSを性能達成とはしない。
+  回転経路には画素ごとの64 bit除算とsource行変更時のPPT2再展開が残る。
+- 起動・終了100回PASS。終了後free240,956 B / largest120,832 Bは全回一定。
+  `.cache/kasane-cp17-cycles/memory.json`。この試験は終了時の回収を検査し、
+  実行中の瞬間ピークやWi-Fi/audio併用時の安全性を保証するものではない。
+- mainのdeadline待機、電源管理とのhidden/reduce-motion結線も残る。
+  CP17/18全体の完了とはしない。
+
+## checkpoint 13d — 回転画像とdamage（2026-09-16）
+
+- 画像の中心回転とsetRotationを追加。1/1024回転・Q14正弦表で変換し、回転後の旧/新AABBを
+  damageへ含める。伸縮画像のvariant/frameを8 bitとして命令32 Bを維持する。
+  回転spanは16画素のsource blockを共用scratch内に保持。pixel scratch上限488 Bは不変。
+- H/Q ASan/UBSan・O2 PASS。独立sin/cos参照と360フレームの回転＋移動＋拡縮、
+  通常/group合成とPATCH/full一致、JSの90度PPT2比較、入力拒否、OOMを確認。
+- 通常/Kasane-only build、link監査PASS。app2,213,456 B / 1,917,584 B、
+  DIRAM137,292 B / 135,932 B。実機負荷とnative自動補間の確認は次のcheckpoint。
+
+## checkpoint 13c — 固定sourceの矩形伸縮（2026-09-16）
+
+- setRectで画像全体の移動・拡縮・縦横比を変更できるSTRETCHを追加。
+  source原点/extentを4 Bに格納し、命令32 B・常設DIRAMを維持。
+  強い縮小でもproviderへのspan要求を32画素以内へ分割する。
+- H/Q ASan/UBSan・O2 PASS。移動240＋伸縮360ケースのPATCH/full一致、独立画素参照、
+  offscreen・clip・alpha/group、JSの同一参照による伸縮と消去を確認。両IDFビルドPASS。
+- CP13b実機K 300ターンPASS、native12,912 B。render mean20.85 ms、modal32–35 msの
+  余裕不足は継続。`.cache/kasane-cp13-images`。この時点の実機は表情切替のみ。
+- ユーザー指定により毎frameのJS座標更新を完成形とせず、nativeの開始/終点/時間指定へ進む。
+  回転描画とCP17–18を前倒しする。自動補間・回転の実機確認は未完了。
+
+## checkpoint 13b — JS image resourceとframe PATCH（2026-09-16）
+
+- petImage/tx.image/setImageFrameを接続。readonly metadata、APP sessionごとのnative登録重複排除、
+  全JS確保成功後の登録、APP reset失効を実装。source座標/scaleはREPLACEで固定する。
+- Q ASan/UBSan・O2 PASS。120 wrapperでnative登録1枠、残る15枠をSYSTEMが使用可能。
+  APP reset後のSYSTEM資源保持、古いhandle拒否、getter/範囲外の全体取消、OOM sweep、
+  実PPT2全64×64画素と転送失敗後の別表情比較を確認。H全回帰/PIE参照もPASS。
+- 通常/Kasane-onlyビルドとlink監査PASS。app2,208,640 B / 1,912,704 B、
+  DIRAM137,292 B / 135,932 B（各+16 B）。JS adapter動的stateはresource ID分+4 B。
+- Kデモに全12種×6表情の時間変化を追加。実機確認結果は次の記録に追記する。
+
+## checkpoint 13a — PPT2 native provider（2026-09-16）
+
+- 既存PPT2のimmutable Flash bytesを借り、variantをペット番号、frameを表情として読む
+  stateless providerを追加。行128 BからRGB565/straight alphaの要求spanだけを返す。
+  資源登録前にPPT2全体を検証し、全画像展開や可変のglobal選択状態を持たない。
+- 実assetsの12種×6表情×64行、端数span、guard、無効引数をASan/UBSan・O2で確認。
+  既存PPT2 decoderの独立参照試験もPASS。通常/Kasane-onlyビルドPASS。
+- この段階はprovider単体。JS接続とresource lifetime試験はCP13b。
+  未使用providerはlink時に除去され、app/DIRAMはCP12と同値。
+
+## checkpoint 12 — native IMAGE crop/scale/span（2026-09-16）
+
+- 32 B命令の未使用部分へsource原点とscaleを格納。1x/2x/half、pixel-center最近傍、
+  clip、straight alpha、group opacityとframe PATCHに対応。範囲外と2xの奇数extentを拒否。
+- normal/groupで96 B span scratchを共用。group tile256＋dither8＋provider行128を含め488 B。
+  sourceを最大31画素ずつ読み、コンポーネントのsurfaceを作らない。常設arena増分0。
+- H ASan/UBSan・O2 PASS。3倍率×256 opacity×normal/groupを独立座標/合成参照で全画面比較。
+  negative clip、source offset、frame固定、帯途中provider失敗→全帯repair、overflow、旧機能を確認。
+- Q ASan/UBSan・O2 PASS。通常/診断ビルドPASS、app2,206,560 B / 1,910,416 B、
+  DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。
+- native probeに60フレームの画像切替と2世代の全画素capture比較を追加。実機結果は後記。
+  JS resource/PPT2 providerはCP13。
+- `ec37a10`をpush後、Kasane-only実機で画像60フレームと2世代64,800画素比較PASS。
+  非captureの描画＋転送はmean6,546 µs/max6,901 µs、heap241,092 Bで前後一定。
+  文字・group・PIE・600フレームfrostも回帰PASS、frost deadline miss0、stack high-water21,468 B。
+  `.cache/kasane-cp12-native`に保存。この画像試験はPPT2ではなく決定的test pattern。
+
+## checkpoint 11 — hello移植とscene controller（2026-09-15）
+
+- helloの旧node生成を廃止し、文字4命令＋角丸1命令へ移行。入力は独立input service。
+  `createScene`はPRESENTED後に候補参照を昇格し、BUSY/cancel後は最新domain stateを反映。
+  helperは初めて作成する時だけJS factoryを評価し、未使用アプリにclosureを常設しない。
+- 通常構成でもhost既知のhello/Kは旧core/bindingを確保しない。source由来で判定し、
+  user sourceのmanifest名から移植済みと推測しない。Kasane-onlyでhelloを許可。
+  初回BUSYでまだactiveになっていなくても旧描画へ落ちないsession flagを用いる。
+- 実hello source＋実QuickJS/native owner試験（ASan/UBSan、O2）PASS。
+  SYSTEM BUSY、入力保持、初回REPLACEの部分転送失敗/cancel、候補破棄、最新state再構築、
+  idle提出0、counterだけ3帯PATCH、非同期builder拒否、終了解放を確認。
+  input配送は既存サービス試験と分離し、このアプリ試験ではactionをdeterministicに注入。
+- Q全回帰ASan/UBSan PASS、session dispatch4構成PASS、registry101 checks PASS。
+- 通常/診断ESP-IDFビルドPASS。app2,204,256 B / 1,908,272 B、
+  DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。実機結果は後記。
+- `bb2b0df`をpush後、Kasane-only実機でhello100回起動/Enter2回/終了PASS。
+  全回の終了後free256,624 B・最大連続空き135,168 Bで一定。初回起動後の観測値は
+  free149,036 B/最大連続空き104,448 B/JS92,825 B（parser中のpeakではない）。
+  `.cache/kasane-cp11-hello-only`にログと初回captureを保存。
+  通常構成も`kasane_input_device_test.py`でhello/旧pet/K/text編集の共存PASS。
+  `.cache/kasane-cp11-input-normal`に保存。Wi-Fi/audio併用の安全性確認は引き続き未完了。
+- 最初のhello captureはUSBのbyte単位読取りによる欠落を検出。診断ツールをchunk読取りへ直し、
+  通常構成で取り直した135行全体を`.cache/kasane-cp11-hello-normal-capture`に保存。
+  この再取得も起動/入力/終了PASS。100回再起動のメモリ記録とは分ける。
+
+## checkpoint 10 — JS TEXTと固定容量PATCH（2026-09-15）
+
+- tx.text、DrawRef.setText/setReveal、features.textを公開。既存setterと同じtransaction原子性。
+  文字はcall中にnative bankへコピーし、変換用文字列を成功/失敗とも解放する。
+  UTF-16長の事前上限で変換の一時領域もbounded。詳細はdesign-api.md参照。
+- Q ASan/UBSan・O2 PASS。実QuickJSとbuiltin coverage rendererを結線し、UTF-8/scalar reveal、
+  空文字、予約容量、孤立サロゲート、NUL/改行、stale ref、getter例外、OOM各点、300回更新を確認。
+  guestの生存確保数・native予約が増えず、guest/native終了で全解放。mapped日本語はCP9で検証。
+- 通常/診断ESP-IDFビルドPASS、app2,201,840 B / 1,905,888 B。
+  DIRAM137,276 B / 135,916 B、常設増分0。Kasane-only link監査PASS。
+- K診断へ日本語のrevealとtick文字列PATCHを追加。実機結果は後記。
+  次はCP11のhello移植・表示確定後の参照昇格helper。
+- `9b5252c`をpush後、実機K 300ターンPASS。mean turn3.54/render19.18/send4.53 ms。
+  modal区間にはrender30–33 msの窓があり、30 Hzの余裕不足は未解決。
+  文字の毎turn更新でdirty範囲と隔離groupの再描画が増える診断条件。CP8と同一負荷ではない。
+  100回起動・終了は全回free241,004 B、最大連続空き120,832 Bで一定。
+  `.cache/kasane-cp10-text`と`.cache/kasane-cp10-restarts`に保存。
+
+## checkpoint 9 — native TEXT coverage（2026-09-15）
+
+- native view/rendererがTEXTを受理し、通常合成・隔離groupともcoverageを色alphaへ乗算。
+  provider欠落/失敗は転送前の確認またはrepairへ進み、確定済み字形を再生する。
+- production `ksn_font_port`は既存Flashの1bpp cellを借用し、最大64画素ずつ読む。
+  日本語/body、caption/display、欠字、UTF-8 scalar reveal、固定送り幅を実装。
+  常設arena・DIRAM増分0、64 B stack scratch（groupの256 B tileと併存）。
+- H: `bash tools/kasane_contract/run.sh` ASan/UBSanとO2 PASS。文字は全256 opacity、
+  fractional coverage、group、clip、帯境界、provider不在/転送途中失敗/repairを独立参照比較。
+  実jpfont readerに合成font imageを渡し、展開版との一致、UTF-8、fallback送り幅も確認。
+- Q: `bash tools/build_kasane_test.sh`と生成exe、ASan/UBSanとO2 PASS（既存API回帰）。
+- 通常/診断ESP-IDFビルドPASS。app 2,200,400 B / 1,904,432 B、
+  DIRAM137,276 B / 135,916 B。Kasane-only link監査PASS。
+- native probeにFlash字形144画素の比較と3書体のcaptureを追加。実機結果は後記。
+  JS text APIはCP10。全文字の描画時間・全UI併用時のメモリ安全性を確認済みとはしない。
+- `8872011`をpush後、Kasane-onlyでCOM3実機確認PASS。`device_probe.py`の文字144画素比較、
+  3書体capture、既存合成/PIE/600フレームfrost試験を通過。
+  frostはmean20.052 ms/p95 20.259 ms、deadline miss0、heap241,092 B・最大連続空き69,632 Bが一定、
+  stack high-water21,484 B。文字の連続負荷計測ではない。`.cache/kasane-cp9-native`へ保存。
+  text-pre-spi.pngで日本語・半透明caption・2倍displayを確認。LCD読戻しではない。
+
+## checkpoint 5 — input service分離（2026-09-15）
+
+- `pocket_input.c/.h`へonAction/onKey/held、購読4枠、repeat、capabilityとlazy namespaceを抽出。
+  input初回参照から旧nodeクラス初期化への依存を除去。UI pumpはtoastの期限更新だけを担当。
+- sessionはinputをtextより先に登録し、guest破棄前にinputをresetする。
+  pump順序、press/release/repeat、listener例外時close、既存ログtagは維持。
+  scope別購読・modal Back配送はCP15。既存capabilityのactions表記がacceptのみという
+  過少申告も今回は維持しており、配送契約の整備時に合わせて修正する。
+- K診断のEnterでtext sessionを開く。Kasaneとinputを使い、旧node APIは呼ばない。
+  text描画のSYSTEM移植はCP16であり、今回のtext試験は入力とcallbackの接続を検証する。
+
+検証:
+
+- `bash tools/build_input_test.sh && /tmp/test-pocket-input`: ASan/UBSan PASS。
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-input-o2 bash tools/build_input_test.sh`
+  と生成exeもPASS。出荷VMスイッチの実QuickJSと実subscription実装を使用し、
+  node/Taffyなしで2 realm、held、400/120 ms repeat境界、例外、自身のclose、quota、reset、
+  古いclose handleを検証。namespace登録はhost stubなのでproduction lazy順序の試験ではない。
+- `bash tools/build_pocket_text_test.sh && /tmp/test-pocket-text`: 全9ケースPASS。
+- ESP-IDF 6.0.1 `-B build_ds_contract build`: PASS。ESP32-S3、PSRAMなし、native probe有効。
+  app 2,197,488 B、partition空き948,240 B、DIRAM137,276 B。
+  inputの静的156 Bは旧UIからの移動でDIRAM増分0。既存GNU-stack警告のみ。
+- COM3へflashしhash一致。`tools/kasane_input_device_test.py --port COM3
+  --out .cache/kasane-cp5-input-final`: PASS。helloのEnterカウント1/2、pet起動・左右移動・
+  home復帰、Kのright/accept press/releaseとheld、text編集hi/submit/cancelを確認。
+  K終了・再起動を含む2回とも成功。petへの給餌や選択変更はしていない。
+- USB試験はログ直後の画面切替前に入力すると取りこぼすため、host側の入力間隔を150 msにした。
+  初回失敗ログも`.cache/kasane-cp5-input*`へ保持。repeatの時間境界はhost fake clockで確認し、
+  USBの瞬間押下を長押し試験とは数えない。実LCDのtext描画の目視確認は含まない。
+- `tools/kasane_device_test.py --port COM3 --ticks 300 --out .cache/kasane-cp5-animation`:
+  PASS。modal開始・終了と300ターンの描画を確認。10計測窓の平均turn 3.29 ms、
+  render 12.60 ms、send 3.38 ms、Kasane nativeBytes 12,908 B。終了後HOME_READY、port解放済み。
+
+## checkpoint 6 — guestの直接dispatch（2026-09-15）
+
+- `app_tick`は旧UI bindingのturn関数を経由せずguest frame/continueを直接呼ぶ。
+  buttons、analog中央0x8080、touchなしを従来と同じ引数で渡す。
+  JS実行後にKasaneがactiveなら旧core tick/drawを省略し、旧UIアプリでは維持する。
+- 継続jobを先に処理する順序、Backの最終保存turn、deferred入力、cleanup、OOM報告、
+  watchdogと表示間隔は保持。guestの実行中に初めてKasaneへ切り替わる場合も同じ判定を使う。
+- `python3 tools/test_session_dispatch.py`: 実run_pumps/dispatch_guest/app_tickを抽出し、
+  ASan/UBSan・O2、compat/fairの4構成でPASS。旧/Kasane経路、切替、frame/continue/draw失敗、
+  cleanup順序、Back、deferred、runaway、repairと表示間隔をdeterministic portで検証。
+- `VMTEST_OUT=/tmp/kasane-sync-vm bash tools/vmtest/build.sh o2`と同OUTの
+  `bash tools/vmtest/run.sh --variant o2`: 63 PASS、0 FAIL。
+- 通常ESP-IDF構成: PASS。S3、PSRAMなし、native probe有効、VM probe無効。
+  app 2,195,968 B、DIRAM137,276 B。CP5比flash -1,520 B、DIRAM増分0。
+- 通常構成実機: `kasane_input_device_test.py` PASS（hello/pet/K/text、2回再起動）。
+  `kasane_device_test.py --ticks 300` PASS。10窓平均turn 2.88 ms、render 12.59 ms、
+  send 3.38 ms。直前CP5のturn 3.29 msから約12%減（同診断の観測値）。
+  記録は`.cache/kasane-cp6-input`と`.cache/kasane-cp6-animation`。
+- VM probe構成: `-B build_ds_vmprobe -D SDKCONFIG=build_ds_vmprobe/sdkconfig build` PASS。
+  app 2,205,264 B、DIRAM143,276 B。通常比6,000 Bは計測buffer等。
+- probe実機: `vm_l0_capture.py --conditions base --workloads DF --seconds 4 --reps 1`
+  成功。Promise chainとasync generatorの各3窓を収集。最大連続空きの観測最小は36,864 Bと
+  55,296 B、stack high-waterはともに23,804 B。全VM機能の実機網羅試験とは区別する。
+  同構成のK 300ターンもPASS。ログは`.cache/kasane-cp6-vmprobe.jsonl`と
+  `.cache/kasane-cp6-probe-k`。CP6実装commitは`380e1d6`、push済み。
+
+## checkpoint 7 — Kasane-only診断profile（2026-09-15）
+
+- root CMakeの`-D KSN_ONLY=ON`で旧UI core/binding/RGB565 rendererを依存探索から除外。
+  選択をIDF build propertyで早期の別プロセスにも伝える。通常構成は既定OFF。
+  manifestの無条件旧UI edgeを除き、通常構成のCMake REQUIRESに集約する。
+- Kasane-onlyでは旧node API、jsfont、petの旧texture adapter、旧render acceleratorをコンパイルしない。
+  native pet通知の共有ヘッダから不要なui_core includeも除く。入力・text serviceは独立して残す。
+- この段階で未移植のforeground appは、評価前に`APP_REFUSED KASANE_ONLY`と表示理由を返す。
+  USB Kと既存のTaffy非依存overlayだけを許可する。native home/editor等の描画はまだ旧native経路。
+- `tools/prepare_dependencies.py --kasane-only`は旧PocketJS checkout/Rustを準備しない。
+  BMI270、opus、minimp3は従来どおり。`tools/test_kasane_prepare.py`はsubprocessをmockして検証。
+- clean診断build: `idf.py -B build_ksn_only -D SDKCONFIG=build_ksn_only/sdkconfig
+  -D KSN_ONLY=ON -D POCKETJS_SOURCE_DIR=C:/devs/m5stack/design-contracts-wt/.cache/absent-legacy-ui build`
+  PASS。指定した旧checkoutのパスは存在しない。native probe有効、VM probe無効、PSRAMなし。
+  app 1,900,384 B、DIRAM135,916 B。通常構成はapp2,196,352 B、DIRAM137,276 BでビルドPASS。
+- `tools/check_kasane_link.py --build build_ksn_only --nm <S3-toolchain-nm>` PASS。
+  component graph、build.ninja、compile_commands、map、demangle済みELFに旧UI/Taffyがなく、
+  Kasane/guest/inputの実シンボルが存在する。旧ソースやarchiveの削除はしていない。
+- session dispatchのhost回帰4構成PASS。Kはdevice情報、seeded random、input capabilityを
+  実際に使い`KASANE_SERVICES PASS legacy=false`を出す。
+- `kasane_only_device_test.py --cycles 100`: 実機PASS。未移植helloの明示拒否、Kのサービスと
+  right press/releaseを毎回確認。終了後heapは全100回241,004 B、最大連続空き120,832 Bで一定。
+  `.cache/kasane-cp7-only`に全ログとmemory.jsonを保存。全機能併用時の安全性を示す値ではない。
+- 同構成`kasane_device_test.py --ticks 300`: PASS。modal/透過/patchとhome復帰、
+  平均turn2.92 ms、render12.65 ms、send3.44 ms。`.cache/kasane-cp7-animation`に保存。
+  CP7実装は`76dac40`としてpush済み。出荷からTaffyを削除するCP25は未実施。
+
+## checkpoint 8 — JS角丸・枠線・gradient（2026-09-15）
+
+- tx.roundRect/strokeRect/gradientとfeaturesを公開。既存DrawRefのPATCH・取消・例外原子性を利用。
+  色/opacity等の整数検証は保持し、座標だけ仕様どおり最近接・half-away-from-zeroへ変更。
+  APIのフィールド、既定値、上限は[design-api.md](design-api.md)に記載。
+- Q: `tools/build_kasane_test.sh`と生成exe、ASan/UBSan・O2 strict-aliasingでPASS。
+  新APIのnative記述子、正負の半分、gradient両端の画素、PATCH、clip、不正radius/width/axis/
+  dither、NaN/overflow、throwing getter、catch後の全体取消、committed画素維持、cancelを追加確認。
+- 通常/診断ESP-IDFビルドPASS。appは2,197,600 B / 1,901,664 B、
+  DIRAM137,276 B / 135,916 Bで増分0。Kasane-onlyのlink監査も再度PASS。
+- K診断を動く角丸・内側枠・ディザ付き水平gradientへ更新。
+  Kasane-only実機で300ターン・modal遷移・home復帰PASS。
+  平均turn3.09 ms、render13.62 ms、send3.36 ms。10/13命令でnativeBytes12,908 B。
+  `.cache/kasane-cp8-gallery`に保存。実装commitは`4e07887`、push済み。
+
+## vm/main同期 — 2026-09-15
+
+- 同名リモートの`77e95c8`をfast-forward後、`origin/vm/main`の`bd0fa43`を統合。
+  VMの中断・再開、OOM記録、guest確保ヘッダ、pet capability、背景PIE、非同期LCD転送を取り込む。
+- gardenの計測関数宣言は両側を保持。Kasaneの最新文書を`docs/kasane/`へ集約し、
+  装飾光線の追加記録は`docs/perf/flower-decor-cost.md`へ保持。索引と相対リンクを更新。
+- 非同期`board_present`の成功はqueue成功なので、Kasaneの同期send契約には直接使わない。
+  `board_present_sync`で先行転送と当該帯の完了を回収し、エラー時は書込み位置を無効化する。
+  APPとKasane実機probeに接続。帯間のCPU/SPI重畳はKasaneでは行わず、完了ackを保証する。
+- QuickJS adapterのhost試験を出荷時と同じSEGFRAMES/FLATCALLS有効へ揃えた。
+  オブジェクトcacheを専用化し、ヘッダとbuild script変更時も再コンパイルする。
+- CP3aの途中変更は未完成・未検証。同期前にstash
+  `ed394313ce340cfbc250c538a01606f206020210`へ既存lock差分とともに保全した。
+  この同期には含めない。再開時はcache/view/probe/testsの変更を取り出し、JS側lazy確保、
+  共有static IDの計上、失敗注入試験を完成させる。CP3bのcore分割は未着手。
+
+検証:
+
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、frost/PIE、C++ヘッダ）。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`、
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  と生成exeはPASS。QuickJS本体は出荷VMスイッチ有効・O1、adapter/core/testは各指定構成。
+- VM: `VMTEST_OUT=/tmp/kasane-sync-vm bash tools/vmtest/build.sh o2`、
+  同じOUTで`bash tools/vmtest/run.sh --variant o2`: 63 PASS、0 FAIL。
+- `python3 tools/test_board_present_sync.py`: PASS。先行転送失敗・queue失敗・最終帯完了失敗・
+  再試行を実関数の抽出とSPI stubで検証。SPIハードウェアの検証ではない。
+- `tools/test_garden.c`、`tools/test_flower.c`を`main/scene/canopy_pie.c`とリンクして
+  `gcc -O2 -Wall -Wextra -Werror ... -lm`で実行: PASS。
+  `python3 tools/pie/test_kernels.py`: 7 PASS。
+- ESP-IDF 6.0.1 `-B build_ds_contract build`: PASS。S3、PSRAMなし、KSN_DEVICE_PROBE無効。
+  app 2,171,696 B、partition空き974,032 B、DIRAM 123,404 B。
+  DIRAMはcheckpoint 2から7,856 B増。主因はboard非同期転送の2本のbuffer（7,680 B）と管理情報。
+  16 KiB基本予算の達成値として扱わず、次のメモリ設計で同時ピークへ加算する。
+- 実機検証はユーザー指示で保留。シリアル操作なし。
+
+## checkpoint 3a — optional/lazy cache（2026-09-15）
+
+- stashの途中変更を引き継ぎ、cacheなしのcoordinatorとJS初回cache.createの遅延確保を完成。
+  cacheはdescriptor/metadata、commands、textの借用3ブロック。固定領域callerもbindして利用する。
+- 初回template検証・JS wrapper確保・native確保後にのみhostへattachする。
+  失敗時は追加領域を回収し、表示済みbank、参照、pollを保持。release後の予約はresetまで保持。
+- C統計は共有ID20 Bをcache未使用時も計上。JS nativeBytesは実際の予約heapを示し、
+  cache.reservedBytesで任意cache分を確認できる。仕様のメモリ節に計上境界を記録した。
+- S3 ELF型情報: 基本10,344 B、cache追加3,056 B（496/1,536/1,024）。
+  cacheなし4,096 B減、cacheあり1,040 B減。base単一確保10,344 Bとstack peakはCP3の未完部分。
+  cache.createのdraw配列はstack1,920 B。CP3bでcoreを分割し、実機stackは後日確認する。
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、PIEモデル、C++ヘッダ）。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`と
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  および生成exeはPASS。3個別確保の各失敗、全回収、再試行、既存ref、JSなしrepairを確認。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,172,032 B、空き973,696 B、DIRAM123,404 B。
+  static DIRAM増分0。実機未確認、シリアル操作なし。
+
+## PIE追補 — 背景と不透明矩形の連続塗りつぶし（2026-09-15）
+
+- ユーザーのPIE推奨を受け、CP3a `af8da25`のpush後に追加。CP3bのcore分割は次の課題。
+- 背景帯と不透明RECTを連続RGB565 fillへまとめる。矩形の色変換は範囲ごとに1回。
+  半透明、group、角丸、gradientの量子化は既存経路で処理する。
+- S3では先頭をscalarで16-byte境界へ揃え、8画素単位をPIEでstore、端数はscalar。
+  出力の先頭画素へ色を置いて`EE.VLDBC.16`でbroadcastするため、色表や追加scratchはない。
+  q0とハードウェアループを使うowner-task専用関数。ポインタはearly-clobber制約を持つ。
+- ESP32-S3 HW MCPへstdio接続し、`knowledge_routes`、`get_instruction`、
+  `example_measured_semantics`、`analyze_sequence`、`pie_cost_estimate`を利用。
+  サーバーは`dj-oyu/esp32s3-hw-mcp`の`fb3561ee79c6b5af3a2dbe01d18e04d8e8d804cb`。
+  TRM v1.8 p170のVLDBC.16と、同MCPの実機記録が確認した128-bit accessの下位4bit切捨てに従う。
+  TRM: https://documentation.espressif.com/esp32-s3_technical_reference_manual_en.pdf
+- コストモデルのstore増分0.6を使うと、240×8画素帯のvector本体は240×1.6=384 cyclesという
+  **推定**になる。整列処理・関数呼出し・色seed・タスク切替は別。速度の実測値ではない。
+- H: `bash tools/kasane_contract/run.sh` PASS。Cのscalar/model両経路で0..1,920画素、
+  全8種のuint16開始alignment、7色、両端guardを検査（ASan/UBSanとO2）。
+  `fill_pie.py`は実asmをpiesimで実行し、1/2/3/29/30/210/240ブロックの画素・ポインタ・guard一致を確認。
+  既存合成・repair・ディザ・frost・C++ヘッダもPASS。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane` PASS。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,172,256 B、空き973,472 B。
+  DIRAM123,404 Bで増分0。objdumpでbroadcast→loopgtz→単一VST→returnを確認。
+  asm loop本体3 B、追加vector領域なし。実機速度・画素確認は後日。シリアル操作なし。
+
+## checkpoint 3b — 基本領域の分割予約（2026-09-15）
+
+- coreを移動不可の借用commands/text各2ブロックへ分割。resetはアドレスを保持し、
+  bank切替はメタデータと内容をコピーして候補bankと表示bankを独立に保つ。
+- JS adapterは基本5ブロックの全確保・初期化後に公開。途中失敗では全回収、resetも全解放。
+  通常PATCH/presentではnative追加確保なし。cacheの遅延3ブロック確保は維持する。
+- S3 ELF型情報: 管理1,644 B、commands 3,072 B×2、text 1,024 B×2、基本合計9,836 B。
+  cache込み12,892 B。CP3aから各508 B減、個別確保上限3,072 Bを満たす。
+  allocator管理情報は別。core単体は管理516 B＋借用8,192 B、C statsの共有IDも引き続き計上。
+- S3 objdumpの関数単体stack frame: ensure_state/core_begin/core_init 48 B、core_bind 32 B。
+  cache.createは1,984 B（draw配列1,920 Bを含む）。描画追加stack 1 KiB目標の達成は未認定。
+  VM・子関数・board buffer・Wi-Fi/audioを含む同時ピークとlargest blockは実機確認待ち。
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、PIE、C++）。
+  追加bind失敗・reset試験はtest_coreをASan/UBSanとO2で別途実行しPASS。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`と
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  および生成exeはPASS。基本5確保＋cache3確保の各失敗、再試行、全回収、stats実予約一致を確認。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,172,240 B、空き973,488 B、DIRAM123,404 B（増分0）。
+  CP3のhost/build側は完了。実機100回起動とstack/断片化確認は保留、シリアル操作なし。
+  次はCP4のhost core/coordinator所有とAPP attach/detach。
+
+## checkpoint 4a — SYSTEMを保持するAPP終了機構（2026-09-15）
+
+- `ksn_view_host_reset_app`を追加。APP builder/submissionを取消し、両bankのAPP、
+  APP cache/画像登録、modal/focusを解放。予約ブロックは維持し、終了でheap確保・ID発行をしない。
+- SYSTEMの確定済み表示、構築中/送信待ち更新、cache instance、画像登録、pollを維持。
+  APPを黒背景に戻し、全面repairを要求。display/provider callbackからの終了・present再入はBUSY。
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、既存描画/PIE、C++）。
+  新規test_app_teardownは6状態、全画素、部分転送失敗、再入拒否、cache compaction後のSYSTEM
+  PATCH、各状態100回のAPP資源確保/終了でquota回収を確認する。実機100回起動とは別。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane` PASS（ASan/UBSan）。
+  新終了APIはまだJS/session未接続のため、Qは既存adapter回帰確認に限定。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,172,240 B、空き973,488 B、DIRAM123,404 B。
+  S3 coordinatorは88 B（+4）、adapter基本9,840 B、cache込み12,896 B。個別確保上限は維持。
+- **CP4全体は未完**。次の4bで領域所有をJS adapterからhostへ移し、世代付きAPP lease、
+  attach/detachとsession終了を接続する。現在の低レベルendpointポインタ自体は失効しない。
+  native homeへの遷移やSYSTEM実サービスへの接続は、この基盤だけでは変更しない。
+- 実機確認は保留。シリアル操作なし。
+
+## checkpoint 4b — host runtime所有とAPP lease（2026-09-15）
+
+- `ksn_runtime.c/.h`へcore/coordinator/cacheの所有を移した。QuickJS依存なし。
+  JS adapterはwrapper管理＋4 BのAPP leaseのみ。初回mutating callでattachし、
+  既存app_sessionの`pocket_kasane_reset`経由でAPPのみdetachする。
+- SYSTEM取得後はguest終了・QuickJS破棄後も領域とSYSTEMを保持。SYSTEM取得のない
+  APP-only利用はdetachで全解放する。native shutdownはAPP/pending/drawing中BUSY。
+- APP leaseはprocess lifetimeで再利用せず、操作ごとにviewを解決する。
+  古いleaseのdetach/end_turnは新しいAPPへ影響しない。ID枯渇は確保前にLIMIT、wrapなし。
+  生viewは呼出し中の借用であり、lifecycleをまたいでキャッシュしない。
+- APPのreturn/yield cleanupはSYSTEM builderをabortしない。cache初回3確保と原子的attachもhostへ移管。
+- H: `bash tools/kasane_contract/run.sh` PASS（ASan/UBSan、O2、PIE）。
+  新規test_runtimeはhost5確保の各OOM、SYSTEM-only描画、APP再接続、古いlease、
+  SYSTEM builder維持、描画再入拒否、shutdown、ID枯渇を検証。runtimeヘッダのC++17検査もPASS。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`、
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  と生成exeはPASS。基本6確保・cache3確保の各OOM、SYSTEM併存時APP OOM、確定済み/
+  pending/部分IO状態のAPP終了、古いJS参照、guest heap全解放後のSYSTEM PATCH/描画を確認。
+- ESP-IDF `-B build_ds_contract build`: PASS。app2,173,536 B、空き972,192 B、DIRAM123,404 B。
+  S3 ELF型情報: host管理616 B＋借用8,192 B＝8,808 B、APP adapter1,044 B。
+  APPあり9,852 B、cache込み12,908 B。CP4a比12 B＋allocator1件増。個別3,072 B以下を維持。
+  runtime staticは8 B追加だが、ELF全体DIRAMはalignment込みで増分0。
+- CP4のhost/build側は完了。実機home/app往復は保留、シリアル操作なし。
+  home/通知実サービスとguestなしの描画pumpのproduction接続は後続checkpoint。
+  次の実装はCP5（入力service切り出し）。
+
+## UI smoke — native / JS同画面比較（2026-09-15）
+
+- `tools/kasane_ui_smoke.c`のnative APP lease呼出しと、`tools/kasane_ui_smoke.js`の
+  実QuickJS呼出しで同じUIを描く。SYSTEMの右上indicatorは両経路でnativeから構築。
+- 5状態: 通常、メーターPATCH、dim-live modal、modal close、APP detach。
+  各経路162,000画素のRGB565と転送量が一致。PATCH対象外不変、PATCHとclose時の
+  全再構築の一致、scopeのAPP→MODAL→APP→HOST、無変更時転送0を確認。
+- 各経路の転送Bは64,800 / 7,680 / 64,800 / 64,800 / 64,800。
+  PATCHは全面比約88%削減。これは転送量であり実機処理時間の測定ではない。
+- ASan/UBSanとO2 strict-aliasingでPASS。出力PNGを目視し、矩形の透過重なり、
+  modal背景の減光、SYSTEM indicator維持、終了時APP消去を確認。
+  hostの実レンダラ試験であり、実LCD確認ではない。シリアル未使用。
+
+再実行（WSL、repository root）:
+
+```sh
+mkdir -p .cache/kasane-ui-smoke
+TEST_SOURCE=tools/kasane_ui_smoke.c OUT=/tmp/kasane-ui-smoke bash tools/build_kasane_test.sh
+/tmp/kasane-ui-smoke .cache/kasane-ui-smoke
+python3 tools/kasane_ui_preview.py .cache/kasane-ui-smoke
+```
+
+O2はbuild時に`CFLAGS="-O2 -fstrict-aliasing"`を追加する。
+previewは上段native・下段JS、左から上記5状態。標準PythonのみでPNG化し、画像はgit対象外。
+firmwareコードに変更なし。テスト用build scriptは`TEST_SOURCE`未指定時に従来のQ試験を構築する。
+ESP-IDF `-B build_ds_contract build`もPASS。app2,173,536 B、DIRAM123,404 Bで前回から変化なし。
+
+## CP4b後の実機UI確認（2026-09-15）
+
+ユーザーから実機利用可能との指示を受け、COM3へnative診断有効のfirmwareを書込み・照合。
+native `~`とJS `K`（300 tick）ともPASS、home復帰。ユーザー目視も正常。
+native転送前162,000画素一致、600フレームでheap/min/largest変化なし。
+JS側のnative予約12,908 Bを実機ログで確認。診断スクリプトのcache期待値を更新し、
+JS側に`--out`で全serialログの保存を追加した。
+実測値、再実行コマンド、実機に残した診断構成のメモリ差は
+[design-device-probe.md](design-device-probe.md)の2026-09-15節を参照。
+100回起動やWi-Fi/audio併用試験は未実施。次の実装対象は引き続きCP5。
+
+## checkpoint 0 — JS失敗の原子性（2026-09-15）
+
+- 有効な所有transactionで起きた引数検証・getter・確保失敗は、JSでcatchしても更新全体をabortする。
+- 古いtransactionは現在のbuilderを取消しない。callback後処理まで再入buildを防ぐ。
+- ticket/template/instance wrapperをnative公開前に確保し、返却OOMによる部分成功やquota漏れを防ぐ。
+- poll/features/statsのプロパティ生成失敗を検出し、部分オブジェクトを破棄する。
+- 破棄済みDrawRefのnative枠を即時回収し、resetをまたいで識別IDを再利用しない。
+- QuickJSが遅延生成時に参照するcacheメソッド定義を関数内`static const`へ変更する。
+  自動記憶域の定義は初回`cache.create`で最適化構成のabortを引き起こしていた。
+
+検証:
+
+- `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`: PASS。
+- `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  と生成実行ファイル: PASS。
+- 上記はadapter/core/test側のASan/UBSan・最適化構成。リンクするQuickJS本体は既存host cacheのO1 object。
+- 各構成で129箇所のJS確保失敗、native calloc失敗と再試行、100回のabort後の枠回収を確認。
+  allocator注入はメソッドを解決してから行い、QuickJS自身の遅延メソッド生成失敗は対象外。
+- Astraが`tools/kasane_contract/run.sh`のASan/UBSan・O2、frost/PIE、C++ヘッダ試験成功を確認。
+- ESP-IDF 6.0.1 `-B build_ds_contract build`: PASS。S3、PSRAMなし、KSN_DEVICE_PROBE無効。
+  app 2,167,648 B、partition空き978,080 B。既存GNU-stackリンカ警告のみ。
+- 実機K診断: 未確認。COM3への書込みを試行したが、portが存在せずopenに失敗。
+  新firmwareは未書込み。USB再接続後に300ターン診断を実行する。
+
+commit: `0227ac0`。`origin/vm/design-contracts`へpush済み。
+
+## checkpoint 1 — committed stateの再描画・修復（2026-09-15）
+
+- guest submissionがなくても、host invalidateから確定済みbankを再描画する。
+- private repairはbankをswapせず、APP/SYSTEMのpoll・cache・ref・modalの確定状態を変更しない。
+- 転送中に届いたinvalidateはack後も保持する。途中IO失敗は同じ画面を保持して再試行する。
+- 転送前OOM/unsupportedではprivate repairの占有だけ解除し、修復要求を残す。
+- `app_force_redraw`を接続。hostのみの修復成功後はJSへ進み、連続するrecording更新で
+  guestが実行されなくなるのを防ぐ。Backの最終保存turnはIO修復待ちでも配送する。
+- board側pet/recording overlayはSYSTEM移植まで既存合成を使用する。
+
+検証:
+
+- H: `tools/kasane_contract/run.sh`、ASan/UBSan・O2ともPASS。
+- Q: `tools/build_kasane_test.sh`と生成exe、ASan/UBSan・pure O2ともPASS。
+- 全17帯の転送失敗→cancel→owner repair失敗→成功をJS更新なしで確認。
+  画素一致、poll/cache/ref/modal保持、callback中のinvalidate、OOM回復、reset、初回cancelも確認。
+- 実sessionの連続invalidate時dispatchはコードレビューとESP-IDFコンパイルで確認。
+  実機のrecording併用・picker終了・capture試験はUSB未接続のため未確認。
+- ESP-IDF 6.0.1 `-B build_ds_contract build`: PASS。S3、PSRAMなし。
+  app 2,168,048 B、partition空き977,680 B、DIRAM 115,548 B。既存GNU-stack警告のみ。
+
+commit: `c787a6c`。`origin/vm/design-contracts`へpush済み。
+
+## checkpoint 2 — group内gradientの最終ディザ（2026-09-15）
+
+- グループの中間premultiplied RGBA8にはディザを適用せず、背景への最終合成後だけRGB565へ量子化する。
+- 画素ごとのbitで、最後の不透明上書き以降のディザ付きgradientの寄与を記録する。
+  半透明の子はbitを維持し、不透明なディザなしの子はbitを消す。
+  不可視・clip外・実効alpha 0のgradientや離れたrect領域へ適用を広げない。
+- 実効group alphaが0ならRGB565背景をそのまま返す。Bayer位相は絶対画面座標へ固定する。
+- 64画素のRGBA8タイルは256 Bのまま。追加は2×uint32のディザbit 8 Bで、heap確保はない。
+  正確な規則は[合成仕様](design-composition.md)の「グループ内gradientのディザ」に記載した。
+
+検証:
+
+- H: `bash tools/kasane_contract/run.sh`、ASan/UBSan・`-O2 -fstrict-aliasing`ともPASS。
+  独立scalar参照で全256 group opacity、16 Bayer位相、混合子、透明画素、角丸・clip、
+  32/64画素境界、PATCHとfullの画素一致を確認。既存rectグループの全opacity試験もPASS。
+- 修正前rendererでは、新試験の画素(12,7)で`0x532f`と参照`0x532e`の不一致を再現した。
+- Q: `bash tools/build_kasane_test.sh && /tmp/test-pocket-kasane`、および
+  `CFLAGS="-O2 -fstrict-aliasing" OUT=/tmp/test-pocket-kasane-o2 bash tools/build_kasane_test.sh`
+  と生成exeはPASS。JSのgradient公開はcheckpoint 8であり、このQは既存APIの回帰確認。
+- ESP-IDF 6.0.1 `-B build_ds_contract build`: PASS。S3、PSRAMなし。
+  app 2,168,208 B（0x211590）、partition空き977,520 B、DIRAM 115,548 Bで前checkpointと同量。
+- 実機画素比較はユーザー指示により後日まとめて実施。シリアル操作は行っていない。

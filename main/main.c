@@ -21,6 +21,7 @@
 #include "pocket_capture.h"
 #include "pocket_bridge.h"
 #include "pocket_text.h"
+#include "system/sys_device.h"
 #include "scene_mem.h"
 #include "vmprobe.h"
 #include "sdkconfig.h"
@@ -34,6 +35,47 @@
 #include "nvs_flash.h"
 #include <stdatomic.h>
 #include <string.h>
+#ifdef CONFIG_KSN_DEVICE_PROBE
+#include "esp_heap_caps.h"
+#include "pocket_kasane.h"
+#include "ui/kasane/ksn_runtime.h"
+static atomic_bool ksn_probe_requested;
+static atomic_int system_probe_requested;
+void ksn_device_probe_run(void);
+static void system_probe(int command){
+    const uint32_t owner=UINT32_MAX;
+    sys_notify *notices=sys_device_notifications();sys_timer *timers=sys_device_timers();
+    if(command=='N'||command=='Z'){
+        sys_timer_release_owner(timers,owner);sys_notify_release_owner(notices,owner);
+    }
+    if(command=='N'){
+        for(unsigned i=0;i<SYS_NOTICE_SLOTS;i++)if(notices->records[i].phase){
+            printf("SYS_PROBE_BUSY\n");return;
+        }
+        uint64_t now=(uint64_t)esp_timer_get_time();uint32_t id;
+        sys_notice_result result=sys_notify_post(notices,owner,1,"SYSTEM NOTICE",0,&id);
+        sys_notify_step(notices,now);
+        for(unsigned i=0;i<8&&result==NOTICE_OK;i++)
+            result=sys_notify_post(notices,owner,i+2,"QUEUED NOTICE",0,&id);
+        if(result==NOTICE_OK)result=sys_timer_set(timers,owner,"probe","RETRY TIMER",now+100000);
+        if(result!=NOTICE_OK){printf("SYS_PROBE_ERROR %u\n",(unsigned)result);return;}
+    }
+    unsigned queued=0,snoozed=0,count=0,blocked=0;sys_notice active;
+    bool have=sys_notify_active(notices,&active);
+    for(unsigned i=0;i<SYS_NOTICE_SLOTS;i++){
+        queued+=notices->records[i].phase==NOTICE_QUEUED;
+        snoozed+=notices->records[i].phase==NOTICE_SNOOZED;
+    }
+    for(unsigned i=0;i<SYS_TIMER_SLOTS;i++){
+        count+=timers->records[i].due_us!=0;blocked+=timers->records[i].blocked;
+    }
+    printf("SYS_PROBE active=%u queued=%u snoozed=%u timers=%u blocked=%u id=%lu free=%lu largest=%lu system=%u composited=%u\n",
+        have,queued,snoozed,count,blocked,(unsigned long)(have?active.id:0),
+        (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+        ksn_runtime_stats(KSN_SYSTEM).displayed.commands,pocket_kasane_notice_composited());
+}
+#endif
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
 #include "esp_cpu.h"
 #endif
@@ -205,6 +247,10 @@ static bool usb_stroke(char c, keystroke_t *k) {
         k->text[0]=c;k->len=1;return true;
     }
     if(c=='s') { atomic_store(&capture,true); return false; }
+#ifdef CONFIG_KSN_DEVICE_PROBE
+    if(c=='~') { atomic_store(&ksn_probe_requested,true); return false; }
+    if(c=='N'||c=='O'||c=='Z'){atomic_store(&system_probe_requested,c);return false;}
+#endif
     if(c=='c') { motion_recenter(); return false; }
     // '8' is not an app: it checks the baked sound tables against this chip's
     // own libm (sound_check_tables), and is handled where the others start. It
@@ -243,6 +289,11 @@ static bool usb_stroke(char c, keystroke_t *k) {
         vmprobe_condition_set((unsigned)(c-'P')); return false;
     }
 #endif
+    // The Kasane demo trigger ('K', app_session.c's kasane_demo_start). PLACED
+    // AFTER the probe block on purpose: 'G'..'K' is the probe's segment range, so
+    // with CONFIG_POCKET_VM_PROBE on a 'K' still selects probe segment 4, and
+    // with it off (every shipping build, and the KSN ones) 'K' reaches the demo.
+    if(c=='K') { atomic_store(&diagnostic,c); return false; }
     // The volume pair and '?', as TEXT rather than as nav, because that is what
     // the Cardputer's own keys produce and what volume_key() and an overlay
     // read. Without them a host script could reach every other key on the home
@@ -564,12 +615,8 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
     // overwrite a live guest pointer; the one that exists (the USB
     // diagnostics) releases the overlay itself.
     overlay_release();
-    // The home screen's background is about to stop being drawn for as long as
-    // the guest owns the display, so its scratch stops being worth anything to
-    // it and starts being worth a great deal to the guest, the font atlas and
-    // the radio. Here rather than in enter(): this is the moment the memory
-    // changes hands, and the next prepare() after the run takes it back.
-    scene_mem_release();
+    // app_session releases background scratch before every foreground start,
+    // including diagnostics, while preserving it for background overlays.
     app_registry_select(app_id);
     run_started = source ? app_start_source(prelude,prelude_len,source,len)
                          : app_start();
@@ -708,16 +755,34 @@ static void ui_task(void *arg) {
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
     while(1) {
+#ifdef CONFIG_KSN_DEVICE_PROBE
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&ksn_probe_requested,false)){
+            ksn_device_probe_run();
+            ESP_LOGI("shell","HOME_READY");
+        }
+#endif
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
         bench_core_tick();
 #endif
         int64_t frame_start=esp_timer_get_time();
         keystroke_t stroke={0};
         bool have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+#ifdef CONFIG_KSN_DEVICE_PROBE
+        /* Replay the visual diagnostic from the physical keyboard as well. */
+        if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
+            atomic_store(&ksn_probe_requested,true);
+            continue;
+        }
+#endif
         // Before everything: the volume is the device's, so it is answered
         // before any question about who owns the screen.
         if(have&&!running&&screen==SCREEN_HOME&&!home_modal()&&volume_key(&stroke))
             have=false;
+#ifdef CONFIG_KSN_DEVICE_PROBE
+        int system_probe_command=atomic_exchange(&system_probe_requested,0);
+        if(system_probe_command)system_probe(system_probe_command);
+#endif
+        sys_device_step();
         pet_repaint=pet_hub_pump();
         if(have&&pet_hub_key(stroke.nav)){have=false;pet_repaint=true;}
         if(pet_repaint&&running)app_force_redraw();
@@ -948,7 +1013,8 @@ static void ui_task(void *arg) {
                 // cap short instead of waiting out the period; the measured
                 // (device) cost it removes is the "up to one frame period"
                 // term of completion latency, and nothing else.
-                if(rest) vm_wake_wait(pdMS_TO_TICKS(rest));
+                if(rest) vm_wake_wait(sys_device_wait_ticks(
+                    (uint64_t)esp_timer_get_time(),pdMS_TO_TICKS(rest),configTICK_RATE_HZ));
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.
                 period_began=esp_timer_get_time();
@@ -960,7 +1026,8 @@ static void ui_task(void *arg) {
         // when a frame() first does, and this keeps a stale `period_began`
         // from making the first frame of a new session skip its wait.
         period_began=esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(rest));
+        vm_wake_wait(sys_device_wait_ticks((uint64_t)esp_timer_get_time(),
+            pdMS_TO_TICKS(rest),configTICK_RATE_HZ));
     }
 }
 

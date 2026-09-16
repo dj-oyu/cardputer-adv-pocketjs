@@ -13,6 +13,7 @@
 #include "../../main/scene/fxmath.c"
 // The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
 // .c files below are included whole, so the definition has to be in this TU too.
+#include "../hostshim/solar_clock.h"
 #include "../../main/scene/solar_time.c"
 static uint64_t ns(void) {
     struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);

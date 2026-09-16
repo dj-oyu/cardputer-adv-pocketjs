@@ -1,6 +1,6 @@
 # システムランタイム移行設計: pet_hub から時計・通知・タイマーを取り出す
 
-2026-09-15。**設計**（未実装）。[システムランタイム仕様](system-runtime.md)と[モジュール境界](module-boundaries.md)を、vm/main の現行コードへ当てはめる手順を決める。Kasane 側の実装順序は `vm/design-contracts` の `docs/kasane-roadmap.md` と `docs/kasane-astra-plan.md`（Astra 計画）に従い、その checkpoint 番号をここでも使う。
+2026-09-15。**設計**（未実装）。[システムランタイム仕様](system-runtime.md)と[モジュール境界](module-boundaries.md)を、vm/main の現行コードへ当てはめる手順を決める。Kasane 側の実装順序は[kasane-roadmap.md](kasane-roadmap.md)と[kasane-astra-plan.md](kasane-astra-plan.md)（Astra 計画）に従い、その checkpoint 番号をここでも使う。
 
 **前提（ユーザー判断、2026-09-15）:** `pocket.pet` はネイティブアプリ（Pocket Pet / Pet Companion）の面であり、共通 API ではない。依存は **ペット → システムモジュール** の向きが正しい。
 
@@ -132,7 +132,7 @@ JS 側の変化:
 | scope 購読と focus の原子的確定 | 15 | 通知の確認キーを Kasane の入力 scope に移す |
 
 - **SYSTEM 層の予算は 16 命令・128 B・トラック2**（[デザインシステム](design-system.md) §5、[ペット適用仕様](design-system-pet.md) §5）。表示するのは ACTIVE の1件だけで、待機中の通知は命令を持たない。
-- 描画順は APP → APP モーダル → SYSTEM（`vm/design-contracts` の `docs/design-composition.md` §2）。通知はモーダルより上に出る。
+- 描画順は APP → APP モーダル → SYSTEM（[design-composition.md](design-composition.md) §2）。通知はモーダルより上に出る。
 
 ## 4. 現行の挙動との対応
 

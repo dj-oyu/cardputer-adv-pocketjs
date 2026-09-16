@@ -8,6 +8,7 @@
 // .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/solar_sail.c"
+#include "hostshim/solar_clock.h"
 #include "../main/scene/solar_time.c"
 #include <assert.h>
 #include <stdio.h>

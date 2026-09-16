@@ -3,7 +3,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 
-// pocket.ui and pocket.input — section 6 of docs/api/common-api.md.
+// pocket.ui — section 6 of docs/api/common-api.md. Input lives in pocket_input.h.
 //
 // This is the surface that replaces ui.setProp(id, 97, ...) for teaching. It
 // does not remove the legacy globals: pocket.ui is built ON TOP of globalThis.ui
@@ -38,12 +38,10 @@ esp_err_t pocket_ui_install(JSContext *ctx, void *user_data);
 // told no.
 void pocket_ui_attach(JSContext *ctx);
 
-// Turns the frame's button mask into ActionEvents and expires a toast. Call
-// once per frame from the JS task with the same mask app_tick() was handed.
-// Costs two loads and a branch when nothing is subscribed and no toast is up.
-void pocket_ui_pump(uint32_t buttons);
+// Expires a toast, on the JS task. Action delivery is pocket_input_pump().
+void pocket_ui_pump(void);
 
-// Drops every screen, node, list and input subscription. Call from the JS task
+// Drops every screen, node and list. Call from the JS task
 // while the guest is still alive — app_stop() before it destroys the guest —
 // so the retained callbacks and item arrays are released into that realm.
 void pocket_ui_reset(void);

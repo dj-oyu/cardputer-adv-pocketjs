@@ -1,12 +1,17 @@
 """Build and run the exhaustive C models in models/ with whatever host C
 compiler is available (gcc, clang, cc, or `zig cc`).
 
-    python tools/pie/run_models.py            all seven
-    python tools/pie/run_models.py blend      one of: ocean, wave, blend, accel, garden, fir, canopy
+    python tools/pie/run_models.py            every model
+    python tools/pie/run_models.py blend      one of: ocean, wave, blend, accel, garden,
+                                              fir, canopy, disc, blendpack, scale256
 
 Each model prints its own verdict; this script fails if any of them reports a
-mismatch or a non-zero exit. The ocean model needs a few seconds, the others
-about a second.
+mismatch or a non-zero exit. The ocean and blendpack models need a few seconds,
+the others about a second. scale256 is the one whose sweep is expected to find
+moved pixels (it is an approximation being measured, not an identity being
+proved): it prints those counts and still exits 0, because the claims it does
+assert -- the scale's identities, the off arm against the pre-change formula,
+and the alphas that must not move -- all hold.
 """
 import os
 import shutil
@@ -25,6 +30,8 @@ TARGETS = {
     'fir': (['fir_model.c'], []),
     'canopy': (['canopy_model.c'], []),
     'disc': (['disc_model.c'], []),
+    'blendpack': (['blend_pack_model.c'], []),
+    'scale256': (['scale256_model.c'], []),
 }
 
 

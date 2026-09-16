@@ -1,0 +1,303 @@
+# Kasane 実機診断
+
+2026-09-13、`vm/design-contracts`、コア基点`770c531`。
+
+## 現在の結果
+
+### 2026-09-15: CP4b後のnative / JS再確認
+
+`93872a4`のfirmwareを`CONFIG_KSN_DEVICE_PROBE=y`でビルドし、COM3のESP32-S3
+（MAC ac:a7:04:01:2e:80）へ書込み。bootloader/partition/appのFlashハッシュ照合成功。
+PSRAMなし、出荷VMのSEGFRAMES/FLATCALLS有効。ユーザーから実LCDの矩形移動・透過・
+ぼかしは「正常に見える」と回答を受けた。
+
+- native `~`: core/review、矩形差分、cache2 instance、group/modal、view、glass、PIE A/B、
+  600フレームstressがPASS。HOME_READY復帰。転送前画素は通常32,400＋glass32,400＋
+  stress97,200＝162,000画素すべて独立期待値と一致。
+- native stress: mean20,053 µs、p95 20,276 µs、max20,438 µs、misses/skippedとも0。
+  free heapはbefore/min/afterすべて240,308 B、largestはすべて65,536 B。
+  stack未使用量21,580 Bは診断全体の値で、production描画の追加stackではない。
+- native PIE A/B: 64試行×8,960画素でscalar361,721 µs、PIE144,678 µs、checksum一致。
+  この診断カーネルの対照試験であり、UI全体の高速化倍率ではない。
+- JS `K`: 実QuickJSで300 tick、初回表示、通常→半透明modal→通常、HOME_READY復帰がPASS。
+  tick120/180はmodal（12 commands）、240/300はapp（9 commands）。native予約は12,908 Bで
+  CP4bのS3型情報と一致。10窓の平均はturn3.21 ms/render12.59 ms/send3.37 ms。
+  通常/modalが混在する平均であり、p95や最大値ではない。JS版は今回ログでの確認で、
+  native版のような画素回収比較はしていない。
+- app2,196,592 B、Flash余裕949,136 B、DIRAM137,276 B。通常構成に対する13,872 B増は
+  native診断領域等のため。診断ファームは実機に残し、両テスト後はhomeへ戻した。
+
+実行:
+
+```sh
+python tools/kasane_contract/device_probe.py --port COM3 --out .cache/kasane-device-20260915-native
+python tools/kasane_device_test.py --port COM3 --ticks 300 --out .cache/kasane-device-20260915-js
+```
+
+各ディレクトリにserial.log、native側にはpre-spi.png、glass-pre-spi.png、stress画像3枚と
+stress-report.jsonを保存。cache統計の期待値をCP3分割後の3,064 B（予約3,056＋共有ID8）へ更新。
+今回の確認はUI診断1巡。100回起動、Wi-Fi/audio併用、全CPの実機検証完了とはしない。
+
+以下は過去の診断履歴。
+
+- COM3のESP32-S3、240 MHz、Flash 8 MBに診断ファームを書込み、Flashハッシュ照合成功。
+- ユーザーが矩形の動きとホーム画面への復帰を目視確認した。
+- 最初の起動時診断ではUSBログが欠落したため、コアテストのPASS、更新時間、heap差分、全画素一致は未確認。目視での成功をこれらの代わりにしない。
+- USB接続安定後に`~`で起動する診断へ修正し、ESP-IDF v6.0.1ビルド成功。再書込みの自動承認レビューが一度利用上限エラーとなったが、ユーザー承認後の再試行で書込み・Flashハッシュ照合に成功した。実機にはUSB起動版が入っている。
+- USB起動版では実コア回帰テストとレビュー回帰テストがともにPASS。全32,400画素の期待値一致とHOME_READYへの復帰もPASS。
+
+### USB起動版の実測値
+
+| 項目 | 結果 |
+| --- | ---: |
+| PATCH→change→end→discard、1,000回の平均 | 14 µs |
+| 同最大 | 79 µs |
+| 計時区間前/後のfree heap | 252,308 / 252,308 B |
+| 初回の矩形合成＋全画面転送 | 12,698 µs / 64,800 B |
+| 診断後UI taskのstack high-water（未使用量） | 22,028 B |
+| ターゲットのsizeof(ksn_frame_command) | 172 B |
+
+1回の診断実行の値。タイミングには他タスクの割込みを含み、Wi-Fi/音声併用の条件別評価やp95ではない。
+実ログと転送前画像は`.cache/ds-device-probe-usb/serial.log`、`pre-spi.png`に保存した。
+
+## 実装範囲
+
+`CONFIG_KSN_DEVICE_PROBE`は既定で無効。`main/ui/kasane/ksn_device_probe.c`は実際のコアに対するホスト回帰テストをターゲットABIで実行する。
+続いてAPP矩形、SYSTEM帯、APP矩形の位置変更を既存のboard stripから同期転送し、ホームへ戻る。
+USB起動版はホーム画面で`~`を受け取り、UI owner taskで処理する。実行前にJSアプリを終了する。
+
+初回の描画経路は診断用の不透明矩形・全17帯転送。後続版では位置変更と画素回収を`ksn_render_rects`へ接続し、damageに基づく部分転送を検査する。native animation、QuickJS bindingの実装ではない。
+1,000回のPATCH→change→end→discardを計時し、平均・最大と前後のfree heapを記録する。
+これは表示を含むフレーム時間でもp95でもない。free heapが同じでも一時確保ゼロの証明にはならない。
+
+最終状態の転送前画素を`board_capture`で回収する。ホストは32,400画素を独立した矩形の期待値と比較し、移動元消去・clip・レイヤー表示を検査する。
+captureはSPIのbyte swapと物理転送より前なので、液晶の物理的な表示確認は別に行う。
+回帰テストは一時的に大きなcoreをスタックに置くため、この診断のstack high-waterをproduction描画の追加スタックと解釈しない。
+
+## サイズ確認
+
+USB起動版のビルド時実測: app binary 2,155,072 B、Flash上限まで990,656 B。
+map上の静的DIRAMは124,700 B、未接続コア版115,468 Bから9,232 B増加。
+主な内訳はcore本体9,216 B、テスト結果変数4 B、共有ID8 B、USBトリガー1 Bとアラインメント。
+`nm`で`probe_core`が0x2400 B、`ksn_core_frame`と`ksn_device_probe_run`がリンクされていることを確認した。
+診断用領域を含む数値であり、Kasane全体16 KiB予算の達成を意味しない。
+
+## 再実行
+
+通常ビルドの設定を変更せず、専用sdkconfigに`CONFIG_KSN_DEVICE_PROBE=y`を設定する。
+今回のworktreeでは`build_ds_contract/sdkconfig.dsprobe`を使用する。
+
+```powershell
+. 'C:\Espressif\tools\Microsoft.v6.0.1.PowerShell_profile.ps1'
+idf.py -B build_ds_contract -D SDKCONFIG=build_ds_contract/sdkconfig.dsprobe build
+idf.py -B build_ds_contract -p COM3 flash
+python tools/kasane_contract/device_probe.py --port COM3 --out .cache/ds-device-probe-usb
+```
+
+スクリプトは`q`でHOME_READYを待ってから`~`を送る。
+`KSN_PROBE: PASS`とホーム復帰、135行の完全なcapture、全画素一致のすべてを要求する。
+ログは出力先の`serial.log`、一致した場合のみ画像を`pre-spi.png`へ保存する。
+初回の失敗ログは`.cache/ds-device-probe/serial.log`。新しい出力先を使って保持する。
+
+## 画像登録・damage追加後の実機検証
+
+2026-09-13。画像登録表16件をcoreの9,216 B予約内に追加。共有IDは計12 Bとなり、coreの常駐計上は9,228 B。
+`nm`で`ksn_core_damage`と`ksn_render_rects`のリンクを確認。ファーム全体の静的DIRAMは124,700 B、app binaryは2,157,520 B。
+
+| 検査 | 実測・結果 |
+| --- | --- |
+| APP矩形の横移動 | 4,453 µs、mask 0xfe0、7帯、26,880 B |
+| 同じ状態の再提出 | 0帯、0 B |
+| 全面再送経路の全画素回収 | 32,400画素すべて期待値一致 |
+| 1,000回のPATCH→change→end→discard | 平均14 µs、最大91 µs |
+| 計時区間前後のfree heap | 252,308 / 252,308 B |
+| 診断後stack high-water（未使用量） | 21,964 B |
+| 回帰テスト、HOME_READY | PASS |
+
+部分転送時間はこの矩形場面1回の合成＋転送。初回の全面診断は別実装のため、時間比から一般的な高速化率を主張しない。
+無変更を検査した後、ホストが転送失敗状態を注入して全面再送を要求し、実際の`ksn_render_rects`から135行をcaptureする。これは物理SPI障害を発生させた試験ではない。
+ホストでは別途、半透明SYSTEM重なり・画面外移動を含む150回の部分描画と独立した全面参照描画を比較し、途中転送失敗でパネルの一部が変化した状況からの復帰も検査した。
+ログと画像は`.cache/ds-device-partial/serial.log`と`pre-spi.png`。実機にはこの部分転送診断版を書込み済み。
+
+## 明示cache追加後の実機検証
+
+2026-09-13。同じ矩形templateから2 instanceを同時表示し、片方を非表示にした。
+`ksn_cache`は4,096 B、共有ID8 B、template 1、instance 2、保存命令1。診断構成の静的DIRAMは128,812 Bで、cache導入前から4,112 B増加した。
+
+| 検査 | 実測・結果 |
+| --- | --- |
+| 片方のinstanceを非表示 | 4,419 µs、mask 0xfe0、7帯、26,880 B |
+| 同じ状態の再提出 | 0帯、0 B |
+| cache操作を含む1,000回の更新 | 平均19 µs、最大201 µs |
+| 計時区間前後のfree heap | 248,196 / 248,196 B |
+| 診断後stack high-water（未使用量） | 21,852 B |
+| 最終転送前画素、HOME_READY | 32,400画素一致、PASS |
+
+ログと画像は`.cache/ds-device-cache/serial.log`と`pre-spi.png`。実機にはcache診断版を書込み済み。
+表示されたinstanceの命令はcore bankへ展開するため、cacheの4,104 Bに加えて通常の命令quotaを消費する。
+
+## グループ透過・modal追加後の実機検証
+
+2026-09-14。2枚の重なる子を持つtemplateから2 instanceを表示し、片方を非表示、残りをgroup opacity=128にした。
+転送前32,400画素を独立したPythonのpremultiplied合成式と比較して一致した。続いてDIM_LIVE modalを開閉し、入力scopeとfocus=42復帰をowner上で検査、HOME_READYへ戻った。
+
+| 検査 | 実測・結果 |
+| --- | --- |
+| 初回表示 | 13,528 µs、64,800 B |
+| 非表示＋group opacity=128 | 6,307 µs、7帯、26,880 B |
+| 無変更 | 0帯、0 B |
+| 2命令instanceの1,000回PATCH/discard | 平均25 µs、最大241 µs |
+| 計時前後free heap | 248,300 / 248,300 B |
+| 診断後stack未使用high-water | 21,756 B |
+| 静的DIRAM | 128,812 B、前回比0 B |
+| app binary / Flash余裕 | 2,163,024 / 982,704 B |
+| core / cache / frame_command | 9,216 / 4,096 / 176 B |
+
+`nm`でcore/cacheの実サイズと`ksn_core_group`、`ksn_core_poll`、`ksn_render_rects`、modalのopen/close/resolve/routeのリンクを確認した。
+modal_cancel/focus補正はホスト検証であり、この実機診断では未実行。物理LCD readback、実キー配送、音声/Wi-Fi併用、p95は未検証。
+今回は前回の1命令instanceから2命令へ変えており、処理時間差を同一負荷での回帰と解釈しない。
+ログと転送前画像は`.cache/ds-device-composition/serial.log`と`pre-spi.png`。実機にはこの診断版を書込み済み。
+
+## 半透明・すりガラス比較診断
+
+2026-09-14。`ksn_frost`の1/8縮小・分離box blur・bilinear拡大・tintを実機で検証した。
+左パネルはtintのみ、右はblur＋tint。線・ボタン・枠は後から描く。両側tintのみ3秒、右の半径1を4秒、半径2を12秒表示する。
+ホーム画面で本体から`~`を入力すると再実行できる。USBの`~`も従来通り。物理キーボード入口はビルド済みだが、今回の自動実行はUSB経由。
+
+| 検査 | 実測・結果 |
+| --- | --- |
+| 半径1: 背景生成＋縮小＋blur | 29,011 µs |
+| 半径2: 背景生成＋縮小＋blur | 30,210 µs |
+| 半径1/2: 比較画面全体の生成・SPI転送 | 47,079 / 47,154 µs |
+| 専用保持領域 | 2,048 B |
+| 静的DIRAM | 130,860 B、前回から+2,048 B |
+| app binary / Flash余裕 | 2,165,552 / 980,176 B |
+| 半透明部品の既存画素検証 | 32,400画素一致 |
+| 半径2の比較画面 | 32,400画素一致、HOME_READYへ復帰 |
+
+`nm`で`probe_frost=0x800`および`ksn_frost_feed/blur/span`のリンクを確認。ホストでもASan/UBSanと最適化の両方で、半径1/2の計64,800画素が独立Python参照式と一致した。
+準備時間には市松模様の背景生成も含む。全画面比較表示時間には模様の再生成、左側tint、右側補間、装飾と転送を含み、blur単体や毎フレームの性能ではない。
+転送前画像は`.cache/ds-device-glass/glass-pre-spi.png`、実ログは同ディレクトリの`serial.log`。物理LCDのreadbackではない。
+この診断は既知の背景からの画素処理検証で、実アプリのcapture handle/attach、期限付き逐次実行、frosted modalへの接続は未実装。
+
+## 経時変化・毎フレーム再生成の負荷試験
+
+2026-09-14。600フレーム、約60秒（回収除外）の連続負荷。背景スクロール、2枚の半透明矩形の移動/alpha変化、すりガラスパネルの移動/tint alpha変化を同時に実行した。
+毎回2 KiBのsnapshotを作り直し、blur半径1/2を60フレームごとに切り替え、全画面をSPI転送する。30 fps目標の周期へ追従できない場合は飛ばした周期を計上する。
+
+| 項目 | 実測 |
+| --- | ---: |
+| フレーム処理時間 平均 / p95 / 最大 | 88,196 / 89,388 / 89,986 µs |
+| 背景生成＋縮小＋blur 平均 | 44,207 µs |
+| 再合成＋補間＋tint＋SPI 平均 | 43,988 µs |
+| 回収除外の経過時間 | 59,988,406 µs |
+| 実効表示速度（待機・通常ログ含む） | 約10.00 fps |
+| 33,333 µs期限超過 | 600 / 600フレーム |
+| 飛ばした目標周期数 | 1,200 |
+| 通常転送量（回収再描画を除く） | 38,880,000 B |
+| free heap 開始 / 採取最小 / 終了 | 246,148 / 246,148 / 246,148 B |
+| 最大連続空き 開始 / 採取最小 / 終了 | 73,728 / 73,728 / 73,728 B |
+| UI task stack未使用high-water | 21,692 B |
+
+600件の時間を保存する診断スタック2,400 Bを追加。静的DIRAMは130,860 Bで増加なし。app binaryは2,169,040 B、Flash余裕976,688 B。`nm`で`ksn_stress_probe_run`のリンクを確認した。
+この条件では30 fpsを達成していない。約10 fpsには目標周期への待機も含み、処理時間の逆数は約11.34 fps。
+画素回収の合計2,999,242 µsは時間とアニメーションから除外。空き領域は60フレーム間隔で採取した最小値で、瞬間最低値ではない。
+0/299/599フレーム（tick=0/29,899/59,899 ms）の計97,200画素が独立Python式と一致し、HOME_READYへの復帰も確認した。記録は`.cache/ds-device-stress/serial.log`と`stress-report.json`、画素は`stress-000.png`、`stress-299.png`、`stress-599.png`。
+PASSは負荷処理の完走を示し、性能目標達成を意味しない。QuickJS/Kasane PATCH/音声/Wi-Fi併用を含むアプリ全体の試験とは分ける。
+
+## 2026-09-14: frostのスカラ最適化
+
+`vm/design-contracts`。channel展開を確実にinline化し、feedのRGBループを展開。
+blurは端画素複製を含む移動和へ変更し、各passのRGB565量子化を維持した。
+spanは丸め前の縦補間を先に行い、隣接2列を再利用する。30列180 Bの案を
+2列24 Bへ縮め、const snapshotの内部を書き換えず、追加heapなしで実装した。
+その他の局所配列・コンパイラのspillは別途スタックを使う。保持領域は2,048 Bのまま。
+
+| 600-frame workload | 変更前 | frostのみ初期改善 | 最終版 |
+| --- | ---: | ---: | ---: |
+| mean µs | 88,200 | 64,265 | 29,559 |
+| p95 µs | 89,394 | 64,951 | 29,698 |
+| max µs | 90,158 | 65,599 | 29,882 |
+| observed fps | 10.002 | 15.001 | 30.006 |
+| deadline miss / skipped | 600 / 1200 | 600 / 600 | 0 / 0 |
+
+最終版の平均内訳: 背景生成10,266 µs、feed 4,306 µs、blur 800 µs、
+span+tint 5,790 µs、board_present 7,076 µs。残差は装飾・計時・ループ等。
+計時はesp_timer_get_timeを行/帯単位で使用し、割込みや呼出コストを含む。
+画素回収の再実行を集計から除外する。準備/表示の合計値だけをfilter時間と扱わない。
+初回LCD診断の約13.7msは合成も含み、転送単独の7.1msと区別する。
+
+最終版では試験用背景の時刻・矩形位置・8種類の合成色をprepare/showごとに一度計算する。
+スクロール、2矩形の移動とalpha、パネルの移動とtint、毎フレームrecapture、
+半径1/2切替、全17帯64,800 B転送は維持する。ただし背景の画素ごとのalpha算術は
+8色の事前計算へ減らしたため、総合の約3倍という改善を汎用alphaカーネルの倍率と解釈しない。
+別ビルド・実時間アニメーションの比較であり、同一バイナリ/固定入力のkernel A/Bではない。
+
+ランダム背景16件、両半径、全256 alpha、全135行、部分spanと出力canaryを
+凍結した旧実装と比較。背景生成もランダム時刻100件×全画面で旧式と一致。
+ASan/UBSan、O2/strict-aliasing、独立Pythonの静止64,800画素/動的97,200画素がPASS。
+実機では静止32,400画素・frame 0/299/599の97,200画素が一致しHOME_READYへ復帰。
+LCD読戻しではなく転送前比較である。
+
+最終実機heap before/min/after=246,100 B、最大連続空き73,728 B、stack_free=21,740 B。
+静的DIRAM=130,908 B（以前より48 B増、計測counter40 Bとalignment）。
+app binary=2,170,144 B。nmでprobe_frost=0x800、channelのout-of-line symbol消失を確認。
+記録: `.cache/ds-device-scalar-opt/`、`.cache/ds-device-scalar-final/`。
+
+この負荷ではスカラ変更で30fpsを達成したためPIE追加は保留。
+併用時の余裕が不足したらspan+tint融合を優先し、次にfeedを検討する。
+blurは0.8msなので優先度を下げる。Wi-Fi/音声併用、製品capture/attach、
+静止snapshot再利用の受入はこの試験に含まない。
+
+## 2026-09-14: 利用API再構成と補間・tintのPIE化
+
+前節のPIE保留を撤回し、余裕時間を増やすため`ksn_frost_span`をSIMD化した。
+1セル8画素の水平補間とtintをQACCで融合する。丸めは元の順序通りに2段階で行う。
+補間区間の端と短いspanはscalar、128-bitストアは16-byte整列の8画素tileだけに行い、
+呼出元の出力先は2-byte整列でよい。snapshotはconstのまま、追加heapは0。
+
+### 同一バイナリ・固定入力のA/B
+
+同じランダムsnapshot、各回同じ位置/tint、112×80画素の64試行。
+scalar/PIEの実行順を交互に反転し、ログと待機を計測区間から除外した。
+
+| 項目 | scalar | PIE |
+| --- | ---: | ---: |
+| 64試行合計 | 362,219 µs | 145,690 µs |
+| 1試行平均（8,960画素） | 5,659.7 µs | 2,276.4 µs |
+
+2.486倍、時間59.78%減。API呼出・端処理・tileコピーを含むspan全体の比較で、
+アセンブリ本体だけの命令周期ではない。端だけの短いspanでは同じ倍率を期待しない。
+
+### 600フレームの継時負荷
+
+| 項目 | 前回scalar最終版 | 今回PIE |
+| --- | ---: | ---: |
+| frame平均 | 29,559 µs | 26,126 µs |
+| p95 / 最大 | 29,698 / 29,882 µs | 26,315 / 26,474 µs |
+| span+tint平均 | 5,790 µs | 2,336 µs |
+| 33,333 µsまでの平均余裕 | 3,774 µs | 7,207 µs |
+| 期限超過 / skipped | 0 / 0 | 0 / 0 |
+| 観測FPS | 30.006 | 30.013 |
+
+今回の残りの平均内訳: source 10,282、feed 4,313、blur 802、SPI 7,052 µs。
+動く背景、半透明矩形2枚、パネル移動/tint変化、毎フレームrecapture、半径1/2、
+全17帯の転送を維持。フレーム全体の比較は別ビルド・実時間アニメーションであり、
+上の同一入力A/Bと区別する。Wi-Fi/音声/QuickJSアプリ併用の余裕は未検証。
+
+### 画素・API・容量
+
+- ホストのassembly modelで実際のinline asmを4,096セル実行し、全alphaを含め整数除算の参照式と一致。
+- ホストの旧実装比較はランダム背景16件、両半径、全alpha/行、全出力整列位置、短いspanとcanary。
+- 実機の実assemblyでも全256 alpha×135行の部分spanをscalarと比較し、出力先8通りの整列とcanaryが一致。
+- 転送前画素は合成32,400、静止glass32,400、動的3フレーム97,200画素が独立Python式と一致。HOME_READY復帰。
+- `VIEW PASS coordinator=84`。新利用窓口だけでcache2個、yield相当取消、無変更転送0、modal開閉とfocus復帰を検証。
+- heap before/min/after=246,100 B、最大連続空き73,728 B、stack_free=21,548 B。
+- 静的DIRAM=130,908 B（増加0）、app binary=2,174,176 B（前回から+4,032 B、API/診断を含む）、Flash余裕971,552 B。
+- snapshot=2,048 Bのまま。PIE spanのtextは792 B、weightsはFlashに32 B、scalar controlは627 B。
+- S3 GCC `-Os -fstack-usage`でspan自身160 B、scalar自身128 B。端でscalarを呼ぶ経路は合計288 Bを見込む（呼出元を除く）。
+  「追加tileが16 Bだから追加stackも16 B」とは扱わない。
+
+ログ、転送前画像、stress-report.jsonは`.cache/ds-device-pie-view/`。
+ビルド/書込みは`build_ds_contract`のESP-IDF v6.0.1。実測ELFは`38d7312`を基点とする本変更の未コミット状態。
+新APIのnative coordinatorは完成したが、QuickJS binding/実アプリ移行/capture attachまで完了したという結果ではない。

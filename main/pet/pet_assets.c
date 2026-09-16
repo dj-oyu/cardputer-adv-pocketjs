@@ -1,4 +1,5 @@
 #include "pet_assets.h"
+#include "pocketjs/ui_core.h"
 #include "esp_timer.h"
 #include "pocket_api.h"
 #include "app_session.h"

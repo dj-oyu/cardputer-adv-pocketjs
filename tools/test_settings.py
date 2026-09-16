@@ -83,7 +83,7 @@ try:
     command('q','HOME_READY')
     command('b','CATEGORY 1');command('u','SELECT 3');command('u','SELECT 2')
     # POCKET PET is appended at index 5; existing settings/Hello indices stay fixed.
-    command('a','CATEGORY 0');command('e','HELLO_FRAME_PRESENTED');command('q','HOME_READY')
+    command('a','CATEGORY 0');command('e','FRAME_PRESENTED');command('q','HOME_READY')
     print('SETTINGS_OK sound=ON categories, toggles, mute, app-return',flush=True)
 finally:
     # An assertion above can abort while SOUND is OFF, which then persists in NVS.

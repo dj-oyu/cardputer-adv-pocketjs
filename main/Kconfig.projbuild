@@ -8,6 +8,13 @@ menu "Pocket VM (L0 measurement probes)"
             Runs the host lifecycle test on the device via USB command L.
             Use a private sdkconfig in a dedicated build directory.
 
+    config KSN_DEVICE_PROBE
+        bool "Enable USB-triggered Kasane core regression and LCD diagnostic"
+        default n
+        help
+            USB '~' on the home screen runs tests and opaque rectangles. Uses extra
+            static storage and stack. Not a production renderer benchmark.
+
     config POCKET_VM_PROBE
         bool "Enable L0 VM probes (docs/vm/quickjs-freertos-vm-spec.md sec.5)"
         default n

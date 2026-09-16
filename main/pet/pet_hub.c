@@ -3,7 +3,7 @@
 #include "pocket_api.h"
 #include "paint.h"
 #include "sound.h"
-#include "solar_time.h"
+#include "system/sys_device.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "nvs.h"
@@ -17,29 +17,36 @@ static pet_hub_t hub;
 static QueueHandle_t inbox;
 static nvs_handle_t prefs;
 static bool opened, changed;
-static uint32_t clock_utc;
-static uint64_t clock_ms, ringing, next_tone;
 static char alert[PET_LABEL_CHARS+1];
+static uint32_t alert_id,alert_owner;
+static bool overlay_suppressed;
+void pet_hub_overlay_suppress(bool suppress){overlay_suppressed=suppress;}
+uint16_t pet_hub_selected(void){return (uint16_t)hub.saved.selected;}
 #include "pet_assets.h"
 #include "pet_pixels.h"
 static uint64_t now_ms(void){return esp_timer_get_time()/1000;}
 static uint32_t read32(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static uint32_t utc_now(void) {
-    solar_time_sample_t t=solar_time_now(0);
-    if(t.source==SOLAR_TIME_UTC)return (uint32_t)(t.days*86400.0+946728000.0);
-    return clock_utc?clock_utc+(uint32_t)((now_ms()-clock_ms)/1000):0;
+    sys_clock_state t;
+    if(sys_clock_snapshot(sys_device_state(),(uint64_t)esp_timer_get_time(),&t)&&t.seconds<=UINT32_MAX)
+        return (uint32_t)t.seconds;
+    return 0;
 }
 static bool persist(void) {
     if(opened&&nvs_set_blob(prefs,"state",&hub.saved,sizeof(hub.saved))==ESP_OK&&nvs_commit(prefs)==ESP_OK)return true;
     ESP_LOGW("pet","PET_SAVE_FAILED");return false;
 }
 void pet_hub_init(void) {
-    pet_hub_defaults(&hub);opened=nvs_open("pet_hub",NVS_READWRITE,&prefs)==ESP_OK;
+    pet_hub_defaults(&hub);hub.notifications=sys_device_notifications();
+    hub.timers=sys_device_timers();
+    opened=nvs_open("pet_hub",NVS_READWRITE,&prefs)==ESP_OK;
     if(opened) {
         pet_hub_saved_t s;size_t n=sizeof(s);
         if(nvs_get_blob(prefs,"state",&s,&n)==ESP_OK&&n==sizeof(s)&&s.magic==PET_HUB_MAGIC&&
            s.selected<12&&s.wake_minute>=-1&&s.wake_minute<1440&&s.utc_offset>=-50400&&s.utc_offset<=50400)hub.saved=s;
     }
+    sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
+    pet_hub_bind_wall(&hub,sys_device_wall());
     inbox=xQueueCreate(4,PET_WIRE_BYTES);
 }
 bool pet_hub_usb(uint8_t c) {
@@ -58,14 +65,16 @@ bool pet_hub_usb(uint8_t c) {
 }
 bool pet_hub_pump(void) {
     uint64_t now=now_ms();
-    if(pet_hub_tick(&hub,now,utc_now()))persist();
+    if(sys_wall_take_changed(sys_device_wall()))persist();
     uint8_t d[PET_WIRE_BYTES];
     while(inbox&&xQueueReceive(inbox,d,0)==pdTRUE) {
         if(d[0]==1&&d[1]==2&&pet_crc(d,44)==read32(d+44)) {
             int32_t offset=(int32_t)read32(d+36);uint32_t stamp=read32(d+40);
             if(offset>=-50400&&offset<=50400&&stamp>=1577836800u) {
                 if(offset!=hub.saved.utc_offset){hub.saved.utc_offset=offset;persist();}
-                clock_utc=stamp;clock_ms=now;changed=true;
+                sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
+                sys_clock_offer_pc(sys_device_state(),stamp,(uint64_t)esp_timer_get_time());changed=true;
+                sys_wall_invalidate(sys_device_wall());
                 ESP_LOGI("pet","PET_ACK 2 %lu",(unsigned long)read32(d+4));
             }
             continue;
@@ -73,8 +82,10 @@ bool pet_hub_pump(void) {
         pet_hub_saved_t before=hub.saved;
         if(pet_hub_packet(&hub,d)) {
             if(!persist()){hub.saved=before;continue;}
+            sys_wall_invalidate(sys_device_wall());
             pet_usage_t *p=&hub.saved.usage[d[2]];
-            clock_utc=read32(d+40);clock_ms=now;changed=true;
+            sys_clock_timezone(sys_device_state(),hub.saved.utc_offset);
+            sys_clock_offer_pc(sys_device_state(),read32(d+40),(uint64_t)esp_timer_get_time());changed=true;
             ESP_LOGI("pet","PET_ACK %u %lu",d[2],(unsigned long)p->sequence);
         } else if(d[2]<2&&pet_crc(d,44)==((uint32_t)d[44]|(uint32_t)d[45]<<8|(uint32_t)d[46]<<16|(uint32_t)d[47]<<24)) {
             // A lost ACK is safe to retry. Invalid/newer frames get no ACK.
@@ -85,21 +96,27 @@ bool pet_hub_pump(void) {
                 ESP_LOGI("pet","PET_ACK %u %lu",d[2],(unsigned long)seq);
         }
     }
-    if(!alert[0]&&pet_hub_take(&hub,alert)){ringing=now;next_tone=now;changed=true;}
-    if(alert[0]&&now-ringing<30000&&now>=next_tone) {
-        sound_tone(1046,200,0.35f,NULL,NULL);next_tone=now+2000;
-    }
+    sys_notify_step(hub.notifications,now*1000);sys_notice notice;
+    if(sys_notify_active(hub.notifications,&notice)){
+        if(alert_id!=notice.id){
+            alert_id=notice.id;alert_owner=notice.owner;memcpy(alert,notice.label,sizeof(alert));
+            changed=true;
+        }
+    }else if(alert_id){alert_id=0;alert[0]=0;changed=true;}
+    if(sys_device_take_tone())sound_tone(1046,200,0.35f,NULL,NULL);
     bool result=changed;changed=false;return result;
 }
 bool pet_hub_key(board_key_t key) {
     if(!alert[0]||key==KEY_NONE)return false;
     if(key==KEY_RIGHT) {
-        if(!pet_hub_timer(&hub,"snooze",alert,now_ms()+300000))return true;
+        if(sys_notify_snooze(hub.notifications,alert_owner,alert_id,
+            (uint64_t)esp_timer_get_time()+UINT64_C(300000000))!=NOTICE_OK)return true;
     } else if(key!=KEY_ENTER&&key!=KEY_BACK)return true;
-    alert[0]=0;changed=true;return true;
+    else if(sys_notify_ack(hub.notifications,alert_owner,alert_id)!=NOTICE_OK)return true;
+    alert_id=0;alert[0]=0;changed=true;return true;
 }
 void pet_hub_overlay(uint16_t *pixels, int y, int rows) {
-    if(!alert[0]||y>=48)return;
+    if(overlay_suppressed||!alert[0]||y>=48)return;
     paint_begin(pixels,y,rows);paint_fill(0,0,240,48,board_rgb(8,12,32));
     paint_fill(0,46,240,2,board_rgb(62,220,208));
     paint_ascii(42,10,alert,board_rgb(240,247,230));
@@ -156,6 +173,7 @@ static JSValue wake(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
         return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.wake","invalid alarm time",false,NULL);
     int32_t old=hub.saved.wake_minute;hub.saved.wake_minute=hour<0?-1:hour*60+minute;
     if(!persist()){hub.saved.wake_minute=old;return save_failed(c,"pet.wake");}
+    sys_wall_invalidate(sys_device_wall());
     return JS_UNDEFINED;
 }
 static JSValue alarm_set(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
@@ -199,8 +217,10 @@ static JSValue timer_read(JSContext *c,JSValueConst self,int argc,JSValueConst *
                                                 "timer id required",false,NULL);
     const char *id=JS_ToCString(c,a[0]);if(!id)return JS_EXCEPTION;
     JSValue result=JS_NULL;
-    for(unsigned i=0;i<PET_MAX_TIMERS;i++)if(hub.timers[i].due&&!strcmp(hub.timers[i].id,id)) {
-        uint64_t now=now_ms();result=JS_NewFloat64(c,hub.timers[i].due>now?(hub.timers[i].due-now)/1000.0:0);break;
+    sys_timer_record timer;
+    if(sys_timer_read(hub.timers,PET_NOTICE_OWNER,id,&timer)) {
+        uint64_t now=(uint64_t)esp_timer_get_time();
+        result=JS_NewFloat64(c,timer.due_us>now?(timer.due_us-now)/1000000.0:0);
     }
     JS_FreeCString(c,id);return result;
 }

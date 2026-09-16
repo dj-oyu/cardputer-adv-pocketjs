@@ -18,14 +18,16 @@ void pet_hub_defaults(pet_hub_t *h) {
     for(unsigned p=0;p<2;p++)for(unsigned w=0;w<2;w++)h->saved.usage[p].used[w]=-1;
 }
 bool pet_hub_notify(pet_hub_t *h, const char *label) {
-    if(h->count==PET_MAX_ALERTS)return false;
-    snprintf(h->alerts[(h->read+h->count)%PET_MAX_ALERTS],PET_LABEL_CHARS+1,"%s",label);
-    h->count++;return true;
+    uint32_t id;
+    return sys_notify_post(h->notifications,PET_NOTICE_OWNER,0,label,0,&id)==NOTICE_OK;
 }
 bool pet_hub_take(pet_hub_t *h, char label[PET_LABEL_CHARS+1]) {
-    if(!h->count)return false;
-    memcpy(label,h->alerts[h->read],PET_LABEL_CHARS+1);
-    h->read=(h->read+1)%PET_MAX_ALERTS;h->count--;return true;
+    /* Destructive legacy queue adapter. The firmware presenter uses active
+     * snapshots and explicit acknowledgement instead. */
+    sys_notify_step(h->notifications,0);sys_notice notice;
+    if(!sys_notify_active(h->notifications,&notice))return false;
+    memcpy(label,notice.label,PET_LABEL_CHARS+1);
+    return sys_notify_ack(h->notifications,PET_NOTICE_OWNER,notice.id)==NOTICE_OK;
 }
 bool pet_hub_packet(pet_hub_t *h, const uint8_t d[PET_WIRE_BYTES]) {
     if(d[0]!=1||d[1]!=1||d[2]>1||(d[3]&~7)||pet_crc(d,44)!=u32(d+44))return false;
@@ -59,36 +61,29 @@ bool pet_hub_packet(pet_hub_t *h, const uint8_t d[PET_WIRE_BYTES]) {
     return true;
 }
 bool pet_hub_timer(pet_hub_t *h, const char *id, const char *label, uint64_t due) {
-    int slot=-1;
-    for(unsigned i=0;i<PET_MAX_TIMERS;i++) {
-        if(!strcmp(h->timers[i].id,id)){slot=i;break;}
-        if(!h->timers[i].due)slot=i;
-    }
-    if(slot<0)return due==0;
-    pet_timer_t *t=&h->timers[slot];
-    snprintf(t->id,sizeof(t->id),"%s",id);
-    snprintf(t->label,sizeof(t->label),"%s",label);t->due=due;return true;
+    if(due>UINT64_MAX/1000)return false;
+    return sys_timer_set(h->timers,PET_NOTICE_OWNER,id,label,due*1000)==NOTICE_OK;
+}
+void pet_hub_bind_wall(pet_hub_t *h,sys_wall *s){
+    *s=(sys_wall){.owner=PET_NOTICE_OWNER,.invalid=true};
+    static const char *const labels[4]={"CODEX RESET TIME","CODEX SECOND RESET TIME",
+        "CLAUDE 5H RESET TIME","CLAUDE WEEK RESET TIME"};
+    for(unsigned p=0;p<2;p++)for(unsigned w=0;w<2;w++)
+        s->rules[p*2+w]=(sys_wall_rule){.due=&h->saved.usage[p].reset[w],
+            .last=&h->saved.usage[p].notified[w],.label=labels[p*2+w]};
+    s->rules[4]=(sys_wall_rule){.last=&h->saved.wake_day,.minute=&h->saved.wake_minute,
+        .offset=&h->saved.utc_offset,.label="GOOD MORNING!"};
 }
 bool pet_hub_tick(pet_hub_t *h, uint64_t ms, uint32_t utc) {
     bool dirty=false;
-    for(unsigned i=0;i<PET_MAX_TIMERS;i++) {
-        pet_timer_t *t=&h->timers[i];
-        if(t->due&&ms>=t->due&&pet_hub_notify(h,t->label))t->due=0;
-    }
-    if(!utc)return false;
-    for(unsigned p=0;p<2;p++)for(unsigned w=0;w<2;w++) {
-        pet_usage_t *u=&h->saved.usage[p];uint32_t r=u->reset[w];
-        if(r&&utc>=r&&u->notified[w]!=r) {
-            const char *label=p?(w?"CLAUDE WEEK RESET TIME":"CLAUDE 5H RESET TIME"):
-                                (w?"CODEX SECOND RESET TIME":"CODEX RESET TIME");
-            if(pet_hub_notify(h,label)){u->notified[w]=r;dirty=true;}
-        }
-    }
-    int64_t local=(int64_t)utc+h->saved.utc_offset;
-    uint32_t day=(uint32_t)(local/86400), seconds=local%86400;
-    if(h->saved.wake_minute>=0&&h->saved.wake_day!=day&&
-       seconds/60==(uint32_t)h->saved.wake_minute&&pet_hub_notify(h,"GOOD MORNING!")) {
-        h->saved.wake_day=day;dirty=true;
+    if(ms<=UINT64_MAX/1000)
+        sys_timer_step(h->timers,h->notifications,ms*1000,h->notifications&&h->notifications->changed);
+    /* Legacy host adapter. Firmware binds the long-lived scheduler once. */
+    sys_wall s;pet_hub_bind_wall(h,&s);
+    for(unsigned i=0;i<SYS_WALL_RULES;i++){
+        sys_wall_rule *r=&s.rules[i];uint32_t before=*r->last;
+        sys_wall_evaluate(r,h->notifications,PET_NOTICE_OWNER,utc,NULL);
+        dirty|=before!=*r->last;
     }
     return dirty;
 }

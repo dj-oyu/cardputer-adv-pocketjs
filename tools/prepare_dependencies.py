@@ -8,16 +8,22 @@ pocketjs_render_rgb565, thin C shims over prebuilt Rust archives, still
 build in place out of .cache/pocketjs and need this checkout.
 """
 from pathlib import Path
+import argparse
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = '6a0a1b6c91a506c473fc37a0256a47b12eceeca8'
 source = ROOT / '.cache/pocketjs'
-if not source.exists():
-    subprocess.run(['git', 'clone', 'https://github.com/pocket-stack/pocketjs.git', str(source)], check=True)
-subprocess.run(['git', '-C', str(source), 'checkout', '--detach', REVISION], check=True)
-print('Fetched PocketJS', REVISION)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--kasane-only', action='store_true',
+                    help='prepare non-UI dependencies without a PocketJS/Rust checkout')
+args = parser.parse_args()
+if not args.kasane_only:
+    if not source.exists():
+        subprocess.run(['git', 'clone', 'https://github.com/pocket-stack/pocketjs.git', str(source)], check=True)
+    subprocess.run(['git', '-C', str(source), 'checkout', '--detach', REVISION], check=True)
+    print('Fetched PocketJS', REVISION)
 bmi = ROOT / '.cache/bmi270'
 if not bmi.exists():
     subprocess.run(['git','clone','https://github.com/boschsensortec/BMI270_SensorAPI.git',str(bmi)],check=True)

@@ -34,6 +34,13 @@ bool jpfont_has(jpfont_id_t font, uint32_t codepoint);
 // tofu box. Returns the advance in px, or 0 when the face is missing.
 unsigned jpfont_glyph(jpfont_id_t font, uint32_t codepoint, uint8_t *out);
 
+typedef struct {
+    const uint8_t *bits;
+    unsigned width,height,stride,advance;
+} jpfont_bitmap_view;
+// Borrow the immutable mapped 1bpp cell, avoiding an expanded glyph buffer.
+bool jpfont_bitmap(jpfont_id_t font,uint32_t codepoint,jpfont_bitmap_view *out);
+
 // Advance of one UTF-8 character in px, and the bytes it consumed.
 unsigned jpfont_advance(jpfont_id_t font, const char *s, size_t len, size_t i,
                         size_t *adv);

@@ -2,9 +2,45 @@
 
 2026-09-13。DDDの責務分割を取り入れた実装前の構成案。現状のinclude関係ではなく、移行後の依存を示す。
 [システムruntime](system-runtime.md)と[デザインシステム](design-system.md)の構造を定義する。
+
+CP14b2の実装済み時計経路:
+
+```mermaid
+flowchart LR
+  SNTP[wifi_time] --> CLOCK[system/sys_clock]
+  SOLAR[solar_time: 天文範囲・demo] --> STATE
+  JS[pocket.time.wall] --> STATE
+  TLS[pocket.net: OS時計の検査] --> CLOCK
+  PET[pet_hub: packet検証・NVS] --> STATE[sys_state: UTC/PC anchor・dirty]
+  DEVICE[sys_device: owner step] --> CLOCK
+  DEVICE --> STATE
+  CLOCK --> WALL[gettimeofday / RTC]
+```
+
+Systemにsolar型・pethub型・QuickJS依存はない。CP14b3でsolar/JS時計もanchorへ統合済み。
+
+CP14c1: pethub → sys_notify（受付・確認・snooze）。sys_deviceが通知storeを所有し、
+期限処理とSYS_NOTIFY dirtyを配送する。pethubには通知内容の判断と既存表示・鳴動を残す。
+部品cache、modal、効果と更新参照の責務は[v0.2合成仕様](design-composition.md)に従う。cacheは描画定義を所有し、Pet等のdomain stateや永続保存を所有しない。
 図の実線矢印は「依存する側 → 公開契約を提供する側」。破線はportの実装関係で、イベントの流れではない。
 
 ## 1. コンテキストを分ける
+
+CP14a（2026-09-16）時点の実装済み電源経路:
+
+```mermaid
+flowchart LR
+  LOOP["owner loop: main.c"] --> DEVICE["sys_device: HAL adapter"]
+  AV["pocket_av: 互換入口"] --> JS["pocket_power: JS adapter"]
+  JS --> DEVICE
+  JS --> STATE["sys_state: snapshot / dirty / deadline"]
+  DEVICE --> STATE
+  DEVICE --> BOARD["board_battery_read"]
+```
+
+`sys_state`は描画・QuickJS・ESP-IDFをincludeしない。`pocket_av`に時計や通知を追加せず、
+電源の実装も独立moduleへ移した。同期status/probeのHAL呼出しだけはJS adapterに互換経路を残す。
+以下の全体図は引き続き移行先であり、時計・通知・SYSTEM presenterの移植完了を意味しない。
 
 | 境界 | 所有する意味・状態 | 外へ持ち出さないもの |
 | --- | --- | --- |

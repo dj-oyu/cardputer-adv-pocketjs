@@ -7,8 +7,12 @@ import serial
 p = argparse.ArgumentParser()
 p.add_argument('--port', required=True)
 p.add_argument('--cycles', type=int, default=100)
-p.add_argument('--frame-marker', default='HELLO_FRAME_PRESENTED',
-               help='frame-presented marker of the installed renderer')
+p.add_argument('--frame-marker', default='FRAME_PRESENTED',
+               help='frame-presented marker of the installed renderer; the default '
+                    'is the common substring of HELLO_FRAME_PRESENTED (the legacy '
+                    'renderer, app_session.c) and KASANE_FRAME_PRESENTED (the Kasane '
+                    'one), so one run covers either build. Pass the full marker to '
+                    'pin a specific renderer.')
 args = p.parse_args()
 s = serial.Serial(args.port, 115200, timeout=0.2)
 time.sleep(1.5)

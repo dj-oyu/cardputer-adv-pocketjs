@@ -105,7 +105,11 @@ def probe(port):
     try:
         s.write(b'q'); until('HOME_READY')
         s.write(b'a'); until('CATEGORY 0')
-        running = mem(s.write(b'e') and until('HELLO_FRAME_PRESENTED'))
+        # 'FRAME_PRESENTED' rather than 'HELLO_FRAME_PRESENTED': the app's first
+        # frame now leaves through the Kasane path in app_session.c:1098, which
+        # logs KASANE_FRAME_PRESENTED; the legacy marker at 1225 is not reached.
+        # The shared suffix matches either, so this is not a version check.
+        running = mem(s.write(b'e') and until('FRAME_PRESENTED'))
         idle = mem(s.write(b'q') and until('APP_STOPPED'))
     finally:
         s.close()

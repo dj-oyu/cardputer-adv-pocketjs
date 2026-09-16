@@ -610,6 +610,165 @@ class GardenDecorMix(unittest.TestCase):
         print(f'decor: {moved}/{len(cases) * 8} pixels differ from the scalar loop, '
               f'worst step r/g/b = {worst}')
 
+BLENDPIE = os.path.join(ROOT, 'main', 'ui', 'kasane', 'ksn_blend_pie.c')
+# ksn_render.c:43, the table the caller's eight threshold lanes come from.
+BAYER4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
+
+
+def quantize_ref(value, maximum, bayer):
+    q = value * maximum // 255
+    remainder = value * maximum - 255 * q
+    if q < maximum and 32 * remainder > (2 * bayer + 1) * 255:
+        q += 1
+    return q
+
+
+class KasaneBlend8(unittest.TestCase):
+    """ksn_blend8_pie's two arms against the scalar blend they replace.
+
+    The reference below is ksn_render.c:190-199 (blend) with :106-111 (pack565)
+    and :101-105 (quantize) written out again, so nothing here shares a
+    transcription with the kernel: the arithmetic being checked is the
+    renderer's. tools/pie/models/blend_pack_model.c has already checked the
+    kernel's lane arithmetic against the same statement over its whole input
+    space; this is the other half -- that the assembly *is* that arithmetic,
+    with those constants in that order, reading and writing the eight pixels it
+    claims to.
+
+    The two arms are separate instruction streams over one shared unpack and
+    mix, so test_shared_prefix_reads_the_same_unpack() compares their opcode
+    sequences: a fix applied to one copy and not the other fails here.
+    """
+
+    DST, K, ARGS, THR = 0x1000, 0x2000, 0x3000, 0x4000
+
+    @staticmethod
+    def blend_px(p, color, opacity, bayer, dither):
+        """ksn_render.c:190-199 + :106-111. Unsigned division is floor here."""
+        a = ((color % 256) * opacity + 127) // 255
+        if not a:
+            return p
+        r, g, b = (p >> 11) % 32, (p >> 5) % 64, p % 32
+        dr, dg, db = (r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)
+        r = (((color >> 24) * a) + dr * (255 - a) + 127) // 255
+        g = ((((color >> 16) % 256) * a) + dg * (255 - a) + 127) // 255
+        b = ((((color >> 8) % 256) * a) + db * (255 - a) + 127) // 255
+        if not dither:
+            return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+        return ((quantize_ref(r, 31, bayer) << 11) |
+                (quantize_ref(g, 63, bayer) << 5) | quantize_ref(b, 31, bayer))
+
+    @classmethod
+    def run_arm(cls, name, words, blocks, color, opacity, thresholds):
+        """-> (memory, sim, k). The constant table and the argument array are
+        built the way the C wrapper builds them, so the assembly's EE.VLDBC.16
+        reads what the caller would have written."""
+        asm = extract_asm(BLENDPIE, name)
+        k = extract_constants(BLENDPIE, name, {})
+        mem = bytearray(0x8000)
+        # guards either side of the run the kernel is allowed to touch
+        mem[cls.DST - 16:cls.DST] = bytes([0xA5] * 16)
+        mem[cls.DST + 16 * blocks:cls.DST + 16 * (blocks + 1)] = bytes([0xA5] * 16)
+        store16(mem, cls.DST, words)
+        store16(mem, cls.K, k)
+        a = ((color % 256) * opacity + 127) // 255
+        store16(mem, cls.ARGS, [a, color >> 24, (color >> 16) % 256, (color >> 8) % 256])
+        if thresholds is not None:
+            store16(mem, cls.THR, thresholds)
+        sim = Sim(mem)
+        ar = {'dst': cls.DST, 'kp': cls.K, 'blocks': blocks,
+              'kb': cls.K + (8 if thresholds is not None else 0),
+              'pa': cls.ARGS, 'pr': cls.ARGS + 2, 'pg': cls.ARGS + 4, 'pb': cls.ARGS + 6,
+              'sh12': 12, 'sh4': 4, 'sh16': 16}
+        if thresholds is not None:
+            ar.update(thr=cls.THR, sh5=5)
+        sim.run(asm, ar)
+        return mem, sim, k
+
+    def check(self, name, words, blocks, color, opacity, thresholds, dither):
+        mem, sim, k = self.run_arm(name, words, blocks, color, opacity, thresholds)
+        got = load16(mem, self.DST, 8 * blocks)
+        want = []
+        for i, p in enumerate(words):
+            bayer = thresholds[i & 7] if thresholds is not None else 0
+            want.append(self.blend_px(p, color, opacity, bayer, dither))
+        self.assertEqual(got, want,
+                         '%s color=%08x opacity=%d blocks=%d' % (name, color, opacity, blocks))
+        # the pointers the caller hands back: one block of eight pixels each, and
+        # the constant table walked exactly once a block
+        self.assertEqual(sim.ar['dst'], self.DST + 16 * blocks, 'dst advance')
+        self.assertEqual(sim.ar['kp'], self.K + 2 * len(k), 'constant walk')
+        self.assertEqual(mem[self.DST - 16:self.DST], bytes([0xA5] * 16), 'guard below')
+        self.assertEqual(mem[self.DST + 16 * blocks:self.DST + 16 * blocks + 16],
+                         bytes([0xA5] * 16), 'guard above')
+
+    def test_thin(self):
+        rng = random.Random(11)
+        cases = [(0xFFFFFFFF, 255, 1), (0x000000FF, 255, 4), (0x00000000, 255, 2),
+                 (0x80402010, 128, 7), (0x12345678, 200, 1), (0xFFFFFF80, 1, 3),
+                 (0x7F7F7F7F, 254, 5), (0x9ABCDEF0, 0, 2)]
+        for color, opacity, blocks in cases:
+            words = [rng.getrandbits(16) for _ in range(8 * blocks)]
+            if color == 0xFFFFFFFF and opacity == 255:
+                words = list(range(0, 8 * blocks))               # boundary words
+            self.check('ksn_blend8_thin(', words, blocks, color, opacity, None, False)
+        for _ in range(60):
+            blocks = rng.randint(1, 12)
+            words = [rng.getrandbits(16) for _ in range(8 * blocks)]
+            self.check('ksn_blend8_thin(', words, blocks, rng.getrandbits(32),
+                       rng.randrange(256), None, False)
+
+    def test_dither(self):
+        rng = random.Random(13)
+        for y in range(4):
+            for x0 in range(0, 8, 2):
+                thresholds = [BAYER4[y % 4][(x0 + i) % 4] for i in range(8)]
+                for color, opacity in ((0xFFFFFFFF, 255), (0x10204080, 127), (0xAAAAAAAB, 85)):
+                    blocks = rng.randint(1, 5)
+                    words = [rng.getrandbits(16) for _ in range(8 * blocks)]
+                    self.check('ksn_blend8_dither(', words, blocks, color, opacity,
+                               thresholds, True)
+        for _ in range(40):
+            blocks = rng.randint(1, 10)
+            words = [rng.getrandbits(16) for _ in range(8 * blocks)]
+            thresholds = [rng.randrange(16) for _ in range(8)]
+            self.check('ksn_blend8_dither(', words, blocks, rng.getrandbits(32),
+                       rng.randrange(256), thresholds, True)
+
+    def test_shared_prefix_reads_the_same_unpack(self):
+        """The two arms must share the unpack and the first channel's mix."""
+        def body_opcodes(text):
+            """The instructions of the per-block body: from its 1: label, so the
+            dither arm's once-a-call prologue is not part of the comparison.
+            The thin arm's body starts at the top of its asm block."""
+            out, started = [], '1:' not in text
+            for raw in text.splitlines():
+                t = raw.split('/*')[0].strip()
+                if not t:
+                    continue
+                if not started:
+                    started = t == '1:'
+                    continue
+                if t.endswith(':'):
+                    continue
+                out.append(t.split()[0])
+            return out
+        thin = body_opcodes(extract_asm(BLENDPIE, 'ksn_blend8_thin('))
+        dith = body_opcodes(extract_asm(BLENDPIE, 'ksn_blend8_dither('))
+        common = 0
+        for a, b in zip(thin, dith):
+            if a != b:
+                break
+            common += 1
+        # the SAR reset, the pointer reset, the eight-pixel load, the fifteen
+        # unpack instructions, the SAR switch and the alpha broadcast. The mix
+        # past that point differs by construction: the dither arm keeps its
+        # per-call preload P in a register and has one register less to
+        # reschedule with, so its loads cannot be put where the thin arm's are.
+        self.assertGreaterEqual(common, 20,
+                                'shared prefix shrank to %d: %s' % (common, thin[:common + 2]))
+        self.assertEqual(thin[:common], dith[:common])
+
 
 if __name__ == '__main__':
     unittest.main()

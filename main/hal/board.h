@@ -29,6 +29,9 @@ extern int g_board_swap_into;
 int board_async_get(void);
 void board_async_set(int on);
 esp_err_t board_present(int y, int rows, uint16_t *pixels);
+// Owner-task barrier: acknowledges completed transfer, including prior work.
+// A transfer failure invalidates the panel write position.
+esp_err_t board_present_sync(int y, int rows, uint16_t *pixels);
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 void board_capture(bool enabled);
 
