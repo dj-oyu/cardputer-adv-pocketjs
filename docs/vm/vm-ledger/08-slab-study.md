@@ -8,6 +8,8 @@
 
 ## 0. 結論
 
+> **32bit（実機と同じ JSValue 8B・ポインタ 4B・TLSF 4B 境界）で取り直した結果は §9。** 12区分が負けるのは変わらないが、区分ゼロの優位は消えて tlsf とほぼ同等になり、59,296B 段は tlsf・区分ゼロとも 17/36 で保てた。以下 §0〜§8 は 64bit ホストの結果。
+
 **No。** 実トレースの確保サイズ分布から決めた12区分のスラブは、試した6通りの配置方針のどれでも、tlsf より最大空きブロックを保てなかった。
 
 - 160 KiB プールに収まったトレースは 16〜17/36（tlsf 23/36）。29,648B 段を実行中ずっと保てたトレースは **0/36**（tlsf 14/36）。
@@ -262,4 +264,72 @@ python3 tools/vmalloc/slab_study.py --binary asan --modes fixed,wide --jobs 8 --
 
 # 1本だけ
 .cache/vmalloc/vmalloc_replay-o2 --allocator slab --cfg classes=none --cfg var_max=4000 --pool 163840 --verify .cache/vmtest/traces/closures.trace
+```
+
+## 9. 32bit で取り直す（2026-09-16 追記）
+
+§5 の「64bit ホストとの差が結論に効くか」を、トレース採取側（vmrun）と再生側（vmalloc_replay）の両方を `-m32` でビルドして確かめた。**すべて実測(host, i386)であり、実機の値ではない。**
+
+### 9.1 結論
+
+**No。区分ゼロは 32bit では tlsf に勝たない（ほぼ同等）。** 64bit で見えた優位はほとんど消えた。12区分スラブは 32bit でも明確に負ける。
+
+| 32bit、36トレース、160 KiB | tlsf | estalloc | slab 12区分（32bit 分布） | slab 12区分（64bit の区分） | 区分ゼロ |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 160 KiB に収まる | 25 | 24 | 21 | 21 | 25 |
+| 59,296B を保てた | **17** | 11 | 0 | 0 | **17** |
+| 29,648B を保てた | **22** | 19 | 17 | 14 | 21 |
+| 最小の最大空き extent の中央値（収まった走行） | **67,080** | 58,620 | 43,120 | 31,184 | 65,536 |
+| tlsf が収まる25本で tlsf と比べて（大きい / 小さい、差の中央値） | – | 0 / 24、−8,410 | 0 / 21、−27,620 | 0 / 21、−37,580 | 15 / 10、+1,184 |
+| 59,296 を常時空けるのに要るプール（tlsf が収まる25本の中央値） | **156,896（153.2 KiB）** | 165,152 | 182,512 | 192,304 | 157,600（153.9 KiB） |
+| malloc steps 平均 | 1.00 | 2.52 | 3.06 | 2.68 | 96.54 |
+
+- 区分ゼロと tlsf で段の判定が分かれたのは special_calls の1本だけ（tlsf 32,484B、区分ゼロ 28,272B で 29,648 段を割る）。59,296 段は同じ17本。
+- 対の差（+1,184B、15勝10敗）と必要プール（+704B）は向きが逆で、どちらも数 KiB の1%未満。**「勝つ」と言える差ではない。** そのため指示どおり、線形探索の索引案は試していない。
+- 12区分は 32bit の分布（上位: 16 が 252,584 件、48 が 188,045、32 が 183,128、40 が 136,761、80 が 104,441、8 が 90,096）から区分を取り直しても、59,296 段は 0/36 のまま。§0 の原因（区分数×セグメントの端数）は 32bit でも変わらない。
+
+### 9.2 64bit との差
+
+同じ worktree の同じソースから 64bit の vmrun も作り直し、44本を両方で採り直した（§4 の表は main のチェックアウトから写した古いトレースで、tlsf が収まる本数が 23 → 20 と少し違う）。
+
+| 指標 | tlsf 64 → 32 | 区分ゼロ 64 → 32 | 12区分 64 → 32 |
+| --- | --- | --- | --- |
+| 160 KiB に収まる | 20 → 25 | 20 → 25 | 12 → 21 |
+| 59,296B を保てた | 0 → 17 | 0 → 17 | 0 → 0 |
+| 29,648B を保てた | 10 → 22 | 14 → 21 | 0 → 14 |
+| 最小の最大空き extent の中央値 | 30,064 → 67,080 | 37,312 → 65,536 | 13,056 → 31,184 |
+| tlsf との差の中央値（tlsf が収まる本） | – | +7,484（20勝0敗）→ +1,184（15勝10敗） | −27,100 → −37,580 |
+| 必要プールの中央値 | 190.8 → 153.2 KiB | 181.5 → 153.9 KiB | 211.2 → 187.8 KiB |
+
+読み方:
+
+- **59,296B 段は、32bit では tlsf でも17本で保てる。** §4.1 の「全方式 0/36」は 64bit の生存バイトのせいだった（§5 の推定が当たった）。
+- **区分ゼロの 64bit での優位は、主にホスト幅の TLSF ヘッダによるものと見ている（推定。要因を分けて測ってはいない）。** 64bit ホストの tlsf は 8B 境界パッチでブロックヘッダが大きく、ポインタが 8B の空きブロックの最小サイズも大きい（台帳06 §1）。32bit で `ALIGN_SIZE_LOG2=2`（実機と同じ既定）に戻すと、この差が消える。§5 で「どれだけがヘッダ幅によるかは分けていない」と書いた点への答え。
+- estalloc は 32bit でも 8B 境界のままなので、32bit では tlsf に負ける側に回った（64bit では 16勝4敗、32bit では 0勝24敗）。
+- 丸め余白は 32bit では tlsf 8,135B、区分ゼロ 3,193B、estalloc 17,393B（収まった走行での最大）。
+
+### 9.3 32bit ビルドの条件と、揃っていない点
+
+- **ツールチェーン**: WSL に gcc-multilib が無く、sudo にはパスワードが要る。`tools/vmtest/m32_sysroot.sh` が `apt-get download`（root 不要）で i386 の libc・libgcc・libasan を落として `/tmp/m32sys` に展開し、libc.so のリンカスクリプトのパスを書き換え、その ld-linux.so.2 と DT_RPATH でリンクするフラグを出す。ASan+UBSan も 32bit で動く。
+- **JSValue 8B**: quickjs-ng は `INTPTR_MAX < INT64_MAX` で `JS_NAN_BOXING` を既定で有効にする（`quickjs.h`）。実機（Xtensa）も同じ条件で、firmware の `components/quickjs-ng/CMakeLists.txt` はこれを上書きしていない。32bit のトレース見出しは `sizeof_JSValue=8 sizeof_ptr=4`。
+- **構造体の中の double / int64 の境界**: i386 の ABI は構造体内で 4B、Xtensa は 8B。`-malign-double` で 8B に揃えた（`offsetof(struct{char; double;})` が 4 → 8 になることを確認）。glibc のヘッダはこのフラグを想定していないので、64bit のフィールドを持つ構造体を libc と受け渡す箇所で配置が食い違いうる。vmrun の 44本の出力は `expected/` とバイト一致した（44 passed）。
+- **`JS_VM_FRAME_ALIGN`**: `quickjs-vmstack.h` は `ESP_PLATFORM` のときだけ 4 で、ほかは 8。32bit ホストでは 8 だとフレームリンク（ポインタ1個、4B）の `_Static_assert` が通らないので、`UINTPTR_MAX == 0xFFFFFFFF` でも 4 にした（実機と同じ値。64bit ホストと実機のビルドは何も変わらない）。
+- **TLSF**: `VMALLOC_TLSF_ALIGN_LOG2=2`（IDF の既定）。台帳06 §1 の 64bit 用パッチはマクロで既定に戻る。
+- **揃っていない点**: `max_align_t` は i386 でも 16B で、実機（16B、`_Alignof` 8）と同じだが、`long double` は i386 が 12B、Xtensa は 8B（QuickJS の確保サイズには出ないと見ているが未確認）。ヒープ上のブロックの配置と確保サイズは実機の QuickJS と同じになるはずだが、実機の確保サイズ分布とは突き合わせていない。
+- 同じ条件で 64bit の o2 は seg_oom_boundary の出力が `expected/` と食い違った（43 passed, 1 failed）。32bit 化とは無関係の既存の差（64bit ビルドのソースは変えていない）で、トレースはそのまま使った。
+- 32bit の再生は ASan+UBSan でも fixed の 144走行（4方式×36本）が rc=0・`verify=OK` で、o2 と同じ値になった。
+
+### 9.4 再現コマンド
+
+```bash
+F=$(bash tools/vmtest/m32_sysroot.sh)
+VMTEST_OUT=$PWD/.cache/vmtest64 bash tools/vmtest/build.sh o2
+VMTEST_OUT=$PWD/.cache/vmtest32 VMTEST_CFLAGS="$F" bash tools/vmtest/build.sh o2
+VMALLOC_OUT=../../.cache/vmalloc32 VMALLOC_CFLAGS="$F" VMALLOC_TLSF_ALIGN_LOG2=2 bash tools/vmalloc/build.sh
+N=$(ls .cache/vmtest/traces/*.trace | xargs -n1 basename | sed 's/\.trace$//')   # §4 と同じ44本
+VMTEST_OUT=$PWD/.cache/vmtest64 bash tools/vmtest/run.sh --variant o2 --trace $N
+VMTEST_OUT=$PWD/.cache/vmtest32 bash tools/vmtest/run.sh --variant o2 --trace $N
+V=tlsf,estalloc,slab:classes=8+16+24+32+48+56+64+72+96+104+120+144,slab:classes=8+16+24+32+40+48+56+64+80+88+96+120,slab:classes=none:var_max=4000
+python3 tools/vmalloc/slab_study.py --binary-dir .cache/vmalloc --output .cache/slab/s64.json --variants "$V" .cache/vmtest64/traces/*.trace
+python3 tools/vmalloc/slab_study.py --binary-dir .cache/vmalloc32 --output .cache/slab/s32.json --variants "$V" .cache/vmtest32/traces/*.trace
 ```
