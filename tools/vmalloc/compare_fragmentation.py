@@ -17,7 +17,7 @@ report = {'pool': args.pool, 'sample_every': 1, 'host_replay': True,
 failed = False
 for trace in args.traces:
     digest = hashlib.sha256(trace.read_bytes()).hexdigest()
-    for allocator in ('tlsf', 'estalloc', 'naive', 'segment'):
+    for allocator in ('tlsf', 'estalloc', 'naive', 'segment', 'slab'):
         output = subprocess.check_output([
             str(binary), '--allocator', allocator, '--pool', str(args.pool),
             '--sample-every', '1', '--verify', str(trace)], text=True)

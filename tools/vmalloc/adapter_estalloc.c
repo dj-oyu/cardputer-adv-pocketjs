@@ -54,6 +54,8 @@ static int est_do_check(void) {
   return g_est->error_message == NULL ? 1 : 0;
 }
 
+static size_t est_usable(const void *p) { return est_usable_size(g_est, (void *)p); }
+
 static const vmalloc_backend_t BACKEND = {
     .name = "estalloc",
     .init = est_backend_init,
@@ -62,6 +64,7 @@ static const vmalloc_backend_t BACKEND = {
     .do_free = est_do_free,
     .stats = est_stats,
     .check = est_do_check,
+    .usable_size = est_usable,
 };
 
 const vmalloc_backend_t *vmalloc_estalloc_backend(void) { return &BACKEND; }

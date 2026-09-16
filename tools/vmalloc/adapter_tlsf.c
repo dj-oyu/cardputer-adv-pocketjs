@@ -66,6 +66,10 @@ static void tlsf_stats(vmalloc_stats_t *out) {
 
 static int tlsf_do_check(void) { return multi_heap_check(g_heap, true) ? 1 : 0; }
 
+// The block's real capacity after TLSF's rounding: what guest.c could
+// report instead of the requested size it reports today.
+static size_t tlsf_usable(const void *p) { return multi_heap_get_allocated_size(g_heap, (void *)p); }
+
 static const vmalloc_backend_t BACKEND = {
     .name = "tlsf",
     .init = tlsf_init,
@@ -74,6 +78,7 @@ static const vmalloc_backend_t BACKEND = {
     .do_free = tlsf_do_free,
     .stats = tlsf_stats,
     .check = tlsf_do_check,
+    .usable_size = tlsf_usable,
 };
 
 const vmalloc_backend_t *vmalloc_tlsf_backend(void) { return &BACKEND; }

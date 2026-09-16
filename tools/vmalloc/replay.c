@@ -140,6 +140,14 @@ typedef struct {
   u32series_t malloc_steps, malloc_ns;
   u32series_t realloc_steps, realloc_ns;
   u32series_t free_ns;
+  u32series_t free_steps;
+  // Slab-study additions (docs/vm/vm-ledger/08-slab-study.md), all backends.
+  unsigned long realloc_calls;
+  unsigned long realloc_in_place; // the pointer came back unchanged
+  unsigned long realloc_covered;  // new size <= usable_size(old) before the call
+  unsigned long realloc_grows, realloc_grow_covered; // the same, restricted to new size > old requested size
+  size_t app_usable_waste;        // max over app ops of sum(usable) - sum(requested), live blocks
+  size_t app_min_largest_free;    // min largest_free_block before "# teardown"
   // Segment-style breakdown, plus physical external extents for all backends. The
   // peaks are taken independently, each at its own worst sample; they do
   // not describe one moment and must not be summed.
@@ -181,6 +189,8 @@ static void take_sample(const vmalloc_backend_t *be, run_result_t *out) {
   if (st.blocks_used > out->peak_blocks) out->peak_blocks = st.blocks_used;
   if (st.largest_free_block < out->min_largest_free) out->min_largest_free = st.largest_free_block;
   if (st.largest_free_block > out->max_largest_free) out->max_largest_free = st.largest_free_block;
+  if (g_cur_op < g_teardown_op && st.largest_free_block < out->app_min_largest_free)
+    out->app_min_largest_free = st.largest_free_block;
   if (st.reserved_bytes > out->peak_reserved) out->peak_reserved = st.reserved_bytes;
   if (st.seg_free_inside > out->peak_seg_free_inside) out->peak_seg_free_inside = st.seg_free_inside;
   if (st.seg_cached_bytes > out->peak_seg_cached) out->peak_seg_cached = st.seg_cached_bytes;
@@ -213,6 +223,7 @@ static int fail_at(const vmalloc_backend_t *be, run_result_t *out, size_t i) {
   if (out->min_largest_free == SIZE_MAX) out->min_largest_free = 0;
   if (out->min_pool_largest == SIZE_MAX) out->min_pool_largest = 0;
   if (out->app_min_pool_largest == SIZE_MAX) out->app_min_pool_largest = 0;
+  if (out->app_min_largest_free == SIZE_MAX) out->app_min_largest_free = 0;
   out->ok = 0;
   out->fail_at_op = i;
   return 0;
@@ -220,7 +231,8 @@ static int fail_at(const vmalloc_backend_t *be, run_result_t *out, size_t i) {
 
 static void result_free(run_result_t *r) {
   free(r->malloc_steps.v); free(r->malloc_ns.v);
-  free(r->realloc_steps.v); free(r->realloc_ns.v); free(r->free_ns.v);
+  free(r->realloc_steps.v); free(r->realloc_ns.v); free(r->free_ns.v); free(r->free_steps.v);
+  memset(&r->free_steps, 0, sizeof r->free_steps);
   memset(&r->malloc_steps, 0, sizeof r->malloc_steps);
   memset(&r->malloc_ns, 0, sizeof r->malloc_ns);
   memset(&r->realloc_steps, 0, sizeof r->realloc_steps);
@@ -335,6 +347,7 @@ static int run_trace(const vmalloc_backend_t *be, void *pool, size_t pool_size,
   out->min_largest_free = SIZE_MAX;
   out->min_pool_largest = SIZE_MAX;
   out->app_min_pool_largest = SIZE_MAX;
+  out->app_min_largest_free = SIZE_MAX;
   out->check_ok = -1;
   g_cur_op = 0;
 
@@ -345,6 +358,7 @@ static int run_trace(const vmalloc_backend_t *be, void *pool, size_t pool_size,
   memset(g_appsize_by_id, 0, idcap * sizeof(size_t));
   g_live_n = 0;
   g_live_requested = 0;
+  size_t live_usable = 0; // sum of usable_size() over live blocks, when the backend has it
   unsigned long last_events = 0;
   size_t last_sweep_op = 0;
 
@@ -362,6 +376,7 @@ static int run_trace(const vmalloc_backend_t *be, void *pool, size_t pool_size,
       g_ptr_by_id[op->id1] = p;
       g_appsize_by_id[op->id1] = op->size;
       g_live_requested += op->size;
+      if (be->usable_size) live_usable += be->usable_size(p);
       if (g_verify) { fill(p, op->id1, op->size); live_add(op->id1); }
     } else if (op->kind == OP_FREE) {
       void *p = g_ptr_by_id[op->id1];
@@ -370,11 +385,13 @@ static int run_trace(const vmalloc_backend_t *be, void *pool, size_t pool_size,
         if (bad != n) verify_error(out, i, "id %llu (%zu B) pattern broken at byte %zu, found at free", (unsigned long long)op->id1, n, bad);
         live_remove(op->id1);
       }
+      if (be->usable_size) live_usable -= be->usable_size(p);
       unsigned steps = 0;
       uint64_t t0 = now_ns();
       be->do_free(p, &steps);
       uint64_t dt = now_ns() - t0;
       series_push(&out->free_ns, (unsigned)dt);
+      series_push(&out->free_steps, steps);
       g_ptr_by_id[op->id1] = NULL;
       g_live_requested -= g_appsize_by_id[op->id1];
     } else { // OP_REALLOC
@@ -384,6 +401,21 @@ static int run_trace(const vmalloc_backend_t *be, void *pool, size_t pool_size,
         size_t bad = check_pattern(old, op->id1, old_app);
         if (bad != old_app) verify_error(out, i, "id %llu (%zu B) pattern broken at byte %zu, found at realloc", (unsigned long long)op->id1, old_app, bad);
         live_remove(op->id1);
+      }
+      // "covered": the block the guest already holds is big enough for the
+      // new request. With a usable_size() that reports real capacity, the
+      // js_realloc2() that grew it earlier would have handed that capacity
+      // to the caller as slack. For a grow this is roughly a lower bound on
+      // calls avoided (the caller needed at most the requested size); see
+      // 08-slab-study.md for what it ignores.
+      size_t old_usable = be->usable_size ? be->usable_size(old) : 0;
+      out->realloc_calls++;
+      if (be->usable_size && op->size <= old_usable) out->realloc_covered++;
+      // Shrinks are "covered" by definition; the grows are the ones slack
+      // could have saved, so they are counted apart.
+      if (op->size > old_app) {
+        out->realloc_grows++;
+        if (be->usable_size && op->size <= old_usable) out->realloc_grow_covered++;
       }
       unsigned steps = 0;
       uint64_t t0 = now_ns();
@@ -396,6 +428,8 @@ static int run_trace(const vmalloc_backend_t *be, void *pool, size_t pool_size,
         return fail_at(be, out, i);
       }
       if (n != old) out->realloc_copy_bytes += (old_app < op->size ? old_app : op->size);
+      else out->realloc_in_place++;
+      if (be->usable_size) live_usable = live_usable - old_usable + be->usable_size(n);
       g_ptr_by_id[op->id1] = NULL;
       g_ptr_by_id[op->id2] = n;
       g_appsize_by_id[op->id2] = op->size;
@@ -410,6 +444,8 @@ static int run_trace(const vmalloc_backend_t *be, void *pool, size_t pool_size,
       }
     }
 
+    if (be->usable_size && i < g_teardown_op && live_usable - g_live_requested > out->app_usable_waste)
+      out->app_usable_waste = live_usable - g_live_requested;
     if (sample_every && (i % sample_every) == 0) take_sample(be, out);
 
     if (g_verify) {
@@ -434,6 +470,7 @@ static int run_trace(const vmalloc_backend_t *be, void *pool, size_t pool_size,
   if (g_verify) sweep(be, out, g_op_count, pool, pool_size);
   if (out->min_pool_largest == SIZE_MAX) out->min_pool_largest = 0;
   if (out->app_min_pool_largest == SIZE_MAX) out->app_min_pool_largest = 0;
+  if (out->app_min_largest_free == SIZE_MAX) out->app_min_largest_free = 0;
 
   out->ok = out->verify_errors ? 2 : 1;
   if (be->check) out->check_ok = be->check() ? 1 : 0;
@@ -445,6 +482,7 @@ static const vmalloc_backend_t *pick_backend(const char *name) {
   if (!strcmp(name, "estalloc")) return vmalloc_estalloc_backend();
   if (!strcmp(name, "naive")) return vmalloc_naive_backend();
   if (!strcmp(name, "segment")) return vmalloc_segment_backend();
+  if (!strcmp(name, "slab")) return vmalloc_slab_backend();
   return NULL;
 }
 
@@ -464,6 +502,27 @@ static void print_external_tail(const vmalloc_backend_t *be, const run_result_t 
   if (be->owner) return;
   printf(" peak_external_frag=%zu min_pool_largest=%zu app_ext_frag=%zu app_min_pool_largest=%zu",
          r->peak_external_frag, r->min_pool_largest, r->app_ext_frag, r->app_min_pool_largest);
+}
+
+static unsigned long long series_sum(const u32series_t *s) {
+  unsigned long long t = 0; // x100 below would wrap a 32-bit long on a -m32 build
+  for (size_t i = 0; i < s->n; i++) t += s->v[i];
+  return t;
+}
+
+// Appended for every backend so 08-slab-study.md compares them on one row
+// format. Means are x100 integers (pctl() sorts in place; sums do not care).
+static void print_study_tail(const vmalloc_backend_t *be, run_result_t *r) {
+  unsigned long long ms = series_sum(&r->malloc_steps), fs = series_sum(&r->free_steps);
+  printf(" malloc_steps_mean_x100=%llu free_steps_max=%u free_steps_mean_x100=%llu realloc_calls=%lu realloc_in_place=%lu",
+         r->malloc_steps.n ? ms * 100 / r->malloc_steps.n : 0ULL, pctl(&r->free_steps, 1.0),
+         r->free_steps.n ? fs * 100 / r->free_steps.n : 0ULL, r->realloc_calls, r->realloc_in_place);
+  printf(" realloc_grows=%lu", r->realloc_grows);
+  if (be->usable_size)
+    printf(" realloc_covered=%lu realloc_grow_covered=%lu app_usable_waste=%zu", r->realloc_covered,
+           r->realloc_grow_covered, r->app_usable_waste);
+  else printf(" realloc_covered=n/a realloc_grow_covered=n/a app_usable_waste=n/a");
+  printf(" app_min_largest_free=%zu", r->app_min_largest_free);
 }
 
 static void print_verify_tail(const run_result_t *r) {
@@ -494,12 +553,24 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--seg-size") && i + 1 < argc && cfg_n < 16) { cfg_keys[cfg_n] = "seg_size"; cfg_vals[cfg_n++] = argv[++i]; }
     else if (!strcmp(argv[i], "--seg-cache") && i + 1 < argc && cfg_n < 16) { cfg_keys[cfg_n] = "cache"; cfg_vals[cfg_n++] = argv[++i]; }
     else if (!strcmp(argv[i], "--fault") && i + 1 < argc && cfg_n < 16) { cfg_keys[cfg_n] = "fault"; cfg_vals[cfg_n++] = argv[++i]; }
+    else if (!strcmp(argv[i], "--cfg")) {
+      if (i + 1 >= argc || cfg_n >= 16 || !strchr(argv[i + 1], '=')) { fprintf(stderr, "replay: --cfg needs KEY=VALUE\n"); return 1; }
+      // Generic backend knob, KEY=VALUE (slab: classes, var_max, carve, pick). The
+      // '=' is overwritten in place so key and value point into argv.
+      char *eq = strchr(argv[++i], '=');
+      *eq = 0;
+      cfg_keys[cfg_n] = argv[i];
+      cfg_vals[cfg_n++] = eq + 1;
+    }
     else trace_path = argv[i];
   }
   if (!allocator || !trace_path || (!pool && !do_bisect)) {
-    fprintf(stderr, "usage: vmalloc_replay --allocator tlsf|estalloc|naive|segment (--pool BYTES | --bisect [--bisect-max BYTES])\n"
+    fprintf(stderr, "usage: vmalloc_replay --allocator tlsf|estalloc|naive|segment|slab (--pool BYTES | --bisect [--bisect-max BYTES])\n"
                     "         [--sample-every N] [--verify] [--verify-every N] [--verify-gap N]\n"
-                    "         [--seg-size BYTES] [--seg-cache N] [--fault none|early-return|overlap|misalign|pool-overlap|compact] TRACE\n");
+                    "         [--seg-size BYTES] [--seg-cache N] [--fault MODE] [--cfg KEY=VALUE] TRACE\n"
+                    "  segment faults: early-return overlap misalign pool-overlap compact\n"
+                    "  slab faults:    early-return overlap pool-overlap ledger-order bitmap\n"
+                    "  slab --cfg:     classes=8,16,... var_max=N carve=low|best|split pick=low|recent\n");
     return 1;
   }
   const vmalloc_backend_t *be = pick_backend(allocator);
@@ -564,6 +635,7 @@ int main(int argc, char **argv) {
            allocator, trace_base, hi, r.peak_used_bytes, r.peak_blocks, r.check_ok);
     if (be->owner) print_segment_tail(&r);
     print_external_tail(be, &r);
+    print_study_tail(be, &r);
     print_verify_tail(&r);
     printf("\n");
     if (r.check_ok == 0) rc = 2;
@@ -587,6 +659,7 @@ int main(int argc, char **argv) {
            r.check_ok);
     if (be->owner) print_segment_tail(&r);
     print_external_tail(be, &r);
+    print_study_tail(be, &r);
     print_verify_tail(&r);
     printf("\n");
     if (r.check_ok == 0) rc = 2;

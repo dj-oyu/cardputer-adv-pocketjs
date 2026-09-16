@@ -694,6 +694,8 @@ static int segment_at(size_t i, vmalloc_seg_t *out) {
 
 static unsigned long segment_events(void) { return G.events; }
 
+static size_t segment_usable(const void *p) { return blk_size(blk_hdr((void *)p)); }
+
 static int segment_configure(const char *key, const char *value) {
   if (!strcmp(key, "seg_size")) { G.seg_size = strtoull(value, NULL, 0); return 0; }
   if (!strcmp(key, "cache")) { G.cache_max = strtoull(value, NULL, 0); return 0; }
@@ -722,6 +724,7 @@ static const vmalloc_backend_t BACKEND = {
     .segment_at = segment_at,
     .events = segment_events,
     .configure = segment_configure,
+    .usable_size = segment_usable,
 };
 
 const vmalloc_backend_t *vmalloc_segment_backend(void) { return &BACKEND; }
