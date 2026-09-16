@@ -1,6 +1,9 @@
 // This suite measures the original main-light/SIMD contract. The independent
 // decorative layer is exercised by test_garden_decor.c.
 #define GARDEN_DECOR_RAYS 0
+#include "../main/scene/fxmath.c"
+// The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
+// .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/garden.c"
 #include "../main/scene/glass_rain.c"
 #include <assert.h>

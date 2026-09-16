@@ -16,6 +16,9 @@ static int fake_gettimeofday(struct timeval *out,void *zone) {
     *out=fake_now;return 0;
 }
 #define gettimeofday fake_gettimeofday
+#include "../main/scene/fxmath.c"
+// The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
+// .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/solar_time.c"
 #include "../main/scene/solar_sail.c"

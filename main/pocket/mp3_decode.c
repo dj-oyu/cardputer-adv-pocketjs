@@ -1,4 +1,5 @@
 #include "mp3_decode.h"
+#include "../scene/fxmath.h"
 #include <math.h>
 #include <string.h>
 
@@ -32,8 +33,8 @@ static void filter_init(pocket_mp3_decoder_t *d, unsigned rate) {
     float cutoff=10800.0f/(float)rate;
     for(unsigned i=0;i<32;i++) {
         float x=(float)i-15.5f;
-        taps[i]=sinf(6.28318530718f*cutoff*x)/(3.14159265359f*x)*
-                (0.54f-0.46f*cosf(6.28318530718f*i/31.0f));
+        taps[i]=fx_sinf(6.28318530718f*cutoff*x)/(3.14159265359f*x)*
+                (0.54f-0.46f*fx_cosf(6.28318530718f*i/31.0f));
         sum+=taps[i];
     }
     int total=0;

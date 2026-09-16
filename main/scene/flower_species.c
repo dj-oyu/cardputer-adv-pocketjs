@@ -55,7 +55,7 @@ static void stem(V a,V b,V c,int steps,float radius,float yaw,float pitch) {
 static void bell(V top,float size,float lean,float yaw,float pitch) {
     if(count>=MAX_PARTS)return;
     Petal *p=&petals[count++];
-    V down={sinf(lean),-cosf(lean),0},side={cosf(lean),sinf(lean),0};
+    V down={fx_sinf(lean),-fx_cosf(lean),0},side={fx_cosf(lean),fx_sinf(lean),0};
     p->c=rotate(add(top,mul(down,size*.52f)),yaw,pitch);
     p->axis[0]=rotate(side,yaw,pitch);p->axis[1]=rotate(down,yaw,pitch);p->axis[2]=rotate((V){0,0,1},yaw,pitch);
     p->radius[0]=size*.36f;p->radius[1]=size*.52f;p->radius[2]=size*.36f;
@@ -90,9 +90,9 @@ static void trumpet(V root,V direction,float length,float radius,unsigned materi
 static void cup(V root,float size,unsigned material,float yaw,float pitch) {
     // Six tepals in two whorls: upright, overlapping ellipsoidal surfaces.
     for(int i=0;i<6;i++) {
-        float a=i*PI/3+.25f,r=((material==VIOLET?.39f:.27f)+FLOWER_CUP*sinf(elapsed*.8f))*size;
-        V bottom=add(root,(V){.045f*size*cosf(a),0,.045f*size*sinf(a)});
-        V top=add(root,(V){r*cosf(a),size*(.94f+(i%2)*.045f),r*sinf(a)});
+        float a=i*PI/3+.25f,r=((material==VIOLET?.39f:.27f)+FLOWER_CUP*fx_sinf(elapsed*.8f))*size;
+        V bottom=add(root,(V){.045f*size*fx_cosf(a),0,.045f*size*fx_sinf(a)});
+        V top=add(root,(V){r*fx_cosf(a),size*(.94f+(i%2)*.045f),r*fx_sinf(a)});
         part(bottom,top,size*.20f,size*.075f,material,yaw,pitch);
     }
 }
@@ -100,9 +100,9 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
     // The only entry to rotate(), so the only place these have to be set. Every
     // caller of rotate -- part, bell, trumpet, and stem through part -- is
     // reachable only from here.
-    rot_c=cosf(yaw);rot_s=sinf(yaw);rot_cp=cosf(pitch);rot_sp=sinf(pitch);
+    rot_c=fx_cosf(yaw);rot_s=fx_sinf(yaw);rot_cp=fx_cosf(pitch);rot_sp=fx_sinf(pitch);
     count=0;
-    float sway=FLOWER_SWAY*sinf(elapsed*.7f),breath=FLOWER_BREATH*sinf(elapsed*.8f);
+    float sway=FLOWER_SWAY*fx_sinf(elapsed*.7f),breath=FLOWER_BREATH*fx_sinf(elapsed*.8f);
     // Match garden.c's offscreen grass roots (screen y=142..149). The old
     // -1.35 ended near y=115, leaving each plant suspended above the ground.
     V base={-.18f,-2.2f,0};
@@ -123,9 +123,9 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         part((V){-.1f,-.86f,0},(V){-.75f,-.34f,-.03f},.17f,.045f,LEAF,yaw,pitch);
         part((V){-.04f,-.64f,0},(V){.68f,-.16f,-.04f},.16f,.04f,LEAF,yaw,pitch);
         for(int i=0;i<26;i++) {
-            float a=i*2*PI/26+.03f*sinf(elapsed*.3f),r=.82f+(i%2)*.08f+breath;
-            V a0=add(center,(V){cosf(a)*.29f,sinf(a)*.29f,-.07f});
-            V a1=add(center,(V){cosf(a)*r,sinf(a)*r,-.04f+.08f*cosf(a*3+elapsed*.4f)});
+            float a=i*2*PI/26+.03f*fx_sinf(elapsed*.3f),r=.82f+(i%2)*.08f+breath;
+            V a0=add(center,(V){fx_cosf(a)*.29f,fx_sinf(a)*.29f,-.07f});
+            V a1=add(center,(V){fx_cosf(a)*r,fx_sinf(a)*r,-.04f+.08f*fx_cosf(a*3+elapsed*.4f)});
             part(a0,a1,.077f,.035f,GOLD,yaw,pitch);
         }
         part(add(center,(V){-.36f,0,.045f}),add(center,(V){.36f,0,.045f}),.385f,.13f,SEED,yaw,pitch);
@@ -140,8 +140,8 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         part(add(top,(V){0,.06f,0}),add(top,(V){0,-.15f,0}),.12f,.10f,LEAF,yaw,pitch);
         for(int i=0;i<3;i++) {
             float a=i*2*PI/3+.2f;
-            V start=add(top,(V){cosf(a)*.04f,-.12f,sinf(a)*.04f});
-            V tip=add(top,(V){cosf(a)*(.47f+breath),-.98f,sinf(a)*.28f});
+            V start=add(top,(V){fx_cosf(a)*.04f,-.12f,fx_sinf(a)*.04f});
+            V tip=add(top,(V){fx_cosf(a)*(.47f+breath),-.98f,fx_sinf(a)*.28f});
             part(start,tip,.132f,.048f,IVORY,yaw,pitch);
         }
         part(add(top,(V){0,-.15f,.03f}),add(top,(V){0,-.66f,.03f}),.14f,.13f,INNER,yaw,pitch);
@@ -157,8 +157,8 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         for(int i=0;i<3;i++)part(base,(V){-.6f+i*.48f,.13f+i*.09f,-.13f},.055f,.025f,LEAF,yaw,pitch);
         for(int i=0;i<6;i++) {
             float a=i*PI/3+.2f;
-            part(add(head,(V){.09f*cosf(a),.09f*sinf(a),0}),
-                 add(head,(V){.73f*cosf(a),.73f*sinf(a),-.08f}),.18f,.045f,IVORY,yaw,pitch);
+            part(add(head,(V){.09f*fx_cosf(a),.09f*fx_sinf(a),0}),
+                 add(head,(V){.73f*fx_cosf(a),.73f*fx_sinf(a),-.08f}),.18f,.045f,IVORY,yaw,pitch);
         }
         // A narrow neck feeds a broad flared mouth. Two overlapping shells
         // expose the spreading rim and its inner wall, rather than enlarging
@@ -205,8 +205,8 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         }
         for(int i=0;i<5;i++) {
             float a=PI*.5f+i*2*PI/5;
-            part(add(head,(V){.02f*cosf(a),.02f*sinf(a),-.045f}),
-                 add(head,(V){.73f*cosf(a),.73f*sinf(a),.015f}),.22f,.06f,VIOLET,yaw,pitch);
+            part(add(head,(V){.02f*fx_cosf(a),.02f*fx_sinf(a),-.045f}),
+                 add(head,(V){.73f*fx_cosf(a),.73f*fx_sinf(a),.015f}),.22f,.06f,VIOLET,yaw,pitch);
         }
         part(add(head,(V){0,-.08f,.05f}),add(head,(V){0,.10f,.08f}),.08f,.035f,IVORY,yaw,pitch);
         V bud={-.58f,.46f,-.08f};
@@ -218,8 +218,8 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         // starts and ends with zero velocity; the period closes at clock wrap.
         float phase=fmodf(elapsed,10*PI),breeze=0;
         if(phase<2*PI) {
-            float envelope=sinf(phase*.5f);
-            breeze=FLOWER_SWAY*.28f*sinf(phase)*envelope*envelope;
+            float envelope=fx_sinf(phase*.5f);
+            breeze=FLOWER_SWAY*.28f*fx_sinf(phase)*envelope*envelope;
         }
         V head={.08f+breeze,.51f,.01f};
         stem(base,(V){-.04f,-.25f,0},head,7,.035f,yaw,pitch);
@@ -230,7 +230,7 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         V axis={0,.94f,.341174f};
         for(int i=0;i<14;i++) {
             float a=i*2*PI/14;
-            V radial={cosf(a),-.341174f*sinf(a),.94f*sinf(a)};
+            V radial={fx_cosf(a),-.341174f*fx_sinf(a),.94f*fx_sinf(a)};
             V root=add(head,add(mul(radial,.20f),mul(axis,.035f)));
             V arch=add(head,add(mul(radial,.85f),mul(axis,.48f)));
             V tip=add(head,add(mul(radial,1.10f),mul(axis,-.36f)));
@@ -252,18 +252,18 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         stem(base,(V){-.3f,-.2f,0},head,7,.026f,yaw,pitch);
         for(int i=0;i<6;i++) {
             float a=i*2*PI/6;
-            part((V){-.12f,-.58f,-.08f},(V){-.12f+.57f*cosf(a),-.58f+.26f*sinf(a),-.1f},.055f,.018f,LEAF,yaw,pitch);
+            part((V){-.12f,-.58f,-.08f},(V){-.12f+.57f*fx_cosf(a),-.58f+.26f*fx_sinf(a),-.1f},.055f,.018f,LEAF,yaw,pitch);
         }
         for(int i=0;i<8;i++) {
             float a=i*2*PI/8+.2f;
-            part(add(head,(V){.055f*cosf(a),.055f*sinf(a),-.06f}),
-                 add(head,(V){.75f*cosf(a),.75f*sinf(a),-.01f}),.255f,.055f,RED,yaw,pitch);
+            part(add(head,(V){.055f*fx_cosf(a),.055f*fx_sinf(a),-.06f}),
+                 add(head,(V){.75f*fx_cosf(a),.75f*fx_sinf(a),-.01f}),.255f,.055f,RED,yaw,pitch);
         }
         part(add(head,(V){-.19f,0,.10f}),add(head,(V){.19f,0,.10f}),.21f,.075f,INK,yaw,pitch);
         for(int i=0;i<12;i++) {
             float a=i*2*PI/12;
-            part(add(head,(V){.20f*cosf(a),.20f*sinf(a),.10f}),
-                 add(head,(V){.29f*cosf(a),.29f*sinf(a),.08f}),.022f,.02f,INK,yaw,pitch);
+            part(add(head,(V){.20f*fx_cosf(a),.20f*fx_sinf(a),.10f}),
+                 add(head,(V){.29f*fx_cosf(a),.29f*fx_sinf(a),.08f}),.022f,.02f,INK,yaw,pitch);
         }
     } else if(species==FLOWER_NIGELLA) {
         // Nigella damascena, double form: petaloid sepals, erect styles and
@@ -271,35 +271,35 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         // Spend the 54-part budget on the lacy involucre and visible centre.
         // Keep the fine bracts together: a quiet 63-second drift, not a
         // separate twitch on each filament. .1 also closes at elapsed's wrap.
-        float lace_sway=FLOWER_SWAY*.35f*sinf(elapsed*.1f);
+        float lace_sway=FLOWER_SWAY*.35f*fx_sinf(elapsed*.1f);
         V head={.06f+lace_sway,.49f,0};
         stem(base,(V){-.05f,-.3f,0},head,4,.022f,yaw,pitch);
         // Five bracts fork around and partly in front of the flower, rather
         // than ten isolated radial needles behind it.
         for(int i=0;i<5;i++) {
             float a=.22f+i*2*PI/5;
-            part(add(head,(V){0,-.12f,-.10f}),add(head,(V){.97f*cosf(a),.97f*sinf(a),.035f}),.016f,.013f,HERB,yaw,pitch);
+            part(add(head,(V){0,-.12f,-.10f}),add(head,(V){.97f*fx_cosf(a),.97f*fx_sinf(a),.035f}),.016f,.013f,HERB,yaw,pitch);
             for(int j=0;j<3;j++) {
                 float b=a+(j%2?-.22f:.24f),r=.72f+j*.13f,d=.35f+j*.13f;
-                V fork=add(head,(V){d*cosf(a),d*sinf(a),-.02f});
-                part(fork,add(head,(V){r*cosf(b),r*sinf(b),.09f}),.013f,.012f,HERB,yaw,pitch);
+                V fork=add(head,(V){d*fx_cosf(a),d*fx_sinf(a),-.02f});
+                part(fork,add(head,(V){r*fx_cosf(b),r*fx_sinf(b),.09f}),.013f,.012f,HERB,yaw,pitch);
             }
         }
         for(int i=0;i<10;i++) {
             float a=PI*.5f+i*2*PI/5+(i>=5?.53f:0),r=i<5?.64f:.44f;
             float z=i<5?0:.055f;
-            part(add(head,(V){.06f*cosf(a),.06f*sinf(a),z}),
-                 add(head,(V){r*cosf(a),r*sinf(a),z+.025f}),i<5?.16f:.115f,.025f,BLUE,yaw,pitch);
+            part(add(head,(V){.06f*fx_cosf(a),.06f*fx_sinf(a),z}),
+                 add(head,(V){r*fx_cosf(a),r*fx_sinf(a),z+.025f}),i<5?.16f:.115f,.025f,BLUE,yaw,pitch);
         }
         part(add(head,(V){-.085f,0,.12f}),add(head,(V){.085f,0,.12f}),.10f,.065f,HERB,yaw,pitch);
         for(int i=0;i<5;i++) {
-            float a=i*2*PI/5+.2f,c=cosf(a),s=sinf(a);
+            float a=i*2*PI/5+.2f,c=fx_cosf(a),s=fx_sinf(a);
             // Five styles rise above the ovary.
             part(add(head,(V){.045f*c,.045f*s,.16f}),
                  add(head,(V){.14f*c,.18f+.11f*s,.27f}),.018f,.015f,HERB,yaw,pitch);
         }
         for(int i=0;i<8;i++) {
-            float a=i*2*PI/8+.11f,c=cosf(a),s=sinf(a);
+            float a=i*2*PI/8+.11f,c=fx_cosf(a),s=fx_sinf(a);
             part(add(head,(V){.07f*c,.07f*s,.15f}),
                  add(head,(V){.31f*c,.31f*s,.17f}),.02f,.015f,FILAMENT,yaw,pitch);
         }
@@ -319,7 +319,7 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
             part((V){-.16f,-.9f,-.1f},(V){x,-.55f,-.1f},.12f,.028f,LEAF,yaw,pitch);
         }
         for(int i=0;i<5;i++) {
-            float a=i*2*PI/5+.2f,c=cosf(a),s=sinf(a);
+            float a=i*2*PI/5+.2f,c=fx_cosf(a),s=fx_sinf(a);
             V root=add(head,(V){.18f*c,-.09f,.16f*s});
             V knee=add(head,(V){.40f*c,.43f,.33f*s});
             part(root,knee,.055f,.04f,VIOLET,yaw,pitch);
@@ -348,7 +348,7 @@ void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
         for(int i=0;i<5;i++)part(add(base,(V){i*.08f-.15f,0,-.1f}),
             (V){-.62f+i*.28f,.12f+(i%3)*.19f,-.12f},.044f,.018f,LEAF,yaw,pitch);
         for(int i=0;i<3;i++) {
-            float a=i*2*PI/3+PI*.5f,c=cosf(a),s=sinf(a);
+            float a=i*2*PI/3+PI*.5f,c=fx_cosf(a),s=fx_sinf(a);
             V knee=add(head,(V){.35f*c,.10f*s,.22f*s});
             V tip=add(head,(V){.86f*c,-.37f+.23f*s,.39f*s});
             part(head,knee,.14f,.04f,VIOLET,yaw,pitch);

@@ -3,6 +3,9 @@
 // scene_mem.c comes first because both of the others draw from it: the scene's
 // 29,579 bytes of arrays now live in two borrowed blocks rather than in .bss,
 // and the block contract is checked at the end of main().
+#include "../main/scene/fxmath.c"
+// The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
+// .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/solar_sail.c"
 #include "../main/scene/solar_time.c"

@@ -615,8 +615,8 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
     // Fine Nigella bracts magnify the common rocking motion on screen.
     // Slow the whole flower together so the lace stays attached and calm.
     float rocking=current_species==FLOWER_NIGELLA
-        ?.012f*sinf(elapsed*.1f):current_species==FLOWER_ECHINACEA
-        ?0:.035f*sinf(elapsed*.6f);
+        ?.012f*fx_sinf(elapsed*.1f):current_species==FLOWER_ECHINACEA
+        ?0:.035f*fx_sinf(elapsed*.6f);
     float yaw=(framed?view_yaw:0)+rocking;
     float pitch=framed?view_pitch:.12f;
     flower_build_botanicals(current_species,yaw,pitch);
@@ -747,7 +747,7 @@ static void prepare_seeds(void) {
     for(int i=0;i<32*32;i++)seed_map[i]=0;
     for(int i=0;i<140;i++) {
         float a=i*2.39996323f,r=14.5f*sqrtf((i+.5f)/140);
-        int x=(int)(16+r*cosf(a)),y=(int)(16+r*sinf(a));
+        int x=(int)(16+r*fx_cosf(a)),y=(int)(16+r*fx_sinf(a));
         seed_map[y*32+x]=(uint8_t)(100+i%4*40);
     }
     float previous=0;

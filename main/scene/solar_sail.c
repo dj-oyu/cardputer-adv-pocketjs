@@ -1,4 +1,5 @@
 #include "solar_sail.h"
+#include "fxmath.h"
 #include "scene_mem.h"
 #include "solar_time.h"
 #include <math.h>
@@ -115,9 +116,9 @@ static float smooth(float x){return x*x*x*(10+x*(-15+6*x));}
 // every eccentricity in the tables (Mercury's 0.2056 is the largest).
 static float eccentric(double m,float e) {
     float f=(float)remainder(m,6.283185307179586);
-    float E=f+e*sinf(f);
+    float E=f+e*fx_sinf(f);
     for(int j=0;j<4;j++) {
-        float d=(E-e*sinf(E)-f)/(1-e*cosf(E));E-=d;
+        float d=(E-e*fx_sinf(E)-f)/(1-e*fx_cosf(E));E-=d;
         if(fabsf(d)<1e-7f)break;
     }
     return E;
@@ -130,18 +131,18 @@ static Orbit orbit_at(unsigned i,double days) {
     double t=days/36525;
     double v[6];for(int j=0;j<6;j++)v[j]=planets[i].base[j]+planets[i].rate[j]*t;
     float inc=v[2]*RAD,w=(v[4]-v[5])*RAD,n=v[5]*RAD,e=v[1];
-    float cw=cosf(w),sw=sinf(w),cn=cosf(n),ss=sinf(n),ci=cosf(inc),si=sinf(inc);
+    float cw=fx_cosf(w),sw=fx_sinf(w),cn=fx_cosf(n),ss=fx_sinf(n),ci=fx_cosf(inc),si=fx_sinf(inc);
     Orbit o={.a=v[0],.e=e,.b=v[0]*sqrtf(1-e*e),
         .u={cw*cn-sw*ss*ci,cw*ss+sw*cn*ci,sw*si},
         .v={-sw*cn-cw*ss*ci,-sw*ss+cw*cn*ci,cw*si}};
     // The mean anomaly stays double until it is folded: L - varpi is the one
     // place where a large angle has to keep its fraction.
     float E=eccentric((v[3]-v[4])*0.017453292519943295,e);
-    o.pos=orbit_point(&o,cosf(E),sinf(E));return o;
+    o.pos=orbit_point(&o,fx_cosf(E),fx_sinf(E));return o;
 }
 static Vec equatorial_to_ecliptic(Vec p) {
     const float e=23.43928f*RAD;
-    return (Vec){p.x,p.y*cosf(e)+p.z*sinf(e),-p.y*sinf(e)+p.z*cosf(e)};
+    return (Vec){p.x,p.y*fx_cosf(e)+p.z*fx_sinf(e),-p.y*fx_sinf(e)+p.z*fx_cosf(e)};
 }
 static Orbit satellite_shape(unsigned i) {
     const Satellite *s=&satellites[i];
@@ -150,13 +151,13 @@ static Orbit satellite_shape(unsigned i) {
     Vec x={1,0,0},y={0,1,0},z={0,0,1};
     if(i!=0) {
         float ra=s->ra*RAD,dec=s->dec*RAD;
-        Vec axis={cosf(dec)*cosf(ra),cosf(dec)*sinf(ra),sinf(dec)};
+        Vec axis={fx_cosf(dec)*fx_cosf(ra),fx_cosf(dec)*fx_sinf(ra),fx_sinf(dec)};
         Vec node=unit(cross((Vec){0,0,1},axis));
         x=equatorial_to_ecliptic(node);
         y=equatorial_to_ecliptic(cross(axis,node));z=equatorial_to_ecliptic(axis);
     }
     float w=s->w*RAD,n=s->node*RAD,inc=s->inc*RAD;
-    float cw=cosf(w),sw=sinf(w),cn=cosf(n),ss=sinf(n),ci=cosf(inc),si=sinf(inc);
+    float cw=fx_cosf(w),sw=fx_sinf(w),cn=fx_cosf(n),ss=fx_sinf(n),ci=fx_cosf(inc),si=fx_sinf(inc);
     Orbit o={.a=s->a,.e=s->e,.b=s->a*sqrtf(1-s->e*s->e)};
     o.u=add(add(mul(x,cw*cn-sw*ss*ci),mul(y,cw*ss+sw*cn*ci)),mul(z,sw*si));
     o.v=add(add(mul(x,-sw*cn-cw*ss*ci),mul(y,-sw*ss+cw*cn*ci)),mul(z,cw*si));
@@ -172,7 +173,7 @@ static Orbit satellite_at(unsigned i,double days) {
     }
     const Satellite *s=&satellites[i];Orbit o=shapes[i];
     float E=eccentric(s->m*0.017453292519943295+6.283185307179586*days/s->period,s->e);
-    o.pos=orbit_point(&o,cosf(E),sinf(E));return o;
+    o.pos=orbit_point(&o,fx_cosf(E),fx_sinf(E));return o;
 }
 // Clip before integer conversion: outer orbits are huge in an inner-planet view.
 static bool clip(float p,float q,float *a,float *b) {
@@ -266,8 +267,8 @@ static Vec pole(unsigned i) {
         {0,90},{317.68143f,52.88650f},{268.056595f,64.495303f},
         {40.589f,83.537f},{257.311f,-15.175f},{299.36f,43.46f}};
     float ra=poles[i][0]*RAD,dec=poles[i][1]*RAD;
-    float x=cosf(dec)*cosf(ra),y=cosf(dec)*sinf(ra),z=sinf(dec),e=23.43928f*RAD;
-    return (Vec){x,y*cosf(e)+z*sinf(e),-y*sinf(e)+z*cosf(e)};
+    float x=fx_cosf(dec)*fx_cosf(ra),y=fx_cosf(dec)*fx_sinf(ra),z=fx_sinf(dec),e=23.43928f*RAD;
+    return (Vec){x,y*fx_cosf(e)+z*fx_sinf(e),-y*fx_sinf(e)+z*fx_cosf(e)};
 }
 static void ring(Vec p,float radius,Vec u,Vec v,bool near,uint16_t color) {
     for(int k=0;k<ORBIT_STEPS;k+=2) {
@@ -339,11 +340,11 @@ void solar_sail_prepare(float dt,int tx,int ty) {
     // block, so they are exactly as old as it is.
     if(rebuild) ready=false;
     if(!ready) {
-        for(int k=0;k<=ORBIT_STEPS;k++){cs[k]=cosf(k*6.2831853f/ORBIT_STEPS);sn[k]=sinf(k*6.2831853f/ORBIT_STEPS);}
+        for(int k=0;k<=ORBIT_STEPS;k++){cs[k]=fx_cosf(k*6.2831853f/ORBIT_STEPS);sn[k]=fx_sinf(k*6.2831853f/ORBIT_STEPS);}
         for(int j=0;j<11;j++)for(int k=0;k<=32;k++) {
             float lon=j>=5?(j-5)*6.2831853f/6:k*6.2831853f/32;
             float lat=j>=5?(-1.5707963f+k*3.1415926f/32):(j-2)*.48f;
-            cage[j][k]=(Vec){cosf(lon)*cosf(lat),sinf(lon)*cosf(lat),sinf(lat)};
+            cage[j][k]=(Vec){fx_cosf(lon)*fx_cosf(lat),fx_sinf(lon)*fx_cosf(lat),fx_sinf(lat)};
         }
         for(int y=0;y<H;y++)sky[y]=rgb(3,7+y/40,17+y/20);
         // r*r-dy*dy is a small exact integer; store the same floor(sqrtf()).
@@ -385,8 +386,8 @@ void solar_sail_prepare(float dt,int tx,int ty) {
     zoom=83/scale;
     float yaw=.38f+(float)sin(elapsed*.009)*.18f+steer_x*.48f;
     float elevation=.60f+steer_y*.38f;
-    right=(Vec){cosf(yaw),sinf(yaw),0};
-    front=(Vec){sinf(yaw)*cosf(elevation),-cosf(yaw)*cosf(elevation),sinf(elevation)};
+    right=(Vec){fx_cosf(yaw),fx_sinf(yaw),0};
+    front=(Vec){fx_sinf(yaw)*fx_cosf(elevation),-fx_cosf(yaw)*fx_cosf(elevation),fx_sinf(elevation)};
     up=cross(front,right);
     count=0;index_valid=false;
     {

@@ -1,4 +1,5 @@
 #include "glass_rain.h"
+#include "fxmath.h"
 #include <math.h>
 #include <stdbool.h>
 #include <string.h>
@@ -36,7 +37,7 @@ void glass_rain_prepare(float dt,uint32_t seed) {
         if(d->age>.65f) {
             // Surface tension pauses a newly formed bead, then it slips down.
             d->speed=fminf(d->speed+dt*4,27);
-            d->y+=d->speed*dt*(.75f+.25f*sinf(d->age*2+d->phase));
+            d->y+=d->speed*dt*(.75f+.25f*fx_sinf(d->age*2+d->phase));
         }
         if(d->life<=0)d->life=0;
     }
@@ -74,7 +75,7 @@ void glass_rain_draw(uint16_t *pixels,int y,int height) {
             int tail=(int)fmaxf(d->start,d->y-35);
             if(py<tail-ry||py>cy+ry)continue;
             if(!copied) {memcpy(source_row,row,sizeof source_row);copied=true;}
-            int cx=(int)(d->x+1.2f*sinf(py*.045f+d->phase));
+            int cx=(int)(d->x+1.2f*fx_sinf(py*.045f+d->phase));
             unsigned fade=(unsigned)(256*fminf(1,fminf(d->age*3,d->life)));
             int dy=py-cy;
             // Lower-priority PIE candidate: coverage and RGB565 blends share

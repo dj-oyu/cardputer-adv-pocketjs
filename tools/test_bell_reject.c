@@ -16,6 +16,9 @@
 // count must be zero.
 //
 //   gcc -O2 -Wall -Wextra -Werror -DFLOWER_BELL_CHECK tools/test_bell_reject.c -lm -o /tmp/br && /tmp/br
+#include "../main/scene/fxmath.c"
+// The fixed-point trig the scene files call (main/scene/fxmath.c): the scene
+// .c files below are included whole, so the definition has to be in this TU too.
 #include "../main/scene/scene_mem.c"
 #include "../main/scene/garden.c"
 #include "../main/scene/flower.c"

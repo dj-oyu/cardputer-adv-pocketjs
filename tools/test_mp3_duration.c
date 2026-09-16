@@ -9,7 +9,7 @@
 //
 //   gcc -O2 -Wall -Wextra -Werror -fsanitize=address,undefined
 //       -I main/pocket -I .cache/codecs/minimp3 tools/test_mp3_duration.c
-//       main/pocket/mp3_decode.c components/minimp3/minimp3.c -lm -o /tmp/t
+//       main/pocket/mp3_decode.c main/scene/fxmath.c components/minimp3/minimp3.c -lm -o /tmp/t
 //   && /tmp/t
 //
 // (from the repository root)
