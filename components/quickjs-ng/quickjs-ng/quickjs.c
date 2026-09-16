@@ -8636,10 +8636,11 @@ done:
                 if (JS_IsException(v)) {
                     break;
                 }
-                if (JS_DefinePropertyValueUint32(ctx, stack, j, v, JS_PROP_C_W_E) < 0) {
-                    JS_FreeValue(ctx, v);
+                /* PocketJS: backport of quickjs-ng c846cb1364. The define
+                 * call frees v on failure too (JS_DefinePropertyValue always
+                 * consumes val); freeing it again here was a double free. */
+                if (JS_DefinePropertyValueUint32(ctx, stack, j, v, JS_PROP_C_W_E) < 0)
                     break;
-                }
             }
         }
         // Clear the csd's we didn't use in case of error.
@@ -66324,7 +66325,14 @@ static JSValue js_new_callsite(JSContext *ctx, JSCallSiteData *csd)
         return JS_EXCEPTION;
     }
 
+    /* The new object takes ownership of the values in |csd|; clear them so
+       the caller doesn't free them a second time. (PocketJS: backport of
+       quickjs-ng c846cb1364 -- build_backtrace's cleanup loop frees csd[j]
+       from the entry whose CallSite failed to be inserted.) */
     memcpy(csd1, csd, sizeof(*csd));
+    csd->filename = JS_UNDEFINED;
+    csd->func = JS_UNDEFINED;
+    csd->func_name = JS_UNDEFINED;
 
     JS_SetOpaqueInternal(obj, csd1);
 
