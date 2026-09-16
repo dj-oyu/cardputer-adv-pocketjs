@@ -989,6 +989,9 @@ void app_main(void) {
     clockbench_run();
 #endif
     ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=512KiB");
+#if POCKET_PROBES
+    { extern void ble_probe(void); ble_probe(); }
+#endif
     ESP_ERROR_CHECK(board_init());
     nvs_init();
     pet_hub_init();
@@ -1004,6 +1007,12 @@ void app_main(void) {
     skk_session_init();
     usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
+#if POCKET_PROBES
+    { extern void opus_probe(void); opus_probe(); }
+#endif
+#if POCKET_PROBES
+    { extern void sd_probe(void); sd_probe(); }
+#endif
     keys=xQueueCreate(16,sizeof(keystroke_t));configASSERT(keys);
     configASSERT(xTaskCreate(input_task,"input",4096,NULL,6,NULL)==pdPASS);
     // Pinned or not, ONE call site (xTaskCreate is itself a wrapper for this
