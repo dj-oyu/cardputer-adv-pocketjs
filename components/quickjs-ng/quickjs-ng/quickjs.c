@@ -446,6 +446,14 @@ typedef struct JSStackFrame {
 #ifdef CONFIG_POCKET_VM_FLATCALLS
     uint8_t l2_flags;  /* JS_SF_* (quickjs-vmstack.h); offset 37, was padding */
 #endif
+    /* PocketJS (backport of quickjs-ng 7955cfd49e): JS_CORO_* -- which kind of
+     * coroutine owns this frame, or JS_CORO_NONE. Upstream adds a
+     * JSGCObjectHeader *cur_gc_obj here; that pointer would take this struct
+     * from 48 to 52 bytes on the target (every JS frame in a segment, and
+     * JSAsyncFunctionData's asserted 104), so the owner is recovered from the
+     * kind with container_of instead (js_coro_owner). Sits in padding: offset
+     * 38 with FLATCALLS, 37 without; size asserted below. */
+    uint8_t coro_kind;
     /* only used in generators. Current stack pointer value. NULL if
        the function is running. */
     JSValue *cur_sp;
@@ -453,6 +461,19 @@ typedef struct JSStackFrame {
     uint32_t ret_shape; /* JS_RET_SHAPE (quickjs-vmstack.h); offset 44-47, was tail padding */
 #endif
 } JSStackFrame;
+
+/* JSStackFrame.coro_kind */
+enum {
+    JS_CORO_NONE = 0,
+    JS_CORO_ASYNC_FUNCTION,  /* frame is JSAsyncFunctionData.func_state.frame */
+    JS_CORO_GENERATOR,       /* frame is JSGeneratorData.func_state.frame */
+    JS_CORO_ASYNC_GENERATOR, /* frame is JSAsyncGeneratorData.func_state.frame */
+};
+
+#if UINTPTR_MAX == UINT32_MAX
+_Static_assert(sizeof(JSStackFrame) == 48,
+               "coro_kind must sit in JSStackFrame's padding on the target");
+#endif
 
 typedef enum {
     JS_GC_OBJ_TYPE_JS_OBJECT,
@@ -493,6 +514,17 @@ typedef struct JSVarRef {
         JSValue value; /* used when is_detached = true */
         struct {
             uint16_t var_ref_idx; /* index in JSStackFrame.var_refs[] */
+            /* PocketJS (backport of quickjs-ng 7955cfd49e): set when this
+             * open var_ref captures a local of a coroutine frame. Such a
+             * var_ref is a GC object holding a counted reference to the
+             * coroutine (js_coro_owner(stack_frame)), so the cycle collector
+             * sees closure -> var_ref -> coroutine. Upstream keeps the flag
+             * next to is_detached; there is no free byte there in this
+             * header layout, so it lives in this padding and is only
+             * meaningful while !is_detached: every reader tests is_detached
+             * first, and close_var_ref reads it before `value` overwrites
+             * it. A snapshot of stack_frame->coro_kind at creation. */
+            uint8_t is_coro;
             JSStackFrame *stack_frame;
         }; /* used when is_detached = false */
     };
@@ -1495,6 +1527,8 @@ static JSValue js_import_meta(JSContext *ctx);
 static JSValue js_dynamic_import(JSContext *ctx, JSValueConst specifier,
                                  JSValueConst options);
 static void free_var_ref(JSRuntime *rt, JSVarRef *var_ref);
+static JSGCObjectHeader *js_coro_owner(JSStackFrame *sf);
+static void js_coro_release(JSRuntime *rt, JSStackFrame *sf);
 static JSValue js_new_promise_capability(JSContext *ctx,
                                          JSValue *resolving_funcs,
                                          JSValueConst ctor);
@@ -7167,6 +7201,14 @@ static void free_var_ref(JSRuntime *rt, JSVarRef *var_ref)
                 JSStackFrame *sf = var_ref->stack_frame;
                 assert(sf->var_refs[var_ref->var_ref_idx] == var_ref);
                 sf->var_refs[var_ref->var_ref_idx] = NULL;
+                /* 7955cfd49e: an open coroutine var_ref is a GC object and
+                   holds a reference on the coroutine. The slot is cleared
+                   first: releasing may free the owner, whose teardown walks
+                   sf->var_refs, and frees arg_buf (and sf with it). */
+                if (var_ref->is_coro) {
+                    remove_gc_object(&var_ref->header);
+                    js_coro_release(rt, sf);
+                }
             }
             js_free_rt(rt, var_ref);
         }
@@ -7268,7 +7310,10 @@ static void js_bytecode_function_mark(JSRuntime *rt, JSValueConst val,
         if (var_refs) {
             for (i = 0; i < b->closure_var_count; i++) {
                 JSVarRef *var_ref = var_refs[i];
-                if (var_ref && var_ref->is_detached) {
+                /* detached var_refs are GC objects; open ones only when they
+                   capture a coroutine local (7955cfd49e). is_detached first:
+                   is_coro is only valid on an open var_ref. */
+                if (var_ref && (var_ref->is_detached || var_ref->is_coro)) {
                     mark_func(rt, &var_ref->header);
                 }
             }
@@ -7552,9 +7597,11 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
                             mark_func(rt, &pr->u.getset.setter->header);
                         }
                     } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
-                        if (pr->u.var_ref->is_detached) {
+                        if (pr->u.var_ref->is_detached ||
+                            pr->u.var_ref->is_coro) {
                             /* Note: the tag does not matter
-                               provided it is a GC object */
+                               provided it is a GC object (7955cfd49e: open
+                               coroutine var_refs are GC objects too) */
                             mark_func(rt, &pr->u.var_ref->header);
                         }
                     } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
@@ -7595,9 +7642,17 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
     break;
     case JS_GC_OBJ_TYPE_VAR_REF: {
         JSVarRef *var_ref = (JSVarRef *)gp;
-        /* only detached variable referenced are taken into account */
-        assert(var_ref->is_detached);
-        JS_MarkValue(rt, *var_ref->pvalue, mark_func);
+        if (var_ref->is_detached) {
+            /* the var_ref owns its value */
+            JS_MarkValue(rt, *var_ref->pvalue, mark_func);
+        } else {
+            /* 7955cfd49e: an open var_ref is a GC object only when it
+               captures a coroutine local. The value lives in the coroutine's
+               frame and is marked by the coroutine; keep the coroutine
+               reachable. */
+            assert(var_ref->is_coro);
+            mark_func(rt, js_coro_owner(var_ref->stack_frame));
+        }
     }
     break;
     case JS_GC_OBJ_TYPE_ASYNC_FUNCTION: {
@@ -17387,8 +17442,12 @@ static void js_mapped_arguments_mark(JSRuntime *rt, JSValueConst val,
         int i;
         if (var_refs) {
             for (i = 0; i < p->u.array.count; i++) {
-                if (var_refs[i] && var_refs[i]->is_detached) {
-                    mark_func(rt, &var_refs[i]->header);
+                /* mapped arguments are a third var_ref holder: mark the ones
+                   that are GC objects, detached or open coroutine locals
+                   (7955cfd49e) */
+                JSVarRef *vr = var_refs[i];
+                if (vr && (vr->is_detached || vr->is_coro)) {
+                    mark_func(rt, &vr->header);
                 }
             }
         }
@@ -18223,6 +18282,15 @@ static JSVarRef *get_var_ref(JSContext *ctx, JSStackFrame *sf, int var_idx,
         var_ref->stack_frame = sf;
         sf->var_refs[var_ref_idx] = var_ref;
         var_ref->pvalue = pvalue;
+        /* 7955cfd49e: a local of a coroutine frame keeps the coroutine
+           reachable for as long as a closure holds the variable. js_malloc
+           does not zero, so is_coro is always written. Frames of ordinary
+           calls (coro_kind 0) are live roots and need nothing. */
+        var_ref->is_coro = sf->coro_kind != JS_CORO_NONE;
+        if (var_ref->is_coro) {
+            js_coro_owner(sf)->ref_count++;
+            add_gc_object(ctx->rt, &var_ref->header, JS_GC_OBJ_TYPE_VAR_REF);
+        }
         return var_ref;
     } else {
         /* Variable is not captured (e.g., from eval closures on uncaptured vars).
@@ -18482,11 +18550,34 @@ fail:
 
 static void close_var_ref(JSRuntime *rt, JSVarRef *var_ref)
 {
+    JSStackFrame *sf;
+    bool is_coro;
+
+    /* 7955cfd49e: read before `value` overwrites the union members that
+       hold them */
+    sf = var_ref->stack_frame;
+    is_coro = var_ref->is_coro;
     var_ref->value = js_dup(*var_ref->pvalue);
     var_ref->pvalue = &var_ref->value;
     /* the reference is no longer to a local variable */
     var_ref->is_detached = true;
-    add_gc_object(rt, &var_ref->header, JS_GC_OBJ_TYPE_VAR_REF);
+    if (is_coro) {
+        /* already a GC object: do not add it to the list a second time.
+           Outside cycle removal the owner is still referenced by whoever is
+           closing its frame (a running or completing coroutine; a finalizer
+           cannot get here with open coroutine var_refs, each of which holds
+           a count), so this release is never the last one. That is what
+           keeps close_var_refs from re-entering: were it the last, the owner
+           would be freed -- arg_buf and this frame with it -- while
+           close_var_refs is still walking the frame. During REMOVE_CYCLES
+           the owner is being freed as part of a cycle and its count carries
+           no such guarantee, but no path frees it from here either. */
+        assert(rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES ||
+               js_coro_owner(sf)->ref_count > 1);
+        js_coro_release(rt, sf);
+    } else {
+        add_gc_object(rt, &var_ref->header, JS_GC_OBJ_TYPE_VAR_REF);
+    }
 }
 
 static void close_var_refs(JSRuntime *rt, JSStackFrame *sf)
@@ -18853,6 +18944,7 @@ static no_inline int js_vm_tail_reuse(JSContext *ctx, JSStackFrame *sf,
     sf->var_ref_count = nb->var_ref_count;
     for (i = 0; i < nb->var_ref_count; i++)
         sf->var_refs[i] = NULL;
+    sf->coro_kind = JS_CORO_NONE; /* tail reuse only takes SEG|FLAT frames */
     sf->cur_pc = nb->byte_code_buf;
     sf->cur_sp = sf->var_buf + nb->var_count;
     return 1;
@@ -19270,6 +19362,9 @@ frame_pushed:
     for (i = 0; i < b->var_ref_count; i++) {
         sf->var_refs[i] = NULL;
     }
+    /* an ordinary call's frame, a live root: not owned by a coroutine (the
+       segment block is not zeroed, so this is written, 7955cfd49e) */
+    sf->coro_kind = JS_CORO_NONE;
     sp = stack_buf;
     pc = b->byte_code_buf;
     /* sf->cur_pc must we set to pc before any recursive calls to JS_CallInternal. */
@@ -22099,6 +22194,7 @@ flat_async_call: {
                 goto exception;
             }
             s->is_active = true;
+            s->func_state.frame.coro_kind = JS_CORO_ASYNC_FUNCTION; /* 7955cfd49e */
             // D33-1: the promise lives in the caller's func slot until the
             // return. async_func_init has dup'd the function into cur_func,
             // so the slot's reference is no longer needed by anyone, and the
@@ -22909,6 +23005,8 @@ static __exception int async_func_init(JSContext *ctx, JSAsyncFunctionState *s,
     for (i = 0; i < b->var_ref_count; i++) {
         sf->var_refs[i] = NULL;
     }
+    /* set by the caller once the owning GC object exists (7955cfd49e) */
+    sf->coro_kind = JS_CORO_NONE;
     for (i = 0; i < argc; i++) {
         sf->arg_buf[i] = js_dup(argv[i]);
     }
@@ -22990,8 +23088,20 @@ typedef enum JSGeneratorStateEnum {
 
 typedef struct JSGeneratorData {
     JSGeneratorStateEnum state;
+    /* PocketJS (7955cfd49e backport): the generator object, set once it
+     * exists (js_call_generator_function), so js_coro_owner can reach it from
+     * the frame. JSAsyncGeneratorData already has the same back pointer. */
+    JSObject *generator;
     JSAsyncFunctionState func_state;
 } JSGeneratorData;
+
+#if UINTPTR_MAX == UINT32_MAX
+/* 7955cfd49e backport: coro_kind went into JSStackFrame's padding so that
+ * this stays 104 on the target with or without FLATCALLS (the FLATCALLS-only
+ * assert next to the struct covers one configuration). */
+_Static_assert(sizeof(JSAsyncFunctionData) == 104,
+               "coro_kind must not grow JSAsyncFunctionData on the target");
+#endif
 
 static void free_generator_stack_rt(JSRuntime *rt, JSGeneratorData *s)
 {
@@ -23152,6 +23262,12 @@ static JSValue js_call_generator_function(JSContext *ctx, JSValueConst func_obj,
         goto fail;
     }
     JS_SetOpaqueInternal(obj, s);
+    /* 7955cfd49e: root captured locals against the generator object from
+       here on. Not earlier: the prologue above (up to OP_initial_yield) can
+       create var_refs -- mapped arguments, default-parameter closures --
+       while there is no owner object to hold; those stay ordinary. */
+    s->generator = JS_VALUE_GET_OBJ(obj);
+    s->func_state.frame.coro_kind = JS_CORO_GENERATOR;
     return obj;
 fail:
     free_generator_stack_rt(ctx->rt, s);
@@ -23420,6 +23536,8 @@ fail:
         return JS_EXCEPTION;
     }
     s->is_active = true;
+    /* 7955cfd49e: the body runs now, and s already exists to own it */
+    s->func_state.frame.coro_kind = JS_CORO_ASYNC_FUNCTION;
 
     if (!js_async_function_resume(ctx, s)) {
         goto fail;
@@ -23457,6 +23575,35 @@ typedef struct JSAsyncGeneratorData {
     JSAsyncFunctionState func_state;
     struct list_head queue; /* list of JSAsyncGeneratorRequest.link */
 } JSAsyncGeneratorData;
+
+/* PocketJS (backport of quickjs-ng 7955cfd49e): the GC object owning a
+ * coroutine frame -- upstream's JSStackFrame.cur_gc_obj, derived from
+ * coro_kind instead of stored (see JSStackFrame). */
+static JSGCObjectHeader *js_coro_owner(JSStackFrame *sf)
+{
+    switch (sf->coro_kind) {
+    case JS_CORO_ASYNC_FUNCTION:
+        return &container_of(sf, JSAsyncFunctionData, func_state.frame)->header;
+    case JS_CORO_GENERATOR:
+        return &container_of(sf, JSGeneratorData, func_state.frame)->generator->header;
+    case JS_CORO_ASYNC_GENERATOR:
+        return &container_of(sf, JSAsyncGeneratorData, func_state.frame)->generator->header;
+    default:
+        abort();
+    }
+}
+
+/* Drop the counted reference an open coroutine var_ref held on its owner
+ * (upstream js_release_coro). May free the owner, and with it the frame and
+ * its arg_buf: callers must not touch sf afterwards. */
+static void js_coro_release(JSRuntime *rt, JSStackFrame *sf)
+{
+    JSGCObjectHeader *owner = js_coro_owner(sf);
+    if (sf->coro_kind == JS_CORO_ASYNC_FUNCTION)
+        js_async_function_free(rt, (JSAsyncFunctionData *)owner);
+    else
+        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, (JSObject *)owner));
+}
 
 static void js_async_generator_free(JSRuntime *rt,
                                     JSAsyncGeneratorData *s)
@@ -23943,6 +24090,8 @@ static JSValue js_async_generator_function_call(JSContext *ctx,
     }
     s->generator = JS_VALUE_GET_OBJ(obj);
     JS_SetOpaqueInternal(obj, s);
+    /* 7955cfd49e: same rule as js_call_generator_function */
+    s->func_state.frame.coro_kind = JS_CORO_ASYNC_GENERATOR;
     return obj;
 fail:
     js_async_generator_free(ctx->rt, s);
