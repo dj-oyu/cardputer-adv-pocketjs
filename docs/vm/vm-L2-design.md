@@ -15,7 +15,7 @@
 | L2c | 中断・再開の関所とガード（`vmrun` の受け口、コーパス） | 実装済み（yield無効時はpass-through） |
 | L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | **async所有・保留jobまで実装済み**（分類A/B、GC保護、Terminate/Discardを含む。実測はresults §4.5。`CONFIG_POCKET_VM_YIELD=n`が既定） |
 | L2c 実機統合 | 要求ビット・guest 側3状態・Back ターン対応 | 実装・実機検証中。総合関所と計測はbacklog.md #11 |
-| TCO | 末尾呼び出しでのフレーム再利用 | 設計下書きのみ（[vm-tco-design.md](vm-tco-design.md)） |
+| TCO | 末尾呼び出しでのフレーム再利用 | 実験実装・host/device検証済み。観測可能な挙動維持のため既定n（[vm-tco-design.md](vm-tco-design.md) §6〜10） |
 
 ---
 
@@ -497,7 +497,9 @@ generator/async generatorの呼び出しは分けて扱い、どちらも囲っ�
 
 ## 12. 末尾呼び出し最適化（TCO）
 
-設計下書きのみ。[vm-tco-design.md](vm-tco-design.md)を参照。L2c本体の実装後に入れる前提（フレーム鎖・GC分担・B地点の位置がL2c本体で確定してから）。
+L2c本体のフレーム鎖・GC分担・B地点の確定後に実験実装とhost/device検証を実施済み。
+[vm-tco-design.md](vm-tco-design.md) §6〜10を参照。Error.stackや到達可能な深さへの影響があるため
+既定nを維持し、通常の移植互換性と実験的な末尾フレーム再利用を区別する。
 
 ---
 
@@ -553,7 +555,7 @@ generator/async generatorの呼び出しは分けて扱い、どちらも囲っ�
 ## 関連文書
 
 - 実測値・関所の通過結果: [vm-L2-results.md](vm-L2-results.md)
-- 末尾呼び出し最適化（未着手の下書き）: [vm-tco-design.md](vm-tco-design.md)
+- 末尾呼び出し最適化（実験実装・既定n）: [vm-tco-design.md](vm-tco-design.md)
 - 未着手・未確認の作業項目: [backlog.md](backlog.md)
 - quickjs.c の事実の根拠: [vm-ledger/](vm-ledger/) 01〜07
 - 実機の基準値: [vm-L0-report.md](vm-L0-report.md)

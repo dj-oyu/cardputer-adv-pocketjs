@@ -221,6 +221,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
     if(c=='L'||c=='M'||c=='Y'||c=='Z') { atomic_store(&diagnostic,c); return false; }
+    if(c=='['||c=='\\'||c==']') { atomic_store(&diagnostic,c); return false; }
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
     // VM probe workload triggers (docs/vm/quickjs-freertos-vm-spec.md sec.5),

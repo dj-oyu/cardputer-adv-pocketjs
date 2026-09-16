@@ -562,6 +562,47 @@ USB・起動・表示待ち・終了を含む。firmwareの累積時間も実行
 FAIR保存検査と本採取の終了後、元appをhash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認。
 復元後ログは`runaway-restored-smoke.log`。通常設定のFAIR/YIELD既定と暴走閾値は変更していない。
 
+次の正常負荷検査用にSELFTEST専用の有限frame診断（2万/4万/10万回の整数加算）と
+`device_finite_frame.py`を追加した。完走時は総和を照合し、停止時はframe由来のRUNAWAYと
+APP_STOPPEDを要求する観測ツール。ループ回数は§3.6の2万回約92msを目安に選んだが、
+別image・実アプリの費用は未測定であり、完走すべき境界をこの数字で断定しない。
+この追加時点では有限診断の実機採取は未実施（次節でFAIR構成を採取）。
+既存の無限負荷採取や通常アプリsmokeを代わりの証拠にはしない。
+
+### 4.17 有限frameの実機採取（2026-09-16、互換/FAIR）
+
+SELFTEST/YIELD/FAIR/LAZY_INPUTS=yのimage SHA256
+`a94add02c8c79a71b95d698967e57c24947274413cd006afebbac47db521d961`、
+app2,159,984B、DIRAM123,356B、Flash Code1,567,796B。閾値は250,000µsのまま。
+`device_finite_frame.py`を3回実行（別serial open。2/3回のuptimeは起動直後へ戻っているため、
+同じ起動状態での連続寿命検査とは扱わない）。各回で以下の結果が一致した。
+
+| 反復数 | 観測結果 |
+| --- | --- |
+| 20,000 | 完走、総和199,990,000 |
+| 40,000 | 完走、総和799,980,000 |
+| 100,000 | frame暴走ガードで停止、累積256,899 / 256,970 / 256,904µs |
+
+4万回はHELLO_FRAME_PRESENTED→完了ログの差だけでも261/262/262ms。
+これは描画・待機・ログを含む区間でCPU時間ではないが、250msを超える壁時計時間を許して
+有限frameが完走する例にはなる。完走frameの累積実行時間は現在のログでは取得できておらず、
+閾値まで何µsの余裕があったかは断定しない。10万回は有限でも停止するため、「有限なら必ず完走」
+という判定をこのガードへ持ち込まない。ログ`.cache/vmtest/finite-fair-{1,2,3}.log`。
+FAIR側の初回証拠であり、この時点では互換順序・競合条件・閾値近傍の確認は残る。
+検証imageのsmoke3周・故障回復6種成功後、元appをhash一致で復元し、同じsmoke3周・故障回復6種と
+HOME_READYを確認した。ログ`finite-fair-smoke.log` / `finite-restored-smoke.log`。
+
+**互換順序での追試:** 検証SDKCONFIGのFAIRだけをnへ変更し、同じ診断ソースをビルド。
+image SHA256 `f0da067f90caa22b6505fb3fb7ced6068acf4dbd248294f2cce268a601315610`、
+app2,159,920B、DIRAM123,356B、Flash Code1,567,728B。
+別serial openの3回すべてで2万/4万回は同じ総和で完走し、10万回は累積256,751 / 256,798 / 256,484µsで停止。
+4万回のHELLO_FRAME_PRESENTED→完了は全回261ms。FAIRと同じ定性的結果だが、別imageなので
+小さな時間差をモードの性能差へ帰属させない。検証用imageのsmoke3周・故障回復6種も成功。
+ログ`.cache/vmtest/finite-compat-{1,2,3}.log`、`finite-compat-smoke.log`。
+これでこの3負荷の互換/FAIR対照は採取済み。競合条件と閾値近傍の確認、総合関所は残る。
+互換側の検証後も元appを書込hash一致で復元し、smoke3周・故障回復6種・HOME_READYを確認した。
+復元後ログ`finite-compat-restored-smoke.log`。閾値と通常設定は変更していない。
+
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 
 ### 5.1 実機のフレーム使用量（実測(device)、プローブビルド、hello他6本を各4秒走行）
