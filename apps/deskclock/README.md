@@ -56,7 +56,7 @@
 最新は14f（Taffyなしフルシステム受入試験）で、15〜27は未着手。CP28自体が
 まだ届いていない番地であり、今回はそこへ向けた前提を1つ確認しただけ。
 
-* `KSN-MISSING(overlay.kasane-attach)`: `main/app_session.c` の `app_start_test()` は
+* `KSN-MISSING(overlay.attach)`: `main/app_session.c` の `app_start_test()` は
   `overlay_session` のとき `pocketjs_guest_quickjs_install_once(guest,"kasane",...)`
   を呼ばない（569行目付近、`goto surfaces_done` で599行目の kasane install を
   スキップする）。overlay guest に `pocket.kasane` 名前空間そのものが存在しない。
