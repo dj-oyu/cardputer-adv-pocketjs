@@ -1,4 +1,5 @@
 // Overlay app. Why it is written this way: apps/deskclock/README.md
+// KSN-MISSING(overlay.kasane-attach): see README "Kasane missing".
 var o = pocket.overlay, t = pocket.time, last = '';
 function pad(n) { return n < 10 ? '0' + n : '' + n; }
 globalThis.frame = function () {
