@@ -7,13 +7,21 @@
 // the picture by a level, and an angle off by a fraction of a degree moves it
 // by a pixel, which is exactly the kind of error the eye forgives on this panel.
 //
-// So the numbers come from here instead:
+// The implementation is a Q31 quadrant-cosine table with a three-point Lagrange
+// between its entries, so the accuracy is the *table's*, and the things worth
+// checking are therefore:
 //
-//  1. the table is checked against libm's own cosine, entry by entry;
-//  2. sin and cos are swept against the true value over five different regimes
-//     (fine grid, scene clocks, table and quadrant boundaries, large arguments,
-//     bit patterns) and held to one ulp of magnitude 1, which is the float's own
-//     rounding: the claim is "the result is correctly rounded", not "close";
+//  1. the table itself, entry by entry against libm's cosine -- it is generated
+//     (tools/gen_fx_lut.py) and committed, and a stray digit would be silent;
+//  2. sin and cos swept against the true value over five different regimes (fine
+//     grid, scene clocks, table and quadrant boundaries, large arguments, bit
+//     patterns), held to the ~1 ulp the Q31 entries can carry. That floor does
+//     not move with the table size: this table measures 0.96 ulp over the sweep
+//     below, a 512-interval quadratic 0.95, and a 2,275-interval *linear* table
+//     (9,104 bytes against 872 here) 0.99. The bound below is a floor check, not
+//     a nicety. The degree-5 polynomial this replaced ran at 0.27 ulp; the pixel
+//     cost of moving to the floor is measured in the dump harnesses, not here
+//     (14 pixels of 84,661,200, all one shading step);
 //  3. the divergence from libm is *counted* rather than bounded, because the
 //     number that matters for the picture is how often the last bit differs;
 //  4. the two callers whose output is an integer are decided exhaustively --
@@ -29,7 +37,11 @@
 // ulp of magnitude 1: the resolution of a float result whatever its size, so the
 // error is reported in a unit that does not jump around as the value passes zero.
 #define ULP1 1.1920929e-07
-static const double TABLE_H = 3.14159265358979323846 / 128.0;
+// One and a quarter of them. The measured worst case over the sweep below is
+// 0.965, and both numbers are printed, so a regression shows up as a number
+// before it shows up as a failure.
+#define ULP1_LIMIT 1.25
+static const double TABLE_H = (3.14159265358979323846 / 2) / FX_LUT_INTERVALS;
 
 static long total, differ;
 static double worst, worst_vs;
@@ -65,30 +77,48 @@ static void report(const char *what) {
     printf("%-30s %9ld calls  differ from libm %7ld (%6.4f%%)  max error %.3f ulp1"
            "  max |fx-libm| %.3f ulp1\n", what, total, differ,
            100.0 * differ / total, worst / ULP1, worst_vs / ULP1);
-    // One ulp1 is 8.4e-8 at the widest; the implementation's own error is a
-    // quarter of that, and anything past one whole ulp1 would mean the table or
-    // the reduction is wrong rather than finely rounded.
-    assert(worst <= ULP1);
+    // The Q31 entries carry a half LSB each and the evaluation rounds through
+    // float, so ~1 ulp is where any table of this width lands; the figure printed
+    // above is the one to watch. The limit is a floor check: a dropped entry, a
+    // wrong quadrant or a mis-scaled fraction all blow past it by 100x.
+    assert(worst <= ULP1 * ULP1_LIMIT);
     total_all += total;
     if (worst > worst_all) worst_all = worst;
     total = differ = 0; worst = worst_vs = 0;
 }
 
 // The table is the part that cannot be checked by eye, and it is also the part a
-// typo would corrupt silently: 0.27 ulp is the whole error budget.
+// typo would corrupt silently -- and it is generated now, so what is checked is
+// that the committed header is what tools/gen_fx_lut.py would write: entry m is
+// round(cos((m-1)*h)*2^31) in the shifted layout the three-point Lagrange reads,
+// and cos(m*h) unshifted when a linear table is being built.
 static void table_matches_libm(void) {
-    int worst_j = 0;
-    for (int j = 1; j <= 64; j++) {          // entry 0 is the clamped 1.0
-        int want = (int)floor(cos(j * TABLE_H) * 2147483648.0 + 0.5);
-        int got = fx_quarter[j];
+#if FX_LUT_SHIFT != 31
+    printf("FAIL: the shipped table is Q31; a Q15 table's own LSB is 256 ulp1\n");
+    assert(FX_LUT_SHIFT == 31);
+#endif
+    const int shift = FX_LUT_ORDER == 2 ? -1 : 0;
+    int checked = 0;
+    for (int m = 0; m < FX_LUT_ENTRIES; m++) {
+        int k = m + shift;
+        double v = cos(k * TABLE_H) * 2147483648.0;
+        if (v > 2147483647.0) v = 2147483647.0;        // entry 0 is the clamp
+        int want = (int)floor(v + 0.5);
+        int got = fx_quarter[m];
         if (want != got) {
-            printf("FAIL: table[%d] = %d, cos(%d*pi/128) fits %d\n", j, got, j, want);
+            printf("FAIL: table[%d] = %d, cos(%d*pi/2/%d) fits %d\n", m, got, k, FX_LUT_INTERVALS, want);
             assert(want == got);
         }
-        worst_j = j;
+        checked++;
     }
-    assert(worst_j == 64 && fx_quarter[0] == 2147483647 && fx_quarter[64] == 0);
-    printf("table: 64 entries plus both ends agree with round(cos(j*pi/128)*2^31)\n");
+    assert(checked == FX_LUT_ENTRIES);
+    // The clamped entry is the one at angle zero -- index 0 unshifted, index 1
+    // in the shifted layout -- and the last entry is the quadrant's end, which is
+    // exactly zero.
+    assert(fx_quarter[FX_LUT_ORDER == 2 ? 1 : 0] == 2147483647);
+    assert(fx_quarter[FX_LUT_ENTRIES - 1] == 0);
+    printf("table: %d entries agree with round(cos((m%+d)*pi/2/%d)*2^31), both ends clamped\n",
+           checked, shift, FX_LUT_INTERVALS);
 }
 
 // wave.c: level_slope = (int)(tanf(tilt_x/256.0f) * 256), and motion.c clamps
@@ -188,8 +218,9 @@ int main(void) {
     report("float bit patterns 0.5..8");
 
     // Degenerate inputs: a scene hands these in when a clock has not started or
-    // a tilt is exactly level, and they were the two cases the fold's signs got
-    // wrong while this was being written (a quarter turn's sine is 2^31).
+    // a tilt is exactly level, and they were the cases the earlier reduction got
+    // wrong. With a table the ends are exact by construction: cos(0) reads entry
+    // 0 (the clamped 1.0f) and a quarter turn's sine reads the table's zero.
     assert(fx_sinf(0.0f) == 0.0f && fx_cosf(0.0f) == 1.0f);
     assert(fx_sinf(-0.0f) == 0.0f && fx_cosf(-0.0f) == 1.0f);
     assert(fx_sinf((float)(M_PI/2)) == 1.0f);
@@ -201,7 +232,8 @@ int main(void) {
 
     wave_level_slope();
     mp3_filter();
-    printf("FXMATH_OK: table exact, %.3f ulp1 worst error over %ld swept calls, "
-           "level_slope and the MP3 coefficients bit-identical\n", worst_all / ULP1, total_all);
+    printf("FXMATH_OK: %d-entry table exact, %.3f ulp1 worst error over %ld swept "
+           "calls (Q31 floor), level_slope and the MP3 coefficients bit-identical\n",
+           FX_LUT_ENTRIES, worst_all / ULP1, total_all);
     return 0;
 }
