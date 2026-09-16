@@ -690,6 +690,19 @@ SELFTEST/YIELD/LAZY_INPUTS=y、FAIR=n、app2,160,160B、DIRAM123,356B、Flash Co
 - `smoke_device.py --cycles 20`: 後のビルドで SMOKE_OK 20・故障回復6種。
 - 手順の誤りを1件記録する: 修正前の memlog を最初は `build_gcthr` で採ったが、`idf.py flash` が作業ツリーの変更込みで再ビルドしていたので、前後とも修正後の値になっていた。上の前の値は、変更を含まない worktree のビルドで採り直したもの。
 
+### 4.21 backtrace 組み立て中の OOM：UAF と CallSite 二重解放（backlog #6、2026-09-16、`vm/l2-memory-safety`）
+
+**§4.20 の訂正**: `memory_device.js` の array-oom（`new Array(1<<18).fill(0)`、少しずつ伸びて上限で OOM）を単発確保に替えた件の説明が不十分だった。この元の形は #9 の後、o2 では `null`（捕捉され、後続も正常）だったが、**asan では下の UAF** だった。当時は o2 の差分しか見ておらず、置き換えで UAF の再現をテストから消していた。`memory_device.js` は単発確保のまま、元の経路は新ケース `oom_creep_backtrace.js` で守る。
+
+**不具合1（上流 e1c1e416、#1469）**: `build_backtrace(ctx, error_val, ...)` は `rt->current_exception` を借用参照で受け取る（`JS_CallInternal` の `exception:` ラベル、パーサ、正規表現）。中の確保が上限で失敗すると `JS_ThrowOutOfMemory`→`JS_Throw` が `rt->current_exception` を解放する。巻き戻し中はそれが唯一の参照なので、その後の `can_add_backtrace(error_val)`・`JS_DefinePropertyValue` が解放済みを読んでいた。修正は、入口で `error_obj = js_dup(error_val)` を取り、出口で解放する形（上流の移植、`JS_ToObject` の無関係な1行は除外、`49edcc4`）。
+- 回帰 `oom_creep_backtrace.js`（device プロファイル）: ヒープを小オブジェクトで上限まで埋め、r=0〜47 個解放してから3段下で大きな確保をする。当たる窓が狭いので余白を掃引する形にした。修正前の asan で UAF、修正後は48回とも捕捉（null 9回、`#info`）。
+- 別モデル（sonnet）の敵対的レビュー: この修正は正しく完全（解放は1回、借用参照の残存使用なし、8呼び出し元すべてに効く）。同じ関数に次の不具合を見つけた。
+
+**不具合2（上流 c846cb13）**: `Error.prepareStackTrace` を設定していると、`build_backtrace` は CallSite の配列を作る。配列への挿入が失敗した場合、`JS_DefinePropertyValueUint32` は失敗時も値を消費する（`JS_DefinePropertyValue` → `JS_FreeValue`）のに、呼び出し側でもう一度 `JS_FreeValue(v)` していた。さらに `js_new_callsite` が `csd` の値を移したのにクリアせず、後始末のループが二重に解放していた。修正は上流の移植（`780cd25`）。
+- 回帰 `oom_callsite_double_free.js`: 上限際の余白掃引（最大1,200回×3通り）では、CallSite の確保が失敗するか全部収まるかで、この分岐に届かなかった。両分岐を計装して `--fail-alloc` を掃引し、1458 を index 0 の挿入時の配列伸長として特定した（alloca 版は番号が違うので skip）。修正前の asan/asan-recur/asan-flat で UAF、修正後は `returned object`。
+
+**検証（最終状態）**: コーパス8変種全合格（71件。alloca は skip 2）、Test262 asan/o2 とも 7,501 pass・regressions 0、`budget_probe.sh o2` 11/11、`oom_canary_probe.sh` asan/o2 とも 5/5、`known/oom_backtrace_uaf.js` は asan で UAF なし。実機 `build_uaf`: smoke 20周・故障回復6種。
+
 ## 5. D42+D43: フレームセグメントの線形化（2026-09-13〜14、`vm/segsize`）
 
 ### 5.1 実機のフレーム使用量（実測(device)、プローブビルド、hello他6本を各4秒走行）
