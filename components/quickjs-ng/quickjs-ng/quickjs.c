@@ -1675,6 +1675,44 @@ JSValue JS_DupValueRT(JSRuntime *rt, JSValueConst v)
     return js_dup(v);
 }
 
+/* PocketJS change (docs/vm/backlog.md #5): under a malloc_limit, the cycle
+ * collector is due no later than 1/32 of the limit below it (5 KiB of the
+ * guest's 160 KiB). Upstream compares against malloc_gc_threshold alone, which
+ * is a growth policy for an unbounded heap: it starts at 256 KiB and is reset
+ * to 1.5x the survivors after each collection. Under a limit either value can
+ * lie past the limit -- the initial one always does on the device, and 1.5x
+ * does once 2/3 of the limit survives -- and then no collection runs before
+ * js_malloc_rt refuses, which does not collect first (the allocator is called
+ * from places where a GC is not safe). Cyclic garbage then becomes an OOM
+ * that one collection would have avoided.
+ *
+ * Why a cap applied at the comparison and not a clamp of the stored value:
+ * the stored value is only rewritten after a collection, so one computed
+ * while the heap was nearly full (e.g. filled to OOM, then partly released by
+ * refcount) stays high. Why a margin and not the limit itself: the check
+ * happens only at object creation, while a cycle also allocates property
+ * arrays and shapes in between, and those can cross the last bytes before an
+ * object does. Measured on tools/vmtest/corpus/gc_threshold_near_limit.js
+ * (host, device profile): a cap of limit-1 still ends in OOM, as did a clamp
+ * of the stored value to half the remaining headroom; this cap completes.
+ *
+ * Cost: once the survivors exceed the cap, every object creation collects.
+ * That happens only within 1/32 of the limit, where the app was already an
+ * allocation or two from OOM. With no limit, or one far above the heap (the
+ * host profile's 64 MiB), the comparison is upstream's. JS_SetGCThreshold(-1)
+ * no longer disables collection under a limit; nothing here uses it. */
+static size_t js_gc_effective_threshold(JSRuntime *rt)
+{
+    size_t threshold = rt->malloc_gc_threshold;
+    size_t limit = rt->malloc_state.malloc_limit;
+    if (limit != 0) {
+        size_t cap = limit - (limit >> 5);
+        if (cap < threshold)
+            threshold = cap;
+    }
+    return threshold;
+}
+
 static void js_trigger_gc(JSRuntime *rt, size_t size)
 {
     bool force_gc;
@@ -1682,7 +1720,7 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
     force_gc = true;
 #else
     force_gc = ((rt->malloc_state.malloc_size + size) >
-                rt->malloc_gc_threshold);
+                js_gc_effective_threshold(rt));
 #endif
     if (force_gc) {
 #ifdef ENABLE_DUMPS // JS_DUMP_GC
