@@ -57,7 +57,8 @@ int main(void){
               "try{kasane.createScene(lazy)}catch(e){}if(got!==1)throw Error('patch read after bad build');"
               "const plain=kasane.createScene({build(tx){tx.background(255);return {}}});"
               "if(Object.keys(plain).join()!=='invalidate,flush'||plain.flush.length!==1||"
-              "plain.invalidate.length!==1||plain.flush.name!=='flush')throw Error('shape');"),
+              "plain.invalidate.length!==1||plain.flush.name!=='flush'||"
+              "Object.getPrototypeOf(plain)!==Object.prototype)throw Error('shape');"),
           "createScene validates options and returns the object-literal shape");
     check(present(&stats)==KSN_OK&&run(
               "let n=0;const s2=kasane.createScene({build(tx,m){n++;tx.background(255);"

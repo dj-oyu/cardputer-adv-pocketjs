@@ -1266,7 +1266,11 @@ static const JSCFunctionListEntry instance_methods[]={
     JS_CFUNC_DEF("setVisible",2,js_instance_visible_checked),
 };
 /* Returns {invalidate, flush} as own data properties holding bound functions,
- * the shape the JS factory's object literal had, so detached calls still work. */
+ * the shape the JS factory's object literal had, so detached calls still work.
+ * The returned object is also the state's holder (its class inherits
+ * Object.prototype): each bound function keeps it alive through its data slot,
+ * a cycle the collector breaks through scene_mark. One object fewer than a
+ * separate hidden holder. */
 static JSValue js_create_scene(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     JSValueConst options=argc?argv[0]:JS_UNDEFINED;
@@ -1285,28 +1289,25 @@ static JSValue js_create_scene(JSContext *ctx,JSValueConst self,int argc,JSValue
         JS_FreeValue(ctx,build);JS_FreeValue(ctx,patch);
         return JS_ThrowTypeError(ctx,"createScene requires build and optional patch callbacks");
     }
-    JSValue holder=JS_NewObjectProtoClass(ctx,JS_NULL,scene_class);
-    kasane_scene *scene=JS_IsException(holder)?NULL:js_mallocz(ctx,sizeof(*scene));
+    JSValue out=JS_NewObjectClass(ctx,scene_class);
+    kasane_scene *scene=JS_IsException(out)?NULL:js_mallocz(ctx,sizeof(*scene));
     if(!scene) {
-        JS_FreeValue(ctx,holder);JS_FreeValue(ctx,build);JS_FreeValue(ctx,patch);
+        JS_FreeValue(ctx,out);JS_FreeValue(ctx,build);JS_FreeValue(ctx,patch);
         return JS_EXCEPTION;
     }
     *scene=(kasane_scene){.build=build,.patch=patch,.refs=JS_NULL,.candidate=JS_NULL,
                           .model=JS_UNDEFINED,.dirty=true,.rebuild=true};
-    JS_SetOpaque(holder,scene);
-    JSValue out=JS_NewObject(ctx);
-    if(JS_IsException(out)) { JS_FreeValue(ctx,holder);return out; }
-    JSValueConst data[]={holder};
+    JS_SetOpaque(out,scene);
+    JSValueConst data[]={out};
     JSValue invalidate=JS_NewCFunctionData2(ctx,scene_invalidate,"invalidate",1,0,1,data);
     if(JS_IsException(invalidate)||
        JS_DefinePropertyValueStr(ctx,out,"invalidate",invalidate,JS_PROP_C_W_E)<0) goto fail;
     JSValue flush=JS_NewCFunctionData2(ctx,scene_flush,"flush",1,0,1,data);
     if(JS_IsException(flush)||
        JS_DefinePropertyValueStr(ctx,out,"flush",flush,JS_PROP_C_W_E)<0) goto fail;
-    JS_FreeValue(ctx,holder);
     return out;
 fail:
-    JS_FreeValue(ctx,holder);JS_FreeValue(ctx,out);
+    JS_FreeValue(ctx,out);
     return JS_EXCEPTION;
 }
 static const JSCFunctionListEntry functions[]={
@@ -1353,8 +1354,7 @@ static bool animation_proto(JSContext *ctx) {
 
 static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
-    /* The scene holder is never reachable from JS, so it needs no prototype;
-     * instance and animation prototypes are built on first use (above). */
+    /* Instance and animation prototypes are built on first use (above). */
     if(!register_class(ctx,&tx_class,&tx_rt,&tx_def)||
        !register_class(ctx,&modal_class,&modal_rt,&modal_def)||
        !register_class(ctx,&ref_class,&ref_rt,&ref_def)||
@@ -1367,15 +1367,16 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
        !set_proto(ctx,tx_class,tx_methods,COUNT(tx_methods))||
        !set_proto(ctx,modal_class,modal_methods,COUNT(modal_methods))||
        !set_proto(ctx,ref_class,ref_methods,COUNT(ref_methods))) return ESP_ERR_NO_MEM;
-    /* Handles with no methods inherit Object.prototype directly instead of
-     * each owning an empty object. */
+    /* Handles with no methods, and scenes (whose methods are own properties),
+     * inherit Object.prototype directly instead of each owning an empty object. */
     JSValue plain=JS_NewObject(ctx);
     if(JS_IsException(plain)) return ESP_ERR_NO_MEM;
     JSValue object_proto=JS_GetPrototype(ctx,plain);
     JS_FreeValue(ctx,plain);
     JS_SetClassProto(ctx,template_class,JS_DupValue(ctx,object_proto));
     JS_SetClassProto(ctx,image_class,JS_DupValue(ctx,object_proto));
-    JS_SetClassProto(ctx,ticket_class,object_proto);
+    JS_SetClassProto(ctx,ticket_class,JS_DupValue(ctx,object_proto));
+    JS_SetClassProto(ctx,scene_class,object_proto);
     if(JS_SetPropertyFunctionList(ctx,ns,functions,
        (int)(sizeof(functions)/sizeof(functions[0])))<0) return ESP_ERR_NO_MEM;
     JSValue cache=JS_NewObject(ctx);
