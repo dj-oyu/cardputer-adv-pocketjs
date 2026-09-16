@@ -136,6 +136,9 @@ struct pocketjs_guest {
   int64_t frame_us;
   esp_timer_handle_t yield_timer;
   bool yield_disabled;
+#ifdef CONFIG_POCKET_VM_SELFTEST
+  bool trace_frame;
+#endif
 #endif
   uint32_t yields;
   uint32_t continuations;
@@ -655,6 +658,13 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
     JS_FreeValue(guest->context, result);
     return ESP_OK;
   }
+#ifdef CONFIG_POCKET_VM_SELFTEST
+  if (guest->trace_frame) {
+    guest->trace_frame = false;
+    ESP_LOGI(TAG, "VM_FRAME_COMPLETE execution_us=%lld exception=%d",
+             (long long)guest->frame_us, JS_IsException(result));
+  }
+#endif
   guest->frame_us = 0;
 #endif
   if (JS_IsException(result)) {
@@ -723,6 +733,12 @@ int64_t pocketjs_guest_frame_total(const pocketjs_guest_t *guest) {
 #endif
 }
 
+#if defined(CONFIG_POCKET_VM_SELFTEST) && defined(CONFIG_POCKET_VM_YIELD)
+void pocketjs_guest_trace_frame(pocketjs_guest_t *guest) {
+  if (guest != NULL) guest->trace_frame = true;
+}
+#endif
+
 void pocketjs_guest_prepare_stop(pocketjs_guest_t *guest) {
   if (!guest || !guest->runtime)
     return;
@@ -787,6 +803,13 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
       return ESP_OK;
     }
     guest->origin = JS_VM_ORIGIN_NONE;
+#ifdef CONFIG_POCKET_VM_SELFTEST
+    if (frame && guest->trace_frame) {
+      guest->trace_frame = false;
+      ESP_LOGI(TAG, "VM_FRAME_COMPLETE execution_us=%lld exception=%d",
+               (long long)guest->frame_us, JS_IsException(result));
+    }
+#endif
     guest->frame_us = 0;
     if (JS_IsException(result)) {
       js_std_dump_error(guest->context);
