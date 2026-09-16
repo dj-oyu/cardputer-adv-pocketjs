@@ -29,6 +29,7 @@ int main(void) {
     check(present(&stats)==KSN_OK,"imucal NO_IMU repeated present stays OK");
     check(run("if(typeof ui!=='undefined')throw Error('legacy ui global leaked in in scope');"),
           "no legacy ui global observed");
+    close_fault_runtime();
 
     /* Second scenario: a full six-orientation walk with sensors.imu, storage
      * and audio mocked in JS, driving the exact success path the device runs. */
@@ -43,7 +44,10 @@ int main(void) {
         "else rej({code:'NOT_FOUND'});});},"
         "set(k,v){return new Promise((res)=>{__store[k]=v;res();});}},"
         "audio:{tone(){return Promise.resolve();}}};"
-        "function setAccel(x,y,z){__imuCb({accel:{x:x,y:y,z:z},gyro:{x:0.01,y:0,z:0},dropped:0});}"
+        /* setAccel is a no-op once report() closes the subscription -- a real
+         * watch stops delivering samples the moment close() runs natively. */
+        "function setAccel(x,y,z){if(__imuCb)__imuCb({accel:{x:x,y:y,z:z},"
+        "gyro:{x:0.01,y:0,z:0},dropped:0});}"
         "function hold(x,y,z){for(let i=0;i<12;i++)setAccel(x,y,z);"
         "for(let i=0;i<50;i++){setAccel(x,y,z);frame();}}"
         "function moveAway(){for(let i=0;i<15;i++){"
@@ -51,14 +55,17 @@ int main(void) {
         "imucal fixture opens with available IMU");
     check(run(source),"imucal.js runs to completion with IMU available");
     check(present(&stats)==KSN_OK,"imucal available-IMU initial scene presents");
-    check(run(
-        "hold(0,0,9.8);moveAway();"
-        "hold(0,0,-9.8);moveAway();"
-        "hold(0,9.8,0);moveAway();"
-        "hold(0,-9.8,0);moveAway();"
-        "hold(9.8,0,0);moveAway();"
-        "hold(-9.8,0,0);"),
-        "imucal completes the six-orientation walk without throwing");
+    check(run("hold(0,0,9.8);"),"orientation 1/6 (DESK FACE UP)");
+    check(run("moveAway();"),"move-away after 1/6");
+    check(run("hold(0,0,-9.8);"),"orientation 2/6 (DESK FACE DOWN)");
+    check(run("moveAway();"),"move-away after 2/6");
+    check(run("hold(0,9.8,0);"),"orientation 3/6 (UP FACING YOU)");
+    check(run("moveAway();"),"move-away after 3/6");
+    check(run("hold(0,-9.8,0);"),"orientation 4/6 (UP INVERTED)");
+    check(run("moveAway();"),"move-away after 4/6");
+    check(run("hold(9.8,0,0);"),"orientation 5/6 (RIGHT EDGE DOWN)");
+    check(run("moveAway();"),"move-away after 5/6");
+    check(run("hold(-9.8,0,0);"),"orientation 6/6 (LEFT EDGE DOWN) triggers report()");
     check(present(&stats)==KSN_OK,"imucal report scene presents");
     check(run("frame();frame();frame();frame();frame();frame();frame();frame();frame();frame();frame();"),
         "imucal post-report frame() pump (GYRO AFTER check) does not throw");
@@ -71,6 +78,8 @@ int main(void) {
           "IMUCAL_MAP for X matches the driven orientations");
     check(run("if(!('axes' in __store))throw Error('report did not persist to pocket.storage');"),
           "report() saved the result through pocket.storage");
+    close_fault_runtime();
+    check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"imucal test teardown frees memory");
 
     printf("%s\n",failures?"IMUCAL KASANE TEST FAIL":"IMUCAL KASANE TEST PASS");
     return failures?1:0;
