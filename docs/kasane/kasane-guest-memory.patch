@@ -1,0 +1,304 @@
+diff --git a/components/quickjs-ng/quickjs-ng/quickjs.c b/components/quickjs-ng/quickjs-ng/quickjs.c
+index b299627..d764aee 100644
+--- a/components/quickjs-ng/quickjs-ng/quickjs.c
++++ b/components/quickjs-ng/quickjs-ng/quickjs.c
+@@ -28117,11 +28117,17 @@ private_field_already_defined:
+ 
+     /* store the class source code in the constructor. */
+     js_free(ctx, ctor_fd->source);
++#ifdef CONFIG_POCKET_MEMPROBE_NO_SOURCE
++    /* measurement only: no source copy; toString uses its fallback */
++    ctor_fd->source = NULL;
++    ctor_fd->source_len = 0;
++#else
+     ctor_fd->source_len = s->buf_ptr - class_start_ptr;
+     ctor_fd->source = js_strndup(ctx, (const char *)class_start_ptr, ctor_fd->source_len);
+     if (!ctor_fd->source) {
+         goto fail;
+     }
++#endif
+ 
+     /* consume the '}' */
+     if (next_token(s)) {
+@@ -40054,11 +40060,13 @@ static __exception int js_parse_function_decl2(JSParseState *s,
+             /* save the function source code */
+             /* the end of the function source code is after the last
+                 token of the function source stored into s->last_ptr */
++#ifndef CONFIG_POCKET_MEMPROBE_NO_SOURCE
+             fd->source_len = s->last_ptr - ptr;
+             fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
+             if (!fd->source) {
+                 goto fail;
+             }
++#endif
+ 
+             goto done;
+         }
+@@ -40086,11 +40094,13 @@ static __exception int js_parse_function_decl2(JSParseState *s,
+     }
+ 
+     /* save the function source code */
++#ifndef CONFIG_POCKET_MEMPROBE_NO_SOURCE
+     fd->source_len = s->buf_ptr - ptr;
+     fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
+     if (!fd->source) {
+         goto fail;
+     }
++#endif
+ 
+     if (next_token(s)) {
+         /* consume the '}' */
+diff --git a/main/Kconfig.projbuild b/main/Kconfig.projbuild
+index 6e22618..fc102f4 100644
+--- a/main/Kconfig.projbuild
++++ b/main/Kconfig.projbuild
+@@ -270,4 +270,14 @@ menu "Pocket VM (L0 measurement probes)"
+             shared root sdkconfig or in sdkconfig.defaults. See
+             sdkconfig.vmclockbench.defaults.
+ 
++    config POCKET_MEMPROBE_NO_SOURCE
++        bool "Measurement only: do not retain function source text"
++        default n
++        help
++            QuickJS copies every function's source text into its bytecode for
++            Function.prototype.toString. On, the copy is never made and
++            toString falls back to "function name() { [native code] }".
++            Used to measure what the copies cost the guest heap
++            (docs/kasane/kasane-guest-memory.md). Isolated SDKCONFIG only.
++
+ endmenu
+diff --git a/main/app_session.c b/main/app_session.c
+index 79b9b86..c374bcf 100644
+--- a/main/app_session.c
++++ b/main/app_session.c
+@@ -402,6 +402,39 @@ static esp_err_t eval_user_source(const char *source, size_t length) {
+ // answer is both known and final -- after the stop hook has had its 200 ms of
+ // JS_ExecutePendingJob, before JS_FreeRuntime discards whatever is left.
+ static pocketjs_guest_stats_t final_stats;
++// MEASUREMENT ONLY (docs/kasane/kasane-guest-memory.md): every JSMemoryUsage
++// field before and after one forced GC, so live bytes and uncollected garbage
++// are separate numbers. The GC here exists for the reading and nothing else.
++static bool memprobe_first_done, memprobe_f300_done;
++static void memprobe_line(const char *phase, const char *gc, JSRuntime *rt) {
++    JSMemoryUsage u;
++    JS_ComputeMemoryUsage(rt,&u);
++    ESP_LOGI("app","MEMPROBE %s %s app=%s free=%u largest=%u malloc_size=%lld malloc_count=%lld "
++        "memory_used_size=%lld memory_used_count=%lld atom_count=%lld atom_size=%lld "
++        "str_count=%lld str_size=%lld obj_count=%lld obj_size=%lld prop_count=%lld prop_size=%lld "
++        "shape_count=%lld shape_size=%lld js_func_count=%lld js_func_size=%lld js_func_code_size=%lld "
++        "js_func_pc2line_count=%lld js_func_pc2line_size=%lld c_func_count=%lld array_count=%lld "
++        "fast_array_count=%lld fast_array_elements=%lld binary_object_count=%lld binary_object_size=%lld frames=%u",
++        phase,gc,app_registry_current()->id,
++        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
++        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
++        (long long)u.malloc_size,(long long)u.malloc_count,(long long)u.memory_used_size,
++        (long long)u.memory_used_count,(long long)u.atom_count,(long long)u.atom_size,
++        (long long)u.str_count,(long long)u.str_size,(long long)u.obj_count,(long long)u.obj_size,
++        (long long)u.prop_count,(long long)u.prop_size,(long long)u.shape_count,(long long)u.shape_size,
++        (long long)u.js_func_count,(long long)u.js_func_size,(long long)u.js_func_code_size,
++        (long long)u.js_func_pc2line_count,(long long)u.js_func_pc2line_size,(long long)u.c_func_count,
++        (long long)u.array_count,(long long)u.fast_array_count,(long long)u.fast_array_elements,
++        (long long)u.binary_object_count,(long long)u.binary_object_size,frames);
++}
++static void memprobe(const char *phase) {
++    JSContext *ctx=guest?pocketjs_guest_quickjs_context(guest):NULL;
++    if(!ctx) return;
++    JSRuntime *rt=JS_GetRuntime(ctx);
++    memprobe_line(phase,"pre",rt);
++    JS_RunGC(rt);
++    memprobe_line(phase,"post",rt);
++}
+ void app_report(void) {
+     pocketjs_guest_stats_t stats={.struct_size=sizeof(stats)};
+     if(guest) pocketjs_guest_stats(guest,&stats);
+@@ -423,6 +456,7 @@ void app_report(void) {
+         (unsigned)stats.heap_used,frames);
+ }
+ void app_stop(void) {
++    memprobe("stop");
+ #ifdef CONFIG_POCKET_VM_PROBE
+     vmprobe_session_reset();
+ #endif
+@@ -511,6 +545,7 @@ esp_err_t app_start_test(char test) {
+      * entry path, including USB diagnostics. Overlays still share the scene. */
+     if(!overlay_session)scene_mem_release();
+     atomic_store(&stop_requested,false); frames=0;
++    memprobe_first_done=memprobe_f300_done=false;
+     deferred_buttons=0; continuation_turns=0; turn_continued=false;
+     last_present_us=0;
+     // Cleared with them: a start that fails before a guest exists reaches
+@@ -999,6 +1034,11 @@ esp_err_t app_tick(uint32_t buttons) {
+     // instead would drop the save silently, and only for the apps that are
+     // busy enough to still have a queue, which is when saving matters most.
+     turn_continued=false;
++    // Taken at the top of the turn after the frame was presented: the previous
++    // turn's pocket_kasane_end_turn() and present have both happened, and no
++    // guest code is on the stack.
++    if(frames>=1&&!memprobe_first_done){memprobe_first_done=true;memprobe("first");}
++    if(frames>=300&&!memprobe_f300_done){memprobe_f300_done=true;memprobe("f300");}
+     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
+     sys_notice notice;
+     bool have_notice=sys_notify_active(sys_device_notifications(),&notice);
+diff --git a/main/pocket/pocket_kasane.c b/main/pocket/pocket_kasane.c
+index 598f7bb..1b24639 100644
+--- a/main/pocket/pocket_kasane.c
++++ b/main/pocket/pocket_kasane.c
+@@ -5,6 +5,8 @@
+ #include "pet/ksn_pet.h"
+ #include "kasane_scene_js.h"
+ #include <math.h>
++#include "esp_log.h"
++#include "esp_heap_caps.h"
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -73,8 +75,19 @@ static bool ensure_state(JSContext *ctx, const char *op) {
+         if(ksn_runtime_app_view(state->lease))return true;
+         throw_result(ctx,KSN_STALE,op);return false;
+     }
++    // MEASUREMENT ONLY (docs/kasane/kasane-guest-memory.md): what the native
++    // arena's separate callocs do to the largest free block.
++    ESP_LOGI("kasane","MEMPROBE arena before free=%u largest=%u reserved=%u op=%s",
++             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
++             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
++             (unsigned)ksn_runtime_reserved_bytes(),op);
+     kasane_state *candidate=calloc(1,sizeof(*candidate));
+     ksn_result result=candidate?ksn_runtime_app_attach(&candidate->lease):KSN_OOM;
++    ESP_LOGI("kasane","MEMPROBE arena after free=%u largest=%u result=%u nativeBytes=%u state=%u",
++             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
++             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
++             (unsigned)result,(unsigned)(ksn_runtime_reserved_bytes()+sizeof(*candidate)),
++             (unsigned)sizeof(*candidate));
+     if(result!=KSN_OK) {
+         free(candidate);throw_result(ctx,result,op);return false;
+     }
+diff --git a/sdkconfig.memprobe-nosrc.defaults b/sdkconfig.memprobe-nosrc.defaults
+new file mode 100644
+index 0000000..51b6ed4
+--- /dev/null
++++ b/sdkconfig.memprobe-nosrc.defaults
+@@ -0,0 +1,2 @@
++# Measurement only (docs/kasane/kasane-guest-memory.md). Isolated SDKCONFIG.
++CONFIG_POCKET_MEMPROBE_NO_SOURCE=y
+diff --git a/tools/kasane_memprobe_run.py b/tools/kasane_memprobe_run.py
+new file mode 100644
+index 0000000..021a8ee
+--- /dev/null
++++ b/tools/kasane_memprobe_run.py
+@@ -0,0 +1,62 @@
++"""Launch apps from the home menu with no input, collect MEMPROBE lines.
++
++    python memprobe_run.py --port COM3 --label kas_on --runs 2 --out log.txt
++"""
++import argparse, time, serial
++
++p = argparse.ArgumentParser()
++p.add_argument('--port', required=True)
++p.add_argument('--label', required=True)
++p.add_argument('--runs', type=int, default=2)
++p.add_argument('--out', required=True)
++a = p.parse_args()
++
++APPS = [(4, 'imucal'), (6, 'companion'), (5, 'pet')]
++s = serial.Serial(a.port, 115200, timeout=0.05)
++out = open(a.out, 'a', encoding='utf-8')
++
++
++def log(line):
++    out.write(f'{a.label} {line}\n'); out.flush()
++
++
++def wait(marker, limit=30, keep=False):
++    end = time.monotonic() + limit
++    seen = []
++    while time.monotonic() < end:
++        line = s.readline().decode(errors='replace').strip()
++        if not line:
++            continue
++        seen.append(line)
++        if 'MEMPROBE' in line or 'MEM free' in line or 'START_FAILED' in line or 'abort' in line.lower() or 'Guru' in line:
++            log(line)
++        if marker in line:
++            return line
++    raise RuntimeError(f'waiting for {marker}: {seen[-10:]}')
++
++
++time.sleep(1.5)
++s.reset_input_buffer()
++s.write(b'q')
++try:
++    wait('HOME_READY', 10)
++except RuntimeError:
++    pass
++s.write(b'a'); wait('CATEGORY 0', 5)
++for run in range(a.runs):
++    for index, name in APPS:
++        for _ in range(8):
++            s.write(b'u'); time.sleep(0.12)
++        for _ in range(index):
++            s.write(b'd'); time.sleep(0.12)
++        wait(f'APP {index}', 5)
++        s.reset_input_buffer()
++        log(f'RUN {run} {name}')
++        s.write(b'e')
++        wait('MEMPROBE first post', 30)
++        wait('MEMPROBE f300 post', 60)
++        s.write(b'q')
++        wait('MEMPROBE stop post', 20)
++        wait('HOME_READY', 20)
++        time.sleep(1.0)
++s.close()
+diff --git a/tools/kasane_memprobe_parse.py b/tools/kasane_memprobe_parse.py
+new file mode 100644
+index 0000000..e10e2f2
+--- /dev/null
++++ b/tools/kasane_memprobe_parse.py
+@@ -0,0 +1,48 @@
++import re, collections, sys
++LOG = sys.argv[1]
++rows = collections.defaultdict(list)   # (build, app, phase, gc) -> [dict]
++arena = collections.defaultdict(list)
++fails = []
++cur = None
++for line in open(LOG, encoding='utf-8'):
++    build = line.split()[0]
++    m = re.search(r'RUN (\d) (\w+)', line)
++    if m: cur = m.group(2); continue
++    if 'START_FAILED' in line or 'Guru' in line: fails.append(line.strip())
++    m = re.search(r'MEMPROBE (first|f300|stop) (pre|post) app=local\.(\w+) (.*)', line)
++    if m:
++        d = {k: int(v) for k, v in re.findall(r'(\w+)=(-?\d+)', m.group(4))}
++        rows[(build, m.group(3), m.group(1), m.group(2))].append(d)
++        continue
++    m = re.search(r'MEMPROBE arena (before|after) (.*)', line)
++    if m and cur:
++        d = {k: int(v) for k, v in re.findall(r'(\w+)=(\d+)', m.group(2))}
++        arena[(build, cur, m.group(1))].append(d)
++print('fails', fails)
++F = ['malloc_size','memory_used_size','malloc_count','atom_count','atom_size','str_count','str_size','obj_count','obj_size',
++     'prop_count','prop_size','shape_count','shape_size','js_func_count','js_func_size','js_func_code_size',
++     'js_func_pc2line_size','c_func_count','array_count','fast_array_elements','binary_object_count','binary_object_size','free','largest']
++def avg(lst, k): return sum(d[k] for d in lst) / len(lst)
++def spread(lst, k): return max(d[k] for d in lst) - min(d[k] for d in lst)
++builds = ['old_on','kas_on','old_off','kas_off']
++apps = ['imucal','companion','pet']
++print('\n## pre/post malloc_size per build/app/phase (n, pre, post, spread)')
++for b in builds:
++    for a in apps:
++        for ph in ['first','f300','stop']:
++            pre = rows.get((b,a,ph,'pre')); post = rows.get((b,a,ph,'post'))
++            if not pre: print(b,a,ph,'MISSING'); continue
++            print(f'{b:8} {a:9} {ph:5} n={len(pre)} pre={avg(pre,"malloc_size"):.0f} post={avg(post,"malloc_size"):.0f} '
++                  f'used={avg(post,"memory_used_size"):.0f} spread={spread(post,"malloc_size")} free={avg(post,"free"):.0f} largest={avg(post,"largest"):.0f}')
++print('\n## field table post-GC first & f300')
++for ph in ['first','f300']:
++    for a in apps:
++        print(f'\n### {a} {ph}')
++        print('field | ' + ' | '.join(builds) + ' | kas-old(on) | on-off(old) | on-off(kas)')
++        for k in F:
++            v = {b: avg(rows[(b,a,ph,'post')], k) for b in builds}
++            print(f'{k} | ' + ' | '.join(f'{v[b]:.0f}' for b in builds) +
++                  f' | {v["kas_on"]-v["old_on"]:+.0f} | {v["old_on"]-v["old_off"]:+.0f} | {v["kas_on"]-v["kas_off"]:+.0f}')
++print('\n## arena')
++for key, lst in sorted(arena.items()):
++    print(key, lst)
