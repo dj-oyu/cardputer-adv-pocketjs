@@ -1,3 +1,7 @@
+// Reference model of pocket.kasane.createScene. The firmware runs the native
+// transcription in main/pocket/pocket_kasane.c (scene_flush_turn); this file is
+// no longer embedded. tools/test_pet.cjs and test_companion.cjs drive apps
+// against it, and tools/test_kasane_hello.c pins the same statements natively.
 // One controller owns APP submissions. Domain state belongs to the caller;
 // candidate refs stay private until LCD acknowledgement. No timer or queue.
 (function (view, options) {

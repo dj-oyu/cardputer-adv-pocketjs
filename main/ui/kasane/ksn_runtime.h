@@ -6,10 +6,20 @@
  * resolve them for EACH operation. Returned views are borrowed only until the
  * next lifecycle call; never retain a view across detach/shutdown. */
 typedef struct { uint32_t value; } ksn_app_lease;
+/* The runtime is one allocation: control state, both banks, and optionally
+ * the APP owner's own state behind them (attach_tail). */
+#define KSN_RUNTIME_BASE_BUDGET (KSN_CORE_STORAGE_BYTES+1024u)
+#define KSN_RUNTIME_TAIL_BUDGET 3072u
+#define KSN_RUNTIME_TAIL_ALIGN 8u
 #ifdef __cplusplus
 extern "C" {
 #endif
 ksn_result ksn_runtime_app_attach(ksn_app_lease *);
+/* As attach, and also hands out `bytes` of zeroed storage for the APP owner.
+ * When this call creates the runtime the storage is inside its one block;
+ * beside an existing SYSTEM owner it is a separate allocation. Either way the
+ * runtime owns it: it is gone after a successful detach. */
+ksn_result ksn_runtime_app_attach_tail(ksn_app_lease *,uint32_t bytes,void **tail);
 ksn_result ksn_runtime_app_detach(ksn_app_lease);
 ksn_view *ksn_runtime_app_view(ksn_app_lease);
 /* APP-lifetime SYSTEM compositor. Does not pin storage or replace an explicit

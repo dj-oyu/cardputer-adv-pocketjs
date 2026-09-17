@@ -1,4 +1,4 @@
-"""Kasane-only admission, services, display and repeated teardown memory check."""
+"""Kasane admission, services, display and repeated teardown memory check."""
 import argparse
 import json
 from pathlib import Path
@@ -41,10 +41,13 @@ with serial.Serial(a.port, 115200, timeout=0.15) as port:
         command(b'a', 'CATEGORY 0')
         for _ in range(8):
             command(b'u', 'APP ')
-        # Hello is migrated; IMU calibration remains deliberately unavailable.
+        # IMU calibration, four rows down, runs through Kasane like every app.
         for _ in range(4):
             command(b'd', 'APP ')
-        command(b'e', 'APP_REFUSED KASANE_ONLY')
+        command(b'e', 'APP_ID local.imucal')
+        # Its first frame, before leaving: otherwise that marker arrives after
+        # HOME_READY and is read as the next session's.
+        wait('KASANE_FRAME_PRESENTED')
         command(b'q', 'HOME_READY')
         for i in range(a.cycles):
             boot = command(b'K', 'KASANE_FRAME_PRESENTED')

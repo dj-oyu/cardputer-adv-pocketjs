@@ -4,7 +4,7 @@ A wrong decoder does not crash and does not show up on the screen: it comes out
 of the speaker as noise, and this board cannot hear itself -- board_capture sees
 the framebuffer, not what reached the ES8311. So main/hal/ima_adpcm.h is a
 header with no ESP dependencies, and this compiles those exact lines with the
-host gcc (through WSL, as tools/uibudget does) and checks three things:
+host gcc (through WSL) and checks three things:
 
   1. the C decoder agrees sample for sample with an independent decoder written
      here from the IMA tables, over pseudorandom nibbles and over real audio;

@@ -48,3 +48,24 @@
 
 受け取らない。3.1 の既定であり、この時計に必要もない。
 残りキーの委譲（`input.overlay`）は**未実装**で、理由は報告に書いた。
+
+## Kasane missing（CP28、2026-09-17調査）
+
+`docs/kasane/kasane-astra-plan.md` のチェックポイント表は28行目に
+「deskclock/player overlay移植」を置くが、`docs/kasane/kasane-progress.md` の
+最新は14f（Taffyなしフルシステム受入試験）で、15〜27は未着手。CP28自体が
+まだ届いていない番地であり、今回はそこへ向けた前提を1つ確認しただけ。
+
+* `KSN-MISSING(overlay.attach)`: `main/app_session.c` の `app_start_test()` は
+  `overlay_session` のとき `pocketjs_guest_quickjs_install_once(guest,"kasane",...)`
+  を呼ばない（569行目付近、`goto surfaces_done` で599行目の kasane install を
+  スキップする）。overlay guest に `pocket.kasane` 名前空間そのものが存在しない。
+  ネイティブを変えない制約の下では、この1行を足す判断すら下せない —
+  overlay 用の region/quota をどう切るか、host-owned core を背景シーンの上に
+  合成する経路（現在の `pocket_overlay_paint()` 相当）を Kasane 側にまだ持って
+  いるか（`ksn_render.c` が背景を0クリアせず合成できるかは未確認）、そのどちらも
+  CP15以降・CP28で決めるべき設計であり、このJSファイルからは決められない。
+* 上記1点が塞いでいるため、`pocket.overlay` から書き換える最小の入口すら開いて
+  おらず、他の個別機能（attach/detach、guest喪失時の扱い、quota、音声実機）は
+  検証以前の状態。移植は**全面的に不可能**と判断し、`apps/deskclock/deskclock.js`
+  は旧実装のまま、ファイル冒頭にマーカーだけを足した。

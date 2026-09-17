@@ -4,6 +4,40 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## checkpoint 24–25 — 旧UI経路とTaffyを出荷物から削除（2026-09-17）
+
+branch `kasane/remove-taffy`（`kasane/app-ports`から）。push未実施。
+
+- 教材: CODE PLAYGROUNDの既定ソースとTUTORIAL 5〜9章（隠しpreludeと参照ページを含む）を
+  `pocket.kasane.replace/patch`と`tx.background/tx.text`へ書き直した。章の数・順序・題・判定・
+  学習目標は不変。`tools/test_lessons.c`が全章と各章の求める編集、既定ソースを実QuickJSで実行する。
+- session: `KSN_ONLY`の分岐を「常にON」で畳み、Playground/TUTORIAL/workspace実行もKasane sessionで
+  起動する。旧API（`ui.createNode/setProp/setText/insertBefore/setStyle`）を含むユーザーソースは変換せず、
+  guest生成前に「旧API(ui.*)のため実行できません」と`APP_LEGACY_UI`で止める。
+  `pocket.pet`はmanifestが`pet.companion`を名指すsessionへ旧分岐の外で注入（pet/companionは
+  旧分岐でしか受け取っていなかった）。`pet.now`/`__petNow`は`pet_hub.c`へ移し、旧sprite overlay用の
+  `place/say/show`と`maxSpeechChars`は削除。`pocket.input.text`の編集欄はKasaneの帯へ合成する
+  （従来は旧strip loopだけが描いていた）。app_registryの`APP_RUNTIME_LEGACY`を廃止。
+- 削除: `components/pocketjs_ui_qjs`、`pocket_ui.c`、`jsfont.c`、`render_accel.c`、`pet_assets.c`、
+  Rustアーカイブ2本のlink、`tools/build_native.sh`、`tools/uibudget`、PIEの`accel_host_test.c`/
+  `blend_model.c`/stub、`apps/pocketui`、`apps/apicheck/capsweep.js`、`make_font.py`のDCFA atlas。
+  `ui.basic`はNOT_IMPLEMENTEDのまま（登録元が無い）。
+- 静的（実測、同じsdkconfig.defaults）: image 2,211,968→1,923,812 B（-288,156）、
+  Flash Code 1,611,540→1,364,480 B、DIRAM 144,708→143,348 B（-1,360、主に`libmain`）。
+  archive別の減少は`libpocketjs_idf_ui_core.a` -217,053、`libpocketjs_idf_render_rgb565.a` -47,968、
+  `libmain.a` -41,188。
+- 実機COM3（実測、`memlog.py --port --check`）: withtaffy idle_free 248,720 / app_free 145,092 /
+  largest 102,400 / js 96,068、notaffy idle_free 250,080 / app_free 146,724 / largest 102,400 /
+  js 95,844。両ビルドで`smoke_device.py --cycles 20`、`test_settings.py`、`capture_home.py`がPASS。
+  notaffyで`kasane_only_device_test.py --cycles 10` PASS（IMU calibrationが起動、
+  `KASANE_SERVICES PASS legacy=false`、終了後free/largest 249,992/81,920で一定）。
+- host: `check_kasane_link.py --build build_notaffy` PASS（build dir名・branch名の誤検出を修正）。
+  session dispatch 4構成、lessons、Kasane native/JS（ASan・O2）、power、pocket_text、codeedit、
+  solar/flower/sfx、PIE kernels/models、app_registry、system runner、node pet/companion PASS。
+  `tools/build_lazy_test.sh`は`quickjs-vm.c`を含まずlink失敗（本変更と無関係、未修正）。
+- 未確認: TUTORIAL/Playgroundの実機操作（保存データを変えるキー操作を避けた）、
+  `pocket.input.text`編集欄の実機表示、pet/companionの実機起動（autosaveがNVSを書く）。
+
 ## checkpoint 14f — Taffyなしフルシステム受入試験（2026-09-16）
 
 - `tools/system_full_test.py`を追加。System host、Kasane native/JS、専用KSN_ONLY build、

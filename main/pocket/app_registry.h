@@ -21,14 +21,12 @@
 // use the same information model, and nothing here assumes the table is static
 // except the table itself.
 
-// Section 2 keeps the existing apps on the old execution mode and requires an
-// explicit move to the common API. The runtime says which one an app is, and
-// the API range is checked only for the new one: a legacy program never reads
-// pocket.apiVersion, so refusing it for a version range it does not use would
-// be a rule with no subject.
+// Section 2 had the existing apps on an old execution mode (ui.createNode and
+// globalThis.frame) until each moved to the common API explicitly. Every app
+// has moved and the old mode is gone from the firmware, so one runtime is
+// left; the field stays because the API range check is keyed on it.
 typedef enum {
-    APP_RUNTIME_LEGACY = 0,   // ui.createNode and globalThis.frame
-    APP_RUNTIME_POCKET,       // pocket.* — the surface of docs/api/common-api.md
+    APP_RUNTIME_POCKET = 1,   // pocket.* — the surface of docs/api/common-api.md
 } app_runtime_t;
 
 // What the host lets an app do with the works library (section 3's `access`,

@@ -158,6 +158,9 @@ textfieldまで覆う。各アプリは座標をJSの薄いcomponent関数で解
 完了条件はclean checkoutで依存準備からbuildでき、`rg`とmap/nmの両方で出荷物にTaffyがなく、
 5アプリとhome/overlay/通知の実機smokeが通ること。
 
+2026-09-17: 実施（branch `kasane/remove-taffy`、CP24〜25）。PIE kernelは移さず`render_accel.c`ごと削除した
+（Kasaneは`ksn_blend_pie.c`を持つ）。記録は[kasane-progress.md](kasane-progress.md)の checkpoint 24–25。
+
 ### M5: PocketJS名称を整理する
 
 UI除去後にprojectを`cardputer_kasane`、VM componentを`js_runtime`へ段階的に改名する。

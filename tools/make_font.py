@@ -1,5 +1,8 @@
-"""Generate original, tiny 5x7 glyphs for the shell and PocketJS DCFA atlases."""
-import struct
+"""Generate original, tiny 5x7 glyphs for the shell's painter.
+
+The two DCFA atlases the Rust UI core loaded were generated here too; they went
+with the core, and font_rows is all that is left.
+"""
 import sys
 from pathlib import Path
 
@@ -35,22 +38,9 @@ GLYPHS = {
 def rows(c):
     return GLYPHS.get(c.upper(), GLYPHS['?'])
 
-def atlas(scale, slot):
-    chars = [chr(i) for i in range(32,127)]
-    data = bytearray(struct.pack('<IHH8B',0x41464344,3,len(chars),6*scale,8*scale,7*scale,9*scale,slot,0,1,0))
-    for i,c in enumerate(chars):
-        data += struct.pack('<IHBB',ord(c),i,6*scale,0)
-    for c in chars:
-        for y in range(8*scale):
-            for x in range(6*scale):
-                on = y//scale < 7 and x//scale < 5 and rows(c)[y//scale] & (1 << (4-x//scale))
-                data.append(255 if on else 0)
-    return data
-
 def generate(out):
     out.mkdir(parents=True,exist_ok=True)
-    arrays={'font_small':atlas(1,0),'font_large':atlas(2,1),
-            'font_rows':bytes(v for i in range(32,127) for v in rows(chr(i)))}
+    arrays={'font_rows':bytes(v for i in range(32,127) for v in rows(chr(i)))}
     text='#pragma once\n#include <stdint.h>\n'
     for name,data in arrays.items():
         text += f'static const uint8_t {name}[] = {{\n'

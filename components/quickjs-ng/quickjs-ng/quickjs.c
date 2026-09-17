@@ -28117,11 +28117,18 @@ private_field_already_defined:
 
     /* store the class source code in the constructor. */
     js_free(ctx, ctor_fd->source);
+#ifdef CONFIG_POCKET_VM_STRIP_FN_SOURCE
+    /* See js_function_toString: no copy is kept, so the class's constructor
+       prints the name-only fallback instead of the class body. */
+    ctor_fd->source = NULL;
+    ctor_fd->source_len = 0;
+#else
     ctor_fd->source_len = s->buf_ptr - class_start_ptr;
     ctor_fd->source = js_strndup(ctx, (const char *)class_start_ptr, ctor_fd->source_len);
     if (!ctor_fd->source) {
         goto fail;
     }
+#endif
 
     /* consume the '}' */
     if (next_token(s)) {
@@ -40054,11 +40061,13 @@ static __exception int js_parse_function_decl2(JSParseState *s,
             /* save the function source code */
             /* the end of the function source code is after the last
                 token of the function source stored into s->last_ptr */
+#ifndef CONFIG_POCKET_VM_STRIP_FN_SOURCE /* see js_function_toString */
             fd->source_len = s->last_ptr - ptr;
             fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
             if (!fd->source) {
                 goto fail;
             }
+#endif
 
             goto done;
         }
@@ -40086,11 +40095,13 @@ static __exception int js_parse_function_decl2(JSParseState *s,
     }
 
     /* save the function source code */
+#ifndef CONFIG_POCKET_VM_STRIP_FN_SOURCE /* see js_function_toString */
     fd->source_len = s->buf_ptr - ptr;
     fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
     if (!fd->source) {
         goto fail;
     }
+#endif
 
     if (next_token(s)) {
         /* consume the '}' */
@@ -45171,6 +45182,21 @@ static JSValue js_function_toString(JSContext *ctx, JSValueConst this_val,
     }
 
     p = JS_VALUE_GET_OBJ(this_val);
+    /* CONFIG_POCKET_VM_STRIP_FN_SOURCE (main/Kconfig.projbuild, default y):
+       the parser keeps no copy of any function's source text, so b->source
+       is NULL for every function compiled from JS and control falls through
+       to upstream's own no-source path below -- the one it already takes
+       for bytecode read without source (JS_ReadObject) and for C functions.
+       The result is "function " + name + "() {
+    [native code]
+}" for
+       every kind: func_kind is never updated from JS_FUNC_NORMAL, so async
+       functions, generators, arrows and classes print the same "function "
+       prefix. The copy is the whole text of each function (an inner
+       function's text is stored again inside its parent's), and on the
+       Cardputer's 160 KiB guest it measured 2.5-7.1 KiB per app
+       (docs/kasane/kasane-guest-memory.md); toString's body is the only
+       reader of it besides the debug dumps. */
     if (js_class_has_bytecode(p->class_id)) {
         JSFunctionBytecode *b = p->u.func.function_bytecode;
         /* `b->source` must be pure ASCII or UTF-8 encoded */

@@ -96,9 +96,11 @@ static void test_admission(void) {
     // The pet's IMU is optional, so the same absent capability does not stop it.
     CHECK(app_registry_admit(pet,"0.1.0",supported,NULL,reason,sizeof reason));
 
-    // A legacy app is not held to an API range; a pocket-app is.
+    // Every app is a pocket-app now (the legacy runtime is gone), so every app
+    // is held to its API range -- the pet included.
     missing=NULL;
-    CHECK(app_registry_admit(pet,"9.9.9",supported,NULL,reason,sizeof reason));
+    CHECK(!app_registry_admit(pet,"9.9.9",supported,NULL,reason,sizeof reason));
+    CHECK(pet&&pet->runtime==APP_RUNTIME_POCKET);
     CHECK(!app_registry_admit(play,"0.2.0",supported,NULL,reason,sizeof reason));
     CHECK(!strncmp(reason,"NEEDS API",9));
     CHECK(app_registry_admit(play,"0.1.0",supported,NULL,reason,sizeof reason));

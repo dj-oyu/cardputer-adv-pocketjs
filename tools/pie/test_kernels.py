@@ -3,12 +3,13 @@ them with their scalar definitions.
 
     python tools/pie/test_kernels.py           (from the repository root)
 
-Each test extracts the inline assembly straight out of main/scene/ocean.c, main/scene/wave.c or
-main/scene/render_accel.c, builds the same memory the C code would (tables, per-row
-constants, the 8-column input blocks), executes the assembly with `piesim`, and
-compares every output pixel with a Python transcription of the scalar
-reference next to the kernel (ocean_row_scalar in ocean.c,
-blend_px in render_accel.c, which is the Rust blend_rgb565 formula).
+Each test extracts the inline assembly straight out of the scene sources
+(main/scene/ocean.c, wave.c, solar_sail.c, garden.c, ...), builds the same memory
+the C code would (tables, per-row constants, the 8-column input blocks), executes
+the assembly with `piesim`, and compares every output pixel with a Python
+transcription of the scalar reference next to the kernel (ocean_row_scalar in
+ocean.c, for instance). The legacy renderer's blend/fill kernels
+(render_accel.c) were tested here too; they left with that renderer.
 
 What this catches: a wrong register in a rescheduled kernel, a constant read in
 the wrong order, an off-by-one in a lookup lane, a pointer that does not advance
@@ -18,8 +19,6 @@ and of the `__attribute__((unused))` scalar functions they were written from.
 
 The constant arrays of the ocean and wave kernels are evaluated from the C
 initializer text, so reordering k[] in the source is checked automatically.
-The blend constants come from blend_constants() in render_accel.c, which has
-no initializer to parse; blend_k() below mirrors it and must be kept in step.
 """
 import math
 import os
@@ -35,7 +34,6 @@ ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
 # file; the assembly moved verbatim, so only these paths changed.
 OCEAN = os.path.join(ROOT, 'main', 'scene', 'ocean.c')
 WAVE = os.path.join(ROOT, 'main', 'scene', 'wave.c')
-ACCEL = os.path.join(ROOT, 'main', 'scene', 'render_accel.c')
 LCD_W = 240
 
 
@@ -168,56 +166,6 @@ class WaveRow(unittest.TestCase):
                           'blocks': LCD_W // 8, 'sar': 11})
             self.assertEqual(load16(mem, ROW, LCD_W), self.scalar(y, ribbons), f'row y={y}')
             self.assertEqual(sim.ar['row'], ROW + LCD_W * 2)
-
-
-def blend_k(r, g, b):
-    """Mirror of blend_constants() plus the pack constants in accel_blend()."""
-    k = [1, 64, 63, 31, 16384, 512, 8192, 128]
-    for s in (r, g, b):
-        k += [s, 0x00FF, 1, 127, 128]
-    k += [0x00F8, 0x8000, 0x00FC, 16384, 256]
-    return k
-
-
-class BlendBlocks(unittest.TestCase):
-    """blend_blocks_pie against blend_px (render_accel.c) = the Rust software blend."""
-
-    @staticmethod
-    def blend_px(p, r, g, b, a):
-        r5, g6, b5 = (p >> 11) & 31, (p >> 5) & 63, p & 31
-        dr, dg, db = (r5 << 3) | (r5 >> 2), (g6 << 2) | (g6 >> 4), (b5 << 3) | (b5 >> 2)
-        ia = 255 - a
-        return rgb565((r * a + dr * ia + 127) // 255, (g * a + dg * ia + 127) // 255,
-                      (b * a + db * ia + 127) // 255)
-
-    def test_blocks(self):
-        asm = extract_asm(ACCEL, 'blend_blocks_pie(')
-        rng = random.Random(7)
-        for _ in range(200):
-            n = rng.randint(1, 30)
-            px = [rng.getrandbits(16) for _ in range(n * 8)]
-            mask = [rng.choice((0, 255, rng.getrandbits(8), rng.getrandbits(8))) for _ in range(n * 8)]
-            r, g, b = (rng.getrandbits(8) for _ in range(3))
-            mem = bytearray(1 << 16)
-            DST, MASK, K = 0x1000, 0x3000, 0x4000
-            store16(mem, DST, px)
-            mem[MASK:MASK + n * 8] = bytes(mask)
-            store16(mem, K, blend_k(r, g, b))
-            sim = Sim(mem)
-            sim.run(asm, {'d': DST, 'm': MASK, 'n': n, 'k': K, 'sar': 11, 'sh8': 8})
-            self.assertEqual(load16(mem, DST, n * 8), [self.blend_px(p, r, g, b, a) for p, a in zip(px, mask)])
-            self.assertEqual((sim.ar['d'], sim.ar['m'], sim.ar['n']), (DST + n * 16, MASK + n * 8, 0))
-
-
-class FillBlocks(unittest.TestCase):
-    def test_blocks(self):
-        asm = extract_asm(ACCEL, 'fill_blocks_pie(')
-        mem = bytearray(1 << 12)
-        store16(mem, 0x800, [0xBEEF])
-        sim = Sim(mem)
-        sim.run(asm, {'d': 0x100, 'c': 0x800, 'n': 5})
-        self.assertEqual(load16(mem, 0x100, 40), [0xBEEF] * 40)
-        self.assertEqual(load16(mem, 0x100 + 80, 1), [0])
 
 
 class SolarFillRow(unittest.TestCase):

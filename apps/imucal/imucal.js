@@ -1,23 +1,29 @@
-// IMU axis calibration: six orientations decide MAP_X/MAP_Y/MAP_Z for motion.c.
-// Records on stillness, answers in sound, keeps the result. See README.md --
-// including why this file is terse: the guest parses it, so bytes cost heap.
+// IMU axis calibration, Kasane port. Terse: guest parses this, bytes cost
+// heap. See README.md for rationale.
 (function () {
-  var P = { w: 1, h: 2, pos: 24, top: 25, left: 28, bg: 64, r: 68, fg: 96 };
-  function node(kind, x, y, w, h, color, text) {
-    var id = ui.createNode(kind);
-    ui.setProp(id, P.pos, 1);
-    ui.setProp(id, P.left, x); ui.setProp(id, P.top, y);
-    ui.setProp(id, P.w, w); ui.setProp(id, P.h, h);
-    ui.setProp(id, kind === 1 ? P.fg : P.bg, color);
-    if (text) ui.setText(id, text);
-    ui.insertBefore(1, id, 0);
-    return id;
-  }
-  var shown = {};
-  function say(id, t) { if (shown[id] !== t) { shown[id] = t; ui.setText(id, t); } }
+  const view = pocket.kasane;
+  const state = {head: 'START', live: 'NO SAMPLE YET', stat: 'WAIT',
+                 spin: 'GYR OFF', foot: 'HOLD STILL. ESC QUITS'};
+  const F = [['head',[12,26,228,38],0xf0f8ffff,32],['live',[20,52,220,64],0x8ef0c4ff,32],
+    ['stat',[20,66,220,78],0xa9bacaff,48],['spin',[20,80,220,92],0xffd479ff,32],
+    ['foot',[12,104,228,116],0x8fa6bcff,32]];
+  const scene = view.createScene({
+    build: function (tx, s) {
+      tx.background(0x071425ff);
+      tx.text({bounds:[12,8,228,20],color:0x69cdeeff,text:'IMU AXIS CALIBRATION'});
+      tx.roundRect({bounds:[12,48,228,94],radius:5,color:0x12334aff});
+      var r = {}, i, d;
+      for (i = 0; i < F.length; i++) { d = F[i];
+        r[d[0]] = tx.text({bounds:d[1],color:d[2],text:s[d[0]],capacity:d[3]}); }
+      return r;
+    },
+    patch: function (tx, r, s) {
+      for (var i = 0; i < F.length; i++) r[F[i][0]].setText(tx, s[F[i][0]]);
+    }
+  });
+  function say(key, t) { if (state[key] !== t) { state[key] = t; scene.invalidate(); } }
   function beep(hz) {
-    pocket.audio.tone({ frequencyHz: hz, durationMs: 120, gain: 0.4 })
-      .then(null, function () {});
+    pocket.audio.tone({ frequencyHz: hz, durationMs: 120, gain: 0.4 }).then(null, function () {});
   }
   function mm(v) { var n = Math.round(v * 1000); return (n < 0 ? '' : '+') + n; }
 
@@ -26,22 +32,13 @@
   var AXIS = [2, 2, 1, 1, 0, 0], SIGN = [1, -1, 1, -1, -1, 1];
   var NAME = ['AX', 'AY', 'AZ'], PUB = ['X', 'Y', 'Z'];
 
-  ui.setProp(1, P.bg, 0x071425ff);
-  node(1, 12, 8, 216, 10, 0x69cdeeff, 'IMU AXIS CALIBRATION');
-  var head = node(1, 12, 26, 216, 12, 0xf0f8ffff, 'START');
-  var panel = node(0, 12, 48, 216, 46, 0x12334aff);
-  ui.setProp(panel, P.r, 5);
-  var live = node(1, 20, 54, 200, 10, 0x8ef0c4ff, 'NO SAMPLE YET');
-  var stat = node(1, 20, 68, 200, 10, 0xa9bacaff, 'WAIT');
-  var spin = node(1, 20, 82, 200, 10, 0xffd479ff, 'GYR OFF');
-  var foot = node(1, 12, 104, 216, 10, 0x8fa6bcff, 'HOLD STILL. ESC QUITS');
-
   var cap = pocket.capabilities.get('sensors.imu');
   console.log('IMUCAL CAP ' + cap.supported + ' ' + cap.available);
   if (!cap.supported || !cap.available) {
-    say(head, 'NO IMU: ' + cap.reason);
+    say('head', 'NO IMU: ' + cap.reason);
     console.log('IMUCAL_UNAVAILABLE ' + cap.reason);
-  globalThis.frame = function () {};
+    globalThis.frame = function () { scene.flush(state); };
+    scene.flush(state);
     return;
   }
 
@@ -108,16 +105,16 @@
       t += (i ? ' ' : '') + PUB[i] + '=' + (map[i].s < 0 ? '-' : '') + NAME[map[i].i];
     }
     console.log(ok ? 'IMUCAL_OK' : 'IMUCAL_SUSPECT');
-    say(head, ok ? 'DONE' : 'DONE, DISAGREED');
-    say(live, t);
-    say(stat, 'ERR ' + err + '%  GYR ' + mm(peak[0]) + ' ' + mm(peak[1]) + ' ' + mm(peak[2]));
-    say(spin, 'SAVING');
-    say(foot, 'ESC QUITS');
+    say('head', ok ? 'DONE' : 'DONE, DISAGREED');
+    say('live', t);
+    say('stat', 'ERR ' + err + '%  GYR ' + mm(peak[0]) + ' ' + mm(peak[1]) + ' ' + mm(peak[2]));
+    say('spin', 'SAVING');
+    say('foot', 'ESC QUITS');
     pocket.storage.set('axes', { map: t, err: err, peak: peak, n: seen, ok: ok })
-      .then(function () { say(spin, 'SAVED'); },
-            function (e) { say(spin, 'SAVE ' + e.code); });
+      .then(function () { say('spin', 'SAVED'); },
+            function (e) { say('spin', 'SAVE ' + e.code); });
     sub.close();
-    sub.close();          // documented no-op; if it were not, this throws
+    sub.close();          // close() twice is documented as a no-op
     checkAt = ticks + 10;
     beep(660);
   }
@@ -126,19 +123,19 @@
 
   function show() {
     if (got.length < 6) {
-      say(head, (got.length + 1) + '/6 ' + LABEL[got.length]);
-      say(foot, armed ? 'HOLD STILL. ESC QUITS' : 'MOVE TO NEXT');
+      say('head', (got.length + 1) + '/6 ' + LABEL[got.length]);
+      say('foot', armed ? 'HOLD STILL. ESC QUITS' : 'MOVE TO NEXT');
     }
     if (!now) return;
     var a = now.accel, g = now.gyro;
-    say(live, 'X' + mm(a.x) + ' Y' + mm(a.y) + ' Z' + mm(a.z));
-    say(stat, 'MAG' + mm(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z)) +
+    say('live', 'X' + mm(a.x) + ' Y' + mm(a.y) + ' Z' + mm(a.z));
+    say('stat', 'MAG' + mm(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z)) +
               (armed ? (still ? ' HOLD ' + (HOLD - still) : ' MOVING') : ' MOVE ON') +
               ' DROP ' + now.dropped);
-    say(spin, g ? 'GYR ' + mm(g.x) + ' ' + mm(g.y) + ' ' + mm(g.z) : 'GYR OFF');
+    say('spin', g ? 'GYR ' + mm(g.x) + ' ' + mm(g.y) + ' ' + mm(g.z) : 'GYR OFF');
   }
 
-  globalThis.frame = function () {
+  function step() {
     ticks++;
     if (checkAt && ticks >= checkAt) {
       checkAt = 0;
@@ -163,8 +160,11 @@
       if (moved >= 10) { armed = true; still = 0; beep(523); }
     }
     show();
-  };
+  }
+
+  globalThis.frame = function () { step(); scene.flush(state); };
 
   show();
+  scene.flush(state);
   console.log('IMUCAL_READY');
 })();

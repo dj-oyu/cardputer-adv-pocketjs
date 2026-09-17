@@ -39,17 +39,17 @@ static const app_manifest_t MANIFESTS[] = {
     // sensor is required: starting it without one would show axes that are not
     // measurements.
     {.id="local.imucal", .title="IMU CALIBRATION", .entry="apps/imucal/imucal.js",
-     .runtime=APP_RUNTIME_LEGACY, .api=NULL,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_IMU, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The pet keeps state between runs, so its store is required; the tilt and
     // the sound are what make it pleasant and not what make it work.
     {.id="local.pet", .title="POCKET PET", .entry="apps/pet/pet.js",
-     .runtime=APP_RUNTIME_LEGACY, .api=NULL,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_KV, .optional=CAPS_PET_OPT, .works=APP_WORKS_NONE},
 
     {.id="local.companion", .title="PET COMPANION", .entry="apps/companion/companion.js",
-     .runtime=APP_RUNTIME_LEGACY, .api=NULL,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_KV, .optional=CAPS_COMP, .works=APP_WORKS_NONE},
 
     // Both of its capabilities are REQUIRED rather than optional, and that is
@@ -69,7 +69,7 @@ static const app_manifest_t MANIFESTS[] = {
     // has never mattered, and changing an app's identity moves its stored
     // files.
     {.id="local.player", .title="MUSIC PLAYER", .entry="apps/player/player.js",
-     .runtime=APP_RUNTIME_LEGACY, .api=NULL,
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_PLAY, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
     // The Playground runs whatever the person typed, so it is the one identity
@@ -208,7 +208,7 @@ bool app_registry_admit(const app_manifest_t *manifest, const char *api_version,
     if(reason && reason_size) reason[0]=0;
     if(!manifest) return true;   // nothing registered is nothing to refuse
 
-    // Only the new runtime is held to a version range; see the header.
+    // Every app is held to the version range it declares.
     if(manifest->runtime==APP_RUNTIME_POCKET &&
        !app_registry_api_ok(manifest->api,api_version)) {
         if(reason && reason_size)

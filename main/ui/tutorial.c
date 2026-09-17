@@ -17,7 +17,7 @@
 #define BODY_TOP 16
 
 static unsigned chapter;
-static bool     reference;      // Tab opened the number list
+static bool     reference;      // Tab opened the summary page
 static bool     cleared;        // the current chapter has been reached
 static bool     saw_error;      // chapter 2: an exception has been seen
 static tutorial_state_t state;
@@ -81,7 +81,7 @@ void tutorial_open(void) {
 // there is nothing to join and nothing to hold.
 const char *tutorial_source(size_t *len) { return code_source(len); }
 
-// Run before it, in the same realm. Five of the nine chapters have none.
+// Run before it, in the same realm. Eight of the nine chapters have none.
 const char *tutorial_prelude(size_t *len) {
     const char *p=lesson_at(chapter)->prelude;
     *len = p ? strlen(p) : 0;
@@ -241,7 +241,7 @@ void tutorial_draw(void) {
         paint_begin(strip,strip_y,strip_h);
         for(int i=0;i<LCD_W*strip_h;i++) strip[i]=board_rgb(6,11,20);
 
-        jp(4,1,reference?"番号の意味":l->title,accent);
+        jp(4,1,reference?"書き方のまとめ":l->title,accent);
         paint_ascii(LCD_W-28,3,progress,dim);
         paint_fill(0,14,LCD_W,1,rule);
 
@@ -257,8 +257,8 @@ void tutorial_draw(void) {
 
         paint_fill(0,LCD_H-13,LCD_W,1,rule);
         jp(4,LCD_H-12,reference?"Tab:もどる":
-           cleared?"Enter:次へ Tab:番号 ←→:章":
-                   "Enter:書く Tab:番号 Del:戻す",dim);
+           cleared?"Enter:次へ Tab:まとめ ←→:章":
+                   "Enter:書く Tab:まとめ Del:戻す",dim);
         ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
     }
 }

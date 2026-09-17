@@ -33,13 +33,37 @@ static ksn_result send(void *ctx,uint16_t y,uint16_t rows,const uint16_t *p){
 }
 int main(void){
     ksn_view *system=NULL;
-    for(int i=0;i<5;i++){
-        fail_after=i;
-        CHECK(ksn_runtime_system_acquire(&system)==KSN_OOM);
-        CHECK(!system&&!blocks&&!ksn_runtime_reserved_bytes());
+    /* Control state and both banks are one block. */
+    fail_after=0;
+    CHECK(ksn_runtime_system_acquire(&system)==KSN_OOM);
+    CHECK(!system&&!blocks&&!ksn_runtime_reserved_bytes());
+    fail_after=-1;
+    CHECK(ksn_runtime_system_acquire(&system)==KSN_OK);
+    CHECK(blocks==1&&maximum<=KSN_RUNTIME_BASE_BUDGET&&maximum==ksn_runtime_reserved_bytes());
+    CHECK(ksn_runtime_shutdown()==KSN_OK&&!blocks);system=NULL;
+    /* An APP that creates the runtime gets its tail inside the same block;
+     * beside an existing SYSTEM owner the tail is its own allocation, and a
+     * failure of that one leaves the SYSTEM owner untouched. */
+    {
+        ksn_app_lease lease;void *tail=NULL;maximum=0;
+        CHECK(ksn_runtime_app_attach_tail(&lease,KSN_RUNTIME_TAIL_BUDGET+1,&tail)==KSN_INVALID&&!blocks);
+        fail_after=0;
+        CHECK(ksn_runtime_app_attach_tail(&lease,100,&tail)==KSN_OOM&&!tail&&!blocks);
         fail_after=-1;
-        CHECK(ksn_runtime_system_acquire(&system)==KSN_OK);
-        CHECK(blocks==5&&maximum<=3072);
+        CHECK(ksn_runtime_app_attach_tail(&lease,100,&tail)==KSN_OK&&tail&&blocks==1);
+        CHECK(maximum==ksn_runtime_reserved_bytes()+100&&(uintptr_t)tail%KSN_RUNTIME_TAIL_ALIGN==0);
+        memset(tail,0xa5,100);
+        CHECK(ksn_runtime_app_detach(lease)==KSN_OK&&!blocks);
+        CHECK(ksn_runtime_system_acquire(&system)==KSN_OK&&blocks==1);
+        fail_after=0;
+        CHECK(ksn_runtime_app_attach_tail(&lease,100,&tail)==KSN_OOM&&blocks==1&&
+              !ksn_runtime_app_view(lease));
+        fail_after=-1;tail=NULL;
+        CHECK(ksn_runtime_app_attach_tail(&lease,100,&tail)==KSN_OK&&blocks==2);
+        const unsigned char *bytes=tail;bool zero=true;
+        for(unsigned i=0;i<100;i++)if(bytes[i])zero=false;
+        CHECK(zero);
+        CHECK(ksn_runtime_app_detach(lease)==KSN_OK&&blocks==1);
         CHECK(ksn_runtime_shutdown()==KSN_OK&&!blocks);system=NULL;
     }
     CHECK(ksn_runtime_system_acquire(&system)==KSN_OK);
@@ -67,7 +91,7 @@ int main(void){
     callback_lease=old;callback_ok=false;
     CHECK(ksn_runtime_present(&port,&stats)==KSN_OK&&callback_ok);
     CHECK(ksn_runtime_app_detach(old)==KSN_OK);
-    CHECK(!ksn_runtime_app_view(old)&&blocks==8);
+    CHECK(!ksn_runtime_app_view(old)&&blocks==4);
     CHECK(ksn_runtime_app_attach(&current)==KSN_OK&&current.value!=old.value);
     ksn_view *app=ksn_runtime_app_view(current);
     CHECK(ksn_view_begin(app,KSN_REPLACE,&tx)==KSN_OK);

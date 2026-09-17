@@ -88,7 +88,6 @@ class LinkAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             build = Path(folder)
             (build / 'project_description.json').write_text(json.dumps({'build_components': [component]}))
-            (build / 'CMakeCache.txt').write_text('KSN_ONLY:BOOL=ON\n')
             for name in ('cardputer_pocketjs.map', 'build.ninja', 'compile_commands.json'):
                 (build / name).write_text(source)
             symbols = 'ksn_core_init pocket_input_install pocketjs_guest_frame ' + symbol

@@ -18,7 +18,5 @@ spread -1 600
 tagged a|b|\n#1,2#true true
 valueOf | sum=4 | toString | str=S | valueOf | cmp=true | hint number | hint string | hint default | prim=42,p,p
 getter-throw RangeError getter-boom
-toString function named() {
-    [native code]
-}
+toString function named(a) { return a; }
 exit=0

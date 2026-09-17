@@ -1,41 +1,63 @@
 (function(){
-  var pet=pocket.pet,page=0,pages=['CODEX','CLAUDE','ALARM','TIMER'],prev=0,last=0;
-  var selected=pet.select(),wake=pet.clock().wakeMinute,edit=wake<0?420:wake,minutes=5;
-  function node(k,x,y,w,h,c,t){var n=ui.createNode(k);ui.setProp(n,24,1);ui.setProp(n,28,x);ui.setProp(n,25,y);ui.setProp(n,1,w);ui.setProp(n,2,h);if(k!==2)ui.setProp(n,k===1?96:64,c);if(t)ui.replaceText(n,t);ui.insertBefore(1,n,0);return n;}
-  var seen={};function text(n,t){if(seen[n]!==t){seen[n]=t;ui.replaceText(n,t);}}
-  // pet.select/wake/alarm throw a PocketError when NVS refuses the write or the
-  // four timer slots are taken. Report it instead of letting frame() end the app.
-  var err='';function fail(e){err=e&&e.code==='LIMIT_EXCEEDED'?'TIMERS BUSY':'SAVE FAILED';}
-  ui.setProp(1,64,0x091323ff);
-  var head=node(1,10,8,225,10,0x70e0d1ff,'PET COMPANION');
-  node(0,8,27,90,76,0x203446ff);
-  var line=[];
-  for(var i=0;i<4;i++)line.push(node(1,106,32+i*18,130,12,i===0?0xfbe8b8ff:0xbdcedbff,''));
-  var foot=node(1,9,113,228,10,0xfbe8b8ff,''),hint=node(1,9,125,228,8,0x89a4bfff,'');
-  pet.place(selected,20,32);
-  function hh(m){return ('0'+Math.floor(m/60)).slice(-2)+':'+('0'+m%60).slice(-2);}
-  function left(r,now){if(r===null||now===null)return '--';var s=Math.max(0,r-now);return Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m';}
-  function draw(){
-    var c=pet.clock();text(head,'< '+pages[page]+' >     PET '+(selected+1)+'/12');
-    if(page<2){var u=pet.usage(page);text(line[0],u.stale?'PC OFFLINE / STALE':'PC CONNECTED');
-      for(var w=0;w<2;w++){var v=u.windows[w];text(line[w+1],(w?'LONG ':'SHORT ')+(v.usedPercent===null?'--':Math.round(v.usedPercent)+'%')+' '+left(v.resetsAt,c.utc));}
-      text(line[3],'SNACKS '+pet.rewards(selected));text(foot,'UP/DOWN PET  L/R PAGE');text(hint,'RESET TIME: CHECK USAGE ON PC');
-    }else if(page===2){text(line[0],c.minute===null?'CLOCK NOT SYNCED':'NOW '+hh(c.minute));text(line[1],'WAKE '+hh(edit));
-      text(line[2],c.wakeMinute<0?'OFF':'ON '+hh(c.wakeMinute));text(line[3],c.minute===null?'CONNECT PC / WI-FI':'DAILY / LOCAL TIME');
-      text(foot,'UP/DOWN 5 MIN  ENTER SET/OFF');text(hint,'L/R PAGE  ESC HOME');
-    }else{var r=pet.timer('companion.timer');text(line[0],r===null?'TIMER READY':'COUNTING DOWN');text(line[1],r===null?minutes+' MINUTES':Math.ceil(r)+' SECONDS');
-      text(line[2],'WORKS FROM HOME');text(line[3],'SNOOZE: 5 MIN');text(foot,'UP/DOWN MIN  ENTER START/STOP');text(hint,'L/R PAGE  ESC HOME');}
-    if(err)text(foot,err);
-  }
-  globalThis.frame=function(buttons){var now=pet.now(),edge=buttons&~prev;prev=buttons;if(edge)err='';
-    if(edge&0x80)page=(page+3)%4;if(edge&0x20)page=(page+1)%4;
-    if(edge&0x50){var d=edge&0x10?1:-1;
-      if(page<2){selected=(selected+d+12)%12;try{pet.select(selected);}catch(e){fail(e);}pet.place(selected,20,32);}
-      else if(page===2)edit=(edit+d*5+1440)%1440;
-      else minutes=Math.max(1,Math.min(120,minutes+d));
-    }
-    if(edge&0x4000){try{if(page===2){var c=pet.clock();if(c.wakeMinute===edit)pet.wake(-1,0);else pet.wake(Math.floor(edit/60),edit%60);}
-      else if(page===3)pet.alarm('companion.timer',pet.timer('companion.timer')===null?minutes*60:0,'TIMER FINISHED');}catch(e){fail(e);}}
-    if(edge||now-last>=1000){last=now;draw();}
-  };draw();console.log('COMPANION_READY');
+var v=pocket.kasane,p=pocket.pet,pi=v.petImage(),pg=['CODEX','CLAUDE','ALARM','TIMER'];
+var wk=p.clock().wakeMinute,s={g:0,d:p.select(),e:wk<0?420:wk,m:5,x:''};
+function hh(n){return('0'+Math.floor(n/60)).slice(-2)+':'+('0'+n%60).slice(-2);}
+function lf(r,n){if(r===null||n===null)return'--';var d=Math.max(0,r-n);return Math.floor(d/3600)+'h '+Math.floor(d%3600/60)+'m';}
+// select/wake/alarm throw on NVS/timer-slot refusal; report, don't end frame().
+function fl(e){s.x=e&&e.code==='LIMIT_EXCEEDED'?'TIMERS BUSY':'SAVE FAILED';}
+function cn(t){
+var c=p.clock(),h='< '+pg[t.g]+' >     PET '+(t.d+1)+'/12',l=['','','',''],f,i;
+if(t.g<2){var u=p.usage(t.g);l[0]=u.stale?'PC OFFLINE / STALE':'PC CONNECTED';
+for(var w=0;w<2;w++){var y=u.windows[w];l[w+1]=(w?'LONG ':'SHORT ')+(y.usedPercent===null?'--':Math.round(y.usedPercent)+'%')+' '+lf(y.resetsAt,c.utc);}
+l[3]='SNACKS '+p.rewards(t.d);f='UP/DOWN PET  L/R PAGE';i='RESET TIME: CHECK USAGE ON PC';
+}else if(t.g===2){l[0]=c.minute===null?'CLOCK NOT SYNCED':'NOW '+hh(c.minute);l[1]='WAKE '+hh(t.e);
+l[2]=c.wakeMinute<0?'OFF':'ON '+hh(c.wakeMinute);l[3]=c.minute===null?'CONNECT PC / WI-FI':'DAILY / LOCAL TIME';
+f='UP/DOWN 5 MIN  ENTER SET/OFF';i='L/R PAGE  ESC HOME';
+}else{var r=p.timer('companion.timer');l[0]=r===null?'TIMER READY':'COUNTING DOWN';
+l[1]=r===null?t.m+' MINUTES':Math.ceil(r)+' SECONDS';l[2]='WORKS FROM HOME';l[3]='SNOOZE: 5 MIN';
+f='UP/DOWN MIN  ENTER START/STOP';i='L/R PAGE  ESC HOME';
+}
+return{h:h,l:l,f:t.x||f,i:i};
+}
+var K=[20,24,24,32];
+var sc=v.createScene({
+build:function(tx,t){
+tx.background(0x091323ff);tx.rect({bounds:[8,27,98,103],color:0x203446ff});
+var pr=tx.image({resource:pi,bounds:[20,32,84,96],variant:t.d,frame:0}),c=cn(t);
+var h=tx.text({bounds:[10,8,235,18],text:c.h,capacity:24,font:'caption',color:0x70e0d1ff});
+var cl=[0xfbe8b8ff,0xbdcedbff,0xbdcedbff,0xbdcedbff],l=[];
+for(var i=0;i<4;i++)l.push(tx.text({bounds:[106,32+i*18,236,44+i*18],text:c.l[i],capacity:K[i],font:'caption',color:cl[i]}));
+var f=tx.text({bounds:[9,113,237,123],text:c.f,capacity:32,font:'caption',color:0xfbe8b8ff});
+var i2=tx.text({bounds:[9,125,237,133],text:c.i,capacity:32,font:'caption',color:0x89a4bfff});
+return{p:pr,d:t.d,h:h,l:l,f:f,i:i2};
+},
+patch:function(tx,r,t){
+if(r.d!==t.d){r.p.setImageFrame(tx,t.d,0);r.d=t.d;}
+var c=cn(t);r.h.setText(tx,c.h);
+for(var i=0;i<4;i++)r.l[i].setText(tx,c.l[i]);
+r.f.setText(tx,c.f);r.i.setText(tx,c.i);
+}
+});
+// press only: old edge=buttons&~prev, no up/down repeat.
+pocket.input.onAction(function(e){
+if(e.phase!=='press')return;
+s.x='';
+if(e.action==='left')s.g=(s.g+3)%4;
+else if(e.action==='right')s.g=(s.g+1)%4;
+else if(e.action==='up'||e.action==='down'){
+var d=e.action==='up'?1:-1;
+if(s.g<2){s.d=(s.d+d+12)%12;try{p.select(s.d);}catch(er){fl(er);}}
+else if(s.g===2)s.e=(s.e+d*5+1440)%1440;
+else s.m=Math.max(1,Math.min(120,s.m+d));
+}else if(e.action==='accept'){
+try{
+if(s.g===2){var c=p.clock();if(c.wakeMinute===s.e)p.wake(-1,0);else p.wake(Math.floor(s.e/60),s.e%60);}
+else if(s.g===3)p.alarm('companion.timer',p.timer('companion.timer')===null?s.m*60:0,'TIMER FINISHED');
+}catch(er){fl(er);}
+}
+sc.invalidate();
+});
+var last=0;
+globalThis.frame=function(){var now=p.now();if(now-last>=1000){last=now;sc.invalidate();}sc.flush(s);};
+sc.flush(s);console.log('COMPANION_READY');
 })();

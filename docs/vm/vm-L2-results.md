@@ -937,3 +937,50 @@ live最大は全方針でhello456B、A148B、B20460B、C172B、D148B、E160B、F
 再現集計: `python tools/vm_segment_report.py --repair-pattern 'segments-repair-v2-*.jsonl'`。元は`.cache/vm/segments-repeat-v2-*`、取り直しは`.cache/vm/segments-repair-v2-*`、統合した出所と84条件の要約は`.cache/vm/segments-repeat-v2-summary.json`。速度改善の数値は主張しない。既定値・JS挙動は変更せず、backlogのサイズ再検証項目2を完了とする。
 
 最終のhost採取/集計検査15件成功。実機は元Kasane appへ復元し、書き込みhash一致、起動3周・故障回復6種・HOME_READYを確認。app以外の領域は書き換えていない。
+
+## 6. 関数ソースを保持しない（2026-09-17、`vm/strip-fn-source`）
+
+上流の QuickJS は、関数を1つ解析するたびにその全文を `js_strndup` で複写して `JSFunctionBytecode.source` に持つ（内側の関数の本文は親の複写にも入るので二重に持つ）。読むのは `Function.prototype.toString` とデバッグ出力だけ。Kasane 移植の計測（[kasane-guest-memory.md](../kasane/kasane-guest-memory.md)）で、この複写がアプリあたり 2.5〜7.1 KiB と分かったので、出荷の既定で作らないようにした。
+
+- **切替**: `CONFIG_POCKET_VM_STRIP_FN_SOURCE`（`main/Kconfig.projbuild`、既定 y）。`quickjs.c` の複写3箇所（通常関数、式本体のアロー、クラス）を飛ばす。n にすると上流と同じ。
+- **失うもの**: JS 関数の `toString()` は、上流にもともとある「ソース無し」の分岐を通って `"function " + name + "() {\n    [native code]\n}"` を返す（`js_function_toString`）。この分岐では `func_kind` が更新されないので、async・ジェネレータ・アロー・クラスも接頭辞は `function ` になる。呼び出し、エラーメッセージ、スタックトレース、行番号は変わらない。
+
+### 6.1 実機（実測(device)、vm/main 同一ソースで切替だけ変えた2ビルド、各2回）
+
+`build_sfs_before`（`=n`）と `build_sfs_after`（既定 y）。数値は起動時の `MEM` 行（`memlog.py` が読むのと同じ行）で、2回の差は 50 B 以内。
+
+| アプリ | js 前→後 | 差 | 実行中 free 差 | largest 前→後 |
+| --- | ---: | ---: | ---: | ---: |
+| hello | 96,090→93,310 | −2,780 | +2,750 | 102,400→106,496 |
+| imucal | 108,972→104,232 | −4,740 | +4,652 | 31,744→38,912 |
+| companion | 103,008→100,432 | −2,576 | +2,540 | 51,200→57,344 |
+| pet | 115,448→111,324 | −4,124 | +4,092 | 45,056→49,152 |
+
+`memlog.py --check`: DIRAM +0、idle free +0、running free +2,740（hello）、`MEMLOG_OK`。`smoke_device.py --cycles 20` は前後とも `SMOKE_OK 20`（故障回復6種 OK）。app バイナリは 2,211,536→2,211,408 B（−128 B）。Kasane 版アプリでの効果（計測では 4.8〜7.1 KiB）は統合後に測る。
+
+### 6.2 ホストの関所（実測(host)）
+
+各変種 X を、同じフラグで切替だけ外した `X-keepsrc` と並べた。
+
+| 関所 | 既定（strip） | `-keepsrc` |
+| --- | --- | --- |
+| コーパス o2 / asan / asan-recur / asan-flat / o2-eager | 75/75 | 75/75 |
+| コーパス asan-alloca | 72 合格・3 skip | 同じ |
+| コーパス asan-yield / asan-tco / asan-lazy | 75/75 | 74/75（`seg_oom_boundary`） |
+| asan-yield `--force-yield` | 75/75 | 74/75（`seg_oom_boundary`） |
+| asan `--budget-jobs 3` | 75/75 | 75/75 |
+| Test262 部分集合 asan / o2 | 7,501 合格、退行 0 | — |
+| oom_canary o2 / asan | OK | — |
+| budget_probe o2 / o2-recur | OK（11/11） | OK（11/11） |
+
+`seg_oom_boundary` は backlog #15 の既存の失敗で、`-keepsrc` 側（＝変更前）で落ちる。既定で通るのは、ヒープのバイト配置が変わって2回目の OOM でエラーオブジェクトを作る余地が残ったからで、**直ったのではない**。#15 は未着手のまま。
+
+**テストの扱い**
+
+- `special_calls` の toString 行: 期待値を分けた。`expected/` は出荷の既定（名前だけの形）、`expected-keepsrc/` はソース全文。`run.sh` は `-keepsrc` 変種で `expected-keepsrc/` を優先する（`--fair` と同じ仕組み）。行を外さなかったのは、両方の挙動を関所に残すため。
+- `--fail-alloc` の番号: 目標の手前で解析される関数の数だけ試行番号が前にずれる。番号を動かして何かが落ちるのを待つのではなく、`-keepsrc` で元の番号を失敗させたアロケータのトレースを取り、既定ビルドで失敗レコードの種類と大きさ、直前 40 件の大きさがすべて一致する番号を探した（o2 と asan-alloca の両方で同じずれ）。`oom_resolving_functions` 1352→1351、`oom_callsite_double_free` 1458→1455、`oom_with_resolvers` 1370→1369、`oom_resolving_functions_module` 1289 は変化なし。`-keepsrc` は先頭5行の `// vmrun-keepsrc-flags:` で元の番号を使う。alloca の skip 指定に `-keepsrc` 名も足した。
+- `budget_probe.sh` の `deep_async_recursion`: flat では外側の catch が表示されるかどうか（`caught null` の行）を差分から外し、情報行（`outer=`）にした。この行はヒープに残るバイト数だけで決まり、D42/D43 で消え、今回また現れた（深さ 80→81）。拘束するのは「同期 try に届かない」「終了コード 2」「OOM カナリアが鳴った」で、変更前と同じ。-recur の `caught RangeError` は C スタック検査の結果なので引き続き差分に入れる。
+
+**Test262 の toString（部分集合の外、`built-ins/Function/prototype/toString`、o2）**: 既定 150 合格／10 不合格、`-keepsrc` 158／2。新しく落ちるのは 5 ファイル×2 モード: `method-computed-property-name`、`private-method-class-expression`、`private-method-class-statement`、`private-static-method-class-expression`、`private-static-method-class-statement`。名前が計算プロパティや `#x` になり、代替の文字列が NativeFunction の文法に合わない。そのほかの toString テストは `[native code]` 形も受け付けるので通る。逆に `line-terminator-normalisation-LF` は既定でだけ通る。
+
+再現: `bash tools/vmtest/build.sh o2 && bash tools/vmtest/build.sh o2-keepsrc`、`python3 tools/vmtest/test262.py --variant o2 built-ins/Function/prototype/toString`（チェックアウトに `git -C .cache/test262 sparse-checkout add test/built-ins/Function/prototype/toString` が必要）。

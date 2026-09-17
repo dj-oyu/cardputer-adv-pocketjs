@@ -158,7 +158,16 @@ check_async() {
   echo "exit=$?" >> "$raw"
   # The unhandled-rejection report lines are counted, not diffed.
   grep -vE '^(#info|vmrun: note:|E pocketjs_guest: Unhandled Promise rejection:)' "$raw" > "$txt"
-  local hits depth unhandled oomn match
+  local hits depth unhandled oomn match caught
+  # On flat the outer catch's line is info too, for the reason given at the
+  # canary below: it has now flipped twice on bytes alone ("caught null" ->
+  # nothing with D42/D43, nothing -> "caught null" with
+  # CONFIG_POCKET_VM_STRIP_FN_SOURCE, docs/vm/vm-L2-results.md sec.6). On
+  # -recur it stays diffed: RangeError there is the C-stack guard, not luck.
+  if [ "$flat" = 1 ]; then
+    caught=$(grep -m1 '^caught ' "$txt" || true)
+    grep -v '^caught ' "$txt" > "$txt.bound"; mv "$txt.bound" "$txt"
+  fi
   hits=$(sed -n 's/.*budget_hits=\([0-9]*\).*/\1/p' "$raw")
   depth=$(sed -n 's/^#info max_depth=\([0-9]*\).*/\1/p' "$raw" | head -n1)
   unhandled=$(grep -c '^E pocketjs_guest: Unhandled Promise rejection:' "$raw")
@@ -188,8 +197,9 @@ check_async() {
   local oom_ok=1
   case "$want_oom" in 0) : ;; '>0') [ "${oomn:-0}" -gt 0 ] || oom_ok=0 ;; esac
   if [ "$match" = match ] && [ "${hits:-x}" = 0 ] && [ $oom_ok = 1 ]; then
-    printf 'ok   %-24s %-7s budget_hits=%-3s unhandled=%-3s oom=%-3s %s[--profile device, vs %s]\n' \
-      "$name" "$match" "${hits:--}" "$unhandled" "${oomn:--}" "${depth:+depth=$depth }" "$exp"
+    printf 'ok   %-24s %-7s budget_hits=%-3s unhandled=%-3s oom=%-3s %s%s[--profile device, vs %s]\n' \
+      "$name" "$match" "${hits:--}" "$unhandled" "${oomn:--}" "${depth:+depth=$depth }" \
+      "${caught:+outer=\"${caught#caught }\" }" "$exp"
   else
     failed=$((failed + 1))
     printf 'FAIL %-24s %-7s budget_hits=%-3s unhandled=%-3s oom=%-3s %s[--profile device, vs %s]  wanted match hits=0 oom=%s\n' \
