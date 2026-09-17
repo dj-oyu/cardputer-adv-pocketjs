@@ -90,6 +90,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [design-contract-review.md](kasane/design-contract-review.md) | 記録 | 公開契約の評価 |
 | [design-device-probe.md](kasane/design-device-probe.md) | 記録 | 実機診断と計測 |
 | [kasane-guest-memory.md](kasane/kasane-guest-memory.md) | 記録 | Kasane 移植で増えたゲスト +14KiB の内訳（実測）。GC 前後の差は 0 B で全部が生存量。主因はアトム・名前空間オブジェクト・関数（ソース複写 2.1〜3.1KiB）・確保ヘッダ。関数ソース保持をやめると 4.8〜7.1KiB 減る。計測パッチ同梱 |
+| [kasane-vs-taffy.md](kasane/kasane-vs-taffy.md) | 記録 | 旧UI（Rust core + taffy）と Kasane を最適化しきった場合の構造比較（Fable、ソースベース）。構造差が残るのは最大連続確保（定数 9.9 KiB 対 データ依存 29.6/59.3 KiB）と失敗の仕方（返り値 対 abort）で、どちらも Kasane 有利。ネイティブ flex とテキスト測定が取り込み候補 |
 | [kasane-guest-memory-reduce.md](kasane/kasane-guest-memory-reduce.md) | 記録 | Kasane のゲスト生存量を 3 アプリで −6.2 KiB（シーンコントローラを C へ −5.0、proto の遅延・共有 −1.1）、native arena を評価前の 1 確保に（ゲスト不変、最大ブロック ±4 KiB） |
 
 ## JS API — [`api/`](api/)
