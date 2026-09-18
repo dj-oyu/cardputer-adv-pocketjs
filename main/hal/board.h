@@ -29,11 +29,23 @@ extern int g_board_swap_into;
 int board_async_get(void);
 void board_async_set(int on);
 esp_err_t board_present(int y, int rows, uint16_t *pixels);
+// Columns [x, x+cols) of `rows` strip rows, each row read at pixels+row*240+x.
+// The rest of the strip is not read and not sent, which is the point: a caller
+// that recomposited six columns of a band pays for six columns on the wire. The
+// panel is re-addressed for the window, so a partial-width transfer always
+// costs the three commands the full-width path avoids -- worth it below roughly
+// 200 columns, not worth it at 240, and board_present stays the way to say 240.
+esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels);
 // Owner-task barrier: acknowledges completed transfer, including prior work.
 // A transfer failure invalidates the panel write position.
 esp_err_t board_present_sync(int y, int rows, uint16_t *pixels);
+esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pixels);
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
 void board_capture(bool enabled);
+// Whether board_capture is dumping rows. A partial-width transfer would leave
+// the untouched columns of the shared strip holding the previous band, and the
+// PIX lines print whole rows, so the caller that narrows has to ask first.
+bool board_capture_active(void);
 
 // Battery voltage at the pack, and when it was sampled. There is deliberately
 // no percentage and no charging flag here: the board has no fuel gauge and no

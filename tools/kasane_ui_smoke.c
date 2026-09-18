@@ -53,7 +53,7 @@ int main(int argc,char **argv){
     for(unsigned mode=0;mode<2;mode++){
         memset(panel,0xa5,sizeof(panel));
         ksn_view *system;ksn_tx tx;ksn_render_stats stats;
-        ksn_display_port port={NULL,buffer,send,240,135,8,NULL};
+        ksn_display_port port={NULL,buffer,send,240,135,8,NULL,NULL};
         REQUIRE(ksn_runtime_system_acquire(&system)==KSN_OK);
         REQUIRE(ksn_view_begin(system,KSN_REPLACE,&tx)==KSN_OK);
         rect(system,tx,(ksn_rect){212,4,228,8},0x4ade80ff);

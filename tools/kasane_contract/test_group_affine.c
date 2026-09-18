@@ -173,7 +173,7 @@ static ksn_result span(void *port,const ksn_draw *d,uint16_t reveal,int x,int y,
     return KSN_OK;
 }
 static const ksn_text_port text_port={.span=span};
-static const ksn_display_port display={NULL,buffer,transfer,240,135,8,&text_port};
+static const ksn_display_port display={NULL,buffer,transfer,240,135,8,&text_port,NULL};
 
 /* One REPLACE frame of `scene`, with the whole command list as one group. `arm`
  * is g_ksn_group_affine, so this is the same binary on both sides. */

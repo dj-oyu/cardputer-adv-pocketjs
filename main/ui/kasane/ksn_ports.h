@@ -16,6 +16,14 @@ typedef struct {
     ksn_result (*present)(void *,uint16_t y,uint16_t rows,const uint16_t *pixels);
     uint16_t width,height,strip_rows;
     const ksn_text_port *text;
+    /* Optional. Transfers columns [x,x+cols) of the strip's `rows` rows, reading
+     * each row at `pixels + row*width + x`; the rest of the strip is NOT valid
+     * and must not be sent. Supplying it is what lets the renderer composite a
+     * band's damaged columns only, so an owner that can only push whole rows
+     * leaves it NULL and gets the full-width behaviour it had. Deciding per
+     * frame is allowed and is how a diagnostic that dumps whole rows opts out. */
+    ksn_result (*present_rect)(void *,uint16_t x,uint16_t y,uint16_t cols,
+                               uint16_t rows,const uint16_t *pixels);
 } ksn_display_port;
 /* Borrow the existing board strip. No second framebuffer. */
 typedef struct {

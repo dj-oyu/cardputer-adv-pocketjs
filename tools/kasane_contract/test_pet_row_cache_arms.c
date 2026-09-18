@@ -70,7 +70,7 @@ static uint32_t hash_bytes(const uint16_t *pixels,unsigned count){
     uint32_t h=2166136261u;const uint8_t *bytes=(const uint8_t *)pixels;
     for(unsigned i=0;i<count*2;i++){h^=bytes[i];h*=16777619u;}
     return h;}
-static ksn_display_port display={NULL,buffer,send,240,135,8,NULL};
+static ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};
 static ksn_render_stats stats;
 
 /* One scene: only what the compositor resolves, rebuilt per arm from that arm's

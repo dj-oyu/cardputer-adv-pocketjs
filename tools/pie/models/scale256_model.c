@@ -420,7 +420,7 @@ static unsigned fit_radius(ksn_rect r){
 
 static int render_frame(unsigned index,uint16_t *panel){
     static ksn_text_port text={.span=span};
-    ksn_display_port display={NULL,get_strip,send_strip,240,135,8,&text};
+    ksn_display_port display={NULL,get_strip,send_strip,240,135,8,&text,NULL};
     lcg=12345u+index*2654435761u;
     ksn_core_init(&core);
     ksn_client app=ksn_core_client(&core,KSN_APP);

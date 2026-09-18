@@ -17,7 +17,7 @@ int main(void){
     CHECK(ksn_cache_bind(&cache,&cache_commands,&cache_text)==KSN_OK);
     ksn_view_host host;ksn_view_host_init(&host,&core,&cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP),*sys=ksn_view_host_endpoint(&host,KSN_SYSTEM);
-    ksn_display_port port={NULL,buffer,transfer,240,135,8,NULL};ksn_render_stats stats;
+    ksn_display_port port={NULL,buffer,transfer,240,135,8,NULL,NULL};ksn_render_stats stats;
     ksn_draw d={.kind=KSN_RECT,.bounds={0,0,16,16},.clip={0,0,240,135},.opacity=255,.data.shape={0xff0000ff,0,0}};
     ksn_placement p={8,8,{0,0,240,135},128,true};
     ksn_template t;ksn_instance a,b;ksn_tx tx,other;ksn_ref ref;

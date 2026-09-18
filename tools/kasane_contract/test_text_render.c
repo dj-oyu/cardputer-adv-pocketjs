@@ -38,7 +38,7 @@ static uint16_t expected(int x,int y,unsigned opacity,bool grouped,unsigned reve
 }
 int main(void){
     KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_text_port text={.span=span};ksn_display_port display={NULL,buffer,send,240,135,8,&text};
+    ksn_text_port text={.span=span};ksn_display_port display={NULL,buffer,send,240,135,8,&text,NULL};
     ksn_tx tx;ksn_ref ref;ksn_render_stats stats;
     ksn_draw d={.kind=KSN_TEXT,.bounds={-3,5,145,29},.clip={2,7,77,22},.opacity=255,
         .data.text={.utf8="\xe3\x81\x82" "A",.bytes=4,.capacity=16,.font=KSN_BODY,.color=0xa15f37b7}};

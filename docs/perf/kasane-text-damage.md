@@ -1,7 +1,9 @@
-# テキストの過剰再描画（1）: 帯を名指しする invalidate
+# テキストの過剰再描画: 帯を名指しする invalidate と、帯の列範囲
 
 2026-09-19。文字の再描画が広すぎる件を実機の計器で切り分け、3つの原因のうち
-**1つ目だけ**を直した記録。残り2つは未着手で、§5に条件と見積もりを書く。
+**2つ**を直した記録。§1〜4 が段階1（帯を名指しする invalidate）、§5 が段階2
+（damage が帯ごとの列範囲を持つ）。残る1つは §6 で、**それが入るまで段階2は
+アプリのテキストを速くしない**という実測もそこにある。
 
 ## 1. 何を測ったか
 
@@ -80,25 +82,69 @@ pet の NAME 編集は NVS を書くので今回の試験では触っていな�
 
 **静的 DIRAM**: `memlog` で +16 B（`pocket_text.c.obj` +4、残りは core の帯集合と整列）。
 
-## 5. 残っている2つ
+## 5. 段階2: damage が帯の列範囲を持つ（2026-09-19）
 
-計測Aが示すのはこの修正では消えない構造で、こちらのほうが**全アプリの全テキスト更新に効く**。
+計測Aが示していたのは、この invalidate では消えない構造のほうだった。
+`command_bands()` は y しか見ず、`ksn_render.c` の帯ループは毎帯 240 px 全幅を塗り、
+`transferred_bytes` も全幅で数えていた。
 
-- **damage に X が無い。** `command_bands()` は y しか見ず、`ksn_render.c` の帯ループは
-  毎帯 `fill565(pixels, 240*rows, …)` で全幅を塗り、`transferred_bytes` も全幅で数える。
-  直すには帯ごとの `x0/x1`（17×2×int16 = 68 B）を damage に添え、帯ループの塗り・命令の
-  x クランプ・転送をその範囲へ閉じる。`board_present()` は現在 CASET 固定・全幅
-  ストリームで再ウィンドウを避けているので（`board.c` の `next_row` の節）、
-  狭い窓では帯ごとに CASET/RASET/RAMWR の 3 コマンドを払うことになる。非同期経路の
-  byte swap が既に `tx_buf` へ写しているので、**その 1 パスで狭い行を詰められる**。
-  display port は `present` を壊さず `present_rect` を**追加**する形にすれば、
-  `tools/kasane_contract/` の約 20 本の `present` 実装を触らずに段階導入できる。
-- **TEXT の damage が文字列全体。** `ksn_core_damage()` は
-  `memcmp(old->text+offset, next->text+offset, length)` で違いの有無しか見ず、
-  damage は bounds 全体になる。新旧を scalar 単位で前から比べ、最初に違った位置までの
-  advance 合計を x0 にすれば、カウンタは末尾数桁だけになる。長さが変わる場合は
-  「最初の差異〜bounds 右端」で打ち切るのが安全側。`reveal` は旧値〜新値の列だけ。
+### 置いたもの
 
-この2つが揃うと計測Aの 1 桁更新は 3帯×240px=11,520 B から 3帯×8px=384 B になる**見込み**で、
-これは面積からの算術であって実測ではない。順序は X を先にすること —— X が無いと
-TEXT 側を narrow しても damage は 1 画素も減らない。
+`ksn_core_damage()` の出力を `uint32_t` から `ksn_damage`（帯集合＋帯ごとの `x0/x1`、
+17×2×int16 = 72 B、呼出側のスタック）へ変えた。変化した命令の**旧と新の切り取り済み矩形**を
+帯ごとに union する。修復・全面再描画の帯だけは列を語る者がいないので [0,240) を入れる。
+
+display port に `present_rect` を**追加**した（`present` は不変なので既存の実装は無改造）。
+これを持つ port にだけ renderer は狭い帯を渡す。**狭めるかどうかは画素を書く前に決める**
+—— 帯を部分幅で合成すると共用ストリップの残りは1つ前の帯の画素を持ったままなので、
+全行しか送れない port には全行を渡さねばならない。
+`board_present_rect()` は CASET/RASET/RAMWR で窓を張り、行を詰めながらバイトスワップする。
+`board_capture` 実行中は PIX が全240列を印字するので `present_rect` を引っ込める
+（`board_capture_active()`）。
+
+### 実機で分かった2つの落とし穴（どちらも実測）
+
+1. **端数の窓は転送経路を落とす。** 最初の実装（窓 184 px）は
+   `bytes 11,520 → 8,832` と減ったのに **render 1.55 → 1.65 ms、send 1.67 → 1.88 ms と悪化**した。
+   詰め直した行が 32 B 境界にも 32 B 倍数にもならず、board のバイトスワップが PIE から
+   スカラーへ落ち、背景塗りも `fill_blocks` から外れていた。
+   そこで**窓を 16 画素へ外側丸め**する（16 画素 = 32 B = カーネル1ブロック）。
+2. **ほぼ全幅の窓は割に合わない。** 全幅経路は RAMWR を開いたまま流すので再アドレス指定が
+   0 コマンド（`board.c` の `next_row`）。狭い窓は帯ごとに 3 コマンド払う。
+   閾値 `KSN_NARROW_MAX = 192`（80%）を超える帯は全幅のまま送る。
+
+### 結果
+
+**ホスト**: `tools/kasane_contract/test_narrow.c` を追加。同じ台本を2つの core へ流し、
+片方に `present_rect` を与え、120 フレームで**パネルを全画素比較**する。
+62 フレームが実際に狭まり（234 回の窓転送）、**全画素一致**。
+狭まった回数も検査するので「何も狭めずに通る」ことはない。
+パネルとストリップは毎フレーム 0xa55a で汚してから描くので、書き忘れた列は毒として現れる。
+契約スイート全体（ASan/UBSan・O2）、pocket_text、Kasane QuickJS、session dispatch も PASS。
+
+**実機**: `kasane_input_device_test`・`smoke --cycles 20`・`test_settings`・`capture_home` すべて PASS。
+静的 DIRAM 増分 0。
+
+**そして hello は速くならなかった。** `bytes=11520 bands=3` のまま、render 1.60 / send 1.68 ms。
+理由ははっきりしている —— counter の `bounds` は `[28,77,212,89]` で **184 px 幅**、
+16 画素丸めで 208 px、閾値 192 を超えるので全幅のまま送られる。
+**宣言された矩形が広いので、damage を矩形にしても狭くならない。**
+
+## 6. 残っている1つ: TEXT の damage が文字列全体
+
+`ksn_core_damage()` は `memcmp(old->text+offset, next->text+offset, length)` で
+違いの**有無**しか見ず、違えば bounds 全体を damage にする。
+`KEY PRESSES: 5` → `6` は 1 文字（caption 6 px）しか変わっていないのに 184 px が damage になる。
+
+直すには新旧を scalar 単位で前から比べ、最初に違った位置までの advance 合計を x0 に、
+長さが同じなら後ろからも比べて x1 にする（長さが変われば以降は全部ずれるので
+x1 は bounds 右端で打ち切るのが安全側）。`reveal` の変化は旧値〜新値の列だけ。
+
+**障害は advance が core に無いこと。** 字形の送り幅は `ksn_text_port` の実装
+（`main/text/ksn_font.c`: caption 6、body 6/12、display 12、全角 8×scale）が持っていて、
+`ksn_core` はフォントに依存しない設計になっている。したがって
+`ksn_text_port` へ advance の問い合わせを足し、`ksn_core_damage()` へ port を渡す形になる。
+
+これが入ると hello の1桁更新は窓 16 px（丸め後）= 3帯 × 16 × 2 × 8 = **768 B** になる**見込み**で、
+11,520 B の 6.7%。これは面積からの算術であって実測ではない。
+§5 の機構は全部この段のために置いてあり、**それ単体ではアプリのテキストを速くしない**。

@@ -20,7 +20,7 @@ static ksn_result text(void *ctx,const ksn_draw *d,uint16_t reveal,int x,int y,u
 int main(void){
     KSN_TEST_CORE(core,);ksn_view_host host;ksn_view_host_init(&host,&core,NULL,0);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP),*system=ksn_view_host_endpoint(&host,KSN_SYSTEM);
-    ksn_text_port font={NULL,text};ksn_display_port port={NULL,buffer,send,240,135,8,&font};ksn_render_stats stats;
+    ksn_text_port font={NULL,text};ksn_display_port port={NULL,buffer,send,240,135,8,&font,NULL};ksn_render_stats stats;
     ksn_tx app_tx,tx;assert(ksn_view_begin(app,KSN_REPLACE,&app_tx)==KSN_OK);
     assert(ksn_view_background(app,app_tx,0x0000ffff)==KSN_OK);
     assert(ksn_view_submit(app,app_tx)==KSN_OK);

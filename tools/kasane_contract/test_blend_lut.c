@@ -261,7 +261,7 @@ static ksn_result span(void *ctx,const ksn_draw *draw,uint16_t reveal,int x,int 
     return KSN_OK;
 }
 static const ksn_text_port text_port={.span=span};
-static const ksn_display_port display={NULL,get_strip,send_strip,240,135,8,&text_port};
+static const ksn_display_port display={NULL,get_strip,send_strip,240,135,8,&text_port,NULL};
 static const uint32_t background=0x071425ff;
 static const char title_text[]="Kasane 日本語";
 static char counter_text[32]="tick 0";

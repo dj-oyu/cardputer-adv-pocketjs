@@ -20,7 +20,7 @@ int main(void){
     assert(ksn_core_animation_bytes(&core)<=1024);
     ksn_client app=ksn_core_client(&core,KSN_APP);ksn_image_port image={NULL,64,64,1,1,source};ksn_resource resource;
     assert(ksn_core_register_image(&core,KSN_APP,&image,&resource)==KSN_OK);
-    ksn_display_port display={NULL,buffer,send,240,135,8,NULL};ksn_render_stats stats;
+    ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};ksn_render_stats stats;
     ksn_tx tx;ksn_ref ref;ksn_animation animation;
     ksn_draw d={.kind=KSN_IMAGE,.bounds={10,20,42,52},.clip={0,0,240,135},.opacity=255,
         .data.image={.resource=resource,.scale=KSN_IMAGE_STRETCH,.source_width=64,.source_height=64}};

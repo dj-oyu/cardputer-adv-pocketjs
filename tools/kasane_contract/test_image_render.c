@@ -64,7 +64,7 @@ int main(void){
     KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP);
     ksn_image_port port={NULL,70,40,1,2,source};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
-    ksn_display_port display={NULL,buffer,send,240,135,8,NULL};ksn_render_stats stats;ksn_tx tx;ksn_ref ref;
+    ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};ksn_render_stats stats;ksn_tx tx;ksn_ref ref;
     ksn_draw d={.kind=KSN_IMAGE,.clip={2,7,110,65},.data.image={.source_x=3,.source_y=2}};
     d.data.image.resource=image;
     for(unsigned scale=0;scale<3;scale++)for(unsigned group=0;group<2;group++)for(unsigned opacity=0;opacity<256;opacity++){

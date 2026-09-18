@@ -90,7 +90,7 @@ static ksn_result span(void *ctx,const ksn_draw *d,uint16_t reveal,int x,int y,
     return KSN_OK;
 }
 static ksn_text_port text_port={.span=span};
-static ksn_display_port display={NULL,get_strip,send_strip,240,135,8,&text_port};
+static ksn_display_port display={NULL,get_strip,send_strip,240,135,8,&text_port,NULL};
 static uint32_t hash_panel(void){
     uint32_t hash=2166136261u;
     for(unsigned i=0;i<240*135;i++){hash^=panel[i];hash*=16777619u;}

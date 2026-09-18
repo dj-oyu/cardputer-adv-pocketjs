@@ -784,8 +784,12 @@ ksn_result ksn_core_image_span(const ksn_core *storage,ksn_tx ticket,bool previo
     return entry->port.read_span(entry->port.ctx,p.variant,p.frame,y,x,count,rgb565,alpha);
 }
 
-static uint32_t command_bands(const ksn_command_storage *command){
-    if(!(command->flags&KSN_FLAG_VISIBLE)||!command->opacity)return 0;
+/* The command's clipped box on the panel, or an empty rect when it paints
+ * nothing. Both sides of the diff go through this, so a command that moved
+ * contributes the union of where it was and where it is. */
+static ksn_rect command_box(const ksn_command_storage *command){
+    const ksn_rect empty={0,0,0,0};
+    if(!(command->flags&KSN_FLAG_VISIBLE)||!command->opacity)return empty;
     ksn_rect bounds=command->bounds;
     if(command->kind==KSN_IMAGE&&command->flags>>KSN_IMAGE_SCALE_SHIFT==KSN_IMAGE_STRETCH){
         stretch_payload p;payload_read(command,&p,sizeof(p));bounds=ksn_image_footprint(bounds,p.rotation);
@@ -799,23 +803,41 @@ static uint32_t command_bands(const ksn_command_storage *command){
     if(x1>240)x1=240;
     if(y0<0)y0=0;
     if(y1>135)y1=135;
-    if(x0>=x1||y0>=y1)return 0;
-    uint32_t mask=0;
-    for(int32_t band=y0/8;band<=(y1-1)/8;band++)mask|=1u<<band;
-    return mask;
+    if(x0>=x1||y0>=y1)return empty;
+    return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
 }
-ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,uint32_t *bands){
-    if(!storage||!bands)return KSN_INVALID;
+/* Union a box into the damage, per band. A band's columns are the union of the
+ * boxes that touch it, which is why a change low on the panel cannot widen a
+ * band it does not reach. */
+static void damage_add(ksn_damage *d,ksn_rect box){
+    if(box.x0>=box.x1||box.y0>=box.y1)return;
+    for(int band=box.y0/8;band<=(box.y1-1)/8;band++){
+        uint32_t bit=1u<<band;
+        if(!(d->bands&bit)){
+            d->bands|=bit;d->x0[band]=box.x0;d->x1[band]=box.x1;
+        }else{
+            if(box.x0<d->x0[band])d->x0[band]=box.x0;
+            if(box.x1>d->x1[band])d->x1[band]=box.x1;
+        }
+    }
+}
+/* Bands whose columns nobody described: the whole width. */
+static void damage_widen(ksn_damage *d,uint32_t bands){
+    for(int band=0;band<17;band++){
+        if(!(bands&(1u<<band)))continue;
+        if(!(d->bands&(1u<<band))){d->bands|=1u<<band;d->x0[band]=0;d->x1[band]=240;}
+        else{d->x0[band]=0;d->x1[band]=240;}
+    }
+}
+ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,ksn_damage *out){
+    if(!storage||!out)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
     if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
     const ksn_bank *old=&core->banks[core->active],*next=&core->banks[core->building_bank];
-    /* What a repair already owes. A repairing frame reads the same bank on both
-     * sides, so the loop below finds nothing and these are the only bands it
-     * has; a guest submission adds them to its own diff. */
-    *bands=core->repair_bands;
+    memset(out,0,sizeof(*out));
     if(core->full_redraw||old->background[KSN_APP]!=next->background[KSN_APP]||
        old->generation[0]!=next->generation[0]||old->generation[1]!=next->generation[1]){
-        *bands=(1u<<17)-1u;return KSN_OK;
+        damage_widen(out,KSN_BANDS_ALL);return KSN_OK;
     }
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<next->count[layer];i++){
         unsigned index=command_base((ksn_layer)layer)+i;
@@ -825,7 +847,12 @@ ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,uint32_t *bands
             text_payload p;payload_read(b,&p,sizeof(p));
             changed=memcmp(old->text+p.offset,next->text+p.offset,p.length)!=0;
         }
-        if(changed)*bands|=command_bands(a)|command_bands(b);
+        if(changed){damage_add(out,command_box(a));damage_add(out,command_box(b));}
     }
+    /* What a repair already owes, added last because an owner that asked for a
+     * band did not say which columns, and full width wins over any range the
+     * diff put there. A repairing frame reads the same bank on both sides, so
+     * the loop above found nothing and these are the only bands it has. */
+    damage_widen(out,core->repair_bands);
     return KSN_OK;
 }

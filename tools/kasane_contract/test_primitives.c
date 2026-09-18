@@ -83,7 +83,7 @@ int main(void){
     CHECK(app.ops->background(app.ctx,tx,0x102030ff)==KSN_OK);
     for(unsigned i=0;i<sizeof(draws)/sizeof(draws[0]);i++)CHECK(app.ops->add(app.ctx,tx,&draws[i],&ref)==KSN_OK);
     CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
-    ksn_display_port display={NULL,get_strip,present,240,135,8,NULL};ksn_render_stats stats;
+    ksn_display_port display={NULL,get_strip,present,240,135,8,NULL,NULL};ksn_render_stats stats;
     CHECK(ksn_render_rects(&core,&display,&stats)==KSN_OK&&stats.transferred_bytes==64800);
     for(int y=0;y<135;y++)for(int x=0;x<240;x++){
         uint16_t expected=pack(0x10,0x20,0x30,0,x,y);

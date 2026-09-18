@@ -53,6 +53,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_render.c -o "$out/render"
   "$out/render"
+  # The narrow arm: a port that offers present_rect gets only the damaged
+  # columns, and the panel it produces has to equal the full-width arm's.
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_narrow.c -o "$out/narrow"
+  "$out/narrow"
   # Boundary 7: the render path's phase counts, and the pixel identity of the
   # two arms inside one binary -- the switch off must not move a pixel, and the
   # counts must not move with it off.

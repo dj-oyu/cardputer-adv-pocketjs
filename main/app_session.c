@@ -209,11 +209,26 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
     // scene has just filled: the guest never learns there is a field, only
     // what was committed into it. Every band is refilled from the scene's
     // background, so nothing drawn here survives into the next frame, and a
-    // field that changed invalidates the whole screen (main.c).
+    // field that changed invalidates the bands it covers (main.c).
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     // Kasane promotes its command bank only after acknowledged transfers.
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
     esp_err_t result=board_present_sync(y,rows,(uint16_t *)pixels);
+    pet_hub_overlay_suppress(false);
+    display->sent_us+=(unsigned)(esp_timer_get_time()-began);
+    return result==ESP_OK?KSN_OK:KSN_IO;
+}
+// The same, for the damaged columns of a band. The field is painted first here
+// too: it draws its whole box into the strip and only the window goes out, and
+// what it drew outside the window is already on the glass from the full-width
+// frame that put it there.
+static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t cols,
+                                   uint16_t rows,const uint16_t *pixels) {
+    kasane_display_t *display=opaque;
+    int64_t began=esp_timer_get_time();
+    pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
+    pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+    esp_err_t result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels);
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
@@ -1173,8 +1188,13 @@ static esp_err_t present_frame(void) {
         ksn_result advanced=pocket_kasane_advance((uint64_t)esp_timer_get_time());
         if(advanced!=KSN_OK&&advanced!=KSN_BUSY)return ESP_FAIL;
         kasane_display_t display_state={0};
+        // Offering present_rect is what lets the renderer composite only the
+        // damaged columns of a band. It is withdrawn while board_capture is
+        // dumping rows, because those PIX lines print all 240 columns of the
+        // shared strip and only the window would have been repainted.
         ksn_display_port port={.ctx=&display_state,.strip=kasane_strip,.present=kasane_send,
-                              .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H,.text=&ksn_font_port};
+                              .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H,.text=&ksn_font_port,
+                              .present_rect=board_capture_active()?NULL:kasane_send_rect};
         ksn_render_stats stats;
         int64_t began=esp_timer_get_time();
         ksn_result result=pocket_kasane_present(&port,&stats);

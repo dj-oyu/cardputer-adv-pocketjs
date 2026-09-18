@@ -33,7 +33,7 @@ static int compare_panel(ksn_rect rect,uint32_t color){
 }
 int main(void){
     KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP),sys=ksn_core_client(&core,KSN_SYSTEM);
-    ksn_display_port display={NULL,get_strip,send_strip,240,135,8,NULL};ksn_render_stats stats;
+    ksn_display_port display={NULL,get_strip,send_strip,240,135,8,NULL,NULL};ksn_render_stats stats;
     ksn_tx tx;ksn_ref moving,overlay;
     ksn_draw d={.kind=KSN_RECT,.bounds={0,0,32,16},.clip={0,0,240,135},.opacity=255};
     d.data.shape.color=0x67dfc7ff;
@@ -77,9 +77,12 @@ int main(void){
     CHECK(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
     ksn_change text={.property=KSN_SET_TEXT,.value.text={"cd",2}};
     CHECK(app.ops->change(app.ctx,tx,moving,&text)==KSN_OK);CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
-    CHECK(ksn_core_frame(&core,&frame)==KSN_OK);uint32_t mask;
-    CHECK(ksn_core_damage(&core,frame.ticket,&mask)==KSN_OK&&mask==(1u<<16));
+    CHECK(ksn_core_frame(&core,&frame)==KSN_OK);ksn_damage damage;
+    CHECK(ksn_core_damage(&core,frame.ticket,&damage)==KSN_OK&&damage.bands==(1u<<16));
+    /* The text moved inside one band, so the band's columns are the union of
+     * where it was and where it is -- not the whole width. */
+    CHECK(damage.x0[16]>=0&&damage.x1[16]<=240&&damage.x1[16]-damage.x0[16]<240);
     CHECK(ksn_core_discard(&core,frame.ticket)==KSN_OK);
-    CHECK(ksn_core_damage(&core,frame.ticket,&mask)==KSN_STALE);
+    CHECK(ksn_core_damage(&core,frame.ticket,&damage)==KSN_STALE);
     puts("damage and rectangle renderer: PASS");return 0;
 }

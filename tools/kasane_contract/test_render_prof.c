@@ -59,7 +59,7 @@ static int render_once(int prof_on,uint32_t *hash){
     KSN_TEST_CORE(core,);ksn_core_init(&core);
     ksn_client app=ksn_core_client(&core,KSN_APP);
     ksn_text_port text={.span=span};
-    ksn_display_port display={NULL,buffer,send,240,135,8,&text};
+    ksn_display_port display={NULL,buffer,send,240,135,8,&text,NULL};
     ksn_tx tx;ksn_ref rect,grad,label,shape,ring;
     ksn_render_stats stats;
     ksn_draw d={.clip={0,0,240,135},.opacity=255};

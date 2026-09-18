@@ -23,7 +23,7 @@ int main(void){
     KSN_TEST_CORE(core,);ksn_cache cache;ksn_cache_command_block commands;ksn_cache_text_block text;
     ksn_core_init(&core);CHECK(ksn_cache_bind(&cache,&commands,&text)==KSN_OK);
     ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_display_port display={NULL,get_strip,present,240,135,8,NULL};
+    ksn_display_port display={NULL,get_strip,present,240,135,8,NULL,NULL};
     ksn_draw card[2]={
         {.kind=KSN_RECT,.bounds={0,0,40,24},.clip={0,0,40,24},.opacity=255,
          .data.shape={0x1c3043ff,0,0}},

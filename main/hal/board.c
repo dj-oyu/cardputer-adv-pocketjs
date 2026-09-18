@@ -78,6 +78,7 @@ void board_capture(bool enabled) {
     capture=enabled;
     printf(enabled?"CAPTURE_BEGIN 240 135\n":"CAPTURE_END\n");
 }
+bool board_capture_active(void) { return capture; }
 
 static esp_err_t tx(bool data, const void *bytes, size_t n) {
     gpio_set_level(34, data);
@@ -436,6 +437,76 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     // frame started there, so the end of the panel always re-windows. A failed
     // transfer leaves the pointer unknown, which is what -1 means.
     next_row = (e==ESP_OK && y+rows<LCD_H) ? y+rows : -1;
+    return e;
+}
+
+// The narrow sibling of board_present. It always re-addresses the panel: the
+// window is not the full-width one the streaming path keeps open, and the write
+// pointer wraps to the WINDOW's left edge at the end of each row, which is what
+// makes a partial-width RAMWR work at all. next_row is cleared afterwards so
+// the next full-width strip re-windows instead of streaming into this one.
+//
+// The overlays still paint their whole rectangles into the strip and only the
+// window goes out. That is correct rather than lucky: everything they draw
+// outside the window is identical to what is already on the glass, because the
+// frame that put it there was full width (an overlay's own change comes through
+// app_force_redraw(), which asks for whole bands).
+esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels) {
+    if (x<0 || cols<1 || x+cols>LCD_W) return ESP_ERR_INVALID_ARG;
+    if (y<0 || rows<1 || rows>STRIP_H || y+rows>LCD_H) return ESP_ERR_INVALID_ARG;
+    if (cols==LCD_W) return board_present(y,rows,pixels);
+    pet_hub_overlay(pixels,y,rows);
+    pocket_capture_overlay(pixels,y,rows);
+    // No capture arm: board_capture dumps whole rows and the columns outside
+    // the window hold the previous band, so a caller that is capturing must not
+    // narrow. board_capture_active() is how it finds that out.
+    uint16_t px0=40+(uint16_t)x, px1=40+(uint16_t)(x+cols)-1;
+    uint16_t py0=53+(uint16_t)y, py1=53+(uint16_t)(y+rows)-1;
+    uint8_t xs[]={px0>>8,px0,px1>>8,px1}, ys[]={py0>>8,py0,py1>>8,py1};
+    esp_err_t e=command(0x2a,xs,4); if(e) { next_row=-1; return e; }
+    e=command(0x2b,ys,4); if(e) { next_row=-1; return e; }
+    e=command(0x2c,NULL,0); if(e) { next_row=-1; return e; }
+    size_t bytes=(size_t)cols*rows*2;
+    // Rows are packed as they are swapped, so the window leaves the strip in one
+    // pass exactly as the full-width path does. Both arms pack into a panel
+    // buffer rather than in place: the strip's rows are 240 apart and the
+    // window's are `cols` apart, so there is a copy either way, and packing into
+    // the buffer that is not in flight keeps the queued arm's overlap.
+    //
+    // The kernel arm is the reason ksn_render rounds its window out to 16
+    // pixels: 16 pixels is 32 bytes, so an aligned x and a multiple-of-16 cols
+    // make every packed row a whole number of the kernel's blocks at an aligned
+    // address. Anything else falls to the scalar swap, which is the arm that
+    // made the first narrow measurement slower than the full-width path.
+    uint16_t *panel = tx_buf[tx_front];
+    bool aligned = pie_swap && (x%16)==0 && (cols%16)==0;
+    for (int r=0;r<rows;r++) {
+        uint16_t *in = pixels+r*LCD_W+x, *out = panel+r*cols;
+        if (aligned) swap_pie(in, out, (unsigned)(cols*2/32));
+        else swap_scalar(out, in, cols);
+    }
+    if (g_board_async) {
+        e = tx_reap();
+        if (e == ESP_OK) {
+            gpio_set_level(34, 1);
+            tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+            e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+            tx_inflight = (e == ESP_OK);
+            tx_front ^= 1;
+        }
+    } else {
+        e = tx_reap();
+        if (e == ESP_OK) e = tx(true, panel, bytes);
+    }
+    next_row = -1;
+    return e;
+}
+
+esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pixels) {
+    esp_err_t e=tx_reap();
+    if(e==ESP_OK) e=board_present_rect(x,y,cols,rows,pixels);
+    if(e==ESP_OK) e=tx_reap();
+    if(e!=ESP_OK) next_row=-1;
     return e;
 }
 

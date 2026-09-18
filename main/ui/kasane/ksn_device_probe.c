@@ -109,7 +109,7 @@ static ksn_result probe_send(void *ctx,uint16_t y,uint16_t rows,const uint16_t *
 
 /* Use the production compositor in diagnostics, including initial frames. */
 static ksn_result probe_display(ksn_core *core){
-    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL};
+    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL,NULL};
     ksn_render_stats stats;return ksn_render_rects(core,&display,&stats);
 }
 
@@ -163,7 +163,7 @@ static ksn_result image_demo(void){
 static ksn_result text_demo(void){
     ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
     ksn_client app=ksn_core_client(&probe_core,KSN_APP);ksn_tx tx;ksn_ref ref;
-    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,&ksn_font_port};
+    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,&ksn_font_port,NULL};
     ksn_draw d={.kind=KSN_TEXT,.bounds={8,7,232,23},.clip={0,0,240,135},.opacity=255,
         .data.text={.utf8="Kasane: 日本語 あいう",.bytes=28,.capacity=48,.font=KSN_BODY,.color=0xf5bb69ff}};
     d.data.text.bytes=(uint16_t)strlen(d.data.text.utf8);
@@ -198,7 +198,7 @@ static ksn_result view_demo(void){
     ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
     ksn_view_host host;ksn_view_host_init(&host,&probe_core,&probe_cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP);
-    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL};
+    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL,NULL};
     ksn_render_stats stats;ksn_tx tx;ksn_template shape;ksn_instance a,b;
     ksn_draw d={.kind=KSN_RECT,.bounds={0,0,64,48},.clip={0,0,240,135},
                .opacity=255,.data.shape={0x67dfc7ff,0,0}};
@@ -283,7 +283,7 @@ void ksn_device_probe_run(void){
        ksn_cache_place(&probe_cache,&probe_core,tx,right_instance,&right)!=KSN_OK||
        app.ops->end(app.ctx,tx)!=KSN_OK)goto fail;
     ksn_frame partial_frame;if(ksn_core_frame(&probe_core,&partial_frame)!=KSN_OK)goto fail;
-    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL};ksn_render_stats rendered;
+    ksn_display_port display={NULL,probe_strip,probe_send,240,135,8,NULL,NULL};ksn_render_stats rendered;
     started=esp_timer_get_time();
     if(ksn_render_rects(&probe_core,&display,&rendered)!=KSN_OK||rendered.bands!=0xfe0u||
        rendered.transferred_bytes!=26880||

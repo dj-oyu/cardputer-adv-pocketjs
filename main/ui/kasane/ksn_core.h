@@ -133,6 +133,17 @@ void ksn_core_invalidate(ksn_core *core);
  * invalidation stays available for owners that do not know. */
 #define KSN_BANDS_ALL ((1u<<17)-1u)
 void ksn_core_invalidate_bands(ksn_core *core,uint32_t bands);
+
+/* What a frame owes the panel: the bands, and for each of them the half-open
+ * column range inside it. The columns are the union of the changed commands'
+ * clipped boxes on that band -- a counter that redraws six pixels of a caption
+ * dirties six columns, not two hundred and forty. Bands not in `bands` have no
+ * meaningful x0/x1. Repair and full-redraw bands carry [0,240) because the
+ * owner that asked for them does not describe columns. */
+typedef struct {
+    uint32_t bands;
+    int16_t x0[17],x1[17];
+} ksn_damage;
 ksn_result ksn_core_discard_reason(ksn_core *core,ksn_tx ticket,ksn_result reason);
 ksn_result ksn_core_check_builder(const ksn_core *core,ksn_tx ticket,ksn_layer layer,ksn_update_mode mode);
 ksn_result ksn_core_builder_usage(const ksn_core *core,ksn_tx ticket,ksn_capacity *out);
@@ -153,8 +164,11 @@ ksn_result ksn_core_read(const ksn_core *core,ksn_tx ticket,bool previous,
 ksn_result ksn_core_image_span(const ksn_core *core,ksn_tx ticket,bool previous,
                             ksn_layer layer,uint16_t index,uint16_t y,uint16_t x,
                             uint16_t count,uint16_t *rgb565,uint8_t *alpha);
-/* Cardputer's 17 full-width bands, last one 7 rows. No state mutation. */
-ksn_result ksn_core_damage(const ksn_core *core,ksn_tx ticket,uint32_t *bands);
+/* Cardputer's 17 bands, last one 7 rows, each with its column range. No state
+ * mutation. A caller that cannot transfer a partial row widens every band to
+ * [0,240) itself before compositing -- the renderer's narrow arm has to be a
+ * decision made before pixels are written, not after. */
+ksn_result ksn_core_damage(const ksn_core *core,ksn_tx ticket,ksn_damage *out);
 /* Call failed on any partial/uncertain LCD transfer, before retry or discard.
  * presented attests that all required bands were transferred successfully. */
 ksn_result ksn_core_failed(ksn_core *core,ksn_tx ticket);

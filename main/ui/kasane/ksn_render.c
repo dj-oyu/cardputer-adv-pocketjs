@@ -1509,7 +1509,8 @@ static ksn_result group_folded_chunk(ksn_core *core,const ksn_text_port *text,ks
  * child of the group is a dithered gradient at all -- with has_dither false the
  * old chain's provenance bit was never set either. */
 static ksn_result group_opaque_row(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsigned first,
-                                   unsigned end,int py,int band_y,bool has_dither,uint16_t *pixels){
+                                   unsigned end,int py,int band_y,int dx0,int dx1,
+                                   bool has_dither,uint16_t *pixels){
     const ksn_frame_view *command;
     for(unsigned i=first;i<=end;i++){
         ksn_result result=frame_command(core,ticket,layer,(uint16_t)i,&command);
@@ -1519,8 +1520,8 @@ static ksn_result group_opaque_row(ksn_core *core,ksn_tx ticket,ksn_layer layer,
            py<d->clip.y0||py>=d->clip.y1)continue;
         int left=d->bounds.x0>d->clip.x0?d->bounds.x0:d->clip.x0;
         int right=d->bounds.x1<d->clip.x1?d->bounds.x1:d->clip.x1;
-        if(left<0)left=0;
-        if(right>240)right=240;
+        if(left<dx0)left=dx0;
+        if(right>dx1)right=dx1;
         if(left>=right)continue;
         bool dither=has_dither&&d->kind==KSN_GRADIENT&&d->data.gradient.dither;
         {KSN_PROF_BEGIN();
@@ -1541,8 +1542,11 @@ static ksn_result group_opaque_row(ksn_core *core,ksn_tx ticket,ksn_layer layer,
     }
     return KSN_OK;
 }
+/* `dx0`/`dx1` are the band's damaged columns: the group composites inside them
+ * and nowhere else, because the strip outside them belongs to a band that has
+ * already gone out. */
 static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span_scratch *scratch,ksn_tx ticket,ksn_layer layer,unsigned first,unsigned end,
-                               uint8_t opacity,int y,int rows,uint16_t *pixels){
+                               uint8_t opacity,int y,int rows,int dx0,int dx1,uint16_t *pixels){
     if(!opacity)return KSN_OK;
     /* One 256-byte scratch for both arms, so the fold costs no stack: the
      * isolated premultiplied tile of the pre-3c chain, or step 2's 8.8
@@ -1603,10 +1607,11 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
         if(i-first<KSN_TILE_REACH_BOXES)reach[i-first]=box;else reach_all=false;
         reach_count++;
     }
-    if(left<0)left=0;
-    if(right>240)right=240;
+    if(left<dx0)left=dx0;
+    if(right>dx1)right=dx1;
     if(top<y)top=y;
     if(bottom>y+rows)bottom=y+rows;
+    if(left>=right)return KSN_OK;
     /* Candidate 3c, step 2: every group, folded, with the colour chain's floor
      * moved from 8 bits to 8.8 and the alpha chain and group stage kept exact.
      * Bit-exact wherever every covering child is opaque (see group_folded_chunk),
@@ -1636,7 +1641,7 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
     if(g_ksn_group_affine&&opacity==255&&opaque_chain){
         {KSN_PROF_BEGIN();
         for(int py=top;py<bottom;py++){
-            ksn_result result=group_opaque_row(core,ticket,layer,first,end,py,y,has_dither,pixels);
+            ksn_result result=group_opaque_row(core,ticket,layer,first,end,py,y,left,right,has_dither,pixels);
             if(result!=KSN_OK)return result;
         }
         KSN_PROF_END(blend);}
@@ -1824,9 +1829,37 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     memset(decoded.valid,0,sizeof(decoded.valid));decoded.text_used=0;
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
-    uint32_t mask;result=ksn_core_damage(core,frame.ticket,&mask);
+    ksn_damage damage;result=ksn_core_damage(core,frame.ticket,&damage);
     if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
-    if(!mask)return ksn_core_presented(core,frame.ticket);
+    if(!damage.bands)return ksn_core_presented(core,frame.ticket);
+    /* Narrowing is a decision taken here, before any pixel is written: a band
+     * composited over part of its width leaves the rest of the shared strip
+     * holding the previous band's pixels, so a port that can only send whole
+     * rows must be given whole rows to send.
+     *
+     * Two things decide it besides the port. The window is rounded OUT to 16
+     * pixels, because the pixels it saves are worth less than the transfer path
+     * it would cost: a packed row of a multiple of 16 pixels is a whole number
+     * of 32-byte blocks at an aligned address, which is what keeps the byte
+     * swap on board.c's PIE kernel and the background fill on fill_blocks. A
+     * window that is not a multiple of 16 puts both on their scalar arms, and
+     * that was measured to cost more than the columns saved (hello: 11,520 ->
+     * 8,832 bytes but render 1.55 -> 1.65 ms and send 1.67 -> 1.88 ms).
+     *
+     * And a window that is nearly the whole width is not worth taking: it pays
+     * three panel commands per band for the re-addressing that the full-width
+     * path avoids entirely (board.c's next_row streaming), and saves too few
+     * columns to cover them. KSN_NARROW_MAX is where that trade is drawn. It is
+     * a threshold on the band, not the frame: a frame may narrow some bands and
+     * send others whole. */
+#define KSN_NARROW_MAX 192
+    for(unsigned band=0;band<17;band++){
+        if(!(damage.bands&(1u<<band)))continue;
+        int x0=damage.x0[band]&~15,x1=(damage.x1[band]+15)&~15;
+        if(x1>240)x1=240;
+        if(!display->present_rect||x1-x0>KSN_NARROW_MAX){x0=0;x1=240;}
+        damage.x0[band]=(int16_t)x0;damage.x1[band]=(int16_t)x1;
+    }
     const ksn_frame_view *command;
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
         {KSN_PROF_BEGIN();
@@ -1852,10 +1885,16 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     if(!pixels){ksn_core_defer_repair(core,frame.ticket);return KSN_OOM;}
     ksn_span_scratch scratch;
     for(unsigned band=0;band<17;band++){
-        if(!(mask&(1u<<band)))continue;
+        if(!(damage.bands&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
+        const int dx0=damage.x0[band],dx1=damage.x1[band];
         {KSN_PROF_BEGIN();
-        fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
+        /* Whole strip in one call when the band is whole, which is every band
+         * of a REPLACE and of any repair; otherwise the damaged columns of each
+         * row, because the columns between them are not ours to touch. */
+        if(dx0==0&&dx1==240)fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
+        else for(int r=0;r<rows;r++)
+            fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
         KSN_PROF_END(fill);}
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
             {KSN_PROF_BEGIN();
@@ -1872,7 +1911,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 }
                 {KSN_PROF_BEGIN();
-                result=render_group(core,display->text,&scratch,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,pixels);
+                result=render_group(core,display->text,&scratch,frame.ticket,(ksn_layer)layer,first,i,opacity,y,rows,dx0,dx1,pixels);
                 KSN_PROF_END(tile);}
                 if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                 continue;
@@ -1885,8 +1924,11 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             if(x1>d->clip.x1)x1=d->clip.x1;
             if(y0<d->clip.y0)y0=d->clip.y0;
             if(y1>d->clip.y1)y1=d->clip.y1;
-            if(x0<0)x0=0;
-            if(x1>240)x1=240;
+            /* The band's damaged columns, not the panel's: everything below
+             * indexes the strip, and the strip outside them still holds the
+             * band that went out before this one. */
+            if(x0<dx0)x0=dx0;
+            if(x1>dx1)x1=dx1;
             if(y0<y)y0=y;
             if(y1>y+rows)y1=y+rows;
             if(x0>=x1||y0>=y1)continue;
@@ -2011,9 +2053,13 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             }
             KSN_PROF_END(blend);}
         }
-        result=display->present(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
+        result=(dx0==0&&dx1==240)?
+            display->present(display->ctx,(uint16_t)y,(uint16_t)rows,pixels):
+            display->present_rect(display->ctx,(uint16_t)dx0,(uint16_t)y,
+                                  (uint16_t)(dx1-dx0),(uint16_t)rows,pixels);
         if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
-        stats->bands|=1u<<band;stats->transferred_bytes+=(uint32_t)rows*240u*2u;
+        stats->bands|=1u<<band;
+        stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
     }
     return ksn_core_presented(core,frame.ticket);
 }

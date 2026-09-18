@@ -59,7 +59,7 @@ static ksn_result span(void *port,const ksn_draw *d,uint16_t reveal,int x,int y,
     return KSN_OK;
 }
 static const ksn_text_port text_port={.span=span};
-static const ksn_display_port display={NULL,buffer,transfer,240,135,8,&text_port};
+static const ksn_display_port display={NULL,buffer,transfer,240,135,8,&text_port,NULL};
 
 /* ---- independent scalar reference (same shape as test_group_dither.c) ----- */
 /* Reads the scene, never the renderer's helpers, and reproduces the documented

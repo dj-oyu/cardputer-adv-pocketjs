@@ -73,7 +73,7 @@ static ksn_result span(void *ctx,const ksn_draw *d,uint16_t reveal,int x,int y,u
     return KSN_OK;
 }
 static ksn_text_port text_port={.span=span};
-static ksn_display_port display={NULL,buffer,transfer,240,135,8,&text_port};
+static ksn_display_port display={NULL,buffer,transfer,240,135,8,&text_port,NULL};
 
 static void glyphs(char *out,unsigned at,unsigned length){
     static const char set[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -#";

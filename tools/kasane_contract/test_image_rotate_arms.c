@@ -76,7 +76,7 @@ static uint32_t scene(const config *c,unsigned arm,unsigned long long *fetch_cou
     ksn_client app=ksn_core_client(&core,KSN_APP);
     ksn_image_port port={NULL,160,160,1,2,source};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
-    ksn_display_port display={NULL,buffer,send,240,135,8,NULL};
+    ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};
     ksn_render_stats stats;ksn_tx tx;ksn_ref ref;uint32_t hash=2166136261u;
     ksn_draw d={.kind=KSN_IMAGE,.clip=c->clip,.opacity=(uint8_t)c->opacity,
         .data.image={.resource=image,.scale=KSN_IMAGE_STRETCH,.source_x=(uint16_t)c->source_x,
@@ -124,7 +124,7 @@ static uint32_t animate_120(unsigned arm_mode,unsigned long long *fetch_count,un
     ksn_client app=ksn_core_client(&core,KSN_APP);
     ksn_image_port port={NULL,160,160,1,2,source};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
-    ksn_display_port display={NULL,buffer,send,240,135,8,NULL};
+    ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};
     ksn_render_stats stats;ksn_tx tx;ksn_ref ref;uint32_t hash=2166136261u;unsigned frames=0;
     ksn_draw d={.kind=KSN_IMAGE,.clip={0,0,240,135},.opacity=193,.bounds={10,20,74,84},
         .data.image={.resource=image,.scale=KSN_IMAGE_STRETCH,.source_x=3,.source_y=2,

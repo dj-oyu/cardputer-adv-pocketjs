@@ -32,7 +32,7 @@ int main(void){
     CHECK(ksn_cache_bind(&cache,&cache_commands,&cache_text)==KSN_OK);
     ksn_view_host_init(&host,&core,&cache,42);
     ksn_view *app=ksn_view_host_endpoint(&host,KSN_APP),*system=ksn_view_host_endpoint(&host,KSN_SYSTEM);
-    ksn_display_port port={NULL,buffer,transfer,240,135,8,NULL};ksn_render_stats stats;
+    ksn_display_port port={NULL,buffer,transfer,240,135,8,NULL,NULL};ksn_render_stats stats;
     ksn_draw d={.kind=KSN_RECT,.bounds={12,12,50,50},.clip={0,0,240,135},
                 .opacity=230,.data.shape={0xff8800ff,0,0}};
     ksn_placement placement={40,60,{0,0,240,135},180,true};
