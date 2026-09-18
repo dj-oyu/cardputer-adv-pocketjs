@@ -50,7 +50,14 @@ struct ksn_core_impl {
     ksn_layer layer;
     ksn_update_mode mode;
     uint8_t active,building_bank;
-    bool building,submitted,full_redraw,repairing,invalidated;
+    /* Two band sets, not one flag: `invalidated` is what an owner has asked for
+     * and prepare_frame has not taken yet, `repair_bands` is what the frame in
+     * flight owes. An unqualified invalidate sets every bit in both and so is
+     * the flag it used to be; a qualified one names the rows its overlay
+     * occupies, which is the difference between a keystroke repainting the
+     * field and a keystroke repainting the screen. */
+    uint32_t invalidated,repair_bands;
+    bool building,submitted,full_redraw,repairing;
 };
 
 /* Borrowed, immovable blocks. The core itself never allocates. */
@@ -118,6 +125,14 @@ bool ksn_core_needs_repair(const ksn_core *core);
 /* Owner invalidation is independent of guest submissions. Requests received
  * during a transfer remain pending until a subsequent complete frame. */
 void ksn_core_invalidate(ksn_core *core);
+/* The same request, limited to the 8-row bands named in `bands` (bit b is rows
+ * 8b..8b+7, bit 16 the last seven). Bits outside the panel are ignored and an
+ * empty set is a no-op. For an owner that composites over the strip and knows
+ * which rows it touched -- the text field of pocket_text.c is the one this
+ * exists for -- so that its damage costs what it covers. Unqualified
+ * invalidation stays available for owners that do not know. */
+#define KSN_BANDS_ALL ((1u<<17)-1u)
+void ksn_core_invalidate_bands(ksn_core *core,uint32_t bands);
 ksn_result ksn_core_discard_reason(ksn_core *core,ksn_tx ticket,ksn_result reason);
 ksn_result ksn_core_check_builder(const ksn_core *core,ksn_tx ticket,ksn_layer layer,ksn_update_mode mode);
 ksn_result ksn_core_builder_usage(const ksn_core *core,ksn_tx ticket,ksn_capacity *out);

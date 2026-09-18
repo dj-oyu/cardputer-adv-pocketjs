@@ -461,7 +461,7 @@ ksn_result ksn_core_reset_layer(ksn_core *storage,ksn_layer layer){
     for(unsigned i=0;i<core->image_count;i++)
         if(core->images[i].layer!=layer)core->images[kept++]=core->images[i];
     memset(core->images+kept,0,(core->image_count-kept)*sizeof(*core->images));
-    core->image_count=(uint8_t)kept;core->invalidated=true;
+    core->image_count=(uint8_t)kept;core->invalidated=KSN_BANDS_ALL;
     return KSN_OK;
 }
 ksn_result ksn_core_enable_animation(ksn_core *storage,ksn_core_animation_block *a,ksn_core_animation_block *b){
@@ -579,9 +579,13 @@ ksn_submission ksn_core_poll(const ksn_core *storage){
     return storage?cimpl(storage)->outcome:(ksn_submission){0};
 }
 bool ksn_core_needs_repair(const ksn_core *storage){
-    return storage&&(cimpl(storage)->full_redraw||cimpl(storage)->invalidated);
+    return storage&&(cimpl(storage)->full_redraw||cimpl(storage)->invalidated||
+                     cimpl(storage)->repair_bands);
 }
-void ksn_core_invalidate(ksn_core *storage){if(storage)impl(storage)->invalidated=true;}
+void ksn_core_invalidate(ksn_core *storage){ksn_core_invalidate_bands(storage,KSN_BANDS_ALL);}
+void ksn_core_invalidate_bands(ksn_core *storage,uint32_t bands){
+    if(storage)impl(storage)->invalidated|=bands&KSN_BANDS_ALL;
+}
 ksn_result ksn_core_check_builder(const ksn_core *storage,ksn_tx ticket,ksn_layer layer,ksn_update_mode mode){
     if(!storage)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
@@ -625,9 +629,10 @@ ksn_result ksn_core_presented(ksn_core *storage,ksn_tx ticket){
     ksn_core_impl *core=impl(storage);
     if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
     if(core->repairing){
-        core->repairing=false;core->full_redraw=false;return KSN_OK;
+        core->repairing=false;core->full_redraw=false;core->repair_bands=0;return KSN_OK;
     }
     core->active=core->building_bank;core->submitted=false;core->full_redraw=false;
+    core->repair_bands=0;
     core->outcome=(ksn_submission){ticket,KSN_PRESENTED,KSN_OK,core->layer};return KSN_OK;
 }
 ksn_result ksn_core_discard(ksn_core *storage,ksn_tx ticket){
@@ -669,7 +674,7 @@ ksn_result ksn_core_frame(const ksn_core *storage,ksn_frame *out){
     const ksn_bank *after=&core->banks[core->repairing?core->active:core->building_bank];
     *out=(ksn_frame){.ticket=core->transaction,.previous_background=before->background[KSN_APP],
                     .next_background=after->background[KSN_APP],
-                    .full_redraw=core->full_redraw||core->invalidated};
+                    .full_redraw=core->full_redraw||core->invalidated==KSN_BANDS_ALL};
     for(unsigned i=0;i<2;i++){
         out->previous[i]=usage(before,(ksn_layer)i);out->next[i]=usage(after,(ksn_layer)i);
     }
@@ -685,8 +690,11 @@ ksn_result ksn_core_prepare_frame(ksn_core *storage,ksn_frame *out){
         core->transaction=(ksn_tx){++last_transaction};core->repairing=true;
     }
     /* A later invalidate, including one inside the display callback, survives
-     * the current acknowledgement. IO failure keeps full_redraw set too. */
-    core->full_redraw|=core->invalidated;core->invalidated=false;
+     * the current acknowledgement. IO failure keeps full_redraw set too.
+     * Only an unqualified invalidate becomes full_redraw; a banded one is owed
+     * by repair_bands, which damage seeds and present clears. */
+    if(core->invalidated==KSN_BANDS_ALL)core->full_redraw=true;
+    core->repair_bands|=core->invalidated;core->invalidated=0;
     return ksn_core_frame(storage,out);
 }
 void ksn_core_defer_repair(ksn_core *storage,ksn_tx ticket){
@@ -801,8 +809,11 @@ ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,uint32_t *bands
     const ksn_core_impl *core=cimpl(storage);
     if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
     const ksn_bank *old=&core->banks[core->active],*next=&core->banks[core->building_bank];
-    *bands=0;
-    if(core->repairing||core->full_redraw||core->invalidated||old->background[KSN_APP]!=next->background[KSN_APP]||
+    /* What a repair already owes. A repairing frame reads the same bank on both
+     * sides, so the loop below finds nothing and these are the only bands it
+     * has; a guest submission adds them to its own diff. */
+    *bands=core->repair_bands;
+    if(core->full_redraw||old->background[KSN_APP]!=next->background[KSN_APP]||
        old->generation[0]!=next->generation[0]||old->generation[1]!=next->generation[1]){
         *bands=(1u<<17)-1u;return KSN_OK;
     }

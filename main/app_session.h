@@ -54,6 +54,10 @@ esp_err_t app_start_overlay(const char *source, size_t length);
 // into its own frame.
 esp_err_t app_overlay_tick(void);
 void app_force_redraw(void);
+// The same, for an owner that composites over the guest's strips and knows
+// which 8-row bands it touched (bit b is rows 8b..8b+7, bit 16 the last seven).
+// An empty set is a no-op.
+void app_force_redraw_bands(uint32_t bands);
 esp_err_t app_tick(uint32_t buttons);
 // The display period the shell paces a RUNNING guest at (main.c's ui_task),
 // and the ceiling on how often a continuation turn reaches the panel

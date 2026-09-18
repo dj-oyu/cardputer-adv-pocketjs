@@ -47,6 +47,8 @@ void ksn_view_host_end_turn(ksn_view_host *);
  * Without a submission, redraw the committed bank when repair is pending. */
 ksn_result ksn_view_host_present(ksn_view_host *,const ksn_display_port *,ksn_render_stats *);
 void ksn_view_host_invalidate(ksn_view_host *);
+/* The same, limited to the named 8-row bands (ksn_core_invalidate_bands). */
+void ksn_view_host_invalidate_bands(ksn_view_host *,uint32_t bands);
 bool ksn_view_host_needs_present(const ksn_view_host *);
 ksn_input_scope ksn_view_host_route(const ksn_view_host *,bool host_priority);
 ksn_result ksn_view_host_focus(ksn_view_host *,const uint32_t *,uint16_t);

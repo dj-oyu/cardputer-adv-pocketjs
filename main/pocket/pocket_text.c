@@ -39,6 +39,14 @@ typedef struct {
 
 static session_t *live;
 static bool       dirty;
+// Which 8-row bands the repaint owes. The field is composited over Kasane's
+// strips (pocket_text_overlay), so a change here is damage Kasane cannot derive
+// from its own commands and has to be told about. Telling it "everything" cost
+// a 64,800-byte full-screen redraw per keystroke; the rows the box occupies are
+// two or three of the seventeen. Accumulated rather than recomputed at the ask,
+// because a session that closes takes its geometry with it and the rows it
+// vacated still need repainting.
+static uint32_t   dirty_bands;
 static JSClassID  session_class;
 static JSRuntime *session_rt;
 static bool       class_ready;
@@ -113,7 +121,27 @@ static pending_ev_t *dequeue_event(void) {
 }
 
 bool pocket_text_active(void) { return live!=NULL; }
-bool pocket_text_take_dirty(void) { bool was=dirty; dirty=false; return was; }
+
+// The box's rows as a band set. Clipped to the panel, so a field placed past
+// the bottom edge contributes nothing rather than a bit that means row 136.
+static uint32_t field_bands(const session_t *s) {
+    if(!s || s->h<=0) return 0;
+    int y0=s->y, y1=s->y+s->h;
+    if(y0<0) y0=0;
+    if(y1>135) y1=135;
+    if(y0>=y1) return 0;
+    uint32_t mask=0;
+    for(int band=y0/8; band<=(y1-1)/8; band++) mask|=1u<<band;
+    return mask;
+}
+
+static void mark_dirty(const session_t *s) { dirty=true; dirty_bands|=field_bands(s); }
+
+uint32_t pocket_text_take_dirty(void) {
+    uint32_t was=dirty?dirty_bands:0;
+    dirty=false; dirty_bands=0;
+    return was;
+}
 
 // ------------------------------------------------------------------- the IME
 
@@ -140,7 +168,7 @@ static void refocus(session_t *s, bool arm) {
 static session_t *detach(void) {
     session_t *s=live;
     live=NULL;
-    if(s) { refocus(s,false); dirty=true; }
+    if(s) { refocus(s,false); mark_dirty(s); }
     return s;
 }
 
@@ -164,7 +192,7 @@ void pocket_text_reset(void) {
     // hear it. The sessions they hold still own three JSValues of a realm that
     // is about to go, so they are destroyed rather than merely forgotten.
     for(pending_ev_t *e; (e=dequeue_event())!=NULL; ) { destroy(e->finished); free(e); }
-    dirty=false;
+    dirty=false; dirty_bands=0;
     // The class belongs to the realm that is going away.
     class_ready=false;
 }
@@ -324,7 +352,9 @@ void pocket_text_pump(void) {
 void pocket_text_key(const keystroke_t *k) {
     session_t *s=live;
     if(!s || !k) return;
-    dirty=true;
+    // Before the key is interpreted, because every arm below repaints the box:
+    // a rejected key still moves the caret's neighbours through the IME.
+    mark_dirty(s);
 
     // Ctrl+J / opt+Space carries no text, so it would fall through the length
     // test below. It is the same toggle every other text screen here has.
@@ -711,7 +741,7 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
 
     live=s;
     scroll_px=0;
-    dirty=true;
+    mark_dirty(s);
     refocus(s,true);
     ESP_LOGI(TAG,"TEXT_OPEN %dx%d at %d,%d max=%u %s ime=%s",
              s->w,s->h,s->x,s->y,(unsigned)cap,
@@ -769,6 +799,6 @@ esp_err_t pocket_text_install(JSContext *ctx, void *user_data) {
     (void)user_data;
     pocket_api_register(&text_capability);
     // A previous session's realm is gone; nothing of it may be reused.
-    live=NULL; dirty=false; class_ready=false; scroll_px=0;
+    live=NULL; dirty=false; dirty_bands=0; class_ready=false; scroll_px=0;
     return pocket_api_lazy(ctx,"input",build_text,NULL);
 }

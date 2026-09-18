@@ -156,6 +156,9 @@ bool ksn_runtime_needs_present(void){
     return runtime&&(runtime->system_owned||runtime->app_active)&&ksn_view_host_needs_present(&runtime->host);
 }
 void ksn_runtime_invalidate(void){if(runtime)ksn_view_host_invalidate(&runtime->host);}
+void ksn_runtime_invalidate_bands(uint32_t bands){
+    if(runtime)ksn_view_host_invalidate_bands(&runtime->host,bands);
+}
 ksn_result ksn_runtime_present(const ksn_display_port *port,ksn_render_stats *stats){
     if(!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};

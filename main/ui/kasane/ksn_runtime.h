@@ -46,6 +46,7 @@ ksn_view_stats ksn_runtime_stats(ksn_layer);
 bool ksn_runtime_has_submission(void);
 bool ksn_runtime_needs_present(void);
 void ksn_runtime_invalidate(void);
+void ksn_runtime_invalidate_bands(uint32_t bands);
 ksn_result ksn_runtime_present(const ksn_display_port *,ksn_render_stats *);
 ksn_input_scope ksn_runtime_input_scope(bool host_priority);
 #ifdef __cplusplus

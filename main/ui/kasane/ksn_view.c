@@ -210,6 +210,9 @@ ksn_result ksn_view_host_attach_cache(ksn_view_host *h,ksn_cache *cache){
     h->cache=cache;return KSN_OK;
 }
 void ksn_view_host_invalidate(ksn_view_host *h){if(h)ksn_core_invalidate(h->core);}
+void ksn_view_host_invalidate_bands(ksn_view_host *h,uint32_t bands){
+    if(h)ksn_core_invalidate_bands(h->core,bands);
+}
 bool ksn_view_host_needs_present(const ksn_view_host *h){
     return h&&h->core&&(ksn_core_has_submission(h->core)||ksn_core_needs_repair(h->core));
 }

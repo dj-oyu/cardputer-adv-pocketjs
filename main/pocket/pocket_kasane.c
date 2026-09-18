@@ -1470,6 +1470,9 @@ void pocket_kasane_set_animation_time(uint64_t now_us){ksn_runtime_set_animation
 bool pocket_kasane_needs_present(void) {
     return ksn_runtime_needs_present();
 }
+void pocket_kasane_invalidate_bands(uint32_t bands) {
+    ksn_runtime_invalidate_bands(bands);
+}
 void pocket_kasane_invalidate(void) {
     ksn_runtime_invalidate();
 }

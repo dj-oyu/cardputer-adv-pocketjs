@@ -29,6 +29,8 @@ void pocket_kasane_animations_presented(uint64_t now_us);
 void pocket_kasane_set_animation_time(uint64_t now_us);
 bool pocket_kasane_needs_present(void);
 void pocket_kasane_invalidate(void);
+// The same, for an owner that knows which 8-row bands its overlay covers.
+void pocket_kasane_invalidate_bands(uint32_t bands);
 ksn_result pocket_kasane_present(const ksn_display_port *display,
                                  ksn_render_stats *stats);
 void pocket_kasane_end_turn(void);

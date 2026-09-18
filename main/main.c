@@ -680,7 +680,7 @@ static void tick_run(bool have, const keystroke_t *stroke) {
         have=false;
         // The guest's renderer presents only when IT has damage, so a field
         // that moved on a frame the app did not would not be sent at all.
-        if(pocket_text_take_dirty()) app_force_redraw();
+        app_force_redraw_bands(pocket_text_take_dirty());
     }
     board_key_t key=have?stroke->nav:KEY_NONE;
     bool leave = have && key==KEY_BACK;
@@ -704,7 +704,7 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     // no damage of the guest's own. The repaint lands on the next frame, which
     // is 33 ms and is why the check above exists as well -- a keystroke has to
     // be seen in the frame it was typed in.
-    if(pocket_text_take_dirty()) app_force_redraw();
+    app_force_redraw_bands(pocket_text_take_dirty());
     // The recording indicator is composited into every strip that is sent, so
     // it needs a strip to be sent: an app that has stopped drawing would
     // otherwise leave the screen it last drew, with no dot on it.

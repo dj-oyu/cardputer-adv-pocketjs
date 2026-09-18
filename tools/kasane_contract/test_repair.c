@@ -125,6 +125,32 @@ int main(void){
     CHECK(ksn_view_poll(app).ticket.value==tx.value&&same_outcome(ksn_view_poll(system),system_outcome));
     CHECK(memcmp(panel,committed,sizeof(panel))==0);
 
+    /* A banded invalidate repaints its bands and nothing else. This is the
+     * contract the text field of pocket_text.c depends on: it composites over
+     * the strip, so Kasane cannot see its damage, and telling Kasane
+     * "everything" made one keystroke a 64,800-byte repaint. The panel is
+     * scribbled over first so a band that is NOT redrawn stays visibly wrong --
+     * the check is both that the named rows were repaired and that the others
+     * were left alone. */
+    memset(panel,0x5a,sizeof(panel));
+    ksn_view_host_invalidate_bands(&host,(1u<<3)|(1u<<4));
+    transfers=0;
+    CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK);
+    CHECK(transfers==2&&stats.bands==((1u<<3)|(1u<<4))&&stats.transferred_bytes==2*8*240*2);
+    CHECK(memcmp(panel+24*240,committed+24*240,16*240*sizeof(*panel))==0);
+    for(unsigned i=0;i<24*240;i++)CHECK(panel[i]==0x5a5a);
+    CHECK(!ksn_view_host_needs_present(&host));
+    /* Bands outside the panel are ignored rather than transferred, and an empty
+     * set asks for nothing at all. */
+    ksn_view_host_invalidate_bands(&host,1u<<20);
+    CHECK(!ksn_view_host_needs_present(&host));
+    ksn_view_host_invalidate_bands(&host,0);
+    CHECK(!ksn_view_host_needs_present(&host));
+    /* Put the panel back for the checks below, which compare all of it. */
+    ksn_view_host_invalidate(&host);
+    CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK&&stats.transferred_bytes==64800);
+    CHECK(memcmp(panel,committed,sizeof(panel))==0);
+
     /* An active builder is never rendered by invalidation. */
     CHECK(ksn_view_begin(app,KSN_PATCH,&tx)==KSN_OK);
     ksn_change change={.property=KSN_SET_COLOR,.value.color=0x00ff00ff};

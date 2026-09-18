@@ -193,6 +193,9 @@ static bool names_kasane(const char *s, size_t n) {
 static bool overlay_session;
 static bool kasane_presented;
 void app_force_redraw(void) { pocket_kasane_invalidate(); }
+void app_force_redraw_bands(uint32_t bands) {
+    if(bands) pocket_kasane_invalidate_bands(bands);
+}
 static esp_err_t present_frame(void);
 typedef struct { unsigned sent_us; } kasane_display_t;
 static uint16_t *kasane_strip(void *opaque) {

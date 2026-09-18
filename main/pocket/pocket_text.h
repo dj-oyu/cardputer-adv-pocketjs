@@ -52,10 +52,12 @@ void pocket_text_key(const keystroke_t *key);
 // delivery into the guest follows.
 void pocket_text_pump(void);
 
-// Whether the field has changed since the last ask, and clears the flag. The
-// guest's renderer only presents when IT has damage, so a field that moved on
-// a frame the app did not needs app_force_redraw() to be seen at all.
-bool pocket_text_take_dirty(void);
+// Which 8-row bands the field has dirtied since the last ask, and clears them.
+// Zero means nothing to repaint. The guest's renderer only presents when IT has
+// damage, so a field that moved on a frame the app did not needs
+// app_force_redraw_bands() to be seen at all -- and the band set is why that is
+// the box's rows rather than the whole panel.
+uint32_t pocket_text_take_dirty(void);
 
 // Composites the field into one strip of the guest's frame. Called from
 // app_session.c's Kasane present port after the band is rendered; a no-op
