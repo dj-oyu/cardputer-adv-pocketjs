@@ -23,6 +23,7 @@
 #include "esp_cpu.h"
 #include "esp_log.h"
 #include <stdint.h>
+#include <string.h>
 
 #define REPT  128
 #define ITERS 200u
@@ -169,6 +170,27 @@ void fpu_latency_run(void) {
         double ind = run_case(cases[c].indep) / (base * cases[c].per_indep);
         ESP_LOGI("fpu", "FPU_CASE %-14s dep=%.2f indep=%.2f stall=%.2f cy/instr",
                  cases[c].name, dep, ind, dep - ind);
+    }
+    // Is madd.s fused? It decides whether the compiler's choice of WHICH
+    // product to contract into the multiply-add changes the result -- and it
+    // does, which is what sank a "bit-identical" claim about a hand-written
+    // version of one block (docs/perf/fpu-latency.md, the last section). Any
+    // future attempt to rewrite float code here has to answer the same
+    // question, so the answer lives with the other properties of the part.
+    //
+    // a = b = 1 + 2^-12, c = -1. Rounded separately a*b is exactly 1 + 2^-11
+    // (the 2^-24 term is a tie that rounds to even) and the sum is 2^-11,
+    // encoded 0x3a000000. Fused, a*b keeps the 2^-24 and the sum is
+    // 2^-11 + 2^-24 = 2^-11 * (1 + 2^-13), whose mantissa field is 2^10 =
+    // 0x400. Measured: 0x3a000400.
+    {
+        float a=1.0f+0x1p-12f,c=-1.0f;
+        uint32_t ab,cb,rb;
+        memcpy(&ab,&a,sizeof ab);memcpy(&cb,&c,sizeof cb);
+        __asm__("wfr f3,%1\n wfr f4,%2\n madd.s f4,f3,f3\n rfr %0,f4"
+                :"=r"(rb):"r"(ab),"r"(cb):"f3","f4");
+        ESP_LOGI("fpu","FPU_MADD_FUSED %s result=%08lx (fused=3a000400 separate=3a000000)",
+                 rb==0x3a000400u?"YES":rb==0x3a000000u?"NO":"UNEXPECTED",(unsigned long)rb);
     }
     ESP_LOGI("fpu", "FPU_LATENCY_DONE");
 }
