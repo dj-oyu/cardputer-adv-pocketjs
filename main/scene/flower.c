@@ -1100,10 +1100,20 @@ static inline __attribute__((always_inline)) flower_lite_t flower_lite_hand(V n)
     flower_lite_t o;
     float t0,t1,c0,c1,z0;
     __asm__(
-        /* Only b0: GCC's xtensa does not accept b1/b2 as clobbers, so the one
-         * boolean is reused, each compare consumed before the next is made.
-         * The three POS operations therefore sit at the ends of their chains,
-         * spaced by the other chains' work, which is the point. */
+        /* One boolean, reused, each compare consumed before the next is made.
+         *
+         * This is NOT because b1/b2 are unavailable, which an earlier comment
+         * here claimed. GCC's xtensa models exactly one boolean register: b1
+         * and b2 are rejected as clobber NAMES, but inline asm that writes them
+         * without declaring them assembles correctly, and GCC's own code for a
+         * float compare only ever emits b0 -- so there is nothing in b1..b15
+         * for the allocator to lose. The variant that hoists all three compares
+         * into b0/b1/b2 was written and measured: shade 561.3 against the C
+         * arm's 570.3, where this version measured 556.1 against 566.9. No
+         * better, and it would rest on an assumption about the allocator that
+         * cannot be written down as a clobber. So b0 alone, which needs no such
+         * assumption, and the three POS operations sit at the ends of their
+         * chains anyway, spaced by the other chains' work. */
         "lsi %[c0],%[k],0\n"        /* -0.36 */
         "lsi %[c1],%[k],12\n"       /* -0.19 */
         "const.s %[z0],0\n"
