@@ -821,6 +821,60 @@ static void damage_add(ksn_damage *d,ksn_rect box){
         }
     }
 }
+/* One scalar out of text the bank has already validated, so the checks
+ * utf8_count makes on the way in are not repeated here. Returns 0 and consumes
+ * one byte on anything malformed, which cannot happen and would only cost a
+ * wider damage box if it did. */
+static uint32_t utf8_next(const uint8_t *text,size_t bytes,size_t *at){
+    uint8_t a=text[(*at)++];unsigned more;uint32_t cp;
+    if(a<0x80u)return a;
+    else if(a>=0xc2u&&a<=0xdfu){cp=a&0x1fu;more=1;}
+    else if(a>=0xe0u&&a<=0xefu){cp=a&0x0fu;more=2;}
+    else if(a>=0xf0u&&a<=0xf4u){cp=a&7u;more=3;}
+    else return 0;
+    if(*at+more>bytes){*at=bytes;return 0;}
+    for(unsigned n=0;n<more;n++)cp=(cp<<6)|(text[(*at)++]&0x3fu);
+    return cp;
+}
+/* The columns of a text command that actually changed.
+ *
+ * A counter that goes from "KEY PRESSES: 5" to "KEY PRESSES: 6" redraws one
+ * caption glyph, but the diff above only knows the bytes differ, so the command
+ * dirtied its whole declared box -- 184 pixels for six. This walks the two runs
+ * scalar by scalar in lockstep, accumulating the pen, and returns the span from
+ * the first scalar that differs to the end of the last one.
+ *
+ * It only does that while the walk stays in lockstep: equal advances at every
+ * position and the same number of scalars. One scalar of a different width and
+ * everything to its right has moved, which is a whole-box change and is
+ * reported as one (false). Scalars past BOTH reveals are not drawn, so a
+ * difference there is not a difference on the panel -- which also means a
+ * setText that only rewrites hidden text yields no damage at all.
+ *
+ * `reveal` is a scalar count, so it is compared against the scalar index; the
+ * two runs share a bank offset and a font, which the caller has checked. */
+static bool text_changed_columns(const ksn_text_port *text,ksn_font font,
+                                 const uint8_t *a,size_t a_bytes,unsigned a_reveal,
+                                 const uint8_t *b,size_t b_bytes,unsigned b_reveal,
+                                 int *first,int *last){
+    if(!text||!text->advance)return false;
+    size_t at_a=0,at_b=0;unsigned scalar=0,pen=0;
+    int lo=-1,hi=0;
+    while(at_a<a_bytes&&at_b<b_bytes){
+        uint32_t cp_a=utf8_next(a,a_bytes,&at_a),cp_b=utf8_next(b,b_bytes,&at_b);
+        unsigned adv=text->advance(text->ctx,font,cp_a);
+        if(adv!=text->advance(text->ctx,font,cp_b))return false;
+        bool vis_a=scalar<a_reveal,vis_b=scalar<b_reveal;
+        if((vis_a||vis_b)&&(cp_a!=cp_b||vis_a!=vis_b)){
+            if(lo<0)lo=(int)pen;
+            hi=(int)(pen+adv);
+        }
+        pen+=adv;scalar++;
+    }
+    if(at_a!=a_bytes||at_b!=b_bytes)return false;
+    if(lo<0){*first=*last=0;return true;} /* nothing visible moved */
+    *first=lo;*last=hi;return true;
+}
 /* Bands whose columns nobody described: the whole width. */
 static void damage_widen(ksn_damage *d,uint32_t bands){
     for(int band=0;band<17;band++){
@@ -829,7 +883,22 @@ static void damage_widen(ksn_damage *d,uint32_t bands){
         else{d->x0[band]=0;d->x1[band]=240;}
     }
 }
-ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,ksn_damage *out){
+/* True when the two sides are the same text command differing only in what it
+ * says -- same box, same clip, same font, same colour, same bank offset. Only
+ * then is a column range meaningful: anything else moved the box itself. */
+static bool same_text_frame(const ksn_command_storage *a,const ksn_command_storage *b,
+                            const text_payload *pa,const text_payload *pb){
+    return a->kind==KSN_TEXT&&b->kind==KSN_TEXT&&a->flags==b->flags&&
+           a->opacity==b->opacity&&a->reserved==b->reserved&&
+           a->bounds.x0==b->bounds.x0&&a->bounds.y0==b->bounds.y0&&
+           a->bounds.x1==b->bounds.x1&&a->bounds.y1==b->bounds.y1&&
+           a->clip.x0==b->clip.x0&&a->clip.y0==b->clip.y0&&
+           a->clip.x1==b->clip.x1&&a->clip.y1==b->clip.y1&&
+           pa->offset==pb->offset&&pa->capacity==pb->capacity&&pa->font==pb->font&&
+           pa->flags==pb->flags&&pa->color==pb->color;
+}
+ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,
+                           const ksn_text_port *text,ksn_damage *out){
     if(!storage||!out)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
     if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
@@ -847,7 +916,29 @@ ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,ksn_damage *out
             text_payload p;payload_read(b,&p,sizeof(p));
             changed=memcmp(old->text+p.offset,next->text+p.offset,p.length)!=0;
         }
-        if(changed){damage_add(out,command_box(a));damage_add(out,command_box(b));}
+        if(!changed)continue;
+        /* A text command that only changed what it says contributes the columns
+         * of the scalars that differ, not its whole declared box. */
+        if(a->kind==KSN_TEXT&&b->kind==KSN_TEXT){
+            text_payload pa,pb;payload_read(a,&pa,sizeof(pa));payload_read(b,&pb,sizeof(pb));
+            int first,last;
+            if(same_text_frame(a,b,&pa,&pb)&&
+               text_changed_columns(text,(ksn_font)pa.font,
+                                    old->text+pa.offset,pa.length,pa.reveal,
+                                    next->text+pb.offset,pb.length,pb.reveal,
+                                    &first,&last)){
+                if(first==last)continue; /* nothing visible moved */
+                ksn_rect box=command_box(b);
+                if(box.x0<box.x1){
+                    int x0=b->bounds.x0+first,x1=b->bounds.x0+last;
+                    if(x0<box.x0)x0=box.x0;
+                    if(x1>box.x1)x1=box.x1;
+                    if(x0<x1)damage_add(out,(ksn_rect){(int16_t)x0,box.y0,(int16_t)x1,box.y1});
+                }
+                continue;
+            }
+        }
+        damage_add(out,command_box(a));damage_add(out,command_box(b));
     }
     /* What a repair already owes, added last because an owner that asked for a
      * band did not say which columns, and full width wins over any range the

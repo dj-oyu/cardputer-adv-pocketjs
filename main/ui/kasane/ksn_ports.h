@@ -9,6 +9,13 @@ typedef struct {
      * reveal counts Unicode scalars. Text starts at bounds.x0/bounds.y0. */
     ksn_result (*span)(void *,const ksn_draw *,uint16_t reveal,int x,int y,
                        unsigned count,uint8_t *out);
+    /* Optional. The pen advance of one scalar, in pixels -- the LOGICAL metric,
+     * which does not change when a face is missing, so it is a property of the
+     * font and the codepoint and nothing else. It exists so damage can say
+     * WHICH columns of a text command changed: the core knows which scalars
+     * differ and this turns that into an x range. Left NULL, a changed text
+     * command dirties its whole box, which is what it always did. */
+    unsigned (*advance)(void *,ksn_font font,uint32_t codepoint);
 } ksn_text_port;
 typedef struct {
     void *ctx;

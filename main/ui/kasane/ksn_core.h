@@ -168,7 +168,8 @@ ksn_result ksn_core_image_span(const ksn_core *core,ksn_tx ticket,bool previous,
  * mutation. A caller that cannot transfer a partial row widens every band to
  * [0,240) itself before compositing -- the renderer's narrow arm has to be a
  * decision made before pixels are written, not after. */
-ksn_result ksn_core_damage(const ksn_core *core,ksn_tx ticket,ksn_damage *out);
+ksn_result ksn_core_damage(const ksn_core *core,ksn_tx ticket,
+                           const ksn_text_port *text,ksn_damage *out);
 /* Call failed on any partial/uncertain LCD transfer, before retry or discard.
  * presented attests that all required bands were transferred successfully. */
 ksn_result ksn_core_failed(ksn_core *core,ksn_tx ticket);

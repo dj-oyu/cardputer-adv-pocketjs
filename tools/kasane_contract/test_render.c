@@ -78,11 +78,11 @@ int main(void){
     ksn_change text={.property=KSN_SET_TEXT,.value.text={"cd",2}};
     CHECK(app.ops->change(app.ctx,tx,moving,&text)==KSN_OK);CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
     CHECK(ksn_core_frame(&core,&frame)==KSN_OK);ksn_damage damage;
-    CHECK(ksn_core_damage(&core,frame.ticket,&damage)==KSN_OK&&damage.bands==(1u<<16));
+    CHECK(ksn_core_damage(&core,frame.ticket,NULL,&damage)==KSN_OK&&damage.bands==(1u<<16));
     /* The text moved inside one band, so the band's columns are the union of
      * where it was and where it is -- not the whole width. */
     CHECK(damage.x0[16]>=0&&damage.x1[16]<=240&&damage.x1[16]-damage.x0[16]<240);
     CHECK(ksn_core_discard(&core,frame.ticket)==KSN_OK);
-    CHECK(ksn_core_damage(&core,frame.ticket,&damage)==KSN_STALE);
+    CHECK(ksn_core_damage(&core,frame.ticket,NULL,&damage)==KSN_STALE);
     puts("damage and rectangle renderer: PASS");return 0;
 }

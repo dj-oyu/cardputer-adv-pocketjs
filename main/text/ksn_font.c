@@ -153,4 +153,16 @@ static ksn_result span(void *ctx,const ksn_draw *draw,uint16_t reveal,int x,int 
     return span_chunk(ctx,draw,reveal,x,y,count,out);
 }
 
-const ksn_text_port ksn_font_port={.span=span};
+/* The same expression both span arms use for the pen step, and deliberately the
+ * only copy of it that is not inside them: it is the LOGICAL advance, so it
+ * never consults jpfont -- a missing face draws tofu of this width rather than
+ * moving the pen (the "Logical metrics do not change" comment above). Damage
+ * uses it to turn "scalars 13 through 14 differ" into a column range. */
+static unsigned advance_of(void *ctx,ksn_font font,uint32_t codepoint){
+    (void)ctx;
+    if((unsigned)font>KSN_DISPLAY)return 0;
+    unsigned scale=font==KSN_DISPLAY?2:1;
+    return (codepoint<128?6:font==KSN_BODY?12:8)*scale;
+}
+
+const ksn_text_port ksn_font_port={.span=span,.advance=advance_of};

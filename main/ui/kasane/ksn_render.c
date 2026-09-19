@@ -1829,7 +1829,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
     memset(decoded.valid,0,sizeof(decoded.valid));decoded.text_used=0;
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
-    ksn_damage damage;result=ksn_core_damage(core,frame.ticket,&damage);
+    ksn_damage damage;result=ksn_core_damage(core,frame.ticket,display->text,&damage);
     if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
     if(!damage.bands)return ksn_core_presented(core,frame.ticket);
     /* Narrowing is a decision taken here, before any pixel is written: a band
