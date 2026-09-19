@@ -1050,6 +1050,141 @@ static const flower_material_t flower_materials[16]={
     [14]       = FLOWER_MATERIAL_DEFAULT,
     [15]       = FLOWER_MATERIAL_DEFAULT,
 };
+
+// ---------------------------------------------------------------------------
+// The lighting block, hand-ordered.
+//
+// Three chains that do not touch each other: the diffuse dot (three deep), the
+// rim from n.z (three), and the specular dot raised to the sixteenth (seven).
+// This core is in-order, so the order written is the order executed, and a
+// dependent FPU result is not available for four cycles while an independent
+// instruction issues every one (docs/perf/fpu-latency.md). Written out one
+// chain at a time -- which is what the source reads like and roughly what -O2
+// emits -- each of those four-cycle gaps is empty. Interleaved, the three
+// chains fill each other's gaps. The same ten-instruction shape measured 3.43
+// cycles an instruction written naively and 2.62 interleaved, 24% apart, and
+// the compiler does not do it: -fschedule-insns made shade 10% SLOWER, and an
+// ablation that added one independent chain to shade paid 7.3 cycles an
+// operation rather than the 1 that weaving would cost.
+//
+// Bit-identical to the C arm, and that is checked rather than reasoned about:
+// flower_lite_check() sweeps the device and compares the two bit for bit. The
+// arithmetic is in the same order and the same association -- the dot is
+// ((x*a)+(y*b))+(z*c) because C evaluates it that way -- and POS is the same
+// (x>0)?x:0, which is why NaN and -0.0 come out as +0.0 on both arms.
+//
+// The constants live in one table so they arrive by lsi, which measured no
+// stall at all, rather than by l32r into a general register and wfr across.
+typedef struct { float diffuse,rim,spec; } flower_lite_t;
+static const float flower_lite_k[8]={-.36f,.48f,.8f,-.19f,.25f,.949f,1.0f,0.0f};
+
+static inline __attribute__((always_inline)) flower_lite_t flower_lite_c(V n) {
+    flower_lite_t o;
+    o.diffuse=POS(dot(n,(V){-.36f,.48f,.8f}));
+    o.rim=1-POS(n.z);o.rim*=o.rim;
+    o.spec=POS(dot(n,(V){-.19f,.25f,.949f}));
+    o.spec*=o.spec;o.spec*=o.spec;o.spec*=o.spec;o.spec*=o.spec;
+    return o;
+}
+
+#ifdef ESP_PLATFORM
+// 1 = the hand-ordered arm, 0 = the C one above, which stays as the control.
+// Measured by alternating this per SPLIT window in one run, seven pairs, the
+// asm arm lower in every one: shade 556.1 against 566.9 cycles a hit, -10.8.
+// That is 18% of the lighting block's 59 cycles, which is what the synthetic
+// weave predicted -- and 1.9% of shade, because the block is only a ninth of
+// it. Do not delete the C arm: it is what flower_lite_check() compares against,
+// and without it the assembly has nothing proving it is the same function.
+int g_flower_lite_asm = 1;
+static inline __attribute__((always_inline)) flower_lite_t flower_lite_hand(V n) {
+    flower_lite_t o;
+    float t0,t1,c0,c1,z0;
+    __asm__(
+        /* Only b0: GCC's xtensa does not accept b1/b2 as clobbers, so the one
+         * boolean is reused, each compare consumed before the next is made.
+         * The three POS operations therefore sit at the ends of their chains,
+         * spaced by the other chains' work, which is the point. */
+        "lsi %[c0],%[k],0\n"        /* -0.36 */
+        "lsi %[c1],%[k],12\n"       /* -0.19 */
+        "const.s %[z0],0\n"
+        "mul.s %[t0],%[x],%[c0]\n"
+        "mul.s %[t1],%[x],%[c1]\n"
+        "lsi %[c0],%[k],4\n"        /*  0.48 */
+        "lsi %[c1],%[k],16\n"       /*  0.25 */
+        "olt.s b0,%[z0],%[z]\n"
+        "mov.s %[r],%[z0]\n"
+        "movt.s %[r],%[z],b0\n"     /* rim = POS(n.z) */
+        "madd.s %[t0],%[y],%[c0]\n"
+        "madd.s %[t1],%[y],%[c1]\n"
+        "lsi %[c0],%[k],8\n"        /*  0.80 */
+        "lsi %[c1],%[k],20\n"       /*  0.949 */
+        "madd.s %[t0],%[z],%[c0]\n"
+        "madd.s %[t1],%[z],%[c1]\n"
+        "lsi %[c0],%[k],24\n"       /*  1.0 */
+        "sub.s %[r],%[c0],%[r]\n"   /* rim = 1 - POS(n.z) */
+        "olt.s b0,%[z0],%[t0]\n"
+        "mov.s %[d],%[z0]\n"
+        "movt.s %[d],%[t0],b0\n"    /* diffuse = POS(dot) */
+        "mul.s %[r],%[r],%[r]\n"
+        "olt.s b0,%[z0],%[t1]\n"
+        "mov.s %[s],%[z0]\n"
+        "movt.s %[s],%[t1],b0\n"    /* spec = POS(dot) */
+        "mul.s %[s],%[s],%[s]\n"
+        "mul.s %[s],%[s],%[s]\n"
+        "mul.s %[s],%[s],%[s]\n"
+        "mul.s %[s],%[s],%[s]\n"
+        : [d]"=&f"(o.diffuse), [r]"=&f"(o.rim), [s]"=&f"(o.spec),
+          [t0]"=&f"(t0), [t1]"=&f"(t1), [c0]"=&f"(c0), [c1]"=&f"(c1), [z0]"=&f"(z0)
+        : [x]"f"(n.x), [y]"f"(n.y), [z]"f"(n.z), [k]"r"(flower_lite_k)
+        : "b0");
+    return o;
+}
+#define FLOWER_LITE(n) (g_flower_lite_asm?flower_lite_hand(n):flower_lite_c(n))
+#else
+#define FLOWER_LITE(n) flower_lite_c(n)
+#endif
+
+#ifdef ESP_PLATFORM
+// Proves the two arms are the same function, on the device, bit for bit.
+// Hand-written assembly cannot be checked by tools/flower_frame_dump.c -- that
+// builds for the host, where only the C arm exists -- so the check has to run
+// where the instructions do. The sweep covers the sign of every component, the
+// zero and the near-zero that POS decides on, values either side of 1, and a
+// NaN and an infinity, because those are where a hand-written compare differs
+// from the compiler's if it differs at all.
+void flower_lite_check(void) {
+    static const float v[]={0.0f,-0.0f,1e-30f,-1e-30f,.25f,-.25f,1.0f,-1.0f,
+                            3.5f,-3.5f,1e18f,-1e18f};
+    const unsigned n=sizeof(v)/sizeof(v[0]);
+    unsigned checked=0,bad=0;
+    for(unsigned a=0;a<n;a++)for(unsigned b=0;b<n;b++)for(unsigned c=0;c<n;c++){
+        V p={v[a],v[b],v[c]};
+        flower_lite_t x=flower_lite_c(p),y=flower_lite_hand(p);
+        uint32_t xb[3],yb[3];
+        memcpy(xb,&x,sizeof xb);memcpy(yb,&y,sizeof yb);
+        checked++;
+        if(xb[0]!=yb[0]||xb[1]!=yb[1]||xb[2]!=yb[2]){
+            if(bad<4)ESP_LOGE("flower","LITE_DIFF n=(%g,%g,%g) c=%08lx,%08lx,%08lx "
+                              "asm=%08lx,%08lx,%08lx",(double)p.x,(double)p.y,(double)p.z,
+                              (unsigned long)xb[0],(unsigned long)xb[1],(unsigned long)xb[2],
+                              (unsigned long)yb[0],(unsigned long)yb[1],(unsigned long)yb[2]);
+            bad++;
+        }
+    }
+    /* A NaN reaches this block only through a degenerate normal, but POS is
+     * where a hand-written compare would disagree if it ever did. */
+    {
+        V p={0.0f/0.0f,1.0f,-1.0f};
+        flower_lite_t x=flower_lite_c(p),y=flower_lite_hand(p);
+        uint32_t xb[3],yb[3];memcpy(xb,&x,sizeof xb);memcpy(yb,&y,sizeof yb);
+        checked++;
+        if(xb[0]!=yb[0]||xb[1]!=yb[1]||xb[2]!=yb[2])bad++;
+    }
+    ESP_LOGI("flower","LITE_CHECK %s checked=%u mismatched=%u",
+             bad?"FAIL":"PASS",checked,bad);
+}
+#endif
+
 static uint16_t shade(V n,int petal,V hit) {
     unsigned material=petals[petal].material;
     // By material and not by geometry or colour. The enum already says which
@@ -1060,10 +1195,8 @@ static uint16_t shade(V n,int petal,V hit) {
     bool inside=n.z<0;
     n=normal(n);
     if(inside)n=mul(n,-1);
-    float diffuse=POS(dot(n,(V){-.36f,.48f,.8f}));
-    float rim=1-POS(n.z);rim*=rim;
-    float spec=POS(dot(n,(V){-.19f,.25f,.949f}));
-    spec*=spec;spec*=spec;spec*=spec;spec*=spec;
+    flower_lite_t lit=FLOWER_LITE(n);
+    float diffuse=lit.diffuse,rim=lit.rim,spec=lit.spec;
     {
         const Petal *p=&petals[petal];V local=add(hit,mul(p->c,-1));
         float longitudinal=DIVR(dot(local,p->axis[0]),p->inv_radius[0],p->radius[0]);
@@ -1832,14 +1965,14 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         ESP_LOGI("garden","SPLIT2 species=%u view=%d parts=%u | "
                  "motes=%.3f (%u rows/frame, %u cy/row) "
                  "horror=%.3f (%u px/frame, %u cy/px) | "
-                 "prep: garden=%.3f seeds=%.3f build=%.3f petals=%.3f (%u cy/part)",
+                 "prep: garden=%.3f seeds=%.3f build=%.3f petals=%.3f (%u cy/part) | asm=%d",
                  (unsigned)bloom_species,bloom_view,prof_ppetaln/prof_frames,
                  mot,moterows/prof_frames,moterows?motecy/moterows:0,
                  prof_horror/240000.0/prof_frames,prof_horrorn/prof_frames,
                  prof_horrorn?prof_horror/prof_horrorn:0,
                  prof_pgarden/240000.0/prof_frames,prof_pseeds/240000.0/prof_frames,
                  prof_pbuild/240000.0/prof_frames,prof_ppetal/240000.0/prof_frames,
-                 prof_ppetaln?prof_ppetal/prof_ppetaln:0);
+                 prof_ppetaln?prof_ppetal/prof_ppetaln:0,g_flower_lite_asm);
         // The third decomposition of the same frame, and it is a separate line
         // for the reason given above SPLIT2: SPLIT reconciles with `kernel=`
         // and SPLIT2 with the species, and neither of those pairs is worth

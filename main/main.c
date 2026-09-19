@@ -769,6 +769,7 @@ static void ui_task(void *arg) {
 #endif
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&fpu_probe_requested,false)){
             fpu_latency_run();
+            {extern void flower_lite_check(void);flower_lite_check();}
             ESP_LOGI("shell","HOME_READY");
         }
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
