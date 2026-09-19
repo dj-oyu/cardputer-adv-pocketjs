@@ -79,18 +79,47 @@ static void wfr_indep(void) { BODY("wfr f3,a8\n mul.s f4,f7,f1"); }
 static void lsi_dep(void)   { BODY("lsi f3,a9,0\n mul.s f4,f3,f1"); }
 static void lsi_indep(void) { BODY("lsi f3,a9,0\n mul.s f4,f7,f1"); }
 // 8. Store then load at the SAME address, which is how shade's prologue
-//    receives its two by-value vectors (section 13).
+//    receives its two by-value vectors (flower-shade.md 13).
 static void fwd_dep(void)   { BODY("s32i.n a8,a9,0\n lsi f3,a9,0"); }
 static void fwd_indep(void) { BODY("s32i.n a8,a9,8\n lsi f3,a9,0"); }
 
-// 9-10. The question shade2 turns on: how many INDEPENDENT CHAINS does it take
-// to fill the stalls? One chain is case 2 at 4.07. These interleave two and
-// four accumulators -- real chains, each op waiting on the same register three
-// back -- so the answer is not "independent single ops saturate issue" (which
-// case 2's indep arm already showed) but "N pixels' worth of serial shading,
-// woven together, costs what".
+// 9-10. How many INDEPENDENT CHAINS it takes to fill the stalls. One chain is
+// case 2 at 4.07. These interleave two and three accumulators -- real chains,
+// each operation waiting on the same register three back.
 static void chain2(void) { BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2"); }
 static void chain3(void) { BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2\n madd.s f4,f1,f2"); }
+
+// 11-12. What hand-ordered assembly would buy, on the shape shade's lighting
+// block actually has. One copy is two INDEPENDENT sub-chains -- the diffuse dot
+// (three deep) and the specular dot raised to the sixteenth (seven deep) -- and
+// this core is in-order, so the order the instructions are WRITTEN is the order
+// they execute. Weaving is nothing but that order, which is precisely what a
+// human can do and what the -O2 xtensa scheduler did not do inside shade
+// (flower-shade.md's ablation: one extra chain there cost 7.3 cycles an
+// operation, worse than serial).
+//
+//   naive1  one copy, each sub-chain written out whole, then the next
+//   woven1  one copy, its two sub-chains interleaved
+//   woven2  TWO copies, all four sub-chains interleaved
+//
+// If woven1 beats naive1, hand ordering pays inside a SINGLE pixel and no
+// two-pixel refactor is needed at all. If woven2 costs what woven1 does, two
+// pixels ride for the price of one.
+static void naive1(void) { BODY(
+    "mul.s f3,f0,f1\n madd.s f3,f0,f1\n madd.s f3,f0,f1\n"
+    "mul.s f4,f0,f1\n madd.s f4,f0,f1\n madd.s f4,f0,f1\n"
+    "mul.s f4,f4,f4\n mul.s f4,f4,f4\n mul.s f4,f4,f4\n mul.s f4,f4,f4\n"); }
+static void woven1(void) { BODY(
+    "mul.s f3,f0,f1\n mul.s f4,f0,f1\n"
+    "madd.s f3,f0,f1\n madd.s f4,f0,f1\n"
+    "madd.s f3,f0,f1\n madd.s f4,f0,f1\n"
+    "mul.s f4,f4,f4\n mul.s f4,f4,f4\n mul.s f4,f4,f4\n mul.s f4,f4,f4\n"); }
+static void woven2(void) { BODY(
+    "mul.s f3,f0,f1\n mul.s f4,f0,f1\n mul.s f5,f0,f1\n mul.s f6,f0,f1\n"
+    "madd.s f3,f0,f1\n madd.s f4,f0,f1\n madd.s f5,f0,f1\n madd.s f6,f0,f1\n"
+    "madd.s f3,f0,f1\n madd.s f4,f0,f1\n madd.s f5,f0,f1\n madd.s f6,f0,f1\n"
+    "mul.s f4,f4,f4\n mul.s f6,f6,f6\n mul.s f4,f4,f4\n mul.s f6,f6,f6\n"
+    "mul.s f4,f4,f4\n mul.s f6,f6,f6\n mul.s f4,f4,f4\n mul.s f6,f6,f6\n"); }
 
 // per_dep / per_indep are how many instructions each arm's REPT body holds.
 // They differ: an independent arm needs several destination registers to break
@@ -101,20 +130,24 @@ static void chain3(void) { BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2\n madd.s f4,f
 struct { const char *name; void (*dep)(void); void (*indep)(void);
          unsigned per_dep, per_indep; } static const
 cases[] = {
-    {"mul.s",        mul_dep,   mul_indep,   1, 4},
-    {"madd.s",       madd_dep,  madd_indep,  1, 4},
-    {"mul.s->rfr",   rfr_dep,   rfr_indep,   2, 2},
-    {"mul.s->trunc", trunc_dep, trunc_indep, 2, 2},
-    {"olt.s->bt",    olt_dep,   olt_indep,   2, 2},
-    {"wfr->mul.s",   wfr_dep,   wfr_indep,   2, 2},
-    {"lsi->mul.s",   lsi_dep,   lsi_indep,   2, 2},
-    {"s32i->lsi",    fwd_dep,   fwd_indep,   2, 2},
-    {"chains 1v2",   madd_dep,  chain2,      1, 2},
-    {"chains 1v3",   madd_dep,  chain3,      1, 3},
+    {"mul.s",          mul_dep,   mul_indep,   1,  4},
+    {"madd.s",         madd_dep,  madd_indep,  1,  4},
+    {"mul.s->rfr",     rfr_dep,   rfr_indep,   2,  2},
+    {"mul.s->trunc",   trunc_dep, trunc_indep, 2,  2},
+    {"olt.s->bt",      olt_dep,   olt_indep,   2,  2},
+    {"wfr->mul.s",     wfr_dep,   wfr_indep,   2,  2},
+    {"lsi->mul.s",     lsi_dep,   lsi_indep,   2,  2},
+    {"s32i->lsi",      fwd_dep,   fwd_indep,   2,  2},
+    {"chains 1v2",     madd_dep,  chain2,      1,  2},
+    {"chains 1v3",     madd_dep,  chain3,      1,  3},
+    // For these two the columns are "naive" and "woven"; the stall column is
+    // what hand ordering recovers per instruction.
+    {"lite naive|wov", naive1,    woven1,      10, 10},
+    {"lite wov1|wov2", woven1,    woven2,      10, 20},
 };
 
 void fpu_latency_run(void) {
-    // a9 points at eight words of scratch for cases 7 and 8; f1 = 1.0f and
+    // a9 points at four words of scratch for cases 7 and 8; f1 = 1.0f and
     // f2 = 0.0f so no arm drifts out of the normal range.
     static uint32_t scratch[4];
     scratch[0] = 0x3f800000u;
@@ -134,7 +167,7 @@ void fpu_latency_run(void) {
         double base = (double)REPT * (double)ITERS;
         double dep = run_case(cases[c].dep) / (base * cases[c].per_dep);
         double ind = run_case(cases[c].indep) / (base * cases[c].per_indep);
-        ESP_LOGI("fpu", "FPU_CASE %-13s dep=%.2f indep=%.2f stall=%.2f cy/instr",
+        ESP_LOGI("fpu", "FPU_CASE %-14s dep=%.2f indep=%.2f stall=%.2f cy/instr",
                  cases[c].name, dep, ind, dep - ind);
     }
     ESP_LOGI("fpu", "FPU_LATENCY_DONE");
