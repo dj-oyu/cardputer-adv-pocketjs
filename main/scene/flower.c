@@ -525,6 +525,15 @@ static inline float flower_isqrt_q(float d) {
 // here and the A/B is one console flip, but the shipping default keeps the picture
 // the test proves. Turn it on with -DFLOWER_SQRT_BITS=14 (or set this to 1) once
 // the caller carries integers end to end.
+// MEASURED SLOWER, 2026-09-19, and left at 0 for that reason rather than for
+// the picture. Alternating this per SPLIT window on the device (one binary, two
+// seconds apart, same scene) gave sqrtf 115-124 cy against flower_isqrt_q's
+// 191-195, and bell_hit's six roots 157 against 179. The reason is in the
+// disassembly: sqrtf on this part is __ieee754_sqrtf, 33 branchless FPU
+// instructions seeded by sqrt0.s, while flower_isqrt_q is a 16-iteration
+// integer loop with float conversions at both ends. Nothing in the tree had
+// ever flipped this switch, so the idea had survived on an estimate for as long
+// as it existed (docs/perf/flower-shade.md 7).
 int g_flower_fixed_sqrt = 0;
 #define FLOWER_SQRT(d) (g_flower_fixed_sqrt ? flower_isqrt_q(d) : sqrtf(d))
 // The four decor switches (this one, and garden.c's gate, scalar tweaks and
@@ -1469,11 +1478,19 @@ static void ray_row(uint16_t *row,int y) {
             float b=p->q[4]*dx+p->q[5]*dy;
             float c=p->q[0]*dx*dx+2*p->q[3]*dx*dy+p->q[1]*dy*dy-1;
             float d=b*b-p->q[2]*c;if(d<0)continue;
-            // sqrtf is not one instruction on this part. It resolves to an
-            // 88-instruction software routine behind a two-level call, and
-            // normal() inside shade() runs another one and a soft-float divide
-            // on top; this is here to find out what that actually costs before
-            // anybody replaces it.
+            // sqrtf is not one instruction on this part, but it is not a
+            // software routine either, and the difference decides what may
+            // replace it. Disassembled from this build (2026-09-19):
+            // sqrtf is a six-instruction wrapper around __ieee754_sqrtf, which
+            // is 33 branchless FPU instructions -- sqrt0.s for the seed, then
+            // maddn.s/nexp01.s/addexp.s/mksadj.s Newton steps and a final
+            // divn.s. The divide that normal() puts on top of it is __divsf3,
+            // which this image resolves to ROM (0x40002274 -> 0x40056124) and
+            // is 30 more of the same, seeded by div0.s. So `1.0f/sqrtf(d)` is
+            // two hardware Newton chains and two windowed calls where the FPU's
+            // rsqrt0.s would need one chain and none. Nothing here is a soft
+            // float: shade's own arithmetic compiles to madd.s/mul.s and the
+            // object has no __mulsf3 or __addsf3 relocation at all.
 #ifdef ESP_PLATFORM
             PROF_FENCE;uint32_t s0=esp_cpu_get_cycle_count();PROF_FENCE;
 #endif
