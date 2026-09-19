@@ -32,6 +32,15 @@ static uint32_t prof_span,prof_spann,prof_div,prof_divn,prof_scan,prof_pre;
 // remainder is the shading arithmetic itself -- which decides whether the thing
 // to attack is the reciprocal square root, the dither, or neither.
 static uint32_t prof_norm,prof_normn,prof_rgbd,prof_rgbdn;
+// TEMPORARY, the next cut: `rest` is ~350 cycles a hit and folding 22
+// instructions out of its path (the lsi table, docs/perf/flower-shade.md 9)
+// moved nothing, so the cost is not the instruction count. These three say
+// where it is instead. lite = the lighting terms that hang off the normal
+// (two dots, the rim, spec to the sixteenth); geom = the petal's local frame,
+// which depends on `hit` and the Petal and NOT on the normal; mat = the
+// material arm and the final nine products. rest - lite - geom - mat is what
+// the brackets do not cover: the prologue, the branches and the call setup.
+static uint32_t prof_lite,prof_geom,prof_mat;
 // prep. It is 3.2 ms -- larger than everything the swarm thread argued about
 // put together -- and it has never been split. Four counters rather than four
 // builds, because the last two attributions in this file were both artefacts
@@ -1079,14 +1088,27 @@ static uint16_t shade(V n,int petal,V hit) {
     PROF_FENCE;prof_norm+=esp_cpu_get_cycle_count()-n0;prof_normn++;PROF_FENCE;
 #endif
     if(inside)n=mul(n,-1);
+#ifdef ESP_PLATFORM
+    PROF_FENCE;uint32_t l0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
     float diffuse=POS(dot(n,(V){-.36f,.48f,.8f}));
     float rim=1-POS(n.z);rim*=rim;
     float spec=POS(dot(n,(V){-.19f,.25f,.949f}));
     spec*=spec;spec*=spec;spec*=spec;spec*=spec;
+#ifdef ESP_PLATFORM
+    PROF_FENCE;prof_lite+=esp_cpu_get_cycle_count()-l0;PROF_FENCE;
+#endif
     {
+#ifdef ESP_PLATFORM
+        PROF_FENCE;uint32_t g0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
         const Petal *p=&petals[petal];V local=add(hit,mul(p->c,-1));
         float longitudinal=DIVR(dot(local,p->axis[0]),p->inv_radius[0],p->radius[0]);
         float transverse=DIVR(dot(local,p->axis[1]),p->inv_radius[1],p->radius[1]);
+#ifdef ESP_PLATFORM
+        PROF_FENCE;prof_geom+=esp_cpu_get_cycle_count()-g0;PROF_FENCE;
+        uint32_t m0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
         float light=.30f+.66f*diffuse;
         if(inside)light*=material==GOLD?.8f:.52f;
         if(p->shape==2)light=.55f+.43f*diffuse;
@@ -1170,6 +1192,9 @@ static uint16_t shade(V n,int petal,V hit) {
             if(material==INNER&&longitudinal>.12f) {r=80;g=155;b=75;}
             spec*=.55f;
         }
+#ifdef ESP_PLATFORM
+        PROF_FENCE;prof_mat+=esp_cpu_get_cycle_count()-m0;PROF_FENCE;
+#endif
         return rgbd(r*light+spec*65+rim*16,g*light+spec*65+rim*20,b*light+spec*70+rim*23);
     }
 }
@@ -1858,7 +1883,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  // TEMPORARY, the split of `shade`: the two calls it makes and
                  // the arithmetic left over. rest is shade - norm - rgbd, so
                  // the three add up to SPLIT's shade= by construction.
-                 "shade: tab=%d norm=%.3f (%u calls, %u cy) rgbd=%.3f (%u calls, %u cy) rest=%.3f",
+                 "shade: tab=%d norm=%u rgbd=%u | lite=%u geom=%u mat=%u other=%d cy/hit (rest=%.3f ms)",
                  (unsigned)bloom_species,bloom_view,prof_ppetaln/prof_frames,
                  mot,moterows/prof_frames,moterows?motecy/moterows:0,
                  prof_horror/240000.0/prof_frames,prof_horrorn/prof_frames,
@@ -1867,10 +1892,12 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  prof_pbuild/240000.0/prof_frames,prof_ppetal/240000.0/prof_frames,
                  prof_ppetaln?prof_ppetal/prof_ppetaln:0,
                  g_flower_material_table,
-                 prof_norm/240000.0/prof_frames,prof_normn/prof_frames,
                  prof_normn?prof_norm/prof_normn:0,
-                 prof_rgbd/240000.0/prof_frames,prof_rgbdn/prof_frames,
                  prof_rgbdn?prof_rgbd/prof_rgbdn:0,
+                 prof_normn?prof_lite/prof_normn:0,
+                 prof_normn?prof_geom/prof_normn:0,
+                 prof_normn?prof_mat/prof_normn:0,
+                 prof_normn?(int)((prof_shade-prof_norm-prof_rgbd-prof_lite-prof_geom-prof_mat)/prof_normn):0,
                  (prof_shade-prof_norm-prof_rgbd)/240000.0/prof_frames);
         // The third decomposition of the same frame, and it is a separate line
         // for the reason given above SPLIT2: SPLIT reconciles with `kernel=`
@@ -1915,6 +1942,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
         prof_norm=prof_normn=prof_rgbd=prof_rgbdn=0;
+        prof_lite=prof_geom=prof_mat=0;
         prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;
         prof_pgarden=prof_pseeds=prof_pbuild=prof_ppetal=prof_ppetaln=0;
         prof_horror=prof_horrorn=0;
