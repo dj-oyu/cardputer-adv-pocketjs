@@ -192,7 +192,7 @@ int main(void){
     ksn_render_stats wide_stats,narrow_stats;
     ksn_ref wide_refs[6],narrow_refs[6];
     for(unsigned i=0;i<240*135;i++){wide.panel[i]=POISON;narrow.panel[i]=POISON;}
-    unsigned narrowed_frames=0,digit_frames=0;
+    unsigned narrowed_frames=0,digit_frames=0,grow_frames=0;
     for(unsigned step=0;step<120;step++){
         CHECK(build(&wide_core,wide_app,step,wide_refs)==KSN_OK);
         CHECK(build(&narrow_core,narrow_app,step,narrow_refs)==KSN_OK);
@@ -214,6 +214,11 @@ int main(void){
          * contributes no band at all -- so the narrow arm's bands have to be a
          * SUBSET of the wide arm's, not equal to them. */
         if(step%8==5&&narrow.bytes&&narrow.bytes*4<=wide.bytes)digit_frames++;
+        /* The length change, where every glyph after the first difference has
+         * moved. The tight walk cannot answer it, but the wider of the two
+         * runs' own widths still beats the declared box, which is the claim in
+         * docs/perf/kasane-text-damage.md 6 about content versus reservation. */
+        if(step%40==6&&narrow.bytes&&narrow.bytes*2<=wide.bytes)grow_frames++;
         CHECK((narrow_stats.bands&~wide_stats.bands)==0);
         for(unsigned i=0;i<240*135;i++){
             if(wide.panel[i]!=narrow.panel[i]){
@@ -230,9 +235,11 @@ int main(void){
     CHECK(narrowed_frames>=60);
     CHECK(narrow.rect_transfers>0);
     CHECK(digit_frames>=8);
+    CHECK(grow_frames>=2);
     printf("narrow damage PASS: 120 frames identical to the full-width arm, "
            "%u of them narrowed (%u windowed transfers), %u one-digit text "
-           "updates at a quarter of the full-width bytes or less\n",
-           narrowed_frames,narrow.rect_transfers,digit_frames);
+           "updates at a quarter of the full-width bytes or less, %u length "
+           "changes at half or less\n",
+           narrowed_frames,narrow.rect_transfers,digit_frames,grow_frames);
     return 0;
 }

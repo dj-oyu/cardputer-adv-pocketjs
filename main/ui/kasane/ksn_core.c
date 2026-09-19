@@ -836,6 +836,18 @@ static uint32_t utf8_next(const uint8_t *text,size_t bytes,size_t *at){
     for(unsigned n=0;n<more;n++)cp=(cp<<6)|(text[(*at)++]&0x3fu);
     return cp;
 }
+/* How wide this run actually draws: the advances of the scalars the reveal
+ * lets through, which is bounded by the CONTENT rather than by the declared
+ * box. A text command is usually given a box with room to grow, so this is the
+ * difference between dirtying what is written and dirtying what was reserved. */
+static unsigned run_width(const ksn_text_port *text,ksn_font font,
+                          const uint8_t *s,size_t bytes,unsigned reveal){
+    size_t at=0;unsigned pen=0,scalar=0;
+    while(at<bytes&&scalar<reveal){
+        pen+=text->advance(text->ctx,font,utf8_next(s,bytes,&at));scalar++;
+    }
+    return pen;
+}
 /* The columns of a text command that actually changed.
  *
  * A counter that goes from "KEY PRESSES: 5" to "KEY PRESSES: 6" redraws one
@@ -844,12 +856,18 @@ static uint32_t utf8_next(const uint8_t *text,size_t bytes,size_t *at){
  * scalar by scalar in lockstep, accumulating the pen, and returns the span from
  * the first scalar that differs to the end of the last one.
  *
- * It only does that while the walk stays in lockstep: equal advances at every
- * position and the same number of scalars. One scalar of a different width and
- * everything to its right has moved, which is a whole-box change and is
- * reported as one (false). Scalars past BOTH reveals are not drawn, so a
- * difference there is not a difference on the panel -- which also means a
- * setText that only rewrites hidden text yields no damage at all.
+ * The tight answer needs the walk to stay in lockstep: equal advances at every
+ * position and the same number of scalars. One scalar of a different width, or
+ * one run longer than the other, and every glyph to the right of that point has
+ * MOVED -- "9" becoming "10" shifts nothing here but would in a run with a
+ * following word. So the answer from there rightwards is the wider of the two
+ * runs' own widths, which is still the content and not the box: 12 columns for
+ * that counter instead of 184.
+ *
+ * Scalars past BOTH reveals are not drawn, so a difference there is not a
+ * difference on the panel -- which also means a setText that only rewrites
+ * hidden text yields no damage at all, and a run that diverges only past both
+ * reveals reports an empty range.
  *
  * `reveal` is a scalar count, so it is compared against the scalar index; the
  * two runs share a bank offset and a font, which the caller has checked. */
@@ -860,10 +878,14 @@ static bool text_changed_columns(const ksn_text_port *text,ksn_font font,
     if(!text||!text->advance)return false;
     size_t at_a=0,at_b=0;unsigned scalar=0,pen=0;
     int lo=-1,hi=0;
+    bool lockstep=true;
     while(at_a<a_bytes&&at_b<b_bytes){
+        size_t was_a=at_a,was_b=at_b;
         uint32_t cp_a=utf8_next(a,a_bytes,&at_a),cp_b=utf8_next(b,b_bytes,&at_b);
         unsigned adv=text->advance(text->ctx,font,cp_a);
-        if(adv!=text->advance(text->ctx,font,cp_b))return false;
+        if(adv!=text->advance(text->ctx,font,cp_b)){
+            at_a=was_a;at_b=was_b;lockstep=false;break;
+        }
         bool vis_a=scalar<a_reveal,vis_b=scalar<b_reveal;
         if((vis_a||vis_b)&&(cp_a!=cp_b||vis_a!=vis_b)){
             if(lo<0)lo=(int)pen;
@@ -871,8 +893,16 @@ static bool text_changed_columns(const ksn_text_port *text,ksn_font font,
         }
         pen+=adv;scalar++;
     }
-    if(at_a!=a_bytes||at_b!=b_bytes)return false;
-    if(lo<0){*first=*last=0;return true;} /* nothing visible moved */
+    if(lockstep&&at_a==a_bytes&&at_b==b_bytes){
+        if(lo<0){*first=*last=0;return true;} /* nothing visible moved */
+        *first=lo;*last=hi;return true;
+    }
+    /* Diverged. Everything from here to the end of the longer drawn run. */
+    if(lo<0)lo=(int)pen;
+    unsigned wide_a=run_width(text,font,a,a_bytes,a_reveal);
+    unsigned wide_b=run_width(text,font,b,b_bytes,b_reveal);
+    hi=(int)(wide_a>wide_b?wide_a:wide_b);
+    if(hi<=lo){*first=*last=0;return true;}
     *first=lo;*last=hi;return true;
 }
 /* Bands whose columns nobody described: the whole width. */
