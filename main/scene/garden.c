@@ -158,15 +158,6 @@ static int garden_corner(int c,int mask,int y,int shift) {
 // taken at 16 for the same reason. Nothing else in these kernels saturates;
 // this is the one place the bound is tight, and it is what the sweep in
 // tools/pie/models/garden_model.c is checking when it prints the four counts.
-#define GARDEN_DKX 18453
-#define GARDEN_DKY 26253
-#define GARDEN_DKC 17872
-#define GARDEN_DKM 42589
-int garden_dither(int x,int y) {
-    unsigned h=((unsigned)(x*GARDEN_DKX)^(unsigned)(y*GARDEN_DKY+GARDEN_DKC))&0xffffu;
-    unsigned s=(h*h)>>17;
-    return (int)(((s*GARDEN_DKM)>>16)&3u);
-}
 static uint16_t garden_rgb(int r,int g,int b) {
     return (uint16_t)((r>>3)<<11|(g>>2)<<5|(b>>3));
 }

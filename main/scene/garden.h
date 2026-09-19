@@ -390,7 +390,21 @@ void garden_row_blend(uint16_t *row,int y,const GardenFrame *frame,unsigned old_
 // The scene's dither, 0..3, a function of the pixel and nothing else. Exposed
 // because the flower needs the same one: two surfaces dithered by two different
 // noises separate to the eye as surely as one dithered and one not.
-int garden_dither(int x,int y);
+//
+// The body is here rather than in garden.c because flower.c calls it once per
+// shaded pixel, and across a translation unit that is a windowed call (entry,
+// retw and the argument shuffle) around four arithmetic operations. It moved
+// rather than being copied: garden.c's own two call sites take it from here
+// now, so there is still exactly one of it and the constants cannot drift.
+#define GARDEN_DKX 18453
+#define GARDEN_DKY 26253
+#define GARDEN_DKC 17872
+#define GARDEN_DKM 42589
+static inline int garden_dither(int x,int y) {
+    unsigned h=((unsigned)(x*GARDEN_DKX)^(unsigned)(y*GARDEN_DKY+GARDEN_DKC))&0xffffu;
+    unsigned s=(h*h)>>17;
+    return (int)(((s*GARDEN_DKM)>>16)&3u);
+}
 #ifdef ESP_PLATFORM
 // TEMPORARY, and it goes with flower.c's counters. garden_row is now made of
 // two very different things -- three vector passes over the 240 pixels, then

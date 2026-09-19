@@ -39,9 +39,13 @@
 | └ ray（花そのもの） | 8.74 | 9.90 | span 7.31 + scan 1.13 + pre 0.11 + rest 0.19 |
 | 　└ span の中 | | | shade 3.75（1,440 hits、624 cy/hit）、sqrt 0.63、visit 残り 2.90（6,834 visits × 102 cy） |
 
-**単項で最大は `shade` の 3.75 ms（17%）**、次が `veg` の 4.18 ms（19%、135 行 × 7,431 cy/行）。
-`shade` の中の `normal()` は `flower_parts.h` に「22 ms 中 1.16 ms、置き換える価値なし」と
-実測済みの注記がある。`visits` の 79% は miss（6,834 visits に対し 1,440 hits）。
+**単項で最大は `shade`**、次が `veg`（135 行 × 7,431 cy/行）。
+`shade` は 2026-09-19 に初めて割った —— [flower-shade.md](flower-shade.md)。
+死んだ `garden_dither` 呼び出しを消し、`garden_dither` をヘッダの `static inline` へ移して
+**kernel 32.0 → 29.3 ms（種 0、−8.4%）、fps 26.4–27.4 → 28.2–28.4**。
+残りは `shade` の `rest`（約 370 cy/hit、依存チェーン待ちかロードかは未測定）と
+`norm`（145 cy、逆平方根の Newton 系列で上限 0.9 ms）。`veg` はまだ割られていない。
+`visits` の 79% は miss（6,834 visits に対し 1,440 hits）。
 
 ## 参照
 

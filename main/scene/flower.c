@@ -24,6 +24,14 @@
 static uint32_t prof_total,prof_garden,prof_visits,prof_hits,prof_frames;
 static uint32_t prof_sqrt,prof_sqrtn,prof_shade,prof_bell,prof_belln;
 static uint32_t prof_span,prof_spann,prof_div,prof_divn,prof_scan,prof_pre;
+// TEMPORARY, and the reason it exists: `shade` is 624 cycles per hit and 3.75 ms
+// of a 21.6 ms kernel, the largest single term the SPLIT line has, and nobody
+// has ever split it. normal() carries a software sqrtf AND a software
+// __divsf3 (both are in .literal.shade's relocations), and rgbd is a call of
+// its own that dithers. These two say how much of the 624 is those, and the
+// remainder is the shading arithmetic itself -- which decides whether the thing
+// to attack is the reciprocal square root, the dither, or neither.
+static uint32_t prof_norm,prof_normn,prof_rgbd,prof_rgbdn;
 // prep. It is 3.2 ms -- larger than everything the swarm thread argued about
 // put together -- and it has never been split. Four counters rather than four
 // builds, because the last two attributions in this file were both artefacts
@@ -909,7 +917,14 @@ static uint16_t rgbd(int r,int g,int b) {
     // pattern reads as texture belonging to the surface and a moving one reads
     // as grain belonging to the image. Making both move put the whole plant in
     // motion and lost the distinction the grain is for.
-    int d=garden_dither(sh_px,sh_py);
+    // The grain arm takes its own sample at the frame's offset, so the banding
+    // sample belongs to the other arm and not above the branch. It used to be
+    // computed first and then overwritten here, which cost every leaf, herb and
+    // filament pixel a whole garden_dither call whose result was discarded --
+    // measured at 213 cycles for this function against normal()'s 151, which is
+    // what sent anyone looking (docs/perf/flower-shade.md). Same pixels: `d` is
+    // assigned exactly once on each path, from the same expression as before.
+    int d;
     if(sh_grain) {
         unsigned fx=grain_frame*7u,fy=grain_frame*13u;
         d=garden_dither(sh_px+(int)fx,sh_py+(int)fy);
@@ -975,10 +990,23 @@ static uint16_t rgbd(int r,int g,int b) {
         }
         return rgb(r,g,b);
     }
+    d=garden_dither(sh_px,sh_py);
     r+=d*2;b+=d*2;g+=d;
 #endif
     return rgb(r,g,b);
 }
+#ifdef ESP_PLATFORM
+// TEMPORARY, same block as prof_norm: rgbd is a call with a hash in it, taken
+// once per shaded pixel, and its share of the 624 has never been separated from
+// the arithmetic around it.
+static uint16_t rgbd_timed(int r,int g,int b) {
+    PROF_FENCE;uint32_t d0=esp_cpu_get_cycle_count();PROF_FENCE;
+    uint16_t out=rgbd(r,g,b);
+    PROF_FENCE;prof_rgbd+=esp_cpu_get_cycle_count()-d0;prof_rgbdn++;PROF_FENCE;
+    return out;
+}
+#define rgbd(r,g,b) rgbd_timed((r),(g),(b))
+#endif
 static uint16_t shade(V n,int petal,V hit) {
     unsigned material=petals[petal].material;
     // By material and not by geometry or colour. The enum already says which
@@ -987,7 +1015,13 @@ static uint16_t shade(V n,int petal,V hit) {
     // wrong on half the species.
     sh_grain=material==LEAF||material==HERB||material==FILAMENT;
     bool inside=n.z<0;
+#ifdef ESP_PLATFORM
+    PROF_FENCE;uint32_t n0=esp_cpu_get_cycle_count();PROF_FENCE;
+#endif
     n=normal(n);
+#ifdef ESP_PLATFORM
+    PROF_FENCE;prof_norm+=esp_cpu_get_cycle_count()-n0;prof_normn++;PROF_FENCE;
+#endif
     if(inside)n=mul(n,-1);
     float diffuse=POS(dot(n,(V){-.36f,.48f,.8f}));
     float rim=1-POS(n.z);rim*=rim;
@@ -1069,6 +1103,9 @@ static uint16_t shade(V n,int petal,V hit) {
         return rgbd(r*light+spec*65+rim*16,g*light+spec*65+rim*20,b*light+spec*70+rim*23);
     }
 }
+#ifdef ESP_PLATFORM
+#undef rgbd
+#endif
 // Bell radius is a smooth cubic profile sampled into six conical bands. Each
 // band has an analytic ray intersection; the bottom remains open. Both roots
 // are considered so the inner-facing far wall can be seen through the mouth.
@@ -1739,14 +1776,23 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         ESP_LOGI("garden","SPLIT2 species=%u view=%d parts=%u | "
                  "motes=%.3f (%u rows/frame, %u cy/row) "
                  "horror=%.3f (%u px/frame, %u cy/px) | "
-                 "prep: garden=%.3f seeds=%.3f build=%.3f petals=%.3f (%u cy/part)",
+                 "prep: garden=%.3f seeds=%.3f build=%.3f petals=%.3f (%u cy/part) | "
+                 // TEMPORARY, the split of `shade`: the two calls it makes and
+                 // the arithmetic left over. rest is shade - norm - rgbd, so
+                 // the three add up to SPLIT's shade= by construction.
+                 "shade: norm=%.3f (%u calls, %u cy) rgbd=%.3f (%u calls, %u cy) rest=%.3f",
                  (unsigned)bloom_species,bloom_view,prof_ppetaln/prof_frames,
                  mot,moterows/prof_frames,moterows?motecy/moterows:0,
                  prof_horror/240000.0/prof_frames,prof_horrorn/prof_frames,
                  prof_horrorn?prof_horror/prof_horrorn:0,
                  prof_pgarden/240000.0/prof_frames,prof_pseeds/240000.0/prof_frames,
                  prof_pbuild/240000.0/prof_frames,prof_ppetal/240000.0/prof_frames,
-                 prof_ppetaln?prof_ppetal/prof_ppetaln:0);
+                 prof_ppetaln?prof_ppetal/prof_ppetaln:0,
+                 prof_norm/240000.0/prof_frames,prof_normn/prof_frames,
+                 prof_normn?prof_norm/prof_normn:0,
+                 prof_rgbd/240000.0/prof_frames,prof_rgbdn/prof_frames,
+                 prof_rgbdn?prof_rgbd/prof_rgbdn:0,
+                 (prof_shade-prof_norm-prof_rgbd)/240000.0/prof_frames);
         // The third decomposition of the same frame, and it is a separate line
         // for the reason given above SPLIT2: SPLIT reconciles with `kernel=`
         // and SPLIT2 with the species, and neither of those pairs is worth
@@ -1789,6 +1835,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         // the SPLIT3 line so a capture still says which arm the window ran.
         prof_total=prof_garden=prof_visits=prof_hits=0;prof_frames=0;
         prof_sqrt=prof_sqrtn=prof_shade=prof_bell=prof_belln=0;
+        prof_norm=prof_normn=prof_rgbd=prof_rgbdn=0;
         prof_span=prof_spann=prof_div=prof_divn=prof_scan=prof_pre=0;
         prof_pgarden=prof_pseeds=prof_pbuild=prof_ppetal=prof_ppetaln=0;
         prof_horror=prof_horrorn=0;
