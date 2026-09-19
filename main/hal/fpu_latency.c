@@ -83,6 +83,15 @@ static void lsi_indep(void) { BODY("lsi f3,a9,0\n mul.s f4,f7,f1"); }
 static void fwd_dep(void)   { BODY("s32i.n a8,a9,0\n lsi f3,a9,0"); }
 static void fwd_indep(void) { BODY("s32i.n a8,a9,8\n lsi f3,a9,0"); }
 
+// 9-10. The question shade2 turns on: how many INDEPENDENT CHAINS does it take
+// to fill the stalls? One chain is case 2 at 4.07. These interleave two and
+// four accumulators -- real chains, each op waiting on the same register three
+// back -- so the answer is not "independent single ops saturate issue" (which
+// case 2's indep arm already showed) but "N pixels' worth of serial shading,
+// woven together, costs what".
+static void chain2(void) { BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2"); }
+static void chain3(void) { BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2\n madd.s f4,f1,f2"); }
+
 // per_dep / per_indep are how many instructions each arm's REPT body holds.
 // They differ: an independent arm needs several destination registers to break
 // the chain, so it packs four instructions where the dependent one packs a
@@ -100,6 +109,8 @@ cases[] = {
     {"wfr->mul.s",   wfr_dep,   wfr_indep,   2, 2},
     {"lsi->mul.s",   lsi_dep,   lsi_indep,   2, 2},
     {"s32i->lsi",    fwd_dep,   fwd_indep,   2, 2},
+    {"chains 1v2",   madd_dep,  chain2,      1, 2},
+    {"chains 1v3",   madd_dep,  chain3,      1, 3},
 };
 
 void fpu_latency_run(void) {
