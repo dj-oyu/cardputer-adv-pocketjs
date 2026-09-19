@@ -1016,6 +1016,53 @@ static uint16_t rgbd_timed(int r,int g,int b) {
 }
 #define rgbd(r,g,b) rgbd_timed((r),(g),(b))
 #endif
+// The materials whose colour is affine in `longitudinal` and whose only other
+// business is a specular scale and, for two of them, their own light curve.
+// They used to be seven arms of the if-chain below, each materialising its own
+// constants -- and on this part a float constant in a literal pool costs TWO
+// instructions, `l32r` into a general register and `wfr` across to the FPU.
+// Read through a pointer instead, the same constant is one `lsi`, which loads
+// an FPU register from memory directly and never touches a general register at
+// all (docs/perf/flower-shade.md 7).
+//
+// Sixteen entries and a mask, not fourteen and a trust: the index is a field of
+// a Petal, and an out-of-range one would read past the table rather than fall
+// into the default arm the way the if-chain did. The two spare rows are the
+// default row, so a masked stray value still shades like IVORY.
+//
+// light_a < 0 means "keep the light computed above"; only BLUE and HERB
+// replace it, and with the same curve they always did.
+typedef struct {
+    float r0,r1,g0,g1,b0,b1;
+    float spec;
+    float light_a,light_b;
+} flower_material_t;
+#define FLOWER_MATERIAL_DEFAULT {225,0, 239,0, 229,0, .55f, -1,0}
+// A/B switch kept after the measurement, 1 = the table above, 0 = the seven arms
+// below. Both arms stay because the measurement said they cost the SAME: paired
+// windows in one run gave shade 675.7 cycles a hit with the table and 677.1
+// without, 0.2% apart (docs/perf/flower-shade.md 9). The table is the default
+// for its 344 fewer bytes of flash and six fewer compares, not for its speed.
+// Do not delete the other arm without measuring again -- it is the control.
+int g_flower_material_table = 1;
+static const flower_material_t flower_materials[16]={
+    [LEAF]     = FLOWER_MATERIAL_DEFAULT,   /* own arm */
+    [IVORY]    = FLOWER_MATERIAL_DEFAULT,
+    [GOLD]     = FLOWER_MATERIAL_DEFAULT,   /* own arm */
+    [SEED]     = FLOWER_MATERIAL_DEFAULT,   /* own arm */
+    [INNER]    = FLOWER_MATERIAL_DEFAULT,
+    [ROSE]     = {242,0,  47,35, 104,32, 1.0f, -1,0},
+    [VIOLET]   = {139,34, 65,20, 235,0,  1.0f, -1,0},
+    [BLUE]     = {145,25, 190,20,255,0,  .4f,  .55f,.4f},
+    [RED]      = {244,0,  35,12, 55,0,   1.0f, -1,0},
+    [INK]      = {29,0,   24,0,  43,0,   .2f,  -1,0},
+    [CHECKER]  = FLOWER_MATERIAL_DEFAULT,   /* own arm */
+    [HERB]     = {80,0,   161,0, 69,0,   .2f,  .55f,.4f},
+    [FILAMENT] = FLOWER_MATERIAL_DEFAULT,   /* own arm */
+    [CORONA]   = FLOWER_MATERIAL_DEFAULT,   /* own arm */
+    [14]       = FLOWER_MATERIAL_DEFAULT,
+    [15]       = FLOWER_MATERIAL_DEFAULT,
+};
 static uint16_t shade(V n,int petal,V hit) {
     unsigned material=petals[petal].material;
     // By material and not by geometry or colour. The enum already says which
@@ -1076,17 +1123,11 @@ static uint16_t shade(V n,int petal,V hit) {
             float core=POS(1-longitudinal*longitudinal-transverse*transverse);
             return rgbd(224+31*core,159+79*core,27+124*core);
         }
-        else if(material==ROSE) {r=242;g=47+35*longitudinal;b=104+32*longitudinal;}
-        else if(material==VIOLET) {r=139+34*longitudinal;g=65+20*longitudinal;b=235;}
-        else if(material==BLUE) {r=145+25*longitudinal;g=190+20*longitudinal;b=255;light=.55f+.4f*diffuse;spec*=.4f;}
-        else if(material==HERB) {r=80;g=161;b=69;light=.55f+.4f*diffuse;spec*=.2f;}
         else if(material==FILAMENT) {
             // A dark anther on the pale filament uses one part, not two.
             bool tip=longitudinal>.65f;
             r=tip?29:226;g=tip?24:233;b=tip?43:217;spec*=.2f;
         }
-        else if(material==RED) {r=244;g=35+12*longitudinal;b=55;}
-        else if(material==INK) {r=29;g=24;b=43;spec*=.2f;}
         else if(material==CHECKER) {
             // Local coordinates keep the chequering on the bell as it sways.
             // No texture image or extra geometry; only this material pays.
@@ -1104,7 +1145,27 @@ static uint16_t shade(V n,int petal,V hit) {
             int x=clampi((int)(16+15*longitudinal),0,31),y=clampi((int)(16+15*transverse),0,31);
             float seed=DIVR(seed_map[y*32+x],1.0f/255,255.0f);
             r=50+seed*72;g=25+seed*43;b=12+seed*16;spec*=.1f;
-        } else {
+        } else if(g_flower_material_table) {
+            // The seven affine materials and the default, from the table. A row
+            // whose r1/g1/b1 are zero produces the same float as the constant
+            // it replaces, and a spec of 1 leaves spec alone, so the arms below
+            // are reproduced exactly -- which flower_frame_dump checks rather
+            // than this comment asserting it.
+            const flower_material_t *m=&flower_materials[material&15u];
+            r=m->r0+m->r1*longitudinal;
+            g=m->g0+m->g1*longitudinal;
+            b=m->b0+m->b1*longitudinal;
+            spec*=m->spec;
+            if(m->light_a>=0)light=m->light_a+m->light_b*diffuse;
+            if(material==INNER&&longitudinal>.12f) {r=80;g=155;b=75;}
+        }
+        else if(material==ROSE) {r=242;g=47+35*longitudinal;b=104+32*longitudinal;}
+        else if(material==VIOLET) {r=139+34*longitudinal;g=65+20*longitudinal;b=235;}
+        else if(material==BLUE) {r=145+25*longitudinal;g=190+20*longitudinal;b=255;light=.55f+.4f*diffuse;spec*=.4f;}
+        else if(material==HERB) {r=80;g=161;b=69;light=.55f+.4f*diffuse;spec*=.2f;}
+        else if(material==RED) {r=244;g=35+12*longitudinal;b=55;}
+        else if(material==INK) {r=29;g=24;b=43;spec*=.2f;}
+        else {
             r=225;g=239;b=229;
             if(material==INNER&&longitudinal>.12f) {r=80;g=155;b=75;}
             spec*=.55f;
@@ -1797,7 +1858,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  // TEMPORARY, the split of `shade`: the two calls it makes and
                  // the arithmetic left over. rest is shade - norm - rgbd, so
                  // the three add up to SPLIT's shade= by construction.
-                 "shade: norm=%.3f (%u calls, %u cy) rgbd=%.3f (%u calls, %u cy) rest=%.3f",
+                 "shade: tab=%d norm=%.3f (%u calls, %u cy) rgbd=%.3f (%u calls, %u cy) rest=%.3f",
                  (unsigned)bloom_species,bloom_view,prof_ppetaln/prof_frames,
                  mot,moterows/prof_frames,moterows?motecy/moterows:0,
                  prof_horror/240000.0/prof_frames,prof_horrorn/prof_frames,
@@ -1805,6 +1866,7 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  prof_pgarden/240000.0/prof_frames,prof_pseeds/240000.0/prof_frames,
                  prof_pbuild/240000.0/prof_frames,prof_ppetal/240000.0/prof_frames,
                  prof_ppetaln?prof_ppetal/prof_ppetaln:0,
+                 g_flower_material_table,
                  prof_norm/240000.0/prof_frames,prof_normn/prof_frames,
                  prof_normn?prof_norm/prof_normn:0,
                  prof_rgbd/240000.0/prof_frames,prof_rgbdn/prof_frames,
