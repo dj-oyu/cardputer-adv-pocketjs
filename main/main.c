@@ -35,6 +35,8 @@
 #include "nvs_flash.h"
 #include <stdatomic.h>
 #include <string.h>
+#include "hal/fpu_latency.h"
+static atomic_bool fpu_probe_requested;
 #ifdef CONFIG_KSN_DEVICE_PROBE
 #include "esp_heap_caps.h"
 #include "pocket_kasane.h"
@@ -247,6 +249,10 @@ static bool usb_stroke(char c, keystroke_t *k) {
         k->text[0]=c;k->len=1;return true;
     }
     if(c=='s') { atomic_store(&capture,true); return false; }
+    // Not behind CONFIG_KSN_DEVICE_PROBE: this one measures the CPU rather than
+    // the display, it is about a kilobyte, and the build that needs it is
+    // whichever build is being optimised -- which is the shipping one.
+    if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
 #ifdef CONFIG_KSN_DEVICE_PROBE
     if(c=='~') { atomic_store(&ksn_probe_requested,true); return false; }
     if(c=='N'||c=='O'||c=='Z'){atomic_store(&system_probe_requested,c);return false;}
@@ -761,6 +767,10 @@ static void ui_task(void *arg) {
             ESP_LOGI("shell","HOME_READY");
         }
 #endif
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&fpu_probe_requested,false)){
+            fpu_latency_run();
+            ESP_LOGI("shell","HOME_READY");
+        }
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
         bench_core_tick();
 #endif

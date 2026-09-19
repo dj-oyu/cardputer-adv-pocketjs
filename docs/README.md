@@ -49,6 +49,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [kasane-pet-row-cache.md](perf/kasane-pet-row-cache.md) | 記録 | PET 画像 provider の重複復号を 64 行キャッシュで消した（切替つき、8,208 B、−70.4%） |
 | [kasane-tile.md](perf/kasane-tile.md) | 記録 | 群のタイル面: 到達判定（3a）・ブロック幅（3b、16 画素は却下）・滑らかな層のブロック定数＋画素増分（厳密と近似の 2 段、命令数と動く画素の実測） |
 | [kasane-lut.md](perf/kasane-lut.md) | 記録 | 群の直接ブレンド連鎖を量子化キーの表へ（solid は厳密・既定 ON、TEXT は 16 段の近似・既定 OFF。画素あたり命令と動く画素の実測） |
+| [fpu-latency.md](perf/fpu-latency.md) | 記録 | この石のスカラー FPU の依存レイテンシを実機で初めて測った表（`main/hal/fpu_latency.c`、USB の `F`）。**依存 4.07 / 独立 1.02 cy/命令＝3サイクルのストール**、`wfr`/`lsi`/store→load の往復は **0**、FPU→汎用は +1。`flower-shade.md` の空振り2件がこれで説明でき、「独立な鎖を2本並べる」方向だけが裏づけられる |
 | [flower-shade.md](perf/flower-shade.md) | 記録 | FLOWER の単項最大 `shade`（748 cy/hit）を割った結果。死んだ `garden_dither` 呼び出しで `rgbd` 214 → 139 cy/call。`sqrtf`/`__divsf3` の逆アセンブル（どちらも FPU の Newton 列で、整数平方根は実機 A/B で**遅い**）。`lsi` による定数の直接ロードは命令 688 → 587・flash −344 B だが**時間は動かず**。§10 にこのシーンで実行間比較が成立しない理由（`rays` が位相で 4,700〜7,067 cy/行）と、初出時の fps 主張の取り下げ |
 | [kasane-text-damage.md](perf/kasane-text-damage.md) | 記録 | テキストの過剰再描画を3段で潰した記録。編集欄の1打鍵が全画面64,800Bだった件（`ksn_core_invalidate_bands`）、damage が帯ごとの列範囲を持つ件（`ksn_damage` / `present_rect` / 16画素丸めと閾値192、狭い窓が転送経路を落とす実測つき）、TEXT の damage が変わった字だけになる件（`ksn_text_port.advance`）。hello の1桁更新で 11,520 B → 768 B、3.22 → 1.92 ms |
 | [kasane-text-span.md](perf/kasane-text-span.md) | 記録 | テキスト span のインクループをセルの列範囲へ（厳密。1 列 70→27 命令・除算 4→0、歩く列はアプリの 4 テキストで 7.6%。実機の計器が span を render_ms の 48% と指したのが根拠で、実機のミリ秒は未取得） |
