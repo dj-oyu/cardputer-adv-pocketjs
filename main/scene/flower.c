@@ -1190,6 +1190,24 @@ void flower_lite_check(void) {
         checked++;
         if(xb[0]!=yb[0]||xb[1]!=yb[1]||xb[2]!=yb[2])bad++;
     }
+    // Is madd.s fused? a=b=1+2^-12, c=-1. Rounded separately, a*b is exactly
+    // 1+2^-11 (the 2^-24 term is a tie that rounds to even), so the sum is
+    // 2^-11. Fused, a*b keeps the 2^-24 and the sum is 2^-11+2^-24, which is
+    // representable. The answer decides whether GCC's fma contraction order
+    // changes the bits -- and therefore whether comparing this function's
+    // inlined copy of flower_lite_c against the assembly proves anything about
+    // the copy inside shade, which contracts in a different order.
+    {
+        float a=1.0f+0x1p-12f,c=-1.0f;
+        uint32_t ab,cb,rb;
+        memcpy(&ab,&a,4);memcpy(&cb,&c,4);
+        __asm__("wfr f3,%1\n wfr f4,%2\n madd.s f4,f3,f3\n rfr %0,f4"
+                :"=r"(rb):"r"(ab),"r"(cb):"f3","f4");
+        /* 2^-11 is 0x3a000000; 2^-11 + 2^-24 is 2^-11*(1+2^-13), whose mantissa
+         * field is 2^10 = 0x400. Measured 0x3a000400: madd.s IS fused. */
+        ESP_LOGI("flower","MADD_FUSED %s result=%08lx (fused=3a000400 separate=3a000000)",
+                 rb==0x3a000400u?"YES":rb==0x3a000000u?"NO":"UNEXPECTED",(unsigned long)rb);
+    }
     ESP_LOGI("flower","LITE_CHECK %s checked=%u mismatched=%u",
              bad?"FAIL":"PASS",checked,bad);
 }
