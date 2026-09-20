@@ -24,6 +24,8 @@
 #include "esp_log.h"
 #include <stdint.h>
 #include <string.h>
+#include "eri.h"
+#include "xtensa-debug-module.h"
 
 #define REPT  128
 #define ITERS 200u
@@ -191,6 +193,32 @@ void fpu_latency_run(void) {
                 :"=r"(rb):"r"(ab),"r"(cb):"f3","f4");
         ESP_LOGI("fpu","FPU_MADD_FUSED %s result=%08lx (fused=3a000400 separate=3a000000)",
                  rb==0x3a000400u?"YES":rb==0x3a000000u?"NO":"UNEXPECTED",(unsigned long)rb);
+    }
+    // What a performance counter costs to read. XTPERF has two counters
+    // (core-isa.h XCHAL_NUM_PERF_COUNTERS), which is enough for cycles plus one
+    // selector, and ESP-IDF reaches them with RER/WER over the core-local ERI
+    // bus -- ordinary instructions, no privilege. Whether they are worth
+    // bracketing a hot region with turns on this number, and nothing in this
+    // repository or the TRM corpus has it. Measured the same way as everything
+    // else here: a long unrolled run, minimum of several.
+    {
+        uint32_t t0=esp_cpu_get_cycle_count();
+        for(unsigned i=0;i<ITERS;i++){
+            __asm__ __volatile__(".rept " STR(REPT) "\n rsr.ccount a8\n.endr\n":::"a8","memory");
+        }
+        uint32_t ccount_cy=esp_cpu_get_cycle_count()-t0;
+        uint32_t best=UINT32_MAX;
+        for(unsigned r=0;r<RUNS;r++){
+            uint32_t a=esp_cpu_get_cycle_count();
+            for(unsigned i=0;i<ITERS;i++)
+                for(unsigned k=0;k<REPT;k++)(void)eri_read(ERI_PERFMON_PM0);
+            uint32_t d=esp_cpu_get_cycle_count()-a;
+            if(d<best)best=d;
+        }
+        double n=(double)REPT*(double)ITERS;
+        ESP_LOGI("fpu","FPU_ERI rsr.ccount=%.2f eri_read=%.2f cy each (the price of "
+                       "bracketing a region with a perf counter)",
+                 ccount_cy/n,best/n);
     }
     ESP_LOGI("fpu", "FPU_LATENCY_DONE");
 }
