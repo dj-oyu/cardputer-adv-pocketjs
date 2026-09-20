@@ -1925,6 +1925,25 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  rays,rayrows/prof_frames,rayrows?raycy/rayrows:0,
                  gar-pix-veg-rays,dissolverows/prof_frames,vegrows/prof_frames,
                  vegrows?100.0*dissolverows/vegrows:0.0);
+#ifdef GARDEN_RAY_PERF
+        // One hardware event per window, against cycles from the same brackets.
+        // `rays` above is ccount and `pm0_cy` here is XTPERF's cycle counter
+        // over the same region: the two disagreeing is the first thing to check
+        // before reading anything else, because it would mean the counters are
+        // not counting what this believes they are.
+        {
+            uint32_t pm1=0,xp0=0,xp1=0;const char *ev="?";
+            uint32_t pm0=garden_prof_ray_perf(&pm1,&ev,&xp0,&xp1);
+            // The pixel pass is measured through the same two counters in the
+            // same frames. It is a different kernel with different code and a
+            // different access pattern, so a fraction that comes out the same
+            // in both belongs to the machine and not to either of them.
+            ESP_LOGI("garden","RAYPERF ev=%-11s frames=%u rays_cy=%u ev=%u"
+                     " per_cycle=%.4f | pixels_cy=%u ev=%u per_cycle=%.4f",
+                     ev,prof_frames,pm0,pm1,pm0?(double)pm1/pm0:0.0,
+                     xp0,xp1,xp0?(double)xp1/xp0:0.0);
+        }
+#endif
 #ifdef FLOWER_AB3
         // The 2026-09-20 rejections, one switch per window, four windows to a
         // cycle so that every "off" window has an all-on neighbour on each side

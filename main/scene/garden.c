@@ -72,6 +72,102 @@ uint32_t garden_prof_rays(uint32_t *rows) {
 uint32_t garden_prof_dissolve(void) {
     uint32_t v=garden_dissolve_rows;garden_dissolve_rows=0;return v;
 }
+#ifdef GARDEN_RAY_PERF
+// Why the decorative rays cost what they cost, from the hardware's own
+// counters rather than from an instruction count.
+//
+// The standing claim is that rays has no headroom, and it rests on three
+// failed attempts. Three failures are not a floor -- the kernel runs at 2.4 to
+// 3.5 times its static instruction count and nobody has said where the
+// difference goes. XTPERF answers exactly that: PM0 counts cycles and PM1
+// counts one chosen event, so the ratio says what fraction of a ray row is
+// retiring instructions, waiting on a register, or waiting on memory.
+//
+// Two counters is the whole budget (XCHAL_NUM_PERF_COUNTERS), so the second
+// selector rotates one per SPLIT window, and PM0 stays on CYCLES so that every
+// fraction has a denominator measured through the same brackets as its
+// numerator. Reading them costs 16.12 cycles each (main/hal/fpu_latency.c,
+// FPU_ERI) and there are four reads a row against ~6,000 cycles a row, so the
+// instrument is ~1% of what it measures and it is inside both terms of every
+// ratio. Diagnostic build only.
+//
+// PM1's ERI address is documented in ESP-IDF as "used in apptrace module to
+// store CRC16". Apptrace is not enabled here; if it ever is, this reads its
+// scratch instead of a counter and the numbers become fiction.
+#include "eri.h"
+#include "xtensa-debug-module.h"
+#include "xtensa/xt_perf_consts.h"
+static uint32_t garden_ray_pm0,garden_ray_pm1;
+// The same two counters around the PIXEL pass as well. The counters free-run,
+// so a second pair of accumulators costs two more reads a row and answers the
+// question the ray numbers cannot: whether a stall fraction belongs to this
+// kernel or to the machine it is running on. Two kernels of completely
+// different shape showing the same fraction is not a property of either.
+static uint32_t garden_pix_pm0,garden_pix_pm1;
+static unsigned garden_ray_sel;
+// PM0 is always cycles; PM1 is the question of the window.
+static const struct {const char *name;uint16_t select,mask;} garden_ray_events[]={
+    {"insn",      XTPERF_CNT_INSN,    XTPERF_MASK_INSN_ALL},
+    {"bubbles",   XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_ALL},
+    {"regdep",    XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_R_HOLD_REG_DEP},
+    {"dstall",    XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_ALL},
+    {"istall",    XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_ALL},
+    // I_STALL is the largest term and it is NOT the instruction cache -- the
+    // cache-miss mask reads a flat zero, which is credible for a kernel this
+    // small run 8,100 times a window. These five are what is left in the
+    // selector, and two of them are arithmetic the compiler cannot avoid
+    // emitting: this core's integer divide and multiply are iterative and
+    // stall the fetch while they run.
+    {"istall_idiv",XTPERF_CNT_I_STALL,XTPERF_MASK_I_STALL_ITERATIVE_DIV},
+    {"istall_imul",XTPERF_CNT_I_STALL,XTPERF_MASK_I_STALL_ITERATIVE_MUL},
+    {"istall_busy",XTPERF_CNT_I_STALL,XTPERF_MASK_I_STALL_BUSY},
+    {"istall_l32r",XTPERF_CNT_I_STALL,XTPERF_MASK_I_STALL_FAST_L32R},
+    {"istall_run", XTPERF_CNT_I_STALL,XTPERF_MASK_I_STALL_EXTERNAL_SIGNAL},
+    {"icachemiss",XTPERF_CNT_I_MEM,   XTPERF_MASK_I_MEM_CACHE_MISSES},
+};
+#define GARDEN_RAY_EVENTS (sizeof garden_ray_events/sizeof*garden_ray_events)
+static void garden_ray_perf_arm(unsigned sel) {
+    // The six lines of components/perfmon/xtensa_perfmon_access.c, inlined so
+    // that this file needs no new component dependency for a build that never
+    // ships.
+    //
+    // kernelcnt 0 with tracelevel 0, and the first attempt had it the other way
+    // round on a misreading that cost a whole run. PMCTRL_KRNLCNT means "count
+    // when CINTLEVEL > TRACELEVEL", so kernelcnt 1 counts ONLY inside
+    // interrupts -- which is why that build reported 195,000 cycles for a
+    // region ccount put at 48,700,000, and zero instruction-cache misses
+    // forever. kernelcnt 0 counts CINTLEVEL <= TRACELEVEL, i.e. ordinary task
+    // code, which is the thing being measured; ISR time inside the bracket is
+    // then excluded, which is what anyone wants anyway.
+    //
+    // The disagreement is why `pm0_cy` and the `rays` ccount are both printed.
+    // A ratio like "IPC 0.55" looked entirely plausible while the counter was
+    // measuring the wrong thing, and would have been believed without the
+    // second number standing next to it.
+    const uint16_t sels[2]={XTPERF_CNT_CYCLES,garden_ray_events[sel].select};
+    const uint16_t masks[2]={XTPERF_MASK_CYCLES,garden_ray_events[sel].mask};
+    for(int id=0;id<2;id++) {
+        uint32_t pmc=((uint32_t)(sels[id]&PMCTRL_SELECT_MASK)<<PMCTRL_SELECT_SHIFT)
+                    |((uint32_t)(masks[id]&PMCTRL_MASK_MASK)<<PMCTRL_MASK_SHIFT)
+                    |(0u<<PMCTRL_KRNLCNT_SHIFT);
+        eri_write(ERI_PERFMON_PM0+id*4,0);
+        eri_write(ERI_PERFMON_PMCTRL0+id*4,pmc);
+    }
+    eri_write(ERI_PERFMON_PGM,PGM_PMEN);
+}
+uint32_t garden_prof_ray_perf(uint32_t *pm1,const char **name,
+                              uint32_t *pix_pm0,uint32_t *pix_pm1) {
+    uint32_t v=garden_ray_pm0;
+    if(pm1)*pm1=garden_ray_pm1;
+    if(name)*name=garden_ray_events[garden_ray_sel].name;
+    if(pix_pm0)*pix_pm0=garden_pix_pm0;
+    if(pix_pm1)*pix_pm1=garden_pix_pm1;
+    garden_ray_pm0=0;garden_ray_pm1=0;garden_pix_pm0=0;garden_pix_pm1=0;
+    garden_ray_sel=(garden_ray_sel+1)%GARDEN_RAY_EVENTS;
+    garden_ray_perf_arm(garden_ray_sel);
+    return v;
+}
+#endif
 #endif
 
 // No writable statics, LUTs, images or vertex lists. A broad warm scattering
@@ -807,6 +903,11 @@ void garden_prepare_layout(GardenFrame *f,float time,unsigned old_seed,unsigned 
     // this wrap, including wind, so long-running animation has no reset seam.
     f->phase=(int)(fmodf(fmaxf(time,0),128.0f)*512);
     garden_decor_prepare(f);
+#ifdef GARDEN_RAY_PERF
+    // Once. Before this the counters are stopped and every delta is zero, so
+    // the first window would otherwise print a row of nothing.
+    {static bool armed;if(!armed){armed=true;garden_ray_perf_arm(garden_ray_sel);}}
+#endif
     // Keep the four-second weather cadence; increase displacement instead of
     // speeding it up. The same cloud field opens/closes the main light volume.
     int opening=garden_motion((unsigned)f->phase,193)-128;
@@ -1885,19 +1986,37 @@ static void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsig
 }
 static void garden_atmosphere_row(uint16_t *row,int y,const GardenFrame *f) {
 #ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t pt0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+    GARDEN_FENCE;uint32_t pt0=esp_cpu_get_cycle_count();
+#ifdef GARDEN_RAY_PERF
+    uint32_t w0=eri_read(ERI_PERFMON_PM0),w1=eri_read(ERI_PERFMON_PM1);
+#endif
+    GARDEN_FENCE;
     garden_pixels_row(row,y,f);
-    GARDEN_FENCE;garden_pixel_cycles+=esp_cpu_get_cycle_count()-pt0;GARDEN_FENCE;
+    GARDEN_FENCE;
+#ifdef GARDEN_RAY_PERF
+    garden_pix_pm0+=eri_read(ERI_PERFMON_PM0)-w0;
+    garden_pix_pm1+=eri_read(ERI_PERFMON_PM1)-w1;
+#endif
+    garden_pixel_cycles+=esp_cpu_get_cycle_count()-pt0;GARDEN_FENCE;
 #else
     garden_pixels_row(row,y,f);
 #endif
 #if GARDEN_DECOR_RAYS && !GARDEN_MOTE_ONLY
 #ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t rt0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+    GARDEN_FENCE;uint32_t rt0=esp_cpu_get_cycle_count();
+#ifdef GARDEN_RAY_PERF
+    uint32_t q0=eri_read(ERI_PERFMON_PM0),q1=eri_read(ERI_PERFMON_PM1);
+#endif
+    GARDEN_FENCE;
 #endif
     garden_decor_row(row,y,f);
 #ifdef ESP_PLATFORM
-    GARDEN_FENCE;garden_ray_cycles+=esp_cpu_get_cycle_count()-rt0;garden_ray_rows++;GARDEN_FENCE;
+    GARDEN_FENCE;
+#ifdef GARDEN_RAY_PERF
+    garden_ray_pm0+=eri_read(ERI_PERFMON_PM0)-q0;
+    garden_ray_pm1+=eri_read(ERI_PERFMON_PM1)-q1;
+#endif
+    garden_ray_cycles+=esp_cpu_get_cycle_count()-rt0;garden_ray_rows++;GARDEN_FENCE;
 #endif
 #endif
 }

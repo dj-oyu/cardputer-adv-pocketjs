@@ -479,6 +479,14 @@ extern int g_garden_canopy_pie;
 // The vegetation row invariants taken once a frame instead of once a row; see
 // GardenVeg above. 1 = hoisted. TEMPORARY, flipped by flower.c's SPLIT3 block.
 extern int g_garden_veg_hoist;
+#ifdef GARDEN_RAY_PERF
+// Diagnostic build only. Returns the decorative rays' cycle count from XTPERF
+// PM0, writes PM1's event count and the event's name, then zeroes both and
+// arms the NEXT event -- so one window answers one question and six windows
+// walk the list. See the block over garden_prof_ray_perf in garden.c.
+uint32_t garden_prof_ray_perf(uint32_t *pm1,const char **name,
+                              uint32_t *pix_pm0,uint32_t *pix_pm1);
+#endif
 // The decor mix on the PIE unit (scene/garden_decor_pie.c) instead of the scalar
 // statement in garden_decor_row: 1 = the kernel, 0 = the scalar statement. The
 // kernel only takes a full group of eight pixels from a 16-byte-aligned pointer,
