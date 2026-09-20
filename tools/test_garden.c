@@ -601,7 +601,14 @@ int main(void) {
     // back where it was, and the episode is worth one line: the argument for
     // raising it was sound and the feature still did not survive contact with
     // a frame counter. A bound is not what decides whether something belongs.
-    assert(sizeof(GardenFrame)<=512);
+    //
+    // Raised a second time, to 1280, for GardenVeg[2] -- the row invariants
+    // that were being recomputed on all 135 rows. This raise is PROVISIONAL in
+    // exactly the way the last one turned out to be: the hoist is proven on
+    // the host to change no pixel, but what it is worth has not been measured
+    // on the device yet. If the frame counter does not show it, this goes back
+    // to 512 and the struct goes with it.
+    assert(sizeof(GardenFrame)<=1280);
     printf("GARDEN_OK: changing=%u gradients=%u lit_left=%u rain_pixels=%u; frame parameters=%zu bytes; no persistent garden arrays\n",
            changing,gradient,lit_left,modified,sizeof(GardenFrame));
 }

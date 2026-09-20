@@ -33,10 +33,12 @@ static uint16_t fb[W*H];
 
 int main(void) {
     unsigned long all_seen=0,all_rej=0,all_wrong=0;
+    unsigned long all_disc=0,all_win=0,all_winwrong=0;
     for(int sp=0;sp<FLOWER_SPECIES_COUNT;sp++) {
         bell_visits_seen=bell_rejected=bell_rejected_wrongly=0;
         bell_miss_disc=bell_miss_height=bell_miss_depth=bell_miss_clip=0;
         bell_accepts=bell_hit_visits=0;bell_discs=0;
+        bell_window_skipped=bell_window_wrong=0;
         for(int ph=0;ph<PHASES;ph++) {
             elapsed=1.3f+ph*0.83f-1.0f/30;
             flower_prepare(1.0f/30,0,0,(flower_species_t)sp);
@@ -63,6 +65,17 @@ int main(void) {
         if(bell_hit_visits)printf("%-10s   %u accepts over %u hit visits = %.2f each\n",
                                   NAME[sp],bell_accepts,bell_hit_visits,
                                   (double)bell_accepts/bell_hit_visits);
+        // The height window sits between those two numbers: it skips bands
+        // that reach a non-negative discriminant and would still have missed,
+        // so it is priced against `bell_discs` and proved against zero.
+        if(bell_discs)
+            printf("%-10s   %u of those %u square roots skippable by the height"
+                   " window (%.1f%%), %u wrongly\n",
+                   NAME[sp],bell_window_skipped,bell_discs,
+                   100.0*bell_window_skipped/bell_discs,bell_window_wrong);
+        all_disc+=bell_discs;all_win+=bell_window_skipped;
+        all_winwrong+=bell_window_wrong;
+        assert(bell_window_wrong==0);
         all_seen+=bell_visits_seen;all_rej+=bell_rejected;
         all_wrong+=bell_rejected_wrongly;
         // The proof. Anything but zero means the test is not conservative and
@@ -77,5 +90,9 @@ int main(void) {
     // and would mean the bound is not tight enough to be worth its fourteen
     // operations.
     assert(all_seen==0||all_rej*100>all_seen*20);
+    printf("BELL_WINDOW_%s: %lu/%lu surviving square roots skippable (%.1f%%),"
+           " %lu wrongly\n",all_winwrong?"FAIL":"OK",all_win,all_disc,
+           all_disc?100.0*all_win/all_disc:0.0,all_winwrong);
+    assert(all_winwrong==0);
     return 0;
 }

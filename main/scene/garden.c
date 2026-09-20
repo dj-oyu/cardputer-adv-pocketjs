@@ -161,7 +161,17 @@ static int garden_corner(int c,int mask,int y,int shift) {
 static uint16_t garden_rgb(int r,int g,int b) {
     return (uint16_t)((r>>3)<<11|(g>>2)<<5|(b>>3));
 }
-static uint16_t garden_mix(uint16_t a,uint16_t b,unsigned f) {
+// Nine multiplies and three shifts, called a few hundred times a row by the
+// trunks, the grass and the dissolve. Forced inline for the call and nothing
+// else: unlike rgbd in flower.c there are no floating-point stalls here for
+// the surrounding code to fill, so what this can win is the l32r, the callx8,
+// the entry and the retw -- and that is why it carries a switch instead of an
+// argument. GARDEN_NO_MIX_INLINE prices it.
+#ifdef GARDEN_NO_MIX_INLINE
+static uint16_t __attribute__((noinline)) garden_mix(uint16_t a,uint16_t b,unsigned f) {
+#else
+static inline __attribute__((always_inline)) uint16_t garden_mix(uint16_t a,uint16_t b,unsigned f) {
+#endif
     unsigned r=(((a>>11)&31)*(256-f)+((b>>11)&31)*f)>>8;
     unsigned g=(((a>>5)&63)*(256-f)+((b>>5)&63)*f)>>8;
     unsigned blue=((a&31)*(256-f)+(b&31)*f)>>8;
@@ -281,6 +291,11 @@ int g_garden_scalar_tweaks=1;
 // does it. 0 selects the scalar statement below, and both arms live in one binary
 // for the same reason.
 int g_garden_canopy_pie=1;
+// TEMPORARY A/B switch for the row-invariant hoist; see GardenVeg in garden.h
+// and the SPLIT3 rotation in flower.c. 1 = the shipping path, the invariants
+// taken once a frame. 0 = every row derives them again, which is where they ran
+// until 2026-09-20.
+int g_garden_veg_hoist=1;
 // One pixel of the canopy blend: the statement the kernel in scene/canopy_pie.c is
 // the lane version of. It is its own function because the kernel only takes whole
 // eight-pixel interiors, so the clipped span's head and tail come through here.
@@ -785,6 +800,8 @@ static void garden_decor_prepare(GardenFrame *f) {
     }
     f->decor_ready=true;
 }
+// Defined with the vegetation row it feeds, called from here; see GardenVeg.
+static void garden_veg_derive(GardenVeg *v,unsigned seed,int phase);
 void garden_prepare_layout(GardenFrame *f,float time,unsigned old_seed,unsigned new_seed,unsigned mix) {
     // Fractional advection avoids whole-pixel jumps. All noise is periodic at
     // this wrap, including wind, so long-running animation has no reset seam.
@@ -803,6 +820,19 @@ void garden_prepare_layout(GardenFrame *f,float time,unsigned old_seed,unsigned 
     }
     f->sun+=shape[0];f->spread=shape[1]+opening/20;f->slant=shape[2];
     f->seed=new_seed;
+    // The A/B arm needs no second copy of the code: leave both slots unready
+    // and every row misses and derives on the stack, which is where all of it
+    // ran before. The picture is the same either way -- proved over 15.5M
+    // pixels including crossfades -- so this prices the hoist and nothing else.
+#ifdef GARDEN_NO_VEG_HOIST
+    f->veg[0].ready=f->veg[1].ready=false;
+#else
+    if(!g_garden_veg_hoist)f->veg[0].ready=f->veg[1].ready=false;
+    else {
+        garden_veg_derive(&f->veg[0],old_seed,f->phase);
+        garden_veg_derive(&f->veg[1],new_seed,f->phase);
+    }
+#endif
 #if GARDEN_NO_MOTES
     // The whole feature, gone: no motion, no index, no touch-up. Nothing else
     // in the frame changes, which is the entire point -- see garden.h.
@@ -1736,14 +1766,63 @@ garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
         }
     }
 }
+// Everything a vegetation row needs that does not depend on y. Twenty-eight
+// hashes, eighteen noise samples, twenty-five motion samples and seven
+// reciprocal divisions -- all of it was inside the row loop, all of it
+// producing the same answer 135 times a frame. See GardenVeg in garden.h.
+static void garden_veg_derive(GardenVeg *v,unsigned seed,int phase) {
+    v->seed=seed;v->phase=phase;v->ready=true;
+    for(int i=0;i<3;i++) {
+        unsigned h=garden_hash((unsigned)i+901+seed);
+        v->trunk_base[i]=(int16_t)(16+i*86+(int)(h%37));
+        v->trunk_slope[i]=(int8_t)((int)((h>>8)%5)-2);
+    }
+    for(int i=0;i<7;i++) {
+        unsigned h=garden_hash((unsigned)i+301+seed);
+        int cx=i*40-15+(int)((h>>20)%23)
+            +(garden_motion((unsigned)(phase+i*180),613)-128)/48;
+        int rx=28+(int)((h>>16)%17);
+        int lo=cx-rx,hi=cx+rx;
+        if(lo<0)lo=0;
+        if(hi>239)hi=239;
+        v->can_cy[i]=(int16_t)(-9+(int)(h%17));
+        v->can_ry[i]=(int16_t)(15+(int)((h>>8)%16));
+        v->can_cx[i]=(int16_t)cx;v->can_rx[i]=(int16_t)rx;
+        v->can_lo[i]=(int16_t)lo;v->can_hi[i]=(int16_t)hi;
+        v->can_mrr[i]=garden_recip(rx*rx,26);
+    }
+    v->grass_live=v->grass_fern=v->grass_wide=0;
+    for(int i=0;i<18;i++) {
+        unsigned h=garden_hash((unsigned)i+71+seed);
+        int root=(i/2)*30-15+(int)((h>>16)%27);
+        int layer=i&1;
+        v->grass_root[i]=(int16_t)root;
+        v->grass_height[i]=(int16_t)(23+(int)(h%63));
+        v->grass_base[i]=(int16_t)(142+layer*7);
+        v->grass_lean[i]=(int16_t)((int)((h>>8)%31)-15);
+        v->grass_wind[i]=(int16_t)((garden_motion((unsigned)(phase+(root+32)*48),557)-128)/12);
+        v->grass_green[i]=garden_rgb(layer?16:26,layer?59:67,layer?39:53);
+        v->grass_spacing[i]=(int8_t)(8+(int)((h>>12)%5));
+        // Static density makes clumps and gaps; only the wind evolves in time.
+        if((int)((h>>24)&255)<=70+garden_noise((unsigned)(root+32)*5,727+seed)*3/4)
+            v->grass_live|=1u<<i;
+        if((h&3)==0)v->grass_fern|=1u<<i;
+        if((h>>14)&1)v->grass_wide|=1u<<i;
+    }
+}
 static void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsigned seed) {
+    // The slot the layout was prepared into, or the old cost on the stack if
+    // this seed was never prepared -- garden_row_blend takes old_seed from its
+    // caller and nothing makes that agree with garden_prepare_layout's.
+    GardenVeg scratch;const GardenVeg *v;
+    if(f->veg[1].ready&&f->veg[1].seed==seed&&f->veg[1].phase==f->phase)v=&f->veg[1];
+    else if(f->veg[0].ready&&f->veg[0].seed==seed&&f->veg[0].phase==f->phase)v=&f->veg[0];
+    else {garden_veg_derive(&scratch,seed,f->phase);v=&scratch;}
     // Distant trunks disappear into the air rather than reading as sharp
     // cutouts. Near vegetation below is darker and has greater contrast.
     int trunk[3];
-    for(int i=0;i<3;i++) {
-        unsigned h=garden_hash((unsigned)i+901+seed);
-        trunk[i]=16+i*86+(int)(h%37)+(y-70)*((int)((h>>8)%5)-2)/19;
-    }
+    for(int i=0;i<3;i++)
+        trunk[i]=v->trunk_base[i]+(y-70)*v->trunk_slope[i]/19;
     const uint16_t bark=garden_rgb(18,36,39),leafy=garden_rgb(9,29,25);
     // The trunks blend each pixel independently and in the same i order, so
     // running them as three short passes after the row is written produces the
@@ -1760,12 +1839,8 @@ static void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsig
     }
     // Out-of-focus canopy at the top: broad soft ellipses break up the light.
     for(int i=0;i<7;i++) {
-        unsigned h=garden_hash((unsigned)i+301+seed);
-        int cy=-9+(int)(h%17),dy=y-cy,ry=15+(int)((h>>8)%16);
+        int dy=y-v->can_cy[i],ry=v->can_ry[i];
         if(abs(dy)>=ry)continue;
-        int cx=i*40-15+(int)((h>>20)%23)
-            +(garden_motion((unsigned)(f->phase+i*180),613)-128)/48;
-        int rx=28+(int)((h>>16)%17);
         // Secondary PIE candidate: contiguous ellipse coverage + RGB565 blend.
         // Clip once, process aligned 8-pixel interiors, retain scalar tails;
         // do not assume the caller's row pointer is 16-byte aligned.
@@ -1780,31 +1855,25 @@ static void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsig
         // (rr = rx*rx for rx in 28..44, and |dx| <= rx so the numerator never
         // exceeds rr) that ceil(2^26/rr) with a shift of 18 reproduces
         // dx*dx*256/rr for every reachable pair. garden_model.c sweeps it.
-        int qy=dy*dy*256/(ry*ry),rr=rx*rx;
-        int mrr=garden_recip(rr,26);
-        int lo=cx-rx,hi=cx+rx;
-        if(lo<0)lo=0;
-        if(hi>239)hi=239;
-        garden_canopy_row(row,lo,hi,cx,mrr,qy,leafy);
+        int qy=dy*dy*256/(ry*ry);
+        garden_canopy_row(row,v->can_lo[i],v->can_hi[i],v->can_cx[i],
+                          v->can_mrr[i],qy,leafy);
     }
     // Curved grass and paired fern leaflets. Hashes describe plants, not stored
     // geometry. Each row intersects only a few spans, never a screen buffer.
     for(int i=0;i<18;i++) {
-        unsigned h=garden_hash((unsigned)i+71+seed);
-        int root=(i/2)*30-15+(int)((h>>16)%27);
-        // Static density makes clumps and gaps; only the wind evolves in time.
-        if((int)((h>>24)&255)>70+garden_noise((unsigned)(root+32)*5,727+seed)*3/4)continue;
-        int layer=i&1,height=23+(int)(h%63),base=142+layer*7;
-        int up=base-y;if(up<0||up>height)continue;
-        int t=up*256/height,lean=(int)((h>>8)%31)-15;
-        int wind=(garden_motion((unsigned)(f->phase+(root+32)*48),557)-128)/12;
-        int cx=root+(lean+wind*(layer+1)/2)*t*t/65536;
-        int radius=1+(256-t)*(1+(int)((h>>14)&1))/220;
-        uint16_t green=garden_rgb(layer?16:26,layer?59:67,layer?39:53);
+        if(!(v->grass_live&(1u<<i)))continue;
+        int layer=i&1,height=v->grass_height[i];
+        int up=v->grass_base[i]-y;if(up<0||up>height)continue;
+        int t=up*256/height;
+        int cx=v->grass_root[i]
+            +(v->grass_lean[i]+v->grass_wind[i]*(layer+1)/2)*t*t/65536;
+        int radius=1+(256-t)*(1+((v->grass_wide>>i)&1))/220;
+        uint16_t green=v->grass_green[i];
         for(int x=cx-radius;x<=cx+radius;x++)if(x>=0&&x<240)
             row[x]=garden_mix(row[x],green,layer?220:130);
-        if((h&3)==0&&t>40&&t<220) {
-            int spacing=8+(int)((h>>12)%5);
+        if((v->grass_fern&(1u<<i))&&t>40&&t<220) {
+            int spacing=v->grass_spacing[i];
             int band=up%spacing,leaf=spacing-abs(band-spacing/2)*2;
             int reach=leaf*(256-t)/220;
             for(int dx=-reach;dx<=reach;dx++) {

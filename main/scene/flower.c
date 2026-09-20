@@ -307,17 +307,32 @@ static uint32_t bloom_random(void) {
 // One of the other botanicals, so a draw never repeats the plant already up:
 // a rotation that shows the same flower twice looks like it has stopped.
 static flower_species_t bloom_next(flower_species_t from) {
+#ifdef FLOWER_AB3
+    // Measurement build only. Four of the fourteen species have bell parts at
+    // all (tools/test_bell_reject.c prints "no bell parts" for the other ten),
+    // and the shipping rotation is random -- seven minutes of it drew crocus
+    // and platycodon and nothing else, so the height-window arm measured an
+    // empty bell_hit and said nothing. Walk the four that exercise it.
+    static const flower_species_t bells[]={FLOWER_VALLEY,FLOWER_DAFFODIL,
+                                           FLOWER_CALLA,FLOWER_FRITILLARIA};
+    for(unsigned i=0;i<sizeof bells/sizeof*bells;i++)
+        if(bells[i]==from)return bells[(i+1)%(sizeof bells/sizeof*bells)];
+    return bells[0];
+#else
     unsigned n=FLOWER_SPECIES_COUNT-FLOWER_VALLEY;
     unsigned here=(unsigned)from-FLOWER_VALLEY;
     unsigned step=1+bloom_random()%(n-1);
     return (flower_species_t)(FLOWER_VALLEY+(here+step)%n);
+#endif
 }
-// Every float `/` in this file used to be a call. The FPU on this part has no
-// divide instruction, GCC emits no seed sequence for one, and -mlongcalls turns
-// the call into `l32r` + `callx8` into a ROM address -- so it is invisible to a
-// mnemonic search and to a `call8 <symbol>` search alike, which is why two
-// rounds of planning here were built on "ray_row has no divisions". It has
-// sixteen. See docs/perf/pie-simd.md 3.1.
+// Every float `/` in this file used to be a call. GCC emits no inline seed
+// sequence for one, and -mlongcalls turns the call into `l32r` + `callx8` into
+// a ROM address -- so it is invisible to a mnemonic search and to a
+// `call8 <symbol>` search alike, which is why two rounds of planning here were
+// built on "ray_row has no divisions". It has sixteen. See docs/perf/pie-simd.md
+// 3.1. What this used to add -- "the FPU on this part has no divide
+// instruction" -- is false: __divsf3 is 30 branchless FPU instructions around
+// div0.s and divn.s. The call is the cost, not an absent instruction.
 //
 // A call is worse than its own cycles. `__divsf3` and `fmaxf` take their
 // arguments in *integer* registers, so each one costs an `rfr`/`wfr` pair and
@@ -349,6 +364,8 @@ static flower_species_t bloom_next(flower_species_t from) {
 //   FLOWER_NO_IFLOOR        floorf/ceilf calls, instead of trunc-and-correct
 //   FLOWER_BELL_CHECK       compute the rejection, do not act on it, and count
 //                           the visits where it was wrong (must be zero)
+//   FLOWER_NO_BELL_WINDOW   take every band's square root, instead of skipping
+//                           the bands whose roots cannot land in their height
 #ifdef FLOWER_DIV_EXACT
 #define DIVR(num,inv,den) ((num)/(den))
 #define POS(x)            fmaxf(0,(x))
@@ -388,8 +405,8 @@ static void petal_reciprocals(Petal *p) {
     // This is the same hoist as bell_lo/bell_hi above it, one step further in:
     // a = bd0^2 + bd2^2 - (slope*bd1)^2 mentions the part and the band profile
     // and nothing else, so `a`, the sign test on it, and 1/a are all constant
-    // across every pixel of every row. bell_hit was paying a software division
-    // for 1/a on each of six bands on each visit -- and because that division
+    // across every pixel of every row. bell_hit was paying a division for 1/a
+    // on each of six bands on each visit -- and because that division
     // is `l32r`+`callx8` into __divsf3 rather than an instruction, it is
     // invisible to every way anybody has looked at this loop (docs/perf/pie-simd.md
     // 3.1).
@@ -453,8 +470,9 @@ static inline int iceil (float x) { int t=(int)x;return t+(x>0.0f&&(float)t!=x);
 #endif
 // The fixed-point square root. Q16 in, Q8 out -- the classic pair, because the
 // integer square root of a 16.16 value is an 8.8 value -- and it exists to be
-// looked at before it is believed: sqrtf() on this part is an 88-instruction
-// software routine behind a two-level call, measured at 154 cycles a call with
+// looked at before it is believed: sqrtf() on this part is a two-level call --
+// a six-instruction wrapper around __ieee754_sqrtf, itself 33 branchless FPU
+// instructions seeded by sqrt0.s -- measured at 154 cycles a call with
 // 4,010 calls a frame (2.1 ms, 6% of the frame, the largest single named cost in
 // the scene). This costs ~16 shift/compare/subtract steps and no float.
 //
@@ -501,11 +519,14 @@ static inline float flower_isqrt_q(float d) {
 // 79 adjacent 60-frame pairs with only this switch moving: the ellipsoid root
 // came out 0.03 ms/frame apart and the bell root 0.08 ms apart, against a control
 // band (shade, garden, decor) of 0.3..0.4 ms -- the loop is 7 instructions a step
-// against an 88-instruction software routine, but d arrives as a float and the
-// root leaves as one, and each of those conversions is a call into soft-float on
-// a part with no FPU. Carry the fixed point through the caller -- d as an integer,
-// the root consumed as one -- and the conversions go with it. Until then this
-// switch buys the picture's 0.02% and no time.
+// against 39, but d arrives as a float and the root leaves as one. That was
+// written as "each of those conversions is a call into soft-float on a part
+// with no FPU", and every clause of it is wrong: this part has a hardware
+// single-precision FPU, float.s and trunc.s are single instructions, and the
+// 39 it is being compared against are FPU instructions rather than a software
+// routine. The disassembly is in ray_row and in docs/perf/fpu-latency.md. The
+// measurement stands and the reason given for it does not -- which is why the
+// switch is still here and still buys the picture's 0.02% and no time.
 //
 // DEFAULT IS 0 HERE (exact sqrtf), and it is a decision rather than a preference.
 // The branch this came from shipped it at 1 and is red on tools/test_flower.c:
@@ -527,6 +548,14 @@ static inline float flower_isqrt_q(float d) {
 // ever flipped this switch, so the idea had survived on an estimate for as long
 // as it existed (docs/perf/flower-shade.md 7).
 int g_flower_fixed_sqrt = 0;
+// TEMPORARY A/B switch for the height-window rejection added 2026-09-20,
+// runtime rather than compile-time for the reason g_garden_canopy_pie is: this part
+// moves the same kernel by up to 15% between builds on instruction-cache
+// alignment (CLAUDE.md), so the only honest comparison is two windows of one
+// binary. 1 = the shipping path. It is proved on the host to change no
+// pixel -- tools/test_bell_reject.c -- so what
+// this prices is time and only time. FLOWER_AB3 in the SPLIT3 block walks it.
+int g_bell_window = 1;
 #define FLOWER_SQRT(d) (g_flower_fixed_sqrt ? flower_isqrt_q(d) : sqrtf(d))
 // The four decor switches (this one, and garden.c's gate, scalar tweaks and
 // canopy kernel) are not walked any more. The 60-frame report used to move one
@@ -1176,6 +1205,10 @@ unsigned bell_accepts,bell_hit_visits;
 // divisions until 1/a moved to petal_reciprocals -- so it prices both, and it
 // is the number the estimate "up to six a visit" was standing in for.
 unsigned bell_discs;
+// The height window: how many bands it would have skipped before their square
+// root, and how many of those went on to accept anyway. The second is zero or
+// the test is wrong.
+unsigned bell_window_skipped,bell_window_wrong;
 #endif
 // A bell visit costs about 2,750 cycles on the device -- six latitude bands
 // walked unconditionally, each with a discriminant, a software square root and
@@ -1309,9 +1342,43 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
 #endif
 #endif
         float roots[2];int nr=0;
+#ifdef FLOWER_BELL_CHECK
+        bool win_no=false;
+#endif
         if(fabsf(a)<1e-7f) {if(fabsf(b)>1e-7f)roots[nr++]=-c/(2*b);}
         else {
             float disc=b*b-a*c;if(disc<0)continue;
+#ifndef FLOWER_NO_BELL_WINDOW
+            // The square root is taken to find roots that are then thrown away
+            // for landing outside the band's height. tools/test_bell_reject.c
+            // counts 4.50-5.35 non-negative discriminants a visit against 1.00
+            // to 1.11 acceptances, so about four fifths of the square roots in
+            // this file are computed and discarded. Whether a root lands in
+            // the band is decidable without taking one.
+            //
+            // v=o[1]+d[1]*z is affine, so the band [lo,hi] is an interval in z;
+            // and f(z)=a z^2+2b z+c meets it exactly when f is of opposite
+            // signs at the two ends, or -- both ends agreeing -- when the
+            // vertex lies between them with f there on the far side of zero.
+            // The vertex test needs no division: f'(z)/2 = a z + b changes
+            // sign across the window precisely when -b/a is inside it. `a*fl`
+            // carries the far-side condition for either sign of a, and disc>=0
+            // is already in hand from the line above.
+            if(g_bell_window&&p->inv_d1!=0) {
+                float zl=(lo-o[1])*p->inv_d1,zr=(hi-o[1])*p->inv_d1;
+                if(zl>zr) {float t=zl;zl=zr;zr=t;}
+                float gl=a*zl+b,gr=a*zr+b;
+                float fl=(gl+b)*zl+c,fr=(gr+b)*zr+c;
+                if(fl*fr>0&&(a*fl<=0||gl*gr>0)) {
+#ifdef FLOWER_BELL_CHECK
+                    win_no=true;   /* counted, not obeyed: the walk goes on */
+                    if(!rejected)bell_window_skipped++;
+#else
+                    continue;
+#endif
+                }
+            }
+#endif
             // The two roots share a divisor, so they share one divide. The
             // square root is timed because there can be six of them in a
             // visit, at 174 measured cycles each, and that is the largest
@@ -1366,6 +1433,10 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
                     mul(p->axis[2],DIVR(w,p->inv_radius[2],p->radius[2])));
 #ifdef FLOWER_BELL_CHECK
             bell_accepts++;
+            // The whole proof of the height window, and it has to be zero: the
+            // test said this band could not land in [lo,hi] and the band just
+            // landed in it.
+            if(win_no)bell_window_wrong++;
 #endif
             *best=z+p->c.z;*norm=n;found=true;
         }
@@ -1441,10 +1512,14 @@ static void ray_row(uint16_t *row,int y) {
 #endif
     for(unsigned i=0;i<count;i++) {
         const Petal *p=&petals[i];if(y<p->ymin||y>p->ymax)continue;
-        // One __divsf3, timed on its own. Every float `/` in this file is a
-        // call into a ROM software routine -- the FPU on this part has no
-        // divide instruction and the compiler never emits the seed sequence --
-        // and the whole remaining plan turns on what one of them costs.
+        // One __divsf3, timed on its own. This used to say that every float
+        // `/` here is "a call into a ROM software routine -- the FPU on this
+        // part has no divide instruction". The call and the ROM are right; the
+        // rest is not. __divsf3 resolves to 0x40002274 -> 0x40056124 and is 30
+        // branchless FPU instructions, div0.s for the seed and divn.s to
+        // finish. What a division costs here is a windowed call wrapped around
+        // a hardware Newton chain, not an absent instruction emulated in
+        // integers -- see the note over FLOWER_SQRT in ray_row.
         float dy=DIVR(65-(y+.5f),cam_inv,cam_s)+cam_y-p->c.y;
         // PIE candidate (unmeasured): for ellipsoids, b, c and discriminant d
         // are polynomials across x. A bounded fixed-point 8-pixel rejection
@@ -1458,27 +1533,6 @@ static void ray_row(uint16_t *row,int y) {
 #endif
         float ob[4];
         if(p->shape)bell_row_terms(p,dy,ob);
-        // The band, and it is narrower than it was first built.
-        //
-        // The obvious version stepped the visit loop itself -- one ray in four,
-        // the answer copied across the run -- which takes a quarter off BOTH of
-        // ray_row's large terms at once, since `span` is per visit and `shade`
-        // is per hit. It also deletes anything thinner than the step. A stem is
-        // one or two pixels wide and has a one-in-four chance of being sampled,
-        // so the plant lost its stem in the defocused bands and the assertion
-        // in tools/test_flower.c that every species reaches the bottom edge
-        // failed on the first species it tried. That is not an artefact to tune
-        // away: a silhouette with holes in it is a different plant.
-        //
-        // So the geometry is evaluated at every pixel and only the SHADING is
-        // sampled. Hits, depth and silhouette are bit-identical to the sharp
-        // build; what a defocused run shares is one pixel's colour. `shade` is
-        // the larger of the two terms anyway -- 5.03 ms against span's 4.30 --
-        // and this half of the win is the half that is safe.
-        //
-        // The grid is global (x & ~(rate-1)) rather than per petal: two petals
-        // overlapping a run must reuse on the same boundaries, or the seam
-        // between them moves with the plant.
         for(int x=p->xmin;x<=p->xmax;x++) {
             float dx=DIVR(x+.5f-180,cam_inv,cam_s)+cam_x-p->c.x;
             if(p->shape) {
@@ -1871,6 +1925,27 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                  rays,rayrows/prof_frames,rayrows?raycy/rayrows:0,
                  gar-pix-veg-rays,dissolverows/prof_frames,vegrows/prof_frames,
                  vegrows?100.0*dissolverows/vegrows:0.0);
+#ifdef FLOWER_AB3
+        // The 2026-09-20 rejections, one switch per window, four windows to a
+        // cycle so that every "off" window has an all-on neighbour on each side
+        // in the same scene -- the shape the canopy A/B in shell.c uses, and
+        // for the same reason: two builds of one kernel differ by up to 15% on
+        // this part from instruction-cache placement alone, so only paired
+        // windows inside one binary answer anything.
+        //
+        // Each lands on a DIFFERENT term of the lines above, which is what
+        // makes one binary enough: `bell` cy/visit for the height window,
+        // `veg` cy/row for the invariant hoist. Not in a shipping build -- see the paragraph
+        // below about a picture whose cost depends on the second.
+        {
+            static unsigned ab3;
+            ESP_LOGI("garden","AB3 arm=%u veg=%d bell=%d",
+                     ab3%4,g_garden_veg_hoist,g_bell_window);
+            ab3++;
+            g_garden_veg_hoist=ab3%4!=1;
+            g_bell_window=ab3%4!=3;
+        }
+#endif
         // The four switches are FIXED here, at the values their comments call
         // the shipping ones, and this file no longer walks them: the walk was
         // the measurement, and a shipped build that flips `sq` every three

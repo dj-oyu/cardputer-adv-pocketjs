@@ -366,6 +366,34 @@ typedef struct {
 // and a zeroed particle is simply one outside the shaft, which the cull replaces
 // on the first frame -- so zero is a valid starting position and garbage is not.
 // scene_mem zeroes a fresh block; a GardenFrame on the stack has to say so.
+// What a vegetation row derives from the layout seed and the frame phase and
+// nothing else -- three trunk hashes, seven canopy hashes with their drift and
+// their reciprocal, eighteen grass hashes with their wind and their cull.
+// Every one of these was recomputed on all 135 rows for a value that was the
+// same on all 135 rows. They are taken once a frame in garden_prepare_layout
+// now; garden_vegetation_row reads them.
+//
+// Two slots because a layout crossfade renders BOTH seeds on the same row
+// (garden_row_blend), so one slot would thrash on exactly the frames that are
+// already doing twice the work. `seed` and `phase` are the key: a caller that
+// asks for a layout prepare never saw falls back to deriving it on the stack,
+// which is the old cost and not a wrong picture.
+typedef struct {
+    unsigned seed;
+    int phase;
+    bool ready;
+    int16_t trunk_base[3];
+    int8_t trunk_slope[3];
+    int16_t can_cy[7],can_ry[7],can_cx[7],can_rx[7],can_lo[7],can_hi[7];
+    int32_t can_mrr[7];
+    int16_t grass_root[18],grass_height[18],grass_base[18],grass_lean[18],
+            grass_wind[18];
+    uint16_t grass_green[18];
+    int8_t grass_spacing[18];
+    uint32_t grass_live;   // bit i: the density cull kept this blade
+    uint32_t grass_fern;   // bit i: (h&3)==0, the paired-leaflet branch
+    uint32_t grass_wide;   // bit i: (h>>14)&1, the thicker of the two radii
+} GardenVeg;
 typedef struct {
     int sun,phase,breath;
     int spread,slant; // slowly changing main-light geometry
@@ -379,6 +407,7 @@ typedef struct {
 #if GARDEN_MOTE_INDEX
     uint16_t rowmask[GARDEN_ROWS];  /* bit i: mote i draws on this row */
 #endif
+    GardenVeg veg[2];   /* [0] old_seed, [1] new_seed; see GardenVeg */
 } GardenFrame;
 void garden_prepare(GardenFrame *frame,float time);
 // Enable independently seeded decorative-ray births; call before prepare.
@@ -447,6 +476,9 @@ extern int g_garden_scalar_tweaks;
 // The canopy blend on the PIE unit (scene/canopy_pie.c) instead of the scalar
 // statement in garden_canopy_row: 1 = the kernel, 0 = the scalar statement.
 extern int g_garden_canopy_pie;
+// The vegetation row invariants taken once a frame instead of once a row; see
+// GardenVeg above. 1 = hoisted. TEMPORARY, flipped by flower.c's SPLIT3 block.
+extern int g_garden_veg_hoist;
 // The decor mix on the PIE unit (scene/garden_decor_pie.c) instead of the scalar
 // statement in garden_decor_row: 1 = the kernel, 0 = the scalar statement. The
 // kernel only takes a full group of eight pixels from a 16-byte-aligned pointer,
