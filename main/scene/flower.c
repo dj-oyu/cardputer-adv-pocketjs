@@ -20,7 +20,26 @@
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
 #include "esp_log.h"
+// The scene's own cycle brackets, and until 2026-09-22 they were in the
+// SHIPPING build: 27 counter reads in this file, 14 of them inside ray_row,
+// each pair wrapped in a "memory" clobber that also forbids the compiler from
+// scheduling across it. That is instructions and spills in the hottest loop of
+// a scene whose largest single cost turned out to be its code not fitting in a
+// 16 KB instruction cache (docs/perf/ray-stall-census.md 2.5) -- so measuring
+// the scene was making the scene the thing it was measuring.
+//
+// SCENE_PROF brings back SPLIT / SPLIT2 / SPLIT3 and everything that reads
+// them (tools/flower_instrument_capture.py, tools/flower_instrument_summary.py).
+// Without it the counters are dead stores and the compiler removes them.
+#if defined(ESP_PLATFORM) && defined(SCENE_PROF)
+#define PROF_ON 1
 #define PROF_FENCE __asm__ __volatile__("":::"memory")
+#define PROF_CC()  esp_cpu_get_cycle_count()
+#else
+#define PROF_ON 0
+#define PROF_FENCE do{}while(0)
+#define PROF_CC()  0u
+#endif
 static uint32_t prof_total,prof_garden,prof_visits,prof_hits,prof_frames;
 static uint32_t prof_sqrt,prof_sqrtn,prof_shade,prof_bell,prof_belln;
 static uint32_t prof_span,prof_spann,prof_div,prof_divn,prof_scan,prof_pre;
@@ -154,8 +173,6 @@ static uint32_t prof_horror,prof_horrorn;
 // channel's 0..63. Below it, nothing is emitted at all.
 #ifndef FLOWER_BLOOM_MIN
 #define FLOWER_BLOOM_MIN 34
-#endif
-#ifdef ESP_PLATFORM
 #endif
 // The camera, set by the rotator and read by flower_prepare. Preparing a
 // species directly -- which the tests do -- leaves them at the old fixed pose,
@@ -698,8 +715,8 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
         garden->decor_rng.state=0;
         garden->decor_ready=false;
     }
-#ifdef ESP_PLATFORM
-    PROF_FENCE;uint32_t q0=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+    PROF_FENCE;uint32_t q0=PROF_CC();PROF_FENCE;
 #endif
     if(view_pending)
         garden_prepare_layout((GardenFrame*)(seed_map+32*32),bloom_weather_time,
@@ -709,12 +726,12 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
     // new as it is. Keeping the flag outside and the data inside would be the
     // one way to get this wrong.
     if(rebuild)seeds_ready=false;
-#ifdef ESP_PLATFORM
-    PROF_FENCE;uint32_t q1=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+    PROF_FENCE;uint32_t q1=PROF_CC();PROF_FENCE;
 #endif
     prepare_seeds();
-#ifdef ESP_PLATFORM
-    PROF_FENCE;uint32_t q2=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+    PROF_FENCE;uint32_t q2=PROF_CC();PROF_FENCE;
 #endif
     // Plants sway around their roots rather than rotating upside down, and the
     // sway is now a small motion ON TOP of wherever the camera is standing.
@@ -738,8 +755,8 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
     float yaw=(framed?view_yaw:0)+rocking;
     float pitch=framed?view_pitch:.12f;
     flower_build_botanicals(current_species,yaw,pitch);
-#ifdef ESP_PLATFORM
-    PROF_FENCE;uint32_t q3=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+    PROF_FENCE;uint32_t q3=PROF_CC();PROF_FENCE;
     prof_pgarden+=q1-q0;prof_pseeds+=q2-q1;prof_pbuild+=q3-q2;
 #endif
     for(unsigned i=0;i<count;i++) {
@@ -849,11 +866,11 @@ void flower_prepare(float dt,int tilt_x,int tilt_y,flower_species_t species) {
         p->ymin=clampi(ifloor(65-cam_s*(p->c.y+p->ey-cam_y)),12,H-1);
         p->ymax=clampi(iceil (65-cam_s*(p->c.y-p->ey-cam_y)),12,H-1);
     }
-#ifdef ESP_PLATFORM
+#if PROF_ON
     // Per part, not per frame: the species differ by a factor of three in part
     // count, so a frame figure alone cannot say whether this loop is expensive
     // or merely long.
-    PROF_FENCE;prof_ppetal+=esp_cpu_get_cycle_count()-q3;prof_ppetaln+=count;PROF_FENCE;
+    PROF_FENCE;prof_ppetal+=PROF_CC()-q3;prof_ppetaln+=count;PROF_FENCE;
 #endif
     // Consumed here, after both readers. See the note at `framed`.
     view_pending=0;
@@ -1394,15 +1411,15 @@ static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm
             // counter that reports a plausible wrong number is worse than no
             // counter; this one was moved rather than deleted because there is
             // a real question here, but the name it had has to go with it.
-#ifdef ESP_PLATFORM
-            PROF_FENCE;uint32_t bs=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;uint32_t bs=PROF_CC();PROF_FENCE;
 #endif
 #ifdef FLOWER_BELL_CHECK
             saw_root=true;if(!rejected)bell_discs++;   /* the shipping build never walks a rejected visit */
 #endif
             float sd=FLOWER_SQRT(disc);
-#ifdef ESP_PLATFORM
-            PROF_FENCE;prof_div+=esp_cpu_get_cycle_count()-bs;prof_divn++;PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;prof_div+=PROF_CC()-bs;prof_divn++;PROF_FENCE;
 #endif
 #ifdef FLOWER_DIV_EXACT
             roots[nr++]=(-b+sd)/a;roots[nr++]=(-b-sd)/a;
@@ -1502,13 +1519,13 @@ bell_hit_at(const Petal *p,float dx,float dy,float *best,V *norm) {
 static void ray_row(uint16_t *row,int y) {
     // Preserve the woodland under overlapping petals during the dissolve.
     // Automatic storage only; no extra full-frame or persistent pixel buffer.
-#ifdef ESP_PLATFORM
-    PROF_FENCE;uint32_t p0=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+    PROF_FENCE;uint32_t p0=PROF_CC();PROF_FENCE;
 #endif
     uint16_t backdrop[FW];memcpy(backdrop,row+X0,sizeof backdrop);
-#ifdef ESP_PLATFORM
-    PROF_FENCE;prof_pre+=esp_cpu_get_cycle_count()-p0;
-    uint32_t c0=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+    PROF_FENCE;prof_pre+=PROF_CC()-p0;
+    uint32_t c0=PROF_CC();PROF_FENCE;
 #endif
     for(unsigned i=0;i<count;i++) {
         const Petal *p=&petals[i];if(y<p->ymin||y>p->ymax)continue;
@@ -1527,9 +1544,9 @@ static void ray_row(uint16_t *row,int y) {
         // PIE is not floating-point SIMD: retain conservative hit masks near
         // d=0, prove ranges, and compare silhouettes/depth with this reference.
         // Bell clipping is a separate path; measure it before extending this.
-#ifdef ESP_PLATFORM
+#if PROF_ON
         prof_visits+=(uint32_t)(p->xmax-p->xmin+1);
-        PROF_FENCE;uint32_t x0=esp_cpu_get_cycle_count();PROF_FENCE;
+        PROF_FENCE;uint32_t x0=PROF_CC();PROF_FENCE;
 #endif
         float ob[4];
         if(p->shape)bell_row_terms(p,dy,ob);
@@ -1542,18 +1559,18 @@ static void ray_row(uint16_t *row,int y) {
                 // discriminant, square root and pair of divisions, and
                 // 59-64% of them miss. Dividing ray_row by `hits` hides it
                 // completely.
-#ifdef ESP_PLATFORM
-                PROF_FENCE;uint32_t v0=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+                PROF_FENCE;uint32_t v0=PROF_CC();PROF_FENCE;
                 bool got=bell_hit(p,dx,ob,&z,&n);
-                PROF_FENCE;prof_bell+=esp_cpu_get_cycle_count()-v0;prof_belln++;PROF_FENCE;
+                PROF_FENCE;prof_bell+=PROF_CC()-v0;prof_belln++;PROF_FENCE;
                 if(got) {
 #else
                 if(bell_hit(p,dx,ob,&z,&n)) {
 #endif
                     depth[x-X0]=z;
-#ifdef ESP_PLATFORM
+#if PROF_ON
                     prof_hits++;
-                    PROF_FENCE;uint32_t b0=esp_cpu_get_cycle_count();PROF_FENCE;
+                    PROF_FENCE;uint32_t b0=PROF_CC();PROF_FENCE;
 #endif
                     // Every hit is shaded. The run sharing existed only because
                     // the row was about to be blurred; with no blur a coarsely
@@ -1561,8 +1578,8 @@ static void ray_row(uint16_t *row,int y) {
                     // 1.7 ms it was giving back goes with it too.
                     sh_px=x;sh_py=y;
             uint16_t lit=shade(n,i,(V){dx+p->c.x,dy+p->c.y,z});
-#ifdef ESP_PLATFORM
-                    PROF_FENCE;prof_shade+=esp_cpu_get_cycle_count()-b0;PROF_FENCE;
+#if PROF_ON
+                    PROF_FENCE;prof_shade+=PROF_CC()-b0;PROF_FENCE;
 #endif
                     row[x]=dissolve(backdrop[x-X0],lit);
                 }
@@ -1584,38 +1601,38 @@ static void ray_row(uint16_t *row,int y) {
             // rsqrt0.s would need one chain and none. Nothing here is a soft
             // float: shade's own arithmetic compiles to madd.s/mul.s and the
             // object has no __mulsf3 or __addsf3 relocation at all.
-#ifdef ESP_PLATFORM
-            PROF_FENCE;uint32_t s0=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;uint32_t s0=PROF_CC();PROF_FENCE;
 #endif
             float root=FLOWER_SQRT(d);
-#ifdef ESP_PLATFORM
-            PROF_FENCE;prof_sqrt+=esp_cpu_get_cycle_count()-s0;prof_sqrtn++;PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;prof_sqrt+=PROF_CC()-s0;prof_sqrtn++;PROF_FENCE;
 #endif
             float dz=(-b+root)*p->invzz,z=dz+p->c.z;
             if(z<=depth[x-X0])continue;
             depth[x-X0]=z;
-#ifdef ESP_PLATFORM
+#if PROF_ON
             prof_hits++;
 #endif
             V n={p->q[0]*dx+p->q[3]*dy+p->q[4]*dz,
                  p->q[3]*dx+p->q[1]*dy+p->q[5]*dz,
                  p->q[4]*dx+p->q[5]*dy+p->q[2]*dz};
-#ifdef ESP_PLATFORM
-            PROF_FENCE;uint32_t h0=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;uint32_t h0=PROF_CC();PROF_FENCE;
 #endif
             sh_px=x;sh_py=y;
             uint16_t lit=shade(n,i,(V){dx+p->c.x,dy+p->c.y,z});
-#ifdef ESP_PLATFORM
-            PROF_FENCE;prof_shade+=esp_cpu_get_cycle_count()-h0;PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;prof_shade+=PROF_CC()-h0;PROF_FENCE;
 #endif
             row[x]=dissolve(backdrop[x-X0],lit);
         }
-#ifdef ESP_PLATFORM
-        PROF_FENCE;prof_span+=esp_cpu_get_cycle_count()-x0;prof_spann++;PROF_FENCE;
+#if PROF_ON
+        PROF_FENCE;prof_span+=PROF_CC()-x0;prof_spann++;PROF_FENCE;
 #endif
     }
-#ifdef ESP_PLATFORM
-    PROF_FENCE;prof_scan+=esp_cpu_get_cycle_count()-c0;PROF_FENCE;
+#if PROF_ON
+    PROF_FENCE;prof_scan+=PROF_CC()-c0;PROF_FENCE;
 #endif
 }
 #if FLOWER_HORROR
@@ -1662,7 +1679,7 @@ static void horror_bloom_row(uint16_t *row) {
                     // distance at one average and one store a pixel.
                     acc=avg565(acc,row[X0+xx]);
                     row[X0+xx]=acc;
-#ifdef ESP_PLATFORM
+#if PROF_ON
                     prof_horrorn++;
 #endif
                 }
@@ -1713,7 +1730,7 @@ static void horror_row(uint16_t *row) {
         else if(lvl>40)out=avg565(hit,out);
         else if(lvl)out=avg565(out,avg565(hit,out));
         row[x]=out;
-#ifdef ESP_PLATFORM
+#if PROF_ON
         prof_horrorn++;
 #endif
     }
@@ -1753,10 +1770,10 @@ void flower_draw(uint16_t *pixels,int y,int height) {
     else {garden_prepare(&fallback,elapsed);garden=&fallback;}
     for(int j=0;j<height;j++) {
         int py=y+j;uint16_t *row=pixels+j*W;
-#ifdef ESP_PLATFORM
-        PROF_FENCE;uint32_t t0=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+        PROF_FENCE;uint32_t t0=PROF_CC();PROF_FENCE;
         garden_row_blend(row,py,garden,bloom_garden_old_seed,bloom_garden_mix);
-        PROF_FENCE;uint32_t t1=esp_cpu_get_cycle_count();PROF_FENCE;
+        PROF_FENCE;uint32_t t1=PROF_CC();PROF_FENCE;
         prof_garden+=t1-t0;
 #else
         garden_row_blend(row,py,garden,bloom_garden_old_seed,bloom_garden_mix);
@@ -1766,8 +1783,8 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         // The roots continue beyond the bottom edge, like the garden grasses.
         // A margin at y=119 visibly severed every stem above the ground.
         if(py<12||!depth) {
-#ifdef ESP_PLATFORM
-            PROF_FENCE;prof_total+=esp_cpu_get_cycle_count()-t0;PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;prof_total+=PROF_CC()-t0;PROF_FENCE;
 #endif
             continue;
         }
@@ -1789,21 +1806,21 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         // the whole frame blooming, not the plant -- the outside-the-silhouette
         // constraint belongs to the tasteful bloom and does not apply here.
         if(horror_level) {
-#ifdef ESP_PLATFORM
-            PROF_FENCE;uint32_t hh=esp_cpu_get_cycle_count();PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;uint32_t hh=PROF_CC();PROF_FENCE;
 #endif
             horror_bloom_row(row);
             horror_row(row);
-#ifdef ESP_PLATFORM
-            PROF_FENCE;prof_horror+=esp_cpu_get_cycle_count()-hh;PROF_FENCE;
+#if PROF_ON
+            PROF_FENCE;prof_horror+=PROF_CC()-hh;PROF_FENCE;
 #endif
         }
 #endif
-#ifdef ESP_PLATFORM
-        PROF_FENCE;prof_total+=esp_cpu_get_cycle_count()-t0;PROF_FENCE;
+#if PROF_ON
+        PROF_FENCE;prof_total+=PROF_CC()-t0;PROF_FENCE;
 #endif
     }
-#ifdef ESP_PLATFORM
+#if PROF_ON
     if(y+height>=H&&++prof_frames>=60) {
         double tot=prof_total/240000.0/prof_frames,gar=prof_garden/240000.0/prof_frames;
         // The vector half of garden_row, so that `garden` can be split into
@@ -1942,6 +1959,14 @@ void flower_draw(uint16_t *pixels,int y,int height) {
                      " per_cycle=%.4f | pixels_cy=%u ev=%u per_cycle=%.4f",
                      ev,prof_frames,pm0,pm1,pm0?(double)pm1/pm0:0.0,
                      xp0,xp1,xp0?(double)xp1/xp0:0.0);
+            {
+                uint32_t e0,e1,en,l0,l1,ln;
+                garden_prof_row_split(&e0,&e1,&en,&l0,&l1,&ln);
+                ESP_LOGI("garden","ROWSPLIT ev=%-11s early(%u rows) cy/row=%u ev/cy=%.4f"
+                         " | late(%u rows) cy/row=%u ev/cy=%.4f",
+                         ev,en,en?e0/en:0,e0?(double)e1/e0:0.0,
+                         ln,ln?l0/ln:0,l0?(double)l1/l0:0.0);
+            }
         }
 #endif
 #ifdef FLOWER_AB3

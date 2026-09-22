@@ -11,7 +11,26 @@
 #endif
 // TEMPORARY (see garden.h). One rsr.ccount either side of the vector half,
 // twice a row; the fences stop the compiler moving work across them.
+// The scene's own cycle brackets, and until 2026-09-22 they were in the
+// SHIPPING build: 14 counter reads in this file, around every row pass,
+// each pair wrapped in a "memory" clobber that also forbids the compiler from
+// scheduling across it. That is instructions and spills in the hottest loop of
+// a scene whose largest single cost turned out to be its code not fitting in a
+// 16 KB instruction cache (docs/perf/ray-stall-census.md 2.5) -- so measuring
+// the scene was making the scene the thing it was measuring.
+//
+// SCENE_PROF brings back SPLIT / SPLIT2 / SPLIT3 and everything that reads
+// them (tools/flower_instrument_capture.py, tools/flower_instrument_summary.py).
+// Without it the counters are dead stores and the compiler removes them.
+#if defined(ESP_PLATFORM) && defined(SCENE_PROF)
+#define PROF_ON 1
 #define GARDEN_FENCE __asm__ __volatile__("":::"memory")
+#define PROF_CC()  esp_cpu_get_cycle_count()
+#else
+#define PROF_ON 0
+#define GARDEN_FENCE do{}while(0)
+#define PROF_CC()  0u
+#endif
 static uint32_t garden_pixel_cycles;
 uint32_t garden_prof_pixels(void) {
     uint32_t v=garden_pixel_cycles;garden_pixel_cycles=0;return v;
@@ -104,6 +123,17 @@ static uint32_t garden_ray_pm0,garden_ray_pm1;
 // kernel or to the machine it is running on. Two kernels of completely
 // different shape showing the same fraction is not a property of either.
 static uint32_t garden_pix_pm0,garden_pix_pm1;
+// The same event split by row index. If a frame's once-per-frame preparation
+// (flower_build_botanicals is 9,725 bytes on its own, flower_prepare 3,135,
+// garden_prepare_layout 1,916) evicts the row loop from a 16 KB cache, the
+// first rows of every frame pay to pull it back and the rest run warm. If
+// instead the row loop simply does not fit, every row pays the same. The two
+// have completely different answers, and one bucket boundary separates them.
+#ifndef GARDEN_EARLY_ROWS
+#define GARDEN_EARLY_ROWS 16
+#endif
+static uint32_t garden_early_pm0,garden_early_pm1,garden_early_rows;
+static uint32_t garden_late_pm0,garden_late_pm1,garden_late_rows;
 static unsigned garden_ray_sel;
 // PM0 is always cycles; PM1 is the question of the window.
 static const struct {const char *name;uint16_t select,mask;} garden_ray_events[]={
@@ -154,6 +184,14 @@ static void garden_ray_perf_arm(unsigned sel) {
         eri_write(ERI_PERFMON_PMCTRL0+id*4,pmc);
     }
     eri_write(ERI_PERFMON_PGM,PGM_PMEN);
+}
+// The row-index split of the pixel pass; see GARDEN_EARLY_ROWS above.
+void garden_prof_row_split(uint32_t *e0,uint32_t *e1,uint32_t *en,
+                           uint32_t *l0,uint32_t *l1,uint32_t *ln) {
+    *e0=garden_early_pm0;*e1=garden_early_pm1;*en=garden_early_rows;
+    *l0=garden_late_pm0;*l1=garden_late_pm1;*ln=garden_late_rows;
+    garden_early_pm0=garden_early_pm1=garden_early_rows=0;
+    garden_late_pm0=garden_late_pm1=garden_late_rows=0;
 }
 uint32_t garden_prof_ray_perf(uint32_t *pm1,const char **name,
                               uint32_t *pix_pm0,uint32_t *pix_pm1) {
@@ -436,10 +474,10 @@ uint32_t garden_prof_canopy(uint32_t *rows) {
 #endif
 static inline void garden_canopy_row(uint16_t *row,int lo,int hi,int cx,int mrr,int qy,
                                      uint16_t leafy) {
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t c0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#if PROF_ON
+    GARDEN_FENCE;uint32_t c0=PROF_CC();GARDEN_FENCE;
     garden_canopy_row_body(row,lo,hi,cx,mrr,qy,leafy);
-    GARDEN_FENCE;garden_canopy_cycles+=esp_cpu_get_cycle_count()-c0;
+    GARDEN_FENCE;garden_canopy_cycles+=PROF_CC()-c0;
     garden_canopy_rows++;GARDEN_FENCE;
 #else
     garden_canopy_row_body(row,lo,hi,cx,mrr,qy,leafy);
@@ -1549,10 +1587,10 @@ static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
     // GARDEN_MOTE_OUTLINE that is a load and a branch rather than 401 bytes of
     // code the instruction cache has to walk past.
     if(f->rowmask[y]) {
-#ifdef ESP_PLATFORM
-        GARDEN_FENCE;uint32_t m0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#if PROF_ON
+        GARDEN_FENCE;uint32_t m0=PROF_CC();GARDEN_FENCE;
         garden_mote_rowpass(row,y,f,dens,&r);
-        GARDEN_FENCE;garden_mote_cycles+=esp_cpu_get_cycle_count()-m0;
+        GARDEN_FENCE;garden_mote_cycles+=PROF_CC()-m0;
         garden_mote_rows++;GARDEN_FENCE;
 #else
         garden_mote_rowpass(row,y,f,dens,&r);
@@ -1985,8 +2023,8 @@ static void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsig
     }
 }
 static void garden_atmosphere_row(uint16_t *row,int y,const GardenFrame *f) {
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t pt0=esp_cpu_get_cycle_count();
+#if PROF_ON
+    GARDEN_FENCE;uint32_t pt0=PROF_CC();
 #ifdef GARDEN_RAY_PERF
     uint32_t w0=eri_read(ERI_PERFMON_PM0),w1=eri_read(ERI_PERFMON_PM1);
 #endif
@@ -1994,40 +2032,44 @@ static void garden_atmosphere_row(uint16_t *row,int y,const GardenFrame *f) {
     garden_pixels_row(row,y,f);
     GARDEN_FENCE;
 #ifdef GARDEN_RAY_PERF
-    garden_pix_pm0+=eri_read(ERI_PERFMON_PM0)-w0;
-    garden_pix_pm1+=eri_read(ERI_PERFMON_PM1)-w1;
+    {
+        uint32_t d0=eri_read(ERI_PERFMON_PM0)-w0,d1=eri_read(ERI_PERFMON_PM1)-w1;
+        garden_pix_pm0+=d0;garden_pix_pm1+=d1;
+        if(y<GARDEN_EARLY_ROWS){garden_early_pm0+=d0;garden_early_pm1+=d1;garden_early_rows++;}
+        else{garden_late_pm0+=d0;garden_late_pm1+=d1;garden_late_rows++;}
+    }
 #endif
-    garden_pixel_cycles+=esp_cpu_get_cycle_count()-pt0;GARDEN_FENCE;
+    garden_pixel_cycles+=PROF_CC()-pt0;GARDEN_FENCE;
 #else
     garden_pixels_row(row,y,f);
 #endif
 #if GARDEN_DECOR_RAYS && !GARDEN_MOTE_ONLY
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t rt0=esp_cpu_get_cycle_count();
+#if PROF_ON
+    GARDEN_FENCE;uint32_t rt0=PROF_CC();
 #ifdef GARDEN_RAY_PERF
     uint32_t q0=eri_read(ERI_PERFMON_PM0),q1=eri_read(ERI_PERFMON_PM1);
 #endif
     GARDEN_FENCE;
 #endif
     garden_decor_row(row,y,f);
-#ifdef ESP_PLATFORM
+#if PROF_ON
     GARDEN_FENCE;
 #ifdef GARDEN_RAY_PERF
     garden_ray_pm0+=eri_read(ERI_PERFMON_PM0)-q0;
     garden_ray_pm1+=eri_read(ERI_PERFMON_PM1)-q1;
 #endif
-    garden_ray_cycles+=esp_cpu_get_cycle_count()-rt0;garden_ray_rows++;GARDEN_FENCE;
+    garden_ray_cycles+=PROF_CC()-rt0;garden_ray_rows++;GARDEN_FENCE;
 #endif
 #endif
 }
 void garden_row(uint16_t *row,int y,const GardenFrame *f) {
     garden_atmosphere_row(row,y,f);
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t vt0=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#if PROF_ON
+    GARDEN_FENCE;uint32_t vt0=PROF_CC();GARDEN_FENCE;
 #endif
     garden_vegetation_row(row,y,f,f->seed);
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;garden_veg_cycles+=esp_cpu_get_cycle_count()-vt0;
+#if PROF_ON
+    GARDEN_FENCE;garden_veg_cycles+=PROF_CC()-vt0;
     garden_veg_rows++;garden_veg_passes++;GARDEN_FENCE;
 #endif
 }
@@ -2035,12 +2077,12 @@ void garden_row_blend(uint16_t *row,int y,const GardenFrame *f,unsigned old_seed
     if(mix>=256||old_seed==f->seed) {garden_row(row,y,f);return;}
     garden_atmosphere_row(row,y,f);
     if(!mix) {
-#ifdef ESP_PLATFORM
-        GARDEN_FENCE;uint32_t vt1=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#if PROF_ON
+        GARDEN_FENCE;uint32_t vt1=PROF_CC();GARDEN_FENCE;
 #endif
         garden_vegetation_row(row,y,f,old_seed);
-#ifdef ESP_PLATFORM
-        GARDEN_FENCE;garden_veg_cycles+=esp_cpu_get_cycle_count()-vt1;
+#if PROF_ON
+        GARDEN_FENCE;garden_veg_cycles+=PROF_CC()-vt1;
         garden_veg_rows++;garden_veg_passes++;GARDEN_FENCE;
 #endif
         return;
@@ -2049,14 +2091,14 @@ void garden_row_blend(uint16_t *row,int y,const GardenFrame *f,unsigned old_seed
     // occlude the SAME lit row, then dissolve between those two results.
     // One 480-byte temporary row, no retained frame or second flower trace.
     uint16_t next[240];memcpy(next,row,sizeof next);
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;uint32_t vt2=esp_cpu_get_cycle_count();GARDEN_FENCE;
+#if PROF_ON
+    GARDEN_FENCE;uint32_t vt2=PROF_CC();GARDEN_FENCE;
     garden_dissolve_rows++;
 #endif
     garden_vegetation_row(row,y,f,old_seed);
     garden_vegetation_row(next,y,f,f->seed);
-#ifdef ESP_PLATFORM
-    GARDEN_FENCE;garden_veg_cycles+=esp_cpu_get_cycle_count()-vt2;
+#if PROF_ON
+    GARDEN_FENCE;garden_veg_cycles+=PROF_CC()-vt2;
     garden_veg_rows++;garden_veg_passes+=2;GARDEN_FENCE;
 #endif
     for(int x=0;x<240;x++)row[x]=garden_mix(row[x],next[x],mix);

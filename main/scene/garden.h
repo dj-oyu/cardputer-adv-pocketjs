@@ -486,6 +486,8 @@ extern int g_garden_veg_hoist;
 // walk the list. See the block over garden_prof_ray_perf in garden.c.
 uint32_t garden_prof_ray_perf(uint32_t *pm1,const char **name,
                               uint32_t *pix_pm0,uint32_t *pix_pm1);
+void garden_prof_row_split(uint32_t *e0,uint32_t *e1,uint32_t *en,
+                           uint32_t *l0,uint32_t *l1,uint32_t *ln);
 #endif
 // The decor mix on the PIE unit (scene/garden_decor_pie.c) instead of the scalar
 // statement in garden_decor_row: 1 = the kernel, 0 = the scalar statement. The
