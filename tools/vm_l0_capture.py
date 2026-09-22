@@ -494,8 +494,9 @@ def main():
     for c in conds:
         if c not in CONDITIONS:
             p.error(f"unknown condition {c}")
-    if 'X' in letters and conds != ['base']:
-        p.error('hello requires --conditions base (no contention wrapper)')
+    if 'X' in letters and 'ui' in conds:
+        p.error('hello builds its own Kasane scene; the ui condition would '
+                'build a second one over it (app_session.c drops the bit)')
 
     out_path = pathlib.Path(a.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

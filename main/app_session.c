@@ -753,8 +753,15 @@ source_ready:;
     // The condition script keeps its own failures to itself (it logs a VMCOND
     // line and continues), so a Wi-Fi that will not link degrades the
     // condition and is recorded, instead of ending the session.
-    if(test>='A'&&test<='F') {
+    // 'X' is hello, a shipped app rather than a probe workload, and it takes
+    // the conditions too: what a real app's frame costs while the audio task
+    // and the radio compete is the question the guard's margin is judged by
+    // (docs/vm/vm-L2-results.md sec.8.4). Its UI bit is dropped -- hello owns
+    // the APP layer with its own Kasane scene, and condition.js would build a
+    // second one over it.
+    if((test>='A'&&test<='F')||test=='X') {
         unsigned mask=vmprobe_condition();
+        if(test=='X') mask&=~1u;
         ESP_LOGI("app","VMCOND start mask=%u",mask);
         if(mask) {
             char select[32];

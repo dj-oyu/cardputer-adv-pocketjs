@@ -8,7 +8,7 @@
 
 | # | 項目 | 出典 | 状態 |
 | --- | --- | --- | --- |
-| 11 | L2c 実機統合: 要求API・実行ターンtimer・leave無効化・guestの2ビット/3起点・stopの後ろ盾とFAIRのpump抑止を実装。両順序の寿命・故障回復・中断中Backホスト経路を検証。両順序で中断中FRAME＋USB Back→実保存→stop hookと再起動後の読取・診断キー削除も確認。暴走frame/jobの停止時間は両順序各3回採取。2026-09-23にYIELD=y/nの2ビルドで実アプリ5本のframe累積時間（最大47.4ms、閾値250msの5.3分の1、多ターンdrainは0件）と通常経路の費用（実機turn_ms 0.17→0.22、Flash +3,784B、DIRAM +32B）を採った。閾値近傍（48,000反復=239.6msは完走、52,000=256.0msで停止）と競合条件（frame最悪値 audio +2.0ms / wifi +8.1ms）も採った（results §8.4）。総合関所も FULL_PASS（results §8.5、30周、`d54f753`）。残りは物理入力、実アプリを競合条件下で測ること、既定値の確定。なお`apps/vmprobe/condition.js`のUI条件は旧`pocket.ui`依存で現在は効かない | design §11.8, results §4.4〜4.9, §4.15〜4.16, §8 | 実装・検証中 |
+| 11 | L2c 実機統合: 要求API・実行ターンtimer・leave無効化・guestの2ビット/3起点・stopの後ろ盾とFAIRのpump抑止を実装。両順序の寿命・故障回復・中断中Backホスト経路を検証。両順序で中断中FRAME＋USB Back→実保存→stop hookと再起動後の読取・診断キー削除も確認。暴走frame/jobの停止時間は両順序各3回採取。2026-09-23にYIELD=y/nの2ビルドで実アプリ5本のframe累積時間（最大47.4ms、閾値250msの5.3分の1、多ターンdrainは0件）と通常経路の費用（実機turn_ms 0.17→0.22、Flash +3,784B、DIRAM +32B）を採った。閾値近傍（48,000反復=239.6msは完走、52,000=256.0msで停止）と競合条件（frame最悪値 audio +2.0ms / wifi +8.1ms）も採った（results §8.4）。総合関所も FULL_PASS（results §8.5、30周、`d54f753`）。実アプリ（hello）の競合条件下も採った（results §8.7、最悪frame 9.90ms、閾値まで25倍）。condition.jsのUI条件は`pocket.kasane`へ書き直し済み。`CONFIG_POCKET_VM_YIELD`は既定yにし、その構成で総合関所 FULL_PASS（results §8.6）。TCO/FAIRは互換性の判断が残るためnのまま。残りは物理入力と、PET/COMPANIONを競合条件下で測ること | design §11.8, results §4.4〜4.9, §4.15〜4.16, §8 | 実装・検証中 |
 
 ## L2 で完了済みの項目（参考）
 
