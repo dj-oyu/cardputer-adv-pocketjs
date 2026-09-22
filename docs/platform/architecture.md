@@ -113,7 +113,9 @@ QuickJS heap limitはRust製core、renderer、フォントなどのメモリを�
 
 srcstoreは最大8192bytesのソースを16スロットで保存する（0はユーザー、1以降は教材用）。各スロットは12KiBブロック×2面の24KiB、全体384KiB。CRC付き二面保存。`pocket.storage`と`pocket.workspace`（[common-api.md](../api/common-api.md) 7節）はこのsrcstoreを公開APIの背後に隠すバックエンドとして使う。汎用ファイルシステムやwear levelingではない。
 
-エディタの**未保存の文書は、画面を閉じるときに下書きとして flash へ置かれる**（2026-09-23）。バッファは8KiBのheapで、`code_close()`が解放し次の`code_open()`がflashから読み直すので、保存していない編集は画面を離れた時点で消えていた。下書きは所属スロットを持つ1件だけの記録で、スロットを1つ増やすのではなく`pocket.fs`の後ろ（`SRCSTORE_DRAFT_BASE`=0xa0000、2面で24KiB）に置く — `pocket_fs.c`が`SRC_SLOT_COUNT`からファイルシステムの先頭を計算しており、スロットを増やすと保存済みのファイルが全部ずれるため。保存に成功したとき、実行前の保存が通ったとき、そのスロットを`srcstore_clear()`で忘れるときに消える。実機の検査は`tools/test_editor_draft.py`。`pocket.fs`（同7節、[filesystem-api.md](../api/filesystem-api.md)）は別の保存領域（`app:`/`assets:`/`sd:`）を持つ。
+エディタの**未保存の文書は、画面を閉じるときに下書きとして flash へ置かれる**（2026-09-23）。バッファは8KiBのheapで、`code_close()`が解放し次の`code_open()`がflashから読み直すので、保存していない編集は画面を離れた時点で消えていた。下書きは所属スロットを持つ1件だけの記録で、スロットを1つ増やすのではなく`pocket.fs`の後ろ（`SRCSTORE_DRAFT_BASE`=0xa0000、2面で24KiB）に置く — `pocket_fs.c`が`SRC_SLOT_COUNT`からファイルシステムの先頭を計算しており、スロットを増やすと保存済みのファイルが全部ずれるため。保存に成功したとき、実行前の保存が通ったとき、そのスロットを`srcstore_clear()`で忘れるときに消える。実機の検査は`tools/test_editor_draft.py`。
+
+**この下書きの範囲は本文だけで、意図的にそこで止める**（2026-09-23の判断）。カーソル位置とundo履歴は戻さない — 完全な復元が目的ではなく、打った文字が消えないことが目的。SKK練習や設定・Wi-Fi画面の入力途中は対象外で、それらは「編集中」という状態を持たない。JSアプリの途中状態も保存しない（保存したいアプリは`pocket.storage`を自分で使う。POCKET PETがそうしている）。`pocket.fs`（同7節、[filesystem-api.md](../api/filesystem-api.md)）は別の保存領域（`app:`/`assets:`/`sd:`）を持つ。
 
 ## 未解決事項
 
