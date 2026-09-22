@@ -984,3 +984,34 @@ live最大は全方針でhello456B、A148B、B20460B、C172B、D148B、E160B、F
 **Test262 の toString（部分集合の外、`built-ins/Function/prototype/toString`、o2）**: 既定 150 合格／10 不合格、`-keepsrc` 158／2。新しく落ちるのは 5 ファイル×2 モード: `method-computed-property-name`、`private-method-class-expression`、`private-method-class-statement`、`private-static-method-class-expression`、`private-static-method-class-statement`。名前が計算プロパティや `#x` になり、代替の文字列が NativeFunction の文法に合わない。そのほかの toString テストは `[native code]` 形も受け付けるので通る。逆に `line-terminator-normalisation-LF` は既定でだけ通る。
 
 再現: `bash tools/vmtest/build.sh o2 && bash tools/vmtest/build.sh o2-keepsrc`、`python3 tools/vmtest/test262.py --variant o2 built-ins/Function/prototype/toString`（チェックアウトに `git -C .cache/test262 sparse-checkout add test/built-ins/Function/prototype/toString` が必要）。
+## 7. §4.23 の既存失敗2件の原因（backlog #15、2026-09-23、`vm/main`）
+
+どちらも VM の不具合ではなかった。1件はテストを直し、もう1件は時間の伸び方を測って記録した。
+
+### 7.1 `seg_oom_boundary`: テストがヒープを上限まで詰めていた（実測(host)、device プロファイル）
+
+`null` は、OOM の後に InternalError そのものを確保できなかったときの上流の挙動である（`JS_ThrowOutOfMemory` は入れ子の OOM を投げない）。
+
+- OOM 時点の充当は `used=162,500`（-keepsrc）/ `162,180`（既定）で、上限 163,840 B に対して残りは約 1.3 KB だった。失敗した要求は `new Array(1 << 14).fill()` が 1.5 倍ずつ伸びる途中の realloc（57,552→86,320 B）。テストの冒頭コメントは「1回で上限を超える大きな要求」と説明しているが、実際には上限に忍び寄る形だった。`memory_device.js` は同じ理由で既に `Array.apply` に替えてあった（backlog #9 のとき）。
+- 1回目と2回目の間に残るブロックを、アロケータのトレースとスタック表示で調べた。
+  - 1,079 B は VM スタックのセグメントで、2回目に再利用されるので余裕を減らさない。
+  - 183 B の `build_backtrace` の文字列を含む5ブロック 439 B は、1回目の Error と読める。トップレベルの catch 束縛がフレームの slot に残っていて、2回目の試行中も生きている。
+  - 残りの 462 B（8ブロック）の中身は特定していない。
+  - このため2回目の余裕は1回目より狭い。-keepsrc は関数ソースの分だけ 320 B 狭く、エラーを作れなかった。
+- トレースを付けると GC 観測用オブジェクトの分だけ配置がずれ、失敗しなくなる。印を入れてソースを数バイト変えても同じだった。§6.2 の「配置が変わっただけ」はこの感度のことである。
+- 修正: `Array.apply(null, { length: 60000 })` で配列を1回で要求する（host 960,000 B）。OOM 時点の充当は約 105,000 B に下がり、余裕は約 58 KB になった。期待出力は変えていない。
+- 関所: `seg_oom_boundary` 単体で 22 通りすべて合格した。内訳は asan / o2 / asan-recur / asan-flat / asan-alloca / asan-yield / asan-tco / asan-lazy / o2-eager の各既定と -keepsrc、および asan-yield / asan-tco（両モード）の `--force-yield`。
+
+### 7.2 `tco_guards`: 毎中断 GC が深さに対して2乗（実測(host)、asan-yield、`--profile host --gc-on-yield --force-yield`）
+
+`wide(100000)` と `big(100000)` は予算の RangeError まで再帰する。`--force-yield` は呼び出しごとに中断し、`--gc-on-yield` は再開のたびに `JS_RunGC` を呼ぶ。GC は中断中の全フレームを辿るので、1回の費用が深さに比例し、全体は深さの2乗になる。
+
+| `--vm-budget` | safepoint | 時間 |
+| --- | ---: | ---: |
+| 256K | 2,248 | 0.4 秒 |
+| 512K | 4,332 | 2.2 秒 |
+| 1M | 8,500 | 7.1 秒 |
+| 2M | 16,838 | 31.0 秒 |
+| 既定（7 MiB、打ち切りなし） | 58,518 | 366 秒 |
+
+既定の予算でも完走し、出力は期待値と一致した。366 秒は別のビルドと並行して測った値。§4.23 の exit=124 は `run.sh` の 300 秒打ち切りで、ハングではない。予算拒否の検査は、`tools/vmtest/README.md` のとおり `VMTEST_VMRUN_FLAGS='--gc-on-yield --vm-budget 64K'` で行う。
