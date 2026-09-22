@@ -73,7 +73,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 ## 主線3: デザインシステム Kasane — [`kasane/`](kasane/)
 
-描画・QuickJS・PocketJS に依存しない C の基盤と、その上のデザインシステム。**開発は `vm/design-contracts` ブランチで進んでいる。** 2026-09-15のvm/main同期で、このブランチの最新仕様・実装記録をこのディレクトリへ統合した。
+描画・QuickJS・PocketJS に依存しない C の基盤と、その上のデザインシステム。**開発は `feature/kasane` ブランチで進め、区切りごとに `vm/main` へマージする。** 2026-09-16までは `vm/design-contracts` で進めていた（全コミットが `vm/main` に統合済みで、2026-09-23に削除）。以下の文書に残る `vm/design-contracts` はその時点の記録。
 
 | 文書 | 種別 | 中身 |
 | --- | --- | --- |

@@ -9,7 +9,7 @@ Solのhost契約試験は成功済みだが、改名・プリミティブ追加�
 
 - 各チェックポイントは独立してビルド可能な変更にする。
 - ESP32-S3・PSRAMなしのESP-IDFビルドと必要なhost試験が通った時点で、必ず
-  `vm/design-contracts`へcommitし、`origin/vm/design-contracts`へpushする。
+  `feature/kasane`へcommitし、`origin/feature/kasane`へpushする（2026-09-23まで`vm/design-contracts`）。
   push成功を確認してから次のチェックポイントへ進む。複数機能の未コミット差分を積み上げない。
 - 実機確認が必要な区切りは、その結果も記録する。ビルド成功と実機確認済みを区別する。
   実機不具合の修正もビルド・試験後に別commit・pushする。
