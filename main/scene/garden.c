@@ -4,6 +4,15 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+// The other half of flower.c's FLOWER_HOT_IRAM probe: the garden's per-row
+// functions. Together with shade/bell_span/ray_row this is essentially the
+// whole row loop, which is what decides whether "make it fit in 16 KB" is a
+// target with a number or a target with no number at all.
+#if defined(ESP_PLATFORM) && defined(FLOWER_HOT_IRAM)
+#define GARDEN_HOT IRAM_ATTR
+#else
+#define GARDEN_HOT
+#endif
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
 #include "esp_attr.h"
@@ -31,15 +40,6 @@
 #define PROF_ON 0
 #define GARDEN_FENCE do{}while(0)
 #define PROF_CC()  0u
-#endif
-// The other half of flower.c's FLOWER_HOT_IRAM probe: the garden's per-row
-// functions. Together with shade/bell_span/ray_row this is essentially the
-// whole row loop, which is what decides whether "make it fit in 16 KB" is a
-// target with a number or a target with no number at all.
-#if defined(ESP_PLATFORM) && defined(FLOWER_HOT_IRAM)
-#define GARDEN_HOT IRAM_ATTR
-#else
-#define GARDEN_HOT
 #endif
 static uint32_t garden_pixel_cycles;
 uint32_t garden_prof_pixels(void) {

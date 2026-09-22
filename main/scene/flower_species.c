@@ -31,7 +31,29 @@ static V cross(V a,V b) {return (V){a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*
 // species faster than it gains callers, and a signature change here would
 // conflict with every one of them.
 static float rot_c,rot_s,rot_cp,rot_sp;
-static V rotate(V a,float yaw,float pitch) {
+// The construction primitives, forced out of line.
+//
+// GCC inlines every one of these into flower_build_botanicals, which is how one
+// function that runs ONCE a frame became 9,725 bytes: part() alone is called
+// dozens of times in a species (twenty-six in sunflower's petal loop), and each
+// call site got its own copy. Only one species' branch executes in a frame, so
+// the fourteen branches were never the problem -- the duplication inside the
+// executing one was.
+//
+// That size is not idle. docs/perf/ray-stall-census.md 2.9 measures this
+// function out of the instruction cache at -3.18 ms (crocus) and -4.72 ms
+// (daffodil): the scene's per-frame instruction footprint is about 27.5 KB
+// against a 16 KB cache, and this was 36% of it.
+//
+// The call costs nothing that matters here. These run about thirty to sixty
+// times a FRAME, not per pixel -- some tens of cycles against a term measured
+// in milliseconds. FLOWER_NO_PRIM_OUTLINE builds the inlined form for A/B.
+#ifdef FLOWER_NO_PRIM_OUTLINE
+#define PRIM
+#else
+#define PRIM __attribute__((noinline))
+#endif
+static PRIM V rotate(V a,float yaw,float pitch) {
     (void)yaw;(void)pitch;
     float c=rot_c,s=rot_s,cp=rot_cp,sp=rot_sp;
     V b={c*a.x-s*a.y,s*a.x+c*a.y,a.z};
@@ -39,7 +61,7 @@ static V rotate(V a,float yaw,float pitch) {
 }
 // Build long axes from endpoints, so stems, leaves and hanging petals share
 // the analytic ellipsoid path. No extra mesh storage per botanical part.
-static void part(V a,V b,float width,float thick,unsigned material,float yaw,float pitch) {
+static PRIM void part(V a,V b,float width,float thick,unsigned material,float yaw,float pitch) {
     if(count>=MAX_PARTS)return;
     Petal *p=&petals[count++];V d=add(b,mul(a,-1));float len=sqrtf(dot(d,d));
     p->c=rotate(mul(add(a,b),.5f),yaw,pitch);
@@ -49,10 +71,10 @@ static void part(V a,V b,float width,float thick,unsigned material,float yaw,flo
     p->material=material;p->shape=0;
 }
 static V bezier(V a,V b,V c,float t) {return add(add(mul(a,(1-t)*(1-t)),mul(b,2*t*(1-t))),mul(c,t*t));}
-static void stem(V a,V b,V c,int steps,float radius,float yaw,float pitch) {
+static PRIM void stem(V a,V b,V c,int steps,float radius,float yaw,float pitch) {
     for(int i=0;i<steps;i++)part(bezier(a,b,c,(float)i/steps),bezier(a,b,c,(float)(i+1)/steps),radius,radius,LEAF,yaw,pitch);
 }
-static void bell(V top,float size,float lean,float yaw,float pitch) {
+static PRIM void bell(V top,float size,float lean,float yaw,float pitch) {
     if(count>=MAX_PARTS)return;
     Petal *p=&petals[count++];
     V down={fx_sinf(lean),-fx_cosf(lean),0},side={fx_cosf(lean),fx_sinf(lean),0};
@@ -61,7 +83,7 @@ static void bell(V top,float size,float lean,float yaw,float pitch) {
     p->radius[0]=size*.36f;p->radius[1]=size*.52f;p->radius[2]=size*.36f;
     p->material=IVORY;p->shape=1;
 }
-static void trumpet(V root,V direction,float length,float radius,unsigned material,unsigned shape,float yaw,float pitch) {
+static PRIM void trumpet(V root,V direction,float length,float radius,unsigned material,unsigned shape,float yaw,float pitch) {
     if(count>=MAX_PARTS)return;
     Petal *p=&petals[count++];V axis=normal(direction);
     V side=normal(cross(axis,fabsf(axis.z)>.9f?(V){0,1,0}:(V){0,0,1}));
@@ -87,7 +109,7 @@ static void trumpet(V root,V direction,float length,float radius,unsigned materi
 #ifndef FLOWER_CUP
 #define FLOWER_CUP .055f
 #endif
-static void cup(V root,float size,unsigned material,float yaw,float pitch) {
+static PRIM void cup(V root,float size,unsigned material,float yaw,float pitch) {
     // Six tepals in two whorls: upright, overlapping ellipsoidal surfaces.
     for(int i=0;i<6;i++) {
         float a=i*PI/3+.25f,r=((material==VIOLET?.39f:.27f)+FLOWER_CUP*fx_sinf(elapsed*.8f))*size;
@@ -111,6 +133,30 @@ static void cup(V root,float size,unsigned material,float yaw,float pitch) {
 #define PREP_IRAM IRAM_ATTR
 #else
 #define PREP_IRAM
+#endif
+// The discriminator for FLOWER_PREP_IRAM, and it is the difference between a
+// rewrite that is worth hours and one that is worth nothing.
+//
+// Moving flower_build_botanicals (9,725 B) to IRAM was measured at -3.18 ms
+// (crocus) and -4.72 ms (daffodil). Two explanations fit that:
+//
+//   occupancy -- the cache no longer has to hold it, so the row loop fits.
+//                Making the function SMALLER would win the same thing, and a
+//                table-driven rewrite is worth doing.
+//   layout    -- vacating 9,725 bytes pulls every function after it 9,725
+//                closer, changing which cache set each one lands in
+//                (9725 mod 2048 = 1557, so a real reshuffle). That is the 15%
+//                alignment effect CLAUDE.md warns about, it is luck, and a
+//                rewrite would reroll the dice rather than win anything.
+//
+// FLOWER_PREP_PAD puts the address space back without putting the code back:
+// IRAM holds the function, and this occupies exactly what it vacated. If the
+// win survives, it is occupancy. If it evaporates, it was layout.
+#ifdef FLOWER_PREP_PAD
+__attribute__((used,noinline))
+static void flower_prep_pad(void) {
+    __asm__ __volatile__(".rept 4862\n nop.n\n.endr\n");
+}
 #endif
 void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
     // The only entry to rotate(), so the only place these have to be set. Every
