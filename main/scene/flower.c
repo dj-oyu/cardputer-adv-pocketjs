@@ -1131,6 +1131,17 @@ static const flower_material_t flower_materials[16]={
 #else
 #define HOT_IRAM
 #endif
+// A separate arm for the once-a-frame code. It is not in the row loop, so its
+// execution time is only the 0.36-0.48 ms the SPLIT2 `build=` field reports --
+// but it is 9,725 bytes that the cache has to hold, and the per-frame footprint
+// is what does not fit. Moving it to IRAM changes its occupancy without
+// changing its cost, which is exactly the question a table-driven rewrite would
+// be answering, at a fraction of the work.
+#if defined(ESP_PLATFORM) && defined(FLOWER_PREP_IRAM)
+#define PREP_IRAM IRAM_ATTR
+#else
+#define PREP_IRAM
+#endif
 static HOT_IRAM uint16_t shade(V n,int petal,V hit) {
     unsigned material=petals[petal].material;
     // By material and not by geometry or colour. The enum already says which

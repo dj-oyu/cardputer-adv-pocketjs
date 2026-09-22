@@ -6,6 +6,7 @@
 #include <string.h>
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
+#include "esp_attr.h"
 #if GARDEN_MOTE_ONLY
 #include "esp_log.h"
 #endif
@@ -30,6 +31,15 @@
 #define PROF_ON 0
 #define GARDEN_FENCE do{}while(0)
 #define PROF_CC()  0u
+#endif
+// The other half of flower.c's FLOWER_HOT_IRAM probe: the garden's per-row
+// functions. Together with shade/bell_span/ray_row this is essentially the
+// whole row loop, which is what decides whether "make it fit in 16 KB" is a
+// target with a number or a target with no number at all.
+#if defined(ESP_PLATFORM) && defined(FLOWER_HOT_IRAM)
+#define GARDEN_HOT IRAM_ATTR
+#else
+#define GARDEN_HOT
 #endif
 static uint32_t garden_pixel_cycles;
 uint32_t garden_prof_pixels(void) {
@@ -1527,7 +1537,7 @@ static inline void garden_mote_rowpass(uint16_t *row,int y,const GardenFrame *f,
 }
 #endif
 #endif
-static void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
+static GARDEN_HOT void garden_pixels_row(uint16_t *row,int y,const GardenFrame *f) {
     int center,width;garden_shaft(y,f,&center,&width);
     // Everything below is invariant across the row. It used to be recomputed
     // 240 times per row because it sat inside the pixel loop: the trunk hashes
@@ -1738,7 +1748,7 @@ static int garden_decor_arrival(const GardenDecor *d,int y,int end) {
 //   1 = the gated path (the shipping one)   0 = the pre-2026-09-15 path
 int g_garden_decor_gate=1;
 static void __attribute__((unused))
-garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
+GARDEN_HOT garden_decor_row(uint16_t *row,int y,const GardenFrame *f) {
     int center,half;garden_shaft(y,f,&center,&half);
     for(int layer=0;layer<4;layer++) {
         GardenDecor decor=f->decor_ready
@@ -1949,7 +1959,7 @@ static void garden_veg_derive(GardenVeg *v,unsigned seed,int phase) {
         if((h>>14)&1)v->grass_wide|=1u<<i;
     }
 }
-static void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsigned seed) {
+static GARDEN_HOT void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsigned seed) {
     // The slot the layout was prepared into, or the old cost on the stack if
     // this seed was never prepared -- garden_row_blend takes old_seed from its
     // caller and nothing makes that agree with garden_prepare_layout's.
@@ -2022,7 +2032,7 @@ static void garden_vegetation_row(uint16_t *row,int y,const GardenFrame *f,unsig
         }
     }
 }
-static void garden_atmosphere_row(uint16_t *row,int y,const GardenFrame *f) {
+static GARDEN_HOT void garden_atmosphere_row(uint16_t *row,int y,const GardenFrame *f) {
 #if PROF_ON
     GARDEN_FENCE;uint32_t pt0=PROF_CC();
 #ifdef GARDEN_RAY_PERF

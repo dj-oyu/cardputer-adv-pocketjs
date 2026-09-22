@@ -96,6 +96,22 @@ static void cup(V root,float size,unsigned material,float yaw,float pitch) {
         part(bottom,top,size*.20f,size*.075f,material,yaw,pitch);
     }
 }
+// A probe, not a decision. This function is 9,725 bytes and runs ONCE a frame,
+// so its execution time is small (the SPLIT2 `build=` field puts it at 0.36-0.48
+// ms) -- and on that basis it was dismissed as a target. That was the wrong
+// measure. The scene's per-frame instruction footprint is about 27.5 KB against
+// a 16 KB cache (docs/perf/ray-stall-census.md 2.8), and this is 36% of it. What
+// it costs as an OCCUPANT is a different number from what it costs as work.
+//
+// FLOWER_PREP_IRAM moves it out of the cache without changing a line of what it
+// computes, which is the same question a table-driven rewrite would answer, for
+// none of the work and none of the risk to the geometry.
+#if defined(ESP_PLATFORM) && defined(FLOWER_PREP_IRAM)
+#include "esp_attr.h"
+#define PREP_IRAM IRAM_ATTR
+#else
+#define PREP_IRAM
+#endif
 void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
     // The only entry to rotate(), so the only place these have to be set. Every
     // caller of rotate -- part, bell, trumpet, and stem through part -- is
