@@ -141,13 +141,23 @@ menu "Pocket VM (L0 measurement probes)"
     config POCKET_VM_YIELD
         bool "Suspend and resume JS at audited opcode safepoints (L2c)"
         depends on POCKET_VM_FLATCALLS
-        default n
+        default y
         help
             Implements the L2c save-and-resume path described by
-            docs/vm/vm-L2-design.md sec.11. The switch stays off while the
-            mechanism is landing in independently testable stages. With it
-            off, forced VM stops retain the pre-L2c uncatchable-interrupt
-            behaviour and the shipping path is unchanged.
+            docs/vm/vm-L2-design.md sec.11. On since 2026-09-23: the
+            mechanism landed stage by stage, and what it costs has been
+            measured rather than guessed (docs/vm/vm-L2-results.md sec.8) --
+            +0.05 ms on the JS turn (0.17 -> 0.22 on hello, three reflashes
+            each), +3,784 B of flash, +32 B of static DRAM. The frame guard
+            it brings charges a frame's accumulated execution time against
+            VM_FRAME_RUNAWAY_US; the five shipped JS apps spend at most
+            47.4 ms in one frame, a factor of 5.3 under it, and a frame at
+            239.6 ms completes while one at 256.0 ms is stopped.
+
+            With it off, forced VM stops retain the pre-L2c uncatchable
+            interrupt and there is no frame guard at all. Turning it off is
+            still the way to compare against that path; it is not a smaller
+            build in any sense that matters.
 
     config POCKET_VM_TCO
         bool "Experimental strict tail-call frame reuse"

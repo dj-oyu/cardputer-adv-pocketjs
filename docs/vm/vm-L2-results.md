@@ -1145,3 +1145,21 @@ firmware SHA-256 `68b23d90ef141ca8a338bb0e011e807afc6d8166bb111ffa51902bce0c8c9c
 報告が対象外と明記するもの: 実LCD・音声の物理確認、SNTPの実時刻変更、sleep電流、全周辺機器と
 ファイルシステムの故障系統。この関所は L2c の既定値そのものを検査するものではなく、
 **YIELD=n の出荷構成が壊れていないこと**を示す（ビルドは `sdkconfig.defaults` のまま）。
+
+### 8.6 L2c を既定にする（2026-09-23、`main/Kconfig.projbuild`）
+
+`CONFIG_POCKET_VM_YIELD` を `default n` から `default y` にした。根拠は §8.1〜8.5 の実測で、
+値段（JSターン +0.05ms、Flash +3,784B、DIRAM +32B）と、持ち込む frame ガードの余裕
+（実アプリ最大 47.4ms に対し閾値 250ms、239.6ms は完走・256.0ms で停止）を測ったうえでの切り替え。
+`POCKET_VM_TCO` と `POCKET_VM_FAIR` は n のまま — 前者は `Error.stack` と再帰上限を、
+後者は JS から観測できるジョブ順序を変えるので、値段ではなく互換性の判断が要る。
+
+新しい既定での総合関所（`--cycles 30`）: **FULL_PASS、全10段階**。
+firmware SHA-256 `9abbb52c8acb1937…`、30周すべてで free 219,768 / largest 77,824 B。
+報告は `.cache/system-full-yield-default/report.json`。YIELD=n の同じ関所（§8.5）との差は
+free −32 B で、静的 DIRAM の +32 B と符合する。
+
+ホスト側も既定を写した（`tools/vmtest/build.sh`）。無印の `asan` / `o2` が YIELD 有効になり、
+旧経路は新しい接尾辞 `-noyield` で作る。`-alloca` と `-recur` は FLATCALLS を落とすので
+YIELD も一緒に落とす（Kconfig の `depends on` と同じ規則）。コーパスは `asan` 75/75、
+`asan-noyield` 75/75。

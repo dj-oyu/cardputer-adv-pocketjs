@@ -41,8 +41,10 @@ Each condition is one USB byte the firmware turns into a bit mask, and the JS
 side of it is apps/vmprobe/condition.js, evaluated on top of the workload:
 
   base  'P'  nothing but the workload.
-  ui    'Q'  a pocket.ui screen (rect + text) whose text is set every frame,
-             so the UI core's tick, layout and draw are inside every turn.
+  ui    'Q'  a pocket.kasane scene (background + rect + text) whose text is
+             set and submitted every frame, so composition and the transfer
+             are inside every turn. Was a pocket.ui screen until 2026-09-23;
+             that API left the firmware in CP24-25.
   audio 'R'  pocket.audio.tone, 440 Hz 1 s, re-armed from its own completion:
              the real synthesiser, the real I2S path, the audio task at
              priority 7 preempting the ui task at 5.

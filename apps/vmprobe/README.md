@@ -44,7 +44,7 @@ USB文字は順に`G H I J K O`。キャッシュ方針は変更せず、実行�
 | 条件 | 字 | 実際に動くもの |
 | --- | --- | --- |
 | base | `P` | ワークロードだけ |
-| ui | `Q` | `pocket.ui` の画面（rect + text）を作り、**毎フレーム** `setText`。UI コアの tick・レイアウト・draw が毎ターンに入る |
+| ui | `Q` | `pocket.kasane` の scene（background + rect + text）を作り、**毎フレーム** `setText` して submit。合成と転送が毎ターンに入る（2026-09-23に旧 `pocket.ui` から書き直した。その API は CP24–25 で削除済み） |
 | audio | `R` | `pocket.audio.tone` 440Hz 1 秒を完了から張り直す。合成も I2S も本物で、優先度 7 の音声タスクが優先度 5 の ui タスクを止める |
 | wifi | `T` | `pocket.net.wifi.acquire` で走行中ずっとリンクを保持し、3 秒ごとに GET を 1 回、本文を EOF まで読む |
 | all | `W` | 上の 3 つ同時 |
