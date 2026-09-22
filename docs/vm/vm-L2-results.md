@@ -1128,3 +1128,20 @@ USB へ 20ms ごとにバイトを送る負荷では 239,699µs（+約 50µs、0
 **条件スクリプトの欠損（記録）**: `apps/vmprobe/condition.js` の UI 条件（mask 1）は旧 `pocket.ui` を呼ぶ。
 CP24–25 でその API は削除されたので、`ui` と `all` の条件は現在そのまま走らせても UI 負荷を作らない。
 本節が audio と wifi を単独で使ったのはそのため。直すなら `pocket.kasane` で書き直す。
+
+### 8.5 総合関所（実測(device)、2026-09-23、`d54f753`）
+
+`tools/system_full_test.py` を `--cycles 30` で通した。**FULL_PASS、全10段階成功。**
+firmware SHA-256 `68b23d90ef141ca8a338bb0e011e807afc6d8166bb111ffa51902bce0c8c9cda`、
+報告は `.cache/system-full-backlog11/report.json`。
+
+| 段階 | 秒 |
+| --- | ---: |
+| system-host / kasane-native / kasane-js（sanitized・optimized） | 29.7 / 238.4 / 9.6 / 7.2 |
+| firmware-build / taffy-exclusion / flash | 260.5 / 1.9 / 16.1 |
+| device-animation / device-system / device-lifetime（30周） | 12.0 / 7.7 / 23.8 |
+
+30周すべてで free 219,800 / largest 77,824 B の一定値。`--cycles` は既定の100ではなく30。
+報告が対象外と明記するもの: 実LCD・音声の物理確認、SNTPの実時刻変更、sleep電流、全周辺機器と
+ファイルシステムの故障系統。この関所は L2c の既定値そのものを検査するものではなく、
+**YIELD=n の出荷構成が壊れていないこと**を示す（ビルドは `sdkconfig.defaults` のまま）。
