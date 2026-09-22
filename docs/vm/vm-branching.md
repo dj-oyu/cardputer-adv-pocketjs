@@ -30,8 +30,11 @@ vm/l2a-segments    ●──●          ●──●  vm/l2b-frames …     段
 **改造用の作業ツリーは1本にした（2026-09-12、L2 着手前）。**
 
 ```text
-C:\devs\m5stack\cardputer-adv-pocketjs   vm/main（ここで改造を進める）
+C:\devs\m5stack\cardputer-adv-pocketjs          vm/main（ここで改造を進める）
+C:\devs\m5stack\cardputer-adv-pocketjs-kasane   feature/kasane（Kasane。VM の改造とは別系統で main へ戻す）
 ```
+
+Kasane のツリーは VM の段とは関係なく常設する（2026-09-23）。Kasane の作業を `vm/main` に載せない。
 
 L0・L1 の間は `-vm`（vm/*）・`-bench`（時計ベンチ）・`-chore`（音声アプリ削除）の3本を
 並べていたが、段階が終わっても枝とツリーが残り、**どこに何があるか誰も分からない状態**に
