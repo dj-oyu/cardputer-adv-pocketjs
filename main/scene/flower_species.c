@@ -118,46 +118,36 @@ static PRIM void cup(V root,float size,unsigned material,float yaw,float pitch) 
         part(bottom,top,size*.20f,size*.075f,material,yaw,pitch);
     }
 }
-// A probe, not a decision. This function is 9,725 bytes and runs ONCE a frame,
-// so its execution time is small (the SPLIT2 `build=` field puts it at 0.36-0.48
-// ms) -- and on that basis it was dismissed as a target. That was the wrong
-// measure. The scene's per-frame instruction footprint is about 27.5 KB against
-// a 16 KB cache (docs/perf/ray-stall-census.md 2.8), and this is 36% of it. What
-// it costs as an OCCUPANT is a different number from what it costs as work.
+// A probe that produced a wrong answer, kept because the answer is instructive.
 //
-// FLOWER_PREP_IRAM moves it out of the cache without changing a line of what it
-// computes, which is the same question a table-driven rewrite would answer, for
-// none of the work and none of the risk to the geometry.
+// This function is 9,725 bytes and runs ONCE a frame, so its execution time is
+// small -- SPLIT2's `build=` field puts it at 0.36-0.48 ms. Moving it out of the
+// instruction cache with FLOWER_PREP_IRAM measured -3.18 ms (crocus) and -4.72
+// (daffodil), which looked like proof that occupancy is a second price on the
+// same bytes and that shrinking this function was worth hours.
+//
+// It was not. Vacating 9,725 bytes pulls every function after it that much
+// closer, and at 16 KB the cache aliased every 2,048 bytes, so that reshuffled
+// which set each one landed in. Padding the address space back returned the
+// frame to baseline. See the note below and ray-stall-census.md 2.10.
+//
+// The instruction cache is 32 KB now and the reshuffle no longer happens, so
+// this switch measures nothing interesting any more. It stays as the shape of
+// an experiment that needed a control and nearly did not get one.
 #if defined(ESP_PLATFORM) && defined(FLOWER_PREP_IRAM)
 #include "esp_attr.h"
 #define PREP_IRAM IRAM_ATTR
 #else
 #define PREP_IRAM
 #endif
-// The discriminator for FLOWER_PREP_IRAM, and it is the difference between a
-// rewrite that is worth hours and one that is worth nothing.
-//
-// Moving flower_build_botanicals (9,725 B) to IRAM was measured at -3.18 ms
-// (crocus) and -4.72 ms (daffodil). Two explanations fit that:
-//
-//   occupancy -- the cache no longer has to hold it, so the row loop fits.
-//                Making the function SMALLER would win the same thing, and a
-//                table-driven rewrite is worth doing.
-//   layout    -- vacating 9,725 bytes pulls every function after it 9,725
-//                closer, changing which cache set each one lands in
-//                (9725 mod 2048 = 1557, so a real reshuffle). That is the 15%
-//                alignment effect CLAUDE.md warns about, it is luck, and a
-//                rewrite would reroll the dice rather than win anything.
-//
-// FLOWER_PREP_PAD puts the address space back without putting the code back:
-// IRAM holds the function, and this occupies exactly what it vacated. If the
-// win survives, it is occupancy. If it evaporates, it was layout.
-#ifdef FLOWER_PREP_PAD
-__attribute__((used,noinline))
-static void flower_prep_pad(void) {
-    __asm__ __volatile__(".rept 4862\n nop.n\n.endr\n");
-}
-#endif
+// The pad that settled this stood here: a run of nops the size of this
+// function, built alongside FLOWER_PREP_IRAM so that the function moved out of
+// the cache while the address space it vacated stayed occupied. Moving the
+// function measured -3.18 ms (crocus) and -4.72 ms (daffodil); padding it back
+// gave 27.00 and 27.89 against baselines of 26.43 and 27.70. The win was the
+// reshuffle, not the occupancy, and four commits of timings went with it.
+// Deleted because the instruction cache is 32 KB now and the reshuffle it
+// exposed no longer happens. docs/perf/ray-stall-census.md 2.10 has the numbers.
 void flower_build_botanicals(flower_species_t species,float yaw,float pitch) {
     // The only entry to rotate(), so the only place these have to be set. Every
     // caller of rotate -- part, bell, trumpet, and stem through part -- is

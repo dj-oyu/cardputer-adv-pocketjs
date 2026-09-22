@@ -90,3 +90,36 @@ CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_FATFS_API_ENCODING_UTF_8=y
 # sd: is the only FATFS volume on this board.
 CONFIG_FATFS_VOLUME_COUNT=1
+
+# The instruction cache, doubled, and it is the largest single change ever made
+# to this scene's frame time -- without touching a line of the scene.
+#
+# 16 KB / 8 ways / 32 B lines is 64 sets, so the set index is (addr >> 5) & 63
+# and addresses alias every 2,048 bytes. FLOWER touches about 20.6 KB of
+# instructions in a frame: 643 lines, 10.1 per set against 8 ways. Conflict
+# misses were structural, and which line evicted which was decided by address
+# mod 2048 -- so moving any function by a non-multiple of 2,048 reshuffled every
+# function after it. A pixel-identical change that removed 354 bytes was
+# measured moving the frame by 5.5 ms, about 20%.
+#
+# 32 KB gives 128 sets and 5.0 lines per set, under the 8 ways. draw 26.4 -> 21.1
+# ms at a pinned species and view, and -- the reason this is worth 16 KiB of
+# DRAM rather than the 5.3 ms alone -- the sample spread collapses from 3.2 ms
+# to 1.4 and the frame time stops depending on where the compiler put things.
+#
+# This is what CLAUDE.md's standing "the same kernel moves 15% between builds"
+# always was. The full measurement, including four commits of timings retracted
+# on the way to finding it, is docs/perf/ray-stall-census.md 2.5-2.11.
+#
+# The cost is 16 KiB of DRAM: idle_free 250,032 -> 233,632 and the largest
+# contiguous block an app can get 110,592 -> 94,208. All four JS apps still
+# evaluate.
+#
+# NOTE for whoever changes a default next: adding a line here did NOT change an
+# existing build. sdkconfig already carried CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB
+# and an existing sdkconfig wins over sdkconfig.defaults for options it already
+# names -- defaults only supply options sdkconfig has not got. CLAUDE.md's
+# "sdkconfig.defaults の変更は全ビルドディレクトリの次回ビルドに効く" holds for a
+# fresh sdkconfig and not for an existing one, so this needed the same three
+# lines edited in sdkconfig itself. A fresh checkout gets it from here.
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
