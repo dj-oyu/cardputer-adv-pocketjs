@@ -20,6 +20,7 @@
 #ifdef ESP_PLATFORM
 #include "esp_cpu.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 // The scene's own cycle brackets, and until 2026-09-22 they were in the
 // SHIPPING build: 27 counter reads in this file, 14 of them inside ray_row,
 // each pair wrapped in a "memory" clobber that also forbids the compiler from
@@ -1117,7 +1118,20 @@ static const flower_material_t flower_materials[16]={
     [14]       = FLOWER_MATERIAL_DEFAULT,
     [15]       = FLOWER_MATERIAL_DEFAULT,
 };
-static uint16_t shade(V n,int petal,V hit) {
+// FLOWER_HOT_IRAM is a probe, not a decision. The scene's per-row code is about
+// 12 KB spread over 36 KB of address space with the once-a-frame code between
+// it, and it does not fit a 16 KB instruction cache
+// (docs/perf/ray-stall-census.md 2.5-2.7). Before reordering 10 KB of source to
+// make it contiguous, this asks the cheaper question: does taking ONE hot
+// function out of the cache entirely move the frame? IRAM is uncached SRAM on
+// this part, so it also spends DRAM -- 2,848 bytes for this one -- which is the
+// same currency a bigger cache costs, only in smaller change.
+#if defined(ESP_PLATFORM) && defined(FLOWER_HOT_IRAM)
+#define HOT_IRAM IRAM_ATTR
+#else
+#define HOT_IRAM
+#endif
+static HOT_IRAM uint16_t shade(V n,int petal,V hit) {
     unsigned material=petals[petal].material;
     // By material and not by geometry or colour. The enum already says which
     // parts are foliage, so the test is exact and costs a compare -- and a
@@ -1559,7 +1573,7 @@ bell_hit_at(const Petal *p,float dx,float dy,float *best,V *norm) {
 // frame. Splitting the span instead keeps the inlining where it is used and
 // keeps the code away from where it is not, so both species win.
 // FLOWER_NO_BELL_SPLIT builds the merged form from this same tree.
-static __attribute__((noinline))
+static __attribute__((noinline)) HOT_IRAM
 void bell_span(const Petal *p,unsigned i,int y,float dy,
                uint16_t *row,const uint16_t *backdrop) {
     float ob[4];
@@ -1596,7 +1610,7 @@ void bell_span(const Petal *p,unsigned i,int y,float dy,
         row[x]=dissolve(backdrop[x-X0],lit);
     }
 }
-static void ray_row(uint16_t *row,int y) {
+static HOT_IRAM void ray_row(uint16_t *row,int y) {
     // Preserve the woodland under overlapping petals during the dissolve.
     // Automatic storage only; no extra full-frame or persistent pixel buffer.
 #if PROF_ON
