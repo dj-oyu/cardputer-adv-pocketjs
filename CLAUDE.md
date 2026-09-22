@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 M5Stack Cardputer ADV（ESP32-S3FN8、PSRAMなし、240×135 LCD）向けのESP-IDFファームウェア。QuickJS版PocketJSでJSアプリを1つずつ実行する。設計ドキュメントは日本語、**コード内のコメントは英語**で、密度と「なぜ」を説明する文体に揃える。
 
-**ドキュメントの入口は `docs/README.md`。** 主線は VM の高速化（`docs/vm/`）、PIE と描画の高速化（`docs/perf/`）、デザインシステム Kasane（`docs/kasane/`、開発は `feature/kasane` で行い `vm/main` へマージする）の3本で、ほかは `api/` `platform/` `scenes/` `apps/` `archive/` に分けてある。新しい文書は該当ディレクトリに置いて索引に1行足す。**ファイル名は変えない** — 本文とCのコメントが名前で参照している。JSソース（`apps/**/*.js`、`tools/vmtest/**/*.js`）のコメントは、ゲストのヒープに効くので2026-09-15の移動前の古いパスのまま残してある。
+**ドキュメントの入口は `docs/README.md`。** 主線は VM の高速化（`docs/vm/`、開発は `vm/main`）、PIE と描画の高速化（`docs/perf/`）、デザインシステム Kasane（`docs/kasane/`、開発は `feature/kasane`）の3本で、どちらのブランチも `main` へマージする。ほかは `api/` `platform/` `scenes/` `apps/` `archive/` に分けてある。新しい文書は該当ディレクトリに置いて索引に1行足す。**ファイル名は変えない** — 本文とCのコメントが名前で参照している。JSソース（`apps/**/*.js`、`tools/vmtest/**/*.js`）のコメントは、ゲストのヒープに効くので2026-09-15の移動前の古いパスのまま残してある。
 
 ## ビルドと書き込み
 
