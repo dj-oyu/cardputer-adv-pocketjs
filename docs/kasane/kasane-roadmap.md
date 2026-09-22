@@ -25,74 +25,67 @@ QuickJS VM、VM scheduler、`pocket.*`の時計・保存・通信等はUIとは�
 
 ## 2. 現在の機能カバレッジ
 
+2026-09-23時点。checkpoint番号は[Astra実装計画](kasane-astra-plan.md)の表、数値と検証範囲は
+[kasane-progress.md](kasane-progress.md)による。2026-09-14版の本節（gate 9/13、アプリ移植0/5、
+Taffyリンク中）はgit履歴に残る。
+
 ### 2.1 実装済み
 
 | 項目 | 状態 | 現在の契約 |
 | --- | --- | --- |
 | 固定容量core | 完了 | APP 80命令、SYSTEM 16命令、2 bank、1命令32 B、heap確保なし |
-| 原子的REPLACE/PATCH | 完了 | submit、present、discard、cancel、世代付きticket。失敗時はbuilder全体をabort |
+| 原子的REPLACE/PATCH | 完了 | submit、present、discard、cancel、世代付きticket。失敗時はbuilder全体をabort（CP0） |
+| committed stateの修復 | 完了 | 転送失敗→cancel→JSなしで再描画（CP1） |
 | 矩形・clip・重なり順 | 完了 | append順にsource-over。自動layoutや部品木なし |
-| 透明度 | 完了 | RGBA、命令opacity、隔離group opacity |
+| 透明度 | 完了 | RGBA、命令opacity、隔離group opacity。group内gradientの最終ディザ（CP2） |
+| 角丸・枠線・gradient | 完了 | QuickJS公開済み（CP8） |
+| 文字 | 完了 | jpfontのcoverage renderer、日本語/fallback、JS TEXTとsetText/setReveal（CP9–10） |
+| 画像 | 完了 | crop/scale/span合成、PPT2 pet provider、JS image resource、伸縮・回転、native自動補間（CP12–13、17a/b） |
 | 差分更新 | 完了 | 前後命令を比較し、240×8の17帯をdirty maskで再描画 |
 | 軽量参照API | 完了 | `DrawRef`のsetRect/setClip/setColor/setVisible。公開参照は32件上限 |
-| 明示cache | 完了 | 48命令、8 template、16 instance。複数配置、移動、表示切替、明示release |
+| 明示cache | 完了 | 48命令、8 template、16 instance。lazy確保（CP3） |
 | modal | 完了 | 1個、入れ子なし、solid/dim-live、表示確定と入力scope/focusを同時commit |
 | QuickJS API | 完了 | `pocket.kasane`。同期build callback、thenable拒否、opaque wrapper、poll/cancel |
-| session/display owner | 完了 | 初回submitで旧rendererを解放。未描画提出とLCD修復をJSより先に処理 |
-| 遅延初期化 | 完了 | featuresだけならKasane arenaは0 B。S3で使用開始時14,440 B、静的DIRAM増分52 B |
+| host所有・APP lease | 完了 | guest破棄後もSYSTEMが継続（CP4）、input service分離（CP5）、guest直接dispatch（CP6） |
+| SYSTEM layer | 完了 | 電源・時計・通知・相対timer・録音表示・壁時計/鳴動をSystem ownerへ移管（CP14a–14e2）。Taffyなしフル受入試験FULL_PASS（CP14f） |
+| アプリ移植 | 完了 | hello（CP11）、imucal・bridge・companion・pet（CP19–22）、TUTORIAL/Playground（CP23） |
+| 旧UIとTaffyの除去 | 完了 | 旧`ui.*`は起動前に`APP_LEGACY_UI`で拒否（CP24）、出荷物から削除（CP25） |
 
 ### 2.2 一部実装
 
 | 項目 | 現在あるもの | 足りないもの |
 | --- | --- | --- |
-| 入力routing | `app/modal/blocked`を到着時に判定し、修復中を遮断 | action購読をscope別に自動配送するadapter、JSからのfocus key登録 |
-| SYSTEM layer | C endpointと16命令枠 | 通知、時計、電池、textfieldを載せるownerと公開adapter |
-| すりガラス | 2,048 B縮小snapshot、radius 1/2 blur、PIE span kernel | capture handle、modal attachment、damage/presentとの結線 |
-| 画像 | coreのresource登録、IMAGE保存、同期`read_span` | `ksn_view`許可、renderer、JS resource wrapper、pet adapter |
-| 文字 | coreのTEXT保存、容量、setText/setReveal | jpfont renderer、JS spec/ref、SYSTEM textfieldとの合成 |
+| 入力routing | `app/modal/blocked`を到着時に判定し、修復中を遮断 | scope別購読とfocusの原子的確定、modal Back配送（CP15） |
+| textfield | `pocket.input.text`の編集欄をKasaneの帯へ合成 | SYSTEMでのIME表示（preedit/caret、優先quota、CP16）。編集欄の実機表示は未確認 |
+| animation | 画像のnative自動補間と回転座標の加算化（CP17a/b） | 汎用animation track、JS APIとnative wake統合、reduce-motion（CP17–18） |
+| すりガラス | 2,048 B縮小snapshot、radius 1/2 blur、PIE span kernel | 明示capture（F0）、frost modalへのattach（F1） |
 
 ### 2.3 未実装
 
-- round-rect、stroke、gradientのQuickJS公開（C endpointとrendererは実装済み）
-- native animation、deadline scheduler、reduce-motion
+- replay可能なnative scene source（CP26）
+- home/shell/status/menuの移植（CP27）
+- deskclock/player overlayの移植（CP28）。overlay sessionは`pocket.kasane`を注入しない
+  （`app_session.c`がoverlayでKasaneのinstallを飛ばす）ため、native側の変更が先に要る。
+  経緯は`apps/deskclock/README.md`と`apps/player/README.md`
+- picker/Wi-Fi/editor/tutorial chrome/consoleの移植（CP29）、全LCD書込み経路の所有権監査（CP30）
 - transform、blur一般化、projective quad、3D renderer
 - pixel stream、frame mailbox、buffer lease、動画resource
 - schema loaderと薄いJS component library
-- 既存5アプリの移植、および旧PocketJS/Taffy依存の除去
+- PocketJS名称の整理（M5）
 
-移行可否を判断する13項目のgateでは、8項目完了、入力とSYSTEMの2項目が一部、
-文字・画像・アプリ移植の3項目が未完了である。部分を0.5として **9/13、約69%**。
-合成MUSTの中核は動作するが、文字と画像がないため「既存UIを完全に作れる69%」とは
-解釈しない。現時点で移植できるのは矩形だけの画面で、既存アプリ移植は0/5である。
+JSアプリの描画はすべてKasaneへ移った。残りはnative画面（home、overlay、picker、editor等）の
+所有権で、Astra計画の三段階では「出荷Taffy-free」まで到達し、「全UIのKasane所有」が未達である。
 
-実機の継時診断は9命令の通常画面と12命令のdim-live modalを300ターン動かした。
-通常時renderは約4.6–5.1 ms、modal中は約11.4–12.5 ms、10窓平均は
-JS turn 3.29 ms、render 7.70 ms、LCD send 3.18 ms。scopeはmodal表示成功時に
-`modal`、close表示成功時に`app`へ戻った。
+実機で未確認のもの（CP24–25の記録）: TUTORIAL/Playgroundの実機操作、`pocket.input.text`編集欄の
+実機表示、pet/companionの実機起動。いずれも保存データやNVSを書き換えるため試験から外した。
 
-## 3. Taffyが残る経路
+## 3. Taffyの除去（完了）
 
-Taffy 0.11は旧`pocketjs-core`の直接依存である。ESP-IDF側ではそのRust coreを含む
-二つのprebuilt archiveと、それを駆動するadapterが現在もリンクされている。
-
-```mermaid
-flowchart LR
-  Session[app_session] --> Guest[pocketjs_guest / QuickJS]
-  Session --> QJS[pocketjs_ui_qjs]
-  QJS --> Core[pocketjs_ui_core archive]
-  Session --> RGB[pocketjs_render_rgb565 archive]
-  RGB --> Core
-  Core --> PC[pocketjs-core]
-  RGB --> PC
-  PC --> Taffy[taffy 0.11]
-  Session --> Kasane[Kasane]
-```
-
-Kasaneアプリでもソース評価前に旧coreと`pocketjs_ui_qjs`を生成しているため、
-旧RGB565 rendererを省略できてもTaffyはまだ外れていない。
-`pocketjs_guest`はQuickJS所有、job drain、watchdog、VM schedulerの実装であり、
-Taffyには依存しない。まずUI関連3 componentを外し、その後にこのcomponentを
-`js_runtime`等へ改名する方が責務と差分を混ぜない。
+2026-09-17のCP24–25で、旧`pocketjs-core`（Taffy 0.11を直接依存に持つRust UI core）の
+prebuilt archive 2本と、`pocketjs_ui_qjs`、`pocket_ui.c`、`render_accel.c`をファームから外した。
+image 2,211,968→1,923,812 B（実測）。`pocketjs_guest`はQuickJS所有・job drain・watchdog・
+VM schedulerの実装でTaffyには依存しないため残り、`js_runtime`等への改名はM5で扱う。
+除去前の依存図はgit履歴にある。
 
 ## 4. 完全移行計画
 
