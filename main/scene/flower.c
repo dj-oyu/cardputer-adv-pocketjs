@@ -324,6 +324,14 @@ static uint32_t bloom_random(void) {
 // One of the other botanicals, so a draw never repeats the plant already up:
 // a rotation that shows the same flower twice looks like it has stopped.
 static flower_species_t bloom_next(flower_species_t from) {
+#ifdef FLOWER_PIN_SPECIES
+    // Measurement builds only. The rotation is random and a species is held for
+    // 40 s, so a run of 24 PERF windows (48 s) reports the median of whichever
+    // plant happened to be up -- which is how a 1.17 ms "improvement" got
+    // measured for a change that only moved code around. Pin the species and
+    // the two binaries are drawing the same thing.
+    (void)from;return (flower_species_t)FLOWER_PIN_SPECIES;
+#endif
 #ifdef FLOWER_AB3
     // Measurement build only. Four of the fourteen species have bell parts at
     // all (tools/test_bell_reject.c prints "no bell parts" for the other ten),
@@ -633,7 +641,20 @@ void flower_prepare_rotating(float dt,int tilt_x,int tilt_y) {
             // Cutting here is why there is no pan: the change is instant and
             // invisible, which a slide across two and a half seconds is not.
             fade=0;
+#ifdef FLOWER_PIN_SPECIES
+            // Measurement builds only, and the second half of pinning the
+            // scene. Pinning the species alone is not enough: the camera walks
+            // FLOWER_VIEWS shots, each held 40 s with its own zoom and pitch,
+            // and a 24-window run at a fixed species still straddles several of
+            // them. That is how the same change measured -1.66 ms and +0.07 ms
+            // on two runs -- the samples spanned 26 to 44 ms while the effect
+            // being looked for was under 2. Hold one shot and the frames become
+            // comparable; docs/perf/flower-shade.md 10 is the standing warning.
+            bloom_view=0;bloom_elapsed=0;
+            {
+#else
             if(++bloom_view>=FLOWER_VIEWS) {
+#endif
                 bloom_view=0;
                 bloom_species=bloom_next(bloom_species);
                 bloom_garden_old_seed=bloom_garden_seed;
@@ -1274,6 +1295,13 @@ bell_reject(const Petal *p,const float *o) {
 // `ob` carries the part of o[] that depends on the row rather than the column;
 // see petal_reciprocals. bell_hit_at below is the form that takes a bare
 // (dx,dy), for callers outside the span walk.
+// Inlined, and deliberately so -- into bell_span and nowhere else. This was
+// briefly given __attribute__((noinline)) to keep its six-band walk off the
+// ellipsoid path's cache lines, and the device priced that at -1.66 ms on a
+// species with no bells and +0.50 ms on one with them: 1,850 visits a frame
+// each paying ~65 cycles of lost inlining across the call boundary. Splitting
+// the span instead (see bell_span) separates the code without separating the
+// optimisation, so keep this inlinable.
 static bool bell_hit(const Petal *p,float dx,const float *ob,float *best,V *norm) {
     float o[3],d[3];
 #ifdef FLOWER_NO_SPAN_AFFINE
@@ -1516,6 +1544,58 @@ bell_hit_at(const Petal *p,float dx,float dy,float *best,V *norm) {
 // is the mean of two RGB565 pixels in four operations, exact for the even bits
 // and one low bit short on the odd ones -- which is a dither of sorts, and at
 // this amplitude is exactly the "use dither" the effect was asked to use.
+// The bell half of a span, lifted out of ray_row into a function of its own.
+//
+// `p->shape` is a property of the part, not of the pixel, so the test belongs
+// outside the loop -- but that is not why this is here. bell_hit is inlined
+// into it, which means a species WITHOUT bell parts never fetches a byte of the
+// six-band walk: ten of the fourteen have none (tools/test_bell_reject.c prints
+// "no bell parts" for them), and on those ten the whole of it was previously
+// sitting on the same 32-byte cache lines as the ellipsoid path that does run.
+//
+// Outlining bell_hit alone was tried first and measured: at a pinned species it
+// was -1.66 ms on crocus (no bells) and +0.50 ms on daffodil (bells), because
+// the call boundary costs ~65 cycles of lost inlining on each of 1,850 visits a
+// frame. Splitting the span instead keeps the inlining where it is used and
+// keeps the code away from where it is not, so both species win.
+// FLOWER_NO_BELL_SPLIT builds the merged form from this same tree.
+static __attribute__((noinline))
+void bell_span(const Petal *p,unsigned i,int y,float dy,
+               uint16_t *row,const uint16_t *backdrop) {
+    float ob[4];
+    bell_row_terms(p,dy,ob);
+    for(int x=p->xmin;x<=p->xmax;x++) {
+        float dx=DIVR(x+.5f-180,cam_inv,cam_s)+cam_x-p->c.x;
+        float z=depth[x-X0];V n;
+        // bell_hit is timed on every visit, not every hit, because that is how
+        // it runs: six conical bands, each with its own discriminant, square
+        // root and pair of divisions, and 59-64% of them miss. Dividing ray_row
+        // by `hits` hides it completely.
+#if PROF_ON
+        PROF_FENCE;uint32_t v0=PROF_CC();PROF_FENCE;
+        bool got=bell_hit(p,dx,ob,&z,&n);
+        PROF_FENCE;prof_bell+=PROF_CC()-v0;prof_belln++;PROF_FENCE;
+        if(!got)continue;
+#else
+        if(!bell_hit(p,dx,ob,&z,&n))continue;
+#endif
+        depth[x-X0]=z;
+#if PROF_ON
+        prof_hits++;
+        PROF_FENCE;uint32_t b0=PROF_CC();PROF_FENCE;
+#endif
+        // Every hit is shaded. The run sharing existed only because the row was
+        // about to be blurred; with no blur a coarsely shaded row is simply
+        // coarse, so it goes with it -- and the 1.7 ms it was giving back goes
+        // with it too.
+        sh_px=x;sh_py=y;
+        uint16_t lit=shade(n,i,(V){dx+p->c.x,dy+p->c.y,z});
+#if PROF_ON
+        PROF_FENCE;prof_shade+=PROF_CC()-b0;PROF_FENCE;
+#endif
+        row[x]=dissolve(backdrop[x-X0],lit);
+    }
+}
 static void ray_row(uint16_t *row,int y) {
     // Preserve the woodland under overlapping petals during the dissolve.
     // Automatic storage only; no extra full-frame or persistent pixel buffer.
@@ -1548,10 +1628,22 @@ static void ray_row(uint16_t *row,int y) {
         prof_visits+=(uint32_t)(p->xmax-p->xmin+1);
         PROF_FENCE;uint32_t x0=PROF_CC();PROF_FENCE;
 #endif
+#ifndef FLOWER_NO_BELL_SPLIT
+        if(p->shape) {
+            bell_span(p,i,y,dy,row,backdrop);
+#if PROF_ON
+            PROF_FENCE;prof_span+=PROF_CC()-x0;prof_spann++;PROF_FENCE;
+#endif
+            continue;
+        }
+        float ob[4];(void)ob;
+#else
         float ob[4];
         if(p->shape)bell_row_terms(p,dy,ob);
+#endif
         for(int x=p->xmin;x<=p->xmax;x++) {
             float dx=DIVR(x+.5f-180,cam_inv,cam_s)+cam_x-p->c.x;
+#ifdef FLOWER_NO_BELL_SPLIT
             if(p->shape) {
                 float z=depth[x-X0];V n;
                 // bell_hit is timed on every visit, not every hit, because
@@ -1585,6 +1677,7 @@ static void ray_row(uint16_t *row,int y) {
                 }
                 continue;
             }
+#endif
             float b=p->q[4]*dx+p->q[5]*dy;
             float c=p->q[0]*dx*dx+2*p->q[3]*dx*dy+p->q[1]*dy*dy-1;
             float d=b*b-p->q[2]*c;if(d<0)continue;
