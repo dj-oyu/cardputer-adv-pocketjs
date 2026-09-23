@@ -6989,7 +6989,12 @@ static void js_vm_reloc_fixup(JSRuntime *rt, const JSVMReloc *tab, uint32_t n,
     }
 }
 
-int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
+/* L3a/L4a: the shared body of JS_VMStackRelocate and JS_VMStackCompact. The
+   two differ only in how the new memory is laid out -- one block per old
+   segment, or one block for the whole chain -- and that is decided entirely
+   in quickjs-vmstack.h; the preconditions, the measurement of the old chain,
+   the fix-up and the release of the old blocks are the same code. */
+static int js_vm_stack_move(JSRuntime *rt, JSVMRelocStats *out, bool coalesce)
 {
     JSVMStack *st = &rt->vm_stack;
     JSVMReloc *tab;
@@ -7015,7 +7020,8 @@ int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
     if (st->pins)
         return -1;
 
-    if (js_vm_stack_reloc_copy(rt, st, &tab, &n) < 0)
+    if ((coalesce ? js_vm_stack_reloc_coalesce(rt, st, &tab, &n)
+                  : js_vm_stack_reloc_copy(rt, st, &tab, &n)) < 0)
         return -1;
     if (!n)     // nothing live to move; not a failure
         return 0;
@@ -7048,6 +7054,25 @@ int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
     }
     return 0;
 }
+
+int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
+{
+    return js_vm_stack_move(rt, out, false);
+}
+
+int JS_VMStackCompact(JSRuntime *rt, JSVMRelocStats *out)
+{
+    return js_vm_stack_move(rt, out, true);
+}
+
+uint32_t JS_VMStackSegments(JSRuntime *rt)
+{
+    uint32_t n = 0;
+    for (JSVMSeg *s = rt->vm_stack.cur; s; s = s->prev)
+        n++;
+    return n;
+}
+
 void JS_VMStackRelocKeepOld(JSRuntime *rt, int keep)
 {
     rt->vm_reloc_keep_old = (keep != 0);
@@ -7074,6 +7099,17 @@ int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
     if (out)
         memset(out, 0, sizeof(*out));
     return -1;
+}
+
+int JS_VMStackCompact(JSRuntime *rt, JSVMRelocStats *out)
+{
+    return JS_VMStackRelocate(rt, out);
+}
+
+uint32_t JS_VMStackSegments(JSRuntime *rt)
+{
+    (void)rt;
+    return 0;
 }
 
 void JS_VMStackRelocKeepOld(JSRuntime *rt, int keep)

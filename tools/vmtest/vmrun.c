@@ -574,6 +574,21 @@ static enum { FYFAULT_NONE, FYFAULT_NORESUME, FYFAULT_NOYIELD } force_yield_faul
 // that suspends inside a native callback legitimately produces.
 static bool force_reloc;
 static bool reloc_keep_old;     // applied once the runtime exists, not at parse time
+// --force-compact (L4a): the same forcing point as --force-reloc, but through
+// JS_VMStackCompact, which gathers a scattered chain into one block. Implies
+// --force-reloc so every existing #info reloc line and the refusal counting
+// apply unchanged; g_compacts counts the parks that actually gathered two or
+// more segments (a single-segment chain is already contiguous and is left
+// where it is).
+static bool reloc_compact;
+static uint64_t g_compacts, g_compact_segments;
+// --compact-min-segs K (L3b policy experiment): with --force-compact, only
+// compact at a park where the chain is in at least K segments, and leave it
+// alone otherwise. K=0 (the default) keeps --force-compact's move-every-park.
+// Exists because the tlsf replay showed moving at every park costs more heap
+// than it recovers; this is the knob that asks how rarely it has to happen.
+static uint32_t compact_min_segs;
+static uint64_t g_compact_skipped;
 // --reloc-pin: take a pin for the whole run, so every park refuses to move.
 // The gate is that the run still produces byte-identical output with
 // moves=0 refused=N -- a pin that silently let the move happen would be
@@ -612,10 +627,18 @@ static JSValue resume_until_done(JSContext *ctx, JSValue result) {
     // a chain that has just moved: js_vm_mark_suspended and the fix-up walk
     // read the same links, and a fix-up that missed one shows up here as a
     // GC touching a freed frame rather than as a wrong answer much later.
-    if (force_reloc) {
+    if (force_reloc && reloc_compact && compact_min_segs &&
+        JS_VMStackSegments(rt) < compact_min_segs) {
+      g_compact_skipped++;
+    } else if (force_reloc) {
       JSVMRelocStats rs;
-      if (JS_VMStackRelocate(rt, &rs) == 0) {
+      if ((reloc_compact ? JS_VMStackCompact(rt, &rs)
+                         : JS_VMStackRelocate(rt, &rs)) == 0) {
         g_relocs++;
+        if (reloc_compact && rs.segments >= 2) {
+          g_compacts++;
+          g_compact_segments += rs.segments;
+        }
         g_reloc_frames += rs.frames;
         g_reloc_coro += rs.coro_frames;
         g_reloc_varrefs += rs.var_refs;
@@ -945,6 +968,7 @@ static void usage(void) {
           "  --force-yield-fault W  L2c gate negative control: noresume | noyield (sec.12.9)\n"
           "  --force-reloc          L3a: move the live segments at every park, before the resume\n"
           "  --reloc-keep-old       ... and leak the old blocks poisoned instead of freeing them\n"
+          "  --force-compact        L4a: as --force-reloc, but gather the chain into one block\n"
           "  --reloc-pin            ... but hold a pin, so every move is refused (negative control)\n"
           "  --reloc-fault W        ... skipping one fix-up: varref | link | varbuf (sec.5)\n"
           "  --gc-on-yield          L2c guard: JS_RunGC before every resume (sec.12.8/12.15;\n"
@@ -1014,6 +1038,11 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--test262")) test262 = true;
     else if (!strcmp(a, "--force-yield")) force_yield = true;
     else if (!strcmp(a, "--force-reloc")) force_reloc = true;
+    else if (!strcmp(a, "--force-compact")) { force_reloc = true; reloc_compact = true; }
+    else if (!strcmp(a, "--compact-min-segs")) {
+      compact_min_segs = (uint32_t)strtoul(NEXT(), NULL, 0);
+      force_reloc = true; reloc_compact = true;
+    }
     else if (!strcmp(a, "--reloc-pin")) reloc_pin = true;
     else if (!strcmp(a, "--reloc-fault")) {
       const char *w = NEXT();
@@ -1406,6 +1435,11 @@ int main(int argc, char **argv) {
               (unsigned long long)g_reloc_span_at_max,
               (unsigned long long)g_reloc_resident_at_max,
               (unsigned long)g_reloc_segs_at_max);
+    if (reloc_compact)
+      fprintf(stderr, "#info compact gathers=%llu segments_gathered=%llu skipped=%llu\n",
+              (unsigned long long)g_compacts,
+              (unsigned long long)g_compact_segments,
+              (unsigned long long)g_compact_skipped);
     if (force_reloc)
       fprintf(stderr, "#info reloc_gap_trend first=%llu/%lu last=%llu/%lu\n",
               (unsigned long long)g_reloc_gap_first, (unsigned long)g_reloc_segs_first,

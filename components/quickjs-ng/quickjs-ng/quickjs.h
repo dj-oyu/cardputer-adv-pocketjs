@@ -575,6 +575,21 @@ typedef struct JSVMRelocStats {
  *
  * Always -1 when built without CONFIG_POCKET_VM_RELOC. `out` may be NULL. */
 JS_EXTERN int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out);
+/* L4a: the same move, but the whole live chain goes into ONE new block, so
+ * the stack stops being scattered across the heap (JS_VMStackRelocate only
+ * trades each segment's address for another of the same size). Same
+ * preconditions and failure contract as JS_VMStackRelocate. Returns 0 with
+ * segments == 0 when the chain has fewer than two segments -- already
+ * contiguous, nothing to gather. The transient cost is one contiguous block
+ * the size of the live stack, held alongside the old segments until they are
+ * freed. */
+JS_EXTERN int JS_VMStackCompact(JSRuntime *rt, JSVMRelocStats *out);
+/* L3b: how many segments the live frame chain is in right now (0 when there
+ * is none). For a caller deciding WHETHER to compact: measured on the host,
+ * compacting at every park costs more heap than it recovers (the old and new
+ * copies coexist during each move), so the decision is a policy on this
+ * count, not a reflex. Walks the chain; a few dozen links at most. */
+JS_EXTERN uint32_t JS_VMStackSegments(JSRuntime *rt);
 /* Diagnostic: after a move, leave the old blocks allocated and poisoned
  * rather than freeing them, so a missed fix-up cannot be masked by the
  * allocator reusing the address. Leaks by design; host harness only. */

@@ -772,6 +772,94 @@ static inline int js_vm_stack_reloc_copy(JSRuntime *rt, JSVMStack *st,
     return 0;
 }
 
+// L4a (docs/vm/vm-L3-design.md sec.10): the same move, but GATHERING the
+// chain into one block instead of copying each segment to a block of its
+// own size. js_vm_stack_reloc_copy cannot reduce scatter -- it hands back
+// exactly the sizes it takes, so the chain ends up as spread out as before,
+// just elsewhere (measured on the host: span - resident of a 9-segment chain
+// is 23-49 KB of other allocations sitting between the pieces). One block
+// has no inside to put anything in.
+//
+// The fix-up does not change. Each old segment still gets one row in the
+// table, and its delta now points at its slice of the new block rather than
+// at a block of its own; D46's per-segment deltas were always the general
+// case, and this is the first caller that makes them differ in kind.
+//
+// Only the live prefix of each segment is copied, bottom segment first, so
+// the frames keep their LIFO order and every block stays at the
+// JS_VM_FRAME_ALIGN it had: the new base is 16-aligned and each slice length
+// is a sum of rounded frame sizes. A pointer to one past the end of a lower
+// segment's live bytes (an operand stack filled to its last slot) lands on
+// the first byte of the next slice -- the same "one past the end" in the new
+// layout, which is all such a pointer is ever used for.
+//
+// The new block is not a member of the size-by-position sequence (standard
+// = 0): it is exactly as large as what it holds, so it is never offered to
+// the cache and is freed when the stack unwinds past it; the next push
+// starts a fresh standard bottom segment as it would from empty. The block
+// is exactly full, so the next deeper push opens a segment above it.
+//
+// Returns 0 with *pn == 0 when there is nothing to gather (fewer than two
+// segments): a single segment is already contiguous, and moving it would
+// only trade one address for another. -1 leaves the VM untouched.
+static inline int js_vm_stack_reloc_coalesce(JSRuntime *rt, JSVMStack *st,
+                                             JSVMReloc **ptab, uint32_t *pn)
+{
+    JSVMSeg *s, *ns;
+    JSVMReloc *tab;
+    uint32_t n = 0, i;
+    size_t total = 0, off = 0, payload;
+
+    *ptab = NULL;
+    *pn = 0;
+    for (s = st->cur; s; s = s->prev) {
+        n++;
+        total += (size_t)(s->top - s->base);
+    }
+    if (n < 2)
+        return 0;
+    tab = js_malloc_rt(rt, (size_t)n * sizeof(*tab));
+    if (!tab)
+        return -1;
+    i = n;
+    for (s = st->cur; s; s = s->prev) {
+        i--;
+        tab[i].old_seg = s;
+        tab[i].old_base = s->base;
+        tab[i].old_end = s->end;
+    }
+    // Never zero: with two or more segments on the chain the top one holds
+    // at least one frame (a segment is retired the moment its first block
+    // is popped; only a lone bottom segment stays resident empty).
+    payload = (total + JS_VM_SEG_ALIGN - 1) & ~(size_t)(JS_VM_SEG_ALIGN - 1);
+    ns = js_vm_seg_new(rt, st, payload, 0);
+    if (!ns) {
+        js_free_rt(rt, tab);
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        size_t live = (size_t)(tab[i].old_seg->top - tab[i].old_seg->base);
+        JS_VM_UNPOISON(ns->base + off, live);
+        memcpy(ns->base + off, tab[i].old_seg->base, live);
+        tab[i].delta = (ptrdiff_t)((ns->base + off) - tab[i].old_base);
+        off += live;
+    }
+    ns->top = ns->base + off;
+    ns->prev = NULL;
+    st->cur = ns;
+#ifdef JS_VM_STACK_STATS
+    // The chain is one segment now; resident is what it holds. The old
+    // segments' share leaves `resident` here and their memory leaves the
+    // heap in js_vm_stack_reloc_finish. resident_max is a peak and keeps the
+    // value it had, and seg_mallocs/seg_frees count the block and the frees.
+    st->seg_live = 1;
+    st->resident = js_vm_seg_payload(ns) + js_vm_seg_overhead();
+#endif
+    *ptab = tab;
+    *pn = n;
+    return 0;
+}
+
 // Stage 5: the old blocks stop existing, loudly. Filling them with 0xD3 first
 // is what catches a fix-up this design MISSED on builds with no sanitizer --
 // 0xD3D3D3D3 is not a valid JSValue tag and not a plausible pointer, so a
