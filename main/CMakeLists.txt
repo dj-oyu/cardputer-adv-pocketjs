@@ -25,6 +25,7 @@ set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.
 set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
+list(APPEND KASANE_SOURCES "ui/kasane/ksn_source_pool.c")
 option(KASANE_P0_PROBE "Instrument Kasane P0 device measurements (not for production)" OFF)
 option(KASANE_P0_COPY_PROBE "Count Kasane logical copies in the P0 diagnostic build" ON)
 option(KASANE_P0_BUS_PROBE "Split LCD transfer phases and SD overlap in P0 diagnostic builds" OFF)

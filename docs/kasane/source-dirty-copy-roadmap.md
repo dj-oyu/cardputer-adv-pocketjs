@@ -133,6 +133,12 @@ core 0に固定するとSPI2 ISRが既定core 0のままでも45秒×3試行と2
 P1全体では公開bind、複数source、期限scheduler、固定snapshot pool、
 画素一致と新経路の同条件A/Bが引き続き未達。
 
+[固定snapshot pool primitive](p1-fixed-source-pool.md)を追加した。
+3 slotを事前確保し、producerが空きslotへ直接書いて公開、readerは
+immutableな世代をzero-copyでpinする。枯渇時はproducerを待たせず`BUSY`。
+並行host試験と診断OFF buildは通したが、providerへの接続と実機gateが
+未実施なので、上記「固定snapshot pool未達」の判定は変えない。
+
 ## P2：dirty-node更新を既存bankのまま導入
 
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。

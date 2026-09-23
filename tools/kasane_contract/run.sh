@@ -64,6 +64,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     -Wl,--gc-sections -Imain/ui/kasane main/ui/kasane/ksn_schema.c \
     main/ui/kasane/ksn_source.c tools/kasane_contract/test_source.c -o "$out/source"
   "$out/source"
+  cc -std=c11 -Wall -Wextra -Werror $options -pthread -Imain/ui/kasane \
+    main/ui/kasane/ksn_source_pool.c tools/kasane_contract/test_source_pool.c \
+    -o "$out/source-pool"
+  "$out/source-pool"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
