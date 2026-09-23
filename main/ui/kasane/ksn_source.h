@@ -70,7 +70,9 @@ ksn_result ksn_source_subscribe(ksn_source_registry *registry,
                                 const ksn_schema *schema,
                                 const ksn_source_binding *bindings,uint8_t count,
                                 ksn_source_subscription *out);
-/* effective is metadata only; text points into the pinned snapshot. Caller
+/* effective is metadata only, distinct from base; text points into the pinned
+ * snapshot. On a malformed snapshot it is restored to base (or remains
+ * untouched if acquisition failed before composition). Caller
  * validates/preflights/submits before release and never retains these pointers. */
 ksn_result ksn_source_acquire(ksn_source_registry *registry,
                               ksn_source_subscription *subscription,

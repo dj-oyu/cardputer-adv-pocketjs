@@ -35,7 +35,7 @@ int main(void){
     };
     const ksn_schema schema={.version=1,.slot_count=2,.background=0x000000ffu,
                               .slots=slots};
-    ksn_schema_value base[2]={0};
+    ksn_schema_value base[KSN_SCHEMA_MAX_SLOTS]={0};
     base[0].data.text=(ksn_schema_text){"base",4};
     base[1].data.number=3;
     fake_source f={.allowed=true};
@@ -66,6 +66,7 @@ int main(void){
     assert(ksn_source_subscribe(&registry,handle,7,&schema,bindings,2,&b)==KSN_OK);
     ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS]={0};
     ksn_source_lease lease={0};
+    assert(ksn_source_acquire(&registry,&a,&schema,base,10,base,&lease)==KSN_INVALID);
     assert(ksn_source_acquire(&registry,&a,&schema,base,10,effective,&lease)==KSN_OK);
     assert(effective[0].data.text.utf8==f.fields[0].data.text.utf8);
     assert(effective[1].data.number==7&&base[1].data.number==3);
@@ -118,8 +119,17 @@ int main(void){
     before=f.releases;
     assert(ksn_source_acquire(&registry,&a,&schema,base,21,effective,&lease)==KSN_INVALID);
     assert(f.releases==before+1&&a.validated_revision==5&&
-           strcmp(base[0].data.text.utf8,"base")==0);
+           strcmp(base[0].data.text.utf8,"base")==0&&
+           effective[0].data.text.utf8==base[0].data.text.utf8&&
+           effective[1].data.number==base[1].data.number);
     f.fields[0].data.text=(ksn_schema_text){"ok",2};
+    f.fields[1].data.number=100; /* First field valid, second invalid. */
+    before=f.releases;
+    assert(ksn_source_acquire(&registry,&a,&schema,base,21,effective,&lease)==KSN_INVALID);
+    assert(f.releases==before+1&&a.validated_revision==5&&
+           effective[0].data.text.utf8==base[0].data.text.utf8&&
+           effective[1].data.number==base[1].data.number);
+    f.fields[1].data.number=7;
     f.allowed=false;
     assert(ksn_source_acquire(&registry,&a,&schema,base,22,effective,&lease)==KSN_UNSUPPORTED);
     f.allowed=true;

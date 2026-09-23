@@ -85,7 +85,7 @@ ksn_result ksn_source_acquire(ksn_source_registry *registry,
                               const ksn_schema_value *base,uint64_t now_us,
                               ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS],
                               ksn_source_lease *lease){
-    if(!subscription||!effective||!lease||lease->active||
+    if(!subscription||!effective||base==effective||!lease||lease->active||
        ksn_schema_validate(schema)!=KSN_OK||
        (schema->slot_count&&!base))return KSN_INVALID;
     ksn_source_entry *e=entry(registry,subscription->handle);
@@ -136,6 +136,10 @@ ksn_result ksn_source_acquire(ksn_source_registry *registry,
     }
     dirty_slots|=valid_slots^subscription->valid_slots;
     if(ksn_schema_values_validate(schema,effective)!=KSN_OK){
+        /* A malformed snapshot must not leave some native fields installed in
+         * the caller's candidate. Failure is cold-path; successful acquire
+         * keeps its single metadata copy and borrowed payload pointers. */
+        memcpy(effective,base,schema->slot_count*sizeof(*effective));
         p->release(p->context,&snapshot);e->pins--;return KSN_INVALID;
     }
     *lease=(ksn_source_lease){.registry=registry,.subscription=subscription,

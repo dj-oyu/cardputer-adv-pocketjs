@@ -141,6 +141,12 @@ immutableな世代をzero-copyでpinする。枯渇時はproducerを待たせず
 汎用source providerへのpool adapterと複数consumerのhost契約試験も
 追加した。実際の別task producer、公開bind、期限scheduler、実機gateは
 残っており、P1全体の完了判定は変えない。
+2026-09-24：不正snapshotの最終slot検証が失敗した際、途中まで
+上書きした`effective`候補をbaseへ戻すよう修正した。成功時のmetadata/
+payloadコピー回数は不変。先頭fieldだけ有効で後続fieldが不正な場合と
+長すぎる文字列をhostで確認し、実QuickJS統合は0失敗。
+診断OFFのESP-IDF buildはPASSし、静的DIRAMは159,788 B。
+公開bind・複数sourceの原子合成は引き続き未実装。
 
 ## P2：dirty-node更新を既存bankのまま導入
 
