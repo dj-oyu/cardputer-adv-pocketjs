@@ -200,6 +200,13 @@ source payloadの重複実装はない。host QuickJSではJS描画更新なし�
 同一分の描画skip、セッション終了後の旧capability失効と再登録を確認。
 診断OFF製品ビルドはPASS（静的DIRAM 159,804 B、前ビルド比+16 B）。
 別task producer・固定snapshot poolとの結合、実機性能/heap/音声共存gateは未達。
+2026-09-24：[公開wallSourceの実機gate](p1-wall-source-device-20260924.md)を実施。
+固定P0閾値のhello 180更新×2、SD音声45秒＋pause/resume×2は全項目合格、
+underrun/fault/IO ERRORは0。診断専用の任意schemaで`pocket.time.wallSource()`を
+購読し、JSによるslot更新なしで65秒後に時計領域の19画素だけが変化した。
+元の3MiBアプリ領域は復元し、全3区画のdigest一致を確認した。
+これは短時間ゲートであり、長時間音声、固定snapshot poolを使う別task producer、
+旧clock経路との同一時刻画素一致を含むP1出口全体は未達。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

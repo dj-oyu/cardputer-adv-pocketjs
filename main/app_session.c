@@ -68,6 +68,9 @@ static JSValue vm_storage_mark(JSContext *ctx, JSValueConst self,
 extern const char hello_start[] asm("_binary_main_js_start");
 extern const char hello_end[] asm("_binary_main_js_end");
 extern const char kasane_demo_start[] asm("_binary_demo_js_start");
+#ifdef KASANE_P0_PROBE
+extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_start");
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
 // VM probe workloads (docs/vm/quickjs-freertos-vm-spec.md sec.5), embedded only
 // when this build turned CONFIG_POCKET_VM_PROBE on (main/CMakeLists.txt).
@@ -686,6 +689,9 @@ source_ready:;
         // The Kasane demo (ui/kasane via app_session.c's kasane_demo_start): the
         // one source that is not a VM self-test, so it sits outside the ifdef.
         case 'K': source=kasane_demo_start; break;
+#ifdef KASANE_P0_PROBE
+        case '7': source=wall_source_probe_start; break;
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
         // VM probe workloads (sec.5): real files under apps/vmprobe/ rather
         // than inline strings like '1'..'6' above, because

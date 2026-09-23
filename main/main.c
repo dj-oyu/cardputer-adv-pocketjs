@@ -262,14 +262,17 @@ static bool usb_stroke(char c, keystroke_t *k) {
     if(c=='c') { motion_recenter(); return false; }
     // '8' is not an app: it checks the baked sound tables against this chip's
     // own libm (sound_check_tables), and is handled where the others start. It
-    // is not folded into the range because '7' has no diagnostic behind it and
-    // would silently start the default app.
+    // is not folded into the range because '7' is a separate Kasane wall-source
+    // diagnostic only in P0 builds; a normal build still leaves it unused.
     // '9' is the same kind of thing for the microphone: it sweeps the codec's
     // input paths and its ADC volume and prints what each produces, because the
     // board answered the first register table with silence and guessing again
     // is not a method. Like every letter in this function it arrives over USB;
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
+#ifdef KASANE_P0_PROBE
+    if(c=='7') { atomic_store(&diagnostic,c); return false; }
+#endif
 #ifdef CONFIG_POCKET_VM_CALLBENCH
     if(c=='N'||c=='U') { atomic_store(&diagnostic,c); return false; }
 #endif
