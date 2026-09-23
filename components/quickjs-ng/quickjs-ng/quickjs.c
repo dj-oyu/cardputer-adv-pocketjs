@@ -26241,6 +26241,16 @@ static int cpool_add(JSParseState *s, JSValue val)
 
     if (js_resize_array(s->ctx, (void *)&fd->cpool, sizeof(fd->cpool[0]),
                         &fd->cpool_size, fd->cpool_count + 1)) {
+        /* PocketJS: the pool takes ownership of `val` ("not duplicated"
+           above), so a failed growth has to consume it too. emit_push_const
+           hands over a fresh js_dup() and its only caller with a GC object,
+           js_parse_template, has already released its own reference by the
+           time it sees -1: the template's strings array stayed at
+           ref_count 1 forever (special_calls.js --fail-alloc 1979 / 2047)
+           and JS_FreeRuntime asserted on the non-empty gc_obj_list. The
+           other callers pass JS_NULL, for which this is a no-op. Same in
+           quickjs-ng master (2026-09-23). */
+        JS_FreeValue(s->ctx, val);
         return -1;
     }
     fd->cpool[fd->cpool_count++] = val;
@@ -54899,6 +54909,19 @@ static int js_json_to_str(JSContext *ctx, JSONStringifyContext *jsc,
                 /* XXX: could do this string conversion only when needed */
                 prop = JS_ToStringFree(ctx, js_int64(i));
                 if (JS_IsException(prop)) {
+                    /* PocketJS: `v` is the element just read and nothing
+                       owns it yet -- js_json_check below is what consumes
+                       it. The common exception: tail frees val/tab/sep/
+                       prop but not v, so an OOM in the index-to-string
+                       conversion (a 16-byte string) leaked one strong
+                       reference to the element (yield_job_tails.js
+                       --fail-alloc 2643 / 2659: an async generator's
+                       iterator result). Through its prototype it keeps the
+                       realm's built-ins alive past JS_FreeRuntime's GC, and
+                       assert(list_empty(&rt->gc_obj_list)) fires -- on the
+                       device that is app_stop() with assertions on. Same in
+                       quickjs-ng master (2026-09-23). */
+                    JS_FreeValue(ctx, v);
                     goto exception;
                 }
                 v = js_json_check(ctx, jsc, val, v, prop);
