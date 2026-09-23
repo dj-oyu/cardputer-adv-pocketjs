@@ -59,6 +59,7 @@ typedef struct {
 } schema_source;
 typedef struct {
     ksn_source_registry registry;
+    uint64_t expiry_us;
     schema_source entries[];
 } schema_sources;
 typedef struct {
@@ -393,7 +394,11 @@ static __attribute__((noinline)) ksn_result schema_refresh_native(
     if(r==KSN_OK){
         s->revision=revision;
         r=ksn_source_commit(&lease);
-        if(r==KSN_OK)s->pending_base_slots=0;
+        if(r==KSN_OK){
+            s->pending_base_slots=0;
+            sources->expiry_us=lease.snapshot.expires_at_us>owner_now_us?
+                               lease.snapshot.expires_at_us:0;
+        }
     }
     ksn_source_release(&lease);
     if(r==KSN_OK&&s->session.ticket.value&&
@@ -444,7 +449,15 @@ static __attribute__((noinline)) ksn_result schema_refresh_native_many(
     if(r==KSN_OK){
         s->revision=revision;
         r=ksn_source_bundle_commit(&bundle);
-        if(r==KSN_OK)s->pending_base_slots=0;
+        if(r==KSN_OK){
+            s->pending_base_slots=0;
+            uint64_t next=UINT64_MAX;
+            for(unsigned i=0;i<count;i++){
+                uint64_t expiry=bundle.leases[i].snapshot.expires_at_us;
+                if(expiry>owner_now_us&&expiry<next)next=expiry;
+            }
+            sources->expiry_us=next==UINT64_MAX?0:next;
+        }
     }
     ksn_source_bundle_release(&bundle);
     if(r==KSN_OK&&s->session.ticket.value&&
@@ -2263,6 +2276,17 @@ bool pocket_kasane_notice_composited(void){
 bool pocket_kasane_system_pending(void){return state&&ksn_runtime_app_system_view(state->lease)&&state->notice_tx.value;}
 bool pocket_kasane_has_submission(void) {
     return ksn_runtime_has_submission();
+}
+uint32_t pocket_kasane_source_wait_ticks(uint64_t now_us,uint32_t cap,uint32_t hz){
+    if(!state||!state->schema||!state->schema->asset->source_count||!hz)return cap;
+    uint64_t next=schema_native(state->schema)->expiry_us;
+    /* A due deadline is retried by the regular owner frame. Returning zero
+     * here could busy-spin after a failed or pending submission. */
+    if(!next||next<=now_us)return cap;
+    uint64_t delta=next-now_us,seconds=delta/1000000u;
+    if(seconds>cap/hz)return cap;
+    uint64_t ticks=seconds*hz+((delta%1000000u)*hz+999999u)/1000000u;
+    return ticks<cap?(uint32_t)ticks:cap;
 }
 ksn_result pocket_kasane_advance(uint64_t now_us){
     apply_outcome();return ksn_runtime_advance_animations(now_us);

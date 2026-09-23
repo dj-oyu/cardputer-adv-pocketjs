@@ -165,6 +165,13 @@ allocation/更新経路を維持。host限定の2 source QuickJS試験で、同�
 ASan/UBSan・O2、2 source QuickJS統合のASan/UBSan・
 `-O2 -fstrict-aliasing`はすべて0失敗。診断OFFのESP-IDF buildもPASSし、
 静的DIRAMは159,788 Bのまま。COM3は使用していない。
+2026-09-24：source snapshotの最も近い将来期限1件をmountが保持し、ownerの既存待機を
+その期限まで短縮する経路を追加した。期限到来でnative overrideから最新の
+JS baseへ戻り、別sourceの画素を変えず、native更新後に再びoverrideへ戻る
+一連の動作を2 sourceの実QuickJS host試験で確認。期限後や提出失敗時に
+0 tick待機を返してbusy-spinしない。新たなtimer/taskは設けていない。
+これは通常のowner frameを起点にした期限処理であり、別task producerの
+到着通知や実機の期限精度・音声共存gateはまだ未検証。公開bindも未実装。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

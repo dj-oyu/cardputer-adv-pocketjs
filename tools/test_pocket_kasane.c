@@ -528,7 +528,46 @@ static void dual_source_mount_tests(void){
           "recovered dual-source frame acknowledges");
     pocket_test_dual_counts(&acquired,&released);
     check(acquired==released,"all dual-source leases released");
+    check(run("dual.set({left:'BASE'})")&&!pocket_kasane_has_submission(),
+          "native left value overrides the JS base without redrawing");
+    pocket_test_dual_expire(0,1000);
+    pocket_kasane_set_animation_time(999);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "source expiry metadata alone does not redraw early");
+    check(pocket_kasane_source_wait_ticks(999,10,1000)==1,
+          "native source deadline bounds owner wait to one tick");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    pocket_kasane_set_animation_time(1000);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "native deadline reveals JS base without a JS frame");
+    check(pocket_kasane_source_wait_ticks(1000,10,1000)==10,
+          "due source cannot cause a zero-tick wait spin");
+    check(present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))!=0,
+          "expired source changes visible left text");
+    bool right_stable=true;
+    for(unsigned row=46;row<62;row++)
+        if(memcmp(committed_pixels+row*240+188,panel_pixels+row*240+188,
+                  48*sizeof(uint16_t))!=0)right_stable=false;
+    check(right_stable,"expiry leaves the other native source unchanged");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "expired source frame acknowledges without repeated redraw");
+    check(run("dual.set({left:'NEXT'})")&&pocket_kasane_has_submission(),
+          "JS base remains writable while native source has expired");
+    check(present(&stats)==KSN_OK,"updated base presents while source expired");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "updated base acknowledges while source expired");
+    pocket_test_dual_expire(0,0);
+    pocket_kasane_set_animation_time(1001);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "renewed native source replaces latest JS base automatically");
+    check(present(&stats)==KSN_OK,"renewed native value presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "renewed native value acknowledges");
     pocket_kasane_reset();
+    check(pocket_kasane_source_wait_ticks(1001,10,1000)==10,
+          "unmounted source does not shorten owner waits");
 }
 #endif
 

@@ -36,6 +36,9 @@ ksn_result pocket_kasane_update_notice(const sys_notice *,uint16_t variant);
 bool pocket_kasane_notice_composited(void);
 bool pocket_kasane_system_pending(void);
 bool pocket_kasane_has_submission(void);
+/* Bound the owner wait by the next native-source expiry. A due/failed source
+ * is retried by the regular frame, so it cannot create a zero-tick spin. */
+uint32_t pocket_kasane_source_wait_ticks(uint64_t now_us,uint32_t cap,uint32_t hz);
 ksn_result pocket_kasane_advance(uint64_t now_us);
 bool pocket_kasane_animation_pending(void);
 void pocket_kasane_animations_presented(uint64_t now_us);

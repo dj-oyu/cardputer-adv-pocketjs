@@ -260,8 +260,9 @@ static const ksn_schema_node dual_nodes[]={
 static const ksn_schema dual_view={.version=1,.slot_count=2,.node_count=2,
     .background=0x000000ffu,.slots=dual_slots,.nodes=dual_nodes};
 typedef struct {unsigned id;uint32_t generation;ksn_schema_value field;} dual_source;
-static struct {char text[8];uint64_t revision;} dual_model[2]={
-    {"A0",1},{"B0",1}
+static struct {char text[8];uint64_t revision,expires_at_us;uint32_t changed;} dual_model[2]={
+    {.text="A0",.revision=1,.changed=1},
+    {.text="B0",.revision=1,.changed=1}
 };
 static bool dual_fail_second;
 static unsigned dual_acquired,dual_released;
@@ -270,6 +271,13 @@ void pocket_test_dual_set(unsigned source,const char *text){
     size_t n=strlen(text);if(n>7)return;
     memcpy(dual_model[source].text,text,n+1u);
     dual_model[source].revision++;
+    dual_model[source].changed=1;
+}
+void pocket_test_dual_expire(unsigned source,uint64_t at_us){
+    if(source>=2)return;
+    dual_model[source].expires_at_us=at_us;
+    dual_model[source].revision++;
+    dual_model[source].changed=0;
 }
 void pocket_test_dual_fail_second(bool fail){dual_fail_second=fail;}
 void pocket_test_dual_counts(unsigned *acquired,unsigned *released){
@@ -286,7 +294,8 @@ static ksn_result dual_acquire(void *opaque,uint64_t cursor,uint64_t now_us,
         (uint16_t)strlen(dual_model[id].text)};
     *out=(ksn_source_snapshot){.size=sizeof(*out),.version=KSN_SOURCE_ABI_VERSION,
         .field_count=1,.generation=source->generation,
-        .revision=dual_model[id].revision,.valid_fields=1,.changed_fields=1,
+        .revision=dual_model[id].revision,.expires_at_us=dual_model[id].expires_at_us,
+        .valid_fields=1,.changed_fields=dual_model[id].changed,
         .fields=&source->field};
     dual_acquired++;
     return KSN_OK;

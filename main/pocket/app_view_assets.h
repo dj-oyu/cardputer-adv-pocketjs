@@ -20,6 +20,7 @@ typedef struct {
 const pocket_app_view_asset *pocket_app_view_lookup(const char *name);
 #ifdef KSN_TEST_DUAL_SOURCE
 void pocket_test_dual_set(unsigned source,const char *text);
+void pocket_test_dual_expire(unsigned source,uint64_t at_us);
 void pocket_test_dual_fail_second(bool fail);
 void pocket_test_dual_counts(unsigned *acquired,unsigned *released);
 #endif

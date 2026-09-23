@@ -11,6 +11,7 @@
 #include "jpfont.h"
 #include "skk_session.h"
 #include "app_session.h"
+#include "pocket_kasane.h"
 #include "vm_wake.h"
 #include "pocket_workspace.h"
 #include "sd_picker.h"
@@ -41,7 +42,6 @@
 static atomic_bool fpu_probe_requested;
 #ifdef CONFIG_KSN_DEVICE_PROBE
 #include "esp_heap_caps.h"
-#include "pocket_kasane.h"
 #include "ui/kasane/ksn_runtime.h"
 static atomic_bool ksn_probe_requested;
 static atomic_int system_probe_requested;
@@ -1065,8 +1065,13 @@ static void ui_task(void *arg) {
                 // cap short instead of waiting out the period; the measured
                 // (device) cost it removes is the "up to one frame period"
                 // term of completion latency, and nothing else.
-                if(rest) vm_wake_wait(sys_device_wait_ticks(
-                    (uint64_t)esp_timer_get_time(),pdMS_TO_TICKS(rest),configTICK_RATE_HZ));
+                if(rest){
+                    uint64_t wait_now=(uint64_t)esp_timer_get_time();
+                    uint32_t ticks=sys_device_wait_ticks(wait_now,pdMS_TO_TICKS(rest),
+                                                         configTICK_RATE_HZ);
+                    vm_wake_wait(pocket_kasane_source_wait_ticks(
+                        wait_now,ticks,configTICK_RATE_HZ));
+                }
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.
                 period_began=esp_timer_get_time();
@@ -1078,8 +1083,11 @@ static void ui_task(void *arg) {
         // when a frame() first does, and this keeps a stale `period_began`
         // from making the first frame of a new session skip its wait.
         period_began=esp_timer_get_time();
-        vm_wake_wait(sys_device_wait_ticks((uint64_t)esp_timer_get_time(),
-            pdMS_TO_TICKS(rest),configTICK_RATE_HZ));
+        uint64_t wait_now=(uint64_t)esp_timer_get_time();
+        uint32_t ticks=sys_device_wait_ticks(wait_now,pdMS_TO_TICKS(rest),
+                                             configTICK_RATE_HZ);
+        vm_wake_wait(pocket_kasane_source_wait_ticks(
+            wait_now,ticks,configTICK_RATE_HZ));
     }
 }
 
