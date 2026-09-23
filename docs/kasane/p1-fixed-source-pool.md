@@ -15,8 +15,8 @@ readerはtokenを読んでpinし、tokenを再確認するため、切替との�
 古い世代を「最新」と誤認しない。revisionは32-bit token内で単調増加し、
 上限で`KSN_LIMIT`を返してwrapしない。
 
-このpoolは**寿命・公開のprimitiveのみ**で、現時点ではclock/musicの
-`ksn_source_provider`へ接続していない。source registryの権限・field型・
+このpoolは**寿命・公開のprimitive**で、汎用provider adapterは追加したが
+clock/musicの実producerにはまだ接続していない。source registryの権限・field型・
 consumer cursor、UI transactionのPRESENTED ack、期限schedulerは別層の責務。
 pool単体が全経路zero-copyを保証するわけでもない。producerが別の場所で
 値を作ってからslotへ移せばそのcopyは残り、core bank・render scratchも
@@ -32,4 +32,15 @@ ThreadSanitizerはこのWSL環境で`unexpected memory mapping`により
 開始できず、race不存在の証拠には用いない。ESP-IDF 6.0.1の
 診断OFF build・容量検査はPASS。まだ実利用者がいないのでlinkerは
 未参照poolを除去し、今回のimage容量は増えなかった。実機gateは
-provider統合後に行う。
+実producer接続後に行う。
+
+2026-09-24追記：`ksn_source_pool_adapter`でこのpoolを既存の汎用
+`ksn_source_provider`へ接続した。payloadのfield配置とmetadata抽出は
+アプリ側が指定し、Kasaneはアプリ名・source名を知らない。adapterは
+`acquire`でslotをpinし、`release`で同一field pointerに対応するslotの
+pinを外す。`ksn_source_snapshot`のABIとowner-turnのcursor契約は変更しない。
+2 consumerが同じ世代を並行保持し、producerの後続公開、pool枯渇、期限、
+不正payloadの解放をhostのO2 strict-aliasingとASan/UBSanで検証した。
+診断OFFのESP-IDF 6.0.1 build・容量検査もPASSし、未利用adapterは
+linkerに除去されたためimage容量は不変。実producerへの接続と
+Cardputer上の性能・heap gateはまだ未実施。

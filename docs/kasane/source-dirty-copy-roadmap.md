@@ -138,6 +138,9 @@ P1全体では公開bind、複数source、期限scheduler、固定snapshot pool�
 immutableな世代をzero-copyでpinする。枯渇時はproducerを待たせず`BUSY`。
 並行host試験と診断OFF buildは通したが、providerへの接続と実機gateが
 未実施なので、上記「固定snapshot pool未達」の判定は変えない。
+汎用source providerへのpool adapterと複数consumerのhost契約試験も
+追加した。実際の別task producer、公開bind、期限scheduler、実機gateは
+残っており、P1全体の完了判定は変えない。
 
 ## P2：dirty-node更新を既存bankのまま導入
 
