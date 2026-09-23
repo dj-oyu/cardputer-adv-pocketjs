@@ -1250,6 +1250,7 @@ static esp_err_t present_frame(void) {
             present_sum+=display_state.sent_us;
             ksn_p0_probe_sample(KSN_P0_APP_RENDER,whole-display_state.sent_us);
             ksn_p0_probe_sample(KSN_P0_APP_SEND,display_state.sent_us);
+            ksn_p0_probe_transfer(stats.transferred_bytes,ksn_render_band_count(stats.bands));
             // This frame's counts into the window's. The millisecond columns on
             // the line are averages and these are sums, which the line says with
             // `frames=`; the renderer resets its accumulators on read, so the
