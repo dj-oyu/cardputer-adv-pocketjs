@@ -61,6 +61,10 @@ LCDとSDは別SPI hostだがDMA/メモリ競合の詳細は未測定。
 musicは新sourceを購読しないため、汎用source処理時間を原因とは断定できない。
 同じ実行コードで固定音声描画gateが揺れるため、P1実機gateは**未合格**。
 閾値を緩めず、送信reap/queueとSD readの同時性を計測して切り分ける。
+同一診断バイナリ2回の[送信分解](p1-lcd-sd-contention-20260924.md)では、
+遅い試行のsend p99 12,159 µsの大部分がreap待機p99 11,391 µsだった。
+SD readとの重複と遅延は相関したが、物理DMA競合とtask復帰遅れの
+区別はまだ付いていない。P1性能gateは引き続き未合格。
 
 生ログとclock PNGは`.cache/kasane-p1-20260924/`に保存。
 試験後に元の3 MiBアプリ領域を復元し、2領域とも`verify-flash`で

@@ -563,6 +563,10 @@ static ksn_result shell_overlay_send(void *opaque,uint16_t y,uint16_t rows,
 void shell_draw(const char *error, unsigned phase) {
     (void)phase;
     strip=board_strip();
+#ifdef KASANE_P0_BUS_PROBE
+    bool bus_trace=!error&&overlay_kasane_active()&&!board_capture_active();
+    if(bus_trace)ksn_p0_bus_begin_frame();
+#endif
     int64_t started=esp_timer_get_time();
     unsigned present_us=0, loop_us=0, hud_us=0;
     float dt=animation_time?(started-animation_time)*0.000001f:0.033f;
@@ -660,6 +664,9 @@ void shell_draw(const char *error, unsigned phase) {
         ksn_p0_probe_sample(KSN_P0_OVERLAY_COMPUTE,
                             elapsed>present_us?elapsed-present_us:0u);
     }
+#ifdef KASANE_P0_BUS_PROBE
+    if(bus_trace)ksn_p0_bus_end_frame(present_us);
+#endif
     if(!window_start)window_start=started;
     samples++;draw_sum+=elapsed;present_sum+=present_us;
     prep_sum+=(unsigned)(after_prep-started);loop_sum+=loop_us;hud_sum+=hud_us;

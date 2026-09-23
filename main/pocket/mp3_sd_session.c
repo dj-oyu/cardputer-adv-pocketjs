@@ -2,6 +2,7 @@
 #include "pocket_fs.h"
 #include "mp3_feed.h"
 #include "mp3_sd_reader.h"
+#include "ui/kasane/ksn_p0_probe.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
@@ -43,7 +44,10 @@ static void wake(mp3_sd_session_t *s) {
 
 static int32_t lease_read(void *ctx, uint32_t at, uint8_t *slot,
                           uint32_t want, int *err) {
-    return sd_media_read_lease_read_at(ctx,at,slot,want,err);
+    ksn_p0_bus_sd_begin();
+    int32_t result=sd_media_read_lease_read_at(ctx,at,slot,want,err);
+    ksn_p0_bus_sd_end();
+    return result;
 }
 
 static void sd_worker(void *arg) {

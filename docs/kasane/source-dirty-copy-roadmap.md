@@ -120,6 +120,9 @@ producer契約：
 期限scheduler、別task producerの固定snapshot、画素一致は未達。
 音声描画gateは同一実行payloadでも合否が揺れたため未合格。
 配置原因説はバイト比較で棄却し、LCD転送とSD readの同時性を調べる。
+[同一診断バイナリでのLCD送信分解](p1-lcd-sd-contention-20260924.md)で、
+遅い試行のreap待機とSD read重複の相関を確認した。ただし物理DMA競合か
+task復帰遅れかは未確定で、P1の性能gateは未合格のまま。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

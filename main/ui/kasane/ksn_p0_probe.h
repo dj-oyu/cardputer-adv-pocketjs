@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /* Diagnostic only. These categories name actual byte moves at their call
  * sites; UTF-8 materialization is reported separately because QuickJS owns
@@ -44,8 +45,37 @@ typedef enum {
     KSN_P0_AV_SERVICE,
     KSN_P0_UI_INTERVAL,
     KSN_P0_INPUT_QUEUE,
+#ifdef KASANE_P0_BUS_PROBE
+    KSN_P0_LCD_SWAP,
+    KSN_P0_LCD_REAP,
+    KSN_P0_LCD_QUEUE,
+    KSN_P0_LCD_OTHER,
+    KSN_P0_LCD_SEND_SD,
+    KSN_P0_LCD_SEND_IDLE,
+#endif
     KSN_P0_SAMPLE_COUNT
 } ksn_p0_sample_kind;
+
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_BUS_PROBE)
+typedef enum {KSN_P0_BUS_SWAP,KSN_P0_BUS_REAP,KSN_P0_BUS_QUEUE} ksn_p0_bus_phase;
+void ksn_p0_bus_begin_frame(void);
+void ksn_p0_bus_phase_sample(ksn_p0_bus_phase phase,uint32_t us,bool sd_overlap);
+void ksn_p0_bus_end_frame(uint32_t send_us);
+void ksn_p0_bus_sd_begin(void);
+void ksn_p0_bus_sd_end(void);
+bool ksn_p0_bus_sd_active(void);
+uint32_t ksn_p0_bus_sd_epoch(void);
+#else
+static inline void ksn_p0_bus_begin_frame(void) {}
+static inline void ksn_p0_bus_phase_sample(int phase,uint32_t us,bool sd_overlap){
+    (void)phase;(void)us;(void)sd_overlap;
+}
+static inline void ksn_p0_bus_end_frame(uint32_t send_us){(void)send_us;}
+static inline void ksn_p0_bus_sd_begin(void) {}
+static inline void ksn_p0_bus_sd_end(void) {}
+static inline bool ksn_p0_bus_sd_active(void){return false;}
+static inline uint32_t ksn_p0_bus_sd_epoch(void){return 0;}
+#endif
 
 #ifdef KASANE_P0_PROBE
 void ksn_p0_probe_reset(void);

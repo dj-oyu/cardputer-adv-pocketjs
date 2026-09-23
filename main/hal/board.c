@@ -1,6 +1,7 @@
 #include "board.h"
 #include "motion.h"
 #include "sound.h"
+#include "ui/kasane/ksn_p0_probe.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
@@ -68,8 +69,19 @@ static spi_transaction_t tx_pending;
 // transfer's own error, or ESP_OK when there was nothing in flight.
 static esp_err_t tx_reap(void) {
     if (!tx_inflight) return ESP_OK;
+#ifdef KASANE_P0_BUS_PROBE
+    bool sd_before=ksn_p0_bus_sd_active();
+    uint32_t sd_epoch_before=ksn_p0_bus_sd_epoch();
+    int64_t began=esp_timer_get_time();
+#endif
     spi_transaction_t *done = NULL;
     esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+#ifdef KASANE_P0_BUS_PROBE
+    ksn_p0_bus_phase_sample(KSN_P0_BUS_REAP,
+        (uint32_t)(esp_timer_get_time()-began),
+        sd_before||ksn_p0_bus_sd_active()||
+        sd_epoch_before!=ksn_p0_bus_sd_epoch());
+#endif
     tx_inflight = false;
     return e;
 }
@@ -242,8 +254,9 @@ bool board_battery_read(board_battery_t *out) {
 // ------------------------------------------------------------------ SPI3 bus
 //
 // The microSD slot (CS=12) and the EXT connector (CS=5) share MOSI=14, CLK=40
-// and MISO=39 (docs/platform/hardware-constraints.md:45). The LCD is wired separately on
-// SPI2, so card traffic can never stall the panel.
+// and MISO=39 (docs/platform/hardware-constraints.md:45). The LCD uses SPI2,
+// so card traffic cannot occupy its SPI device queue. Both hosts may still
+// contend for shared DMA/memory bandwidth; see the P1 LCD/SD diagnostic.
 //
 // The bus lives here, beside the LCD's, rather than inside whichever driver
 // happens to come up first. Exactly one caller may spi_bus_initialize a host;
@@ -397,6 +410,9 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     size_t bytes = (size_t)LCD_W * rows * 2;
     esp_err_t e;
     if (g_board_async) {
+#ifdef KASANE_P0_BUS_PROBE
+        int64_t swap_began=esp_timer_get_time();
+#endif
         // THE PIPELINE. The strip queued on the previous call has been going out
         // during everything above (~440 us of SPI against ~2.2 ms of drawing and
         // layout). The panel buffer that is NOT in flight is tx_buf[tx_front], so
@@ -415,6 +431,10 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             else swap_scalar(pixels,pixels,count);
             memcpy(panel, pixels, bytes);
         }
+#ifdef KASANE_P0_BUS_PROBE
+        ksn_p0_bus_phase_sample(KSN_P0_BUS_SWAP,
+            (uint32_t)(esp_timer_get_time()-swap_began),false);
+#endif
         e = tx_reap();
         if (e == ESP_OK) {
             // DC high: these bytes are pixel data and not a command. tx() is the
@@ -422,7 +442,14 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             // because it would block on the transfer this path exists to overlap.
             gpio_set_level(34, 1);
             tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+#ifdef KASANE_P0_BUS_PROBE
+            int64_t queue_began=esp_timer_get_time();
+#endif
             e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+#ifdef KASANE_P0_BUS_PROBE
+            ksn_p0_bus_phase_sample(KSN_P0_BUS_QUEUE,
+                (uint32_t)(esp_timer_get_time()-queue_began),false);
+#endif
             tx_inflight = (e == ESP_OK);
             tx_front ^= 1;
         }

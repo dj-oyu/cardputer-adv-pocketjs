@@ -6,6 +6,9 @@
 #include "freertos/task.h"
 #include <stdio.h>
 #include <string.h>
+#ifdef KASANE_P0_BUS_PROBE
+#include <stdatomic.h>
+#endif
 
 #define P0_BUCKETS 256u
 typedef struct {
@@ -19,16 +22,75 @@ static uint32_t copy_calls[KSN_P0_COPY_COUNT];
 #endif
 static uint64_t transfer_bytes,transfer_bands;
 static uint32_t transfer_frames;
+#ifdef KASANE_P0_BUS_PROBE
+/* SD worker updates only the atomic counter; the UI owner alone mutates the
+ * frame accumulator. No per-read log or cross-core lock enters the hot path. */
+static atomic_uint sd_reads_active;
+static atomic_uint sd_read_epoch;
+static struct {
+    uint32_t swap_us,reap_us,queue_us,sd_reap_calls;
+    bool active;
+} bus_frame;
+static uint32_t bus_sd_reap_calls;
+
+void ksn_p0_bus_sd_begin(void){
+    atomic_fetch_add_explicit(&sd_reads_active,1u,memory_order_relaxed);
+    atomic_fetch_add_explicit(&sd_read_epoch,1u,memory_order_relaxed);
+}
+void ksn_p0_bus_sd_end(void){
+    atomic_fetch_sub_explicit(&sd_reads_active,1u,memory_order_relaxed);
+}
+bool ksn_p0_bus_sd_active(void){
+    return atomic_load_explicit(&sd_reads_active,memory_order_relaxed)!=0u;
+}
+uint32_t ksn_p0_bus_sd_epoch(void){
+    return atomic_load_explicit(&sd_read_epoch,memory_order_relaxed);
+}
+void ksn_p0_bus_begin_frame(void){
+    bus_frame.swap_us=bus_frame.reap_us=bus_frame.queue_us=0;
+    bus_frame.sd_reap_calls=0;
+    bus_frame.active=true;
+}
+void ksn_p0_bus_phase_sample(ksn_p0_bus_phase phase,uint32_t us,bool sd_overlap){
+    if(!bus_frame.active)return;
+    if(phase==KSN_P0_BUS_SWAP)bus_frame.swap_us+=us;
+    else if(phase==KSN_P0_BUS_REAP){
+        bus_frame.reap_us+=us;
+        if(sd_overlap)bus_frame.sd_reap_calls++;
+    }else if(phase==KSN_P0_BUS_QUEUE)bus_frame.queue_us+=us;
+}
+void ksn_p0_bus_end_frame(uint32_t send_us){
+    if(!bus_frame.active)return;
+    bus_frame.active=false;
+    ksn_p0_probe_sample(KSN_P0_LCD_SWAP,bus_frame.swap_us);
+    ksn_p0_probe_sample(KSN_P0_LCD_REAP,bus_frame.reap_us);
+    ksn_p0_probe_sample(KSN_P0_LCD_QUEUE,bus_frame.queue_us);
+    uint32_t phases=bus_frame.swap_us+bus_frame.reap_us+bus_frame.queue_us;
+    ksn_p0_probe_sample(KSN_P0_LCD_OTHER,send_us>phases?send_us-phases:0u);
+    ksn_p0_probe_sample(bus_frame.sd_reap_calls?KSN_P0_LCD_SEND_SD:
+                        KSN_P0_LCD_SEND_IDLE,send_us);
+    bus_sd_reap_calls+=bus_frame.sd_reap_calls;
+}
+#endif
 static const char *const sample_names[]={"app_turn","app_render","app_send",
                                          "overlay_work","overlay_draw",
                                          "overlay_send","overlay_compute",
                                          "ui_frame","av_service",
-                                         "ui_interval","input_queue"};
+                                         "ui_interval","input_queue"
+#ifdef KASANE_P0_BUS_PROBE
+                                         ,"lcd_swap","lcd_reap","lcd_queue",
+                                         "lcd_other","lcd_send_sd","lcd_send_idle"
+#endif
+};
 // Preserve 128-us resolution for draw/service. Whole-frame and interval
 // samples can exceed 32 ms routinely, so give them a 262-ms range without
 // charging every other series for a larger histogram.
 static const uint16_t sample_bucket_us[]={128,128,128,128,128,128,128,
-                                          1024,128,1024,256};
+                                          1024,128,1024,256
+#ifdef KASANE_P0_BUS_PROBE
+                                          ,128,128,128,128,128,128
+#endif
+};
 _Static_assert(sizeof(sample_names)/sizeof(*sample_names)==KSN_P0_SAMPLE_COUNT,
                "sample probe labels must match the categories");
 _Static_assert(sizeof(sample_bucket_us)/sizeof(*sample_bucket_us)==KSN_P0_SAMPLE_COUNT,
@@ -81,6 +143,9 @@ _Static_assert(sizeof(copy_groups)/sizeof(*copy_groups)==KSN_P0_COPY_COUNT,
 
 void ksn_p0_probe_reset(void){
     memset(samples,0,sizeof(samples));
+#ifdef KASANE_P0_BUS_PROBE
+    bus_frame.active=false;bus_sd_reap_calls=0;
+#endif
 #ifdef KASANE_P0_COPY_PROBE
     memset(copy_bytes,0,sizeof(copy_bytes));
     memset(copy_calls,0,sizeof(copy_calls));
@@ -153,6 +218,10 @@ void ksn_p0_probe_report(const char *session){
     if(transfer_frames)ESP_LOGI("KSN_P0","T session=%s frames=%lu lcd_bytes=%llu bands=%llu",
         label,(unsigned long)transfer_frames,(unsigned long long)transfer_bytes,
         (unsigned long long)transfer_bands);
+#ifdef KASANE_P0_BUS_PROBE
+    ESP_LOGI("KSN_P0","B session=%s sd_reap_calls=%lu sd_active=%u",
+        label,(unsigned long)bus_sd_reap_calls,(unsigned)ksn_p0_bus_sd_active());
+#endif
     ESP_LOGI("KSN_P0","M session=%s free=%u min=%u largest=%u stack_free=%u",
         label,(unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
