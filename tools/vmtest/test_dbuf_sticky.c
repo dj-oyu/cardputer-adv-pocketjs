@@ -1,18 +1,20 @@
-// Does a DynBuf keep taking writes after it has failed to grow?
-//
-//   gcc -O1 -g -Wall -Werror -fsanitize=address,undefined \
-//       -I components/quickjs-ng/quickjs-ng \
-//       tools/vmtest/test_dbuf_sticky.c -o /tmp/t && /tmp/t
-//
-// (-Wextra is left out on purpose: cutils.h itself has unused parameters.)
-//
-// cutils.h's fast paths (dbuf_putc, dbuf_put_u16/u32/u64, dbuf_put) test only
-// whether the write fits the slack; the error flag was consulted in
-// dbuf_claim alone. So after a failed growth a smaller write could still land,
-// and a byte stream decoded by instruction length came out shifted: the
-// operand that failed was missing and the next opcode sat in its place. The
-// parser's bytecode is such a stream. This fails (exit 1) on the unpatched
-// header and passes once a failure collapses allocated_size to size.
+/* Does a DynBuf keep taking writes after it has failed to grow?
+ *
+ *   gcc -O1 -g -Wall -Werror -fsanitize=address,undefined \
+ *       -I components/quickjs-ng/quickjs-ng \
+ *       tools/vmtest/test_dbuf_sticky.c -o /tmp/t && /tmp/t
+ *
+ * (-Wextra is left out on purpose: cutils.h itself has unused parameters.
+ * A block comment, because a // line ending in a backslash continues the
+ * comment onto the next line, which -Wall rejects.)
+ *
+ * cutils.h's fast paths (dbuf_putc, dbuf_put_u16/u32/u64, dbuf_put) test only
+ * whether the write fits the slack; the error flag was consulted in
+ * dbuf_claim alone. So after a failed growth a smaller write could still land,
+ * and a byte stream decoded by instruction length came out shifted: the
+ * operand that failed was missing and the next opcode sat in its place. The
+ * parser's bytecode is such a stream. This fails (exit 1) on the unpatched
+ * header and passes once a failure collapses allocated_size to size. */
 #include <stdio.h>
 #include <stdlib.h>
 #include "cutils.h"

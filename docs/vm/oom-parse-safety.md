@@ -184,25 +184,24 @@ bytecode を積む `DynBuf` のエラー旗に残るだけで、例外は投げ�
 | 14 | `yield_then_handler.js` | 30 秒でタイムアウト | **テストの作り**。末尾の `afterAll` が `order.length < 5` の間、自分を `Promise.resolve().then` で再登録し続ける。OOM で `.then` の1つが落ちると 5 に届かず永久にポーリングする。VM は Promise ジョブを正しく回している（SIGABRT で取ったスタックは `JS_VMCallJob` の中）。実機では同じ形（無限 Promise 連鎖）をドレインの暴走ガードが 250 ms で止める（L3a の実機計測で診断 `'6'` が `RUNAWAY one drain spent 250845 us`） |
 | 4 | `special_calls.js`、`yield_job_tails.js` | **abort**: `JS_FreeRuntime` の `assert(list_empty(&rt->gc_obj_list))` | **OOM のエラー経路での参照の漏れ**。破棄の時点で約 160 個の GC オブジェクトが残り、大半が素の Object と C 関数、参照数 11〜13 のものも在る — 組み込みのプロトタイプ群がまるごと生き残る形で、C 側の参照が1本解放されずにコンテキストの全体を生かしている。**実機では `app_stop()` がこの assert を踏むので、実行中に OOM を踏んだアプリを閉じると再起動する**（推論。実機では未確認）。→ §3.7 で修正済み（4 点とも assert なしで終了、LSan 0、2 ファイル各 3,000 点で 0 件） |
 
-## 6. 残っているもの（この変更の範囲外）
+## 6. メモリ安全性の後に残っていたもの — すべて修正済み
 
-エラーの**種類**を全点で分類した（`--fail-alloc N` ごとの最初の例外）。§3.5 の修正で
-`ReferenceError` は 0 になったが、次が残る:
+§3〜§5 の修正後、エラーの**種類**を全点で分類した（`--fail-alloc N` ごとの最初の例外）。
+メモリ安全性の問題ではない（ASan/UBSan 無反応）が、**OOM が別の例外や黙った誤りとして出る**点が
+残っていた。並行して調査・修正し、すべて `vm/oom-truncated-bytecode` に統合した:
 
-| 症状 | closures | generators | 性質 |
-| --- | --- | --- | --- |
-| `SyntaxError`（存在しない構文エラー） | 112 | 69 | **誤診断**。コンパイルは失敗するので安全だが、アプリ作者は無い構文エラーを探すことになる。**§7 で修正（0 / 0）** |
-| `TypeError: not a function` | 12 | 9 | **初期化時の黙った欠落**。N=500 付近はパースより前、コンテキスト初期化中で、`Array.prototype.join` の登録が OOM で黙って落ち、プログラムは走って `join` が無いと言う。組み込みの登録関数が失敗を無視している |
-| `TypeError: cannot read property 'constructor' of null` | 0 | 6 | 未調査 |
+| 症状 | 最初の点数 | 修正 |
+| --- | --- | --- |
+| `SyntaxError`（存在しない構文エラー） | closures 112 / generators 69 | §7 |
+| `TypeError: not a function`（初期化時に組み込みが黙って欠ける） | 12 / 9 | §8.1 |
+| `TypeError: cannot read property 'constructor' of null` | 0 / 6 | §8.2 |
+| `JS_FreeRuntime` の assert（参照の漏れ） | 4 点（§5.1） | §3.7 |
+| `yield_then_handler.js` のタイムアウト | 14 点（§5.1） | §8.5 |
+| 正規表現のコンパイラ（未掃引だった） | 新コーパスで 4 件 | §8.3 |
+| 実行時の `not a function`、`this` のグローバル読み、名前付きグループの欠落 | 正規表現の掃引と §8.1 の後に判明 | §8.4 |
 
-どれもメモリ安全性の問題ではない（ASan/UBSan 無反応）。**初期化時の欠落は、この機体ではアプリ起動時に
-システムヒープが薄いと起こりうる**ので、後で扱う価値がある。
-
-`libregexp.c` も同じ `DynBuf` で正規表現の bytecode を組むので §3.1 の修正は効くが、**正規表現の
-コンパイラを狙った掃引はしていない**。
-
-**実機では1度も確かめていない。** 実機の assert（§3.6）が再起動を起こしていたかどうかも、
-ホストでの推論である。
+**実機では1度も確かめていない。** 実機の assert（§3.6、§3.7）や `exit(1)`（§8.1）が再起動を
+起こしていたかどうかは、ホストでの推論である。
 
 ## 7. パース中の OOM を `SyntaxError` と報告していた件（ブランチ `vm/oom-fix-syntaxerr`）
 
@@ -241,3 +240,87 @@ Test262 の `language/expressions` `language/statements` `language/arguments-obj
 38,566 pass / 1,191 fail / 2 skip）を修正前後の o2 で走らせ、**結果ファイルが1行も違わない**
 （負のテストは `SyntaxError` の型を検査する）。quickjs-ng master（2026-09-23）も
 同じ振る舞い（`js_parse_error` は無条件に `SyntaxError`、先読みの `XXX` と `push_scope` の無検査が残る）。
+
+## 8. 並行して直したもの（2026-09-23）
+
+§6 の各項目を、難易度ごとに別々のエージェント（Sonnet / Opus / Fable）へ割り当て、それぞれ別の
+ワークツリー・別ブランチで調査・修正させ、`vm/oom-truncated-bytecode` へ 1 本ずつ統合した。
+各ブランチは修正前後の分類と `oom_sweep.sh`・`run.sh` を自分で取り、統合側で差分を読んでから
+取り込んだ。**上流 quickjs-ng master（2026-09-23 取得）は、以下のどれも同じコードのまま。**
+
+### 8.1 初期化時の OOM で組み込みが黙って欠ける（`vm/oom-fix-initoom`）
+
+`JS_NewContext` は `JS_AddIntrinsic*` の戻り値しか見ず、その中の大量のプロパティ定義
+（`JS_SetPropertyFunctionList`、各 `JS_DefineAutoInitProperty`、エラー型のプロトタイプ…）は結果を
+捨てていた。**初期化区間 1,238 点のうち約 400 点で、組み込みがどれか欠けたままプログラムが最後まで
+走っていた**（例外として表に出たのは 2 点だけ）。
+
+修正: すべての確保拒否が通る OOM カナリアの件数を、コンテキスト構築の前後で比べ、動いていたら
+コンテキストを解放して NULL を返す（数百箇所の個別検査ではなく1箇所）。件数は読むだけで消さない
+ので、ホストのターンごとの `JS_TakeOOMCanary` には影響しない。同じ症状の関連3件も直した:
+
+- `JS_AutoInitProperty`: 遅延生成の組み込みを、結果を見る前に `undefined` で上書きしていた
+  （generators.js の 2877 で `Generator.prototype.throw` が消える）。失敗時はスロットをそのまま残し、
+  次のアクセスで作り直す。
+- `JS_NewContextRaw`: 早い失敗で、GC リストに繋がったままのコンテキストを解放していた。
+- `js_std_init_handlers`: 確保失敗で **`exit(1)`（実機では再起動）**、終了処理の登録失敗で 160 B の漏れ。
+
+`pocketjs_guest_create` と vmrun は、`js_std_add_helpers` の後にもカナリアを見て、失敗した
+ゲストを `ESP_ERR_NO_MEM` で断る。
+
+### 8.2 Error が作れないと `null` を投げていた（`vm/oom-fix-ctornull`）
+
+`JS_ThrowError2` は、Error オブジェクト自体の確保に失敗すると素の `null` を投げていた。ゲストの
+`catch (e) { e.constructor... }` が OOM ではなく `cannot read property 'constructor' of null` に
+なる（generators.js の 6 点、すべて実行中）。`JS_ThrowOutOfMemory` 経由にし、その
+`in_out_of_memory` 旗で再帰を 1 段に抑える。本当に枯渇していればこれまでどおり `null`。
+
+### 8.3 正規表現のコンパイラ（`vm/oom-fix-regexp`）
+
+同じ `DynBuf` で bytecode を組むのに一度も掃引されていなかった。新しいコーパス `regexp_oom.js`
+（6,240 確保）を全点掃引して 4 件 → 0: `|` のジャンプを記録位置へ失敗後に書き戻す書き越し、
+名前付きグループ表の追記失敗でも旗を立てる読み越し、失敗後も再帰を続けて NULL を `memmove`、
+古い文字列を残す 2 つの失敗経路。再帰パーサの共通入口（`lre_check_size`）で `dbuf_error` を見る。
+`lre_compile` は OOM を `*plen = -1` で知らせ、`js_compile_regexp` はそれを `InternalError` にする
+（上流は正規表現のコンパイル失敗をすべて `SyntaxError` にする）。
+
+### 8.4 OOM が別の例外・黙った誤りとして出る残り（`vm/oom-fix-silentundef`）
+
+正規表現の掃引で見つかった「例外のプロトタイプが無い」「`rx.flags` が例外なしで `undefined`」は、
+失敗した確保の C スタックを取ると**どちらもコンテキスト初期化の中**で、§8.1 で閉じていた
+（プロトタイプが欠けたまま作られていた）。実行時のプロパティ読み出しに不具合は無かった。
+残りは別の原因で、次を直した:
+
+- `JS_EvalFunctionInternal`: `js_closure` の失敗を `JS_CallFree` に渡し、保留中の OOM を
+  `not a function` で上書きしていた（すべてのスクリプトと直接 `eval` が通る）。
+- `resolve_pseudo_var`: 「`this` の束縛が無い」と「`add_var` の確保失敗」を同じ -1 で返し、OOM で
+  `this` を**グローバル読み**としてコンパイルしていた（§3.5 と同じ黙った誤コンパイル）。確保失敗は
+  -2 で区別する。`add_eval_variables` が捨てていた `add_var` 系の結果 14 箇所も検査。
+- 正規表現の名前付きグループ表は 2 本目の `DynBuf` で書き込みが無検査だった
+  （`groups === undefined` のままコンパイルされる）。メッセージ無しで失敗する 2 つの補助関数も直した。
+
+### 8.5 `yield_then_handler.js` のタイムアウト（`vm/oom-fix-pollhang`）
+
+テスト側の問題。末尾の関数が 5 件そろうまで自分を再登録し続けるので、OOM で 1 件欠けると永久に
+待つ。1,000 回で諦めて例外を投げるようにした（通常は 9 ジョブで終わるので出力は変わらない）。
+vmrun の暴走ガードは既定で無効（使うファイルがヘッダで要求する）なので、既定を変えずテストを直した。
+
+## 9. 統合後の最終検証（2026-09-24、`09d3973` + 本文書、実測(host)）
+
+§3〜§8 のすべてを統合した `vm/oom-truncated-bytecode` で取り直した。
+
+| 検査 | 結果 |
+| --- | --- |
+| `oom_sweep.sh -n 3000`、コーパス 64 ファイル（192,000 点） | **0 件**（§5.1 で残っていたタイムアウト 14・abort 4 も含めて 0） |
+| `oom_sweep.sh -n 6240 regexp_oom.js` | **0 件** |
+| 全点の例外の種類、closures（4,800）/ generators（4,800）/ regexp_oom（6,240） | `InternalError: out of memory` と「例外なし」だけ（regexp_oom はほかに実行時の `out of memory in regexp execution` 58 点）。**`SyntaxError` / `TypeError` / `ReferenceError` は 0** |
+| `run.sh`（o2、o2 `--force-yield`、asan） | 76/76、76/76、76/76 |
+| Test262 標準集合（o2、通常 / `--force-yield`） | 7,501 / 194 / 0、**基準と同一**、退行 0 |
+| `test_dbuf_sticky.c` | pass |
+| 実機ビルド（書き込みはしていない） | 通る。DIRAM ±0、Flash **+652 B**（`vm/main` の既定ビルド 1,402,876 → 1,403,528） |
+
+「例外なし」は、落とした確保がプログラムの確保より後だった点、プログラムが自分で扱った点、そして
+§8.1 でコンテキストの構築が OOM で断られた点（vmrun は `guest setup failed: out of memory` を出し、
+`XxxError:` の行を出さない）を含む。
+
+**実機では1度も走らせていない。** `vm/main` へ戻す前に smoke と `memlog --check` を実機で通す。

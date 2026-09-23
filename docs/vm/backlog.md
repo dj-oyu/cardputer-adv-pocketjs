@@ -11,16 +11,14 @@
 
 ## 確保失敗時のコンパイル経路（VM の段とは独立）
 
-出典: [oom-parse-safety.md](oom-parse-safety.md)。開発は `vm/oom-truncated-bytecode`。状態は 2026-09-23 時点。
+出典: [oom-parse-safety.md](oom-parse-safety.md)。開発は `vm/oom-truncated-bytecode`。状態は 2026-09-24 時点。
+
+ホストで見つけたものはすべて修正・統合済み（§3〜§8、最終検証 §9: 全点掃引 0 件、誤った例外の種類 0、
+Test262 基準と同一）。残るのは実機だけ:
 
 | # | 項目 | 出典 | 状態 |
 | --- | --- | --- | --- |
-| 1 | 全点掃引のメモリ安全性の報告（ASan/UBSan）を 0 に | §2、§3、§5.1 | **完了**。コーパス 64 ファイル・192,000 点で 0 件 |
-| 6 | **OOM のエラー経路での参照の漏れ → 破棄時の assert**（`special_calls.js`、`yield_job_tails.js` の4点）。実機では OOM を踏んだアプリを閉じると `app_stop()` → `JS_FreeRuntime` の assert で再起動する（推論）。約 160 個の GC オブジェクトが残る。修正前から在る | §5.1 | 未着手 |
-| 2 | OOM が `SyntaxError` として報告される（closures 112 点・generators 69 点）。誤診断で安全だが、アプリ作者が無い構文エラーを探す | §6 | 未着手 |
-| 3 | コンテキスト初期化中の OOM で組み込み（例 `Array.prototype.join`）が黙って欠け、プログラムが走る | §6 | 未着手 |
-| 4 | 正規表現コンパイラ（`libregexp.c`）を狙った掃引 | §6 | 未着手 |
-| 5 | 実機での確認（パース中 OOM の assert が再起動を起こしていたか） | §6 | 未着手 |
+| 1 | 実機での確認（smoke、`memlog --check`）。パース中・終了時の assert、`exit(1)` が実機で再起動を起こしていたかは推論のまま | §9 | 未実施（COM3 待ち） |
 
 ## L2 で完了済みの項目（参考）
 
