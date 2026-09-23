@@ -52,12 +52,15 @@ typedef struct {
     ref_status status;
 } ref_slot;
 typedef struct {
-    ksn_source_registry registry;
     ksn_source_provider provider;
     ksn_source_subscription subscription;
     ksn_source_handle handle;
     uint64_t pending_revision;
 } schema_source;
+typedef struct {
+    ksn_source_registry registry;
+    schema_source entries[];
+} schema_sources;
 typedef struct {
     ksn_schema_session session;
     const ksn_schema *definition;
@@ -272,25 +275,38 @@ static void apply_outcome(void) {
 static char *schema_text_base(schema_state *s){
     return (char *)&s->values[s->definition->slot_count];
 }
-static schema_source *schema_native(schema_state *s){
-    return s->asset->source_open?(schema_source *)s->source_state:NULL;
+static schema_sources *schema_native(schema_state *s){
+    return s->asset->source_count?(schema_sources *)s->source_state:NULL;
 }
 static schema_state *schema_alloc(const pocket_app_view_asset *asset,uint32_t consumer){
     const ksn_schema *definition=asset?asset->schema:NULL;
     if(!definition||ksn_schema_validate(definition)!=KSN_OK)return NULL;
+    if(asset->source_count>KSN_SOURCE_MAX_REGISTERED||
+       (asset->source_count&&!asset->sources))return NULL;
     size_t text_bytes=0;
     for(unsigned i=0;i<definition->slot_count;i++)
         if(definition->slots[i].type==KSN_SLOT_TEXT)
             text_bytes+=(size_t)definition->slots[i].capacity+1u;
     size_t source_offset=(text_bytes+7u)&~(size_t)7u;
-    size_t bytes=sizeof(schema_state)+
-                 definition->slot_count*sizeof(ksn_schema_value)+
-                 source_offset+(asset->source_open?sizeof(schema_source)+asset->source_bytes:0u);
+    size_t source_bytes=asset->source_count?
+        sizeof(schema_sources)+asset->source_count*sizeof(schema_source):0u;
+    for(unsigned i=0;i<asset->source_count;i++){
+        if(!asset->sources[i].source_open||!asset->sources[i].source_bindings||
+           !asset->sources[i].source_binding_count||
+           asset->sources[i].source_bytes>SIZE_MAX-7u)return NULL;
+        size_t padded=(asset->sources[i].source_bytes+7u)&~(size_t)7u;
+        if(source_bytes>SIZE_MAX-padded)return NULL;
+        source_bytes+=padded;
+    }
+    size_t fixed_bytes=sizeof(schema_state)+
+        definition->slot_count*sizeof(ksn_schema_value)+source_offset;
+    if(fixed_bytes>SIZE_MAX-source_bytes)return NULL;
+    size_t bytes=fixed_bytes+source_bytes;
     schema_state *s=calloc(1,bytes);
     if(!s)return NULL;
     s->definition=definition;s->asset=asset;s->revision=1;s->handle=consumer;
     s->allocation_bytes=bytes;
-    if(asset->source_open){
+    if(asset->source_count){
         s->source_state=schema_text_base(s)+source_offset;
     }
     size_t offset=0;
@@ -306,19 +322,28 @@ static schema_state *schema_alloc(const pocket_app_view_asset *asset,uint32_t co
             s->values[i].data.number=slot->initial_number;
     }
     if(ksn_schema_session_init(&s->session,definition)!=KSN_OK){free(s);return NULL;}
-    schema_source *native=schema_native(s);
+    schema_sources *native=schema_native(s);
     if(native){
-        void *storage=(char *)native+sizeof(*native);
+        char *storage=(char *)(native->entries+asset->source_count);
+        uint32_t source_slots=0;
         ksn_source_registry_init(&native->registry);
-        ksn_result r=asset->source_open(storage,&native->provider);
-        if(r==KSN_OK)r=ksn_source_register(&native->registry,
-                                            &native->provider,&native->handle);
-        if(r==KSN_OK&&asset->source_registered)
-            asset->source_registered(storage,native->handle);
-        if(r==KSN_OK)r=ksn_source_subscribe(&native->registry,native->handle,
-            consumer,definition,asset->source_bindings,asset->source_binding_count,
-            &native->subscription);
-        if(r!=KSN_OK){free(s);return NULL;}
+        for(unsigned i=0;i<asset->source_count;i++){
+            const pocket_app_view_source *source=&asset->sources[i];
+            schema_source *entry=&native->entries[i];
+            ksn_result r=source->source_open(storage,&entry->provider);
+            if(r==KSN_OK)r=ksn_source_register(&native->registry,
+                                                &entry->provider,&entry->handle);
+            if(r==KSN_OK&&source->source_registered)
+                source->source_registered(storage,entry->handle);
+            if(r==KSN_OK)r=ksn_source_subscribe(&native->registry,entry->handle,
+                consumer,definition,source->source_bindings,
+                source->source_binding_count,&entry->subscription);
+            if(r==KSN_OK&&(source_slots&entry->subscription.bound_slots))
+                r=KSN_INVALID;
+            if(r!=KSN_OK){free(s);return NULL;}
+            source_slots|=entry->subscription.bound_slots;
+            storage+=(source->source_bytes+7u)&~(size_t)7u;
+        }
     }
     return s;
 }
@@ -333,7 +358,8 @@ static void schema_note_submitted(schema_state *s,ksn_tx before){
 }
 /* Keep the borrowed-value scratch off the ordinary mount hot path. */
 static __attribute__((noinline)) ksn_result schema_refresh_native(
-    schema_state *s,schema_source *native,bool *blocked){
+    schema_state *s,schema_sources *sources,bool *blocked){
+    schema_source *native=&sources->entries[0];
     if(s->session.ticket.value){
         ksn_submission outcome=ksn_view_poll(view());
         /* A complete current snapshot can be reacquired after this ticket
@@ -354,7 +380,7 @@ static __attribute__((noinline)) ksn_result schema_refresh_native(
     ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS];
     ksn_source_lease lease={0};
     uint64_t revision=s->revision;
-    ksn_result source=ksn_source_acquire(&native->registry,&native->subscription,
+    ksn_result source=ksn_source_acquire(&sources->registry,&native->subscription,
         s->definition,s->values,owner_now_us,effective,&lease);
     if(source!=KSN_OK)return source;
     if(lease.dirty_slots){
@@ -377,12 +403,66 @@ static __attribute__((noinline)) ksn_result schema_refresh_native(
     }
     return r;
 }
+/* Multiple producers are composed only on assets that declare them. The
+ * single-source clock keeps its smaller lease and stack frame above. */
+static __attribute__((noinline)) ksn_result schema_refresh_native_many(
+    schema_state *s,schema_sources *sources,bool *blocked){
+    uint8_t count=s->asset->source_count;
+    schema_source *native=sources->entries;
+    if(s->session.ticket.value){
+        ksn_submission outcome=ksn_view_poll(view());
+        if(outcome.ticket.value==s->session.ticket.value&&
+           outcome.status==KSN_SUBMITTED){
+            if(blocked)*blocked=true;
+            return KSN_OK;
+        }
+        if(outcome.ticket.value==s->session.ticket.value&&
+           outcome.status==KSN_PRESENTED){
+            for(unsigned i=0;i<count;i++)if(native[i].pending_revision){
+                ksn_result ack=ksn_source_presented(&native[i].subscription,
+                                                      native[i].pending_revision);
+                if(ack!=KSN_OK)return ack;
+            }
+        }
+    }
+    ksn_source_member members[KSN_SOURCE_MAX_REGISTERED];
+    for(unsigned i=0;i<count;i++)members[i]=(ksn_source_member){
+        &sources->registry,&native[i].subscription};
+    ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS];
+    ksn_source_bundle bundle={0};
+    ksn_result source=ksn_source_bundle_acquire(members,count,s->definition,
+        s->values,owner_now_us,effective,&bundle);
+    if(source!=KSN_OK)return source;
+    uint64_t revision=s->revision;
+    if(bundle.dirty_slots){
+        if(revision==UINT64_MAX){ksn_source_bundle_release(&bundle);return KSN_LIMIT;}
+        revision++;
+    }
+    ksn_tx before=s->session.ticket;
+    ksn_result r=ksn_schema_session_step_dirty(&s->session,view(),viewport,effective,
+        revision,s->pending_base_slots|bundle.dirty_slots,blocked);
+    if(r==KSN_OK){
+        s->revision=revision;
+        r=ksn_source_bundle_commit(&bundle);
+        if(r==KSN_OK)s->pending_base_slots=0;
+    }
+    ksn_source_bundle_release(&bundle);
+    if(r==KSN_OK&&s->session.ticket.value&&
+       s->session.ticket.value!=before.value){
+        for(unsigned i=0;i<count;i++)
+            native[i].pending_revision=native[i].subscription.validated_revision;
+        schema_note_submitted(s,before);
+    }
+    return r;
+}
 static ksn_result schema_refresh(bool *blocked){
     if(blocked)*blocked=false;
     if(!state||!state->schema)return KSN_OK;
     schema_state *s=state->schema;
-    schema_source *native=schema_native(s);
-    if(native)return schema_refresh_native(s,native,blocked);
+    schema_sources *native=schema_native(s);
+    if(native)return s->asset->source_count==1?
+        schema_refresh_native(s,native,blocked):
+        schema_refresh_native_many(s,native,blocked);
     ksn_tx before=s->session.ticket;
     ksn_result r=ksn_schema_session_step_dirty(&s->session,view(),viewport,s->values,
         s->revision,s->pending_base_slots,blocked);

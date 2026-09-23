@@ -1,6 +1,7 @@
 // End-to-end host contract for pocket.kasane with the real QuickJS and the
 // real fixed-storage DS core/cache/modal/renderer.
 #include "pocket_kasane.h"
+#include "app_view_assets.h"
 #include "pocket_av.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
@@ -481,6 +482,55 @@ static void reactive_presenter_tests(void){
           "new native minute acknowledgement is stable");
     pocket_kasane_reset();test_clock_valid=false;
 }
+
+#ifdef KSN_TEST_DUAL_SOURCE
+static void dual_source_mount_tests(void){
+    ksn_render_stats stats;
+    bool blocked=false;
+    unsigned acquired=0,released=0,reads_before=0;
+    pocket_kasane_set_viewport(140,46,96,22);
+    check(run("globalThis.dual=kasane.mount('dual-test')")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "two native sources compose in a mounted asset");
+    check(present(&stats)==KSN_OK,"dual-source initial frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "both source revisions acknowledge after presentation");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    pocket_test_dual_set(0,"A1");pocket_test_dual_set(1,"B1");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "two source changes enter one submission");
+    pocket_test_dual_counts(&reads_before,NULL);
+    pocket_test_dual_set(0,"A2");pocket_test_dual_set(1,"B2");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "pending dual-source frame defers new acquisition");
+    pocket_test_dual_counts(&acquired,NULL);
+    check(acquired==reads_before,"pending dual-source frame does not read producers");
+    check(present(&stats)==KSN_OK,"first dual-source update presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "latest values coalesce after first presentation");
+    check(present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))!=0,
+          "coalesced dual-source values change displayed pixels");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "coalesced dual-source update acknowledges");
+    pocket_test_dual_set(0,"A3");pocket_test_dual_set(1,"B3");
+    pocket_test_dual_fail_second(true);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_IO&&
+          !pocket_kasane_has_submission(),
+          "second-source failure prevents partial submission");
+    pocket_test_dual_counts(&acquired,&released);
+    check(acquired==released,"failed composition releases first source pin");
+    pocket_test_dual_fail_second(false);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "dual-source mount recovers after producer failure");
+    check(present(&stats)==KSN_OK,"recovered dual-source frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "recovered dual-source frame acknowledges");
+    pocket_test_dual_counts(&acquired,&released);
+    check(acquired==released,"all dual-source leases released");
+    pocket_kasane_reset();
+}
+#endif
 
 static void atomicity_tests(void) {
     ksn_render_stats stats;
@@ -1247,6 +1297,9 @@ int main(void) {
     presenter_tests();
     app_presenter_tests();
     reactive_presenter_tests();
+#ifdef KSN_TEST_DUAL_SOURCE
+    dual_source_mount_tests();
+#endif
 
     check(run("globalThis.tpl=kasane.cache.create(["
               "{bounds:[0,0,10,10],color:0xff0000ff},"

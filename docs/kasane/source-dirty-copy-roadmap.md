@@ -154,7 +154,17 @@ metadata代入でdisjoint slotへ重ねる。UTF-8 payload転記は0回。
 不正値・権限拒否・古い世代では全leaseを解放し候補をbaseへ戻す。
 cursorはbundle全体を受理した後にだけ進める。hostのASan/UBSan・O2で
 重複slot拒否、期限切れ、失敗後のpin/cursor回収を確認した。
-これはまだmount/JS公開bindに接続しておらず、P1出口の複数source完了とはしない。
+2026-09-24：アプリ所有の不変asset定義を複数source宣言へ拡張し、
+`mount`がdisjointなslot購読を登録してbundle合成するよう接続した。
+登録表はmount内で全sourceが1つを共有し、source数に比例する重複表を持たない。
+単一sourceのclockは小さい既存lease経路、sourceなしアプリは従来の
+allocation/更新経路を維持。host限定の2 source QuickJS試験で、同時更新を
+1提出にまとめること、提出中の再取得抑止、後続source失敗時の無提出・
+全pin解放・復旧を確認した。公開JS `bind`、期限scheduler、別task producer、
+実機gateは未達で、P1出口の完了判定は変えない。Kasane契約一式の
+ASan/UBSan・O2、2 source QuickJS統合のASan/UBSan・
+`-O2 -fstrict-aliasing`はすべて0失敗。診断OFFのESP-IDF buildもPASSし、
+静的DIRAMは159,788 Bのまま。COM3は使用していない。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

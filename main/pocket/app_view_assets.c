@@ -233,15 +233,95 @@ static void clock_registered(void *storage,ksn_source_handle handle){
     ((clock_source *)storage)->generation=handle.generation;
 }
 static const ksn_source_binding clock_bindings[]={{0,0},{1,1}};
+static const pocket_app_view_source clock_sources[]={
+    {.source_bytes=sizeof(clock_source),.source_open=clock_open,
+     .source_registered=clock_registered,.source_bindings=clock_bindings,
+     .source_binding_count=2}
+};
 static const pocket_app_view_asset hello_asset={.schema=&hello};
 static const pocket_app_view_asset imucal_asset={.schema=&imucal};
 static const pocket_app_view_asset bridge_asset={.schema=&bridge};
 static const pocket_app_view_asset companion_asset={.schema=&companion};
 static const pocket_app_view_asset pet_asset={.schema=&pet};
 static const pocket_app_view_asset clock_asset={.schema=&clock_view,
-    .source_bytes=sizeof(clock_source),.source_open=clock_open,
-    .source_registered=clock_registered,.source_bindings=clock_bindings,
-    .source_binding_count=2};
+    .sources=clock_sources,.source_count=1};
+#ifdef KSN_TEST_DUAL_SOURCE
+/* Host-only mount fixture: two independent native producers with disjoint
+ * slots. No test state or app identity enters the Kasane core. */
+static const ksn_schema_slot dual_slots[]={
+    {"left",KSN_SLOT_TEXT,7,0,0},{"right",KSN_SLOT_TEXT,7,0,0}
+};
+static const ksn_schema_node dual_nodes[]={
+    {.kind=KSN_NODE_TEXT,.bounds=RECT(0,0,45,16),
+     .color=COLOR(0xffffffffu),.text={.slot=0},.font=KSN_CAPTION},
+    {.kind=KSN_NODE_TEXT,.bounds=RECT(48,0,95,16),
+     .color=COLOR(0xffffffffu),.text={.slot=1},.font=KSN_CAPTION}
+};
+static const ksn_schema dual_view={.version=1,.slot_count=2,.node_count=2,
+    .background=0x000000ffu,.slots=dual_slots,.nodes=dual_nodes};
+typedef struct {unsigned id;uint32_t generation;ksn_schema_value field;} dual_source;
+static struct {char text[8];uint64_t revision;} dual_model[2]={
+    {"A0",1},{"B0",1}
+};
+static bool dual_fail_second;
+static unsigned dual_acquired,dual_released;
+void pocket_test_dual_set(unsigned source,const char *text){
+    if(source>=2||!text)return;
+    size_t n=strlen(text);if(n>7)return;
+    memcpy(dual_model[source].text,text,n+1u);
+    dual_model[source].revision++;
+}
+void pocket_test_dual_fail_second(bool fail){dual_fail_second=fail;}
+void pocket_test_dual_counts(unsigned *acquired,unsigned *released){
+    if(acquired)*acquired=dual_acquired;
+    if(released)*released=dual_released;
+}
+static ksn_result dual_acquire(void *opaque,uint64_t cursor,uint64_t now_us,
+                               ksn_source_snapshot *out){
+    (void)cursor;(void)now_us;
+    dual_source *source=opaque;
+    if(source->id==1&&dual_fail_second)return KSN_IO;
+    unsigned id=source->id;
+    source->field.data.text=(ksn_schema_text){dual_model[id].text,
+        (uint16_t)strlen(dual_model[id].text)};
+    *out=(ksn_source_snapshot){.size=sizeof(*out),.version=KSN_SOURCE_ABI_VERSION,
+        .field_count=1,.generation=source->generation,
+        .revision=dual_model[id].revision,.valid_fields=1,.changed_fields=1,
+        .fields=&source->field};
+    dual_acquired++;
+    return KSN_OK;
+}
+static void dual_release(void *opaque,const ksn_source_snapshot *snapshot){
+    (void)opaque;(void)snapshot;dual_released++;
+}
+static bool dual_allow(void *opaque,uint32_t consumer){
+    (void)opaque;return consumer!=0;
+}
+static ksn_result dual_open(void *storage,ksn_source_provider *out,unsigned id){
+    static const ksn_slot_type types[]={KSN_SLOT_TEXT};
+    dual_source *source=storage;source->id=id;
+    *out=(ksn_source_provider){.size=sizeof(*out),.version=KSN_SOURCE_ABI_VERSION,
+        .field_count=1,.field_types=types,.context=storage,
+        .acquire=dual_acquire,.release=dual_release,.allow=dual_allow};
+    return KSN_OK;
+}
+static ksn_result dual_open_left(void *storage,ksn_source_provider *out){
+    return dual_open(storage,out,0);
+}
+static ksn_result dual_open_right(void *storage,ksn_source_provider *out){
+    return dual_open(storage,out,1);
+}
+static void dual_registered(void *storage,ksn_source_handle handle){
+    ((dual_source *)storage)->generation=handle.generation;
+}
+static const ksn_source_binding dual_left[]={{0,0}},dual_right[]={{1,0}};
+static const pocket_app_view_source dual_sources[]={
+    {sizeof(dual_source),dual_open_left,dual_registered,dual_left,1},
+    {sizeof(dual_source),dual_open_right,dual_registered,dual_right,1}
+};
+static const pocket_app_view_asset dual_asset={.schema=&dual_view,
+    .sources=dual_sources,.source_count=2};
+#endif
 const pocket_app_view_asset *pocket_app_view_lookup(const char *name){
     if(!name)return NULL;
     if(strcmp(name,"hello")==0)return &hello_asset;
@@ -250,6 +330,9 @@ const pocket_app_view_asset *pocket_app_view_lookup(const char *name){
     if(strcmp(name,"companion")==0)return &companion_asset;
     if(strcmp(name,"pet")==0)return &pet_asset;
     if(strcmp(name,"clock")==0)return &clock_asset;
+#ifdef KSN_TEST_DUAL_SOURCE
+    if(strcmp(name,"dual-test")==0)return &dual_asset;
+#endif
     return NULL;
 }
 static const pocket_app_image_asset pet_image_asset={"pets",64,64,12,6,ksn_pet_builtin_image};
