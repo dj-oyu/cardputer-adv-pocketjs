@@ -134,6 +134,20 @@ bytecode を積む `DynBuf` のエラー旗に残るだけで、例外は投げ�
   返し、次の行が参照する（実行時、`new Array` に既定でないプロトタイプ）。
 - `js_parse_for_in_of`: bytecode が一度も確保されていないと `memset(NULL, x, 0)`（UB）。
 
+### 3.7 OOM のエラー経路での参照の漏れ — `JS_FreeRuntime` の assert（§5.1 の残り 4 件）
+
+`JS_DUMP_LEAKS`（`JS_SetDumpFlags`、内部参照を `gc_decref` で除いて外部参照だけを出す）で見ると、
+4 点とも**漏れているのは1個**で、それが prototype 経由で組み込み群を生かしていた。特定の
+オブジェクトの `js_dup` / `JS_FreeValueRT` を `__sanitizer_print_stack_trace()` で追って場所を出した:
+
+| 点 | 漏れたもの | 場所 |
+| --- | --- | --- |
+| `special_calls.js` 1979 / 2047 | タグ付きテンプレートの strings 配列（空の Array、ref 1） | `cpool_add`。`emit_push_const` は `js_dup()` した値を渡すが、`js_resize_array` の失敗時に捨てずに `-1` を返す。呼び出し元 `js_parse_template` は自分の参照を既に解放している |
+| `yield_job_tails.js` 2643 / 2659 | `Promise.all` の値配列の要素（非同期ジェネレータの iterator result） | `js_json_to_str` の配列分岐。要素 `v` を読んだ直後の `JS_ToStringFree(js_int64(i))`（16 バイトの文字列）が失敗すると `goto exception` するが、共通の末尾は `v` を解放しない |
+
+**修正**: `cpool_add` の失敗経路で `val` を解放（他の呼び出し元は `JS_NULL` を渡すので無害）、
+`js_json_to_str` の当該経路で `v` を解放。どちらも quickjs-ng master（2026-09-23）に同じコードが残っている。
+
 ## 4. 上流の状況
 
 **quickjs-ng master と bellard/quickjs master（どちらも 2026-09-23 取得）で、上のどれも修正されて
@@ -168,7 +182,7 @@ bytecode を積む `DynBuf` のエラー旗に残るだけで、例外は投げ�
 | 件数 | ファイル | 症状 | 何か |
 | --- | --- | --- | --- |
 | 14 | `yield_then_handler.js` | 30 秒でタイムアウト | **テストの作り**。末尾の `afterAll` が `order.length < 5` の間、自分を `Promise.resolve().then` で再登録し続ける。OOM で `.then` の1つが落ちると 5 に届かず永久にポーリングする。VM は Promise ジョブを正しく回している（SIGABRT で取ったスタックは `JS_VMCallJob` の中）。実機では同じ形（無限 Promise 連鎖）をドレインの暴走ガードが 250 ms で止める（L3a の実機計測で診断 `'6'` が `RUNAWAY one drain spent 250845 us`） |
-| 4 | `special_calls.js`、`yield_job_tails.js` | **abort**: `JS_FreeRuntime` の `assert(list_empty(&rt->gc_obj_list))` | **OOM のエラー経路での参照の漏れ**。破棄の時点で約 160 個の GC オブジェクトが残り、大半が素の Object と C 関数、参照数 11〜13 のものも在る — 組み込みのプロトタイプ群がまるごと生き残る形で、C 側の参照が1本解放されずにコンテキストの全体を生かしている。**実機では `app_stop()` がこの assert を踏むので、実行中に OOM を踏んだアプリを閉じると再起動する**（推論。実機では未確認）。漏れている参照の特定は未着手 |
+| 4 | `special_calls.js`、`yield_job_tails.js` | **abort**: `JS_FreeRuntime` の `assert(list_empty(&rt->gc_obj_list))` | **OOM のエラー経路での参照の漏れ**。破棄の時点で約 160 個の GC オブジェクトが残り、大半が素の Object と C 関数、参照数 11〜13 のものも在る — 組み込みのプロトタイプ群がまるごと生き残る形で、C 側の参照が1本解放されずにコンテキストの全体を生かしている。**実機では `app_stop()` がこの assert を踏むので、実行中に OOM を踏んだアプリを閉じると再起動する**（推論。実機では未確認）。→ §3.7 で修正済み（4 点とも assert なしで終了、LSan 0、2 ファイル各 3,000 点で 0 件） |
 
 ## 6. 残っているもの（この変更の範囲外）
 
