@@ -54,7 +54,8 @@ S3でworker状態6,896B、別途PCM4,608B、圧縮フレーム2,048B、stack24,5
 2本のリング12,288B。合計50,416Bはソースとsizeofからの導出で、TCB・allocator管理費は別。
 小さなバッファは分けて確保し、全体50KiBの単一連続領域を要求しない。
 ただしstack24KiBの連続領域は必要で、空き総量だけでは可否を決められない。
-リングは初回playからcloseまで保持し、workerとstackは停止・EOFで解放する。
+リングは初回playからcloseまで保持する。一時停止ではworker・stack・復号状態も
+保持し、closeまたはEOFで解放する。停止中もI2Sへ無音を送り、位置とunderrun数は進めない。
 
 ## 実装範囲と残る制約
 
@@ -63,11 +64,12 @@ S3でworker状態6,896B、別途PCM4,608B、圧縮フレーム2,048B、stack24,5
 - ID3v2.2〜2.4の先頭タグとID3v1末尾タグを除外。APE等の末尾タグは未対応。
 - free-format、曲の途中のサンプルレート変更、破損フレームは拒否する。
 - encoder delay/paddingやXing/LAMEによるgapless処理は未実装。
-- 総時間はEOFまでnull、seekは無効。pause/resumeは先頭から復号して位置を復元するため、
-  長い曲では待ち時間が伸びる。効率的なランダムシークには別途インデックスとreservoirの扱いが必要。
-- SDは既存設定で400kHz。128kbpsは16KB/s、320kbpsは40KB/s、バスの理論上限は50KB/s
-  （すべて導出）。ファイルの開閉・seek・描画との同居分を含めると320kbpsを保証できない。
-  Flashからの実機試験をSD性能の証明には使わない。SD速度の実測と読み出し経路の改善は別の作業。
+- タグが総時間を記録していなければ `durationMs` はnull、ランダムseekは無効。
+  pause/resumeはライブ復号状態を保持するので曲頭からの再デコードはしない。
+  ランダムシークには別途インデックスとbit reservoirのpre-rollが必要。
+- SD読み出しはUI owner taskの `read_at` で、2048Bごとにopen/seek/closeする。
+  2026-09-23の実機では25MHzでマウントし、診断時の最大読み取り時間は18.662ms。
+  持続readerはgrant失効・カード世代・ファイル置換の扱いを決めてから検討する。
 - すべての音源・無線同時通信・SDカード・UI負荷を網羅した性能保証ではない。
 
 ## 再現
@@ -85,6 +87,15 @@ idf.py -B build_mp3 -p COM3 flash
 復号器の検証を終えた後、commit `1fea03f`でdev/test資産ごと削除済み。現在の実機経路は
 `apps/player`（ホーム画面のMUSICオーバーレイ、[player-overlay.md](player-overlay.md)）で、
 MP3固有の往復試験を新たに走らせるにはその経路を使う。
+
+2026-09-23の実カード・MUSIC overlayでは、`04 リズム.mp3` の約73秒地点で
+`STREAM STARVED`、512連続underrun、ソース/復号fault 0を確認した。
+Kasaneの表示待ちがguest turn内の補充を止めていたため、ネイティブ音声補充を
+UIフレーム先頭へ分離した。修正版は同曲の完走・次曲への遷移、および約78秒地点での
+pause/resumeを確認した。次曲の通常再生55秒間でunderrun数は増えなかった。
+画面キャプチャ時にはシリアル転送に伴う156 gapsが発生したため、その区間は
+通常再生性能の計測から除外する。ログと画面は
+`.cache/device/mp3-fixed-20260923/` に保存した。
 
 ホストでは `bash tools/test_mp3.sh <MP3ファイル...>`。ASan/UBSanで実物のデコーダーと
 レート変換を実行し、24kHzのPCM一致と、各入力レートの整数出力サンプル数を照合する。

@@ -23,11 +23,10 @@ typedef enum {
     OVERLAY_RUNNING,
 } overlay_state_t;
 
-// Where on the LCD an overlay may draw. x/y are screen pixels; an overlay's
-// own coordinates are relative to the box and are never translated by the
-// guest, so a program cannot even express a pixel outside it -- and asking for
-// one is refused rather than clipped (3.1: clipping hides the mistake from the
-// author).
+// Where on the LCD an overlay may draw. x/y are screen pixels and the guest's
+// coordinates are relative to the box. overlay_region_holds() enforces the
+// strict legacy pocket.overlay display-list contract; the Kasane profile uses
+// the same box as a viewport and clips commands at the adapter boundary.
 typedef struct { int16_t x, y, w, h; } overlay_region_t;
 
 // True when a w*h box at (x,y) in region-local coordinates lies wholly inside
@@ -99,6 +98,10 @@ void overlay_budget_start(overlay_budget_t *b, uint64_t now_us);
 // skipped -- the old behaviour, for a caller that has no frame.
 bool overlay_budget_turn(overlay_budget_t *b, uint32_t turn_us,
                          uint32_t frame_us);
+
+// Guest execution and retained Kasane composition are one overlay cost even
+// though the shell measures them on opposite sides of scene drawing.
+uint32_t overlay_budget_cost(uint32_t guest_us,uint32_t composite_us);
 
 // The share an over-budget turn must reach before it is charged, as a divisor:
 // the turn must be more than a QUARTER of the frame. Chosen so that an overlay

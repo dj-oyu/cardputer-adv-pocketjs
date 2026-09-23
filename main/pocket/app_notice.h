@@ -1,7 +1,7 @@
-#ifndef KSN_NOTICE_H
-#define KSN_NOTICE_H
+#ifndef APP_NOTICE_H
+#define APP_NOTICE_H
 #include "ksn_view.h"
-#include "../../system/sys_notify.h"
+#include "../system/sys_notify.h"
 /* Append to the caller's SYSTEM transaction: at most 5 commands/41 text bytes.
  * Does not own the transaction, runtime, resource or notice. Caller cancels on
  * error and submits/polls the whole SYSTEM frame, including other indicators.

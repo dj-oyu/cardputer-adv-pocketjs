@@ -1,6 +1,23 @@
 #pragma once
 #include "esp_err.h"
 #include "quickjs.h"
+#include <stdint.h>
+#include <stdbool.h>
+
+typedef enum {
+    POCKET_AV_UI_READY, POCKET_AV_UI_PLAYING, POCKET_AV_UI_PAUSED,
+    POCKET_AV_UI_ENDED, POCKET_AV_UI_ERROR
+} pocket_av_ui_state;
+typedef struct {
+    pocket_av_ui_state state;
+    uint32_t position_ms,duration_ms,underruns;
+} pocket_av_ui_snapshot;
+
+/* UI-owner-task-only, read-only projection of the current player. The ID is
+ * never reused while this task runs; a closed/replaced source cannot revive a
+ * view binding. No JS value, callback, or audio buffer is retained. */
+int32_t pocket_av_ui_current_player(void);
+bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out);
 
 // pocket.audio and pocket.power — sections 9 and 8 of docs/api/common-api.md, on
 // top of sound.c and board.c's battery ADC.
@@ -16,11 +33,9 @@
 //   audio.tone(spec, options)       sound_tone, Promise<void>
 //   audio.capture.open              NOT here -- pocket_capture.c contributes
 //                                   it to the same namespace
-//   audio.player.open(spec)         Promise<Player> — one clip, in RAM, in the
-//                                   host's 24 kHz mono, as PCM16 or IMA ADPCM
-//                                   inside a WAV. Section 9.1's MP3/Opus/FLAC
-//                                   off sd: is not reachable on this board and
-//                                   the section carries the measurements.
+//   audio.player.open(spec)         Promise<Player> — one source decoded to
+//                                   24 kHz mono, including WAV, MP3 and Opus
+//                                   from granted storage.
 //   power.status()                  battery millivolts; percent and charging
 //                                   are null because the board cannot read them
 //   power.onChange(fn)              Subscription, fired when the reading moves
@@ -38,6 +53,10 @@ esp_err_t pocket_av_install(JSContext *ctx, void *user_data);
 // finished tone, and this one is what turns a finished clip into onState.
 // Cheap when nothing is subscribed: it returns after one load.
 void pocket_av_pump(void);
+
+// Native-only audio refill/priming/completion. Call on the UI owner task before
+// any modal, guest-continuation or presentation gate can skip a guest turn.
+void pocket_av_service_stream(void);
 
 // Drops every power and player subscription, so its callbacks are released,
 // and stops and frees a clip the audio task may still be reading. Call from the

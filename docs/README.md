@@ -79,6 +79,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | --- | --- | --- |
 | [design-system.md](kasane/design-system.md) | 仕様 | デザインシステム仕様 |
 | [design-schema.md](kasane/design-schema.md) | 仕様 | デザイン定義スキーマ（[JSON Schema](kasane/design-schema.json)、[例](kasane/design-example.json)） |
+| [generic-presenter-design.md](kasane/generic-presenter-design.md) | 設計 | アプリ詳細を持たないnative presenterのslot・descriptor・source・性能契約 |
 | [design-system-pet.md](kasane/design-system-pet.md) | 仕様 | ペットへの適用 |
 | [system-runtime.md](kasane/system-runtime.md) | 設計 | 時計・電源・通知の共通ランタイム |
 | [system-full-test.md](kasane/system-full-test.md) | 検証 | TaffyなしのSystem/Kasane host・新規build・実機受入試験 |
@@ -91,6 +92,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [kasane-progress.md](kasane/kasane-progress.md) | 記録 | 実装結果、検証、実機未確認事項 |
 | [kasane-roadmap.md](kasane/kasane-roadmap.md) | 設計 | 機能カバレッジ、Taffy移行、動画・3Dの将来設計 |
 | [design-api.md](kasane/design-api.md) | 仕様 | 利用APIとowner境界 |
+| [player-scene-migration-design.md](kasane/player-scene-migration-design.md) | 設計 | overlay 用 native presenter：JS は表示値、Kasane が命令構成・差分・提出を担当する案（未実装） |
 | [design-composition.md](kasane/design-composition.md) | 仕様 | 重なり、透過、cache、modal、効果 |
 | [design-contract-review.md](kasane/design-contract-review.md) | 記録 | 公開契約の評価 |
 | [design-device-probe.md](kasane/design-device-probe.md) | 記録 | 実機診断と計測 |

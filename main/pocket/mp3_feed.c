@@ -90,8 +90,8 @@ static void worker(void *arg) {
         count++;
         atomic_store(&progress,count);
         atomic_store(&frames,w->produced);
-        // Resume replays and discards earlier samples to restore the bit
-        // reservoir exactly. Yield even when no PCM backpressure applies.
+        // Share the core with the UI even when no PCM backpressure applies.
+        // A live pause retains this decoder instead of replaying the prefix.
         vTaskDelay(1);
     }
     if(!count&&!atomic_load(&halt)) atomic_fetch_add(&faults,1);

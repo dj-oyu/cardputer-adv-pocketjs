@@ -50,6 +50,11 @@ bool overlay_budget_turn(overlay_budget_t *b, uint32_t turn_us,
     return b->over_limit && b->over_run>=b->over_limit;
 }
 
+uint32_t overlay_budget_cost(uint32_t guest_us,uint32_t composite_us) {
+    uint64_t total=(uint64_t)guest_us+composite_us;
+    return total>UINT32_MAX?UINT32_MAX:(uint32_t)total;
+}
+
 bool overlay_budget_healthy(const overlay_budget_t *b, uint64_t now_us) {
     // Both halves: long enough, and not in the middle of a bad run. A start
     // that was over budget from its first turn is exactly what should not be

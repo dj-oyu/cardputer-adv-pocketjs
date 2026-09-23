@@ -14,6 +14,7 @@
 #include "sfx_synth.h"
 #include <stdatomic.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SAMPLE_RATE ((int)SOUND_SAMPLE_RATE)
 
@@ -39,6 +40,8 @@ static QueueHandle_t events;
 static atomic_bool enabled=true;
 static atomic_int cancelled;
 static atomic_int next_id=1;
+static atomic_int stream_pause;
+static atomic_int stream_pause_ack;
 // True from sound_capture_start() to sound_capture_stop(). Playback reads it,
 // which is where "recording and app playback are exclusive, and UI cues do not
 // sound while recording" (docs/api/common-api.md 9) is actually enforced.
@@ -49,7 +52,10 @@ static atomic_bool playing;
 void sound_set_enabled(bool value){atomic_store(&enabled,value);}
 bool sound_available(void){return events!=NULL;}
 bool sound_play(int kind) {
-    if(!events||!atomic_load(&enabled)||atomic_load(&capturing))return false;
+    // A retained paused stream still owns the sole output task. Do not queue
+    // a click now only to replay it unexpectedly when the song ends.
+    if(!events||!atomic_load(&enabled)||atomic_load(&capturing)||
+       atomic_load(&stream_pause))return false;
     request_t req={.kind=(int16_t)kind};
     return xQueueSend(events,&req,0)==pdTRUE;
 }
@@ -253,6 +259,14 @@ static void play_stream(const request_t *req,int16_t *pcm) {
     // samples through the DMA ring.
     while(at<frames+256) {
         if(atomic_load(&stream_halt)==req->id) { completed=false; break; }
+        if(atomic_load(&stream_pause)==req->id) {
+            // Keep the I2S clock running, but leave both the ring cursor and
+            // the starvation deadline frozen until playback resumes.
+            atomic_store(&stream_pause_ack,req->id);
+            memset(pcm,0,128*2*sizeof(*pcm));
+            if(!emit(pcm)) { completed=false; break; }
+            continue;
+        }
         // One 128-frame block; stream_sample() in sound_stream.h is the walk.
         bool starving=false;
         for(int j=0;j<128;j++) {
@@ -283,12 +297,23 @@ static void play_stream(const request_t *req,int16_t *pcm) {
         if(starving) {
             starved++;
             atomic_store(&stream_starved,atomic_load(&stream_starved)+1);
-            if(starved>=SOUND_STREAM_STARVE_BLOCKS) { completed=false; break; }
+            if(starved>=SOUND_STREAM_STARVE_BLOCKS) {
+                ESP_LOGE("sound","STREAM STARVED at=%u of %u blocks=%u filled=%u drained=%u eof=%u held=%u",
+                         (unsigned)at,(unsigned)frames,(unsigned)starved,
+                         (unsigned)atomic_load(&s->filled),
+                         (unsigned)atomic_load(&s->drained),
+                         (unsigned)atomic_load(&s->eof),(unsigned)r.held);
+                completed=false; break;
+            }
         } else starved=0;
         atomic_store(&stream_frames,at<frames?at:frames);
         if(!emit(pcm)) { completed=false; break; }
     }
     stream_release(s,&r);
+    int paused=req->id;
+    atomic_compare_exchange_strong(&stream_pause,&paused,0);
+    paused=req->id;
+    atomic_compare_exchange_strong(&stream_pause_ack,&paused,0);
     atomic_store(&stream_active,0);
     if(req->done) req->done(req->ctx,completed);
 }
@@ -330,7 +355,34 @@ bool sound_stream_stop(int32_t id) {
     // recover from by freeing it anyway.
     for(int i=0;i<40&&atomic_load(&stream_active)==id;i++)
         vTaskDelay(pdMS_TO_TICKS(5));
+    int paused=id;
+    atomic_compare_exchange_strong(&stream_pause,&paused,0);
+    paused=id;
+    atomic_compare_exchange_strong(&stream_pause_ack,&paused,0);
     return atomic_load(&stream_active)!=id;
+}
+
+bool sound_stream_pause(int32_t id) {
+    if(id<=0||atomic_load(&stream_halt)==id) return false;
+    atomic_store(&stream_pause_ack,0);
+    atomic_store(&stream_pause,id);
+    // Wait for the boundary of the current 128-frame block. The UI can now
+    // report a position that cannot advance after pause() resolves.
+    for(int i=0;i<24&&atomic_load(&stream_active)==id&&
+        atomic_load(&stream_pause_ack)!=id;i++)
+        vTaskDelay(pdMS_TO_TICKS(5));
+    if(atomic_load(&stream_active)==id&&atomic_load(&stream_pause_ack)!=id)
+        ESP_LOGW("sound","STREAM PAUSE ACK slow id=%d",(int)id);
+    return true;
+}
+
+bool sound_stream_resume(int32_t id) {
+    if(id<=0||atomic_load(&stream_halt)==id) return false;
+    int paused=id;
+    bool resumed=atomic_compare_exchange_strong(&stream_pause,&paused,0);
+    paused=id;
+    atomic_compare_exchange_strong(&stream_pause_ack,&paused,0);
+    return resumed;
 }
 
 uint32_t sound_stream_position(int32_t id) {
@@ -342,7 +394,7 @@ uint32_t sound_stream_underruns(void) { return atomic_load(&stream_starved); }
 int32_t sound_tone(unsigned frequency_hz,unsigned duration_ms,float gain,
                    sound_done_fn done,void *ctx) {
     if(!events)return SOUND_ERR_UNSUPPORTED;
-    if(atomic_load(&capturing))return SOUND_ERR_BUSY;
+    if(atomic_load(&capturing)||atomic_load(&stream_pause))return SOUND_ERR_BUSY;
     if(frequency_hz<SOUND_TONE_MIN_HZ||frequency_hz>SOUND_TONE_MAX_HZ)return SOUND_ERR_INVALID;
     if(!duration_ms||duration_ms>SOUND_TONE_MAX_MS)return SOUND_ERR_INVALID;
     // Written as a positive test so that a NaN gain is rejected rather than

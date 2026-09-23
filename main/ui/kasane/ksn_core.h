@@ -91,6 +91,8 @@ ksn_client ksn_core_client(ksn_core *core,ksn_layer layer);
  * init, which must run outside provider callbacks and invalidate all clients.
  * Register only between submissions/builders. No per-frame retain/release. */
 ksn_result ksn_core_register_image(ksn_core *core,ksn_layer layer,const ksn_image_port *port,ksn_resource *out);
+/* Read-only owner-turn validation against currently registered resources. */
+ksn_result ksn_core_check_draw(const ksn_core *,ksn_layer,const ksn_draw *);
 /* Optional caller-owned blocks, attached before the first animation. */
 ksn_result ksn_core_enable_animation(ksn_core *,ksn_core_animation_block *,ksn_core_animation_block *);
 ksn_result ksn_core_finish_animation(ksn_core *,ksn_layer,ksn_tx,ksn_animation);
@@ -161,6 +163,11 @@ ksn_result ksn_core_prepare_frame(ksn_core *core,ksn_frame *out);
 void ksn_core_defer_repair(ksn_core *core,ksn_tx ticket);
 ksn_result ksn_core_read(const ksn_core *core,ksn_tx ticket,bool previous,
                        ksn_layer layer,uint16_t index,ksn_frame_command *out);
+/* Owner-only read of one committed reference. Text points directly into the
+ * active bank and is read-only until the next successful presentation/reset.
+ * Never retain the pointer or call from a display callback. */
+ksn_result ksn_core_read_active_ref(const ksn_core *core,ksn_layer layer,
+                                    ksn_ref ref,ksn_frame_command *out);
 ksn_result ksn_core_image_span(const ksn_core *core,ksn_tx ticket,bool previous,
                             ksn_layer layer,uint16_t index,uint16_t y,uint16_t x,
                             uint16_t count,uint16_t *rgb565,uint8_t *alpha);

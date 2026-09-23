@@ -19,6 +19,7 @@
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_capture.h"
+#include "pocket_av.h"
 #include "pocket_bridge.h"
 #include "pocket_text.h"
 #include "system/sys_device.h"
@@ -793,6 +794,7 @@ static void ui_task(void *arg) {
         if(system_probe_command)system_probe(system_probe_command);
 #endif
         sys_device_step();
+        pocket_av_service_stream();
         pet_repaint=pet_hub_pump();
         if(have&&pet_hub_key(stroke.nav)){have=false;pet_repaint=true;}
         if(pet_repaint&&running)app_force_redraw();

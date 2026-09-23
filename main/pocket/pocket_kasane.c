@@ -1,15 +1,48 @@
 #include "pocket_kasane.h"
 #include "pocket_api.h"
 #include "ui/kasane/ksn_runtime.h"
-#include "ui/kasane/ksn_notice.h"
+#include "app_notice.h"
+#include "app_view_provider.h"
+#include "ui/kasane/ksn_schema_session.h"
+#include "ui/kasane/ksn_p0_probe.h"
+#include "app_view_assets.h"
 #include "pet/ksn_pet.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define KASANE_REF_LIMIT 32u
 #define KASANE_REF_STORAGE 64u
 #define KASANE_SCREEN ((ksn_rect){0,0,240,135})
+static ksn_rect viewport={0,0,240,135};
+static bool overlay_profile;
+
+void pocket_kasane_set_viewport(int16_t x,int16_t y,int16_t width,int16_t height) {
+    int32_t x1=(int32_t)x+width,y1=(int32_t)y+height;
+    overlay_profile=true;
+    if(width<=0||height<=0||x<0||y<0||x1>240||y1>135) viewport=KASANE_SCREEN;
+    else viewport=(ksn_rect){x,y,(int16_t)x1,(int16_t)y1};
+}
+
+static void viewport_rect(ksn_rect *r) {
+    int32_t x0=(int32_t)r->x0+viewport.x0,x1=(int32_t)r->x1+viewport.x0;
+    int32_t y0=(int32_t)r->y0+viewport.y0,y1=(int32_t)r->y1+viewport.y0;
+    r->x0=(int16_t)(x0<INT16_MIN?INT16_MIN:x0>INT16_MAX?INT16_MAX:x0);
+    r->x1=(int16_t)(x1<INT16_MIN?INT16_MIN:x1>INT16_MAX?INT16_MAX:x1);
+    r->y0=(int16_t)(y0<INT16_MIN?INT16_MIN:y0>INT16_MAX?INT16_MAX:y0);
+    r->y1=(int16_t)(y1<INT16_MIN?INT16_MIN:y1>INT16_MAX?INT16_MAX:y1);
+}
+static void viewport_clip(ksn_rect *r) {
+    if(r->x0<viewport.x0)r->x0=viewport.x0;
+    if(r->y0<viewport.y0)r->y0=viewport.y0;
+    if(r->x1>viewport.x1)r->x1=viewport.x1;
+    if(r->y1>viewport.y1)r->y1=viewport.y1;
+    /* A command wholly outside the viewport has an empty, not reversed,
+     * clip. Off-screen animation poses remain valid and simply draw nothing. */
+    if(r->x1<r->x0)r->x1=r->x0;
+    if(r->y1<r->y0)r->y1=r->y0;
+}
 
 typedef enum { REF_FREE, REF_CANDIDATE, REF_ACTIVE } ref_status;
 typedef struct {
@@ -19,6 +52,18 @@ typedef struct {
     ref_status status;
 } ref_slot;
 typedef struct {
+    ksn_schema_session session;
+    const ksn_schema *definition;
+    const pocket_app_view_asset *asset;
+    void *owned_asset;
+    size_t allocation_bytes,owned_asset_bytes;
+    void *source_state;
+    uint64_t revision;
+    uint32_t handle;
+    uint16_t text_offset[KSN_SCHEMA_MAX_SLOTS];
+    ksn_schema_value values[];
+} schema_state;
+typedef struct {
     ksn_app_lease lease;
     /* Two generations let a 32-reference REPLACE be built while the displayed
      * generation remains valid. Retiring identities frees slots immediately;
@@ -27,23 +72,30 @@ typedef struct {
     ksn_tx building;
     ksn_tx submitted;
     ksn_update_mode submitted_mode;
-    ksn_resource pet_resource;
+    struct {const pocket_app_image_asset *asset;ksn_resource resource;} images[4];
     ksn_resource notice_resource;
     ksn_tx notice_tx;
     uint32_t notice_displayed,notice_pending;
     uint16_t notice_variant,notice_pending_variant;
     bool active;
+    const pocket_app_view_provider *provider;
+    void *provider_state;
+    schema_state *schema;
 } kasane_state;
 
-_Static_assert(sizeof(kasane_state)<=3072,"Kasane control allocation budget");
+_Static_assert(sizeof(kasane_state)<=KSN_RUNTIME_TAIL_BUDGET,"Kasane control allocation budget");
 
 static kasane_state *state;
 /* Never recycle identities across host reset while old JS wrappers can live. */
 static uint32_t ref_serial;
+static uint32_t schema_serial;
+static uint64_t owner_now_us;
 static JSClassID tx_class, modal_class, ref_class, template_class;
 static JSClassID instance_class, ticket_class, image_class, animation_class;
+static JSClassID schema_class;
 static JSRuntime *tx_rt, *modal_rt, *ref_rt, *template_rt;
 static JSRuntime *instance_rt, *ticket_rt, *image_rt, *animation_rt;
+static JSRuntime *schema_rt;
 
 static const char *result_code(ksn_result result) {
     switch(result) {
@@ -65,6 +117,11 @@ static JSValue throw_result(JSContext *ctx, ksn_result result, const char *op) {
     return pocket_api_throw(ctx,code,op,code,
                             result==KSN_BUSY||result==KSN_OOM||result==KSN_IO,
                             POCKET_OUTCOME_NOT_APPLIED);
+}
+static const char *bounded_cstring(JSContext *ctx,JSValueConst value,int64_t max_units){
+    int64_t units=0;
+    return JS_IsString(value)&&JS_GetLength(ctx,value,&units)==0&&units<=max_units?
+           JS_ToCString(ctx,value):NULL;
 }
 
 /* The state lives in the runtime's single block (attach_tail), so the whole
@@ -102,6 +159,15 @@ static ksn_result create_template(const ksn_draw *draws,uint16_t count,ksn_templ
 static ksn_view *view(void) {
     return state?ksn_runtime_app_view(state->lease):NULL;
 }
+static bool provider_busy(void *owner){
+    kasane_state *s=owner;
+    return s->building.value||s->submitted.value;
+}
+static void provider_submitted(void *owner,ksn_tx ticket,ksn_update_mode mode){
+    kasane_state *s=owner;
+    s->submitted=ticket;s->submitted_mode=mode;s->active=true;
+    ksn_runtime_app_activate(s->lease);
+}
 
 static uint32_t opaque_value(JSValueConst value, JSClassID class_id) {
     return (uint32_t)(uintptr_t)JS_GetOpaque(value,class_id);
@@ -130,6 +196,7 @@ static const JSClassDef instance_def={.class_name=KASANE_CLASS};
 static const JSClassDef ticket_def={.class_name=KASANE_CLASS};
 static const JSClassDef image_def={.class_name=KASANE_CLASS};
 static const JSClassDef animation_def={.class_name=KASANE_CLASS};
+static const JSClassDef schema_def={.class_name=KASANE_CLASS};
 
 static ref_slot *ref_from(JSContext *ctx, JSValueConst self, const char *op) {
     uint32_t handle=opaque_value(self,ref_class);
@@ -195,6 +262,78 @@ static void apply_outcome(void) {
     state->submitted=(ksn_tx){0};
 }
 
+static char *schema_text_base(schema_state *s){
+    return (char *)&s->values[s->definition->slot_count];
+}
+static schema_state *schema_alloc(const pocket_app_view_asset *asset){
+    const ksn_schema *definition=asset?asset->schema:NULL;
+    if(!definition||ksn_schema_validate(definition)!=KSN_OK)return NULL;
+    size_t text_bytes=0;
+    for(unsigned i=0;i<definition->slot_count;i++)
+        if(definition->slots[i].type==KSN_SLOT_TEXT)
+            text_bytes+=(size_t)definition->slots[i].capacity+1u;
+    size_t source_offset=(text_bytes+7u)&~(size_t)7u;
+    size_t bytes=sizeof(schema_state)+
+                 definition->slot_count*sizeof(ksn_schema_value)+
+                 source_offset+asset->source_bytes;
+    schema_state *s=calloc(1,bytes);
+    if(!s)return NULL;
+    s->definition=definition;s->asset=asset;s->revision=1;
+    s->allocation_bytes=bytes;
+    s->source_state=schema_text_base(s)+source_offset;
+    size_t offset=0;
+    for(unsigned i=0;i<definition->slot_count;i++){
+        const ksn_schema_slot *slot=&definition->slots[i];
+        if(slot->type==KSN_SLOT_TEXT){
+            s->text_offset[i]=(uint16_t)offset;
+            s->values[i].data.text.utf8=schema_text_base(s)+offset;
+            offset+=(size_t)slot->capacity+1u;
+        }else if(slot->type==KSN_SLOT_COLOR)
+            s->values[i].data.color=definition->dynamic_background&&
+                definition->background_slot==i?definition->background:0x000000ffu;
+        else if(slot->type==KSN_SLOT_U16)
+            s->values[i].data.number=slot->initial_number;
+    }
+    if(ksn_schema_session_init(&s->session,definition)!=KSN_OK){free(s);return NULL;}
+    return s;
+}
+static ksn_result schema_refresh(bool *blocked){
+    if(blocked)*blocked=false;
+    if(!state||!state->schema)return KSN_OK;
+    schema_state *s=state->schema;
+    if(s->asset->source_read){
+        ksn_result source=s->asset->source_read(s->source_state,s->values,&s->revision);
+        if(source!=KSN_OK)return source;
+    }
+    ksn_tx before=s->session.ticket;
+    ksn_result r=ksn_schema_session_step(&s->session,view(),viewport,s->values,
+                                         s->revision,blocked);
+    if(r==KSN_OK&&s->session.ticket.value&&
+       s->session.ticket.value!=before.value){
+        state->submitted=s->session.ticket;
+        state->submitted_mode=s->session.pending_delta==KSN_SCHEMA_PATCHED?
+                              KSN_PATCH:KSN_REPLACE;
+        state->active=true;
+        ksn_runtime_app_activate(state->lease);
+    }
+    return r;
+}
+
+ksn_result pocket_kasane_presenter_host_status(const char *text,size_t bytes,uint64_t until_us){
+    if(!state||!state->provider||!state->provider->host_status)return KSN_OK;
+    return state->provider->host_status(state->provider_state,text,bytes,until_us);
+}
+
+ksn_result pocket_kasane_presenter_step(bool *blocked){
+    if(blocked)*blocked=false;
+    if(state&&state->schema){
+        ksn_result r=schema_refresh(blocked);
+        return r==KSN_BUSY?KSN_OK:r;
+    }
+    if(!state||!state->provider)return KSN_OK;
+    return state->provider->step(state->provider_state,blocked);
+}
+
 static bool number_in(JSContext *ctx, JSValueConst value, double lo, double hi,
                       double *out) {
     double n;
@@ -227,8 +366,8 @@ static bool parse_u32(JSContext *ctx, JSValueConst value, uint32_t *out) {
     return true;
 }
 
-static bool parse_rect(JSContext *ctx, JSValueConst value, ksn_rect *out,
-                       const char *op) {
+static bool parse_rect_mode(JSContext *ctx, JSValueConst value, ksn_rect *out,
+                            const char *op,bool translate) {
     int64_t length=0;
     if(JS_IsArray(value)&&JS_GetLength(ctx,value,&length)<0) return false;
     if(!JS_IsArray(value)||length!=4) {
@@ -254,7 +393,13 @@ static bool parse_rect(JSContext *ctx, JSValueConst value, ksn_rect *out,
                          "rectangle edges are reversed",false,NULL);
         return false;
     }
+    if(translate)viewport_rect(out);
     return true;
+}
+
+static bool parse_rect(JSContext *ctx, JSValueConst value, ksn_rect *out,
+                       const char *op) {
+    return parse_rect_mode(ctx,value,out,op,true);
 }
 
 static bool property_rect(JSContext *ctx, JSValueConst object, const char *name,
@@ -265,6 +410,15 @@ static bool property_rect(JSContext *ctx, JSValueConst object, const char *name,
     bool ok=parse_rect(ctx,value,out,op);
     JS_FreeValue(ctx,value);
     return ok;
+}
+
+static bool property_local_rect(JSContext *ctx,JSValueConst object,const char *name,
+                                ksn_rect fallback,ksn_rect *out,const char *op) {
+    JSValue value=JS_GetPropertyStr(ctx,object,name);
+    if(JS_IsException(value))return false;
+    if(JS_IsUndefined(value)){*out=fallback;JS_FreeValue(ctx,value);return true;}
+    bool ok=parse_rect_mode(ctx,value,out,op,false);
+    JS_FreeValue(ctx,value);return ok;
 }
 
 static bool property_u8(JSContext *ctx, JSValueConst object, const char *name,
@@ -293,6 +447,7 @@ static bool parse_draw_base(JSContext *ctx, JSValueConst value, ksn_draw *out,
     out->kind=KSN_RECT;
     out->clip=out->bounds;
     if(!property_rect(ctx,value,"clip",out->bounds,&out->clip,op)) return false;
+    viewport_clip(&out->clip);
     if(!property_u8(ctx,value,"opacity",255,&out->opacity,op)) return false;
     return true;
 }
@@ -315,6 +470,27 @@ static bool parse_draw(JSContext *ctx, JSValueConst value, ksn_draw *out,
                        const char *op) {
     return parse_draw_base(ctx,value,out,op)&&
            property_color(ctx,value,"color",&out->data.shape.color,op);
+}
+
+/* Cache templates live in their own local coordinate space. Translating or
+ * clipping them here destroys pixels that a later placement moves into the
+ * viewport. The placement supplies the viewport origin and final clip. */
+static bool parse_cache_draw(JSContext *ctx,JSValueConst value,ksn_draw *out,
+                             const char *op) {
+    if(!JS_IsObject(value)) {
+        pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                         "rectangle must be an object",false,NULL);
+        return false;
+    }
+    JSValue bounds=JS_GetPropertyStr(ctx,value,"bounds");
+    bool ok=!JS_IsException(bounds)&&
+        parse_rect_mode(ctx,bounds,&out->bounds,op,false);
+    JS_FreeValue(ctx,bounds);
+    if(!ok)return false;
+    out->kind=KSN_RECT;out->clip=out->bounds;
+    if(!property_local_rect(ctx,value,"clip",out->bounds,&out->clip,op)||
+       !property_u8(ctx,value,"opacity",255,&out->opacity,op))return false;
+    return property_color(ctx,value,"color",&out->data.shape.color,op);
 }
 
 static bool parse_primitive(JSContext *ctx,JSValueConst value,ksn_kind kind,
@@ -357,7 +533,8 @@ static bool parse_primitive(JSContext *ctx,JSValueConst value,ksn_kind kind,
 
 static bool parse_placement(JSContext *ctx, JSValueConst value, ksn_placement *out,
                             const char *op) {
-    *out=(ksn_placement){.clip=KASANE_SCREEN,.opacity=255,.visible=true};
+    *out=(ksn_placement){.x=viewport.x0,.y=viewport.y0,.clip=viewport,
+                         .opacity=255,.visible=true};
     if(JS_IsUndefined(value)) return true;
     if(!JS_IsObject(value)) {
         pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
@@ -383,15 +560,21 @@ static bool parse_placement(JSContext *ctx, JSValueConst value, ksn_placement *o
         if(JS_IsException(y)) {
             JS_FreeValue(ctx,x);JS_FreeValue(ctx,offset);return false;
         }
-        bool ok=parse_i16(ctx,x,&out->x)&&parse_i16(ctx,y,&out->y);
+        int16_t local_x=0,local_y=0;
+        bool ok=parse_i16(ctx,x,&local_x)&&parse_i16(ctx,y,&local_y);
         JS_FreeValue(ctx,x);JS_FreeValue(ctx,y);JS_FreeValue(ctx,offset);
-        if(!ok) {
+        int32_t absolute_x=(int32_t)local_x+viewport.x0;
+        int32_t absolute_y=(int32_t)local_y+viewport.y0;
+        if(!ok||absolute_x<INT16_MIN||absolute_x>INT16_MAX||
+           absolute_y<INT16_MIN||absolute_y>INT16_MAX) {
             pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                              "offset coordinates must be int16 values",false,NULL);
             return false;
         }
+        out->x=(int16_t)absolute_x;out->y=(int16_t)absolute_y;
     } else JS_FreeValue(ctx,offset);
-    if(!property_rect(ctx,value,"clip",KASANE_SCREEN,&out->clip,op)) return false;
+    if(!property_rect(ctx,value,"clip",viewport,&out->clip,op)) return false;
+    viewport_clip(&out->clip);
     if(!property_u8(ctx,value,"opacity",255,&out->opacity,op)) return false;
     JSValue visible=JS_GetPropertyStr(ctx,value,"visible");
     if(JS_IsException(visible)) return false;
@@ -494,26 +677,43 @@ static bool parse_rotation(JSContext *ctx,JSValueConst value,uint16_t *out,const
     int32_t turns;if(!parse_angle(ctx,value,&turns,op))return false;
     *out=(uint16_t)((turns%1024+1024)%1024);return true;
 }
-static JSValue js_pet_image(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;(void)argc;(void)argv;const char *op="kasane.petImage";
+static JSValue js_resource(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="kasane.resource";
+    const char *name=argc?bounded_cstring(ctx,argv[0],31):NULL;
+    if(!name)return throw_result(ctx,KSN_INVALID,op);
+    const pocket_app_image_asset *asset=pocket_app_image_lookup(name);
+    JS_FreeCString(ctx,name);
+    if(!asset)return throw_result(ctx,KSN_UNSUPPORTED,op);
     if(state&&state->building.value)return throw_result(ctx,KSN_BUSY,op);
     /* Finish every fallible JS allocation before reserving a native resource. */
     JSValue object=JS_NewObjectClass(ctx,image_class);
     if(JS_IsException(object))return object;
-    static const struct {const char *name;int value;} metadata[]={
-        {"width",64},{"height",64},{"variants",12},{"frames",6}};
+    const struct {const char *name;int value;} metadata[]={
+        {"width",asset->width},{"height",asset->height},
+        {"variants",asset->variants},{"frames",asset->frames}};
     for(unsigned i=0;i<sizeof(metadata)/sizeof(metadata[0]);i++)
         if(JS_DefinePropertyValueStr(ctx,object,metadata[i].name,
                 JS_NewInt32(ctx,metadata[i].value),JS_PROP_ENUMERABLE)<0){
             JS_FreeValue(ctx,object);return JS_EXCEPTION;
-        }
-    if(!ensure_state(ctx,op)){JS_FreeValue(ctx,object);return JS_EXCEPTION;}
-    if(!state->pet_resource.value){
-        ksn_image_port port;ksn_result result=ksn_pet_builtin_image(&port);
-        if(result==KSN_OK)result=ksn_view_host_register_image(view(),&port,&state->pet_resource);
-        if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
     }
-    JS_SetOpaque(object,(void *)(uintptr_t)state->pet_resource.value);return object;
+    if(!ensure_state(ctx,op)){JS_FreeValue(ctx,object);return JS_EXCEPTION;}
+    unsigned index=0;
+    for(;index<4;index++)if(state->images[index].asset==asset)break;
+    if(index==4){
+        for(index=0;index<4&&state->images[index].asset;index++);
+        if(index==4){JS_FreeValue(ctx,object);return throw_result(ctx,KSN_LIMIT,op);}
+        ksn_image_port port;ksn_result opened=asset->open(&port);
+        if(opened!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,opened,op);}
+        if(port.width!=asset->width||port.height!=asset->height||
+           port.variants!=asset->variants||port.frames!=asset->frames){
+            JS_FreeValue(ctx,object);return throw_result(ctx,KSN_INVALID,op);
+        }
+        ksn_resource resource={0};
+        ksn_result result=ksn_view_host_register_image(view(),&port,&resource);
+        if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
+        state->images[index].asset=asset;state->images[index].resource=resource;
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)state->images[index].resource.value);return object;
 }
 
 static JSValue js_tx_image(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -648,6 +848,7 @@ static JSValue change_ref(JSContext *ctx, JSValueConst self, int argc,
     ksn_change change={.property=property};
     if(property==KSN_SET_RECT||property==KSN_SET_CLIP) {
         if(!parse_rect(ctx,argc>1?argv[1]:JS_UNDEFINED,&change.value.rect,op)) return JS_EXCEPTION;
+        if(property==KSN_SET_CLIP)viewport_clip(&change.value.rect);
     } else if(property==KSN_SET_COLOR) {
         if(argc<2||!parse_u32(ctx,argv[1],&change.value.color))
             return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
@@ -787,6 +988,7 @@ static JSValue js_modal_open(JSContext *ctx, JSValueConst self, int argc,
     if(!raw)
         return pocket_api_throw(ctx,POCKET_ERR_CLOSED,"kasane.modal.open",
                                 "transaction is outside its build callback",false,NULL);
+    if(overlay_profile)return throw_result(ctx,KSN_UNSUPPORTED,"kasane.modal.open");
     if(argc<1||!JS_IsObject(argv[0]))
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.modal.open",
                                 "modal spec must be an object",false,NULL);
@@ -933,6 +1135,7 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                 "build must be a synchronous function",false,NULL);
     if(!ensure_state(ctx,op)) return JS_EXCEPTION;
+    if(state->provider||state->schema)return throw_result(ctx,KSN_BUSY,op);
     /* Keep the callback closed to reentrant builds after an inner abort. */
     if(state->building.value) return throw_result(ctx,KSN_BUSY,op);
     apply_outcome();
@@ -1105,7 +1308,7 @@ static JSValue js_cache_create(JSContext *ctx, JSValueConst self, int argc,
     memset(draws,0,sizeof(draws));
     for(int64_t i=0;i<length;i++) {
         JSValue item=JS_GetPropertyUint32(ctx,argv[0],(uint32_t)i);
-        bool ok=!JS_IsException(item)&&parse_draw(ctx,item,&draws[i],"kasane.cache.create");
+        bool ok=!JS_IsException(item)&&parse_cache_draw(ctx,item,&draws[i],"kasane.cache.create");
         JS_FreeValue(ctx,item);
         if(!ok) return JS_EXCEPTION;
     }
@@ -1195,7 +1398,7 @@ static JSValue js_features(JSContext *ctx, JSValueConst self, int argc,
     PUT(out,"imageStretch",JS_NewBool(ctx,true));
     PUT(out,"imageRotation",JS_NewBool(ctx,true));
     PUT(out,"groupOpacity",JS_NewBool(ctx,true));
-    PUT(out,"modal",JS_NewBool(ctx,true));
+    PUT(out,"modal",JS_NewBool(ctx,!overlay_profile));
     PUT(out,"animation",JS_NewBool(ctx,true));
     PUT(out,"frosted",JS_NewBool(ctx,false));
     PUT(capacity,"commands",JS_NewInt32(ctx,KSN_APP_COMMANDS));
@@ -1223,7 +1426,11 @@ static JSValue js_stats(JSContext *ctx, JSValueConst self, int argc,
     displayed=JS_NewObject(ctx);if(JS_IsException(displayed)) goto fail;
     cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
     PUT(out,"active",JS_NewBool(ctx,state&&state->active));
-    PUT(out,"nativeBytes",JS_NewUint32(ctx,ksn_runtime_reserved_bytes()+(state?sizeof(*state):0)));
+    PUT(out,"nativeBytes",JS_NewUint32(ctx,ksn_runtime_reserved_bytes()+
+        (state?sizeof(*state)+(state->provider?
+          state->provider->native_bytes(state->provider_state):0)+
+          (state->schema?state->schema->allocation_bytes+
+                         state->schema->owned_asset_bytes:0):0)));
     PUT(displayed,"commands",JS_NewInt32(ctx,stats.displayed.commands));
     PUT(displayed,"textBytes",JS_NewInt32(ctx,stats.displayed.text_bytes));
     PUT(cache,"commands",JS_NewInt32(ctx,stats.shared_cache.commands));
@@ -1321,8 +1528,431 @@ fail:
     JS_FreeValue(ctx,out);
     return JS_EXCEPTION;
 }
+
+static schema_state *schema_owner(JSValueConst self){
+    uint32_t handle=(uint32_t)(uintptr_t)JS_GetOpaque(self,schema_class);
+    return handle&&state&&state->schema&&state->schema->handle==handle?
+           state->schema:NULL;
+}
+static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
+    const char *op="kasane.view.set";
+    if(!JS_IsObject(model)||JS_IsArray(model))
+        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                "slots must be an object",false,NULL);
+    ksn_schema_value candidate[KSN_SCHEMA_MAX_SLOTS];
+    char pending_text[KSN_SCHEMA_MAX_SLOTS][KSN_SCHEMA_TEXT_MAX+1u];
+    bool text_dirty[KSN_SCHEMA_MAX_SLOTS]={0};
+    memcpy(candidate,s->values,s->definition->slot_count*sizeof(*candidate));
+    ksn_p0_probe_copy(KSN_P0_ADAPTER_TEMP,s->definition->slot_count*sizeof(*candidate));
+    JSPropertyEnum *props=NULL;uint32_t count=0;
+    if(JS_GetOwnPropertyNames(ctx,&props,&count,model,
+                              JS_GPN_STRING_MASK|JS_GPN_ENUM_ONLY))return JS_EXCEPTION;
+    bool ok=true,changed=false;
+    for(uint32_t p=0;p<count&&ok;p++){
+        const char *key=JS_AtomToCString(ctx,props[p].atom);
+        if(!key){ok=false;break;}
+        unsigned i=0;
+        for(;i<s->definition->slot_count;i++)
+            if(strcmp(key,s->definition->slots[i].name)==0)break;
+        JS_FreeCString(ctx,key);
+        if(i==s->definition->slot_count){
+            pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                             "unknown display slot",false,NULL);ok=false;break;
+        }
+        JSValue value=JS_GetProperty(ctx,model,props[p].atom);
+        if(JS_IsException(value)){ok=false;break;}
+        const ksn_schema_slot *slot=&s->definition->slots[i];
+        if(slot->type==KSN_SLOT_TEXT){
+            if(!JS_IsString(value))ok=false;
+            else{
+                int64_t units=0;
+                if(JS_GetLength(ctx,value,&units)<0||units>slot->capacity)ok=false;
+                else{
+                    size_t length=0;const char *text=JS_ToCStringLen(ctx,&length,value);
+                    if(text)ksn_p0_probe_copy(KSN_P0_UTF8_MATERIALIZED,length);
+                    if(!text)ok=false;
+                    else if(length>slot->capacity)ok=false;
+                    else{
+                        memcpy(pending_text[i],text,length);
+                        ksn_p0_probe_copy(KSN_P0_ADAPTER_TEMP,length);
+                        pending_text[i][length]=0;
+                        candidate[i].data.text=(ksn_schema_text){pending_text[i],(uint16_t)length};
+                        text_dirty[i]=true;
+                    }
+                    if(text)JS_FreeCString(ctx,text);
+                }
+            }
+        }else if(slot->type==KSN_SLOT_RECT){
+            ok=parse_rect_mode(ctx,value,&candidate[i].data.rect,op,false);
+        }else if(slot->type==KSN_SLOT_BOOL){
+            ok=JS_IsBool(value);
+            if(ok)candidate[i].data.boolean=JS_ToBool(ctx,value)!=0;
+        }else if(slot->type==KSN_SLOT_COLOR){
+            uint32_t color;ok=parse_u32(ctx,value,&color);
+            if(ok)candidate[i].data.color=color;
+        }else if(slot->type==KSN_SLOT_U16){
+            double number;ok=number_in(ctx,value,0,
+                           slot->maximum?slot->maximum:UINT16_MAX,&number);
+            if(ok)candidate[i].data.number=(uint16_t)number;
+        }else if(slot->type==KSN_SLOT_RESOURCE){
+            candidate[i].data.resource.value=opaque_value(value,image_class);
+            ok=candidate[i].data.resource.value!=0;
+        }
+        JS_FreeValue(ctx,value);
+        if(!ok&&!JS_HasException(ctx))
+            pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                             "display slot type or value is invalid",false,NULL);
+    }
+    JS_FreePropertyEnum(ctx,props,count);
+    if(!ok)return JS_EXCEPTION;
+    for(unsigned i=0;i<s->definition->slot_count;i++){
+        if(text_dirty[i]){
+            ksn_schema_text a=candidate[i].data.text,b=s->values[i].data.text;
+            if(a.bytes!=b.bytes||memcmp(a.utf8,b.utf8,a.bytes)!=0)changed=true;
+        }else if(memcmp(&candidate[i].data,&s->values[i].data,
+                         sizeof(candidate[i].data))!=0)changed=true;
+    }
+    if(!changed)return JS_UNDEFINED;
+    if(s->revision==UINT64_MAX)return throw_result(ctx,KSN_LIMIT,op);
+    ksn_result check=ksn_schema_preflight_view(view(),s->definition,candidate,viewport);
+    if(check!=KSN_OK)return throw_result(ctx,check,op);
+    for(unsigned i=0;i<s->definition->slot_count;i++){
+        if(text_dirty[i]){
+            ksn_schema_text text=candidate[i].data.text;
+            char *dest=schema_text_base(s)+s->text_offset[i];
+            memcpy(dest,text.utf8,text.bytes+1u);
+            ksn_p0_probe_copy(KSN_P0_ADAPTER_OWNED,text.bytes+1u);
+            s->values[i].data.text=(ksn_schema_text){dest,text.bytes};
+        }else s->values[i]=candidate[i];
+    }
+    s->revision++;
+    ksn_result submitted=schema_refresh(NULL);
+    return submitted==KSN_OK||submitted==KSN_BUSY?JS_UNDEFINED:
+           throw_result(ctx,submitted,op);
+}
+static JSValue js_schema_set_method(JSContext *ctx,JSValueConst self,
+                                    int argc,JSValueConst *argv){
+    schema_state *generic=schema_owner(self);
+    if(!generic)return throw_result(ctx,KSN_STALE,"kasane.view.set");
+    return js_schema_set(ctx,generic,argc?argv[0]:JS_UNDEFINED);
+}
+static const JSCFunctionListEntry schema_methods[]={
+    JS_CFUNC_DEF("set",1,js_schema_set_method),
+};
+static bool lazy_proto(JSContext *ctx,JSClassID id,const JSCFunctionListEntry *methods,int count);
+static JSValue js_schema_mount(JSContext *ctx,const pocket_app_view_asset *asset,
+                               void *owned_asset,size_t owned_asset_bytes){
+    if(!ensure_state(ctx,"kasane.mount"))return JS_EXCEPTION;
+    if(state->schema||state->provider||state->building.value||
+       state->submitted.value||state->active)
+        return throw_result(ctx,KSN_BUSY,"kasane.mount");
+    if(schema_serial==UINT32_MAX)return throw_result(ctx,KSN_LIMIT,"kasane.mount");
+    if(!lazy_proto(ctx,schema_class,schema_methods,
+                   (int)(sizeof(schema_methods)/sizeof(schema_methods[0]))))
+        return JS_EXCEPTION;
+    JSValue object=JS_NewObjectClass(ctx,schema_class);
+    if(JS_IsException(object))return object;
+    schema_state *s=schema_alloc(asset);
+    if(!s){JS_FreeValue(ctx,object);return throw_result(ctx,KSN_OOM,"kasane.mount");}
+    s->owned_asset=owned_asset;
+    s->owned_asset_bytes=owned_asset_bytes;
+    s->handle=++schema_serial;
+    JS_SetOpaque(object,(void *)(uintptr_t)s->handle);
+    state->schema=s;
+    return object;
+}
+/* Runtime declarations compile once into the same immutable descriptor that
+ * flash assets use. The pools are one mount-time allocation, never visited by
+ * the per-frame source/key fast path. */
+#define RUNTIME_NAME_BYTES 32u
+typedef struct {
+    pocket_app_view_asset asset;
+    ksn_schema schema;
+    size_t bytes;
+} runtime_descriptor;
+static bool runtime_u16(JSContext *ctx,JSValueConst object,const char *key,
+                        uint16_t maximum,uint16_t *out,bool required){
+    JSValue value=JS_GetPropertyStr(ctx,object,key);
+    if(JS_IsException(value))return false;
+    if(JS_IsUndefined(value)&&!required){JS_FreeValue(ctx,value);return true;}
+    double number;bool ok=number_in(ctx,value,0,maximum,&number);
+    JS_FreeValue(ctx,value);
+    if(ok)*out=(uint16_t)number;
+    return ok;
+}
+static bool runtime_binding(JSContext *ctx,JSValueConst object,const char *key,
+                            ksn_slot_type type,const ksn_schema *schema,
+                            char literal[KSN_SCHEMA_TEXT_MAX+1u],
+                            ksn_schema_binding *out){
+    JSValue value=JS_GetPropertyStr(ctx,object,key);
+    if(JS_IsException(value))return false;
+    JSValue slot=JS_IsObject(value)&&!JS_IsArray(value)?
+                 JS_GetPropertyStr(ctx,value,"slot"):JS_UNDEFINED;
+    if(JS_IsException(slot)){JS_FreeValue(ctx,value);return false;}
+    bool ok=false;
+    if(JS_IsString(slot)){
+        const char *name=bounded_cstring(ctx,slot,RUNTIME_NAME_BYTES-1u);
+        if(name){
+            for(unsigned i=0;i<schema->slot_count;i++)
+                if(strcmp(name,schema->slots[i].name)==0&&schema->slots[i].type==type){
+                    *out=(ksn_schema_binding){.slot=(uint8_t)i};ok=true;break;
+                }
+            JS_FreeCString(ctx,name);
+        }
+    }else if(JS_IsUndefined(slot)){
+        *out=(ksn_schema_binding){.slot=KSN_SCHEMA_LITERAL};
+        if(type==KSN_SLOT_RECT)ok=parse_rect_mode(ctx,value,&out->literal.rect,
+                                                  "kasane.mount",false);
+        else if(type==KSN_SLOT_COLOR){
+            uint32_t color;ok=parse_u32(ctx,value,&color);
+            if(ok)out->literal.color=color;
+        }else if(type==KSN_SLOT_BOOL){
+            ok=JS_IsBool(value);if(ok)out->literal.boolean=JS_ToBool(ctx,value)!=0;
+        }else if(type==KSN_SLOT_U16){
+            double n;ok=number_in(ctx,value,0,UINT16_MAX,&n);
+            if(ok)out->literal.number=(uint16_t)n;
+        }else if(type==KSN_SLOT_RESOURCE){
+            out->literal.resource.value=opaque_value(value,image_class);
+            ok=out->literal.resource.value!=0;
+        }else if(type==KSN_SLOT_TEXT&&JS_IsString(value)){
+            int64_t units=0;
+            if(JS_GetLength(ctx,value,&units)==0&&units<=KSN_SCHEMA_TEXT_MAX){
+                size_t length=0;const char *src=JS_ToCStringLen(ctx,&length,value);
+                if(src){
+                    if(length<=KSN_SCHEMA_TEXT_MAX){
+                        memcpy(literal,src,length);literal[length]=0;
+                        out->literal.text=(ksn_schema_text){literal,(uint16_t)length};ok=true;
+                    }
+                    JS_FreeCString(ctx,src);
+                }
+            }
+        }
+    }
+    JS_FreeValue(ctx,slot);JS_FreeValue(ctx,value);
+    return ok;
+}
+static bool runtime_optional_binding(JSContext *ctx,JSValueConst object,const char *key,
+                                     ksn_slot_type type,const ksn_schema *schema,
+                                     char literal[KSN_SCHEMA_TEXT_MAX+1u],
+                                     ksn_schema_binding *out,bool *present){
+    JSValue value=JS_GetPropertyStr(ctx,object,key);
+    if(JS_IsException(value))return false;
+    *present=!JS_IsUndefined(value);JS_FreeValue(ctx,value);
+    return !*present||runtime_binding(ctx,object,key,type,schema,literal,out);
+}
+static runtime_descriptor *runtime_compile(JSContext *ctx,JSValueConst definition){
+    JSValue slots=JS_GetPropertyStr(ctx,definition,"slots");
+    JSValue nodes=JS_GetPropertyStr(ctx,definition,"nodes");
+    JSPropertyEnum *properties=NULL;uint32_t slot_count=0;
+    int64_t node_count=0;
+    bool valid=JS_IsObject(slots)&&!JS_IsArray(slots)&&JS_IsArray(nodes)&&
+        JS_GetOwnPropertyNames(ctx,&properties,&slot_count,slots,
+                               JS_GPN_STRING_MASK|JS_GPN_ENUM_ONLY)==0&&
+        JS_GetLength(ctx,nodes,&node_count)==0&&
+        slot_count<=KSN_SCHEMA_MAX_SLOTS&&node_count>=0&&
+        node_count<=KSN_SCHEMA_MAX_NODES;
+    runtime_descriptor *r=NULL;
+    if(valid){
+        size_t bytes=sizeof(*r)+(size_t)slot_count*sizeof(ksn_schema_slot)+
+          (size_t)node_count*sizeof(ksn_schema_node)+
+          (size_t)slot_count*RUNTIME_NAME_BYTES+
+          (size_t)node_count*(KSN_SCHEMA_TEXT_MAX+1u);
+        r=calloc(1,bytes);valid=r!=NULL;
+        if(valid){
+            r->bytes=bytes;
+            char *pool=(char *)(r+1);
+            ksn_schema_slot *slot_defs=(ksn_schema_slot *)pool;
+            pool+=(size_t)slot_count*sizeof(*slot_defs);
+            ksn_schema_node *node_defs=(ksn_schema_node *)pool;
+            pool+=(size_t)node_count*sizeof(*node_defs);
+            char *names=pool;pool+=(size_t)slot_count*RUNTIME_NAME_BYTES;
+            char *literal_text=pool;
+            r->asset.schema=&r->schema;
+            r->schema=(ksn_schema){.version=1,.slot_count=(uint8_t)slot_count,
+                .node_count=(uint8_t)node_count,.background=0x000000ffu,
+                .slots=slot_defs,.nodes=node_defs};
+            uint16_t version=0;
+            valid=runtime_u16(ctx,definition,"version",1,&version,true)&&version==1;
+            JSValue bg=JS_GetPropertyStr(ctx,definition,"background");
+            if(JS_IsException(bg))valid=false;
+            else if(!JS_IsUndefined(bg)){
+                uint32_t color=0;
+                if(!parse_u32(ctx,bg,&color))valid=false;
+                else r->schema.background=color;
+            }
+            JS_FreeValue(ctx,bg);
+            for(unsigned i=0;valid&&i<slot_count;i++){
+                JSValue name_value=JS_AtomToValue(ctx,properties[i].atom);
+                const char *name=bounded_cstring(ctx,name_value,RUNTIME_NAME_BYTES-1u);
+                JS_FreeValue(ctx,name_value);
+                if(!name){valid=false;break;}
+                size_t len=strlen(name);
+                if(!len||len>=RUNTIME_NAME_BYTES)valid=false;
+                else{memcpy(names+i*RUNTIME_NAME_BYTES,name,len+1u);
+                     slot_defs[i].name=names+i*RUNTIME_NAME_BYTES;}
+                JS_FreeCString(ctx,name);
+                if(!valid)break;
+                JSValue spec=JS_GetProperty(ctx,slots,properties[i].atom);
+                JSValue type=JS_IsObject(spec)?JS_GetPropertyStr(ctx,spec,"type"):JS_UNDEFINED;
+                const char *label=bounded_cstring(ctx,type,16);
+                if(!label)valid=false;
+                else{
+                    static const char *const types[]={"text","rect","color","bool","u16","resource"};
+                    unsigned t=0;for(;t<6;t++)if(strcmp(label,types[t])==0)break;
+                    if(t==6)valid=false;else slot_defs[i].type=(ksn_slot_type)t;
+                    JS_FreeCString(ctx,label);
+                }
+                if(valid&&slot_defs[i].type==KSN_SLOT_TEXT){
+                    uint16_t cap=0;valid=runtime_u16(ctx,spec,"capacity",KSN_SCHEMA_TEXT_MAX,&cap,true)&&cap>0;
+                    slot_defs[i].capacity=(uint8_t)cap;
+                }
+                if(valid&&slot_defs[i].type==KSN_SLOT_U16){
+                    valid=runtime_u16(ctx,spec,"initial",UINT16_MAX,&slot_defs[i].initial_number,false)&&
+                          runtime_u16(ctx,spec,"maximum",UINT16_MAX,&slot_defs[i].maximum,false);
+                }
+                JS_FreeValue(ctx,type);JS_FreeValue(ctx,spec);
+            }
+            JSValue background_slot=JS_GetPropertyStr(ctx,definition,"backgroundSlot");
+            if(JS_IsException(background_slot))valid=false;
+            else if(valid&&!JS_IsUndefined(background_slot)){
+                const char *name=bounded_cstring(ctx,background_slot,RUNTIME_NAME_BYTES-1u);
+                if(!name)valid=false;
+                else{
+                    bool found=false;
+                    for(unsigned i=0;i<slot_count;i++)
+                        if(strcmp(name,slot_defs[i].name)==0&&slot_defs[i].type==KSN_SLOT_COLOR){
+                            r->schema.dynamic_background=true;
+                            r->schema.background_slot=(uint8_t)i;found=true;break;
+                        }
+                    if(!found)valid=false;
+                    JS_FreeCString(ctx,name);
+                }
+            }
+            JS_FreeValue(ctx,background_slot);
+            for(unsigned i=0;valid&&i<(unsigned)node_count;i++){
+                JSValue spec=JS_GetPropertyUint32(ctx,nodes,i);
+                JSValue type=JS_IsObject(spec)?JS_GetPropertyStr(ctx,spec,"type"):JS_UNDEFINED;
+                const char *label=bounded_cstring(ctx,type,16);
+                if(!label)valid=false;
+                else{
+                    static const char *const types[]={"rect","roundRect","text","image","plateText"};
+                    unsigned t=0;for(;t<5;t++)if(strcmp(label,types[t])==0)break;
+                    if(t==5)valid=false;else node_defs[i].kind=(ksn_schema_node_kind)t;
+                    JS_FreeCString(ctx,label);
+                }
+                ksn_schema_node *n=&node_defs[i];
+                char *text=literal_text+i*(KSN_SCHEMA_TEXT_MAX+1u);
+                if(valid)valid=runtime_binding(ctx,spec,"bounds",KSN_SLOT_RECT,&r->schema,text,&n->bounds);
+                JSValue add=JS_GetPropertyStr(ctx,spec,"rectAdd");
+                if(JS_IsException(add))valid=false;
+                else if(!JS_IsUndefined(add)){
+                    int64_t length=0;
+                    if(!JS_IsArray(add)||JS_GetLength(ctx,add,&length)<0||length!=4)valid=false;
+                    for(unsigned edge=0;valid&&edge<4;edge++){
+                        JSValue name_value=JS_GetPropertyUint32(ctx,add,edge);
+                        if(JS_IsException(name_value)){valid=false;break;}
+                        if(!JS_IsNull(name_value)&&!JS_IsUndefined(name_value)){
+                            const char *name=bounded_cstring(ctx,name_value,RUNTIME_NAME_BYTES-1u);
+                            if(!name)valid=false;
+                            else{
+                                bool found=false;
+                                for(unsigned slot=0;slot<slot_count;slot++)
+                                    if(strcmp(name,slot_defs[slot].name)==0&&
+                                       slot_defs[slot].type==KSN_SLOT_U16){
+                                        n->rect_add_mask|=(uint8_t)(1u<<edge);
+                                        n->rect_add_slot[edge]=(uint8_t)slot;found=true;break;
+                                    }
+                                if(!found)valid=false;
+                                JS_FreeCString(ctx,name);
+                            }
+                        }
+                        JS_FreeValue(ctx,name_value);
+                    }
+                }
+                JS_FreeValue(ctx,add);
+                if(valid&&n->kind!=KSN_NODE_IMAGE)
+                    valid=runtime_binding(ctx,spec,"color",KSN_SLOT_COLOR,&r->schema,text,&n->color);
+                if(valid&&(n->kind==KSN_NODE_TEXT||n->kind==KSN_NODE_PLATE_TEXT))
+                    valid=runtime_binding(ctx,spec,"text",KSN_SLOT_TEXT,&r->schema,text,&n->text);
+                if(valid&&n->kind==KSN_NODE_PLATE_TEXT)
+                    valid=runtime_binding(ctx,spec,"plateColor",KSN_SLOT_COLOR,&r->schema,text,&n->plate_color);
+                if(valid&&n->kind==KSN_NODE_IMAGE){
+                    valid=runtime_binding(ctx,spec,"resource",KSN_SLOT_RESOURCE,&r->schema,text,&n->resource)&&
+                          runtime_binding(ctx,spec,"variant",KSN_SLOT_U16,&r->schema,text,&n->variant)&&
+                          runtime_binding(ctx,spec,"frame",KSN_SLOT_U16,&r->schema,text,&n->frame)&&
+                          runtime_u16(ctx,spec,"sourceWidth",256,&n->source_width,true)&&
+                          runtime_u16(ctx,spec,"sourceHeight",256,&n->source_height,true);
+                }
+                bool present=false;
+                if(valid)valid=runtime_optional_binding(ctx,spec,"visible",KSN_SLOT_BOOL,&r->schema,
+                                                         text,&n->visible,&present);
+                if(present)n->flags|=KSN_SCHEMA_HAS_VISIBLE;
+                if(valid)valid=runtime_optional_binding(ctx,spec,"page",KSN_SLOT_U16,&r->schema,
+                                                         text,&n->page,&present);
+                if(present){n->flags|=KSN_SCHEMA_HAS_PAGE;
+                    valid=valid&&runtime_u16(ctx,spec,"pageEquals",UINT16_MAX,&n->page_equals,true);}
+                if(valid)valid=runtime_optional_binding(ctx,spec,"reveal",KSN_SLOT_U16,&r->schema,
+                                                         text,&n->reveal,&present);
+                if(present)n->flags|=KSN_SCHEMA_HAS_REVEAL;
+                uint16_t radius=0,font=0;
+                if(valid)valid=runtime_u16(ctx,spec,"radius",8,&radius,false)&&
+                               runtime_u16(ctx,spec,"font",KSN_DISPLAY,&font,false);
+                n->radius=(uint8_t)radius;n->font=(ksn_font)font;
+                JS_FreeValue(ctx,type);JS_FreeValue(ctx,spec);
+            }
+            if(valid)valid=ksn_schema_validate(&r->schema)==KSN_OK;
+        }
+    }
+    JS_FreePropertyEnum(ctx,properties,slot_count);
+    JS_FreeValue(ctx,slots);JS_FreeValue(ctx,nodes);
+    if(!valid){free(r);return NULL;}
+    return r;
+}
+static JSValue js_presenter_mount(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    if(argc&&JS_IsObject(argv[0])&&!JS_IsArray(argv[0])){
+        runtime_descriptor *compiled=runtime_compile(ctx,argv[0]);
+        if(!compiled)return JS_HasException(ctx)?JS_EXCEPTION:
+            pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.mount",
+                             "invalid view definition",false,NULL);
+        JSValue object=js_schema_mount(ctx,&compiled->asset,compiled,compiled->bytes);
+        if(JS_IsException(object)){free(compiled);return object;}
+        if(argc>1&&!JS_IsUndefined(argv[1])){
+            JSValue result=js_schema_set(ctx,state->schema,argv[1]);
+            if(JS_IsException(result)){
+                if(!state->submitted.value){
+                    schema_state *failed=state->schema;state->schema=NULL;
+                    free(failed);free(compiled);
+                }
+                JS_FreeValue(ctx,object);return result;
+            }
+            JS_FreeValue(ctx,result);
+        }
+        return object;
+    }
+    const char *id=argc?bounded_cstring(ctx,argv[0],31):NULL;
+    if(!id)return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,"kasane.mount",
+                                  "view id must be a registered presenter",false,NULL);
+    const pocket_app_view_asset *asset=pocket_app_view_lookup(id);
+    if(asset){JS_FreeCString(ctx,id);return js_schema_mount(ctx,asset,NULL,0);}
+    const pocket_app_view_provider *provider=pocket_app_view_provider_lookup(id);
+    JS_FreeCString(ctx,id);
+    if(!provider)return throw_result(ctx,KSN_UNSUPPORTED,"kasane.mount");
+    if(!ensure_state(ctx,"kasane.mount"))return JS_EXCEPTION;
+    if(state->schema||state->provider||state->building.value||state->submitted.value||state->active)
+        return throw_result(ctx,KSN_BUSY,"kasane.mount");
+    pocket_app_view_host host={.owner=state,.view=view(),.viewport=viewport,
+        .now_us=&owner_now_us,.busy=provider_busy,.submitted=provider_submitted};
+    void *instance=NULL;
+    JSValue object=provider->mount(ctx,&host,&instance);
+    if(JS_IsException(object))return object;
+    if(!instance){JS_FreeValue(ctx,object);return throw_result(ctx,KSN_INVALID,"kasane.mount");}
+    state->provider=provider;state->provider_state=instance;
+    return object;
+}
 static const JSCFunctionListEntry functions[]={
-    JS_CFUNC_DEF("petImage",0,js_pet_image),
+    JS_CFUNC_DEF("resource",1,js_resource),
+    JS_CFUNC_DEF("mount",1,js_presenter_mount),
     JS_CFUNC_DEF("createScene",1,js_create_scene),
     JS_CFUNC_DEF("replace",1,js_replace),JS_CFUNC_DEF("patch",1,js_patch),
     JS_CFUNC_DEF("poll",0,js_poll),JS_CFUNC_DEF("cancel",1,js_cancel),
@@ -1375,6 +2005,7 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
        !register_class(ctx,&image_class,&image_rt,&image_def)||
        !register_class(ctx,&ticket_class,&ticket_rt,&ticket_def)||
        !register_class(ctx,&scene_class,&scene_rt,&scene_def)||
+       !register_class(ctx,&schema_class,&schema_rt,&schema_def)||
        !set_proto(ctx,tx_class,tx_methods,COUNT(tx_methods))||
        !set_proto(ctx,modal_class,modal_methods,COUNT(modal_methods))||
        !set_proto(ctx,ref_class,ref_methods,COUNT(ref_methods))) return ESP_ERR_NO_MEM;
@@ -1420,8 +2051,17 @@ esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data) {
 }
 
 void pocket_kasane_reset(void) {
+    const pocket_app_view_provider *provider=state?state->provider:NULL;
+    void *provider_state=state?state->provider_state:NULL;
+    schema_state *schema=state?state->schema:NULL;
     if(state&&ksn_runtime_app_detach(state->lease)==KSN_BUSY)return;
+    if(provider)provider->destroy(provider_state);
+    if(schema)free(schema->owned_asset);
+    free(schema);
     state=NULL;   /* the runtime released it with the lease */
+    viewport=KASANE_SCREEN;
+    overlay_profile=false;
+    owner_now_us=0;
 }
 bool pocket_kasane_active(void) { return state&&state->active; }
 ksn_result pocket_kasane_update_notice(const sys_notice *notice,uint16_t variant){
@@ -1466,7 +2106,10 @@ ksn_result pocket_kasane_advance(uint64_t now_us){
 }
 bool pocket_kasane_animation_pending(void){return ksn_runtime_animation_pending();}
 void pocket_kasane_animations_presented(uint64_t now_us){ksn_runtime_animations_presented(now_us);}
-void pocket_kasane_set_animation_time(uint64_t now_us){ksn_runtime_set_animation_time(now_us);}
+void pocket_kasane_set_animation_time(uint64_t now_us){
+    owner_now_us=now_us;
+    ksn_runtime_set_animation_time(now_us);
+}
 bool pocket_kasane_needs_present(void) {
     return ksn_runtime_needs_present();
 }
@@ -1481,6 +2124,14 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
     *stats=(ksn_render_stats){0};
     if(!pocket_kasane_needs_present()) return KSN_OK;
     ksn_result result=ksn_runtime_present(display,stats);
+    apply_outcome();return result;
+}
+ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
+                                          ksn_backdrop_loader load,ksn_render_stats *stats) {
+    if(!stats||!load)return KSN_INVALID;
+    *stats=(ksn_render_stats){0};
+    if(!pocket_kasane_needs_present())return KSN_OK;
+    ksn_result result=ksn_runtime_present_backdrop(display,load,stats);
     apply_outcome();return result;
 }
 void pocket_kasane_end_turn(void) {

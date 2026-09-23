@@ -32,6 +32,9 @@ typedef struct {
     ksn_result (*present_rect)(void *,uint16_t x,uint16_t y,uint16_t cols,
                                uint16_t rows,const uint16_t *pixels);
 } ksn_display_port;
+/* Optional host backdrop for ksn_render_rects_backdrop. Called once per band
+ * instead of clearing to the APP background. It must fill width*rows pixels. */
+typedef ksn_result (*ksn_backdrop_loader)(void *,uint16_t y,uint16_t rows,uint16_t *pixels);
 /* Borrow the existing board strip. No second framebuffer. */
 typedef struct {
     void *ctx;

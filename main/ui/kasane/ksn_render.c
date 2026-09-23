@@ -1,5 +1,6 @@
 #include "ksn_render.h"
 #include "ksn_image_transform.h"
+#include "ksn_p0_probe.h"
 #include <string.h>
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
@@ -169,7 +170,8 @@ bool g_ksn_image_rotate_reject=true;
  * sizeof(ksn_anchor_row) of .bss. */
 #define KSN_ANCHOR_SPANS 16
 typedef struct {
-    int32_t rotation,bounds_x,bounds_y,window; /* affine inputs, packed pairwise */
+    int32_t rotation;
+    uint32_t bounds_x,bounds_y,window;         /* affine inputs, packed pairwise */
     int32_t row;                               /* destination row of the entries */
     int32_t base_x;                            /* destination x of entry 0 */
     int32_t spans;                             /* entries built */
@@ -197,7 +199,7 @@ static void anchor_extend(ksn_anchor_row *t,int last){
 /* Seed entry 0 with the exact division the caller computed for this pixel and
  * remember the affine inputs it came from (bounds packed pairwise so the
  * per-span check is four word compares). */
-static void anchor_put(int32_t rotation,int32_t bx,int32_t by,int32_t window,int x,int y,
+static void anchor_put(int32_t rotation,uint32_t bx,uint32_t by,uint32_t window,int x,int y,
                        int step_u,int step_v,unsigned sw,unsigned sh,int um,int vm,
                        int sx,int remu,int sy,int remv){
     ksn_anchor_row *t=&g_anchor_row;
@@ -281,12 +283,12 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
              * non-negative multiple of 16 below the table's reach is all that
              * has to be checked. Nothing else is evaluated when the switch is
              * off, so the per-span division arm keeps its own cost. */
-            int32_t key_bx=(uint16_t)d->bounds.x0|((int32_t)(uint16_t)d->bounds.x1<<16);
-            int32_t key_by=(uint16_t)d->bounds.y0|((int32_t)(uint16_t)d->bounds.y1<<16);
+            uint32_t key_bx=(uint16_t)d->bounds.x0|((uint32_t)(uint16_t)d->bounds.x1<<16);
+            uint32_t key_by=(uint16_t)d->bounds.y0|((uint32_t)(uint16_t)d->bounds.y1<<16);
             unsigned delta=(unsigned)(x-g_anchor_row.base_x);
             if(g_anchor_row.rotation==(int32_t)d->data.image.rotation&&
                g_anchor_row.bounds_x==key_bx&&g_anchor_row.bounds_y==key_by&&
-               g_anchor_row.window==(int32_t)(sw|(sh<<16))&&g_anchor_row.row==y&&
+               g_anchor_row.window==(sw|(sh<<16))&&g_anchor_row.row==y&&
                delta<16u*KSN_ANCHOR_SPANS&&!(delta&15u)){
                 j=(int)(delta>>4);
                 if(j>=g_anchor_row.spans)anchor_extend(&g_anchor_row,j);
@@ -308,9 +310,9 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
             if(remv<0){sy--;remv+=vm;}
             if(g_ksn_image_rotate_anchor)
                 anchor_put((int32_t)d->data.image.rotation,
-                           (uint16_t)d->bounds.x0|((int32_t)(uint16_t)d->bounds.x1<<16),
-                           (uint16_t)d->bounds.y0|((int32_t)(uint16_t)d->bounds.y1<<16),
-                           (int32_t)(sw|(sh<<16)),x,y,step_u,step_v,sw,sh,um,vm,sx,remu,sy,remv);
+                           (uint16_t)d->bounds.x0|((uint32_t)(uint16_t)d->bounds.x1<<16),
+                           (uint16_t)d->bounds.y0|((uint32_t)(uint16_t)d->bounds.y1<<16),
+                           sw|(sh<<16),x,y,step_u,step_v,sw,sh,um,vm,sx,remu,sy,remv);
         }
         /* Whole-span rejection. A span whose first pixel is accepted has an
          * accepted pixel, so the interval test only has to run when the first
@@ -1137,6 +1139,7 @@ static bool cache_view(unsigned slot,const ksn_frame_command *command){
         unsigned bytes=view->draw.data.text.bytes;
         if(bytes>sizeof(decoded.text)-decoded.text_used)return false;
         memcpy(decoded.text+decoded.text_used,command->text,bytes);
+        ksn_p0_probe_copy(KSN_P0_RENDER_DECODE_TEXT,bytes);
         view->draw.data.text.utf8=bytes?decoded.text+decoded.text_used:decoded.text;
         decoded.text_used+=bytes;
     }
@@ -1821,7 +1824,8 @@ static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int 
     }
     return pack565(r,g,b,dither,x,y);
 }
-ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
+static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
+                               ksn_backdrop_loader load_backdrop,ksn_render_stats *stats){
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
@@ -1888,14 +1892,17 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
         if(!(damage.bands&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
         const int dx0=damage.x0[band],dx1=damage.x1[band];
-        {KSN_PROF_BEGIN();
-        /* Whole strip in one call when the band is whole, which is every band
-         * of a REPLACE and of any repair; otherwise the damaged columns of each
-         * row, because the columns between them are not ours to touch. */
-        if(dx0==0&&dx1==240)fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
-        else for(int r=0;r<rows;r++)
-            fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
-        KSN_PROF_END(fill);}
+        if(load_backdrop){
+            result=load_backdrop(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
+            if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+        }else{KSN_PROF_BEGIN();
+            /* Whole strip in one call when the band is whole, which is every band
+             * of a REPLACE and of any repair; otherwise the damaged columns of each
+             * row, because the columns between them are not ours to touch. */
+            if(dx0==0&&dx1==240)fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
+            else for(int r=0;r<rows;r++)
+                fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
+            KSN_PROF_END(fill);}
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
             {KSN_PROF_BEGIN();
             result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
@@ -2062,4 +2069,12 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
     }
     return ksn_core_presented(core,frame.ticket);
+}
+ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
+    return render_rects(core,display,NULL,stats);
+}
+ksn_result ksn_render_rects_backdrop(ksn_core *core,const ksn_display_port *display,
+                                     ksn_backdrop_loader load,ksn_render_stats *stats){
+    if(!load)return KSN_INVALID;
+    return render_rects(core,display,load,stats);
 }

@@ -1,7 +1,7 @@
-# Kasane利用APIとowner境界 v0.4
+# Kasane利用APIとowner境界 v0.5
 
-2026-09-14。`ksn_view.h`と`ksn_view_host.h`、`pocket.kasane`は実装済み。
-既存アプリの移植は未実装。この文書は既存PocketJS UIの
+2026-09-23。`ksn_view.h`と`ksn_view_host.h`、`pocket.kasane`、通常/overlayアプリの
+利用経路は実装済み。この文書は旧PocketJS UIの
 `pocket.ui`と区別し、Kasaneの利用窓口を定める。
 画素と容量の規範は[合成仕様](design-composition.md)と[Kasane仕様](design-system.md)。
 
@@ -118,7 +118,7 @@ frame中にproviderの選択を変えてはならない。
 
 ### JS IMAGE / PPT2（CP13）
 
-`view.petImage()`はFlash上の組込みPPT2を借りる不透明handleを返す。
+`view.resource('pets')`はアプリ所有assetからFlash上の組込みPPT2を借りる不透明handleを返す。
 readonlyのwidth/height=64、variants=12、frames=6を持つ。APP session内のnative登録は一度だけ。
 取得はbuilder外で行う。初回登録はpending/repair中BUSY、登録済みhandleの再取得は可能。
 JS wrapperをGCしてもnative登録は残り、APP detachでまとめて失効する。
@@ -192,6 +192,44 @@ DISCARDEDなら最新stateで再試行し、REPLACEの候補refsは捨てる。B
 検証・quota・OOM・callback例外はdirtyを保持して呼出元へ送出する。build/patchは同期限定。
 idle時はpoll/提出をせず、timer・frame queue・毎flushのclosureを作らない。
 controller自体のJS関数/状態はcreateScene時のguest heapに計上する（未使用時は作らない）。
+
+### native presenter（source/slot実装）
+
+登録済みの表示定義は`pocket.kasane.mount('music'|'clock')`で単独所有する。
+MUSICは`view.set({title?,message?})`でアプリ所有slotだけを部分更新し、
+open済みの1件のplayerに`view.bind('playback')`で結び付ける。現在のplayer IDが
+close／再openで変われば旧bindingは読めず、新playerには再bindが必要。
+再生位置・長さ・状態・underrunはaudioサービスの読取専用native snapshotから取り、
+helpと未知長lightの位相はpresenterが持つ。`toggleHelp()`／`dismissHelp()`はその
+内部状態を変更する。CLOCKは`view.bind('wallClock')`でシステム時刻を読む。
+両アプリともJSの表示model・dirty・毎frame status pollを持たない。ただしguestの
+既存実行契約上、空の`frame()`関数は定義する。
+
+host専用status slotは`pocket_kasane_presenter_host_status`から期限付きで設定でき、
+`host status > app message > playback summary`の順に表示する。期限中にapp／audioが
+変わっても値は保持し、期限切れに最新値へ戻す。音量・FPS HUDと同意モーダルは従来どおり
+shell所有でAPP後に重ねる。このhost status slotには現時点でproduction callerは無い。
+文字列はUTF-8 scalar境界で47バイトに収め、JS入力は変換前に256 UTF-16 code unitsで
+制限する。旧`view.update(model)`は互換経路として残すがsource/slot経路とは混ぜない。
+native側で表示プランを作り、可視のbounds・色・文字列を比較する。同じ絵なら提出せず、
+変わればまずAPP REPLACEを使う。pending中の更新はlatestだけを差し替え、PRESENTED後に
+未表示分を再提出する。`pocket.overlay`はMUSICのキー配送に残るが、描画命令を作らない。
+同じAPP leaseで直接`replace/patch`や別のscene controllerを混ぜることはBUSYで拒否する。
+MUSIC/CLOCKのPATCH最適化は未実施であり、低レベルAPIも互換用に残す。
+
+通常画面の登録済み定義は`mount('hello'|'imucal'|'bridge'|'companion'|'pet')`で使う。
+`view.set({...})`は部分更新で、未指定slotを保持する。helloは`count`、imucalは
+`head/live/stat/spin/foot`、bridgeは`st/info/job/seen`、companionは
+`variant/head/line0..line3/foot/hint`を受ける。petは
+`ready/variant/frame/petY/neon/title/index/species/status/food/joy/energy/`
+`bar0..bar2/foot/hint/bubble/note/reveal`を受ける。文字はnative固定長slotとして
+保持し、画像はKasaneが組込みPPT2 resourceを登録する。JSはdomain判断と値の生成を
+続けるが、命令・参照・dirty・毎turnの`flush`を持たない。可視値が変わらない更新は
+nativeの固定長keyで提出を省く。全画面profileは構造・背景が同じ場合、表示確定した
+参照へPATCHし、文字・バー・画像の変更帯だけを再描画する。初回・空slotの出現・
+吹き出しの開閉・背景変更はREPLACEへ戻す。PATCHの文字予約はslotごと47 B固定で、
+可変boundsのclipは画面全体に置く。helloの実機連続更新では全17帯のREPLACEから
+3帯のPATCHになり、30フレーム平均の描画時間は4.58 msから0.93 msへ減った。
 
 APP提出の単独所有者として使う。他のcontrollerや直接replace/patchを混ぜない。
 修復中のownerによるpresent、SYSTEM提出、hostのcancelは併用可能。
@@ -275,12 +313,36 @@ RAM cacheは最初のcache.create成功時だけ追加する。管理情報・�
 公開DrawRefは32件。原子的REPLACE中に旧世代と候補世代を同時保持できるようnative slotは
 2世代分を持つが、1更新が新規公開できる参照は32件を超えない。
 
-session ownerは初回submitで旧RGB565 rendererを解放し、Kasaneのdirty帯だけを共用LCD stripへ送る。
+通常appのsession ownerは初回submitで旧RGB565 rendererを解放し、Kasaneのdirty帯だけを共用LCD stripへ送る。
 ソース評価中の初回submitとLCD修復は次のJS turnより先に処理する。全JS復帰境界で
 `pocket_kasane_end_turn`を呼び、guest終了前に`pocket_kasane_reset`する。
 
-schema loader、文字・画像rendererは未実装。旧PocketJS/Taffyからの完全移行は
-[Kasaneロードマップ](kasane-roadmap.md)に従う。
+### overlay profile（CP28、2026-09-23）
+
+overlayは第三のKasane layerを追加せず、通常appと同じAPP leaseを使う。overlay ownerはmanifestの
+regionを`pocket_kasane_set_viewport()`へ設定し、JSのbounds/clip/placementをregion-localからLCD座標へ
+変換したうえで必ずviewportと交差させる。これによりoverlay guestはregion外の画素を指定できない。
+`pocket.overlay`はregion limitsとkey listenerの契約として残すが、新規描画は`pocket.kasane`を使う。
+
+cache templateだけは配置前にclipしないlocal座標で保持する。instantiate/placeのoffsetへviewport原点を
+一度だけ加え、template clip・placement clip・viewportを最終配置で交差する。これによりregion外で
+定義したtemplate片をregion内へ移した場合も、先に失われない。
+
+Kasane transaction modalはoverlay profileでは非対応で、`features().modal=false`、`modal.open`は
+`UNSUPPORTED`となる。native modalが作る全画面scrimと、host backdropで無視されるSOLID背景を
+region契約へ混在させないためである。ファイル/フォルダー等のshell-owned pickerは従来どおり全画面で
+overlayより上に表示される。
+
+overlayでもtransaction上は不透明なAPP背景色を必須とするが、その色で帯を消去しない。
+shellが`ksn_backdrop_loader`で現在のnative sceneを帯へ描き、
+`ksn_render_rects_backdrop()`がその同じ帯へAPP命令をsource-over合成する。sceneはKasaneのdirty stateと
+独立に動くため、overlay稼働中はownerが全画面をinvalidateする。LCD転送、FPS/音量表示などの
+shell-owned surfaceはその後に重ねる。途中転送失敗時のcancel・全帯修復は通常appと同じview契約を使う。
+submissionまたはrepairが残る間は次のguest turnを開始せず、予約Back以外のoverlay入力はqueueへ入れない。
+scene再生、shell HUD、LCD転送を除いたKasane合成時間はguest turn時間と合算してoverlay予算へ課金する。
+
+schema loaderは未実装。文字・画像renderer、旧PocketJS/Taffyからの移行は完了済みで、残るnative画面の
+移行は[Kasaneロードマップ](kasane-roadmap.md)に従う。
 
 ## 6. 検証とメモリ
 

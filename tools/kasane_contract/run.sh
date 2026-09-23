@@ -12,9 +12,12 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   tools/kasane_contract/use_cases.c tools/kasane_contract/test_core.c -o "$out/core" main/ui/kasane/ksn_blend_pie.c
 "$out/core"
 for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
-  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+  cc -std=c11 -Wall -Wextra -Werror $options -Itools/kasane_contract/p0_hostshim -Itools/hostshim \
+    tools/kasane_contract/test_p0_histogram.c -o "$out/p0-histogram"
+  "$out/p0-histogram"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Imain/pocket \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
-    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_notice.c main/ui/kasane/ksn_indicator.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_notice.c main/ui/kasane/ksn_indicator.c \
     tools/kasane_contract/test_notice.c -o "$out/notice"
   "$out/notice"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
@@ -34,6 +37,26 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_view.c -o "$out/view"
   "$out/view"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain -Imain/ui/kasane -Imain/pocket -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_legacy_presenter.c \
+    tools/kasane_contract/test_presenter.c -o "$out/presenter"
+  "$out/presenter"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
+    tools/kasane_contract/test_schema.c -o "$out/schema"
+  "$out/schema"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
+    main/ui/kasane/ksn_schema_session.c tools/kasane_contract/test_schema_session.c -o "$out/schema-session"
+  "$out/schema-session"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
+    main/ui/kasane/ksn_schema_session.c tools/kasane_contract/test_schema_workloads.c -o "$out/schema-workloads"
+  "$out/schema-workloads"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_repair.c -o "$out/repair"

@@ -14,6 +14,8 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "fonts.h"
+#include "ksn_font.h"
+#include "kasane/ksn_p0_probe.h"
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -513,6 +515,51 @@ static void solar_labels(uint16_t *s,int y,int height) {
     text(166,121,solar_sail_target(),1,board_rgb(87,125,144));
 }
 
+/* Kasane overlay display port. Loading and sending are deliberately split:
+ * load_backdrop replays the native scene below the retained command bank;
+ * present adds shell-owned indicators above it and transfers the result. */
+typedef struct {
+    const scene_ops_t *scene;
+    const char *meter;
+    uint16_t muted;
+    unsigned *loop_us,*hud_us,*present_us;
+} shell_overlay_port;
+
+static uint16_t *shell_overlay_strip(void *ctx) {
+    (void)ctx;return board_strip();
+}
+static ksn_result shell_overlay_backdrop(void *opaque,uint16_t y,uint16_t rows,
+                                         uint16_t *pixels) {
+    shell_overlay_port *ctx=opaque;
+    strip=pixels;strip_y=y;strip_h=rows;
+    int64_t began=esp_timer_get_time();
+    kernel_cycles+=ctx->scene->draw(strip,strip_y,strip_h);
+    *ctx->loop_us+=(unsigned)(esp_timer_get_time()-began);
+    began=esp_timer_get_time();
+    HUD_FENCE;uint32_t h0=esp_cpu_get_cycle_count();HUD_FENCE;
+    if(ctx->scene->overlay)ctx->scene->overlay(strip,strip_y,strip_h);
+    HUD_FENCE;hud_ovl_cy+=esp_cpu_get_cycle_count()-h0;HUD_FENCE;
+    *ctx->hud_us+=(unsigned)(esp_timer_get_time()-began);
+    return KSN_OK;
+}
+static ksn_result shell_overlay_send(void *opaque,uint16_t y,uint16_t rows,
+                                     const uint16_t *pixels) {
+    shell_overlay_port *ctx=opaque;
+    strip=(uint16_t *)pixels;strip_y=y;strip_h=rows;
+    int64_t began=esp_timer_get_time();
+    HUD_FENCE;uint32_t h0=esp_cpu_get_cycle_count();HUD_FENCE;
+    if(show_fps)text(194,8,ctx->meter,1,ctx->muted);
+    HUD_FENCE;uint32_t h1=esp_cpu_get_cycle_count();HUD_FENCE;
+    paint_volume();
+    HUD_FENCE;uint32_t h2=esp_cpu_get_cycle_count();HUD_FENCE;
+    hud_fps_cy+=h1-h0;hud_menu_cy+=h2-h1;
+    *ctx->hud_us+=(unsigned)(esp_timer_get_time()-began);
+    began=esp_timer_get_time();
+    esp_err_t result=board_present(y,rows,(uint16_t *)pixels);
+    *ctx->present_us+=(unsigned)(esp_timer_get_time()-began);
+    return result==ESP_OK?KSN_OK:KSN_IO;
+}
+
 void shell_draw(const char *error, unsigned phase) {
     (void)phase;
     strip=board_strip();
@@ -555,7 +602,24 @@ void shell_draw(const char *error, unsigned phase) {
     if(!error&&xmb)menu_layout();
     HUD_FENCE;hud_menu_cy+=esp_cpu_get_cycle_count()-f1;HUD_FENCE;
     hud_us+=(unsigned)(esp_timer_get_time()-hud_once);
-    for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
+    if(!error&&overlay_kasane_active()) {
+        shell_overlay_port host={.scene=sc,.meter=meter,.muted=muted,
+            .loop_us=&loop_us,.hud_us=&hud_us,.present_us=&present_us};
+        ksn_display_port port={.ctx=&host,.strip=shell_overlay_strip,
+            .present=shell_overlay_send,.width=LCD_W,.height=LCD_H,
+            .strip_rows=STRIP_H,.text=&ksn_font_port};
+        ksn_render_stats stats={0};
+        unsigned loop_before=loop_us,hud_before=hud_us,present_before=present_us;
+        int64_t composite_began=esp_timer_get_time();
+        ksn_result result=overlay_kasane_present(&port,shell_overlay_backdrop,&stats);
+        ksn_p0_probe_transfer(stats.transferred_bytes,ksn_render_band_count(stats.bands));
+        uint64_t elapsed=(uint64_t)(esp_timer_get_time()-composite_began);
+        uint64_t excluded=(uint64_t)(loop_us-loop_before)+(hud_us-hud_before)+
+                          (present_us-present_before);
+        overlay_kasane_charge((uint32_t)(elapsed>excluded?elapsed-excluded:0));
+        if(result!=KSN_OK)
+            ESP_LOGW("overlay","Kasane composite failed: %u",(unsigned)result);
+    } else for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
         strip_h=LCD_H-strip_y<STRIP_H ? LCD_H-strip_y:STRIP_H;
         int64_t band=esp_timer_get_time();
         kernel_cycles+=sc->draw(strip,strip_y,strip_h);
@@ -590,6 +654,12 @@ void shell_draw(const char *error, unsigned phase) {
         present_us+=(unsigned)(esp_timer_get_time()-sent);
     }
     unsigned elapsed=(unsigned)(esp_timer_get_time()-started);
+    if(overlay_kasane_active()&&!board_capture_active()){
+        ksn_p0_probe_sample(KSN_P0_OVERLAY_DRAW,elapsed);
+        ksn_p0_probe_sample(KSN_P0_OVERLAY_SEND,present_us);
+        ksn_p0_probe_sample(KSN_P0_OVERLAY_COMPUTE,
+                            elapsed>present_us?elapsed-present_us:0u);
+    }
     if(!window_start)window_start=started;
     samples++;draw_sum+=elapsed;present_sum+=present_us;
     prep_sum+=(unsigned)(after_prep-started);loop_sum+=loop_us;hud_sum+=hud_us;

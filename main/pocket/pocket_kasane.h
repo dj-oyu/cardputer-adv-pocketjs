@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 #include "quickjs.h"
@@ -17,8 +18,20 @@ void pocket_kasane_reset(void);
  * kasane, while the heap is still unbroken. Failure is silent: the first call
  * then retries and reports OUT_OF_MEMORY where the app can see it. */
 void pocket_kasane_prepare(void);
+/* Bind the JS coordinate space to a host-owned viewport. The ordinary app
+ * viewport is the whole panel. Overlay coordinates are region-local: direct
+ * destinations are translated immediately; cache templates remain local and
+ * are translated/clipped at placement. Configure before source evaluation;
+ * reset restores the whole panel and normal feature profile. */
+void pocket_kasane_set_viewport(int16_t x,int16_t y,int16_t width,int16_t height);
 
 bool pocket_kasane_active(void);
+/* Advances the native presenter's acknowledged/queued plans in the owner turn.
+ * blocked means it submitted a new APP bank, so guest frame must wait. */
+ksn_result pocket_kasane_presenter_step(bool *blocked);
+/* Host-owned transient status slot. It overrides the app message without
+ * mutating it; expiry reveals the latest app/playback value on the next turn. */
+ksn_result pocket_kasane_presenter_host_status(const char *text,size_t bytes,uint64_t until_us);
 ksn_result pocket_kasane_update_notice(const sys_notice *,uint16_t variant);
 bool pocket_kasane_notice_composited(void);
 bool pocket_kasane_system_pending(void);
@@ -33,5 +46,7 @@ void pocket_kasane_invalidate(void);
 void pocket_kasane_invalidate_bands(uint32_t bands);
 ksn_result pocket_kasane_present(const ksn_display_port *display,
                                  ksn_render_stats *stats);
+ksn_result pocket_kasane_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,
+                                          ksn_render_stats *);
 void pocket_kasane_end_turn(void);
 ksn_input_scope pocket_kasane_input_scope(bool host_priority);

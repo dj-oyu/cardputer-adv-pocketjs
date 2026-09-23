@@ -4,6 +4,62 @@
 書込み・シリアル診断を再開した。以前の保留項目は実行したものだけ確認済みに更新する。
 各checkpointはhost試験とESP-IDFビルド後にcommit・pushして進める。
 
+## presenter source/slot 経路（2026-09-23、実機未確認）
+
+- MUSIC JSから表示model、dirty、pos、tick、helpを除き、選曲・再生操作と
+  `view.set({title,message})`だけを残した。open後にcurrent player IDへbindし、
+  audioの読取専用native snapshotから位置・長さ・状態・underrunを表示する。
+- DESK CLOCKは`view.bind('wallClock')`だけでUTC時刻と同期表示をnativeで更新する。
+  両アプリはguest契約のため空の`frame()`を残すが、UI更新は行わない。
+- host専用の期限付きstatus slotはapp messageを壊さず優先表示し、期限切れに最新値へ
+  復帰する。既存の音量・FPS HUDと同意モーダルはshellの優先経路を維持する。
+- 文字検証をcoreのUTF-8 scalar／制御文字規則に合わせ、JS入力変換を256 code unitsに
+  制限。`stats().nativeBytes`へpresenter確保分を含め、常駐容量を1 KiB以下にガード。
+- QuickJS hostのsource/上書き/期限/不正入力テスト、native契約テスト、ESP-IDF buildは通過。
+  別プロセスがCOM3を使用中のためflash・実機画素／性能計測は行っていない。
+
+## native presenter 第一段階（2026-09-23、実機未確認）
+
+- MUSIC/CLOCK の表示プランを `ksn_presenter` で生成し、可視命令の field 比較後に APP REPLACE
+  を提出する。`mount/update` のJS adapterは値の検証とコピーだけを担当する。
+- MUSIC と DESK CLOCK はJSのrect/text組立てをやめた。`pocket.overlay`はMUSICの入力契約に残す。
+- pending中の最新値、PRESENTED後の再提出、同一表示の抑制、旧セッションviewの拒否を
+  QuickJS hostテストで確認。native表示プランの単体テストとESP-IDF buildも通過。
+- 別プロセスがCOM3を使用中のため、本段階ではポート照会・flash・実機計測を行っていない。
+  再生中のA/B性能、画素capture、heap free/largest、LCD費用は未判定。
+
+## checkpoint 28 — overlay app共通Kasane profile（2026-09-23）
+
+- endpoint: overlay sessionにも`pocket.kasane`を注入し、APP leaseを再利用した。第三の
+  OVERLAY layerは作らない。`pocket.overlay`はregion/key contractと旧display list互換経路として残す。
+- region: manifest regionをviewportとしてsession開始前に設定する。QuickJS adapterがbounds、clip、
+  cache placementをregion-localからLCD座標へ変換し、viewportと交差させる。cache templateはlocal・
+  未clipで保持して配置時に制約する。resetで全画面へ戻す。
+- isolation: native全画面scrimとSOLID背景の意味がhost backdropと両立しないため、overlay profileでは
+  Kasane modalを非公開（`features().modal=false`、openは`UNSUPPORTED`）とした。shell pickerは別経路。
+- composition: `ksn_render_rects_backdrop`とview/runtime/pocketのpresent-backdrop経路を追加した。
+  shellが各8-row帯へ現在のnative sceneを描き、Kasaneが同じ帯へAPP commandをsource-over合成する。
+  shellのFPS/音量表示とLCD転送所有権は従来どおりshell側に残る。
+- scheduling: overlay turnの全JS復帰境界でKasane transactionを閉じる。native sceneはKasane stateと
+  独立に動くためoverlay稼働中は全画面をinvalidateし、転送失敗時は通常APPと同じcancel/repairを使う。
+  submission/repair中はguestと通常入力を止める。Kasane合成時間はscene/HUD/LCDを除外してguest時間と
+  合算し、既存の連続超過・frame share予算へ含める。
+- apps: DESK CLOCKとMUSICを`pocket.kasane`へ移植した。両manifestに`display.kasane`を宣言し、
+  playerは`pocket.overlay`を入力とregion limitsのためだけに使う。
+- host: Kasane contract（host backdrop合成）、実QuickJS adapter（viewport、cache、modal profile）、overlay contract、
+  deskclock/playerのJS構文を検査対象に追加した。ESP-IDF full buildも通過。
+- 実機COM3: 1,959,872 Bのapp imageを0x10000へ書込み、esptoolのhash照合PASS。`tools/overlay_device_test.py`
+  でDESK CLOCK/MUSICを設定行から起動し、各6秒超の継続動作、MUSICの`?`ヘルプ、Back離脱、
+  元のoverlay設定への復帰を確認。送信前RGB565の240×135画素を3枚captureし、時計が右上region
+  `{140,46,96,22}`に収まることとMUSICの通常/ヘルプ表示を確認。物理LCDの撮影ではない。
+  `.cache/kasane-overlay-cp28-device/`にserialログとPNGを保存。
+- 同実機のheap: 起動前/終了後free 217,460 B・largest 81,920 B。時計の起動後free 124,048 B・
+  JS 87,560 B（消費93,412 B）、MUSICはfree 107,720 B・largest 53,248 B・JS 104,864 B
+  （消費109,740 B）。再試行でも同じ値。各離脱時のbudget worstは時計3,501 µs、MUSIC
+  11,791 µs（設定上限8,000/12,000 µs）。背景mode 3の安定窓はoverlay中も29.7–29.9 fps。
+  capture中の窓は送信待ちが伸びて14–16 fpsなので通常動作の値に混ぜない。
+  `memlog.py --check`: DIRAM 159,676 B、Flash Code 1,400,436 B、budget内。
+
 ## checkpoint 24–25 — 旧UI経路とTaffyを出荷物から削除（2026-09-17）
 
 branch `kasane/remove-taffy`（`kasane/app-ports`から）。push未実施。

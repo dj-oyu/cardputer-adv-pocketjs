@@ -140,5 +140,40 @@ int main(void){
         for(size_t n=0;n<sizeof(core_commands[i]);n++)CHECK(bytes[n]==0);
         for(size_t n=0;n<sizeof(core_text[i].bytes);n++)CHECK(core_text[i].bytes[n]==0);
     }
+
+    /* PATCH copies only published prefixes of both layers. Poison the spare
+     * bank's unused tails so a whole-allocation clone cannot pass unnoticed. */
+    app=ksn_core_client(&core,KSN_APP);system=ksn_core_client(&core,KSN_SYSTEM);
+    CHECK(begin_app(app,KSN_REPLACE,&tx)==KSN_OK);
+    ksn_ref app_text,system_text;
+    CHECK(add_text(app,tx,"abc",3,8,&app_text)==KSN_OK);
+    CHECK(app.ops->end(app.ctx,tx)==KSN_OK&&presented(&core)==KSN_OK);
+    CHECK(system.ops->begin(system.ctx,KSN_REPLACE,&tx)==KSN_OK);
+    CHECK(add_text(system,tx,"SYS",3,8,&system_text)==KSN_OK);
+    CHECK(system.ops->end(system.ctx,tx)==KSN_OK&&presented(&core)==KSN_OK);
+    ksn_bank *active=&core.state.banks[core.state.active];
+    ksn_bank *spare=&core.state.banks[core.state.active^1u];
+    memset(spare->commands+1,0xa5,(KSN_APP_COMMANDS-1)*sizeof(ksn_command_storage));
+    memset(spare->commands+KSN_APP_COMMANDS+1,0xa5,
+           (KSN_SYSTEM_COMMANDS-1)*sizeof(ksn_command_storage));
+    memset(spare->text+8,0xa5,KSN_APP_TEXT_BYTES-8);
+    memset(spare->text+KSN_APP_TEXT_BYTES+8,0xa5,KSN_SYSTEM_TEXT_BYTES-8);
+    CHECK(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
+    CHECK(memcmp(spare->commands,active->commands,sizeof(ksn_command_storage))==0);
+    CHECK(memcmp(spare->commands+KSN_APP_COMMANDS,active->commands+KSN_APP_COMMANDS,
+                 sizeof(ksn_command_storage))==0);
+    CHECK(memcmp(spare->text,active->text,8)==0);
+    CHECK(memcmp(spare->text+KSN_APP_TEXT_BYTES,active->text+KSN_APP_TEXT_BYTES,8)==0);
+    CHECK(((unsigned char *)(spare->commands+1))[0]==0xa5);
+    CHECK(((unsigned char *)(spare->commands+KSN_APP_COMMANDS+1))[0]==0xa5);
+    CHECK(spare->text[8]==0xa5&&spare->text[KSN_APP_TEXT_BYTES+8]==0xa5);
+    change=(ksn_change){.property=KSN_SET_TEXT,.value.text={"XY",2}};
+    CHECK(app.ops->change(app.ctx,tx,app_text,&change)==KSN_OK);
+    CHECK(app.ops->end(app.ctx,tx)==KSN_OK&&presented(&core)==KSN_OK);
+    ksn_frame_command read={0};
+    CHECK(ksn_core_read_active_ref(&core,KSN_APP,app_text,&read)==KSN_OK);
+    CHECK(read.draw.data.text.bytes==2&&memcmp(read.draw.data.text.utf8,"XY",2)==0);
+    CHECK(ksn_core_read_active_ref(&core,KSN_SYSTEM,system_text,&read)==KSN_OK);
+    CHECK(read.draw.data.text.bytes==3&&memcmp(read.draw.data.text.utf8,"SYS",3)==0);
     puts("fixed core: PASS (borrowed banks, failed bind, reset)");return 0;
 }

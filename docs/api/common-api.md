@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 2 | capabilities／apiVersion | 実装済み | `pocket_api.c` |
 | 3 | アプリ登録（静的テーブル） | 実装済み | `main/pocket/app_registry.c` |
-| 3.1 | オーバーレイ | 実装済み（`pocket.overlay`。§3.1本文に改訂履歴） | `pocket_overlay.c`、`main/ui/overlay*.c` |
+| 3.1 | オーバーレイ | 実装済み（描画は`pocket.kasane`、region/inputは`pocket.overlay`） | `pocket_kasane.c`、`pocket_overlay.c`、`main/ui/overlay*.c` |
 | 4 | 共通エラー・cancel・Options | 実装済み | `pocket_api.c` |
 | 5 | app／time／log | 実装済み | `pocket_app.c` |
 | 6 | ui／input／input.text | 実装済み | `pocket_ui.c`、`pocket_text.c` |
@@ -110,7 +110,7 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 **ホーム画面のUIそのものになるアプリ。XMBを終了させ、その場所に立つ。** シーンは下で描かれ続け、シェルは画面を手放さない（背景の代わりに走る通常アプリとは、そこが違う）。時計・いま鳴っている曲・観賞用の表示・シーン定義の編集など「背景を見ながら使うもの」がこの形になる。
 
 ```json
-{ "runtime": "pocket-overlay", "required": ["ui.overlay"] }
+{ "runtime": "pocket-overlay", "required": ["ui.overlay", "display.kasane"] }
 ```
 
 **この種別を分ける理由は、合成ではなく統治にある。** 描画の重ね合わせはホーム画面が既に行っている（背景＋メニュー）。新しいのは、**ユーザーがホーム画面に居るあいだゲストが生きている**という点で、危険はすべてそこから出る。
@@ -155,7 +155,7 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 
 **能力の既定はフォアグラウンドのアプリより狭い。** ユーザーがアプリを見ていない間も走るので、音声再生・ネットワーク・外部機器の駆動は宣言と許可があっても既定では止め、明示的に有効化する。**許可の取り消しはホーム画面から常に到達できる**必要があり、オーバーレイが壊れている最中でも到達できなければならない — 上の予約キーがその経路である。
 
-#### 実装の状態（2026-09-09）
+#### 実装の状態（2026-09-23）
 
 **この節は実装された。** `shell_draw()` はoverlayが立っているとき `menu_layout()` を
 呼ばず、ラベルも描かない。ESCはシェルの予約キーで、`ui_task` の配送ループの先頭で
@@ -165,6 +165,13 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 
 `overlay_yield()` の最初の呼び出し元は予約キーである。無線とストリームの側の
 呼び出し元は依然として無い。
+
+overlay sessionにも`pocket.kasane`を注入する。座標はmanifest region相対で、adapterがLCD座標へ
+変換しregionでclipする。shellは現在のnative sceneを各帯のbackdropとして供給し、その上へ同じ
+APP layerを合成するため、OVERLAYという第三layerやfull-frame bufferは持たない。`pocket.overlay`の
+旧display listは互換経路として残り、新規overlayではregion limitsとkey listenerだけを担う。
+Kasane modalは全画面scrim/SOLID背景がregion付きbackdropと両立しないためoverlayでは非対応。
+submission/repair中は通常入力と次のguest turnを止め、Kasane合成費用もoverlay予算へ含める。
 
 **予約キーは一度間違った場所に置かれた。** force stop（Ctrl+Alt+Del）の分岐に
 書いたので、通常のBackは配送経路をそのまま通っていた——**この節が構造的だと言って
@@ -761,9 +768,10 @@ MP3の `info().durationMs` は **Xing/Info/VBRIタグの総フレーム数**か�
 **述べられているときに述べ、述べられていないときは黙る。** 嘘をついたバーは
 消せない。
 `seekable:false` で `seek()` は `NOT_AVAILABLE`。
-一時停止からの再開は専用タスクで先頭から復号し、既に再生したサンプルを捨てて
-bit reservoirを復元するため、長い曲の後半では再開に時間がかかる。
-描画タスクで全曲を走査せず、インデックスも推定しない実装上の制約。
+一時停止は音声リングの消費だけを止め、復号器・bit reservoir・変換状態と
+未消費バッファを保持する。再開時の曲頭からの再デコードは不要で、位置に比例する
+待ち時間はない。停止中はI2Sに無音を送り、再生位置とunderrun数は増やさない。
+ランダムseekは引き続き非対応で、別途インデックスとpre-rollの設計が必要。
 
 `audio.playback.limits.codecs` に `mp3`、`mp3Container:"mpeg-layer3"`、
 `mp3Seekable:false` を追加。共通の `sampleRate:24000, channels:1` は出力形式。

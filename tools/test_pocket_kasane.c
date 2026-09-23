@@ -1,6 +1,8 @@
 // End-to-end host contract for pocket.kasane with the real QuickJS and the
 // real fixed-storage DS core/cache/modal/renderer.
 #include "pocket_kasane.h"
+#include "pocket_av.h"
+#include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "text/ksn_font.h"
 #include "pet/ksn_pet.h"
@@ -19,6 +21,20 @@ static uint16_t panel_pixels[240*135],committed_pixels[240*135];
 static unsigned transfers;
 static bool fail_once;
 static int fail_band=-1,invalidate_band=-1;
+static int32_t test_player_id;
+static pocket_av_ui_snapshot test_player_ui;
+static bool test_clock_valid;
+static sys_clock_state test_clock_ui;
+
+int32_t pocket_av_ui_current_player(void){return test_player_id;}
+bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
+    if(!out||!id||id!=test_player_id)return false;
+    *out=test_player_ui;return true;
+}
+bool sys_device_clock_read(sys_clock_state *out){
+    if(!out||!test_clock_valid)return false;
+    *out=test_clock_ui;return true;
+}
 
 /* Single-shot failures let QuickJS construct/catch its OOM exception. Track
  * every guest allocation so each fresh-runtime sweep also checks leaks. */
@@ -127,6 +143,324 @@ static ksn_result present(ksn_render_stats *stats) {
     ksn_display_port port={.strip=get_strip,.present=send_strip,
                           .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
     return pocket_kasane_present(&port,stats);
+}
+
+static void presenter_tests(void) {
+    ksn_render_stats stats;bool blocked=false;
+    check(run("globalThis.music=kasane.mount('music');"
+              "globalThis.picture={title:'TRACK',status:'PLAYING  1s',positionMs:1000,"
+              "durationMs:100000,playing:true,phase:0,help:false};"
+              "music.update(picture);"),"native MUSIC presenter accepts a view model");
+    check(pocket_kasane_active()&&pocket_kasane_has_submission(),
+          "presenter submit activates the APP lease");
+    check(run("picture.status='PLAYING  2s';picture.positionMs=2000;music.update(picture);"),
+          "pending MUSIC update replaces latest plan without another transaction");
+    check(present(&stats)==KSN_OK,"first MUSIC plan reaches display");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "acknowledging A submits newer B, not a false acknowledgement of B");
+    check(present(&stats)==KSN_OK,"newer MUSIC plan reaches display");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "presenter becomes idle after latest plan is acknowledged");
+    check(run("music.update(picture);"),"same MUSIC plan is accepted");
+    check(!pocket_kasane_has_submission(),"equal plan does not submit a new bank");
+    check(run("picture.help=true;music.update(picture);"),"help changes the native page");
+    check(present(&stats)==KSN_OK,"help page presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "help acknowledgement is stable");
+    check(run("let busy=false;try{kasane.replace(tx=>tx.background(0xff));}"
+              "catch(e){busy=e.code==='BUSY'}if(!busy)throw Error('mixed owners');"),
+          "direct replace cannot mix with a mounted presenter");
+    pocket_kasane_reset();
+    pocket_kasane_set_viewport(140,46,96,22);
+    check(run("globalThis.clock=kasane.mount('clock');")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "a generic native source supports a small clock overlay viewport");
+    check(run("(()=>{let stale=false;try{music.update(picture)}"
+              "catch(e){stale=e.code==='CLOSED'}"
+              "if(!stale)throw Error('old presenter controlled new lease')})()"),
+          "a prior session presenter cannot control a newly mounted view");
+    check(present(&stats)==KSN_OK,"clock presenter reaches display");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "clock presenter acknowledges its plan");
+    pocket_kasane_reset();
+}
+
+static void app_presenter_tests(void){
+    ksn_render_stats stats;bool blocked=false;
+    char accounting[128];
+    check(run("globalThis.helloView=kasane.mount('hello');helloView.set({counter:'KEY PRESSES: 0'});"),
+          "hello mounts a native full-screen definition");
+    check(present(&stats)==KSN_OK,"hello first frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "hello presenter acknowledges the frame");
+    check(run("helloView.set({counter:'KEY PRESSES: 0'})")&&!pocket_kasane_has_submission(),
+          "same hello counter skips a replacement");
+    check(run("helloView.set({counter:'KEY PRESSES: 1'})")&&pocket_kasane_has_submission(),
+          "hello counter update submits without a JS scene callback");
+    check(present(&stats)==KSN_OK&&stats.bands!=0x1ffffu,
+          "hello counter PATCH damages fewer than all 17 bands");
+    pocket_kasane_reset();
+    check(run("globalThis.imuView=kasane.mount('imucal');"
+              "imuView.set({head:'START',live:'NO SAMPLE YET',stat:'WAIT',"
+              "spin:'GYR OFF',foot:'HOLD STILL'});"),
+          "IMU calibration mounts native text slots");
+    check(present(&stats)==KSN_OK,"IMU first frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "IMU presenter acknowledges the frame");
+    check(run("imuView.set({live:'X+100 Y+000 Z-100'})")&&pocket_kasane_has_submission(),
+          "partial IMU slot update submits latest state");
+    check(present(&stats)==KSN_OK&&stats.bands!=0x1ffffu,
+          "IMU text PATCH keeps the rest of the screen clean");
+    pocket_kasane_reset();
+    check(run("globalThis.bridgeView=kasane.mount('bridge');"
+              "bridgeView.set({st:'CONNECTING...',info:'',job:'',seen:''});"),
+          "bridge mounts native text slots with empty optional fields");
+    check(present(&stats)==KSN_OK,"bridge first frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "bridge presenter acknowledges the frame");
+    check(run("bridgeView.set({info:'HOST READY'})")&&pocket_kasane_has_submission(),
+          "bridge reveals an empty slot after an asynchronous event");
+    pocket_kasane_reset();
+    check(run("globalThis.companionArt=kasane.resource('pets');"
+              "globalThis.companionView=kasane.mount('companion');"
+              "companionView.set({resource:companionArt,variant:3,head:'< CODEX >',line0:'PC CONNECTED',"
+              "foot:'UP/DOWN PET',hint:'ESC HOME'});"),
+          "companion mounts a native pet image and text layout");
+    check(present(&stats)==KSN_OK,"companion first frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "companion presenter acknowledges the frame");
+    check(run("try{companionView.set({variant:12,head:'BAD'});throw Error('accepted')}"
+              "catch(e){if(e.message==='accepted')throw e}"),
+          "out-of-range image variant is rejected before changing any slot");
+    check(run("companionView.set({variant:4})")&&pocket_kasane_has_submission(),
+          "companion pet selection patches the registered image after invalid set");
+    pocket_kasane_reset();
+    check(run("globalThis.petArt=kasane.resource('pets');"),
+          "pet image resource is registered before the presenter allocation");
+    check(run("globalThis.petNativeBase=kasane.stats().nativeBytes;"),
+          "native accounting baseline excludes an unmounted descriptor");
+    native_max=0;
+    track_native=true;
+    check(run("globalThis.petView=kasane.mount('pet');petView.set({ready:false});"),
+          "pet mounts without an image before storage is loaded");
+    track_native=false;
+    printf("pet static allocation: %zu bytes\n",native_max);
+    check(native_max<=1280,"pet static presenter allocation stays within the prior 1280-byte budget");
+    snprintf(accounting,sizeof(accounting),
+             "if(kasane.stats().nativeBytes-petNativeBase!==%zu)throw Error('schema accounting')",
+             native_max);
+    check(run(accounting),
+          "nativeBytes includes the pet schema, session, values, and text pool");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "pet loading model starts its initial transaction");
+    check(present(&stats)==KSN_OK,"pet loading frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "pet loading frame acknowledges");
+    check(run("try{petView.set({ready:true,resource:companionArt,title:'BAD'});"
+              "throw Error('accepted')}catch(e){if(e.message==='accepted')throw e}"),
+          "stale image handle is rejected before changing the pet model");
+    check(run("petView.set({ready:true,resource:petArt,variant:8,frame:2,petY:31,"
+              "bar0:80,bar1:60,bar2:40,title:'CHOOSE: GRAY',"
+              "food:'FOOD 80',joy:'JOY 60',energy:'ENERGY 40'});")&&
+          pocket_kasane_has_submission(),
+          "pet domain values build a native image and three bars");
+    check(present(&stats)==KSN_OK,"pet selected frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "pet selected frame acknowledges");
+    check(run("petView.set({bubble:true,note:'YUM!',reveal:2})")&&
+          pocket_kasane_has_submission(),
+          "pet bubble reveal is owned by the presenter transaction");
+    check(present(&stats)==KSN_OK,"pet bubble frame presents");
+    pocket_kasane_reset();
+    check(run("try{kasane.mount({version:1,slots:{x:{type:'u16'}},"
+              "nodes:[{type:'rect',bounds:[0,0,20,20],color:0xffffffff,"
+              "visible:{slot:'x'}}]});throw Error('accepted')}"
+              "catch(e){if(e.message==='accepted')throw e}"),
+          "runtime descriptor rejects a mismatched slot type before mounting");
+    check(run("globalThis.runtimeNativeBase=kasane.stats().nativeBytes;"),
+          "runtime descriptor starts from a known native accounting baseline");
+    size_t runtime_before=native_bytes;
+    track_native=true;
+    check(run("globalThis.customView=kasane.mount({version:1,background:0x112233ff,"
+              "slots:{label:{type:'text',capacity:24},fill:{type:'rect'},show:{type:'bool'}},"
+              "nodes:[{type:'text',bounds:[8,8,220,24],text:{slot:'label'},color:0xe2f0ffff},"
+              "{type:'rect',bounds:{slot:'fill'},visible:{slot:'show'},color:0x78c8ffff}]},"
+              "{label:'EIGHTH APP',fill:[12,109,88,111],show:true});"),
+          "an unknown eighth JS app compiles typed slots and nodes at mount");
+    track_native=false;
+    snprintf(accounting,sizeof(accounting),
+             "if(kasane.stats().nativeBytes-runtimeNativeBase!==%zu)throw Error('runtime accounting')",
+             native_bytes-runtime_before);
+    check(run(accounting),
+          "nativeBytes includes the runtime descriptor and mounted schema allocations");
+    check(present(&stats)==KSN_OK,"runtime descriptor initial frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "runtime descriptor initial frame acknowledges");
+    check(run("try{customView.set({label:'X'.repeat(100000)});throw Error('accepted')}"
+              "catch(e){if(e.message==='accepted')throw e}"),
+          "runtime text length is rejected before UTF-8 conversion");
+    check(run("customView.set({label:'UPDATED'})")&&pocket_kasane_has_submission(),
+          "runtime descriptor updates via the same exact PATCH path");
+    check(present(&stats)==KSN_OK&&stats.bands!=0x1ffffu,
+          "runtime descriptor PATCH avoids full-screen damage");
+    pocket_kasane_reset();
+    check(run("globalThis.offsetView=kasane.mount({version:1,backgroundSlot:'bg',"
+              "slots:{bg:{type:'color'},extent:{type:'u16',initial:1,maximum:80}},"
+              "nodes:[{type:'rect',bounds:[8,30,8,34],rectAdd:[null,null,'extent',null],"
+              "color:0x78c8ffff}]},{bg:0x102030ff,extent:40});"),
+          "runtime descriptor compiles dynamic background and numeric geometry");
+    check(present(&stats)==KSN_OK,"runtime numeric geometry first frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "runtime numeric geometry frame acknowledges");
+    check(run("offsetView.set({extent:41})")&&pocket_kasane_has_submission(),
+          "runtime numeric geometry patches through the generic offset operator");
+    pocket_kasane_reset();
+}
+
+static void reactive_presenter_tests(void){
+    ksn_render_stats stats;bool blocked=false;
+    test_player_id=77;
+    test_player_ui=(pocket_av_ui_snapshot){.state=POCKET_AV_UI_PLAYING,
+        .position_ms=1000,.duration_ms=0,.underruns=0};
+    pocket_kasane_set_animation_time(0);
+    check(run("globalThis.live=kasane.mount('music');"
+              "live.set({title:'TRACK',message:'OPENING'});live.bind('playback');"),
+          "music binds a native playback snapshot without a JS frame model");
+    check(present(&stats)==KSN_OK,"reactive initial MUSIC plan presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "initial reactive acknowledgement is stable");
+    check(run("live.set({message:''})"),"app message reveals the playback summary");
+    check(present(&stats)==KSN_OK,"playback summary presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "playback summary acknowledgement is stable");
+    test_player_ui.position_ms=2000;
+    pocket_kasane_set_animation_time(66667);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          pocket_kasane_has_submission(),
+          "audio position changes the scene without a JS update");
+    check(present(&stats)==KSN_OK,"native audio update presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "native audio update acknowledges");
+    test_player_ui.underruns=42;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "diagnostic underruns do not redraw the music status");
+    check(pocket_kasane_presenter_host_status("SYSTEM",6,200000)==KSN_OK,
+          "host-owned status overrides the app and playback slots");
+    check(present(&stats)==KSN_OK,"host status presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "host status acknowledges");
+    check(run("live.set({message:'APP'})"),"app updates behind the host status");
+    check(!pocket_kasane_has_submission(),"hidden app update does not submit");
+    pocket_kasane_set_animation_time(200000);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "host expiry reveals the latest app message");
+    check(present(&stats)==KSN_OK,"restored app message presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "restored app message acknowledges");
+    check(run("(()=>{let rejected=false;try{live.set({message:'\\n'})}"
+              "catch(e){rejected=e.code==='INVALID_ARGUMENT'}"
+              "if(!rejected)throw Error('control accepted')})()"),
+          "invalid text never enters the latest reactive plan");
+    check(run("(()=>{let limited=false;try{live.set({title:'A'.repeat(257)})}"
+              "catch(e){limited=e.code==='LIMIT_EXCEEDED'}"
+              "if(!limited)throw Error('unbounded presenter input')})()"),
+          "JS string conversion is bounded before UTF-8 allocation");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "invalid text leaves the native source step healthy");
+    check(run("live.set({message:''})"),"app message clears without resetting playback binding");
+    check(present(&stats)==KSN_OK,"cleared app message presents playback state");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "cleared message acknowledgement is stable");
+    test_player_id=78;
+    test_player_ui=(pocket_av_ui_snapshot){.state=POCKET_AV_UI_READY};
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "closed player ID cannot revive the old binding");
+    check(present(&stats)==KSN_OK,"detached old player presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "detached player acknowledgement is stable");
+    check(run("live.bind('playback')"),"a newly opened player explicitly rebinds");
+    check(present(&stats)==KSN_OK,"new player binding presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "new player acknowledgement is stable");
+    test_player_ui.duration_ms=500;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "subsecond known duration changes the visible status suffix");
+    check(present(&stats)==KSN_OK,"subsecond duration presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "subsecond duration acknowledgement is stable");
+    test_player_ui.duration_ms=0;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "removing the subsecond duration restores unknown-length status");
+    check(present(&stats)==KSN_OK,"unknown duration presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "unknown duration acknowledgement is stable");
+    test_player_ui.state=POCKET_AV_UI_PLAYING;test_player_ui.position_ms=3000;
+    pocket_kasane_set_animation_time(266668);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "source A submits from native state");
+    test_player_ui.position_ms=4000;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "source B coalesces while A is pending");
+    check(present(&stats)==KSN_OK,"source A presents first");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "acknowledging A submits the latest native source B");
+    check(present(&stats)==KSN_OK,"source B presents second");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "source B acknowledgement is stable");
+    test_player_ui.duration_ms=100000;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "known duration changes the visible status and bar");
+    check(present(&stats)==KSN_OK,"known duration presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "known duration acknowledgement is stable");
+    test_player_ui.position_ms=4001;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "subpixel progress and same displayed second skip plan submission");
+    check(run("live.toggleHelp()"),"reactive help opens");
+    check(present(&stats)==KSN_OK,"reactive help presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "reactive help acknowledgement is stable");
+    check(run("live.set({title:'HIDDEN TITLE',message:'HIDDEN MESSAGE'})"),
+          "app slots update behind help");
+    check(!pocket_kasane_has_submission(),
+          "hidden app slots do not redraw the help page");
+    check(run("live.dismissHelp()"),"reactive help closes");
+    check(present(&stats)==KSN_OK,"latest app slots appear after help closes");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "revealed app slots acknowledgement is stable");
+    check(run("live.set({title:'HIDDEN TITLE'})")&&
+          !pocket_kasane_has_submission(),
+          "setting an unchanged app slot does not advance its visible revision");
+    pocket_kasane_reset();test_player_id=0;
+
+    test_clock_valid=false;
+    pocket_kasane_set_viewport(140,46,96,22);
+    check(run("globalThis.liveClock=kasane.mount('clock');")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "clock asset supplies the registered wall-clock source");
+    check(present(&stats)==KSN_OK,"unsynced native clock presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "unsynced clock acknowledgement is stable");
+    test_clock_valid=true;
+    test_clock_ui=(sys_clock_state){.seconds=45240,.source=SYS_CLOCK_SNTP};
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "clock source updates without a JS update");
+    check(present(&stats)==KSN_OK,"synced native clock presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "synced clock acknowledgement is stable");
+    test_clock_ui.seconds=45299;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "same displayed minute makes no native submission");
+    test_clock_ui.seconds=45300;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "new minute makes one native submission");
+    check(present(&stats)==KSN_OK,"new native minute presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "new native minute acknowledgement is stable");
+    pocket_kasane_reset();test_clock_valid=false;
 }
 
 static void atomicity_tests(void) {
@@ -349,13 +683,13 @@ static void fault_sweep(const char *label,const char *exercise,bool arm_inside) 
 
 static void allocator_tests(void) {
     fault_sweep("animation spec and wrapper failures abort the whole scene",
-                "globalThis.asset=kasane.petImage();globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
+                "globalThis.asset=kasane.resource('pets');globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
                 "tx.image({resource:asset,bounds:[0,0,32,32]}).animate(tx,{from:{bounds:[0,0,32,32],rotation:0},"
                 "to:{bounds:[20,20,84,84],rotation:720},durationMs:1200,easing:'ease-in-out',repeat:'once'})});",false);
     fault_sweep("image resource allocation failures reserve no native slot",
-                "globalThis.exercise=()=>kasane.petImage();",false);
+                "globalThis.exercise=()=>kasane.resource('pets');",false);
     fault_sweep("image draw allocation failures abort the candidate",
-                "globalThis.asset=kasane.petImage();globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
+                "globalThis.asset=kasane.resource('pets');globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
                 "return tx.image({resource:asset,bounds:[0,0,32,32],scale:0.5})});",false);
     fault_sweep("text conversion and wrapper allocation failures reclaim the candidate",
                 "globalThis.exercise=()=>kasane.replace(tx=>{tx.background(255);"
@@ -437,7 +771,7 @@ static void base_block_tests(void) {
              "throw Error('prepared accounting');",native_bytes);
     check(run(prepared),"prepared arena is reported before first use");
     calls=native_calls;
-    check(run("kasane.petImage();kasane.replace(tx=>{tx.background(0x000000ff);tx.rect(shape)});")&&
+    check(run("kasane.resource('pets');kasane.replace(tx=>{tx.background(0x000000ff);tx.rect(shape)});")&&
           native_calls==calls&&pocket_kasane_active(),"first Kasane calls reuse the prepared arena");
     check(present(&stats)==KSN_OK,"prepared arena presents");
     pocket_kasane_reset();check(native_bytes==0,"reset releases a prepared arena");
@@ -616,6 +950,67 @@ static void primitive_tests(void) {
     check(ksn_runtime_shutdown()==KSN_OK,"primitive native owner shuts down");
 }
 
+static void viewport_tests(void) {
+    check(open_fault_runtime(""),"overlay viewport fixture opens");
+    pocket_kasane_set_viewport(140,46,96,22);
+    ksn_view *system=NULL;
+    check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect viewport through native owner");
+    check(run("kasane.replace(tx=>{tx.background(255);tx.rect({"
+              "bounds:[0,0,96,22],color:0xffffffff});});"),
+          "overlay submits region-local coordinates");
+    ksn_frame frame;ksn_frame_command command;
+    check(ksn_core_frame(system->host->core,&frame)==KSN_OK&&
+          ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,0,&command)==KSN_OK&&
+          command.draw.bounds.x0==140&&command.draw.bounds.y0==46&&
+          command.draw.bounds.x1==236&&command.draw.bounds.y1==68&&
+          command.draw.clip.x0==140&&command.draw.clip.y0==46&&
+          command.draw.clip.x1==236&&command.draw.clip.y1==68,
+          "overlay viewport translates and confines every draw");
+    ksn_render_stats stats;
+    check(present(&stats)==KSN_OK,"overlay viewport baseline presents");
+    check(run("globalThis.viewportTemplate=kasane.cache.create(["
+              "{bounds:[-10,0,10,10],color:0xffffffff}]);"
+              "kasane.replace(tx=>{tx.background(255);"
+              "tx.instantiate(viewportTemplate);"
+              "tx.instantiate(viewportTemplate,{offset:[20,0]});});"),
+          "overlay cache keeps local pixels until placement");
+    check(ksn_core_frame(system->host->core,&frame)==KSN_OK&&
+          ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,0,&command)==KSN_OK&&
+          command.draw.bounds.x0==130&&command.draw.bounds.x1==150&&
+          command.draw.clip.x0==140&&command.draw.clip.x1==150&&
+          ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,1,&command)==KSN_OK&&
+          command.draw.bounds.x0==150&&command.draw.bounds.x1==170&&
+          command.draw.clip.x0==150&&command.draw.clip.x1==170&&
+          command.draw.bounds.y0==46&&command.draw.bounds.y1==56,
+          "overlay cache translates once and clips after placement");
+    check(present(&stats)==KSN_OK,"overlay cache placement presents");
+    check(run("if(kasane.features().modal)throw Error('overlay modal advertised');"
+              "let inner=false,outer=false;try{kasane.replace(tx=>{try{"
+              "tx.modal.open({backdrop:'dim-live',color:0xff0000ff})"
+              "}catch(e){inner=e.code==='UNSUPPORTED'}})}catch(e){outer=true}"
+              "if(!inner||!outer)throw Error('overlay modal escaped');"),
+          "overlay profile rejects viewport-bypassing modal atomically");
+    close_fault_runtime();
+    check(ksn_runtime_shutdown()==KSN_OK,"overlay viewport owner shuts down");
+
+    check(open_fault_runtime(""),"foreground cache regression fixture opens");
+    system=NULL;
+    check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect foreground cache placement");
+    check(run("if(!kasane.features().modal)throw Error('foreground modal lost');"
+              "var foregroundTemplate=kasane.cache.create(["
+              "{bounds:[-10,0,10,10],color:0xffffffff}]);"
+              "kasane.replace(tx=>{tx.background(255);"
+              "tx.instantiate(foregroundTemplate,{offset:[20,0]});});"),
+          "foreground cache may move off-screen template pixels on-screen");
+    check(ksn_core_frame(system->host->core,&frame)==KSN_OK&&
+          ksn_core_read(system->host->core,frame.ticket,false,KSN_APP,0,&command)==KSN_OK&&
+          command.draw.bounds.x0==10&&command.draw.bounds.x1==30&&
+          command.draw.clip.x0==10&&command.draw.clip.x1==30,
+          "foreground cache no longer clips before placement");
+    close_fault_runtime();
+    check(ksn_runtime_shutdown()==KSN_OK,"foreground cache owner shuts down");
+}
+
 static void text_tests(void){
     check(open_fault_runtime(""),"text fixture opens");
     ksn_view *system=NULL;check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect text through native owner");
@@ -678,9 +1073,9 @@ static void image_tests(void){
     check(open_fault_runtime(""),"image fixture opens");
     ksn_render_stats stats;ksn_image_port port;
     check(ksn_pet_builtin_image(&port)==KSN_OK,"real embedded PPT2 provider validates");
-    check(run("globalThis.asset=kasane.petImage();globalThis.sprite=null;"
+    check(run("globalThis.asset=kasane.resource('pets');globalThis.sprite=null;"
               "if(!kasane.features().image||asset.width!==64||asset.frames!==6||asset.variants!==12)throw Error('metadata');"
-              "for(let i=0;i<100;i++)kasane.petImage();"
+              "for(let i=0;i<100;i++)kasane.resource('pets');"
               "kasane.replace(tx=>{tx.background(255);sprite=tx.image({resource:asset,bounds:[0,0,64,64],clip:[0,0,240,135]})});"),
           "JS exposes a borrowed image and repeated handles");
     check(present(&stats)==KSN_OK,"JS image presents");
@@ -698,7 +1093,7 @@ static void image_tests(void){
     check(pixels,"JS image pixels match real PPT2 span");
     check(run("kasane.patch(tx=>sprite.setImageFrame(tx,11,5));"),"JS frame PATCH submitted");
     fail_band=1;check(present(&stats)==KSN_IO,"image partial transfer retains snapshot");fail_band=-1;
-    check(run("for(let i=0;i<20;i++)kasane.petImage();"),"borrowing existing resource while pending does not mutate source");
+    check(run("for(let i=0;i<20;i++)kasane.resource('pets');"),"borrowing existing resource while pending does not mutate source");
     check(present(&stats)==KSN_OK,"image repair presents fixed variant and frame");
     pixels=true;
     for(unsigned y=0;y<64;y++){
@@ -752,7 +1147,7 @@ static void image_tests(void){
     pocket_kasane_reset();
     check(run("failed=false;try{kasane.replace(tx=>tx.image({resource:asset,bounds:[0,0,64,64]}))}"
               "catch(e){failed=e.code==='CLOSED'}if(!failed)throw Error('stale asset revived');"
-              "asset=kasane.petImage();"),"APP reset invalidates old resource and reclaims its slot");
+              "asset=kasane.resource('pets');"),"APP reset invalidates old resource and reclaims its slot");
     ksn_draw draw={.kind=KSN_IMAGE,.bounds={0,0,32,32},.clip={0,0,240,135},.opacity=255,
         .data.image={.resource=resources[14],.variant=4,.frame=3,.scale=KSN_IMAGE_HALF}};
     ksn_tx tx;ksn_ref ref;
@@ -762,7 +1157,7 @@ static void image_tests(void){
 }
 
 static void animation_tests(void){
-    check(open_fault_runtime("globalThis.asset=kasane.petImage();globalThis.sprite=null;globalThis.motion=null;"
+    check(open_fault_runtime("globalThis.asset=kasane.resource('pets');globalThis.sprite=null;globalThis.motion=null;"
           "globalThis.motionSpec={from:{bounds:[10,20,42,52],rotation:0},to:{bounds:[110,30,206,126],rotation:720},"
           "durationMs:1000,easing:'linear',repeat:'once'};"),"animation fixture opens");
     ksn_render_stats stats;size_t before=ksn_runtime_reserved_bytes();
@@ -829,6 +1224,10 @@ int main(void) {
               "if(kasane.stats().active||kasane.stats().nativeBytes!==0)throw Error('lazy')"),
           "features do not allocate the native arena");
     check(!pocket_kasane_active(),"native display remains inactive after feature test");
+
+    presenter_tests();
+    app_presenter_tests();
+    reactive_presenter_tests();
 
     check(run("globalThis.tpl=kasane.cache.create(["
               "{bounds:[0,0,10,10],color:0xff0000ff},"
@@ -910,6 +1309,7 @@ int main(void) {
     lazy_cache_tests();
     system_lifetime_tests();
     notice_lifetime_tests();
+    viewport_tests();
     primitive_tests();
     text_tests();
     image_tests();

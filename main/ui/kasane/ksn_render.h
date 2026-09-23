@@ -122,6 +122,11 @@ extern int g_ksn_tile_pixels,g_ksn_tile_reach,g_ksn_tile_smooth;
  * otherwise mutate the core or reenter JS/presentation. prepare_frame consumes
  * preexisting invalidation; later invalidation survives the acknowledgement. */
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats);
+/* As ksn_render_rects, but load the host's replayable scene below the command
+ * layers. Kept as a separate entry point so the stable display-port ABI and
+ * its positional host fixtures do not grow for one composition policy. */
+ksn_result ksn_render_rects_backdrop(ksn_core *,const ksn_display_port *,
+                                     ksn_backdrop_loader,ksn_render_stats *);
 /* TEMPORARY A/B switch for that renderer's coverage solver: 1 = solve a row's
  * covered x set as runs once per row per command, 0 = ask the per-pixel
  * predicate for every pixel. Both arms live in one binary and produce the same

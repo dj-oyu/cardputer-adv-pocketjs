@@ -1,5 +1,6 @@
 #include "ksn_core.h"
 #include "ksn_image_transform.h"
+#include "ksn_p0_probe.h"
 #include <string.h>
 
 #define KSN_REF_INDEX_BITS 7u
@@ -94,9 +95,11 @@ static size_t utf8_count(const char *text,size_t bytes){
 }
 static void payload_write(ksn_command_storage *command,const void *payload,size_t bytes){
     memset(command->payload,0,sizeof(command->payload));memcpy(command->payload,payload,bytes);
+    ksn_p0_probe_copy(KSN_P0_CORE_PAYLOAD_WRITE,bytes);
 }
 static void payload_read(const ksn_command_storage *command,void *payload,size_t bytes){
     memcpy(payload,command->payload,bytes);
+    ksn_p0_probe_copy(KSN_P0_CORE_PAYLOAD_READ,bytes);
 }
 static const ksn_image_entry *find_image(const ksn_core_impl *core,ksn_layer layer,ksn_resource id){
     for(unsigned i=0;i<core->image_count;i++)
@@ -125,6 +128,26 @@ static ksn_result validate_image_window(const ksn_core_impl *core,ksn_layer laye
     return (uint32_t)x+width<=entry->port.width&&(uint32_t)y+height<=entry->port.height?KSN_OK:KSN_INVALID;
 }
 
+/* Only the published prefix of each layer can be read. Every new command is
+ * assigned in full by add(), and every new text allocation is initialized by
+ * add()/change(), so stale bytes beyond count/text_used need not cross banks.
+ * Animation slots are different: stopped/finished IDs remain pollable, hence
+ * their complete fixed block is still cloned below. */
+static void copy_live_layer(ksn_bank *next,const ksn_bank *active,ksn_layer layer){
+    size_t command_bytes=(size_t)active->count[layer]*sizeof(ksn_command_storage);
+    size_t text_bytes=active->text_used[layer];
+    if(command_bytes){
+        unsigned base=command_base(layer);
+        memcpy(next->commands+base,active->commands+base,command_bytes);
+        ksn_p0_probe_copy(KSN_P0_CORE_CLONE_COMMAND,command_bytes);
+    }
+    if(text_bytes){
+        unsigned base=text_base(layer);
+        memcpy(next->text+base,active->text+base,text_bytes);
+        ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TEXT,text_bytes);
+    }
+}
+
 static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
     ksn_endpoint *endpoint=context;ksn_core_impl *core=endpoint->core;
     if(!out||(mode!=KSN_REPLACE&&mode!=KSN_PATCH))return KSN_INVALID;
@@ -137,9 +160,22 @@ static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
     const ksn_bank *active=&core->banks[core->active];
     ksn_command_storage *commands=next->commands;uint8_t *text=next->text;ksn_track *tracks=next->tracks;
     *next=*active;next->commands=commands;next->text=text;next->tracks=tracks;
-    if(tracks)memcpy(tracks,active->tracks,sizeof(ksn_core_animation_block));
-    memcpy(commands,active->commands,sizeof(ksn_core_command_block));
-    memcpy(text,active->text,sizeof(ksn_core_text_block));
+    if(mode==KSN_PATCH){
+        if(tracks){memcpy(tracks,active->tracks,sizeof(ksn_core_animation_block));
+            ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TRACK,sizeof(ksn_core_animation_block));}
+        copy_live_layer(next,active,KSN_APP);
+        copy_live_layer(next,active,KSN_SYSTEM);
+    }else{
+        /* REPLACE clears the edited layer below. Only the other layer needs
+         * carrying to the candidate bank; never copy bytes just to erase them. */
+        ksn_layer keep=layer==KSN_APP?KSN_SYSTEM:KSN_APP;
+        unsigned ab=track_base(keep);
+        copy_live_layer(next,active,keep);
+        if(tracks)memcpy(tracks+ab,active->tracks+ab,
+                         track_limit(keep)*sizeof(*tracks));
+        if(tracks)ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TRACK,
+                                   track_limit(keep)*sizeof(*tracks));
+    }
     core->layer=layer;core->mode=mode;core->poison=KSN_OK;core->building=true;
     core->transaction=(ksn_tx){++last_transaction};*out=core->transaction;
     if(mode==KSN_REPLACE){
@@ -182,6 +218,20 @@ static ksn_result validate_draw(const ksn_draw *draw){
     }
     return KSN_INVALID;
 }
+ksn_result ksn_core_check_draw(const ksn_core *storage,ksn_layer layer,
+                               const ksn_draw *draw){
+    if(!storage||!valid_layer(layer))return KSN_INVALID;
+    ksn_result result=validate_draw(draw);
+    if(result!=KSN_OK||draw->kind!=KSN_IMAGE)return result;
+    const ksn_core_impl *core=cimpl(storage);
+    result=validate_image(core,layer,draw->data.image.resource,
+                          draw->data.image.variant,draw->data.image.frame);
+    if(result!=KSN_OK)return result;
+    return validate_image_window(core,layer,draw->data.image.resource,draw->bounds,
+                                 draw->data.image.source_x,draw->data.image.source_y,
+                                 draw->data.image.scale,draw->data.image.source_width,
+                                 draw->data.image.source_height);
+}
 static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref *out){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;ksn_result result=check_transaction(context,tx);
     if(result!=KSN_OK)return result;
@@ -217,7 +267,8 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
         if(used+capacity>text_limit(layer))return poison(core,KSN_LIMIT);
         unsigned offset=text_base(layer)+used;
         memset(bank->text+offset,0,capacity);
-        if(draw->data.text.bytes)memcpy(bank->text+offset,draw->data.text.utf8,draw->data.text.bytes);
+        if(draw->data.text.bytes){memcpy(bank->text+offset,draw->data.text.utf8,draw->data.text.bytes);
+            ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_TEXT,draw->data.text.bytes);}
         text_payload payload={(uint16_t)offset,(uint8_t)draw->data.text.bytes,(uint8_t)capacity,
                               (uint8_t)draw->data.text.font,(uint8_t)utf8_count(draw->data.text.utf8,draw->data.text.bytes),
                               0,draw->data.text.color};
@@ -292,7 +343,8 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
         if(count==SIZE_MAX)return poison(core,KSN_INVALID);
         ksn_bank *bank=&core->banks[core->building_bank];
         memset(bank->text+p.offset,0,p.capacity);
-        if(change->value.text.bytes)memcpy(bank->text+p.offset,change->value.text.utf8,change->value.text.bytes);
+        if(change->value.text.bytes){memcpy(bank->text+p.offset,change->value.text.utf8,change->value.text.bytes);
+            ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_TEXT,change->value.text.bytes);}
         p.length=(uint8_t)change->value.text.bytes;p.reveal=(uint8_t)count;payload_write(command,&p,sizeof(p));return KSN_OK;
     }
     case KSN_SET_REVEAL:{
@@ -710,12 +762,8 @@ ksn_result ksn_core_failed(ksn_core *storage,ksn_tx ticket){
     if(core->submitted)core->outcome.reason=KSN_IO;
     return KSN_OK;
 }
-ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
-                       ksn_layer layer,uint16_t index,ksn_frame_command *out){
-    if(!storage||!out||!valid_layer(layer))return KSN_INVALID;
-    const ksn_core_impl *core=cimpl(storage);
-    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
-    const ksn_bank *bank=&core->banks[(previous||core->repairing)?core->active:core->building_bank];
+static ksn_result read_command(const ksn_bank *bank,ksn_layer layer,
+                               uint16_t index,ksn_frame_command *out,bool borrow_text){
     if(index>=bank->count[layer])return KSN_INVALID;
     const ksn_command_storage *command=&bank->commands[command_base(layer)+index];
     memset(out,0,sizeof(*out));
@@ -739,8 +787,13 @@ ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
     }
     case KSN_TEXT:{
         text_payload p;payload_read(command,&p,sizeof(p));
-        memcpy(out->text,bank->text+p.offset,p.length);
-        draw->data.text.utf8=out->text;draw->data.text.bytes=p.length;
+        if(borrow_text)draw->data.text.utf8=(const char *)(bank->text+p.offset);
+        else{
+            memcpy(out->text,bank->text+p.offset,p.length);
+            ksn_p0_probe_copy(KSN_P0_CORE_RENDER_TEXT,p.length);
+            draw->data.text.utf8=out->text;
+        }
+        draw->data.text.bytes=p.length;
         draw->data.text.capacity=p.capacity;draw->data.text.font=(ksn_font)p.font;
         draw->data.text.color=p.color;out->reveal=p.reveal;break;
     }
@@ -761,6 +814,26 @@ ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
     default:return KSN_INVALID;
     }
     return KSN_OK;
+}
+
+ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
+                       ksn_layer layer,uint16_t index,ksn_frame_command *out){
+    if(!storage||!out||!valid_layer(layer))return KSN_INVALID;
+    const ksn_core_impl *core=cimpl(storage);
+    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
+    const ksn_bank *bank=&core->banks[(previous||core->repairing)?core->active:core->building_bank];
+    return read_command(bank,layer,index,out,false);
+}
+
+ksn_result ksn_core_read_active_ref(const ksn_core *storage,ksn_layer layer,
+                                    ksn_ref ref,ksn_frame_command *out){
+    if(!storage||!out||!ref.value||!valid_layer(layer))return KSN_INVALID;
+    const ksn_core_impl *core=cimpl(storage);
+    const ksn_bank *bank=&core->banks[core->active];
+    unsigned index=ref_index(ref),base=command_base(layer);
+    if(index<base||index>=base+bank->count[layer]||
+       ref_generation(ref)!=bank->generation[layer])return KSN_STALE;
+    return read_command(bank,layer,(uint16_t)(index-base),out,true);
 }
 
 ksn_result ksn_core_image_span(const ksn_core *storage,ksn_tx ticket,bool previous,

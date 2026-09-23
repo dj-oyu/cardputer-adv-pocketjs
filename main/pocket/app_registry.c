@@ -21,8 +21,9 @@ static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
 static const char *const CAPS_PET_OPT[]= {"sensors.imu", "audio.tone", "pet.companion", NULL};
 static const char *const CAPS_WORK[]   = {"workspace", NULL};
 static const char *const CAPS_COMP[]   = {"net.http", "audio.tone", "pet.companion", NULL};
-static const char *const CAPS_OVERLAY[]= {"ui.overlay", "time", NULL};
-static const char *const CAPS_PLAY[]    = {"audio.playback", "fs.volume.sd", NULL};
+static const char *const CAPS_OVERLAY[]= {"ui.overlay", "display.kasane", "time", NULL};
+static const char *const CAPS_PLAY[]    = {"ui.overlay", "display.kasane",
+                                           "audio.playback", "fs.volume.sd", NULL};
 
 // The one range this build knows. It is written out per row rather than shared
 // so that a row can be moved forward on its own, which is what a version range

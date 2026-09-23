@@ -79,26 +79,14 @@ bytes of its 131,072 limit; at 8,406 bytes it fails to evaluate at all. Linking
 Wi-Fi took about 37 KB of DRAM and that headroom went with it. This document
 exists so the reasoning does not have to live inside the budget.
 
-## Kasane port (CP19)
+## Kasane presenter
 
-`imucal.js` uses `pocket.kasane` (`view.createScene`, `tx.text`, `tx.roundRect`,
-`ref.setText`) instead of the legacy `ui.createNode`/`setProp`/`insertBefore`.
-Every field the app ever draws (`head`/`live`/`stat`/`spin`/`foot`) is declared
-once in the `F` table with its Kasane `capacity` (UTF-8 reserved bytes); `say()`
-only marks the scene dirty when the string actually changes, same as the old
-`shown` cache. The one required behavior change: Kasane never renders on its
-own, so `frame()` must call `scene.flush(state)` every turn (including the
-`NO_IMU` early-return path) to drain the submission — the legacy immediate-mode
-`ui.setText` never needed that pump.
-
-Text uses the default font (`body`) everywhere instead of the legacy single
-built-in font, since that is the closest Kasane size to the original ~10-12px
-row heights; there is no attempt to reproduce the old renderer's metrics pixel
-for pixel.
-
-Nothing needed for this port is missing from `pocket.kasane`: no key/ESC
-handling, no text input, and no animation are used by this app, so CP15
-(scope/focus) and CP16-18 (textfield/animation) are not blockers here.
+`imucal.js` calls `pocket.kasane.mount('imucal')`. The guest owns sensor
+measurements and sends the five visible strings (`head`, `live`, `stat`, `spin`,
+`foot`) with `view.set()`. The native presenter owns layout, text capacity,
+submission acknowledgement, and REPLACE/PATCH selection. `frame()` only
+advances calibration; it does not flush or retain drawing references. The
+`NO_IMU` path can likewise display its status without a frame pump.
 
 ### Kasane missing
 

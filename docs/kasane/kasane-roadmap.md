@@ -1,5 +1,9 @@
 # Kasane カバレッジ・完全移行・将来設計 v0.1
 
+`mount` の汎用source購読、dirty-node、コピー削減の次期実装順序と完成ゲートは
+[source-dirty-copy-roadmap.md](source-dirty-copy-roadmap.md)を参照。本書の機能表は
+低レベルKasaneと旧移行計画を含み、次期3機能の完成認定を意味しない。
+
 > 2026-09-14 Astra評価: 実装順序・完了条件・surface寿命は
 > [Astra実装計画](kasane-astra-plan.md)で改訂した。以後の実装ではそちらを優先し、
 > 各ビルド・試験成功区切りでcommit・pushしてから次へ進む。
@@ -47,6 +51,7 @@ Taffyリンク中）はgit履歴に残る。
 | modal | 完了 | 1個、入れ子なし、solid/dim-live、表示確定と入力scope/focusを同時commit |
 | QuickJS API | 完了 | `pocket.kasane`。同期build callback、thenable拒否、opaque wrapper、poll/cancel |
 | host所有・APP lease | 完了 | guest破棄後もSYSTEMが継続（CP4）、input service分離（CP5）、guest直接dispatch（CP6） |
+| overlay framework | 完了 | APP leaseを第三layerなしで再利用。region-local viewport、host backdrop、repair/input gate、合成予算を実装。Kasane modalは非対応。deskclock/playerを移植（CP28） |
 | SYSTEM layer | 完了 | 電源・時計・通知・相対timer・録音表示・壁時計/鳴動をSystem ownerへ移管（CP14a–14e2）。Taffyなしフル受入試験FULL_PASS（CP14f） |
 | アプリ移植 | 完了 | hello（CP11）、imucal・bridge・companion・pet（CP19–22）、TUTORIAL/Playground（CP23） |
 | 旧UIとTaffyの除去 | 完了 | 旧`ui.*`は起動前に`APP_LEGACY_UI`で拒否（CP24）、出荷物から削除（CP25） |
@@ -64,16 +69,13 @@ Taffyリンク中）はgit履歴に残る。
 
 - replay可能なnative scene source（CP26）
 - home/shell/status/menuの移植（CP27）
-- deskclock/player overlayの移植（CP28）。overlay sessionは`pocket.kasane`を注入しない
-  （`app_session.c`がoverlayでKasaneのinstallを飛ばす）ため、native側の変更が先に要る。
-  経緯は`apps/deskclock/README.md`と`apps/player/README.md`
 - picker/Wi-Fi/editor/tutorial chrome/consoleの移植（CP29）、全LCD書込み経路の所有権監査（CP30）
 - transform、blur一般化、projective quad、3D renderer
 - pixel stream、frame mailbox、buffer lease、動画resource
 - schema loaderと薄いJS component library
 - PocketJS名称の整理（M5）
 
-JSアプリの描画はすべてKasaneへ移った。残りはnative画面（home、overlay、picker、editor等）の
+JSアプリとoverlayアプリの描画はKasaneへ移った。残りはnative画面（home、picker、editor等）の
 所有権で、Astra計画の三段階では「出荷Taffy-free」まで到達し、「全UIのKasane所有」が未達である。
 
 実機で未確認のもの（CP24–25の記録）: TUTORIAL/Playgroundの実機操作、`pocket.input.text`編集欄の

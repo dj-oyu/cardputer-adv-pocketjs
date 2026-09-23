@@ -135,6 +135,12 @@ int32_t sound_stream_start(sound_stream_t *stream, int format, uint16_t block,
 // ring. True when it has -- and only then may the caller free those bytes.
 bool sound_stream_stop(int32_t id);
 
+// Freeze/resume a live stream without discarding its decoder or ring cursor.
+// While paused the output sends silence, but position and underrun count do
+// not advance. A queued stream may be paused before the audio task claims it.
+bool sound_stream_pause(int32_t id);
+bool sound_stream_resume(int32_t id);
+
 // Output frames this stream has produced so far. Zero once it is over, so read
 // it before the callback lands or keep your own total.
 uint32_t sound_stream_position(int32_t id);

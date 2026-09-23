@@ -164,6 +164,13 @@ ksn_result ksn_runtime_present(const ksn_display_port *port,ksn_render_stats *st
     *stats=(ksn_render_stats){0};
     return ksn_runtime_needs_present()?ksn_view_host_present(&runtime->host,port,stats):KSN_OK;
 }
+ksn_result ksn_runtime_present_backdrop(const ksn_display_port *port,ksn_backdrop_loader load,
+                                        ksn_render_stats *stats){
+    if(!stats)return KSN_INVALID;
+    *stats=(ksn_render_stats){0};
+    return ksn_runtime_needs_present()?
+        ksn_view_host_present_backdrop(&runtime->host,port,load,stats):KSN_OK;
+}
 ksn_input_scope ksn_runtime_input_scope(bool priority){
     if(!runtime)return priority?KSN_INPUT_HOST:KSN_INPUT_APP;
     if(!runtime->app.value)return KSN_INPUT_HOST;

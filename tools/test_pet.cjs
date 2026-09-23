@@ -3,47 +3,25 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname,'../apps/pet/pet.js'),'utf8');
-const sceneFactorySrc = fs.readFileSync(path.join(__dirname,'../apps/kasane/create_scene.js'),'utf8');
-const sceneFactory = new vm.Script(sceneFactorySrc).runInNewContext({});
 const E=0x4000,L=0x80,R=0x20,U=0x10,D=0x40,B=0x2000;
-// Budget stands in for the native ksn_core reservation: KSN_APP_COMMANDS (main/ui/kasane/ksn_core.h).
+// This double observes domain values sent to the registered native view.
 const APP_COMMANDS=80, APP_TEXT_BYTES=896;
 function makeKasane() {
-  const refs=[]; let bg=0, textBytes=0;
-  function mkRef(kind, spec) {
-    assert(refs.length<APP_COMMANDS, 'exceeds APP command budget ('+APP_COMMANDS+')');
-    if (kind==='text') { textBytes+=spec.capacity||0; assert(textBytes<=APP_TEXT_BYTES,'exceeds APP text-byte budget ('+APP_TEXT_BYTES+')'); }
-    const r={kind,visible:spec.visible!==false,bounds:spec.bounds,clip:spec.clip,color:spec.color,
-      text:spec.text||'',capacity:spec.capacity,variant:spec.variant||0,frame:spec.frame||0,reveal:0};
-    r.setRect=(tx,b)=>{r.bounds=b;};
-    r.setClip=(tx,c)=>{r.clip=c;};
-    r.setColor=(tx,c)=>{r.color=c;};
-    r.setVisible=(tx,v)=>{r.visible=v;};
-    r.setText=(tx,t)=>{t=String(t);assert(Buffer.byteLength(t,'utf8')<=r.capacity,'setText exceeds reserved capacity');r.text=t;};
-    r.setReveal=(tx,n)=>{r.reveal=n;};
-    r.setImageFrame=(tx,variant,frame)=>{r.variant=variant;r.frame=frame;};
-    r.setRotation=(tx,d)=>{r.rotation=d;};
-    r.animate=()=>{throw Error('animate not mocked');};
-    refs.push(r);return r;
-  }
-  function makeTx() {
-    return {background(c){bg=c;},rect(spec){return mkRef('rect',spec);},text(spec){return mkRef('text',spec);},
-      image(spec){return mkRef('image',spec);},roundRect(spec){return mkRef('rect',spec);},
-      strokeRect(spec){return mkRef('rect',spec);},gradient(spec){return mkRef('rect',spec);},
-      group(){},instantiate(){throw Error('cache not mocked');}};
-  }
-  const view={
-    petImage(){return {width:64,height:64,variants:12,frames:6};},
-    replace(fn){const out=fn(makeTx());
-      if(out&&typeof out.then==='function')throw Object.assign(Error('async build'),{code:'INVALID_ARGUMENT'});
-      return {};},
-    patch(fn){fn(makeTx());return {};},
-    poll(){return {status:'PRESENTED'};},cancel(){return 'OK';},
-    features(){return {};},stats(){return {active:true,displayed:{commands:refs.length},nativeBytes:0,cache:{}};},
-    inputScope(){return 'app';}
-  };
-  view.createScene=(options)=>sceneFactory(view,options);
-  return {view,refs,background:()=>bg};
+  const refs=[], model={};
+  const view={resource(id){assert.equal(id,'pets');return {};},mount(id){assert.equal(id,'pet');return {set(update){
+    Object.assign(model,update);refs.length=0;
+    for(const key of ['title','index','species','status','food','joy','energy','foot','hint','note']){
+      if(model[key]&&!(key==='note'&&!model.bubble)){
+        assert(Buffer.byteLength(model[key],'utf8')<=47,'native slot text budget');
+        refs.push({kind:'text',visible:true,text:model[key]});
+      }
+    }
+    if(model.ready)refs.push({kind:'image',variant:model.variant,frame:model.frame,
+                              bounds:[27,model.petY,91,model.petY+64]});
+    assert(refs.length<=APP_COMMANDS);
+    assert(refs.filter(r=>r.kind==='text').reduce((n,r)=>n+Buffer.byteLength(r.text),0)<=APP_TEXT_BYTES);
+  }};}};
+  return {view,refs};
 }
 async function boot(initial, failRead=false, failWrite=false) {
   let time=0, saved=initial, writes=0, selected=initial&&initial.selected<12?initial.selected:0, reward=0;

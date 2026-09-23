@@ -314,9 +314,9 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
 // has no such cap, or sd: when it lands. The player no longer has an opinion
 // either way, which is the part that was worth building.
 //
-// The producer is pocket_av_pump(), on the JS/ui task, because that is the task
-// pocket_fs.c's reads belong to -- its store index and block walk are not
-// thread-safe and nothing here is going to make them so. A refill is one
+// The producer is pocket_av_service_stream(), on the UI owner task before any
+// presentation gate. pocket_fs.c's reads belong there: its store index and
+// block walk are not thread-safe. A refill is one
 // esp_partition_read of at most 2,048 bytes; at PCM16's 48,000 bytes a second
 // that is about 23 reads a second, at most one slot-full per frame after the
 // first. It is the same work fs.file.read already does on this task on an app's
@@ -443,6 +443,11 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
 #define PLAYER_PKT_BYTES  (SOUND_STREAM_SLOTS*SOUND_STREAM_SLOT_BYTES)
 
 typedef enum { P_READY=0, P_PLAYING, P_PAUSED, P_ENDED, P_ERROR } player_state_t;
+_Static_assert((int)P_READY==(int)POCKET_AV_UI_READY &&
+               (int)P_PLAYING==(int)POCKET_AV_UI_PLAYING &&
+               (int)P_PAUSED==(int)POCKET_AV_UI_PAUSED &&
+               (int)P_ENDED==(int)POCKET_AV_UI_ENDED &&
+               (int)P_ERROR==(int)POCKET_AV_UI_ERROR,"player UI state mapping");
 // Which of the three the open source turned out to be. `block` used to carry
 // this on its own (nonzero meant ADPCM); a third codec needs a name.
 typedef enum { C_PCM16=0, C_IMA, C_OPUS, C_MP3 } player_codec_t;
@@ -488,6 +493,7 @@ static struct {
     bool     priming;
     uint16_t prime_waits;
     uint32_t mp3_progress;
+    uint32_t mp3_read_max_us, mp3_read_slow_count;
     bool source_fault;
     player_state_t state;
     bool     announce;      // a state change the pump has still to deliver
@@ -632,6 +638,13 @@ static const char *source_parse(uint32_t size) {
 
 static void player_set_state(player_state_t state) {
     if(player.state==state) return;
+#ifdef KASANE_P0_PROBE
+    if(player.codec==C_MP3&&(state==P_PLAYING||state==P_PAUSED))
+        ESP_LOGI("KSN_P0","A transition=mp3_%s stream=%u underruns=%u",
+            state==P_PLAYING?"playing":"paused",(unsigned)player.stream,
+            (unsigned)(player.underruns+
+                (player.stream?sound_stream_underruns():0)));
+#endif
     player.state=state;
     player.announce=true;   // delivered from the pump, never inside a JS call
 }
@@ -644,12 +657,31 @@ static void player_set_state(player_state_t state) {
 static uint32_t player_reported;
 
 static uint32_t player_frames_now(void) {
-    if(player.state!=P_PLAYING||!player.stream) return player.position;
+    if(!player.stream||
+       (player.state!=P_PLAYING&&
+        !(player.codec==C_MP3&&player.state==P_PAUSED))) return player.position;
     uint32_t done=player.position+sound_stream_position(player.stream);
     if(done>player.frames) done=player.frames;
     if(done<player_reported) return player_reported;
     player_reported=done;
     return done;
+}
+
+int32_t pocket_av_ui_current_player(void) { return player.open?player.id:0; }
+
+bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out) {
+    if(!out||!id||!player.open||player.id!=id)return false;
+    uint32_t duration=player.codec==C_MP3?player.mp3_duration_ms:
+        player.frames==PLAYER_MP3_UNKNOWN?0:
+        (uint32_t)((uint64_t)player.frames*1000u/SOUND_SAMPLE_RATE);
+    *out=(pocket_av_ui_snapshot){
+        .state=(pocket_av_ui_state)player.state,
+        .position_ms=(uint32_t)((uint64_t)player_frames_now()*1000u/SOUND_SAMPLE_RATE),
+        .duration_ms=duration,
+        .underruns=player.underruns+
+            (player.stream?sound_stream_underruns():0)
+    };
+    return true;
 }
 
 // Fills every free slot from the source. The producer half of sound.h's ring,
@@ -725,14 +757,25 @@ static void player_feed(void) {
         uint32_t left=end-player.feed;
         if(want>left) want=left;
         const char *code=NULL;
+        int64_t read_start=player.codec==C_MP3?esp_timer_get_time():0;
         int32_t got=pocket_fs_read_at(player.path,player.feed,slot,want,&code);
+        if(player.codec==C_MP3) {
+            uint32_t elapsed=(uint32_t)(esp_timer_get_time()-read_start);
+            if(elapsed>player.mp3_read_max_us) player.mp3_read_max_us=elapsed;
+            if(elapsed>=200000u) {
+                player.mp3_read_slow_count++;
+                ESP_LOGW("pocket.av","MP3 source read slow offset=%u want=%u got=%d us=%u code=%s",
+                         (unsigned)player.feed,(unsigned)want,(int)got,(unsigned)elapsed,
+                         code?code:"none");
+            }
+        }
         if(got<=0) {
             // The source stopped answering mid-stream. Ending it here is the
             // honest move: the audio task plays what it already has and the
             // completion reports the shortfall, which reaches the app as the
             // same "stopped early" P_ERROR an I2S failure does.
-            ESP_LOGW("pocket.av","the source stopped reading at %u",
-                     (unsigned)player.feed);
+            ESP_LOGW("pocket.av","the source stopped reading at %u code=%s got=%d",
+                     (unsigned)player.feed,code?code:"none",(int)got);
             player.source_fault=true;
             sound_stream_publish(destination,0,true);
             player.feed=end;
@@ -868,6 +911,7 @@ static const char *player_launch(void) {
     player_reported=start;
     player.feed=byte;
     player.source_fault=false;
+    player.mp3_read_max_us=0; player.mp3_read_slow_count=0;
     sound_stream_rewind(&player.ring);
     uint32_t seq=++player_seq;
     // Primed before the audio task is given anything to play, so the first
@@ -984,28 +1028,13 @@ static bool player_payload(JSContext *ctx, int slot, void *user, JSValue *payloa
     return true;
 }
 
-static void player_pump(void) {
-    // The network open, settled here because opus_net.c runs on its own task and
-    // pocket_api_complete() is the only thing it is allowed to touch. Errors are
-    // checked FIRST: a receiver that failed after publishing its header would
-    // otherwise be reported as a successful open of a stream that is already
-    // dead.
-    if(player.open_req) {
-        if(opus_net_error()) {
-            pocket_api_complete(player.open_req,1);
-        } else if(opus_net_ready()) {
-            player.pak=*opus_net_header();
-            player.offset=player.pak.data_offset;
-            player.bytes=0;                  // no data chunk: there is a socket
-            player.frames=player.pak.total_frames;
-            pocket_api_complete(player.open_req,POCKET_STATUS_OK);
-        }
-    }
+static void player_service_stream(void) {
+    if(!player.open) return;
     // The Opus start, deferred out of play() -- see player_launch(). One slot is
     // 40 ms of decoded audio, which is a whole frame of head start for a
     // consumer that takes 5.3 ms at a time; eof covers a source so short the
     // decoder finished it before publishing twice.
-    if(player.priming) {
+    if(player.priming&&player.state==P_PLAYING) {
         player_feed();          // keep the packet ring full while we wait
         if(player.codec==C_MP3&&player.mp3_progress!=mp3_feed_progress()) {
             player.mp3_progress=mp3_feed_progress(); player.prime_waits=0;
@@ -1031,6 +1060,9 @@ static void player_pump(void) {
     if(player.stream&&done==player_seq) {
         atomic_store(&player_done_seq,0);
         bool ok=atomic_load(&player_done_ok);
+        // A pause may have raced the final output block; do not leave a stale
+        // paused id suppressing UI cues after this stream has completed.
+        if(player.codec==C_MP3) (void)sound_stream_resume(player.stream);
         player.underruns+=sound_stream_underruns();
         // The audio task cannot tell a stream that ended from one whose decoder
         // gave up -- both look like a PCM ring that reached eof -- so the fault
@@ -1038,16 +1070,49 @@ static void player_pump(void) {
         // reported to the app as a clip that simply finished early.
         if(player.codec==C_OPUS&&opus_feed_faults()) ok=false;
         if(player.codec==C_MP3) {
-            if(mp3_feed_faults()||player.source_fault) ok=false;
+            uint32_t decode_faults=mp3_feed_faults();
+            if(decode_faults||player.source_fault) ok=false;
+            if(!ok) ESP_LOGE("pocket.av",
+                "MP3 stop source_fault=%u decode_faults=%u progress=%u feed=%u/%u "
+                "pcm=%u/%u eof=%u pkt=%u/%u eof=%u read_max_us=%u slow_reads=%u underruns=%u",
+                (unsigned)player.source_fault,(unsigned)decode_faults,
+                (unsigned)mp3_feed_progress(),(unsigned)player.feed,
+                (unsigned)(player.offset+player.bytes),
+                (unsigned)atomic_load(&player.ring.filled),
+                (unsigned)atomic_load(&player.ring.drained),
+                (unsigned)atomic_load(&player.ring.eof),
+                (unsigned)atomic_load(&player.pkt.filled),
+                (unsigned)atomic_load(&player.pkt.drained),
+                (unsigned)atomic_load(&player.pkt.eof),
+                (unsigned)player.mp3_read_max_us,
+                (unsigned)player.mp3_read_slow_count,
+                (unsigned)player.underruns);
             player.frames=mp3_feed_frames();
         }
         player.stream=0;
         if(ok) player.position=player.frames;
-        if(player.state==P_PLAYING) player_set_state(ok?P_ENDED:P_ERROR);
+        if(player.state==P_PLAYING||player.state==P_PAUSED)
+            player_set_state(ok?P_ENDED:P_ERROR);
     }
-    // The refill, and the reason this surface has a pump at all now. Ahead of
-    // the delivery below so a listener that runs long costs the ring nothing.
+    // Refill on the UI owner task, independently of JS and the Kasane present
+    // gate. A stalled LCD transaction must not become a stalled audio source.
     if(player.state==P_PLAYING) player_feed();
+}
+
+static void player_pump(void) {
+    // Keep promise completion and subscriber delivery in the guest turn: these
+    // may enter JS, unlike the native-only stream service above.
+    if(player.open_req) {
+        if(opus_net_error()) {
+            pocket_api_complete(player.open_req,1);
+        } else if(opus_net_ready()) {
+            player.pak=*opus_net_header();
+            player.offset=player.pak.data_offset;
+            player.bytes=0;
+            player.frames=player.pak.total_frames;
+            pocket_api_complete(player.open_req,POCKET_STATUS_OK);
+        }
+    }
     if(player.announce&&player_table.open) {
         player.announce=false;
         pocket_api_sub_deliver(&player_table,player_payload,NULL);
@@ -1127,6 +1192,15 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
                 return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,op,
                     "this player is finished; open the source again",false,
                     POCKET_OUTCOME_NOT_APPLIED);
+            if(player.codec==C_MP3&&player.state==P_PAUSED&&
+               (player.stream||player.priming)) {
+                if(player.stream&&!sound_stream_resume(player.stream))
+                    return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,op,
+                        "the paused stream has stopped",true,
+                        POCKET_OUTCOME_NOT_APPLIED);
+                player_set_state(P_PLAYING);
+                return pocket_api_settled(ctx,JS_UNDEFINED,false);
+            }
             const char *why=player_launch();
             if(why) {
                 if(!strcmp(why,"ended")) {
@@ -1164,7 +1238,10 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
         }
         case M_PAUSE: {
             if(player.state==P_PLAYING) {
-                player_halt();
+                // Retain MP3's decoder, bit reservoir and both rings. Relaunch
+                // from a byte offset would re-decode the entire song prefix.
+                if(player.codec!=C_MP3) player_halt();
+                else if(player.stream) sound_stream_pause(player.stream);
                 player_set_state(P_PAUSED);
             }
             // Pausing a player that is ready, already paused or finished holds
@@ -1485,6 +1562,12 @@ void pocket_av_pump(void) {
     pocket_power_pump();
     // Cheaper than it looks when nothing is open: one atomic load and a branch.
     if(player.open||player.announce) player_pump();
+}
+
+void pocket_av_service_stream(void) {
+    // Called once per UI frame before modal and presentation early returns.
+    // File reads stay on their owner task; no JS value is touched here.
+    player_service_stream();
 }
 
 // Audio namespace lifetime; power has its own owner adapter.

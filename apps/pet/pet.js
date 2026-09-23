@@ -4,69 +4,30 @@
   var s={v:1,selected:0,pets:[]}, ready=false, lf=false, mode=1, choice=0, action=0;
   var last=__petNow(), saved=last, anim=0, prev=0, note='LOADING', until=0, pos=0, draft='';
   var chars=' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  var barc=[0xf5bb69ff,0xf08bbcff,0x67dfc7ff];
-  var V=pocket.kasane, PI=V.petImage();
-  function upd(tx,r){
+  var art=pocket.kasane.resource('pets'), V=pocket.kasane.mount('pet');
+  function render(){
+    if(!ready){V.set({foot:lf?note:''});return;}
     var now=__petNow(), id=mode===1?choice:s.selected, p=s.pets[id];
-    r.t.setText(tx,mode===1?'CHOOSE: '+names[id]:mode===2?'NAME: '+draft:p.name);
-    r.ba.setText(tx,(id+1)+'/12');
-    r.sn.setText(tx,kinds[Math.floor(id/4)]);
-    tx.background(id%4===3?0x080c20ff:0x0b1727ff);
-    r.st.setText(tx,mode===1?'ENTER TO KEEP':p.sleep?'SLEEPING':p.food<25?'HUNGRY':p.energy<25?'TIRED':'HAPPY');
-    var v=[p.food,p.fun,p.energy], tg=['FOOD','JOY','ENERGY'];
-    for(var i=0;i<3;i++){
-      r.lb[i].setText(tx,tg[i]+' '+Math.round(v[i]));
-      var w=Math.max(1,Math.round(v[i]*1.06));
-      r.br[i].setRect(tx,[122,56+i*18,122+w,59+i*18]);
-    }
-    r.ft.setText(tx,mode===1?'LEFT/RIGHT COLOR  UP/DOWN ANIMAL':mode===2?'EDIT LETTER '+(pos+1)+' / 8':until>now?note:'< '+actions[action]+' >');
-    r.hp.setText(tx,mode===1?'ENTER SELECT   ESC HOME':mode===2?'ARROWS EDIT  ENTER SAVE':'L/R ACTION  ENTER DO  ESC SAVE/HOME');
     var by=29+(p.sleep?2:Math.floor(now/1000)%2);
-    r.pt.setRect(tx,[27,by,91,by+64]);
-    r.pt.setImageFrame(tx,id,p.sleep?1:mode===0&&until>now?2:now%5000<200?1:p.food<25?4:0);
-    // Bubble reuses note/until (message() sets both): sk mirrors the footer window.
     var sk=until>now;
-    r.bg.setVisible(tx,sk);r.bt.setVisible(tx,sk);
-    // KSN-MISSING(text.animate): no native char-reveal track; stepped from JS each patch
-    if(sk)r.bt.setReveal(tx,Math.min(note.length,Math.floor((2400-(until-now))/70)));
+    V.set({ready:true,resource:art,variant:id,frame:p.sleep?1:mode===0&&sk?2:now%5000<200?1:p.food<25?4:0,
+      petY:by,background:id%4===3?0x080c20ff:0x0b1727ff,title:mode===1?'CHOOSE: '+names[id]:mode===2?'NAME: '+draft:p.name,
+      index:(id+1)+'/12',species:kinds[Math.floor(id/4)],
+      status:mode===1?'ENTER TO KEEP':p.sleep?'SLEEPING':p.food<25?'HUNGRY':p.energy<25?'TIRED':'HAPPY',
+      food:'FOOD '+Math.round(p.food),joy:'JOY '+Math.round(p.fun),energy:'ENERGY '+Math.round(p.energy),
+      bar0:Math.max(1,Math.round(p.food*1.06)),bar1:Math.max(1,Math.round(p.fun*1.06)),
+      bar2:Math.max(1,Math.round(p.energy*1.06)),
+      foot:mode===1?'LEFT/RIGHT COLOR  UP/DOWN ANIMAL':mode===2?'EDIT LETTER '+(pos+1)+' / 8':sk?note:'< '+actions[action]+' >',
+      hint:mode===1?'ENTER SELECT   ESC HOME':mode===2?'ARROWS EDIT  ENTER SAVE':'L/R ACTION  ENTER DO  ESC SAVE/HOME',
+      bubble:sk,note:sk?note:'',reveal:sk?Math.min(note.length,Math.max(0,Math.floor((2400-(until-now))/70))):0});
   }
-  var SC=V.createScene({
-    build:function(tx){
-      function T(bd,c,cap){return tx.text({bounds:bd,font:'caption',color:c,text:'',capacity:cap});}
-      function R(bd,c){return tx.rect({bounds:bd,color:c});}
-      tx.background(0x0b1727ff);
-      var t=T([9,7,184,21],0xf5eedcff,24), ba=T([190,7,238,21],0x67dfc7ff,8);
-      R([7,25,112,109],0x1c3043ff);R([15,94,104,96],0x476275ff);
-      var sn=T([15,99,111,108],0xb8c7d6ff,12), st=T([122,29,238,43],0x67dfc7ff,16);
-      var lb=[], br=[];
-      for(var i=0;i<3;i++){
-        lb.push(T([122,45+i*18,232,57+i*18],0xc9d5dfff,16));
-        br.push(R([122,56+i*18,123,59+i*18],barc[i]));
-      }
-      var ft=T([8,114,238,124],0xf5bb69ff,40), hp=T([8,126,238,135],0x91a6baff,40);
-      // pet/bubble join once ready: no placeholder pose during load.
-      var out={t:t,ba:ba,sn:sn,st:st,lb:lb,br:br,ft:ft,hp:hp};
-      if(ready){
-        out.pt=tx.image({resource:PI,bounds:[27,29,91,93]});
-        out.bg=R([96,24,236,45],0x080c21ff);
-        out.bt=T([100,31,232,39],0x080c21ff,24);
-        upd(tx,out); // topology just gained content refs: fill them now, not next patch
-      }
-      return out;
-    },
-    patch:function(tx,r){
-      if(lf){r.ft.setText(tx,note);return;}
-      if(!ready)return;
-      upd(tx,r);
-    }
-  });
-  SC.flush(0);
+  render();
   function pet(){return s.pets[s.selected];}
   function message(t){note=t;until=__petNow()+2400;}
   function save(){
     if(!ready)return;
     saved=__petNow();
-    pocket.storage.set('pet.v1',s).then(function(){},function(){message('SAVE FAILED');SC.invalidate();});
+    pocket.storage.set('pet.v1',s).then(function(){},function(){message('SAVE FAILED');render();});
   }
   pocket.storage.get('pet.v1').then(function(r){
     var v=r&&r.value;
@@ -82,18 +43,18 @@
       p.sleep=p.sleep===true;s.pets[i]=p;
     }
     s.selected=pocket.pet.select();choice=s.selected;ready=true;last=__petNow();
-    SC.invalidate(true);SC.flush(0);
+    render();
     console.log('PET_READY '+s.selected);
-  },function(){lf=true;note='LOAD FAILED: ESC TO RETRY';SC.invalidate();SC.flush(0);});
+  },function(){lf=true;note='LOAD FAILED: ESC TO RETRY';render();});
   globalThis.frame=function(buttons){
     var now=__petNow(), edge=buttons&~prev;prev=buttons;
-    if(!ready){SC.flush(0);return;}
+    if(!ready)return;
     var p=pet(), dt=Math.max(0,Math.min(5,(now-last)/1000));last=now;
     var gift=pocket.pet.rewards(s.selected),was=typeof p.gift==='number'?p.gift:0;
     if(gift>was){p.food=Math.min(100,p.food+gift-was);p.gift=gift;message('TOKEN SNACK!');}
     p.food=Math.max(0,p.food-dt/90);p.fun=Math.max(0,p.fun-dt/120);
     p.energy=Math.max(0,Math.min(100,p.energy+dt*(p.sleep?0.8:-1/150)));
-    if(edge&0x2000){save();SC.flush(0);return;}
+    if(edge&0x2000){save();return;}
     if(mode===1){
       if(edge&0x80)choice=Math.floor(choice/4)*4+(choice+3)%4;
       if(edge&0x20)choice=Math.floor(choice/4)*4+(choice+1)%4;
@@ -120,7 +81,6 @@
       }
     }
     if(now-saved>=60000)save();
-    if(now-anim>=100||edge){anim=now;SC.invalidate();}
-    SC.flush(0);
+    if(now-anim>=100||edge){anim=now;render();}
   };
 })();

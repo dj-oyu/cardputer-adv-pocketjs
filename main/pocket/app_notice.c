@@ -1,4 +1,4 @@
-#include "ksn_notice.h"
+#include "app_notice.h"
 ksn_result ksn_notice_emit(ksn_view *view,ksn_tx tx,const sys_notice *notice,ksn_resource pet,uint16_t variant){
     if(!view||!tx.value)return KSN_INVALID;
     if(!notice)return KSN_OK;

@@ -7,6 +7,7 @@ screen, keep it repainting with Enter presses, and print the PAINT lines
 Run with the ESP-IDF Python environment (pyserial).
 """
 import argparse
+from pathlib import Path
 import re
 import time
 import serial
@@ -16,10 +17,12 @@ p.add_argument('--port', required=True)
 p.add_argument('--samples', type=int, default=6, help='PAINT lines to collect')
 p.add_argument('--interval', type=float, default=0.25, help='seconds between Enter presses')
 p.add_argument('--sound', choices=['on', 'off'], help='set the sound option first (each Enter plays a sound otherwise)')
+p.add_argument('--out', type=Path, help='save the paint windows and summary')
 a = p.parse_args()
 s = serial.Serial(a.port, 115200, timeout=0.05)
 time.sleep(1.5)
 s.reset_input_buffer()
+serial_log = []
 
 
 def wait(marker, limit=8):
@@ -29,6 +32,7 @@ def wait(marker, limit=8):
         line = s.readline().decode(errors='replace').strip()
         if line:
             seen.append(line)
+            serial_log.append(line)
         if marker in line:
             return line
     raise RuntimeError(f'waiting for {marker}: {seen[-8:]}')
@@ -52,13 +56,20 @@ try:
         if time.monotonic() - last >= a.interval:
             s.write(b'e'); last = time.monotonic()
         line = s.readline().decode(errors='replace').strip()
+        if line:
+            serial_log.append(line)
         if 'PAINT' in line:
             print(line, flush=True)
             got.append(line)
             fields.append({k: float(v) for k, v in re.findall(r'(\w+_ms)=([\d.]+)', line)})
+    summary = ''
     if fields:
         keys = fields[0].keys()
-        print('MEAN ' + ' '.join(f'{k}={sum(f[k] for f in fields) / len(fields):.2f}' for k in keys), flush=True)
+        summary = 'MEAN ' + ' '.join(f'{k}={sum(f[k] for f in fields) / len(fields):.2f}' for k in keys)
+        print(summary, flush=True)
     s.write(b'q'); wait('HOME_READY')
+    if a.out:
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        a.out.write_text('\n'.join(serial_log + ([summary] if summary else [])) + '\n', encoding='utf-8')
 finally:
     s.close()

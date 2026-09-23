@@ -17,6 +17,11 @@ typedef struct {
     ksn_cache_stats shared_cache;
     uint32_t native_bytes; /* Core+cache+coordinator+shared IDs; excludes LCD/VM. */
 } ksn_view_stats;
+typedef struct {
+    ksn_draw draw;
+    uint8_t reveal;
+    bool visible;
+} ksn_view_snapshot;
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -37,6 +42,10 @@ ksn_result ksn_view_group(ksn_view *,ksn_tx,ksn_ref first,uint16_t count,uint8_t
 ksn_result ksn_view_submit(ksn_view *,ksn_tx);
 ksn_result ksn_view_cancel(ksn_view *,ksn_tx);
 ksn_submission ksn_view_poll(const ksn_view *);
+/* Borrow a committed ref without copying its text. The pointer is read-only
+ * and valid until the next successful presentation or layer reset. */
+ksn_result ksn_view_read_ref(const ksn_view *,ksn_ref,ksn_view_snapshot *out);
+ksn_result ksn_view_check_draw(const ksn_view *,const ksn_draw *);
 /* Definitions are copied and live until release or host reset. Create/release
  * only between updates; they are not rolled back by transaction cancellation.
  * Instances detach when omitted from a successfully presented REPLACE. */

@@ -1,6 +1,6 @@
 #include "core_fixture.h"
 #include "ksn_view_host.h"
-#include "ksn_notice.h"
+#include "app_notice.h"
 #include "ksn_indicator.h"
 #include <assert.h>
 #include <stdio.h>
