@@ -187,7 +187,7 @@ menu "Pocket VM (L0 measurement probes)"
             non-moving segments are not already enough. Off by default and
             meant to stay that way until that case is made.
 
-            Costs, measured on this tree: flash +1,228 B, static DRAM
+            Costs, measured on this tree: flash +1,300 B, static DRAM
             +16 B against the same build with it off.
 
     config POCKET_VM_TCO

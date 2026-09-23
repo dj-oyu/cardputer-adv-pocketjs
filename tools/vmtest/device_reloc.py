@@ -13,6 +13,12 @@ So the comparison is over the markers that are supposed to be deterministic
 (the app's own LOADED/APP_ID/APP_STOPPED sequence), plus the requirement that
 the moving run actually moved -- moves=0 would pass every check here while
 proving nothing.
+
+What this does NOT test is compaction, because L3a has none. A move allocates
+blocks of the SAME sizes as the ones it replaces, so it holds both copies at
+once and gives back exactly what it took; it cannot pack the heap. The heap
+figures it prints are observations for L4 to start from, not a gate -- see
+fragmentation() below.
 """
 import argparse
 import json
@@ -56,12 +62,44 @@ def contract(text):
 def reloc_stats(text):
     m = re.search(
         r"VM_RELOC moves=(\d+) refused=(\d+) frames=(\d+) var_refs=(\d+) "
-        r"bytes=(\d+) max_us=(\d+) total_us=(\d+)", text)
+        r"bytes=(\d+) max_us=(\d+) total_us=(\d+) "
+        r"largest_first=(\d+) largest_last=(\d+) largest_min=(\d+)", text)
     if not m:
         raise RuntimeError("no VM_RELOC line; was the build RELOC=y and armed?")
     keys = ("moves", "refused", "frames", "var_refs", "bytes", "max_us",
-            "total_us")
+            "total_us", "largest_first", "largest_last", "largest_min")
     return dict(zip(keys, (int(g) for g in m.groups())))
+
+
+def mem_pairs(text):
+    """The session's own MEM line, which brackets the run at start and stop."""
+    return [tuple(int(g) for g in m)
+            for m in re.findall(r"MEM free=(\d+) largest=(\d+) js=(\d+)", text)]
+
+
+def fragmentation(baseline, moved, stats):
+    """What the run says about the heap -- reported, never asserted.
+
+    L3a does not compact. A move takes NEW blocks of the SAME sizes, copies,
+    and frees the old ones, so it cannot pack anything; the most it can do is
+    hand the allocator a different arrangement of the same total. These numbers
+    exist so that "moving made the heap worse" would be visible if it were
+    true, not because any particular value is required to pass. Deciding what
+    ought to happen here is L4's job, and L4 does not exist yet.
+    """
+    return {
+        "note": "L3a relocates, it does not compact; these are observations",
+        "largest_before_first_move": stats["largest_first"],
+        "largest_after_last_move": stats["largest_last"],
+        "largest_worst_seen": stats["largest_min"],
+        "largest_net": stats["largest_last"] - stats["largest_first"],
+        # Both copies are live across a move, so this is the transient extra
+        # the heap has to find -- exactly the chain's own size, summed here
+        # over every move rather than per move.
+        "bytes_copied_total": stats["bytes"],
+        "session_mem_without_moving": mem_pairs(baseline),
+        "session_mem_with_moving": mem_pairs(moved),
+    }
 
 
 def main():
@@ -93,7 +131,8 @@ def main():
 
     stats = reloc_stats(moved)
     before, after = contract(baseline), contract(moved)
-    result = {"app": args.app, "contract_match": before == after, **stats}
+    result = {"app": args.app, "contract_match": before == after, **stats,
+              "heap": fragmentation(baseline, moved, stats)}
 
     if before != after:
         raise RuntimeError(f"markers changed under relocation:\n"
