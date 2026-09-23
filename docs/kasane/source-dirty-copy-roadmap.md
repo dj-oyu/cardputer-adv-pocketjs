@@ -144,6 +144,12 @@ immutableな世代をzero-copyでpinする。枯渇時はproducerを待たせず
 
 ## P2：dirty-node更新を既存bankのまま導入
 
+2026-09-24の準備変更：JS `view.set`は検証用の全slot候補を維持しつつ、
+受理時に**変更slotだけ**をschema所有値へ書き戻す。これはdirty slot maskの
+取得とadapter-owned copy削減までで、依存nodeだけを解決するP2本体は
+まだ未実装。実QuickJS統合のASan/UBSan・O2（各0失敗）と診断OFF buildを
+通した。実機の同条件A/Bは未実施。
+
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。
 committed node→command範囲を固定容量で保持し、非dirty nodeのresolve/read/compareを
 避ける。hidden nodeは0命令、`plateText`は複数命令なので、対応表は候補と確定を分け、

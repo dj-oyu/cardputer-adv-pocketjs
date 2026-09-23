@@ -1618,7 +1618,7 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
     JSPropertyEnum *props=NULL;uint32_t count=0;
     if(JS_GetOwnPropertyNames(ctx,&props,&count,model,
                               JS_GPN_STRING_MASK|JS_GPN_ENUM_ONLY))return JS_EXCEPTION;
-    bool ok=true,changed=false;
+    bool ok=true;
     for(uint32_t p=0;p<count&&ok;p++){
         const char *key=JS_AtomToCString(ctx,props[p].atom);
         if(!key){ok=false;break;}
@@ -1676,18 +1676,22 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
     }
     JS_FreePropertyEnum(ctx,props,count);
     if(!ok)return JS_EXCEPTION;
+    uint32_t changed_slots=0;
     for(unsigned i=0;i<s->definition->slot_count;i++){
+        bool differs;
         if(text_dirty[i]){
             ksn_schema_text a=candidate[i].data.text,b=s->values[i].data.text;
-            if(a.bytes!=b.bytes||memcmp(a.utf8,b.utf8,a.bytes)!=0)changed=true;
-        }else if(memcmp(&candidate[i].data,&s->values[i].data,
-                         sizeof(candidate[i].data))!=0)changed=true;
+            differs=a.bytes!=b.bytes||memcmp(a.utf8,b.utf8,a.bytes)!=0;
+        }else differs=memcmp(&candidate[i].data,&s->values[i].data,
+                            sizeof(candidate[i].data))!=0;
+        if(differs)changed_slots|=(uint32_t)1u<<i;
     }
-    if(!changed)return JS_UNDEFINED;
+    if(!changed_slots)return JS_UNDEFINED;
     if(s->revision==UINT64_MAX)return throw_result(ctx,KSN_LIMIT,op);
     ksn_result check=ksn_schema_preflight_view(view(),s->definition,candidate,viewport);
     if(check!=KSN_OK)return throw_result(ctx,check,op);
     for(unsigned i=0;i<s->definition->slot_count;i++){
+        if(!(changed_slots&((uint32_t)1u<<i)))continue;
         if(text_dirty[i]){
             ksn_schema_text text=candidate[i].data.text;
             char *dest=schema_text_base(s)+s->text_offset[i];
