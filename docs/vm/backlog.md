@@ -23,7 +23,7 @@
 | 8 | **D8（駐機中のネイティブ確保が飛地を増やすか）が未決**。必要なのは「駐機しつつ確保もする」負荷だが、診断 `%` は確保せず、確保する出荷アプリは駐機しない。両立する負荷の作成が条件 | results §3.4 | 未着手 |
 | 4 | D55 の制限（床の下に外側の JS 活性が在ると移動を拒む）を緩められるかは未検討。`JS_SF_MAY_YIELD` が同じ入れ子を別の理由で扱っている | design §2.1 | 検討中（L3b） |
 | 5 | L3b（誰がいつ動かすと決めるか）は未着手。L3a は「動かせること」までで、動かす理由は L4 が持つ | design §1、D54 | 未着手 |
-| 6 | **L3 とは独立の不具合**: `--fail-alloc 1500` で `resolve_variables`（`quickjs.c:37723`）の `dbuf_put` が heap-buffer-overflow を起こす。確保失敗が `dbuf` の伸長で起きたときの後始末の経路で、**パース中**（`JS_Eval` → `js_create_function`）なのでフレームもセグメントも関与しない。L3a の作業中に `--fail-alloc` の掃引で見つけたが、**RELOC を1行もコンパイルしない素の `asan` ビルドで同一アドレスに再現する**ので L3 以前から在る。上流に同じ形（backlog #6 の backtrace UAF）の修正があるので、上流の確認から入る | 本セッションの掃引、`.cache/vmtest` | 未着手 |
+| 6 | **L3 とは独立の不具合**: `--fail-alloc 1500` で `resolve_variables`（`quickjs.c:37723`）の `dbuf_put` が heap-buffer-overflow を起こす。確保失敗が `dbuf` の伸長で起きたときの後始末の経路で、**パース中**（`JS_Eval` → `js_create_function`）なのでフレームもセグメントも関与しない。L3a の作業中に `--fail-alloc` の掃引で見つけたが、**RELOC を1行もコンパイルしない素の `asan` ビルドで同一アドレスに再現する**ので L3 以前から在る。**上流に修正は無い**（2026-09-23 時点の quickjs-ng master と bellard/quickjs master の両方で、`resolve_variables` は入力の `dbuf_error` を見ない。出力側だけ末尾で見る）。`free_bytecode_atoms` には同じ状況への防御（`may happen if there is not enough memory when emitting bytecode`）があるので、上流は切れた命令が起きることを知っている。修正は L3 と独立に `vm/oom-truncated-bytecode` で行う | 本セッションの掃引 | 着手（別ブランチ） |
 
 ## L2 で完了済みの項目（参考）
 
