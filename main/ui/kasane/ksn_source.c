@@ -1,6 +1,7 @@
 #include "ksn_source.h"
 #include <stdatomic.h>
 #include <string.h>
+_Static_assert(sizeof(ksn_source_bundle)<=512u,"source bundle stack budget");
 
 /* Generations must also survive a registry object's teardown/reuse at the
  * same address. Registration is cold-path; leases remain allocation-free. */
@@ -79,15 +80,12 @@ ksn_result ksn_source_subscribe(ksn_source_registry *registry,
     memcpy(out->bindings,bindings,count*sizeof(*bindings));
     return KSN_OK;
 }
-ksn_result ksn_source_acquire(ksn_source_registry *registry,
-                              ksn_source_subscription *subscription,
-                              const ksn_schema *schema,
-                              const ksn_schema_value *base,uint64_t now_us,
-                              ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS],
-                              ksn_source_lease *lease){
-    if(!subscription||!effective||base==effective||!lease||lease->active||
-       ksn_schema_validate(schema)!=KSN_OK||
-       (schema->slot_count&&!base))return KSN_INVALID;
+static ksn_result source_pin(ksn_source_registry *registry,
+                             ksn_source_subscription *subscription,
+                             const ksn_schema *schema,uint64_t now_us,
+                             ksn_source_lease *lease,bool schema_checked){
+    if(!subscription||!lease||lease->active||
+       (!schema_checked&&ksn_schema_validate(schema)!=KSN_OK))return KSN_INVALID;
     ksn_source_entry *e=entry(registry,subscription->handle);
     if(!e)return KSN_STALE;
     const ksn_source_provider *p=e->provider;
@@ -116,35 +114,53 @@ ksn_result ksn_source_acquire(ksn_source_registry *registry,
        (snapshot.valid_fields&~mask)||(snapshot.changed_fields&~mask)){
         p->release(p->context,&snapshot);e->pins--;return KSN_INVALID;
     }
-    memcpy(effective,base,schema->slot_count*sizeof(*effective));
+    *lease=(ksn_source_lease){.registry=registry,.subscription=subscription,
+        .provider=p,.snapshot=snapshot,.active=true};
+    return KSN_OK;
+}
+static void source_overlay(ksn_source_lease *lease,uint64_t now_us,
+                           ksn_schema_value *effective){
+    const ksn_source_subscription *subscription=lease->subscription;
+    const ksn_source_snapshot *snapshot=&lease->snapshot;
     uint32_t valid_slots=0,dirty_slots=0;
-    bool expired=snapshot.expires_at_us&&now_us>=snapshot.expires_at_us;
+    bool expired=snapshot->expires_at_us&&now_us>=snapshot->expires_at_us;
     bool changed=!subscription->has_validated||
-                 snapshot.revision!=subscription->validated_revision;
+                 snapshot->revision!=subscription->validated_revision;
     bool gap=!subscription->has_validated||
              subscription->validated_revision==UINT64_MAX||
-             snapshot.revision!=subscription->validated_revision+1u;
+             snapshot->revision!=subscription->validated_revision+1u;
     for(unsigned i=0;i<subscription->binding_count;i++){
         unsigned slot=subscription->bindings[i].slot;
         unsigned field=subscription->bindings[i].field;
         uint32_t slot_bit=(uint32_t)1u<<slot,field_bit=(uint32_t)1u<<field;
-        if(!expired&&(snapshot.valid_fields&field_bit)){
-            effective[slot]=snapshot.fields[field];
+        if(!expired&&(snapshot->valid_fields&field_bit)){
+            effective[slot]=snapshot->fields[field];
             valid_slots|=slot_bit;
         }
-        if(changed&&(gap||(snapshot.changed_fields&field_bit)))dirty_slots|=slot_bit;
+        if(changed&&(gap||(snapshot->changed_fields&field_bit)))dirty_slots|=slot_bit;
     }
     dirty_slots|=valid_slots^subscription->valid_slots;
+    lease->valid_slots=valid_slots;lease->dirty_slots=dirty_slots;
+}
+ksn_result ksn_source_acquire(ksn_source_registry *registry,
+                              ksn_source_subscription *subscription,
+                              const ksn_schema *schema,
+                              const ksn_schema_value *base,uint64_t now_us,
+                              ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS],
+                              ksn_source_lease *lease){
+    if(!schema||!effective||base==effective||
+       (schema->slot_count&&!base))return KSN_INVALID;
+    ksn_result r=source_pin(registry,subscription,schema,now_us,lease,false);
+    if(r!=KSN_OK)return r;
+    memcpy(effective,base,schema->slot_count*sizeof(*effective));
+    source_overlay(lease,now_us,effective);
     if(ksn_schema_values_validate(schema,effective)!=KSN_OK){
-        /* A malformed snapshot must not leave some native fields installed in
-         * the caller's candidate. Failure is cold-path; successful acquire
-         * keeps its single metadata copy and borrowed payload pointers. */
+        /* Failure is cold-path. Keep the candidate atomic without adding a
+         * second metadata or payload copy to a successful owner turn. */
         memcpy(effective,base,schema->slot_count*sizeof(*effective));
-        p->release(p->context,&snapshot);e->pins--;return KSN_INVALID;
+        ksn_source_release(lease);
+        return KSN_INVALID;
     }
-    *lease=(ksn_source_lease){.registry=registry,.subscription=subscription,
-        .provider=p,.snapshot=snapshot,.valid_slots=valid_slots,
-        .dirty_slots=dirty_slots,.active=true};
     return KSN_OK;
 }
 ksn_result ksn_source_commit(ksn_source_lease *lease){
@@ -161,6 +177,65 @@ void ksn_source_release(ksn_source_lease *lease){
     lease->provider->release(lease->provider->context,&lease->snapshot);
     lease->registry->entries[lease->subscription->handle.index].pins--;
     *lease=(ksn_source_lease){0};
+}
+ksn_result ksn_source_bundle_acquire(const ksn_source_member *members,uint8_t count,
+    const ksn_schema *schema,const ksn_schema_value *base,uint64_t now_us,
+    ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS],ksn_source_bundle *bundle){
+    if(!members||!count||count>KSN_SOURCE_MAX_REGISTERED||!bundle||
+       bundle->active||bundle->count||!effective||base==effective||
+       ksn_schema_validate(schema)!=KSN_OK||(schema->slot_count&&!base))
+        return KSN_INVALID;
+    uint32_t used_slots=0;
+    for(unsigned i=0;i<count;i++){
+        const ksn_source_subscription *sub=members[i].subscription;
+        if(!members[i].registry||!sub||!sub->binding_count||
+           sub->binding_count>KSN_SOURCE_MAX_FIELDS)return KSN_INVALID;
+        uint32_t bound=0;
+        for(unsigned j=0;j<sub->binding_count;j++){
+            unsigned slot=sub->bindings[j].slot;
+            if(slot>=schema->slot_count||
+               (bound&((uint32_t)1u<<slot)))return KSN_INVALID;
+            bound|=(uint32_t)1u<<slot;
+        }
+        if(bound!=sub->bound_slots||(used_slots&bound))return KSN_INVALID;
+        used_slots|=bound;
+    }
+    memcpy(effective,base,schema->slot_count*sizeof(*effective));
+    bundle->dirty_slots=0;
+    for(unsigned i=0;i<count;i++){
+        ksn_source_lease *lease=&bundle->leases[i];
+        ksn_result r=source_pin(members[i].registry,members[i].subscription,
+                                 schema,now_us,lease,true);
+        if(r!=KSN_OK){
+            ksn_source_bundle_release(bundle);
+            memcpy(effective,base,schema->slot_count*sizeof(*effective));
+            return r;
+        }
+        bundle->count++;
+        source_overlay(lease,now_us,effective);
+        bundle->dirty_slots|=lease->dirty_slots;
+    }
+    if(ksn_schema_values_validate(schema,effective)!=KSN_OK){
+        ksn_source_bundle_release(bundle);
+        memcpy(effective,base,schema->slot_count*sizeof(*effective));
+        return KSN_INVALID;
+    }
+    bundle->active=true;
+    return KSN_OK;
+}
+ksn_result ksn_source_bundle_commit(ksn_source_bundle *bundle){
+    if(!bundle||!bundle->active||!bundle->count||
+       bundle->count>KSN_SOURCE_MAX_REGISTERED)return KSN_INVALID;
+    for(unsigned i=0;i<bundle->count;i++)
+        if(!bundle->leases[i].active||bundle->leases[i].committed)return KSN_INVALID;
+    for(unsigned i=0;i<bundle->count;i++)
+        (void)ksn_source_commit(&bundle->leases[i]);
+    return KSN_OK;
+}
+void ksn_source_bundle_release(ksn_source_bundle *bundle){
+    if(!bundle)return;
+    while(bundle->count)ksn_source_release(&bundle->leases[--bundle->count]);
+    *bundle=(ksn_source_bundle){0};
 }
 ksn_result ksn_source_presented(ksn_source_subscription *subscription,
                                 uint64_t revision){

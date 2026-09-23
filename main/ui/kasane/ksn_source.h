@@ -58,6 +58,16 @@ typedef struct {
     uint32_t valid_slots,dirty_slots;
     bool active,committed;
 } ksn_source_lease;
+typedef struct {
+    ksn_source_registry *registry;
+    ksn_source_subscription *subscription;
+} ksn_source_member;
+typedef struct {
+    ksn_source_lease leases[KSN_SOURCE_MAX_REGISTERED];
+    uint32_t dirty_slots;
+    uint8_t count;
+    bool active;
+} ksn_source_bundle;
 
 void ksn_source_registry_init(ksn_source_registry *registry);
 ksn_result ksn_source_register(ksn_source_registry *registry,
@@ -80,6 +90,16 @@ ksn_result ksn_source_acquire(ksn_source_registry *registry,
                               const ksn_schema_value *base,uint64_t now_us,
                               ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS],
                               ksn_source_lease *lease);
+/* Compose disjoint subscriptions from one or more registries with one
+ * base->effective metadata copy and no payload copy. All leases remain pinned
+ * until bundle_release. Initialize bundle to zero before first use. A failure
+ * after composition begins releases every pin, restores effective to base,
+ * and advances no source cursor. */
+ksn_result ksn_source_bundle_acquire(const ksn_source_member *members,uint8_t count,
+    const ksn_schema *schema,const ksn_schema_value *base,uint64_t now_us,
+    ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS],ksn_source_bundle *bundle);
+ksn_result ksn_source_bundle_commit(ksn_source_bundle *bundle);
+void ksn_source_bundle_release(ksn_source_bundle *bundle);
 /* Advance the read cursor only after the caller has accepted a complete,
  * validated effective value set. A failed preflight must not call commit. */
 ksn_result ksn_source_commit(ksn_source_lease *lease);

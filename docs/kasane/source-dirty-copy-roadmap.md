@@ -146,7 +146,15 @@ immutableな世代をzero-copyでpinする。枯渇時はproducerを待たせず
 payloadコピー回数は不変。先頭fieldだけ有効で後続fieldが不正な場合と
 長すぎる文字列をhostで確認し、実QuickJS統合は0失敗。
 診断OFFのESP-IDF buildはPASSし、静的DIRAMは159,788 B。
-公開bind・複数sourceの原子合成は引き続き未実装。
+公開bind・mountへの複数source接続は引き続き未実装。
+複数sourceのC合成primitiveも追加した。最大4購読を異なるregistryから
+同時にpinし、base全体のmetadata複製1回と有効なbound slotごとの
+metadata代入でdisjoint slotへ重ねる。UTF-8 payload転記は0回。
+全source取得後に値を1回検証し、後続sourceの
+不正値・権限拒否・古い世代では全leaseを解放し候補をbaseへ戻す。
+cursorはbundle全体を受理した後にだけ進める。hostのASan/UBSan・O2で
+重複slot拒否、期限切れ、失敗後のpin/cursor回収を確認した。
+これはまだmount/JS公開bindに接続しておらず、P1出口の複数source完了とはしない。
 
 ## P2：dirty-node更新を既存bankのまま導入
 
