@@ -5,6 +5,18 @@
 UIタスクの同期SD待ちを除き、音声と描画の締切を守ることが目的。
 平均FPSだけでなくp99・最悪値、音声underrun、停止・抜去時の寿命を判定する。
 
+## コンセプトと責務
+
+問題はSPI2（LCD）とSPI3（SD）の物理バス競合ではなく、UIタスクが
+`read_at`の完了を待つ間、別バスの描画も進められないことである。
+KasaneのUI状態・描画契約やJSのプレーヤー制御は変えない。UIタスクは
+権限確認と再生sessionの作成・終了を担当し、SD専用workerだけが
+lease経由でSDを読み、既存の圧縮リングの未公開slotへ直接書く。
+リングの所有権を公開する前にSD読み込みを完了し、停止・抜去では
+worker ACK前にring/lease/マウントを解放しない。通知は起床のヒント、
+リングとatomic stateが真の状態である。これが全案共通の契約であり、
+A/B/Cの違いはleaseの開き方とCPU/ISRの配置だけに限定する。
+
 ## 比較する実装
 
 | 案 | SDの読取方式 | 変更点・検証したい仮説 |
@@ -114,3 +126,74 @@ Sは共通lease基盤だけを追加し、MP3 producerは従来どおりUI上の
 `.cache/sd-variants/sync-control-run{1,2,3}`の`serial.log`。
 この6 runは実装準備中に基準3回→S3回と測ったため、完全な順番交替ではない。
 最終判定ではA/B/Cと対照を再度交互に実施する。
+
+## A/B/C実機比較と選定
+
+診断バイナリはA `d828858`（SHA-256 `c36a262d2024a52fd8cc43ec6e7f197187236ee2a22f940d370c29b920cef5a6`）、
+B `7cb4d8f`（`5b878a3e5d55e2884ce24eadba926906f3ff7a09706e2998a288338d1ecb233`）、
+C統合 `db4b89f`＋診断条件修正 `efac303`
+（`b2a2ac37095b6de16f168398e2f131b4aeb3f52ab4a51f0010c1448a1d2da6f1`）。
+Cの最初の試行は`POCKET_PROBES=ON`で起動時SDプローブがSPI3を占有したため
+無効とし、以後は全案`KASANE_P0_PROBE=ON, POCKET_PROBES=OFF`に統一した。
+同じ先頭2曲・2曲目90秒・30秒で2秒pause/resumeを各3回、Bは後で1回追試。
+別時点のS追試も元の結果を再現した。いずれも通常再生のMP3 fault/underrunは0。
+
+| 案 | `ui_frame` p99 µs | `av_service` p99 µs | `overlay_draw` p99 µs | SD open/2曲目 | heap最低 B |
+| --- | --- | --- | --- | ---: | ---: |
+| S | 39,935 / 39,935 / 39,935 | 29,311 / 29,439 / 28,927 | 16,127 / 15,999 / 16,127 | 同期反復open | 48,476 |
+| A | 12,287 / 12,287 / 12,287 | 127 / 127 / 127 | 9,343 / 9,343 / 9,343 | 約1,765 | 43,468～43,572 |
+| B | 12,287 / 12,287 / 18,431 | 127 / 127 / 127 | 9,343 / 9,343 / 16,383 | 1 | 43,240～43,564 |
+| C | 12,287 / 12,287 / 12,287 | 127 / 127 / 127 | 9,343 / 9,343 / 9,343 | 1 | 42,572～43,564 |
+
+Bの4回目は`ui_frame` 12,287 µsへ戻り、3回目のLCD送信p99
+12,159 µsは再現しなかった。B/CはAに対するUI p99の反復可能な改善がない。
+B/Cの最大SD read時間は概ね12 ms、Aは概ね17 msだったが、これは
+readのp99でも画面p99でもない。B/Cは再生・pause中に既存上限2本の
+VFSファイルhandleの1本を占有する。CのSPI ISR coreログは設定要求の証拠で、
+ISR内の実行coreを直接観測した値ではない。
+
+選定はA（毎slot再open）とした。S→Aで`ui_frame` p99が27,648 µs
+（69.2%）改善し、`av_service`は計測バケット上限127 µsになった。
+B/Cの複雑さと常時handle占有を正当化する追加効果は確認できない。
+これは本Cardputer/SD/曲での選定であり、B/Cの別条件での優位性を否定しない。
+
+## A選定後の安全・持久試験
+
+Aの初版には外部lease失効をユーザーcancelと同一視し、圧縮リングEOFを
+公開しない欠陥が見つかった。`ae555b8`で、明示的stopだけをcancel、
+外部失効・読取失敗をsource error＋EOFとし、一時停止中のsource errorも
+所有者側で`P_ERROR`へ進めた。ホストのASan/UBSanテストと診断ON/OFFビルドはPASS。
+修正版の90秒実機試験は`ui_frame` p99 12,287 µs、fault/underrun 0。
+この修正はB `7f12ebd`、C `b562d98`にも反映して各案のホストテストと
+診断ON/OFFビルドを通した。ただしB/C修正版を再度実機測定していないため、
+上表の性能値は修正前の通常再生試験値である。通常経路の実装差分はない。
+
+- 初版Aの5分試験：2曲目から3曲目へ進み、合計約12.6 MBを読み、
+  IO ERROR/MP3 fault/underrun 0。セッション全体の`ui_frame` p99は
+  17,407 µsで、短い同一条件試験との直接比較には使わない。
+- 修正版Aの100回連続曲送り：起点2曲を含む102 sessionのopen/解放が一致。
+  fault/underrun/隔離警告0、stop ACK最大9,055 µs、p99 8,785 µs。
+  最低heap 41,312 B、終了後free 217,652 Bへ回復した。
+- 再生中に人がSDを抜き、数秒後に再挿入：SD read失敗から公開
+  `PLAYBACK IO_ERROR`まで269 ms、`source_fault=1`、underrun 0。
+  途中MP3 frameの不足に伴うdecode faultも1と記録されたが、公開エラーは1回。
+  packet/PCM EOF後もUIは応答し、終了時のfree heapは217,652 B。
+- pause中の抜去・再挿入：停止中はSD I/Oをしないうえ検出ピンもないため、
+  失効は観測されなかった。異常処理のPASSとは数えない。
+- 以前の問題曲`04 リズム.mp3`を修正版Aで180秒再生し、60秒で
+  pause/resume。IO ERROR/MP3 fault/underrun 0、7.2 MBを読んだ。
+
+生ログは`.cache/sd-variants/`の`a-reopen-run{1,2,3}`、
+`b-persistent-run{1,2,3}`、`b-persistent-post-c-run4`、
+`c-affinity-valid-run{1,2,3}`、`sync-control-post-b-run1`、
+`a-reopen-long-run1`、`a-reopen-fixed-*`以下にある。実機の診断バイナリ、
+操作列、カードは同一である。未完のゲートはWi-Fi負荷、高ビットレート/VBR等の
+別曲群、可聴の再開遅延、100回規模のpause/resumeと終了操作、抜去中の
+再マウントと稀なaudio stop timeoutの寿命確認である。入力遅延は今回の
+サンプル数ではp99判定できない。これらを確認せずに全条件での製品保証とは呼ばない。
+
+選定したAは本ブランチの`c198692`、`6519d65`、`81e75c1`に統合した。
+診断OFFのESP-IDFフルビルド、SD reader/leaseのホストASan/UBSanテストもPASS。
+実機試験後は試験前に退避した元のアプリ領域（`0x10000`と`0x110000`からの
+2領域）をCardputerに書き戻し、両領域を`verify-flash`で照合した。
+現在の端末は実験用Aバイナリではなく、元のファームウェアである。
