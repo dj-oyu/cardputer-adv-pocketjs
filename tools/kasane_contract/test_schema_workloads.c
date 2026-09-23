@@ -28,26 +28,33 @@ static ksn_result transfer(void *ctx,uint16_t y,uint16_t rows,const uint16_t *pi
 static ksn_display_port port(display *d){
     return (ksn_display_port){d,strip,transfer,240,135,8,&text_port,NULL};
 }
-static int compare(const ksn_schema *schema,const ksn_schema_value *values,
-                   ksn_view_host *reference,ksn_view *ref_view){
+static int compare_at(const ksn_schema *schema,const ksn_schema_value *values,
+                      ksn_rect viewport,ksn_view_host *reference,
+                      ksn_view *ref_view){
     ksn_ref refs[KSN_SCHEMA_MAX_NODES*2u];uint8_t count;ksn_tx tx;
-    ksn_rect viewport={0,0,240,135};ksn_render_stats stats;
+    ksn_render_stats stats;
     if(ksn_schema_submit(ref_view,viewport,schema,values,refs,&count,&tx)!=KSN_OK)return 1;
     ksn_display_port out=port(&ref_display);
     if(ksn_view_host_present(reference,&out,&stats)!=KSN_OK)return 1;
     return memcmp(fast_display.panel,ref_display.panel,sizeof(ref_display.panel))!=0;
 }
+static int compare(const ksn_schema *schema,const ksn_schema_value *values,
+                   ksn_view_host *reference,ksn_view *ref_view){
+    return compare_at(schema,values,(ksn_rect){0,0,240,135},reference,ref_view);
+}
 static int present(ksn_schema_session *session,ksn_view_host *host,ksn_view *view,
-                   const ksn_schema_value *values,uint64_t revision){
+                   const ksn_schema_value *values,uint64_t revision,
+                   uint32_t dirty_slots){
     ksn_rect viewport={0,0,240,135};ksn_render_stats stats;bool blocked=false;
     ksn_display_port out=port(&fast_display);
-    ksn_result r=ksn_schema_session_step(session,view,viewport,values,revision,&blocked);
+    ksn_result r=ksn_schema_session_step_dirty(session,view,viewport,values,
+                                               revision,dirty_slots,&blocked);
     if(r!=KSN_OK||!blocked){fprintf(stderr,"workload submit revision=%llu result=%u blocked=%u\n",
         (unsigned long long)revision,(unsigned)r,(unsigned)blocked);return 1;}
     r=ksn_view_host_present(host,&out,&stats);
     if(r!=KSN_OK){fprintf(stderr,"workload present revision=%llu result=%u\n",
         (unsigned long long)revision,(unsigned)r);return 1;}
-    r=ksn_schema_session_step(session,view,viewport,values,revision,&blocked);
+    r=ksn_schema_session_step_dirty(session,view,viewport,values,revision,0,&blocked);
     if(r!=KSN_OK||blocked){fprintf(stderr,"workload ack revision=%llu result=%u blocked=%u\n",
         (unsigned long long)revision,(unsigned)r,(unsigned)blocked);return 1;}
     return 0;
@@ -102,13 +109,20 @@ int main(void){
     ksn_view *ref_view=ksn_view_host_endpoint(&ref_host,KSN_APP);
     ksn_schema_session session;
     CHECK(ksn_schema_session_init(&session,&schema)==KSN_OK);
-    CHECK(!present(&session,&fast_host,fast_view,values,1));
+    CHECK(!present(&session,&fast_host,fast_view,values,1,0));
+    CHECK(session.has_map&&ksn_schema_ref_map_total(&session.active_map)==21);
     CHECK(!compare(&schema,values,&ref_host,ref_view));
     bool blocked=true;
-    CHECK(ksn_schema_session_step(&session,fast_view,(ksn_rect){0,0,240,135},
-                                  values,1,&blocked)==KSN_OK&&!blocked);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,1,0,&blocked)==KSN_OK&&!blocked);
     values[1].data.color=0xd06040ffu;
-    CHECK(!present(&session,&fast_host,fast_view,values,2));
+#ifdef KSN_SCHEMA_DIRTY_COUNT
+    ksn_schema_resolved_nodes=0;
+#endif
+    CHECK(!present(&session,&fast_host,fast_view,values,2,1u<<1));
+#ifdef KSN_SCHEMA_DIRTY_COUNT
+    CHECK(ksn_schema_resolved_nodes==2);
+#endif
     CHECK(session.pending_delta==KSN_SCHEMA_PATCHED);
     CHECK(!compare(&schema,values,&ref_host,ref_view));
     static const char max_text[]="12345678901234567890123456789012345678901234567";
@@ -117,29 +131,63 @@ int main(void){
     for(unsigned i=1;i<=20;i++)values[i].data.color=0x203040ffu+(i<<16);
     values[21].data.boolean=true;values[22].data.number=1;
     values[23].data.text=(ksn_schema_text){"PAGE",4};
-    CHECK(!present(&session,&fast_host,fast_view,values,3));
+    CHECK(!present(&session,&fast_host,fast_view,values,3,0xffffffu));
     CHECK(session.pending_delta==KSN_SCHEMA_REPLACED);
+    CHECK(ksn_schema_ref_map_count(&session.active_map,22)==2);
     CHECK(!compare(&schema,values,&ref_host,ref_view));
     values[2].data.color=0x112233ffu;
-    CHECK(ksn_schema_session_step(&session,fast_view,(ksn_rect){0,0,240,135},
-                                  values,4,&blocked)==KSN_OK&&blocked);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,4,1u<<2,&blocked)==KSN_OK&&blocked);
     values[2].data.color=0x445566ffu;
-    CHECK(ksn_schema_session_step(&session,fast_view,(ksn_rect){0,0,240,135},
-                                  values,5,&blocked)==KSN_OK&&blocked);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,5,1u<<2,&blocked)==KSN_OK&&blocked);
     ksn_display_port out=port(&fast_display);ksn_render_stats stats;
     CHECK(ksn_view_host_present(&fast_host,&out,&stats)==KSN_OK);
-    CHECK(ksn_schema_session_step(&session,fast_view,(ksn_rect){0,0,240,135},
-                                  values,5,&blocked)==KSN_OK&&blocked);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,5,0,&blocked)==KSN_OK&&blocked);
     CHECK(ksn_view_host_present(&fast_host,&out,&stats)==KSN_OK);
-    CHECK(ksn_schema_session_step(&session,fast_view,(ksn_rect){0,0,240,135},
-                                  values,5,&blocked)==KSN_OK&&!blocked);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,5,0,&blocked)==KSN_OK&&!blocked);
     CHECK(!compare(&schema,values,&ref_host,ref_view));
     values[21].data.boolean=false;values[22].data.number=0;
-    CHECK(ksn_schema_session_step(&session,fast_view,(ksn_rect){0,0,240,135},
-                                  values,6,&blocked)==KSN_OK&&blocked);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,6,(1u<<21)|(1u<<22),&blocked)==KSN_OK&&blocked);
     CHECK(ksn_view_cancel(fast_view,session.ticket)==KSN_OK);
-    CHECK(!present(&session,&fast_host,fast_view,values,6));
+    CHECK(!present(&session,&fast_host,fast_view,values,6,0));
     CHECK(!compare(&schema,values,&ref_host,ref_view));
-    puts("schema workloads: PASS (no change, 1/24 slots, 47-byte text, hidden/page, coalesced and discarded updates)");
+    ksn_rect narrower={0,0,239,135};
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,narrower,values,7,0,
+                                        &blocked)==KSN_OK&&blocked);
+    CHECK(session.pending_delta==KSN_SCHEMA_REPLACED);
+    CHECK(ksn_view_host_present(&fast_host,&out,&stats)==KSN_OK);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,narrower,values,7,0,
+                                        &blocked)==KSN_OK&&!blocked);
+    CHECK(!compare_at(&schema,values,narrower,&ref_host,ref_view));
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,
+        (ksn_rect){0,0,240,135},values,8,0,&blocked)==KSN_OK&&blocked);
+    CHECK(session.pending_delta==KSN_SCHEMA_REPLACED);
+    CHECK(ksn_view_host_present(&fast_host,&out,&stats)==KSN_OK);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,
+        (ksn_rect){0,0,240,135},values,8,0,&blocked)==KSN_OK&&!blocked);
+    CHECK(!compare(&schema,values,&ref_host,ref_view));
+    uint32_t seed=0x63a24e91u;
+    for(unsigned frame=0;frame<120;frame++){
+        seed=seed*1664525u+1013904223u;
+        unsigned slot=1u+seed%20u;
+        ksn_rgba next=(seed&0xffffff00u)|0xffu;
+        if(next==values[slot].data.color)next^=0x01000000u;
+        values[slot].data.color=next;
+#ifdef KSN_SCHEMA_DIRTY_COUNT
+        ksn_schema_resolved_nodes=0;
+#endif
+        CHECK(!present(&session,&fast_host,fast_view,values,9u+frame,
+                       (uint32_t)1u<<slot));
+        CHECK(session.pending_delta==KSN_SCHEMA_PATCHED);
+#ifdef KSN_SCHEMA_DIRTY_COUNT
+        CHECK(ksn_schema_resolved_nodes==2);
+#endif
+        CHECK(!compare(&schema,values,&ref_host,ref_view));
+    }
+    puts("schema workloads: PASS (dirty node, 1/24 slots, 47-byte text, hidden/page, coalesced, discard, viewport, 120 reference frames)");
     return 0;
 }

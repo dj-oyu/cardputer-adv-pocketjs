@@ -18,12 +18,17 @@ ksn_result ksn_schema_session_init(ksn_schema_session *session,
     *session=(ksn_schema_session){.schema=schema,.dependencies=dependencies};
     return KSN_OK;
 }
-ksn_result ksn_schema_session_step(ksn_schema_session *session,ksn_view *view,
-                                   ksn_rect viewport,const ksn_schema_value *values,
-                                   uint64_t revision,bool *blocked){
+static ksn_result step(ksn_schema_session *session,ksn_view *view,
+                       ksn_rect viewport,const ksn_schema_value *values,
+                       uint64_t revision,uint32_t dirty_slots,bool known,
+                       bool *blocked){
     if(blocked)*blocked=false;
     if(!session||!session->schema||!view||!revision||
        viewport.x0>=viewport.x1||viewport.y0>=viewport.y1)return KSN_INVALID;
+    if(known){
+        if(dirty_slots>>session->schema->slot_count)return KSN_INVALID;
+        session->pending_dirty|=dirty_slots;
+    }
     if(session->ticket.value){
         ksn_submission outcome=ksn_view_poll(view);
         if(outcome.ticket.value!=session->ticket.value)return KSN_STALE;
@@ -36,28 +41,76 @@ ksn_result ksn_schema_session_step(ksn_schema_session *session,ksn_view *view,
                                   session->candidate_count*sizeof(ksn_ref));
                 session->active_count=session->candidate_count;
                 session->has_active=true;
+                if(session->candidate_map_valid){
+                    session->active_map=session->candidate_map;
+                    session->has_map=true;
+                }else session->has_map=false;
             }
             session->active_viewport=session->candidate_viewport;
             session->active_background=session->candidate_background;
             session->applied_revision=session->pending_revision;
-        }else if(outcome.status!=KSN_DISCARDED)return KSN_STALE;
+        }else if(outcome.status==KSN_DISCARDED){
+            session->pending_dirty|=session->inflight_dirty;
+            session->dirty_unknown|=session->inflight_unknown;
+        }else return KSN_STALE;
+        session->inflight_dirty=0;
+        session->inflight_unknown=false;
         session->ticket=(ksn_tx){0};
     }
+    if(!known&&(!session->has_active||session->applied_revision!=revision||
+                !same_rect(session->active_viewport,viewport)))
+        session->dirty_unknown=true;
     if(session->has_active&&session->applied_revision==revision&&
-       same_rect(session->active_viewport,viewport))return KSN_OK;
+       same_rect(session->active_viewport,viewport)&&
+       !session->pending_dirty&&!session->dirty_unknown)return KSN_OK;
     ksn_schema_delta delta;ksn_tx tx={0};uint8_t count=0;
-    ksn_result r=ksn_schema_update(view,viewport,session->schema,values,
-        session->active_refs,session->has_active?session->active_count:UINT8_MAX,
-        session->active_background,session->candidate_refs,&count,&tx,&delta);
+    bool mapped=known&&!session->dirty_unknown;
+    uint32_t dirty_nodes=0;
+    if(mapped)for(unsigned slot=0;slot<session->schema->slot_count;slot++)
+        if(session->pending_dirty&((uint32_t)1u<<slot))
+            dirty_nodes|=session->dependencies.nodes[slot];
+    bool same_viewport=session->has_active&&
+                       same_rect(session->active_viewport,viewport);
+    ksn_result r;
+    if(mapped){
+        r=ksn_schema_update_dirty(view,viewport,session->schema,values,dirty_nodes,
+            session->active_refs,
+            session->has_active&&session->has_map&&same_viewport?
+                session->active_count:UINT8_MAX,
+            session->has_map?&session->active_map:NULL,
+            session->active_background,session->candidate_refs,
+            &session->candidate_map,&count,&tx,&delta);
+        session->candidate_map_valid=r==KSN_OK;
+    }else{
+        r=ksn_schema_update(view,viewport,session->schema,values,
+            session->active_refs,
+            session->has_active&&same_viewport?session->active_count:UINT8_MAX,
+            session->active_background,session->candidate_refs,&count,&tx,&delta);
+        session->candidate_map_valid=false;
+    }
     if(r!=KSN_OK)return r;
     if(delta==KSN_SCHEMA_NO_CHANGE){
         session->applied_revision=revision;session->active_viewport=viewport;
+        session->pending_dirty=0;session->dirty_unknown=false;
         return KSN_OK;
     }
     session->ticket=tx;session->pending_revision=revision;
     session->pending_delta=delta;session->candidate_count=count;
+    session->inflight_dirty=session->pending_dirty;
+    session->inflight_unknown=session->dirty_unknown;
+    session->pending_dirty=0;session->dirty_unknown=false;
     session->candidate_background=background(session->schema,values);
     session->candidate_viewport=viewport;
     if(blocked)*blocked=true;
     return KSN_OK;
+}
+ksn_result ksn_schema_session_step(ksn_schema_session *session,ksn_view *view,
+                                   ksn_rect viewport,const ksn_schema_value *values,
+                                   uint64_t revision,bool *blocked){
+    return step(session,view,viewport,values,revision,0,false,blocked);
+}
+ksn_result ksn_schema_session_step_dirty(ksn_schema_session *session,ksn_view *view,
+    ksn_rect viewport,const ksn_schema_value *values,uint64_t revision,
+    uint32_t dirty_slots,bool *blocked){
+    return step(session,view,viewport,values,revision,dirty_slots,true,blocked);
 }

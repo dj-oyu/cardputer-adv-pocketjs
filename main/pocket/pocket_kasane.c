@@ -66,8 +66,8 @@ typedef struct {
     size_t allocation_bytes,owned_asset_bytes;
     void *source_state;
     uint64_t revision;
+    uint32_t pending_base_slots;
     uint32_t handle;
-    uint16_t text_offset[KSN_SCHEMA_MAX_SLOTS];
     ksn_schema_value values[];
 } schema_state;
 typedef struct {
@@ -297,7 +297,6 @@ static schema_state *schema_alloc(const pocket_app_view_asset *asset,uint32_t co
     for(unsigned i=0;i<definition->slot_count;i++){
         const ksn_schema_slot *slot=&definition->slots[i];
         if(slot->type==KSN_SLOT_TEXT){
-            s->text_offset[i]=(uint16_t)offset;
             s->values[i].data.text.utf8=schema_text_base(s)+offset;
             offset+=(size_t)slot->capacity+1u;
         }else if(slot->type==KSN_SLOT_COLOR)
@@ -363,11 +362,12 @@ static __attribute__((noinline)) ksn_result schema_refresh_native(
         revision++;
     }
     ksn_tx before=s->session.ticket;
-    ksn_result r=ksn_schema_session_step(&s->session,view(),viewport,effective,
-                                         revision,blocked);
+    ksn_result r=ksn_schema_session_step_dirty(&s->session,view(),viewport,effective,
+        revision,s->pending_base_slots|lease.dirty_slots,blocked);
     if(r==KSN_OK){
         s->revision=revision;
         r=ksn_source_commit(&lease);
+        if(r==KSN_OK)s->pending_base_slots=0;
     }
     ksn_source_release(&lease);
     if(r==KSN_OK&&s->session.ticket.value&&
@@ -384,8 +384,9 @@ static ksn_result schema_refresh(bool *blocked){
     schema_source *native=schema_native(s);
     if(native)return schema_refresh_native(s,native,blocked);
     ksn_tx before=s->session.ticket;
-    ksn_result r=ksn_schema_session_step(&s->session,view(),viewport,s->values,
-                                         s->revision,blocked);
+    ksn_result r=ksn_schema_session_step_dirty(&s->session,view(),viewport,s->values,
+        s->revision,s->pending_base_slots,blocked);
+    if(r==KSN_OK)s->pending_base_slots=0;
     if(r==KSN_OK)schema_note_submitted(s,before);
     return r;
 }
@@ -1694,7 +1695,7 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
         if(!(changed_slots&((uint32_t)1u<<i)))continue;
         if(text_dirty[i]){
             ksn_schema_text text=candidate[i].data.text;
-            char *dest=schema_text_base(s)+s->text_offset[i];
+            char *dest=(char *)s->values[i].data.text.utf8;
             memcpy(dest,text.utf8,text.bytes+1u);
             ksn_p0_probe_copy(KSN_P0_ADAPTER_OWNED,text.bytes+1u);
             s->values[i].data.text=(ksn_schema_text){dest,text.bytes};
@@ -1705,6 +1706,7 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
         }
     }
     s->revision++;
+    s->pending_base_slots|=changed_slots;
     ksn_result submitted=schema_refresh(NULL);
     return submitted==KSN_OK||submitted==KSN_BUSY?JS_UNDEFINED:
            throw_result(ctx,submitted,op);

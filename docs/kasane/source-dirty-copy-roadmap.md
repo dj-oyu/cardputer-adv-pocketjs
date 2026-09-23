@@ -144,11 +144,19 @@ immutableな世代をzero-copyでpinする。枯渇時はproducerを待たせず
 
 ## P2：dirty-node更新を既存bankのまま導入
 
-2026-09-24の準備変更：JS `view.set`は検証用の全slot候補を維持しつつ、
-受理時に**変更slotだけ**をschema所有値へ書き戻す。これはdirty slot maskの
-取得とadapter-owned copy削減までで、依存nodeだけを解決するP2本体は
-まだ未実装。実QuickJS統合のASan/UBSan・O2（各0失敗）と診断OFF buildを
-通した。実機の同条件A/Bは未実施。
+2026-09-24の実装途中結果：JS `view.set`は検証用の全slot候補を維持しつつ、
+受理時に**変更slotだけ**をschema所有値へ書き戻す。そのmaskとnative sourceの
+dirty maskをsessionに渡し、依存nodeだけのresolve/ref比較/PATCHを実装した。
+可視性・page・文字の空/非空で命令数が変われば全REPLACEへ戻す。
+node→命令数は2 bitset（計8 B）で保持し、PRESENTEDで候補mapを昇格、
+DISCARDEDではinflight dirtyをpendingへ戻す。clean turnのrevision/viewport
+一致は従来どおりO(1)。24 slot・hidden/page・47 byte文字・提出中更新・
+discard・viewport変更と120フレームを全画面参照との画素比較で通した。
+1 slot更新では対象nodeだけを比較・適用の2回resolveした。
+実QuickJS統合のASan/UBSan・O2は各0失敗、pet allocationは1256 Bで
+従来1280 B以内、Kasane契約テスト一式も両構成でPASS。
+診断OFF buildの静的DIRAM増加は0。
+ただし実機の同条件A/B、音声共存、固定閾値は未実施でP2出口は未達。
 
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。
 committed node→command範囲を固定容量で保持し、非dirty nodeのresolve/read/compareを

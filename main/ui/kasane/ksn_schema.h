@@ -101,6 +101,32 @@ ksn_result ksn_schema_submit(ksn_view *view,ksn_rect viewport,
                              uint8_t *ref_count,ksn_tx *out);
 typedef enum { KSN_SCHEMA_NO_CHANGE, KSN_SCHEMA_PATCHED,
                KSN_SCHEMA_REPLACED } ksn_schema_delta;
+/* Committed node-to-command ranges. A hidden node owns zero commands and a
+ * plateText node owns two; only a PRESENTED replacement promotes this map. */
+typedef struct {
+    uint32_t present,extra; /* one command per present bit, one more per extra */
+} ksn_schema_ref_map;
+static inline unsigned ksn_schema_ref_map_count(const ksn_schema_ref_map *map,
+                                                unsigned node){
+    uint32_t bit=(uint32_t)1u<<node;
+    return !!(map->present&bit)+!!(map->extra&bit);
+}
+static inline unsigned ksn_schema_ref_map_start(const ksn_schema_ref_map *map,
+                                                unsigned node){
+    uint32_t before=((uint32_t)1u<<node)-1u;
+    return (unsigned)__builtin_popcount(map->present&before)+
+           (unsigned)__builtin_popcount(map->extra&before);
+}
+static inline unsigned ksn_schema_ref_map_total(const ksn_schema_ref_map *map){
+    return (unsigned)__builtin_popcount(map->present)+
+           (unsigned)__builtin_popcount(map->extra);
+}
+#ifdef KSN_SCHEMA_DIRTY_COUNT
+extern uint32_t ksn_schema_resolved_nodes;
+#endif
+ksn_result ksn_schema_ref_map_build(const ksn_schema *schema,
+                                    const ksn_schema_value *values,
+                                    ksn_rect viewport,ksn_schema_ref_map *out);
 /* Uses committed refs as the exact comparison baseline; no duplicate plan or
  * text snapshot is retained. On REPLACE, candidate refs are promoted by the
  * caller only after PRESENTED. On PATCH, active refs remain unchanged. The
@@ -113,4 +139,14 @@ ksn_result ksn_schema_update(ksn_view *view,ksn_rect viewport,
                              ksn_ref candidate_refs[KSN_SCHEMA_MAX_NODES*2u],
                              uint8_t *candidate_count,ksn_tx *out,
                              ksn_schema_delta *delta);
+/* Exact dirty-node path. The caller supplies all nodes affected since the
+ * committed revision, not just the latest write. Topology mismatch falls
+ * back to REPLACE; untouched nodes are not resolved/read on a stable PATCH. */
+ksn_result ksn_schema_update_dirty(ksn_view *view,ksn_rect viewport,
+    const ksn_schema *schema,const ksn_schema_value *values,uint32_t dirty_nodes,
+    const ksn_ref active_refs[KSN_SCHEMA_MAX_NODES*2u],uint8_t active_count,
+    const ksn_schema_ref_map *active_map,ksn_rgba active_background,
+    ksn_ref candidate_refs[KSN_SCHEMA_MAX_NODES*2u],
+    ksn_schema_ref_map *candidate_map,uint8_t *candidate_count,ksn_tx *out,
+    ksn_schema_delta *delta);
 #endif

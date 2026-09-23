@@ -74,7 +74,8 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_source_pool_adapter.c \
     tools/kasane_contract/test_source_pool_adapter.c -o "$out/source-pool-adapter"
   "$out/source-pool-adapter"
-  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+  cc -std=c11 -Wall -Wextra -Werror $options -DKSN_SCHEMA_DIRTY_COUNT \
+    -Imain/ui/kasane -Itools/kasane_contract \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
     main/ui/kasane/ksn_schema_session.c tools/kasane_contract/test_schema_workloads.c -o "$out/schema-workloads"

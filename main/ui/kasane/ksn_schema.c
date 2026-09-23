@@ -194,13 +194,21 @@ static ksn_result add(ksn_view *view,ksn_tx tx,ksn_draw *draw,
 
 typedef struct { uint8_t node;bool plate_tail; } schema_cursor;
 typedef struct { ksn_draw draw;uint16_t reveal;bool has_reveal; } schema_resolved;
+#ifdef KSN_SCHEMA_DIRTY_COUNT
+uint32_t ksn_schema_resolved_nodes;
+#endif
 /* One node can expand to two commands. This cursor is the single execution
  * path for REPLACE, topology checks, and the changed-properties PATCH. */
-static ksn_result next_draw(const ksn_schema *schema,const ksn_schema_value *values,
-                            ksn_rect viewport,schema_cursor *cursor,
-                            schema_resolved *out,bool *found){
+static ksn_result next_draw_until(const ksn_schema *schema,
+                                  const ksn_schema_value *values,
+                                  ksn_rect viewport,schema_cursor *cursor,
+                                  unsigned end_node,schema_resolved *out,
+                                  bool *found){
     *found=false;
-    while(cursor->node<schema->node_count){
+    while(cursor->node<end_node){
+#ifdef KSN_SCHEMA_DIRTY_COUNT
+        ksn_schema_resolved_nodes++;
+#endif
         const ksn_schema_node *n=&schema->nodes[cursor->node];
         if(!cursor->plate_tail){
             if(((n->flags&KSN_SCHEMA_HAS_VISIBLE)&&!get_bool(n->visible,values))||
@@ -285,6 +293,39 @@ static ksn_result next_draw(const ksn_schema *schema,const ksn_schema_value *val
         *found=true;return KSN_OK;
     }
     return KSN_OK;
+}
+static ksn_result next_draw(const ksn_schema *schema,const ksn_schema_value *values,
+                            ksn_rect viewport,schema_cursor *cursor,
+                            schema_resolved *out,bool *found){
+    return next_draw_until(schema,values,viewport,cursor,schema->node_count,
+                           out,found);
+}
+
+ksn_result ksn_schema_ref_map_build(const ksn_schema *schema,
+                                    const ksn_schema_value *values,
+                                    ksn_rect viewport,ksn_schema_ref_map *out){
+    if(!out||viewport.x0>=viewport.x1||viewport.y0>=viewport.y1||
+       ksn_schema_values_validate(schema,values)!=KSN_OK)return KSN_INVALID;
+    ksn_schema_ref_map map={0};
+    unsigned total=0;
+    for(unsigned node=0;node<schema->node_count;node++){
+        schema_cursor cursor={(uint8_t)node,false};
+        for(;;){
+            schema_resolved resolved;bool found;
+            ksn_result r=next_draw_until(schema,values,viewport,&cursor,node+1u,
+                                         &resolved,&found);
+            if(r!=KSN_OK)return r;
+            if(!found)break;
+            if(total==KSN_SCHEMA_MAX_NODES*2u)return KSN_LIMIT;
+            if(!(map.present&((uint32_t)1u<<node)))
+                map.present|=(uint32_t)1u<<node;
+            else if(!(map.extra&((uint32_t)1u<<node)))
+                map.extra|=(uint32_t)1u<<node;
+            else return KSN_LIMIT;
+            total++;
+        }
+    }
+    *out=map;return KSN_OK;
 }
 
 static ksn_result preflight(const ksn_view *view,const ksn_schema *schema,
@@ -467,6 +508,94 @@ ksn_result ksn_schema_update(ksn_view *view,ksn_rect viewport,
         if(r==KSN_OK&&changed(&resolved,&old))
             r=patch_one(view,tx,active_refs[count],&resolved,&old);
         count++;
+    }
+    if(r==KSN_OK)r=ksn_view_submit(view,tx);
+    if(r!=KSN_OK){(void)ksn_view_cancel(view,tx);return r;}
+    *out=tx;*delta=KSN_SCHEMA_PATCHED;return KSN_OK;
+}
+
+static ksn_result replace_mapped(ksn_view *view,ksn_rect viewport,
+    const ksn_schema *schema,const ksn_schema_value *values,
+    ksn_ref candidate_refs[KSN_SCHEMA_MAX_NODES*2u],
+    ksn_schema_ref_map *candidate_map,uint8_t *candidate_count,ksn_tx *out,
+    ksn_schema_delta *delta){
+    ksn_schema_ref_map map;
+    ksn_result r=ksn_schema_ref_map_build(schema,values,viewport,&map);
+    if(r!=KSN_OK)return r;
+    r=ksn_schema_submit(view,viewport,schema,values,candidate_refs,
+                        candidate_count,out);
+    if(r!=KSN_OK)return r;
+    if(*candidate_count!=ksn_schema_ref_map_total(&map)){
+        (void)ksn_view_cancel(view,*out);
+        return KSN_STALE;
+    }
+    *candidate_map=map;*delta=KSN_SCHEMA_REPLACED;
+    return KSN_OK;
+}
+
+ksn_result ksn_schema_update_dirty(ksn_view *view,ksn_rect viewport,
+    const ksn_schema *schema,const ksn_schema_value *values,uint32_t dirty_nodes,
+    const ksn_ref active_refs[KSN_SCHEMA_MAX_NODES*2u],uint8_t active_count,
+    const ksn_schema_ref_map *active_map,ksn_rgba active_background,
+    ksn_ref candidate_refs[KSN_SCHEMA_MAX_NODES*2u],
+    ksn_schema_ref_map *candidate_map,uint8_t *candidate_count,ksn_tx *out,
+    ksn_schema_delta *delta){
+    if(!view||!schema||!candidate_refs||!candidate_map||!candidate_count||
+       !out||!delta||viewport.x0>=viewport.x1||viewport.y0>=viewport.y1||
+       values_validate_checked(schema,values)!=KSN_OK||
+       (schema->node_count<32u&&(dirty_nodes>>schema->node_count)))
+        return KSN_INVALID;
+    bool replace=active_count==UINT8_MAX||
+                 get_background(schema,values)!=active_background;
+    if(!replace&&(!active_refs||!active_map||
+                  ksn_schema_ref_map_total(active_map)!=active_count))
+        return KSN_INVALID;
+    if(replace)return replace_mapped(view,viewport,schema,values,candidate_refs,
+                                    candidate_map,candidate_count,out,delta);
+    bool any_change=false;
+    for(unsigned node=0;node<schema->node_count;node++){
+        if(!(dirty_nodes&((uint32_t)1u<<node)))continue;
+        unsigned index=ksn_schema_ref_map_start(active_map,node);
+        unsigned end=index+ksn_schema_ref_map_count(active_map,node);
+        if(end>active_count){replace=true;break;}
+        schema_cursor cursor={(uint8_t)node,false};
+        for(;;){
+            schema_resolved resolved;bool found;
+            ksn_result r=next_draw_until(schema,values,viewport,&cursor,node+1u,
+                                         &resolved,&found);
+            if(r!=KSN_OK)return r;
+            if(!found)break;
+            if(index>=end){replace=true;break;}
+            ksn_view_snapshot old;
+            r=ksn_view_read_ref(view,active_refs[index],&old);
+            if(r!=KSN_OK||!same_topology(&resolved,&old)){replace=true;break;}
+            if(changed(&resolved,&old))any_change=true;
+            index++;
+        }
+        if(replace||index!=end){replace=true;break;}
+    }
+    if(replace)return replace_mapped(view,viewport,schema,values,candidate_refs,
+                                    candidate_map,candidate_count,out,delta);
+    *candidate_count=active_count;
+    *candidate_map=*active_map;
+    if(!any_change){*out=(ksn_tx){0};*delta=KSN_SCHEMA_NO_CHANGE;return KSN_OK;}
+    ksn_tx tx;ksn_result r=ksn_view_begin(view,KSN_PATCH,&tx);
+    if(r!=KSN_OK)return r;
+    for(unsigned node=0;node<schema->node_count&&r==KSN_OK;node++){
+        if(!(dirty_nodes&((uint32_t)1u<<node)))continue;
+        unsigned index=ksn_schema_ref_map_start(active_map,node);
+        schema_cursor cursor={(uint8_t)node,false};
+        for(;;){
+            schema_resolved resolved;bool found;
+            r=next_draw_until(schema,values,viewport,&cursor,node+1u,
+                              &resolved,&found);
+            if(r!=KSN_OK||!found)break;
+            ksn_view_snapshot old;
+            r=ksn_view_read_ref(view,active_refs[index],&old);
+            if(r==KSN_OK&&changed(&resolved,&old))
+                r=patch_one(view,tx,active_refs[index],&resolved,&old);
+            index++;
+        }
     }
     if(r==KSN_OK)r=ksn_view_submit(view,tx);
     if(r!=KSN_OK){(void)ksn_view_cancel(view,tx);return r;}
