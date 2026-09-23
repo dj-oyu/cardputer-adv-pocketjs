@@ -71,6 +71,10 @@ import time
 
 WORKLOADS = {
     "X": "hello",
+    # The two shipped apps with a probe entry of their own (app_session.c);
+    # they run under their own manifest and write their own saved state.
+    "<": "pet",
+    ">": "companion",
     "A": "sync_loop",
     "B": "deep_recursion",
     "C": "closures",
@@ -494,9 +498,10 @@ def main():
     for c in conds:
         if c not in CONDITIONS:
             p.error(f"unknown condition {c}")
-    if 'X' in letters and 'ui' in conds:
-        p.error('hello builds its own Kasane scene; the ui condition would '
-                'build a second one over it (app_session.c drops the bit)')
+    if any(l in letters for l in 'X<>') and 'ui' in conds:
+        p.error('the shipped apps build their own Kasane scene; the ui '
+                'condition would build a second one over it (app_session.c '
+                'drops the bit)')
 
     out_path = pathlib.Path(a.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

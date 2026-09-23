@@ -283,6 +283,12 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // above -- tools/vm_l0_capture.py drives these.
     if(c>='A'&&c<='F') { atomic_store(&diagnostic,c); return false; }
     if(c=='X') { atomic_store(&diagnostic,c); return false; }
+    // '<' and '>' are POCKET PET and PET COMPANION, the two shipped apps whose
+    // frames are the heaviest measured (docs/vm/vm-L2-results.md sec.8.1) and
+    // which the menu is the only other way to start. Through here they take the
+    // contention conditions, which is what sec.8.7 needs them for. Note they
+    // write their own saved state as usual.
+    if(c=='<'||c=='>') { atomic_store(&diagnostic,c); return false; }
     if(c>='G'&&c<='K') { vmprobe_segment_set((unsigned)(c-'G')); return false; }
     if(c=='O') { vmprobe_segment_set(5); return false; }
     // The contention condition the NEXT workload runs under (sec.5's "fix the
@@ -947,7 +953,17 @@ static void ui_task(void *arg) {
             if(test && !running && screen==SCREEN_HOME) {
                 overlay_release();
                 owner=SCREEN_HOME;
-                app_registry_select(APP_ID_DEFAULT);
+                // A diagnostic normally runs as the default app. The two app
+                // letters must not: the manifest decides which capabilities are
+                // injected (pet.companion) and which store owns the saved
+                // state, and running pet under hello's identity would give it
+                // neither.
+                const char *diag_id=APP_ID_DEFAULT;
+#ifdef CONFIG_POCKET_VM_PROBE
+                if(test=='<') diag_id="local.pet";
+                else if(test=='>') diag_id="local.companion";
+#endif
+                app_registry_select(diag_id);
                 run_started=app_start_test(test);
                 running = run_started==ESP_OK;
                 if(!running) { app_stop(); home_error="TEST ERROR"; }

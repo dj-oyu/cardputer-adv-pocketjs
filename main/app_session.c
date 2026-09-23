@@ -77,6 +77,10 @@ extern const char vmp_closures_start[] asm("_binary_closures_js_start");
 extern const char vmp_promise_start[] asm("_binary_promise_chain_js_start");
 extern const char vmp_io_start[] asm("_binary_io_wait_js_start");
 extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
+// The two shipped apps the probe can start ('<' and '>'), so that the heaviest
+// real frames can be measured under the contention conditions.
+extern const char pet_start[] asm("_binary_pet_js_start");
+extern const char companion_start[] asm("_binary_companion_js_start");
 // The contention conditions, applied on top of whichever workload is running.
 extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
@@ -677,6 +681,8 @@ source_ready:;
         // the off build 20 B flash).
         case 'A': source=vmp_sync_start; break;
         case 'X': source=hello_start; break;
+        case '<': source=pet_start; break;
+        case '>': source=companion_start; break;
         case 'B': source=vmp_recur_start; break;
         case 'C': source=vmp_closures_start; break;
         case 'D': source=vmp_promise_start; break;
@@ -759,9 +765,9 @@ source_ready:;
     // (docs/vm/vm-L2-results.md sec.8.4). Its UI bit is dropped -- hello owns
     // the APP layer with its own Kasane scene, and condition.js would build a
     // second one over it.
-    if((test>='A'&&test<='F')||test=='X') {
+    if((test>='A'&&test<='F')||test=='X'||test=='<'||test=='>') {
         unsigned mask=vmprobe_condition();
-        if(test=='X') mask&=~1u;
+        if(test=='X'||test=='<'||test=='>') mask&=~1u;
         ESP_LOGI("app","VMCOND start mask=%u",mask);
         if(mask) {
             char select[32];
