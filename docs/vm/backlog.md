@@ -9,6 +9,18 @@
 未完了の項目は無い（2026-09-23）。L2c は実機統合まで終わり、`CONFIG_POCKET_VM_YIELD` は既定 y。TCO と FAIR は互換性の判断として n のまま残している。経緯と実測は vm-L2-results.md §8、設計は vm-L2-design.md §11。
 
 
+## 確保失敗時のコンパイル経路（VM の段とは独立）
+
+出典: [oom-parse-safety.md](oom-parse-safety.md)。開発は `vm/oom-truncated-bytecode`。状態は 2026-09-23 時点。
+
+| # | 項目 | 出典 | 状態 |
+| --- | --- | --- | --- |
+| 1 | 全点掃引のメモリ安全性の報告（ASan/UBSan）を 0 に | §2、§3 | closures・generators で 0。コーパス全体は実施中（§5.1） |
+| 2 | OOM が `SyntaxError` として報告される（closures 112 点・generators 69 点）。誤診断で安全だが、アプリ作者が無い構文エラーを探す | §6 | 未着手 |
+| 3 | コンテキスト初期化中の OOM で組み込み（例 `Array.prototype.join`）が黙って欠け、プログラムが走る | §6 | 未着手 |
+| 4 | 正規表現コンパイラ（`libregexp.c`）を狙った掃引 | §6 | 未着手 |
+| 5 | 実機での確認（パース中 OOM の assert が再起動を起こしていたか） | §6 | 未着手 |
+
 ## L2 で完了済みの項目（参考）
 
 - flat復帰時の引数等の遅延復元を既定yへ採用。追加Test262 19,307判定が即時復元と失敗詳細まで一致、診断なしhostの68件・ASan・成長36比較・G1/D10、実機smoke20周・故障回復6種・メモリ予算を確認。静的DIRAM/Cフレーム不変、Flash Code +132B。即時復元への設定fallbackを維持（旧項目13、results §3.6〜3.7）。

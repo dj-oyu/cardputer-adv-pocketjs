@@ -6339,9 +6339,29 @@ fail:
                 pr = &p->prop[0];
             } else {
                 /* only used for the first array */
-                /* cannot fail */
                 pr = add_property(ctx, p, JS_ATOM_length,
                                   JS_PROP_WRITABLE | JS_PROP_LENGTH);
+                /* PocketJS: upstream (quickjs-ng and bellard/quickjs, both
+                   master 2026-09-23) says "cannot fail" here, and it can:
+                   add_property allocates -- a realloc of p->prop, a shape
+                   clone, a property-table resize -- and returns NULL when
+                   that fails, which the next line then dereferenced (UBSan:
+                   member access within null pointer, reached through
+                   `new Array` with a non-default prototype under vmrun
+                   --fail-alloc; a load fault on the device). It is not only
+                   the first array either: any array whose shape is not
+                   ctx->array_shape comes this way, e.g. one built for a
+                   subclass. p is not a GC object yet (add_gc_object is at
+                   the end of this function) and on every failure path
+                   add_property leaves p->prop and p->shape valid and owned
+                   by p, so freeing the three by hand is the whole cleanup;
+                   props is NULL on this branch. */
+                if (unlikely(!pr)) {
+                    js_free(ctx, p->prop);
+                    js_free_shape(ctx->rt, p->shape);
+                    js_free(ctx, p);
+                    return JS_EXCEPTION;
+                }
             }
             pr->u.value = js_int32(0);
         }
@@ -28113,7 +28133,18 @@ private_field_already_defined:
         }
     }
     /* patch the constant pool index for the constructor */
-    put_u32(fd->byte_code.buf + ctor_cpool_offset, ctor_fd->parent_cpool_idx);
+    /* PocketJS: ctor_cpool_offset was recorded as byte_code.size just
+       BEFORE emit_u32 wrote its placeholder. If that write (or any before
+       it) failed, size stopped there, so the offset names the first byte
+       past the valid data -- the patch then writes 4 bytes beyond the
+       buffer, or through a NULL buf when nothing was ever allocated (ASan:
+       heap-buffer-overflow / unknown-crash here, reached with vmrun
+       --fail-alloc on any file that declares a class). The buffer is dead
+       once it has failed -- resolve_variables refuses it -- so the patch is
+       simply skipped. The same rule is applied to every patch-at-a-recorded-
+       offset in the parser that get_prev_opcode() does not already guard. */
+    if (!dbuf_error(&fd->byte_code))
+        put_u32(fd->byte_code.buf + ctor_cpool_offset, ctor_fd->parent_cpool_idx);
 
     /* store the class source code in the constructor. */
     js_free(ctx, ctor_fd->source);
@@ -28154,7 +28185,10 @@ private_field_already_defined:
             }
             /* patch the start of the function to enable the
                OP_add_brand_instance code */
-            cf->fields_init_fd->byte_code.buf[cf->brand_push_pos] = OP_push_true;
+            /* PocketJS: a recorded offset into ANOTHER function's byte code;
+               see the constructor patch in js_parse_class. */
+            if (!dbuf_error(&cf->fields_init_fd->byte_code))
+                cf->fields_init_fd->byte_code.buf[cf->brand_push_pos] = OP_push_true;
         }
 
         /* store the function to initialize the fields to that it can be
@@ -31431,7 +31465,16 @@ initializer_error:
             return -1;
         }
         dbuf_put(bc, bc->buf + pos_next, chunk_size);
-        memset(bc->buf + pos_next, OP_nop, chunk_size);
+        /* PocketJS: chunk_size is 0 when the byte code buffer failed before
+           the `next` part was emitted -- both positions were read off a size
+           that had stopped moving -- and dbuf_claim(bc, 0) succeeds without
+           allocating, so bc->buf can still be NULL here. memset(NULL, x, 0)
+           is undefined (UBSan: null pointer passed as argument 1, reached
+           with vmrun --fail-alloc in a for-of). dbuf_put already skips a
+           zero-length copy; this skips the matching fill. The function is
+           dead either way: resolve_variables refuses its errored buffer. */
+        if (chunk_size > 0)
+            memset(bc->buf + pos_next, OP_nop, chunk_size);
         /* `next` part ends with a goto */
         s->cur_func->last_opcode_pos = bc->size - 5;
         /* relocate labels */
@@ -32011,8 +32054,12 @@ haslet:
         }
         if (default_label_pos >= 0) {
             /* Ugly patch for the `default` label, shameful and risky */
-            put_u32(s->cur_func->byte_code.buf + default_label_pos,
-                    label_case);
+            /* PocketJS: and unsafe once the buffer has failed -- the
+               recorded position may lie past the valid data (see the
+               constructor patch in js_parse_class). */
+            if (!dbuf_error(&s->cur_func->byte_code))
+                put_u32(s->cur_func->byte_code.buf + default_label_pos,
+                        label_case);
             s->cur_func->label_slots[label_case].pos = default_label_pos + 4;
         } else {
             emit_label(s, label_case);
@@ -35976,10 +36023,19 @@ static int resolve_scope_var(JSContext *ctx, JSFunctionDef *s,
                 s->has_arguments_binding) {
             /* 'arguments' pseudo variable */
             var_idx = add_arguments_var(ctx, s);
+            /* PocketJS: an allocation failure, not "absent" -- left alone
+               it falls through to the parent scopes and then the global
+               fallback (closure_fail; reproduced: closures.js under
+               vmrun --fail-alloc 1903 runs to mapped() and throws
+               "ReferenceError: arguments is not defined"). */
+            if (var_idx < 0)
+                goto closure_fail;
         }
         if (var_idx < 0 && s->is_func_expr && var_name == s->func_name) {
             /* add a new variable with the function name */
             var_idx = add_func_var(ctx, s, var_name);
+            if (var_idx < 0)
+                goto closure_fail;   /* PocketJS: as above */
         }
     }
     if (var_idx >= 0) {
@@ -36122,11 +36178,11 @@ local_scope_var:
             } else if (vd->var_name == JS_ATOM__with_ && !is_pseudo_var) {
                 capture_var(fd, vd);
                 idx = get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL, idx, vd->var_name, false, false, JS_VAR_NORMAL);
-                if (idx >= 0) {
-                    dbuf_putc(bc, OP_get_var_ref);
-                    dbuf_put_u16(bc, idx);
-                    var_object_test(ctx, s, var_name, op, bc, &label_done, 1);
-                }
+                if (idx < 0)
+                    goto closure_fail;   /* PocketJS: see closure_fail */
+                dbuf_putc(bc, OP_get_var_ref);
+                dbuf_put_u16(bc, idx);
+                var_object_test(ctx, s, var_name, op, bc, &label_done, 1);
             }
             idx = vd->scope_next;
         }
@@ -36149,11 +36205,17 @@ local_scope_var:
         }
         if (var_name == JS_ATOM_arguments && fd->has_arguments_binding) {
             var_idx = add_arguments_var(ctx, fd);
+            /* PocketJS: -1 here is an allocation failure, not "absent";
+               left alone it reaches the global fallback (closure_fail). */
+            if (var_idx < 0)
+                goto closure_fail;
             break;
         }
         if (fd->is_func_expr && fd->func_name == var_name) {
             /* add a new variable with the function name */
             var_idx = add_func_var(ctx, fd, var_name);
+            if (var_idx < 0)
+                goto closure_fail;   /* PocketJS: as above */
             break;
         }
 
@@ -36164,6 +36226,8 @@ local_scope_var:
             idx = get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL,
                                   fd->var_object_idx, vd->var_name,
                                   false, false, JS_VAR_NORMAL);
+            if (idx < 0)
+                goto closure_fail;   /* PocketJS: see closure_fail */
             dbuf_putc(bc, OP_get_var_ref);
             dbuf_put_u16(bc, idx);
             var_object_test(ctx, s, var_name, op, bc, &label_done, 0);
@@ -36176,6 +36240,8 @@ local_scope_var:
             idx = get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL,
                                   fd->arg_var_object_idx, vd->var_name,
                                   false, false, JS_VAR_NORMAL);
+            if (idx < 0)
+                goto closure_fail;   /* PocketJS: see closure_fail */
             dbuf_putc(bc, OP_get_var_ref);
             dbuf_put_u16(bc, idx);
             var_object_test(ctx, s, var_name, op, bc, &label_done, 0);
@@ -36202,6 +36268,8 @@ local_scope_var:
                                           idx1,
                                           cv->var_name, cv->is_const,
                                           cv->is_lexical, cv->var_kind);
+                    if (idx < 0)
+                        goto closure_fail;   /* PocketJS: has_idx reads closure_var[idx] */
                 } else {
                     idx = idx1;
                 }
@@ -36216,6 +36284,8 @@ local_scope_var:
                                           idx1,
                                           cv->var_name, false, false,
                                           JS_VAR_NORMAL);
+                    if (idx < 0)
+                        goto closure_fail;   /* PocketJS: see closure_fail */
                 } else {
                     idx = idx1;
                 }
@@ -36242,6 +36312,11 @@ local_scope_var:
                                   fd->vars[var_idx].is_lexical,
                                   fd->vars[var_idx].var_kind);
         }
+        /* PocketJS: the silent-global case in closure_fail's comment --
+           without this, a failed capture fell out of this `if` and was
+           compiled by the global-variable code below. */
+        if (idx < 0)
+            goto closure_fail;
         if (idx >= 0) {
 has_idx:
             if ((op == OP_scope_put_var || op == OP_scope_make_ref) &&
@@ -36372,6 +36447,24 @@ done:
         s->label_slots[label_done].pos2 = bc->size;
     }
     return pos_next;
+closure_fail:
+    /* PocketJS: get_closure_var() creates the closure variable when it does
+       not exist yet, so it never returns -1 for "not found" -- only when
+       add_closure_var could not grow the array (out of memory) or hit the
+       16-bit limit. Upstream's call sites here treated that -1 three
+       different ways, all wrong: `if (idx >= 0)` and carry on to the next
+       scope, which ends in the GLOBAL-variable fallback at the bottom of
+       this function -- a variable the closure should have captured silently
+       compiled as a global read (reproduced: closures.js under
+       vmrun --fail-alloc 1764 prints its first two lines and then throws
+       "ReferenceError: shared is not defined"; had a global of that name
+       existed it would have read the wrong variable with no error at all);
+       no test, writing -1 into the operand as var_ref index 0xFFFF; and one
+       `goto has_idx` that reads s->closure_var[-1]. Marking the output
+       failed makes resolve_variables throw at its end, so the function
+       fails to compile -- the only honest result. */
+    dbuf_set_error(bc);
+    goto done;
 }
 
 /* search in all scopes */
@@ -36700,8 +36793,9 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
         while (scope_idx >= 0) {
             vd = &fd->vars[scope_idx];
             capture_var(fd, vd);
-            get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL, scope_idx,
-                            vd->var_name, vd->is_const, vd->is_lexical, vd->var_kind);
+            if (get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL, scope_idx,
+                            vd->var_name, vd->is_const, vd->is_lexical, vd->var_kind) < 0)
+                goto fail;   /* PocketJS: see below */
             scope_idx = vd->scope_next;
         }
         is_arg_scope = (scope_idx == ARG_SCOPE_END);
@@ -36712,9 +36806,10 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
                 vd = &fd->args[i];
                 if (vd->var_name != JS_ATOM_NULL) {
                     capture_var(fd, vd);
-                    get_closure_var(ctx, s, fd,
+                    if (get_closure_var(ctx, s, fd,
                                     JS_CLOSURE_ARG, i, vd->var_name, false,
-                                    vd->is_lexical, JS_VAR_NORMAL);
+                                    vd->is_lexical, JS_VAR_NORMAL) < 0)
+                        goto fail;   /* PocketJS: see below */
                 }
             }
             for (i = 0; i < fd->var_count; i++) {
@@ -36724,9 +36819,10 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
                         vd->var_name != JS_ATOM__ret_ &&
                         vd->var_name != JS_ATOM_NULL) {
                     capture_var(fd, vd);
-                    get_closure_var(ctx, s, fd,
+                    if (get_closure_var(ctx, s, fd,
                                     JS_CLOSURE_LOCAL, i, vd->var_name, false,
-                                    vd->is_lexical, JS_VAR_NORMAL);
+                                    vd->is_lexical, JS_VAR_NORMAL) < 0)
+                        goto fail;   /* PocketJS: see below */
                 }
             }
         } else {
@@ -36735,9 +36831,10 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
                 /* do not close top level last result */
                 if (vd->scope_level == 0 && is_var_in_arg_scope(vd)) {
                     capture_var(fd, vd);
-                    get_closure_var(ctx, s, fd,
+                    if (get_closure_var(ctx, s, fd,
                                     JS_CLOSURE_LOCAL, i, vd->var_name, false,
-                                    vd->is_lexical, JS_VAR_NORMAL);
+                                    vd->is_lexical, JS_VAR_NORMAL) < 0)
+                        goto fail;   /* PocketJS: see below */
                 }
             }
         }
@@ -36747,13 +36844,27 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
                top level) */
             for (idx = 0; idx < fd->closure_var_count; idx++) {
                 JSClosureVar *cv = &fd->closure_var[idx];
-                get_closure_var(ctx, s, fd,
+                if (get_closure_var(ctx, s, fd,
                                 JS_CLOSURE_REF,
                                 idx, cv->var_name, cv->is_const,
-                                cv->is_lexical, cv->var_kind);
+                                cv->is_lexical, cv->var_kind) < 0)
+                    goto fail;   /* PocketJS: see below */
             }
         }
     }
+    return;
+fail:
+    /* PocketJS: add_eval_variables creates, in advance, a closure variable
+       for everything a direct eval inside this function could name. It
+       ignored get_closure_var's result, and -1 means add_closure_var could
+       not allocate: that variable then never reached the eval, whose code
+       would resolve the name as a global -- the same silent miscompile
+       resolve_scope_var's closure_fail describes. This function returns
+       nothing, so the failure is recorded on the function's byte code, and
+       resolve_variables refuses an errored buffer before it walks it: the
+       function fails to compile with the out-of-memory error already
+       pending from the failed allocation. */
+    dbuf_set_error(&s->byte_code);
 }
 
 static void set_closure_from_var(JSContext *ctx, JSClosureVar *cv,
@@ -37201,6 +37312,33 @@ static __exception int resolve_variables(JSContext *ctx, JSFunctionDef *s)
     DynBuf bc_out;
     CodeContext cc;
     int scope;
+
+    /* PocketJS: the input may end in half an instruction. When an emit runs
+       out of memory part-way (emit_source_loc's dbuf_putc lands, the
+       dbuf_put_u32 after it does not), dbuf_put writes nothing, sets the
+       error flag and leaves size where it was -- so the buffer ends on an
+       opcode byte whose operands were never written. The walk below advances
+       by each opcode's declared length and copies that many bytes with
+       dbuf_put, which reads past the end (ASan: heap-buffer-overflow, READ
+       of size 5, reached with vmrun --fail-alloc on an ordinary corpus file).
+
+       Upstream knows this state exists: free_bytecode_atoms stops at a short
+       instruction with the comment "may happen if there is not enough memory
+       when emitting bytecode". This pass never got the same guard, in
+       quickjs-ng or in bellard/quickjs (both master, 2026-09-23), which check
+       only the OUTPUT buffer's error at the end.
+
+       Refusing before the walk is enough, and nothing else is needed for the
+       refcounts: emit_atom claims its 4 bytes before duplicating the atom, so
+       a cut-short instruction holds no atom reference, and the caller's fail
+       path frees s->byte_code through the already-guarded
+       free_bytecode_atoms. Nothing has been moved into bc_out yet, which is
+       why this cannot use the `fail:` path below -- that one exists to finish
+       a copy that had started. */
+    if (dbuf_error(&s->byte_code)) {
+        JS_ThrowOutOfMemory(ctx);
+        return -1;
+    }
 
     cc.bc_buf = bc_buf = s->byte_code.buf;
     cc.bc_len = bc_len = s->byte_code.size;
@@ -37946,6 +38084,25 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
             for (re = ls->first_reloc; re != NULL; re = re_next) {
                 int diff = ls->addr - re->addr;
                 re_next = re->next;
+                /* PocketJS: a reloc's address was recorded as
+                   `bc_out.size - n` right AFTER writing an n-byte
+                   placeholder, i.e. on the assumption that the write
+                   landed. Once bc_out has failed that is false -- nothing
+                   more is written, size stops -- so the address points n
+                   bytes back into the PREVIOUS instruction, and patching it
+                   writes a jump offset over that instruction's operand. The
+                   caller's fail path then decodes the buffer to free its
+                   atoms and reads the offset as an atom index (ASan: heap-
+                   buffer-overflow in __JS_FreeAtom, reading rt->atom_array
+                   far past its end, reached with vmrun --fail-alloc). The
+                   output of an errored pass is discarded anyway, so the
+                   patch is simply skipped; the entry is still freed. This
+                   also keeps the diff-range asserts below from firing on a
+                   garbage address, which on the device would reboot. */
+                if (dbuf_error(&bc_out)) {
+                    js_free(ctx, re);
+                    continue;
+                }
                 switch (re->size) {
                 case 4:
                     put_u32(bc_out.buf + re->addr, diff);
@@ -38770,6 +38927,25 @@ no_change:
         }
     }
 
+    /* PocketJS: the jump optimisation below rewrites bc_out in place -- it
+       indexes bc_out.buf at every jump slot's recorded pos and memmove()s
+       the tail by bc_out.size - pos - size - delta. Those positions were
+       recorded while pass 1 was emitting; if an emit in pass 1 ran out of
+       memory, bc_out stopped growing but the slots did not, so a pos can lie
+       past bc_out.size and the memmove length goes negative (ASan:
+       negative-size-param / heap-buffer-overflow in this function, reached
+       with vmrun --fail-alloc). The error was only tested at the very end,
+       after that damage.
+
+       Skip straight to the common tail rather than returning here: that tail
+       is what hands bc_out over as s->byte_code with use_short_opcodes set,
+       so the caller's fail path frees its atoms by decoding it with the right
+       (short) opcode table -- decoding it with the long one would misread
+       every instruction length. The tail's own dbuf_error test then throws
+       and returns -1, exactly as it did for a late failure before. */
+    if (dbuf_error(&bc_out))
+        goto finish;
+
     /* check that there were no missing labels */
     for (i = 0; i < s->label_count; i++) {
         assert(label_slots[i].first_reloc == NULL);
@@ -38852,6 +39028,22 @@ shrink:
         }
     }
 
+finish:
+    /* PocketJS: relocations still pending here belong to labels the walk
+       never reached, which only happens when it stopped early (the `fail:`
+       path below). Nothing else frees them -- js_free_function_def frees
+       the label_slots array but not the chains hanging off it. On the
+       success path every chain is already empty, as the assert above
+       checks, so this is skipped there. */
+    if (dbuf_error(&bc_out)) {
+        for (i = 0; i < s->label_count; i++) {
+            for (re = label_slots[i].first_reloc; re != NULL; re = re_next) {
+                re_next = re->next;
+                js_free(ctx, re);
+            }
+            label_slots[i].first_reloc = NULL;
+        }
+    }
     js_free(ctx, s->jump_slots);
     s->jump_slots = NULL;
     js_free(ctx, s->label_slots);
@@ -38870,9 +39062,28 @@ shrink:
     }
     return 0;
 fail:
-    /* XXX: not safe */
-    dbuf_free(&bc_out);
-    return -1;
+    /* PocketJS: upstream's "XXX: not safe", made safe. Reached when
+       add_reloc cannot allocate a relocation entry, part-way through the
+       walk. Upstream freed bc_out and returned, leaving s->byte_code as the
+       INPUT -- but the walk had already freed some of that input's atoms
+       (the cases that rewrite an instruction JS_FreeAtom the atom they
+       consumed), and the caller's fail path then frees every atom in the
+       input through free_bytecode_atoms, those included. A double free of an
+       atom: the second release reads a free-list link out of
+       rt->atom_array as if it were an atom (UBSan: misaligned JSAtomStruct
+       in __JS_FreeAtom, reached with vmrun --fail-alloc).
+
+       Hand over bc_out instead, through the common tail. Every atom the
+       walk moved is in bc_out exactly once and every atom it consumed is
+       gone, so freeing bc_out frees each exactly once. Atoms of input
+       instructions the walk never reached are neither moved nor freed --
+       the tail dbuf_free()s the input without walking it -- so they stay
+       referenced until JS_FreeRuntime releases the whole atom table: a
+       bounded leak on an out-of-memory path, never a double free. The error
+       flag makes the tail skip the jump optimisation, free the pending
+       relocations, install bc_out with use_short_opcodes, and throw. */
+    dbuf_set_error(&bc_out);
+    goto finish;
 }
 
 /* compute the maximum stack size needed by the function */
@@ -39240,12 +39451,25 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
 
         fd1 = list_entry(el, JSFunctionDef, link);
         cpool_idx = fd1->parent_cpool_idx;
+        /* PocketJS: -1 here means the parser's cpool_add() for this child
+           ran out of memory. All three sites that set parent_cpool_idx
+           (class field initialisers, the function-expression path and the
+           child-function path) store cpool_add's result without testing it,
+           and the parse carries on, so this used to be an assert -- which on
+           the device, where assertions are compiled in, turned an OOM while
+           parsing into a reboot. Refused BEFORE the child is built: fd1 is
+           still on fd->child_list, and the fail path below frees the whole
+           list through js_free_function_def, so nothing leaks and nothing is
+           built only to be thrown away. */
+        if (cpool_idx < 0) {
+            JS_ThrowOutOfMemory(ctx);
+            goto fail;
+        }
         func_obj = js_create_function(ctx, fd1);
         if (JS_IsException(func_obj)) {
             goto fail;
         }
         /* save it in the constant pool */
-        assert(cpool_idx >= 0);
         fd->cpool[cpool_idx] = func_obj;
     }
 
