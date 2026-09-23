@@ -55,6 +55,9 @@ P0(2)～(4)や実機ゲートの完了を意味しない。
 P0(2)の計数境界は[copy計数の監査表](p0-copy-coverage-20260924.md)に置く。
 明示的な構造体代入・schema参照確定・描画view複製を追加計数したが、
 QuickJS内部や全producerの複写は依然未網羅であり、合計はpartialのまま。
+[計数あり/なしのABBA実機比較](p0-copy-probe-abba-20260924.md)では、
+音声再生時draw p99の悪化は見えず、LCD送信p99に128 µsの差が出た。
+以後の時間基準にはcopy計数なし版を使う。
 
 1. `ksn_render.c` の既知のsigned-shift UBSan警告を解消し、sanitizer診断0件を
    成功条件にする。ASan/UBSanと`-O2 -fstrict-aliasing`、QuickJS統合、ESP-IDF buildを

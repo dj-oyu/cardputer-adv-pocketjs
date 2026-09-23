@@ -26,6 +26,11 @@
 実際に発行するload/store。P0の出口には診断ON/OFFの同条件実機時間比較と
 通常アプリ・musicの再現可能な基準値が必要であり、今回の分類追加だけでは未達。
 診断用カウンタはreleaseの`KASANE_P0_PROBE=OFF`でinline no-opになる。
+時間ヒストグラムだけを残して計数を外すときは
+`KASANE_P0_PROBE=ON -DKASANE_P0_COPY_PROBE=OFF`を指定する。
+[実機ABBA比較](p0-copy-probe-abba-20260924.md)ではdraw p99の回帰は
+検出されなかったが、send p99には計数ありで128 µsの差が出たため、
+時間基準とcopy量は別版の結果として扱う。
 
 ホストの`test_p0_histogram`は分類別bytes/calls、0-byte除外、reset、
 全分類のgroup対応を確認した。Kasane契約テストのASan/UBSan・O2、

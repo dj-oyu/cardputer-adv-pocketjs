@@ -13,8 +13,10 @@ typedef struct {
     uint32_t seen, maximum, over12;
 } series;
 static series samples[KSN_P0_SAMPLE_COUNT];
+#ifdef KASANE_P0_COPY_PROBE
 static uint64_t copy_bytes[KSN_P0_COPY_COUNT];
 static uint32_t copy_calls[KSN_P0_COPY_COUNT];
+#endif
 static uint64_t transfer_bytes,transfer_bands;
 static uint32_t transfer_frames;
 static const char *const sample_names[]={"app_turn","app_render","app_send",
@@ -31,6 +33,7 @@ _Static_assert(sizeof(sample_names)/sizeof(*sample_names)==KSN_P0_SAMPLE_COUNT,
                "sample probe labels must match the categories");
 _Static_assert(sizeof(sample_bucket_us)/sizeof(*sample_bucket_us)==KSN_P0_SAMPLE_COUNT,
                "sample probe bucket widths must match the categories");
+#ifdef KASANE_P0_COPY_PROBE
 static const char *const copy_names[]={"utf8_materialized","producer_materialized","adapter_temp",
     "adapter_owned","adapter_slot_commit","schema_ref_commit",
     "music_plan","music_status","music_materialized",
@@ -74,16 +77,22 @@ _Static_assert(sizeof(group_names)/sizeof(*group_names)==P0_GROUP_COUNT,
                "copy group names must match");
 _Static_assert(sizeof(copy_groups)/sizeof(*copy_groups)==KSN_P0_COPY_COUNT,
                "each copy category needs a group");
+#endif
 
 void ksn_p0_probe_reset(void){
-    memset(samples,0,sizeof(samples));memset(copy_bytes,0,sizeof(copy_bytes));
+    memset(samples,0,sizeof(samples));
+#ifdef KASANE_P0_COPY_PROBE
+    memset(copy_bytes,0,sizeof(copy_bytes));
     memset(copy_calls,0,sizeof(copy_calls));
+#endif
     transfer_bytes=transfer_bands=0;transfer_frames=0;
 }
+#ifdef KASANE_P0_COPY_PROBE
 void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes){
     if((unsigned)kind>=KSN_P0_COPY_COUNT||!bytes)return;
     copy_bytes[kind]+=bytes;copy_calls[kind]++;
 }
+#endif
 void ksn_p0_probe_sample(ksn_p0_sample_kind kind,uint32_t us){
     if((unsigned)kind>=KSN_P0_SAMPLE_COUNT)return;
     series *s=&samples[kind];
@@ -121,6 +130,7 @@ void ksn_p0_probe_report(const char *session){
             (unsigned long)s->maximum,(unsigned long)s->over12,
             (unsigned)sample_bucket_us[k],(unsigned long)s->bins[P0_BUCKETS-1u]);
     }
+#ifdef KASANE_P0_COPY_PROBE
     uint64_t observed_bytes=0;
     uint32_t observed_calls=0;
     uint64_t group_bytes[P0_GROUP_COUNT]={0};
@@ -139,6 +149,7 @@ void ksn_p0_probe_report(const char *session){
             (unsigned long long)group_bytes[k]);
     ESP_LOGI("KSN_P0","C session=%s kind=observed_total calls=%lu bytes=%llu coverage=partial",
         label,(unsigned long)observed_calls,(unsigned long long)observed_bytes);
+#endif
     if(transfer_frames)ESP_LOGI("KSN_P0","T session=%s frames=%lu lcd_bytes=%llu bands=%llu",
         label,(unsigned long)transfer_frames,(unsigned long long)transfer_bytes,
         (unsigned long long)transfer_bands);

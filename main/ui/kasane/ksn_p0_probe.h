@@ -49,7 +49,13 @@ typedef enum {
 
 #ifdef KASANE_P0_PROBE
 void ksn_p0_probe_reset(void);
+#ifdef KASANE_P0_COPY_PROBE
 void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes);
+#else
+static inline void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes) {
+    (void)kind;(void)bytes;
+}
+#endif
 void ksn_p0_probe_sample(ksn_p0_sample_kind kind,uint32_t us);
 void ksn_p0_probe_transfer(uint32_t bytes,uint32_t bands);
 void ksn_p0_probe_report(const char *session);

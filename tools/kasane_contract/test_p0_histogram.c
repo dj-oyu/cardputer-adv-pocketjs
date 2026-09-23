@@ -1,6 +1,9 @@
 #include <assert.h>
 #include <stdio.h>
 #define KASANE_P0_PROBE 1
+#ifndef P0_TIMING_ONLY
+#define KASANE_P0_COPY_PROBE 1
+#endif
 #include "../../main/ui/kasane/ksn_p0_probe.c"
 
 int main(void){
@@ -27,6 +30,7 @@ int main(void){
     ksn_p0_probe_transfer(64800,17);
     ksn_p0_probe_transfer(768,3);
     assert(transfer_frames==2&&transfer_bytes==65568&&transfer_bands==20);
+#ifndef P0_TIMING_ONLY
     ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,12);
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
@@ -48,11 +52,16 @@ int main(void){
            grouped_calls[P0_GROUP_ADAPTER_SCHEMA]==1);
     assert(grouped_bytes[P0_GROUP_CORE_SUBMIT]==48&&
            grouped_calls[P0_GROUP_CORE_SUBMIT]==2);
+#else
+    ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
+#endif
     ksn_p0_probe_reset();
     assert(samples[KSN_P0_OVERLAY_DRAW].seen==0);
     assert(transfer_frames==0&&transfer_bytes==0&&transfer_bands==0);
+#ifndef P0_TIMING_ONLY
     assert(copy_calls[KSN_P0_CORE_SUBMIT_COMMAND]==0&&
            copy_bytes[KSN_P0_CORE_SUBMIT_COMMAND]==0);
+#endif
     puts("p0 histogram: PASS (whole session, 128-us upper bounds, tail, deadline, LCD bytes/bands)");
     return 0;
 }

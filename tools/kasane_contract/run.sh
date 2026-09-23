@@ -15,6 +15,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Itools/kasane_contract/p0_hostshim -Itools/hostshim \
     tools/kasane_contract/test_p0_histogram.c -o "$out/p0-histogram"
   "$out/p0-histogram"
+  cc -std=c11 -Wall -Wextra -Werror $options -DP0_TIMING_ONLY \
+    -Itools/kasane_contract/p0_hostshim -Itools/hostshim \
+    tools/kasane_contract/test_p0_histogram.c -o "$out/p0-timing-only"
+  "$out/p0-timing-only"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Imain/pocket \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_notice.c main/ui/kasane/ksn_indicator.c \
