@@ -403,12 +403,35 @@ static inline size_t js_vm_seg_want_for_size(const JSVMStack *st, uint32_t n, si
     return want;
 }
 
+// Host harness only (tools/vmtest/vmrun.c defines it; everything else, the
+// firmware included, leaves the weak reference NULL): "the next allocation
+// is a frame segment". vmrun marks it in its trace so tools/vmalloc/replay
+// can serve segments from a region of their own (--seg-arena) and ask
+// whether keeping them out of the objects' heap helps it (design D6,
+// docs/vm/vm-L3-design.md sec.11).
+//
+// It carries the request size and is cleared (size 0) as soon as
+// js_malloc_rt returns, because js_malloc_rt can refuse on the memory limit
+// without calling the allocator at all: a bare "next one is a segment" flag
+// would then be left set and label whatever unrelated allocation came next.
+#if !defined(ESP_PLATFORM)
+extern void vmtest_seg_alloc_hint(size_t size) __attribute__((weak));
+#endif
+
 // `standard`: whether this segment belongs to the size-by-position growth
 // sequence (see JSVMSeg.standard) -- false for a frame bigger than
 // JS_VM_SEG_MAX and for the memory-limit fallback sized to a frame alone.
 static inline JSVMSeg *js_vm_seg_new(JSRuntime *rt, JSVMStack *st, size_t payload, int standard)
 {
+#if !defined(ESP_PLATFORM)
+    if (vmtest_seg_alloc_hint)
+        vmtest_seg_alloc_hint(sizeof(JSVMSeg) + (JS_VM_SEG_ALIGN - 1) + payload);
+#endif
     JSVMSeg *s = js_malloc_rt(rt, sizeof(JSVMSeg) + (JS_VM_SEG_ALIGN - 1) + payload);
+#if !defined(ESP_PLATFORM)
+    if (vmtest_seg_alloc_hint)
+        vmtest_seg_alloc_hint(0);
+#endif
     if (!s)
         return NULL;
     uintptr_t b = ((uintptr_t)(s + 1) + JS_VM_SEG_ALIGN - 1) & ~(uintptr_t)(JS_VM_SEG_ALIGN - 1);

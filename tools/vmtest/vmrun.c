@@ -111,8 +111,23 @@ static allocation_header_t *raw_alloc(size_t size) {
   return header;
 }
 
+// Set by the VM (quickjs-vmstack.h js_vm_seg_new) to the size of the frame
+// segment it is about to request, and back to 0 once js_malloc_rt returns.
+// The trace gets a "# seg" line in front of that one allocation, which
+// tools/vmalloc/replay --seg-arena uses to serve segments from their own
+// region. Matching on the size as well as the flag is belt and braces: the
+// VM clears it, but a request the memory limit refuses never reaches here.
+static size_t g_seg_hint_size;
+
+void vmtest_seg_alloc_hint(size_t size) {
+  g_seg_hint_size = size;
+}
+
 static void *vm_malloc(void *opaque, size_t size) {
   (void)opaque;
+  const bool is_seg = g_seg_hint_size != 0 && g_seg_hint_size == size;
+  g_seg_hint_size = 0;
+  if (A.trace && is_seg) fprintf(A.trace, "# seg\n");
   allocation_header_t *header = raw_alloc(size);
   if (header == NULL) {
     A.n_fail++;
