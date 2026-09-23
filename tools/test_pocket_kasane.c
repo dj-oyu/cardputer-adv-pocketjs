@@ -25,6 +25,7 @@ static int32_t test_player_id;
 static pocket_av_ui_snapshot test_player_ui;
 static bool test_clock_valid;
 static sys_clock_state test_clock_ui;
+static unsigned test_clock_reads;
 
 int32_t pocket_av_ui_current_player(void){return test_player_id;}
 bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
@@ -32,6 +33,7 @@ bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
     *out=test_player_ui;return true;
 }
 bool sys_device_clock_read(sys_clock_state *out){
+    test_clock_reads++;
     if(!out||!test_clock_valid)return false;
     *out=test_clock_ui;return true;
 }
@@ -453,14 +455,25 @@ static void reactive_presenter_tests(void){
     test_clock_ui=(sys_clock_state){.seconds=45240,.source=SYS_CLOCK_SNTP};
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
           "clock source updates without a JS update");
-    check(present(&stats)==KSN_OK,"synced native clock presents");
+    test_clock_ui.seconds=45300;
+    unsigned reads_before_pending=test_clock_reads;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          pocket_kasane_has_submission()&&test_clock_reads==reads_before_pending,
+          "pending ticket defers producer acquisition and coalesces the new minute");
+    check(present(&stats)==KSN_OK,"first synced native clock presents");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "latest native minute submits after the old ticket presents");
+    check(present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))!=0,
+          "coalesced native minute changes the displayed clock");
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
           "synced clock acknowledgement is stable");
-    test_clock_ui.seconds=45299;
+    test_clock_ui.seconds=45359;
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
           !pocket_kasane_has_submission(),
           "same displayed minute makes no native submission");
-    test_clock_ui.seconds=45300;
+    test_clock_ui.seconds=45420;
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
           "new minute makes one native submission");
     check(present(&stats)==KSN_OK,"new native minute presents");

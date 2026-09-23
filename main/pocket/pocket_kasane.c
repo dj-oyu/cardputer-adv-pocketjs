@@ -337,6 +337,14 @@ static __attribute__((noinline)) ksn_result schema_refresh_native(
     schema_state *s,schema_source *native,bool *blocked){
     if(s->session.ticket.value){
         ksn_submission outcome=ksn_view_poll(view());
+        /* A complete current snapshot can be reacquired after this ticket
+         * settles. Do not read the producer or advance its cursor for values
+         * that the session cannot preflight while a submission is pending. */
+        if(outcome.ticket.value==s->session.ticket.value&&
+           outcome.status==KSN_SUBMITTED){
+            if(blocked)*blocked=true;
+            return KSN_OK;
+        }
         if(outcome.ticket.value==s->session.ticket.value&&
            outcome.status==KSN_PRESENTED&&native->pending_revision){
             ksn_result ack=ksn_source_presented(&native->subscription,

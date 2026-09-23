@@ -82,3 +82,32 @@ decoderのみcore 0
 
 試験後、保存してあった元のapp領域3 MiBを0x10000と0x110000の2領域に
 復元し、双方`verify-flash`でdigest一致を確認した。COM3は解放済み。
+
+## SPI2 ISRを既定配置に戻したdecoder単独gate
+
+追加image SHA-256
+`394DEBDD007AA8EAE5BC3676BC3FAFA16F05FBF3B0AB3BCD2E9510C8A1C5D089`。
+`KASANE_P1_LCD_ISR_CORE1=OFF`、`KASANE_P1_DECODER_CORE0=ON`、
+`KASANE_P1_OUTPUT_CORE0=OFF`。終了時にSPI2 ISR core 0、decoder core 0を
+実測した。同じ01→02曲＋pause/resumeを3回、その後同一imageで240秒の
+01→02→03曲＋pause/resumeを実施した。
+
+| 試行 | draw p99 | post-ISR p99 | draw >12 ms | MP3 fault / underrun |
+| --- | ---: | ---: | ---: | --- |
+| 45秒 1 | 9.471 ms | 0.383 ms | 0/2,563 | 0 / 0 |
+| 45秒 2 | 9.471 ms | 0.383 ms | 0/2,024 | 0 / 0 |
+| 45秒 3 | 9.471 ms | 0.383 ms | 0/1,998 | 0 / 0 |
+| 240秒 | 9.471 ms | 0.383 ms | 0/7,803 | 0 / 0 |
+
+長時間試行では`missing_isr=0`、SD read最大17.764 ms、`slow=0`、
+`low_water=1`、最低heap 35,412 B、UI stack残23,692 B。
+この結果から**decoder core 0固定のみ**をMP3経路の既定動作へ採用する。
+ISR core 1固定・音声出力task core 0固定は診断optionのままで既定OFF。
+採用後の診断OFFファームはESP-IDF 6.0.1でリンク・容量検査に合格し、
+実QuickJS統合はASan/UBSanのO1と`-O2 -fstrict-aliasing`で0失敗。
+ただし採用後の診断OFF image自体は実機へ書き込んでいない。
+汎用source API、長時間以外のSD抜去、全アプリ画素一致などは未達であり、
+これだけでP1全体を完了扱いにしない。
+
+追加ログは`.cache/kasane-p1-affinity-20260924/decoder-isr-default-*/serial.log`。
+追加試行後も元の3 MiB app領域を復元して2領域を`verify-flash`、COM3を解放した。

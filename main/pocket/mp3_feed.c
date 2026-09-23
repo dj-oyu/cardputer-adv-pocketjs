@@ -163,11 +163,11 @@ mp3_feed_start_t mp3_feed_start(sound_stream_t *pcm, sound_stream_t *input,
     atomic_store(&running,true);
     // ESP-IDF stack sizes and watermarks are bytes, not vanilla FreeRTOS words.
     TaskHandle_t created=NULL;
-#ifdef KASANE_P1_DECODER_CORE0
+    /* Decoder bursts on the UI core delayed the LCD completion wake by up to
+     * 7 ms during SD playback. Core 0 keeps the UI's core 1 runnable; the
+     * reader and output tasks already coexisted there without underruns in
+     * the 240-second Cardputer gate (docs/kasane/p1-spi-isr-wakeup-20260924.md). */
     BaseType_t started=xTaskCreatePinnedToCore(worker,"mp3dec",MP3_STACK,w,6,&created,0);
-#else
-    BaseType_t started=xTaskCreate(worker,"mp3dec",MP3_STACK,w,6,&created);
-#endif
     if(started!=pdPASS) {
         atomic_store(&running,false);
         free(w->decoder.pcm); free(w->frame); free(w); return MP3_FEED_NOMEM;

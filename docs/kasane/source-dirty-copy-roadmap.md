@@ -126,7 +126,12 @@ task復帰遅れかは未確定で、P1の性能gateは未合格のまま。
 [SPI2完了callbackを用いた追試](p1-spi-isr-wakeup-20260924.md)では、
 遅い/速い試行でcallback前p99は同じ4,607 µs、callback後p99は
 7,807/383 µsだった。主な不安定性は物理転送時間よりUI task復帰側に
-ある。配置要因の切り分けと音声・描画の再ゲートが次の作業。
+ある。[task配置の独立比較](p1-spi-isr-wakeup-20260924.md)で、decoderを
+core 0に固定するとSPI2 ISRが既定core 0のままでも45秒×3試行と240秒の
+音声再生でdraw p99 9.471 ms、fault/underrun 0を確認し、MP3経路の
+既定配置へ採用した。出力taskやISRだけの移動は遅延を解消しなかった。
+P1全体では公開bind、複数source、期限scheduler、固定snapshot pool、
+画素一致と新経路の同条件A/Bが引き続き未達。
 
 ## P2：dirty-node更新を既存bankのまま導入
 
