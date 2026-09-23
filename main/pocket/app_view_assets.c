@@ -249,15 +249,18 @@ static const pocket_app_view_asset clock_asset={.schema=&clock_view,
 /* Host-only mount fixture: two independent native producers with disjoint
  * slots. No test state or app identity enters the Kasane core. */
 static const ksn_schema_slot dual_slots[]={
-    {"left",KSN_SLOT_TEXT,7,0,0},{"right",KSN_SLOT_TEXT,7,0,0}
+    {"left",KSN_SLOT_TEXT,7,0,0},{"right",KSN_SLOT_TEXT,7,0,0},
+    {"alt",KSN_SLOT_TEXT,7,0,0},{"tint",KSN_SLOT_COLOR,0,0,0}
 };
 static const ksn_schema_node dual_nodes[]={
     {.kind=KSN_NODE_TEXT,.bounds=RECT(0,0,45,16),
      .color=COLOR(0xffffffffu),.text={.slot=0},.font=KSN_CAPTION},
-    {.kind=KSN_NODE_TEXT,.bounds=RECT(48,0,95,16),
-     .color=COLOR(0xffffffffu),.text={.slot=1},.font=KSN_CAPTION}
+    {.kind=KSN_NODE_TEXT,.bounds=RECT(48,0,62,16),
+     .color=COLOR(0xffffffffu),.text={.slot=1},.font=KSN_CAPTION},
+    {.kind=KSN_NODE_TEXT,.bounds=RECT(64,0,95,16),
+     .color=COLOR(0xffffffffu),.text={.slot=2},.font=KSN_CAPTION}
 };
-static const ksn_schema dual_view={.version=1,.slot_count=2,.node_count=2,
+static const ksn_schema dual_view={.version=1,.slot_count=4,.node_count=3,
     .background=0x000000ffu,.slots=dual_slots,.nodes=dual_nodes};
 typedef struct {unsigned id;uint32_t generation;ksn_schema_value field;} dual_source;
 static struct {char text[8];uint64_t revision,expires_at_us;uint32_t changed;} dual_model[2]={
@@ -265,6 +268,7 @@ static struct {char text[8];uint64_t revision,expires_at_us;uint32_t changed;} d
     {.text="B0",.revision=1,.changed=1}
 };
 static bool dual_fail_second;
+static bool dual_deny[2];
 static unsigned dual_acquired,dual_released;
 void pocket_test_dual_set(unsigned source,const char *text){
     if(source>=2||!text)return;
@@ -278,6 +282,9 @@ void pocket_test_dual_expire(unsigned source,uint64_t at_us){
     dual_model[source].expires_at_us=at_us;
     dual_model[source].revision++;
     dual_model[source].changed=0;
+}
+void pocket_test_dual_deny(unsigned source,bool deny){
+    if(source<2)dual_deny[source]=deny;
 }
 void pocket_test_dual_fail_second(bool fail){dual_fail_second=fail;}
 void pocket_test_dual_counts(unsigned *acquired,unsigned *released){
@@ -304,7 +311,7 @@ static void dual_release(void *opaque,const ksn_source_snapshot *snapshot){
     (void)opaque;(void)snapshot;dual_released++;
 }
 static bool dual_allow(void *opaque,uint32_t consumer){
-    (void)opaque;return consumer!=0;
+    return consumer!=0&&!dual_deny[((dual_source *)opaque)->id];
 }
 static ksn_result dual_open(void *storage,ksn_source_provider *out,unsigned id){
     static const ksn_slot_type types[]={KSN_SLOT_TEXT};

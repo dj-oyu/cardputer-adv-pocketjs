@@ -171,7 +171,14 @@ JS baseへ戻り、別sourceの画素を変えず、native更新後に再びover
 一連の動作を2 sourceの実QuickJS host試験で確認。期限後や提出失敗時に
 0 tick待機を返してbusy-spinしない。新たなtimer/taskは設けていない。
 これは通常のowner frameを起点にした期限処理であり、別task producerの
-到着通知や実機の期限精度・音声共存gateはまだ未検証。公開bindも未実装。
+到着通知や実機の期限精度・音声共存gateはまだ未検証。この時点では公開bindも未実装。
+2026-09-24：[mount-owned source bind](p1-mount-source-bind.md)を追加した。
+`view.bind(index,{slotName:fieldIndex})`でC assetが既に所有するsourceの
+対応を、型・認可・重複slotを確認して変更できる。ownerの次turnで
+旧slotをJS baseへ戻し、新slotを完全snapshotで上書きする。
+実QuickJSのASan/UBSan・O2と診断OFF ESP-IDF buildはPASS、静的DIRAM
+159,788 B。任意アプリが外部service sourceを取得するcapability、
+detach/unbind、実機gateは未実装・未検証でありP1出口には未達。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

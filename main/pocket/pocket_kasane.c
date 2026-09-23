@@ -1810,8 +1810,77 @@ static JSValue js_schema_set_method(JSContext *ctx,JSValueConst self,
     if(!generic)return throw_result(ctx,KSN_STALE,"kasane.view.set");
     return js_schema_set(ctx,generic,argc?argv[0]:JS_UNDEFINED);
 }
+/* The source index is local to this mounted asset. It is not a global source
+ * name or a transferable handle; registration and allow() remain in C. */
+static JSValue js_schema_bind_method(JSContext *ctx,JSValueConst self,
+                                     int argc,JSValueConst *argv){
+    const char *op="kasane.view.bind";
+    schema_state *s=schema_owner(self);
+    if(!s)return throw_result(ctx,KSN_STALE,op);
+    if(!s->asset->source_count)return throw_result(ctx,KSN_UNSUPPORTED,op);
+    if(s->session.ticket.value)return throw_result(ctx,KSN_BUSY,op);
+    double source_number;
+    if(argc<2||!number_in(ctx,argv[0],0,s->asset->source_count-1u,
+                          &source_number)||!JS_IsObject(argv[1])||JS_IsArray(argv[1]))
+        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                "source index and slot bindings are required",false,NULL);
+    unsigned source_index=(unsigned)source_number;
+    JSPropertyEnum *props=NULL;uint32_t count=0;
+    if(JS_GetOwnPropertyNames(ctx,&props,&count,argv[1],
+                              JS_GPN_STRING_MASK|JS_GPN_ENUM_ONLY))return JS_EXCEPTION;
+    if(!count||count>KSN_SOURCE_MAX_FIELDS){
+        JS_FreePropertyEnum(ctx,props,count);
+        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                "binding count is out of range",false,NULL);
+    }
+    ksn_source_binding bindings[KSN_SOURCE_MAX_FIELDS];
+    bool valid=true;
+    for(uint32_t p=0;p<count&&valid;p++){
+        const char *name=JS_AtomToCString(ctx,props[p].atom);
+        if(!name){valid=false;break;}
+        unsigned slot=0;
+        for(;slot<s->definition->slot_count;slot++)
+            if(strcmp(name,s->definition->slots[slot].name)==0)break;
+        JS_FreeCString(ctx,name);
+        if(slot==s->definition->slot_count){valid=false;break;}
+        JSValue value=JS_GetProperty(ctx,argv[1],props[p].atom);
+        if(JS_IsException(value)){valid=false;break;}
+        double field;
+        valid=number_in(ctx,value,0,KSN_SOURCE_MAX_FIELDS-1u,&field);
+        JS_FreeValue(ctx,value);
+        if(valid)bindings[p]=(ksn_source_binding){(uint8_t)slot,(uint8_t)field};
+    }
+    JS_FreePropertyEnum(ctx,props,count);
+    if(!valid)return JS_HasException(ctx)?JS_EXCEPTION:
+        pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                         "slot name or field index is invalid",false,NULL);
+    /* A binding getter can call view.set() and submit while we parse it. */
+    if(s->session.ticket.value)return throw_result(ctx,KSN_BUSY,op);
+    schema_sources *sources=schema_native(s);
+    schema_source *entry=&sources->entries[source_index];
+    if(entry->subscription.binding_count==count&&
+       memcmp(entry->subscription.bindings,bindings,
+              count*sizeof(*bindings))==0)return JS_UNDEFINED;
+    ksn_source_subscription candidate;
+    ksn_result r=ksn_source_subscribe(&sources->registry,entry->handle,s->handle,
+        s->definition,bindings,(uint8_t)count,&candidate);
+    if(r!=KSN_OK)return throw_result(ctx,r,op);
+    for(unsigned i=0;i<s->asset->source_count;i++)
+        if(i!=source_index&&
+           (sources->entries[i].subscription.bound_slots&candidate.bound_slots))
+            return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                    "another source owns a bound slot",false,NULL);
+    s->pending_base_slots|=entry->subscription.bound_slots|candidate.bound_slots;
+    entry->subscription=candidate;
+    entry->pending_revision=0;
+    /* The next owner step reacquires the complete current snapshot. This
+     * cold-path mapping change allocates nothing and keeps the current frame
+     * intact if a producer is temporarily unavailable. */
+    return JS_UNDEFINED;
+}
 static const JSCFunctionListEntry schema_methods[]={
     JS_CFUNC_DEF("set",1,js_schema_set_method),
+    JS_CFUNC_DEF("bind",2,js_schema_bind_method),
 };
 static bool lazy_proto(JSContext *ctx,JSClassID id,const JSCFunctionListEntry *methods,int count);
 static JSValue js_schema_mount(JSContext *ctx,const pocket_app_view_asset *asset,

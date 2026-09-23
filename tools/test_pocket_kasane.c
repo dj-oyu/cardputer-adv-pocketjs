@@ -499,6 +499,9 @@ static void dual_source_mount_tests(void){
     pocket_test_dual_set(0,"A1");pocket_test_dual_set(1,"B1");
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
           "two source changes enter one submission");
+    check(run("(()=>{let busy=false;try{dual.bind(0,{alt:0})}catch(e){busy=true}"
+              "if(!busy)throw Error('bind while pending')})()"),
+          "bind rejects a mapping change during an in-flight frame");
     pocket_test_dual_counts(&reads_before,NULL);
     pocket_test_dual_set(0,"A2");pocket_test_dual_set(1,"B2");
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
@@ -565,9 +568,51 @@ static void dual_source_mount_tests(void){
     check(present(&stats)==KSN_OK,"renewed native value presents");
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
           "renewed native value acknowledges");
+    check(run("(()=>{let overlap=false;try{dual.bind(0,{right:0})}"
+              "catch(e){overlap=true}if(!overlap)throw Error('overlap')})()"),
+          "public bind rejects a slot already owned by another source");
+    check(run("(()=>{let wrong=false;try{dual.bind(0,{alt:1})}"
+              "catch(e){wrong=true}if(!wrong)throw Error('field type')})()"),
+          "public bind validates the source field index");
+    check(run("(()=>{let wrong=false;try{dual.bind(0,{tint:0})}"
+              "catch(e){wrong=true}if(!wrong)throw Error('slot type')})()"),
+          "public bind rejects a field-to-slot type mismatch");
+    pocket_test_dual_deny(0,true);
+    check(run("(()=>{let denied=false;try{dual.bind(0,{alt:0})}"
+              "catch(e){denied=true}if(!denied)throw Error('source denied')})()"),
+          "public bind enforces producer authorization");
+    pocket_test_dual_deny(0,false);
+    check(run("(()=>{let busy=false;try{dual.bind(0,{get alt(){"
+              "dual.set({alt:'JS'});return 0}})}catch(e){busy=true}"
+              "if(!busy)throw Error('getter submitted')})()")&&
+          pocket_kasane_has_submission(),
+          "public bind rechecks pending work after a binding getter");
+    check(present(&stats)==KSN_OK,"binding getter submission presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "binding getter submission acknowledges");
+    check(run("dual.bind(0,{left:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "reentrant rejected bind leaves the old mapping intact");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    check(run("dual.bind(0,{alt:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "public bind remaps a mount-owned source without JS frame state");
+    check(present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))!=0,
+          "rebinding restores old base slot and fills new source slot");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "rebound source acknowledges its new subscription");
+    check(run("dual.bind(0,{alt:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "identical public bind does not redraw");
     pocket_kasane_reset();
     check(pocket_kasane_source_wait_ticks(1001,10,1000)==10,
           "unmounted source does not shorten owner waits");
+    check(run("(()=>{let stale=false;try{dual.bind(0,{alt:0})}"
+              "catch(e){stale=true}if(!stale)throw Error('stale bind')})()"),
+          "old mount cannot rebind a source after reset");
 }
 #endif
 
