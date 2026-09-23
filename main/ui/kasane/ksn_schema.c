@@ -175,12 +175,12 @@ static bool offset_rect(ksn_rect *r,ksn_rect viewport){
     *r=(ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
     return true;
 }
-static int text_advance(ksn_schema_text text){
+static int text_advance(ksn_schema_text text,ksn_font font){
     int width=0;
     for(unsigned i=0;i<text.bytes;){
         uint8_t lead=(uint8_t)text.utf8[i];
         unsigned n=lead<0x80?1:lead<0xe0?2:lead<0xf0?3:4;
-        width+=n==1?6:n==4?24:12;i+=n;
+        width+=(int)ksn_font_advance(font,lead);i+=n;
     }
     return width;
 }
@@ -234,7 +234,7 @@ static ksn_result next_draw(const ksn_schema *schema,const ksn_schema_value *val
         *out=(schema_resolved){.draw={.opacity=255,.bounds=bounds,.clip=viewport}};
         ksn_draw *draw=&out->draw;
         if(n->kind==KSN_NODE_PLATE_TEXT){
-            int width=text_advance(value);
+            int width=text_advance(value,n->font);
             if((int32_t)bounds.x0+width+8>INT16_MAX||
                (int32_t)bounds.y0+16>INT16_MAX)return KSN_INVALID;
             if(!cursor->plate_tail){

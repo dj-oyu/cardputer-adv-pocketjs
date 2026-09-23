@@ -39,9 +39,9 @@ static int advance(const char *s,unsigned bytes){
     for(unsigned i=0;i<bytes;){
         unsigned lead=(uint8_t)s[i];
         unsigned n=lead<0x80?1:lead<0xe0?2:lead<0xf0?3:4;
-        /* The old JS plate counted a supplementary scalar as two UTF-16
-         * code units. Keep that width for the migration comparison. */
-        width+=n==1?6:n==4?24:12;i+=n;
+        /* A non-ASCII lead denotes one scalar, including supplementary ones.
+         * The caption renderer advances 8 px regardless of UTF-8 byte count. */
+        width+=(int)ksn_font_advance(KSN_CAPTION,lead);i+=n;
     }
     return width;
 }

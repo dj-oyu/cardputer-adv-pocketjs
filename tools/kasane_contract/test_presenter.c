@@ -34,10 +34,14 @@ int main(void){
     CHECK(ksn_presenter_copy_text(v.text[0],&v.bytes[0],"あ",3)==KSN_OK);
     v.help=false;v.playing=false;
     CHECK(ksn_presenter_make(KSN_PRESENTER_MUSIC,&v,240,135,&a)==KSN_OK);
-    CHECK(a.items[0].bounds.x1==28); /* Legacy plate advance: 12 + 8. */
+    CHECK(a.items[0].bounds.x1==24); /* Caption: 8 + 8 padding. */
+    CHECK(a.items[1].bounds.x1==20); /* Text starts at x=12, advances 8. */
     CHECK(ksn_presenter_copy_text(v.text[0],&v.bytes[0],"\xf0\x9f\x98\x80",4)==KSN_OK);
     CHECK(ksn_presenter_make(KSN_PRESENTER_MUSIC,&v,240,135,&a)==KSN_OK);
-    CHECK(a.items[0].bounds.x1==40); /* Two legacy UTF-16 advances: 24 + 8. */
+    CHECK(a.items[0].bounds.x1==24); /* Supplementary scalar advances once. */
+    CHECK(ksn_presenter_copy_text(v.text[0],&v.bytes[0],"A\xe3\x81\x82" "B",5)==KSN_OK);
+    CHECK(ksn_presenter_make(KSN_PRESENTER_MUSIC,&v,240,135,&a)==KSN_OK);
+    CHECK(a.items[0].bounds.x1==36); /* 6 + 8 + 6 + 8 padding. */
     {
         char long_text[64];memset(long_text,'A',sizeof(long_text));
         CHECK(ksn_presenter_copy_text(v.text[0],&v.bytes[0],long_text,sizeof(long_text))==KSN_OK);

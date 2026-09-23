@@ -120,5 +120,17 @@ int main(void){
     duplicate[1].name="arbitraryCaption";
     ksn_schema bad=schema;bad.slots=duplicate;
     CHECK(ksn_schema_validate(&bad)==KSN_INVALID);
+    ksn_schema_node mixed_plate=nodes[2];
+    mixed_plate.text.literal.text=(ksn_schema_text){"A\xe3\x81\x82\xf0\x9f\x98\x80",8};
+    ksn_schema plate_schema=schema;plate_schema.nodes=&mixed_plate;plate_schema.node_count=1;
+    values[3].data.number=1;
+    CHECK(ksn_schema_submit(view,(ksn_rect){0,0,240,135},&plate_schema,values,
+                            refs,&count,&tx)==KSN_OK&&count==2);
+    CHECK(ksn_core_frame(&core,&frame)==KSN_OK);
+    CHECK(ksn_core_presented(&core,tx)==KSN_OK);
+    CHECK(ksn_view_read_ref(view,refs[0],&snapshot)==KSN_OK);
+    CHECK(snapshot.draw.kind==KSN_RECT&&snapshot.draw.bounds.x1==38);
+    CHECK(ksn_view_read_ref(view,refs[1],&snapshot)==KSN_OK);
+    CHECK(snapshot.draw.kind==KSN_TEXT&&snapshot.draw.bounds.x1==34);
     puts("schema: PASS");return 0;
 }
