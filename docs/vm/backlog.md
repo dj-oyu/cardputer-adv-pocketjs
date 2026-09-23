@@ -40,7 +40,7 @@ L1 とは独立に見つかった既存の不具合。
 | --- | --- | --- | --- |
 | 1 | `deferred_buttons` が継続ターン中の 2 打鍵を 1 マスクに融合する。受け入れて文書化するか、キュー化する（離鍵フレームの対の作り直しを伴う）か、継続ターン中は最初の 1 つだけ保持するかが未決 | vm-L1-report.md §5.2-1 | 未決（実装は現状維持） |
 | 2 | 仕様 §6「未処理ジョブもイベントも無い場合だけ待機する」を、専用タスク化なし（現状: `ui_task` のフレーム待ちを完了通知で早く抜けるだけ）で充足と認めるかどうか。専用タスク化は静的 DIRAM +24〜32 KiB 推定で、L0 の RAM 上限 +8 KiB を超える | vm-L1-report.md §4.1・§3 | 未決 |
-| 3 | 公平モード（`CONFIG_POCKET_VM_FAIR`、既定 off）を既定にするかどうかの再検討。F 型アプリで完了遅延が中央値 3〜7 倍改善する一方、JS から観測できる順序（互換順序）を変えるため、仕様 §12 の既定挙動維持とは相容れない。L2 が実測を根拠に問い直せると位置づけ済み | vm-L1-report.md §9.5 | 未決（build 時選択として温存） |
+| 3 | 公平モード（`CONFIG_POCKET_VM_FAIR`、既定 off）を既定にするかどうか。**2026-09-23に n で確定**: 実機で測り直したところ、L1 §9.5 の「F型で完了遅延が中央値3〜7倍改善」は今の負荷では再現しない（F は完了イベントを持たず、E は drain が予算に収まるため公平モードのコードに到達しない）。観測できるのは費用だけで、仕様 §12 の順序互換を崩す理由が無い。出荷アプリに「予算超過の drain ＋ 待っている完了」が現れたら測り直す | vm-L1-report.md §9.5, vm-L2-results.md §9 | 完了（n で確定） |
 | 5 | GC 閾値（初期値 256 KiB）がゲストの上限（160 KiB）より大きく、循環参照のゴミが回収されなかった。`quickjs.c` の比較時キャップ（上限−上限/32）と `guest.c` の初期閾値（上限/2）で修正。回帰は `tools/vmtest/corpus/gc_threshold_{device,near_limit}.js`。生存量が上限の31/32を超えると毎オブジェクト生成でGCする点は未計測（実機） | vm-L0-report.md §2、結果は vm-L2-results.md §4.19 | 完了（host・実機smoke/memlog/benchで確認） |
 | 6 | 上流 quickjs-ng の use-after-free: バックトレース組み立て中に確保が失敗する経路。上流 e1c1e416 を移植して修正。同じ関数の CallSite 二重解放（上流 c846cb13）も移植。回帰は `oom_creep_backtrace.js`・`oom_callsite_double_free.js`（再現元の `known/oom_backtrace_uaf.js` も asan で UAF なし） | vm-L0-report.md §2、結果は vm-L2-results.md §4.21 | 完了 |
 | 7 | 中断された `await` の Promise が永久に pending のまま残る（割り込みが捕捉不能な例外として実装されているため）。L1 は予算切れではこれを作らないが、暴走ガードと `stop_interrupt` の経路では今も起きる | quickjs-freertos-vm-spec.md §7「非対応事項」、vm-ledger/03 事実39-41 | 未着手（L2 の中断設計と併せて扱う想定） |

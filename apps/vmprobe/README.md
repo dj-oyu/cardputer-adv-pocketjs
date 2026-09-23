@@ -18,6 +18,8 @@ USB の 1 バイトだけで起動する（`main/main.c` の `usb_stroke()`、`m
 | E | `io_wait.js` | `pocket.time.sleep(10)` を自分の `.then` から張り直す。完了遅延 |
 | F | `async_generator.js` | `for await` で async generator を 20 回。中断・再開と await の往復 |
 
+**`F` の取り合い（2026-09-23に解消）**: ホーム画面の `F` は FPU 遅延計測にも割り当てられていて、`usb_stroke()` の並び順のせいでワークロードに届いていなかった。この字での採取は、FPU 計測が入ってから 2026-09-23 までのあいだ、窓が出ないまま失敗していた（`main/main.c` で順序を直した）。
+
 ## フレームセグメント比較（診断ビルドのみ）
 
 `tools/vm_l0_capture.py --segment-policy 0..5`で、次に開始するセッションのFIRST/MAXを選ぶ。
