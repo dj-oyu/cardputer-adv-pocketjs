@@ -1072,6 +1072,16 @@ static bool player_payload(JSContext *ctx, int slot, void *user, JSValue *payloa
 static void player_service_stream(void) {
     mp3_sd_session_reap();
     if(!player.open) return;
+    // A paused decoder cannot consume the EOF published by card removal.
+    // Finish that session on the owner task instead of leaving it paused until
+    // somebody asks to resume a source whose lease has been revoked.
+    if(player.state==P_PAUSED&&player.sd_mp3&&
+       mp3_sd_session_fault(player.sd_mp3)) {
+        player.source_fault=true;
+        player_halt();
+        player_set_state(P_ERROR);
+        return;
+    }
     // The Opus start, deferred out of play() -- see player_launch(). One slot is
     // 40 ms of decoded audio, which is a whole frame of head start for a
     // consumer that takes 5.3 ms at a time; eof covers a source so short the

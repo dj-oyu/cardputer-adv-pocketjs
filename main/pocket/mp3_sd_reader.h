@@ -15,8 +15,21 @@ typedef struct {
     mp3_sd_read_fn read;
 } mp3_sd_reader_t;
 
+static inline mp3_sd_step_t mp3_sd_reader_signal(mp3_sd_reader_t *r) {
+    // Owner stop explicitly sets cancel before revoking its lease. A revoked
+    // lease without that stop means removal or another SD failure: wake the
+    // decoder with EOF and let the player report a source error.
+    if(atomic_load(r->cancel)) return MP3_SD_CANCEL;
+    if(atomic_load(r->revoked)) {
+        atomic_store(&r->packets->eof,true);
+        return MP3_SD_ERROR;
+    }
+    return MP3_SD_MORE;
+}
+
 static inline mp3_sd_step_t mp3_sd_reader_step(mp3_sd_reader_t *r) {
-    if(atomic_load(r->cancel)||atomic_load(r->revoked)) return MP3_SD_CANCEL;
+    mp3_sd_step_t signal=mp3_sd_reader_signal(r);
+    if(signal!=MP3_SD_MORE) return signal;
     if(r->at>=r->end) {
         atomic_store(&r->packets->eof,true);
         return MP3_SD_EOF;
@@ -27,8 +40,9 @@ static inline mp3_sd_step_t mp3_sd_reader_step(mp3_sd_reader_t *r) {
     if(want>SOUND_STREAM_SLOT_BYTES) want=SOUND_STREAM_SLOT_BYTES;
     int err=0;
     int32_t got=r->read(r->read_ctx,r->at,slot,want,&err);
-    // Cancellation during a blocking read discards its uncommitted slot.
-    if(atomic_load(r->cancel)||atomic_load(r->revoked)) return MP3_SD_CANCEL;
+    // A stop or removal during a blocking read discards the uncommitted slot.
+    signal=mp3_sd_reader_signal(r);
+    if(signal!=MP3_SD_MORE) return signal;
     if(got<=0||err) {
         atomic_store(&r->packets->eof,true);
         return MP3_SD_ERROR;

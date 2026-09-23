@@ -75,7 +75,12 @@ reader park on predicates; notifications only wake the reader to recheck those
 predicates. EOF, read error and cancellation are distinct terminal states.
 Read errors set compressed EOF so the decoder drains what was published, then
 the player reports `P_ERROR`. Cancellation of a blocking read discards its
-unpublished slot. Stop cancels the lease and waits 200 ms for worker ACK before
+unpublished slot. A lease revoked by card removal or another SD fault also
+sets compressed EOF and reports `P_ERROR`, even if the reader was paused or the
+revocation arrived inside `fread()`. Only an explicit owner stop is a silent
+cancellation. A paused player reports this source error from the owner service
+without waiting for its parked decoder to drain. Stop cancels the lease and
+waits 200 ms for worker ACK before
 closing the lease or freeing any session-owned memory. A late worker is kept in
 quarantine and reaped from the owner task after ACK. If the audio task itself
 fails its stop wait, its PCM ring stays quarantined because the sound API has

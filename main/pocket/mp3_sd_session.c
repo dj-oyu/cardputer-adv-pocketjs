@@ -56,9 +56,11 @@ static void sd_worker(void *arg) {
     s->core=(uint32_t)xPortGetCoreID();
 #endif
     for(;;) {
-        if(atomic_load(&s->cancel)||atomic_load(&s->lease.token.revoked)) {
-            atomic_store(&s->terminal,SD_CANCELLED); break;
-        }
+        // Check this even while paused: physical removal must wake the
+        // decoder and become P_ERROR, whereas close() is a cancellation.
+        mp3_sd_step_t signal=mp3_sd_reader_signal(&r);
+        if(signal==MP3_SD_CANCEL) { atomic_store(&s->terminal,SD_CANCELLED); break; }
+        if(signal==MP3_SD_ERROR) { atomic_store(&s->terminal,SD_ERROR); break; }
         if(atomic_load(&s->paused)) {
             ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(SD_WAIT_MS));
             continue;
