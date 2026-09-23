@@ -210,6 +210,8 @@ static const uint16_t *char_range_table[] = {
     char_range_w,
 };
 
+static int re_parse_out_of_memory(REParseState *s);
+
 static int cr_init_char_range(REParseState *s, CharRange *cr, uint32_t c)
 {
     bool invert;
@@ -232,8 +234,14 @@ static int cr_init_char_range(REParseState *s, CharRange *cr, uint32_t c)
     }
     return 0;
 fail:
+    /* PocketJS: cr_add_point / cr_invert fail only on allocation, and this
+       `return -1` (upstream, as of 2026-09-23) set no message, so
+       lre_compile()'s error: label copied out whatever s->u.tmp_buf held
+       -- the last group name parsed. /(?<y>\d{4})-(?<m>\d{2})/ under
+       vmrun --fail-alloc 1626 / 1631 threw "SyntaxError: y" and
+       "SyntaxError: m" for a heap that was merely full. */
     cr_free(cr);
-    return -1;
+    return re_parse_out_of_memory(s);
 }
 
 #ifdef DUMP_REOP
@@ -701,7 +709,8 @@ unknown_property_name:
     if (is_inv) {
         if (cr_invert(cr)) {
             cr_free(cr);
-            return -1;
+            goto out_of_memory;   /* PocketJS: was a message-less -1, see
+                                     cr_init_char_range() */
         }
     }
     *pp = p;
@@ -1388,8 +1397,20 @@ lookahead:
                     return re_parse_error(s, "duplicate group name");
                 }
                 /* group name with a trailing zero */
-                dbuf_put(&s->group_names, (uint8_t *)s->u.tmp_buf,
-                         strlen(s->u.tmp_buf) + 1);
+                /* PocketJS: upstream ignores this result (and the
+                   dbuf_putc below). The name table is a second DynBuf,
+                   independent of s->byte_code, so a failed growth here is
+                   not seen by lre_compile()'s dbuf_error(&s->byte_code)
+                   check: the pattern compiles, the table stays short, and
+                   the `size > capture_count - 1` test at the end decides
+                   there were no named groups at all. /(?<y>\d{4})/ then
+                   matches with `groups` undefined (regexp_oom.js under
+                   vmrun --fail-alloc 1625 / 1630: "cannot read property
+                   'y' of undefined"). Report it as what it is. */
+                if (dbuf_put(&s->group_names, (uint8_t *)s->u.tmp_buf,
+                             strlen(s->u.tmp_buf) + 1)) {
+                    return re_parse_out_of_memory(s);
+                }
                 s->has_named_captures = 1;
                 goto parse_capture;
             } else {
@@ -1399,7 +1420,9 @@ lookahead:
             int capture_index;
             p++;
             /* capture without group name */
-            dbuf_putc(&s->group_names, 0);
+            if (dbuf_putc(&s->group_names, 0)) {
+                return re_parse_out_of_memory(s);   /* PocketJS: as above */
+            }
 parse_capture:
             if (s->capture_count >= CAPTURE_COUNT_MAX) {
                 return re_parse_error(s, "too many captures");
@@ -2030,6 +2053,15 @@ error:
     s->byte_code.buf[RE_HEADER_STACK_SIZE] = stack_size;
     put_u32(s->byte_code.buf + RE_HEADER_BYTECODE_LEN,
             s->byte_code.size - RE_HEADER_LEN);
+
+    /* PocketJS: the choke point for the group-name table, as the
+       dbuf_error(&s->byte_code) above is for the bytecode: both writers in
+       re_parse_term() check their own result, this catches any that a
+       later edit forgets, so a short table can never pass as "no names". */
+    if (dbuf_error(&s->group_names)) {
+        re_parse_out_of_memory(s);
+        goto error;
+    }
 
     /* add the named groups if needed */
     if (s->group_names.size > (s->capture_count - 1)) {

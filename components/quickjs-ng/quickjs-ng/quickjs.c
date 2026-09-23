@@ -36021,6 +36021,10 @@ static int add_var_this(JSContext *ctx, JSFunctionDef *fd)
     return idx;
 }
 
+/* PocketJS: resolve_pseudo_var's third answer, next to "index" and "-1: no
+   binding here" -- add_var failed (see the comment at its alloc_fail). */
+#define RESOLVE_PSEUDO_VAR_ALLOC_FAIL (-2)
+
 static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
                               JSAtom var_name)
 {
@@ -36034,6 +36038,8 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         /* 'home_object' pseudo variable */
         if (s->home_object_var_idx < 0) {
             s->home_object_var_idx = add_var(ctx, s, var_name);
+            if (s->home_object_var_idx < 0)
+                goto alloc_fail;   /* PocketJS: see below */
         }
         var_idx = s->home_object_var_idx;
         break;
@@ -36041,6 +36047,8 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         /* 'this.active_func' pseudo variable */
         if (s->this_active_func_var_idx < 0) {
             s->this_active_func_var_idx = add_var(ctx, s, var_name);
+            if (s->this_active_func_var_idx < 0)
+                goto alloc_fail;
         }
         var_idx = s->this_active_func_var_idx;
         break;
@@ -36048,6 +36056,8 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         /* 'new.target' pseudo variable */
         if (s->new_target_var_idx < 0) {
             s->new_target_var_idx = add_var(ctx, s, var_name);
+            if (s->new_target_var_idx < 0)
+                goto alloc_fail;
         }
         var_idx = s->new_target_var_idx;
         break;
@@ -36055,6 +36065,8 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         /* 'this' pseudo variable */
         if (s->this_var_idx < 0) {
             s->this_var_idx = add_var_this(ctx, s);
+            if (s->this_var_idx < 0)
+                goto alloc_fail;
         }
         var_idx = s->this_var_idx;
         break;
@@ -36063,6 +36075,19 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         break;
     }
     return var_idx;
+alloc_fail:
+    /* PocketJS: this function has two "no" answers that upstream (quickjs-ng
+       master as of 2026-09-23) folds into one -1: "this function has no
+       such binding, look in the parent" and "add_var could not grow the
+       vars array" (out of memory, or JS_MAX_LOCAL_VARS, which has already
+       thrown). resolve_scope_var treats -1 as the former, walks on to the
+       parent scopes and finally the global fallback, so a `this` or
+       `new.target` that failed to get its slot compiled as a global read of
+       the same name -- generators.js under vmrun --fail-alloc 2115
+       (add_var for `this` in a generator, needed by the yield* delegation)
+       ran and reported "TypeError: not a function" at the yield*. -2 is the
+       distinct answer; both callers route it to closure_fail. */
+    return RESOLVE_PSEUDO_VAR_ALLOC_FAIL;
 }
 
 /* test if 'var_name' is in the variable object on the stack. If is it
@@ -36147,6 +36172,8 @@ static int resolve_scope_var(JSContext *ctx, JSFunctionDef *s,
 
         if (var_idx < 0 && is_pseudo_var) {
             var_idx = resolve_pseudo_var(ctx, s, var_name);
+            if (var_idx == RESOLVE_PSEUDO_VAR_ALLOC_FAIL)
+                goto closure_fail;   /* PocketJS: see resolve_pseudo_var */
         }
 
         if (var_idx < 0 && var_name == JS_ATOM_arguments &&
@@ -36329,6 +36356,8 @@ local_scope_var:
         }
         if (is_pseudo_var) {
             var_idx = resolve_pseudo_var(ctx, fd, var_name);
+            if (var_idx == RESOLVE_PSEUDO_VAR_ALLOC_FAIL)
+                goto closure_fail;   /* PocketJS: see resolve_pseudo_var */
             if (var_idx >= 0) {
                 break;
             }
@@ -36829,12 +36858,22 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
 
     /* in non strict mode, variables are created in the caller's
        environment object */
+    /* PocketJS: every add_var / add_*_var below returns -1 only when the
+       vars array could not grow (or JS_MAX_LOCAL_VARS, already thrown);
+       upstream drops all of these results, so the variable the eval was
+       promised is simply absent and the eval's code resolves the name one
+       scope too far out. Same disease as the get_closure_var sites
+       (fail: below); same cure. */
     if (!s->is_eval && !s->is_strict_mode) {
         s->var_object_idx = add_var(ctx, s, JS_ATOM__var_);
+        if (s->var_object_idx < 0)
+            goto fail;
         if (s->has_parameter_expressions) {
             /* an additional variable object is needed for the
                argument scope */
             s->arg_var_object_idx = add_var(ctx, s, JS_ATOM__arg_var_);
+            if (s->arg_var_object_idx < 0)
+                goto fail;
         }
     }
 
@@ -36843,29 +36882,40 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
     if (has_this_binding) {
         if (s->this_var_idx < 0) {
             s->this_var_idx = add_var_this(ctx, s);
+            if (s->this_var_idx < 0)
+                goto fail;
         }
         if (s->new_target_var_idx < 0) {
             s->new_target_var_idx = add_var(ctx, s, JS_ATOM_new_target);
+            if (s->new_target_var_idx < 0)
+                goto fail;
         }
         if (s->is_derived_class_constructor && s->this_active_func_var_idx < 0) {
             s->this_active_func_var_idx = add_var(ctx, s, JS_ATOM_this_active_func);
+            if (s->this_active_func_var_idx < 0)
+                goto fail;
         }
         if (s->has_home_object && s->home_object_var_idx < 0) {
             s->home_object_var_idx = add_var(ctx, s, JS_ATOM_home_object);
+            if (s->home_object_var_idx < 0)
+                goto fail;
         }
     }
     has_arguments_binding = s->has_arguments_binding;
     if (has_arguments_binding) {
-        add_arguments_var(ctx, s);
+        if (add_arguments_var(ctx, s) < 0)
+            goto fail;
         /* also add an arguments binding in the argument scope to
            raise an error if a direct eval in the argument scope tries
            to redefine it */
         if (s->has_parameter_expressions && !s->is_strict_mode) {
-            add_arguments_arg(ctx, s);
+            if (add_arguments_arg(ctx, s) < 0)
+                goto fail;
         }
     }
     if (s->is_func_expr && s->func_name != JS_ATOM_NULL) {
-        add_func_var(ctx, s, s->func_name);
+        if (add_func_var(ctx, s, s->func_name) < 0)
+            goto fail;
     }
 
     /* eval can use all the variables of the enclosing functions, so
@@ -36896,26 +36946,36 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
         if (!has_this_binding && fd->has_this_binding) {
             if (fd->this_var_idx < 0) {
                 fd->this_var_idx = add_var_this(ctx, fd);
+                if (fd->this_var_idx < 0)
+                    goto fail;   /* PocketJS: see above */
             }
             if (fd->new_target_var_idx < 0) {
                 fd->new_target_var_idx = add_var(ctx, fd, JS_ATOM_new_target);
+                if (fd->new_target_var_idx < 0)
+                    goto fail;
             }
             if (fd->is_derived_class_constructor && fd->this_active_func_var_idx < 0) {
                 fd->this_active_func_var_idx = add_var(ctx, fd, JS_ATOM_this_active_func);
+                if (fd->this_active_func_var_idx < 0)
+                    goto fail;
             }
             if (fd->has_home_object && fd->home_object_var_idx < 0) {
                 fd->home_object_var_idx = add_var(ctx, fd, JS_ATOM_home_object);
+                if (fd->home_object_var_idx < 0)
+                    goto fail;
             }
             has_this_binding = true;
         }
         /* add 'arguments' if it was not previously added */
         if (!has_arguments_binding && fd->has_arguments_binding) {
-            add_arguments_var(ctx, fd);
+            if (add_arguments_var(ctx, fd) < 0)
+                goto fail;
             has_arguments_binding = true;
         }
         /* add function name */
         if (fd->is_func_expr && fd->func_name != JS_ATOM_NULL) {
-            add_func_var(ctx, fd, fd->func_name);
+            if (add_func_var(ctx, fd, fd->func_name) < 0)
+                goto fail;
         }
 
         /* add lexical variables */
@@ -40692,6 +40752,21 @@ static JSValue JS_EvalFunctionInternal(JSContext *ctx, JSValue fun_obj,
     tag = JS_VALUE_GET_TAG(fun_obj);
     if (tag == JS_TAG_FUNCTION_BYTECODE) {
         fun_obj = js_closure(ctx, fun_obj, var_refs, sf);
+        /* PocketJS: js_closure returns JS_EXCEPTION when the function
+           object or its var_refs cannot be allocated (bfunc is freed by
+           then), with "out of memory" already pending. Upstream (quickjs-ng
+           master, same lines as of 2026-09-23) hands that JS_EXCEPTION
+           straight to JS_CallFree, which rejects a non-object callee with
+           "TypeError: not a function" -- and JS_Throw replaces the pending
+           InternalError with it. Every top-level script and every direct
+           eval passes through here, so the guest's first sign of a full
+           heap was a TypeError with no stack (regexp_oom.js 2429-2431,
+           closures.js 2306-2308 / 2648-2654, generators.js 2527-2529
+           under vmrun --fail-alloc). The interpreter's own OP_fclosure
+           already checks this result; this caller did not. */
+        if (JS_IsException(fun_obj)) {
+            return JS_EXCEPTION;
+        }
         ret_val = JS_CallFree(ctx, fun_obj, this_obj, 0, NULL);
     } else if (tag == JS_TAG_MODULE) {
         JSModuleDef *m;
