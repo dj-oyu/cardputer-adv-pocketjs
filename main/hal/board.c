@@ -72,10 +72,17 @@ static spi_transaction_t tx_pending;
  * places the result on ret_queue. This is an ISR-service timestamp, not the
  * exact hardware DMA completion edge. Both tasks use the same esp_timer clock. */
 static atomic_uint lcd_data_isr_us;
+static atomic_int lcd_data_isr_core=ATOMIC_VAR_INIT(-1);
+static bool lcd_isr_reported;
+int board_lcd_isr_core(void){
+    return atomic_load_explicit(&lcd_data_isr_core,memory_order_relaxed);
+}
 static void IRAM_ATTR lcd_post_cb(spi_transaction_t *trans){
-    if(trans->user==&lcd_data_isr_us)
+    if(trans->user==&lcd_data_isr_us){
+        atomic_store_explicit(&lcd_data_isr_core,xPortGetCoreID(),memory_order_relaxed);
         atomic_store_explicit(&lcd_data_isr_us,(uint32_t)esp_timer_get_time(),
                               memory_order_relaxed);
+    }
 }
 #endif
 // Reap the strip queued last time. One transaction is in flight at a time
@@ -106,6 +113,14 @@ static esp_err_t tx_reap(void) {
         ksn_p0_bus_phase_sample(KSN_P0_BUS_PRE_ISR,pre,false);
         ksn_p0_bus_phase_sample(KSN_P0_BUS_POST_ISR,elapsed-pre,false);
     }else ksn_p0_bus_missing_isr();
+    if(!lcd_isr_reported){
+        int core=atomic_load_explicit(&lcd_data_isr_core,memory_order_relaxed);
+        if(core>=0){
+            lcd_isr_reported=true;
+            ESP_LOGI("board","P1 LCD ISR observed core %d, UI reap core %d",
+                     core,xPortGetCoreID());
+        }
+    }
 #endif
     tx_inflight = false;
     return e;
@@ -312,8 +327,16 @@ esp_err_t board_init(void) {
     gpio_set_level(38, 0); gpio_set_level(33, 0); vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(33, 1); vTaskDelay(pdMS_TO_TICKS(120));
     spi_bus_config_t bus = {.mosi_io_num=35, .miso_io_num=-1, .sclk_io_num=36,
-        .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=sizeof(shared)};
+        .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=sizeof(shared)
+#ifdef KASANE_P1_LCD_ISR_CORE1
+        ,.isr_cpu_id=ESP_INTR_CPU_AFFINITY_1
+#endif
+    };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
+#ifdef KASANE_P1_LCD_ISR_CORE1
+    ESP_LOGI("board","P1 LCD ISR affinity requested core 1, UI core %d",
+             CONFIG_POCKET_UI_TASK_CORE);
+#endif
     // 80MHz, not the 40MHz M5Stack ships. The panel's flex is short and the
     // ST7789 tolerates it: send went from 15.5ms to 9.1ms measured, and the
     // owner confirmed on the physical panel that nothing is corrupted. That

@@ -40,3 +40,45 @@ core配置とdecoder/audio taskのcore配置を**別要因として**測る。
 実機は試験前の先頭1 MiBと、試験前にdigest一致を確認した既存の後半2 MiBに
 復元し、2領域とも`verify-flash`で一致を確認してCOM3を解放した。
 P1の音声描画gateは引き続き未合格。
+
+## ISR / task affinity の独立比較
+
+同じREOPEN reader、同じ01→02曲、2曲目約45秒、15秒時点で2秒pause/resume。
+すべて`KASANE_P0_PROBE=ON`、`KASANE_P0_BUS_PROBE=ON`。
+SPI2 ISRをcore 1へ固定した状態で、decoderと音声出力taskの配置だけを
+切り替えた。出荷構成ではこれらの診断optionはすべてOFF。
+
+| decoder core 0 | 出力 core 0 | 有効試行 | draw p99 | post-ISR p99 | draw >12 ms | 音声fault / underrun |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| いいえ | いいえ | 1 | 16.255 ms | 7.167 ms | 101 | 0 / 0 |
+| はい | はい | 3 | 各9.471 ms | 各0.255 ms | 各0 | 0 / 0 |
+| はい | いいえ | 2 | 各9.471 ms | 各0.383 ms | 各0 | 0 / 0 |
+| いいえ | はい | 1 | 16.127 ms | 7.039 ms | 109 | 0 / 0 |
+
+ISR core 1だけを変えた最初の有効試行もdraw p99 16.895 ms、post-ISR
+p99 7.807 msで遅かった。終了時ログでSPI2 ISRがcore 1で走ることを
+確認した。音声出力taskは未固定でも終了時core 0、decoderは未固定の
+試行で曲によって終了時core 1 / 0となった。終了時の1点観測では
+途中のmigrationは証明できない。
+
+このA/Bではdecoderをcore 0に固定した2構成だけが再現して速い。
+音声出力taskだけの固定とISR core 1だけでは足りない。主因の候補は
+decoderがUI core 1を長く占有してUI taskのSPI完了復帰を遅らせること。
+ただし今回の試行はすべてISR core 1なので、decoder固定**単独**で
+出荷構成を改善するかは未測定。また45秒×数試行では長時間再生、
+SD抜去、音声deadline、全体の消費電力を合格扱いにできない。
+
+image SHA-256: ISR1 / task未固定
+`C9F7D7C22ACACC64BFAB753BF8584BF49E11FFA65C826361B7C40A211684E8AF`、
+両task core 0
+`2EC8FC208F8D80FAEAF521BE7892FDB12FF4C32A6CDAB5C4CBCE14C5DD403005`、
+decoderのみcore 0
+`E6D30BFABD3A82FC8A1A99A97F16F28E7255DCEBA6E662B0848800373676795B`、
+出力のみcore 0
+`EEE9D237F46031E0E35B4D7E94E35DD2C749692DADE247A8F3B7CD5CA7A38B79`。
+生ログは`.cache/kasane-p1-affinity-20260924/`。
+最初のISR1および出力のみ試行には、前のアプリ状態からhelloが開いていた
+無効試行が各1回あり、表から除外した。
+
+試験後、保存してあった元のapp領域3 MiBを0x10000と0x110000の2領域に
+復元し、双方`verify-flash`でdigest一致を確認した。COM3は解放済み。

@@ -1082,6 +1082,9 @@ static void audio_task(void *arg) {
             if(req.kind<SFX_KINDS&&atomic_load(&enabled))play_click(req.kind,pcm);
         } else if(req.kind==-2) {
             play_stream(&req,pcm);
+#ifdef KASANE_P0_BUS_PROBE
+            ESP_LOGI("sound","P1 audio observed core %d",xPortGetCoreID());
+#endif
         } else {
             play_tone(&req,pcm);
         }
@@ -1116,7 +1119,12 @@ void sound_init(i2c_master_bus_handle_t bus) {
     i2c_master_bus_rm_device(codec);if(err!=ESP_OK)goto fail;
     events=xQueueCreate(4,sizeof(request_t));
     if(!events)goto fail;
-    if(xTaskCreate(audio_task,"sfx",4096,NULL,7,NULL)!=pdPASS){vQueueDelete(events);events=NULL;goto fail;}
+#ifdef KASANE_P1_OUTPUT_CORE0
+    BaseType_t started=xTaskCreatePinnedToCore(audio_task,"sfx",4096,NULL,7,NULL,0);
+#else
+    BaseType_t started=xTaskCreate(audio_task,"sfx",4096,NULL,7,NULL);
+#endif
+    if(started!=pdPASS){vQueueDelete(events);events=NULL;goto fail;}
     // Nothing is rendered here any more; the tables were rendered by the build.
     ESP_LOGI("sound","ES8311 ready; 24kHz stereo from %d baked samples; default ON",
              SFX_SAMPLES+WAVE_POINTS);return;

@@ -109,7 +109,7 @@ static void worker(void *arg) {
         count++;
         atomic_store(&progress,count);
         atomic_store(&frames,w->produced);
-        // Share the core with the UI even when no PCM backpressure applies.
+        // Yield even when no PCM backpressure applies.
         // A live pause retains this decoder instead of replaying the prefix.
         vTaskDelay(1);
     }
@@ -131,6 +131,9 @@ static void worker(void *arg) {
              (unsigned)count,(unsigned)w->produced,(unsigned)atomic_load(&faults),
              (unsigned)(count?total_us/count:0),(unsigned)worst_us,
              MP3_STACK-left,MP3_STACK,(unsigned)sizeof(*w));
+#ifdef KASANE_P0_BUS_PROBE
+    ESP_LOGI("mp3","P1 decoder observed core %d",xPortGetCoreID());
+#endif
     free(w->decoder.pcm); free(w->frame); free(w);
     taskENTER_CRITICAL(&worker_lock);
     worker_task=NULL;
@@ -160,7 +163,12 @@ mp3_feed_start_t mp3_feed_start(sound_stream_t *pcm, sound_stream_t *input,
     atomic_store(&running,true);
     // ESP-IDF stack sizes and watermarks are bytes, not vanilla FreeRTOS words.
     TaskHandle_t created=NULL;
-    if(xTaskCreate(worker,"mp3dec",MP3_STACK,w,6,&created)!=pdPASS) {
+#ifdef KASANE_P1_DECODER_CORE0
+    BaseType_t started=xTaskCreatePinnedToCore(worker,"mp3dec",MP3_STACK,w,6,&created,0);
+#else
+    BaseType_t started=xTaskCreate(worker,"mp3dec",MP3_STACK,w,6,&created);
+#endif
+    if(started!=pdPASS) {
         atomic_store(&running,false);
         free(w->decoder.pcm); free(w->frame); free(w); return MP3_FEED_NOMEM;
     }

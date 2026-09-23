@@ -502,6 +502,10 @@ void app_stop(void) {
     guest=NULL;
     app_report();
     if(p0_had_guest)ksn_p0_probe_report(overlay_session?"overlay":"app");
+#ifdef KASANE_P0_BUS_PROBE
+    if(p0_had_guest)ESP_LOGI("board","P1 LCD ISR observed core %d at app stop",
+                            board_lcd_isr_core());
+#endif
     ESP_LOGI("app","APP_STOPPED");
 }
 esp_err_t app_start_test(char test) {

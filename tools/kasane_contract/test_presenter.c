@@ -42,6 +42,12 @@ int main(void){
     CHECK(ksn_presenter_copy_text(v.text[0],&v.bytes[0],"A\xe3\x81\x82" "B",5)==KSN_OK);
     CHECK(ksn_presenter_make(KSN_PRESENTER_MUSIC,&v,240,135,&a)==KSN_OK);
     CHECK(a.items[0].bounds.x1==36); /* 6 + 8 + 6 + 8 padding. */
+    /* Captured on the device as an 86 px plate before the caption fix:
+     * three kana were counted as 12 px while the font drew them at 8 px. */
+    const char *rhythm="04 \xe3\x83\xaa\xe3\x82\xba\xe3\x83\xa0.mp3";
+    CHECK(ksn_presenter_copy_text(v.text[0],&v.bytes[0],rhythm,strlen(rhythm))==KSN_OK);
+    CHECK(ksn_presenter_make(KSN_PRESENTER_MUSIC,&v,240,135,&a)==KSN_OK);
+    CHECK(a.items[0].bounds.x1==82); /* Plate x=8..81: 66 px text + 8 px padding. */
     {
         char long_text[64];memset(long_text,'A',sizeof(long_text));
         CHECK(ksn_presenter_copy_text(v.text[0],&v.bytes[0],long_text,sizeof(long_text))==KSN_OK);
