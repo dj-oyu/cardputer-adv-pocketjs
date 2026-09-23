@@ -43,11 +43,21 @@
     __asm__ __volatile__(".rept " STR(REPT) "\n" asmstr "\n.endr\n" ::: \
         "f0","f3","f4","f5","f6","f7","a8","memory")
 
-static uint32_t run_case(void (*body)(void)) {
+// Cases 7 and 8 read four words of scratch. The pointer arrives as the case's
+// argument and the asm names it as %0, rather than being left in a9 by the
+// setup in fpu_latency_run(): a9 is in the CALLER's window, so what the callee
+// finds there is a different register. It survived the first run by luck and
+// took the second one down -- LoadProhibited inside lsi_indep, reproducible by
+// pressing 'F' twice (2026-09-23).
+#define BODY_P(asmstr, ptr) \
+    __asm__ __volatile__(".rept " STR(REPT) "\n" asmstr "\n.endr\n" :: "a"(ptr) : \
+        "f0","f3","f4","f5","f6","f7","a8","memory")
+
+static uint32_t run_case(void (*body)(void *), void *scratch) {
     uint32_t best = UINT32_MAX;
     for (unsigned r = 0; r < RUNS; r++) {
         uint32_t t0 = esp_cpu_get_cycle_count();
-        for (unsigned i = 0; i < ITERS; i++) body();
+        for (unsigned i = 0; i < ITERS; i++) body(scratch);
         uint32_t dt = esp_cpu_get_cycle_count() - t0;
         if (dt < best) best = dt;
     }
@@ -55,42 +65,42 @@ static uint32_t run_case(void (*body)(void)) {
 }
 
 // 1. mul.s, result of each feeding the next.
-static void mul_dep(void)   { BODY("mul.s f0,f0,f1"); }
-static void mul_indep(void) { BODY("mul.s f3,f7,f1\n mul.s f4,f7,f1\n mul.s f5,f7,f1\n mul.s f6,f7,f1"); }
+static void mul_dep(void *p)   { (void)p; BODY("mul.s f0,f0,f1"); }
+static void mul_indep(void *p) { (void)p; BODY("mul.s f3,f7,f1\n mul.s f4,f7,f1\n mul.s f5,f7,f1\n mul.s f6,f7,f1"); }
 // 2. madd.s accumulating into one register, against four independent ones.
-static void madd_dep(void)   { BODY("madd.s f0,f1,f2"); }
-static void madd_indep(void) { BODY("madd.s f3,f1,f2\n madd.s f4,f1,f2\n madd.s f5,f1,f2\n madd.s f6,f1,f2"); }
+static void madd_dep(void *p)   { (void)p; BODY("madd.s f0,f1,f2"); }
+static void madd_indep(void *p) { (void)p; BODY("madd.s f3,f1,f2\n madd.s f4,f1,f2\n madd.s f5,f1,f2\n madd.s f6,f1,f2"); }
 // 3. An FPU result crossing to a general register. shade does this three times
 //    per pixel on the way into rgbd, and once in normal().
-static void rfr_dep(void)   { BODY("mul.s f0,f0,f1\n rfr a8,f0"); }
-static void rfr_indep(void) { BODY("mul.s f0,f0,f1\n rfr a8,f7"); }
+static void rfr_dep(void *p)   { (void)p; BODY("mul.s f0,f0,f1\n rfr a8,f0"); }
+static void rfr_indep(void *p) { (void)p; BODY("mul.s f0,f0,f1\n rfr a8,f7"); }
 // 4. The float-to-int conversion, which is how every colour channel leaves
 //    shade. Note trunc.s writes a GENERAL register, so there is no rfr after
 //    it -- the crossing is the instruction itself. The dependent arm converts a
 //    value the previous instruction just produced.
-static void trunc_dep(void)   { BODY("mul.s f0,f0,f1\n trunc.s a8,f0,0"); }
-static void trunc_indep(void) { BODY("mul.s f0,f0,f1\n trunc.s a8,f7,0"); }
+static void trunc_dep(void *p)   { (void)p; BODY("mul.s f0,f0,f1\n trunc.s a8,f0,0"); }
+static void trunc_indep(void *p) { (void)p; BODY("mul.s f0,f0,f1\n trunc.s a8,f7,0"); }
 // 5. An FPU compare feeding a branch: POS() and every material test.
-static void olt_dep(void)   { BODY("olt.s b0,f1,f2\n bt b0,1f\n 1:"); }
-static void olt_indep(void) { BODY("olt.s b0,f1,f2\n bt b1,1f\n 1:"); }
+static void olt_dep(void *p)   { (void)p; BODY("olt.s b0,f1,f2\n bt b0,1f\n 1:"); }
+static void olt_indep(void *p) { (void)p; BODY("olt.s b0,f1,f2\n bt b1,1f\n 1:"); }
 // 6. A general register crossing INTO the FPU and being used at once, which is
 //    what a literal-pool constant costs after l32r.
-static void wfr_dep(void)   { BODY("wfr f3,a8\n mul.s f4,f3,f1"); }
-static void wfr_indep(void) { BODY("wfr f3,a8\n mul.s f4,f7,f1"); }
+static void wfr_dep(void *p)   { (void)p; BODY("wfr f3,a8\n mul.s f4,f3,f1"); }
+static void wfr_indep(void *p) { (void)p; BODY("wfr f3,a8\n mul.s f4,f7,f1"); }
 // 7. The same value loaded straight into the FPU, which is what the material
 //    table in shade does instead (docs/perf/flower-shade.md 9).
-static void lsi_dep(void)   { BODY("lsi f3,a9,0\n mul.s f4,f3,f1"); }
-static void lsi_indep(void) { BODY("lsi f3,a9,0\n mul.s f4,f7,f1"); }
+static void lsi_dep(void *p)   { BODY_P("lsi f3,%0,0\n mul.s f4,f3,f1", p); }
+static void lsi_indep(void *p) { BODY_P("lsi f3,%0,0\n mul.s f4,f7,f1", p); }
 // 8. Store then load at the SAME address, which is how shade's prologue
 //    receives its two by-value vectors (flower-shade.md 13).
-static void fwd_dep(void)   { BODY("s32i.n a8,a9,0\n lsi f3,a9,0"); }
-static void fwd_indep(void) { BODY("s32i.n a8,a9,8\n lsi f3,a9,0"); }
+static void fwd_dep(void *p)   { BODY_P("s32i.n a8,%0,0\n lsi f3,%0,0", p); }
+static void fwd_indep(void *p) { BODY_P("s32i.n a8,%0,8\n lsi f3,%0,0", p); }
 
 // 9-10. How many INDEPENDENT CHAINS it takes to fill the stalls. One chain is
 // case 2 at 4.07. These interleave two and three accumulators -- real chains,
 // each operation waiting on the same register three back.
-static void chain2(void) { BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2"); }
-static void chain3(void) { BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2\n madd.s f4,f1,f2"); }
+static void chain2(void *p) { (void)p; BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2"); }
+static void chain3(void *p) { (void)p; BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2\n madd.s f4,f1,f2"); }
 
 // 11-12. What hand-ordered assembly would buy, on the shape shade's lighting
 // block actually has. One copy is two INDEPENDENT sub-chains -- the diffuse dot
@@ -108,16 +118,16 @@ static void chain3(void) { BODY("madd.s f0,f1,f2\n madd.s f3,f1,f2\n madd.s f4,f
 // If woven1 beats naive1, hand ordering pays inside a SINGLE pixel and no
 // two-pixel refactor is needed at all. If woven2 costs what woven1 does, two
 // pixels ride for the price of one.
-static void naive1(void) { BODY(
+static void naive1(void *p) { (void)p; BODY(
     "mul.s f3,f0,f1\n madd.s f3,f0,f1\n madd.s f3,f0,f1\n"
     "mul.s f4,f0,f1\n madd.s f4,f0,f1\n madd.s f4,f0,f1\n"
     "mul.s f4,f4,f4\n mul.s f4,f4,f4\n mul.s f4,f4,f4\n mul.s f4,f4,f4\n"); }
-static void woven1(void) { BODY(
+static void woven1(void *p) { (void)p; BODY(
     "mul.s f3,f0,f1\n mul.s f4,f0,f1\n"
     "madd.s f3,f0,f1\n madd.s f4,f0,f1\n"
     "madd.s f3,f0,f1\n madd.s f4,f0,f1\n"
     "mul.s f4,f4,f4\n mul.s f4,f4,f4\n mul.s f4,f4,f4\n mul.s f4,f4,f4\n"); }
-static void woven2(void) { BODY(
+static void woven2(void *p) { (void)p; BODY(
     "mul.s f3,f0,f1\n mul.s f4,f0,f1\n mul.s f5,f0,f1\n mul.s f6,f0,f1\n"
     "madd.s f3,f0,f1\n madd.s f4,f0,f1\n madd.s f5,f0,f1\n madd.s f6,f0,f1\n"
     "madd.s f3,f0,f1\n madd.s f4,f0,f1\n madd.s f5,f0,f1\n madd.s f6,f0,f1\n"
@@ -130,7 +140,7 @@ static void woven2(void) { BODY(
 // single instruction. Dividing both by the same number -- which the first run
 // of this probe did -- reports the independent arm as four times its cost and
 // makes a real three-cycle stall look like none at all.
-struct { const char *name; void (*dep)(void); void (*indep)(void);
+struct { const char *name; void (*dep)(void *); void (*indep)(void *);
          unsigned per_dep, per_indep; } static const
 cases[] = {
     {"mul.s",          mul_dep,   mul_indep,   1,  4},
@@ -168,8 +178,8 @@ void fpu_latency_run(void) {
              REPT, ITERS, RUNS);
     for (unsigned c = 0; c < sizeof(cases)/sizeof(cases[0]); c++) {
         double base = (double)REPT * (double)ITERS;
-        double dep = run_case(cases[c].dep) / (base * cases[c].per_dep);
-        double ind = run_case(cases[c].indep) / (base * cases[c].per_indep);
+        double dep = run_case(cases[c].dep, scratch) / (base * cases[c].per_dep);
+        double ind = run_case(cases[c].indep, scratch) / (base * cases[c].per_indep);
         ESP_LOGI("fpu", "FPU_CASE %-14s dep=%.2f indep=%.2f stall=%.2f cy/instr",
                  cases[c].name, dep, ind, dep - ind);
     }

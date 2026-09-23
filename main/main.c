@@ -249,10 +249,6 @@ static bool usb_stroke(char c, keystroke_t *k) {
         k->text[0]=c;k->len=1;return true;
     }
     if(c=='s') { atomic_store(&capture,true); return false; }
-    // Not behind CONFIG_KSN_DEVICE_PROBE: this one measures the CPU rather than
-    // the display, it is about a kilobyte, and the build that needs it is
-    // whichever build is being optimised -- which is the shipping one.
-    if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
 #ifdef CONFIG_KSN_DEVICE_PROBE
     if(c=='~') { atomic_store(&ksn_probe_requested,true); return false; }
     if(c=='N'||c=='O'||c=='Z'){atomic_store(&system_probe_requested,c);return false;}
@@ -301,6 +297,15 @@ static bool usb_stroke(char c, keystroke_t *k) {
         vmprobe_condition_set((unsigned)(c-'P')); return false;
     }
 #endif
+    // Not behind CONFIG_KSN_DEVICE_PROBE: this one measures the CPU rather than
+    // the display, it is about a kilobyte, and the build that needs it is
+    // whichever build is being optimised -- which is the shipping one. PLACED
+    // AFTER the probe block for the same reason 'K' is: 'F' is also the probe's
+    // sixth workload (async_generator), and taking it here made that workload
+    // unreachable in a probe build -- tools/vm_l0_capture.py asked for it and
+    // got a pipeline measurement instead, silently, from whenever this key was
+    // added until 2026-09-23.
+    if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
     // The Kasane demo trigger ('K', app_session.c's kasane_demo_start). PLACED
     // AFTER the probe block on purpose: 'G'..'K' is the probe's segment range, so
     // with CONFIG_POCKET_VM_PROBE on a 'K' still selects probe segment 4, and
