@@ -43,3 +43,5 @@ SD workerのboundedな実行タイミング比較を行う。リング空き・�
 を無視したSD停止や、閾値の事後緩和は採用しない。診断機は試験後に
 元の3 MiBアプリ領域を復元し、両領域の`verify-flash`一致を確認した。
 生ログは`.cache/kasane-p1-bus-20260924/trial-{1,2}/serial.log`。
+続く[割込み時刻の同一バイナリ比較](p1-spi-isr-wakeup-20260924.md)では、
+遅い試行の増分は主にSPI2完了callback後からUI task復帰までにあった。

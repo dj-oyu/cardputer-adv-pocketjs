@@ -15,6 +15,10 @@
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
+#ifdef KASANE_P0_BUS_PROBE
+#include <stdatomic.h>
+#include "esp_attr.h"
+#endif
 
 static spi_device_handle_t lcd;
 static i2c_master_dev_handle_t keyboard;
@@ -63,6 +67,17 @@ static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
 // keeps the pointer until the result is reaped.
 static spi_transaction_t tx_pending;
+#ifdef KASANE_P0_BUS_PROBE
+/* Diagnostic only. SPI post_cb runs in the SPI2 ISR just before the driver
+ * places the result on ret_queue. This is an ISR-service timestamp, not the
+ * exact hardware DMA completion edge. Both tasks use the same esp_timer clock. */
+static atomic_uint lcd_data_isr_us;
+static void IRAM_ATTR lcd_post_cb(spi_transaction_t *trans){
+    if(trans->user==&lcd_data_isr_us)
+        atomic_store_explicit(&lcd_data_isr_us,(uint32_t)esp_timer_get_time(),
+                              memory_order_relaxed);
+}
+#endif
 // Reap the strip queued last time. One transaction is in flight at a time
 // (the LCD device is configured with queue_size=1), so this is also the barrier
 // every command goes through before it ends the RAMWR session. Returns the
@@ -77,10 +92,20 @@ static esp_err_t tx_reap(void) {
     spi_transaction_t *done = NULL;
     esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
 #ifdef KASANE_P0_BUS_PROBE
+    uint32_t finished=(uint32_t)esp_timer_get_time();
+    uint32_t elapsed=finished-(uint32_t)began;
     ksn_p0_bus_phase_sample(KSN_P0_BUS_REAP,
-        (uint32_t)(esp_timer_get_time()-began),
+        elapsed,
         sd_before||ksn_p0_bus_sd_active()||
         sd_epoch_before!=ksn_p0_bus_sd_epoch());
+    uint32_t isr=atomic_load_explicit(&lcd_data_isr_us,memory_order_relaxed);
+    if(isr){
+        /* The ISR may already have run before the UI entered get_result. */
+        uint32_t pre=(int32_t)(isr-(uint32_t)began)>0?isr-(uint32_t)began:0u;
+        if(pre>elapsed)pre=elapsed;
+        ksn_p0_bus_phase_sample(KSN_P0_BUS_PRE_ISR,pre,false);
+        ksn_p0_bus_phase_sample(KSN_P0_BUS_POST_ISR,elapsed-pre,false);
+    }else ksn_p0_bus_missing_isr();
 #endif
     tx_inflight = false;
     return e;
@@ -296,7 +321,11 @@ esp_err_t board_init(void) {
     // the byte swap and the transfer, and MISO is unwired, so no software
     // check here can see what actually reaches the glass. Revert to 40000000
     // if any tearing or colour damage ever shows up.
-    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37, .queue_size=1};
+    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37, .queue_size=1
+#ifdef KASANE_P0_BUS_PROBE
+        ,.post_cb=lcd_post_cb
+#endif
+    };
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev, &lcd));
     pie_swap=swap_agrees();
     // Says which clock is in the binary. Several sessions share this tree, and
@@ -443,6 +472,8 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             gpio_set_level(34, 1);
             tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
 #ifdef KASANE_P0_BUS_PROBE
+            atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
+            tx_pending.user=&lcd_data_isr_us;
             int64_t queue_began=esp_timer_get_time();
 #endif
             e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
@@ -517,6 +548,10 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
         if (e == ESP_OK) {
             gpio_set_level(34, 1);
             tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+#ifdef KASANE_P0_BUS_PROBE
+            atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
+            tx_pending.user=&lcd_data_isr_us;
+#endif
             e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
             tx_inflight = (e == ESP_OK);
             tx_front ^= 1;

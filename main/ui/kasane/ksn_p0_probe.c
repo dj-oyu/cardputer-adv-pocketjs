@@ -28,10 +28,10 @@ static uint32_t transfer_frames;
 static atomic_uint sd_reads_active;
 static atomic_uint sd_read_epoch;
 static struct {
-    uint32_t swap_us,reap_us,queue_us,sd_reap_calls;
+    uint32_t swap_us,reap_us,pre_isr_us,post_isr_us,queue_us,sd_reap_calls;
     bool active;
 } bus_frame;
-static uint32_t bus_sd_reap_calls;
+static uint32_t bus_sd_reap_calls,bus_missing_isr;
 
 void ksn_p0_bus_sd_begin(void){
     atomic_fetch_add_explicit(&sd_reads_active,1u,memory_order_relaxed);
@@ -47,7 +47,8 @@ uint32_t ksn_p0_bus_sd_epoch(void){
     return atomic_load_explicit(&sd_read_epoch,memory_order_relaxed);
 }
 void ksn_p0_bus_begin_frame(void){
-    bus_frame.swap_us=bus_frame.reap_us=bus_frame.queue_us=0;
+    bus_frame.swap_us=bus_frame.reap_us=bus_frame.pre_isr_us=0;
+    bus_frame.post_isr_us=bus_frame.queue_us=0;
     bus_frame.sd_reap_calls=0;
     bus_frame.active=true;
 }
@@ -57,13 +58,18 @@ void ksn_p0_bus_phase_sample(ksn_p0_bus_phase phase,uint32_t us,bool sd_overlap)
     else if(phase==KSN_P0_BUS_REAP){
         bus_frame.reap_us+=us;
         if(sd_overlap)bus_frame.sd_reap_calls++;
-    }else if(phase==KSN_P0_BUS_QUEUE)bus_frame.queue_us+=us;
+    }else if(phase==KSN_P0_BUS_PRE_ISR)bus_frame.pre_isr_us+=us;
+    else if(phase==KSN_P0_BUS_POST_ISR)bus_frame.post_isr_us+=us;
+    else if(phase==KSN_P0_BUS_QUEUE)bus_frame.queue_us+=us;
 }
+void ksn_p0_bus_missing_isr(void){bus_missing_isr++;}
 void ksn_p0_bus_end_frame(uint32_t send_us){
     if(!bus_frame.active)return;
     bus_frame.active=false;
     ksn_p0_probe_sample(KSN_P0_LCD_SWAP,bus_frame.swap_us);
     ksn_p0_probe_sample(KSN_P0_LCD_REAP,bus_frame.reap_us);
+    ksn_p0_probe_sample(KSN_P0_LCD_PRE_ISR,bus_frame.pre_isr_us);
+    ksn_p0_probe_sample(KSN_P0_LCD_POST_ISR,bus_frame.post_isr_us);
     ksn_p0_probe_sample(KSN_P0_LCD_QUEUE,bus_frame.queue_us);
     uint32_t phases=bus_frame.swap_us+bus_frame.reap_us+bus_frame.queue_us;
     ksn_p0_probe_sample(KSN_P0_LCD_OTHER,send_us>phases?send_us-phases:0u);
@@ -78,7 +84,8 @@ static const char *const sample_names[]={"app_turn","app_render","app_send",
                                          "ui_frame","av_service",
                                          "ui_interval","input_queue"
 #ifdef KASANE_P0_BUS_PROBE
-                                         ,"lcd_swap","lcd_reap","lcd_queue",
+                                         ,"lcd_swap","lcd_reap","lcd_pre_isr",
+                                         "lcd_post_isr","lcd_queue",
                                          "lcd_other","lcd_send_sd","lcd_send_idle"
 #endif
 };
@@ -88,7 +95,7 @@ static const char *const sample_names[]={"app_turn","app_render","app_send",
 static const uint16_t sample_bucket_us[]={128,128,128,128,128,128,128,
                                           1024,128,1024,256
 #ifdef KASANE_P0_BUS_PROBE
-                                          ,128,128,128,128,128,128
+                                          ,128,128,128,128,128,128,128,128
 #endif
 };
 _Static_assert(sizeof(sample_names)/sizeof(*sample_names)==KSN_P0_SAMPLE_COUNT,
@@ -144,7 +151,7 @@ _Static_assert(sizeof(copy_groups)/sizeof(*copy_groups)==KSN_P0_COPY_COUNT,
 void ksn_p0_probe_reset(void){
     memset(samples,0,sizeof(samples));
 #ifdef KASANE_P0_BUS_PROBE
-    bus_frame.active=false;bus_sd_reap_calls=0;
+    bus_frame.active=false;bus_sd_reap_calls=bus_missing_isr=0;
 #endif
 #ifdef KASANE_P0_COPY_PROBE
     memset(copy_bytes,0,sizeof(copy_bytes));
@@ -219,8 +226,9 @@ void ksn_p0_probe_report(const char *session){
         label,(unsigned long)transfer_frames,(unsigned long long)transfer_bytes,
         (unsigned long long)transfer_bands);
 #ifdef KASANE_P0_BUS_PROBE
-    ESP_LOGI("KSN_P0","B session=%s sd_reap_calls=%lu sd_active=%u",
-        label,(unsigned long)bus_sd_reap_calls,(unsigned)ksn_p0_bus_sd_active());
+    ESP_LOGI("KSN_P0","B session=%s sd_reap_calls=%lu sd_active=%u missing_isr=%lu",
+        label,(unsigned long)bus_sd_reap_calls,(unsigned)ksn_p0_bus_sd_active(),
+        (unsigned long)bus_missing_isr);
 #endif
     ESP_LOGI("KSN_P0","M session=%s free=%u min=%u largest=%u stack_free=%u",
         label,(unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),

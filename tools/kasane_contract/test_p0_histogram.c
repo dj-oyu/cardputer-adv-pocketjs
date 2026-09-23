@@ -37,16 +37,23 @@ int main(void){
     ksn_p0_bus_sd_begin();
     assert(ksn_p0_bus_sd_active()&&ksn_p0_bus_sd_epoch()==epoch+1u);
     ksn_p0_bus_phase_sample(KSN_P0_BUS_REAP,300,true);
+    ksn_p0_bus_phase_sample(KSN_P0_BUS_PRE_ISR,200,false);
+    ksn_p0_bus_phase_sample(KSN_P0_BUS_POST_ISR,100,false);
     ksn_p0_bus_sd_end();
     assert(!ksn_p0_bus_sd_active());
     ksn_p0_bus_phase_sample(KSN_P0_BUS_QUEUE,200,false);
     ksn_p0_bus_end_frame(1000);
     assert(samples[KSN_P0_LCD_SWAP].seen==1&&samples[KSN_P0_LCD_SWAP].maximum==100);
     assert(samples[KSN_P0_LCD_REAP].seen==1&&samples[KSN_P0_LCD_REAP].maximum==300);
+    assert(samples[KSN_P0_LCD_PRE_ISR].seen==1&&
+           samples[KSN_P0_LCD_PRE_ISR].maximum==200);
+    assert(samples[KSN_P0_LCD_POST_ISR].seen==1&&
+           samples[KSN_P0_LCD_POST_ISR].maximum==100);
     assert(samples[KSN_P0_LCD_QUEUE].seen==1&&samples[KSN_P0_LCD_QUEUE].maximum==200);
     assert(samples[KSN_P0_LCD_OTHER].seen==1&&samples[KSN_P0_LCD_OTHER].maximum==400);
     assert(samples[KSN_P0_LCD_SEND_SD].seen==1&&samples[KSN_P0_LCD_SEND_IDLE].seen==0);
-    assert(bus_sd_reap_calls==1);
+    ksn_p0_bus_missing_isr();
+    assert(bus_sd_reap_calls==1&&bus_missing_isr==1);
 #endif
 #ifndef P0_TIMING_ONLY
     ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,12);
@@ -76,7 +83,8 @@ int main(void){
     ksn_p0_probe_reset();
     assert(samples[KSN_P0_OVERLAY_DRAW].seen==0);
 #ifdef KASANE_P0_BUS_PROBE
-    assert(samples[KSN_P0_LCD_REAP].seen==0&&bus_sd_reap_calls==0);
+    assert(samples[KSN_P0_LCD_REAP].seen==0&&bus_sd_reap_calls==0&&
+           bus_missing_isr==0);
 #endif
     assert(transfer_frames==0&&transfer_bytes==0&&transfer_bands==0);
 #ifndef P0_TIMING_ONLY

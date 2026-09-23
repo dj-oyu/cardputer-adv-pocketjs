@@ -123,6 +123,10 @@ producer契約：
 [同一診断バイナリでのLCD送信分解](p1-lcd-sd-contention-20260924.md)で、
 遅い試行のreap待機とSD read重複の相関を確認した。ただし物理DMA競合か
 task復帰遅れかは未確定で、P1の性能gateは未合格のまま。
+[SPI2完了callbackを用いた追試](p1-spi-isr-wakeup-20260924.md)では、
+遅い/速い試行でcallback前p99は同じ4,607 µs、callback後p99は
+7,807/383 µsだった。主な不安定性は物理転送時間よりUI task復帰側に
+ある。配置要因の切り分けと音声・描画の再ゲートが次の作業。
 
 ## P2：dirty-node更新を既存bankのまま導入
 
