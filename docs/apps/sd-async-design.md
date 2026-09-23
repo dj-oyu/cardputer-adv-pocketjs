@@ -57,3 +57,36 @@ This foundation does not choose a producer schedule or worker priority, and
 does not make general `pocket.fs` calls thread-safe. Host tests exercise the
 card-free lifecycle model. Physical card removal and teardown timing still
 need device verification for each scheduling variant.
+
+## Variant A: REOPEN MP3 reader
+
+`audio.player.play()` creates a session only for an MP3 source on `sd:`. It
+owns the two existing three-slot, 2,048-byte rings, their storage, the physical
+path lease, the reader task and its terminal state. The priority-4 CPU0 reader
+calls `sd_media_read_lease_read_at()` directly into the next compressed ring
+slot. Each refill opens, seeks, reads at most 2,048 bytes and closes; there is
+no intermediate transport buffer. The decoder stays at priority 6 and audio
+task settings are unchanged. Flash MP3 and other codecs use their original
+source paths. Header inspection and lease validation at open/play still run on
+the UI task; only ongoing SD MP3 refills move to the worker.
+
+Pause retains the decoder state, source offset and both rings. The decoder and
+reader park on predicates; notifications only wake the reader to recheck those
+predicates. EOF, read error and cancellation are distinct terminal states.
+Read errors set compressed EOF so the decoder drains what was published, then
+the player reports `P_ERROR`. Cancellation of a blocking read discards its
+unpublished slot. Stop cancels the lease and waits 200 ms for worker ACK before
+closing the lease or freeing any session-owned memory. A late worker is kept in
+quarantine and reaped from the owner task after ACK. If the audio task itself
+fails its stop wait, its PCM ring stays quarantined because the sound API has
+no late completion ACK to prove it has stopped using that ring. This can retain
+the session and pin the mount until reset; it is preferable to freeing live
+memory.
+
+With `KASANE_P0_PROBE=ON`, the owner emits one `KSN_P0 SD` line at session
+end: actual task core, lease opens/reads/bytes/maximum read time/slow count,
+compressed ring low-water slots, stop-to-ACK time, worker stack high-water,
+and internal heap free/minimum/largest values. Worker-owned counters are read
+only after ACK. Device timing and card removal still require hardware runs;
+host ASan/UBSan covers refill/EOF/backpressure/delayed cancellation/error and
+the shared lease lifecycle.

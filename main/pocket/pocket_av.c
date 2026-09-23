@@ -3,6 +3,7 @@
 #include "pocket_fs.h"
 #include "opus_feed.h"
 #include "mp3_feed.h"
+#include "mp3_sd_session.h"
 #include "mp3_decode.h"
 #include "opus_net.h"
 #include "sound.h"
@@ -479,6 +480,7 @@ static struct {
     // pump and the decode task, and the container the header described.
     uint8_t *pkt_bytes;
     sound_stream_t pkt;
+    mp3_sd_session_t *sd_mp3;
     opus_pak_t pak;
     // An http(s) source: the packet ring is filled by opus_net.c's receive task
     // instead of by player_feed_opus() on this one, and the container header
@@ -498,6 +500,13 @@ static struct {
     player_state_t state;
     bool     announce;      // a state change the pump has still to deliver
 } player;
+
+static sound_stream_t *player_pcm_ring(void) {
+    return player.sd_mp3?mp3_sd_session_pcm(player.sd_mp3):&player.ring;
+}
+static sound_stream_t *player_packet_ring(void) {
+    return player.sd_mp3?mp3_sd_session_packets(player.sd_mp3):&player.pkt;
+}
 
 static int32_t player_next_id=1;
 
@@ -741,6 +750,7 @@ static void player_feed(void) {
     // nothing for the pump to do and, more to the point, nothing it MAY do: the
     // ring has a single producer and that is what makes its atomics correct.
     if(player.net) return;
+    if(player.sd_mp3) return;
     if(player.codec==C_OPUS) { if(player.pkt_bytes) player_feed_opus(); return; }
     if(!player.ring_bytes) return;
     sound_stream_t *destination=player.codec==C_MP3?&player.pkt:&player.ring;
@@ -807,18 +817,34 @@ static bool player_halt(void) {
         player.priming=false;
         bool freed=player.codec==C_MP3?mp3_feed_stop():opus_feed_stop();
         if(player.net) freed=opus_net_stop()&&freed;
+        if(player.sd_mp3) {
+            bool sd_freed=mp3_sd_session_stop(player.sd_mp3,true,freed);
+            player.sd_mp3=NULL;
+            freed=sd_freed&&freed;
+        }
         return freed;
     }
     player.position=player_frames_now();
     player.underruns+=sound_stream_underruns();
-    bool released=sound_stream_stop(player.stream);
+    bool audio_stopped=sound_stream_stop(player.stream);
+    bool released=audio_stopped;
     // The audio task first, then the decode task: stopping the consumer first
     // means the decoder finds the PCM ring full and parks rather than spinning
     // through the packets it had left. Both have to say they are out before
     // either ring can be freed, so the two answers are ANDed rather than the
     // second one overwriting the first.
     if(player.codec==C_OPUS) released=opus_feed_stop()&&released;
-    if(player.codec==C_MP3) released=mp3_feed_stop()&&released;
+    bool decoder_stopped=true;
+    if(player.codec==C_MP3) {
+        decoder_stopped=mp3_feed_stop();
+        released=decoder_stopped&&released;
+    }
+    if(player.sd_mp3) {
+        bool sd_freed=mp3_sd_session_stop(player.sd_mp3,audio_stopped,
+                                         decoder_stopped);
+        player.sd_mp3=NULL;
+        released=sd_freed&&released;
+    }
     // After the decoder, because the decoder is what reads the packet ring: a
     // receiver stopped first would leave it blocked on a ring nobody fills.
     if(player.net) released=opus_net_stop()&&released;
@@ -893,7 +919,8 @@ static const char *player_launch(void) {
     // fragment a heap whose largest block is the thing this whole surface has
     // to fit inside. A player that is opened and never played still costs
     // nothing, which is the case that matters.
-    if(!player.ring_bytes) {
+    bool sd_mp3=player.codec==C_MP3&&!strncmp(player.path,"sd:",3);
+    if(!sd_mp3&&!player.ring_bytes) {
         player.ring_bytes=malloc(PLAYER_RING_BYTES);
         if(!player.ring_bytes) return "nomem";
         player.ring.bytes=player.ring_bytes;
@@ -902,7 +929,7 @@ static const char *player_launch(void) {
     // for the same reason the PCM one is: churning 6 KiB on every pause is how a
     // heap whose largest block this whole surface has to fit inside gets
     // fragmented.
-    if((player.codec==C_OPUS||player.codec==C_MP3)&&!player.pkt_bytes) {
+    if(!sd_mp3&&(player.codec==C_OPUS||player.codec==C_MP3)&&!player.pkt_bytes) {
         player.pkt_bytes=malloc(PLAYER_PKT_BYTES);
         if(!player.pkt_bytes) return "nomem";
         player.pkt.bytes=player.pkt_bytes;
@@ -912,17 +939,31 @@ static const char *player_launch(void) {
     player.feed=byte;
     player.source_fault=false;
     player.mp3_read_max_us=0; player.mp3_read_slow_count=0;
-    sound_stream_rewind(&player.ring);
+    if(sd_mp3) {
+        const char *code=NULL;
+        player.sd_mp3=mp3_sd_session_start(player.path,byte,
+                                            player.offset+player.bytes,&code);
+        if(!player.sd_mp3) return code&&(!strcmp(code,POCKET_ERR_BUSY)||
+                                         !strcmp(code,"busy"))?"busy":
+                                 code&&!strcmp(code,"nomem")?"nomem":"unavailable";
+    } else sound_stream_rewind(&player.ring);
     uint32_t seq=++player_seq;
     // Primed before the audio task is given anything to play, so the first
     // block is audio rather than an underrun. Three slots is one read of at
     // most 6,144 bytes in total.
     if(player.codec==C_MP3) {
-        sound_stream_rewind(&player.pkt);
-        player_feed();
-        mp3_feed_start_t started=mp3_feed_start(&player.ring,&player.pkt,start);
+        if(!sd_mp3) {
+            sound_stream_rewind(&player.pkt);
+            player_feed();
+        }
+        mp3_feed_start_t started=mp3_feed_start(player_pcm_ring(),
+                                                player_packet_ring(),start);
         if(started!=MP3_FEED_OK) {
             player_seq++;
+            if(player.sd_mp3) {
+                mp3_sd_session_stop(player.sd_mp3,true,true);
+                player.sd_mp3=NULL;
+            }
             return started==MP3_FEED_NOMEM?"nomem":"busy";
         }
         player.priming=true; player.prime_waits=0; player.mp3_progress=0;
@@ -1029,6 +1070,7 @@ static bool player_payload(JSContext *ctx, int slot, void *user, JSValue *payloa
 }
 
 static void player_service_stream(void) {
+    mp3_sd_session_reap();
     if(!player.open) return;
     // The Opus start, deferred out of play() -- see player_launch(). One slot is
     // 40 ms of decoded audio, which is a whole frame of head start for a
@@ -1039,9 +1081,10 @@ static void player_service_stream(void) {
         if(player.codec==C_MP3&&player.mp3_progress!=mp3_feed_progress()) {
             player.mp3_progress=mp3_feed_progress(); player.prime_waits=0;
         }
-        if(atomic_load(&player.ring.filled)||atomic_load(&player.ring.eof)) {
+        sound_stream_t *pcm=player_pcm_ring();
+        if(atomic_load(&pcm->filled)||atomic_load(&pcm->eof)) {
             player.priming=false;
-            int32_t id=sound_stream_start(&player.ring,SOUND_STREAM_PCM16,0,
+            int32_t id=sound_stream_start(pcm,SOUND_STREAM_PCM16,0,
                                           player.frames-player.position,1.0f,
                                           clip_done,(void *)(uintptr_t)player_seq);
             if(id<0) { player_halt(); player_set_state(P_ERROR); }
@@ -1071,19 +1114,24 @@ static void player_service_stream(void) {
         if(player.codec==C_OPUS&&opus_feed_faults()) ok=false;
         if(player.codec==C_MP3) {
             uint32_t decode_faults=mp3_feed_faults();
+            if(player.sd_mp3) {
+                player.source_fault=mp3_sd_session_fault(player.sd_mp3);
+                player.feed=mp3_sd_session_position(player.sd_mp3);
+            }
             if(decode_faults||player.source_fault) ok=false;
+            sound_stream_t *pcm=player_pcm_ring(), *pkt=player_packet_ring();
             if(!ok) ESP_LOGE("pocket.av",
                 "MP3 stop source_fault=%u decode_faults=%u progress=%u feed=%u/%u "
                 "pcm=%u/%u eof=%u pkt=%u/%u eof=%u read_max_us=%u slow_reads=%u underruns=%u",
                 (unsigned)player.source_fault,(unsigned)decode_faults,
                 (unsigned)mp3_feed_progress(),(unsigned)player.feed,
                 (unsigned)(player.offset+player.bytes),
-                (unsigned)atomic_load(&player.ring.filled),
-                (unsigned)atomic_load(&player.ring.drained),
-                (unsigned)atomic_load(&player.ring.eof),
-                (unsigned)atomic_load(&player.pkt.filled),
-                (unsigned)atomic_load(&player.pkt.drained),
-                (unsigned)atomic_load(&player.pkt.eof),
+                (unsigned)atomic_load(&pcm->filled),
+                (unsigned)atomic_load(&pcm->drained),
+                (unsigned)atomic_load(&pcm->eof),
+                (unsigned)atomic_load(&pkt->filled),
+                (unsigned)atomic_load(&pkt->drained),
+                (unsigned)atomic_load(&pkt->eof),
                 (unsigned)player.mp3_read_max_us,
                 (unsigned)player.mp3_read_slow_count,
                 (unsigned)player.underruns);
@@ -1198,6 +1246,10 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
                     return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,op,
                         "the paused stream has stopped",true,
                         POCKET_OUTCOME_NOT_APPLIED);
+                if(player.sd_mp3) {
+                    mp3_feed_pause(false);
+                    mp3_sd_session_pause(player.sd_mp3,false);
+                }
                 player_set_state(P_PLAYING);
                 return pocket_api_settled(ctx,JS_UNDEFINED,false);
             }
@@ -1242,6 +1294,10 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
                 // from a byte offset would re-decode the entire song prefix.
                 if(player.codec!=C_MP3) player_halt();
                 else if(player.stream) sound_stream_pause(player.stream);
+                if(player.sd_mp3) {
+                    mp3_feed_pause(true);
+                    mp3_sd_session_pause(player.sd_mp3,true);
+                }
                 player_set_state(P_PAUSED);
             }
             // Pausing a player that is ready, already paused or finished holds
