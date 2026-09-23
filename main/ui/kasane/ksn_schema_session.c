@@ -1,4 +1,5 @@
 #include "ksn_schema_session.h"
+#include "ksn_p0_probe.h"
 #include <string.h>
 
 static bool same_rect(ksn_rect a,ksn_rect b){
@@ -31,6 +32,8 @@ ksn_result ksn_schema_session_step(ksn_schema_session *session,ksn_view *view,
             if(session->pending_delta==KSN_SCHEMA_REPLACED){
                 memcpy(session->active_refs,session->candidate_refs,
                        session->candidate_count*sizeof(ksn_ref));
+                ksn_p0_probe_copy(KSN_P0_SCHEMA_REF_COMMIT,
+                                  session->candidate_count*sizeof(ksn_ref));
                 session->active_count=session->candidate_count;
                 session->has_active=true;
             }

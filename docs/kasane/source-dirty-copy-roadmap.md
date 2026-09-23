@@ -52,6 +52,10 @@ LCD送信p99 11.775 ms・送信以外p99 11.135 msに分離し、
 ビルドも同一コードでPASS。これはP0(1)の対象経路を確認した結果であり、
 P0(2)～(4)や実機ゲートの完了を意味しない。
 
+P0(2)の計数境界は[copy計数の監査表](p0-copy-coverage-20260924.md)に置く。
+明示的な構造体代入・schema参照確定・描画view複製を追加計数したが、
+QuickJS内部や全producerの複写は依然未網羅であり、合計はpartialのまま。
+
 1. `ksn_render.c` の既知のsigned-shift UBSan警告を解消し、sanitizer診断0件を
    成功条件にする。ASan/UBSanと`-O2 -fstrict-aliasing`、QuickJS統合、ESP-IDF buildを
    同じcommitで確認する。

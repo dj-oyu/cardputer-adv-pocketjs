@@ -269,6 +269,7 @@ static bool presenter_text(JSContext *ctx,JSValueConst model,const char *name,
     size_t length;const char *s=JS_ToCStringLen(ctx,&length,value);
     JS_FreeValue(ctx,value);
     if(!s)return false;
+    ksn_p0_probe_copy(KSN_P0_UTF8_MATERIALIZED,length);
     ksn_result result=ksn_presenter_copy_text(out,bytes,s,length);
     JS_FreeCString(ctx,s);
     if(result==KSN_OK)return true;
@@ -328,6 +329,7 @@ static JSValue js_presenter_update(JSContext *ctx,JSValueConst self,int argc,JSV
     if(changed&&active->manual_revision==UINT64_MAX)
         return music_throw_result(ctx,KSN_LIMIT,"kasane.view.update");
     active->owned=values;active->manual=true;
+    ksn_p0_probe_copy(KSN_P0_MUSIC_MODEL_COPY,sizeof(values));
     if(changed)active->manual_revision++;
     result=music_refresh();
     return result==KSN_OK||result==KSN_BUSY?JS_UNDEFINED:
@@ -358,6 +360,7 @@ static bool presenter_optional_text(JSContext *ctx,JSValueConst model,const char
     size_t length;const char *text=JS_ToCStringLen(ctx,&length,value);
     JS_FreeValue(ctx,value);
     if(!text)return false;
+    ksn_p0_probe_copy(KSN_P0_UTF8_MATERIALIZED,length);
     ksn_result result=ksn_presenter_copy_text(out,bytes,text,length);
     JS_FreeCString(ctx,text);
     if(result==KSN_OK)return true;

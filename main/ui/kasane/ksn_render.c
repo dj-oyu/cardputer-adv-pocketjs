@@ -1124,6 +1124,10 @@ static void decode_view(ksn_frame_view *view,const ksn_frame_command *command){
     view->group_end=command->group_end;
     view->group_opacity=command->group_opacity;
     view->reveal=command->reveal;
+    ksn_p0_probe_copy(KSN_P0_RENDER_DECODE_VIEW,
+                      sizeof(view->draw)+sizeof(view->visible)+
+                      sizeof(view->group_begin)+sizeof(view->group_end)+
+                      sizeof(view->group_opacity)+sizeof(view->reveal));
 }
 static ksn_frame_view *view_slot(unsigned slot){
     /* The core bounds the index, the clamp only keeps the name total. */

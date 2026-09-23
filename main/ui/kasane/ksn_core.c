@@ -160,6 +160,9 @@ static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
     const ksn_bank *active=&core->banks[core->active];
     ksn_command_storage *commands=next->commands;uint8_t *text=next->text;ksn_track *tracks=next->tracks;
     *next=*active;next->commands=commands;next->text=text;next->tracks=tracks;
+    // Semantic struct assignment, including pointer fields immediately reset
+    // above; this is logical copy volume, not a DRAM bus-traffic estimate.
+    ksn_p0_probe_copy(KSN_P0_CORE_CLONE_META,sizeof(*next));
     if(mode==KSN_PATCH){
         if(tracks){memcpy(tracks,active->tracks,sizeof(ksn_core_animation_block));
             ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TRACK,sizeof(ksn_core_animation_block));}
@@ -288,6 +291,7 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
     }
     }
     bank->commands[index]=command;bank->count[layer]++;
+    ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,sizeof(command));
     *out=make_ref(bank->generation[layer],index);return KSN_OK;
 }
 static ksn_result referenced_command(ksn_core_impl *core,ksn_ref ref,ksn_command_storage **out){

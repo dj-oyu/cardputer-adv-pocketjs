@@ -32,12 +32,48 @@ _Static_assert(sizeof(sample_names)/sizeof(*sample_names)==KSN_P0_SAMPLE_COUNT,
 _Static_assert(sizeof(sample_bucket_us)/sizeof(*sample_bucket_us)==KSN_P0_SAMPLE_COUNT,
                "sample probe bucket widths must match the categories");
 static const char *const copy_names[]={"utf8_materialized","producer_materialized","adapter_temp",
-    "adapter_owned","music_plan","music_status","music_materialized",
+    "adapter_owned","adapter_slot_commit","schema_ref_commit",
+    "music_plan","music_status","music_materialized",
     "music_model_copy","core_payload_write",
     "core_payload_read","core_clone_command","core_clone_text",
-    "core_clone_track","core_submit_text","core_render_text","render_decode_text"};
+    "core_clone_track","core_clone_meta","core_submit_command",
+    "core_submit_text","core_render_text","render_decode_view","render_decode_text"};
 _Static_assert(sizeof(copy_names)/sizeof(*copy_names)==KSN_P0_COPY_COUNT,
                "copy probe labels must match the categories");
+typedef enum {
+    P0_GROUP_JS_UTF8,P0_GROUP_PRODUCER,P0_GROUP_ADAPTER_SCHEMA,
+    P0_GROUP_CORE_SUBMIT,P0_GROUP_BANK_CLONE,P0_GROUP_RENDER_SCRATCH,
+    P0_GROUP_COUNT
+} copy_group;
+static const char *const group_names[]={"js_utf8","producer_snapshot",
+    "adapter_schema","core_submit","bank_clone","render_scratch"};
+static const uint8_t copy_groups[]={
+    [KSN_P0_UTF8_MATERIALIZED]=P0_GROUP_JS_UTF8,
+    [KSN_P0_PRODUCER_MATERIALIZED]=P0_GROUP_PRODUCER,
+    [KSN_P0_ADAPTER_TEMP]=P0_GROUP_ADAPTER_SCHEMA,
+    [KSN_P0_ADAPTER_OWNED]=P0_GROUP_ADAPTER_SCHEMA,
+    [KSN_P0_ADAPTER_SLOT_COMMIT]=P0_GROUP_ADAPTER_SCHEMA,
+    [KSN_P0_SCHEMA_REF_COMMIT]=P0_GROUP_ADAPTER_SCHEMA,
+    [KSN_P0_MUSIC_PLAN]=P0_GROUP_ADAPTER_SCHEMA,
+    [KSN_P0_MUSIC_STATUS]=P0_GROUP_ADAPTER_SCHEMA,
+    [KSN_P0_MUSIC_MATERIALIZED]=P0_GROUP_ADAPTER_SCHEMA,
+    [KSN_P0_MUSIC_MODEL_COPY]=P0_GROUP_ADAPTER_SCHEMA,
+    [KSN_P0_CORE_PAYLOAD_WRITE]=P0_GROUP_CORE_SUBMIT,
+    [KSN_P0_CORE_PAYLOAD_READ]=P0_GROUP_RENDER_SCRATCH,
+    [KSN_P0_CORE_CLONE_COMMAND]=P0_GROUP_BANK_CLONE,
+    [KSN_P0_CORE_CLONE_TEXT]=P0_GROUP_BANK_CLONE,
+    [KSN_P0_CORE_CLONE_TRACK]=P0_GROUP_BANK_CLONE,
+    [KSN_P0_CORE_CLONE_META]=P0_GROUP_BANK_CLONE,
+    [KSN_P0_CORE_SUBMIT_COMMAND]=P0_GROUP_CORE_SUBMIT,
+    [KSN_P0_CORE_SUBMIT_TEXT]=P0_GROUP_CORE_SUBMIT,
+    [KSN_P0_CORE_RENDER_TEXT]=P0_GROUP_RENDER_SCRATCH,
+    [KSN_P0_RENDER_DECODE_VIEW]=P0_GROUP_RENDER_SCRATCH,
+    [KSN_P0_RENDER_DECODE_TEXT]=P0_GROUP_RENDER_SCRATCH
+};
+_Static_assert(sizeof(group_names)/sizeof(*group_names)==P0_GROUP_COUNT,
+               "copy group names must match");
+_Static_assert(sizeof(copy_groups)/sizeof(*copy_groups)==KSN_P0_COPY_COUNT,
+               "each copy category needs a group");
 
 void ksn_p0_probe_reset(void){
     memset(samples,0,sizeof(samples));memset(copy_bytes,0,sizeof(copy_bytes));
@@ -87,12 +123,20 @@ void ksn_p0_probe_report(const char *session){
     }
     uint64_t observed_bytes=0;
     uint32_t observed_calls=0;
+    uint64_t group_bytes[P0_GROUP_COUNT]={0};
+    uint32_t group_calls[P0_GROUP_COUNT]={0};
     for(unsigned k=0;k<KSN_P0_COPY_COUNT;k++){
         observed_bytes+=copy_bytes[k];observed_calls+=copy_calls[k];
+        group_bytes[copy_groups[k]]+=copy_bytes[k];
+        group_calls[copy_groups[k]]+=copy_calls[k];
         if(copy_calls[k])ESP_LOGI("KSN_P0","C session=%s kind=%s calls=%lu bytes=%llu",
             label,copy_names[k],(unsigned long)copy_calls[k],
             (unsigned long long)copy_bytes[k]);
     }
+    for(unsigned k=0;k<P0_GROUP_COUNT;k++)
+        ESP_LOGI("KSN_P0","G session=%s group=%s calls=%lu bytes=%llu coverage=partial",
+            label,group_names[k],(unsigned long)group_calls[k],
+            (unsigned long long)group_bytes[k]);
     ESP_LOGI("KSN_P0","C session=%s kind=observed_total calls=%lu bytes=%llu coverage=partial",
         label,(unsigned long)observed_calls,(unsigned long long)observed_bytes);
     if(transfer_frames)ESP_LOGI("KSN_P0","T session=%s frames=%lu lcd_bytes=%llu bands=%llu",

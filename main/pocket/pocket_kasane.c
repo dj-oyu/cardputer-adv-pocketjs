@@ -1623,7 +1623,11 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
             memcpy(dest,text.utf8,text.bytes+1u);
             ksn_p0_probe_copy(KSN_P0_ADAPTER_OWNED,text.bytes+1u);
             s->values[i].data.text=(ksn_schema_text){dest,text.bytes};
-        }else s->values[i]=candidate[i];
+            ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,sizeof(ksn_schema_text));
+        }else{
+            s->values[i]=candidate[i];
+            ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,sizeof(candidate[i]));
+        }
     }
     s->revision++;
     ksn_result submitted=schema_refresh(NULL);
@@ -1719,8 +1723,10 @@ static bool runtime_binding(JSContext *ctx,JSValueConst object,const char *key,
             if(JS_GetLength(ctx,value,&units)==0&&units<=KSN_SCHEMA_TEXT_MAX){
                 size_t length=0;const char *src=JS_ToCStringLen(ctx,&length,value);
                 if(src){
+                    ksn_p0_probe_copy(KSN_P0_UTF8_MATERIALIZED,length);
                     if(length<=KSN_SCHEMA_TEXT_MAX){
                         memcpy(literal,src,length);literal[length]=0;
+                        ksn_p0_probe_copy(KSN_P0_ADAPTER_TEMP,length);
                         out->literal.text=(ksn_schema_text){literal,(uint16_t)length};ok=true;
                     }
                     JS_FreeCString(ctx,src);

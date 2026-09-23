@@ -27,9 +27,32 @@ int main(void){
     ksn_p0_probe_transfer(64800,17);
     ksn_p0_probe_transfer(768,3);
     assert(transfer_frames==2&&transfer_bytes==65568&&transfer_bands==20);
+    ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,12);
+    ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
+    ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
+    ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,0);
+    assert(copy_calls[KSN_P0_ADAPTER_SLOT_COMMIT]==1&&
+           copy_bytes[KSN_P0_ADAPTER_SLOT_COMMIT]==12);
+    assert(copy_calls[KSN_P0_CORE_SUBMIT_COMMAND]==2&&
+           copy_bytes[KSN_P0_CORE_SUBMIT_COMMAND]==48);
+    assert(copy_groups[KSN_P0_ADAPTER_SLOT_COMMIT]==P0_GROUP_ADAPTER_SCHEMA);
+    assert(copy_groups[KSN_P0_CORE_SUBMIT_COMMAND]==P0_GROUP_CORE_SUBMIT);
+    uint64_t grouped_bytes[P0_GROUP_COUNT]={0};
+    uint32_t grouped_calls[P0_GROUP_COUNT]={0};
+    for(unsigned i=0;i<KSN_P0_COPY_COUNT;i++){
+        assert(copy_groups[i]<P0_GROUP_COUNT);
+        grouped_bytes[copy_groups[i]]+=copy_bytes[i];
+        grouped_calls[copy_groups[i]]+=copy_calls[i];
+    }
+    assert(grouped_bytes[P0_GROUP_ADAPTER_SCHEMA]==12&&
+           grouped_calls[P0_GROUP_ADAPTER_SCHEMA]==1);
+    assert(grouped_bytes[P0_GROUP_CORE_SUBMIT]==48&&
+           grouped_calls[P0_GROUP_CORE_SUBMIT]==2);
     ksn_p0_probe_reset();
     assert(samples[KSN_P0_OVERLAY_DRAW].seen==0);
     assert(transfer_frames==0&&transfer_bytes==0&&transfer_bands==0);
+    assert(copy_calls[KSN_P0_CORE_SUBMIT_COMMAND]==0&&
+           copy_bytes[KSN_P0_CORE_SUBMIT_COMMAND]==0);
     puts("p0 histogram: PASS (whole session, 128-us upper bounds, tail, deadline, LCD bytes/bands)");
     return 0;
 }
