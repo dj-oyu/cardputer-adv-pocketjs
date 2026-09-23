@@ -334,6 +334,11 @@ struct JSRuntime {
 #ifdef CONFIG_POCKET_VM_YIELD
     _Atomic uint8_t vm_yield_req; /* fills the flags' alignment padding */
 #endif
+    /* PocketJS: bumped by every JS_ThrowOutOfMemory. The parser snapshots it
+       in js_parse_init so js_parse_error can tell that an allocation already
+       failed during this parse (see there); wrap-around is harmless, only
+       equality is tested. */
+    uint32_t oom_count;
 
     struct JSStackFrame *current_stack_frame;
 
@@ -8928,6 +8933,7 @@ static int JS_ThrowTypeErrorReadOnly(JSContext *ctx, int flags, JSAtom atom)
 JSValue JS_ThrowOutOfMemory(JSContext *ctx)
 {
     JSRuntime *rt = ctx->rt;
+    rt->oom_count++;
     if (!rt->in_out_of_memory) {
         rt->in_out_of_memory = true;
         JS_ThrowInternalError(ctx, "out of memory");
@@ -24454,6 +24460,7 @@ typedef struct JSParseState {
     const uint8_t *buf_end;
     const uint8_t *eol;  // most recently seen end-of-line character
     const uint8_t *mark; // first token character, invariant: eol < mark
+    uint32_t oom_count; /* PocketJS: rt->oom_count when the parse began */
 
     /* current function code */
     JSFunctionDef *cur_func;
@@ -24599,6 +24606,27 @@ int JS_PRINTF_FORMAT_ATTR(2, 3) js_parse_error(JSParseState *s, JS_PRINTF_FORMAT
     va_list ap;
     int backtrace_flags;
 
+    /* PocketJS: once an allocation has failed during this parse, a syntax
+       error is almost always the parser misreading its own damaged state,
+       not the source, and reporting it would send the app author hunting for
+       a mistake that is not there. Two ways in, both measured with
+       --fail-alloc on every allocation of closures.js / generators.js:
+       - the function's byte code DynBuf failed (170 of 181 points): the
+         parser keeps going, get_prev_opcode() then answers OP_invalid, and
+         the lvalue checks say "invalid assignment left-hand side" or
+         "invalid increment/decrement operand";
+       - js_parse_skip_parens_token's lookahead lexer failed to make an atom
+         (11 points): it swallows the error by design (its "XXX: should clear
+         the exception"), returns a wrong guess, and the parser takes the
+         wrong branch ("Unexpected token '=>'", "variable name expected",
+         "expected 'of' or 'in'...").
+       In both, the OOM thrown by js_realloc was already pending and the
+       syntax error overwrote it. Report the OOM instead. A parse that met no
+       failed allocation is unaffected, so genuine syntax errors are too. */
+    if (unlikely(ctx->rt->oom_count != s->oom_count)) {
+        JS_ThrowOutOfMemory(ctx);
+        return -1;
+    }
     va_start(ap, fmt);
     JS_ThrowError2(ctx, JS_SYNTAX_ERROR, false, fmt, ap);
     va_end(ap);
@@ -40549,6 +40577,7 @@ static void js_parse_init(JSContext *ctx, JSParseState *s,
     s->token.val = ' ';
     s->token.line_num = 1;
     s->token.col_num = 1;
+    s->oom_count = ctx->rt->oom_count;
 }
 
 static JSValue JS_EvalFunctionInternal(JSContext *ctx, JSValue fun_obj,
@@ -40678,6 +40707,22 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     fd->body_scope = fd->scope_level;
 
     err = js_parse_program(s);
+    /* PocketJS: some parser allocations fail without failing the parse, and
+       the program then compiled and ran with the OOM left pending. Measured
+       (--fail-alloc, closures.js + generators.js, 69 points): the lookahead
+       in js_parse_skip_parens_token swallows its lexer's error and returns a
+       guess (arrow or not, destructuring or not, has_parameter_expressions);
+       push_scope's -1 is ignored by every caller, so the block's lexical
+       variables land in the enclosing scope and the matching pop_scope
+       leaves the wrong one; js_new_function_def keeps going without its
+       filename atom. None of the 69 changed the output of those two files,
+       but the first two let a program compile on a decision the parser never
+       made. Any allocation that failed during the parse fails the compile,
+       as InternalError, instead of trusting each site to propagate it. */
+    if (!err && unlikely(ctx->rt->oom_count != s->oom_count)) {
+        JS_ThrowOutOfMemory(ctx);
+        err = -1;
+    }
     if (err) {
 fail:
         free_token(s, &s->token);

@@ -177,7 +177,7 @@ bytecode を積む `DynBuf` のエラー旗に残るだけで、例外は投げ�
 
 | 症状 | closures | generators | 性質 |
 | --- | --- | --- | --- |
-| `SyntaxError`（存在しない構文エラー） | 112 | 69 | **誤診断**。コンパイルは失敗するので安全だが、アプリ作者は無い構文エラーを探すことになる。bytecode が失敗すると `get_prev_opcode()` が `OP_invalid` を返し、左辺値の判定などがそれを構文エラーとして報告していると思われる（未確認） |
+| `SyntaxError`（存在しない構文エラー） | 112 | 69 | **誤診断**。コンパイルは失敗するので安全だが、アプリ作者は無い構文エラーを探すことになる。**§7 で修正（0 / 0）** |
 | `TypeError: not a function` | 12 | 9 | **初期化時の黙った欠落**。N=500 付近はパースより前、コンテキスト初期化中で、`Array.prototype.join` の登録が OOM で黙って落ち、プログラムは走って `join` が無いと言う。組み込みの登録関数が失敗を無視している |
 | `TypeError: cannot read property 'constructor' of null` | 0 | 6 | 未調査 |
 
@@ -189,3 +189,41 @@ bytecode を積む `DynBuf` のエラー旗に残るだけで、例外は投げ�
 
 **実機では1度も確かめていない。** 実機の assert（§3.6）が再起動を起こしていたかどうかも、
 ホストでの推論である。
+
+## 7. パース中の OOM を `SyntaxError` と報告していた件（ブランチ `vm/oom-fix-syntaxerr`）
+
+§6 の 1 行目。`--fail-alloc` で `SyntaxError` になる 181 点（closures 112 / generators 69）の各点で、
+`js_parse_error` に届いた時点の状態を一時的な計測で調べた。**181 点すべてで、そのパースの中で
+`JS_ThrowOutOfMemory` が既に呼ばれていた**（確保失敗の OOM は既に投げられていて、それを
+`SyntaxError` が上書きしていた）。入口は 2 つ:
+
+| 入口 | 点数 | 仕組み |
+| --- | --- | --- |
+| 関数の bytecode `DynBuf` の失敗 | 170 | パーサは止まらず、`get_prev_opcode()` が `OP_invalid` を返し、左辺値の判定が「invalid assignment left-hand side」「invalid increment/decrement operand」を出す（§6 の推測どおり） |
+| `js_parse_skip_parens_token` の先読み | 11 | 先読みの字句解析で atom が作れず失敗するが、上流の設計どおり（`XXX: should clear the exception`）黙って推測を返す。パーサが別の分岐に入り「Unexpected token '=>'」「variable name expected」「expected 'of' or 'in'」を出す |
+
+**修正は 2 点で、どちらも中央に置いた。** `JSRuntime` に `oom_count`（`JS_ThrowOutOfMemory` が毎回
+増やす）を足し、`js_parse_init` がパース開始時の値を控える。
+
+1. `js_parse_error`: 開始時から値が動いていれば `SyntaxError` ではなく OOM を投げる。OOM を1度も
+   踏まないパースは値が動かないので、**本物の構文エラーは変わらない**。
+2. `__JS_EvalInternal`: `js_parse_program` が成功しても値が動いていればコンパイルを OOM で失敗させる。
+   1 だけの版で掃引すると、**確保に失敗したのにパースが成功し、プログラムがそのまま走る点**が
+   69 点あった（closures 10 / generators 59）。内訳は先読みの失敗、`push_scope` の失敗（全呼び出し元が
+   戻り値を見ないので、ブロックの字句変数が外側のスコープに入り、対応する `pop_scope` が違うスコープを
+   閉じる）、`js_new_function_def` のファイル名 atom の失敗。69 点とも出力は正常時と同じだった
+   （誤コンパイルは観測していない）が、先読みと `push_scope` はパーサがしていない判断の上にコンパイル
+   させる。個々の呼び出し元を直すより、パース中の確保失敗を一律にコンパイル失敗にする方が漏れがない。
+
+| 分類（各 4,800 点） | closures 前 → 後 | generators 前 → 後 |
+| --- | --- | --- |
+| `InternalError: out of memory` | 1,200 → 1,322 | 2,633 → 2,761 |
+| `SyntaxError` | 112 → **0** | 69 → **0** |
+| 例外なし | 3,476 → 3,466 | 2,059 → 2,000 |
+| それ以外（§6 の `TypeError` など） | 12 → 12 | 39 → 39 |
+
+`oom_sweep.sh` 0 / 0、`run.sh` o2 75/75（通常 / `--force-yield`）。本物の構文エラーの番人として
+Test262 の `language/expressions` `language/statements` `language/arguments-object`（20,712 ファイル、
+38,566 pass / 1,191 fail / 2 skip）を修正前後の o2 で走らせ、**結果ファイルが1行も違わない**
+（負のテストは `SyntaxError` の型を検査する）。quickjs-ng master（2026-09-23）も
+同じ振る舞い（`js_parse_error` は無条件に `SyntaxError`、先読みの `XXX` と `push_scope` の無検査が残る）。
