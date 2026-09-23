@@ -37,6 +37,12 @@
 #include <string.h>
 #include "hal/fpu_latency.h"
 static atomic_bool fpu_probe_requested;
+#ifdef CONFIG_POCKET_VM_RELOC
+// Sticky across app starts: one arming can be followed by several runs, which
+// is what a lifecycle sweep needs. Set-only, not a toggle -- a script that
+// sends '&' twice to be sure must not end up disarming it.
+static atomic_bool reloc_requested;
+#endif
 #ifdef CONFIG_KSN_DEVICE_PROBE
 #include "esp_heap_caps.h"
 #include "pocket_kasane.h"
@@ -305,6 +311,21 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // unreachable in a probe build -- tools/vm_l0_capture.py asked for it and
     // got a pipeline measurement instead, silently, from whenever this key was
     // added until 2026-09-23.
+    // L3a (docs/vm/vm-L3-design.md sec.7): arm the segment move for whatever
+    // app is started NEXT. Sticky and separate from the app letter, the same
+    // shape as the probe's 'P' contention mask, because what it modifies is
+    // the run rather than which run it is.
+    //
+    // Taken on the HOME SCREEN only, which is why it arms the next app instead
+    // of the running one: a byte arriving while an app is up is offered to
+    // pocket_bridge_usb() and pet_hub_usb() first, and an app that claimed '&'
+    // would take this silently. Placed after the probe block for the reason
+    // the two keys above it record -- 'F' was taken here while it was also the
+    // probe's sixth workload, and that workload became unreachable without
+    // anyone noticing for as long as it took to find.
+#ifdef CONFIG_POCKET_VM_RELOC
+    if(c=='&') { atomic_store(&reloc_requested,true); return false; }
+#endif
     if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
     // The Kasane demo trigger ('K', app_session.c's kasane_demo_start). PLACED
     // AFTER the probe block on purpose: 'G'..'K' is the probe's segment range, so
@@ -782,6 +803,17 @@ static void ui_task(void *arg) {
             fpu_latency_run();
             ESP_LOGI("shell","HOME_READY");
         }
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+        // Acknowledged on the home screen with a marker of its own, so a host
+        // script knows the arming landed before it starts an app -- otherwise
+        // a VM_RELOC line that never appears is ambiguous between "the key was
+        // dropped" and "the app never parked where a move was legal".
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&reloc_requested,false)){
+            app_vm_reloc_request();
+            ESP_LOGI("shell","VM_RELOC_ARMED");
+            ESP_LOGI("shell","HOME_READY");
+        }
+#endif
 #if CONFIG_POCKET_VM_L1_CLOCKBENCH
         bench_core_tick();
 #endif

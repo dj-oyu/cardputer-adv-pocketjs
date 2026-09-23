@@ -13,6 +13,11 @@ esp_err_t app_start(void);
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length);
 esp_err_t app_start_test(char test);
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+/* L3a: every app started from now on moves its frame segments at every park,
+ * and logs VM_RELOC when it stops. Only linked in CONFIG_POCKET_VM_RELOC. */
+void app_vm_reloc_request(void);
+#endif
 void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
 
 // docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the

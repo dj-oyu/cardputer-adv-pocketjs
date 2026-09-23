@@ -82,6 +82,16 @@ int64_t pocketjs_guest_frame_total(const pocketjs_guest_t *guest);
  * Includes preemption and native calls; not a CPU-time measurement. */
 void pocketjs_guest_trace_frame(pocketjs_guest_t *guest);
 #endif
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+/** L3a: move the frame segments to new addresses at every park from now on,
+ * and reset the counters. Off until this is called, so a RELOC build that is
+ * never armed takes the same path as a build without it. Arming does not
+ * change what the guest computes -- if it does, that is the bug this is for
+ * (docs/vm/vm-L3-design.md sec.8, gate G7). */
+void pocketjs_guest_reloc_arm(pocketjs_guest_t *guest, bool on);
+/** Log VM_RELOC with what the moves since arming cost. Silent when unarmed. */
+void pocketjs_guest_reloc_report(const pocketjs_guest_t *guest);
+#endif
 /** Stop the yield producer first. Close a parked chain without catch/finally
  * before entering a shutdown hook; queued jobs remain queued. */
 void pocketjs_guest_prepare_stop(pocketjs_guest_t *guest);

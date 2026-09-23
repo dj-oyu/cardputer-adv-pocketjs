@@ -158,6 +158,24 @@ struct pocketjs_guest {
 #ifdef CONFIG_POCKET_VM_SELFTEST
   bool trace_frame;
 #endif
+#ifdef CONFIG_POCKET_VM_RELOC
+  /* L3a on the device (docs/vm/vm-L3-design.md sec.7). `reloc_armed` is off
+   * until a host asks for it, so a RELOC build that nobody arms runs the
+   * same code path as a build without it -- the switch decides whether the
+   * call happens, not whether it is compiled.
+   *
+   * Counted rather than assumed, the same reason vmrun counts them: refusals
+   * are legitimate (D55 -- a park underneath an outer JS activation cannot
+   * move) and a run of all refusals would otherwise look exactly like a run
+   * of successful moves. `reloc_max_us` is the worst single move, which is
+   * what a stop-the-world budget would have to be written against; the mean
+   * hides it. */
+  bool reloc_armed;
+  uint32_t reloc_moves, reloc_refused;
+  uint32_t reloc_frames, reloc_var_refs;
+  uint32_t reloc_max_us;
+  uint64_t reloc_total_us, reloc_bytes;
+#endif
 #endif
   uint32_t yields;
   uint32_t continuations;
@@ -829,6 +847,38 @@ void pocketjs_guest_trace_frame(pocketjs_guest_t *guest) {
 }
 #endif
 
+#ifdef CONFIG_POCKET_VM_RELOC
+void pocketjs_guest_reloc_arm(pocketjs_guest_t *guest, bool on) {
+  if (guest == NULL) return;
+  guest->reloc_armed = on;
+  if (!on) return;
+  guest->reloc_moves = guest->reloc_refused = 0;
+  guest->reloc_frames = guest->reloc_var_refs = 0;
+  guest->reloc_max_us = 0;
+  guest->reloc_total_us = guest->reloc_bytes = 0;
+}
+
+void pocketjs_guest_reloc_report(const pocketjs_guest_t *guest) {
+  if (guest == NULL || !guest->reloc_armed) return;
+  /* One uppercase marker, like every other contract this firmware has with
+   * tools/ (CLAUDE.md). tools/vm_reloc_device.py parses this line.
+   *
+   * moves=0 with refused>0 is a real outcome, not a failure: the app never
+   * parked anywhere a move was legal. The script has to be able to tell that
+   * from "it moved and nothing broke", which is why both are printed. */
+  ESP_LOGI(TAG,
+           "VM_RELOC moves=%lu refused=%lu frames=%lu var_refs=%lu "
+           "bytes=%llu max_us=%lu total_us=%llu",
+           (unsigned long)guest->reloc_moves,
+           (unsigned long)guest->reloc_refused,
+           (unsigned long)guest->reloc_frames,
+           (unsigned long)guest->reloc_var_refs,
+           (unsigned long long)guest->reloc_bytes,
+           (unsigned long)guest->reloc_max_us,
+           (unsigned long long)guest->reloc_total_us);
+}
+#endif
+
 void pocketjs_guest_prepare_stop(pocketjs_guest_t *guest) {
   if (!guest || !guest->runtime)
     return;
@@ -873,6 +923,34 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
   if (guest->suspended) {
     const bool frame = guest->origin == JS_VM_ORIGIN_HOST;
     const bool held = guest->origin == JS_VM_ORIGIN_JOB_HELD;
+#ifdef CONFIG_POCKET_VM_RELOC
+    /* L3a's one caller on the device. Here and nowhere else: this is the
+     * only place the firmware resumes a chain it means to keep running, so
+     * it is the only place where the VM is parked AND has a future. The
+     * resume in pocketjs_guest_prepare_stop() is parked too, but it is
+     * terminating the chain -- moving it would copy bytes on their way to
+     * being freed.
+     *
+     * Charged separately from the resume it precedes, so the frame and
+     * drain totals the runaway guard reads keep meaning "time the guest
+     * spent running" rather than quietly including relocation. */
+    if (guest->reloc_armed) {
+      JSVMRelocStats rs;
+      const int64_t reloc_began = esp_timer_get_time();
+      const int moved = JS_VMStackRelocate(guest->runtime, &rs);
+      const uint32_t reloc_us = (uint32_t)(esp_timer_get_time() - reloc_began);
+      if (moved == 0 && rs.segments != 0U) {
+        guest->reloc_moves++;
+        guest->reloc_frames += rs.frames;
+        guest->reloc_var_refs += rs.var_refs;
+        guest->reloc_bytes += rs.bytes;
+        guest->reloc_total_us += reloc_us;
+        if (reloc_us > guest->reloc_max_us) guest->reloc_max_us = reloc_us;
+      } else if (moved != 0) {
+        guest->reloc_refused++;
+      }
+    }
+#endif
     const int64_t began = esp_timer_get_time();
     JSValue result = JS_VMResume(guest->context);
     const int64_t elapsed = esp_timer_get_time() - began;

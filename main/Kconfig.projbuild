@@ -175,10 +175,20 @@ menu "Pocket VM (L0 measurement probes)"
             guessing which machine words those are. That is why this
             depends on POCKET_VM_YIELD rather than on SEGFRAMES alone.
 
-            Nothing in the firmware calls it. L3a's deliverable is that
-            the segments CAN move; deciding when to move them is L4's
-            problem. Off by default and meant to stay that way until
-            there is a caller with a measured reason.
+            The only caller is the diagnostic one: USB '&' on the home
+            screen arms the next app, guest_continue_impl() then moves the
+            segments before every resume, and the session logs VM_RELOC
+            with what that cost. tools/vmtest/device_reloc.py drives it.
+            Unarmed, a RELOC build takes the same path as a build without
+            it.
+
+            That is deliberately not a reason to move: deciding WHEN to
+            relocate belongs to L4, which has to show first that the
+            non-moving segments are not already enough. Off by default and
+            meant to stay that way until that case is made.
+
+            Costs, measured on this tree: flash +1,228 B, static DRAM
+            +16 B against the same build with it off.
 
     config POCKET_VM_TCO
         bool "Experimental strict tail-call frame reuse"

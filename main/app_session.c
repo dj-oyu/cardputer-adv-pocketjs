@@ -251,6 +251,12 @@ void app_vm_watchdog(int (*fn)(void *), void *opaque) {
 }
 
 void app_vm_prepare_stop(void) {
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+    // Before the chain is closed, not after: prepare_stop resumes the parked
+    // chain in order to terminate it, and the counters belong to the run that
+    // is ending rather than to its teardown.
+    if(guest) pocketjs_guest_reloc_report(guest);
+#endif
     if(guest) pocketjs_guest_prepare_stop(guest);
 }
 void app_request_stop(void) { atomic_store(&stop_requested,true); }
@@ -495,6 +501,14 @@ void app_stop(void) {
     app_report();
     ESP_LOGI("app","APP_STOPPED");
 }
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+// Set by main.c's '&' on the home screen and left set, so one arming covers a
+// lifecycle sweep of several runs. Read at guest creation, which is the only
+// moment the guest exists and has not run anything yet.
+static bool reloc_requested;
+void app_vm_reloc_request(void) { reloc_requested=true; }
+#endif
+
 esp_err_t app_start_test(char test) {
     esp_err_t err;
 #ifdef CONFIG_POCKET_VM_SELFTEST
@@ -555,6 +569,13 @@ esp_err_t app_start_test(char test) {
 #ifdef CONFIG_POCKET_VM_PROBE
     TRY(vmprobe_segment_apply(guest) == 0 ? ESP_OK : ESP_ERR_INVALID_STATE);
     vmprobe_static_report();
+#endif
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+    // Armed here rather than after app_start_test returns: the source is
+    // EVALUATED inside this function, and a top-level await parks during that
+    // evaluation. Arming afterwards would miss exactly the parks that carry
+    // the deepest chains a session ever has.
+    if(reloc_requested) pocketjs_guest_reloc_arm(guest,true);
 #endif
     pocketjs_guest_set_watchdog(guest,interrupt,NULL);
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
