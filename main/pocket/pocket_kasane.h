@@ -18,7 +18,8 @@ esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data);
  * unregistering the handle, which makes later binds/acquires stale. */
 JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *registry,
                                          ksn_source_handle handle);
-void pocket_kasane_reset(void);
+/* False only while APP detach is busy: external producers must remain alive. */
+bool pocket_kasane_reset(void);
 /* Takes the native arena now, as one block, instead of at the guest's first
  * Kasane call. The session calls it before evaluating a source that names
  * kasane, while the heap is still unbroken. Failure is silent: the first call

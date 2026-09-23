@@ -1,6 +1,7 @@
 // End-to-end host contract for pocket.kasane with the real QuickJS and the
 // real fixed-storage DS core/cache/modal/renderer.
 #include "pocket_kasane.h"
+#include "pocket_clock.h"
 #include "app_view_assets.h"
 #include "pocket_av.h"
 #include "system/sys_device.h"
@@ -901,6 +902,69 @@ static void external_source_mount_tests(void){
     pocket_kasane_reset();
 }
 
+static void wall_source_service_tests(void){
+    ksn_render_stats stats;
+    bool blocked=false;
+    test_clock_valid=false;
+    JSValue global=JS_GetGlobalObject(ctx);
+    JSValue cap=pocket_clock_wall_source(ctx,JS_UNDEFINED,0,NULL);
+    check(!JS_IsException(cap)&&JS_SetPropertyStr(ctx,global,"wallCap",cap)>=0,
+          "wall-clock service issues a real native source capability");
+    JS_FreeValue(ctx,global);
+    check(run("globalThis.wallView=kasane.mount({version:1,"
+              "slots:{face:{type:'text',capacity:5},tag:{type:'text',capacity:7}},"
+              "nodes:[{type:'text',bounds:[0,0,48,12],text:{slot:'face'},"
+              "color:0xffffffff},{type:'text',bounds:[50,0,96,12],"
+              "text:{slot:'tag'},color:0xffffffff}]},"
+              "{face:'BASE',tag:'BASE'})")&&
+          present(&stats)==KSN_OK&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "arbitrary app schema mounts before a service bind");
+    check(run("wallView.bind(wallCap,{face:0,tag:1})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "arbitrary app schema subscribes to the clock service without JS polling");
+    check(present(&stats)==KSN_OK,"unsynced service clock presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "unsynced service clock acknowledges");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    test_clock_valid=true;
+    test_clock_ui=(sys_clock_state){.seconds=45240,.source=SYS_CLOCK_SNTP};
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          present(&stats)==KSN_OK&&
+          memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels))!=0,
+          "clock service updates native text when the minute changes");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "clock service acknowledgement is stable");
+    test_clock_ui.seconds=45259;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "unchanged minute does not redraw a subscribed app");
+    check(pocket_kasane_reset(),"clock service subscriber detaches at session reset");
+    pocket_clock_reset();
+    global=JS_GetGlobalObject(ctx);
+    JSValue next=pocket_clock_wall_source(ctx,JS_UNDEFINED,0,NULL);
+    check(!JS_IsException(next)&&JS_SetPropertyStr(ctx,global,"wallCapNext",next)>=0,
+          "clock service can issue a fresh capability after reset");
+    JS_FreeValue(ctx,global);
+    check(run("globalThis.wallView2=kasane.mount({version:1,"
+              "slots:{face:{type:'text',capacity:5}},"
+              "nodes:[{type:'text',bounds:[0,0,48,12],text:{slot:'face'},"
+              "color:0xffffffff}]},{face:'BASE'})")&&
+          present(&stats)==KSN_OK&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "fresh session mounts after clock service reset");
+    check(run("(()=>{let stale=false;try{wallView2.bind(wallCap,{face:0})}"
+              "catch(e){stale=true}if(!stale)throw Error('old clock capability')})()"),
+          "old clock capability cannot bind to a new service generation");
+    check(run("wallView2.bind(wallCapNext,{face:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          present(&stats)==KSN_OK,
+          "fresh clock capability binds and presents after reset");
+    check(pocket_kasane_reset(),"fresh clock service subscriber detaches");
+    pocket_clock_reset();
+    test_clock_valid=false;
+}
+
 static void atomicity_tests(void) {
     ksn_render_stats stats;
     /* Keep an old JS draw wrapper alive while its native arena is replaced. */
@@ -1670,6 +1734,7 @@ int main(void) {
     dual_source_mount_tests();
 #endif
     external_source_mount_tests();
+    wall_source_service_tests();
 
     check(run("globalThis.tpl=kasane.cache.create(["
               "{bounds:[0,0,10,10],color:0xff0000ff},"

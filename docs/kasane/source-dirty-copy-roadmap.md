@@ -194,6 +194,12 @@ stale購読自動切り離しを追加。旧slotを最新JS baseへ戻し、複�
 実QuickJS host試験で提出中拒否、解除→再bind、登録解除→base復帰、
 他source保持、6回の世代更新、提出後・表示前の登録解除を確認。実service配線、別task producer、
 実機性能・寿命gateは引き続き未達。
+2026-09-24：`pocket.time.wallSource()`で実system clockサービスのsourceを
+通常アプリのruntime descriptorへ公開した。時計assetのproducer実装を共有し、
+source payloadの重複実装はない。host QuickJSではJS描画更新なしの時刻変化、
+同一分の描画skip、セッション終了後の旧capability失効と再登録を確認。
+診断OFF製品ビルドはPASS（静的DIRAM 159,804 B、前ビルド比+16 B）。
+別task producer・固定snapshot poolとの結合、実機性能/heap/音声共存gateは未達。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

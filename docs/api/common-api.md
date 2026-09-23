@@ -245,10 +245,13 @@ pocket.app.exit(): void;
 pocket.app.onFrame(fn: (f: {timeMs: number; deltaMs: number}) => void): Subscription;
 pocket.time.now(): number;
 pocket.time.wall(): {unixMs: number | null; source: "unsynced" | "host" | "network"};
+pocket.time.wallSource(): KasaneSourceCapability;
 pocket.time.sleep(ms: number, options?: Options): Promise<void>;
 ```
 
 `time.wall()`はSystemの共通anchorを読む。`source`はRTC/SNTPなら互換表記`network`、検証済みPC packetの補完なら`host`、利用できる時刻がなければ`unsynced`。RTC/SNTPを優先し、PC補完はOS時計を書き換えない。PC packetのCRCは時刻の真正性保証ではない。TLSは別に実際のOS時計の信頼状態を検査する。`unixMs`は丸めた整数ミリ秒で、安全な数値範囲を越える場合もnullを返す。
+
+`time.wallSource()`はKasaneのmountへ渡す不透明なsession-scoped capabilityを返す。`view.bind(pocket.time.wallSource(), {face: 0, tag: 1})`で、text field 0を`HH:MM`（同期前は`--:--`）、field 1を`UTC`または`NO SYNC`として購読できる。JS側の毎フレーム時刻取得や描画更新は不要。sourceは時計サービスが所有し、Kasaneは型付きsnapshotを一時的に借りるだけである。capabilityはセッション終了後に失効する。
 
 startはソース評価中に1回登録する。新ランタイムではglobalThis.frameをホストが用意し、Promiseだけを待つアプリもイベント処理を継続できる。start hook終了まで状態はStartingだが、I/O完了とキャンセルは配送する。onFrameはRunningでのみ呼ぶ。
 

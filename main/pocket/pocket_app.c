@@ -863,6 +863,7 @@ static esp_err_t build_time(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     define(ctx,ns,"now",JS_NewCFunction(ctx,js_time_now,"now",0));
     define(ctx,ns,"wall",JS_NewCFunction(ctx,pocket_clock_wall,"wall",0));
+    define(ctx,ns,"wallSource",JS_NewCFunction(ctx,pocket_clock_wall_source,"wallSource",0));
     define(ctx,ns,"sleep",JS_NewCFunction(ctx,js_sleep,"sleep",2));
     return ESP_OK;
 }

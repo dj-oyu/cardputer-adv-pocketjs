@@ -15,6 +15,7 @@
 #include "pocket_ble.h"
 #include "pocket_text.h"
 #include "pocket_app.h"
+#include "pocket_clock.h"
 #include "pocket_bridge.h"
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
@@ -482,7 +483,7 @@ void app_stop(void) {
     // Before pocket_api_reset(): a picker still on screen holds a promise slot,
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
-    pocket_kasane_reset();
+    if(pocket_kasane_reset())pocket_clock_reset();
     pocket_input_reset();
     pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and

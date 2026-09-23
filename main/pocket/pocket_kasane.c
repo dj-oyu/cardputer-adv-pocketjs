@@ -2552,11 +2552,11 @@ JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *regi
     return object;
 }
 
-void pocket_kasane_reset(void) {
+bool pocket_kasane_reset(void) {
     const pocket_app_view_provider *provider=state?state->provider:NULL;
     void *provider_state=state?state->provider_state:NULL;
     schema_state *schema=state?state->schema:NULL;
-    if(state&&ksn_runtime_app_detach(state->lease)==KSN_BUSY)return;
+    if(state&&ksn_runtime_app_detach(state->lease)==KSN_BUSY)return false;
     if(provider)provider->destroy(provider_state);
     if(schema)free(schema_external_state(schema));
     if(schema)free(schema->owned_asset);
@@ -2566,6 +2566,7 @@ void pocket_kasane_reset(void) {
     viewport=KASANE_SCREEN;
     overlay_profile=false;
     owner_now_us=0;
+    return true;
 }
 bool pocket_kasane_active(void) { return state&&state->active; }
 ksn_result pocket_kasane_update_notice(const sys_notice *notice,uint16_t variant){

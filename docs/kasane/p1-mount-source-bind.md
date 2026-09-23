@@ -38,6 +38,16 @@ recordは新しい世代へ再利用できるがserialは再利用しない。
 実際のsystem/serviceがcapabilityを発行する配線、別task producerの
 固定snapshotとの接続、実機gateが残り、P1完了ではない。
 
+2026-09-24追記：`pocket.time.wallSource()`が実clock serviceのcapabilityを発行する。
+通常アプリのruntime descriptorから`face:0, tag:1`でbind可能になった。
+既存のdeskclock assetも同じC producer実装を利用し、時刻文字列の整形は重複しない。
+service storageは初回要求時に1回だけ確保し、Kasane detach完了後に登録解除・解放する。
+旧capabilityは新セッションで再発行しても使えない。実QuickJS host試験で
+未同期→同期、同一分の描画skip、reset後の再登録をASan/UBSanと
+`-O2 -fstrict-aliasing`で0失敗と確認した。診断OFF製品ビルドもPASS
+（静的DIRAM 159,804 B、前ビルド比+16 B）。
+別task producerの固定snapshot、実機gateは引き続き未達。
+
 host限定2 source fixtureの実QuickJS試験では、保留中の変更拒否、field index・
 型・認可・slot重複・getter再入の拒否、旧base復帰と新slotへのnative値、同一bindingの
 描画skip、reset後の古いview拒否を確認。ASan/UBSanと
