@@ -1,0 +1,139 @@
+#include "core_fixture.h"
+#include "ksn_p0_probe.h"
+#include "ksn_schema_session.h"
+#include "ksn_source.h"
+#include "ksn_view_host.h"
+#include <stdio.h>
+#include <string.h>
+
+#define CHECK(x) do {if(!(x)){fprintf(stderr,"source copy line %d: %s\n",__LINE__,#x);return 1;}}while(0)
+#define LIT KSN_SCHEMA_LITERAL
+KSN_TEST_CORE(core,static);
+static unsigned copy_calls[KSN_P0_COPY_COUNT];
+static size_t copy_bytes[KSN_P0_COPY_COUNT];
+void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes){
+    if(bytes&&kind<KSN_P0_COPY_COUNT){copy_calls[kind]++;copy_bytes[kind]+=bytes;}
+}
+typedef struct {
+    char text[16];
+    ksn_schema_value field;
+    uint32_t generation;
+    uint64_t revision;
+    unsigned releases;
+} producer;
+static ksn_result acquire(void *context,uint64_t cursor,uint64_t now_us,
+                          ksn_source_snapshot *out){
+    producer *p=context;(void)cursor;(void)now_us;
+    *out=(ksn_source_snapshot){.size=sizeof(*out),.version=KSN_SOURCE_ABI_VERSION,
+        .field_count=1,.generation=p->generation,.revision=p->revision,
+        .valid_fields=1,.changed_fields=1,.fields=&p->field};
+    return KSN_OK;
+}
+static void release(void *context,const ksn_source_snapshot *snapshot){
+    producer *p=context;
+    if(snapshot->fields==&p->field)p->releases++;
+}
+static bool allow(void *context,uint32_t consumer){
+    (void)context;return consumer==7;
+}
+typedef struct {uint16_t pixels[240*8];unsigned alpha,bravo,gamma;} display;
+static uint16_t *strip(void *context){return ((display *)context)->pixels;}
+static ksn_result transfer(void *context,uint16_t y,uint16_t rows,const uint16_t *pixels){
+    (void)context;(void)y;(void)rows;(void)pixels;return KSN_OK;
+}
+static ksn_result span(void *context,const ksn_draw *draw,uint16_t reveal,
+                       int x,int y,unsigned count,uint8_t *out){
+    display *d=context;(void)reveal;(void)x;(void)y;
+    if(draw->data.text.bytes!=5)return KSN_INVALID;
+    if(memcmp(draw->data.text.utf8,"alpha",5)==0){if(count)d->alpha++;}
+    else if(memcmp(draw->data.text.utf8,"bravo",5)==0){if(count)d->bravo++;}
+    else if(memcmp(draw->data.text.utf8,"gamma",5)==0){if(count)d->gamma++;}
+    else return KSN_INVALID;
+    if(count)memset(out,255,count);
+    return KSN_OK;
+}
+static int read_text(ksn_tx tx,const char *expected){
+    for(unsigned i=0;i<2;i++){
+        ksn_frame_command command;
+        if(ksn_core_read(&core,tx,false,KSN_APP,(uint16_t)i,&command)!=KSN_OK||
+           command.draw.kind!=KSN_TEXT||command.draw.data.text.bytes!=5||
+           memcmp(command.draw.data.text.utf8,expected,5)!=0)return 1;
+    }
+    return 0;
+}
+int main(void){
+    static const ksn_schema_slot slots[]={{"title",KSN_SLOT_TEXT,15,0,0}};
+    static const ksn_schema_node nodes[]={
+        {.kind=KSN_NODE_TEXT,.bounds={.slot=LIT,.literal.rect={4,4,90,16}},
+         .color={.slot=LIT,.literal.color=0xffffffffu},.text={.slot=0},.font=KSN_CAPTION},
+        {.kind=KSN_NODE_TEXT,.bounds={.slot=LIT,.literal.rect={4,20,90,32}},
+         .color={.slot=LIT,.literal.color=0xffffffffu},.text={.slot=0},.font=KSN_CAPTION}
+    };
+    const ksn_schema schema={.version=1,.slot_count=1,.node_count=2,
+        .background=0x000000ffu,.slots=slots,.nodes=nodes};
+    ksn_schema_value base[1]={0},effective[KSN_SCHEMA_MAX_SLOTS]={0};
+    base[0].data.text=(ksn_schema_text){"base",4};
+    producer p={.revision=1};memcpy(p.text,"alpha",6);
+    p.field.data.text=(ksn_schema_text){p.text,5};
+    static const ksn_slot_type types[]={KSN_SLOT_TEXT};
+    ksn_source_provider provider={.size=sizeof(provider),.version=KSN_SOURCE_ABI_VERSION,
+        .field_count=1,.field_types=types,.context=&p,
+        .acquire=acquire,.release=release,.allow=allow};
+    ksn_source_registry registry;ksn_source_registry_init(&registry);
+    ksn_source_handle handle={0};
+    CHECK(ksn_source_register(&registry,&provider,&handle)==KSN_OK);
+    p.generation=handle.generation;
+    const ksn_source_binding binding={0,0};ksn_source_subscription sub={0};
+    CHECK(ksn_source_subscribe(&registry,handle,7,&schema,&binding,1,&sub)==KSN_OK);
+    ksn_view_host host;ksn_view_host_init(&host,&core,NULL,1);
+    ksn_view *view=ksn_view_host_endpoint(&host,KSN_APP);
+    ksn_schema_session session;CHECK(ksn_schema_session_init(&session,&schema)==KSN_OK);
+    display output={0};const ksn_text_port font={.ctx=&output,.span=span};
+    ksn_display_port port={&output,strip,transfer,240,135,8,&font,NULL};
+    ksn_rect viewport={0,0,240,135};ksn_render_stats stats;bool blocked=false;
+    ksn_source_lease lease={0};
+    CHECK(ksn_source_acquire(&registry,&sub,&schema,base,1,effective,&lease)==KSN_OK);
+    CHECK(effective[0].data.text.utf8==p.text&&lease.dirty_slots==1);
+    CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,1,1,&blocked)==KSN_OK&&blocked);
+    CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==2&&copy_bytes[KSN_P0_CORE_SUBMIT_TEXT]==10);
+    CHECK(copy_calls[KSN_P0_ADAPTER_TEMP]==0&&copy_calls[KSN_P0_ADAPTER_OWNED]==0);
+    CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
+    CHECK(p.releases==1);memcpy(p.text,"xxxxx",6);
+    CHECK(!read_text(session.ticket,"alpha"));
+    CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK&&output.alpha>0);
+    CHECK(ksn_source_presented(&sub,1)==KSN_OK);
+
+    p.revision=2;memcpy(p.text,"bravo",6);
+    CHECK(ksn_source_acquire(&registry,&sub,&schema,base,2,effective,&lease)==KSN_OK);
+    CHECK(effective[0].data.text.utf8==p.text&&lease.dirty_slots==1);
+    CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,2,1,&blocked)==KSN_OK&&blocked);
+    CHECK(session.pending_delta==KSN_SCHEMA_PATCHED);
+    CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==4&&copy_bytes[KSN_P0_CORE_SUBMIT_TEXT]==20);
+    CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
+    CHECK(p.releases==2);memcpy(p.text,"xxxxx",6);
+    CHECK(!read_text(session.ticket,"bravo"));
+    CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK&&output.bravo>0);
+    CHECK(ksn_source_presented(&sub,2)==KSN_OK);
+    ksn_view_host_invalidate(&host);
+    CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK);
+    CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==4);
+
+    p.revision=3;memcpy(p.text,"gamma",6);
+    CHECK(ksn_source_acquire(&registry,&sub,&schema,base,3,effective,&lease)==KSN_OK);
+    CHECK(lease.dirty_slots==1);
+    CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,3,1,&blocked)==KSN_OK&&blocked);
+    CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
+    CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==6);
+    CHECK(ksn_view_cancel(view,session.ticket)==KSN_OK);
+    CHECK(ksn_source_acquire(&registry,&sub,&schema,base,4,effective,&lease)==KSN_OK);
+    CHECK(lease.dirty_slots==0); /* Session must restore the discarded dirty bit. */
+    CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,3,0,&blocked)==KSN_OK&&blocked);
+    CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==8&&copy_bytes[KSN_P0_CORE_SUBMIT_TEXT]==40);
+    CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
+    memcpy(p.text,"xxxxx",6);
+    CHECK(!read_text(session.ticket,"gamma"));
+    CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK&&output.gamma>0);
+    CHECK(copy_calls[KSN_P0_ADAPTER_TEMP]==0&&copy_calls[KSN_P0_ADAPTER_OWNED]==0);
+    puts("source copy: PASS (one core copy/destination, release, PATCH, repair, discard/retry)");
+    return 0;
+}

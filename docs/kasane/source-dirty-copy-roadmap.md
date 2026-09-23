@@ -190,6 +190,16 @@ core bank cloneは依然O(使用済みbank bytes)。全処理をO(dirty node数)
 
 ## P3：native payloadの1-copyと寿命ゲート
 
+2026-09-24のhost境界試験：`test_source_copy.c`で1つのnative UTF-8
+payloadを2つのtext nodeに渡し、schema/adapterのpayload転記0回、
+core受理時のtext転記2回（各destinationに1回、5 Bずつ）を計数した。
+source lease解放後に元バッファを書き換えても、REPLACE/PATCHの提出済み値、
+描画、後続のrepairが保持される。DISCARDED時は同revisionの完全snapshotを
+再取得してdirtyを復元し、再提出できる。ASan/UBSan・O2でPASS。
+これはhostのsource→core受理境界の証拠であり、producer内部の生成copy、
+実Cardputerのpool-backed producer、音声共存、全経路1-copyの証明ではない。
+P3出口は未達。
+
 producerが公開済みの不変UTF-8をowner turnだけ借り、schemaの中間文字所有を
 必須にせずcoreへ提出する。core受理時に1回コピーすればlease解放後も描画・repair
 可能になる。静的flash値は借用のままでもよいが、動的値に寿命保証なしの0-copyを
