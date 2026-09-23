@@ -670,6 +670,24 @@ static void dual_source_mount_tests(void){
           "mixed three-source frame acknowledges");
     check(external_test[0].acquired==external_test[0].released,
           "mixed-source lease does not outlive its owner turn");
+    check(run("dual.unbind(0)")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "unbind drops one static source but keeps the other two");
+    check(present(&stats)==KSN_OK,"static unbind restores alt base");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "static unbind frame acknowledges");
+    check(run("dual.bind(0,{alt:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "static source can rebind after unbind");
+    check(present(&stats)==KSN_OK,"rebound static source presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "rebound static source acknowledges");
+    check(run("dual.unbind(mixedCap)")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "external unbind keeps both static subscriptions");
+    check(present(&stats)==KSN_OK,"external unbind restores left base");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "external unbind frame acknowledges");
     pocket_kasane_reset();
     check(pocket_kasane_source_wait_ticks(1001,10,1000)==10,
           "unmounted source does not shorten owner waits");
@@ -733,6 +751,9 @@ static void external_source_mount_tests(void){
               "externalView.bind(externalCap1,{right:0})")&&
           pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
           "runtime view composes two external source registries");
+    check(run("(()=>{let busy=false;try{externalView.unbind(externalCap0)}"
+              "catch(e){busy=true}if(!busy)throw Error('pending unbind')})()"),
+          "unbind rejects a subscription change while a frame is pending");
     check(run("(()=>{let added=kasane.stats().nativeBytes-externalNativeBefore;"
               "if(added<=0||added>1024)throw Error('external allocation')})()"),
           "external subscription uses one bounded lazy allocation");
@@ -776,7 +797,69 @@ static void external_source_mount_tests(void){
     check(external_test[0].acquired==external_test[0].released&&
           external_test[1].acquired==external_test[1].released,
           "external leases are released after every owner step");
+    check(run("externalView.unbind(externalCap0)")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "explicit unbind restores latest base with second source retained");
+    check(present(&stats)==KSN_OK,"first external unbind presents base");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "first external unbind acknowledges");
+    check(run("externalView.unbind(externalCap1)")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "last external unbind falls back to source-free schema path");
+    check(present(&stats)==KSN_OK,"last external unbind presents base");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "last external unbind acknowledges");
+    check(run("if(kasane.stats().nativeBytes!==externalNativeBefore)"
+              "throw Error('external allocation retained')"),
+          "last unbind releases the optional subscription allocation");
+    check(run("externalView.unbind(externalCap1)")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "external unbind is idempotent");
+    check(run("externalView.bind(externalCap0,{label:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "external source rebinds after full detach");
+    check(present(&stats)==KSN_OK,"rebound external source presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "rebound external source acknowledges");
+    check(run("externalView.bind(externalCap1,{right:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "second external source rebinds before service revocation");
+    check(present(&stats)==KSN_OK,"second external source presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "second external source acknowledges");
+    memcpy(external_test[0].text,"A2",3);external_test[0].revision++;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "source update submits before service revocation");
+    check(ksn_source_unregister(&external_test[0].registry,
+                                external_test[0].handle)==KSN_OK,
+          "service can unregister after the owner releases its source pin");
+    unsigned reads_before_revoke=external_test[0].acquired;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          external_test[0].acquired==reads_before_revoke,
+          "pending submitted frame does not reacquire a revoked service");
+    check(present(&stats)==KSN_OK,
+          "submitted core-owned pixels present after source revocation");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "stale service handle automatically reveals latest JS base");
+    check(present(&stats)==KSN_OK,"automatic stale-source detach presents base");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "automatic stale-source detach acknowledges");
+    check(run("if(kasane.stats().nativeBytes<=externalNativeBefore)"
+              "throw Error('other subscription dropped')"),
+          "automatic detach preserves the other external subscription");
+    check(run("externalView.unbind(externalCap1)")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "remaining external source can detach after stale peer");
+    check(present(&stats)==KSN_OK,"remaining external unbind presents base");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "remaining external unbind acknowledges");
+    check(run("if(kasane.stats().nativeBytes!==externalNativeBefore)"
+              "throw Error('stale subscription retained')"),
+          "last detach frees the external subscription allocation");
     pocket_kasane_reset();
+    check(external_test_open(0,"N0"),
+          "service registers a new generation after prior handle removal");
     global=JS_GetGlobalObject(ctx);
     JSValue fresh=pocket_kasane_source_capability(ctx,&external_test[0].registry,
                                                    external_test[0].handle);
@@ -796,6 +879,25 @@ static void external_source_mount_tests(void){
           pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
           "fresh capability subscribes the new runtime view");
     check(present(&stats)==KSN_OK,"fresh external capability presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "fresh external capability acknowledges");
+    bool recycled=true;
+    for(unsigned i=0;i<6;i++){
+        if(ksn_source_unregister(&external_test[0].registry,
+                                 external_test[0].handle)!=KSN_OK||
+           ksn_source_register(&external_test[0].registry,
+                               &external_test[0].provider,
+                               &external_test[0].handle)!=KSN_OK){recycled=false;break;}
+        JSValue cap=pocket_kasane_source_capability(ctx,&external_test[0].registry,
+                                                    external_test[0].handle);
+        if(JS_IsException(cap))recycled=false;
+        JS_FreeValue(ctx,cap);
+        if(!recycled)break;
+    }
+    check(recycled,"stale capability records recycle across source generations");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "generation replacement detaches the old subscription");
+    check(present(&stats)==KSN_OK,"generation replacement presents base");
     pocket_kasane_reset();
 }
 

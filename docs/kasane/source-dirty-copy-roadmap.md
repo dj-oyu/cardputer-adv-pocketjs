@@ -187,6 +187,13 @@ reset失効をASan/UBSan・O2で確認。購読領域は初回bind時の固定�
 sourceなしmountのallocationは維持。診断OFF buildはPASS、静的DIRAM
 159,788 B。実serviceの発行配線、登録解除時のbase復帰、unbind、
 別task producerと実機gateは未達で、P1全体は未完了。
+2026-09-24：`view.unbind(index|capability)`と、service handle登録解除時の
+stale購読自動切り離しを追加。旧slotを最新JS baseへ戻し、複数sourceの
+残存購読は保つ。最後の外部購読解除ではlazy領域を解放し、sourceなし経路へ
+復帰。capability tableは古い世代の枠を新しいserialで再利用する。
+実QuickJS host試験で提出中拒否、解除→再bind、登録解除→base復帰、
+他source保持、6回の世代更新、提出後・表示前の登録解除を確認。実service配線、別task producer、
+実機性能・寿命gateは引き続き未達。
 
 ## P2：dirty-node更新を既存bankのまま導入
 
