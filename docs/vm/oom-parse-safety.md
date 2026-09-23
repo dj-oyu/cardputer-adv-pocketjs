@@ -146,7 +146,7 @@ bytecode を積む `DynBuf` のエラー旗に残るだけで、例外は投げ�
 | 検査 | 結果 |
 | --- | --- |
 | `oom_sweep.sh`（closures + generators、各 4,800 点） | **0 件**（修正前 71 / 133） |
-| `oom_sweep.sh`（コーパス 64 ファイル、各 3,000 点） | §5.1 |
+| `oom_sweep.sh`（コーパス 64 ファイル、各 3,000 点） | **ASan/UBSan 0 件**（192,000 点）。サニタイザ以外の 18 件は修正前から在るもの（§5.1） |
 | 以前落ちていた 8 点を LSan 有効で | 8 点とも `InternalError: out of memory` で終了、**リーク 0** |
 | `test_dbuf_sticky.c` | 修正後 pass、未修正ヘッダで fail |
 | `run.sh`（o2、通常 / `--force-yield`） | 75/75、75/75 |
@@ -155,8 +155,20 @@ bytecode を積む `DynBuf` のエラー旗に残るだけで、例外は投げ�
 
 ### 5.1 コーパス全体の掃引
 
-**実施中。** 途中まで（古い実行ファイルで 31/64 ファイル）の時点で `js_parse_class` の書き越しを
-19 件見つけ、§3.3 の修正を広げた。全修正を入れた実行ファイルで最初から回し直している。
+`oom_sweep.sh -n 3000` をコーパス 64 ファイルに（長い `bench_*` と `runaway_jobs` / `budget_starve` /
+`tco_guards` は除外）。**192,000 点で、ASan/UBSan の報告は 0 件。**
+
+途中の版（古い実行ファイル、31/64 ファイル）で `js_parse_class` の書き越しを 19 件見つけ、§3.3 を
+クラス解析まで広げた。その3ファイル（`l2b_flat_calls` / `lazy_call_inputs` / `l2b_async_flat`）は
+最終版で各 3,000 点とも 0 件。
+
+サニタイザ以外の報告が 18 件残った。**18 件とも修正前のビルドで同じ点・同じ症状が再現する**
+（修正とは無関係に以前から在る）:
+
+| 件数 | ファイル | 症状 | 何か |
+| --- | --- | --- | --- |
+| 14 | `yield_then_handler.js` | 30 秒でタイムアウト | **テストの作り**。末尾の `afterAll` が `order.length < 5` の間、自分を `Promise.resolve().then` で再登録し続ける。OOM で `.then` の1つが落ちると 5 に届かず永久にポーリングする。VM は Promise ジョブを正しく回している（SIGABRT で取ったスタックは `JS_VMCallJob` の中）。実機では同じ形（無限 Promise 連鎖）をドレインの暴走ガードが 250 ms で止める（L3a の実機計測で診断 `'6'` が `RUNAWAY one drain spent 250845 us`） |
+| 4 | `special_calls.js`、`yield_job_tails.js` | **abort**: `JS_FreeRuntime` の `assert(list_empty(&rt->gc_obj_list))` | **OOM のエラー経路での参照の漏れ**。破棄の時点で約 160 個の GC オブジェクトが残り、大半が素の Object と C 関数、参照数 11〜13 のものも在る — 組み込みのプロトタイプ群がまるごと生き残る形で、C 側の参照が1本解放されずにコンテキストの全体を生かしている。**実機では `app_stop()` がこの assert を踏むので、実行中に OOM を踏んだアプリを閉じると再起動する**（推論。実機では未確認）。漏れている参照の特定は未着手 |
 
 ## 6. 残っているもの（この変更の範囲外）
 
