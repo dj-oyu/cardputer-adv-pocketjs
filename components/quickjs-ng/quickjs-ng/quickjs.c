@@ -8814,10 +8814,32 @@ JS_ThrowError2(JSContext *ctx, JSErrorEnum error_num, bool add_backtrace,
                JS_PRINTF_FORMAT const char *fmt, va_list ap)
 {
     JSValue obj;
+    JSRuntime *rt = ctx->rt;
 
     obj = JS_MakeError(ctx, error_num, add_backtrace, fmt, ap);
     if (unlikely(JS_IsException(obj))) {
-        /* out of memory: throw JS_NULL to avoid recursing */
+        /* PocketJS: the allocation(s) needed to build *this* Error object
+         * failed too (docs/vm/oom-parse-safety.md sec.6). Upstream
+         * (quickjs-ng master, unchanged as of 2026-09-23) throws a bare
+         * JS_NULL here, which reaches guest code indistinguishable from a
+         * script's own `throw null` -- a `catch (e) { ...e.constructor... }`
+         * block then crashes with a misleading TypeError instead of ever
+         * seeing the OOM (--fail-alloc 3225..3227 / 3248..3250 on
+         * generators.js: "cannot read property 'constructor' of null" at
+         * generators.js:67/72, both well into execution, not context
+         * setup -- JS_TakeOOMCanary confirms exactly one rejection).
+         * JS_ThrowOutOfMemory's own rt->in_out_of_memory guard already
+         * exists to stop this from recursing forever, so route through it
+         * instead of jumping straight to JS_NULL: under fault injection only
+         * the one targeted allocation fails, so the fresh allocation it
+         * retries for the InternalError object succeeds and the guest sees
+         * "InternalError: out of memory" as it should. If we are already
+         * inside that retry (rt->in_out_of_memory set), a second failure
+         * means the heap is genuinely exhausted right now -- fall back to
+         * JS_NULL exactly as before rather than looping. */
+        if (!rt->in_out_of_memory) {
+            return JS_ThrowOutOfMemory(ctx);
+        }
         obj = JS_NULL;
     }
     return JS_Throw(ctx, obj);
