@@ -2809,10 +2809,60 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
 }
 
+/* PocketJS: context setup ignores most of its own failures. The intrinsic
+ * adders define hundreds of properties through JS_SetPropertyFunctionList,
+ * JS_DefinePropertyValue*, JS_NewGlobalCConstructor2 and friends, and most
+ * of those results are dropped (JS_AddIntrinsicBasicObjects' error
+ * prototypes, every JS_DefineAutoInitProperty, the DEF_CGETSET branch of
+ * JS_InstantiateFunctionListItem, ...). An allocation that fails in one of
+ * them leaves the context with a hole -- measured: vmrun --fail-alloc 500
+ * on closures.js ran the whole program and then threw "not a function" at
+ * .join(), because Array.prototype.join was never defined; 228 other points
+ * of the same sweep ran to completion with some builtin silently missing.
+ * On the device a context is built per app start, so a short heap at that
+ * moment would start the app on a broken standard library instead of
+ * refusing to start it.
+ *
+ * Checking each call would be several hundred edits to upstream code and
+ * would still miss the next one added. Every rejected allocation already
+ * passes through js_oom_canary_record (both the malloc_limit check and a NULL
+ * from the allocator), so the count it keeps answers "did anything fail
+ * while this context was built" once, at the end. Read, never cleared, so
+ * the per-turn JS_TakeOOMCanary discipline of the host is untouched; the
+ * count saturates at UINT32_MAX, which would hide a failure only after four
+ * billion untaken rejections. */
+static uint32_t js_context_setup_mark(void)
+{
+    return g_oom_canary.count;
+}
+
+/* PocketJS: true if an allocation was rejected since `mark`. */
+static bool js_context_setup_failed(uint32_t mark)
+{
+    return g_oom_canary.count != mark;
+}
+
+/* PocketJS: tears down a context whose setup failed, checked or not. The
+ * exception the failing call threw (an InternalError created from this very
+ * context's prototypes) is dropped first rather than handed to the caller:
+ * left pending it would keep the dead realm alive past JS_FreeContext, and
+ * JS_NewContext's contract is NULL, not NULL plus an exception. Only dropped
+ * if none was pending when setup began, so a caller's own pending exception
+ * is never eaten. */
+static void js_context_setup_abort(JSContext *ctx, bool had_exception)
+{
+    if (!had_exception)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeContext(ctx);
+}
+
 JSContext *JS_NewContextRaw(JSRuntime *rt)
 {
     JSContext *ctx;
     int i;
+    /* PocketJS: see js_context_setup_mark */
+    uint32_t setup_mark = js_context_setup_mark();
+    bool had_exception = !JS_IsUninitialized(rt->current_exception);
 
     ctx = js_mallocz_rt(rt, sizeof(JSContext));
     if (!ctx) {
@@ -2824,6 +2874,11 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->class_proto = js_malloc_rt(rt, sizeof(ctx->class_proto[0]) *
                                     rt->class_count);
     if (!ctx->class_proto) {
+        /* PocketJS: upstream freed ctx while its header was still linked
+         * into rt->gc_obj_list, leaving a dangling node for the next GC or
+         * JS_FreeRuntime to walk. Unreached before only because nothing
+         * then freed the runtime after a failed JS_NewContext. */
+        remove_gc_object(&ctx->header);
         js_free_rt(rt, ctx);
         return NULL;
     }
@@ -2843,8 +2898,9 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->error_stack_trace_limit = js_int32(10);
     init_list_head(&ctx->loaded_modules);
 
-    if (JS_AddIntrinsicBasicObjects(ctx)) {
-        JS_FreeContext(ctx);
+    if (JS_AddIntrinsicBasicObjects(ctx) ||
+        js_context_setup_failed(setup_mark)) {
+        js_context_setup_abort(ctx, had_exception);
         return NULL;
     }
     return ctx;
@@ -2853,6 +2909,9 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
 JSContext *JS_NewContext(JSRuntime *rt)
 {
     JSContext *ctx;
+    /* PocketJS: see js_context_setup_mark */
+    uint32_t setup_mark = js_context_setup_mark();
+    bool had_exception = !JS_IsUninitialized(rt->current_exception);
 
     ctx = JS_NewContextRaw(rt);
     if (!ctx) {
@@ -2870,8 +2929,9 @@ JSContext *JS_NewContext(JSRuntime *rt)
             JS_AddIntrinsicPromise(ctx) ||
             JS_AddIntrinsicWeakRef(ctx) ||
             JS_AddIntrinsicDOMException(ctx) ||
-            JS_AddPerformance(ctx)) {
-        JS_FreeContext(ctx);
+            JS_AddPerformance(ctx) ||
+            js_context_setup_failed(setup_mark)) {
+        js_context_setup_abort(ctx, had_exception);
         return NULL;
     }
 
@@ -9593,12 +9653,22 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
     func = js_autoinit_func_table[js_autoinit_get_id(pr)];
     /* 'func' shall not modify the object properties 'pr' */
     val = func(realm, p, prop, pr->u.init.opaque);
-    js_autoinit_free(ctx->rt, pr);
-    prs->flags &= ~JS_PROP_TMASK;
-    pr->u.value = JS_UNDEFINED;
+    /* PocketJS: upstream turned the property into a plain `undefined` before
+     * looking at the result, so one failed instantiation (an OOM in
+     * JS_NewCFunction2 on first use) removed the builtin for the rest of the
+     * run: generators.js under --fail-alloc 2877 fails to instantiate
+     * Generator.prototype.throw and then reports "not a function" at
+     * g.throw(). This is the lazy half of context setup (every JS_DEF_CFUNC
+     * of the intrinsic tables lands here), so it gets the same rule as
+     * JS_NewContext: a failure may fail the operation, never leave a hole.
+     * The autoinit slot is left as it was -- 'func' does not touch 'pr', and
+     * the realm reference and opaque are still owned by it -- so the next
+     * access simply tries again. */
     if (JS_IsException(val)) {
         return -1;
     }
+    js_autoinit_free(ctx->rt, pr);
+    prs->flags &= ~JS_PROP_TMASK;
     pr->u.value = val;
     return 0;
 }
