@@ -562,6 +562,27 @@ static enum { FYFAULT_NONE, FYFAULT_NORESUME, FYFAULT_NOYIELD } force_yield_faul
 // yield_discard, yield_call_on_chain, yield_held_terminate,
 // yield_held_discard) can be blessed WITHOUT yield now and are ready to
 // exercise the real mechanism the moment stage 3 lands it.
+// --force-reloc (L3a, docs/vm/vm-L3-design.md sec.7). Moves the whole live
+// segment chain to fresh addresses at every park, just before the resume.
+// Deliberately has no corpus of its own: paired with --force-yield it turns
+// EVERY existing file into a relocation test, and the gate is that the
+// expected output does not change by one byte. A move that altered anything
+// observable would be a design error, not a new baseline to bless.
+//
+// Refusals are counted, not reported as failures: D45/D55 make a move illegal
+// while an outer JS activation waits below the floor, which a corpus file
+// that suspends inside a native callback legitimately produces.
+static bool force_reloc;
+static bool reloc_keep_old;     // applied once the runtime exists, not at parse time
+// --reloc-pin: take a pin for the whole run, so every park refuses to move.
+// The gate is that the run still produces byte-identical output with
+// moves=0 refused=N -- a pin that silently let the move happen would be
+// indistinguishable from a working pin without this.
+static bool reloc_pin;
+static int reloc_fault = JS_VM_RELOC_FAULT_NONE;
+static uint64_t g_relocs, g_reloc_refused;
+static uint64_t g_reloc_frames, g_reloc_coro, g_reloc_varrefs;
+
 static bool gc_on_yield;
 static int terminate_after = -1;   // -1 = off; N = terminate on the Nth resume
 static int discard_after = -1;     // -1 = off; N = discard on the Nth resume
@@ -574,6 +595,19 @@ static JSValue resume_until_done(JSContext *ctx, JSValue result) {
   JSRuntime *rt = JS_GetRuntime(ctx);
   while (JS_VMSuspended(rt)) {
     g_resumes++;
+    // Before the GC, so that when both flags are on the mark walk runs over
+    // a chain that has just moved: js_vm_mark_suspended and the fix-up walk
+    // read the same links, and a fix-up that missed one shows up here as a
+    // GC touching a freed frame rather than as a wrong answer much later.
+    if (force_reloc) {
+      JSVMRelocStats rs;
+      if (JS_VMStackRelocate(rt, &rs) == 0) {
+        g_relocs++;
+        g_reloc_frames += rs.frames;
+        g_reloc_coro += rs.coro_frames;
+        g_reloc_varrefs += rs.var_refs;
+      } else g_reloc_refused++;
+    }
     if (gc_on_yield) JS_RunGC(rt);
     JS_FreeValue(ctx, result);
     result = JS_VMResume(ctx);
@@ -885,6 +919,10 @@ static void usage(void) {
           "                         (G1: bytes of C stack per JS recursion level, see stack_probe.sh)\n"
           "  --stack-probe-fault W  inject a probe fault: flat | silent (G1 negative control)\n"
           "  --force-yield-fault W  L2c gate negative control: noresume | noyield (sec.12.9)\n"
+          "  --force-reloc          L3a: move the live segments at every park, before the resume\n"
+          "  --reloc-keep-old       ... and leak the old blocks poisoned instead of freeing them\n"
+          "  --reloc-pin            ... but hold a pin, so every move is refused (negative control)\n"
+          "  --reloc-fault W        ... skipping one fix-up: varref | link | varbuf (sec.5)\n"
           "  --gc-on-yield          L2c guard: JS_RunGC before every resume (sec.12.8/12.15;\n"
           "                         a note until the VM can suspend)\n"
           "  --terminate-after N    L2c guard: JS_VMTerminate instead of the Nth resume\n"
@@ -951,6 +989,17 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--strict")) strict = true;
     else if (!strcmp(a, "--test262")) test262 = true;
     else if (!strcmp(a, "--force-yield")) force_yield = true;
+    else if (!strcmp(a, "--force-reloc")) force_reloc = true;
+    else if (!strcmp(a, "--reloc-pin")) reloc_pin = true;
+    else if (!strcmp(a, "--reloc-fault")) {
+      const char *w = NEXT();
+      if (!strcmp(w, "varref")) reloc_fault = JS_VM_RELOC_FAULT_VARREF;
+      else if (!strcmp(w, "link")) reloc_fault = JS_VM_RELOC_FAULT_LINK;
+      else if (!strcmp(w, "varbuf")) reloc_fault = JS_VM_RELOC_FAULT_VARBUF;
+      else { fprintf(stderr, "unknown --reloc-fault: %s\n", w); return 2; }
+      force_reloc = true;
+    }
+    else if (!strcmp(a, "--reloc-keep-old")) { force_reloc = true; reloc_keep_old = true; }
     else if (!strcmp(a, "--gaps")) want_gaps = true;
     else if (!strcmp(a, "--budget-jobs")) budget_jobs = (unsigned)parse_size(NEXT());
     else if (!strcmp(a, "--runaway-jobs")) runaway_jobs = (uint64_t)parse_size(NEXT());
@@ -1032,6 +1081,17 @@ int main(int argc, char **argv) {
     JS_SetGCThreshold(G.runtime, heap_limit / 2U);
   JS_SetMaxStackSize(G.runtime, stack_limit);
   JS_SetRuntimeInfo(G.runtime, "PocketJS ESP-IDF guest");
+  if (reloc_keep_old) JS_VMStackRelocKeepOld(G.runtime, 1);
+  if (reloc_pin) { force_reloc = true; JS_VMStackPin(G.runtime, +1); }
+  if (reloc_fault != JS_VM_RELOC_FAULT_NONE) JS_VMStackRelocFault(G.runtime, reloc_fault);
+  // The "not parked" refusal (design sec.6), checked where it is unambiguous:
+  // no JS has run yet, so there is no chain, no park, and a move that
+  // returned 0 here would mean the guard is not being consulted at all.
+  if (force_reloc && JS_VMStackRelocate(G.runtime, NULL) == 0) {
+    fprintf(stderr, "vmrun: JS_VMStackRelocate moved with no parked chain\n");
+    JS_FreeRuntime(G.runtime);
+    return 3;
+  }
   if (call_mode != -1) {
 #ifdef CONFIG_POCKET_VM_CALLBENCH
     if (vmtest_call_mode(G.runtime, call_mode) != 0) {
@@ -1309,6 +1369,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "#info vm resumes=%llu held=%llu safepoints_yieldable=%llu held_jobs=%llu\n",
             (unsigned long long)g_resumes, (unsigned long long)g_held,
             (unsigned long long)safepoints_yieldable, (unsigned long long)g_held_jobs);
+    // Only when asked to move: an #info line the whole corpus would otherwise
+    // carry for a feature that is off in every shipped build.
+    if (force_reloc)
+      fprintf(stderr, "#info reloc moves=%llu refused=%llu frames=%llu coro_frames=%llu var_refs=%llu\n",
+              (unsigned long long)g_relocs, (unsigned long long)g_reloc_refused,
+              (unsigned long long)g_reloc_frames, (unsigned long long)g_reloc_coro,
+              (unsigned long long)g_reloc_varrefs);
   }
   // "#info vmstack ..." only under --stats: the corpus does not need it and
   // the info files stay readable.

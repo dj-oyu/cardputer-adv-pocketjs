@@ -356,6 +356,19 @@ struct JSRuntime {
     JSValue vm_floor_this;
     JSValue vm_floor_new_target;
 #endif
+#ifdef CONFIG_POCKET_VM_RELOC
+    /* L3a diagnostic (design D50 layer 3): keep the old segment blocks
+       allocated and poisoned after a move instead of freeing them, so that
+       tlsf cannot hand the address straight back out and overwrite the
+       poison with bytes that read as valid. A deliberate leak; the host
+       harness sets it, the firmware never does. */
+    bool vm_reloc_keep_old;
+    /* L3a negative control (design sec.5): deliberately skip one entry of the
+       fix-up, so the poisoning can be shown to CATCH a missed pointer rather
+       than merely to be present. A detector nothing ever trips reads exactly
+       like a detector that works. JS_VM_RELOC_FAULT_* in quickjs.h. */
+    uint8_t vm_reloc_fault;
+#endif
 
     JSInterruptHandler *interrupt_handler;
     void *interrupt_opaque;
@@ -6875,6 +6888,197 @@ void JS_VMStackTrim(JSRuntime *rt)
     (void)rt;
 #endif
 }
+
+#ifdef CONFIG_POCKET_VM_RELOC
+// L3a stage 4 (docs/vm/vm-L3-design.md sec.4.1): the typed fix-up. Walks the
+// same chain js_vm_mark_suspended walks and touches the fields it does not --
+// the two are exhaustive and disjoint over a parked frame, which is why the
+// mark walker could be read as the shape this one has to take
+// (docs/vm/vm-ledger/09-relocation-entries.md sec.6).
+//
+// Walks the NEW copies (D48): stage 2 has already copied the bytes, so each
+// new frame holds the old frame's pointer values, and fixing them up in place
+// means one pass. Walking the old side instead would mean stage 5 poisons the
+// ground this just covered.
+//
+// Nothing here can fail. Every allocation was made in stage 1, and a lookup
+// that matches nothing is the no-op that makes a partial move legal (D53) --
+// so once this is entered the pointer graph is rewritten to completion.
+static void js_vm_reloc_fixup(JSRuntime *rt, const JSVMReloc *tab, uint32_t n,
+                              JSVMRelocStats *out)
+{
+    JSStackFrame *sf, *floor;
+    uint32_t frames = 0, coro_frames = 0, var_refs = 0;
+    const uint8_t fault = rt->vm_reloc_fault;
+
+    // The roots first: the walk below needs to START at a new address.
+    rt->current_stack_frame = js_vm_reloc_ptr(tab, n, rt->current_stack_frame);
+    rt->vm_susp.top = js_vm_reloc_ptr(tab, n, rt->vm_susp.top);
+    rt->vm_susp.floor = js_vm_reloc_ptr(tab, n, rt->vm_susp.floor);
+
+    sf = rt->vm_susp.top;
+    floor = rt->vm_susp.floor;
+    for (;;) {
+        // Read the link out before anything else writes to this frame: the
+        // loop advances on the FIXED value, so the chain is walked once in
+        // new addresses rather than once in old and once in new.
+        JSStackFrame *next = js_vm_reloc_ptr(tab, n, sf->prev_frame);
+        int i;
+
+        // Unconditional, not guarded on JS_SF_SEG. A coroutine frame's
+        // buffers live in its JSAsyncFunctionState and a lookup leaves them
+        // alone -- but its arg_buf can point at the CALLER's argv, which is
+        // in a segment whenever arg_allocated_size was 0 (ledger sec.0).
+        // Asking the table about all four costs four linear scans of a table
+        // with a few dozen rows, at a moment the VM is already stopped, and
+        // removes a class of "which frames can point where" reasoning that
+        // would have to be redone every time the call path changes.
+        sf->arg_buf = js_vm_reloc_ptr(tab, n, sf->arg_buf);
+        if (fault != JS_VM_RELOC_FAULT_VARBUF)
+            sf->var_buf = js_vm_reloc_ptr(tab, n, sf->var_buf);
+        sf->var_refs = js_vm_reloc_ptr(tab, n, sf->var_refs);
+        sf->cur_sp = js_vm_reloc_ptr(tab, n, sf->cur_sp);
+
+        if (sf->l2_flags & JS_SF_SEG) {
+            // The link sits in front of the frame inside the same block, so
+            // this address arithmetic is only valid for a segment frame.
+            JSVMLink *link = ((JSVMLink *)sf) - 1;
+            if (fault != JS_VM_RELOC_FAULT_LINK)
+                link->caller_sp = js_vm_reloc_ptr(tab, n, link->caller_sp);
+        } else {
+            // A coroutine frame is not in a segment, but the record that
+            // owns it holds the caller's sp, and the caller IS (D33). This
+            // is the one entry reached by walking back out of the chain
+            // rather than along it (ledger sec.3).
+            JSAsyncFunctionData *d =
+                container_of(sf, JSAsyncFunctionData, func_state.frame);
+            d->flat_caller_sp = js_vm_reloc_ptr(tab, n, d->flat_caller_sp);
+            coro_frames++;
+        }
+
+        // Open var_refs: pvalue names a slot in some frame's arg_buf or
+        // var_buf, and stack_frame names the frame. Both are in objects that
+        // live OUTSIDE the segments, and this table is the only way to reach
+        // them without walking the whole GC heap -- get_var_ref registers
+        // every open one here (quickjs.c:18283) and close_var_refs relies on
+        // the same invariant to close them.
+        //
+        // A detached var_ref must be skipped: its pvalue points at its own
+        // `value` field, so adding a delta to it would aim a self-reference
+        // into a segment.
+        for (i = 0; i < sf->var_ref_count; i++) {
+            JSVarRef *vr = sf->var_refs[i];
+            if (!vr || vr->is_detached)
+                continue;
+            if (fault != JS_VM_RELOC_FAULT_VARREF)
+                vr->pvalue = js_vm_reloc_ptr(tab, n, vr->pvalue);
+            vr->stack_frame = js_vm_reloc_ptr(tab, n, vr->stack_frame);
+            var_refs++;
+        }
+
+        sf->prev_frame = next;
+        frames++;
+        if (sf == floor)
+            break;
+        sf = next;
+    }
+    if (out) {
+        out->frames = frames;
+        out->coro_frames = coro_frames;
+        out->var_refs = var_refs;
+    }
+}
+
+int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
+{
+    JSVMStack *st = &rt->vm_stack;
+    JSVMReloc *tab;
+    uint32_t n, i;
+    size_t bytes = 0;
+
+    if (out)
+        memset(out, 0, sizeof(*out));
+
+    // D45: only while parked. A running JS_CallInternal holds pointers into
+    // the block in C locals and registers, and the spec rules out guessing
+    // which machine words those are (spec sec.8).
+    if (!rt->vm_susp.top || !rt->vm_susp.floor)
+        return -1;
+    // D55: parked, but an OUTER JS activation is still on the C stack below
+    // the floor -- its locals are exactly the pointers D45 cannot fix, and
+    // the bump allocator can have put its frames in the same segment as the
+    // floor, so "move only above the floor" does not separate them either.
+    if (rt->current_stack_frame)
+        return -1;
+    // D51: no real pin site exists yet; this refuses the move so that the
+    // completion condition has something to test.
+    if (st->pins)
+        return -1;
+
+    if (js_vm_stack_reloc_copy(rt, st, &tab, &n) < 0)
+        return -1;
+    if (!n)     // nothing live to move; not a failure
+        return 0;
+    for (i = 0; i < n; i++)
+        bytes += (size_t)(tab[i].old_seg->top - tab[i].old_seg->base);
+
+    js_vm_reloc_fixup(rt, tab, n, out);
+    js_vm_stack_reloc_finish(rt, st, tab, n, rt->vm_reloc_keep_old);
+
+    if (out) {
+        out->segments = n;
+        out->bytes = bytes;
+        out->generation = st->generation;
+    }
+    return 0;
+}
+void JS_VMStackRelocKeepOld(JSRuntime *rt, int keep)
+{
+    rt->vm_reloc_keep_old = (keep != 0);
+}
+
+void JS_VMStackRelocFault(JSRuntime *rt, int mode)
+{
+    rt->vm_reloc_fault = (uint8_t)mode;
+}
+
+int JS_VMStackPin(JSRuntime *rt, int delta)
+{
+    JSVMStack *st = &rt->vm_stack;
+    if (delta > 0)
+        st->pins++;
+    else if (delta < 0 && st->pins)
+        st->pins--;
+    return (int)st->pins;
+}
+#else
+int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
+{
+    (void)rt;
+    if (out)
+        memset(out, 0, sizeof(*out));
+    return -1;
+}
+
+void JS_VMStackRelocKeepOld(JSRuntime *rt, int keep)
+{
+    (void)rt;
+    (void)keep;
+}
+
+int JS_VMStackPin(JSRuntime *rt, int delta)
+{
+    (void)rt;
+    (void)delta;
+    return -1;
+}
+
+void JS_VMStackRelocFault(JSRuntime *rt, int mode)
+{
+    (void)rt;
+    (void)mode;
+}
+#endif
 
 JSVMState *js_vm_arm(JSRuntime *rt, int on)
 {

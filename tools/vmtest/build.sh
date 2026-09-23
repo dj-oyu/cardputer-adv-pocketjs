@@ -60,7 +60,7 @@ build_variant() {
   local strip="-DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1"
   if [[ $variant == *-keepsrc ]]; then strip=""; fi
   local core=${variant%-keepsrc}
-  local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}; base=${base%-noyield}
+  local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}; base=${base%-noyield}; base=${base%-reloc}
   case "$core" in
     *-lazy-flat) ;;
     *-eager) lazy="" ;;
@@ -70,6 +70,11 @@ build_variant() {
     *-alloca) segframes=""; flatcalls=""; lazy=""; yield="" ;;
     *-recur) flatcalls=""; lazy=""; yield="" ;;
     *-noyield) yield="" ;;
+    # L3a: the explicit move API. Default n in the Kconfig and nothing in the
+    # firmware calls it, so it is never in a plain variant -- this suffix is
+    # the only way it is built, and --force-reloc is the only thing that
+    # calls it.
+    *-reloc) yield="-DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_RELOC=1" ;;
     *-flat) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1" ;;
     *-yield) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"; yield="-DCONFIG_POCKET_VM_YIELD=1" ;;
   esac

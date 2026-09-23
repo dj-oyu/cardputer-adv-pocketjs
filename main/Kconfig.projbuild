@@ -159,6 +159,27 @@ menu "Pocket VM (L0 measurement probes)"
             still the way to compare against that path; it is not a smaller
             build in any sense that matters.
 
+    config POCKET_VM_RELOC
+        bool "Relocatable frame segments: the explicit move API (L3a)"
+        depends on POCKET_VM_YIELD
+        default n
+        help
+            Compiles in JS_VMStackRelocate, which copies the live frame
+            segments to fresh addresses and rewrites every pointer that
+            named the old ones (docs/vm/vm-L3-design.md, the entry ledger
+            is docs/vm/vm-ledger/09-relocation-entries.md).
+
+            Moving is only legal while the VM is parked at an L2c
+            safepoint: a running JS_CallInternal keeps pointers into the
+            block in C locals and registers, and the spec rules out
+            guessing which machine words those are. That is why this
+            depends on POCKET_VM_YIELD rather than on SEGFRAMES alone.
+
+            Nothing in the firmware calls it. L3a's deliverable is that
+            the segments CAN move; deciding when to move them is L4's
+            problem. Off by default and meant to stay that way until
+            there is a caller with a measured reason.
+
     config POCKET_VM_TCO
         bool "Experimental strict tail-call frame reuse"
         depends on POCKET_VM_YIELD
