@@ -172,6 +172,14 @@ struct pocketjs_guest {
    * hides it. */
   bool reloc_armed;
   uint32_t reloc_moves, reloc_refused;
+  /* The third outcome, which the first device run showed is NOT rare: parked,
+   * allowed to move, and nothing to move -- the live segment chain is empty
+   * because the parked frames are all coroutine frames in their own
+   * JSAsyncFunctionState, not in segments. Diagnostic '6' (an endless promise
+   * chain) parks 31 times and lands here every time. Counted separately
+   * because moves=0 refused=0 otherwise reads as "the call never happened",
+   * which is what it looked like until this counter existed. */
+  uint32_t reloc_empty;
   uint32_t reloc_frames, reloc_var_refs;
   uint32_t reloc_max_us;
   uint64_t reloc_total_us, reloc_bytes;
@@ -877,7 +885,7 @@ void pocketjs_guest_reloc_arm(pocketjs_guest_t *guest, bool on) {
   if (guest == NULL) return;
   guest->reloc_armed = on;
   if (!on) return;
-  guest->reloc_moves = guest->reloc_refused = 0;
+  guest->reloc_moves = guest->reloc_refused = guest->reloc_empty = 0;
   guest->reloc_frames = guest->reloc_var_refs = 0;
   guest->reloc_max_us = 0;
   guest->reloc_total_us = guest->reloc_bytes = 0;
@@ -895,12 +903,13 @@ void pocketjs_guest_reloc_report(const pocketjs_guest_t *guest) {
    * parked anywhere a move was legal. The script has to be able to tell that
    * from "it moved and nothing broke", which is why both are printed. */
   ESP_LOGI(TAG,
-           "VM_RELOC moves=%lu refused=%lu frames=%lu var_refs=%lu "
+           "VM_RELOC moves=%lu refused=%lu empty=%lu frames=%lu var_refs=%lu "
            "bytes=%llu max_us=%lu total_us=%llu "
            "largest_first=%lu largest_last=%lu largest_min=%lu "
            "gap_max=%lu gap_segments=%lu",
            (unsigned long)guest->reloc_moves,
            (unsigned long)guest->reloc_refused,
+           (unsigned long)guest->reloc_empty,
            (unsigned long)guest->reloc_frames,
            (unsigned long)guest->reloc_var_refs,
            (unsigned long long)guest->reloc_bytes,
@@ -997,6 +1006,8 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
         if (reloc_us > guest->reloc_max_us) guest->reloc_max_us = reloc_us;
       } else if (moved != 0) {
         guest->reloc_refused++;
+      } else {
+        guest->reloc_empty++;
       }
     }
 #endif

@@ -36,12 +36,22 @@ CONTRACT = re.compile(r"\b(APP_ID \S+|LOADED \S+|APP_STOPPED|APP_REFUSED \S+)")
 
 
 def run_app(port, command, seconds):
-    """Start an app over USB, let it run, stop it, and return its log."""
+    """Start an app over USB, let it finish or stop it, and return its log.
+
+    An app may end before the window is up, and the interesting ones do: a
+    workload that parks deeply enough to be worth measuring is usually one the
+    frame guard stops. So APP_STOPPED is watched for during the run -- and
+    checked in the startup text too, since a guard that fires in 350 ms puts
+    it there before this loop reads a single line. Only an app still alive at
+    the end gets a 'q'. Waiting for APP_STOPPED unconditionally after that 'q'
+    waits for a line that already went past.
+    """
     port.write(command)
     text = wait(port, "APP_ID", timeout=15)
     deadline = time.monotonic() + seconds
     lines = [text]
-    while time.monotonic() < deadline:
+    stopped = "APP_STOPPED" in text
+    while time.monotonic() < deadline and not stopped:
         line = port.readline().decode(errors="replace").strip()
         if not line:
             continue
@@ -50,8 +60,11 @@ def run_app(port, command, seconds):
         if any(s in line for s in ("Guru Meditation", "assert failed",
                                    "CORRUPT HEAP")):
             raise RuntimeError(line)
-    port.write(b"q")
-    lines.append(wait(port, "APP_STOPPED", timeout=20))
+        if "APP_STOPPED" in line:
+            stopped = True
+    if not stopped:
+        port.write(b"q")
+        lines.append(wait(port, "APP_STOPPED", timeout=20))
     return "\n".join(lines)
 
 
@@ -61,13 +74,13 @@ def contract(text):
 
 def reloc_stats(text):
     m = re.search(
-        r"VM_RELOC moves=(\d+) refused=(\d+) frames=(\d+) var_refs=(\d+) "
+        r"VM_RELOC moves=(\d+) refused=(\d+) empty=(\d+) frames=(\d+) var_refs=(\d+) "
         r"bytes=(\d+) max_us=(\d+) total_us=(\d+) "
         r"largest_first=(\d+) largest_last=(\d+) largest_min=(\d+) "
         r"gap_max=(\d+) gap_segments=(\d+)", text)
     if not m:
         raise RuntimeError("no VM_RELOC line; was the build RELOC=y and armed?")
-    keys = ("moves", "refused", "frames", "var_refs", "bytes", "max_us",
+    keys = ("moves", "refused", "empty", "frames", "var_refs", "bytes", "max_us",
             "total_us", "largest_first", "largest_last", "largest_min",
             "gap_max", "gap_segments")
     return dict(zip(keys, (int(g) for g in m.groups())))
@@ -116,8 +129,12 @@ def fragmentation(baseline, moved, stats):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True)
-    parser.add_argument("--app", default="1",
-                        help="USB diagnostic letter to run (default '1')")
+    parser.add_argument("--app", default="<",
+                        help="USB app letter: '<' pet, '>' companion (needs "
+                             "CONFIG_POCKET_VM_PROBE). The digits are FAILURE "
+                             "diagnostics -- '1' is a deliberate syntax error "
+                             "and '3' an endless frame -- so none of them is a "
+                             "default worth having here.")
     parser.add_argument("--seconds", type=float, default=6.0)
     args = parser.parse_args()
     app = args.app.encode()
@@ -154,8 +171,8 @@ def main():
     if stats["moves"] == 0:
         raise RuntimeError(
             f"no move ever happened (refused={stats['refused']}): the app "
-            f"never parked anywhere a move was legal, so this run did not "
-            f"test relocation")
+            f"never parked anywhere a move was legal (empty="
+            f"{stats['empty']}), so this run did not test relocation")
     print(json.dumps(result, indent=2))
 
 

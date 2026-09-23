@@ -650,6 +650,27 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+#ifdef CONFIG_POCKET_VM_RELOC
+        // L3a (docs/vm/vm-L3-design.md sec.8.1, D6/D8). The shipped apps never
+        // park: a turn's budget is VM_TURN_BUDGET_US (8 ms) and pet's and
+        // companion's frames finish inside it, measured, so the relocation
+        // caller is never reached by them and max_us stays a number about
+        // nothing. This one parks ON PURPOSE and parks DEEP -- it recurses
+        // first and only then burns the budget, so the chain the yield timer
+        // catches spans several segments rather than the single 68-byte frame
+        // diagnostic '3' produces.
+        //
+        // The depth is chosen against the D10 byte budget (20,480 B): 60
+        // frames of this shape stay well inside it, so the RangeError path is
+        // not what is being exercised here. The inner loop is sized to pass
+        // 8 ms and stay under VM_FRAME_RUNAWAY_US (250 ms) so the app keeps
+        // running and keeps parking, frame after frame.
+        case '%': source=
+            "globalThis.frame=()=>{let s=0;"
+            "function f(n){if(n===0){for(let i=0;i<400000;i++)s+=i;return 0}"
+            "return f(n-1)+1}f(60);return s};";
+            break;
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
         case '[': case '\\': case ']': source=
             "let ran=false;globalThis.frame=b=>{if(ran||(b&8192))return;ran=true;"

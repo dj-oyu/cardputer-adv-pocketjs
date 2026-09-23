@@ -325,6 +325,10 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // anyone noticing for as long as it took to find.
 #ifdef CONFIG_POCKET_VM_RELOC
     if(c=='&') { atomic_store(&reloc_requested,true); return false; }
+    // '%' is the deep-parking workload the move needs in order to be measured
+    // on anything but a one-frame chain (app_session.c). A diagnostic letter
+    // like '1'-'6', not an app.
+    if(c=='%') { atomic_store(&diagnostic,c); return false; }
 #endif
     if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
     // The Kasane demo trigger ('K', app_session.c's kasane_demo_start). PLACED
