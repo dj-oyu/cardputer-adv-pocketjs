@@ -20,6 +20,7 @@
 #include "pet_hub.h"
 #include "pocket_capture.h"
 #include "pocket_av.h"
+#include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_bridge.h"
 #include "pocket_text.h"
 #include "system/sys_device.h"
@@ -326,6 +327,9 @@ static void input_task(void *arg) {
         char c;
         if(!have && usb_serial_jtag_read_bytes(&c,1,0)>0) have=usb_stroke(c,&k);
         if(have) {
+#ifdef KASANE_P0_PROBE
+            k.queued_at_us=(uint32_t)esp_timer_get_time();
+#endif
             // Only the force stop jumps the queue, and it does so because the
             // drawing task may be inside a guest call that has to be
             // interrupted rather than waited out. Everything else is ordered.
@@ -754,6 +758,18 @@ static void paint(const screen_ops_t *s) {
 // without restarting it; see the rule at the bottom of ui_task().
 static int64_t period_began;
 
+static bool ui_key_receive(keystroke_t *stroke) {
+    bool have=xQueueReceive(keys,stroke,0)==pdTRUE;
+#ifdef KASANE_P0_PROBE
+    // Measures queue residence after the input task saw the event. It does
+    // not claim to measure physical key-down or USB host transport latency.
+    if(have&&overlay_running())
+        ksn_p0_probe_sample(KSN_P0_INPUT_QUEUE,
+                            (uint32_t)esp_timer_get_time()-stroke->queued_at_us);
+#endif
+    return have;
+}
+
 static void ui_task(void *arg) {
     (void)arg;
     // Before anything can post: every producer of a completion runs on a task
@@ -761,6 +777,9 @@ static void ui_task(void *arg) {
     vm_wake_bind();
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
+#ifdef KASANE_P0_PROBE
+    int64_t previous_overlay_frame_started=0;
+#endif
     while(1) {
 #ifdef CONFIG_KSN_DEVICE_PROBE
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&ksn_probe_requested,false)){
@@ -776,8 +795,16 @@ static void ui_task(void *arg) {
         bench_core_tick();
 #endif
         int64_t frame_start=esp_timer_get_time();
+#ifdef KASANE_P0_PROBE
+        if(overlay_running()) {
+            if(previous_overlay_frame_started)
+                ksn_p0_probe_sample(KSN_P0_UI_INTERVAL,
+                    (uint32_t)(frame_start-previous_overlay_frame_started));
+            previous_overlay_frame_started=frame_start;
+        } else previous_overlay_frame_started=0;
+#endif
         keystroke_t stroke={0};
-        bool have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+        bool have=ui_key_receive(&stroke);
 #ifdef CONFIG_KSN_DEVICE_PROBE
         /* Replay the visual diagnostic from the physical keyboard as well. */
         if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
@@ -794,7 +821,15 @@ static void ui_task(void *arg) {
         if(system_probe_command)system_probe(system_probe_command);
 #endif
         sys_device_step();
+#ifdef KASANE_P0_PROBE
+        int64_t av_service_started=esp_timer_get_time();
+#endif
         pocket_av_service_stream();
+#ifdef KASANE_P0_PROBE
+        if(overlay_running())
+            ksn_p0_probe_sample(KSN_P0_AV_SERVICE,
+                                (uint32_t)(esp_timer_get_time()-av_service_started));
+#endif
         pet_repaint=pet_hub_pump();
         if(have&&pet_hub_key(stroke.nav)){have=false;pet_repaint=true;}
         if(pet_repaint&&running)app_force_redraw();
@@ -881,7 +916,7 @@ static void ui_task(void *arg) {
                         break;
                     }
                     overlay_key(&stroke);
-                    have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+                    have=ui_key_receive(&stroke);
                 }
             }
             while(have) {
@@ -889,7 +924,7 @@ static void ui_task(void *arg) {
                 if(screen!=was) break;
                 const char *ignored; size_t ignored_len;
                 if(s->wants_run && s->wants_run(&ignored,&ignored_len)) break;
-                have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+                have=ui_key_receive(&stroke);
             }
             s=&SCREENS[screen];              // key() may have moved us
             // One overlay turn, before the frame it will be composited into
@@ -965,6 +1000,11 @@ static void ui_task(void *arg) {
                      SCREENS[screen].takes_text || pocket_text_active());
 
         last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
+#ifdef KASANE_P0_PROBE
+        // Unlike overlay_draw, this includes the synchronous SD producer.
+        // Do not count the frame that ends/reports the session after reset.
+        if(overlay_running()) ksn_p0_probe_sample(KSN_P0_UI_FRAME,last_frame_us);
+#endif
         int held=(int)(last_frame_us/1000);
         unsigned cap = running ? VM_DISPLAY_PERIOD_MS : SCREENS[screen].frame_ms;
         unsigned rest = (unsigned)held<cap?cap-held:1;

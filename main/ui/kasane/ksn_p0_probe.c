@@ -20,7 +20,9 @@ static uint64_t transfer_bytes,transfer_bands;
 static uint32_t transfer_frames;
 static const char *const sample_names[]={"app_turn","app_render","app_send",
                                          "overlay_work","overlay_draw",
-                                         "overlay_send","overlay_compute"};
+                                         "overlay_send","overlay_compute",
+                                         "ui_frame","av_service",
+                                         "ui_interval","input_queue"};
 _Static_assert(sizeof(sample_names)/sizeof(*sample_names)==KSN_P0_SAMPLE_COUNT,
                "sample probe labels must match the categories");
 static const char *const copy_names[]={"utf8_materialized","producer_materialized","adapter_temp",

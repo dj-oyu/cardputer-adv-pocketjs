@@ -10,6 +10,7 @@ UIタスクの同期SD待ちを除き、音声と描画の締切を守ること�
 | 案 | SDの読取方式 | 変更点・検証したい仮説 |
 | --- | --- | --- |
 | 基準 | UIタスクで`pocket_fs_read_at` | 現行。2,048 Bごとに解決・open・seek・read・closeする |
+| S | 共通lease基盤、ただし同期producerを維持 | 基盤導入のみの影響を分離する対照 |
 | A | 専用readerタスク、毎slot再open | 読取をUIから外す効果のみを測る。既存圧縮リングに直接書く |
 | B | 専用readerタスク、再生中は`FILE*`保持 | Aとの差で再open/seekとディレクトリ歩行のコストを測る |
 | C | Bと同じ読取、コア・SPI ISRを明示配置 | Bとの差でスケジューリング/割り込み競合の効果を測る |
@@ -17,6 +18,8 @@ UIタスクの同期SD待ちを除き、音声と描画の締切を守ること�
 A/Bのタスク・ISR配置は同一にする。CだけUI+SPI2 ISRをcore 1、
 SD reader+SPI3 ISR+MP3 decoder+音声出力をcore 0に固定して比較する。
 現行の実際の所属コアを先にログで確認し、推定値で比較しない。
+因果比較は基準→S、S→A、A→B、B→Cの順とし、CはBから分岐して
+配置変更以外を加えない。C内の個別配置要素の効果までは推論しない。
 MP3用圧縮リングは既存6,144 Bを再利用し、追加のtransport copyを作らない。
 これはSDからデコーダまでの全経路zero-copyを意味しない。
 
@@ -47,6 +50,11 @@ COM3を使うのは1実験だけとし、各flash前後にポートが空いて�
 decode active/blocked、UI work/draw/compute/sendの全件分位点、12 ms超過、
 LCD bytes/帯、音声underrun/fault、pause ACKと可聴再開、free/min/largest heap、
 各タスクのstack high-waterと所属core、SPI2/3 ISR所属core、終了ACK時間。
+SD serviceは描画の前にあるため、draw単独は主要効果を表さない。
+診断版ではUI全フレーム処理・フレーム開始間隔・AV service・
+入力タスク観測からUI queue取出しまでを全件計測する。
+通常再生の定常窓と、起動・次曲・pause/resume・終了の遷移は分けて集計する。
+MP3DECの経過時間はプリエンプションを含むためCPU activeとは呼ばない。
 画面captureや大量serial出力は時間測定と別runにする。
 
 最低合格条件は通常再生で予期しないfault/underrun 0、画素/状態遷移一致、
@@ -55,6 +63,9 @@ LCD bytes/帯、音声underrun/fault、pause ACKと可聴再開、free/min/large
 対象p99で反復可能な1 ms以上または10%以上の改善を目安とし、
 他の主要遅延指標の5%超の悪化とメモリ上限超過がないことを確認する。
 閾値は試験後に緩めない。効果が測定誤差以下なら最も単純な案を選ぶ。
+採否は加点式でなく、安全性→寿命・権限→資源→主要指標の非劣化→
+対象p99の改善幅→同程度なら単純さ、のゲート順とする。
+未実施の抜去・障害注入等はPASSとせず、性能候補と正式採用を区別する。
 
 ## 基準版の初回実機測定（暫定）
 
