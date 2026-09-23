@@ -1261,7 +1261,8 @@ KSN_TILE_MEASURED static void smooth_chord_block(ksn_premultiplied_rgba8 *tile,c
     for(unsigned c=0;c<4;c++){
         unsigned shift=24-8*c;
         int32_t span=(int32_t)(((end>>shift)&255u)-((anchor>>shift)&255u));
-        step[c]=count>1?(int32_t)(((int64_t)span<<16)/(count-1)):0;
+        // A channel may descend, so shifting its negative signed span is UB.
+        step[c]=count>1?(int32_t)(((int64_t)span*65536)/(count-1)):0;
         base[c]=(anchor>>shift)&255u;
     }
     int32_t offset[4]={0,0,0,0};

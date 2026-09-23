@@ -9,15 +9,21 @@ int main(void){
     for(unsigned i=0;i<20;i++)ksn_p0_probe_sample(KSN_P0_OVERLAY_DRAW,20000);
     for(unsigned i=0;i<10;i++)ksn_p0_probe_sample(KSN_P0_OVERLAY_DRAW,40000);
     const series *s=&samples[KSN_P0_OVERLAY_DRAW];
+    const uint32_t draw_bucket=sample_bucket_us[KSN_P0_OVERLAY_DRAW];
     assert(s->seen==1000&&s->over12==30&&s->maximum==40000);
     assert(s->bins[7]==970&&s->bins[156]==20&&s->bins[255]==10);
-    assert(rank_upper(s,50)==1023);
-    assert(rank_upper(s,95)==1023);
-    assert(rank_upper(s,99)==20095);
+    assert(rank_upper(s,50,draw_bucket)==1023);
+    assert(rank_upper(s,95,draw_bucket)==1023);
+    assert(rank_upper(s,99,draw_bucket)==20095);
     ksn_p0_probe_sample(KSN_P0_OVERLAY_DRAW,12000);
     assert(s->over12==30); /* strictly above 12 ms */
     for(unsigned i=0;i<100;i++)ksn_p0_probe_sample(KSN_P0_OVERLAY_DRAW,50000);
-    assert(rank_upper(s,99)==50000); /* tail quantile is bounded by max */
+    assert(rank_upper(s,99,draw_bucket)==50000); /* tail quantile is bounded by max */
+    ksn_p0_probe_sample(KSN_P0_UI_FRAME,40000);
+    const series *frame=&samples[KSN_P0_UI_FRAME];
+    assert(sample_bucket_us[KSN_P0_UI_FRAME]==1024);
+    assert(frame->bins[39]==1);
+    assert(rank_upper(frame,99,sample_bucket_us[KSN_P0_UI_FRAME])==40959);
     ksn_p0_probe_transfer(64800,17);
     ksn_p0_probe_transfer(768,3);
     assert(transfer_frames==2&&transfer_bytes==65568&&transfer_bands==20);

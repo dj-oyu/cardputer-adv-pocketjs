@@ -280,7 +280,7 @@ static int smooth_arithmetic(void){
                     unsigned base=(from*(last-i0)+to*i0+last/2)/last;
                     unsigned end=(from*(last-i0-(n-1))+to*(i0+n-1)+last/2)/last;
                     int32_t span=(int32_t)end-(int32_t)base;
-                    int32_t step=n>1?(int32_t)(((int64_t)span<<16)/(int32_t)(n-1)):0;
+                    int32_t step=n>1?(int32_t)(((int64_t)span*65536)/(int32_t)(n-1)):0;
                     int32_t offset=0;
                     unsigned lo=base<end?base:end,hi=base<end?end:base;
                     /* the exact remainder stepping, over the same run */

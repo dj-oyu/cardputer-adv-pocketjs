@@ -31,6 +31,9 @@ music overlay の旧版に対する追加確保量を整理前の584 Bから164 
 ESP-IDF build、QuickJS統合テスト（0 failures）、Kasane契約テスト
 （ASan/UBSanとO2、presenter/schemaを含む）はPASS。
 契約テスト中、`ksn_render.c` の既存のsigned left shift UBSan警告は残る。
+後続の2026-09-24変更で負方向gradientの該当shiftと参照テストを修正し、
+専用tileテストおよびKasane契約テストをASan/UBSan診断0件で再実行した。
+この段落の2026-09-23時点の性能値は再測定していない。
 
 未完了のゲート：music を汎用 descriptor/native source へ移した同一条件比較、
 foreground 各アプリの更新p95/p99/max・12 ms超過、長時間再生中のunderrun。

@@ -44,6 +44,14 @@ LCD送信p99 11.775 ms・送信以外p99 11.135 msに分離し、
 診断ビルドの時間上乗せ、新経路との同一曲A/Bも未評価。
 以下の出口には未到達。
 
+2026-09-24のP0(1)更新：負方向gradientの`span << 16`を等価な
+64-bit乗算へ変更し、参照テスト内の同じUBも修正した。
+`run_group_tile.sh`にASan/UBSanを加え、負方向を含む約544万算術ケースと
+画素一致を診断0件で通過。`kasane_contract/run.sh`のASan/UBSan・O2、
+実QuickJS統合のASan/UBSan・`-O2 -fstrict-aliasing`、診断OFFのESP-IDF
+ビルドも同一コードでPASS。これはP0(1)の対象経路を確認した結果であり、
+P0(2)～(4)や実機ゲートの完了を意味しない。
+
 1. `ksn_render.c` の既知のsigned-shift UBSan警告を解消し、sanitizer診断0件を
    成功条件にする。ASan/UBSanと`-O2 -fstrict-aliasing`、QuickJS統合、ESP-IDF buildを
    同じcommitで確認する。
