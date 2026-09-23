@@ -207,6 +207,12 @@ underrun/fault/IO ERRORは0。診断専用の任意schemaで`pocket.time.wallSou
 元の3MiBアプリ領域は復元し、全3区画のdigest一致を確認した。
 これは短時間ゲートであり、長時間音声、固定snapshot poolを使う別task producer、
 旧clock経路との同一時刻画素一致を含むP1出口全体は未達。
+2026-09-24：[別task音声数値sourceの接続設計](p1-cross-task-audio-source-design-20260924.md)を
+固定した。UI task上の`pocket_av_ui_read()`をpoolへ写しても別task producerの
+証明にはならないため、既存の単一writer音声出力taskからbounded callbackで
+3 slot poolへ公開する。HALはKasaneを知らず、pool枯渇で音声を待たせない。
+現行schemaはU16までなので、U32値の公開bind前に型拡張が必要。
+この段階は設計のみで、接続実装・実機A/B・P1出口は未達。
 
 ## P2：dirty-node更新を既存bankのまま導入
 
