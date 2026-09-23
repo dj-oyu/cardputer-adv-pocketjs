@@ -1207,3 +1207,21 @@ capability の注入（`pet.companion`）と保存の持ち主が manifest で�
 - 条件下では空きが減る: PET の `heap_free_min` は base 109,388 → all 38,600 B、
   `largest` は 65,536 → 29,696 B。Wi-Fi のリンクと HTTP がゲストと同じ DRAM を使うため。
   **ゲストの上限（160 KiB）に触れてはいないが、余裕は Wi-Fi 条件でいちばん薄くなる。**
+
+### 8.9 物理キーでの確認（実測(device)、2026-09-23、操作はユーザー）
+
+L2c の入力まわりはすべて USB の1バイトで駆動してきた。その経路は `usb_stroke()` から入るので、
+キーボードの走査・`held`/repeat の簿記・デバウンスを通らない。`tools/device_physical_input.py`
+（`.cmd` は ESP-IDF の python を呼ぶだけのラッパー）が実機のログを見張り、押す人に指示を出す。
+ビルドは SELFTEST=y／YIELD=y。結果は **PHYSICAL_INPUT_OK**。
+
+| 確認 | 結果 |
+| --- | --- |
+| 中断中の Back（ゲストは安全地点で停止中） | `VM_SAVE_MARK` が `1, 10, 11, 2, 3, 4, 5`。11 は「Back が届いた時点で中断中だった」 |
+| アプリ内の通常の押下 | `HELLO_COUNT 1, 2, 3` |
+| Enter を約2秒押しっぱなし | 4〜14 の11回。**repeat は物理キーでは実際に出る**（毎秒約5回） |
+| Back でホームへ戻る | `APP_STOPPED` → `HOME_READY` |
+
+1行目が本題で、§4.15 が USB で確かめた順序（保存 → stop hook → それぞれの Promise 完了）が、
+走査から来たキーでも同じだったことを示す。repeat は USB 経路には存在しないので、ここで初めて観測した。
+物理確認はこの4つで、キー全数・同時押し・チャタリングは対象外。
