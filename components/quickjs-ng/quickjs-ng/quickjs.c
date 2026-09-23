@@ -52332,7 +52332,18 @@ bad_flags:
                                   sizeof(error_msg), str, len, re_flags, ctx);
     JS_FreeCString(ctx, str);
     if (!re_bytecode_buf) {
-        JS_ThrowSyntaxError(ctx, "%s", error_msg);
+        /* PocketJS: lre_compile() signals an allocation failure by setting
+           *plen to -1 instead of the ordinary 0 (see its 'error:' label).
+           Before this, every regexp compile failure -- a real syntax error
+           or running out of memory mid-parse -- surfaced identically as
+           SyntaxError, so an app hitting OOM here saw a syntax error in a
+           pattern that has none (docs/vm/oom-parse-safety.md sec.6, same
+           misdiagnosis the bytecode compiler had). */
+        if (re_bytecode_len < 0) {
+            JS_ThrowOutOfMemory(ctx);
+        } else {
+            JS_ThrowSyntaxError(ctx, "%s", error_msg);
+        }
         return JS_EXCEPTION;
     }
 
