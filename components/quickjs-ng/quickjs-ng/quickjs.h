@@ -551,6 +551,15 @@ typedef struct JSVMRelocStats {
     uint32_t var_refs;   /* open var_refs rewritten */
     uint32_t generation; /* JSVMStack.generation after the move */
     size_t bytes;        /* live payload bytes copied */
+    /* How scattered the chain was, BEFORE this move. `resident` is the sum of
+     * the live segments' whole blocks; `span` is the distance from the lowest
+     * block's start to the highest one's end. They are equal only if the
+     * segments happened to be laid end to end. span - resident is therefore
+     * the number of bytes belonging to OTHER allocations that sit between the
+     * pieces of this stack -- the thing a chain built across several parks is
+     * suspected of accumulating. Both 0 when nothing moved. */
+    size_t resident;
+    size_t span;
 } JSVMRelocStats;
 /* Copy the live frame segments to fresh addresses and rewrite every pointer
  * that named the old ones. The explicit move API the spec (sec.8) asks L3 to

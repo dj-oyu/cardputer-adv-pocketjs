@@ -582,6 +582,19 @@ static bool reloc_pin;
 static int reloc_fault = JS_VM_RELOC_FAULT_NONE;
 static uint64_t g_relocs, g_reloc_refused;
 static uint64_t g_reloc_frames, g_reloc_coro, g_reloc_varrefs;
+// How far apart the heap put the pieces of one stack, at its worst and at the
+// deepest chain seen. span - resident is bytes of OTHER allocations sitting
+// between this stack's segments: the "scattered across the heap" that repeated
+// parking is suspected of producing. Tracked as a maximum because one bad
+// chain is the interesting case, not the average of many shallow ones.
+static uint64_t g_reloc_gap_max, g_reloc_span_at_max, g_reloc_resident_at_max;
+static uint32_t g_reloc_segs_at_max;
+// Does repeated parking make it WORSE? Same quantity at the first move and at
+// the last, with the segment count beside each: a gap that grew while the
+// chain stayed the same shape is scatter the run accumulated, not scatter the
+// allocator would have produced anyway.
+static uint64_t g_reloc_gap_first, g_reloc_gap_last;
+static uint32_t g_reloc_segs_first, g_reloc_segs_last;
 
 static bool gc_on_yield;
 static int terminate_after = -1;   // -1 = off; N = terminate on the Nth resume
@@ -606,6 +619,17 @@ static JSValue resume_until_done(JSContext *ctx, JSValue result) {
         g_reloc_frames += rs.frames;
         g_reloc_coro += rs.coro_frames;
         g_reloc_varrefs += rs.var_refs;
+        {
+          const uint64_t gap = rs.span > rs.resident ? rs.span - rs.resident : 0;
+          if (g_relocs == 1) { g_reloc_gap_first = gap; g_reloc_segs_first = rs.segments; }
+          g_reloc_gap_last = gap; g_reloc_segs_last = rs.segments;
+        }
+        if (rs.span > rs.resident && rs.span - rs.resident > g_reloc_gap_max) {
+          g_reloc_gap_max = rs.span - rs.resident;
+          g_reloc_span_at_max = rs.span;
+          g_reloc_resident_at_max = rs.resident;
+          g_reloc_segs_at_max = rs.segments;
+        }
       } else g_reloc_refused++;
     }
     if (gc_on_yield) JS_RunGC(rt);
@@ -1376,6 +1400,16 @@ int main(int argc, char **argv) {
               (unsigned long long)g_relocs, (unsigned long long)g_reloc_refused,
               (unsigned long long)g_reloc_frames, (unsigned long long)g_reloc_coro,
               (unsigned long long)g_reloc_varrefs);
+    if (force_reloc)
+      fprintf(stderr, "#info reloc_gap max=%llu span=%llu resident=%llu segments=%lu\n",
+              (unsigned long long)g_reloc_gap_max,
+              (unsigned long long)g_reloc_span_at_max,
+              (unsigned long long)g_reloc_resident_at_max,
+              (unsigned long)g_reloc_segs_at_max);
+    if (force_reloc)
+      fprintf(stderr, "#info reloc_gap_trend first=%llu/%lu last=%llu/%lu\n",
+              (unsigned long long)g_reloc_gap_first, (unsigned long)g_reloc_segs_first,
+              (unsigned long long)g_reloc_gap_last, (unsigned long)g_reloc_segs_last);
   }
   // "#info vmstack ..." only under --stats: the corpus does not need it and
   // the info files stay readable.

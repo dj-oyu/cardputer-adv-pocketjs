@@ -6994,7 +6994,7 @@ int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
     JSVMStack *st = &rt->vm_stack;
     JSVMReloc *tab;
     uint32_t n, i;
-    size_t bytes = 0;
+    size_t bytes = 0, resident = 0, span = 0;
 
     if (out)
         memset(out, 0, sizeof(*out));
@@ -7019,8 +7019,22 @@ int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
         return -1;
     if (!n)     // nothing live to move; not a failure
         return 0;
-    for (i = 0; i < n; i++)
-        bytes += (size_t)(tab[i].old_seg->top - tab[i].old_seg->base);
+    {
+        // Measured on the OLD addresses, before the copy replaces them: how
+        // far apart the heap put the pieces of one logical stack. Taken here
+        // rather than in the header's copy routine because it is a question
+        // about the chain, not a step of moving it.
+        const uint8_t *lo = (const uint8_t *)tab[0].old_seg;
+        const uint8_t *hi = tab[0].old_end;
+        for (i = 0; i < n; i++) {
+            const uint8_t *b = (const uint8_t *)tab[i].old_seg;
+            bytes += (size_t)(tab[i].old_seg->top - tab[i].old_seg->base);
+            resident += (size_t)(tab[i].old_end - b);
+            if (b < lo) lo = b;
+            if (tab[i].old_end > hi) hi = tab[i].old_end;
+        }
+        span = (size_t)(hi - lo);
+    }
 
     js_vm_reloc_fixup(rt, tab, n, out);
     js_vm_stack_reloc_finish(rt, st, tab, n, rt->vm_reloc_keep_old);
@@ -7028,6 +7042,8 @@ int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
     if (out) {
         out->segments = n;
         out->bytes = bytes;
+        out->resident = resident;
+        out->span = span;
         out->generation = st->generation;
     }
     return 0;

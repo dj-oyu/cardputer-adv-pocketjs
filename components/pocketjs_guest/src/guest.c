@@ -188,6 +188,15 @@ struct pocketjs_guest {
    *
    * Sampled outside the timed region so that reloc_max_us stays a measurement
    * of the move rather than of heap_caps_get_largest_free_block(). */
+  /* How far apart the heap put the pieces of one stack (JSVMRelocStats.span
+   * minus .resident: bytes of OTHER allocations wedged between this stack's
+   * segments). On the host this turned out to track chain DEPTH rather than
+   * park count -- a corpus file that parked 5,807 times kept a 2 KB gap,
+   * while one that only went deep reached 29 KB. The device is the case the
+   * host cannot answer, because here the firmware runs native work in the
+   * SAME pool while the chain sits parked, and vmrun's park runs nothing. */
+  uint32_t reloc_gap_max;
+  uint32_t reloc_gap_segments;   /* chain depth when that gap was seen */
   uint32_t reloc_largest_first;  /* before the first move */
   uint32_t reloc_largest_last;   /* after the last one */
   uint32_t reloc_largest_min;    /* worst sample either side of any move */
@@ -872,6 +881,7 @@ void pocketjs_guest_reloc_arm(pocketjs_guest_t *guest, bool on) {
   guest->reloc_frames = guest->reloc_var_refs = 0;
   guest->reloc_max_us = 0;
   guest->reloc_total_us = guest->reloc_bytes = 0;
+  guest->reloc_gap_max = guest->reloc_gap_segments = 0;
   guest->reloc_largest_first = guest->reloc_largest_last = 0;
   guest->reloc_largest_min = 0;
 }
@@ -887,7 +897,8 @@ void pocketjs_guest_reloc_report(const pocketjs_guest_t *guest) {
   ESP_LOGI(TAG,
            "VM_RELOC moves=%lu refused=%lu frames=%lu var_refs=%lu "
            "bytes=%llu max_us=%lu total_us=%llu "
-           "largest_first=%lu largest_last=%lu largest_min=%lu",
+           "largest_first=%lu largest_last=%lu largest_min=%lu "
+           "gap_max=%lu gap_segments=%lu",
            (unsigned long)guest->reloc_moves,
            (unsigned long)guest->reloc_refused,
            (unsigned long)guest->reloc_frames,
@@ -897,7 +908,9 @@ void pocketjs_guest_reloc_report(const pocketjs_guest_t *guest) {
            (unsigned long long)guest->reloc_total_us,
            (unsigned long)guest->reloc_largest_first,
            (unsigned long)guest->reloc_largest_last,
-           (unsigned long)guest->reloc_largest_min);
+           (unsigned long)guest->reloc_largest_min,
+           (unsigned long)guest->reloc_gap_max,
+           (unsigned long)guest->reloc_gap_segments);
 }
 #endif
 
@@ -975,6 +988,11 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
         guest->reloc_frames += rs.frames;
         guest->reloc_var_refs += rs.var_refs;
         guest->reloc_bytes += rs.bytes;
+        if (rs.span > rs.resident &&
+            (uint32_t)(rs.span - rs.resident) > guest->reloc_gap_max) {
+          guest->reloc_gap_max = (uint32_t)(rs.span - rs.resident);
+          guest->reloc_gap_segments = rs.segments;
+        }
         guest->reloc_total_us += reloc_us;
         if (reloc_us > guest->reloc_max_us) guest->reloc_max_us = reloc_us;
       } else if (moved != 0) {

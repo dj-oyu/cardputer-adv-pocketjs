@@ -63,11 +63,13 @@ def reloc_stats(text):
     m = re.search(
         r"VM_RELOC moves=(\d+) refused=(\d+) frames=(\d+) var_refs=(\d+) "
         r"bytes=(\d+) max_us=(\d+) total_us=(\d+) "
-        r"largest_first=(\d+) largest_last=(\d+) largest_min=(\d+)", text)
+        r"largest_first=(\d+) largest_last=(\d+) largest_min=(\d+) "
+        r"gap_max=(\d+) gap_segments=(\d+)", text)
     if not m:
         raise RuntimeError("no VM_RELOC line; was the build RELOC=y and armed?")
     keys = ("moves", "refused", "frames", "var_refs", "bytes", "max_us",
-            "total_us", "largest_first", "largest_last", "largest_min")
+            "total_us", "largest_first", "largest_last", "largest_min",
+            "gap_max", "gap_segments")
     return dict(zip(keys, (int(g) for g in m.groups())))
 
 
@@ -97,6 +99,15 @@ def fragmentation(baseline, moved, stats):
         # the heap has to find -- exactly the chain's own size, summed here
         # over every move rather than per move.
         "bytes_copied_total": stats["bytes"],
+        # The question this was added for: are the pieces of one stack spread
+        # across the heap with other allocations between them? gap_max is how
+        # many foreign bytes sat inside the chain's address range at its worst,
+        # and gap_segments is how deep the chain was at that moment. On the
+        # host the gap tracked DEPTH, not how often the app parked; the device
+        # is where that could differ, because native work runs in this same
+        # pool while a chain sits parked and vmrun's park runs nothing.
+        "foreign_bytes_inside_chain": stats["gap_max"],
+        "chain_segments_then": stats["gap_segments"],
         "session_mem_without_moving": mem_pairs(baseline),
         "session_mem_with_moving": mem_pairs(moved),
     }
