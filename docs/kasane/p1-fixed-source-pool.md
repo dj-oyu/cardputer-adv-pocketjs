@@ -40,7 +40,8 @@ ThreadSanitizerはこのWSL環境で`unexpected memory mapping`により
 `acquire`でslotをpinし、`release`で同一field pointerに対応するslotの
 pinを外す。`ksn_source_snapshot`のABIとowner-turnのcursor契約は変更しない。
 2 consumerが同じ世代を並行保持し、producerの後続公開、pool枯渇、期限、
-不正payloadの解放をhostのO2 strict-aliasingとASan/UBSanで検証した。
+不正payloadの解放に加え、別pthread producerとの20,000回同時進行を
+hostのO2 strict-aliasingとASan/UBSanで検証した。
 診断OFFのESP-IDF 6.0.1 build・容量検査もPASSし、未利用adapterは
 linkerに除去されたためimage容量は不変。実producerへの接続と
 Cardputer上の性能・heap gateはまだ未実施。

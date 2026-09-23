@@ -1,6 +1,7 @@
 #include "ksn_source_pool_adapter.h"
 #include <assert.h>
 #include <stddef.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,6 +35,17 @@ static ksn_result publish(ksn_source_pool *pool,const char *text,
     p->fields[1].data.number=count;
     p->expires_at_us=expires;p->changed_fields=3;p->malformed=malformed;
     return ksn_source_pool_publish(&write,NULL);
+}
+static void *publish_concurrently(void *context){
+    ksn_source_pool *pool=context;
+    for(unsigned i=0;i<20000;i++){
+        unsigned number=i%100u;
+        char text[16];
+        (void)snprintf(text,sizeof(text),"%u",number);
+        ksn_result r=publish(pool,text,(uint16_t)number,0,false);
+        assert(r==KSN_OK||r==KSN_BUSY);
+    }
+    return NULL;
 }
 int main(void){
     payload slots[KSN_SOURCE_POOL_SLOTS]={0};
@@ -102,11 +114,28 @@ int main(void){
     assert(ksn_source_acquire(&registry,&b,&schema,base,12,effective,&lc)==KSN_OK);
     assert(strcmp(effective[0].data.text.utf8,"recovered")==0);
     ksn_source_release(&lc);
+    assert(publish(&pool,"7",7,0,false)==KSN_OK);
+    pthread_t writer;
+    assert(pthread_create(&writer,NULL,publish_concurrently,&pool)==0);
+    unsigned concurrent_reads=0;
+    for(unsigned i=0;i<20000;i++){
+        ksn_result r=ksn_source_acquire(&registry,&b,&schema,base,13+i,
+                                        effective,&lc);
+        assert(r==KSN_OK||r==KSN_BUSY);
+        if(r!=KSN_OK)continue;
+        char expected[16];
+        (void)snprintf(expected,sizeof(expected),"%u",effective[1].data.number);
+        assert(strcmp(effective[0].data.text.utf8,expected)==0);
+        assert(ksn_source_commit(&lc)==KSN_OK);
+        ksn_source_release(&lc);
+        concurrent_reads++;
+    }
+    assert(pthread_join(writer,NULL)==0&&concurrent_reads>0);
     permitted=false;
-    assert(ksn_source_acquire(&registry,&b,&schema,base,13,effective,&lc)==KSN_UNSUPPORTED);
+    assert(ksn_source_acquire(&registry,&b,&schema,base,20014,effective,&lc)==KSN_UNSUPPORTED);
     permitted=true;
     assert(ksn_source_unregister(&registry,handle)==KSN_OK);
-    assert(ksn_source_acquire(&registry,&b,&schema,base,14,effective,&lc)==KSN_STALE);
-    puts("source pool adapter: PASS (multi-consumer, zero-copy pin, exhaustion, expiry, invalid release)");
+    assert(ksn_source_acquire(&registry,&b,&schema,base,20015,effective,&lc)==KSN_STALE);
+    puts("source pool adapter: PASS (multi-consumer, zero-copy pin, exhaustion, expiry, concurrent producer)");
     return 0;
 }

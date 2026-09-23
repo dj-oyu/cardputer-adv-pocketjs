@@ -68,7 +68,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_source_pool.c tools/kasane_contract/test_source_pool.c \
     -o "$out/source-pool"
   "$out/source-pool"
-  cc -std=c11 -Wall -Wextra -Werror $options -ffunction-sections -fdata-sections \
+  cc -std=c11 -Wall -Wextra -Werror $options -pthread -ffunction-sections -fdata-sections \
     -Wl,--gc-sections -Imain/ui/kasane main/ui/kasane/ksn_schema.c \
     main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c \
     main/ui/kasane/ksn_source_pool_adapter.c \
