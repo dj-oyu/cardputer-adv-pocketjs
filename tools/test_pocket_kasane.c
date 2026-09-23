@@ -443,6 +443,12 @@ static void reactive_presenter_tests(void){
     check(present(&stats)==KSN_OK,"unsynced native clock presents");
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
           "unsynced clock acknowledgement is stable");
+    memcpy(committed_pixels,panel_pixels,sizeof(panel_pixels));
+    check(run("liveClock.set({face:'BASE',tag:'BASE'})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission()&&
+          !memcmp(committed_pixels,panel_pixels,sizeof(panel_pixels)),
+          "native clock overrides JS base without a redundant frame");
     test_clock_valid=true;
     test_clock_ui=(sys_clock_state){.seconds=45240,.source=SYS_CLOCK_SNTP};
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,

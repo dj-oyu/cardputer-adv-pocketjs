@@ -115,6 +115,12 @@ producer契約：
 期限、base復帰、detach/reset、権限拒否、型不一致、古い世代、複数consumerを確認する。
 既存clockとの画素一致、JS turn増加なし、常駐/peakメモリの上限を出口とする。
 
+2026-09-24途中経過：内部C契約とclock移行、host試験、helloと音声の実機gateを
+[P1途中結果](p1-source-clock-20260924.md)に記録。公開bind、複数source、
+期限scheduler、別task producerの固定snapshot、画素一致は未達。
+音声描画gateは同一実行payloadでも合否が揺れたため未合格。
+配置原因説はバイト比較で棄却し、LCD転送とSD readの同時性を調べる。
+
 ## P2：dirty-node更新を既存bankのまま導入
 
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。

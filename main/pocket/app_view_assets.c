@@ -172,10 +172,18 @@ static const ksn_schema_node clock_nodes[]={
 };
 static const ksn_schema clock_view={.version=1,.slot_count=2,.node_count=4,
     .background=0x000000ffu,.slots=clock_slots,.nodes=clock_nodes};
-typedef struct {uint64_t key;bool initialized;} clock_source;
-static ksn_result clock_read(void *opaque,ksn_schema_value *values,uint64_t *revision){
+typedef struct {
+    uint64_t key,revision;
+    uint32_t generation;
+    bool initialized;
+    char face[6],tag[8];
+    ksn_schema_value fields[2];
+} clock_source;
+static ksn_result clock_acquire(void *opaque,uint64_t cursor,uint64_t now_us,
+                                ksn_source_snapshot *out){
     clock_source *source=opaque;
-    if(!source||!values||!revision||*revision==UINT64_MAX)return KSN_INVALID;
+    (void)cursor;(void)now_us;
+    if(!source||!out||source->revision==UINT64_MAX)return KSN_INVALID;
     sys_clock_state clock;bool valid=sys_device_clock_read(&clock)&&
         clock.seconds<=INT64_C(9007199254740);
     uint16_t minute=0;bool sync=false;
@@ -188,27 +196,52 @@ static ksn_result clock_read(void *opaque,ksn_schema_value *values,uint64_t *rev
     }
     uint64_t key=valid?(uint64_t)minute+1u:0u;
     if(sync)key|=UINT64_C(1)<<16;
-    if(source->initialized&&source->key==key)return KSN_OK;
-    char *face=(char *)values[0].data.text.utf8;
-    char *tag=(char *)values[1].data.text.utf8;
-    if(valid)(void)snprintf(face,6,"%02u:%02u",(unsigned)(minute/60),
+    if(!source->initialized||source->key!=key){
+    if(valid)(void)snprintf(source->face,sizeof(source->face),"%02u:%02u",(unsigned)(minute/60),
                             (unsigned)(minute%60));
-    else memcpy(face,"--:--",6);
+    else memcpy(source->face,"--:--",6);
     const char *label=sync?"UTC":"NO SYNC";
-    size_t bytes=strlen(label);memcpy(tag,label,bytes+1u);
-    /* Formatted directly into the view-owned text buffers: these are bytes
+    size_t bytes=strlen(label);memcpy(source->tag,label,bytes+1u);
+    /* Formatted directly into source-owned text buffers: these are bytes
      * materialized by the producer, not a second snapshot copy. */
     ksn_p0_probe_copy(KSN_P0_PRODUCER_MATERIALIZED,6u+bytes+1u);
-    values[0].data.text.bytes=5;values[1].data.text.bytes=(uint16_t)bytes;
-    source->key=key;source->initialized=true;(*revision)++;
+    source->fields[0].data.text=(ksn_schema_text){source->face,5};
+    source->fields[1].data.text=(ksn_schema_text){source->tag,(uint16_t)bytes};
+    source->key=key;source->initialized=true;source->revision++;
+    }
+    *out=(ksn_source_snapshot){.size=sizeof(*out),.version=KSN_SOURCE_ABI_VERSION,
+        .field_count=2,.generation=source->generation,
+        .revision=source->revision,.valid_fields=3,.changed_fields=3,
+        .fields=source->fields};
     return KSN_OK;
 }
-static const pocket_app_view_asset hello_asset={&hello,0,NULL};
-static const pocket_app_view_asset imucal_asset={&imucal,0,NULL};
-static const pocket_app_view_asset bridge_asset={&bridge,0,NULL};
-static const pocket_app_view_asset companion_asset={&companion,0,NULL};
-static const pocket_app_view_asset pet_asset={&pet,0,NULL};
-static const pocket_app_view_asset clock_asset={&clock_view,sizeof(clock_source),clock_read};
+static void clock_release(void *opaque,const ksn_source_snapshot *snapshot){
+    (void)opaque;(void)snapshot;
+}
+static bool clock_allow(void *opaque,uint32_t consumer){
+    (void)opaque;return consumer!=0;
+}
+static ksn_result clock_open(void *storage,ksn_source_provider *out){
+    static const ksn_slot_type types[]={KSN_SLOT_TEXT,KSN_SLOT_TEXT};
+    if(!storage||!out)return KSN_INVALID;
+    *out=(ksn_source_provider){.size=sizeof(*out),.version=KSN_SOURCE_ABI_VERSION,
+        .field_count=2,.field_types=types,.context=storage,
+        .acquire=clock_acquire,.release=clock_release,.allow=clock_allow};
+    return KSN_OK;
+}
+static void clock_registered(void *storage,ksn_source_handle handle){
+    ((clock_source *)storage)->generation=handle.generation;
+}
+static const ksn_source_binding clock_bindings[]={{0,0},{1,1}};
+static const pocket_app_view_asset hello_asset={.schema=&hello};
+static const pocket_app_view_asset imucal_asset={.schema=&imucal};
+static const pocket_app_view_asset bridge_asset={.schema=&bridge};
+static const pocket_app_view_asset companion_asset={.schema=&companion};
+static const pocket_app_view_asset pet_asset={.schema=&pet};
+static const pocket_app_view_asset clock_asset={.schema=&clock_view,
+    .source_bytes=sizeof(clock_source),.source_open=clock_open,
+    .source_registered=clock_registered,.source_bindings=clock_bindings,
+    .source_binding_count=2};
 const pocket_app_view_asset *pocket_app_view_lookup(const char *name){
     if(!name)return NULL;
     if(strcmp(name,"hello")==0)return &hello_asset;
