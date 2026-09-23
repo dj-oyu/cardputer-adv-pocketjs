@@ -157,6 +157,14 @@ discard・viewport変更と120フレームを全画面参照との画素比較�
 従来1280 B以内、Kasane契約テスト一式も両構成でPASS。
 診断OFF buildの静的DIRAM増加は0。
 ただし実機の同条件A/B、音声共存、固定閾値は未実施でP2出口は未達。
+2026-09-24：実機A/B用に直前版`65c2770`とdirty-node版`31b78f8`を
+同じ`KASANE_P0_PROBE=ON`、copy/bus probe OFF、`POCKET_PROBES=OFF`で
+ビルドした。app image SHA-256は直前版
+`399de067390b2e745561dbcdd303a140ca4db08b8b2b56efdf9ddd4c9be3dde7`、
+dirty-node版
+`0cc3bf24fbf45bb828890a587cb78acd699d0fdc6f9b7628d7056dc3afcebef8`。
+Kasane契約テスト一式は同日のASan/UBSan・O2の両構成で再度PASS。
+COM3は未使用で、実機gateの合否は未判定。
 
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。
 committed node→command範囲を固定容量で保持し、非dirty nodeのresolve/read/compareを
