@@ -58,8 +58,20 @@ typedef struct {
     uint64_t pending_revision;
 } schema_source;
 typedef struct {
+    ksn_source_registry *registry;
+    ksn_source_handle handle;
+    ksn_source_subscription subscription;
+    uint64_t pending_revision;
+} schema_external;
+typedef struct {
+    uint64_t expiry_us;
+    uint8_t count;
+    schema_external entries[KSN_SOURCE_MAX_REGISTERED];
+} schema_externals;
+typedef struct {
     ksn_source_registry registry;
     uint64_t expiry_us;
+    schema_externals *external;
     schema_source entries[];
 } schema_sources;
 typedef struct {
@@ -104,9 +116,22 @@ static uint64_t owner_now_us;
 static JSClassID tx_class, modal_class, ref_class, template_class;
 static JSClassID instance_class, ticket_class, image_class, animation_class;
 static JSClassID schema_class;
+static JSClassID source_cap_class;
 static JSRuntime *tx_rt, *modal_rt, *ref_rt, *template_rt;
 static JSRuntime *instance_rt, *ticket_rt, *image_rt, *animation_rt;
 static JSRuntime *schema_rt;
+static JSRuntime *source_cap_rt;
+typedef struct {
+    ksn_source_registry *registry;
+    ksn_source_handle handle;
+    uint32_t serial;
+} source_cap_record;
+typedef struct {
+    uint8_t count;
+    source_cap_record records[KSN_SOURCE_MAX_REGISTERED];
+} source_cap_table;
+static source_cap_table *source_caps;
+static uint32_t source_cap_serial;
 
 static const char *result_code(ksn_result result) {
     switch(result) {
@@ -208,6 +233,7 @@ static const JSClassDef ticket_def={.class_name=KASANE_CLASS};
 static const JSClassDef image_def={.class_name=KASANE_CLASS};
 static const JSClassDef animation_def={.class_name=KASANE_CLASS};
 static const JSClassDef schema_def={.class_name=KASANE_CLASS};
+static const JSClassDef source_cap_def={.class_name=KASANE_CLASS};
 
 static ref_slot *ref_from(JSContext *ctx, JSValueConst self, const char *op) {
     uint32_t handle=opaque_value(self,ref_class);
@@ -278,6 +304,11 @@ static char *schema_text_base(schema_state *s){
 }
 static schema_sources *schema_native(schema_state *s){
     return s->asset->source_count?(schema_sources *)s->source_state:NULL;
+}
+static schema_externals *schema_external_state(schema_state *s){
+    if(!s->source_state)return NULL;
+    return s->asset->source_count?schema_native(s)->external:
+           (schema_externals *)s->source_state;
 }
 static schema_state *schema_alloc(const pocket_app_view_asset *asset,uint32_t consumer){
     const ksn_schema *definition=asset?asset->schema:NULL;
@@ -411,9 +442,11 @@ static __attribute__((noinline)) ksn_result schema_refresh_native(
 /* Multiple producers are composed only on assets that declare them. The
  * single-source clock keeps its smaller lease and stack frame above. */
 static __attribute__((noinline)) ksn_result schema_refresh_native_many(
-    schema_state *s,schema_sources *sources,bool *blocked){
-    uint8_t count=s->asset->source_count;
-    schema_source *native=sources->entries;
+    schema_state *s,schema_sources *sources,schema_externals *external,bool *blocked){
+    uint8_t static_count=s->asset->source_count;
+    uint8_t external_count=external?external->count:0;
+    uint8_t count=static_count+external_count;
+    schema_source *native=sources?sources->entries:NULL;
     if(s->session.ticket.value){
         ksn_submission outcome=ksn_view_poll(view());
         if(outcome.ticket.value==s->session.ticket.value&&
@@ -423,16 +456,26 @@ static __attribute__((noinline)) ksn_result schema_refresh_native_many(
         }
         if(outcome.ticket.value==s->session.ticket.value&&
            outcome.status==KSN_PRESENTED){
-            for(unsigned i=0;i<count;i++)if(native[i].pending_revision){
+            for(unsigned i=0;i<static_count;i++)if(native[i].pending_revision){
                 ksn_result ack=ksn_source_presented(&native[i].subscription,
                                                       native[i].pending_revision);
                 if(ack!=KSN_OK)return ack;
             }
+            for(unsigned i=0;i<external_count;i++)
+                if(external->entries[i].pending_revision){
+                    ksn_result ack=ksn_source_presented(
+                        &external->entries[i].subscription,
+                        external->entries[i].pending_revision);
+                    if(ack!=KSN_OK)return ack;
+                }
         }
     }
     ksn_source_member members[KSN_SOURCE_MAX_REGISTERED];
-    for(unsigned i=0;i<count;i++)members[i]=(ksn_source_member){
+    for(unsigned i=0;i<static_count;i++)members[i]=(ksn_source_member){
         &sources->registry,&native[i].subscription};
+    for(unsigned i=0;i<external_count;i++)members[static_count+i]=
+        (ksn_source_member){external->entries[i].registry,
+                            &external->entries[i].subscription};
     ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS];
     ksn_source_bundle bundle={0};
     ksn_result source=ksn_source_bundle_acquire(members,count,s->definition,
@@ -452,18 +495,27 @@ static __attribute__((noinline)) ksn_result schema_refresh_native_many(
         if(r==KSN_OK){
             s->pending_base_slots=0;
             uint64_t next=UINT64_MAX;
-            for(unsigned i=0;i<count;i++){
+            for(unsigned i=0;i<static_count;i++){
                 uint64_t expiry=bundle.leases[i].snapshot.expires_at_us;
                 if(expiry>owner_now_us&&expiry<next)next=expiry;
             }
-            sources->expiry_us=next==UINT64_MAX?0:next;
+            if(sources)sources->expiry_us=next==UINT64_MAX?0:next;
+            next=UINT64_MAX;
+            for(unsigned i=0;i<external_count;i++){
+                uint64_t expiry=bundle.leases[static_count+i].snapshot.expires_at_us;
+                if(expiry>owner_now_us&&expiry<next)next=expiry;
+            }
+            if(external)external->expiry_us=next==UINT64_MAX?0:next;
         }
     }
     ksn_source_bundle_release(&bundle);
     if(r==KSN_OK&&s->session.ticket.value&&
        s->session.ticket.value!=before.value){
-        for(unsigned i=0;i<count;i++)
+        for(unsigned i=0;i<static_count;i++)
             native[i].pending_revision=native[i].subscription.validated_revision;
+        for(unsigned i=0;i<external_count;i++)
+            external->entries[i].pending_revision=
+                external->entries[i].subscription.validated_revision;
         schema_note_submitted(s,before);
     }
     return r;
@@ -473,9 +525,12 @@ static ksn_result schema_refresh(bool *blocked){
     if(!state||!state->schema)return KSN_OK;
     schema_state *s=state->schema;
     schema_sources *native=schema_native(s);
+    schema_externals *external=schema_external_state(s);
+    if(external&&external->count)return
+        schema_refresh_native_many(s,native,external,blocked);
     if(native)return s->asset->source_count==1?
         schema_refresh_native(s,native,blocked):
-        schema_refresh_native_many(s,native,blocked);
+        schema_refresh_native_many(s,native,NULL,blocked);
     ksn_tx before=s->session.ticket;
     ksn_result r=ksn_schema_session_step_dirty(&s->session,view(),viewport,s->values,
         s->revision,s->pending_base_slots,blocked);
@@ -1592,10 +1647,13 @@ static JSValue js_stats(JSContext *ctx, JSValueConst self, int argc,
     cache=JS_NewObject(ctx);if(JS_IsException(cache)) goto fail;
     PUT(out,"active",JS_NewBool(ctx,state&&state->active));
     PUT(out,"nativeBytes",JS_NewUint32(ctx,ksn_runtime_reserved_bytes()+
-        (state?sizeof(*state)+(state->provider?
+        (state?sizeof(*state)+(source_caps?sizeof(*source_caps):0)+
+          (state->provider?
           state->provider->native_bytes(state->provider_state):0)+
           (state->schema?state->schema->allocation_bytes+
-                         state->schema->owned_asset_bytes:0):0)));
+                         state->schema->owned_asset_bytes+
+                         (schema_external_state(state->schema)?
+                          sizeof(schema_externals):0):0):0)));
     PUT(displayed,"commands",JS_NewInt32(ctx,stats.displayed.commands));
     PUT(displayed,"textBytes",JS_NewInt32(ctx,stats.displayed.text_bytes));
     PUT(cache,"commands",JS_NewInt32(ctx,stats.shared_cache.commands));
@@ -1810,21 +1868,36 @@ static JSValue js_schema_set_method(JSContext *ctx,JSValueConst self,
     if(!generic)return throw_result(ctx,KSN_STALE,"kasane.view.set");
     return js_schema_set(ctx,generic,argc?argv[0]:JS_UNDEFINED);
 }
-/* The source index is local to this mounted asset. It is not a global source
- * name or a transferable handle; registration and allow() remain in C. */
+/* A numeric source index is local to the mount; a C-issued capability can
+ * refer to a separate service registry. Neither path searches source names. */
 static JSValue js_schema_bind_method(JSContext *ctx,JSValueConst self,
                                      int argc,JSValueConst *argv){
     const char *op="kasane.view.bind";
     schema_state *s=schema_owner(self);
     if(!s)return throw_result(ctx,KSN_STALE,op);
-    if(!s->asset->source_count)return throw_result(ctx,KSN_UNSUPPORTED,op);
     if(s->session.ticket.value)return throw_result(ctx,KSN_BUSY,op);
-    double source_number;
-    if(argc<2||!number_in(ctx,argv[0],0,s->asset->source_count-1u,
-                          &source_number)||!JS_IsObject(argv[1])||JS_IsArray(argv[1]))
+    if(argc<2||!JS_IsObject(argv[1])||JS_IsArray(argv[1]))
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
-                                "source index and slot bindings are required",false,NULL);
-    unsigned source_index=(unsigned)source_number;
+                                "source and slot bindings are required",false,NULL);
+    bool local=JS_IsNumber(argv[0]);
+    unsigned source_index=0;
+    source_cap_record *offer=NULL;
+    if(local){
+        double number;
+        if(!s->asset->source_count||!number_in(ctx,argv[0],0,
+                  s->asset->source_count-1u,&number))
+            return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                    "source index is out of range",false,NULL);
+        source_index=(unsigned)number;
+    }else{
+        uint32_t serial=(uint32_t)(uintptr_t)JS_GetOpaque(argv[0],source_cap_class);
+        if(!serial||!source_caps)return throw_result(ctx,KSN_STALE,op);
+        for(unsigned i=0;i<source_caps->count;i++)
+            if(source_caps->records[i].serial==serial){
+                offer=&source_caps->records[i];break;
+            }
+        if(!offer)return throw_result(ctx,KSN_STALE,op);
+    }
     JSPropertyEnum *props=NULL;uint32_t count=0;
     if(JS_GetOwnPropertyNames(ctx,&props,&count,argv[1],
                               JS_GPN_STRING_MASK|JS_GPN_ENUM_ONLY))return JS_EXCEPTION;
@@ -1857,25 +1930,57 @@ static JSValue js_schema_bind_method(JSContext *ctx,JSValueConst self,
     /* A binding getter can call view.set() and submit while we parse it. */
     if(s->session.ticket.value)return throw_result(ctx,KSN_BUSY,op);
     schema_sources *sources=schema_native(s);
-    schema_source *entry=&sources->entries[source_index];
-    if(entry->subscription.binding_count==count&&
-       memcmp(entry->subscription.bindings,bindings,
-              count*sizeof(*bindings))==0)return JS_UNDEFINED;
+    schema_externals *external=schema_external_state(s);
+    schema_source *entry=local?&sources->entries[source_index]:NULL;
+    int external_index=-1;
+    if(!local&&external)for(unsigned i=0;i<external->count;i++)
+        if(external->entries[i].registry==offer->registry&&
+           external->entries[i].handle.index==offer->handle.index&&
+           external->entries[i].handle.generation==offer->handle.generation){
+            external_index=(int)i;break;
+        }
+    ksn_source_subscription *old=local?&entry->subscription:
+        external_index>=0?&external->entries[external_index].subscription:NULL;
     ksn_source_subscription candidate;
-    ksn_result r=ksn_source_subscribe(&sources->registry,entry->handle,s->handle,
+    ksn_result r=ksn_source_subscribe(local?&sources->registry:offer->registry,
+        local?entry->handle:offer->handle,s->handle,
         s->definition,bindings,(uint8_t)count,&candidate);
     if(r!=KSN_OK)return throw_result(ctx,r,op);
+    if(old&&old->binding_count==count&&
+       memcmp(old->bindings,bindings,count*sizeof(*bindings))==0)return JS_UNDEFINED;
     for(unsigned i=0;i<s->asset->source_count;i++)
-        if(i!=source_index&&
+        if((!local||i!=source_index)&&
            (sources->entries[i].subscription.bound_slots&candidate.bound_slots))
             return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                     "another source owns a bound slot",false,NULL);
-    s->pending_base_slots|=entry->subscription.bound_slots|candidate.bound_slots;
-    entry->subscription=candidate;
-    entry->pending_revision=0;
-    /* The next owner step reacquires the complete current snapshot. This
-     * cold-path mapping change allocates nothing and keeps the current frame
-     * intact if a producer is temporarily unavailable. */
+    if(external)for(unsigned i=0;i<external->count;i++)
+        if((local||(int)i!=external_index)&&
+           (external->entries[i].subscription.bound_slots&candidate.bound_slots))
+            return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                    "another source owns a bound slot",false,NULL);
+    if(!local&&external_index<0&&(unsigned)s->asset->source_count+
+       (external?(unsigned)external->count:0u)>=KSN_SOURCE_MAX_REGISTERED)
+        return throw_result(ctx,KSN_LIMIT,op);
+    if(!local&&!external){
+        external=calloc(1,sizeof(*external));
+        if(!external)return throw_result(ctx,KSN_OOM,op);
+        if(sources)sources->external=external;
+        else s->source_state=external;
+    }
+    s->pending_base_slots|=(old?old->bound_slots:0)|candidate.bound_slots;
+    if(local){
+        entry->subscription=candidate;
+        entry->pending_revision=0;
+    }else{
+        schema_external *target=&external->entries[external_index>=0?
+                                                   (unsigned)external_index:
+                                                   external->count++];
+        *target=(schema_external){.registry=offer->registry,.handle=offer->handle,
+                                  .subscription=candidate};
+    }
+    /* The next owner step reacquires the complete current snapshot. Only the
+     * first external bind allocates its fixed-capacity subscription block;
+     * a temporary producer failure leaves the current frame intact. */
     return JS_UNDEFINED;
 }
 static const JSCFunctionListEntry schema_methods[]={
@@ -2294,6 +2399,45 @@ esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data) {
     esp_err_t result=pocket_api_register(&capability);
     return result==ESP_OK?pocket_api_lazy(ctx,"kasane",build_kasane,NULL):result;
 }
+JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *registry,
+                                         ksn_source_handle handle){
+    const char *op="kasane.sourceCapability";
+    if(!registry||handle.index>=KSN_SOURCE_MAX_REGISTERED||!handle.generation||
+       !registry->entries[handle.index].provider||
+       registry->entries[handle.index].generation!=handle.generation)
+        return throw_result(ctx,KSN_STALE,op);
+    if(!ensure_state(ctx,op))return JS_EXCEPTION;
+    if(!register_class(ctx,&source_cap_class,&source_cap_rt,&source_cap_def))
+        return throw_result(ctx,KSN_OOM,op);
+    JSValue proto=JS_GetClassProto(ctx,source_cap_class);
+    if(JS_IsNull(proto)){
+        JS_FreeValue(ctx,proto);
+        proto=JS_NewObject(ctx);
+        if(JS_IsException(proto))return proto;
+        JS_SetClassProto(ctx,source_cap_class,proto);
+    }else JS_FreeValue(ctx,proto);
+    if(!source_caps){
+        source_caps=calloc(1,sizeof(*source_caps));
+        if(!source_caps)return throw_result(ctx,KSN_OOM,op);
+    }
+    source_cap_record *record=NULL;
+    for(unsigned i=0;i<source_caps->count;i++)
+        if(source_caps->records[i].registry==registry&&
+           source_caps->records[i].handle.index==handle.index&&
+           source_caps->records[i].handle.generation==handle.generation){
+            record=&source_caps->records[i];break;
+        }
+    if(!record&&(source_caps->count==KSN_SOURCE_MAX_REGISTERED||
+                 source_cap_serial==UINT32_MAX))return throw_result(ctx,KSN_LIMIT,op);
+    JSValue object=JS_NewObjectClass(ctx,source_cap_class);
+    if(JS_IsException(object))return object;
+    if(!record){
+        record=&source_caps->records[source_caps->count++];
+        *record=(source_cap_record){registry,handle,++source_cap_serial};
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)record->serial);
+    return object;
+}
 
 void pocket_kasane_reset(void) {
     const pocket_app_view_provider *provider=state?state->provider:NULL;
@@ -2301,8 +2445,10 @@ void pocket_kasane_reset(void) {
     schema_state *schema=state?state->schema:NULL;
     if(state&&ksn_runtime_app_detach(state->lease)==KSN_BUSY)return;
     if(provider)provider->destroy(provider_state);
+    if(schema)free(schema_external_state(schema));
     if(schema)free(schema->owned_asset);
     free(schema);
+    free(source_caps);source_caps=NULL;
     state=NULL;   /* the runtime released it with the lease */
     viewport=KASANE_SCREEN;
     overlay_profile=false;
@@ -2347,11 +2493,15 @@ bool pocket_kasane_has_submission(void) {
     return ksn_runtime_has_submission();
 }
 uint32_t pocket_kasane_source_wait_ticks(uint64_t now_us,uint32_t cap,uint32_t hz){
-    if(!state||!state->schema||!state->schema->asset->source_count||!hz)return cap;
-    uint64_t next=schema_native(state->schema)->expiry_us;
+    if(!state||!state->schema||!hz)return cap;
+    schema_sources *native=schema_native(state->schema);
+    schema_externals *external=schema_external_state(state->schema);
+    uint64_t next=native&&native->expiry_us?native->expiry_us:UINT64_MAX;
+    if(external&&external->expiry_us&&external->expiry_us<next)
+        next=external->expiry_us;
     /* A due deadline is retried by the regular owner frame. Returning zero
      * here could busy-spin after a failed or pending submission. */
-    if(!next||next<=now_us)return cap;
+    if(next==UINT64_MAX||next<=now_us)return cap;
     uint64_t delta=next-now_us,seconds=delta/1000000u;
     if(seconds>cap/hz)return cap;
     uint64_t ticks=seconds*hz+((delta%1000000u)*hz+999999u)/1000000u;

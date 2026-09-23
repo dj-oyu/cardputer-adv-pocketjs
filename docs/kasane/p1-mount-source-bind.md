@@ -1,9 +1,17 @@
-# P1 mount-owned source bind（2026-09-24）
+# P1 source capability / bind（2026-09-24）
 
 `view.bind(sourceIndex, {slotName: fieldIndex, ...})` は、現在の `mount`
 がC側で登録したnative source **1件の対応表を置き換える**。indexはその
 view内だけで意味を持つ0始まりの番号であり、source名や別viewへ渡せる
 handleではない。C assetの初期bindingはmount時に自動購読される。
+
+別のC serviceは`pocket_kasane_source_capability(ctx,registry,handle)`で
+session-scopedの不透明JS capabilityを明示的に発行できる。
+`view.bind(capability,{slotName:fieldIndex,...})`はruntime descriptorを含む
+任意のmounted schemaから、そのservice registryを購読する。同じcapabilityを
+再bindすると対応表を置き換え、初回bindだけで固定上限4購読の領域を1回確保する。
+sourceを使わないmountはその領域を持たない。複数の内部・外部registryも
+同じbundleで合成し、payloadはlease中だけ借用する。
 
 bindはsource fieldとschema slotの型、producerの`allow(consumer)`、
 他sourceとのslot重複を検証する。提出中のframeがあれば`BUSY`で拒否し、
@@ -15,14 +23,22 @@ frameを提出した場合も、解析後に再度`BUSY`を確認して変更を
 失敗はowner step側で返す。bind自体は描画やproducer acquireを行わず、
 hot pathにJSのUI組立てを足さない。
 
-これは**mount-owned sourceの公開再割当**であり、任意のruntime descriptorが
-system/service sourceを見つけて接続できるAPIではない。外部sourceへの
-拡張には、登録者が明示的に発行する不透明capabilityと、guest reset後の
-失効・provider寿命・consumer認可を先に定義する。文字列名だけによる
-グローバル探索は行わない。detach/unbindも未実装なのでP1完了とはしない。
+capabilityは文字列名で探索しない。plain objectは偽造できず、reset後の
+旧capabilityは同じregistry/handleに再発行しても失効したまま。C serviceは
+registryとproviderを`pocket_kasane_reset()`まで有効に保つ契約である。
+`ksn_source_unregister`したhandleは次のbind/acquireで古い世代として拒否する。
+ただしサービスが稼働中に登録解除した場合の自動base復帰と、明示的な
+detach/unbindは未実装。実際のsystem/serviceがcapabilityを発行する配線、
+別task producerの固定snapshotとの接続、実機gateも残り、P1完了ではない。
 
 host限定2 source fixtureの実QuickJS試験では、保留中の変更拒否、field index・
 型・認可・slot重複・getter再入の拒否、旧base復帰と新slotへのnative値、同一bindingの
 描画skip、reset後の古いview拒否を確認。ASan/UBSanと
 `-O2 -fstrict-aliasing`で0失敗、診断OFFのESP-IDF buildもPASS。
 静的DIRAMは159,788 Bのまま。実機の描画時間・heap・音声共存は未測定。
+
+外部2 registryと内部2＋外部1 sourceの実QuickJS試験では、独立revision、
+後続source失敗時の全pin解放、復旧、JS baseのoverride、期限到来時のbase復帰、
+再有効化、認可、偽造拒否、lazy割当の上限とOOM時の無変更、
+reset後の旧capability拒否を確認。
+ASan/UBSan・`-O2 -fstrict-aliasing`で0失敗、診断OFF製品ビルドもPASS。

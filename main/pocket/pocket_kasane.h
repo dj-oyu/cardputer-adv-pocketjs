@@ -5,6 +5,7 @@
 #include "esp_err.h"
 #include "quickjs.h"
 #include "ui/kasane/ksn_view_host.h"
+#include "ui/kasane/ksn_source.h"
 #include "system/sys_notify.h"
 
 /* QuickJS-facing APP lease into the native Kasane runtime. Allocation is lazy
@@ -12,6 +13,11 @@
  * bookkeeping; a native SYSTEM owner keeps the shared storage alive.
  * Owner task only, reset outside guest/render callbacks. */
 esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data);
+/* C service publishes a session-scoped, unforgeable source capability. The
+ * registry and provider must outlive pocket_kasane_reset(); revoke by
+ * unregistering the handle, which makes later binds/acquires stale. */
+JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *registry,
+                                         ksn_source_handle handle);
 void pocket_kasane_reset(void);
 /* Takes the native arena now, as one block, instead of at the guest's first
  * Kasane call. The session calls it before evaluating a source that names

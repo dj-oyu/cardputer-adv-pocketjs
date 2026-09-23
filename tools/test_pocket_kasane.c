@@ -27,6 +27,53 @@ static pocket_av_ui_snapshot test_player_ui;
 static bool test_clock_valid;
 static sys_clock_state test_clock_ui;
 static unsigned test_clock_reads;
+typedef struct {
+    ksn_source_registry registry;
+    ksn_source_provider provider;
+    ksn_source_handle handle;
+    ksn_schema_value field;
+    char text[8];
+    uint64_t revision,expires_at_us;
+    unsigned acquired,released;
+    bool allowed,fail;
+} external_test_source;
+static external_test_source external_test[2];
+static const ksn_slot_type external_test_types[]={KSN_SLOT_TEXT};
+static ksn_result external_test_acquire(void *context,uint64_t cursor,
+                                        uint64_t now_us,ksn_source_snapshot *out){
+    (void)cursor;(void)now_us;
+    external_test_source *source=context;
+    if(source->fail)return KSN_IO;
+    source->field.data.text=(ksn_schema_text){source->text,
+        (uint16_t)strlen(source->text)};
+    *out=(ksn_source_snapshot){.size=sizeof(*out),.version=KSN_SOURCE_ABI_VERSION,
+        .field_count=1,.generation=source->handle.generation,
+        .revision=source->revision,.expires_at_us=source->expires_at_us,
+        .valid_fields=1,.changed_fields=1,
+        .fields=&source->field};
+    source->acquired++;
+    return KSN_OK;
+}
+static void external_test_release(void *context,const ksn_source_snapshot *snapshot){
+    (void)snapshot;((external_test_source *)context)->released++;
+}
+static bool external_test_allow(void *context,uint32_t consumer){
+    return consumer!=0&&((external_test_source *)context)->allowed;
+}
+static bool external_test_open(unsigned index,const char *text){
+    external_test_source *source=&external_test[index];
+    memset(source,0,sizeof(*source));
+    source->allowed=true;source->revision=1;
+    strcpy(source->text,text);
+    source->provider=(ksn_source_provider){.size=sizeof(source->provider),
+        .version=KSN_SOURCE_ABI_VERSION,.field_count=1,
+        .field_types=external_test_types,.context=source,
+        .acquire=external_test_acquire,.release=external_test_release,
+        .allow=external_test_allow};
+    ksn_source_registry_init(&source->registry);
+    return ksn_source_register(&source->registry,&source->provider,
+                               &source->handle)==KSN_OK;
+}
 
 int32_t pocket_av_ui_current_player(void){return test_player_id;}
 bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
@@ -607,6 +654,22 @@ static void dual_source_mount_tests(void){
           pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
           !pocket_kasane_has_submission(),
           "identical public bind does not redraw");
+    check(external_test_open(0,"C0"),"third service source registers for mixed mount");
+    JSValue global=JS_GetGlobalObject(ctx);
+    JSValue mixed=pocket_kasane_source_capability(ctx,&external_test[0].registry,
+                                                   external_test[0].handle);
+    check(!JS_IsException(mixed)&&
+          JS_SetPropertyStr(ctx,global,"mixedCap",mixed)>=0,
+          "mixed mount receives a separate service capability");
+    JS_FreeValue(ctx,global);
+    check(run("dual.bind(mixedCap,{left:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "two mount-owned and one service source compose in one frame");
+    check(present(&stats)==KSN_OK,"mixed three-source frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "mixed three-source frame acknowledges");
+    check(external_test[0].acquired==external_test[0].released,
+          "mixed-source lease does not outlive its owner turn");
     pocket_kasane_reset();
     check(pocket_kasane_source_wait_ticks(1001,10,1000)==10,
           "unmounted source does not shorten owner waits");
@@ -615,6 +678,126 @@ static void dual_source_mount_tests(void){
           "old mount cannot rebind a source after reset");
 }
 #endif
+
+static void external_source_mount_tests(void){
+    ksn_render_stats stats;
+    bool blocked=false;
+    check(external_test_open(0,"A0")&&external_test_open(1,"B0"),
+          "two service-owned source registries register independently");
+    JSValue global=JS_GetGlobalObject(ctx);
+    JSValue first=pocket_kasane_source_capability(ctx,&external_test[0].registry,
+                                                   external_test[0].handle);
+    JSValue second=pocket_kasane_source_capability(ctx,&external_test[1].registry,
+                                                    external_test[1].handle);
+    check(!JS_IsException(first)&&!JS_IsException(second)&&
+          JS_SetPropertyStr(ctx,global,"externalCap0",first)>=0&&
+          JS_SetPropertyStr(ctx,global,"externalCap1",second)>=0,
+          "C services publish opaque session-scoped capabilities");
+    JS_FreeValue(ctx,global);
+    pocket_kasane_set_viewport(140,46,96,22);
+    check(run("globalThis.externalView=kasane.mount({version:1,"
+              "slots:{label:{type:'text',capacity:7},right:{type:'text',capacity:7}},"
+              "nodes:[{type:'text',bounds:[0,0,44,16],text:{slot:'label'},"
+              "color:0xffffffff},{type:'text',bounds:[48,0,95,16],"
+              "text:{slot:'right'},color:0xffffffff}]},"
+              "{label:'BASE',right:'BASE'})"),
+          "runtime descriptor mounts without built-in source state");
+    check(present(&stats)==KSN_OK,"runtime base frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "runtime base frame acknowledges");
+    check(run("globalThis.externalNativeBefore=kasane.stats().nativeBytes"),
+          "external view records allocation before first bind");
+    check(run("(()=>{let forged=false;try{externalView.bind({}, {label:0})}"
+              "catch(e){forged=true}if(!forged)throw Error('forged source')})()"),
+          "plain JS objects cannot forge source capabilities");
+    external_test[0].allowed=false;
+    check(run("(()=>{let denied=false;try{externalView.bind(externalCap0,{label:0})}"
+              "catch(e){denied=true}if(!denied)throw Error('not authorized')})()"),
+          "external bind enforces service authorization");
+    external_test[0].allowed=true;
+    check(run("globalThis.externalBindings={label:0};"
+              "globalThis.externalBindExercise=()=>externalView.bind("
+              "externalCap0,externalBindings)"),
+          "external bind OOM fixture is compiled before injection");
+    global=JS_GetGlobalObject(ctx);
+    JSValue exercise=JS_GetPropertyStr(ctx,global,"externalBindExercise");
+    JS_FreeValue(ctx,global);
+    native_fault=true;
+    JSValue failed=JS_Call(ctx,exercise,JS_UNDEFINED,0,NULL);
+    check(!native_fault&&JS_IsException(failed)&&
+          !pocket_kasane_has_submission(),
+          "external bind allocation failure leaves mount unchanged");
+    JSValue error=JS_GetException(ctx);
+    JS_FreeValue(ctx,error);JS_FreeValue(ctx,failed);JS_FreeValue(ctx,exercise);
+    check(run("externalView.bind(externalCap0,{label:0});"
+              "externalView.bind(externalCap1,{right:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "runtime view composes two external source registries");
+    check(run("(()=>{let added=kasane.stats().nativeBytes-externalNativeBefore;"
+              "if(added<=0||added>1024)throw Error('external allocation')})()"),
+          "external subscription uses one bounded lazy allocation");
+    check(present(&stats)==KSN_OK,"external source frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "both external source revisions acknowledge");
+    memcpy(external_test[0].text,"A1",3);external_test[0].revision++;
+    memcpy(external_test[1].text,"B1",3);external_test[1].revision++;
+    external_test[1].fail=true;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_IO&&
+          !pocket_kasane_has_submission()&&
+          external_test[0].acquired==external_test[0].released,
+          "later external failure releases earlier registry pin atomically");
+    external_test[1].fail=false;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "external subscriptions recover with latest complete values");
+    check(present(&stats)==KSN_OK,"recovered external frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "recovered external frame acknowledges");
+    check(run("externalView.set({label:'LATEST'})")&&
+          !pocket_kasane_has_submission(),
+          "native external value overrides JS base without redraw");
+    external_test[0].expires_at_us=2000;external_test[0].revision++;
+    pocket_kasane_set_animation_time(1999);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          pocket_kasane_source_wait_ticks(1999,10,1000)==1,
+          "external source deadline shortens owner wait without early redraw");
+    pocket_kasane_set_animation_time(2000);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "expired external capability reveals latest JS base");
+    check(present(&stats)==KSN_OK,"expired external source presents base");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "expired external source acknowledges");
+    external_test[0].expires_at_us=0;external_test[0].revision++;
+    pocket_kasane_set_animation_time(2001);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "renewed external source overrides base again");
+    check(present(&stats)==KSN_OK,"renewed external source presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "renewed external source acknowledges");
+    check(external_test[0].acquired==external_test[0].released&&
+          external_test[1].acquired==external_test[1].released,
+          "external leases are released after every owner step");
+    pocket_kasane_reset();
+    global=JS_GetGlobalObject(ctx);
+    JSValue fresh=pocket_kasane_source_capability(ctx,&external_test[0].registry,
+                                                   external_test[0].handle);
+    check(!JS_IsException(fresh)&&
+          JS_SetPropertyStr(ctx,global,"externalCapFresh",fresh)>=0,
+          "same service can issue a new-session capability");
+    JS_FreeValue(ctx,global);
+    check(run("globalThis.externalView2=kasane.mount({version:1,"
+              "slots:{label:{type:'text',capacity:7}},"
+              "nodes:[{type:'text',bounds:[0,0,95,16],text:{slot:'label'},"
+              "color:0xffffffff}]})"),
+          "new runtime descriptor mounts after reset");
+    check(run("(()=>{let stale=false;try{externalView2.bind(externalCap0,{label:0})}"
+              "catch(e){stale=true}if(!stale)throw Error('old capability')})()"),
+          "old source capability cannot cross guest reset");
+    check(run("externalView2.bind(externalCapFresh,{label:0})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
+          "fresh capability subscribes the new runtime view");
+    check(present(&stats)==KSN_OK,"fresh external capability presents");
+    pocket_kasane_reset();
+}
 
 static void atomicity_tests(void) {
     ksn_render_stats stats;
@@ -1384,6 +1567,7 @@ int main(void) {
 #ifdef KSN_TEST_DUAL_SOURCE
     dual_source_mount_tests();
 #endif
+    external_source_mount_tests();
 
     check(run("globalThis.tpl=kasane.cache.create(["
               "{bounds:[0,0,10,10],color:0xff0000ff},"

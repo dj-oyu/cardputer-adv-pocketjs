@@ -179,6 +179,14 @@ JS baseへ戻り、別sourceの画素を変えず、native更新後に再びover
 実QuickJSのASan/UBSan・O2と診断OFF ESP-IDF buildはPASS、静的DIRAM
 159,788 B。任意アプリが外部service sourceを取得するcapability、
 detach/unbind、実機gateは未実装・未検証でありP1出口には未達。
+2026-09-24：C serviceが不透明capabilityを明示発行し、任意のruntime
+descriptorが`view.bind(cap,{slot:field})`で外部registryを購読できる経路を
+追加した。[契約と検証範囲](p1-mount-source-bind.md)を参照。外部2 registry、
+内部2＋外部1 sourceを実QuickJSで合成し、後続失敗時のpin回収、期限、
+reset失効をASan/UBSan・O2で確認。購読領域は初回bind時の固定上限1回確保で、
+sourceなしmountのallocationは維持。診断OFF buildはPASS、静的DIRAM
+159,788 B。実serviceの発行配線、登録解除時のbase復帰、unbind、
+別task producerと実機gateは未達で、P1全体は未完了。
 
 ## P2：dirty-node更新を既存bankのまま導入
 
