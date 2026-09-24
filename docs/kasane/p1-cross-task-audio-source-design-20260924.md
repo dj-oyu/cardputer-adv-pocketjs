@@ -4,8 +4,10 @@
 
 実装追記：最初の製品service接続は、描画に直接使える1 Hzの8 byte text
 `HH:MM:SS`を選び、[実機結果](p1-audio-output-source-device-20260924.md)に記録した。
-以下の33 ms数値telemetry、`U32` slot、observer OFF/ON ABBAなどは未実装の
-元設計であり、この接続試験により達成したとは扱わない。
+以下の33 ms数値telemetry、`U32` slotなどは未実装の元設計であり、
+この接続試験により達成したとは扱わない。短時間observer OFF/ON ABBAは
+[別記録](p1-audio-source-abba-20260924.md)で実施したが、描画workloadは
+OFF/ONで異なるため性能出口には用いない。
 
 ## 接続点
 

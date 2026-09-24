@@ -15,7 +15,8 @@ HALへ渡すため、別streamの時刻を0から誤表示しない。pool枯渇
 
 この版は[数値telemetry設計](p1-cross-task-audio-source-design-20260924.md)の
 全項目を実装したものではない。`U32` slot、frame・starvation・stream idの数値公開、
-約33 ms周期、同一バイナリobserver OFF/ONのABBAは未実施。8文字の時刻だけを1 Hzで
+約33 ms周期は未実装。短時間observer OFF/ONの同一バイナリABBAは
+[別記録](p1-audio-source-abba-20260924.md)で実施した。8文字の時刻だけを1 Hzで
 公開するのは現在の表示用途の低コストな接続試験であり、数値APIの代替完成扱いにしない。
 
 ## 実機手順と結果
@@ -52,7 +53,7 @@ pool/adapter並行読者とsource copy/discard/repair、dirty-node参照比較�
 
 ## 未達の出口
 
-- 同一バイナリ、同一曲、同じ電源条件でobserver OFF/ONのABBA比較と固定P0閾値判定。
+- 同じ描画workloadでのobserver OFF/ON性能比較とmusic overlayの固定P0閾値判定。
 - 1 Hz text以外の数値source契約（必要なら汎用`U32` slot）、seek・pause/resume・
   複数stream連続・pool全slot pin時の終了invalid再試行のhost/実機試験。
 - 長時間再生、音声とhome/overlay切替、全copy内訳、P2 dirty-nodeの実機A/B、

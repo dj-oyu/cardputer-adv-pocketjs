@@ -224,8 +224,14 @@ host並行契約、通常helloとSD音声の短期固定gateもPASS。診断OFF�
 45秒再生と同時に47回公開/skip 0、underrun・decode fault 0を確認した。
 終了invalidでJS baseへ戻るLCD差分は122画素、領域外0。診断OFFの静的DIRAMは
 159,820 B（+16 B）。元の3 MiB app領域は全区画digest一致で復元。
-これは1 Hz text接続試験であり、当初設計の数値telemetry/U32、同一バイナリ
-OFF/ON ABBA、長時間・seek等は未達。P1全体の完了判定は変えない。
+これは1 Hz text接続試験であり、この時点では当初設計の数値telemetry/U32、
+同一バイナリOFF/ON ABBA、長時間・seek等は未達。P1全体の完了判定は変えない。
+2026-09-24：[音声observer OFF/ON同一バイナリABBA](p1-audio-source-abba-20260924.md)
+を`u→v→v→u`、同じSD MP3各45秒で実施。全4試行underrun/decode fault 0、
+ONは47/48 publish・skip 0。SD readは全回885回/1,812,480 Bで一致。
+ONのapp renderは実際の1 Hz描画48回、OFFは初期2回だけなのでp99を
+同workload回帰値とはみなさない。music overlayの固定P0ゲートと
+数値telemetry、長時間・seek等は未達で、P1出口の完了判定は変えない。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

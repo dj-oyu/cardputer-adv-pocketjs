@@ -74,6 +74,7 @@ extern const char kasane_demo_start[] asm("_binary_demo_js_start");
 extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_start");
 extern const char pool_source_probe_start[] asm("_binary_pool_source_probe_js_start");
 extern const char output_source_probe_start[] asm("_binary_output_source_probe_js_start");
+extern const char output_source_probe_off_start[] asm("_binary_output_source_probe_off_js_start");
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
 // VM probe workloads (docs/vm/quickjs-freertos-vm-spec.md sec.5), embedded only
@@ -703,6 +704,7 @@ source_ready:;
         case '7': source=wall_source_probe_start; break;
         case '0': source=pool_source_probe_start; break;
         case 'v': source=output_source_probe_start; break;
+        case 'u': source=output_source_probe_off_start; break;
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
         // VM probe workloads (sec.5): real files under apps/vmprobe/ rather
