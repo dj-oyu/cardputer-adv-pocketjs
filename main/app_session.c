@@ -75,6 +75,7 @@ extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_st
 extern const char pool_source_probe_start[] asm("_binary_pool_source_probe_js_start");
 extern const char output_source_probe_start[] asm("_binary_output_source_probe_js_start");
 extern const char output_source_probe_hidden_start[] asm("_binary_output_source_probe_hidden_js_start");
+extern const char output_source_probe_dual_start[] asm("_binary_output_source_probe_dual_js_start");
 extern const char output_source_probe_long_start[] asm("_binary_output_source_probe_long_js_start");
 #ifdef KASANE_P0_COPY_PROBE
 extern const char output_source_probe_exhaust_start[] asm("_binary_output_source_probe_exhaust_js_start");
@@ -737,6 +738,7 @@ source_ready:;
         case '0': source=pool_source_probe_start; break;
         case 'v': source=output_source_probe_start; break;
         case 'w': source=output_source_probe_hidden_start; break;
+        case 'z': source=output_source_probe_dual_start; break;
         case 'y': source=output_source_probe_long_start; break;
 #ifdef KASANE_P0_COPY_PROBE
         case 'x': source=output_source_probe_exhaust_start; break;

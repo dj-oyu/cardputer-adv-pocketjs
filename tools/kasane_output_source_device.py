@@ -12,15 +12,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x', 'y'), default='v',
-                        help='u=off; v=on; w=hide/show; x=pool exhaustion; y=full MP3/pause')
+    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x', 'y', 'z'), default='v',
+                        help='u=off; v=on; w=hide/show; x=pool exhaustion; y=full MP3/pause; z=dual text')
     parser.add_argument('--capture', action='store_true',
-                        help='capture live and ended LCD frames for v (w always captures)')
+                        help='capture live and ended LCD frames for v (w and z always capture)')
     parser.add_argument('--require-copy-watch', action='store_true',
                         help='require direct producer-pointer copy observations')
     args = parser.parse_args()
     if args.probe != 'v' and args.capture:
-        parser.error('--capture is only for probe v; w captures automatically')
+        parser.error('--capture is only for probe v; w and z capture automatically')
     if args.out.exists() and any(args.out.iterdir()):
         parser.error('--out must be new or empty')
     args.out.mkdir(parents=True, exist_ok=True)
@@ -94,13 +94,13 @@ def main():
                 until('KSN_OUTPUT_SOURCE SHOWN', 30, seen_ok=True)
                 time.sleep(0.5)
                 shown = capture('shown')
-            elif args.capture:
+            elif args.capture or args.probe == 'z':
                 time.sleep(1)
                 live = capture('live')
             until('KSN_OUTPUT_SOURCE CLOSED', 300 if args.probe == 'y' else 65,
                   seen_ok=True)
             time.sleep(0.5)
-            ended = capture('ended') if args.capture else None
+            ended = capture('ended') if args.capture or args.probe == 'z' else None
             port.write(b'q')
             stop = until('KSN_OUTPUT_SOURCE: STOP', 12) if args.probe != 'u' else None
             until('APP_STOPPED', 12)
@@ -112,9 +112,12 @@ def main():
             if args.probe != 'u' and not match:
                 raise RuntimeError(f'unexpected source stop line: {stop}')
             changed = outside = hidden_text = shown_text = outside_text = None
+            left_changed = right_changed = dual_mismatch = None
             first, second = (hidden, shown) if args.probe == 'w' else (live, ended)
             if first is not None:
                 changed = outside = 0
+                if args.probe == 'z':
+                    left_changed = right_changed = dual_mismatch = 0
                 if args.probe == 'w':
                     hidden_text = shown_text = outside_text = 0
                     background = hidden[:2]
@@ -127,10 +130,17 @@ def main():
                             shown_text += second[at:at + 2] != background
                         if first[at:at + 2] != second[at:at + 2]:
                             changed += 1
-                            if x >= 96 or y >= 24:
+                            if x >= (192 if args.probe == 'z' else 96) or y >= 24:
                                 outside += 1
                             if args.probe == 'w' and not in_text:
                                 outside_text += 1
+                            if args.probe == 'z':
+                                left_changed += 4 <= x < 92 and 4 <= y < 16
+                                right_changed += 100 <= x < 188 and 4 <= y < 16
+                        if args.probe == 'z' and 4 <= x < 92 and 4 <= y < 16:
+                            other = 2 * (y * 240 + x + 96)
+                            dual_mismatch += (first[at:at + 2] != first[other:other + 2] or
+                                              second[at:at + 2] != second[other:other + 2])
             errors = [line for line in lines if 'APP_FAILED' in line or
                       'KSN_OUTPUT_SOURCE ERROR' in line or 'panic' in line.lower() or
                       'KSN_OUTPUT_SOURCE STATE error' in line or
@@ -141,6 +151,10 @@ def main():
             watch_match = (re.search(r'source_text_core_calls=(\d+) bytes=(\d+) '
                                      r'length_mismatches=(\d+)', watched[-1])
                            if watched else None)
+            core_text_logs = [line for line in lines if
+                              'KSN_P0: C session=app kind=core_submit_text ' in line]
+            core_text_match = (re.search(r'calls=(\d+) bytes=(\d+)', core_text_logs[-1])
+                               if core_text_logs else None)
             pin_logs = [line for line in lines if 'KSN_OUTPUT_SOURCE: PIN_PROBE ' in line]
             pin_match = (re.search(r'pinned=(\d+) released=(\d+)', pin_logs[-1])
                          if pin_logs else None)
@@ -175,7 +189,7 @@ def main():
                                                'max': int(found.group(4)),
                                                'over12': int(found.group(5))}
             summary = {'binary_probe': args.probe,
-                       'capture': args.capture or args.probe == 'w',
+                       'capture': args.capture or args.probe in ('w', 'z'),
                        'published': int(match.group(1)) if match else None,
                        'valid_published': int(match.group(2)) if match and match.group(2) else None,
                        'skipped': int(match.group(3)) if match else None,
@@ -183,6 +197,8 @@ def main():
                        'source_text_core_calls': int(watch_match.group(1)) if watch_match else None,
                        'source_text_core_bytes': int(watch_match.group(2)) if watch_match else None,
                        'source_text_length_mismatches': int(watch_match.group(3)) if watch_match else None,
+                       'core_submit_text_calls': int(core_text_match.group(1)) if core_text_match else None,
+                       'core_submit_text_bytes': int(core_text_match.group(2)) if core_text_match else None,
                        'probe_pinned': int(pin_match.group(1)) if pin_match else None,
                        'probe_released': int(pin_match.group(2)) if pin_match else None,
                        'max_published_frames': int(numeric.group(1)) if numeric else None,
@@ -192,6 +208,9 @@ def main():
                        'hidden_text_pixels': hidden_text,
                        'shown_text_pixels': shown_text,
                        'outside_text_pixels': outside_text,
+                       'left_changed_pixels': left_changed,
+                       'right_changed_pixels': right_changed,
+                       'dual_text_mismatch_pixels': dual_mismatch,
                        'audio_log': p0, 'final_log': final,
                        'final_underruns': int(final_match.group(1)) if final_match else None,
                        'final_position_ms': int(position_match.group(1)) if position_match else None,
@@ -227,6 +246,16 @@ def main():
                       summary['source_text_core_calls'] is None or
                       summary['source_text_core_calls'] >= summary['valid_published'] or
                       hidden_text != 0 or shown_text == 0 or outside_text != 0)) or
+                    (args.probe == 'z' and
+                     (summary['valid_published'] is None or
+                      summary['source_text_core_calls'] is None or
+                      summary['source_text_core_calls'] < 2 or
+                      summary['source_text_core_calls'] % 2 != 0 or
+                      summary['source_text_core_calls'] > 2 * summary['valid_published'] or
+                      summary['core_submit_text_calls'] is None or
+                      summary['core_submit_text_calls'] < summary['source_text_core_calls'] or
+                      left_changed == 0 or right_changed == 0 or
+                      left_changed != right_changed or dual_mismatch != 0)) or
                     (args.probe == 'y' and
                      (not summary['seek_unsupported'] or not summary['ended_state'] or
                       summary['final_position_ms'] is None or

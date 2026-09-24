@@ -307,21 +307,29 @@ core bank cloneは依然O(使用済みbank bytes)。全処理をO(dirty node数)
 
 ## P3：native payloadの1-copyと寿命ゲート
 
+2026-09-24の[2描画先実機ゲート](p3-dual-source-device-20260924.md)：
+同じ音声source textを左右2 nodeへ表示して45秒再生。有効公開46件に対し
+元producerポインタからcoreへの直接copyは92回/736 B、各destination
+1回ずつ、合計2回ずつ。左右の文字画素は完全一致、underrun/fault/IO ERROR 0。
+診断OFF製品image/DIRAMは不変、元ファームは全3区画digest一致で復元。
+複数destinationの実機gateは通過したが、値全体で合計1回ではなく、
+全経路1-copyはP4で別判定。seek可能形式、別曲・低heap条件は残る。
+
 2026-09-24の[全曲再生・pause/resume実機ゲート](p3-long-output-device-20260924.md)：
 同じSD MP3を自然終端の235,937 msまで再生し、45秒・140秒で各3秒pause。
 停止位置ずれ0、再開受理3.074/3.076 ms、位置進行再開70.088/99.805 ms。
 有効公開236件/直接core copy236回、pool skip・underrun・fault・IO ERROR 0。
 MP3 seekは現行APIで`seekable=false`、`NOT_AVAILABLE`拒否を確認しただけで、
 時間seek実装の証拠ではない。残る実機P3ゲートはseek可能形式、
-複数destination、別曲・低heap条件。全経路1-copyはP4で別判定。
+別曲・低heap条件。全経路1-copyはP4で別判定。
 
 2026-09-24の[実機pool枯渇・回復試験](p3-pool-exhaust-device-20260924.md)：
 音声taskの初期2 snapshotを診断専用にpinし、3-slot poolの`BUSY`を
 実際に5回発生させた。8秒でpinを解放すると最新値の公開・core直接copyを
 再開し、同一バイナリの次セッションではpin/skipとも0。
 各45秒MP3のunderrun/fault 0。診断OFF製品image/DIRAMは不変。
-これは短時間音声共存の枯渇ゲート。長時間・pauseは後続試験で確認したが、
-seek可能形式、複数destination実機、厳格な全経路1-copyは未達。
+これは短時間音声共存の枯渇ゲート。長時間・pause・複数destinationは
+後続試験で確認したが、seek可能形式、厳格な全経路1-copyは未達。
 
 2026-09-24の[実機非表示→再表示試験](p3-hidden-source-device-20260924.md)で、
 音声sourceを約20秒非表示にしてもpublishを継続し、再表示時の全画面captureには
@@ -329,7 +337,7 @@ seek可能形式、複数destination実機、厳格な全経路1-copyは未達�
 文字画素111、領域外の差分0。45秒再生でunderrun/fault 0。
 診断OFF製品image/DIRAMは不変、元ファームは全3区画digest一致で復元。
 シリアルcaptureの長い転送時間は描画性能ゲートに使用しない。
-長時間・pauseは後続試験で確認したが、seek可能形式・複数destinationは未達。
+長時間・pause・複数destinationは後続試験で確認したが、seek可能形式は未達。
 
 2026-09-24の[音声producer実機copy境界](p3-source-copy-device-20260924.md)：
 固定pool内の8-byte時計textを購読し、45秒MP3再生の有効publish 46件に対して
@@ -340,7 +348,7 @@ pin解放→最新値のcore直接copyを統合してASan/UBSan・O2で確認し
 元ファームは全3区画digest一致で復元。これは実測workloadの
 **公開済みpayload→1 destination受理**についての証拠であり、
 bank clone・render copyを含む全経路1-copyではない。
-長時間・pauseは後続試験で確認したが、seek可能形式・複数destinationの
+長時間・pause・複数destinationは後続試験で確認したが、seek可能形式の
 **実機**gateは未達。
 
 2026-09-24のhost境界試験：`test_source_copy.c`で1つのnative UTF-8
