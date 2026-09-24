@@ -16,6 +16,8 @@ def main():
                         help='u=observer off; v=audio output source on')
     parser.add_argument('--capture', action='store_true',
                         help='capture live and ended LCD frames (extra serial load)')
+    parser.add_argument('--require-copy-watch', action='store_true',
+                        help='require direct producer-pointer copy observations')
     args = parser.parse_args()
     if args.probe == 'u' and args.capture:
         parser.error('LCD source capture requires --probe v')
@@ -91,7 +93,8 @@ def main():
             port.write(b'q')
             stop = until('KSN_OUTPUT_SOURCE: STOP', 12) if args.probe == 'v' else None
             until('APP_STOPPED', 12)
-            match = (re.search(r'published=(\d+) skipped=(\d+) audio_stopped=(\d+)', stop)
+            match = (re.search(r'published=(\d+) (?:valid_published=(\d+) )?'
+                               r'skipped=(\d+) audio_stopped=(\d+)', stop)
                      if stop else None)
             numeric = (re.search(r'max_frames=(\d+) max_starved=(\d+)', stop)
                        if stop else None)
@@ -112,6 +115,10 @@ def main():
                       'KSN_OUTPUT_SOURCE STATE error' in line or
                       'STREAM STARVED' in line or 'MP3 stop source_fault=1' in line]
             p0 = [line for line in lines if 'KSN_P0: A session=' in line]
+            watched = [line for line in lines if 'KSN_P0: W session=app ' in line]
+            watch_match = (re.search(r'source_text_core_calls=(\d+) bytes=(\d+) '
+                                     r'length_mismatches=(\d+)', watched[-1])
+                           if watched else None)
             final = [line for line in lines if 'KSN_OUTPUT_SOURCE FINAL' in line]
             final_match = re.search(r'underruns=(\d+)', final[-1]) if final else None
             decoders = [line for line in lines if 'MP3DEC packets=' in line]
@@ -127,8 +134,12 @@ def main():
                                                'over12': int(found.group(5))}
             summary = {'binary_probe': args.probe, 'capture': args.capture,
                        'published': int(match.group(1)) if match else None,
-                       'skipped': int(match.group(2)) if match else None,
-                       'audio_stopped': int(match.group(3)) if match else None,
+                       'valid_published': int(match.group(2)) if match and match.group(2) else None,
+                       'skipped': int(match.group(3)) if match else None,
+                       'audio_stopped': int(match.group(4)) if match else None,
+                       'source_text_core_calls': int(watch_match.group(1)) if watch_match else None,
+                       'source_text_core_bytes': int(watch_match.group(2)) if watch_match else None,
+                       'source_text_length_mismatches': int(watch_match.group(3)) if watch_match else None,
                        'max_published_frames': int(numeric.group(1)) if numeric else None,
                        'max_starved_blocks': int(numeric.group(2)) if numeric else None,
                        'changed_pixels': changed,
@@ -146,6 +157,10 @@ def main():
                      summary['max_starved_blocks'] != 0)) or
                     summary['final_underruns'] != 0 or summary['decoder_faults'] != 0 or errors or
                     'app_render' not in metrics or 'app_send' not in metrics or
+                    (args.require_copy_watch and
+                     (watch_match is None or summary['source_text_core_calls'] == 0 or
+                      summary['source_text_core_bytes'] != 8 * summary['source_text_core_calls'] or
+                      summary['source_text_length_mismatches'] != 0)) or
                     (changed is not None and (changed == 0 or outside != 0))):
                 raise RuntimeError(f'output-source gate: {summary}')
             print('OUTPUT_SOURCE PASS', summary, flush=True)

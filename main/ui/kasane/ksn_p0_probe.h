@@ -88,9 +88,23 @@ static inline uint32_t ksn_p0_bus_sd_epoch(void){return 0;}
 void ksn_p0_probe_reset(void);
 #ifdef KASANE_P0_COPY_PROBE
 void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes);
+/* Diagnostic pointer identity only: a producer may register its immutable
+ * published text buffers. Core submit reports when it copies directly from
+ * one of those addresses. This is a subset of CORE_SUBMIT_TEXT, not an extra
+ * copy category. Registration and core submit run on the owner task. */
+bool ksn_p0_probe_watch_source_text(const char *text,size_t bytes);
+void ksn_p0_probe_unwatch_source_text(const char *text);
+void ksn_p0_probe_core_source_text(const char *text,size_t bytes);
 #else
 static inline void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes) {
     (void)kind;(void)bytes;
+}
+static inline bool ksn_p0_probe_watch_source_text(const char *text,size_t bytes) {
+    (void)text;(void)bytes;return true;
+}
+static inline void ksn_p0_probe_unwatch_source_text(const char *text) {(void)text;}
+static inline void ksn_p0_probe_core_source_text(const char *text,size_t bytes) {
+    (void)text;(void)bytes;
 }
 #endif
 void ksn_p0_probe_sample(ksn_p0_sample_kind kind,uint32_t us);
@@ -100,6 +114,13 @@ void ksn_p0_probe_report(const char *session);
 static inline void ksn_p0_probe_reset(void) {}
 static inline void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes) {
     (void)kind;(void)bytes;
+}
+static inline bool ksn_p0_probe_watch_source_text(const char *text,size_t bytes) {
+    (void)text;(void)bytes;return true;
+}
+static inline void ksn_p0_probe_unwatch_source_text(const char *text) {(void)text;}
+static inline void ksn_p0_probe_core_source_text(const char *text,size_t bytes) {
+    (void)text;(void)bytes;
 }
 static inline void ksn_p0_probe_sample(ksn_p0_sample_kind kind,uint32_t us) {
     (void)kind;(void)us;

@@ -20,6 +20,10 @@
 6小計の和と`C kind=observed_total`は一致する。同じ元の文字が複数nodeへ
 提出されるとdestinationごとの転記を全部足す。従って小計だけから
 「1-copy達成」や「X bytesのheapを削減できる」とは判断しない。
+2026-09-24追加の`W source_text_core_calls`は、登録したproducer text bufferの
+ポインタがcore提出のコピー元と一致した回数・bytesを示す。
+`C kind=core_submit_text`の**内数**であり、合計へ再加算しない。
+[音声producer実機計測](p3-source-copy-device-20260924.md)で使用した。
 
 未網羅：QuickJS内部の文字列複製・GC、native producer内部の複写、
 すべてのconstructor/小さなscalarの代入、他の描画/API経路、コンパイラが

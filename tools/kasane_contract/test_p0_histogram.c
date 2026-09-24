@@ -56,6 +56,15 @@ int main(void){
     assert(bus_sd_reap_calls==1&&bus_missing_isr==1);
 #endif
 #ifndef P0_TIMING_ONLY
+    char source_text[8]={0};
+    assert(ksn_p0_probe_watch_source_text(source_text,8));
+    ksn_p0_probe_core_source_text(source_text,8);
+    ksn_p0_probe_core_source_text(source_text,7);
+    assert(source_text_core_calls==2&&source_text_core_bytes==15&&
+           source_text_length_mismatches==1);
+    ksn_p0_probe_unwatch_source_text(source_text);
+    ksn_p0_probe_core_source_text(source_text,8);
+    assert(source_text_core_calls==2);
     ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,12);
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);

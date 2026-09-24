@@ -19,6 +19,10 @@ static series samples[KSN_P0_SAMPLE_COUNT];
 #ifdef KASANE_P0_COPY_PROBE
 static uint64_t copy_bytes[KSN_P0_COPY_COUNT];
 static uint32_t copy_calls[KSN_P0_COPY_COUNT];
+typedef struct {const char *text;size_t bytes;} source_text_watch;
+static source_text_watch source_text_watches[4];
+static uint64_t source_text_core_bytes;
+static uint32_t source_text_core_calls,source_text_length_mismatches;
 #endif
 static uint64_t transfer_bytes,transfer_bands;
 static uint32_t transfer_frames;
@@ -156,6 +160,9 @@ void ksn_p0_probe_reset(void){
 #ifdef KASANE_P0_COPY_PROBE
     memset(copy_bytes,0,sizeof(copy_bytes));
     memset(copy_calls,0,sizeof(copy_calls));
+    memset(source_text_watches,0,sizeof(source_text_watches));
+    source_text_core_bytes=0;
+    source_text_core_calls=source_text_length_mismatches=0;
 #endif
     transfer_bytes=transfer_bands=0;transfer_frames=0;
 }
@@ -163,6 +170,34 @@ void ksn_p0_probe_reset(void){
 void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes){
     if((unsigned)kind>=KSN_P0_COPY_COUNT||!bytes)return;
     copy_bytes[kind]+=bytes;copy_calls[kind]++;
+}
+bool ksn_p0_probe_watch_source_text(const char *text,size_t bytes){
+    if(!text||!bytes)return false;
+    for(unsigned i=0;i<sizeof(source_text_watches)/sizeof(*source_text_watches);i++){
+        if(source_text_watches[i].text==text){
+            source_text_watches[i].bytes=bytes;return true;
+        }
+    }
+    for(unsigned i=0;i<sizeof(source_text_watches)/sizeof(*source_text_watches);i++){
+        if(!source_text_watches[i].text){
+            source_text_watches[i]=(source_text_watch){text,bytes};return true;
+        }
+    }
+    return false;
+}
+void ksn_p0_probe_unwatch_source_text(const char *text){
+    for(unsigned i=0;i<sizeof(source_text_watches)/sizeof(*source_text_watches);i++)
+        if(source_text_watches[i].text==text)source_text_watches[i]=(source_text_watch){0};
+}
+void ksn_p0_probe_core_source_text(const char *text,size_t bytes){
+    if(!text||!bytes)return;
+    for(unsigned i=0;i<sizeof(source_text_watches)/sizeof(*source_text_watches);i++){
+        if(source_text_watches[i].text!=text)continue;
+        source_text_core_calls++;
+        source_text_core_bytes+=bytes;
+        if(source_text_watches[i].bytes!=bytes)source_text_length_mismatches++;
+        return;
+    }
 }
 #endif
 void ksn_p0_probe_sample(ksn_p0_sample_kind kind,uint32_t us){
@@ -221,6 +256,10 @@ void ksn_p0_probe_report(const char *session){
             (unsigned long long)group_bytes[k]);
     ESP_LOGI("KSN_P0","C session=%s kind=observed_total calls=%lu bytes=%llu coverage=partial",
         label,(unsigned long)observed_calls,(unsigned long long)observed_bytes);
+    ESP_LOGI("KSN_P0","W session=%s source_text_core_calls=%lu bytes=%llu length_mismatches=%lu",
+        label,(unsigned long)source_text_core_calls,
+        (unsigned long long)source_text_core_bytes,
+        (unsigned long)source_text_length_mismatches);
 #endif
     if(transfer_frames)ESP_LOGI("KSN_P0","T session=%s frames=%lu lcd_bytes=%llu bands=%llu",
         label,(unsigned long)transfer_frames,(unsigned long long)transfer_bytes,

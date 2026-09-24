@@ -3,6 +3,7 @@
 #include "pocket_kasane.h"
 #include "sound.h"
 #include "ui/kasane/ksn_source_pool_adapter.h"
+#include "ui/kasane/ksn_p0_probe.h"
 #include "esp_log.h"
 #include <stdatomic.h>
 #include <stddef.h>
@@ -23,7 +24,7 @@ typedef struct {
     atomic_int pending_end_id;
     uint32_t published;
 #ifdef KASANE_P0_PROBE
-    uint32_t max_published_frames,max_starved_blocks;
+    uint32_t max_published_frames,max_starved_blocks,valid_published;
 #endif
     int32_t last_id;
     uint32_t last_second;
@@ -75,6 +76,7 @@ static ksn_result publish(output_service *s,int32_t id,uint32_t frames,
         s->published++;
 #ifdef KASANE_P0_PROBE
         if(valid){
+            s->valid_published++;
             if(frames>s->max_published_frames)s->max_published_frames=frames;
             if(starved_blocks>s->max_starved_blocks)s->max_starved_blocks=starved_blocks;
         }
@@ -124,6 +126,11 @@ JSValue pocket_av_output_source(JSContext *ctx,JSValueConst self,
                 POCKET_OUTCOME_NOT_APPLIED);
         }
         service=s;
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_COPY_PROBE)
+        for(unsigned i=0;i<KSN_SOURCE_POOL_SLOTS;i++)
+            if(!ksn_p0_probe_watch_source_text(s->payloads[i].clock,8u))
+                ESP_LOGE("KSN_OUTPUT_SOURCE","source text watch registration failed slot=%u",i);
+#endif
         atomic_store_explicit(&live,s,memory_order_release);
         sound_stream_set_observer(observe);
     }
@@ -154,8 +161,9 @@ void pocket_av_output_source_reset(bool audio_stopped){
     if(!s)return;
 #ifdef KASANE_P0_PROBE
     if(audio_stopped)ESP_LOGI("KSN_OUTPUT_SOURCE",
-                             "STOP published=%lu skipped=%lu audio_stopped=1 max_frames=%lu max_starved=%lu",
+                             "STOP published=%lu valid_published=%lu skipped=%lu audio_stopped=1 max_frames=%lu max_starved=%lu",
                              (unsigned long)s->published,
+                             (unsigned long)s->valid_published,
                              (unsigned long)ksn_source_pool_skipped(&s->pool),
                              (unsigned long)s->max_published_frames,
                              (unsigned long)s->max_starved_blocks);
@@ -171,5 +179,9 @@ void pocket_av_output_source_reset(bool audio_stopped){
         return;
     }
     atomic_store_explicit(&live,NULL,memory_order_release);
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_COPY_PROBE)
+    for(unsigned i=0;i<KSN_SOURCE_POOL_SLOTS;i++)
+        ksn_p0_probe_unwatch_source_text(s->payloads[i].clock);
+#endif
     free(s);
 }

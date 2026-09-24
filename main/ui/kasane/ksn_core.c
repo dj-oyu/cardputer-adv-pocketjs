@@ -271,7 +271,8 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
         unsigned offset=text_base(layer)+used;
         memset(bank->text+offset,0,capacity);
         if(draw->data.text.bytes){memcpy(bank->text+offset,draw->data.text.utf8,draw->data.text.bytes);
-            ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_TEXT,draw->data.text.bytes);}
+            ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_TEXT,draw->data.text.bytes);
+            ksn_p0_probe_core_source_text(draw->data.text.utf8,draw->data.text.bytes);}
         text_payload payload={(uint16_t)offset,(uint8_t)draw->data.text.bytes,(uint8_t)capacity,
                               (uint8_t)draw->data.text.font,(uint8_t)utf8_count(draw->data.text.utf8,draw->data.text.bytes),
                               0,draw->data.text.color};
@@ -348,7 +349,8 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
         ksn_bank *bank=&core->banks[core->building_bank];
         memset(bank->text+p.offset,0,p.capacity);
         if(change->value.text.bytes){memcpy(bank->text+p.offset,change->value.text.utf8,change->value.text.bytes);
-            ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_TEXT,change->value.text.bytes);}
+            ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_TEXT,change->value.text.bytes);
+            ksn_p0_probe_core_source_text(change->value.text.utf8,change->value.text.bytes);}
         p.length=(uint8_t)change->value.text.bytes;p.reveal=(uint8_t)count;payload_write(command,&p,sizeof(p));return KSN_OK;
     }
     case KSN_SET_REVEAL:{

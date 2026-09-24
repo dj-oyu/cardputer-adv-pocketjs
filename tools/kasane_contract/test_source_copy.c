@@ -11,8 +11,23 @@
 KSN_TEST_CORE(core,static);
 static unsigned copy_calls[KSN_P0_COPY_COUNT];
 static size_t copy_bytes[KSN_P0_COPY_COUNT];
+static const char *watched_source_text;
+static size_t watched_source_bytes;
+static unsigned direct_source_calls;
+static size_t direct_source_bytes;
 void ksn_p0_probe_copy(ksn_p0_copy_kind kind,size_t bytes){
     if(bytes&&kind<KSN_P0_COPY_COUNT){copy_calls[kind]++;copy_bytes[kind]+=bytes;}
+}
+bool ksn_p0_probe_watch_source_text(const char *text,size_t bytes){
+    watched_source_text=text;watched_source_bytes=bytes;return text&&bytes;
+}
+void ksn_p0_probe_unwatch_source_text(const char *text){
+    if(text==watched_source_text)watched_source_text=NULL;
+}
+void ksn_p0_probe_core_source_text(const char *text,size_t bytes){
+    if(text==watched_source_text&&bytes==watched_source_bytes){
+        direct_source_calls++;direct_source_bytes+=bytes;
+    }
 }
 typedef struct {
     char text[16];
@@ -75,6 +90,7 @@ int main(void){
     base[0].data.text=(ksn_schema_text){"base",4};
     producer p={.revision=1};memcpy(p.text,"alpha",6);
     p.field.data.text=(ksn_schema_text){p.text,5};
+    CHECK(ksn_p0_probe_watch_source_text(p.text,5));
     static const ksn_slot_type types[]={KSN_SLOT_TEXT};
     ksn_source_provider provider={.size=sizeof(provider),.version=KSN_SOURCE_ABI_VERSION,
         .field_count=1,.field_types=types,.context=&p,
@@ -96,6 +112,7 @@ int main(void){
     CHECK(effective[0].data.text.utf8==p.text&&lease.dirty_slots==1);
     CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,1,1,&blocked)==KSN_OK&&blocked);
     CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==2&&copy_bytes[KSN_P0_CORE_SUBMIT_TEXT]==10);
+    CHECK(direct_source_calls==2&&direct_source_bytes==10);
     CHECK(copy_calls[KSN_P0_ADAPTER_TEMP]==0&&copy_calls[KSN_P0_ADAPTER_OWNED]==0);
     CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
     CHECK(p.releases==1);memcpy(p.text,"xxxxx",6);
@@ -109,6 +126,7 @@ int main(void){
     CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,2,1,&blocked)==KSN_OK&&blocked);
     CHECK(session.pending_delta==KSN_SCHEMA_PATCHED);
     CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==4&&copy_bytes[KSN_P0_CORE_SUBMIT_TEXT]==20);
+    CHECK(direct_source_calls==4&&direct_source_bytes==20);
     CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
     CHECK(p.releases==2);memcpy(p.text,"xxxxx",6);
     CHECK(!read_text(session.ticket,"bravo"));
@@ -124,16 +142,19 @@ int main(void){
     CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,3,1,&blocked)==KSN_OK&&blocked);
     CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
     CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==6);
+    CHECK(direct_source_calls==6&&direct_source_bytes==30);
     CHECK(ksn_view_cancel(view,session.ticket)==KSN_OK);
     CHECK(ksn_source_acquire(&registry,&sub,&schema,base,4,effective,&lease)==KSN_OK);
     CHECK(lease.dirty_slots==0); /* Session must restore the discarded dirty bit. */
     CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,3,0,&blocked)==KSN_OK&&blocked);
     CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==8&&copy_bytes[KSN_P0_CORE_SUBMIT_TEXT]==40);
+    CHECK(direct_source_calls==8&&direct_source_bytes==40);
     CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
     memcpy(p.text,"xxxxx",6);
     CHECK(!read_text(session.ticket,"gamma"));
     CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK&&output.gamma>0);
     CHECK(copy_calls[KSN_P0_ADAPTER_TEMP]==0&&copy_calls[KSN_P0_ADAPTER_OWNED]==0);
-    puts("source copy: PASS (one core copy/destination, release, PATCH, repair, discard/retry)");
+    ksn_p0_probe_unwatch_source_text(p.text);
+    puts("source copy: PASS (direct producer pointer, one core copy/destination, release, PATCH, repair, discard/retry)");
     return 0;
 }
