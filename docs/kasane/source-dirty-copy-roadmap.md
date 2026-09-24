@@ -269,6 +269,10 @@ heapは同一。dirty-node版のhello render p95は1 bucket低いが、send p99�
 1～2 bucket高く、music send p99も1 bucket高い。速度向上はまだ証明しない。
 実機画素capture、24 slot/hidden/page、LCD失敗repair、厳密な同一配置A/Bは
 残るのでP2出口全体は未達。元ファームは全3区画digest一致で復元した。
+続く[hello全画面capture](p2-dirty-node-device-20260924.md#hello画素一致)では、
+初期・1・2・9・10・99・100・180の8状態でSPI送信直前の全64,800 Bが
+直前版とdirty-node版で完全一致した。画素不一致0。ただし24 slot/hidden/page、
+LCD失敗repairや液晶GRAM読戻しは未検証で、P2出口全体は引き続き未達。
 
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。
 committed node→command範囲を固定容量で保持し、非dirty nodeのresolve/read/compareを

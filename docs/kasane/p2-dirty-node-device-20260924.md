@@ -51,8 +51,20 @@ draw p99は3回同一、send p99はdirty-node版で1 bucket高い。
 music overlayはこの比較ではdirty-node schemaの主な更新対象ではないので、
 共存回帰の短期確認でありdirty-nodeの速度改善を測るworkloadではない。
 
-試験前に元の3 MiBアプリ領域が保存済みbackup 3区画と全件digest一致することを
-確認した。試験後に3区画を復元し、再び全件digest一致を確認してCOM3を解放した。
-生ログは`.cache/kasane-p2-ab-20260924/`。画面pixelの実機capture、
+## hello画素一致
+
+`tools/kasane_p2_pixel_device.py`で両imageに同じhello入力180回を与え、
+初期値・1・2・9・10・99・100・180の8状態を`board_capture`で取得した。
+各状態とも全135行、240×135 RGB565（64,800 B）が揃い、
+直前版とdirty-node版のSHA-256は8組すべて一致した。
+不一致画素0。1→2だけでなく、桁数が変わる9→10・99→100を含む。
+これは`board_present`でSPI送信する直前の画素列の一致であり、
+液晶GRAMからの読み戻しや、全slot/page/失敗時repairの証拠ではない。
+取得したrawとhashは`.cache/kasane-p2-pixels-20260924/`。
+
+各実機試験前に元の3 MiBアプリ領域が保存済みbackup 3区画と全件digest一致する
+ことを確認した。試験後に3区画を復元し、再び全件digest一致を確認してCOM3を
+解放した。時間・音声の生ログは`.cache/kasane-p2-ab-20260924/`。
 24 slot/hidden/page・LCD失敗repairの実機試験、厳密な同一配置A/Bは残る。
-したがってP2の固定時間・音声共存ゲートは通過したが、P2出口全体は未達。
+したがってP2の固定時間・音声共存・hello画素ゲートは通過したが、
+P2出口全体は未達。
