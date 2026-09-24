@@ -42,8 +42,10 @@ QuickJS内部を含む「producer原データからLCD描画完了まで1回」�
 観測済みcopy合計は824回/16,763 Bだが、計数範囲はpartial。
 hidden→visibleの実機は後続の
 [非表示→再表示試験](p3-hidden-source-device-20260924.md)で確認した。
-pool枯渇の**実機**、長時間・seek/pause、複数destinationの実機ゲートは
-残る。P3全体と全経路1-copyは未達と判定する。
+pool枯渇の実機は後続の
+[強制pin試験](p3-pool-exhaust-device-20260924.md)で確認した。
+長時間・seek/pause、複数destinationの実機ゲートは残る。
+P3全体と全経路1-copyは未達と判定する。
 
 診断OFFの製品ビルドはapp 1,995,328 B、静的DIRAM 159,820 Bで前版と同値。
 診断ON版の時間分位点はprobe overheadを含むため速度ゲートに使わない。

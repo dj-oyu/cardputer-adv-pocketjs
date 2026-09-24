@@ -12,8 +12,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--probe', choices=('u', 'v', 'w'), default='v',
-                        help='u=observer off; v=source on; w=hide/show source text')
+    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x'), default='v',
+                        help='u=off; v=on; w=hide/show; x=force source-pool exhaustion')
     parser.add_argument('--capture', action='store_true',
                         help='capture live and ended LCD frames for v (w always captures)')
     parser.add_argument('--require-copy-watch', action='store_true',
@@ -135,6 +135,9 @@ def main():
             watch_match = (re.search(r'source_text_core_calls=(\d+) bytes=(\d+) '
                                      r'length_mismatches=(\d+)', watched[-1])
                            if watched else None)
+            pin_logs = [line for line in lines if 'KSN_OUTPUT_SOURCE: PIN_PROBE ' in line]
+            pin_match = (re.search(r'pinned=(\d+) released=(\d+)', pin_logs[-1])
+                         if pin_logs else None)
             final = [line for line in lines if 'KSN_OUTPUT_SOURCE FINAL' in line]
             final_match = re.search(r'underruns=(\d+)', final[-1]) if final else None
             decoders = [line for line in lines if 'MP3DEC packets=' in line]
@@ -157,6 +160,8 @@ def main():
                        'source_text_core_calls': int(watch_match.group(1)) if watch_match else None,
                        'source_text_core_bytes': int(watch_match.group(2)) if watch_match else None,
                        'source_text_length_mismatches': int(watch_match.group(3)) if watch_match else None,
+                       'probe_pinned': int(pin_match.group(1)) if pin_match else None,
+                       'probe_released': int(pin_match.group(2)) if pin_match else None,
                        'max_published_frames': int(numeric.group(1)) if numeric else None,
                        'max_starved_blocks': int(numeric.group(2)) if numeric else None,
                        'changed_pixels': changed,
@@ -174,7 +179,11 @@ def main():
                     (summary['published'] < 3 or summary['audio_stopped'] != 1 or
                      summary['max_published_frames'] is None or
                      summary['max_published_frames'] <= 65535 or
-                     summary['max_starved_blocks'] != 0)) or
+                     summary['max_starved_blocks'] != 0 or
+                     (args.probe == 'x' and
+                      (summary['skipped'] == 0 or summary['probe_pinned'] != 2 or
+                       summary['probe_released'] != 2)) or
+                     (args.probe != 'x' and summary['skipped'] != 0))) or
                     summary['final_underruns'] != 0 or summary['decoder_faults'] != 0 or errors or
                     'app_render' not in metrics or 'app_send' not in metrics or
                     (args.require_copy_watch and

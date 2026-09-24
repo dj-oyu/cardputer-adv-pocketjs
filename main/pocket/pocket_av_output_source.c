@@ -26,6 +26,11 @@ typedef struct {
 #ifdef KASANE_P0_PROBE
     uint32_t max_published_frames,max_starved_blocks,valid_published;
 #endif
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_COPY_PROBE)
+    ksn_source_read probe_pins[2];
+    uint32_t probe_pinned,probe_released;
+    bool probe_hold;
+#endif
     int32_t last_id;
     uint32_t last_second;
     bool last_valid;
@@ -91,15 +96,32 @@ static void observe(int32_t id,uint32_t frames,uint32_t starved_blocks,bool acti
     output_service *s=atomic_load_explicit(&live,memory_order_acquire);
     if(!s)return;
     uint32_t second=frames/SOUND_SAMPLE_RATE;
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_COPY_PROBE)
+    if(s->probe_hold&&second>=8u){
+        for(unsigned i=0;i<s->probe_pinned;i++)
+            if(ksn_source_pool_release(&s->probe_pins[i])==KSN_OK)s->probe_released++;
+        s->probe_hold=false;
+    }
+#endif
     if(active&&s->last_valid&&s->last_id==id&&s->last_second==second)return;
     ksn_result r=publish(s,id,frames,starved_blocks,active);
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_COPY_PROBE)
+    if(active&&r==KSN_OK&&s->probe_hold&&s->probe_pinned<2u&&
+       ksn_source_pool_acquire(&s->pool,&s->probe_pins[s->probe_pinned])==KSN_OK)
+        s->probe_pinned++;
+#endif
     if(!active&&r!=KSN_OK)
         atomic_store_explicit(&s->pending_end_id,id,memory_order_release);
 }
 
 JSValue pocket_av_output_source(JSContext *ctx,JSValueConst self,
                                 int argc,JSValueConst *argv){
-    (void)self;(void)argc;(void)argv;
+    (void)self;
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_COPY_PROBE)
+    bool probe_hold=argc>0&&JS_IsBool(argv[0])&&JS_ToBool(ctx,argv[0]);
+#else
+    (void)argc;(void)argv;
+#endif
     if(!service){
         static const ksn_slot_type types[]={KSN_SLOT_TEXT,KSN_SLOT_U32,
                                             KSN_SLOT_U32,KSN_SLOT_U32};
@@ -108,6 +130,9 @@ JSValue pocket_av_output_source(JSContext *ctx,JSValueConst self,
             "audio.outputSource","source allocation failed",true,
             POCKET_OUTCOME_NOT_APPLIED);
         atomic_init(&s->pending_end_id,0);
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_COPY_PROBE)
+        s->probe_hold=probe_hold;
+#endif
         ksn_result r=ksn_source_pool_init(&s->pool,s->payloads,sizeof(s->payloads),
                                            sizeof(s->payloads[0]));
         if(r==KSN_OK)r=ksn_source_pool_adapter_open(&s->adapter,&s->pool,types,4,
@@ -168,6 +193,15 @@ void pocket_av_output_source_reset(bool audio_stopped){
                              (unsigned long)s->max_published_frames,
                              (unsigned long)s->max_starved_blocks);
     else ESP_LOGE("KSN_OUTPUT_SOURCE","STOP audio task still active");
+#endif
+#if defined(KASANE_P0_PROBE) && defined(KASANE_P0_COPY_PROBE)
+    if(audio_stopped){
+        for(unsigned i=0;i<s->probe_pinned;i++)
+            if(s->probe_pins[i].active&&
+               ksn_source_pool_release(&s->probe_pins[i])==KSN_OK)s->probe_released++;
+        ESP_LOGI("KSN_OUTPUT_SOURCE","PIN_PROBE pinned=%lu released=%lu",
+            (unsigned long)s->probe_pinned,(unsigned long)s->probe_released);
+    }
 #endif
     service=NULL;
     if(ksn_source_unregister(&s->registry,s->handle)!=KSN_OK){
