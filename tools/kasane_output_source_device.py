@@ -93,6 +93,8 @@ def main():
             until('APP_STOPPED', 12)
             match = (re.search(r'published=(\d+) skipped=(\d+) audio_stopped=(\d+)', stop)
                      if stop else None)
+            numeric = (re.search(r'max_frames=(\d+) max_starved=(\d+)', stop)
+                       if stop else None)
             if args.probe == 'v' and not match:
                 raise RuntimeError(f'unexpected source stop line: {stop}')
             changed = outside = None
@@ -127,6 +129,8 @@ def main():
                        'published': int(match.group(1)) if match else None,
                        'skipped': int(match.group(2)) if match else None,
                        'audio_stopped': int(match.group(3)) if match else None,
+                       'max_published_frames': int(numeric.group(1)) if numeric else None,
+                       'max_starved_blocks': int(numeric.group(2)) if numeric else None,
                        'changed_pixels': changed,
                        'outside_source_pixels': outside,
                        'audio_log': p0, 'final_log': final,
@@ -136,7 +140,10 @@ def main():
             (args.out / 'summary.json').write_text(json.dumps(summary, indent=2),
                                                    encoding='utf-8')
             if ((args.probe == 'v' and
-                    (summary['published'] < 3 or summary['audio_stopped'] != 1)) or
+                    (summary['published'] < 3 or summary['audio_stopped'] != 1 or
+                     summary['max_published_frames'] is None or
+                     summary['max_published_frames'] <= 65535 or
+                     summary['max_starved_blocks'] != 0)) or
                     summary['final_underruns'] != 0 or summary['decoder_faults'] != 0 or errors or
                     'app_render' not in metrics or 'app_send' not in metrics or
                     (changed is not None and (changed == 0 or outside != 0))):

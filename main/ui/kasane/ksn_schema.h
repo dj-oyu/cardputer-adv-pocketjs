@@ -9,15 +9,18 @@
 #define KSN_SCHEMA_MAX_NODES 24u
 #define KSN_SCHEMA_TEXT_MAX 47u
 #define KSN_SCHEMA_LITERAL UINT8_MAX
+/* Native C descriptor ABI: v2 widens slot numeric bounds and adds U32.
+ * Runtime JS descriptors still accept version:1 and compile into this ABI. */
+#define KSN_SCHEMA_ABI_VERSION 2u
 typedef enum {
     KSN_SLOT_TEXT, KSN_SLOT_RECT, KSN_SLOT_COLOR, KSN_SLOT_BOOL,
-    KSN_SLOT_U16, KSN_SLOT_RESOURCE
+    KSN_SLOT_U16, KSN_SLOT_RESOURCE, KSN_SLOT_U32
 } ksn_slot_type;
 typedef struct {
     const char *name;
     ksn_slot_type type;
     uint8_t capacity; /* TEXT only; zero for all other types. */
-    uint16_t initial_number,maximum; /* U16; maximum 0 means UINT16_MAX. */
+    uint32_t initial_number,maximum; /* U16/U32; maximum 0 means type maximum. */
 } ksn_schema_slot;
 typedef struct {
     const char *utf8;
@@ -30,6 +33,7 @@ typedef struct {
         ksn_rgba color;
         bool boolean;
         uint16_t number;
+        uint32_t wide_number;
         ksn_resource resource;
     } data;
 } ksn_schema_value;

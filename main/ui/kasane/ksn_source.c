@@ -36,7 +36,7 @@ ksn_result ksn_source_register(ksn_source_registry *registry,
        provider->field_count>KSN_SOURCE_MAX_FIELDS||!provider->field_types||
        !provider->acquire||!provider->release||!provider->allow)return KSN_INVALID;
     for(unsigned field=0;field<provider->field_count;field++)
-        if((unsigned)provider->field_types[field]>KSN_SLOT_RESOURCE)return KSN_INVALID;
+        if((unsigned)provider->field_types[field]>KSN_SLOT_U32)return KSN_INVALID;
     for(unsigned i=0;i<KSN_SOURCE_MAX_REGISTERED;i++){
         ksn_source_entry *e=&registry->entries[i];
         if(e->provider)continue;

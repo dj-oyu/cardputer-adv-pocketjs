@@ -264,7 +264,7 @@ static void play_stream(const request_t *req,int16_t *pcm) {
         return;
     }
     sound_stream_observer_fn observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
-    if(observe)observe(req->id,req->start_frame,true);
+    if(observe)observe(req->id,req->start_frame,0,true);
     uint32_t next_observation=SOUND_SAMPLE_RATE-req->start_frame%SOUND_SAMPLE_RATE;
     stream_read_t r={0};
     uint32_t frames=req->frames, at=0, starved=0;
@@ -324,7 +324,8 @@ static void play_stream(const request_t *req,int16_t *pcm) {
         if(!emit(pcm)) { completed=false; break; }
         if(at>=next_observation){
             observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
-            if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),true);
+            if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),
+                               atomic_load_explicit(&stream_starved,memory_order_relaxed),true);
             next_observation=next_observation<=UINT32_MAX-SOUND_SAMPLE_RATE?
                 next_observation+SOUND_SAMPLE_RATE:UINT32_MAX;
         }
@@ -335,7 +336,8 @@ static void play_stream(const request_t *req,int16_t *pcm) {
     paused=req->id;
     atomic_compare_exchange_strong(&stream_pause_ack,&paused,0);
     observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
-    if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),false);
+    if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),
+                       atomic_load_explicit(&stream_starved,memory_order_relaxed),false);
     /* Stop waits on stream_active. Clear it only after the observer has
      * released its producer lease, so its service may then be detached. */
     atomic_store(&stream_active,0);

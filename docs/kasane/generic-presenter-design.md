@@ -6,6 +6,12 @@
 汎用化したことにならない。新しいアプリは Kasane の C ソースを変更せずに画面を
 定義できなければならない。
 
+2026-09-24追記：下の「未実装」は当初の段階記録である。汎用source/bindと
+dirty-nodeは後続ロードマップで実装を進めた。数値source用の`u32`は
+データslotとして追加し、`u16`座標・page・revealへ暗黙変換しない。
+JS descriptorは`version:1`を維持し、native C schema/source ABIは
+slot構造と型集合の変更に合わせてv2へ上げた。
+
 ## 実装段階
 
 汎用の不変 C descriptor、型付き slot、条件付き node、文字幅連動 plate、

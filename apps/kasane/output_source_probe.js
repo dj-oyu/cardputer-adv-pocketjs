@@ -2,11 +2,12 @@
 // a fixed source pool while a mounted view subscribes without JS slot writes.
 (function () {
   const view = pocket.kasane.mount({version: 1,
-    slots: {elapsed: {type: 'text', capacity: 8}},
+    slots: {elapsed: {type: 'text', capacity: 8},
+            frames: {type: 'u32'}, starved: {type: 'u32'}, streamId: {type: 'u32'}},
     nodes: [
       {type: 'rect', bounds: [0, 0, 96, 24], color: 0x060c1aff},
       {type: 'text', bounds: [4, 4, 92, 16], text: {slot: 'elapsed'}, color: 0xe2f0ffff}
-    ]}, {elapsed: '--------'});
+    ]}, {elapsed: '--------', frames: 0, starved: 0, streamId: 0});
   const source = pocket.audio.outputSource();
   let bound = false;
   let playerHandle = null;
@@ -23,7 +24,7 @@
       console.log('KSN_OUTPUT_SOURCE CLOSED');
     }
     if (bound) return;
-    try { view.bind(source, {elapsed: 0}); }
+    try { view.bind(source, {elapsed: 0, frames: 1, starved: 2, streamId: 3}); }
     catch (error) {
       if (error.code === 'BUSY') return;
       console.log('KSN_OUTPUT_SOURCE ERROR ' + error);

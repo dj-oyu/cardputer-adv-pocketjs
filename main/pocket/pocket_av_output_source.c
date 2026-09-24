@@ -9,7 +9,7 @@
 #include <stdlib.h>
 
 typedef struct {
-    ksn_schema_value fields[1];
+    ksn_schema_value fields[4];
     char clock[9];
     bool valid;
 } output_payload;
@@ -22,6 +22,9 @@ typedef struct {
     output_payload payloads[KSN_SOURCE_POOL_SLOTS];
     atomic_int pending_end_id;
     uint32_t published;
+#ifdef KASANE_P0_PROBE
+    uint32_t max_published_frames,max_starved_blocks;
+#endif
     int32_t last_id;
     uint32_t last_second;
     bool last_valid;
@@ -37,13 +40,14 @@ static ksn_result describe(const void *data,ksn_source_pool_view *out){
     const output_payload *payload=data;
     if(!payload||!out)return KSN_INVALID;
     *out=(ksn_source_pool_view){.fields=payload->fields,
-        .valid_fields=payload->valid?1u:0u,.changed_fields=1u};
+        .valid_fields=payload->valid?15u:0u,.changed_fields=15u};
     return KSN_OK;
 }
 static bool allow(void *policy,uint32_t consumer){
     (void)policy;return consumer!=0;
 }
-static ksn_result publish(output_service *s,int32_t id,uint32_t frames,bool valid){
+static ksn_result publish(output_service *s,int32_t id,uint32_t frames,
+                          uint32_t starved_blocks,bool valid){
     ksn_source_write write={0};
     ksn_result r=ksn_source_pool_begin(&s->pool,&write);
     if(r!=KSN_OK)return r;
@@ -61,23 +65,32 @@ static ksn_result publish(output_service *s,int32_t id,uint32_t frames,bool vali
         payload->clock[7]=(char)('0'+second%10u);
         payload->clock[8]=0;
         payload->fields[0].data.text=(ksn_schema_text){payload->clock,8};
+        payload->fields[1].data.wide_number=frames;
+        payload->fields[2].data.wide_number=starved_blocks;
+        payload->fields[3].data.wide_number=(uint32_t)id;
     }else payload->fields[0].data.text=(ksn_schema_text){NULL,0};
     payload->valid=valid;
     r=ksn_source_pool_publish(&write,NULL);
     if(r==KSN_OK){
         s->published++;
+#ifdef KASANE_P0_PROBE
+        if(valid){
+            if(frames>s->max_published_frames)s->max_published_frames=frames;
+            if(starved_blocks>s->max_starved_blocks)s->max_starved_blocks=starved_blocks;
+        }
+#endif
         s->last_id=id;
         s->last_second=frames/SOUND_SAMPLE_RATE;
         s->last_valid=valid;
     }else (void)ksn_source_pool_cancel(&write);
     return r;
 }
-static void observe(int32_t id,uint32_t frames,bool active){
+static void observe(int32_t id,uint32_t frames,uint32_t starved_blocks,bool active){
     output_service *s=atomic_load_explicit(&live,memory_order_acquire);
     if(!s)return;
     uint32_t second=frames/SOUND_SAMPLE_RATE;
     if(active&&s->last_valid&&s->last_id==id&&s->last_second==second)return;
-    ksn_result r=publish(s,id,frames,active);
+    ksn_result r=publish(s,id,frames,starved_blocks,active);
     if(!active&&r!=KSN_OK)
         atomic_store_explicit(&s->pending_end_id,id,memory_order_release);
 }
@@ -86,7 +99,8 @@ JSValue pocket_av_output_source(JSContext *ctx,JSValueConst self,
                                 int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;
     if(!service){
-        static const ksn_slot_type types[]={KSN_SLOT_TEXT};
+        static const ksn_slot_type types[]={KSN_SLOT_TEXT,KSN_SLOT_U32,
+                                            KSN_SLOT_U32,KSN_SLOT_U32};
         output_service *s=calloc(1,sizeof(*s));
         if(!s)return pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,
             "audio.outputSource","source allocation failed",true,
@@ -94,14 +108,14 @@ JSValue pocket_av_output_source(JSContext *ctx,JSValueConst self,
         atomic_init(&s->pending_end_id,0);
         ksn_result r=ksn_source_pool_init(&s->pool,s->payloads,sizeof(s->payloads),
                                            sizeof(s->payloads[0]));
-        if(r==KSN_OK)r=ksn_source_pool_adapter_open(&s->adapter,&s->pool,types,1,
+        if(r==KSN_OK)r=ksn_source_pool_adapter_open(&s->adapter,&s->pool,types,4,
             offsetof(output_payload,fields),describe,allow,NULL,&s->provider);
         if(r==KSN_OK)ksn_source_registry_init(&s->registry);
         if(r==KSN_OK)r=ksn_source_register(&s->registry,&s->provider,&s->handle);
         if(r==KSN_OK)r=ksn_source_pool_adapter_registered(&s->adapter,s->handle);
         /* A complete invalid snapshot lets views bind before play(). The
          * audio task is not observing yet, so there is exactly one writer. */
-        if(r==KSN_OK)r=publish(s,0,0,false);
+        if(r==KSN_OK)r=publish(s,0,0,0,false);
         if(r!=KSN_OK){
             if(s->handle.generation)(void)ksn_source_unregister(&s->registry,s->handle);
             free(s);
@@ -124,7 +138,7 @@ void pocket_av_output_source_service(int32_t current_stream_id){
     /* The output task may still be publishing this stream. Once the owner
      * has seen its completion, no producer writes this pool concurrently. */
     if(current_stream_id==pending)return;
-    if(current_stream_id==0&&publish(s,pending,0,false)==KSN_OK)
+    if(current_stream_id==0&&publish(s,pending,0,0,false)==KSN_OK)
         atomic_compare_exchange_strong_explicit(&s->pending_end_id,&pending,0,
             memory_order_acq_rel,memory_order_acquire);
     else if(current_stream_id!=0)
@@ -139,9 +153,12 @@ void pocket_av_output_source_reset(bool audio_stopped){
     output_service *s=service;
     if(!s)return;
 #ifdef KASANE_P0_PROBE
-    if(audio_stopped)ESP_LOGI("KSN_OUTPUT_SOURCE","STOP published=%lu skipped=%lu audio_stopped=1",
+    if(audio_stopped)ESP_LOGI("KSN_OUTPUT_SOURCE",
+                             "STOP published=%lu skipped=%lu audio_stopped=1 max_frames=%lu max_starved=%lu",
                              (unsigned long)s->published,
-                             (unsigned long)ksn_source_pool_skipped(&s->pool));
+                             (unsigned long)ksn_source_pool_skipped(&s->pool),
+                             (unsigned long)s->max_published_frames,
+                             (unsigned long)s->max_starved_blocks);
     else ESP_LOGE("KSN_OUTPUT_SOURCE","STOP audio task still active");
 #endif
     service=NULL;

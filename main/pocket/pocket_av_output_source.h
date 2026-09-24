@@ -4,8 +4,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Session-scoped capability. Field 0 is an eight-byte HH:MM:SS text value
- * while an output stream is active; no stream restores the consumer's base.
+/* Session-scoped capability. Fields: 0 = HH:MM:SS text, 1 = logical
+ * output frame position (U32), 2 = cumulative starved blocks (U32),
+ * 3 = stream id (U32). All fields are invalid outside an active stream,
+ * restoring their consumers' base values.
  * The source owns its pool and registry; Kasane only sees a typed provider. */
 JSValue pocket_av_output_source(JSContext *,JSValueConst,int,JSValueConst *);
 /* Called on the owner task every service turn; retries a skipped final

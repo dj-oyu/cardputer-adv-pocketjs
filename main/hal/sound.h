@@ -61,10 +61,12 @@ typedef void (*sound_done_fn)(void *ctx, bool completed);
  * task, at the start, at elapsed whole-second boundaries, and at termination.
  * It must never wait, allocate, touch JS, or access a stream ring. `frames` is
  * the caller's logical position (start_frame + frames actually consumed).
+ * `starved_blocks` is the output stream's cumulative silence-block count.
  * active=false invalidates a stream even when it ended by stop or I2S error.
  * Install/clear from the owner task; the callback must remain alive until the
  * stream has stopped. NULL leaves the ordinary stream path unobserved. */
-typedef void (*sound_stream_observer_fn)(int32_t id,uint32_t frames,bool active);
+typedef void (*sound_stream_observer_fn)(int32_t id,uint32_t frames,
+                                         uint32_t starved_blocks,bool active);
 void sound_stream_set_observer(sound_stream_observer_fn observer);
 
 // Queues one tone and returns its id, or one of the negative errors above. gain

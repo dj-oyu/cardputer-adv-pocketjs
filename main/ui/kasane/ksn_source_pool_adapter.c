@@ -53,7 +53,7 @@ ksn_result ksn_source_pool_adapter_open(ksn_source_pool_adapter *adapter,
        (size_t)field_count>(pool->stride-fields_offset)/sizeof(ksn_schema_value))
         return KSN_INVALID;
     for(unsigned i=0;i<field_count;i++)
-        if((unsigned)field_types[i]>KSN_SLOT_RESOURCE)return KSN_INVALID;
+        if((unsigned)field_types[i]>KSN_SLOT_U32)return KSN_INVALID;
     *adapter=(ksn_source_pool_adapter){.pool=pool,.field_types=field_types,
         .field_count=field_count,.fields_offset=fields_offset,
         .describe=describe,.allow=allow,.policy=policy};

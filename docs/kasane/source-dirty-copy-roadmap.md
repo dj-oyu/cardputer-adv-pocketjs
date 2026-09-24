@@ -232,6 +232,12 @@ ONは47/48 publish・skip 0。SD readは全回885回/1,812,480 Bで一致。
 ONのapp renderは実際の1 Hz描画48回、OFFは初期2回だけなのでp99を
 同workload回帰値とはみなさない。music overlayの固定P0ゲートと
 数値telemetry、長時間・seek等は未達で、P1出口の完了判定は変えない。
+2026-09-24：[U32数値fieldとnative ABI v2](p1-audio-source-u32-device-20260924.md)を
+追加した。音声出力taskの同一snapshotにtext時刻・論理frame・無音補填block・stream IDを
+載せ、実機45秒×2で最大公開frame 1,080,064、skip/underrun/fault 0、
+LCD source領域外の画素変化0を確認。診断OFF静的DIRAMは159,820 Bで増分0。
+これは1 Hz観測で、元案の約33 ms周期、同描画workloadのA/B、
+seek/pause・長時間とmusic固定gateは未達。P1出口全体は未完了。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

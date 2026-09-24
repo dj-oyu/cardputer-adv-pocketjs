@@ -2,11 +2,12 @@
 // audio.outputSource() or installing the audio-task observer.
 (function () {
   pocket.kasane.mount({version: 1,
-    slots: {elapsed: {type: 'text', capacity: 8}},
+    slots: {elapsed: {type: 'text', capacity: 8},
+            frames: {type: 'u32'}, starved: {type: 'u32'}, streamId: {type: 'u32'}},
     nodes: [
       {type: 'rect', bounds: [0, 0, 96, 24], color: 0x060c1aff},
       {type: 'text', bounds: [4, 4, 92, 16], text: {slot: 'elapsed'}, color: 0xe2f0ffff}
-    ]}, {elapsed: '--------'});
+    ]}, {elapsed: '--------', frames: 0, starved: 0, streamId: 0});
   let playerHandle = null;
   let stateSubscription = null;
   let playStartMs = 0;

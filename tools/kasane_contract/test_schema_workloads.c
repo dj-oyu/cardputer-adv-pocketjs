@@ -97,7 +97,7 @@ int main(void){
         .plate_color={.slot=LIT,.literal.color=0x102030ffu},
         .text={.slot=23},.font=KSN_CAPTION,
         .flags=KSN_SCHEMA_HAS_PAGE,.page={.slot=22},.page_equals=1};
-    ksn_schema schema={.version=1,.slot_count=24,.node_count=23,
+    ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=24,.node_count=23,
         .background=0x071425ffu,.slots=slots,.nodes=nodes};
     CHECK(ksn_schema_validate(&schema)==KSN_OK);
     CHECK(ksn_cache_bind(&fast_cache,&fast_cache_commands,&fast_cache_text)==KSN_OK);

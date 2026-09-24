@@ -28,12 +28,63 @@ static bool allow(void *context,uint32_t consumer){
     return ((fake_source *)context)->allowed&&consumer==7u;
 }
 
+static void u32_source_test(void){
+    static const ksn_slot_type types[]={KSN_SLOT_U32};
+    static const ksn_schema_slot slots[]={
+        {"frames",KSN_SLOT_U32,0,0,UINT32_MAX-1u}
+    };
+    const ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=1,
+        .background=0x000000ffu,.slots=slots};
+    ksn_schema_value base[KSN_SCHEMA_MAX_SLOTS]={0};
+    fake_source f={.allowed=true};
+    f.fields[0].data.wide_number=UINT32_MAX-1u;
+    f.snapshot=(ksn_source_snapshot){.size=sizeof(f.snapshot),
+        .version=KSN_SOURCE_ABI_VERSION,.field_count=1,.revision=1,
+        .valid_fields=1,.changed_fields=1,.fields=f.fields};
+    ksn_source_provider provider={.size=sizeof(provider),
+        .version=KSN_SOURCE_ABI_VERSION,.field_count=1,.field_types=types,
+        .context=&f,.acquire=acquire,.release=release,.allow=allow};
+    ksn_source_registry registry;
+    ksn_source_registry_init(&registry);
+    ksn_source_handle handle={0};
+    assert(ksn_schema_validate(&schema)==KSN_OK);
+    provider.version=1;
+    assert(ksn_source_register(&registry,&provider,&handle)==KSN_INVALID);
+    provider.version=KSN_SOURCE_ABI_VERSION;
+    assert(ksn_source_register(&registry,&provider,&handle)==KSN_OK);
+    f.snapshot.generation=handle.generation;
+    ksn_source_subscription sub={0};
+    const ksn_source_binding binding={0,0};
+    assert(ksn_source_subscribe(&registry,handle,7,&schema,&binding,1,&sub)==KSN_OK);
+    ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS]={0};
+    ksn_source_lease lease={0};
+    assert(ksn_source_acquire(&registry,&sub,&schema,base,0,effective,&lease)==KSN_OK);
+    assert(effective[0].data.wide_number==UINT32_MAX-1u);
+    assert(ksn_source_commit(&lease)==KSN_OK);
+    ksn_source_release(&lease);
+    f.snapshot.version=1;
+    assert(ksn_source_acquire(&registry,&sub,&schema,base,0,effective,&lease)==KSN_INVALID);
+    assert(sub.validated_revision==1);
+    f.snapshot.version=KSN_SOURCE_ABI_VERSION;
+    f.snapshot.revision=2;
+    f.fields[0].data.wide_number=UINT32_MAX;
+    assert(ksn_source_acquire(&registry,&sub,&schema,base,0,effective,&lease)==KSN_INVALID);
+    assert(sub.validated_revision==1&&effective[0].data.wide_number==0);
+    assert(ksn_source_unregister(&registry,handle)==KSN_OK);
+    assert(f.acquisitions==f.releases);
+    const ksn_schema_slot bad_u16={"bad",KSN_SLOT_U16,0,0,65536};
+    const ksn_schema bad={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=1,
+        .background=0x000000ffu,.slots=&bad_u16};
+    assert(ksn_schema_validate(&bad)==KSN_INVALID);
+}
+
 int main(void){
+    u32_source_test();
     static const ksn_slot_type types[]={KSN_SLOT_TEXT,KSN_SLOT_U16};
     static const ksn_schema_slot slots[]={
         {"label",KSN_SLOT_TEXT,12,0,0},{"count",KSN_SLOT_U16,0,0,99}
     };
-    const ksn_schema schema={.version=1,.slot_count=2,.background=0x000000ffu,
+    const ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=2,.background=0x000000ffu,
                               .slots=slots};
     ksn_schema_value base[KSN_SCHEMA_MAX_SLOTS]={0};
     base[0].data.text=(ksn_schema_text){"base",4};

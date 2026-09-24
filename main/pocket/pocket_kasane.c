@@ -394,7 +394,9 @@ static schema_state *schema_alloc(const pocket_app_view_asset *asset,uint32_t co
             s->values[i].data.color=definition->dynamic_background&&
                 definition->background_slot==i?definition->background:0x000000ffu;
         else if(slot->type==KSN_SLOT_U16)
-            s->values[i].data.number=slot->initial_number;
+            s->values[i].data.number=(uint16_t)slot->initial_number;
+        else if(slot->type==KSN_SLOT_U32)
+            s->values[i].data.wide_number=slot->initial_number;
     }
     if(ksn_schema_session_init(&s->session,definition)!=KSN_OK){free(s);return NULL;}
     schema_sources *native=schema_native(s);
@@ -1875,6 +1877,10 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
             double number;ok=number_in(ctx,value,0,
                            slot->maximum?slot->maximum:UINT16_MAX,&number);
             if(ok)candidate[i].data.number=(uint16_t)number;
+        }else if(slot->type==KSN_SLOT_U32){
+            uint32_t number;ok=parse_u32(ctx,value,&number)&&
+                (!slot->maximum||number<=slot->maximum);
+            if(ok)candidate[i].data.wide_number=number;
         }else if(slot->type==KSN_SLOT_RESOURCE){
             candidate[i].data.resource.value=opaque_value(value,image_class);
             ok=candidate[i].data.resource.value!=0;
@@ -2130,6 +2136,15 @@ static bool runtime_u16(JSContext *ctx,JSValueConst object,const char *key,
     if(ok)*out=(uint16_t)number;
     return ok;
 }
+static bool runtime_u32(JSContext *ctx,JSValueConst object,const char *key,
+                        uint32_t *out){
+    JSValue value=JS_GetPropertyStr(ctx,object,key);
+    if(JS_IsException(value))return false;
+    if(JS_IsUndefined(value)){JS_FreeValue(ctx,value);return true;}
+    bool ok=parse_u32(ctx,value,out);
+    JS_FreeValue(ctx,value);
+    return ok;
+}
 static bool runtime_binding(JSContext *ctx,JSValueConst object,const char *key,
                             ksn_slot_type type,const ksn_schema *schema,
                             char literal[KSN_SCHEMA_TEXT_MAX+1u],
@@ -2220,7 +2235,7 @@ static runtime_descriptor *runtime_compile(JSContext *ctx,JSValueConst definitio
             char *names=pool;pool+=(size_t)slot_count*RUNTIME_NAME_BYTES;
             char *literal_text=pool;
             r->asset.schema=&r->schema;
-            r->schema=(ksn_schema){.version=1,.slot_count=(uint8_t)slot_count,
+            r->schema=(ksn_schema){.version=KSN_SCHEMA_ABI_VERSION,.slot_count=(uint8_t)slot_count,
                 .node_count=(uint8_t)node_count,.background=0x000000ffu,
                 .slots=slot_defs,.nodes=node_defs};
             uint16_t version=0;
@@ -2249,9 +2264,9 @@ static runtime_descriptor *runtime_compile(JSContext *ctx,JSValueConst definitio
                 const char *label=bounded_cstring(ctx,type,16);
                 if(!label)valid=false;
                 else{
-                    static const char *const types[]={"text","rect","color","bool","u16","resource"};
-                    unsigned t=0;for(;t<6;t++)if(strcmp(label,types[t])==0)break;
-                    if(t==6)valid=false;else slot_defs[i].type=(ksn_slot_type)t;
+                    static const char *const types[]={"text","rect","color","bool","u16","resource","u32"};
+                    unsigned t=0;for(;t<7;t++)if(strcmp(label,types[t])==0)break;
+                    if(t==7)valid=false;else slot_defs[i].type=(ksn_slot_type)t;
                     JS_FreeCString(ctx,label);
                 }
                 if(valid&&slot_defs[i].type==KSN_SLOT_TEXT){
@@ -2259,8 +2274,14 @@ static runtime_descriptor *runtime_compile(JSContext *ctx,JSValueConst definitio
                     slot_defs[i].capacity=(uint8_t)cap;
                 }
                 if(valid&&slot_defs[i].type==KSN_SLOT_U16){
-                    valid=runtime_u16(ctx,spec,"initial",UINT16_MAX,&slot_defs[i].initial_number,false)&&
-                          runtime_u16(ctx,spec,"maximum",UINT16_MAX,&slot_defs[i].maximum,false);
+                    uint16_t initial=0,maximum=0;
+                    valid=runtime_u16(ctx,spec,"initial",UINT16_MAX,&initial,false)&&
+                          runtime_u16(ctx,spec,"maximum",UINT16_MAX,&maximum,false);
+                    if(valid){slot_defs[i].initial_number=initial;slot_defs[i].maximum=maximum;}
+                }
+                if(valid&&slot_defs[i].type==KSN_SLOT_U32){
+                    valid=runtime_u32(ctx,spec,"initial",&slot_defs[i].initial_number)&&
+                          runtime_u32(ctx,spec,"maximum",&slot_defs[i].maximum);
                 }
                 JS_FreeValue(ctx,type);JS_FreeValue(ctx,spec);
             }

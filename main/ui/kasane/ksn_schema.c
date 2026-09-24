@@ -34,7 +34,7 @@ static bool binding_valid(const ksn_schema *schema,const ksn_schema_binding *bin
 }
 
 ksn_result ksn_schema_validate(const ksn_schema *schema){
-    if(!schema||schema->version!=1||schema->slot_count>KSN_SCHEMA_MAX_SLOTS||
+    if(!schema||schema->version!=KSN_SCHEMA_ABI_VERSION||schema->slot_count>KSN_SCHEMA_MAX_SLOTS||
        schema->node_count>KSN_SCHEMA_MAX_NODES||
        (schema->slot_count&&!schema->slots)||(schema->node_count&&!schema->nodes))
         return KSN_INVALID;
@@ -43,10 +43,14 @@ ksn_result ksn_schema_validate(const ksn_schema *schema){
         schema->slots[schema->background_slot].type!=KSN_SLOT_COLOR))return KSN_INVALID;
     for(unsigned i=0;i<schema->slot_count;i++){
         const ksn_schema_slot *s=&schema->slots[i];
-        if(!s->name||!s->name[0]||s->type>KSN_SLOT_RESOURCE||
+        if(!s->name||!s->name[0]||s->type>KSN_SLOT_U32||
            (s->type==KSN_SLOT_TEXT?(!s->capacity||s->capacity>KSN_SCHEMA_TEXT_MAX):
                                       s->capacity!=0)||
-           (s->type==KSN_SLOT_U16?(s->maximum&&s->initial_number>s->maximum):
+           (s->type==KSN_SLOT_U16?
+                (s->initial_number>UINT16_MAX||s->maximum>UINT16_MAX||
+                 (s->maximum&&s->initial_number>s->maximum)):
+            s->type==KSN_SLOT_U32?
+                (s->maximum&&s->initial_number>s->maximum):
                                       (s->initial_number||s->maximum)))return KSN_INVALID;
         for(unsigned j=0;j<i;j++)if(strcmp(s->name,schema->slots[j].name)==0)return KSN_INVALID;
     }
@@ -101,6 +105,8 @@ static ksn_result values_validate_checked(const ksn_schema *schema,
         }
         if(slot->type==KSN_SLOT_U16&&slot->maximum&&
            values[i].data.number>slot->maximum)return KSN_INVALID;
+        if(slot->type==KSN_SLOT_U32&&slot->maximum&&
+           values[i].data.wide_number>slot->maximum)return KSN_INVALID;
     }
     ksn_rgba background=schema->dynamic_background?
         values[schema->background_slot].data.color:schema->background;

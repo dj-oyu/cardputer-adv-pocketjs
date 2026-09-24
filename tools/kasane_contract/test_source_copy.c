@@ -69,7 +69,7 @@ int main(void){
         {.kind=KSN_NODE_TEXT,.bounds={.slot=LIT,.literal.rect={4,20,90,32}},
          .color={.slot=LIT,.literal.color=0xffffffffu},.text={.slot=0},.font=KSN_CAPTION}
     };
-    const ksn_schema schema={.version=1,.slot_count=1,.node_count=2,
+    const ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=1,.node_count=2,
         .background=0x000000ffu,.slots=slots,.nodes=nodes};
     ksn_schema_value base[1]={0},effective[KSN_SCHEMA_MAX_SLOTS]={0};
     base[0].data.text=(ksn_schema_text){"base",4};

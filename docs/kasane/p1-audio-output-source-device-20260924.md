@@ -1,6 +1,8 @@
 # P1 別task音声source：45秒の実機接続試験
 
 2026-09-24、Cardputer ADV、COM3。これはP1全体または描画性能のA/B合格を宣言するものではない。
+後続の[U32拡張実機試験](p1-audio-source-u32-device-20260924.md)で
+数値field 1–3を追加した。本書の測定値は当初のtext-only版である。
 
 ## 接続した経路
 

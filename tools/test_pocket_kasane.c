@@ -366,6 +366,19 @@ static void app_presenter_tests(void){
     check(run("offsetView.set({extent:41})")&&pocket_kasane_has_submission(),
           "runtime numeric geometry patches through the generic offset operator");
     pocket_kasane_reset();
+    check(run("globalThis.wideView=kasane.mount({version:1,"
+              "slots:{frames:{type:'u32',initial:3999999999,maximum:4000000000}},"
+              "nodes:[{type:'rect',bounds:[0,0,8,8],color:0xffffffff}]});"),
+          "runtime descriptor accepts full-width numeric source slots");
+    check(run("wideView.set({frames:4000000000})"),
+          "u32 base value preserves numbers above the u16 range");
+    check(run("try{wideView.set({frames:4000000001});throw Error('accepted')}"
+              "catch(e){if(e.message==='accepted')throw e}"),
+          "u32 maximum rejects an excessive value without partial update");
+    check(run("try{wideView.set({frames:4294967296});throw Error('accepted')}"
+              "catch(e){if(e.message==='accepted')throw e}"),
+          "u32 slot rejects values outside the 32-bit range");
+    pocket_kasane_reset();
 }
 
 static void reactive_presenter_tests(void){

@@ -33,7 +33,7 @@ int main(void){
     static const ksn_schema_slot slots[]={
         {"label",KSN_SLOT_TEXT,15,0,0},{"count",KSN_SLOT_U16,0,0,99}
     };
-    const ksn_schema schema={.version=1,.slot_count=2,.slots=slots,
+    const ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=2,.slots=slots,
                              .background=0x000000ffu};
     ksn_schema_value base[KSN_SCHEMA_MAX_SLOTS]={0},effective[KSN_SCHEMA_MAX_SLOTS]={0};
     base[0].data.text=(ksn_schema_text){"base",4};base[1].data.number=9;

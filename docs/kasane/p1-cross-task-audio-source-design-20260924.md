@@ -4,10 +4,15 @@
 
 実装追記：最初の製品service接続は、描画に直接使える1 Hzの8 byte text
 `HH:MM:SS`を選び、[実機結果](p1-audio-output-source-device-20260924.md)に記録した。
-以下の33 ms数値telemetry、`U32` slotなどは未実装の元設計であり、
-この接続試験により達成したとは扱わない。短時間observer OFF/ON ABBAは
+その後、[U32拡張と実機確認](p1-audio-source-u32-device-20260924.md)で
+frame・starved block・stream IDを同じsnapshotへ追加した。
+約33 msの更新周期は未採用で、現行は約1 Hz。短時間observer OFF/ON ABBAは
 [別記録](p1-audio-source-abba-20260924.md)で実施したが、描画workloadは
 OFF/ONで異なるため性能出口には用いない。
+元案の「callback内で文字列生成しない」は、固定8文字の時刻を音声serviceの
+空きpool slotへ直接書く実装へ変更した。動的確保・中間コピー・JS処理はなく、
+1秒に1回の有界な整数演算だけである。毎回owner taskへ数値を渡してから
+別のtext snapshotを作る二段階より、コピー/同期と表示遅延を抑えるためである。
 
 ## 接続点
 

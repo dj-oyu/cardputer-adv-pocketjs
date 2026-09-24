@@ -22,7 +22,7 @@ static const ksn_schema_node hello_nodes[]={
     {.kind=KSN_NODE_TEXT,.bounds=RECT(16,117,236,127),.color=COLOR(0xa9bacaffu),
      .text=TEXT("ENTER +1    ESC HOME"),.font=KSN_CAPTION}
 };
-static const ksn_schema hello={.version=1,.slot_count=1,.node_count=5,
+static const ksn_schema hello={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=1,.node_count=5,
     .background=0x071425ffu,.slots=hello_slots,.nodes=hello_nodes};
 
 static const ksn_schema_slot imucal_slots[]={
@@ -46,7 +46,7 @@ static const ksn_schema_node imucal_nodes[]={
     {.kind=KSN_NODE_TEXT,.bounds=RECT(12,104,228,116),.color=COLOR(0x8fa6bcffu),
      .text={.slot=4},.font=KSN_BODY}
 };
-static const ksn_schema imucal={.version=1,.slot_count=5,.node_count=7,
+static const ksn_schema imucal={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=5,.node_count=7,
     .background=0x071425ffu,.slots=imucal_slots,.nodes=imucal_nodes};
 
 static const ksn_schema_slot bridge_slots[]={
@@ -68,7 +68,7 @@ static const ksn_schema_node bridge_nodes[]={
     {.kind=KSN_NODE_TEXT,.bounds=RECT(10,120,230,129),.color=COLOR(0xf5bb69ffu),
      .text=TEXT("ENTER SUBMIT   ESC HOME"),.font=KSN_CAPTION}
 };
-static const ksn_schema bridge={.version=1,.slot_count=4,.node_count=7,
+static const ksn_schema bridge={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=4,.node_count=7,
     .background=0x08131fffu,.slots=bridge_slots,.nodes=bridge_nodes};
 
 static const ksn_schema_slot companion_slots[]={
@@ -98,7 +98,7 @@ static const ksn_schema_node companion_nodes[]={
     {.kind=KSN_NODE_TEXT,.bounds=RECT(9,125,237,133),.color=COLOR(0x89a4bffu),
      .text={.slot=6},.font=KSN_CAPTION}
 };
-static const ksn_schema companion={.version=1,.slot_count=9,.node_count=9,
+static const ksn_schema companion={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=9,.node_count=9,
     .background=0x091323ffu,.slots=companion_slots,.nodes=companion_nodes};
 
 static const ksn_schema_slot pet_slots[]={
@@ -153,7 +153,7 @@ static const ksn_schema_node pet_nodes[]={
      .flags=KSN_SCHEMA_HAS_VISIBLE|KSN_SCHEMA_HAS_REVEAL,
      .visible={.slot=18},.reveal={.slot=20}}
 };
-static const ksn_schema pet={.version=1,.slot_count=21,.node_count=17,
+static const ksn_schema pet={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=21,.node_count=17,
     .background=0x0b1727ffu,.dynamic_background=true,.background_slot=19,
     .slots=pet_slots,.nodes=pet_nodes};
 
@@ -168,7 +168,7 @@ static const ksn_schema_node clock_nodes[]={
     {.kind=KSN_NODE_TEXT,.bounds=RECT(50,12,94,24),.color=COLOR(0x63d6ddffu),
      .text={.slot=1},.font=KSN_CAPTION}
 };
-static const ksn_schema clock_view={.version=1,.slot_count=2,.node_count=4,
+static const ksn_schema clock_view={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=2,.node_count=4,
     .background=0x000000ffu,.slots=clock_slots,.nodes=clock_nodes};
 static const ksn_source_binding clock_bindings[]={{0,0},{1,1}};
 static const pocket_app_view_source clock_sources[]={
@@ -198,7 +198,7 @@ static const ksn_schema_node dual_nodes[]={
     {.kind=KSN_NODE_TEXT,.bounds=RECT(64,0,95,16),
      .color=COLOR(0xffffffffu),.text={.slot=2},.font=KSN_CAPTION}
 };
-static const ksn_schema dual_view={.version=1,.slot_count=4,.node_count=3,
+static const ksn_schema dual_view={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=4,.node_count=3,
     .background=0x000000ffu,.slots=dual_slots,.nodes=dual_nodes};
 typedef struct {unsigned id;uint32_t generation;ksn_schema_value field;} dual_source;
 static struct {char text[8];uint64_t revision,expires_at_us;uint32_t changed;} dual_model[2]={

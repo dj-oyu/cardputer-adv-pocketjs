@@ -55,7 +55,7 @@ int main(void){
     static const ksn_schema_slot schema_slots[]={
         {"label",KSN_SLOT_TEXT,15,0,0},{"count",KSN_SLOT_U16,0,0,99}
     };
-    const ksn_schema schema={.version=1,.slot_count=2,.slots=schema_slots,
+    const ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=2,.slots=schema_slots,
                              .background=0x000000ffu};
     bool permitted=true;
     ksn_source_pool_adapter adapter={0};ksn_source_provider provider={0};

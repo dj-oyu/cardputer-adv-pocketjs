@@ -19,7 +19,7 @@ int main(void){
         .kind=KSN_NODE_RECT,.bounds={.slot=0},
         .color={.slot=KSN_SCHEMA_LITERAL,.literal.color=0x78c8ffffu}
     }};
-    const ksn_schema schema={.version=1,.slot_count=1,.node_count=1,
+    const ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=1,.node_count=1,
                              .background=0x000000ffu,.slots=slots,.nodes=nodes};
     ksn_schema_value values[]={{.data.rect={12,109,12,111}}};
     ksn_schema_session session;

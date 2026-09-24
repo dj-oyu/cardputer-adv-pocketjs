@@ -30,7 +30,7 @@ int main(void){
          .text=BTEXT("PAGE ONE",8),
          .page={.slot=3},.page_equals=1,.flags=KSN_SCHEMA_HAS_PAGE}
     };
-    const ksn_schema schema={.version=1,.slot_count=4,.node_count=3,
+    const ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=4,.node_count=3,
                              .background=0x071425ffu,.slots=slots,.nodes=nodes};
     ksn_schema_value values[]={
         {.data.text={"ANY APP",7}},
@@ -39,6 +39,8 @@ int main(void){
         {.data.number=0}
     };
     CHECK(ksn_schema_validate(&schema)==KSN_OK);
+    ksn_schema old_abi=schema;old_abi.version=1;
+    CHECK(ksn_schema_validate(&old_abi)==KSN_INVALID);
     ksn_schema_dependencies dependencies;
     CHECK(ksn_schema_dependencies_build(&schema,&dependencies)==KSN_OK);
     CHECK(dependencies.nodes[0]==1u&&dependencies.nodes[1]==2u&&
