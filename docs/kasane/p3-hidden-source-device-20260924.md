@@ -27,7 +27,10 @@ JSが`elapsed`を`set`することなく、開始8秒でtext nodeだけを非表
 
 全画面captureをシリアルへ転送した試行なので、`app_send`のp99
 960,666 µsは診断I/O負荷を含み、製品の描画性能値に使わない。
-実機の固定pool**枯渇**、長時間・seek/pause、複数destinationは別ゲートとして残す。
+固定pool枯渇と長時間・pauseは後続の
+[枯渇試験](p3-pool-exhaust-device-20260924.md)・
+[全曲再生試験](p3-long-output-device-20260924.md)で確認した。
+seek可能形式と複数destinationは別ゲートとして残す。
 診断OFFの製品app image 1,995,328 B、静的DIRAM 159,820 Bは前版と同値。
 元3 MiB app領域をバックアップから復元し、3×1 MiB全区画のdigest一致を確認。
 COM3は閉じた。

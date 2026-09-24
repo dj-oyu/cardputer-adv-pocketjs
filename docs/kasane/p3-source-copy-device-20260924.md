@@ -44,7 +44,8 @@ hidden→visibleの実機は後続の
 [非表示→再表示試験](p3-hidden-source-device-20260924.md)で確認した。
 pool枯渇の実機は後続の
 [強制pin試験](p3-pool-exhaust-device-20260924.md)で確認した。
-長時間・seek/pause、複数destinationの実機ゲートは残る。
+長時間・pauseは後続の[全曲再生試験](p3-long-output-device-20260924.md)で確認した。
+seek可能形式・複数destinationの実機ゲートは残る。
 P3全体と全経路1-copyは未達と判定する。
 
 診断OFFの製品ビルドはapp 1,995,328 B、静的DIRAM 159,820 Bで前版と同値。

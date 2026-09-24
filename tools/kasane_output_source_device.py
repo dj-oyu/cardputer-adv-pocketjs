@@ -12,8 +12,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x'), default='v',
-                        help='u=off; v=on; w=hide/show; x=force source-pool exhaustion')
+    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x', 'y'), default='v',
+                        help='u=off; v=on; w=hide/show; x=pool exhaustion; y=full MP3/pause')
     parser.add_argument('--capture', action='store_true',
                         help='capture live and ended LCD frames for v (w always captures)')
     parser.add_argument('--require-copy-watch', action='store_true',
@@ -38,6 +38,10 @@ def main():
                     lines.append(line)
                     log.write(line + '\n')
                     log.flush()
+                    if args.probe == 'y' and any(marker in line for marker in
+                        ('KSN_OUTPUT_SOURCE TICK', 'KSN_OUTPUT_SOURCE PAUSED',
+                         'KSN_OUTPUT_SOURCE RESUME_', 'KSN_OUTPUT_SOURCE STATE ended')):
+                        print('PROGRESS', line, flush=True)
                 return line
 
             def until(marker, seconds, seen_ok=False):
@@ -93,7 +97,8 @@ def main():
             elif args.capture:
                 time.sleep(1)
                 live = capture('live')
-            until('KSN_OUTPUT_SOURCE CLOSED', 65, seen_ok=True)
+            until('KSN_OUTPUT_SOURCE CLOSED', 300 if args.probe == 'y' else 65,
+                  seen_ok=True)
             time.sleep(0.5)
             ended = capture('ended') if args.capture else None
             port.write(b'q')
@@ -129,7 +134,8 @@ def main():
             errors = [line for line in lines if 'APP_FAILED' in line or
                       'KSN_OUTPUT_SOURCE ERROR' in line or 'panic' in line.lower() or
                       'KSN_OUTPUT_SOURCE STATE error' in line or
-                      'STREAM STARVED' in line or 'MP3 stop source_fault=1' in line]
+                      'STREAM STARVED' in line or 'MP3 stop source_fault=1' in line or
+                      'IO ERROR' in line or 'source stopped reading' in line]
             p0 = [line for line in lines if 'KSN_P0: A session=' in line]
             watched = [line for line in lines if 'KSN_P0: W session=app ' in line]
             watch_match = (re.search(r'source_text_core_calls=(\d+) bytes=(\d+) '
@@ -140,8 +146,25 @@ def main():
                          if pin_logs else None)
             final = [line for line in lines if 'KSN_OUTPUT_SOURCE FINAL' in line]
             final_match = re.search(r'underruns=(\d+)', final[-1]) if final else None
+            position_match = re.search(r'positionMs=(\d+)', final[-1]) if final else None
             decoders = [line for line in lines if 'MP3DEC packets=' in line]
             decoder_match = re.search(r'faults=(\d+)', decoders[-1]) if decoders else None
+            def cycle_values(pattern, convert=int):
+                values = {}
+                for line in lines:
+                    found = re.search(pattern, line)
+                    if found:
+                        values[int(found.group(1))] = convert(found.group(2))
+                return values
+            paused_positions = cycle_values(r'KSN_OUTPUT_SOURCE PAUSED cycle=(\d+) positionMs=(\d+)')
+            resume_positions = cycle_values(r'KSN_OUTPUT_SOURCE RESUME_REQUEST cycle=(\d+) positionMs=(\d+)')
+            resume_accept = cycle_values(
+                r'KSN_OUTPUT_SOURCE RESUME_ACCEPT cycle=(\d+) latencyMs=(\d+(?:\.\d+)?)', float)
+            resume_progress = cycle_values(
+                r'KSN_OUTPUT_SOURCE RESUME_PROGRESS cycle=(\d+) latencyMs=(\d+(?:\.\d+)?)', float)
+            pause_drift = {cycle: resume_positions[cycle] - value
+                           for cycle, value in paused_positions.items()
+                           if cycle in resume_positions}
             metrics = {}
             for line in lines:
                 found = re.search(r'KSN_P0: S session=app metric=(\w+).*?p95=(\d+) '
@@ -171,7 +194,16 @@ def main():
                        'outside_text_pixels': outside_text,
                        'audio_log': p0, 'final_log': final,
                        'final_underruns': int(final_match.group(1)) if final_match else None,
+                       'final_position_ms': int(position_match.group(1)) if position_match else None,
                        'decoder_faults': int(decoder_match.group(1)) if decoder_match else None,
+                       'seek_unsupported': any('KSN_OUTPUT_SOURCE SEEK_UNSUPPORTED code=NOT_AVAILABLE'
+                                               in line for line in lines),
+                       'ended_state': any('KSN_OUTPUT_SOURCE STATE ended' in line for line in lines),
+                       'paused_positions': paused_positions,
+                       'resume_positions': resume_positions,
+                       'resume_accept_ms': resume_accept,
+                       'resume_progress_ms': resume_progress,
+                       'pause_drift_ms': pause_drift,
                        'metrics': metrics, 'errors': errors}
             (args.out / 'summary.json').write_text(json.dumps(summary, indent=2),
                                                    encoding='utf-8')
@@ -195,6 +227,18 @@ def main():
                       summary['source_text_core_calls'] is None or
                       summary['source_text_core_calls'] >= summary['valid_published'] or
                       hidden_text != 0 or shown_text == 0 or outside_text != 0)) or
+                    (args.probe == 'y' and
+                     (not summary['seek_unsupported'] or not summary['ended_state'] or
+                      summary['final_position_ms'] is None or
+                      summary['final_position_ms'] < 220000 or
+                      set(paused_positions) != {0, 1} or
+                      set(resume_positions) != {0, 1} or
+                      set(resume_accept) != {0, 1} or
+                      set(resume_progress) != {0, 1} or
+                      set(pause_drift) != {0, 1} or
+                      any(not 0 <= drift <= 100 for drift in pause_drift.values()) or
+                      any(ms > 1000 for ms in resume_accept.values()) or
+                      any(ms > 2000 for ms in resume_progress.values()))) or
                     (changed is not None and (changed == 0 or outside != 0))):
                 raise RuntimeError(f'output-source gate: {summary}')
             print('OUTPUT_SOURCE PASS', summary, flush=True)

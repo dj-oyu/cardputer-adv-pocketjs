@@ -29,5 +29,7 @@ coreに直接渡され、文字列長不一致0。続く`v`のskip 0・pin 0は
 
 診断OFFの製品app imageは1,995,328 B、静的DIRAM 159,820 Bで前版と同値。
 元3 MiB app領域をバックアップから復元し、3×1 MiB全区画のdigest一致を確認。
-COM3は閉じた。P3の長時間、seek/pause、複数destination実機ゲートと、
+COM3は閉じた。長時間・pauseは後続の
+[全曲再生試験](p3-long-output-device-20260924.md)で確認した。
+P3のseek可能形式・複数destination実機ゲートと、
 producer生成・bank clone・render scratchを含む全経路1-copyは未達。
