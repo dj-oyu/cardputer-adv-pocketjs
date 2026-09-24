@@ -307,6 +307,16 @@ core bank cloneは依然O(使用済みbank bytes)。全処理をO(dirty node数)
 
 ## P3：native payloadの1-copyと寿命ゲート
 
+2026-09-24の[別曲・低heap実機ゲート](p3-lowheap-alternate-device-20260924.md)：
+SDの未使用曲`03 うーあ.mp3`を、JSが16 KiBを保持したまま46秒再生。
+同一診断バイナリ2回で最小heap 32,480 B、underrun/fault/IO ERROR/
+pool skip 0、音声sourceからcoreへの直接text copyは各更新8 B、
+render text再copy 0。描画p99 1,151/1,023 µs、送信p99各7,423 µsで
+事前ゲート内。元ファームは3区画digest一致で復元し、診断OFF容量は不変。
+これでP3のseek可能形式・別曲・低heapの**個別診断条件**を確認した。
+music overlay全体の低heap・同条件A/B、producer生成やbank cloneを含む
+全経路1-copyは引き続き未達。
+
 2026-09-24の[seek可能WAV実機ゲート](p3-seekable-source-device-20260924.md)：
 `app:/`に診断専用の1,874 ms IMA-ADPCM WAVを生成し、再生中の1,120 ms
 seekが約20 msで受理、1,224 msへ進行して自然終了した。最終のキャプチャなし

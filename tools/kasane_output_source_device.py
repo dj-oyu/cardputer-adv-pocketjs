@@ -12,8 +12,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x', 'y', 'z', 'j'), default='v',
-                        help='u=off; v=on; w=hide/show; x=pool exhaustion; y=full MP3/pause; z=dual text; j=seekable WAV')
+    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x', 'y', 'z', 'j', 'b'), default='v',
+                        help='u=off; v=on; w=hide/show; x=pool exhaustion; y=full MP3/pause; z=dual text; j=seekable WAV; b=alternate MP3/low heap')
     parser.add_argument('--capture', action='store_true',
                         help='capture live and ended LCD frames for v (w and z always capture)')
     parser.add_argument('--require-copy-watch', action='store_true',
@@ -197,6 +197,7 @@ def main():
                            for cycle, value in paused_positions.items()
                            if cycle in resume_positions}
             metrics = {}
+            app_heap = None
             for line in lines:
                 found = re.search(r'KSN_P0: S session=app metric=(\w+).*?p95=(\d+) '
                                   r'p99=(\d+) max=(\d+) over12=(\d+)', line)
@@ -205,6 +206,16 @@ def main():
                                                'p99': int(found.group(3)),
                                                'max': int(found.group(4)),
                                                'over12': int(found.group(5))}
+                heap = re.search(r'KSN_P0: M session=app free=(\d+) min=(\d+) '
+                                 r'largest=(\d+) stack_free=(\d+)', line)
+                if heap:
+                    app_heap = {'free': int(heap.group(1)), 'min': int(heap.group(2)),
+                                'largest': int(heap.group(3)),
+                                'stack_free': int(heap.group(4))}
+            alternate_tracks = [line.split('KSN_OUTPUT_SOURCE TRACK ', 1)[1]
+                                for line in lines if 'KSN_OUTPUT_SOURCE TRACK ' in line]
+            pressure_logs = [line for line in lines if
+                             'KSN_OUTPUT_SOURCE LOW_HEAP bytes=' in line]
             summary = {'binary_probe': args.probe,
                        'capture': args.capture or args.probe in ('w', 'z'),
                        'published': int(match.group(1)) if match else None,
@@ -246,7 +257,11 @@ def main():
                        'resume_accept_ms': resume_accept,
                        'resume_progress_ms': resume_progress,
                        'pause_drift_ms': pause_drift,
-                       'metrics': metrics, 'errors': errors}
+                       'metrics': metrics, 'app_heap': app_heap,
+                       'alternate_track': alternate_tracks[-1] if alternate_tracks else None,
+                       'low_heap_bytes': 16384 if pressure_logs and
+                                         'bytes=16384' in pressure_logs[-1] else None,
+                       'errors': errors}
             (args.out / 'summary.json').write_text(json.dumps(summary, indent=2),
                                                    encoding='utf-8')
             if ((args.probe != 'u' and
@@ -299,6 +314,19 @@ def main():
                       summary['seek_progress_latency_ms'] > 1500 or
                       summary['final_position_ms'] is None or
                       not 1800 <= summary['final_position_ms'] <= 1900)) or
+                    (args.probe == 'b' and
+                     (summary['alternate_track'] is None or
+                      '/02 インザハウス.mp3' in summary['alternate_track'] or
+                      '/01 KAKATORO.mp3' in summary['alternate_track'] or
+                      summary['low_heap_bytes'] != 16384 or
+                      app_heap is None or not 20000 <= app_heap['min'] <= 45000 or
+                      app_heap['stack_free'] < 22500 or
+                      summary['final_position_ms'] is None or
+                      summary['final_position_ms'] < 45000 or
+                      metrics['app_render']['p99'] > 1407 or
+                      metrics['app_render']['over12'] != 0 or
+                      metrics['app_send']['p99'] > 9000 or
+                      metrics['app_send']['over12'] != 0)) or
                     (args.probe == 'y' and
                      (not summary['seek_unsupported'] or not summary['ended_state'] or
                       summary['final_position_ms'] is None or
