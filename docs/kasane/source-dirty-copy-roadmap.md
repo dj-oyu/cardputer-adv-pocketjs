@@ -434,6 +434,15 @@ AV snapshotとslotの対応だけを共通source契約へ移し、汎用Kasane�
 既存providerは比較経路として保持し、画素・入力・状態遷移・性能が一致してから
 不要部分だけ削除する。musicを無理に単一schemaへ収めることはv1の完成条件ではない。
 
+2026-09-24：[music native consumerの共通source移行](p5-music-source-device-20260924.md)。
+music providerのAV直接読取りを廃止し、6 fieldの汎用playbackSourceを
+`ksn_source_subscribe/acquire`で購読する。`playerId`で古い曲のbindingを
+分離し、status文言/help/bar/期限付きsystem statusはmusic moduleに残した。
+Cardputerの45秒×2試行ではP0固定時間・heap・音声閾値を全項目通過し、
+音声エラーとpool skipは0。元の3 MiBはdigest照合して復元した。
+ただしJSの`view.bind('playback')`表面、旧presenterの比較経路、
+同一曲の旧新画素比較、長時間/低heap/seek/repairを残すため、P5出口は未達。
+
 最終実機は同一バイナリ内A/Bが可能なら優先し、旧→新→旧→新でも再確認する。
 同一曲の長時間再生、pause/resume、seek、overlay/home/app切替、system status重畳、
 画面修復、低空きheapを含める。p95/p99/max、12 ms超過、LCD bytes/帯、

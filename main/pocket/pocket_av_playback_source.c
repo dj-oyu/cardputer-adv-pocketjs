@@ -8,7 +8,7 @@
 #include <stdlib.h>
 
 typedef struct {
-    ksn_schema_value fields[5];
+    ksn_schema_value fields[6];
     bool valid;
 } playback_payload;
 typedef struct {
@@ -28,14 +28,15 @@ typedef struct {
 
 static playback_service *service;
 static const ksn_slot_type field_types[]={
-    KSN_SLOT_U16,KSN_SLOT_U32,KSN_SLOT_U32,KSN_SLOT_U32,KSN_SLOT_BOOL
+    KSN_SLOT_U16,KSN_SLOT_U32,KSN_SLOT_U32,KSN_SLOT_U32,KSN_SLOT_BOOL,
+    KSN_SLOT_U32
 };
 
 static ksn_result describe(const void *data,ksn_source_pool_view *out){
     const playback_payload *payload=data;
     if(!payload||!out)return KSN_INVALID;
     *out=(ksn_source_pool_view){.fields=payload->fields,
-        .valid_fields=payload->valid?31u:0u,.changed_fields=31u};
+        .valid_fields=payload->valid?63u:0u,.changed_fields=63u};
     return KSN_OK;
 }
 static bool allow(void *policy,uint32_t consumer){
@@ -54,6 +55,7 @@ static ksn_result publish(playback_service *s,int32_t player_id,
         payload->fields[2].data.wide_number=snapshot->duration_ms;
         payload->fields[3].data.wide_number=snapshot->underruns;
         payload->fields[4].data.boolean=snapshot->state==POCKET_AV_UI_PLAYING;
+        payload->fields[5].data.wide_number=(uint32_t)player_id;
     }
     r=ksn_source_pool_publish(&write,NULL);
     if(r!=KSN_OK){(void)ksn_source_pool_cancel(&write);return r;}
@@ -71,18 +73,16 @@ static ksn_result publish(playback_service *s,int32_t player_id,
     return KSN_OK;
 }
 
-JSValue pocket_av_playback_source(JSContext *ctx,JSValueConst self,
-                                  int argc,JSValueConst *argv){
-    (void)self;(void)argc;(void)argv;
+ksn_result pocket_av_playback_source_open(ksn_source_registry **registry,
+                                           ksn_source_handle *handle){
+    if(!registry||!handle)return KSN_INVALID;
     if(!service){
         playback_service *s=calloc(1,sizeof(*s));
-        if(!s)return pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,
-            "audio.playbackSource","source allocation failed",true,
-            POCKET_OUTCOME_NOT_APPLIED);
+        if(!s)return KSN_OOM;
         ksn_result r=ksn_source_pool_init(&s->pool,s->payloads,sizeof(s->payloads),
                                            sizeof(s->payloads[0]));
         if(r==KSN_OK)r=ksn_source_pool_adapter_open(&s->adapter,&s->pool,
-            field_types,5,offsetof(playback_payload,fields),describe,allow,NULL,
+            field_types,6,offsetof(playback_payload,fields),describe,allow,NULL,
             &s->provider);
         if(r==KSN_OK)ksn_source_registry_init(&s->registry);
         if(r==KSN_OK)r=ksn_source_register(&s->registry,&s->provider,&s->handle);
@@ -92,13 +92,27 @@ JSValue pocket_av_playback_source(JSContext *ctx,JSValueConst self,
             if(s->handle.generation)
                 (void)ksn_source_unregister(&s->registry,s->handle);
             free(s);
-            return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,
-                "audio.playbackSource","source registration failed",false,
-                POCKET_OUTCOME_NOT_APPLIED);
+            return r;
         }
         service=s;
+        pocket_av_playback_source_service();
     }
-    return pocket_kasane_source_capability(ctx,&service->registry,service->handle);
+    *registry=&service->registry;
+    *handle=service->handle;
+    return KSN_OK;
+}
+
+JSValue pocket_av_playback_source(JSContext *ctx,JSValueConst self,
+                                  int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    ksn_source_registry *registry=NULL;
+    ksn_source_handle handle={0};
+    ksn_result r=pocket_av_playback_source_open(&registry,&handle);
+    if(r!=KSN_OK)return pocket_api_throw(ctx,r==KSN_OOM?POCKET_ERR_OUT_OF_MEMORY:
+        POCKET_ERR_INVALID_ARGUMENT,"audio.playbackSource",
+        r==KSN_OOM?"source allocation failed":"source registration failed",
+        r==KSN_OOM,POCKET_OUTCOME_NOT_APPLIED);
+    return pocket_kasane_source_capability(ctx,registry,handle);
 }
 
 void pocket_av_playback_source_service(void){
@@ -111,8 +125,15 @@ void pocket_av_playback_source_service(void){
         if(s->last_valid)(void)publish(s,0,NULL);
         return;
     }
+    /* Bound the title/progress projection's lag to roughly one LCD pixel
+     * without requiring the producer to know the music viewport. Unknown
+     * duration still needs a fresh status second, not a per-frame publish. */
+    uint32_t quantum=snapshot.duration_ms?snapshot.duration_ms/240u:1000u;
+    if(!quantum)quantum=1u;
+    if(quantum>1000u)quantum=1000u;
     if(s->last_valid&&s->last_player_id==id&&
        s->last.state==snapshot.state&&
+       s->last.position_ms/quantum==snapshot.position_ms/quantum&&
        s->last.position_ms/1000u==snapshot.position_ms/1000u&&
        s->last.duration_ms==snapshot.duration_ms&&
        s->last.underruns==snapshot.underruns)return;

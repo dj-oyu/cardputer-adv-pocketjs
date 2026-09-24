@@ -489,12 +489,13 @@ blockごとのリアルタイム通知ではない。
 source。field 0は状態（`u16`: ready=0、playing=1、paused=2、ended=3、
 error=4）、field 1は`positionMs`（`u32`）、field 2は`durationMs`（`u32`、
 不明なら0）、field 3は累積`underruns`（`u32`）、field 4は`playing`
-（`bool`）。`view.bind(pocket.audio.playbackSource(), {state:0,
-positionMs:1,durationMs:2,underruns:3,playing:4})`のように型の合うslotへ
+（`bool`）、field 5は現在の`playerId`（`u32`）。`view.bind(pocket.audio.playbackSource(), {state:0,
+positionMs:1,durationMs:2,underruns:3,playing:4,playerId:5})`のように型の合うslotへ
 束縛できる。playerがない間は全field invalidとなり、JSの最新base値に戻る。
 sourceは購読要求時だけ確保され、UI ownerが状態・再生秒・duration・underrun
 の変化時に完全snapshotを公開する。複数の短命playerにまたがる「現在の
-player」sourceであり、特定handleへの固定bindingではない。数値は概ね1 Hzの
+player」sourceであり、特定handleへの固定bindingではない。既知の曲長では
+進捗1画素相当（最大1秒）の位置変化でも公開する。数値は描画用の間欠的な
 観測値で、`player.status()`のリアルタイム精度を代替しない。
 
 sourceは `app:/` / `assets:/` のWAVファイルで、24kHz・1ch・16bit PCMまたはIMA ADPCM（WAVのブロック配置）。**再生はストリーミングで、長さの上限はこの面には無い。** openはヘッダだけを範囲読みで検査し、バッファも音も取らない。playは出力受付の完了、pauseは停止位置の保持完了を返し、曲の終わりはonStateで通知する。位置は消費したPCM framesから求める。endedからのplayとseekはNOT_AVAILABLE（再生し直すにはopenし直す）。close後はすべてCLOSED。1プレイヤー・1音声で、toneとは排他（tone中のopenはBUSY）。セッション終了時は自動close。

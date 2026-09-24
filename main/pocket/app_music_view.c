@@ -2,6 +2,7 @@
 #include "app_legacy_presenter.h"
 #include "pocket_api.h"
 #include "pocket_av.h"
+#include "pocket_av_playback_source.h"
 #include "ui/kasane/ksn_p0_probe.h"
 #include <math.h>
 #include <stdio.h>
@@ -21,6 +22,8 @@ typedef struct {
     uint64_t system_revision,manual_revision;
     uint32_t handle;
     int32_t playback_id;
+    ksn_source_registry *playback_registry;
+    ksn_source_subscription playback_subscription;
     uint8_t system_bytes,topology_count;
     bool have_key,have_refs,manual,reactive,help;
 } music_state;
@@ -120,6 +123,48 @@ static bool presenter_can_patch(const music_state *p,const ksn_presenter_plan *p
     return true;
 }
 
+/* The music-specific projection is a consumer of the same typed capability
+ * available to an arbitrary mount. No AV-owned pointer crosses the source
+ * lease, and a replaced player cannot satisfy an older binding. */
+static const ksn_schema_slot playback_slots[]={
+    {.name="state",.type=KSN_SLOT_U16},
+    {.name="positionMs",.type=KSN_SLOT_U32},
+    {.name="durationMs",.type=KSN_SLOT_U32},
+    {.name="underruns",.type=KSN_SLOT_U32},
+    {.name="playing",.type=KSN_SLOT_BOOL},
+    {.name="playerId",.type=KSN_SLOT_U32}
+};
+static const ksn_schema playback_schema={.version=KSN_SCHEMA_ABI_VERSION,
+    .slot_count=6,.background=0x000000ffu,.slots=playback_slots};
+static const ksn_source_binding playback_bindings[]={
+    {0,0},{1,1},{2,2},{3,3},{4,4},{5,5}
+};
+static ksn_result music_audio_read(music_state *p,pocket_av_ui_snapshot *audio,
+                                   bool *live,ksn_source_lease *lease){
+    *live=false;
+    if(!p->playback_registry||!p->playback_subscription.binding_count)return KSN_OK;
+    const ksn_schema_value base[6]={0};
+    ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS]={0};
+    ksn_result r=ksn_source_acquire(p->playback_registry,&p->playback_subscription,
+        &playback_schema,base,music_now_us(),effective,lease);
+    if(r!=KSN_OK)return r;
+    if((lease->valid_slots&63u)==63u&&
+       effective[5].data.wide_number==(uint32_t)p->playback_id){
+        if(effective[0].data.number>POCKET_AV_UI_ERROR){
+            ksn_source_release(lease);return KSN_INVALID;
+        }
+        *audio=(pocket_av_ui_snapshot){
+            .state=(pocket_av_ui_state)effective[0].data.number,
+            .position_ms=effective[1].data.wide_number,
+            .duration_ms=effective[2].data.wide_number,
+            .underruns=effective[3].data.wide_number
+        };
+        ksn_p0_probe_copy(KSN_P0_PRODUCER_MATERIALIZED,sizeof(*audio));
+        *live=true;
+    }
+    return KSN_OK;
+}
+
 /* Borrow source facts only within this owner turn. Compare the visible
  * projection before constructing a plan. The command bank owns submitted text;
  * pending work never points into a mutable source. */
@@ -133,13 +178,14 @@ static ksn_result music_refresh(void) {
     key[0]=((uint64_t)p->manual<<8)|((uint64_t)p->reactive<<9);
     key[1]=presenter_viewport_key();
     pocket_av_ui_snapshot audio={0};
+    ksn_source_lease source_lease={0};
     bool live=false,system_status=false;
     if(p->manual)key[2]=p->manual_revision;
     else{
         key[2]=p->help?1u:0u;
         if(!p->help){
-            live=pocket_av_ui_read(p->playback_id,&audio);
-            if(live)ksn_p0_probe_copy(KSN_P0_PRODUCER_MATERIALIZED,sizeof(audio));
+            ksn_result source_result=music_audio_read(p,&audio,&live,&source_lease);
+            if(source_result!=KSN_OK)return source_result;
             system_status=p->system_bytes&&music_now_us()<p->system_until_us;
             key[3]=p->title_revision;
             if(system_status){key[4]=1;key[5]=p->system_revision;}
@@ -160,7 +206,11 @@ static ksn_result music_refresh(void) {
             }
         }
     }
-    if(p->have_key&&memcmp(key,p->key,sizeof(key))==0)return KSN_OK;
+    if(p->have_key&&memcmp(key,p->key,sizeof(key))==0){
+        if(source_lease.active)(void)ksn_source_commit(&source_lease);
+        ksn_source_release(&source_lease);
+        return KSN_OK;
+    }
     ksn_presenter_values values=p->owned;
     ksn_p0_probe_copy(KSN_P0_MUSIC_MODEL_COPY,sizeof(values));
     if(p->reactive){
@@ -175,7 +225,9 @@ static ksn_result music_refresh(void) {
             values.playing=audio.state==POCKET_AV_UI_PLAYING;
             if(!values.bytes[1]){
                 static const char *const names[]={"READY","PLAYING","PAUSED","ENDED","ERROR"};
-                if((unsigned)audio.state>=sizeof(names)/sizeof(names[0]))return KSN_INVALID;
+                if((unsigned)audio.state>=sizeof(names)/sizeof(names[0])){
+                    ksn_source_release(&source_lease);return KSN_INVALID;
+                }
                 char line[KSN_PRESENTER_TEXT_MAX+1u];
                 int n=snprintf(line,sizeof(line),"%s  %us",names[audio.state],
                                (unsigned)(audio.position_ms/1000u));
@@ -185,7 +237,7 @@ static ksn_result music_refresh(void) {
                 ksn_p0_probe_copy(KSN_P0_MUSIC_MATERIALIZED,strlen(line)+1u);
                 ksn_result r=ksn_presenter_copy_text(values.text[1],&values.bytes[1],
                                                        line,strlen(line));
-                if(r!=KSN_OK)return r;
+                if(r!=KSN_OK){ksn_source_release(&source_lease);return r;}
             }
         }
         values.phase=(uint32_t)(music_now_us()/66667u);
@@ -194,14 +246,16 @@ static ksn_result music_refresh(void) {
     ksn_presenter_plan plan;
     ksn_result r=ksn_presenter_make(KSN_PRESENTER_MUSIC,&values,
         (uint16_t)(music_viewport().x1-music_viewport().x0),(uint16_t)(music_viewport().y1-music_viewport().y0),&plan);
-    if(r!=KSN_OK)return r;
-    if(music_busy())return KSN_BUSY;
+    if(r!=KSN_OK){ksn_source_release(&source_lease);return r;}
+    if(music_busy()){ksn_source_release(&source_lease);return KSN_BUSY;}
     bool patch=presenter_can_patch(p,&plan);
     ksn_tx ticket;
     ksn_ref candidate_refs[KSN_PRESENTER_ITEMS];
     if(patch)r=ksn_presenter_patch(music_view(),music_viewport(),&plan,p->refs,&ticket);
     else r=ksn_presenter_submit(music_view(),music_viewport(),(ksn_resource){0},&plan,candidate_refs,&ticket);
-    if(r!=KSN_OK)return r;
+    if(r!=KSN_OK){ksn_source_release(&source_lease);return r;}
+    if(source_lease.active)(void)ksn_source_commit(&source_lease);
+    ksn_source_release(&source_lease);
     if(!patch)memcpy(p->refs,candidate_refs,sizeof(candidate_refs));
     p->topology_count=plan.count;p->topology_background=plan.background;
     for(unsigned i=0;i<plan.count;i++)p->topology[i]=presenter_shape(&plan.items[i]);
@@ -410,6 +464,16 @@ static JSValue js_presenter_bind(JSContext *ctx,JSValueConst self,int argc,JSVal
     if(!id)return pocket_api_throw(ctx,POCKET_ERR_NOT_AVAILABLE,"kasane.view.bind",
                                   "no open player",false,NULL);
     p->playback_id=id;
+    ksn_source_registry *registry=NULL;
+    ksn_source_handle source_handle={0};
+    ksn_result source_result=pocket_av_playback_source_open(&registry,&source_handle);
+    if(source_result!=KSN_OK)return music_throw_result(ctx,source_result,"kasane.view.bind");
+    ksn_source_subscription subscription={0};
+    source_result=ksn_source_subscribe(registry,source_handle,p->handle,
+        &playback_schema,playback_bindings,6,&subscription);
+    if(source_result!=KSN_OK)return music_throw_result(ctx,source_result,"kasane.view.bind");
+    p->playback_registry=registry;
+    p->playback_subscription=subscription;
     p->reactive=true;
     ksn_result result=music_refresh();
     return result==KSN_OK||result==KSN_BUSY?JS_UNDEFINED:

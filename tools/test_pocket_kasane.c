@@ -4,6 +4,7 @@
 #include "pocket_clock.h"
 #include "app_view_assets.h"
 #include "pocket_av.h"
+#include "pocket_av_playback_source.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "text/ksn_font.h"
@@ -81,6 +82,13 @@ bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
     if(!out||!id||id!=test_player_id)return false;
     *out=test_player_ui;return true;
 }
+/* The device pumps AV before the presenter turn. Preserve that ordering in
+ * host tests rather than letting a music-specific presenter poll the player. */
+static ksn_result host_presenter_step(bool *blocked){
+    pocket_av_playback_source_service();
+    return pocket_kasane_presenter_step(blocked);
+}
+#define pocket_kasane_presenter_step host_presenter_step
 bool sys_device_clock_read(sys_clock_state *out){
     test_clock_reads++;
     if(!out||!test_clock_valid)return false;
@@ -497,7 +505,7 @@ static void reactive_presenter_tests(void){
     check(run("live.set({title:'HIDDEN TITLE'})")&&
           !pocket_kasane_has_submission(),
           "setting an unchanged app slot does not advance its visible revision");
-    pocket_kasane_reset();test_player_id=0;
+    pocket_kasane_reset();pocket_av_playback_source_reset();test_player_id=0;
 
     test_clock_valid=false;
     pocket_kasane_set_viewport(140,46,96,22);
