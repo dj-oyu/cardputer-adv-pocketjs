@@ -307,6 +307,16 @@ core bank cloneは依然O(使用済みbank bytes)。全処理をO(dirty node数)
 
 ## P3：native payloadの1-copyと寿命ゲート
 
+2026-09-24の[seek可能WAV実機ゲート](p3-seekable-source-device-20260924.md)：
+`app:/`に診断専用の1,874 ms IMA-ADPCM WAVを生成し、再生中の1,120 ms
+seekが約20 msで受理、1,224 msへ進行して自然終了した。最終のキャプチャなし
+試行はunderrun・pool skip・starvation・error 0、source text直接copyは
+2回/16 B、renderer text再copy 0。再生中の別試行ではseek後の`00:00:01`
+をLCDで確認したが、シリアル全画面captureが音声補充を塞ぎ104 underrunを
+生んだため、音声性能の判定には使用しない。診断用ファイルは削除し、元の
+3 MiB app領域をdigest照合で復元。seek可能形式の短時間実機gateは通過。
+別曲・低heap条件、および全経路1-copyは未達。
+
 2026-09-24の[2描画先実機ゲート](p3-dual-source-device-20260924.md)：
 同じ音声source textを左右2 nodeへ表示して45秒再生。有効公開46件に対し
 元producerポインタからcoreへの直接copyは92回/736 B、各destination

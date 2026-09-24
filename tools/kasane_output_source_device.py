@@ -12,8 +12,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x', 'y', 'z'), default='v',
-                        help='u=off; v=on; w=hide/show; x=pool exhaustion; y=full MP3/pause; z=dual text')
+    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x', 'y', 'z', 'j'), default='v',
+                        help='u=off; v=on; w=hide/show; x=pool exhaustion; y=full MP3/pause; z=dual text; j=seekable WAV')
     parser.add_argument('--capture', action='store_true',
                         help='capture live and ended LCD frames for v (w and z always capture)')
     parser.add_argument('--require-copy-watch', action='store_true',
@@ -84,9 +84,12 @@ def main():
             until('HOME_READY', 12)
             port.write(args.probe.encode('ascii'))
             until('KSN_OUTPUT_SOURCE BOUND', 15)
-            until('pocket.sd: PICK 2 folders', 15)
-            port.write(b'de')
-            until('pocket.sd: GRANTED music', 15)
+            if args.probe == 'j':
+                until('KSN_OUTPUT_SOURCE CREATED bytes=22576', 30)
+            else:
+                until('pocket.sd: PICK 2 folders', 15)
+                port.write(b'de')
+                until('pocket.sd: GRANTED music', 15)
             until('KSN_OUTPUT_SOURCE OPEN', 15)
             until('KSN_OUTPUT_SOURCE PLAY', 15)
             live = hidden = shown = None
@@ -169,6 +172,12 @@ def main():
             final = [line for line in lines if 'KSN_OUTPUT_SOURCE FINAL' in line]
             final_match = re.search(r'underruns=(\d+)', final[-1]) if final else None
             position_match = re.search(r'positionMs=(\d+)', final[-1]) if final else None
+            seek_accept_logs = [line for line in lines if 'KSN_OUTPUT_SOURCE SEEK_ACCEPT ' in line]
+            seek_accept_match = (re.search(r'positionMs=(\d+) latencyMs=(\d+(?:\.\d+)?)',
+                                           seek_accept_logs[-1]) if seek_accept_logs else None)
+            seek_progress_logs = [line for line in lines if 'KSN_OUTPUT_SOURCE SEEK_PROGRESS ' in line]
+            seek_progress_match = (re.search(r'positionMs=(\d+) latencyMs=(\d+(?:\.\d+)?)',
+                                             seek_progress_logs[-1]) if seek_progress_logs else None)
             decoders = [line for line in lines if 'MP3DEC packets=' in line]
             decoder_match = re.search(r'faults=(\d+)', decoders[-1]) if decoders else None
             def cycle_values(pattern, convert=int):
@@ -223,6 +232,11 @@ def main():
                        'audio_log': p0, 'final_log': final,
                        'final_underruns': int(final_match.group(1)) if final_match else None,
                        'final_position_ms': int(position_match.group(1)) if position_match else None,
+                       'seek_accept_position_ms': int(seek_accept_match.group(1)) if seek_accept_match else None,
+                       'seek_accept_latency_ms': float(seek_accept_match.group(2)) if seek_accept_match else None,
+                       'seek_progress_position_ms': int(seek_progress_match.group(1)) if seek_progress_match else None,
+                       'seek_progress_latency_ms': float(seek_progress_match.group(2)) if seek_progress_match else None,
+                       'seek_probe_removed': any('KSN_OUTPUT_SOURCE REMOVED' in line for line in lines),
                        'decoder_faults': int(decoder_match.group(1)) if decoder_match else None,
                        'seek_unsupported': any('KSN_OUTPUT_SOURCE SEEK_UNSUPPORTED code=NOT_AVAILABLE'
                                                in line for line in lines),
@@ -238,13 +252,15 @@ def main():
             if ((args.probe != 'u' and
                     (summary['published'] < 3 or summary['audio_stopped'] != 1 or
                      summary['max_published_frames'] is None or
-                     summary['max_published_frames'] <= 65535 or
+                     summary['max_published_frames'] <= (24000 if args.probe == 'j' else 65535) or
                      summary['max_starved_blocks'] != 0 or
                      (args.probe == 'x' and
                       (summary['skipped'] == 0 or summary['probe_pinned'] != 2 or
                        summary['probe_released'] != 2)) or
                      (args.probe != 'x' and summary['skipped'] != 0))) or
-                    summary['final_underruns'] != 0 or summary['decoder_faults'] != 0 or errors or
+                    summary['final_underruns'] != 0 or
+                    (summary['decoder_faults'] != 0 if args.probe != 'j' else
+                     summary['decoder_faults'] not in (None, 0)) or errors or
                     'app_render' not in metrics or 'app_send' not in metrics or
                     (args.require_copy_watch and
                      (watch_match is None or summary['source_text_core_calls'] == 0 or
@@ -269,6 +285,20 @@ def main():
                       summary['core_submit_text_calls'] < summary['source_text_core_calls'] or
                       left_changed == 0 or right_changed == 0 or
                       left_changed != right_changed or dual_mismatch != 0)) or
+                    (args.probe == 'j' and
+                     (not any('KSN_OUTPUT_SOURCE OPEN codec=wav/ima-adpcm ' in line and
+                              'seekable=true' in line for line in lines) or
+                      not summary['seek_probe_removed'] or not summary['ended_state'] or
+                      summary['seek_accept_position_ms'] is None or
+                      not 900 <= summary['seek_accept_position_ms'] <= 1300 or
+                      summary['seek_accept_latency_ms'] is None or
+                      summary['seek_accept_latency_ms'] > 1000 or
+                      summary['seek_progress_position_ms'] is None or
+                      not 1200 <= summary['seek_progress_position_ms'] <= 1900 or
+                      summary['seek_progress_latency_ms'] is None or
+                      summary['seek_progress_latency_ms'] > 1500 or
+                      summary['final_position_ms'] is None or
+                      not 1800 <= summary['final_position_ms'] <= 1900)) or
                     (args.probe == 'y' and
                      (not summary['seek_unsupported'] or not summary['ended_state'] or
                       summary['final_position_ms'] is None or
