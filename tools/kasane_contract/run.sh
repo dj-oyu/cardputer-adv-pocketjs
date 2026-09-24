@@ -84,7 +84,8 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
     main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c \
     main/ui/kasane/ksn_schema.c main/ui/kasane/ksn_schema_session.c \
-    main/ui/kasane/ksn_source.c tools/kasane_contract/test_source_copy.c \
+    main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c \
+    main/ui/kasane/ksn_source_pool_adapter.c tools/kasane_contract/test_source_copy.c \
     -o "$out/source-copy"
   "$out/source-copy"
   cc -std=c11 -Wall -Wextra -Werror $options -DKSN_SCHEMA_DIRTY_COUNT \

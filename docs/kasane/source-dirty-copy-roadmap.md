@@ -311,10 +311,12 @@ core bank cloneは依然O(使用済みbank bytes)。全処理をO(dirty node数)
 固定pool内の8-byte時計textを購読し、45秒MP3再生の有効publish 46件に対して
 producer元ポインタからcoreへの直接copy 46回/368 B、長さ不一致0を確認。
 同一診断バイナリの購読OFFでは直接copy 0。両試行ともunderrun/fault 0。
+hostでは非表示中のsource更新→最新値で再表示、3-slot pool枯渇→
+pin解放→最新値のcore直接copyを統合してASan/UBSan・O2で確認した。
 元ファームは全3区画digest一致で復元。これは実測workloadの
 **公開済みpayload→1 destination受理**についての証拠であり、
 bank clone・render copyを含む全経路1-copyではない。hidden→visible、
-pool枯渇、長時間・seek/pause、複数destinationの実機gateは未達。
+pool枯渇、長時間・seek/pause、複数destinationの**実機**gateは未達。
 
 2026-09-24のhost境界試験：`test_source_copy.c`で1つのnative UTF-8
 payloadを2つのtext nodeに渡し、schema/adapterのpayload転記0回、

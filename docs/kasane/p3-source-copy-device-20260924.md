@@ -26,13 +26,22 @@ ASan/UBSanと`-O2 -fstrict-aliasing`で通した。実機の1 node / 46更新で
 有効publish 46件と直接copy 46回が一致した。よって**この実測workloadの
 producer公開済みtext→各core destination受理**は1回/destination。
 
+続くhost統合ケースでは、2 nodeを非表示にしたままtext sourceを更新すると
+core text copyは増えず、再表示時には最新値だけが2 destinationへ1回ずつ
+直接コピーされ、lease解放後にも描画できた。実際の3-slot poolと汎用adapterを
+接続したケースでは、古い2世代をpinしたまま次のpublishを`BUSY`で
+boundedに拒否（skip 1）、古いsnapshotを保持し、pin解放後に公開した
+最新値をpool pointerからcoreへ直接コピーした。これらもASan/UBSanと
+`-O2 -fstrict-aliasing`でPASS。ただし後者のpool枯渇はhost試験であり、
+Cardputer実機での音声task同時実行中の枯渇ではない。
+
 これは音声task内の文字列生成、snapshot全体、core bank clone、render scratch、
 QuickJS内部を含む「producer原データからLCD描画完了まで1回」の証明ではない。
 実際、`v`では`core_clone_text`が47回/376 B、`core_render_text`が
 49回/392 B、`render_decode_text`も49回/392 B発生した。
 観測済みcopy合計は824回/16,763 Bだが、計数範囲はpartial。
-P3のhidden→visible、pool枯渇、長時間・seek/pause、複数destinationの
-実機ゲートは残る。P3全体と全経路1-copyは未達と判定する。
+P3のhidden→visibleとpool枯渇の**実機**、長時間・seek/pause、
+複数destinationの実機ゲートは残る。P3全体と全経路1-copyは未達と判定する。
 
 診断OFFの製品ビルドはapp 1,995,328 B、静的DIRAM 159,820 Bで前版と同値。
 診断ON版の時間分位点はprobe overheadを含むため速度ゲートに使わない。
