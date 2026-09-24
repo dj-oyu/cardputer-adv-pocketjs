@@ -3,6 +3,7 @@
 #include "app_session.h"
 #include "jsconsole.h"
 #include "pocket_clock.h"
+#include "pocket_pool_probe.h"
 #include "utf8.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -864,6 +865,9 @@ static esp_err_t build_time(JSContext *ctx, JSValueConst ns, void *user) {
     define(ctx,ns,"now",JS_NewCFunction(ctx,js_time_now,"now",0));
     define(ctx,ns,"wall",JS_NewCFunction(ctx,pocket_clock_wall,"wall",0));
     define(ctx,ns,"wallSource",JS_NewCFunction(ctx,pocket_clock_wall_source,"wallSource",0));
+#ifdef KASANE_P0_PROBE
+    define(ctx,ns,"poolProbeSource",JS_NewCFunction(ctx,pocket_pool_probe_source,"poolProbeSource",0));
+#endif
     define(ctx,ns,"sleep",JS_NewCFunction(ctx,js_sleep,"sleep",2));
     return ESP_OK;
 }

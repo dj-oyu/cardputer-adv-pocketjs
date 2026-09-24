@@ -16,6 +16,7 @@
 #include "pocket_text.h"
 #include "pocket_app.h"
 #include "pocket_clock.h"
+#include "pocket_pool_probe.h"
 #include "pocket_bridge.h"
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
@@ -70,6 +71,7 @@ extern const char hello_end[] asm("_binary_main_js_end");
 extern const char kasane_demo_start[] asm("_binary_demo_js_start");
 #ifdef KASANE_P0_PROBE
 extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_start");
+extern const char pool_source_probe_start[] asm("_binary_pool_source_probe_js_start");
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
 // VM probe workloads (docs/vm/quickjs-freertos-vm-spec.md sec.5), embedded only
@@ -486,7 +488,12 @@ void app_stop(void) {
     // Before pocket_api_reset(): a picker still on screen holds a promise slot,
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
-    if(pocket_kasane_reset())pocket_clock_reset();
+    if(pocket_kasane_reset()){
+        pocket_clock_reset();
+#ifdef KASANE_P0_PROBE
+        pocket_pool_probe_reset();
+#endif
+    }
     pocket_input_reset();
     pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and
@@ -691,6 +698,7 @@ source_ready:;
         case 'K': source=kasane_demo_start; break;
 #ifdef KASANE_P0_PROBE
         case '7': source=wall_source_probe_start; break;
+        case '0': source=pool_source_probe_start; break;
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
         // VM probe workloads (sec.5): real files under apps/vmprobe/ rather

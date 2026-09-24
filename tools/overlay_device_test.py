@@ -27,7 +27,11 @@ def png_chunk(kind, payload):
     return struct.pack('>I', len(payload)) + kind + payload + struct.pack('>I', zlib.crc32(kind + payload))
 
 
-with serial.Serial(args.port, 115200, timeout=0.15) as port:
+port = serial.Serial(port=None, baudrate=115200, timeout=0.15)
+port.dtr = False
+port.rts = False
+port.port = args.port
+with port:
     time.sleep(1.2)
     port.reset_input_buffer()
 

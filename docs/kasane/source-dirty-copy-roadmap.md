@@ -213,6 +213,12 @@ underrun/fault/IO ERRORは0。診断専用の任意schemaで`pocket.time.wallSou
 3 slot poolへ公開する。HALはKasaneを知らず、pool枯渇で音声を待たせない。
 現行schemaはU16までなので、U32値の公開bind前に型拡張が必要。
 この段階は設計のみで、接続実装・実機A/B・P1出口は未達。
+2026-09-24：[固定poolの別task実機試験](p1-pool-source-device-20260924.md)で、
+診断専用FreeRTOS producer→3 slot pool→汎用adapter→runtime mountを
+通し、JS `set`なしの画素更新を2回確認した。20秒201 publish/skip 0、
+host並行契約、通常helloとSD音声の短期固定gateもPASS。診断OFFの
+静的DIRAMは159,804 Bのまま。音声とproducerの同時実行、製品serviceの
+接続、長時間/画素一致等は未達なのでP1全体は完了扱いにしない。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

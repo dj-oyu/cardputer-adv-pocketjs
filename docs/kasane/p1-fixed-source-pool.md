@@ -45,3 +45,9 @@ hostのO2 strict-aliasingとASan/UBSanで検証した。
 診断OFFのESP-IDF 6.0.1 build・容量検査もPASSし、未利用adapterは
 linkerに除去されたためimage容量は不変。実producerへの接続と
 Cardputer上の性能・heap gateはまだ未実施。
+
+2026-09-24：[別FreeRTOS taskを使う実機接続試験](p1-pool-source-device-20260924.md)で、
+診断専用producerが直接書いた3 slot payloadを汎用adapterからruntime
+`mount`へbindした。LCD画素変化、20秒201 publish/skip 0、終了後heap、
+通常helloと短時間SD音声の固定gateを確認した。音声とこのproducerの
+同時実行、製品serviceへの接続、長時間gateは未達。
