@@ -202,6 +202,21 @@ static bool names_kasane(const char *s, size_t n) {
 // scene as a backdrop instead of clearing to an opaque APP background.
 static bool overlay_session;
 static bool kasane_presented;
+#ifdef KASANE_P2_REPAIR_PROBE
+static atomic_bool p2_repair_request;
+/* UI task only. One-shot failure after three successfully sent bands. */
+static unsigned p2_repair_stage;
+static int p2_sends_before_failure=-1;
+void app_p2_request_repair_probe(void) {
+    atomic_store(&p2_repair_request,true);
+}
+static bool p2_fail_this_send(uint16_t y) {
+    if(p2_repair_stage!=1||p2_sends_before_failure<0)return false;
+    if(p2_sends_before_failure--!=0)return false;
+    ESP_LOGW("KSN_P2","INJECT_FAIL y=%u after=3",(unsigned)y);
+    return true;
+}
+#endif
 void app_force_redraw(void) { pocket_kasane_invalidate(); }
 void app_force_redraw_bands(uint32_t bands) {
     if(bands) pocket_kasane_invalidate_bands(bands);
@@ -214,6 +229,9 @@ static uint16_t *kasane_strip(void *opaque) {
 static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
                              const uint16_t *pixels) {
     kasane_display_t *display=opaque;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_fail_this_send(y))return KSN_IO;
+#endif
     int64_t began=esp_timer_get_time();
     // Section 6's host-owned edit field, composited over the band the guest's
     // scene has just filled: the guest never learns there is a field, only
@@ -235,6 +253,9 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
 static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t cols,
                                    uint16_t rows,const uint16_t *pixels) {
     kasane_display_t *display=opaque;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_fail_this_send(y))return KSN_IO;
+#endif
     int64_t began=esp_timer_get_time();
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
@@ -459,6 +480,12 @@ void app_report(void) {
 }
 void app_stop(void) {
     bool p0_had_guest=guest!=NULL;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_repair_stage)board_capture(false);
+    p2_repair_stage=0;
+    p2_sends_before_failure=-1;
+    atomic_store(&p2_repair_request,false);
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
     vmprobe_session_reset();
 #endif
@@ -1246,6 +1273,17 @@ void app_vm_back_selftest(void) {
 static esp_err_t present_frame(void) {
     last_present_us=esp_timer_get_time();
     {
+#ifdef KASANE_P2_REPAIR_PROBE
+        if(atomic_exchange(&p2_repair_request,false)) {
+            if(!p2_repair_stage) {
+                p2_repair_stage=1;
+                p2_sends_before_failure=3;
+                board_capture(true);
+                pocket_kasane_invalidate();
+                ESP_LOGI("KSN_P2","ARMED after=3");
+            } else ESP_LOGW("KSN_P2","BUSY stage=%u",p2_repair_stage);
+        }
+#endif
         ksn_result advanced=pocket_kasane_advance((uint64_t)esp_timer_get_time());
         if(advanced!=KSN_OK&&advanced!=KSN_BUSY)return ESP_FAIL;
         kasane_display_t display_state={0};
@@ -1263,6 +1301,12 @@ static esp_err_t present_frame(void) {
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         frames++;
         if(result==KSN_IO) {
+#ifdef KASANE_P2_REPAIR_PROBE
+            if(p2_repair_stage==1&&p2_sends_before_failure<0) {
+                p2_repair_stage=2;
+                ESP_LOGI("KSN_P2","PARTIAL_FAILED sent=3");
+            }
+#endif
             ESP_LOGW("kasane","LCD transfer failed; retaining display work for retry");
             return ESP_OK;
         }
@@ -1270,6 +1314,14 @@ static esp_err_t present_frame(void) {
             ESP_LOGE("kasane","present failed: %u",(unsigned)result);
             return ESP_FAIL;
         }
+#ifdef KASANE_P2_REPAIR_PROBE
+        if(p2_repair_stage==2&&stats.bands) {
+            ESP_LOGI("KSN_P2","REPAIR_OK bands=%u bytes=%u",
+                     ksn_render_band_count(stats.bands),(unsigned)stats.transferred_bytes);
+            board_capture(false);
+            p2_repair_stage=0;
+        }
+#endif
         if(stats.bands) {
             painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;

@@ -251,6 +251,9 @@ static bool usb_stroke(char c, keystroke_t *k) {
         k->text[0]=c;k->len=1;return true;
     }
     if(c=='s') { atomic_store(&capture,true); return false; }
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(c=='%') { app_p2_request_repair_probe(); return false; }
+#endif
     // Not behind CONFIG_KSN_DEVICE_PROBE: this one measures the CPU rather than
     // the display, it is about a kilobyte, and the build that needs it is
     // whichever build is being optimised -- which is the shipping one.

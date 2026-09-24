@@ -276,6 +276,12 @@ LCD失敗repairや液晶GRAM読戻しは未検証で、P2出口全体は引き�
 full-scan画素参照のhost workloadは単色120 frameに加え、text長・
 hidden/page・複数色・全24slotを混ぜた600 frameへ拡張し、
 ASan/UBSanとO2 strict-aliasingの契約スイート全体がPASSした。
+2026-09-24：[Kasane表示ポートの一度限りの失敗注入](p2-repair-device-20260924.md)で、
+実機LCDへ先に3 bandを送ってから4 band目を`KSN_IO`にした。
+2試行とも次turnに17 band/64,800 Bをrepairし、正常時・repair時・再描画時の
+全32,400画素が一致。診断OFF製品image/DIRAMは不変、元ファームは
+全3区画digest一致で復元した。これは実SPI故障・GRAM読戻し・狭いPATCH失敗の
+証拠ではなく、P2出口全体は未達。
 
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。
 committed node→command範囲を固定容量で保持し、非dirty nodeのresolve/read/compareを
