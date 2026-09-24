@@ -381,7 +381,9 @@ renderer専用の借用読み取りで`core_render_text`と`render_decode_text`�
 2描画先45秒再生の実機計数で計204回/1,632 Bから0へ削減。
 host ASan/UBSan・O2の画素/IO retry試験と実機2描画先画素が通過。
 診断OFF静的DIRAMは1,040 B減少。ただしbank clone 47回/752 Bは残り、
-同条件の性能A/B、JS所有、全経路1-copyの判定は未完了。
+同じSD曲45秒のcaptureなし交互A/Bでは描画p99が新旧とも
+1,023～1,151 µs、underrun/fault 0で劣化を検出せず。
+ただし全アプリ・長時間・低heap、JS所有、全経路1-copy判定は未完了。
 
 JS文字列にはUTF-16→UTF-8変換、getter/例外、GC、提出待ち、同じ値を複数nodeが
 参照する場合がある。単一のadapter-owned UTF-8値、候補bankへ直接materializeする案、
