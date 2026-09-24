@@ -10,6 +10,7 @@
 #include "pocket_imu.h"
 #include "pocket_av.h"
 #include "pocket_av_output_source.h"
+#include "pocket_av_playback_source.h"
 #include "pocket_capture.h"
 #include "pocket_io.h"
 #include "pocket_net.h"
@@ -79,6 +80,7 @@ extern const char output_source_probe_dual_start[] asm("_binary_output_source_pr
 extern const char output_source_probe_long_start[] asm("_binary_output_source_probe_long_js_start");
 extern const char output_source_probe_seek_start[] asm("_binary_output_source_probe_seek_js_start");
 extern const char output_source_probe_lowheap_start[] asm("_binary_output_source_probe_lowheap_js_start");
+extern const char playback_source_probe_start[] asm("_binary_playback_source_probe_js_start");
 #ifdef KASANE_P0_COPY_PROBE
 extern const char output_source_probe_exhaust_start[] asm("_binary_output_source_probe_exhaust_js_start");
 #endif
@@ -529,6 +531,7 @@ void app_stop(void) {
     if(pocket_kasane_reset()){
         pocket_clock_reset();
         pocket_av_output_source_reset(av_stopped);
+        pocket_av_playback_source_reset();
 #ifdef KASANE_P0_PROBE
         pocket_pool_probe_reset();
 #endif
@@ -744,6 +747,7 @@ source_ready:;
         case 'y': source=output_source_probe_long_start; break;
         case 'j': source=output_source_probe_seek_start; break;
         case 'b': source=output_source_probe_lowheap_start; break;
+        case 'h': source=playback_source_probe_start; break;
 #ifdef KASANE_P0_COPY_PROBE
         case 'x': source=output_source_probe_exhaust_start; break;
 #endif

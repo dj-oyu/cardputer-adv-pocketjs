@@ -11,6 +11,7 @@
 #include "board.h"
 #include "pocket_power.h"
 #include "pocket_av_output_source.h"
+#include "pocket_av_playback_source.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -1638,6 +1639,7 @@ void pocket_av_service_stream(void) {
     // File reads stay on their owner task; no JS value is touched here.
     player_service_stream();
     pocket_av_output_source_service(player.open?player.stream:0);
+    pocket_av_playback_source_service();
 }
 
 // Audio namespace lifetime; power has its own owner adapter.
@@ -1777,6 +1779,8 @@ static esp_err_t build_audio(JSContext *ctx, JSValueConst ns, void *user) {
         JS_NewCFunction(ctx,js_tone,"tone",2),JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx,ns,"outputSource",
         JS_NewCFunction(ctx,pocket_av_output_source,"outputSource",0),JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx,ns,"playbackSource",
+        JS_NewCFunction(ctx,pocket_av_playback_source,"playbackSource",0),JS_PROP_ENUMERABLE);
     // audio.capture is pocket_capture.c's, contributed to this same
     // namespace by a second lazy builder.
     // A realm going away takes its listeners with it, so the table starts empty

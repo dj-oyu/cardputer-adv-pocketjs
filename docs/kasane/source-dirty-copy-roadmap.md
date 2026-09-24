@@ -420,6 +420,15 @@ coreのPATCH開始時の全bank cloneとrender readのscratch copyを残す限�
 
 ## P5：music統合と最終実機ゲート
 
+2026-09-24：[汎用playbackSourceの実機ゲート](p5-playback-source-device-20260924.md)。
+現在playerのstate/position/duration/underruns/playingを音声module側の
+固定snapshot poolで公開し、任意mountがtyped slotへbindできるようにした。
+Cardputerの同一バイナリでready→playing→paused→resumed→closedの文字画素を
+0→54→0→54→0と確認。captureなし試行は有効公開23回・描画6回、
+render p99 895 µs、underrun/fault/IO ERROR 0。source未要求時は
+追加確保なし、診断OFF静的DIRAM総量は不変。ただし**music overlayの
+専用`bind('playback')`は現存**し、status/進行bar/helpの移行と比較は未達。
+
 music固有の文言、help、再生projection、期限付きstatusはmusicモジュールに残す。
 AV snapshotとslotの対応だけを共通source契約へ移し、汎用Kasaneにmusic条件を入れない。
 既存providerは比較経路として保持し、画素・入力・状態遷移・性能が一致してから
