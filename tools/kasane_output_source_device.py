@@ -1,4 +1,4 @@
-"""Exercise diagnostic v: audio-task producer -> pool -> mounted text slot."""
+"""Exercise audio-task producer -> pool -> mounted text slot diagnostics."""
 import argparse
 import json
 from pathlib import Path
@@ -12,15 +12,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--probe', choices=('u', 'v'), default='v',
-                        help='u=observer off; v=audio output source on')
+    parser.add_argument('--probe', choices=('u', 'v', 'w'), default='v',
+                        help='u=observer off; v=source on; w=hide/show source text')
     parser.add_argument('--capture', action='store_true',
-                        help='capture live and ended LCD frames (extra serial load)')
+                        help='capture live and ended LCD frames for v (w always captures)')
     parser.add_argument('--require-copy-watch', action='store_true',
                         help='require direct producer-pointer copy observations')
     args = parser.parse_args()
-    if args.probe == 'u' and args.capture:
-        parser.error('LCD source capture requires --probe v')
+    if args.probe != 'v' and args.capture:
+        parser.error('--capture is only for probe v; w captures automatically')
     if args.out.exists() and any(args.out.iterdir()):
         parser.error('--out must be new or empty')
     args.out.mkdir(parents=True, exist_ok=True)
@@ -83,33 +83,49 @@ def main():
             until('pocket.sd: GRANTED music', 15)
             until('KSN_OUTPUT_SOURCE OPEN', 15)
             until('KSN_OUTPUT_SOURCE PLAY', 15)
-            live = None
-            if args.capture:
+            live = hidden = shown = None
+            if args.probe == 'w':
+                until('KSN_OUTPUT_SOURCE HIDDEN', 20)
+                hidden = capture('hidden')
+                until('KSN_OUTPUT_SOURCE SHOWN', 30, seen_ok=True)
+                time.sleep(0.5)
+                shown = capture('shown')
+            elif args.capture:
                 time.sleep(1)
                 live = capture('live')
             until('KSN_OUTPUT_SOURCE CLOSED', 65, seen_ok=True)
             time.sleep(0.5)
             ended = capture('ended') if args.capture else None
             port.write(b'q')
-            stop = until('KSN_OUTPUT_SOURCE: STOP', 12) if args.probe == 'v' else None
+            stop = until('KSN_OUTPUT_SOURCE: STOP', 12) if args.probe != 'u' else None
             until('APP_STOPPED', 12)
             match = (re.search(r'published=(\d+) (?:valid_published=(\d+) )?'
                                r'skipped=(\d+) audio_stopped=(\d+)', stop)
                      if stop else None)
             numeric = (re.search(r'max_frames=(\d+) max_starved=(\d+)', stop)
                        if stop else None)
-            if args.probe == 'v' and not match:
+            if args.probe != 'u' and not match:
                 raise RuntimeError(f'unexpected source stop line: {stop}')
-            changed = outside = None
-            if live is not None:
+            changed = outside = hidden_text = shown_text = outside_text = None
+            first, second = (hidden, shown) if args.probe == 'w' else (live, ended)
+            if first is not None:
                 changed = outside = 0
+                if args.probe == 'w':
+                    hidden_text = shown_text = outside_text = 0
+                    background = hidden[:2]
                 for y in range(135):
                     for x in range(240):
                         at = 2 * (y * 240 + x)
-                        if live[at:at + 2] != ended[at:at + 2]:
+                        in_text = 4 <= x < 92 and 4 <= y < 16
+                        if args.probe == 'w' and in_text:
+                            hidden_text += first[at:at + 2] != background
+                            shown_text += second[at:at + 2] != background
+                        if first[at:at + 2] != second[at:at + 2]:
                             changed += 1
                             if x >= 96 or y >= 24:
                                 outside += 1
+                            if args.probe == 'w' and not in_text:
+                                outside_text += 1
             errors = [line for line in lines if 'APP_FAILED' in line or
                       'KSN_OUTPUT_SOURCE ERROR' in line or 'panic' in line.lower() or
                       'KSN_OUTPUT_SOURCE STATE error' in line or
@@ -132,7 +148,8 @@ def main():
                                                'p99': int(found.group(3)),
                                                'max': int(found.group(4)),
                                                'over12': int(found.group(5))}
-            summary = {'binary_probe': args.probe, 'capture': args.capture,
+            summary = {'binary_probe': args.probe,
+                       'capture': args.capture or args.probe == 'w',
                        'published': int(match.group(1)) if match else None,
                        'valid_published': int(match.group(2)) if match and match.group(2) else None,
                        'skipped': int(match.group(3)) if match else None,
@@ -144,13 +161,16 @@ def main():
                        'max_starved_blocks': int(numeric.group(2)) if numeric else None,
                        'changed_pixels': changed,
                        'outside_source_pixels': outside,
+                       'hidden_text_pixels': hidden_text,
+                       'shown_text_pixels': shown_text,
+                       'outside_text_pixels': outside_text,
                        'audio_log': p0, 'final_log': final,
                        'final_underruns': int(final_match.group(1)) if final_match else None,
                        'decoder_faults': int(decoder_match.group(1)) if decoder_match else None,
                        'metrics': metrics, 'errors': errors}
             (args.out / 'summary.json').write_text(json.dumps(summary, indent=2),
                                                    encoding='utf-8')
-            if ((args.probe == 'v' and
+            if ((args.probe != 'u' and
                     (summary['published'] < 3 or summary['audio_stopped'] != 1 or
                      summary['max_published_frames'] is None or
                      summary['max_published_frames'] <= 65535 or
@@ -161,6 +181,11 @@ def main():
                      (watch_match is None or summary['source_text_core_calls'] == 0 or
                       summary['source_text_core_bytes'] != 8 * summary['source_text_core_calls'] or
                       summary['source_text_length_mismatches'] != 0)) or
+                    (args.probe == 'w' and
+                     (summary['valid_published'] is None or
+                      summary['source_text_core_calls'] is None or
+                      summary['source_text_core_calls'] >= summary['valid_published'] or
+                      hidden_text != 0 or shown_text == 0 or outside_text != 0)) or
                     (changed is not None and (changed == 0 or outside != 0))):
                 raise RuntimeError(f'output-source gate: {summary}')
             print('OUTPUT_SOURCE PASS', summary, flush=True)
