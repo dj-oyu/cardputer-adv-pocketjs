@@ -18,6 +18,8 @@ def main():
                         help='capture live and ended LCD frames for v (w and z always capture)')
     parser.add_argument('--require-copy-watch', action='store_true',
                         help='require direct producer-pointer copy observations')
+    parser.add_argument('--require-render-borrow', action='store_true',
+                        help='require zero renderer text copies from a sealed core bank')
     args = parser.parse_args()
     if args.probe != 'v' and args.capture:
         parser.error('--capture is only for probe v; w and z capture automatically')
@@ -155,6 +157,12 @@ def main():
                               'KSN_P0: C session=app kind=core_submit_text ' in line]
             core_text_match = (re.search(r'calls=(\d+) bytes=(\d+)', core_text_logs[-1])
                                if core_text_logs else None)
+            copy_kinds = {}
+            for line in lines:
+                found = re.search(r'KSN_P0: C session=app kind=(\w+) calls=(\d+) bytes=(\d+)', line)
+                if found:
+                    copy_kinds[found.group(1)] = {'calls': int(found.group(2)),
+                                                  'bytes': int(found.group(3))}
             pin_logs = [line for line in lines if 'KSN_OUTPUT_SOURCE: PIN_PROBE ' in line]
             pin_match = (re.search(r'pinned=(\d+) released=(\d+)', pin_logs[-1])
                          if pin_logs else None)
@@ -199,6 +207,7 @@ def main():
                        'source_text_length_mismatches': int(watch_match.group(3)) if watch_match else None,
                        'core_submit_text_calls': int(core_text_match.group(1)) if core_text_match else None,
                        'core_submit_text_bytes': int(core_text_match.group(2)) if core_text_match else None,
+                       'copy_kinds': copy_kinds,
                        'probe_pinned': int(pin_match.group(1)) if pin_match else None,
                        'probe_released': int(pin_match.group(2)) if pin_match else None,
                        'max_published_frames': int(numeric.group(1)) if numeric else None,
@@ -241,6 +250,10 @@ def main():
                      (watch_match is None or summary['source_text_core_calls'] == 0 or
                       summary['source_text_core_bytes'] != 8 * summary['source_text_core_calls'] or
                       summary['source_text_length_mismatches'] != 0)) or
+                    (args.require_render_borrow and
+                     (not args.require_copy_watch or
+                      any(copy_kinds.get(kind, {}).get('calls', 0) != 0
+                          for kind in ('core_render_text', 'render_decode_text')))) or
                     (args.probe == 'w' and
                      (summary['valid_published'] is None or
                       summary['source_text_core_calls'] is None or

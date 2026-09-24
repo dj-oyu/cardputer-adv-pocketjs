@@ -376,6 +376,13 @@ hidden→visibleで最新値、pool枯渇・音声併用を通す。問題があ
 
 ## P4：JS所有とcore bankの全経路copyを個別判定
 
+2026-09-24の[sealed bank text借用描画](p4-render-borrow-20260924.md)：
+renderer専用の借用読み取りで`core_render_text`と`render_decode_text`を
+2描画先45秒再生の実機計数で計204回/1,632 Bから0へ削減。
+host ASan/UBSan・O2の画素/IO retry試験と実機2描画先画素が通過。
+診断OFF静的DIRAMは1,040 B減少。ただしbank clone 47回/752 Bは残り、
+同条件の性能A/B、JS所有、全経路1-copyの判定は未完了。
+
 JS文字列にはUTF-16→UTF-8変換、getter/例外、GC、提出待ち、同じ値を複数nodeが
 参照する場合がある。単一のadapter-owned UTF-8値、候補bankへ直接materializeする案、
 固定容量の共有text arenaを比較する。stack上の最大24×48 B一時文字領域を減らすが、

@@ -170,7 +170,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   # wrapped so the read counts are counted call sites, not estimates.
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
-    tools/kasane_contract/test_decode_reuse.c -Wl,--wrap=ksn_core_read -o "$out/decode-reuse"
+    tools/kasane_contract/test_decode_reuse.c -Wl,--wrap=ksn_core_read_borrowed -o "$out/decode-reuse"
   "$out/decode-reuse"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \

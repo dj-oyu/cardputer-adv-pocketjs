@@ -90,11 +90,11 @@ static void fill565(uint16_t *dst,unsigned count,uint16_t color){
  * loop asks for the same command once per band, twice per group child, so a
  * full frame decodes the same few commands hundreds of times
  * (docs/perf/kasane-opt-survey.md, boundary 2). This cache holds the fields the
- * band loop and the group composition read, plus the counted text bytes a
- * cached command needs to stay alive; no pointer into a command bank ever
- * escapes the borrowed view of ksn_core.h. The banks cannot change while a
- * frame is in flight: the renderer holds the sealed ticket, a guest cannot
- * start another builder before it is presented or discarded, and the port
+ * band loop and the group composition read. Text points into the sealed bank;
+ * no pointer escapes this rendering attempt or its display callbacks. The
+ * banks cannot change while a frame is in flight: the renderer holds the
+ * sealed ticket, a guest cannot start another builder before it is presented
+ * or discarded, and the port
  * contract already forbids a callback from mutating the core or reentering
  * presentation. Validity covers one ksn_render_rects call, so a retried frame
  * decodes again from scratch. Owner task only, like every entry point here. */
@@ -107,8 +107,6 @@ typedef struct {
 static struct {
     ksn_frame_view view[KSN_COMMANDS];
     uint32_t valid[(KSN_COMMANDS+31u)/32u];
-    char text[KSN_TEXT_BYTES];
-    unsigned text_used;
     ksn_frame_command read; /* The ABI storage of the reference read path. */
 } decoded;
 
@@ -1133,22 +1131,10 @@ static ksn_frame_view *view_slot(unsigned slot){
     /* The core bounds the index, the clamp only keeps the name total. */
     return &decoded.view[slot<KSN_COMMANDS?slot:0];
 }
-/* False when this command's text does not fit the frame pool; the caller then
- * falls back to the reference read. The bank's own text pool is the same
- * total, so a full frame pool cannot happen in practice. */
-static bool cache_view(unsigned slot,const ksn_frame_command *command){
+static void cache_view(unsigned slot,const ksn_frame_command *command){
     ksn_frame_view *view=view_slot(slot);
     decode_view(view,command);
-    if(view->draw.kind==KSN_TEXT){
-        unsigned bytes=view->draw.data.text.bytes;
-        if(bytes>sizeof(decoded.text)-decoded.text_used)return false;
-        memcpy(decoded.text+decoded.text_used,command->text,bytes);
-        ksn_p0_probe_copy(KSN_P0_RENDER_DECODE_TEXT,bytes);
-        view->draw.data.text.utf8=bytes?decoded.text+decoded.text_used:decoded.text;
-        decoded.text_used+=bytes;
-    }
     decoded.valid[slot>>5]|=1u<<(slot&31u);
-    return true;
 }
 /* previous=false only: the renderer never reads the displayed bank. */
 static ksn_result frame_command(ksn_core *core,ksn_tx ticket,ksn_layer layer,uint16_t index,
@@ -1157,9 +1143,10 @@ static ksn_result frame_command(ksn_core *core,ksn_tx ticket,ksn_layer layer,uin
     if(g_ksn_decode_once&&slot<KSN_COMMANDS&&(decoded.valid[slot>>5]&(1u<<(slot&31u)))){
         *out=view_slot(slot);return KSN_OK;
     }
-    ksn_result result=ksn_core_read(core,ticket,false,layer,index,&decoded.read);
+    ksn_result result=ksn_core_read_borrowed(core,ticket,false,layer,index,&decoded.read);
     if(result!=KSN_OK)return result;
-    if(g_ksn_decode_once&&slot<KSN_COMMANDS&&cache_view(slot,&decoded.read)){
+    if(g_ksn_decode_once&&slot<KSN_COMMANDS){
+        cache_view(slot,&decoded.read);
         *out=view_slot(slot);return KSN_OK;
     }
     decode_view(view_slot(slot),&decoded.read);*out=view_slot(slot);
@@ -1835,7 +1822,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     /* One frame's worth of decoded commands; a retried frame starts over. */
-    memset(decoded.valid,0,sizeof(decoded.valid));decoded.text_used=0;
+    memset(decoded.valid,0,sizeof(decoded.valid));
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
     ksn_damage damage;result=ksn_core_damage(core,frame.ticket,display->text,&damage);

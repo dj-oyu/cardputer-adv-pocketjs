@@ -163,6 +163,13 @@ ksn_result ksn_core_prepare_frame(ksn_core *core,ksn_frame *out);
 void ksn_core_defer_repair(ksn_core *core,ksn_tx ticket);
 ksn_result ksn_core_read(const ksn_core *core,ksn_tx ticket,bool previous,
                        ksn_layer layer,uint16_t index,ksn_frame_command *out);
+/* Renderer-only read of a sealed ticket. Text is a read-only view into the
+ * selected bank, valid through this presentation attempt (including a retry),
+ * but not after presented/discarded/reset. The display port must not mutate
+ * the core or retain the pointer from a callback. Unlike ksn_core_read this
+ * does not copy text into out->text. */
+ksn_result ksn_core_read_borrowed(const ksn_core *core,ksn_tx ticket,bool previous,
+                                ksn_layer layer,uint16_t index,ksn_frame_command *out);
 /* Owner-only read of one committed reference. Text points directly into the
  * active bank and is read-only until the next successful presentation/reset.
  * Never retain the pointer or call from a display callback. */

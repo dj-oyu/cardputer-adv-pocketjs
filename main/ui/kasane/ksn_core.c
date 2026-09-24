@@ -831,6 +831,15 @@ ksn_result ksn_core_read(const ksn_core *storage,ksn_tx ticket,bool previous,
     return read_command(bank,layer,index,out,false);
 }
 
+ksn_result ksn_core_read_borrowed(const ksn_core *storage,ksn_tx ticket,bool previous,
+                                ksn_layer layer,uint16_t index,ksn_frame_command *out){
+    if(!storage||!out||!valid_layer(layer))return KSN_INVALID;
+    const ksn_core_impl *core=cimpl(storage);
+    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
+    const ksn_bank *bank=&core->banks[(previous||core->repairing)?core->active:core->building_bank];
+    return read_command(bank,layer,index,out,true);
+}
+
 ksn_result ksn_core_read_active_ref(const ksn_core *storage,ksn_layer layer,
                                     ksn_ref ref,ksn_frame_command *out){
     if(!storage||!out||!ref.value||!valid_layer(layer))return KSN_INVALID;
