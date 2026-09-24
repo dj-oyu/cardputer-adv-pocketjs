@@ -262,6 +262,13 @@ dirty-node版
 `0cc3bf24fbf45bb828890a587cb78acd699d0fdc6f9b7628d7056dc3afcebef8`。
 Kasane契約テスト一式は同日のASan/UBSan・O2の両構成で再度PASS。
 COM3は未使用で、実機gateの合否は未判定。
+2026-09-24：[dirty-node実機時間・音声ゲート](p2-dirty-node-device-20260924.md)で、
+直前版hello 2回・dirty-node hello 2回、SD music B-A-B各45秒を比較。
+すべてP0固定閾値内、音声underrun/decode fault/IO ERROR 0、helloのLCD転送量と
+heapは同一。dirty-node版のhello render p95は1 bucket低いが、send p99は
+1～2 bucket高く、music send p99も1 bucket高い。速度向上はまだ証明しない。
+実機画素capture、24 slot/hidden/page、LCD失敗repair、厳密な同一配置A/Bは
+残るのでP2出口全体は未達。元ファームは全3区画digest一致で復元した。
 
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。
 committed node→command範囲を固定容量で保持し、非dirty nodeのresolve/read/compareを
