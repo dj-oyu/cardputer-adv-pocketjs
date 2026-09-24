@@ -20,15 +20,16 @@
 
 // A click, a tone, or a stream. kind is the click index, -1 for a tone, -2 for
 // a stream; frequency is read only for tones, and the last two fields only for
-// streams. One struct rather than a union because the queue is four entries
-// deep: the eight bytes a stream adds cost 32 bytes of .bss in total, and a
-// union would cost the same reading twice as badly.
+// streams. One struct rather than a union: the queue is only four entries
+// deep. The logical start frame adds one word per queued entry on ESP32-S3;
+// normal playback installs no observer and never touches a Kasane pool.
 typedef struct {
     int32_t id;
     int16_t kind;
     uint16_t frequency;
     uint16_t gain;        // 0..4096
     uint32_t frames;
+    uint32_t start_frame;       // logical position before this stream segment
     sound_done_fn done;
     void *ctx;
     sound_stream_t *stream;         // streams: the caller's ring
@@ -230,6 +231,16 @@ static atomic_int stream_active;
 static atomic_int stream_halt;
 static atomic_uint stream_frames;      // output frames produced so far
 static atomic_uint stream_starved;     // blocks filled with silence
+static _Atomic(sound_stream_observer_fn) stream_observer;
+
+void sound_stream_set_observer(sound_stream_observer_fn observer) {
+    atomic_store_explicit(&stream_observer,observer,memory_order_release);
+}
+
+static uint32_t observed_frame(const request_t *req,uint32_t consumed){
+    uint64_t frame=(uint64_t)req->start_frame+consumed;
+    return frame>UINT32_MAX?UINT32_MAX:(uint32_t)frame;
+}
 
 // The underrun policy is stated in full above sound_stream_start() in sound.h,
 // because it is the part of this design an app can see. The two lines it comes
@@ -252,6 +263,9 @@ static void play_stream(const request_t *req,int16_t *pcm) {
         if(req->done) req->done(req->ctx,false);
         return;
     }
+    sound_stream_observer_fn observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
+    if(observe)observe(req->id,req->start_frame,true);
+    uint32_t next_observation=SOUND_SAMPLE_RATE-req->start_frame%SOUND_SAMPLE_RATE;
     stream_read_t r={0};
     uint32_t frames=req->frames, at=0, starved=0;
     bool completed=true;
@@ -308,18 +322,28 @@ static void play_stream(const request_t *req,int16_t *pcm) {
         } else starved=0;
         atomic_store(&stream_frames,at<frames?at:frames);
         if(!emit(pcm)) { completed=false; break; }
+        if(at>=next_observation){
+            observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
+            if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),true);
+            next_observation=next_observation<=UINT32_MAX-SOUND_SAMPLE_RATE?
+                next_observation+SOUND_SAMPLE_RATE:UINT32_MAX;
+        }
     }
     stream_release(s,&r);
     int paused=req->id;
     atomic_compare_exchange_strong(&stream_pause,&paused,0);
     paused=req->id;
     atomic_compare_exchange_strong(&stream_pause_ack,&paused,0);
+    observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
+    if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),false);
+    /* Stop waits on stream_active. Clear it only after the observer has
+     * released its producer lease, so its service may then be detached. */
     atomic_store(&stream_active,0);
     if(req->done) req->done(req->ctx,completed);
 }
 
 int32_t sound_stream_start(sound_stream_t *stream,int format,uint16_t block,
-                           uint32_t frames,float gain,
+                           uint32_t frames,uint32_t start_frame,float gain,
                            sound_done_fn done,void *ctx) {
     if(!events) return SOUND_ERR_UNSUPPORTED;
     // The codec is recording. BUSY rather than UNSUPPORTED: the feature exists
@@ -340,6 +364,7 @@ int32_t sound_stream_start(sound_stream_t *stream,int format,uint16_t block,
         .kind=-2,
         .gain=(uint16_t)(gain*4096.0f),
         .frames=frames,
+        .start_frame=start_frame,
         .done=done,.ctx=ctx,
         .stream=stream,.block=block};
     if(xQueueSend(events,&req,0)!=pdTRUE) return SOUND_ERR_BUSY;

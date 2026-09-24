@@ -460,6 +460,7 @@ WAV（PCM16／IMA ADPCM）、Opus CELT（§9.1.2）、MP3（§9.1.3）を実装�
 
 ```ts
 pocket.audio.player.open({source:string}, options?:Options):Promise<Player>;
+pocket.audio.outputSource(): KasaneSourceCapability;
 type Player = {
   info(): {codec:"wav/pcm16"|"wav/ima-adpcm"|"opus/celt"|"mp3";sampleRate:24000;channels:1;
            durationMs:number|null;seekable:boolean};
@@ -472,6 +473,13 @@ type Player = {
   close():void;
 };
 ```
+
+`audio.outputSource()`は実装済みの任意Kasane mount用source。field 0はtext
+`HH:MM:SS`（8 byte）で、音声出力taskが実際に消費したframeに基づき再生開始時と
+秒境界で更新する。`view.bind(pocket.audio.outputSource(), {elapsed: 0})`のように
+text slotへ束縛する。再生していない間はfield invalidとなり、slotはJSの最新base値へ
+戻る。sourceの生成・寿命はセッション単位で、音声taskはJSやKasane coreを直接呼ばない。
+現状は数値frame/starvationのsourceではなく、1 Hzの表示用fieldのみである。
 
 sourceは `app:/` / `assets:/` のWAVファイルで、24kHz・1ch・16bit PCMまたはIMA ADPCM（WAVのブロック配置）。**再生はストリーミングで、長さの上限はこの面には無い。** openはヘッダだけを範囲読みで検査し、バッファも音も取らない。playは出力受付の完了、pauseは停止位置の保持完了を返し、曲の終わりはonStateで通知する。位置は消費したPCM framesから求める。endedからのplayとseekはNOT_AVAILABLE（再生し直すにはopenし直す）。close後はすべてCLOSED。1プレイヤー・1音声で、toneとは排他（tone中のopenはBUSY）。セッション終了時は自動close。
 

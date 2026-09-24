@@ -10,6 +10,7 @@
 #include "wav_scan.h"
 #include "board.h"
 #include "pocket_power.h"
+#include "pocket_av_output_source.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -1012,17 +1013,18 @@ static const char *player_launch(void) {
     player_feed();
     int32_t id=sound_stream_start(&player.ring,
                                   player.block?SOUND_STREAM_IMA:SOUND_STREAM_PCM16,
-                                  player.block,player.frames-start,1.0f,
+                                  player.block,player.frames-start,start,1.0f,
                                   clip_done,(void *)(uintptr_t)seq);
     if(id<0) { player_seq++; return id==SOUND_ERR_BUSY?"busy":"unavailable"; }
     player.stream=id;
     return NULL;
 }
 
-static void player_teardown(void) {
-    if(!player.open) return;
+static bool player_teardown(void) {
+    if(!player.open) return true;
     player.open=false;
-    if(player_halt()) { free(player.ring_bytes); free(player.pkt_bytes); }
+    bool released=player_halt();
+    if(released) { free(player.ring_bytes); free(player.pkt_bytes); }
     else ESP_LOGE("pocket.av","a task still holds the rings; their %u bytes stay",
                   (unsigned)(PLAYER_RING_BYTES+
                              ((player.codec==C_OPUS||player.codec==C_MP3)?PLAYER_PKT_BYTES:0)));
@@ -1038,6 +1040,7 @@ static void player_teardown(void) {
     // Back to the file shape. Left true, this would send the NEXT player's pump
     // and feed down the network branches for a source that has no receiver.
     player.net=false; player.open_req=0;
+    return released;
 }
 
 // ---- onState
@@ -1095,7 +1098,7 @@ static void player_service_stream(void) {
         if(atomic_load(&pcm->filled)||atomic_load(&pcm->eof)) {
             player.priming=false;
             int32_t id=sound_stream_start(pcm,SOUND_STREAM_PCM16,0,
-                                          player.frames-player.position,1.0f,
+                                          player.frames-player.position,player.position,1.0f,
                                           clip_done,(void *)(uintptr_t)player_seq);
             if(id<0) { player_halt(); player_set_state(P_ERROR); }
             else player.stream=id;
@@ -1634,23 +1637,26 @@ void pocket_av_service_stream(void) {
     // Called once per UI frame before modal and presentation early returns.
     // File reads stay on their owner task; no JS value is touched here.
     player_service_stream();
+    pocket_av_output_source_service(player.open?player.stream:0);
 }
 
 // Audio namespace lifetime; power has its own owner adapter.
 static bool built;
 
-void pocket_av_reset(void) {
+bool pocket_av_reset(void) {
     pocket_power_reset();
-    if(!built) return;
+    if(!built) return true;
     built=false;
     // The tone is not here: it waits on a promise slot, and pocket_api_reset()
     // is what asks it to stop and lets its resolvers go.
     // The clip is read by the audio task, so this has to be the thing that
     // stops it: the buffer is the host's, but the session ending is what makes
     // it unreachable. Nothing else frees it.
-    player_teardown();
+    pocket_av_output_source_suspend();
+    bool released=player_teardown();
     pocket_api_sub_close_all(&player_table);
     player_table.ctx=NULL;
+    return released;
 }
 
 // ------------------------------------------------------------- capabilities
@@ -1769,6 +1775,8 @@ static esp_err_t build_audio(JSContext *ctx, JSValueConst ns, void *user) {
         JS_NewCFunction(ctx,js_cue,"cue",1),JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx,ns,"tone",
         JS_NewCFunction(ctx,js_tone,"tone",2),JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx,ns,"outputSource",
+        JS_NewCFunction(ctx,pocket_av_output_source,"outputSource",0),JS_PROP_ENUMERABLE);
     // audio.capture is pocket_capture.c's, contributed to this same
     // namespace by a second lazy builder.
     // A realm going away takes its listeners with it, so the table starts empty

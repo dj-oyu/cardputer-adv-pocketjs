@@ -271,7 +271,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
 #ifdef KASANE_P0_PROBE
-    if(c=='7'||c=='0') { atomic_store(&diagnostic,c); return false; }
+    if(c=='7'||c=='0'||c=='v') { atomic_store(&diagnostic,c); return false; }
 #endif
 #ifdef CONFIG_POCKET_VM_CALLBENCH
     if(c=='N'||c=='U') { atomic_store(&diagnostic,c); return false; }

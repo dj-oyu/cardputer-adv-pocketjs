@@ -219,6 +219,13 @@ underrun/fault/IO ERRORは0。診断専用の任意schemaで`pocket.time.wallSou
 host並行契約、通常helloとSD音声の短期固定gateもPASS。診断OFFの
 静的DIRAMは159,804 Bのまま。音声とproducerの同時実行、製品serviceの
 接続、長時間/画素一致等は未達なのでP1全体は完了扱いにしない。
+2026-09-24：[音声出力taskをproducerにした実service接続](p1-audio-output-source-device-20260924.md)
+で、`pocket.audio.outputSource()`のtext時刻を任意mountへbindし、SD MP3の
+45秒再生と同時に47回公開/skip 0、underrun・decode fault 0を確認した。
+終了invalidでJS baseへ戻るLCD差分は122画素、領域外0。診断OFFの静的DIRAMは
+159,820 B（+16 B）。元の3 MiB app領域は全区画digest一致で復元。
+これは1 Hz text接続試験であり、当初設計の数値telemetry/U32、同一バイナリ
+OFF/ON ABBA、長時間・seek等は未達。P1全体の完了判定は変えない。
 
 ## P2：dirty-node更新を既存bankのまま導入
 

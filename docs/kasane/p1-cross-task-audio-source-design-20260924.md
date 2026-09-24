@@ -2,6 +2,11 @@
 
 2026-09-24。これは実装前の接続設計であり、P1完了や実機gate合格を宣言しない。
 
+実装追記：最初の製品service接続は、描画に直接使える1 Hzの8 byte text
+`HH:MM:SS`を選び、[実機結果](p1-audio-output-source-device-20260924.md)に記録した。
+以下の33 ms数値telemetry、`U32` slot、observer OFF/ON ABBAなどは未実装の
+元設計であり、この接続試験により達成したとは扱わない。
+
 ## 接続点
 
 既存の`pocket_av_ui_read()`はUI owner taskで`player`の状態と

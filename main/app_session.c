@@ -9,6 +9,7 @@
 #include "pocket_fs.h"
 #include "pocket_imu.h"
 #include "pocket_av.h"
+#include "pocket_av_output_source.h"
 #include "pocket_capture.h"
 #include "pocket_io.h"
 #include "pocket_net.h"
@@ -72,6 +73,7 @@ extern const char kasane_demo_start[] asm("_binary_demo_js_start");
 #ifdef KASANE_P0_PROBE
 extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_start");
 extern const char pool_source_probe_start[] asm("_binary_pool_source_probe_js_start");
+extern const char output_source_probe_start[] asm("_binary_output_source_probe_js_start");
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
 // VM probe workloads (docs/vm/quickjs-freertos-vm-spec.md sec.5), embedded only
@@ -475,7 +477,7 @@ void app_stop(void) {
             overlay_session?"overlay":"app",(long)p0_player,(unsigned)p0_audio.state,
             (unsigned long)p0_audio.position_ms,(unsigned long)p0_audio.underruns);
 #endif
-    pocket_av_reset();
+    bool av_stopped=pocket_av_reset();
     // Before pocket_api_reset(): a recorder holds the I2S RX channel and the
     // codec's ADC, and a read still waiting holds a promise slot.
     pocket_capture_reset();
@@ -490,6 +492,7 @@ void app_stop(void) {
     pocket_workspace_reset();
     if(pocket_kasane_reset()){
         pocket_clock_reset();
+        pocket_av_output_source_reset(av_stopped);
 #ifdef KASANE_P0_PROBE
         pocket_pool_probe_reset();
 #endif
@@ -699,6 +702,7 @@ source_ready:;
 #ifdef KASANE_P0_PROBE
         case '7': source=wall_source_probe_start; break;
         case '0': source=pool_source_probe_start; break;
+        case 'v': source=output_source_probe_start; break;
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
         // VM probe workloads (sec.5): real files under apps/vmprobe/ rather

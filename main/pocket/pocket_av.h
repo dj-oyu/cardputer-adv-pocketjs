@@ -63,4 +63,5 @@ void pocket_av_service_stream(void);
 // JS task while the guest is still alive -- app_stop() before it destroys the
 // guest. A tone still sounding is pocket_api_reset()'s to end, which app_stop()
 // calls right after this one.
-void pocket_av_reset(void);
+/* True only when the audio task is no longer using its stream or observer. */
+bool pocket_av_reset(void);
