@@ -188,6 +188,52 @@ int main(void){
 #endif
         CHECK(!compare(&schema,values,&ref_host,ref_view));
     }
-    puts("schema workloads: PASS (dirty node, 1/24 slots, 47-byte text, hidden/page, coalesced, discard, viewport, 120 reference frames)");
+    /* Mixed deterministic fuzz: every turn changes a visible color, while
+     * text length, command count, visibility and page vary independently.
+     * The full-scan renderer is rebuilt every turn and compared pixelwise. */
+    for(unsigned frame=0;frame<600;frame++){
+        seed=seed*1664525u+1013904223u;
+        unsigned slot=1u+seed%20u;
+        values[slot].data.color=((seed^frame)&0xffffff00u)|0xffu;
+        uint32_t dirty=1u<<slot;
+        switch(frame%6u){
+        case 0:
+            values[21].data.boolean=!values[21].data.boolean;
+            dirty|=1u<<21;
+            break;
+        case 1:
+            values[22].data.number^=1u;
+            dirty|=1u<<22;
+            break;
+        case 2:
+            values[0].data.text=(frame&2u)?
+                (ksn_schema_text){max_text,47}:(ksn_schema_text){"",0};
+            dirty|=1u;
+            break;
+        case 3:
+            values[23].data.text=(frame&2u)?
+                (ksn_schema_text){"LONG LABEL",10}:(ksn_schema_text){"",0};
+            dirty|=1u<<23;
+            break;
+        case 4:
+            for(unsigned i=1;i<=20;i+=3){
+                values[i].data.color=((seed+i*0x102030u)&0xffffff00u)|0xffu;
+                dirty|=1u<<i;
+            }
+            break;
+        default:
+            for(unsigned i=1;i<=20;i++)
+                values[i].data.color=((seed+i*0x10305u)&0xffffff00u)|0xffu;
+            values[0].data.text=(ksn_schema_text){max_text,47};
+            values[21].data.boolean=!values[21].data.boolean;
+            values[22].data.number^=1u;
+            values[23].data.text=(ksn_schema_text){"PAGE",4};
+            dirty=0xffffffu;
+            break;
+        }
+        CHECK(!present(&session,&fast_host,fast_view,values,129u+frame,dirty));
+        CHECK(!compare(&schema,values,&ref_host,ref_view));
+    }
+    puts("schema workloads: PASS (dirty node, 1/24 slots, 47-byte text, hidden/page, coalesced, discard, viewport, 120 single-slot + 600 mixed reference frames)");
     return 0;
 }

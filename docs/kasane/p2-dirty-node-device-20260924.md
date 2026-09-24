@@ -62,6 +62,13 @@ music overlayはこの比較ではdirty-node schemaの主な更新対象では�
 液晶GRAMからの読み戻しや、全slot/page/失敗時repairの証拠ではない。
 取得したrawとhashは`.cache/kasane-p2-pixels-20260924/`。
 
+hostの`test_schema_workloads.c`も、元の120 single-slot frameに続けて
+600 mixed frameをfull-scan参照実装と毎回画素比較するよう拡張した。
+常に可視色slotを変更し、追加で空/47-byte文字、plateText、可視性、page、
+複数色、全24slot更新を決定的に混ぜる。Kasane契約スイート全体を
+ASan/UBSanと`-O2 -fstrict-aliasing`で実行し、両構成とも0失敗。
+実機8状態だけから24slot/pageを推定せず、hostと実機の証拠を分ける。
+
 各実機試験前に元の3 MiBアプリ領域が保存済みbackup 3区画と全件digest一致する
 ことを確認した。試験後に3区画を復元し、再び全件digest一致を確認してCOM3を
 解放した。時間・音声の生ログは`.cache/kasane-p2-ab-20260924/`。

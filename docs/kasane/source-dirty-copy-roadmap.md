@@ -273,6 +273,9 @@ heapは同一。dirty-node版のhello render p95は1 bucket低いが、send p99�
 初期・1・2・9・10・99・100・180の8状態でSPI送信直前の全64,800 Bが
 直前版とdirty-node版で完全一致した。画素不一致0。ただし24 slot/hidden/page、
 LCD失敗repairや液晶GRAM読戻しは未検証で、P2出口全体は引き続き未達。
+full-scan画素参照のhost workloadは単色120 frameに加え、text長・
+hidden/page・複数色・全24slotを混ぜた600 frameへ拡張し、
+ASan/UBSanとO2 strict-aliasingの契約スイート全体がPASSした。
 
 `set`とsourceからslot変更maskを受け取り、既存のslot→node依存表でdirty nodeを得る。
 committed node→command範囲を固定容量で保持し、非dirty nodeのresolve/read/compareを
