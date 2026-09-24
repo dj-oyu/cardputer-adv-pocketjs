@@ -10,6 +10,9 @@ BUSY/失敗時はleaseを解放し、次turnで再取得する。
 
 診断OFF製品ビルドはPASS、静的DIRAMは移行前と同じ158,780 B。
 QuickJS統合はWindows MSYS GCCの`-O2 -fstrict-aliasing`で0失敗。
+同じホスト結合のlessonsも0失敗、UI smokeは5フレームのnative/JS画素が
+すべて一致した。音声を使わないホストfixtureにはAV/時計の無効sourceスタブを
+明示的に置いた。
 ASan/UBSanはこのWindows環境にruntimeがなく実行できなかった。
 
 Cardputer/COM3で同じ診断image SHA-256
