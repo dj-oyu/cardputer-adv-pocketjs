@@ -56,11 +56,13 @@
 
 | 順番 / owner | 実作業と成果物 | 完了条件・実機を使う条件 |
 | --- | --- | --- |
-| **K1 source寿命** / `ksn_source_pool`、`pocket_*_source`、mutex arena | APP停止、reader pin、unregister拒否、次session open、pool全pin、arena初回競合・確保拒否を「旧領域をいつ解放できるか」の表に落とす。既存host試験（`test_source_pool`、`test_app_teardown`、`test_mutex_arena`、実QuickJSの`build_kasane_test.sh`）を対応づけ、**未試験の分岐だけ**最小の注入試験を追加する。 | UAF/二重解放なし、producerは有界BUSY/OOM、停止未確認時は旧領域保持＋新規作成拒否、解放証明後のみ再利用。既存の実task race・pool全pin・確保拒否注入・低heap＋音声ログを流用。真の全heap OOMや強制task停止timeoutは未再現として残し、v1合格と偽らない。sourceコード変更時だけhost全契約＋影響する実機代表条件を再実行。 |
+| **K1 source寿命 — 完了** / `ksn_source_pool`、`pocket_*_source`、mutex arena | APP停止、reader pin、unregister拒否、次session open、pool全pin、arena初回競合・確保拒否を既存試験と照合。clock sourceのpin中reset→新規BUSY→解放後再作成が未試験だったため実QuickJS host試験を追加した。registryはUI owner task、別task producerは同期済みpoolを使う契約を`ksn_source.h`に明記した。 | 下のK1証拠表によりv1のfail-closed契約を確認。実行時コードは変更なし、COM3再計測なし。真の全heap OOMや強制task停止timeoutは未再現として残し、合格済みとは呼ばない。source実装を変更する場合だけhost全契約＋影響する実機代表条件を再実行。 |
 | **K2 汎用mount境界** / `ksn_schema*`、`pocket_kasane` | 既存`test_pocket_kasane.c`のアプリ名を知らない`mount({version:1,...})`、slot型/容量/不正入力のatomic拒否、source購読、APP/SYSTEM分離を対応表で確認する。欠けた組合せだけhost testを追加し、coreにアプリ別分岐を足さない。 | 新しい定義をcore変更なしでmount→更新→disposeでき、不正入力は部分反映せず、SYSTEM確定状態はAPP teardown後も残る。既存4アプリ・overlayの実機画面と代表入力を利用。schema/renderer実装を変えた場合に限り画素一致・Hello P0・該当画面の実機smokeを再実行。 |
 | **K3 v1判定の凍結** / `docs/kasane` | K1/K2の合否、image SHA/flags/スクリプト/ログを1枚の証拠表に結び、各行を**hostのみ・診断実機・全probe OFF**に分類する。旧send 5,506 µs不合格も独立行で保持する。 | 必須行に未判定がなく、新しい既知不具合もないならKasane FW v1を完了とする。既存のHello 180更新、music 45秒複合、画面capture、音声0障害を再利用。現行コードのまま「もう一回測る」はしない。変更後に必要な固定ゲートだけ実行し、どのrunも超過したらそのrunを不合格として残す。 |
 | **K4 研究の分離** / P4・PIE | v1の完了判定とは別に、全経路1-copy・可視33 ms source・text PIEの採否を個別issue化する。P4はpayload lineageと残copyのCPU/RAM利益上限を先に定義し、PIEは現music既定OFFを維持する。 | 利益上限が小さければ「未達・保留」で終了。所有権・bank数を増やす実装は、利益、UAF安全性、画素、音声、heap、p99の事前比較条件が揃うまで着手しない。製品v1をこれらの研究待ちにしない。 |
 
 **別トラック（Kasane coreの阻止条件ではない）:** IMUの6姿勢校正・保存、Pet育成値の保存、Companion timer/wake永続化、実SDでの既知duration曲、SD抜去後の製品復旧仕様。これらをアプリ/音声/SDのQAとして扱い、表示契約に関係する分岐はhostの既存試験を使う。物理GRAM読戻し、非overlay modal、native home/picker/editor、未採用効果もv1へ戻さない。
+
+K1の証拠境界（2026-09-25）: pool全pin・2 producer/2 reader・再利用は`test_source_pool`、APP/SYSTEMのpartial IO・100回teardownは`test_app_teardown`、arenaの同時activate・予約中deactivate・確保拒否は`test_mutex_arena`。実QuickJS/ASan/UBSan `tools/build_kasane_test.sh` → `.cache/test-pocket-kasane-k1` は`PASS: 0 failure(s)`で、output sourceの停止未確認→boot中BUSY、playback sourceの旧pin→BUSY→解放後再open、wall sourceの旧pin中reset→BUSY→解放後再openを含む。意図的なboot寿命保持があるためこのhost実行のLeakSanitizerだけをOFFとし、ASan/UBSanはON。実機のarena 2 core競合・確保失敗注入・pool全pin＋45秒MP3・16 KiB低heap＋音声は`verification.md`の既存ログを使い、全heap OOM/実task停止timeoutへ外挿しない。
 
 旧repair runのsend 5,506 µsは分類不能の不合格として保持する。後続の独立boot×2と今回の統合診断runが固定線を通過した事実で旧runを書き換えない。`max≤5,500 µs`を製品応答期限へ昇格させる場合は、変更**前**にworkload・独立boot数・時間/frame数・p99とmaxの扱いを決める。通常の画素不一致・音声fault・lease破壊は許容揺らぎにしない。

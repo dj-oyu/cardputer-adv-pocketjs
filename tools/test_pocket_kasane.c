@@ -32,6 +32,7 @@ static pocket_av_ui_snapshot test_player_ui;
 static bool test_clock_valid;
 static sys_clock_state test_clock_ui;
 static unsigned test_clock_reads;
+static bool reset_clock_during_read,clock_reentry_busy;
 static sound_stream_observer_fn test_stream_observer;
 static uint32_t test_stream_interval;
 void sound_stream_set_observer_interval(sound_stream_observer_fn observer,
@@ -103,6 +104,23 @@ static ksn_result host_presenter_step(bool *blocked){
 #define pocket_kasane_presenter_step host_presenter_step
 bool sys_device_clock_read(sys_clock_state *out){
     test_clock_reads++;
+    if(reset_clock_during_read){
+        reset_clock_during_read=false;
+        /* source_pin has already pinned the registry before provider.acquire
+         * calls here. A reset must retain that provider, and a replacement
+         * source must fail closed until this borrow has released. */
+        pocket_clock_reset();
+        JSValue attempted=pocket_clock_wall_source(ctx,JS_UNDEFINED,0,NULL);
+        if(JS_IsException(attempted)){
+            JSValue error=JS_GetException(ctx);
+            JSValue code=JS_GetPropertyStr(ctx,error,"code");
+            const char *name=JS_ToCString(ctx,code);
+            clock_reentry_busy=name&&strcmp(name,"BUSY")==0;
+            if(name)JS_FreeCString(ctx,name);
+            JS_FreeValue(ctx,code);JS_FreeValue(ctx,error);
+        }
+        JS_FreeValue(ctx,attempted);
+    }
     if(!out||!test_clock_valid)return false;
     *out=test_clock_ui;return true;
 }
@@ -1207,6 +1225,31 @@ static void wall_source_service_tests(void){
           present(&stats)==KSN_OK,
           "fresh clock capability binds and presents after reset");
     check(pocket_kasane_reset(),"fresh clock service subscriber detaches");
+    pocket_clock_reset();
+    global=JS_GetGlobalObject(ctx);
+    JSValue retained_cap=pocket_clock_wall_source(ctx,JS_UNDEFINED,0,NULL);
+    check(!JS_IsException(retained_cap)&&
+          JS_SetPropertyStr(ctx,global,"wallCapRetained",retained_cap)>=0,
+          "clock service opens for a pinned-reset test");
+    JS_FreeValue(ctx,global);
+    check(run("globalThis.wallRetainedView=kasane.mount({version:1,"
+              "slots:{face:{type:'text',capacity:5}},"
+              "nodes:[{type:'text',bounds:[0,0,48,12],text:{slot:'face'},"
+              "color:0xffffffff}]},{face:'BASE'})")&&
+          present(&stats)==KSN_OK&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          run("wallRetainedView.bind(wallCapRetained,{face:0})"),
+          "clock view subscribes before a reset during acquire");
+    clock_reentry_busy=false;reset_clock_during_read=true;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          clock_reentry_busy&&!reset_clock_during_read,
+          "pinned clock reset retains the old provider and rejects replacement");
+    check(pocket_kasane_reset(),"clock APP detaches after the pinned read");
+    pocket_clock_reset();
+    JSValue after_release=pocket_clock_wall_source(ctx,JS_UNDEFINED,0,NULL);
+    check(!JS_IsException(after_release),
+          "clock source can reopen after the last pin releases");
+    JS_FreeValue(ctx,after_release);
     pocket_clock_reset();
     test_clock_valid=false;
 }

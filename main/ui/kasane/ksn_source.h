@@ -3,8 +3,12 @@
 #include "ksn_schema.h"
 
 /* App/service-owned capability registry. Kasane knows neither source names nor
- * domains. A snapshot is complete, immutable until release, and borrowed only
- * for the owner turn. The producer must not wait for a UI consumer. */
+ * domains. Register/subscribe/acquire/commit/release/unregister and the
+ * subscription cursor are UI-owner-task operations, not a cross-task API:
+ * registry entries and pin counts are intentionally non-atomic. A producer
+ * on another task publishes through its own synchronized provider/pool; it
+ * never touches this registry or waits for a UI consumer. A snapshot is
+ * complete, immutable until release, and borrowed only for the owner turn. */
 #define KSN_SOURCE_ABI_VERSION 2u
 #define KSN_SOURCE_MAX_REGISTERED 4u
 #define KSN_SOURCE_MAX_FIELDS KSN_SCHEMA_MAX_SLOTS
