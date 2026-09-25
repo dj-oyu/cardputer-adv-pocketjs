@@ -302,6 +302,15 @@ struct JSRuntime {
     uint32_t *atom_hash;
     JSAtomStruct **atom_array;
     int atom_free_index; /* 0 = none */
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    /* F1 (docs/vm/builtin-floor-plan.md sec.5.1): a flash atom has no
+       JSString to hand out, so turning one into a string value builds one.
+       Names that escape often (typeof's answers, class names) would build one
+       per escape; this small direct-mapped cache keeps the last string per
+       slot, holding one reference each. */
+    JSString *rom_cache[32];
+    uint16_t rom_cache_atom[32];
+#endif
 
     JSClassID js_class_id_alloc; /* counter for user defined classes */
     int class_count;    /* size of class_array */
@@ -2697,6 +2706,17 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
     js_free_rt(rt, rt->class_array);
 
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    /* Before the atoms: a cached string may have become a symbol's own
+       struct (JS_NewSymbolInternal reuses atom_type 0 strings), and dropping
+       the cache's reference is what frees it through the atom path. */
+    for (i = 0; i < 32; i++) {
+        if (rt->rom_cache[i]) {
+            js_free_string(rt, rt->rom_cache[i]);
+            rt->rom_cache[i] = NULL;
+        }
+    }
+#endif
 #ifdef ENABLE_DUMPS // JS_DUMP_ATOM_LEAKS
     /* only the atoms defined in JS_InitAtoms() should be left */
     if (check_dump_flag(rt, JS_DUMP_ATOM_LEAKS)) {
@@ -2704,7 +2724,7 @@ void JS_FreeRuntime(JSRuntime *rt)
 
         for (i = 0; i < rt->atom_size; i++) {
             JSAtomStruct *p = rt->atom_array[i];
-            if (!atom_is_free(p) /* && p->str*/) {
+            if (p && !atom_is_free(p) /* && p->str*/) {
                 if (i >= JS_ATOM_END || p->header.ref_count != 1) {
                     if (!header_done) {
                         header_done = true;
@@ -2756,10 +2776,10 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
 #endif
 
-    /* free the atoms */
+    /* free the atoms (a NULL slot is a flash atom: nothing to free) */
     for (i = 0; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
             list_del(&p->link);
 #endif
@@ -3263,10 +3283,117 @@ static inline bool is_strict_mode(JSContext *ctx)
 /* return the max count from the hash size */
 #define JS_ATOM_COUNT_RESIZE(n) ((n) * 2)
 
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+/* F1: builtin names live in flash as these records rather than as heap
+   JSStrings (docs/vm/builtin-floor-plan.md sec.5.1). No ref_count, hash_next
+   or weak-ref field: nothing ever writes to one, which is the whole point --
+   an atom below JS_ROM_ATOM_END is immortal, so there is nothing to count.
+   Numbering: [1, JS_ATOM_END) is the predefined list as always (its ROM
+   entries have a NULL atom_array slot; symbols, the private brand and the
+   empty string stay heap JSStrings), [JS_ATOM_END, JS_ROM_ATOM_END) are the
+   names the builtin function lists create, and dynamic atoms start above. */
+typedef struct JSRomAtom {
+    uint32_t hash_flags; /* the runtime's 28-bit hash, plus JS_ROM_NUMERIC */
+    uint16_t len;        /* JS_ROM_NOT: this index is not a flash atom */
+    uint16_t off;        /* into js_rom_chars; the text is NUL-terminated */
+} JSRomAtom;
+#define JS_ROM_NOT     0xffff
+/* JS_AtomIsNumericIndex1 is true for it, i.e. "Infinity": baked by the
+   generator so the typed-array get/set paths need not build a string for
+   every method name they are asked about. */
+#define JS_ROM_NUMERIC (1u << 28)
+#include "quickjs-rom-atoms-defs.h"
+#include "quickjs-rom-atoms.h"
+/* The table numbers the predefined atoms by their enum value, so a change to
+   quickjs-atom.h without regenerating would give every later name the wrong
+   text. Stale extras are harmless; a stale predefined list is not. */
+_Static_assert(JS_ROM_PREDEF_END == JS_ATOM_END,
+               "quickjs-rom-atoms.h is stale: run tools/vmtest/floor/gen_rom_atoms.sh");
+#define JS_ATOM_CONST_END JS_ROM_ATOM_END
+#else
+#define JS_ATOM_CONST_END JS_ATOM_END
+#endif
+
 static inline bool __JS_AtomIsConst(JSAtom v)
 {
-    return (int32_t)v < JS_ATOM_END;
+    return (int32_t)v < (int32_t)JS_ATOM_CONST_END;
 }
+
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+/* The flash record for a non-tagged atom, or NULL if it is a heap atom. */
+static inline const JSRomAtom *js_rom_atom(JSAtom a)
+{
+    if (a < JS_ROM_ATOM_END && js_rom_atoms[a].len != JS_ROM_NOT)
+        return &js_rom_atoms[a];
+    return NULL;
+}
+
+static inline const char *js_rom_text(const JSRomAtom *r)
+{
+    return js_rom_chars + r->off;
+}
+
+/* Name -> flash atom, on the runtime's own hash (JS_ATOM_HASH_MASK bits).
+   `s16` is non-NULL for a 16-bit string: flash text is 8-bit, so the two
+   are compared by code unit, the way js_string_memcmp compares mixed
+   widths. Returns 0 if the name is not in the table. */
+static JSAtom js_rom_find(const uint8_t *s8, const uint16_t *s16, uint32_t len,
+                          uint32_t h)
+{
+    uint32_t mask = (1u << JS_ROM_HASH_BITS) - 1, j = h & mask;
+    for (;;) {
+        uint32_t a = js_rom_hash[j];
+        if (a == 0)
+            return 0;
+        const JSRomAtom *r = &js_rom_atoms[a];
+        if ((r->hash_flags & JS_ATOM_HASH_MASK) == h && r->len == len) {
+            const uint8_t *t = (const uint8_t *)js_rom_text(r);
+            if (s8) {
+                if (!memcmp(t, s8, len))
+                    return a;
+            } else {
+                uint32_t k = 0;
+                while (k < len && s16[k] == t[k])
+                    k++;
+                if (k == len)
+                    return a;
+            }
+        }
+        j = (j + 1) & mask;
+    }
+}
+
+/* A fresh, ordinary (non-atom) heap string with a flash atom's text. Its
+   atom_type is 0, so handing it to __JS_NewAtom finds the flash atom again
+   by content rather than mistaking the string for an atom of its own. */
+static JSString *js_rom_new_string(JSRuntime *rt, const JSRomAtom *r)
+{
+    JSString *p = js_alloc_string_rt(rt, r->len, 0);
+    if (p) {
+        memcpy(str8(p), js_rom_text(r), r->len);
+        str8(p)[r->len] = '\0';
+    }
+    return p;
+}
+
+/* The string value of a flash atom, through rt->rom_cache. */
+static JSValue js_rom_atom_value(JSContext *ctx, JSAtom atom, const JSRomAtom *r)
+{
+    JSRuntime *rt = ctx->rt;
+    unsigned k = atom & 31;
+    JSString *p = rt->rom_cache[k];
+    if (p && rt->rom_cache_atom[k] == atom)
+        return js_dup(JS_MKPTR(JS_TAG_STRING, p));
+    p = js_rom_new_string(rt, r);
+    if (!p)
+        return JS_ThrowOutOfMemory(ctx);
+    if (rt->rom_cache[k])
+        js_free_string(rt, rt->rom_cache[k]);
+    rt->rom_cache[k] = p;
+    rt->rom_cache_atom[k] = (uint16_t)atom;
+    return js_dup(JS_MKPTR(JS_TAG_STRING, p));
+}
+#endif
 
 static inline bool __JS_AtomIsTaggedInt(JSAtom v)
 {
@@ -3428,7 +3555,7 @@ static __maybe_unused void JS_DumpAtoms(JSRuntime *rt)
     printf("JSAtom table: {\n");
     for (i = 0; i < rt->atom_size; i++) {
         p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
             printf("  %d: { %d %08x ", i, p->atom_type, p->hash);
             if (!(p->len == 0 && p->is_wide_char != 0)) {
                 JS_DumpString(rt, p);
@@ -3470,6 +3597,76 @@ static int JS_ResizeAtomHash(JSRuntime *rt, int new_hash_size)
     return 0;
 }
 
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+/* F1: size atom_array to cover the flash range before anything is placed.
+   [1, JS_ROM_ATOM_END) are fixed numbers -- a flash atom keeps a NULL slot,
+   which every walk of the array skips -- and the free list starts past them,
+   so a dynamic atom can never take a flash atom's number. The 256 spare
+   slots are for the app's own atoms; the array grows as it always has.
+   Slot 0 is the JS_ATOM_NULL entry __JS_NewAtom makes on its first growth. */
+static int js_rom_atoms_reserve(JSRuntime *rt)
+{
+    uint32_t size = JS_ROM_ATOM_END + 256, i;
+    JSAtomStruct **arr = js_malloc_rt(rt, sizeof(*arr) * size);
+    JSAtomStruct *p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+    if (!arr || !p) {
+        js_free_rt(rt, arr);
+        js_free_rt(rt, p);
+        return -1;
+    }
+    p->header.ref_count = 1;  /* not refcounted */
+    p->atom_type = JS_ATOM_TYPE_SYMBOL;
+#ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
+    list_add_tail(&p->link, &rt->string_list);
+#endif
+    arr[0] = p;
+    for (i = 1; i < JS_ROM_ATOM_END; i++)
+        arr[i] = NULL;
+    for (i = JS_ROM_ATOM_END; i < size; i++)
+        arr[i] = atom_set_free(i + 1 < size ? i + 1 : 0);
+    rt->atom_array = arr;
+    rt->atom_size = size;
+    rt->atom_free_index = JS_ROM_ATOM_END;
+    rt->atom_count = 1;
+    return 0;
+}
+
+/* A predefined atom that stays on the heap (symbols, the private brand, the
+   empty string), put at its fixed number the way __JS_NewAtom would have
+   put it at the next free one: same hash, same chain, same fields. */
+static int js_rom_atom_place(JSRuntime *rt, uint32_t i, const char *s, int len,
+                             int atom_type)
+{
+    JSString *p = js_alloc_string_rt(rt, len, 0);
+    uint32_t h;
+    if (!p) {
+        return -1;
+    }
+    memcpy(str8(p), s, len);
+    str8(p)[len] = '\0';
+    if (atom_type == JS_ATOM_TYPE_STRING) {
+        h = hash_string8(str8(p), len, JS_ATOM_TYPE_STRING) & JS_ATOM_HASH_MASK;
+    } else if (atom_type == JS_ATOM_TYPE_SYMBOL) {
+        h = JS_ATOM_HASH_SYMBOL;
+    } else {
+        h = JS_ATOM_HASH_PRIVATE;
+        atom_type = JS_ATOM_TYPE_SYMBOL;
+    }
+    rt->atom_array[i] = p;
+    p->hash = h;
+    p->hash_next = i;   /* atom_index */
+    p->atom_type = atom_type;
+    p->first_weak_ref = NULL;
+    rt->atom_count++;
+    if (atom_type != JS_ATOM_TYPE_SYMBOL) {
+        uint32_t h1 = h & (rt->atom_hash_size - 1);
+        p->hash_next = rt->atom_hash[h1];
+        rt->atom_hash[h1] = i;
+    }
+    return 0;
+}
+#endif
+
 static int JS_InitAtoms(JSRuntime *rt)
 {
     int i, len, atom_type;
@@ -3484,6 +3681,11 @@ static int JS_InitAtoms(JSRuntime *rt)
         return -1;
     }
 
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    if (js_rom_atoms_reserve(rt)) {
+        return -1;
+    }
+#endif
     p = js_atom_init;
     for (i = 1; i < JS_ATOM_END; i++) {
         if (i == JS_ATOM_Private_brand) {
@@ -3494,9 +3696,17 @@ static int JS_InitAtoms(JSRuntime *rt)
             atom_type = JS_ATOM_TYPE_STRING;
         }
         len = strlen(p);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+        /* A flash atom needs nothing on the heap; the others are placed at
+           their predefined number (the free list starts past the table). */
+        if (!js_rom_atom(i) && js_rom_atom_place(rt, i, p, len, atom_type)) {
+            return -1;
+        }
+#else
         if (__JS_NewAtomInit(rt, p, len, atom_type) == JS_ATOM_NULL) {
             return -1;
         }
+#endif
         p = p + len + 1;
     }
     return 0;
@@ -3535,6 +3745,11 @@ static JSAtomKindEnum JS_AtomGetKind(JSContext *ctx, JSAtom v)
     if (__JS_AtomIsTaggedInt(v)) {
         return JS_ATOM_KIND_STRING;
     }
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    if (js_rom_atom(v)) {
+        return JS_ATOM_KIND_STRING;   /* flash holds plain strings only */
+    }
+#endif
     p = rt->atom_array[v];
     switch (p->atom_type) {
     case JS_ATOM_TYPE_STRING:
@@ -3598,6 +3813,18 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
         len = str->len;
         h = hash_string(str, atom_type);
         h &= JS_ATOM_HASH_MASK;
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+        /* Flash first: a builtin name must resolve to its flash number, or
+           the same name would get a second, heap atom and property lookups
+           keyed on the two would never meet. Only plain strings live there;
+           Symbol.for keys are GLOBAL_SYMBOL and never match. */
+        if (atom_type == JS_ATOM_TYPE_STRING) {
+            i = js_rom_find(str->is_wide_char ? NULL : str8(str),
+                            str->is_wide_char ? str16(str) : NULL, len, h);
+            if (i)
+                goto done;
+        }
+#endif
         h1 = h & (rt->atom_hash_size - 1);
         i = rt->atom_hash[h1];
         while (i != 0) {
@@ -3765,6 +3992,11 @@ static JSAtom __JS_FindAtom(JSRuntime *rt, const char *str, size_t len,
 
     h = hash_string8((const uint8_t *)str, len, JS_ATOM_TYPE_STRING);
     h &= JS_ATOM_HASH_MASK;
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    i = js_rom_find((const uint8_t *)str, NULL, len, h);
+    if (i)
+        return i;   /* immortal: no reference to take */
+#endif
     h1 = h & (rt->atom_hash_size - 1);
     i = rt->atom_hash[h1];
     while (i != 0) {
@@ -3929,6 +4161,20 @@ static JSValue JS_NewSymbolFromAtom(JSContext *ctx, JSAtom descr,
 
     assert(!__JS_AtomIsTaggedInt(descr));
     assert(descr < rt->atom_size);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    {
+        /* A fresh string, never the cached one: JS_NewSymbolInternal turns
+           an atom_type 0 string into the symbol itself. */
+        const JSRomAtom *r = js_rom_atom(descr);
+        if (r) {
+            p = js_rom_new_string(rt, r);
+            if (!p) {
+                return JS_ThrowOutOfMemory(ctx);
+            }
+            return JS_NewSymbolInternal(ctx, p, atom_type);
+        }
+    }
+#endif
     p = rt->atom_array[descr];
     js_dup(JS_MKPTR(JS_TAG_STRING, p));
     return JS_NewSymbolInternal(ctx, p, atom_type);
@@ -3956,6 +4202,11 @@ static const char *JS_AtomGetStrRT(JSRuntime *rt, char *buf, int buf_size,
     } else if (atom >= rt->atom_size) {
         assert(atom < rt->atom_size);
         snprintf(buf, buf_size, "<invalid %x>", atom);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    } else if (js_rom_atom(atom)) {
+        const JSRomAtom *r = js_rom_atom(atom);
+        utf8_encode_buf8(buf, buf_size, (const uint8_t *)js_rom_text(r), r->len);
+#endif
     } else {
         JSAtomStruct *p = rt->atom_array[atom];
         *buf = '\0';
@@ -3990,6 +4241,14 @@ static JSValue __JS_AtomToValue(JSContext *ctx, JSAtom atom, bool force_string)
         JSRuntime *rt = ctx->rt;
         JSAtomStruct *p;
         assert(atom < rt->atom_size);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+        {
+            const JSRomAtom *r = js_rom_atom(atom);
+            if (r) {
+                return js_rom_atom_value(ctx, atom, r);
+            }
+        }
+#endif
         p = rt->atom_array[atom];
         if (p->atom_type == JS_ATOM_TYPE_STRING) {
             goto ret_string;
@@ -4029,6 +4288,14 @@ static bool JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom)
         uint32_t val;
 
         assert(atom < rt->atom_size);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+        /* The generator refuses a flash name that is an index: those are
+           tagged ints and never become atoms at all. */
+        if (js_rom_atom(atom)) {
+            *pval = 0;
+            return false;
+        }
+#endif
         p = rt->atom_array[atom];
         if (p->atom_type == JS_ATOM_TYPE_STRING &&
                 is_num_string(&val, p) && val != -1) {
@@ -4056,6 +4323,42 @@ static JSValue JS_AtomIsNumericIndex1(JSContext *ctx, JSAtom atom)
         return js_int32(__JS_AtomToUInt32(atom));
     }
     assert(atom < rt->atom_size);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    {
+        /* Every typed-array property access by name asks this, so the
+           answer is baked (JS_ROM_NUMERIC); only "Infinity" builds a string
+           to run the real conversion below on. */
+        const JSRomAtom *r = js_rom_atom(atom);
+        if (r) {
+            if (!(r->hash_flags & JS_ROM_NUMERIC)) {
+                return JS_UNDEFINED;
+            }
+            p = js_rom_new_string(rt, r);
+            if (!p) {
+                return JS_ThrowOutOfMemory(ctx);
+            }
+            num = JS_ToNumber(ctx, JS_MKPTR(JS_TAG_STRING, p));
+            if (JS_IsException(num)) {
+                js_free_string(rt, p);
+                return num;
+            }
+            str = JS_ToString(ctx, num);
+            if (JS_IsException(str)) {
+                js_free_string(rt, p);
+                JS_FreeValue(ctx, num);
+                return str;
+            }
+            ret = js_string_eq(p, JS_VALUE_GET_STRING(str));
+            JS_FreeValue(ctx, str);
+            js_free_string(rt, p);
+            if (ret) {
+                return num;
+            }
+            JS_FreeValue(ctx, num);
+            return JS_UNDEFINED;
+        }
+    }
+#endif
     p1 = rt->atom_array[atom];
     if (p1->atom_type != JS_ATOM_TYPE_STRING) {
         return JS_UNDEFINED;
@@ -4172,6 +4475,11 @@ static bool JS_AtomSymbolHasDescription(JSContext *ctx, JSAtom v)
     if (__JS_AtomIsTaggedInt(v)) {
         return false;
     }
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    if (js_rom_atom(v)) {
+        return false;   /* a string, not a symbol */
+    }
+#endif
     p = rt->atom_array[v];
     return (((p->atom_type == JS_ATOM_TYPE_SYMBOL &&
               p->hash == JS_ATOM_HASH_SYMBOL) ||
@@ -8520,7 +8828,7 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
                    sizeof(rt->atom_hash[0]) * rt->atom_hash_size;
     for (i = 0; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
             s->atom_size += (sizeof(*p) + (p->len << p->is_wide_char) +
                              1 - p->is_wide_char);
         }

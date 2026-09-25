@@ -98,6 +98,26 @@ for name in "${names[@]}"; do
       flags+=("${extra[@]}")
     fi
   fi
+  # Same for builtin names in flash (F1, default since 2026-09-25; every
+  # variant but "-norom"): ~440 fewer allocations before the program starts,
+  # plus one per builtin name the program turns into a string value.
+  # "// vmrun-flags:" keeps the heap-atom number; "// vmrun-rom-flags: ..."
+  # carries the re-pinned one, found by aligning the two allocator traces
+  # after "# ready" (the same-size allocation, not just the same output).
+  # With -keepsrc as well, "// vmrun-rom-keepsrc-flags:" wins when a file
+  # has one (the two shifts do not simply add up), else the rom number.
+  if [[ $variant != *-norom* ]]; then
+    rom_line=
+    if [[ $variant == *-keepsrc ]]; then
+      rom_line=$(head -n5 "$src" | grep -m1 '^// vmrun-rom-keepsrc-flags:' || true)
+      rom_line=${rom_line/-keepsrc-flags:/-flags:}
+    fi
+    [ -n "$rom_line" ] || rom_line=$(head -n5 "$src" | grep -m1 '^// vmrun-rom-flags:' || true)
+    if [ -n "$rom_line" ]; then
+      read -r -a extra <<< "${rom_line#// vmrun-rom-flags:}"
+      flags+=("${extra[@]}")
+    fi
+  fi
   # Appended LAST so they beat a per-file "// vmrun-flags:" budget: the
   # point of these two is to re-run the WHOLE corpus at a chosen budget and
   # require the same bytes out (docs/vm/vm-L1-design.md sec.7 invariants 1-5).

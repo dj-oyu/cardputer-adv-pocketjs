@@ -1,4 +1,5 @@
 // vmrun-flags: --module --fail-alloc 1289
+// vmrun-rom-flags: --module --fail-alloc 849
 // vmrun-skip-variants: asan-alloca o2-alloca asan-alloca-keepsrc o2-alloca-keepsrc -- no frame segment on these builds, so the target allocation is attempt 1288 and 1289 misses it (swept, docs/vm-L2-design.md sec.10.3)
 // Regression for the SECOND instance of the resolving-functions double-free
 // (reports/upstream/quickjs-ng-resolving-functions-double-free.md, "A second

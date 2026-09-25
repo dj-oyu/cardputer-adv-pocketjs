@@ -1,5 +1,7 @@
 // vmrun-flags: --fail-alloc 1351
+// vmrun-rom-flags: --fail-alloc 913
 // vmrun-keepsrc-flags: --fail-alloc 1352
+// vmrun-rom-keepsrc-flags: --fail-alloc 914
 // 1352 -> 1351 with CONFIG_POCKET_VM_STRIP_FN_SOURCE: 1 function source copy fewer before the target (allocator traces aligned, docs/vm/vm-L2-results.md sec.6).
 // Regression for the resolving-functions double-free (reports/upstream/
 // quickjs-ng-resolving-functions-double-free.md). js_create_resolving_
