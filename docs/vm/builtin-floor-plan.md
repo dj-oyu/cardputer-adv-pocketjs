@@ -1,0 +1,410 @@
+# 起動床の削減計画: 組み込みの名前と索引を flash に置く
+
+`vm/main` 上の新しい線（**F 系列**、§1.3）。VM の段（L0〜L5、[仕様](quickjs-freertos-vm-spec.md) §4）とは
+独立で、対象は**ゲストが JS ソースを 1 バイトも読む前に払うヒープ**である。計測は
+`tools/vmtest/floor/`（§9）で再現できる。数値はすべて **実測(host, 実機レイアウト)** / **実測(host)** /
+**計算** / **推定** のどれかを付ける。実機の確認はまだ無い（§10）。
+
+## 1. 目的と結論
+
+### 1.1 問題
+
+アプリを起動するたびに `JSRuntime` と `JS_NewContext`（全 intrinsic、`components/pocketjs_guest/src/guest.c:612`）を
+新しく作る。出荷アプリの `js=` は 93〜117 KB で、その大半がこの**床**である（hello はソース 414 B で
+`js=93,310`、実測(device)）。[common-api.md](../api/common-api.md) §7.1 の「床 ＋ ソース 1 バイトあたり約 4.5 B」の
+床のほう。ゲスト上限 160 KiB（`main/app_session.c:756`）のうち床が 6 割近くを占め、capability を足すたびに
+ゲストの部屋が減る（CLAUDE.md）。
+
+### 1.2 結論（先に数字）
+
+実機レイアウト（`-m32 -malign-double`、JSValue 8 B・ポインタ 4 B）で、実機ゲストと同じ課金
+（tlsf ブロック長 = 4 B 切り上げ・最小 12 B、`js=` が数えるもの）で測った床は
+**js=64,420 B / 1,020 ブロック**（実測(host, 実機レイアウト)）。tlsf のブロックヘッダ 4 B × 1,020 ≈ 4 KB は
+`js=` に見えないぶん別にある（計算）。
+
+採る設計は 2 段（§5）:
+
+| 段 | 何を flash へ | 床の減り（計算、実機レイアウト） |
+| --- | --- | --- |
+| F1: ROM atom | 組み込みの名前（文字列 atom 543 個）を flash の記録にする | −21,720 B |
+| F2: 組み込みの索引を持たない | 関数リスト由来のプロパティ（AUTOINIT 407・GETSET 50）を最初に触るまで shape・prop 配列に載せない | −10,368 B（slot）−3,648 B（accessor 関数オブジェクト 57 個） |
+| 合計 | | **64,420 → 28,684 B（−35,736 B、−55%）** |
+
+保守的な見積りである: 値プロパティ（`Math.PI`、関数の `length`/`name`）は残す前提で数え、`atom_array`/`atom_hash`
+（4,892 B）の縮小は数えていない。**すべてのアプリの床が減る**（TypedArray や Date を使うアプリも含む）。
+**減らないもの**: アプリ自身が作るオブジェクトと atom、ソース解析の 4.5 B/byte、および床のうち
+ファーム側の面（§2.3 の約 13 KB、未計算）。
+
+実行時の代償（§7）: 組み込みオブジェクトでの own-property の**外れ**が表探索になる。出荷アプリで最悪の
+imucal が約 53 回/フレーム（実測(host)、外れの回数）。1 回 0.1〜1 µs（**推定、未計測**）なら ≈53 µs/フレーム、
+imucal の JS ターン 4.4 ms（[kasane-text-damage.md](../perf/kasane-text-damage.md) §7、実測(device)）の ≈1.2%。
+
+### 1.3 線の名前 — なぜ L6 ではないか
+
+仕様 §4 の L0〜L5 は「VM スタックをどこに置き、どう動かすか」の梯子で、番号が前提関係を表す
+（L3 は L2 の上、L4 は L3 の後）。床の削減はその梯子に前提を持たず、L2 の結果（`vm-L2`）の上で
+どの段とも独立に進められる。L5（研究）の次に置くと「L5 の後」と読めてしまうので、**別の系列 F
+（floor）** とし、F0（計測、この文書）→ F1 → F2 と番号を振る。決定表は **FD1〜** で、L2/L3 の D1〜D59 と
+衝突しない。ブランチは [vm-branching.md](vm-branching.md) のとおり `vm/f1-rom-atoms` のように切り、
+関所を通したら `vm/main` へ `--no-ff` で戻してタグ `vm-F1` を打つ。
+
+## 2. 床の内訳
+
+`tools/vmtest/floor/floor32.sh` の出力（実測(host, 実機レイアウト)、2026-09-25、`vm/main` 29f6f35）:
+
+```
+sizeof: JSValue=8 ptr=4
+runtime        js= 16176 blocks= 235 hdr=  940 | obj   0 prop    0 shape   0 atom 230 atomB 13515
+full_context   js= 48244 blocks= 785 hdr= 3140 | obj 175 prop  965 shape 104 atom 328 atomB 12949
+TOTAL_FLOOR js=64420
+raw+Base       js= 21548 blocks= 342 hdr= 1368 | obj  68 prop  415 shape  38 atom 165 atomB  6406
+TypedArrays    js= 10456 blocks= 187 hdr=  748 | obj  53 prop  233 shape  32 atom  49 atomB  1922
+MapSet         js=  3228 blocks=  53 hdr=  212 | obj  16 prop   82 shape  10 atom  11 atomB   444
+Date           js=  3240 blocks=  53 hdr=  212 | obj   3 prop   57 shape   2 atom  45 atomB  1787
+DOMException   js=  3216 blocks=  41 hdr=  164 | obj   5 prop   65 shape   2 atom  29 atomB  1284
+RegExp         js=  2632 blocks=  51 hdr=  204 | obj  14 prop   50 shape   5 atom  18 atomB   701
+Promise        js=  1960 blocks=  34 hdr=  136 | obj  10 prop   40 shape   9 atom   5 atomB   178
+WeakRef        js=   772 blocks=  15 hdr=   60 | obj   4 prop   15 shape   4 atom   3 atomB   110
+Proxy          js=   200 blocks=   4 hdr=   16 | obj   1 prop    4 shape   1 atom   1 atomB    38
+JSON           js=     0
+Eval           js=     0
+RegExpCompiler js=     0
+BigInt         js=   384 blocks=   6 hdr=   24 | obj   2 prop    9 shape   2 atom   0 atomB     0
+```
+
+- **runtime 16,176 B のうち atom の文字列が 13,515 B**（`atomB` は `JS_ComputeMemoryUsage` の `atom_size`。
+  `atom_array`/`atom_hash` の表を含む）。`JS_NewRuntime` はオブジェクトを 1 つも作らず、予定義 atom
+  229 個（`quickjs-atom.h` の `DEF` 行数）の `JSString` を作る。
+- **context 48,244 B** は 175 オブジェクト・965 プロパティ・104 shape・328 atom。`raw+Base`
+  （`JS_NewContextRaw` + `JS_AddIntrinsicBaseObjects`）21,548 B が最大で、TypedArrays 10,456 B が次。
+- 各 intrinsic の行は Base の上に**単独で**足したときの増分（計算の前提: 順序依存の共有 atom は
+  最初に足したものに付く）。
+
+### 2.1 何が床を作っているか（heap walk）
+
+`tools/vmtest/floor/lazyfloor.sh`（`quickjs.c` を `#include` して `rt->atom_array` と `rt->gc_obj_list` を
+中から歩く。実測(host, 実機レイアウト)）:
+
+```
+floor_js=64420 blocks=1020
+walked: atoms_str=21720 (n=543, symbols kept 14) atom_tables=4892 objects=8400 (n=175)
+        prop_arrays=8464 own_shapes=16432 -> sum=59908 (93% of floor; rest = shared shapes,
+        other gc objects n=1, misc)
+props: autoinit=407 getset=50 plain=508; accessor fn objects=57 (~64 B each)
+SAVE flash_atoms=21720 lazy_slots=10368 lazy_accessor_fns=3648 total=35736
+FLOOR now=28684 (after)
+```
+
+| 項目 | B | 備考 |
+| --- | --- | --- |
+| 文字列 atom 543 個 | 21,720 | 全部が組み込みの名前（アプリはまだ無い）。1 個 = `tl(20 + len + 1)` |
+| symbol atom 14 個 | （据え置き） | 予定義 well-known symbol。値としての同一性が要る |
+| `atom_array` + `atom_hash` | 4,892 | 縮小は F の数字に入れていない |
+| `JSObject` 175 個 | 8,400 | 48 B/個 |
+| prop 配列 | 8,464 | `JSProperty` 8 B × `prop_size`（成長規則で余りを持つ） |
+| 専有 shape（ref_count 1） | 16,432 | `get_shape_size` = hash×4 + `sizeof(JSShape)` + `prop_size`×8 |
+| 歩いた合計 | 59,908 | 床の 93%。残りは共有 shape・その他 |
+
+**プロパティ 965 個の内訳: AUTOINIT 407、GETSET 50、値 508。** AUTOINIT は「初めて読まれたら関数
+オブジェクトを作る」印だけで、関数本体はまだ無い（§3）。つまり床のうち shape と prop 配列は、**まだ何も
+作られていないものの索引**である。
+
+### 2.2 実機の床との差
+
+`js=` の床は文書上 **約 77.3 KiB**（common-api §7.1、deskclock `js=80,653` からの逆算、実測(device)）で、
+ここで測った 64,420 B とは **約 13 KB** ずれる。差はファームが `JS_NewContext` の後に注入するもの
+（`console`、`pocket` の骨組みと `capabilities`、quickjs-libc の helper、`pocketjs_guest_quickjs_install_once`）と
+考えられるが、**未計算**である。この文書の削減額はエンジン側の床（64,420 B）に対するもので、ファーム側の
+13 KB には効かない。F1 で組み込み名を ROM にすると、ファームが `JS_NewCFunction` 等で足す名前のうち
+ROM に載っていないもの（`pocket`、`capabilities`、…）は今までどおりヒープ atom になる。ファームの面の
+名前も ROM 表に含めるかは F1 の実装時に決める（表は生成物なので追加は容易。FD5）。
+
+## 3. データはどこにあるか（コードで確認したこと）
+
+`components/quickjs-ng/quickjs-ng/quickjs.c` の行番号は `vm/main` 29f6f35 時点。
+
+- **組み込みの定義は `static const JSCFunctionListEntry` の表**（例 `js_typed_array_base_proto_funcs`
+  65218 行）と予定義 atom の名前列 `js_atom_init`（1305 行、`quickjs-atom.h` の 229 個）。すべて `const` →
+  `.rodata` → **flash**。ESP32-S3 では cache 経由でメモリマップされるので、読むためのコピーは要らない。
+- **runtime 生成時**、`JS_InitAtoms`（3473 行）→ `__JS_NewAtomInit`（3746 行）が名前ごとにヒープの
+  `JSString` を確保して文字を memcpy する。`struct JSString`（752 行）のヘッダは 32-bit で 20 B
+  （ref_count、len/wide、hash/kind/atom_type、hash_next、first_weak_ref）。"subarray"（8 文字）は
+  `tl(20+8+1)` = 32 B のヒープ。
+- **メソッドの関数オブジェクトは既に遅延**: `JS_InstantiateFunctionListItem`（43798 行）は `JS_DEF_CFUNC` を
+  `JS_PROP_AUTOINIT` のプロパティとして表の項目を指すだけにし、関数オブジェクトは最初の読みで作る。
+  getter/setter（`JS_DEF_CGETSET`、43842 行）は即時に作る（上流のコメント "XXX: use autoinit again ?"）。
+  したがってヒープに在るのは**索引**（オブジェクト・shape・prop 配列）と**名前**（atom 文字列）である。
+- **const atom は既に不死**: index < `JS_ATOM_END` を `__JS_AtomIsConst`（3266 行）が判定し、`JS_DupAtom`/
+  `__JS_FreeAtom` が参照数を触らない。`rt->atom_array[` の参照は 33 箇所（§11）。
+- **bytecode を flash から実行する道は無い**: `quickjs.h:1342` の `JS_READ_OBJ_ROM_DATA` は
+  「obsolete, broken by ICs」で 0。§4-B。
+
+## 4. 検討して捨てた案
+
+| 案 | 内容 | 捨てた理由 |
+| --- | --- | --- |
+| **A. intrinsic を群ごとに遅延** | TypedArrays・Date・Map/Set・DOMException・WeakRef・BigInt・Proxy を最初に触るまで作らない | 出荷アプリはどれも使わない（`pocket.fs/io/net/capture` が返す ArrayBuffer だけがネイティブ側で作られる）ので **約 21.5 KB**（計算、§2 の合計）減るが、使うアプリには 0。§5 の設計は群単位でなく名前・プロパティ単位で同じ節約を全アプリに与え、A を包含する。**F2 の後で群遅延を重ねる価値があるかは、F2 の実測で決める**（残る値プロパティ・オブジェクト本体 8,400 B の一部が対象） |
+| **B. bytecode の ROM 実行** | 組み込みや事前コンパイル済みアプリを flash の bytecode から直接動かす | `JS_READ_OBJ_ROM_DATA` が「IC で壊れた」として 0 固定。インラインキャッシュが bytecode に書き込む設計なので、この engine では in-place 実行できない。事前コンパイルが省けるのは解析の一時領域だけで、床には効かない |
+| **C. 名前を flash に置いたまま書き込みを握りつぶす** | `JSString` を `.rodata` に置き、ref_count の増減が flash への書き込みになっても無視されることに賭ける | ESP-IDF の cache エラーハンドラ（`components/esp_system/port/soc/esp32s3/cache_err_int.c`）は "Dbus write to cache rejected" と "Write back error occurred while dcache tries to write back to flash" を panic として列挙する。後者は cache line の追い出し後に来る**非同期の割り込み**なので、該当 store を飛ばす細工ができない。文書化されていない「黙って落ちる」挙動に依存するのは不健全。**実機で試していない**（IDF v6.0.1 `C:\esp\v6.0.1\esp-idf` の同ファイル 84 行・99 行に両文言があることは確認。挙動は IDF ソースからの推論。§10） |
+| **D. 参照数の増減すべてにアドレス判定を足す** | `JS_DupValue`/`JS_FreeValue` で flash 番地なら触らない | インタプリタの**最も熱い経路**に分岐を足す。名前だけのために全値の操作を遅くする理由が無い |
+
+## 5. 採る設計
+
+### 5.1 F1: ROM atom — flash 常駐の atom 記録
+
+**FD1. ROM atom は `JSString` ではなく専用の記録にする。**
+
+```c
+/* One per builtin name, in .rodata. No ref_count, hash_next or weak-ref
+ * fields: nothing ever writes to it, so it can live in flash. */
+typedef struct { uint32_t hash_type; uint16_t len; uint16_t off; } JSRomAtom;   /* 8 B */
+extern const JSRomAtom js_rom_atoms[];   /* generated */
+extern const char      js_rom_chars[];   /* one blob, all ASCII */
+```
+
+- **番号空間**: `1 .. ROM_END` が ROM atom、それより上が今までのヒープ atom。`rt->atom_array` は
+  `atom - ROM_END` で引く（ROM ぶんの 4 B × 約 550 = 2.2 KB のポインタ表を持たない。計算）。
+  `__JS_AtomIsConst` 相当の判定 `atom < ROM_END` を、`rt->atom_array[` の 33 箇所（§11）が分岐に使う。
+- **ヒープに残す const atom**: well-known symbol 14 個（値としての同一性が要る）と空文字列
+  `JS_ATOM_empty_string`（`js_empty_string` 4411 行が**値として**毎回返す。ROM だと毎回 materialize に
+  なる）。これらは番号 `1 .. K` に**並べ替え**て置き、`K .. ROM_END` を ROM 文字列にする。これで
+  「番号 < K → ヒープの const、< ROM_END → ROM、それ以上 → 動的」の 3 区間になり、記録に kind を持たせずに済む。
+  `quickjs-atom.h` の順序は生成し直す（bytecode 形式が変わる。仕様 §12.2「キャッシュ形式を識別・無効化」）。
+- **名前 → atom の検索**（parser の識別子、`JS_NewAtom*`、`find_atom` 43755 行）は、**ビルド時に生成した
+  ROM 表**（`hash & mask` で引く固定ハッシュ表、または hash 順ソート + 二分探索。生成器が決める）を先に
+  引き、外れたら今までの動的表へ行く。ROM 表はハッシュの再構築（`JS_ResizeAtomHash` 3442 行が全 atom の
+  `hash_next` を書き換える）に**関与しない** — ROM 記録には `hash_next` が無い。
+- **文字列値への脱出**（`__JS_AtomToValue` 3982 行 / `JS_AtomToString` / `JS_AtomGetStrRT` 3949 行:
+  `Object.keys(Math)`、`fn.name`、エラー文言など）は、その場でヒープの `JSString` を materialize する。
+  普通の文字列値なので参照数で消える。**キャッシュは任意**（FD3 で「まず持たない、脱出回数を数えてから」）。
+  materialize した文字列を `JS_NewAtomStr` に戻したときは ROM 検索が同じ番号を返すので、`p->atom_type` に
+  頼る同一性は壊れない。
+- **ROM の名前一覧**: 予定義 229 個 ＋ `JS_NewContext` 直後に存在する全文字列 atom（=組み込みの関数
+  リストが作る名前。今日の数で 543 個）。**ホストの生成器**が `JS_NewContext` 後の atom 表を dump して
+  表を生成する（`lazyfloor.c` の walk がその原型）。
+- **flash の費用（推定）**: 記録 543 × 8 = 4,344 B ＋ 文字 ≤ 10,860 B（21,720 − 543 × 20、切り上げ込みの
+  上界）＋ 検索表 ≈ 1〜2 KB → **≤ 15 KB flash**（計算）。`.rodata` の 543 個の `js_atom_init` 文字列は
+  blob に置き換わるので、その分は相殺される。
+
+**FD2. ROM 記録に `is_numeric` の答えを焼く。** `JS_AtomIsArrayIndex`（4021 行）と
+`JS_AtomIsNumericIndex1`（4047 行）は文字列の純関数なので生成時に計算し、`hash_type` の空きビットに置く。
+組み込み名に配列添字は無いが、`"Infinity"`・`"NaN"` は予定義 atom で、`JS_AtomIsNumericIndex1` が
+それを数値として扱う（TypedArray の `[[DefineOwnProperty]]` 用）。生成器は `JS_AtomIsNumericIndex1` の
+現行実装で答えを作り、対照（現行ビルド）と同じ答えになることを検査に含める（§8 の負の対照 N1c）。
+
+**FD3. 脱出文字列のキャッシュは最初は持たない。** F1 の計装で「ROM atom → 文字列値」の回数をアプリ
+ごとに数え（§8 F1 の計装）、フレームあたりの回数が 0 でないアプリが出たときに検討する。
+
+### 5.2 F2: 組み込みの索引を持たない
+
+**FD4. 組み込みオブジェクトは、関数リスト由来のプロパティ（AUTOINIT のメソッドと GETSET の accessor）を
+最初に触るまで shape に載せず、flash の関数リストだけを持つ。**
+
+- `JS_SetPropertyFunctionList(ctx, obj, tab, len)` は、対象オブジェクトに「未展開のリスト」
+  `(tab, len, insert_index)` を記録するだけになる。`insert_index` はそのときの `prop_count`
+  （定義順を保つため。§6 リスク「プロパティ順序」）。表の項目は生成時に **ROM atom 番号**を持つ
+  （`JSCFunctionListEntry.name` が文字列なので、生成器が番号付きの並列表を出すか、`find_atom` の結果を
+  一度だけ引いて `uint16_t` の表に置く。整数比較で探せることが要点）。
+- **own-property の外れ**（`find_own_property` が NULL）で、対象が未展開リストを持てば表を探す
+  （整数比較、二分探索または線形。1 表 ≤ 40 項目程度）。当たれば**その 1 項目だけ**を今日と同じ形で shape に
+  materialize する（AUTOINIT なら AUTOINIT のまま、GETSET なら accessor 関数を作って GETSET）。
+  同一性 `Array.prototype.map === Array.prototype.map` は、2 回目からは shape にあるので保たれる。
+- **全展開**: 列挙（`getOwnPropertyNames` / `ownKeys` / for-in / `JSON.stringify`）、`delete`、
+  `freeze`/`seal`/`preventExtensions`、`defineProperty`、`setPrototypeOf`、Proxy の target 化、
+  `JS_GetOwnPropertyNames` を通る C API — の**前**に、リストを定義順に `insert_index` の位置へ全部
+  materialize して「展開済み」の旗を立てる。以後の挙動は今日と同一。
+- **1 オブジェクトが複数のリストを受ける場合**（global、TypedArray の base prototype 等。個数は F2 の
+  生成器で数える。§10）は、リストの配列を持つか、リストごとに `insert_index` を持つ小さな配列にする。
+- **代償**: 外れ経路の表探索（§7）と、全展開が起きたときのまとまった確保（今日は起動時に払っているもの）。
+  Kasane や `pocket.*` の C 側が組み込みの prototype を列挙する箇所があれば起動時に全展開が走って節約が
+  消えるので、F2 の計装で「どのオブジェクトがいつ全展開されたか」を出す（§8 F2 の計装）。
+
+**FD5. ファームが `JS_NewContext` の後に足す名前を ROM 表へ入れるかは F1 の実機計測後に決める。**
+入れると §2.2 の 13 KB のうち atom ぶんが減るが、表の生成にファームの面の一覧が要り、面を足すたびに
+生成し直すことになる。入れなくても正しさは変わらない（動的 atom になるだけ）。
+
+### 5.3 F1 と F2 の関係
+
+F2 は F1 に依存する（表の項目を ROM atom 番号で持つため）。F1 単独でも 21,720 B は取れるので、
+F1 を先に `vm/main` へ戻し、F2 は別の枝で進める。
+
+## 6. リスク
+
+| # | リスク | 扱い |
+| --- | --- | --- |
+| R1 | **プロパティ順序**: 遅延 materialize の順が定義順と違うと `Object.keys` の並びが変わる（Test262 が見る） | 全展開を「列挙の前」に定義順・`insert_index` 位置で行う（FD4）。部分展開の状態で列挙に入らないことを、列挙の全入口（`JS_GetOwnPropertyNamesInternal`、for-in の enum 生成、Proxy）で保証。コーパスに順序検査（§8 N2a） |
+| R2 | **脱出経路の漏れ**: ROM atom の `JSAtomStruct*` を期待して `atom_array` を引く経路を見落とすと、`atom - ROM_END` が負になって範囲外読み | 33 箇所の台帳（§11）を 1 行ずつ閉じる。ホストの負の対照 N1b（ROM 表を読み取り専用ページに置き、書けば SEGV）と ASan |
+| R3 | **symbol**: well-known symbol は値の同一性（`Symbol.iterator === Symbol.iterator`）とプロパティ鍵の両方で使われる | ヒープに残す（FD1）。`JS_NewSymbolFromAtom` 3924 行の `descr` が ROM 文字列のときは materialize |
+| R4 | **`JS_ResizeAtomHash`**: 動的表の再ハッシュが ROM atom を鎖に混ぜると `hash_next` への書き込みになる | ROM 記録は動的表に入らない（別表で先に引く）。N1b が検出する |
+| R5 | **UTF-8 / wide 文字列からの `JS_NewAtom`**: ROM 名は ASCII だが、同じ文字列が 16-bit の `JSString` で来ることがある（`String.fromCharCode`、`toUpperCase` の結果など） | ROM 検索は `js_string_memcmp` と同じく幅の違う比較を受け付ける。ハッシュは `hash_string` と同じ式で生成（生成器がホストの `hash_string` を呼ぶ） |
+| R6 | **GC / 解放**: ROM atom は解放されない（不死）。`JS_FreeRuntime` の解放ループと leak 検査が ROM を飛ばす必要 | 台帳 #1・#2 |
+| R7 | **`JS_AtomIsNumericIndex`** の `"Infinity"`/`"NaN"` | FD2、N1c |
+| R8 | **解析時の検索性能**: ソースの識別子ごとに ROM 表を 1 回引く | 固定ハッシュ表なら 1 probe ＋ memcmp。今日も動的ハッシュ表を引いているので、ROM 表は**追加**の 1 回（推定: 数十 ns/識別子、解析時のみ。実測は F1 の関所 §8 で `timing.py`） |
+| R9 | **外れ経路の性能**（F2） | §7。1 回の単価は未計測 |
+| R10 | **ファームの C 側が prototype を列挙して全展開を誘発**（F2） | 計装で検出（§8 F2） |
+| R11 | **bytecode 形式**: atom 番号の付け替えで `JS_WriteObject` の出力が変わる | 保存済み bytecode はこのプロジェクトに無い（毎回ソースから解析）。台帳 #26・#27 で形式の版を上げる |
+| R12 | **JSString の atom_type**: materialize した文字列を再び atom にするとき、`JS_NewAtomStr` は `p->atom_type != 0` なら既存 atom とみなす | materialize する `JSString` は `atom_type = 0` で作り、通常の検索経路で ROM 番号に戻す |
+
+## 7. 実行時の代償（F2）の実測(host)
+
+`tools/vmtest/floor/lazyprobe.sh`: 実物の QuickJS と実物の `pocket.kasane`、他の `pocket.*` は
+stub（JS 側の小さな代替）。300 フレーム、30 フレームごとに Enter。`find_own_property` に計数を挟んだ
+`quickjs.c` の写しを使う（リポジトリの `quickjs.c` は触らない）。数えたのは
+**`JS_NewContext` 直後に存在したオブジェクト（=組み込み）での own-property の外れ**と、
+**関数リスト由来プロパティの初回ヒット**（F2 なら materialize になるもの）。
+
+```
+apps/hello/main.js          startup: miss=8   first=1 | per frame: miss=5.1  first=0.00
+apps/imucal/imucal.js       startup: miss=16  first=3 | per frame: miss=58.1 first=0.01
+apps/pet/pet.js             startup: miss=171 first=5 | per frame: miss=18.5 first=0.00
+apps/companion/companion.js startup: miss=17  first=2 | per frame: miss=6.5  first=0.00
+apps/deskclock/deskclock.js startup: miss=6   first=0 | per frame: miss=5.0  first=0.00
+apps/kasane/demo.js         FAIL (stub 不足: TypeError: not a function)
+```
+
+| アプリ | 起動時の外れ | 外れ/フレーム | アプリ起因/フレーム（ハーネス自身の `frame()` 呼び出しの床 ≈5 を引く。deskclock は `frame` を持たず 5.0 なのでそれが床） | 初回展開 |
+| --- | --- | --- | --- | --- |
+| hello | 8 | 5.1 | ≈0 | 1 |
+| deskclock | 6 | 5.0 | 0（床） | 0 |
+| companion | 17 | 6.5 | ≈1.5 | 2 |
+| pet | 171 | 18.5 | ≈13.5 | 5 |
+| imucal | 16 | 58.1 | ≈53 | 3（+0.01/フレーム） |
+
+外れは主に「prototype 鎖を上る途中で組み込み prototype を通過する」もの（アプリ自身のオブジェクトの
+プロパティを読むと `Object.prototype` で外れる）。**1 回の単価は未計測**: 整数比較の二分探索で 0.1〜1 µs
+（推定）。imucal で ≈53 µs/フレーム ≈ JS ターン 4.4 ms の 1.2%（計算）。参考の速度事実: 呼び出し ≈3.4 µs、
+メソッド呼び出し ≈6.8 µs（[vm-L2-results.md](vm-L2-results.md) §3.5 から計算）。imucal だけが JS を
+フレームの最大項に持つ（他は描画が支配）。Kasane デモは stub 不足で未計測（§10）。
+
+## 8. 段階ごとの移行計画と関所
+
+各段は `CONFIG_POCKET_VM_*` のビルド時選択で従来経路へ戻せるようにする（仕様 §12.2）。関所は
+「既存の合格項目を維持」（仕様 §12.1）に、**新しい機構ごとの負の対照**を足す — 検出器は、検出すべき
+ものを一度検出してみせるまで信用しない（[vm-L3-results.md](vm-L3-results.md) の毒の対照と同じ流儀）。
+
+### F0（この文書、完了）
+
+- 床の内訳・節約の計算・外れ回数の実測(host)。道具は `tools/vmtest/floor/`（§9）。
+
+### F1: ROM atom（`CONFIG_POCKET_VM_ROM_ATOMS`、既定 n → 関所後 y）
+
+1. 生成器 `tools/vmtest/floor/gen_rom_atoms.py`（予定）: ホストで `JS_NewContext` 後の atom を dump し、
+   `quickjs-rom-atoms.h`（記録・blob・検索表・並べ替えた `quickjs-atom.h`）を出す。生成物はリポジトリに
+   入れ、生成器の再実行で差分 0 を検査に含める。
+2. 台帳 §11 の 33 箇所を 1 行ずつ閉じ、台帳を `vm-ledger/10-rom-atoms.md` に移して「各行の処置」を書く。
+3. 計装（既定 n）: ROM atom → 文字列値の脱出回数、ROM 表の検索回数と衝突長。
+4. **関所（ホスト）**: `tools/vmtest/run.sh` の全変種（asan・o2・`--force-yield`・`-keepsrc`）でコーパス
+   バイト一致。`tools/vmtest/test262.py` が `test262-baseline.txt` と同一（asan と o2、`--force-yield`）。
+   `timing.py` で解析時間の退行が配置差の床（15%）以内。
+   - **N1a（負の対照: 検出器が働く）**: ROM 表から名前を 1 つ（例 `subarray`）わざと抜いたビルドで、
+     その名前が動的 atom として作られ、コーパスが通る（フォールバックが生きている証拠）。
+   - **N1b（負の対照: 書き込み）**: ホストで ROM 記録と blob を `mprotect(PROT_READ)` したページに置き、
+     33 箇所のどれかが書けば SEGV。わざと 1 箇所を戻して SEGV が出ることを確認してから、全部閉じた
+     状態で全変種を通す。
+   - **N1c**: `JS_AtomIsNumericIndex1` の焼き込み結果が現行実装と全 ROM 名で一致。
+5. **関所（実機、`build_*` を分ける）**: `tools/smoke_device.py --cycles 20`、`tools/test_settings.py`、
+   `tools/memlog.py --map ... --port COM3 --check`。アプリごとの `js=` が **≈ −21.7 KB**（計算値。実機の
+   値は tlsf の実長課金なので多少ずれる）。既定ビルドの `idf.py size` で flash の増分 ≤ 15 KB（推定）を確認。
+   `benchmark_app.py` で JS ターンが動いていないこと（同一バイナリ内比較でないので 15% 未満の差は主張しない）。
+
+### F2: 組み込みの索引を持たない（`CONFIG_POCKET_VM_LAZY_BUILTINS`、既定 n → 関所後 y）
+
+1. `JS_SetPropertyFunctionList` の遅延化、外れ経路の表探索、全展開の入口の列挙（§5.2）。
+2. 計装（既定 n）: オブジェクトごとの外れ回数・初回展開・全展開の発生と誘発元（C API か JS か）。
+3. **関所（ホスト）**: F1 と同じ全変種・Test262 同一。
+   - **N2a（負の対照: 順序）**: コーパスに「全組み込みオブジェクトの `Object.getOwnPropertyNames` と
+     descriptor を、触る前・1 つ触った後・全展開後に印字」する検査を足し、期待値は**現行ビルド**で作る。
+     わざと `insert_index` を無視した実装で失敗することを一度見せる。
+   - **N2b（負の対照: 同一性）**: `Array.prototype.map === Array.prototype.map` 等を全リスト項目で
+     機械的に生成して比較。materialize を「毎回作り直す」誤実装で落ちることを見せる。
+   - **N2c**: 「起動時に全展開」モードのビルドが、現行ビルドとコーパス・Test262 で同一（遅延を切れば
+     今日に戻ることの証明）。
+4. **関所（実機）**: F1 と同じ。`js=` が合計で **≈ −35.7 KB**（計算、F1 と合わせて）。`lazyprobe` の外れ
+   回数を実機の計装でも出し、ホストの表（§7）と桁が合うこと。imucal の JS ターンが `benchmark_app.py` で
+   退行していないこと（配置差の床 15% 以内なら「不変」）。
+
+### F3（任意、F2 の実測後に判断）
+
+- `atom_array`/`atom_hash` の初期サイズ縮小（4,892 B のうち）。
+- 脱出文字列のキャッシュ（FD3）。
+- 群単位の intrinsic 遅延（§4-A）を F2 の上に重ねる価値があるか。
+- §2.2 のファーム側 13 KB の計算と、ファームの面の名前を ROM 表に入れる（FD5）。
+
+## 9. 再現（`tools/vmtest/floor/`）
+
+すべて WSL。PowerShell から `wsl -e bash <ファイル>` で呼ぶ（`bash -lc "…$…"` は `$` が壊れるので
+スクリプトをファイルに置いてある。Git Bash は `/mnt/c` を書き換えるので PowerShell から呼ぶ）。
+
+```powershell
+wsl -e bash tools/vmtest/floor/floor32.sh     # §2: intrinsic ごとの床（-m32 -malign-double、.cache/vmtest32 を作る）
+wsl -e bash tools/vmtest/floor/lazyfloor.sh   # §2.1・§6: heap walk と F1/F2 の節約（floor32.sh の後）
+wsl -e bash tools/vmtest/floor/lazyprobe.sh   # §7: 出荷アプリの外れ回数（64-bit host、.cache/vmtest-floor）
+```
+
+| ファイル | 何を測るか | 前提 |
+| --- | --- | --- |
+| `floor32.c` / `floor32.sh` | `JS_NewRuntime2` と各 `JS_AddIntrinsic*` の `js=` を、実機ゲストの課金（tlsf ブロック長）で | `tools/vmtest/m32_sysroot.sh`（初回は i386 の deb を取得）、`build.sh o2` を `VMTEST_OUT=.cache/vmtest32` で |
+| `lazyfloor.c` / `lazyfloor.sh` | `quickjs.c` を `#include` して atom 表と GC リストを歩き、§5 の 2 段で消えるバイトを数える | `floor32.sh` が作った `.cache/vmtest32/obj-o2` |
+| `lazyprobe_patch.py` / `lazyprobe.c` / `lazyprobe.sh` | `find_own_property` に計数を足した `quickjs.c` の写しで、出荷アプリを Kasane ごと 300 フレーム走らせる | `tools/make_font.py`、`apps/pet/assets/pets-compact.bin`、`tools/hostshim/` |
+
+`lazyfloor.c` の節約は**計算**である（walk した現状の shape/prop 配列から、値プロパティだけで作り直した
+ときの大きさを `resize_properties` の成長規則で求めている）。実装後の実測と一致する保証は無く、F1/F2 の
+関所で `js=` を測って置き換える。
+
+## 10. 計測の穴（正直に）
+
+| 穴 | 状態 |
+| --- | --- |
+| F2 の外れ 1 回の単価 | **未計測**。0.1〜1 µs は推定。F2 の実装で `callbench` 流に同一バイナリ内で測る |
+| 床のうちファーム側の約 13 KB | **未計算**（§2.2）。`pocketjs_guest_quickjs_install_once` をホストでリンクして `floor32` と同じ課金で測るのが次の手 |
+| 実機の確認 | **無い**。数字はすべてホスト（実機レイアウト）か計算。実機の `js=` は tlsf の実長課金（backlog #9）なので、切り上げの分だけずれる |
+| Kasane デモの外れ回数 | stub 不足で未計測 |
+| 案 C（flash への書き込み）の実機挙動 | 未検証（IDF v6.0.1 の `cache_err_int.c` に panic 文言があることは確認。実際に書いて panic するかは実機で試していない） |
+| 1 オブジェクトが受ける関数リストの個数 | 未集計（F2 の生成器で出す） |
+| 解析時の ROM 検索の費用 | 未計測（R8） |
+| 4.5 B/byte のうち atom が占める割合 | 未計測。アプリの識別子が ROM 名と一致するぶん（`length`・`push`・`map` …）は F1 で動的 atom にならないので、ソース由来の atom も少し減るはずだが数えていない |
+
+## 11. 付録: `rt->atom_array[` の 33 箇所（`quickjs.c`、29f6f35）
+
+F1 の台帳の原型。処置の分類: **境界**（`< ROM_END` の分岐を足す）、**除外**（ROM は通らない/飛ばす）、
+**読替**（ROM 記録から同じ情報を読む）、**脱出**（`JSString` を materialize）、**索引**（`atom - ROM_END`）。
+「？」は読み切れていないもの。
+
+| # | 行 | 関数 | 何をしているか | 処置 |
+| --- | --- | --- | --- | --- |
+| 1 | 2706 | `JS_FreeRuntime`（`ENABLE_DUMPS` の leak 検査） | 全 atom を走査し `i >= JS_ATOM_END` か ref_count≠1 を漏れとして印字 | 除外（動的区間だけ走査） |
+| 2 | 2761 | `JS_FreeRuntime` | 全 atom を `js_free_rt` | 除外（動的区間だけ） |
+| 3 | 3419 | `JS_DumpAtoms` | ハッシュ鎖を辿って印字 | 除外（ROM は鎖に無い。ROM 表を別に印字） |
+| 4 | 3430 | `JS_DumpAtoms` | 全 atom を印字 | 索引・読替 |
+| 5 | 3456 | `JS_ResizeAtomHash` | 鎖の全要素の `hash_next` を書き換える | 除外（ROM は鎖に無い。N1b で検出） |
+| 6 | 3510 | `JS_DupAtomRT` | `!__JS_AtomIsConst` なら ref_count++ | 境界（既存の判定を `ROM_END` に） |
+| 7 | 3523 | `JS_DupAtom` | 同上 | 境界 |
+| 8 | 3538 | `JS_AtomGetKind` | `p->atom_type` を読む | 読替（`hash_type` に型がある） |
+| 9 | 3568 | `js_get_atom_index` | `JSAtomStruct*` から番号へ（`p->hash_next` を索引に使う経路） | 除外？ ROM は `JSAtomStruct*` として現れないはずだが、materialize した文字列が渡らないことを要確認 |
+| 10 | 3572 | `js_get_atom_index` | 同上（線形探索側） | 同上 |
+| 11 | 3604 | `__JS_NewAtom` | 動的ハッシュ鎖で既存 atom を探す | 境界（この前に ROM 表を引く） |
+| 12 | 3672 | `__JS_NewAtom` | `atom_array` を伸ばして自由リストを繋ぐ | 索引 |
+| 13 | 3714 | `__JS_NewAtom` | 自由スロットから次を取る | 索引 |
+| 14 | 3715 | `__JS_NewAtom` | 新 atom を格納 | 索引 |
+| 15 | 3771 | `__JS_FindAtom` | C 文字列で既存 atom を探す（作らない） | 境界（ROM 表を先に） |
+| 16 | 3796 | `JS_FreeAtomStruct` | 鎖から外す（先頭） | 除外（ROM は解放されない） |
+| 17 | 3804 | `JS_FreeAtomStruct` | 鎖から外す（途中） | 除外 |
+| 18 | 3813 | `JS_FreeAtomStruct` | スロットを自由リストへ | 除外・索引 |
+| 19 | 3831 | `__JS_FreeAtom` | ref_count-- して 0 なら解放 | 境界（呼び出し側の const 判定を `ROM_END` に） |
+| 20 | 3920 | `JS_NewSymbolInternal` | symbol atom を値にする | 除外（symbol はヒープ、番号 < K） |
+| 21 | 3932 | `JS_NewSymbolFromAtom` | 説明 atom の `JSString` で symbol を作る | 脱出（`descr` が ROM なら materialize） |
+| 22 | 3960 | `JS_AtomGetStrRT` | 文字を C バッファへ（エラー文言・dump） | 読替（blob から読む） |
+| 23 | 3993 | `__JS_AtomToValue` | atom を文字列値に | 脱出 |
+| 24 | 3999 | `__JS_AtomToValue` | symbol の説明が無いとき空文字列 | 除外（空文字列はヒープ、FD1） |
+| 25 | 4032 | `JS_AtomIsArrayIndex` | `atom_type` と `is_num_string` | 読替（FD2 の焼き込み） |
+| 26 | 4059 | `JS_AtomIsNumericIndex1` | 文字列を数値へ変換して正準性を見る | 読替（FD2） |
+| 27 | 4175 | `JS_AtomSymbolHasDescription` | symbol の説明の有無 | 除外（symbol はヒープ） |
+| 28 | 4411 | `js_empty_string` | 空文字列 atom を値として返す（高頻度） | 除外（ヒープに残す、FD1） |
+| 29 | 8519 | `JS_ComputeMemoryUsage` | `atom_array` の大きさを `atom_size` に足す | 索引（動的区間だけ数える。`js=` の床が減る根拠） |
+| 30 | 8522 | `JS_ComputeMemoryUsage` | 各 atom の文字列サイズを足す | 除外（ROM は数えない） |
+| 31 | 42224 | `JS_WriteObjectAtoms` | bytecode 書き出し。const は番号、他は文字列 | 境界（ROM も番号で書く。形式の版を上げる、R11） |
+| 32 | 43574 | `JS_ReadObjectRec` | bytecode 読み込みで symbol atom を値に | 境界？ 読み込み側の const 判定を `ROM_END` に。symbol 以外の ROM 番号が来る経路が無いか要確認 |
+| 33 | 43755 | `find_atom` | 関数リストの `name`（`[Symbol.x]` 記法つき）から atom | 境界（ROM 表を先に。F2 はここを生成時に済ませる） |
+
+「境界」は 33 箇所のほかに、`__JS_AtomIsConst` を呼ぶ側（3509・3521・3592 行など）と、`JS_ATOM_END` を
+直接比べる箇所（2708 行、`JS_InitAtoms` の 3488 行）にもある。F1 の台帳はこれらも行にする。
