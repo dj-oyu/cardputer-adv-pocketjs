@@ -13,7 +13,12 @@ const coldLine = ['cold-set', Array.isArray(cold), cold instanceof Array,
 // the object (listing puts every pending entry in the shape first).
 const coldDel = ['cold-delete', delete Date.prototype.getYear, 'getYear' in Date.prototype,
   delete Math.LN2, 'LN2' in Math, delete Reflect.isExtensible, typeof Reflect.isExtensible].join(' ');
-const out = [coldLine, coldDel];
+// Names that are NOT entries but look like one to a matcher: a prefix, a
+// trailing NUL, a string spelled like a symbol entry, the empty string.
+const coldKey = ['cold-key', Math.ma, Math['max\0'], Math['[Symbol.toStringTag]'],
+  JSON['[Symbol.toStringTag]'], Math[''], Reflect.ownKey, 'ma' in Math, Math['māx'],
+  typeof Math.max, Math[Symbol.toStringTag], String(Object.keys(Math).length)].map(String).join(' ');
+const out = [coldLine, coldDel, coldKey];
 const p = (...a) => out.push(a.join(' '));
 const keys = o => Reflect.ownKeys(o).map(String).join(',');
 const desc = (o, k) => {
