@@ -409,7 +409,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // AFTER the probe block on purpose: 'G'..'K' is the probe's segment range, so
     // with CONFIG_POCKET_VM_PROBE on a 'K' still selects probe segment 4, and
     // with it off (every shipping build, and the KSN ones) 'K' reaches the demo.
-    if(c=='K') { atomic_store(&diagnostic,c); return false; }
+    if(c=='K'||APP_FLOOR_BENCH_KEY(c)) { atomic_store(&diagnostic,c); return false; }
     // The volume pair and '?', as TEXT rather than as nav, because that is what
     // the Cardputer's own keys produce and what volume_key() and an overlay
     // read. Without them a host script could reach every other key on the home

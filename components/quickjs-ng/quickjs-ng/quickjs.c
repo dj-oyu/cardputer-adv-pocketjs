@@ -3451,10 +3451,10 @@ static JSValue js_rom_atom_value(JSContext *ctx, JSAtom atom, const JSRomAtom *r
 {
     JSRuntime *rt = ctx->rt;
     unsigned k = atom & 31;
-    JSString *p = rt->rom_cache[k];
+    JSString *p = rt->rom_cache[k]; FP_INC(rt, rom_escape);
     if (p && rt->rom_cache_atom[k] == atom)
         return js_dup(JS_MKPTR(JS_TAG_STRING, p));
-    p = js_rom_new_string(rt, r);
+    p = js_rom_new_string(rt, r); FP_INC(rt, rom_escape_new);
     if (!p)
         return JS_ThrowOutOfMemory(ctx);
     if (rt->rom_cache[k])
@@ -4237,7 +4237,7 @@ static JSValue JS_NewSymbolFromAtom(JSContext *ctx, JSAtom descr,
            an atom_type 0 string into the symbol itself. */
         const JSRomAtom *r = js_rom_atom(descr);
         if (r) {
-            p = js_rom_new_string(rt, r);
+            p = js_rom_new_string(rt, r); FP_INC(rt, rom_symbol);
             if (!p) {
                 return JS_ThrowOutOfMemory(ctx);
             }
@@ -4403,7 +4403,7 @@ static JSValue JS_AtomIsNumericIndex1(JSContext *ctx, JSAtom atom)
             if (!(r->hash_flags & JS_ROM_NUMERIC)) {
                 return JS_UNDEFINED;
             }
-            p = js_rom_new_string(rt, r);
+            p = js_rom_new_string(rt, r); FP_INC(rt, rom_numeric);
             if (!p) {
                 return JS_ThrowOutOfMemory(ctx);
             }
@@ -44550,15 +44550,15 @@ static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom)
     JSRuntime *rt = ctx->rt;
     uint32_t i;
 
-    if (__JS_AtomIsTaggedInt(atom))
-        return 0;   /* no list entry is an index */
-    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+    if (__JS_AtomIsTaggedInt(atom)) /* counted as a miss either way */
+        return FP_INC(rt, lazy_miss), 0;   /* no list entry is an index */
+    for (FP_INC(rt, lazy_miss), i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
         JSLazyList *l = &rt->lazy[i];
         for (int k = 0; k < l->len; k++) {
             if (lazy_done(l, k) || !lazy_name_is(rt, atom, l->tab[k].name))
                 continue;
             /* Marked first: add_property below looks the name up again. */
-            lazy_set_done(l, k);
+            lazy_set_done(l, k); FP_INC(rt, lazy_hit);
             return lazy_define(l->realm, p, atom, &l->tab[k]) ? -1 : 1;
         }
     }
@@ -44584,7 +44584,7 @@ static int js_lazy_delete(JSContext *ctx, JSObject *p, JSAtom atom)
             if (!(l->tab[k].prop_flags & JS_PROP_CONFIGURABLE) ||
                     (l->tab[k].def_type == JS_DEF_CFUNC && atom == JS_ATOM_Symbol_hasInstance))
                 return false;
-            lazy_set_done(l, k);
+            lazy_set_done(l, k); FP_INC(rt, lazy_delete);
             return true;
         }
     }
@@ -44751,9 +44751,9 @@ static int js_lazy_all(JSContext *ctx, JSObject *p, bool enum_only)
                         (rt->lazy[i].tab[k].prop_flags & JS_PROP_ENUMERABLE))
                     any = true;
         if (!any)
-            return 0;
+            return FP_INC(rt, lazy_all_skip), 0;
     }
-    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+    FP_ALL(p, enum_only); for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
         for (int k = 0; k < rt->lazy[i].len; k++) {
             /* rt->lazy may move under lazy_define (a getter's function
                object can register nothing, but re-read it to be safe) */
@@ -68673,5 +68673,15 @@ uint32_t JS_VMStackBlocks(JSRuntime *rt, const void **out, uint32_t cap)
     (void)cap;
 #endif
     return n;
+}
+#endif
+
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+/* F-line measurement (quickjs.h). At the end of the file so the option-off
+ * build keeps every __LINE__ above it; the counters are in quickjs-vmprobe.h. */
+void JS_TakeFloorProbe(JSFloorProbe *out)
+{
+    *out = js_floor_probe;
+    memset(&js_floor_probe, 0, sizeof(js_floor_probe));
 }
 #endif

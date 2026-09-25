@@ -539,6 +539,25 @@ JS_EXTERN void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out);
  * safe at any point, including with frames live. No-op when the build keeps
  * frames on the C stack. Does not allocate. */
 JS_EXTERN void JS_VMStackTrim(JSRuntime *rt);
+/* F-line measurement (CONFIG_POCKET_VM_FLOORPROBE, default n;
+ * docs/vm/builtin-floor-plan.md sec.14): how often the flash-atom (F1) and
+ * lazy-builtin (F2) paths ran since the last take (read and clear; the
+ * firmware takes at session start and at stop). Process-wide, which is one
+ * runtime at a time on the device. Defined only with that option. */
+typedef struct JSFloorProbe {
+    uint32_t rom_escape;     /* flash atom turned into a string value */
+    uint32_t rom_escape_new; /* ... of which built a new string (cache miss) */
+    uint32_t rom_symbol;     /* Symbol() described by a flash atom */
+    uint32_t rom_numeric;    /* numeric-index test that had to build a string */
+    uint32_t lazy_miss;      /* lookups that missed a lazy object's shape */
+    uint32_t lazy_hit;       /* ... of which put a list entry in the shape */
+    uint32_t lazy_delete;    /* deletes of a pending entry */
+    uint32_t lazy_all;       /* full materializations */
+    uint32_t lazy_all_skip;  /* enumerable-only listings that needed none */
+    uint16_t all_class[8];   /* class ids of the first full materializations */
+    uint8_t all_enum_only[8];
+} JSFloorProbe;
+JS_EXTERN void JS_TakeFloorProbe(JSFloorProbe *out);
 /* G12 (main/pocket/oomprobe.c): the heap blocks the frame segments occupy,
  * live chain and reuse cache alike, so a heap walk can ask what moving them
  * would have joined. Writes at most `cap` block pointers, returns how many
