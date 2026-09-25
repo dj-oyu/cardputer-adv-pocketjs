@@ -164,4 +164,4 @@ static unsigned advance_of(void *ctx,ksn_font font,uint32_t codepoint){
     return ksn_font_advance(font,codepoint);
 }
 
-const ksn_text_port ksn_font_port={.span=span,.advance=advance_of};
+const ksn_text_port ksn_font_port={.span=span,.advance=advance_of,.binary_coverage=true};

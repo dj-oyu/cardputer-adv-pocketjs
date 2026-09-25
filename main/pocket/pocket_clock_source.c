@@ -9,6 +9,7 @@ static ksn_result clock_acquire(void *opaque,uint64_t cursor,uint64_t now_us,
     pocket_clock_source_state *source=opaque;
     (void)cursor;(void)now_us;
     if(!source||!out||source->revision==UINT64_MAX)return KSN_INVALID;
+    if(source->pins==UINT32_MAX)return KSN_BUSY;
     sys_clock_state clock;bool valid=sys_device_clock_read(&clock)&&
         clock.seconds<=INT64_C(9007199254740);
     uint16_t minute=0;bool sync=false;
@@ -22,6 +23,9 @@ static ksn_result clock_acquire(void *opaque,uint64_t cursor,uint64_t now_us,
     uint64_t key=valid?(uint64_t)minute+1u:0u;
     if(sync)key|=UINT64_C(1)<<16;
     if(!source->initialized||source->key!=key){
+        /* The snapshot borrows face/tag. Do not mutate either while another
+         * lease still exposes their addresses; retry after its release. */
+        if(source->pins)return KSN_BUSY;
         if(valid)(void)snprintf(source->face,sizeof(source->face),"%02u:%02u",
                                 (unsigned)(minute/60),(unsigned)(minute%60));
         else memcpy(source->face,"--:--",6);
@@ -32,6 +36,7 @@ static ksn_result clock_acquire(void *opaque,uint64_t cursor,uint64_t now_us,
         source->fields[1].data.text=(ksn_schema_text){source->tag,(uint16_t)bytes};
         source->key=key;source->initialized=true;source->revision++;
     }
+    source->pins++;
     *out=(ksn_source_snapshot){.size=sizeof(*out),.version=KSN_SOURCE_ABI_VERSION,
         .field_count=2,.generation=source->generation,
         .revision=source->revision,.valid_fields=3,.changed_fields=3,
@@ -39,7 +44,9 @@ static ksn_result clock_acquire(void *opaque,uint64_t cursor,uint64_t now_us,
     return KSN_OK;
 }
 static void clock_release(void *opaque,const ksn_source_snapshot *snapshot){
-    (void)opaque;(void)snapshot;
+    (void)snapshot;
+    pocket_clock_source_state *source=opaque;
+    if(source&&source->pins)source->pins--;
 }
 static bool clock_allow(void *opaque,uint32_t consumer){
     (void)opaque;return consumer!=0;

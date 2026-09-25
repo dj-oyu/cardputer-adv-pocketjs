@@ -604,6 +604,44 @@ ksn_result pocket_kasane_presenter_host_status(const char *text,size_t bytes,uin
     return state->provider->host_status(state->provider_state,text,bytes,until_us);
 }
 
+ksn_result pocket_kasane_presenter_settle(bool *blocked){
+    if(blocked)*blocked=false;
+    if(state&&state->schema){
+        schema_state *s=state->schema;
+        if(s->session.ticket.value){
+            ksn_submission outcome=ksn_view_poll(view());
+            if(outcome.ticket.value!=s->session.ticket.value)return KSN_STALE;
+            if(outcome.status==KSN_SUBMITTED){
+                if(blocked)*blocked=true;
+                return KSN_OK;
+            }
+            if(outcome.status==KSN_PRESENTED){
+                schema_sources *native=schema_native(s);
+                if(native)for(unsigned i=0;i<s->asset->source_count;i++){
+                    schema_source *entry=&native->entries[i];
+                    if(!entry->pending_revision)continue;
+                    ksn_result r=ksn_source_presented(&entry->subscription,
+                                                       entry->pending_revision);
+                    if(r!=KSN_OK)return r;
+                    entry->pending_revision=0;
+                }
+                schema_externals *external=schema_external_state(s);
+                if(external)for(unsigned i=0;i<external->count;i++){
+                    schema_external *entry=&external->entries[i];
+                    if(!entry->pending_revision)continue;
+                    ksn_result r=ksn_source_presented(&entry->subscription,
+                                                       entry->pending_revision);
+                    if(r!=KSN_OK)return r;
+                    entry->pending_revision=0;
+                }
+            }
+        }
+        return ksn_schema_session_settle(&s->session,view(),blocked);
+    }
+    if(!state||!state->provider||!state->provider->settle)return KSN_OK;
+    return state->provider->settle(state->provider_state,blocked);
+}
+
 ksn_result pocket_kasane_presenter_step(bool *blocked){
     if(blocked)*blocked=false;
     if(state&&state->schema){
@@ -1370,7 +1408,7 @@ MUTATOR(js_modal_close,modal_class,false,"kasane.modal.close")
 #undef MUTATOR
 
 /* The scene controller of createScene(), native since the guest-memory work
- * (docs/kasane/kasane-guest-memory-reduce.md). As JS it cost each Kasane app
+ * (docs/kasane/decisions.md). As JS it cost each Kasane app
  * four closures, their bytecode and source copies, a dozen var_refs and the
  * atoms of every local name; here it is one opaque holder and two bound
  * functions. apps/kasane/create_scene.js remains as the reference model the
@@ -1817,13 +1855,19 @@ static schema_state *schema_owner(JSValueConst self){
     return handle&&state&&state->schema&&state->schema->handle==handle?
            state->schema:NULL;
 }
+static void schema_free_pending_text(JSContext *ctx,const char *const *texts,unsigned count){
+    for(unsigned i=0;i<count;i++)if(texts[i])JS_FreeCString(ctx,texts[i]);
+}
 static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
     const char *op="kasane.view.set";
     if(!JS_IsObject(model)||JS_IsArray(model))
         return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                                 "slots must be an object",false,NULL);
     ksn_schema_value candidate[KSN_SCHEMA_MAX_SLOTS];
-    char pending_text[KSN_SCHEMA_MAX_SLOTS][KSN_SCHEMA_TEXT_MAX+1u];
+    /* JS_ToCStringLen owns a live JSString reference until FreeCString.
+     * Borrow those immutable UTF-8 bytes through preflight, then make the
+     * single schema-owned copy only for changed slots. */
+    const char *pending_text[KSN_SCHEMA_MAX_SLOTS]={0};
     bool text_dirty[KSN_SCHEMA_MAX_SLOTS]={0};
     memcpy(candidate,s->values,s->definition->slot_count*sizeof(*candidate));
     ksn_p0_probe_copy(KSN_P0_ADAPTER_TEMP,s->definition->slot_count*sizeof(*candidate));
@@ -1856,13 +1900,11 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
                     if(!text)ok=false;
                     else if(length>slot->capacity)ok=false;
                     else{
-                        memcpy(pending_text[i],text,length);
-                        ksn_p0_probe_copy(KSN_P0_ADAPTER_TEMP,length);
-                        pending_text[i][length]=0;
+                        pending_text[i]=text;
                         candidate[i].data.text=(ksn_schema_text){pending_text[i],(uint16_t)length};
                         text_dirty[i]=true;
                     }
-                    if(text)JS_FreeCString(ctx,text);
+                    if(text&&!text_dirty[i])JS_FreeCString(ctx,text);
                 }
             }
         }else if(slot->type==KSN_SLOT_RECT){
@@ -1891,7 +1933,10 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
                              "display slot type or value is invalid",false,NULL);
     }
     JS_FreePropertyEnum(ctx,props,count);
-    if(!ok)return JS_EXCEPTION;
+    if(!ok){
+        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        return JS_EXCEPTION;
+    }
     uint32_t changed_slots=0;
     for(unsigned i=0;i<s->definition->slot_count;i++){
         bool differs;
@@ -1902,10 +1947,19 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
                             sizeof(candidate[i].data))!=0;
         if(differs)changed_slots|=(uint32_t)1u<<i;
     }
-    if(!changed_slots)return JS_UNDEFINED;
-    if(s->revision==UINT64_MAX)return throw_result(ctx,KSN_LIMIT,op);
+    if(!changed_slots){
+        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        return JS_UNDEFINED;
+    }
+    if(s->revision==UINT64_MAX){
+        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        return throw_result(ctx,KSN_LIMIT,op);
+    }
     ksn_result check=ksn_schema_preflight_view(view(),s->definition,candidate,viewport);
-    if(check!=KSN_OK)return throw_result(ctx,check,op);
+    if(check!=KSN_OK){
+        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        return throw_result(ctx,check,op);
+    }
     for(unsigned i=0;i<s->definition->slot_count;i++){
         if(!(changed_slots&((uint32_t)1u<<i)))continue;
         if(text_dirty[i]){
@@ -1920,9 +1974,15 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
             ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,sizeof(candidate[i]));
         }
     }
+    schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
     s->revision++;
     s->pending_base_slots|=changed_slots;
     ksn_result submitted=schema_refresh(NULL);
+#ifdef KASANE_P2_REPAIR_PROBE
+    printf("KSN_P2_SET revision=%llu ticket=%u inflight=%08x pending=%08x\n",
+           (unsigned long long)s->revision,(unsigned)s->session.ticket.value,
+           (unsigned)s->session.inflight_dirty,(unsigned)s->session.pending_dirty);
+#endif
     return submitted==KSN_OK||submitted==KSN_BUSY?JS_UNDEFINED:
            throw_result(ctx,submitted,op);
 }
@@ -2657,6 +2717,9 @@ bool pocket_kasane_needs_present(void) {
 void pocket_kasane_invalidate_bands(uint32_t bands) {
     ksn_runtime_invalidate_bands(bands);
 }
+uint32_t pocket_kasane_opaque_system_bands(void){
+    return state&&state->active?ksn_runtime_opaque_system_bands():0;
+}
 void pocket_kasane_invalidate(void) {
     ksn_runtime_invalidate();
 }
@@ -2668,11 +2731,12 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
     apply_outcome();return result;
 }
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
-                                          ksn_backdrop_loader load,ksn_render_stats *stats) {
+                                          ksn_backdrop_loader load,bool occlusion_safe,
+                                          ksn_render_stats *stats) {
     if(!stats||!load)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     if(!pocket_kasane_needs_present())return KSN_OK;
-    ksn_result result=ksn_runtime_present_backdrop(display,load,stats);
+    ksn_result result=ksn_runtime_present_backdrop(display,load,occlusion_safe,stats);
     apply_outcome();return result;
 }
 void pocket_kasane_end_turn(void) {

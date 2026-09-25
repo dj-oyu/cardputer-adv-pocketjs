@@ -47,7 +47,7 @@ typedef struct {
     uint32_t consumer,bound_slots,valid_slots;
     uint64_t validated_revision,displayed_revision;
     uint8_t binding_count;
-    bool has_validated;
+    bool has_validated,identity_bindings;
     ksn_source_binding bindings[KSN_SOURCE_MAX_FIELDS];
 } ksn_source_subscription;
 typedef struct {
@@ -90,6 +90,24 @@ ksn_result ksn_source_acquire(ksn_source_registry *registry,
                               const ksn_schema_value *base,uint64_t now_us,
                               ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS],
                               ksn_source_lease *lease);
+/* Custom native projections can borrow the complete producer snapshot after
+ * subscribe validated their immutable schema and bindings. No base/effective
+ * metadata copy or schema walk is performed. The caller must honor
+ * lease.valid_slots, validate domain constraints before commit, and never
+ * retain snapshot.fields after release. */
+ksn_result ksn_source_borrow(ksn_source_registry *registry,
+                             ksn_source_subscription *subscription,
+                             uint64_t now_us,ksn_source_lease *lease);
+/* Native owner-turn fast path for an unchanged, subscribe-validated identity
+ * mapping (slot i <- field i). It still checks capability generation, policy,
+ * snapshot shape and cursor, pins storage, and computes validity/dirty masks.
+ * The caller must not mutate subscription bindings after subscribe. */
+ksn_result ksn_source_borrow_identity(ksn_source_registry *registry,
+                                      ksn_source_subscription *subscription,
+                                      uint64_t now_us,ksn_source_lease *lease);
+#ifdef KASANE_P0_PROBE
+void ksn_source_borrow_probe_report(void);
+#endif
 /* Compose disjoint subscriptions from one or more registries with one
  * base->effective metadata copy and no payload copy. All leases remain pinned
  * until bundle_release. Initialize bundle to zero before first use. A failure

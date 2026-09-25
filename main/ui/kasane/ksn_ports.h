@@ -16,6 +16,10 @@ typedef struct {
      * differ and this turns that into an x range. Left NULL, a changed text
      * command dirties its whole box, which is what it always did. */
     unsigned (*advance)(void *,ksn_font font,uint32_t codepoint);
+    /* Opt-in contract: span writes only 0 or 255. The renderer may consume an
+     * aligned eight-byte mask directly in a PIE lane kernel; other providers
+     * keep the general 0..255 scalar path. */
+    bool binary_coverage;
 } ksn_text_port;
 typedef struct {
     void *ctx;

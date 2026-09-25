@@ -20,6 +20,8 @@ typedef struct {
 typedef struct {
     const char *name;
     JSValue (*mount)(JSContext *ctx,const pocket_app_view_host *host,void **out);
+    /* Acknowledge a finished ticket without creating the next native frame. */
+    ksn_result (*settle)(void *instance,bool *blocked);
     ksn_result (*step)(void *instance,bool *blocked);
     ksn_result (*host_status)(void *instance,const char *text,size_t bytes,
                               uint64_t until_us);

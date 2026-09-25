@@ -76,11 +76,11 @@ type DeviceInfo = {
 
 **capabilityの登録はセッションごと。** 各面は注入時に登録し、`pocket_api_reset()`がセッション終了時に表を空にする。したがって`capabilities.get()`は「このセッションに注入された面」を答え、前のセッションが注入した面を引き継がない（オーバーレイは無線・バス等を注入しないので、それらはsupported=false）。
 
-**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[システムランタイム移行設計](../kasane/system-runtime-migration.md)に従う。
+**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[Kasaneの境界と契約](../kasane/architecture.md)を参照。
 
 availableは予約ではなく観測値。確認直後に資源が変わり得るため、open/acquireの結果が最終判断となる。認可状態は別であり、available=trueだけでは利用権を得ない。limitsはそのビルドのハード上限、取得ハンドルは実際に割り当てられた値を返す。
 
-版0.xでは破壊的変更をminor版で明示する。アプリ登録情報に対応APIの範囲を持ち、不適合なら起動前に表示する。旧 `legacy-pocketjs` 実行モード（`ui.createNode` などの `ui.*`、Rust UIコアとTaffyレイアウト）は、全アプリの移行後にファームから削除した（2026-09-17）。全アプリが `pocket-app` で、描画は `pocket.kasane`（[Kasane利用API](../kasane/design-api.md)）。旧APIを呼ぶ保存済みプログラムは変換せず、起動前に「旧API(ui.*)のため実行できません」と表示してログに `APP_LEGACY_UI` を出し、実行しない。
+版0.xでは破壊的変更をminor版で明示する。アプリ登録情報に対応APIの範囲を持ち、不適合なら起動前に表示する。旧 `legacy-pocketjs` 実行モード（`ui.createNode` などの `ui.*`、Rust UIコアとTaffyレイアウト）は、全アプリの移行後にファームから削除した（2026-09-17）。全アプリが `pocket-app` で、描画は `pocket.kasane`（[Kasaneの現行境界](../kasane/architecture.md)）。旧APIを呼ぶ保存済みプログラムは変換せず、起動前に「旧API(ui.*)のため実行できません」と表示してログに `APP_LEGACY_UI` を出し、実行しない。
 
 ## 3. アプリ登録と権限
 
@@ -254,6 +254,8 @@ pocket.time.sleep(ms: number, options?: Options): Promise<void>;
 `time.wallSource()`はKasaneのmountへ渡す不透明なsession-scoped capabilityを返す。`view.bind(pocket.time.wallSource(), {face: 0, tag: 1})`で、text field 0を`HH:MM`（同期前は`--:--`）、field 1を`UTC`または`NO SYNC`として購読できる。JS側の毎フレーム時刻取得や描画更新は不要。sourceは時計サービスが所有し、Kasaneは型付きsnapshotを一時的に借りるだけである。capabilityはセッション終了後に失効する。
 
 startはソース評価中に1回登録する。新ランタイムではglobalThis.frameをホストが用意し、Promiseだけを待つアプリもイベント処理を継続できる。start hook終了まで状態はStartingだが、I/O完了とキャンセルは配送する。onFrameはRunningでのみ呼ぶ。
+
+`pocket.app.start()`を使わず、入力・Promiseだけで動くアプリは明示的に`globalThis.frame = null`を指定できる。この場合も各host turnでservice pumpとPromise job drainは続き、JS frame呼出しと引数生成だけを省く。`frame`未定義は引き続き起動エラーである。
 
 1ターンは停止要求→入力／I/O完了→上限付きPromise job→frame→描画の順。Promise連鎖を含むJSターン全体に期限を設ける。frameは同期関数で、Promiseを返したらINVALID_ARGUMENTとしてアプリを停止する。I/Oのawaitはstart、別のasync関数、イベントから開始する。
 
@@ -460,7 +462,7 @@ WAV（PCM16／IMA ADPCM）、Opus CELT（§9.1.2）、MP3（§9.1.3）を実装�
 
 ```ts
 pocket.audio.player.open({source:string}, options?:Options):Promise<Player>;
-pocket.audio.outputSource(): KasaneSourceCapability;
+pocket.audio.outputSource(options?: {sampleMs?: number}): KasaneSourceCapability;
 pocket.audio.playbackSource(): KasaneSourceCapability;
 type Player = {
   info(): {codec:"wav/pcm16"|"wav/ima-adpcm"|"opus/celt"|"mp3";sampleRate:24000;channels:1;
@@ -478,12 +480,15 @@ type Player = {
 `audio.outputSource()`は実装済みの任意Kasane mount用source。field 0はtext
 `HH:MM:SS`（8 byte）、field 1は論理的な再生位置frames（`u32`）、field 2は
 そのstreamで無音補填したblockの累積数（`u32`）、field 3はstream ID（`u32`）。
-音声出力taskが実際に消費したframeに基づき再生開始時と秒境界で完全snapshotを更新する。
+音声出力taskが実際に消費したframeに基づき再生開始時・終了時と観測周期で
+完全snapshotを更新する。`sampleMs`は32～1000の整数で、既定は1000。
+観測は128-frame出力blockの境界に量子化され、source初回作成後は周期を変更できない。
 `view.bind(pocket.audio.outputSource(), {elapsed: 0, frames: 1, starved: 2,
 streamId: 3})`のように型の合うslotへ束縛する。再生していない間は全field invalidと
 なり、slotはJSの最新base値へ戻る。sourceの生成・寿命はセッション単位で、
-音声taskはJSやKasane coreを直接呼ばない。数値fieldは約1 Hzの観測値であり、
-blockごとのリアルタイム通知ではない。
+音声taskはJSやKasane coreを直接呼ばない。数値fieldの既定は約1 Hzの観測値で、
+短い周期を指定しても全更新の描画やblock単位の配達は保証しない。readerが
+revisionを飛ばした場合は最新の完全snapshotを再取得し、必要なslotを再評価する。
 
 `audio.playbackSource()`は現在のplayerのUI向け事実を公開する汎用Kasane
 source。field 0は状態（`u16`: ready=0、playing=1、paused=2、ended=3、

@@ -2,9 +2,12 @@
 // real fixed-storage DS core/cache/modal/renderer.
 #include "pocket_kasane.h"
 #include "pocket_clock.h"
+#include "pocket_clock_source.h"
 #include "app_view_assets.h"
 #include "pocket_av.h"
 #include "pocket_av_playback_source.h"
+#include "pocket_av_output_source.h"
+#include "sound.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "text/ksn_font.h"
@@ -29,6 +32,15 @@ static pocket_av_ui_snapshot test_player_ui;
 static bool test_clock_valid;
 static sys_clock_state test_clock_ui;
 static unsigned test_clock_reads;
+static sound_stream_observer_fn test_stream_observer;
+static uint32_t test_stream_interval;
+void sound_stream_set_observer_interval(sound_stream_observer_fn observer,
+                                        uint32_t interval_frames){
+    test_stream_observer=observer;test_stream_interval=interval_frames;
+}
+void sound_stream_set_observer(sound_stream_observer_fn observer){
+    sound_stream_set_observer_interval(observer,SOUND_SAMPLE_RATE);
+}
 typedef struct {
     ksn_source_registry registry;
     ksn_source_provider provider;
@@ -215,11 +227,15 @@ static void presenter_tests(void) {
     check(run("picture.status='PLAYING  2s';picture.positionMs=2000;music.update(picture);"),
           "pending MUSIC update replaces latest plan without another transaction");
     check(present(&stats)==KSN_OK,"first MUSIC plan reaches display");
+    check(pocket_kasane_presenter_settle(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "music settle acknowledges A without overtaking a guest turn");
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked,
-          "acknowledging A submits newer B, not a false acknowledgement of B");
+          "refresh after a guest turn submits newer B");
     check(present(&stats)==KSN_OK,"newer MUSIC plan reaches display");
-    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
-          "presenter becomes idle after latest plan is acknowledged");
+    check(pocket_kasane_presenter_settle(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "music settle leaves the latest presented plan idle");
     check(run("music.update(picture);"),"same MUSIC plan is accepted");
     check(!pocket_kasane_has_submission(),"equal plan does not submit a new bank");
     check(run("picture.help=true;music.update(picture);"),"help changes the native page");
@@ -239,6 +255,9 @@ static void presenter_tests(void) {
               "if(!stale)throw Error('old presenter controlled new lease')})()"),
           "a prior session presenter cannot control a newly mounted view");
     check(present(&stats)==KSN_OK,"clock presenter reaches display");
+    check(pocket_kasane_presenter_settle(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "generic source settle acknowledges display without reacquiring");
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
           "clock presenter acknowledges its plan");
     pocket_kasane_reset();
@@ -362,6 +381,53 @@ static void app_presenter_tests(void){
           "runtime descriptor updates via the same exact PATCH path");
     check(present(&stats)==KSN_OK&&stats.bands!=0x1ffffu,
           "runtime descriptor PATCH avoids full-screen damage");
+    pocket_kasane_reset();
+    check(run("globalThis.manySlots={show:{type:'bool'}};"
+              "globalThis.manyNodes=[];globalThis.manyInitial={show:false};"
+              "for(let i=0;i<23;i++){let key='t'+i,x=(i&1)?124:4,y=2+(i>>1)*11;"
+              "manySlots[key]={type:'text',capacity:39};manyInitial[key]='I'+i;"
+              "let node={type:'text',bounds:[x,y,x+111,y+10],"
+              "text:{slot:key},color:0xe2f0ffff};"
+              "if(i===22)node.visible={slot:'show'};manyNodes.push(node);}"
+              "globalThis.manyText=kasane.mount({version:1,background:0x071425ff,"
+              "slots:manySlots,nodes:manyNodes},manyInitial);"),
+          "24 slots mount within the 896-byte APP text capacity");
+    check(present(&stats)==KSN_OK,"23 text slot initial frame presents");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "23 text slot initial frame acknowledges");
+    check(run("globalThis.jpValues={};for(let i=0;i<23;i++)"
+              "jpValues['t'+i]='日本語'+i;manyText.set(jpValues);"),
+          "23 converted UTF-8 pointers remain valid through preflight");
+    check(present(&stats)==KSN_OK,"23 Japanese text slots present");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "23 Japanese text slots acknowledge");
+    check(run("manyText.set(jpValues)")&&!pocket_kasane_has_submission(),
+          "unchanged text slots release temporary UTF-8 references");
+    check(run("(()=>{globalThis.badLast={};for(let i=0;i<22;i++)"
+              "badLast['t'+i]='失敗'+i;badLast.t22='X'.repeat(40);"
+              "let rejected=false;try{manyText.set(badLast)}catch(e){rejected=true}"
+              "if(!rejected)throw Error('accepted');})()"),
+          "late invalid slot releases earlier converted strings atomically");
+    check(!pocket_kasane_has_submission(),"late invalid slot submits nothing");
+    check(run("(()=>{globalThis.setMarker=Error('slot getter');"
+              "globalThis.throwLast={};for(let i=0;i<22;i++)"
+              "throwLast['t'+i]='例外'+i;"
+              "Object.defineProperty(throwLast,'t22',{enumerable:true,"
+              "get(){throw setMarker}});"
+              "let caught=false;try{manyText.set(throwLast)}"
+              "catch(e){caught=e===setMarker}if(!caught)throw Error('lost getter');})()"),
+          "throwing final getter keeps its exception and releases prior text");
+    check(!pocket_kasane_has_submission(),"throwing getter submits nothing");
+    check(run("(()=>{globalThis.tooMuch={show:true};for(let i=0;i<23;i++)"
+              "tooMuch['t'+i]='日本語'.repeat(4);"
+              "let rejected=false;try{manyText.set(tooMuch)}catch(e){rejected=true}"
+              "if(!rejected)throw Error('accepted');})()"),
+          "capacity preflight rejection frees 23 converted UTF-8 strings");
+    check(!pocket_kasane_has_submission(),"failed preflight leaves scene unchanged");
+    JS_RunGC(rt);
+    check(run("manyText.set({t0:'復旧'})")&&pocket_kasane_has_submission(),
+          "valid update still submits after conversion failures and GC");
+    check(present(&stats)==KSN_OK,"post-failure text update presents");
     pocket_kasane_reset();
     check(run("globalThis.offsetView=kasane.mount({version:1,backgroundSlot:'bg',"
               "slots:{bg:{type:'color'},extent:{type:'u16',initial:1,maximum:80}},"
@@ -550,6 +616,134 @@ static void reactive_presenter_tests(void){
     check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
           "new native minute acknowledgement is stable");
     pocket_kasane_reset();test_clock_valid=false;
+}
+
+static void playback_source_lease_tests(void){
+    test_player_id=91;
+    test_player_ui=(pocket_av_ui_snapshot){.state=POCKET_AV_UI_PLAYING,
+        .position_ms=1000,.duration_ms=120000};
+    ksn_source_registry *registry=NULL;
+    ksn_source_handle handle={0};
+    check(pocket_av_playback_source_open(&registry,&handle)==KSN_OK,
+          "owner-task playback source opens");
+    const uint64_t *revision_ref=pocket_av_playback_source_revision_ref(handle);
+    check(revision_ref&&*revision_ref!=0,
+          "playback source exposes an owner-task revision hint");
+    ksn_schema_slot slots[6]={
+        {.name="state",.type=KSN_SLOT_U16},
+        {.name="position",.type=KSN_SLOT_U32},
+        {.name="duration",.type=KSN_SLOT_U32},
+        {.name="underruns",.type=KSN_SLOT_U32},
+        {.name="playing",.type=KSN_SLOT_BOOL},
+        {.name="playerId",.type=KSN_SLOT_U32}
+    };
+    ksn_schema schema={.version=KSN_SCHEMA_ABI_VERSION,.slot_count=6,
+        .slots=slots};
+    ksn_source_binding bindings[6]={{0,0},{1,1},{2,2},{3,3},{4,4},{5,5}};
+    ksn_source_subscription sub={0};
+    check(ksn_source_subscribe(registry,handle,1,&schema,bindings,6,&sub)==KSN_OK,
+          "playback source binds typed fields");
+    ksn_source_lease lease={0};
+    check(ksn_source_borrow(registry,&sub,0,&lease)==KSN_OK&&
+          lease.snapshot.fields[1].data.wide_number==1000,
+          "playback source borrows current facts");
+    uint64_t revision=lease.snapshot.revision;
+    test_player_ui.position_ms=2000;
+    pocket_av_playback_source_service();
+    check(lease.snapshot.fields[1].data.wide_number==1000&&
+          lease.snapshot.revision==revision,
+          "pinned playback fields remain immutable during reentrant publish");
+    check(ksn_source_unregister(registry,handle)==KSN_BUSY,
+          "pinned playback source cannot unregister");
+    ksn_source_release(&lease);
+    pocket_av_playback_source_service();
+    check(ksn_source_borrow(registry,&sub,0,&lease)==KSN_OK&&
+          lease.snapshot.fields[1].data.wide_number==2000&&
+          lease.snapshot.revision>revision&&*revision_ref==lease.snapshot.revision,
+          "skipped playback update publishes after release");
+    ksn_source_release(&lease);
+    pocket_av_playback_source_reset();test_player_id=0;
+    check(pocket_av_playback_source_revision_ref(handle)==NULL,
+          "stale playback revision hint cannot be reopened");
+    check(pocket_av_playback_source_open(&registry,&handle)==KSN_OK,
+          "playback source can reopen after a clean detach");
+    check(ksn_source_subscribe(registry,handle,1,&schema,bindings,6,&sub)==KSN_OK&&
+          ksn_source_borrow(registry,&sub,0,&lease)==KSN_OK,
+          "old playback source has an independently releasable reader");
+    pocket_av_playback_source_reset();
+    check(pocket_av_playback_source_open(&registry,&handle)==KSN_BUSY,
+          "pinned old playback source blocks a new generation");
+    ksn_source_release(&lease);
+    check(!lease.active,
+          "old playback reader can release after APP detach");
+    check(pocket_av_playback_source_open(&registry,&handle)==KSN_OK,
+          "old playback source is reclaimed before reopening");
+    pocket_av_playback_source_reset();
+}
+
+static void output_source_cadence_tests(void){
+    ksn_render_stats stats;bool blocked=false;
+    JSValue options=JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx,options,"sampleMs",JS_NewInt32(ctx,31));
+    JSValue rejected=pocket_av_output_source(ctx,JS_UNDEFINED,1,&options);
+    check(JS_IsException(rejected)&&!test_stream_observer,
+          "output source rejects an interval shorter than 32 ms before allocation");
+    JS_FreeValue(ctx,rejected);JS_FreeValue(ctx,JS_GetException(ctx));
+    JS_FreeValue(ctx,options);
+    options=JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx,options,"sampleMs",JS_NewInt32(ctx,33));
+    JSValue cap=pocket_av_output_source(ctx,JS_UNDEFINED,1,&options);
+    check(!JS_IsException(cap)&&test_stream_observer&&test_stream_interval==792u,
+          "audio-task source configures a 33 ms output-frame cadence");
+    JS_FreeValue(ctx,options);
+    JSValue global=JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx,global,"outputCap",cap);
+    JS_FreeValue(ctx,global);
+    options=JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx,options,"sampleMs",JS_NewInt32(ctx,1000));
+    rejected=pocket_av_output_source(ctx,JS_UNDEFINED,1,&options);
+    check(JS_IsException(rejected)&&test_stream_interval==792u,
+          "active output source refuses a conflicting cadence");
+    JS_FreeValue(ctx,rejected);JS_FreeValue(ctx,JS_GetException(ctx));
+    JS_FreeValue(ctx,options);
+    check(run("globalThis.outputView=kasane.mount({version:1,"
+              "slots:{clock:{type:'text',capacity:8},frames:{type:'u32'},"
+              "starved:{type:'u32'},streamId:{type:'u32'}},"
+              "nodes:[{type:'text',bounds:[0,0,96,16],text:{slot:'clock'},"
+              "color:0xffffffff}]},{clock:'--------',frames:0,starved:0,streamId:0})")&&
+          present(&stats)==KSN_OK,
+          "an arbitrary mount prepares for the configurable output source");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "initial output source view acknowledges before bind");
+    check(run("outputView.bind(outputCap,{clock:0,frames:1,starved:2,streamId:3})")&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "an arbitrary mount binds the invalid output source without a repaint");
+    test_stream_observer(7,0,0,true);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          present(&stats)==KSN_OK,
+          "stream start publishes a complete output snapshot");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "stream start acknowledgement is stable");
+    test_stream_observer(7,768,0,true);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "numeric-only 32 ms update does not redraw unchanged clock text");
+    test_stream_observer(7,24000,0,true);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          present(&stats)==KSN_OK,
+          "clock second change still redraws after numeric-only updates");
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked,
+          "new clock frame acknowledges");
+    test_stream_observer(7,24768,0,true);
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          !pocket_kasane_has_submission(),
+          "subsequent numeric progress remains render-free");
+    test_stream_observer(7,24768,0,false);
+    check(pocket_kasane_reset(),"output source subscriber detaches cleanly");
+    pocket_av_output_source_suspend();
+    check(pocket_av_output_source_reset(true),
+          "output source releases its pool after APP detach");
+    check(!test_stream_observer,"output source reset removes the audio observer");
 }
 
 #ifdef KSN_TEST_DUAL_SOURCE
@@ -921,6 +1115,37 @@ static void external_source_mount_tests(void){
           "generation replacement detaches the old subscription");
     check(present(&stats)==KSN_OK,"generation replacement presents base");
     pocket_kasane_reset();
+}
+
+static void wall_source_lease_tests(void){
+    pocket_clock_source_state state={0};
+    ksn_source_provider provider={0};
+    ksn_source_snapshot first={0},second={0},next={0};
+    test_clock_valid=true;
+    test_clock_ui=(sys_clock_state){.seconds=60,.source=SYS_CLOCK_SNTP};
+    check(pocket_clock_source_open(&state,&provider)==KSN_OK,
+          "wall source opens an owner-task provider");
+    pocket_clock_source_registered(&state,(ksn_source_handle){.generation=7});
+    check(provider.acquire(provider.context,0,0,&first)==KSN_OK&&
+          provider.acquire(provider.context,0,0,&second)==KSN_OK&&
+          memcmp(first.fields[0].data.text.utf8,"00:01",5)==0,
+          "two wall readers share an immutable minute snapshot");
+    uint64_t revision=first.revision;
+    test_clock_ui.seconds=120;
+    check(provider.acquire(provider.context,0,0,&next)==KSN_BUSY&&
+          first.revision==revision&&
+          memcmp(first.fields[0].data.text.utf8,"00:01",5)==0,
+          "minute change cannot overwrite a pinned wall snapshot");
+    provider.release(provider.context,&first);
+    check(provider.acquire(provider.context,0,0,&next)==KSN_BUSY,
+          "one remaining wall reader still holds the old text");
+    provider.release(provider.context,&second);
+    check(provider.acquire(provider.context,0,0,&next)==KSN_OK&&
+          next.revision>revision&&
+          memcmp(next.fields[0].data.text.utf8,"00:02",5)==0,
+          "new minute publishes after the last wall reader releases");
+    provider.release(provider.context,&next);
+    test_clock_valid=false;
 }
 
 static void wall_source_service_tests(void){
@@ -1750,11 +1975,14 @@ int main(void) {
 
     presenter_tests();
     app_presenter_tests();
+    playback_source_lease_tests();
+    output_source_cadence_tests();
     reactive_presenter_tests();
 #ifdef KSN_TEST_DUAL_SOURCE
     dual_source_mount_tests();
 #endif
     external_source_mount_tests();
+    wall_source_lease_tests();
     wall_source_service_tests();
 
     check(run("globalThis.tpl=kasane.cache.create(["
@@ -1831,7 +2059,21 @@ int main(void) {
           "stats reports the allocated native arena");
     atomicity_tests();
     repair_tests();
-    pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    pocket_kasane_reset();
+    JSValue failed_stop_source=pocket_av_output_source(ctx,JS_UNDEFINED,0,NULL);
+    check(!JS_IsException(failed_stop_source)&&test_stream_observer,
+          "failed-stop test starts a fresh output source");
+    JS_FreeValue(ctx,failed_stop_source);
+    pocket_av_output_source_suspend();
+    check(!pocket_av_output_source_reset(false)&&!test_stream_observer,
+          "unconfirmed audio stop retains the output source allocation");
+    JSValue blocked_source=pocket_av_output_source(ctx,JS_UNDEFINED,0,NULL);
+    check(JS_IsException(blocked_source)&&!test_stream_observer,
+          "retained output source cannot be overwritten by a new session");
+    JS_FreeValue(ctx,blocked_source);JS_FreeValue(ctx,JS_GetException(ctx));
+    check(!pocket_av_output_source_reset(true),
+          "later reset does not falsely claim the retained source was freed");
+    JS_FreeContext(ctx);JS_FreeRuntime(rt);
     allocator_tests();
     base_block_tests();
     lazy_cache_tests();

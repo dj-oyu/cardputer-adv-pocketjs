@@ -232,8 +232,16 @@ static atomic_int stream_halt;
 static atomic_uint stream_frames;      // output frames produced so far
 static atomic_uint stream_starved;     // blocks filled with silence
 static _Atomic(sound_stream_observer_fn) stream_observer;
+static atomic_uint stream_observer_interval;
 
 void sound_stream_set_observer(sound_stream_observer_fn observer) {
+    sound_stream_set_observer_interval(observer,SOUND_SAMPLE_RATE);
+}
+void sound_stream_set_observer_interval(sound_stream_observer_fn observer,
+                                        uint32_t interval_frames) {
+    if(interval_frames<128u||interval_frames>SOUND_SAMPLE_RATE)
+        interval_frames=SOUND_SAMPLE_RATE;
+    atomic_store_explicit(&stream_observer_interval,interval_frames,memory_order_release);
     atomic_store_explicit(&stream_observer,observer,memory_order_release);
 }
 
@@ -265,7 +273,9 @@ static void play_stream(const request_t *req,int16_t *pcm) {
     }
     sound_stream_observer_fn observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
     if(observe)observe(req->id,req->start_frame,0,true);
-    uint32_t next_observation=SOUND_SAMPLE_RATE-req->start_frame%SOUND_SAMPLE_RATE;
+    uint32_t interval=atomic_load_explicit(&stream_observer_interval,memory_order_acquire);
+    if(interval<128u||interval>SOUND_SAMPLE_RATE)interval=SOUND_SAMPLE_RATE;
+    uint32_t next_observation=interval-req->start_frame%interval;
     stream_read_t r={0};
     uint32_t frames=req->frames, at=0, starved=0;
     bool completed=true;
@@ -326,8 +336,8 @@ static void play_stream(const request_t *req,int16_t *pcm) {
             observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
             if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),
                                atomic_load_explicit(&stream_starved,memory_order_relaxed),true);
-            next_observation=next_observation<=UINT32_MAX-SOUND_SAMPLE_RATE?
-                next_observation+SOUND_SAMPLE_RATE:UINT32_MAX;
+            next_observation=next_observation<=UINT32_MAX-interval?
+                next_observation+interval:UINT32_MAX;
         }
     }
     stream_release(s,&r);

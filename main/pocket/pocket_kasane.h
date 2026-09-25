@@ -33,6 +33,9 @@ void pocket_kasane_prepare(void);
 void pocket_kasane_set_viewport(int16_t x,int16_t y,int16_t width,int16_t height);
 
 bool pocket_kasane_active(void);
+/* Acknowledge a finished presenter ticket without acquiring a new source or
+ * submitting fresh display work. Used before an overlay guest turn. */
+ksn_result pocket_kasane_presenter_settle(bool *blocked);
 /* Advances the native presenter's acknowledged/queued plans in the owner turn.
  * blocked means it submitted a new APP bank, so guest frame must wait. */
 ksn_result pocket_kasane_presenter_step(bool *blocked);
@@ -54,9 +57,10 @@ bool pocket_kasane_needs_present(void);
 void pocket_kasane_invalidate(void);
 // The same, for an owner that knows which 8-row bands its overlay covers.
 void pocket_kasane_invalidate_bands(uint32_t bands);
+uint32_t pocket_kasane_opaque_system_bands(void);
 ksn_result pocket_kasane_present(const ksn_display_port *display,
                                  ksn_render_stats *stats);
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,
-                                          ksn_render_stats *);
+                                          bool occlusion_safe,ksn_render_stats *);
 void pocket_kasane_end_turn(void);
 ksn_input_scope pocket_kasane_input_scope(bool host_priority);

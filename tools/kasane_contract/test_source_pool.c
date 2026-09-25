@@ -20,13 +20,12 @@ static bool sound(const ksn_source_read *read){
 }
 static void *producer(void *unused){
     (void)unused;
-    for(uint32_t i=0;i<100000;i++){
+    for(uint32_t i=0;i<50000;i++){
         ksn_source_write write={0};
         if(ksn_source_pool_begin(&pool,&write)!=KSN_OK){sched_yield();continue;}
         put(&write,i);
         if(ksn_source_pool_publish(&write,NULL)!=KSN_OK)atomic_fetch_add(&errors,1);
     }
-    atomic_store(&done,true);
     return NULL;
 }
 static void *consumer(void *unused){
@@ -93,12 +92,29 @@ int main(void){
     assert(ksn_source_pool_acquire(&pool,&latest)==KSN_OK);
     assert(ksn_source_pool_release(&latest)==KSN_OK);
 
-    pthread_t writer,readers[2];
-    assert(pthread_create(&writer,NULL,producer,NULL)==0);
+    /* Two producers contend for the single writer lease while readers pin
+     * older immutable generations. BUSY is allowed; torn payloads are not. */
+    pthread_t writers[2],readers[2];
+    for(unsigned i=0;i<2;i++)
+        assert(pthread_create(&writers[i],NULL,producer,NULL)==0);
     for(unsigned i=0;i<2;i++)assert(pthread_create(&readers[i],NULL,consumer,NULL)==0);
-    assert(pthread_join(writer,NULL)==0);
+    for(unsigned i=0;i<2;i++)assert(pthread_join(writers[i],NULL)==0);
+    atomic_store(&done,true);
     for(unsigned i=0;i<2;i++)assert(pthread_join(readers[i],NULL)==0);
     assert(atomic_load(&errors)==0&&ksn_source_pool_latest(&pool)>=4);
-    puts("source pool: PASS (zero-copy leases, exhaustion, immutability, concurrent readers)");
+
+    /* Revision exhaustion must not wrap a stale handle back into use. A
+     * rejected publish keeps the writer lease until explicit cancellation. */
+    uint32_t before_limit=ksn_source_pool_latest(&pool);
+    atomic_store(&pool.revision,UINT32_MAX>>2);
+    assert(ksn_source_pool_begin(&pool,&write)==KSN_OK);
+    put(&write,99);
+    assert(ksn_source_pool_publish(&write,&revision)==KSN_LIMIT&&write.active);
+    assert(ksn_source_pool_latest(&pool)==before_limit);
+    assert(ksn_source_pool_begin(&pool,&busy)==KSN_BUSY);
+    assert(ksn_source_pool_cancel(&write)==KSN_OK);
+    assert(ksn_source_pool_acquire(&pool,&latest)==KSN_OK&&sound(&latest));
+    assert(ksn_source_pool_release(&latest)==KSN_OK);
+    puts("source pool: PASS (zero-copy leases, exhaustion, immutability, concurrent producers/readers, revision limit)");
     return 0;
 }

@@ -45,8 +45,75 @@ static unsigned command_base(ksn_layer layer){return layer==KSN_APP?0u:KSN_APP_C
 static unsigned command_limit(ksn_layer layer){return layer==KSN_APP?KSN_APP_COMMANDS:KSN_SYSTEM_COMMANDS;}
 static unsigned text_base(ksn_layer layer){return layer==KSN_APP?0u:KSN_APP_TEXT_BYTES;}
 static unsigned text_limit(ksn_layer layer){return layer==KSN_APP?KSN_APP_TEXT_BYTES:KSN_SYSTEM_TEXT_BYTES;}
+static unsigned command_owner(const ksn_bank *bank,unsigned index){
+    return (bank->command_owner[index/32u]>>(index%32u))&1u;
+}
+static void select_command_owner(ksn_bank *bank,unsigned index,unsigned owner){
+    uint32_t bit=1u<<(index%32u);
+    if(owner)bank->command_owner[index/32u]|=bit;
+    else bank->command_owner[index/32u]&=~bit;
+}
+static ksn_command_storage *bank_command(ksn_bank *bank,unsigned index){
+    return (command_owner(bank,index)==bank->physical_index?
+            bank->commands:bank->command_peer)+index;
+}
+static const ksn_command_storage *bank_command_const(const ksn_bank *bank,unsigned index){
+    return (command_owner(bank,index)==bank->physical_index?
+            bank->commands:bank->command_peer)+index;
+}
+static ksn_command_storage *private_command(ksn_core_impl *core,unsigned index){
+    ksn_bank *next=&core->banks[core->building_bank];
+    const ksn_bank *active=&core->banks[core->active];
+    if(command_owner(next,index)==command_owner(active,index)){
+        unsigned owner=command_owner(active,index)^1u;
+        ksn_command_storage *destination=(owner==next->physical_index?
+            next->commands:next->command_peer)+index;
+        memcpy(destination,bank_command_const(active,index),sizeof(*destination));
+        ksn_p0_probe_copy(KSN_P0_CORE_CLONE_COMMAND,sizeof(*destination));
+        select_command_owner(next,index,owner);
+    }
+    return bank_command(next,index);
+}
+static uint8_t *bank_text(ksn_bank *bank,ksn_layer layer,unsigned offset){
+    return bank->text_layer[layer]+offset-text_base(layer);
+}
+static const uint8_t *bank_text_const(const ksn_bank *bank,ksn_layer layer,unsigned offset){
+    return bank->text_layer[layer]+offset-text_base(layer);
+}
 static unsigned track_base(ksn_layer layer){return layer==KSN_APP?0:KSN_APP_TRACKS;}
 static unsigned track_limit(ksn_layer layer){return layer==KSN_APP?KSN_APP_TRACKS:KSN_SYSTEM_TRACKS;}
+static unsigned track_owner(const ksn_bank *bank,unsigned index){return (bank->track_owner>>index)&1u;}
+static void select_track_owner(ksn_bank *bank,unsigned index,unsigned owner){
+    uint8_t bit=(uint8_t)(1u<<index);
+    if(owner)bank->track_owner|=bit;else bank->track_owner&=(uint8_t)~bit;
+}
+static ksn_track *bank_track(ksn_bank *bank,unsigned index){
+    return (track_owner(bank,index)==bank->physical_index?bank->tracks:bank->track_peer)+index;
+}
+static const ksn_track *bank_track_const(const ksn_bank *bank,unsigned index){
+    return (track_owner(bank,index)==bank->physical_index?bank->tracks:bank->track_peer)+index;
+}
+static ksn_track *private_track(ksn_core_impl *core,unsigned index){
+    ksn_bank *next=&core->banks[core->building_bank];
+    const ksn_bank *active=&core->banks[core->active];
+    if(track_owner(next,index)==track_owner(active,index)){
+        unsigned owner=track_owner(active,index)^1u;
+        select_track_owner(next,index,owner);
+        ksn_track *destination=bank_track(next,index);
+        memcpy(destination,bank_track_const(active,index),sizeof(*destination));
+        ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TRACK,sizeof(*destination));
+    }
+    return bank_track(next,index);
+}
+/* A new animation assigns the entire slot, so its prior value need not be
+ * copied even when this PATCH is the first writer of that slot. */
+static ksn_track *fresh_track(ksn_core_impl *core,unsigned index){
+    ksn_bank *next=&core->banks[core->building_bank];
+    const ksn_bank *active=&core->banks[core->active];
+    if(track_owner(next,index)==track_owner(active,index))
+        select_track_owner(next,index,track_owner(active,index)^1u);
+    return bank_track(next,index);
+}
 static bool running(const ksn_track *t){return t->status==KSN_ANIMATION_RUNNING||t->status==KSN_ANIMATION_PENDING;}
 static bool valid_layer(ksn_layer layer){return layer==KSN_APP||layer==KSN_SYSTEM;}
 static bool valid_rect(ksn_rect r){return r.x0<=r.x1&&r.y0<=r.y1;}
@@ -131,21 +198,71 @@ static ksn_result validate_image_window(const ksn_core_impl *core,ksn_layer laye
 /* Only the published prefix of each layer can be read. Every new command is
  * assigned in full by add(), and every new text allocation is initialized by
  * add()/change(), so stale bytes beyond count/text_used need not cross banks.
- * Animation slots are different: stopped/finished IDs remain pollable, hence
- * their complete fixed block is still cloned below. */
-static void copy_live_layer(ksn_bank *next,const ksn_bank *active,ksn_layer layer){
-    size_t command_bytes=(size_t)active->count[layer]*sizeof(ksn_command_storage);
-    size_t text_bytes=active->text_used[layer];
-    if(command_bytes){
-        unsigned base=command_base(layer);
-        memcpy(next->commands+base,active->commands+base,command_bytes);
-        ksn_p0_probe_copy(KSN_P0_CORE_CLONE_COMMAND,command_bytes);
+ * Animation slots are independently borrowed and privatized on write. */
+static void copy_live_text(ksn_bank *next,const ksn_bank *active,ksn_layer layer,
+                           unsigned start,unsigned end){
+    if(start>=end)return;
+    size_t bytes=end-start;
+    memcpy(bank_text(next,layer,start),bank_text_const(active,layer,start),bytes);
+    ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TEXT,bytes);
+}
+static bool text_slot_written(const ksn_core_impl *core,unsigned index){
+    return (core->text_written[index/32u]&(1u<<(index%32u)))!=0;
+}
+static void mark_text_slot_written(ksn_core_impl *core,unsigned index){
+    core->text_written[index/32u]|=1u<<(index%32u);
+    core->text_written_layers|=(uint8_t)(1u<<core->layer);
+}
+static void privatize_text_layer(ksn_core_impl *core,ksn_layer layer){
+    ksn_bank *next=&core->banks[core->building_bank];
+    const ksn_bank *active=&core->banks[core->active];
+    if(next->text_layer[layer]!=active->text_layer[layer])return;
+    unsigned base=text_base(layer);
+    next->text_layer[layer]=active->text_layer[layer]==core->banks[0].text+base?
+        core->banks[1].text+base:core->banks[0].text+base;
+}
+/* Text allocations are ordered by add(), so changed slots divide the live
+ * prefix into contiguous unchanged spans. No old bytes of a changed slot
+ * cross banks, even if that slot is rewritten more than once in one PATCH. */
+static void copy_patch_text_layer(ksn_core_impl *core,ksn_layer layer){
+    ksn_bank *next=&core->banks[core->building_bank];
+    const ksn_bank *active=&core->banks[core->active];
+    if(next->text_layer[layer]==active->text_layer[layer])return;
+    unsigned cursor=text_base(layer),end=cursor+active->text_used[layer];
+    if(!(core->text_written_layers&(1u<<layer))){
+        copy_live_text(next,active,layer,cursor,end);return;
     }
-    if(text_bytes){
-        unsigned base=text_base(layer);
-        memcpy(next->text+base,active->text+base,text_bytes);
-        ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TEXT,text_bytes);
+    unsigned base=command_base(layer);
+    for(unsigned i=0;i<active->count[layer];i++){
+        unsigned index=base+i;
+        if(!text_slot_written(core,index))continue;
+        const ksn_command_storage *command=bank_command_const(active,index);
+        if(command->kind!=KSN_TEXT)continue;
+        text_payload payload;payload_read(command,&payload,sizeof(payload));
+        copy_live_text(next,active,layer,cursor,payload.offset);
+        cursor=(unsigned)payload.offset+payload.capacity;
     }
+    copy_live_text(next,active,layer,cursor,end);
+}
+
+/* Candidate identity (physical blocks and index) is fixed by core_bind.
+ * Copy only the logical metadata that belongs to the sealed scene. A whole
+ * ksn_bank assignment needlessly copied the physical pointers and padding,
+ * then rewrote them with the same candidate-owned values on every begin. */
+static void clone_bank_metadata(ksn_bank *next,const ksn_bank *active){
+    memcpy(next->command_owner,active->command_owner,sizeof(next->command_owner));
+    memcpy(next->text_layer,active->text_layer,sizeof(next->text_layer));
+    next->track_owner=active->track_owner;
+    memcpy(next->count,active->count,sizeof(next->count));
+    memcpy(next->text_used,active->text_used,sizeof(next->text_used));
+    memcpy(next->generation,active->generation,sizeof(next->generation));
+    memcpy(next->background,active->background,sizeof(next->background));
+    memcpy(next->background_set,active->background_set,sizeof(next->background_set));
+    ksn_p0_probe_copy(KSN_P0_CORE_CLONE_META,
+        sizeof(next->command_owner)+sizeof(next->text_layer)+
+        sizeof(next->track_owner)+sizeof(next->count)+sizeof(next->text_used)+
+        sizeof(next->generation)+sizeof(next->background)+
+        sizeof(next->background_set));
 }
 
 static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
@@ -158,27 +275,15 @@ static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
     core->building_bank=(uint8_t)(core->active^1u);
     ksn_bank *next=&core->banks[core->building_bank];
     const ksn_bank *active=&core->banks[core->active];
-    ksn_command_storage *commands=next->commands;uint8_t *text=next->text;ksn_track *tracks=next->tracks;
-    *next=*active;next->commands=commands;next->text=text;next->tracks=tracks;
-    // Semantic struct assignment, including pointer fields immediately reset
-    // above; this is logical copy volume, not a DRAM bus-traffic estimate.
-    ksn_p0_probe_copy(KSN_P0_CORE_CLONE_META,sizeof(*next));
-    if(mode==KSN_PATCH){
-        if(tracks){memcpy(tracks,active->tracks,sizeof(ksn_core_animation_block));
-            ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TRACK,sizeof(ksn_core_animation_block));}
-        copy_live_layer(next,active,KSN_APP);
-        copy_live_layer(next,active,KSN_SYSTEM);
-    }else{
-        /* REPLACE clears the edited layer below. Only the other layer needs
-         * carrying to the candidate bank; never copy bytes just to erase them. */
-        ksn_layer keep=layer==KSN_APP?KSN_SYSTEM:KSN_APP;
-        unsigned ab=track_base(keep);
-        copy_live_layer(next,active,keep);
-        if(tracks)memcpy(tracks+ab,active->tracks+ab,
-                         track_limit(keep)*sizeof(*tracks));
-        if(tracks)ksn_p0_probe_copy(KSN_P0_CORE_CLONE_TRACK,
-                                   track_limit(keep)*sizeof(*tracks));
-    }
+    clone_bank_metadata(next,active);
+    /* PATCH borrows both immutable layers until its first text write. REPLACE
+     * needs a private edited layer immediately; the other layer stays shared.
+     * A failed or pending frame never writes the active region. */
+    if(mode==KSN_REPLACE)privatize_text_layer(core,layer);
+    /* PATCH borrows every track. REPLACE clears only the edited layer's
+     * opposite physical slots; the other layer remains sealed and borrowed. */
+    memset(core->text_written,0,sizeof(core->text_written));
+    core->text_written_layers=0;
     core->layer=layer;core->mode=mode;core->poison=KSN_OK;core->building=true;
     core->transaction=(ksn_tx){++last_transaction};*out=core->transaction;
     if(mode==KSN_REPLACE){
@@ -186,9 +291,11 @@ static ksn_result core_begin(void *context,ksn_update_mode mode,ksn_tx *out){
         ksn_bank *bank=&core->banks[core->building_bank];
         bank->generation[layer]=generation;bank->count[layer]=0;bank->text_used[layer]=0;
         bank->background_set[layer]=false;
-        memset(bank->commands+command_base(layer),0,command_limit(layer)*sizeof(ksn_command_storage));
-        memset(bank->text+text_base(layer),0,text_limit(layer));
-        if(bank->tracks)memset(bank->tracks+track_base(layer),0,track_limit(layer)*sizeof(ksn_track));
+        memset(bank_text(bank,layer,text_base(layer)),0,text_limit(layer));
+        if(bank->tracks)for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++){
+            select_track_owner(bank,i,track_owner(active,i)^1u);
+            memset(bank_track(bank,i),0,sizeof(ksn_track));
+        }
     }
     return KSN_OK;
 }
@@ -269,8 +376,8 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
         unsigned used=bank->text_used[layer],capacity=draw->data.text.capacity;
         if(used+capacity>text_limit(layer))return poison(core,KSN_LIMIT);
         unsigned offset=text_base(layer)+used;
-        memset(bank->text+offset,0,capacity);
-        if(draw->data.text.bytes){memcpy(bank->text+offset,draw->data.text.utf8,draw->data.text.bytes);
+        memset(bank_text(bank,layer,offset),0,capacity);
+        if(draw->data.text.bytes){memcpy(bank_text(bank,layer,offset),draw->data.text.utf8,draw->data.text.bytes);
             ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_TEXT,draw->data.text.bytes);
             ksn_p0_probe_core_source_text(draw->data.text.utf8,draw->data.text.bytes);}
         text_payload payload={(uint16_t)offset,(uint8_t)draw->data.text.bytes,(uint8_t)capacity,
@@ -291,7 +398,8 @@ static ksn_result core_add(void *context,ksn_tx tx,const ksn_draw *draw,ksn_ref 
         payload_write(&command,&payload,sizeof(payload));break;
     }
     }
-    bank->commands[index]=command;bank->count[layer]++;
+    select_command_owner(bank,index,command_owner(&core->banks[core->active],index)^1u);
+    *bank_command(bank,index)=command;bank->count[layer]++;
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,sizeof(command));
     *out=make_ref(bank->generation[layer],index);return KSN_OK;
 }
@@ -300,7 +408,7 @@ static ksn_result referenced_command(ksn_core_impl *core,ksn_ref ref,ksn_command
     ksn_bank *bank=&core->banks[core->building_bank];
     if(index<base||index>=base+limit||index>=base+bank->count[core->layer]||
        ref_generation(ref)!=bank->generation[core->layer])return KSN_STALE;
-    *out=&bank->commands[index];return KSN_OK;
+    *out=private_command(core,index);return KSN_OK;
 }
 static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_change *change){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;ksn_result result=check_transaction(context,tx);
@@ -311,7 +419,9 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
     if(change->property==KSN_SET_RECT||change->property==KSN_SET_ROTATION){
         ksn_track *tracks=core->banks[core->building_bank].tracks;
         if(tracks)for(unsigned i=track_base(core->layer);i<track_base(core->layer)+track_limit(core->layer);i++)
-            if(running(&tracks[i])&&tracks[i].target.value==ref.value)return poison(core,KSN_BUSY);
+            if(running(bank_track_const(&core->banks[core->building_bank],i))&&
+               bank_track_const(&core->banks[core->building_bank],i)->target.value==ref.value)
+                return poison(core,KSN_BUSY);
     }
     switch(change->property){
     case KSN_SET_RECT:
@@ -347,16 +457,21 @@ static ksn_result core_change(void *context,ksn_tx tx,ksn_ref ref,const ksn_chan
         size_t count=utf8_count(change->value.text.utf8,change->value.text.bytes);
         if(count==SIZE_MAX)return poison(core,KSN_INVALID);
         ksn_bank *bank=&core->banks[core->building_bank];
-        memset(bank->text+p.offset,0,p.capacity);
-        if(change->value.text.bytes){memcpy(bank->text+p.offset,change->value.text.utf8,change->value.text.bytes);
+        if(core->mode==KSN_PATCH)privatize_text_layer(core,core->layer);
+        memset(bank_text(bank,core->layer,p.offset),0,p.capacity);
+        if(change->value.text.bytes){memcpy(bank_text(bank,core->layer,p.offset),change->value.text.utf8,change->value.text.bytes);
             ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_TEXT,change->value.text.bytes);
             ksn_p0_probe_core_source_text(change->value.text.utf8,change->value.text.bytes);}
-        p.length=(uint8_t)change->value.text.bytes;p.reveal=(uint8_t)count;payload_write(command,&p,sizeof(p));return KSN_OK;
+        p.length=(uint8_t)change->value.text.bytes;p.reveal=(uint8_t)count;payload_write(command,&p,sizeof(p));
+        if(core->mode==KSN_PATCH)mark_text_slot_written(core,ref_index(ref));
+        return KSN_OK;
     }
     case KSN_SET_REVEAL:{
         if(command->kind!=KSN_TEXT)return poison(core,KSN_INVALID);
-        text_payload p;payload_read(command,&p,sizeof(p));ksn_bank *bank=&core->banks[core->building_bank];
-        size_t count=utf8_count((const char *)bank->text+p.offset,p.length);
+        text_payload p;payload_read(command,&p,sizeof(p));
+        const ksn_bank *bank=&core->banks[core->mode==KSN_PATCH&&!text_slot_written(core,ref_index(ref))
+                                                 ?core->active:core->building_bank];
+        size_t count=utf8_count((const char *)bank_text_const(bank,core->layer,p.offset),p.length);
         if(change->value.reveal>count)return poison(core,KSN_INVALID);
         p.reveal=(uint8_t)change->value.reveal;payload_write(command,&p,sizeof(p));return KSN_OK;
     }
@@ -391,11 +506,11 @@ static void apply_pose(ksn_command_storage *command,ksn_pose pose){
     command->bounds=pose.bounds;p.rotation=(uint16_t)((pose.rotation%1024+1024)%1024);
     payload_write(command,&p,sizeof(p));
 }
-static ksn_track *find_track(ksn_bank *bank,ksn_layer layer,ksn_animation id){
-    if(!bank->tracks||!id.value)return NULL;
+static int find_track_index(const ksn_bank *bank,ksn_layer layer,ksn_animation id){
+    if(!bank->tracks||!id.value)return -1;
     for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)
-        if(bank->tracks[i].id.value==id.value)return &bank->tracks[i];
-    return NULL;
+        if(bank_track_const(bank,i)->id.value==id.value)return (int)i;
+    return -1;
 }
 static ksn_result core_animate(void *context,ksn_tx tx,const ksn_motion *motion,ksn_animation *out){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;ksn_result result=check_transaction(context,tx);
@@ -410,24 +525,26 @@ static ksn_result core_animate(void *context,ksn_tx tx,const ksn_motion *motion,
         return poison(core,KSN_UNSUPPORTED);
     ksn_bank *bank=&core->banks[core->building_bank];
     if(!bank->tracks)return poison(core,KSN_UNSUPPORTED);
-    ksn_track *slot=NULL;
+    int slot=-1;
     for(unsigned i=track_base(core->layer);i<track_base(core->layer)+track_limit(core->layer);i++){
-        ksn_track *t=&bank->tracks[i];
+        const ksn_track *t=bank_track_const(bank,i);
         if(running(t)&&t->target.value==motion->first.value)return poison(core,KSN_BUSY);
-        if(!running(t)&&!slot)slot=t;
+        if(!running(t)&&slot<0)slot=(int)i;
     }
-    if(!slot||last_animation==UINT32_MAX)return poison(core,KSN_LIMIT);
-    *slot=(ksn_track){.from=motion->from.pose,.to=motion->to.pose,.id={++last_animation},.target=motion->first,
+    if(slot<0||last_animation==UINT32_MAX)return poison(core,KSN_LIMIT);
+    ksn_track *written=fresh_track(core,(unsigned)slot);
+    *written=(ksn_track){.from=motion->from.pose,.to=motion->to.pose,.id={++last_animation},.target=motion->first,
         .duration_ms=motion->duration_ms,.easing=(uint8_t)motion->easing,.repeat=(uint8_t)motion->repeat,
         .status=KSN_ANIMATION_PENDING};
-    apply_pose(command,slot->from);*out=slot->id;return KSN_OK;
+    apply_pose(command,written->from);*out=written->id;return KSN_OK;
 }
 static ksn_result core_stop(void *context,ksn_tx tx,ksn_animation animation){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;ksn_result result=check_transaction(context,tx);
     if(result!=KSN_OK)return result;
-    ksn_track *t=find_track(&core->banks[core->building_bank],core->layer,animation);
-    if(!t)return poison(core,KSN_STALE);
-    if(running(t))t->status=KSN_ANIMATION_STOPPED;
+    int index=find_track_index(&core->banks[core->building_bank],core->layer,animation);
+    if(index<0)return poison(core,KSN_STALE);
+    if(running(bank_track_const(&core->banks[core->building_bank],(unsigned)index)))
+        private_track(core,(unsigned)index)->status=KSN_ANIMATION_STOPPED;
     return KSN_OK;
 }
 static void sample_tracks(ksn_core_impl *core,uint64_t now,bool reduce);
@@ -435,6 +552,10 @@ static ksn_result core_end(void *context,ksn_tx tx){
     ksn_core_impl *core=((ksn_endpoint *)context)->core;ksn_result result=check_transaction(context,tx);
     if(result!=KSN_OK)return result;
     if(!core->banks[core->building_bank].background_set[KSN_APP])return poison(core,KSN_INVALID);
+    if(core->mode==KSN_PATCH){
+        copy_patch_text_layer(core,KSN_APP);
+        copy_patch_text_layer(core,KSN_SYSTEM);
+    }
     /* Coalesce native motion into a guest update before sealing the bank. */
     sample_tracks(core,core->animation_now_us,false);
     core->building=false;core->submitted=true;
@@ -453,7 +574,8 @@ static ksn_limits core_limits(void *context){
 }
 static uint8_t track_usage(const ksn_bank *bank,ksn_layer layer){
     uint8_t count=0;
-    if(bank->tracks)for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)count+=running(&bank->tracks[i]);
+    if(bank->tracks)for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)
+        count+=running(bank_track_const(bank,i));
     return count;
 }
 static ksn_stats core_stats(void *context){
@@ -475,8 +597,15 @@ void ksn_core_init(ksn_core *storage){
     if(!commands[0]||!commands[1]||!text[0]||!text[1])return;
     memset(storage,0,sizeof(*storage));
     for(unsigned i=0;i<2;i++){
-        core->banks[i].commands=commands[i];core->banks[i].text=text[i];
-        core->banks[i].tracks=tracks[i];
+        core->banks[i].commands=commands[i];core->banks[i].command_peer=commands[i^1u];
+        core->banks[i].physical_index=(uint8_t)i;
+        if(i)for(unsigned word=0;word<(KSN_COMMANDS+31u)/32u;word++)
+            core->banks[i].command_owner[word]=UINT32_MAX;
+        core->banks[i].text=text[i];
+        for(unsigned layer=0;layer<2;layer++)
+            core->banks[i].text_layer[layer]=text[i]+text_base((ksn_layer)layer);
+        core->banks[i].tracks=tracks[i];core->banks[i].track_peer=tracks[i^1u];
+        core->banks[i].track_owner=i?UINT8_MAX:0;
         if(tracks[i])memset(tracks[i],0,sizeof(ksn_core_animation_block));
         memset(commands[i],0,sizeof(ksn_core_command_block));
         memset(text[i],0,sizeof(ksn_core_text_block));
@@ -509,9 +638,14 @@ ksn_result ksn_core_reset_layer(ksn_core *storage,ksn_layer layer){
     for(unsigned i=0;i<2;i++){
         ksn_bank *bank=&core->banks[i];
         memset(bank->commands+command_base(layer),0,command_limit(layer)*sizeof(ksn_command_storage));
+        for(unsigned index=command_base(layer);index<command_base(layer)+command_limit(layer);index++)
+            select_command_owner(bank,index,i);
         memset(bank->text+text_base(layer),0,text_limit(layer));
         bank->count[layer]=bank->text_used[layer]=0;bank->generation[layer]=0;
-        if(bank->tracks)memset(bank->tracks+track_base(layer),0,track_limit(layer)*sizeof(ksn_track));
+        if(bank->tracks)for(unsigned index=track_base(layer);index<track_base(layer)+track_limit(layer);index++){
+            memset(bank->tracks+index,0,sizeof(ksn_track));
+            select_track_owner(bank,index,i);
+        }
         bank->background[layer]=layer==KSN_APP?0x000000ff:0;
         bank->background_set[layer]=layer==KSN_APP;
     }
@@ -527,7 +661,10 @@ ksn_result ksn_core_enable_animation(ksn_core *storage,ksn_core_animation_block 
     ksn_core_impl *core=impl(storage);
     if(core->submitted||core->repairing||core->banks[0].tracks||core->banks[1].tracks)return KSN_BUSY;
     memset(a,0,sizeof(*a));memset(b,0,sizeof(*b));
-    core->banks[0].tracks=a->tracks;core->banks[1].tracks=b->tracks;return KSN_OK;
+    core->banks[0].tracks=a->tracks;core->banks[0].track_peer=b->tracks;
+    core->banks[1].tracks=b->tracks;core->banks[1].track_peer=a->tracks;
+    core->banks[0].track_owner=0;core->banks[1].track_owner=UINT8_MAX;
+    return KSN_OK;
 }
 uint32_t ksn_core_animation_bytes(const ksn_core *storage){
     return storage&&cimpl(storage)->banks[0].tracks?2*sizeof(ksn_core_animation_block):0;
@@ -536,21 +673,24 @@ ksn_result ksn_core_finish_animation(ksn_core *storage,ksn_layer layer,ksn_tx tx
     if(!storage||!valid_layer(layer))return KSN_INVALID;
     ksn_core_impl *core=impl(storage);ksn_result r=check_transaction(&core->endpoints[layer],tx);
     if(r!=KSN_OK)return r;
-    ksn_track *t=find_track(&core->banks[core->building_bank],layer,id);
-    if(!t)return poison(core,KSN_STALE);
-    ksn_command_storage *command;r=referenced_command(core,t->target,&command);
+    int index=find_track_index(&core->banks[core->building_bank],layer,id);
+    if(index<0)return poison(core,KSN_STALE);
+    const ksn_track *current=bank_track_const(&core->banks[core->building_bank],(unsigned)index);
+    ksn_command_storage *command;r=referenced_command(core,current->target,&command);
     if(r!=KSN_OK)return poison(core,r);
+    ksn_track *t=private_track(core,(unsigned)index);
     apply_pose(command,t->to);t->status=KSN_ANIMATION_FINISHED;return KSN_OK;
 }
 ksn_animation_status ksn_core_poll_animation(const ksn_core *storage,ksn_layer layer,ksn_animation id){
     if(!storage||!valid_layer(layer)||!id.value)return KSN_ANIMATION_DISCARDED;
     const ksn_core_impl *core=cimpl(storage);const ksn_bank *active=&core->banks[core->active];
     if(active->tracks)for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)
-        if(active->tracks[i].id.value==id.value)return (ksn_animation_status)active->tracks[i].status;
+        if(bank_track_const(active,i)->id.value==id.value)
+            return (ksn_animation_status)bank_track_const(active,i)->status;
     const ksn_bank *next=&core->banks[core->building_bank];
     if((core->building||core->submitted)&&next->tracks)
         for(unsigned i=track_base(layer);i<track_base(layer)+track_limit(layer);i++)
-            if(next->tracks[i].id.value==id.value)return KSN_ANIMATION_PENDING;
+            if(bank_track_const(next,i)->id.value==id.value)return KSN_ANIMATION_PENDING;
     return KSN_ANIMATION_DISCARDED;
 }
 void ksn_core_start_animations(ksn_core *storage,uint64_t now){
@@ -558,20 +698,23 @@ void ksn_core_start_animations(ksn_core *storage,uint64_t now){
     ksn_core_impl *core=impl(storage);
     core->animation_now_us=now;
     if(core->building||core->submitted||core->repairing)return;
-    ksn_track *tracks=core->banks[core->active].tracks;if(!tracks)return;
-    for(unsigned i=0;i<KSN_TRACKS;i++)if(tracks[i].status==KSN_ANIMATION_PENDING){
-        tracks[i].started_us=tracks[i].sampled_us=now;tracks[i].status=KSN_ANIMATION_RUNNING;
+    ksn_bank *active=&core->banks[core->active];if(!active->tracks)return;
+    for(unsigned i=0;i<KSN_TRACKS;i++)if(bank_track_const(active,i)->status==KSN_ANIMATION_PENDING){
+        ksn_track *t=bank_track(active,i);
+        t->started_us=t->sampled_us=now;t->status=KSN_ANIMATION_RUNNING;
     }
 }
 uint64_t ksn_core_animation_deadline(const ksn_core *storage){
     if(!storage)return UINT64_MAX;
-    const ksn_track *tracks=cimpl(storage)->banks[cimpl(storage)->active].tracks;
-    uint64_t next=UINT64_MAX;if(!tracks)return next;
-    for(unsigned i=0;i<KSN_TRACKS;i++)if(tracks[i].status==KSN_ANIMATION_RUNNING){
-        uint64_t due=tracks[i].sampled_us>UINT64_MAX-33334?UINT64_MAX:tracks[i].sampled_us+33334;
-        if(tracks[i].easing==KSN_STEP&&tracks[i].repeat==KSN_ONCE){
-            uint64_t duration=(uint64_t)tracks[i].duration_ms*1000;
-            uint64_t end=tracks[i].started_us>UINT64_MAX-duration?UINT64_MAX:tracks[i].started_us+duration;
+    const ksn_bank *active=&cimpl(storage)->banks[cimpl(storage)->active];
+    uint64_t next=UINT64_MAX;if(!active->tracks)return next;
+    for(unsigned i=0;i<KSN_TRACKS;i++){
+        const ksn_track *t=bank_track_const(active,i);
+        if(t->status!=KSN_ANIMATION_RUNNING)continue;
+        uint64_t due=t->sampled_us>UINT64_MAX-33334?UINT64_MAX:t->sampled_us+33334;
+        if(t->easing==KSN_STEP&&t->repeat==KSN_ONCE){
+            uint64_t duration=(uint64_t)t->duration_ms*1000;
+            uint64_t end=t->started_us>UINT64_MAX-duration?UINT64_MAX:t->started_us+duration;
             if(end>due)due=end;
         }
         if(due<next)next=due;
@@ -598,14 +741,16 @@ static void sample_tracks(ksn_core_impl *core,uint64_t now,bool reduce){
     ksn_bank *bank=&core->banks[core->building_bank];
     if(!bank->tracks)return;
     for(unsigned i=0;i<KSN_TRACKS;i++){
-        ksn_track *t=&bank->tracks[i];if(t->status!=KSN_ANIMATION_RUNNING)continue;
-        if(!reduce&&(now<t->sampled_us||now-t->sampled_us<33334))continue;
+        const ksn_track *current=bank_track_const(bank,i);
+        if(current->status!=KSN_ANIMATION_RUNNING)continue;
+        if(!reduce&&(now<current->sampled_us||now-current->sampled_us<33334))continue;
+        ksn_track *t=private_track(core,i);
         uint64_t elapsed=now>=t->started_us?now-t->started_us:0;bool done;
         uint32_t q=motion_progress(t,elapsed,reduce,&done);
         ksn_pose p={.bounds={motion_lerp(t->from.bounds.x0,t->to.bounds.x0,q),motion_lerp(t->from.bounds.y0,t->to.bounds.y0,q),
             motion_lerp(t->from.bounds.x1,t->to.bounds.x1,q),motion_lerp(t->from.bounds.y1,t->to.bounds.y1,q)},
             .rotation=motion_lerp(t->from.rotation,t->to.rotation,q)};
-        apply_pose(&bank->commands[ref_index(t->target)],p);t->sampled_us=now;
+        apply_pose(private_command(core,ref_index(t->target)),p);t->sampled_us=now;
         if(done)t->status=KSN_ANIMATION_FINISHED;
     }
 }
@@ -644,6 +789,34 @@ void ksn_core_invalidate(ksn_core *storage){ksn_core_invalidate_bands(storage,KS
 void ksn_core_invalidate_bands(ksn_core *storage,uint32_t bands){
     if(storage)impl(storage)->invalidated|=bands&KSN_BANDS_ALL;
 }
+uint32_t ksn_core_opaque_system_bands(const ksn_core *storage){
+    if(!storage)return 0;
+    const ksn_core_impl *core=cimpl(storage);
+    /* A pending SYSTEM replacement may expose the old backdrop. Repair also
+     * cannot assume that the glass contains the committed opaque pixels. */
+    if(core->repairing||core->full_redraw||core->repair_bands||
+       (core->submitted&&core->layer==KSN_SYSTEM))return 0;
+    const ksn_bank *bank=&core->banks[core->active];
+    uint32_t covered=0;
+    for(unsigned i=0;i<bank->count[KSN_SYSTEM];i++){
+        const ksn_command_storage *command=bank_command_const(bank,KSN_APP_COMMANDS+i);
+        if(command->kind!=KSN_RECT||command->opacity!=255||
+           !(command->flags&KSN_FLAG_VISIBLE)||(command->flags&KSN_FLAG_GROUP)||
+           command->bounds.x0>0||command->bounds.x1<240||
+           command->clip.x0>0||command->clip.x1<240)continue;
+        ksn_rgba color;
+        memcpy(&color,command->payload,sizeof(color));
+        if((color&255u)!=255u)continue;
+        for(unsigned band=0;band<17;band++){
+            int y0=(int)band*8,y1=y0+8;
+            if(y1>135)y1=135;
+            if(command->bounds.y0<=y0&&command->bounds.y1>=y1&&
+               command->clip.y0<=y0&&command->clip.y1>=y1)
+                covered|=1u<<band;
+        }
+    }
+    return covered;
+}
 ksn_result ksn_core_check_builder(const ksn_core *storage,ksn_tx ticket,ksn_layer layer,ksn_update_mode mode){
     if(!storage)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
@@ -671,14 +844,17 @@ ksn_result ksn_core_group(ksn_core *storage,ksn_layer layer,ksn_tx tx,ksn_ref fi
     if(count>core->banks[core->building_bank].count[layer]-index)return poison(core,KSN_INVALID);
     bool existing=(command->flags&KSN_FLAG_GROUP)!=0;
     if(!existing&&core->mode!=KSN_REPLACE)return poison(core,KSN_INVALID);
+    ksn_bank *bank=&core->banks[core->building_bank];
     for(unsigned i=0;i<count;i++){
         unsigned expected=KSN_FLAG_GROUP|(i==0?KSN_FLAG_GROUP_BEGIN:0)|(i+1==count?KSN_FLAG_GROUP_END:0);
-        unsigned flags=command[i].flags&(KSN_FLAG_GROUP|KSN_FLAG_GROUP_BEGIN|KSN_FLAG_GROUP_END);
+        const ksn_command_storage *part=bank_command_const(bank,ref_index(first)+i);
+        unsigned flags=part->flags&(KSN_FLAG_GROUP|KSN_FLAG_GROUP_BEGIN|KSN_FLAG_GROUP_END);
         if(flags!=(existing?expected:0))return poison(core,KSN_INVALID);
     }
     for(unsigned i=0;i<count;i++){
-        command[i].flags|=KSN_FLAG_GROUP|(i==0?KSN_FLAG_GROUP_BEGIN:0)|(i+1==count?KSN_FLAG_GROUP_END:0);
-        command[i].reserved=opacity;
+        ksn_command_storage *part=private_command(core,ref_index(first)+i);
+        part->flags|=KSN_FLAG_GROUP|(i==0?KSN_FLAG_GROUP_BEGIN:0)|(i+1==count?KSN_FLAG_GROUP_END:0);
+        part->reserved=opacity;
     }
     return KSN_OK;
 }
@@ -771,7 +947,7 @@ ksn_result ksn_core_failed(ksn_core *storage,ksn_tx ticket){
 static ksn_result read_command(const ksn_bank *bank,ksn_layer layer,
                                uint16_t index,ksn_frame_command *out,bool borrow_text){
     if(index>=bank->count[layer])return KSN_INVALID;
-    const ksn_command_storage *command=&bank->commands[command_base(layer)+index];
+    const ksn_command_storage *command=bank_command_const(bank,command_base(layer)+index);
     memset(out,0,sizeof(*out));
     ksn_draw *draw=&out->draw;
     draw->kind=(ksn_kind)command->kind;draw->bounds=command->bounds;
@@ -793,9 +969,9 @@ static ksn_result read_command(const ksn_bank *bank,ksn_layer layer,
     }
     case KSN_TEXT:{
         text_payload p;payload_read(command,&p,sizeof(p));
-        if(borrow_text)draw->data.text.utf8=(const char *)(bank->text+p.offset);
+        if(borrow_text)draw->data.text.utf8=(const char *)bank_text_const(bank,layer,p.offset);
         else{
-            memcpy(out->text,bank->text+p.offset,p.length);
+            memcpy(out->text,bank_text_const(bank,layer,p.offset),p.length);
             ksn_p0_probe_copy(KSN_P0_CORE_RENDER_TEXT,p.length);
             draw->data.text.utf8=out->text;
         }
@@ -859,7 +1035,7 @@ ksn_result ksn_core_image_span(const ksn_core *storage,ksn_tx ticket,bool previo
     if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
     const ksn_bank *bank=&core->banks[(previous||core->repairing)?core->active:core->building_bank];
     if(index>=bank->count[layer])return KSN_INVALID;
-    const ksn_command_storage *command=&bank->commands[command_base(layer)+index];
+    const ksn_command_storage *command=bank_command_const(bank,command_base(layer)+index);
     if(command->kind!=KSN_IMAGE)return KSN_INVALID;
     image_payload p;payload_read(command,&p,sizeof(p));
     if(command->flags>>KSN_IMAGE_SCALE_SHIFT==KSN_IMAGE_STRETCH){stretch_payload s;
@@ -1028,11 +1204,12 @@ ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,
     }
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<next->count[layer];i++){
         unsigned index=command_base((ksn_layer)layer)+i;
-        const ksn_command_storage *a=&old->commands[index],*b=&next->commands[index];
+        const ksn_command_storage *a=bank_command_const(old,index),*b=bank_command_const(next,index);
         bool changed=memcmp(a,b,sizeof(*a))!=0;
         if(!changed&&b->kind==KSN_TEXT){
             text_payload p;payload_read(b,&p,sizeof(p));
-            changed=memcmp(old->text+p.offset,next->text+p.offset,p.length)!=0;
+            changed=memcmp(bank_text_const(old,(ksn_layer)layer,p.offset),
+                           bank_text_const(next,(ksn_layer)layer,p.offset),p.length)!=0;
         }
         if(!changed)continue;
         /* A text command that only changed what it says contributes the columns
@@ -1042,8 +1219,8 @@ ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,
             int first,last;
             if(same_text_frame(a,b,&pa,&pb)&&
                text_changed_columns(text,(ksn_font)pa.font,
-                                    old->text+pa.offset,pa.length,pa.reveal,
-                                    next->text+pb.offset,pb.length,pb.reveal,
+                                    bank_text_const(old,(ksn_layer)layer,pa.offset),pa.length,pa.reveal,
+                                    bank_text_const(next,(ksn_layer)layer,pb.offset),pb.length,pb.reveal,
                                     &first,&last)){
                 if(first==last)continue; /* nothing visible moved */
                 ksn_rect box=command_box(b);

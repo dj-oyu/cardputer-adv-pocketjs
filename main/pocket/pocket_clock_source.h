@@ -5,7 +5,7 @@
 /* Clock-owned storage. Snapshots borrow face/tag only until release. */
 typedef struct {
     uint64_t key,revision;
-    uint32_t generation;
+    uint32_t generation,pins;
     bool initialized;
     char face[6],tag[8];
     ksn_schema_value fields[2];

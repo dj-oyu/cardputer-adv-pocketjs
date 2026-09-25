@@ -278,7 +278,7 @@ menu "Pocket VM (L0 measurement probes)"
             compiles (an inner function's text a second time, inside its
             parent's) so that Function.prototype.toString can return it. On
             the 160 KiB guest those copies measured 2.5-7.1 KiB per app
-            (docs/kasane/kasane-guest-memory.md, docs/vm/vm-L2-results.md
+            (docs/kasane/decisions.md, docs/vm/vm-L2-results.md
             sec.6), and nothing else reads them.
 
             On (default), no copy is made. What is lost: toString of a JS

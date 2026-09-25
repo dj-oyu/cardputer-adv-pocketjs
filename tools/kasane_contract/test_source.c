@@ -56,6 +56,19 @@ static void u32_source_test(void){
     ksn_source_subscription sub={0};
     const ksn_source_binding binding={0,0};
     assert(ksn_source_subscribe(&registry,handle,7,&schema,&binding,1,&sub)==KSN_OK);
+    ksn_source_lease borrowed={0};
+    assert(ksn_source_borrow(&registry,&sub,0,&borrowed)==KSN_OK);
+    assert(borrowed.snapshot.fields==f.fields&&borrowed.valid_slots==1&&
+           borrowed.dirty_slots==1&&ksn_source_unregister(&registry,handle)==KSN_BUSY);
+    ksn_source_release(&borrowed);
+    assert(ksn_source_borrow_identity(&registry,&sub,0,&borrowed)==KSN_OK);
+    assert(borrowed.snapshot.fields==f.fields&&borrowed.valid_slots==1&&
+           borrowed.dirty_slots==1);
+    ksn_source_release(&borrowed);
+    f.allowed=false;
+    assert(ksn_source_borrow_identity(&registry,&sub,0,&borrowed)==KSN_UNSUPPORTED);
+    f.allowed=true;
+    assert(!sub.has_validated);
     ksn_schema_value effective[KSN_SCHEMA_MAX_SLOTS]={0};
     ksn_source_lease lease={0};
     assert(ksn_source_acquire(&registry,&sub,&schema,base,0,effective,&lease)==KSN_OK);
@@ -64,6 +77,8 @@ static void u32_source_test(void){
     ksn_source_release(&lease);
     f.snapshot.version=1;
     assert(ksn_source_acquire(&registry,&sub,&schema,base,0,effective,&lease)==KSN_INVALID);
+    assert(ksn_source_borrow_identity(&registry,&sub,0,&borrowed)==KSN_INVALID&&
+           !borrowed.active);
     assert(sub.validated_revision==1);
     f.snapshot.version=KSN_SOURCE_ABI_VERSION;
     f.snapshot.revision=2;
@@ -184,6 +199,17 @@ int main(void){
     f.allowed=false;
     assert(ksn_source_acquire(&registry,&a,&schema,base,22,effective,&lease)==KSN_UNSUPPORTED);
     f.allowed=true;
+    ksn_source_subscription malformed=b;
+    malformed.bindings[1].slot=0;
+    ksn_source_lease malformed_lease={0};
+    unsigned released_before=f.releases;
+    assert(ksn_source_borrow(&registry,&malformed,0,&malformed_lease)==KSN_INVALID);
+    assert(!malformed_lease.active&&f.releases==released_before+1&&
+           malformed.validated_revision==b.validated_revision);
+    malformed=b;malformed.bindings[1].field=2;
+    assert(ksn_source_borrow(&registry,&malformed,0,&malformed_lease)==KSN_INVALID);
+    assert(!malformed_lease.active&&f.releases==released_before+2&&
+           malformed.validated_revision==b.validated_revision);
     assert(ksn_source_unregister(&registry,handle)==KSN_OK);
     assert(ksn_source_acquire(&registry,&a,&schema,base,23,effective,&lease)==KSN_STALE);
     ksn_source_handle next={0};

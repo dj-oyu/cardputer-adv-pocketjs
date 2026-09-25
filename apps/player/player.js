@@ -5,6 +5,7 @@
   var EXT = ['.mp3', '.wav', '.pok'];
 
   var p = null, sub = null, path = '', state = 'idle', busy = false;
+  var outputProbe = null, outputBound = false;
 
   function leaf(s) { var i = s.lastIndexOf('/'); return i < 0 ? s : s.slice(i + 1); }
   function say(m) { view.set({message: m}); }
@@ -77,6 +78,23 @@
 
   host.onKey(function (e) {
     if (e.key === '?') { view.toggleHelp(); return; }
+    // Diagnostic-only: the real music presenter stays on screen. The source
+    // publishes from the audio task but this probe does not bind its fields.
+    if (globalThis.KSN_P1_OUTPUT_OVERLAY_PROBE && e.action === 'up') {
+      if (!outputProbe) {
+        outputProbe = pocket.audio.outputSource({sampleMs: 33});
+        console.log('KSN_P1_OUTPUT_OVERLAY ACTIVE sampleMs=33');
+      }
+      return;
+    }
+    if (globalThis.KSN_P1_OUTPUT_OVERLAY_PROBE && e.action === 'down') {
+      if (outputProbe && !outputBound) {
+        view.bind('output');
+        outputBound = true;
+        console.log('KSN_P1_OUTPUT_OVERLAY BOUND visible=1');
+      }
+      return;
+    }
     if (busy) return;
     if (view.dismissHelp()) return;
     if (e.action === 'accept') { if (p) toggle(); else pick(); return; }
@@ -86,5 +104,6 @@
   });
 
   view.set({title: 'NO TRACK', message: 'ENTER TO CHOOSE'});
-  globalThis.frame = function () {};
+  // Input and Promise callbacks own the JS work; native Kasane owns drawing.
+  globalThis.frame = null;
 })();

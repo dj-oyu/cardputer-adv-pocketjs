@@ -12,6 +12,7 @@
 #define LIT KSN_SCHEMA_LITERAL
 KSN_TEST_CORE(core,static);
 KSN_TEST_CORE(pool_core,static);
+KSN_TEST_CORE(shared_core,static);
 static unsigned copy_calls[KSN_P0_COPY_COUNT];
 static size_t copy_bytes[KSN_P0_COPY_COUNT];
 static const char *watched_source_text;
@@ -216,6 +217,7 @@ int main(void){
     CHECK(ksn_schema_session_step_dirty(&session,view,viewport,effective,2,1,&blocked)==KSN_OK&&blocked);
     CHECK(session.pending_delta==KSN_SCHEMA_PATCHED);
     CHECK(copy_calls[KSN_P0_CORE_SUBMIT_TEXT]==4&&copy_bytes[KSN_P0_CORE_SUBMIT_TEXT]==20);
+    CHECK(copy_calls[KSN_P0_CORE_CLONE_TEXT]==0&&copy_bytes[KSN_P0_CORE_CLONE_TEXT]==0);
     CHECK(direct_source_calls==4&&direct_source_bytes==20);
     CHECK(ksn_source_commit(&lease)==KSN_OK);ksn_source_release(&lease);
     CHECK(p.releases==2);memcpy(p.text,"xxxxx",6);
@@ -272,6 +274,53 @@ int main(void){
     CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK&&output.omega>0);
     ksn_p0_probe_unwatch_source_text(p.text);
     CHECK(pool_exhaustion_case(&schema)==0);
+    /* An unrelated layer's immutable text must cross neither bank on
+     * REPLACE. Alternating APP/SYSTEM writers still render the same strings. */
+    ksn_core_init(&shared_core);
+    ksn_client shared_app=ksn_core_client(&shared_core,KSN_APP);
+    ksn_client shared_sys=ksn_core_client(&shared_core,KSN_SYSTEM);
+    ksn_tx shared_tx;ksn_ref shared_ref;
+    ksn_draw shared_text={.kind=KSN_TEXT,.bounds={4,4,100,14},
+        .clip={0,0,240,135},.opacity=255,
+        .data.text={.utf8="alpha",.bytes=5,.capacity=8,.font=KSN_CAPTION,.color=0xffffffff}};
+    CHECK(shared_app.ops->begin(shared_app.ctx,KSN_REPLACE,&shared_tx)==KSN_OK);
+    CHECK(shared_app.ops->background(shared_app.ctx,shared_tx,0x000000ff)==KSN_OK);
+    CHECK(shared_app.ops->add(shared_app.ctx,shared_tx,&shared_text,&shared_ref)==KSN_OK);
+    CHECK(shared_app.ops->end(shared_app.ctx,shared_tx)==KSN_OK);
+    CHECK(ksn_render_rects(&shared_core,&port,&stats)==KSN_OK);
+    shared_text.bounds=(ksn_rect){4,24,100,34};shared_text.data.text.utf8="bravo";
+    CHECK(shared_sys.ops->begin(shared_sys.ctx,KSN_REPLACE,&shared_tx)==KSN_OK);
+    CHECK(shared_sys.ops->add(shared_sys.ctx,shared_tx,&shared_text,&shared_ref)==KSN_OK);
+    CHECK(shared_sys.ops->end(shared_sys.ctx,shared_tx)==KSN_OK);
+    CHECK(ksn_render_rects(&shared_core,&port,&stats)==KSN_OK);
+    memset(copy_calls,0,sizeof(copy_calls));memset(copy_bytes,0,sizeof(copy_bytes));
+    CHECK(shared_sys.ops->begin(shared_sys.ctx,KSN_PATCH,&shared_tx)==KSN_OK);
+    CHECK(shared_sys.ops->end(shared_sys.ctx,shared_tx)==KSN_OK);
+    CHECK(copy_calls[KSN_P0_CORE_CLONE_COMMAND]==0&&
+          copy_bytes[KSN_P0_CORE_CLONE_COMMAND]==0);
+    CHECK(ksn_render_rects(&shared_core,&port,&stats)==KSN_OK);
+    ksn_change shared_color={.property=KSN_SET_COLOR,.value.color=0xff00ffff};
+    CHECK(shared_sys.ops->begin(shared_sys.ctx,KSN_PATCH,&shared_tx)==KSN_OK);
+    CHECK(shared_sys.ops->change(shared_sys.ctx,shared_tx,shared_ref,&shared_color)==KSN_OK);
+    CHECK(shared_sys.ops->end(shared_sys.ctx,shared_tx)==KSN_OK);
+    CHECK(copy_calls[KSN_P0_CORE_CLONE_COMMAND]==1&&
+          copy_bytes[KSN_P0_CORE_CLONE_COMMAND]==sizeof(ksn_command_storage));
+    CHECK(copy_calls[KSN_P0_CORE_CLONE_TEXT]==0&&copy_bytes[KSN_P0_CORE_CLONE_TEXT]==0);
+    CHECK(ksn_render_rects(&shared_core,&port,&stats)==KSN_OK);
+    shared_text.data.text.utf8="gamma";
+    CHECK(shared_sys.ops->begin(shared_sys.ctx,KSN_REPLACE,&shared_tx)==KSN_OK);
+    CHECK(shared_sys.ops->add(shared_sys.ctx,shared_tx,&shared_text,&shared_ref)==KSN_OK);
+    CHECK(shared_sys.ops->end(shared_sys.ctx,shared_tx)==KSN_OK);
+    CHECK(copy_calls[KSN_P0_CORE_CLONE_TEXT]==0&&copy_bytes[KSN_P0_CORE_CLONE_TEXT]==0);
+    CHECK(ksn_render_rects(&shared_core,&port,&stats)==KSN_OK);
+    shared_text.bounds=(ksn_rect){4,4,100,14};shared_text.data.text.utf8="omega";
+    CHECK(shared_app.ops->begin(shared_app.ctx,KSN_REPLACE,&shared_tx)==KSN_OK);
+    CHECK(shared_app.ops->background(shared_app.ctx,shared_tx,0x000000ff)==KSN_OK);
+    CHECK(shared_app.ops->add(shared_app.ctx,shared_tx,&shared_text,&shared_ref)==KSN_OK);
+    CHECK(shared_app.ops->end(shared_app.ctx,shared_tx)==KSN_OK);
+    CHECK(copy_calls[KSN_P0_CORE_CLONE_TEXT]==0&&copy_bytes[KSN_P0_CORE_CLONE_TEXT]==0);
+    CHECK(ksn_render_rects(&shared_core,&port,&stats)==KSN_OK);
+    CHECK(output.gamma>0&&output.omega>0);
     puts("source copy: PASS (direct producer pointer, one copy/destination, release, PATCH, repair, discard/retry, hidden/show latest, pool exhaustion)");
     return 0;
 }

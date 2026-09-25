@@ -21,7 +21,15 @@
 #include "pet_hub.h"
 #include "pocket_capture.h"
 #include "pocket_av.h"
+#ifdef KASANE_P0_PROBE
+#include "pocket/app_music_view.h"
+#include "pocket_mutex_arena.h"
+#include "ui/kasane/ksn_schema_session.h"
+#endif
 #include "ui/kasane/ksn_p0_probe.h"
+#ifdef KASANE_TEXT_PIE_DEVICE_PROBE
+#include "ui/kasane/ksn_render.h"
+#endif
 #include "pocket_bridge.h"
 #include "pocket_text.h"
 #include "system/sys_device.h"
@@ -40,6 +48,10 @@
 #include <string.h>
 #include "hal/fpu_latency.h"
 static atomic_bool fpu_probe_requested;
+#ifdef KASANE_P5_NOTICE_PROBE
+static atomic_int p5_notice_probe_requested;
+#define P5_NOTICE_OWNER (UINT32_MAX-1u)
+#endif
 #ifdef CONFIG_KSN_DEVICE_PROBE
 #include "esp_heap_caps.h"
 #include "ui/kasane/ksn_runtime.h"
@@ -233,6 +245,16 @@ static uint32_t last_frame_us;
 // USB drives the home screen with single letters, but an editor needs the
 // bytes themselves so a host script can type at it. 0x1b closes either way.
 static bool usb_stroke(char c, keystroke_t *k) {
+#ifdef KASANE_TEXT_PIE_DEVICE_PROBE
+    /* Set, do not toggle: a host can safely retry after a lost USB/log byte.
+     * This diagnostic path runs before guest input forwarding. */
+    if(c=='K'||c=='k') {
+        g_ksn_text_pie=c=='K';
+        ESP_LOGI("KSN_PIE","TEXT %d",g_ksn_text_pie);
+        return false;
+    }
+    if(c=='?') { atomic_store(&diagnostic,c); return false; }
+#endif
     if(pocket_bridge_usb((uint8_t)c))return false;
     if(pet_hub_usb((uint8_t)c))return false;
     memset(k,0,sizeof(*k));
@@ -253,6 +275,27 @@ static bool usb_stroke(char c, keystroke_t *k) {
     if(c=='s') { atomic_store(&capture,true); return false; }
 #ifdef KASANE_P2_REPAIR_PROBE
     if(c=='%') { app_p2_request_repair_probe(); return false; }
+    if(c=='@') { app_p2_request_patch_repair_probe(); return false; }
+    if(c=='}') { k->nav=KEY_RIGHT; return true; }
+    if(c=='{') { k->nav=KEY_LEFT; return true; }
+    if(c=='!') { k->nav=KEY_UP; return true; }
+    if(c==']') { k->nav=KEY_DOWN; return true; }
+#endif
+#ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
+    if(c=='%'||c=='^') { shell_overlay_repair_request(c=='^'); return false; }
+#endif
+#ifdef KASANE_P5_LOWHEAP_PROBE
+    if(c=='H') { shell_lowheap_toggle_request(); return false; }
+#endif
+#ifdef KASANE_P5_NOTICE_PROBE
+    if(c=='J'||c=='C') { atomic_store(&p5_notice_probe_requested,c); return false; }
+#endif
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+    /* P0's USB 'u' starts a foreground diagnostic. Keep a distinct key for
+     * the music overlay's up action so the 33 ms probe stays in the overlay.
+     * Likewise, 'b' starts a P0 app, so settings navigation needs right. */
+    if(c=='&') { k->nav=KEY_UP; return true; }
+    if(c=='>') { k->nav=KEY_RIGHT; return true; }
 #endif
     // Not behind CONFIG_KSN_DEVICE_PROBE: this one measures the CPU rather than
     // the display, it is about a kilobyte, and the build that needs it is
@@ -274,7 +317,17 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
 #ifdef KASANE_P0_PROBE
-    if(c=='7'||c=='0'||c=='v'||c=='w'||c=='y'||c=='z'||c=='j'||c=='b'||c=='h'||c=='u'
+    if(c==';') { (void)pocket_mutex_arena_device_race_probe(); return false; }
+    if(c==':') { (void)pocket_mutex_arena_device_oom_probe(); return false; }
+    if(c=='g') {
+        bool fullscan=ksn_schema_session_toggle_fullscan_probe();
+        ESP_LOGI("KSN_P2","FULLSCAN %u",(unsigned)fullscan);
+        return false;
+    }
+    if(c=='7'||c=='0'||c=='v'||c=='V'||c=='w'||c=='y'||c=='z'||c=='j'||c=='h'||c=='i'||c=='l'||c=='T'||c=='t'||c=='R'||c=='#'
+#ifndef KASANE_P5_FAIRNESS_PROBE
+       ||c=='b'||c=='u'
+#endif
 #ifdef KASANE_P0_COPY_PROBE
        ||c=='x'
 #endif
@@ -830,6 +883,18 @@ static void ui_task(void *arg) {
         int system_probe_command=atomic_exchange(&system_probe_requested,0);
         if(system_probe_command)system_probe(system_probe_command);
 #endif
+#ifdef KASANE_P5_NOTICE_PROBE
+        int p5_notice_command=atomic_exchange(&p5_notice_probe_requested,0);
+        if(p5_notice_command=='J'){
+            uint32_t id=0;
+            sys_notice_result result=sys_notify_post(sys_device_notifications(),P5_NOTICE_OWNER,
+                                                     1,"P5 SYSTEM NOTICE",0,&id);
+            ESP_LOGI("KSN_P5_NOTICE","POST result=%u id=%u",(unsigned)result,(unsigned)id);
+        }else if(p5_notice_command=='C'){
+            sys_notify_release_owner(sys_device_notifications(),P5_NOTICE_OWNER);
+            ESP_LOGI("KSN_P5_NOTICE","CLEAR");
+        }
+#endif
         sys_device_step();
 #ifdef KASANE_P0_PROBE
         int64_t av_service_started=esp_timer_get_time();
@@ -958,8 +1023,16 @@ static void ui_task(void *arg) {
                 paint(s);
 
             framed:
-            {
+        {
             int test=atomic_exchange(&diagnostic,0);
+#ifdef KASANE_P0_PROBE
+            if(test=='R'){
+                ksn_p0_probe_reset();
+                pocket_app_music_view_probe_reset_counters();
+                ESP_LOGI("KSN_P0","RESET requested");
+                test=0;
+            }
+#endif
 #ifdef CONFIG_POCKET_VM_CALLBENCH
             if(test=='N'||test=='U') {
                 if(!running && screen==SCREEN_HOME) {

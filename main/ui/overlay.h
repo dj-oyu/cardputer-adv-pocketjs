@@ -92,6 +92,6 @@ void overlay_paint(uint16_t *strip, int strip_y, int strip_h);
 // overlay_paint() above during the compatibility window.
 bool overlay_kasane_active(void);
 ksn_result overlay_kasane_present(const ksn_display_port *,ksn_backdrop_loader,
-                                  ksn_render_stats *);
+                                  bool host_top_dynamic,ksn_render_stats *);
 // Charge only Kasane's retained-command work. Scene/HUD/LCD time is excluded.
 void overlay_kasane_charge(uint32_t composite_us);

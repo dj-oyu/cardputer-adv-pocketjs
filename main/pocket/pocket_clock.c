@@ -13,6 +13,7 @@ typedef struct {
     ksn_source_handle handle;
 } wall_source_service;
 static wall_source_service *wall_source;
+static bool wall_source_retained;
 
 JSValue pocket_clock_wall(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv) {
@@ -33,6 +34,15 @@ JSValue pocket_clock_wall(JSContext *ctx, JSValueConst this_val,
 JSValue pocket_clock_wall_source(JSContext *ctx,JSValueConst this_val,
                                  int argc,JSValueConst *argv){
     (void)this_val;(void)argc;(void)argv;
+    if(wall_source_retained){
+        if(ksn_source_unregister(&wall_source->registry,wall_source->handle)!=KSN_OK)
+            return pocket_api_throw(ctx,POCKET_ERR_BUSY,"time.wallSource",
+                "a previous clock source still has readers",true,
+                POCKET_OUTCOME_NOT_APPLIED);
+        free(wall_source);
+        wall_source=NULL;
+        wall_source_retained=false;
+    }
     if(!wall_source){
         wall_source_service *service=calloc(1,sizeof(*service));
         if(!service)return pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,
@@ -56,7 +66,11 @@ JSValue pocket_clock_wall_source(JSContext *ctx,JSValueConst this_val,
 
 void pocket_clock_reset(void){
     if(!wall_source)return;
-    if(ksn_source_unregister(&wall_source->registry,wall_source->handle)!=KSN_OK)return;
+    if(ksn_source_unregister(&wall_source->registry,wall_source->handle)!=KSN_OK){
+        wall_source_retained=true;
+        return;
+    }
     free(wall_source);
     wall_source=NULL;
+    wall_source_retained=false;
 }

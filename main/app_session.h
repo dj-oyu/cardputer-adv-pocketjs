@@ -62,6 +62,8 @@ void app_force_redraw_bands(uint32_t bands);
 #ifdef KASANE_P2_REPAIR_PROBE
 // USB diagnostic only: fail the fourth send of one forced full APP repaint.
 void app_p2_request_repair_probe(void);
+// USB diagnostic only: fail the fourth send of the next natural APP PATCH.
+void app_p2_request_patch_repair_probe(void);
 #endif
 esp_err_t app_tick(uint32_t buttons);
 // The display period the shell paces a RUNNING guest at (main.c's ui_task),

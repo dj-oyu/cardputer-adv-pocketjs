@@ -50,7 +50,7 @@ frameが表情0–5で、旧`pocket.pet.place`の第1引数・第4引数とそ�
   制約ではなく、ゲストソースのバイト数予算（移植元以下を維持）を優先した判断です。
 
 旧`ui.createNode`で作っていたノード数上限（taffy段差）の節はKasane移植で意味を失った
-ため削除しました。Kasaneのcommand/text予算は`docs/kasane/design-api.md`の
+ため削除しました。Kasaneのcommand/text予算は`docs/kasane/architecture.md`の
 `KSN_APP_COMMANDS`(80)・`KSN_APP_TEXT_BYTES`(896)です。presenterは可視命令だけを提出し、
 現在の画面で容量内に収まることをnative契約テストで確認します。
 

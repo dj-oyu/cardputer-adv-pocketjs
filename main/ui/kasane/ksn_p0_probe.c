@@ -87,6 +87,12 @@ static const char *const sample_names[]={"app_turn","app_render","app_send",
                                          "overlay_send","overlay_compute",
                                          "ui_frame","av_service",
                                          "ui_interval","input_queue"
+#ifdef KASANE_P1_OVERLAY_STAGE_PROBE
+                                         ,"p1_overlay_guest","p1_overlay_composite",
+                                         "p1_music_key","p1_music_output_borrow",
+                                         "p1_music_make","p1_music_submit",
+                                         "p1_music_fast"
+#endif
 #ifdef KASANE_P0_BUS_PROBE
                                          ,"lcd_swap","lcd_reap","lcd_pre_isr",
                                          "lcd_post_isr","lcd_queue",
@@ -98,6 +104,9 @@ static const char *const sample_names[]={"app_turn","app_render","app_send",
 // charging every other series for a larger histogram.
 static const uint16_t sample_bucket_us[]={128,128,128,128,128,128,128,
                                           1024,128,1024,256
+#ifdef KASANE_P1_OVERLAY_STAGE_PROBE
+                                          ,128,128,128,128,128,128,128
+#endif
 #ifdef KASANE_P0_BUS_PROBE
                                           ,128,128,128,128,128,128,128,128
 #endif

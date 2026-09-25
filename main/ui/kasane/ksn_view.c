@@ -196,14 +196,15 @@ ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,k
 }
 
 ksn_result ksn_view_host_present_backdrop(ksn_view_host *h,const ksn_display_port *port,
-                                          ksn_backdrop_loader load,ksn_render_stats *stats){
+                                          ksn_backdrop_loader load,bool occlusion_safe,
+                                          ksn_render_stats *stats){
     if(!h||!h->core||!stats||!load)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     if(h->presenting)return KSN_BUSY;
     bool submitted=ksn_core_has_submission(h->core);
     if(!submitted&&!ksn_core_needs_repair(h->core))return KSN_OK;
     h->presenting=true;
-    ksn_result r=ksn_render_rects_backdrop(h->core,port,load,stats);
+    ksn_result r=ksn_render_rects_backdrop(h->core,port,load,occlusion_safe,stats);
     h->presenting=false;
     if(r==KSN_OK&&submitted)resolve(h);
     return r;

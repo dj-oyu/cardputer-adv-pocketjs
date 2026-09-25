@@ -12,6 +12,13 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   tools/kasane_contract/use_cases.c tools/kasane_contract/test_core.c -o "$out/core" main/ui/kasane/ksn_blend_pie.c
 "$out/core"
 for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
+  cc -std=c11 -Wall -Wextra -Werror $options -pthread \
+    -Itools/kasane_contract/mutex_arena_hostshim \
+    tools/kasane_contract/test_mutex_arena.c -o "$out/mutex-arena"
+  "$out/mutex-arena"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    tools/kasane_contract/test_repair_send_probe.c -o "$out/repair-send-probe"
+  "$out/repair-send-probe"
   cc -std=c11 -Wall -Wextra -Werror $options -Itools/kasane_contract/p0_hostshim -Itools/hostshim \
     tools/kasane_contract/test_p0_histogram.c -o "$out/p0-histogram"
   "$out/p0-histogram"
@@ -50,6 +57,11 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_legacy_presenter.c \
     tools/kasane_contract/test_presenter.c -o "$out/presenter"
   "$out/presenter"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain -Imain/ui/kasane -Imain/pocket -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_legacy_presenter.c \
+    tools/kasane_contract/test_music_light_fast.c -o "$out/music-light-fast"
+  "$out/music-light-fast"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
@@ -88,6 +100,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_source_pool_adapter.c tools/kasane_contract/test_source_copy.c \
     -o "$out/source-copy"
   "$out/source-copy"
+  cc -std=gnu11 -Wall -Wextra -Werror $options -DKASANE_P0_PROBE -DKASANE_P0_COPY_PROBE \
+    -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_blend_pie.c \
+    tools/kasane_contract/test_track_cow.c -o "$out/track-cow"
+  "$out/track-cow"
   cc -std=c11 -Wall -Wextra -Werror $options -DKSN_SCHEMA_DIRTY_COUNT \
     -Imain/ui/kasane -Itools/kasane_contract \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
@@ -126,7 +142,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_primitives.c -o "$out/primitives"
   "$out/primitives"
-  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+  cc -std=c11 -Wall -Wextra -Werror $options -DKSN_TEXT_PIE_COUNT -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_text_render.c -o "$out/text"
   "$out/text"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \

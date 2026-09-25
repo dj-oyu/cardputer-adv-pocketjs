@@ -18,7 +18,7 @@ typedef struct {
 /* One allocation for the control state, both command banks and both text
  * banks (and the APP tail). They used to be five callocs made while the guest
  * was evaluating, and each cut a hole in the largest free block
- * (docs/kasane/kasane-guest-memory-reduce.md). */
+ * (docs/kasane/decisions.md). */
 typedef struct {
     runtime_storage control;
     ksn_core_command_block commands[2];
@@ -159,17 +159,20 @@ void ksn_runtime_invalidate(void){if(runtime)ksn_view_host_invalidate(&runtime->
 void ksn_runtime_invalidate_bands(uint32_t bands){
     if(runtime)ksn_view_host_invalidate_bands(&runtime->host,bands);
 }
+uint32_t ksn_runtime_opaque_system_bands(void){
+    return runtime?ksn_core_opaque_system_bands(&runtime->core):0;
+}
 ksn_result ksn_runtime_present(const ksn_display_port *port,ksn_render_stats *stats){
     if(!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     return ksn_runtime_needs_present()?ksn_view_host_present(&runtime->host,port,stats):KSN_OK;
 }
 ksn_result ksn_runtime_present_backdrop(const ksn_display_port *port,ksn_backdrop_loader load,
-                                        ksn_render_stats *stats){
+                                        bool occlusion_safe,ksn_render_stats *stats){
     if(!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     return ksn_runtime_needs_present()?
-        ksn_view_host_present_backdrop(&runtime->host,port,load,stats):KSN_OK;
+        ksn_view_host_present_backdrop(&runtime->host,port,load,occlusion_safe,stats):KSN_OK;
 }
 ksn_input_scope ksn_runtime_input_scope(bool priority){
     if(!runtime)return priority?KSN_INPUT_HOST:KSN_INPUT_APP;

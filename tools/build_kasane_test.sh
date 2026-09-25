@@ -29,7 +29,7 @@ gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Wer
   "$TEST_SOURCE" ${EXTRA_SOURCES:-} tools/hostshim/pocket_api_stub.c \
   main/text/ksn_font.c tools/hostshim/jpfont.c \
   main/pet/ksn_pet.c main/pet/pet_pixels.c tools/hostshim/ksn_pet_builtin.c \
-  main/pocket/pocket_clock_source.c main/pocket/pocket_clock.c main/pocket/pocket_av_playback_source.c main/pocket/app_view_assets.c main/pocket/app_view_provider.c main/pocket/app_music_view.c main/pocket/app_legacy_presenter.c main/pocket/pocket_kasane.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_schema.c main/ui/kasane/ksn_schema_session.c main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c main/ui/kasane/ksn_source_pool_adapter.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
+  main/pocket/pocket_clock_source.c main/pocket/pocket_clock.c main/pocket/pocket_av_playback_source.c main/pocket/pocket_av_output_source.c main/pocket/app_view_assets.c main/pocket/app_view_provider.c main/pocket/app_music_view.c main/pocket/app_legacy_presenter.c main/pocket/pocket_kasane.c main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_schema.c main/ui/kasane/ksn_schema_session.c main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c main/ui/kasane/ksn_source_pool_adapter.c main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c \
   main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/pocket/app_notice.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \
   "$CACHE/quickjs-vm.o" \

@@ -58,7 +58,7 @@ void sound_check_tables(void);
 // hand the result to whichever loop is waiting for it.
 typedef void (*sound_done_fn)(void *ctx, bool completed);
 /* Optional system observer of output-stream progress. Called only on the audio
- * task, at the start, at elapsed whole-second boundaries, and at termination.
+ * task, at the start, at elapsed whole-second boundaries by default, and at termination.
  * It must never wait, allocate, touch JS, or access a stream ring. `frames` is
  * the caller's logical position (start_frame + frames actually consumed).
  * `starved_blocks` is the output stream's cumulative silence-block count.
@@ -68,6 +68,12 @@ typedef void (*sound_done_fn)(void *ctx, bool completed);
 typedef void (*sound_stream_observer_fn)(int32_t id,uint32_t frames,
                                          uint32_t starved_blocks,bool active);
 void sound_stream_set_observer(sound_stream_observer_fn observer);
+/* Set an output-frame observation interval for the next stream. The callback
+ * is still at most once per emitted 128-frame block. A zero or out-of-range
+ * interval falls back to one second; changing it mid-stream takes effect on
+ * the next stream, never by moving an active task's deadline. */
+void sound_stream_set_observer_interval(sound_stream_observer_fn observer,
+                                        uint32_t interval_frames);
 
 // Queues one tone and returns its id, or one of the negative errors above. gain
 // is 0..1 and scales the same peak the clicks use. Tones and clicks share one

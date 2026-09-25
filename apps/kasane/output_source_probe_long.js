@@ -8,7 +8,7 @@
       {type: 'rect', bounds: [0, 0, 96, 24], color: 0x060c1aff},
       {type: 'text', bounds: [4, 4, 92, 16], text: {slot: 'elapsed'}, color: 0xe2f0ffff}
     ]}, {elapsed: '--------', frames: 0, starved: 0, streamId: 0});
-  const source = pocket.audio.outputSource();
+  const source = pocket.audio.outputSource({sampleMs: 33});
   const pauseAtMs = [45000, 140000];
   let bound = false;
   let playerHandle = null;

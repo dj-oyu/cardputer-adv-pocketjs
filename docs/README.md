@@ -73,32 +73,15 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 ## 主線3: デザインシステム Kasane — [`kasane/`](kasane/)
 
-描画・QuickJS・PocketJS に依存しない C の基盤と、その上のデザインシステム。**開発は `feature/kasane` ブランチで進め、区切りごとに `main` へマージする**（`vm/main` は QuickJS VM の開発用）。2026-09-16までは `vm/design-contracts` で進めていた（全コミットが `main` に統合済みで、2026-09-23に削除）。以下の文書に残る `vm/design-contracts` はその時点の記録。
+固定容量の C 描画基盤、その上の汎用 mount/source/presenter、Systemとの所有権境界を扱う。履歴資料と日別実験ログは縮約し、現行の判断に必要な資料を次の4本へまとめた。
 
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [design-system.md](kasane/design-system.md) | 仕様 | デザインシステム仕様 |
-| [design-schema.md](kasane/design-schema.md) | 仕様 | デザイン定義スキーマ（[JSON Schema](kasane/design-schema.json)、[例](kasane/design-example.json)） |
-| [generic-presenter-design.md](kasane/generic-presenter-design.md) | 設計 | アプリ詳細を持たないnative presenterのslot・descriptor・source・性能契約 |
-| [design-system-pet.md](kasane/design-system-pet.md) | 仕様 | ペットへの適用 |
-| [system-runtime.md](kasane/system-runtime.md) | 設計 | 時計・電源・通知の共通ランタイム |
-| [system-full-test.md](kasane/system-full-test.md) | 検証 | TaffyなしのSystem/Kasane host・新規build・実機受入試験 |
-| [module-boundaries.md](kasane/module-boundaries.md) | 設計 | モジュール境界と依存の向き |
-| [system-runtime-migration.md](kasane/system-runtime-migration.md) | 設計 | pet_hub から時計・通知・タイマー・鳴動を取り出す手順（S1〜S4、Kasane の checkpoint との対応） |
-
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [kasane-astra-plan.md](kasane/kasane-astra-plan.md) | 設計 | 実装順序とcheckpointごとの検証・commit/push条件 |
-| [kasane-progress.md](kasane/kasane-progress.md) | 記録 | 実装結果、検証、実機未確認事項 |
-| [kasane-roadmap.md](kasane/kasane-roadmap.md) | 設計 | 機能カバレッジ、Taffy移行、動画・3Dの将来設計 |
-| [design-api.md](kasane/design-api.md) | 仕様 | 利用APIとowner境界 |
-| [player-scene-migration-design.md](kasane/player-scene-migration-design.md) | 設計 | overlay 用 native presenter：JS は表示値、Kasane が命令構成・差分・提出を担当する案（未実装） |
-| [design-composition.md](kasane/design-composition.md) | 仕様 | 重なり、透過、cache、modal、効果 |
-| [design-contract-review.md](kasane/design-contract-review.md) | 記録 | 公開契約の評価 |
-| [design-device-probe.md](kasane/design-device-probe.md) | 記録 | 実機診断と計測 |
-| [kasane-guest-memory.md](kasane/kasane-guest-memory.md) | 記録 | Kasane 移植で増えたゲスト +14KiB の内訳（実測）。GC 前後の差は 0 B で全部が生存量。主因はアトム・名前空間オブジェクト・関数（ソース複写 2.1〜3.1KiB）・確保ヘッダ。関数ソース保持をやめると 4.8〜7.1KiB 減る。計測パッチ同梱 |
-| [kasane-vs-taffy.md](kasane/kasane-vs-taffy.md) | 記録 | 旧UI（Rust core + taffy）と Kasane を最適化しきった場合の構造比較（Fable、ソースベース）。構造差が残るのは最大連続確保（定数 9.9 KiB 対 データ依存 29.6/59.3 KiB）と失敗の仕方（返り値 対 abort）で、どちらも Kasane 有利。ネイティブ flex とテキスト測定が取り込み候補 |
-| [kasane-guest-memory-reduce.md](kasane/kasane-guest-memory-reduce.md) | 記録 | Kasane のゲスト生存量を 3 アプリで −6.2 KiB（シーンコントローラを C へ −5.0、proto の遅延・共有 −1.1）、native arena を評価前の 1 確保に（ゲスト不変、最大ブロック ±4 KiB） |
+| 文書 | 内容 |
+| --- | --- |
+| [入口](kasane/README.md) | 読む順番、現在地、機械可読の旧スキーマ例の扱い |
+| [境界と契約](kasane/architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
+| [判断台帳](kasane/decisions.md) | トレードオフ、不採用案と再検討条件 |
+| [検証](kasane/verification.md) | 固定実機ゲート、実測の達成範囲、計測の落とし穴 |
+| [残タスク](kasane/roadmap.md) | 実装・実測・未達を分けたロードマップ再評価用の表 |
 
 ## JS API — [`api/`](api/)
 

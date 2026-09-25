@@ -39,7 +39,8 @@ static void repaint(const hello_line *line,uint32_t *columns,uint32_t *cells){
     unsigned scale=line->font==KSN_DISPLAY?2:1;
     unsigned line_height=line->font==KSN_BODY?12:8*scale;
     uint32_t columns_before=ksn_span_columns,cells_before=ksn_span_cells;
-    unsigned spans=0;
+    unsigned spans=0,aligned_blocks=0,uniform_ink=0,uniform_zero=0;
+    unsigned mask_blocks=0,mask_ink_pixels=0;
     for(unsigned gy=0;gy<line_height;gy++)
         for(int x=line->bounds.x0;x<line->bounds.x1;){
             unsigned count=(unsigned)(line->bounds.x1-x);
@@ -49,11 +50,28 @@ static void repaint(const hello_line *line,uint32_t *columns,uint32_t *cells){
                 .font=line->font}};
             uint8_t out[64];
             assert(ksn_font_port.span(NULL,&d,255,x,line->bounds.y0+(int)gy,count,out)==KSN_OK);
+            if(g_ksn_span_narrow)for(unsigned i=0;i<count;){
+                if(((x+(int)i)&7)==0&&i+8u<=count){
+                    aligned_blocks++;
+                    if((x&7)==0){
+                        mask_blocks++;
+                        for(unsigned j=0;j<8u;j++)mask_ink_pixels+=out[i+j]!=0;
+                    }
+                    unsigned j=1;
+                    while(j<8u&&out[i+j]==out[i])j++;
+                    if(j==8u){
+                        if(out[i])uniform_ink++;else uniform_zero++;
+                        i+=8u;continue;
+                    }
+                }
+                i++;
+            }
             x+=(int)count;spans++;
         }
     *columns=ksn_span_columns-columns_before;
     *cells=ksn_span_cells-cells_before;
-    printf("  %-8s spans=%3u\n",line->name,spans);
+    printf("  %-8s spans=%3u aligned=%u uniform_ink=%u uniform_zero=%u mask_blocks=%u mask_ink=%u\n",
+           line->name,spans,aligned_blocks,uniform_ink,uniform_zero,mask_blocks,mask_ink_pixels);
 }
 
 int main(void){

@@ -22,6 +22,10 @@ typedef struct {
 
 ksn_result ksn_schema_session_init(ksn_schema_session *session,
                                    const ksn_schema *schema);
+/* Consume a terminal display outcome without resolving/submitting new work.
+ * An overlay can then run its guest before a fast native source submits again. */
+ksn_result ksn_schema_session_settle(ksn_schema_session *session,ksn_view *view,
+                                     bool *blocked);
 /* revision is monotonic for changed source values. Equal revision and viewport
  * bypass all schema work. Pending updates coalesce into the latest values
  * supplied on a later owner turn; no pointer survives this call. */
@@ -35,4 +39,8 @@ ksn_result ksn_schema_session_step(ksn_schema_session *session,ksn_view *view,
 ksn_result ksn_schema_session_step_dirty(ksn_schema_session *session,ksn_view *view,
     ksn_rect viewport,const ksn_schema_value *values,uint64_t revision,
     uint32_t dirty_slots,bool *blocked);
+#ifdef KASANE_P0_PROBE
+/* Diagnostic-only same-image A/B selector. Production has no branch or state. */
+bool ksn_schema_session_toggle_fullscan_probe(void);
+#endif
 #endif

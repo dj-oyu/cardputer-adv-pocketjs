@@ -61,7 +61,13 @@ static void worker(void *arg){
     unsigned count=0;
     while(!atomic_load_explicit(&s->stop,memory_order_acquire)){
         publish(s,count++);
+#ifdef KASANE_P5_FAIRNESS_PROBE
+        /* Faster than the UI frame, so every eligible presenter step finds a
+         * newer immutable generation. Diagnostic builds only. */
+        (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(10));
+#else
         (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(100));
+#endif
     }
     atomic_store_explicit(&s->exited,true,memory_order_release);
     vTaskDelete(NULL);

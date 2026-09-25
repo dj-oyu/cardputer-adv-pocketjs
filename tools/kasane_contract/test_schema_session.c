@@ -33,7 +33,11 @@ int main(void){
     ksn_rect viewport={0,0,240,135};
     CHECK(ksn_schema_session_step(&session,view,viewport,values,1,&blocked)==KSN_OK&&blocked);
     CHECK(!session.has_active&&session.candidate_count==0);
+    CHECK(ksn_schema_session_settle(&session,view,&blocked)==KSN_OK&&blocked);
+    CHECK(session.ticket.value&&!session.has_active);
     CHECK(ksn_view_host_present(&host,&port,&stats)==KSN_OK);
+    CHECK(ksn_schema_session_settle(&session,view,&blocked)==KSN_OK&&!blocked);
+    CHECK(!session.ticket.value&&session.has_active&&session.applied_revision==1);
     CHECK(ksn_schema_session_step(&session,view,viewport,values,1,&blocked)==KSN_OK&&!blocked);
     CHECK(session.has_active&&session.active_count==0);
     values[0].data.rect=(ksn_rect){12,109,32,111};
@@ -54,6 +58,8 @@ int main(void){
     CHECK(ksn_schema_session_step(&session,view,viewport,values,4,&blocked)==KSN_OK&&blocked);
     CHECK(session.pending_delta==KSN_SCHEMA_REPLACED&&session.candidate_count==0);
     CHECK(ksn_view_cancel(view,session.ticket)==KSN_OK);
+    CHECK(ksn_schema_session_settle(&session,view,&blocked)==KSN_OK&&!blocked);
+    CHECK(!session.ticket.value&&session.dirty_unknown&&session.active_count==1);
     CHECK(ksn_schema_session_step(&session,view,viewport,values,4,&blocked)==KSN_OK&&blocked);
     CHECK(session.active_count==1);
     CHECK(ksn_view_read_ref(view,session.active_refs[0],&snapshot)==KSN_OK);

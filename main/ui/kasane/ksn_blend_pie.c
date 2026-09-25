@@ -15,9 +15,9 @@
  * colour for the block -- the way docs/perf/pie-simd.md:542 records the same
  * class of 565 blend going 38.5 ms to about 10 ms when it was vectorised.
  *
- * Nothing here is wired into the renderer. ksn_render.c is unchanged and this
- * file is not in main/CMakeLists.txt: one kernel, one commit, and deciding
- * which eight-pixel runs are blendable is the caller's job in the next commit.
+ * The constant-colour kernel is wired into the renderer and enabled after a
+ * same-binary device A/B. The binary-text-mask variant below is a new candidate
+ * and remains disabled in the renderer pending its own device measurement.
  *
  * ---------------------------------------------------------------------------
  * 1. What the kernel has to reproduce, and the space it has to do it over
@@ -307,7 +307,8 @@ static void ksn_v_srcmb(ksn_v8 d,int shift){             /* 1.8.54 */
 /* The two arms as the assembly writes them: same unpack, same mix, different
  * pack. `args` is {a, sr, sg, sb} as the dispatcher builds it. */
 __attribute__((unused))
-static void ksn_blend8_lane_thin(uint16_t *pixels,int blocks,const int16_t *args){
+static void ksn_blend8_lane_thin(uint16_t *pixels,int blocks,const int16_t *args,
+                                  const uint8_t *mask){
     ksn_v8 word,r5,r8,g6,g8,b5,b8,a,one,partial,f;
     for(int b=0;b<blocks;b++,pixels+=KSN_LANES){
         ksn_v_load(word,pixels);                                  /* SAR 12 */
@@ -319,6 +320,8 @@ static void ksn_blend8_lane_thin(uint16_t *pixels,int blocks,const int16_t *args
         ksn_v_splat(one,31u);    ksn_v_and(b5,word,one);
         ksn_v_splat(one,33792u); ksn_v_vmul(b8,b5,one,12);
         ksn_v_splat(a,(unsigned)(args[0]&255));                   /* SAR 4 */
+        if(mask)for(int lane=0;lane<KSN_LANES;lane++)
+            a[lane]&=mask[b*KSN_LANES+lane]; /* binary 0/255 only */
         KSN_LANE_MIX((unsigned)(args[1]&255),r8,a,f,one);         /* red */
         ksn_v_splat(one,2u);     ksn_v_vmul(f,f,one,4);           /* c>>3 */
         ksn_v_splat(one,32768u); ksn_v_vmul(partial,f,one,4);     /* <<11 */
@@ -505,6 +508,128 @@ static void ksn_blend8_thin(uint16_t *pixels,int blocks,const int16_t *args){
         : "memory");
 }
 
+/* The binary text mask loads eight bytes directly and widens them with
+ * EE.VZIP.8 against zero. Each 0/255 byte ANDs with the command's effective
+ * alpha; the remaining blend/pack chain is the thin kernel's exact chain. */
+static void ksn_blend8_mask(uint16_t *pixels,const uint8_t *mask,int blocks,
+                             const int16_t *args){
+    /* In load order: the program below walks this table with EE.VLDBC.16.IP and
+     * resets the pointer at the top of every block, so moving a load past
+     * another swaps two constants and no amount of reading the diff shows it.
+     * tools/pie/test_kernels.py evaluates this initializer and runs the assembly
+     * with it, so the order and the values are both checked. */
+    static const int16_t k[21] __attribute__((aligned(4)))={
+        2,                        /* dst>>11, SAR 12 */
+        33*1024,                  /* r5 -> (r5<<3)|(r5>>2) */
+        128,                      /* dst>>5 */
+        63,                       /* the six-bit field */
+        65*256,                   /* g6 -> (g6<<2)|(g6>>4) */
+        31,                       /* the five-bit field */
+        33792,                    /* b5 -> (b5<<3)|(b5>>2) */
+        255,4112,32896,           /* the a' mask, its 257 scale, the preload */
+        2,32768,                  /* c>>3 and its placement */
+        255,4112,32896,           /* the same three, green */
+        4,512,                    /* c>>2 and its placement */
+        255,4112,32896,           /* and blue */
+        2                         /* c>>3 (the five bits are already low) */
+    };
+    const int16_t *kp=k,*kb=k;
+    unsigned sh12=12,sh4=4,sh16=16;
+    __asm__ volatile(
+        "1:\n"
+        "wsr.sar         %[sh12]\n"
+        "mov             %[kp], %[kb]\n"
+        "ee.vld.128.ip   q0, %[dst], 0\n"
+        "ee.vldbc.16.ip  q4, %[kp], 2\n"
+        "ee.vldbc.16.ip  q7, %[kp], 2\n"
+        "ee.vmul.u16     q5, q0, q4\n"
+        "ee.vldbc.16.ip  q4, %[kp], 2\n"
+        "ee.vmul.u16     q1, q5, q7\n"
+        "ee.vldbc.16.ip  q7, %[kp], 2\n"
+        "ee.vmul.u16     q5, q0, q4\n"
+        "ee.vldbc.16.ip  q4, %[kp], 2\n"
+        "ee.andq         q5, q5, q7\n"
+        "ee.vldbc.16.ip  q7, %[kp], 2\n"
+        "ee.vmul.u16     q2, q5, q4\n"
+        "ee.andq         q5, q0, q7\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vmul.u16     q3, q5, q0\n"
+        "wsr.sar         %[sh4]\n"
+        "ee.zero.q       q6\n"
+        "ee.vld.l.64.ip  q7, %[mask], 8\n"
+        "ee.vzip.8       q7, q6\n"
+        "ee.vldbc.16     q0, %[pa]\n"
+        "ee.andq         q7, q7, q0\n"
+        /* red */
+        "ee.vldbc.16     q4, %[pr]\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vcmp.lt.s16  q5, q4, q1\n"
+        "ee.andq         q5, q5, q0\n"
+        "ee.xorq         q5, q5, q7\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vmin.s16     q6, q4, q1\n"
+        "ee.vmul.u16     q5, q5, q0\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vmax.s16     q4, q4, q1\n"
+        "ee.vsubs.s16    q4, q4, q6\n"
+        "ee.mov.u16.qacc q0\n"
+        "ee.vmulas.u16.qacc q4, q5\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.srcmb.s16.qacc q5, %[sh16], 0\n"
+        "ee.vadds.s16    q5, q5, q6\n"
+        "ee.vmul.u16     q5, q5, q0\n"
+        "ee.vldbc.16.ip  q6, %[kp], 2\n"
+        "ee.vmul.u16     q1, q5, q6\n"
+        /* green */
+        "ee.vldbc.16     q4, %[pg]\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vcmp.lt.s16  q5, q4, q2\n"
+        "ee.andq         q5, q5, q0\n"
+        "ee.xorq         q5, q5, q7\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vmin.s16     q6, q4, q2\n"
+        "ee.vmul.u16     q5, q5, q0\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vmax.s16     q4, q4, q2\n"
+        "ee.vsubs.s16    q4, q4, q6\n"
+        "ee.mov.u16.qacc q0\n"
+        "ee.vmulas.u16.qacc q4, q5\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.srcmb.s16.qacc q5, %[sh16], 0\n"
+        "ee.vadds.s16    q5, q5, q6\n"
+        "ee.vmul.u16     q5, q5, q0\n"
+        "ee.vldbc.16.ip  q6, %[kp], 2\n"
+        "ee.vmul.u16     q5, q5, q6\n"
+        "ee.orq          q1, q1, q5\n"
+        /* blue */
+        "ee.vldbc.16     q4, %[pb]\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vcmp.lt.s16  q5, q4, q3\n"
+        "ee.andq         q5, q5, q0\n"
+        "ee.xorq         q5, q5, q7\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vmin.s16     q6, q4, q3\n"
+        "ee.vmul.u16     q5, q5, q0\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.vmax.s16     q4, q4, q3\n"
+        "ee.vsubs.s16    q4, q4, q6\n"
+        "ee.mov.u16.qacc q0\n"
+        "ee.vmulas.u16.qacc q4, q5\n"
+        "ee.vldbc.16.ip  q0, %[kp], 2\n"
+        "ee.srcmb.s16.qacc q5, %[sh16], 0\n"
+        "ee.vadds.s16    q5, q5, q6\n"
+        "ee.vmul.u16     q5, q5, q0\n"
+        "ee.orq          q1, q1, q5\n"
+        "ee.vst.128.ip   q1, %[dst], 16\n"
+        "addi            %[blocks], %[blocks], -1\n"
+        "bnez            %[blocks], 1b\n"
+        : [dst] "+&a"(pixels), [mask] "+&a"(mask), [kp] "+&a"(kp),
+          [blocks] "+&a"(blocks)
+        : [kb] "a"(kb), [pa] "a"(args+0), [pr] "a"(args+1), [pg] "a"(args+2),
+          [pb] "a"(args+3), [sh12] "a"(sh12), [sh4] "a"(sh4), [sh16] "a"(sh16)
+        : "memory");
+}
+
 /* The dither arm: the same unpack and mix, and quantize()'s dither pack -- one
  * rounded division a channel with T' folded into its preload. */
 static void ksn_blend8_dither(uint16_t *pixels,int blocks,const int16_t *args,
@@ -648,7 +773,11 @@ static void ksn_blend8_dither(uint16_t *pixels,int blocks,const int16_t *args,
 #else
 
 static void ksn_blend8_thin(uint16_t *pixels,int blocks,const int16_t *args){
-    ksn_blend8_lane_thin(pixels,blocks,args);
+    ksn_blend8_lane_thin(pixels,blocks,args,NULL);
+}
+static void ksn_blend8_mask(uint16_t *pixels,const uint8_t *mask,int blocks,
+                             const int16_t *args){
+    ksn_blend8_lane_thin(pixels,blocks,args,mask);
 }
 static void ksn_blend8_dither(uint16_t *pixels,int blocks,const int16_t *args,
                               const uint16_t *thresholds){
@@ -671,4 +800,19 @@ void ksn_blend8_pie(uint16_t *pixels,int blocks,ksn_rgba src,uint8_t opacity,
     };
     if(thresholds)ksn_blend8_dither(pixels,blocks,args,thresholds);
     else ksn_blend8_thin(pixels,blocks,args);
+}
+
+/* A binary font mask is borrowed directly from the span scratch: eight bytes
+ * become eight 16-bit 0/A lanes inside PIE. No expanded alpha buffer or second
+ * copy. Both pointers must be aligned (16-byte RGB565, 8-byte coverage), and
+ * the caller promises that every mask byte is 0 or 255. */
+void ksn_blend8_mask_pie(uint16_t *pixels,const uint8_t *mask,int blocks,
+                         ksn_rgba src,uint8_t opacity){
+    if(!pixels||!mask||blocks<=0)return;
+    unsigned a=((src&255u)*opacity+127u)/255u;
+    if(!a)return;
+    int16_t args[4] __attribute__((aligned(4)))={
+        (int16_t)a,(int16_t)(src>>24),(int16_t)((src>>16)&255u),(int16_t)((src>>8)&255u)
+    };
+    ksn_blend8_mask(pixels,mask,blocks,args);
 }

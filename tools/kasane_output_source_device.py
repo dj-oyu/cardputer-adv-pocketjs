@@ -12,17 +12,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--probe', choices=('u', 'v', 'w', 'x', 'y', 'z', 'j', 'b'), default='v',
-                        help='u=off; v=on; w=hide/show; x=pool exhaustion; y=full MP3/pause; z=dual text; j=seekable WAV; b=alternate MP3/low heap')
+    parser.add_argument('--probe', choices=('u', 'v', 'V', 'w', 'x', 'y', 'z', 'j', 'b'), default='v',
+                        help='u=off; v=1 Hz; V=33 ms; w=hide/show; x=pool exhaustion; y=full MP3/pause; z=dual text; j=seekable WAV; b=alternate MP3/low heap')
     parser.add_argument('--capture', action='store_true',
-                        help='capture live and ended LCD frames for v (w and z always capture)')
+                        help='capture live and ended LCD frames for v/V (w and z always capture)')
     parser.add_argument('--require-copy-watch', action='store_true',
                         help='require direct producer-pointer copy observations')
     parser.add_argument('--require-render-borrow', action='store_true',
                         help='require zero renderer text copies from a sealed core bank')
     args = parser.parse_args()
-    if args.probe != 'v' and args.capture:
-        parser.error('--capture is only for probe v; w and z capture automatically')
+    if args.probe not in ('v', 'V') and args.capture:
+        parser.error('--capture is only for probes v/V; w and z capture automatically')
     if args.out.exists() and any(args.out.iterdir()):
         parser.error('--out must be new or empty')
     args.out.mkdir(parents=True, exist_ok=True)
@@ -82,7 +82,9 @@ def main():
 
             port.write(b'q')
             until('HOME_READY', 12)
-            port.write(args.probe.encode('ascii'))
+            # 'b' selects a home category while the fairness diagnostic owns
+            # that byte. The low-heap app also has a USB-only '#' alias.
+            port.write(('#' if args.probe == 'b' else args.probe).encode('ascii'))
             until('KSN_OUTPUT_SOURCE BOUND', 15)
             if args.probe == 'j':
                 until('KSN_OUTPUT_SOURCE CREATED bytes=22576', 30)
@@ -92,7 +94,7 @@ def main():
                 until('pocket.sd: GRANTED music', 15)
             until('KSN_OUTPUT_SOURCE OPEN', 15)
             until('KSN_OUTPUT_SOURCE PLAY', 15)
-            live = hidden = shown = None
+            live = live2 = hidden = shown = None
             if args.probe == 'w':
                 until('KSN_OUTPUT_SOURCE HIDDEN', 20)
                 hidden = capture('hidden')
@@ -102,6 +104,9 @@ def main():
             elif args.capture or args.probe == 'z':
                 time.sleep(1)
                 live = capture('live')
+                if args.capture and args.probe == 'V':
+                    time.sleep(0.25)
+                    live2 = capture('live2')
             until('KSN_OUTPUT_SOURCE CLOSED', 300 if args.probe == 'y' else 65,
                   seen_ok=True)
             time.sleep(0.5)
@@ -118,6 +123,16 @@ def main():
                 raise RuntimeError(f'unexpected source stop line: {stop}')
             changed = outside = hidden_text = shown_text = outside_text = None
             left_changed = right_changed = dual_mismatch = None
+            live_changed = live_outside = None
+            if live2 is not None:
+                live_changed = live_outside = 0
+                for y in range(135):
+                    for x in range(240):
+                        at = 2 * (y * 240 + x)
+                        if live[at:at + 2] != live2[at:at + 2]:
+                            live_changed += 1
+                            if x >= 96 or y >= 24:
+                                live_outside += 1
             first, second = (hidden, shown) if args.probe == 'w' else (live, ended)
             if first is not None:
                 changed = outside = 0
@@ -234,6 +249,8 @@ def main():
                        'max_starved_blocks': int(numeric.group(2)) if numeric else None,
                        'changed_pixels': changed,
                        'outside_source_pixels': outside,
+                       'live_changed_pixels': live_changed,
+                       'live_outside_source_pixels': live_outside,
                        'hidden_text_pixels': hidden_text,
                        'shown_text_pixels': shown_text,
                        'outside_text_pixels': outside_text,
@@ -339,7 +356,9 @@ def main():
                       any(not 0 <= drift <= 100 for drift in pause_drift.values()) or
                       any(ms > 1000 for ms in resume_accept.values()) or
                       any(ms > 2000 for ms in resume_progress.values()))) or
-                    (changed is not None and (changed == 0 or outside != 0))):
+                    (changed is not None and (changed == 0 or outside != 0)) or
+                    (live_changed is not None and
+                     (live_changed == 0 or live_outside != 0))):
                 raise RuntimeError(f'output-source gate: {summary}')
             print('OUTPUT_SOURCE PASS', summary, flush=True)
         finally:

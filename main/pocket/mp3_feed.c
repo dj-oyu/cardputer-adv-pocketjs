@@ -166,7 +166,7 @@ mp3_feed_start_t mp3_feed_start(sound_stream_t *pcm, sound_stream_t *input,
     /* Decoder bursts on the UI core delayed the LCD completion wake by up to
      * 7 ms during SD playback. Core 0 keeps the UI's core 1 runnable; the
      * reader and output tasks already coexisted there without underruns in
-     * the 240-second Cardputer gate (docs/kasane/p1-spi-isr-wakeup-20260924.md). */
+     * the 240-second Cardputer gate (docs/kasane/decisions.md and verification.md). */
     BaseType_t started=xTaskCreatePinnedToCore(worker,"mp3dec",MP3_STACK,w,6,&created,0);
     if(started!=pdPASS) {
         atomic_store(&running,false);

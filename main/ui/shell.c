@@ -6,6 +6,11 @@
 #include "flower.h"
 #include "menu_rows.h"
 #include "overlay.h"
+#include "pet_hub.h"
+#include "pocket_kasane.h"
+#ifdef KASANE_P5_NOTICE_PROBE
+#include "system/sys_device.h"
+#endif
 #include "glass_rain.h"
 #include "board.h"
 #include "paint.h"
@@ -22,6 +27,51 @@
 #include "esp_timer.h"
 #include "esp_cpu.h"
 #include "esp_log.h"
+#ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
+#include <stdatomic.h>
+#ifdef KASANE_P5_SEND_PHASE_PROBE
+#include "kasane/ksn_repair_send_probe.h"
+#endif
+static atomic_bool overlay_repair_requested;
+static atomic_bool overlay_repair_capture_requested;
+/* UI task only; the input task only sets the atomic request. */
+static unsigned overlay_repair_stage;
+static int overlay_repair_remaining=-1;
+static bool overlay_repair_capturing;
+#ifdef KASANE_P5_SEND_PHASE_PROBE
+static ksn_repair_send_probe repair_send_probe;
+static bool repair_send_probe_active;
+#endif
+void shell_overlay_repair_request(bool capture_pixels) {
+    atomic_store(&overlay_repair_capture_requested,capture_pixels);
+    atomic_store(&overlay_repair_requested,true);
+}
+#endif
+#ifdef KASANE_P5_LOWHEAP_PROBE
+#include <stdatomic.h>
+#include "esp_heap_caps.h"
+static atomic_bool lowheap_toggle_requested;
+static uint8_t *lowheap_reservation;
+void shell_lowheap_toggle_request(void) {
+    atomic_store(&lowheap_toggle_requested,true);
+}
+static void shell_lowheap_service(void) {
+    if(!atomic_exchange(&lowheap_toggle_requested,false))return;
+    if(lowheap_reservation){
+        heap_caps_free(lowheap_reservation);
+        lowheap_reservation=NULL;
+        ESP_LOGI("KSN_P5_LOWHEAP","OFF free=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+        return;
+    }
+    lowheap_reservation=heap_caps_malloc(16384,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    if(!lowheap_reservation){ESP_LOGE("KSN_P5_LOWHEAP","ALLOC_FAIL bytes=16384");return;}
+    memset(lowheap_reservation,0xa5,16384);
+    ESP_LOGI("KSN_P5_LOWHEAP","ON bytes=16384 free=%u largest=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+}
+#endif
 
 static uint16_t *strip;
 static int strip_y, strip_h;
@@ -544,6 +594,13 @@ static ksn_result shell_overlay_backdrop(void *opaque,uint16_t y,uint16_t rows,
 }
 static ksn_result shell_overlay_send(void *opaque,uint16_t y,uint16_t rows,
                                      const uint16_t *pixels) {
+#ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
+    if(overlay_repair_stage==1&&overlay_repair_remaining--==0) {
+        overlay_repair_stage=2;
+        ESP_LOGW("KSN_P5_REPAIR","INJECT_FAIL y=%u after=3",(unsigned)y);
+        return KSN_IO;
+    }
+#endif
     shell_overlay_port *ctx=opaque;
     strip=(uint16_t *)pixels;strip_y=y;strip_h=rows;
     int64_t began=esp_timer_get_time();
@@ -555,20 +612,81 @@ static ksn_result shell_overlay_send(void *opaque,uint16_t y,uint16_t rows,
     hud_fps_cy+=h1-h0;hud_menu_cy+=h2-h1;
     *ctx->hud_us+=(unsigned)(esp_timer_get_time()-began);
     began=esp_timer_get_time();
+    /* The SYSTEM bank already owns the notice. Match the foreground Kasane
+     * display port: board_present's legacy pet hook must not paint it again. */
+    bool notice_composited=pocket_kasane_notice_composited();
+    pet_hub_overlay_suppress(notice_composited);
     esp_err_t result=board_present(y,rows,(uint16_t *)pixels);
+    pet_hub_overlay_suppress(false);
     *ctx->present_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
 }
 
 void shell_draw(const char *error, unsigned phase) {
+#ifdef KASANE_P5_NOTICE_PROBE
+    static int last_notice_active=-1;
+    sys_notice current_notice;
+    bool notice_active=sys_notify_active(sys_device_notifications(),&current_notice);
+    if((int)notice_active!=last_notice_active){
+        ESP_LOGI("KSN_P5_NOTICE","STATE active=%u overlay_ksn=%u ksn=%u composited=%u pending=%u",
+                 (unsigned)notice_active,(unsigned)overlay_kasane_active(),
+                 (unsigned)pocket_kasane_active(),(unsigned)pocket_kasane_notice_composited(),
+                 (unsigned)pocket_kasane_system_pending());
+        last_notice_active=(int)notice_active;
+    }
+#endif
     (void)phase;
+#ifdef KASANE_P5_LOWHEAP_PROBE
+    shell_lowheap_service();
+#endif
     strip=board_strip();
+#ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
+    if(!overlay_kasane_active()) {
+#ifdef KASANE_P5_SEND_PHASE_PROBE
+        if(repair_send_probe_active){
+            ESP_LOGI("KSN_P5_REPAIR",
+                "SEND_PHASE normal=%lu/%lu inject=%lu/%lu recover=%lu/%lu",
+                (unsigned long)repair_send_probe.frames[KSN_REPAIR_SEND_NORMAL],
+                (unsigned long)repair_send_probe.max_us[KSN_REPAIR_SEND_NORMAL],
+                (unsigned long)repair_send_probe.frames[KSN_REPAIR_SEND_INJECT],
+                (unsigned long)repair_send_probe.max_us[KSN_REPAIR_SEND_INJECT],
+                (unsigned long)repair_send_probe.frames[KSN_REPAIR_SEND_RECOVER],
+                (unsigned long)repair_send_probe.max_us[KSN_REPAIR_SEND_RECOVER]);
+            memset(&repair_send_probe,0,sizeof(repair_send_probe));
+            repair_send_probe_active=false;
+        }
+#endif
+        (void)atomic_exchange(&overlay_repair_requested,false);
+        (void)atomic_exchange(&overlay_repair_capture_requested,false);
+        if(overlay_repair_capturing)board_capture(false);
+        overlay_repair_capturing=false;
+        overlay_repair_stage=0;
+        overlay_repair_remaining=-1;
+    } else if(atomic_exchange(&overlay_repair_requested,false)) {
+        bool capture=atomic_exchange(&overlay_repair_capture_requested,false);
+        if(!overlay_repair_stage) {
+            overlay_repair_stage=1;
+            overlay_repair_remaining=3;
+            overlay_repair_capturing=capture;
+            if(capture)board_capture(true);
+            ESP_LOGI("KSN_P5_REPAIR","ARMED after=3");
+        } else ESP_LOGW("KSN_P5_REPAIR","BUSY stage=%u",overlay_repair_stage);
+    }
+#endif
+#ifdef KASANE_P5_SEND_PHASE_PROBE
+    unsigned repair_stage_before=overlay_repair_stage;
+#endif
 #ifdef KASANE_P0_BUS_PROBE
     bool bus_trace=!error&&overlay_kasane_active()&&!board_capture_active();
     if(bus_trace)ksn_p0_bus_begin_frame();
 #endif
     int64_t started=esp_timer_get_time();
     unsigned present_us=0, loop_us=0, hud_us=0;
+#ifdef KASANE_P5_NOTICE_PROBE
+    uint32_t p5_bytes=0,p5_comp_us=0;
+    unsigned p5_bands=0;
+    bool p5_host_top_dynamic=false;
+#endif
     float dt=animation_time?(started-animation_time)*0.000001f:0.033f;
     animation_time=started;
     float amount=1-expf(-dt/0.045f);
@@ -609,18 +727,36 @@ void shell_draw(const char *error, unsigned phase) {
     if(!error&&overlay_kasane_active()) {
         shell_overlay_port host={.scene=sc,.meter=meter,.muted=muted,
             .loop_us=&loop_us,.hud_us=&hud_us,.present_us=&present_us};
+        bool host_top_dynamic=show_fps||volume_shown_us||board_capture_active();
         ksn_display_port port={.ctx=&host,.strip=shell_overlay_strip,
             .present=shell_overlay_send,.width=LCD_W,.height=LCD_H,
             .strip_rows=STRIP_H,.text=&ksn_font_port};
         ksn_render_stats stats={0};
         unsigned loop_before=loop_us,hud_before=hud_us,present_before=present_us;
         int64_t composite_began=esp_timer_get_time();
-        ksn_result result=overlay_kasane_present(&port,shell_overlay_backdrop,&stats);
+        ksn_result result=overlay_kasane_present(&port,shell_overlay_backdrop,
+                                                  host_top_dynamic,&stats);
+#ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
+        if(overlay_repair_stage==2&&result==KSN_OK&&stats.bands) {
+            ESP_LOGI("KSN_P5_REPAIR","REPAIR_OK bands=%u bytes=%u",
+                     ksn_render_band_count(stats.bands),(unsigned)stats.transferred_bytes);
+            if(overlay_repair_capturing)board_capture(false);
+            overlay_repair_capturing=false;
+            overlay_repair_stage=0;
+            overlay_repair_remaining=-1;
+        }
+#endif
         ksn_p0_probe_transfer(stats.transferred_bytes,ksn_render_band_count(stats.bands));
         uint64_t elapsed=(uint64_t)(esp_timer_get_time()-composite_began);
         uint64_t excluded=(uint64_t)(loop_us-loop_before)+(hud_us-hud_before)+
                           (present_us-present_before);
         overlay_kasane_charge((uint32_t)(elapsed>excluded?elapsed-excluded:0));
+#ifdef KASANE_P5_NOTICE_PROBE
+        p5_bytes=stats.transferred_bytes;
+        p5_bands=ksn_render_band_count(stats.bands);
+        p5_comp_us=(uint32_t)(elapsed>excluded?elapsed-excluded:0);
+        p5_host_top_dynamic=host_top_dynamic;
+#endif
         if(result!=KSN_OK)
             ESP_LOGW("overlay","Kasane composite failed: %u",(unsigned)result);
     } else for(strip_y=0;strip_y<LCD_H;strip_y+=STRIP_H) {
@@ -663,7 +799,30 @@ void shell_draw(const char *error, unsigned phase) {
         ksn_p0_probe_sample(KSN_P0_OVERLAY_SEND,present_us);
         ksn_p0_probe_sample(KSN_P0_OVERLAY_COMPUTE,
                             elapsed>present_us?elapsed-present_us:0u);
+#ifdef KASANE_P5_SEND_PHASE_PROBE
+        ksn_repair_send_class phase=ksn_repair_send_classify(
+            repair_stage_before,overlay_repair_stage);
+        ksn_repair_send_record(&repair_send_probe,phase,present_us);
+        if(phase!=KSN_REPAIR_SEND_NORMAL)repair_send_probe_active=true;
+#endif
     }
+#ifdef KASANE_P5_NOTICE_PROBE
+    /* Log only after the measured frame has been sampled. This may perturb the
+     * next interval, but not the draw sample being diagnosed. */
+    static int last_notice_composited=-1;
+    bool notice_composited=pocket_kasane_notice_composited();
+    if((int)notice_composited!=last_notice_composited){
+        ESP_LOGI("KSN_P5_NOTICE","COMPOSITED %u",(unsigned)notice_composited);
+        last_notice_composited=(int)notice_composited;
+    }
+    if(elapsed>10000&&overlay_kasane_active()&&!board_capture_active())
+        ESP_LOGI("KSN_P5_SPIKE",
+                 "draw=%u present=%u prep=%u loop=%u hud=%u comp=%u bytes=%u bands=%u notice=%u composited=%u host=%u",
+                 elapsed,present_us,(unsigned)(after_prep-started),loop_us,hud_us,
+                 (unsigned)p5_comp_us,(unsigned)p5_bytes,p5_bands,
+                 (unsigned)notice_active,(unsigned)notice_composited,
+                 (unsigned)p5_host_top_dynamic);
+#endif
 #ifdef KASANE_P0_BUS_PROBE
     if(bus_trace)ksn_p0_bus_end_frame(present_us);
 #endif

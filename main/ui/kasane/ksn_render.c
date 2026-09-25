@@ -5,6 +5,9 @@
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
 #include "esp_cpu.h"
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+#include "esp_log.h"
+#endif
 #endif
 
 /* Boundary 7a-7b of docs/perf/kasane-opt-survey.md: the render path's own
@@ -44,6 +47,26 @@ static uint32_t ksn_cycles(void){
 /* No rsr.ccount without IDF headers, so the cycle columns stay 0 and only the
  * entry counts are available on host (docs/perf/pie-simd.md 6.7). */
 static uint32_t ksn_cycles(void){return 0;}
+#endif
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+static uint64_t decode_work_cycles,decode_empty_cycles;
+static uint32_t decode_calls,decode_work_max;
+void ksn_render_decode_cycle_reset(void){
+    decode_work_cycles=decode_empty_cycles=0;
+    decode_calls=decode_work_max=0;
+}
+void ksn_render_decode_cycle_report(void){
+    uint64_t net=decode_work_cycles>decode_empty_cycles?
+                 decode_work_cycles-decode_empty_cycles:0;
+    ESP_LOGI("KSN_P4_DECODE",
+             "calls=%lu work_cycles=%llu empty_cycles=%llu net_cycles=%llu net_mean_cycles=%llu max_work_cycles=%lu",
+             (unsigned long)decode_calls,
+             (unsigned long long)decode_work_cycles,
+             (unsigned long long)decode_empty_cycles,
+             (unsigned long long)net,
+             (unsigned long long)(decode_calls?net/decode_calls:0),
+             (unsigned long)decode_work_max);
+}
 #endif
 /* The switch is cached per bracket: these sit in per-row and per-pixel loops,
  * and a global load inside a bracket would be part of what it measures. Each
@@ -115,11 +138,12 @@ typedef struct { uint8_t r,g,b,a; } ksn_premultiplied_rgba8;
 /* One shared span scratch across normal/group paths. Together with the group
  * tile (256), dither bits (8), and a provider's 128-byte row: 504 <= 512 bytes. */
 typedef union {
-    uint8_t text[64];
+    _Alignas(16) uint8_t text[64];
     struct { uint16_t rgb[32];uint8_t alpha[32];uint8_t stretch[16]; } image;
     struct { uint16_t rgb[16];uint8_t alpha[16];uint16_t block_rgb[16];uint8_t block_alpha[16]; } rotated;
 } ksn_span_scratch;
 _Static_assert(sizeof(ksn_span_scratch)+256+8+128<=512,"compositor/provider pixel scratch budget");
+_Static_assert(_Alignof(ksn_span_scratch)>=16,"PIE text mask must be 8-byte aligned");
 static ksn_rgba image_color(uint16_t rgb,uint8_t alpha){
     unsigned r=rgb>>11,g=(rgb>>5)&63,b=rgb&31;
     return ((r<<3|r>>2)<<24)|((g<<2|g>>4)<<16)|((b<<3|b>>2)<<8)|alpha;
@@ -1116,12 +1140,23 @@ static bool blend_lut_alpha_prime(ksn_rgba color,uint8_t opacity){
 /* One decode, shared by both paths: the cache stores it for the frame, the
  * reference path stores it for the next read only. */
 static void decode_view(ksn_frame_view *view,const ksn_frame_command *command){
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+    uint32_t empty_begin=ksn_cycles(),empty_cycles=ksn_cycles()-empty_begin;
+    uint32_t work_begin=ksn_cycles();
+#endif
     view->draw=command->draw;
     view->visible=command->visible;
     view->group_begin=command->group_begin;
     view->group_end=command->group_end;
     view->group_opacity=command->group_opacity;
     view->reveal=command->reveal;
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+    uint32_t work_cycles=ksn_cycles()-work_begin;
+    decode_empty_cycles+=empty_cycles;
+    decode_work_cycles+=work_cycles;
+    decode_calls++;
+    if(work_cycles>decode_work_max)decode_work_max=work_cycles;
+#endif
     ksn_p0_probe_copy(KSN_P0_RENDER_DECODE_VIEW,
                       sizeof(view->draw)+sizeof(view->visible)+
                       sizeof(view->group_begin)+sizeof(view->group_end)+
@@ -1780,8 +1815,17 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
  * (row_cov, the coarser switch, is the other one above the noise floor at 2.78).
  * ------------------------------------------------------------------------- */
 int g_ksn_blend_pie=1;
+/* Binary font coverage may be consumed directly as eight 0/A PIE lanes.
+ * Keep this candidate off until a same-image device A/B establishes a gain. */
+int g_ksn_text_pie=0;
+#ifdef KSN_TEXT_PIE_COUNT
+uint32_t ksn_text_pie_blocks;
+uint32_t ksn_text_pie_mixed_blocks;
+#endif
 void ksn_blend8_pie(uint16_t *pixels,int blocks,ksn_rgba src,uint8_t opacity,
                     const uint16_t *thresholds);
+void ksn_blend8_mask_pie(uint16_t *pixels,const uint8_t *mask,int blocks,
+                         ksn_rgba src,uint8_t opacity);
 /* The kernel for one row's aligned window [first, first+8*blocks). The bayer
  * phase is built here because it depends on the absolute column: the scalar
  * pack reads bayer4[y&3][x&3], and the 4-cycle pattern is the same for every
@@ -1802,6 +1846,7 @@ static uint16_t rgb565(ksn_rgba c){return (uint16_t)((c>>27)<<11|((c>>18)&63)<<5
 static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int x,int y){
     unsigned a=((src&255)*opacity+127)/255;
     if(!a)return dst;
+    if(a==255&&!dither)return rgb565(src);
     unsigned r=(dst>>11)&31,g=(dst>>5)&63,b=dst&31;
     r=(r<<3)|(r>>2);g=(g<<2)|(g>>4);b=(b<<3)|(b>>2);
     if(KSN_SCALE256()){
@@ -1817,16 +1862,20 @@ static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int 
     return pack565(r,g,b,dither,x,y);
 }
 static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
-                               ksn_backdrop_loader load_backdrop,ksn_render_stats *stats){
+                               ksn_backdrop_loader load_backdrop,bool occlusion_safe,
+                               ksn_render_stats *stats){
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     /* One frame's worth of decoded commands; a retried frame starts over. */
     memset(decoded.valid,0,sizeof(decoded.valid));
+    uint32_t occluded=load_backdrop&&occlusion_safe?
+        ksn_core_opaque_system_bands(core):0;
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
     ksn_damage damage;result=ksn_core_damage(core,frame.ticket,display->text,&damage);
     if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+    damage.bands&=~occluded;
     if(!damage.bands)return ksn_core_presented(core,frame.ticket);
     /* Narrowing is a decision taken here, before any pixel is written: a band
      * composited over part of its width leaves the rest of the shared strip
@@ -1857,6 +1906,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         damage.x0[band]=(int16_t)x0;damage.x1[band]=(int16_t)x1;
     }
     const ksn_frame_view *command;
+    uint32_t next_system_opaque=0;
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
         {KSN_PROF_BEGIN();
         result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
@@ -1864,6 +1914,24 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
         if(command->draw.kind<KSN_RECT||command->draw.kind>KSN_IMAGE){
             ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
+        }
+        /* The first ungrouped SYSTEM command can establish a whole opaque
+         * band before anything else in that layer reads the strip. This is
+         * about the sealed *next* frame, unlike the committed-pixel mask above:
+         * a newly posted notice still has to be transferred, but its backdrop
+         * and APP pixels need not be computed underneath it. */
+        if(load_backdrop&&occlusion_safe&&layer==KSN_SYSTEM&&i==0&&
+           !command->group_begin&&!command->group_end&&command->visible&&
+           command->draw.kind==KSN_RECT&&command->draw.opacity==255&&
+           (command->draw.data.shape.color&255u)==255u&&
+           command->draw.bounds.x0<=0&&command->draw.bounds.x1>=240&&
+           command->draw.clip.x0<=0&&command->draw.clip.x1>=240){
+            for(unsigned band=0;band<17;band++){
+                int y0=(int)band*8,y1=y0+8;if(y1>135)y1=135;
+                if(command->draw.bounds.y0<=y0&&command->draw.bounds.y1>=y1&&
+                   command->draw.clip.y0<=y0&&command->draw.clip.y1>=y1)
+                    next_system_opaque|=1u<<band;
+            }
         }
         if(command->draw.kind==KSN_TEXT){
             {KSN_PROF_BEGIN();
@@ -1884,10 +1952,10 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         if(!(damage.bands&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
         const int dx0=damage.x0[band],dx1=damage.x1[band];
-        if(load_backdrop){
+        if(load_backdrop&&!(next_system_opaque&(1u<<band))){
             result=load_backdrop(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
             if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
-        }else{KSN_PROF_BEGIN();
+        }else if(!(next_system_opaque&(1u<<band))){KSN_PROF_BEGIN();
             /* Whole strip in one call when the band is whole, which is every band
              * of a REPLACE and of any repair; otherwise the damaged columns of each
              * row, because the columns between them are not ours to touch. */
@@ -1896,6 +1964,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                 fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
             KSN_PROF_END(fill);}
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
+            if(layer==KSN_APP&&(next_system_opaque&(1u<<band)))break;
             {KSN_PROF_BEGIN();
             result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
             KSN_PROF_END(read);}
@@ -1943,16 +2012,60 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                     KSN_PROF_END(span);}
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     {KSN_PROF_BEGIN();
-                    for(unsigned i=0;i<count;i++)if(scratch.text[i]){
+                    uint16_t *row=pixels+(py-y)*240;
+                    bool pie_row=g_ksn_text_pie&&g_ksn_blend_pie&&
+                                 display->text->binary_coverage&&!lut&&!KSN_SCALE256()&&
+                                 (((uintptr_t)row&15u)==0u);
+                    for(unsigned i=0;i<count;){
+                        /* Both PIE memory ops clear low address bits: only a
+                         * fully aligned destination/mask pair is handed over.
+                         * The binary port promises 0/255 coverage, so mixed
+                         * ink blocks need no scan or expanded-alpha copy. */
+                        if(pie_row&&((x+(int)i)&7)==0&&
+                           (((uintptr_t)(scratch.text+i)&7u)==0u)&&i+8u<=count){
+                            /* A binary font has many empty blocks. Inspect the
+                             * borrowed eight bytes in registers and submit only
+                             * contiguous nonempty blocks to the PIE kernel. */
+                            /* GCC otherwise emits an out-of-line memcpy even
+                             * for eight aligned bytes on Xtensa. may_alias
+                             * keeps this borrowed read defined while the
+                             * alignment gate above permits two 32-bit loads. */
+                            typedef uint64_t ksn_mask_word __attribute__((may_alias));
+                            uint64_t ink=*(const ksn_mask_word *)(scratch.text+i);
+                            if(!ink){i+=8u;continue;}
+#ifdef KSN_TEXT_PIE_COUNT
+                            if(ink!=UINT64_MAX)ksn_text_pie_mixed_blocks++;
+#endif
+                            unsigned end=i+8u;
+                            while(end+8u<=count){
+                                ink=*(const ksn_mask_word *)(scratch.text+end);
+                                if(!ink)break;
+#ifdef KSN_TEXT_PIE_COUNT
+                                if(ink!=UINT64_MAX)ksn_text_pie_mixed_blocks++;
+#endif
+                                end+=8u;
+                            }
+                            unsigned blocks=(end-i)>>3;
+                            ksn_blend8_mask_pie(row+x+i,scratch.text+i,(int)blocks,
+                                                d->data.text.color,d->opacity);
+#ifdef KSN_TEXT_PIE_COUNT
+                            ksn_text_pie_blocks+=blocks;
+#endif
+                            i=end;
+                            continue;
+                        }
+                        if(!scratch.text[i]){i++;continue;}
                         unsigned index=(unsigned)((py-y)*240+x)+i;
                         if(lut){
                             unsigned a=mul8(mul8(d->data.text.color&255,scratch.text[i]),d->opacity);
                             if(a)pixels[index]=blend_lut_pack(pixels[index],blend_lut_alpha[a>>4]);
+                            i++;
                             continue;
                         }
                         ksn_rgba color=(d->data.text.color&0xffffff00u)|mul8(d->data.text.color&255,scratch.text[i]);
                         pixels[index]=KSN_BLEND(KSN_SLOT(KSN_TEXT,false),pixels[index],color,
                                                 d->opacity,false,x+(int)i,py);
+                        i++;
                     }
                     KSN_PROF_END(blend);}
                 }
@@ -1965,8 +2078,15 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     for(unsigned j=0;j<count;j++){
                         unsigned source=image_sample_index(d,&scratch,x,j),index=(unsigned)((py-y)*240+x)+j;
-                        pixels[index]=blend(pixels[index],image_sample_color(d,&scratch,source),
-                                            d->opacity,false,x+(int)j,py);
+                        uint16_t rgb=d->data.image.rotation?scratch.rotated.rgb[source]:scratch.image.rgb[source];
+                        uint8_t alpha=d->data.image.rotation?scratch.rotated.alpha[source]:scratch.image.alpha[source];
+                        if(!alpha)continue;
+                        /* RGB565 -> expanded RGB8 -> RGB565 is an identity for
+                         * a fully opaque texel. Keep it in provider format:
+                         * no redundant channel unpack, blend, or repack. */
+                        if(alpha==255&&d->opacity==255)pixels[index]=rgb;
+                        else pixels[index]=blend(pixels[index],image_color(rgb,alpha),
+                                                 d->opacity,false,x+(int)j,py);
                     }
                     x+=(int)count;
                 }
@@ -2063,10 +2183,11 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     return ksn_core_presented(core,frame.ticket);
 }
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
-    return render_rects(core,display,NULL,stats);
+    return render_rects(core,display,NULL,false,stats);
 }
 ksn_result ksn_render_rects_backdrop(ksn_core *core,const ksn_display_port *display,
-                                     ksn_backdrop_loader load,ksn_render_stats *stats){
+                                     ksn_backdrop_loader load,bool occlusion_safe,
+                                     ksn_render_stats *stats){
     if(!load)return KSN_INVALID;
-    return render_rects(core,display,load,stats);
+    return render_rects(core,display,load,occlusion_safe,stats);
 }

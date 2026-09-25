@@ -3,14 +3,30 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-static uint16_t panel[240*135],strip[240*8],reference[240*135];
+static uint16_t panel[240*135],reference[240*135];
+static uint16_t strip[240*8+8] __attribute__((aligned(16)));
 static unsigned sends;static int fault_y=-1;static bool unavailable;
-static uint16_t *buffer(void *p){(void)p;return strip;}
+static bool binary_mode,unaligned_mode;
+#ifdef KSN_TEXT_PIE_COUNT
+extern uint32_t ksn_text_pie_blocks;
+extern uint32_t ksn_text_pie_mixed_blocks;
+#endif
+static uint16_t *buffer(void *p){(void)p;return strip+(unaligned_mode?1:0);}
 static ksn_result send(void *p,uint16_t y,uint16_t rows,const uint16_t *pixels){
     (void)p;sends++;memcpy(panel+y*240,pixels,rows*240*sizeof(*pixels));return KSN_OK;
 }
 static unsigned coverage(int x,int y,unsigned reveal){
     static const unsigned values[]={0,1,127,128,254,255};
+    if(binary_mode){
+        if(x<8||x>=93||y<7||y>=22)return 0;
+        switch((unsigned)x&31u){
+        case 0:case 1:case 2:case 3:case 4:case 5:case 6:case 7:return 0;
+        case 8:case 9:case 10:case 11:case 12:case 13:case 14:case 15:return 255;
+        case 16:case 17:case 18:case 19:case 20:case 21:case 22:case 23:
+            return ((x+y)&1)?255:0;
+        default:return ((x*13+y*7)&4)?255:0;
+        }
+    }
     if(x<2||x>=77||y<7||y>=22||x>=-3+(int)reveal*40)return 0;
     return values[(x+y)%6];
 }
@@ -63,5 +79,98 @@ int main(void){
     for(int y=0;y<135;y++)for(int x=0;x<240;x++)assert(panel[y*240+x]==expected(x,y,255,true,1));
     memcpy(reference,panel,sizeof(panel));ksn_core_invalidate(&core);
     assert(ksn_render_rects(&core,&display,&stats)==KSN_OK&&!memcmp(reference,panel,sizeof(panel)));
+    /* Separate ungrouped text scene: zero, solid, and mixed binary-mask blocks
+     * plus a clipped tail. Repaint the same core with
+     * the switch flipped so the byte comparison includes the whole panel. */
+    {
+        KSN_TEST_CORE(pie_core,);ksn_core_init(&pie_core);
+        ksn_client pie_app=ksn_core_client(&pie_core,KSN_APP);
+        ksn_draw label={.kind=KSN_TEXT,.bounds={8,5,101,24},.clip={8,7,93,22},
+            .opacity=193,.data.text={.utf8="PIE",.bytes=3,.capacity=8,
+                                     .font=KSN_BODY,.color=0xa15f37b7}};
+        binary_mode=true;text.binary_coverage=true;
+        assert(pie_app.ops->begin(pie_app.ctx,KSN_REPLACE,&tx)==KSN_OK);
+        assert(pie_app.ops->background(pie_app.ctx,tx,0x183c60ff)==KSN_OK);
+        assert(pie_app.ops->add(pie_app.ctx,tx,&label,&ref)==KSN_OK);
+        assert(pie_app.ops->end(pie_app.ctx,tx)==KSN_OK);
+        g_ksn_text_pie=0;
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        memcpy(reference,panel,sizeof(panel));
+        ksn_core_invalidate(&pie_core);
+        g_ksn_text_pie=1;
+#ifdef KSN_TEXT_PIE_COUNT
+        ksn_text_pie_blocks=0;
+        ksn_text_pie_mixed_blocks=0;
+#endif
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        assert(!memcmp(reference,panel,sizeof(panel)));
+#ifdef KSN_TEXT_PIE_COUNT
+        assert(ksn_text_pie_blocks>0);
+        assert(ksn_text_pie_mixed_blocks>0);
+#endif
+        ksn_core_invalidate(&pie_core);fault_y=8;
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_IO);
+        fault_y=-1;
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        assert(!memcmp(reference,panel,sizeof(panel)));
+        text.binary_coverage=false;ksn_core_invalidate(&pie_core);
+#ifdef KSN_TEXT_PIE_COUNT
+        ksn_text_pie_blocks=0;
+#endif
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        assert(!memcmp(reference,panel,sizeof(panel)));
+#ifdef KSN_TEXT_PIE_COUNT
+        assert(ksn_text_pie_blocks==0);
+#endif
+        text.binary_coverage=true;
+        /* PIE loads/stores require 16-byte alignment: an unaligned borrowed
+         * strip must use the scalar path and preserve the same panel. */
+        unaligned_mode=true;ksn_core_invalidate(&pie_core);
+#ifdef KSN_TEXT_PIE_COUNT
+        ksn_text_pie_blocks=0;
+#endif
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        assert(!memcmp(reference,panel,sizeof(panel)));
+#ifdef KSN_TEXT_PIE_COUNT
+        assert(ksn_text_pie_blocks==0);
+#endif
+        unaligned_mode=false;
+        /* The coarse scalar colour arm is approximate; the exact PIE arm must
+         * not silently override it when that independent switch is selected. */
+        g_ksn_scale256=1;
+        g_ksn_text_pie=0;ksn_core_invalidate(&pie_core);
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        memcpy(reference,panel,sizeof(panel));
+        g_ksn_text_pie=1;ksn_core_invalidate(&pie_core);
+#ifdef KSN_TEXT_PIE_COUNT
+        ksn_text_pie_blocks=0;
+#endif
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        assert(!memcmp(reference,panel,sizeof(panel)));
+#ifdef KSN_TEXT_PIE_COUNT
+        assert(ksn_text_pie_blocks==0);
+#endif
+        /* A command whose span starts one pixel off the eight-byte boundary
+         * cannot pair the aligned panel blocks with aligned mask bytes. */
+        g_ksn_scale256=0;
+        label.bounds.x0=9;label.clip.x0=9;
+        assert(pie_app.ops->begin(pie_app.ctx,KSN_REPLACE,&tx)==KSN_OK);
+        assert(pie_app.ops->background(pie_app.ctx,tx,0x183c60ff)==KSN_OK);
+        assert(pie_app.ops->add(pie_app.ctx,tx,&label,&ref)==KSN_OK);
+        assert(pie_app.ops->end(pie_app.ctx,tx)==KSN_OK);
+        g_ksn_text_pie=0;
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        memcpy(reference,panel,sizeof(panel));
+        g_ksn_text_pie=1;ksn_core_invalidate(&pie_core);
+#ifdef KSN_TEXT_PIE_COUNT
+        ksn_text_pie_blocks=0;
+#endif
+        assert(ksn_render_rects(&pie_core,&display,&stats)==KSN_OK);
+        assert(!memcmp(reference,panel,sizeof(panel)));
+#ifdef KSN_TEXT_PIE_COUNT
+        assert(ksn_text_pie_blocks==0);
+#endif
+        g_ksn_scale256=0;g_ksn_text_pie=0;binary_mode=false;text.binary_coverage=false;
+    }
     puts("text render PASS: coverage/alpha/group, clipping, UTF-8 reveal, bands, provider failure/repair");
 }

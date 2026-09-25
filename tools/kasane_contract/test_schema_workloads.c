@@ -234,6 +234,29 @@ int main(void){
         CHECK(!present(&session,&fast_host,fast_view,values,129u+frame,dirty));
         CHECK(!compare(&schema,values,&ref_host,ref_view));
     }
-    puts("schema workloads: PASS (dirty node, 1/24 slots, 47-byte text, hidden/page, coalesced, discard, viewport, 120 single-slot + 600 mixed reference frames)");
+    /* A later slot update must survive even when the submitted earlier one
+     * is discarded. The retry's dirty mask is the union, not just the second
+     * caller's mask, and its final pixels match a fresh full-scan submit. */
+    values[2].data.color^=0x00010100u;
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,729,1u<<2,&blocked)==KSN_OK&&blocked);
+    CHECK(session.inflight_dirty==(1u<<2));
+    ksn_tx discarded=session.ticket;
+    values[2].data.color^=0x00330000u;
+    values[0].data.text=(ksn_schema_text){"RETRY",5};
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,730,(1u<<0)|(1u<<2),&blocked)==KSN_OK&&blocked);
+    CHECK(session.ticket.value==discarded.value&&session.pending_dirty==0x5u);
+    CHECK(ksn_view_cancel(fast_view,discarded)==KSN_OK);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,730,0,&blocked)==KSN_OK&&blocked);
+    CHECK(session.ticket.value&&session.ticket.value!=discarded.value);
+    CHECK(session.inflight_dirty==0x5u);
+    CHECK(ksn_view_host_present(&fast_host,&out,&stats)==KSN_OK);
+    CHECK(ksn_schema_session_step_dirty(&session,fast_view,(ksn_rect){0,0,240,135},
+                                        values,730,0,&blocked)==KSN_OK&&!blocked);
+    CHECK(session.applied_revision==730&&!session.pending_dirty);
+    CHECK(!compare(&schema,values,&ref_host,ref_view));
+    puts("schema workloads: PASS (dirty node, 1/24 slots, 47-byte text, hidden/page, coalesced, discard with pending update, viewport, 120 single-slot + 600 mixed reference frames)");
     return 0;
 }

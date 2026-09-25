@@ -1,5 +1,8 @@
 #include "app_legacy_presenter.h"
 #include "ui/kasane/ksn_p0_probe.h"
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+#include "esp_log.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -74,6 +77,16 @@ static ksn_result plate(ksn_presenter_plan *p,int x,int y,uint8_t id,ksn_rgba co
     ksn_result r=rect(p,x,y,advance(s,bytes)+8,16,0x000000ffu);
     return r==KSN_OK?label(p,x+4,y+2,id,color):r;
 }
+static void music_light_rects(uint32_t phase,unsigned track,int x[3],int width[3]){
+    int head=(int)(((uint64_t)phase*3u)%(track+54u))-54;
+    for(unsigned i=0;i<3;i++){
+        x[i]=head+(int)i*18;
+        width[i]=18;
+        if(x[i]<0){width[i]+=x[i];x[i]=0;}
+        if(x[i]+width[i]>(int)track)width[i]=(int)track-x[i];
+        if(width[i]<=0){x[i]=0;width[i]=0;}
+    }
+}
 static ksn_result make_player(const ksn_presenter_values *v,uint16_t w,uint16_t h,
                               ksn_presenter_plan *p){
     if(w<25||h<28)return KSN_INVALID;
@@ -97,17 +110,57 @@ static ksn_result make_player(const ksn_presenter_values *v,uint16_t w,uint16_t 
         if(fill>0)r=rect(p,12,y,fill,2,0x78c8ffffu);
     }else if(v->playing){
         const ksn_rgba colors[]={0x78c8ffffu,0x3c78aaffu,0x1e3c5affu};
-        unsigned span=(unsigned)track+54u;
-        int head=(int)(((uint64_t)v->phase*3u)%span)-54;
+        int x[3],width[3];
+        music_light_rects(v->phase,(unsigned)track,x,width);
         for(int i=0;i<3&&r==KSN_OK;i++){
-            int x=head+i*18,width=18;
-            if(x<0){width+=x;x=0;}
-            if(x+width>track)width=track-x;
-            if(width>0)r=rect(p,12+x,y,width,2,colors[i]);
+            if(width[i]>0){
+                r=rect(p,12+x[i],y,width[i],2,colors[i]);
+                if(r==KSN_OK)p->items[p->count-1u].movable=1;
+            }
         }
     }
     if(r==KSN_OK)r=plate(p,8,(int)h-20,23,0x6e8ca5ffu);
     return r;
+}
+uint64_t ksn_presenter_music_light_key(uint32_t phase,uint16_t track){
+    if(!track||track>255u)return 0;
+    int x[3],width[3];
+    music_light_rects(phase,track,x,width);
+    uint64_t key=0;
+    for(unsigned i=0;i<3;i++){
+        key|=((uint64_t)(((unsigned)x[i]<<8)|(unsigned)width[i]))<<(i*16);
+    }
+    return key;
+}
+ksn_result ksn_presenter_music_light_patch(ksn_view *view,ksn_rect viewport,
+    const ksn_ref refs[KSN_PRESENTER_ITEMS],const uint8_t light_indices[3],
+    uint8_t count,uint64_t old_key,uint64_t new_key,ksn_tx *out){
+    if(!view||!refs||!light_indices||!out||count>KSN_PRESENTER_ITEMS||
+       old_key==new_key)return KSN_INVALID;
+    for(unsigned light=0;light<3;light++){
+        unsigned old_part=(unsigned)((old_key>>(light*16u))&0xffffu);
+        unsigned new_part=(unsigned)((new_key>>(light*16u))&0xffffu);
+        if(((old_part&0xffu)!=0u)!=((new_part&0xffu)!=0u)||
+           ((new_part&0xffu)!=0u&&light_indices[light]>=count))
+            return KSN_UNSUPPORTED;
+    }
+    ksn_tx tx;
+    ksn_result r=ksn_view_begin(view,KSN_PATCH,&tx);
+    if(r!=KSN_OK)return r;
+    for(unsigned light=0;light<3&&r==KSN_OK;light++){
+        unsigned old_part=(unsigned)((old_key>>(light*16u))&0xffffu);
+        unsigned new_part=(unsigned)((new_key>>(light*16u))&0xffffu);
+        if(old_part==new_part)continue;
+        int x0=viewport.x0+12+(int)(new_part>>8);
+        int y0=viewport.y1-26;
+        ksn_change change={.property=KSN_SET_RECT,
+            .value.rect={x0,y0,x0+(int)(new_part&0xffu),y0+2}};
+        r=ksn_view_change(view,tx,refs[light_indices[light]],&change);
+    }
+    if(r==KSN_OK)r=ksn_view_submit(view,tx);
+    if(r!=KSN_OK){(void)ksn_view_cancel(view,tx);return r;}
+    *out=tx;
+    return KSN_OK;
 }
 ksn_result ksn_presenter_make(ksn_presenter_kind kind,const ksn_presenter_values *v,
                               uint16_t width,uint16_t height,ksn_presenter_plan *out){
@@ -123,7 +176,7 @@ bool ksn_presenter_equal(const ksn_presenter_plan *a,const ksn_presenter_plan *b
         const ksn_presenter_item *x=&a->items[i],*y=&b->items[i];
         if(x->kind!=y->kind||x->text_id!=y->text_id||x->font!=y->font||
            x->radius!=y->radius||x->variant!=y->variant||x->frame!=y->frame||
-           x->reveal!=y->reveal||x->color!=y->color||
+           x->reveal!=y->reveal||x->movable!=y->movable||x->color!=y->color||
            x->bounds.x0!=y->bounds.x0||x->bounds.y0!=y->bounds.y0||
            x->bounds.x1!=y->bounds.x1||x->bounds.y1!=y->bounds.y1)return false;
     }
@@ -152,7 +205,14 @@ ksn_result ksn_presenter_submit(ksn_view *view,ksn_rect viewport,ksn_resource im
         ksn_draw d={.kind=(ksn_kind)it->kind,.opacity=255};
         d.bounds=(ksn_rect){it->bounds.x0+viewport.x0,it->bounds.y0+viewport.y0,
                             it->bounds.x1+viewport.x0,it->bounds.y1+viewport.y0};
-        d.clip=plan->patchable?viewport:intersect(d.bounds,viewport);
+        if(plan->patchable)d.clip=viewport;
+        else if(it->movable){
+            /* Only the light can move. Preserve its whole track as a clip,
+             * while unrelated commands keep their narrow immutable clips. */
+            ksn_rect track={viewport.x0+12,viewport.y1-26,
+                            viewport.x1-12,viewport.y1-24};
+            d.clip=intersect(track,viewport);
+        }else d.clip=intersect(d.bounds,viewport);
         if(d.kind==KSN_RECT||d.kind==KSN_ROUND_RECT){
             d.data.shape.color=it->color;d.data.shape.radius=it->radius;
         }
@@ -195,6 +255,9 @@ ksn_result ksn_presenter_patch(ksn_view *view,ksn_rect viewport,
                          it->bounds.x1+viewport.x0,it->bounds.y1+viewport.y0};
         ksn_change rect_change={.property=KSN_SET_RECT,.value.rect=bounds};
         r=ksn_view_change(view,tx,refs[i],&rect_change);
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+        if(r!=KSN_OK)ESP_LOGE("KSN_P1_PATCH","item=%u property=rect result=%u",i,(unsigned)r);
+#endif
         if(r!=KSN_OK)break;
         if(it->kind==KSN_IMAGE){
             ksn_change frame={.property=KSN_SET_IMAGE_FRAME,
@@ -203,11 +266,17 @@ ksn_result ksn_presenter_patch(ksn_view *view,ksn_rect viewport,
         }else{
             ksn_change color={.property=KSN_SET_COLOR,.value.color=it->color};
             r=ksn_view_change(view,tx,refs[i],&color);
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+            if(r!=KSN_OK)ESP_LOGE("KSN_P1_PATCH","item=%u property=color result=%u",i,(unsigned)r);
+#endif
             if(r==KSN_OK&&it->kind==KSN_TEXT&&it->text_id<KSN_PRESENTER_SLOTS){
                 unsigned bytes;const char *s=text_for(plan,it->text_id,&bytes);
                 ksn_change value={.property=KSN_SET_TEXT,
                                   .value.text={.utf8=s,.bytes=(uint16_t)bytes}};
                 r=ksn_view_change(view,tx,refs[i],&value);
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+                if(r!=KSN_OK)ESP_LOGE("KSN_P1_PATCH","item=%u property=text bytes=%u result=%u",i,bytes,(unsigned)r);
+#endif
                 if(r==KSN_OK&&it->reveal!=UINT8_MAX){
                     ksn_change reveal={.property=KSN_SET_REVEAL,.value.reveal=it->reveal};
                     r=ksn_view_change(view,tx,refs[i],&reveal);
@@ -216,6 +285,9 @@ ksn_result ksn_presenter_patch(ksn_view *view,ksn_rect viewport,
         }
     }
     if(r==KSN_OK)r=ksn_view_submit(view,tx);
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+    if(r!=KSN_OK)ESP_LOGE("KSN_P1_PATCH","submit_or_change result=%u",(unsigned)r);
+#endif
     if(r!=KSN_OK){(void)ksn_view_cancel(view,tx);return r;}
     *out=tx;return KSN_OK;
 }

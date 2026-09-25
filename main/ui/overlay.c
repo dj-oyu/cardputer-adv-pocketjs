@@ -17,6 +17,10 @@ static const char *TAG="overlay";
 
 extern const char deskclock_start[] asm("_binary_deskclock_js_start");
 extern const char deskclock_end[]   asm("_binary_deskclock_js_end");
+#ifdef KASANE_P5_FAIRNESS_PROBE
+extern const char overlay_fairness_probe_start[] asm("_binary_overlay_fairness_probe_js_start");
+extern const char overlay_fairness_probe_end[] asm("_binary_overlay_fairness_probe_js_end");
+#endif
 extern const char player_start[] asm("_binary_player_js_start");
 extern const char player_end[]   asm("_binary_player_js_end");
 
@@ -139,7 +143,12 @@ void overlay_init(void) {
     // because a `.source` initialiser would need the address of an extern array
     // at file scope and that is fine -- but the END pointer is only ever used as
     // a length, and keeping both here puts the arithmetic in one place.
+#ifdef KASANE_P5_FAIRNESS_PROBE
+    deskclock_src=overlay_fairness_probe_start;
+    deskclock_src_end=overlay_fairness_probe_end;
+#else
     deskclock_src=deskclock_start; deskclock_src_end=deskclock_end;
+#endif
     player_src=player_start;       player_src_end=player_end;
     uint8_t stored=0;
     if(nvs_open("overlay",NVS_READWRITE,&prefs)==ESP_OK) {
@@ -362,6 +371,10 @@ void overlay_tick(uint32_t frame_us) {
     int64_t began=esp_timer_get_time();
     if(budget_frame_pending) {
         uint32_t total=overlay_budget_cost(budget_guest_us,budget_composite_us);
+#ifdef KASANE_P1_OVERLAY_STAGE_PROBE
+        ksn_p0_probe_sample(KSN_P1_OVERLAY_GUEST,budget_guest_us);
+        ksn_p0_probe_sample(KSN_P1_OVERLAY_COMPOSITE,budget_composite_us);
+#endif
         ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,total);
         budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
         if(overlay_budget_turn(&budget,total,frame_us)) {
@@ -444,14 +457,17 @@ bool overlay_kasane_active(void) {
 }
 
 ksn_result overlay_kasane_present(const ksn_display_port *port,ksn_backdrop_loader load,
-                                  ksn_render_stats *stats) {
+                                  bool host_top_dynamic,ksn_render_stats *stats) {
     if(!overlay_kasane_active()||!port||!load||!stats)return KSN_INVALID;
     uint64_t now=(uint64_t)esp_timer_get_time();
     ksn_result result=pocket_kasane_advance(now);
     if(result!=KSN_OK&&result!=KSN_BUSY)return result;
-    /* The scene below the retained commands is independently animated. */
-    pocket_kasane_invalidate();
-    result=pocket_kasane_present_backdrop(port,load,stats);
+    /* A fully opaque SYSTEM band hides the animated backdrop. Its own
+     * transaction damage still repaints it on post/clear; dynamic host HUD
+     * content above Kasane opts out of this occlusion shortcut. */
+    uint32_t covered=host_top_dynamic?0:pocket_kasane_opaque_system_bands();
+    pocket_kasane_invalidate_bands(KSN_BANDS_ALL&~covered);
+    result=pocket_kasane_present_backdrop(port,load,!host_top_dynamic,stats);
     if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
     return result;
 }

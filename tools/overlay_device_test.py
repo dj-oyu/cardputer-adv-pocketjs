@@ -18,6 +18,12 @@ parser.add_argument('--port', required=True)
 parser.add_argument('--out', type=Path, required=True)
 parser.add_argument('--playback', action='store_true',
                     help='play the first already-granted audio file; never grant a new folder')
+parser.add_argument('--fairness-seconds', type=float, default=0,
+                    help='run the P5 fast-native-source deskclock diagnostic without captures')
+parser.add_argument('--p1-nav-alias', action='store_true',
+                    help='use diagnostic USB aliases for up/right; P0 reserves u/b')
+parser.add_argument('--rearm-music-only', action='store_true',
+                    help='toggle HOME OVERLAY off/on if its saved choice is music')
 args = parser.parse_args()
 args.out.mkdir(parents=True, exist_ok=True)
 log = []
@@ -77,9 +83,9 @@ with port:
         # Returning from Settings and re-entering it in the same display tick
         # can consume the category key without opening the menu.
         time.sleep(0.15)
-        key('b', 'CATEGORY 1')
+        key('>' if args.p1_nav_alias else 'b', 'CATEGORY 1')
         for _ in range(8):
-            key('u', 'SELECT')
+            key('&' if args.p1_nav_alias else 'u', 'SELECT')
         for i in range(1, 5):
             key('d', f'SELECT {i}')
 
@@ -100,7 +106,7 @@ with port:
         if not match:
             raise RuntimeError(line)
         current = int(match.group(1))
-        step = 'd' if value > current else 'u'
+        step = 'd' if value > current else ('&' if args.p1_nav_alias else 'u')
         for n in range(current + (1 if value > current else -1),
                        value + (1 if value > current else -1),
                        1 if value > current else -1):
@@ -190,6 +196,47 @@ with port:
         # A boot/start guard intentionally refuses re-arming an overlay until
         # the person turns it OFF. Make that transition explicit on every run.
         select(0)
+        if args.rearm_music_only:
+            if original != 2:
+                raise RuntimeError(f'expected saved music choice 2, found {original}')
+            select(2)
+            print('MUSIC_REARMED', flush=True)
+            raise SystemExit(0)
+        if args.fairness_seconds:
+            if args.fairness_seconds < 5:
+                raise ValueError('fairness observation must be at least 5 seconds')
+            started = select(1)
+            await_line('KSN_FAIR BOUND', seconds=10,
+                       since=len(log) - len(started))
+            at = len(log)
+            deadline = time.monotonic() + args.fairness_seconds
+            while time.monotonic() < deadline:
+                read_line()
+            observed = log[at:]
+            if any('OVERLAY_STOPPED' in line or 'OVERLAY_REFUSED' in line or
+                   'KSN_FAIR ERROR' in line or 'panic' in line.lower()
+                   for line in observed):
+                raise RuntimeError(f'fairness overlay stopped: {observed[-15:]}')
+            reports = [re.search(r'KSN_FAIR HEARTBEAT frames=(\d+) maxGapMs=([\d.]+)', line)
+                       for line in observed]
+            reports = [report for report in reports if report]
+            if len(reports) < int(args.fairness_seconds) - 2:
+                raise RuntimeError(f'only {len(reports)} guest heartbeats')
+            frames = int(reports[-1].group(1))
+            max_gap = float(reports[-1].group(2))
+            print(f'FAIRNESS heartbeats={len(reports)} frames={frames} maxGapMs={max_gap}',
+                  flush=True)
+            before_stop = len(log)
+            select(0)
+            stopped = await_line('KSN_POOL: STOP published=', seconds=10,
+                                 since=before_stop)
+            print(stopped, flush=True)
+            published = int(re.search(r'published=(\d+)', stopped).group(1))
+            skipped = int(re.search(r'skipped=(\d+)', stopped).group(1))
+            if (frames < int(args.fairness_seconds * 5) or max_gap > 200 or
+                    published < int(args.fairness_seconds * 50) or skipped):
+                raise RuntimeError('fast-native-source guest fairness gate failed')
+            raise SystemExit(0)
         for value, name in ((1, 'deskclock'), (2, 'music')):
             started = select(value)
             for line in started:

@@ -20,6 +20,7 @@ static void read_span(ksn_draw *d,unsigned reveal,int x,int y,unsigned count,uin
 }
 int main(void){
     setup();
+    assert(ksn_font_port.binary_coverage);
     jpfont_bitmap_view bitmap;
     assert(!jpfont_bitmap(JPFONT_COUNT,0x3042,&bitmap));
     assert(!jpfont_bitmap(JPFONT_TEXT,0x3042,NULL));

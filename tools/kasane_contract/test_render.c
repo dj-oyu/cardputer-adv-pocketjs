@@ -55,14 +55,53 @@ int main(void){
         ksn_display_port port={.strip=get_strip,.present=send_strip,.width=240,.height=135,
             .strip_rows=8};
         ksn_render_stats rendered;
-        CHECK(ksn_render_rects_backdrop(&backdrop,&port,load_backdrop,&rendered)==KSN_OK);
+        CHECK(ksn_render_rects_backdrop(&backdrop,&port,load_backdrop,false,&rendered)==KSN_OK);
         CHECK(backdrop_loads==17&&panel[0]==0x07e0&&panel[2+2*240]==0xf800);
         ksn_core_invalidate(&backdrop);backdrop_fail_y=8;
-        CHECK(ksn_render_rects_backdrop(&backdrop,&port,load_backdrop,&rendered)==KSN_IO);
+        CHECK(ksn_render_rects_backdrop(&backdrop,&port,load_backdrop,false,&rendered)==KSN_IO);
         CHECK(ksn_core_needs_repair(&backdrop));
         backdrop_fail_y=-1;backdrop_loads=0;
-        CHECK(ksn_render_rects_backdrop(&backdrop,&port,load_backdrop,&rendered)==KSN_OK);
+        CHECK(ksn_render_rects_backdrop(&backdrop,&port,load_backdrop,false,&rendered)==KSN_OK);
         CHECK(backdrop_loads==17&&!ksn_core_needs_repair(&backdrop));
+    }
+    /* Opaque SYSTEM rows hide APP and scene damage only while the SYSTEM
+     * pixels are committed. A pending clear must repaint the exposed scene. */
+    {
+        KSN_TEST_CORE(occlusion,);ksn_core_init(&occlusion);
+        ksn_client app=ksn_core_client(&occlusion,KSN_APP);
+        ksn_client sys=ksn_core_client(&occlusion,KSN_SYSTEM);
+        ksn_display_port port={.strip=get_strip,.present=send_strip,.width=240,
+                               .height=135,.strip_rows=8};
+        ksn_render_stats rendered;ksn_tx tx;ksn_ref ref;
+        ksn_draw opaque={.kind=KSN_RECT,.bounds={0,0,240,48},
+                         .clip={0,0,240,48},.opacity=255,
+                         .data.shape={.color=0x102030ff}};
+        CHECK(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
+        CHECK(app.ops->background(app.ctx,tx,0x000000ff)==KSN_OK);
+        ksn_draw behind={.kind=KSN_RECT,.bounds={0,0,240,48},
+                         .clip={0,0,240,48},.opacity=255,
+                         .data.shape={.color=0xff0000ff}};
+        CHECK(app.ops->add(app.ctx,tx,&behind,&ref)==KSN_OK);
+        CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
+        CHECK(ksn_render_rects_backdrop(&occlusion,&port,load_backdrop,true,&rendered)==KSN_OK);
+        CHECK(sys.ops->begin(sys.ctx,KSN_REPLACE,&tx)==KSN_OK);
+        CHECK(sys.ops->add(sys.ctx,tx,&opaque,&ref)==KSN_OK);
+        CHECK(sys.ops->end(sys.ctx,tx)==KSN_OK);
+        backdrop_loads=0;
+        CHECK(ksn_render_rects_backdrop(&occlusion,&port,load_backdrop,true,&rendered)==KSN_OK);
+        CHECK(backdrop_loads==11&&rendered.bands==KSN_BANDS_ALL);
+        uint16_t covered_pixel=panel[0];
+        CHECK(covered_pixel==color565(0x102030ff));
+        CHECK(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
+        CHECK(app.ops->background(app.ctx,tx,0xffffffff)==KSN_OK);
+        CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
+        backdrop_loads=0;ksn_core_invalidate(&occlusion);
+        CHECK(ksn_render_rects_backdrop(&occlusion,&port,load_backdrop,true,&rendered)==KSN_OK);
+        CHECK((rendered.bands&0x3fu)==0&&backdrop_loads==11&&panel[0]==covered_pixel);
+        CHECK(sys.ops->begin(sys.ctx,KSN_REPLACE,&tx)==KSN_OK);
+        CHECK(sys.ops->end(sys.ctx,tx)==KSN_OK);
+        CHECK(ksn_render_rects_backdrop(&occlusion,&port,load_backdrop,true,&rendered)==KSN_OK);
+        CHECK((rendered.bands&0x3fu)==0x3fu&&panel[0]==color565(0xff0000ff));
     }
     KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP),sys=ksn_core_client(&core,KSN_SYSTEM);
     ksn_display_port display={NULL,get_strip,send_strip,240,135,8,NULL,NULL};ksn_render_stats stats;
