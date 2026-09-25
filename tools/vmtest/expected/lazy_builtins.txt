@@ -1,0 +1,35 @@
+cold-set false true true true false
+cold-delete true false false true true undefined
+Array.prototype length,at,with,concat,every,some,forEach,map,filter,reduce,reduceRight,fill,find,findIndex,findLast,findLastIndex,indexOf,lastIndexOf,includes,join,toString,toLocaleString,pop,push,shift,unshift,reverse,toReversed,sort,toSorted,slice,splice,toSpliced,copyWithin,flatMap,flat,values,keys,entries,constructor,Symbol(Symbol.iterator),Symbol(Symbol.unscopables)
+Math min,max,abs,floor,ceil,round,sqrt,acos,asin,atan,atan2,cos,exp,log,pow,sin,tan,trunc,sign,cosh,sinh,tanh,acosh,asinh,atanh,expm1,log1p,log2,log10,cbrt,hypot,random,f16round,fround,imul,clz32,sumPrecise,E,LN10,LN2,LOG2E,LOG10E,PI,SQRT1_2,SQRT2,Symbol(Symbol.toStringTag)
+Object.prototype toString,toLocaleString,valueOf,hasOwnProperty,isPrototypeOf,propertyIsEnumerable,__proto__,__defineGetter__,__defineSetter__,__lookupGetter__,__lookupSetter__,constructor
+Map.prototype set,get,getOrInsert,getOrInsertComputed,has,delete,clear,size,forEach,values,keys,entries,constructor,Symbol(Symbol.iterator),Symbol(Symbol.toStringTag)
+String.prototype length,at,charCodeAt,charAt,concat,codePointAt,isWellFormed,toWellFormed,indexOf,lastIndexOf,includes,endsWith,startsWith,match,matchAll,search,split,substring,substr,slice,repeat,replace,replaceAll,padEnd,padStart,trim,trimEnd,trimRight,trimStart,trimLeft,toString,valueOf,localeCompare,normalize,toLowerCase,toUpperCase,toLocaleLowerCase,toLocaleUpperCase,anchor,big,blink,bold,fixed,fontcolor,fontsize,italics,link,small,strike,sub,sup,constructor,Symbol(Symbol.iterator)
+Array length,name,isArray,from,of,prototype,fromAsync,Symbol(Symbol.species)
+Object length,name,create,getPrototypeOf,setPrototypeOf,defineProperty,defineProperties,getOwnPropertyNames,getOwnPropertySymbols,groupBy,keys,values,entries,isExtensible,preventExtensions,getOwnPropertyDescriptor,getOwnPropertyDescriptors,is,assign,seal,freeze,isSealed,isFrozen,fromEntries,hasOwn,prototype
+Number length,name,parseInt,parseFloat,isNaN,isFinite,isInteger,isSafeInteger,MAX_VALUE,MIN_VALUE,EPSILON,MAX_SAFE_INTEGER,MIN_SAFE_INTEGER,NaN,NEGATIVE_INFINITY,POSITIVE_INFINITY,prototype
+Promise length,name,resolve,reject,all,allSettled,any,try,race,withResolvers,prototype,Symbol(Symbol.species)
+Reflect apply,construct,defineProperty,deleteProperty,get,getOwnPropertyDescriptor,getPrototypeOf,has,ownKeys,preventExtensions,set,setPrototypeOf,Symbol(Symbol.toStringTag)
+JSON isRawJSON,parse,rawJSON,stringify,Symbol(Symbol.toStringTag)
+Date.prototype valueOf,toString,toUTCString,toGMTString,toISOString,toDateString,toTimeString,toLocaleString,toLocaleDateString,toLocaleTimeString,getTimezoneOffset,getTime,getFullYear,getUTCFullYear,getMonth,getUTCMonth,getDate,getUTCDate,getHours,getUTCHours,getMinutes,getUTCMinutes,getSeconds,getUTCSeconds,getMilliseconds,getUTCMilliseconds,getDay,getUTCDay,setTime,setMilliseconds,setUTCMilliseconds,setSeconds,setUTCSeconds,setMinutes,setUTCMinutes,setHours,setUTCHours,setDate,setUTCDate,setMonth,setUTCMonth,setYear,setFullYear,setUTCFullYear,toJSON,constructor,Symbol(Symbol.toPrimitive)
+RegExp.prototype flags,source,global,ignoreCase,multiline,dotAll,unicode,unicodeSets,sticky,hasIndices,exec,compile,test,toString,constructor,Symbol(Symbol.replace),Symbol(Symbol.match),Symbol(Symbol.matchAll),Symbol(Symbol.search),Symbol(Symbol.split)
+Set.prototype add,has,delete,clear,size,forEach,isDisjointFrom,isSubsetOf,isSupersetOf,intersection,difference,symmetricDifference,union,values,keys,entries,constructor,Symbol(Symbol.iterator),Symbol(Symbol.toStringTag)
+Symbol length,name,for,keyFor,toPrimitive,iterator,match,matchAll,replace,search,split,toStringTag,isConcatSpreadable,hasInstance,species,unscopables,asyncIterator,prototype
+Function.prototype length,name,caller,arguments,call,apply,bind,toString,fileName,lineNumber,columnNumber,constructor,Symbol(Symbol.hasInstance)
+Error.prototype toString,name,message,constructor
+Iterator.prototype drop,filter,flatMap,map,take,every,find,forEach,some,reduce,toArray,constructor,Symbol(Symbol.iterator),Symbol(Symbol.toStringTag)
+desc functionWC getC number number functionWC function functionC
+identity true true true true
+has true true false true false
+delete true false  false 3.141592653589793
+after delete min,max,abs,floor,ceil,round,sqrt,acos,asin,atan,atan2,cos,exp,log,pow,sin,tan,trunc,sign,cosh,sinh,tanh,acosh,asinh,atanh,expm1,log1p,log2,log10,hypot,random,f16round,fround,imul,clz32,sumPrecise,E,LN10,LN2,LOG2E,LOG10E,PI,SQRT1_2,SQRT2,Symbol(Symbol.toStringTag)
+ctor before length,name,isArray,from,of,prototype,fromAsync,Symbol(Symbol.species)
+ctor after length,isArray,from,of,prototype,fromAsync,Symbol(Symbol.species)
+mine
+define fixed functionWC
+non-extensible function false
+frozen true function function
+for-in a,a,extra
+accessors true g 4 2
+shadow own 1,2,3
+exit=0

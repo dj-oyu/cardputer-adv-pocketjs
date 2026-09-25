@@ -1,4 +1,7 @@
 // vmrun-flags: --fail-alloc 1369
+// vmrun-rom-lb-flags: --fail-alloc 847
+// vmrun-rom-lb-keepsrc-flags: --fail-alloc 848
+// vmrun-lb-flags: --fail-alloc 1097
 // vmrun-rom-flags: --fail-alloc 931
 // vmrun-skip-variants: asan-alloca o2-alloca asan-alloca-keepsrc o2-alloca-keepsrc -- no frame segment on these builds, so the allocation numbers differ
 // vmrun-keepsrc-flags: --fail-alloc 1370

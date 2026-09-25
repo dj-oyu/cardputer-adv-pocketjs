@@ -61,14 +61,14 @@ failed=() skipped_names=()
 for name in "${names[@]}"; do
   src=corpus/$name.js
   [ -f "$src" ] || { echo "no such corpus file: $src" >&2; fail=$((fail+1)); failed+=("$name"); continue; }
-  # "// vmrun-skip-variants: V... -- reason" in the first 5 lines: the file is
+  # "// vmrun-skip-variants: V... -- reason" in the first 10 lines: the file is
   # not run on those builds, and says so on every run instead of silently
   # passing. For cases whose subject is an exact allocation sequence that a
   # build variant structurally changes -- e.g. a --fail-alloc attempt number
   # on the *-alloca builds, which allocate no frame segment and so number
   # every later allocation one lower. Not for hiding a real difference: the
   # reason is printed, and the skip is counted in the summary.
-  skip_line=$(head -n5 "$src" | grep -m1 '^// vmrun-skip-variants:' || true)
+  skip_line=$(head -n10 "$src" | grep -m1 '^// vmrun-skip-variants:' || true)
   if [ -n "$skip_line" ]; then
     skip_spec=${skip_line#// vmrun-skip-variants:}
     skip_list=${skip_spec%%--*}
@@ -89,10 +89,10 @@ for name in "${names[@]}"; do
   fi
   # A "-keepsrc" variant parses one js_strndup per function more than the
   # shipping build, so a --fail-alloc attempt number shifts by the functions
-  # defined before its target. "// vmrun-keepsrc-flags: ..." in the first 5
+  # defined before its target. "// vmrun-keepsrc-flags: ..." in the first 10
   # lines is appended after the above (last one wins) for those variants.
   if [[ $variant == *-keepsrc ]]; then
-    keep_line=$(head -n5 "$src" | grep -m1 '^// vmrun-keepsrc-flags:' || true)
+    keep_line=$(head -n10 "$src" | grep -m1 '^// vmrun-keepsrc-flags:' || true)
     if [ -n "$keep_line" ]; then
       read -r -a extra <<< "${keep_line#// vmrun-keepsrc-flags:}"
       flags+=("${extra[@]}")
@@ -104,17 +104,21 @@ for name in "${names[@]}"; do
   # "// vmrun-flags:" keeps the heap-atom number; "// vmrun-rom-flags: ..."
   # carries the re-pinned one, found by aligning the two allocator traces
   # after "# ready" (the same-size allocation, not just the same output).
-  # With -keepsrc as well, "// vmrun-rom-keepsrc-flags:" wins when a file
-  # has one (the two shifts do not simply add up), else the rom number.
-  if [[ $variant != *-norom* ]]; then
-    rom_line=
-    if [[ $variant == *-keepsrc ]]; then
-      rom_line=$(head -n5 "$src" | grep -m1 '^// vmrun-rom-keepsrc-flags:' || true)
-      rom_line=${rom_line/-keepsrc-flags:/-flags:}
-    fi
-    [ -n "$rom_line" ] || rom_line=$(head -n5 "$src" | grep -m1 '^// vmrun-rom-flags:' || true)
-    if [ -n "$rom_line" ]; then
-      read -r -a extra <<< "${rom_line#// vmrun-rom-flags:}"
+  # The shifts of flash atoms (rom), lazy builtin lists (lb, F2) and kept
+  # source (keepsrc) do not simply add up, so each combination that differs
+  # from the heap-atom build carries its own line: the key is the tags
+  # present, in that order, e.g. "// vmrun-rom-lb-keepsrc-flags:". Looked up
+  # in the first 10 lines. A combination without a line falls back to the
+  # lines above, which a pinned file then fails -- the cue to pin it.
+  tags=()
+  [[ $variant != *-norom* ]] && tags+=(rom)
+  [[ $variant == *-lb* ]] && tags+=(lb)
+  [[ $variant == *-keepsrc ]] && tags+=(keepsrc)
+  if [ ${#tags[@]} -gt 0 ] && [ "${tags[*]}" != keepsrc ]; then
+    key=$(IFS=-; echo "${tags[*]}")
+    tag_line=$(head -n10 "$src" | grep -m1 "^// vmrun-$key-flags:" || true)
+    if [ -n "$tag_line" ]; then
+      read -r -a extra <<< "${tag_line#// vmrun-$key-flags:}"
       flags+=("${extra[@]}")
     fi
   fi
