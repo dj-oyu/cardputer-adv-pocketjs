@@ -44412,44 +44412,44 @@ static uint32_t lazy_first(JSRuntime *rt, JSObject *p)
     return lo;
 }
 
-/* Does `atom` name the list entry `name`? No allocation: a flash atom is
-   compared against its flash text, a heap one against its JSString, and a
-   "[Symbol.x]" entry against the well-known symbol's description (the same
-   test find_atom uses to resolve it). */
-static bool lazy_name_is(JSRuntime *rt, JSAtom atom, const char *name)
+/* An atom's text, resolved once per lookup rather than once per list entry:
+   a miss compares against every pending entry of every list on the object,
+   and redoing the flash/heap lookup and a strlen of the entry for each was
+   what made one cost 8-30 us on the device (plan sec.14.3). `open` is '['
+   for a well-known symbol, which only a "[Symbol.x]" entry can name (the
+   same test find_atom uses); c0 is the first byte an entry must start with. */
+typedef struct { const uint8_t *s8; const uint16_t *s16; uint32_t len; int c0, open; } LazyKey;
+static bool lazy_key(JSRuntime *rt, JSAtom atom, LazyKey *key)
 {
-    size_t n;
-    JSString *s;
-
     if (__JS_AtomIsTaggedInt(atom))
-        return false;
-    if (name[0] == '[') {
-        if (atom < JS_ATOM_Symbol_toPrimitive || atom >= JS_ATOM_END)
-            return false;
-        s = rt->atom_array[atom];
-        n = strlen(name) - 2;
-        return s->len == n && !memcmp(str8(s), name + 1, n);
-    }
+        return false;   /* no list entry is an index */
+    key->open = atom >= JS_ATOM_Symbol_toPrimitive && atom < JS_ATOM_END ? '[' : 0;
 #ifdef CONFIG_POCKET_VM_ROM_ATOMS
-    {
-        const JSRomAtom *r = js_rom_atom(atom);
-        if (r)
-            return js_rom_text(r)[0] == name[0] && r->len == strlen(name) &&
-                   !memcmp(js_rom_text(r), name, r->len);
+    const JSRomAtom *r = key->open ? NULL : js_rom_atom(atom);
+    if (r) {
+        key->s8 = (const uint8_t *)js_rom_text(r), key->s16 = NULL, key->len = r->len;
+        return (key->c0 = r->len ? key->s8[0] : 0) != '[';   /* '[' names a symbol entry */
     }
 #endif
-    s = rt->atom_array[atom];
-    if (s->atom_type != JS_ATOM_TYPE_STRING)
+    JSString *s = rt->atom_array[atom];
+    if (!key->open && s->atom_type != JS_ATOM_TYPE_STRING)
         return false;
-    n = strlen(name);
-    if (s->len != n)
-        return false;
-    if (!s->is_wide_char)
-        return !memcmp(str8(s), name, n);
-    for (size_t i = 0; i < n; i++)
-        if (str16(s)[i] != (uint8_t)name[i])
-            return false;
-    return true;
+    key->s8 = s->is_wide_char ? NULL : str8(s), key->s16 = s->is_wide_char ? str16(s) : NULL;
+    key->len = s->len;
+    key->c0 = key->open ? '[' : !s->len ? 0 : key->s8 ? key->s8[0] : str16(s)[0];
+    return key->c0 != '[' || key->open;
+}
+
+/* Does the resolved key name the list entry `name`? No allocation. */
+static inline bool lazy_key_is(const LazyKey *key, const char *name)
+{
+    const uint8_t *t = (const uint8_t *)name + (key->open != 0);
+    if ((uint8_t)name[0] != key->c0)
+        return false;   /* the common miss: one flash byte */
+    for (uint32_t i = 0; i < key->len; i++)
+        if (!t[i] || t[i] != (key->s8 ? key->s8[i] : key->s16[i]))
+            return false;   /* !t[i]: the entry ended; a key may hold a NUL */
+    return t[key->len] == (key->open ? ']' : 0) && (!key->open || !t[key->len + 1]);
 }
 
 /* Put one list entry into the shape, the way JS_InstantiateFunctionListItem
@@ -44549,13 +44549,13 @@ static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom)
 {
     JSRuntime *rt = ctx->rt;
     uint32_t i;
-
-    if (__JS_AtomIsTaggedInt(atom)) /* counted as a miss either way */
-        return FP_INC(rt, lazy_miss), 0;   /* no list entry is an index */
+    LazyKey key;
+    if (!lazy_key(rt, atom, &key)) /* counted as a miss either way */
+        return FP_INC(rt, lazy_miss), 0;   /* nothing in a list can match */
     for (FP_INC(rt, lazy_miss), i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
         JSLazyList *l = &rt->lazy[i];
         for (int k = 0; k < l->len; k++) {
-            if (lazy_done(l, k) || !lazy_name_is(rt, atom, l->tab[k].name))
+            if (lazy_done(l, k) || !lazy_key_is(&key, l->tab[k].name))
                 continue;
             /* Marked first: add_property below looks the name up again. */
             lazy_set_done(l, k); FP_INC(rt, lazy_hit);
@@ -44572,13 +44572,13 @@ static int js_lazy_delete(JSContext *ctx, JSObject *p, JSAtom atom)
 {
     JSRuntime *rt = ctx->rt;
     uint32_t i;
-
-    if (__JS_AtomIsTaggedInt(atom))
+    LazyKey key;
+    if (!lazy_key(rt, atom, &key))
         return 2;
     for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
         JSLazyList *l = &rt->lazy[i];
         for (int k = 0; k < l->len; k++) {
-            if (lazy_done(l, k) || !lazy_name_is(rt, atom, l->tab[k].name))
+            if (lazy_done(l, k) || !lazy_key_is(&key, l->tab[k].name))
                 continue;
             /* Symbol.hasInstance is made non-configurable by lazy_define. */
             if (!(l->tab[k].prop_flags & JS_PROP_CONFIGURABLE) ||
@@ -44594,11 +44594,11 @@ static int js_lazy_delete(JSContext *ctx, JSObject *p, JSAtom atom)
 /* The list entry an own property came from, or NULL if it is not one. */
 static JSLazyList *lazy_owner(JSRuntime *rt, JSObject *p, JSAtom atom, int *pk)
 {
-    uint32_t i;
-    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+    uint32_t i; LazyKey key;
+    for (i = lazy_key(rt, atom, &key) ? lazy_first(rt, p) : rt->lazy_count; i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
         JSLazyList *l = &rt->lazy[i];
         for (int k = 0; k < l->len; k++) {
-            if (lazy_name_is(rt, atom, l->tab[k].name)) {
+            if (lazy_key_is(&key, l->tab[k].name)) {
                 *pk = k;
                 return l;
             }
