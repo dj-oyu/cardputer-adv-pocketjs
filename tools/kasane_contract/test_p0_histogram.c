@@ -66,6 +66,7 @@ int main(void){
     ksn_p0_probe_core_source_text(source_text,8);
     assert(source_text_core_calls==2);
     ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,12);
+    ksn_p0_probe_copy(KSN_P0_UTF8_REQUEST,5);
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,0);
@@ -86,6 +87,8 @@ int main(void){
            grouped_calls[P0_GROUP_ADAPTER_SCHEMA]==1);
     assert(grouped_bytes[P0_GROUP_CORE_SUBMIT]==48&&
            grouped_calls[P0_GROUP_CORE_SUBMIT]==2);
+    assert(grouped_bytes[P0_GROUP_JS_UTF8_REQUEST]==5&&
+           grouped_calls[P0_GROUP_JS_UTF8_REQUEST]==1);
 #else
     ksn_p0_probe_copy(KSN_P0_CORE_SUBMIT_COMMAND,24);
 #endif

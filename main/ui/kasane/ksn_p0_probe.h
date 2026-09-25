@@ -5,11 +5,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Diagnostic only. These categories name actual byte moves at their call
- * sites; UTF-8 materialization is reported separately because QuickJS owns
- * its implementation and may allocate rather than memcpy. */
+/* Diagnostic only. Most categories name byte moves at their call sites.
+ * UTF8_REQUEST is only the length passed to JS_ToCStringLen: QuickJS may
+ * return a borrowed ASCII pointer, so it is not a copy or allocation count. */
 typedef enum {
-    KSN_P0_UTF8_MATERIALIZED,
+    KSN_P0_UTF8_REQUEST,
     KSN_P0_PRODUCER_MATERIALIZED,
     KSN_P0_ADAPTER_TEMP,
     KSN_P0_ADAPTER_OWNED,

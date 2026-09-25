@@ -671,7 +671,7 @@ static bool presenter_text(JSContext *ctx,JSValueConst model,const char *name,
     size_t length;const char *s=JS_ToCStringLen(ctx,&length,value);
     JS_FreeValue(ctx,value);
     if(!s)return false;
-    ksn_p0_probe_copy(KSN_P0_UTF8_MATERIALIZED,length);
+    ksn_p0_probe_copy(KSN_P0_UTF8_REQUEST,length);
     ksn_result result=ksn_presenter_copy_text(out,bytes,s,length);
     JS_FreeCString(ctx,s);
     if(result==KSN_OK)return true;
@@ -762,7 +762,7 @@ static bool presenter_optional_text(JSContext *ctx,JSValueConst model,const char
     size_t length;const char *text=JS_ToCStringLen(ctx,&length,value);
     JS_FreeValue(ctx,value);
     if(!text)return false;
-    ksn_p0_probe_copy(KSN_P0_UTF8_MATERIALIZED,length);
+    ksn_p0_probe_copy(KSN_P0_UTF8_REQUEST,length);
     ksn_result result=ksn_presenter_copy_text(out,bytes,text,length);
     JS_FreeCString(ctx,text);
     if(result==KSN_OK)return true;

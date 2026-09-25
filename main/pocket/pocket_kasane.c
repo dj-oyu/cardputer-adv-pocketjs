@@ -1896,7 +1896,7 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
                 if(JS_GetLength(ctx,value,&units)<0||units>slot->capacity)ok=false;
                 else{
                     size_t length=0;const char *text=JS_ToCStringLen(ctx,&length,value);
-                    if(text)ksn_p0_probe_copy(KSN_P0_UTF8_MATERIALIZED,length);
+                    if(text)ksn_p0_probe_copy(KSN_P0_UTF8_REQUEST,length);
                     if(!text)ok=false;
                     else if(length>slot->capacity)ok=false;
                     else{
@@ -2244,7 +2244,7 @@ static bool runtime_binding(JSContext *ctx,JSValueConst object,const char *key,
             if(JS_GetLength(ctx,value,&units)==0&&units<=KSN_SCHEMA_TEXT_MAX){
                 size_t length=0;const char *src=JS_ToCStringLen(ctx,&length,value);
                 if(src){
-                    ksn_p0_probe_copy(KSN_P0_UTF8_MATERIALIZED,length);
+                    ksn_p0_probe_copy(KSN_P0_UTF8_REQUEST,length);
                     if(length<=KSN_SCHEMA_TEXT_MAX){
                         memcpy(literal,src,length);literal[length]=0;
                         ksn_p0_probe_copy(KSN_P0_ADAPTER_TEMP,length);

@@ -116,7 +116,7 @@ _Static_assert(sizeof(sample_names)/sizeof(*sample_names)==KSN_P0_SAMPLE_COUNT,
 _Static_assert(sizeof(sample_bucket_us)/sizeof(*sample_bucket_us)==KSN_P0_SAMPLE_COUNT,
                "sample probe bucket widths must match the categories");
 #ifdef KASANE_P0_COPY_PROBE
-static const char *const copy_names[]={"utf8_materialized","producer_materialized","adapter_temp",
+static const char *const copy_names[]={"utf8_request","producer_materialized","adapter_temp",
     "adapter_owned","adapter_slot_commit","schema_ref_commit",
     "music_plan","music_status","music_materialized",
     "music_model_copy","core_payload_write",
@@ -126,14 +126,14 @@ static const char *const copy_names[]={"utf8_materialized","producer_materialize
 _Static_assert(sizeof(copy_names)/sizeof(*copy_names)==KSN_P0_COPY_COUNT,
                "copy probe labels must match the categories");
 typedef enum {
-    P0_GROUP_JS_UTF8,P0_GROUP_PRODUCER,P0_GROUP_ADAPTER_SCHEMA,
+    P0_GROUP_JS_UTF8_REQUEST,P0_GROUP_PRODUCER,P0_GROUP_ADAPTER_SCHEMA,
     P0_GROUP_CORE_SUBMIT,P0_GROUP_BANK_CLONE,P0_GROUP_RENDER_SCRATCH,
     P0_GROUP_COUNT
 } copy_group;
-static const char *const group_names[]={"js_utf8","producer_snapshot",
+static const char *const group_names[]={"js_utf8_request","producer_snapshot",
     "adapter_schema","core_submit","bank_clone","render_scratch"};
 static const uint8_t copy_groups[]={
-    [KSN_P0_UTF8_MATERIALIZED]=P0_GROUP_JS_UTF8,
+    [KSN_P0_UTF8_REQUEST]=P0_GROUP_JS_UTF8_REQUEST,
     [KSN_P0_PRODUCER_MATERIALIZED]=P0_GROUP_PRODUCER,
     [KSN_P0_ADAPTER_TEMP]=P0_GROUP_ADAPTER_SCHEMA,
     [KSN_P0_ADAPTER_OWNED]=P0_GROUP_ADAPTER_SCHEMA,
@@ -252,17 +252,23 @@ void ksn_p0_probe_report(const char *session){
     uint64_t group_bytes[P0_GROUP_COUNT]={0};
     uint32_t group_calls[P0_GROUP_COUNT]={0};
     for(unsigned k=0;k<KSN_P0_COPY_COUNT;k++){
-        observed_bytes+=copy_bytes[k];observed_calls+=copy_calls[k];
+        /* A ToCString request can borrow ASCII bytes. Keep it visible but
+         * never charge its length as an observed memory move. */
+        if(k!=KSN_P0_UTF8_REQUEST){
+            observed_bytes+=copy_bytes[k];observed_calls+=copy_calls[k];
+        }
         group_bytes[copy_groups[k]]+=copy_bytes[k];
         group_calls[copy_groups[k]]+=copy_calls[k];
-        if(copy_calls[k])ESP_LOGI("KSN_P0","C session=%s kind=%s calls=%lu bytes=%llu",
+        if(copy_calls[k])ESP_LOGI("KSN_P0","%s session=%s kind=%s calls=%lu bytes=%llu",
+            k==KSN_P0_UTF8_REQUEST?"R":"C",
             label,copy_names[k],(unsigned long)copy_calls[k],
             (unsigned long long)copy_bytes[k]);
     }
     for(unsigned k=0;k<P0_GROUP_COUNT;k++)
-        ESP_LOGI("KSN_P0","G session=%s group=%s calls=%lu bytes=%llu coverage=partial",
+        ESP_LOGI("KSN_P0","G session=%s group=%s calls=%lu bytes=%llu coverage=%s",
             label,group_names[k],(unsigned long)group_calls[k],
-            (unsigned long long)group_bytes[k]);
+            (unsigned long long)group_bytes[k],
+            k==P0_GROUP_JS_UTF8_REQUEST?"request_not_copy":"partial");
     ESP_LOGI("KSN_P0","C session=%s kind=observed_total calls=%lu bytes=%llu coverage=partial",
         label,(unsigned long)observed_calls,(unsigned long long)observed_bytes);
     ESP_LOGI("KSN_P0","W session=%s source_text_core_calls=%lu bytes=%llu length_mismatches=%lu",

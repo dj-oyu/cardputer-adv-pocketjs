@@ -276,6 +276,10 @@ cc -std=c11 -Wall -Wextra -Werror -O2 -DKSN_COUNT_VISIBLE -Imain/ui/kasane -Itoo
 diff <(grep '^scene' "$out/visible.plain") <(grep '^scene' "$out/visible.count")
 grep '^CORPUS' "$out/visible.count"
 echo "visible skip PASS: the counters change no pixel (5 scene hashes identical)"
+# The QuickJS boundary is not necessarily a copy: ASCII may return borrowed
+# storage, while wide strings require UTF-8 conversion. Keep this separate
+# from the C-only copy counters and from device timing claims.
+bash tools/kasane_contract/run_qjs_utf8_cost.sh
 # The same arm for the blend LUT: entries into the per-pixel chain and into the
 # table read, so "the chain became a row lookup" is a count of calls.
 cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_COUNT_LUT \
