@@ -10,7 +10,8 @@
 #   tools/vmtest/build.sh asan-recur    # segframes, JS calls still recurse in C (L2a; FLATCALLS off)
 #   tools/vmtest/build.sh asan-flat     # segframes + CONFIG_POCKET_VM_FLATCALLS (L2b)
 #   tools/vmtest/build.sh all-recur / all-flat
-#   tools/vmtest/build.sh asan-yield   # flat calls + the staged L2c body
+#   tools/vmtest/build.sh asan-yield   # flat calls + the L2c body (the default since 2026-09-23)
+#   tools/vmtest/build.sh asan-noyield # the pre-L2c path: no suspend, no frame guard
 #   tools/vmtest/build.sh all-yield
 #   tools/vmtest/build.sh o2-keepsrc   # any variant + "-keepsrc": function source text kept (upstream toString)
 #
@@ -46,7 +47,12 @@ build_variant() {
   local flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"
   # Match the validated firmware default; -eager retains the old return path.
   local lazy="-DCONFIG_POCKET_VM_LAZY_INPUTS=1"
-  local yield=""
+  # CONFIG_POCKET_VM_YIELD: default y in main/Kconfig.projbuild since
+  # 2026-09-23. Same rule as the two above -- the plain variant is the
+  # firmware's path -- so "-noyield" is what builds the pre-L2c one, and the
+  # variants that drop FLATCALLS have to drop this with it (the Kconfig makes
+  # it depend on FLATCALLS, and the two cannot be mixed here either).
+  local yield="-DCONFIG_POCKET_VM_YIELD=1"
   # CONFIG_POCKET_VM_STRIP_FN_SOURCE: default y (no function source text kept,
   # Function.prototype.toString prints the name-only fallback). A trailing
   # "-keepsrc" on ANY variant builds the upstream behaviour instead; it is
@@ -54,15 +60,21 @@ build_variant() {
   local strip="-DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1"
   if [[ $variant == *-keepsrc ]]; then strip=""; fi
   local core=${variant%-keepsrc}
-  local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}
+  local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}; base=${base%-noyield}; base=${base%-reloc}
   case "$core" in
     *-lazy-flat) ;;
     *-eager) lazy="" ;;
     *-callbench) yield="-DCONFIG_POCKET_VM_CALLBENCH=1" ;;
     *-lazy) yield="-DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_TCO=1" ;;
     *-tco) yield="-DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_TCO=1" ;;
-    *-alloca) segframes=""; flatcalls=""; lazy="" ;;
-    *-recur) flatcalls=""; lazy="" ;;
+    *-alloca) segframes=""; flatcalls=""; lazy=""; yield="" ;;
+    *-recur) flatcalls=""; lazy=""; yield="" ;;
+    *-noyield) yield="" ;;
+    # L3a: the explicit move API. Default n in the Kconfig and nothing in the
+    # firmware calls it, so it is never in a plain variant -- this suffix is
+    # the only way it is built, and --force-reloc is the only thing that
+    # calls it.
+    *-reloc) yield="-DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_RELOC=1" ;;
     *-flat) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1" ;;
     *-yield) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"; yield="-DCONFIG_POCKET_VM_YIELD=1" ;;
   esac

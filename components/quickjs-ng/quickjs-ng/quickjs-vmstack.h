@@ -237,6 +237,23 @@ typedef struct JSVMStack {
     // the target, so a frame count would bound memory by nothing.
     size_t used;
     size_t budget;
+#ifdef CONFIG_POCKET_VM_RELOC
+    // L3a (docs/vm/vm-L3-design.md D51). `generation` counts completed
+    // moves; nothing in the VM reads it yet -- L3a keeps raw pointers and
+    // fixes them up at move time, so there is no relative reference to
+    // check it against. It is here because the test has to be able to tell
+    // "the move happened" from "the move was a no-op", and because L3b
+    // needs the field to exist in a layout it does not get to change.
+    //
+    // `pins` is 0 at every moment L3a can observe: a move is only legal
+    // while the VM is parked (D45), and no native call can be on the C
+    // stack at a park. The counter is the shape of the rule, not an
+    // implementation of it -- js_vm_pin exists so the "a pin refuses a
+    // move" completion condition (spec sec.8) has something to test, and
+    // so that the day a real pin site appears it is a call, not a design.
+    uint32_t generation;
+    uint32_t pins;
+#endif
 #ifdef JS_VM_STACK_STATS
     size_t live_bytes_max;               // peak of `used`
     size_t frame_max;                    // largest single frame pushed
@@ -386,12 +403,35 @@ static inline size_t js_vm_seg_want_for_size(const JSVMStack *st, uint32_t n, si
     return want;
 }
 
+// Host harness only (tools/vmtest/vmrun.c defines it; everything else, the
+// firmware included, leaves the weak reference NULL): "the next allocation
+// is a frame segment". vmrun marks it in its trace so tools/vmalloc/replay
+// can serve segments from a region of their own (--seg-arena) and ask
+// whether keeping them out of the objects' heap helps it (design D6,
+// docs/vm/vm-L3-design.md sec.11).
+//
+// It carries the request size and is cleared (size 0) as soon as
+// js_malloc_rt returns, because js_malloc_rt can refuse on the memory limit
+// without calling the allocator at all: a bare "next one is a segment" flag
+// would then be left set and label whatever unrelated allocation came next.
+#if !defined(ESP_PLATFORM)
+extern void vmtest_seg_alloc_hint(size_t size) __attribute__((weak));
+#endif
+
 // `standard`: whether this segment belongs to the size-by-position growth
 // sequence (see JSVMSeg.standard) -- false for a frame bigger than
 // JS_VM_SEG_MAX and for the memory-limit fallback sized to a frame alone.
 static inline JSVMSeg *js_vm_seg_new(JSRuntime *rt, JSVMStack *st, size_t payload, int standard)
 {
+#if !defined(ESP_PLATFORM)
+    if (vmtest_seg_alloc_hint)
+        vmtest_seg_alloc_hint(sizeof(JSVMSeg) + (JS_VM_SEG_ALIGN - 1) + payload);
+#endif
     JSVMSeg *s = js_malloc_rt(rt, sizeof(JSVMSeg) + (JS_VM_SEG_ALIGN - 1) + payload);
+#if !defined(ESP_PLATFORM)
+    if (vmtest_seg_alloc_hint)
+        vmtest_seg_alloc_hint(0);
+#endif
     if (!s)
         return NULL;
     uintptr_t b = ((uintptr_t)(s + 1) + JS_VM_SEG_ALIGN - 1) & ~(uintptr_t)(JS_VM_SEG_ALIGN - 1);
@@ -631,6 +671,253 @@ static inline void js_vm_stack_trim(JSRuntime *rt, JSVMStack *st)
     st->trims++;
 #endif
 }
+
+// ---------------------------------------------------------------- L3a
+//
+// Moving the segments (docs/vm/vm-L3-design.md; the ledger of everything that
+// points into them is docs/vm/vm-ledger/09-relocation-entries.md).
+//
+// This half does the memory: allocate the new blocks, copy the live bytes,
+// hand back a table of "what moved where", and later poison and free the old
+// ones. It deliberately does NOT know what a JSStackFrame is -- the typed
+// fix-up walk over the ledger's 14 entries lives in quickjs.c, which does.
+// Splitting it here is what keeps this header's promise (layout plus bump
+// allocator, no VM semantics) intact for a stage whose whole subject is VM
+// semantics.
+#ifdef CONFIG_POCKET_VM_RELOC
+
+// One moved segment. `delta` is what a pointer INTO this segment's payload
+// gains; the pair of bounds is how a pointer is recognised as belonging here
+// at all. Per segment, never one figure for the whole stack: the live chain
+// is several separately malloc'd blocks whose new addresses have no reason to
+// share an offset (spec sec.8, "do not express different displacements with a
+// single addend at the root"). `old_seg` is the block the move has to give
+// back once nothing names it any more -- stage 5, after the fix-up, not before.
+typedef struct JSVMReloc {
+    uint8_t *old_base;
+    uint8_t *old_end;
+    ptrdiff_t delta;
+    JSVMSeg *old_seg;
+} JSVMReloc;
+
+// The lookup that stands in for "is this a pointer into a moved segment".
+// Linear: the table has one row per LIVE segment, and JS_VM_SEG_MAX keeps
+// that count to a few dozen even at the device's whole stack budget (the same
+// bound js_vm_stack_push_slow relies on for its prev-walk). A pointer that
+// matches no row is left alone -- that is not a failure, it is how a partial
+// move (one segment, not the chain) stays legal (D53).
+static inline void *js_vm_reloc_ptr(const JSVMReloc *tab, uint32_t n, void *p)
+{
+    uint32_t i;
+    uint8_t *b = (uint8_t *)p;
+    if (!p)
+        return p;
+    for (i = 0; i < n; i++) {
+        // The end is inclusive here, unlike js_vm_stack_holds: a frame's
+        // cur_sp / caller_sp legitimately sits one past the last live slot,
+        // and an exclusive test would silently leave such a pointer behind
+        // whenever the operand stack happened to be full.
+        if (b >= tab[i].old_base && b <= tab[i].old_end)
+            return b + tab[i].delta;
+    }
+    return p;
+}
+
+// Stages 1-3 (design sec.4): allocate, copy, and relink onto the new blocks.
+// The old blocks are still allocated and still readable when this returns 0 --
+// only js_vm_stack_reloc_finish gives them up -- so a caller that fails
+// between here and there can still read what it needs.
+//
+// Returns -1 with the VM byte-for-byte unchanged when any allocation fails:
+// every new block taken so far is returned first. This is the "keep the old
+// region on failure" the spec asks the VM to guarantee, and the reason the
+// allocation is all done up front rather than segment by segment during the
+// walk -- there is no way to half-rewrite a pointer graph and back out.
+static inline int js_vm_stack_reloc_copy(JSRuntime *rt, JSVMStack *st,
+                                         JSVMReloc **ptab, uint32_t *pn)
+{
+    JSVMSeg *s, *ns, *new_top = NULL, *new_prev = NULL;
+    JSVMReloc *tab;
+    uint32_t n = 0, i;
+
+    *ptab = NULL;
+    *pn = 0;
+    for (s = st->cur; s; s = s->prev)
+        n++;
+    if (!n)
+        return 0;
+    tab = js_malloc_rt(rt, (size_t)n * sizeof(*tab));
+    if (!tab)
+        return -1;
+
+    // Bottom-up, so the new chain's prev links can be written as they are
+    // created: walking st->cur gives top-down, so fill the table from the
+    // back and then build upward from row 0.
+    i = n;
+    for (s = st->cur; s; s = s->prev) {
+        i--;
+        tab[i].old_seg = s;
+        tab[i].old_base = s->base;
+        tab[i].old_end = s->end;
+    }
+    for (i = 0; i < n; i++) {
+        size_t payload = js_vm_seg_payload(tab[i].old_seg);
+        size_t live = (size_t)(tab[i].old_seg->top - tab[i].old_seg->base);
+        ns = js_vm_seg_new(rt, st, payload, tab[i].old_seg->standard);
+        if (!ns) {
+            // Nothing has been rewritten yet; give back what this attempt
+            // took and leave the caller exactly as it was found. The new
+            // blocks are already chained through new_prev, so the partial
+            // chain is its own undo list -- no second array to keep in step
+            // with the table.
+            while (new_prev) {
+                JSVMSeg *dead = new_prev;
+                new_prev = dead->prev;
+                js_vm_seg_del(rt, st, dead);
+            }
+            js_free_rt(rt, tab);
+            return -1;
+        }
+        // Copy only the live prefix: the tail is poisoned in the source
+        // under ASan, and copying it would report on the memcpy itself
+        // rather than on any real mistake. js_vm_seg_new already poisoned
+        // the whole new payload, so unpoison exactly what is being filled.
+        JS_VM_UNPOISON(ns->base, live);
+        memcpy(ns->base, tab[i].old_seg->base, live);
+        ns->top = ns->base + live;
+        ns->prev = new_prev;
+        new_prev = new_top = ns;
+        tab[i].delta = (ptrdiff_t)(ns->base - tab[i].old_base);
+    }
+    st->cur = new_top;
+    *ptab = tab;
+    *pn = n;
+    return 0;
+}
+
+// L4a (docs/vm/vm-L3-design.md sec.10): the same move, but GATHERING the
+// chain into one block instead of copying each segment to a block of its
+// own size. js_vm_stack_reloc_copy cannot reduce scatter -- it hands back
+// exactly the sizes it takes, so the chain ends up as spread out as before,
+// just elsewhere (measured on the host: span - resident of a 9-segment chain
+// is 23-49 KB of other allocations sitting between the pieces). One block
+// has no inside to put anything in.
+//
+// The fix-up does not change. Each old segment still gets one row in the
+// table, and its delta now points at its slice of the new block rather than
+// at a block of its own; D46's per-segment deltas were always the general
+// case, and this is the first caller that makes them differ in kind.
+//
+// Only the live prefix of each segment is copied, bottom segment first, so
+// the frames keep their LIFO order and every block stays at the
+// JS_VM_FRAME_ALIGN it had: the new base is 16-aligned and each slice length
+// is a sum of rounded frame sizes. A pointer to one past the end of a lower
+// segment's live bytes (an operand stack filled to its last slot) lands on
+// the first byte of the next slice -- the same "one past the end" in the new
+// layout, which is all such a pointer is ever used for.
+//
+// The new block is not a member of the size-by-position sequence (standard
+// = 0): it is exactly as large as what it holds, so it is never offered to
+// the cache and is freed when the stack unwinds past it; the next push
+// starts a fresh standard bottom segment as it would from empty. The block
+// is exactly full, so the next deeper push opens a segment above it.
+//
+// Returns 0 with *pn == 0 when there is nothing to gather (fewer than two
+// segments): a single segment is already contiguous, and moving it would
+// only trade one address for another. -1 leaves the VM untouched.
+static inline int js_vm_stack_reloc_coalesce(JSRuntime *rt, JSVMStack *st,
+                                             JSVMReloc **ptab, uint32_t *pn)
+{
+    JSVMSeg *s, *ns;
+    JSVMReloc *tab;
+    uint32_t n = 0, i;
+    size_t total = 0, off = 0, payload;
+
+    *ptab = NULL;
+    *pn = 0;
+    for (s = st->cur; s; s = s->prev) {
+        n++;
+        total += (size_t)(s->top - s->base);
+    }
+    if (n < 2)
+        return 0;
+    tab = js_malloc_rt(rt, (size_t)n * sizeof(*tab));
+    if (!tab)
+        return -1;
+    i = n;
+    for (s = st->cur; s; s = s->prev) {
+        i--;
+        tab[i].old_seg = s;
+        tab[i].old_base = s->base;
+        tab[i].old_end = s->end;
+    }
+    // Never zero: with two or more segments on the chain the top one holds
+    // at least one frame (a segment is retired the moment its first block
+    // is popped; only a lone bottom segment stays resident empty).
+    payload = (total + JS_VM_SEG_ALIGN - 1) & ~(size_t)(JS_VM_SEG_ALIGN - 1);
+    ns = js_vm_seg_new(rt, st, payload, 0);
+    if (!ns) {
+        js_free_rt(rt, tab);
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        size_t live = (size_t)(tab[i].old_seg->top - tab[i].old_seg->base);
+        JS_VM_UNPOISON(ns->base + off, live);
+        memcpy(ns->base + off, tab[i].old_seg->base, live);
+        tab[i].delta = (ptrdiff_t)((ns->base + off) - tab[i].old_base);
+        off += live;
+    }
+    ns->top = ns->base + off;
+    ns->prev = NULL;
+    st->cur = ns;
+#ifdef JS_VM_STACK_STATS
+    // The chain is one segment now; resident is what it holds. The old
+    // segments' share leaves `resident` here and their memory leaves the
+    // heap in js_vm_stack_reloc_finish. resident_max is a peak and keeps the
+    // value it had, and seg_mallocs/seg_frees count the block and the frees.
+    st->seg_live = 1;
+    st->resident = js_vm_seg_payload(ns) + js_vm_seg_overhead();
+#endif
+    *ptab = tab;
+    *pn = n;
+    return 0;
+}
+
+// Stage 5: the old blocks stop existing, loudly. Filling them with 0xD3 first
+// is what catches a fix-up this design MISSED on builds with no sanitizer --
+// 0xD3D3D3D3 is not a valid JSValue tag and not a plausible pointer, so a
+// read through a stale reference trips an existing assert or faults, instead
+// of finding the bytes still sitting there and appearing to work. That is the
+// check the ledger's completeness claim actually rests on (ledger sec.9).
+//
+// `keep_old` leaves the blocks allocated and poisoned rather than freeing
+// them. Diagnostic only, and a deliberate leak: freeing hands the address
+// back to tlsf, which can hand it straight out again and overwrite the
+// poison with something that reads as valid.
+static inline void js_vm_stack_reloc_finish(JSRuntime *rt, JSVMStack *st,
+                                            JSVMReloc *tab, uint32_t n,
+                                            int keep_old)
+{
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+        JSVMSeg *s = tab[i].old_seg;
+        size_t payload = js_vm_seg_payload(s);
+        JS_VM_UNPOISON(s->base, payload);
+        memset(s->base, 0xD3, payload);
+        if (keep_old) {
+            // Unlinked from every chain by the relink in _copy, so nothing
+            // walks it and nothing frees it: it stays as a poisoned address
+            // range for the rest of the process.
+            JS_VM_POISON(s->base, payload);
+        } else {
+            js_vm_seg_del(rt, st, s);
+        }
+    }
+    js_free_rt(rt, tab);
+    st->generation++;
+}
+
+#endif /* CONFIG_POCKET_VM_RELOC */
 
 // ---------------------------------------------------------------- L2b
 //

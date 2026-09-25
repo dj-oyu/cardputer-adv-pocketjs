@@ -31,6 +31,7 @@ idf.py -B build_api -p COM3 monitor
 python tools\smoke_device.py --port COM3 --cycles 20   # 起動/停止のライフサイクルとリーク
 python tools\test_settings.py --port COM3              # XMB設定・ミュート順序・画面遷移
 python tools\capture_home.py --port COM3               # 実ピクセル取得と30fps確認
+python tools\test_editor_draft.py --port COM3          # 未保存の編集がアプリ起動を跨いで残るか
 python tools\benchmark_app.py --port COM3              # JSアプリのPAINT内訳
 ```
 

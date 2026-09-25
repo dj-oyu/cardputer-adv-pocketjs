@@ -61,6 +61,11 @@ static const char *TAG = "pocket.fs";
 #define FS_SECTORS     64u
 #define FS_SIZE        (FS_SECTORS*FS_SECTOR)
 _Static_assert(FS_BASE==0x60000u, "srcstore no longer ends where app:/ begins");
+// The editor parks its unsaved document just past this region. Asserted
+// here because this file owns the end of app:/ and srcstore.h owns the
+// number: if the filesystem ever grows, the draft has to move with it.
+_Static_assert(FS_BASE+FS_SIZE==SRCSTORE_DRAFT_BASE,
+               "the editor draft no longer begins where app:/ ends");
 
 // ------------------------------------------------------------------ limits
 //

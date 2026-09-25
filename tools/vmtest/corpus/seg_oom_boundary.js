@@ -11,8 +11,15 @@
 // known/oom_backtrace_uaf.js documents an upstream use-after-free in
 // build_backtrace that a creeping OOM can trigger, and a fragile repro
 // (breaks if a byte of source changes) is not what this file is for.
+// Not `new Array(1 << 14).fill(depth)`, which this file used until backlog
+// #15: it grows 1.5x at a time and crept up to 162,500 of 163,840 B (host,
+// device profile) before the growth that failed, so the InternalError had
+// ~1.3 KB to be built in, and the second attempt -- which still holds the
+// first error in the catch binding -- came out `null` under the -yield/-tco/
+// -lazy -keepsrc builds. apply() asks for its array in one request, as in
+// memory_device.js.
 function pileOnce(depth, out) {
-  if (depth === 2) out.push(new Array(1 << 14).fill(depth)); // one big block, mid-chain
+  if (depth === 2) out.push(Array.apply(null, { length: 60000 })); // one big block, mid-chain
   else out.push(depth);
   if (depth === 0) return out.length;
   return pileOnce(depth - 1, out);

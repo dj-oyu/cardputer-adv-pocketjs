@@ -41,8 +41,10 @@ Each condition is one USB byte the firmware turns into a bit mask, and the JS
 side of it is apps/vmprobe/condition.js, evaluated on top of the workload:
 
   base  'P'  nothing but the workload.
-  ui    'Q'  a pocket.ui screen (rect + text) whose text is set every frame,
-             so the UI core's tick, layout and draw are inside every turn.
+  ui    'Q'  a pocket.kasane scene (background + rect + text) whose text is
+             set and submitted every frame, so composition and the transfer
+             are inside every turn. Was a pocket.ui screen until 2026-09-23;
+             that API left the firmware in CP24-25.
   audio 'R'  pocket.audio.tone, 440 Hz 1 s, re-armed from its own completion:
              the real synthesiser, the real I2S path, the audio task at
              priority 7 preempting the ui task at 5.
@@ -69,6 +71,10 @@ import time
 
 WORKLOADS = {
     "X": "hello",
+    # The two shipped apps with a probe entry of their own (app_session.c);
+    # they run under their own manifest and write their own saved state.
+    "<": "pet",
+    ">": "companion",
     "A": "sync_loop",
     "B": "deep_recursion",
     "C": "closures",
@@ -492,8 +498,10 @@ def main():
     for c in conds:
         if c not in CONDITIONS:
             p.error(f"unknown condition {c}")
-    if 'X' in letters and conds != ['base']:
-        p.error('hello requires --conditions base (no contention wrapper)')
+    if any(l in letters for l in 'X<>') and 'ui' in conds:
+        p.error('the shipped apps build their own Kasane scene; the ui '
+                'condition would build a second one over it (app_session.c '
+                'drops the bit)')
 
     out_path = pathlib.Path(a.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

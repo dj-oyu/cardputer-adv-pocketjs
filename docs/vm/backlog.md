@@ -4,12 +4,49 @@
 
 ## L2（移動しない VM スタックと中断・再開）
 
-出典: `docs/vm/vm-L2-design.md`。状態は 2026-09-16 時点。
+出典: `docs/vm/vm-L2-design.md`。状態は 2026-09-23 時点。
 
-| # | 項目 | 出典 | 状態 |
-| --- | --- | --- | --- |
-| 8 | 旧D42+D43比較でlargest余裕が6,240→4,192Bへ減った原因の確認。現行同一バイナリの反復では同一設定・同一総空きでもlargestが2KiB変動し、旧単発差をD42に帰属できない。旧差の原因は未特定 | results §5.4, §5.8 | 検証中 |
-| 11 | L2c 実機統合: 要求API・実行ターンtimer・leave無効化・guestの2ビット/3起点・stopの後ろ盾とFAIRのpump抑止を実装。両順序の寿命・故障回復・中断中Backホスト経路を検証。両順序で中断中FRAME＋USB Back→実保存→stop hookと再起動後の読取・診断キー削除も確認。暴走frame/jobの停止時間は両順序各3回採取。残りは物理入力、正常負荷・競合を含む`VM_FRAME_RUNAWAY_US`調律、総合関所、既定値の確定 | design §11.8, results §4.4〜4.9, §4.15〜4.16 | 実装・検証中 |
+未完了の項目は無い（2026-09-23）。L2c は実機統合まで終わり、`CONFIG_POCKET_VM_YIELD` は既定 y。TCO と FAIR は互換性の判断として n のまま残している。経緯と実測は vm-L2-results.md §8、設計は vm-L2-design.md §11。
+
+
+## L3 / L4（移動可能スタックとコンパクション）
+
+出典: [vm-L3-design.md](vm-L3-design.md)、[vm-L3-results.md](vm-L3-results.md)、台帳
+[09-relocation-entries.md](vm-ledger/09-relocation-entries.md)。開発は `vm/l3a-refs`。状態は 2026-09-25 時点。
+
+**閉じた（2026-09-25、G12 の結果による）。** ホストでは tlsf モデルで比べたすべての方式が動かさない
+現行設計に負け（design §10〜§12）、実機の G12（results §15）では:
+
+- 出荷アプリ（hello・imucal・pet・companion、負荷の前後2巡）と Kasane デモで、確保の失敗は 0 件。
+- わざと OOM にする負荷では「空き総量 ≥ 要求 > 最大空きブロック」が 168 件出た — **backlog が決めて
+  いた字義どおりの基準は満たさない**。決めてあった次の手順（要求が何かを見て §10.3 の退避を検討）を
+  取ると、要求は JS の `ArrayBuffer`、分断しているのは JS のオブジェクトで、**セグメントを退かして救えた
+  失敗は 0 件**。負の対照（セグメントが分断するヒープ）では 590 件すべてを検出した。
+
+L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D58）も含めて採らない。L3a と L4a のコードは
+既定 n のまま残す（台帳 09 と毒化は、将来フレームを動かす必要が出たときの出発点）。**再開する条件**:
+出荷アプリで G12 の `segfix=1` が出ること（`CONFIG_POCKET_VM_OOMPROBE`、`tools/vmtest/device_g12.py`）。
+
+旧 #2（D8: 駐機中のネイティブ確保が飛地を増やすか）・#3（出荷アプリは駐機しない）・#4（D55 の緩和）は、
+動かさない方針では問いにならないので閉じた。
+
+### 完了（参考）
+
+- G12（実機の断片化計測）: results §15。計装は既定 n の `CONFIG_POCKET_VM_OOMPROBE`。
+
+- L3a: 台帳 14 種、差分表による型付き補正、3層の毒化、世代・pin・4種の失敗。コーパス 74 件一致、
+  Test262 標準集合と部分集合 7,036 ファイルで対照と同一、負の対照 3 種を検出。実機で 34 回移動・最悪
+  235 µs・契約一致・smoke 20 周・予算内（results §3〜§9）。
+- L4a と D6 をホストで測り不採用（results §13〜§14、design D57・D59）。
+- L3 の作業中に見つけた、確保失敗時のコンパイル経路の不具合群は `vm/oom-truncated-bytecode` で修正し、
+  ホストと実機（smoke・`memlog --check`）を通して `vm/main` 経由で取り込んだ（2026-09-25、
+  [oom-parse-safety.md](oom-parse-safety.md) §9・§9.1）。
+
+## 確保失敗時のコンパイル経路（VM の段とは独立）
+
+未完了の項目は無い（2026-09-25）。ホストの最終検証（[oom-parse-safety.md](oom-parse-safety.md) §9）と
+実機の smoke・`memlog --check`（§9.1）を通して `vm/main` へ戻した。修正前の assert や `exit(1)` が実機で
+再起動を起こしていたかは推論のまま（smoke は OOM を起こさない）。
 
 ## L2 で完了済みの項目（参考）
 
@@ -42,7 +79,7 @@ L1 とは独立に見つかった既存の不具合。
 | --- | --- | --- | --- |
 | 1 | `deferred_buttons` が継続ターン中の 2 打鍵を 1 マスクに融合する。受け入れて文書化するか、キュー化する（離鍵フレームの対の作り直しを伴う）か、継続ターン中は最初の 1 つだけ保持するかが未決 | vm-L1-report.md §5.2-1 | 未決（実装は現状維持） |
 | 2 | 仕様 §6「未処理ジョブもイベントも無い場合だけ待機する」を、専用タスク化なし（現状: `ui_task` のフレーム待ちを完了通知で早く抜けるだけ）で充足と認めるかどうか。専用タスク化は静的 DIRAM +24〜32 KiB 推定で、L0 の RAM 上限 +8 KiB を超える | vm-L1-report.md §4.1・§3 | 未決 |
-| 3 | 公平モード（`CONFIG_POCKET_VM_FAIR`、既定 off）を既定にするかどうかの再検討。F 型アプリで完了遅延が中央値 3〜7 倍改善する一方、JS から観測できる順序（互換順序）を変えるため、仕様 §12 の既定挙動維持とは相容れない。L2 が実測を根拠に問い直せると位置づけ済み | vm-L1-report.md §9.5 | 未決（build 時選択として温存） |
+| 3 | 公平モード（`CONFIG_POCKET_VM_FAIR`、既定 off）を既定にするかどうか。**2026-09-23に n で確定**: 実機で測り直したところ、L1 §9.5 の「F型で完了遅延が中央値3〜7倍改善」は今の負荷では再現しない（F は完了イベントを持たず、E は drain が予算に収まるため公平モードのコードに到達しない）。観測できるのは費用だけで、仕様 §12 の順序互換を崩す理由が無い。出荷アプリに「予算超過の drain ＋ 待っている完了」が現れたら測り直す | vm-L1-report.md §9.5, vm-L2-results.md §9 | 完了（n で確定） |
 | 5 | GC 閾値（初期値 256 KiB）がゲストの上限（160 KiB）より大きく、循環参照のゴミが回収されなかった。`quickjs.c` の比較時キャップ（上限−上限/32）と `guest.c` の初期閾値（上限/2）で修正。回帰は `tools/vmtest/corpus/gc_threshold_{device,near_limit}.js`。生存量が上限の31/32を超えると毎オブジェクト生成でGCする点は未計測（実機） | vm-L0-report.md §2、結果は vm-L2-results.md §4.19 | 完了（host・実機smoke/memlog/benchで確認） |
 | 6 | 上流 quickjs-ng の use-after-free: バックトレース組み立て中に確保が失敗する経路。上流 e1c1e416 を移植して修正。同じ関数の CallSite 二重解放（上流 c846cb13）も移植。回帰は `oom_creep_backtrace.js`・`oom_callsite_double_free.js`（再現元の `known/oom_backtrace_uaf.js` も asan で UAF なし） | vm-L0-report.md §2、結果は vm-L2-results.md §4.21 | 完了 |
 | 7 | 中断された `await` の Promise が永久に pending のまま残る（割り込みが捕捉不能な例外として実装されているため）。L1 は予算切れではこれを作らないが、暴走ガードと `stop_interrupt` の経路では今も起きる | quickjs-freertos-vm-spec.md §7「非対応事項」、vm-ledger/03 事実39-41 | 未着手（L2 の中断設計と併せて扱う想定） |
@@ -53,5 +90,5 @@ L1 とは独立に見つかった既存の不具合。
 | 12 | task-allocation-facade: 「配置を保持した協調的な FP 輪番」は検討中の案のみで未決・未実装。所有者不在時の扱い、通知順序、輪番と優先度/音声期限の優先順位、チェックポイント間隔などが未検証 | task-allocation-facade.md §進行中の議論 | 検討中（採否未定） |
 | 13 | 上流 quickjs-ng 7955cfd49e（中断中コルーチンが closure 経由でしか届かないと GC に回収される UAF）。JSStackFrame 48B・JSAsyncFunctionData 104B を保つ形（`coro_kind` をパディングに置き、所有者は container_of）で移植（`aa602e1`、本文の訂正は §4.23）。回帰は `coro_closure_gc.js`（修正前は6変種すべて UAF）と `coro_prologue_gc.js`（プロローグ単独のケースは修正前も鳴らず、誤った移植を UBSan で検出するガード。プロローグと本体 closure の混在循環は修正前に6変種すべて UAF）。修正後はいずれもクリーン。修正前後の差は `coro_closure_gc` だけ。実機は Flash +320B、DIRAM・空きは不変 | vm-L2-results.md §4.22、結果は §4.23 | 完了 |
 | 14 | 上流の低優先修正（v0.14.0 以降、未移植）: 大きさ計算の整数オーバーフロー a65377157e / e2c45218f6 / e93cca6119 / 252209d99c / 610b90842d、循環 re-export のクラッシュ ef7a3a748b。該当コードはあるが、160 KiB 上限下ではほぼ届かないか、モジュール使用時だけ | vm-L2-results.md §4.22 | 記録のみ |
-| 15 | 7955cfd49e 移植の関所で、修正前とバイト一致で落ちていた既存の失敗2件。`seg_oom_boundary`（asan-yield / asan-tco / `--force-yield` で2回目の OOM が `InternalError` でなく `null`）と、`tco_guards`（asan-yield の `--gc-on-yield --force-yield` で 300 秒タイムアウト）。どちらも原因は未調査。関数ソースを保持しない既定（#16）では `seg_oom_boundary` が asan-yield / asan-tco / asan-lazy / `--force-yield` で通るが、ヒープのバイト配置が変わっただけで直ってはいない（`-keepsrc` 変種では今も落ちる。再現は `-keepsrc` で行う） | vm-L2-results.md §4.23、§6.2 | 未着手 |
+| 15 | 7955cfd49e 移植の関所で、修正前とバイト一致で落ちていた既存の失敗2件。どちらも VM の不具合ではなかった。`seg_oom_boundary` はテストが名目どおりの形になっていなかった。`new Array(1<<14).fill()` が1.5倍ずつ伸びて 162,500/163,840 B まで詰め、InternalError を作る余地が約1.3KBしか残らなかった。2回目は1回目の Error が catch 束縛に残る分だけさらに狭く、-keepsrc で `null` になった。`Array.apply` の1回確保（`memory_device.js` と同じ）に替え、余裕は約58KB。`tco_guards` は毎中断GCが深さに比例して、予算に対し2乗で伸びる（512K 2.2秒→1M 7.1秒→2M 31秒、7MiB既定で366秒完走・出力一致）。300秒の打ち切りは時間切れで、ハングではない | vm-L2-results.md §7 | 完了 |
 | 16 | 関数ソースの複写（`js_strndup` で全関数の本文を保持）をやめる。`CONFIG_POCKET_VM_STRIP_FN_SOURCE`（既定 y）。toString は上流の「ソース無し」の形を返す。実機: hello −2,780 / imucal −4,740 / companion −2,576 / pet −4,124 B（ゲスト）、smoke 20 周 OK。Test262 部分集合の退行 0、toString ディレクトリで新たに 5 ファイル×2 モードが落ちる（計算名・private メソッド）。vmtest は `-keepsrc` 変種、`expected-keepsrc/`、`--fail-alloc` 番号をトレースで再配置 | [Kasane判断台帳](../kasane/decisions.md)、結果は vm-L2-results.md §6 | 完了 |

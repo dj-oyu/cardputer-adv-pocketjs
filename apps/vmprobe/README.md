@@ -18,6 +18,8 @@ USB の 1 バイトだけで起動する（`main/main.c` の `usb_stroke()`、`m
 | E | `io_wait.js` | `pocket.time.sleep(10)` を自分の `.then` から張り直す。完了遅延 |
 | F | `async_generator.js` | `for await` で async generator を 20 回。中断・再開と await の往復 |
 
+**`F` の取り合い（2026-09-23に解消）**: ホーム画面の `F` は FPU 遅延計測にも割り当てられていて、`usb_stroke()` の並び順のせいでワークロードに届いていなかった。この字での採取は、FPU 計測が入ってから 2026-09-23 までのあいだ、窓が出ないまま失敗していた（`main/main.c` で順序を直した）。
+
 ## フレームセグメント比較（診断ビルドのみ）
 
 `tools/vm_l0_capture.py --segment-policy 0..5`で、次に開始するセッションのFIRST/MAXを選ぶ。
@@ -44,7 +46,7 @@ USB文字は順に`G H I J K O`。キャッシュ方針は変更せず、実行�
 | 条件 | 字 | 実際に動くもの |
 | --- | --- | --- |
 | base | `P` | ワークロードだけ |
-| ui | `Q` | `pocket.ui` の画面（rect + text）を作り、**毎フレーム** `setText`。UI コアの tick・レイアウト・draw が毎ターンに入る |
+| ui | `Q` | `pocket.kasane` の scene（background + rect + text）を作り、**毎フレーム** `setText` して submit。合成と転送が毎ターンに入る（2026-09-23に旧 `pocket.ui` から書き直した。その API は CP24–25 で削除済み） |
 | audio | `R` | `pocket.audio.tone` 440Hz 1 秒を完了から張り直す。合成も I2S も本物で、優先度 7 の音声タスクが優先度 5 の ui タスクを止める |
 | wifi | `T` | `pocket.net.wifi.acquire` で走行中ずっとリンクを保持し、3 秒ごとに GET を 1 回、本文を EOF まで読む |
 | all | `W` | 上の 3 つ同時 |

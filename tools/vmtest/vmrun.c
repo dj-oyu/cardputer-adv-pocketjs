@@ -111,8 +111,23 @@ static allocation_header_t *raw_alloc(size_t size) {
   return header;
 }
 
+// Set by the VM (quickjs-vmstack.h js_vm_seg_new) to the size of the frame
+// segment it is about to request, and back to 0 once js_malloc_rt returns.
+// The trace gets a "# seg" line in front of that one allocation, which
+// tools/vmalloc/replay --seg-arena uses to serve segments from their own
+// region. Matching on the size as well as the flag is belt and braces: the
+// VM clears it, but a request the memory limit refuses never reaches here.
+static size_t g_seg_hint_size;
+
+void vmtest_seg_alloc_hint(size_t size) {
+  g_seg_hint_size = size;
+}
+
 static void *vm_malloc(void *opaque, size_t size) {
   (void)opaque;
+  const bool is_seg = g_seg_hint_size != 0 && g_seg_hint_size == size;
+  g_seg_hint_size = 0;
+  if (A.trace && is_seg) fprintf(A.trace, "# seg\n");
   allocation_header_t *header = raw_alloc(size);
   if (header == NULL) {
     A.n_fail++;
@@ -562,6 +577,55 @@ static enum { FYFAULT_NONE, FYFAULT_NORESUME, FYFAULT_NOYIELD } force_yield_faul
 // yield_discard, yield_call_on_chain, yield_held_terminate,
 // yield_held_discard) can be blessed WITHOUT yield now and are ready to
 // exercise the real mechanism the moment stage 3 lands it.
+// --force-reloc (L3a, docs/vm/vm-L3-design.md sec.7). Moves the whole live
+// segment chain to fresh addresses at every park, just before the resume.
+// Deliberately has no corpus of its own: paired with --force-yield it turns
+// EVERY existing file into a relocation test, and the gate is that the
+// expected output does not change by one byte. A move that altered anything
+// observable would be a design error, not a new baseline to bless.
+//
+// Refusals are counted, not reported as failures: D45/D55 make a move illegal
+// while an outer JS activation waits below the floor, which a corpus file
+// that suspends inside a native callback legitimately produces.
+static bool force_reloc;
+static bool reloc_keep_old;     // applied once the runtime exists, not at parse time
+// --force-compact (L4a): the same forcing point as --force-reloc, but through
+// JS_VMStackCompact, which gathers a scattered chain into one block. Implies
+// --force-reloc so every existing #info reloc line and the refusal counting
+// apply unchanged; g_compacts counts the parks that actually gathered two or
+// more segments (a single-segment chain is already contiguous and is left
+// where it is).
+static bool reloc_compact;
+static uint64_t g_compacts, g_compact_segments;
+// --compact-min-segs K (L3b policy experiment): with --force-compact, only
+// compact at a park where the chain is in at least K segments, and leave it
+// alone otherwise. K=0 (the default) keeps --force-compact's move-every-park.
+// Exists because the tlsf replay showed moving at every park costs more heap
+// than it recovers; this is the knob that asks how rarely it has to happen.
+static uint32_t compact_min_segs;
+static uint64_t g_compact_skipped;
+// --reloc-pin: take a pin for the whole run, so every park refuses to move.
+// The gate is that the run still produces byte-identical output with
+// moves=0 refused=N -- a pin that silently let the move happen would be
+// indistinguishable from a working pin without this.
+static bool reloc_pin;
+static int reloc_fault = JS_VM_RELOC_FAULT_NONE;
+static uint64_t g_relocs, g_reloc_refused;
+static uint64_t g_reloc_frames, g_reloc_coro, g_reloc_varrefs;
+// How far apart the heap put the pieces of one stack, at its worst and at the
+// deepest chain seen. span - resident is bytes of OTHER allocations sitting
+// between this stack's segments: the "scattered across the heap" that repeated
+// parking is suspected of producing. Tracked as a maximum because one bad
+// chain is the interesting case, not the average of many shallow ones.
+static uint64_t g_reloc_gap_max, g_reloc_span_at_max, g_reloc_resident_at_max;
+static uint32_t g_reloc_segs_at_max;
+// Does repeated parking make it WORSE? Same quantity at the first move and at
+// the last, with the segment count beside each: a gap that grew while the
+// chain stayed the same shape is scatter the run accumulated, not scatter the
+// allocator would have produced anyway.
+static uint64_t g_reloc_gap_first, g_reloc_gap_last;
+static uint32_t g_reloc_segs_first, g_reloc_segs_last;
+
 static bool gc_on_yield;
 static int terminate_after = -1;   // -1 = off; N = terminate on the Nth resume
 static int discard_after = -1;     // -1 = off; N = discard on the Nth resume
@@ -574,6 +638,38 @@ static JSValue resume_until_done(JSContext *ctx, JSValue result) {
   JSRuntime *rt = JS_GetRuntime(ctx);
   while (JS_VMSuspended(rt)) {
     g_resumes++;
+    // Before the GC, so that when both flags are on the mark walk runs over
+    // a chain that has just moved: js_vm_mark_suspended and the fix-up walk
+    // read the same links, and a fix-up that missed one shows up here as a
+    // GC touching a freed frame rather than as a wrong answer much later.
+    if (force_reloc && reloc_compact && compact_min_segs &&
+        JS_VMStackSegments(rt) < compact_min_segs) {
+      g_compact_skipped++;
+    } else if (force_reloc) {
+      JSVMRelocStats rs;
+      if ((reloc_compact ? JS_VMStackCompact(rt, &rs)
+                         : JS_VMStackRelocate(rt, &rs)) == 0) {
+        g_relocs++;
+        if (reloc_compact && rs.segments >= 2) {
+          g_compacts++;
+          g_compact_segments += rs.segments;
+        }
+        g_reloc_frames += rs.frames;
+        g_reloc_coro += rs.coro_frames;
+        g_reloc_varrefs += rs.var_refs;
+        {
+          const uint64_t gap = rs.span > rs.resident ? rs.span - rs.resident : 0;
+          if (g_relocs == 1) { g_reloc_gap_first = gap; g_reloc_segs_first = rs.segments; }
+          g_reloc_gap_last = gap; g_reloc_segs_last = rs.segments;
+        }
+        if (rs.span > rs.resident && rs.span - rs.resident > g_reloc_gap_max) {
+          g_reloc_gap_max = rs.span - rs.resident;
+          g_reloc_span_at_max = rs.span;
+          g_reloc_resident_at_max = rs.resident;
+          g_reloc_segs_at_max = rs.segments;
+        }
+      } else g_reloc_refused++;
+    }
     if (gc_on_yield) JS_RunGC(rt);
     JS_FreeValue(ctx, result);
     result = JS_VMResume(ctx);
@@ -885,6 +981,11 @@ static void usage(void) {
           "                         (G1: bytes of C stack per JS recursion level, see stack_probe.sh)\n"
           "  --stack-probe-fault W  inject a probe fault: flat | silent (G1 negative control)\n"
           "  --force-yield-fault W  L2c gate negative control: noresume | noyield (sec.12.9)\n"
+          "  --force-reloc          L3a: move the live segments at every park, before the resume\n"
+          "  --reloc-keep-old       ... and leak the old blocks poisoned instead of freeing them\n"
+          "  --force-compact        L4a: as --force-reloc, but gather the chain into one block\n"
+          "  --reloc-pin            ... but hold a pin, so every move is refused (negative control)\n"
+          "  --reloc-fault W        ... skipping one fix-up: varref | link | varbuf (sec.5)\n"
           "  --gc-on-yield          L2c guard: JS_RunGC before every resume (sec.12.8/12.15;\n"
           "                         a note until the VM can suspend)\n"
           "  --terminate-after N    L2c guard: JS_VMTerminate instead of the Nth resume\n"
@@ -951,6 +1052,22 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--strict")) strict = true;
     else if (!strcmp(a, "--test262")) test262 = true;
     else if (!strcmp(a, "--force-yield")) force_yield = true;
+    else if (!strcmp(a, "--force-reloc")) force_reloc = true;
+    else if (!strcmp(a, "--force-compact")) { force_reloc = true; reloc_compact = true; }
+    else if (!strcmp(a, "--compact-min-segs")) {
+      compact_min_segs = (uint32_t)strtoul(NEXT(), NULL, 0);
+      force_reloc = true; reloc_compact = true;
+    }
+    else if (!strcmp(a, "--reloc-pin")) reloc_pin = true;
+    else if (!strcmp(a, "--reloc-fault")) {
+      const char *w = NEXT();
+      if (!strcmp(w, "varref")) reloc_fault = JS_VM_RELOC_FAULT_VARREF;
+      else if (!strcmp(w, "link")) reloc_fault = JS_VM_RELOC_FAULT_LINK;
+      else if (!strcmp(w, "varbuf")) reloc_fault = JS_VM_RELOC_FAULT_VARBUF;
+      else { fprintf(stderr, "unknown --reloc-fault: %s\n", w); return 2; }
+      force_reloc = true;
+    }
+    else if (!strcmp(a, "--reloc-keep-old")) { force_reloc = true; reloc_keep_old = true; }
     else if (!strcmp(a, "--gaps")) want_gaps = true;
     else if (!strcmp(a, "--budget-jobs")) budget_jobs = (unsigned)parse_size(NEXT());
     else if (!strcmp(a, "--runaway-jobs")) runaway_jobs = (uint64_t)parse_size(NEXT());
@@ -1023,7 +1140,10 @@ int main(int argc, char **argv) {
   // Same order as pocketjs_guest_create().
   memset(&G, 0, sizeof(G));
   G.runtime = JS_NewRuntime2(&VM_ALLOCATOR, &G);
-  if (!G.runtime) return 4;
+  if (!G.runtime) {
+    fprintf(stderr, "vmrun: runtime setup failed: out of memory\n");
+    return 4;
+  }
   JS_SetMemoryLimit(G.runtime, heap_limit);
   // guest.c: first cycle collection at half the limit (backlog #5), only ever
   // lowered, so --profile host keeps upstream's 256 KiB.
@@ -1032,6 +1152,17 @@ int main(int argc, char **argv) {
     JS_SetGCThreshold(G.runtime, heap_limit / 2U);
   JS_SetMaxStackSize(G.runtime, stack_limit);
   JS_SetRuntimeInfo(G.runtime, "PocketJS ESP-IDF guest");
+  if (reloc_keep_old) JS_VMStackRelocKeepOld(G.runtime, 1);
+  if (reloc_pin) { force_reloc = true; JS_VMStackPin(G.runtime, +1); }
+  if (reloc_fault != JS_VM_RELOC_FAULT_NONE) JS_VMStackRelocFault(G.runtime, reloc_fault);
+  // The "not parked" refusal (design sec.6), checked where it is unambiguous:
+  // no JS has run yet, so there is no chain, no park, and a move that
+  // returned 0 here would mean the guard is not being consulted at all.
+  if (force_reloc && JS_VMStackRelocate(G.runtime, NULL) == 0) {
+    fprintf(stderr, "vmrun: JS_VMStackRelocate moved with no parked chain\n");
+    JS_FreeRuntime(G.runtime);
+    return 3;
+  }
   if (call_mode != -1) {
 #ifdef CONFIG_POCKET_VM_CALLBENCH
     if (vmtest_call_mode(G.runtime, call_mode) != 0) {
@@ -1081,8 +1212,31 @@ int main(int argc, char **argv) {
   js_std_init_handlers(G.runtime);
   if (module) JS_SetModuleLoaderFunc2(G.runtime, NULL, js_module_loader, js_module_check_attributes, NULL);
   G.context = JS_NewContext(G.runtime);
-  if (!G.context) return 4;
-  js_std_add_helpers(G.context, 0, NULL);
+  if (G.context) {
+    js_std_add_helpers(G.context, 0, NULL);
+    // Mirrors pocketjs_guest_create(): js_std_add_helpers drops its own
+    // failures, and the canary (cleared by JS_NewRuntime2, untouched by a
+    // JS_NewContext that succeeded) is the only record of one. Nothing is
+    // lost from the "#info oom" line below: on success the count is 0 here.
+    JSOOMCanary setup_oom = {0};
+    JS_TakeOOMCanary(G.runtime, &setup_oom);
+    if (setup_oom.count != 0) {
+      JS_FreeValue(G.context, JS_GetException(G.context));
+      JS_FreeContext(G.context);
+      G.context = NULL;
+    }
+  }
+  if (!G.context) {
+    // Same exit status as before, now with a line saying why: a --fail-alloc
+    // point inside context setup used to end silently with 4. The runtime is
+    // freed (it was not before) so LSan sees whether a failed setup leaks.
+    // Not "context": the canary check above also catches a failure inside
+    // js_std_init_handlers, which runs before JS_NewContext.
+    fprintf(stderr, "vmrun: guest setup failed: out of memory\n");
+    js_std_free_handlers(G.runtime);
+    JS_FreeRuntime(G.runtime);
+    return 4;
+  }
 
   JSValue probe = JS_UNDEFINED;
   if (A.trace) {
@@ -1309,6 +1463,28 @@ int main(int argc, char **argv) {
     fprintf(stderr, "#info vm resumes=%llu held=%llu safepoints_yieldable=%llu held_jobs=%llu\n",
             (unsigned long long)g_resumes, (unsigned long long)g_held,
             (unsigned long long)safepoints_yieldable, (unsigned long long)g_held_jobs);
+    // Only when asked to move: an #info line the whole corpus would otherwise
+    // carry for a feature that is off in every shipped build.
+    if (force_reloc)
+      fprintf(stderr, "#info reloc moves=%llu refused=%llu frames=%llu coro_frames=%llu var_refs=%llu\n",
+              (unsigned long long)g_relocs, (unsigned long long)g_reloc_refused,
+              (unsigned long long)g_reloc_frames, (unsigned long long)g_reloc_coro,
+              (unsigned long long)g_reloc_varrefs);
+    if (force_reloc)
+      fprintf(stderr, "#info reloc_gap max=%llu span=%llu resident=%llu segments=%lu\n",
+              (unsigned long long)g_reloc_gap_max,
+              (unsigned long long)g_reloc_span_at_max,
+              (unsigned long long)g_reloc_resident_at_max,
+              (unsigned long)g_reloc_segs_at_max);
+    if (reloc_compact)
+      fprintf(stderr, "#info compact gathers=%llu segments_gathered=%llu skipped=%llu\n",
+              (unsigned long long)g_compacts,
+              (unsigned long long)g_compact_segments,
+              (unsigned long long)g_compact_skipped);
+    if (force_reloc)
+      fprintf(stderr, "#info reloc_gap_trend first=%llu/%lu last=%llu/%lu\n",
+              (unsigned long long)g_reloc_gap_first, (unsigned long)g_reloc_segs_first,
+              (unsigned long long)g_reloc_gap_last, (unsigned long)g_reloc_segs_last);
   }
   // "#info vmstack ..." only under --stats: the corpus does not need it and
   // the info files stay readable.

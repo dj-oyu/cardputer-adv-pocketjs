@@ -124,9 +124,21 @@ static char label[4]="JS";
 static void open_slot(unsigned which, const char *seed, size_t seed_len) {
     slot=which;
     take_buffer();
-    doc.len=text_live()?srcstore_load(slot,text):0;
-    stored=true;                        // what is in the buffer came from flash
-    if(!doc.len && seed_len && text_live()) {
+    // A document left unsaved when the screen closed is parked in flash, and
+    // taking it back is what makes leaving the editor reversible. The draft is
+    // read FIRST because both reads land in this one buffer and the one that
+    // says "nothing here" empties it. The saved record is left alone in flash:
+    // it still holds the last version the person asked to keep, and `changed`
+    // below is what puts the draft back on the next close.
+    size_t draft=text_live()?srcstore_draft_load(slot,text):0;
+    bool restored=draft>0;
+    doc.len=draft;
+    // `stored` answers "is there a record to reload from", which the run path
+    // depends on -- a restored draft is not one, whether or not a record for
+    // this slot also exists.
+    stored=!restored;
+    if(!restored && text_live()) { doc.len=srcstore_load(slot,text); stored=true; }
+    if(!doc.len && !restored && seed_len && text_live()) {
         if(seed_len>SRC_MAX) seed_len=SRC_MAX;
         memcpy(text,seed,seed_len);
         doc.len=seed_len;
@@ -135,7 +147,7 @@ static void open_slot(unsigned which, const char *seed, size_t seed_len) {
     text[doc.len]=0;
     // Vim opens at the top of the file, and the first key is a command rather
     // than a character, so nothing is typed by accident on arrival.
-    doc.cursor=0; doc.changed=false;
+    doc.cursor=0; doc.changed=restored;
     vim_reset(&vim);
     vim_clamp(&vim,&doc);
     top_line=0; left_px=0; state=CODE_EDIT; code_repaint_all();
@@ -144,6 +156,7 @@ static void open_slot(unsigned which, const char *seed, size_t seed_len) {
     // first command message replaces this, which is right: it is onboarding,
     // not chrome.
     snprintf(notice,sizeof(notice),"C-R RUN  C-S SAVE");
+    if(restored) snprintf(notice,sizeof(notice),"UNSAVED DRAFT %u B",(unsigned)doc.len);
     if(!text_live()) snprintf(notice,sizeof(notice),"NO MEMORY FOR SOURCE");
     ime_wanted=false;
     if(skk_session_ready()) { ime_reset(skk_session()); ime_set_on(skk_session(),false); }
@@ -166,8 +179,19 @@ void code_open_lesson(unsigned lesson, const char *seed, size_t seed_len) {
 }
 
 // Leaving the screen. The buffer is 8 KB that nothing reads again until the
-// next open, and the next open reads it out of flash.
-void code_close(void) { give_buffer(); }
+// next open, and the next open reads it out of flash -- so an edit that was
+// never saved has to be written somewhere first. It goes to the draft record,
+// which is why `:q!` and the force stop no longer cost the work, and why the
+// person can run POCKET PET in the middle of writing a program and come back
+// to the half-written line. A document with no unsaved change drops any draft
+// instead: whatever is parked would be older than the record.
+void code_close(void) {
+    if(text_live()) {
+        if(doc.changed) srcstore_draft_save(slot,text,doc.len);
+        else srcstore_draft_clear();
+    }
+    give_buffer();
+}
 
 // The guest has finished parsing out of this buffer, so it goes back to the
 // heap for the length of the run — which is exactly the stretch in which the
@@ -250,10 +274,15 @@ static void follow_cursor(void) {
 // ---- keys -----------------------------------------------------------------
 
 static void do_save(void) {
-    snprintf(notice,sizeof(notice),
-             srcstore_save(slot,text,doc.len)?"SAVED %u B":"SAVE FAILED",
+    bool written=srcstore_save(slot,text,doc.len);
+    snprintf(notice,sizeof(notice),written?"SAVED %u B":"SAVE FAILED",
              (unsigned)doc.len);
     doc.changed=false; stored=true;
+    // Only a save that reached flash retires the draft. `changed` is cleared
+    // either way, which is the known defect in docs/platform/backlog.md item 2
+    // and not this change's to fix -- but dropping the parked copy on a failed
+    // write would turn that display bug into a lost document.
+    if(written) srcstore_draft_clear();
     sound_play(1);
 }
 
@@ -264,7 +293,8 @@ static void do_run(void) {
     // reloaded from flash afterwards, so a seed that was never written would
     // come back as an empty document.
     if(doc.changed || !stored) {
-        srcstore_save(slot,text,doc.len);
+        // Same rule as do_save(): the draft goes only when the record is in.
+        if(srcstore_save(slot,text,doc.len)) srcstore_draft_clear();
         doc.changed=false; stored=true;
     }
     state=CODE_RUNNING;

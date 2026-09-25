@@ -25,6 +25,7 @@
 #include "keymap.h"
 #include "board.h"
 #include "jpfont.h"
+#include "srcstore.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -234,6 +235,51 @@ int main(void) {
            frames,strips_incr,strips_full,100.0*strips_incr/(double)strips_full);
 
     code_close();
+
+    // ---- the unsaved document survives leaving the screen ------------------
+    // The scenario this exists for: edit, walk away to another screen (a JS
+    // app, the home menu, a forced stop), come back and carry on. Nothing is
+    // saved here, so the parked draft is the only thing that can carry the
+    // bytes across the free() that closing the screen performs.
+    code_open();
+    ch('i'); type("// draft");
+    size_t typed_len=0; const char *typed=code_source(&typed_len);
+    char typed_copy[64];
+    check(typed_len>0 && typed_len<sizeof typed_copy,"the typed document fits the copy");
+    memcpy(typed_copy,typed,typed_len); typed_copy[typed_len]=0;
+    code_close();                        // as go_home() does, saving nothing
+    unsigned owner=0;
+    check(srcstore_draft_owner(&owner) && owner==SRC_SLOT_USER,
+          "closing parks the draft under the Playground's slot");
+
+    code_open();
+    size_t back_len=0; const char *back=code_source(&back_len);
+    check(back_len==typed_len && !memcmp(back,typed_copy,typed_len),
+          "the unsaved document comes back byte for byte");
+
+    // ---- saving retires the draft -----------------------------------------
+    ch(0x13);                            // C-s
+    check(!srcstore_draft_owner(NULL),"a save drops the draft");
+    code_close();
+    check(!srcstore_draft_owner(NULL),"an unchanged document parks nothing");
+    code_open();
+    size_t saved_len=0; const char *saved=code_source(&saved_len);
+    check(saved_len==typed_len && !memcmp(saved,typed_copy,typed_len),
+          "what comes back after the save is the record");
+
+    // ---- a draft belongs to one slot --------------------------------------
+    ch('i'); type("x");
+    code_close();
+    static char other[SRC_MAX+1];
+    check(srcstore_draft_load(SRC_SLOT_LESSON,other)==0,
+          "another slot is not offered this slot's draft");
+    check(srcstore_draft_load(SRC_SLOT_USER,other)>0,
+          "and the draft is still there after the other slot asked");
+
+    // ---- a reset forgets the slot's draft ---------------------------------
+    srcstore_clear(SRC_SLOT_USER);
+    check(!srcstore_draft_owner(NULL),"clearing the slot clears its draft");
+
     if(failures) { printf("%u FAILURES\n",failures); return 1; }
     printf("codeedit: ok\n");
     return 0;
