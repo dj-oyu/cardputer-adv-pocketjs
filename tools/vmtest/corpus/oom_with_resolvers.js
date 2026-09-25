@@ -1,4 +1,5 @@
 // vmrun-flags: --fail-alloc 1369
+// vmrun-rom-flags: --fail-alloc 931
 // vmrun-skip-variants: asan-alloca o2-alloca asan-alloca-keepsrc o2-alloca-keepsrc -- no frame segment on these builds, so the allocation numbers differ
 // vmrun-keepsrc-flags: --fail-alloc 1370
 // 1370 -> 1369 with CONFIG_POCKET_VM_STRIP_FN_SOURCE: 1 function source copy fewer before the target (allocator traces aligned, docs/vm/vm-L2-results.md sec.6). The numbers below are the -keepsrc ones.

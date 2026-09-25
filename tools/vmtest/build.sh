@@ -30,7 +30,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT=$(pwd)
-QJS=components/quickjs-ng/quickjs-ng
+# VMTEST_QJS: build a copy of the engine instead (the negative controls,
+# tools/vmtest/floor/f1_faults.sh, build deliberately broken copies this way;
+# pair it with its own VMTEST_OUT so no object is shared with the real one).
+QJS=${VMTEST_QJS:-components/quickjs-ng/quickjs-ng}
 OUT=${VMTEST_OUT:-$ROOT/.cache/vmtest}
 
 build_variant() {
@@ -59,7 +62,13 @@ build_variant() {
   # peeled off first so the suffix rules below see the rest unchanged.
   local strip="-DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1"
   if [[ $variant == *-keepsrc ]]; then strip=""; fi
+  # CONFIG_POCKET_VM_ROM_ATOMS (F1, docs/vm/builtin-floor-plan.md): builtin
+  # names in flash. A "-rom" anywhere in the name turns it on and is removed
+  # before the rules below, so asan-rom, o2-rom, asan-reloc-rom all work.
+  local rom=""
+  if [[ $variant == *-rom* ]]; then rom="-DCONFIG_POCKET_VM_ROM_ATOMS=1"; fi
   local core=${variant%-keepsrc}
+  core=${core//-rom/}
   local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}; base=${base%-noyield}; base=${base%-reloc}
   case "$core" in
     *-lazy-flat) ;;
@@ -101,7 +110,7 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield $strip -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield $strip $rom -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
