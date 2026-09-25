@@ -39,9 +39,15 @@
   Test262 標準集合と部分集合 7,036 ファイルで対照と同一、負の対照 3 種を検出。実機で 34 回移動・最悪
   235 µs・契約一致・smoke 20 周・予算内（results §3〜§9）。
 - L4a と D6 をホストで測り不採用（results §13〜§14、design D57・D59）。
-- L3 の作業中に見つけた、確保失敗時のコンパイル経路の不具合群は `vm/oom-truncated-bytecode` で修正・
-  ホスト検証済み（[oom-parse-safety.md](oom-parse-safety.md) は同ブランチ）。残りは同ブランチの実機
-  smoke と `memlog --check`。
+- L3 の作業中に見つけた、確保失敗時のコンパイル経路の不具合群は `vm/oom-truncated-bytecode` で修正し、
+  ホストと実機（smoke・`memlog --check`）を通して `vm/main` 経由で取り込んだ（2026-09-25、
+  [oom-parse-safety.md](oom-parse-safety.md) §9・§9.1）。
+
+## 確保失敗時のコンパイル経路（VM の段とは独立）
+
+未完了の項目は無い（2026-09-25）。ホストの最終検証（[oom-parse-safety.md](oom-parse-safety.md) §9）と
+実機の smoke・`memlog --check`（§9.1）を通して `vm/main` へ戻した。修正前の assert や `exit(1)` が実機で
+再起動を起こしていたかは推論のまま（smoke は OOM を起こさない）。
 
 ## L2 で完了済みの項目（参考）
 

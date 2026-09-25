@@ -615,6 +615,23 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
     return ESP_ERR_NO_MEM;
   }
   js_std_add_helpers(guest->context, 0, NULL);
+  /* js_std_add_helpers returns nothing and drops its own failures, so an OOM
+   * here would start the app without console.log or print. JS_NewContext
+   * itself now refuses a context with holes (quickjs.c
+   * js_context_setup_mark); this closes the same gap for the helpers, and
+   * for js_std_init_handlers, which no longer exit()s (a reboot here) but
+   * returns without thread state. The canary was cleared by JS_NewRuntime2
+   * and a context that came back has added nothing to it, so any count now
+   * is a rejection in one of those two. Taking it also hands the first turn
+   * a clean canary, as app_session.c expects. tools/vmtest/vmrun.c mirrors
+   * this. */
+  JSOOMCanary setup_oom = {0};
+  JS_TakeOOMCanary(guest->runtime, &setup_oom);
+  if (setup_oom.count != 0) {
+    JS_FreeValue(guest->context, JS_GetException(guest->context));
+    pocketjs_guest_destroy(guest);
+    return ESP_ERR_NO_MEM;
+  }
   *out_guest = guest;
   return ESP_OK;
 }

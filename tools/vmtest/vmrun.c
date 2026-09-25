@@ -1140,7 +1140,10 @@ int main(int argc, char **argv) {
   // Same order as pocketjs_guest_create().
   memset(&G, 0, sizeof(G));
   G.runtime = JS_NewRuntime2(&VM_ALLOCATOR, &G);
-  if (!G.runtime) return 4;
+  if (!G.runtime) {
+    fprintf(stderr, "vmrun: runtime setup failed: out of memory\n");
+    return 4;
+  }
   JS_SetMemoryLimit(G.runtime, heap_limit);
   // guest.c: first cycle collection at half the limit (backlog #5), only ever
   // lowered, so --profile host keeps upstream's 256 KiB.
@@ -1209,8 +1212,31 @@ int main(int argc, char **argv) {
   js_std_init_handlers(G.runtime);
   if (module) JS_SetModuleLoaderFunc2(G.runtime, NULL, js_module_loader, js_module_check_attributes, NULL);
   G.context = JS_NewContext(G.runtime);
-  if (!G.context) return 4;
-  js_std_add_helpers(G.context, 0, NULL);
+  if (G.context) {
+    js_std_add_helpers(G.context, 0, NULL);
+    // Mirrors pocketjs_guest_create(): js_std_add_helpers drops its own
+    // failures, and the canary (cleared by JS_NewRuntime2, untouched by a
+    // JS_NewContext that succeeded) is the only record of one. Nothing is
+    // lost from the "#info oom" line below: on success the count is 0 here.
+    JSOOMCanary setup_oom = {0};
+    JS_TakeOOMCanary(G.runtime, &setup_oom);
+    if (setup_oom.count != 0) {
+      JS_FreeValue(G.context, JS_GetException(G.context));
+      JS_FreeContext(G.context);
+      G.context = NULL;
+    }
+  }
+  if (!G.context) {
+    // Same exit status as before, now with a line saying why: a --fail-alloc
+    // point inside context setup used to end silently with 4. The runtime is
+    // freed (it was not before) so LSan sees whether a failed setup leaks.
+    // Not "context": the canary check above also catches a failure inside
+    // js_std_init_handlers, which runs before JS_NewContext.
+    fprintf(stderr, "vmrun: guest setup failed: out of memory\n");
+    js_std_free_handlers(G.runtime);
+    JS_FreeRuntime(G.runtime);
+    return 4;
+  }
 
   JSValue probe = JS_UNDEFINED;
   if (A.trace) {
