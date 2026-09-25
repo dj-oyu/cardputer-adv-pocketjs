@@ -159,6 +159,64 @@ menu "Pocket VM (L0 measurement probes)"
             still the way to compare against that path; it is not a smaller
             build in any sense that matters.
 
+    config POCKET_VM_RELOC
+        bool "Relocatable frame segments: the explicit move API (L3a)"
+        depends on POCKET_VM_YIELD
+        default n
+        help
+            Compiles in JS_VMStackRelocate, which copies the live frame
+            segments to fresh addresses and rewrites every pointer that
+            named the old ones (docs/vm/vm-L3-design.md, the entry ledger
+            is docs/vm/vm-ledger/09-relocation-entries.md).
+
+            Moving is only legal while the VM is parked at an L2c
+            safepoint: a running JS_CallInternal keeps pointers into the
+            block in C locals and registers, and the spec rules out
+            guessing which machine words those are. That is why this
+            depends on POCKET_VM_YIELD rather than on SEGFRAMES alone.
+
+            The only caller is the diagnostic one: USB '&' on the home
+            screen arms the next app, guest_continue_impl() then moves the
+            segments before every resume, and the session logs VM_RELOC
+            with what that cost. tools/vmtest/device_reloc.py drives it.
+            Unarmed, a RELOC build takes the same path as a build without
+            it.
+
+            That is deliberately not a reason to move: deciding WHEN to
+            relocate belongs to L4, which has to show first that the
+            non-moving segments are not already enough. Off by default and
+            meant to stay that way until that case is made.
+
+            Costs, measured on this tree: flash +1,300 B, static DRAM
+            +16 B against the same build with it off.
+
+    config POCKET_VM_OOMPROBE
+        bool "G12 fragmentation probe: log every failed heap allocation"
+        default n
+        help
+            The device half of the L3/L4 decision (docs/vm/backlog.md G12):
+            does fragmentation make allocations fail here? Registers the
+            heap's failed-allocation hook, which walks the heap at the moment
+            of every refusal and records, per heap region, whether the free
+            bytes would have held the request had they been contiguous
+            ("G12 FAIL ... cand=1"). Also logs every JS_TakeOOMCanary report
+            ("G12 CANARY") and a per-session total ("G12 SESSION").
+
+            Each refusal also says whether treating the VM's frame segments
+            as movable would have left a long enough run ("segfix=1"):
+            L3/L4 move segments and nothing else, so that is the case they
+            could prevent. Adds JS_VMStackBlocks' only caller.
+
+            Adds USB workloads on the home screen that drive the guest into
+            OOM on purpose: '!' interleaved holes plus a growing large
+            request, '@' a growing array between small objects, '#' JSON
+            round-trips of a growing array, and '$' the negative control --
+            a heap where the segments are what splits the free space.
+            tools/vmtest/device_g12.py runs them and the shipped apps.
+
+            Measurement only. Build a separate build_* directory with its own
+            sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
+
     config POCKET_VM_TCO
         bool "Experimental strict tail-call frame reuse"
         depends on POCKET_VM_YIELD

@@ -9,6 +9,39 @@
 未完了の項目は無い（2026-09-23）。L2c は実機統合まで終わり、`CONFIG_POCKET_VM_YIELD` は既定 y。TCO と FAIR は互換性の判断として n のまま残している。経緯と実測は vm-L2-results.md §8、設計は vm-L2-design.md §11。
 
 
+## L3 / L4（移動可能スタックとコンパクション）
+
+出典: [vm-L3-design.md](vm-L3-design.md)、[vm-L3-results.md](vm-L3-results.md)、台帳
+[09-relocation-entries.md](vm-ledger/09-relocation-entries.md)。開発は `vm/l3a-refs`。状態は 2026-09-25 時点。
+
+**閉じた（2026-09-25、G12 の結果による）。** ホストでは tlsf モデルで比べたすべての方式が動かさない
+現行設計に負け（design §10〜§12）、実機の G12（results §15）では:
+
+- 出荷アプリ（hello・imucal・pet・companion、負荷の前後2巡）と Kasane デモで、確保の失敗は 0 件。
+- わざと OOM にする負荷では「空き総量 ≥ 要求 > 最大空きブロック」が 168 件出た — **backlog が決めて
+  いた字義どおりの基準は満たさない**。決めてあった次の手順（要求が何かを見て §10.3 の退避を検討）を
+  取ると、要求は JS の `ArrayBuffer`、分断しているのは JS のオブジェクトで、**セグメントを退かして救えた
+  失敗は 0 件**。負の対照（セグメントが分断するヒープ）では 590 件すべてを検出した。
+
+L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D58）も含めて採らない。L3a と L4a のコードは
+既定 n のまま残す（台帳 09 と毒化は、将来フレームを動かす必要が出たときの出発点）。**再開する条件**:
+出荷アプリで G12 の `segfix=1` が出ること（`CONFIG_POCKET_VM_OOMPROBE`、`tools/vmtest/device_g12.py`）。
+
+旧 #2（D8: 駐機中のネイティブ確保が飛地を増やすか）・#3（出荷アプリは駐機しない）・#4（D55 の緩和）は、
+動かさない方針では問いにならないので閉じた。
+
+### 完了（参考）
+
+- G12（実機の断片化計測）: results §15。計装は既定 n の `CONFIG_POCKET_VM_OOMPROBE`。
+
+- L3a: 台帳 14 種、差分表による型付き補正、3層の毒化、世代・pin・4種の失敗。コーパス 74 件一致、
+  Test262 標準集合と部分集合 7,036 ファイルで対照と同一、負の対照 3 種を検出。実機で 34 回移動・最悪
+  235 µs・契約一致・smoke 20 周・予算内（results §3〜§9）。
+- L4a と D6 をホストで測り不採用（results §13〜§14、design D57・D59）。
+- L3 の作業中に見つけた、確保失敗時のコンパイル経路の不具合群は `vm/oom-truncated-bytecode` で修正し、
+  ホストと実機（smoke・`memlog --check`）を通して `vm/main` 経由で取り込んだ（2026-09-25、
+  [oom-parse-safety.md](oom-parse-safety.md) §9・§9.1）。
+
 ## 確保失敗時のコンパイル経路（VM の段とは独立）
 
 未完了の項目は無い（2026-09-25）。ホストの最終検証（[oom-parse-safety.md](oom-parse-safety.md) §9）と

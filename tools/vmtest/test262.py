@@ -271,12 +271,16 @@ def main():
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--force-yield", action="store_true",
                     help="L1+: yield at every VM checkpoint; the pass set must not change")
+    ap.add_argument("--force-reloc", action="store_true",
+                    help="L3a: move the segments at every park; the pass set must not change")
     ap.add_argument("--fair", action="store_true",
                     help="L1: fair ordering (CONFIG_POCKET_VM_FAIR); the pass set must not change")
     ap.add_argument("filters", nargs="*")
     a = ap.parse_args()
     if a.force_yield:
         EXTRA_FLAGS.append("--force-yield")
+    if a.force_reloc:
+        EXTRA_FLAGS.append("--force-reloc")
     if a.fetch:
         fetch()
         return

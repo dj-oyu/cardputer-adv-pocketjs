@@ -158,6 +158,57 @@ struct pocketjs_guest {
 #ifdef CONFIG_POCKET_VM_SELFTEST
   bool trace_frame;
 #endif
+#ifdef CONFIG_POCKET_VM_RELOC
+  /* L3a on the device (docs/vm/vm-L3-design.md sec.7). `reloc_armed` is off
+   * until a host asks for it, so a RELOC build that nobody arms runs the
+   * same code path as a build without it -- the switch decides whether the
+   * call happens, not whether it is compiled.
+   *
+   * Counted rather than assumed, the same reason vmrun counts them: refusals
+   * are legitimate (D55 -- a park underneath an outer JS activation cannot
+   * move) and a run of all refusals would otherwise look exactly like a run
+   * of successful moves. `reloc_max_us` is the worst single move, which is
+   * what a stop-the-world budget would have to be written against; the mean
+   * hides it. */
+  bool reloc_armed;
+  uint32_t reloc_moves, reloc_refused;
+  /* The third outcome, which the first device run showed is NOT rare: parked,
+   * allowed to move, and nothing to move -- the live segment chain is empty
+   * because the parked frames are all coroutine frames in their own
+   * JSAsyncFunctionState, not in segments. Diagnostic '6' (an endless promise
+   * chain) parks 31 times and lands here every time. Counted separately
+   * because moves=0 refused=0 otherwise reads as "the call never happened",
+   * which is what it looked like until this counter existed. */
+  uint32_t reloc_empty;
+  uint32_t reloc_frames, reloc_var_refs;
+  uint32_t reloc_max_us;
+  uint64_t reloc_total_us, reloc_bytes;
+  /* What the heap looked like around the moves. L3a does NOT compact: a move
+   * allocates blocks of the SAME sizes, copies into them, and frees the old
+   * ones, so both are held at once and the transient cost is exactly the
+   * chain's own size (reloc_bytes). Whether the heap ends up better or worse
+   * laid out afterwards is a side effect nobody designed, which is precisely
+   * why it has to be measured rather than argued.
+   *
+   * Largest free block, not free size: free size barely moves here (the same
+   * bytes are given back), and the number that decides whether an app can
+   * still get a 9.9 KiB Kasane arena is the largest CONTIGUOUS one.
+   *
+   * Sampled outside the timed region so that reloc_max_us stays a measurement
+   * of the move rather than of heap_caps_get_largest_free_block(). */
+  /* How far apart the heap put the pieces of one stack (JSVMRelocStats.span
+   * minus .resident: bytes of OTHER allocations wedged between this stack's
+   * segments). On the host this turned out to track chain DEPTH rather than
+   * park count -- a corpus file that parked 5,807 times kept a 2 KB gap,
+   * while one that only went deep reached 29 KB. The device is the case the
+   * host cannot answer, because here the firmware runs native work in the
+   * SAME pool while the chain sits parked, and vmrun's park runs nothing. */
+  uint32_t reloc_gap_max;
+  uint32_t reloc_gap_segments;   /* chain depth when that gap was seen */
+  uint32_t reloc_largest_first;  /* before the first move */
+  uint32_t reloc_largest_last;   /* after the last one */
+  uint32_t reloc_largest_min;    /* worst sample either side of any move */
+#endif
 #endif
   uint32_t yields;
   uint32_t continuations;
@@ -846,6 +897,49 @@ void pocketjs_guest_trace_frame(pocketjs_guest_t *guest) {
 }
 #endif
 
+#ifdef CONFIG_POCKET_VM_RELOC
+void pocketjs_guest_reloc_arm(pocketjs_guest_t *guest, bool on) {
+  if (guest == NULL) return;
+  guest->reloc_armed = on;
+  if (!on) return;
+  guest->reloc_moves = guest->reloc_refused = guest->reloc_empty = 0;
+  guest->reloc_frames = guest->reloc_var_refs = 0;
+  guest->reloc_max_us = 0;
+  guest->reloc_total_us = guest->reloc_bytes = 0;
+  guest->reloc_gap_max = guest->reloc_gap_segments = 0;
+  guest->reloc_largest_first = guest->reloc_largest_last = 0;
+  guest->reloc_largest_min = 0;
+}
+
+void pocketjs_guest_reloc_report(const pocketjs_guest_t *guest) {
+  if (guest == NULL || !guest->reloc_armed) return;
+  /* One uppercase marker, like every other contract this firmware has with
+   * tools/ (CLAUDE.md). tools/vm_reloc_device.py parses this line.
+   *
+   * moves=0 with refused>0 is a real outcome, not a failure: the app never
+   * parked anywhere a move was legal. The script has to be able to tell that
+   * from "it moved and nothing broke", which is why both are printed. */
+  ESP_LOGI(TAG,
+           "VM_RELOC moves=%lu refused=%lu empty=%lu frames=%lu var_refs=%lu "
+           "bytes=%llu max_us=%lu total_us=%llu "
+           "largest_first=%lu largest_last=%lu largest_min=%lu "
+           "gap_max=%lu gap_segments=%lu",
+           (unsigned long)guest->reloc_moves,
+           (unsigned long)guest->reloc_refused,
+           (unsigned long)guest->reloc_empty,
+           (unsigned long)guest->reloc_frames,
+           (unsigned long)guest->reloc_var_refs,
+           (unsigned long long)guest->reloc_bytes,
+           (unsigned long)guest->reloc_max_us,
+           (unsigned long long)guest->reloc_total_us,
+           (unsigned long)guest->reloc_largest_first,
+           (unsigned long)guest->reloc_largest_last,
+           (unsigned long)guest->reloc_largest_min,
+           (unsigned long)guest->reloc_gap_max,
+           (unsigned long)guest->reloc_gap_segments);
+}
+#endif
+
 void pocketjs_guest_prepare_stop(pocketjs_guest_t *guest) {
   if (!guest || !guest->runtime)
     return;
@@ -890,6 +984,50 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
   if (guest->suspended) {
     const bool frame = guest->origin == JS_VM_ORIGIN_HOST;
     const bool held = guest->origin == JS_VM_ORIGIN_JOB_HELD;
+#ifdef CONFIG_POCKET_VM_RELOC
+    /* L3a's one caller on the device. Here and nowhere else: this is the
+     * only place the firmware resumes a chain it means to keep running, so
+     * it is the only place where the VM is parked AND has a future. The
+     * resume in pocketjs_guest_prepare_stop() is parked too, but it is
+     * terminating the chain -- moving it would copy bytes on their way to
+     * being freed.
+     *
+     * Charged separately from the resume it precedes, so the frame and
+     * drain totals the runaway guard reads keep meaning "time the guest
+     * spent running" rather than quietly including relocation. */
+    if (guest->reloc_armed) {
+      JSVMRelocStats rs;
+      const uint32_t before = (uint32_t)heap_caps_get_largest_free_block(
+          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      const int64_t reloc_began = esp_timer_get_time();
+      const int moved = JS_VMStackRelocate(guest->runtime, &rs);
+      const uint32_t reloc_us = (uint32_t)(esp_timer_get_time() - reloc_began);
+      if (moved == 0 && rs.segments != 0U) {
+        const uint32_t after = (uint32_t)heap_caps_get_largest_free_block(
+            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (guest->reloc_moves == 0U) guest->reloc_largest_first = before;
+        guest->reloc_largest_last = after;
+        if (guest->reloc_largest_min == 0U || before < guest->reloc_largest_min)
+          guest->reloc_largest_min = before;
+        if (after < guest->reloc_largest_min) guest->reloc_largest_min = after;
+        guest->reloc_moves++;
+        guest->reloc_frames += rs.frames;
+        guest->reloc_var_refs += rs.var_refs;
+        guest->reloc_bytes += rs.bytes;
+        if (rs.span > rs.resident &&
+            (uint32_t)(rs.span - rs.resident) > guest->reloc_gap_max) {
+          guest->reloc_gap_max = (uint32_t)(rs.span - rs.resident);
+          guest->reloc_gap_segments = rs.segments;
+        }
+        guest->reloc_total_us += reloc_us;
+        if (reloc_us > guest->reloc_max_us) guest->reloc_max_us = reloc_us;
+      } else if (moved != 0) {
+        guest->reloc_refused++;
+      } else {
+        guest->reloc_empty++;
+      }
+    }
+#endif
     const int64_t began = esp_timer_get_time();
     JSValue result = JS_VMResume(guest->context);
     const int64_t elapsed = esp_timer_get_time() - began;

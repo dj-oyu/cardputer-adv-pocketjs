@@ -539,6 +539,87 @@ JS_EXTERN void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out);
  * safe at any point, including with frames live. No-op when the build keeps
  * frames on the C stack. Does not allocate. */
 JS_EXTERN void JS_VMStackTrim(JSRuntime *rt);
+/* G12 (main/pocket/oomprobe.c): the heap blocks the frame segments occupy,
+ * live chain and reuse cache alike, so a heap walk can ask what moving them
+ * would have joined. Writes at most `cap` block pointers, returns how many
+ * there are (0 without SEGFRAMES). Read-only; call it on the thread that
+ * runs the runtime. Defined only with CONFIG_POCKET_VM_OOMPROBE. */
+JS_EXTERN uint32_t JS_VMStackBlocks(JSRuntime *rt, const void **out, uint32_t cap);
+/* L3a (docs/vm/vm-L3-design.md sec.7): what one move did. Zeroed on failure. */
+typedef struct JSVMRelocStats {
+    uint32_t segments;   /* segments copied to new addresses */
+    uint32_t frames;     /* frames whose pointers were rewritten */
+    uint32_t coro_frames;/* of those, frames NOT in a segment (the E12 branch:
+                          * a coroutine frame whose owner record holds the
+                          * caller's sp). Counted so a gate can tell "that
+                          * branch is correct" from "that branch never ran" --
+                          * an untaken branch passes every test there is. */
+    uint32_t var_refs;   /* open var_refs rewritten */
+    uint32_t generation; /* JSVMStack.generation after the move */
+    size_t bytes;        /* live payload bytes copied */
+    /* How scattered the chain was, BEFORE this move. `resident` is the sum of
+     * the live segments' whole blocks; `span` is the distance from the lowest
+     * block's start to the highest one's end. They are equal only if the
+     * segments happened to be laid end to end. span - resident is therefore
+     * the number of bytes belonging to OTHER allocations that sit between the
+     * pieces of this stack -- the thing a chain built across several parks is
+     * suspected of accumulating. Both 0 when nothing moved. */
+    size_t resident;
+    size_t span;
+} JSVMRelocStats;
+/* Copy the live frame segments to fresh addresses and rewrite every pointer
+ * that named the old ones. The explicit move API the spec (sec.8) asks L3 to
+ * prove itself with; nothing in the firmware calls it.
+ *
+ * Legal only while the VM is parked at an L2c safepoint AND the parked chain
+ * is the whole live stack -- a running JS_CallInternal, or an outer one
+ * waiting below the floor, keeps pointers into the blocks in C locals and
+ * registers, which is precisely what the spec forbids guessing at. Returns
+ * -1, changing nothing, when that does not hold, when a pin is held, or when
+ * the memory for the new blocks cannot be had. 0 with segments == 0 means
+ * there was nothing live to move, which is success.
+ *
+ * Always -1 when built without CONFIG_POCKET_VM_RELOC. `out` may be NULL. */
+JS_EXTERN int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out);
+/* L4a: the same move, but the whole live chain goes into ONE new block, so
+ * the stack stops being scattered across the heap (JS_VMStackRelocate only
+ * trades each segment's address for another of the same size). Same
+ * preconditions and failure contract as JS_VMStackRelocate. Returns 0 with
+ * segments == 0 when the chain has fewer than two segments -- already
+ * contiguous, nothing to gather. The transient cost is one contiguous block
+ * the size of the live stack, held alongside the old segments until they are
+ * freed. */
+JS_EXTERN int JS_VMStackCompact(JSRuntime *rt, JSVMRelocStats *out);
+/* L3b: how many segments the live frame chain is in right now (0 when there
+ * is none). For a caller deciding WHETHER to compact: measured on the host,
+ * compacting at every park costs more heap than it recovers (the old and new
+ * copies coexist during each move), so the decision is a policy on this
+ * count, not a reflex. Walks the chain; a few dozen links at most. */
+JS_EXTERN uint32_t JS_VMStackSegments(JSRuntime *rt);
+/* Diagnostic: after a move, leave the old blocks allocated and poisoned
+ * rather than freeing them, so a missed fix-up cannot be masked by the
+ * allocator reusing the address. Leaks by design; host harness only. */
+JS_EXTERN void JS_VMStackRelocKeepOld(JSRuntime *rt, int keep);
+/* Hold the segments still. `delta` is +1 to take a pin and -1 to release one;
+ * the new count is returned, or -1 if the build has no relocation at all.
+ *
+ * There is no caller yet, and that is the honest state of it: a move is only
+ * legal while the VM is parked (see above), and no native call can be on the C
+ * stack at a park -- so the region a pin would protect cannot currently be
+ * reached by anything that would want one. It exists because "a pin refuses a
+ * move" is a completion condition that has to be testable, and because the day
+ * a real pin site appears it should be a call rather than a design. */
+JS_EXTERN int JS_VMStackPin(JSRuntime *rt, int delta);
+/* Negative control for the poisoning (design sec.5): skip exactly one of the
+ * fix-up's entries, so that a run which then comes back CLEAN is evidence the
+ * detector cannot see anything, rather than evidence there was nothing to
+ * see. A detector nothing ever trips is indistinguishable from one that
+ * works. Each mode leaves a different kind of stale pointer behind. */
+#define JS_VM_RELOC_FAULT_NONE   0
+#define JS_VM_RELOC_FAULT_VARREF 1  /* an open closure variable keeps its old slot */
+#define JS_VM_RELOC_FAULT_LINK   2  /* a flat frame keeps its caller's old sp */
+#define JS_VM_RELOC_FAULT_VARBUF 3  /* a frame keeps its old locals base */
+JS_EXTERN void JS_VMStackRelocFault(JSRuntime *rt, int mode);
 JS_EXTERN void JS_SetDumpFlags(JSRuntime *rt, uint64_t flags);
 JS_EXTERN uint64_t JS_GetDumpFlags(JSRuntime *rt);
 JS_EXTERN size_t JS_GetGCThreshold(JSRuntime *rt);

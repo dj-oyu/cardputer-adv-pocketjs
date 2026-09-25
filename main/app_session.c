@@ -29,6 +29,10 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "vmprobe.h"
+#include "oomprobe.h"
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+#include "quickjs.h"
+#endif
 #include "vm_wake.h"
 #include <stdatomic.h>
 #include <stdio.h>
@@ -94,12 +98,19 @@ static pocketjs_guest_t *guest;
 // script's own `throw null` without this. Not a contracted marker (the
 // CLAUDE.md list predates it); a new line costs nothing to add.
 static void report_oom_if_any(void) {
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    oomprobe_drain();
+#endif
     if(!guest) return;
     uint32_t n=0; size_t first_req=0, first_used=0;
     pocketjs_guest_take_oom(guest,&n,&first_req,&first_used);
-    if(n>0)
+    if(n>0) {
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
                  (unsigned)n,(unsigned)first_req,(unsigned)first_used);
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+        oomprobe_canary(n,first_req,first_used);
+#endif
+    }
 }
 static atomic_bool stop_requested;
 static int64_t deadline;
@@ -251,6 +262,12 @@ void app_vm_watchdog(int (*fn)(void *), void *opaque) {
 }
 
 void app_vm_prepare_stop(void) {
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+    // Before the chain is closed, not after: prepare_stop resumes the parked
+    // chain in order to terminate it, and the counters belong to the run that
+    // is ending rather than to its teardown.
+    if(guest) pocketjs_guest_reloc_report(guest);
+#endif
     if(guest) pocketjs_guest_prepare_stop(guest);
 }
 void app_request_stop(void) { atomic_store(&stop_requested,true); }
@@ -490,13 +507,36 @@ void app_stop(void) {
         final_stats=(pocketjs_guest_stats_t){.struct_size=sizeof(final_stats)};
         pocketjs_guest_stats(guest,&final_stats);
     }
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    // Before the destroy: JS_FreeRuntime frees the segments the hook would
+    // otherwise go looking for.
+    oomprobe_set_runtime(NULL);
+#endif
     if(guest) pocketjs_guest_destroy(guest);
     guest=NULL;
     app_report();
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    // After the teardown, so a refusal inside it is counted in this session.
+    oomprobe_session_end("app");
+#endif
     ESP_LOGI("app","APP_STOPPED");
 }
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+// Set by main.c's '&' on the home screen and left set, so one arming covers a
+// lifecycle sweep of several runs. Read at guest creation, which is the only
+// moment the guest exists and has not run anything yet.
+static bool reloc_requested;
+void app_vm_reloc_request(void) { reloc_requested=true; }
+#endif
+
 esp_err_t app_start_test(char test) {
     esp_err_t err;
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    oomprobe_init();
+    // Whatever the home screen refused since the last session is its own,
+    // not this app's.
+    oomprobe_session_end("home");
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
     vm_storage_active=test=='Y';
     vm_storage_leaving=vm_storage_parked=false;
@@ -552,9 +592,25 @@ esp_err_t app_start_test(char test) {
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
+    // The control has to reach the HEAP: a diagnostic starts with ~82 KB of
+    // the 160 KiB limit already in use, so under the limit its requests are
+    // refused by QuickJS long before the heap is asked, and the control
+    // measured nothing (2026-09-25). Its footprint is bounded by its fixed
+    // recursion depth; the large requests are freed as soon as they succeed.
+    if(test=='$') JS_SetMemoryLimit(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),0);
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
     TRY(vmprobe_segment_apply(guest) == 0 ? ESP_OK : ESP_ERR_INVALID_STATE);
     vmprobe_static_report();
+#endif
+#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+    // Armed here rather than after app_start_test returns: the source is
+    // EVALUATED inside this function, and a top-level await parks during that
+    // evaluation. Arming afterwards would miss exactly the parks that carry
+    // the deepest chains a session ever has.
+    if(reloc_requested) pocketjs_guest_reloc_arm(guest,true);
 #endif
     pocketjs_guest_set_watchdog(guest,interrupt,NULL);
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
@@ -629,6 +685,66 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+        // G12 (oomprobe.h). Each one catches its own OOM and keeps running, so
+        // one session yields a refusal per frame in a changing heap rather
+        // than a single one. '!': small blocks with every third one dropped
+        // each frame (a steady ~70 live, interleaved with holes), then the
+        // largest block the guest can still get, in 8 KiB steps. '@': one
+        // array grown by realloc between small objects. '#': JSON round
+        // trips of a growing array -- the string buffers native code grows.
+        // The catches empty with `length=0`, never `x=[]`: at the limit a new
+        // array is itself refused, and the escaping bare null ends the app.
+        case '!': source=
+            "let k=[];globalThis.frame=()=>{try{for(let i=0;i<24;i++)"
+            "k.push(new Uint8Array(32+(Math.random()*3000|0)));"
+            "for(let i=0;i<k.length;i+=3)k[i]=null;k=k.filter(x=>x)}catch(e){k.length=0}"
+            "for(let s=8192;;s+=8192){try{new Uint8Array(s)}catch(e){break}}};";
+            break;
+        case '@': source=
+            "let a=[],o=[];globalThis.frame=()=>{try{for(let i=0;i<400;i++)"
+            "{a.push(i);o.push({i})}if(o.length>1600)o=o.filter((x,j)=>j&3)}"
+            "catch(e){a.length=o.length=0}};";
+            break;
+        case '#': source=
+            "let o=[];globalThis.frame=()=>{try{for(let i=0;i<8;i++)"
+            "o.push({i:o.length,s:'y'.repeat(o.length%97)});"
+            "JSON.parse(JSON.stringify(o))}catch(e){o.length=0}};";
+            break;
+        // The negative control: a heap where the FRAME SEGMENTS are what
+        // splits the free space. Each level of the recursion allocates a
+        // buffer, so the segments the chain grows into land between buffers;
+        // at the bottom every buffer is dropped and the large request runs
+        // with only the segments standing in the gaps. If the probe never says
+        // segfix=1 here, the probe is broken, not the heap.
+        case '$': source=
+            "let k=[];function f(n,a,b,c,d,e,g,h){"
+            "k.push(new Uint8Array(1000));if(n)return f(n-1,a,b,c,d,e,g,h)+1;"
+            "k.length=0;for(let s=8192;;s+=4096){try{new Uint8Array(s)}catch(x){break}}"
+            "return 0}globalThis.frame=()=>{try{f(60,1,2,3,4,5,6,7)}catch(x){k.length=0}};";
+            break;
+#endif
+#ifdef CONFIG_POCKET_VM_RELOC
+        // L3a (docs/vm/vm-L3-design.md sec.8.1, D6/D8). The shipped apps never
+        // park: a turn's budget is VM_TURN_BUDGET_US (8 ms) and pet's and
+        // companion's frames finish inside it, measured, so the relocation
+        // caller is never reached by them and max_us stays a number about
+        // nothing. This one parks ON PURPOSE and parks DEEP -- it recurses
+        // first and only then burns the budget, so the chain the yield timer
+        // catches spans several segments rather than the single 68-byte frame
+        // diagnostic '3' produces.
+        //
+        // The depth is chosen against the D10 byte budget (20,480 B): 60
+        // frames of this shape stay well inside it, so the RangeError path is
+        // not what is being exercised here. The inner loop is sized to pass
+        // 8 ms and stay under VM_FRAME_RUNAWAY_US (250 ms) so the app keeps
+        // running and keeps parking, frame after frame.
+        case '%': source=
+            "globalThis.frame=()=>{let s=0;"
+            "function f(n){if(n===0){for(let i=0;i<400000;i++)s+=i;return 0}"
+            "return f(n-1)+1}f(60);return s};";
+            break;
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
         case '[': case '\\': case ']': source=
             "let ran=false;globalThis.frame=b=>{if(ran||(b&8192))return;ran=true;"
