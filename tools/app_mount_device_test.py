@@ -1,7 +1,8 @@
-"""Smoke and capture the mounted foreground apps without changing pet storage.
+"""Exercise and capture mounted foreground apps without changing pet storage.
 
 Pet is tested last and left running; reset the board after this script. Sending
 Back to pet would save (and potentially normalize) the user's persisted pet.
+On diagnostic P0 builds USB `u` starts a probe, so run on the normal image.
 """
 import argparse
 from pathlib import Path
@@ -90,16 +91,47 @@ try:
                    + chunk(b'IDAT', zlib.compress(raster)) + chunk(b'IEND', b''))
             (args.out / f'{name}.png').write_bytes(png)
             print(f'CAPTURE {name} rows=135', flush=True)
+            return rows
+
+        def region(rows, first, last):
+            return b''.join(rows[y] for y in range(first, last))
+
+        def navigate(value):
+            time.sleep(0.15)
+            port.write(value.encode())
+            time.sleep(0.3)
 
         open_app(0, 'HELLO_READY')
         key('e', 'HELLO_COUNT 1')
         capture('hello')
         open_app(4, 'IMUCAL_READY')
-        capture('imucal')
+        imucal = capture('imucal')
+        time.sleep(0.5)
+        imucal_later = capture('imucal_later')
+        if region(imucal, 45, 96) == region(imucal_later, 45, 96):
+            raise RuntimeError('imucal sensor/status rows did not update')
+        open_app(4, 'IMUCAL_READY')
+        capture('imucal_restart')
+        print('IMUCAL_SENSOR_RESTART PASS (calibration not required)', flush=True)
         open_app(6, 'COMPANION_READY')
-        capture('companion')
+        companion = capture('companion')
+        navigate('b')
+        companion_next = capture('companion_next')
+        if region(companion, 0, 25) == region(companion_next, 0, 25):
+            raise RuntimeError('companion right did not change the page heading')
+        navigate('a')
+        companion_back = capture('companion_back')
+        if region(companion, 0, 25) != region(companion_back, 0, 25):
+            raise RuntimeError('companion left did not restore the page heading')
+        print('COMPANION_NAVIGATION PASS', flush=True)
         open_app(5, 'PET_READY')
-        capture('pet')
+        pet = capture('pet')
+        navigate('b')  # action cursor only; do not press Enter or Back (save)
+        pet_next = capture('pet_next')
+        if (region(pet, 110, 135) == region(pet_next, 110, 135) and
+                region(pet, 0, 25) == region(pet_next, 0, 25)):
+            raise RuntimeError('pet right changed neither action nor choice')
+        print('PET_CURSOR PASS (no save)', flush=True)
         print('PET_LEFT_RUNNING reset without Back to preserve storage', flush=True)
 finally:
     (args.out / 'serial.log').write_text('\n'.join(log) + '\n', encoding='utf-8')

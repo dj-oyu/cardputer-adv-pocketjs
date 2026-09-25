@@ -38,7 +38,7 @@
 | **研究（v1の阻止条件ではない）** | 33 ms可視native source、producer原データから描画まで全経路≤1 copy、binary text PIE、cache/instance、非overlay modal、group opacity・dither等の出荷アプリ未使用効果、制作時schema/生成器。実装/APIやhost試験があっても製品能力を意味しない。 | それぞれ別の画素・CPU・RAM・音声ゲートを先に定義してから採否を決める。33 msを15 Hzに読み替えず、P4の厳格目標も削除しない。overlay modal は現行契約でUNSUPPORTED。 |
 | **Kasane FW v1 の対象外** | native home/picker/editorへの移植、frosted backdrop・raster cache・native flex・汎用blur/affine/3D、物理GRAM読戻し保証。既存shell/editorを削除する意味ではない。 | 別の製品要求・容量予算・実機ゲートが決まるまで、Kasane v1の完了をこれらで判定しない。 |
 
-この範囲の**現在の状態は未合格**。hostや診断imageが通った項目と、製品imageで未実施の関所を混同しない。直近の `553f0fd` 統合版（既定YIELD=y、RELOC/OOMPROBE=n）はVM Test262 7,501 pass/194既知fail/退行0、静的DIRAM 158,892 B、実機hello中 free 139,600 B・largest 98,304 B、5周smokeと20秒music→Hello smokeを通した。2026-09-25の同一ソースの追加確認は下表。4メニューアプリの**起動・初期frame**とdeskclockの**起動・継続表示・終了**は確認したが、imucal/pet/companionの値更新・入力・再起動、既知duration曲は未確認。Petは保存値を変えないためBackせずにresetした。20秒製品smokeを時間分布・repair・pauseの合格へ外挿しない。
+この範囲の**現在の状態は未合格**。hostや診断imageが通った項目と、製品imageで未実施の関所を混同しない。直近の `553f0fd` 統合版（既定YIELD=y、RELOC/OOMPROBE=n）はVM Test262 7,501 pass/194既知fail/退行0、静的DIRAM 158,892 B、実機hello中 free 139,600 B・largest 98,304 B、5周smokeと20秒music→Hello smokeを通した。2026-09-25の同一ソースの追加確認は下表。4メニューアプリの起動・初期frame、deskclockの起動・継続表示・終了、imucal/companion/petの**非破壊的な代表更新・入力**は確認した。6姿勢校正と保存、Petの保存を伴う操作と正常終了、Companionのtimer/wake永続化、既知duration曲は未確認。Petは保存値を変えないためBackせずにresetした。20秒製品smokeを時間分布・repair・pauseの合格へ外挿しない。
 
 | 追加の統合確認 | imageと実行 | 結果と主張の境界 |
 | --- | --- | --- |
@@ -46,6 +46,7 @@
 | P0 Hello | 診断image SHA256 `583762BE…`、P0/lowheap/repair/notice ON。`tools/kasane_p0_hello_run.py`、`.cache/kasane-v1-merge-gate-20260925/hello` | 180更新・181 frame。turn p99 383、render p99 1279、send p99 895 µs、送信最大7496 µs、heap min116980 B、stack free23692 B。`verification.md` のHello固定線を1 bootで通過。 |
 | P0 music複合 | 同じ診断image、`tools/sd_async_compare_run.py`、`music-repair2` と `music-notice`（前記cache配下）、各独立boot・45秒track02・20秒後2秒pause・16 KiB hold・最後Helloへ切替 | repair注入は17帯/64800 Bで39 ms後復旧。noticeはPOST/CLEAR・COMPOSITED 1/0。双方でdecoder fault/underrun/IO ERROR=0、描画/送信/UI frame/heap/stackの低heap固定線を1 bootずつ通過。noticeのdraw max9966 µs、UI p99 12287 µsは上限に近い。正常heapのfloorを低heap runへ要求しない。旧send max5506 µs不合格は残す。 |
 | 製品経路の画面 | 全probe OFF image SHA256 `B5D5D68D…`、`tools/app_mount_device_test.py` と `tools/overlay_device_test.py`、前記cacheの `apps-default` / `overlays-default` | hello・imucal・companion・petを起動し各135行LCD capture、hello入力でCOUNT 1。deskclockとmusicは各135行capture、約6秒の継続表示と終了、設定値2への復元。音声再生と時間分布をこのrunから主張しない。 |
+| 通常アプリ代表入力 | 同じ全probe OFF image、拡張した `tools/app_mount_device_test.py`、`.cache/kasane-v1-app-input-20260925-r2` と `-r3`（独立boot×2） | imucalはセンサー表示行の変化と再mount、companionは右で別ページ・左で元の見出しへ復帰、petは右で操作/選択表示が変化。各135行LCD capture。最初の「10秒以内にIMUCAL_SAMPLE 1」条件は端末の静止度に依存して不成立だったため、FW回帰ゲートにはしない。PetはEnter/Backを送らずresetし、保存値は変更しない。 |
 
 送信 `max≤5,500 µs` は現時点では**回帰防止の固定線**であって、製品の応答期限としての意味は未確定。新たな製品期限を採用するなら、変更前にworkload・独立boot数・時間/frame数・p99とmaxの役割・全runの扱いを決め、旧不合格を残す。通常の再生/画素/lease/音声の失敗は統計的な許容揺らぎにしない。source鮮度は既存の約1 Hz telemetry を必須とし、33 ms表示は要求が確定するまで研究側とする。
 
