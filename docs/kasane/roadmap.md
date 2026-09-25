@@ -9,9 +9,9 @@
 | P2 | dirty-nodeで変わった所だけ解決 | **24-nodeの定義済みworkloadでは達成**。依存表と差分解決、CPU利益、画素、注入修復を確認。 | 他画面への適用範囲は別に判断。overlay全画面転送、実GRAM、物理SPI故障をP2の直接合格条件へ混ぜない。 |
 | P3 | **native text**公開済みpayload→各core destinationを≤1 copy | **限定したtext経路では達成**。実機1 destination、host複数destination、lease/非表示/pool枯渇を確認。 | 他source型を必須範囲にするなら型と操作を指定。複数destinationの実機は必要性に応じて選ぶ。seek可能音源はP3 copyよりP5統合の課題。 |
 | P4 | producer原データ→描画まで全経路≤1 copy | 部分的clone/JS一時copyを削減したが厳格目標は未達。copy/変換/転送の操作的定義と既存計数器の重複範囲を固定。実機45秒のnative textはsource→core 46回/368 B、text bank clone・render scratch copy 0。実music 45秒でもtext clone/render scratch/decode copyは0だが、view decodeが13,359回/708,027 B（約498 B/frame）、命令・metadata等の構造copyが残る。同一診断imageの独立boot×2でview decodeは空括弧差引き154〜155 cycles/回、約5.8〜5.9 µs/frame。QuickJS実装とhost allocator試験ではASCII→C文字列はallocation 0、日本語は1回。旧UTF-8計数はASCIIもcopyに含める表示だったため要求量へ分離した。単純slot COWはborrow pointer契約と2bank予算で不成立。 | 現musicのview decode単独は危険な所有権変更を正当化しない。payload lineageと日本語変換・他の構造copyの実機CPU寄与を測り、利益上限から候補を絞る。小さければ厳格目標は未達・保留。必要な候補だけRAM、断片化、repair、安全性、描画p99で比較。 |
-| P5 | 音楽と通常アプリを製品経路に統合 | 通常アプリ5ソースをmountへ移行したが、現行imageに埋め込まれるのはhello・imucal・pet・companionの4件（bridgeは未登録）。deskclock/music overlayもnative mount。music source-only、限定light PATCH、通知・pause・低heap・切替の複合試験まで進んだ。位相分類ありの45秒×2ではsend最大は両runとも通常frame（5,302/5,291 µs）、注入451/455 µs、復旧4,551/4,846 µs。位相分類を分離・OFFにした同条件の独立boot×2でもsend最大5,336/5,358 µs、draw最大9,510/9,415 µs、音声障害0で固定線を通過。静止music helpの注入修復はSPI直前の32,400画素が独立boot×2で一致。全probe OFFの製品imageも45秒music→Hello切替のsmokeを通過（decoder fault/IO ERROR=0）。旧5,506 µsは分類不能の不合格として保持。 | 故障注入付き診断imageの時間値を全probe OFF製品imageの性能と呼ばない。既知duration・SD抜去・物理GRAM等はリスクごとの代表条件を選び、全条件の直積を要求しない。全計画PATCHは現状不採用。 |
+| P5 | 音楽と通常アプリを製品経路に統合 | 通常アプリ5ソースをmountへ移行したが、現行imageに埋め込まれるのはhello・imucal・pet・companionの4件（bridgeは未登録）。deskclock/music overlayもnative mount。music source-only、限定light PATCH、通知・pause・低heap・切替の複合試験まで進んだ。位相分類ありの45秒×2ではsend最大は両runとも通常frame（5,302/5,291 µs）、注入451/455 µs、復旧4,551/4,846 µs。位相分類を分離・OFFにした同条件の独立boot×2でもsend最大5,336/5,358 µs、draw最大9,510/9,415 µs、音声障害0で固定線を通過。静止music helpの注入修復はSPI直前の32,400画素が独立boot×2で一致。全probe OFFの製品imageも45秒music→Hello切替のsmokeを通過（decoder fault/IO ERROR=0）。旧5,506 µsは分類不能の不合格として保持。 | 故障注入付き診断imageの時間値を全probe OFF製品imageの性能と呼ばない。duration有無の表示はhostで判定済み。実SDの既知duration曲・SD抜去・物理GRAMは別の音声/SD/物理QAへ分け、Kasane v1のために全条件の直積を要求しない。全計画PATCHは現状不採用。 |
 | PIE text | binary maskを追加copyなしで8 lane処理し、画素と描画時間を悪化させない | 0/255 port宣言、PIEカーネル、整列/ゼロskip、全256 maskの命令シミュレーションとhost画素A/B。整列日本語診断では描画p99 4,095→3,327〜3,455 µs、全画素一致。実music 45秒の同一binary・独立boot ABBAは音声障害0だが、overlay compute p50はOFF 3,839 / 3,839、ON 3,967 / 3,967 µsで利益なし。既定OFF。 | 現musicでは採用しない。高速化対象を明確化して小ブロックのPIE呼出し等を調べ、改善案があれば画素・音声・性能を再判定する。現時点で製品既定ONにしない。 |
-| Framework全体 | 新アプリがKasane C core変更なしで安全にmountできる | 汎用schema/slot/descriptorと低レベルescape hatchはある。通常5ソース（うちbridgeは未登録）が例となる。 | v1で必要なcache/modal、native home/picker/editor、制作スキーマ/生成器、効果を**必須/研究/対象外**に分類。全部を暗黙の完了条件にしない。 |
+| Framework全体 | 新アプリがKasane C core変更なしで安全にmountできる | 汎用schema/slot/descriptorと低レベルescape hatchはある。通常5ソース（うちbridgeは未登録）が例となる。 | v1範囲は下表で固定済み。動的`mount({version:1,...})`の汎用性と失敗原子性をhost契約に対応づけ、未試験の組合せだけ補う。cache/modal、native home/picker/editor、生成器、効果を暗黙の完了条件にしない。 |
 
 ## 直近の再現セット
 
@@ -32,13 +32,13 @@
 
 | 分類 | 範囲と理由 | 判定・撤回条件 |
 | --- | --- | --- |
-| **必須: APP** | メニュー登録済みの hello・imucal・pet・companion の native `mount`、値更新、入力、終了・再起動。表示内容の意味は各アプリが所有する。bridgeはソース移行済みだがimage未収録で、実機必須集合には入れない。 | host の Kasane 契約/O2・sanitizer、実機の4アプリ起動→更新→終了、故障回復6種。hello 180更新は `verification.md` の P0 画素/時間/heap/stack 線。失敗または元画面の破壊は統合を止める。 |
-| **必須: overlay** | deskclockの起動・時計snapshot・終了と、musicのSD選曲→再生→pause/resume→終了→Hello切替、再生中のSYSTEM通知post/clear、表示失敗後のrepair。`pocket.overlay` がregion/入力、Kasaneが表示。曲の既知/未知durationは各1例を選び、未用意なら未検証とする。 | deskclockは背景・領域外画素と更新/終了の代表試験。musicは音声障害0、正しい表示・入力、有限時間でのrepair、固定した45秒 P0/16 KiB複合線（`verification.md`）。診断imageと全probe OFF製品imageの結果を分ける。**旧send max 5,506 µs不合格は消さない**。今後のどの実機runでも固定線を超えたらそのrunは不合格として保持し、原因か撤回判断を要する。 |
+| **必須: APP** | メニュー登録済みの hello・imucal・pet・companion の native `mount`、slot更新・入力反映、APP終了/再mountでのlease安全性。表示内容の意味と永続化は各アプリが所有する。bridgeはソース移行済みだがimage未収録で、実機必須集合には入れない。 | hostのKasane契約/O2・sanitizer、実機の非破壊的な代表入力と故障回復6種、hello 180更新の`verification.md`固定線。6姿勢校正、Pet育成値の保存、Companion alarm/wake設定は**アプリ機能QA**であり、Kasane coreの合格条件ではない。APP終了の一般契約はhost teardownで確認し、Pet保存値を変える実機BackはKasane判定のために要求しない。 |
+| **必須: overlay** | deskclockの起動・時計snapshot・終了と、musicのSD選曲→再生→pause/resume→終了→Hello切替、再生中のSYSTEM通知post/clear、表示失敗後のrepair。`pocket.overlay`がregion/入力、Kasaneが表示。duration有無による表示分岐も対象だが、実SDの既知duration曲の調達は必須にしない。 | 既知/未知durationの可視状態は`tools/test_pocket_kasane.c`のhost統合試験、実SDは承認済み未知duration曲で音声共存・UIを判定。deskclockは背景・領域外画素と更新/終了。musicは音声障害0、正しい表示・入力、有限時間のrepair、固定45秒 P0/16 KiB複合線（`verification.md`）。診断imageと全probe OFF製品imageを分け、**旧send max 5,506 µs不合格は消さない**。新runの固定線超過はそのrunを不合格として保持し、原因か撤回判断を要する。 |
 | **必須: 汎用source/SYSTEM** | 世代・pin付きsnapshot、dirty購読、APP/SYSTEM二層、通知優先とAPP終了後のSYSTEM保持。producerはUI待ちせず、有界BUSY/OOMを返す。 | hostの複数reader/全pin/解放/再利用、実機の通常通知・music共存・低heap。UAF、lease破壊、音声障害、無限待ちは即不合格。未再現の真のheap OOM・停止timeoutは「合格済み」に含めない。 |
 | **研究（v1の阻止条件ではない）** | 33 ms可視native source、producer原データから描画まで全経路≤1 copy、binary text PIE、cache/instance、非overlay modal、group opacity・dither等の出荷アプリ未使用効果、制作時schema/生成器。実装/APIやhost試験があっても製品能力を意味しない。 | それぞれ別の画素・CPU・RAM・音声ゲートを先に定義してから採否を決める。33 msを15 Hzに読み替えず、P4の厳格目標も削除しない。overlay modal は現行契約でUNSUPPORTED。 |
 | **Kasane FW v1 の対象外** | native home/picker/editorへの移植、frosted backdrop・raster cache・native flex・汎用blur/affine/3D、物理GRAM読戻し保証。既存shell/editorを削除する意味ではない。 | 別の製品要求・容量予算・実機ゲートが決まるまで、Kasane v1の完了をこれらで判定しない。 |
 
-この範囲の**現在の状態は未合格**。hostや診断imageが通った項目と、製品imageで未実施の関所を混同しない。直近の `553f0fd` 統合版（既定YIELD=y、RELOC/OOMPROBE=n）はVM Test262 7,501 pass/194既知fail/退行0、静的DIRAM 158,892 B、実機hello中 free 139,600 B・largest 98,304 B、5周smokeと20秒music→Hello smokeを通した。2026-09-25の同一ソースの追加確認は下表。4メニューアプリの起動・初期frame、deskclockの起動・継続表示・終了、imucal/companion/petの**非破壊的な代表更新・入力**は確認した。6姿勢校正と保存、Petの保存を伴う操作と正常終了、Companionのtimer/wake永続化、既知duration曲は未確認。Petは保存値を変えないためBackせずにresetした。20秒製品smokeを時間分布・repair・pauseの合格へ外挿しない。
+この範囲の**現在の状態は未合格**。hostや診断imageが通った項目と、製品imageで未実施の関所を混同しない。直近の `553f0fd` 統合版（既定YIELD=y、RELOC/OOMPROBE=n）はVM Test262 7,501 pass/194既知fail/退行0、静的DIRAM 158,892 B、実機hello中 free 139,600 B・largest 98,304 B、5周smokeと20秒music→Hello smokeを通した。2026-09-25の同一ソースの追加確認は下表。4メニューアプリの起動・初期frame、deskclockの起動・継続表示・終了、imucal/companion/petの**非破壊的な代表更新・入力**は確認した。Petは保存値を変えないためBackせずにresetした。6姿勢校正/育成値保存/timer設定と実SDの既知duration曲は未確認だが、上表の責務境界によりKasane v1の阻止条件にはしない。20秒製品smokeを時間分布・repair・pauseの合格へ外挿しない。
 
 | 追加の統合確認 | imageと実行 | 結果と主張の境界 |
 | --- | --- | --- |
@@ -50,22 +50,17 @@
 
 送信 `max≤5,500 µs` は現時点では**回帰防止の固定線**であって、製品の応答期限としての意味は未確定。新たな製品期限を採用するなら、変更前にworkload・独立boot数・時間/frame数・p99とmaxの役割・全runの扱いを決め、旧不合格を残す。通常の再生/画素/lease/音声の失敗は統計的な許容揺らぎにしない。source鮮度は既存の約1 Hz telemetry を必須とし、33 ms表示は要求が確定するまで研究側とする。
 
-## Astraレビュー後の最小順序（v1範囲固定後）
+## ここからの実行順序
 
-1. **v1対象を固定する — 完了（上表）。** 必須/研究/対象外を分け、既存の固定ゲートと旧不合格を保持した。新規の製品要件が出たら分類と関所を事前改訂する。
-2. **repairの単発超過を切り分ける。** 旧5,506 µsのframeは既存ログでは特定不可。追加した独立boot×2の分類では最大値は通常frame、注入・復旧はそれより短い。この事実から旧runを再分類しない。位相分類をOFFにした独立boot×2の同条件は事前固定線を全run通過した。旧5,506 µsは不合格のまま残す。なお故障注入には診断buildが必須なので、この測定を全probe OFF製品imageの性能に外挿しない。38 msのrepair所要時間は製品許容値未設定の参考値とする。
-3. **source/arenaの安全性穴を閉じる。** 真の並行activate、pool全pin、OOM、release/APP終了をhost・必要な実task条件へ分ける。有界BUSY/OOM、deadlock/UAFなし、lease破壊なし、復旧後に再利用可能、音声障害なしを合格条件にする。
-4. **v1代表回帰をまとめる。** mount→更新→終了、music既知/未知duration、通知、pause/resume、低heap、repairから故障影響の大きい組合せを事前選定。SD抜去は製品で約束する復旧動作を定義してから追加。通常動作は音声障害0、画素/論理状態一致、既存性能線を確認する。故障注入時は事前定義したエラー通知・停止/復帰・UI応答と有界repairを判定し、意図したIO ERRORを通常動作の音声障害と混同しない。全アプリ×全曲×全故障の直積は要求しない。
-5. **P4を別の研究判定で区切る。** copyの操作的定義を先に決める。文字生成、UTF-8 materialize、schema保有、bank clone、render decode/scratch、LCD送信の各操作について「データ複製」「変換」「転送」のどれを数えるか、各回数/bytes/CPU寄与を記録する。現行RAM余裕と実害を測り、改善上限が小さければ未達・保留とする。第3bankや新lease実装を自動的に必須にはしない。
+以下は**新しい計測の依頼リストではない**。まず既存の証拠で閉じ、コードの欠落が見つかった箇所だけ直す。各作業は完了・保留・不合格のいずれかで終える。「実機でまだ全故障を見ていない」を無期限の作業にしない。
 
-レビュー時点で不足している材料は、v1必須機能一覧、send max 5,500 µsの製品上の意味、現在のcore/arena/stack余裕、sourceの鮮度要求と省略許可、cache/modal/効果の製品対応表、現行image/flags/スクリプト/結果を結ぶ短い証拠manifestである。資料から決められない項目を「実装済み」や「出荷阻止」と推測しない。
+| 順番 / owner | 実作業と成果物 | 完了条件・実機を使う条件 |
+| --- | --- | --- |
+| **K1 source寿命** / `ksn_source_pool`、`pocket_*_source`、mutex arena | APP停止、reader pin、unregister拒否、次session open、pool全pin、arena初回競合・確保拒否を「旧領域をいつ解放できるか」の表に落とす。既存host試験（`test_source_pool`、`test_app_teardown`、`test_mutex_arena`、実QuickJSの`build_kasane_test.sh`）を対応づけ、**未試験の分岐だけ**最小の注入試験を追加する。 | UAF/二重解放なし、producerは有界BUSY/OOM、停止未確認時は旧領域保持＋新規作成拒否、解放証明後のみ再利用。既存の実task race・pool全pin・確保拒否注入・低heap＋音声ログを流用。真の全heap OOMや強制task停止timeoutは未再現として残し、v1合格と偽らない。sourceコード変更時だけhost全契約＋影響する実機代表条件を再実行。 |
+| **K2 汎用mount境界** / `ksn_schema*`、`pocket_kasane` | 既存`test_pocket_kasane.c`のアプリ名を知らない`mount({version:1,...})`、slot型/容量/不正入力のatomic拒否、source購読、APP/SYSTEM分離を対応表で確認する。欠けた組合せだけhost testを追加し、coreにアプリ別分岐を足さない。 | 新しい定義をcore変更なしでmount→更新→disposeでき、不正入力は部分反映せず、SYSTEM確定状態はAPP teardown後も残る。既存4アプリ・overlayの実機画面と代表入力を利用。schema/renderer実装を変えた場合に限り画素一致・Hello P0・該当画面の実機smokeを再実行。 |
+| **K3 v1判定の凍結** / `docs/kasane` | K1/K2の合否、image SHA/flags/スクリプト/ログを1枚の証拠表に結び、各行を**hostのみ・診断実機・全probe OFF**に分類する。旧send 5,506 µs不合格も独立行で保持する。 | 必須行に未判定がなく、新しい既知不具合もないならKasane FW v1を完了とする。既存のHello 180更新、music 45秒複合、画面capture、音声0障害を再利用。現行コードのまま「もう一回測る」はしない。変更後に必要な固定ゲートだけ実行し、どのrunも超過したらそのrunを不合格として残す。 |
+| **K4 研究の分離** / P4・PIE | v1の完了判定とは別に、全経路1-copy・可視33 ms source・text PIEの採否を個別issue化する。P4はpayload lineageと残copyのCPU/RAM利益上限を先に定義し、PIEは現music既定OFFを維持する。 | 利益上限が小さければ「未達・保留」で終了。所有権・bank数を増やす実装は、利益、UAF安全性、画素、音声、heap、p99の事前比較条件が揃うまで着手しない。製品v1をこれらの研究待ちにしない。 |
 
-## 優先順位を決めるための質問
+**別トラック（Kasane coreの阻止条件ではない）:** IMUの6姿勢校正・保存、Pet育成値の保存、Companion timer/wake永続化、実SDでの既知duration曲、SD抜去後の製品復旧仕様。これらをアプリ/音声/SDのQAとして扱い、表示契約に関係する分岐はhostの既存試験を使う。物理GRAM読戻し、非overlay modal、native home/picker/editor、未採用効果もv1へ戻さない。
 
-1. 「描画を劣化させない」はどの製品workloadか。通常musicの全画面送信をP2 dirty-nodeの成否に含めない。音声・低heap・通知・修復の同時条件を、頻度と故障影響に応じて最小の代表集合にする。
-2. 33 ms可視 source は製品要件か研究要件か。約1 Hzの数値snapshotと15/30 Hzのアニメーションは同一要求ではない。頻度を下げて見かけ上合格としない一方、不要な30 Hz更新も課さない。
-3. P4全経路1-copyを、RAM・複雑さ・p99を悪化させても追うか。まず残copyの発生頻度/bytes/所要時間を測り、性能上の利益の上限を示す。目標を残すことと製品出荷を止めることは別の判断。
-4. send max単発6 µs超過の扱いをどう一般化するか。今回の不合格は維持し、今後は分位点・繰返し・worstの役割を事前に再定義する。音声fault、画素不一致、repair破壊は統計的揺らぎとして許容しない。
-5. System/cache/modal/将来効果をどこまでKasane FW v1の完了条件にするか。実装済みAPI、実機検証済み能力、制作時の構想を混ぜない。
-
-ロードマップの更新時は各タスクに owner、合格条件、ホスト試験、実機条件、予算増分、撤回条件を付ける。数値がない提案は「速くなる」「0 copyになる」と断言しない。
+旧repair runのsend 5,506 µsは分類不能の不合格として保持する。後続の独立boot×2と今回の統合診断runが固定線を通過した事実で旧runを書き換えない。`max≤5,500 µs`を製品応答期限へ昇格させる場合は、変更**前**にworkload・独立boot数・時間/frame数・p99とmaxの扱いを決める。通常の画素不一致・音声fault・lease破壊は許容揺らぎにしない。
