@@ -229,6 +229,20 @@ menu "Pocket VM (L0 measurement probes)"
             pocket.* lists are lazy too), corpus/Test262 unchanged
             (docs/vm/builtin-floor-plan.md sec.13). n builds the old path.
 
+    config POCKET_VM_FLOORPROBE
+        bool "F-line measurement: guest floor by stage, F1/F2 path counters"
+        default n
+        help
+            Measurement only (docs/vm/builtin-floor-plan.md sec.14). Logs
+            "FLOOR stage=<surface> js=<bytes>" after the guest is created
+            and after each native surface is installed, so the firmware's
+            share of the startup floor can be read surface by surface;
+            logs "FLOORPROBE ..." with JS_GetFloorProbe's counters (flash
+            atom escapes, lazy-list misses and materializations) when an
+            app stops; and adds USB '(' on the home screen, a
+            same-binary microbenchmark of a lookup miss on a lazy builtin
+            against the same miss once the builtin is fully materialized.
+
     config POCKET_VM_OOMPROBE
         bool "G12 fragmentation probe: log every failed heap allocation"
         default n

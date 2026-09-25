@@ -19,6 +19,15 @@ esp_err_t app_start_test(char test);
 void app_vm_reloc_request(void);
 #endif
 void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
+/* The F-line microbenchmark's USB key ('(', CONFIG_POCKET_VM_FLOORPROBE).
+ * A macro rather than an #ifdef block in main.c's usb_stroke(): a block there
+ * adds lines, and app_main's ESP_ERROR_CHECKs below it embed __LINE__, so the
+ * option-off build would stop being byte-identical. Off, it folds to 0. */
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+#define APP_FLOOR_BENCH_KEY(c) ((c) == '(')
+#else
+#define APP_FLOOR_BENCH_KEY(c) 0
+#endif
 
 // docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the
 // background rather than instead of it. It gets a region-scoped Kasane APP
