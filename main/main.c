@@ -330,6 +330,11 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // like '1'-'6', not an app.
     if(c=='%') { atomic_store(&diagnostic,c); return false; }
 #endif
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    // G12's OOM workloads (app_session.c). Shifted digits, which nothing else
+    // on the home screen reads.
+    if(c=='!'||c=='@'||c=='#'||c=='$') { atomic_store(&diagnostic,c); return false; }
+#endif
     if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
     // The Kasane demo trigger ('K', app_session.c's kasane_demo_start). PLACED
     // AFTER the probe block on purpose: 'G'..'K' is the probe's segment range, so

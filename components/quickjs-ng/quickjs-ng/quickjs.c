@@ -67679,3 +67679,32 @@ uintptr_t js_std_cmd(int cmd, ...)
 #undef malloc
 #undef free
 #undef realloc
+
+// G12 (quickjs.h). At the END of the file and only for its one caller, so
+// the default build stays byte-identical: placed next to JS_VMStackTrim it
+// moved every later line, and the __LINE__ each assert() embeds changed the
+// code around it (+8 B text, then +4 B with the body #ifdef'd out; measured
+// 2026-09-25) although the function itself was never linked.
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+uint32_t JS_VMStackBlocks(JSRuntime *rt, const void **out, uint32_t cap)
+{
+    uint32_t n = 0;
+#ifdef CONFIG_POCKET_VM_SEGFRAMES
+    // The header is the start of its own js_malloc_rt block, so the segment
+    // pointer IS the block pointer a heap walk reports. Chain first, then the
+    // cache: both hold heap blocks, and a cached segment splits free space
+    // exactly as a live one does.
+    for (int pass = 0; pass < 2; pass++)
+        for (JSVMSeg *s = pass ? rt->vm_stack.cache : rt->vm_stack.cur; s; s = s->prev) {
+            if (n < cap)
+                out[n] = s;
+            n++;
+        }
+#else
+    (void)rt;
+    (void)out;
+    (void)cap;
+#endif
+    return n;
+}
+#endif

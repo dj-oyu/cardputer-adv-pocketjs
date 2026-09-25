@@ -539,6 +539,12 @@ JS_EXTERN void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out);
  * safe at any point, including with frames live. No-op when the build keeps
  * frames on the C stack. Does not allocate. */
 JS_EXTERN void JS_VMStackTrim(JSRuntime *rt);
+/* G12 (main/pocket/oomprobe.c): the heap blocks the frame segments occupy,
+ * live chain and reuse cache alike, so a heap walk can ask what moving them
+ * would have joined. Writes at most `cap` block pointers, returns how many
+ * there are (0 without SEGFRAMES). Read-only; call it on the thread that
+ * runs the runtime. Defined only with CONFIG_POCKET_VM_OOMPROBE. */
+JS_EXTERN uint32_t JS_VMStackBlocks(JSRuntime *rt, const void **out, uint32_t cap);
 /* L3a (docs/vm/vm-L3-design.md sec.7): what one move did. Zeroed on failure. */
 typedef struct JSVMRelocStats {
     uint32_t segments;   /* segments copied to new addresses */
