@@ -27,14 +27,14 @@ run_case() {  # name expect(FAIL|PASS) [fault]
     || { echo "$name: build failed"; tail -3 "$dir/build.log"; status=1; return; }
   local line fails f pinned
   line=$(VMTEST_OUT=$PWD/$dir/out bash tools/vmtest/run.sh --variant asan-rom 2>&1 | grep '^corpus')
-  # The files pinned to an allocation number ("// vmrun-rom-flags:") are
+  # The files pinned to an allocation number ("// vmrun-rom[-...]-flags:") are
   # re-pinned for the real table; a table with fewer names shifts them, so a
   # failure there says nothing about stale-table and is left out of its
   # verdict. Every other file has to pass.
   fails=$(sed -n 's/.*failed (\(.*\))$/\1/p' <<< "$line")
   local got=PASS
   for f in $fails; do
-    pinned=$(head -n5 "tools/vmtest/corpus/$f.js" | grep -c '^// vmrun-rom-flags:')
+    pinned=$(head -n10 "tools/vmtest/corpus/$f.js" | grep -cE '^// vmrun-rom(-[a-z-]+)?-flags:')
     if [ "$name" != stale-table ] || [ "$pinned" = 0 ]; then got=FAIL; fi
   done
   if [ "$got" = "$expect" ]; then
