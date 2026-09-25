@@ -1140,13 +1140,11 @@ static void file_close(fs_file_t *f, bool discard) {
     if(!f->handle) return;
     if(discard) writer_discard(f);
     if(f->volume==VOL_SD) {
-        // THIS LOOKS LIKE A LEAK AND IS NOT. The FILE* is touched only while
-        // the card that made it is still the card in the slot. After a removal the FatFs mount is gone and the fd
-        // belongs to a VFS that has been unregistered, so closing it would be a
-        // call into a driver that no longer exists; the handle is dropped
-        // instead, and what it held went with the mount.
+        // Logical removal now precedes physical VFS teardown. Close while the
+        // original mount is still present, including that deferred interval;
+        // never close a stale descriptor against a later mount generation.
         bool live=sd_generation_valid(sd_media(),f->sd_gen);
-        if(f->sd&&live) fclose(f->sd);
+        if(f->sd&&sd_media_file_close_safe(f->sd_gen)) fclose(f->sd);
         f->sd=NULL;
         // Section 5: an uncommitted create or replace loses its temporary
         // version here, which is what makes those modes safe to abandon.
@@ -1855,6 +1853,7 @@ static bool sd_volume_payload(JSContext *ctx, int slot, void *user,
 }
 
 void pocket_fs_pump(void) {
+    sd_media_service();
     if(!built) return;                 // nobody read pocket.fs; nothing to tell
     const sd_media_t *m=sd_media();
     if(m->generation==sd_told_gen&&(uint8_t)m->state==sd_told_state) return;
@@ -2836,10 +2835,9 @@ static const char *native_reader(const char *path, fs_path_t *p, fs_file_t *src)
 }
 
 static void native_reader_close(fs_file_t *src) {
-    // Only if the card that opened it is still the card in the slot: after a
-    // removal the fd belongs to a VFS that has been unregistered. Same rule as
-    // file_close(), and the same reason.
-    if(src->sd&&sd_generation_valid(sd_media(),src->sd_gen)) fclose(src->sd);
+    // Logical removal may have been observed by this very read. The VFS is
+    // deliberately still mounted until the owner service runs, so close now.
+    if(src->sd&&sd_media_file_close_safe(src->sd_gen)) fclose(src->sd);
     src->sd=NULL;
 }
 
@@ -2899,6 +2897,49 @@ int32_t pocket_fs_read_at(const char *path, uint32_t offset, uint8_t *out,
 done:
     native_reader_close(&src);
     return answer;
+}
+
+bool pocket_fs_sd_read_lease_open(const char *path,
+                                  sd_media_read_lease_t *lease,
+                                  sd_media_lease_mode_t mode,
+                                  uint32_t *size, const char **code) {
+    if(!lease||!size||!code) {
+        if(code) *code=POCKET_ERR_INVALID_ARGUMENT;
+        return false;
+    }
+    fs_path_t p;
+    fs_file_t src;
+    *code=native_reader(path,&p,&src);
+    if(*code) return false;
+    if(p.volume!=VOL_SD) {
+        native_reader_close(&src);
+        *code=POCKET_ERR_INVALID_ARGUMENT;
+        return false;
+    }
+    if(mode!=SD_MEDIA_LEASE_REOPEN&&mode!=SD_MEDIA_LEASE_PERSISTENT) {
+        native_reader_close(&src);
+        *code=POCKET_ERR_INVALID_ARGUMENT;
+        return false;
+    }
+    char fspath[SD_FSPATH_MAX];
+    sd_path_result_t built=sd_path_build(sd_media(),p.text+p.off[0],
+                                         (size_t)(p.len-p.off[0]),
+                                         fspath,sizeof fspath);
+    if(built!=SD_PATH_OK) {
+        native_reader_close(&src);
+        *code=POCKET_ERR_DISCONNECTED;
+        return false;
+    }
+    if(mode==SD_MEDIA_LEASE_REOPEN) native_reader_close(&src);
+    if(!sd_media_read_lease_bind(lease,src.sd,fspath,src.sd_key,
+                                 src.sd_gen,src.size,mode)) {
+        native_reader_close(&src);
+        *code=POCKET_ERR_DISCONNECTED;
+        return false;
+    }
+    *size=src.size;
+    src.sd=NULL;                 // persistent mode transferred this FILE
+    return true;
 }
 
 static JSValue js_read_text(JSContext *ctx, JSValueConst self,
@@ -3405,6 +3446,7 @@ static uint32_t sd_key_of(const char *fspath) {
 }
 
 static bool sd_busy(uint32_t key, bool writing) {
+    if(writing&&sd_media_read_lease_busy(key)) return true;
     for(int i=0;i<FS_MAX_HANDLES;i++) {
         fs_file_t *f=&files[i];
         if(!f->handle||f->volume!=VOL_SD||f->sd_key!=key) continue;
@@ -3629,7 +3671,8 @@ static JSValue sd_remove(JSContext *ctx, const fs_path_t *p, const char *op,
                                      "the revision has moved on",false,
                                      POCKET_OUTCOME_NOT_APPLIED);
     }
-    if(sd_busy(sd_key_of(fspath),true))
+    if(sd_busy(sd_key_of(fspath),true)||
+       sd_media_read_lease_tree_busy(fspath))
         return pocket_api_reject(ctx,POCKET_ERR_BUSY,op,
                                  "a handle is open on this path",true,
                                  POCKET_OUTCOME_NOT_APPLIED);
@@ -3673,7 +3716,8 @@ static JSValue sd_rename(JSContext *ctx, const fs_path_t *from,
         return pocket_api_reject(ctx,FS_ERR_ALREADY_EXISTS,op,
                                  "something already has that name",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
-    if(sd_busy(sd_key_of(a),true)||sd_busy(sd_key_of(b),true))
+    if(sd_busy(sd_key_of(a),true)||sd_busy(sd_key_of(b),true)||
+       sd_media_read_lease_tree_busy(a)||sd_media_read_lease_tree_busy(b))
         return pocket_api_reject(ctx,POCKET_ERR_BUSY,op,
                                  "a handle is open on this path",true,
                                  POCKET_OUTCOME_NOT_APPLIED);

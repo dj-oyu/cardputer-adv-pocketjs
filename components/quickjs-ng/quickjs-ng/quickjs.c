@@ -45897,7 +45897,7 @@ static JSValue js_function_toString(JSContext *ctx, JSValueConst this_val,
        prefix. The copy is the whole text of each function (an inner
        function's text is stored again inside its parent's), and on the
        Cardputer's 160 KiB guest it measured 2.5-7.1 KiB per app
-       (docs/kasane/kasane-guest-memory.md); toString's body is the only
+       (docs/kasane/decisions.md); toString's body is the only
        reader of it besides the debug dumps. */
     if (js_class_has_bytecode(p->class_id)) {
         JSFunctionBytecode *b = p->u.func.function_bytecode;

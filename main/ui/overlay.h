@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "keymap.h"
+#include "kasane/ksn_render.h"
 
 // The shell's side of docs/api/common-api.md 3.1: which overlay may run, whether it
 // is allowed to start, and when it is stopped.
@@ -49,8 +50,9 @@ bool overlay_running(void);
 void overlay_key(const keystroke_t *k);
 
 // One home-screen frame. Starts the overlay if it is armed and not up, runs one
-// guest turn, charges it against the frame budget, and stops it if it has been
-// over budget too long. Only ever called with no foreground guest running.
+// guest turn, combines it with the previous retained Kasane composition cost,
+// and stops it if it has been over budget too long. Only ever called with no
+// foreground guest running.
 //
 // `frame_us` is how long the PREVIOUS whole frame took. The charge is a share
 // of it rather than a stopwatch reading, because both this measurement and the
@@ -80,6 +82,16 @@ void overlay_yield(const char *claimant);
 // 2026-09-09 an overlay is meant to end the menu and stand in its place, with
 // only the shell's MODAL surfaces above it. What the menu was protecting was
 // reachability, and a reserved key the shell never delegates gives that
-// directly -- see overlay_yield(), which still has no caller. The code is
-// behind the section; shell.c says the same at the call site.
+// directly -- see the reserved-key caller of overlay_yield(). The compatibility
+// code is behind the section; shell.c says the same at the call site.
 void overlay_paint(uint16_t *strip, int strip_y, int strip_h);
+
+// A migrated overlay uses the normal Kasane APP lease, but the shell supplies
+// each live scene band through the backdrop-loader callback. The retained
+// command bank is recomposited every home frame; legacy pocket.overlay lists use
+// overlay_paint() above during the compatibility window.
+bool overlay_kasane_active(void);
+ksn_result overlay_kasane_present(const ksn_display_port *,ksn_backdrop_loader,
+                                  bool host_top_dynamic,ksn_render_stats *);
+// Charge only Kasane's retained-command work. Scene/HUD/LCD time is excluded.
+void overlay_kasane_charge(uint32_t composite_us);

@@ -41,6 +41,9 @@ ksn_result ksn_view_host_register_image(ksn_view *v,const ksn_image_port *port,k
     if(v->host->presenting)return KSN_BUSY;
     return ksn_core_register_image(v->host->core,v->layer,port,out);
 }
+ksn_result ksn_view_check_draw(const ksn_view *v,const ksn_draw *draw){
+    return valid(v)?ksn_core_check_draw(v->host->core,v->layer,draw):KSN_INVALID;
+}
 ksn_view_capabilities ksn_view_features(const ksn_view *v){
     if(!valid(v))return (ksn_view_capabilities){0};
     return (ksn_view_capabilities){.draw_kinds=(1u<<KSN_RECT)|(1u<<KSN_ROUND_RECT)|
@@ -115,6 +118,15 @@ ksn_result ksn_view_cancel(ksn_view *v,ksn_tx tx){
     return r;
 }
 ksn_submission ksn_view_poll(const ksn_view *v){return valid(v)?v->outcome:(ksn_submission){0};}
+ksn_result ksn_view_read_ref(const ksn_view *v,ksn_ref ref,ksn_view_snapshot *out){
+    if(!valid(v)||!out)return KSN_INVALID;
+    ksn_frame_command command;
+    ksn_result r=ksn_core_read_active_ref(v->host->core,v->layer,ref,&command);
+    if(r!=KSN_OK)return r;
+    *out=(ksn_view_snapshot){.draw=command.draw,.reveal=command.reveal,
+                             .visible=command.visible};
+    return KSN_OK;
+}
 static bool idle(const ksn_view *v){return !v->host->builder.value&&!ksn_core_has_submission(v->host->core);}
 static bool template_owned(const ksn_view *v,ksn_template t){
     if(!v->host->cache)return false;
@@ -178,6 +190,21 @@ ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,k
     if(!submitted&&!ksn_core_needs_repair(h->core))return KSN_OK;
     h->presenting=true;
     ksn_result r=ksn_render_rects(h->core,port,stats);
+    h->presenting=false;
+    if(r==KSN_OK&&submitted)resolve(h);
+    return r;
+}
+
+ksn_result ksn_view_host_present_backdrop(ksn_view_host *h,const ksn_display_port *port,
+                                          ksn_backdrop_loader load,bool occlusion_safe,
+                                          ksn_render_stats *stats){
+    if(!h||!h->core||!stats||!load)return KSN_INVALID;
+    *stats=(ksn_render_stats){0};
+    if(h->presenting)return KSN_BUSY;
+    bool submitted=ksn_core_has_submission(h->core);
+    if(!submitted&&!ksn_core_needs_repair(h->core))return KSN_OK;
+    h->presenting=true;
+    ksn_result r=ksn_render_rects_backdrop(h->core,port,load,occlusion_safe,stats);
     h->presenting=false;
     if(r==KSN_OK&&submitted)resolve(h);
     return r;

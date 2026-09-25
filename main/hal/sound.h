@@ -57,6 +57,23 @@ void sound_check_tables(void);
 // runs at the audio task's priority with its stack, so it must do no more than
 // hand the result to whichever loop is waiting for it.
 typedef void (*sound_done_fn)(void *ctx, bool completed);
+/* Optional system observer of output-stream progress. Called only on the audio
+ * task, at the start, at elapsed whole-second boundaries by default, and at termination.
+ * It must never wait, allocate, touch JS, or access a stream ring. `frames` is
+ * the caller's logical position (start_frame + frames actually consumed).
+ * `starved_blocks` is the output stream's cumulative silence-block count.
+ * active=false invalidates a stream even when it ended by stop or I2S error.
+ * Install/clear from the owner task; the callback must remain alive until the
+ * stream has stopped. NULL leaves the ordinary stream path unobserved. */
+typedef void (*sound_stream_observer_fn)(int32_t id,uint32_t frames,
+                                         uint32_t starved_blocks,bool active);
+void sound_stream_set_observer(sound_stream_observer_fn observer);
+/* Set an output-frame observation interval for the next stream. The callback
+ * is still at most once per emitted 128-frame block. A zero or out-of-range
+ * interval falls back to one second; changing it mid-stream takes effect on
+ * the next stream, never by moving an active task's deadline. */
+void sound_stream_set_observer_interval(sound_stream_observer_fn observer,
+                                        uint32_t interval_frames);
 
 // Queues one tone and returns its id, or one of the negative errors above. gain
 // is 0..1 and scales the same peak the clicks use. Tones and clicks share one
@@ -126,14 +143,21 @@ enum {
 // playback; `block` is the ADPCM block size and is ignored for PCM16. At least
 // one slot should be published before this is called, or the first block is an
 // underrun. A stream queued behind a tone waits for it, as everything on this
-// queue does.
+// queue does. `start_frame` is the logical position before this segment, used
+// only for observer reports (seek/resume may begin partway through a source).
 int32_t sound_stream_start(sound_stream_t *stream, int format, uint16_t block,
-                           uint32_t frames, float gain,
+                           uint32_t frames, uint32_t start_frame, float gain,
                            sound_done_fn done, void *ctx);
 
 // Stops the stream with this id and waits for the audio task to let go of the
 // ring. True when it has -- and only then may the caller free those bytes.
 bool sound_stream_stop(int32_t id);
+
+// Freeze/resume a live stream without discarding its decoder or ring cursor.
+// While paused the output sends silence, but position and underrun count do
+// not advance. A queued stream may be paused before the audio task claims it.
+bool sound_stream_pause(int32_t id);
+bool sound_stream_resume(int32_t id);
 
 // Output frames this stream has produced so far. Zero once it is over, so read
 // it before the callback lands or keep your own total.

@@ -1,40 +1,14 @@
-// The home screen's music player. Overlay app -- no ui.*, no menu underneath.
-// KSN-MISSING(overlay.attach): app_session.c never installs "kasane" for an
-// overlay_session, so this stays on pocket.overlay. README.md "Kasane missing".
+// The home screen's music player. Kasane owns the picture; pocket.overlay owns keys.
 (function () {
-  var o = pocket.overlay, W = o.region.width, H = o.region.height;
+  var host = pocket.overlay, ui = pocket.kasane;
+  var view = ui.mount('music');
   var EXT = ['.mp3', '.wav', '.pok'];
-  var MAX = pocket.capabilities.get('ui.overlay').limits.maxTextChars;
 
   var p = null, sub = null, path = '', state = 'idle', busy = false;
-  var pos = 0, gaps = 0, msg = 'ENTER TO CHOOSE', title = 'NO TRACK';
-  var dirty = true, total = null, tick = 0, help = false;
-
-  // The face is 6 px for ASCII and 12 for everything else, and overlay.text
-  // counts BYTES while String.slice counts code units. Both facts are needed
-  // twice: to trim a name to the limit, and to put a box exactly round it.
-  function walk(s, cap) {
-    for (var b = 0, w = 0, i = 0; i < s.length; i++) {
-      var c = s.charCodeAt(i), n = c < 128 ? 1 : c < 2048 ? 2 : 3;
-      if (cap && b + n > MAX) break;
-      b += n; w += c < 128 ? 6 : 12;
-    }
-    return cap ? s.slice(0, i) : w;
-  }
-  function cut(s) { return walk(s, 1); }
-  function wpx(s) { return walk(s, 0); }
-
-  // Text on its own black plate, sized to the text. No band across the top:
-  // the ground belongs to the scene, and only the letters take any of it.
-  function plate(x, y, s, r, g, b) {
-    if (!s) return;
-    s = cut(s);
-    o.rect(x, y, wpx(s) + 8, 16, 0, 0, 0);
-    o.text(x + 4, y + 2, s, r, g, b);
-  }
+  var outputProbe = null, outputBound = false;
 
   function leaf(s) { var i = s.lastIndexOf('/'); return i < 0 ? s : s.slice(i + 1); }
-  function say(m) { msg = m; dirty = true; }
+  function say(m) { view.set({message: m}); }
 
   function fail(where, e) {
     say(where + ' ' + ((e && e.code) || e));
@@ -45,21 +19,19 @@
   function drop() {
     if (sub) { sub.close(); sub = null; }
     if (p) { p.close(); p = null; }
-    state = 'idle'; pos = 0;
+    state = 'idle';
   }
 
   function open(src, play) {
     drop();
     path = src; busy = true;
-    title = leaf(src); say('OPENING');
+    view.set({title: leaf(src), message: 'OPENING'});
     pocket.audio.player.open({ source: src }).then(function (h) {
       p = h;
-      // Real, from the file's own Xing/Info or VBRI tag, or null. Two different
-      // pictures below, never one rounded into the other.
-      total = h.info().durationMs;
-      console.log('PLAYER_OPEN ' + src + ' durationMs=' + total);
+      view.bind('playback');
+      console.log('PLAYER_OPEN ' + src + ' durationMs=' + h.info().durationMs);
       sub = h.onState(function (e) {
-        state = e.state; say(''); dirty = true;
+        state = e.state; say('');
         if (e.state === 'error') { fail('PLAYBACK', e.error); return; }
         if (e.state === 'ended') next();
       });
@@ -79,7 +51,7 @@
     }, function (e) { fail('NEXT', e); });
   }
 
-  function chose(f) { busy = false; if (f) open(f, true); else dirty = true; }
+  function chose(f) { busy = false; if (f) open(f, true); else say(p ? '' : 'ENTER TO CHOOSE'); }
 
   // The grant screen on its own key. README.md.
   function share() {
@@ -104,77 +76,34 @@
       .then(function () { busy = false; }, function (e) { fail('TRANSPORT', e); });
   }
 
-  o.onKey(function (e) {
-    if (e.key === '?') { help = !help; dirty = true; return; }
+  host.onKey(function (e) {
+    if (e.key === '?') { view.toggleHelp(); return; }
+    // Diagnostic-only: the real music presenter stays on screen. The source
+    // publishes from the audio task but this probe does not bind its fields.
+    if (globalThis.KSN_P1_OUTPUT_OVERLAY_PROBE && e.action === 'up') {
+      if (!outputProbe) {
+        outputProbe = pocket.audio.outputSource({sampleMs: 33});
+        console.log('KSN_P1_OUTPUT_OVERLAY ACTIVE sampleMs=33');
+      }
+      return;
+    }
+    if (globalThis.KSN_P1_OUTPUT_OVERLAY_PROBE && e.action === 'down') {
+      if (outputProbe && !outputBound) {
+        view.bind('output');
+        outputBound = true;
+        console.log('KSN_P1_OUTPUT_OVERLAY BOUND visible=1');
+      }
+      return;
+    }
     if (busy) return;
-    if (help) { help = false; dirty = true; return; }
+    if (view.dismissHelp()) return;
     if (e.action === 'accept') { if (p) toggle(); else pick(); return; }
     if (e.action === 'right') { if (p) next(); return; }
     if (e.action === 'left') { pick(); return; }
     if (e.action === 'up') share();
   });
 
-  // A bar against a real end, or a light that travels and claims no position.
-  function bar(y) {
-    var track = W - 24;
-    o.rect(12, y, track, 2, 24, 38, 54);
-    if (total) {
-      var w = (pos * track / total) | 0;
-      if (w > track) w = track;
-      if (w > 0) o.rect(12, y, w, 2, 120, 200, 255);
-      return;
-    }
-    if (state !== 'playing') return;
-    var seg = 18, span = track + seg * 3, head = (tick * 3) % span - seg * 3;
-    var c = [[120, 200, 255], [60, 120, 170], [30, 60, 90]];
-    for (var i = 0; i < 3; i++) {
-      var x = head + i * seg, w2 = seg;
-      if (x < 0) { w2 += x; x = 0; }
-      if (x + w2 > track) w2 = track - x;
-      if (w2 > 0) o.rect(12 + x, y, w2, 2, c[i][0], c[i][1], c[i][2]);
-    }
-  }
-
-  // ONE status line. It used to be two -- a transport state and a note -- which
-  // said "PLAYING" and "OPENING" a few pixels apart and left the reader to work
-  // out which was current. A message wins while it stands, and the transport
-  // speaks when there is nothing to report.
-  function status() {
-    if (msg) return msg;
-    if (!p) return '';
-    var t = state.toUpperCase() + '  ' + (pos / 1000 | 0) + 's';
-    if (total) t += ' / ' + (total / 1000 | 0) + 's';
-    if (gaps) t += '  GAPS ' + gaps;
-    return t;
-  }
-
-  var HELP = ['ENTER  PLAY / PAUSE', 'LEFT   CHOOSE A FILE',
-              'UP     CHOOSE A FOLDER', 'RIGHT  NEXT TRACK',
-              '-  =   VOLUME', 'ESC    LEAVE THE PLAYER'];
-
-  var n = 0;
-  globalThis.frame = function () {
-    if (p && !(++n % 5)) {
-      var s = p.status();
-      if (s.positionMs !== pos || s.underruns !== gaps) dirty = true;
-      pos = s.positionMs; gaps = s.underruns;
-    }
-    // The light is the only thing that must redraw on an otherwise still frame,
-    // so it is what marks the list dirty. 15 Hz; it bought no frames, README.md.
-    if (!total && state === 'playing' && !(n % 2)) { tick++; dirty = true; }
-    if (!dirty) return;
-    dirty = false;
-    o.begin();
-    if (help) {
-      o.rect(0, 0, W, H, 0, 0, 0);
-      for (var i = 0; i < HELP.length; i++)
-        o.text(14, 14 + i * 18, HELP[i], 226, 240, 255);
-      o.text(14, H - 18, '?  CLOSE', 110, 140, 165);
-      return;
-    }
-    plate(8, 8, title, 226, 240, 255);
-    plate(8, 28, status(), 150, 190, 220);
-    bar(H - 26);
-    plate(8, H - 20, '?: help', 110, 140, 165);
-  };
+  view.set({title: 'NO TRACK', message: 'ENTER TO CHOOSE'});
+  // Input and Promise callbacks own the JS work; native Kasane owns drawing.
+  globalThis.frame = null;
 })();

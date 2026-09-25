@@ -21,24 +21,17 @@ Escで保存してホームへ戻ります。
 
 ## 実装
 
-`pet.js`が育成ロジックとUIを所有します。共通の方向ボタン（PSPビット配置）と
+`pet.js`が育成ロジックと入力判断を所有し、Kasaneのnative presenterが画面構成を所有します。共通の方向ボタン（PSPビット配置）と
 `pocket.storage`を利用します。ホストは`local.pet`名前空間を割り当てます。
 Esc時にはキャンセル前に0x2000の終了フレームを1度配送します。
 描画時刻はフレーム数ではなく単調時計を使用し、入力でフレーム数が増えても育成速度を変えません。
 
-2026-09-17、`pocket.kasane`（Kasane）へ移植しました。旧`ui.createNode`/`setProp`/
-`insertBefore`/`replaceText`と旧`pocket.pet.place`/`say`/`show`オーバーレイは呼びません。
-`view.createScene({build,patch})`を1個所有し、`build`が固定トポロジ（タイトル・バッジ・
-パネル・地面・種名・状態・バー3本・フッタ・ヒント）を1回作ります。ペット画像と吹き出しは
-ロード成功後の`scene.invalidate(true)`による再`build`でトポロジへ加わります
-（未ロード中は旧UIと同様に何も出ません）。以降は`patch`が値だけ更新します。
-
-ペット画像は`view.petImage()`で借りるopaque handleと`tx.image({resource,bounds})`、
-色・表情の更新は`ref.setImageFrame(tx,variant,frame)`です。variantが0–11の配色番号、
+2026-09-23、`pocket.kasane.mount('pet')`へ移行しました。JSは育成値・操作・
+保存を扱い、`view.set()`で表示値だけを渡します。画像資源、固定配置、バー、吹き出し、
+差分判定、提出と再試行はnative presenterが担当します。variantが0–11の配色番号、
 frameが表情0–5で、旧`pocket.pet.place`の第1引数・第4引数とそれぞれ対応します。
-吹き出しは旧`pocket.pet.say`のネイティブオーバーレイに依存できないため
-（Kasaneが最初のsubmitで旧RGB565 rendererを解放し、以後そのオーバーレイは描画されない）、
-`tx.rect`の吹き出し本体1枚と`tx.text`＋`setReveal`で文字送りをJS側から再実装しました。
+ロード前は画像を置かず、ロード後の最新値から再構築します。
+吹き出しの文字送り時刻はJSのdomain時計から渡し、文字のrevealはKasaneが適用します。
 枠と内側の二色塗りだった旧デザインは単色1枚に簡略化しています（`KSN-MISSING`参照）。
 英数字UIは`font:'caption'`で日本語フォントアトラスの増加を避けます。
 
@@ -51,15 +44,15 @@ frameが表情0–5で、旧`pocket.pet.place`の第1引数・第4引数とそ�
 移植時点でKasaneに無く、JS側で代替した／簡略化した点です。
 
 - `KSN-MISSING(text.animate)`: 文字列のreveal（文字送り）を進める native track が無く、
-  `patch`が呼ばれるたびにJSで経過時間から表示文字数を計算しています。旧`pocket.pet.say`は
+  JSが経過時間から表示文字数を渡しています。旧`pocket.pet.say`は
   ネイティブ側が70ms刻みで進めていました。
 - 吹き出しの二色塗り（外枠+内側ハイライト）は単色矩形1枚に簡略化しました。Kasane側の
   制約ではなく、ゲストソースのバイト数予算（移植元以下を維持）を優先した判断です。
 
 旧`ui.createNode`で作っていたノード数上限（taffy段差）の節はKasane移植で意味を失った
-ため削除しました。Kasaneのcommand/text予算は`docs/kasane/design-api.md`の
-`KSN_APP_COMMANDS`(80)・`KSN_APP_TEXT_BYTES`(896)で、pet.jsの使用量はどちらも
-1/3未満です（命令17、文字予約252 B）。
+ため削除しました。Kasaneのcommand/text予算は`docs/kasane/architecture.md`の
+`KSN_APP_COMMANDS`(80)・`KSN_APP_TEXT_BYTES`(896)です。presenterは可視命令だけを提出し、
+現在の画面で容量内に収まることをnative契約テストで確認します。
 
 `assets/concepts.png`はこの会話で内蔵画像生成ツールを使って作成・承認された下絵です。
 最終指示: 「3行4列。猫は茶トラ・三毛・黒猫・濃紺にシアン／マゼンタのサイバーパンク。
@@ -75,9 +68,8 @@ frameが表情0–5で、旧`pocket.pet.place`の第1引数・第4引数とそ�
 
 ネイティブ描画のソースは再編後の`main/pet/pet_pixels.c`、ヘッダー検索パスは`-Imain/pet`です。
 
-`node tools/test_pet.cjs`は旧`ui`/`pocket.pet.place`APIをモックしており、Kasane移植後の
-`pet.js`とは非互換で失敗します（2026-09-17時点で未更新、要`pocket.kasane`モック書き直し）。
-`node tools/test_companion.cjs`（companion、未移植）は引き続き旧APIのままです。
+`node tools/test_pet.cjs`と`node tools/test_companion.cjs`はnative viewへ渡すdomain値と
+保存・操作の振る舞いを検査します。画素は別途Kasaneのnativeテストと実機で確認します。
 `tools/test_pet_pixels.c`はホストCコンパイラーで`main/pet/pet_pixels.c`とリンクし、
 引数に`apps/pet/assets/pets-compact.bin`を指定すると全画素・表情・クリップ境界を確認できます。
 `idf.py -B build_pet_compact build`で専用ディレクトリにビルドします。

@@ -1,10 +1,17 @@
 /* Compare native and real QuickJS calls through the production RGB565 renderer. */
 #include "pocket_kasane.h"
+#include "pocket_av.h"
+#include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 void host_capabilities_clear(void);
+int32_t pocket_av_ui_current_player(void){return 0;}
+bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
+    (void)id;(void)out;return false;
+}
+bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void *__real_calloc(size_t,size_t);
 void __real_free(void *);
 void *__wrap_calloc(size_t n,size_t s){return __real_calloc(n,s);}

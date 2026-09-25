@@ -10,5 +10,8 @@ Caller-driven QuickJS guest for ESP-IDF.
 
 The component creates no FreeRTOS task and mounts no PocketJS capability by
 itself. `pocketjs_guest_frame` calls `globalThis.frame` once and drains the
-pending job queue. The QuickJS header is a version-pinned extension surface;
+pending job queue. An explicit `globalThis.frame = null` selects event-driven
+mode: each host turn still drains jobs but skips the JS frame call and argument
+allocation. A missing frame is still rejected. The QuickJS header is a
+version-pinned extension surface;
 ordinary firmware includes only `guest.h`.

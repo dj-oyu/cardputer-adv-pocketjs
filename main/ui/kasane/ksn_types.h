@@ -15,6 +15,11 @@ typedef enum { KSN_APP, KSN_SYSTEM } ksn_layer;
 typedef enum { KSN_REPLACE, KSN_PATCH } ksn_update_mode;
 typedef enum { KSN_RECT, KSN_ROUND_RECT, KSN_STROKE, KSN_GRADIENT, KSN_TEXT, KSN_IMAGE } ksn_kind;
 typedef enum { KSN_CAPTION, KSN_BODY, KSN_DISPLAY } ksn_font;
+/* Logical pen step; independent of whether a glyph is present in the font. */
+static inline unsigned ksn_font_advance(ksn_font font,uint32_t codepoint){
+    unsigned scale=font==KSN_DISPLAY?2u:1u;
+    return (codepoint<128u?6u:font==KSN_BODY?12u:8u)*scale;
+}
 /* Crop origin in source pixels; its extent follows bounds and scale. 2X
  * requires even destination extents. HALF samples source pixel centers. */
 typedef enum { KSN_IMAGE_1X, KSN_IMAGE_2X, KSN_IMAGE_HALF, KSN_IMAGE_STRETCH } ksn_image_scale;

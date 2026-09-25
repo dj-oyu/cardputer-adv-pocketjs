@@ -1,0 +1,41 @@
+# Kasane の判断台帳
+
+ここはコードを見ても復元しにくい**なぜその設計にしたか／なぜ別案を採らなかったか**を残す。数値は当時の比較条件に限る。再提案は禁止しないが、右欄の欠点を解消し、[verification.md](verification.md)のゲートで測ること。
+
+| 判断 | 理由・捨てたもの | 再検討の条件 |
+| --- | --- | --- |
+| Taffy/旧UIを削除し、固定容量・絶対座標の Kasane にする | PSRAMなしで旧UIの最大連続確保はデータ依存の約29.6/59.3 KiB、確保失敗は abort。Kasane は bounded な返り値失敗にできる。反面、native flex と文字測定を失い、固定 bank の常駐費用を払う。flash の旧約265 KiB対 Kasane約48 KiBという比較は機能幅も異なり、言語優位の証明ではない。 | flex が本当に必要なら固定配列の submit 時1回解決を別機能として提案。動的木・無制限 cache は戻さない。 |
+| guestメモリはGCではなく生存量を減らす | Kasane移植時のguest増分はアプリにより約13.9–15.4 KiBで、GC前後差0。主因はatom/名前空間/関数と確保ヘッダ、関数本文の複写だけで約2.5–7.1 KiB。関数source保持を出荷時に止め、scene controllerのC化で約5.0 KiB、prototypeの遅延・共有で約1.1 KiBを削減した。`kasane`を使わないsessionへnative arenaを先取りしない。 | toString/debug互換とアプリ別guest heapを再測定する。preload失敗は黙って流し、最初の実Kasane呼出しがOOMを返す契約を維持。 |
+| `createScene({build,patch})` を music 移行の本命にしない | controller は C でも命令を組み立てる callback は JS に残り、「アプリは意味と値、Kasane は画面構成」の目的を満たさない。 | 低レベル escape hatch としては可。汎用 `mount` に不足する描画能力は slot/descriptor の汎用語彙として示す。 |
+| Kasane core はいかなるアプリ詳細も知らない | `music/pet/clock` の `kind` や status 順位を core に入れると新しいアプリごとに FW が変わる。source は opaque な型付き値、表示定義はアプリ資産。 | アプリ固有の高速経路はそのアプリ module に置き、core の ABI には一般の可視値・所有権規則だけ追加。 |
+| hash / revision は dirty 候補選別に限定し、表示省略の最終判定は可視値の完全比較 | hash 衝突や「source revision は変わったが表示は同じ／逆」を表示欠落にしてはならない。ESP32-S3の暗号命令があっても短い固定命令の hash 計算・保持・衝突対策が無料とは限らない。 | 実測で比較より安く、衝突時も表示安全性が保てる場合に限る。完全比較を無条件に全 node へ行うのではなく dirty node に限る。 |
+| 2 bank と明示的 ticket、SUBMITTED/PRESENTED/DISCARDED | DISPLAYの途中失敗、SYSTEM割込み、JS yield 時にも旧確定画面を保つ。第3 bankや無制限更新queueは RAM に合わない。submitをLCD完了と見なすと失敗時に候補refsが生き残る。 | bank共有/lease変更は旧参照・途中転送・discard・repairの同値性が前提。 |
+| slot COW を text に単純適用しない | 2つの896 B APP物理領域に11 B textを80個配置し、交互PATCHで両 bankに分散させる。128 B text×7の合法 REPLACE は両 bankに連続128 B空きがなく、既に返した active pointer は次の成功表示まで上書き不可。正規化も返却済み pointer を壊す。第3領域には少なくとも896 Bが必要だが、当時の core は9,024/9,216 Bで余裕192 B。 | borrow pointerの寿命/leaseを明示変更するか、容量・断片化の証明と追加RAM承認が必要。現状は text-changing PATCH で同 layer の未変更 text clone が残るため、全経路1-copy未達。 |
+| native source は公開済み不変 snapshotを借り、core受理時だけ copy | producer と UI の双方に「immutabilityのためのコピー」を持たせると2回以上になる。lease が安全な間は pointer で読み、各表示 destination へ1回受理する。複数 destination の合計 copy は1回とは呼ばない。 | pool全pin、別 task同時publish、hidden→visible、DISCARDED、APP終了、低heapを有界で試験。全経路1-copyとは別の到達点。 |
+| JS text の UTF-8 stack一時copyを除去 | QuickJS文字列を検証中だけ借り、変更slotだけ schema 所有領域へ1回copyする。例外・拒否・GCで参照を解放する必要がある。実機23 text更新のp99改善は一貫せず、速度向上とは呼ばない。 | QuickJS内部変換・schema→core・render copyも計数してから全経路目標を判断。 |
+| template を不変共有し、表示命令32 B自体は instance ごとに展開 | 同じ部品を複数表示しながら instance 別PATCHと単純 damage を維持するため。cache 8・instance 8の制限を物理共有で迂回しない。命令 cache はJS再構築を省くが、画素生成やSPI送信を省かない。 | 命令の物理共有は変更頻度・damage・寿命・RAM/CPUの複雑さを含むA/B後。 |
+| group opacity は隔離してから適用 | 各子 alpha を縮めると重なり部分の色が違う。64画素行tileを使い、全画面中間bufferを作らない。ディザは最後のRGB565変換で画面座標固定、透明穴は背景を一切再量子化しない。 | pixel cacheへ自動切替すると量子化が変わり得るため明示mode・画素照合が必要。 |
+| overlay は APP lease + shell 背景、第三 layerなし | `pocket.overlay` は領域・キー、Kasane はguestの描画。shell-owned背景が動くため、Kasaneのdirty-nodeが効いても毎frameの背景合成と全画面転送は残り得る。modal の全画面scrimはregion契約と衝突する。 | backdrop更新そのものを局所化する案は、背景/通知/HUD/修復を同条件で画素・帯・音声計測してから。 |
+| 可視33 ms sourceを既定の全画面 music 更新にしない | 1 Hz telemetryを30 Hzにすれば短い変化が見えるが、最初の通常overlay試験で bound work p99=4,351 µs、固定上限3,839 µsを超えた。source取得単体だけが原因ではなく、計画・提出回数も増える。15 Hzへ落として合格とするのは33 ms要件の代用でない。 | フレームレス/限定描画等で同じ可視33 msと固定音声・heap・画素ゲートを満たす。数値telemetry自体は約1 Hzで足りるなら30 Hzへ増やさない。 |
+| 全計画 music PATCH を製品常時ONにしない | 最初の別image2回で send p99が固定上限5,247 µsを1 bucket超過。同一image ABBAでは PATCH/REPLACEとも work/draw/send p99利益を検出できず、差の因果も断定できない。全項目PATCHは構築・bank copy費用を相殺しない。 | 限定更新の正しい画素/repairと、同一imageで有意なCPU・音声・heap非悪化を示す。 |
+| music の light-only 3矩形 PATCH は採用 | projection/revisionが不変なら動く矩形だけ提出し、それ以外はREPLACE。OFF→ON→ON→OFF各45秒で work p99=3,199→3,071/2,943→3,199 µs、120秒ONと音声0、host32,400画素一致。draw p99は同値でLCDはほぼ64,800 B/17帯のまま。利点は組立・提出CPU、転送ではない。旧repair試験の1 runはsend最大5,506 µsで固定線を超えたが、位相分類OFFの後続独立boot×2は全run通過。 | 別曲・既知duration・実機画素・実SPI故障は未確認。旧不合格を後続合格で消さず、診断imageを製品imageへ外挿しない。 |
+| 毎frame guest優先をやめ、nativeとguestの公平性を有界にする | 毎frame guest優先は通常musicの work p99=4,351 µsで固定上限3,839 µs違反。一方native ticketを「前turnのguest提出」と誤認するとJS sleepが音声終了まで止まった。既存提出を先にsettleし、通常native優先、guest最終実行から100 ms経過時だけguest優先とした。 | 100 msはUI taskが回る場合の方針であり、preemption込みwall-clock保証ではない。実機の高頻度sourceで観測最大間隔136.061 msを隠さない。 |
+| decoderだけ core 0 固定を既定にする | 音楽中の描画p99 9/16 msの揺れはSPI2転送そのものより、ISR callback後にUI taskが結果を受け取る遅れが大きかった。ISR core1だけ、output task core0だけでは改善せず、decoder core0のみがISR既定配置でも45秒×3＋240秒で draw p99=9.471 ms・音声障害0。 | SD read/decoder/UI因果は環境依存。物理DMA完了時刻を測っていない。優先度だけ上げる、音声をUI待ちにする、音声ringを無視してSD停止する案は採らない。 |
+| 音声 source の早期確保と条件付き arena 回収 | 後期確保はSD-SPI/VFSのstatic mutex各84 Bが大きな空き領域を分断し、largest floor 65,536 Bを割った。source本体静的化は静的DIRAM+368 Bで解決せず、SPI3 bus解放はfree+632 Bでもlargestを改善せず撤回。1,344 B mutex arenaを初回lock/SD mountまで遅らせてもlargest=63,488 Bで撤回。早期確保し、停止時に使用枠0なら回収する案は通常musicのP0を通した。2コア初回確保レースは実機独立boot×2で共有・重複分解放・最終回収を確認。 | static lock寿命とheap配置が理由であり source leak ではない。実heap OOM時の音声と生成途中deactivateの実機競合は追加試験が要る。 |
+| 音声停止を証明できなければsourceを再作成しない | 停止未確認/登録解除失敗で旧storageを保持するのはcallback・readerのUAF回避に必要。その状態で次のAPPが新serviceを登録すると、旧callbackが参照する`live`が置換され、保持した意味が失われる。そこでboot中は`BUSY`で新規作成を拒否し、旧arenaも回収しない。通常停止は解放する。 | 旧taskと全leaseの停止を改めて証明するquiescence APIと再回収手順があれば再検討。現行は異常停止後の機能回復よりメモリ安全を優先する。hostで停止未確認分岐を確認したが実機timeoutは未再現。 |
+| owner-task playback sourceは残存pinの解放後に回収できる | 再生状態sourceには別taskのcallbackがなく、旧pinがある間だけunregisterを拒否すればよい。APP終了後に新sourceを重ねず、次のopen/resetでunregister成功を確認してから旧storageを解放する。音声task直結sourceのように停止未確認をboot中永久BUSYにする必要はない。 | 旧leaseの孤児化を実機で作った証拠はない。hostではpin→detach→BUSY→release→回収→再openを確認した。owner-task外からのproducer追加時はこの回収条件を再設計する。 |
+| wall sourceの文字はreaderが返すまで更新しない | `face/tag`はsource内の固定配列を借用しており、分境界でその場更新すると旧snapshotの文字が変わる。複数readerがpin中なら新しい分のacquireは有界`BUSY`とし、最後のrelease後に更新する。APP終了時の旧pinも新セッションへ再利用せず、解除後に旧世代を回収する。 | hostで2 readerの不変性・解放後更新を確認。実機では通常の1分更新で時計領域だけ21画素変化。実機の長期pinや孤児leaseは未再現。 |
+| System dirtyとKasane damageを分ける | 前者はstate変更通知、後者は可視画素。通知の受付など消せない操作をdirty bitへ置くと取りこぼす。System通知は固定record、snapshotは必要時copy、所有者の command が受付結果を返す。 | broker・event sourcing・購読者別payload複製は容量と意味論を示してから。 |
+| 通知の不透明上書きで背後の再合成を省く | SYSTEM先頭の完全不透明・全幅・非group rectが帯を覆うときだけ背景loaderとAPP描画を省ける。透明/半透明は従来合成。初回通知のdraw maxスパイクを軽減し、解除時に背景を再描画。 | 通知名ではなく一般の遮蔽条件で判定し、host画素一致と実機の通知/解除を試す。 |
+| PIEは描画の局所実装とし、System帳簿処理に広げない | 不透明spanやfrost補間の反復画素処理には8 laneの利益がある。旧frost stressの同一image A/Bではscalar 362,219 µs→PIE 145,690 µs（8,960画素×64）。一方Systemの4/5/8/9件の固定帳簿処理はレーン並列性が乏しく、当時の推定は描画2.32 msに対し約0.2%。PIE命令があることだけでhash/diffやSystemが速くなるとは判断しない。 | scalarとの画素一致、実機A/B、追加scratch/stack、コードサイズを個別に示す。 |
+| binary text PIEを現行musicの既定経路にしない | 整列日本語を毎回更新する診断画面では同一imageの描画p99が約16〜19%短縮し、全画素一致。一方、実musicの独立boot ABBAでは音声障害0でも `overlay_compute` p50がOFF 3,839→ON 3,967 µs、p99の改善もなかった。8 lane命令の存在だけで小さな/まばらな文字更新を速いとみなさない。 | 既定OFFを維持。小ブロックの呼出し閾値等を変えるなら、music・日本語診断・画素・音声・容量を同じ設計で再測定する。 |
+| 厳格な「全経路1-copy」を製品v1の合格と混同しない | producer原データまで広げるとcore bank clone、構造展開、QuickJS materializeが残る。現music 45秒ではtext clone/render scratch/decode copyは0だが、`render_decode_view`は約498 B/frame。同一image独立boot×2の診断では、このview展開だけの空括弧差引きは約5.8〜5.9 µs/frame。約8.7 msの描画中央値に対して小さく、これを消すためだけに第3 bankやborrow寿命変更を入れない。他のcopyとpayload lineageは未測定。 | 安全な保存/lease設計と端末の同一条件ゲートを通した場合だけ達成宣言。未達のまま製品運用はできるが、目標を消さない。 |
+
+## 意図的に狭くした／保留した機能
+
+- `u32` は source のデータ slot とし、16-bit座標等へ暗黙変換しない。JS定義 `version:1` と native schema/source ABI v2 を区別し、旧C構造体は拒否する。PIEや別binary導入時の誤読防止。
+- 文字はFlash字形を行単位で読み、RAM atlasは持たない。日本語全角の実際のadvanceを使う。複雑な組版・自動折返しは保証しない。
+- `frosted-static` は縮小 snapshot + blur の追加2/6 KiB予算を要し、基本16 KiB目標に混ぜない。filter画素があることをmodalの capture/attach と実アプリ採用の完了とはしない。
+- native flex、汎用 blur/affine/3D、raster cacheは別予算・画素規約・実機負荷ゲートが必要。初期JSON Schemaは制作時の構想であり、現行 `mount` と同一の機能完成を示さない。
+- 将来の動画/3Dを入れるなら、任意の帯を同じ内容で再読出しできる **replayable resource** と、producerが最新frameを公開する **live surface** を分ける構想。後者は深さ1・latest-wins mailbox、世代付きleaseで `FREE→PRODUCER→READY→COMPOSITOR→FREE` とし、compositor借用中の上書きを禁止する。LCD途中失敗時に同じframeをrewindできなければ、そのframeを確定baselineにせず破棄し、再現可能frame/keyframeで全面修復する。JSへpixel pointerや書込ArrayBufferを渡さず、音声があれば音声clockをmasterにする。MJPEG等の再読出し可能形式を先にし、inter-frame codecのdecoder stateは別RAM予算。これは**未実装の候補契約**で、現行能力ではない。
+- 時計が無効でも相対timerは動く。電圧から偽のバッテリー残量百分率を作らない。日次alarmの巻戻し/飛越し、通知満杯、保存失敗をexactly-onceと呼ばない。強い保証には永続outboxが必要。

@@ -940,7 +940,7 @@ live最大は全方針でhello456B、A148B、B20460B、C172B、D148B、E160B、F
 
 ## 6. 関数ソースを保持しない（2026-09-17、`vm/strip-fn-source`）
 
-上流の QuickJS は、関数を1つ解析するたびにその全文を `js_strndup` で複写して `JSFunctionBytecode.source` に持つ（内側の関数の本文は親の複写にも入るので二重に持つ）。読むのは `Function.prototype.toString` とデバッグ出力だけ。Kasane 移植の計測（[kasane-guest-memory.md](../kasane/kasane-guest-memory.md)）で、この複写がアプリあたり 2.5〜7.1 KiB と分かったので、出荷の既定で作らないようにした。
+上流の QuickJS は、関数を1つ解析するたびにその全文を `js_strndup` で複写して `JSFunctionBytecode.source` に持つ（内側の関数の本文は親の複写にも入るので二重に持つ）。読むのは `Function.prototype.toString` とデバッグ出力だけ。Kasane 移植の計測（[判断台帳](../kasane/decisions.md)）で、この複写がアプリあたり 2.5〜7.1 KiB と分かったので、出荷の既定で作らないようにした。
 
 - **切替**: `CONFIG_POCKET_VM_STRIP_FN_SOURCE`（`main/Kconfig.projbuild`、既定 y）。`quickjs.c` の複写3箇所（通常関数、式本体のアロー、クラス）を飛ばす。n にすると上流と同じ。
 - **失うもの**: JS 関数の `toString()` は、上流にもともとある「ソース無し」の分岐を通って `"function " + name + "() {\n    [native code]\n}"` を返す（`js_function_toString`）。この分岐では `func_kind` が更新されないので、async・ジェネレータ・アロー・クラスも接頭辞は `function ` になる。呼び出し、エラーメッセージ、スタックトレース、行番号は変わらない。

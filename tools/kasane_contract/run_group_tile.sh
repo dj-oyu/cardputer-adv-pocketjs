@@ -4,16 +4,16 @@
 # the smooth-layer shortcut. This is the entry point for
 # tools/kasane_contract/test_group_tile.c alone.
 #
-# It deliberately does not touch tools/kasane_contract/run.sh: this container
-# cannot finish that script's sanitizer arm (docs/perf/kasane-opt-integration.md
-# 0; AddressSanitizer:DEADLYSIGNAL in an endless loop on pristine HEAD too), and
-# the suite is run from a /tmp copy of run.sh with only the sanitizer flag
-# stripped. Wiring this case into run.sh belongs to a session that can run the
-# sanitizer arm, so it is left out here.
+# Keep this large sweep as a separate entry point, but test both sanitizer and
+# optimized builds. Negative gradient spans must not reach a signed left shift.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
+cc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -Imain/ui/kasane \
+  main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+  tools/kasane_contract/test_group_tile.c -o "$out/group-tile-sanitized"
+UBSAN_OPTIONS=halt_on_error=1 ASAN_OPTIONS=halt_on_error=1 "$out/group-tile-sanitized"
 # test_group_tile.c links ksn_render.c as a translation unit (it only needs the
 # three switches, which ksn_render.h declares): do NOT also include it.
 cc -std=c11 -Wall -Wextra -Werror -O2 -fstrict-aliasing -Imain/ui/kasane \

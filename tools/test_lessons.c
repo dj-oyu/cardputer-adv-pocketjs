@@ -8,6 +8,8 @@
 //
 //   wsl -e bash -lc "cd <repo> && bash tools/build_lessons_test.sh && /tmp/test-lessons"
 #include "pocket_kasane.h"
+#include "pocket_av.h"
+#include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "text/ksn_font.h"
 #include "lessons.h"
@@ -16,6 +18,11 @@
 #include <string.h>
 
 void host_capabilities_clear(void);
+int32_t pocket_av_ui_current_player(void){return 0;}
+bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
+    (void)id;(void)out;return false;
+}
+bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void *__real_calloc(size_t count,size_t size);
 void __real_free(void *ptr);
 void __wrap_free(void *ptr) { __real_free(ptr); }

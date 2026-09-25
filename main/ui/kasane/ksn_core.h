@@ -30,9 +30,23 @@ typedef struct ksn_core_impl ksn_core_impl;
 typedef struct { ksn_core_impl *core; ksn_layer layer; } ksn_endpoint;
 typedef struct { ksn_image_port port; ksn_resource id; ksn_layer layer; } ksn_image_entry;
 typedef struct {
-    ksn_command_storage *commands;
-    uint8_t *text;
+    /* Keep clone_bank_metadata() in ksn_core.c in sync with logical fields
+     * added here. Physical block identity must never cross candidate banks. */
+    ksn_command_storage *commands; /* Owned physical block. */
+    ksn_command_storage *command_peer;
+    /* Per-slot owner: bit 0/1 selects physical command bank 0/1. A PATCH
+     * borrows sealed commands until a writer privatizes one slot. */
+    uint32_t command_owner[(KSN_COMMANDS+31u)/32u];
+    uint8_t physical_index;
+    uint8_t *text; /* Owned physical block; never changes after bind. */
+    /* A sealed layer may borrow the other logical bank's immutable text.
+     * Each pointer addresses that layer's own [0,text_limit) region. */
+    uint8_t *text_layer[2];
     ksn_track *tracks;
+    ksn_track *track_peer;
+    /* One bit per animation slot selects immutable physical track bank 0/1.
+     * A candidate borrows unchanged slots and privatizes only a writer. */
+    uint8_t track_owner;
     uint16_t count[2],text_used[2];
     uint32_t generation[2];
     ksn_rgba background[2];
@@ -50,6 +64,10 @@ struct ksn_core_impl {
     ksn_layer layer;
     ksn_update_mode mode;
     uint8_t active,building_bank;
+    /* PATCH text slots already written into the candidate bank. The old
+     * contents of those slots need not be cloned at seal time. */
+    uint32_t text_written[(KSN_COMMANDS+31u)/32u];
+    uint8_t text_written_layers;
     /* Two band sets, not one flag: `invalidated` is what an owner has asked for
      * and prepare_frame has not taken yet, `repair_bands` is what the frame in
      * flight owes. An unqualified invalidate sets every bit in both and so is
@@ -91,6 +109,8 @@ ksn_client ksn_core_client(ksn_core *core,ksn_layer layer);
  * init, which must run outside provider callbacks and invalidate all clients.
  * Register only between submissions/builders. No per-frame retain/release. */
 ksn_result ksn_core_register_image(ksn_core *core,ksn_layer layer,const ksn_image_port *port,ksn_resource *out);
+/* Read-only owner-turn validation against currently registered resources. */
+ksn_result ksn_core_check_draw(const ksn_core *,ksn_layer,const ksn_draw *);
 /* Optional caller-owned blocks, attached before the first animation. */
 ksn_result ksn_core_enable_animation(ksn_core *,ksn_core_animation_block *,ksn_core_animation_block *);
 ksn_result ksn_core_finish_animation(ksn_core *,ksn_layer,ksn_tx,ksn_animation);
@@ -133,6 +153,10 @@ void ksn_core_invalidate(ksn_core *core);
  * invalidation stays available for owners that do not know. */
 #define KSN_BANDS_ALL ((1u<<17)-1u)
 void ksn_core_invalidate_bands(ksn_core *core,uint32_t bands);
+/* Full-width 8-row bands whose displayed SYSTEM layer is independent of the
+ * backdrop. Conservative: returns 0 while SYSTEM work/repair is in flight.
+ * This is a read-only occlusion hint, never a substitute for submission damage. */
+uint32_t ksn_core_opaque_system_bands(const ksn_core *core);
 
 /* What a frame owes the panel: the bands, and for each of them the half-open
  * column range inside it. The columns are the union of the changed commands'
@@ -161,6 +185,19 @@ ksn_result ksn_core_prepare_frame(ksn_core *core,ksn_frame *out);
 void ksn_core_defer_repair(ksn_core *core,ksn_tx ticket);
 ksn_result ksn_core_read(const ksn_core *core,ksn_tx ticket,bool previous,
                        ksn_layer layer,uint16_t index,ksn_frame_command *out);
+/* Renderer-only read of a sealed ticket. Text is a read-only view into the
+ * selected bank, valid through this presentation attempt (including a retry),
+ * but not after presented/discarded/reset. The display port must not mutate
+ * the core or retain the pointer from a callback. Unlike ksn_core_read this
+ * does not copy text into out->text. */
+ksn_result ksn_core_read_borrowed(const ksn_core *core,ksn_tx ticket,bool previous,
+                                ksn_layer layer,uint16_t index,ksn_frame_command *out);
+/* Owner-only read of one committed reference. Text points directly into the
+ * active bank and is read-only until the next successful presentation/reset.
+ * It may be held only through that interval; never call from a display
+ * callback or retain it beyond presentation/reset. */
+ksn_result ksn_core_read_active_ref(const ksn_core *core,ksn_layer layer,
+                                    ksn_ref ref,ksn_frame_command *out);
 ksn_result ksn_core_image_span(const ksn_core *core,ksn_tx ticket,bool previous,
                             ksn_layer layer,uint16_t index,uint16_t y,uint16_t x,
                             uint16_t count,uint16_t *rgb565,uint8_t *alpha);

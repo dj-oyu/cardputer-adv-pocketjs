@@ -21,9 +21,10 @@ void app_vm_reloc_request(void);
 void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
 
 // docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the
-// background rather than instead of it. It gets no Kasane display -- see
-// pocket_overlay.h -- and a guest heap sized for
-// what is left while a scene is drawing rather than for an empty machine.
+// background rather than instead of it. It gets a region-scoped Kasane APP
+// endpoint; the shell supplies the live native scene as its backdrop. The
+// guest heap is sized for what is left while a scene is drawing rather than
+// for an empty machine.
 //
 // The bytes must outlive the start, as with app_start_source().
 //
@@ -54,15 +55,21 @@ void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
 // spent instead of predicting it.
 #define OVERLAY_GUEST_HEAP (160*1024)
 esp_err_t app_start_overlay(const char *source, size_t length);
-// One turn of an overlay session. Guest JavaScript only: nothing is rendered
-// or presented here, because the shell composites the overlay's display list
-// into its own frame.
+// One turn of an overlay session. Guest JavaScript is advanced and its Kasane
+// transaction is closed here. Presentation remains shell-owned so it can load
+// the native scene into each strip before composing the APP layer.
 esp_err_t app_overlay_tick(void);
 void app_force_redraw(void);
 // The same, for an owner that composites over the guest's strips and knows
 // which 8-row bands it touched (bit b is rows 8b..8b+7, bit 16 the last seven).
 // An empty set is a no-op.
 void app_force_redraw_bands(uint32_t bands);
+#ifdef KASANE_P2_REPAIR_PROBE
+// USB diagnostic only: fail the fourth send of one forced full APP repaint.
+void app_p2_request_repair_probe(void);
+// USB diagnostic only: fail the fourth send of the next natural APP PATCH.
+void app_p2_request_patch_repair_probe(void);
+#endif
 esp_err_t app_tick(uint32_t buttons);
 // The display period the shell paces a RUNNING guest at (main.c's ui_task),
 // and the ceiling on how often a continuation turn reaches the panel

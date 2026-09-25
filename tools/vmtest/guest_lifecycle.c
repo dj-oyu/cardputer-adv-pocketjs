@@ -25,6 +25,29 @@ static int value(JSContext *ctx, const char *expr) {
 }
 
 void vmtest_guest_lifecycle(void) {
+    {
+        pocketjs_guest_config_t config;
+        pocketjs_guest_config_defaults(&config);
+        config.heap_limit = 160 * 1024;
+        config.stack_limit = 20 * 1024;
+        config.prefer_psram = false;
+        pocketjs_guest_t *guest = NULL;
+        assert(pocketjs_guest_create(&config, &guest) == ESP_OK);
+        const char *missing = "globalThis.jobs=0";
+        assert(pocketjs_guest_eval(guest, missing, strlen(missing), "missing-frame") == ESP_ERR_NOT_FOUND);
+        const char *event_driven = "globalThis.frame=null;Promise.resolve().then(()=>jobs++)";
+        assert(pocketjs_guest_eval(guest, event_driven, strlen(event_driven), "event-driven") == ESP_OK);
+        JSContext *ctx = pocketjs_guest_quickjs_context(guest);
+        assert(value(ctx, "jobs") == 1);
+        assert(value(ctx, "Promise.resolve().then(()=>jobs++);0") == 0);
+        pocketjs_guest_frame_t input = {.struct_size = sizeof(input)};
+        assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
+        assert(value(ctx, "jobs") == 2);
+        pocketjs_guest_stats_t stats = {.struct_size = sizeof(stats)};
+        assert(pocketjs_guest_stats(guest, &stats) == ESP_OK);
+        assert(stats.frames == 1 && stats.frame_errors == 0);
+        pocketjs_guest_destroy(guest);
+    }
     const char *sources[] = {
         "globalThis.frame=()=>{calls++;work()}",
         "globalThis.frame=()=>{calls++;Promise.resolve().then(work)}",

@@ -703,7 +703,8 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
   JSValue global = JS_GetGlobalObject(guest->context);
   guest->frame = JS_GetPropertyStr(guest->context, global, "frame");
   JS_FreeValue(guest->context, global);
-  if (!JS_IsFunction(guest->context, guest->frame)) {
+  if (!JS_IsFunction(guest->context, guest->frame) &&
+      !JS_IsNull(guest->frame)) {
     return ESP_ERR_NOT_FOUND;
   }
   return drain_jobs(guest);
@@ -749,11 +750,20 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
       (frame->touch_count != 0U && frame->touches == NULL)) {
     return ESP_ERR_INVALID_ARG;
   }
-  if (!JS_IsFunction(guest->context, guest->frame)) {
+  if (!JS_IsFunction(guest->context, guest->frame) &&
+      !JS_IsNull(guest->frame)) {
     return ESP_ERR_INVALID_STATE;
   }
   if (pocketjs_guest_suspended(guest))
     return ESP_ERR_INVALID_STATE;
+  if (JS_IsNull(guest->frame)) {
+    /* Explicit event-driven mode: the host still pumps services and every
+     * pending Promise job, but there is no JS frame callback to invoke. */
+    guest->frames++;
+    const esp_err_t jobs = drain_jobs(guest);
+    if (jobs != ESP_OK) guest->frame_errors++;
+    return jobs;
+  }
   JSValue arguments[4] = {
       JS_NewUint32(guest->context, frame->buttons),
       JS_NewUint32(guest->context, frame->analog),

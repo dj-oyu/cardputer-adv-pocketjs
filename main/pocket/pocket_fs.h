@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "quickjs.h"
+#include "sd_media.h"
 
 // pocket.fs — the file surface of docs/api/common-api.md section 7, specified in
 // detail by docs/api/filesystem-api.md.
@@ -89,3 +90,13 @@ int32_t pocket_fs_read_all(const char *path, uint8_t *out, uint32_t cap,
                            const char **code);
 int32_t pocket_fs_read_at(const char *path, uint32_t offset, uint8_t *out,
                           uint32_t want, const char **code);
+
+// Owner-task handoff for an SD-only asynchronous reader. It applies the same
+// path, grant, generation, directory, size and writer exclusions as read_at,
+// then creates a session-owned lease. REOPEN releases the validation FILE;
+// PERSISTENT transfers it. The worker reads only that lease; after its teardown
+// ACK the owner calls sd_media_read_lease_close().
+bool pocket_fs_sd_read_lease_open(const char *path,
+                                  sd_media_read_lease_t *lease,
+                                  sd_media_lease_mode_t mode,
+                                  uint32_t *size, const char **code);

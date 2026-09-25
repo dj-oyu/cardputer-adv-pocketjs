@@ -92,8 +92,8 @@ static unsigned advance_of(void *ctx,ksn_font font,uint32_t codepoint){
 }
 /* The wide arm gets no advance, so its text commands dirty their whole box --
  * which is what makes this a comparison and not a tautology. */
-static const ksn_text_port wide_text={NULL,span,NULL};
-static const ksn_text_port narrow_text={NULL,span,advance_of};
+static const ksn_text_port wide_text={.span=span};
+static const ksn_text_port narrow_text={.span=span,.advance=advance_of};
 
 KSN_TEST_CORE(wide_core,static);
 KSN_TEST_CORE(narrow_core,static);

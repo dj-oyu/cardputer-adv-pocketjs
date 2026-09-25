@@ -9,16 +9,22 @@
 #include "pocket_fs.h"
 #include "pocket_imu.h"
 #include "pocket_av.h"
+#include "pocket_av_output_source.h"
+#include "pocket_av_playback_source.h"
+#include "pocket_mutex_arena.h"
 #include "pocket_capture.h"
 #include "pocket_io.h"
 #include "pocket_net.h"
 #include "pocket_ble.h"
 #include "pocket_text.h"
 #include "pocket_app.h"
+#include "pocket_clock.h"
+#include "pocket_pool_probe.h"
 #include "pocket_bridge.h"
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
 #include "pocket_kasane.h"
+#include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_input.h"
 #include "ksn_font.h"
 #include "app_registry.h"
@@ -70,6 +76,27 @@ static JSValue vm_storage_mark(JSContext *ctx, JSValueConst self,
 extern const char hello_start[] asm("_binary_main_js_start");
 extern const char hello_end[] asm("_binary_main_js_end");
 extern const char kasane_demo_start[] asm("_binary_demo_js_start");
+#ifdef KASANE_P0_PROBE
+extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_start");
+extern const char pool_source_probe_start[] asm("_binary_pool_source_probe_js_start");
+extern const char output_source_probe_start[] asm("_binary_output_source_probe_js_start");
+extern const char output_source_probe_hidden_start[] asm("_binary_output_source_probe_hidden_js_start");
+extern const char output_source_probe_dual_start[] asm("_binary_output_source_probe_dual_js_start");
+extern const char output_source_probe_long_start[] asm("_binary_output_source_probe_long_js_start");
+extern const char output_source_probe_seek_start[] asm("_binary_output_source_probe_seek_js_start");
+extern const char output_source_probe_lowheap_start[] asm("_binary_output_source_probe_lowheap_js_start");
+extern const char playback_source_probe_start[] asm("_binary_playback_source_probe_js_start");
+extern const char music_bar_probe_start[] asm("_binary_music_bar_probe_js_start");
+extern const char dirty24_probe_start[] asm("_binary_dirty24_probe_js_start");
+extern const char text23_probe_start[] asm("_binary_text23_probe_js_start");
+#ifdef KASANE_TEXT_PIE_DEVICE_PROBE
+extern const char text_pie_probe_start[] asm("_binary_text_pie_probe_js_start");
+#endif
+#ifdef KASANE_P0_COPY_PROBE
+extern const char output_source_probe_exhaust_start[] asm("_binary_output_source_probe_exhaust_js_start");
+#endif
+extern const char output_source_probe_off_start[] asm("_binary_output_source_probe_off_js_start");
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
 // VM probe workloads (docs/vm/quickjs-freertos-vm-spec.md sec.5), embedded only
 // when this build turned CONFIG_POCKET_VM_PROBE on (main/CMakeLists.txt).
@@ -202,11 +229,35 @@ static bool names_kasane(const char *s, size_t n) {
 // guest callback is still reset before the guest is destroyed. An overlay
 // session is a session; it is only started and ended by a different event.
 //
-// The flag is what an overlay session does NOT get: no Kasane display, and a
-// much smaller guest heap. See pocket_overlay.h for why drawing goes through a
-// host display list instead. Every other session draws through Kasane.
+// The flag selects the overlay capability set and shell-owned presentation.
+// Kasane still uses the APP lease; its display port receives the live home
+// scene as a backdrop instead of clearing to an opaque APP background.
 static bool overlay_session;
+/* An animated native source may submit every display period. Mark the guest
+ * due after 100 ms of native-only turns (plus the next UI scheduling delay)
+ * without charging every native frame for a JS turn. Reset per session. */
+static int64_t overlay_guest_last_us;
 static bool kasane_presented;
+#ifdef KASANE_P2_REPAIR_PROBE
+/* 1: forced full repaint, 2: the next natural PATCH. USB task -> UI task. */
+static atomic_int p2_repair_request;
+/* UI task only. One-shot failure after three successfully sent bands. */
+static unsigned p2_repair_stage;
+static int p2_sends_before_failure=-1;
+static bool p2_capture_repair_only;
+void app_p2_request_repair_probe(void) {
+    atomic_store(&p2_repair_request,1);
+}
+void app_p2_request_patch_repair_probe(void) {
+    atomic_store(&p2_repair_request,2);
+}
+static bool p2_fail_this_send(uint16_t y) {
+    if(p2_repair_stage!=1||p2_sends_before_failure<0)return false;
+    if(p2_sends_before_failure--!=0)return false;
+    ESP_LOGW("KSN_P2","INJECT_FAIL y=%u after=3",(unsigned)y);
+    return true;
+}
+#endif
 void app_force_redraw(void) { pocket_kasane_invalidate(); }
 void app_force_redraw_bands(uint32_t bands) {
     if(bands) pocket_kasane_invalidate_bands(bands);
@@ -219,6 +270,11 @@ static uint16_t *kasane_strip(void *opaque) {
 static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
                              const uint16_t *pixels) {
     kasane_display_t *display=opaque;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_repair_stage==1&&p2_capture_repair_only&&p2_sends_before_failure>=0)
+        ESP_LOGI("KSN_P2","SEND_FULL y=%u rows=%u",(unsigned)y,(unsigned)rows);
+    if(p2_fail_this_send(y))return KSN_IO;
+#endif
     int64_t began=esp_timer_get_time();
     // Section 6's host-owned edit field, composited over the band the guest's
     // scene has just filled: the guest never learns there is a field, only
@@ -240,6 +296,12 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
 static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t cols,
                                    uint16_t rows,const uint16_t *pixels) {
     kasane_display_t *display=opaque;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_repair_stage==1&&p2_capture_repair_only&&p2_sends_before_failure>=0)
+        ESP_LOGI("KSN_P2","SEND_RECT x=%u y=%u cols=%u rows=%u",
+                 (unsigned)x,(unsigned)y,(unsigned)cols,(unsigned)rows);
+    if(p2_fail_this_send(y))return KSN_IO;
+#endif
     int64_t began=esp_timer_get_time();
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
@@ -448,6 +510,75 @@ static esp_err_t eval_user_source(const char *source, size_t length) {
 // answer is both known and final -- after the stop hook has had its 200 ms of
 // JS_ExecutePendingJob, before JS_FreeRuntime discards whatever is left.
 static pocketjs_guest_stats_t final_stats;
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+// Diagnostic only. heap_caps_walk holds the heap lock while invoking us, so
+// collect on the stack and log only after traversal has returned.
+typedef struct {
+    intptr_t heap;
+    void *ptr;
+    size_t size;
+    void *before;
+    size_t before_size;
+    bool before_used;
+    void *after;
+    size_t after_size;
+    bool after_used;
+} p1_heap_hole_t;
+typedef struct {
+    p1_heap_hole_t holes[16];
+    unsigned count;
+    unsigned overflow;
+    intptr_t previous_heap;
+    void *previous_ptr;
+    size_t previous_size;
+    bool previous_used;
+    int awaiting_after;
+} p1_heap_walk_t;
+static bool p1_heap_walk(walker_heap_into_t heap, walker_block_info_t block,
+                         void *opaque) {
+    p1_heap_walk_t *walk=(p1_heap_walk_t *)opaque;
+    if(walk->previous_heap!=heap.start) {
+        walk->previous_heap=heap.start;
+        walk->previous_ptr=NULL;
+        walk->previous_size=0;
+        walk->awaiting_after=-1;
+    }
+    if(walk->awaiting_after>=0) {
+        p1_heap_hole_t *hole=&walk->holes[walk->awaiting_after];
+        hole->after=block.ptr;
+        hole->after_size=block.size;
+        hole->after_used=block.used;
+        walk->awaiting_after=-1;
+    }
+    if(!block.used && block.size>=20000) {
+        if(walk->count<sizeof(walk->holes)/sizeof(walk->holes[0])) {
+            unsigned index=walk->count++;
+            walk->holes[index]=(p1_heap_hole_t){
+                .heap=heap.start, .ptr=block.ptr, .size=block.size,
+                .before=walk->previous_ptr, .before_size=walk->previous_size,
+                .before_used=walk->previous_used,
+            };
+            walk->awaiting_after=(int)index;
+        } else walk->overflow++;
+    }
+    walk->previous_ptr=block.ptr;
+    walk->previous_size=block.size;
+    walk->previous_used=block.used;
+    return true;
+}
+static void p1_report_heap_holes(void) {
+    p1_heap_walk_t walk={.awaiting_after=-1};
+    heap_caps_walk(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT,p1_heap_walk,&walk);
+    ESP_LOGI("KSN_P1_HEAP","holes=%u overflow=%u",walk.count,walk.overflow);
+    for(unsigned i=0;i<walk.count;i++) {
+        const p1_heap_hole_t *h=&walk.holes[i];
+        ESP_LOGI("KSN_P1_HEAP","heap=%p free=%p/%u before=%p/%u/%u after=%p/%u/%u",
+                 (void *)h->heap,h->ptr,(unsigned)h->size,
+                 h->before,(unsigned)h->before_size,(unsigned)h->before_used,
+                 h->after,(unsigned)h->after_size,(unsigned)h->after_used);
+    }
+}
+#endif
 void app_report(void) {
     pocketjs_guest_stats_t stats={.struct_size=sizeof(stats)};
     if(guest) pocketjs_guest_stats(guest,&stats);
@@ -469,6 +600,14 @@ void app_report(void) {
         (unsigned)stats.heap_used,frames);
 }
 void app_stop(void) {
+    bool p0_had_guest=guest!=NULL;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_repair_stage)board_capture(false);
+    p2_repair_stage=0;
+    p2_sends_before_failure=-1;
+    p2_capture_repair_only=false;
+    atomic_store(&p2_repair_request,0);
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
     vmprobe_session_reset();
 #endif
@@ -478,7 +617,17 @@ void app_stop(void) {
     // the subscriptions it may still want to use are taken away.
     pocket_app_reset();
     pocket_imu_reset();
-    pocket_av_reset();
+#ifdef KASANE_P0_PROBE
+    /* Read before pocket_av_reset() stops the stream and clears the player.
+     * Decoder faults are distinct from audio output underruns. */
+    int32_t p0_player=pocket_av_ui_current_player();
+    pocket_av_ui_snapshot p0_audio;
+    if(p0_player&&pocket_av_ui_read(p0_player,&p0_audio))
+        ESP_LOGI("KSN_P0","A session=%s player=%ld state=%u position_ms=%lu underruns=%lu",
+            overlay_session?"overlay":"app",(long)p0_player,(unsigned)p0_audio.state,
+            (unsigned long)p0_audio.position_ms,(unsigned long)p0_audio.underruns);
+#endif
+    bool av_stopped=pocket_av_reset();
     // Before pocket_api_reset(): a recorder holds the I2S RX channel and the
     // codec's ADC, and a read still waiting holds a promise slot.
     pocket_capture_reset();
@@ -491,7 +640,14 @@ void app_stop(void) {
     // Before pocket_api_reset(): a picker still on screen holds a promise slot,
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
-    pocket_kasane_reset();
+    if(pocket_kasane_reset()){
+        pocket_clock_reset();
+        pocket_av_output_source_reset(av_stopped);
+        pocket_av_playback_source_reset();
+#ifdef KASANE_P0_PROBE
+        pocket_pool_probe_reset();
+#endif
+    }
     pocket_input_reset();
     pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and
@@ -514,7 +670,21 @@ void app_stop(void) {
 #endif
     if(guest) pocketjs_guest_destroy(guest);
     guest=NULL;
+#ifdef KASANE_P0_PROBE
+    if(p0_had_guest)pocket_mutex_arena_report();
+#endif
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+    if(p0_had_guest)p1_report_heap_holes();
+#endif
     app_report();
+    if(p0_had_guest)ksn_p0_probe_report(overlay_session?"overlay":"app");
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+    if(p0_had_guest)ksn_render_decode_cycle_report();
+#endif
+#ifdef KASANE_P0_BUS_PROBE
+    if(p0_had_guest)ESP_LOGI("board","P1 LCD ISR observed core %d at app stop",
+                            board_lcd_isr_core());
+#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     // After the teardown, so a refusal inside it is counted in this session.
     oomprobe_session_end("app");
@@ -547,6 +717,10 @@ esp_err_t app_start_test(char test) {
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     kasane_presented=false;
+    ksn_p0_probe_reset();
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+    ksn_render_decode_cycle_reset();
+#endif
     // Refused before a guest exists, so a program that cannot run costs nothing.
     if(user_source && !overlay_session && uses_legacy_ui(user_source,user_length)) {
         jsconsole_set_error("旧API(ui.*)のため実行できません");
@@ -627,6 +801,7 @@ esp_err_t app_start_test(char test) {
     if(overlay_session) {
         TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
         TRY(pocketjs_guest_quickjs_install_once(guest,"overlay",pocket_overlay_install,NULL));
+        TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
         // fs and av joined this list on 2026-09-09, and the reason is worth
         // stating because 3.1's narrowing is deliberate and this widens it.
         //
@@ -786,6 +961,29 @@ source_ready:;
         // The Kasane demo (ui/kasane via app_session.c's kasane_demo_start): the
         // one source that is not a VM self-test, so it sits outside the ifdef.
         case 'K': source=kasane_demo_start; break;
+#ifdef KASANE_P0_PROBE
+        case '7': source=wall_source_probe_start; break;
+        case '0': source=pool_source_probe_start; break;
+        case 'v': source=output_source_probe_start; break;
+        case 'V': source=output_source_probe_start; break;
+        case 'w': source=output_source_probe_hidden_start; break;
+        case 'z': source=output_source_probe_dual_start; break;
+        case 'y': source=output_source_probe_long_start; break;
+        case 'j': source=output_source_probe_seek_start; break;
+        case 'b': source=output_source_probe_lowheap_start; break;
+        case '#': source=output_source_probe_lowheap_start; break;
+        case 'h': source=playback_source_probe_start; break;
+        case 'i': source=music_bar_probe_start; break;
+        case 'l': source=dirty24_probe_start; break;
+        case 'T': source=text23_probe_start; break;
+#ifdef KASANE_TEXT_PIE_DEVICE_PROBE
+        case '?': source=text_pie_probe_start; break;
+#endif
+#ifdef KASANE_P0_COPY_PROBE
+        case 'x': source=output_source_probe_exhaust_start; break;
+#endif
+        case 'u': source=output_source_probe_off_start; break;
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
         // VM probe workloads (sec.5): real files under apps/vmprobe/ rather
         // than inline strings like '1'..'6' above, because
@@ -853,13 +1051,33 @@ source_ready:;
         if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
     }
 #endif
+#ifdef KASANE_P0_PROBE
+    if(test=='V'){
+        JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+        JSValue global=JS_GetGlobalObject(ctx);
+        int installed=JS_SetPropertyStr(ctx,global,"KSN_OUTPUT_SAMPLE_MS",
+                                        JS_NewInt32(ctx,33));
+        JS_FreeValue(ctx,global);
+        if(installed<0){err=ESP_ERR_NO_MEM;goto fail;}
+    }
+#endif
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+    if(overlay_session){
+        JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+        JSValue global=JS_GetGlobalObject(ctx);
+        int installed=JS_SetPropertyStr(ctx,global,"KSN_P1_OUTPUT_OVERLAY_PROBE",
+                                        JS_NewBool(ctx,true));
+        JS_FreeValue(ctx,global);
+        if(installed<0){err=ESP_ERR_NO_MEM;goto fail;}
+    }
+#endif
     // The native Kasane arena is ~9.9 KiB. Taken at the guest's first Kasane
     // call it lands between allocations the guest has just made and splits the
     // largest free block; taken here, before evaluation, it is one block from
-    // an unbroken heap (docs/kasane/kasane-guest-memory-reduce.md). Overlays
-    // have no pocket.kasane, and a source that never names it pays nothing.
-    if(!overlay_session&&(names_kasane(source,length)||
-       (user_prelude&&names_kasane(user_prelude,user_prelude_length))))
+    // an unbroken heap (docs/kasane/decisions.md). A source
+    // that never names it, including a compatibility overlay, pays nothing.
+    if(names_kasane(source,length)||
+       (user_prelude&&names_kasane(user_prelude,user_prelude_length)))
         pocket_kasane_prepare();
     if(user_source) err=eval_user_source(source,length);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
@@ -906,6 +1124,7 @@ esp_err_t app_start(void) {
 }
 
 esp_err_t app_start_overlay(const char *source, size_t length) {
+    overlay_guest_last_us=0;
     user_source=source; user_length=length;
     user_prelude=NULL; overlay_session=true;
     esp_err_t err=app_start_test(0);
@@ -916,11 +1135,37 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
     return err;
 }
 
-// One turn of an overlay. No damage plan, no strips, no bus: what an overlay
-// draws is a display list the shell composites into its own frame, so the
-// whole of the frame here is the guest's own JavaScript.
+// One turn of an overlay. Guest work and Kasane transaction finalization live
+// here; strip composition and the LCD bus remain in shell_draw(), where the
+// native scene can be supplied as the backdrop.
 esp_err_t app_overlay_tick(void) {
     if(!guest) return ESP_ERR_INVALID_STATE;
+    pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
+    /* The overlay has its own guest loop; foreground app_tick() does not run.
+     * Keep the shared SYSTEM bank in sync before the shell presents it. */
+    sys_notice notice;
+    bool have_notice=sys_notify_active(sys_device_notifications(),&notice);
+    (void)pocket_kasane_update_notice(have_notice?&notice:NULL,pet_hub_selected());
+    /* Presentation and repair own the retained candidate. Do not let another
+     * guest turn race it; shell_draw() will retry it later in this frame. */
+    if(pocket_kasane_needs_present())return ESP_OK;
+    bool presenter_blocked=false;
+    ksn_result presenter_result=pocket_kasane_presenter_settle(&presenter_blocked);
+    if(presenter_result!=KSN_OK){
+        ESP_LOGE("kasane","PRESENTER_SETTLE_FAILED %u",(unsigned)presenter_result);
+        return ESP_FAIL;
+    }
+    if(presenter_blocked)return ESP_OK;
+    bool guest_due=!overlay_guest_last_us||
+        esp_timer_get_time()-overlay_guest_last_us>=100000;
+    if(!guest_due){
+        presenter_result=pocket_kasane_presenter_step(&presenter_blocked);
+        if(presenter_result!=KSN_OK){
+            ESP_LOGE("kasane","PRESENTER_STEP_FAILED %u",(unsigned)presenter_result);
+            return ESP_FAIL;
+        }
+        if(presenter_blocked)return ESP_OK;
+    }
     // The same runaway guard the foreground gets, and it was 50 ms until a
     // board run under the FLOWER scene threw "InternalError: interrupted"
     // inside a five-line loop that counts characters.
@@ -944,6 +1189,7 @@ esp_err_t app_overlay_tick(void) {
     // overlay does not install. The drain is resumed directly.
     if(pocketjs_guest_work_pending(guest)) {
         esp_err_t ce=pocketjs_guest_continue(guest);
+        pocket_kasane_end_turn();
         report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
         vmprobe_continuation_sample(guest);
@@ -965,9 +1211,16 @@ esp_err_t app_overlay_tick(void) {
 #endif
             if(drain_runaway()) return ESP_ERR_TIMEOUT;
             continuation_turns++;
-            // No display list this turn: the shell composites whatever the
-            // overlay last produced, which is the same thing it does for a
-            // turn the overlay chose not to draw in.
+            // The guest drain was resumed first. Native source work may now
+            // submit for shell_draw(), without overtaking queued JS jobs.
+            overlay_guest_last_us=esp_timer_get_time();
+            if(guest_due){
+                presenter_result=pocket_kasane_presenter_step(NULL);
+                if(presenter_result!=KSN_OK){
+                    ESP_LOGE("kasane","PRESENTER_STEP_FAILED %u",(unsigned)presenter_result);
+                    return ESP_FAIL;
+                }
+            }
             return ESP_OK;
         }
     }
@@ -989,9 +1242,22 @@ esp_err_t app_overlay_tick(void) {
     pocket_av_pump();
     pocketjs_guest_frame_t f={.struct_size=sizeof(f)};
     esp_err_t e=pocketjs_guest_frame(guest,&f);
+    pocket_kasane_end_turn();
     frames++;
     report_oom_if_any();
-    return e;
+    if(e!=ESP_OK)return e;
+    overlay_guest_last_us=esp_timer_get_time();
+    /* The guest has now seen its input and due promises. Submit the newest
+     * native projection for shell_draw() without making a fast progress bar
+     * starve every following guest turn. */
+    if(guest_due){
+        presenter_result=pocket_kasane_presenter_step(NULL);
+        if(presenter_result!=KSN_OK){
+            ESP_LOGE("kasane","PRESENTER_STEP_FAILED %u",(unsigned)presenter_result);
+            return ESP_FAIL;
+        }
+    }
+    return ESP_OK;
 }
 
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
@@ -1076,6 +1342,17 @@ esp_err_t app_tick(uint32_t buttons) {
     // busy enough to still have a queue, which is when saving matters most.
     turn_continued=false;
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
+    /* A ticket retained from a prior turn keeps its dedicated display turn.
+     * A fresh native presenter ticket below does not: after it reaches the
+     * panel, due JS promises and input must still run this turn. */
+    bool prior_submission=pocket_kasane_has_submission()&&
+        !pocket_kasane_animation_pending()&&!pocket_kasane_system_pending();
+    bool presenter_blocked=false;
+    ksn_result presenter_result=pocket_kasane_presenter_step(&presenter_blocked);
+    if(presenter_result!=KSN_OK){
+        ESP_LOGE("kasane","PRESENTER_STEP_FAILED %u",(unsigned)presenter_result);
+        return ESP_FAIL;
+    }
     sys_notice notice;
     bool have_notice=sys_notify_active(sys_device_notifications(),&notice);
     /* BUSY/limits leave the legacy overlay available until SYSTEM can submit.
@@ -1087,14 +1364,13 @@ esp_err_t app_tick(uint32_t buttons) {
     // without letting another JS update race repair. An invalidated committed
     // screen also reaches this gate when no JS submission exists.
     if(pocket_kasane_needs_present()) {
-        bool guest_submission=pocket_kasane_has_submission()&&!pocket_kasane_animation_pending()&&!pocket_kasane_system_pending();
         esp_err_t pending=present_frame();
         if(pending!=ESP_OK)return pending;
         // A completed owner-only redraw must allow this tick's JS turn. Live
         // indicators can invalidate every tick; returning here unconditionally
         // would starve the guest for the entire recording. Guest submissions
         // retain their existing dedicated display turn, and IO keeps retrying.
-        if(!(buttons&0x2000)&&(guest_submission||pocket_kasane_needs_present()))
+        if(!(buttons&0x2000)&&(prior_submission||pocket_kasane_needs_present()))
             return ESP_OK;
         // Back is host-priority and this is the guest's final save turn. Carry
         // it into JS even if LCD IO still needs retry, so display trouble cannot
@@ -1137,7 +1413,9 @@ esp_err_t app_tick(uint32_t buttons) {
         int64_t cont_began=esp_timer_get_time();
         esp_err_t ce=dispatch_guest(true,0);
         pocket_kasane_end_turn();
-        turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
+        uint32_t continuation_us=(uint32_t)(esp_timer_get_time()-cont_began);
+        turn_sum+=(double)continuation_us; ticks++;
+        ksn_p0_probe_sample(KSN_P0_APP_TURN,continuation_us);
         report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
         vmprobe_continuation_sample(guest);
@@ -1246,6 +1524,7 @@ esp_err_t app_tick(uint32_t buttons) {
 #endif
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
+    ksn_p0_probe_sample(KSN_P0_APP_TURN,(uint32_t)turn_us);
     report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
     // turn_us is frame() plus whatever job draining dispatch_guest() does
@@ -1314,6 +1593,22 @@ void app_vm_back_selftest(void) {
 static esp_err_t present_frame(void) {
     last_present_us=esp_timer_get_time();
     {
+#ifdef KASANE_P2_REPAIR_PROBE
+        int p2_request=atomic_exchange(&p2_repair_request,0);
+        if(p2_request) {
+            if(!p2_repair_stage) {
+                p2_repair_stage=1;
+                p2_sends_before_failure=3;
+                p2_capture_repair_only=p2_request==2;
+                if(!p2_capture_repair_only) {
+                    board_capture(true);
+                    pocket_kasane_invalidate();
+                }
+                ESP_LOGI("KSN_P2","ARMED%s after=3",
+                         p2_capture_repair_only?"_PATCH":"");
+            } else ESP_LOGW("KSN_P2","BUSY stage=%u",p2_repair_stage);
+        }
+#endif
         ksn_result advanced=pocket_kasane_advance((uint64_t)esp_timer_get_time());
         if(advanced!=KSN_OK&&advanced!=KSN_BUSY)return ESP_FAIL;
         kasane_display_t display_state={0};
@@ -1331,6 +1626,13 @@ static esp_err_t present_frame(void) {
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         frames++;
         if(result==KSN_IO) {
+#ifdef KASANE_P2_REPAIR_PROBE
+            if(p2_repair_stage==1&&p2_sends_before_failure<0) {
+                p2_repair_stage=2;
+                ESP_LOGI("KSN_P2","PARTIAL_FAILED sent=3");
+                if(p2_capture_repair_only)board_capture(true);
+            }
+#endif
             ESP_LOGW("kasane","LCD transfer failed; retaining display work for retry");
             return ESP_OK;
         }
@@ -1338,9 +1640,21 @@ static esp_err_t present_frame(void) {
             ESP_LOGE("kasane","present failed: %u",(unsigned)result);
             return ESP_FAIL;
         }
+#ifdef KASANE_P2_REPAIR_PROBE
+        if(p2_repair_stage==2&&stats.bands) {
+            ESP_LOGI("KSN_P2","REPAIR_OK bands=%u bytes=%u",
+                     ksn_render_band_count(stats.bands),(unsigned)stats.transferred_bytes);
+            board_capture(false);
+            p2_repair_stage=0;
+            p2_capture_repair_only=false;
+        }
+#endif
         if(stats.bands) {
             painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
+            ksn_p0_probe_sample(KSN_P0_APP_RENDER,whole-display_state.sent_us);
+            ksn_p0_probe_sample(KSN_P0_APP_SEND,display_state.sent_us);
+            ksn_p0_probe_transfer(stats.transferred_bytes,ksn_render_band_count(stats.bands));
             // This frame's counts into the window's. The millisecond columns on
             // the line are averages and these are sums, which the line says with
             // `frames=`; the renderer resets its accumulators on read, so the

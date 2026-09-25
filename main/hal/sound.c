@@ -14,20 +14,22 @@
 #include "sfx_synth.h"
 #include <stdatomic.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SAMPLE_RATE ((int)SOUND_SAMPLE_RATE)
 
 // A click, a tone, or a stream. kind is the click index, -1 for a tone, -2 for
 // a stream; frequency is read only for tones, and the last two fields only for
-// streams. One struct rather than a union because the queue is four entries
-// deep: the eight bytes a stream adds cost 32 bytes of .bss in total, and a
-// union would cost the same reading twice as badly.
+// streams. One struct rather than a union: the queue is only four entries
+// deep. The logical start frame adds one word per queued entry on ESP32-S3;
+// normal playback installs no observer and never touches a Kasane pool.
 typedef struct {
     int32_t id;
     int16_t kind;
     uint16_t frequency;
     uint16_t gain;        // 0..4096
     uint32_t frames;
+    uint32_t start_frame;       // logical position before this stream segment
     sound_done_fn done;
     void *ctx;
     sound_stream_t *stream;         // streams: the caller's ring
@@ -39,6 +41,8 @@ static QueueHandle_t events;
 static atomic_bool enabled=true;
 static atomic_int cancelled;
 static atomic_int next_id=1;
+static atomic_int stream_pause;
+static atomic_int stream_pause_ack;
 // True from sound_capture_start() to sound_capture_stop(). Playback reads it,
 // which is where "recording and app playback are exclusive, and UI cues do not
 // sound while recording" (docs/api/common-api.md 9) is actually enforced.
@@ -49,7 +53,10 @@ static atomic_bool playing;
 void sound_set_enabled(bool value){atomic_store(&enabled,value);}
 bool sound_available(void){return events!=NULL;}
 bool sound_play(int kind) {
-    if(!events||!atomic_load(&enabled)||atomic_load(&capturing))return false;
+    // A retained paused stream still owns the sole output task. Do not queue
+    // a click now only to replay it unexpectedly when the song ends.
+    if(!events||!atomic_load(&enabled)||atomic_load(&capturing)||
+       atomic_load(&stream_pause))return false;
     request_t req={.kind=(int16_t)kind};
     return xQueueSend(events,&req,0)==pdTRUE;
 }
@@ -224,6 +231,24 @@ static atomic_int stream_active;
 static atomic_int stream_halt;
 static atomic_uint stream_frames;      // output frames produced so far
 static atomic_uint stream_starved;     // blocks filled with silence
+static _Atomic(sound_stream_observer_fn) stream_observer;
+static atomic_uint stream_observer_interval;
+
+void sound_stream_set_observer(sound_stream_observer_fn observer) {
+    sound_stream_set_observer_interval(observer,SOUND_SAMPLE_RATE);
+}
+void sound_stream_set_observer_interval(sound_stream_observer_fn observer,
+                                        uint32_t interval_frames) {
+    if(interval_frames<128u||interval_frames>SOUND_SAMPLE_RATE)
+        interval_frames=SOUND_SAMPLE_RATE;
+    atomic_store_explicit(&stream_observer_interval,interval_frames,memory_order_release);
+    atomic_store_explicit(&stream_observer,observer,memory_order_release);
+}
+
+static uint32_t observed_frame(const request_t *req,uint32_t consumed){
+    uint64_t frame=(uint64_t)req->start_frame+consumed;
+    return frame>UINT32_MAX?UINT32_MAX:(uint32_t)frame;
+}
 
 // The underrun policy is stated in full above sound_stream_start() in sound.h,
 // because it is the part of this design an app can see. The two lines it comes
@@ -246,6 +271,11 @@ static void play_stream(const request_t *req,int16_t *pcm) {
         if(req->done) req->done(req->ctx,false);
         return;
     }
+    sound_stream_observer_fn observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
+    if(observe)observe(req->id,req->start_frame,0,true);
+    uint32_t interval=atomic_load_explicit(&stream_observer_interval,memory_order_acquire);
+    if(interval<128u||interval>SOUND_SAMPLE_RATE)interval=SOUND_SAMPLE_RATE;
+    uint32_t next_observation=interval-req->start_frame%interval;
     stream_read_t r={0};
     uint32_t frames=req->frames, at=0, starved=0;
     bool completed=true;
@@ -253,6 +283,14 @@ static void play_stream(const request_t *req,int16_t *pcm) {
     // samples through the DMA ring.
     while(at<frames+256) {
         if(atomic_load(&stream_halt)==req->id) { completed=false; break; }
+        if(atomic_load(&stream_pause)==req->id) {
+            // Keep the I2S clock running, but leave both the ring cursor and
+            // the starvation deadline frozen until playback resumes.
+            atomic_store(&stream_pause_ack,req->id);
+            memset(pcm,0,128*2*sizeof(*pcm));
+            if(!emit(pcm)) { completed=false; break; }
+            continue;
+        }
         // One 128-frame block; stream_sample() in sound_stream.h is the walk.
         bool starving=false;
         for(int j=0;j<128;j++) {
@@ -283,18 +321,41 @@ static void play_stream(const request_t *req,int16_t *pcm) {
         if(starving) {
             starved++;
             atomic_store(&stream_starved,atomic_load(&stream_starved)+1);
-            if(starved>=SOUND_STREAM_STARVE_BLOCKS) { completed=false; break; }
+            if(starved>=SOUND_STREAM_STARVE_BLOCKS) {
+                ESP_LOGE("sound","STREAM STARVED at=%u of %u blocks=%u filled=%u drained=%u eof=%u held=%u",
+                         (unsigned)at,(unsigned)frames,(unsigned)starved,
+                         (unsigned)atomic_load(&s->filled),
+                         (unsigned)atomic_load(&s->drained),
+                         (unsigned)atomic_load(&s->eof),(unsigned)r.held);
+                completed=false; break;
+            }
         } else starved=0;
         atomic_store(&stream_frames,at<frames?at:frames);
         if(!emit(pcm)) { completed=false; break; }
+        if(at>=next_observation){
+            observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
+            if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),
+                               atomic_load_explicit(&stream_starved,memory_order_relaxed),true);
+            next_observation=next_observation<=UINT32_MAX-interval?
+                next_observation+interval:UINT32_MAX;
+        }
     }
     stream_release(s,&r);
+    int paused=req->id;
+    atomic_compare_exchange_strong(&stream_pause,&paused,0);
+    paused=req->id;
+    atomic_compare_exchange_strong(&stream_pause_ack,&paused,0);
+    observe=atomic_load_explicit(&stream_observer,memory_order_acquire);
+    if(observe)observe(req->id,observed_frame(req,at<frames?at:frames),
+                       atomic_load_explicit(&stream_starved,memory_order_relaxed),false);
+    /* Stop waits on stream_active. Clear it only after the observer has
+     * released its producer lease, so its service may then be detached. */
     atomic_store(&stream_active,0);
     if(req->done) req->done(req->ctx,completed);
 }
 
 int32_t sound_stream_start(sound_stream_t *stream,int format,uint16_t block,
-                           uint32_t frames,float gain,
+                           uint32_t frames,uint32_t start_frame,float gain,
                            sound_done_fn done,void *ctx) {
     if(!events) return SOUND_ERR_UNSUPPORTED;
     // The codec is recording. BUSY rather than UNSUPPORTED: the feature exists
@@ -315,6 +376,7 @@ int32_t sound_stream_start(sound_stream_t *stream,int format,uint16_t block,
         .kind=-2,
         .gain=(uint16_t)(gain*4096.0f),
         .frames=frames,
+        .start_frame=start_frame,
         .done=done,.ctx=ctx,
         .stream=stream,.block=block};
     if(xQueueSend(events,&req,0)!=pdTRUE) return SOUND_ERR_BUSY;
@@ -330,7 +392,34 @@ bool sound_stream_stop(int32_t id) {
     // recover from by freeing it anyway.
     for(int i=0;i<40&&atomic_load(&stream_active)==id;i++)
         vTaskDelay(pdMS_TO_TICKS(5));
+    int paused=id;
+    atomic_compare_exchange_strong(&stream_pause,&paused,0);
+    paused=id;
+    atomic_compare_exchange_strong(&stream_pause_ack,&paused,0);
     return atomic_load(&stream_active)!=id;
+}
+
+bool sound_stream_pause(int32_t id) {
+    if(id<=0||atomic_load(&stream_halt)==id) return false;
+    atomic_store(&stream_pause_ack,0);
+    atomic_store(&stream_pause,id);
+    // Wait for the boundary of the current 128-frame block. The UI can now
+    // report a position that cannot advance after pause() resolves.
+    for(int i=0;i<24&&atomic_load(&stream_active)==id&&
+        atomic_load(&stream_pause_ack)!=id;i++)
+        vTaskDelay(pdMS_TO_TICKS(5));
+    if(atomic_load(&stream_active)==id&&atomic_load(&stream_pause_ack)!=id)
+        ESP_LOGW("sound","STREAM PAUSE ACK slow id=%d",(int)id);
+    return true;
+}
+
+bool sound_stream_resume(int32_t id) {
+    if(id<=0||atomic_load(&stream_halt)==id) return false;
+    int paused=id;
+    bool resumed=atomic_compare_exchange_strong(&stream_pause,&paused,0);
+    paused=id;
+    atomic_compare_exchange_strong(&stream_pause_ack,&paused,0);
+    return resumed;
 }
 
 uint32_t sound_stream_position(int32_t id) {
@@ -342,7 +431,7 @@ uint32_t sound_stream_underruns(void) { return atomic_load(&stream_starved); }
 int32_t sound_tone(unsigned frequency_hz,unsigned duration_ms,float gain,
                    sound_done_fn done,void *ctx) {
     if(!events)return SOUND_ERR_UNSUPPORTED;
-    if(atomic_load(&capturing))return SOUND_ERR_BUSY;
+    if(atomic_load(&capturing)||atomic_load(&stream_pause))return SOUND_ERR_BUSY;
     if(frequency_hz<SOUND_TONE_MIN_HZ||frequency_hz>SOUND_TONE_MAX_HZ)return SOUND_ERR_INVALID;
     if(!duration_ms||duration_ms>SOUND_TONE_MAX_MS)return SOUND_ERR_INVALID;
     // Written as a positive test so that a NaN gain is rejected rather than
@@ -1030,6 +1119,9 @@ static void audio_task(void *arg) {
             if(req.kind<SFX_KINDS&&atomic_load(&enabled))play_click(req.kind,pcm);
         } else if(req.kind==-2) {
             play_stream(&req,pcm);
+#ifdef KASANE_P0_BUS_PROBE
+            ESP_LOGI("sound","P1 audio observed core %d",xPortGetCoreID());
+#endif
         } else {
             play_tone(&req,pcm);
         }
@@ -1064,7 +1156,12 @@ void sound_init(i2c_master_bus_handle_t bus) {
     i2c_master_bus_rm_device(codec);if(err!=ESP_OK)goto fail;
     events=xQueueCreate(4,sizeof(request_t));
     if(!events)goto fail;
-    if(xTaskCreate(audio_task,"sfx",4096,NULL,7,NULL)!=pdPASS){vQueueDelete(events);events=NULL;goto fail;}
+#ifdef KASANE_P1_OUTPUT_CORE0
+    BaseType_t started=xTaskCreatePinnedToCore(audio_task,"sfx",4096,NULL,7,NULL,0);
+#else
+    BaseType_t started=xTaskCreate(audio_task,"sfx",4096,NULL,7,NULL);
+#endif
+    if(started!=pdPASS){vQueueDelete(events);events=NULL;goto fail;}
     // Nothing is rendered here any more; the tables were rendered by the build.
     ESP_LOGI("sound","ES8311 ready; 24kHz stereo from %d baked samples; default ON",
              SFX_SAMPLES+WAVE_POINTS);return;

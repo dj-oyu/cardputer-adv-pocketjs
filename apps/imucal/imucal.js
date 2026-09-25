@@ -1,27 +1,9 @@
-// IMU axis calibration, Kasane port. Terse: guest parses this, bytes cost
-// heap. See README.md for rationale.
+// IMU calibration owns measurements; Kasane owns the picture.
 (function () {
-  const view = pocket.kasane;
-  const state = {head: 'START', live: 'NO SAMPLE YET', stat: 'WAIT',
-                 spin: 'GYR OFF', foot: 'HOLD STILL. ESC QUITS'};
-  const F = [['head',[12,26,228,38],0xf0f8ffff,32],['live',[20,52,220,64],0x8ef0c4ff,32],
-    ['stat',[20,66,220,78],0xa9bacaff,48],['spin',[20,80,220,92],0xffd479ff,32],
-    ['foot',[12,104,228,116],0x8fa6bcff,32]];
-  const scene = view.createScene({
-    build: function (tx, s) {
-      tx.background(0x071425ff);
-      tx.text({bounds:[12,8,228,20],color:0x69cdeeff,text:'IMU AXIS CALIBRATION'});
-      tx.roundRect({bounds:[12,48,228,94],radius:5,color:0x12334aff});
-      var r = {}, i, d;
-      for (i = 0; i < F.length; i++) { d = F[i];
-        r[d[0]] = tx.text({bounds:d[1],color:d[2],text:s[d[0]],capacity:d[3]}); }
-      return r;
-    },
-    patch: function (tx, r, s) {
-      for (var i = 0; i < F.length; i++) r[F[i][0]].setText(tx, s[F[i][0]]);
-    }
-  });
-  function say(key, t) { if (state[key] !== t) { state[key] = t; scene.invalidate(); } }
+  const view = pocket.kasane.mount('imucal');
+  view.set({head: 'START', live: 'NO SAMPLE YET', stat: 'WAIT',
+            spin: 'GYR OFF', foot: 'HOLD STILL. ESC QUITS'});
+  function say(key, t) { var slot = {}; slot[key] = t; view.set(slot); }
   function beep(hz) {
     pocket.audio.tone({ frequencyHz: hz, durationMs: 120, gain: 0.4 }).then(null, function () {});
   }
@@ -37,8 +19,7 @@
   if (!cap.supported || !cap.available) {
     say('head', 'NO IMU: ' + cap.reason);
     console.log('IMUCAL_UNAVAILABLE ' + cap.reason);
-    globalThis.frame = function () { scene.flush(state); };
-    scene.flush(state);
+    globalThis.frame = function () {};
     return;
   }
 
@@ -162,9 +143,8 @@
     show();
   }
 
-  globalThis.frame = function () { step(); scene.flush(state); };
+  globalThis.frame = function () { step(); };
 
   show();
-  scene.flush(state);
   console.log('IMUCAL_READY');
 })();

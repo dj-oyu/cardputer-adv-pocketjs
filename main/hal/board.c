@@ -1,6 +1,7 @@
 #include "board.h"
 #include "motion.h"
 #include "sound.h"
+#include "ui/kasane/ksn_p0_probe.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
@@ -14,6 +15,10 @@
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
+#ifdef KASANE_P0_BUS_PROBE
+#include <stdatomic.h>
+#include "esp_attr.h"
+#endif
 
 static spi_device_handle_t lcd;
 static i2c_master_dev_handle_t keyboard;
@@ -62,14 +67,61 @@ static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
 // keeps the pointer until the result is reaped.
 static spi_transaction_t tx_pending;
+#ifdef KASANE_P0_BUS_PROBE
+/* Diagnostic only. SPI post_cb runs in the SPI2 ISR just before the driver
+ * places the result on ret_queue. This is an ISR-service timestamp, not the
+ * exact hardware DMA completion edge. Both tasks use the same esp_timer clock. */
+static atomic_uint lcd_data_isr_us;
+static atomic_int lcd_data_isr_core=ATOMIC_VAR_INIT(-1);
+static bool lcd_isr_reported;
+int board_lcd_isr_core(void){
+    return atomic_load_explicit(&lcd_data_isr_core,memory_order_relaxed);
+}
+static void IRAM_ATTR lcd_post_cb(spi_transaction_t *trans){
+    if(trans->user==&lcd_data_isr_us){
+        atomic_store_explicit(&lcd_data_isr_core,xPortGetCoreID(),memory_order_relaxed);
+        atomic_store_explicit(&lcd_data_isr_us,(uint32_t)esp_timer_get_time(),
+                              memory_order_relaxed);
+    }
+}
+#endif
 // Reap the strip queued last time. One transaction is in flight at a time
 // (the LCD device is configured with queue_size=1), so this is also the barrier
 // every command goes through before it ends the RAMWR session. Returns the
 // transfer's own error, or ESP_OK when there was nothing in flight.
 static esp_err_t tx_reap(void) {
     if (!tx_inflight) return ESP_OK;
+#ifdef KASANE_P0_BUS_PROBE
+    bool sd_before=ksn_p0_bus_sd_active();
+    uint32_t sd_epoch_before=ksn_p0_bus_sd_epoch();
+    int64_t began=esp_timer_get_time();
+#endif
     spi_transaction_t *done = NULL;
     esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+#ifdef KASANE_P0_BUS_PROBE
+    uint32_t finished=(uint32_t)esp_timer_get_time();
+    uint32_t elapsed=finished-(uint32_t)began;
+    ksn_p0_bus_phase_sample(KSN_P0_BUS_REAP,
+        elapsed,
+        sd_before||ksn_p0_bus_sd_active()||
+        sd_epoch_before!=ksn_p0_bus_sd_epoch());
+    uint32_t isr=atomic_load_explicit(&lcd_data_isr_us,memory_order_relaxed);
+    if(isr){
+        /* The ISR may already have run before the UI entered get_result. */
+        uint32_t pre=(int32_t)(isr-(uint32_t)began)>0?isr-(uint32_t)began:0u;
+        if(pre>elapsed)pre=elapsed;
+        ksn_p0_bus_phase_sample(KSN_P0_BUS_PRE_ISR,pre,false);
+        ksn_p0_bus_phase_sample(KSN_P0_BUS_POST_ISR,elapsed-pre,false);
+    }else ksn_p0_bus_missing_isr();
+    if(!lcd_isr_reported){
+        int core=atomic_load_explicit(&lcd_data_isr_core,memory_order_relaxed);
+        if(core>=0){
+            lcd_isr_reported=true;
+            ESP_LOGI("board","P1 LCD ISR observed core %d, UI reap core %d",
+                     core,xPortGetCoreID());
+        }
+    }
+#endif
     tx_inflight = false;
     return e;
 }
@@ -242,8 +294,9 @@ bool board_battery_read(board_battery_t *out) {
 // ------------------------------------------------------------------ SPI3 bus
 //
 // The microSD slot (CS=12) and the EXT connector (CS=5) share MOSI=14, CLK=40
-// and MISO=39 (docs/platform/hardware-constraints.md:45). The LCD is wired separately on
-// SPI2, so card traffic can never stall the panel.
+// and MISO=39 (docs/platform/hardware-constraints.md:45). The LCD uses SPI2,
+// so card traffic cannot occupy its SPI device queue. Both hosts may still
+// contend for shared DMA/memory bandwidth; see the P1 LCD/SD diagnostic.
 //
 // The bus lives here, beside the LCD's, rather than inside whichever driver
 // happens to come up first. Exactly one caller may spi_bus_initialize a host;
@@ -274,8 +327,16 @@ esp_err_t board_init(void) {
     gpio_set_level(38, 0); gpio_set_level(33, 0); vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(33, 1); vTaskDelay(pdMS_TO_TICKS(120));
     spi_bus_config_t bus = {.mosi_io_num=35, .miso_io_num=-1, .sclk_io_num=36,
-        .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=sizeof(shared)};
+        .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=sizeof(shared)
+#ifdef KASANE_P1_LCD_ISR_CORE1
+        ,.isr_cpu_id=ESP_INTR_CPU_AFFINITY_1
+#endif
+    };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
+#ifdef KASANE_P1_LCD_ISR_CORE1
+    ESP_LOGI("board","P1 LCD ISR affinity requested core 1, UI core %d",
+             CONFIG_POCKET_UI_TASK_CORE);
+#endif
     // 80MHz, not the 40MHz M5Stack ships. The panel's flex is short and the
     // ST7789 tolerates it: send went from 15.5ms to 9.1ms measured, and the
     // owner confirmed on the physical panel that nothing is corrupted. That
@@ -283,7 +344,11 @@ esp_err_t board_init(void) {
     // the byte swap and the transfer, and MISO is unwired, so no software
     // check here can see what actually reaches the glass. Revert to 40000000
     // if any tearing or colour damage ever shows up.
-    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37, .queue_size=1};
+    spi_device_interface_config_t dev = {.clock_speed_hz=80000000, .mode=0, .spics_io_num=37, .queue_size=1
+#ifdef KASANE_P0_BUS_PROBE
+        ,.post_cb=lcd_post_cb
+#endif
+    };
     ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev, &lcd));
     pie_swap=swap_agrees();
     // Says which clock is in the binary. Several sessions share this tree, and
@@ -397,6 +462,9 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     size_t bytes = (size_t)LCD_W * rows * 2;
     esp_err_t e;
     if (g_board_async) {
+#ifdef KASANE_P0_BUS_PROBE
+        int64_t swap_began=esp_timer_get_time();
+#endif
         // THE PIPELINE. The strip queued on the previous call has been going out
         // during everything above (~440 us of SPI against ~2.2 ms of drawing and
         // layout). The panel buffer that is NOT in flight is tx_buf[tx_front], so
@@ -415,6 +483,10 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             else swap_scalar(pixels,pixels,count);
             memcpy(panel, pixels, bytes);
         }
+#ifdef KASANE_P0_BUS_PROBE
+        ksn_p0_bus_phase_sample(KSN_P0_BUS_SWAP,
+            (uint32_t)(esp_timer_get_time()-swap_began),false);
+#endif
         e = tx_reap();
         if (e == ESP_OK) {
             // DC high: these bytes are pixel data and not a command. tx() is the
@@ -422,7 +494,16 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             // because it would block on the transfer this path exists to overlap.
             gpio_set_level(34, 1);
             tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+#ifdef KASANE_P0_BUS_PROBE
+            atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
+            tx_pending.user=&lcd_data_isr_us;
+            int64_t queue_began=esp_timer_get_time();
+#endif
             e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+#ifdef KASANE_P0_BUS_PROBE
+            ksn_p0_bus_phase_sample(KSN_P0_BUS_QUEUE,
+                (uint32_t)(esp_timer_get_time()-queue_began),false);
+#endif
             tx_inflight = (e == ESP_OK);
             tx_front ^= 1;
         }
@@ -490,6 +571,10 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
         if (e == ESP_OK) {
             gpio_set_level(34, 1);
             tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
+#ifdef KASANE_P0_BUS_PROBE
+            atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
+            tx_pending.user=&lcd_data_isr_us;
+#endif
             e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
             tx_inflight = (e == ESP_OK);
             tx_front ^= 1;

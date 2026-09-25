@@ -11,6 +11,7 @@
 #include "jpfont.h"
 #include "skk_session.h"
 #include "app_session.h"
+#include "pocket_kasane.h"
 #include "vm_wake.h"
 #include "pocket_workspace.h"
 #include "sd_picker.h"
@@ -19,6 +20,16 @@
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_capture.h"
+#include "pocket_av.h"
+#ifdef KASANE_P0_PROBE
+#include "pocket/app_music_view.h"
+#include "pocket_mutex_arena.h"
+#include "ui/kasane/ksn_schema_session.h"
+#endif
+#include "ui/kasane/ksn_p0_probe.h"
+#ifdef KASANE_TEXT_PIE_DEVICE_PROBE
+#include "ui/kasane/ksn_render.h"
+#endif
 #include "pocket_bridge.h"
 #include "pocket_text.h"
 #include "system/sys_device.h"
@@ -37,6 +48,10 @@
 #include <string.h>
 #include "hal/fpu_latency.h"
 static atomic_bool fpu_probe_requested;
+#ifdef KASANE_P5_NOTICE_PROBE
+static atomic_int p5_notice_probe_requested;
+#define P5_NOTICE_OWNER (UINT32_MAX-1u)
+#endif
 #ifdef CONFIG_POCKET_VM_RELOC
 // Sticky across app starts: one arming can be followed by several runs, which
 // is what a lifecycle sweep needs. Set-only, not a toggle -- a script that
@@ -45,7 +60,6 @@ static atomic_bool reloc_requested;
 #endif
 #ifdef CONFIG_KSN_DEVICE_PROBE
 #include "esp_heap_caps.h"
-#include "pocket_kasane.h"
 #include "ui/kasane/ksn_runtime.h"
 static atomic_bool ksn_probe_requested;
 static atomic_int system_probe_requested;
@@ -237,6 +251,16 @@ static uint32_t last_frame_us;
 // USB drives the home screen with single letters, but an editor needs the
 // bytes themselves so a host script can type at it. 0x1b closes either way.
 static bool usb_stroke(char c, keystroke_t *k) {
+#ifdef KASANE_TEXT_PIE_DEVICE_PROBE
+    /* Set, do not toggle: a host can safely retry after a lost USB/log byte.
+     * This diagnostic path runs before guest input forwarding. */
+    if(c=='K'||c=='k') {
+        g_ksn_text_pie=c=='K';
+        ESP_LOGI("KSN_PIE","TEXT %d",g_ksn_text_pie);
+        return false;
+    }
+    if(c=='?') { atomic_store(&diagnostic,c); return false; }
+#endif
     if(pocket_bridge_usb((uint8_t)c))return false;
     if(pet_hub_usb((uint8_t)c))return false;
     memset(k,0,sizeof(*k));
@@ -255,6 +279,34 @@ static bool usb_stroke(char c, keystroke_t *k) {
         k->text[0]=c;k->len=1;return true;
     }
     if(c=='s') { atomic_store(&capture,true); return false; }
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(c=='%') { app_p2_request_repair_probe(); return false; }
+    if(c=='@') { app_p2_request_patch_repair_probe(); return false; }
+    if(c=='}') { k->nav=KEY_RIGHT; return true; }
+    if(c=='{') { k->nav=KEY_LEFT; return true; }
+    if(c=='!') { k->nav=KEY_UP; return true; }
+    if(c==']') { k->nav=KEY_DOWN; return true; }
+#endif
+#ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
+    if(c=='%'||c=='^') { shell_overlay_repair_request(c=='^'); return false; }
+#endif
+#ifdef KASANE_P5_LOWHEAP_PROBE
+    if(c=='H') { shell_lowheap_toggle_request(); return false; }
+#endif
+#ifdef KASANE_P5_NOTICE_PROBE
+    if(c=='J'||c=='C') { atomic_store(&p5_notice_probe_requested,c); return false; }
+#endif
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+    /* P0's USB 'u' starts a foreground diagnostic. Keep a distinct key for
+     * the music overlay's up action so the 33 ms probe stays in the overlay.
+     * Likewise, 'b' starts a P0 app, so settings navigation needs right. */
+    if(c=='&') { k->nav=KEY_UP; return true; }
+    if(c=='>') { k->nav=KEY_RIGHT; return true; }
+#endif
+    // Not behind CONFIG_KSN_DEVICE_PROBE: this one measures the CPU rather than
+    // the display, it is about a kilobyte, and the build that needs it is
+    // whichever build is being optimised -- which is the shipping one.
+    if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
 #ifdef CONFIG_KSN_DEVICE_PROBE
     if(c=='~') { atomic_store(&ksn_probe_requested,true); return false; }
     if(c=='N'||c=='O'||c=='Z'){atomic_store(&system_probe_requested,c);return false;}
@@ -262,14 +314,31 @@ static bool usb_stroke(char c, keystroke_t *k) {
     if(c=='c') { motion_recenter(); return false; }
     // '8' is not an app: it checks the baked sound tables against this chip's
     // own libm (sound_check_tables), and is handled where the others start. It
-    // is not folded into the range because '7' has no diagnostic behind it and
-    // would silently start the default app.
+    // is not folded into the range because '7' is a separate Kasane wall-source
+    // diagnostic only in P0 builds; a normal build still leaves it unused.
     // '9' is the same kind of thing for the microphone: it sweeps the codec's
     // input paths and its ADC volume and prints what each produces, because the
     // board answered the first register table with silence and guessing again
     // is not a method. Like every letter in this function it arrives over USB;
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
+#ifdef KASANE_P0_PROBE
+    if(c==';') { (void)pocket_mutex_arena_device_race_probe(); return false; }
+    if(c==':') { (void)pocket_mutex_arena_device_oom_probe(); return false; }
+    if(c=='g') {
+        bool fullscan=ksn_schema_session_toggle_fullscan_probe();
+        ESP_LOGI("KSN_P2","FULLSCAN %u",(unsigned)fullscan);
+        return false;
+    }
+    if(c=='7'||c=='0'||c=='v'||c=='V'||c=='w'||c=='y'||c=='z'||c=='j'||c=='h'||c=='i'||c=='l'||c=='T'||c=='t'||c=='R'||c=='#'
+#ifndef KASANE_P5_FAIRNESS_PROBE
+       ||c=='b'||c=='u'
+#endif
+#ifdef KASANE_P0_COPY_PROBE
+       ||c=='x'
+#endif
+      ) { atomic_store(&diagnostic,c); return false; }
+#endif
 #ifdef CONFIG_POCKET_VM_CALLBENCH
     if(c=='N'||c=='U') { atomic_store(&diagnostic,c); return false; }
 #endif
@@ -366,6 +435,9 @@ static void input_task(void *arg) {
         char c;
         if(!have && usb_serial_jtag_read_bytes(&c,1,0)>0) have=usb_stroke(c,&k);
         if(have) {
+#ifdef KASANE_P0_PROBE
+            k.queued_at_us=(uint32_t)esp_timer_get_time();
+#endif
             // Only the force stop jumps the queue, and it does so because the
             // drawing task may be inside a guest call that has to be
             // interrupted rather than waited out. Everything else is ordered.
@@ -794,6 +866,18 @@ static void paint(const screen_ops_t *s) {
 // without restarting it; see the rule at the bottom of ui_task().
 static int64_t period_began;
 
+static bool ui_key_receive(keystroke_t *stroke) {
+    bool have=xQueueReceive(keys,stroke,0)==pdTRUE;
+#ifdef KASANE_P0_PROBE
+    // Measures queue residence after the input task saw the event. It does
+    // not claim to measure physical key-down or USB host transport latency.
+    if(have&&overlay_running())
+        ksn_p0_probe_sample(KSN_P0_INPUT_QUEUE,
+                            (uint32_t)esp_timer_get_time()-stroke->queued_at_us);
+#endif
+    return have;
+}
+
 static void ui_task(void *arg) {
     (void)arg;
     // Before anything can post: every producer of a completion runs on a task
@@ -801,6 +885,9 @@ static void ui_task(void *arg) {
     vm_wake_bind();
     ESP_LOGI("shell","ui runs on core %d",xPortGetCoreID());
     ESP_LOGI("shell","HOME_READY");
+#ifdef KASANE_P0_PROBE
+    int64_t previous_overlay_frame_started=0;
+#endif
     while(1) {
 #ifdef CONFIG_KSN_DEVICE_PROBE
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&ksn_probe_requested,false)){
@@ -827,8 +914,16 @@ static void ui_task(void *arg) {
         bench_core_tick();
 #endif
         int64_t frame_start=esp_timer_get_time();
+#ifdef KASANE_P0_PROBE
+        if(overlay_running()) {
+            if(previous_overlay_frame_started)
+                ksn_p0_probe_sample(KSN_P0_UI_INTERVAL,
+                    (uint32_t)(frame_start-previous_overlay_frame_started));
+            previous_overlay_frame_started=frame_start;
+        } else previous_overlay_frame_started=0;
+#endif
         keystroke_t stroke={0};
-        bool have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+        bool have=ui_key_receive(&stroke);
 #ifdef CONFIG_KSN_DEVICE_PROBE
         /* Replay the visual diagnostic from the physical keyboard as well. */
         if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
@@ -844,7 +939,28 @@ static void ui_task(void *arg) {
         int system_probe_command=atomic_exchange(&system_probe_requested,0);
         if(system_probe_command)system_probe(system_probe_command);
 #endif
+#ifdef KASANE_P5_NOTICE_PROBE
+        int p5_notice_command=atomic_exchange(&p5_notice_probe_requested,0);
+        if(p5_notice_command=='J'){
+            uint32_t id=0;
+            sys_notice_result result=sys_notify_post(sys_device_notifications(),P5_NOTICE_OWNER,
+                                                     1,"P5 SYSTEM NOTICE",0,&id);
+            ESP_LOGI("KSN_P5_NOTICE","POST result=%u id=%u",(unsigned)result,(unsigned)id);
+        }else if(p5_notice_command=='C'){
+            sys_notify_release_owner(sys_device_notifications(),P5_NOTICE_OWNER);
+            ESP_LOGI("KSN_P5_NOTICE","CLEAR");
+        }
+#endif
         sys_device_step();
+#ifdef KASANE_P0_PROBE
+        int64_t av_service_started=esp_timer_get_time();
+#endif
+        pocket_av_service_stream();
+#ifdef KASANE_P0_PROBE
+        if(overlay_running())
+            ksn_p0_probe_sample(KSN_P0_AV_SERVICE,
+                                (uint32_t)(esp_timer_get_time()-av_service_started));
+#endif
         pet_repaint=pet_hub_pump();
         if(have&&pet_hub_key(stroke.nav)){have=false;pet_repaint=true;}
         if(pet_repaint&&running)app_force_redraw();
@@ -931,7 +1047,7 @@ static void ui_task(void *arg) {
                         break;
                     }
                     overlay_key(&stroke);
-                    have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+                    have=ui_key_receive(&stroke);
                 }
             }
             while(have) {
@@ -939,7 +1055,7 @@ static void ui_task(void *arg) {
                 if(screen!=was) break;
                 const char *ignored; size_t ignored_len;
                 if(s->wants_run && s->wants_run(&ignored,&ignored_len)) break;
-                have=xQueueReceive(keys,&stroke,0)==pdTRUE;
+                have=ui_key_receive(&stroke);
             }
             s=&SCREENS[screen];              // key() may have moved us
             // One overlay turn, before the frame it will be composited into
@@ -963,8 +1079,16 @@ static void ui_task(void *arg) {
                 paint(s);
 
             framed:
-            {
+        {
             int test=atomic_exchange(&diagnostic,0);
+#ifdef KASANE_P0_PROBE
+            if(test=='R'){
+                ksn_p0_probe_reset();
+                pocket_app_music_view_probe_reset_counters();
+                ESP_LOGI("KSN_P0","RESET requested");
+                test=0;
+            }
+#endif
 #ifdef CONFIG_POCKET_VM_CALLBENCH
             if(test=='N'||test=='U') {
                 if(!running && screen==SCREEN_HOME) {
@@ -1025,6 +1149,11 @@ static void ui_task(void *arg) {
                      SCREENS[screen].takes_text || pocket_text_active());
 
         last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
+#ifdef KASANE_P0_PROBE
+        // Unlike overlay_draw, this includes the synchronous SD producer.
+        // Do not count the frame that ends/reports the session after reset.
+        if(overlay_running()) ksn_p0_probe_sample(KSN_P0_UI_FRAME,last_frame_us);
+#endif
         int held=(int)(last_frame_us/1000);
         unsigned cap = running ? VM_DISPLAY_PERIOD_MS : SCREENS[screen].frame_ms;
         unsigned rest = (unsigned)held<cap?cap-held:1;
@@ -1085,8 +1214,13 @@ static void ui_task(void *arg) {
                 // cap short instead of waiting out the period; the measured
                 // (device) cost it removes is the "up to one frame period"
                 // term of completion latency, and nothing else.
-                if(rest) vm_wake_wait(sys_device_wait_ticks(
-                    (uint64_t)esp_timer_get_time(),pdMS_TO_TICKS(rest),configTICK_RATE_HZ));
+                if(rest){
+                    uint64_t wait_now=(uint64_t)esp_timer_get_time();
+                    uint32_t ticks=sys_device_wait_ticks(wait_now,pdMS_TO_TICKS(rest),
+                                                         configTICK_RATE_HZ);
+                    vm_wake_wait(pocket_kasane_source_wait_ticks(
+                        wait_now,ticks,configTICK_RATE_HZ));
+                }
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.
                 period_began=esp_timer_get_time();
@@ -1098,8 +1232,11 @@ static void ui_task(void *arg) {
         // when a frame() first does, and this keeps a stale `period_began`
         // from making the first frame of a new session skip its wait.
         period_began=esp_timer_get_time();
-        vm_wake_wait(sys_device_wait_ticks((uint64_t)esp_timer_get_time(),
-            pdMS_TO_TICKS(rest),configTICK_RATE_HZ));
+        uint64_t wait_now=(uint64_t)esp_timer_get_time();
+        uint32_t ticks=sys_device_wait_ticks(wait_now,pdMS_TO_TICKS(rest),
+                                             configTICK_RATE_HZ);
+        vm_wake_wait(pocket_kasane_source_wait_ticks(
+            wait_now,ticks,configTICK_RATE_HZ));
     }
 }
 

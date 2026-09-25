@@ -5,6 +5,12 @@
 extern "C" {
 #endif
 typedef struct { uint32_t bands,transferred_bytes; } ksn_render_stats;
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+/* Diagnostic only: counts decode_view's bracketed cycles and an adjacent
+ * empty bracket with the same cycle reader. Neither is a product timer. */
+void ksn_render_decode_cycle_reset(void);
+void ksn_render_decode_cycle_report(void);
+#endif
 /* Per-phase render counters, the measurement boundary 7 of
  * docs/perf/kasane-opt-survey.md says is missing. Every field is a COUNT of
  * events that happened, never a duration: `_cy` sums the CPU cycle reads
@@ -122,6 +128,11 @@ extern int g_ksn_tile_pixels,g_ksn_tile_reach,g_ksn_tile_smooth;
  * otherwise mutate the core or reenter JS/presentation. prepare_frame consumes
  * preexisting invalidation; later invalidation survives the acknowledgement. */
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats);
+/* As ksn_render_rects, but load the host's replayable scene below the command
+ * layers. Kept as a separate entry point so the stable display-port ABI and
+ * its positional host fixtures do not grow for one composition policy. */
+ksn_result ksn_render_rects_backdrop(ksn_core *,const ksn_display_port *,
+                                     ksn_backdrop_loader,bool occlusion_safe,ksn_render_stats *);
 /* TEMPORARY A/B switch for that renderer's coverage solver: 1 = solve a row's
  * covered x set as runs once per row per command, 0 = ask the per-pixel
  * predicate for every pixel. Both arms live in one binary and produce the same
@@ -180,12 +191,15 @@ extern int g_ksn_scale256;
  * chain; 0 = the chain only. The kernel is exact -- it reproduces blend()'s own
  * expressions, proven over the whole per-channel space and over random multi
  * block runs (test_kernels.py, docs/perf/kasane-blend-pie.md sections 4 and 6) --
- * so both arms must produce byte identical panels. It is default 0 because the
- * win is a device measurement (same binary, the switch flipped per window), and
- * because PIE is coprocessor 3, which is the owner task's here. The kernel needs
+ * so both arms must produce byte identical panels. It is default 1 after a
+ * same-binary device A/B showed a render gain. PIE is coprocessor 3, owned by
+ * the UI task here. The kernel needs
  * a 16-byte aligned destination, so the caller hands over only the 8-aligned
  * window of a run and keeps head and tail on the chain. */
 extern int g_ksn_blend_pie;
+/* Candidate for binary text masks: aligned eight-pixel blocks are consumed by
+ * a zero-copy, per-lane-alpha PIE kernel. Disabled until its own device A/B. */
+extern int g_ksn_text_pie;
 #ifdef __cplusplus
 }
 #endif

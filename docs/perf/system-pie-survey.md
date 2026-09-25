@@ -3,7 +3,7 @@
 2026-09-16、ブランチ `perf/system-pie`（親 `origin/perf/kasane-opt` = `d3fc8ba`）。
 対象は `vm/design-contracts` が 2026-09-16 に足したシステムAPI・通知ランタイム
 （`main/system/sys_{state,clock,wall,timer,notify,ringer,device}.{c,h}`、14 ファイル 728 行）。
-[system-runtime.md](../kasane/system-runtime.md) が設計、本書は**分析のみ**で、ソース・挙動・
+[Kasaneの境界と契約](../kasane/architecture.md) が現在の設計要約、本書は**分析のみ**で、ソース・挙動・
 実機には一切触れていない。したがってここにある数は「読んだ行」「実行したコマンドの出力」
 「既存ドキュメントの値」のいずれかで、**このモジュールの実機時間を新たに測ったものは 1 つも無い**。
 
@@ -114,7 +114,7 @@ PIE（`docs/perf/pie-simd.md`）が効くのは「8 本の int16（または 4 �
 
 ## 5. 測っていないこと / 主張しないこと
 
-- **実機の時間は 1 つも無い**。`system-runtime.md` の CP14a/CP14b1/CP14b2 は容量と構造の
+- **実機の時間は 1 つも無い**。Kasaneの旧System実装記録（Git履歴中）のCP14a/CP14b1/CP14b2は容量と構造の
   記録（`state` 144 B、追加 heap/task 無し）で、時間の実測ではない。§2 の 4〜6 µs は
   命令数 × 回数 × 借用 IPC の**推定**である。
 - IPC 1.0〜1.3 は pie-simd.md のスカラー計測からの借用で、この経路で測った値ではない。

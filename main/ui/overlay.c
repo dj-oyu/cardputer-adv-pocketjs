@@ -3,6 +3,8 @@
 #include "app_session.h"
 #include "app_registry.h"
 #include "pocket_overlay.h"
+#include "pocket_kasane.h"
+#include "kasane/ksn_p0_probe.h"
 #include "board.h"
 #include "nvs.h"
 #include "esp_heap_caps.h"
@@ -15,6 +17,10 @@ static const char *TAG="overlay";
 
 extern const char deskclock_start[] asm("_binary_deskclock_js_start");
 extern const char deskclock_end[]   asm("_binary_deskclock_js_end");
+#ifdef KASANE_P5_FAIRNESS_PROBE
+extern const char overlay_fairness_probe_start[] asm("_binary_overlay_fairness_probe_js_start");
+extern const char overlay_fairness_probe_end[] asm("_binary_overlay_fairness_probe_js_end");
+#endif
 extern const char player_start[] asm("_binary_player_js_start");
 extern const char player_end[]   asm("_binary_player_js_end");
 
@@ -55,7 +61,8 @@ static const overlay_app_t MUSIC = {
     .source=&player_src, .source_end=&player_src_end,
     // The whole panel, which is what 3.1 now allows and what the old rule made
     // impossible: with XMB ended there is nothing underneath to stay clear of.
-    // Modals still land on top, and they draw the whole screen themselves.
+    // Shell-owned pickers still land on top and draw the whole screen. Kasane
+    // transaction modals are not part of the overlay profile.
     .region={.x=0,.y=0,.w=LCD_W,.h=LCD_H},
     // More than the clock, because it holds a file open and reads the card
     // inside its turn. Still a small fraction of the frame: what this catches
@@ -89,6 +96,8 @@ static bool             session_up;       // a guest belonging to us exists
 // chain, and the next boot proves it again from scratch.
 static bool             proven;
 static overlay_budget_t budget;
+static uint32_t         budget_guest_us,budget_composite_us;
+static bool             budget_frame_pending;
 // One live buffer per overlay. Only the selected one is ever written, so a row
 // that is not running keeps its plain title rather than a stale status.
 static char             labels[OVERLAY_APPS][20];
@@ -134,7 +143,12 @@ void overlay_init(void) {
     // because a `.source` initialiser would need the address of an extern array
     // at file scope and that is fine -- but the END pointer is only ever used as
     // a length, and keeping both here puts the arithmetic in one place.
+#ifdef KASANE_P5_FAIRNESS_PROBE
+    deskclock_src=overlay_fairness_probe_start;
+    deskclock_src_end=overlay_fairness_probe_end;
+#else
     deskclock_src=deskclock_start; deskclock_src_end=deskclock_end;
+#endif
     player_src=player_start;       player_src_end=player_end;
     uint8_t stored=0;
     if(nvs_open("overlay",NVS_READWRITE,&prefs)==ESP_OK) {
@@ -197,6 +211,7 @@ static void stop_with(const char *label, overlay_state_t next) {
     if(session_up) { app_stop(); session_up=false; }
     if(flag_stored) flag_set(false);
     state=next;
+    budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
     say(label);
     ESP_LOGW(TAG,"OVERLAY_STOPPED %s worst=%uus turns=%u",
              label,(unsigned)budget.worst_us,(unsigned)budget.turns);
@@ -212,6 +227,7 @@ void overlay_release(void) {
         if(choice && state==OVERLAY_RUNNING) { state=OVERLAY_STARTING; say("..."); }
     }
     if(flag_stored) flag_set(false);
+    budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
     pocket_overlay_reset();
 }
 
@@ -297,6 +313,7 @@ static void start(void) {
         return;
     }
     pocket_overlay_set_region(&o->region);
+    pocket_kasane_set_viewport(o->region.x,o->region.y,o->region.w,o->region.h);
     app_registry_select(o->id);
     // The -1 is the NUL that EMBED_TXTFILES appends and the guest must not see.
     esp_err_t err=app_start_overlay(*o->source,
@@ -323,6 +340,7 @@ static void start(void) {
     budget=(overlay_budget_t){.budget_us=o->budget_us,.over_limit=60,
                               .healthy_us=5000000};
     overlay_budget_start(&budget,(uint64_t)esp_timer_get_time());
+    budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
     // VERIFY, having predicted. The guest is up, so what it cost is no longer a
     // forecast -- it is a subtraction. Standing down here puts the machine back
     // exactly where it was, which is the whole reason this check can exist for
@@ -351,16 +369,49 @@ void overlay_tick(uint32_t frame_us) {
     if(state!=OVERLAY_RUNNING) return;
 
     int64_t began=esp_timer_get_time();
+    if(budget_frame_pending) {
+        uint32_t total=overlay_budget_cost(budget_guest_us,budget_composite_us);
+#ifdef KASANE_P1_OVERLAY_STAGE_PROBE
+        ksn_p0_probe_sample(KSN_P1_OVERLAY_GUEST,budget_guest_us);
+        ksn_p0_probe_sample(KSN_P1_OVERLAY_COMPOSITE,budget_composite_us);
+#endif
+        ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,total);
+        budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
+        if(overlay_budget_turn(&budget,total,frame_us)) {
+            stop_with("OVER BUDGET",OVERLAY_STOPPED);return;
+        }
+        if(flag_stored&&overlay_budget_healthy(&budget,(uint64_t)began)) {
+            proven=true;flag_set(false);
+            ESP_LOGI(TAG,"OVERLAY_HEALTHY worst=%uus",(unsigned)budget.worst_us);
+        }
+        char cost[12];
+        snprintf(cost,sizeof cost,"%u.%ums",(unsigned)(total/1000),
+                 (unsigned)((total%1000)/100));
+        say(cost);
+    }
+    /* A submitted or repairing bank must reach the shell-owned display port
+     * before guest code or its queued input can mutate application state. */
+    if(pocket_kasane_needs_present()) {
+        if(overlay_kasane_active())budget_frame_pending=true;
+        return;
+    }
+    began=esp_timer_get_time();
     esp_err_t err=app_overlay_tick();
     uint32_t spent=(uint32_t)(esp_timer_get_time()-began);
     if(err!=ESP_OK) { stop_with("FAULTED",OVERLAY_STOPPED); return; }
+    if(overlay_kasane_active()) {
+        budget_guest_us=spent;budget_composite_us=0;budget_frame_pending=true;
+        return;
+    }
     if(overlay_budget_turn(&budget,spent,frame_us)) {
+        ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,spent);
         // 3.1: stopped, and the stop is SHOWN. The Settings row is where the
         // person would go to turn it off, so it is where they are told it
         // already stopped -- a silent stop is indistinguishable from a fault.
         stop_with("OVER BUDGET",OVERLAY_STOPPED);
         return;
     }
+    ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,spent);
     if(flag_stored && overlay_budget_healthy(&budget,(uint64_t)began)) {
         proven=true;
         flag_set(false);
@@ -401,6 +452,26 @@ void overlay_paint(uint16_t *strip, int strip_y, int strip_h) {
     pocket_overlay_paint(strip,strip_y,strip_h);
 }
 
+bool overlay_kasane_active(void) {
+    return state==OVERLAY_RUNNING&&pocket_kasane_active();
+}
+
+ksn_result overlay_kasane_present(const ksn_display_port *port,ksn_backdrop_loader load,
+                                  bool host_top_dynamic,ksn_render_stats *stats) {
+    if(!overlay_kasane_active()||!port||!load||!stats)return KSN_INVALID;
+    uint64_t now=(uint64_t)esp_timer_get_time();
+    ksn_result result=pocket_kasane_advance(now);
+    if(result!=KSN_OK&&result!=KSN_BUSY)return result;
+    /* A fully opaque SYSTEM band hides the animated backdrop. Its own
+     * transaction damage still repaints it on post/clear; dynamic host HUD
+     * content above Kasane opts out of this occlusion shortcut. */
+    uint32_t covered=host_top_dynamic?0:pocket_kasane_opaque_system_bands();
+    pocket_kasane_invalidate_bands(KSN_BANDS_ALL&~covered);
+    result=pocket_kasane_present_backdrop(port,load,!host_top_dynamic,stats);
+    if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
+    return result;
+}
+
 bool overlay_running(void) { return state==OVERLAY_RUNNING; }
 
 // The residue, and nothing else reaches here. main.c takes the reserved key
@@ -409,5 +480,11 @@ bool overlay_running(void) { return state==OVERLAY_RUNNING; }
 // site rather than a filter this file could get wrong.
 void overlay_key(const keystroke_t *k) {
     if(state!=OVERLAY_RUNNING||!k) return;
+    if(pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return;
     pocket_overlay_key(k);
+}
+
+void overlay_kasane_charge(uint32_t composite_us) {
+    if(state!=OVERLAY_RUNNING||!budget_frame_pending)return;
+    budget_composite_us=overlay_budget_cost(budget_composite_us,composite_us);
 }

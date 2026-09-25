@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 2 | capabilities／apiVersion | 実装済み | `pocket_api.c` |
 | 3 | アプリ登録（静的テーブル） | 実装済み | `main/pocket/app_registry.c` |
-| 3.1 | オーバーレイ | 実装済み（`pocket.overlay`。§3.1本文に改訂履歴） | `pocket_overlay.c`、`main/ui/overlay*.c` |
+| 3.1 | オーバーレイ | 実装済み（描画は`pocket.kasane`、region/inputは`pocket.overlay`） | `pocket_kasane.c`、`pocket_overlay.c`、`main/ui/overlay*.c` |
 | 4 | 共通エラー・cancel・Options | 実装済み | `pocket_api.c` |
 | 5 | app／time／log | 実装済み | `pocket_app.c` |
 | 6 | ui／input／input.text | 実装済み | `pocket_ui.c`、`pocket_text.c` |
@@ -76,11 +76,11 @@ type DeviceInfo = {
 
 **capabilityの登録はセッションごと。** 各面は注入時に登録し、`pocket_api_reset()`がセッション終了時に表を空にする。したがって`capabilities.get()`は「このセッションに注入された面」を答え、前のセッションが注入した面を引き継がない（オーバーレイは無線・バス等を注入しないので、それらはsupported=false）。
 
-**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[システムランタイム移行設計](../kasane/system-runtime-migration.md)に従う。
+**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[Kasaneの境界と契約](../kasane/architecture.md)を参照。
 
 availableは予約ではなく観測値。確認直後に資源が変わり得るため、open/acquireの結果が最終判断となる。認可状態は別であり、available=trueだけでは利用権を得ない。limitsはそのビルドのハード上限、取得ハンドルは実際に割り当てられた値を返す。
 
-版0.xでは破壊的変更をminor版で明示する。アプリ登録情報に対応APIの範囲を持ち、不適合なら起動前に表示する。旧 `legacy-pocketjs` 実行モード（`ui.createNode` などの `ui.*`、Rust UIコアとTaffyレイアウト）は、全アプリの移行後にファームから削除した（2026-09-17）。全アプリが `pocket-app` で、描画は `pocket.kasane`（[Kasane利用API](../kasane/design-api.md)）。旧APIを呼ぶ保存済みプログラムは変換せず、起動前に「旧API(ui.*)のため実行できません」と表示してログに `APP_LEGACY_UI` を出し、実行しない。
+版0.xでは破壊的変更をminor版で明示する。アプリ登録情報に対応APIの範囲を持ち、不適合なら起動前に表示する。旧 `legacy-pocketjs` 実行モード（`ui.createNode` などの `ui.*`、Rust UIコアとTaffyレイアウト）は、全アプリの移行後にファームから削除した（2026-09-17）。全アプリが `pocket-app` で、描画は `pocket.kasane`（[Kasaneの現行境界](../kasane/architecture.md)）。旧APIを呼ぶ保存済みプログラムは変換せず、起動前に「旧API(ui.*)のため実行できません」と表示してログに `APP_LEGACY_UI` を出し、実行しない。
 
 ## 3. アプリ登録と権限
 
@@ -110,7 +110,7 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 **ホーム画面のUIそのものになるアプリ。XMBを終了させ、その場所に立つ。** シーンは下で描かれ続け、シェルは画面を手放さない（背景の代わりに走る通常アプリとは、そこが違う）。時計・いま鳴っている曲・観賞用の表示・シーン定義の編集など「背景を見ながら使うもの」がこの形になる。
 
 ```json
-{ "runtime": "pocket-overlay", "required": ["ui.overlay"] }
+{ "runtime": "pocket-overlay", "required": ["ui.overlay", "display.kasane"] }
 ```
 
 **この種別を分ける理由は、合成ではなく統治にある。** 描画の重ね合わせはホーム画面が既に行っている（背景＋メニュー）。新しいのは、**ユーザーがホーム画面に居るあいだゲストが生きている**という点で、危険はすべてそこから出る。
@@ -155,7 +155,7 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 
 **能力の既定はフォアグラウンドのアプリより狭い。** ユーザーがアプリを見ていない間も走るので、音声再生・ネットワーク・外部機器の駆動は宣言と許可があっても既定では止め、明示的に有効化する。**許可の取り消しはホーム画面から常に到達できる**必要があり、オーバーレイが壊れている最中でも到達できなければならない — 上の予約キーがその経路である。
 
-#### 実装の状態（2026-09-09）
+#### 実装の状態（2026-09-23）
 
 **この節は実装された。** `shell_draw()` はoverlayが立っているとき `menu_layout()` を
 呼ばず、ラベルも描かない。ESCはシェルの予約キーで、`ui_task` の配送ループの先頭で
@@ -165,6 +165,13 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 
 `overlay_yield()` の最初の呼び出し元は予約キーである。無線とストリームの側の
 呼び出し元は依然として無い。
+
+overlay sessionにも`pocket.kasane`を注入する。座標はmanifest region相対で、adapterがLCD座標へ
+変換しregionでclipする。shellは現在のnative sceneを各帯のbackdropとして供給し、その上へ同じ
+APP layerを合成するため、OVERLAYという第三layerやfull-frame bufferは持たない。`pocket.overlay`の
+旧display listは互換経路として残り、新規overlayではregion limitsとkey listenerだけを担う。
+Kasane modalは全画面scrim/SOLID背景がregion付きbackdropと両立しないためoverlayでは非対応。
+submission/repair中は通常入力と次のguest turnを止め、Kasane合成費用もoverlay予算へ含める。
 
 **予約キーは一度間違った場所に置かれた。** force stop（Ctrl+Alt+Del）の分岐に
 書いたので、通常のBackは配送経路をそのまま通っていた——**この節が構造的だと言って
@@ -238,12 +245,17 @@ pocket.app.exit(): void;
 pocket.app.onFrame(fn: (f: {timeMs: number; deltaMs: number}) => void): Subscription;
 pocket.time.now(): number;
 pocket.time.wall(): {unixMs: number | null; source: "unsynced" | "host" | "network"};
+pocket.time.wallSource(): KasaneSourceCapability;
 pocket.time.sleep(ms: number, options?: Options): Promise<void>;
 ```
 
 `time.wall()`はSystemの共通anchorを読む。`source`はRTC/SNTPなら互換表記`network`、検証済みPC packetの補完なら`host`、利用できる時刻がなければ`unsynced`。RTC/SNTPを優先し、PC補完はOS時計を書き換えない。PC packetのCRCは時刻の真正性保証ではない。TLSは別に実際のOS時計の信頼状態を検査する。`unixMs`は丸めた整数ミリ秒で、安全な数値範囲を越える場合もnullを返す。
 
+`time.wallSource()`はKasaneのmountへ渡す不透明なsession-scoped capabilityを返す。`view.bind(pocket.time.wallSource(), {face: 0, tag: 1})`で、text field 0を`HH:MM`（同期前は`--:--`）、field 1を`UTC`または`NO SYNC`として購読できる。JS側の毎フレーム時刻取得や描画更新は不要。sourceは時計サービスが所有し、Kasaneは型付きsnapshotを一時的に借りるだけである。capabilityはセッション終了後に失効する。
+
 startはソース評価中に1回登録する。新ランタイムではglobalThis.frameをホストが用意し、Promiseだけを待つアプリもイベント処理を継続できる。start hook終了まで状態はStartingだが、I/O完了とキャンセルは配送する。onFrameはRunningでのみ呼ぶ。
+
+`pocket.app.start()`を使わず、入力・Promiseだけで動くアプリは明示的に`globalThis.frame = null`を指定できる。この場合も各host turnでservice pumpとPromise job drainは続き、JS frame呼出しと引数生成だけを省く。`frame`未定義は引き続き起動エラーである。
 
 1ターンは停止要求→入力／I/O完了→上限付きPromise job→frame→描画の順。Promise連鎖を含むJSターン全体に期限を設ける。frameは同期関数で、Promiseを返したらINVALID_ARGUMENTとしてアプリを停止する。I/Oのawaitはstart、別のasync関数、イベントから開始する。
 
@@ -450,6 +462,8 @@ WAV（PCM16／IMA ADPCM）、Opus CELT（§9.1.2）、MP3（§9.1.3）を実装�
 
 ```ts
 pocket.audio.player.open({source:string}, options?:Options):Promise<Player>;
+pocket.audio.outputSource(options?: {sampleMs?: number}): KasaneSourceCapability;
+pocket.audio.playbackSource(): KasaneSourceCapability;
 type Player = {
   info(): {codec:"wav/pcm16"|"wav/ima-adpcm"|"opus/celt"|"mp3";sampleRate:24000;channels:1;
            durationMs:number|null;seekable:boolean};
@@ -463,9 +477,38 @@ type Player = {
 };
 ```
 
+`audio.outputSource()`は実装済みの任意Kasane mount用source。field 0はtext
+`HH:MM:SS`（8 byte）、field 1は論理的な再生位置frames（`u32`）、field 2は
+そのstreamで無音補填したblockの累積数（`u32`）、field 3はstream ID（`u32`）。
+音声出力taskが実際に消費したframeに基づき再生開始時・終了時と観測周期で
+完全snapshotを更新する。`sampleMs`は32～1000の整数で、既定は1000。
+観測は128-frame出力blockの境界に量子化され、source初回作成後は周期を変更できない。
+`view.bind(pocket.audio.outputSource(), {elapsed: 0, frames: 1, starved: 2,
+streamId: 3})`のように型の合うslotへ束縛する。再生していない間は全field invalidと
+なり、slotはJSの最新base値へ戻る。sourceの生成・寿命はセッション単位で、
+音声taskはJSやKasane coreを直接呼ばない。数値fieldの既定は約1 Hzの観測値で、
+短い周期を指定しても全更新の描画やblock単位の配達は保証しない。readerが
+revisionを飛ばした場合は最新の完全snapshotを再取得し、必要なslotを再評価する。
+
+`audio.playbackSource()`は現在のplayerのUI向け事実を公開する汎用Kasane
+source。field 0は状態（`u16`: ready=0、playing=1、paused=2、ended=3、
+error=4）、field 1は`positionMs`（`u32`）、field 2は`durationMs`（`u32`、
+不明なら0）、field 3は累積`underruns`（`u32`）、field 4は`playing`
+（`bool`）、field 5は現在の`playerId`（`u32`）。`view.bind(pocket.audio.playbackSource(), {state:0,
+positionMs:1,durationMs:2,underruns:3,playing:4,playerId:5})`のように型の合うslotへ
+束縛できる。playerがない間は全field invalidとなり、JSの最新base値に戻る。
+sourceは購読要求時だけ確保され、UI ownerが状態・再生秒・duration・underrun
+の変化時に完全snapshotを公開する。複数の短命playerにまたがる「現在の
+player」sourceであり、特定handleへの固定bindingではない。既知の曲長では
+進捗1画素相当（最大1秒）の位置変化でも公開する。数値は描画用の間欠的な
+観測値で、`player.status()`のリアルタイム精度を代替しない。
+
 sourceは `app:/` / `assets:/` のWAVファイルで、24kHz・1ch・16bit PCMまたはIMA ADPCM（WAVのブロック配置）。**再生はストリーミングで、長さの上限はこの面には無い。** openはヘッダだけを範囲読みで検査し、バッファも音も取らない。playは出力受付の完了、pauseは停止位置の保持完了を返し、曲の終わりはonStateで通知する。位置は消費したPCM framesから求める。endedからのplayとseekはNOT_AVAILABLE（再生し直すにはopenし直す）。close後はすべてCLOSED。1プレイヤー・1音声で、toneとは排他（tone中のopenはBUSY）。セッション終了時は自動close。
 
-seekは実装している——クリップは全部RAMにあるので、seekable=falseにする理由がない。ただしADPCMはブロック先頭からしか再開できない（ブロック先頭の4バイトが予測器を再初期化する）ので、要求位置を含むブロックの先頭に落ちる。`seekBlockAligned` がそれを言う。pause/resumeも同じ丸めを受ける。
+seekはWAVおよび非network Opusで実装している。クリップ全体はRAMに載せず、
+ファイルを範囲読みする。ADPCMはブロック先頭からしか再開できない
+（ブロック先頭の4バイトが予測器を再初期化する）ので、要求位置を含む
+ブロックの先頭に落ちる。MP3 seekは現行実装では未対応。
 
 underrunsはもう常に0ではない。生産者（`pocket_av_pump()`）がリングを満たし損ねた128フレームのブロック数を数える。1回は5.3msで、**落ちるのではなく伸びる**——無音が挿入されるだけで音は1サンプルも失われず、positionMsもその間止まる。pause/seekを跨いで累積する。
 
@@ -761,9 +804,10 @@ MP3の `info().durationMs` は **Xing/Info/VBRIタグの総フレーム数**か�
 **述べられているときに述べ、述べられていないときは黙る。** 嘘をついたバーは
 消せない。
 `seekable:false` で `seek()` は `NOT_AVAILABLE`。
-一時停止からの再開は専用タスクで先頭から復号し、既に再生したサンプルを捨てて
-bit reservoirを復元するため、長い曲の後半では再開に時間がかかる。
-描画タスクで全曲を走査せず、インデックスも推定しない実装上の制約。
+一時停止は音声リングの消費だけを止め、復号器・bit reservoir・変換状態と
+未消費バッファを保持する。再開時の曲頭からの再デコードは不要で、位置に比例する
+待ち時間はない。停止中はI2Sに無音を送り、再生位置とunderrun数は増やさない。
+ランダムseekは引き続き非対応で、別途インデックスとpre-rollの設計が必要。
 
 `audio.playback.limits.codecs` に `mp3`、`mp3Container:"mpeg-layer3"`、
 `mp3Seekable:false` を追加。共通の `sampleRate:24000, channels:1` は出力形式。
