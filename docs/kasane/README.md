@@ -11,7 +11,7 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 
 ## 一目で分かる現在地
 
-- `mount` の汎用 descriptor、型付き slot、native source、dirty-node、APP/SYSTEM の lease と repair は実装されている。通常アプリ5件は native mount 経路へ移行した。Kasane core はアプリ名や音楽の意味を知らない。
+- `mount` の汎用 descriptor、型付き slot、native source、dirty-node、APP/SYSTEM の lease と repair は実装されている。メニュー登録済みの通常アプリ4件（hello・imucal・pet・companion）とdeskclock/music overlayは native mount 経路。bridgeもソースは移行済みだが現行imageには埋め込まれず、出荷アプリには数えない。Kasane core はアプリ名や音楽の意味を知らない。
 - music はアプリ側に音声・入力・文言判断を残し、表示を native presenter へ移した。music 固有の light 3矩形だけを PATCH する高速経路は採用済み。全計画 PATCH は利益を確認できず不採用。
 - 「producer が公開した text → 各 core destination が受理するまで」は該当実測経路で1 copy。producer 原データから LCD 描画完了までの**全経路1 copy以下は未達**。2 bank と返却済み borrowed pointer の寿命が主な障壁。
 - dirty-node の CPU 利益と部分転送・画素一致は確認したが、音楽 overlay は native 背景のため多くの frame が全17帯・64,800 Bを転送する。CPU改善とLCD改善は別物。
