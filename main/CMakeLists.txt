@@ -32,7 +32,9 @@ option(KASANE_TEXT_PIE_DEVICE_PROBE "Toggle binary-text PIE over USB for same-im
 if(KASANE_TEXT_PIE_DEVICE_PROBE AND NOT KASANE_P0_PROBE)
     message(FATAL_ERROR "KASANE_TEXT_PIE_DEVICE_PROBE requires KASANE_P0_PROBE")
 endif()
-option(KASANE_P0_COPY_PROBE "Count Kasane logical copies in the P0 diagnostic build" ON)
+# The fixed P0 timing gate excludes copy instrumentation. Opt in explicitly
+# for copy studies so a fresh diagnostic build cannot silently change workload.
+option(KASANE_P0_COPY_PROBE "Count Kasane logical copies in the P0 diagnostic build" OFF)
 option(KASANE_P0_BUS_PROBE "Split LCD transfer phases and SD overlap in P0 diagnostic builds" OFF)
 option(KASANE_P2_REPAIR_PROBE "Inject one Kasane LCD send failure and capture repair (not for production)" OFF)
 option(KASANE_P5_FAIRNESS_PROBE "Drive a fast native source under the deskclock overlay (diagnostic only)" OFF)

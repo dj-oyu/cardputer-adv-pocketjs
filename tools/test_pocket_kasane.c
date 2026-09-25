@@ -373,6 +373,14 @@ static void app_presenter_tests(void){
               "visible:{slot:'x'}}]});throw Error('accepted')}"
               "catch(e){if(e.message==='accepted')throw e}"),
           "runtime descriptor rejects a mismatched slot type before mounting");
+    check(run("(()=>{let rejected=false;try{kasane.mount({version:1,"
+              "slots:{label:{type:'text',capacity:4}},"
+              "nodes:[{type:'text',bounds:[0,0,48,12],text:{slot:'label'},"
+              "color:0xffffffff}]},{label:'TOO LONG'})}"
+              "catch(e){rejected=e.code==='INVALID_ARGUMENT'}"
+              "if(!rejected)throw Error('invalid initial model accepted')})()")&&
+          !pocket_kasane_has_submission()&&!pocket_kasane_active(),
+          "invalid initial model aborts a generic mount without a submission");
     check(run("globalThis.runtimeNativeBase=kasane.stats().nativeBytes;"),
           "runtime descriptor starts from a known native accounting baseline");
     size_t runtime_before=native_bytes;
