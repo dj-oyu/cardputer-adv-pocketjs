@@ -323,4 +323,13 @@ vmrun の暴走ガードは既定で無効（使うファイルがヘッダで�
 §8.1 でコンテキストの構築が OOM で断られた点（vmrun は `guest setup failed: out of memory` を出し、
 `XxxError:` の行を出さない）を含む。
 
-**実機では1度も走らせていない。** `vm/main` へ戻す前に smoke と `memlog --check` を実機で通す。
+### 9.1 実機（2026-09-25、`0103197` の既定ビルド、実測(device)）
+
+| 検査 | 結果 |
+| --- | --- |
+| `smoke_device.py --cycles 20` | `SMOKE_OK 20`、10 周目と 20 周目の空きが同じ `(233760, 118784)`、`FAULT_RECOVERY_OK` 1〜6 |
+| `memlog.py --port COM3 --check` | `idle_free=233760 app_free=136880 app_largest=94208 js=88768`、DIRAM +0、予算内 |
+
+これで `vm/main` へ戻した（`c42cffc`）。smoke は OOM を起こさないので、**§3.6・§3.7・§8.1 の assert や
+`exit(1)` が修正前の実機で再起動を起こしていたかは、推論のまま**。確かめたのは「修正が実機の通常経路を
+壊していない」ことだけ。
