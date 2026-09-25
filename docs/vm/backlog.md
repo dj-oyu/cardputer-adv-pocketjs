@@ -44,15 +44,13 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 
 ## F 系列（起動床の削減、VM の段とは独立）
 
-出典: [builtin-floor-plan.md](builtin-floor-plan.md)。状態は 2026-09-25 時点。F0（計測と計画）は済み。
-実機レイアウトの床 js=64,420 B → 28,684 B（−35,736 B、計算）が目標。実機の数字はまだ無い。
+出典: [builtin-floor-plan.md](builtin-floor-plan.md)。状態は 2026-09-25 時点。F0（計測と計画）と **F1（ROM atom）は済み**:
+アプリごとの `js=` が実測(device)で 20.1〜21.4 KB 減（plan §12）。残りは F2 と F0 の穴。
 
 | # | 項目 | 出典 | 状態 |
 | --- | --- | --- | --- |
-| F1-1 | ROM atom 表の生成器（`JS_NewContext` 後の atom を dump → `quickjs-rom-atoms.h`、`quickjs-atom.h` の並べ替え、再生成で差分 0） | plan §5.1・§8 F1 | 未着手 |
-| F1-2 | `rt->atom_array[` 33 箇所の台帳を閉じる（`vm-ledger/10-rom-atoms.md` へ。原型は plan §11） | plan §11 | 未着手 |
-| F1-3 | 負の対照 N1a（名前 1 つを抜く）・N1b（ROM を `mprotect` して書けば SEGV）・N1c（数値索引の焼き込み一致） | plan §8 F1 | 未着手 |
-| F1-4 | 関所: コーパス全変種・Test262 基準同一・`timing.py`、実機 smoke 20 周・`memlog --check`・アプリ別 `js=` ≈ −21.7 KB・flash ≤ 15 KB | plan §8 F1 | 未着手 |
+| F1-5 | 脱出文字列の回数をアプリごとに数える（FD3。今は 32 枠のキャッシュを置いて済ませている） | plan §12.2 | 未着手 |
+| F1-6 | JS ターンの速さを同一バイナリ内で比べる（ROM 検索は解析時と文字列→atom の変換時だけに入る） | plan §12.4 | 未着手 |
 | F2-1 | `JS_SetPropertyFunctionList` の遅延化、外れ経路の表探索、全展開の入口（列挙・delete・freeze・defineProperty・setPrototypeOf・C API）の網羅 | plan §5.2 | 未着手（F1 の後） |
 | F2-2 | 負の対照 N2a（順序）・N2b（同一性）・N2c（起動時全展開 = 現行）と、全展開の誘発元の計装 | plan §8 F2 | 未着手 |
 | F2-3 | 外れ 1 回の単価を同一バイナリ内で実測（今は 0.1〜1 µs の推定） | plan §7・§10 | 未着手 |

@@ -192,7 +192,7 @@ menu "Pocket VM (L0 measurement probes)"
 
     config POCKET_VM_ROM_ATOMS
         bool "F1: builtin names in flash instead of heap strings"
-        default n
+        default y
         help
             Every JS runtime used to start by copying ~540 builtin names
             (property and method names of the intrinsics) from flash into
@@ -203,8 +203,12 @@ menu "Pocket VM (L0 measurement probes)"
             tools/vmtest/floor/gen_rom_atoms.sh); a name becomes a heap
             string only when a program asks for it as a string value.
 
-            Costs ~14 KB of flash. Regenerate the table after changing the
+            Costs ~15.5 KB of flash. Regenerate the table after changing the
             builtins; a stale table is still correct, it only saves less.
+
+            Default y since 2026-09-25: every shipped app's js= fell by
+            20.1-21.4 KB on the device, corpus/Test262 unchanged
+            (docs/vm/builtin-floor-plan.md sec.12). n builds the old path.
 
     config POCKET_VM_OOMPROBE
         bool "G12 fragmentation probe: log every failed heap allocation"

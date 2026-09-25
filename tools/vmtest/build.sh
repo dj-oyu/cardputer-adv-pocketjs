@@ -63,11 +63,14 @@ build_variant() {
   local strip="-DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1"
   if [[ $variant == *-keepsrc ]]; then strip=""; fi
   # CONFIG_POCKET_VM_ROM_ATOMS (F1, docs/vm/builtin-floor-plan.md): builtin
-  # names in flash. A "-rom" anywhere in the name turns it on and is removed
-  # before the rules below, so asan-rom, o2-rom, asan-reloc-rom all work.
-  local rom=""
-  if [[ $variant == *-rom* ]]; then rom="-DCONFIG_POCKET_VM_ROM_ATOMS=1"; fi
+  # names in flash, default y since 2026-09-25, so the plain variant has it
+  # like the three above. "-norom" anywhere in the name builds the heap-atom
+  # path instead; "-rom" is still accepted (it is now the default) so the F1
+  # gate's names keep working. Both are removed before the rules below.
+  local rom="-DCONFIG_POCKET_VM_ROM_ATOMS=1"
+  if [[ $variant == *-norom* ]]; then rom=""; fi
   local core=${variant%-keepsrc}
+  core=${core//-norom/}
   core=${core//-rom/}
   local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}; base=${base%-noyield}; base=${base%-reloc}
   case "$core" in
