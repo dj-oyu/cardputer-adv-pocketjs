@@ -70,13 +70,14 @@ build_variant() {
   local rom="-DCONFIG_POCKET_VM_ROM_ATOMS=1"
   if [[ $variant == *-norom* ]]; then rom=""; fi
   # CONFIG_POCKET_VM_LAZY_BUILTINS (F2): builtin function lists stay in
-  # flash until a name is touched. Default n while F2 is being built; "-lb"
-  # anywhere in the name turns it on.
-  local lazyb=""
-  if [[ $variant == *-lb* ]]; then lazyb="-DCONFIG_POCKET_VM_LAZY_BUILTINS=1"; fi
+  # flash until a name is touched. Default y since 2026-09-26, so the plain
+  # variant has it; "-nolb" builds the eager path ("-lb" is still accepted).
+  local lazyb="-DCONFIG_POCKET_VM_LAZY_BUILTINS=1"
+  if [[ $variant == *-nolb* ]]; then lazyb=""; fi
   local core=${variant%-keepsrc}
   core=${core//-norom/}
   core=${core//-rom/}
+  core=${core//-nolb/}
   core=${core//-lb/}
   local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}; base=${base%-noyield}; base=${base%-reloc}
   case "$core" in

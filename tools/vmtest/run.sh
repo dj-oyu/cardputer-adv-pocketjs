@@ -112,7 +112,7 @@ for name in "${names[@]}"; do
   # lines above, which a pinned file then fails -- the cue to pin it.
   tags=()
   [[ $variant != *-norom* ]] && tags+=(rom)
-  [[ $variant == *-lb* ]] && tags+=(lb)
+  [[ $variant != *-nolb* ]] && tags+=(lb)
   [[ $variant == *-keepsrc ]] && tags+=(keepsrc)
   if [ ${#tags[@]} -gt 0 ] && [ "${tags[*]}" != keepsrc ]; then
     key=$(IFS=-; echo "${tags[*]}")

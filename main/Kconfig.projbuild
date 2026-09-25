@@ -212,7 +212,7 @@ menu "Pocket VM (L0 measurement probes)"
 
     config POCKET_VM_LAZY_BUILTINS
         bool "F2: builtin methods stay in their flash lists until touched"
-        default n
+        default y
         help
             Every JS context used to put each builtin's methods, accessors
             and constants (Array.prototype.map, Math.PI, ...) into its
@@ -223,6 +223,11 @@ menu "Pocket VM (L0 measurement probes)"
             searches them; the entry is put in the table the first time it
             is touched. Listing an object's keys first puts every pending
             entry in, in definition order.
+
+            Default y since 2026-09-26: on the device every shipped app's
+            js= fell a further 15.3-18.0 KB on top of F1 (the firmware's own
+            pocket.* lists are lazy too), corpus/Test262 unchanged
+            (docs/vm/builtin-floor-plan.md sec.13). n builds the old path.
 
     config POCKET_VM_OOMPROBE
         bool "G12 fragmentation probe: log every failed heap allocation"
