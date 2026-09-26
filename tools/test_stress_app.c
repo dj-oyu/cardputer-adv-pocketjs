@@ -160,8 +160,20 @@ int main(int argc,char **argv) {
     // A 64-bit host spends more per object than the device, so the cap is
     // set above the device's 160 KiB; L3 still has to reach it.
     JS_SetMemoryLimit(rt,640*1024);
+    // Profiling knobs (tools/vmtest/prof/stress_prof.sh): STRESS_HEAP_LIMIT
+    // sets the device's arrangement instead (the limit, and the collector's
+    // first threshold at half of it, as pocketjs_guest_create does -- right
+    // for a -m32 build, whose objects are the device's size); STRESS_FRAMES
+    // stops early (the verdict then no longer applies).
+    const char *heap_env=getenv("STRESS_HEAP_LIMIT"),*frames_env=getenv("STRESS_FRAMES");
+    if(heap_env) {
+        size_t limit=(size_t)strtoul(heap_env,NULL,0);
+        JS_SetMemoryLimit(rt,limit);
+        if(limit/2<JS_GetGCThreshold(rt)) JS_SetGCThreshold(rt,limit/2);
+    }
+    unsigned frames=frames_env?(unsigned)strtoul(frames_env,NULL,0):900u;
     unsigned bad_present=0;
-    for(unsigned t=1;ok&&t<=900;t++) {
+    for(unsigned t=1;ok&&t<=frames;t++) {
         if(inject_dispatch_fault&&t==601) {
             const char *fault="globalThis.__holdRead=true;"
                 "(function(){const original=Promise.prototype.catch;"
