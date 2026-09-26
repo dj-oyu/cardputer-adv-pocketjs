@@ -153,11 +153,11 @@ static unsigned category,setting,app;
 // does -- capture_home.py line 80 says as much about POCKET PET. A row in the
 // MIDDLE would renumber shell_app(), and with it main.c's switch, silently.
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
-                          "IMU CALIBRATION","POCKET PET","PET COMPANION"};
+                          "IMU CALIBRATION","POCKET PET","PET COMPANION","STRESS TEST"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
-                                  "AI USAGE / ALARM / TIMER"};
+                                  "AI USAGE / ALARM / TIMER","HEAP CHURN + DRAWING LOAD"};
 // AUDIO STREAM / OPUS STREAM / OPUS + WI-FI / MP3 PLAYBACK used to be appended
 // here (apps/streamplay, apps/opusplay, apps/opusfit, apps/mp3play) -- dev/test
 // apps for the MP3 and Opus decoders, removed once those decoders were verified
