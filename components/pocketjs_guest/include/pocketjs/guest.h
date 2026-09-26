@@ -143,6 +143,16 @@ void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
 #include "quickjs.h"
 void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out);
 
+/* CONFIG_POCKET_VM_ALLOCPROBE (measurement only, docs/vm/backlog.md R2): calls
+ * and CPU cycles inside the guest allocator's entry points since the last
+ * take, process-wide. Index 0 malloc/calloc, 1 free, 2 realloc, 3 usable
+ * size. Only defined in that build. */
+typedef struct {
+  uint32_t calls[4];
+  uint64_t cycles[4];
+} pocketjs_guest_allocprobe_t;
+void pocketjs_guest_allocprobe_take(pocketjs_guest_allocprobe_t *out);
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
 /* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare

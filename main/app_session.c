@@ -33,6 +33,7 @@
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "esp_heap_caps.h"
+#include "esp_cpu.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "vmprobe.h"
@@ -946,6 +947,38 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+        // What one heap_caps call costs, by size, before a trivial app
+        // starts (docs/vm/backlog.md R2). Batches, not pairs alone: N
+        // blocks allocated, then freed, then N malloc+free pairs, the
+        // allocated-size readback on live blocks in between.
+        case ')': {
+            static const size_t sizes[]={16,32,48,64,128,256};
+            enum {N=200};
+            void *blocks[N];
+            for(unsigned s=0;s<sizeof(sizes)/sizeof(sizes[0]);s++) {
+                uint32_t c0=esp_cpu_get_cycle_count(),ok=0;
+                for(unsigned i=0;i<N;i++) {
+                    blocks[i]=heap_caps_malloc(sizes[s],MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+                    ok+=blocks[i]!=NULL;
+                }
+                uint32_t c1=esp_cpu_get_cycle_count();
+                size_t total=0;
+                for(unsigned i=0;i<N;i++) if(blocks[i]) total+=heap_caps_get_allocated_size(blocks[i]);
+                uint32_t c2=esp_cpu_get_cycle_count();
+                for(unsigned i=0;i<N;i++) heap_caps_free(blocks[i]);
+                uint32_t c3=esp_cpu_get_cycle_count();
+                for(unsigned i=0;i<N;i++) heap_caps_free(heap_caps_malloc(sizes[s],MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+                uint32_t c4=esp_cpu_get_cycle_count();
+                ESP_LOGI("app","ALLOCBENCH size=%u ok=%lu malloc=%lu usable=%lu free=%lu pair=%lu cycles (total=%u)",
+                         (unsigned)sizes[s],(unsigned long)ok,(unsigned long)((c1-c0)/N),
+                         (unsigned long)((c2-c1)/N),(unsigned long)((c3-c2)/N),
+                         (unsigned long)((c4-c3)/N),(unsigned)total);
+            }
+            source="globalThis.frame=null";
+            break;
+        }
+#endif
 #ifdef CONFIG_POCKET_VM_FLOORPROBE
         // F2's price in one binary (docs/vm/builtin-floor-plan.md sec.14): a
         // lookup that misses a lazy builtin (Math, Object.prototype) against
@@ -1875,6 +1908,21 @@ static esp_err_t present_frame(void) {
                              (unsigned)prof_sum.read_n,painted);
                     for(unsigned r=0;r<rows;r++)*switches[r].flag=arm!=r+1;
                     ab_arm++;
+                }
+#endif
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+                {
+                    // The guest allocator over the same window as turn_ms above
+                    // (docs/vm/backlog.md R2). Calls made outside a turn (the
+                    // pumps) are in the counts too; they are few.
+                    pocketjs_guest_allocprobe_t ap;
+                    pocketjs_guest_allocprobe_take(&ap);
+                    ESP_LOGI("app","ALLOCPROBE ticks=%u turn_us=%.0f malloc=%lu/%llu free=%lu/%llu "
+                             "realloc=%lu/%llu usable=%lu/%llu",ticks,turn_sum,
+                             (unsigned long)ap.calls[0],(unsigned long long)ap.cycles[0],
+                             (unsigned long)ap.calls[1],(unsigned long long)ap.cycles[1],
+                             (unsigned long)ap.calls[2],(unsigned long long)ap.cycles[2],
+                             (unsigned long)ap.calls[3],(unsigned long long)ap.cycles[3]);
                 }
 #endif
                 render_sum=0;present_sum=0;painted=0;turn_sum=0;ticks=0;

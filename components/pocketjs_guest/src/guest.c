@@ -293,6 +293,29 @@ static void guest_run_end(pocketjs_guest_t *guest) { (void)guest; }
 #define GUEST_CAPS_INTERNAL (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
 #define GUEST_CAPS_PSRAM (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+/* What the guest's allocator costs (docs/vm/backlog.md R2): calls and CPU
+ * cycles spent inside each entry point QuickJS calls, read and cleared by
+ * pocketjs_guest_allocprobe_take(). The bodies are the *_impl functions
+ * below; the counted wrappers are the ones GUEST_ALLOCATOR names, so a call
+ * one body makes to another (realloc(NULL), calloc) is not counted twice. */
+#include "esp_cpu.h"
+static pocketjs_guest_allocprobe_t g_allocprobe;
+#define AP_WRAP(i, ret_type, expr) do { \
+    uint32_t c0_ = esp_cpu_get_cycle_count(); ret_type r_ = (expr); \
+    g_allocprobe.cycles[i] += esp_cpu_get_cycle_count() - c0_; g_allocprobe.calls[i]++; \
+    return r_; } while (0)
+void pocketjs_guest_allocprobe_take(pocketjs_guest_allocprobe_t *out) {
+  *out = g_allocprobe;
+  memset(&g_allocprobe, 0, sizeof(g_allocprobe));
+}
+#define guest_malloc guest_malloc_impl
+#define guest_calloc guest_calloc_impl
+#define guest_free guest_free_impl
+#define guest_usable_size guest_usable_size_impl
+#define guest_realloc guest_realloc_impl
+#endif
+
 static void *guest_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;
   if (size == 0U) {
@@ -344,6 +367,30 @@ static void *guest_realloc(void *opaque, void *pointer, size_t size) {
   }
   return heap_caps_realloc(pointer, size, GUEST_CAPS_INTERNAL);
 }
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+#undef guest_malloc
+#undef guest_calloc
+#undef guest_free
+#undef guest_usable_size
+#undef guest_realloc
+static void *guest_malloc(void *opaque, size_t size) {
+  AP_WRAP(0, void *, guest_malloc_impl(opaque, size));
+}
+static void *guest_calloc(void *opaque, size_t count, size_t size) {
+  AP_WRAP(0, void *, guest_calloc_impl(opaque, count, size));
+}
+static void guest_free(void *opaque, void *pointer) {
+  uint32_t c0 = esp_cpu_get_cycle_count();
+  guest_free_impl(opaque, pointer);
+  g_allocprobe.cycles[1] += esp_cpu_get_cycle_count() - c0; g_allocprobe.calls[1]++;
+}
+static void *guest_realloc(void *opaque, void *pointer, size_t size) {
+  AP_WRAP(2, void *, guest_realloc_impl(opaque, pointer, size));
+}
+static size_t guest_usable_size(const void *pointer) {
+  AP_WRAP(3, size_t, guest_usable_size_impl(pointer));
+}
+#endif
 #else
 static void *guest_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;

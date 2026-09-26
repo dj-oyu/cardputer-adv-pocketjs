@@ -28,6 +28,12 @@ void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
 #else
 #define APP_FLOOR_BENCH_KEY(c) 0
 #endif
+/* R2's allocator microbenchmark (')', CONFIG_POCKET_VM_ALLOCPROBE); same shape. */
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+#define APP_ALLOC_BENCH_KEY(c) ((c) == ')')
+#else
+#define APP_ALLOC_BENCH_KEY(c) 0
+#endif
 
 // docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the
 // background rather than instead of it. It gets a region-scoped Kasane APP
