@@ -8,7 +8,7 @@
   let sch = [], dol = [], bub = [], grid = [], meter, stat, info, lv;
 
   const f = [], pal = [CYAN, PINK, MINT, SUN];
-  for (let i = 0; i < 9; i++) {   // an instance spends its commands (+1) out of the scene's 80
+  for (let i = 0; i < 9; i++) {   // each instance spends its template's commands out of the scene's 80
     const x = i * 29 % 72, y = i * 13 % 30, c = pal[i & 3];
     f.push({bounds: [x + 3, y + 1, x + 12, y + 5], color: c},
       {bounds: [x, y, x + 3, y + 6], color: c, opacity: 150});

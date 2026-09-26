@@ -36,16 +36,24 @@ static JSContext *ctx;
 static uint16_t strip_pixels[240*8];
 static uint16_t panel[240*135];
 static unsigned lines_ready,lines_native,lines_oom,lines_fail,lines_stat,exceptions;
+static unsigned bad_command_count,bad_native;
 
 static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
     (void)self;
     const char *s=argc?JS_ToCString(c,argv[0]):NULL;
     if(!s) return JS_UNDEFINED;
     if(!strncmp(s,"STRESS_READY",12)) lines_ready++;
-    else if(!strncmp(s,"STRESS_NATIVE",13)) lines_native++;
+    else if(!strncmp(s,"STRESS_NATIVE",13)) {
+        lines_native++;
+        if(strstr(s,"STRESS_NATIVE NG"))bad_native++;
+    }
     else if(!strncmp(s,"STRESS_OOM",10)) lines_oom++;
     else if(!strncmp(s,"STRESS_FAIL",11)) { lines_fail++; printf("  %s\n",s); }
-    else if(!strncmp(s,"STRESS f=",9)) { lines_stat++; if(lines_stat%5==1) printf("  %s\n",s); }
+    else if(!strncmp(s,"STRESS f=",9)) {
+        unsigned commands=0;const char *field=strstr(s," cmds=");
+        if(!field||sscanf(field," cmds=%u",&commands)!=1||commands!=75)bad_command_count++;
+        lines_stat++;if(lines_stat%5==1)printf("  %s\n",s);
+    }
     else printf("  %s\n",s);
     JS_FreeCString(c,s);
     return JS_UNDEFINED;
@@ -132,9 +140,10 @@ int main(int argc,char **argv) {
             }
         }
     }
-    printf("frames 900: exceptions=%u fails=%u oom=%u stats=%u ready=%u bad_present=%u\n",
-           exceptions,lines_fail,lines_oom,lines_stat,lines_ready,bad_present);
-    bool pass=ok&&!exceptions&&!lines_fail&&lines_ready==1&&lines_oom>0&&!bad_present;
+    printf("frames 900: exceptions=%u fails=%u oom=%u stats=%u ready=%u bad_present=%u bad_cmds=%u bad_native=%u\n",
+           exceptions,lines_fail,lines_oom,lines_stat,lines_ready,bad_present,bad_command_count,bad_native);
+    bool pass=ok&&!exceptions&&!lines_fail&&lines_ready==1&&lines_native==1&&
+              lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native;
     pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
     printf("%s\n",pass?"STRESS_HOST PASS":"STRESS_HOST FAIL");
     return pass?0:1;

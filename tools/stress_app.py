@@ -60,6 +60,7 @@ def main():
     ap.add_argument("--port", required=True)
     ap.add_argument("--seconds", type=float, default=20)
     ap.add_argument("--log", help="also write every USB line here")
+    ap.add_argument("--launch-only", action="store_true", help="launch STRESS TEST and leave it running")
     a = ap.parse_args()
     log = []
     try:
@@ -82,6 +83,14 @@ def run(a, log):
         read_for(port, 5, f"APP {ROW}", log)
         port.write(b"e")
         start = read_for(port, 15, "STRESS_READY", log)
+        if a.launch_only:
+            if not any("STRESS_READY" in line for line in start):
+                raise RuntimeError("STRESS TEST did not report STRESS_READY")
+            frames = read_for(port, 8, "STRESS f=60", log)
+            if not any("STRESS f=60" in line for line in frames):
+                raise RuntimeError("STRESS TEST did not advance to frame 60")
+            print("STRESS_APP_RUNNING")
+            return
         levels = []
         for n in (1, 2, 3):
             if n > 1:
