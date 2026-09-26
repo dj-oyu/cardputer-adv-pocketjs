@@ -1815,6 +1815,9 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
  * (row_cov, the coarser switch, is the other one above the noise floor at 2.78).
  * ------------------------------------------------------------------------- */
 int g_ksn_blend_pie=1;
+/* A vertical gradient has one source colour per row, even when its endpoints
+ * differ. Keep a switch for same-binary device A/B against the scalar path. */
+int g_ksn_vertical_gradient_pie=1;
 /* Binary font coverage may be consumed directly as eight 0/A PIE lanes.
  * Keep this candidate off until a same-image device A/B establishes a gain. */
 int g_ksn_text_pie=0;
@@ -2108,12 +2111,13 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             bool one_color=d->kind!=KSN_GRADIENT||d->data.gradient.from==d->data.gradient.to;
             const uint8_t (*lut)[KSN_BLEND_LUT_ROW]=(g_ksn_blend_lut&&one_color&&
                 blend_lut_solid_prime(sample(command,x0,y0),d->opacity,dither))?blend_lut_solid:NULL;
-            /* Candidate 4a: a constant-colour command's aligned 8-pixel blocks go
-             * to the PIE kernel. It needs a 16-byte aligned destination, so the
-             * band row's base is checked once here and the head and tail of each
-             * run stay on the arms below. All three arms are exact, so which one
-             * runs is a measurement, not a pixel decision. */
-            bool pie=g_ksn_blend_pie&&one_color;
+            /* Candidate 4a: aligned 8-pixel blocks with one source colour go to
+             * the PIE kernel. A vertical gradient also has one colour per row;
+             * sample() below uses this row's y, not the command's first row.
+             * The head and tail stay scalar. Both arms are pixel-exact, so the
+             * switch changes work rather than output. */
+            bool pie=g_ksn_blend_pie&&(one_color||
+                (g_ksn_vertical_gradient_pie&&d->kind==KSN_GRADIENT&&d->data.gradient.axis!=0));
             for(int py=y0;py<y1;py++){
                 const uint8_t *bayer_row=dither?bayer4[(unsigned)py&3u]:NULL;
                 bool pie_row=pie&&(((uintptr_t)(pixels+(py-y)*240)&15u)==0u);

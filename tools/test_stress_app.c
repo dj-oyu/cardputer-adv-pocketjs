@@ -12,6 +12,7 @@
 #include "pocket_av.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
+#include "ui/kasane/ksn_render.h"
 #include "text/ksn_font.h"
 #include "sound.h"
 #include <stdio.h>
@@ -101,6 +102,9 @@ static const char FS_STUB[]=
     "return{read:async function(m){return ++n>3?null:new Uint8Array(m)},close:function(){}}}}};";
 
 int main(int argc,char **argv) {
+    const char *gradient_arm=getenv("KSN_VERTICAL_GRAD_PIE");
+    if(gradient_arm)g_ksn_vertical_gradient_pie=strcmp(gradient_arm,"0")!=0;
+    uint32_t panel_digest=2166136261u;
     const char *path=argc>1?argv[1]:"apps/stress/stress.js";
     FILE *f=fopen(path,"rb");
     if(!f){printf("cannot open %s\n",path);return 2;}
@@ -123,6 +127,9 @@ int main(int argc,char **argv) {
         snprintf(call,sizeof call,"frame(%u)",buttons);
         eval(call,strlen(call),"frame.js");
         if(!present()) bad_present++;
+        if(gradient_arm)for(size_t i=0;i<240u*135u;i++){
+            panel_digest^=panel[i];panel_digest*=16777619u;
+        }
         // STRESS_PPM=<prefix>: the panel as P6 at a few frames, for looking at.
         const char *ppm=getenv("STRESS_PPM");
         if(ppm&&(t==90||t==240||t==420)) {
@@ -142,6 +149,8 @@ int main(int argc,char **argv) {
     }
     printf("frames 900: exceptions=%u fails=%u oom=%u stats=%u ready=%u bad_present=%u bad_cmds=%u bad_native=%u\n",
            exceptions,lines_fail,lines_oom,lines_stat,lines_ready,bad_present,bad_command_count,bad_native);
+    if(gradient_arm)printf("gradient arm=%d panel_digest=%08x\n",
+                           g_ksn_vertical_gradient_pie,panel_digest);
     bool pass=ok&&!exceptions&&!lines_fail&&lines_ready==1&&lines_native==1&&
               lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native;
     pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);

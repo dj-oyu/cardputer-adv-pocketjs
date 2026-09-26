@@ -160,6 +160,12 @@ static int64_t last_present_us;
 static unsigned frames;
 static double render_sum, present_sum, turn_sum;
 static unsigned painted, ticks;
+#ifndef KASANE_STRESS_GRAD_AB
+#define KASANE_STRESS_GRAD_AB 0
+#endif
+#if KASANE_STRESS_GRAD_AB
+static unsigned grad_ab_window,grad_ab_bytes;
+#endif
 // Boundary 7 of docs/perf/kasane-opt-survey.md: the render path's own counts,
 // summed over the same 30 frames the millisecond terms cover. Counts only --
 // `cy` is rsr.ccount read inside the renderer and 0 with g_ksn_prof off, and
@@ -756,6 +762,9 @@ esp_err_t app_start_test(char test) {
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     kasane_presented=false;
+#if KASANE_STRESS_GRAD_AB
+    grad_ab_window=0;grad_ab_bytes=0;g_ksn_vertical_gradient_pie=1;
+#endif
     ksn_p0_probe_reset();
 #ifdef KASANE_P4_DECODE_CYCLE_PROBE
     ksn_render_decode_cycle_reset();
@@ -1731,6 +1740,9 @@ static esp_err_t present_frame(void) {
         if(stats.bands) {
             painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
+#if KASANE_STRESS_GRAD_AB
+            grad_ab_bytes+=stats.transferred_bytes;
+#endif
             ksn_p0_probe_sample(KSN_P0_APP_RENDER,whole-display_state.sent_us);
             ksn_p0_probe_sample(KSN_P0_APP_SEND,display_state.sent_us);
             ksn_p0_probe_transfer(stats.transferred_bytes,ksn_render_band_count(stats.bands));
@@ -1762,6 +1774,13 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.tile_n,(unsigned)prof_sum.tile_cy,
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,painted);
+#if KASANE_STRESS_GRAD_AB
+                ESP_LOGI("kasane","GRAD_AB window=%u pie=%d bytes_avg=%.1f",
+                         grad_ab_window,g_ksn_vertical_gradient_pie,grad_ab_bytes/30.0);
+                grad_ab_window++;
+                grad_ab_bytes=0;
+                g_ksn_vertical_gradient_pie^=1;
+#endif
 #ifndef KASANE_AB
 #define KASANE_AB 0
 #endif
