@@ -958,7 +958,15 @@ static JSValue js_tx_primitive(JSContext *ctx, JSValueConst self, int argc,
     ksn_draw draw={0};
     if(!parse_primitive(ctx,argc?argv[0]:JS_UNDEFINED,kind,&draw,op)) return JS_EXCEPTION;
     ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
-    return result==KSN_OK?expose_ref(ctx,tx,ref):throw_result(ctx,result,op);
+    if(result==KSN_OK)return expose_ref(ctx,tx,ref);
+    if(result==KSN_LIMIT)
+        return pocket_api_throw(ctx,POCKET_ERR_LIMIT_EXCEEDED,op,
+                                "scene command limit exceeded",false,POCKET_OUTCOME_NOT_APPLIED);
+    if(result==KSN_INVALID&&(kind==KSN_ROUND_RECT||kind==KSN_GRADIENT))
+        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                "radius must be <= 8 and fit within half the shape width and height",
+                                false,POCKET_OUTCOME_NOT_APPLIED);
+    return throw_result(ctx,result,op);
 }
 
 /* Bound conversion before QuickJS allocates UTF-8 storage (at most 384 bytes
@@ -1494,7 +1502,14 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
         goto fail;
     }
     result=ksn_view_submit(view(),tx);
-    if(result!=KSN_OK) { throw_result(ctx,result,op);goto fail; }
+    if(result!=KSN_OK) {
+        if(result==KSN_INVALID&&mode==KSN_REPLACE)
+            pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                             "replace requires tx.background(color)",false,
+                             POCKET_OUTCOME_NOT_APPLIED);
+        else throw_result(ctx,result,op);
+        goto fail;
+    }
     state->building=(ksn_tx){0};
     state->submitted=tx;state->submitted_mode=mode;state->active=true;
     ksn_runtime_app_activate(state->lease);

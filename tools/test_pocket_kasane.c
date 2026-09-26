@@ -1700,6 +1700,24 @@ static void primitive_tests(void) {
     check(open_fault_runtime(""),"primitive fixture opens");
     ksn_view *system=NULL;
     check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect primitive descriptors through native owner");
+    check(run("(()=>{let caught=false;try{kasane.replace(tx=>{})}catch(e){"
+              "caught=e.code==='INVALID_ARGUMENT'&&e.message.includes('tx.background')};"
+              "if(!caught)throw Error('missing background diagnostic')})()"),
+          "replace reports its missing background requirement");
+    check(run("(()=>{let caught=false;try{kasane.replace(tx=>{tx.background(255);"
+              "tx.roundRect({bounds:[0,0,40,40],radius:9,color:255})})}catch(e){"
+              "caught=e.code==='INVALID_ARGUMENT'&&e.message.includes('radius must be <= 8')};"
+              "if(!caught)throw Error('radius diagnostic')})()"),
+          "rounded-rectangle radius failure identifies the constraint");
+    check(run("(()=>{let cells=[];for(let i=0;i<10;i++)cells.push({"
+              "bounds:[i,0,i+1,1],color:255});let t=kasane.cache.create(cells);"
+              "let caught=false,detail='none';try{kasane.replace(tx=>{tx.background(255);"
+              "for(let i=0;i<7;i++)tx.instantiate(t);"
+              "for(let i=0;i<11;i++)tx.rect({bounds:[0,0,1,1],color:255})})}catch(e){"
+              "detail=e.code+': '+e.message;"
+              "caught=e.code==='LIMIT_EXCEEDED'&&e.message.includes('scene command limit')};"
+              "kasane.cache.release(t);if(!caught)throw Error('command limit diagnostic '+detail)})()"),
+          "command-cap failure identifies the scene budget");
     check(run("var f=kasane.features();if(!f.roundRect||!f.strokeRect||!f.gradient)throw Error('features');"
               "kasane.replace(tx=>{tx.background(0x000000ff);"
               "globalThis.pr=tx.roundRect({bounds:[0.5,0.5,20.5,20.5],radius:8,color:0xff0000ff});"
