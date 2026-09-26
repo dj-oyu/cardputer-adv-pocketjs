@@ -105,7 +105,7 @@ idf_component_register(SRCS "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_dec
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin")
 target_link_libraries(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=xQueueCreateMutex" "-Wl,--wrap=vQueueDelete")
