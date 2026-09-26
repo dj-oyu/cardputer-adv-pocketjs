@@ -302,6 +302,24 @@ struct JSRuntime {
     uint32_t *atom_hash;
     JSAtomStruct **atom_array;
     int atom_free_index; /* 0 = none */
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    /* F1 (docs/vm/builtin-floor-plan.md sec.5.1): a flash atom has no
+       JSString to hand out, so turning one into a string value builds one.
+       Names that escape often (typeof's answers, class names) would build one
+       per escape; this small direct-mapped cache keeps the last string per
+       slot, holding one reference each. */
+    JSString *rom_cache[32];
+    uint16_t rom_cache_atom[32];
+#endif
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    /* F2 (docs/vm/builtin-floor-plan.md sec.5.2): function lists whose
+       entries are not in their object's shape yet, sorted by object. */
+    struct JSLazyList *lazy;
+    uint32_t lazy_count, lazy_size;
+    /* The lazy flag lives in a spare header bit; set once the runtime has
+       checked that bit really is spare on this compiler (JS_NewRuntime2). */
+    bool lazy_ok;
+#endif
 
     JSClassID js_class_id_alloc; /* counter for user defined classes */
     int class_count;    /* size of class_array */
@@ -1283,6 +1301,40 @@ struct JSObject {
     /* byte sizes: 40/48/72 */
 };
 
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+/* F2 (docs/vm/builtin-floor-plan.md sec.5.2): an object whose function
+   lists are not (all) in its shape yet. The entries stay in the flash lists
+   and a lookup that misses the shape searches them (js_lazy_touch), so the
+   heap only ever holds the entries a program touched.
+
+   The flag is the low bit of JSGCObjectHeader.dummy0: in the JSObject view
+   that byte is __gc_mark:7 + is_prototype:1, and dummy0 sits above the
+   gc_obj_type:4 / mark:1 bits, so its low bit is unused by both views --
+   JS_NewRuntime2 checks that on the compiler it was built with before
+   enabling any of this (rt->lazy_ok). */
+static inline bool js_obj_lazy(const JSObject *p)
+{
+    return p->header.dummy0 & 1;
+}
+
+static inline void js_obj_set_lazy(JSObject *p, bool on)
+{
+    p->header.dummy0 = (p->header.dummy0 & ~1u) | (on ? 1 : 0);
+}
+
+typedef struct JSLazyList {
+    JSObject *obj;
+    JSContext *realm;                /* the context that registered it */
+    const JSCFunctionListEntry *tab; /* in flash */
+    uint16_t len;
+    /* How many of the object's own, non-list properties preceded this list
+       when it was registered: where its entries go when the object is fully
+       materialized, so property order stays the definition order. */
+    uint16_t pos;
+    uint32_t done[2];                /* entry materialized, or deleted */
+} JSLazyList;
+#endif
+
 typedef struct JSCallSiteData {
     JSValue filename;
     JSValue func;
@@ -2217,6 +2269,27 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     if (!rt) {
         return NULL;
     }
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    {
+        /* The lazy flag borrows a header bit that no field names in the
+           JSObject view. Bitfield layout is the compiler's choice, so prove
+           the bit is independent of the bits either view uses before
+           trusting it; if not, every list stays eager. */
+        JSObject o;
+        memset(&o, 0, sizeof(o));
+        o.header.gc_obj_type = JS_GC_OBJ_TYPE_JS_OBJECT;
+        js_obj_set_lazy(&o, true);
+        bool ok = o.header.gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT &&
+                  !o.header.mark && !o.is_prototype && !o.extensible;
+        o.is_prototype = 1;
+        o.header.mark = 1;
+        ok = ok && js_obj_lazy(&o);
+        js_obj_set_lazy(&o, false);
+        ok = ok && o.is_prototype && o.header.mark &&
+             o.header.gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT;
+        rt->lazy_ok = ok;
+    }
+#endif
     rt->mf = *mf;
 #ifdef CONFIG_POCKET_VM_YIELD
     atomic_init(&rt->vm_yield_req, 0);
@@ -2697,6 +2770,17 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
     js_free_rt(rt, rt->class_array);
 
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    /* Before the atoms: a cached string may have become a symbol's own
+       struct (JS_NewSymbolInternal reuses atom_type 0 strings), and dropping
+       the cache's reference is what frees it through the atom path. */
+    for (i = 0; i < 32; i++) {
+        if (rt->rom_cache[i]) {
+            js_free_string(rt, rt->rom_cache[i]);
+            rt->rom_cache[i] = NULL;
+        }
+    }
+#endif
 #ifdef ENABLE_DUMPS // JS_DUMP_ATOM_LEAKS
     /* only the atoms defined in JS_InitAtoms() should be left */
     if (check_dump_flag(rt, JS_DUMP_ATOM_LEAKS)) {
@@ -2704,7 +2788,7 @@ void JS_FreeRuntime(JSRuntime *rt)
 
         for (i = 0; i < rt->atom_size; i++) {
             JSAtomStruct *p = rt->atom_array[i];
-            if (!atom_is_free(p) /* && p->str*/) {
+            if (p && !atom_is_free(p) /* && p->str*/) {
                 if (i >= JS_ATOM_END || p->header.ref_count != 1) {
                     if (!header_done) {
                         header_done = true;
@@ -2756,10 +2840,16 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
 #endif
 
-    /* free the atoms */
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    /* Every object is gone by now, and free_object took its lists along. */
+    assert(rt->lazy_count == 0);
+    js_free_rt(rt, rt->lazy);
+    rt->lazy = NULL;
+#endif
+    /* free the atoms (a NULL slot is a flash atom: nothing to free) */
     for (i = 0; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
             list_del(&p->link);
 #endif
@@ -3263,10 +3353,117 @@ static inline bool is_strict_mode(JSContext *ctx)
 /* return the max count from the hash size */
 #define JS_ATOM_COUNT_RESIZE(n) ((n) * 2)
 
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+/* F1: builtin names live in flash as these records rather than as heap
+   JSStrings (docs/vm/builtin-floor-plan.md sec.5.1). No ref_count, hash_next
+   or weak-ref field: nothing ever writes to one, which is the whole point --
+   an atom below JS_ROM_ATOM_END is immortal, so there is nothing to count.
+   Numbering: [1, JS_ATOM_END) is the predefined list as always (its ROM
+   entries have a NULL atom_array slot; symbols, the private brand and the
+   empty string stay heap JSStrings), [JS_ATOM_END, JS_ROM_ATOM_END) are the
+   names the builtin function lists create, and dynamic atoms start above. */
+typedef struct JSRomAtom {
+    uint32_t hash_flags; /* the runtime's 28-bit hash, plus JS_ROM_NUMERIC */
+    uint16_t len;        /* JS_ROM_NOT: this index is not a flash atom */
+    uint16_t off;        /* into js_rom_chars; the text is NUL-terminated */
+} JSRomAtom;
+#define JS_ROM_NOT     0xffff
+/* JS_AtomIsNumericIndex1 is true for it, i.e. "Infinity": baked by the
+   generator so the typed-array get/set paths need not build a string for
+   every method name they are asked about. */
+#define JS_ROM_NUMERIC (1u << 28)
+#include "quickjs-rom-atoms-defs.h"
+#include "quickjs-rom-atoms.h"
+/* The table numbers the predefined atoms by their enum value, so a change to
+   quickjs-atom.h without regenerating would give every later name the wrong
+   text. Stale extras are harmless; a stale predefined list is not. */
+_Static_assert(JS_ROM_PREDEF_END == JS_ATOM_END,
+               "quickjs-rom-atoms.h is stale: run tools/vmtest/floor/gen_rom_atoms.sh");
+#define JS_ATOM_CONST_END JS_ROM_ATOM_END
+#else
+#define JS_ATOM_CONST_END JS_ATOM_END
+#endif
+
 static inline bool __JS_AtomIsConst(JSAtom v)
 {
-    return (int32_t)v < JS_ATOM_END;
+    return (int32_t)v < (int32_t)JS_ATOM_CONST_END;
 }
+
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+/* The flash record for a non-tagged atom, or NULL if it is a heap atom. */
+static inline const JSRomAtom *js_rom_atom(JSAtom a)
+{
+    if (a < JS_ROM_ATOM_END && js_rom_atoms[a].len != JS_ROM_NOT)
+        return &js_rom_atoms[a];
+    return NULL;
+}
+
+static inline const char *js_rom_text(const JSRomAtom *r)
+{
+    return js_rom_chars + r->off;
+}
+
+/* Name -> flash atom, on the runtime's own hash (JS_ATOM_HASH_MASK bits).
+   `s16` is non-NULL for a 16-bit string: flash text is 8-bit, so the two
+   are compared by code unit, the way js_string_memcmp compares mixed
+   widths. Returns 0 if the name is not in the table. */
+static JSAtom js_rom_find(const uint8_t *s8, const uint16_t *s16, uint32_t len,
+                          uint32_t h)
+{
+    uint32_t mask = (1u << JS_ROM_HASH_BITS) - 1, j = h & mask;
+    for (;;) {
+        uint32_t a = js_rom_hash[j];
+        if (a == 0)
+            return 0;
+        const JSRomAtom *r = &js_rom_atoms[a];
+        if ((r->hash_flags & JS_ATOM_HASH_MASK) == h && r->len == len) {
+            const uint8_t *t = (const uint8_t *)js_rom_text(r);
+            if (s8) {
+                if (!memcmp(t, s8, len))
+                    return a;
+            } else {
+                uint32_t k = 0;
+                while (k < len && s16[k] == t[k])
+                    k++;
+                if (k == len)
+                    return a;
+            }
+        }
+        j = (j + 1) & mask;
+    }
+}
+
+/* A fresh, ordinary (non-atom) heap string with a flash atom's text. Its
+   atom_type is 0, so handing it to __JS_NewAtom finds the flash atom again
+   by content rather than mistaking the string for an atom of its own. */
+static JSString *js_rom_new_string(JSRuntime *rt, const JSRomAtom *r)
+{
+    JSString *p = js_alloc_string_rt(rt, r->len, 0);
+    if (p) {
+        memcpy(str8(p), js_rom_text(r), r->len);
+        str8(p)[r->len] = '\0';
+    }
+    return p;
+}
+
+/* The string value of a flash atom, through rt->rom_cache. */
+static JSValue js_rom_atom_value(JSContext *ctx, JSAtom atom, const JSRomAtom *r)
+{
+    JSRuntime *rt = ctx->rt;
+    unsigned k = atom & 31;
+    JSString *p = rt->rom_cache[k]; FP_INC(rt, rom_escape);
+    if (p && rt->rom_cache_atom[k] == atom)
+        return js_dup(JS_MKPTR(JS_TAG_STRING, p));
+    p = js_rom_new_string(rt, r); FP_INC(rt, rom_escape_new);
+    if (!p)
+        return JS_ThrowOutOfMemory(ctx);
+    if (rt->rom_cache[k])
+        js_free_string(rt, rt->rom_cache[k]);
+    rt->rom_cache[k] = p;
+    rt->rom_cache_atom[k] = (uint16_t)atom;
+    return js_dup(JS_MKPTR(JS_TAG_STRING, p));
+}
+#endif
 
 static inline bool __JS_AtomIsTaggedInt(JSAtom v)
 {
@@ -3428,7 +3625,7 @@ static __maybe_unused void JS_DumpAtoms(JSRuntime *rt)
     printf("JSAtom table: {\n");
     for (i = 0; i < rt->atom_size; i++) {
         p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
             printf("  %d: { %d %08x ", i, p->atom_type, p->hash);
             if (!(p->len == 0 && p->is_wide_char != 0)) {
                 JS_DumpString(rt, p);
@@ -3470,6 +3667,76 @@ static int JS_ResizeAtomHash(JSRuntime *rt, int new_hash_size)
     return 0;
 }
 
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+/* F1: size atom_array to cover the flash range before anything is placed.
+   [1, JS_ROM_ATOM_END) are fixed numbers -- a flash atom keeps a NULL slot,
+   which every walk of the array skips -- and the free list starts past them,
+   so a dynamic atom can never take a flash atom's number. The 256 spare
+   slots are for the app's own atoms; the array grows as it always has.
+   Slot 0 is the JS_ATOM_NULL entry __JS_NewAtom makes on its first growth. */
+static int js_rom_atoms_reserve(JSRuntime *rt)
+{
+    uint32_t size = JS_ROM_ATOM_END + 256, i;
+    JSAtomStruct **arr = js_malloc_rt(rt, sizeof(*arr) * size);
+    JSAtomStruct *p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+    if (!arr || !p) {
+        js_free_rt(rt, arr);
+        js_free_rt(rt, p);
+        return -1;
+    }
+    p->header.ref_count = 1;  /* not refcounted */
+    p->atom_type = JS_ATOM_TYPE_SYMBOL;
+#ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
+    list_add_tail(&p->link, &rt->string_list);
+#endif
+    arr[0] = p;
+    for (i = 1; i < JS_ROM_ATOM_END; i++)
+        arr[i] = NULL;
+    for (i = JS_ROM_ATOM_END; i < size; i++)
+        arr[i] = atom_set_free(i + 1 < size ? i + 1 : 0);
+    rt->atom_array = arr;
+    rt->atom_size = size;
+    rt->atom_free_index = JS_ROM_ATOM_END;
+    rt->atom_count = 1;
+    return 0;
+}
+
+/* A predefined atom that stays on the heap (symbols, the private brand, the
+   empty string), put at its fixed number the way __JS_NewAtom would have
+   put it at the next free one: same hash, same chain, same fields. */
+static int js_rom_atom_place(JSRuntime *rt, uint32_t i, const char *s, int len,
+                             int atom_type)
+{
+    JSString *p = js_alloc_string_rt(rt, len, 0);
+    uint32_t h;
+    if (!p) {
+        return -1;
+    }
+    memcpy(str8(p), s, len);
+    str8(p)[len] = '\0';
+    if (atom_type == JS_ATOM_TYPE_STRING) {
+        h = hash_string8(str8(p), len, JS_ATOM_TYPE_STRING) & JS_ATOM_HASH_MASK;
+    } else if (atom_type == JS_ATOM_TYPE_SYMBOL) {
+        h = JS_ATOM_HASH_SYMBOL;
+    } else {
+        h = JS_ATOM_HASH_PRIVATE;
+        atom_type = JS_ATOM_TYPE_SYMBOL;
+    }
+    rt->atom_array[i] = p;
+    p->hash = h;
+    p->hash_next = i;   /* atom_index */
+    p->atom_type = atom_type;
+    p->first_weak_ref = NULL;
+    rt->atom_count++;
+    if (atom_type != JS_ATOM_TYPE_SYMBOL) {
+        uint32_t h1 = h & (rt->atom_hash_size - 1);
+        p->hash_next = rt->atom_hash[h1];
+        rt->atom_hash[h1] = i;
+    }
+    return 0;
+}
+#endif
+
 static int JS_InitAtoms(JSRuntime *rt)
 {
     int i, len, atom_type;
@@ -3484,6 +3751,11 @@ static int JS_InitAtoms(JSRuntime *rt)
         return -1;
     }
 
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    if (js_rom_atoms_reserve(rt)) {
+        return -1;
+    }
+#endif
     p = js_atom_init;
     for (i = 1; i < JS_ATOM_END; i++) {
         if (i == JS_ATOM_Private_brand) {
@@ -3494,9 +3766,17 @@ static int JS_InitAtoms(JSRuntime *rt)
             atom_type = JS_ATOM_TYPE_STRING;
         }
         len = strlen(p);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+        /* A flash atom needs nothing on the heap; the others are placed at
+           their predefined number (the free list starts past the table). */
+        if (!js_rom_atom(i) && js_rom_atom_place(rt, i, p, len, atom_type)) {
+            return -1;
+        }
+#else
         if (__JS_NewAtomInit(rt, p, len, atom_type) == JS_ATOM_NULL) {
             return -1;
         }
+#endif
         p = p + len + 1;
     }
     return 0;
@@ -3535,6 +3815,11 @@ static JSAtomKindEnum JS_AtomGetKind(JSContext *ctx, JSAtom v)
     if (__JS_AtomIsTaggedInt(v)) {
         return JS_ATOM_KIND_STRING;
     }
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    if (js_rom_atom(v)) {
+        return JS_ATOM_KIND_STRING;   /* flash holds plain strings only */
+    }
+#endif
     p = rt->atom_array[v];
     switch (p->atom_type) {
     case JS_ATOM_TYPE_STRING:
@@ -3598,6 +3883,18 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
         len = str->len;
         h = hash_string(str, atom_type);
         h &= JS_ATOM_HASH_MASK;
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+        /* Flash first: a builtin name must resolve to its flash number, or
+           the same name would get a second, heap atom and property lookups
+           keyed on the two would never meet. Only plain strings live there;
+           Symbol.for keys are GLOBAL_SYMBOL and never match. */
+        if (atom_type == JS_ATOM_TYPE_STRING) {
+            i = js_rom_find(str->is_wide_char ? NULL : str8(str),
+                            str->is_wide_char ? str16(str) : NULL, len, h);
+            if (i)
+                goto done;
+        }
+#endif
         h1 = h & (rt->atom_hash_size - 1);
         i = rt->atom_hash[h1];
         while (i != 0) {
@@ -3765,6 +4062,11 @@ static JSAtom __JS_FindAtom(JSRuntime *rt, const char *str, size_t len,
 
     h = hash_string8((const uint8_t *)str, len, JS_ATOM_TYPE_STRING);
     h &= JS_ATOM_HASH_MASK;
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    i = js_rom_find((const uint8_t *)str, NULL, len, h);
+    if (i)
+        return i;   /* immortal: no reference to take */
+#endif
     h1 = h & (rt->atom_hash_size - 1);
     i = rt->atom_hash[h1];
     while (i != 0) {
@@ -3929,6 +4231,20 @@ static JSValue JS_NewSymbolFromAtom(JSContext *ctx, JSAtom descr,
 
     assert(!__JS_AtomIsTaggedInt(descr));
     assert(descr < rt->atom_size);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    {
+        /* A fresh string, never the cached one: JS_NewSymbolInternal turns
+           an atom_type 0 string into the symbol itself. */
+        const JSRomAtom *r = js_rom_atom(descr);
+        if (r) {
+            p = js_rom_new_string(rt, r); FP_INC(rt, rom_symbol);
+            if (!p) {
+                return JS_ThrowOutOfMemory(ctx);
+            }
+            return JS_NewSymbolInternal(ctx, p, atom_type);
+        }
+    }
+#endif
     p = rt->atom_array[descr];
     js_dup(JS_MKPTR(JS_TAG_STRING, p));
     return JS_NewSymbolInternal(ctx, p, atom_type);
@@ -3956,6 +4272,11 @@ static const char *JS_AtomGetStrRT(JSRuntime *rt, char *buf, int buf_size,
     } else if (atom >= rt->atom_size) {
         assert(atom < rt->atom_size);
         snprintf(buf, buf_size, "<invalid %x>", atom);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    } else if (js_rom_atom(atom)) {
+        const JSRomAtom *r = js_rom_atom(atom);
+        utf8_encode_buf8(buf, buf_size, (const uint8_t *)js_rom_text(r), r->len);
+#endif
     } else {
         JSAtomStruct *p = rt->atom_array[atom];
         *buf = '\0';
@@ -3990,6 +4311,14 @@ static JSValue __JS_AtomToValue(JSContext *ctx, JSAtom atom, bool force_string)
         JSRuntime *rt = ctx->rt;
         JSAtomStruct *p;
         assert(atom < rt->atom_size);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+        {
+            const JSRomAtom *r = js_rom_atom(atom);
+            if (r) {
+                return js_rom_atom_value(ctx, atom, r);
+            }
+        }
+#endif
         p = rt->atom_array[atom];
         if (p->atom_type == JS_ATOM_TYPE_STRING) {
             goto ret_string;
@@ -4029,6 +4358,14 @@ static bool JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom)
         uint32_t val;
 
         assert(atom < rt->atom_size);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+        /* The generator refuses a flash name that is an index: those are
+           tagged ints and never become atoms at all. */
+        if (js_rom_atom(atom)) {
+            *pval = 0;
+            return false;
+        }
+#endif
         p = rt->atom_array[atom];
         if (p->atom_type == JS_ATOM_TYPE_STRING &&
                 is_num_string(&val, p) && val != -1) {
@@ -4056,6 +4393,42 @@ static JSValue JS_AtomIsNumericIndex1(JSContext *ctx, JSAtom atom)
         return js_int32(__JS_AtomToUInt32(atom));
     }
     assert(atom < rt->atom_size);
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    {
+        /* Every typed-array property access by name asks this, so the
+           answer is baked (JS_ROM_NUMERIC); only "Infinity" builds a string
+           to run the real conversion below on. */
+        const JSRomAtom *r = js_rom_atom(atom);
+        if (r) {
+            if (!(r->hash_flags & JS_ROM_NUMERIC)) {
+                return JS_UNDEFINED;
+            }
+            p = js_rom_new_string(rt, r); FP_INC(rt, rom_numeric);
+            if (!p) {
+                return JS_ThrowOutOfMemory(ctx);
+            }
+            num = JS_ToNumber(ctx, JS_MKPTR(JS_TAG_STRING, p));
+            if (JS_IsException(num)) {
+                js_free_string(rt, p);
+                return num;
+            }
+            str = JS_ToString(ctx, num);
+            if (JS_IsException(str)) {
+                js_free_string(rt, p);
+                JS_FreeValue(ctx, num);
+                return str;
+            }
+            ret = js_string_eq(p, JS_VALUE_GET_STRING(str));
+            JS_FreeValue(ctx, str);
+            js_free_string(rt, p);
+            if (ret) {
+                return num;
+            }
+            JS_FreeValue(ctx, num);
+            return JS_UNDEFINED;
+        }
+    }
+#endif
     p1 = rt->atom_array[atom];
     if (p1->atom_type != JS_ATOM_TYPE_STRING) {
         return JS_UNDEFINED;
@@ -4172,6 +4545,11 @@ static bool JS_AtomSymbolHasDescription(JSContext *ctx, JSAtom v)
     if (__JS_AtomIsTaggedInt(v)) {
         return false;
     }
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    if (js_rom_atom(v)) {
+        return false;   /* a string, not a symbol */
+    }
+#endif
     p = rt->atom_array[v];
     return (((p->atom_type == JS_ATOM_TYPE_SYMBOL &&
               p->hash == JS_ATOM_HASH_SYMBOL) ||
@@ -6382,6 +6760,14 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
     p->tmp_mark = 0;
     p->is_HTMLDDA = 0;
     p->is_prototype = 0;
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    /* Upstream never initializes the spare header bits (nothing read
+       them); the lazy flag is one, and a recycled block would otherwise
+       hand a new object a dead one's flag -- seen under ASan, whose fresh
+       memory is not zero, as %ThrowTypeError% being "fully materialized"
+       at startup (2026-09-25). */
+    js_obj_set_lazy(p, false);
+#endif
     p->first_weak_ref = NULL;
     p->u.opaque = NULL;
     p->shape = sh;
@@ -7506,6 +7892,17 @@ static inline JSShapeProperty *find_own_property1(JSObject *p, JSAtom atom)
     return NULL;
 }
 
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom);
+static int js_lazy_all(JSContext *ctx, JSObject *p, bool enum_only);
+static int js_lazy_delete(JSContext *ctx, JSObject *p, JSAtom atom);
+static void js_lazy_after_delete(JSRuntime *rt, JSObject *p, int q);
+static int js_lazy_plain_index(JSRuntime *rt, JSObject *p, JSAtom atom);
+static void js_lazy_forget(JSRuntime *rt, JSObject *p);
+#else
+#define js_obj_lazy(p) false
+#endif
+
 static inline JSShapeProperty *find_own_property(JSProperty **ppr,
                                                  JSObject *p,
                                                  JSAtom atom)
@@ -7718,6 +8115,12 @@ static void free_object(JSRuntime *rt, JSObject *p)
 
     p->free_mark = 1; /* used to tell the object is invalid when
                          freeing cycles */
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    /* Its lists go with it: rt->lazy is keyed by the object's address,
+       which the allocator will hand out again. */
+    if (unlikely(js_obj_lazy(p)))
+        js_lazy_forget(rt, p);
+#endif
     /* free all the fields */
     sh = p->shape;
     pr = sh->prop;
@@ -8520,7 +8923,7 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
                    sizeof(rt->atom_hash[0]) * rt->atom_hash_size;
     for (i = 0; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
             s->atom_size += (sizeof(*p) + (p->len << p->is_wide_char) +
                              1 - p->is_wide_char);
         }
@@ -10046,6 +10449,15 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                 return js_dup(pr->u.value);
             }
         }
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+        if (unlikely(js_obj_lazy(p))) {
+            int r = js_lazy_touch(ctx, p, prop);
+            if (r < 0)
+                return JS_EXCEPTION;
+            if (r)
+                continue;   /* now in the shape */
+        }
+#endif
         if (unlikely(p->is_exotic)) {
             /* exotic behaviors */
             if (p->fast_array) {
@@ -10385,6 +10797,17 @@ static int __exception JS_GetOwnPropertyNamesInternal(JSContext *ctx,
     *ptab = NULL;
     *plen = 0;
 
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    /* Listing the keys observes the whole set and its order: pending
+       entries go into the shape, in definition order, first -- unless only
+       enumerable keys are wanted and no pending entry is enumerable, the
+       case of every for-in walking up through a builtin prototype. */
+    if (unlikely(js_obj_lazy(p)) &&
+            js_lazy_all(ctx, p, (flags & JS_GPN_ENUM_ONLY) != 0)) {
+        return -1;
+    }
+#endif
+
     /* compute the number of returned properties */
     num_keys_count = 0;
     str_keys_count = 0;
@@ -10629,6 +11052,15 @@ retry:
         }
         return true;
     }
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    if (unlikely(js_obj_lazy(p))) {
+        int r = js_lazy_touch(ctx, p, prop);
+        if (r < 0)
+            return -1;
+        if (r)
+            goto retry;
+    }
+#endif
     if (p->is_exotic) {
         if (p->fast_array) {
             /* specific case for fast arrays */
@@ -11155,7 +11587,30 @@ static no_inline __exception int convert_fast_array_to_array(JSContext *ctx,
     return 0;
 }
 
+static int delete_property0(JSContext *ctx, JSObject *p, JSAtom atom);
+
 static int delete_property(JSContext *ctx, JSObject *p, JSAtom atom)
+{
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    if (unlikely(js_obj_lazy(p))) {
+        /* A pending entry is deleted by never materializing it. A plain
+           property ahead of a list moves the list's slot back by one when
+           it goes (compact_properties may renumber the rest, so the
+           position is counted among live properties, not shape slots). */
+        int r = js_lazy_delete(ctx, p, atom);
+        if (r != 2)
+            return r;
+        int q = js_lazy_plain_index(ctx->rt, p, atom);
+        r = delete_property0(ctx, p, atom);
+        if (r == true && q >= 0 && js_obj_lazy(p))
+            js_lazy_after_delete(ctx->rt, p, q);
+        return r;
+    }
+#endif
+    return delete_property0(ctx, p, atom);
+}
+
+static int delete_property0(JSContext *ctx, JSObject *p, JSAtom atom)
 {
     JSShape *sh;
     JSShapeProperty *pr, *lpr, *prop;
@@ -11494,6 +11949,15 @@ retry:
             goto read_only_prop;
         }
     }
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    if (unlikely(js_obj_lazy(p1))) {
+        int r = js_lazy_touch(ctx, p1, prop);
+        if (r < 0)
+            goto fail;
+        if (r)
+            goto retry;
+    }
+#endif
 
     for (;;) {
         if (p1->is_exotic) {
@@ -11595,6 +12059,17 @@ prototype_lookup:
 
 retry2:
         prs = find_own_property(&pr, p1, prop);
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+        /* A setter or a read-only property up the chain may still be in a
+           list; it decides this assignment exactly as if it were here. */
+        if (!prs && unlikely(js_obj_lazy(p1))) {
+            int r = js_lazy_touch(ctx, p1, prop);
+            if (r < 0)
+                goto fail;
+            if (r)
+                goto retry2;
+        }
+#endif
         if (prs) {
             if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
                 return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags);
@@ -12158,6 +12633,17 @@ int JS_DefineProperty(JSContext *ctx, JSValueConst this_obj,
 
 redo_prop_update:
     prs = find_own_property(&pr, p, prop);
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    /* Redefining a pending entry redefines what it would have been, so it
+       is put in the shape first; a new name falls through to be added. */
+    if (!prs && unlikely(js_obj_lazy(p))) {
+        int r = js_lazy_touch(ctx, p, prop);
+        if (r < 0)
+            return -1;
+        if (r)
+            goto redo_prop_update;
+    }
+#endif
     if (prs) {
         /* the range of the Array length property is always tested before */
         if ((prs->flags & JS_PROP_LENGTH) && (flags & JS_PROP_HAS_VALUE)) {
@@ -19831,7 +20317,8 @@ restart:
                             val = js_dup(pr->u.value);
                             break;
                         }
-                        if (unlikely(p->is_exotic)) {
+                        /* a lazy object (F2) may hold it in a list */
+                        if (unlikely(p->is_exotic || js_obj_lazy(p))) {
                             obj = JS_MKPTR(JS_TAG_OBJECT, p);
                             goto get_length_slow_path;
                         }
@@ -21153,7 +21640,8 @@ ret_fail:
                             val = js_dup(pr->u.value);
                             break;
                         }
-                        if (unlikely(p->is_exotic)) {
+                        /* a lazy object (F2) may hold it in a list */
+                        if (unlikely(p->is_exotic || js_obj_lazy(p))) {
                             /* XXX: should avoid the slow path for arrays
                                and typed arrays by ensuring that 'prop' is
                                not numeric */
@@ -21202,7 +21690,8 @@ get_field_slow_path:
                             val = js_dup(pr->u.value);
                             break;
                         }
-                        if (unlikely(p->is_exotic)) {
+                        /* a lazy object (F2) may hold it in a list */
+                        if (unlikely(p->is_exotic || js_obj_lazy(p))) {
                             /* XXX: should avoid the slow path for arrays
                                and typed arrays by ensuring that 'prop' is
                                not numeric */
@@ -41941,6 +42430,12 @@ static int JS_WriteObjectTag(BCWriterState *s, JSValueConst obj)
 
     bc_put_u8(s, BC_TAG_OBJECT);
     prop_count = 0;
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    /* Only enumerable properties are written, like a for-in. */
+    if (unlikely(js_obj_lazy(p)) && js_lazy_all(s->ctx, p, true)) {
+        goto fail;
+    }
+#endif
     sh = p->shape;
     for (pass = 0; pass < 2; pass++) {
         if (pass == 1) {
@@ -43892,11 +44387,483 @@ static int JS_InstantiateFunctionListItem(JSContext *ctx, JSValueConst obj,
     return 0;
 }
 
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+static inline bool lazy_done(const JSLazyList *l, int k)
+{
+    return (l->done[k >> 5] >> (k & 31)) & 1;
+}
+
+static inline void lazy_set_done(JSLazyList *l, int k)
+{
+    l->done[k >> 5] |= 1u << (k & 31);
+}
+
+/* Index of the first list of `p` in rt->lazy (sorted by object). */
+static uint32_t lazy_first(JSRuntime *rt, JSObject *p)
+{
+    uint32_t lo = 0, hi = rt->lazy_count;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        if ((uintptr_t)rt->lazy[mid].obj < (uintptr_t)p)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
+}
+
+/* An atom's text, resolved once per lookup rather than once per list entry:
+   a miss compares against every pending entry of every list on the object,
+   and redoing the flash/heap lookup and a strlen of the entry for each was
+   what made one cost 8-30 us on the device (plan sec.14.3). `open` is '['
+   for a well-known symbol, which only a "[Symbol.x]" entry can name (the
+   same test find_atom uses); c0 is the first byte an entry must start with. */
+typedef struct { const uint8_t *s8; const uint16_t *s16; uint32_t len; int c0, open; } LazyKey;
+static bool lazy_key(JSRuntime *rt, JSAtom atom, LazyKey *key)
+{
+    if (__JS_AtomIsTaggedInt(atom))
+        return false;   /* no list entry is an index */
+    key->open = atom >= JS_ATOM_Symbol_toPrimitive && atom < JS_ATOM_END ? '[' : 0;
+#ifdef CONFIG_POCKET_VM_ROM_ATOMS
+    const JSRomAtom *r = key->open ? NULL : js_rom_atom(atom);
+    if (r) {
+        key->s8 = (const uint8_t *)js_rom_text(r), key->s16 = NULL, key->len = r->len;
+        return (key->c0 = r->len ? key->s8[0] : 0) != '[';   /* '[' names a symbol entry */
+    }
+#endif
+    JSString *s = rt->atom_array[atom];
+    if (!key->open && s->atom_type != JS_ATOM_TYPE_STRING)
+        return false;
+    key->s8 = s->is_wide_char ? NULL : str8(s), key->s16 = s->is_wide_char ? str16(s) : NULL;
+    key->len = s->len;
+    key->c0 = key->open ? '[' : !s->len ? 0 : key->s8 ? key->s8[0] : str16(s)[0];
+    return key->c0 != '[' || key->open;
+}
+
+/* Does the resolved key name the list entry `name`? No allocation. */
+static inline bool lazy_key_is(const LazyKey *key, const char *name)
+{
+    const uint8_t *t = (const uint8_t *)name + (key->open != 0);
+    if ((uint8_t)name[0] != key->c0)
+        return false;   /* the common miss: one flash byte */
+    for (uint32_t i = 0; i < key->len; i++)
+        if (!t[i] || t[i] != (key->s8 ? key->s8[i] : key->s16[i]))
+            return false;   /* !t[i]: the entry ended; a key may hold a NUL */
+    return t[key->len] == (key->open ? ']' : 0) && (!key->open || !t[key->len + 1]);
+}
+
+/* Put one list entry into the shape, the way JS_InstantiateFunctionListItem
+   would have at registration -- same flags, same AUTOINIT record -- but
+   through add_property, so a non-extensible object can still materialize
+   what it always had. `ctx` is the list's realm. */
+static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
+                       const JSCFunctionListEntry *e)
+{
+    JSProperty *pr;
+    JSValue val;
+    int prop_flags = e->prop_flags;
+
+    switch (e->def_type) {
+    case JS_DEF_CFUNC:
+        if (atom == JS_ATOM_Symbol_toPrimitive) {
+            prop_flags = JS_PROP_CONFIGURABLE;
+        } else if (atom == JS_ATOM_Symbol_hasInstance) {
+            prop_flags = 0;
+        }
+        /* fall through */
+    case JS_DEF_PROP_STRING:
+    case JS_DEF_OBJECT:
+        pr = add_property(ctx, p, atom, (prop_flags & JS_PROP_C_W_E) | JS_PROP_AUTOINIT);
+        if (!pr)
+            return -1;
+        pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx) | JS_AUTOINIT_ID_PROP;
+        pr->u.init.opaque = (void *)e;
+        return 0;
+    case JS_DEF_CGETSET:
+    case JS_DEF_CGETSET_MAGIC: {
+        JSValue getter = JS_UNDEFINED, setter = JS_UNDEFINED;
+        char buf[64];
+        if (e->u.getset.get.generic) {
+            snprintf(buf, sizeof(buf), "get %s", e->name);
+            getter = JS_NewCFunction2(ctx, e->u.getset.get.generic, buf, 0,
+                                      e->def_type == JS_DEF_CGETSET_MAGIC ? JS_CFUNC_getter_magic : JS_CFUNC_getter,
+                                      e->magic);
+            if (JS_IsException(getter))
+                return -1;
+        }
+        if (e->u.getset.set.generic) {
+            snprintf(buf, sizeof(buf), "set %s", e->name);
+            setter = JS_NewCFunction2(ctx, e->u.getset.set.generic, buf, 1,
+                                      e->def_type == JS_DEF_CGETSET_MAGIC ? JS_CFUNC_setter_magic : JS_CFUNC_setter,
+                                      e->magic);
+            if (JS_IsException(setter)) {
+                JS_FreeValue(ctx, getter);
+                return -1;
+            }
+        }
+        pr = add_property(ctx, p, atom, (prop_flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE)) |
+                          JS_PROP_GETSET);
+        if (!pr) {
+            JS_FreeValue(ctx, getter);
+            JS_FreeValue(ctx, setter);
+            return -1;
+        }
+        pr->u.getset.getter = JS_IsUndefined(getter) ? NULL : JS_VALUE_GET_OBJ(getter);
+        pr->u.getset.setter = JS_IsUndefined(setter) ? NULL : JS_VALUE_GET_OBJ(setter);
+        return 0;
+    }
+    case JS_DEF_PROP_INT32:
+        val = js_int32(e->u.i32);
+        break;
+    case JS_DEF_PROP_INT64:
+        val = js_int64(e->u.i64);
+        break;
+    case JS_DEF_PROP_DOUBLE:
+        val = js_float64(e->u.f64);
+        break;
+    case JS_DEF_PROP_UNDEFINED:
+        val = JS_UNDEFINED;
+        break;
+    case JS_DEF_PROP_SYMBOL:
+        val = JS_AtomToValue(ctx, e->u.i32);
+        break;
+    case JS_DEF_PROP_BOOL:
+        val = JS_NewBool(ctx, e->u.i32);
+        break;
+    default:
+        abort();   /* JS_DEF_ALIAS is materialized at registration */
+    }
+    pr = add_property(ctx, p, atom, prop_flags & JS_PROP_C_W_E);
+    if (!pr) {
+        JS_FreeValue(ctx, val);
+        return -1;
+    }
+    pr->u.value = val;
+    return 0;
+}
+
+/* A lookup of `atom` missed p's shape: if one of p's lists still holds it,
+   put it in the shape. 1 = materialized (look again), 0 = not in any list,
+   -1 = exception (out of memory). */
+static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom)
+{
+    JSRuntime *rt = ctx->rt;
+    uint32_t i;
+    LazyKey key;
+    if (!lazy_key(rt, atom, &key)) /* counted as a miss either way */
+        return FP_INC(rt, lazy_miss), 0;   /* nothing in a list can match */
+    for (FP_INC(rt, lazy_miss), i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+        JSLazyList *l = &rt->lazy[i];
+        for (int k = 0; k < l->len; k++) {
+            if (lazy_done(l, k) || !lazy_key_is(&key, l->tab[k].name))
+                continue;
+            /* Marked first: add_property below looks the name up again. */
+            lazy_set_done(l, k); FP_INC(rt, lazy_hit);
+            return lazy_define(l->realm, p, atom, &l->tab[k]) ? -1 : 1;
+        }
+    }
+    return 0;
+}
+
+/* delete of a name p's lists still hold: nothing to take out of the shape,
+   just never materialize it. true/false as delete_property, or 2 when the
+   name is not a pending list entry (delete it the ordinary way). */
+static int js_lazy_delete(JSContext *ctx, JSObject *p, JSAtom atom)
+{
+    JSRuntime *rt = ctx->rt;
+    uint32_t i;
+    LazyKey key;
+    if (!lazy_key(rt, atom, &key))
+        return 2;
+    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+        JSLazyList *l = &rt->lazy[i];
+        for (int k = 0; k < l->len; k++) {
+            if (lazy_done(l, k) || !lazy_key_is(&key, l->tab[k].name))
+                continue;
+            /* Symbol.hasInstance is made non-configurable by lazy_define. */
+            if (!(l->tab[k].prop_flags & JS_PROP_CONFIGURABLE) ||
+                    (l->tab[k].def_type == JS_DEF_CFUNC && atom == JS_ATOM_Symbol_hasInstance))
+                return false;
+            lazy_set_done(l, k); FP_INC(rt, lazy_delete);
+            return true;
+        }
+    }
+    return 2;
+}
+
+/* The list entry an own property came from, or NULL if it is not one. */
+static JSLazyList *lazy_owner(JSRuntime *rt, JSObject *p, JSAtom atom, int *pk)
+{
+    uint32_t i; LazyKey key;
+    for (i = lazy_key(rt, atom, &key) ? lazy_first(rt, p) : rt->lazy_count; i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+        JSLazyList *l = &rt->lazy[i];
+        for (int k = 0; k < l->len; k++) {
+            if (lazy_key_is(&key, l->tab[k].name)) {
+                *pk = k;
+                return l;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* Position of `atom` among p's live own properties that did not come from
+   a list, or -1. Taken before a delete so the lists' `pos` can follow. */
+static int js_lazy_plain_index(JSRuntime *rt, JSObject *p, JSAtom atom)
+{
+    JSShape *sh = p->shape;
+    JSShapeProperty *prs = sh->prop;
+    int q = 0, k;
+    for (int i = 0; i < sh->prop_count; i++, prs++) {
+        if (prs->atom == JS_ATOM_NULL || lazy_owner(rt, p, prs->atom, &k))
+            continue;
+        if (prs->atom == atom)
+            return q;
+        q++;
+    }
+    return -1;
+}
+
+static void js_lazy_after_delete(JSRuntime *rt, JSObject *p, int q)
+{
+    uint32_t i;
+    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++)
+        if (rt->lazy[i].pos > q)
+            rt->lazy[i].pos--;
+}
+
+static void lazy_remove(JSRuntime *rt, JSObject *p)
+{
+    uint32_t i = lazy_first(rt, p), j = i;
+    while (j < rt->lazy_count && rt->lazy[j].obj == p)
+        j++;
+    memmove(&rt->lazy[i], &rt->lazy[j], (rt->lazy_count - j) * sizeof(rt->lazy[0]));
+    rt->lazy_count -= j - i;
+    js_obj_set_lazy(p, false);
+}
+
+static void js_lazy_forget(JSRuntime *rt, JSObject *p)
+{
+    lazy_remove(rt, p);
+}
+
+/* Rebuild p's shape so its properties are in definition order: each list's
+   entries go back to where the list was registered (pos), whatever order
+   they were touched in. Allocates the new shape and property array first,
+   so an out-of-memory leaves the object as it was (complete, and only in a
+   different order). */
+static int lazy_reorder(JSContext *ctx, JSObject *p)
+{
+    JSRuntime *rt = ctx->rt;
+    JSShape *sh = p->shape, *nsh;
+    JSProperty *nprop;
+    uint32_t first = lazy_first(rt, p), nl = 0, i, n = 0, nplain = 0;
+    int *order, *owner_list, *owner_k;
+    int j, k, count;
+    intptr_t h;
+
+    while (first + nl < rt->lazy_count && rt->lazy[first + nl].obj == p)
+        nl++;
+    count = sh->prop_count;
+    order = js_malloc(ctx, sizeof(int) * (3 * count + 1));
+    if (!order)
+        return -1;
+    owner_list = order + count;
+    owner_k = owner_list + count;
+    for (j = 0; j < count; j++) {
+        JSShapeProperty *prs = &sh->prop[j];
+        owner_list[j] = -2;   /* deleted slot */
+        if (prs->atom == JS_ATOM_NULL)
+            continue;
+        JSLazyList *l = lazy_owner(rt, p, prs->atom, &k);
+        owner_list[j] = l ? (int)(l - &rt->lazy[first]) : -1;
+        owner_k[j] = k;
+        if (!l)
+            nplain++;
+    }
+    /* Emit: before the q-th plain property, every list registered at q. */
+    for (uint32_t q = 0; q <= nplain; q++) {
+        for (i = 0; i < nl; i++) {
+            JSLazyList *l = &rt->lazy[first + i];
+            if (l->pos != q && !(q == nplain && l->pos > nplain))
+                continue;
+            for (k = 0; k < l->len; k++)
+                for (j = 0; j < count; j++)
+                    if (owner_list[j] == (int)i && owner_k[j] == k)
+                        order[n++] = j;
+        }
+        if (q == nplain)
+            break;
+        for (j = 0, i = 0; j < count; j++)
+            if (owner_list[j] == -1 && i++ == q)
+                order[n++] = j;
+    }
+    /* Already in definition order (nothing touched out of turn, nothing
+       deleted): keep the shape, which may be shared. */
+    if (sh->deleted_prop_count == 0 && n == (uint32_t)count) {
+        for (j = 0; j < (int)n && order[j] == j; j++)
+            ;
+        if (j == (int)n) {
+            js_free(ctx, order);
+            return 0;
+        }
+    }
+    nsh = js_new_shape_nohash(ctx, sh->proto, sh->prop_hash_mask + 1, max_int(n, 1));
+    nprop = nsh ? js_malloc(ctx, sizeof(JSProperty) * max_int(n, 1)) : NULL;
+    if (!nprop) {
+        if (nsh)
+            js_free_shape(rt, nsh);
+        js_free(ctx, order);
+        return -1;
+    }
+    for (j = 0; j < (int)n; j++) {
+        JSShapeProperty *src = &sh->prop[order[j]], *dst = &nsh->prop[j];
+        dst->atom = JS_DupAtom(ctx, src->atom);
+        dst->flags = src->flags;
+        h = (uintptr_t)dst->atom & nsh->prop_hash_mask;
+        dst->hash_next = prop_hash_end(nsh)[-h - 1];
+        prop_hash_end(nsh)[-h - 1] = j + 1;
+        nprop[j] = p->prop[order[j]];   /* the value moves, no refcount change */
+    }
+    nsh->prop_count = n;
+    js_free(ctx, p->prop);
+    p->prop = nprop;
+    p->shape = nsh;
+    js_free_shape(rt, sh);
+    js_free(ctx, order);
+    return 0;
+}
+
+/* Every pending entry of p into its shape, in definition order, then p is
+   an ordinary object again. With `enum_only`, a caller that will only look
+   at enumerable properties: if no pending entry is enumerable, there is
+   nothing it could see, and p stays lazy. */
+static int js_lazy_all(JSContext *ctx, JSObject *p, bool enum_only)
+{
+    JSRuntime *rt = ctx->rt;
+    uint32_t i;
+
+    if (enum_only) {
+        bool any = false;
+        for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++)
+            for (int k = 0; k < rt->lazy[i].len; k++)
+                if (!lazy_done(&rt->lazy[i], k) &&
+                        (rt->lazy[i].tab[k].prop_flags & JS_PROP_ENUMERABLE))
+                    any = true;
+        if (!any)
+            return FP_INC(rt, lazy_all_skip), 0;
+    }
+    FP_ALL(p, enum_only); for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+        for (int k = 0; k < rt->lazy[i].len; k++) {
+            /* rt->lazy may move under lazy_define (a getter's function
+               object can register nothing, but re-read it to be safe) */
+            JSLazyList *l = &rt->lazy[i];
+            if (lazy_done(l, k))
+                continue;
+            JSAtom atom = find_atom(l->realm, l->tab[k].name);
+            if (atom == JS_ATOM_NULL)
+                return -1;
+            lazy_set_done(l, k);
+            int ret = lazy_define(l->realm, p, atom, &l->tab[k]);
+            JS_FreeAtom(ctx, atom);
+            if (ret)
+                return -1;
+        }
+    }
+    if (lazy_reorder(ctx, p))
+        return -1;
+    lazy_remove(rt, p);
+    return 0;
+}
+
+/* Which objects may keep a list in flash. The global object is left out:
+   global variable access has its own lookup paths (JS_GetGlobalVar and
+   friends) that are not taught about pending entries. Exotic objects too,
+   except arrays (Array.prototype), whose exotic part is indices only. */
+static bool lazy_eligible(JSContext *ctx, JSValueConst obj, int len)
+{
+    JSObject *p;
+    if (!ctx->rt->lazy_ok || len <= 0 || len > 64 ||
+            JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (p == JS_VALUE_GET_OBJ(ctx->global_obj))
+        return false;
+    return !p->is_exotic || p->class_id == JS_CLASS_ARRAY;
+}
+
+static int lazy_register(JSContext *ctx, JSValueConst obj,
+                         const JSCFunctionListEntry *tab, int len)
+{
+    JSRuntime *rt = ctx->rt;
+    JSObject *p = JS_VALUE_GET_OBJ(obj);
+    JSShape *sh = p->shape;
+    uint32_t at, end;
+    int k, q = 0;
+
+    /* pos: live own properties that are not entries of p's earlier lists */
+    for (int j = 0; j < sh->prop_count; j++)
+        if (sh->prop[j].atom != JS_ATOM_NULL && !lazy_owner(rt, p, sh->prop[j].atom, &k))
+            q++;
+    if (rt->lazy_count == rt->lazy_size) {
+        uint32_t size = rt->lazy_size ? rt->lazy_size * 3 / 2 : 96;
+        JSLazyList *nl = js_realloc(ctx, rt->lazy, sizeof(*nl) * size);
+        if (!nl)
+            return -1;
+        rt->lazy = nl;
+        rt->lazy_size = size;
+    }
+    at = lazy_first(rt, p);
+    end = at;
+    while (end < rt->lazy_count && rt->lazy[end].obj == p)
+        end++;   /* after p's earlier lists: registration order */
+    memmove(&rt->lazy[end + 1], &rt->lazy[end], (rt->lazy_count - end) * sizeof(rt->lazy[0]));
+    rt->lazy_count++;
+    rt->lazy[end] = (JSLazyList){ .obj = p, .realm = ctx, .tab = tab,
+                                  .len = (uint16_t)len, .pos = (uint16_t)q };
+    js_obj_set_lazy(p, true);
+    /* The builtins are created with their shape pre-sized for the list
+       (JS_NewObjectProtoClassAlloc(.., n_fields), JS_NewCFunction3(..,
+       n + 3)); with the entries staying in flash that room would sit empty,
+       and it was most of what F2 failed to save at first (2026-09-25:
+       a 3-property prototype holding a 48-slot shape). Give it back while
+       the shape is still this object's alone; a failure only keeps it. */
+    if (!p->shape->is_hashed && p->shape->header.ref_count == 1 &&
+            p->shape->prop_size > max_int(JS_PROP_INITIAL_SIZE,
+                                          p->shape->prop_count - p->shape->deleted_prop_count)) {
+        compact_properties(ctx, p);
+    }
+    /* An alias reads its target's current value, which only registration
+       time knows for sure, so aliases are defined now (the target is
+       materialized through the ordinary lookup). */
+    for (k = 0; k < len; k++) {
+        if (tab[k].def_type != JS_DEF_ALIAS)
+            continue;
+        JSAtom atom = find_atom(ctx, tab[k].name);
+        if (atom == JS_ATOM_NULL)
+            return -1;
+        uint32_t idx = lazy_first(rt, p);
+        while (rt->lazy[idx].tab != tab)
+            idx++;
+        lazy_set_done(&rt->lazy[idx], k);
+        int ret = JS_InstantiateFunctionListItem(ctx, obj, atom, &tab[k]);
+        JS_FreeAtom(ctx, atom);
+        if (ret)
+            return -1;
+    }
+    return 0;
+}
+#endif
+
 int JS_SetPropertyFunctionList(JSContext *ctx, JSValueConst obj,
                                const JSCFunctionListEntry *tab, int len)
 {
     int i, ret;
 
+#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
+    if (lazy_eligible(ctx, obj, len))
+        return lazy_register(ctx, obj, tab, len);
+#endif
     for (i = 0; i < len; i++) {
         const JSCFunctionListEntry *e = &tab[i];
         JSAtom atom = find_atom(ctx, e->name);
@@ -67706,5 +68673,15 @@ uint32_t JS_VMStackBlocks(JSRuntime *rt, const void **out, uint32_t cap)
     (void)cap;
 #endif
     return n;
+}
+#endif
+
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+/* F-line measurement (quickjs.h). At the end of the file so the option-off
+ * build keeps every __LINE__ above it; the counters are in quickjs-vmprobe.h. */
+void JS_TakeFloorProbe(JSFloorProbe *out)
+{
+    *out = js_floor_probe;
+    memset(&js_floor_probe, 0, sizeof(js_floor_probe));
 }
 #endif

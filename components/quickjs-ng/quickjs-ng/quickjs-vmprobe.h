@@ -53,6 +53,29 @@ uint64_t qjs_vmprobe_jobs_executed_get(void);
 
 #endif // CONFIG_POCKET_VM_PROBE
 
+// F-line measurement (CONFIG_POCKET_VM_FLOORPROBE, docs/vm/builtin-floor-plan.md
+// sec.14): counters of the flash-atom (F1) and lazy-builtin (F2) paths,
+// read and cleared by JS_TakeFloorProbe (quickjs.h). The counters and macros
+// live here rather than in quickjs.c so that quickjs.c gains no line: its
+// assert()s embed __LINE__, and a shifted line changes the code of the
+// option-off build (the same reason JS_VMStackBlocks sits at the end of it).
+// quickjs.c calls FP_INC/FP_ALL on lines that already existed.
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+#include "quickjs.h"
+static __attribute__((unused)) JSFloorProbe js_floor_probe;
+#define FP_INC(rt, field) ((void)(rt), js_floor_probe.field++)
+#define FP_ALL(p, enum_only) do { \
+        if (js_floor_probe.lazy_all < 8) { \
+            js_floor_probe.all_class[js_floor_probe.lazy_all] = (uint16_t)(p)->class_id; \
+            js_floor_probe.all_enum_only[js_floor_probe.lazy_all] = (enum_only); \
+        } \
+        js_floor_probe.lazy_all++; \
+    } while (0)
+#else
+#define FP_INC(rt, field) ((void)0)
+#define FP_ALL(p, enum_only) ((void)0)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

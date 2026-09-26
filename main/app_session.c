@@ -36,7 +36,7 @@
 #include "esp_timer.h"
 #include "vmprobe.h"
 #include "oomprobe.h"
-#ifdef CONFIG_POCKET_VM_OOMPROBE
+#if defined(CONFIG_POCKET_VM_OOMPROBE) || defined(CONFIG_POCKET_VM_FLOORPROBE)
 #include "quickjs.h"
 #endif
 #include "vm_wake.h"
@@ -663,6 +663,25 @@ void app_stop(void) {
         final_stats=(pocketjs_guest_stats_t){.struct_size=sizeof(final_stats)};
         pocketjs_guest_stats(guest,&final_stats);
     }
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+    if(guest) {
+        // What the F1/F2 paths cost this session, counted inside QuickJS.
+        JSFloorProbe fp;
+        JS_TakeFloorProbe(&fp);
+        ESP_LOGI("app","FLOORPROBE frames=%u rom_escape=%lu rom_escape_new=%lu rom_symbol=%lu "
+                 "rom_numeric=%lu lazy_miss=%lu lazy_hit=%lu lazy_delete=%lu lazy_all=%lu "
+                 "lazy_all_skip=%lu all_class=%u,%u,%u,%u,%u,%u,%u,%u enum=%u%u%u%u%u%u%u%u",
+                 frames,(unsigned long)fp.rom_escape,(unsigned long)fp.rom_escape_new,
+                 (unsigned long)fp.rom_symbol,(unsigned long)fp.rom_numeric,
+                 (unsigned long)fp.lazy_miss,(unsigned long)fp.lazy_hit,
+                 (unsigned long)fp.lazy_delete,(unsigned long)fp.lazy_all,
+                 (unsigned long)fp.lazy_all_skip,
+                 fp.all_class[0],fp.all_class[1],fp.all_class[2],fp.all_class[3],
+                 fp.all_class[4],fp.all_class[5],fp.all_class[6],fp.all_class[7],
+                 fp.all_enum_only[0],fp.all_enum_only[1],fp.all_enum_only[2],fp.all_enum_only[3],
+                 fp.all_enum_only[4],fp.all_enum_only[5],fp.all_enum_only[6],fp.all_enum_only[7]);
+    }
+#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     // Before the destroy: JS_FreeRuntime frees the segments the hook would
     // otherwise go looking for.
@@ -697,6 +716,26 @@ void app_stop(void) {
 // moment the guest exists and has not run anything yet.
 static bool reloc_requested;
 void app_vm_reloc_request(void) { reloc_requested=true; }
+#endif
+
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+// F-line measurement (docs/vm/builtin-floor-plan.md sec.14): the guest's
+// js= after each step of building it, so the firmware's own share of the
+// startup floor reads surface by surface. js= is the same number the MEM
+// line and memlog report.
+static void floor_stage(const char *stage) {
+    pocketjs_guest_stats_t s={.struct_size=sizeof(s)};
+    if(guest && pocketjs_guest_stats(guest,&s)==ESP_OK)
+        ESP_LOGI("app","FLOOR stage=%s js=%u",stage,(unsigned)s.heap_used);
+}
+static esp_err_t floor_install(pocketjs_guest_t *g,const char *name,
+                               pocketjs_guest_quickjs_install_fn fn,void *user) {
+    esp_err_t e=pocketjs_guest_quickjs_install_once(g,name,fn,user);
+    floor_stage(name);
+    return e;
+}
+// Every install below goes through the wrapper; nothing else changes.
+#define pocketjs_guest_quickjs_install_once floor_install
 #endif
 
 esp_err_t app_start_test(char test) {
@@ -765,7 +804,15 @@ esp_err_t app_start_test(char test) {
     // that was already failing.
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+    // The counters are process-wide: drop whatever the last session left
+    // (a failed start never reaches the take in app_stop).
+    { JSFloorProbe discard; JS_TakeFloorProbe(&discard); }
+#endif
     TRY(pocketjs_guest_create(&gc,&guest));
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+    floor_stage("context");   // runtime + JS_NewContext, before any surface
+#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
     // The control has to reach the HEAP: a diagnostic starts with ~82 KB of
@@ -860,6 +907,38 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+#ifdef CONFIG_POCKET_VM_FLOORPROBE
+        // F2's price in one binary (docs/vm/builtin-floor-plan.md sec.14): a
+        // lookup that misses a lazy builtin (Math, Object.prototype) against
+        // the same miss once both are fully materialized (getOwnPropertyNames),
+        // next to a miss with no builtin on the chain at all. One timed loop
+        // per frame, so no frame nears the 250 ms guard; Date.now() is ms, so
+        // each loop is long enough (N) for that to be a few %. Each result is also
+        // logged as it lands, so a frame the guard stops loses one number only.
+        case '(': source=
+            "const N=8000,R=5,nul=Object.create(null),pl={};let s=0,st=0;const res={};"
+            "const T=[['loop',()=>{for(let i=0;i<N;i++)if(i<0)s++}],"
+            "['nul',()=>{for(let i=0;i<N;i++)if(nul.q)s++}],"
+            "['plain',()=>{for(let i=0;i<N;i++)if(pl.q)s++}],"
+            "['math/4',()=>{for(let i=0;i<N/4;i++)if(Math.q)s++}],"
+            "['mathHit',()=>{for(let i=0;i<N;i++)if(Math.max)s++}],"
+            "['eager',()=>{Object.getOwnPropertyNames(Math);Object.getOwnPropertyNames(Object.prototype)}],"
+            "['plainE',()=>{for(let i=0;i<N;i++)if(pl.q)s++}],"
+            "['mathE/4',()=>{for(let i=0;i<N/4;i++)if(Math.q)s++}],"
+            "['mathHitE',()=>{for(let i=0;i<N;i++)if(Math.max)s++}],"
+            // F1: a flash name as a string value (typeof's answer, through
+            // the cache), and a run-time string used as a key -- one equal
+            // to a flash name, one not -- which is where the flash table is
+            // searched at run time.
+            "['typeof',()=>{let x;for(let i=0;i<N;i++)x=typeof i;s+=x.length}],"
+            "['keyRom',()=>{const o={length:1};for(let i=0;i<N;i++)s+=o['len'+'gth']}],"
+            "['keyDyn',()=>{const o={zzqq:1};for(let i=0;i<N;i++)s+=o['zz'+'qq']}]];"
+            "globalThis.frame=()=>{if(st>=T.length*R){if(st++==T.length*R)"
+            "console.log('FLOORBENCH '+JSON.stringify(res)+' N='+N);return}"
+            "const t=T[(st/R)|0],a=Date.now();t[1]();const d=Date.now()-a;"
+            "console.log('FLOORSTEP '+t[0]+' '+d);(res[t[0]]=res[t[0]]||[]).push(d);st++};";
+            break;
+#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
         // G12 (oomprobe.h). Each one catches its own OOM and keeps running, so
         // one session yields a refusal per frame in a changing heap rather

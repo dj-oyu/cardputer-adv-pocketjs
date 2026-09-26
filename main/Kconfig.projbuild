@@ -190,6 +190,59 @@ menu "Pocket VM (L0 measurement probes)"
             Costs, measured on this tree: flash +1,300 B, static DRAM
             +16 B against the same build with it off.
 
+    config POCKET_VM_ROM_ATOMS
+        bool "F1: builtin names in flash instead of heap strings"
+        default y
+        help
+            Every JS runtime used to start by copying ~540 builtin names
+            (property and method names of the intrinsics) from flash into
+            heap JSStrings: ~21.7 KB of every app's guest heap, identical in
+            every run (docs/vm/builtin-floor-plan.md). With this on they
+            stay in flash as records generated at build time
+            (components/quickjs-ng/quickjs-ng/quickjs-rom-atoms.h, from
+            tools/vmtest/floor/gen_rom_atoms.sh); a name becomes a heap
+            string only when a program asks for it as a string value.
+
+            Costs ~15.5 KB of flash. Regenerate the table after changing the
+            builtins; a stale table is still correct, it only saves less.
+
+            Default y since 2026-09-25: every shipped app's js= fell by
+            20.1-21.4 KB on the device, corpus/Test262 unchanged
+            (docs/vm/builtin-floor-plan.md sec.12). n builds the old path.
+
+    config POCKET_VM_LAZY_BUILTINS
+        bool "F2: builtin methods stay in their flash lists until touched"
+        default y
+        help
+            Every JS context used to put each builtin's methods, accessors
+            and constants (Array.prototype.map, Math.PI, ...) into its
+            object's property table at startup: a shape entry and a slot for
+            each, ~14 KB of every app's guest heap for names most apps never
+            use (docs/vm/builtin-floor-plan.md sec.5.2). With this on, the
+            function lists stay in flash and a lookup that misses the object
+            searches them; the entry is put in the table the first time it
+            is touched. Listing an object's keys first puts every pending
+            entry in, in definition order.
+
+            Default y since 2026-09-26: on the device every shipped app's
+            js= fell a further 15.3-18.0 KB on top of F1 (the firmware's own
+            pocket.* lists are lazy too), corpus/Test262 unchanged
+            (docs/vm/builtin-floor-plan.md sec.13). n builds the old path.
+
+    config POCKET_VM_FLOORPROBE
+        bool "F-line measurement: guest floor by stage, F1/F2 path counters"
+        default n
+        help
+            Measurement only (docs/vm/builtin-floor-plan.md sec.14). Logs
+            "FLOOR stage=<surface> js=<bytes>" after the guest is created
+            and after each native surface is installed, so the firmware's
+            share of the startup floor can be read surface by surface;
+            logs "FLOORPROBE ..." with JS_GetFloorProbe's counters (flash
+            atom escapes, lazy-list misses and materializations) when an
+            app stops; and adds USB '(' on the home screen, a
+            same-binary microbenchmark of a lookup miss on a lazy builtin
+            against the same miss once the builtin is fully materialized.
+
     config POCKET_VM_OOMPROBE
         bool "G12 fragmentation probe: log every failed heap allocation"
         default n
