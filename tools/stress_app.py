@@ -14,8 +14,11 @@ import serial
 ROW = 7
 PAINT = re.compile(r"KASANE_PAINT turn_ms=([\d.]+) render_ms=([\d.]+) send_ms=([\d.]+)")
 STAT = re.compile(r"\((\d+)\) js: STRESS f=(\d+) lvl=(\d) pool=(\d+) peak=(\d+) oom=(\d+) cyc=(\d+) nat=(\d+) "
-                  r"natOk=(\S+) err=(\d+) cmds=(\d+) native=(\d+)")
+                  r"natOk=(\S+) err=(\d+) cmds=(\d+) native=(\d+)"
+                  r"(?: pressure=(\d+) pe=(\d+) trim=(\d+))?")
 FATAL = ("Guru Meditation", "assert failed", "CORRUPT HEAP", "abort()")
+SUSPECT = re.compile(r"\((\d+)\) js: STRESS_SUSPECT ")
+ENGINE_OOM = re.compile(r"\((\d+)\) app: OOM n=")
 
 
 def read_for(port, seconds, until=None, log=None):
@@ -50,9 +53,23 @@ def level(lines, n):
         s = stats[-1][1:]
         out.update(peak=int(s[3]), oom=int(s[4]), nat=int(s[6]), natOk=s[7], err=int(s[8]),
                    cmds=int(s[9]), kasane_native=int(s[10]))
+        if s[11] is not None:
+            out.update(pressure=int(s[11]), pressure_events=int(s[12]), pressure_trims=int(s[13]))
     out["oom_lines"] = sum("STRESS_OOM" in l for l in lines)
+    out["oom_suspects"] = sum("STRESS_SUSPECT" in l for l in lines)
     out["engine_oom_lines"] = sum(" OOM n=" in l for l in lines)
     return out
+
+
+def adjudicate_oom_suspects(log):
+    """Only the VM canary after the same JS turn confirms a bare InternalError."""
+    suspects = [(i, int(m.group(1))) for i, line in enumerate(log)
+                if (m := SUSPECT.search(line))]
+    engine_oom = [(i, int(m.group(1))) for i, line in enumerate(log)
+                  if (m := ENGINE_OOM.search(line))]
+    confirmed = sum(any(0 < j - i <= 8 and 0 <= ms - at <= 100
+                        for j, ms in engine_oom) for i, at in suspects)
+    return len(suspects), confirmed
 
 
 def main():
@@ -107,17 +124,22 @@ def run(a, log):
     native = re.search(r"STRESS_NATIVE (\S+) len=(\d+)", text)
     mem = re.search(r"APP_ID local\.stress[\s\S]*?MEM free=(\d+) largest=(\d+) js=(\d+) frames=0", text)
     l3 = levels[2]
+    suspect_count, confirmed_suspects = adjudicate_oom_suspects(log)
     result = {
         "native": native.group(1) if native else None,
         "js_after_source": int(mem.group(3)) if mem else None,
         "levels": levels,
         "fails": [l for l in log if "STRESS_FAIL" in l][:5],
         "runaway": [l for l in log if "RUNAWAY" in l][:5],
+        "oom_suspects": suspect_count,
+        "confirmed_oom_suspects": confirmed_suspects,
         "stopped": any("APP_STOPPED" in l for l in stop),
         "home": any("HOME_READY" in l for l in home),
     }
     ok = (result["native"] == "ok" and not result["fails"] and not result["runaway"]
+          and confirmed_suspects == suspect_count
           and l3.get("oom_lines", 0) > 0 and l3.get("paint_samples", 0) > 0
+          and l3.get("pressure_events", 0) > 0 and l3.get("pressure_trims", 0) > 0
           and result["stopped"] and result["home"])
     print(json.dumps(result, indent=1))
     print("STRESS_APP_" + ("PASS" if ok else "FAIL"))

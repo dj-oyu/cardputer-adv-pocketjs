@@ -37,7 +37,8 @@ static JSRuntime *rt;
 static JSContext *ctx;
 static uint16_t strip_pixels[240*8];
 static uint16_t panel[240*135];
-static unsigned lines_ready,lines_native,lines_oom,lines_fail,lines_stat,exceptions;
+static unsigned lines_ready,lines_native,lines_oom,lines_suspect,lines_fail,lines_stat,exceptions;
+static unsigned bad_suspect;
 static unsigned bad_command_count,bad_native;
 static unsigned pressure_events, pressure_trims;
 static unsigned reads_started,reads_finished,reads_at_first_oom,unhandled_rejections;
@@ -75,6 +76,7 @@ static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
         if(!lines_oom)reads_at_first_oom=reads_started;
         lines_oom++;
     }
+    else if(!strncmp(s,"STRESS_SUSPECT",14)) lines_suspect++;
     else if(!strncmp(s,"STRESS_FAIL",11)) { lines_fail++; printf("  %s\n",s); }
     else if(!strncmp(s,"STRESS f=",9)) {
         unsigned commands=0;const char *field=strstr(s," cmds=");
@@ -171,9 +173,11 @@ int main(int argc,char **argv) {
         char call[64];
         unsigned buttons=(t==300||t==600)?0x4000u:0u;   // L1 -> L2 -> L3
         snprintf(call,sizeof call,"frame(%u)",buttons);
+        unsigned suspects_before=lines_suspect;
         eval(call,strlen(call),"frame.js");
         JSOOMCanary canary={0};
         JS_TakeOOMCanary(rt,&canary);
+        if(lines_suspect>suspects_before&&!canary.count)bad_suspect++;
         if(canary.count)pocket_memory_oom(&canary,(uint64_t)t*20000u);
         size_t used=0,limit=0;
         JS_GetMemoryCounters(rt,&used,&limit);
@@ -203,13 +207,13 @@ int main(int argc,char **argv) {
             }
         }
     }
-    printf("frames 900: exceptions=%u fails=%u oom=%u pressure_events=%u pressure_trims=%u stats=%u ready=%u bad_present=%u bad_cmds=%u bad_native=%u reads=%u/%u first_oom_reads=%u unhandled=%u dispatch_faults=%u fault_reads=%u\n",
-           exceptions,lines_fail,lines_oom,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
+    printf("frames 900: exceptions=%u fails=%u oom=%u suspects=%u bad_suspect=%u pressure_events=%u pressure_trims=%u stats=%u ready=%u bad_present=%u bad_cmds=%u bad_native=%u reads=%u/%u first_oom_reads=%u unhandled=%u dispatch_faults=%u fault_reads=%u\n",
+           exceptions,lines_fail,lines_oom,lines_suspect,bad_suspect,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
            reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
            dispatch_faults,reads_at_dispatch_fault);
     if(gradient_arm)printf("gradient arm=%d panel_digest=%08x\n",
                            g_ksn_vertical_gradient_pie,panel_digest);
-    bool pass=ok&&!exceptions&&!lines_fail&&lines_ready==1&&lines_native==1&&
+    bool pass=ok&&!exceptions&&!lines_fail&&!bad_suspect&&lines_ready==1&&lines_native==1&&
               lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native&&
               pressure_events>0&&pressure_trims>0&&
               reads_started==reads_finished&&reads_started>reads_at_first_oom&&

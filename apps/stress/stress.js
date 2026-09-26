@@ -3,7 +3,7 @@
   const V = pocket.kasane, fs = pocket.fs, CAP = [15, 35, 1e9];
   const SEA = [0, 61, 240, 110];   // a moved shape keeps its clip, which defaults to where it began
   const PINK = 0xff71ceff, CYAN = 0x01cdfeff, MINT = 0x05ffa1ff, SUN = 0xfffb96ff, INK = 0x1a0033ff;
-  let t = 0, lvl = 0, pool = [], peak = 0, oom = 0, cyc = 0, err = 0;
+  let t = 0, lvl = 0, pool = [], peak = 0, oom = 0, suspect = 0, cyc = 0, err = 0;
   let pressure = 0, pressureEvents = 0, pressureTrims = 0;
   // The host owns pressure detection. Keep the callback allocation-free: LV3
   // sheds retained load only after a real allocation failure, preserving the
@@ -103,6 +103,13 @@
   function fail(where, e) {
     pool.length = 0;
     if (e === null || /memory/.test(e)) { oom++; console.log('STRESS_OOM n=' + oom + ' at=' + where); }
+    // At the quota, QuickJS can reject allocating the OOM error's message.
+    // Keep this separate from confirmed OOM: the host must correlate it with
+    // the VM canary from this turn before counting the trial as clean.
+    else if (lvl === 2 && memory && (memory.pressure() & memory.GUEST) && e &&
+             e.name === 'InternalError' && !e.message) {
+      suspect++; console.log('STRESS_SUSPECT n=' + suspect + ' at=' + where);
+    }
     else { err++; console.log('STRESS_FAIL ' + where + ' ' + e); }
   }
 

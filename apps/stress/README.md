@@ -46,6 +46,7 @@
 | `STRESS f= lvl= pool= peak= oom= cyc= nat= natOk= err= cmds= native= pressure= pe= trim=` | 60 フレームごと。末尾は現在の圧迫マスク・通知回数・通知による破棄回数 |
 | `STRESS_LEVEL n` | Enter で段階が変わった |
 | `STRESS_OOM n= at=` | 確保失敗を捕まえた |
+| `STRESS_SUSPECT n= at=` | OOM 例外の文字列確保も失敗した疑い。試験側は同一ターンの VM OOM 記録がある場合のみ許容 |
 | `STRESS_FAIL where ...` | 確保失敗以外の例外（数は `err=`） |
 
 描画の時間はファームの `KASANE_PAINT turn_ms= render_ms= ...`（30 フレームごと）で見る。
@@ -69,6 +70,19 @@
 | LV3 | 22.2 | 12.2 | 22.3 | 16（すべて回復） |
 
 ソース評価後の `js=` 61,704。
+
+## メモリ通知統合後の実機確認（2026-09-27）
+
+`feature/kasane` に `vm/main` の F3c と STRESS シーン再生成修正を統合した
+Cardputer ADV、各段階20秒。75コマンド、`STRESS_APP_PASS`。LV1/LV2/LV3 の fps は
+29.7/29.7/26.2、`render_ms` 中央値は 6.49/6.43/6.72 ms。LV3 は18回の OOM から
+回復し、低メモリ通知36回、通知による保持プール破棄18回、描画・アプリのエラー0。
+ソース評価後の `js=` は 59,960。ホスト900フレーム試験も PASS。
+
+QuickJS は極限の OOM でエラーメッセージ文字列さえ確保できず、単なる `InternalError`
+として見える場合がある。アプリはこれを `STRESS_SUSPECT` として分けて記録し、
+ホスト試験は同一フレームの OOM canary、実機試験は同一ターンの VM OOM ログとの
+対応を要求する。対応のない `InternalError` は引き続き FAIL とする。
 
 ## Kasane キャッシュ配置の実機 A/B/A（2026-09-26）
 

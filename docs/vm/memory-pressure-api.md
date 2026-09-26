@@ -146,8 +146,11 @@ The API, canary fan-out and STRESS LV3 use are implemented. The host QuickJS
 STRESS harness exercises notification and allocation-failure trimming while
 preserving deliberate OOM/recovery. The dedicated host test covers mask
 entry/clear, episode numbering, Back suppression, listener replacement and
-thrown-callback containment. Device measurement and the other fault-injection
-and scheduler gates above remain open; no Kasane native reclaimer is enabled.
-The ESP32-S3 `build_stress_kasane` firmware build links successfully; the
-build's static DIRAM delta is +144 B. No device run or threshold calibration
-has been performed for this API.
+thrown-callback containment. On Cardputer ADV (2026-09-27, 20 seconds per
+level), STRESS passed: LV3 reported 36 pressure notifications, 18 trims,
+18 caught OOMs and zero app errors; the app stopped and returned home cleanly.
+This verifies the end-to-end guest-quota path, not the system-DRAM thresholds
+or the other fault-injection and scheduler gates above. No Kasane native
+reclaimer is enabled. The ESP32-S3 `build_stress_kasane` firmware build links
+successfully; the initial build's static DIRAM delta was +144 B. Threshold
+calibration across music and overlay remains open.
