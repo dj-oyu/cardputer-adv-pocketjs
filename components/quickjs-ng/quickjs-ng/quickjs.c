@@ -3747,7 +3747,7 @@ static int JS_InitAtoms(JSRuntime *rt)
     rt->atom_count = 0;
     rt->atom_size = 0;
     rt->atom_free_index = 0;
-    if (JS_ResizeAtomHash(rt, 512)) {   /* there are at least 504 predefined atoms */
+    if (JS_ResizeAtomHash(rt, JS_ATOM_CONST_END == JS_ATOM_END ? 512 : 64)) {   /* at least 504 predefined atoms; with F1 only ~16 are hashed here (F3a, plan sec.16) */
         return -1;
     }
 
