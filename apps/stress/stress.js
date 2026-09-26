@@ -4,6 +4,16 @@
   const SEA = [0, 61, 240, 110];   // a moved shape keeps its clip, which defaults to where it began
   const PINK = 0xff71ceff, CYAN = 0x01cdfeff, MINT = 0x05ffa1ff, SUN = 0xfffb96ff, INK = 0x1a0033ff;
   let t = 0, lvl = 0, pool = [], peak = 0, oom = 0, cyc = 0, err = 0;
+  let pressure = 0, pressureEvents = 0, pressureTrims = 0;
+  // The host owns pressure detection. Keep the callback allocation-free: LV3
+  // sheds retained load only after a real allocation failure, preserving the
+  // stress test's deliberate first OOM and its recovery check.
+  const memory = pocket.memory;
+  if (memory) memory.onPressure(function (mask) {
+    pressure = mask;
+    pressureEvents++;
+    if (lvl === 2 && (mask & memory.FAILURE)) { pool.length = 0; pressureTrims++; }
+  });
   let nat = 0, natB = 0, natOk = '?', h = null, busy = false, fresh = false;
   let sch = [], dol = [], bub = [], grid = [], meter, stat, info, lv;
 
@@ -136,7 +146,8 @@
         const s = V.stats();
         console.log('STRESS f=' + t + ' lvl=' + (lvl + 1) + ' pool=' + pool.length + ' peak=' + peak +
           ' oom=' + oom + ' cyc=' + cyc + ' nat=' + nat + ' natOk=' + natOk + ' err=' + err +
-          ' cmds=' + s.displayed.commands + ' native=' + s.nativeBytes);
+          ' cmds=' + s.displayed.commands + ' native=' + s.nativeBytes +
+          ' pressure=' + pressure + ' pe=' + pressureEvents + ' trim=' + pressureTrims);
       }
     } catch (e) { fresh = true; fail('frame', e); }
   };

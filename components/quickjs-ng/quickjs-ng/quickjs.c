@@ -1848,7 +1848,7 @@ static size_t js_malloc_usable_size_unknown(const void *ptr)
  * js_malloc_rt (JS_NewRuntime2's "Inline what js_malloc_rt does" comment) and
  * its own usable_size counts toward malloc_size, so widening it would move
  * the byte at which every malloc_limit-driven test in tools/vmtest/corpus
- * trips -- measured: adding these three fields to JSMallocState alone made
+ * trips -- measured: adding canary fields to JSMallocState alone made
  * gc_threshold_device.js (which deliberately runs a cyclic-garbage loop to
  * the last byte of the device's 160 KiB limit) hit the limit one allocation
  * earlier, inside the uncaught print() after its try/catch instead of inside
@@ -1871,7 +1871,8 @@ static JSOOMCanary g_oom_canary;
  * caller's malloc_size at the moment of rejection, passed in rather than
  * read from a JSMallocState* so this never needs a pointer into the struct
  * whose size this exists specifically to leave alone. */
-static void js_oom_canary_record(size_t requested, size_t used_before)
+static void js_oom_canary_record(size_t requested, size_t used_before,
+                                 bool quota)
 {
     if (g_oom_canary.count == 0) {
         g_oom_canary.first_req = requested;
@@ -1879,6 +1880,10 @@ static void js_oom_canary_record(size_t requested, size_t used_before)
     }
     if (g_oom_canary.count < UINT32_MAX)
         g_oom_canary.count++;
+    uint32_t *reason_count = quota ? &g_oom_canary.quota_count :
+                                     &g_oom_canary.allocator_count;
+    if (*reason_count < UINT32_MAX)
+        ++*reason_count;
 }
 
 void *js_calloc_rt(JSRuntime *rt, size_t count, size_t size)
@@ -1898,14 +1903,16 @@ void *js_calloc_rt(JSRuntime *rt, size_t count, size_t size)
 
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
-    if (unlikely(s->malloc_size + (count * size) > s->malloc_limit - 1)) {
-        js_oom_canary_record(count * size, s->malloc_size);
+    if (unlikely(s->malloc_limit &&
+                 (s->malloc_size >= s->malloc_limit ||
+                  count * size > s->malloc_limit - 1 - s->malloc_size))) {
+        js_oom_canary_record(count * size, s->malloc_size, true);
         return NULL;
     }
 
     ptr = rt->mf.js_calloc(s->opaque, count, size);
     if (!ptr) {
-        js_oom_canary_record(count * size, s->malloc_size);
+        js_oom_canary_record(count * size, s->malloc_size, false);
         return NULL;
     }
 
@@ -1926,14 +1933,16 @@ void *js_malloc_rt(JSRuntime *rt, size_t size)
 
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
-    if (unlikely(s->malloc_size + size > s->malloc_limit - 1)) {
-        js_oom_canary_record(size, s->malloc_size);
+    if (unlikely(s->malloc_limit &&
+                 (s->malloc_size >= s->malloc_limit ||
+                  size > s->malloc_limit - 1 - s->malloc_size))) {
+        js_oom_canary_record(size, s->malloc_size, true);
         return NULL;
     }
 
     ptr = rt->mf.js_malloc(s->opaque, size);
     if (!ptr) {
-        js_oom_canary_record(size, s->malloc_size);
+        js_oom_canary_record(size, s->malloc_size, false);
         return NULL;
     }
 
@@ -1979,14 +1988,17 @@ void *js_realloc_rt(JSRuntime *rt, void *ptr, size_t size)
     old_size = rt->mf.js_malloc_usable_size(ptr);
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
-    if (s->malloc_size + size - old_size > s->malloc_limit - 1) {
-        js_oom_canary_record(size, s->malloc_size);
+    size_t used_without_old = s->malloc_size - old_size;
+    if (s->malloc_limit &&
+        (used_without_old >= s->malloc_limit ||
+         size > s->malloc_limit - 1 - used_without_old)) {
+        js_oom_canary_record(size, s->malloc_size, true);
         return NULL;
     }
 
     ptr = rt->mf.js_realloc(s->opaque, ptr, size);
     if (!ptr) {
-        js_oom_canary_record(size, s->malloc_size);
+        js_oom_canary_record(size, s->malloc_size, false);
         return NULL;
     }
 
@@ -8657,6 +8669,14 @@ void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out)
     (void)rt;
     *out = g_oom_canary;
     g_oom_canary = (JSOOMCanary){0};
+}
+
+void JS_GetMemoryCounters(JSRuntime *rt, size_t *used, size_t *limit)
+{
+    if (used)
+        *used = rt->malloc_state.malloc_size;
+    if (limit)
+        *limit = rt->malloc_state.malloc_limit;
 }
 
 void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)

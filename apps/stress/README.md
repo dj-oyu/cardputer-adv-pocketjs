@@ -12,6 +12,8 @@
   - LV3 は実際に確保失敗まで積み、捕まえてすべて捨て、また積む（`STRESS_OOM`）。確保失敗は
     `app_session.c` がログに残すだけで、アプリは続く。途中で失敗した `replace` は参照をすべて古くするので、
     失敗したフレームの次はシーンを作り直す。
+  - `pocket.memory.onPressure` はレベル・原因を購読する。LV3 では割り当て失敗 bit の通知時に
+    保持プールを破棄する。初回 OOM を意図的に残し、通知 callback 内ではログや追加配列を作らない。
 - **ネイティブの `Uint8Array`**（F3b の実機確認、`docs/vm/builtin-floor-plan.md` §17.3）: 2 フレームに 1 回
   `assets:/hello.js` を 1 KB ずつ `pocket.fs` で読む。読んだ塊もメモリの負荷に入る。最初の塊で、JS がまだ
   グローバルの `Uint8Array` を読んでいない状態から、ネイティブが作ったものの `prototype`・`constructor` が
@@ -41,7 +43,7 @@
 | --- | --- |
 | `STRESS_READY` | 評価が終わった |
 | `STRESS_NATIVE ok len=N` | ネイティブ生成の `Uint8Array` がグローバルと一致（`NG` なら不一致） |
-| `STRESS f= lvl= pool= peak= oom= cyc= nat= natOk= err= cmds= native=` | 60 フレームごと |
+| `STRESS f= lvl= pool= peak= oom= cyc= nat= natOk= err= cmds= native= pressure= pe= trim=` | 60 フレームごと。末尾は現在の圧迫マスク・通知回数・通知による破棄回数 |
 | `STRESS_LEVEL n` | Enter で段階が変わった |
 | `STRESS_OOM n= at=` | 確保失敗を捕まえた |
 | `STRESS_FAIL where ...` | 確保失敗以外の例外（数は `err=`） |

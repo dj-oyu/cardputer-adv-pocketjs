@@ -9,6 +9,7 @@
 //
 //   wsl -e bash -lc "cd <repo> && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"
 #include "pocket_kasane.h"
+#include "pocket_memory.h"
 #include "pocket_av.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
@@ -38,6 +39,7 @@ static uint16_t strip_pixels[240*8];
 static uint16_t panel[240*135];
 static unsigned lines_ready,lines_native,lines_oom,lines_fail,lines_stat,exceptions;
 static unsigned bad_command_count,bad_native;
+static unsigned pressure_events, pressure_trims;
 static unsigned reads_started,reads_finished,reads_at_first_oom,unhandled_rejections;
 static unsigned dispatch_faults,reads_at_dispatch_fault,bad_fault_reads;
 
@@ -77,6 +79,8 @@ static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
     else if(!strncmp(s,"STRESS f=",9)) {
         unsigned commands=0;const char *field=strstr(s," cmds=");
         if(!field||sscanf(field," cmds=%u",&commands)!=1||commands!=75)bad_command_count++;
+        field=strstr(s," pe=");if(field)sscanf(field," pe=%u",&pressure_events);
+        field=strstr(s," trim=");if(field)sscanf(field," trim=%u",&pressure_trims);
         lines_stat++;if(lines_stat%5==1)printf("  %s\n",s);
     }
     else printf("  %s\n",s);
@@ -127,7 +131,7 @@ static const char FS_STUB[]=
     "return{read:async function(m){"
     "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}"
     "__readStarted();let c=++n>3?null:new Uint8Array(m);"
-    "__readFinished();return c},close:function(){}}}}};";
+    "__readFinished();return c},close:function(){}}}},memory:globalThis.memory};";
 
 int main(int argc,char **argv) {
     const char *gradient_arm=getenv("KSN_VERTICAL_GRAD_PIE");
@@ -141,6 +145,7 @@ int main(int argc,char **argv) {
     rt=JS_NewRuntime(); ctx=JS_NewContext(rt); host_capabilities_clear();
     JS_SetHostPromiseRejectionTracker(rt,promise_rejection,NULL);
     pocket_kasane_install(ctx,NULL);
+    pocket_memory_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__readStarted",JS_NewCFunction(ctx,js_read_started,"readStarted",0));
@@ -167,6 +172,13 @@ int main(int argc,char **argv) {
         unsigned buttons=(t==300||t==600)?0x4000u:0u;   // L1 -> L2 -> L3
         snprintf(call,sizeof call,"frame(%u)",buttons);
         eval(call,strlen(call),"frame.js");
+        JSOOMCanary canary={0};
+        JS_TakeOOMCanary(rt,&canary);
+        if(canary.count)pocket_memory_oom(&canary,(uint64_t)t*20000u);
+        size_t used=0,limit=0;
+        JS_GetMemoryCounters(rt,&used,&limit);
+        pocket_memory_sample((uint64_t)t*20000u,used,limit,false,0,0);
+        pocket_memory_pump(false);
         if(!present()) bad_present++;
         if(gradient_arm)for(size_t i=0;i<240u*135u;i++){
             panel_digest^=panel[i];panel_digest*=16777619u;
@@ -188,19 +200,20 @@ int main(int argc,char **argv) {
             }
         }
     }
-    printf("frames 900: exceptions=%u fails=%u oom=%u stats=%u ready=%u bad_present=%u bad_cmds=%u bad_native=%u reads=%u/%u first_oom_reads=%u unhandled=%u dispatch_faults=%u fault_reads=%u\n",
-           exceptions,lines_fail,lines_oom,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
+    printf("frames 900: exceptions=%u fails=%u oom=%u pressure_events=%u pressure_trims=%u stats=%u ready=%u bad_present=%u bad_cmds=%u bad_native=%u reads=%u/%u first_oom_reads=%u unhandled=%u dispatch_faults=%u fault_reads=%u\n",
+           exceptions,lines_fail,lines_oom,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
            reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
            dispatch_faults,reads_at_dispatch_fault);
     if(gradient_arm)printf("gradient arm=%d panel_digest=%08x\n",
                            g_ksn_vertical_gradient_pie,panel_digest);
     bool pass=ok&&!exceptions&&!lines_fail&&lines_ready==1&&lines_native==1&&
               lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native&&
+              pressure_events>0&&pressure_trims>0&&
               reads_started==reads_finished&&reads_started>reads_at_first_oom&&
               !unhandled_rejections&&
               (!inject_dispatch_fault||(dispatch_faults==1&&!bad_fault_reads&&
                                         reads_started>reads_at_dispatch_fault));
-    pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
+    pocket_memory_reset();pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
     printf("%s\n",pass?"STRESS_HOST PASS":"STRESS_HOST FAIL");
     return pass?0:1;
 }

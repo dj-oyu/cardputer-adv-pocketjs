@@ -4,6 +4,7 @@
 #include "pocketjs/guest_quickjs.h"
 #include "jsconsole.h"
 #include "pocket_api.h"
+#include "pocket_memory.h"
 #include "pocket_random.h"
 #include "pocket_storage.h"
 #include "pocket_fs.h"
@@ -129,15 +130,33 @@ static void report_oom_if_any(void) {
     oomprobe_drain();
 #endif
     if(!guest) return;
-    uint32_t n=0; size_t first_req=0, first_used=0;
-    pocketjs_guest_take_oom(guest,&n,&first_req,&first_used);
-    if(n>0) {
+    JSOOMCanary canary={0};
+    pocketjs_guest_take_oom_detail(guest,&canary);
+    if(canary.count>0) {
+        pocket_memory_oom(&canary,(uint64_t)esp_timer_get_time());
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
-                 (unsigned)n,(unsigned)first_req,(unsigned)first_used);
+                 (unsigned)canary.count,(unsigned)canary.first_req,(unsigned)canary.first_used);
 #ifdef CONFIG_POCKET_VM_OOMPROBE
-        oomprobe_canary(n,first_req,first_used);
+        oomprobe_canary(canary.count,canary.first_req,canary.first_used);
 #endif
     }
+}
+
+/* Constant-time VM counters every owner turn; native heap is sampled at most
+ * once per 100 ms. Also runs on display-only turns so pressure can recover. */
+static void sample_memory_pressure(void) {
+    if(!guest)return;
+    uint64_t now=(uint64_t)esp_timer_get_time();
+    size_t used=0,limit=0,free_bytes=0,largest=0;
+    JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),
+                         &used,&limit);
+    bool native=pocket_memory_native_sample_due(now);
+    if(native){
+        const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+        free_bytes=heap_caps_get_free_size(caps);
+        largest=heap_caps_get_largest_free_block(caps);
+    }
+    pocket_memory_sample(now,used,limit,native,free_bytes,largest);
 }
 static atomic_bool stop_requested;
 static int64_t deadline;
@@ -666,6 +685,7 @@ void app_stop(void) {
     // a screen change closes the session -- which is what the end of a run is.
     pocket_text_reset();
     pocket_bridge_reset();
+    pocket_memory_reset();
     pocket_api_reset();
     // Read before the runtime goes: app_report() below runs with guest == NULL,
     // so this is the last point at which "was anything still queued" has an
@@ -856,6 +876,7 @@ esp_err_t app_start_test(char test) {
     jsconsole_clear();
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"memory",pocket_memory_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"random",pocket_random_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
     // 3.1: an overlay's default capability set is NARROWER than a foreground
@@ -1237,6 +1258,7 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
 // native scene can be supplied as the backdrop.
 esp_err_t app_overlay_tick(void) {
     if(!guest) return ESP_ERR_INVALID_STATE;
+    sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
     /* The overlay has its own guest loop; foreground app_tick() does not run.
      * Keep the shared SYSTEM bank in sync before the shell presents it. */
@@ -1326,6 +1348,7 @@ esp_err_t app_overlay_tick(void) {
     // may turn an exit() into a stop, because the stop is delivered as an
     // interrupt and would otherwise cut the drain it lands in.
     if(pocket_app_exit_requested()) app_request_stop();
+    pocket_memory_pump(atomic_load(&stop_requested));
     pocket_app_pump();
     // Before pocket_api_pump(), like every other producer: what these post is
     // settled by that call, and posting after it would delay every completion
@@ -1438,6 +1461,7 @@ esp_err_t app_tick(uint32_t buttons) {
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
     turn_continued=false;
+    sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
     /* A ticket retained from a prior turn keeps its dedicated display turn.
      * A fresh native presenter ticket below does not: after it reaches the
@@ -1604,6 +1628,7 @@ esp_err_t app_tick(uint32_t buttons) {
     // here, ahead of every other pump, and still does everything else it did).
     if(pocket_app_exit_requested()) app_request_stop();
     buttons|=deferred_buttons; deferred_buttons=0;
+    pocket_memory_pump((buttons&0x2000)!=0||atomic_load(&stop_requested));
     run_pumps(buttons);
     pocket_kasane_end_turn();
     // The JS side of the frame: frame() in QuickJS. Timed on every tick, painted or not, so turn_ms is its own number
