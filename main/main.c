@@ -530,6 +530,9 @@ extern const char pet_start[] asm("_binary_pet_js_start");
 extern const char pet_end[] asm("_binary_pet_js_end");
 extern const char companion_start[] asm("_binary_companion_js_start");
 extern const char companion_end[] asm("_binary_companion_js_end");
+// Heap churn + drawing load (apps/stress/README.md), a test app kept on the menu.
+extern const char stress_start[] asm("_binary_stress_js_start");
+extern const char stress_end[] asm("_binary_stress_js_end");
 
 // shell_key() cannot say "hand the display to another screen": its bool already
 // means "launch the app shell_app() names". The request is left behind instead,
@@ -604,6 +607,7 @@ static bool home_key(const keystroke_t *k) {
         case 4: begin_run("local.imucal",NULL,0,imucal_start,(size_t)(imucal_end-imucal_start-1)); break;
         case 5: begin_run("local.pet",NULL,0,pet_start,(size_t)(pet_end-pet_start-1)); break;
         case 6: begin_run("local.companion",NULL,0,companion_start,(size_t)(companion_end-companion_start-1)); break;
+        case 7: begin_run("local.stress",NULL,0,stress_start,(size_t)(stress_end-stress_start-1)); break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
