@@ -76,6 +76,51 @@ static __attribute__((unused)) JSFloorProbe js_floor_probe;
 #define FP_ALL(p, enum_only) ((void)0)
 #endif
 
+// F3b/F3c (CONFIG_POCKET_VM_LAZY_INTRINSICS, docs/vm/builtin-floor-plan.md
+// sec.17-18): typed-array, Map/Set, WeakRef and DOMException constructors
+// made on first use. The hooks are macros
+// placed on lines of quickjs.c that already existed, for the same reason as
+// FP_INC above: with the option off each expands to nothing (or to a
+// constant the compiler folds), and the option-off build stays byte-identical.
+// The functions they name are at the end of quickjs.c.
+#ifdef CONFIG_POCKET_VM_LAZY_INTRINSICS
+#define JS_DEF_POCKET_LAZY_CLASS 12   /* after JS_DEF_PROP_BOOL; quickjs.c only */
+#define LAZY_CLASS_DECLS \
+    static JSValue js_lazy_class_ctor(JSContext *ctx, int class_id); \
+    static int js_lazy_class_ensure(JSContext *ctx, int class_id); \
+    static int js_lazy_ta_register(JSContext *ctx); \
+    static int js_lazy_register(JSContext *ctx, int group);
+#define LAZY_CLASS_CASE \
+    case JS_DEF_POCKET_LAZY_CLASS: val = js_lazy_class_ctor(ctx, e->magic); break;
+/* true = the class's prototype was pending and making it failed */
+#define LAZY_CLASS_MISSING(ctx, id) \
+    (unlikely(JS_IsNull((ctx)->class_proto[id])) && js_lazy_class_ensure(ctx, id) < 0)
+/* ta_base: %TypedArray%. lazy_groups: which LAZY_G_* this context registered
+   lazily (a group it did not is upstream's, JS_NULL prototype and all). */
+#define LAZY_CTX_FIELDS JSValue ta_base; uint8_t lazy_groups;
+#define LAZY_CTX_INIT ctx->ta_base = JS_NULL; ctx->lazy_groups = 0;
+#define LAZY_CTX_MARK JS_MarkValue(rt, ctx->ta_base, mark_func);
+#define LAZY_CTX_FREE JS_FreeValue(ctx, ctx->ta_base);
+#define LAZY_TA_REGISTER(ctx) return js_lazy_ta_register(ctx);
+/* F3c: the same for Map/Set, WeakRef/FinalizationRegistry and DOMException,
+   placed at the top of their JS_AddIntrinsic* in place of the rest of it. */
+#define LAZY_G_TA 0
+#define LAZY_G_MAPSET 1
+#define LAZY_G_WEAKREF 2
+#define LAZY_G_DOMEX 3
+#define LAZY_GROUP_REGISTER(ctx, group) return js_lazy_register(ctx, group);
+#else
+#define LAZY_GROUP_REGISTER(ctx, group)
+#define LAZY_CLASS_DECLS
+#define LAZY_CLASS_CASE
+#define LAZY_CLASS_MISSING(ctx, id) 0
+#define LAZY_CTX_FIELDS
+#define LAZY_CTX_INIT
+#define LAZY_CTX_MARK
+#define LAZY_CTX_FREE
+#define LAZY_TA_REGISTER(ctx)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -74,11 +74,18 @@ build_variant() {
   # variant has it; "-nolb" builds the eager path ("-lb" is still accepted).
   local lazyb="-DCONFIG_POCKET_VM_LAZY_BUILTINS=1"
   if [[ $variant == *-nolb* ]]; then lazyb=""; fi
+  # CONFIG_POCKET_VM_LAZY_INTRINSICS (F3b): typed-array constructors made on
+  # first use. Default y since 2026-09-26, so the plain variant has it;
+  # "-noli" builds the eager path ("-li" is still accepted).
+  local lazyi="-DCONFIG_POCKET_VM_LAZY_INTRINSICS=1"
+  if [[ $variant == *-noli* ]]; then lazyi=""; fi
   local core=${variant%-keepsrc}
   core=${core//-norom/}
   core=${core//-rom/}
   core=${core//-nolb/}
   core=${core//-lb/}
+  core=${core//-noli/}
+  core=${core//-li/}
   local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}; base=${base%-noyield}; base=${base%-reloc}
   case "$core" in
     *-lazy-flat) ;;
@@ -120,7 +127,7 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield $strip $rom $lazyb -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield $strip $rom $lazyb $lazyi -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,

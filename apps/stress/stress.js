@@ -141,7 +141,8 @@
         catch (e) { busy = false; throw e; }
       }
       // A replace that failed part-way (an OOM) left every ref stale: rebuild.
-      if (fresh || t % 120 === 0) { fresh = true; V.replace(scene); fresh = false; } else V.patch(draw);
+      // draw() in the same replace: scene() alone shows the start positions for a frame.
+      if (fresh || t % 120 === 0) { fresh = true; V.replace(tx => { scene(tx); draw(tx); }); fresh = false; } else V.patch(draw);
       if (t % 60 === 0) {
         const s = V.stats();
         console.log('STRESS f=' + t + ' lvl=' + (lvl + 1) + ' pool=' + pool.length + ' peak=' + peak +

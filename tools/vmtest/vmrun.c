@@ -514,9 +514,24 @@ static void host_requests_free(void) {
     }
 }
 
+// host.bytes(n): a Uint8Array of n bytes 0..n-1 made the way pocket.fs and
+// pocket.io make theirs (JS_NewUint8ArrayCopy), i.e. through class_proto
+// without ever reading the global Uint8Array -- the native way into the F3b
+// lazy classes (docs/vm/builtin-floor-plan.md sec.17).
+static JSValue host_bytes(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  int32_t n = 0;
+  uint8_t buf[256];
+  if (argc > 0 && JS_ToInt32(ctx, &n, argv[0])) return JS_EXCEPTION;
+  if (n < 0 || n > (int32_t)sizeof(buf)) return JS_ThrowRangeError(ctx, "host.bytes: 0..256");
+  for (int32_t i = 0; i < n; i++) buf[i] = (uint8_t)i;
+  return JS_NewUint8ArrayCopy(ctx, buf, (size_t)n);
+}
+
 static void install_host(JSContext *ctx) {
   JSValue o = JS_NewObject(ctx);
   JS_SetPropertyStr(ctx, o, "request", JS_NewCFunction(ctx, host_request, "request", 1));
+  JS_SetPropertyStr(ctx, o, "bytes", JS_NewCFunction(ctx, host_bytes, "bytes", 1));
   JS_SetPropertyStr(ctx, o, "exit", JS_NewCFunction(ctx, host_exit, "exit", 0));
   JSValue global = JS_GetGlobalObject(ctx);
   JS_SetPropertyStr(ctx, global, "host", o);

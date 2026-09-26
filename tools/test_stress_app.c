@@ -183,9 +183,12 @@ int main(int argc,char **argv) {
         if(gradient_arm)for(size_t i=0;i<240u*135u;i++){
             panel_digest^=panel[i];panel_digest*=16777619u;
         }
-        // STRESS_PPM=<prefix>: the panel as P6 at a few frames, for looking at.
-        const char *ppm=getenv("STRESS_PPM");
-        if(ppm&&(t==90||t==240||t==420)) {
+        // STRESS_PPM=<prefix>: the panel as P6 at a few frames, for looking at;
+        // STRESS_PPM_AT="239,240,241" picks the frames (default 90,240,420).
+        const char *ppm=getenv("STRESS_PPM"),*at=getenv("STRESS_PPM_AT");
+        char want[16]; snprintf(want,sizeof want,",%u,",t);
+        char list[128]; snprintf(list,sizeof list,",%s,",at?at:"90,240,420");
+        if(ppm&&strstr(list,want)) {
             char name[256]; snprintf(name,sizeof name,"%s-%03u.ppm",ppm,t);
             FILE *o=fopen(name,"wb");
             if(o) {
