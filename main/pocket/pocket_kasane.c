@@ -1876,8 +1876,12 @@ static schema_state *schema_owner(JSValueConst self){
     return handle&&state&&state->schema&&state->schema->handle==handle?
            state->schema:NULL;
 }
-static void schema_free_pending_text(JSContext *ctx,const char *const *texts,unsigned count){
-    for(unsigned i=0;i<count;i++)if(texts[i])JS_FreeCString(ctx,texts[i]);
+static void schema_free_pending_text(JSContext *ctx,const char *const *texts,
+                                     const uint8_t *touched,unsigned count){
+    for(unsigned n=0;n<count;n++){
+        unsigned i=touched[n];
+        if(texts[i])JS_FreeCString(ctx,texts[i]);
+    }
 }
 static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
     const char *op="kasane.view.set";
@@ -1889,7 +1893,8 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
      * Borrow those immutable UTF-8 bytes through preflight, then make the
      * single schema-owned copy only for changed slots. */
     const char *pending_text[KSN_SCHEMA_MAX_SLOTS]={0};
-    bool text_dirty[KSN_SCHEMA_MAX_SLOTS]={0};
+    uint8_t touched[KSN_SCHEMA_MAX_SLOTS];
+    unsigned touched_count=0;
     memcpy(candidate,s->values,s->definition->slot_count*sizeof(*candidate));
     ksn_p0_probe_copy(KSN_P0_ADAPTER_TEMP,s->definition->slot_count*sizeof(*candidate));
     JSPropertyEnum *props=NULL;uint32_t count=0;
@@ -1907,6 +1912,10 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
             pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                              "unknown display slot",false,NULL);ok=false;break;
         }
+        /* Own property names are unique; only these slots can differ from
+         * the copied candidate. Compare after all getters have run, since a
+         * getter may reenter view.set and change the live baseline. */
+        touched[touched_count++]=(uint8_t)i;
         JSValue value=JS_GetProperty(ctx,model,props[p].atom);
         if(JS_IsException(value)){ok=false;break;}
         const ksn_schema_slot *slot=&s->definition->slots[i];
@@ -1923,9 +1932,8 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
                     else{
                         pending_text[i]=text;
                         candidate[i].data.text=(ksn_schema_text){pending_text[i],(uint16_t)length};
-                        text_dirty[i]=true;
                     }
-                    if(text&&!text_dirty[i])JS_FreeCString(ctx,text);
+                    if(text&&!pending_text[i])JS_FreeCString(ctx,text);
                 }
             }
         }else if(slot->type==KSN_SLOT_RECT){
@@ -1955,13 +1963,14 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
     }
     JS_FreePropertyEnum(ctx,props,count);
     if(!ok){
-        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        schema_free_pending_text(ctx,pending_text,touched,touched_count);
         return JS_EXCEPTION;
     }
     uint32_t changed_slots=0;
-    for(unsigned i=0;i<s->definition->slot_count;i++){
+    for(unsigned n=0;n<touched_count;n++){
+        unsigned i=touched[n];
         bool differs;
-        if(text_dirty[i]){
+        if(pending_text[i]){
             ksn_schema_text a=candidate[i].data.text,b=s->values[i].data.text;
             differs=a.bytes!=b.bytes||memcmp(a.utf8,b.utf8,a.bytes)!=0;
         }else differs=memcmp(&candidate[i].data,&s->values[i].data,
@@ -1969,21 +1978,22 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
         if(differs)changed_slots|=(uint32_t)1u<<i;
     }
     if(!changed_slots){
-        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        schema_free_pending_text(ctx,pending_text,touched,touched_count);
         return JS_UNDEFINED;
     }
     if(s->revision==UINT64_MAX){
-        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        schema_free_pending_text(ctx,pending_text,touched,touched_count);
         return throw_result(ctx,KSN_LIMIT,op);
     }
     ksn_result check=ksn_schema_preflight_view(view(),s->definition,candidate,viewport);
     if(check!=KSN_OK){
-        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        schema_free_pending_text(ctx,pending_text,touched,touched_count);
         return throw_result(ctx,check,op);
     }
-    for(unsigned i=0;i<s->definition->slot_count;i++){
+    for(unsigned n=0;n<touched_count;n++){
+        unsigned i=touched[n];
         if(!(changed_slots&((uint32_t)1u<<i)))continue;
-        if(text_dirty[i]){
+        if(pending_text[i]){
             ksn_schema_text text=candidate[i].data.text;
             char *dest=(char *)s->values[i].data.text.utf8;
             memcpy(dest,text.utf8,text.bytes+1u);
@@ -1995,7 +2005,7 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
             ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,sizeof(candidate[i]));
         }
     }
-    schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+    schema_free_pending_text(ctx,pending_text,touched,touched_count);
     s->revision++;
     s->pending_base_slots|=changed_slots;
     ksn_result submitted=schema_refresh(NULL);
