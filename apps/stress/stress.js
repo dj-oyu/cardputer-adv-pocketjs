@@ -67,7 +67,10 @@
     if (pool.length > CAP[lvl]) pool.splice(0, pool.length >> 1);
   }
 
+  function readRejected() { busy = false; }
+
   async function readChunk() {
+    busy = true;
     try {
       if (!h) h = await fs.open('assets:/hello.js', {mode: 'read'});
       const c = await h.read(1024);
@@ -123,7 +126,10 @@
     try {
       if (buttons & 0x4000) { lvl = (lvl + 1) % 3; peak = 0; console.log('STRESS_LEVEL ' + (lvl + 1)); }
       load();
-      if (!busy && (t & 1)) { busy = true; readChunk(); }
+      if (!busy && (t & 1)) {
+        try { readChunk().catch(readRejected); }
+        catch (e) { busy = false; throw e; }
+      }
       // A replace that failed part-way (an OOM) left every ref stale: rebuild.
       if (fresh || t % 120 === 0) { fresh = true; V.replace(scene); fresh = false; } else V.patch(draw);
       if (t % 60 === 0) {

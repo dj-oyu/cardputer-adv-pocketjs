@@ -38,6 +38,27 @@ static uint16_t strip_pixels[240*8];
 static uint16_t panel[240*135];
 static unsigned lines_ready,lines_native,lines_oom,lines_fail,lines_stat,exceptions;
 static unsigned bad_command_count,bad_native;
+static unsigned reads_started,reads_finished,reads_at_first_oom,unhandled_rejections;
+static unsigned dispatch_faults,reads_at_dispatch_fault,bad_fault_reads;
+
+static JSValue js_read_started(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
+    (void)c;(void)self;(void)argc;(void)argv; reads_started++; return JS_UNDEFINED;
+}
+static JSValue js_read_finished(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
+    (void)c;(void)self;(void)argc;(void)argv; reads_finished++; return JS_UNDEFINED;
+}
+static JSValue js_dispatch_fault(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
+    (void)c;(void)self;(void)argc;(void)argv;
+    dispatch_faults++;
+    reads_at_dispatch_fault=reads_started;
+    if(reads_started!=reads_finished)bad_fault_reads++;
+    return JS_UNDEFINED;
+}
+static void promise_rejection(JSContext *c,JSValueConst promise,JSValueConst reason,bool handled,void *opaque) {
+    (void)c;(void)promise;(void)reason;(void)opaque;
+    if(handled) { if(unhandled_rejections)unhandled_rejections--; }
+    else unhandled_rejections++;
+}
 
 static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv) {
     (void)self;
@@ -48,7 +69,10 @@ static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
         lines_native++;
         if(strstr(s,"STRESS_NATIVE NG"))bad_native++;
     }
-    else if(!strncmp(s,"STRESS_OOM",10)) lines_oom++;
+    else if(!strncmp(s,"STRESS_OOM",10)) {
+        if(!lines_oom)reads_at_first_oom=reads_started;
+        lines_oom++;
+    }
     else if(!strncmp(s,"STRESS_FAIL",11)) { lines_fail++; printf("  %s\n",s); }
     else if(!strncmp(s,"STRESS f=",9)) {
         unsigned commands=0;const char *field=strstr(s," cmds=");
@@ -98,11 +122,16 @@ static bool present(void) {
 // three 1 KiB chunks then null (end of file).
 static const char FS_STUB[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,fs:{open:async function(){let n=0;"
-    "return{read:async function(m){return ++n>3?null:new Uint8Array(m)},close:function(){}}}}};";
+    "globalThis.pocket={kasane:globalThis.kasane,fs:{open:async function(){"
+    "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}let n=0;"
+    "return{read:async function(m){"
+    "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}"
+    "__readStarted();let c=++n>3?null:new Uint8Array(m);"
+    "__readFinished();return c},close:function(){}}}}};";
 
 int main(int argc,char **argv) {
     const char *gradient_arm=getenv("KSN_VERTICAL_GRAD_PIE");
+    const bool inject_dispatch_fault=getenv("STRESS_DISPATCH_FAULT")!=NULL;
     if(gradient_arm)g_ksn_vertical_gradient_pie=strcmp(gradient_arm,"0")!=0;
     uint32_t panel_digest=2166136261u;
     const char *path=argc>1?argv[1]:"apps/stress/stress.js";
@@ -110,9 +139,13 @@ int main(int argc,char **argv) {
     if(!f){printf("cannot open %s\n",path);return 2;}
     static char src[1<<15]; size_t n=fread(src,1,sizeof src-1,f); fclose(f); src[n]=0;
     rt=JS_NewRuntime(); ctx=JS_NewContext(rt); host_capabilities_clear();
+    JS_SetHostPromiseRejectionTracker(rt,promise_rejection,NULL);
     pocket_kasane_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
+    JS_SetPropertyStr(ctx,g,"__readStarted",JS_NewCFunction(ctx,js_read_started,"readStarted",0));
+    JS_SetPropertyStr(ctx,g,"__readFinished",JS_NewCFunction(ctx,js_read_finished,"readFinished",0));
+    JS_SetPropertyStr(ctx,g,"__dispatchFault",JS_NewCFunction(ctx,js_dispatch_fault,"dispatchFault",0));
     JS_FreeValue(ctx,g);
     eval(FS_STUB,strlen(FS_STUB),"stub.js");
     bool ok=eval(src,n,path)&&present();
@@ -122,6 +155,14 @@ int main(int argc,char **argv) {
     JS_SetMemoryLimit(rt,640*1024);
     unsigned bad_present=0;
     for(unsigned t=1;ok&&t<=900;t++) {
+        if(inject_dispatch_fault&&t==601) {
+            const char *fault="globalThis.__holdRead=true;"
+                "(function(){const original=Promise.prototype.catch;"
+                "Promise.prototype.catch=function(handler){Promise.prototype.catch=original;"
+                "__dispatchFault();throw null}})();";
+            ok=eval(fault,strlen(fault),"dispatch-fault.js");
+            if(!ok)break;
+        }
         char call[64];
         unsigned buttons=(t==300||t==600)?0x4000u:0u;   // L1 -> L2 -> L3
         snprintf(call,sizeof call,"frame(%u)",buttons);
@@ -147,12 +188,18 @@ int main(int argc,char **argv) {
             }
         }
     }
-    printf("frames 900: exceptions=%u fails=%u oom=%u stats=%u ready=%u bad_present=%u bad_cmds=%u bad_native=%u\n",
-           exceptions,lines_fail,lines_oom,lines_stat,lines_ready,bad_present,bad_command_count,bad_native);
+    printf("frames 900: exceptions=%u fails=%u oom=%u stats=%u ready=%u bad_present=%u bad_cmds=%u bad_native=%u reads=%u/%u first_oom_reads=%u unhandled=%u dispatch_faults=%u fault_reads=%u\n",
+           exceptions,lines_fail,lines_oom,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
+           reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
+           dispatch_faults,reads_at_dispatch_fault);
     if(gradient_arm)printf("gradient arm=%d panel_digest=%08x\n",
                            g_ksn_vertical_gradient_pie,panel_digest);
     bool pass=ok&&!exceptions&&!lines_fail&&lines_ready==1&&lines_native==1&&
-              lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native;
+              lines_oom>0&&lines_stat==15&&!bad_present&&!bad_command_count&&!bad_native&&
+              reads_started==reads_finished&&reads_started>reads_at_first_oom&&
+              !unhandled_rejections&&
+              (!inject_dispatch_fault||(dispatch_faults==1&&!bad_fault_reads&&
+                                        reads_started>reads_at_dispatch_fault));
     pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
     printf("%s\n",pass?"STRESS_HOST PASS":"STRESS_HOST FAIL");
     return pass?0:1;
