@@ -1,4 +1,8 @@
 // vmrun-flags: --module --fail-alloc 1289
+// vmrun-rom-lb-li-keepsrc-flags: --module --fail-alloc 609
+// vmrun-rom-li-flags: --module --fail-alloc 725
+// vmrun-lb-li-flags: --module --fail-alloc 873
+// vmrun-rom-lb-li-flags: --module --fail-alloc 609
 // vmrun-rom-keepsrc-flags: --module --fail-alloc 849
 // vmrun-rom-lb-flags: --module --fail-alloc 763
 // vmrun-rom-lb-keepsrc-flags: --module --fail-alloc 763

@@ -326,6 +326,8 @@ apps/kasane/demo.js         FAIL (stub 不足: TypeError: not a function)
 
 ### F3（任意、F2 の実測後に判断）
 
+→ 2026-09-26 に F3a（hash 表、§16）と F3b（型付き配列の遅延、§17）を実施。残りは backlog F3c 以降。
+
 - `atom_array`/`atom_hash` の初期サイズ縮小（4,892 B のうち）。
 - 脱出文字列のキャッシュ（FD3）。
 - 群単位の intrinsic 遅延（§4-A）を F2 の上に重ねる価値があるか。
@@ -645,3 +647,102 @@ F1-6（JS ターンの速さ）は、ROM 検索が入る唯一の実行時経路
 
 `device_floor.py` を全アプリ通しで回すと、最後のベンチが 1 行で止まったことが 1 回あった（原因未調査）。
 `--bench-only` では毎回取れている。
+
+## 16. F3a: atom の hash 表を小さく始める（2026-09-26、`vm/f3-floor`）
+
+### 16.1 F2 の後の床（実測(host, 実機レイアウト)、`floor32.sh`）
+
+F2-5 の後で 35,444 B。runtime 8,536 B のうち **atom の表が約 6 KB**（`atom_array` 814 枠 × 4 B = 3,256 B、
+`atom_hash` 512 枠 × 4 B = 2,048 B、ヒープに残る予定義 atom 16 個）。context 26,908 B のうち TypedArrays が
+5,764 B で最大（§17）。
+
+**§14.1 の「作成直後の 40.2 KB とホスト計算の差 4.8 KB」は計上の違いだった。** 実機の `js=` は QuickJS の
+`malloc_size` で、確保 1 回ごとに `MALLOC_OVERHEAD`（8 B）を足す。`floor32` の `js=` は tlsf のブロック長の和で、
+それを足さない。ホストの実機レイアウト版 vmrun で空のスクリプトを流すと `qjs_malloc_size=40,236`（実機 40,208〜
+40,240）で一致し、差は床のブロック約 450 個 × 8 B ≈ 3.6 KB と `js_std` の helper 約 1.2 KB。
+
+**tlsf が実際に払うヘッダは 4 B なので、160 KiB の上限はブロックあたり 4 B 多く数えている**（床だけで約 1.8 KB、
+アプリのブロック数に比例して増える）。上限の意味を変える判断なので、ここでは直していない（backlog F0-c）。
+
+### 16.2 何をしたか
+
+`JS_InitAtoms` の `JS_ResizeAtomHash(rt, 512)` は予定義 atom 504 個を全部 hash に入れる前提の大きさで、F1 の後は
+ヒープで hash に入るのは十数個しかない。ROM atom があるときは **64 枠から始め**、既存の規則（数が枠の 2 倍に
+なったら倍）で伸ばす。同じ行の中の定数式で、ROM なしのビルドは 512 に畳まれる。
+
+`atom_array` の ROM 範囲の空き枠（約 2.2 KB）は残した。33 箇所の `rt->atom_array[` を番号の付け替えで通す必要が
+あり、1 KB 台のために触る範囲が広すぎる。
+
+### 16.3 結果
+
+| | 前 | 後 | 差 |
+| --- | --- | --- | --- |
+| 床（ホスト計算） | 35,444 | 33,652 | −1,792 |
+| hello（実測(device)、`js=` ソース評価後） | 50,412 | 48,640 | −1,772 |
+| imucal | 64,036 | 62,480 | −1,556 |
+| pet | 67,288 | 65,796 | −1,492 |
+| companion | 61,228 | 59,740 | −1,488 |
+| Kasane デモ | 64,672 | 63,076 | −1,596 |
+
+アプリの atom が増えると hash が 128・256 枠に伸びるので、床の差（1,792 B）より少し小さい。関所: コーパス
+（asan・o2・ROM なし・`--force-yield`）78/78、Test262 退行 0。
+
+## 17. F3b: 型付き配列のクラスを初めて使うときに作る（2026-09-26、`vm/f3-floor`）
+
+`CONFIG_POCKET_VM_LAZY_INTRINSICS`（関所の後で既定 y）。
+
+### 17.1 何をしたか
+
+§4-A の群単位の遅延を、F2 の上で一番大きい TypedArrays（5,764 B）にだけ当てた。出荷アプリはどれも型付き配列の
+コンストラクタを使わず、ファームが `pocket.fs`・`pocket.io`・`pocket.capture` で返す `Uint8Array` はネイティブ側で
+作られる。
+
+- `SharedArrayBuffer`・12 種の型付き配列・`DataView` のグローバル名は、`JS_AddIntrinsicTypedArrays` がコンストラクタを
+  定義していた位置に **autoinit の束縛**として置く（キーの順序と属性は元のまま）。読まれたときにそのクラスの
+  コンストラクタとプロトタイプを作って返す。
+- **群ではなくクラスごとに作る。** autoinit の関数は解決中のオブジェクトを変えてはいけない
+  （`JS_AutoInitProperty`）ので、`Uint8Array` の解決中に同じグローバルへ `Int8Array` を定義できない。クラスごとなら、
+  `Uint8Array` しか見ないファームのアプリが払うのも 1 組で済む。
+- ネイティブ側の入口: `class_proto` を読む 4 箇所（`JS_GetClassProto`、`JS_NewObjectClass`、`js_create_from_ctor` の
+  2 経路）で JS_NULL を見たら作る。まだ束縛が autoinit のまま残っていれば**その束縛を解決する**ので、グローバルと
+  `prototype.constructor` は即時版と同じく同一のオブジェクトになる。
+- `ArrayBuffer`（ファームが返す）・`Atomics`・`%TypedArray%` 自身は即時のまま。`%TypedArray%.prototype.toString` は
+  **元の** `Array.prototype.toString` と同一でなければならず、それを保証できるのは context 生成時だけ。
+- `JSContext` に `ta_base`（`%TypedArray%`）を 1 つ足した。登録しない context（`JS_NewContextRaw` だけのもの）は上流の
+  まま（プロトタイプは JS_NULL）。
+- 変更は既存の行の末尾（`quickjs-vmprobe.h` のマクロ）とファイル末尾だけ。**n のビルドは F3a のコミットと
+  `.text`・`.rodata`・`.data`・`.bss` が一致**（同じフラグでホストの gcc で `quickjs.c` を比べた）。
+
+### 17.2 関所
+
+| 検査 | 結果 |
+| --- | --- |
+| 床（ホスト計算） | 33,652 → **28,824 B**（−4,828） |
+| コーパス（既定・o2・遅延なし・ROM なし・F2 なし・`o2-keepsrc`・`--force-yield`） | すべて **79/79**。新規 `corpus/lazy_intrinsics.js`: ネイティブが先に作る（`host.bytes` = `JS_NewUint8ArrayCopy`、しかも `prototype.constructor` を先に書き換えてから束縛を読む）、グローバルのキー順と属性、触る前の削除と上書き、`%TypedArray%` の同一性、静的プロパティ、species・継承・`DataView`・`SharedArrayBuffer`・`Atomics`。期待値は即時版の出力 |
+| 確保番号で固定した OOM 回帰 3 件 | 遅延ありは context 生成の確保が 154 回（ROM なし 140、F2 なし 124）少ない。ready 以降の確保の大きさの列は一致するので、番号をその分ずらした行（`// vmrun-rom-lb-li-flags:` など、`run.sh` の `li` 札）を足した |
+| Test262（既定 asan・o2・o2 `--force-yield`） | すべて **退行 0**（`$262.createRealm` の別 realm から `new.target` 経由で作る試験を含む） |
+| 負の対照（`tools/vmtest/floor/f3_faults.sh`） | 束縛を解決せず横に作る・ネイティブ経路の判定なし・`toString` の別名なし・束縛が列挙可能、の **4 種すべて検出**。最初の 1 種は、束縛を読む前に `prototype.constructor` を書き換える試験を足すまで検出されなかった |
+| 確保失敗の総当たり（`lazy_intrinsics.js` の 1,159 回すべて） | ASan・リーク・assert・異常終了 **0**。失敗を注入しても正常終了した 95 回は、出力がすべて通常と一致 |
+
+### 17.3 実機（実測(device)、FLOORPROBE ビルド、`js=` ソース評価後）
+
+| アプリ | F3a のみ | F3a+F3b | F3b の差 | F2-5 の後（§15）からの差 |
+| --- | --- | --- | --- | --- |
+| hello | 48,640 | 42,752 | −5,888 | −7,660（−15%） |
+| imucal | 62,480 | 56,612 | −5,868 | −7,424 |
+| pet | 65,796 | 59,928 | −5,868 | −7,360 |
+| companion | 59,740 | 53,892 | −5,848 | −7,336 |
+| Kasane デモ | 63,076 | 57,356 | −5,720 | −7,316 |
+
+ゲスト作成直後の `js=` は 40,240 → 32,580。既定の設定（F3b y、計測なし）で `smoke_device.py --cycles 20`・
+故障回復 6 種・`test_settings.py` 通過、`memlog --check` 予算内（アプリ実行中の空き `app_free` 179,956、
+最大空きブロック 139,264。§13.4 の F2 の後は 172,700 と 131,072）。静的 DRAM は不変、書き込むイメージは
+コード +356 B・rodata +368 B。
+
+**実機で確かめていないこと**: ネイティブが `Uint8Array` を先に作る経路（`pocket.fs` の read など）は、ホストで同じ
+`JS_NewUint8ArrayCopy` を通して確かめただけで、それを使う出荷アプリが無いので実機では通っていない。
+
+### 17.4 次の候補
+
+同じ仕組みで Map/Set（1.8 KB）・DOMException（1.4 KB）・WeakRef（0.7 KB）も遅延にできる（ホスト計算、F2 の後の
+§16.1 の floor32 の各行）。Promise は async 関数が内部で使うので対象外。
