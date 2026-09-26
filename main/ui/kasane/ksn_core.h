@@ -169,6 +169,8 @@ typedef struct {
     int16_t x0[17],x1[17];
 } ksn_damage;
 ksn_result ksn_core_discard_reason(ksn_core *core,ksn_tx ticket,ksn_result reason);
+/* Read-only transaction check for cache no-op updates. */
+ksn_result ksn_core_check_transaction(const ksn_core *core,ksn_tx ticket,ksn_layer layer);
 ksn_result ksn_core_check_builder(const ksn_core *core,ksn_tx ticket,ksn_layer layer,ksn_update_mode mode);
 ksn_result ksn_core_builder_usage(const ksn_core *core,ksn_tx ticket,ksn_capacity *out);
 /* One isolated group over a consecutive range; no overlaps/nesting. PATCH
