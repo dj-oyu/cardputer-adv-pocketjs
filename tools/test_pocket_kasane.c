@@ -32,6 +32,7 @@ static pocket_av_ui_snapshot test_player_ui;
 static bool test_clock_valid;
 static sys_clock_state test_clock_ui;
 static unsigned test_clock_reads;
+static bool reset_clock_during_read,clock_reentry_busy;
 static sound_stream_observer_fn test_stream_observer;
 static uint32_t test_stream_interval;
 void sound_stream_set_observer_interval(sound_stream_observer_fn observer,
@@ -103,6 +104,23 @@ static ksn_result host_presenter_step(bool *blocked){
 #define pocket_kasane_presenter_step host_presenter_step
 bool sys_device_clock_read(sys_clock_state *out){
     test_clock_reads++;
+    if(reset_clock_during_read){
+        reset_clock_during_read=false;
+        /* source_pin has already pinned the registry before provider.acquire
+         * calls here. A reset must retain that provider, and a replacement
+         * source must fail closed until this borrow has released. */
+        pocket_clock_reset();
+        JSValue attempted=pocket_clock_wall_source(ctx,JS_UNDEFINED,0,NULL);
+        if(JS_IsException(attempted)){
+            JSValue error=JS_GetException(ctx);
+            JSValue code=JS_GetPropertyStr(ctx,error,"code");
+            const char *name=JS_ToCString(ctx,code);
+            clock_reentry_busy=name&&strcmp(name,"BUSY")==0;
+            if(name)JS_FreeCString(ctx,name);
+            JS_FreeValue(ctx,code);JS_FreeValue(ctx,error);
+        }
+        JS_FreeValue(ctx,attempted);
+    }
     if(!out||!test_clock_valid)return false;
     *out=test_clock_ui;return true;
 }
@@ -355,6 +373,14 @@ static void app_presenter_tests(void){
               "visible:{slot:'x'}}]});throw Error('accepted')}"
               "catch(e){if(e.message==='accepted')throw e}"),
           "runtime descriptor rejects a mismatched slot type before mounting");
+    check(run("(()=>{let rejected=false;try{kasane.mount({version:1,"
+              "slots:{label:{type:'text',capacity:4}},"
+              "nodes:[{type:'text',bounds:[0,0,48,12],text:{slot:'label'},"
+              "color:0xffffffff}]},{label:'TOO LONG'})}"
+              "catch(e){rejected=e.code==='INVALID_ARGUMENT'}"
+              "if(!rejected)throw Error('invalid initial model accepted')})()")&&
+          !pocket_kasane_has_submission()&&!pocket_kasane_active(),
+          "invalid initial model aborts a generic mount without a submission");
     check(run("globalThis.runtimeNativeBase=kasane.stats().nativeBytes;"),
           "runtime descriptor starts from a known native accounting baseline");
     size_t runtime_before=native_bytes;
@@ -1208,6 +1234,31 @@ static void wall_source_service_tests(void){
           "fresh clock capability binds and presents after reset");
     check(pocket_kasane_reset(),"fresh clock service subscriber detaches");
     pocket_clock_reset();
+    global=JS_GetGlobalObject(ctx);
+    JSValue retained_cap=pocket_clock_wall_source(ctx,JS_UNDEFINED,0,NULL);
+    check(!JS_IsException(retained_cap)&&
+          JS_SetPropertyStr(ctx,global,"wallCapRetained",retained_cap)>=0,
+          "clock service opens for a pinned-reset test");
+    JS_FreeValue(ctx,global);
+    check(run("globalThis.wallRetainedView=kasane.mount({version:1,"
+              "slots:{face:{type:'text',capacity:5}},"
+              "nodes:[{type:'text',bounds:[0,0,48,12],text:{slot:'face'},"
+              "color:0xffffffff}]},{face:'BASE'})")&&
+          present(&stats)==KSN_OK&&
+          pocket_kasane_presenter_step(&blocked)==KSN_OK&&!blocked&&
+          run("wallRetainedView.bind(wallCapRetained,{face:0})"),
+          "clock view subscribes before a reset during acquire");
+    clock_reentry_busy=false;reset_clock_during_read=true;
+    check(pocket_kasane_presenter_step(&blocked)==KSN_OK&&blocked&&
+          clock_reentry_busy&&!reset_clock_during_read,
+          "pinned clock reset retains the old provider and rejects replacement");
+    check(pocket_kasane_reset(),"clock APP detaches after the pinned read");
+    pocket_clock_reset();
+    JSValue after_release=pocket_clock_wall_source(ctx,JS_UNDEFINED,0,NULL);
+    check(!JS_IsException(after_release),
+          "clock source can reopen after the last pin releases");
+    JS_FreeValue(ctx,after_release);
+    pocket_clock_reset();
     test_clock_valid=false;
 }
 
@@ -1649,6 +1700,24 @@ static void primitive_tests(void) {
     check(open_fault_runtime(""),"primitive fixture opens");
     ksn_view *system=NULL;
     check(ksn_runtime_system_acquire(&system)==KSN_OK,"inspect primitive descriptors through native owner");
+    check(run("(()=>{let caught=false;try{kasane.replace(tx=>{})}catch(e){"
+              "caught=e.code==='INVALID_ARGUMENT'&&e.message.includes('tx.background')};"
+              "if(!caught)throw Error('missing background diagnostic')})()"),
+          "replace reports its missing background requirement");
+    check(run("(()=>{let caught=false;try{kasane.replace(tx=>{tx.background(255);"
+              "tx.roundRect({bounds:[0,0,40,40],radius:9,color:255})})}catch(e){"
+              "caught=e.code==='INVALID_ARGUMENT'&&e.message.includes('radius must be <= 8')};"
+              "if(!caught)throw Error('radius diagnostic')})()"),
+          "rounded-rectangle radius failure identifies the constraint");
+    check(run("(()=>{let cells=[];for(let i=0;i<10;i++)cells.push({"
+              "bounds:[i,0,i+1,1],color:255});let t=kasane.cache.create(cells);"
+              "let caught=false,detail='none';try{kasane.replace(tx=>{tx.background(255);"
+              "for(let i=0;i<7;i++)tx.instantiate(t);"
+              "for(let i=0;i<11;i++)tx.rect({bounds:[0,0,1,1],color:255})})}catch(e){"
+              "detail=e.code+': '+e.message;"
+              "caught=e.code==='LIMIT_EXCEEDED'&&e.message.includes('scene command limit')};"
+              "kasane.cache.release(t);if(!caught)throw Error('command limit diagnostic '+detail)})()"),
+          "command-cap failure identifies the scene budget");
     check(run("var f=kasane.features();if(!f.roundRect||!f.strokeRect||!f.gradient)throw Error('features');"
               "kasane.replace(tx=>{tx.background(0x000000ff);"
               "globalThis.pr=tx.roundRect({bounds:[0.5,0.5,20.5,20.5],radius:8,color:0xff0000ff});"
@@ -1965,6 +2034,30 @@ static void animation_tests(void){
     close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"animation teardown releases all guest and native storage");
 }
 
+static void namespace_heap_tests(void) {
+    rt=JS_NewRuntime();ctx=rt?JS_NewContext(rt):NULL;
+    JSMemoryUsage before;
+    if(ctx){JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&before);}
+    check(ctx&&pocket_kasane_install(ctx,NULL)==ESP_OK,
+          "heap fixture installs Kasane namespace");
+    if(!ctx)return;
+    JSMemoryUsage base,loaded,mounted;
+    JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&base);
+    check(run("kasane.features();"),"heap fixture materializes Kasane namespace");
+    JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&loaded);
+    check(run("globalThis.heapView=kasane.mount('hello');"),
+          "heap fixture mounts native hello view");
+    JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&mounted);
+    printf("KASANE_GUEST_HEAP pre=%lld install=%lld namespace=%lld mount=%lld malloc_pre=%lld malloc_install=%lld malloc_namespace=%lld malloc_mount=%lld\n",
+           (long long)before.memory_used_size,
+           (long long)base.memory_used_size,(long long)loaded.memory_used_size,
+           (long long)mounted.memory_used_size,(long long)before.malloc_size,
+           (long long)base.malloc_size,(long long)loaded.malloc_size,
+           (long long)mounted.malloc_size);
+    pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    ctx=NULL;rt=NULL;
+}
+
 int main(void) {
     rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
     check(pocket_kasane_install(ctx,NULL)==ESP_OK,"namespace installs");
@@ -2074,6 +2167,7 @@ int main(void) {
     check(!pocket_av_output_source_reset(true),
           "later reset does not falsely claim the retained source was freed");
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    namespace_heap_tests();
     allocator_tests();
     base_block_tests();
     lazy_cache_tests();

@@ -14,11 +14,17 @@ pathlib.Path(sys.argv[1]).write_text('static const uint8_t pet_test_data[] = {' 
 PY
 # Match the shipping VM path. Keep this cache separate from harnesses with
 # different defines, and invalidate it on header or build-script changes.
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1"
+DEFS=(
+  -DQUICKJS_NG_BUILD -D_GNU_SOURCE
+  -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1
+  -DCONFIG_POCKET_VM_LAZY_INPUTS=1 -DCONFIG_POCKET_VM_YIELD=1
+  -DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1
+  -DCONFIG_POCKET_VM_ROM_ATOMS=1 -DCONFIG_POCKET_VM_LAZY_BUILTINS=1
+)
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] || [ "$0" -nt "$CACHE/$f.o" ] \
      || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
-    gcc -std=gnu11 -c -O1 -g -w $DEFS -I "$QJS" -I components/pocketjs_guest/include \
+    gcc -std=gnu11 -c -O1 -g -w "${DEFS[@]}" -I "$QJS" -I components/pocketjs_guest/include \
         "$QJS/$f.c" -o "$CACHE/$f.o"
   fi
 done

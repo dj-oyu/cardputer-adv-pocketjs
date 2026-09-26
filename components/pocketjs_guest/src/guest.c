@@ -1149,12 +1149,16 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
 void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
                              size_t *first_req, size_t *first_used) {
   JSOOMCanary canary = {0};
-  if (guest != NULL) {
-    JS_TakeOOMCanary(guest->runtime, &canary);
-  }
+  pocketjs_guest_take_oom_detail(guest, &canary);
   if (count != NULL) *count = canary.count;
   if (first_req != NULL) *first_req = canary.first_req;
   if (first_used != NULL) *first_used = canary.first_used;
+}
+
+void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out) {
+  if (out == NULL) return;
+  *out = (JSOOMCanary){0};
+  if (guest != NULL) JS_TakeOOMCanary(guest->runtime, out);
 }
 
 void pocketjs_guest_destroy(pocketjs_guest_t *guest) {

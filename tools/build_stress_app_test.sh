@@ -5,4 +5,5 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT=${OUT:-/tmp/test-stress-app} TEST_SOURCE=tools/test_stress_app.c \
+  EXTRA_SOURCES=main/pocket/pocket_memory.c \
   bash tools/build_kasane_test.sh

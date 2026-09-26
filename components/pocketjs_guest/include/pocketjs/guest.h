@@ -139,6 +139,10 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
 void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
                              size_t *first_req, size_t *first_used);
 
+/* Detailed destructive read. The host calls only one variant per turn. */
+#include "quickjs.h"
+void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out);
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
 /* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare

@@ -17,6 +17,7 @@
 // ("noseg"). A refusal is one moving segments could have fixed only if that
 // run would have held the request ("segfix=1").
 #include "oomprobe.h"
+#include "pocket_memory.h"
 #include "quickjs.h"
 #include "esp_attr.h"
 #include "esp_cpu_utils.h"
@@ -116,6 +117,7 @@ static bool walk_block(walker_heap_into_t heap, walker_block_info_t block, void 
 }
 
 static void failed_alloc(size_t size, uint32_t caps, const char *function_name) {
+    pocket_memory_native_failure(size,caps);
     (void)function_name;  // always a heap_caps_* entry point; the backtrace says who
     oom_rec_t r = {.req = (uint32_t)size, .caps = caps};
     // Reject-time state, before anything the caller does next frees memory.

@@ -916,9 +916,11 @@ static ksn_tx tx_from(JSContext *ctx, JSValueConst value, const char *op) {
     return (ksn_tx){raw};
 }
 
-/* Built on the first wrapper that needs them rather than with the namespace:
- * an app that never instantiates or animates keeps neither prototype, its
- * shape, nor the method-name atoms. Defined after the method tables. */
+/* Built on first use: native mount apps need none of the low-level drawing
+ * wrapper methods. Defined after the method tables. */
+static bool tx_proto(JSContext *ctx);
+static bool modal_proto(JSContext *ctx);
+static bool ref_proto(JSContext *ctx);
 static bool instance_proto(JSContext *ctx);
 static bool animation_proto(JSContext *ctx);
 
@@ -942,6 +944,9 @@ static JSValue js_tx_background(JSContext *ctx, JSValueConst self, int argc,
 }
 
 static JSValue expose_ref(JSContext *ctx,ksn_tx tx,ksn_ref ref) {
+    if(!ref_proto(ctx)) {
+        ksn_view_cancel(view(),tx);discard_candidates(tx);return JS_EXCEPTION;
+    }
     ref_slot *slot=claim_ref(ctx,ref,tx);
     if(!slot) { ksn_view_cancel(view(),tx); discard_candidates(tx); return JS_EXCEPTION; }
     JSValue object=wrap_direct(ctx,ref_class,slot->handle);
@@ -958,7 +963,15 @@ static JSValue js_tx_primitive(JSContext *ctx, JSValueConst self, int argc,
     ksn_draw draw={0};
     if(!parse_primitive(ctx,argc?argv[0]:JS_UNDEFINED,kind,&draw,op)) return JS_EXCEPTION;
     ksn_ref ref;ksn_result result=ksn_view_add(view(),tx,&draw,&ref);
-    return result==KSN_OK?expose_ref(ctx,tx,ref):throw_result(ctx,result,op);
+    if(result==KSN_OK)return expose_ref(ctx,tx,ref);
+    if(result==KSN_LIMIT)
+        return pocket_api_throw(ctx,POCKET_ERR_LIMIT_EXCEEDED,op,
+                                "scene command limit exceeded",false,POCKET_OUTCOME_NOT_APPLIED);
+    if(result==KSN_INVALID&&(kind==KSN_ROUND_RECT||kind==KSN_GRADIENT))
+        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                                "radius must be <= 8 and fit within half the shape width and height",
+                                false,POCKET_OUTCOME_NOT_APPLIED);
+    return throw_result(ctx,result,op);
 }
 
 /* Bound conversion before QuickJS allocates UTF-8 storage (at most 384 bytes
@@ -1456,6 +1469,7 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
     if(state->provider||state->schema)return throw_result(ctx,KSN_BUSY,op);
     /* Keep the callback closed to reentrant builds after an inner abort. */
     if(state->building.value) return throw_result(ctx,KSN_BUSY,op);
+    if(!tx_proto(ctx)||!modal_proto(ctx)) return JS_EXCEPTION;
     apply_outcome();
     ksn_tx tx;ksn_result result=ksn_view_begin(view(),mode,&tx);
     if(result!=KSN_OK) return throw_result(ctx,result,op);
@@ -1494,7 +1508,14 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
         goto fail;
     }
     result=ksn_view_submit(view(),tx);
-    if(result!=KSN_OK) { throw_result(ctx,result,op);goto fail; }
+    if(result!=KSN_OK) {
+        if(result==KSN_INVALID&&mode==KSN_REPLACE)
+            pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
+                             "replace requires tx.background(color)",false,
+                             POCKET_OUTCOME_NOT_APPLIED);
+        else throw_result(ctx,result,op);
+        goto fail;
+    }
     state->building=(ksn_tx){0};
     state->submitted=tx;state->submitted_mode=mode;state->active=true;
     ksn_runtime_app_activate(state->lease);
@@ -1855,8 +1876,12 @@ static schema_state *schema_owner(JSValueConst self){
     return handle&&state&&state->schema&&state->schema->handle==handle?
            state->schema:NULL;
 }
-static void schema_free_pending_text(JSContext *ctx,const char *const *texts,unsigned count){
-    for(unsigned i=0;i<count;i++)if(texts[i])JS_FreeCString(ctx,texts[i]);
+static void schema_free_pending_text(JSContext *ctx,const char *const *texts,
+                                     const uint8_t *touched,unsigned count){
+    for(unsigned n=0;n<count;n++){
+        unsigned i=touched[n];
+        if(texts[i])JS_FreeCString(ctx,texts[i]);
+    }
 }
 static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
     const char *op="kasane.view.set";
@@ -1868,7 +1893,8 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
      * Borrow those immutable UTF-8 bytes through preflight, then make the
      * single schema-owned copy only for changed slots. */
     const char *pending_text[KSN_SCHEMA_MAX_SLOTS]={0};
-    bool text_dirty[KSN_SCHEMA_MAX_SLOTS]={0};
+    uint8_t touched[KSN_SCHEMA_MAX_SLOTS];
+    unsigned touched_count=0;
     memcpy(candidate,s->values,s->definition->slot_count*sizeof(*candidate));
     ksn_p0_probe_copy(KSN_P0_ADAPTER_TEMP,s->definition->slot_count*sizeof(*candidate));
     JSPropertyEnum *props=NULL;uint32_t count=0;
@@ -1886,6 +1912,10 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
             pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,op,
                              "unknown display slot",false,NULL);ok=false;break;
         }
+        /* Own property names are unique; only these slots can differ from
+         * the copied candidate. Compare after all getters have run, since a
+         * getter may reenter view.set and change the live baseline. */
+        touched[touched_count++]=(uint8_t)i;
         JSValue value=JS_GetProperty(ctx,model,props[p].atom);
         if(JS_IsException(value)){ok=false;break;}
         const ksn_schema_slot *slot=&s->definition->slots[i];
@@ -1902,9 +1932,8 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
                     else{
                         pending_text[i]=text;
                         candidate[i].data.text=(ksn_schema_text){pending_text[i],(uint16_t)length};
-                        text_dirty[i]=true;
                     }
-                    if(text&&!text_dirty[i])JS_FreeCString(ctx,text);
+                    if(text&&!pending_text[i])JS_FreeCString(ctx,text);
                 }
             }
         }else if(slot->type==KSN_SLOT_RECT){
@@ -1934,13 +1963,14 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
     }
     JS_FreePropertyEnum(ctx,props,count);
     if(!ok){
-        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        schema_free_pending_text(ctx,pending_text,touched,touched_count);
         return JS_EXCEPTION;
     }
     uint32_t changed_slots=0;
-    for(unsigned i=0;i<s->definition->slot_count;i++){
+    for(unsigned n=0;n<touched_count;n++){
+        unsigned i=touched[n];
         bool differs;
-        if(text_dirty[i]){
+        if(pending_text[i]){
             ksn_schema_text a=candidate[i].data.text,b=s->values[i].data.text;
             differs=a.bytes!=b.bytes||memcmp(a.utf8,b.utf8,a.bytes)!=0;
         }else differs=memcmp(&candidate[i].data,&s->values[i].data,
@@ -1948,21 +1978,22 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
         if(differs)changed_slots|=(uint32_t)1u<<i;
     }
     if(!changed_slots){
-        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        schema_free_pending_text(ctx,pending_text,touched,touched_count);
         return JS_UNDEFINED;
     }
     if(s->revision==UINT64_MAX){
-        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        schema_free_pending_text(ctx,pending_text,touched,touched_count);
         return throw_result(ctx,KSN_LIMIT,op);
     }
     ksn_result check=ksn_schema_preflight_view(view(),s->definition,candidate,viewport);
     if(check!=KSN_OK){
-        schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+        schema_free_pending_text(ctx,pending_text,touched,touched_count);
         return throw_result(ctx,check,op);
     }
-    for(unsigned i=0;i<s->definition->slot_count;i++){
+    for(unsigned n=0;n<touched_count;n++){
+        unsigned i=touched[n];
         if(!(changed_slots&((uint32_t)1u<<i)))continue;
-        if(text_dirty[i]){
+        if(pending_text[i]){
             ksn_schema_text text=candidate[i].data.text;
             char *dest=(char *)s->values[i].data.text.utf8;
             memcpy(dest,text.utf8,text.bytes+1u);
@@ -1974,7 +2005,7 @@ static JSValue js_schema_set(JSContext *ctx,schema_state *s,JSValueConst model){
             ksn_p0_probe_copy(KSN_P0_ADAPTER_SLOT_COMMIT,sizeof(candidate[i]));
         }
     }
-    schema_free_pending_text(ctx,pending_text,s->definition->slot_count);
+    schema_free_pending_text(ctx,pending_text,touched,touched_count);
     s->revision++;
     s->pending_base_slots|=changed_slots;
     ksn_result submitted=schema_refresh(NULL);
@@ -2519,6 +2550,15 @@ static bool lazy_proto(JSContext *ctx, JSClassID id, const JSCFunctionListEntry 
     return ready||set_proto(ctx,id,methods,count);
 }
 #define COUNT(methods) ((int)(sizeof(methods)/sizeof(methods[0])))
+static bool tx_proto(JSContext *ctx) {
+    return lazy_proto(ctx,tx_class,tx_methods,COUNT(tx_methods));
+}
+static bool modal_proto(JSContext *ctx) {
+    return lazy_proto(ctx,modal_class,modal_methods,COUNT(modal_methods));
+}
+static bool ref_proto(JSContext *ctx) {
+    return lazy_proto(ctx,ref_class,ref_methods,COUNT(ref_methods));
+}
 static bool instance_proto(JSContext *ctx) {
     return lazy_proto(ctx,instance_class,instance_methods,COUNT(instance_methods));
 }
@@ -2538,10 +2578,7 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
        !register_class(ctx,&image_class,&image_rt,&image_def)||
        !register_class(ctx,&ticket_class,&ticket_rt,&ticket_def)||
        !register_class(ctx,&scene_class,&scene_rt,&scene_def)||
-       !register_class(ctx,&schema_class,&schema_rt,&schema_def)||
-       !set_proto(ctx,tx_class,tx_methods,COUNT(tx_methods))||
-       !set_proto(ctx,modal_class,modal_methods,COUNT(modal_methods))||
-       !set_proto(ctx,ref_class,ref_methods,COUNT(ref_methods))) return ESP_ERR_NO_MEM;
+       !register_class(ctx,&schema_class,&schema_rt,&schema_def)) return ESP_ERR_NO_MEM;
     /* Handles with no methods, and scenes (whose methods are own properties),
      * inherit Object.prototype directly instead of each owning an empty object. */
     JSValue plain=JS_NewObject(ctx);

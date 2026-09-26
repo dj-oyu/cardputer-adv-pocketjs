@@ -1209,7 +1209,8 @@ int g_ksn_tile_smooth=1;    /* smooth layers: one exact anchor per block plus a
  * tools/kasane_contract/run_group_tile.sh). "covered" is a tile pixel whose
  * accumulated alpha is non-zero, i.e. one a child actually wrote into. */
 uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
-         ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels;
+         ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels,
+         ksn_tile_child_skipped;
 #endif
 /* Objdump can only attribute a per-pixel cost to a function that is not inlined
  * away. The measurement build (-DKSN_TILE_MEASURE, tools/kasane_contract/
@@ -1223,7 +1224,7 @@ uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
 #endif
 /* A group with more children than this falls back to the unconditional tile:
  * the reach table exists to skip work, never to decide which pixels are drawn. */
-#define KSN_TILE_REACH_BOXES 16
+#define KSN_TILE_REACH_BOXES 18
 typedef struct { int16_t x0,y0,x1,y1; } ksn_tile_reach;
 static bool tile_block_reached(const ksn_tile_reach *box,unsigned count,
                                int x0,int width,int py){
@@ -1694,6 +1695,18 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
          * opaque child. Two words avoid variable 64-bit shifts on ESP32-S3. */
         uint32_t dither_pixels[2]={0,0};
         for(unsigned i=first;i<=end;i++){
+            /* The bounds pass already validated and clipped this child. When
+             * its box misses this row/block, re-reading and decoding the
+             * immutable frame command cannot contribute a pixel. */
+            if(g_ksn_tile_reach&&reach_all){
+                const ksn_tile_reach *box=&reach[i-first];
+                if(py<box->y0||py>=box->y1||x0>=box->x1||x0+count<=box->x0){
+#ifdef KSN_TILE_COUNT
+                    ksn_tile_child_skipped++;
+#endif
+                    continue;
+                }
+            }
             ksn_result result;
             {KSN_PROF_BEGIN();
             result=frame_command(core,ticket,layer,(uint16_t)i,&command);
@@ -1815,6 +1828,9 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
  * (row_cov, the coarser switch, is the other one above the noise floor at 2.78).
  * ------------------------------------------------------------------------- */
 int g_ksn_blend_pie=1;
+/* A vertical gradient has one source colour per row, even when its endpoints
+ * differ. Keep a switch for same-binary device A/B against the scalar path. */
+int g_ksn_vertical_gradient_pie=1;
 /* Binary font coverage may be consumed directly as eight 0/A PIE lanes.
  * Keep this candidate off until a same-image device A/B establishes a gain. */
 int g_ksn_text_pie=0;
@@ -2108,12 +2124,13 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             bool one_color=d->kind!=KSN_GRADIENT||d->data.gradient.from==d->data.gradient.to;
             const uint8_t (*lut)[KSN_BLEND_LUT_ROW]=(g_ksn_blend_lut&&one_color&&
                 blend_lut_solid_prime(sample(command,x0,y0),d->opacity,dither))?blend_lut_solid:NULL;
-            /* Candidate 4a: a constant-colour command's aligned 8-pixel blocks go
-             * to the PIE kernel. It needs a 16-byte aligned destination, so the
-             * band row's base is checked once here and the head and tail of each
-             * run stay on the arms below. All three arms are exact, so which one
-             * runs is a measurement, not a pixel decision. */
-            bool pie=g_ksn_blend_pie&&one_color;
+            /* Candidate 4a: aligned 8-pixel blocks with one source colour go to
+             * the PIE kernel. A vertical gradient also has one colour per row;
+             * sample() below uses this row's y, not the command's first row.
+             * The head and tail stay scalar. Both arms are pixel-exact, so the
+             * switch changes work rather than output. */
+            bool pie=g_ksn_blend_pie&&(one_color||
+                (g_ksn_vertical_gradient_pie&&d->kind==KSN_GRADIENT&&d->data.gradient.axis!=0));
             for(int py=y0;py<y1;py++){
                 const uint8_t *bayer_row=dither?bayer4[(unsigned)py&3u]:NULL;
                 bool pie_row=pie&&(((uintptr_t)(pixels+(py-y)*240)&15u)==0u);

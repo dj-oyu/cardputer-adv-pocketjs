@@ -197,6 +197,8 @@ extern int g_ksn_scale256;
  * a 16-byte aligned destination, so the caller hands over only the 8-aligned
  * window of a run and keeps head and tail on the chain. */
 extern int g_ksn_blend_pie;
+/* Exact same-colour-per-row PIE arm for vertical gradients; default on. */
+extern int g_ksn_vertical_gradient_pie;
 /* Candidate for binary text masks: aligned eight-pixel blocks are consumed by
  * a zero-copy, per-lane-alpha PIE kernel. Disabled until its own device A/B. */
 extern int g_ksn_text_pie;

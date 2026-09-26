@@ -817,6 +817,12 @@ uint32_t ksn_core_opaque_system_bands(const ksn_core *storage){
     }
     return covered;
 }
+ksn_result ksn_core_check_transaction(const ksn_core *storage,ksn_tx ticket,ksn_layer layer){
+    if(!storage||!valid_layer(layer))return KSN_INVALID;
+    const ksn_core_impl *core=cimpl(storage);
+    if(!core->building||core->layer!=layer||!ticket.value||core->transaction.value!=ticket.value)return KSN_STALE;
+    return core->poison;
+}
 ksn_result ksn_core_check_builder(const ksn_core *storage,ksn_tx ticket,ksn_layer layer,ksn_update_mode mode){
     if(!storage)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);

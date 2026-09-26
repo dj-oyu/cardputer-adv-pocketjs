@@ -526,10 +526,15 @@ JS_EXTERN void JS_SetMemoryLimit(JSRuntime *rt, size_t limit);
  * can tell the two apart without JS_TakeOOMCanary itself allocating. */
 typedef struct JSOOMCanary {
     uint32_t count;      /* rejections since the last JS_TakeOOMCanary */
+    uint32_t quota_count;      /* malloc_limit refusals */
+    uint32_t allocator_count;  /* underlying allocator refusals */
     size_t first_req;    /* requested size of the first one this window */
     size_t first_used;   /* malloc_state.malloc_size at that moment */
 } JSOOMCanary;
 JS_EXTERN void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out);
+/* O(1), allocation-free accounted heap query. Not a promise that the next
+ * allocation will succeed; unlike JS_ComputeMemoryUsage it walks no objects. */
+JS_EXTERN void JS_GetMemoryCounters(JSRuntime *rt, size_t *used, size_t *limit);
 /* D43 (docs/vm/vm-L2-design.md sec.7.3): return to the heap the empty frame
  * segments the segment stack kept for reuse during the turn that just ended.
  * Within a turn every segment a returning call empties is kept, so a call

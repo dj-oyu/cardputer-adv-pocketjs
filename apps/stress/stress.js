@@ -3,12 +3,22 @@
   const V = pocket.kasane, fs = pocket.fs, CAP = [15, 35, 1e9];
   const SEA = [0, 61, 240, 110];   // a moved shape keeps its clip, which defaults to where it began
   const PINK = 0xff71ceff, CYAN = 0x01cdfeff, MINT = 0x05ffa1ff, SUN = 0xfffb96ff, INK = 0x1a0033ff;
-  let t = 0, lvl = 0, pool = [], peak = 0, oom = 0, cyc = 0, err = 0;
+  let t = 0, lvl = 0, pool = [], peak = 0, oom = 0, suspect = 0, cyc = 0, err = 0;
+  let pressure = 0, pressureEvents = 0, pressureTrims = 0;
+  // The host owns pressure detection. Keep the callback allocation-free: LV3
+  // sheds retained load only after a real allocation failure, preserving the
+  // stress test's deliberate first OOM and its recovery check.
+  const memory = pocket.memory;
+  if (memory) memory.onPressure(function (mask) {
+    pressure = mask;
+    pressureEvents++;
+    if (lvl === 2 && (mask & memory.FAILURE)) { pool.length = 0; pressureTrims++; }
+  });
   let nat = 0, natB = 0, natOk = '?', h = null, busy = false, fresh = false;
   let sch = [], dol = [], bub = [], grid = [], meter, stat, info, lv;
 
   const f = [], pal = [CYAN, PINK, MINT, SUN];
-  for (let i = 0; i < 9; i++) {   // an instance spends its commands (+1) out of the scene's 80
+  for (let i = 0; i < 9; i++) {   // each instance spends its template's commands out of the scene's 80
     const x = i * 29 % 72, y = i * 13 % 30, c = pal[i & 3];
     f.push({bounds: [x + 3, y + 1, x + 12, y + 5], color: c},
       {bounds: [x, y, x + 3, y + 6], color: c, opacity: 150});
@@ -67,7 +77,10 @@
     if (pool.length > CAP[lvl]) pool.splice(0, pool.length >> 1);
   }
 
+  function readRejected() { busy = false; }
+
   async function readChunk() {
+    busy = true;
     try {
       if (!h) h = await fs.open('assets:/hello.js', {mode: 'read'});
       const c = await h.read(1024);
@@ -90,6 +103,13 @@
   function fail(where, e) {
     pool.length = 0;
     if (e === null || /memory/.test(e)) { oom++; console.log('STRESS_OOM n=' + oom + ' at=' + where); }
+    // At the quota, QuickJS can reject allocating the OOM error's message.
+    // Keep this separate from confirmed OOM: the host must correlate it with
+    // the VM canary from this turn before counting the trial as clean.
+    else if (lvl === 2 && memory && (memory.pressure() & memory.GUEST) && e &&
+             e.name === 'InternalError' && !e.message) {
+      suspect++; console.log('STRESS_SUSPECT n=' + suspect + ' at=' + where);
+    }
     else { err++; console.log('STRESS_FAIL ' + where + ' ' + e); }
   }
 
@@ -123,7 +143,10 @@
     try {
       if (buttons & 0x4000) { lvl = (lvl + 1) % 3; peak = 0; console.log('STRESS_LEVEL ' + (lvl + 1)); }
       load();
-      if (!busy && (t & 1)) { busy = true; readChunk(); }
+      if (!busy && (t & 1)) {
+        try { readChunk().catch(readRejected); }
+        catch (e) { busy = false; throw e; }
+      }
       // A replace that failed part-way (an OOM) left every ref stale: rebuild.
       // draw() in the same replace: scene() alone shows the start positions for a frame.
       if (fresh || t % 120 === 0) { fresh = true; V.replace(tx => { scene(tx); draw(tx); }); fresh = false; } else V.patch(draw);
@@ -131,7 +154,8 @@
         const s = V.stats();
         console.log('STRESS f=' + t + ' lvl=' + (lvl + 1) + ' pool=' + pool.length + ' peak=' + peak +
           ' oom=' + oom + ' cyc=' + cyc + ' nat=' + nat + ' natOk=' + natOk + ' err=' + err +
-          ' cmds=' + s.displayed.commands + ' native=' + s.nativeBytes);
+          ' cmds=' + s.displayed.commands + ' native=' + s.nativeBytes +
+          ' pressure=' + pressure + ' pe=' + pressureEvents + ' trim=' + pressureTrims);
       }
     } catch (e) { fresh = true; fail('frame', e); }
   };
