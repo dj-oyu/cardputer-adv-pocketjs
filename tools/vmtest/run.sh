@@ -113,6 +113,7 @@ for name in "${names[@]}"; do
   tags=()
   [[ $variant != *-norom* ]] && tags+=(rom)
   [[ $variant != *-nolb* ]] && tags+=(lb)
+  [[ $variant != *-noli* ]] && tags+=(li)   # F3b: fewer allocations at context creation
   [[ $variant == *-keepsrc ]] && tags+=(keepsrc)
   if [ ${#tags[@]} -gt 0 ] && [ "${tags[*]}" != keepsrc ]; then
     key=$(IFS=-; echo "${tags[*]}")

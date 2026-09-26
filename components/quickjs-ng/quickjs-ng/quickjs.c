@@ -673,7 +673,7 @@ struct JSContext {
     JSValue eval_obj;
 
     JSValue global_obj; /* global object */
-    JSValue global_var_obj; /* contains the global let/const definitions */
+    JSValue global_var_obj; LAZY_CTX_FIELDS /* contains the global let/const definitions */
 
     double time_origin;
 
@@ -1670,7 +1670,7 @@ static JSValue js_instantiate_prototype(JSContext *ctx, JSObject *p, JSAtom atom
 static JSValue js_module_ns_autoinit(JSContext *ctx, JSObject *p, JSAtom atom,
                                      void *opaque);
 static JSValue JS_InstantiateFunctionListItem2(JSContext *ctx, JSObject *p,
-                                               JSAtom atom, void *opaque);
+                                               JSAtom atom, void *opaque); LAZY_CLASS_DECLS
 static JSValue JS_NewObjectProtoList(JSContext *ctx, JSValueConst proto,
                                      const JSCFunctionListEntry *fields, int n_fields);
 
@@ -2995,7 +2995,7 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     for (i = 0; i < rt->class_count; i++) {
         ctx->class_proto[i] = JS_NULL;
     }
-    ctx->array_ctor = JS_NULL;
+    ctx->array_ctor = JS_NULL; LAZY_CTX_INIT
     ctx->iterator_ctor = JS_NULL;
     ctx->iterator_ctor_getset = JS_NULL;
     ctx->regexp_ctor = JS_NULL;
@@ -3075,7 +3075,7 @@ void JS_SetClassProto(JSContext *ctx, JSClassID class_id, JSValue obj)
 JSValue JS_GetClassProto(JSContext *ctx, JSClassID class_id)
 {
     assert(class_id < ctx->rt->class_count);
-    return js_dup(ctx->class_proto[class_id]);
+    if (LAZY_CLASS_MISSING(ctx, class_id)) { return JS_EXCEPTION; } return js_dup(ctx->class_proto[class_id]);
 }
 
 JSValue JS_GetFunctionProto(JSContext *ctx)
@@ -3160,7 +3160,7 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
         js_mark_module_def(rt, m, mark_func);
     }
 
-    JS_MarkValue(rt, ctx->global_obj, mark_func);
+    JS_MarkValue(rt, ctx->global_obj, mark_func); LAZY_CTX_MARK
     JS_MarkValue(rt, ctx->global_var_obj, mark_func);
 
     JS_MarkValue(rt, ctx->throw_type_error, mark_func);
@@ -3255,7 +3255,7 @@ void JS_FreeContext(JSContext *ctx)
 
     js_free_modules(ctx, JS_FREE_MODULE_ALL);
 
-    JS_FreeValue(ctx, ctx->global_obj);
+    JS_FreeValue(ctx, ctx->global_obj); LAZY_CTX_FREE
     JS_FreeValue(ctx, ctx->global_var_obj);
 
     JS_FreeValue(ctx, ctx->throw_type_error);
@@ -6958,7 +6958,7 @@ static int JS_SetObjectData(JSContext *ctx, JSValueConst obj, JSValue val)
 
 JSValue JS_NewObjectClass(JSContext *ctx, JSClassID class_id)
 {
-    return JS_NewObjectProtoClass(ctx, ctx->class_proto[class_id], class_id);
+    if (LAZY_CLASS_MISSING(ctx, class_id)) { return JS_EXCEPTION; } return JS_NewObjectProtoClass(ctx, ctx->class_proto[class_id], class_id);
 }
 
 JSValue JS_NewObjectProto(JSContext *ctx, JSValueConst proto)
@@ -23722,7 +23722,7 @@ static JSValue js_create_from_ctor(JSContext *ctx, JSValueConst ctor,
     JSContext *realm;
 
     if (JS_IsUndefined(ctor)) {
-        proto = js_dup(ctx->class_proto[class_id]);
+        if (LAZY_CLASS_MISSING(ctx, class_id)) { return JS_EXCEPTION; } proto = js_dup(ctx->class_proto[class_id]);
     } else {
         proto = JS_GetProperty(ctx, ctor, JS_ATOM_prototype);
         if (JS_IsException(proto)) {
@@ -23734,7 +23734,7 @@ static JSValue js_create_from_ctor(JSContext *ctx, JSValueConst ctor,
             if (!realm) {
                 return JS_EXCEPTION;
             }
-            proto = js_dup(realm->class_proto[class_id]);
+            if (LAZY_CLASS_MISSING(realm, class_id)) { return JS_EXCEPTION; } proto = js_dup(realm->class_proto[class_id]);
         }
     }
     obj = JS_NewObjectProtoClass(ctx, proto, class_id);
@@ -44284,7 +44284,7 @@ static JSValue JS_InstantiateFunctionListItem2(JSContext *ctx, JSObject *p,
         val = JS_NewObjectProtoList(ctx, proto,
                                     e->u.prop_list.tab, e->u.prop_list.len);
         break;
-    default:
+    LAZY_CLASS_CASE default:
         abort();
     }
     return val;
@@ -67571,7 +67571,7 @@ int JS_AddIntrinsicTypedArrays(JSContext *ctx)
     if (JS_IsException(obj)) {
         return -1;
     }
-    JS_FreeValue(ctx, obj);
+    JS_FreeValue(ctx, obj); LAZY_TA_REGISTER(ctx)
 
     obj = JS_NewCConstructor(ctx, JS_CLASS_SHARED_ARRAY_BUFFER, "SharedArrayBuffer",
                              js_shared_array_buffer_constructor, 1, JS_CFUNC_constructor, 0,
@@ -68683,5 +68683,194 @@ void JS_TakeFloorProbe(JSFloorProbe *out)
 {
     *out = js_floor_probe;
     memset(&js_floor_probe, 0, sizeof(js_floor_probe));
+}
+#endif
+
+#ifdef CONFIG_POCKET_VM_LAZY_INTRINSICS
+/* F3b (docs/vm/builtin-floor-plan.md sec.17): SharedArrayBuffer, the typed
+   arrays and DataView are made the first time they are needed rather than at
+   context creation -- ~5 KB of every guest heap for classes the shipped apps
+   never touch. Their global names are autoinit bindings, defined where
+   JS_AddIntrinsicTypedArrays used to define the constructors, so the global
+   object's keys, order and flags are what they were.
+
+   Made per class, not per group: an autoinit function must not change the
+   object it is resolving (JS_AutoInitProperty), so resolving "Uint8Array"
+   cannot also bind "Int8Array" on the same global, and a class made alone
+   costs a firmware app that only ever sees Uint8Array one pair, not fourteen.
+
+   Two ways in. A read of the global resolves its autoinit slot
+   (js_lazy_class_ctor). A native path that needs the prototype first --
+   JS_NewUint8ArrayCopy for pocket.fs, JS_ReadObject, a subclass's
+   new.target without a prototype -- reaches one of the class_proto reads
+   guarded by LAZY_CLASS_MISSING, and js_lazy_class_ensure resolves the
+   global slot itself if it is still pending, so the binding and
+   prototype.constructor are one object as they would have been eagerly.
+
+   %TypedArray% stays eager (ta_base): %TypedArray%.prototype.toString has to
+   be the ORIGINAL Array.prototype.toString, which only context creation can
+   promise, and every typed-array class needs it as its parent. ArrayBuffer
+   (the firmware returns them) and Atomics stay eager too. */
+static const JSCFunctionListEntry js_lazy_ta_entries[] = {
+#define LAZY_TA(name, cid) { name, JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE, JS_DEF_POCKET_LAZY_CLASS, cid, { .i32 = 0 } }
+    LAZY_TA("SharedArrayBuffer", JS_CLASS_SHARED_ARRAY_BUFFER),
+    LAZY_TA("Uint8ClampedArray", JS_CLASS_UINT8C_ARRAY),
+    LAZY_TA("Int8Array", JS_CLASS_INT8_ARRAY),
+    LAZY_TA("Uint8Array", JS_CLASS_UINT8_ARRAY),
+    LAZY_TA("Int16Array", JS_CLASS_INT16_ARRAY),
+    LAZY_TA("Uint16Array", JS_CLASS_UINT16_ARRAY),
+    LAZY_TA("Int32Array", JS_CLASS_INT32_ARRAY),
+    LAZY_TA("Uint32Array", JS_CLASS_UINT32_ARRAY),
+    LAZY_TA("BigInt64Array", JS_CLASS_BIG_INT64_ARRAY),
+    LAZY_TA("BigUint64Array", JS_CLASS_BIG_UINT64_ARRAY),
+    LAZY_TA("Float16Array", JS_CLASS_FLOAT16_ARRAY),
+    LAZY_TA("Float32Array", JS_CLASS_FLOAT32_ARRAY),
+    LAZY_TA("Float64Array", JS_CLASS_FLOAT64_ARRAY),
+    LAZY_TA("DataView", JS_CLASS_DATAVIEW),
+#undef LAZY_TA
+};
+
+static JSAtom js_lazy_ta_atom(int class_id)
+{
+    if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER)
+        return JS_ATOM_SharedArrayBuffer;
+    if (class_id == JS_CLASS_DATAVIEW)
+        return JS_ATOM_DataView;
+    return JS_ATOM_Uint8ClampedArray + class_id - JS_CLASS_UINT8C_ARRAY;
+}
+
+static bool js_lazy_ta_class(int class_id)
+{
+    return class_id == JS_CLASS_SHARED_ARRAY_BUFFER || class_id == JS_CLASS_DATAVIEW ||
+           (class_id >= JS_CLASS_UINT8C_ARRAY &&
+            class_id < JS_CLASS_UINT8C_ARRAY + JS_TYPED_ARRAY_COUNT);
+}
+
+/* Called by JS_AddIntrinsicTypedArrays right after ArrayBuffer, in place of
+   the rest of it. */
+static int js_lazy_ta_register(JSContext *ctx)
+{
+    JSValue base, proto, obj;
+    int ret;
+
+    base = JS_NewCConstructor(ctx, -1, "TypedArray",
+                              js_typed_array_base_constructor, 0, JS_CFUNC_constructor_or_func, 0,
+                              JS_UNDEFINED,
+                              js_typed_array_base_funcs, countof(js_typed_array_base_funcs),
+                              js_typed_array_base_proto_funcs, countof(js_typed_array_base_proto_funcs),
+                              JS_NEW_CTOR_NO_GLOBAL);
+    if (JS_IsException(base))
+        return -1;
+    set_value(ctx, &ctx->ta_base, base);
+    /* TypedArray.prototype.toString must be the same object as Array.prototype.toString */
+    obj = JS_GetProperty(ctx, ctx->class_proto[JS_CLASS_ARRAY], JS_ATOM_toString);
+    if (JS_IsException(obj))
+        return -1;
+    proto = JS_GetProperty(ctx, base, JS_ATOM_prototype);
+    if (JS_IsException(proto)) {
+        JS_FreeValue(ctx, obj);
+        return -1;
+    }
+    ret = JS_DefinePropertyValue(ctx, proto, JS_ATOM_toString, obj,
+                                 JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_FreeValue(ctx, proto);
+    if (ret < 0)
+        return -1;
+    for (size_t i = 0; i < countof(js_lazy_ta_entries); i++) {
+        const JSCFunctionListEntry *e = &js_lazy_ta_entries[i];
+        if (JS_DefineAutoInitProperty(ctx, ctx->global_obj, js_lazy_ta_atom(e->magic),
+                                      JS_AUTOINIT_ID_PROP, (void *)e, e->prop_flags) < 0)
+            return -1;
+    }
+#ifdef CONFIG_ATOMICS
+    if (JS_AddIntrinsicAtomics(ctx))
+        return -1;
+#endif
+    return 0;
+}
+
+/* Make one class's constructor and prototype, as JS_AddIntrinsicTypedArrays
+   did, without the global binding. A failure leaves the class unmade:
+   JS_NewCConstructor sets class_proto before it can fail, and a prototype
+   that is there but half-built would look made to every later caller. */
+static JSValue js_lazy_ta_make(JSContext *ctx, int class_id)
+{
+    JSValue ctor;
+
+    if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER) {
+        ctor = JS_NewCConstructor(ctx, class_id, "SharedArrayBuffer",
+                                  js_shared_array_buffer_constructor, 1, JS_CFUNC_constructor, 0,
+                                  JS_UNDEFINED,
+                                  js_shared_array_buffer_funcs, countof(js_shared_array_buffer_funcs),
+                                  js_shared_array_buffer_proto_funcs, countof(js_shared_array_buffer_proto_funcs),
+                                  JS_NEW_CTOR_NO_GLOBAL);
+    } else if (class_id == JS_CLASS_DATAVIEW) {
+        ctor = JS_NewCConstructor(ctx, class_id, "DataView",
+                                  js_dataview_constructor, 1, JS_CFUNC_constructor, 0,
+                                  JS_UNDEFINED,
+                                  NULL, 0,
+                                  js_dataview_proto_funcs, countof(js_dataview_proto_funcs),
+                                  JS_NEW_CTOR_NO_GLOBAL);
+    } else {
+        char buf[ATOM_GET_STR_BUF_SIZE];
+        /* Used to squelch a -Wcast-function-type warning. */
+        JSCFunctionType ft = { .generic_magic = js_typed_array_constructor };
+        const JSCFunctionListEntry *bpe = js_typed_array_funcs + typed_array_size_log2(class_id);
+        ctor = JS_NewCConstructor(ctx, class_id,
+                                  JS_AtomGetStr(ctx, buf, sizeof(buf), js_lazy_ta_atom(class_id)),
+                                  ft.generic, 3, JS_CFUNC_constructor_magic, class_id,
+                                  ctx->ta_base,
+                                  bpe, 1,
+                                  bpe, 1,
+                                  JS_NEW_CTOR_NO_GLOBAL);
+    }
+    if (JS_IsException(ctor))
+        set_value(ctx, &ctx->class_proto[class_id], JS_NULL);
+    return ctor;
+}
+
+/* The autoinit function of a pending global binding (LAZY_CLASS_CASE in
+   JS_InstantiateFunctionListItem2); `ctx` is the realm that registered it. */
+static JSValue js_lazy_class_ctor(JSContext *ctx, int class_id)
+{
+    /* Made already but still bound lazily: js_lazy_class_ensure resolves a
+       pending binding rather than making the class beside it, so this is
+       not expected. Kept as the safe answer. */
+    if (!JS_IsNull(ctx->class_proto[class_id]))
+        return JS_GetProperty(ctx, ctx->class_proto[class_id], JS_ATOM_constructor);
+    return js_lazy_ta_make(ctx, class_id);
+}
+
+/* A class_proto read found JS_NULL (LAZY_CLASS_MISSING). 0 = the prototype
+   is there now, or this class is not lazy here (a context that never
+   registered the bindings keeps upstream's JS_NULL); -1 = exception. */
+static int js_lazy_class_ensure(JSContext *ctx, int class_id)
+{
+    JSObject *g;
+    JSProperty *pr;
+    JSShapeProperty *prs;
+    JSAtom atom;
+    const JSCFunctionListEntry *e;
+    JSValue ctor;
+
+    if (!js_lazy_ta_class(class_id) || !JS_IsObject(ctx->ta_base))
+        return 0;
+    /* Resolve the binding itself while it is still ours and pending, so the
+       global and prototype.constructor are the same object. */
+    atom = js_lazy_ta_atom(class_id);
+    g = JS_VALUE_GET_OBJ(ctx->global_obj);
+    prs = find_own_property(&pr, g, atom);
+    if (prs && (prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT &&
+            js_autoinit_get_id(pr) == JS_AUTOINIT_ID_PROP &&
+            js_autoinit_get_realm(pr) == ctx) {
+        e = pr->u.init.opaque;
+        if (e >= js_lazy_ta_entries && e < js_lazy_ta_entries + countof(js_lazy_ta_entries))
+            return JS_AutoInitProperty(ctx, g, atom, pr, prs);
+    }
+    ctor = js_lazy_ta_make(ctx, class_id);
+    if (JS_IsException(ctor))
+        return -1;
+    JS_FreeValue(ctx, ctor);
+    return 0;
 }
 #endif

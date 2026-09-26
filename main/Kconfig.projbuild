@@ -229,6 +229,24 @@ menu "Pocket VM (L0 measurement probes)"
             pocket.* lists are lazy too), corpus/Test262 unchanged
             (docs/vm/builtin-floor-plan.md sec.13). n builds the old path.
 
+    config POCKET_VM_LAZY_INTRINSICS
+        bool "F3b: typed-array constructors made on first use"
+        default y
+        help
+            Every context made SharedArrayBuffer, the 12 typed-array
+            constructors and DataView -- 14 constructor/prototype pairs --
+            at startup, ~5 KB of every app's guest heap, while the shipped
+            apps use none of them (docs/vm/builtin-floor-plan.md sec.17).
+            With this on, their global names are autoinit bindings and each
+            pair is made the first time its name is read or the firmware
+            asks for one (JS_NewUint8ArrayCopy). ArrayBuffer, Atomics and
+            %TypedArray% itself stay eager.
+
+            Default y since 2026-09-26: every shipped app's js= fell a
+            further 5.7-5.9 KB on the device, corpus/Test262 unchanged
+            (docs/vm/builtin-floor-plan.md sec.17). n builds the old path,
+            whose code is identical to the build before this option.
+
     config POCKET_VM_FLOORPROBE
         bool "F-line measurement: guest floor by stage, F1/F2 path counters"
         default n
