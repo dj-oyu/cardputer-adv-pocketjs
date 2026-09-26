@@ -31,15 +31,16 @@
 #ifdef KSN_TILE_COUNT
 #include <inttypes.h>
 extern uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
-                ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels;
+                ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels,
+                ksn_tile_child_skipped;
 #endif
 
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"group tile line %d: %s\n",__LINE__,#x);return 1;}}while(0)
 #define COUNT(a) (sizeof(a)/sizeof((a)[0]))
 KSN_TEST_CORE(core,static);
 static uint16_t strip[240*8],panel[240*135],arm_a[240*135],arm_b[240*135];
-static ksn_draw draws[16];
-static bool visible[16];
+static ksn_draw draws[18];
+static bool visible[18];
 static unsigned draw_count,dither_differences;
 static uint32_t background=0x315d7bff;
 static const char title_text[]="Kasane";
@@ -147,7 +148,7 @@ static int render_frame(const ksn_draw *d,const bool *vis,unsigned count,uint8_t
     g_ksn_tile_pixels=pixels;g_ksn_tile_reach=reach;g_ksn_tile_smooth=smooth;
     background=back;
     ksn_core_init(&core);
-    ksn_client app=ksn_core_client(&core,KSN_APP);ksn_tx tx;ksn_ref refs[16];
+    ksn_client app=ksn_core_client(&core,KSN_APP);ksn_tx tx;ksn_ref refs[18];
     ksn_render_stats stats;
     CHECK(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
     CHECK(app.ops->background(app.ctx,tx,back)==KSN_OK);
@@ -476,6 +477,34 @@ static int text_scene(void){
     }
     return 0;
 }
+/* The stress school's 18-child group used to exceed the reach table's 16
+ * entries. Keep a sparse 18-child fixture so a reverted cap is observable as
+ * zero skipped blocks in the counting build, not merely equal output. */
+static int reach_eighteen(void){
+    draw_count=18;
+    for(unsigned i=0;i<draw_count;i++){
+        int x=(int)(i*37u%220u),y=20+(int)(i*19u%90u);
+        draws[i]=(ksn_draw){.kind=KSN_RECT,
+            .bounds={(int16_t)x,(int16_t)y,(int16_t)(x+5),(int16_t)(y+4)},
+            .clip={0,0,240,135},.opacity=255,
+            .data.shape={0x60b8eaff,0,0}};
+        visible[i]=true;
+    }
+#ifdef KSN_TILE_COUNT
+    uint32_t skipped_before=ksn_tile_skipped;
+    uint32_t children_before=ksn_tile_child_skipped;
+#endif
+    CHECK(exact_arms(draws,visible,draw_count,170,"18 children")==0);
+#ifdef KSN_TILE_COUNT
+    CHECK(ksn_tile_skipped>skipped_before);
+    CHECK(ksn_tile_child_skipped>children_before);
+#endif
+    CHECK(render_frame(draws,visible,draw_count,170,0x315d7bff,64,1,0,arm_a)==0);
+    unsigned mismatches=0;
+    CHECK(against_reference(arm_a,"18 children",170,&mismatches)==0);
+    CHECK(mismatches==0);
+    return 0;
+}
 /* ---- 3: 120 frames of a demo-shaped scene -------------------------------- */
 static unsigned moved_frames,worst_frame_moved,exact_frames_pixels,frames_moved_total;
 static uint32_t panel_hash(uint32_t state){
@@ -595,6 +624,7 @@ int main(void){
     CHECK(parameter_space()==0);
     CHECK(text_scene()==0);
     CHECK(waste_scene()==0);
+    CHECK(reach_eighteen()==0);
     printf("parameter space: %u pixels compared, %u moved (%.2f%%): along x %u of %u, "
            "along y %u of %u, unexplained %u\n",
            compared_pixels,moved_pixels,100.0*(double)moved_pixels/(double)compared_pixels,
@@ -606,10 +636,12 @@ int main(void){
     CHECK(frames_120()==0);
 #ifdef KSN_TILE_COUNT
     printf("tile counters: visited %" PRIu32 " covered %" PRIu32 " waste %.2f%%, blocks %" PRIu32
-           " skipped %" PRIu32 ", smooth blocks %" PRIu32 " pixels %" PRIu32 "\n",
+           " skipped %" PRIu32 ", child skips %" PRIu32
+           ", smooth blocks %" PRIu32 " pixels %" PRIu32 "\n",
            ksn_tile_visited,ksn_tile_covered,
            ksn_tile_visited?100.0*(double)(ksn_tile_visited-ksn_tile_covered)/(double)ksn_tile_visited:0.0,
-           ksn_tile_blocks,ksn_tile_skipped,ksn_tile_smooth_blocks,ksn_tile_smooth_pixels);
+           ksn_tile_blocks,ksn_tile_skipped,ksn_tile_child_skipped,
+           ksn_tile_smooth_blocks,ksn_tile_smooth_pixels);
 #endif
     printf("group tile: PASS (arithmetic swept, exact arms identical, approximation "
            "measured and named, 120 frames compared)\n");

@@ -163,6 +163,12 @@ static unsigned painted, ticks;
 #ifndef KASANE_STRESS_GRAD_AB
 #define KASANE_STRESS_GRAD_AB 0
 #endif
+#ifndef KASANE_STRESS_REACH_AB
+#define KASANE_STRESS_REACH_AB 0
+#endif
+#if KASANE_STRESS_REACH_AB
+static unsigned reach_ab_window;
+#endif
 #if KASANE_STRESS_GRAD_AB
 static unsigned grad_ab_window,grad_ab_bytes;
 #endif
@@ -762,6 +768,9 @@ esp_err_t app_start_test(char test) {
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     kasane_presented=false;
+#if KASANE_STRESS_REACH_AB
+    reach_ab_window=0;g_ksn_tile_reach=1;
+#endif
 #if KASANE_STRESS_GRAD_AB
     grad_ab_window=0;grad_ab_bytes=0;g_ksn_vertical_gradient_pie=1;
 #endif
@@ -1780,6 +1789,11 @@ static esp_err_t present_frame(void) {
                 grad_ab_window++;
                 grad_ab_bytes=0;
                 g_ksn_vertical_gradient_pie^=1;
+#endif
+#if KASANE_STRESS_REACH_AB
+                ESP_LOGI("kasane","REACH_AB window=%u reach=%d",
+                         reach_ab_window++,g_ksn_tile_reach);
+                g_ksn_tile_reach^=1;
 #endif
 #ifndef KASANE_AB
 #define KASANE_AB 0

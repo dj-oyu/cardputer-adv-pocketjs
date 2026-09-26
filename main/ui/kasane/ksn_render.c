@@ -1209,7 +1209,8 @@ int g_ksn_tile_smooth=1;    /* smooth layers: one exact anchor per block plus a
  * tools/kasane_contract/run_group_tile.sh). "covered" is a tile pixel whose
  * accumulated alpha is non-zero, i.e. one a child actually wrote into. */
 uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
-         ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels;
+         ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels,
+         ksn_tile_child_skipped;
 #endif
 /* Objdump can only attribute a per-pixel cost to a function that is not inlined
  * away. The measurement build (-DKSN_TILE_MEASURE, tools/kasane_contract/
@@ -1223,7 +1224,7 @@ uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
 #endif
 /* A group with more children than this falls back to the unconditional tile:
  * the reach table exists to skip work, never to decide which pixels are drawn. */
-#define KSN_TILE_REACH_BOXES 16
+#define KSN_TILE_REACH_BOXES 18
 typedef struct { int16_t x0,y0,x1,y1; } ksn_tile_reach;
 static bool tile_block_reached(const ksn_tile_reach *box,unsigned count,
                                int x0,int width,int py){
@@ -1694,6 +1695,18 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
          * opaque child. Two words avoid variable 64-bit shifts on ESP32-S3. */
         uint32_t dither_pixels[2]={0,0};
         for(unsigned i=first;i<=end;i++){
+            /* The bounds pass already validated and clipped this child. When
+             * its box misses this row/block, re-reading and decoding the
+             * immutable frame command cannot contribute a pixel. */
+            if(g_ksn_tile_reach&&reach_all){
+                const ksn_tile_reach *box=&reach[i-first];
+                if(py<box->y0||py>=box->y1||x0>=box->x1||x0+count<=box->x0){
+#ifdef KSN_TILE_COUNT
+                    ksn_tile_child_skipped++;
+#endif
+                    continue;
+                }
+            }
             ksn_result result;
             {KSN_PROF_BEGIN();
             result=frame_command(core,ticket,layer,(uint16_t)i,&command);
