@@ -333,6 +333,11 @@ struct JSRuntime {
     struct list_head gc_zero_ref_count_list;
     struct list_head tmp_obj_list; /* used during GC */
     JSGCPhaseEnum gc_phase : 8;
+    /* malloc_size (in 64 B units) after the last collection the cap
+       triggered that left the heap above the cap, or 0 (js_trigger_gc). In
+       the padding before the size_t: JSRuntime's size, and with it every
+       malloc_size the corpus pins, stays what it was. */
+    uint16_t gc_cap_floor;
     size_t malloc_gc_threshold;
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
     struct list_head string_list; /* list of JSString.link */
@@ -1804,7 +1809,18 @@ JSValue JS_DupValueRT(JSRuntime *rt, JSValueConst v)
  * That happens only within 1/32 of the limit, where the app was already an
  * allocation or two from OOM. With no limit, or one far above the heap (the
  * host profile's 64 MiB), the comparison is upstream's. JS_SetGCThreshold(-1)
- * no longer disables collection under a limit; nothing here uses it. */
+ * no longer disables collection under a limit; nothing here uses it.
+ *
+ * ...which turned out not to be rare: an app that keeps a live heap just
+ * under the limit (apps/stress LV3, a cache grown to fit) collected 3.6
+ * times a frame, 70% of its JS time (host callgrind, device layout,
+ * docs/vm/gc-cap-backoff.md). A collection that leaves the heap above the
+ * cap found nothing it could free; the next can only free what the heap has
+ * grown by since. So js_trigger_gc does not let the cap collect again until
+ * malloc_size is limit >> GC_CAP_GROWTH_SHIFT above where the last such
+ * collection left it: garbage that would need collecting is growth, however
+ * few or many objects it is made of. Below the cap nothing changes. */
+#define GC_CAP_GROWTH_SHIFT 5
 static size_t js_gc_effective_threshold(JSRuntime *rt)
 {
     size_t threshold = rt->malloc_gc_threshold;
@@ -1823,8 +1839,25 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
 #ifdef FORCE_GC_AT_MALLOC
     force_gc = true;
 #else
-    force_gc = ((rt->malloc_state.malloc_size + size) >
-                js_gc_effective_threshold(rt));
+    size_t threshold = js_gc_effective_threshold(rt);
+    force_gc = ((rt->malloc_state.malloc_size + size) > threshold);
+    /* Only the cap backs off (see above): a crossing of the ordinary
+       threshold collects as it always did. */
+    if (force_gc && threshold < rt->malloc_gc_threshold && rt->gc_cap_floor) {
+        /* The growth allowed is also at most half of what the floor left
+           before the limit, so a floor in the last bytes collects again soon. */
+        size_t floor = (size_t)rt->gc_cap_floor << 6;
+        size_t limit = rt->malloc_state.malloc_limit;
+        size_t room = limit > floor ? (limit - floor) >> 1 : 0;
+        size_t budget = limit >> GC_CAP_GROWTH_SHIFT;
+        if (room < budget)
+            budget = room;
+        /* A heap below the floor has freed since (refcount): the floor says
+           nothing about it any more, and it collects as before. */
+        if (rt->malloc_state.malloc_size >= floor &&
+            rt->malloc_state.malloc_size < floor + budget)
+            force_gc = false;
+    }
 #endif
     if (force_gc) {
 #ifdef ENABLE_DUMPS // JS_DUMP_GC
@@ -1835,6 +1868,12 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
         JS_RunGC(rt);
         rt->malloc_gc_threshold = rt->malloc_state.malloc_size +
                                   (rt->malloc_state.malloc_size >> 1);
+        /* Still above the cap: nothing more to free until the heap grows.
+           A heap past 4 MiB (64 B units in 16 bits) keeps upstream's rule. */
+        size_t units = rt->malloc_state.malloc_size >> 6;
+        rt->gc_cap_floor = rt->malloc_state.malloc_size + size >
+                           js_gc_effective_threshold(rt) && units <= 0xffff ?
+                           (uint16_t)units : 0;
     }
 }
 
