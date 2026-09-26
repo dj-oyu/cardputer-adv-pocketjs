@@ -8,7 +8,7 @@ cd "$(dirname "$0")/../../.."
 QJS=components/quickjs-ng/quickjs-ng
 BASE=.cache/vmtest-faults-f3
 status=0
-for fault in no-resolve-binding no-ctor-guard no-tostring-alias binding-enumerable; do
+for fault in no-resolve-binding no-ctor-guard no-tostring-alias binding-enumerable no-newobjectclass-guard; do
   dir=$BASE/$fault
   rm -rf "$dir"; mkdir -p "$dir/qjs"
   cp $QJS/*.c $QJS/*.h "$dir/qjs/"

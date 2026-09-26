@@ -56,7 +56,7 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 | F2-4 | 全展開の誘発元の計装 | plan §14.2 | 済: 出荷アプリとデモすべてで 0 回 |
 | F0-a | 床のうちファーム側（`pocket.*` の面など） | plan §14.1・§16.1 | 済: 約 6.2 KB（`pocket` の土台 3.2 KB、他は各 0.3 KB 以下）。作成直後とホスト計算の差 4.8 KB は `MALLOC_OVERHEAD`（8 B/確保）と `js_std` の helper |
 | F0-c | 160 KiB の上限の数え方: QuickJS は確保ごとに 8 B 足すが tlsf の実ヘッダは 4 B（床だけで約 1.8 KB 多く数え、アプリのブロック数に比例） | plan §16.1 | 未着手（上限の意味を変える判断が要る） |
-| F3c | Map/Set（1.8 KB）・DOMException（1.4 KB）・WeakRef（0.7 KB）を F3b と同じ仕組みで遅延に | plan §17.4 | 未着手 |
+| F3c | Map/Set（1.8 KB）・DOMException（1.4 KB）・WeakRef（0.7 KB）を F3b と同じ仕組みで遅延に | plan §18 | ホストは済（床 28,824 → 24,928 B）。**実機の関所が未**（COM3 を Kasane の線に譲っている間） |
 | F3d | ネイティブが `Uint8Array` を先に作る経路の実機確認（`pocket.fs` の read を使うアプリで） | plan §17.3・`apps/stress/README.md` | 済（2026-09-26）: STRESS TEST が JS より先に `pocket.fs` で読んだ `Uint8Array` の prototype・constructor がグローバルと一致（`STRESS_NATIVE ok`、実機） |
 | F0-d | Kasane の使い勝手（STRESS TEST で踏んだ）: `replace` の背景なし・コマンド数超過・半径超過がすべて理由なしの `INVALID_ARGUMENT`、キャッシュのコマンド 48 がビュー合計、インスタンスがシーンの 80 を使う、既定の clip が作成時の bounds、半径 8 まで・円や線が無い | `apps/stress/README.md` | Kasane の線（`feature/kasane`）へ渡す |
 | F0-b | Kasane デモの外れ回数 | plan §14.2 | 済: 2.4 回/フレーム（最多は imucal の 8.7） |

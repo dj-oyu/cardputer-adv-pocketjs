@@ -59712,7 +59712,7 @@ static const uint8_t js_map_proto_funcs_count[6] = {
 
 int JS_AddIntrinsicMapSet(JSContext *ctx)
 {
-    int i;
+    int i; LAZY_GROUP_REGISTER(ctx, LAZY_G_MAPSET)
     JSValue obj1;
     char buf[ATOM_GET_STR_BUF_SIZE];
     /* Used to squelch a -Wcast-function-type warning. */
@@ -68003,7 +68003,7 @@ static JSValue js_finrec_job(JSContext *ctx, int argc, JSValueConst *argv)
 
 int JS_AddIntrinsicWeakRef(JSContext *ctx)
 {
-    JSRuntime *rt = ctx->rt;
+    JSRuntime *rt = ctx->rt; LAZY_GROUP_REGISTER(ctx, LAZY_G_WEAKREF)
     JSValue obj;
 
     /* WeakRef */
@@ -68533,7 +68533,7 @@ JSValue JS_PRINTF_FORMAT_ATTR(3, 4) JS_ThrowDOMException(JSContext *ctx, const c
 
 int JS_AddIntrinsicDOMException(JSContext *ctx)
 {
-    JSRuntime *rt = ctx->rt;
+    JSRuntime *rt = ctx->rt; LAZY_GROUP_REGISTER(ctx, LAZY_G_DOMEX)
     int i;
     JSAtom name;
     JSValue ctor, proto;
@@ -68710,40 +68710,91 @@ void JS_TakeFloorProbe(JSFloorProbe *out)
    %TypedArray% stays eager (ta_base): %TypedArray%.prototype.toString has to
    be the ORIGINAL Array.prototype.toString, which only context creation can
    promise, and every typed-array class needs it as its parent. ArrayBuffer
-   (the firmware returns them) and Atomics stay eager too. */
-static const JSCFunctionListEntry js_lazy_ta_entries[] = {
-#define LAZY_TA(name, cid) { name, JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE, JS_DEF_POCKET_LAZY_CLASS, cid, { .i32 = 0 } }
-    LAZY_TA("SharedArrayBuffer", JS_CLASS_SHARED_ARRAY_BUFFER),
-    LAZY_TA("Uint8ClampedArray", JS_CLASS_UINT8C_ARRAY),
-    LAZY_TA("Int8Array", JS_CLASS_INT8_ARRAY),
-    LAZY_TA("Uint8Array", JS_CLASS_UINT8_ARRAY),
-    LAZY_TA("Int16Array", JS_CLASS_INT16_ARRAY),
-    LAZY_TA("Uint16Array", JS_CLASS_UINT16_ARRAY),
-    LAZY_TA("Int32Array", JS_CLASS_INT32_ARRAY),
-    LAZY_TA("Uint32Array", JS_CLASS_UINT32_ARRAY),
-    LAZY_TA("BigInt64Array", JS_CLASS_BIG_INT64_ARRAY),
-    LAZY_TA("BigUint64Array", JS_CLASS_BIG_UINT64_ARRAY),
-    LAZY_TA("Float16Array", JS_CLASS_FLOAT16_ARRAY),
-    LAZY_TA("Float32Array", JS_CLASS_FLOAT32_ARRAY),
-    LAZY_TA("Float64Array", JS_CLASS_FLOAT64_ARRAY),
-    LAZY_TA("DataView", JS_CLASS_DATAVIEW),
-#undef LAZY_TA
+   (the firmware returns them) and Atomics stay eager too.
+
+   F3c (sec.18) puts Map/Set/WeakMap/WeakSet, WeakRef/FinalizationRegistry
+   and DOMException on the same footing, one "group" per JS_AddIntrinsic*
+   (ctx->lazy_groups says which this context registered lazily). The Map
+   and Set iterator prototypes have no global name: they are made on the
+   first JS_NewObjectClass of their class, i.e. the first entries()/values()
+   of a Map or Set that already exists. WeakRef and DOMException register
+   their classes with the runtime at registration, as before; only the
+   constructor/prototype pairs wait. */
+static const JSCFunctionListEntry js_lazy_entries[] = {
+#define LAZY_E(name, cid, group) { name, JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE, JS_DEF_POCKET_LAZY_CLASS, cid, { .i32 = group } }
+    LAZY_E("SharedArrayBuffer", JS_CLASS_SHARED_ARRAY_BUFFER, LAZY_G_TA),
+    LAZY_E("Uint8ClampedArray", JS_CLASS_UINT8C_ARRAY, LAZY_G_TA),
+    LAZY_E("Int8Array", JS_CLASS_INT8_ARRAY, LAZY_G_TA),
+    LAZY_E("Uint8Array", JS_CLASS_UINT8_ARRAY, LAZY_G_TA),
+    LAZY_E("Int16Array", JS_CLASS_INT16_ARRAY, LAZY_G_TA),
+    LAZY_E("Uint16Array", JS_CLASS_UINT16_ARRAY, LAZY_G_TA),
+    LAZY_E("Int32Array", JS_CLASS_INT32_ARRAY, LAZY_G_TA),
+    LAZY_E("Uint32Array", JS_CLASS_UINT32_ARRAY, LAZY_G_TA),
+    LAZY_E("BigInt64Array", JS_CLASS_BIG_INT64_ARRAY, LAZY_G_TA),
+    LAZY_E("BigUint64Array", JS_CLASS_BIG_UINT64_ARRAY, LAZY_G_TA),
+    LAZY_E("Float16Array", JS_CLASS_FLOAT16_ARRAY, LAZY_G_TA),
+    LAZY_E("Float32Array", JS_CLASS_FLOAT32_ARRAY, LAZY_G_TA),
+    LAZY_E("Float64Array", JS_CLASS_FLOAT64_ARRAY, LAZY_G_TA),
+    LAZY_E("DataView", JS_CLASS_DATAVIEW, LAZY_G_TA),
+    LAZY_E("Map", JS_CLASS_MAP, LAZY_G_MAPSET),
+    LAZY_E("Set", JS_CLASS_SET, LAZY_G_MAPSET),
+    LAZY_E("WeakMap", JS_CLASS_WEAKMAP, LAZY_G_MAPSET),
+    LAZY_E("WeakSet", JS_CLASS_WEAKSET, LAZY_G_MAPSET),
+    LAZY_E("WeakRef", JS_CLASS_WEAK_REF, LAZY_G_WEAKREF),
+    LAZY_E("FinalizationRegistry", JS_CLASS_FINALIZATION_REGISTRY, LAZY_G_WEAKREF),
+    LAZY_E("DOMException", JS_CLASS_DOM_EXCEPTION, LAZY_G_DOMEX),
+#undef LAZY_E
 };
 
-static JSAtom js_lazy_ta_atom(int class_id)
+static bool js_lazy_map_iterator(int class_id)
 {
-    if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER)
-        return JS_ATOM_SharedArrayBuffer;
-    if (class_id == JS_CLASS_DATAVIEW)
-        return JS_ATOM_DataView;
+    return class_id == JS_CLASS_MAP_ITERATOR || class_id == JS_CLASS_SET_ITERATOR;
+}
+
+/* Which group a class belongs to, or -1 if it is never lazy. */
+static int js_lazy_group(int class_id)
+{
+    if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER || class_id == JS_CLASS_DATAVIEW ||
+            (class_id >= JS_CLASS_UINT8C_ARRAY &&
+             class_id < JS_CLASS_UINT8C_ARRAY + JS_TYPED_ARRAY_COUNT))
+        return LAZY_G_TA;
+    if ((class_id >= JS_CLASS_MAP && class_id <= JS_CLASS_WEAKSET) ||
+            js_lazy_map_iterator(class_id))
+        return LAZY_G_MAPSET;
+    if (class_id == JS_CLASS_WEAK_REF || class_id == JS_CLASS_FINALIZATION_REGISTRY)
+        return LAZY_G_WEAKREF;
+    if (class_id == JS_CLASS_DOM_EXCEPTION)
+        return LAZY_G_DOMEX;
+    return -1;
+}
+
+static JSAtom js_lazy_atom(int class_id)
+{
+    switch (class_id) {
+    case JS_CLASS_SHARED_ARRAY_BUFFER: return JS_ATOM_SharedArrayBuffer;
+    case JS_CLASS_DATAVIEW: return JS_ATOM_DataView;
+    case JS_CLASS_WEAK_REF: return JS_ATOM_WeakRef;
+    case JS_CLASS_FINALIZATION_REGISTRY: return JS_ATOM_FinalizationRegistry;
+    case JS_CLASS_DOM_EXCEPTION: return JS_ATOM_DOMException;
+    }
+    if (class_id >= JS_CLASS_MAP && class_id <= JS_CLASS_WEAKSET)
+        return JS_ATOM_Map + class_id - JS_CLASS_MAP;
     return JS_ATOM_Uint8ClampedArray + class_id - JS_CLASS_UINT8C_ARRAY;
 }
 
-static bool js_lazy_ta_class(int class_id)
+/* The group's global bindings, where its JS_AddIntrinsic* defined them. */
+static int js_lazy_bind(JSContext *ctx, int group)
 {
-    return class_id == JS_CLASS_SHARED_ARRAY_BUFFER || class_id == JS_CLASS_DATAVIEW ||
-           (class_id >= JS_CLASS_UINT8C_ARRAY &&
-            class_id < JS_CLASS_UINT8C_ARRAY + JS_TYPED_ARRAY_COUNT);
+    for (size_t i = 0; i < countof(js_lazy_entries); i++) {
+        const JSCFunctionListEntry *e = &js_lazy_entries[i];
+        if (e->u.i32 != group)
+            continue;
+        if (JS_DefineAutoInitProperty(ctx, ctx->global_obj, js_lazy_atom(e->magic),
+                                      JS_AUTOINIT_ID_PROP, (void *)e, e->prop_flags) < 0)
+            return -1;
+    }
+    ctx->lazy_groups |= 1u << group;
+    return 0;
 }
 
 /* Called by JS_AddIntrinsicTypedArrays right after ArrayBuffer, in place of
@@ -68776,12 +68827,8 @@ static int js_lazy_ta_register(JSContext *ctx)
     JS_FreeValue(ctx, proto);
     if (ret < 0)
         return -1;
-    for (size_t i = 0; i < countof(js_lazy_ta_entries); i++) {
-        const JSCFunctionListEntry *e = &js_lazy_ta_entries[i];
-        if (JS_DefineAutoInitProperty(ctx, ctx->global_obj, js_lazy_ta_atom(e->magic),
-                                      JS_AUTOINIT_ID_PROP, (void *)e, e->prop_flags) < 0)
-            return -1;
-    }
+    if (js_lazy_bind(ctx, LAZY_G_TA))
+        return -1;
 #ifdef CONFIG_ATOMICS
     if (JS_AddIntrinsicAtomics(ctx))
         return -1;
@@ -68789,40 +68836,148 @@ static int js_lazy_ta_register(JSContext *ctx)
     return 0;
 }
 
-/* Make one class's constructor and prototype, as JS_AddIntrinsicTypedArrays
-   did, without the global binding. A failure leaves the class unmade:
+/* Called at the top of JS_AddIntrinsicMapSet / WeakRef / DOMException in
+   place of the rest of each. */
+static int js_lazy_register(JSContext *ctx, int group)
+{
+    JSRuntime *rt = ctx->rt;
+
+    if (group == LAZY_G_WEAKREF) {
+        if (!JS_IsRegisteredClass(rt, JS_CLASS_WEAK_REF) &&
+                init_class_range(rt, js_weakref_class_def, JS_CLASS_WEAK_REF,
+                                 countof(js_weakref_class_def)))
+            return -1;
+        if (!JS_IsRegisteredClass(rt, JS_CLASS_FINALIZATION_REGISTRY) &&
+                init_class_range(rt, js_finrec_class_def, JS_CLASS_FINALIZATION_REGISTRY,
+                                 countof(js_finrec_class_def)))
+            return -1;
+    } else if (group == LAZY_G_DOMEX) {
+        if (!JS_IsRegisteredClass(rt, JS_CLASS_DOM_EXCEPTION) &&
+                init_class_range(rt, js_domexception_class_def, JS_CLASS_DOM_EXCEPTION,
+                                 countof(js_domexception_class_def)))
+            return -1;
+    }
+    return js_lazy_bind(ctx, group);
+}
+
+/* DOMException as JS_AddIntrinsicDOMException made it, without the global
+   binding; that one ignored every failure (context creation checks the
+   OOM canary afterwards), this one cannot leave a half-built pair behind. */
+static JSValue js_lazy_domexception_make(JSContext *ctx)
+{
+    JSValue proto, ctor = JS_UNDEFINED;
+
+    proto = JS_NewObjectClass(ctx, JS_CLASS_ERROR);
+    if (JS_IsException(proto))
+        return proto;
+    if (JS_SetPropertyFunctionList(ctx, proto, js_domexception_proto_funcs,
+                                   countof(js_domexception_proto_funcs)))
+        goto fail;
+    ctor = JS_NewCFunction2(ctx, js_domexception_constructor, "DOMException", 2,
+                            JS_CFUNC_constructor_or_func, 0);
+    if (JS_IsException(ctor) || JS_SetConstructor(ctx, ctor, proto) < 0)
+        goto fail;
+    for (size_t i = 0; i < countof(js_dom_exception_names_table); i++) {
+        JSAtom name = JS_NewAtom(ctx, js_dom_exception_names_table[i].code_name);
+        if (name == JS_ATOM_NULL)
+            goto fail;
+        int r = JS_DefinePropertyValue(ctx, proto, name, js_int32(i + 1), JS_PROP_ENUMERABLE);
+        if (r >= 0)
+            r = JS_DefinePropertyValue(ctx, ctor, name, js_int32(i + 1), JS_PROP_ENUMERABLE);
+        JS_FreeAtom(ctx, name);
+        if (r < 0)
+            goto fail;
+    }
+    ctx->class_proto[JS_CLASS_DOM_EXCEPTION] = proto;
+    return ctor;
+fail:
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    return JS_EXCEPTION;
+}
+
+/* Make one class's constructor and prototype, as its JS_AddIntrinsic* did,
+   without the global binding (a Map/Set iterator: its prototype only, and
+   the result is undefined). A failure leaves the class unmade:
    JS_NewCConstructor sets class_proto before it can fail, and a prototype
    that is there but half-built would look made to every later caller. */
-static JSValue js_lazy_ta_make(JSContext *ctx, int class_id)
+static JSValue js_lazy_make(JSContext *ctx, int class_id)
 {
     JSValue ctor;
+    char buf[ATOM_GET_STR_BUF_SIZE];
+    const char *name = JS_AtomGetStr(ctx, buf, sizeof(buf), js_lazy_atom(class_id));
 
-    if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER) {
-        ctor = JS_NewCConstructor(ctx, class_id, "SharedArrayBuffer",
-                                  js_shared_array_buffer_constructor, 1, JS_CFUNC_constructor, 0,
-                                  JS_UNDEFINED,
-                                  js_shared_array_buffer_funcs, countof(js_shared_array_buffer_funcs),
-                                  js_shared_array_buffer_proto_funcs, countof(js_shared_array_buffer_proto_funcs),
-                                  JS_NEW_CTOR_NO_GLOBAL);
-    } else if (class_id == JS_CLASS_DATAVIEW) {
-        ctor = JS_NewCConstructor(ctx, class_id, "DataView",
-                                  js_dataview_constructor, 1, JS_CFUNC_constructor, 0,
+    switch (js_lazy_group(class_id)) {
+    case LAZY_G_TA:
+        if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER) {
+            ctor = JS_NewCConstructor(ctx, class_id, name,
+                                      js_shared_array_buffer_constructor, 1, JS_CFUNC_constructor, 0,
+                                      JS_UNDEFINED,
+                                      js_shared_array_buffer_funcs, countof(js_shared_array_buffer_funcs),
+                                      js_shared_array_buffer_proto_funcs, countof(js_shared_array_buffer_proto_funcs),
+                                      JS_NEW_CTOR_NO_GLOBAL);
+        } else if (class_id == JS_CLASS_DATAVIEW) {
+            ctor = JS_NewCConstructor(ctx, class_id, name,
+                                      js_dataview_constructor, 1, JS_CFUNC_constructor, 0,
+                                      JS_UNDEFINED,
+                                      NULL, 0,
+                                      js_dataview_proto_funcs, countof(js_dataview_proto_funcs),
+                                      JS_NEW_CTOR_NO_GLOBAL);
+        } else {
+            /* Used to squelch a -Wcast-function-type warning. */
+            JSCFunctionType ft = { .generic_magic = js_typed_array_constructor };
+            const JSCFunctionListEntry *bpe = js_typed_array_funcs + typed_array_size_log2(class_id);
+            ctor = JS_NewCConstructor(ctx, class_id, name,
+                                      ft.generic, 3, JS_CFUNC_constructor_magic, class_id,
+                                      ctx->ta_base,
+                                      bpe, 1,
+                                      bpe, 1,
+                                      JS_NEW_CTOR_NO_GLOBAL);
+        }
+        break;
+    case LAZY_G_MAPSET:
+        if (js_lazy_map_iterator(class_id)) {
+            int i = class_id - JS_CLASS_MAP_ITERATOR + 4;
+            JSValue proto = JS_NewObjectProtoList(ctx, ctx->class_proto[JS_CLASS_ITERATOR],
+                                                  js_map_proto_funcs_ptr[i],
+                                                  js_map_proto_funcs_count[i]);
+            if (JS_IsException(proto))
+                return proto;
+            ctx->class_proto[class_id] = proto;
+            return JS_UNDEFINED;
+        } else {
+            int i = class_id - JS_CLASS_MAP;
+            /* Used to squelch a -Wcast-function-type warning. */
+            JSCFunctionType ft = { .constructor_magic = js_map_constructor };
+            ctor = JS_NewCConstructor(ctx, class_id, name,
+                                      ft.generic, 0, JS_CFUNC_constructor_magic, i,
+                                      JS_UNDEFINED,
+                                      class_id == JS_CLASS_MAP ? js_map_funcs :
+                                      class_id == JS_CLASS_SET ? js_set_funcs : NULL,
+                                      class_id == JS_CLASS_MAP ? countof(js_map_funcs) :
+                                      class_id == JS_CLASS_SET ? countof(js_set_funcs) : 0,
+                                      js_map_proto_funcs_ptr[i], js_map_proto_funcs_count[i],
+                                      JS_NEW_CTOR_NO_GLOBAL);
+        }
+        break;
+    case LAZY_G_WEAKREF:
+        ctor = JS_NewCConstructor(ctx, class_id, name,
+                                  class_id == JS_CLASS_WEAK_REF ? js_weakref_constructor
+                                                                : js_finrec_constructor,
+                                  1, JS_CFUNC_constructor_or_func, 0,
                                   JS_UNDEFINED,
                                   NULL, 0,
-                                  js_dataview_proto_funcs, countof(js_dataview_proto_funcs),
+                                  class_id == JS_CLASS_WEAK_REF ? js_weakref_proto_funcs
+                                                                : js_finrec_proto_funcs,
+                                  class_id == JS_CLASS_WEAK_REF ? countof(js_weakref_proto_funcs)
+                                                                : countof(js_finrec_proto_funcs),
                                   JS_NEW_CTOR_NO_GLOBAL);
-    } else {
-        char buf[ATOM_GET_STR_BUF_SIZE];
-        /* Used to squelch a -Wcast-function-type warning. */
-        JSCFunctionType ft = { .generic_magic = js_typed_array_constructor };
-        const JSCFunctionListEntry *bpe = js_typed_array_funcs + typed_array_size_log2(class_id);
-        ctor = JS_NewCConstructor(ctx, class_id,
-                                  JS_AtomGetStr(ctx, buf, sizeof(buf), js_lazy_ta_atom(class_id)),
-                                  ft.generic, 3, JS_CFUNC_constructor_magic, class_id,
-                                  ctx->ta_base,
-                                  bpe, 1,
-                                  bpe, 1,
-                                  JS_NEW_CTOR_NO_GLOBAL);
+        break;
+    case LAZY_G_DOMEX:
+        ctor = js_lazy_domexception_make(ctx);
+        break;
+    default:
+        abort();
     }
     if (JS_IsException(ctor))
         set_value(ctx, &ctx->class_proto[class_id], JS_NULL);
@@ -68838,12 +68993,12 @@ static JSValue js_lazy_class_ctor(JSContext *ctx, int class_id)
        not expected. Kept as the safe answer. */
     if (!JS_IsNull(ctx->class_proto[class_id]))
         return JS_GetProperty(ctx, ctx->class_proto[class_id], JS_ATOM_constructor);
-    return js_lazy_ta_make(ctx, class_id);
+    return js_lazy_make(ctx, class_id);
 }
 
 /* A class_proto read found JS_NULL (LAZY_CLASS_MISSING). 0 = the prototype
    is there now, or this class is not lazy here (a context that never
-   registered the bindings keeps upstream's JS_NULL); -1 = exception. */
+   registered the group keeps upstream's JS_NULL); -1 = exception. */
 static int js_lazy_class_ensure(JSContext *ctx, int class_id)
 {
     JSObject *g;
@@ -68852,22 +69007,25 @@ static int js_lazy_class_ensure(JSContext *ctx, int class_id)
     JSAtom atom;
     const JSCFunctionListEntry *e;
     JSValue ctor;
+    int group = js_lazy_group(class_id);
 
-    if (!js_lazy_ta_class(class_id) || !JS_IsObject(ctx->ta_base))
+    if (group < 0 || !(ctx->lazy_groups & (1u << group)))
         return 0;
     /* Resolve the binding itself while it is still ours and pending, so the
        global and prototype.constructor are the same object. */
-    atom = js_lazy_ta_atom(class_id);
-    g = JS_VALUE_GET_OBJ(ctx->global_obj);
-    prs = find_own_property(&pr, g, atom);
-    if (prs && (prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT &&
-            js_autoinit_get_id(pr) == JS_AUTOINIT_ID_PROP &&
-            js_autoinit_get_realm(pr) == ctx) {
-        e = pr->u.init.opaque;
-        if (e >= js_lazy_ta_entries && e < js_lazy_ta_entries + countof(js_lazy_ta_entries))
-            return JS_AutoInitProperty(ctx, g, atom, pr, prs);
+    if (!js_lazy_map_iterator(class_id)) {
+        atom = js_lazy_atom(class_id);
+        g = JS_VALUE_GET_OBJ(ctx->global_obj);
+        prs = find_own_property(&pr, g, atom);
+        if (prs && (prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT &&
+                js_autoinit_get_id(pr) == JS_AUTOINIT_ID_PROP &&
+                js_autoinit_get_realm(pr) == ctx) {
+            e = pr->u.init.opaque;
+            if (e >= js_lazy_entries && e < js_lazy_entries + countof(js_lazy_entries))
+                return JS_AutoInitProperty(ctx, g, atom, pr, prs);
+        }
     }
-    ctor = js_lazy_ta_make(ctx, class_id);
+    ctor = js_lazy_make(ctx, class_id);
     if (JS_IsException(ctor))
         return -1;
     JS_FreeValue(ctx, ctor);

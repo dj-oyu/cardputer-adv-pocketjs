@@ -745,4 +745,39 @@ F2-5 の後で 35,444 B。runtime 8,536 B のうち **atom の表が約 6 KB**�
 ### 17.4 次の候補
 
 同じ仕組みで Map/Set（1.8 KB）・DOMException（1.4 KB）・WeakRef（0.7 KB）も遅延にできる（ホスト計算、F2 の後の
-§16.1 の floor32 の各行）。Promise は async 関数が内部で使うので対象外。
+§16.1 の floor32 の各行）。Promise は async 関数が内部で使うので対象外。→ §18。
+
+## 18. F3c: Map/Set・WeakRef・DOMException も初めて使うときに作る（2026-09-26、`vm/f3c-lazy-intrinsics`）
+
+`CONFIG_POCKET_VM_LAZY_INTRINSICS`（F3b と同じ設定、既定 y）の対象を広げた。
+
+### 18.1 何をしたか
+
+- F3b の仕組みを「群」に一般化した。`JS_AddIntrinsicMapSet`・`JS_AddIntrinsicWeakRef`・`JS_AddIntrinsicDOMException` の
+  先頭（既存の行）で、残りの代わりに `js_lazy_register` を呼ぶ。グローバルには元と同じ位置・順序・属性の autoinit
+  束縛を置き、`ctx->lazy_groups` にその群を登録したことを記録する。
+- 対象: `Map`・`Set`・`WeakMap`・`WeakSet`、`WeakRef`・`FinalizationRegistry`、`DOMException`。WeakRef と DOMException の
+  **クラス登録（ランタイム側）は登録時に即時**のままで、待つのはコンストラクタとプロトタイプの組だけ。
+- **Map/Set のイテレータのプロトタイプ**（`JS_CLASS_MAP_ITERATOR`・`SET_ITERATOR`）はグローバル名を持たない。
+  初めて `entries()`/`values()` を呼んだとき、つまり `JS_NewObjectClass` の判定（F3b の 4 箇所の 1 つ）で作る。
+- DOMException は即時版が失敗をすべて無視していた（context 生成は OOM カナリアで後から検査する）。遅延版は
+  途中で失敗したら組ごと捨てる。
+- 変更は既存の行とファイル末尾だけ。**n のビルドは vm/main と `.text`・`.rodata`・`.data`・`.bss` が一致**（同じ
+  フラグでホストの gcc で `quickjs.c` を比べた）。
+
+### 18.2 関所（ホスト）
+
+| 検査 | 結果 |
+| --- | --- |
+| 床（ホスト計算、実機レイアウト） | 28,824 → **24,928 B**（−3,896）。floor32 の MapSet・DOMException・WeakRef の行はどれも 0 B（束縛の分だけ） |
+| 空のスクリプトの `js=`（実機レイアウト版 vmrun、`malloc_size`） | 32,832 → **28,448** |
+| コーパス（既定・o2・遅延なし・ROM なし・F2 なし・`o2-keepsrc`・`o2-noli-nolb-keepsrc`・`--force-yield`） | すべて **79/79**。`lazy_intrinsics.js` に、触る前の削除と上書き、束縛の属性、Map のイテレータのプロトタイプ連鎖、`Map.groupBy`、Set の集合演算（内部で Set を作る）、WeakMap・WeakRef、DOMException の定数 25 個と継承を追加。期待値は遅延なしの出力 |
+| 確保番号で固定した OOM 回帰 3 件 | context 生成の確保が遅延なしより 270 回（F3b だけの時は 154 回）少ない。`li` の行を付け直した |
+| Test262（既定 asan・o2・o2 `--force-yield`） | すべて **退行 0** |
+| 負の対照（`f3_faults.sh`） | 既存 4 種＋新規 1 種（`JS_NewObjectClass` の判定なし → イテレータのプロトタイプが null）の **5 種すべて検出**。既存 2 種は F3c の書き換えで当てる場所が消え、そのままだと黙って走らなくなるところだった（`patch failed` で止まるので気づいた） |
+| F2 の負の対照 | 7 種すべて検出 |
+| 確保失敗の総当たり（`lazy_intrinsics.js` の 1,665 回すべて） | ASan・リーク・assert・異常終了 **0**。失敗を注入しても正常終了した 195 回は出力がすべて通常と一致 |
+| ファームのビルド | 通る。静的 DRAM は不変 |
+
+**実機の関所は未**（COM3 を Kasane の線に譲っている間。backlog F3c）。F3b の実機の差（−5.9 KB）と床の差（−4.8 KB）
+の比から、アプリの `js=` は 4〜5 KB 減る見込み（推定）。
