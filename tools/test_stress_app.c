@@ -34,6 +34,39 @@ void __wrap_free(void *ptr) { __real_free(ptr); }
 void *__wrap_calloc(size_t count,size_t size) { return __real_calloc(count,size); }
 
 static JSRuntime *rt;
+
+/* STRESS_ALLOC_TRACE=<file> (docs/vm/allocator-cost.md, R3's design): the
+ * guest allocator's calls as text -- "m <usable> <id>", "f <id>",
+ * "r <old id> <new id> <usable>", "F <frame>" -- with the device's tlsf
+ * rounding (4 B, 12 B minimum) as the usable size, so a -m32 build's trace
+ * has the device's sizes. Ids are sequence numbers, not addresses. */
+static FILE *alloc_trace;
+typedef struct { size_t usable; uint32_t id; } trace_hdr;
+static uint32_t trace_next_id=1;
+static size_t trace_usable(size_t n){ n=(n+3)&~(size_t)3; return n<12?12:n; }
+static void *tr_malloc(void *o,size_t n){
+    (void)o; if(!n) return NULL;
+    trace_hdr *h=malloc(sizeof(trace_hdr)+trace_usable(n)); if(!h) return NULL;
+    h->usable=trace_usable(n); h->id=trace_next_id++;
+    fprintf(alloc_trace,"m %zu %u\n",h->usable,h->id); return h+1;
+}
+static void tr_free(void *o,void *p){
+    (void)o; if(!p) return; trace_hdr *h=(trace_hdr *)p-1;
+    fprintf(alloc_trace,"f %u\n",h->id); free(h);
+}
+static void *tr_calloc(void *o,size_t c,size_t n){
+    void *p=tr_malloc(o,c*n); if(p) memset(p,0,c*n); return p;
+}
+static size_t tr_usable(const void *p){ return p?((const trace_hdr *)p-1)->usable:0; }
+static void *tr_realloc(void *o,void *p,size_t n){
+    (void)o; if(!p) return tr_malloc(o,n);
+    if(!n){ tr_free(o,p); return NULL; }
+    trace_hdr *h=(trace_hdr *)p-1; uint32_t old=h->id;
+    trace_hdr *q=realloc(h,sizeof(trace_hdr)+trace_usable(n)); if(!q) return NULL;
+    q->usable=trace_usable(n); q->id=trace_next_id++;
+    fprintf(alloc_trace,"r %u %u %zu\n",old,q->id,q->usable); return q+1;
+}
+static const JSMallocFunctions TRACE_MF={tr_calloc,tr_malloc,tr_free,tr_realloc,tr_usable};
 static JSContext *ctx;
 static uint16_t strip_pixels[240*8];
 static uint16_t panel[240*135];
@@ -144,7 +177,10 @@ int main(int argc,char **argv) {
     FILE *f=fopen(path,"rb");
     if(!f){printf("cannot open %s\n",path);return 2;}
     static char src[1<<15]; size_t n=fread(src,1,sizeof src-1,f); fclose(f); src[n]=0;
-    rt=JS_NewRuntime(); ctx=JS_NewContext(rt); host_capabilities_clear();
+    const char *trace_path=getenv("STRESS_ALLOC_TRACE");
+    if(trace_path&&(alloc_trace=fopen(trace_path,"w"))) rt=JS_NewRuntime2(&TRACE_MF,NULL);
+    else rt=JS_NewRuntime();
+    ctx=JS_NewContext(rt); host_capabilities_clear();
     JS_SetHostPromiseRejectionTracker(rt,promise_rejection,NULL);
     pocket_kasane_install(ctx,NULL);
     pocket_memory_install(ctx,NULL);
@@ -186,6 +222,7 @@ int main(int argc,char **argv) {
         unsigned buttons=(t==300||t==600)?0x4000u:0u;   // L1 -> L2 -> L3
         snprintf(call,sizeof call,"frame(%u)",buttons);
         unsigned suspects_before=lines_suspect;
+        if(alloc_trace) fprintf(alloc_trace,"F %u\n",t);
         eval(call,strlen(call),"frame.js");
         JSOOMCanary canary={0};
         JS_TakeOOMCanary(rt,&canary);
