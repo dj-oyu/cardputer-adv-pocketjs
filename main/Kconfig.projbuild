@@ -230,7 +230,7 @@ menu "Pocket VM (L0 measurement probes)"
             (docs/vm/builtin-floor-plan.md sec.13). n builds the old path.
 
     config POCKET_VM_LAZY_INTRINSICS
-        bool "F3b: typed-array constructors made on first use"
+        bool "F3b/F3c: typed-array, Map/Set, WeakRef, DOMException made on first use"
         default y
         help
             Every context made SharedArrayBuffer, the 12 typed-array
@@ -246,6 +246,10 @@ menu "Pocket VM (L0 measurement probes)"
             further 5.7-5.9 KB on the device, corpus/Test262 unchanged
             (docs/vm/builtin-floor-plan.md sec.17). n builds the old path,
             whose code is identical to the build before this option.
+
+            F3c (sec.18) puts Map/Set/WeakMap/WeakSet (and their iterator
+            prototypes), WeakRef/FinalizationRegistry and DOMException on the
+            same footing: a further ~3.9 KB of the floor (host calculation).
 
     config POCKET_VM_FLOORPROBE
         bool "F-line measurement: guest floor by stage, F1/F2 path counters"

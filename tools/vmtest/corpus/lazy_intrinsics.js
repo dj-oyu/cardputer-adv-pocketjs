@@ -25,6 +25,14 @@ p('in', 'Float16Array' in globalThis, Object.prototype.hasOwnProperty.call(globa
 p('delete', delete globalThis.Float32Array, typeof globalThis.Float32Array);
 globalThis.Int8Array = 5;
 p('overwrite', Int8Array, typeof Object.getOwnPropertyDescriptor(globalThis, 'Int8Array').value);
+// F3c groups, cold: the same for Map/Set, WeakRef and DOMException.
+p('f3c-delete', delete globalThis.WeakSet, typeof globalThis.WeakSet);
+globalThis.FinalizationRegistry = 7;
+p('f3c-overwrite', FinalizationRegistry);
+p('f3c-desc', ['Map', 'Set', 'WeakMap', 'WeakRef', 'DOMException'].map(n => {
+  const g = Object.getOwnPropertyDescriptor(globalThis, n);
+  return n + ':' + g.writable + g.enumerable + g.configurable + typeof g.value + g.value.name;
+}).join(' '));
 
 // %TypedArray% and its identities.
 const TA = Object.getPrototypeOf(Int32Array);
@@ -52,5 +60,19 @@ p('atomics', Atomics.load(i32, 0), i32.buffer === sab);
 const v = host.bytes(3);
 p('native-after', Array.from(v).join(','), Object.getPrototypeOf(v) === Object.getPrototypeOf(u));
 p('BigInt64Array', new BigInt64Array([5n])[0], typeof BigInt64Array.from);
+// F3c: the Map/Set iterator prototypes are made on the first entries().
+const mp = new Map([[1, 'a'], [2, 'b']]), it = mp.entries(), IP = Object.getPrototypeOf(it);
+p('map', mp.size, [...mp.keys()].join(','), Object.prototype.toString.call(it), IP === Object.getPrototypeOf(new Map().values()),
+  Object.getOwnPropertyNames(IP).join(','), Object.getPrototypeOf(IP) === Object.getPrototypeOf(Object.getPrototypeOf([].values())),
+  Map.groupBy([1, 2, 3], x => x % 2).get(1).join(','), Map.prototype.constructor === Map);
+const st = new Set([1, 2, 3]);
+p('set', st.has(2), [...st.union(new Set([4]))].join(','), st.union(new Set()) instanceof Set,
+  Object.prototype.toString.call(st.values()), Object.getOwnPropertyNames(Set.prototype).length);
+p('weak', new WeakMap([[{}, 1]]) instanceof WeakMap, typeof new WeakRef({}).deref(),
+  Object.getOwnPropertyNames(WeakRef.prototype).join(','), WeakRef.length);
+const de = new DOMException('m', 'NotFoundError');
+p('domex', de.name, de.message, de.code, DOMException.NOT_FOUND_ERR, de.NOT_FOUND_ERR, de instanceof Error,
+  Object.prototype.toString.call(de), Object.keys(DOMException).length, Object.keys(DOMException.prototype).length,
+  Object.getPrototypeOf(DOMException.prototype) === Error.prototype, DOMException.prototype.constructor === DOMException);
 p('global-keys-after', Object.getOwnPropertyNames(globalThis).join(','));
 console.log(out.join('\n'));
