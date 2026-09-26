@@ -916,9 +916,11 @@ static ksn_tx tx_from(JSContext *ctx, JSValueConst value, const char *op) {
     return (ksn_tx){raw};
 }
 
-/* Built on the first wrapper that needs them rather than with the namespace:
- * an app that never instantiates or animates keeps neither prototype, its
- * shape, nor the method-name atoms. Defined after the method tables. */
+/* Built on first use: native mount apps need none of the low-level drawing
+ * wrapper methods. Defined after the method tables. */
+static bool tx_proto(JSContext *ctx);
+static bool modal_proto(JSContext *ctx);
+static bool ref_proto(JSContext *ctx);
 static bool instance_proto(JSContext *ctx);
 static bool animation_proto(JSContext *ctx);
 
@@ -942,6 +944,9 @@ static JSValue js_tx_background(JSContext *ctx, JSValueConst self, int argc,
 }
 
 static JSValue expose_ref(JSContext *ctx,ksn_tx tx,ksn_ref ref) {
+    if(!ref_proto(ctx)) {
+        ksn_view_cancel(view(),tx);discard_candidates(tx);return JS_EXCEPTION;
+    }
     ref_slot *slot=claim_ref(ctx,ref,tx);
     if(!slot) { ksn_view_cancel(view(),tx); discard_candidates(tx); return JS_EXCEPTION; }
     JSValue object=wrap_direct(ctx,ref_class,slot->handle);
@@ -1464,6 +1469,7 @@ static JSValue run_build(JSContext *ctx, JSValueConst build, kasane_scene *scene
     if(state->provider||state->schema)return throw_result(ctx,KSN_BUSY,op);
     /* Keep the callback closed to reentrant builds after an inner abort. */
     if(state->building.value) return throw_result(ctx,KSN_BUSY,op);
+    if(!tx_proto(ctx)||!modal_proto(ctx)) return JS_EXCEPTION;
     apply_outcome();
     ksn_tx tx;ksn_result result=ksn_view_begin(view(),mode,&tx);
     if(result!=KSN_OK) return throw_result(ctx,result,op);
@@ -2534,6 +2540,15 @@ static bool lazy_proto(JSContext *ctx, JSClassID id, const JSCFunctionListEntry 
     return ready||set_proto(ctx,id,methods,count);
 }
 #define COUNT(methods) ((int)(sizeof(methods)/sizeof(methods[0])))
+static bool tx_proto(JSContext *ctx) {
+    return lazy_proto(ctx,tx_class,tx_methods,COUNT(tx_methods));
+}
+static bool modal_proto(JSContext *ctx) {
+    return lazy_proto(ctx,modal_class,modal_methods,COUNT(modal_methods));
+}
+static bool ref_proto(JSContext *ctx) {
+    return lazy_proto(ctx,ref_class,ref_methods,COUNT(ref_methods));
+}
 static bool instance_proto(JSContext *ctx) {
     return lazy_proto(ctx,instance_class,instance_methods,COUNT(instance_methods));
 }
@@ -2553,10 +2568,7 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
        !register_class(ctx,&image_class,&image_rt,&image_def)||
        !register_class(ctx,&ticket_class,&ticket_rt,&ticket_def)||
        !register_class(ctx,&scene_class,&scene_rt,&scene_def)||
-       !register_class(ctx,&schema_class,&schema_rt,&schema_def)||
-       !set_proto(ctx,tx_class,tx_methods,COUNT(tx_methods))||
-       !set_proto(ctx,modal_class,modal_methods,COUNT(modal_methods))||
-       !set_proto(ctx,ref_class,ref_methods,COUNT(ref_methods))) return ESP_ERR_NO_MEM;
+       !register_class(ctx,&schema_class,&schema_rt,&schema_def)) return ESP_ERR_NO_MEM;
     /* Handles with no methods, and scenes (whose methods are own properties),
      * inherit Object.prototype directly instead of each owning an empty object. */
     JSValue plain=JS_NewObject(ctx);

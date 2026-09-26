@@ -2034,6 +2034,30 @@ static void animation_tests(void){
     close_fault_runtime();check(ksn_runtime_shutdown()==KSN_OK&&live_allocations==0,"animation teardown releases all guest and native storage");
 }
 
+static void namespace_heap_tests(void) {
+    rt=JS_NewRuntime();ctx=rt?JS_NewContext(rt):NULL;
+    JSMemoryUsage before;
+    if(ctx){JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&before);}
+    check(ctx&&pocket_kasane_install(ctx,NULL)==ESP_OK,
+          "heap fixture installs Kasane namespace");
+    if(!ctx)return;
+    JSMemoryUsage base,loaded,mounted;
+    JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&base);
+    check(run("kasane.features();"),"heap fixture materializes Kasane namespace");
+    JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&loaded);
+    check(run("globalThis.heapView=kasane.mount('hello');"),
+          "heap fixture mounts native hello view");
+    JS_RunGC(rt);JS_ComputeMemoryUsage(rt,&mounted);
+    printf("KASANE_GUEST_HEAP pre=%lld install=%lld namespace=%lld mount=%lld malloc_pre=%lld malloc_install=%lld malloc_namespace=%lld malloc_mount=%lld\n",
+           (long long)before.memory_used_size,
+           (long long)base.memory_used_size,(long long)loaded.memory_used_size,
+           (long long)mounted.memory_used_size,(long long)before.malloc_size,
+           (long long)base.malloc_size,(long long)loaded.malloc_size,
+           (long long)mounted.malloc_size);
+    pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    ctx=NULL;rt=NULL;
+}
+
 int main(void) {
     rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
     check(pocket_kasane_install(ctx,NULL)==ESP_OK,"namespace installs");
@@ -2143,6 +2167,7 @@ int main(void) {
     check(!pocket_av_output_source_reset(true),
           "later reset does not falsely claim the retained source was freed");
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    namespace_heap_tests();
     allocator_tests();
     base_block_tests();
     lazy_cache_tests();
