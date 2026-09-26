@@ -251,6 +251,17 @@ menu "Pocket VM (L0 measurement probes)"
             prototypes), WeakRef/FinalizationRegistry and DOMException on the
             same footing: a further ~3.9 KB of the floor (host calculation).
 
+    config POCKET_VM_ALLOCPROBE
+        bool "R2 measurement: cycles inside the guest allocator"
+        default n
+        help
+            Measurement only (docs/vm/backlog.md R2). Counts calls and CPU
+            cycles inside the guest allocator's entry points (malloc/calloc,
+            free, realloc, usable size) and logs them with every KASANE_PAINT
+            line as "ALLOCPROBE ..." next to the same window's JS turn time.
+            USB ')' on the home screen runs a heap_caps microbenchmark
+            ("ALLOCBENCH size=... cycles") before starting a trivial app.
+
     config POCKET_VM_FLOORPROBE
         bool "F-line measurement: guest floor by stage, F1/F2 path counters"
         default n
