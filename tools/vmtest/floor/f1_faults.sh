@@ -34,7 +34,7 @@ run_case() {  # name expect(FAIL|PASS) [fault]
   fails=$(sed -n 's/.*failed (\(.*\))$/\1/p' <<< "$line")
   local got=PASS
   for f in $fails; do
-    pinned=$(head -n10 "tools/vmtest/corpus/$f.js" | grep -cE '^// vmrun-rom(-[a-z-]+)?-flags:')
+    pinned=$(head -n20 "tools/vmtest/corpus/$f.js" | grep -cE '^// vmrun-rom(-[a-z-]+)?-flags:')
     if [ "$name" != stale-table ] || [ "$pinned" = 0 ]; then got=FAIL; fi
   done
   if [ "$got" = "$expect" ]; then
