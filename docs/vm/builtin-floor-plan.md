@@ -793,4 +793,4 @@ F2-5 の後で 35,444 B。runtime 8,536 B のうち **atom の表が約 6 KB**�
 `test_settings.py` 通過、`memlog --check` 予算内（アプリ実行中の空き `app_free` 184,228、最大空きブロック 139,264、
 静的 DRAM 不変）、`stress_app.py` PASS（LV3 で 16 回の確保失敗からすべて回復、ネイティブ生成の `Uint8Array` 一致）。
 
-F 系列の前との差は §12.4 の「F 系列の前」の列（hello 85,988・imucal 100,708・pet 106,164・companion 98,396）との差。
+F 系列の前との差は §12.4 の「`js=` 既定」の列（F1 の前の既定ビルド、hello 85,988・imucal 100,708・pet 106,164・companion 98,396）との差。
