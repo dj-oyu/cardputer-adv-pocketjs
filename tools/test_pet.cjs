@@ -30,12 +30,26 @@ async function boot(initial, failRead=false, failWrite=false) {
     pocket:{kasane:k.view,pet:{select:(n)=>{if(n!==undefined){if(failWrite)throw Object.assign(Error(),{code:'IO_ERROR',outcome:'not-applied'});selected=n;}return selected;},rewards:()=>reward},
       storage:{get:()=>failRead?Promise.reject(Error()):Promise.resolve(initial?{value:structuredClone(initial)}:null),
         set:(key,v)=>{assert.equal(key,'pet.v1');if(failWrite)return Promise.reject(Error());saved=JSON.parse(JSON.stringify(v));writes++;return Promise.resolve();}}}};
+  // The host's side of a turn, as pet.js now registers for it: each set button
+  // bit is a press delivered to pocket.input.onAction, Back is the suspend hook
+  // (the app keeps itself asleep on Back and saves there), then one onFrame.
+  const ACT=[[L,'left'],[R,'right'],[U,'up'],[D,'down'],[E,'accept']];
+  let hooks={},onFrame=null,onAction=null;
+  ctx.pocket.input={onAction(f){onAction=f;}};
+  ctx.pocket.app={start(h){hooks=h;},onFrame(f){onFrame=f;}};
+  ctx.frame=(b)=>{
+    if(b&B){hooks.suspend();return;}
+    for(const [bit,action] of ACT)if(b&bit)onAction({action,phase:'press'});
+    onFrame();
+  };
+  ctx.resume=(ms)=>{time+=ms;hooks.resume({suspendedMs:ms});};
   vm.createContext(ctx);vm.runInContext(source,ctx);await Promise.resolve();
   const petRef=()=>k.refs.find(r=>r.kind==='image');
   return {key(b){ctx.frame(b);ctx.frame(0);},advance(ms){for(let n=0;n<ms;n+=1000){time+=Math.min(1000,ms-n);ctx.frame(0);}},
     feed(n){reward=n;},step(ms){time+=ms;ctx.frame(0);},
     get pose(){const p=petRef();return p&&{i:p.variant,y:p.bounds[1],m:p.frame};},
     get saved(){return saved;},get writes(){return writes;},get picture(){const p=petRef();return p?p.variant:-1;},
+    resume(ms){ctx.resume(ms);},
     has(t){return k.refs.some(r=>r.kind==='text'&&r.visible&&r.text.includes(t));},
     refs:k.refs};
 }
@@ -60,6 +74,10 @@ async function boot(initial, failRead=false, failWrite=false) {
   b.key(B);assert.equal(b.writes,2);
   let food=b.saved.pets[9].food;b.feed(5);b.advance(1);b.key(B);assert(b.saved.pets[9].food>food+4.9);
   food=b.saved.pets[9].food;b.advance(1);b.key(B);assert(b.saved.pets[9].food<=food);
+  // Asleep for ten minutes: the wake restarts the clock, so nothing decays for
+  // the time the app was not running -- the same as closing and reopening it.
+  food=b.saved.pets[9].food;b.key(B);b.resume(600000);b.step(1);b.key(B);
+  assert(b.saved.pets[9].food>food-0.01,'no decay while suspended');
   let corrupt={v:1,selected:999,pets:Array(12).fill(null)};
   b=await boot(corrupt);b.key(B);assert.equal(b.saved.selected,0);assert.equal(b.saved.pets[0].food,80);
   b=await boot(null,true);b.key(E);assert.equal(b.writes,0);assert(b.has('LOAD FAILED'));

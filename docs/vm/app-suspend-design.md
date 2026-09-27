@@ -182,3 +182,30 @@ S0〜S3 を実装した。§4 の表からの変更と、決めたことの実�
 `pocket.app.start` を使っていないので、書き換えが要る）、S5（music の再生をオーバーレイのセッションから
 切り離す）。無線・SD・マイク・I/O を使っている最中の中断は、診断アプリでは扱っていない（面ごとの実機の
 筋書きは S3 の残り）。
+
+### 11.1 S4: 出荷アプリの参加（2026-09-27）
+
+IMU CALIBRATION・POCKET PET・PET COMPANION を `pocket.app.start` に書き換え、`resume` を登録した。
+HELLO WORLD（smoke が Back での終了を前提にしている）と STRESS TEST（負荷試験）は今のまま終了する。
+
+- **pet**: `frame(buttons)` の押下の立ち上がりを `pocket.input.onAction` の press に、Back の `0x2000` での保存を
+  `suspend`／`stop` フックに移した。`resume` で経過時間の基準を取り直すので、眠っていた間は育成が進まない
+  （起動し直したときと同じ）。
+- **companion**: `frame` を `onFrame` に。`resume` で描き直す。タイマーとアラームはネイティブ（pet hub）なので
+  眠っていても鳴る。
+- **imucal**: `frame` を `onFrame` に。`resume` で眠る前の姿勢のサンプルを捨てる。IMU が無いときの経路は
+  従来の `frame` のまま（参加しない）。
+- 再開のときも最初の提示で `KASANE_FRAME_PRESENTED` を出す（アプリを開いた後にスクリプトが待つ目印）。
+- 診断（`K`、`1`〜`6`、効果音の検査）の前の退去が `CONFIG_POCKET_VM_SELFTEST` の中にしか無く、出荷構成では
+  眠っているアプリがあると `K` が `START_FAILED`（pocket API が別の realm に入ったまま）になった。外へ出した。
+
+**検証**: `tools/test_app_resume.py`（3 アプリそれぞれ 中断→同じ行で再開（`*_READY` が 2 度出ない）→中断→
+HELLO で退去）、`node tools/test_pet.cjs`（新たに「10 分眠っても空腹が進まない」）、`node
+tools/test_companion.cjs`（再開で描き直す）。実機の回帰: `app_mount_device_test.py`（IMU CALIBRATION の 2 度目は
+再開として、再開後もセンサーの表示が動く）、`kasane_input_device_test.py`、smoke 20 周、`test_settings.py`、
+`capture_home.py`、`test_editor_draft.py`、STRESS、`memlog --check`。検査の間に別のセッションが COM3 へ別の
+ファームを書いたので、1 回目の結果は捨て、`test_app_resume.py` を最初と最後に置いた回で確かめた（私の
+ファームでしか通らない）。
+
+`tools/test_kasane_imucal.c` は `vm/main` の時点で既に落ちている（模擬の Kasane が `BUSY`、IMU が無い経路から）。
+今回の書き換えに合わせて模擬に `pocket.app` と途中の `resume` を足したが、落ちる理由は別件（backlog）。

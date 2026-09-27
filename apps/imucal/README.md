@@ -4,6 +4,10 @@
 already aligned with the published frame, so `main/motion.c` keeps the identity
 macros. Re-run this if the sensor is reseated or the board revised.
 
+Back keeps the app asleep rather than ending it (docs/vm/app-suspend-design.md):
+opening the row again continues the same calibration, with the pre-sleep
+samples dropped so a stale posture cannot count as holding still.
+
 `imucal.js` finds how the BMI270 is oriented on the Cardputer ADV board and
 prints the three macros `main/motion.c` needs:
 

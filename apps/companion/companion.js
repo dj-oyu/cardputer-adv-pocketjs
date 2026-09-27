@@ -41,6 +41,7 @@ else if(s.g===3)p.alarm('companion.timer',p.timer('companion.timer')===null?s.m*
 render();
 });
 var last=0;
-globalThis.frame=function(){var now=p.now();if(now-last>=1000){last=now;render();}};
+pocket.app.start({resume:render});
+pocket.app.onFrame(function(){var now=p.now();if(now-last>=1000){last=now;render();}});
 render();console.log('COMPANION_READY');
 })();
