@@ -3,6 +3,7 @@
 #include "app_session.h"
 #include "app_registry.h"
 #include "pocket_overlay.h"
+#include "pocket_av.h"
 #include "pocket_kasane.h"
 #include "kasane/ksn_p0_probe.h"
 #include "board.h"
@@ -36,6 +37,7 @@ typedef struct {
     const char      **source_end;
     overlay_region_t  region;
     uint32_t          budget_us;
+    bool              adopts_music;   // takes over the host's background player
 } overlay_app_t;
 
 static const char *deskclock_src, *deskclock_src_end;
@@ -68,6 +70,7 @@ static const overlay_app_t MUSIC = {
     // inside its turn. Still a small fraction of the frame: what this catches
     // is a turn that has stopped returning, not one that is working.
     .budget_us=12000,
+    .adopts_music=true,
 };
 
 static const overlay_app_t *const REGISTERED[OVERLAY_APPS] = { &DESKCLOCK, &MUSIC };
@@ -207,8 +210,11 @@ void overlay_armed_set(unsigned value) {
 
 // ------------------------------------------------------------- start/stop
 
-static void stop_with(const char *label, overlay_state_t next) {
-    if(session_up) { app_stop(); session_up=false; }
+static void stop_with(const char *label, overlay_state_t next, bool keep_music) {
+    if(session_up) {
+        if(keep_music) app_stop_keep_music(); else app_stop();
+        session_up=false;
+    }
     if(flag_stored) flag_set(false);
     state=next;
     budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
@@ -219,7 +225,8 @@ static void stop_with(const char *label, overlay_state_t next) {
 
 void overlay_release(void) {
     if(session_up) {
-        app_stop(); session_up=false;
+        // Giving the display away is not a stop: the music goes on (S5).
+        app_stop_keep_music(); session_up=false;
         // Back to armed-but-not-up, so the home screen starts it again when it
         // gets the frame back. A release is not a fault, so REFUSED and
         // STOPPED are left standing: those are decisions, and giving the
@@ -285,8 +292,23 @@ static uint32_t free_internal(void) {
 // piece; and it does not use the cap as the cost, because a ceiling is not a
 // price. It asks only whether the total is plausible, so the obvious "no" costs
 // nothing. The answer that counts is taken after the start, from what happened.
-static bool plausible(void) {
-    return free_internal()>=OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR;
+//
+// One credit: the music overlay starting over background music (S5) adopts a
+// player that is already paid for, and the forecast above counts one it would
+// open. What that player holds, measured (device) 2026-09-28 as the home
+// screen's free heap with and without it: 217,064 - 154,468 = 62,596 bytes.
+// The credit is rounded DOWN, and without it the adoption the person asked for
+// was refused by 1,192 bytes. The check after the start still decides.
+#define OVERLAY_BG_MUSIC_CREDIT (60*1024)
+
+static uint32_t overlay_needs(const overlay_app_t *o) {
+    uint32_t need=OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR;
+    if(o->adopts_music && pocket_av_background_active()) need-=OVERLAY_BG_MUSIC_CREDIT;
+    return need;
+}
+
+static bool plausible(const overlay_app_t *o) {
+    return free_internal()>=overlay_needs(o);
 }
 
 static void start(void) {
@@ -294,12 +316,12 @@ static void start(void) {
     const overlay_app_t *o=REGISTERED[choice-1];
     current=o;
     uint32_t before=free_internal();
-    if(!plausible()) {
+    if(!plausible(o)) {
         state=OVERLAY_REFUSED;
         say("NO ROOM");
         ESP_LOGW(TAG,"OVERLAY_REFUSED_GATE free=%u needs=%u expected=%u floor=%u",
                  (unsigned)before,
-                 (unsigned)(OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR),
+                 (unsigned)overlay_needs(o),
                  (unsigned)OVERLAY_EXPECTED_COST,(unsigned)OVERLAY_FREE_FLOOR);
         return;
     }
@@ -354,7 +376,7 @@ static void start(void) {
         // worse off, which is the case 3.1 had no name for. The reason is
         // stateable -- the radio could no longer be brought up -- and it is
         // shown in the row the person would turn it off from.
-        stop_with("NO ROOM",OVERLAY_REFUSED);
+        stop_with("NO ROOM",OVERLAY_REFUSED,false);
         ESP_LOGW(TAG,"OVERLAY_REFUSED_FLOOR free=%u below floor=%u",
                  (unsigned)after,(unsigned)OVERLAY_FREE_FLOOR);
         return;
@@ -378,7 +400,7 @@ void overlay_tick(uint32_t frame_us) {
         ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,total);
         budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
         if(overlay_budget_turn(&budget,total,frame_us)) {
-            stop_with("OVER BUDGET",OVERLAY_STOPPED);return;
+            stop_with("OVER BUDGET",OVERLAY_STOPPED,false);return;
         }
         if(flag_stored&&overlay_budget_healthy(&budget,(uint64_t)began)) {
             proven=true;flag_set(false);
@@ -398,7 +420,7 @@ void overlay_tick(uint32_t frame_us) {
     began=esp_timer_get_time();
     esp_err_t err=app_overlay_tick();
     uint32_t spent=(uint32_t)(esp_timer_get_time()-began);
-    if(err!=ESP_OK) { stop_with("FAULTED",OVERLAY_STOPPED); return; }
+    if(err!=ESP_OK) { stop_with("FAULTED",OVERLAY_STOPPED,false); return; }
     if(overlay_kasane_active()) {
         budget_guest_us=spent;budget_composite_us=0;budget_frame_pending=true;
         return;
@@ -408,7 +430,7 @@ void overlay_tick(uint32_t frame_us) {
         // 3.1: stopped, and the stop is SHOWN. The Settings row is where the
         // person would go to turn it off, so it is where they are told it
         // already stopped -- a silent stop is indistinguishable from a fault.
-        stop_with("OVER BUDGET",OVERLAY_STOPPED);
+        stop_with("OVER BUDGET",OVERLAY_STOPPED,false);
         return;
     }
     ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,spent);
@@ -440,11 +462,11 @@ void overlay_tick(uint32_t frame_us) {
 // numbers that do not exist yet. This end is ready: it is idempotent, it is
 // safe from any task that already calls into the shell, and it leaves the row
 // saying why.
-void overlay_yield(const char *claimant) {
+void overlay_yield(const char *claimant, bool keep_music) {
     if(state!=OVERLAY_RUNNING && !session_up) return;
     ESP_LOGW(TAG,"OVERLAY_YIELDED to %s free=%u",
              claimant?claimant:"?",(unsigned)free_internal());
-    stop_with("YIELDED",OVERLAY_STOPPED);
+    stop_with("YIELDED",OVERLAY_STOPPED,keep_music);
 }
 
 void overlay_paint(uint16_t *strip, int strip_y, int strip_h) {

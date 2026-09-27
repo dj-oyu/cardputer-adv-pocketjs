@@ -27,17 +27,20 @@
     path = src; busy = true;
     view.set({title: leaf(src), message: 'OPENING'});
     pocket.audio.player.open({ source: src }).then(function (h) {
-      p = h;
-      view.bind('playback');
+      attach(h);
       console.log('PLAYER_OPEN ' + src + ' durationMs=' + h.info().durationMs);
-      sub = h.onState(function (e) {
-        state = e.state; say('');
-        if (e.state === 'error') { fail('PLAYBACK', e.error); return; }
-        if (e.state === 'ended') next();
-      });
-      busy = false;
       if (play) h.play().then(null, function (e) { fail('PLAY', e); });
     }, function (e) { fail('OPEN', e); });
+  }
+
+  function attach(h) {
+    p = h; busy = false;
+    view.bind('playback');
+    sub = h.onState(function (e) {
+      state = e.state; say('');
+      if (e.state === 'error') { fail('PLAYBACK', e.error); return; }
+      if (e.state === 'ended') next();
+    });
   }
 
   // The queue, asked of the host at the only moment it matters. Nothing here
@@ -104,6 +107,13 @@
   });
 
   view.set({title: 'NO TRACK', message: 'ENTER TO CHOOSE'});
+  // Music the host kept playing while this overlay was away (S5). README.md.
+  var kept = pocket.audio.player.current();
+  if (kept) {
+    path = kept.info().source; state = 'playing'; attach(kept);
+    view.set({title: leaf(path), message: ''});
+    console.log('PLAYER_ADOPTED ' + path);
+  }
   // Input and Promise callbacks own the JS work; native Kasane owns drawing.
   globalThis.frame = null;
 })();

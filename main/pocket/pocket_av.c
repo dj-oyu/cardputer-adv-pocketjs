@@ -12,6 +12,8 @@
 #include "pocket_power.h"
 #include "pocket_av_output_source.h"
 #include "pocket_av_playback_source.h"
+#include "file_picker.h"
+#include "sd_media.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -225,6 +227,8 @@ static JSValue js_tone(JSContext *ctx, JSValueConst this_val,
     JSValue bad=take_options(ctx,argc>1?argv[1]:JS_UNDEFINED,OP,&options);
     if(!JS_IsUndefined(bad)) return bad;
 
+    // S5 (sec.8-2): an app's own sound wins over the background music.
+    pocket_av_background_stop("tone");
     // Section 4 allows one operation of a kind per handle and answers the
     // second with BUSY. One tone at a time is also what sound.c can cancel:
     // it remembers a single id.
@@ -1244,6 +1248,9 @@ static JSValue js_player_method(JSContext *ctx, JSValueConst this_val,
             // have to fake.
             JS_SetPropertyStr(ctx,info,"seekable",
                               (player.net||player.codec==C_MP3)?JS_FALSE:JS_TRUE);
+            // What was opened: an app that takes over a player it did not open
+            // (player.current(), S5) needs it to walk the folder on from there.
+            JS_SetPropertyStr(ctx,info,"source",JS_NewString(ctx,player.path?player.path:""));
             return info;
         }
         case M_PLAY: {
@@ -1543,6 +1550,8 @@ static JSValue js_player_open(JSContext *ctx, JSValueConst this_val,
     if(!sound_available())
         return pocket_api_reject(ctx,POCKET_ERR_NOT_AVAILABLE,OP,
             "no audio codec on this unit",false,POCKET_OUTCOME_NOT_APPLIED);
+    // S5 (sec.8-2): an app's own sound wins over the background music.
+    pocket_av_background_stop("player");
     // Section 9.1: one player, and it is exclusive with the tone. The tone is
     // not stopped for it -- a running tone means this call is early, not that
     // the tone was a mistake.
@@ -1626,6 +1635,112 @@ static JSValue js_player_open(JSContext *ctx, JSValueConst this_val,
     return pocket_api_settled(ctx,object,false);
 }
 
+// ------------------------------------------------------- background music
+//
+// docs/vm/app-suspend-design.md S5. The home screen's music overlay is a JS
+// session like any other, and a session that ends takes its player with it --
+// which is wrong for music: the person expects it to keep playing while they
+// open an app, while that app sleeps, while they are in the settings. So when
+// the overlay gives the display away (overlay_release, not a stop), a player
+// that is playing is handed to the host: `bg`. The host has no JS to ask, so
+// it does what player.js would have done -- on "ended" it opens the next file
+// of the folder, on "error" it stops -- and whoever wants the sound or the
+// card more, wins it (sec.8-2): a foreground player, tone or recording, an
+// app's use of sd:, low memory at an app start, or Back on the home screen.
+// The overlay coming back takes the player over again with player.current().
+static bool bg;
+static bool built;   // the audio namespace's lifetime; defined with pocket_av_reset()
+
+// js_player_open's file branch, without the JS: what the host needs to go on
+// to the next file of the folder.
+static bool player_open_native(const char *source) {
+    size_t n=strlen(source)+1;
+    char *path=malloc(n);
+    if(!path) return false;
+    memcpy(path,source,n);
+    player.path=path; player.net=false; player.open_req=0;
+    const char *code=NULL;
+    int32_t size=pocket_fs_read_all(player.path,NULL,0,&code);
+    if(size<0 || source_parse((uint32_t)size)) {
+        free(player.path); player.path=NULL;
+        return false;
+    }
+    player.open=true; player.id=player_next_id++;
+    player.position=0; player_reported=0; player.stream=0;
+    player.feed=0; player.underruns=0;
+    player.ring_bytes=NULL; player.ring.bytes=NULL;
+    player.pkt_bytes=NULL; player.pkt.bytes=NULL;
+    sound_stream_rewind(&player.ring);
+    sound_stream_rewind(&player.pkt);
+    player.state=P_READY; player.announce=false;
+    return true;
+}
+
+bool pocket_av_background_active(void) { return bg; }
+bool pocket_av_background_holds_card(void) {
+    return bg && player.path && !strncmp(player.path,"sd:",3);
+}
+
+void pocket_av_background_stop(const char *why) {
+    if(!bg) return;
+    bool card=pocket_av_background_holds_card();
+    bg=false;
+    player_teardown();
+    // The card was kept mounted, and granted, for the music alone. Given back
+    // now -- and serviced at once, so a requestFolder right behind this finds
+    // it unmounted rather than still waiting on the reader's lease.
+    if(card) { sd_media_unmount(); sd_media_service(); }
+    ESP_LOGI("pocket.av","BG_MUSIC_STOPPED %s",why?why:"?");
+}
+
+// app_stop() of the overlay that is giving the display away, before
+// pocket_av_reset(): the playing player becomes the host's. Its listeners go
+// with the session; the JS objects that held it are about to be freed.
+bool pocket_av_detach_background(void) {
+    if(!built||!player.open||player.net||player.state!=P_PLAYING) return false;
+    pocket_api_sub_close_all(&player_table);
+    player_table.ctx=NULL;
+    bg=true;
+    ESP_LOGI("pocket.av","BG_MUSIC_DETACHED %s",player.path?player.path:"?");
+    return true;
+}
+
+// player.current(): the overlay, back on the home screen, takes the music over
+// again. null when nothing plays in the background -- the overlay then opens
+// a file as it always has.
+static JSValue js_player_current(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv) {
+    (void)this_val; (void)argc; (void)argv;
+    if(!bg||!player.open) return JS_NULL;
+    JSValue handle=player_handle(ctx);
+    if(JS_IsException(handle)) return handle;
+    bg=false;
+    ESP_LOGI("pocket.av","BG_MUSIC_ADOPTED %s",player.path?player.path:"?");
+    return handle;
+}
+
+// Every UI frame, from pocket_av_service_stream(): the queue player.js would
+// have kept, and the card service no session is pumping.
+static void bg_service(void) {
+    if(!bg) return;
+    if(!player.open) { bg=false; return; }
+    if(pocket_av_background_holds_card()) sd_media_service();
+    if(player.state==P_ERROR) { pocket_av_background_stop("error"); return; }
+    if(player.state!=P_ENDED) return;
+    static const char *const EXT[]={".mp3",".wav",".pok"};
+    char next[256];
+    bool have=file_picker_next_path(player.path,EXT,3,next,sizeof next);
+    player_teardown();
+    if(!have || !player_open_native(next) || player_launch()) {
+        if(player.open) player_teardown();
+        bg=false;
+        ESP_LOGI("pocket.av","BG_MUSIC_END %s",have?next:"no next file");
+        return;
+    }
+    player_set_state(P_PLAYING);
+    ESP_LOGI("pocket.av","BG_MUSIC_NEXT %s",next);
+}
+
 // ------------------------------------------------------------- pump / reset
 
 void pocket_av_pump(void) {
@@ -1638,6 +1753,7 @@ void pocket_av_service_stream(void) {
     // Called once per UI frame before modal and presentation early returns.
     // File reads stay on their owner task; no JS value is touched here.
     player_service_stream();
+    bg_service();
     pocket_av_output_source_service(player.open?player.stream:0);
     pocket_av_playback_source_service();
 }
@@ -1656,7 +1772,8 @@ static bool play_on_wake;
 
 void pocket_av_suspend(void) {
     play_on_wake=false;
-    if(!built || !player.open) return;
+    // The background music is not the sleeping app's (S5).
+    if(bg || !built || !player.open) return;
     bool sd_source=player.path && !strncmp(player.path,"sd:",3);
     if(player.net || player.sd_mp3 || sd_source) {
         player_teardown();
@@ -1685,8 +1802,15 @@ void pocket_av_resume(void) {
 
 bool pocket_av_reset(void) {
     pocket_power_reset();
-    if(!built) return true;
+    // The background music (S5) is the host's, not this session's: it is not
+    // torn down here, and the audio has not stopped for the sources' sake.
+    if(!built) return !bg;
     built=false;
+    if(bg) {
+        pocket_api_sub_close_all(&player_table);
+        player_table.ctx=NULL;
+        return false;
+    }
     // The tone is not here: it waits on a promise slot, and pocket_api_reset()
     // is what asks it to stop and lets its resolvers go.
     // The clip is read by the audio task, so this has to be the thing that
@@ -1832,6 +1956,8 @@ static esp_err_t build_audio(JSContext *ctx, JSValueConst ns, void *user) {
     JSValue object=JS_NewObject(ctx);
     JS_DefinePropertyValueStr(ctx,object,"open",
         JS_NewCFunction(ctx,js_player_open,"open",2),JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx,object,"current",
+        JS_NewCFunction(ctx,js_player_current,"current",0),JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx,ns,"player",object,JS_PROP_ENUMERABLE);
     built=true;
     return ESP_OK;

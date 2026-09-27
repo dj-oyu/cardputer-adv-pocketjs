@@ -66,6 +66,9 @@ bool app_can_suspend(void);
 esp_err_t app_suspend(void);
 esp_err_t app_resume(void);
 const char *app_dormant_id(void);
+// S5: app_stop() for an overlay giving the display away; its playing music
+// becomes the host's background music instead of stopping.
+void app_stop_keep_music(void);
 // One turn of an overlay session. Guest JavaScript is advanced and its Kasane
 // transaction is closed here. Presentation remains shell-owned so it can load
 // the native scene into each strip before composing the APP layer.

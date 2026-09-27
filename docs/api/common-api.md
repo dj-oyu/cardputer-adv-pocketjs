@@ -466,11 +466,12 @@ WAV（PCM16／IMA ADPCM）、Opus CELT（§9.1.2）、MP3（§9.1.3）を実装�
 
 ```ts
 pocket.audio.player.open({source:string}, options?:Options):Promise<Player>;
+pocket.audio.player.current():Player|null;
 pocket.audio.outputSource(options?: {sampleMs?: number}): KasaneSourceCapability;
 pocket.audio.playbackSource(): KasaneSourceCapability;
 type Player = {
   info(): {codec:"wav/pcm16"|"wav/ima-adpcm"|"opus/celt"|"mp3";sampleRate:24000;channels:1;
-           durationMs:number|null;seekable:boolean};
+           durationMs:number|null;seekable:boolean;source:string};
   play():Promise<void>;
   pause():Promise<void>;
   seek(positionMs:number,options?:Options):Promise<void>;
@@ -480,6 +481,17 @@ type Player = {
   close():void;
 };
 ```
+
+**セッションを越える再生（バックグラウンドの音楽）。** playerはふつうセッションの終わりに閉じるが、
+例外が1つある。ホームのオーバーレイ（MUSIC）が再生中のplayerは、オーバーレイがホームを譲るとき
+（前景のアプリを開く、ホームでBackを押す）に閉じられず、ホストのものとして鳴り続ける。曲が終わると
+同じフォルダの次の曲（`.mp3`/`.wav`/`.pok`、`fs.nextFile`と同じ名前順）へ進み、最後の曲の次は先頭へ戻る。前景のアプリが音
+（`player.open`・`tone`・`capture`）かSD（`fs`のSDへのアクセス・`pickFile`・`requestFolder`）を使うと、その
+時点で止まる（前景が優先）。メニューを出した状態でホームのBackを押しても止まる。
+`player.current()`は、そのplayerを次に起動したオーバーレイのセッションへ引き渡す（ハンドルは今の
+セッションのものになり、`onState`もこのセッションへ届く）。引き渡すものが無ければ`null`。
+`info().source`は開いた`source`の文字列で、引き取ったplayerの曲名を出すのに使う。
+設計と決めたことは`docs/vm/app-suspend-design.md`のS5。
 
 `audio.outputSource()`は実装済みの任意Kasane mount用source。field 0はtext
 `HH:MM:SS`（8 byte）、field 1は論理的な再生位置frames（`u32`）、field 2は

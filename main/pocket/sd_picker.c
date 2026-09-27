@@ -28,6 +28,7 @@
 //    person said no, nobody is holding those bytes -- but only if no earlier
 //    grant is live, because unmounting drops the grant and would silently
 //    invalidate handles the person did authorise.
+#include "pocket_av.h"
 #include "sd_picker.h"
 #include "pickmodal.h"
 #include "sd_media.h"
@@ -251,6 +252,8 @@ JSValue sd_picker_request(JSContext *ctx, JSValueConst self,
                           int argc, JSValueConst *argv) {
     (void)self;
     static const char OP[]="fs.requestFolder";
+    // S5: an app that reaches for the card wins it from the background music.
+    if(pocket_av_background_holds_card()) pocket_av_background_stop("sd");
     // The volume id is named rather than assumed: app: and assets: need no
     // permission and have no folder to choose, and a future removable volume
     // must not silently mean this one on a firmware that predates it.

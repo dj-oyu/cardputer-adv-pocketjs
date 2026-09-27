@@ -12,6 +12,7 @@ typedef enum {
 
 void shell_init(void);
 bool shell_key(board_key_t key);
+bool shell_choices_open(void);
 unsigned shell_app(void);   // which Apps entry Enter would launch
 // The screen the last key press asked for, and clears it. Poll once per key,
 // after shell_key(); SHELL_SCREEN_NONE means stay on the home screen.

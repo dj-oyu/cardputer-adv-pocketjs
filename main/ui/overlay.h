@@ -72,8 +72,10 @@ void overlay_release(void);
 // Intended for the moment a large recurring claim is actually made -- the radio
 // coming up, an audio stream starting -- rather than for a forecast taken when
 // the overlay started. It has no call sites yet; see the definition for why.
-// Idempotent.
-void overlay_yield(const char *claimant);
+// Idempotent. keep_music: a player the overlay has playing goes on as the
+// host's background music (S5) -- true only for the person's Back, which asks
+// for the menu, not for silence; a second Back on the menu is what stops it.
+void overlay_yield(const char *claimant, bool keep_music);
 
 // Composites the overlay's display list. Called from shell_draw() per strip,
 // AFTER the scene and BEFORE the shell's own labels.
