@@ -123,3 +123,18 @@ CONFIG_FATFS_VOLUME_COUNT=1
 # fresh sdkconfig and not for an existing one, so this needed the same three
 # lines edited in sdkconfig itself. A fresh checkout gets it from here.
 CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+
+# Flash in QIO instead of DIO. The JS turn waits on the flash cache for 70% of
+# its cycles even with the 32 KB cache above (I_STALL_BUSY, which on this chip
+# is the flash-cache miss wait: docs/perf/ray-stall-census.md 2.5): a frame's
+# interpreter code is ~65-84 KB against the cache's 32 (estimate, host call
+# graph against the device's symbol sizes). A quad read moves a line in half the
+# clocks of a dual one, and on the same binary layout (JS_CallInternal at the
+# same address) STRESS LV1's JS per frame went 10.78 -> 7.25 ms and render
+# 6.61 -> 6.16 ms, measured with CONFIG_POCKET_VM_TURNPERF (docs/vm/turn-cpi.md).
+# The part is an XMC 0x4017 with the eFuse flash type set to quad (esptool
+# flash-id). No code and no DRAM: the bootloader switches the mode.
+#
+# As with the cache size above, an existing sdkconfig keeps its DIO line; edit
+# CONFIG_ESPTOOLPY_FLASHMODE_* there too (or start that build_* directory fresh).
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y

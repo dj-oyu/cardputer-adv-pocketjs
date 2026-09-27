@@ -214,6 +214,84 @@ static void prof_accumulate(const ksn_render_prof *frame){
     prof_sum.blend_cy+=frame->blend_cy;prof_sum.blend_n+=frame->blend_n;
     prof_sum.read_cy+=frame->read_cy;prof_sum.read_n+=frame->read_n;
 }
+#ifdef CONFIG_POCKET_VM_TURNPERF
+// R4 (docs/vm/turn-cpi.md): the ordinary JS turn against the core's own
+// counters, the arming main/scene/garden.c worked out. Two counters is the
+// whole budget (XCHAL_NUM_PERF_COUNTERS): PM0 stays on cycles so every ratio
+// has a denominator taken through the same brackets, PM1 rotates one event per
+// window. kernelcnt 0 counts task code only (CINTLEVEL <= TRACELEVEL), so ISR
+// time inside the bracket drops out of both terms. PM1's ERI slot doubles as
+// apptrace's CRC scratch; apptrace is off in every build this is meant for.
+#include "eri.h"
+#include "xtensa-debug-module.h"
+#include "xtensa/xt_perf_consts.h"
+#define TURNPERF_WINDOW 30u
+static const struct {const char *name;uint16_t select,mask;} turnperf_events[]={
+    {"insn",       XTPERF_CNT_INSN,    XTPERF_MASK_INSN_ALL},
+    {"istall",     XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_ALL},
+    {"dstall",     XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_ALL},
+    {"bubbles",    XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_ALL},
+    {"exr",        XTPERF_CNT_EXR,     XTPERF_MASK_EXR_ALL},
+    {"icachemiss", XTPERF_CNT_I_MEM,   XTPERF_MASK_I_MEM_CACHE_MISSES},
+    {"istall_miss",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_CACHE_MISS},
+    {"istall_busy",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_BUSY},
+    {"istall_pif", XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_IN_PIF},
+    {"istall_run", XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_EXTERNAL_SIGNAL},
+    {"istall_unc", XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_UNCACHED_FETCH},
+    {"istall_l32r",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_FAST_L32R},
+    {"istall_idiv",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_ITERATIVE_DIV},
+    {"istall_imul",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_ITERATIVE_MUL},
+    {"dstall_busy",XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_BUSY},
+    {"dstall_pif", XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_IN_PIF},
+    {"dstall_sbuf",XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_STORE_BUF_FULL},
+    {"dstall_bank",XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_BANK_CONFLICT},
+    {"regdep",     XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_R_HOLD_REG_DEP},
+    {"cti",        XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_CTI},
+    {"memw",       XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_R_HOLD_WAIT},
+    // The windowed ABI spills and refills register frames through exceptions;
+    // an interpreter that recurses through JS_CallInternal pays them per call.
+    {"exr_window", XTPERF_CNT_EXR,     XTPERF_MASK_EXR_WINDOW},
+    {"exr_replay", XTPERF_CNT_EXR,     XTPERF_MASK_EXR_REPLAYS},
+    {"load",       XTPERF_CNT_D_LOAD_U1,XTPERF_MASK_D_LOAD_ALL},
+    {"imem_hit",   XTPERF_CNT_I_MEM,   XTPERF_MASK_I_MEM_CACHE_HITS},
+};
+#define TURNPERF_EVENTS (sizeof turnperf_events/sizeof*turnperf_events)
+static unsigned turnperf_sel,turnperf_n,turnperf_cont_n;
+// Continuation turns are not bracketed, only timed: a frame() the 8 ms budget
+// cut finishes in one, so per-frame JS time is (us+cont_us)/n, and a change
+// that shortens the ordinary turn below the budget moves time out of cont_us.
+static uint32_t turnperf_pm0,turnperf_pm1,turnperf_us,turnperf_cont_us;
+static bool turnperf_armed;
+static void turnperf_arm(unsigned sel) {
+    const uint16_t sels[2]={XTPERF_CNT_CYCLES,turnperf_events[sel].select};
+    const uint16_t masks[2]={XTPERF_MASK_CYCLES,turnperf_events[sel].mask};
+    for(int id=0;id<2;id++) {
+        uint32_t pmc=((uint32_t)(sels[id]&PMCTRL_SELECT_MASK)<<PMCTRL_SELECT_SHIFT)
+                    |((uint32_t)(masks[id]&PMCTRL_MASK_MASK)<<PMCTRL_MASK_SHIFT);
+        eri_write(ERI_PERFMON_PM0+id*4,0);
+        eri_write(ERI_PERFMON_PMCTRL0+id*4,pmc);
+    }
+    eri_write(ERI_PERFMON_PGM,PGM_PMEN);
+    turnperf_armed=true;
+}
+// The ui task is pinned (POCKET_UI_TASK_CORE), so both reads of a bracket are
+// the same core's counters.
+static inline void turnperf_read(uint32_t *c0,uint32_t *c1) {
+    if(!turnperf_armed) turnperf_arm(turnperf_sel);
+    *c0=eri_read(ERI_PERFMON_PM0);*c1=eri_read(ERI_PERFMON_PM0+4);
+}
+static void turnperf_add(uint32_t a0,uint32_t a1,uint32_t us) {
+    uint32_t b0=eri_read(ERI_PERFMON_PM0),b1=eri_read(ERI_PERFMON_PM0+4);
+    turnperf_pm0+=b0-a0;turnperf_pm1+=b1-a1;turnperf_us+=us;
+    if(++turnperf_n<TURNPERF_WINDOW) return;
+    ESP_LOGI("app","TURNPERF %s cy=%lu ev=%lu n=%u us=%lu cont_n=%u cont_us=%lu",
+             turnperf_events[turnperf_sel].name,(unsigned long)turnperf_pm0,(unsigned long)turnperf_pm1,
+             turnperf_n,(unsigned long)turnperf_us,turnperf_cont_n,(unsigned long)turnperf_cont_us);
+    turnperf_pm0=turnperf_pm1=turnperf_us=turnperf_cont_us=0;turnperf_n=turnperf_cont_n=0;
+    turnperf_sel=(turnperf_sel+1)%TURNPERF_EVENTS;
+    turnperf_arm(turnperf_sel);
+}
+#endif
 // Borrowed for the length of a start; the Playground owns the bytes and does
 // not edit them while a run is up.
 static const char *user_source;
@@ -1446,6 +1524,9 @@ esp_err_t app_tick(uint32_t buttons) {
         pocket_kasane_end_turn();
         uint32_t continuation_us=(uint32_t)(esp_timer_get_time()-cont_began);
         turn_sum+=(double)continuation_us; ticks++;
+#ifdef CONFIG_POCKET_VM_TURNPERF
+        turnperf_cont_us+=continuation_us; turnperf_cont_n++;
+#endif
         ksn_p0_probe_sample(KSN_P0_APP_TURN,continuation_us);
         report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
@@ -1504,8 +1585,14 @@ esp_err_t app_tick(uint32_t buttons) {
     // The JS side of the frame: frame() in QuickJS. Timed on every tick, painted or not, so turn_ms is its own number
     // next to render_ms rather than hidden inside the frame period.
     int64_t turning=esp_timer_get_time();
+#ifdef CONFIG_POCKET_VM_TURNPERF
+    uint32_t tp0,tp1; turnperf_read(&tp0,&tp1);
+#endif
     esp_err_t e=dispatch_guest(false,buttons);
     pocket_kasane_end_turn();
+#ifdef CONFIG_POCKET_VM_TURNPERF
+    turnperf_add(tp0,tp1,(uint32_t)(esp_timer_get_time()-turning));
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
     // The storage park, marked where the tick can see it: the guest suspended
     // itself mid-turn and the next turn is what runs its continuation.

@@ -99,6 +99,22 @@ menu "Pocket VM (diagnostics)"
             Measurement only. Build a separate build_* directory with its own
             sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
 
+    config POCKET_VM_TURNPERF
+        bool "R4 probe: the JS turn's cycles against the core's own counters"
+        default n
+        help
+            Where the frame() turn's cycles go (docs/vm/turn-cpi.md). The
+            host profile counts ~0.35M x86 instructions a STRESS LV1 turn
+            against ~1.7M cycles on the board, and that gap -- retiring,
+            instruction fetch, data, bubbles -- decides what the next speed
+            work should attack. Brackets the ordinary turn in app_tick with
+            the Xtensa performance counters: PM0 counts cycles, PM1 one event
+            that rotates every 30 turns, and each window logs
+            "TURNPERF <event> cy=... ev=... n=... us=...".
+
+            Measurement only. Build a separate build_* directory with its own
+            sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
+
     config POCKET_UI_TASK_CORE
         int "Core the ui task is pinned to (-1 = let FreeRTOS choose)"
         range -1 1
