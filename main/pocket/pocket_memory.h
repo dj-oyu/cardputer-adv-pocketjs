@@ -31,3 +31,5 @@ void pocket_memory_sample(uint64_t now_us, size_t guest_used, size_t guest_limit
                           bool native_valid, size_t internal_free,
                           size_t internal_largest);
 void pocket_memory_pump(bool leaving);
+/* The pressure bits (POCKET_MEMORY_*) in force now. */
+uint8_t pocket_memory_mask(void);

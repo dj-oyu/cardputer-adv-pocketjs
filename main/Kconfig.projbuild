@@ -251,6 +251,21 @@ menu "Pocket VM (L0 measurement probes)"
             prototypes), WeakRef/FinalizationRegistry and DOMException on the
             same footing: a further ~3.9 KB of the floor (host calculation).
 
+    config POCKET_VM_BLOCK_CACHE
+        bool "R3: reuse small freed blocks in the guest allocator"
+        default n
+        help
+            The guest's JS frees most blocks the moment their refcount drops,
+            and eight lengths (QuickJS's 32-bit structs) are most of every
+            frame's allocations, while a heap_caps malloc/free pair costs
+            ~1,800 cycles (docs/vm/allocator-cost.md). With this on the guest
+            allocator keeps up to 8 freed blocks of each of those lengths and
+            hands them straight to the next allocation (at most 3 KB of
+            system heap outside the guest's 160 KiB accounting), and reads a
+            block's length from its tlsf header after checking that read
+            against heap_caps_get_allocated_size at guest creation
+            (docs/vm/r3-small-block-cache.md).
+
     config POCKET_VM_ALLOCPROBE
         bool "R2 measurement: cycles inside the guest allocator"
         default n

@@ -83,6 +83,38 @@ typedef struct {
 
 static alloc_state_t A;
 
+// R3 (docs/vm/r3-small-block-cache.md): the device's small-block cache, in the
+// storage layer -- below the --fail-alloc attempt numbering, the trace and the
+// accounting above, so those, and every pinned corpus number, are unchanged
+// whether it is built or not. Its classes are the device's (tlsf lengths) plus
+// this header, since here the stored block carries one.
+#ifdef CONFIG_POCKET_VM_BLOCK_CACHE
+#include "pocketjs/block_cache.h"
+static void *bc_backend_malloc(void *ctx, size_t n) { (void)ctx; return malloc(n); }
+static void bc_backend_free(void *ctx, void *p) { (void)ctx; free(p); }
+static size_t bc_backend_length(void *ctx, const void *p) {
+  (void)ctx;
+  return sizeof(allocation_header_t) + ((const allocation_header_t *)p)->h.usable;
+}
+static const block_cache_backend_t BC_BACKEND = {bc_backend_malloc, bc_backend_free,
+                                                 bc_backend_length, NULL};
+static block_cache_t g_block_cache;
+static void storage_init(void) {
+  static const uint16_t device[] = {12, 16, 32, 36, 48, 72, 80, 88};
+  uint16_t sizes[8];
+  for (int i = 0; i < 8; i++) sizes[i] = (uint16_t)(device[i] + sizeof(allocation_header_t));
+  block_cache_init(&g_block_cache, &BC_BACKEND, sizes, 8, true);
+}
+static void *storage_alloc(size_t n) { return block_cache_malloc(&g_block_cache, n, n); }
+static void storage_free(allocation_header_t *h) { block_cache_free(&g_block_cache, h); }
+static void storage_fini(void) { block_cache_flush(&g_block_cache); }
+#else
+static void storage_init(void) {}
+static void *storage_alloc(size_t n) { return malloc(n); }
+static void storage_free(allocation_header_t *h) { free(h); }
+static void storage_fini(void) {}
+#endif
+
 static void account_add(size_t size) {
   A.live_bytes += size;
   A.live_blocks++;
@@ -103,7 +135,7 @@ static allocation_header_t *raw_alloc(size_t size) {
   A.attempts++;
   if (A.fail_at != 0 && A.attempts == A.fail_at) return NULL;
   const size_t usable = tlsf_usable(size);
-  allocation_header_t *header = malloc(sizeof(allocation_header_t) + usable);
+  allocation_header_t *header = storage_alloc(sizeof(allocation_header_t) + usable);
   if (header == NULL) return NULL;
   header->h.size = size;
   header->h.usable = usable;
@@ -155,7 +187,7 @@ static void vm_free(void *opaque, void *pointer) {
   A.n_free++;
   account_sub(header->h.size);
   if (A.trace) fprintf(A.trace, "- %llu\n", (unsigned long long)header->h.id);
-  free(header);
+  storage_free(header);
 }
 
 static size_t vm_usable_size(const void *pointer) {
@@ -213,7 +245,7 @@ static void *vm_realloc(void *opaque, void *pointer, size_t size) {
   if (A.trace)
     fprintf(A.trace, "~ %llu %llu %zu\n", (unsigned long long)old->h.id,
             (unsigned long long)next->h.id, size);
-  free(old);
+  storage_free(old);
   return next + 1;
 }
 
@@ -1031,6 +1063,10 @@ int main(int argc, char **argv) {
   // An unbuffered marker distinguishes pre-main ASan failures from a slow
   // running VM. Program stdout may remain buffered until normal exit.
   if (getenv("VMTEST_START_MARKER")) fprintf(stderr, "#info vmrun-start\n");
+  // Registered after the sanitizer's own exit hook, so it runs first: blocks
+  // still cached at exit go back to malloc before the leak check looks.
+  storage_init();
+  atexit(storage_fini);
   size_t heap_limit = 160U * 1024U;  // main/app_session.c gc.heap_limit
   size_t stack_limit = 20U * 1024U;  // main/app_session.c gc.stack_limit
   const char *trace_path = NULL;

@@ -153,6 +153,12 @@ typedef struct {
 } pocketjs_guest_allocprobe_t;
 void pocketjs_guest_allocprobe_take(pocketjs_guest_allocprobe_t *out);
 
+/* R3 (CONFIG_POCKET_VM_BLOCK_CACHE, docs/vm/r3-small-block-cache.md): give the
+ * small blocks the guest's allocator keeps for reuse back to the heap -- when
+ * the system, not the guest, is short (pocket_memory FREE/LARGEST). A no-op
+ * without the option, and from any task but the one that created the guest. */
+void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest);
+
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 
 /* VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5). __has_include, not a bare

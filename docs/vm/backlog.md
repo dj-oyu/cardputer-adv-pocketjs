@@ -72,7 +72,8 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 | --- | --- | --- | --- |
 | R1 | 上限の手前での GC の空回り（天井を超えるとオブジェクトごとに GC） | [gc-cap-backoff.md](gc-cap-backoff.md) | 済（2026-09-27）: 実機 STRESS LV3 の turn_ms 11.41 → 8.04 ms、fps 26.4 → 29.4。確保失敗は増えず |
 | R2 | 普段のターン（LV1/LV2）の内訳 | [allocator-cost.md](allocator-cost.md) | 計測済み（2026-09-27、実機）: **アロケータが JS のターンの 20.6%**（7.63 ms 中 1.56 ms、1 フレーム約 340 回、malloc 1 回約 1,270 サイクル） |
-| R3 | 小さいブロックの再利用とブロック長の直読み | [r3-small-block-cache.md](r3-small-block-cache.md) | 設計済み（2026-09-27）: 8 クラス × 8 個（上限の外で最大 3 KB）、STRESS で malloc の約 6 割を見込み。未実装 |
+| R3 | 小さいブロックの再利用とブロック長の直読み | [r3-small-block-cache.md](r3-small-block-cache.md) | 実装済み・**既定 n**（2026-09-27）: 実機でアロケータ 1.57 → 0.92 ms、LV1 のターン 7.62 → 7.08 ms |
+| R3a | キャッシュ有りで STRESS LV3 に Kasane の `BUSY`（3/3 回、無しでは 0/2）。frame の外の確保失敗の約 2 フレーム後 | r3-small-block-cache.md §6.2 | 未解決。既存の経路の穴の露出か、キャッシュ起因の解放後使用かを切り分ける |
 
 ## 確保失敗時のコンパイル経路（VM の段とは独立）
 
