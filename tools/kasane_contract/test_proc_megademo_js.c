@@ -210,11 +210,12 @@ int main(int argc, char **argv) {
         "const y=Math.floor((b.coeff[2]*b.x[i]+b.coeff[3]*b.y[i]+b.coeff[5])/16384);"
         "if(x<0||x>=240||y<0||y>=135)throw Error('point bounds')}"
         "}"
-        "for(let tick=0;tick<48;tick++)frame();"
-        "if(__procCalls.frames.length!==48)throw Error('frame count');"
-        "for(let tick=0;tick<48;tick++){"
-        "const f=__procCalls.frames[tick],phase=Math.floor(tick/16);"
-        "if(f.backdrop!==procMegademo.backdrop(tick)||f.draws.length!==5)"
+        "for(let tick=0;tick<97;tick++)frame();"
+        "if(__procCalls.frames.length!==97)throw Error('frame count');"
+        "if(__procCalls.registered.length!==15)throw Error('registered again');"
+        "for(let tick=0;tick<97;tick++){"
+        "const f=__procCalls.frames[tick],scene=tick%48,phase=Math.floor(scene/16);"
+        "if(f.backdrop!==procMegademo.backdrop(scene)||f.draws.length!==5)"
         "throw Error('frame structure '+tick);"
         "for(let layer=0;layer<5;layer++){const d=f.draws[layer];"
         "if(d[0]!==phase*5+layer||d[1].length!==4)"
@@ -227,7 +228,7 @@ int main(int argc, char **argv) {
     JS_FreeValue(ctx, global);
     JS_FreeContext(ctx);
     JS_FreeRuntime(runtime);
-    printf("PASS JS megademo: %u registered programs, 3 bounded Q14 batches, %u frames, %u native plan layer runs, exact base RGB565 pixels and playback calls\n",
+    printf("PASS JS megademo: %u registered programs, 3 bounded Q14 batches, %u reference frames, %u native plan layer runs, exact base RGB565 pixels and 97 looping playback calls\n",
            programs, PROC_MEGA_FRAMES, layers_run);
     return 0;
 }

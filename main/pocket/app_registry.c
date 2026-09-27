@@ -60,6 +60,13 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
+    // The procedural megademo is an ordinary foreground app. Its frame loop
+    // wraps after 48 frames; leaving it with Back and reopening starts a new
+    // session with fresh procedural plans.
+    {.id="local.megademo", .title="MEGADEMO", .entry="apps/kasane/proc_megademo.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
     // Both of its capabilities are REQUIRED rather than optional, and that is
     // not strictness for its own sake: without the card there is nothing to
     // choose and without playback there is nothing to do with a choice, so an
