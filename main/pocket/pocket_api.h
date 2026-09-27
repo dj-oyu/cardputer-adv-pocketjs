@@ -190,7 +190,9 @@ bool pocket_api_cancel_requested(JSValueConst token);
 // rejection rather than a throw, so a surface whose work is synchronous still
 // has to hand back a Promise. pocket_api_settled() builds one that is already
 // settled with `value` (which it takes over), and pocket_api_reject() is the
-// same thing carrying a PocketError.
+// same thing carrying a PocketError. At the guest's limit it returns
+// JS_EXCEPTION with `value` already freed; a caller whose value stands for
+// something native (a File's slot) must release that itself.
 JSValue pocket_api_settled(JSContext *ctx, JSValue value, bool rejected);
 JSValue pocket_api_reject(JSContext *ctx, const char *code, const char *operation,
                           const char *message, bool retryable, const char *outcome);

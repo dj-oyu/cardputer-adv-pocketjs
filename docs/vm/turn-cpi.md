@@ -76,7 +76,40 @@ already open` が出続けた（474 回）。`pocket.fs` の read の OOM の後
 中の `JS_NewPromiseCapability` が OOM で失敗すると File を解放する。File には意図的にファイナライザが無い
 （`pocket_fs.c` の `file_class_def` の注記）ので、そのスロットはアプリが終わるまで戻らない。QIO が作った不具合
 ではなく、ターンが短くなって OOM の落ちる位置がずれただけと見ている（DIO の 60 秒走行と、QIO の既定 20 秒走行は
-PASS）。backlog に積んだ。
+PASS）。
+
+### 4.1 R4a: 修正（2026-09-27、`vm/fs-open-oom`）
+
+**直したもの 1（fs）**: `file_wrap` と `pocket_api_settled` を `file_settled()` に束ね、Promise を作れなかったら
+スロットを番号で探して閉じる。同時に、`pocket_api_settled` が resolve の呼び出しの失敗を握りつぶして
+「決して決着しない Promise と、文脈に残った例外」を返していたのを、例外として返すようにした（`pocket_api.h` の
+契約に書いた）。`file_wrap` の失敗時に例外値そのものを `settled` に渡していた経路も同じ関数で消えた。
+
+**直したもの 2（VM、実機の負荷を作る途中で見つけた）**: 負荷の最初の版は `fs.open` を満杯のヒープで初めて読み、
+そのセッションの間ずっと `fs.open` が `undefined`（"not a function"）になった。F2 の遅延の索引
+（`POCKET_VM_LAZY_BUILTINS`）が、項目に「済み」の印を付けてから shape へ入れる順で、`add_property` が OOM で
+失敗すると名前が shape にも一覧にも無くなっていた。`js_lazy_touch`・`js_lazy_all`・別名の登録の 3 箇所で、
+失敗したら印を戻す（`lazy_undo_done`。確保中の GC が `rt->lazy` を詰め直すので、一覧は（オブジェクト, 表）で
+探し直す。`js_lazy_all` の添字も同じ理由で取り直す）。上流の autoinit の同種の穴は以前に直してあった
+（`JS_AutoInitProperty` の注記）が、こちらで足した遅延の経路に同じ規則が無かった。**`pocket.*` の名前空間も
+この一覧に乗るので、最初の読みがヒープの端に当たったアプリはその API を失っていた。**
+
+| 検査 | 結果 |
+| --- | --- |
+| ホスト: `--fail-alloc` 1〜3000 の掃引（5 つの遅延の名前を読んで型を見る） | 修正前は 707・708 番で `Object.fromEntries` が `undefined`、修正後は穴 0、ASan クリーン |
+| ホスト: 新しいコーパス `lazy_touch_oom.js`（`--profile device`、18 の名前を満杯の縁で初めて読む） | 修正後はすべて function。**陰性対照（修正前の quickjs.c）で 18 中 13 が `undefined`** |
+| ホスト: コーパス | asan・o2・`--force-yield` とも 80/80 |
+| 実機: `CONFIG_POCKET_VM_OOMPROBE` の USB `^`（ヒープを埋め、0〜23 ブロック返して open を 10 巡、最後に 2 本同時に open） | **fs の修正なし 5/5 `FSOOM leak two files are already open`**、修正あり 5/5 `FSOOM ok`（漏れの拒否 0、File 以外の解決値 0） |
+| 実機: 出荷構成 | smoke 20 周・故障回復 6 種、settings、editor draft、`stress_app.py --seconds 60` PASS（29.4〜29.8 fps）、memlog 予算内・DIRAM ±0 |
+| ホスト: `pocket_api.c` をリンクする検査 | input・capture・random PASS |
+
+**残したもの**: JS の側で、解決した File を受け取る継続（`await` の再開）自体が OOM で走れない場合は、File は
+どこにも届かず、ファイナライザが無いのでスロットは戻らない。これは `file_class_def` の注記が選んだ設計（GC に
+書き込み中のファイルを閉じさせない）の帰結で、変えるには API の判断が要る。
+
+**別件（既存）**: `oom_sweep.sh` を `lazy_builtins.js` に 2,500 点かけると、1,075 番で終了時に
+`JS_FreeRuntime: Assertion list_empty(&rt->gc_obj_list)` になる。修正前の quickjs.c でも同じなので今回の変更では
+ない。backlog に積んだ。
 
 ## 5. 次の手（未着手）
 
