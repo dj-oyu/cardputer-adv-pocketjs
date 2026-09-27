@@ -4,7 +4,7 @@
 #
 #   tools/vmtest/oom_sweep.sh                      # closures + generators, 4800 points each
 #   tools/vmtest/oom_sweep.sh -n 3000 a.js b.js    # other files, other depth
-#   VARIANT=asan-keepsrc tools/vmtest/oom_sweep.sh
+#   VARIANT=o2 tools/vmtest/oom_sweep.sh
 #
 # Why every attempt rather than a sample: the bugs this caught live at single
 # points. A 15-point sweep over closures.js found one (--fail-alloc 1500); the

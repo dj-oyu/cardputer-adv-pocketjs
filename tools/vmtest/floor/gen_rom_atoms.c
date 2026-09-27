@@ -1,7 +1,8 @@
 // F1 (docs/vm/builtin-floor-plan.md sec.5.1): generate the flash-resident
 // atom table, components/quickjs-ng/quickjs-ng/quickjs-rom-atoms.h.
 //
-// Built against the engine WITHOUT CONFIG_POCKET_VM_ROM_ATOMS: the table has
+// Built with POCKET_VM_GEN_ROM_ATOMS (flash atoms and lazy builtins off, the
+// only build of quickjs.c that has them off): the table has
 // to describe what today's JS_NewContext creates, and it is compiled with
 // quickjs.c included so the heap can be read from inside.
 //

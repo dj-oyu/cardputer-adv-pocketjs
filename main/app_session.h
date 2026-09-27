@@ -13,27 +13,12 @@ esp_err_t app_start(void);
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length);
 esp_err_t app_start_test(char test);
-#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+#ifdef CONFIG_POCKET_VM_RELOC
 /* L3a: every app started from now on moves its frame segments at every park,
  * and logs VM_RELOC when it stops. Only linked in CONFIG_POCKET_VM_RELOC. */
 void app_vm_reloc_request(void);
 #endif
 void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
-/* The F-line microbenchmark's USB key ('(', CONFIG_POCKET_VM_FLOORPROBE).
- * A macro rather than an #ifdef block in main.c's usb_stroke(): a block there
- * adds lines, and app_main's ESP_ERROR_CHECKs below it embed __LINE__, so the
- * option-off build would stop being byte-identical. Off, it folds to 0. */
-#ifdef CONFIG_POCKET_VM_FLOORPROBE
-#define APP_FLOOR_BENCH_KEY(c) ((c) == '(')
-#else
-#define APP_FLOOR_BENCH_KEY(c) 0
-#endif
-/* R2's allocator microbenchmark (')', CONFIG_POCKET_VM_ALLOCPROBE); same shape. */
-#ifdef CONFIG_POCKET_VM_ALLOCPROBE
-#define APP_ALLOC_BENCH_KEY(c) ((c) == ')')
-#else
-#define APP_ALLOC_BENCH_KEY(c) 0
-#endif
 
 // docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the
 // background rather than instead of it. It gets a region-scoped Kasane APP

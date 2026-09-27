@@ -7,8 +7,8 @@ it sends nothing but the byte that starts the diagnostic, and it never waits on
 the host's keyboard -- each step watches until the device reports the thing, or
 times out.
 
-Needs a build with CONFIG_POCKET_VM_SELFTEST=y (CONFIG_POCKET_VM_YIELD=y is the
-shipping default since 2026-09-23) and the ESP-IDF Python environment:
+Needs a build with CONFIG_POCKET_VM_SELFTEST=y and the ESP-IDF Python
+environment:
 
     idf.py -B build_phys -D SDKCONFIG=build_phys/sdkconfig \
         -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;<file with SELFTEST=y>" build

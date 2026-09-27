@@ -3,29 +3,6 @@
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
 
-#ifdef CONFIG_POCKET_VM_CCOUNT
-#include "esp_cpu.h"
-/* CCOUNT is a PER-CORE register: two reads taken on different cores describe
- * two different counters and their difference is noise. A build that reads it
- * for the budget therefore needs the task that owns the drain to be unable to
- * migrate. That task is the ui task (docs/vm/vm-L1-design.md sec.4.1) and
- * CONFIG_POCKET_UI_TASK_CORE is what pins it, so the two options are not
- * independent -- refuse the combination at compile time rather than ship a
- * budget that is wrong once in a few thousand frames (measured (device):
- * 1 migration in 1,800 idle frames, docs/vm/vm-L1-report.md sec.8.8). */
-#if CONFIG_POCKET_UI_TASK_CORE < 0
-#error "CONFIG_POCKET_VM_CCOUNT needs CONFIG_POCKET_UI_TASK_CORE >= 0: CCOUNT is per core, so a task that migrates between two reads makes their difference meaningless."
-#endif
-/* A constant rather than a runtime query of the clock tree, because
- * CONFIG_PM_ENABLE is off in this project: the CPU frequency never changes at
- * runtime, so asking would return this number every time. If dynamic frequency
- * scaling is ever turned on, THIS is the line that becomes wrong -- CCOUNT
- * counts CPU cycles, so its rate would follow the frequency. */
-#define VM_CLOCK_TICKS_PER_US ((uint32_t)CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ)
-static vm_tick_t vm_clock_default(void) {
-  return (vm_tick_t)esp_cpu_get_cycle_count();
-}
-#else
 #include "esp_timer.h"
 /* Truncated to 32 bits deliberately: only differences are used, and an
  * unsigned 32-bit difference of a microsecond counter is exact for any
@@ -34,7 +11,6 @@ static vm_tick_t vm_clock_default(void) {
 static vm_tick_t vm_clock_default(void) {
   return (vm_tick_t)esp_timer_get_time();
 }
-#endif
 
 #else /* host */
 #include <time.h>

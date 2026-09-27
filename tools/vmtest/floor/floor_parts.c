@@ -45,10 +45,8 @@ int main(void) {
         } else other++;
     }
     size_t lazyb = 0;
-#ifdef CONFIG_POCKET_VM_LAZY_BUILTINS
     lazyb = rt->lazy ? tl(sizeof(rt->lazy[0]) * rt->lazy_size) : 0;
     printf("lazy lists=%u (array %u slots, %zu B)\n", rt->lazy_count, rt->lazy_size, lazyb);
-#endif
     printf("context js=%zu: objects %zu, prop arrays %zu, shapes %zu (n=%zu, prop slots %zu, hash slots %zu), lazy %zu, rest %zu (other gc %zu)\n",
            ctxb, objb, propb, shb, shn, shp, shh, lazyb, ctxb - objb - propb - shb - lazyb, other);
     // The biggest object shapes: whose are they, and are they still lazy?

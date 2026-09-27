@@ -53,37 +53,13 @@ uint64_t qjs_vmprobe_jobs_executed_get(void);
 
 #endif // CONFIG_POCKET_VM_PROBE
 
-// F-line measurement (CONFIG_POCKET_VM_FLOORPROBE, docs/vm/builtin-floor-plan.md
-// sec.14): counters of the flash-atom (F1) and lazy-builtin (F2) paths,
-// read and cleared by JS_TakeFloorProbe (quickjs.h). The counters and macros
-// live here rather than in quickjs.c so that quickjs.c gains no line: its
-// assert()s embed __LINE__, and a shifted line changes the code of the
-// option-off build (the same reason JS_VMStackBlocks sits at the end of it).
-// quickjs.c calls FP_INC/FP_ALL on lines that already existed.
-#ifdef CONFIG_POCKET_VM_FLOORPROBE
-#include "quickjs.h"
-static __attribute__((unused)) JSFloorProbe js_floor_probe;
-#define FP_INC(rt, field) ((void)(rt), js_floor_probe.field++)
-#define FP_ALL(p, enum_only) do { \
-        if (js_floor_probe.lazy_all < 8) { \
-            js_floor_probe.all_class[js_floor_probe.lazy_all] = (uint16_t)(p)->class_id; \
-            js_floor_probe.all_enum_only[js_floor_probe.lazy_all] = (enum_only); \
-        } \
-        js_floor_probe.lazy_all++; \
-    } while (0)
-#else
-#define FP_INC(rt, field) ((void)0)
-#define FP_ALL(p, enum_only) ((void)0)
-#endif
-
-// F3b/F3c (CONFIG_POCKET_VM_LAZY_INTRINSICS, docs/vm/builtin-floor-plan.md
+// F3b/F3c (POCKET_VM_LAZY_INTRINSICS, docs/vm/builtin-floor-plan.md
 // sec.17-18): typed-array, Map/Set, WeakRef and DOMException constructors
-// made on first use. The hooks are macros
-// placed on lines of quickjs.c that already existed, for the same reason as
-// FP_INC above: with the option off each expands to nothing (or to a
-// constant the compiler folds), and the option-off build stays byte-identical.
-// The functions they name are at the end of quickjs.c.
-#ifdef CONFIG_POCKET_VM_LAZY_INTRINSICS
+// made on first use. The hooks are macros placed on lines of quickjs.c; off
+// (only in tools/vmtest/floor/gen_rom_atoms.sh, see quickjs.c) each expands
+// to nothing or to a constant the compiler folds. The functions they name are
+// at the end of quickjs.c.
+#ifdef POCKET_VM_LAZY_INTRINSICS
 #define JS_DEF_POCKET_LAZY_CLASS 12   /* after JS_DEF_PROP_BOOL; quickjs.c only */
 #define LAZY_CLASS_DECLS \
     static JSValue js_lazy_class_ctor(JSContext *ctx, int class_id); \

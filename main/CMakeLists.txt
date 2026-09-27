@@ -223,9 +223,6 @@ if(CONFIG_POCKET_VM_OOMPROBE)
     target_sources(${COMPONENT_LIB} PRIVATE "pocket/oomprobe.c")
 endif()
 
-if(CONFIG_POCKET_VM_CALLBENCH)
-    target_sources(${COMPONENT_LIB} PRIVATE "../tools/vmtest/callbench.c")
-endif()
 
 if(CONFIG_POCKET_VM_PROBE)
     target_sources(${COMPONENT_LIB} PRIVATE "pocket/vmprobe.c")

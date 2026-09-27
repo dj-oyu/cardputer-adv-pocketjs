@@ -79,12 +79,12 @@ bool pocketjs_guest_suspended(const pocketjs_guest_t *guest);
 bool pocketjs_guest_work_pending(const pocketjs_guest_t *guest);
 /** Accumulated time inside the current parked frame call, not host waits. */
 int64_t pocketjs_guest_frame_total(const pocketjs_guest_t *guest);
-#if defined(CONFIG_POCKET_VM_SELFTEST) && defined(CONFIG_POCKET_VM_YIELD)
+#ifdef CONFIG_POCKET_VM_SELFTEST
 /** Log the next completed frame's accumulated call time, excluding host waits.
  * Includes preemption and native calls; not a CPU-time measurement. */
 void pocketjs_guest_trace_frame(pocketjs_guest_t *guest);
 #endif
-#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+#ifdef CONFIG_POCKET_VM_RELOC
 /** L3a: move the frame segments to new addresses at every park from now on,
  * and reset the counters. Off until this is called, so a RELOC build that is
  * never armed takes the same path as a build without it. Arming does not
@@ -143,20 +143,10 @@ void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
 #include "quickjs.h"
 void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out);
 
-/* CONFIG_POCKET_VM_ALLOCPROBE (measurement only, docs/vm/backlog.md R2): calls
- * and CPU cycles inside the guest allocator's entry points since the last
- * take, process-wide. Index 0 malloc/calloc, 1 free, 2 realloc, 3 usable
- * size. Only defined in that build. */
-typedef struct {
-  uint32_t calls[4];
-  uint64_t cycles[4];
-} pocketjs_guest_allocprobe_t;
-void pocketjs_guest_allocprobe_take(pocketjs_guest_allocprobe_t *out);
-
-/* R3 (CONFIG_POCKET_VM_BLOCK_CACHE, docs/vm/r3-small-block-cache.md): give the
- * small blocks the guest's allocator keeps for reuse back to the heap -- when
- * the system, not the guest, is short (pocket_memory FREE/LARGEST). A no-op
- * without the option, and from any task but the one that created the guest. */
+/* R3 (docs/vm/r3-small-block-cache.md): give the small blocks the guest's
+ * allocator keeps for reuse back to the heap -- when the system, not the
+ * guest, is short (pocket_memory FREE/LARGEST). A no-op from any task but the
+ * one that created the guest. */
 void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest);
 
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);

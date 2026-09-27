@@ -38,7 +38,7 @@
 #include "esp_timer.h"
 #include "vmprobe.h"
 #include "oomprobe.h"
-#if defined(CONFIG_POCKET_VM_OOMPROBE) || defined(CONFIG_POCKET_VM_FLOORPROBE)
+#ifdef CONFIG_POCKET_VM_OOMPROBE
 #include "quickjs.h"
 #endif
 #include "vm_wake.h"
@@ -126,14 +126,7 @@ static pocketjs_guest_t *guest;
 // JS_ThrowOutOfMemory's own allocation also fails, indistinguishable from the
 // script's own `throw null` without this. Not a contracted marker (the
 // CLAUDE.md list predates it); a new line costs nothing to add.
-#ifdef CONFIG_POCKET_VM_ALLOCPROBE
-// backlog R3a: which call site found the rejection, and whether Kasane still
-// holds an unconsumed submission at that moment.
-#define report_oom_if_any() report_oom_at(__LINE__)
-static void report_oom_at(int site) {
-#else
 static void report_oom_if_any(void) {
-#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_drain();
 #endif
@@ -144,9 +137,6 @@ static void report_oom_if_any(void) {
         pocket_memory_oom(&canary,(uint64_t)esp_timer_get_time());
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
                  (unsigned)canary.count,(unsigned)canary.first_req,(unsigned)canary.first_used);
-#ifdef CONFIG_POCKET_VM_ALLOCPROBE
-        ESP_LOGW("app","R3A_OOM site=%d submission=%d",site,(int)pocket_kasane_has_submission());
-#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
         oomprobe_canary(canary.count,canary.first_req,canary.first_used);
 #endif
@@ -374,7 +364,7 @@ void app_vm_watchdog(int (*fn)(void *), void *opaque) {
 }
 
 void app_vm_prepare_stop(void) {
-#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+#ifdef CONFIG_POCKET_VM_RELOC
     // Before the chain is closed, not after: prepare_stop resumes the parked
     // chain in order to terminate it, and the counters belong to the run that
     // is ending rather than to its teardown.
@@ -395,7 +385,6 @@ void app_request_stop(void) { atomic_store(&stop_requested,true); }
 static void arm_turn(uint32_t buttons) {
     const int64_t now=esp_timer_get_time();
     deadline=now+250000;
-#ifdef CONFIG_POCKET_VM_SCHED
     // The Back turn (main.c calls app_tick(0x2000) once so the guest can save)
     // gets room to finish rather than be cut: the session ends immediately
     // after it, so no reordering it causes can be observed.
@@ -404,10 +393,6 @@ static void arm_turn(uint32_t buttons) {
                              VM_JOB_FLOOR,VM_LEAVE_BACKSTOP);
     else
         vm_budget_begin(&budget,VM_TURN_BUDGET_US);
-#else
-    (void)buttons;
-    vm_budget_begin(&budget,0);
-#endif
     // vm_budget_begin does its own read through vm_clock rather than being
     // handed `now`: which clock the budget uses is vm_clock's decision (the
     // measurement says a cycle counter is 33x cheaper than the timer), and
@@ -714,25 +699,6 @@ void app_stop(void) {
         final_stats=(pocketjs_guest_stats_t){.struct_size=sizeof(final_stats)};
         pocketjs_guest_stats(guest,&final_stats);
     }
-#ifdef CONFIG_POCKET_VM_FLOORPROBE
-    if(guest) {
-        // What the F1/F2 paths cost this session, counted inside QuickJS.
-        JSFloorProbe fp;
-        JS_TakeFloorProbe(&fp);
-        ESP_LOGI("app","FLOORPROBE frames=%u rom_escape=%lu rom_escape_new=%lu rom_symbol=%lu "
-                 "rom_numeric=%lu lazy_miss=%lu lazy_hit=%lu lazy_delete=%lu lazy_all=%lu "
-                 "lazy_all_skip=%lu all_class=%u,%u,%u,%u,%u,%u,%u,%u enum=%u%u%u%u%u%u%u%u",
-                 frames,(unsigned long)fp.rom_escape,(unsigned long)fp.rom_escape_new,
-                 (unsigned long)fp.rom_symbol,(unsigned long)fp.rom_numeric,
-                 (unsigned long)fp.lazy_miss,(unsigned long)fp.lazy_hit,
-                 (unsigned long)fp.lazy_delete,(unsigned long)fp.lazy_all,
-                 (unsigned long)fp.lazy_all_skip,
-                 fp.all_class[0],fp.all_class[1],fp.all_class[2],fp.all_class[3],
-                 fp.all_class[4],fp.all_class[5],fp.all_class[6],fp.all_class[7],
-                 fp.all_enum_only[0],fp.all_enum_only[1],fp.all_enum_only[2],fp.all_enum_only[3],
-                 fp.all_enum_only[4],fp.all_enum_only[5],fp.all_enum_only[6],fp.all_enum_only[7]);
-    }
-#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     // Before the destroy: JS_FreeRuntime frees the segments the hook would
     // otherwise go looking for.
@@ -761,32 +727,12 @@ void app_stop(void) {
 #endif
     ESP_LOGI("app","APP_STOPPED");
 }
-#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+#ifdef CONFIG_POCKET_VM_RELOC
 // Set by main.c's '&' on the home screen and left set, so one arming covers a
 // lifecycle sweep of several runs. Read at guest creation, which is the only
 // moment the guest exists and has not run anything yet.
 static bool reloc_requested;
 void app_vm_reloc_request(void) { reloc_requested=true; }
-#endif
-
-#ifdef CONFIG_POCKET_VM_FLOORPROBE
-// F-line measurement (docs/vm/builtin-floor-plan.md sec.14): the guest's
-// js= after each step of building it, so the firmware's own share of the
-// startup floor reads surface by surface. js= is the same number the MEM
-// line and memlog report.
-static void floor_stage(const char *stage) {
-    pocketjs_guest_stats_t s={.struct_size=sizeof(s)};
-    if(guest && pocketjs_guest_stats(guest,&s)==ESP_OK)
-        ESP_LOGI("app","FLOOR stage=%s js=%u",stage,(unsigned)s.heap_used);
-}
-static esp_err_t floor_install(pocketjs_guest_t *g,const char *name,
-                               pocketjs_guest_quickjs_install_fn fn,void *user) {
-    esp_err_t e=pocketjs_guest_quickjs_install_once(g,name,fn,user);
-    floor_stage(name);
-    return e;
-}
-// Every install below goes through the wrapper; nothing else changes.
-#define pocketjs_guest_quickjs_install_once floor_install
 #endif
 
 esp_err_t app_start_test(char test) {
@@ -861,15 +807,7 @@ esp_err_t app_start_test(char test) {
     // that was already failing.
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
-#ifdef CONFIG_POCKET_VM_FLOORPROBE
-    // The counters are process-wide: drop whatever the last session left
-    // (a failed start never reaches the take in app_stop).
-    { JSFloorProbe discard; JS_TakeFloorProbe(&discard); }
-#endif
     TRY(pocketjs_guest_create(&gc,&guest));
-#ifdef CONFIG_POCKET_VM_FLOORPROBE
-    floor_stage("context");   // runtime + JS_NewContext, before any surface
-#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
     // The control has to reach the HEAP: a diagnostic starts with ~82 KB of
@@ -883,7 +821,7 @@ esp_err_t app_start_test(char test) {
     TRY(vmprobe_segment_apply(guest) == 0 ? ESP_OK : ESP_ERR_INVALID_STATE);
     vmprobe_static_report();
 #endif
-#if defined(CONFIG_POCKET_VM_RELOC) && defined(CONFIG_POCKET_VM_YIELD)
+#ifdef CONFIG_POCKET_VM_RELOC
     // Armed here rather than after app_start_test returns: the source is
     // EVALUATED inside this function, and a top-level await parks during that
     // evaluation. Arming afterwards would miss exactly the parks that carry
@@ -965,70 +903,6 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
-#ifdef CONFIG_POCKET_VM_ALLOCPROBE
-        // What one heap_caps call costs, by size, before a trivial app
-        // starts (docs/vm/backlog.md R2). Batches, not pairs alone: N
-        // blocks allocated, then freed, then N malloc+free pairs, the
-        // allocated-size readback on live blocks in between.
-        case ')': {
-            static const size_t sizes[]={16,32,48,64,128,256};
-            enum {N=200};
-            void *blocks[N];
-            for(unsigned s=0;s<sizeof(sizes)/sizeof(sizes[0]);s++) {
-                uint32_t c0=esp_cpu_get_cycle_count(),ok=0;
-                for(unsigned i=0;i<N;i++) {
-                    blocks[i]=heap_caps_malloc(sizes[s],MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-                    ok+=blocks[i]!=NULL;
-                }
-                uint32_t c1=esp_cpu_get_cycle_count();
-                size_t total=0;
-                for(unsigned i=0;i<N;i++) if(blocks[i]) total+=heap_caps_get_allocated_size(blocks[i]);
-                uint32_t c2=esp_cpu_get_cycle_count();
-                for(unsigned i=0;i<N;i++) heap_caps_free(blocks[i]);
-                uint32_t c3=esp_cpu_get_cycle_count();
-                for(unsigned i=0;i<N;i++) heap_caps_free(heap_caps_malloc(sizes[s],MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
-                uint32_t c4=esp_cpu_get_cycle_count();
-                ESP_LOGI("app","ALLOCBENCH size=%u ok=%lu malloc=%lu usable=%lu free=%lu pair=%lu cycles (total=%u)",
-                         (unsigned)sizes[s],(unsigned long)ok,(unsigned long)((c1-c0)/N),
-                         (unsigned long)((c2-c1)/N),(unsigned long)((c3-c2)/N),
-                         (unsigned long)((c4-c3)/N),(unsigned)total);
-            }
-            source="globalThis.frame=null";
-            break;
-        }
-#endif
-#ifdef CONFIG_POCKET_VM_FLOORPROBE
-        // F2's price in one binary (docs/vm/builtin-floor-plan.md sec.14): a
-        // lookup that misses a lazy builtin (Math, Object.prototype) against
-        // the same miss once both are fully materialized (getOwnPropertyNames),
-        // next to a miss with no builtin on the chain at all. One timed loop
-        // per frame, so no frame nears the 250 ms guard; Date.now() is ms, so
-        // each loop is long enough (N) for that to be a few %. Each result is also
-        // logged as it lands, so a frame the guard stops loses one number only.
-        case '(': source=
-            "const N=8000,R=5,nul=Object.create(null),pl={};let s=0,st=0;const res={};"
-            "const T=[['loop',()=>{for(let i=0;i<N;i++)if(i<0)s++}],"
-            "['nul',()=>{for(let i=0;i<N;i++)if(nul.q)s++}],"
-            "['plain',()=>{for(let i=0;i<N;i++)if(pl.q)s++}],"
-            "['math/4',()=>{for(let i=0;i<N/4;i++)if(Math.q)s++}],"
-            "['mathHit',()=>{for(let i=0;i<N;i++)if(Math.max)s++}],"
-            "['eager',()=>{Object.getOwnPropertyNames(Math);Object.getOwnPropertyNames(Object.prototype)}],"
-            "['plainE',()=>{for(let i=0;i<N;i++)if(pl.q)s++}],"
-            "['mathE/4',()=>{for(let i=0;i<N/4;i++)if(Math.q)s++}],"
-            "['mathHitE',()=>{for(let i=0;i<N;i++)if(Math.max)s++}],"
-            // F1: a flash name as a string value (typeof's answer, through
-            // the cache), and a run-time string used as a key -- one equal
-            // to a flash name, one not -- which is where the flash table is
-            // searched at run time.
-            "['typeof',()=>{let x;for(let i=0;i<N;i++)x=typeof i;s+=x.length}],"
-            "['keyRom',()=>{const o={length:1};for(let i=0;i<N;i++)s+=o['len'+'gth']}],"
-            "['keyDyn',()=>{const o={zzqq:1};for(let i=0;i<N;i++)s+=o['zz'+'qq']}]];"
-            "globalThis.frame=()=>{if(st>=T.length*R){if(st++==T.length*R)"
-            "console.log('FLOORBENCH '+JSON.stringify(res)+' N='+N);return}"
-            "const t=T[(st/R)|0],a=Date.now();t[1]();const d=Date.now()-a;"
-            "console.log('FLOORSTEP '+t[0]+' '+d);(res[t[0]]=res[t[0]]||[]).push(d);st++};";
-            break;
-#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
         // G12 (oomprobe.h). Each one catches its own OOM and keeps running, so
         // one session yields a refusal per frame in a changing heap rather
@@ -1204,9 +1078,7 @@ source_ready:;
                                     JS_NewCFunction(ctx,vm_finite_done,"vmFiniteDone",2));
         JS_FreeValue(ctx,global);
         if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
-#ifdef CONFIG_POCKET_VM_YIELD
         pocketjs_guest_trace_frame(guest);
-#endif
     }
     if(test=='Y'||test=='Z') {
         pocket_storage_set_owner("vm.back.selftest.20260916");
@@ -1366,19 +1238,6 @@ esp_err_t app_overlay_tick(void) {
 #endif
         if(ce) return ce;
         if(pocketjs_guest_work_pending(guest)) {
-#ifdef CONFIG_POCKET_VM_FAIR
-            if(!pocketjs_guest_suspended(guest)) {
-            // Fair ordering, the overlay's share of it: the same rule and the
-            // same reasons as app_tick() states at length, over the pumps an
-            // overlay session actually installs. No exit() check and no
-            // frame() here either.
-            pocket_app_pump();
-            pocket_overlay_pump();
-            pocket_api_pump();
-            pocket_fs_pump();
-            pocket_av_pump();
-            }
-#endif
             if(drain_runaway()) return ESP_ERR_TIMEOUT;
             continuation_turns++;
             // The guest drain was resumed first. Native source work may now
@@ -1594,60 +1453,8 @@ esp_err_t app_tick(uint32_t buttons) {
 #endif
         if(ce) return ce;
         if(!leaving && pocketjs_guest_work_pending(guest)) {
-#ifdef CONFIG_POCKET_VM_FAIR
-            // FAIR ORDERING (Kconfig POCKET_VM_FAIR, off in the shipping
-            // build; docs/vm/vm-L1-report.md sec.9). The drain has yielded with
-            // work still queued, and this is the one place compat ordering
-            // refuses to let a host event through.
-            //
-            // THE RULE: the pumps run AFTER the drain has had its budget and
-            // only when the queue is still non-empty -- i.e. exactly on the
-            // turns compat ordering would have delivered nothing at all. What
-            // a pump settles is enqueued by JS_Call'ing a resolve function,
-            // and a resolve function APPENDS its reactions to the job queue
-            // (ledger 03 fact 53), so the reaction lands BEHIND every job of
-            // the unfinished drain: FIFO inside the queue is byte for byte
-            // what compat produces. What changes, and the only thing that
-            // changes, is that a subscription delivery and a completion's
-            // resolve happen at a job boundary in the middle of one logical
-            // drain instead of after its end.
-            //
-            // Draining first rather than pumping first is deliberate: a
-            // continuation turn must begin with the continuation, or a
-            // high-rate subscription could keep appending work in front of a
-            // drain that then never reaches its own budget. It also means no
-            // turn ever pumps twice -- if the drain above emptied the queue,
-            // control falls through to the ordinary path below, which pumps
-            // exactly once, at the same point in the turn as ever.
-            //
-            // NOT made fair here, and neither is safe to be:
-            //   - the exit() check: app_request_stop() is delivered as an
-            //     uncatchable interrupt on the next call into JS, so honouring
-            //     it at a job boundary cuts the drain it lands in -- whether
-            //     a .finally ran would depend on where the budget fell. It
-            //     stays below, on a turn that begins with an empty queue.
-            //   - frame(): it is the guest's picture, not a host event, and
-            //     calling it here would put a frame INSIDE a chain, which
-            //     tools/vmtest/corpus/budget_frame_boundary.js exists to
-            //     forbid. A continuation turn still shows no frame() in
-            //     either mode, so main.c's display pacing (commit 3298d0f) is
-            //     untouched: app_turn_continued() is still true here.
-            // The unhandled-rejection report point is untouched as well: the
-            // guest reports only where vm_sched_drain() returned EMPTY, which
-            // is not this boundary.
-            if(!pocketjs_guest_suspended(guest)) {
-                buttons|=deferred_buttons; deferred_buttons=0;
-                run_pumps(buttons);
-            } else {
-                // A suspended chain is the selftest's storage park: hold the keys
-                // for the turn that can run them instead of dropping them.
-                deferred_buttons|=buttons;
-            }
-            pocket_kasane_end_turn();
-#else
             // Nothing new reaches JS this turn. The keys are held, not lost.
             deferred_buttons|=buttons;
-#endif
             // sec.5.2 plus the L2c frame guard: a timed-out suspended chain
             // is terminated by pocket_app_reset() before stop-hook JS entry.
             // A job boundary has no live chain; an opcode park can still have
@@ -1681,9 +1488,6 @@ esp_err_t app_tick(uint32_t buttons) {
         // here, as the top-of-turn gate does, and hold this turn's keys for
         // the next one. Back is not held: it is the guest's last save turn.
         if(!leaving&&pocket_kasane_has_submission()) {
-#ifdef CONFIG_POCKET_VM_ALLOCPROBE
-            ESP_LOGW("app","R3A_CONT_PRESENT");
-#endif
             deferred_buttons|=buttons;
             return present_frame();
         }
@@ -1718,9 +1522,6 @@ esp_err_t app_tick(uint32_t buttons) {
     // turn_us is frame() plus whatever job draining dispatch_guest() does
     // around it -- see vmprobe.h for why the two are not split further.
     vmprobe_frame_sample(guest,turn_us);
-#endif
-#ifdef CONFIG_POCKET_VM_ALLOCPROBE
-    if(e)ESP_LOGW("app","R3A_TURN e=0x%x submission=%d",(unsigned)e,(int)pocket_kasane_has_submission());
 #endif
     if(e)return e;
     return present_frame();
@@ -1944,21 +1745,6 @@ static esp_err_t present_frame(void) {
                              (unsigned)prof_sum.read_n,painted);
                     for(unsigned r=0;r<rows;r++)*switches[r].flag=arm!=r+1;
                     ab_arm++;
-                }
-#endif
-#ifdef CONFIG_POCKET_VM_ALLOCPROBE
-                {
-                    // The guest allocator over the same window as turn_ms above
-                    // (docs/vm/backlog.md R2). Calls made outside a turn (the
-                    // pumps) are in the counts too; they are few.
-                    pocketjs_guest_allocprobe_t ap;
-                    pocketjs_guest_allocprobe_take(&ap);
-                    ESP_LOGI("app","ALLOCPROBE ticks=%u turn_us=%.0f malloc=%lu/%llu free=%lu/%llu "
-                             "realloc=%lu/%llu usable=%lu/%llu",ticks,turn_sum,
-                             (unsigned long)ap.calls[0],(unsigned long long)ap.cycles[0],
-                             (unsigned long)ap.calls[1],(unsigned long long)ap.cycles[1],
-                             (unsigned long)ap.calls[2],(unsigned long long)ap.cycles[2],
-                             (unsigned long)ap.calls[3],(unsigned long long)ap.cycles[3]);
                 }
 #endif
                 render_sum=0;present_sum=0;painted=0;turn_sum=0;ticks=0;

@@ -1,9 +1,9 @@
-# R3 設計: 小さいブロックの再利用（2026-09-27、実装済み・既定 y）
+# R3 設計: 小さいブロックの再利用（2026-09-27、実装済み・常時有効）
 
 > **現状（2026-09-27）**: `CONFIG_POCKET_VM_BLOCK_CACHE` として実装した。ホストの関所は通過、実機でアロケータの
 > 時間は 1.57 → 0.92 ms（−41%）。有効にすると STRESS の LV3 で Kasane の `BUSY` が出ていたが、原因はキャッシュではなく
 > `app_tick` の継続ターンの穴で、修正後はキャッシュ有りで 3/3 回 PASS（§6.2、backlog R3a）。これを受けて既定を y にした。
-> 既存のビルドディレクトリの `sdkconfig` は `is not set` を持ったままなので、作り直すか menuconfig で有効にする。
+> 同日、ビルドオプションではなくなり常に入る（backlog「ビルドオプションの整理」）。
 
 出典: [allocator-cost.md](allocator-cost.md)（実機: malloc 1 回 約 1,270 サイクル、free 約 620、ブロック長の読み戻し
 約 110、STRESS の JS のターンの 20.6%）。道具は `tools/vmtest/prof/`（`alloc_sim.py`・`vmtrace2alloc.py`、

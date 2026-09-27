@@ -23,10 +23,10 @@ run_case() {  # name expect(FAIL|PASS) [fault]
   if [ "$name" = stale-table ]; then
     ROM_NO_EXTRAS=1 "$GEN" "$dir/qjs/quickjs-rom-atoms.h" >/dev/null
   fi
-  VMTEST_QJS=$dir/qjs VMTEST_OUT=$PWD/$dir/out bash tools/vmtest/build.sh asan-rom >"$dir/build.log" 2>&1 \
+  VMTEST_QJS=$dir/qjs VMTEST_OUT=$PWD/$dir/out bash tools/vmtest/build.sh asan >"$dir/build.log" 2>&1 \
     || { echo "$name: build failed"; tail -3 "$dir/build.log"; status=1; return; }
   local line fails f pinned
-  line=$(VMTEST_OUT=$PWD/$dir/out bash tools/vmtest/run.sh --variant asan-rom 2>&1 | grep '^corpus')
+  line=$(VMTEST_OUT=$PWD/$dir/out bash tools/vmtest/run.sh --variant asan 2>&1 | grep '^corpus')
   # The files pinned to an allocation number ("// vmrun-rom[-...]-flags:") are
   # re-pinned for the real table; a table with fewer names shifts them, so a
   # failure there says nothing about stale-table and is left out of its
