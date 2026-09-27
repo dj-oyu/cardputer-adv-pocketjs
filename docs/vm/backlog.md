@@ -74,6 +74,9 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 | R2 | 普段のターン（LV1/LV2）の内訳 | [allocator-cost.md](allocator-cost.md) | 計測済み（2026-09-27、実機）: **アロケータが JS のターンの 20.6%**（7.63 ms 中 1.56 ms、1 フレーム約 340 回、malloc 1 回約 1,270 サイクル） |
 | R3 | 小さいブロックの再利用とブロック長の直読み | [r3-small-block-cache.md](r3-small-block-cache.md) | 実装済み・**既定 y**（2026-09-27、R3a 解決後）: 実機でアロケータ 1.57 → 0.92 ms、LV1 のターン 7.62 → 7.08 ms |
 | R3a | キャッシュ有りで STRESS LV3 に Kasane の `BUSY`（3/3 回、無しでは 0/2）。frame の外の確保失敗の約 2 フレーム後 | r3-small-block-cache.md §6.2 | **解決**: キャッシュでなく `app_tick` の穴。中断された frame() を継続ターンが終えて提出したまま次の frame() を呼んでいた。修正後 実機 3/3 PASS |
+| R4 | ターンのサイクルの内訳（性能カウンタ、`CONFIG_POCKET_VM_TURNPERF`） | [turn-cpi.md](turn-cpi.md) | 済（2026-09-27、実機）: **IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち**。flash を QIO にして（既定）LV1 の 1 フレームの JS 10.78 → 7.25 ms、描画 6.61 → 6.16 ms。旧 `turn_ms` 7.1 ms は予算で切られた通常＋継続の平均で、実際の合計は 10.8 ms だった |
+| R5 | QIO の後も 57% がミス待ち。ホットな関数の連続配置・一部 IRAM・flash 120 MHz | turn-cpi.md §5 | 未着手 |
+| R4a | `pocket.fs` の open が OOM すると File のスロットが戻らない（`pocket_api_settled` の Promise 生成失敗で File が消え、ファイナライザ無し）。STRESS LV3 60 秒で 474 回 `two files are already open` | turn-cpi.md §4 | 未着手（コードで経路を確認、再現は 1 回） |
 
 ## ビルドオプションの整理（2026-09-27）
 
