@@ -160,6 +160,13 @@ struct pocketjs_guest {
   vm_budget_t budget;
   bool jobs_pending;
   bool suspended;
+  /* Resident suspension (docs/vm/app-suspend-design.md): the app left with
+   * Back but its runtime is kept. Nothing may enter JavaScript until the host
+   * wakes it -- not a frame, not a drain, not an install -- and the interrupt
+   * handler answers "stop" first, so an entry that slipped past the gates
+   * throws instead of running. Distinct from `suspended`, which is L2c's
+   * parked chain inside one turn. */
+  bool dormant;
   JSVMOrigin origin; /* HOST means the logical frame call, including async */
   int64_t frame_us;
   esp_timer_handle_t yield_timer;
@@ -486,6 +493,8 @@ static int guest_interrupt(JSRuntime *runtime, void *opaque) {
   pocketjs_guest_t *guest = opaque;
   if (guest == NULL)
     return 0;
+  if (guest->dormant)
+    return 1;
   /* sec.5.3: one registration, a swappable predicate. The host's watchdog (the
    * 250 ms deadline, or the stop hook's 200 ms one) answers for the whole turn
    * when it is installed; the epoch handler below is what is left when nobody
@@ -715,6 +724,8 @@ pocketjs_guest_quickjs_install(pocketjs_guest_t *guest,
   if (guest == NULL || guest->context == NULL || install == NULL) {
     return ESP_ERR_INVALID_ARG;
   }
+  if (guest->dormant)
+    return ESP_ERR_INVALID_STATE;
   return install(guest->context, user_data);
 }
 
@@ -762,6 +773,8 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
       source_size == 0U) {
     return ESP_ERR_INVALID_ARG;
   }
+  if (guest->dormant)
+    return ESP_ERR_INVALID_STATE;
   JSValue result =
       JS_Eval(guest->context, source, source_size,
               label != NULL ? label : "<pocket-app>", JS_EVAL_TYPE_GLOBAL);
@@ -923,6 +936,8 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
 
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame) {
+  if (guest != NULL && guest->dormant)
+    return ESP_ERR_INVALID_STATE;
   esp_err_t err = guest_run_begin(guest);
   if (err == ESP_OK) err = guest_frame_impl(guest, frame);
   guest_run_end(guest);
@@ -947,6 +962,33 @@ bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest) {
 
 bool pocketjs_guest_suspended(const pocketjs_guest_t *guest) {
   return guest != NULL && guest->suspended;
+}
+
+esp_err_t pocketjs_guest_set_dormant(pocketjs_guest_t *guest, bool dormant) {
+  if (guest == NULL || guest->runtime == NULL)
+    return ESP_ERR_INVALID_ARG;
+  if (!dormant || guest->dormant) {
+    guest->dormant = dormant;
+    return ESP_OK;
+  }
+  /* A parked chain or queued jobs belong to the turn that made them; putting
+   * them to sleep would resume them minutes later in a world their awaits
+   * never saw. The host finishes the drain (the leave turn does) or stops. */
+  if (pocketjs_guest_work_pending(guest))
+    return ESP_ERR_INVALID_STATE;
+  /* What the app no longer reaches goes back to the system before the host
+   * screens need it: the guest allocates block by block from the shared
+   * internal heap, so a collection's garbage is free memory at once, and the
+   * small-block cache holds memory nobody else can use. A FinalizationRegistry
+   * callback the collection queues stays queued until the wake. */
+  JS_RunGC(guest->runtime);
+  pocketjs_guest_block_cache_flush(guest);
+  guest->dormant = true;
+  return ESP_OK;
+}
+
+bool pocketjs_guest_dormant(const pocketjs_guest_t *guest) {
+  return guest != NULL && guest->dormant;
 }
 
 bool pocketjs_guest_work_pending(const pocketjs_guest_t *guest) {
@@ -1135,6 +1177,8 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
 }
 
 esp_err_t pocketjs_guest_continue(pocketjs_guest_t *guest) {
+  if (guest != NULL && guest->dormant)
+    return ESP_ERR_INVALID_STATE;
   esp_err_t err = guest_run_begin(guest);
   if (err == ESP_OK) err = guest_continue_impl(guest);
   guest_run_end(guest);
