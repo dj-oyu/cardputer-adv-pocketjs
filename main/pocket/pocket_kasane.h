@@ -33,6 +33,9 @@ void pocket_kasane_prepare(void);
 void pocket_kasane_set_viewport(int16_t x,int16_t y,int16_t width,int16_t height);
 
 bool pocket_kasane_active(void);
+// Resident suspension: while on, the kept APP lease is invisible to the host
+// screens; turning it off repaints the whole panel on the next present.
+void pocket_kasane_set_dormant(bool on);
 /* Acknowledge a finished presenter ticket without acquiring a new source or
  * submitting fresh display work. Used before an overlay guest turn. */
 ksn_result pocket_kasane_presenter_settle(bool *blocked);

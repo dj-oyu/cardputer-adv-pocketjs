@@ -39,3 +39,5 @@ void pocket_net_pump(void);
 // nothing. A new session that asks for a lease before that finishes gets BUSY,
 // which is retryable and honest.
 void pocket_net_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_net_suspend(void);

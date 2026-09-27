@@ -239,7 +239,9 @@ type PocketError = Error & {
 ```ts
 pocket.app.start(hooks: {
   start?: () => void | Promise<void>;
-  stop?: (reason: "back" | "replace" | "shutdown") => void | Promise<void>;
+  stop?: (reason: "back" | "evict" | "replace" | "shutdown") => void | Promise<void>;
+  suspend?: () => void | Promise<void>;
+  resume?: (info: {suspendedMs: number}) => void | Promise<void>;
 }): void;
 pocket.app.exit(): void;
 pocket.app.onFrame(fn: (f: {timeMs: number; deltaMs: number}) => void): Subscription;
@@ -254,6 +256,8 @@ pocket.time.sleep(ms: number, options?: Options): Promise<void>;
 `time.wallSource()`はKasaneのmountへ渡す不透明なsession-scoped capabilityを返す。`view.bind(pocket.time.wallSource(), {face: 0, tag: 1})`で、text field 0を`HH:MM`（同期前は`--:--`）、field 1を`UTC`または`NO SYNC`として購読できる。JS側の毎フレーム時刻取得や描画更新は不要。sourceは時計サービスが所有し、Kasaneは型付きsnapshotを一時的に借りるだけである。capabilityはセッション終了後に失効する。
 
 startはソース評価中に1回登録する。新ランタイムではglobalThis.frameをホストが用意し、Promiseだけを待つアプリもイベント処理を継続できる。start hook終了まで状態はStartingだが、I/O完了とキャンセルは配送する。onFrameはRunningでのみ呼ぶ。
+
+**常駐中断**（[docs/vm/app-suspend-design.md](../vm/app-suspend-design.md)）: `resume`を登録したアプリは、ホームのメニューから起動したときに限り、Backで終了せずに眠る。ゲストは残り、同じ行を開くとその時点から続く（行に一時停止の印が出る）。眠る前に`suspend`フックが走り（stopと同じ200ms）、実行中の操作はすべて`CANCELLED`（再試行可）で決着する。無線のリース・開いているファイルとSD・マイク・UART/I2C/RMT・テキスト入力・ピッカーは手放し、再開後はリースが`onChange`で`disconnected`、SDが`onVolumeChange`、テキスト入力が`onCancel`、再生が`onState`で知らせる（内蔵素材の再生は一時停止して再開で戻り、SD・ネットワークからの再生は閉じる）。通知の無い面の古いハンドルは`CLOSED`を返す。再開では`resume({suspendedMs})`が走り、最初の`onFrame`の`deltaMs`は0になる。別のアプリを起動する・診断を走らせるときは、眠っているアプリを`stop("evict")`で終える。眠っている間はオーバーレイを起動しない。中断が失敗した（フックが200msで終わらない、操作が決着しない、中断後の空きが96KiB未満）ときは通常のBackと同じく終了する。`capabilities.get("app")`の`limits.suspend`が1なら対応している。
 
 `pocket.app.start()`を使わず、入力・Promiseだけで動くアプリは明示的に`globalThis.frame = null`を指定できる。この場合も各host turnでservice pumpとPromise job drainは続き、JS frame呼出しと引数生成だけを省く。`frame`未定義は引き続き起動エラーである。
 

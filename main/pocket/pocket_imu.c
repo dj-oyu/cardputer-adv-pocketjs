@@ -162,6 +162,13 @@ void pocket_imu_reset(void) {
     motion_request_gyro(false);
 }
 
+// Resident suspension (docs/vm/app-suspend-design.md sec.4): the watches stay
+// open and keep their place in the sample stream, so the first delivery after
+// the wake reports what the sleep skipped in `dropped`; the gyroscope's current
+// is what is given back.
+void pocket_imu_suspend(void) { if(built) motion_request_gyro(false); }
+void pocket_imu_resume(void)  { if(built) follow_gyro_demand(&watch_table); }
+
 // ---------------------------------------------------------------- capability
 
 static const pocket_limit_t imu_limits[] = {

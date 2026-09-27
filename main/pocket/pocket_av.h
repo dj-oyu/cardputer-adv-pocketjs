@@ -65,3 +65,6 @@ void pocket_av_service_stream(void);
 // calls right after this one.
 /* True only when the audio task is no longer using its stream or observer. */
 bool pocket_av_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_av_suspend(void);
+void pocket_av_resume(void);

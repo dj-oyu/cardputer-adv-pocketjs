@@ -465,6 +465,16 @@ void pocket_capture_reset(void) {
     rec.data=NULL; rec.got=0; rec.want=0;
 }
 
+// Resident suspension: the microphone goes, the recorder with it (a 64 ms ring
+// cannot wait out a suspension). A read in flight was stopped by
+// pocket_api_cancel_all() before this; the recorder the app still holds
+// answers CLOSED from here on, the same as after close().
+void pocket_capture_suspend(void) {
+    teardown();
+    free(rec.data);
+    rec.data=NULL; rec.got=0; rec.want=0;
+}
+
 // ---------------------------------------------------------------- indicator
 
 static int64_t indicator_next_us;

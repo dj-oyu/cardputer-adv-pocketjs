@@ -77,6 +77,14 @@ bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest);
 bool pocketjs_guest_suspended(const pocketjs_guest_t *guest);
 /** Either a parked chain or pending jobs must finish before a new frame. */
 bool pocketjs_guest_work_pending(const pocketjs_guest_t *guest);
+/** Resident suspension (docs/vm/app-suspend-design.md). true refuses with
+ * ESP_ERR_INVALID_STATE while work is pending, otherwise collects garbage,
+ * returns the small-block cache and puts the guest to sleep: eval, frame,
+ * continue and install then return ESP_ERR_INVALID_STATE without entering
+ * JavaScript, and the interrupt handler stops any entry that gets past them.
+ * false wakes it. Destroying a dormant guest is allowed. */
+esp_err_t pocketjs_guest_set_dormant(pocketjs_guest_t *guest, bool dormant);
+bool pocketjs_guest_dormant(const pocketjs_guest_t *guest);
 /** Accumulated time inside the current parked frame call, not host waits. */
 int64_t pocketjs_guest_frame_total(const pocketjs_guest_t *guest);
 #ifdef CONFIG_POCKET_VM_SELFTEST

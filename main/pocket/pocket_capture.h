@@ -34,6 +34,8 @@ void pocket_capture_pump(void);
 // recorder holds the I2S channel and the codec's ADC, and nothing else in the
 // firmware would give them back.
 void pocket_capture_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_capture_suspend(void);
 
 // The recording indicator. Drawn from board_present(), which is the only path
 // to the panel, so it lands over whatever the app drew and the app cannot paint

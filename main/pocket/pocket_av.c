@@ -1645,6 +1645,44 @@ void pocket_av_service_stream(void) {
 // Audio namespace lifetime; power has its own owner adapter.
 static bool built;
 
+// Resident suspension (docs/vm/app-suspend-design.md sec.8-2): a sleeping app's
+// sound pauses and comes back with it. The pause is M_PAUSE's -- MP3 keeps its
+// decoder and rings, the others halt and keep their position -- and onState
+// hears "paused" on the first pump after the wake, then "playing" once it
+// resumes. A player fed from the card or the network cannot be paused across
+// the suspension that takes the card and the radio away, so it is closed:
+// the object the app holds answers CLOSED, as after close().
+static bool play_on_wake;
+
+void pocket_av_suspend(void) {
+    play_on_wake=false;
+    if(!built || !player.open) return;
+    bool sd_source=player.path && !strncmp(player.path,"sd:",3);
+    if(player.net || player.sd_mp3 || sd_source) {
+        player_teardown();
+        return;
+    }
+    if(player.state!=P_PLAYING) return;
+    if(player.codec!=C_MP3) player_halt();
+    else if(player.stream) sound_stream_pause(player.stream);
+    player_set_state(P_PAUSED);
+    play_on_wake=true;
+}
+
+void pocket_av_resume(void) {
+    if(!play_on_wake) return;
+    play_on_wake=false;
+    if(!built || !player.open || player.state!=P_PAUSED) return;
+    if(player.codec==C_MP3 && player.stream) {
+        if(sound_stream_resume(player.stream)) player_set_state(P_PLAYING);
+        else player_set_state(P_ERROR);
+        return;
+    }
+    // Relaunched from the kept position; a refusal (memory, a full queue) is
+    // the same error a play() would have met, reported through onState.
+    player_set_state(player_launch()?P_ERROR:P_PLAYING);
+}
+
 bool pocket_av_reset(void) {
     pocket_power_reset();
     if(!built) return true;

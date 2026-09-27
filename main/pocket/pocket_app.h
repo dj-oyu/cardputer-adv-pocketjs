@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_err.h"
 #include "quickjs.h"
 
@@ -29,3 +30,13 @@ void pocket_app_pump(void);
 // pocket_app_pump() so a continuation turn honours it too; see the definition.
 bool pocket_app_exit_requested(void);
 void pocket_app_reset(void);
+
+// Resident suspension (docs/vm/app-suspend-design.md). can_suspend: the app is
+// Running and registered a resume hook. run_suspend: its suspend hook and the
+// jobs it needs, until it settles or until_us; false means stop it instead.
+// resume: restart the frame clock and run the resume hook with {suspendedMs}.
+// set_stop_reason: what the next stop hook is told ("back" or "evict").
+bool pocket_app_can_suspend(void);
+bool pocket_app_run_suspend(int64_t until_us);
+void pocket_app_resume(int64_t suspended_ms);
+void pocket_app_set_stop_reason(const char *reason);

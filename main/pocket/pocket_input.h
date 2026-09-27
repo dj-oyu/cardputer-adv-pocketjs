@@ -10,3 +10,5 @@ esp_err_t pocket_input_install(JSContext *,void *);
  * held() is updated even with no listeners or before the first namespace read. */
 void pocket_input_pump(uint32_t buttons);
 void pocket_input_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_input_suspend(void);

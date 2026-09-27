@@ -1458,13 +1458,12 @@ void pocket_io_pump(void) {
 // built and no IR channel exists, so the whole of this is someone else's work.
 static bool built;
 
-void pocket_io_reset(void) {
-    if(!built) return;
-    built=false;
+// Everything this file holds of the hardware. Shared by the end of a session
+// and by a resident suspension, which differ only in whether the program's
+// watch subscriptions survive.
+static void release_hardware(void) {
     for(int i=0;i<IO_HANDLES;i++)
         if(handles[i].kind!=H_FREE) handle_close(&handles[i]);
-    pocket_api_sub_close_all(&watch_table);
-    watch_table.ctx=NULL;
     // The IR frame is not stopped here: it waits on a promise slot, and
     // pocket_api_reset() is what asks it to stop. The channel goes either way,
     // because rmt_del_channel needs the channel disabled and ir_stop has just
@@ -1480,6 +1479,24 @@ void pocket_io_reset(void) {
     if(grove_bus) { i2c_del_master_bus(grove_bus); grove_bus=NULL; }
     grove_users=0;
     claimed_pins=0;
+}
+
+void pocket_io_reset(void) {
+    if(!built) return;
+    built=false;
+    release_hardware();
+    pocket_api_sub_close_all(&watch_table);
+    watch_table.ctx=NULL;
+}
+
+// Resident suspension (docs/vm/app-suspend-design.md sec.4). A UART left open
+// fills its driver buffer while nobody pumps it, and the pins are the app's to
+// hold only while it runs. Every handle the program keeps answers CLOSED
+// afterwards; its watch subscriptions stay. The IR frame in flight was stopped
+// by pocket_api_cancel_all() before this, which disabled the channel the way
+// the end of a session relies on.
+void pocket_io_suspend(void) {
+    if(built) release_hardware();
 }
 
 // ------------------------------------------------------------ capabilities

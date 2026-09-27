@@ -124,6 +124,13 @@ void pocket_input_pump(uint32_t buttons){
     }
 }
 
+// Resident suspension: the Back that put the app to sleep is still "held" from
+// the leave turn. Forgotten here, so the first turn after the wake does not
+// report its release to an app that never saw the key come up.
+void pocket_input_suspend(void){
+    held_mask=0;memset(repeat_at,0,sizeof(repeat_at));
+}
+
 void pocket_input_reset(void){
     pocket_api_sub_close_all(&action_table);action_table.ctx=NULL;
     held_mask=0;memset(repeat_at,0,sizeof(repeat_at));

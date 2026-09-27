@@ -36,6 +36,8 @@
 #include "esp_cpu.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "vmprobe.h"
 #include "oomprobe.h"
 #ifdef CONFIG_POCKET_VM_OOMPROBE
@@ -185,6 +187,11 @@ static bool turn_continued;
 // When present_frame() last reached the panel. Only the continuation path
 // reads it; see there for why the display, unlike the turn, is still paced.
 static int64_t last_present_us;
+// Resident suspension (docs/vm/app-suspend-design.md): the manifest id of the
+// app whose guest is kept asleep, "" when none, and when it went to sleep.
+static char dormant_id[48];
+static int64_t dormant_since_us;
+static void run_pumps(uint32_t buttons);
 static unsigned frames;
 static double render_sum, present_sum, turn_sum;
 static unsigned painted, ticks;
@@ -724,6 +731,15 @@ void app_stop(void) {
 #ifdef CONFIG_POCKET_VM_PROBE
     vmprobe_session_reset();
 #endif
+    // A sleeping app is ended awake: its stop hook ("evict") is its last chance
+    // to save, and a dormant guest refuses every entry. Everything it gave up
+    // on suspension is already released, which the resets below tolerate.
+    if(guest&&pocketjs_guest_dormant(guest)) {
+        pocketjs_guest_set_dormant(guest,false);
+        pocket_app_set_stop_reason("evict");
+        ESP_LOGI("app","APP_EVICT %s",dormant_id);
+    }
+    dormant_id[0]=0;
     // Before the guest goes: the watches hold callbacks belonging to it, and a
     // promise still in flight holds its resolvers.
     // First: section 5 runs the stop hook before I/O cancellation and before
@@ -804,6 +820,139 @@ void app_stop(void) {
     oomprobe_session_end("app");
 #endif
     ESP_LOGI("app","APP_STOPPED");
+}
+
+// ------------------------------------------------------ resident suspension
+//
+// docs/vm/app-suspend-design.md. Back on an app that registered a resume hook
+// keeps its guest instead of destroying it. The order is the design's sec.3:
+// finish the turn's work, run the suspend hook, cancel every operation still
+// running and let it settle while JS can still hear it, then release what the
+// home screen must not find held (sec.4), then put the guest to sleep. Any
+// step that fails returns an error and the caller ends the app the ordinary
+// way -- a failed suspension is exactly today's Back.
+
+// The home screen's backdrop takes up to 30,671 B (scene_mem.h) and a radio
+// raised from home needs NET_RADIO_MIN_FREE (56 KiB); a sleeping app that
+// leaves less than both is ended instead of kept.
+#define APP_SUSPEND_MIN_FREE (96*1024)
+// The settle loop's bound: cancellation completes through drivers that post
+// from their own tasks, and a turn on this board is 250 ms at most.
+#define APP_SUSPEND_SETTLE_US 200000
+// The suspend hook gets what the stop hook gets (pocket_app.c's APP_STOP_MS).
+#define APP_SUSPEND_HOOK_US 200000
+
+bool app_can_suspend(void) {
+    return guest && !overlay_session && !atomic_load(&stop_requested) &&
+           pocket_app_can_suspend();
+}
+
+const char *app_dormant_id(void) { return dormant_id; }
+
+// Pumps and drains until nothing is in flight and nothing is queued, or the
+// deadline. Everything a cancelled operation settles to runs here, while the
+// app is still awake to catch it.
+static bool settle_all(int64_t until_us) {
+    JSRuntime *rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
+    do {
+        run_pumps(0);
+        pocket_api_pump();
+        JSContext *pending=NULL;
+        while(JS_ExecutePendingJob(rt,&pending)>0 && esp_timer_get_time()<until_us) {}
+        if(!pocket_api_open_count() && !JS_IsJobPending(rt)) return true;
+        vTaskDelay(1);
+    } while(esp_timer_get_time()<until_us);
+    return false;
+}
+
+esp_err_t app_suspend(void) {
+    if(!app_can_suspend()) return ESP_ERR_INVALID_STATE;
+    int64_t began=esp_timer_get_time();
+    // The Back turn's arming: its deadline bounds the hook, and yield is off,
+    // so nothing below can be parked half way.
+    arm_turn(0x2000);
+    for(int i=0;i<16 && pocketjs_guest_work_pending(guest);i++)
+        if(pocketjs_guest_continue(guest)!=ESP_OK) break;
+    if(pocketjs_guest_work_pending(guest)) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED work pending");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if(!pocket_app_run_suspend(began+APP_SUSPEND_HOOK_US)) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED suspend hook");
+        return ESP_FAIL;
+    }
+    // sec.4: deadlines are absolute, so nothing may be left armed across the
+    // sleep; each operation settles CANCELLED (retryable) through its driver.
+    pocket_api_cancel_all(POCKET_ERR_CANCELLED);
+    if(!settle_all(began+APP_SUSPEND_SETTLE_US)) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED %u operations did not settle",
+                 pocket_api_open_count());
+        return ESP_ERR_TIMEOUT;
+    }
+    // sec.4's table, most dependent first: sound before the card and the radio
+    // it may be fed from, the pickers before the card they browse.
+    pocket_text_suspend();
+    pocket_workspace_suspend();
+    pocket_av_suspend();
+    pocket_capture_suspend();
+    pocket_io_suspend();
+    pocket_net_suspend();
+    pocket_fs_suspend();
+    pocket_imu_suspend();
+    pocket_input_suspend();
+    // A release may have posted a completion (a picker going back); it is
+    // settled now, not left to fire into a sleeping guest.
+    if(!settle_all(esp_timer_get_time()+APP_SUSPEND_SETTLE_US)) return ESP_ERR_TIMEOUT;
+    esp_err_t err=pocketjs_guest_set_dormant(guest,true);
+    if(err!=ESP_OK) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED dormant %s",esp_err_to_name(err));
+        return err;
+    }
+    size_t free_now=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    if(free_now<APP_SUSPEND_MIN_FREE) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED free=%u",(unsigned)free_now);
+        pocketjs_guest_set_dormant(guest,false);
+        return ESP_ERR_NO_MEM;
+    }
+    pocket_kasane_set_dormant(true);
+    const app_manifest_t *manifest=app_registry_current();
+    snprintf(dormant_id,sizeof dormant_id,"%s",manifest?manifest->id:"");
+    dormant_since_us=esp_timer_get_time();
+    pocketjs_guest_stats_t stats={.struct_size=sizeof(stats)};
+    pocketjs_guest_stats(guest,&stats);
+    // tools/ scripts read this line: id, the time the suspension took, and the
+    // two numbers the memory rule above is about.
+    ESP_LOGI("app","APP_SUSPENDED %s us=%u free=%u js=%u",dormant_id,
+             (unsigned)(dormant_since_us-began),(unsigned)free_now,
+             (unsigned)stats.heap_used);
+    return ESP_OK;
+}
+
+esp_err_t app_resume(void) {
+    if(!guest || !dormant_id[0] || !pocketjs_guest_dormant(guest))
+        return ESP_ERR_INVALID_STATE;
+    // The identity is global and a host screen may have moved it; the stores
+    // are keyed by it, so it is put back before anything can read or write.
+    app_registry_select(dormant_id);
+    const app_manifest_t *manifest=app_registry_current();
+    pocket_storage_set_owner(manifest->id);
+    pocket_fs_set_owner(manifest->id);
+    pocketjs_guest_set_dormant(guest,false);
+    pocket_kasane_set_dormant(false);
+    pocket_imu_resume();
+    pocket_av_resume();
+    pocket_bridge_resume();
+    atomic_store(&stop_requested,false);
+    deferred_buttons=0; continuation_turns=0; turn_continued=false;
+    last_present_us=0;
+    int64_t slept_ms=(esp_timer_get_time()-dormant_since_us)/1000;
+    // The resume hook runs under a normal turn's watchdog; the Promise it may
+    // return settles through the job queue on the turns that follow.
+    arm_turn(0);
+    pocket_app_resume(slept_ms);
+    ESP_LOGI("app","APP_RESUMED %s slept_ms=%lld",dormant_id,(long long)slept_ms);
+    dormant_id[0]=0;
+    return ESP_OK;
 }
 #ifdef CONFIG_POCKET_VM_RELOC
 // Set by main.c's '&' on the home screen and left set, so one arming covers a
@@ -1099,6 +1248,22 @@ source_ready:;
             "return pocket.storage.get(key)}).then(r=>{if(r!==null)"
             "throw Error('test record remains');vmSaveMark(8)})"
             ".catch(()=>vmSaveMark(9));globalThis.frame=()=>{};";
+            break;
+        // Resident suspension (docs/vm/app-suspend-design.md): a sleep that must
+        // come back CANCELLED, an IMU watch, a file handle that must answer
+        // CLOSED after the wake, and a frame counter that must continue.
+        // tools/vmtest/device_suspend.py reads the SUSP_TEST lines.
+        case 'S': source=
+            "let n=0,h=null;const L=m=>console.log('SUSP_TEST '+m);"
+            "pocket.app.start({start(){"
+            "pocket.time.sleep(20000).then(()=>L('sleep done'),e=>L('sleep '+(e&&e.code)));"
+            "pocket.sensors.imu.watch({rateHz:20},()=>{});"
+            "return pocket.fs.open('assets:/hello.js',{mode:'read'}).then(f=>{h=f;L('ready')})},"
+            "suspend(){L('suspend n='+n)},"
+            "resume(i){L('resume ms='+i.suspendedMs+' n='+n);"
+            "h.read(16).then(()=>L('read ok'),e=>L('read '+e.code))},"
+            "stop(r){L('stop '+r)}});"
+            "pocket.app.onFrame(()=>{n++;if(n%30===0)L('frame n='+n)});";
             break;
         case 'M': source=
             "pocket.app.start({stop:()=>{vmMark(5);return Promise.resolve().then(()=>vmMark(6))}});"

@@ -208,7 +208,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
       ) { atomic_store(&diagnostic,c); return false; }
 #endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
-    if(c=='L'||c=='M'||c=='Y'||c=='Z') { atomic_store(&diagnostic,c); return false; }
+    if(c=='L'||c=='M'||c=='Y'||c=='Z'||c=='S') { atomic_store(&diagnostic,c); return false; }
     if(c=='['||c=='\\'||c==']') { atomic_store(&diagnostic,c); return false; }
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
@@ -579,6 +579,16 @@ static void end_run(esp_err_t tick_err) {
     take_pending_run();
 }
 
+// Resident suspension (docs/vm/app-suspend-design.md): the app is asleep, not
+// gone, so none of end_run()'s teardown runs -- the home screen simply comes
+// back, and the menu row of the app shows it paused.
+static void suspend_run(void) {
+    running=false;
+    xQueueReset(keys);
+    sound_play(2);
+    ESP_LOGI("shell","HOME_READY");
+}
+
 static void take_pending_run(void) {
     const char *source=NULL;
     size_t      length=0;
@@ -596,6 +606,20 @@ static void take_pending_run(void) {
 static void begin_run(const char *app_id, const char *prelude, size_t prelude_len,
                       const char *source, size_t len) {
     owner=screen;
+    // A kept app is resumed by opening it again from the menu (sec.8-4); any
+    // other start ends it first -- stop("evict") is its last chance to save --
+    // because there is one guest slot and this start is about to take it.
+    const char *kept=app_dormant_id();
+    if(kept[0]) {
+        if(!strcmp(kept,app_id) && app_resume()==ESP_OK) {
+            run_started=ESP_OK;
+            running=true;
+            app_force_redraw();
+            ESP_LOGI(SCREENS[owner].tag,"RESUME %s",app_id);
+            return;
+        }
+        app_stop();
+    }
     // The other half of the same rule. Every path that builds a foreground
     // guest comes through here, and app_session.c holds ONE set of statics --
     // so the overlay's session must be gone before this one is built. A path
@@ -673,6 +697,17 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     board_key_t key=have?stroke->nav:KEY_NONE;
     bool leave = have && key==KEY_BACK;
     esp_err_t e=ESP_OK;
+    // An app that can be kept goes to sleep instead (docs/vm/app-suspend-design
+    // .md). Only from the menu: a Playground or tutorial run hands its buffer
+    // back to the editor on the way out, which a kept guest would not. A
+    // suspension that fails is the ordinary Back below.
+    // Not a work launched by workspace.run(): every work shares APP_ID_WORK, so a
+    // kept one could not be told from the next.
+    if(leave && owner==SCREEN_HOME && app_can_suspend() &&
+       strcmp(app_registry_current()->id,APP_ID_WORK) && app_suspend()==ESP_OK) {
+        suspend_run();
+        return;
+    }
     // Let the guest persist its last state before cancellation tears it down.
     if(leave) { e=app_tick(0x2000); app_request_stop(); }
 
@@ -933,7 +968,10 @@ static void ui_task(void *arg) {
             // finished. This frame's is not knowable here -- the overlay turn
             // is part of it -- and the scene does not change cost from one
             // frame to the next by anything like the factor this decides.
-            if(!running && screen==SCREEN_HOME) overlay_tick(last_frame_us);
+            // Not while an app is kept asleep (sec.8-3): an overlay would need
+            // the guest slot and the Kasane lease the sleeping app holds.
+            if(!running && screen==SCREEN_HOME && !app_dormant_id()[0])
+                overlay_tick(last_frame_us);
             const char *source=NULL; size_t len=0;
             if(!running && s->wants_run && s->wants_run(&source,&len)) {
                 const char *pre=NULL; size_t pre_len=0;
@@ -956,6 +994,9 @@ static void ui_task(void *arg) {
             }
 #endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
+            // The diagnostics below assume no guest exists; a kept one is ended
+            // first, the way any other start ends it.
+            if(test && !running && app_dormant_id()[0]) app_stop();
             if((test=='L'||test=='M') && !running && screen==SCREEN_HOME) {
                 overlay_release();
                 scene_mem_release();
