@@ -43,7 +43,10 @@ int main(void) {
         "storage:{get(k){return new Promise((res,rej)=>{if(k in __store)res(__store[k]);"
         "else rej({code:'NOT_FOUND'});});},"
         "set(k,v){return new Promise((res)=>{__store[k]=v;res();});}},"
-        "audio:{tone(){return Promise.resolve();}}};"
+        "audio:{tone(){return Promise.resolve();}},"
+        /* pocket.app as the host has it: onFrame is what frame() delivers to,
+         * and the hooks are kept so a resume can be driven mid-walk. */
+        "app:{start(h){globalThis.__hooks=h;},onFrame(f){globalThis.frame=()=>f();}}};"
         /* setAccel is a no-op once report() closes the subscription -- a real
          * watch stops delivering samples the moment close() runs natively. */
         "function setAccel(x,y,z){if(__imuCb)__imuCb({accel:{x:x,y:y,z:z},"
@@ -59,6 +62,8 @@ int main(void) {
     check(run("moveAway();"),"move-away after 1/6");
     check(run("hold(0,0,-9.8);"),"orientation 2/6 (DESK FACE DOWN)");
     check(run("moveAway();"),"move-away after 2/6");
+    check(run("__hooks.resume({suspendedMs:5000});"),
+          "a resume mid-walk (docs/vm/app-suspend-design.md) does not throw");
     check(run("hold(0,9.8,0);"),"orientation 3/6 (UP FACING YOU)");
     check(run("moveAway();"),"move-away after 3/6");
     check(run("hold(0,-9.8,0);"),"orientation 4/6 (UP INVERTED)");

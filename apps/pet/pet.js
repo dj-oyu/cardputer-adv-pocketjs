@@ -2,7 +2,7 @@
   var names=['TABBY','CALICO','BLACK','NEON CAT','PINK','IVORY','MINT','NEON AXO','GRAY','YELLOW','BLUE','NEON BIRD'];
   var kinds=['CAT','AXOLOTL','COCKATIEL'], actions=['FEED','PLAY','SLEEP','NAME','PETS'];
   var s={v:1,selected:0,pets:[]}, ready=false, lf=false, mode=1, choice=0, action=0;
-  var last=__petNow(), saved=last, anim=0, prev=0, note='LOADING', until=0, pos=0, draft='';
+  var last=__petNow(), saved=last, anim=0, note='LOADING', until=0, pos=0, draft='';
   var chars=' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   var art=pocket.kasane.resource('pets'), V=pocket.kasane.mount('pet');
   function render(){
@@ -46,15 +46,14 @@
     render();
     console.log('PET_READY '+s.selected);
   },function(){lf=true;note='LOAD FAILED: ESC TO RETRY';render();});
-  globalThis.frame=function(buttons){
-    var now=__petNow(), edge=buttons&~prev;prev=buttons;
+  function step(edge){
+    var now=__petNow();
     if(!ready)return;
     var p=pet(), dt=Math.max(0,Math.min(5,(now-last)/1000));last=now;
     var gift=pocket.pet.rewards(s.selected),was=typeof p.gift==='number'?p.gift:0;
     if(gift>was){p.food=Math.min(100,p.food+gift-was);p.gift=gift;message('TOKEN SNACK!');}
     p.food=Math.max(0,p.food-dt/90);p.fun=Math.max(0,p.fun-dt/120);
     p.energy=Math.max(0,Math.min(100,p.energy+dt*(p.sleep?0.8:-1/150)));
-    if(edge&0x2000){save();return;}
     if(mode===1){
       if(edge&0x80)choice=Math.floor(choice/4)*4+(choice+3)%4;
       if(edge&0x20)choice=Math.floor(choice/4)*4+(choice+1)%4;
@@ -82,5 +81,9 @@
     }
     if(now-saved>=60000)save();
     if(now-anim>=100||edge){anim=now;render();}
-  };
+  }
+  var B={left:0x80,right:0x20,up:0x10,down:0x40,accept:0x4000};
+  pocket.input.onAction(function(e){if(e.phase==='press'&&B[e.action])step(B[e.action]);});
+  pocket.app.start({suspend:save,stop:save,resume:function(){last=__petNow();render();}});
+  pocket.app.onFrame(function(){step(0);});
 })();

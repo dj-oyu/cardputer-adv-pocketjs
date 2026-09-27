@@ -945,6 +945,9 @@ esp_err_t app_resume(void) {
     atomic_store(&stop_requested,false);
     deferred_buttons=0; continuation_turns=0; turn_continued=false;
     last_present_us=0;
+    // The panel is the app's again, so its first present logs the marker the
+    // tools wait for after opening an app, exactly as a fresh start's does.
+    kasane_presented=false;
     int64_t slept_ms=(esp_timer_get_time()-dormant_since_us)/1000;
     // The resume hook runs under a normal turn's watchdog; the Promise it may
     // return settles through the job queue on the turns that follow.

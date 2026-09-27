@@ -110,9 +110,15 @@ try:
         imucal_later = capture('imucal_later')
         if region(imucal, 45, 96) == region(imucal_later, 45, 96):
             raise RuntimeError('imucal sensor/status rows did not update')
-        open_app(4, 'IMUCAL_READY')
-        capture('imucal_restart')
-        print('IMUCAL_SENSOR_RESTART PASS (calibration not required)', flush=True)
+        # IMU CALIBRATION keeps itself asleep on Back (docs/vm/app-suspend-design.md),
+        # so opening it again resumes the same session: no second IMUCAL_READY,
+        # and the sensor rows must still be moving after the wake.
+        open_app(4, 'APP_RESUMED local.imucal')
+        resumed = capture('imucal_resumed')
+        time.sleep(0.5)
+        if region(resumed, 45, 96) == region(capture('imucal_resumed_later'), 45, 96):
+            raise RuntimeError('imucal sensor/status rows did not update after resume')
+        print('IMUCAL_SENSOR_RESUME PASS (calibration not required)', flush=True)
         open_app(6, 'COMPANION_READY')
         companion = capture('companion')
         navigate('b')

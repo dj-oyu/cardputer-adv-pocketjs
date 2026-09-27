@@ -34,6 +34,7 @@ python tools\capture_home.py --port COM3               # 実ピクセル取得�
 python tools\test_editor_draft.py --port COM3          # 未保存の編集がアプリ起動を跨いで残るか
 python tools\benchmark_app.py --port COM3              # JSアプリのPAINT内訳
 python tools\stress_app.py --port COM3                # STRESS TEST（メニュー最後の行）: ヒープ負荷3段階＋描画負荷、OOM回復とfps
+python tools\test_app_resume.py --port COM3           # Backで眠るアプリ（IMU CAL/PET/COMPANION）: 中断→同じ行で再開→別アプリで退去
 ```
 
 `test_settings.py` と `capture_home.py` は**押下回数を数えて**メニューを移動する。設定やアプリの行を増減させたら、この2つを同じ変更の中で直す。ログの大文字マーカー（`HOME_READY` / `CATEGORY %u` / `APP %u` / `SELECT %u` / `OPEN %u choice=%u` / `CHOICE %u` / `VALUE ...` / `LOADED ...` / `MODE %u %s` / `PERF ...` / `SFX %d played`）はこれらのスクリプトの契約なので、バイト単位で保つ。

@@ -12,11 +12,16 @@ const view={resource(id){assert.equal(id,'pets');return {};},mount(id){assert.eq
   images.push(values.variant);
   for(const key of ['head','line0','line1','line2','line3','foot','hint'])texts.push(values[key]);
 }};}};
-const ctx={pocket:{pet,kasane:view,input},console:{log(){}}};vm.createContext(ctx);
+// pocket.app as the host has it: the frame listener is what ctx.frame() runs,
+// and the resume hook is kept to check that a wake repaints.
+let hooks={},onFrame=()=>{};
+const app={start(h){hooks=h;},onFrame(fn){onFrame=fn;}};
+const ctx={pocket:{pet,kasane:view,input,app},console:{log(){}},frame:()=>onFrame()};vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../apps/companion/companion.js'),'utf8'),ctx);
 function key(action){clock+=1100;onAction({action,phase:'press'});ctx.frame();}
 assert.equal(images.at(-1),0);key('up');assert.equal(selected,1);assert.equal(images.at(-1),1);
 key('right');assert(texts.some(t=>t.includes('CLAUDE')));
 key('right');key('accept');assert.equal(wake,420);key('accept');assert.equal(wake,-1);
 key('right');key('accept');assert.equal(timer,300);key('accept');assert.equal(timer,null);
-console.log('PASS: companion native-view values, pet select, wake toggle, timer start/stop');
+const painted=images.length;hooks.resume({suspendedMs:5000});assert(images.length>painted,'resume repaints');
+console.log('PASS: companion native-view values, pet select, wake toggle, timer start/stop, resume repaint');

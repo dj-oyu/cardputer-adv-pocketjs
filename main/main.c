@@ -993,10 +993,11 @@ static void ui_task(void *arg) {
                 test=0;
             }
 #endif
-#ifdef CONFIG_POCKET_VM_SELFTEST
             // The diagnostics below assume no guest exists; a kept one is ended
-            // first, the way any other start ends it.
-            if(test && !running && app_dormant_id()[0]) app_stop();
+            // first, the way any other start ends it. Outside the SELFTEST
+            // block: 'K', '1'..'6' and the sound checks are in every build.
+            if(test && !running && screen==SCREEN_HOME && app_dormant_id()[0]) app_stop();
+#ifdef CONFIG_POCKET_VM_SELFTEST
             if((test=='L'||test=='M') && !running && screen==SCREEN_HOME) {
                 overlay_release();
                 scene_mem_release();
