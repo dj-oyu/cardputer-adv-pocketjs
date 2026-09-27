@@ -1,8 +1,8 @@
 /* Boundary 2a identity harness: one binary renders the same 120-frame script
  * once per arm of g_ksn_decode_once and compares the framebuffer hash and the
  * transfer counters render by render. The read counts are counted call sites in
- * the linked binary: the linker redirects every ksn_core_read reference from
- * ksn_render.c to __wrap_ksn_core_read (see run.sh), so the numbers are
+ * the linked binary: the linker redirects every borrowed core read from
+ * ksn_render.c to __wrap_ksn_core_read_borrowed (see run.sh), so numbers are
  * measured, not estimated. The scalar reference is the arm with the switch off,
  * which is the pre-2a renderer: it reads the command again for every band and
  * twice for every group child. g_ksn_decode_once is defined weakly here so this
@@ -30,11 +30,11 @@
 int g_ksn_decode_once __attribute__((weak))=1;
 
 static unsigned counted_reads;
-ksn_result __real_ksn_core_read(const ksn_core *,ksn_tx,bool,ksn_layer,uint16_t,ksn_frame_command *);
-ksn_result __wrap_ksn_core_read(const ksn_core *core,ksn_tx ticket,bool previous,ksn_layer layer,
-                                uint16_t index,ksn_frame_command *out){
+ksn_result __real_ksn_core_read_borrowed(const ksn_core *,ksn_tx,bool,ksn_layer,uint16_t,ksn_frame_command *);
+ksn_result __wrap_ksn_core_read_borrowed(const ksn_core *core,ksn_tx ticket,bool previous,ksn_layer layer,
+                                         uint16_t index,ksn_frame_command *out){
     counted_reads++;
-    return __real_ksn_core_read(core,ticket,previous,layer,index,out);
+    return __real_ksn_core_read_borrowed(core,ticket,previous,layer,index,out);
 }
 
 KSN_TEST_CORE(core,static);

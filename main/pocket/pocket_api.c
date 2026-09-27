@@ -173,10 +173,15 @@ JSValue pocket_api_settled(JSContext *ctx, JSValue value, bool rejected) {
     if(JS_IsException(promise)) { JS_FreeValue(ctx,value); return promise; }
     JSValue done=JS_Call(ctx,funcs[rejected?1:0],JS_UNDEFINED,1,
                          (JSValueConst *)&value);
-    JS_FreeValue(ctx,done);
     JS_FreeValue(ctx,funcs[0]);
     JS_FreeValue(ctx,funcs[1]);
     JS_FreeValue(ctx,value);
+    // A settle refused at the guest's limit would otherwise hand back a promise
+    // that never settles, with the refusal left pending on the context. The
+    // caller gets the exception instead, and one that owns something the value
+    // carried (a File's slot) can take it back.
+    if(JS_IsException(done)) { JS_FreeValue(ctx,promise); return done; }
+    JS_FreeValue(ctx,done);
     return promise;
 }
 
@@ -465,13 +470,11 @@ void pocket_api_complete(pocket_request_t request, int32_t status) {
     // Written last: the pump reads the number first and only then trusts the
     // status beside it.
     atomic_store(&p->done,request);
-#ifdef CONFIG_POCKET_VM_SCHED
     // AFTER the record is published, never before (vm_wake.h's ordering
     // contract). The owner task re-checks its own state when it wakes, so a
     // wake that arrived first would find nothing and go back to sleep for the
     // rest of the frame period -- which is the delay this is here to remove.
     vm_wake_post();
-#endif
 }
 
 static void promise_settle(pocket_promise_t *p, JSValue value, bool rejected) {
@@ -522,6 +525,21 @@ void pocket_api_pump(void) {
             promise_stop(p,POCKET_ERR_TIMEOUT);
     }
 }
+
+// Resident suspension (docs/vm/app-suspend-design.md sec.4): every operation
+// still running is asked to stop, and settles through the ordinary pump once
+// its driver posts the completion -- the same path a cancel token takes. A
+// deadline is absolute, so an operation left armed across a suspension of
+// minutes would come back as a TIMEOUT that had nothing to do with it.
+void pocket_api_cancel_all(const char *code) {
+    if(!promise_open) return;
+    for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
+        pocket_promise_t *p=&promises[i];
+        if(atomic_load(&p->request) && p->armed) promise_stop(p,code);
+    }
+}
+
+unsigned pocket_api_open_count(void) { return promise_open; }
 
 // Every static that pocket_api_class_ready() has filled in, so the end of a
 // session can clear them (see pocket_api.h). Twelve owners exist today; the

@@ -137,9 +137,36 @@ bool srcstore_save(unsigned slot, const char *text, size_t len) {
     memcpy(slotbuf[slot],text,len); slotlen[slot]=len; slotset[slot]=true;
     return true;
 }
+// The parked draft: one record for the firmware, carrying its owning slot,
+// exactly like the flash region srcstore.c writes.
+static char   draftbuf[SRC_MAX+1];
+static size_t draftlen;
+static unsigned draftslot;
+static bool   draftset;
+
 bool srcstore_clear(unsigned slot) {
     if(slot>=SRC_SLOT_COUNT) return false;
+    if(draftset && draftslot==slot) draftset=false;
     slotset[slot]=false; slotlen[slot]=0; return true;
+}
+size_t srcstore_draft_load(unsigned slot, char *out) {
+    out[0]=0;
+    if(!draftset || draftslot!=slot) return 0;
+    memcpy(out,draftbuf,draftlen);
+    out[draftlen]=0;
+    return draftlen;
+}
+bool srcstore_draft_save(unsigned slot, const char *text, size_t len) {
+    if(slot>=SRC_SLOT_COUNT || len>SRC_MAX) return false;
+    memcpy(draftbuf,text,len); draftbuf[len]=0;
+    draftlen=len; draftslot=slot; draftset=true;
+    return true;
+}
+bool srcstore_draft_clear(void) { draftset=false; draftlen=0; return true; }
+bool srcstore_draft_owner(unsigned *slot) {
+    if(!draftset) return false;
+    if(slot) *slot=draftslot;
+    return true;
 }
 uint32_t srcstore_revision(unsigned slot) { return slotset[slot]?1u:0u; }
 

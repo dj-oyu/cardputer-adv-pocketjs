@@ -820,6 +820,16 @@ void pocket_bridge_reset(void) {
     // and reaches each one through bridge_stop() and bridge_release().
 }
 
+// Resident suspension: the link and the app's listeners stay, the calls in
+// flight were cancelled with everything else. What the PC sent while the app
+// slept is old news by the wake -- a two-slot inbox holds only the first two
+// of it anyway -- so it is dropped then, and counted like any other drop.
+void pocket_bridge_resume(void) {
+    uint32_t head=atomic_load(&inbox_head),tail=atomic_load(&inbox_tail);
+    atomic_fetch_add(&inbox_dropped,head-tail);
+    atomic_store(&inbox_tail,head);
+}
+
 // ----------------------------------------------------------------- capability
 
 static const pocket_limit_t bridge_limits[] = {

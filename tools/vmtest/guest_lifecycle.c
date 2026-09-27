@@ -16,6 +16,11 @@ static JSValue request(JSContext *ctx, JSValueConst self, int argc, JSValueConst
     return JS_UNDEFINED;
 }
 
+static esp_err_t noop_install(JSContext *ctx, void *user) {
+    (void)ctx; (void)user;
+    return ESP_OK;
+}
+
 static int value(JSContext *ctx, const char *expr) {
     JSValue v = JS_Eval(ctx, expr, strlen(expr), "guest-check", JS_EVAL_TYPE_GLOBAL);
     int32_t n;
@@ -25,6 +30,29 @@ static int value(JSContext *ctx, const char *expr) {
 }
 
 void vmtest_guest_lifecycle(void) {
+    {
+        pocketjs_guest_config_t config;
+        pocketjs_guest_config_defaults(&config);
+        config.heap_limit = 160 * 1024;
+        config.stack_limit = 20 * 1024;
+        config.prefer_psram = false;
+        pocketjs_guest_t *guest = NULL;
+        assert(pocketjs_guest_create(&config, &guest) == ESP_OK);
+        const char *missing = "globalThis.jobs=0";
+        assert(pocketjs_guest_eval(guest, missing, strlen(missing), "missing-frame") == ESP_ERR_NOT_FOUND);
+        const char *event_driven = "globalThis.frame=null;Promise.resolve().then(()=>jobs++)";
+        assert(pocketjs_guest_eval(guest, event_driven, strlen(event_driven), "event-driven") == ESP_OK);
+        JSContext *ctx = pocketjs_guest_quickjs_context(guest);
+        assert(value(ctx, "jobs") == 1);
+        assert(value(ctx, "Promise.resolve().then(()=>jobs++);0") == 0);
+        pocketjs_guest_frame_t input = {.struct_size = sizeof(input)};
+        assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
+        assert(value(ctx, "jobs") == 2);
+        pocketjs_guest_stats_t stats = {.struct_size = sizeof(stats)};
+        assert(pocketjs_guest_stats(guest, &stats) == ESP_OK);
+        assert(stats.frames == 1 && stats.frame_errors == 0);
+        pocketjs_guest_destroy(guest);
+    }
     const char *sources[] = {
         "globalThis.frame=()=>{calls++;work()}",
         "globalThis.frame=()=>{calls++;Promise.resolve().then(work)}",
@@ -128,5 +156,57 @@ void vmtest_guest_lifecycle(void) {
         pocketjs_guest_destroy(guest);
         vTaskDelay(1); // esp_timer_delete frees from the timer task
         printf("lifecycle guest timer mode=%u resumes=%u OK\n", mode, resumes);
+    }
+    // Resident suspension (docs/vm/app-suspend-design.md, S0): a dormant
+    // guest keeps its state, refuses every entry, and wakes where it slept.
+    for (unsigned mode = 0; mode < 2; mode++) {
+        pocketjs_guest_config_t config;
+        pocketjs_guest_config_defaults(&config);
+        config.heap_limit = 160 * 1024;
+        config.stack_limit = 20 * 1024;
+        config.prefer_psram = false;
+        pocketjs_guest_t *guest = NULL;
+        assert(pocketjs_guest_create(&config, &guest) == ESP_OK);
+        JSContext *ctx = pocketjs_guest_quickjs_context(guest);
+        JSValue global = JS_GetGlobalObject(ctx);
+        JS_SetPropertyStr(ctx, global, "requestYield", JS_NewCFunction(ctx, request, "requestYield", 0));
+        JS_FreeValue(ctx, global);
+        const char *src = "globalThis.n=0;globalThis.park=false;globalThis.junk=[];"
+                          "globalThis.frame=()=>{n++;junk.push({n});if(junk.length>64)junk.length=0;"
+                          "if(park){park=false;requestYield();for(let i=0;i<3;i++);}}";
+        assert(pocketjs_guest_eval(guest, src, strlen(src), "dormant-guest") == ESP_OK);
+        pocketjs_guest_frame_t input = {.struct_size = sizeof(input)};
+        for (unsigned i = 0; i < 3; i++) assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
+        // A parked chain belongs to its turn: it may not go to sleep.
+        assert(value(ctx, "park=true;0") == 0);
+        assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
+        assert(pocketjs_guest_work_pending(guest));
+        assert(pocketjs_guest_set_dormant(guest, true) == ESP_ERR_INVALID_STATE);
+        assert(!pocketjs_guest_dormant(guest));
+        assert(pocketjs_guest_continue(guest) == ESP_OK);
+        assert(!pocketjs_guest_work_pending(guest));
+        unsigned cycles = 0;
+        for (; cycles < 20; cycles++) {
+            assert(pocketjs_guest_set_dormant(guest, true) == ESP_OK);
+            assert(pocketjs_guest_dormant(guest));
+            assert(pocketjs_guest_frame(guest, &input) == ESP_ERR_INVALID_STATE);
+            assert(pocketjs_guest_continue(guest) == ESP_ERR_INVALID_STATE);
+            assert(pocketjs_guest_eval(guest, "n++", 3, "dormant-eval") == ESP_ERR_INVALID_STATE);
+            assert(pocketjs_guest_quickjs_install_once(guest, "dormant-surface", noop_install, NULL)
+                   == ESP_ERR_INVALID_STATE);
+            if (cycles == 0) {
+                // Past the gates, the interrupt handler still stops it.
+                JSValue v = JS_Eval(ctx, "for(;;){}", 9, "dormant-direct", JS_EVAL_TYPE_GLOBAL);
+                assert(JS_IsException(v));
+                JS_FreeValue(ctx, JS_GetException(ctx));
+            }
+            if (mode == 1 && cycles == 10) break;   // destroyed while dormant
+            assert(pocketjs_guest_set_dormant(guest, false) == ESP_OK);
+            assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
+            assert(value(ctx, "n") == 5 + (int)cycles);
+        }
+        pocketjs_guest_destroy(guest);
+        vTaskDelay(1);
+        printf("lifecycle guest dormant mode=%u cycles=%u OK\n", mode, cycles);
     }
 }

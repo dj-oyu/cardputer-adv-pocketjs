@@ -1,25 +1,7 @@
 (function () {
-  var state = {st: 'CONNECTING...', info: '', job: '', seen: ''};
-  function T(tx, x, y, w, h, c, t, cap) {
-    return tx.text({bounds: [x, y, x + w, y + h], font: 'caption', color: c, text: t, capacity: cap});
-  }
-  var scene = pocket.kasane.createScene({
-    build: function (tx, s) {
-      tx.background(0x08131fff);
-      T(tx, 10, 8, 220, 10, 0x7fd7ffff, 'POCKET BRIDGE / PC LINK');
-      tx.rect({bounds: [8, 24, 232, 98], color: 0x14293cff});
-      var r = {
-        st: T(tx, 16, 31, 208, 10, 0xf5eedcff, s.st, 32),
-        info: T(tx, 16, 49, 208, 10, 0x9fb6c8ff, s.info, 40),
-        job: T(tx, 16, 66, 208, 10, 0x9fb6c8ff, s.job, 24),
-        seen: T(tx, 16, 83, 208, 10, 0x8ef0c4ff, s.seen, 32)
-      };
-      T(tx, 10, 120, 220, 9, 0xf5bb69ff, 'ENTER SUBMIT   ESC HOME');
-      return r;
-    },
-    patch: function (tx, r, s) { for (var k in r) r[k].setText(tx, s[k]); }
-  });
-  function show(f, t) { if (state[f] !== t) { state[f] = t; scene.invalidate(); } }
+  var view = pocket.kasane.mount('bridge');
+  view.set({st: 'CONNECTING...', info: '', job: '', seen: ''});
+  function show(f, t) { var slot = {}; slot[f] = t; view.set(slot); }
   var cap = pocket.capabilities.get('bridge.pc');
   console.log('BRIDGE_CAP supported=' + cap.supported + ' available=' + cap.available +
     ' maxFrameBytes=' + cap.limits.maxFrameBytes + ' maxPayloadBytes=' + cap.limits.maxPayloadBytes);
@@ -55,7 +37,6 @@
         console.log('BRIDGE_JOB ' + r.jobId + ' ' + r.state);
       }, function (e) { busy = false; fail('SUBMIT', e); });
   });
-  globalThis.frame = function () { scene.flush(state); };
-  scene.flush(state);
+  globalThis.frame = function () {};
   console.log('BRIDGE_READY');
 })();

@@ -59,6 +59,9 @@ int main(void){
     EXPECT(ksn_core_discard(&core,stale)==KSN_STALE);
     EXPECT(ksn_core_read(&core,frame.ticket,false,KSN_APP,0,&command)==KSN_OK);
     EXPECT(command.draw.data.text.utf8==command.text&&memcmp(command.text,"abc",3)==0);
+    EXPECT(ksn_core_read_borrowed(&core,frame.ticket,false,KSN_APP,0,&command)==KSN_OK);
+    EXPECT(command.draw.data.text.utf8!=command.text&&
+           memcmp(command.draw.data.text.utf8,"abc",3)==0);
     EXPECT(ksn_core_presented(&core,frame.ticket)==KSN_OK);
     EXPECT(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
     ksn_change change={.property=KSN_SET_TEXT,.value.text={"xy",2}};
@@ -69,8 +72,15 @@ int main(void){
     EXPECT(command.draw.data.text.bytes==3&&memcmp(command.text,"abc",3)==0);
     EXPECT(ksn_core_read(&core,frame.ticket,false,KSN_APP,0,&command)==KSN_OK);
     EXPECT(command.draw.data.text.bytes==2&&memcmp(command.text,"xy",2)==0);
+    EXPECT(ksn_core_read_borrowed(&core,frame.ticket,true,KSN_APP,0,&command)==KSN_OK);
+    EXPECT(command.draw.data.text.bytes==3&&memcmp(command.draw.data.text.utf8,"abc",3)==0);
+    EXPECT(ksn_core_read_borrowed(&core,frame.ticket,false,KSN_APP,0,&command)==KSN_OK);
+    EXPECT(command.draw.data.text.bytes==2&&memcmp(command.draw.data.text.utf8,"xy",2)==0);
     EXPECT(ksn_core_failed(&core,frame.ticket)==KSN_OK);
+    EXPECT(ksn_core_read_borrowed(&core,frame.ticket,false,KSN_APP,0,&command)==KSN_OK);
+    EXPECT(memcmp(command.draw.data.text.utf8,"xy",2)==0);
     EXPECT(ksn_core_discard(&core,frame.ticket)==KSN_OK);
+    EXPECT(ksn_core_read_borrowed(&core,frame.ticket,false,KSN_APP,0,&command)==KSN_STALE);
     EXPECT(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
     EXPECT(app.ops->end(app.ctx,tx)==KSN_OK);
     EXPECT(ksn_core_frame(&core,&frame)==KSN_OK&&frame.full_redraw);

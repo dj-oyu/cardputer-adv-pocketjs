@@ -197,6 +197,15 @@ void pocket_text_reset(void) {
     class_ready=false;
 }
 
+// Resident suspension (docs/vm/app-suspend-design.md sec.4): an open field
+// takes the keyboard and the IME with it, and neither belongs to the home
+// screen. It is cancelled the way Esc cancels it, so the app's onCancel runs
+// on the first pump after the wake -- not now, when it is about to sleep.
+static void finish_cancel(session_t *s);
+void pocket_text_suspend(void) {
+    if(live) finish_cancel(live);
+}
+
 // Calls one listener and reports whether the session survived it. `s` may be
 // freed by the call -- an onEdit that calls close() does exactly that -- so
 // nothing after this may touch it unless the answer is true.

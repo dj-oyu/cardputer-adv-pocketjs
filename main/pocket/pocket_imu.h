@@ -19,3 +19,6 @@ void pocket_imu_pump(void);
 // app_stop() before it destroys the guest -- so the callbacks are released and
 // the gyroscope goes back off.
 void pocket_imu_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_imu_suspend(void);
+void pocket_imu_resume(void);

@@ -12,6 +12,8 @@ typedef struct {
     uint32_t id;
     uint16_t first_command,text_offset,text_bytes;
     uint8_t command_count,layer;
+    /* Bounds and clips of every command, in template-local coordinates. */
+    ksn_rect extent;
 } ksn_cache_template_entry;
 typedef struct {
     uint32_t id,template_id,pending_tx;
@@ -52,7 +54,9 @@ ksn_result ksn_cache_create(ksn_cache *cache,ksn_layer layer,const ksn_draw *dra
                           uint16_t count,ksn_template *out);
 ksn_result ksn_cache_release(ksn_cache *cache,ksn_template handle);
 /* Instantiate only in REPLACE. Every instance uses isolated premultiplied
- * composition, including opacity 255, to keep rounding stable under PATCH. */
+ * composition, including opacity 255, to keep rounding stable under PATCH.
+ * Cache owns the resulting refs; bypassing it to mutate child commands makes
+ * placement's unchanged-property fast path invalid. */
 ksn_result ksn_cache_instantiate(ksn_cache *cache,ksn_core *core,ksn_tx tx,
                                ksn_template handle,const ksn_placement *placement,
                                ksn_instance *out);

@@ -1,0 +1,18 @@
+typeof number string object undefined function symbol
+typeof again true 6
+Math keys min,max,abs,floor,ceil,round,sqrt,acos,asin,atan,atan2,cos,exp,log,pow,sin,tan,trunc,sign,cosh,sinh,tanh,acosh,asinh,atanh,expm1,log1p,log2,log10,cbrt,hypot,random,f16round,fround,imul,clz32,sumPrecise,E,LN10,LN2,LOG2E,LOG10E,PI,SQRT1_2,SQRT2
+Array.prototype length,at,with,concat,every,some,forEach,map,filter,reduce,reduceRight,fill,find,findIndex,findLast,findLastIndex,indexOf,lastIndexOf,includes,join,toString,toLocaleString,pop,push,shift,unshift,reverse,toReversed,sort,toSorted,slice,splice,toSpliced,copyWithin,flatMap,flat,values,keys,entries,constructor
+Uint8Array.prototype length,at,with,buffer,byteLength,byteOffset,set,values,keys,entries,copyWithin,every,some,forEach,map,filter,reduce,reduceRight,fill,find,findIndex,findLast,findLastIndex,reverse,toReversed,slice,subarray,sort,toSorted,join,toLocaleString,indexOf,lastIndexOf,includes,constructor,toString,Symbol(Symbol.iterator),Symbol(Symbol.toStringTag)
+names map max get size
+toString tags [object Array] [object Map]
+symbols Symbol(number) false length Symbol(Symbol.iterator) true
+typed   1 false 0,1,length2
+wide true 3 9
+json {"name":"n","value":1,"length":2}
+for-in name,value,length,then,toString
+keys name,value,length,then,toString n 1
+error cannot read property 'subarray' of null
+error cannot read property 'map' of undefined
+map 1 false true
+concat true true
+exit=0

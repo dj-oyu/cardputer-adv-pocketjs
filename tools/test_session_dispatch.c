@@ -1,5 +1,6 @@
 // Production app_tick/run_pumps/dispatch_guest with deterministic host ports.
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -14,7 +15,9 @@ typedef struct {size_t struct_size;uint32_t buttons,analog;const uint32_t *touch
 typedef struct {int id;} sys_notice;
 static void *guest;
 static bool turn_continued,pending,remain,activate,need_present,submission;
-static bool runaway,exit_requested,stopped;
+static bool runaway,exit_requested,stopped,cont_submits;
+static ksn_result presenter_result;
+static atomic_bool stop_requested;
 static unsigned continuation_turns,ticks;
 static uint32_t deferred_buttons,delivered,armed;
 static int scope,guest_error;
@@ -26,10 +29,11 @@ static void call(char c){size_t n=strlen(calls);assert(n+1<sizeof(calls));calls[
 static int64_t esp_timer_get_time(void){return now;}
 static void arm_turn(uint32_t b){armed=b;call('A');}
 static bool pocketjs_guest_work_pending(void *g){(void)g;return pending;}
-#ifdef CONFIG_POCKET_VM_FAIR
-static bool pocketjs_guest_suspended(void *g){(void)g;return false;}
-#endif
-static int pocketjs_guest_continue(void *g){(void)g;call('C');pending=remain;return guest_error;}
+/* cont_submits: the continuation finishes a frame() the VM parked mid-call,
+ * and that frame() submits its picture (backlog R3a). */
+static int pocketjs_guest_continue(void *g){
+    (void)g;call('C');pending=remain;if(cont_submits)submission=need_present=true;return guest_error;
+}
 static int pocketjs_guest_frame(void *g,const pocketjs_guest_frame_t *f){
     (void)g;assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
     assert(!f->touch_count&&!f->touches&&!f->touch_hits);
@@ -52,6 +56,14 @@ static bool drain_runaway(void){return runaway;}
 static bool pocket_app_exit_requested(void){return exit_requested;}
 static void app_request_stop(void){stopped=true;call('S');}
 static int present_frame(void){call('P');need_present=false;submission=false;return 0;}
+/* Silent: the call strings below predate these, and none of them decides an
+ * ordering this test checks. The presenter step can be made to fail. */
+static void sample_memory_pressure(void){}
+static ksn_result pocket_kasane_presenter_step(bool *blocked){*blocked=false;return presenter_result;}
+#define ESP_LOGE(tag,...) ((void)(tag))
+enum {KSN_P0_APP_TURN};
+static void ksn_p0_probe_sample(int which,uint32_t us){(void)which;(void)us;}
+static void pocket_memory_pump(bool leaving){(void)leaving;}
 #define PUMP(name,c) static void name(void){call(c);}
 PUMP(pocket_app_pump,'a') PUMP(pocket_text_pump,'t') PUMP(pocket_imu_pump,'i')
 PUMP(pocket_io_pump,'o') PUMP(pocket_bridge_pump,'b') PUMP(pocket_net_pump,'n')
@@ -62,7 +74,8 @@ static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
 static void reset(void){
     calls[0]=0;pending=remain=activate=need_present=submission=false;
     native_animation=system_pending=false;
-    runaway=exit_requested=stopped=turn_continued=false;scope=KSN_INPUT_APP;
+    runaway=exit_requested=stopped=turn_continued=cont_submits=false;scope=KSN_INPUT_APP;
+    presenter_result=KSN_OK;
     deferred_buttons=delivered=armed=continuation_turns=ticks=0;
     guest_error=0;now=40000;last_present_us=0;turn_sum=0;
 }
@@ -76,16 +89,10 @@ int main(void){
     assert(strstr(calls,"FEO")&&!strchr(calls,'P'));
     reset();pending=remain=true;assert(app_tick(0x20)==0);
     assert(turn_continued&&!strchr(calls,'F')&&strstr(calls,"ACEO"));
-#ifdef CONFIG_POCKET_VM_FAIR
-    assert(strstr(calls,"atiobncpfvkE")&&delivered==0x20);
-#else
     assert(!strchr(calls,'a')&&deferred_buttons==0x20);
-#endif
     calls[0]=0;remain=false;assert(app_tick(0)==0);
     assert(strchr(calls,'C')<strchr(calls,'a')&&strchr(calls,'a')<strchr(calls,'F'));
-#ifndef CONFIG_POCKET_VM_FAIR
     assert(delivered==0x20&&!deferred_buttons);
-#endif
     reset();pending=remain=true;exit_requested=true;assert(app_tick(0)==0);assert(!stopped);
     reset();pending=remain=true;assert(app_tick(0x2000)==0);
     assert(delivered==0x2000&&strchr(calls,'F')&&!turn_continued);
@@ -100,5 +107,17 @@ int main(void){
     reset();need_present=submission=true;assert(app_tick(0x2000)==0);assert(delivered==0x2000);
     reset();scope=KSN_INPUT_BLOCKED;assert(app_tick(0x4000)==0);assert(!delivered);
     reset();pending=remain=true;now=1000;assert(app_tick(0)==0);assert(!strchr(calls,'P'));
-    puts("session dispatch PASS: ordering, cleanup, Back, continuation, display turn, watchdog");
+    // A failed presenter step ends the turn before anything reaches JS.
+    reset();presenter_result=KSN_BUSY;assert(app_tick(0x4000)==ESP_FAIL);assert(!strcmp(calls,""));
+    // R3a: the continuation finished a parked frame() that submitted. That
+    // ticket is presented before any new frame(), whose patch would otherwise
+    // find it unconsumed; the keys wait for the next turn.
+    reset();pending=true;cont_submits=true;assert(app_tick(0x20)==0);
+    assert(!strcmp(calls,"ACEOP")&&!strchr(calls,'F')&&deferred_buttons==0x20);
+    calls[0]=0;cont_submits=false;assert(app_tick(0)==0);
+    assert(strchr(calls,'F')&&delivered==0x20&&!deferred_buttons);
+    // Back is the last save turn: it is not held back for that present.
+    reset();pending=true;cont_submits=true;assert(app_tick(0x2000)==0);
+    assert(strchr(calls,'F')&&delivered==0x2000);
+    puts("session dispatch PASS: ordering, cleanup, Back, continuation, display turn, watchdog, parked-frame present");
 }

@@ -522,6 +522,9 @@ static inline bool dbuf_error(DynBuf *s)
 static inline void dbuf_set_error(DynBuf *s)
 {
     s->error = true;
+    /* PocketJS: see dbuf_claim -- an errored buffer must take no more
+       writes, including ones that would fit in the slack. */
+    s->allocated_size = s->size;
 }
 
 /*---- UTF-8 and UTF-16 handling ----*/
@@ -814,6 +817,26 @@ static inline int dbuf_claim(DynBuf *s, size_t len)
         new_buf = s->realloc_func(s->opaque, s->buf, new_allocated_size);
         if (!new_buf) {
             s->error = true;
+            /* PocketJS: make the error stick for EVERY later write. The
+               fast paths in dbuf_putc / dbuf_put_u16/u32/u64, dbuf_put and
+               dbuf_printf only reach this function when the write does not
+               fit in the slack, and the `if (s->error)` test above lives
+               only here -- so after a failed growth, a smaller write that
+               fits the leftover slack still landed. For a byte stream that
+               is decoded by length, that is a shifted stream: the operand
+               that failed is missing and the next opcode sits where it
+               should have been (a host test in .cache/vm/oom/dbuf_sticky.c
+               shows put_u32 fail and the putc after it succeed, size
+               12 -> 13). The parser's bytecode, the regexp compiler's and
+               the atom-freeing walk all decode such streams.
+
+               Collapsing allocated_size to size sends every later write,
+               of any length, down the slow path into the error test above,
+               at no cost on the fast path. Nothing but this header reads
+               allocated_size (the block is still freed by pointer in
+               dbuf_free, and the guest's heap accounting uses the
+               allocator's own usable size), and nothing clears `error`. */
+            s->allocated_size = s->size;
             return -1;
         }
         s->buf = new_buf;

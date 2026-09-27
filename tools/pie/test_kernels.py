@@ -588,7 +588,7 @@ class KasaneBlend8(unittest.TestCase):
     sequences: a fix applied to one copy and not the other fails here.
     """
 
-    DST, K, ARGS, THR = 0x1000, 0x2000, 0x3000, 0x4000
+    DST, K, ARGS, THR, MASK = 0x1000, 0x2000, 0x3000, 0x4000, 0x5000
 
     @staticmethod
     def blend_px(p, color, opacity, bayer, dither):
@@ -682,6 +682,48 @@ class KasaneBlend8(unittest.TestCase):
             thresholds = [rng.randrange(16) for _ in range(8)]
             self.check('ksn_blend8_dither(', words, blocks, rng.getrandbits(32),
                        rng.randrange(256), thresholds, True)
+
+    def test_binary_mask(self):
+        """The borrowed 0/255 font mask widens in PIE without a scratch copy.
+
+        Exercise every eight-bit ink pattern, then multi-block pointer walks.
+        The general 0..255 coverage port does not opt into this kernel.
+        """
+        name = 'ksn_blend8_mask('
+        asm = extract_asm(BLENDPIE, name)
+        k = extract_constants(BLENDPIE, name, {})
+        rng = random.Random(43)
+        cases = [(0xA15F37B7, 193, 1, bits) for bits in range(256)]
+        cases += [(rng.getrandbits(32), rng.randrange(256), rng.randrange(1, 9),
+                   rng.getrandbits(64)) for _ in range(80)]
+        for color, opacity, blocks, bits in cases:
+            words = [rng.getrandbits(16) for _ in range(8 * blocks)]
+            mask = [255 if (bits >> (i % 64)) & 1 else 0 for i in range(8 * blocks)]
+            mem = bytearray(0x8000)
+            mem[self.DST - 16:self.DST] = bytes([0xA5] * 16)
+            mem[self.DST + 16 * blocks:self.DST + 16 * (blocks + 1)] = bytes([0xA5] * 16)
+            store16(mem, self.DST, words)
+            store16(mem, self.K, k)
+            mem[self.MASK:self.MASK + len(mask)] = bytes(mask)
+            a = ((color & 255) * opacity + 127) // 255
+            store16(mem, self.ARGS, [a, color >> 24, (color >> 16) & 255,
+                                     (color >> 8) & 255])
+            sim = Sim(mem)
+            sim.run(asm, {'dst': self.DST, 'mask': self.MASK, 'blocks': blocks,
+                          'kp': self.K, 'kb': self.K,
+                          'pa': self.ARGS, 'pr': self.ARGS + 2,
+                          'pg': self.ARGS + 4, 'pb': self.ARGS + 6,
+                          'sh12': 12, 'sh4': 4, 'sh16': 16})
+            got = load16(mem, self.DST, 8 * blocks)
+            want = [self.blend_px(p, (color & 0xFFFFFF00) | ((color & 255) if mask[i] else 0),
+                                  opacity, 0, False) for i, p in enumerate(words)]
+            self.assertEqual(got, want, f'color={color:08x} opacity={opacity} bits={bits:x}')
+            self.assertEqual(sim.ar['dst'], self.DST + 16 * blocks)
+            self.assertEqual(sim.ar['mask'], self.MASK + 8 * blocks)
+            self.assertEqual(sim.ar['kp'], self.K + 2 * len(k))
+            self.assertEqual(mem[self.DST - 16:self.DST], bytes([0xA5] * 16))
+            self.assertEqual(mem[self.DST + 16 * blocks:self.DST + 16 * (blocks + 1)],
+                             bytes([0xA5] * 16))
 
     def test_shared_prefix_reads_the_same_unpack(self):
         """The two arms must share the unpack and the first channel's mix."""

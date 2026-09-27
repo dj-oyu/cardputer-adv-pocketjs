@@ -4,21 +4,28 @@
 #include "pocketjs/guest_quickjs.h"
 #include "jsconsole.h"
 #include "pocket_api.h"
+#include "pocket_memory.h"
 #include "pocket_random.h"
 #include "pocket_storage.h"
 #include "pocket_fs.h"
 #include "pocket_imu.h"
 #include "pocket_av.h"
+#include "pocket_av_output_source.h"
+#include "pocket_av_playback_source.h"
+#include "pocket_mutex_arena.h"
 #include "pocket_capture.h"
 #include "pocket_io.h"
 #include "pocket_net.h"
 #include "pocket_ble.h"
 #include "pocket_text.h"
 #include "pocket_app.h"
+#include "pocket_clock.h"
+#include "pocket_pool_probe.h"
 #include "pocket_bridge.h"
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
 #include "pocket_kasane.h"
+#include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_input.h"
 #include "ksn_font.h"
 #include "app_registry.h"
@@ -26,9 +33,16 @@
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "esp_heap_caps.h"
+#include "esp_cpu.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "vmprobe.h"
+#include "oomprobe.h"
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+#include "quickjs.h"
+#endif
 #include "vm_wake.h"
 #include <stdatomic.h>
 #include <stdio.h>
@@ -66,6 +80,27 @@ static JSValue vm_storage_mark(JSContext *ctx, JSValueConst self,
 extern const char hello_start[] asm("_binary_main_js_start");
 extern const char hello_end[] asm("_binary_main_js_end");
 extern const char kasane_demo_start[] asm("_binary_demo_js_start");
+#ifdef KASANE_P0_PROBE
+extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_start");
+extern const char pool_source_probe_start[] asm("_binary_pool_source_probe_js_start");
+extern const char output_source_probe_start[] asm("_binary_output_source_probe_js_start");
+extern const char output_source_probe_hidden_start[] asm("_binary_output_source_probe_hidden_js_start");
+extern const char output_source_probe_dual_start[] asm("_binary_output_source_probe_dual_js_start");
+extern const char output_source_probe_long_start[] asm("_binary_output_source_probe_long_js_start");
+extern const char output_source_probe_seek_start[] asm("_binary_output_source_probe_seek_js_start");
+extern const char output_source_probe_lowheap_start[] asm("_binary_output_source_probe_lowheap_js_start");
+extern const char playback_source_probe_start[] asm("_binary_playback_source_probe_js_start");
+extern const char music_bar_probe_start[] asm("_binary_music_bar_probe_js_start");
+extern const char dirty24_probe_start[] asm("_binary_dirty24_probe_js_start");
+extern const char text23_probe_start[] asm("_binary_text23_probe_js_start");
+#ifdef KASANE_TEXT_PIE_DEVICE_PROBE
+extern const char text_pie_probe_start[] asm("_binary_text_pie_probe_js_start");
+#endif
+#ifdef KASANE_P0_COPY_PROBE
+extern const char output_source_probe_exhaust_start[] asm("_binary_output_source_probe_exhaust_js_start");
+#endif
+extern const char output_source_probe_off_start[] asm("_binary_output_source_probe_off_js_start");
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
 // VM probe workloads (docs/vm/quickjs-freertos-vm-spec.md sec.5), embedded only
 // when this build turned CONFIG_POCKET_VM_PROBE on (main/CMakeLists.txt).
@@ -77,6 +112,10 @@ extern const char vmp_closures_start[] asm("_binary_closures_js_start");
 extern const char vmp_promise_start[] asm("_binary_promise_chain_js_start");
 extern const char vmp_io_start[] asm("_binary_io_wait_js_start");
 extern const char vmp_asyncgen_start[] asm("_binary_async_generator_js_start");
+// The two shipped apps the probe can start ('<' and '>'), so that the heaviest
+// real frames can be measured under the contention conditions.
+extern const char pet_start[] asm("_binary_pet_js_start");
+extern const char companion_start[] asm("_binary_companion_js_start");
 // The contention conditions, applied on top of whichever workload is running.
 extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
@@ -90,12 +129,45 @@ static pocketjs_guest_t *guest;
 // script's own `throw null` without this. Not a contracted marker (the
 // CLAUDE.md list predates it); a new line costs nothing to add.
 static void report_oom_if_any(void) {
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    oomprobe_drain();
+#endif
     if(!guest) return;
-    uint32_t n=0; size_t first_req=0, first_used=0;
-    pocketjs_guest_take_oom(guest,&n,&first_req,&first_used);
-    if(n>0)
+    JSOOMCanary canary={0};
+    pocketjs_guest_take_oom_detail(guest,&canary);
+    if(canary.count>0) {
+        pocket_memory_oom(&canary,(uint64_t)esp_timer_get_time());
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
-                 (unsigned)n,(unsigned)first_req,(unsigned)first_used);
+                 (unsigned)canary.count,(unsigned)canary.first_req,(unsigned)canary.first_used);
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+        oomprobe_canary(canary.count,canary.first_req,canary.first_used);
+#endif
+    }
+}
+
+/* Constant-time VM counters every owner turn; native heap is sampled at most
+ * once per 100 ms. Also runs on display-only turns so pressure can recover. */
+static void sample_memory_pressure(void) {
+    if(!guest)return;
+    uint64_t now=(uint64_t)esp_timer_get_time();
+    size_t used=0,limit=0,free_bytes=0,largest=0;
+    JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),
+                         &used,&limit);
+    bool native=pocket_memory_native_sample_due(now);
+    if(native){
+        const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+        free_bytes=heap_caps_get_free_size(caps);
+        largest=heap_caps_get_largest_free_block(caps);
+    }
+    pocket_memory_sample(now,used,limit,native,free_bytes,largest);
+    // R3 (docs/vm/r3-small-block-cache.md sec.3.4): when the SYSTEM is short
+    // (free RAM or the largest free block), hand the guest allocator's cached
+    // small blocks back. Not on GUEST pressure: those blocks are already
+    // outside the guest's accounting, so returning them gives it no room.
+    static uint8_t last_mask;
+    const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
+    if(mask&~last_mask)pocketjs_guest_block_cache_flush(guest);
+    last_mask=mask;
 }
 static atomic_bool stop_requested;
 static int64_t deadline;
@@ -115,9 +187,29 @@ static bool turn_continued;
 // When present_frame() last reached the panel. Only the continuation path
 // reads it; see there for why the display, unlike the turn, is still paced.
 static int64_t last_present_us;
+// Resident suspension (docs/vm/app-suspend-design.md): the manifest id of the
+// app whose guest is kept asleep, "" when none, and when it went to sleep.
+static char dormant_id[48];
+// S5 (docs/vm/app-suspend-design.md): set by app_stop_keep_music() for the one
+// app_stop() it makes.
+static bool keep_music_once;
+static int64_t dormant_since_us;
+static void run_pumps(uint32_t buttons);
 static unsigned frames;
 static double render_sum, present_sum, turn_sum;
 static unsigned painted, ticks;
+#ifndef KASANE_STRESS_GRAD_AB
+#define KASANE_STRESS_GRAD_AB 0
+#endif
+#ifndef KASANE_STRESS_REACH_AB
+#define KASANE_STRESS_REACH_AB 0
+#endif
+#if KASANE_STRESS_REACH_AB
+static unsigned reach_ab_window;
+#endif
+#if KASANE_STRESS_GRAD_AB
+static unsigned grad_ab_window,grad_ab_bytes;
+#endif
 // Boundary 7 of docs/perf/kasane-opt-survey.md: the render path's own counts,
 // summed over the same 30 frames the millisecond terms cover. Counts only --
 // `cy` is rsr.ccount read inside the renderer and 0 with g_ksn_prof off, and
@@ -132,6 +224,84 @@ static void prof_accumulate(const ksn_render_prof *frame){
     prof_sum.blend_cy+=frame->blend_cy;prof_sum.blend_n+=frame->blend_n;
     prof_sum.read_cy+=frame->read_cy;prof_sum.read_n+=frame->read_n;
 }
+#ifdef CONFIG_POCKET_VM_TURNPERF
+// R4 (docs/vm/turn-cpi.md): the ordinary JS turn against the core's own
+// counters, the arming main/scene/garden.c worked out. Two counters is the
+// whole budget (XCHAL_NUM_PERF_COUNTERS): PM0 stays on cycles so every ratio
+// has a denominator taken through the same brackets, PM1 rotates one event per
+// window. kernelcnt 0 counts task code only (CINTLEVEL <= TRACELEVEL), so ISR
+// time inside the bracket drops out of both terms. PM1's ERI slot doubles as
+// apptrace's CRC scratch; apptrace is off in every build this is meant for.
+#include "eri.h"
+#include "xtensa-debug-module.h"
+#include "xtensa/xt_perf_consts.h"
+#define TURNPERF_WINDOW 30u
+static const struct {const char *name;uint16_t select,mask;} turnperf_events[]={
+    {"insn",       XTPERF_CNT_INSN,    XTPERF_MASK_INSN_ALL},
+    {"istall",     XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_ALL},
+    {"dstall",     XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_ALL},
+    {"bubbles",    XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_ALL},
+    {"exr",        XTPERF_CNT_EXR,     XTPERF_MASK_EXR_ALL},
+    {"icachemiss", XTPERF_CNT_I_MEM,   XTPERF_MASK_I_MEM_CACHE_MISSES},
+    {"istall_miss",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_CACHE_MISS},
+    {"istall_busy",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_BUSY},
+    {"istall_pif", XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_IN_PIF},
+    {"istall_run", XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_EXTERNAL_SIGNAL},
+    {"istall_unc", XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_UNCACHED_FETCH},
+    {"istall_l32r",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_FAST_L32R},
+    {"istall_idiv",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_ITERATIVE_DIV},
+    {"istall_imul",XTPERF_CNT_I_STALL, XTPERF_MASK_I_STALL_ITERATIVE_MUL},
+    {"dstall_busy",XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_BUSY},
+    {"dstall_pif", XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_IN_PIF},
+    {"dstall_sbuf",XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_STORE_BUF_FULL},
+    {"dstall_bank",XTPERF_CNT_D_STALL, XTPERF_MASK_D_STALL_BANK_CONFLICT},
+    {"regdep",     XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_R_HOLD_REG_DEP},
+    {"cti",        XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_CTI},
+    {"memw",       XTPERF_CNT_BUBBLES, XTPERF_MASK_BUBBLES_R_HOLD_WAIT},
+    // The windowed ABI spills and refills register frames through exceptions;
+    // an interpreter that recurses through JS_CallInternal pays them per call.
+    {"exr_window", XTPERF_CNT_EXR,     XTPERF_MASK_EXR_WINDOW},
+    {"exr_replay", XTPERF_CNT_EXR,     XTPERF_MASK_EXR_REPLAYS},
+    {"load",       XTPERF_CNT_D_LOAD_U1,XTPERF_MASK_D_LOAD_ALL},
+    {"imem_hit",   XTPERF_CNT_I_MEM,   XTPERF_MASK_I_MEM_CACHE_HITS},
+};
+#define TURNPERF_EVENTS (sizeof turnperf_events/sizeof*turnperf_events)
+static unsigned turnperf_sel,turnperf_n,turnperf_cont_n;
+// Continuation turns are not bracketed, only timed: a frame() the 8 ms budget
+// cut finishes in one, so per-frame JS time is (us+cont_us)/n, and a change
+// that shortens the ordinary turn below the budget moves time out of cont_us.
+static uint32_t turnperf_pm0,turnperf_pm1,turnperf_us,turnperf_cont_us;
+static bool turnperf_armed;
+static void turnperf_arm(unsigned sel) {
+    const uint16_t sels[2]={XTPERF_CNT_CYCLES,turnperf_events[sel].select};
+    const uint16_t masks[2]={XTPERF_MASK_CYCLES,turnperf_events[sel].mask};
+    for(int id=0;id<2;id++) {
+        uint32_t pmc=((uint32_t)(sels[id]&PMCTRL_SELECT_MASK)<<PMCTRL_SELECT_SHIFT)
+                    |((uint32_t)(masks[id]&PMCTRL_MASK_MASK)<<PMCTRL_MASK_SHIFT);
+        eri_write(ERI_PERFMON_PM0+id*4,0);
+        eri_write(ERI_PERFMON_PMCTRL0+id*4,pmc);
+    }
+    eri_write(ERI_PERFMON_PGM,PGM_PMEN);
+    turnperf_armed=true;
+}
+// The ui task is pinned (POCKET_UI_TASK_CORE), so both reads of a bracket are
+// the same core's counters.
+static inline void turnperf_read(uint32_t *c0,uint32_t *c1) {
+    if(!turnperf_armed) turnperf_arm(turnperf_sel);
+    *c0=eri_read(ERI_PERFMON_PM0);*c1=eri_read(ERI_PERFMON_PM0+4);
+}
+static void turnperf_add(uint32_t a0,uint32_t a1,uint32_t us) {
+    uint32_t b0=eri_read(ERI_PERFMON_PM0),b1=eri_read(ERI_PERFMON_PM0+4);
+    turnperf_pm0+=b0-a0;turnperf_pm1+=b1-a1;turnperf_us+=us;
+    if(++turnperf_n<TURNPERF_WINDOW) return;
+    ESP_LOGI("app","TURNPERF %s cy=%lu ev=%lu n=%u us=%lu cont_n=%u cont_us=%lu",
+             turnperf_events[turnperf_sel].name,(unsigned long)turnperf_pm0,(unsigned long)turnperf_pm1,
+             turnperf_n,(unsigned long)turnperf_us,turnperf_cont_n,(unsigned long)turnperf_cont_us);
+    turnperf_pm0=turnperf_pm1=turnperf_us=turnperf_cont_us=0;turnperf_n=turnperf_cont_n=0;
+    turnperf_sel=(turnperf_sel+1)%TURNPERF_EVENTS;
+    turnperf_arm(turnperf_sel);
+}
+#endif
 // Borrowed for the length of a start; the Playground owns the bytes and does
 // not edit them while a run is up.
 static const char *user_source;
@@ -187,11 +357,35 @@ static bool names_kasane(const char *s, size_t n) {
 // guest callback is still reset before the guest is destroyed. An overlay
 // session is a session; it is only started and ended by a different event.
 //
-// The flag is what an overlay session does NOT get: no Kasane display, and a
-// much smaller guest heap. See pocket_overlay.h for why drawing goes through a
-// host display list instead. Every other session draws through Kasane.
+// The flag selects the overlay capability set and shell-owned presentation.
+// Kasane still uses the APP lease; its display port receives the live home
+// scene as a backdrop instead of clearing to an opaque APP background.
 static bool overlay_session;
+/* An animated native source may submit every display period. Mark the guest
+ * due after 100 ms of native-only turns (plus the next UI scheduling delay)
+ * without charging every native frame for a JS turn. Reset per session. */
+static int64_t overlay_guest_last_us;
 static bool kasane_presented;
+#ifdef KASANE_P2_REPAIR_PROBE
+/* 1: forced full repaint, 2: the next natural PATCH. USB task -> UI task. */
+static atomic_int p2_repair_request;
+/* UI task only. One-shot failure after three successfully sent bands. */
+static unsigned p2_repair_stage;
+static int p2_sends_before_failure=-1;
+static bool p2_capture_repair_only;
+void app_p2_request_repair_probe(void) {
+    atomic_store(&p2_repair_request,1);
+}
+void app_p2_request_patch_repair_probe(void) {
+    atomic_store(&p2_repair_request,2);
+}
+static bool p2_fail_this_send(uint16_t y) {
+    if(p2_repair_stage!=1||p2_sends_before_failure<0)return false;
+    if(p2_sends_before_failure--!=0)return false;
+    ESP_LOGW("KSN_P2","INJECT_FAIL y=%u after=3",(unsigned)y);
+    return true;
+}
+#endif
 void app_force_redraw(void) { pocket_kasane_invalidate(); }
 void app_force_redraw_bands(uint32_t bands) {
     if(bands) pocket_kasane_invalidate_bands(bands);
@@ -204,6 +398,11 @@ static uint16_t *kasane_strip(void *opaque) {
 static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
                              const uint16_t *pixels) {
     kasane_display_t *display=opaque;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_repair_stage==1&&p2_capture_repair_only&&p2_sends_before_failure>=0)
+        ESP_LOGI("KSN_P2","SEND_FULL y=%u rows=%u",(unsigned)y,(unsigned)rows);
+    if(p2_fail_this_send(y))return KSN_IO;
+#endif
     int64_t began=esp_timer_get_time();
     // Section 6's host-owned edit field, composited over the band the guest's
     // scene has just filled: the guest never learns there is a field, only
@@ -225,6 +424,12 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
 static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t cols,
                                    uint16_t rows,const uint16_t *pixels) {
     kasane_display_t *display=opaque;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_repair_stage==1&&p2_capture_repair_only&&p2_sends_before_failure>=0)
+        ESP_LOGI("KSN_P2","SEND_RECT x=%u y=%u cols=%u rows=%u",
+                 (unsigned)x,(unsigned)y,(unsigned)cols,(unsigned)rows);
+    if(p2_fail_this_send(y))return KSN_IO;
+#endif
     int64_t began=esp_timer_get_time();
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
@@ -247,6 +452,12 @@ void app_vm_watchdog(int (*fn)(void *), void *opaque) {
 }
 
 void app_vm_prepare_stop(void) {
+#ifdef CONFIG_POCKET_VM_RELOC
+    // Before the chain is closed, not after: prepare_stop resumes the parked
+    // chain in order to terminate it, and the counters belong to the run that
+    // is ending rather than to its teardown.
+    if(guest) pocketjs_guest_reloc_report(guest);
+#endif
     if(guest) pocketjs_guest_prepare_stop(guest);
 }
 void app_request_stop(void) { atomic_store(&stop_requested,true); }
@@ -262,7 +473,6 @@ void app_request_stop(void) { atomic_store(&stop_requested,true); }
 static void arm_turn(uint32_t buttons) {
     const int64_t now=esp_timer_get_time();
     deadline=now+250000;
-#ifdef CONFIG_POCKET_VM_SCHED
     // The Back turn (main.c calls app_tick(0x2000) once so the guest can save)
     // gets room to finish rather than be cut: the session ends immediately
     // after it, so no reordering it causes can be observed.
@@ -271,10 +481,6 @@ static void arm_turn(uint32_t buttons) {
                              VM_JOB_FLOOR,VM_LEAVE_BACKSTOP);
     else
         vm_budget_begin(&budget,VM_TURN_BUDGET_US);
-#else
-    (void)buttons;
-    vm_budget_begin(&budget,0);
-#endif
     // vm_budget_begin does its own read through vm_clock rather than being
     // handed `now`: which clock the budget uses is vm_clock's decision (the
     // measurement says a cycle counter is 33x cheaper than the timer), and
@@ -427,6 +633,75 @@ static esp_err_t eval_user_source(const char *source, size_t length) {
 // answer is both known and final -- after the stop hook has had its 200 ms of
 // JS_ExecutePendingJob, before JS_FreeRuntime discards whatever is left.
 static pocketjs_guest_stats_t final_stats;
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+// Diagnostic only. heap_caps_walk holds the heap lock while invoking us, so
+// collect on the stack and log only after traversal has returned.
+typedef struct {
+    intptr_t heap;
+    void *ptr;
+    size_t size;
+    void *before;
+    size_t before_size;
+    bool before_used;
+    void *after;
+    size_t after_size;
+    bool after_used;
+} p1_heap_hole_t;
+typedef struct {
+    p1_heap_hole_t holes[16];
+    unsigned count;
+    unsigned overflow;
+    intptr_t previous_heap;
+    void *previous_ptr;
+    size_t previous_size;
+    bool previous_used;
+    int awaiting_after;
+} p1_heap_walk_t;
+static bool p1_heap_walk(walker_heap_into_t heap, walker_block_info_t block,
+                         void *opaque) {
+    p1_heap_walk_t *walk=(p1_heap_walk_t *)opaque;
+    if(walk->previous_heap!=heap.start) {
+        walk->previous_heap=heap.start;
+        walk->previous_ptr=NULL;
+        walk->previous_size=0;
+        walk->awaiting_after=-1;
+    }
+    if(walk->awaiting_after>=0) {
+        p1_heap_hole_t *hole=&walk->holes[walk->awaiting_after];
+        hole->after=block.ptr;
+        hole->after_size=block.size;
+        hole->after_used=block.used;
+        walk->awaiting_after=-1;
+    }
+    if(!block.used && block.size>=20000) {
+        if(walk->count<sizeof(walk->holes)/sizeof(walk->holes[0])) {
+            unsigned index=walk->count++;
+            walk->holes[index]=(p1_heap_hole_t){
+                .heap=heap.start, .ptr=block.ptr, .size=block.size,
+                .before=walk->previous_ptr, .before_size=walk->previous_size,
+                .before_used=walk->previous_used,
+            };
+            walk->awaiting_after=(int)index;
+        } else walk->overflow++;
+    }
+    walk->previous_ptr=block.ptr;
+    walk->previous_size=block.size;
+    walk->previous_used=block.used;
+    return true;
+}
+static void p1_report_heap_holes(void) {
+    p1_heap_walk_t walk={.awaiting_after=-1};
+    heap_caps_walk(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT,p1_heap_walk,&walk);
+    ESP_LOGI("KSN_P1_HEAP","holes=%u overflow=%u",walk.count,walk.overflow);
+    for(unsigned i=0;i<walk.count;i++) {
+        const p1_heap_hole_t *h=&walk.holes[i];
+        ESP_LOGI("KSN_P1_HEAP","heap=%p free=%p/%u before=%p/%u/%u after=%p/%u/%u",
+                 (void *)h->heap,h->ptr,(unsigned)h->size,
+                 h->before,(unsigned)h->before_size,(unsigned)h->before_used,
+                 h->after,(unsigned)h->after_size,(unsigned)h->after_used);
+    }
+}
+#endif
 void app_report(void) {
     pocketjs_guest_stats_t stats={.struct_size=sizeof(stats)};
     if(guest) pocketjs_guest_stats(guest,&stats);
@@ -448,16 +723,46 @@ void app_report(void) {
         (unsigned)stats.heap_used,frames);
 }
 void app_stop(void) {
+    bool p0_had_guest=guest!=NULL;
+#ifdef KASANE_P2_REPAIR_PROBE
+    if(p2_repair_stage)board_capture(false);
+    p2_repair_stage=0;
+    p2_sends_before_failure=-1;
+    p2_capture_repair_only=false;
+    atomic_store(&p2_repair_request,0);
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
     vmprobe_session_reset();
 #endif
+    // A sleeping app is ended awake: its stop hook ("evict") is its last chance
+    // to save, and a dormant guest refuses every entry. Everything it gave up
+    // on suspension is already released, which the resets below tolerate.
+    if(guest&&pocketjs_guest_dormant(guest)) {
+        pocketjs_guest_set_dormant(guest,false);
+        pocket_app_set_stop_reason("evict");
+        ESP_LOGI("app","APP_EVICT %s",dormant_id);
+    }
+    dormant_id[0]=0;
     // Before the guest goes: the watches hold callbacks belonging to it, and a
     // promise still in flight holds its resolvers.
     // First: section 5 runs the stop hook before I/O cancellation and before
     // the subscriptions it may still want to use are taken away.
     pocket_app_reset();
     pocket_imu_reset();
-    pocket_av_reset();
+#ifdef KASANE_P0_PROBE
+    /* Read before pocket_av_reset() stops the stream and clears the player.
+     * Decoder faults are distinct from audio output underruns. */
+    int32_t p0_player=pocket_av_ui_current_player();
+    pocket_av_ui_snapshot p0_audio;
+    if(p0_player&&pocket_av_ui_read(p0_player,&p0_audio))
+        ESP_LOGI("KSN_P0","A session=%s player=%ld state=%u position_ms=%lu underruns=%lu",
+            overlay_session?"overlay":"app",(long)p0_player,(unsigned)p0_audio.state,
+            (unsigned long)p0_audio.position_ms,(unsigned long)p0_audio.underruns);
+#endif
+    // S5: an overlay that is giving the display away (not being stopped) hands
+    // a playing player to the host before its audio is reset.
+    if(keep_music_once && overlay_session) pocket_av_detach_background();
+    bool av_stopped=pocket_av_reset();
     // Before pocket_api_reset(): a recorder holds the I2S RX channel and the
     // codec's ADC, and a read still waiting holds a promise slot.
     pocket_capture_reset();
@@ -470,13 +775,21 @@ void app_stop(void) {
     // Before pocket_api_reset(): a picker still on screen holds a promise slot,
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
-    pocket_kasane_reset();
+    if(pocket_kasane_reset()){
+        pocket_clock_reset();
+        pocket_av_output_source_reset(av_stopped);
+        pocket_av_playback_source_reset();
+#ifdef KASANE_P0_PROBE
+        pocket_pool_probe_reset();
+#endif
+    }
     pocket_input_reset();
     pocket_overlay_reset();
     // Before pocket_api_reset(): an open field holds three guest callbacks, and
     // a screen change closes the session -- which is what the end of a run is.
     pocket_text_reset();
     pocket_bridge_reset();
+    pocket_memory_reset();
     pocket_api_reset();
     // Read before the runtime goes: app_report() below runs with guest == NULL,
     // so this is the last point at which "was anything still queued" has an
@@ -486,13 +799,199 @@ void app_stop(void) {
         final_stats=(pocketjs_guest_stats_t){.struct_size=sizeof(final_stats)};
         pocketjs_guest_stats(guest,&final_stats);
     }
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    // Before the destroy: JS_FreeRuntime frees the segments the hook would
+    // otherwise go looking for.
+    oomprobe_set_runtime(NULL);
+#endif
     if(guest) pocketjs_guest_destroy(guest);
     guest=NULL;
+#ifdef KASANE_P0_PROBE
+    if(p0_had_guest)pocket_mutex_arena_report();
+#endif
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+    if(p0_had_guest)p1_report_heap_holes();
+#endif
     app_report();
+    if(p0_had_guest)ksn_p0_probe_report(overlay_session?"overlay":"app");
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+    if(p0_had_guest)ksn_render_decode_cycle_report();
+#endif
+#ifdef KASANE_P0_BUS_PROBE
+    if(p0_had_guest)ESP_LOGI("board","P1 LCD ISR observed core %d at app stop",
+                            board_lcd_isr_core());
+#endif
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    // After the teardown, so a refusal inside it is counted in this session.
+    oomprobe_session_end("app");
+#endif
     ESP_LOGI("app","APP_STOPPED");
 }
+
+// ------------------------------------------------------ resident suspension
+//
+// docs/vm/app-suspend-design.md. Back on an app that registered a resume hook
+// keeps its guest instead of destroying it. The order is the design's sec.3:
+// finish the turn's work, run the suspend hook, cancel every operation still
+// running and let it settle while JS can still hear it, then release what the
+// home screen must not find held (sec.4), then put the guest to sleep. Any
+// step that fails returns an error and the caller ends the app the ordinary
+// way -- a failed suspension is exactly today's Back.
+
+// The home screen's backdrop takes up to 30,671 B (scene_mem.h) and a radio
+// raised from home needs NET_RADIO_MIN_FREE (56 KiB); a sleeping app that
+// leaves less than both is ended instead of kept.
+#define APP_SUSPEND_MIN_FREE (96*1024)
+// The settle loop's bound: cancellation completes through drivers that post
+// from their own tasks, and a turn on this board is 250 ms at most.
+#define APP_SUSPEND_SETTLE_US 200000
+// The suspend hook gets what the stop hook gets (pocket_app.c's APP_STOP_MS).
+#define APP_SUSPEND_HOOK_US 200000
+
+// The overlay's way out when it is giving the display away rather than being
+// stopped: music that is playing goes on as the host's (S5).
+void app_stop_keep_music(void) {
+    keep_music_once=true;
+    app_stop();
+    keep_music_once=false;
+}
+
+bool app_can_suspend(void) {
+    return guest && !overlay_session && !atomic_load(&stop_requested) &&
+           pocket_app_can_suspend();
+}
+
+const char *app_dormant_id(void) { return dormant_id; }
+
+// Pumps and drains until nothing is in flight and nothing is queued, or the
+// deadline. Everything a cancelled operation settles to runs here, while the
+// app is still awake to catch it.
+static bool settle_all(int64_t until_us) {
+    JSRuntime *rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
+    do {
+        run_pumps(0);
+        pocket_api_pump();
+        JSContext *pending=NULL;
+        while(JS_ExecutePendingJob(rt,&pending)>0 && esp_timer_get_time()<until_us) {}
+        if(!pocket_api_open_count() && !JS_IsJobPending(rt)) return true;
+        vTaskDelay(1);
+    } while(esp_timer_get_time()<until_us);
+    return false;
+}
+
+esp_err_t app_suspend(void) {
+    if(!app_can_suspend()) return ESP_ERR_INVALID_STATE;
+    int64_t began=esp_timer_get_time();
+    // The Back turn's arming: its deadline bounds the hook, and yield is off,
+    // so nothing below can be parked half way.
+    arm_turn(0x2000);
+    for(int i=0;i<16 && pocketjs_guest_work_pending(guest);i++)
+        if(pocketjs_guest_continue(guest)!=ESP_OK) break;
+    if(pocketjs_guest_work_pending(guest)) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED work pending");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if(!pocket_app_run_suspend(began+APP_SUSPEND_HOOK_US)) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED suspend hook");
+        return ESP_FAIL;
+    }
+    // sec.4: deadlines are absolute, so nothing may be left armed across the
+    // sleep; each operation settles CANCELLED (retryable) through its driver.
+    pocket_api_cancel_all(POCKET_ERR_CANCELLED);
+    if(!settle_all(began+APP_SUSPEND_SETTLE_US)) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED %u operations did not settle",
+                 pocket_api_open_count());
+        return ESP_ERR_TIMEOUT;
+    }
+    // sec.4's table, most dependent first: sound before the card and the radio
+    // it may be fed from, the pickers before the card they browse.
+    pocket_text_suspend();
+    pocket_workspace_suspend();
+    pocket_av_suspend();
+    pocket_capture_suspend();
+    pocket_io_suspend();
+    pocket_net_suspend();
+    pocket_fs_suspend();
+    pocket_imu_suspend();
+    pocket_input_suspend();
+    // A release may have posted a completion (a picker going back); it is
+    // settled now, not left to fire into a sleeping guest.
+    if(!settle_all(esp_timer_get_time()+APP_SUSPEND_SETTLE_US)) return ESP_ERR_TIMEOUT;
+    esp_err_t err=pocketjs_guest_set_dormant(guest,true);
+    if(err!=ESP_OK) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED dormant %s",esp_err_to_name(err));
+        return err;
+    }
+    size_t free_now=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    if(free_now<APP_SUSPEND_MIN_FREE) {
+        ESP_LOGW("app","APP_SUSPEND_REFUSED free=%u",(unsigned)free_now);
+        pocketjs_guest_set_dormant(guest,false);
+        return ESP_ERR_NO_MEM;
+    }
+    pocket_kasane_set_dormant(true);
+    const app_manifest_t *manifest=app_registry_current();
+    snprintf(dormant_id,sizeof dormant_id,"%s",manifest?manifest->id:"");
+    dormant_since_us=esp_timer_get_time();
+    pocketjs_guest_stats_t stats={.struct_size=sizeof(stats)};
+    pocketjs_guest_stats(guest,&stats);
+    // tools/ scripts read this line: id, the time the suspension took, and the
+    // two numbers the memory rule above is about.
+    ESP_LOGI("app","APP_SUSPENDED %s us=%u free=%u js=%u",dormant_id,
+             (unsigned)(dormant_since_us-began),(unsigned)free_now,
+             (unsigned)stats.heap_used);
+    return ESP_OK;
+}
+
+esp_err_t app_resume(void) {
+    if(!guest || !dormant_id[0] || !pocketjs_guest_dormant(guest))
+        return ESP_ERR_INVALID_STATE;
+    // The identity is global and a host screen may have moved it; the stores
+    // are keyed by it, so it is put back before anything can read or write.
+    app_registry_select(dormant_id);
+    const app_manifest_t *manifest=app_registry_current();
+    pocket_storage_set_owner(manifest->id);
+    pocket_fs_set_owner(manifest->id);
+    // The home screen's backdrop scratch goes back, as it does on every
+    // foreground start: without this a resumed app ran 16 KiB short of a
+    // freshly started one (measured: the second suspension of the same app
+    // reported exactly 16,384 B less free).
+    scene_mem_release();
+    pocketjs_guest_set_dormant(guest,false);
+    pocket_kasane_set_dormant(false);
+    pocket_imu_resume();
+    pocket_av_resume();
+    pocket_bridge_resume();
+    atomic_store(&stop_requested,false);
+    deferred_buttons=0; continuation_turns=0; turn_continued=false;
+    last_present_us=0;
+    // The panel is the app's again, so its first present logs the marker the
+    // tools wait for after opening an app, exactly as a fresh start's does.
+    kasane_presented=false;
+    int64_t slept_ms=(esp_timer_get_time()-dormant_since_us)/1000;
+    // The resume hook runs under a normal turn's watchdog; the Promise it may
+    // return settles through the job queue on the turns that follow.
+    arm_turn(0);
+    pocket_app_resume(slept_ms);
+    ESP_LOGI("app","APP_RESUMED %s slept_ms=%lld",dormant_id,(long long)slept_ms);
+    dormant_id[0]=0;
+    return ESP_OK;
+}
+#ifdef CONFIG_POCKET_VM_RELOC
+// Set by main.c's '&' on the home screen and left set, so one arming covers a
+// lifecycle sweep of several runs. Read at guest creation, which is the only
+// moment the guest exists and has not run anything yet.
+static bool reloc_requested;
+void app_vm_reloc_request(void) { reloc_requested=true; }
+#endif
+
 esp_err_t app_start_test(char test) {
     esp_err_t err;
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    oomprobe_init();
+    // Whatever the home screen refused since the last session is its own,
+    // not this app's.
+    oomprobe_session_end("home");
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
     vm_storage_active=test=='Y';
     vm_storage_leaving=vm_storage_parked=false;
@@ -503,6 +1002,16 @@ esp_err_t app_start_test(char test) {
     // first tick with no error line -- every diagnostic run after boot did.
     if(test) { user_source=NULL; user_prelude=NULL; overlay_session=false; }
     kasane_presented=false;
+#if KASANE_STRESS_REACH_AB
+    reach_ab_window=0;g_ksn_tile_reach=1;
+#endif
+#if KASANE_STRESS_GRAD_AB
+    grad_ab_window=0;grad_ab_bytes=0;g_ksn_vertical_gradient_pie=1;
+#endif
+    ksn_p0_probe_reset();
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+    ksn_render_decode_cycle_reset();
+#endif
     // Refused before a guest exists, so a program that cannot run costs nothing.
     if(user_source && !overlay_session && uses_legacy_ui(user_source,user_length)) {
         jsconsole_set_error("旧API(ui.*)のため実行できません");
@@ -548,15 +1057,32 @@ esp_err_t app_start_test(char test) {
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
     TRY(pocketjs_guest_create(&gc,&guest));
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+    oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
+    // The control has to reach the HEAP: a diagnostic starts with ~82 KB of
+    // the 160 KiB limit already in use, so under the limit its requests are
+    // refused by QuickJS long before the heap is asked, and the control
+    // measured nothing (2026-09-25). Its footprint is bounded by its fixed
+    // recursion depth; the large requests are freed as soon as they succeed.
+    if(test=='$') JS_SetMemoryLimit(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),0);
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
     TRY(vmprobe_segment_apply(guest) == 0 ? ESP_OK : ESP_ERR_INVALID_STATE);
     vmprobe_static_report();
+#endif
+#ifdef CONFIG_POCKET_VM_RELOC
+    // Armed here rather than after app_start_test returns: the source is
+    // EVALUATED inside this function, and a top-level await parks during that
+    // evaluation. Arming afterwards would miss exactly the parks that carry
+    // the deepest chains a session ever has.
+    if(reloc_requested) pocketjs_guest_reloc_arm(guest,true);
 #endif
     pocketjs_guest_set_watchdog(guest,interrupt,NULL);
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
     jsconsole_clear();
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"pocket",pocket_api_install,NULL));
+    TRY(pocketjs_guest_quickjs_install_once(guest,"memory",pocket_memory_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"random",pocket_random_install,NULL));
     TRY(pocketjs_guest_quickjs_install_once(guest,"storage",pocket_storage_install,NULL));
     // 3.1: an overlay's default capability set is NARROWER than a foreground
@@ -567,6 +1093,7 @@ esp_err_t app_start_test(char test) {
     if(overlay_session) {
         TRY(pocketjs_guest_quickjs_install_once(guest,"app",pocket_app_install,NULL));
         TRY(pocketjs_guest_quickjs_install_once(guest,"overlay",pocket_overlay_install,NULL));
+        TRY(pocketjs_guest_quickjs_install_once(guest,"kasane",pocket_kasane_install,NULL));
         // fs and av joined this list on 2026-09-09, and the reason is worth
         // stating because 3.1's narrowing is deliberate and this widens it.
         //
@@ -625,6 +1152,95 @@ source_ready:;
         case '4': source="let a=[];while(true)a.push(new Uint8Array(4096))"; break;
         case '5': source="globalThis.frame=()=>{throw Error('test')}"; break;
         case '6': source="globalThis.frame=()=>{function f(){Promise.resolve().then(f)}f()}"; break;
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+        // G12 (oomprobe.h). Each one catches its own OOM and keeps running, so
+        // one session yields a refusal per frame in a changing heap rather
+        // than a single one. '!': small blocks with every third one dropped
+        // each frame (a steady ~70 live, interleaved with holes), then the
+        // largest block the guest can still get, in 8 KiB steps. '@': one
+        // array grown by realloc between small objects. '#': JSON round
+        // trips of a growing array -- the string buffers native code grows.
+        // The catches empty with `length=0`, never `x=[]`: at the limit a new
+        // array is itself refused, and the escaping bare null ends the app.
+        case '!': source=
+            "let k=[];globalThis.frame=()=>{try{for(let i=0;i<24;i++)"
+            "k.push(new Uint8Array(32+(Math.random()*3000|0)));"
+            "for(let i=0;i<k.length;i+=3)k[i]=null;k=k.filter(x=>x)}catch(e){k.length=0}"
+            "for(let s=8192;;s+=8192){try{new Uint8Array(s)}catch(e){break}}};";
+            break;
+        case '@': source=
+            "let a=[],o=[];globalThis.frame=()=>{try{for(let i=0;i<400;i++)"
+            "{a.push(i);o.push({i})}if(o.length>1600)o=o.filter((x,j)=>j&3)}"
+            "catch(e){a.length=o.length=0}};";
+            break;
+        case '#': source=
+            "let o=[];globalThis.frame=()=>{try{for(let i=0;i<8;i++)"
+            "o.push({i:o.length,s:'y'.repeat(o.length%97)});"
+            "JSON.parse(JSON.stringify(o))}catch(e){o.length=0}};";
+            break;
+        // The negative control: a heap where the FRAME SEGMENTS are what
+        // splits the free space. Each level of the recursion allocates a
+        // buffer, so the segments the chain grows into land between buffers;
+        // at the bottom every buffer is dropped and the large request runs
+        // with only the segments standing in the gaps. If the probe never says
+        // segfix=1 here, the probe is broken, not the heap.
+        case '$': source=
+            "let k=[];function f(n,a,b,c,d,e,g,h){"
+            "k.push(new Uint8Array(1000));if(n)return f(n-1,a,b,c,d,e,g,h)+1;"
+            "k.length=0;for(let s=8192;;s+=4096){try{new Uint8Array(s)}catch(x){break}}"
+            "return 0}globalThis.frame=()=>{try{f(60,1,2,3,4,5,6,7)}catch(x){k.length=0}};";
+            break;
+        // R4a (docs/vm/turn-cpi.md sec.4): fs.open at the limit must not keep
+        // a slot whose File never reached the app. Stage 0: each frame fills
+        // the heap to the last byte, gives back a few of the smallest blocks,
+        // opens, then drops the fill so the File (if any) can be closed; the
+        // release walks 0..23 blocks ten times over (the heap's layout differs
+        // each round), so some step lands between the File and its promise.
+        // The first read of fs.open is itself at the limit, which is how the
+        // lazy-list hole (quickjs.c lazy_undo_done) was found. Stage 1 (sec.
+        // 4.2): the open succeeds with room to spare, and it is the .then --
+        // the continuation an await would queue -- that meets the limit; when
+        // it cannot be queued the File is dropped with its promise and only
+        // the finalizer gives the slot back. Then two opens at once must both
+        // succeed: "FSOOM ok", or "FSOOM leak" with the refusal.
+        case '^': source=
+            "const fs=pocket.fs,O={mode:'read'},N='assets:/hello.js',f=new Array(3000).fill(0);"
+            "let g=0,st=0,thr=0,got=0,rej=0,odd=0,lost=0;"
+            "function fill(){let n=0;for(let s=2048;s>=1;s>>=1)while(n<3000){try{f[n]=new Uint8Array(s);n++}catch(e){break}}"
+            "for(let k=g%24;k>0&&n>0;k--)f[--n]=0;return n}"
+            "function drop(n){while(n>0)f[--n]=0}"
+            "function took(h){got++;if(h&&typeof h.close==='function')h.close();else odd++}"
+            "globalThis.frame=()=>{if(st<2){let p=null,n=0;"
+            "if(st===1)try{p=fs.open(N,O)}catch(e){thr++}"
+            "try{n=fill();if(st===0)p=fs.open(N,O);if(p)p.then(took,e=>{rej++})}"
+            "catch(e){if(st===0)thr++;else lost++}drop(n);p=null;"
+            "if(++g>=240*(st+1))st++;return}"
+            "if(st===2){st=3;Promise.all([fs.open(N,O),fs.open(N,O)]).then("
+            "a=>{a[0].close();a[1].close();console.log('FSOOM ok thr='+thr+' got='+got+' rej='+rej+' odd='+odd+' lost='+lost)},"
+            "e=>console.log('FSOOM leak '+e.message+' thr='+thr+' got='+got+' rej='+rej+' odd='+odd+' lost='+lost))}};";
+            break;
+#endif
+#ifdef CONFIG_POCKET_VM_RELOC
+        // L3a (docs/vm/vm-L3-design.md sec.8.1, D6/D8). The shipped apps never
+        // park: a turn's budget is VM_TURN_BUDGET_US (8 ms) and pet's and
+        // companion's frames finish inside it, measured, so the relocation
+        // caller is never reached by them and max_us stays a number about
+        // nothing. This one parks ON PURPOSE and parks DEEP -- it recurses
+        // first and only then burns the budget, so the chain the yield timer
+        // catches spans several segments rather than the single 68-byte frame
+        // diagnostic '3' produces.
+        //
+        // The depth is chosen against the D10 byte budget (20,480 B): 60
+        // frames of this shape stay well inside it, so the RangeError path is
+        // not what is being exercised here. The inner loop is sized to pass
+        // 8 ms and stay under VM_FRAME_RUNAWAY_US (250 ms) so the app keeps
+        // running and keeps parking, frame after frame.
+        case '%': source=
+            "globalThis.frame=()=>{let s=0;"
+            "function f(n){if(n===0){for(let i=0;i<400000;i++)s+=i;return 0}"
+            "return f(n-1)+1}f(60);return s};";
+            break;
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
         case '[': case '\\': case ']': source=
             "let ran=false;globalThis.frame=b=>{if(ran||(b&8192))return;ran=true;"
@@ -655,6 +1271,22 @@ source_ready:;
             "throw Error('test record remains');vmSaveMark(8)})"
             ".catch(()=>vmSaveMark(9));globalThis.frame=()=>{};";
             break;
+        // Resident suspension (docs/vm/app-suspend-design.md): a sleep that must
+        // come back CANCELLED, an IMU watch, a file handle that must answer
+        // CLOSED after the wake, and a frame counter that must continue.
+        // tools/vmtest/device_suspend.py reads the SUSP_TEST lines.
+        case 'S': source=
+            "let n=0,h=null;const L=m=>console.log('SUSP_TEST '+m);"
+            "pocket.app.start({start(){"
+            "pocket.time.sleep(20000).then(()=>L('sleep done'),e=>L('sleep '+(e&&e.code)));"
+            "pocket.sensors.imu.watch({rateHz:20},()=>{});"
+            "return pocket.fs.open('assets:/hello.js',{mode:'read'}).then(f=>{h=f;L('ready')})},"
+            "suspend(){L('suspend n='+n)},"
+            "resume(i){L('resume ms='+i.suspendedMs+' n='+n);"
+            "h.read(16).then(()=>L('read ok'),e=>L('read '+e.code))},"
+            "stop(r){L('stop '+r)}});"
+            "pocket.app.onFrame(()=>{n++;if(n%30===0)L('frame n='+n)});";
+            break;
         case 'M': source=
             "pocket.app.start({stop:()=>{vmMark(5);return Promise.resolve().then(()=>vmMark(6))}});"
             "function work(){vmMark(1);vmRequest();for(let i=0;i<3;i++){}vmMark(2)}"
@@ -666,6 +1298,29 @@ source_ready:;
         // The Kasane demo (ui/kasane via app_session.c's kasane_demo_start): the
         // one source that is not a VM self-test, so it sits outside the ifdef.
         case 'K': source=kasane_demo_start; break;
+#ifdef KASANE_P0_PROBE
+        case '7': source=wall_source_probe_start; break;
+        case '0': source=pool_source_probe_start; break;
+        case 'v': source=output_source_probe_start; break;
+        case 'V': source=output_source_probe_start; break;
+        case 'w': source=output_source_probe_hidden_start; break;
+        case 'z': source=output_source_probe_dual_start; break;
+        case 'y': source=output_source_probe_long_start; break;
+        case 'j': source=output_source_probe_seek_start; break;
+        case 'b': source=output_source_probe_lowheap_start; break;
+        case '#': source=output_source_probe_lowheap_start; break;
+        case 'h': source=playback_source_probe_start; break;
+        case 'i': source=music_bar_probe_start; break;
+        case 'l': source=dirty24_probe_start; break;
+        case 'T': source=text23_probe_start; break;
+#ifdef KASANE_TEXT_PIE_DEVICE_PROBE
+        case '?': source=text_pie_probe_start; break;
+#endif
+#ifdef KASANE_P0_COPY_PROBE
+        case 'x': source=output_source_probe_exhaust_start; break;
+#endif
+        case 'u': source=output_source_probe_off_start; break;
+#endif
 #ifdef CONFIG_POCKET_VM_PROBE
         // VM probe workloads (sec.5): real files under apps/vmprobe/ rather
         // than inline strings like '1'..'6' above, because
@@ -677,6 +1332,8 @@ source_ready:;
         // the off build 20 B flash).
         case 'A': source=vmp_sync_start; break;
         case 'X': source=hello_start; break;
+        case '<': source=pet_start; break;
+        case '>': source=companion_start; break;
         case 'B': source=vmp_recur_start; break;
         case 'C': source=vmp_closures_start; break;
         case 'D': source=vmp_promise_start; break;
@@ -715,9 +1372,7 @@ source_ready:;
                                     JS_NewCFunction(ctx,vm_finite_done,"vmFiniteDone",2));
         JS_FreeValue(ctx,global);
         if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
-#ifdef CONFIG_POCKET_VM_YIELD
         pocketjs_guest_trace_frame(guest);
-#endif
     }
     if(test=='Y'||test=='Z') {
         pocket_storage_set_owner("vm.back.selftest.20260916");
@@ -731,13 +1386,33 @@ source_ready:;
         if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
     }
 #endif
+#ifdef KASANE_P0_PROBE
+    if(test=='V'){
+        JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+        JSValue global=JS_GetGlobalObject(ctx);
+        int installed=JS_SetPropertyStr(ctx,global,"KSN_OUTPUT_SAMPLE_MS",
+                                        JS_NewInt32(ctx,33));
+        JS_FreeValue(ctx,global);
+        if(installed<0){err=ESP_ERR_NO_MEM;goto fail;}
+    }
+#endif
+#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
+    if(overlay_session){
+        JSContext *ctx=pocketjs_guest_quickjs_context(guest);
+        JSValue global=JS_GetGlobalObject(ctx);
+        int installed=JS_SetPropertyStr(ctx,global,"KSN_P1_OUTPUT_OVERLAY_PROBE",
+                                        JS_NewBool(ctx,true));
+        JS_FreeValue(ctx,global);
+        if(installed<0){err=ESP_ERR_NO_MEM;goto fail;}
+    }
+#endif
     // The native Kasane arena is ~9.9 KiB. Taken at the guest's first Kasane
     // call it lands between allocations the guest has just made and splits the
     // largest free block; taken here, before evaluation, it is one block from
-    // an unbroken heap (docs/kasane/kasane-guest-memory-reduce.md). Overlays
-    // have no pocket.kasane, and a source that never names it pays nothing.
-    if(!overlay_session&&(names_kasane(source,length)||
-       (user_prelude&&names_kasane(user_prelude,user_prelude_length))))
+    // an unbroken heap (docs/kasane/decisions.md). A source
+    // that never names it, including a compatibility overlay, pays nothing.
+    if(names_kasane(source,length)||
+       (user_prelude&&names_kasane(user_prelude,user_prelude_length)))
         pocket_kasane_prepare();
     if(user_source) err=eval_user_source(source,length);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
@@ -753,8 +1428,15 @@ source_ready:;
     // The condition script keeps its own failures to itself (it logs a VMCOND
     // line and continues), so a Wi-Fi that will not link degrades the
     // condition and is recorded, instead of ending the session.
-    if(test>='A'&&test<='F') {
+    // 'X' is hello, a shipped app rather than a probe workload, and it takes
+    // the conditions too: what a real app's frame costs while the audio task
+    // and the radio compete is the question the guard's margin is judged by
+    // (docs/vm/vm-L2-results.md sec.8.4). Its UI bit is dropped -- hello owns
+    // the APP layer with its own Kasane scene, and condition.js would build a
+    // second one over it.
+    if((test>='A'&&test<='F')||test=='X'||test=='<'||test=='>') {
         unsigned mask=vmprobe_condition();
+        if(test=='X'||test=='<'||test=='>') mask&=~1u;
         ESP_LOGI("app","VMCOND start mask=%u",mask);
         if(mask) {
             char select[32];
@@ -777,6 +1459,7 @@ esp_err_t app_start(void) {
 }
 
 esp_err_t app_start_overlay(const char *source, size_t length) {
+    overlay_guest_last_us=0;
     user_source=source; user_length=length;
     user_prelude=NULL; overlay_session=true;
     esp_err_t err=app_start_test(0);
@@ -787,11 +1470,38 @@ esp_err_t app_start_overlay(const char *source, size_t length) {
     return err;
 }
 
-// One turn of an overlay. No damage plan, no strips, no bus: what an overlay
-// draws is a display list the shell composites into its own frame, so the
-// whole of the frame here is the guest's own JavaScript.
+// One turn of an overlay. Guest work and Kasane transaction finalization live
+// here; strip composition and the LCD bus remain in shell_draw(), where the
+// native scene can be supplied as the backdrop.
 esp_err_t app_overlay_tick(void) {
     if(!guest) return ESP_ERR_INVALID_STATE;
+    sample_memory_pressure();
+    pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
+    /* The overlay has its own guest loop; foreground app_tick() does not run.
+     * Keep the shared SYSTEM bank in sync before the shell presents it. */
+    sys_notice notice;
+    bool have_notice=sys_notify_active(sys_device_notifications(),&notice);
+    (void)pocket_kasane_update_notice(have_notice?&notice:NULL,pet_hub_selected());
+    /* Presentation and repair own the retained candidate. Do not let another
+     * guest turn race it; shell_draw() will retry it later in this frame. */
+    if(pocket_kasane_needs_present())return ESP_OK;
+    bool presenter_blocked=false;
+    ksn_result presenter_result=pocket_kasane_presenter_settle(&presenter_blocked);
+    if(presenter_result!=KSN_OK){
+        ESP_LOGE("kasane","PRESENTER_SETTLE_FAILED %u",(unsigned)presenter_result);
+        return ESP_FAIL;
+    }
+    if(presenter_blocked)return ESP_OK;
+    bool guest_due=!overlay_guest_last_us||
+        esp_timer_get_time()-overlay_guest_last_us>=100000;
+    if(!guest_due){
+        presenter_result=pocket_kasane_presenter_step(&presenter_blocked);
+        if(presenter_result!=KSN_OK){
+            ESP_LOGE("kasane","PRESENTER_STEP_FAILED %u",(unsigned)presenter_result);
+            return ESP_FAIL;
+        }
+        if(presenter_blocked)return ESP_OK;
+    }
     // The same runaway guard the foreground gets, and it was 50 ms until a
     // board run under the FLOWER scene threw "InternalError: interrupted"
     // inside a five-line loop that counts characters.
@@ -815,30 +1525,25 @@ esp_err_t app_overlay_tick(void) {
     // overlay does not install. The drain is resumed directly.
     if(pocketjs_guest_work_pending(guest)) {
         esp_err_t ce=pocketjs_guest_continue(guest);
+        pocket_kasane_end_turn();
         report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
         vmprobe_continuation_sample(guest);
 #endif
         if(ce) return ce;
         if(pocketjs_guest_work_pending(guest)) {
-#ifdef CONFIG_POCKET_VM_FAIR
-            if(!pocketjs_guest_suspended(guest)) {
-            // Fair ordering, the overlay's share of it: the same rule and the
-            // same reasons as app_tick() states at length, over the pumps an
-            // overlay session actually installs. No exit() check and no
-            // frame() here either.
-            pocket_app_pump();
-            pocket_overlay_pump();
-            pocket_api_pump();
-            pocket_fs_pump();
-            pocket_av_pump();
-            }
-#endif
             if(drain_runaway()) return ESP_ERR_TIMEOUT;
             continuation_turns++;
-            // No display list this turn: the shell composites whatever the
-            // overlay last produced, which is the same thing it does for a
-            // turn the overlay chose not to draw in.
+            // The guest drain was resumed first. Native source work may now
+            // submit for shell_draw(), without overtaking queued JS jobs.
+            overlay_guest_last_us=esp_timer_get_time();
+            if(guest_due){
+                presenter_result=pocket_kasane_presenter_step(NULL);
+                if(presenter_result!=KSN_OK){
+                    ESP_LOGE("kasane","PRESENTER_STEP_FAILED %u",(unsigned)presenter_result);
+                    return ESP_FAIL;
+                }
+            }
             return ESP_OK;
         }
     }
@@ -847,6 +1552,7 @@ esp_err_t app_overlay_tick(void) {
     // may turn an exit() into a stop, because the stop is delivered as an
     // interrupt and would otherwise cut the drain it lands in.
     if(pocket_app_exit_requested()) app_request_stop();
+    pocket_memory_pump(atomic_load(&stop_requested));
     pocket_app_pump();
     // Before pocket_api_pump(), like every other producer: what these post is
     // settled by that call, and posting after it would delay every completion
@@ -860,9 +1566,22 @@ esp_err_t app_overlay_tick(void) {
     pocket_av_pump();
     pocketjs_guest_frame_t f={.struct_size=sizeof(f)};
     esp_err_t e=pocketjs_guest_frame(guest,&f);
+    pocket_kasane_end_turn();
     frames++;
     report_oom_if_any();
-    return e;
+    if(e!=ESP_OK)return e;
+    overlay_guest_last_us=esp_timer_get_time();
+    /* The guest has now seen its input and due promises. Submit the newest
+     * native projection for shell_draw() without making a fast progress bar
+     * starve every following guest turn. */
+    if(guest_due){
+        presenter_result=pocket_kasane_presenter_step(NULL);
+        if(presenter_result!=KSN_OK){
+            ESP_LOGE("kasane","PRESENTER_STEP_FAILED %u",(unsigned)presenter_result);
+            return ESP_FAIL;
+        }
+    }
+    return ESP_OK;
 }
 
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
@@ -946,7 +1665,19 @@ esp_err_t app_tick(uint32_t buttons) {
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
     turn_continued=false;
+    sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
+    /* A ticket retained from a prior turn keeps its dedicated display turn.
+     * A fresh native presenter ticket below does not: after it reaches the
+     * panel, due JS promises and input must still run this turn. */
+    bool prior_submission=pocket_kasane_has_submission()&&
+        !pocket_kasane_animation_pending()&&!pocket_kasane_system_pending();
+    bool presenter_blocked=false;
+    ksn_result presenter_result=pocket_kasane_presenter_step(&presenter_blocked);
+    if(presenter_result!=KSN_OK){
+        ESP_LOGE("kasane","PRESENTER_STEP_FAILED %u",(unsigned)presenter_result);
+        return ESP_FAIL;
+    }
     sys_notice notice;
     bool have_notice=sys_notify_active(sys_device_notifications(),&notice);
     /* BUSY/limits leave the legacy overlay available until SYSTEM can submit.
@@ -958,14 +1689,13 @@ esp_err_t app_tick(uint32_t buttons) {
     // without letting another JS update race repair. An invalidated committed
     // screen also reaches this gate when no JS submission exists.
     if(pocket_kasane_needs_present()) {
-        bool guest_submission=pocket_kasane_has_submission()&&!pocket_kasane_animation_pending()&&!pocket_kasane_system_pending();
         esp_err_t pending=present_frame();
         if(pending!=ESP_OK)return pending;
         // A completed owner-only redraw must allow this tick's JS turn. Live
         // indicators can invalidate every tick; returning here unconditionally
         // would starve the guest for the entire recording. Guest submissions
         // retain their existing dedicated display turn, and IO keeps retrying.
-        if(!(buttons&0x2000)&&(guest_submission||pocket_kasane_needs_present()))
+        if(!(buttons&0x2000)&&(prior_submission||pocket_kasane_needs_present()))
             return ESP_OK;
         // Back is host-priority and this is the guest's final save turn. Carry
         // it into JS even if LCD IO still needs retry, so display trouble cannot
@@ -1008,67 +1738,20 @@ esp_err_t app_tick(uint32_t buttons) {
         int64_t cont_began=esp_timer_get_time();
         esp_err_t ce=dispatch_guest(true,0);
         pocket_kasane_end_turn();
-        turn_sum+=(double)(esp_timer_get_time()-cont_began); ticks++;
+        uint32_t continuation_us=(uint32_t)(esp_timer_get_time()-cont_began);
+        turn_sum+=(double)continuation_us; ticks++;
+#ifdef CONFIG_POCKET_VM_TURNPERF
+        turnperf_cont_us+=continuation_us; turnperf_cont_n++;
+#endif
+        ksn_p0_probe_sample(KSN_P0_APP_TURN,continuation_us);
         report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
         vmprobe_continuation_sample(guest);
 #endif
         if(ce) return ce;
         if(!leaving && pocketjs_guest_work_pending(guest)) {
-#ifdef CONFIG_POCKET_VM_FAIR
-            // FAIR ORDERING (Kconfig POCKET_VM_FAIR, off in the shipping
-            // build; docs/vm/vm-L1-report.md sec.9). The drain has yielded with
-            // work still queued, and this is the one place compat ordering
-            // refuses to let a host event through.
-            //
-            // THE RULE: the pumps run AFTER the drain has had its budget and
-            // only when the queue is still non-empty -- i.e. exactly on the
-            // turns compat ordering would have delivered nothing at all. What
-            // a pump settles is enqueued by JS_Call'ing a resolve function,
-            // and a resolve function APPENDS its reactions to the job queue
-            // (ledger 03 fact 53), so the reaction lands BEHIND every job of
-            // the unfinished drain: FIFO inside the queue is byte for byte
-            // what compat produces. What changes, and the only thing that
-            // changes, is that a subscription delivery and a completion's
-            // resolve happen at a job boundary in the middle of one logical
-            // drain instead of after its end.
-            //
-            // Draining first rather than pumping first is deliberate: a
-            // continuation turn must begin with the continuation, or a
-            // high-rate subscription could keep appending work in front of a
-            // drain that then never reaches its own budget. It also means no
-            // turn ever pumps twice -- if the drain above emptied the queue,
-            // control falls through to the ordinary path below, which pumps
-            // exactly once, at the same point in the turn as ever.
-            //
-            // NOT made fair here, and neither is safe to be:
-            //   - the exit() check: app_request_stop() is delivered as an
-            //     uncatchable interrupt on the next call into JS, so honouring
-            //     it at a job boundary cuts the drain it lands in -- whether
-            //     a .finally ran would depend on where the budget fell. It
-            //     stays below, on a turn that begins with an empty queue.
-            //   - frame(): it is the guest's picture, not a host event, and
-            //     calling it here would put a frame INSIDE a chain, which
-            //     tools/vmtest/corpus/budget_frame_boundary.js exists to
-            //     forbid. A continuation turn still shows no frame() in
-            //     either mode, so main.c's display pacing (commit 3298d0f) is
-            //     untouched: app_turn_continued() is still true here.
-            // The unhandled-rejection report point is untouched as well: the
-            // guest reports only where vm_sched_drain() returned EMPTY, which
-            // is not this boundary.
-            if(!pocketjs_guest_suspended(guest)) {
-                buttons|=deferred_buttons; deferred_buttons=0;
-                run_pumps(buttons);
-            } else {
-                // A suspended chain is the selftest's storage park: hold the keys
-                // for the turn that can run them instead of dropping them.
-                deferred_buttons|=buttons;
-            }
-            pocket_kasane_end_turn();
-#else
             // Nothing new reaches JS this turn. The keys are held, not lost.
             deferred_buttons|=buttons;
-#endif
             // sec.5.2 plus the L2c frame guard: a timed-out suspended chain
             // is terminated by pocket_app_reset() before stop-hook JS entry.
             // A job boundary has no live chain; an opcode park can still have
@@ -1093,6 +1776,18 @@ esp_err_t app_tick(uint32_t buttons) {
                 return ESP_OK;
             return present_frame();
         }
+        // The drain is done, but what it finished may have been a frame() the
+        // VM parked mid-call (L2c), and that frame() may have submitted its
+        // picture. Falling through would call the NEXT frame() in this same
+        // turn, whose patch/replace finds that ticket unconsumed and throws
+        // BUSY (backlog R3a: seen on the device right after an OOM's long
+        // collection got a frame parked). Give the ticket its display turn
+        // here, as the top-of-turn gate does, and hold this turn's keys for
+        // the next one. Back is not held: it is the guest's last save turn.
+        if(!leaving&&pocket_kasane_has_submission()) {
+            deferred_buttons|=buttons;
+            return present_frame();
+        }
     }
     continuation_turns=0;
     // The queue is empty, so this is the first moment since the exit() that
@@ -1100,13 +1795,20 @@ esp_err_t app_tick(uint32_t buttons) {
     // here, ahead of every other pump, and still does everything else it did).
     if(pocket_app_exit_requested()) app_request_stop();
     buttons|=deferred_buttons; deferred_buttons=0;
+    pocket_memory_pump((buttons&0x2000)!=0||atomic_load(&stop_requested));
     run_pumps(buttons);
     pocket_kasane_end_turn();
     // The JS side of the frame: frame() in QuickJS. Timed on every tick, painted or not, so turn_ms is its own number
     // next to render_ms rather than hidden inside the frame period.
     int64_t turning=esp_timer_get_time();
+#ifdef CONFIG_POCKET_VM_TURNPERF
+    uint32_t tp0,tp1; turnperf_read(&tp0,&tp1);
+#endif
     esp_err_t e=dispatch_guest(false,buttons);
     pocket_kasane_end_turn();
+#ifdef CONFIG_POCKET_VM_TURNPERF
+    turnperf_add(tp0,tp1,(uint32_t)(esp_timer_get_time()-turning));
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
     // The storage park, marked where the tick can see it: the guest suspended
     // itself mid-turn and the next turn is what runs its continuation.
@@ -1117,6 +1819,7 @@ esp_err_t app_tick(uint32_t buttons) {
 #endif
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
+    ksn_p0_probe_sample(KSN_P0_APP_TURN,(uint32_t)turn_us);
     report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
     // turn_us is frame() plus whatever job draining dispatch_guest() does
@@ -1185,6 +1888,22 @@ void app_vm_back_selftest(void) {
 static esp_err_t present_frame(void) {
     last_present_us=esp_timer_get_time();
     {
+#ifdef KASANE_P2_REPAIR_PROBE
+        int p2_request=atomic_exchange(&p2_repair_request,0);
+        if(p2_request) {
+            if(!p2_repair_stage) {
+                p2_repair_stage=1;
+                p2_sends_before_failure=3;
+                p2_capture_repair_only=p2_request==2;
+                if(!p2_capture_repair_only) {
+                    board_capture(true);
+                    pocket_kasane_invalidate();
+                }
+                ESP_LOGI("KSN_P2","ARMED%s after=3",
+                         p2_capture_repair_only?"_PATCH":"");
+            } else ESP_LOGW("KSN_P2","BUSY stage=%u",p2_repair_stage);
+        }
+#endif
         ksn_result advanced=pocket_kasane_advance((uint64_t)esp_timer_get_time());
         if(advanced!=KSN_OK&&advanced!=KSN_BUSY)return ESP_FAIL;
         kasane_display_t display_state={0};
@@ -1202,6 +1921,13 @@ static esp_err_t present_frame(void) {
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         frames++;
         if(result==KSN_IO) {
+#ifdef KASANE_P2_REPAIR_PROBE
+            if(p2_repair_stage==1&&p2_sends_before_failure<0) {
+                p2_repair_stage=2;
+                ESP_LOGI("KSN_P2","PARTIAL_FAILED sent=3");
+                if(p2_capture_repair_only)board_capture(true);
+            }
+#endif
             ESP_LOGW("kasane","LCD transfer failed; retaining display work for retry");
             return ESP_OK;
         }
@@ -1209,9 +1935,24 @@ static esp_err_t present_frame(void) {
             ESP_LOGE("kasane","present failed: %u",(unsigned)result);
             return ESP_FAIL;
         }
+#ifdef KASANE_P2_REPAIR_PROBE
+        if(p2_repair_stage==2&&stats.bands) {
+            ESP_LOGI("KSN_P2","REPAIR_OK bands=%u bytes=%u",
+                     ksn_render_band_count(stats.bands),(unsigned)stats.transferred_bytes);
+            board_capture(false);
+            p2_repair_stage=0;
+            p2_capture_repair_only=false;
+        }
+#endif
         if(stats.bands) {
             painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
+#if KASANE_STRESS_GRAD_AB
+            grad_ab_bytes+=stats.transferred_bytes;
+#endif
+            ksn_p0_probe_sample(KSN_P0_APP_RENDER,whole-display_state.sent_us);
+            ksn_p0_probe_sample(KSN_P0_APP_SEND,display_state.sent_us);
+            ksn_p0_probe_transfer(stats.transferred_bytes,ksn_render_band_count(stats.bands));
             // This frame's counts into the window's. The millisecond columns on
             // the line are averages and these are sums, which the line says with
             // `frames=`; the renderer resets its accumulators on read, so the
@@ -1240,6 +1981,18 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.tile_n,(unsigned)prof_sum.tile_cy,
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,painted);
+#if KASANE_STRESS_GRAD_AB
+                ESP_LOGI("kasane","GRAD_AB window=%u pie=%d bytes_avg=%.1f",
+                         grad_ab_window,g_ksn_vertical_gradient_pie,grad_ab_bytes/30.0);
+                grad_ab_window++;
+                grad_ab_bytes=0;
+                g_ksn_vertical_gradient_pie^=1;
+#endif
+#if KASANE_STRESS_REACH_AB
+                ESP_LOGI("kasane","REACH_AB window=%u reach=%d",
+                         reach_ab_window++,g_ksn_tile_reach);
+                g_ksn_tile_reach^=1;
+#endif
 #ifndef KASANE_AB
 #define KASANE_AB 0
 #endif

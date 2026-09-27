@@ -47,7 +47,10 @@ bool ksn_runtime_has_submission(void);
 bool ksn_runtime_needs_present(void);
 void ksn_runtime_invalidate(void);
 void ksn_runtime_invalidate_bands(uint32_t bands);
+uint32_t ksn_runtime_opaque_system_bands(void);
 ksn_result ksn_runtime_present(const ksn_display_port *,ksn_render_stats *);
+ksn_result ksn_runtime_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,
+                                        bool occlusion_safe,ksn_render_stats *);
 ksn_input_scope ksn_runtime_input_scope(bool host_priority);
 #ifdef __cplusplus
 }

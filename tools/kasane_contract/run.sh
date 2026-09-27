@@ -12,9 +12,27 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   tools/kasane_contract/use_cases.c tools/kasane_contract/test_core.c -o "$out/core" main/ui/kasane/ksn_blend_pie.c
 "$out/core"
 for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
+  cc -std=c11 -Wall -Wextra -Werror $options -pthread \
+    -Itools/kasane_contract/mutex_arena_hostshim \
+    tools/kasane_contract/test_mutex_arena.c -o "$out/mutex-arena"
+  "$out/mutex-arena"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    tools/kasane_contract/test_repair_send_probe.c -o "$out/repair-send-probe"
+  "$out/repair-send-probe"
+  cc -std=c11 -Wall -Wextra -Werror $options -Itools/kasane_contract/p0_hostshim -Itools/hostshim \
+    tools/kasane_contract/test_p0_histogram.c -o "$out/p0-histogram"
+  "$out/p0-histogram"
+  cc -std=c11 -Wall -Wextra -Werror $options -DP0_TIMING_ONLY \
+    -Itools/kasane_contract/p0_hostshim -Itools/hostshim \
+    tools/kasane_contract/test_p0_histogram.c -o "$out/p0-timing-only"
+  "$out/p0-timing-only"
+  cc -std=c11 -Wall -Wextra -Werror $options -DP0_TIMING_ONLY -DKASANE_P0_BUS_PROBE \
+    -Itools/kasane_contract/p0_hostshim -Itools/hostshim \
+    tools/kasane_contract/test_p0_histogram.c -o "$out/p0-bus"
+  "$out/p0-bus"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Imain/pocket \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
-    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_notice.c main/ui/kasane/ksn_indicator.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_notice.c main/ui/kasane/ksn_indicator.c \
     tools/kasane_contract/test_notice.c -o "$out/notice"
   "$out/notice"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
@@ -34,6 +52,64 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_view.c -o "$out/view"
   "$out/view"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain -Imain/ui/kasane -Imain/pocket -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_legacy_presenter.c \
+    tools/kasane_contract/test_presenter.c -o "$out/presenter"
+  "$out/presenter"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain -Imain/ui/kasane -Imain/pocket -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_legacy_presenter.c \
+    tools/kasane_contract/test_music_light_fast.c -o "$out/music-light-fast"
+  "$out/music-light-fast"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
+    tools/kasane_contract/test_schema.c -o "$out/schema"
+  "$out/schema"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
+    main/ui/kasane/ksn_schema_session.c tools/kasane_contract/test_schema_session.c -o "$out/schema-session"
+  "$out/schema-session"
+  cc -std=c11 -Wall -Wextra -Werror $options -ffunction-sections -fdata-sections \
+    -Wl,--gc-sections -Imain/ui/kasane main/ui/kasane/ksn_schema.c \
+    main/ui/kasane/ksn_source.c tools/kasane_contract/test_source.c -o "$out/source"
+  "$out/source"
+  cc -std=c11 -Wall -Wextra -Werror $options -ffunction-sections -fdata-sections \
+    -Wl,--gc-sections -Imain/ui/kasane main/ui/kasane/ksn_schema.c \
+    main/ui/kasane/ksn_source.c tools/kasane_contract/test_source_bundle.c \
+    -o "$out/source-bundle"
+  "$out/source-bundle"
+  cc -std=c11 -Wall -Wextra -Werror $options -pthread -Imain/ui/kasane \
+    main/ui/kasane/ksn_source_pool.c tools/kasane_contract/test_source_pool.c \
+    -o "$out/source-pool"
+  "$out/source-pool"
+  cc -std=c11 -Wall -Wextra -Werror $options -pthread -ffunction-sections -fdata-sections \
+    -Wl,--gc-sections -Imain/ui/kasane main/ui/kasane/ksn_schema.c \
+    main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c \
+    main/ui/kasane/ksn_source_pool_adapter.c \
+    tools/kasane_contract/test_source_pool_adapter.c -o "$out/source-pool-adapter"
+  "$out/source-pool-adapter"
+  cc -std=c11 -Wall -Wextra -Werror $options -DKASANE_P0_PROBE -DKASANE_P0_COPY_PROBE \
+    -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+    main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c \
+    main/ui/kasane/ksn_schema.c main/ui/kasane/ksn_schema_session.c \
+    main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c \
+    main/ui/kasane/ksn_source_pool_adapter.c tools/kasane_contract/test_source_copy.c \
+    -o "$out/source-copy"
+  "$out/source-copy"
+  cc -std=gnu11 -Wall -Wextra -Werror $options -DKASANE_P0_PROBE -DKASANE_P0_COPY_PROBE \
+    -Imain/ui/kasane main/ui/kasane/ksn_core.c main/ui/kasane/ksn_blend_pie.c \
+    tools/kasane_contract/test_track_cow.c -o "$out/track-cow"
+  "$out/track-cow"
+  cc -std=c11 -Wall -Wextra -Werror $options -DKSN_SCHEMA_DIRTY_COUNT \
+    -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_schema.c \
+    main/ui/kasane/ksn_schema_session.c tools/kasane_contract/test_schema_workloads.c -o "$out/schema-workloads"
+  "$out/schema-workloads"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_repair.c -o "$out/repair"
@@ -66,7 +142,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_primitives.c -o "$out/primitives"
   "$out/primitives"
-  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+  cc -std=c11 -Wall -Wextra -Werror $options -DKSN_TEXT_PIE_COUNT -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_text_render.c -o "$out/text"
   "$out/text"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
@@ -110,7 +186,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   # wrapped so the read counts are counted call sites, not estimates.
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
-    tools/kasane_contract/test_decode_reuse.c -Wl,--wrap=ksn_core_read -o "$out/decode-reuse"
+    tools/kasane_contract/test_decode_reuse.c -Wl,--wrap=ksn_core_read_borrowed -o "$out/decode-reuse"
   "$out/decode-reuse"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
@@ -200,6 +276,10 @@ cc -std=c11 -Wall -Wextra -Werror -O2 -DKSN_COUNT_VISIBLE -Imain/ui/kasane -Itoo
 diff <(grep '^scene' "$out/visible.plain") <(grep '^scene' "$out/visible.count")
 grep '^CORPUS' "$out/visible.count"
 echo "visible skip PASS: the counters change no pixel (5 scene hashes identical)"
+# The QuickJS boundary is not necessarily a copy: ASCII may return borrowed
+# storage, while wide strings require UTF-8 conversion. Keep this separate
+# from the C-only copy counters and from device timing claims.
+bash tools/kasane_contract/run_qjs_utf8_cost.sh
 # The same arm for the blend LUT: entries into the per-pixel chain and into the
 # table read, so "the chain became a row lookup" is a count of calls.
 cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_COUNT_LUT \

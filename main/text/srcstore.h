@@ -25,6 +25,34 @@
 #define SRC_SLOT_WORK_COUNT 6
 #define SRC_SLOT_COUNT    16
 
+// The editor's unsaved document, parked so that leaving the screen is not the
+// same as dropping the edit. It is one record for the whole firmware, not one
+// per slot: a person edits one thing at a time, and the record carries which
+// slot it belongs to so that a draft of the tutorial's chapter 3 is never
+// handed to the Playground.
+//
+// It lives past the end of pocket.fs rather than in a seventeenth slot,
+// because pocket_fs.c derives the filesystem's offset from SRC_SLOT_COUNT --
+// adding a slot would slide every file the person has stored. Two faces like a
+// slot, so a power cut during the park costs the draft and not the save.
+#define SRCSTORE_DRAFT_BASE 0xa0000u
+
+// Returns the draft's length when one is parked FOR THIS SLOT, 0 otherwise.
+size_t srcstore_draft_load(unsigned slot, char *out);
+
+// Parks `text` as the draft of `slot`, replacing whatever was parked before.
+bool srcstore_draft_save(unsigned slot, const char *text, size_t len);
+
+// Drops the parked draft, whatever slot it belonged to. Called when the
+// document is saved (the draft has become the record) and when the draft has
+// been taken back into the editor.
+bool srcstore_draft_clear(void);
+
+// Which slot the parked draft belongs to, without reading its text (and so
+// without an 8 KB buffer). False when nothing is parked. A slot's reset
+// asks this before clearing, so resetting chapter 3 cannot drop chapter 4.
+bool srcstore_draft_owner(unsigned *slot);
+
 // Fills `out` (SRC_MAX+1 bytes, NUL terminated) and returns its length.
 // Returns 0 when the slot is empty or its record does not verify.
 size_t srcstore_load(unsigned slot, char *out);

@@ -1,0 +1,5 @@
+# R4 turn-perf overlay (docs/vm/turn-cpi.md). Kept out of sdkconfig.defaults;
+# build it with its own sdkconfig so no other build_* directory picks it up:
+#   idf.py -B build_turnperf -D SDKCONFIG=build_turnperf/sdkconfig \
+#       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.turnperf.defaults" build
+CONFIG_POCKET_VM_TURNPERF=y

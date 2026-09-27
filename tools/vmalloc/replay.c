@@ -64,26 +64,90 @@ static uint64_t g_max_id;
 // twice: over the whole trace and over the ops before this marker.
 static size_t g_teardown_op = SIZE_MAX;
 
+// --seg-arena BYTES (docs/vm/vm-L3-design.md sec.11, spec design D6): the
+// frame segments come from a region of their own instead of the heap the
+// objects use. vmrun writes "# seg" on the line before each segment
+// allocation (host builds only, through vmtest_seg_alloc_hint), so the
+// replay can take those ops out of the backend entirely and account for them
+// here. The region is modelled as perfectly packed -- segments come and go
+// in LIFO order (a segment is retired when its first frame pops, the cache
+// is trimmed whole), which a stack allocator serves with no fragmentation --
+// so all it has to report is how much of it was needed and whether BYTES was
+// enough. The backend gets the pool MINUS the region: same total memory, the
+// question being whether the objects' heap keeps a larger free extent when
+// no segment lands in the middle of it.
+static size_t g_seg_arena;          // 0 = off: segments replay like everything else
+static size_t g_arena_used, g_arena_peak, g_arena_app_peak;
+static unsigned long g_arena_allocs, g_arena_overflows, g_seg_reallocs;
+static size_t *g_seg_size;          // by id: size of a live segment, 0 = not a segment
+static size_t g_seg_size_cap;
+
+static void seg_size_set(uint64_t id, size_t size) {
+  if (id >= g_seg_size_cap) {
+    size_t cap = g_seg_size_cap ? g_seg_size_cap : 4096;
+    while (cap <= id) cap *= 2;
+    g_seg_size = realloc(g_seg_size, cap * sizeof *g_seg_size);
+    if (!g_seg_size) { fprintf(stderr, "replay: out of memory\n"); exit(1); }
+    memset(g_seg_size + g_seg_size_cap, 0, (cap - g_seg_size_cap) * sizeof *g_seg_size);
+    g_seg_size_cap = cap;
+  }
+  g_seg_size[id] = size;
+}
+
+static size_t seg_size_get(uint64_t id) {
+  return id < g_seg_size_cap ? g_seg_size[id] : 0;
+}
+
 static void load_trace(const char *path) {
   FILE *f = fopen(path, "r");
   if (!f) { fprintf(stderr, "replay: cannot open %s\n", path); exit(1); }
   char line[512];
+  int next_is_seg = 0;
   while (fgets(line, sizeof line, f)) {
-    if (line[0] == '#') { if (!strncmp(line, "# teardown", 10)) g_teardown_op = g_op_count; continue; }
+    if (line[0] == '#') {
+      if (!strncmp(line, "# teardown", 10)) g_teardown_op = g_op_count;
+      else if (!strncmp(line, "# seg", 5) && (line[5] == '\n' || line[5] == '\0')) next_is_seg = 1;
+      continue;
+    }
     if (line[0] == '\n') continue;
+    if (line[0] == '!') { next_is_seg = 0; continue; }   // the segment allocation failed
     if (line[0] == '+') {
       uint64_t id; unsigned long long sz;
       if (sscanf(line + 1, "%llu %llu", (unsigned long long *)&id, &sz) != 2) continue;
-      push_op(OP_MALLOC, id, 0, (size_t)sz);
       if (id > g_max_id) g_max_id = id;
+      if (next_is_seg && g_seg_arena) {
+        next_is_seg = 0;
+        seg_size_set(id, (size_t)sz);
+        g_arena_allocs++;
+        g_arena_used += (size_t)sz;
+        if (g_arena_used > g_arena_peak) g_arena_peak = g_arena_used;
+        if (g_teardown_op == SIZE_MAX && g_arena_used > g_arena_app_peak)
+          g_arena_app_peak = g_arena_used;
+        if (g_arena_used > g_seg_arena) g_arena_overflows++;
+        continue;
+      }
+      next_is_seg = 0;
+      push_op(OP_MALLOC, id, 0, (size_t)sz);
     } else if (line[0] == '-') {
       uint64_t id;
       if (sscanf(line + 1, "%llu", (unsigned long long *)&id) != 1) continue;
+      if (g_seg_arena && seg_size_get(id)) {
+        g_arena_used -= seg_size_get(id);
+        seg_size_set(id, 0);
+        continue;
+      }
       push_op(OP_FREE, id, 0, 0);
     } else if (line[0] == '~') {
       uint64_t oid, nid; unsigned long long sz;
       if (sscanf(line + 1, "%llu %llu %llu", (unsigned long long *)&oid,
                  (unsigned long long *)&nid, &sz) != 3) continue;
+      if (g_seg_arena && seg_size_get(oid)) {
+        // js_vm_seg_new never reallocs a segment; if one ever does, the
+        // arena model no longer describes the run, so it is counted and
+        // reported rather than silently folded in.
+        g_seg_reallocs++;
+        continue;
+      }
       push_op(OP_REALLOC, oid, nid, (size_t)sz);
       if (nid > g_max_id) g_max_id = nid;
     }
@@ -523,6 +587,9 @@ static void print_study_tail(const vmalloc_backend_t *be, run_result_t *r) {
            r->realloc_grow_covered, r->app_usable_waste);
   else printf(" realloc_covered=n/a realloc_grow_covered=n/a app_usable_waste=n/a");
   printf(" app_min_largest_free=%zu", r->app_min_largest_free);
+  if (g_seg_arena)
+    printf(" seg_arena=%zu arena_peak=%zu arena_app_peak=%zu arena_allocs=%lu arena_overflows=%lu seg_reallocs=%lu",
+           g_seg_arena, g_arena_peak, g_arena_app_peak, g_arena_allocs, g_arena_overflows, g_seg_reallocs);
 }
 
 static void print_verify_tail(const run_result_t *r) {
@@ -544,6 +611,7 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--allocator") && i + 1 < argc) allocator = argv[++i];
     else if (!strcmp(argv[i], "--pool") && i + 1 < argc) pool = strtoull(argv[++i], NULL, 0);
+    else if (!strcmp(argv[i], "--seg-arena") && i + 1 < argc) g_seg_arena = strtoull(argv[++i], NULL, 0);
     else if (!strcmp(argv[i], "--bisect")) do_bisect = 1;
     else if (!strcmp(argv[i], "--bisect-max") && i + 1 < argc) bisect_max = strtoull(argv[++i], NULL, 0);
     else if (!strcmp(argv[i], "--sample-every") && i + 1 < argc) sample_every = (unsigned)strtoul(argv[++i], NULL, 0);
@@ -583,6 +651,16 @@ int main(int argc, char **argv) {
   // sweeps somewhere other than the end.
   if (g_verify && !be->owner && !g_verify_every) g_verify_every = 4096;
 
+  if (g_seg_arena) {
+    // Same total memory: the segments' region comes out of the pool the
+    // objects get. A bisection would search the object pool alone and
+    // ignore the region, so the two are not combined.
+    if (do_bisect || g_seg_arena >= pool) {
+      fprintf(stderr, "replay: --seg-arena needs --pool larger than the region, and no --bisect\n");
+      return 1;
+    }
+    pool -= g_seg_arena;
+  }
   load_trace(trace_path);
   g_ptr_by_id = calloc(g_max_id + 1, sizeof(void *));
   g_appsize_by_id = calloc(g_max_id + 1, sizeof(size_t));

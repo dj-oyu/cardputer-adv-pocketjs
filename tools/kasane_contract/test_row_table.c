@@ -284,10 +284,10 @@ static int switch_means_old_path(void){
 
 /* ---- 2. whole frame, four arms, every pixel of every frame ----------------- */
 #define FRAMES 120u
-#define SCENE 13u
-/* Arms: both switches in both positions. Arm 0 is the reference -- the coverage
- * solver on (its shipping default) and the row table off, which is the pixel
- * path this file ran before the table existed. Arm 1 is the shipping pair. */
+#define SCENE 14u
+/* Arms: coverage and row table in both positions. The vertical-gradient PIE
+ * switch follows the table arm, so arms 0/2 use the scalar gradient and 1/3
+ * use PIE. Arm 0 remains the original per-pixel reference. */
 #define ARMS 4u
 static const int arm_coverage[ARMS]={1,1,0,0};
 static const int arm_table[ARMS]={0,1,0,1};
@@ -384,7 +384,7 @@ static const ksn_draw scene_base[SCENE]={
     {.kind=KSN_GRADIENT,.bounds={-40,20,280,44},.clip={0,0,240,135},.opacity=219,
      .data.gradient={0x253849cc,0xe0a972d2,0,8,true}},
     {.kind=KSN_GRADIENT,.bounds={150,46,240,60},.clip={0,0,240,135},.opacity=255,
-     .data.gradient={0x123456ff,0xffff80ff,1,0,false}},
+     .data.gradient={0x123456ff,0xffff80ff,1,0,true}},
     {.kind=KSN_GRADIENT,.bounds={168,62,169,86},.clip={0,0,240,135},.opacity=200,
      .data.gradient={0xbe3344ff,0x00ff00ff,0,0,false}},
     {.kind=KSN_TEXT,.bounds={8,3,232,17},.clip={0,0,240,135},.opacity=255,
@@ -406,7 +406,9 @@ static const ksn_draw scene_base[SCENE]={
     {.kind=KSN_RECT,.bounds={24,66,136,86},.clip={0,0,240,135},.opacity=220,
      .data.shape={0x63d7bccc,0,0}},
     {.kind=KSN_ROUND_RECT,.bounds={196,110,239,134},.clip={0,0,240,135},.opacity=255,
-     .data.shape={0x62e0a8ff,3,0}}
+     .data.shape={0x62e0a8ff,3,0}},
+    {.kind=KSN_GRADIENT,.bounds={35,48,90,74},.clip={0,0,240,135},.opacity=179,
+     .data.gradient={0x88aa33cc,0x22bbdd88,1,4,true}}
 };
 /* A cached template is RECT/ROUND_RECT/STROKE only (ksn_cache_create), so it is
  * the constant case of the table that a template instance exercises; the group
@@ -491,6 +493,7 @@ static int run_all(void){
         for(unsigned arm=0;arm<ARMS;arm++){
             g_ksn_row_coverage=arm_coverage[arm];
             g_ksn_row_table=arm_table[arm];
+            g_ksn_vertical_gradient_pie=arm_table[arm];
             if(render_frame(arm,frame))return 1;
             hash_panel(arm,&frame_hash[arm][frame]);
             arm_hash[arm]=arm_hash[arm]*31u+frame_hash[arm][frame];
@@ -504,7 +507,7 @@ static int run_all(void){
             if(compare_panels(arm,frame))return 1;
         }
     }
-    g_ksn_row_coverage=1;g_ksn_row_table=1;
+    g_ksn_row_coverage=1;g_ksn_row_table=1;g_ksn_vertical_gradient_pie=1;
     return 0;
 }
 
@@ -524,7 +527,7 @@ int main(void){
     CHECK(full_frames==ARMS*(1+FRAMES/17));
     CHECK(compared_panels==(ARMS-1)*FRAMES);
     CHECK(differing_pixels==0&&worst_step==0);
-    printf("row table: %u frames, %u arms (table/coverage on and off), %u panels of 32,400 "
+    printf("row table: %u frames, %u arms (table/coverage; vertical PIE follows table), %u panels of 32,400 "
            "pixels compared pixel by pixel, %u pixels differed (worst channel step %u)\n",
            FRAMES,ARMS,compared_panels,differing_pixels,worst_step);
     printf("row table: rolling hashes %08x %08x %08x %08x (reference (coverage,table)=(1,0) first)\n",

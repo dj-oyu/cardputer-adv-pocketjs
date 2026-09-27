@@ -16,6 +16,10 @@ typedef struct {
      * differ and this turns that into an x range. Left NULL, a changed text
      * command dirties its whole box, which is what it always did. */
     unsigned (*advance)(void *,ksn_font font,uint32_t codepoint);
+    /* Opt-in contract: span writes only 0 or 255. The renderer may consume an
+     * aligned eight-byte mask directly in a PIE lane kernel; other providers
+     * keep the general 0..255 scalar path. */
+    bool binary_coverage;
 } ksn_text_port;
 typedef struct {
     void *ctx;
@@ -32,6 +36,9 @@ typedef struct {
     ksn_result (*present_rect)(void *,uint16_t x,uint16_t y,uint16_t cols,
                                uint16_t rows,const uint16_t *pixels);
 } ksn_display_port;
+/* Optional host backdrop for ksn_render_rects_backdrop. Called once per band
+ * instead of clearing to the APP background. It must fill width*rows pixels. */
+typedef ksn_result (*ksn_backdrop_loader)(void *,uint16_t y,uint16_t rows,uint16_t *pixels);
 /* Borrow the existing board strip. No second framebuffer. */
 typedef struct {
     void *ctx;

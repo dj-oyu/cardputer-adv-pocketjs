@@ -269,7 +269,7 @@ static JSValue now_read(JSContext *c,JSValueConst self,int argc,JSValueConst *ar
 }
 // The sprite, speech-bubble and texture methods (place/say/show) drew through
 // the legacy renderer and went with it; the apps draw the pet through
-// pocket.kasane.petImage() instead.
+// pocket.kasane.resource('pets') instead.
 static esp_err_t build_pet(JSContext *ctx,JSValueConst ns,void *user) {
     (void)user;
     JSValue pet=(JSValue)ns;

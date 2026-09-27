@@ -42,6 +42,8 @@ int main(void){
     CHECK(app.ops->background(app.ctx,tx,0x000000ff)==KSN_OK);
     CHECK(ksn_cache_instantiate(&cache,&core,tx,first,&left,&a)==KSN_OK);
     CHECK(ksn_cache_instantiate(&cache,&core,tx,first,&right,&b)==KSN_OK);
+    ksn_capacity candidate;
+    CHECK(ksn_core_builder_usage(&core,tx,&candidate)==KSN_OK&&candidate.commands==4);
     CHECK(ksn_cache_release(&cache,first)==KSN_BUSY);
     CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
     CHECK(render_and_resolve(&cache,&core,&display)==KSN_OK);
@@ -93,5 +95,28 @@ int main(void){
     CHECK(ksn_cache_instantiate(&cache,&core,tx,first,&left,&a)==KSN_OK);
     left.opacity=255;CHECK(ksn_cache_place(&cache,&core,tx,a,&left)==KSN_OK);
     CHECK(app.ops->end(app.ctx,tx)==KSN_OK);CHECK(render_and_resolve(&cache,&core,&display)==KSN_OK);
+    /* Overflow is rejected before any child changes; a no-op still checks tx/layer. */
+    CHECK(ksn_cache_place(&cache,&core,tx,a,&left)==KSN_STALE);
+    ksn_client system=ksn_core_client(&core,KSN_SYSTEM);
+    CHECK(system.ops->begin(system.ctx,KSN_PATCH,&tx)==KSN_OK);
+    CHECK(ksn_cache_place(&cache,&core,tx,a,&left)==KSN_STALE);
+    system.ops->abort(system.ctx,tx);
+    CHECK(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
+    CHECK(ksn_cache_place(&cache,&core,tx,a,&left)==KSN_STALE);
+    app.ops->abort(app.ctx,tx);
+    CHECK(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
+    ksn_placement overflow=left;overflow.x=INT16_MAX;
+    CHECK(ksn_cache_place(&cache,&core,tx,a,&overflow)==KSN_INVALID);
+    CHECK(ksn_cache_place(&cache,&core,tx,a,&left)==KSN_OK);
+    CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
+    CHECK(render_and_resolve(&cache,&core,&display)==KSN_OK);
+    CHECK(colored_pixels()==40u*24u);
+    /* A clip-only PATCH must still update every child's effective clip. */
+    ksn_placement cropped=left;cropped.clip=(ksn_rect){200,64,210,88};
+    CHECK(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK);
+    CHECK(ksn_cache_place(&cache,&core,tx,a,&cropped)==KSN_OK);
+    CHECK(app.ops->end(app.ctx,tx)==KSN_OK);
+    CHECK(render_and_resolve(&cache,&core,&display)==KSN_OK);
+    CHECK(colored_pixels()==10u*24u);
     puts("explicit component cache: PASS");return 0;
 }

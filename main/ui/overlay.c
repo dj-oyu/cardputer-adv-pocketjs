@@ -3,6 +3,9 @@
 #include "app_session.h"
 #include "app_registry.h"
 #include "pocket_overlay.h"
+#include "pocket_av.h"
+#include "pocket_kasane.h"
+#include "kasane/ksn_p0_probe.h"
 #include "board.h"
 #include "nvs.h"
 #include "esp_heap_caps.h"
@@ -15,6 +18,10 @@ static const char *TAG="overlay";
 
 extern const char deskclock_start[] asm("_binary_deskclock_js_start");
 extern const char deskclock_end[]   asm("_binary_deskclock_js_end");
+#ifdef KASANE_P5_FAIRNESS_PROBE
+extern const char overlay_fairness_probe_start[] asm("_binary_overlay_fairness_probe_js_start");
+extern const char overlay_fairness_probe_end[] asm("_binary_overlay_fairness_probe_js_end");
+#endif
 extern const char player_start[] asm("_binary_player_js_start");
 extern const char player_end[]   asm("_binary_player_js_end");
 
@@ -30,6 +37,7 @@ typedef struct {
     const char      **source_end;
     overlay_region_t  region;
     uint32_t          budget_us;
+    bool              adopts_music;   // takes over the host's background player
 } overlay_app_t;
 
 static const char *deskclock_src, *deskclock_src_end;
@@ -55,12 +63,14 @@ static const overlay_app_t MUSIC = {
     .source=&player_src, .source_end=&player_src_end,
     // The whole panel, which is what 3.1 now allows and what the old rule made
     // impossible: with XMB ended there is nothing underneath to stay clear of.
-    // Modals still land on top, and they draw the whole screen themselves.
+    // Shell-owned pickers still land on top and draw the whole screen. Kasane
+    // transaction modals are not part of the overlay profile.
     .region={.x=0,.y=0,.w=LCD_W,.h=LCD_H},
     // More than the clock, because it holds a file open and reads the card
     // inside its turn. Still a small fraction of the frame: what this catches
     // is a turn that has stopped returning, not one that is working.
     .budget_us=12000,
+    .adopts_music=true,
 };
 
 static const overlay_app_t *const REGISTERED[OVERLAY_APPS] = { &DESKCLOCK, &MUSIC };
@@ -89,6 +99,8 @@ static bool             session_up;       // a guest belonging to us exists
 // chain, and the next boot proves it again from scratch.
 static bool             proven;
 static overlay_budget_t budget;
+static uint32_t         budget_guest_us,budget_composite_us;
+static bool             budget_frame_pending;
 // One live buffer per overlay. Only the selected one is ever written, so a row
 // that is not running keeps its plain title rather than a stale status.
 static char             labels[OVERLAY_APPS][20];
@@ -134,7 +146,12 @@ void overlay_init(void) {
     // because a `.source` initialiser would need the address of an extern array
     // at file scope and that is fine -- but the END pointer is only ever used as
     // a length, and keeping both here puts the arithmetic in one place.
+#ifdef KASANE_P5_FAIRNESS_PROBE
+    deskclock_src=overlay_fairness_probe_start;
+    deskclock_src_end=overlay_fairness_probe_end;
+#else
     deskclock_src=deskclock_start; deskclock_src_end=deskclock_end;
+#endif
     player_src=player_start;       player_src_end=player_end;
     uint8_t stored=0;
     if(nvs_open("overlay",NVS_READWRITE,&prefs)==ESP_OK) {
@@ -193,10 +210,14 @@ void overlay_armed_set(unsigned value) {
 
 // ------------------------------------------------------------- start/stop
 
-static void stop_with(const char *label, overlay_state_t next) {
-    if(session_up) { app_stop(); session_up=false; }
+static void stop_with(const char *label, overlay_state_t next, bool keep_music) {
+    if(session_up) {
+        if(keep_music) app_stop_keep_music(); else app_stop();
+        session_up=false;
+    }
     if(flag_stored) flag_set(false);
     state=next;
+    budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
     say(label);
     ESP_LOGW(TAG,"OVERLAY_STOPPED %s worst=%uus turns=%u",
              label,(unsigned)budget.worst_us,(unsigned)budget.turns);
@@ -204,7 +225,8 @@ static void stop_with(const char *label, overlay_state_t next) {
 
 void overlay_release(void) {
     if(session_up) {
-        app_stop(); session_up=false;
+        // Giving the display away is not a stop: the music goes on (S5).
+        app_stop_keep_music(); session_up=false;
         // Back to armed-but-not-up, so the home screen starts it again when it
         // gets the frame back. A release is not a fault, so REFUSED and
         // STOPPED are left standing: those are decisions, and giving the
@@ -212,6 +234,7 @@ void overlay_release(void) {
         if(choice && state==OVERLAY_RUNNING) { state=OVERLAY_STARTING; say("..."); }
     }
     if(flag_stored) flag_set(false);
+    budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
     pocket_overlay_reset();
 }
 
@@ -269,8 +292,23 @@ static uint32_t free_internal(void) {
 // piece; and it does not use the cap as the cost, because a ceiling is not a
 // price. It asks only whether the total is plausible, so the obvious "no" costs
 // nothing. The answer that counts is taken after the start, from what happened.
-static bool plausible(void) {
-    return free_internal()>=OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR;
+//
+// One credit: the music overlay starting over background music (S5) adopts a
+// player that is already paid for, and the forecast above counts one it would
+// open. What that player holds, measured (device) 2026-09-28 as the home
+// screen's free heap with and without it: 217,064 - 154,468 = 62,596 bytes.
+// The credit is rounded DOWN, and without it the adoption the person asked for
+// was refused by 1,192 bytes. The check after the start still decides.
+#define OVERLAY_BG_MUSIC_CREDIT (60*1024)
+
+static uint32_t overlay_needs(const overlay_app_t *o) {
+    uint32_t need=OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR;
+    if(o->adopts_music && pocket_av_background_active()) need-=OVERLAY_BG_MUSIC_CREDIT;
+    return need;
+}
+
+static bool plausible(const overlay_app_t *o) {
+    return free_internal()>=overlay_needs(o);
 }
 
 static void start(void) {
@@ -278,12 +316,12 @@ static void start(void) {
     const overlay_app_t *o=REGISTERED[choice-1];
     current=o;
     uint32_t before=free_internal();
-    if(!plausible()) {
+    if(!plausible(o)) {
         state=OVERLAY_REFUSED;
         say("NO ROOM");
         ESP_LOGW(TAG,"OVERLAY_REFUSED_GATE free=%u needs=%u expected=%u floor=%u",
                  (unsigned)before,
-                 (unsigned)(OVERLAY_EXPECTED_COST+OVERLAY_FREE_FLOOR),
+                 (unsigned)overlay_needs(o),
                  (unsigned)OVERLAY_EXPECTED_COST,(unsigned)OVERLAY_FREE_FLOOR);
         return;
     }
@@ -297,6 +335,7 @@ static void start(void) {
         return;
     }
     pocket_overlay_set_region(&o->region);
+    pocket_kasane_set_viewport(o->region.x,o->region.y,o->region.w,o->region.h);
     app_registry_select(o->id);
     // The -1 is the NUL that EMBED_TXTFILES appends and the guest must not see.
     esp_err_t err=app_start_overlay(*o->source,
@@ -323,6 +362,7 @@ static void start(void) {
     budget=(overlay_budget_t){.budget_us=o->budget_us,.over_limit=60,
                               .healthy_us=5000000};
     overlay_budget_start(&budget,(uint64_t)esp_timer_get_time());
+    budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
     // VERIFY, having predicted. The guest is up, so what it cost is no longer a
     // forecast -- it is a subtraction. Standing down here puts the machine back
     // exactly where it was, which is the whole reason this check can exist for
@@ -336,7 +376,7 @@ static void start(void) {
         // worse off, which is the case 3.1 had no name for. The reason is
         // stateable -- the radio could no longer be brought up -- and it is
         // shown in the row the person would turn it off from.
-        stop_with("NO ROOM",OVERLAY_REFUSED);
+        stop_with("NO ROOM",OVERLAY_REFUSED,false);
         ESP_LOGW(TAG,"OVERLAY_REFUSED_FLOOR free=%u below floor=%u",
                  (unsigned)after,(unsigned)OVERLAY_FREE_FLOOR);
         return;
@@ -351,16 +391,49 @@ void overlay_tick(uint32_t frame_us) {
     if(state!=OVERLAY_RUNNING) return;
 
     int64_t began=esp_timer_get_time();
+    if(budget_frame_pending) {
+        uint32_t total=overlay_budget_cost(budget_guest_us,budget_composite_us);
+#ifdef KASANE_P1_OVERLAY_STAGE_PROBE
+        ksn_p0_probe_sample(KSN_P1_OVERLAY_GUEST,budget_guest_us);
+        ksn_p0_probe_sample(KSN_P1_OVERLAY_COMPOSITE,budget_composite_us);
+#endif
+        ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,total);
+        budget_guest_us=budget_composite_us=0;budget_frame_pending=false;
+        if(overlay_budget_turn(&budget,total,frame_us)) {
+            stop_with("OVER BUDGET",OVERLAY_STOPPED,false);return;
+        }
+        if(flag_stored&&overlay_budget_healthy(&budget,(uint64_t)began)) {
+            proven=true;flag_set(false);
+            ESP_LOGI(TAG,"OVERLAY_HEALTHY worst=%uus",(unsigned)budget.worst_us);
+        }
+        char cost[12];
+        snprintf(cost,sizeof cost,"%u.%ums",(unsigned)(total/1000),
+                 (unsigned)((total%1000)/100));
+        say(cost);
+    }
+    /* A submitted or repairing bank must reach the shell-owned display port
+     * before guest code or its queued input can mutate application state. */
+    if(pocket_kasane_needs_present()) {
+        if(overlay_kasane_active())budget_frame_pending=true;
+        return;
+    }
+    began=esp_timer_get_time();
     esp_err_t err=app_overlay_tick();
     uint32_t spent=(uint32_t)(esp_timer_get_time()-began);
-    if(err!=ESP_OK) { stop_with("FAULTED",OVERLAY_STOPPED); return; }
+    if(err!=ESP_OK) { stop_with("FAULTED",OVERLAY_STOPPED,false); return; }
+    if(overlay_kasane_active()) {
+        budget_guest_us=spent;budget_composite_us=0;budget_frame_pending=true;
+        return;
+    }
     if(overlay_budget_turn(&budget,spent,frame_us)) {
+        ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,spent);
         // 3.1: stopped, and the stop is SHOWN. The Settings row is where the
         // person would go to turn it off, so it is where they are told it
         // already stopped -- a silent stop is indistinguishable from a fault.
-        stop_with("OVER BUDGET",OVERLAY_STOPPED);
+        stop_with("OVER BUDGET",OVERLAY_STOPPED,false);
         return;
     }
+    ksn_p0_probe_sample(KSN_P0_OVERLAY_WORK,spent);
     if(flag_stored && overlay_budget_healthy(&budget,(uint64_t)began)) {
         proven=true;
         flag_set(false);
@@ -389,16 +462,36 @@ void overlay_tick(uint32_t frame_us) {
 // numbers that do not exist yet. This end is ready: it is idempotent, it is
 // safe from any task that already calls into the shell, and it leaves the row
 // saying why.
-void overlay_yield(const char *claimant) {
+void overlay_yield(const char *claimant, bool keep_music) {
     if(state!=OVERLAY_RUNNING && !session_up) return;
     ESP_LOGW(TAG,"OVERLAY_YIELDED to %s free=%u",
              claimant?claimant:"?",(unsigned)free_internal());
-    stop_with("YIELDED",OVERLAY_STOPPED);
+    stop_with("YIELDED",OVERLAY_STOPPED,keep_music);
 }
 
 void overlay_paint(uint16_t *strip, int strip_y, int strip_h) {
     if(state!=OVERLAY_RUNNING) return;
     pocket_overlay_paint(strip,strip_y,strip_h);
+}
+
+bool overlay_kasane_active(void) {
+    return state==OVERLAY_RUNNING&&pocket_kasane_active();
+}
+
+ksn_result overlay_kasane_present(const ksn_display_port *port,ksn_backdrop_loader load,
+                                  bool host_top_dynamic,ksn_render_stats *stats) {
+    if(!overlay_kasane_active()||!port||!load||!stats)return KSN_INVALID;
+    uint64_t now=(uint64_t)esp_timer_get_time();
+    ksn_result result=pocket_kasane_advance(now);
+    if(result!=KSN_OK&&result!=KSN_BUSY)return result;
+    /* A fully opaque SYSTEM band hides the animated backdrop. Its own
+     * transaction damage still repaints it on post/clear; dynamic host HUD
+     * content above Kasane opts out of this occlusion shortcut. */
+    uint32_t covered=host_top_dynamic?0:pocket_kasane_opaque_system_bands();
+    pocket_kasane_invalidate_bands(KSN_BANDS_ALL&~covered);
+    result=pocket_kasane_present_backdrop(port,load,!host_top_dynamic,stats);
+    if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
+    return result;
 }
 
 bool overlay_running(void) { return state==OVERLAY_RUNNING; }
@@ -409,5 +502,11 @@ bool overlay_running(void) { return state==OVERLAY_RUNNING; }
 // site rather than a filter this file could get wrong.
 void overlay_key(const keystroke_t *k) {
     if(state!=OVERLAY_RUNNING||!k) return;
+    if(pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return;
     pocket_overlay_key(k);
+}
+
+void overlay_kasane_charge(uint32_t composite_us) {
+    if(state!=OVERLAY_RUNNING||!budget_frame_pending)return;
+    budget_composite_us=overlay_budget_cost(budget_composite_us,composite_us);
 }

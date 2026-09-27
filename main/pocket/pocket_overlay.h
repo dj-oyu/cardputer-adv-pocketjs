@@ -6,7 +6,9 @@
 #include "overlay_core.h"
 #include "keymap.h"
 
-// pocket.overlay — the drawing surface of docs/api/common-api.md 3.1.
+// pocket.overlay — the region and input contract of docs/api/common-api.md 3.1.
+// New overlay drawing uses the region-scoped pocket.kasane APP endpoint. The
+// display-list calls below remain as a compatibility path for saved overlays.
 //
 // WHY THIS IS NOT ui.basic, which is what 3.1 names.
 //
@@ -23,9 +25,13 @@
 //     account, the largest single allocation a small app makes -- and an
 //     overlay wants it at the moment the scene's scratch is also held.
 //
-// So the overlay draws through a host-owned display list instead: the guest
-// appends a few dozen boxes and strings, and ui/overlay.c composites them into
-// the shell's strip under the shell's own labels. That also makes 3.1's
+// The original overlay therefore drew through this host-owned display list:
+// the guest appended boxes and strings, and ui/overlay.c composited them into
+// the shell's strip. The Kasane overlay path now solves the same background
+// requirement through ksn_render_rects_backdrop(): the shell fills each strip
+// from the live native scene, then Kasane source-over blends the APP commands.
+//
+// The legacy list also makes 3.1's
 // "はみ出しは切り取るのではなく拒否する" a property of the surface rather than
 // an intention -- every call is checked against the region and throws when it
 // does not fit, and the coordinates are region-local so the shell's own rows

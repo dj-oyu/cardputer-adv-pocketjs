@@ -71,6 +71,10 @@ static int newest(const esp_partition_t *p, unsigned slot, uint32_t *out_seq) {
     return best;
 }
 
+// Defined with the draft region at the end of this file; srcstore_clear uses
+// them to drop a draft that belongs to the slot it is forgetting.
+static bool draft_owner_of(unsigned *slot);
+
 uint32_t srcstore_revision(unsigned slot) {
     const esp_partition_t *p=storage();
     if(!p) return 0;
@@ -112,6 +116,11 @@ size_t srcstore_load_checked(unsigned slot, char *out, bool *verified) {
 bool srcstore_clear(unsigned slot) {
     const esp_partition_t *p=storage();
     if(!p) return false;
+    // Forgetting a slot forgets its unsaved draft as well: a chapter reset or a
+    // work taken back would otherwise leave a draft that the next open would
+    // hand to whoever is given that slot next.
+    unsigned parked=0;
+    if(draft_owner_of(&parked) && parked==slot) srcstore_draft_clear();
     for(unsigned f=0;f<FACES;f++) {
         size_t base=face_at(p,slot,f);
         if(base==SIZE_MAX) return false;
@@ -155,3 +164,139 @@ bool srcstore_save(unsigned slot, const char *text, size_t len) {
              slot,(unsigned)len,face,(unsigned)hdr.seq);
     return true;
 }
+
+// ---- the parked draft ------------------------------------------------------
+//
+// Same record shape as a slot's, with the owning slot appended and a magic of
+// its own so that a draft can never be mistaken for a source record (or the
+// other way round, if the two regions were ever to meet). The region sits at
+// SRCSTORE_DRAFT_BASE, past pocket.fs -- see the note in srcstore.h.
+#define DRAFT_MAGIC 0x31445253u   // "SRD1"
+
+typedef struct {
+    src_hdr_t base;
+    uint32_t slot;
+} draft_hdr_t;
+
+static size_t draft_face_at(const esp_partition_t *p, unsigned face) {
+    size_t off=(size_t)SRCSTORE_DRAFT_BASE+(size_t)face*BLOCK;
+    return (off+BLOCK<=p->size) ? off : SIZE_MAX;
+}
+
+static bool draft_read(const esp_partition_t *p, unsigned face, char *out,
+                       draft_hdr_t *hdr) {
+    size_t base=draft_face_at(p,face);
+    if(base==SIZE_MAX) return false;
+    if(esp_partition_read(p,base,hdr,sizeof(*hdr))!=ESP_OK) return false;
+    if(hdr->base.magic!=DRAFT_MAGIC || hdr->base.len>SRC_MAX) return false;
+    if(hdr->slot>=SRC_SLOT_COUNT) return false;
+    if(esp_partition_read(p,base+sizeof(*hdr),out,hdr->base.len)!=ESP_OK) return false;
+    out[hdr->base.len]=0;
+    if(esp_crc32_le(0,(const uint8_t*)out,hdr->base.len)!=hdr->base.crc) {
+        ESP_LOGW("src","draft face %u failed its CRC",face);
+        return false;
+    }
+    return true;
+}
+
+// Which face holds the newest draft, reading the headers only.
+static int draft_newest(const esp_partition_t *p, uint32_t *out_seq) {
+    int best=-1; uint32_t best_seq=0;
+    for(unsigned f=0;f<FACES;f++) {
+        size_t base=draft_face_at(p,f);
+        if(base==SIZE_MAX) continue;
+        draft_hdr_t hdr;
+        if(esp_partition_read(p,base,&hdr,sizeof(hdr))!=ESP_OK) continue;
+        if(hdr.base.magic!=DRAFT_MAGIC || hdr.base.len>SRC_MAX) continue;
+        if(best<0 || (int32_t)(hdr.base.seq-best_seq)>0) {
+            best=(int)f; best_seq=hdr.base.seq;
+        }
+    }
+    if(out_seq) *out_seq=best_seq;
+    return best;
+}
+
+size_t srcstore_draft_load(unsigned slot, char *out) {
+    out[0]=0;
+    const esp_partition_t *p=storage();
+    if(!p) return 0;
+    int first=draft_newest(p,NULL);
+    if(first<0) return 0;
+    for(unsigned attempt=0;attempt<FACES;attempt++) {
+        unsigned face=(unsigned)((first+attempt)%FACES);
+        draft_hdr_t hdr;
+        if(!draft_read(p,face,out,&hdr)) continue;
+        // A draft belongs to one slot. Another slot asking gets nothing, and
+        // the draft stays parked for the slot that owns it.
+        if(hdr.slot!=slot) { out[0]=0; return 0; }
+        ESP_LOGI("src","draft: %u bytes for slot %u from face %u seq %u",
+                 (unsigned)hdr.base.len,slot,face,(unsigned)hdr.base.seq);
+        return hdr.base.len;
+    }
+    out[0]=0;
+    return 0;
+}
+
+bool srcstore_draft_save(unsigned slot, const char *text, size_t len) {
+    if(len>SRC_MAX || slot>=SRC_SLOT_COUNT) return false;
+    const esp_partition_t *p=storage();
+    if(!p) return false;
+    uint32_t seq=0;
+    int current=draft_newest(p,&seq);
+    unsigned face=(current<0)?0:(unsigned)((current+1)%FACES);
+    size_t base=draft_face_at(p,face);
+    if(base==SIZE_MAX) return false;
+
+    // Written exactly like a slot's record: body first in aligned runs, header
+    // last, so a present magic means the bytes under it are present too.
+    draft_hdr_t hdr={.base={.magic=DRAFT_MAGIC,.len=(uint32_t)len,
+                            .crc=esp_crc32_le(0,(const uint8_t*)text,len),
+                            .seq=seq+1},
+                     .slot=slot};
+    size_t body=len & ~(size_t)3, tail=len-body;
+    esp_err_t err=esp_partition_erase_range(p,base,BLOCK);
+    if(err==ESP_OK && body)
+        err=esp_partition_write(p,base+sizeof(hdr),text,body);
+    if(err==ESP_OK && tail) {
+        uint8_t word[4]={0xff,0xff,0xff,0xff};
+        memcpy(word,text+body,tail);
+        err=esp_partition_write(p,base+sizeof(hdr)+body,word,sizeof(word));
+    }
+    if(err==ESP_OK) err=esp_partition_write(p,base,&hdr,sizeof(hdr));
+    if(err!=ESP_OK) {
+        ESP_LOGW("src","draft save failed: %s",esp_err_to_name(err));
+        return false;
+    }
+    ESP_LOGI("src","draft: parked %u bytes of slot %u in face %u seq %u",
+             (unsigned)len,slot,face,(unsigned)hdr.base.seq);
+    return true;
+}
+
+bool srcstore_draft_clear(void) {
+    const esp_partition_t *p=storage();
+    if(!p) return false;
+    // Erasing both faces is what makes "no draft" the answer; erasing only the
+    // newest would hand back the one before it.
+    for(unsigned f=0;f<FACES;f++) {
+        size_t base=draft_face_at(p,f);
+        if(base==SIZE_MAX) return false;
+        if(esp_partition_erase_range(p,base,BLOCK)!=ESP_OK) return false;
+    }
+    return true;
+}
+
+static bool draft_owner_of(unsigned *slot) {
+    const esp_partition_t *p=storage();
+    if(!p) return false;
+    int face=draft_newest(p,NULL);
+    if(face<0) return false;
+    size_t base=draft_face_at(p,(unsigned)face);
+    if(base==SIZE_MAX) return false;
+    draft_hdr_t hdr;
+    if(esp_partition_read(p,base,&hdr,sizeof(hdr))!=ESP_OK) return false;
+    if(hdr.base.magic!=DRAFT_MAGIC || hdr.slot>=SRC_SLOT_COUNT) return false;
+    if(slot) *slot=hdr.slot;
+    return true;
+}
+
+bool srcstore_draft_owner(unsigned *slot) { return draft_owner_of(slot); }

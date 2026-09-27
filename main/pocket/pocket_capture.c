@@ -1,5 +1,6 @@
 #include "pocket_capture.h"
 #include "pocket_api.h"
+#include "pocket_av.h"
 #include "sound.h"
 #include "board.h"
 #include "paint.h"
@@ -409,6 +410,9 @@ static JSValue js_open(JSContext *ctx, JSValueConst this_val,
                                  "cancelled before the recorder opened",false,
                                  POCKET_OUTCOME_NOT_APPLIED);
 
+    // S5 (docs/vm/app-suspend-design.md sec.8-2): the app's recording wins over
+    // the background music, which would otherwise hold the speaker.
+    pocket_av_background_stop("capture");
     // The exclusion section 9 asks for. sound.c refuses while anything is
     // queued or sounding, so a tone or a clip that is still playing means this
     // call is early -- BUSY and retryable, not a refusal of the feature.
@@ -461,6 +465,16 @@ void pocket_capture_reset(void) {
     // microphone, which nothing else in the firmware would give back.
     teardown();
     rec.request=0;
+    free(rec.data);
+    rec.data=NULL; rec.got=0; rec.want=0;
+}
+
+// Resident suspension: the microphone goes, the recorder with it (a 64 ms ring
+// cannot wait out a suspension). A read in flight was stopped by
+// pocket_api_cancel_all() before this; the recorder the app still holds
+// answers CLOSED from here on, the same as after close().
+void pocket_capture_suspend(void) {
+    teardown();
     free(rec.data);
     rec.data=NULL; rec.got=0; rec.want=0;
 }

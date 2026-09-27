@@ -47,6 +47,16 @@
 #include "quickjs.h"
 #include "libregexp.h"
 #include "dtoa.h"
+// F1-F3 (docs/vm/builtin-floor-plan.md): builtin names in flash, builtin
+// methods and the rarer intrinsics made on first use. Not build options: only
+// tools/vmtest/floor/gen_rom_atoms.sh turns them off, because the atom table
+// it writes has to describe everything an eager JS_NewContext creates.
+// Defined ahead of quickjs-vmprobe.h, whose F3 hooks test the third.
+#ifndef POCKET_VM_GEN_ROM_ATOMS
+#define POCKET_VM_ROM_ATOMS 1
+#define POCKET_VM_LAZY_BUILTINS 1
+#define POCKET_VM_LAZY_INTRINSICS 1
+#endif
 // VM_PROBE (docs/vm/quickjs-freertos-vm-spec.md sec.5): declares the handful of
 // accessors this file defines under #ifdef CONFIG_POCKET_VM_PROBE below.
 // Not an upstream file -- see its own header comment.
@@ -55,16 +65,11 @@
 // Not an upstream file -- see its own header comment. Harness measurement
 // uses js_vm_armed; production yield requests use the runtime's atomic bit.
 #include "quickjs-vm.h"
-// L2a: the segment stack JS_CallInternal pushes its frame + locals on when
-// CONFIG_POCKET_VM_SEGFRAMES is set (default y, main/Kconfig.projbuild;
-// tools/vmtest/build.sh passes it with -D). Not an upstream file -- see its
-// own header comment. With the config off this file is the upstream alloca
-// path, byte for byte on the call path, and JSRuntime keeps its old size.
+// L2a: the segment stack JS_CallInternal pushes its frame + locals on. Not an
+// upstream file -- see its own header comment.
 #include "quickjs-vmstack.h"
-#ifdef CONFIG_POCKET_VM_YIELD
 #include <stdatomic.h>
 _Static_assert(ATOMIC_CHAR_LOCK_FREE == 2, "yield requests must not take a lock");
-#endif
 // File-scope on purpose, not a JSRuntime member: the runtime is allocated
 // from the guest heap, and one more pointer in it moved the outcome of the
 // creeping-OOM corpus case (gc_threshold_device.js -- measured: the original
@@ -302,6 +307,24 @@ struct JSRuntime {
     uint32_t *atom_hash;
     JSAtomStruct **atom_array;
     int atom_free_index; /* 0 = none */
+#ifdef POCKET_VM_ROM_ATOMS
+    /* F1 (docs/vm/builtin-floor-plan.md sec.5.1): a flash atom has no
+       JSString to hand out, so turning one into a string value builds one.
+       Names that escape often (typeof's answers, class names) would build one
+       per escape; this small direct-mapped cache keeps the last string per
+       slot, holding one reference each. */
+    JSString *rom_cache[32];
+    uint16_t rom_cache_atom[32];
+#endif
+#ifdef POCKET_VM_LAZY_BUILTINS
+    /* F2 (docs/vm/builtin-floor-plan.md sec.5.2): function lists whose
+       entries are not in their object's shape yet, sorted by object. */
+    struct JSLazyList *lazy;
+    uint32_t lazy_count, lazy_size;
+    /* The lazy flag lives in a spare header bit; set once the runtime has
+       checked that bit really is spare on this compiler (JS_NewRuntime2). */
+    bool lazy_ok;
+#endif
 
     JSClassID js_class_id_alloc; /* counter for user defined classes */
     int class_count;    /* size of class_array */
@@ -315,6 +338,11 @@ struct JSRuntime {
     struct list_head gc_zero_ref_count_list;
     struct list_head tmp_obj_list; /* used during GC */
     JSGCPhaseEnum gc_phase : 8;
+    /* malloc_size (in 64 B units) after the last collection the cap
+       triggered that left the heap above the cap, or 0 (js_trigger_gc). In
+       the padding before the size_t: JSRuntime's size, and with it every
+       malloc_size the corpus pins, stays what it was. */
+    uint16_t gc_cap_floor;
     size_t malloc_gc_threshold;
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
     struct list_head string_list; /* list of JSString.link */
@@ -331,13 +359,15 @@ struct JSRuntime {
     bool in_build_stack_trace;
     /* true if inside JS_FreeRuntime */
     bool in_free;
-#ifdef CONFIG_POCKET_VM_YIELD
     _Atomic uint8_t vm_yield_req; /* fills the flags' alignment padding */
-#endif
+    /* PocketJS: bumped by every JS_ThrowOutOfMemory. The parser snapshots it
+       in js_parse_init so js_parse_error can tell that an allocation already
+       failed during this parse (see there); wrap-around is harmless, only
+       equality is tested. */
+    uint32_t oom_count;
 
     struct JSStackFrame *current_stack_frame;
 
-#ifdef CONFIG_POCKET_VM_YIELD
     /* L2c host-owned suspension. `top != NULL` is the only parked-state
        predicate; the floor values are duplicated before execution starts so
        the no-allocation yield path merely publishes pointers. */
@@ -355,6 +385,18 @@ struct JSRuntime {
     uint8_t vm_entry_block; /* native completion tails cannot park */
     JSValue vm_floor_this;
     JSValue vm_floor_new_target;
+#ifdef CONFIG_POCKET_VM_RELOC
+    /* L3a diagnostic (design D50 layer 3): keep the old segment blocks
+       allocated and poisoned after a move instead of freeing them, so that
+       tlsf cannot hand the address straight back out and overwrite the
+       poison with bytes that read as valid. A deliberate leak; the host
+       harness sets it, the firmware never does. */
+    bool vm_reloc_keep_old;
+    /* L3a negative control (design sec.5): deliberately skip one entry of the
+       fix-up, so the poisoning can be shown to CATCH a missed pointer rather
+       than merely to be present. A detector nothing ever trips reads exactly
+       like a detector that works. JS_VM_RELOC_FAULT_* in quickjs.h. */
+    uint8_t vm_reloc_fault;
 #endif
 
     JSInterruptHandler *interrupt_handler;
@@ -397,17 +439,11 @@ struct JSRuntime {
     int shape_hash_size;
     int shape_hash_count; /* number of hashed shapes */
     JSShape **shape_hash;
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     // L2a frame segments (quickjs-vmstack.h). A member, unlike js_vm_armed,
     // because it is real per-runtime state that must die with the runtime;
     // the layout concern noted at js_vm_armed does not apply to a build that
     // already moves every frame into the guest heap.
     JSVMStack vm_stack;
-#endif
-#ifdef CONFIG_POCKET_VM_CALLBENCH
-    bool vm_bench_recursive;
-    bool vm_bench_eager_inputs;
-#endif
     void *user_opaque;
     void *libc_opaque;
     JSRuntimeFinalizerState *finalizers;
@@ -425,7 +461,6 @@ struct JSClass {
 
 typedef struct JSStackFrame {
     struct JSStackFrame *prev_frame; /* NULL if first stack frame */
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     // L2b (design D2 sec.5.3-4): the JSContext the call was made from. Four
     // JS_Throw* sites in the dispatch loop create their error in the
     // CALLER's realm, which the callee's b->realm cannot recover; once a
@@ -433,7 +468,6 @@ typedef struct JSStackFrame {
     // place the value survives. Sits in the padding after prev_frame on the
     // target (offset 4-7), so JSStackFrame stays 48 bytes there.
     JSContext *caller_ctx;
-#endif
     JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
     JSValue *arg_buf; /* arguments */
     JSValue *var_buf; /* variables */
@@ -443,9 +477,7 @@ typedef struct JSStackFrame {
     uint16_t var_ref_count; /* number of var refs */
     uint16_t arg_count;
     bool is_strict_mode;
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     uint8_t l2_flags;  /* JS_SF_* (quickjs-vmstack.h); offset 37, was padding */
-#endif
     /* PocketJS (backport of quickjs-ng 7955cfd49e): JS_CORO_* -- which kind of
      * coroutine owns this frame, or JS_CORO_NONE. Upstream adds a
      * JSGCObjectHeader *cur_gc_obj here; that pointer would take this struct
@@ -457,9 +489,7 @@ typedef struct JSStackFrame {
     /* only used in generators. Current stack pointer value. NULL if
        the function is running. */
     JSValue *cur_sp;
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     uint32_t ret_shape; /* JS_RET_SHAPE (quickjs-vmstack.h); offset 44-47, was tail padding */
-#endif
 } JSStackFrame;
 
 /* JSStackFrame.coro_kind */
@@ -637,7 +667,7 @@ struct JSContext {
     JSValue eval_obj;
 
     JSValue global_obj; /* global object */
-    JSValue global_var_obj; /* contains the global let/const definitions */
+    JSValue global_var_obj; LAZY_CTX_FIELDS /* contains the global let/const definitions */
 
     double time_origin;
 
@@ -1000,7 +1030,6 @@ typedef struct JSAsyncFunctionData {
     JSGCObjectHeader header; /* must come first */
     JSValue resolving_funcs[2];
     bool is_active; /* true if the async function state is valid */
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     // L2b-async (design D33-2): the caller's operand stack pointer while
     // this function's first synchronous stretch runs as a flat frame in the
     // caller's C activation. A flat SEG frame keeps that in its JSVMLink;
@@ -1011,11 +1040,9 @@ typedef struct JSAsyncFunctionData {
     // bytes of padding before func_state's 8-byte-aligned JSValue, so the
     // struct does not grow (asserted below).
     JSValue *flat_caller_sp;
-#endif
     JSAsyncFunctionState func_state;
 } JSAsyncFunctionData;
 
-#ifdef CONFIG_POCKET_VM_FLATCALLS
 // Target (xtensa, 4-byte pointers, 8-byte JSValue): 16 header + 16 resolving
 // + 1 is_active, flat_caller_sp in the padding to 40, then func_state 64
 // (8 this_val + 4 argc + 1 throw_flag + pad, 48 frame) = 104 -- the same 104
@@ -1027,7 +1054,6 @@ typedef struct JSAsyncFunctionData {
 #if UINTPTR_MAX == UINT32_MAX
 _Static_assert(sizeof(JSAsyncFunctionData) == 104,
                "flat_caller_sp must sit in JSAsyncFunctionData's padding on the target");
-#endif
 #endif
 
 typedef struct JSReqModuleEntry {
@@ -1264,6 +1290,40 @@ struct JSObject {
     } u;
     /* byte sizes: 40/48/72 */
 };
+
+#ifdef POCKET_VM_LAZY_BUILTINS
+/* F2 (docs/vm/builtin-floor-plan.md sec.5.2): an object whose function
+   lists are not (all) in its shape yet. The entries stay in the flash lists
+   and a lookup that misses the shape searches them (js_lazy_touch), so the
+   heap only ever holds the entries a program touched.
+
+   The flag is the low bit of JSGCObjectHeader.dummy0: in the JSObject view
+   that byte is __gc_mark:7 + is_prototype:1, and dummy0 sits above the
+   gc_obj_type:4 / mark:1 bits, so its low bit is unused by both views --
+   JS_NewRuntime2 checks that on the compiler it was built with before
+   enabling any of this (rt->lazy_ok). */
+static inline bool js_obj_lazy(const JSObject *p)
+{
+    return p->header.dummy0 & 1;
+}
+
+static inline void js_obj_set_lazy(JSObject *p, bool on)
+{
+    p->header.dummy0 = (p->header.dummy0 & ~1u) | (on ? 1 : 0);
+}
+
+typedef struct JSLazyList {
+    JSObject *obj;
+    JSContext *realm;                /* the context that registered it */
+    const JSCFunctionListEntry *tab; /* in flash */
+    uint16_t len;
+    /* How many of the object's own, non-list properties preceded this list
+       when it was registered: where its entries go when the object is fully
+       materialized, so property order stays the definition order. */
+    uint16_t pos;
+    uint32_t done[2];                /* entry materialized, or deleted */
+} JSLazyList;
+#endif
 
 typedef struct JSCallSiteData {
     JSValue filename;
@@ -1600,7 +1660,7 @@ static JSValue js_instantiate_prototype(JSContext *ctx, JSObject *p, JSAtom atom
 static JSValue js_module_ns_autoinit(JSContext *ctx, JSObject *p, JSAtom atom,
                                      void *opaque);
 static JSValue JS_InstantiateFunctionListItem2(JSContext *ctx, JSObject *p,
-                                               JSAtom atom, void *opaque);
+                                               JSAtom atom, void *opaque); LAZY_CLASS_DECLS
 static JSValue JS_NewObjectProtoList(JSContext *ctx, JSValueConst proto,
                                      const JSCFunctionListEntry *fields, int n_fields);
 
@@ -1734,7 +1794,18 @@ JSValue JS_DupValueRT(JSRuntime *rt, JSValueConst v)
  * That happens only within 1/32 of the limit, where the app was already an
  * allocation or two from OOM. With no limit, or one far above the heap (the
  * host profile's 64 MiB), the comparison is upstream's. JS_SetGCThreshold(-1)
- * no longer disables collection under a limit; nothing here uses it. */
+ * no longer disables collection under a limit; nothing here uses it.
+ *
+ * ...which turned out not to be rare: an app that keeps a live heap just
+ * under the limit (apps/stress LV3, a cache grown to fit) collected 3.6
+ * times a frame, 70% of its JS time (host callgrind, device layout,
+ * docs/vm/gc-cap-backoff.md). A collection that leaves the heap above the
+ * cap found nothing it could free; the next can only free what the heap has
+ * grown by since. So js_trigger_gc does not let the cap collect again until
+ * malloc_size is limit >> GC_CAP_GROWTH_SHIFT above where the last such
+ * collection left it: garbage that would need collecting is growth, however
+ * few or many objects it is made of. Below the cap nothing changes. */
+#define GC_CAP_GROWTH_SHIFT 5
 static size_t js_gc_effective_threshold(JSRuntime *rt)
 {
     size_t threshold = rt->malloc_gc_threshold;
@@ -1753,8 +1824,25 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
 #ifdef FORCE_GC_AT_MALLOC
     force_gc = true;
 #else
-    force_gc = ((rt->malloc_state.malloc_size + size) >
-                js_gc_effective_threshold(rt));
+    size_t threshold = js_gc_effective_threshold(rt);
+    force_gc = ((rt->malloc_state.malloc_size + size) > threshold);
+    /* Only the cap backs off (see above): a crossing of the ordinary
+       threshold collects as it always did. */
+    if (force_gc && threshold < rt->malloc_gc_threshold && rt->gc_cap_floor) {
+        /* The growth allowed is also at most half of what the floor left
+           before the limit, so a floor in the last bytes collects again soon. */
+        size_t floor = (size_t)rt->gc_cap_floor << 6;
+        size_t limit = rt->malloc_state.malloc_limit;
+        size_t room = limit > floor ? (limit - floor) >> 1 : 0;
+        size_t budget = limit >> GC_CAP_GROWTH_SHIFT;
+        if (room < budget)
+            budget = room;
+        /* A heap below the floor has freed since (refcount): the floor says
+           nothing about it any more, and it collects as before. */
+        if (rt->malloc_state.malloc_size >= floor &&
+            rt->malloc_state.malloc_size < floor + budget)
+            force_gc = false;
+    }
 #endif
     if (force_gc) {
 #ifdef ENABLE_DUMPS // JS_DUMP_GC
@@ -1765,6 +1853,12 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
         JS_RunGC(rt);
         rt->malloc_gc_threshold = rt->malloc_state.malloc_size +
                                   (rt->malloc_state.malloc_size >> 1);
+        /* Still above the cap: nothing more to free until the heap grows.
+           A heap past 4 MiB (64 B units in 16 bits) keeps upstream's rule. */
+        size_t units = rt->malloc_state.malloc_size >> 6;
+        rt->gc_cap_floor = rt->malloc_state.malloc_size + size >
+                           js_gc_effective_threshold(rt) && units <= 0xffff ?
+                           (uint16_t)units : 0;
     }
 }
 
@@ -1778,7 +1872,7 @@ static size_t js_malloc_usable_size_unknown(const void *ptr)
  * js_malloc_rt (JS_NewRuntime2's "Inline what js_malloc_rt does" comment) and
  * its own usable_size counts toward malloc_size, so widening it would move
  * the byte at which every malloc_limit-driven test in tools/vmtest/corpus
- * trips -- measured: adding these three fields to JSMallocState alone made
+ * trips -- measured: adding canary fields to JSMallocState alone made
  * gc_threshold_device.js (which deliberately runs a cyclic-garbage loop to
  * the last byte of the device's 160 KiB limit) hit the limit one allocation
  * earlier, inside the uncaught print() after its try/catch instead of inside
@@ -1801,7 +1895,8 @@ static JSOOMCanary g_oom_canary;
  * caller's malloc_size at the moment of rejection, passed in rather than
  * read from a JSMallocState* so this never needs a pointer into the struct
  * whose size this exists specifically to leave alone. */
-static void js_oom_canary_record(size_t requested, size_t used_before)
+static void js_oom_canary_record(size_t requested, size_t used_before,
+                                 bool quota)
 {
     if (g_oom_canary.count == 0) {
         g_oom_canary.first_req = requested;
@@ -1809,6 +1904,10 @@ static void js_oom_canary_record(size_t requested, size_t used_before)
     }
     if (g_oom_canary.count < UINT32_MAX)
         g_oom_canary.count++;
+    uint32_t *reason_count = quota ? &g_oom_canary.quota_count :
+                                     &g_oom_canary.allocator_count;
+    if (*reason_count < UINT32_MAX)
+        ++*reason_count;
 }
 
 void *js_calloc_rt(JSRuntime *rt, size_t count, size_t size)
@@ -1828,14 +1927,16 @@ void *js_calloc_rt(JSRuntime *rt, size_t count, size_t size)
 
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
-    if (unlikely(s->malloc_size + (count * size) > s->malloc_limit - 1)) {
-        js_oom_canary_record(count * size, s->malloc_size);
+    if (unlikely(s->malloc_limit &&
+                 (s->malloc_size >= s->malloc_limit ||
+                  count * size > s->malloc_limit - 1 - s->malloc_size))) {
+        js_oom_canary_record(count * size, s->malloc_size, true);
         return NULL;
     }
 
     ptr = rt->mf.js_calloc(s->opaque, count, size);
     if (!ptr) {
-        js_oom_canary_record(count * size, s->malloc_size);
+        js_oom_canary_record(count * size, s->malloc_size, false);
         return NULL;
     }
 
@@ -1856,14 +1957,16 @@ void *js_malloc_rt(JSRuntime *rt, size_t size)
 
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
-    if (unlikely(s->malloc_size + size > s->malloc_limit - 1)) {
-        js_oom_canary_record(size, s->malloc_size);
+    if (unlikely(s->malloc_limit &&
+                 (s->malloc_size >= s->malloc_limit ||
+                  size > s->malloc_limit - 1 - s->malloc_size))) {
+        js_oom_canary_record(size, s->malloc_size, true);
         return NULL;
     }
 
     ptr = rt->mf.js_malloc(s->opaque, size);
     if (!ptr) {
-        js_oom_canary_record(size, s->malloc_size);
+        js_oom_canary_record(size, s->malloc_size, false);
         return NULL;
     }
 
@@ -1909,14 +2012,17 @@ void *js_realloc_rt(JSRuntime *rt, void *ptr, size_t size)
     old_size = rt->mf.js_malloc_usable_size(ptr);
     s = &rt->malloc_state;
     /* When malloc_limit is 0 (unlimited), malloc_limit - 1 will be SIZE_MAX. */
-    if (s->malloc_size + size - old_size > s->malloc_limit - 1) {
-        js_oom_canary_record(size, s->malloc_size);
+    size_t used_without_old = s->malloc_size - old_size;
+    if (s->malloc_limit &&
+        (used_without_old >= s->malloc_limit ||
+         size > s->malloc_limit - 1 - used_without_old)) {
+        js_oom_canary_record(size, s->malloc_size, true);
         return NULL;
     }
 
     ptr = rt->mf.js_realloc(s->opaque, ptr, size);
     if (!ptr) {
-        js_oom_canary_record(size, s->malloc_size);
+        js_oom_canary_record(size, s->malloc_size, false);
         return NULL;
     }
 
@@ -2199,10 +2305,29 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     if (!rt) {
         return NULL;
     }
-    rt->mf = *mf;
-#ifdef CONFIG_POCKET_VM_YIELD
-    atomic_init(&rt->vm_yield_req, 0);
+#ifdef POCKET_VM_LAZY_BUILTINS
+    {
+        /* The lazy flag borrows a header bit that no field names in the
+           JSObject view. Bitfield layout is the compiler's choice, so prove
+           the bit is independent of the bits either view uses before
+           trusting it; if not, every list stays eager. */
+        JSObject o;
+        memset(&o, 0, sizeof(o));
+        o.header.gc_obj_type = JS_GC_OBJ_TYPE_JS_OBJECT;
+        js_obj_set_lazy(&o, true);
+        bool ok = o.header.gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT &&
+                  !o.header.mark && !o.is_prototype && !o.extensible;
+        o.is_prototype = 1;
+        o.header.mark = 1;
+        ok = ok && js_obj_lazy(&o);
+        js_obj_set_lazy(&o, false);
+        ok = ok && o.is_prototype && o.header.mark &&
+             o.header.gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT;
+        rt->lazy_ok = ok;
+    }
 #endif
+    rt->mf = *mf;
+    atomic_init(&rt->vm_yield_req, 0);
     if (!rt->mf.js_malloc_usable_size) {
         /* use dummy function if none provided */
         rt->mf.js_malloc_usable_size = js_malloc_usable_size_unknown;
@@ -2212,11 +2337,9 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     ms.malloc_size += rt->mf.js_malloc_usable_size(rt) + MALLOC_OVERHEAD;
     rt->malloc_state = ms;
     rt->malloc_gc_threshold = 256 * 1024;
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     // No segment yet: the first JS call pushes the bottom one, so a runtime
     // that never runs bytecode never pays for it.
     js_vm_stack_init(&rt->vm_stack);
-#endif
 
     init_list_head(&rt->context_list);
     init_list_head(&rt->gc_obj_list);
@@ -2261,10 +2384,8 @@ JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
     JS_UpdateStackTop(rt);
 
     rt->current_exception = JS_UNINITIALIZED;
-#ifdef CONFIG_POCKET_VM_YIELD
     rt->vm_floor_this = JS_UNDEFINED;
     rt->vm_floor_new_target = JS_UNDEFINED;
-#endif
 
     return rt;
 fail:
@@ -2456,14 +2577,12 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
     JSValue res;
     int i, ret;
 
-#ifdef CONFIG_POCKET_VM_YIELD
     /* Reject before removing the entry: a parked chain owns the next turn. */
     if (rt->vm_susp.top) {
         *pctx = rt->vm_susp.floor->caller_ctx;
         JS_ThrowInternalError(*pctx, "VM suspended");
         return -1;
     }
-#endif
 
     if (list_empty(&rt->job_list)) {
         *pctx = NULL;
@@ -2481,13 +2600,11 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
 #endif
     ctx = e->ctx;
     res = e->job_func(e->ctx, e->argc, vc(e->argv));
-#ifdef CONFIG_POCKET_VM_YIELD
     if (rt->vm_susp.top && rt->vm_susp.origin == JS_VM_ORIGIN_JOB_HELD) {
         rt->vm_susp.job = e;
         *pctx = ctx;
         return 2;
     }
-#endif
     for (i = 0; i < e->argc; i++) {
         JS_FreeValue(ctx, e->argv[i]);
     }
@@ -2595,9 +2712,7 @@ void JS_FreeRuntime(JSRuntime *rt)
     int i;
 
     rt->in_free = true;
-#ifdef CONFIG_POCKET_VM_YIELD
     JS_VMDiscard(rt);
-#endif
     // The harness state owns atoms; release them before the atom table goes.
     js_vm_arm(rt, 0);
     JS_FreeValueRT(rt, rt->current_exception);
@@ -2620,12 +2735,10 @@ void JS_FreeRuntime(JSRuntime *rt)
 
     JS_RunGC(rt);
 
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     // After the GC, before the leak accounting: the segments are js_malloc_rt
     // blocks and would otherwise be counted as leaked by the malloc_size
     // check at the end. No frame can be live here (asserted inside).
     js_vm_stack_free(rt, &rt->vm_stack);
-#endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
     /* leaking objects */
@@ -2679,6 +2792,17 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
     js_free_rt(rt, rt->class_array);
 
+#ifdef POCKET_VM_ROM_ATOMS
+    /* Before the atoms: a cached string may have become a symbol's own
+       struct (JS_NewSymbolInternal reuses atom_type 0 strings), and dropping
+       the cache's reference is what frees it through the atom path. */
+    for (i = 0; i < 32; i++) {
+        if (rt->rom_cache[i]) {
+            js_free_string(rt, rt->rom_cache[i]);
+            rt->rom_cache[i] = NULL;
+        }
+    }
+#endif
 #ifdef ENABLE_DUMPS // JS_DUMP_ATOM_LEAKS
     /* only the atoms defined in JS_InitAtoms() should be left */
     if (check_dump_flag(rt, JS_DUMP_ATOM_LEAKS)) {
@@ -2686,7 +2810,7 @@ void JS_FreeRuntime(JSRuntime *rt)
 
         for (i = 0; i < rt->atom_size; i++) {
             JSAtomStruct *p = rt->atom_array[i];
-            if (!atom_is_free(p) /* && p->str*/) {
+            if (p && !atom_is_free(p) /* && p->str*/) {
                 if (i >= JS_ATOM_END || p->header.ref_count != 1) {
                     if (!header_done) {
                         header_done = true;
@@ -2738,10 +2862,16 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
 #endif
 
-    /* free the atoms */
+#ifdef POCKET_VM_LAZY_BUILTINS
+    /* Every object is gone by now, and free_object took its lists along. */
+    assert(rt->lazy_count == 0);
+    js_free_rt(rt, rt->lazy);
+    rt->lazy = NULL;
+#endif
+    /* free the atoms (a NULL slot is a flash atom: nothing to free) */
     for (i = 0; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
 #ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
             list_del(&p->link);
 #endif
@@ -2809,10 +2939,60 @@ void JS_FreeRuntime(JSRuntime *rt)
     }
 }
 
+/* PocketJS: context setup ignores most of its own failures. The intrinsic
+ * adders define hundreds of properties through JS_SetPropertyFunctionList,
+ * JS_DefinePropertyValue*, JS_NewGlobalCConstructor2 and friends, and most
+ * of those results are dropped (JS_AddIntrinsicBasicObjects' error
+ * prototypes, every JS_DefineAutoInitProperty, the DEF_CGETSET branch of
+ * JS_InstantiateFunctionListItem, ...). An allocation that fails in one of
+ * them leaves the context with a hole -- measured: vmrun --fail-alloc 500
+ * on closures.js ran the whole program and then threw "not a function" at
+ * .join(), because Array.prototype.join was never defined; 228 other points
+ * of the same sweep ran to completion with some builtin silently missing.
+ * On the device a context is built per app start, so a short heap at that
+ * moment would start the app on a broken standard library instead of
+ * refusing to start it.
+ *
+ * Checking each call would be several hundred edits to upstream code and
+ * would still miss the next one added. Every rejected allocation already
+ * passes through js_oom_canary_record (both the malloc_limit check and a NULL
+ * from the allocator), so the count it keeps answers "did anything fail
+ * while this context was built" once, at the end. Read, never cleared, so
+ * the per-turn JS_TakeOOMCanary discipline of the host is untouched; the
+ * count saturates at UINT32_MAX, which would hide a failure only after four
+ * billion untaken rejections. */
+static uint32_t js_context_setup_mark(void)
+{
+    return g_oom_canary.count;
+}
+
+/* PocketJS: true if an allocation was rejected since `mark`. */
+static bool js_context_setup_failed(uint32_t mark)
+{
+    return g_oom_canary.count != mark;
+}
+
+/* PocketJS: tears down a context whose setup failed, checked or not. The
+ * exception the failing call threw (an InternalError created from this very
+ * context's prototypes) is dropped first rather than handed to the caller:
+ * left pending it would keep the dead realm alive past JS_FreeContext, and
+ * JS_NewContext's contract is NULL, not NULL plus an exception. Only dropped
+ * if none was pending when setup began, so a caller's own pending exception
+ * is never eaten. */
+static void js_context_setup_abort(JSContext *ctx, bool had_exception)
+{
+    if (!had_exception)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeContext(ctx);
+}
+
 JSContext *JS_NewContextRaw(JSRuntime *rt)
 {
     JSContext *ctx;
     int i;
+    /* PocketJS: see js_context_setup_mark */
+    uint32_t setup_mark = js_context_setup_mark();
+    bool had_exception = !JS_IsUninitialized(rt->current_exception);
 
     ctx = js_mallocz_rt(rt, sizeof(JSContext));
     if (!ctx) {
@@ -2824,6 +3004,11 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->class_proto = js_malloc_rt(rt, sizeof(ctx->class_proto[0]) *
                                     rt->class_count);
     if (!ctx->class_proto) {
+        /* PocketJS: upstream freed ctx while its header was still linked
+         * into rt->gc_obj_list, leaving a dangling node for the next GC or
+         * JS_FreeRuntime to walk. Unreached before only because nothing
+         * then freed the runtime after a failed JS_NewContext. */
+        remove_gc_object(&ctx->header);
         js_free_rt(rt, ctx);
         return NULL;
     }
@@ -2832,7 +3017,7 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     for (i = 0; i < rt->class_count; i++) {
         ctx->class_proto[i] = JS_NULL;
     }
-    ctx->array_ctor = JS_NULL;
+    ctx->array_ctor = JS_NULL; LAZY_CTX_INIT
     ctx->iterator_ctor = JS_NULL;
     ctx->iterator_ctor_getset = JS_NULL;
     ctx->regexp_ctor = JS_NULL;
@@ -2843,8 +3028,9 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->error_stack_trace_limit = js_int32(10);
     init_list_head(&ctx->loaded_modules);
 
-    if (JS_AddIntrinsicBasicObjects(ctx)) {
-        JS_FreeContext(ctx);
+    if (JS_AddIntrinsicBasicObjects(ctx) ||
+        js_context_setup_failed(setup_mark)) {
+        js_context_setup_abort(ctx, had_exception);
         return NULL;
     }
     return ctx;
@@ -2853,6 +3039,9 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
 JSContext *JS_NewContext(JSRuntime *rt)
 {
     JSContext *ctx;
+    /* PocketJS: see js_context_setup_mark */
+    uint32_t setup_mark = js_context_setup_mark();
+    bool had_exception = !JS_IsUninitialized(rt->current_exception);
 
     ctx = JS_NewContextRaw(rt);
     if (!ctx) {
@@ -2870,8 +3059,9 @@ JSContext *JS_NewContext(JSRuntime *rt)
             JS_AddIntrinsicPromise(ctx) ||
             JS_AddIntrinsicWeakRef(ctx) ||
             JS_AddIntrinsicDOMException(ctx) ||
-            JS_AddPerformance(ctx)) {
-        JS_FreeContext(ctx);
+            JS_AddPerformance(ctx) ||
+            js_context_setup_failed(setup_mark)) {
+        js_context_setup_abort(ctx, had_exception);
         return NULL;
     }
 
@@ -2907,7 +3097,7 @@ void JS_SetClassProto(JSContext *ctx, JSClassID class_id, JSValue obj)
 JSValue JS_GetClassProto(JSContext *ctx, JSClassID class_id)
 {
     assert(class_id < ctx->rt->class_count);
-    return js_dup(ctx->class_proto[class_id]);
+    if (LAZY_CLASS_MISSING(ctx, class_id)) { return JS_EXCEPTION; } return js_dup(ctx->class_proto[class_id]);
 }
 
 JSValue JS_GetFunctionProto(JSContext *ctx)
@@ -2939,7 +3129,6 @@ JSContext *JS_DupContext(JSContext *ctx)
     return ctx;
 }
 
-#ifdef CONFIG_POCKET_VM_YIELD
 static JSValue js_vm_resume_owner(JSContext *ctx);
 
 static void js_vm_mark_suspended(JSRuntime *rt, JSContext *ctx,
@@ -2976,7 +3165,6 @@ static void js_vm_mark_suspended(JSRuntime *rt, JSContext *ctx,
             break;
     }
 }
-#endif
 
 /* used by the GC */
 static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
@@ -2992,7 +3180,7 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
         js_mark_module_def(rt, m, mark_func);
     }
 
-    JS_MarkValue(rt, ctx->global_obj, mark_func);
+    JS_MarkValue(rt, ctx->global_obj, mark_func); LAZY_CTX_MARK
     JS_MarkValue(rt, ctx->global_var_obj, mark_func);
 
     JS_MarkValue(rt, ctx->throw_type_error, mark_func);
@@ -3037,11 +3225,9 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     if (ctx->regexp_result_shape) {
         mark_func(rt, &ctx->regexp_result_shape->header);
     }
-#ifdef CONFIG_POCKET_VM_YIELD
     /* A parked SEG chain is deliberately detached from current_stack_frame;
        its values remain context roots until its host owner resumes it. */
     js_vm_mark_suspended(rt, ctx, mark_func);
-#endif
 }
 
 void JS_FreeContext(JSContext *ctx)
@@ -3087,7 +3273,7 @@ void JS_FreeContext(JSContext *ctx)
 
     js_free_modules(ctx, JS_FREE_MODULE_ALL);
 
-    JS_FreeValue(ctx, ctx->global_obj);
+    JS_FreeValue(ctx, ctx->global_obj); LAZY_CTX_FREE
     JS_FreeValue(ctx, ctx->global_var_obj);
 
     JS_FreeValue(ctx, ctx->throw_type_error);
@@ -3141,7 +3327,6 @@ static void update_stack_limit(JSRuntime *rt)
         rt->stack_limit = rt->stack_top - rt->stack_size;
     }
 #endif
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     // D10: JS_SetMaxStackSize is also the byte budget of the frame segments
     // (docs/vm/vm-L2-design.md sec.8 D10). Same knob, same unit, two resources
     // for as long as JS_CallInternal still recurses in C: the C-stack test
@@ -3155,7 +3340,6 @@ static void update_stack_limit(JSRuntime *rt)
     // the bound on the moved half, and is the half that will remain once
     // L2b removes the C recursion and the C-stack test stops measuring depth.
     rt->vm_stack.budget = rt->stack_size;
-#endif
 }
 
 void JS_SetMaxStackSize(JSRuntime *rt, size_t stack_size)
@@ -3185,10 +3369,117 @@ static inline bool is_strict_mode(JSContext *ctx)
 /* return the max count from the hash size */
 #define JS_ATOM_COUNT_RESIZE(n) ((n) * 2)
 
+#ifdef POCKET_VM_ROM_ATOMS
+/* F1: builtin names live in flash as these records rather than as heap
+   JSStrings (docs/vm/builtin-floor-plan.md sec.5.1). No ref_count, hash_next
+   or weak-ref field: nothing ever writes to one, which is the whole point --
+   an atom below JS_ROM_ATOM_END is immortal, so there is nothing to count.
+   Numbering: [1, JS_ATOM_END) is the predefined list as always (its ROM
+   entries have a NULL atom_array slot; symbols, the private brand and the
+   empty string stay heap JSStrings), [JS_ATOM_END, JS_ROM_ATOM_END) are the
+   names the builtin function lists create, and dynamic atoms start above. */
+typedef struct JSRomAtom {
+    uint32_t hash_flags; /* the runtime's 28-bit hash, plus JS_ROM_NUMERIC */
+    uint16_t len;        /* JS_ROM_NOT: this index is not a flash atom */
+    uint16_t off;        /* into js_rom_chars; the text is NUL-terminated */
+} JSRomAtom;
+#define JS_ROM_NOT     0xffff
+/* JS_AtomIsNumericIndex1 is true for it, i.e. "Infinity": baked by the
+   generator so the typed-array get/set paths need not build a string for
+   every method name they are asked about. */
+#define JS_ROM_NUMERIC (1u << 28)
+#include "quickjs-rom-atoms-defs.h"
+#include "quickjs-rom-atoms.h"
+/* The table numbers the predefined atoms by their enum value, so a change to
+   quickjs-atom.h without regenerating would give every later name the wrong
+   text. Stale extras are harmless; a stale predefined list is not. */
+_Static_assert(JS_ROM_PREDEF_END == JS_ATOM_END,
+               "quickjs-rom-atoms.h is stale: run tools/vmtest/floor/gen_rom_atoms.sh");
+#define JS_ATOM_CONST_END JS_ROM_ATOM_END
+#else
+#define JS_ATOM_CONST_END JS_ATOM_END
+#endif
+
 static inline bool __JS_AtomIsConst(JSAtom v)
 {
-    return (int32_t)v < JS_ATOM_END;
+    return (int32_t)v < (int32_t)JS_ATOM_CONST_END;
 }
+
+#ifdef POCKET_VM_ROM_ATOMS
+/* The flash record for a non-tagged atom, or NULL if it is a heap atom. */
+static inline const JSRomAtom *js_rom_atom(JSAtom a)
+{
+    if (a < JS_ROM_ATOM_END && js_rom_atoms[a].len != JS_ROM_NOT)
+        return &js_rom_atoms[a];
+    return NULL;
+}
+
+static inline const char *js_rom_text(const JSRomAtom *r)
+{
+    return js_rom_chars + r->off;
+}
+
+/* Name -> flash atom, on the runtime's own hash (JS_ATOM_HASH_MASK bits).
+   `s16` is non-NULL for a 16-bit string: flash text is 8-bit, so the two
+   are compared by code unit, the way js_string_memcmp compares mixed
+   widths. Returns 0 if the name is not in the table. */
+static JSAtom js_rom_find(const uint8_t *s8, const uint16_t *s16, uint32_t len,
+                          uint32_t h)
+{
+    uint32_t mask = (1u << JS_ROM_HASH_BITS) - 1, j = h & mask;
+    for (;;) {
+        uint32_t a = js_rom_hash[j];
+        if (a == 0)
+            return 0;
+        const JSRomAtom *r = &js_rom_atoms[a];
+        if ((r->hash_flags & JS_ATOM_HASH_MASK) == h && r->len == len) {
+            const uint8_t *t = (const uint8_t *)js_rom_text(r);
+            if (s8) {
+                if (!memcmp(t, s8, len))
+                    return a;
+            } else {
+                uint32_t k = 0;
+                while (k < len && s16[k] == t[k])
+                    k++;
+                if (k == len)
+                    return a;
+            }
+        }
+        j = (j + 1) & mask;
+    }
+}
+
+/* A fresh, ordinary (non-atom) heap string with a flash atom's text. Its
+   atom_type is 0, so handing it to __JS_NewAtom finds the flash atom again
+   by content rather than mistaking the string for an atom of its own. */
+static JSString *js_rom_new_string(JSRuntime *rt, const JSRomAtom *r)
+{
+    JSString *p = js_alloc_string_rt(rt, r->len, 0);
+    if (p) {
+        memcpy(str8(p), js_rom_text(r), r->len);
+        str8(p)[r->len] = '\0';
+    }
+    return p;
+}
+
+/* The string value of a flash atom, through rt->rom_cache. */
+static JSValue js_rom_atom_value(JSContext *ctx, JSAtom atom, const JSRomAtom *r)
+{
+    JSRuntime *rt = ctx->rt;
+    unsigned k = atom & 31;
+    JSString *p = rt->rom_cache[k];
+    if (p && rt->rom_cache_atom[k] == atom)
+        return js_dup(JS_MKPTR(JS_TAG_STRING, p));
+    p = js_rom_new_string(rt, r);
+    if (!p)
+        return JS_ThrowOutOfMemory(ctx);
+    if (rt->rom_cache[k])
+        js_free_string(rt, rt->rom_cache[k]);
+    rt->rom_cache[k] = p;
+    rt->rom_cache_atom[k] = (uint16_t)atom;
+    return js_dup(JS_MKPTR(JS_TAG_STRING, p));
+}
+#endif
 
 static inline bool __JS_AtomIsTaggedInt(JSAtom v)
 {
@@ -3350,7 +3641,7 @@ static __maybe_unused void JS_DumpAtoms(JSRuntime *rt)
     printf("JSAtom table: {\n");
     for (i = 0; i < rt->atom_size; i++) {
         p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
             printf("  %d: { %d %08x ", i, p->atom_type, p->hash);
             if (!(p->len == 0 && p->is_wide_char != 0)) {
                 JS_DumpString(rt, p);
@@ -3392,6 +3683,76 @@ static int JS_ResizeAtomHash(JSRuntime *rt, int new_hash_size)
     return 0;
 }
 
+#ifdef POCKET_VM_ROM_ATOMS
+/* F1: size atom_array to cover the flash range before anything is placed.
+   [1, JS_ROM_ATOM_END) are fixed numbers -- a flash atom keeps a NULL slot,
+   which every walk of the array skips -- and the free list starts past them,
+   so a dynamic atom can never take a flash atom's number. The 256 spare
+   slots are for the app's own atoms; the array grows as it always has.
+   Slot 0 is the JS_ATOM_NULL entry __JS_NewAtom makes on its first growth. */
+static int js_rom_atoms_reserve(JSRuntime *rt)
+{
+    uint32_t size = JS_ROM_ATOM_END + 256, i;
+    JSAtomStruct **arr = js_malloc_rt(rt, sizeof(*arr) * size);
+    JSAtomStruct *p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+    if (!arr || !p) {
+        js_free_rt(rt, arr);
+        js_free_rt(rt, p);
+        return -1;
+    }
+    p->header.ref_count = 1;  /* not refcounted */
+    p->atom_type = JS_ATOM_TYPE_SYMBOL;
+#ifdef ENABLE_DUMPS // JS_DUMP_LEAKS
+    list_add_tail(&p->link, &rt->string_list);
+#endif
+    arr[0] = p;
+    for (i = 1; i < JS_ROM_ATOM_END; i++)
+        arr[i] = NULL;
+    for (i = JS_ROM_ATOM_END; i < size; i++)
+        arr[i] = atom_set_free(i + 1 < size ? i + 1 : 0);
+    rt->atom_array = arr;
+    rt->atom_size = size;
+    rt->atom_free_index = JS_ROM_ATOM_END;
+    rt->atom_count = 1;
+    return 0;
+}
+
+/* A predefined atom that stays on the heap (symbols, the private brand, the
+   empty string), put at its fixed number the way __JS_NewAtom would have
+   put it at the next free one: same hash, same chain, same fields. */
+static int js_rom_atom_place(JSRuntime *rt, uint32_t i, const char *s, int len,
+                             int atom_type)
+{
+    JSString *p = js_alloc_string_rt(rt, len, 0);
+    uint32_t h;
+    if (!p) {
+        return -1;
+    }
+    memcpy(str8(p), s, len);
+    str8(p)[len] = '\0';
+    if (atom_type == JS_ATOM_TYPE_STRING) {
+        h = hash_string8(str8(p), len, JS_ATOM_TYPE_STRING) & JS_ATOM_HASH_MASK;
+    } else if (atom_type == JS_ATOM_TYPE_SYMBOL) {
+        h = JS_ATOM_HASH_SYMBOL;
+    } else {
+        h = JS_ATOM_HASH_PRIVATE;
+        atom_type = JS_ATOM_TYPE_SYMBOL;
+    }
+    rt->atom_array[i] = p;
+    p->hash = h;
+    p->hash_next = i;   /* atom_index */
+    p->atom_type = atom_type;
+    p->first_weak_ref = NULL;
+    rt->atom_count++;
+    if (atom_type != JS_ATOM_TYPE_SYMBOL) {
+        uint32_t h1 = h & (rt->atom_hash_size - 1);
+        p->hash_next = rt->atom_hash[h1];
+        rt->atom_hash[h1] = i;
+    }
+    return 0;
+}
+#endif
+
 static int JS_InitAtoms(JSRuntime *rt)
 {
     int i, len, atom_type;
@@ -3402,10 +3763,15 @@ static int JS_InitAtoms(JSRuntime *rt)
     rt->atom_count = 0;
     rt->atom_size = 0;
     rt->atom_free_index = 0;
-    if (JS_ResizeAtomHash(rt, 512)) {   /* there are at least 504 predefined atoms */
+    if (JS_ResizeAtomHash(rt, JS_ATOM_CONST_END == JS_ATOM_END ? 512 : 64)) {   /* at least 504 predefined atoms; with F1 only ~16 are hashed here (F3a, plan sec.16) */
         return -1;
     }
 
+#ifdef POCKET_VM_ROM_ATOMS
+    if (js_rom_atoms_reserve(rt)) {
+        return -1;
+    }
+#endif
     p = js_atom_init;
     for (i = 1; i < JS_ATOM_END; i++) {
         if (i == JS_ATOM_Private_brand) {
@@ -3416,9 +3782,17 @@ static int JS_InitAtoms(JSRuntime *rt)
             atom_type = JS_ATOM_TYPE_STRING;
         }
         len = strlen(p);
+#ifdef POCKET_VM_ROM_ATOMS
+        /* A flash atom needs nothing on the heap; the others are placed at
+           their predefined number (the free list starts past the table). */
+        if (!js_rom_atom(i) && js_rom_atom_place(rt, i, p, len, atom_type)) {
+            return -1;
+        }
+#else
         if (__JS_NewAtomInit(rt, p, len, atom_type) == JS_ATOM_NULL) {
             return -1;
         }
+#endif
         p = p + len + 1;
     }
     return 0;
@@ -3457,6 +3831,11 @@ static JSAtomKindEnum JS_AtomGetKind(JSContext *ctx, JSAtom v)
     if (__JS_AtomIsTaggedInt(v)) {
         return JS_ATOM_KIND_STRING;
     }
+#ifdef POCKET_VM_ROM_ATOMS
+    if (js_rom_atom(v)) {
+        return JS_ATOM_KIND_STRING;   /* flash holds plain strings only */
+    }
+#endif
     p = rt->atom_array[v];
     switch (p->atom_type) {
     case JS_ATOM_TYPE_STRING:
@@ -3520,6 +3899,18 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
         len = str->len;
         h = hash_string(str, atom_type);
         h &= JS_ATOM_HASH_MASK;
+#ifdef POCKET_VM_ROM_ATOMS
+        /* Flash first: a builtin name must resolve to its flash number, or
+           the same name would get a second, heap atom and property lookups
+           keyed on the two would never meet. Only plain strings live there;
+           Symbol.for keys are GLOBAL_SYMBOL and never match. */
+        if (atom_type == JS_ATOM_TYPE_STRING) {
+            i = js_rom_find(str->is_wide_char ? NULL : str8(str),
+                            str->is_wide_char ? str16(str) : NULL, len, h);
+            if (i)
+                goto done;
+        }
+#endif
         h1 = h & (rt->atom_hash_size - 1);
         i = rt->atom_hash[h1];
         while (i != 0) {
@@ -3687,6 +4078,11 @@ static JSAtom __JS_FindAtom(JSRuntime *rt, const char *str, size_t len,
 
     h = hash_string8((const uint8_t *)str, len, JS_ATOM_TYPE_STRING);
     h &= JS_ATOM_HASH_MASK;
+#ifdef POCKET_VM_ROM_ATOMS
+    i = js_rom_find((const uint8_t *)str, NULL, len, h);
+    if (i)
+        return i;   /* immortal: no reference to take */
+#endif
     h1 = h & (rt->atom_hash_size - 1);
     i = rt->atom_hash[h1];
     while (i != 0) {
@@ -3851,6 +4247,20 @@ static JSValue JS_NewSymbolFromAtom(JSContext *ctx, JSAtom descr,
 
     assert(!__JS_AtomIsTaggedInt(descr));
     assert(descr < rt->atom_size);
+#ifdef POCKET_VM_ROM_ATOMS
+    {
+        /* A fresh string, never the cached one: JS_NewSymbolInternal turns
+           an atom_type 0 string into the symbol itself. */
+        const JSRomAtom *r = js_rom_atom(descr);
+        if (r) {
+            p = js_rom_new_string(rt, r);
+            if (!p) {
+                return JS_ThrowOutOfMemory(ctx);
+            }
+            return JS_NewSymbolInternal(ctx, p, atom_type);
+        }
+    }
+#endif
     p = rt->atom_array[descr];
     js_dup(JS_MKPTR(JS_TAG_STRING, p));
     return JS_NewSymbolInternal(ctx, p, atom_type);
@@ -3878,6 +4288,11 @@ static const char *JS_AtomGetStrRT(JSRuntime *rt, char *buf, int buf_size,
     } else if (atom >= rt->atom_size) {
         assert(atom < rt->atom_size);
         snprintf(buf, buf_size, "<invalid %x>", atom);
+#ifdef POCKET_VM_ROM_ATOMS
+    } else if (js_rom_atom(atom)) {
+        const JSRomAtom *r = js_rom_atom(atom);
+        utf8_encode_buf8(buf, buf_size, (const uint8_t *)js_rom_text(r), r->len);
+#endif
     } else {
         JSAtomStruct *p = rt->atom_array[atom];
         *buf = '\0';
@@ -3912,6 +4327,14 @@ static JSValue __JS_AtomToValue(JSContext *ctx, JSAtom atom, bool force_string)
         JSRuntime *rt = ctx->rt;
         JSAtomStruct *p;
         assert(atom < rt->atom_size);
+#ifdef POCKET_VM_ROM_ATOMS
+        {
+            const JSRomAtom *r = js_rom_atom(atom);
+            if (r) {
+                return js_rom_atom_value(ctx, atom, r);
+            }
+        }
+#endif
         p = rt->atom_array[atom];
         if (p->atom_type == JS_ATOM_TYPE_STRING) {
             goto ret_string;
@@ -3951,6 +4374,14 @@ static bool JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom)
         uint32_t val;
 
         assert(atom < rt->atom_size);
+#ifdef POCKET_VM_ROM_ATOMS
+        /* The generator refuses a flash name that is an index: those are
+           tagged ints and never become atoms at all. */
+        if (js_rom_atom(atom)) {
+            *pval = 0;
+            return false;
+        }
+#endif
         p = rt->atom_array[atom];
         if (p->atom_type == JS_ATOM_TYPE_STRING &&
                 is_num_string(&val, p) && val != -1) {
@@ -3978,6 +4409,42 @@ static JSValue JS_AtomIsNumericIndex1(JSContext *ctx, JSAtom atom)
         return js_int32(__JS_AtomToUInt32(atom));
     }
     assert(atom < rt->atom_size);
+#ifdef POCKET_VM_ROM_ATOMS
+    {
+        /* Every typed-array property access by name asks this, so the
+           answer is baked (JS_ROM_NUMERIC); only "Infinity" builds a string
+           to run the real conversion below on. */
+        const JSRomAtom *r = js_rom_atom(atom);
+        if (r) {
+            if (!(r->hash_flags & JS_ROM_NUMERIC)) {
+                return JS_UNDEFINED;
+            }
+            p = js_rom_new_string(rt, r);
+            if (!p) {
+                return JS_ThrowOutOfMemory(ctx);
+            }
+            num = JS_ToNumber(ctx, JS_MKPTR(JS_TAG_STRING, p));
+            if (JS_IsException(num)) {
+                js_free_string(rt, p);
+                return num;
+            }
+            str = JS_ToString(ctx, num);
+            if (JS_IsException(str)) {
+                js_free_string(rt, p);
+                JS_FreeValue(ctx, num);
+                return str;
+            }
+            ret = js_string_eq(p, JS_VALUE_GET_STRING(str));
+            JS_FreeValue(ctx, str);
+            js_free_string(rt, p);
+            if (ret) {
+                return num;
+            }
+            JS_FreeValue(ctx, num);
+            return JS_UNDEFINED;
+        }
+    }
+#endif
     p1 = rt->atom_array[atom];
     if (p1->atom_type != JS_ATOM_TYPE_STRING) {
         return JS_UNDEFINED;
@@ -4094,6 +4561,11 @@ static bool JS_AtomSymbolHasDescription(JSContext *ctx, JSAtom v)
     if (__JS_AtomIsTaggedInt(v)) {
         return false;
     }
+#ifdef POCKET_VM_ROM_ATOMS
+    if (js_rom_atom(v)) {
+        return false;   /* a string, not a symbol */
+    }
+#endif
     p = rt->atom_array[v];
     return (((p->atom_type == JS_ATOM_TYPE_SYMBOL &&
               p->hash == JS_ATOM_HASH_SYMBOL) ||
@@ -6304,6 +6776,14 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
     p->tmp_mark = 0;
     p->is_HTMLDDA = 0;
     p->is_prototype = 0;
+#ifdef POCKET_VM_LAZY_BUILTINS
+    /* Upstream never initializes the spare header bits (nothing read
+       them); the lazy flag is one, and a recycled block would otherwise
+       hand a new object a dead one's flag -- seen under ASan, whose fresh
+       memory is not zero, as %ThrowTypeError% being "fully materialized"
+       at startup (2026-09-25). */
+    js_obj_set_lazy(p, false);
+#endif
     p->first_weak_ref = NULL;
     p->u.opaque = NULL;
     p->shape = sh;
@@ -6339,9 +6819,29 @@ fail:
                 pr = &p->prop[0];
             } else {
                 /* only used for the first array */
-                /* cannot fail */
                 pr = add_property(ctx, p, JS_ATOM_length,
                                   JS_PROP_WRITABLE | JS_PROP_LENGTH);
+                /* PocketJS: upstream (quickjs-ng and bellard/quickjs, both
+                   master 2026-09-23) says "cannot fail" here, and it can:
+                   add_property allocates -- a realloc of p->prop, a shape
+                   clone, a property-table resize -- and returns NULL when
+                   that fails, which the next line then dereferenced (UBSan:
+                   member access within null pointer, reached through
+                   `new Array` with a non-default prototype under vmrun
+                   --fail-alloc; a load fault on the device). It is not only
+                   the first array either: any array whose shape is not
+                   ctx->array_shape comes this way, e.g. one built for a
+                   subclass. p is not a GC object yet (add_gc_object is at
+                   the end of this function) and on every failure path
+                   add_property leaves p->prop and p->shape valid and owned
+                   by p, so freeing the three by hand is the whole cleanup;
+                   props is NULL on this branch. */
+                if (unlikely(!pr)) {
+                    js_free(ctx, p->prop);
+                    js_free_shape(ctx->rt, p->shape);
+                    js_free(ctx, p);
+                    return JS_EXCEPTION;
+                }
             }
             pr->u.value = js_int32(0);
         }
@@ -6474,7 +6974,7 @@ static int JS_SetObjectData(JSContext *ctx, JSValueConst obj, JSValue val)
 
 JSValue JS_NewObjectClass(JSContext *ctx, JSClassID class_id)
 {
-    return JS_NewObjectProtoClass(ctx, ctx->class_proto[class_id], class_id);
+    if (LAZY_CLASS_MISSING(ctx, class_id)) { return JS_EXCEPTION; } return JS_NewObjectProtoClass(ctx, ctx->class_proto[class_id], class_id);
 }
 
 JSValue JS_NewObjectProto(JSContext *ctx, JSValueConst proto)
@@ -6837,44 +7337,256 @@ JSVMState *js_vm_state(JSRuntime *rt)
 
 JSVMStack *js_vm_stack_get(JSRuntime *rt)
 {
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     return &rt->vm_stack;
-#else
-    (void)rt;
-    return NULL;
-#endif
 }
-
-#ifdef CONFIG_POCKET_VM_CALLBENCH
-#if !defined(CONFIG_POCKET_VM_FLATCALLS) || !defined(CONFIG_POCKET_VM_LAZY_INPUTS) || defined(CONFIG_POCKET_VM_YIELD)
-#error "CALLBENCH requires FLATCALLS/LAZY_INPUTS and excludes YIELD"
-#endif
-int vmtest_call_mode(JSRuntime *rt, int recursive)
-{
-    // Do not change dispatch under live frames, including native callbacks.
-    if (rt->current_stack_frame || (recursive != 0 && recursive != 1))
-        return -1;
-    rt->vm_bench_recursive = recursive;
-    return 0;
-}
-
-int vmtest_call_inputs_eager(JSRuntime *rt, int eager)
-{
-    if (rt->current_stack_frame || (eager != 0 && eager != 1))
-        return -1;
-    rt->vm_bench_eager_inputs = eager;
-    return 0;
-}
-#endif
 
 void JS_VMStackTrim(JSRuntime *rt)
 {
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     js_vm_stack_trim(rt, &rt->vm_stack);
-#else
-    (void)rt;
-#endif
 }
+
+#ifdef CONFIG_POCKET_VM_RELOC
+// L3a stage 4 (docs/vm/vm-L3-design.md sec.4.1): the typed fix-up. Walks the
+// same chain js_vm_mark_suspended walks and touches the fields it does not --
+// the two are exhaustive and disjoint over a parked frame, which is why the
+// mark walker could be read as the shape this one has to take
+// (docs/vm/vm-ledger/09-relocation-entries.md sec.6).
+//
+// Walks the NEW copies (D48): stage 2 has already copied the bytes, so each
+// new frame holds the old frame's pointer values, and fixing them up in place
+// means one pass. Walking the old side instead would mean stage 5 poisons the
+// ground this just covered.
+//
+// Nothing here can fail. Every allocation was made in stage 1, and a lookup
+// that matches nothing is the no-op that makes a partial move legal (D53) --
+// so once this is entered the pointer graph is rewritten to completion.
+static void js_vm_reloc_fixup(JSRuntime *rt, const JSVMReloc *tab, uint32_t n,
+                              JSVMRelocStats *out)
+{
+    JSStackFrame *sf, *floor;
+    uint32_t frames = 0, coro_frames = 0, var_refs = 0;
+    const uint8_t fault = rt->vm_reloc_fault;
+
+    // The roots first: the walk below needs to START at a new address.
+    rt->current_stack_frame = js_vm_reloc_ptr(tab, n, rt->current_stack_frame);
+    rt->vm_susp.top = js_vm_reloc_ptr(tab, n, rt->vm_susp.top);
+    rt->vm_susp.floor = js_vm_reloc_ptr(tab, n, rt->vm_susp.floor);
+
+    sf = rt->vm_susp.top;
+    floor = rt->vm_susp.floor;
+    for (;;) {
+        // Read the link out before anything else writes to this frame: the
+        // loop advances on the FIXED value, so the chain is walked once in
+        // new addresses rather than once in old and once in new.
+        JSStackFrame *next = js_vm_reloc_ptr(tab, n, sf->prev_frame);
+        int i;
+
+        // Unconditional, not guarded on JS_SF_SEG. A coroutine frame's
+        // buffers live in its JSAsyncFunctionState and a lookup leaves them
+        // alone -- but its arg_buf can point at the CALLER's argv, which is
+        // in a segment whenever arg_allocated_size was 0 (ledger sec.0).
+        // Asking the table about all four costs four linear scans of a table
+        // with a few dozen rows, at a moment the VM is already stopped, and
+        // removes a class of "which frames can point where" reasoning that
+        // would have to be redone every time the call path changes.
+        sf->arg_buf = js_vm_reloc_ptr(tab, n, sf->arg_buf);
+        if (fault != JS_VM_RELOC_FAULT_VARBUF)
+            sf->var_buf = js_vm_reloc_ptr(tab, n, sf->var_buf);
+        sf->var_refs = js_vm_reloc_ptr(tab, n, sf->var_refs);
+        sf->cur_sp = js_vm_reloc_ptr(tab, n, sf->cur_sp);
+
+        if (sf->l2_flags & JS_SF_SEG) {
+            // The link sits in front of the frame inside the same block, so
+            // this address arithmetic is only valid for a segment frame.
+            JSVMLink *link = ((JSVMLink *)sf) - 1;
+            if (fault != JS_VM_RELOC_FAULT_LINK)
+                link->caller_sp = js_vm_reloc_ptr(tab, n, link->caller_sp);
+        } else {
+            // A coroutine frame is not in a segment, but the record that
+            // owns it holds the caller's sp, and the caller IS (D33). This
+            // is the one entry reached by walking back out of the chain
+            // rather than along it (ledger sec.3).
+            JSAsyncFunctionData *d =
+                container_of(sf, JSAsyncFunctionData, func_state.frame);
+            d->flat_caller_sp = js_vm_reloc_ptr(tab, n, d->flat_caller_sp);
+            coro_frames++;
+        }
+
+        // Open var_refs: pvalue names a slot in some frame's arg_buf or
+        // var_buf, and stack_frame names the frame. Both are in objects that
+        // live OUTSIDE the segments, and this table is the only way to reach
+        // them without walking the whole GC heap -- get_var_ref registers
+        // every open one here (quickjs.c:18283) and close_var_refs relies on
+        // the same invariant to close them.
+        //
+        // A detached var_ref must be skipped: its pvalue points at its own
+        // `value` field, so adding a delta to it would aim a self-reference
+        // into a segment.
+        for (i = 0; i < sf->var_ref_count; i++) {
+            JSVarRef *vr = sf->var_refs[i];
+            if (!vr || vr->is_detached)
+                continue;
+            if (fault != JS_VM_RELOC_FAULT_VARREF)
+                vr->pvalue = js_vm_reloc_ptr(tab, n, vr->pvalue);
+            vr->stack_frame = js_vm_reloc_ptr(tab, n, vr->stack_frame);
+            var_refs++;
+        }
+
+        sf->prev_frame = next;
+        frames++;
+        if (sf == floor)
+            break;
+        sf = next;
+    }
+    if (out) {
+        out->frames = frames;
+        out->coro_frames = coro_frames;
+        out->var_refs = var_refs;
+    }
+}
+
+/* L3a/L4a: the shared body of JS_VMStackRelocate and JS_VMStackCompact. The
+   two differ only in how the new memory is laid out -- one block per old
+   segment, or one block for the whole chain -- and that is decided entirely
+   in quickjs-vmstack.h; the preconditions, the measurement of the old chain,
+   the fix-up and the release of the old blocks are the same code. */
+static int js_vm_stack_move(JSRuntime *rt, JSVMRelocStats *out, bool coalesce)
+{
+    JSVMStack *st = &rt->vm_stack;
+    JSVMReloc *tab;
+    uint32_t n, i;
+    size_t bytes = 0, resident = 0, span = 0;
+
+    if (out)
+        memset(out, 0, sizeof(*out));
+
+    // D45: only while parked. A running JS_CallInternal holds pointers into
+    // the block in C locals and registers, and the spec rules out guessing
+    // which machine words those are (spec sec.8).
+    if (!rt->vm_susp.top || !rt->vm_susp.floor)
+        return -1;
+    // D55: parked, but an OUTER JS activation is still on the C stack below
+    // the floor -- its locals are exactly the pointers D45 cannot fix, and
+    // the bump allocator can have put its frames in the same segment as the
+    // floor, so "move only above the floor" does not separate them either.
+    if (rt->current_stack_frame)
+        return -1;
+    // D51: no real pin site exists yet; this refuses the move so that the
+    // completion condition has something to test.
+    if (st->pins)
+        return -1;
+
+    if ((coalesce ? js_vm_stack_reloc_coalesce(rt, st, &tab, &n)
+                  : js_vm_stack_reloc_copy(rt, st, &tab, &n)) < 0)
+        return -1;
+    if (!n)     // nothing live to move; not a failure
+        return 0;
+    {
+        // Measured on the OLD addresses, before the copy replaces them: how
+        // far apart the heap put the pieces of one logical stack. Taken here
+        // rather than in the header's copy routine because it is a question
+        // about the chain, not a step of moving it.
+        const uint8_t *lo = (const uint8_t *)tab[0].old_seg;
+        const uint8_t *hi = tab[0].old_end;
+        for (i = 0; i < n; i++) {
+            const uint8_t *b = (const uint8_t *)tab[i].old_seg;
+            bytes += (size_t)(tab[i].old_seg->top - tab[i].old_seg->base);
+            resident += (size_t)(tab[i].old_end - b);
+            if (b < lo) lo = b;
+            if (tab[i].old_end > hi) hi = tab[i].old_end;
+        }
+        span = (size_t)(hi - lo);
+    }
+
+    js_vm_reloc_fixup(rt, tab, n, out);
+    js_vm_stack_reloc_finish(rt, st, tab, n, rt->vm_reloc_keep_old);
+
+    if (out) {
+        out->segments = n;
+        out->bytes = bytes;
+        out->resident = resident;
+        out->span = span;
+        out->generation = st->generation;
+    }
+    return 0;
+}
+
+int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
+{
+    return js_vm_stack_move(rt, out, false);
+}
+
+int JS_VMStackCompact(JSRuntime *rt, JSVMRelocStats *out)
+{
+    return js_vm_stack_move(rt, out, true);
+}
+
+uint32_t JS_VMStackSegments(JSRuntime *rt)
+{
+    uint32_t n = 0;
+    for (JSVMSeg *s = rt->vm_stack.cur; s; s = s->prev)
+        n++;
+    return n;
+}
+
+void JS_VMStackRelocKeepOld(JSRuntime *rt, int keep)
+{
+    rt->vm_reloc_keep_old = (keep != 0);
+}
+
+void JS_VMStackRelocFault(JSRuntime *rt, int mode)
+{
+    rt->vm_reloc_fault = (uint8_t)mode;
+}
+
+int JS_VMStackPin(JSRuntime *rt, int delta)
+{
+    JSVMStack *st = &rt->vm_stack;
+    if (delta > 0)
+        st->pins++;
+    else if (delta < 0 && st->pins)
+        st->pins--;
+    return (int)st->pins;
+}
+#else
+int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out)
+{
+    (void)rt;
+    if (out)
+        memset(out, 0, sizeof(*out));
+    return -1;
+}
+
+int JS_VMStackCompact(JSRuntime *rt, JSVMRelocStats *out)
+{
+    return JS_VMStackRelocate(rt, out);
+}
+
+uint32_t JS_VMStackSegments(JSRuntime *rt)
+{
+    (void)rt;
+    return 0;
+}
+
+void JS_VMStackRelocKeepOld(JSRuntime *rt, int keep)
+{
+    (void)rt;
+    (void)keep;
+}
+
+int JS_VMStackPin(JSRuntime *rt, int delta)
+{
+    (void)rt;
+    (void)delta;
+    return -1;
+}
+
+void JS_VMStackRelocFault(JSRuntime *rt, int mode)
+{
+    (void)rt;
+    (void)mode;
+}
+#endif
 
 JSVMState *js_vm_arm(JSRuntime *rt, int on)
 {
@@ -7165,6 +7877,17 @@ static inline JSShapeProperty *find_own_property1(JSObject *p, JSAtom atom)
     return NULL;
 }
 
+#ifdef POCKET_VM_LAZY_BUILTINS
+static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom);
+static int js_lazy_all(JSContext *ctx, JSObject *p, bool enum_only);
+static int js_lazy_delete(JSContext *ctx, JSObject *p, JSAtom atom);
+static void js_lazy_after_delete(JSRuntime *rt, JSObject *p, int q);
+static int js_lazy_plain_index(JSRuntime *rt, JSObject *p, JSAtom atom);
+static void js_lazy_forget(JSRuntime *rt, JSObject *p);
+#else
+#define js_obj_lazy(p) false
+#endif
+
 static inline JSShapeProperty *find_own_property(JSProperty **ppr,
                                                  JSObject *p,
                                                  JSAtom atom)
@@ -7377,6 +8100,12 @@ static void free_object(JSRuntime *rt, JSObject *p)
 
     p->free_mark = 1; /* used to tell the object is invalid when
                          freeing cycles */
+#ifdef POCKET_VM_LAZY_BUILTINS
+    /* Its lists go with it: rt->lazy is keyed by the object's address,
+       which the allocator will hand out again. */
+    if (unlikely(js_obj_lazy(p)))
+        js_lazy_forget(rt, p);
+#endif
     /* free all the fields */
     sh = p->shape;
     pr = sh->prop;
@@ -7915,6 +8644,14 @@ void JS_TakeOOMCanary(JSRuntime *rt, JSOOMCanary *out)
     g_oom_canary = (JSOOMCanary){0};
 }
 
+void JS_GetMemoryCounters(JSRuntime *rt, size_t *used, size_t *limit)
+{
+    if (used)
+        *used = rt->malloc_state.malloc_size;
+    if (limit)
+        *limit = rt->malloc_state.malloc_limit;
+}
+
 void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
 {
     struct list_head *el, *el1;
@@ -8179,7 +8916,7 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
                    sizeof(rt->atom_hash[0]) * rt->atom_hash_size;
     for (i = 0; i < rt->atom_size; i++) {
         JSAtomStruct *p = rt->atom_array[i];
-        if (!atom_is_free(p)) {
+        if (p && !atom_is_free(p)) {
             s->atom_size += (sizeof(*p) + (p->len << p->is_wide_char) +
                              1 - p->is_wide_char);
         }
@@ -8794,10 +9531,32 @@ JS_ThrowError2(JSContext *ctx, JSErrorEnum error_num, bool add_backtrace,
                JS_PRINTF_FORMAT const char *fmt, va_list ap)
 {
     JSValue obj;
+    JSRuntime *rt = ctx->rt;
 
     obj = JS_MakeError(ctx, error_num, add_backtrace, fmt, ap);
     if (unlikely(JS_IsException(obj))) {
-        /* out of memory: throw JS_NULL to avoid recursing */
+        /* PocketJS: the allocation(s) needed to build *this* Error object
+         * failed too (docs/vm/oom-parse-safety.md sec.6). Upstream
+         * (quickjs-ng master, unchanged as of 2026-09-23) throws a bare
+         * JS_NULL here, which reaches guest code indistinguishable from a
+         * script's own `throw null` -- a `catch (e) { ...e.constructor... }`
+         * block then crashes with a misleading TypeError instead of ever
+         * seeing the OOM (--fail-alloc 3225..3227 / 3248..3250 on
+         * generators.js: "cannot read property 'constructor' of null" at
+         * generators.js:67/72, both well into execution, not context
+         * setup -- JS_TakeOOMCanary confirms exactly one rejection).
+         * JS_ThrowOutOfMemory's own rt->in_out_of_memory guard already
+         * exists to stop this from recursing forever, so route through it
+         * instead of jumping straight to JS_NULL: under fault injection only
+         * the one targeted allocation fails, so the fresh allocation it
+         * retries for the InternalError object succeeds and the guest sees
+         * "InternalError: out of memory" as it should. If we are already
+         * inside that retry (rt->in_out_of_memory set), a second failure
+         * means the heap is genuinely exhausted right now -- fall back to
+         * JS_NULL exactly as before rather than looping. */
+        if (!rt->in_out_of_memory) {
+            return JS_ThrowOutOfMemory(ctx);
+        }
         obj = JS_NULL;
     }
     return JS_Throw(ctx, obj);
@@ -8908,6 +9667,7 @@ static int JS_ThrowTypeErrorReadOnly(JSContext *ctx, int flags, JSAtom atom)
 JSValue JS_ThrowOutOfMemory(JSContext *ctx)
 {
     JSRuntime *rt = ctx->rt;
+    rt->oom_count++;
     if (!rt->in_out_of_memory) {
         rt->in_out_of_memory = true;
         JS_ThrowInternalError(ctx, "out of memory");
@@ -9015,7 +9775,6 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_saf
         // 1 and run the host handler on its own shadow cadence instead --
         // arming must not move the poll at which a session stop is honoured.
         ctx->interrupt_counter = 1;
-#ifdef CONFIG_POCKET_VM_YIELD
         /* A yield returns below. Account for this poll first, otherwise a
            branch-only loop can yield forever without checking termination. */
         if (--vm->host_poll_left <= 0) {
@@ -9026,9 +9785,7 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_saf
                 return -1;
             }
         }
-#endif
         if (at_safepoint) {
-#ifdef CONFIG_POCKET_VM_YIELD
             JSStackFrame *sf = rt->current_stack_frame;
             if (sf && (sf->l2_flags & JS_SF_MAY_YIELD) &&
                 js_vm_safepoint(rt, vm, js_vm_frame_func(sf))) {
@@ -9037,18 +9794,6 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_saf
                    entering exception unwinding. */
                 return 2;
             }
-#else
-            if (js_vm_safepoint(rt, vm, js_vm_frame_func(rt->current_stack_frame))) {
-                // Before L2c the VM's only way to stop is the uncatchable
-                // "interrupted" error, which loses the frame (design
-                // sec.4.1). A forced yield therefore kills the job; the
-                // corpus going red under --force-yield is the evidence that
-                // the gate checks something. L2c replaces this line with
-                // save-and-return.
-                JS_ThrowInterrupted(ctx);
-                return -1;
-            }
-#endif
         } else if (rt->current_stack_frame == NULL) {
             // The JS_CallInternal prologue poll with no frame: the host is
             // entering JS. Not a safepoint (N5), but the start of the interval
@@ -9056,13 +9801,7 @@ static no_inline __exception int __js_poll_interrupts(JSContext *ctx, int at_saf
             // boundary is exactly this point).
             js_vm_enter(rt, vm);
         }
-#ifdef CONFIG_POCKET_VM_YIELD
         return 0;
-#else
-        if (--vm->host_poll_left > 0)
-            return 0;
-        vm->host_poll_left = JS_INTERRUPT_COUNTER_INIT;
-#endif
     } else {
         ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
     }
@@ -9095,7 +9834,6 @@ static inline __exception int js_poll_safepoint(JSContext *ctx)
         if (result)
             return result;
     }
-#ifdef CONFIG_POCKET_VM_YIELD
     /* Only the VM thread owns interrupt_counter. A timer publishes just the
        atomic bit; polling it here avoids a racing write to that counter or
        an atomic read-modify-write on every branch. Termination still polls
@@ -9105,11 +9843,9 @@ static inline __exception int js_poll_safepoint(JSContext *ctx)
         if (sf && (sf->l2_flags & JS_SF_MAY_YIELD))
             return 2;
     }
-#endif
     return 0;
 }
 
-#ifdef CONFIG_POCKET_VM_YIELD
 static inline bool js_vm_push_yield(JSRuntime *rt, JSStackFrame *sf)
 {
     if (!(sf->l2_flags & JS_SF_MAY_YIELD))
@@ -9118,9 +9854,7 @@ static inline bool js_vm_push_yield(JSRuntime *rt, JSStackFrame *sf)
         return true;
     return atomic_load_explicit(&rt->vm_yield_req, memory_order_relaxed) != 0;
 }
-#endif
 
-#ifdef CONFIG_POCKET_VM_YIELD
 #define JS_VM_POLL_SAFEPOINT() do {                 \
         int _vm_poll = js_poll_safepoint(ctx);      \
         if (unlikely(_vm_poll == 2))                \
@@ -9128,7 +9862,6 @@ static inline bool js_vm_push_yield(JSRuntime *rt, JSStackFrame *sf)
         if (unlikely(_vm_poll != 0))                \
             goto exception;                         \
     } while (0)
-#endif
 
 /* return -1 (exception) or true/false */
 static int JS_SetPrototypeInternal(JSContext *ctx, JSValueConst obj,
@@ -9573,12 +10306,22 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
     func = js_autoinit_func_table[js_autoinit_get_id(pr)];
     /* 'func' shall not modify the object properties 'pr' */
     val = func(realm, p, prop, pr->u.init.opaque);
-    js_autoinit_free(ctx->rt, pr);
-    prs->flags &= ~JS_PROP_TMASK;
-    pr->u.value = JS_UNDEFINED;
+    /* PocketJS: upstream turned the property into a plain `undefined` before
+     * looking at the result, so one failed instantiation (an OOM in
+     * JS_NewCFunction2 on first use) removed the builtin for the rest of the
+     * run: generators.js under --fail-alloc 2877 fails to instantiate
+     * Generator.prototype.throw and then reports "not a function" at
+     * g.throw(). This is the lazy half of context setup (every JS_DEF_CFUNC
+     * of the intrinsic tables lands here), so it gets the same rule as
+     * JS_NewContext: a failure may fail the operation, never leave a hole.
+     * The autoinit slot is left as it was -- 'func' does not touch 'pr', and
+     * the realm reference and opaque are still owned by it -- so the next
+     * access simply tries again. */
     if (JS_IsException(val)) {
         return -1;
     }
+    js_autoinit_free(ctx->rt, pr);
+    prs->flags &= ~JS_PROP_TMASK;
     pr->u.value = val;
     return 0;
 }
@@ -9672,6 +10415,15 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                 return js_dup(pr->u.value);
             }
         }
+#ifdef POCKET_VM_LAZY_BUILTINS
+        if (unlikely(js_obj_lazy(p))) {
+            int r = js_lazy_touch(ctx, p, prop);
+            if (r < 0)
+                return JS_EXCEPTION;
+            if (r)
+                continue;   /* now in the shape */
+        }
+#endif
         if (unlikely(p->is_exotic)) {
             /* exotic behaviors */
             if (p->fast_array) {
@@ -10011,6 +10763,17 @@ static int __exception JS_GetOwnPropertyNamesInternal(JSContext *ctx,
     *ptab = NULL;
     *plen = 0;
 
+#ifdef POCKET_VM_LAZY_BUILTINS
+    /* Listing the keys observes the whole set and its order: pending
+       entries go into the shape, in definition order, first -- unless only
+       enumerable keys are wanted and no pending entry is enumerable, the
+       case of every for-in walking up through a builtin prototype. */
+    if (unlikely(js_obj_lazy(p)) &&
+            js_lazy_all(ctx, p, (flags & JS_GPN_ENUM_ONLY) != 0)) {
+        return -1;
+    }
+#endif
+
     /* compute the number of returned properties */
     num_keys_count = 0;
     str_keys_count = 0;
@@ -10255,6 +11018,15 @@ retry:
         }
         return true;
     }
+#ifdef POCKET_VM_LAZY_BUILTINS
+    if (unlikely(js_obj_lazy(p))) {
+        int r = js_lazy_touch(ctx, p, prop);
+        if (r < 0)
+            return -1;
+        if (r)
+            goto retry;
+    }
+#endif
     if (p->is_exotic) {
         if (p->fast_array) {
             /* specific case for fast arrays */
@@ -10781,7 +11553,30 @@ static no_inline __exception int convert_fast_array_to_array(JSContext *ctx,
     return 0;
 }
 
+static int delete_property0(JSContext *ctx, JSObject *p, JSAtom atom);
+
 static int delete_property(JSContext *ctx, JSObject *p, JSAtom atom)
+{
+#ifdef POCKET_VM_LAZY_BUILTINS
+    if (unlikely(js_obj_lazy(p))) {
+        /* A pending entry is deleted by never materializing it. A plain
+           property ahead of a list moves the list's slot back by one when
+           it goes (compact_properties may renumber the rest, so the
+           position is counted among live properties, not shape slots). */
+        int r = js_lazy_delete(ctx, p, atom);
+        if (r != 2)
+            return r;
+        int q = js_lazy_plain_index(ctx->rt, p, atom);
+        r = delete_property0(ctx, p, atom);
+        if (r == true && q >= 0 && js_obj_lazy(p))
+            js_lazy_after_delete(ctx->rt, p, q);
+        return r;
+    }
+#endif
+    return delete_property0(ctx, p, atom);
+}
+
+static int delete_property0(JSContext *ctx, JSObject *p, JSAtom atom)
 {
     JSShape *sh;
     JSShapeProperty *pr, *lpr, *prop;
@@ -11120,6 +11915,15 @@ retry:
             goto read_only_prop;
         }
     }
+#ifdef POCKET_VM_LAZY_BUILTINS
+    if (unlikely(js_obj_lazy(p1))) {
+        int r = js_lazy_touch(ctx, p1, prop);
+        if (r < 0)
+            goto fail;
+        if (r)
+            goto retry;
+    }
+#endif
 
     for (;;) {
         if (p1->is_exotic) {
@@ -11221,6 +12025,17 @@ prototype_lookup:
 
 retry2:
         prs = find_own_property(&pr, p1, prop);
+#ifdef POCKET_VM_LAZY_BUILTINS
+        /* A setter or a read-only property up the chain may still be in a
+           list; it decides this assignment exactly as if it were here. */
+        if (!prs && unlikely(js_obj_lazy(p1))) {
+            int r = js_lazy_touch(ctx, p1, prop);
+            if (r < 0)
+                goto fail;
+            if (r)
+                goto retry2;
+        }
+#endif
         if (prs) {
             if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
                 return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags);
@@ -11784,6 +12599,17 @@ int JS_DefineProperty(JSContext *ctx, JSValueConst this_obj,
 
 redo_prop_update:
     prs = find_own_property(&pr, p, prop);
+#ifdef POCKET_VM_LAZY_BUILTINS
+    /* Redefining a pending entry redefines what it would have been, so it
+       is put in the shape first; a new name falls through to be added. */
+    if (!prs && unlikely(js_obj_lazy(p))) {
+        int r = js_lazy_touch(ctx, p, prop);
+        if (r < 0)
+            return -1;
+        if (r)
+            goto redo_prop_update;
+    }
+#endif
     if (prs) {
         /* the range of the Array length property is always tested before */
         if ((prs->flags & JS_PROP_LENGTH) && (flags & JS_PROP_HAS_VALUE)) {
@@ -18609,9 +19435,7 @@ static void close_lexical_var(JSContext *ctx, JSFunctionBytecode *b,
 
 #define JS_CALL_FLAG_COPY_ARGV   (1 << 1)
 #define JS_CALL_FLAG_GENERATOR   (1 << 2)
-#ifdef CONFIG_POCKET_VM_YIELD
 #define JS_CALL_FLAG_VM_RESUME   (1 << 3)
-#endif
 
 static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
                                   JSValueConst this_obj,
@@ -18800,7 +19624,6 @@ static void dump_single_byte_code(JSContext *ctx, const uint8_t *pc,
 static void print_func_name(JSFunctionBytecode *b);
 #endif
 
-#ifdef CONFIG_POCKET_VM_FLATCALLS
 // L2b: may this call target run in the caller's C activation? Two kinds
 // (design D32): a bytecode function whose bytecode is JS_FUNC_NORMAL, and an
 // async function (JS_CLASS_ASYNC_FUNCTION, whose first synchronous stretch
@@ -18816,12 +19639,7 @@ static void print_func_name(JSFunctionBytecode *b);
 static inline bool js_vm_flat_callable(JSRuntime *rt, JSValueConst func_obj)
 {
     JSObject *p;
-#ifdef CONFIG_POCKET_VM_CALLBENCH
-    if (rt->vm_bench_recursive)
-        return false;
-#else
     (void)rt;
-#endif
     if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
         return false;
     p = JS_VALUE_GET_OBJ(func_obj);
@@ -18851,107 +19669,6 @@ static inline JSValue *js_vm_flat_caller_sp(JSStackFrame *sf)
     return container_of(sf, JSAsyncFunctionData, func_state.frame)->flat_caller_sp;
 }
 
-#ifdef CONFIG_POCKET_VM_TCO
-#ifndef CONFIG_POCKET_VM_YIELD
-#error "CONFIG_POCKET_VM_TCO requires CONFIG_POCKET_VM_YIELD"
-#endif
-// No allocation and no intermediate safepoint. A successful replacement
-// keeps the parent link/return shape, but owns its new call operands in the
-// block itself. This also makes the existing suspended GC/discard slot walk
-// sufficient; cur_func borrows slot zero, not a vanished parent's operand.
-static no_inline int js_vm_tail_reuse(JSContext *ctx, JSStackFrame *sf,
-                                     JSValue *sp, int argc, bool method)
-{
-    JSRuntime *rt = ctx->rt;
-    JSValue *av = sp - argc, saved[10], *local = (JSValue *)(sf + 1);
-    JSObject *callee;
-    JSFunctionBytecode *nb;
-    JSVMSeg *seg = rt->vm_stack.cur;
-    uint8_t *block;
-    size_t size, old_size, used;
-    int nargs, i;
-    if (!sf->is_strict_mode || argc > 8 ||
-        (sf->l2_flags & (JS_SF_SEG | JS_SF_FLAT)) != (JS_SF_SEG | JS_SF_FLAT) ||
-        JS_VALUE_GET_TAG(av[-1]) != JS_TAG_OBJECT)
-        return 0;
-    callee = JS_VALUE_GET_OBJ(av[-1]);
-    if (callee->class_id != JS_CLASS_BYTECODE_FUNCTION)
-        return 0;
-    nb = callee->u.func.function_bytecode;
-    if (nb->func_kind != JS_FUNC_NORMAL)
-        return 0;
-    // Tail syntax alone does not make a protected call discardable. The
-    // parser wraps catch bodies in a synthetic rethrow handler. Only those
-    // transparent handlers may disappear; real catches/finally/iterators
-    // keep the ordinary call-and-return path, including its exception path.
-    JSFunctionBytecode *old = JS_VALUE_GET_OBJ(sf->cur_func)->u.func.function_bytecode;
-    for (JSValue *slot = sf->var_buf + old->var_count; slot < sp; slot++) {
-        if (JS_VALUE_GET_TAG(*slot) == JS_TAG_CATCH_OFFSET) {
-            int target = JS_VALUE_GET_INT(*slot);
-            if (target <= 0 || target >= old->byte_code_len)
-                return 0;
-            const uint8_t *at = old->byte_code_buf + target;
-            const uint8_t *end = old->byte_code_buf + old->byte_code_len;
-            while (at < end && *at == OP_close_loc) {
-                if (end - at < 3) return 0;
-                at += 3;
-            }
-            if (at >= end || *at != OP_throw)
-                return 0;
-        }
-    }
-    block = (uint8_t *)(((JSVMLink *)sf) - 1);
-    nargs = max_int(argc, nb->arg_count);
-    size = js_vm_stack_round(JS_VM_FRAME_PREFIX + sizeof(*sf) +
-           sizeof(JSValue) * (2 + nargs + nb->var_count + nb->stack_size) +
-           sizeof(JSVarRef *) * nb->var_ref_count);
-    old_size = (size_t)(seg->top - block);
-    used = rt->vm_stack.used - old_size + size;
-    if (size > (size_t)(seg->end - block) ||
-        (rt->vm_stack.budget && used > rt->vm_stack.budget))
-        return 0;
-    if (unlikely(js_poll_interrupts(ctx)))
-        return -1;
-    saved[0] = js_dup(av[-1]);
-    saved[1] = method ? js_dup(av[-2]) : JS_UNDEFINED;
-    for (i = 0; i < argc; i++)
-        saved[i + 2] = js_dup(av[i]);
-    close_var_refs(rt, sf);
-    for (JSValue *slot = local; slot < sp; slot++)
-        JS_FreeValue(ctx, *slot);
-    // Commit only after every test above; no failing operation follows.
-    JS_VM_POISON(block, old_size);
-    JS_VM_UNPOISON(block, size);
-    seg->top = block + size;
-    rt->vm_stack.used = used;
-#ifdef JS_VM_STACK_STATS
-    if (used > rt->vm_stack.live_bytes_max)
-        rt->vm_stack.live_bytes_max = used;
-    if (size > rt->vm_stack.frame_max)
-        rt->vm_stack.frame_max = size;
-#endif
-    for (i = 0; i < argc + 2; i++)
-        local[i] = saved[i];
-    for (; i < 2 + nargs + nb->var_count; i++)
-        local[i] = JS_UNDEFINED;
-    sf->l2_flags |= JS_SF_TAIL;
-    sf->cur_func = local[0];
-    sf->is_strict_mode = nb->is_strict_mode;
-    sf->arg_count = argc;
-    sf->arg_buf = local + 2;
-    sf->var_buf = local + 2 + nargs;
-    sf->var_refs = (JSVarRef **)(sf->var_buf + nb->var_count + nb->stack_size);
-    sf->var_ref_count = nb->var_ref_count;
-    for (i = 0; i < nb->var_ref_count; i++)
-        sf->var_refs[i] = NULL;
-    sf->coro_kind = JS_CORO_NONE; /* tail reuse only takes SEG|FLAT frames */
-    sf->cur_pc = nb->byte_code_buf;
-    sf->cur_sp = sf->var_buf + nb->var_count;
-    return 1;
-}
-#endif
-#endif
-
 static bool needs_backtrace(JSValue exc)
 {
     JSObject *p;
@@ -18975,19 +19692,14 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     JSContext *ctx;
     JSObject *p;
     JSFunctionBytecode *b;
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     // L2a: the frame lives in a segment (or, on the generator path, in the
     // JSAsyncFunctionState); nothing of it is on this C frame any more.
     JSStackFrame *sf;
-#else
-    JSStackFrame sf_s, *sf = &sf_s;
-#endif
     uint8_t *pc;
     int opcode, arg_allocated_size, i;
     JSValue *local_buf, *stack_buf, *var_buf, *arg_buf, *sp, ret_val, *pval;
     JSVarRef **var_refs;
     size_t alloca_size;
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     // L2b, the floor's view (design H9): this C activation's own argv /
     // this / new.target, i.e. the parameters it was entered with. A flat
     // callee reuses the parameter variables (the loop reads them by name),
@@ -19015,23 +19727,13 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     // caller once the caller's locals are back. NULL on every other path
     // through resume_caller:.
     JSAsyncFunctionData *settle_s = NULL;
-#endif
-#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
-#ifndef CONFIG_POCKET_VM_FLATCALLS
-#error "LAZY_INPUTS requires FLATCALLS"
-#endif
     bool call_inputs_valid = true;
     // Restore before consuming operands/immediates, then enter the reader
     // directly: no extra dispatch, debug dump, JS execution or poll.
 #define ENSURE_CALL_INPUTS(op) \
     if (!call_inputs_valid) goto restore_call_inputs; \
     inputs_ready_ ## op:
-#else
-#define ENSURE_CALL_INPUTS(op) ((void)0)
-#endif
-#ifdef CONFIG_POCKET_VM_YIELD
     bool vm_floor_may_yield;
-#endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_STEP
 #define DUMP_BYTECODE_OR_DONT(pc) \
@@ -19058,7 +19760,6 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 #define BREAK           SWITCH(pc)
 #endif
 
-#ifdef CONFIG_POCKET_VM_YIELD
     if ((flags & JS_CALL_FLAG_VM_RESUME) ||
         ((flags & JS_CALL_FLAG_GENERATOR) &&
          (((JSAsyncFunctionState *)JS_VALUE_GET_PTR(func_obj))->frame.l2_flags & JS_SF_SUSPENDED))) {
@@ -19108,12 +19809,6 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) ==
             (JS_SF_FLAT | JS_SF_SEG)) {
             argc = sf->arg_count;
-#ifdef CONFIG_POCKET_VM_TCO
-            if (sf->l2_flags & JS_SF_TAIL) {
-                argv = vc(sf->arg_buf);
-                this_obj = sf->arg_buf[-1];
-            } else
-#endif
             {
                 argv = vc(js_vm_flat_caller_sp(sf) - argc);
                 this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
@@ -19140,23 +19835,18 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
         goto restart;
     }
     vm_floor_may_yield = rt->vm_entry_ok && rt->current_stack_frame == NULL;
-#endif
     if (js_poll_interrupts(caller_ctx)) {
         return JS_EXCEPTION;
     }
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     floor_argc = argc;
     floor_argv = argv;
     floor_this = this_obj;
     floor_new_target = new_target;
-#endif
     if (unlikely(JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)) {
         if (flags & JS_CALL_FLAG_GENERATOR) {
             JSAsyncFunctionState *s = JS_VALUE_GET_PTR(func_obj);
-#ifdef CONFIG_POCKET_VM_YIELD
             if (unlikely(rt->vm_susp.top))
                 return JS_ThrowInternalError(caller_ctx, "VM suspended");
-#endif
             /* func_obj get contains a pointer to JSFuncAsyncState */
             /* the stack frame is already allocated */
             sf = &s->frame;
@@ -19172,18 +19862,14 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             pc = sf->cur_pc;
             sf->prev_frame = rt->current_stack_frame;
             rt->current_stack_frame = sf;
-#ifdef CONFIG_POCKET_VM_FLATCALLS
             // A resumed generator/async frame is the floor of this activation
             // (H6): l2_flags is 0 from js_mallocz, so a flat child returning
             // into it takes the floor branch. caller_ctx is per resume, like
             // prev_frame -- the resumer's realm, not the creator's.
             sf->caller_ctx = caller_ctx;
-#endif
-#ifdef CONFIG_POCKET_VM_YIELD
             sf->l2_flags = vm_floor_may_yield ? JS_SF_MAY_YIELD : 0;
             if (vm_floor_may_yield)
                 rt->vm_susp.floor = sf;
-#endif
             if (s->throw_flag) {
                 goto exception;
             } else {
@@ -19201,30 +19887,21 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 not_a_function:
             return js_vm_leave_frameless(rt, JS_ThrowTypeErrorNotAFunction(caller_ctx));
         }
-#ifdef CONFIG_POCKET_VM_YIELD
         /* Only the async class has an owner that can receive a parked body.
            Other native entries must not lend the host's token to JS reentry. */
         rt->vm_entry_ok = p->class_id == JS_CLASS_ASYNC_FUNCTION && !rt->vm_entry_block;
         ret_val = call_func(caller_ctx, func_obj, this_obj, argc, argv, flags);
         rt->vm_entry_ok = 0;
         return js_vm_leave_frameless(rt, ret_val);
-#else
-        return js_vm_leave_frameless(rt, call_func(caller_ctx, func_obj, this_obj, argc,
-                                                   argv, flags));
-#endif
     }
-#ifdef CONFIG_POCKET_VM_YIELD
     if (unlikely(rt->vm_susp.top))
         return JS_ThrowInternalError(caller_ctx, "VM suspended");
-#endif
     b = p->u.func.function_bytecode;
 
     if (unlikely(argc < b->arg_count || (flags & JS_CALL_FLAG_COPY_ARGV))) {
         arg_allocated_size = b->arg_count;
-#ifdef CONFIG_POCKET_VM_YIELD
         if (vm_floor_may_yield && argc > arg_allocated_size)
             arg_allocated_size = argc;
-#endif
     } else {
         arg_allocated_size = 0;
     }
@@ -19232,7 +19909,6 @@ not_a_function:
     alloca_size = sizeof(JSValue) * (arg_allocated_size + b->var_count +
                                      b->stack_size) +
                   sizeof(JSVarRef *) * b->var_ref_count;
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     // Two limits now, each with its own error, because they are two
     // different resources:
     //  - The C stack. This is the FLOOR of a C activation -- entered from
@@ -19271,7 +19947,6 @@ not_a_function:
     if (js_check_stack_overflow(rt, 0)) {
         return JS_ThrowStackOverflow(caller_ctx);
     }
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     {
         // The block is [JSVMLink][JSStackFrame][slots][var_refs]; sf points
         // past the link. (The non-flat build below keeps the upstream shape
@@ -19284,51 +19959,29 @@ not_a_function:
         sf = (JSStackFrame *)(block + JS_VM_FRAME_PREFIX);
     }
     sf->l2_flags = JS_SF_SEG;     // a floor: entered from C, returns to C
-#ifdef CONFIG_POCKET_VM_YIELD
     if (vm_floor_may_yield) {
         sf->l2_flags |= JS_SF_MAY_YIELD | JS_SF_OWNS_FUNC;
         rt->vm_susp.floor = sf;
         rt->vm_floor_this = js_dup(this_obj);
         rt->vm_floor_new_target = js_dup(new_target);
     }
-#endif
     sf->caller_ctx = caller_ctx;
-#else
-    sf = js_vm_stack_push(rt, &rt->vm_stack, sizeof(JSStackFrame) + alloca_size);
-    if (unlikely(!sf)) {
-        return JS_ThrowOutOfMemory(caller_ctx);
-    }
-#endif
     local_buf = (JSValue *)(sf + 1);
-#else
-    if (js_check_stack_overflow(rt, alloca_size)) {
-        return JS_ThrowStackOverflow(caller_ctx);
-    }
-#endif
 
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     // From here to restart: the frame is pushed and p / b / sf / local_buf /
     // argc / argv / func_obj / this_obj / new_target / caller_ctx describe
     // the callee. The flat call site (flat_call:, in the loop) arrives here
     // with the same set, so one copy of the prologue serves both entries.
 frame_pushed:
-#endif
-#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
     call_inputs_valid = true;
-#endif
     sf->is_strict_mode = b->is_strict_mode;
     arg_buf = (JSValue *)argv;
     sf->arg_count = argc;
     sf->cur_func = unsafe_unconst(func_obj);
-#ifdef CONFIG_POCKET_VM_YIELD
     if (sf->l2_flags & JS_SF_OWNS_FUNC)
         sf->cur_func = js_dup(func_obj);
-#endif
     var_refs = p->u.func.var_refs;
 
-#ifndef CONFIG_POCKET_VM_SEGFRAMES
-    local_buf = alloca(alloca_size);
-#endif
     if (unlikely(arg_allocated_size)) {
         int n = min_int(argc, arg_allocated_size);
         arg_buf = local_buf;
@@ -19338,15 +19991,6 @@ frame_pushed:
         for (; i < arg_allocated_size; i++) {
             arg_buf[i] = JS_UNDEFINED;
         }
-#ifndef CONFIG_POCKET_VM_FLATCALLS
-        // D11 (design sec.9): with flat calls sf->arg_count keeps the argc
-        // the caller PASSED, because the return path rebuilds the caller's
-        // `argc` local from it and OP_rest / arguments read that, not the
-        // declared count (which lives in b->arg_count for anyone who needs
-        // it). No reader of sf->arg_count exists in this tree, so the other
-        // builds keep the upstream line only to stay byte-identical.
-        sf->arg_count = b->arg_count;
-#endif
     }
     var_buf = local_buf + arg_allocated_size;
     sf->var_buf = var_buf;
@@ -19373,12 +20017,10 @@ frame_pushed:
     rt->current_stack_frame = sf;
     ctx = b->realm; /* set the current realm */
 
-#ifdef CONFIG_POCKET_VM_YIELD
     /* Class B is after the complete push, so resuming never repeats a call.
        The prologue already polled the watchdog; do not count it twice. */
     if (js_vm_push_yield(rt, sf))
         goto vm_yield;
-#endif
 
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_STEP
     if (check_dump_flag(ctx->rt, JS_DUMP_BYTECODE_STEP)) {
@@ -19457,7 +20099,8 @@ restart:
                             val = js_dup(pr->u.value);
                             break;
                         }
-                        if (unlikely(p->is_exotic)) {
+                        /* a lazy object (F2) may hold it in a list */
+                        if (unlikely(p->is_exotic || js_obj_lazy(p))) {
                             obj = JS_MKPTR(JS_TAG_OBJECT, p);
                             goto get_length_slow_path;
                         }
@@ -19744,9 +20387,6 @@ normal_this:
                 call_argc = opcode - OP_call0;
             goto has_call_argc;
             CASE(OP_tail_call):
-#ifdef CONFIG_POCKET_VM_TCO
-                goto try_tail_reuse;
-#endif
                 // Tail-call entry (TCO, docs/vm/vm-tco-design.md, a draft):
                 // its own dispatch label, placed ABOVE OP_call so that a
                 // frame-reusing tail call can be added here without one
@@ -19763,7 +20403,6 @@ normal_this:
 has_call_argc:
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
-#ifdef CONFIG_POCKET_VM_FLATCALLS
                 // L2b: a bytecode callee runs in this activation. Anything
                 // else (native, bound, proxy, generator/async class, and a
                 // frame whose bytecode is not JS_FUNC_NORMAL -- see the
@@ -19775,7 +20414,6 @@ has_call_argc:
                 if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
-#endif
                 ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
                                           JS_UNDEFINED, call_argc,
                                           vc(call_argv), 0);
@@ -19811,47 +20449,6 @@ has_call_argc:
             }
             BREAK;
             CASE(OP_tail_call_method):
-#ifdef CONFIG_POCKET_VM_TCO
-try_tail_reuse: {
-                int reused;
-                sf->cur_pc = pc + 2;
-                reused = js_vm_tail_reuse(ctx, sf, sp, get_u16(pc),
-                                          opcode == OP_tail_call_method);
-                if (reused < 0) {
-                    pc += 2;
-                    goto exception;
-                }
-                if (reused) {
-tail_reused:
-#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
-                    call_inputs_valid = true;
-#endif
-                    func_obj = sf->cur_func;
-                    p = JS_VALUE_GET_OBJ(func_obj);
-                    b = p->u.func.function_bytecode;
-                    ctx = b->realm;
-                    var_refs = p->u.func.var_refs;
-                    arg_buf = sf->arg_buf;
-                    var_buf = sf->var_buf;
-                    local_buf = (JSValue *)(sf + 1);
-                    stack_buf = var_buf + b->var_count;
-                    argc = sf->arg_count;
-                    argv = vc(arg_buf);
-                    this_obj = arg_buf[-1];
-                    new_target = JS_UNDEFINED;
-                    pc = sf->cur_pc;
-                    sp = stack_buf;
-                    if (js_vm_push_yield(rt, sf))
-                        goto vm_yield;
-                    goto restart;
-                }
-                if (opcode == OP_tail_call) {
-                    call_argc = get_u16(pc);
-                    pc += 2;
-                    goto has_call_argc;
-                }
-            }
-#endif
                 // Tail-call entry for the method form -- same contract as
                 // OP_tail_call above: empty, falls through, must not move pc.
             CASE(OP_call_method): {
@@ -19859,14 +20456,12 @@ tail_reused:
                 pc += 2;
                 call_argv = sp - call_argc;
                 sf->cur_pc = pc;
-#ifdef CONFIG_POCKET_VM_FLATCALLS
                 // L2b, as at has_call_argc; the block reads `this` from
                 // call_argv[-2] and drops one slot more on return
                 // (JS_RET_METHOD), both keyed on `opcode`.
                 if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
-#endif
                 ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
                                           JS_UNDEFINED, call_argc,
                                           vc(call_argv), 0);
@@ -20029,13 +20624,6 @@ non_ctor_call:
                     ret_val = JS_EvalObject(ctx, JS_UNDEFINED, obj,
                                             JS_EVAL_TYPE_DIRECT, scope_idx);
                 } else {
-#ifdef CONFIG_POCKET_VM_TCO
-                    if (*pc == OP_return) {
-                        int reused = js_vm_tail_reuse(ctx, sf, sp, call_argc, false);
-                        if (reused < 0) goto exception;
-                        if (reused) goto tail_reused;
-                    }
-#endif
                     ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
                                               JS_UNDEFINED, call_argc,
                                               vc(call_argv), 0);
@@ -20449,33 +21037,15 @@ non_ctor_call:
 
             CASE(OP_goto):
                 pc += (int32_t)get_u32(pc);
-#ifdef CONFIG_POCKET_VM_YIELD
             JS_VM_POLL_SAFEPOINT();
-#else
-            if (unlikely(js_poll_safepoint(ctx))) {
-                goto exception;
-            }
-#endif
             BREAK;
             CASE(OP_goto16):
                 pc += (int16_t)get_u16(pc);
-#ifdef CONFIG_POCKET_VM_YIELD
             JS_VM_POLL_SAFEPOINT();
-#else
-            if (unlikely(js_poll_safepoint(ctx))) {
-                goto exception;
-            }
-#endif
             BREAK;
             CASE(OP_goto8):
                 pc += (int8_t)pc[0];
-#ifdef CONFIG_POCKET_VM_YIELD
             JS_VM_POLL_SAFEPOINT();
-#else
-            if (unlikely(js_poll_safepoint(ctx))) {
-                goto exception;
-            }
-#endif
             BREAK;
             CASE(OP_if_true): {
                 int res;
@@ -20492,13 +21062,7 @@ non_ctor_call:
                 if (res) {
                     pc += (int32_t)get_u32(pc - 4) - 4;
                 }
-#ifdef CONFIG_POCKET_VM_YIELD
                 JS_VM_POLL_SAFEPOINT();
-#else
-                if (unlikely(js_poll_safepoint(ctx))) {
-                    goto exception;
-                }
-#endif
             }
             BREAK;
             CASE(OP_if_false): {
@@ -20516,13 +21080,7 @@ non_ctor_call:
                 if (!res) {
                     pc += (int32_t)get_u32(pc - 4) - 4;
                 }
-#ifdef CONFIG_POCKET_VM_YIELD
                 JS_VM_POLL_SAFEPOINT();
-#else
-                if (unlikely(js_poll_safepoint(ctx))) {
-                    goto exception;
-                }
-#endif
             }
             BREAK;
             CASE(OP_if_true8): {
@@ -20540,13 +21098,7 @@ non_ctor_call:
                 if (res) {
                     pc += (int8_t)pc[-1] - 1;
                 }
-#ifdef CONFIG_POCKET_VM_YIELD
                 JS_VM_POLL_SAFEPOINT();
-#else
-                if (unlikely(js_poll_safepoint(ctx))) {
-                    goto exception;
-                }
-#endif
             }
             BREAK;
             CASE(OP_if_false8): {
@@ -20564,13 +21116,7 @@ non_ctor_call:
                 if (!res) {
                     pc += (int8_t)pc[-1] - 1;
                 }
-#ifdef CONFIG_POCKET_VM_YIELD
                 JS_VM_POLL_SAFEPOINT();
-#else
-                if (unlikely(js_poll_safepoint(ctx))) {
-                    goto exception;
-                }
-#endif
             }
             BREAK;
             CASE(OP_catch): {
@@ -20779,7 +21325,8 @@ ret_fail:
                             val = js_dup(pr->u.value);
                             break;
                         }
-                        if (unlikely(p->is_exotic)) {
+                        /* a lazy object (F2) may hold it in a list */
+                        if (unlikely(p->is_exotic || js_obj_lazy(p))) {
                             /* XXX: should avoid the slow path for arrays
                                and typed arrays by ensuring that 'prop' is
                                not numeric */
@@ -20828,7 +21375,8 @@ get_field_slow_path:
                             val = js_dup(pr->u.value);
                             break;
                         }
-                        if (unlikely(p->is_exotic)) {
+                        /* a lazy object (F2) may hold it in a list */
+                        if (unlikely(p->is_exotic || js_obj_lazy(p))) {
                             /* XXX: should avoid the slow path for arrays
                                and typed arrays by ensuring that 'prop' is
                                not numeric */
@@ -22051,7 +22599,6 @@ DEFAULT:
                                       (int)(pc - b->byte_code_buf - 1), opcode);
             goto exception;
         }
-#ifdef CONFIG_POCKET_VM_FLATCALLS
         // Not reached with DIRECT_DISPATCH (BREAK re-dispatches); with a
         // plain switch every opcode's `break` lands here and must go round.
         continue;
@@ -22232,30 +22779,18 @@ flat_async_call: {
             argv = vc(nsf->arg_buf);
             this_obj = s->func_state.this_val;
             new_target = JS_UNDEFINED;
-#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
             call_inputs_valid = true;
-#endif
-#ifdef CONFIG_POCKET_VM_YIELD
             if (js_vm_push_yield(rt, sf))
                 goto vm_yield;
-#endif
             goto restart;
         }
-#endif
     }
-#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
 restore_call_inputs:
     // Entry-only inputs are not needed by ordinary body opcodes. A default
     // initializer can call JS before rest/arguments are built, so reconstruct
     // from the *current* frame when one of the five input readers runs.
     if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) == (JS_SF_FLAT | JS_SF_SEG)) {
         argc = sf->arg_count;
-#ifdef CONFIG_POCKET_VM_TCO
-        if (sf->l2_flags & JS_SF_TAIL) {
-            argv = vc(sf->arg_buf);
-            this_obj = sf->arg_buf[-1];
-        } else
-#endif
         {
             argv = vc(js_vm_flat_caller_sp(sf) - argc);
             this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
@@ -22282,8 +22817,6 @@ restore_call_inputs:
     case OP_init_ctor: goto inputs_ready_OP_init_ctor;
     default: abort();
     }
-#endif
-#ifdef CONFIG_POCKET_VM_YIELD
 vm_yield: {
         JSStackFrame *walk = sf;
         sf->cur_pc = pc;
@@ -22324,7 +22857,6 @@ vm_yield: {
         }
         return JS_EXCEPTION;
     }
-#endif
 exception:
     if (needs_backtrace(rt->current_exception)
             || JS_IsUndefined(ctx->error_back_trace)) {
@@ -22333,9 +22865,7 @@ exception:
                         NULL, 0, 0, 0);
     }
     if (
-#ifdef CONFIG_POCKET_VM_YIELD
         !rt->vm_terminating &&
-#endif
         !JS_IsUncatchableError(rt->current_exception)) {
         while (sp > stack_buf) {
             JSValue val = *--sp;
@@ -22377,7 +22907,6 @@ done:
             JS_FreeValue(ctx, *pval);
         }
     }
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) == JS_SF_FLAT) {
         // L2b-async return (design D34): a flat async frame has reached its
         // first await / return / uncaught throw, and done_generator: has
@@ -22424,15 +22953,11 @@ done:
         sf = csf;
         goto resume_caller;
     }
-#endif
     {
-#ifdef CONFIG_POCKET_VM_YIELD
         const bool owns_func = (sf->l2_flags & JS_SF_OWNS_FUNC) != 0;
         if (!(sf->l2_flags & JS_SF_SEG))
             sf->l2_flags &= ~(JS_SF_MAY_YIELD | JS_SF_SUSPENDED);
-#endif
         js_vm_pop_frame(rt, sf);
-#ifdef CONFIG_POCKET_VM_YIELD
         if (owns_func) {
             JS_FreeValueRT(rt, sf->cur_func);
             JS_FreeValueRT(rt, rt->vm_floor_this);
@@ -22443,9 +22968,7 @@ done:
             rt->vm_susp.floor = NULL;
             rt->vm_terminating = false;
         }
-#endif
     }
-#ifdef CONFIG_POCKET_VM_SEGFRAMES
     // Last, after close_var_refs has detached every JSVarRef that pointed
     // into the block and after the pop hook has read sf->prev_frame: the
     // block is dead the moment this returns. "Did this call push" is asked
@@ -22465,16 +22988,10 @@ done:
     // state already in cache. The generator path (frame in a
     // JSAsyncFunctionState) never lies inside a segment.
     if (js_vm_stack_holds(&rt->vm_stack, sf)) {
-#ifdef CONFIG_POCKET_VM_FLATCALLS
         js_vm_stack_pop(rt, &rt->vm_stack, ((JSVMLink *)sf) - 1);
-#else
-        js_vm_stack_pop(rt, &rt->vm_stack, sf);
-#endif
     }
-#endif
     return ret_val;
 
-#ifdef CONFIG_POCKET_VM_FLATCALLS
 resume_caller: {
         // A flat frame has returned and `sf` is already its caller, with
         // `sp` the caller's operand stack pointer, `ret_shape` the returning
@@ -22498,13 +23015,8 @@ resume_caller: {
         pc = sf->cur_pc;
         caller_ctx = sf->caller_ctx;
         func_obj = sf->cur_func;
-#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
         call_inputs_valid = false;
-#ifdef CONFIG_POCKET_VM_CALLBENCH
-        if (!rt->vm_bench_eager_inputs)
-#endif
             goto call_inputs_ready;
-#endif
         if ((sf->l2_flags & (JS_SF_FLAT | JS_SF_SEG)) == (JS_SF_FLAT | JS_SF_SEG)) {
             // A flat SEG frame. D11: a flat push leaves the true argc in
             // arg_count. Its argv is the caller's slots below the sp its
@@ -22512,12 +23024,6 @@ resume_caller: {
             // `this` the slot below the func slot for a method call, and it
             // was never a constructor call.
             argc = sf->arg_count;
-#ifdef CONFIG_POCKET_VM_TCO
-            if (sf->l2_flags & JS_SF_TAIL) {
-                argv = vc(sf->arg_buf);
-                this_obj = sf->arg_buf[-1];
-            } else
-#endif
             {
                 argv = vc(js_vm_flat_caller_sp(sf) - argc);
                 this_obj = (sf->ret_shape & JS_RET_METHOD) ? argv[-2] : JS_UNDEFINED;
@@ -22541,10 +23047,8 @@ resume_caller: {
             this_obj = floor_this;
             new_target = floor_new_target;
         }
-#ifdef CONFIG_POCKET_VM_LAZY_INPUTS
         call_inputs_valid = true;
 call_inputs_ready:
-#endif
         if (settle_s) {
             // The flat async frame's first stretch is over: settle its
             // promise (D34) with the caller's locals in place, so that any
@@ -22578,7 +23082,6 @@ call_inputs_ready:
         *sp++ = ret_val;
         goto restart;
     }
-#endif
 #undef ENSURE_CALL_INPUTS
 }
 
@@ -22589,7 +23092,6 @@ JSValue JS_Call(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
                            argc, argv, JS_CALL_FLAG_COPY_ARGV);
 }
 
-#ifdef CONFIG_POCKET_VM_YIELD
 void JS_VMRequestYield(JSRuntime *rt)
 {
     atomic_store_explicit(&rt->vm_yield_req, 1, memory_order_relaxed);
@@ -22753,7 +23255,6 @@ JSValue JS_VMEval(JSContext *ctx, const char *input, size_t input_len,
     rt->vm_entry_ok = old_entry;
     return ret;
 }
-#endif
 
 /* A job tail consumes its result, but borrows job argv and optional aux.
    Aux belongs to the job until the tail finishes, including across yields. */
@@ -22763,12 +23264,9 @@ static JSValue JS_VMCallJob(JSContext *ctx, JSValueConst func, JSValueConst this
                             JSValueConst *job_argv, JSValue *aux)
 {
     JSValue ret;
-#ifdef CONFIG_POCKET_VM_YIELD
     JSRuntime *rt = ctx->rt;
     rt->vm_entry_ok = !rt->vm_entry_block;
-#endif
     ret = JS_Call(ctx, func, this_val, argc, argv);
-#ifdef CONFIG_POCKET_VM_YIELD
     rt->vm_entry_ok = 0;
     if (rt->vm_susp.top &&
         (rt->vm_owner_kind == 0 || !JS_IsUndefined(ret))) {
@@ -22781,12 +23279,9 @@ static JSValue JS_VMCallJob(JSContext *ctx, JSValueConst func, JSValueConst this
         return JS_EXCEPTION;
     }
     rt->vm_entry_block++;
-#endif
     if (tail)
         ret = tail(ctx, ret, job_argv, aux);
-#ifdef CONFIG_POCKET_VM_YIELD
     rt->vm_entry_block--;
-#endif
     if (aux) {
         JS_FreeValue(ctx, aux[0]);
         JS_FreeValue(ctx, aux[1]);
@@ -22859,7 +23354,7 @@ static JSValue js_create_from_ctor(JSContext *ctx, JSValueConst ctor,
     JSContext *realm;
 
     if (JS_IsUndefined(ctor)) {
-        proto = js_dup(ctx->class_proto[class_id]);
+        if (LAZY_CLASS_MISSING(ctx, class_id)) { return JS_EXCEPTION; } proto = js_dup(ctx->class_proto[class_id]);
     } else {
         proto = JS_GetProperty(ctx, ctor, JS_ATOM_prototype);
         if (JS_IsException(proto)) {
@@ -22871,7 +23366,7 @@ static JSValue js_create_from_ctor(JSContext *ctx, JSValueConst ctor,
             if (!realm) {
                 return JS_EXCEPTION;
             }
-            proto = js_dup(realm->class_proto[class_id]);
+            if (LAZY_CLASS_MISSING(realm, class_id)) { return JS_EXCEPTION; } proto = js_dup(realm->class_proto[class_id]);
         }
     }
     obj = JS_NewObjectProtoClass(ctx, proto, class_id);
@@ -23363,9 +23858,7 @@ static bool js_async_function_settle_core(JSContext *ctx, JSAsyncFunctionData *s
     if (JS_IsException(func_ret)) {
 fail:
         if (unlikely(
-#ifdef CONFIG_POCKET_VM_YIELD
             ctx->rt->vm_terminating ||
-#endif
             JS_IsUncatchableError(ctx->rt->current_exception))) {
             is_success = false;
         } else {
@@ -23434,7 +23927,6 @@ resolved:
 static bool js_async_function_resume(JSContext *ctx, JSAsyncFunctionData *s)
 {
     JSValue ret = async_func_resume(ctx, &s->func_state);
-#ifdef CONFIG_POCKET_VM_YIELD
     ctx->rt->vm_entry_ok = 0;
     if (ctx->rt->vm_susp.top) {
         /* The current job/creator can release its references after return. */
@@ -23442,11 +23934,9 @@ static bool js_async_function_resume(JSContext *ctx, JSAsyncFunctionData *s)
         ctx->rt->vm_owner_kind = 1;
         return true;
     }
-#endif
     return js_async_function_settle_core(ctx, s, ret);
 }
 
-#ifdef CONFIG_POCKET_VM_FLATCALLS
 // L2b-async (design D34): the tail of js_async_function_call for a call that
 // ran flat -- the body has already run in the caller's activation and
 // `func_ret` is what done_generator: produced. Settles, drops the creator's
@@ -23467,7 +23957,6 @@ static JSValue js_async_flat_settle(JSContext *ctx, JSAsyncFunctionData *s,
     js_async_function_free(ctx->rt, s);
     return promise;
 }
-#endif
 
 static JSValue js_async_function_resolve_call(JSContext *ctx,
                                               JSValueConst func_obj,
@@ -23492,18 +23981,12 @@ static JSValue js_async_function_resolve_call(JSContext *ctx,
         /* return value of await */
         s->func_state.frame.cur_sp[-1] = js_dup(arg);
     }
-#ifdef CONFIG_POCKET_VM_YIELD
     ctx->rt->vm_entry_ok = !ctx->rt->vm_entry_block;
-#endif
     if (!js_async_function_resume(ctx, s)) {
-#ifdef CONFIG_POCKET_VM_YIELD
         ctx->rt->vm_entry_ok = 0;
-#endif
         return JS_EXCEPTION;
     }
-#ifdef CONFIG_POCKET_VM_YIELD
     ctx->rt->vm_entry_ok = 0;
-#endif
     return JS_UNDEFINED;
 }
 
@@ -23814,9 +24297,7 @@ static void js_async_generator_resume_next(JSContext *ctx,
 {
     JSAsyncGeneratorRequest *next;
     JSValue func_ret, value;
-#ifdef CONFIG_POCKET_VM_YIELD
     bool may_yield = ctx->rt->vm_entry_ok && ctx->rt->current_stack_frame == NULL;
-#endif
 
     for (;;) {
         if (list_empty(&s->queue)) {
@@ -23865,18 +24346,14 @@ exec_no_arg:
             }
             s->state = JS_ASYNC_GENERATOR_STATE_EXECUTING;
 resume_exec:
-#ifdef CONFIG_POCKET_VM_YIELD
             ctx->rt->vm_entry_ok = may_yield;
-#endif
             func_ret = async_func_resume(ctx, &s->func_state);
-#ifdef CONFIG_POCKET_VM_YIELD
             ctx->rt->vm_entry_ok = 0;
             if (ctx->rt->vm_susp.top) {
                 ctx->rt->vm_owner_kind = 2;
                 ctx->rt->vm_floor_this = js_dup(JS_MKPTR(JS_TAG_OBJECT, s->generator));
                 return;
             }
-#endif
             if (JS_IsException(func_ret)) {
                 value = JS_GetException(ctx);
                 js_async_generator_complete(ctx, s);
@@ -23935,9 +24412,7 @@ static JSValue js_async_generator_resolve_function(JSContext *ctx,
     bool is_reject = magic & 1;
     JSAsyncGeneratorData *s = JS_GetOpaque(func_data[0], JS_CLASS_ASYNC_GENERATOR);
     JSValueConst arg = argv[0];
-#ifdef CONFIG_POCKET_VM_YIELD
     JSStackFrame *native_frame = ctx->rt->current_stack_frame;
-#endif
 
     /* XXX: what if s == NULL */
 
@@ -23960,7 +24435,6 @@ static JSValue js_async_generator_resolve_function(JSContext *ctx,
             /* return value of await */
             s->func_state.frame.cur_sp[-1] = js_dup(arg);
         }
-#ifdef CONFIG_POCKET_VM_YIELD
         /* C_FUNCTION_DATA installs a native frame even for this internal
            continuation. Its only remaining action is to return undefined;
            detach it while the heap owner runs, then restore it for C's pop.
@@ -23968,17 +24442,13 @@ static JSValue js_async_generator_resolve_function(JSContext *ctx,
         if (native_frame && native_frame->prev_frame == NULL)
             ctx->rt->current_stack_frame = NULL;
         ctx->rt->vm_entry_ok = !ctx->rt->vm_entry_block;
-#endif
         js_async_generator_resume_next(ctx, s);
-#ifdef CONFIG_POCKET_VM_YIELD
         ctx->rt->vm_entry_ok = 0;
         ctx->rt->current_stack_frame = native_frame;
-#endif
     }
     return JS_UNDEFINED;
 }
 
-#ifdef CONFIG_POCKET_VM_YIELD
 static JSValue js_vm_resume_owner(JSContext *ctx)
 {
     JSRuntime *rt = ctx->rt;
@@ -24008,7 +24478,6 @@ static JSValue js_vm_resume_owner(JSContext *ctx)
     }
     return ok ? JS_UNDEFINED : JS_EXCEPTION;
 }
-#endif
 
 /* magic = GEN_MAGIC_x */
 static JSValue js_async_generator_next(JSContext *ctx, JSValueConst this_val,
@@ -24434,6 +24903,7 @@ typedef struct JSParseState {
     const uint8_t *buf_end;
     const uint8_t *eol;  // most recently seen end-of-line character
     const uint8_t *mark; // first token character, invariant: eol < mark
+    uint32_t oom_count; /* PocketJS: rt->oom_count when the parse began */
 
     /* current function code */
     JSFunctionDef *cur_func;
@@ -24579,6 +25049,27 @@ int JS_PRINTF_FORMAT_ATTR(2, 3) js_parse_error(JSParseState *s, JS_PRINTF_FORMAT
     va_list ap;
     int backtrace_flags;
 
+    /* PocketJS: once an allocation has failed during this parse, a syntax
+       error is almost always the parser misreading its own damaged state,
+       not the source, and reporting it would send the app author hunting for
+       a mistake that is not there. Two ways in, both measured with
+       --fail-alloc on every allocation of closures.js / generators.js:
+       - the function's byte code DynBuf failed (170 of 181 points): the
+         parser keeps going, get_prev_opcode() then answers OP_invalid, and
+         the lvalue checks say "invalid assignment left-hand side" or
+         "invalid increment/decrement operand";
+       - js_parse_skip_parens_token's lookahead lexer failed to make an atom
+         (11 points): it swallows the error by design (its "XXX: should clear
+         the exception"), returns a wrong guess, and the parser takes the
+         wrong branch ("Unexpected token '=>'", "variable name expected",
+         "expected 'of' or 'in'...").
+       In both, the OOM thrown by js_realloc was already pending and the
+       syntax error overwrote it. Report the OOM instead. A parse that met no
+       failed allocation is unaffected, so genuine syntax errors are too. */
+    if (unlikely(ctx->rt->oom_count != s->oom_count)) {
+        JS_ThrowOutOfMemory(ctx);
+        return -1;
+    }
     va_start(ap, fmt);
     JS_ThrowError2(ctx, JS_SYNTAX_ERROR, false, fmt, ap);
     va_end(ap);
@@ -26199,6 +26690,16 @@ static int cpool_add(JSParseState *s, JSValue val)
 
     if (js_resize_array(s->ctx, (void *)&fd->cpool, sizeof(fd->cpool[0]),
                         &fd->cpool_size, fd->cpool_count + 1)) {
+        /* PocketJS: the pool takes ownership of `val` ("not duplicated"
+           above), so a failed growth has to consume it too. emit_push_const
+           hands over a fresh js_dup() and its only caller with a GC object,
+           js_parse_template, has already released its own reference by the
+           time it sees -1: the template's strings array stayed at
+           ref_count 1 forever (special_calls.js --fail-alloc 1979 / 2047)
+           and JS_FreeRuntime asserted on the non-empty gc_obj_list. The
+           other callers pass JS_NULL, for which this is a no-op. Same in
+           quickjs-ng master (2026-09-23). */
+        JS_FreeValue(s->ctx, val);
         return -1;
     }
     fd->cpool[fd->cpool_count++] = val;
@@ -28113,22 +28614,25 @@ private_field_already_defined:
         }
     }
     /* patch the constant pool index for the constructor */
-    put_u32(fd->byte_code.buf + ctor_cpool_offset, ctor_fd->parent_cpool_idx);
+    /* PocketJS: ctor_cpool_offset was recorded as byte_code.size just
+       BEFORE emit_u32 wrote its placeholder. If that write (or any before
+       it) failed, size stopped there, so the offset names the first byte
+       past the valid data -- the patch then writes 4 bytes beyond the
+       buffer, or through a NULL buf when nothing was ever allocated (ASan:
+       heap-buffer-overflow / unknown-crash here, reached with vmrun
+       --fail-alloc on any file that declares a class). The buffer is dead
+       once it has failed -- resolve_variables refuses it -- so the patch is
+       simply skipped. The same rule is applied to every patch-at-a-recorded-
+       offset in the parser that get_prev_opcode() does not already guard. */
+    if (!dbuf_error(&fd->byte_code))
+        put_u32(fd->byte_code.buf + ctor_cpool_offset, ctor_fd->parent_cpool_idx);
 
     /* store the class source code in the constructor. */
     js_free(ctx, ctor_fd->source);
-#ifdef CONFIG_POCKET_VM_STRIP_FN_SOURCE
     /* See js_function_toString: no copy is kept, so the class's constructor
        prints the name-only fallback instead of the class body. */
     ctor_fd->source = NULL;
     ctor_fd->source_len = 0;
-#else
-    ctor_fd->source_len = s->buf_ptr - class_start_ptr;
-    ctor_fd->source = js_strndup(ctx, (const char *)class_start_ptr, ctor_fd->source_len);
-    if (!ctor_fd->source) {
-        goto fail;
-    }
-#endif
 
     /* consume the '}' */
     if (next_token(s)) {
@@ -28154,7 +28658,10 @@ private_field_already_defined:
             }
             /* patch the start of the function to enable the
                OP_add_brand_instance code */
-            cf->fields_init_fd->byte_code.buf[cf->brand_push_pos] = OP_push_true;
+            /* PocketJS: a recorded offset into ANOTHER function's byte code;
+               see the constructor patch in js_parse_class. */
+            if (!dbuf_error(&cf->fields_init_fd->byte_code))
+                cf->fields_init_fd->byte_code.buf[cf->brand_push_pos] = OP_push_true;
         }
 
         /* store the function to initialize the fields to that it can be
@@ -31431,7 +31938,16 @@ initializer_error:
             return -1;
         }
         dbuf_put(bc, bc->buf + pos_next, chunk_size);
-        memset(bc->buf + pos_next, OP_nop, chunk_size);
+        /* PocketJS: chunk_size is 0 when the byte code buffer failed before
+           the `next` part was emitted -- both positions were read off a size
+           that had stopped moving -- and dbuf_claim(bc, 0) succeeds without
+           allocating, so bc->buf can still be NULL here. memset(NULL, x, 0)
+           is undefined (UBSan: null pointer passed as argument 1, reached
+           with vmrun --fail-alloc in a for-of). dbuf_put already skips a
+           zero-length copy; this skips the matching fill. The function is
+           dead either way: resolve_variables refuses its errored buffer. */
+        if (chunk_size > 0)
+            memset(bc->buf + pos_next, OP_nop, chunk_size);
         /* `next` part ends with a goto */
         s->cur_func->last_opcode_pos = bc->size - 5;
         /* relocate labels */
@@ -32011,8 +32527,12 @@ haslet:
         }
         if (default_label_pos >= 0) {
             /* Ugly patch for the `default` label, shameful and risky */
-            put_u32(s->cur_func->byte_code.buf + default_label_pos,
-                    label_case);
+            /* PocketJS: and unsafe once the buffer has failed -- the
+               recorded position may lie past the valid data (see the
+               constructor patch in js_parse_class). */
+            if (!dbuf_error(&s->cur_func->byte_code))
+                put_u32(s->cur_func->byte_code.buf + default_label_pos,
+                        label_case);
             s->cur_func->label_slots[label_case].pos = default_label_pos + 4;
         } else {
             emit_label(s, label_case);
@@ -35844,6 +36364,10 @@ static int add_var_this(JSContext *ctx, JSFunctionDef *fd)
     return idx;
 }
 
+/* PocketJS: resolve_pseudo_var's third answer, next to "index" and "-1: no
+   binding here" -- add_var failed (see the comment at its alloc_fail). */
+#define RESOLVE_PSEUDO_VAR_ALLOC_FAIL (-2)
+
 static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
                               JSAtom var_name)
 {
@@ -35857,6 +36381,8 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         /* 'home_object' pseudo variable */
         if (s->home_object_var_idx < 0) {
             s->home_object_var_idx = add_var(ctx, s, var_name);
+            if (s->home_object_var_idx < 0)
+                goto alloc_fail;   /* PocketJS: see below */
         }
         var_idx = s->home_object_var_idx;
         break;
@@ -35864,6 +36390,8 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         /* 'this.active_func' pseudo variable */
         if (s->this_active_func_var_idx < 0) {
             s->this_active_func_var_idx = add_var(ctx, s, var_name);
+            if (s->this_active_func_var_idx < 0)
+                goto alloc_fail;
         }
         var_idx = s->this_active_func_var_idx;
         break;
@@ -35871,6 +36399,8 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         /* 'new.target' pseudo variable */
         if (s->new_target_var_idx < 0) {
             s->new_target_var_idx = add_var(ctx, s, var_name);
+            if (s->new_target_var_idx < 0)
+                goto alloc_fail;
         }
         var_idx = s->new_target_var_idx;
         break;
@@ -35878,6 +36408,8 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         /* 'this' pseudo variable */
         if (s->this_var_idx < 0) {
             s->this_var_idx = add_var_this(ctx, s);
+            if (s->this_var_idx < 0)
+                goto alloc_fail;
         }
         var_idx = s->this_var_idx;
         break;
@@ -35886,6 +36418,19 @@ static int resolve_pseudo_var(JSContext *ctx, JSFunctionDef *s,
         break;
     }
     return var_idx;
+alloc_fail:
+    /* PocketJS: this function has two "no" answers that upstream (quickjs-ng
+       master as of 2026-09-23) folds into one -1: "this function has no
+       such binding, look in the parent" and "add_var could not grow the
+       vars array" (out of memory, or JS_MAX_LOCAL_VARS, which has already
+       thrown). resolve_scope_var treats -1 as the former, walks on to the
+       parent scopes and finally the global fallback, so a `this` or
+       `new.target` that failed to get its slot compiled as a global read of
+       the same name -- generators.js under vmrun --fail-alloc 2115
+       (add_var for `this` in a generator, needed by the yield* delegation)
+       ran and reported "TypeError: not a function" at the yield*. -2 is the
+       distinct answer; both callers route it to closure_fail. */
+    return RESOLVE_PSEUDO_VAR_ALLOC_FAIL;
 }
 
 /* test if 'var_name' is in the variable object on the stack. If is it
@@ -35970,16 +36515,27 @@ static int resolve_scope_var(JSContext *ctx, JSFunctionDef *s,
 
         if (var_idx < 0 && is_pseudo_var) {
             var_idx = resolve_pseudo_var(ctx, s, var_name);
+            if (var_idx == RESOLVE_PSEUDO_VAR_ALLOC_FAIL)
+                goto closure_fail;   /* PocketJS: see resolve_pseudo_var */
         }
 
         if (var_idx < 0 && var_name == JS_ATOM_arguments &&
                 s->has_arguments_binding) {
             /* 'arguments' pseudo variable */
             var_idx = add_arguments_var(ctx, s);
+            /* PocketJS: an allocation failure, not "absent" -- left alone
+               it falls through to the parent scopes and then the global
+               fallback (closure_fail; reproduced: closures.js under
+               vmrun --fail-alloc 1903 runs to mapped() and throws
+               "ReferenceError: arguments is not defined"). */
+            if (var_idx < 0)
+                goto closure_fail;
         }
         if (var_idx < 0 && s->is_func_expr && var_name == s->func_name) {
             /* add a new variable with the function name */
             var_idx = add_func_var(ctx, s, var_name);
+            if (var_idx < 0)
+                goto closure_fail;   /* PocketJS: as above */
         }
     }
     if (var_idx >= 0) {
@@ -36122,11 +36678,11 @@ local_scope_var:
             } else if (vd->var_name == JS_ATOM__with_ && !is_pseudo_var) {
                 capture_var(fd, vd);
                 idx = get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL, idx, vd->var_name, false, false, JS_VAR_NORMAL);
-                if (idx >= 0) {
-                    dbuf_putc(bc, OP_get_var_ref);
-                    dbuf_put_u16(bc, idx);
-                    var_object_test(ctx, s, var_name, op, bc, &label_done, 1);
-                }
+                if (idx < 0)
+                    goto closure_fail;   /* PocketJS: see closure_fail */
+                dbuf_putc(bc, OP_get_var_ref);
+                dbuf_put_u16(bc, idx);
+                var_object_test(ctx, s, var_name, op, bc, &label_done, 1);
             }
             idx = vd->scope_next;
         }
@@ -36143,17 +36699,25 @@ local_scope_var:
         }
         if (is_pseudo_var) {
             var_idx = resolve_pseudo_var(ctx, fd, var_name);
+            if (var_idx == RESOLVE_PSEUDO_VAR_ALLOC_FAIL)
+                goto closure_fail;   /* PocketJS: see resolve_pseudo_var */
             if (var_idx >= 0) {
                 break;
             }
         }
         if (var_name == JS_ATOM_arguments && fd->has_arguments_binding) {
             var_idx = add_arguments_var(ctx, fd);
+            /* PocketJS: -1 here is an allocation failure, not "absent";
+               left alone it reaches the global fallback (closure_fail). */
+            if (var_idx < 0)
+                goto closure_fail;
             break;
         }
         if (fd->is_func_expr && fd->func_name == var_name) {
             /* add a new variable with the function name */
             var_idx = add_func_var(ctx, fd, var_name);
+            if (var_idx < 0)
+                goto closure_fail;   /* PocketJS: as above */
             break;
         }
 
@@ -36164,6 +36728,8 @@ local_scope_var:
             idx = get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL,
                                   fd->var_object_idx, vd->var_name,
                                   false, false, JS_VAR_NORMAL);
+            if (idx < 0)
+                goto closure_fail;   /* PocketJS: see closure_fail */
             dbuf_putc(bc, OP_get_var_ref);
             dbuf_put_u16(bc, idx);
             var_object_test(ctx, s, var_name, op, bc, &label_done, 0);
@@ -36176,6 +36742,8 @@ local_scope_var:
             idx = get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL,
                                   fd->arg_var_object_idx, vd->var_name,
                                   false, false, JS_VAR_NORMAL);
+            if (idx < 0)
+                goto closure_fail;   /* PocketJS: see closure_fail */
             dbuf_putc(bc, OP_get_var_ref);
             dbuf_put_u16(bc, idx);
             var_object_test(ctx, s, var_name, op, bc, &label_done, 0);
@@ -36202,6 +36770,8 @@ local_scope_var:
                                           idx1,
                                           cv->var_name, cv->is_const,
                                           cv->is_lexical, cv->var_kind);
+                    if (idx < 0)
+                        goto closure_fail;   /* PocketJS: has_idx reads closure_var[idx] */
                 } else {
                     idx = idx1;
                 }
@@ -36216,6 +36786,8 @@ local_scope_var:
                                           idx1,
                                           cv->var_name, false, false,
                                           JS_VAR_NORMAL);
+                    if (idx < 0)
+                        goto closure_fail;   /* PocketJS: see closure_fail */
                 } else {
                     idx = idx1;
                 }
@@ -36242,6 +36814,11 @@ local_scope_var:
                                   fd->vars[var_idx].is_lexical,
                                   fd->vars[var_idx].var_kind);
         }
+        /* PocketJS: the silent-global case in closure_fail's comment --
+           without this, a failed capture fell out of this `if` and was
+           compiled by the global-variable code below. */
+        if (idx < 0)
+            goto closure_fail;
         if (idx >= 0) {
 has_idx:
             if ((op == OP_scope_put_var || op == OP_scope_make_ref) &&
@@ -36372,6 +36949,24 @@ done:
         s->label_slots[label_done].pos2 = bc->size;
     }
     return pos_next;
+closure_fail:
+    /* PocketJS: get_closure_var() creates the closure variable when it does
+       not exist yet, so it never returns -1 for "not found" -- only when
+       add_closure_var could not grow the array (out of memory) or hit the
+       16-bit limit. Upstream's call sites here treated that -1 three
+       different ways, all wrong: `if (idx >= 0)` and carry on to the next
+       scope, which ends in the GLOBAL-variable fallback at the bottom of
+       this function -- a variable the closure should have captured silently
+       compiled as a global read (reproduced: closures.js under
+       vmrun --fail-alloc 1764 prints its first two lines and then throws
+       "ReferenceError: shared is not defined"; had a global of that name
+       existed it would have read the wrong variable with no error at all);
+       no test, writing -1 into the operand as var_ref index 0xFFFF; and one
+       `goto has_idx` that reads s->closure_var[-1]. Marking the output
+       failed makes resolve_variables throw at its end, so the function
+       fails to compile -- the only honest result. */
+    dbuf_set_error(bc);
+    goto done;
 }
 
 /* search in all scopes */
@@ -36606,12 +37201,22 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
 
     /* in non strict mode, variables are created in the caller's
        environment object */
+    /* PocketJS: every add_var / add_*_var below returns -1 only when the
+       vars array could not grow (or JS_MAX_LOCAL_VARS, already thrown);
+       upstream drops all of these results, so the variable the eval was
+       promised is simply absent and the eval's code resolves the name one
+       scope too far out. Same disease as the get_closure_var sites
+       (fail: below); same cure. */
     if (!s->is_eval && !s->is_strict_mode) {
         s->var_object_idx = add_var(ctx, s, JS_ATOM__var_);
+        if (s->var_object_idx < 0)
+            goto fail;
         if (s->has_parameter_expressions) {
             /* an additional variable object is needed for the
                argument scope */
             s->arg_var_object_idx = add_var(ctx, s, JS_ATOM__arg_var_);
+            if (s->arg_var_object_idx < 0)
+                goto fail;
         }
     }
 
@@ -36620,29 +37225,40 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
     if (has_this_binding) {
         if (s->this_var_idx < 0) {
             s->this_var_idx = add_var_this(ctx, s);
+            if (s->this_var_idx < 0)
+                goto fail;
         }
         if (s->new_target_var_idx < 0) {
             s->new_target_var_idx = add_var(ctx, s, JS_ATOM_new_target);
+            if (s->new_target_var_idx < 0)
+                goto fail;
         }
         if (s->is_derived_class_constructor && s->this_active_func_var_idx < 0) {
             s->this_active_func_var_idx = add_var(ctx, s, JS_ATOM_this_active_func);
+            if (s->this_active_func_var_idx < 0)
+                goto fail;
         }
         if (s->has_home_object && s->home_object_var_idx < 0) {
             s->home_object_var_idx = add_var(ctx, s, JS_ATOM_home_object);
+            if (s->home_object_var_idx < 0)
+                goto fail;
         }
     }
     has_arguments_binding = s->has_arguments_binding;
     if (has_arguments_binding) {
-        add_arguments_var(ctx, s);
+        if (add_arguments_var(ctx, s) < 0)
+            goto fail;
         /* also add an arguments binding in the argument scope to
            raise an error if a direct eval in the argument scope tries
            to redefine it */
         if (s->has_parameter_expressions && !s->is_strict_mode) {
-            add_arguments_arg(ctx, s);
+            if (add_arguments_arg(ctx, s) < 0)
+                goto fail;
         }
     }
     if (s->is_func_expr && s->func_name != JS_ATOM_NULL) {
-        add_func_var(ctx, s, s->func_name);
+        if (add_func_var(ctx, s, s->func_name) < 0)
+            goto fail;
     }
 
     /* eval can use all the variables of the enclosing functions, so
@@ -36673,26 +37289,36 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
         if (!has_this_binding && fd->has_this_binding) {
             if (fd->this_var_idx < 0) {
                 fd->this_var_idx = add_var_this(ctx, fd);
+                if (fd->this_var_idx < 0)
+                    goto fail;   /* PocketJS: see above */
             }
             if (fd->new_target_var_idx < 0) {
                 fd->new_target_var_idx = add_var(ctx, fd, JS_ATOM_new_target);
+                if (fd->new_target_var_idx < 0)
+                    goto fail;
             }
             if (fd->is_derived_class_constructor && fd->this_active_func_var_idx < 0) {
                 fd->this_active_func_var_idx = add_var(ctx, fd, JS_ATOM_this_active_func);
+                if (fd->this_active_func_var_idx < 0)
+                    goto fail;
             }
             if (fd->has_home_object && fd->home_object_var_idx < 0) {
                 fd->home_object_var_idx = add_var(ctx, fd, JS_ATOM_home_object);
+                if (fd->home_object_var_idx < 0)
+                    goto fail;
             }
             has_this_binding = true;
         }
         /* add 'arguments' if it was not previously added */
         if (!has_arguments_binding && fd->has_arguments_binding) {
-            add_arguments_var(ctx, fd);
+            if (add_arguments_var(ctx, fd) < 0)
+                goto fail;
             has_arguments_binding = true;
         }
         /* add function name */
         if (fd->is_func_expr && fd->func_name != JS_ATOM_NULL) {
-            add_func_var(ctx, fd, fd->func_name);
+            if (add_func_var(ctx, fd, fd->func_name) < 0)
+                goto fail;
         }
 
         /* add lexical variables */
@@ -36700,8 +37326,9 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
         while (scope_idx >= 0) {
             vd = &fd->vars[scope_idx];
             capture_var(fd, vd);
-            get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL, scope_idx,
-                            vd->var_name, vd->is_const, vd->is_lexical, vd->var_kind);
+            if (get_closure_var(ctx, s, fd, JS_CLOSURE_LOCAL, scope_idx,
+                            vd->var_name, vd->is_const, vd->is_lexical, vd->var_kind) < 0)
+                goto fail;   /* PocketJS: see below */
             scope_idx = vd->scope_next;
         }
         is_arg_scope = (scope_idx == ARG_SCOPE_END);
@@ -36712,9 +37339,10 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
                 vd = &fd->args[i];
                 if (vd->var_name != JS_ATOM_NULL) {
                     capture_var(fd, vd);
-                    get_closure_var(ctx, s, fd,
+                    if (get_closure_var(ctx, s, fd,
                                     JS_CLOSURE_ARG, i, vd->var_name, false,
-                                    vd->is_lexical, JS_VAR_NORMAL);
+                                    vd->is_lexical, JS_VAR_NORMAL) < 0)
+                        goto fail;   /* PocketJS: see below */
                 }
             }
             for (i = 0; i < fd->var_count; i++) {
@@ -36724,9 +37352,10 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
                         vd->var_name != JS_ATOM__ret_ &&
                         vd->var_name != JS_ATOM_NULL) {
                     capture_var(fd, vd);
-                    get_closure_var(ctx, s, fd,
+                    if (get_closure_var(ctx, s, fd,
                                     JS_CLOSURE_LOCAL, i, vd->var_name, false,
-                                    vd->is_lexical, JS_VAR_NORMAL);
+                                    vd->is_lexical, JS_VAR_NORMAL) < 0)
+                        goto fail;   /* PocketJS: see below */
                 }
             }
         } else {
@@ -36735,9 +37364,10 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
                 /* do not close top level last result */
                 if (vd->scope_level == 0 && is_var_in_arg_scope(vd)) {
                     capture_var(fd, vd);
-                    get_closure_var(ctx, s, fd,
+                    if (get_closure_var(ctx, s, fd,
                                     JS_CLOSURE_LOCAL, i, vd->var_name, false,
-                                    vd->is_lexical, JS_VAR_NORMAL);
+                                    vd->is_lexical, JS_VAR_NORMAL) < 0)
+                        goto fail;   /* PocketJS: see below */
                 }
             }
         }
@@ -36747,13 +37377,27 @@ static void add_eval_variables(JSContext *ctx, JSFunctionDef *s)
                top level) */
             for (idx = 0; idx < fd->closure_var_count; idx++) {
                 JSClosureVar *cv = &fd->closure_var[idx];
-                get_closure_var(ctx, s, fd,
+                if (get_closure_var(ctx, s, fd,
                                 JS_CLOSURE_REF,
                                 idx, cv->var_name, cv->is_const,
-                                cv->is_lexical, cv->var_kind);
+                                cv->is_lexical, cv->var_kind) < 0)
+                    goto fail;   /* PocketJS: see below */
             }
         }
     }
+    return;
+fail:
+    /* PocketJS: add_eval_variables creates, in advance, a closure variable
+       for everything a direct eval inside this function could name. It
+       ignored get_closure_var's result, and -1 means add_closure_var could
+       not allocate: that variable then never reached the eval, whose code
+       would resolve the name as a global -- the same silent miscompile
+       resolve_scope_var's closure_fail describes. This function returns
+       nothing, so the failure is recorded on the function's byte code, and
+       resolve_variables refuses an errored buffer before it walks it: the
+       function fails to compile with the out-of-memory error already
+       pending from the failed allocation. */
+    dbuf_set_error(&s->byte_code);
 }
 
 static void set_closure_from_var(JSContext *ctx, JSClosureVar *cv,
@@ -37201,6 +37845,33 @@ static __exception int resolve_variables(JSContext *ctx, JSFunctionDef *s)
     DynBuf bc_out;
     CodeContext cc;
     int scope;
+
+    /* PocketJS: the input may end in half an instruction. When an emit runs
+       out of memory part-way (emit_source_loc's dbuf_putc lands, the
+       dbuf_put_u32 after it does not), dbuf_put writes nothing, sets the
+       error flag and leaves size where it was -- so the buffer ends on an
+       opcode byte whose operands were never written. The walk below advances
+       by each opcode's declared length and copies that many bytes with
+       dbuf_put, which reads past the end (ASan: heap-buffer-overflow, READ
+       of size 5, reached with vmrun --fail-alloc on an ordinary corpus file).
+
+       Upstream knows this state exists: free_bytecode_atoms stops at a short
+       instruction with the comment "may happen if there is not enough memory
+       when emitting bytecode". This pass never got the same guard, in
+       quickjs-ng or in bellard/quickjs (both master, 2026-09-23), which check
+       only the OUTPUT buffer's error at the end.
+
+       Refusing before the walk is enough, and nothing else is needed for the
+       refcounts: emit_atom claims its 4 bytes before duplicating the atom, so
+       a cut-short instruction holds no atom reference, and the caller's fail
+       path frees s->byte_code through the already-guarded
+       free_bytecode_atoms. Nothing has been moved into bc_out yet, which is
+       why this cannot use the `fail:` path below -- that one exists to finish
+       a copy that had started. */
+    if (dbuf_error(&s->byte_code)) {
+        JS_ThrowOutOfMemory(ctx);
+        return -1;
+    }
 
     cc.bc_buf = bc_buf = s->byte_code.buf;
     cc.bc_len = bc_len = s->byte_code.size;
@@ -37663,46 +38334,6 @@ static bool code_has_label(CodeContext *s, int pos, int label)
 /* return the target label, following the OP_goto jumps
    the first opcode at destination is stored in *pop
  */
-#ifdef CONFIG_POCKET_VM_TCO
-// Pass-2 code still has labels. Follow only control transfers and lexical
-// closes on the way to returning the call's value. nip_catch is only a
-// stack cleanup; runtime reuse additionally verifies transparent handlers.
-// Never cross gosub: that executes a finally after the call returns.
-// Do not change label refcounts; other predecessors still use this code.
-static bool js_vm_tail_return_path(JSFunctionDef *s, int pos)
-{
-    const uint8_t *code = s->byte_code.buf;
-    int limit = s->byte_code.size;
-    // Bound compile work even for cyclic or adversarial jump chains.
-    // Longer continuations conservatively keep an ordinary call.
-    for (int steps = 0; steps < 64 && pos >= 0 && pos < limit; steps++) {
-        int op = code[pos];
-        int size = opcode_info[op].size;
-        if (size > limit - pos)
-            return false;
-        switch (op) {
-        case OP_return:
-            return true;
-        case OP_source_loc:
-        case OP_label:
-        case OP_close_loc:
-        case OP_nip_catch:
-            pos += size;
-            break;
-        case OP_goto: {
-            int label = get_u32(code + pos + 1);
-            if (label < 0 || label >= s->label_count)
-                return false;
-            pos = s->label_slots[label].pos2;
-            break;
-        }
-        default:
-            return false;
-        }
-    }
-    return false;
-}
-#endif
 
 static int find_jump_target(JSFunctionDef *s, int label, int *pop)
 {
@@ -37946,6 +38577,25 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
             for (re = ls->first_reloc; re != NULL; re = re_next) {
                 int diff = ls->addr - re->addr;
                 re_next = re->next;
+                /* PocketJS: a reloc's address was recorded as
+                   `bc_out.size - n` right AFTER writing an n-byte
+                   placeholder, i.e. on the assumption that the write
+                   landed. Once bc_out has failed that is false -- nothing
+                   more is written, size stops -- so the address points n
+                   bytes back into the PREVIOUS instruction, and patching it
+                   writes a jump offset over that instruction's operand. The
+                   caller's fail path then decodes the buffer to free its
+                   atoms and reads the offset as an atom index (ASan: heap-
+                   buffer-overflow in __JS_FreeAtom, reading rt->atom_array
+                   far past its end, reached with vmrun --fail-alloc). The
+                   output of an errored pass is discarded anyway, so the
+                   patch is simply skipped; the entry is still freed. This
+                   also keeps the diff-range asserts below from firing on a
+                   garbage address, which on the device would reboot. */
+                if (dbuf_error(&bc_out)) {
+                    js_free(ctx, re);
+                    continue;
+                }
                 switch (re->size) {
                 case 4:
                     put_u32(bc_out.buf + re->addr, diff);
@@ -37970,14 +38620,6 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
             /* detect and transform tail calls */
             int argc;
             argc = get_u16(bc_buf + pos + 1);
-#ifdef CONFIG_POCKET_VM_TCO
-            if (s->is_strict_mode && js_vm_tail_return_path(s, pos_next)) {
-                add_pc2line_info(s, bc_out.size, line_num, col_num);
-                put_short_code(&bc_out, op + 1, argc);
-                // Keep the continuation for any other incoming labels.
-                break;
-            }
-#endif
             if (code_match(&cc, pos_next, OP_return, -1)) {
                 if (cc.line_num >= 0) {
                     line_num = cc.line_num;
@@ -38770,6 +39412,25 @@ no_change:
         }
     }
 
+    /* PocketJS: the jump optimisation below rewrites bc_out in place -- it
+       indexes bc_out.buf at every jump slot's recorded pos and memmove()s
+       the tail by bc_out.size - pos - size - delta. Those positions were
+       recorded while pass 1 was emitting; if an emit in pass 1 ran out of
+       memory, bc_out stopped growing but the slots did not, so a pos can lie
+       past bc_out.size and the memmove length goes negative (ASan:
+       negative-size-param / heap-buffer-overflow in this function, reached
+       with vmrun --fail-alloc). The error was only tested at the very end,
+       after that damage.
+
+       Skip straight to the common tail rather than returning here: that tail
+       is what hands bc_out over as s->byte_code with use_short_opcodes set,
+       so the caller's fail path frees its atoms by decoding it with the right
+       (short) opcode table -- decoding it with the long one would misread
+       every instruction length. The tail's own dbuf_error test then throws
+       and returns -1, exactly as it did for a late failure before. */
+    if (dbuf_error(&bc_out))
+        goto finish;
+
     /* check that there were no missing labels */
     for (i = 0; i < s->label_count; i++) {
         assert(label_slots[i].first_reloc == NULL);
@@ -38852,6 +39513,22 @@ shrink:
         }
     }
 
+finish:
+    /* PocketJS: relocations still pending here belong to labels the walk
+       never reached, which only happens when it stopped early (the `fail:`
+       path below). Nothing else frees them -- js_free_function_def frees
+       the label_slots array but not the chains hanging off it. On the
+       success path every chain is already empty, as the assert above
+       checks, so this is skipped there. */
+    if (dbuf_error(&bc_out)) {
+        for (i = 0; i < s->label_count; i++) {
+            for (re = label_slots[i].first_reloc; re != NULL; re = re_next) {
+                re_next = re->next;
+                js_free(ctx, re);
+            }
+            label_slots[i].first_reloc = NULL;
+        }
+    }
     js_free(ctx, s->jump_slots);
     s->jump_slots = NULL;
     js_free(ctx, s->label_slots);
@@ -38870,9 +39547,28 @@ shrink:
     }
     return 0;
 fail:
-    /* XXX: not safe */
-    dbuf_free(&bc_out);
-    return -1;
+    /* PocketJS: upstream's "XXX: not safe", made safe. Reached when
+       add_reloc cannot allocate a relocation entry, part-way through the
+       walk. Upstream freed bc_out and returned, leaving s->byte_code as the
+       INPUT -- but the walk had already freed some of that input's atoms
+       (the cases that rewrite an instruction JS_FreeAtom the atom they
+       consumed), and the caller's fail path then frees every atom in the
+       input through free_bytecode_atoms, those included. A double free of an
+       atom: the second release reads a free-list link out of
+       rt->atom_array as if it were an atom (UBSan: misaligned JSAtomStruct
+       in __JS_FreeAtom, reached with vmrun --fail-alloc).
+
+       Hand over bc_out instead, through the common tail. Every atom the
+       walk moved is in bc_out exactly once and every atom it consumed is
+       gone, so freeing bc_out frees each exactly once. Atoms of input
+       instructions the walk never reached are neither moved nor freed --
+       the tail dbuf_free()s the input without walking it -- so they stay
+       referenced until JS_FreeRuntime releases the whole atom table: a
+       bounded leak on an out-of-memory path, never a double free. The error
+       flag makes the tail skip the jump optimisation, free the pending
+       relocations, install bc_out with use_short_opcodes, and throw. */
+    dbuf_set_error(&bc_out);
+    goto finish;
 }
 
 /* compute the maximum stack size needed by the function */
@@ -39240,12 +39936,25 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
 
         fd1 = list_entry(el, JSFunctionDef, link);
         cpool_idx = fd1->parent_cpool_idx;
+        /* PocketJS: -1 here means the parser's cpool_add() for this child
+           ran out of memory. All three sites that set parent_cpool_idx
+           (class field initialisers, the function-expression path and the
+           child-function path) store cpool_add's result without testing it,
+           and the parse carries on, so this used to be an assert -- which on
+           the device, where assertions are compiled in, turned an OOM while
+           parsing into a reboot. Refused BEFORE the child is built: fd1 is
+           still on fd->child_list, and the fail path below frees the whole
+           list through js_free_function_def, so nothing leaks and nothing is
+           built only to be thrown away. */
+        if (cpool_idx < 0) {
+            JS_ThrowOutOfMemory(ctx);
+            goto fail;
+        }
         func_obj = js_create_function(ctx, fd1);
         if (JS_IsException(func_obj)) {
             goto fail;
         }
         /* save it in the constant pool */
-        assert(cpool_idx >= 0);
         fd->cpool[cpool_idx] = func_obj;
     }
 
@@ -40061,13 +40770,6 @@ static __exception int js_parse_function_decl2(JSParseState *s,
             /* save the function source code */
             /* the end of the function source code is after the last
                 token of the function source stored into s->last_ptr */
-#ifndef CONFIG_POCKET_VM_STRIP_FN_SOURCE /* see js_function_toString */
-            fd->source_len = s->last_ptr - ptr;
-            fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
-            if (!fd->source) {
-                goto fail;
-            }
-#endif
 
             goto done;
         }
@@ -40095,13 +40797,6 @@ static __exception int js_parse_function_decl2(JSParseState *s,
     }
 
     /* save the function source code */
-#ifndef CONFIG_POCKET_VM_STRIP_FN_SOURCE /* see js_function_toString */
-    fd->source_len = s->buf_ptr - ptr;
-    fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
-    if (!fd->source) {
-        goto fail;
-    }
-#endif
 
     if (next_token(s)) {
         /* consume the '}' */
@@ -40325,6 +41020,7 @@ static void js_parse_init(JSContext *ctx, JSParseState *s,
     s->token.val = ' ';
     s->token.line_num = 1;
     s->token.col_num = 1;
+    s->oom_count = ctx->rt->oom_count;
 }
 
 static JSValue JS_EvalFunctionInternal(JSContext *ctx, JSValue fun_obj,
@@ -40337,6 +41033,21 @@ static JSValue JS_EvalFunctionInternal(JSContext *ctx, JSValue fun_obj,
     tag = JS_VALUE_GET_TAG(fun_obj);
     if (tag == JS_TAG_FUNCTION_BYTECODE) {
         fun_obj = js_closure(ctx, fun_obj, var_refs, sf);
+        /* PocketJS: js_closure returns JS_EXCEPTION when the function
+           object or its var_refs cannot be allocated (bfunc is freed by
+           then), with "out of memory" already pending. Upstream (quickjs-ng
+           master, same lines as of 2026-09-23) hands that JS_EXCEPTION
+           straight to JS_CallFree, which rejects a non-object callee with
+           "TypeError: not a function" -- and JS_Throw replaces the pending
+           InternalError with it. Every top-level script and every direct
+           eval passes through here, so the guest's first sign of a full
+           heap was a TypeError with no stack (regexp_oom.js 2429-2431,
+           closures.js 2306-2308 / 2648-2654, generators.js 2527-2529
+           under vmrun --fail-alloc). The interpreter's own OP_fclosure
+           already checks this result; this caller did not. */
+        if (JS_IsException(fun_obj)) {
+            return JS_EXCEPTION;
+        }
         ret_val = JS_CallFree(ctx, fun_obj, this_obj, 0, NULL);
     } else if (tag == JS_TAG_MODULE) {
         JSModuleDef *m;
@@ -40454,6 +41165,22 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     fd->body_scope = fd->scope_level;
 
     err = js_parse_program(s);
+    /* PocketJS: some parser allocations fail without failing the parse, and
+       the program then compiled and ran with the OOM left pending. Measured
+       (--fail-alloc, closures.js + generators.js, 69 points): the lookahead
+       in js_parse_skip_parens_token swallows its lexer's error and returns a
+       guess (arrow or not, destructuring or not, has_parameter_expressions);
+       push_scope's -1 is ignored by every caller, so the block's lexical
+       variables land in the enclosing scope and the matching pop_scope
+       leaves the wrong one; js_new_function_def keeps going without its
+       filename atom. None of the 69 changed the output of those two files,
+       but the first two let a program compile on a decision the parser never
+       made. Any allocation that failed during the parse fails the compile,
+       as InternalError, instead of trusting each site to propagate it. */
+    if (!err && unlikely(ctx->rt->oom_count != s->oom_count)) {
+        JS_ThrowOutOfMemory(ctx);
+        err = -1;
+    }
     if (err) {
 fail:
         free_token(s, &s->token);
@@ -41239,6 +41966,12 @@ static int JS_WriteObjectTag(BCWriterState *s, JSValueConst obj)
 
     bc_put_u8(s, BC_TAG_OBJECT);
     prop_count = 0;
+#ifdef POCKET_VM_LAZY_BUILTINS
+    /* Only enumerable properties are written, like a for-in. */
+    if (unlikely(js_obj_lazy(p)) && js_lazy_all(s->ctx, p, true)) {
+        goto fail;
+    }
+#endif
     sh = p->shape;
     for (pass = 0; pass < 2; pass++) {
         if (pass == 1) {
@@ -43087,7 +43820,7 @@ static JSValue JS_InstantiateFunctionListItem2(JSContext *ctx, JSObject *p,
         val = JS_NewObjectProtoList(ctx, proto,
                                     e->u.prop_list.tab, e->u.prop_list.len);
         break;
-    default:
+    LAZY_CLASS_CASE default:
         abort();
     }
     return val;
@@ -43190,11 +43923,525 @@ static int JS_InstantiateFunctionListItem(JSContext *ctx, JSValueConst obj,
     return 0;
 }
 
+#ifdef POCKET_VM_LAZY_BUILTINS
+static inline bool lazy_done(const JSLazyList *l, int k)
+{
+    return (l->done[k >> 5] >> (k & 31)) & 1;
+}
+
+static inline void lazy_set_done(JSLazyList *l, int k)
+{
+    l->done[k >> 5] |= 1u << (k & 31);
+}
+
+static uint32_t lazy_first(JSRuntime *rt, JSObject *p);
+
+/* p's list for `tab`, found again: whatever materializes an entry allocates,
+   an allocation can collect, and freeing a lazy object moves rt->lazy
+   (lazy_remove), so a JSLazyList pointer or index taken before the call is
+   stale after it. */
+static JSLazyList *lazy_list_of(JSRuntime *rt, JSObject *p,
+                                const JSCFunctionListEntry *tab)
+{
+    for (uint32_t i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++)
+        if (rt->lazy[i].tab == tab)
+            return &rt->lazy[i];
+    return NULL;
+}
+
+/* An entry is marked done before it is materialized; when that fails (out of
+   memory) the mark must come off again, or the name is in neither the shape
+   nor the list and reads as undefined for the rest of the run -- how
+   pocket.fs.open vanished after one refused first read (docs/vm/turn-cpi.md
+   sec.4). Same rule as JS_AutoInitProperty: a failure may fail the
+   operation, never leave a hole. */
+static void lazy_undo_done(JSRuntime *rt, JSObject *p,
+                           const JSCFunctionListEntry *tab, int k)
+{
+    JSLazyList *l = lazy_list_of(rt, p, tab);
+    if (l)
+        l->done[k >> 5] &= ~(1u << (k & 31));
+}
+
+/* Index of the first list of `p` in rt->lazy (sorted by object). */
+static uint32_t lazy_first(JSRuntime *rt, JSObject *p)
+{
+    uint32_t lo = 0, hi = rt->lazy_count;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        if ((uintptr_t)rt->lazy[mid].obj < (uintptr_t)p)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
+}
+
+/* An atom's text, resolved once per lookup rather than once per list entry:
+   a miss compares against every pending entry of every list on the object,
+   and redoing the flash/heap lookup and a strlen of the entry for each was
+   what made one cost 8-30 us on the device (plan sec.14.3). `open` is '['
+   for a well-known symbol, which only a "[Symbol.x]" entry can name (the
+   same test find_atom uses); c0 is the first byte an entry must start with. */
+typedef struct { const uint8_t *s8; const uint16_t *s16; uint32_t len; int c0, open; } LazyKey;
+static bool lazy_key(JSRuntime *rt, JSAtom atom, LazyKey *key)
+{
+    if (__JS_AtomIsTaggedInt(atom))
+        return false;   /* no list entry is an index */
+    key->open = atom >= JS_ATOM_Symbol_toPrimitive && atom < JS_ATOM_END ? '[' : 0;
+#ifdef POCKET_VM_ROM_ATOMS
+    const JSRomAtom *r = key->open ? NULL : js_rom_atom(atom);
+    if (r) {
+        key->s8 = (const uint8_t *)js_rom_text(r), key->s16 = NULL, key->len = r->len;
+        return (key->c0 = r->len ? key->s8[0] : 0) != '[';   /* '[' names a symbol entry */
+    }
+#endif
+    JSString *s = rt->atom_array[atom];
+    if (!key->open && s->atom_type != JS_ATOM_TYPE_STRING)
+        return false;
+    key->s8 = s->is_wide_char ? NULL : str8(s), key->s16 = s->is_wide_char ? str16(s) : NULL;
+    key->len = s->len;
+    key->c0 = key->open ? '[' : !s->len ? 0 : key->s8 ? key->s8[0] : str16(s)[0];
+    return key->c0 != '[' || key->open;
+}
+
+/* Does the resolved key name the list entry `name`? No allocation. */
+static inline bool lazy_key_is(const LazyKey *key, const char *name)
+{
+    const uint8_t *t = (const uint8_t *)name + (key->open != 0);
+    if ((uint8_t)name[0] != key->c0)
+        return false;   /* the common miss: one flash byte */
+    for (uint32_t i = 0; i < key->len; i++)
+        if (!t[i] || t[i] != (key->s8 ? key->s8[i] : key->s16[i]))
+            return false;   /* !t[i]: the entry ended; a key may hold a NUL */
+    return t[key->len] == (key->open ? ']' : 0) && (!key->open || !t[key->len + 1]);
+}
+
+/* Put one list entry into the shape, the way JS_InstantiateFunctionListItem
+   would have at registration -- same flags, same AUTOINIT record -- but
+   through add_property, so a non-extensible object can still materialize
+   what it always had. `ctx` is the list's realm. */
+static int lazy_define(JSContext *ctx, JSObject *p, JSAtom atom,
+                       const JSCFunctionListEntry *e)
+{
+    JSProperty *pr;
+    JSValue val;
+    int prop_flags = e->prop_flags;
+
+    switch (e->def_type) {
+    case JS_DEF_CFUNC:
+        if (atom == JS_ATOM_Symbol_toPrimitive) {
+            prop_flags = JS_PROP_CONFIGURABLE;
+        } else if (atom == JS_ATOM_Symbol_hasInstance) {
+            prop_flags = 0;
+        }
+        /* fall through */
+    case JS_DEF_PROP_STRING:
+    case JS_DEF_OBJECT:
+        pr = add_property(ctx, p, atom, (prop_flags & JS_PROP_C_W_E) | JS_PROP_AUTOINIT);
+        if (!pr)
+            return -1;
+        pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx) | JS_AUTOINIT_ID_PROP;
+        pr->u.init.opaque = (void *)e;
+        return 0;
+    case JS_DEF_CGETSET:
+    case JS_DEF_CGETSET_MAGIC: {
+        JSValue getter = JS_UNDEFINED, setter = JS_UNDEFINED;
+        char buf[64];
+        if (e->u.getset.get.generic) {
+            snprintf(buf, sizeof(buf), "get %s", e->name);
+            getter = JS_NewCFunction2(ctx, e->u.getset.get.generic, buf, 0,
+                                      e->def_type == JS_DEF_CGETSET_MAGIC ? JS_CFUNC_getter_magic : JS_CFUNC_getter,
+                                      e->magic);
+            if (JS_IsException(getter))
+                return -1;
+        }
+        if (e->u.getset.set.generic) {
+            snprintf(buf, sizeof(buf), "set %s", e->name);
+            setter = JS_NewCFunction2(ctx, e->u.getset.set.generic, buf, 1,
+                                      e->def_type == JS_DEF_CGETSET_MAGIC ? JS_CFUNC_setter_magic : JS_CFUNC_setter,
+                                      e->magic);
+            if (JS_IsException(setter)) {
+                JS_FreeValue(ctx, getter);
+                return -1;
+            }
+        }
+        pr = add_property(ctx, p, atom, (prop_flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE)) |
+                          JS_PROP_GETSET);
+        if (!pr) {
+            JS_FreeValue(ctx, getter);
+            JS_FreeValue(ctx, setter);
+            return -1;
+        }
+        pr->u.getset.getter = JS_IsUndefined(getter) ? NULL : JS_VALUE_GET_OBJ(getter);
+        pr->u.getset.setter = JS_IsUndefined(setter) ? NULL : JS_VALUE_GET_OBJ(setter);
+        return 0;
+    }
+    case JS_DEF_PROP_INT32:
+        val = js_int32(e->u.i32);
+        break;
+    case JS_DEF_PROP_INT64:
+        val = js_int64(e->u.i64);
+        break;
+    case JS_DEF_PROP_DOUBLE:
+        val = js_float64(e->u.f64);
+        break;
+    case JS_DEF_PROP_UNDEFINED:
+        val = JS_UNDEFINED;
+        break;
+    case JS_DEF_PROP_SYMBOL:
+        val = JS_AtomToValue(ctx, e->u.i32);
+        break;
+    case JS_DEF_PROP_BOOL:
+        val = JS_NewBool(ctx, e->u.i32);
+        break;
+    default:
+        abort();   /* JS_DEF_ALIAS is materialized at registration */
+    }
+    pr = add_property(ctx, p, atom, prop_flags & JS_PROP_C_W_E);
+    if (!pr) {
+        JS_FreeValue(ctx, val);
+        return -1;
+    }
+    pr->u.value = val;
+    return 0;
+}
+
+/* A lookup of `atom` missed p's shape: if one of p's lists still holds it,
+   put it in the shape. 1 = materialized (look again), 0 = not in any list,
+   -1 = exception (out of memory). */
+static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom)
+{
+    JSRuntime *rt = ctx->rt;
+    uint32_t i;
+    LazyKey key;
+    if (!lazy_key(rt, atom, &key)) /* counted as a miss either way */
+        return 0;   /* nothing in a list can match */
+    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+        JSLazyList *l = &rt->lazy[i];
+        for (int k = 0; k < l->len; k++) {
+            if (lazy_done(l, k) || !lazy_key_is(&key, l->tab[k].name))
+                continue;
+            /* Marked first: add_property below looks the name up again. */
+            const JSCFunctionListEntry *tab = l->tab;
+            lazy_set_done(l, k);
+            if (lazy_define(l->realm, p, atom, &tab[k])) {
+                lazy_undo_done(rt, p, tab, k);
+                return -1;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* delete of a name p's lists still hold: nothing to take out of the shape,
+   just never materialize it. true/false as delete_property, or 2 when the
+   name is not a pending list entry (delete it the ordinary way). */
+static int js_lazy_delete(JSContext *ctx, JSObject *p, JSAtom atom)
+{
+    JSRuntime *rt = ctx->rt;
+    uint32_t i;
+    LazyKey key;
+    if (!lazy_key(rt, atom, &key))
+        return 2;
+    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+        JSLazyList *l = &rt->lazy[i];
+        for (int k = 0; k < l->len; k++) {
+            if (lazy_done(l, k) || !lazy_key_is(&key, l->tab[k].name))
+                continue;
+            /* Symbol.hasInstance is made non-configurable by lazy_define. */
+            if (!(l->tab[k].prop_flags & JS_PROP_CONFIGURABLE) ||
+                    (l->tab[k].def_type == JS_DEF_CFUNC && atom == JS_ATOM_Symbol_hasInstance))
+                return false;
+            lazy_set_done(l, k);
+            return true;
+        }
+    }
+    return 2;
+}
+
+/* The list entry an own property came from, or NULL if it is not one. */
+static JSLazyList *lazy_owner(JSRuntime *rt, JSObject *p, JSAtom atom, int *pk)
+{
+    uint32_t i; LazyKey key;
+    for (i = lazy_key(rt, atom, &key) ? lazy_first(rt, p) : rt->lazy_count; i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+        JSLazyList *l = &rt->lazy[i];
+        for (int k = 0; k < l->len; k++) {
+            if (lazy_key_is(&key, l->tab[k].name)) {
+                *pk = k;
+                return l;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* Position of `atom` among p's live own properties that did not come from
+   a list, or -1. Taken before a delete so the lists' `pos` can follow. */
+static int js_lazy_plain_index(JSRuntime *rt, JSObject *p, JSAtom atom)
+{
+    JSShape *sh = p->shape;
+    JSShapeProperty *prs = sh->prop;
+    int q = 0, k;
+    for (int i = 0; i < sh->prop_count; i++, prs++) {
+        if (prs->atom == JS_ATOM_NULL || lazy_owner(rt, p, prs->atom, &k))
+            continue;
+        if (prs->atom == atom)
+            return q;
+        q++;
+    }
+    return -1;
+}
+
+static void js_lazy_after_delete(JSRuntime *rt, JSObject *p, int q)
+{
+    uint32_t i;
+    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++)
+        if (rt->lazy[i].pos > q)
+            rt->lazy[i].pos--;
+}
+
+static void lazy_remove(JSRuntime *rt, JSObject *p)
+{
+    uint32_t i = lazy_first(rt, p), j = i;
+    while (j < rt->lazy_count && rt->lazy[j].obj == p)
+        j++;
+    memmove(&rt->lazy[i], &rt->lazy[j], (rt->lazy_count - j) * sizeof(rt->lazy[0]));
+    rt->lazy_count -= j - i;
+    js_obj_set_lazy(p, false);
+}
+
+static void js_lazy_forget(JSRuntime *rt, JSObject *p)
+{
+    lazy_remove(rt, p);
+}
+
+/* Rebuild p's shape so its properties are in definition order: each list's
+   entries go back to where the list was registered (pos), whatever order
+   they were touched in. Allocates the new shape and property array first,
+   so an out-of-memory leaves the object as it was (complete, and only in a
+   different order). */
+static int lazy_reorder(JSContext *ctx, JSObject *p)
+{
+    JSRuntime *rt = ctx->rt;
+    JSShape *sh = p->shape, *nsh;
+    JSProperty *nprop;
+    uint32_t first = lazy_first(rt, p), nl = 0, i, n = 0, nplain = 0;
+    int *order, *owner_list, *owner_k;
+    int j, k, count;
+    intptr_t h;
+
+    while (first + nl < rt->lazy_count && rt->lazy[first + nl].obj == p)
+        nl++;
+    count = sh->prop_count;
+    order = js_malloc(ctx, sizeof(int) * (3 * count + 1));
+    if (!order)
+        return -1;
+    owner_list = order + count;
+    owner_k = owner_list + count;
+    for (j = 0; j < count; j++) {
+        JSShapeProperty *prs = &sh->prop[j];
+        owner_list[j] = -2;   /* deleted slot */
+        if (prs->atom == JS_ATOM_NULL)
+            continue;
+        JSLazyList *l = lazy_owner(rt, p, prs->atom, &k);
+        owner_list[j] = l ? (int)(l - &rt->lazy[first]) : -1;
+        owner_k[j] = k;
+        if (!l)
+            nplain++;
+    }
+    /* Emit: before the q-th plain property, every list registered at q. */
+    for (uint32_t q = 0; q <= nplain; q++) {
+        for (i = 0; i < nl; i++) {
+            JSLazyList *l = &rt->lazy[first + i];
+            if (l->pos != q && !(q == nplain && l->pos > nplain))
+                continue;
+            for (k = 0; k < l->len; k++)
+                for (j = 0; j < count; j++)
+                    if (owner_list[j] == (int)i && owner_k[j] == k)
+                        order[n++] = j;
+        }
+        if (q == nplain)
+            break;
+        for (j = 0, i = 0; j < count; j++)
+            if (owner_list[j] == -1 && i++ == q)
+                order[n++] = j;
+    }
+    /* Already in definition order (nothing touched out of turn, nothing
+       deleted): keep the shape, which may be shared. */
+    if (sh->deleted_prop_count == 0 && n == (uint32_t)count) {
+        for (j = 0; j < (int)n && order[j] == j; j++)
+            ;
+        if (j == (int)n) {
+            js_free(ctx, order);
+            return 0;
+        }
+    }
+    nsh = js_new_shape_nohash(ctx, sh->proto, sh->prop_hash_mask + 1, max_int(n, 1));
+    nprop = nsh ? js_malloc(ctx, sizeof(JSProperty) * max_int(n, 1)) : NULL;
+    if (!nprop) {
+        if (nsh)
+            js_free_shape(rt, nsh);
+        js_free(ctx, order);
+        return -1;
+    }
+    for (j = 0; j < (int)n; j++) {
+        JSShapeProperty *src = &sh->prop[order[j]], *dst = &nsh->prop[j];
+        dst->atom = JS_DupAtom(ctx, src->atom);
+        dst->flags = src->flags;
+        h = (uintptr_t)dst->atom & nsh->prop_hash_mask;
+        dst->hash_next = prop_hash_end(nsh)[-h - 1];
+        prop_hash_end(nsh)[-h - 1] = j + 1;
+        nprop[j] = p->prop[order[j]];   /* the value moves, no refcount change */
+    }
+    nsh->prop_count = n;
+    js_free(ctx, p->prop);
+    p->prop = nprop;
+    p->shape = nsh;
+    js_free_shape(rt, sh);
+    js_free(ctx, order);
+    return 0;
+}
+
+/* Every pending entry of p into its shape, in definition order, then p is
+   an ordinary object again. With `enum_only`, a caller that will only look
+   at enumerable properties: if no pending entry is enumerable, there is
+   nothing it could see, and p stays lazy. */
+static int js_lazy_all(JSContext *ctx, JSObject *p, bool enum_only)
+{
+    JSRuntime *rt = ctx->rt;
+    uint32_t i;
+
+    if (enum_only) {
+        bool any = false;
+        for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++)
+            for (int k = 0; k < rt->lazy[i].len; k++)
+                if (!lazy_done(&rt->lazy[i], k) &&
+                        (rt->lazy[i].tab[k].prop_flags & JS_PROP_ENUMERABLE))
+                    any = true;
+        if (!any)
+            return 0;
+    }
+    for (i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++) {
+        for (int k = 0; k < rt->lazy[i].len; k++) {
+            /* rt->lazy may move under lazy_define (a getter's function
+               object can register nothing, but re-read it to be safe) */
+            JSLazyList *l = &rt->lazy[i];
+            if (lazy_done(l, k))
+                continue;
+            JSAtom atom = find_atom(l->realm, l->tab[k].name);
+            if (atom == JS_ATOM_NULL)
+                return -1;
+            const JSCFunctionListEntry *tab = l->tab;
+            lazy_set_done(l, k);
+            int ret = lazy_define(l->realm, p, atom, &tab[k]);
+            JS_FreeAtom(ctx, atom);
+            if (ret) {
+                lazy_undo_done(rt, p, tab, k);
+                return -1;
+            }
+            /* A collection inside lazy_define can move p's lists down the
+               array (lazy_remove of a freed object before them). */
+            i = (uint32_t)(lazy_list_of(rt, p, tab) - rt->lazy);
+        }
+    }
+    if (lazy_reorder(ctx, p))
+        return -1;
+    lazy_remove(rt, p);
+    return 0;
+}
+
+/* Which objects may keep a list in flash. The global object is left out:
+   global variable access has its own lookup paths (JS_GetGlobalVar and
+   friends) that are not taught about pending entries. Exotic objects too,
+   except arrays (Array.prototype), whose exotic part is indices only. */
+static bool lazy_eligible(JSContext *ctx, JSValueConst obj, int len)
+{
+    JSObject *p;
+    if (!ctx->rt->lazy_ok || len <= 0 || len > 64 ||
+            JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (p == JS_VALUE_GET_OBJ(ctx->global_obj))
+        return false;
+    return !p->is_exotic || p->class_id == JS_CLASS_ARRAY;
+}
+
+static int lazy_register(JSContext *ctx, JSValueConst obj,
+                         const JSCFunctionListEntry *tab, int len)
+{
+    JSRuntime *rt = ctx->rt;
+    JSObject *p = JS_VALUE_GET_OBJ(obj);
+    JSShape *sh = p->shape;
+    uint32_t at, end;
+    int k, q = 0;
+
+    /* pos: live own properties that are not entries of p's earlier lists */
+    for (int j = 0; j < sh->prop_count; j++)
+        if (sh->prop[j].atom != JS_ATOM_NULL && !lazy_owner(rt, p, sh->prop[j].atom, &k))
+            q++;
+    if (rt->lazy_count == rt->lazy_size) {
+        uint32_t size = rt->lazy_size ? rt->lazy_size * 3 / 2 : 96;
+        JSLazyList *nl = js_realloc(ctx, rt->lazy, sizeof(*nl) * size);
+        if (!nl)
+            return -1;
+        rt->lazy = nl;
+        rt->lazy_size = size;
+    }
+    at = lazy_first(rt, p);
+    end = at;
+    while (end < rt->lazy_count && rt->lazy[end].obj == p)
+        end++;   /* after p's earlier lists: registration order */
+    memmove(&rt->lazy[end + 1], &rt->lazy[end], (rt->lazy_count - end) * sizeof(rt->lazy[0]));
+    rt->lazy_count++;
+    rt->lazy[end] = (JSLazyList){ .obj = p, .realm = ctx, .tab = tab,
+                                  .len = (uint16_t)len, .pos = (uint16_t)q };
+    js_obj_set_lazy(p, true);
+    /* The builtins are created with their shape pre-sized for the list
+       (JS_NewObjectProtoClassAlloc(.., n_fields), JS_NewCFunction3(..,
+       n + 3)); with the entries staying in flash that room would sit empty,
+       and it was most of what F2 failed to save at first (2026-09-25:
+       a 3-property prototype holding a 48-slot shape). Give it back while
+       the shape is still this object's alone; a failure only keeps it. */
+    if (!p->shape->is_hashed && p->shape->header.ref_count == 1 &&
+            p->shape->prop_size > max_int(JS_PROP_INITIAL_SIZE,
+                                          p->shape->prop_count - p->shape->deleted_prop_count)) {
+        compact_properties(ctx, p);
+    }
+    /* An alias reads its target's current value, which only registration
+       time knows for sure, so aliases are defined now (the target is
+       materialized through the ordinary lookup). */
+    for (k = 0; k < len; k++) {
+        if (tab[k].def_type != JS_DEF_ALIAS)
+            continue;
+        JSAtom atom = find_atom(ctx, tab[k].name);
+        if (atom == JS_ATOM_NULL)
+            return -1;
+        uint32_t idx = lazy_first(rt, p);
+        while (rt->lazy[idx].tab != tab)
+            idx++;
+        lazy_set_done(&rt->lazy[idx], k);
+        int ret = JS_InstantiateFunctionListItem(ctx, obj, atom, &tab[k]);
+        JS_FreeAtom(ctx, atom);
+        if (ret) {
+            lazy_undo_done(rt, p, tab, k);
+            return -1;
+        }
+    }
+    return 0;
+}
+#endif
+
 int JS_SetPropertyFunctionList(JSContext *ctx, JSValueConst obj,
                                const JSCFunctionListEntry *tab, int len)
 {
     int i, ret;
 
+#ifdef POCKET_VM_LAZY_BUILTINS
+    if (lazy_eligible(ctx, obj, len))
+        return lazy_register(ctx, obj, tab, len);
+#endif
     for (i = 0; i < len; i++) {
         const JSCFunctionListEntry *e = &tab[i];
         JSAtom atom = find_atom(ctx, e->name);
@@ -45195,7 +46442,7 @@ static JSValue js_function_toString(JSContext *ctx, JSValueConst this_val,
        prefix. The copy is the whole text of each function (an inner
        function's text is stored again inside its parent's), and on the
        Cardputer's 160 KiB guest it measured 2.5-7.1 KiB per app
-       (docs/kasane/kasane-guest-memory.md); toString's body is the only
+       (docs/kasane/decisions.md); toString's body is the only
        reader of it besides the debug dumps. */
     if (js_class_has_bytecode(p->class_id)) {
         JSFunctionBytecode *b = p->u.func.function_bytecode;
@@ -52086,7 +53333,18 @@ bad_flags:
                                   sizeof(error_msg), str, len, re_flags, ctx);
     JS_FreeCString(ctx, str);
     if (!re_bytecode_buf) {
-        JS_ThrowSyntaxError(ctx, "%s", error_msg);
+        /* PocketJS: lre_compile() signals an allocation failure by setting
+           *plen to -1 instead of the ordinary 0 (see its 'error:' label).
+           Before this, every regexp compile failure -- a real syntax error
+           or running out of memory mid-parse -- surfaced identically as
+           SyntaxError, so an app hitting OOM here saw a syntax error in a
+           pattern that has none (docs/vm/oom-parse-safety.md sec.6, same
+           misdiagnosis the bytecode compiler had). */
+        if (re_bytecode_len < 0) {
+            JS_ThrowOutOfMemory(ctx);
+        } else {
+            JS_ThrowSyntaxError(ctx, "%s", error_msg);
+        }
         return JS_EXCEPTION;
     }
 
@@ -54642,6 +55900,19 @@ static int js_json_to_str(JSContext *ctx, JSONStringifyContext *jsc,
                 /* XXX: could do this string conversion only when needed */
                 prop = JS_ToStringFree(ctx, js_int64(i));
                 if (JS_IsException(prop)) {
+                    /* PocketJS: `v` is the element just read and nothing
+                       owns it yet -- js_json_check below is what consumes
+                       it. The common exception: tail frees val/tab/sep/
+                       prop but not v, so an OOM in the index-to-string
+                       conversion (a 16-byte string) leaked one strong
+                       reference to the element (yield_job_tails.js
+                       --fail-alloc 2643 / 2659: an async generator's
+                       iterator result). Through its prototype it keeps the
+                       realm's built-ins alive past JS_FreeRuntime's GC, and
+                       assert(list_empty(&rt->gc_obj_list)) fires -- on the
+                       device that is app_stop() with assertions on. Same in
+                       quickjs-ng master (2026-09-23). */
+                    JS_FreeValue(ctx, v);
                     goto exception;
                 }
                 v = js_json_check(ctx, jsc, val, v, prop);
@@ -58019,7 +59290,7 @@ static const uint8_t js_map_proto_funcs_count[6] = {
 
 int JS_AddIntrinsicMapSet(JSContext *ctx)
 {
-    int i;
+    int i; LAZY_GROUP_REGISTER(ctx, LAZY_G_MAPSET)
     JSValue obj1;
     char buf[ATOM_GET_STR_BUF_SIZE];
     /* Used to squelch a -Wcast-function-type warning. */
@@ -58164,9 +59435,7 @@ static JSValue promise_reaction_tail(JSContext *ctx, JSValue res,
     bool is_reject = JS_IsException(res);
     if (is_reject) {
         if (unlikely(
-#ifdef CONFIG_POCKET_VM_YIELD
             ctx->rt->vm_terminating ||
-#endif
             JS_IsUncatchableError(ctx->rt->current_exception))) {
             return JS_EXCEPTION;
         }
@@ -58274,10 +59543,8 @@ static JSValue js_promise_thenable_tail(JSContext *ctx, JSValue res,
                          rt->promise_hook_opaque);
     }
     if (JS_IsException(res)) {
-#ifdef CONFIG_POCKET_VM_YIELD
         if (rt->vm_terminating)
             return JS_EXCEPTION;
-#endif
         JSValue error = JS_GetException(ctx);
         res = JS_Call(ctx, args[1], JS_UNDEFINED, 1, vc(&error));
         JS_FreeValue(ctx, error);
@@ -65878,7 +67145,7 @@ int JS_AddIntrinsicTypedArrays(JSContext *ctx)
     if (JS_IsException(obj)) {
         return -1;
     }
-    JS_FreeValue(ctx, obj);
+    JS_FreeValue(ctx, obj); LAZY_TA_REGISTER(ctx)
 
     obj = JS_NewCConstructor(ctx, JS_CLASS_SHARED_ARRAY_BUFFER, "SharedArrayBuffer",
                              js_shared_array_buffer_constructor, 1, JS_CFUNC_constructor, 0,
@@ -66310,7 +67577,7 @@ static JSValue js_finrec_job(JSContext *ctx, int argc, JSValueConst *argv)
 
 int JS_AddIntrinsicWeakRef(JSContext *ctx)
 {
-    JSRuntime *rt = ctx->rt;
+    JSRuntime *rt = ctx->rt; LAZY_GROUP_REGISTER(ctx, LAZY_G_WEAKREF)
     JSValue obj;
 
     /* WeakRef */
@@ -66840,7 +68107,7 @@ JSValue JS_PRINTF_FORMAT_ATTR(3, 4) JS_ThrowDOMException(JSContext *ctx, const c
 
 int JS_AddIntrinsicDOMException(JSContext *ctx)
 {
-    JSRuntime *rt = ctx->rt;
+    JSRuntime *rt = ctx->rt; LAZY_GROUP_REGISTER(ctx, LAZY_G_DOMEX)
     int i;
     JSAtom name;
     JSValue ctor, proto;
@@ -66953,3 +68220,373 @@ uintptr_t js_std_cmd(int cmd, ...)
 #undef malloc
 #undef free
 #undef realloc
+
+// G12 (quickjs.h). At the END of the file and only for its one caller, so
+// the default build stays byte-identical: placed next to JS_VMStackTrim it
+// moved every later line, and the __LINE__ each assert() embeds changed the
+// code around it (+8 B text, then +4 B with the body #ifdef'd out; measured
+// 2026-09-25) although the function itself was never linked.
+#ifdef CONFIG_POCKET_VM_OOMPROBE
+uint32_t JS_VMStackBlocks(JSRuntime *rt, const void **out, uint32_t cap)
+{
+    uint32_t n = 0;
+    // The header is the start of its own js_malloc_rt block, so the segment
+    // pointer IS the block pointer a heap walk reports. Chain first, then the
+    // cache: both hold heap blocks, and a cached segment splits free space
+    // exactly as a live one does.
+    for (int pass = 0; pass < 2; pass++)
+        for (JSVMSeg *s = pass ? rt->vm_stack.cache : rt->vm_stack.cur; s; s = s->prev) {
+            if (n < cap)
+                out[n] = s;
+            n++;
+        }
+    return n;
+}
+#endif
+
+#ifdef POCKET_VM_LAZY_INTRINSICS
+/* F3b (docs/vm/builtin-floor-plan.md sec.17): SharedArrayBuffer, the typed
+   arrays and DataView are made the first time they are needed rather than at
+   context creation -- ~5 KB of every guest heap for classes the shipped apps
+   never touch. Their global names are autoinit bindings, defined where
+   JS_AddIntrinsicTypedArrays used to define the constructors, so the global
+   object's keys, order and flags are what they were.
+
+   Made per class, not per group: an autoinit function must not change the
+   object it is resolving (JS_AutoInitProperty), so resolving "Uint8Array"
+   cannot also bind "Int8Array" on the same global, and a class made alone
+   costs a firmware app that only ever sees Uint8Array one pair, not fourteen.
+
+   Two ways in. A read of the global resolves its autoinit slot
+   (js_lazy_class_ctor). A native path that needs the prototype first --
+   JS_NewUint8ArrayCopy for pocket.fs, JS_ReadObject, a subclass's
+   new.target without a prototype -- reaches one of the class_proto reads
+   guarded by LAZY_CLASS_MISSING, and js_lazy_class_ensure resolves the
+   global slot itself if it is still pending, so the binding and
+   prototype.constructor are one object as they would have been eagerly.
+
+   %TypedArray% stays eager (ta_base): %TypedArray%.prototype.toString has to
+   be the ORIGINAL Array.prototype.toString, which only context creation can
+   promise, and every typed-array class needs it as its parent. ArrayBuffer
+   (the firmware returns them) and Atomics stay eager too.
+
+   F3c (sec.18) puts Map/Set/WeakMap/WeakSet, WeakRef/FinalizationRegistry
+   and DOMException on the same footing, one "group" per JS_AddIntrinsic*
+   (ctx->lazy_groups says which this context registered lazily). The Map
+   and Set iterator prototypes have no global name: they are made on the
+   first JS_NewObjectClass of their class, i.e. the first entries()/values()
+   of a Map or Set that already exists. WeakRef and DOMException register
+   their classes with the runtime at registration, as before; only the
+   constructor/prototype pairs wait. */
+static const JSCFunctionListEntry js_lazy_entries[] = {
+#define LAZY_E(name, cid, group) { name, JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE, JS_DEF_POCKET_LAZY_CLASS, cid, { .i32 = group } }
+    LAZY_E("SharedArrayBuffer", JS_CLASS_SHARED_ARRAY_BUFFER, LAZY_G_TA),
+    LAZY_E("Uint8ClampedArray", JS_CLASS_UINT8C_ARRAY, LAZY_G_TA),
+    LAZY_E("Int8Array", JS_CLASS_INT8_ARRAY, LAZY_G_TA),
+    LAZY_E("Uint8Array", JS_CLASS_UINT8_ARRAY, LAZY_G_TA),
+    LAZY_E("Int16Array", JS_CLASS_INT16_ARRAY, LAZY_G_TA),
+    LAZY_E("Uint16Array", JS_CLASS_UINT16_ARRAY, LAZY_G_TA),
+    LAZY_E("Int32Array", JS_CLASS_INT32_ARRAY, LAZY_G_TA),
+    LAZY_E("Uint32Array", JS_CLASS_UINT32_ARRAY, LAZY_G_TA),
+    LAZY_E("BigInt64Array", JS_CLASS_BIG_INT64_ARRAY, LAZY_G_TA),
+    LAZY_E("BigUint64Array", JS_CLASS_BIG_UINT64_ARRAY, LAZY_G_TA),
+    LAZY_E("Float16Array", JS_CLASS_FLOAT16_ARRAY, LAZY_G_TA),
+    LAZY_E("Float32Array", JS_CLASS_FLOAT32_ARRAY, LAZY_G_TA),
+    LAZY_E("Float64Array", JS_CLASS_FLOAT64_ARRAY, LAZY_G_TA),
+    LAZY_E("DataView", JS_CLASS_DATAVIEW, LAZY_G_TA),
+    LAZY_E("Map", JS_CLASS_MAP, LAZY_G_MAPSET),
+    LAZY_E("Set", JS_CLASS_SET, LAZY_G_MAPSET),
+    LAZY_E("WeakMap", JS_CLASS_WEAKMAP, LAZY_G_MAPSET),
+    LAZY_E("WeakSet", JS_CLASS_WEAKSET, LAZY_G_MAPSET),
+    LAZY_E("WeakRef", JS_CLASS_WEAK_REF, LAZY_G_WEAKREF),
+    LAZY_E("FinalizationRegistry", JS_CLASS_FINALIZATION_REGISTRY, LAZY_G_WEAKREF),
+    LAZY_E("DOMException", JS_CLASS_DOM_EXCEPTION, LAZY_G_DOMEX),
+#undef LAZY_E
+};
+
+static bool js_lazy_map_iterator(int class_id)
+{
+    return class_id == JS_CLASS_MAP_ITERATOR || class_id == JS_CLASS_SET_ITERATOR;
+}
+
+/* Which group a class belongs to, or -1 if it is never lazy. */
+static int js_lazy_group(int class_id)
+{
+    if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER || class_id == JS_CLASS_DATAVIEW ||
+            (class_id >= JS_CLASS_UINT8C_ARRAY &&
+             class_id < JS_CLASS_UINT8C_ARRAY + JS_TYPED_ARRAY_COUNT))
+        return LAZY_G_TA;
+    if ((class_id >= JS_CLASS_MAP && class_id <= JS_CLASS_WEAKSET) ||
+            js_lazy_map_iterator(class_id))
+        return LAZY_G_MAPSET;
+    if (class_id == JS_CLASS_WEAK_REF || class_id == JS_CLASS_FINALIZATION_REGISTRY)
+        return LAZY_G_WEAKREF;
+    if (class_id == JS_CLASS_DOM_EXCEPTION)
+        return LAZY_G_DOMEX;
+    return -1;
+}
+
+static JSAtom js_lazy_atom(int class_id)
+{
+    switch (class_id) {
+    case JS_CLASS_SHARED_ARRAY_BUFFER: return JS_ATOM_SharedArrayBuffer;
+    case JS_CLASS_DATAVIEW: return JS_ATOM_DataView;
+    case JS_CLASS_WEAK_REF: return JS_ATOM_WeakRef;
+    case JS_CLASS_FINALIZATION_REGISTRY: return JS_ATOM_FinalizationRegistry;
+    case JS_CLASS_DOM_EXCEPTION: return JS_ATOM_DOMException;
+    }
+    if (class_id >= JS_CLASS_MAP && class_id <= JS_CLASS_WEAKSET)
+        return JS_ATOM_Map + class_id - JS_CLASS_MAP;
+    return JS_ATOM_Uint8ClampedArray + class_id - JS_CLASS_UINT8C_ARRAY;
+}
+
+/* The group's global bindings, where its JS_AddIntrinsic* defined them. */
+static int js_lazy_bind(JSContext *ctx, int group)
+{
+    for (size_t i = 0; i < countof(js_lazy_entries); i++) {
+        const JSCFunctionListEntry *e = &js_lazy_entries[i];
+        if (e->u.i32 != group)
+            continue;
+        if (JS_DefineAutoInitProperty(ctx, ctx->global_obj, js_lazy_atom(e->magic),
+                                      JS_AUTOINIT_ID_PROP, (void *)e, e->prop_flags) < 0)
+            return -1;
+    }
+    ctx->lazy_groups |= 1u << group;
+    return 0;
+}
+
+/* Called by JS_AddIntrinsicTypedArrays right after ArrayBuffer, in place of
+   the rest of it. */
+static int js_lazy_ta_register(JSContext *ctx)
+{
+    JSValue base, proto, obj;
+    int ret;
+
+    base = JS_NewCConstructor(ctx, -1, "TypedArray",
+                              js_typed_array_base_constructor, 0, JS_CFUNC_constructor_or_func, 0,
+                              JS_UNDEFINED,
+                              js_typed_array_base_funcs, countof(js_typed_array_base_funcs),
+                              js_typed_array_base_proto_funcs, countof(js_typed_array_base_proto_funcs),
+                              JS_NEW_CTOR_NO_GLOBAL);
+    if (JS_IsException(base))
+        return -1;
+    set_value(ctx, &ctx->ta_base, base);
+    /* TypedArray.prototype.toString must be the same object as Array.prototype.toString */
+    obj = JS_GetProperty(ctx, ctx->class_proto[JS_CLASS_ARRAY], JS_ATOM_toString);
+    if (JS_IsException(obj))
+        return -1;
+    proto = JS_GetProperty(ctx, base, JS_ATOM_prototype);
+    if (JS_IsException(proto)) {
+        JS_FreeValue(ctx, obj);
+        return -1;
+    }
+    ret = JS_DefinePropertyValue(ctx, proto, JS_ATOM_toString, obj,
+                                 JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_FreeValue(ctx, proto);
+    if (ret < 0)
+        return -1;
+    if (js_lazy_bind(ctx, LAZY_G_TA))
+        return -1;
+#ifdef CONFIG_ATOMICS
+    if (JS_AddIntrinsicAtomics(ctx))
+        return -1;
+#endif
+    return 0;
+}
+
+/* Called at the top of JS_AddIntrinsicMapSet / WeakRef / DOMException in
+   place of the rest of each. */
+static int js_lazy_register(JSContext *ctx, int group)
+{
+    JSRuntime *rt = ctx->rt;
+
+    if (group == LAZY_G_WEAKREF) {
+        if (!JS_IsRegisteredClass(rt, JS_CLASS_WEAK_REF) &&
+                init_class_range(rt, js_weakref_class_def, JS_CLASS_WEAK_REF,
+                                 countof(js_weakref_class_def)))
+            return -1;
+        if (!JS_IsRegisteredClass(rt, JS_CLASS_FINALIZATION_REGISTRY) &&
+                init_class_range(rt, js_finrec_class_def, JS_CLASS_FINALIZATION_REGISTRY,
+                                 countof(js_finrec_class_def)))
+            return -1;
+    } else if (group == LAZY_G_DOMEX) {
+        if (!JS_IsRegisteredClass(rt, JS_CLASS_DOM_EXCEPTION) &&
+                init_class_range(rt, js_domexception_class_def, JS_CLASS_DOM_EXCEPTION,
+                                 countof(js_domexception_class_def)))
+            return -1;
+    }
+    return js_lazy_bind(ctx, group);
+}
+
+/* DOMException as JS_AddIntrinsicDOMException made it, without the global
+   binding; that one ignored every failure (context creation checks the
+   OOM canary afterwards), this one cannot leave a half-built pair behind. */
+static JSValue js_lazy_domexception_make(JSContext *ctx)
+{
+    JSValue proto, ctor = JS_UNDEFINED;
+
+    proto = JS_NewObjectClass(ctx, JS_CLASS_ERROR);
+    if (JS_IsException(proto))
+        return proto;
+    if (JS_SetPropertyFunctionList(ctx, proto, js_domexception_proto_funcs,
+                                   countof(js_domexception_proto_funcs)))
+        goto fail;
+    ctor = JS_NewCFunction2(ctx, js_domexception_constructor, "DOMException", 2,
+                            JS_CFUNC_constructor_or_func, 0);
+    if (JS_IsException(ctor) || JS_SetConstructor(ctx, ctor, proto) < 0)
+        goto fail;
+    for (size_t i = 0; i < countof(js_dom_exception_names_table); i++) {
+        JSAtom name = JS_NewAtom(ctx, js_dom_exception_names_table[i].code_name);
+        if (name == JS_ATOM_NULL)
+            goto fail;
+        int r = JS_DefinePropertyValue(ctx, proto, name, js_int32(i + 1), JS_PROP_ENUMERABLE);
+        if (r >= 0)
+            r = JS_DefinePropertyValue(ctx, ctor, name, js_int32(i + 1), JS_PROP_ENUMERABLE);
+        JS_FreeAtom(ctx, name);
+        if (r < 0)
+            goto fail;
+    }
+    ctx->class_proto[JS_CLASS_DOM_EXCEPTION] = proto;
+    return ctor;
+fail:
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    return JS_EXCEPTION;
+}
+
+/* Make one class's constructor and prototype, as its JS_AddIntrinsic* did,
+   without the global binding (a Map/Set iterator: its prototype only, and
+   the result is undefined). A failure leaves the class unmade:
+   JS_NewCConstructor sets class_proto before it can fail, and a prototype
+   that is there but half-built would look made to every later caller. */
+static JSValue js_lazy_make(JSContext *ctx, int class_id)
+{
+    JSValue ctor;
+    char buf[ATOM_GET_STR_BUF_SIZE];
+    const char *name = JS_AtomGetStr(ctx, buf, sizeof(buf), js_lazy_atom(class_id));
+
+    switch (js_lazy_group(class_id)) {
+    case LAZY_G_TA:
+        if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER) {
+            ctor = JS_NewCConstructor(ctx, class_id, name,
+                                      js_shared_array_buffer_constructor, 1, JS_CFUNC_constructor, 0,
+                                      JS_UNDEFINED,
+                                      js_shared_array_buffer_funcs, countof(js_shared_array_buffer_funcs),
+                                      js_shared_array_buffer_proto_funcs, countof(js_shared_array_buffer_proto_funcs),
+                                      JS_NEW_CTOR_NO_GLOBAL);
+        } else if (class_id == JS_CLASS_DATAVIEW) {
+            ctor = JS_NewCConstructor(ctx, class_id, name,
+                                      js_dataview_constructor, 1, JS_CFUNC_constructor, 0,
+                                      JS_UNDEFINED,
+                                      NULL, 0,
+                                      js_dataview_proto_funcs, countof(js_dataview_proto_funcs),
+                                      JS_NEW_CTOR_NO_GLOBAL);
+        } else {
+            /* Used to squelch a -Wcast-function-type warning. */
+            JSCFunctionType ft = { .generic_magic = js_typed_array_constructor };
+            const JSCFunctionListEntry *bpe = js_typed_array_funcs + typed_array_size_log2(class_id);
+            ctor = JS_NewCConstructor(ctx, class_id, name,
+                                      ft.generic, 3, JS_CFUNC_constructor_magic, class_id,
+                                      ctx->ta_base,
+                                      bpe, 1,
+                                      bpe, 1,
+                                      JS_NEW_CTOR_NO_GLOBAL);
+        }
+        break;
+    case LAZY_G_MAPSET:
+        if (js_lazy_map_iterator(class_id)) {
+            int i = class_id - JS_CLASS_MAP_ITERATOR + 4;
+            JSValue proto = JS_NewObjectProtoList(ctx, ctx->class_proto[JS_CLASS_ITERATOR],
+                                                  js_map_proto_funcs_ptr[i],
+                                                  js_map_proto_funcs_count[i]);
+            if (JS_IsException(proto))
+                return proto;
+            ctx->class_proto[class_id] = proto;
+            return JS_UNDEFINED;
+        } else {
+            int i = class_id - JS_CLASS_MAP;
+            /* Used to squelch a -Wcast-function-type warning. */
+            JSCFunctionType ft = { .constructor_magic = js_map_constructor };
+            ctor = JS_NewCConstructor(ctx, class_id, name,
+                                      ft.generic, 0, JS_CFUNC_constructor_magic, i,
+                                      JS_UNDEFINED,
+                                      class_id == JS_CLASS_MAP ? js_map_funcs :
+                                      class_id == JS_CLASS_SET ? js_set_funcs : NULL,
+                                      class_id == JS_CLASS_MAP ? countof(js_map_funcs) :
+                                      class_id == JS_CLASS_SET ? countof(js_set_funcs) : 0,
+                                      js_map_proto_funcs_ptr[i], js_map_proto_funcs_count[i],
+                                      JS_NEW_CTOR_NO_GLOBAL);
+        }
+        break;
+    case LAZY_G_WEAKREF:
+        ctor = JS_NewCConstructor(ctx, class_id, name,
+                                  class_id == JS_CLASS_WEAK_REF ? js_weakref_constructor
+                                                                : js_finrec_constructor,
+                                  1, JS_CFUNC_constructor_or_func, 0,
+                                  JS_UNDEFINED,
+                                  NULL, 0,
+                                  class_id == JS_CLASS_WEAK_REF ? js_weakref_proto_funcs
+                                                                : js_finrec_proto_funcs,
+                                  class_id == JS_CLASS_WEAK_REF ? countof(js_weakref_proto_funcs)
+                                                                : countof(js_finrec_proto_funcs),
+                                  JS_NEW_CTOR_NO_GLOBAL);
+        break;
+    case LAZY_G_DOMEX:
+        ctor = js_lazy_domexception_make(ctx);
+        break;
+    default:
+        abort();
+    }
+    if (JS_IsException(ctor))
+        set_value(ctx, &ctx->class_proto[class_id], JS_NULL);
+    return ctor;
+}
+
+/* The autoinit function of a pending global binding (LAZY_CLASS_CASE in
+   JS_InstantiateFunctionListItem2); `ctx` is the realm that registered it. */
+static JSValue js_lazy_class_ctor(JSContext *ctx, int class_id)
+{
+    /* Made already but still bound lazily: js_lazy_class_ensure resolves a
+       pending binding rather than making the class beside it, so this is
+       not expected. Kept as the safe answer. */
+    if (!JS_IsNull(ctx->class_proto[class_id]))
+        return JS_GetProperty(ctx, ctx->class_proto[class_id], JS_ATOM_constructor);
+    return js_lazy_make(ctx, class_id);
+}
+
+/* A class_proto read found JS_NULL (LAZY_CLASS_MISSING). 0 = the prototype
+   is there now, or this class is not lazy here (a context that never
+   registered the group keeps upstream's JS_NULL); -1 = exception. */
+static int js_lazy_class_ensure(JSContext *ctx, int class_id)
+{
+    JSObject *g;
+    JSProperty *pr;
+    JSShapeProperty *prs;
+    JSAtom atom;
+    const JSCFunctionListEntry *e;
+    JSValue ctor;
+    int group = js_lazy_group(class_id);
+
+    if (group < 0 || !(ctx->lazy_groups & (1u << group)))
+        return 0;
+    /* Resolve the binding itself while it is still ours and pending, so the
+       global and prototype.constructor are the same object. */
+    if (!js_lazy_map_iterator(class_id)) {
+        atom = js_lazy_atom(class_id);
+        g = JS_VALUE_GET_OBJ(ctx->global_obj);
+        prs = find_own_property(&pr, g, atom);
+        if (prs && (prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT &&
+                js_autoinit_get_id(pr) == JS_AUTOINIT_ID_PROP &&
+                js_autoinit_get_realm(pr) == ctx) {
+            e = pr->u.init.opaque;
+            if (e >= js_lazy_entries && e < js_lazy_entries + countof(js_lazy_entries))
+                return JS_AutoInitProperty(ctx, g, atom, pr, prs);
+        }
+    }
+    ctor = js_lazy_make(ctx, class_id);
+    if (JS_IsException(ctor))
+        return -1;
+    JS_FreeValue(ctx, ctor);
+    return 0;
+}
+#endif

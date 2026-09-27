@@ -13,6 +13,7 @@
 
 #include "overlay_core.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int failures;
@@ -158,6 +159,17 @@ static void frame_budget(void) {
     // which is the reading a caller would expect of "no limit".
     b=fresh(); b.over_limit=0;
     for(int i=0;i<200;i++) CHECK(!overlay_budget_turn(&b,1000000,0),"no limit, no stop");
+
+    CHECK(overlay_budget_cost(3000,6000)==9000,
+          "guest and retained Kasane composition are one charge");
+    CHECK(overlay_budget_cost(UINT32_MAX,1)==UINT32_MAX,
+          "combined overlay cost saturates instead of wrapping");
+    b=fresh();
+    for(int i=0;i<59;i++)
+        CHECK(!overlay_budget_turn(&b,overlay_budget_cost(3000,6000),0),
+              "combined cost stopped early at %d",i);
+    CHECK(overlay_budget_turn(&b,overlay_budget_cost(3000,6000),0),
+          "the 60th combined guest/composite overrun stops it");
 }
 
 static void healthy_period(void) {
@@ -185,10 +197,11 @@ static void healthy_period(void) {
 // is a shape and not a value.
 
 static char *slurp(const char *path) {
-    static char buffer[400000];
     FILE *f=fopen(path,"rb");
     if(!f) { printf("FAIL cannot open %s\n",path); failures++; return NULL; }
-    size_t n=fread(buffer,1,sizeof(buffer)-1,f);
+    char *buffer=malloc(400000);
+    if(!buffer){fclose(f);printf("FAIL cannot allocate source buffer\n");failures++;return NULL;}
+    size_t n=fread(buffer,1,399999,f);
     fclose(f);
     buffer[n]='\0';
     return buffer;
@@ -217,6 +230,8 @@ static void home_survives_without_the_overlay(void) {
     CHECK(occurrences(shell,"app_overlay_tick")==0 &&
           occurrences(shell,"app_start_overlay")==0,
           "the shell never runs guest code from inside a draw");
+    CHECK(occurrences(shell,"overlay_kasane_charge(")==1,
+          "the shell charges retained Kasane composition exactly once");
 
     // THE MENU IS ENDED, NOT COVERED (3.1, revised 2026-09-09). This replaced
     // "the composite is painted under the labels", which was the old rule and
@@ -237,13 +252,21 @@ static void home_survives_without_the_overlay(void) {
           "and so is painting its labels");
 
     char *main_c=slurp("main/main.c");
-    if(!main_c) return;
-    // Every path that takes the display releases the overlay first. Three of
-    // them: leaving the home screen, starting a foreground app, and the USB
-    // diagnostics, which reach app_start_test() without going through
-    // begin_run().
-    CHECK(occurrences(main_c,"overlay_release()")==3,
+    if(!main_c) { free(shell);return; }
+    // Every path that takes the display releases the overlay first. Keep the
+    // lower bound: additional diagnostic/start paths are allowed to repeat the
+    // same safety valve.
+    CHECK(occurrences(main_c,"overlay_release()")>=3,
           "every path that takes the guest releases the overlay first");
+
+    char *session=slurp("main/app_session.c");
+    char *owner=slurp("main/ui/overlay.c");
+    CHECK(session&&strstr(session,"if(pocket_kasane_needs_present())return ESP_OK;"),
+          "overlay guest waits for submission presentation and repair");
+    const char *queue=owner?strstr(owner,"pocket_overlay_key(k)"):NULL;
+    const char *blocked=owner?strstr(owner,"pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED"):NULL;
+    CHECK(queue&&blocked&&blocked<queue,
+          "blocked Kasane input is dropped before entering the overlay queue");
     const char *tick=strstr(main_c,"overlay_tick(");
     CHECK(tick && strstr(tick-260,"!running && screen==SCREEN_HOME"),
           "and a turn only runs while the home screen owns the display");
@@ -283,6 +306,7 @@ static void home_survives_without_the_overlay(void) {
           "and the file picker");
     CHECK(occurrences(main_c,"pocket_workspace_modal()")>=2,
           "and the works picker");
+    free(owner);free(session);free(main_c);free(shell);
 }
 
 int main(void) {

@@ -13,6 +13,9 @@ typedef struct {
     uint8_t     len;
     bool        toggle_ime;   // Ctrl+J or opt+Space
     bool        force_stop;   // Ctrl+Alt+Del
+#ifdef KASANE_P0_PROBE
+    uint32_t    queued_at_us; // input-task observation, not physical key-down
+#endif
 } keystroke_t;
 
 // Drain one hardware event. Returns false when nothing was produced — a

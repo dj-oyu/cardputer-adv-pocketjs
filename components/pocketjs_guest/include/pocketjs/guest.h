@@ -57,7 +57,9 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
 esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
                               size_t source_size, const char *label);
 
-/** Call globalThis.frame(...) once and drain every pending Promise job. */
+/** Call globalThis.frame(...) once and drain pending Promise jobs. An explicit
+ * globalThis.frame = null selects event-driven mode: jobs still drain, but no
+ * JS frame call or argument allocation occurs. A missing frame is an error. */
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame);
 
@@ -75,12 +77,30 @@ bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest);
 bool pocketjs_guest_suspended(const pocketjs_guest_t *guest);
 /** Either a parked chain or pending jobs must finish before a new frame. */
 bool pocketjs_guest_work_pending(const pocketjs_guest_t *guest);
+/** Resident suspension (docs/vm/app-suspend-design.md). true refuses with
+ * ESP_ERR_INVALID_STATE while work is pending, otherwise collects garbage,
+ * returns the small-block cache and puts the guest to sleep: eval, frame,
+ * continue and install then return ESP_ERR_INVALID_STATE without entering
+ * JavaScript, and the interrupt handler stops any entry that gets past them.
+ * false wakes it. Destroying a dormant guest is allowed. */
+esp_err_t pocketjs_guest_set_dormant(pocketjs_guest_t *guest, bool dormant);
+bool pocketjs_guest_dormant(const pocketjs_guest_t *guest);
 /** Accumulated time inside the current parked frame call, not host waits. */
 int64_t pocketjs_guest_frame_total(const pocketjs_guest_t *guest);
-#if defined(CONFIG_POCKET_VM_SELFTEST) && defined(CONFIG_POCKET_VM_YIELD)
+#ifdef CONFIG_POCKET_VM_SELFTEST
 /** Log the next completed frame's accumulated call time, excluding host waits.
  * Includes preemption and native calls; not a CPU-time measurement. */
 void pocketjs_guest_trace_frame(pocketjs_guest_t *guest);
+#endif
+#ifdef CONFIG_POCKET_VM_RELOC
+/** L3a: move the frame segments to new addresses at every park from now on,
+ * and reset the counters. Off until this is called, so a RELOC build that is
+ * never armed takes the same path as a build without it. Arming does not
+ * change what the guest computes -- if it does, that is the bug this is for
+ * (docs/vm/vm-L3-design.md sec.8, gate G7). */
+void pocketjs_guest_reloc_arm(pocketjs_guest_t *guest, bool on);
+/** Log VM_RELOC with what the moves since arming cost. Silent when unarmed. */
+void pocketjs_guest_reloc_report(const pocketjs_guest_t *guest);
 #endif
 /** Stop the yield producer first. Close a parked chain without catch/finally
  * before entering a shutdown hook; queued jobs remain queued. */
@@ -126,6 +146,16 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
  * inside the guest once JS_ThrowOutOfMemory's own allocation also fails). */
 void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
                              size_t *first_req, size_t *first_used);
+
+/* Detailed destructive read. The host calls only one variant per turn. */
+#include "quickjs.h"
+void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out);
+
+/* R3 (docs/vm/r3-small-block-cache.md): give the small blocks the guest's
+ * allocator keeps for reuse back to the heap -- when the system, not the
+ * guest, is short (pocket_memory FREE/LARGEST). A no-op from any task but the
+ * one that created the guest. */
+void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest);
 
 void pocketjs_guest_destroy(pocketjs_guest_t *guest);
 

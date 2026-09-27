@@ -212,7 +212,7 @@ DIRAM（実測(build)）: **プローブ無効 115,372 B（本作業の前後で
 | 条件 | 字 | 実際に動いていたもの | 実測での確認 |
 | --- | --- | --- | --- |
 | base | `P` | ワークロードだけ | — |
-| ui | `Q` | `pocket.ui` の画面（rect 1 + text 1）を毎フレーム `setText` | `VMCOND ui on` |
+| ui | `Q` | 画面（rect 1 + text 1）を毎フレーム `setText`。2026-09-23 に `pocket.kasane` へ書き直した（採取当時は `pocket.ui`） | `VMCOND ui on` |
 | audio | `R` | `pocket.audio.tone` 440 Hz 1 秒を完了から張り直す（合成も I2S も本物、音声タスクは優先度 7） | `VMCOND tone 5/10/15`（15 秒で 14〜15 音） |
 | wifi | `T` | リンクを走行中ずっと保持し、3 秒ごとに LAN ゲートウェイへ平文 GET、本文を EOF まで読む | `VMCOND wifi connected 192.168.1.42 -> http://192.168.1.1/`、`VMCOND http 200 56 …ms` |
 | all | `W` | 上の 3 つ同時 | 上記すべて |

@@ -1,3 +1,4 @@
+#include "pocket_av.h"
 #include "file_picker.h"
 #include "pickmodal.h"
 #include "sd_media.h"
@@ -342,6 +343,8 @@ JSValue file_picker_request(JSContext *ctx, JSValueConst self,
                             int argc, JSValueConst *argv) {
     (void)self;
     static const char OP[]="fs.pickFile";
+    // S5: an app that reaches for the card wins it from the background music.
+    if(pocket_av_background_holds_card()) pocket_av_background_stop("sd");
     const char *id=argc>0&&JS_IsString(argv[0])?JS_ToCString(ctx,argv[0]):NULL;
     bool is_sd=id&&(!strcmp(id,"sd")||!strcmp(id,"sd:/")||!strcmp(id,"sd:"));
     if(id) JS_FreeCString(ctx,id);
@@ -492,10 +495,40 @@ static bool successor(file_picker_t *fp, const char *dirpath, const char *after,
     return found;
 }
 
+// The background player's queue (docs/vm/app-suspend-design.md S5): the walk
+// fs.nextFile makes, for the host, when the music overlay that would have asked
+// is no longer running. Same grant, same media and same folder rules; wraps to
+// the first file of the folder. `out` receives "sd:/..." on success.
+bool file_picker_next_path(const char *path, const char *const *exts, unsigned n_ext,
+                           char *out, size_t outsz) {
+    if(!path||strncmp(path,"sd:/",4)) return false;
+    if(!sd_media()->granted||sd_media()->state!=SD_MEDIA_READY) return false;
+    file_picker_t fp={0};
+    const char *rel=path+4;
+    const char *slash=strrchr(rel,'/');
+    size_t dirlen=slash?(size_t)(slash-rel):0;
+    const char *leaf=slash?slash+1:rel;
+    if(dirlen>=sizeof fp.rel||strlen(leaf)>=PICK_NAME_MAX) return false;
+    memcpy(fp.rel,rel,dirlen);
+    fp.rel[dirlen]='\0';
+    for(unsigned i=0;i<n_ext&&fp.ext_count<PICK_EXT_MAX;i++)
+        if(strlen(exts[i])<PICK_EXT_LEN) snprintf(fp.ext[fp.ext_count++],PICK_EXT_LEN,"%s",exts[i]);
+    char dirpath[SD_FSPATH_MAX];
+    if(!here(&fp,dirpath,sizeof dirpath)) return false;
+    char next[PICK_NAME_MAX];
+    bool found=successor(&fp,dirpath,leaf,next,sizeof next);
+    if(!found) found=successor(&fp,dirpath,NULL,next,sizeof next);
+    if(!found) return false;
+    int w=snprintf(out,outsz,"sd:/%s%s%s",fp.rel,fp.rel[0]?"/":"",next);
+    return w>0&&(size_t)w<outsz;
+}
+
 JSValue file_picker_next(JSContext *ctx, JSValueConst self,
                          int argc, JSValueConst *argv) {
     (void)self;
     static const char OP[]="fs.nextFile";
+    // S5: an app that reaches for the card wins it from the background music.
+    if(pocket_av_background_holds_card()) pocket_av_background_stop("sd");
     const char *path=argc>0&&JS_IsString(argv[0])?JS_ToCString(ctx,argv[0]):NULL;
     if(!path||strncmp(path,"sd:/",4)) {
         if(path) JS_FreeCString(ctx,path);

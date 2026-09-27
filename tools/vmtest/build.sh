@@ -4,23 +4,15 @@
 #   tools/vmtest/build.sh           # asan (default)
 #   tools/vmtest/build.sh o2        # -O2, for timing
 #   tools/vmtest/build.sh all
-#   tools/vmtest/build.sh asan-alloca   # CONFIG_POCKET_VM_SEGFRAMES off: frames on the C stack
-#   tools/vmtest/build.sh o2-alloca     # (the pre-L2a path; spec sec.12 "revertible")
-#   tools/vmtest/build.sh all-alloca
-#   tools/vmtest/build.sh asan-recur    # segframes, JS calls still recurse in C (L2a; FLATCALLS off)
-#   tools/vmtest/build.sh asan-flat     # segframes + CONFIG_POCKET_VM_FLATCALLS (L2b)
-#   tools/vmtest/build.sh all-recur / all-flat
-#   tools/vmtest/build.sh asan-yield   # flat calls + the staged L2c body
-#   tools/vmtest/build.sh all-yield
-#   tools/vmtest/build.sh o2-keepsrc   # any variant + "-keepsrc": function source text kept (upstream toString)
+#   tools/vmtest/build.sh asan-reloc  # + CONFIG_POCKET_VM_RELOC (L3a), for --force-reloc
 #
-# Three paths (spec sec.12 / design H5): "-alloca" is the same compiler flags
-# without the L2a define; "-recur" and "-flat" pin the L2b switch off / on.
-# The PLAIN variants (asan / o2) build what main/Kconfig.projbuild ships by
-# default -- see the three defaults below, which must be kept equal to the
-# Kconfig -- so that every gate run without a suffix is a gate on the
-# firmware's path. run.sh --variant / stack_probe.sh N VARIANT / test262.py
-# --variant / budget_probe.sh VARIANT accept any of the six names.
+# The engine has one path: the VM levels (L1 scheduling, L2 segment frames,
+# flat calls and yield, stripped function source) and the F/R lines (flash
+# atoms, lazy builtins and intrinsics, the small-block cache) are no longer
+# build options (docs/vm/backlog.md, 2026-09-27), so the host builds exactly
+# what the firmware ships. The variants that pinned one of them off (-alloca,
+# -recur, -noyield, -keepsrc, -norom, ...) went with them; commit 5db834f is
+# the last tree that has them.
 #
 # Unlike tools/build_pocket_text_test.sh, the asan variant instruments QuickJS
 # itself: the code under test from L1 on IS quickjs.c, so a use-after-free in a
@@ -29,47 +21,24 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT=$(pwd)
-QJS=components/quickjs-ng/quickjs-ng
+# VMTEST_QJS: build a copy of the engine instead (the negative controls,
+# tools/vmtest/floor/f1_faults.sh, build deliberately broken copies this way;
+# pair it with its own VMTEST_OUT so no object is shared with the real one).
+QJS=${VMTEST_QJS:-components/quickjs-ng/quickjs-ng}
 OUT=${VMTEST_OUT:-$ROOT/.cache/vmtest}
 
 build_variant() {
   local variant=$1 cflags
-  # CONFIG_POCKET_VM_SEGFRAMES defaults to y in main/Kconfig.projbuild. The
-  # host has no sdkconfig (the stub below is empty), so a default-y switch
-  # has to be passed by hand or the host would silently test the OTHER path
-  # from the one the firmware ships. Passed as -D, not written into the stub:
-  # the stub is shared by every variant and the -alloca ones must not see it.
-  local segframes="-DCONFIG_POCKET_VM_SEGFRAMES=1"
-  # CONFIG_POCKET_VM_FLATCALLS: default y in main/Kconfig.projbuild (L2b,
-  # docs/vm/vm-L2-design.md sec.9). Same rule as above: the plain variant
-  # mirrors the Kconfig default; "-flat" / "-recur" force it on / off.
-  local flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"
-  # Match the validated firmware default; -eager retains the old return path.
-  local lazy="-DCONFIG_POCKET_VM_LAZY_INPUTS=1"
-  local yield=""
-  # CONFIG_POCKET_VM_STRIP_FN_SOURCE: default y (no function source text kept,
-  # Function.prototype.toString prints the name-only fallback). A trailing
-  # "-keepsrc" on ANY variant builds the upstream behaviour instead; it is
-  # peeled off first so the suffix rules below see the rest unchanged.
-  local strip="-DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1"
-  if [[ $variant == *-keepsrc ]]; then strip=""; fi
-  local core=${variant%-keepsrc}
-  local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}
-  case "$core" in
-    *-lazy-flat) ;;
-    *-eager) lazy="" ;;
-    *-callbench) yield="-DCONFIG_POCKET_VM_CALLBENCH=1" ;;
-    *-lazy) yield="-DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_TCO=1" ;;
-    *-tco) yield="-DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_TCO=1" ;;
-    *-alloca) segframes=""; flatcalls=""; lazy="" ;;
-    *-recur) flatcalls=""; lazy="" ;;
-    *-flat) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1" ;;
-    *-yield) flatcalls="-DCONFIG_POCKET_VM_FLATCALLS=1"; yield="-DCONFIG_POCKET_VM_YIELD=1" ;;
-  esac
+  # L3a: the explicit move API. Default n in the Kconfig and nothing in the
+  # firmware calls it, so it is never in a plain variant -- this suffix is
+  # the only way it is built, and --force-reloc is the only thing that calls it.
+  local reloc=""
+  local base=${variant%-reloc}
+  [ "$base" != "$variant" ] && reloc="-DCONFIG_POCKET_VM_RELOC=1"
   case "$base" in
     asan) cflags="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined" ;;
     o2)   cflags="-O2 -g" ;;
-    *) echo "unknown variant $variant" >&2; exit 2 ;;
+    *) echo "unknown variant $variant (asan, o2, either with -reloc)" >&2; exit 2 ;;
   esac
   # VMTEST_CFLAGS: extra flags for every compile and the link, e.g. the -m32
   # sysroot flags from tools/vmtest/m32_sysroot.sh (with VMTEST_OUT pointing at
@@ -89,7 +58,7 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield $strip -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $reloc -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
@@ -115,16 +84,12 @@ build_variant() {
     return 1
   fi
   gcc -std=gnu11 $cflags -Wall -Wextra -Werror $defs -I "$QJS" \
-      tools/vmtest/vmrun.c "$GUEST/src/vm_sched.c" "$GUEST/src/vm_clock.c" \
+      tools/vmtest/vmrun.c "$GUEST/src/vm_sched.c" "$GUEST/src/vm_clock.c" "$GUEST/src/block_cache.c" \
       "${objs[@]}" -lm -lpthread -ldl -o "$OUT/vmrun-$variant"
   echo "built $OUT/vmrun-$variant"
 }
 
 case "${1:-asan}" in
   all) build_variant asan; build_variant o2 ;;
-  all-alloca) build_variant asan-alloca; build_variant o2-alloca ;;
-  all-recur) build_variant asan-recur; build_variant o2-recur ;;
-  all-flat) build_variant asan-flat; build_variant o2-flat ;;
-  all-yield) build_variant asan-yield; build_variant o2-yield ;;
   *) build_variant "${1:-asan}" ;;
 esac

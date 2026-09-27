@@ -3,6 +3,7 @@
 #include "app_session.h"
 #include "jsconsole.h"
 #include "pocket_clock.h"
+#include "pocket_pool_probe.h"
 #include "utf8.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -42,6 +43,14 @@ typedef enum { PHASE_LOADING, PHASE_STARTING, PHASE_RUNNING, PHASE_STOPPED } pha
 static phase_t phase;
 static bool    registered;      // pocket.app.start() was called
 static JSValue start_hook, stop_hook;
+// Resident suspension (docs/vm/app-suspend-design.md sec.5). Registering a
+// resume hook is how an app says it can be kept: without one, Back still ends
+// it, because an app written before suspension existed saves in its stop hook
+// and would otherwise never reach it.
+static JSValue suspend_hook, resume_hook;
+// What the next stop hook is told. "evict" is a suspended app being ended by
+// the host (another app starting, memory); it goes back to "back" after use.
+static const char *stop_reason="back";
 static int64_t frame_last_us;   // 0 until the first frame
 
 static pocket_sub_slot_t  frame_slots[APP_FRAME_LISTENERS];
@@ -609,10 +618,13 @@ static JSValue js_start(JSContext *ctx, JSValueConst this_val,
     bool    bad=false;
     JSValue error=take_hook(ctx,argv[0],"start",&start_hook,&bad);
     if(!bad) error=take_hook(ctx,argv[0],"stop",&stop_hook,&bad);
+    if(!bad) error=take_hook(ctx,argv[0],"suspend",&suspend_hook,&bad);
+    if(!bad) error=take_hook(ctx,argv[0],"resume",&resume_hook,&bad);
     if(bad) {
         JS_FreeValue(ctx,global);
         JS_FreeValue(ctx,start_hook); JS_FreeValue(ctx,stop_hook);
-        start_hook=stop_hook=JS_UNDEFINED;
+        JS_FreeValue(ctx,suspend_hook); JS_FreeValue(ctx,resume_hook);
+        start_hook=stop_hook=suspend_hook=resume_hook=JS_UNDEFINED;
         return error;
     }
     JS_SetPropertyStr(ctx,global,"frame",
@@ -733,6 +745,49 @@ void pocket_app_pump(void) {
     }
 }
 
+// ------------------------------------------------------ resident suspension
+
+bool pocket_app_can_suspend(void) {
+    return js_ctx && registered && phase==PHASE_RUNNING && !exit_requested &&
+           !JS_IsUndefined(resume_hook);
+}
+
+// Called inside the leave turn, whose watchdog bounds it: the hook, then the
+// jobs its Promise needs, until it settles or `until_us`. False when it threw,
+// rejected or did not finish -- the host then stops the app instead, and the
+// stop hook gets its chance to save.
+bool pocket_app_run_suspend(int64_t until_us) {
+    JSContext *ctx=js_ctx;
+    if(!ctx) return false;
+    hook_failed=false; hook_pending=false;
+    if(!JS_IsUndefined(suspend_hook)) {
+        run_hook(ctx,suspend_hook,JS_UNDEFINED,0);
+        JSRuntime *rt=JS_GetRuntime(ctx);
+        JSContext *pending=NULL;
+        while(hook_pending && esp_timer_get_time()<until_us)
+            if(JS_ExecutePendingJob(rt,&pending)<=0) break;
+    }
+    return !hook_failed && !hook_pending;
+}
+
+// The first turn after a suspension. The frame clock starts over, so the first
+// onFrame reports a delta of zero rather than the minutes the app slept; the
+// sleep itself is the resume hook's argument. A resume hook that fails is a
+// program that could not come back, and is stopped like one whose start failed.
+void pocket_app_resume(int64_t suspended_ms) {
+    JSContext *ctx=js_ctx;
+    frame_last_us=0; fps_window_us=0; fps_frames=0;
+    if(!ctx || JS_IsUndefined(resume_hook)) return;
+    JSValue info=JS_NewObject(ctx);
+    if(JS_IsException(info)) { JS_FreeValue(ctx,JS_GetException(ctx)); app_request_stop(); return; }
+    JS_SetPropertyStr(ctx,info,"suspendedMs",JS_NewInt64(ctx,suspended_ms));
+    run_hook(ctx,resume_hook,info,1);
+    JS_FreeValue(ctx,info);
+    if(hook_failed) app_request_stop();
+}
+
+void pocket_app_set_stop_reason(const char *reason) { stop_reason=reason?reason:"back"; }
+
 // The stop hook has to be able to run after the shell has already asked the
 // guest to stop, and app_session.c's interrupt handler answers yes to every
 // call from that moment on. Swapping in a handler with a deadline of its own is
@@ -760,11 +815,11 @@ void pocket_app_reset(void) {
         // than JS_SetInterruptHandler: the slot is single and three callers
         // used to overwrite each other in it.
         app_vm_watchdog(stop_interrupt,NULL);
-        // "back" is the only reason this host can give honestly: the shell has
-        // one teardown path, taken both when the user leaves an app and when
-        // the app calls exit(), and neither "replace" nor "shutdown" exists
-        // here yet. Passing one of those would make the argument a guess.
-        JSValue reason=JS_NewString(ctx,"back");
+        // "back" is the reason for the shell's ordinary teardown, taken both
+        // when the user leaves an app and when the app calls exit(); "evict"
+        // is a suspended app the host is ending. Neither "replace" nor
+        // "shutdown" exists here yet, and passing one would make it a guess.
+        JSValue reason=JS_NewString(ctx,stop_reason);
         run_hook(ctx,stop_hook,reason,1);
         JS_FreeValue(ctx,reason);
         // A hook's Promise can only settle through the job queue, and this is
@@ -784,8 +839,12 @@ void pocket_app_reset(void) {
     phase=PHASE_STOPPED;
     pocket_api_sub_close_all(&frame_table);
     frame_table.ctx=NULL;
-    if(ctx) { JS_FreeValue(ctx,start_hook); JS_FreeValue(ctx,stop_hook); }
-    start_hook=stop_hook=JS_UNDEFINED;
+    if(ctx) {
+        JS_FreeValue(ctx,start_hook); JS_FreeValue(ctx,stop_hook);
+        JS_FreeValue(ctx,suspend_hook); JS_FreeValue(ctx,resume_hook);
+    }
+    start_hook=stop_hook=suspend_hook=resume_hook=JS_UNDEFINED;
+    stop_reason="back";
     // The sleeps are not settled here: they wait on promise slots, and
     // pocket_api_reset() is what asks them to stop and lets their resolvers go.
     //
@@ -806,7 +865,9 @@ void pocket_app_reset(void) {
 static const pocket_limit_t app_limits[] = {
     {.name="maxFrameListeners",.kind=POCKET_LIMIT_INT, .number=APP_FRAME_LISTENERS},
     {.name="stopHookMs",       .kind=POCKET_LIMIT_INT, .number=APP_STOP_MS},
-    {.name="stopReasons",      .kind=POCKET_LIMIT_TEXT,.text="back"},
+    {.name="stopReasons",      .kind=POCKET_LIMIT_TEXT,.text="back,evict"},
+    // Resident suspension: a resume hook keeps the app asleep on Back.
+    {.name="suspend",          .kind=POCKET_LIMIT_FLAG,.number=1},
     // pocket_workspace.c contributes launchContext() and info() to this
     // namespace, so the flag an app branches on says 1 here.
     {.name="launchContext",    .kind=POCKET_LIMIT_FLAG,.number=1},
@@ -863,6 +924,10 @@ static esp_err_t build_time(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
     define(ctx,ns,"now",JS_NewCFunction(ctx,js_time_now,"now",0));
     define(ctx,ns,"wall",JS_NewCFunction(ctx,pocket_clock_wall,"wall",0));
+    define(ctx,ns,"wallSource",JS_NewCFunction(ctx,pocket_clock_wall_source,"wallSource",0));
+#ifdef KASANE_P0_PROBE
+    define(ctx,ns,"poolProbeSource",JS_NewCFunction(ctx,pocket_pool_probe_source,"poolProbeSource",0));
+#endif
     define(ctx,ns,"sleep",JS_NewCFunction(ctx,js_sleep,"sleep",2));
     return ESP_OK;
 }
@@ -900,7 +965,8 @@ esp_err_t pocket_app_install(JSContext *ctx, void *user_data) {
     registered=false;
     exit_requested=false;
     hook_pending=false; hook_failed=false;
-    start_hook=stop_hook=JS_UNDEFINED;
+    start_hook=stop_hook=suspend_hook=resume_hook=JS_UNDEFINED;
+    stop_reason="back";
     frame_last_us=0;
     fps_window_us=0; fps_frames=0; fps_value=-1.0;
     log_reset();

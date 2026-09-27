@@ -19,12 +19,27 @@ typedef struct {
     uint32_t skip, produced;
     int64_t blocked_us;
 } mp3_worker_t;
-static atomic_bool running, halt;
+static atomic_bool running, halt, parked, worker_started;
 static atomic_uint faults, frames, progress;
+static TaskHandle_t worker_task;
+static portMUX_TYPE worker_lock=portMUX_INITIALIZER_UNLOCKED;
+
+static void wake_worker(void) {
+    taskENTER_CRITICAL(&worker_lock);
+    if(worker_task) xTaskNotifyGive(worker_task);
+    taskEXIT_CRITICAL(&worker_lock);
+}
+
+static void wait_while_paused(void) {
+    while(atomic_load(&parked)&&!atomic_load(&halt))
+        ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(5));
+}
 
 static int read_bytes(mp3_worker_t *w, uint8_t *dst, unsigned want) {
     unsigned got=0;
     while(got<want&&!atomic_load(&halt)) {
+        wait_while_paused();
+        if(atomic_load(&halt)) break;
         if(!w->read.held||w->read.used==w->read.bytes) {
             stream_release(w->input,&w->read);
             if(!stream_take(w->input,&w->read,0)) {
@@ -48,6 +63,7 @@ static bool output(void *ctx, int16_t sample) {
     w->produced++;
     if(w->skip) { w->skip--; return !atomic_load(&halt); }
     while(!w->slot&&!atomic_load(&halt)) {
+        wait_while_paused();
         w->slot=sound_stream_slot(w->pcm);
         if(!w->slot) {
             int64_t start=esp_timer_get_time();
@@ -67,9 +83,12 @@ static bool output(void *ctx, int16_t sample) {
 
 static void worker(void *arg) {
     mp3_worker_t *w=arg;
+    while(!atomic_load(&worker_started)) vTaskDelay(1);
     int64_t total_us=0, worst_us=0;
     uint32_t count=0;
     while(!atomic_load(&halt)) {
+        wait_while_paused();
+        if(atomic_load(&halt)) break;
         int n=read_bytes(w,w->frame,4);
         if(!n) break;
         pocket_mp3_header_t h;
@@ -90,8 +109,8 @@ static void worker(void *arg) {
         count++;
         atomic_store(&progress,count);
         atomic_store(&frames,w->produced);
-        // Resume replays and discards earlier samples to restore the bit
-        // reservoir exactly. Yield even when no PCM backpressure applies.
+        // Yield even when no PCM backpressure applies.
+        // A live pause retains this decoder instead of replaying the prefix.
         vTaskDelay(1);
     }
     if(!count&&!atomic_load(&halt)) atomic_fetch_add(&faults,1);
@@ -112,7 +131,13 @@ static void worker(void *arg) {
              (unsigned)count,(unsigned)w->produced,(unsigned)atomic_load(&faults),
              (unsigned)(count?total_us/count:0),(unsigned)worst_us,
              MP3_STACK-left,MP3_STACK,(unsigned)sizeof(*w));
+#ifdef KASANE_P0_BUS_PROBE
+    ESP_LOGI("mp3","P1 decoder observed core %d",xPortGetCoreID());
+#endif
     free(w->decoder.pcm); free(w->frame); free(w);
+    taskENTER_CRITICAL(&worker_lock);
+    worker_task=NULL;
+    taskEXIT_CRITICAL(&worker_lock);
     atomic_store(&running,false);
     vTaskDelete(NULL);
 }
@@ -131,22 +156,40 @@ mp3_feed_start_t mp3_feed_start(sound_stream_t *pcm, sound_stream_t *input,
     }
     pocket_mp3_init(&w->decoder,pcm_buffer);
     w->pcm=pcm; w->input=input; w->skip=skip_frames;
-    atomic_store(&halt,false); atomic_store(&faults,0);
+    atomic_store(&halt,false); atomic_store(&parked,false);
+    atomic_store(&worker_started,false);
+    atomic_store(&faults,0);
     atomic_store(&frames,0); atomic_store(&progress,0);
     atomic_store(&running,true);
     // ESP-IDF stack sizes and watermarks are bytes, not vanilla FreeRTOS words.
-    if(xTaskCreate(worker,"mp3dec",MP3_STACK,w,6,NULL)!=pdPASS) {
+    TaskHandle_t created=NULL;
+    /* Decoder bursts on the UI core delayed the LCD completion wake by up to
+     * 7 ms during SD playback. Core 0 keeps the UI's core 1 runnable; the
+     * reader and output tasks already coexisted there without underruns in
+     * the 240-second Cardputer gate (docs/kasane/decisions.md and verification.md). */
+    BaseType_t started=xTaskCreatePinnedToCore(worker,"mp3dec",MP3_STACK,w,6,&created,0);
+    if(started!=pdPASS) {
         atomic_store(&running,false);
         free(w->decoder.pcm); free(w->frame); free(w); return MP3_FEED_NOMEM;
     }
+    taskENTER_CRITICAL(&worker_lock);
+    worker_task=created;
+    taskEXIT_CRITICAL(&worker_lock);
+    atomic_store(&worker_started,true);
     return MP3_FEED_OK;
 }
 
 bool mp3_feed_stop(void) {
     atomic_store(&halt,true);
+    wake_worker();
     for(unsigned i=0;i<40&&atomic_load(&running);i++) vTaskDelay(pdMS_TO_TICKS(5));
     return !atomic_load(&running);
 }
+void mp3_feed_pause(bool paused) {
+    atomic_store(&parked,paused);
+    wake_worker();
+}
+bool mp3_feed_running(void) { return atomic_load(&running); }
 uint32_t mp3_feed_faults(void) { return atomic_load(&faults); }
 uint32_t mp3_feed_frames(void) { return atomic_load(&frames); }
 uint32_t mp3_feed_progress(void) { return atomic_load(&progress); }

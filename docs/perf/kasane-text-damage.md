@@ -210,6 +210,6 @@ render 12.8〜36.2 ms だったものが **13,312〜29,952 B / render 8.0〜29.5
 ## 8. まだ箱全体になる場合
 
 - **ネイティブ画面**（home / overlay / picker / editor）は Kasane が所有していないので
-  この経路に乗らない。`docs/kasane/kasane-astra-plan.md` の CP27–30。
+  この経路に乗らない。[Kasane残タスク](../kasane/roadmap.md)のFramework全体を参照。
 - **`advance` を持たない text port**（ホスト試験の広いアーム）。実機は `ksn_font_port` が
   持っているので該当しない。

@@ -68,11 +68,7 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
     // (CONFIG_POCKET_VM_FLATCALLS). budget_probe.sh reads it to know which
     // guard is expected to answer under the shipped limits: with C recursion
     // the C-stack guard fires first (budget_hits=0), flat only the budget can.
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     const int flat = 1;
-#else
-    const int flat = 0;
-#endif
     // The (unsigned) casts are not decoration: depth_max and seg_live_max are
     // uint32_t, which is unsigned int on the x86-64 host but long unsigned int
     // on xtensa, so a bare %u passed every host build and failed -Werror=format
@@ -91,13 +87,8 @@ void vmtest_vmstack_report(JSRuntime *rt, void *out)
             st->budget, (unsigned long long)st->budget_hits,
             (unsigned long long)st->seg_refused);
 #else
-#ifdef CONFIG_POCKET_VM_FLATCALLS
     fprintf(f, "#info vmstack flat=1 seg_size=%zu seg_first=%zu seg_max=%zu budget=%zu (no stats in this build)\n",
             st->seg_max, st->seg_first, st->seg_max, st->budget);
-#else
-    fprintf(f, "#info vmstack flat=0 seg_size=%zu seg_first=%zu seg_max=%zu budget=%zu (no stats in this build)\n",
-            st->seg_max, st->seg_first, st->seg_max, st->budget);
-#endif
 #endif
 }
 
@@ -225,41 +216,6 @@ void js_vm_state_free(JSRuntime *rt, JSVMState *vm)
 // itself changes. Once quickjs.c grows the real rt->vm_susp / vm_yield: /
 // vm_resume: machinery, JS_VMSuspended and friends move there and read it
 // instead of being constant.
-
-#ifndef CONFIG_POCKET_VM_YIELD
-void JS_VMRequestYield(JSRuntime *rt) { (void)rt; }
-void JS_VMClearYield(JSRuntime *rt) { (void)rt; }
-void JS_VMTerminate(JSRuntime *rt) { (void)rt; }
-void JS_VMDiscard(JSRuntime *rt) { (void)rt; }
-
-int JS_VMSuspended(JSRuntime *rt) {
-    (void)rt;
-    return 0;
-}
-
-JSVMOrigin JS_VMSuspendedOrigin(JSRuntime *rt) {
-    (void)rt;
-    return JS_VM_ORIGIN_NONE;
-}
-
-JSValue JS_VMResume(JSContext *ctx) {
-    // Never legitimately reachable: every caller checks JS_VMSuspended first,
-    // and that is always false. A caller that gets here anyway has a bug, not
-    // a suspended chain to resume -- report it the same way an internal
-    // invariant violation elsewhere in quickjs.c would.
-    return JS_ThrowInternalError(ctx, "JS_VMResume: nothing suspended");
-}
-
-JSValue JS_VMCall(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
-                  int argc, JSValueConst *argv) {
-    return JS_Call(ctx, func_obj, this_obj, argc, argv);
-}
-
-JSValue JS_VMEval(JSContext *ctx, const char *input, size_t input_len,
-                  const char *filename, int eval_flags) {
-    return JS_Eval(ctx, input, input_len, filename, eval_flags);
-}
-#endif
 
 void vmtest_vm_set_force_yield(JSRuntime *rt, int on)
 {

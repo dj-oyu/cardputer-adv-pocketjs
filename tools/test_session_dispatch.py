@@ -11,9 +11,8 @@ with tempfile.TemporaryDirectory(prefix='ksn-session-') as directory:
     path = Path(directory)
     (path / 'session_dispatch_impl.inc').write_text(source[start:end])
     for flags in (['-O1', '-g', '-fsanitize=address,undefined'], ['-O2', '-fstrict-aliasing']):
-        for fair in ([], ['-DCONFIG_POCKET_VM_FAIR=1']):
-            exe = path / 'test'
-            subprocess.run(['gcc', '-std=c11', '-Wall', '-Wextra', '-Werror',
-                            *flags, *fair, '-I', str(path),
-                            str(root / 'tools/test_session_dispatch.c'), '-o', str(exe)], check=True)
-            subprocess.run([str(exe)], check=True)
+        exe = path / 'test'
+        subprocess.run(['gcc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                        *flags, '-I', str(path),
+                        str(root / 'tools/test_session_dispatch.c'), '-o', str(exe)], check=True)
+        subprocess.run([str(exe)], check=True)

@@ -1,0 +1,46 @@
+cc1 true
+cc2 xx
+cc3 a1,b22,c333
+alt1 true
+q1 aaaa
+q2 aaaaa
+lazy1 <a>
+greedy1 <a><b>
+star true
+plus true
+opt true
+anchor1 true
+wb1 true
+dotall true
+multi a,b
+grp1 12,34
+grp2 bar
+named1 2026
+backref1 true
+named-backref true
+la1 true
+nla1 true
+lb1 100
+nlb1 true
+ci1 true
+sticky1 true
+global1 a,b,c,
+u1 true
+u2 true
+v1-unsupported SyntaxError
+replace1 23/09/2026
+replaceAll1 a_b_c
+replFn aBc
+matchAll1 1,2,3
+split1 one|two|three
+search1 6
+bigalt true
+bigclass true
+nested abcd,abc,ab,a,b,c,d
+manygroups true
+badsyntax SyntaxError
+badquant SyntaxError
+badrange SyntaxError
+execloop 3 0
+props abc gimsuy
+exit=0

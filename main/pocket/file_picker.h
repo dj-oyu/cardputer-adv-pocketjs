@@ -27,6 +27,9 @@
 
 JSValue file_picker_request(JSContext *ctx, JSValueConst self,
                             int argc, JSValueConst *argv);
+// S5: the next file after `path` in its folder, wrapping, for the host.
+bool file_picker_next_path(const char *path, const char *const *exts, unsigned n_ext,
+                           char *out, size_t outsz);
 
 // The modal contract main.c's tick_run() drives, the same one the folder and
 // works pickers have: while it is up the guest is not ticked and the keys are

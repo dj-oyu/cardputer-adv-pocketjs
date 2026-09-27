@@ -78,6 +78,12 @@ typedef struct {
     bool unicode_sets;
     bool ignore_case;
     bool dotall;
+    /* PocketJS: set by re_parse_out_of_memory(), read by lre_compile() to
+       tell an allocation failure apart from a genuine parse error -- see
+       js_compile_regexp() in quickjs.c, which used to throw SyntaxError
+       for both (docs/vm/oom-parse-safety.md sec.6's "誤診断" class, here
+       in the regexp compiler instead of the bytecode compiler). */
+    bool is_oom;
     int capture_count;
     int total_capture_count; /* -1 = not computed yet */
     int has_named_captures; /* -1 = don't know, 0 = no, 1 = yes */
@@ -204,6 +210,8 @@ static const uint16_t *char_range_table[] = {
     char_range_w,
 };
 
+static int re_parse_out_of_memory(REParseState *s);
+
 static int cr_init_char_range(REParseState *s, CharRange *cr, uint32_t c)
 {
     bool invert;
@@ -226,8 +234,14 @@ static int cr_init_char_range(REParseState *s, CharRange *cr, uint32_t c)
     }
     return 0;
 fail:
+    /* PocketJS: cr_add_point / cr_invert fail only on allocation, and this
+       `return -1` (upstream, as of 2026-09-23) set no message, so
+       lre_compile()'s error: label copied out whatever s->u.tmp_buf held
+       -- the last group name parsed. /(?<y>\d{4})-(?<m>\d{2})/ under
+       vmrun --fail-alloc 1626 / 1631 threw "SyntaxError: y" and
+       "SyntaxError: m" for a heap that was merely full. */
     cr_free(cr);
-    return -1;
+    return re_parse_out_of_memory(s);
 }
 
 #ifdef DUMP_REOP
@@ -397,11 +411,28 @@ static int JS_PRINTF_FORMAT_ATTR(2, 3) re_parse_error(REParseState *s, const cha
 
 static int re_parse_out_of_memory(REParseState *s)
 {
+    s->is_oom = true;
     return re_parse_error(s, "out of memory");
 }
 
 static int lre_check_size(REParseState *s)
 {
+    /* PocketJS: this is the entry check of re_parse_term(),
+       re_parse_alternative() and re_parse_disjunction() -- the same choke
+       point docs/vm/oom-parse-safety.md sec.3.2 used for the bytecode
+       compiler's resolve_variables(): once ANY earlier dbuf_put* on
+       s->byte_code has failed, the sticky DynBuf (cutils.h dbuf_claim)
+       means every later write here is a guaranteed no-op, so there is no
+       point recursing further into the pattern -- and several call sites
+       assume a non-empty, non-NULL byte_code.buf once they are past this
+       check (e.g. the backward-direction term reorder's memmove/memcpy
+       below, UBSan-flagged as passing NULL when the very first write
+       failed and buf was never allocated). Checking size alone let
+       parsing run on with a truncated/erred buffer until one of a handful
+       of scattered dbuf_error() checks happened to catch it (or didn't). */
+    if (dbuf_error(&s->byte_code)) {
+        return re_parse_out_of_memory(s);
+    }
     if (s->byte_code.size < 64 * 1024 * 1024) {
         return 0;
     }
@@ -678,7 +709,8 @@ unknown_property_name:
     if (is_inv) {
         if (cr_invert(cr)) {
             cr_free(cr);
-            return -1;
+            goto out_of_memory;   /* PocketJS: was a message-less -1, see
+                                     cr_init_char_range() */
         }
     }
     *pp = p;
@@ -1346,7 +1378,13 @@ lookahead:
                 re_emit_op(s, REOP_match);
                 /* jump after the 'match' after the lookahead is successful */
                 if (dbuf_error(&s->byte_code)) {
-                    return -1;
+                    /* PocketJS: this used to `return -1` without calling
+                       re_parse_out_of_memory(), so s->u.error_msg was
+                       whatever the union's other member (u.tmp_buf, the
+                       last-parsed group name) left behind -- lre_compile()
+                       copies that stale text out as the thrown error's
+                       message instead of "out of memory". */
+                    return re_parse_out_of_memory(s);
                 }
                 put_u32(s->byte_code.buf + pos, s->byte_code.size - (pos + 4));
             } else if (p[2] == '<') {
@@ -1359,8 +1397,20 @@ lookahead:
                     return re_parse_error(s, "duplicate group name");
                 }
                 /* group name with a trailing zero */
-                dbuf_put(&s->group_names, (uint8_t *)s->u.tmp_buf,
-                         strlen(s->u.tmp_buf) + 1);
+                /* PocketJS: upstream ignores this result (and the
+                   dbuf_putc below). The name table is a second DynBuf,
+                   independent of s->byte_code, so a failed growth here is
+                   not seen by lre_compile()'s dbuf_error(&s->byte_code)
+                   check: the pattern compiles, the table stays short, and
+                   the `size > capture_count - 1` test at the end decides
+                   there were no named groups at all. /(?<y>\d{4})/ then
+                   matches with `groups` undefined (regexp_oom.js under
+                   vmrun --fail-alloc 1625 / 1630: "cannot read property
+                   'y' of undefined"). Report it as what it is. */
+                if (dbuf_put(&s->group_names, (uint8_t *)s->u.tmp_buf,
+                             strlen(s->u.tmp_buf) + 1)) {
+                    return re_parse_out_of_memory(s);
+                }
                 s->has_named_captures = 1;
                 goto parse_capture;
             } else {
@@ -1370,7 +1420,9 @@ lookahead:
             int capture_index;
             p++;
             /* capture without group name */
-            dbuf_putc(&s->group_names, 0);
+            if (dbuf_putc(&s->group_names, 0)) {
+                return re_parse_out_of_memory(s);   /* PocketJS: as above */
+            }
 parse_capture:
             if (s->capture_count >= CAPTURE_COUNT_MAX) {
                 return re_parse_error(s, "too many captures");
@@ -1799,7 +1851,12 @@ static int re_parse_alternative(REParseState *s, bool is_backward_dir)
             end = s->byte_code.size;
             term_size = end - term_start;
             if (dbuf_claim(&s->byte_code, term_size)) {
-                return -1;
+                /* PocketJS: dbuf_claim() itself never touches
+                   s->u.error_msg, so a bare `return -1` here left
+                   lre_compile()'s error: label copy out whatever stale
+                   text was left in the union (see the lookahead fix
+                   above for the same class of bug). */
+                return re_parse_out_of_memory(s);
             }
             memmove(s->byte_code.buf + start + term_size,
                     s->byte_code.buf + start,
@@ -1841,6 +1898,18 @@ static int re_parse_disjunction(REParseState *s, bool is_backward_dir)
 
         if (re_parse_alternative(s, is_backward_dir)) {
             return -1;
+        }
+
+        /* PocketJS: 'pos' was recorded as the buffer size right before the
+           REOP_goto operand was written. If that write (or any write since,
+           including inside the alternative just parsed) failed, the sticky
+           DynBuf error (cutils.h dbuf_claim) means size never advanced past
+           it -- pos can sit exactly at the end of the allocation, and the
+           unconditional put_u32 below would be a 4-byte heap overflow past
+           s->byte_code.buf. Bail the same way lre_compile()'s own patch-back
+           at RE_HEADER_* does (checked via dbuf_error there too). */
+        if (dbuf_error(&s->byte_code)) {
+            return re_parse_out_of_memory(s);
         }
 
         /* patch the goto */
@@ -1947,7 +2016,16 @@ error:
         dbuf_free(&s->byte_code);
         dbuf_free(&s->group_names);
         js__pstrcpy(error_msg, error_msg_size, s->u.error_msg);
-        *plen = 0;
+        /* PocketJS: *plen is otherwise unused on the error path (every
+           caller only checks the returned pointer), so an allocation
+           failure is signalled here as -1 instead of the ordinary 0. The
+           only caller that reads the return value with the pattern still
+           in hand is js_compile_regexp() in quickjs.c, which used this to
+           throw SyntaxError even for "out of memory" -- see
+           docs/vm/oom-parse-safety.md sec.6, same misdiagnosis class as
+           the bytecode compiler's SyntaxError-for-OOM finding, here in the
+           regexp compiler instead. */
+        *plen = s->is_oom ? -1 : 0;
         return NULL;
     }
 
@@ -1976,9 +2054,31 @@ error:
     put_u32(s->byte_code.buf + RE_HEADER_BYTECODE_LEN,
             s->byte_code.size - RE_HEADER_LEN);
 
+    /* PocketJS: the choke point for the group-name table, as the
+       dbuf_error(&s->byte_code) above is for the bytecode: both writers in
+       re_parse_term() check their own result, this catches any that a
+       later edit forgets, so a short table can never pass as "no names". */
+    if (dbuf_error(&s->group_names)) {
+        re_parse_out_of_memory(s);
+        goto error;
+    }
+
     /* add the named groups if needed */
     if (s->group_names.size > (s->capture_count - 1)) {
-        dbuf_put(&s->byte_code, s->group_names.buf, s->group_names.size);
+        /* PocketJS: this dbuf_put()'s result used to be ignored, so on
+           allocation failure the group-name table was silently NOT
+           appended while the LRE_FLAG_NAMED_GROUPS bit below was still
+           set unconditionally. RE_HEADER_BYTECODE_LEN was already latched
+           just above (the length *without* the table), so
+           lre_get_groupnames() -- trusting the flag alone -- would read
+           and strlen() starting exactly at the end of the returned
+           allocation: a heap-buffer-overflow read, not merely a wrong
+           answer, and one dbuf_error() at line ~1993 does not cover
+           because it runs before this append. */
+        if (dbuf_put(&s->byte_code, s->group_names.buf, s->group_names.size)) {
+            re_parse_out_of_memory(s);
+            goto error;
+        }
         put_u16(s->byte_code.buf + RE_HEADER_FLAGS,
                 LRE_FLAG_NAMED_GROUPS | lre_get_flags(s->byte_code.buf));
     }

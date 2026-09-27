@@ -53,7 +53,7 @@ static ksn_result span_columns(void *ctx,const ksn_draw *draw,uint16_t reveal,in
         bool mapped=(font==KSN_BODY||cp>=128)&&
             jpfont_bitmap(font==KSN_BODY?JPFONT_TEXT:JPFONT_SMALL,cp,&glyph);
         // Logical metrics do not change when a glyph/face is missing.
-        unsigned advance=(cp<128?6:font==KSN_BODY?12:8)*scale;
+        unsigned advance=ksn_font_advance(font,cp);
         unsigned width=mapped?glyph.width*scale:advance;
         if(width>advance)width=advance;
 #ifdef KSN_SPAN_COUNT
@@ -118,7 +118,7 @@ static ksn_result span_chunk(void *ctx,const ksn_draw *draw,uint16_t reveal,int 
         jpfont_bitmap_view glyph={0};
         bool mapped=(font==KSN_BODY||cp>=128)&&
             jpfont_bitmap(font==KSN_BODY?JPFONT_TEXT:JPFONT_SMALL,cp,&glyph);
-        unsigned advance=(cp<128?6:font==KSN_BODY?12:8)*scale;
+        unsigned advance=ksn_font_advance(font,cp);
         unsigned width=mapped?glyph.width*scale:advance;
         if(width>advance)width=advance;
 #ifdef KSN_SPAN_COUNT
@@ -161,8 +161,7 @@ static ksn_result span(void *ctx,const ksn_draw *draw,uint16_t reveal,int x,int 
 static unsigned advance_of(void *ctx,ksn_font font,uint32_t codepoint){
     (void)ctx;
     if((unsigned)font>KSN_DISPLAY)return 0;
-    unsigned scale=font==KSN_DISPLAY?2:1;
-    return (codepoint<128?6:font==KSN_BODY?12:8)*scale;
+    return ksn_font_advance(font,codepoint);
 }
 
-const ksn_text_port ksn_font_port={.span=span,.advance=advance_of};
+const ksn_text_port ksn_font_port={.span=span,.advance=advance_of,.binary_coverage=true};

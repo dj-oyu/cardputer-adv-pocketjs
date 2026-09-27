@@ -983,6 +983,15 @@ void pocket_workspace_reset(void) {
     else { free(launch_state); launch_state=NULL; }
 }
 
+// Resident suspension: a picker still up goes back and resolves null, as it
+// would at the end of a session. The launch state is left alone -- it is read
+// by launchContext(), which the app may still call after the wake.
+void pocket_workspace_suspend(void) {
+    picker_finish(PICK_CANCELLED,-1);
+    picked_mask=0;
+    pick_slot=-1;
+}
+
 // -------------------------------------------------------------------- install
 
 static const JSCFunctionListEntry workspace_methods[] = {

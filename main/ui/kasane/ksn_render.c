@@ -1,9 +1,13 @@
 #include "ksn_render.h"
 #include "ksn_image_transform.h"
+#include "ksn_p0_probe.h"
 #include <string.h>
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
 #include "esp_cpu.h"
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+#include "esp_log.h"
+#endif
 #endif
 
 /* Boundary 7a-7b of docs/perf/kasane-opt-survey.md: the render path's own
@@ -43,6 +47,26 @@ static uint32_t ksn_cycles(void){
 /* No rsr.ccount without IDF headers, so the cycle columns stay 0 and only the
  * entry counts are available on host (docs/perf/pie-simd.md 6.7). */
 static uint32_t ksn_cycles(void){return 0;}
+#endif
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+static uint64_t decode_work_cycles,decode_empty_cycles;
+static uint32_t decode_calls,decode_work_max;
+void ksn_render_decode_cycle_reset(void){
+    decode_work_cycles=decode_empty_cycles=0;
+    decode_calls=decode_work_max=0;
+}
+void ksn_render_decode_cycle_report(void){
+    uint64_t net=decode_work_cycles>decode_empty_cycles?
+                 decode_work_cycles-decode_empty_cycles:0;
+    ESP_LOGI("KSN_P4_DECODE",
+             "calls=%lu work_cycles=%llu empty_cycles=%llu net_cycles=%llu net_mean_cycles=%llu max_work_cycles=%lu",
+             (unsigned long)decode_calls,
+             (unsigned long long)decode_work_cycles,
+             (unsigned long long)decode_empty_cycles,
+             (unsigned long long)net,
+             (unsigned long long)(decode_calls?net/decode_calls:0),
+             (unsigned long)decode_work_max);
+}
 #endif
 /* The switch is cached per bracket: these sit in per-row and per-pixel loops,
  * and a global load inside a bracket would be part of what it measures. Each
@@ -89,11 +113,11 @@ static void fill565(uint16_t *dst,unsigned count,uint16_t color){
  * loop asks for the same command once per band, twice per group child, so a
  * full frame decodes the same few commands hundreds of times
  * (docs/perf/kasane-opt-survey.md, boundary 2). This cache holds the fields the
- * band loop and the group composition read, plus the counted text bytes a
- * cached command needs to stay alive; no pointer into a command bank ever
- * escapes the borrowed view of ksn_core.h. The banks cannot change while a
- * frame is in flight: the renderer holds the sealed ticket, a guest cannot
- * start another builder before it is presented or discarded, and the port
+ * band loop and the group composition read. Text points into the sealed bank;
+ * no pointer escapes this rendering attempt or its display callbacks. The
+ * banks cannot change while a frame is in flight: the renderer holds the
+ * sealed ticket, a guest cannot start another builder before it is presented
+ * or discarded, and the port
  * contract already forbids a callback from mutating the core or reentering
  * presentation. Validity covers one ksn_render_rects call, so a retried frame
  * decodes again from scratch. Owner task only, like every entry point here. */
@@ -106,8 +130,6 @@ typedef struct {
 static struct {
     ksn_frame_view view[KSN_COMMANDS];
     uint32_t valid[(KSN_COMMANDS+31u)/32u];
-    char text[KSN_TEXT_BYTES];
-    unsigned text_used;
     ksn_frame_command read; /* The ABI storage of the reference read path. */
 } decoded;
 
@@ -116,11 +138,12 @@ typedef struct { uint8_t r,g,b,a; } ksn_premultiplied_rgba8;
 /* One shared span scratch across normal/group paths. Together with the group
  * tile (256), dither bits (8), and a provider's 128-byte row: 504 <= 512 bytes. */
 typedef union {
-    uint8_t text[64];
+    _Alignas(16) uint8_t text[64];
     struct { uint16_t rgb[32];uint8_t alpha[32];uint8_t stretch[16]; } image;
     struct { uint16_t rgb[16];uint8_t alpha[16];uint16_t block_rgb[16];uint8_t block_alpha[16]; } rotated;
 } ksn_span_scratch;
 _Static_assert(sizeof(ksn_span_scratch)+256+8+128<=512,"compositor/provider pixel scratch budget");
+_Static_assert(_Alignof(ksn_span_scratch)>=16,"PIE text mask must be 8-byte aligned");
 static ksn_rgba image_color(uint16_t rgb,uint8_t alpha){
     unsigned r=rgb>>11,g=(rgb>>5)&63,b=rgb&31;
     return ((r<<3|r>>2)<<24)|((g<<2|g>>4)<<16)|((b<<3|b>>2)<<8)|alpha;
@@ -169,7 +192,8 @@ bool g_ksn_image_rotate_reject=true;
  * sizeof(ksn_anchor_row) of .bss. */
 #define KSN_ANCHOR_SPANS 16
 typedef struct {
-    int32_t rotation,bounds_x,bounds_y,window; /* affine inputs, packed pairwise */
+    int32_t rotation;
+    uint32_t bounds_x,bounds_y,window;         /* affine inputs, packed pairwise */
     int32_t row;                               /* destination row of the entries */
     int32_t base_x;                            /* destination x of entry 0 */
     int32_t spans;                             /* entries built */
@@ -197,7 +221,7 @@ static void anchor_extend(ksn_anchor_row *t,int last){
 /* Seed entry 0 with the exact division the caller computed for this pixel and
  * remember the affine inputs it came from (bounds packed pairwise so the
  * per-span check is four word compares). */
-static void anchor_put(int32_t rotation,int32_t bx,int32_t by,int32_t window,int x,int y,
+static void anchor_put(int32_t rotation,uint32_t bx,uint32_t by,uint32_t window,int x,int y,
                        int step_u,int step_v,unsigned sw,unsigned sh,int um,int vm,
                        int sx,int remu,int sy,int remv){
     ksn_anchor_row *t=&g_anchor_row;
@@ -281,12 +305,12 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
              * non-negative multiple of 16 below the table's reach is all that
              * has to be checked. Nothing else is evaluated when the switch is
              * off, so the per-span division arm keeps its own cost. */
-            int32_t key_bx=(uint16_t)d->bounds.x0|((int32_t)(uint16_t)d->bounds.x1<<16);
-            int32_t key_by=(uint16_t)d->bounds.y0|((int32_t)(uint16_t)d->bounds.y1<<16);
+            uint32_t key_bx=(uint16_t)d->bounds.x0|((uint32_t)(uint16_t)d->bounds.x1<<16);
+            uint32_t key_by=(uint16_t)d->bounds.y0|((uint32_t)(uint16_t)d->bounds.y1<<16);
             unsigned delta=(unsigned)(x-g_anchor_row.base_x);
             if(g_anchor_row.rotation==(int32_t)d->data.image.rotation&&
                g_anchor_row.bounds_x==key_bx&&g_anchor_row.bounds_y==key_by&&
-               g_anchor_row.window==(int32_t)(sw|(sh<<16))&&g_anchor_row.row==y&&
+               g_anchor_row.window==(sw|(sh<<16))&&g_anchor_row.row==y&&
                delta<16u*KSN_ANCHOR_SPANS&&!(delta&15u)){
                 j=(int)(delta>>4);
                 if(j>=g_anchor_row.spans)anchor_extend(&g_anchor_row,j);
@@ -308,9 +332,9 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
             if(remv<0){sy--;remv+=vm;}
             if(g_ksn_image_rotate_anchor)
                 anchor_put((int32_t)d->data.image.rotation,
-                           (uint16_t)d->bounds.x0|((int32_t)(uint16_t)d->bounds.x1<<16),
-                           (uint16_t)d->bounds.y0|((int32_t)(uint16_t)d->bounds.y1<<16),
-                           (int32_t)(sw|(sh<<16)),x,y,step_u,step_v,sw,sh,um,vm,sx,remu,sy,remv);
+                           (uint16_t)d->bounds.x0|((uint32_t)(uint16_t)d->bounds.x1<<16),
+                           (uint16_t)d->bounds.y0|((uint32_t)(uint16_t)d->bounds.y1<<16),
+                           sw|(sh<<16),x,y,step_u,step_v,sw,sh,um,vm,sx,remu,sy,remv);
         }
         /* Whole-span rejection. A span whose first pixel is accepted has an
          * accepted pixel, so the interval test only has to run when the first
@@ -1116,32 +1140,36 @@ static bool blend_lut_alpha_prime(ksn_rgba color,uint8_t opacity){
 /* One decode, shared by both paths: the cache stores it for the frame, the
  * reference path stores it for the next read only. */
 static void decode_view(ksn_frame_view *view,const ksn_frame_command *command){
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+    uint32_t empty_begin=ksn_cycles(),empty_cycles=ksn_cycles()-empty_begin;
+    uint32_t work_begin=ksn_cycles();
+#endif
     view->draw=command->draw;
     view->visible=command->visible;
     view->group_begin=command->group_begin;
     view->group_end=command->group_end;
     view->group_opacity=command->group_opacity;
     view->reveal=command->reveal;
+#ifdef KASANE_P4_DECODE_CYCLE_PROBE
+    uint32_t work_cycles=ksn_cycles()-work_begin;
+    decode_empty_cycles+=empty_cycles;
+    decode_work_cycles+=work_cycles;
+    decode_calls++;
+    if(work_cycles>decode_work_max)decode_work_max=work_cycles;
+#endif
+    ksn_p0_probe_copy(KSN_P0_RENDER_DECODE_VIEW,
+                      sizeof(view->draw)+sizeof(view->visible)+
+                      sizeof(view->group_begin)+sizeof(view->group_end)+
+                      sizeof(view->group_opacity)+sizeof(view->reveal));
 }
 static ksn_frame_view *view_slot(unsigned slot){
     /* The core bounds the index, the clamp only keeps the name total. */
     return &decoded.view[slot<KSN_COMMANDS?slot:0];
 }
-/* False when this command's text does not fit the frame pool; the caller then
- * falls back to the reference read. The bank's own text pool is the same
- * total, so a full frame pool cannot happen in practice. */
-static bool cache_view(unsigned slot,const ksn_frame_command *command){
+static void cache_view(unsigned slot,const ksn_frame_command *command){
     ksn_frame_view *view=view_slot(slot);
     decode_view(view,command);
-    if(view->draw.kind==KSN_TEXT){
-        unsigned bytes=view->draw.data.text.bytes;
-        if(bytes>sizeof(decoded.text)-decoded.text_used)return false;
-        memcpy(decoded.text+decoded.text_used,command->text,bytes);
-        view->draw.data.text.utf8=bytes?decoded.text+decoded.text_used:decoded.text;
-        decoded.text_used+=bytes;
-    }
     decoded.valid[slot>>5]|=1u<<(slot&31u);
-    return true;
 }
 /* previous=false only: the renderer never reads the displayed bank. */
 static ksn_result frame_command(ksn_core *core,ksn_tx ticket,ksn_layer layer,uint16_t index,
@@ -1150,9 +1178,10 @@ static ksn_result frame_command(ksn_core *core,ksn_tx ticket,ksn_layer layer,uin
     if(g_ksn_decode_once&&slot<KSN_COMMANDS&&(decoded.valid[slot>>5]&(1u<<(slot&31u)))){
         *out=view_slot(slot);return KSN_OK;
     }
-    ksn_result result=ksn_core_read(core,ticket,false,layer,index,&decoded.read);
+    ksn_result result=ksn_core_read_borrowed(core,ticket,false,layer,index,&decoded.read);
     if(result!=KSN_OK)return result;
-    if(g_ksn_decode_once&&slot<KSN_COMMANDS&&cache_view(slot,&decoded.read)){
+    if(g_ksn_decode_once&&slot<KSN_COMMANDS){
+        cache_view(slot,&decoded.read);
         *out=view_slot(slot);return KSN_OK;
     }
     decode_view(view_slot(slot),&decoded.read);*out=view_slot(slot);
@@ -1180,7 +1209,8 @@ int g_ksn_tile_smooth=1;    /* smooth layers: one exact anchor per block plus a
  * tools/kasane_contract/run_group_tile.sh). "covered" is a tile pixel whose
  * accumulated alpha is non-zero, i.e. one a child actually wrote into. */
 uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
-         ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels;
+         ksn_tile_smooth_blocks,ksn_tile_smooth_pixels,ksn_tile_child_pixels,
+         ksn_tile_child_skipped;
 #endif
 /* Objdump can only attribute a per-pixel cost to a function that is not inlined
  * away. The measurement build (-DKSN_TILE_MEASURE, tools/kasane_contract/
@@ -1194,7 +1224,7 @@ uint32_t ksn_tile_visited,ksn_tile_covered,ksn_tile_blocks,ksn_tile_skipped,
 #endif
 /* A group with more children than this falls back to the unconditional tile:
  * the reach table exists to skip work, never to decide which pixels are drawn. */
-#define KSN_TILE_REACH_BOXES 16
+#define KSN_TILE_REACH_BOXES 18
 typedef struct { int16_t x0,y0,x1,y1; } ksn_tile_reach;
 static bool tile_block_reached(const ksn_tile_reach *box,unsigned count,
                                int x0,int width,int py){
@@ -1258,7 +1288,8 @@ KSN_TILE_MEASURED static void smooth_chord_block(ksn_premultiplied_rgba8 *tile,c
     for(unsigned c=0;c<4;c++){
         unsigned shift=24-8*c;
         int32_t span=(int32_t)(((end>>shift)&255u)-((anchor>>shift)&255u));
-        step[c]=count>1?(int32_t)(((int64_t)span<<16)/(count-1)):0;
+        // A channel may descend, so shifting its negative signed span is UB.
+        step[c]=count>1?(int32_t)(((int64_t)span*65536)/(count-1)):0;
         base[c]=(anchor>>shift)&255u;
     }
     int32_t offset[4]={0,0,0,0};
@@ -1664,6 +1695,18 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
          * opaque child. Two words avoid variable 64-bit shifts on ESP32-S3. */
         uint32_t dither_pixels[2]={0,0};
         for(unsigned i=first;i<=end;i++){
+            /* The bounds pass already validated and clipped this child. When
+             * its box misses this row/block, re-reading and decoding the
+             * immutable frame command cannot contribute a pixel. */
+            if(g_ksn_tile_reach&&reach_all){
+                const ksn_tile_reach *box=&reach[i-first];
+                if(py<box->y0||py>=box->y1||x0>=box->x1||x0+count<=box->x0){
+#ifdef KSN_TILE_COUNT
+                    ksn_tile_child_skipped++;
+#endif
+                    continue;
+                }
+            }
             ksn_result result;
             {KSN_PROF_BEGIN();
             result=frame_command(core,ticket,layer,(uint16_t)i,&command);
@@ -1785,8 +1828,20 @@ static ksn_result render_group(ksn_core *core,const ksn_text_port *text,ksn_span
  * (row_cov, the coarser switch, is the other one above the noise floor at 2.78).
  * ------------------------------------------------------------------------- */
 int g_ksn_blend_pie=1;
+/* A vertical gradient has one source colour per row, even when its endpoints
+ * differ. Keep a switch for same-binary device A/B against the scalar path. */
+int g_ksn_vertical_gradient_pie=1;
+/* Binary font coverage may be consumed directly as eight 0/A PIE lanes.
+ * Keep this candidate off until a same-image device A/B establishes a gain. */
+int g_ksn_text_pie=0;
+#ifdef KSN_TEXT_PIE_COUNT
+uint32_t ksn_text_pie_blocks;
+uint32_t ksn_text_pie_mixed_blocks;
+#endif
 void ksn_blend8_pie(uint16_t *pixels,int blocks,ksn_rgba src,uint8_t opacity,
                     const uint16_t *thresholds);
+void ksn_blend8_mask_pie(uint16_t *pixels,const uint8_t *mask,int blocks,
+                         ksn_rgba src,uint8_t opacity);
 /* The kernel for one row's aligned window [first, first+8*blocks). The bayer
  * phase is built here because it depends on the absolute column: the scalar
  * pack reads bayer4[y&3][x&3], and the 4-cycle pattern is the same for every
@@ -1807,6 +1862,7 @@ static uint16_t rgb565(ksn_rgba c){return (uint16_t)((c>>27)<<11|((c>>18)&63)<<5
 static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int x,int y){
     unsigned a=((src&255)*opacity+127)/255;
     if(!a)return dst;
+    if(a==255&&!dither)return rgb565(src);
     unsigned r=(dst>>11)&31,g=(dst>>5)&63,b=dst&31;
     r=(r<<3)|(r>>2);g=(g<<2)|(g>>4);b=(b<<3)|(b>>2);
     if(KSN_SCALE256()){
@@ -1821,16 +1877,21 @@ static uint16_t blend(uint16_t dst,ksn_rgba src,uint8_t opacity,bool dither,int 
     }
     return pack565(r,g,b,dither,x,y);
 }
-ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
+static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
+                               ksn_backdrop_loader load_backdrop,bool occlusion_safe,
+                               ksn_render_stats *stats){
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
     /* One frame's worth of decoded commands; a retried frame starts over. */
-    memset(decoded.valid,0,sizeof(decoded.valid));decoded.text_used=0;
+    memset(decoded.valid,0,sizeof(decoded.valid));
+    uint32_t occluded=load_backdrop&&occlusion_safe?
+        ksn_core_opaque_system_bands(core):0;
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
     ksn_damage damage;result=ksn_core_damage(core,frame.ticket,display->text,&damage);
     if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+    damage.bands&=~occluded;
     if(!damage.bands)return ksn_core_presented(core,frame.ticket);
     /* Narrowing is a decision taken here, before any pixel is written: a band
      * composited over part of its width leaves the rest of the shared strip
@@ -1861,6 +1922,7 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
         damage.x0[band]=(int16_t)x0;damage.x1[band]=(int16_t)x1;
     }
     const ksn_frame_view *command;
+    uint32_t next_system_opaque=0;
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
         {KSN_PROF_BEGIN();
         result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
@@ -1868,6 +1930,24 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
         if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
         if(command->draw.kind<KSN_RECT||command->draw.kind>KSN_IMAGE){
             ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
+        }
+        /* The first ungrouped SYSTEM command can establish a whole opaque
+         * band before anything else in that layer reads the strip. This is
+         * about the sealed *next* frame, unlike the committed-pixel mask above:
+         * a newly posted notice still has to be transferred, but its backdrop
+         * and APP pixels need not be computed underneath it. */
+        if(load_backdrop&&occlusion_safe&&layer==KSN_SYSTEM&&i==0&&
+           !command->group_begin&&!command->group_end&&command->visible&&
+           command->draw.kind==KSN_RECT&&command->draw.opacity==255&&
+           (command->draw.data.shape.color&255u)==255u&&
+           command->draw.bounds.x0<=0&&command->draw.bounds.x1>=240&&
+           command->draw.clip.x0<=0&&command->draw.clip.x1>=240){
+            for(unsigned band=0;band<17;band++){
+                int y0=(int)band*8,y1=y0+8;if(y1>135)y1=135;
+                if(command->draw.bounds.y0<=y0&&command->draw.bounds.y1>=y1&&
+                   command->draw.clip.y0<=y0&&command->draw.clip.y1>=y1)
+                    next_system_opaque|=1u<<band;
+            }
         }
         if(command->draw.kind==KSN_TEXT){
             {KSN_PROF_BEGIN();
@@ -1888,15 +1968,19 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
         if(!(damage.bands&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
         const int dx0=damage.x0[band],dx1=damage.x1[band];
-        {KSN_PROF_BEGIN();
-        /* Whole strip in one call when the band is whole, which is every band
-         * of a REPLACE and of any repair; otherwise the damaged columns of each
-         * row, because the columns between them are not ours to touch. */
-        if(dx0==0&&dx1==240)fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
-        else for(int r=0;r<rows;r++)
-            fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
-        KSN_PROF_END(fill);}
+        if(load_backdrop&&!(next_system_opaque&(1u<<band))){
+            result=load_backdrop(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
+            if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
+        }else if(!(next_system_opaque&(1u<<band))){KSN_PROF_BEGIN();
+            /* Whole strip in one call when the band is whole, which is every band
+             * of a REPLACE and of any repair; otherwise the damaged columns of each
+             * row, because the columns between them are not ours to touch. */
+            if(dx0==0&&dx1==240)fill565(pixels,(unsigned)(240*rows),rgb565(frame.next_background));
+            else for(int r=0;r<rows;r++)
+                fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
+            KSN_PROF_END(fill);}
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
+            if(layer==KSN_APP&&(next_system_opaque&(1u<<band)))break;
             {KSN_PROF_BEGIN();
             result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
             KSN_PROF_END(read);}
@@ -1944,16 +2028,60 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     KSN_PROF_END(span);}
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     {KSN_PROF_BEGIN();
-                    for(unsigned i=0;i<count;i++)if(scratch.text[i]){
+                    uint16_t *row=pixels+(py-y)*240;
+                    bool pie_row=g_ksn_text_pie&&g_ksn_blend_pie&&
+                                 display->text->binary_coverage&&!lut&&!KSN_SCALE256()&&
+                                 (((uintptr_t)row&15u)==0u);
+                    for(unsigned i=0;i<count;){
+                        /* Both PIE memory ops clear low address bits: only a
+                         * fully aligned destination/mask pair is handed over.
+                         * The binary port promises 0/255 coverage, so mixed
+                         * ink blocks need no scan or expanded-alpha copy. */
+                        if(pie_row&&((x+(int)i)&7)==0&&
+                           (((uintptr_t)(scratch.text+i)&7u)==0u)&&i+8u<=count){
+                            /* A binary font has many empty blocks. Inspect the
+                             * borrowed eight bytes in registers and submit only
+                             * contiguous nonempty blocks to the PIE kernel. */
+                            /* GCC otherwise emits an out-of-line memcpy even
+                             * for eight aligned bytes on Xtensa. may_alias
+                             * keeps this borrowed read defined while the
+                             * alignment gate above permits two 32-bit loads. */
+                            typedef uint64_t ksn_mask_word __attribute__((may_alias));
+                            uint64_t ink=*(const ksn_mask_word *)(scratch.text+i);
+                            if(!ink){i+=8u;continue;}
+#ifdef KSN_TEXT_PIE_COUNT
+                            if(ink!=UINT64_MAX)ksn_text_pie_mixed_blocks++;
+#endif
+                            unsigned end=i+8u;
+                            while(end+8u<=count){
+                                ink=*(const ksn_mask_word *)(scratch.text+end);
+                                if(!ink)break;
+#ifdef KSN_TEXT_PIE_COUNT
+                                if(ink!=UINT64_MAX)ksn_text_pie_mixed_blocks++;
+#endif
+                                end+=8u;
+                            }
+                            unsigned blocks=(end-i)>>3;
+                            ksn_blend8_mask_pie(row+x+i,scratch.text+i,(int)blocks,
+                                                d->data.text.color,d->opacity);
+#ifdef KSN_TEXT_PIE_COUNT
+                            ksn_text_pie_blocks+=blocks;
+#endif
+                            i=end;
+                            continue;
+                        }
+                        if(!scratch.text[i]){i++;continue;}
                         unsigned index=(unsigned)((py-y)*240+x)+i;
                         if(lut){
                             unsigned a=mul8(mul8(d->data.text.color&255,scratch.text[i]),d->opacity);
                             if(a)pixels[index]=blend_lut_pack(pixels[index],blend_lut_alpha[a>>4]);
+                            i++;
                             continue;
                         }
                         ksn_rgba color=(d->data.text.color&0xffffff00u)|mul8(d->data.text.color&255,scratch.text[i]);
                         pixels[index]=KSN_BLEND(KSN_SLOT(KSN_TEXT,false),pixels[index],color,
                                                 d->opacity,false,x+(int)i,py);
+                        i++;
                     }
                     KSN_PROF_END(blend);}
                 }
@@ -1966,8 +2094,15 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     for(unsigned j=0;j<count;j++){
                         unsigned source=image_sample_index(d,&scratch,x,j),index=(unsigned)((py-y)*240+x)+j;
-                        pixels[index]=blend(pixels[index],image_sample_color(d,&scratch,source),
-                                            d->opacity,false,x+(int)j,py);
+                        uint16_t rgb=d->data.image.rotation?scratch.rotated.rgb[source]:scratch.image.rgb[source];
+                        uint8_t alpha=d->data.image.rotation?scratch.rotated.alpha[source]:scratch.image.alpha[source];
+                        if(!alpha)continue;
+                        /* RGB565 -> expanded RGB8 -> RGB565 is an identity for
+                         * a fully opaque texel. Keep it in provider format:
+                         * no redundant channel unpack, blend, or repack. */
+                        if(alpha==255&&d->opacity==255)pixels[index]=rgb;
+                        else pixels[index]=blend(pixels[index],image_color(rgb,alpha),
+                                                 d->opacity,false,x+(int)j,py);
                     }
                     x+=(int)count;
                 }
@@ -1989,12 +2124,13 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
             bool one_color=d->kind!=KSN_GRADIENT||d->data.gradient.from==d->data.gradient.to;
             const uint8_t (*lut)[KSN_BLEND_LUT_ROW]=(g_ksn_blend_lut&&one_color&&
                 blend_lut_solid_prime(sample(command,x0,y0),d->opacity,dither))?blend_lut_solid:NULL;
-            /* Candidate 4a: a constant-colour command's aligned 8-pixel blocks go
-             * to the PIE kernel. It needs a 16-byte aligned destination, so the
-             * band row's base is checked once here and the head and tail of each
-             * run stay on the arms below. All three arms are exact, so which one
-             * runs is a measurement, not a pixel decision. */
-            bool pie=g_ksn_blend_pie&&one_color;
+            /* Candidate 4a: aligned 8-pixel blocks with one source colour go to
+             * the PIE kernel. A vertical gradient also has one colour per row;
+             * sample() below uses this row's y, not the command's first row.
+             * The head and tail stay scalar. Both arms are pixel-exact, so the
+             * switch changes work rather than output. */
+            bool pie=g_ksn_blend_pie&&(one_color||
+                (g_ksn_vertical_gradient_pie&&d->kind==KSN_GRADIENT&&d->data.gradient.axis!=0));
             for(int py=y0;py<y1;py++){
                 const uint8_t *bayer_row=dither?bayer4[(unsigned)py&3u]:NULL;
                 bool pie_row=pie&&(((uintptr_t)(pixels+(py-y)*240)&15u)==0u);
@@ -2062,4 +2198,13 @@ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_r
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
     }
     return ksn_core_presented(core,frame.ticket);
+}
+ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
+    return render_rects(core,display,NULL,false,stats);
+}
+ksn_result ksn_render_rects_backdrop(ksn_core *core,const ksn_display_port *display,
+                                     ksn_backdrop_loader load,bool occlusion_safe,
+                                     ksn_render_stats *stats){
+    if(!load)return KSN_INVALID;
+    return render_rects(core,display,load,occlusion_safe,stats);
 }

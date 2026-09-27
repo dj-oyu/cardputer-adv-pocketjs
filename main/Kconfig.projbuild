@@ -1,8 +1,7 @@
-menu "Pocket VM (L0 measurement probes)"
+menu "Pocket VM (diagnostics)"
 
     config POCKET_VM_SELFTEST
         bool "Enable USB L lifecycle self-test"
-        depends on POCKET_VM_YIELD
         default n
         help
             Runs the host lifecycle test on the device via USB command L.
@@ -44,151 +43,77 @@ menu "Pocket VM (L0 measurement probes)"
             directory regardless of -B. Never turn this on in
             sdkconfig.defaults or in the shared root sdkconfig.
 
-    config POCKET_VM_SCHED
-        bool "Job-boundary scheduling and wake (docs/vm/vm-L1-design.md, L1)"
-        default y
-        help
-            The L1 execution control. On, a turn's Promise job drain may stop
-            BETWEEN two jobs once the turn's time budget is spent, and the rest
-            of that drain runs at the top of the next turn before any host
-            event or frame() reaches JavaScript; a completion posted from
-            another task can also cut short the frame-cap sleep instead of
-            waiting out the whole period.
-
-            Off, every knob it adds is set to "unlimited": the drain cannot
-            yield, so no continuation turn can exist, the unhandled-rejection
-            report point is the one it always was, and the frame cap is the old
-            unconditional vTaskDelay. That is the pre-L1 behaviour exactly,
-            which is what spec sec.12 means by every stage being revertible --
-            if a board run finds something this level broke, this switch puts
-            it back without reverting the code.
-
-            Measure the cost with tools/memlog.py rather than assuming it.
-
-    config POCKET_VM_SEGFRAMES
-        bool "JS frames in runtime-owned segments, not on the C stack (L2a)"
-        default y
-        help
-            docs/vm/quickjs-freertos-vm-spec.md sec.7 L2a, docs/vm/vm-L2-design.md.
-            On, JS_CallInternal takes its JSStackFrame and the block that
-            used to be alloca()'d (arguments, locals, operand stack, var_refs)
-            from a bump-allocated segment chain the runtime owns
-            (components/quickjs-ng/quickjs-ng/quickjs-vmstack.h). Segments come
-            from the guest heap through js_malloc_rt, so they count against
-            JS_SetMemoryLimit; one 4 KiB segment stays resident from the first
-            call to JS_FreeRuntime, a frame that does not fit chains another,
-            and a frame larger than a segment gets one of its own.
-
-            What this changes for an app: per JS call the ui task's 20 KiB C
-            stack loses the frame (48 B) and the locals block, keeping only
-            JS_CallInternal's own C frame -- and with POCKET_VM_FLATCALLS
-            (L2b, below) not even that for a JS-to-JS call. Deep recursion
-            still ends in the same RangeError from JS_SetMaxStackSize; a
-            frame the heap refuses is an InternalError "out of memory", the
-            error a generator's heap frame already produced. Generator /
-            async frames are untouched.
-
-            JS_SetMaxStackSize (app_session.c: 20 KiB) is read twice on this
-            path (design D10): as the C-stack limit it always was, and as a
-            byte budget for the segments -- the sum of every live frame, in
-            bytes, not a frame count. Whichever fills first raises the
-            RangeError; the budget is tested before the heap is asked, so
-            "too deep" stays RangeError and only a frame the heap cannot
-            hold is InternalError. The budget is the guard that survives
-            L2b's removal of the C recursion. tools/vmtest/budget_probe.sh
-            shows it working with the C-stack guard lifted.
-
-            Off, JS_CallInternal is the upstream alloca path and JSRuntime
-            has no segment state: the pre-L2a behaviour exactly, which is
-            what spec sec.12 means by every stage being revertible. The host
-            harness builds the same switch as tools/vmtest/build.sh
-            "-alloca" variants.
-
-    config POCKET_VM_FLATCALLS
-        bool "JS-to-JS calls stay in one JS_CallInternal activation (L2b)"
-        depends on POCKET_VM_SEGFRAMES
-        default y
-        help
-            docs/vm/quickjs-freertos-vm-spec.md sec.7 L2b, docs/vm/vm-L2-design.md
-            sec.10. On, a call opcode whose target is a bytecode function
-            (call / call0-3 / call_method / tail_call / tail_call_method)
-            pushes the callee's frame on the segment stack and keeps running
-            in the SAME C activation of JS_CallInternal; the callee's return
-            pops that frame and resumes the caller from the frame chain. No
-            C stack is consumed per JS level, so the recursion limit is the
-            segment byte budget (D10) alone -- the JS_SetMaxStackSize value,
-            in bytes of live frames -- and a frame the heap cannot hold is
-            the InternalError it already was. Constructor calls, apply,
-            eval, and every C-to-JS re-entry (a builtin calling back into
-            JS, getters, Proxy traps) still recurse in C and still meet the
-            C-stack guard at the entry of the new activation: those are
-            "wrapped" synchronous calls in the spec's sense, marked
-            interruption-forbidden.
-
-            Costs, per frame pushed on a segment: one pointer (the caller's
-            operand stack pointer, D12) in front of the JSStackFrame, and
-            three fields folded into JSStackFrame's padding (48 B on the
-            target either way). Per C activation: three saved pointers.
-
-            Off, every JS-to-JS call is a C recursion of JS_CallInternal as
-            in L2a (the C-stack guard answers first, exactly as before).
-            The host harness builds this switch as the "-flat" / "-recur"
-            variants of tools/vmtest/build.sh. Default y since every host
-            gate passed on it (design sec.10.5); NOT yet run on the board,
-            like L2a itself (design sec.8.4) -- that is what the switch is
-            for.
-
-    config POCKET_VM_YIELD
-        bool "Suspend and resume JS at audited opcode safepoints (L2c)"
-        depends on POCKET_VM_FLATCALLS
+    config POCKET_VM_RELOC
+        bool "Relocatable frame segments: the explicit move API (L3a)"
         default n
         help
-            Implements the L2c save-and-resume path described by
-            docs/vm/vm-L2-design.md sec.11. The switch stays off while the
-            mechanism is landing in independently testable stages. With it
-            off, forced VM stops retain the pre-L2c uncatchable-interrupt
-            behaviour and the shipping path is unchanged.
+            Compiles in JS_VMStackRelocate, which copies the live frame
+            segments to fresh addresses and rewrites every pointer that
+            named the old ones (docs/vm/vm-L3-design.md, the entry ledger
+            is docs/vm/vm-ledger/09-relocation-entries.md).
 
-    config POCKET_VM_TCO
-        bool "Experimental strict tail-call frame reuse"
-        depends on POCKET_VM_YIELD
+            Moving is only legal while the VM is parked at an L2c
+            safepoint: a running JS_CallInternal keeps pointers into the
+            block in C locals and registers, and the spec rules out
+            guessing which machine words those are.
+
+            The only caller is the diagnostic one: USB '&' on the home
+            screen arms the next app, guest_continue_impl() then moves the
+            segments before every resume, and the session logs VM_RELOC
+            with what that cost. tools/vmtest/device_reloc.py drives it.
+            Unarmed, a RELOC build takes the same path as a build without
+            it.
+
+            That is deliberately not a reason to move: deciding WHEN to
+            relocate belongs to L4, which has to show first that the
+            non-moving segments are not already enough. Off by default and
+            meant to stay that way until that case is made.
+
+            Costs, measured on this tree: flash +1,300 B, static DRAM
+            +16 B against the same build with it off.
+
+    config POCKET_VM_OOMPROBE
+        bool "G12 fragmentation probe: log every failed heap allocation"
         default n
         help
-            Reuse flat segment frames at strict tail calls to ordinary
-            bytecode functions. Sloppy calls and unsupported shapes keep
-            the existing path. Changes strict Error.stack and recursion
-            limits, so this stays opt-in during compatibility validation.
+            The device half of the L3/L4 decision (docs/vm/backlog.md G12):
+            does fragmentation make allocations fail here? Registers the
+            heap's failed-allocation hook, which walks the heap at the moment
+            of every refusal and records, per heap region, whether the free
+            bytes would have held the request had they been contiguous
+            ("G12 FAIL ... cand=1"). Also logs every JS_TakeOOMCanary report
+            ("G12 CANARY") and a per-session total ("G12 SESSION").
 
-    config POCKET_VM_FAIR
-        bool "Fair ordering: run the pumps on a continuation turn too"
+            Each refusal also says whether treating the VM's frame segments
+            as movable would have left a long enough run ("segfix=1"):
+            L3/L4 move segments and nothing else, so that is the case they
+            could prevent. Adds JS_VMStackBlocks' only caller.
+
+            Adds USB workloads on the home screen that drive the guest into
+            OOM on purpose: '!' interleaved holes plus a growing large
+            request, '@' a growing array between small objects, '#' JSON
+            round-trips of a growing array, and '$' the negative control --
+            a heap where the segments are what splits the free space.
+            tools/vmtest/device_g12.py runs them and the shipped apps.
+
+            Measurement only. Build a separate build_* directory with its own
+            sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
+
+    config POCKET_VM_TURNPERF
+        bool "R4 probe: the JS turn's cycles against the core's own counters"
         default n
         help
-            OFF (the shipping default) is COMPAT ORDERING, the rule
-            docs/vm/vm-L1-design.md sec.2.1 states: a turn that ended with jobs
-            queued finishes them at the top of the next turn, and no host event
-            reaches JavaScript until the queue is empty. One logical drain then
-            has exactly the job order the pre-L1 single drain produced, and the
-            only thing that changed is that wall clock passes between two of
-            its jobs. This switch compiles to nothing when it is off.
+            Where the frame() turn's cycles go (docs/vm/turn-cpi.md). The
+            host profile counts ~0.35M x86 instructions a STRESS LV1 turn
+            against ~1.7M cycles on the board, and that gap -- retiring,
+            instruction fetch, data, bubbles -- decides what the next speed
+            work should attack. Brackets the ordinary turn in app_tick with
+            the Xtensa performance counters: PM0 counts cycles, PM1 one event
+            that rotates every 30 turns, and each window logs
+            "TURNPERF <event> cy=... ev=... n=... us=...".
 
-            ON, a continuation turn that STILL has jobs left runs the same
-            pumps an ordinary turn runs -- everything except frame() and the
-            exit() check -- after its drain has yielded. A completion that a
-            radio, a bus or a timer recorded during the drain is settled there
-            and its reaction is enqueued at the TAIL of the queue, behind the
-            jobs of the unfinished drain, so FIFO inside the queue is exactly
-            what it was; what changes is only that a host event can reach
-            JavaScript between two jobs of one logical drain.
-
-            The cost compat ordering pays is completion latency on an app whose
-            drain needs continuations -- measured (device) at ~1.9x the pre-L1
-            path under audio contention (docs/vm/vm-L1-report.md sec.2.8). This mode
-            exists so that tradeoff can be measured rather than argued, and so
-            L2 can revisit it with evidence. Two things are deliberately NOT
-            made fair, because neither can be made safe at a job boundary:
-            exit() (delivered as an uncatchable interrupt, it would cut the
-            drain it lands in) and frame() (it would put a frame inside a
-            chain). See docs/vm/vm-L1-report.md sec.9.3.
+            Measurement only. Build a separate build_* directory with its own
+            sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
 
     config POCKET_UI_TASK_CORE
         int "Core the ui task is pinned to (-1 = let FreeRTOS choose)"
@@ -208,87 +133,10 @@ menu "Pocket VM (L0 measurement probes)"
             of an HTTP request running on the other core, because core 0 is
             where ESP-IDF fixes the Wi-Fi driver task. Pinning also removes the
             one migration the board does take (measured: 1 in 1,800 idle
-            frames, docs/vm/vm-L1-report.md sec.8.8), which is what makes a per-core
-            clock (CONFIG_POCKET_VM_CCOUNT) possible at all.
+            frames, docs/vm/vm-L1-report.md sec.8.8).
 
             The three values are the SAME binary with one immediate changed --
             xTaskCreatePinnedToCore() is the only call site either way -- so a
             measurement across them is not confounded by a code-path change.
-
-    config POCKET_VM_CCOUNT
-        bool "Read CCOUNT, not esp_timer, for the L1 job budget"
-        default n
-        help
-            The L1 turn budget asks the clock how much of its 8 ms is left,
-            once every VM_JOB_STRIDE jobs (vm_sched.h). CCOUNT --
-            the per-core cycle counter, RSR CCOUNT, the one main/scene/flower.c
-            already uses -- costs 25 ns a read against esp_timer_get_time()'s
-            833 ns (measured (device), docs/vm/vm-L1-report.md sec.8.7).
-
-            It is per core, so it is only sound when the task that runs the
-            drain cannot migrate: components/pocketjs_guest/src/vm_clock.c
-            refuses to compile unless CONFIG_POCKET_UI_TASK_CORE >= 0.
-
-            Whether it is worth having is a measurement, not a preference --
-            docs/vm/vm-L1-report.md sec.8 records what each clock costs on the
-            job-heavy workloads.
-
-    config POCKET_VM_LAZY_INPUTS
-        bool "Lazy restoration of flat call inputs"
-        depends on POCKET_VM_FLATCALLS
-        default y
-        help
-            Reconstruct argc/argv/this/new.target on their next bytecode use,
-            instead of at every flat return. Disable to restore eagerly.
-
-    config POCKET_VM_CALLBENCH
-        bool "Diagnostic same-binary flat/recursive call benchmark"
-        depends on POCKET_VM_FLATCALLS && !POCKET_VM_YIELD
-        select POCKET_VM_LAZY_INPUTS
-        default n
-        help
-            Adds an idle-runtime dispatch selector and the USB N benchmark.
-            Use an isolated build directory and SDKCONFIG. This compares the
-            two dispatch paths inside the flat interpreter, not two complete
-            compile-time engine configurations. Never enable for shipping.
-
-    config POCKET_VM_L1_CLOCKBENCH
-        bool "Enable L1 clock-cost bench (docs/vm/vm-L1-report.md 8.7)"
-        default n
-        help
-            A throwaway bench for one question: what does reading the clock
-            cost, and does the ui task migrate cores? NOT part of any normal
-            build. On, this compiles in:
-              - a boot-time loop (main.c) that times esp_cpu_get_cycle_count()
-                (RSR CCOUNT) against esp_timer_get_time() (systimer), logging
-                "CLOCKBENCH ..." lines once, then falls through to the normal
-                boot.
-              - a per-frame xPortGetCoreID() migration counter in ui_task,
-                logging a rate-limited "BENCH_CORE ..." summary.
-            Same isolation rule as POCKET_VM_PROBE: give the build directory
-            its own -D SDKCONFIG=<dir>/sdkconfig, never enable this in the
-            shared root sdkconfig or in sdkconfig.defaults. See
-            sdkconfig.vmclockbench.defaults.
-
-    config POCKET_VM_STRIP_FN_SOURCE
-        bool "Do not keep function source text in the guest heap"
-        default y
-        help
-            Upstream QuickJS copies the full source text of every function it
-            compiles (an inner function's text a second time, inside its
-            parent's) so that Function.prototype.toString can return it. On
-            the 160 KiB guest those copies measured 2.5-7.1 KiB per app
-            (docs/kasane/kasane-guest-memory.md, docs/vm/vm-L2-results.md
-            sec.6), and nothing else reads them.
-
-            On (default), no copy is made. What is lost: toString of a JS
-            function returns upstream's no-source fallback,
-            "function <name>() {\n    [native code]\n}", for every kind of
-            function (async, generator, arrow and class included), instead of
-            its source. Code that parses a function's own text breaks; calling,
-            error messages, stack traces and line numbers are unaffected.
-
-            Off, the upstream behaviour exactly. The host harness mirrors the
-            default; tools/vmtest/build.sh's "-keepsrc" suffix builds it off.
 
 endmenu

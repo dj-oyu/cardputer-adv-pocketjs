@@ -30,6 +30,8 @@ esp_err_t pocket_text_install(JSContext *ctx, void *user_data);
 // hear it. Call from app_stop() while the guest is alive, beside the other
 // surfaces' resets: a session holds three guest callbacks.
 void pocket_text_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_text_suspend(void);
 
 // ------------------------------------------------------------- the host field
 

@@ -19,9 +19,6 @@
 
 static int jobs;
 static void check_int(JSContext *ctx, const char *expr, int expected);
-#ifdef CONFIG_POCKET_VM_TCO
-#include "tco_device_check.h"
-#endif
 
 typedef struct {
     JSRuntime *rt;
@@ -231,9 +228,6 @@ static JSValue advance(JSContext *ctx, JSValue value) {
 
 int vmtest_lifecycle(void) {
     unsigned total = 0;
-#ifdef CONFIG_POCKET_VM_TCO
-    check_tail_depth();
-#endif
     check_requests();
     check_concurrent_requests();
     {

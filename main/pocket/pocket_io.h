@@ -74,3 +74,5 @@ void pocket_io_pump(void);
 // and gives the buses back. Call from app_stop() while the guest is still
 // alive, next to the other surfaces' resets.
 void pocket_io_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_io_suspend(void);

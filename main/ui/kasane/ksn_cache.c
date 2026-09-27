@@ -40,6 +40,14 @@ static bool translate_rect(ksn_rect in,int16_t x,int16_t y,ksn_rect *out){
     if(x0<INT16_MIN||y0<INT16_MIN||x1>INT16_MAX||y1>INT16_MAX)return false;
     *out=(ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};return true;
 }
+/* The template extent has already proved that every translated endpoint fits. */
+static ksn_rect translate_checked_extent(ksn_rect in,int16_t x,int16_t y){
+    return (ksn_rect){(int16_t)((int32_t)in.x0+x),(int16_t)((int32_t)in.y0+y),
+                      (int16_t)((int32_t)in.x1+x),(int16_t)((int32_t)in.y1+y)};
+}
+static bool same_rect(ksn_rect a,ksn_rect b){
+    return a.x0==b.x0&&a.y0==b.y0&&a.x1==b.x1&&a.y1==b.y1;
+}
 static ksn_rect intersect(ksn_rect a,ksn_rect b){
     if(a.x0<b.x0)a.x0=b.x0;
     if(a.y0<b.y0)a.y0=b.y0;
@@ -62,31 +70,49 @@ static ksn_result apply_placement(ksn_cache_impl *cache,ksn_core *core,ksn_tx tx
     ksn_result result=validate_placement(placement);if(result!=KSN_OK)return result;
     const ksn_cache_template_entry *entry=find_template_const(cache,instance->template_id);
     if(!entry)return KSN_STALE;
-    for(unsigned i=0;i<entry->command_count;i++){
-        ksn_draw draw;ksn_rect translated;
-        result=decode(&cache->commands[entry->first_command+i],&draw);
+    ksn_rect translated;
+    if(!translate_rect(entry->extent,placement->x,placement->y,&translated))return KSN_INVALID;
+    const ksn_placement *previous=instance->pending_tx==tx.value?&instance->pending:&instance->current;
+    bool moved=previous->x!=placement->x||previous->y!=placement->y;
+    bool clip_changed=moved||!same_rect(previous->clip,placement->clip);
+    bool visibility_changed=previous->visible!=placement->visible;
+    bool opacity_changed=previous->opacity!=placement->opacity;
+    if(!moved&&!clip_changed&&!visibility_changed&&!opacity_changed){
+        /* A no-op must still reject a stale, wrong-layer or poisoned ticket. */
+        result=ksn_core_check_transaction(core,tx,(ksn_layer)entry->layer);
         if(result!=KSN_OK)return result;
-        if(!translate_rect(draw.bounds,placement->x,placement->y,&translated)||
-           !translate_rect(draw.clip,placement->x,placement->y,&translated))return KSN_INVALID;
+        /* REPLACE may have invalidated an old instance's refs. PATCH keeps
+         * them, but REPLACE must validate the group before accepting no-op. */
+        if(ksn_core_check_builder(core,tx,(ksn_layer)entry->layer,KSN_REPLACE)==KSN_OK){
+            result=ksn_core_group(core,(ksn_layer)entry->layer,tx,instance->first,
+                                  entry->command_count,placement->opacity);
+            if(result!=KSN_OK)return result;
+        }
+        instance->pending=*placement;instance->pending_tx=tx.value;return KSN_OK;
     }
     ksn_client client=ksn_core_client(core,(ksn_layer)entry->layer);
-    for(unsigned i=0;i<entry->command_count;i++){
-        ksn_draw draw;result=decode(&cache->commands[entry->first_command+i],&draw);
-        if(result!=KSN_OK)return result;
-        ksn_rect bounds,clip;
-        if(!translate_rect(draw.bounds,placement->x,placement->y,&bounds)||
-           !translate_rect(draw.clip,placement->x,placement->y,&clip))return KSN_INVALID;
-        clip=intersect(clip,placement->clip);
-        ksn_ref ref={instance->first.value+i};
-        ksn_change change={.property=KSN_SET_RECT,.value.rect=bounds};
-        result=client.ops->change(client.ctx,tx,ref,&change);if(result!=KSN_OK)return result;
-        change=(ksn_change){.property=KSN_SET_CLIP,.value.rect=clip};
-        result=client.ops->change(client.ctx,tx,ref,&change);if(result!=KSN_OK)return result;
-        change=(ksn_change){.property=KSN_SET_VISIBLE,.value.visible=placement->visible};
-        result=client.ops->change(client.ctx,tx,ref,&change);if(result!=KSN_OK)return result;
+    if(moved||clip_changed||visibility_changed)for(unsigned i=0;i<entry->command_count;i++){
+        const ksn_command_storage *stored=&cache->commands[entry->first_command+i];
+        ksn_ref ref={instance->first.value+i};ksn_change change;
+        if(moved){
+            change=(ksn_change){.property=KSN_SET_RECT,
+                .value.rect=translate_checked_extent(stored->bounds,placement->x,placement->y)};
+            result=client.ops->change(client.ctx,tx,ref,&change);if(result!=KSN_OK)return result;
+        }
+        if(clip_changed){
+            ksn_rect clip=translate_checked_extent(stored->clip,placement->x,placement->y);
+            change=(ksn_change){.property=KSN_SET_CLIP,.value.rect=intersect(clip,placement->clip)};
+            result=client.ops->change(client.ctx,tx,ref,&change);if(result!=KSN_OK)return result;
+        }
+        if(visibility_changed){
+            change=(ksn_change){.property=KSN_SET_VISIBLE,.value.visible=placement->visible};
+            result=client.ops->change(client.ctx,tx,ref,&change);if(result!=KSN_OK)return result;
+        }
     }
-    result=ksn_core_group(core,(ksn_layer)entry->layer,tx,instance->first,entry->command_count,placement->opacity);
-    if(result!=KSN_OK)return result;
+    if(opacity_changed){
+        result=ksn_core_group(core,(ksn_layer)entry->layer,tx,instance->first,entry->command_count,placement->opacity);
+        if(result!=KSN_OK)return result;
+    }
     instance->pending=*placement;instance->pending_tx=tx.value;return KSN_OK;
 }
 
@@ -123,8 +149,19 @@ ksn_result ksn_cache_create(ksn_cache *storage,ksn_layer layer,const ksn_draw *d
         shape_payload payload={draw->data.shape.color,draw->data.shape.radius,draw->data.shape.width,{0,0}};
         memcpy(stored->payload,&payload,sizeof(payload));
     }
+    ksn_rect extent={INT16_MAX,INT16_MAX,INT16_MIN,INT16_MIN};
+    for(unsigned i=0;i<count;i++){
+        const ksn_rect rects[2]={draws[i].bounds,draws[i].clip};
+        for(unsigned j=0;j<2;j++){
+            ksn_rect r=rects[j];
+            if(r.x0<extent.x0)extent.x0=r.x0;
+            if(r.y0<extent.y0)extent.y0=r.y0;
+            if(r.x1>extent.x1)extent.x1=r.x1;
+            if(r.y1>extent.y1)extent.y1=r.y1;
+        }
+    }
     ksn_cache_template_entry *entry=&cache->templates[cache->template_count++];
-    *entry=(ksn_cache_template_entry){++last_template,(uint16_t)first,0,0,(uint8_t)count,(uint8_t)layer};
+    *entry=(ksn_cache_template_entry){++last_template,(uint16_t)first,0,0,(uint8_t)count,(uint8_t)layer,extent};
     *out=(ksn_template){entry->id};return KSN_OK;
 }
 ksn_result ksn_cache_release(ksn_cache *storage,ksn_template handle){
@@ -163,21 +200,16 @@ ksn_result ksn_cache_instantiate(ksn_cache *storage,ksn_core *core,ksn_tx tx,
     ksn_cache_template_entry *entry=find_template(cache,handle);
     if(!entry)return KSN_STALE;
     if(cache->instance_count==KSN_CACHE_INSTANCES||last_instance==UINT32_MAX)return KSN_LIMIT;
-    for(unsigned i=0;i<entry->command_count;i++){
-        ksn_draw draw;ksn_rect translated;
-        result=decode(&cache->commands[entry->first_command+i],&draw);
-        if(result!=KSN_OK)return result;
-        if(!translate_rect(draw.bounds,placement->x,placement->y,&translated)||
-           !translate_rect(draw.clip,placement->x,placement->y,&translated))return KSN_INVALID;
-    }
+    ksn_rect translated;
+    if(!translate_rect(entry->extent,placement->x,placement->y,&translated))return KSN_INVALID;
     ksn_client client=ksn_core_client(core,(ksn_layer)entry->layer);ksn_cache_instance_entry pending={0};
     pending.id=++last_instance;pending.template_id=entry->id;pending.layer=entry->layer;
     pending.command_count=entry->command_count;pending.pending=*placement;pending.pending_tx=tx.value;
     pending.flags=INSTANCE_PENDING_NEW;
     for(unsigned i=0;i<entry->command_count;i++){
         ksn_draw draw;result=decode(&cache->commands[entry->first_command+i],&draw);if(result!=KSN_OK)return result;
-        if(!translate_rect(draw.bounds,placement->x,placement->y,&draw.bounds)||
-           !translate_rect(draw.clip,placement->x,placement->y,&draw.clip))return KSN_INVALID;
+        draw.bounds=translate_checked_extent(draw.bounds,placement->x,placement->y);
+        draw.clip=translate_checked_extent(draw.clip,placement->x,placement->y);
         draw.clip=intersect(draw.clip,placement->clip);
         ksn_ref ref;result=client.ops->add(client.ctx,tx,&draw,&ref);if(result!=KSN_OK)return result;
         if(!placement->visible){

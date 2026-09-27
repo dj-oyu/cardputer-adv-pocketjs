@@ -151,7 +151,7 @@ type File = {
 - tell: 最後に完了したI/Oのbyte位置。read/create/replaceは0開始、appendは既存末尾開始。保留I/O中は完了前の値。失敗後は位置を信頼せず、ハンドルを開き直す。
 - flush: 書込バッファをバックエンドへ同期する。create/replaceは一時版の同期で公開ではない。readではINVALID_ARGUMENT。同期成功と電源断後の保証は区別する。
 - commit: create/replaceのみ。同期→検証→公開の後にresolveし、自動的にハンドルを閉じる。二度目はCLOSED。0bytesのcommitも正当な空ファイル。部分版を公開しない。
-- close: 冪等で、新規操作とcallbackを即時無効化。保留I/Oをcancelし、native資源の停止完了はホストが追跡する。同期voidなのでflushの代用にしない。アプリ終了時も自動close。
+- close: 冪等で、新規操作とcallbackを即時無効化。保留I/Oをcancelし、native資源の停止完了はホストが追跡する。同期voidなのでflushの代用にしない。アプリ終了時も自動close。どこからも参照されなくなったFileも、回収された後の次のtickで破棄としてcloseされる（commitしていない書き込みは消える。参照の無いFileはもうcommitできないので、アプリ終了時と同じ扱い）。
 
 appendはセンサーログ等の用途で、原子的な文書保存には使用しない。電源断で末尾が欠け得るため、レコード長・sequence・CRC等はログ形式側で定義する。durability=crash-safeのappendは初版ではUNSUPPORTED。
 

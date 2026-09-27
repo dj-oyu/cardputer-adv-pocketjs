@@ -190,7 +190,9 @@ bool pocket_api_cancel_requested(JSValueConst token);
 // rejection rather than a throw, so a surface whose work is synchronous still
 // has to hand back a Promise. pocket_api_settled() builds one that is already
 // settled with `value` (which it takes over), and pocket_api_reject() is the
-// same thing carrying a PocketError.
+// same thing carrying a PocketError. At the guest's limit it returns
+// JS_EXCEPTION with `value` already freed; a caller whose value stands for
+// something native (a File's slot) must release that itself.
 JSValue pocket_api_settled(JSContext *ctx, JSValue value, bool rejected);
 JSValue pocket_api_reject(JSContext *ctx, const char *code, const char *operation,
                           const char *message, bool retryable, const char *outcome);
@@ -391,6 +393,11 @@ void pocket_api_complete(pocket_request_t request, int32_t status);
 // they have not. Call once per frame from the JS task. Costs one load and one
 // branch when nothing is in flight.
 void pocket_api_pump(void);
+// Resident suspension: stop every armed operation with `code`; each settles on a
+// later pocket_api_pump() once its driver posts. pocket_api_open_count() is the
+// number of slots still claimed.
+void pocket_api_cancel_all(const char *code);
+unsigned pocket_api_open_count(void);
 
 // Ends the session's promises: each is asked to stop and its resolvers are
 // released without settling, there being nobody left to settle to. Call from

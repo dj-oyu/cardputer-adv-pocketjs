@@ -11,12 +11,8 @@
 #include "esp_log.h"
 #include "quickjs-libc.h"
 #include "quickjs-vm.h"
-#if defined(CONFIG_POCKET_VM_YIELD) || defined(CONFIG_POCKET_VM_PROBE)
 #include "esp_timer.h"
-#endif
-#ifdef CONFIG_POCKET_VM_YIELD
 #include "freertos/FreeRTOS.h"
-#endif
 #ifdef CONFIG_POCKET_VM_PROBE
 #include <stdio.h>
 #include "quickjs-vm.h"
@@ -130,12 +126,26 @@ typedef struct surface {
   struct surface *next;
 } surface_t;
 
+#ifdef ESP_PLATFORM
+#include "pocketjs/block_cache.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
+
 struct pocketjs_guest {
   JSRuntime *runtime;
   JSContext *context;
   JSValue frame;
   size_t heap_limit;
   bool prefer_psram;
+#ifdef ESP_PLATFORM
+  /* R3 (docs/vm/r3-small-block-cache.md): freed small blocks kept for the next
+   * allocation of their length. Used only from the task that created the
+   * guest; any other caller goes straight to heap_caps. */
+  block_cache_t block_cache;
+  TaskHandle_t owner_task;
+  bool block_cache_on;
+#endif
   atomic_uint interrupt_epoch;
   unsigned int handled_interrupt_epoch;
   rejection_t *rejections;
@@ -149,8 +159,14 @@ struct pocketjs_guest {
    * turn's continuation drain share one deadline measured from turn start. */
   vm_budget_t budget;
   bool jobs_pending;
-#ifdef CONFIG_POCKET_VM_YIELD
   bool suspended;
+  /* Resident suspension (docs/vm/app-suspend-design.md): the app left with
+   * Back but its runtime is kept. Nothing may enter JavaScript until the host
+   * wakes it -- not a frame, not a drain, not an install -- and the interrupt
+   * handler answers "stop" first, so an entry that slipped past the gates
+   * throws instead of running. Distinct from `suspended`, which is L2c's
+   * parked chain inside one turn. */
+  bool dormant;
   JSVMOrigin origin; /* HOST means the logical frame call, including async */
   int64_t frame_us;
   esp_timer_handle_t yield_timer;
@@ -158,6 +174,56 @@ struct pocketjs_guest {
 #ifdef CONFIG_POCKET_VM_SELFTEST
   bool trace_frame;
 #endif
+#ifdef CONFIG_POCKET_VM_RELOC
+  /* L3a on the device (docs/vm/vm-L3-design.md sec.7). `reloc_armed` is off
+   * until a host asks for it, so a RELOC build that nobody arms runs the
+   * same code path as a build without it -- the switch decides whether the
+   * call happens, not whether it is compiled.
+   *
+   * Counted rather than assumed, the same reason vmrun counts them: refusals
+   * are legitimate (D55 -- a park underneath an outer JS activation cannot
+   * move) and a run of all refusals would otherwise look exactly like a run
+   * of successful moves. `reloc_max_us` is the worst single move, which is
+   * what a stop-the-world budget would have to be written against; the mean
+   * hides it. */
+  bool reloc_armed;
+  uint32_t reloc_moves, reloc_refused;
+  /* The third outcome, which the first device run showed is NOT rare: parked,
+   * allowed to move, and nothing to move -- the live segment chain is empty
+   * because the parked frames are all coroutine frames in their own
+   * JSAsyncFunctionState, not in segments. Diagnostic '6' (an endless promise
+   * chain) parks 31 times and lands here every time. Counted separately
+   * because moves=0 refused=0 otherwise reads as "the call never happened",
+   * which is what it looked like until this counter existed. */
+  uint32_t reloc_empty;
+  uint32_t reloc_frames, reloc_var_refs;
+  uint32_t reloc_max_us;
+  uint64_t reloc_total_us, reloc_bytes;
+  /* What the heap looked like around the moves. L3a does NOT compact: a move
+   * allocates blocks of the SAME sizes, copies into them, and frees the old
+   * ones, so both are held at once and the transient cost is exactly the
+   * chain's own size (reloc_bytes). Whether the heap ends up better or worse
+   * laid out afterwards is a side effect nobody designed, which is precisely
+   * why it has to be measured rather than argued.
+   *
+   * Largest free block, not free size: free size barely moves here (the same
+   * bytes are given back), and the number that decides whether an app can
+   * still get a 9.9 KiB Kasane arena is the largest CONTIGUOUS one.
+   *
+   * Sampled outside the timed region so that reloc_max_us stays a measurement
+   * of the move rather than of heap_caps_get_largest_free_block(). */
+  /* How far apart the heap put the pieces of one stack (JSVMRelocStats.span
+   * minus .resident: bytes of OTHER allocations wedged between this stack's
+   * segments). On the host this turned out to track chain DEPTH rather than
+   * park count -- a corpus file that parked 5,807 times kept a 2 KB gap,
+   * while one that only went deep reached 29 KB. The device is the case the
+   * host cannot answer, because here the firmware runs native work in the
+   * SAME pool while the chain sits parked, and vmrun's park runs nothing. */
+  uint32_t reloc_gap_max;
+  uint32_t reloc_gap_segments;   /* chain depth when that gap was seen */
+  uint32_t reloc_largest_first;  /* before the first move */
+  uint32_t reloc_largest_last;   /* after the last one */
+  uint32_t reloc_largest_min;    /* worst sample either side of any move */
 #endif
   uint32_t yields;
   uint32_t continuations;
@@ -180,7 +246,6 @@ struct pocketjs_guest {
   void *watchdog_opaque;
 };
 
-#ifdef CONFIG_POCKET_VM_YIELD
 /* The callback never keeps a guest pointer. Clearing this slot under the
  * same lock joins its last runtime access even if stop races a fired timer.
  * Only one guest executes JS at a time, as required by the host contract. */
@@ -230,22 +295,76 @@ static esp_err_t guest_run_begin(pocketjs_guest_t *guest) {
   if (err != ESP_OK) guest_run_end(guest);
   return err;
 }
-#else
-static esp_err_t guest_run_begin(pocketjs_guest_t *guest) {
-  (void)guest;
-  return ESP_OK;
-}
-static void guest_run_end(pocketjs_guest_t *guest) { (void)guest; }
-#endif
 
 #ifdef ESP_PLATFORM
 #define GUEST_CAPS_INTERNAL (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
 #define GUEST_CAPS_PSRAM (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
+/* A block's length straight from its tlsf header -- the word before the
+ * pointer, low two bits flags (tlsf.c block_header_t.size; multi_heap adds no
+ * owner word without CONFIG_HEAP_TASK_TRACKING) -- instead of
+ * heap_caps_get_allocated_size(), which is in flash and scans the heap list
+ * (~110 cycles, docs/vm/allocator-cost.md). Used only after
+ * guest_tlsf_direct() has seen the two agree on this build's heap. */
+static int g_tlsf_direct = -1;
+static inline size_t tlsf_header_length(const void *pointer) {
+  return *(const uint32_t *)((const char *)pointer - 4) & ~(uint32_t)3U;
+}
+static bool guest_tlsf_direct(void) {
+  if (g_tlsf_direct < 0) {
+    static const size_t sizes[] = {1, 12, 20, 48, 100, 300};
+    bool ok = true;
+    for (size_t i = 0; ok && i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+      void *p = heap_caps_malloc(sizes[i], GUEST_CAPS_INTERNAL);
+      if (p == NULL) {
+        ok = false;
+        break;
+      }
+      ok = tlsf_header_length(p) == heap_caps_get_allocated_size(p);
+      heap_caps_free(p);
+    }
+    g_tlsf_direct = ok;
+    ESP_LOGI("guest", "BLOCK_LENGTH direct=%d", (int)ok);
+  }
+  return g_tlsf_direct == 1;
+}
+static inline size_t guest_block_length(const void *pointer) {
+  return g_tlsf_direct == 1 ? tlsf_header_length(pointer)
+                            : heap_caps_get_allocated_size((void *)pointer);
+}
+static void *block_cache_heap_malloc(void *ctx, size_t size) {
+  (void)ctx;
+  return heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+}
+static void block_cache_heap_free(void *ctx, void *block) {
+  (void)ctx;
+  heap_caps_free(block);
+}
+static size_t block_cache_heap_length(void *ctx, const void *block) {
+  (void)ctx;
+  return guest_block_length(block);
+}
+static const block_cache_backend_t BLOCK_CACHE_HEAP = {
+    block_cache_heap_malloc, block_cache_heap_free, block_cache_heap_length, NULL};
+/* tlsf's own rounding of a request (adjust_request_size): what the cache's
+ * classes are keyed on. The cache only ever holds blocks whose real length
+ * is a class, so a hit is never shorter than this. */
+static inline size_t guest_tlsf_round(size_t size) {
+  size_t aligned = (size + 3U) & ~(size_t)3U;
+  return aligned < 12U ? 12U : aligned;
+}
+static inline bool guest_uses_block_cache(const pocketjs_guest_t *guest) {
+  return guest != NULL && guest->block_cache_on &&
+         xTaskGetCurrentTaskHandle() == guest->owner_task;
+}
+
 static void *guest_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;
   if (size == 0U) {
     return NULL;
+  }
+  if (guest_uses_block_cache(guest)) {
+    return block_cache_malloc(&guest->block_cache, size, guest_tlsf_round(size));
   }
   void *memory = NULL;
   if (guest != NULL && guest->prefer_psram) {
@@ -270,12 +389,15 @@ static void *guest_calloc(void *opaque, size_t count, size_t size) {
 }
 
 static void guest_free(void *opaque, void *pointer) {
-  (void)opaque;
+  if (guest_uses_block_cache(opaque)) {
+    block_cache_free(&((pocketjs_guest_t *)opaque)->block_cache, pointer);
+    return;
+  }
   heap_caps_free(pointer);
 }
 
 static size_t guest_usable_size(const void *pointer) {
-  return pointer == NULL ? 0U : heap_caps_get_allocated_size((void *)pointer);
+  return pointer == NULL ? 0U : guest_block_length(pointer);
 }
 
 static void *guest_realloc(void *opaque, void *pointer, size_t size) {
@@ -371,6 +493,8 @@ static int guest_interrupt(JSRuntime *runtime, void *opaque) {
   pocketjs_guest_t *guest = opaque;
   if (guest == NULL)
     return 0;
+  if (guest->dormant)
+    return 1;
   /* sec.5.3: one registration, a swappable predicate. The host's watchdog (the
    * 250 ms deadline, or the stop hook's 200 ms one) answers for the whole turn
    * when it is installed; the epoch handler below is what is left when nobody
@@ -462,16 +586,12 @@ static esp_err_t drain_jobs(pocketjs_guest_t *guest) {
   guest->drain_jobs += ran;
   guest->jobs_pending = (status == VM_DRAIN_YIELDED);
   if (status == VM_DRAIN_SUSPENDED) {
-#ifdef CONFIG_POCKET_VM_YIELD
     guest->suspended = true;
     guest->origin = JS_VMSuspendedOrigin(guest->runtime);
     guest->jobs_pending = JS_IsJobPending(guest->runtime) ||
                           guest->origin == JS_VM_ORIGIN_JOB_HELD;
     guest->yields++;
     return ESP_OK;
-#else
-    return ESP_FAIL;
-#endif
   }
   if (status == VM_DRAIN_THREW) {
     if (context != NULL) {
@@ -529,6 +649,18 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
   guest->frame = JS_UNDEFINED;
   guest->heap_limit = config->heap_limit;
   guest->prefer_psram = config->prefer_psram;
+#ifdef ESP_PLATFORM
+  {
+    /* Before the runtime exists: JS_NewRuntime2's own allocations already go
+     * through the allocator. PSRAM-preferring guests keep the plain path (the
+     * cache's heap is internal RAM). */
+    static const uint16_t classes[] = {12, 16, 32, 36, 48, 72, 80, 88};
+    guest->owner_task = xTaskGetCurrentTaskHandle();
+    guest->block_cache_on = !guest->prefer_psram && guest_tlsf_direct();
+    block_cache_init(&guest->block_cache, &BLOCK_CACHE_HEAP, classes,
+                     sizeof(classes) / sizeof(classes[0]), guest->block_cache_on);
+  }
+#endif
   atomic_init(&guest->interrupt_epoch, 0U);
   /* Unlimited until a host arms a turn. Evaluation is not a turn: the source
    * is parsed once, before any frame, and cutting its drain would leave an app
@@ -564,6 +696,23 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
     return ESP_ERR_NO_MEM;
   }
   js_std_add_helpers(guest->context, 0, NULL);
+  /* js_std_add_helpers returns nothing and drops its own failures, so an OOM
+   * here would start the app without console.log or print. JS_NewContext
+   * itself now refuses a context with holes (quickjs.c
+   * js_context_setup_mark); this closes the same gap for the helpers, and
+   * for js_std_init_handlers, which no longer exit()s (a reboot here) but
+   * returns without thread state. The canary was cleared by JS_NewRuntime2
+   * and a context that came back has added nothing to it, so any count now
+   * is a rejection in one of those two. Taking it also hands the first turn
+   * a clean canary, as app_session.c expects. tools/vmtest/vmrun.c mirrors
+   * this. */
+  JSOOMCanary setup_oom = {0};
+  JS_TakeOOMCanary(guest->runtime, &setup_oom);
+  if (setup_oom.count != 0) {
+    JS_FreeValue(guest->context, JS_GetException(guest->context));
+    pocketjs_guest_destroy(guest);
+    return ESP_ERR_NO_MEM;
+  }
   *out_guest = guest;
   return ESP_OK;
 }
@@ -575,6 +724,8 @@ pocketjs_guest_quickjs_install(pocketjs_guest_t *guest,
   if (guest == NULL || guest->context == NULL || install == NULL) {
     return ESP_ERR_INVALID_ARG;
   }
+  if (guest->dormant)
+    return ESP_ERR_INVALID_STATE;
   return install(guest->context, user_data);
 }
 
@@ -622,6 +773,8 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
       source_size == 0U) {
     return ESP_ERR_INVALID_ARG;
   }
+  if (guest->dormant)
+    return ESP_ERR_INVALID_STATE;
   JSValue result =
       JS_Eval(guest->context, source, source_size,
               label != NULL ? label : "<pocket-app>", JS_EVAL_TYPE_GLOBAL);
@@ -635,7 +788,8 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
   JSValue global = JS_GetGlobalObject(guest->context);
   guest->frame = JS_GetPropertyStr(guest->context, global, "frame");
   JS_FreeValue(guest->context, global);
-  if (!JS_IsFunction(guest->context, guest->frame)) {
+  if (!JS_IsFunction(guest->context, guest->frame) &&
+      !JS_IsNull(guest->frame)) {
     return ESP_ERR_NOT_FOUND;
   }
   return drain_jobs(guest);
@@ -681,11 +835,20 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
       (frame->touch_count != 0U && frame->touches == NULL)) {
     return ESP_ERR_INVALID_ARG;
   }
-  if (!JS_IsFunction(guest->context, guest->frame)) {
+  if (!JS_IsFunction(guest->context, guest->frame) &&
+      !JS_IsNull(guest->frame)) {
     return ESP_ERR_INVALID_STATE;
   }
   if (pocketjs_guest_suspended(guest))
     return ESP_ERR_INVALID_STATE;
+  if (JS_IsNull(guest->frame)) {
+    /* Explicit event-driven mode: the host still pumps services and every
+     * pending Promise job, but there is no JS frame callback to invoke. */
+    guest->frames++;
+    const esp_err_t jobs = drain_jobs(guest);
+    if (jobs != ESP_OK) guest->frame_errors++;
+    return jobs;
+  }
   JSValue arguments[4] = {
       JS_NewUint32(guest->context, frame->buttons),
       JS_NewUint32(guest->context, frame->analog),
@@ -724,14 +887,10 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
    * the two numbers add up to less than the turn rather than more. */
   const int64_t vmprobe_call_begin = esp_timer_get_time();
 #endif
-#ifdef CONFIG_POCKET_VM_YIELD
   const int64_t frame_begin = esp_timer_get_time();
-#endif
   JSValue result = JS_VMCall(guest->context, guest->frame, JS_UNDEFINED,
                            argument_count, arguments);
-#ifdef CONFIG_POCKET_VM_YIELD
   guest->frame_us = esp_timer_get_time() - frame_begin;
-#endif
 #ifdef CONFIG_POCKET_VM_PROBE
   vmprobe_call_us += (uint32_t)(esp_timer_get_time() - vmprobe_call_begin);
 #endif
@@ -739,7 +898,6 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
     JS_FreeValue(guest->context, arguments[index]);
   }
   guest->frames++;
-#ifdef CONFIG_POCKET_VM_YIELD
   if (JS_VMSuspended(guest->runtime)) {
     guest->suspended = true;
     guest->origin = JS_VM_ORIGIN_HOST;
@@ -756,7 +914,6 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
   }
 #endif
   guest->frame_us = 0;
-#endif
   if (JS_IsException(result)) {
     js_std_dump_error(guest->context);
     JS_FreeValue(guest->context, result);
@@ -779,6 +936,8 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
 
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame) {
+  if (guest != NULL && guest->dormant)
+    return ESP_ERR_INVALID_STATE;
   esp_err_t err = guest_run_begin(guest);
   if (err == ESP_OK) err = guest_frame_impl(guest, frame);
   guest_run_end(guest);
@@ -802,12 +961,34 @@ bool pocketjs_guest_jobs_pending(const pocketjs_guest_t *guest) {
 }
 
 bool pocketjs_guest_suspended(const pocketjs_guest_t *guest) {
-#ifdef CONFIG_POCKET_VM_YIELD
   return guest != NULL && guest->suspended;
-#else
-  (void)guest;
-  return false;
-#endif
+}
+
+esp_err_t pocketjs_guest_set_dormant(pocketjs_guest_t *guest, bool dormant) {
+  if (guest == NULL || guest->runtime == NULL)
+    return ESP_ERR_INVALID_ARG;
+  if (!dormant || guest->dormant) {
+    guest->dormant = dormant;
+    return ESP_OK;
+  }
+  /* A parked chain or queued jobs belong to the turn that made them; putting
+   * them to sleep would resume them minutes later in a world their awaits
+   * never saw. The host finishes the drain (the leave turn does) or stops. */
+  if (pocketjs_guest_work_pending(guest) || JS_IsJobPending(guest->runtime))
+    return ESP_ERR_INVALID_STATE;
+  /* What the app no longer reaches goes back to the system before the host
+   * screens need it: the guest allocates block by block from the shared
+   * internal heap, so a collection's garbage is free memory at once, and the
+   * small-block cache holds memory nobody else can use. A FinalizationRegistry
+   * callback the collection queues stays queued until the wake. */
+  JS_RunGC(guest->runtime);
+  pocketjs_guest_block_cache_flush(guest);
+  guest->dormant = true;
+  return ESP_OK;
+}
+
+bool pocketjs_guest_dormant(const pocketjs_guest_t *guest) {
+  return guest != NULL && guest->dormant;
 }
 
 bool pocketjs_guest_work_pending(const pocketjs_guest_t *guest) {
@@ -815,17 +996,55 @@ bool pocketjs_guest_work_pending(const pocketjs_guest_t *guest) {
 }
 
 int64_t pocketjs_guest_frame_total(const pocketjs_guest_t *guest) {
-#ifdef CONFIG_POCKET_VM_YIELD
   return guest != NULL ? guest->frame_us : 0;
-#else
-  (void)guest;
-  return 0;
-#endif
 }
 
-#if defined(CONFIG_POCKET_VM_SELFTEST) && defined(CONFIG_POCKET_VM_YIELD)
+#ifdef CONFIG_POCKET_VM_SELFTEST
 void pocketjs_guest_trace_frame(pocketjs_guest_t *guest) {
   if (guest != NULL) guest->trace_frame = true;
+}
+#endif
+
+#ifdef CONFIG_POCKET_VM_RELOC
+void pocketjs_guest_reloc_arm(pocketjs_guest_t *guest, bool on) {
+  if (guest == NULL) return;
+  guest->reloc_armed = on;
+  if (!on) return;
+  guest->reloc_moves = guest->reloc_refused = guest->reloc_empty = 0;
+  guest->reloc_frames = guest->reloc_var_refs = 0;
+  guest->reloc_max_us = 0;
+  guest->reloc_total_us = guest->reloc_bytes = 0;
+  guest->reloc_gap_max = guest->reloc_gap_segments = 0;
+  guest->reloc_largest_first = guest->reloc_largest_last = 0;
+  guest->reloc_largest_min = 0;
+}
+
+void pocketjs_guest_reloc_report(const pocketjs_guest_t *guest) {
+  if (guest == NULL || !guest->reloc_armed) return;
+  /* One uppercase marker, like every other contract this firmware has with
+   * tools/ (CLAUDE.md). tools/vm_reloc_device.py parses this line.
+   *
+   * moves=0 with refused>0 is a real outcome, not a failure: the app never
+   * parked anywhere a move was legal. The script has to be able to tell that
+   * from "it moved and nothing broke", which is why both are printed. */
+  ESP_LOGI(TAG,
+           "VM_RELOC moves=%lu refused=%lu empty=%lu frames=%lu var_refs=%lu "
+           "bytes=%llu max_us=%lu total_us=%llu "
+           "largest_first=%lu largest_last=%lu largest_min=%lu "
+           "gap_max=%lu gap_segments=%lu",
+           (unsigned long)guest->reloc_moves,
+           (unsigned long)guest->reloc_refused,
+           (unsigned long)guest->reloc_empty,
+           (unsigned long)guest->reloc_frames,
+           (unsigned long)guest->reloc_var_refs,
+           (unsigned long long)guest->reloc_bytes,
+           (unsigned long)guest->reloc_max_us,
+           (unsigned long long)guest->reloc_total_us,
+           (unsigned long)guest->reloc_largest_first,
+           (unsigned long)guest->reloc_largest_last,
+           (unsigned long)guest->reloc_largest_min,
+           (unsigned long)guest->reloc_gap_max,
+           (unsigned long)guest->reloc_gap_segments);
 }
 #endif
 
@@ -833,7 +1052,6 @@ void pocketjs_guest_prepare_stop(pocketjs_guest_t *guest) {
   if (!guest || !guest->runtime)
     return;
   guest_run_end(guest);
-#ifdef CONFIG_POCKET_VM_YIELD
   if (JS_VMSuspended(guest->runtime)) {
     JS_VMTerminate(guest->runtime);
     JSValue result = JS_VMResume(guest->context);
@@ -848,7 +1066,6 @@ void pocketjs_guest_prepare_stop(pocketjs_guest_t *guest) {
   guest->suspended = JS_VMSuspended(guest->runtime);
   guest->origin = JS_VM_ORIGIN_NONE;
   guest->frame_us = 0;
-#endif
   guest->jobs_pending = JS_IsJobPending(guest->runtime);
 }
 
@@ -869,10 +1086,53 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
   if (!pocketjs_guest_work_pending(guest))
     return ESP_OK;
   guest->continuations++;
-#ifdef CONFIG_POCKET_VM_YIELD
   if (guest->suspended) {
     const bool frame = guest->origin == JS_VM_ORIGIN_HOST;
     const bool held = guest->origin == JS_VM_ORIGIN_JOB_HELD;
+#ifdef CONFIG_POCKET_VM_RELOC
+    /* L3a's one caller on the device. Here and nowhere else: this is the
+     * only place the firmware resumes a chain it means to keep running, so
+     * it is the only place where the VM is parked AND has a future. The
+     * resume in pocketjs_guest_prepare_stop() is parked too, but it is
+     * terminating the chain -- moving it would copy bytes on their way to
+     * being freed.
+     *
+     * Charged separately from the resume it precedes, so the frame and
+     * drain totals the runaway guard reads keep meaning "time the guest
+     * spent running" rather than quietly including relocation. */
+    if (guest->reloc_armed) {
+      JSVMRelocStats rs;
+      const uint32_t before = (uint32_t)heap_caps_get_largest_free_block(
+          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      const int64_t reloc_began = esp_timer_get_time();
+      const int moved = JS_VMStackRelocate(guest->runtime, &rs);
+      const uint32_t reloc_us = (uint32_t)(esp_timer_get_time() - reloc_began);
+      if (moved == 0 && rs.segments != 0U) {
+        const uint32_t after = (uint32_t)heap_caps_get_largest_free_block(
+            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (guest->reloc_moves == 0U) guest->reloc_largest_first = before;
+        guest->reloc_largest_last = after;
+        if (guest->reloc_largest_min == 0U || before < guest->reloc_largest_min)
+          guest->reloc_largest_min = before;
+        if (after < guest->reloc_largest_min) guest->reloc_largest_min = after;
+        guest->reloc_moves++;
+        guest->reloc_frames += rs.frames;
+        guest->reloc_var_refs += rs.var_refs;
+        guest->reloc_bytes += rs.bytes;
+        if (rs.span > rs.resident &&
+            (uint32_t)(rs.span - rs.resident) > guest->reloc_gap_max) {
+          guest->reloc_gap_max = (uint32_t)(rs.span - rs.resident);
+          guest->reloc_gap_segments = rs.segments;
+        }
+        guest->reloc_total_us += reloc_us;
+        if (reloc_us > guest->reloc_max_us) guest->reloc_max_us = reloc_us;
+      } else if (moved != 0) {
+        guest->reloc_refused++;
+      } else {
+        guest->reloc_empty++;
+      }
+    }
+#endif
     const int64_t began = esp_timer_get_time();
     JSValue result = JS_VMResume(guest->context);
     const int64_t elapsed = esp_timer_get_time() - began;
@@ -913,11 +1173,12 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
       guest->drain_jobs++;
     }
   }
-#endif
   return drain_jobs(guest);
 }
 
 esp_err_t pocketjs_guest_continue(pocketjs_guest_t *guest) {
+  if (guest != NULL && guest->dormant)
+    return ESP_ERR_INVALID_STATE;
   esp_err_t err = guest_run_begin(guest);
   if (err == ESP_OK) err = guest_continue_impl(guest);
   guest_run_end(guest);
@@ -925,13 +1186,9 @@ esp_err_t pocketjs_guest_continue(pocketjs_guest_t *guest) {
 }
 
 void pocketjs_guest_yield_enabled(pocketjs_guest_t *guest, bool enabled) {
-#ifdef CONFIG_POCKET_VM_YIELD
   if (!guest) return;
   guest->yield_disabled = !enabled;
   if (!enabled) guest_run_end(guest);
-#else
-  (void)guest; (void)enabled;
-#endif
 }
 
 void pocketjs_guest_set_watchdog(pocketjs_guest_t *guest, int (*fn)(void *),
@@ -984,12 +1241,16 @@ esp_err_t pocketjs_guest_stats(pocketjs_guest_t *guest,
 void pocketjs_guest_take_oom(pocketjs_guest_t *guest, uint32_t *count,
                              size_t *first_req, size_t *first_used) {
   JSOOMCanary canary = {0};
-  if (guest != NULL) {
-    JS_TakeOOMCanary(guest->runtime, &canary);
-  }
+  pocketjs_guest_take_oom_detail(guest, &canary);
   if (count != NULL) *count = canary.count;
   if (first_req != NULL) *first_req = canary.first_req;
   if (first_used != NULL) *first_used = canary.first_used;
+}
+
+void pocketjs_guest_take_oom_detail(pocketjs_guest_t *guest, JSOOMCanary *out) {
+  if (out == NULL) return;
+  *out = (JSOOMCanary){0};
+  if (guest != NULL) JS_TakeOOMCanary(guest->runtime, out);
 }
 
 void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
@@ -997,9 +1258,7 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
     return;
   }
   guest_run_end(guest);
-#ifdef CONFIG_POCKET_VM_YIELD
   if (guest->yield_timer) (void)esp_timer_delete(guest->yield_timer);
-#endif
   if (guest->runtime != NULL) {
     /* sec.3.2: whatever is still queued is discarded UNRUN, which is what
      * JS_FreeRuntime does anyway (ledger 03 fact 9) and what pocket_api_reset()
@@ -1029,6 +1288,10 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
   }
   if (guest->runtime != NULL) {
     JS_FreeRuntime(guest->runtime);
+#ifdef ESP_PLATFORM
+    /* The runtime's last frees (its own struct among them) may be cached. */
+    block_cache_flush(&guest->block_cache);
+#endif
   }
   while (guest->surfaces) {
     surface_t *entry = guest->surfaces;
@@ -1037,4 +1300,14 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
     free(entry);
   }
   free(guest);
+}
+
+void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest) {
+#ifdef ESP_PLATFORM
+  if (guest != NULL && guest->block_cache_on &&
+      xTaskGetCurrentTaskHandle() == guest->owner_task)
+    block_cache_flush(&guest->block_cache);
+#else
+  (void)guest;
+#endif
 }

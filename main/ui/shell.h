@@ -12,11 +12,18 @@ typedef enum {
 
 void shell_init(void);
 bool shell_key(board_key_t key);
+bool shell_choices_open(void);
 unsigned shell_app(void);   // which Apps entry Enter would launch
 // The screen the last key press asked for, and clears it. Poll once per key,
 // after shell_key(); SHELL_SCREEN_NONE means stay on the home screen.
 shell_screen_t shell_pending_screen(void);
 void shell_draw(const char *error, unsigned phase);
+#ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
+void shell_overlay_repair_request(bool capture_pixels);
+#endif
+#ifdef KASANE_P5_LOWHEAP_PROBE
+void shell_lowheap_toggle_request(void);
+#endif
 
 // Writes every settings row to NVS. Called when a row is applied, and by the
 // volume keys, which change a setting without going through a row.

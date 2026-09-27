@@ -1,0 +1,24 @@
+native-first 0,1,2,3 true function true true
+global-keys Object,Function,Error,EvalError,RangeError,ReferenceError,SyntaxError,TypeError,URIError,InternalError,AggregateError,Iterator,Array,parseInt,parseFloat,isNaN,isFinite,queueMicrotask,decodeURI,decodeURIComponent,encodeURI,encodeURIComponent,escape,unescape,Infinity,NaN,undefined,eval,Number,Boolean,String,Math,Reflect,Symbol,globalThis,BigInt,Date,RegExp,JSON,Proxy,Map,Set,WeakMap,WeakSet,ArrayBuffer,SharedArrayBuffer,Uint8ClampedArray,Int8Array,Uint8Array,Int16Array,Uint16Array,Int32Array,Uint32Array,BigInt64Array,BigUint64Array,Float16Array,Float32Array,Float64Array,DataView,Atomics,Promise,WeakRef,FinalizationRegistry,DOMException,performance,console,scriptArgs,print,host
+global-desc true false true function Int16Array
+in true true
+delete true undefined
+overwrite 5 number
+f3c-delete true undefined
+f3c-overwrite 7
+f3c-desc Map:truefalsetruefunctionMap Set:truefalsetruefunctionSet WeakMap:truefalsetruefunctionWeakMap WeakRef:truefalsetruefunctionWeakRef DOMException:truefalsetruefunctionDOMException
+base true TypedArray true true true
+statics 1 8 BigUint64Array 3 length,name,BYTES_PER_ELEMENT,prototype BYTES_PER_ELEMENT,constructor
+species 2,4,6 true [object Uint8Array]
+subclass 2 true true
+dataview 18 52 [object DataView]
+sab 8 [object SharedArrayBuffer] true false
+atomics 7 true
+native-after 0,1,2 true
+BigInt64Array 5 function
+map 2 1,2 [object Map Iterator] true next true 1,3 true
+set true 1,2,3,4 true [object Set Iterator] 17
+weak true undefined deref,constructor 1
+domex NotFoundError m 8 8 8 true [object DOMException] 25 25 true true
+global-keys-after Object,Function,Error,EvalError,RangeError,ReferenceError,SyntaxError,TypeError,URIError,InternalError,AggregateError,Iterator,Array,parseInt,parseFloat,isNaN,isFinite,queueMicrotask,decodeURI,decodeURIComponent,encodeURI,encodeURIComponent,escape,unescape,Infinity,NaN,undefined,eval,Number,Boolean,String,Math,Reflect,Symbol,globalThis,BigInt,Date,RegExp,JSON,Proxy,Map,Set,WeakMap,ArrayBuffer,SharedArrayBuffer,Uint8ClampedArray,Int8Array,Uint8Array,Int16Array,Uint16Array,Int32Array,Uint32Array,BigInt64Array,BigUint64Array,Float16Array,Float64Array,DataView,Atomics,Promise,WeakRef,FinalizationRegistry,DOMException,performance,console,scriptArgs,print,host
+exit=0

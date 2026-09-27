@@ -38,9 +38,8 @@ NVSへ保存されるので再起動しても残る。段が5つで上寄りな�
 ## 帯を持たない
 
 上部に固定高さの帯を敷いていたが、やめた。**地は背景のもので、letters以外は
-何も取らない。** 文字はそれぞれ自分の幅だけの黒い板の上に載る（`plate()`）。
-板の幅を出すには文字の画素幅が要るので、バイト数で刈り込む `cut()` と
-同じ歩き方を共有している——面が6px/12pxで数えるものを、こちらも同じに数える。
+何も取らない。** 文字はそれぞれ自分の幅だけの黒い板の上に載る。板幅と47バイト上限は
+Kasane native presenter が計算し、JS は表示値だけを渡す。
 
 **状態行は1本。** 以前は transport の状態と note が数ピクセル離れて並び、
 「PLAYING」と「OPENING」が同時に出て、どちらが今なのかを読む側に解かせていた。
@@ -49,34 +48,25 @@ NVSへ保存されるので再起動しても残る。段が5つで上寄りな�
 **キー一覧は常設しない。** 右下に `?: help` とだけ出て、`?` で全面のモーダルに
 なる。ヘルプ中はどのキーでも閉じる（ESCはシェルのものなので届かない）。
 
-## ui.* が無い
+## Kasane overlay
 
-overlayセッションにRust UIコアは無い（`pocket_overlay.h` に理由）。描画は
-`pocket.overlay` の表示リストで、矩形と文字列だけ。シェルがシーンの上へ合成する。
+CP28で描画を`pocket.kasane`へ移植した。通常appと同じAPP layerを使い、シェルが各帯へ
+native sceneをbackdropとして供給してから合成する。OVERLAYという第三layerはない。
+`pocket.overlay`はregion limitsとkey listenerのためだけに残る。
 
-## Kasane missing
+`ui.mount('music')` で native presenter を取得する。JSは選曲・再生操作と
+`view.set({title,message})` だけを担当し、open後に `view.bind('playback')` する。
+Kasaneが再生位置・長さをnative音声snapshotから読み、helpと未知長lightの
+UI状態も保持する。JSにdirty判定・毎frameの`player.status()`・表示model・rect/textの組立てや
+`ui.replace()`はない。presenter が表示プラン、可視差分、APP REPLACE の提出を担当する。
+座標はregion-localで、native adapterがLCD座標へ
+変換してregionでclipする。guest喪失時のreset、転送失敗後のrepair、shell HUDの最終合成は
+共通frameworkが所有する。現段階は native REPLACE 版で、PATCH 化や性能向上は実機計測待ち。
 
-CP28（`docs/kasane/kasane-astra-plan.md` 行124）はdeskclock/playerのoverlay移植を
-求めるが、**現状ではoverlayセッションにKasaneを載せる経路が無い**。
-`main/app_session.c` の `app_start_test()` は `overlay_session` が真のとき
-`kasane_session` を強制的に偽にし（501行）、`"kasane"`（`pocket_kasane_install`）の
-`pocketjs_guest_quickjs_install_once` 呼び出しは非overlay経路にしかなく（599行）、
-overlayは588行の `goto surfaces_done` でそこを素通りする。したがって overlay ゲストの
-グローバルに `pocket.kasane` は存在しない。`docs/kasane/design-api.md` の endpoint も
-APP/SYSTEM固定で、OVERLAYという第三の宛先はまだ定義されていない
-（roadmap自体がCP28を「未達」の列に置いている——2026-09-17時点の進捗はCP17a台）。
+文字幅とバイト数は別の制限である:
 
-このファイルは推測でAPIを作らず、旧 `pocket.overlay` 実装のまま据え置いた。
-コード中のマーカーは1箇所（1〜3行目、`KSN-MISSING(overlay.attach)`）。
-ネイティブ側で overlay 用の Kasane endpoint と `pocket.kasane` インストールが
-用意されたら、このマーカーを起点に本移植を書く。
-
-**はみ出しは切り取られず拒否される。** これは仕様であって不便ではない——1文字はみ出した
-行は作者が知るべき間違いで、末尾が消えた表示は知らせたことにならない。実際この
-アプリは実機で2回それに落ちた:
-
-- `title.slice(0, 23)` は**コード単位**を数え、`overlay.text` は**バイト**を数える。
-  `02 インザハウス.mp3` は14文字28バイト。`cut()` が面と同じ数え方をする。
+- JSの`String.length`は**コード単位**を数えるが、presenter は**UTF-8バイト**を数える。
+  `02 インザハウス.mp3` は14文字28バイト。47バイト上限でUTF-8の途中を切らない。
 - 44文字のヒント行は47バイト上限には収まるが、`8 + 44*6 = 272px` で**240pxの
   パネルに入らない**。バイト上限とパネル幅は別の制限で、小さいほうは常に同じではない。
 
@@ -115,7 +105,9 @@ MP3の `durationMs` は再生が終わるまで `null` で、`seekable:false`。
 出ていない。タグがある側は `tools/test_mp3_duration.c` がホストで検査する——
 「無い」だけを通るテストは、動く実装と何もしない実装を区別できない。
 
-## 実測（2026-09-09、実機）
+## 移植前の実測（2026-09-09、実機）
+
+以下は旧`pocket.overlay` display list時代のbaselineであり、Kasane overlay移植後は未測定。
 
 ```
 overlay: OVERLAY_COST free_before=268708 free_after=158840 floor=57344

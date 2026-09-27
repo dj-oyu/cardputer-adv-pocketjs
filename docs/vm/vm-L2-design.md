@@ -12,10 +12,11 @@
 | L2a 追補 | セグメントサイズの線形成長・ターン単位キャッシュ（D42/D43） | 実装済み |
 | L2b | 通常関数のフラット呼び出し | 実装済み（`CONFIG_POCKET_VM_FLATCALLS`、既定 on） |
 | L2b 拡張 | JS から呼ぶ async 関数のフラット化（D31〜D38） | 実装済み |
-| L2c | 中断・再開の関所とガード（`vmrun` の受け口、コーパス） | 実装済み（yield無効時はpass-through） |
-| L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | **async所有・保留jobまで実装済み**（分類A/B、GC保護、Terminate/Discardを含む。実測はresults §4.5。`CONFIG_POCKET_VM_YIELD=n`が既定） |
-| L2c 実機統合 | 要求ビット・guest 側3状態・Back ターン対応 | 実装・実機検証中。総合関所と計測はbacklog.md #11 |
-| TCO | 末尾呼び出しでのフレーム再利用 | 実験実装・host/device検証済み。観測可能な挙動維持のため既定n（[vm-tco-design.md](vm-tco-design.md) §6〜10） |
+| L2c | 中断・再開の関所とガード（`vmrun` の受け口、コーパス） | 実装済み（`-noyield` 変種が旧経路の対照） |
+| L2c 本体 | `rt->vm_susp` / `vm_yield:` / `vm_resume:` の実装 | 実装済み（分類A/B、GC保護、Terminate/Discard。実測は results §4.5）。**2026-09-23 に `CONFIG_POCKET_VM_YIELD=y` が既定** |
+| L2c 実機統合 | 要求ビット・guest 側3状態・Back ターン対応 | **完了**（tag `vm-L2`）。frame ガードの余裕・競合条件・総合関所・物理キーは results §8 |
+| TCO | 末尾呼び出しでのフレーム再利用 | 実験実装・host/device検証済み。観測可能な挙動維持のため既定 n で確定（[vm-tco-design.md](vm-tco-design.md) §6〜10、results §9.3） |
+| FAIR | 継続ターンでも pump を回す公平順序 | 実装済み・既定 n で確定。実機では利益が観測できず費用だけが見えた（results §9.2） |
 
 ---
 

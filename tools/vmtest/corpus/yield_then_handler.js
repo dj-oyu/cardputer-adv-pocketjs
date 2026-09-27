@@ -25,8 +25,16 @@ Promise.resolve().then(() => order.push("resolve-then"));
 // Polls rather than guessing a fixed chain depth: every entry above is
 // queued from code that has already run by the time this file finishes
 // executing, so this settles in a fixed, deterministic number of turns for
-// a given interpreter -- which is all --bless needs.
+// a given interpreter -- which is all --bless needs. Normal runs settle in
+// under 10 polls (measured); the cap below is only so an OOM that kills one
+// of the .then handlers above (so order.length never reaches 5) fails fast
+// instead of re-queueing itself forever.
+let afterAllPolls = 0;
 (function afterAll() {
-  if (order.length < 5) { Promise.resolve().then(afterAll); return; }
+  if (order.length < 5) {
+    if (++afterAllPolls > 1000) throw new Error("afterAll: gave up polling, order stuck at " + order.length);
+    Promise.resolve().then(afterAll);
+    return;
+  }
   print("order", order.join(","));
 })();

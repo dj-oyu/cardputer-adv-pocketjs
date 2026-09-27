@@ -19,12 +19,22 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [vm-branching.md](vm/vm-branching.md) | 仕様 | `vm/*` ブランチとワークツリーの運用 |
 | [vm-L1-design.md](vm/vm-L1-design.md) | 設計 | L1: ジョブ境界の実行制御と起床 |
 | [vm-L2-design.md](vm/vm-L2-design.md) | 設計 | L2: 移動しない VM スタックと中断・再開。決定表 D1〜D43、整列（§2.2） |
+| [vm-L3-design.md](vm/vm-L3-design.md) | 設計 | L3: 相対参照と移動可能スタック。決定表 D44〜D55、移動は中断中のみ（§2）、差分表（§3） |
 | [vm-tco-design.md](vm/vm-tco-design.md) | 設計・検証記録 | strict末尾呼び出し最適化の実験実装。host/device検証済み、互換性維持のため既定n |
 | [task-allocation-facade.md](vm/task-allocation-facade.md) | 設計 | FreeRTOS タスクの配置ファサード（`standalone/fp_ticket`、未接続） |
 | [vm-L0-report.md](vm/vm-L0-report.md) | 記録 | L0 の実機計測（ターン内訳、ヒープ、ジョブ単価） |
 | [vm-L1-report.md](vm/vm-L1-report.md) | 記録 | L1 の実測。時計読み出しのコスト（§8.7）、コア移行（§8.8）、スケジューラ定数の調律（§10） |
 | [vm-L2-results.md](vm/vm-L2-results.md) | 記録 | L2 の実測と関所の結果（段ごと、host/device の別つき） |
-| [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜08（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック） |
+| [vm-L3-results.md](vm/vm-L3-results.md) | 記録 | L3a の実測。コーパス74件バイト一致、枝ごとの踏まれ方、毒の負の対照3種、Test262 7,036ファイル、移動の単価。**実機のサイズは `--gc-sections` で落ちるので測れない**（§2） |
+| [oom-parse-safety.md](vm/oom-parse-safety.md) | 記録 | 確保失敗時のコンパイル経路（VM の段とは独立）。全点掃引で見つけたメモリ安全性の穴（closures 71 点・generators 133 点 → 0）と、変数の捕捉が黙ってグローバル読みになる誤コンパイル。`DynBuf` のエラーが余りへの書き込みに効いていなかった根本原因。上流2系統とも未修正 |
+| [r3-small-block-cache.md](vm/r3-small-block-cache.md) | 設計 | R3: ゲストのアロケータの下に小ブロックの再利用リストを置く設計。確保の大きさの分布（上位 6 つで 92%）とキャッシュ方式ごとの命中率のシミュレーション、置き場所・上限の外に出る量・手放す時点・検査の仕方 |
+| [allocator-cost.md](vm/allocator-cost.md) | 記録 | ゲストのアロケータの値段を実機で測った（`CONFIG_POCKET_VM_ALLOCPROBE`、計測後に削除）: malloc→free 1 組 約 1,800 サイクル、STRESS の JS のターンの 20.6%。経路は `heap_caps` の走査・クリティカルセクション・flash 上の読み戻し |
+| [app-suspend-design.md](vm/app-suspend-design.md) | 設計 | アプリの常駐中断: Back でゲストを壊さずに止めて残し、同じアプリを開くと続きから。状態遷移、各面の中断・再開の扱い、API（`suspend`/`resume` フック、`stop("evict")`）、退去の条件、メモリの予算、段と検証。決めること 4 つ |
+| [r5-icache.md](vm/r5-icache.md) | 記録 | R5: STRESS のターンを QEMU で記録し、命令キャッシュの模型に通した（`tools/r5sim/`）。触るのは 45.5 KiB、衝突は 15%。flash 内の並べ替えは効かない。IRAM 8 KiB は実機で JS −15%・空き −8.7 KiB で、見送り |
+| [turn-cpi.md](vm/turn-cpi.md) | 記録 | R4: JS のターンを Xtensa の性能カウンタで測った（`CONFIG_POCKET_VM_TURNPERF`）。IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち。flash を QIO にして 1 フレームの JS 10.78 → 7.25 ms（同一配置） |
+| [gc-cap-backoff.md](vm/gc-cap-backoff.md) | 記録 | 上限の手前 1/32 の GC の天井が、生存量が天井を超えるとオブジェクトごとに GC を走らせていた（STRESS LV3 で JS 時間の 70%）。天井が起こした GC の後はヒープが伸びるまで待つ。GC 1,085 → 109 回、確保失敗の時点は同一。道具は `tools/vmtest/prof/` |
+| [builtin-floor-plan.md](vm/builtin-floor-plan.md) | 設計・計画 | F 系列（VM の段とは独立）: ゲストの起動床（実機レイアウトで js=64,420 B、うち組み込みの名前 21.7 KB と何も作っていない索引）を flash へ。F1 ROM atom・F2 遅延索引で 28,684 B（−55%、計算）。捨てた案 4 つ、`atom_array` 33 箇所の台帳、関所と負の対照。道具は `tools/vmtest/floor/` |
+| [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
 
 ## 主線2: PIE と描画の高速化 — [`perf/`](perf/)
@@ -73,30 +83,15 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 ## 主線3: デザインシステム Kasane — [`kasane/`](kasane/)
 
-描画・QuickJS・PocketJS に依存しない C の基盤と、その上のデザインシステム。**開発は `feature/kasane` ブランチで進め、区切りごとに `main` へマージする**（`vm/main` は QuickJS VM の開発用）。2026-09-16までは `vm/design-contracts` で進めていた（全コミットが `main` に統合済みで、2026-09-23に削除）。以下の文書に残る `vm/design-contracts` はその時点の記録。
+固定容量の C 描画基盤、その上の汎用 mount/source/presenter、Systemとの所有権境界を扱う。履歴資料と日別実験ログは縮約し、現行の判断に必要な資料を次の4本へまとめた。
 
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [design-system.md](kasane/design-system.md) | 仕様 | デザインシステム仕様 |
-| [design-schema.md](kasane/design-schema.md) | 仕様 | デザイン定義スキーマ（[JSON Schema](kasane/design-schema.json)、[例](kasane/design-example.json)） |
-| [design-system-pet.md](kasane/design-system-pet.md) | 仕様 | ペットへの適用 |
-| [system-runtime.md](kasane/system-runtime.md) | 設計 | 時計・電源・通知の共通ランタイム |
-| [system-full-test.md](kasane/system-full-test.md) | 検証 | TaffyなしのSystem/Kasane host・新規build・実機受入試験 |
-| [module-boundaries.md](kasane/module-boundaries.md) | 設計 | モジュール境界と依存の向き |
-| [system-runtime-migration.md](kasane/system-runtime-migration.md) | 設計 | pet_hub から時計・通知・タイマー・鳴動を取り出す手順（S1〜S4、Kasane の checkpoint との対応） |
-
-| 文書 | 種別 | 中身 |
-| --- | --- | --- |
-| [kasane-astra-plan.md](kasane/kasane-astra-plan.md) | 設計 | 実装順序とcheckpointごとの検証・commit/push条件 |
-| [kasane-progress.md](kasane/kasane-progress.md) | 記録 | 実装結果、検証、実機未確認事項 |
-| [kasane-roadmap.md](kasane/kasane-roadmap.md) | 設計 | 機能カバレッジ、Taffy移行、動画・3Dの将来設計 |
-| [design-api.md](kasane/design-api.md) | 仕様 | 利用APIとowner境界 |
-| [design-composition.md](kasane/design-composition.md) | 仕様 | 重なり、透過、cache、modal、効果 |
-| [design-contract-review.md](kasane/design-contract-review.md) | 記録 | 公開契約の評価 |
-| [design-device-probe.md](kasane/design-device-probe.md) | 記録 | 実機診断と計測 |
-| [kasane-guest-memory.md](kasane/kasane-guest-memory.md) | 記録 | Kasane 移植で増えたゲスト +14KiB の内訳（実測）。GC 前後の差は 0 B で全部が生存量。主因はアトム・名前空間オブジェクト・関数（ソース複写 2.1〜3.1KiB）・確保ヘッダ。関数ソース保持をやめると 4.8〜7.1KiB 減る。計測パッチ同梱 |
-| [kasane-vs-taffy.md](kasane/kasane-vs-taffy.md) | 記録 | 旧UI（Rust core + taffy）と Kasane を最適化しきった場合の構造比較（Fable、ソースベース）。構造差が残るのは最大連続確保（定数 9.9 KiB 対 データ依存 29.6/59.3 KiB）と失敗の仕方（返り値 対 abort）で、どちらも Kasane 有利。ネイティブ flex とテキスト測定が取り込み候補 |
-| [kasane-guest-memory-reduce.md](kasane/kasane-guest-memory-reduce.md) | 記録 | Kasane のゲスト生存量を 3 アプリで −6.2 KiB（シーンコントローラを C へ −5.0、proto の遅延・共有 −1.1）、native arena を評価前の 1 確保に（ゲスト不変、最大ブロック ±4 KiB） |
+| 文書 | 内容 |
+| --- | --- |
+| [入口](kasane/README.md) | 読む順番、現在地、機械可読の旧スキーマ例の扱い |
+| [境界と契約](kasane/architecture.md) | APIの考え方、owner、source、表示失敗、overlay、System |
+| [判断台帳](kasane/decisions.md) | トレードオフ、不採用案と再検討条件 |
+| [検証](kasane/verification.md) | 固定実機ゲート、実測の達成範囲、計測の落とし穴 |
+| [残タスク](kasane/roadmap.md) | 実装・実測・未達を分けたロードマップ再評価用の表 |
 
 ## JS API — [`api/`](api/)
 

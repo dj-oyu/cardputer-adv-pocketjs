@@ -18,7 +18,7 @@
     });
   }
   const view = pocket.kasane;
-  const pets = view.petImage();
+  const pets = view.resource('pets');
   const tile = view.cache.create([
     {bounds: [0, 0, 42, 24], color: 0x185071ff},
     {bounds: [4, 4, 38, 20], color: 0x63d7bccc, opacity: 220}

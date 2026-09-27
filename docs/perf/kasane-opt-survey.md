@@ -5,6 +5,10 @@
 「読んだファイルの行」「実行したコマンドの出力」「既存ドキュメントの値」のいずれかで、
 **実機の時間を新たに測ったものは 1 つも無い**。各値の出所を明示する。
 
+この歴史的調査中の `design-device-probe.md:行` / `kasane-progress.md:行` は、
+資料縮約前のGit版 `docs/kasane/` への出所表記である。現行判断の入口は
+[`docs/kasane/verification.md`](../kasane/verification.md)。旧行番号を現行文書の行番号として読まない。
+
 対象は kasane（設計システム＝描画側）の内部境界面である。ホットな関数の一覧ではなく、
 **仕事がどの面を越えるか**で切る。面を越えるたびに回数・コピー・間接呼び出し・ABI の
 段差が発生するので、最適化の候補も面ごとに性質が違う（面の中で命令を削る／面を跨ぐ
@@ -36,7 +40,7 @@ PSRAM 帯域やキャッシュミスの類の候補は本調査に無い。
 | `xtensa-esp32s3-elf-gcc 15.2.0`（`/root/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/`） | kasane のソースは IDF ヘッダ無しでも単体でコンパイルできる。`-Os`/`-O2` でオブジェクトを作り `objdump -d` で命令数、`-fstack-usage` でフレームサイズ、`nm -S` で型サイズを実測した |
 | ホスト `cc` + 一時ハーネス（**未コミット**、`/tmp/ksncount/`） | `ksn_core.c`/`ksn_render.c`/`ksn_view.c`/`ksn_cache.c`/`ksn_modal.c`/`ksn_font.c` をそのままリンクし、`apps/kasane/demo.js` の場面を再構成して境界の通過回数を数えた。方法は §13 |
 | `nm`/`objdump` | 命令数、フレーム、型サイズ、呼び出し箇所（`ksn_core_read` は `--wrap` で包み、呼び出し元アドレスごとに集計） |
-| 既存ドキュメント | `docs/perf/pie-simd.md`（コストモデルと実測）、`docs/kasane/design-device-probe.md`（実機実測）、`docs/kasane/kasane-progress.md`（CP ごとの実機値） |
+| 既存ドキュメント | `docs/perf/pie-simd.md`（コストモデルと実測）、`docs/kasane/verification.md`（現在の実機ゲートと測定範囲）。旧Kasane日別記録はGit履歴に残る |
 
 ### 0.3 kasane 側に既にある最適化（境界ごとの「もう済んでいる」）
 
@@ -546,8 +550,8 @@ python3 tools/make_font.py <生成先>   # fonts.h
 
 ### 13.3 出所の一覧
 
-- 実機の値: `docs/kasane/design-device-probe.md`（2026-09-13/14/15 の診断）、
-  `docs/kasane/kasane-progress.md`（CP ごと）、`docs/perf/pie-simd.md` §7。
+- 実機の値: `docs/kasane/verification.md`（現在のゲートと到達範囲）、
+  `docs/perf/pie-simd.md` §7。初期診断の詳細はGit履歴。
 - モデルと作法: `docs/perf/pie-simd.md` §2・§3・§4・§5・§6、`docs/perf/backlog.md`、
   `tools/pie/README.md`。
 - 本調査が自分で実行した値: §13.1 の objdump/nm/stack-usage、§13.2 のハーネス、
