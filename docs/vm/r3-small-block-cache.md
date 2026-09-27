@@ -1,8 +1,8 @@
 # R3 設計: 小さいブロックの再利用（2026-09-27、実装済み・既定 n）
 
 > **現状（2026-09-27）**: `CONFIG_POCKET_VM_BLOCK_CACHE`（既定 n）として実装した。ホストの関所は通過、実機でアロケータの
-> 時間は 1.57 → 0.92 ms（−41%）。ただし有効にすると STRESS の LV3 で Kasane の `BUSY` が毎回出る（無効では出ない）。
-> 原因を突き止めるまで既定は n のまま（§6）。
+> 時間は 1.57 → 0.92 ms（−41%）。有効にすると STRESS の LV3 で Kasane の `BUSY` が出ていたが、原因はキャッシュではなく
+> `app_tick` の継続ターンの穴で、修正後はキャッシュ有りで 3/3 回 PASS（§6.2、backlog R3a）。既定は n のまま。
 
 出典: [allocator-cost.md](allocator-cost.md)（実機: malloc 1 回 約 1,270 サイクル、free 約 620、ブロック長の読み戻し
 約 110、STRESS の JS のターンの 20.6%）。道具は `tools/vmtest/prof/`（`alloc_sim.py`・`vmtrace2alloc.py`、
@@ -130,15 +130,24 @@ STRESS の LV1: malloc 166 回・free 165 回のうち 6 割がキャッシュ�
 
 見込み（§4、約 0.9 ms）に対し実測は約 0.55 ms。free は積めなかった分（クラス外・満杯）が今までの値段のまま残る。
 
-### 6.2 未解決: キャッシュ有りで LV3 に Kasane の `BUSY`
+### 6.2 解決: キャッシュ有りで LV3 に Kasane の `BUSY`（R3a）
 
-キャッシュ有りの 3 回とも `STRESS_APP_FAIL`（`STRESS_FAIL frame PocketError: BUSY` が 1〜4 回）、無しの 2 回は PASS。
-どの回も、アプリが frame の中で捕まえていない確保失敗（`app: OOM n=4..11`、`first_req` 1059・80・64 など）の約 60 ms 後
-（2 フレーム後）に次の `patch`/`replace` が `BUSY` になる。`BUSY` は前の提出が消費されていない（`ksn_core.c:271`）などの
-状態で返る。
+修正前、キャッシュ有りの 3 回とも `STRESS_APP_FAIL`（`STRESS_FAIL frame PocketError: BUSY` が 1〜4 回）、無しの 2 回は PASS。
+どの回も、確保失敗（`app: OOM n=9 first_req=1059` など）の約 55 ms 後に次の `patch` が `BUSY` になっていた。
 
-見立て（未確認）: キャッシュは命中したブロックの長さがクラスちょうど（新しい tlsf のブロックは余りを最大 15 B 持つ）なので、
-同じ中身でも計上が少し小さくなり、上限に当たる場所が変わる。その結果、今まで踏まなかった「frame の外（ポンプやジョブ）での
-確保失敗の後に、Kasane の提出が消費されずに残る」経路を踏んでいる可能性がある。つまりキャッシュの誤りではなく、上限付近の
-既存の経路の穴をキャッシュが露出させている可能性。逆に、キャッシュが返したブロックを誰かが解放後も使っている可能性も
-まだ消せていない（どちらもホストの ASan では再現していない）。**有効にする前に原因を特定する**（backlog R3a）。
+**計装（実機）**: `BUSY` を返した時点の Kasane の状態を記録すると `op=kasane.patch building=0 presenting=0
+core_submission=1`、つまり前の frame の提出が消費されずに残っていた。直前の OOM の報告時点で `submission=1` だが、
+これは frame が patch を出した後の通常の状態で、それだけでは `BUSY` にならない（同じ状態で出ない回もあった）。
+
+**原因（コード）**: VM は frame() を途中で止められる（L2c、`POCKET_VM_YIELD=y`）。止まった frame() の残りは次の tick の
+継続ターン（`pocketjs_guest_continue`）が走らせ、そこで patch が提出される。継続でキューが空になると `app_tick` は
+そのまま通常の経路へ落ち、**present を挟まずに次の frame() を呼ぶ**ので、その patch が `BUSY` になる。OOM の後は
+GC と例外の処理でターンが長くなり、frame() の途中で止まりやすい。キャッシュは止まる位置をずらしただけで、ブロックの
+解放後使用ではない。この穴はキャッシュと無関係に既存のもので、Kasane 側のツリーの `app_session.c` にも同じ形である。
+
+**修正**: 継続でキューが空になったとき、提出が残っていればその tick は present だけにして、キーは次の tick へ持ち越す
+（Back は持ち越さない。ゲストの最後の保存のターンなので）。ALLOCPROBE のビルドでは `R3A_CONT_PRESENT` を出す。
+
+**実機（キャッシュ有り＋計装、3 回）**: 3/3 回 `STRESS_APP_PASS`、`BUSY` 0 回。`R3A_CONT_PRESENT` は各回 3 回、
+どれも OOM の約 50 ms 後 — 修正前に `BUSY` が出ていた位置そのもの。LV1〜3 は 29.3〜29.7 fps。
+ログは `.cache/vm-archive/stress_r3fix{4,5,6}.log`。

@@ -7,6 +7,10 @@
 #include "ui/kasane/ksn_p0_probe.h"
 #include "app_view_assets.h"
 #include "pet/ksn_pet.h"
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+#include "esp_log.h"
+#include "ui/kasane/ksn_core.h"
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,7 +152,13 @@ static const char *result_code(ksn_result result) {
     return POCKET_ERR_CONFLICT;
 }
 
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+static void r3a_busy_log(const char *op);   // backlog R3a: which state said BUSY
+#endif
 static JSValue throw_result(JSContext *ctx, ksn_result result, const char *op) {
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+    if(result==KSN_BUSY)r3a_busy_log(op);
+#endif
     const char *code=result_code(result);
     return pocket_api_throw(ctx,code,op,code,
                             result==KSN_BUSY||result==KSN_OOM||result==KSN_IO,
@@ -195,6 +205,17 @@ static ksn_result create_template(const ksn_draw *draws,uint16_t count,ksn_templ
 static ksn_view *view(void) {
     return state?ksn_runtime_app_view(state->lease):NULL;
 }
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+static void r3a_busy_log(const char *op){
+    ksn_view *v=view();
+    ESP_LOGW("kasane","R3A_BUSY op=%s building=%u submitted=%u provider=%d schema=%d "
+             "presenting=%d builder=%u core_submission=%d",op,
+             state?(unsigned)state->building.value:0u,state?(unsigned)state->submitted.value:0u,
+             state&&state->provider,state&&state->schema,
+             v?(int)v->host->presenting:-1,v?(unsigned)v->host->builder.value:0u,
+             v?(int)ksn_core_has_submission(v->host->core):-1);
+}
+#endif
 static bool provider_busy(void *owner){
     kasane_state *s=owner;
     return s->building.value||s->submitted.value;
