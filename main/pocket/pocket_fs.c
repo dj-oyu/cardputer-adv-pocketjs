@@ -1,3 +1,4 @@
+#include "pocket_av.h"
 #include "pocket_fs.h"
 #include "pocket_api.h"
 #include "srcstore.h"
@@ -941,6 +942,12 @@ static JSValue take_path(JSContext *ctx, JSValueConst value, const char *op,
     if(why)
         return pocket_api_reject(ctx,POCKET_ERR_INVALID_ARGUMENT,op,why,false,
                                  POCKET_OUTCOME_NOT_APPLIED);
+    // S5 (docs/vm/app-suspend-design.md sec.8-2): an app that reaches for the
+    // card wins it from the background music, which gives the card and its
+    // grant back -- so this app then meets the same PERMISSION_DENIED, and the
+    // same picker, as it would with no music playing.
+    if(out->volume==VOL_SD && pocket_av_background_holds_card())
+        pocket_av_background_stop("sd");
     if(out->volume==VOL_SD) {
         // The grant is tested before the media state, and the order is a
         // contract rather than a preference: section 8 asks an unauthorised
@@ -4089,7 +4096,10 @@ void pocket_fs_reset(void) {
     // as it returns the 7,032 bytes the mount holds. Outside the `built` test
     // on purpose: a session that reached the picker must give the card back
     // even if it never built anything else.
-    sd_media_unmount();
+    // Not while the background music is reading it (S5): the card, and its
+    // grant, are the host player's until it stops, and pocket_av gives them
+    // back then.
+    if(!pocket_av_background_holds_card()) sd_media_unmount();
     // The unmount above moved the state, and there is nobody left to tell: the
     // guest is going away and its listeners with it. Recording it as announced
     // keeps the next session's baseline honest.
@@ -4125,5 +4135,8 @@ void pocket_fs_suspend(void) {
             if(files[i].handle) file_close(&files[i],true);
         cursors_clear();
     }
-    sd_media_unmount();
+    // Not while the background music is reading it (S5): the card, and its
+    // grant, are the host player's until it stops, and pocket_av gives them
+    // back then.
+    if(!pocket_av_background_holds_card()) sd_media_unmount();
 }

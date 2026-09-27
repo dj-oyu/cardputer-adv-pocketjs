@@ -346,6 +346,11 @@ static void paint_volume(void) {
         paint_fill(x+4+(int)i*10,y+4,8,6,i<=sound_volume()?ink:dim);
 }
 
+// Whether a setting's value list is open: Back then closes the list rather
+// than acting at the home screen's root (main.c: Back at the root stops the
+// background music, S5).
+bool shell_choices_open(void) { return choices; }
+
 bool shell_key(board_key_t key) {
     if(key==KEY_BACK) {
         choices=false;sound_play(2);

@@ -462,6 +462,11 @@ static bool home_key(const keystroke_t *k) {
         }
         return true;
     }
+    // Back at the root of the home screen stops the background music (S5 in
+    // docs/vm/app-suspend-design.md): with no overlay up there is no other
+    // control for it. Back with a value list open closes the list.
+    if(nav==KEY_BACK && !shell_choices_open() && pocket_av_background_active())
+        pocket_av_background_stop("back");
     bool launch=shell_key(nav);
     take_pending_screen();
     if(!launch) return true;
@@ -609,6 +614,12 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
     // A kept app is resumed by opening it again from the menu (sec.8-4); any
     // other start ends it first -- stop("evict") is its last chance to save --
     // because there is one guest slot and this start is about to take it.
+    // S5: the background music gives way to an app that starts short of room.
+    // 128 KiB covers the shipped apps' 38-107 KB with the Kasane arena on top;
+    // below it the app's heap wins over the song.
+    if(pocket_av_background_active() &&
+       heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)<128*1024)
+        pocket_av_background_stop("memory");
     const char *kept=app_dormant_id();
     if(kept[0]) {
         if(!strcmp(kept,app_id) && app_resume()==ESP_OK) {
@@ -877,7 +888,7 @@ static void ui_task(void *arg) {
             // why putting the reserved key here left Back travelling the
             // ordinary path and reaching the guest. The reserved key is in the
             // residue loop below, where every other keystroke is decided.
-            else if(overlay_running()&&!home_modal()) overlay_yield("force stop");
+            else if(overlay_running()&&!home_modal()) overlay_yield("force stop",false);
             else { shell_key(KEY_BACK); take_pending_screen(); }
             xQueueReset(keys);
             have=false;
@@ -937,7 +948,7 @@ static void ui_task(void *arg) {
                     // decline", and spending it on standing the overlay down
                     // would leave that screen up with its promise unsettled.
                     if(stroke.nav==KEY_BACK&&!home_modal()) {
-                        overlay_yield("the person");
+                        overlay_yield("the person",true);
                         // The menu is back, which is what this marker has
                         // always meant. Saying it here keeps the contract the
                         // host scripts read -- they open with Back and wait for

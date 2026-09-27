@@ -190,6 +190,9 @@ static int64_t last_present_us;
 // Resident suspension (docs/vm/app-suspend-design.md): the manifest id of the
 // app whose guest is kept asleep, "" when none, and when it went to sleep.
 static char dormant_id[48];
+// S5 (docs/vm/app-suspend-design.md): set by app_stop_keep_music() for the one
+// app_stop() it makes.
+static bool keep_music_once;
 static int64_t dormant_since_us;
 static void run_pumps(uint32_t buttons);
 static unsigned frames;
@@ -756,6 +759,9 @@ void app_stop(void) {
             overlay_session?"overlay":"app",(long)p0_player,(unsigned)p0_audio.state,
             (unsigned long)p0_audio.position_ms,(unsigned long)p0_audio.underruns);
 #endif
+    // S5: an overlay that is giving the display away (not being stopped) hands
+    // a playing player to the host before its audio is reset.
+    if(keep_music_once && overlay_session) pocket_av_detach_background();
     bool av_stopped=pocket_av_reset();
     // Before pocket_api_reset(): a recorder holds the I2S RX channel and the
     // codec's ADC, and a read still waiting holds a promise slot.
@@ -841,6 +847,14 @@ void app_stop(void) {
 #define APP_SUSPEND_SETTLE_US 200000
 // The suspend hook gets what the stop hook gets (pocket_app.c's APP_STOP_MS).
 #define APP_SUSPEND_HOOK_US 200000
+
+// The overlay's way out when it is giving the display away rather than being
+// stopped: music that is playing goes on as the host's (S5).
+void app_stop_keep_music(void) {
+    keep_music_once=true;
+    app_stop();
+    keep_music_once=false;
+}
 
 bool app_can_suspend(void) {
     return guest && !overlay_session && !atomic_load(&stop_requested) &&

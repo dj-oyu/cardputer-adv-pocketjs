@@ -224,3 +224,50 @@ tools/test_companion.cjs`（再開で描き直す）。実機の回帰: `app_mou
 - 確かめたこと: pet は中断の前後で画面が同じで、17 秒眠っても状態が進まない。COMPANION のタイマーは眠っている
   間に鳴り、ホームに「TIMER FINISHED」が出る。眠っている間に設定でオーバーレイ（時計）を選んでも起動せず、
   HELLO で退去させてホームに戻るとすぐ起動する（設定は元の値に戻した）。
+
+### 11.3 S5: バックグラウンドの音楽（2026-09-28）
+
+決めたこと（ユーザー、2026-09-28）: 曲が終わったら**同じフォルダの次の曲**へ進む。前景のアプリが**音**
+（`player.open`・`tone`・`capture`）か**SD**を使ったら音楽を止める（前景が優先）。**メニューを出したホームで
+Back** を押したら止める。オーバーレイは新しい API（`player.current()`）で再生を引き取れる。
+
+- **切り離し**: オーバーレイのセッションを終える 2 つの道（前景のアプリを開くときの `overlay_release()`、
+  ホームの Back での `overlay_yield("the person", true)`）が `app_stop_keep_music()` を通り、`app_stop()` の
+  `pocket_av_reset()` の前に `pocket_av_detach_background()` が再生中の player をホストのものにする
+  （購読を閉じ、JS の値を手放し、デコーダ・ストリーム・開いたファイルは残す）。故障・予算超過・強制停止での
+  停止は切り離さない。
+- **Back は 2 段**: 1 回目はオーバーレイを退かせてメニューを返す（音楽は鳴り続ける）。2 回目（メニューの上、
+  値の一覧が閉じているとき）で止める。ホームに他の操作の口が無いので、これが止め方になる。
+- **次の曲**: `pocket_av_service_stream()` の中の `bg_service()` が `P_ENDED` を見て、`fs.nextFile` と同じ
+  `file_picker_next_path()`（名前順、最後の次は先頭）で次を開く。SD の保持（`sd_media_service()`）もここで回す。
+  セッションの終わりの SD のアンマウントは、音楽が SD を読んでいる間は飛ばす（`pocket_fs.c`）。
+- **前景が優先**: `player.open`・`tone`・`capture` の開始、`fs` の `sd:` への操作・`pickFile`・`nextFile`・
+  `requestFolder` が先に `pocket_av_background_stop()` を呼ぶ。アプリの起動の前に空きが 128 KiB 未満なら止める。
+- **引き取り**: `player.current()` がハンドルを今のセッションのものとして返す。`info().source` で曲名を出す。
+  MUSIC オーバーレイの起動の門は、引き取る player の分（実測 62,596 B、門には 60 KiB で入れた）を差し引く。
+  差し引かないと 1,192 B 足りずに断られた（`OVERLAY_REFUSED_GATE free=154456 needs=155648`）。
+
+**検証（実機、2026-09-28、`.cache/vm-archive/s5dev`）**:
+
+| 筋書き | 結果 |
+| --- | --- |
+| MUSIC で再生 → ホームで Back | `BG_MUSIC_DETACHED`、メニューが戻る |
+| そのまま HELLO を開いて閉じる | 止まらない。HELLO の起動時の空き 119,380 B（音楽なしは約 182 KB） |
+| 曲の終わり | `BG_MUSIC_NEXT` で 02→03。02 は 5,662,511 frames（24 kHz で 236 秒、実時間どおり）、`faults=0` |
+| IMU CALIBRATION を開く（姿勢を取ると beep） | beep の時点で `BG_MUSIC_STOPPED tone` |
+| もう一度 Back（メニューの上） | `BG_MUSIC_STOPPED back` |
+| 再生中に MUSIC を入れ直す | `BG_MUSIC_ADOPTED` → `PLAYER_ADOPTED`、画面に曲名と引き継いだ位置（59 秒） |
+| 止めた後 | HELLO の起動時の空きが音楽の前と同じ水準に戻る（182,808 B） |
+| 回帰 | smoke 20 周・故障回復 6 種、`test_settings.py`、`capture_home.py`（30 fps）、`test_editor_draft.py`、`test_app_resume.py`、STRESS PASS |
+
+実機で確かめていないもの: `capture` と SD の前景での停止（メニューにマイクや SD を使うアプリが無い）、128 KiB の
+門（音楽を持ったホームの空きは約 154 KiB で届かない）。どれもコードの経路は 1 行で、上の `tone` と同じ関数。
+
+**わかったこと**:
+- 曲の切り替えで UI が約 0.2 秒止まる（実測: デコーダの終了のログから `BG_MUSIC_NEXT` まで 185〜213 ms、20 曲の
+  フォルダ）。ディレクトリの走査（1 項目ごとの `stat`）と次の曲を開くのが UI のタスクで走る。
+- 音楽を持っている間、前景のアプリの空きは約 62 KiB 減り、最大の連続ブロックは 110,592 B から 47,104 B に落ちる
+  （player の確保がヒープの中ほどに残る）。ゲストは小さな確保で伸びるので HELLO・IMU CAL は動いたが、大きな
+  アプリが OOM になる余地は増える。
+- USB のシリアルは、ホストが読んでいない間の出力を捨てる。筋書きを 1 本の接続で流さないと、ピッカーの
+  `PICK ENTER` が抜けて「キーが届かない」と読み違える（今回 1 度そうなった）。

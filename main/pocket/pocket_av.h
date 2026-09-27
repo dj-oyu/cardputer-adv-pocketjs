@@ -68,3 +68,12 @@ bool pocket_av_reset(void);
 // Resident suspension (docs/vm/app-suspend-design.md sec.4).
 void pocket_av_suspend(void);
 void pocket_av_resume(void);
+// Background music (docs/vm/app-suspend-design.md S5). detach: the ending
+// overlay's playing player becomes the host's (false when nothing plays).
+// stop: end it -- an app wanted the sound, the card or the memory, or the
+// person pressed Back on home. holds_card: it is reading from sd:, so a
+// session end must not unmount the card under it.
+bool pocket_av_detach_background(void);
+void pocket_av_background_stop(const char *why);
+bool pocket_av_background_active(void);
+bool pocket_av_background_holds_card(void);
