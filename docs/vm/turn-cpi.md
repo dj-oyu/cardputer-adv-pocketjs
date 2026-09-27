@@ -103,9 +103,26 @@ PASS）。
 | 実機: 出荷構成 | smoke 20 周・故障回復 6 種、settings、editor draft、`stress_app.py --seconds 60` PASS（29.4〜29.8 fps）、memlog 予算内・DIRAM ±0 |
 | ホスト: `pocket_api.c` をリンクする検査 | input・capture・random PASS |
 
-**残したもの**: JS の側で、解決した File を受け取る継続（`await` の再開）自体が OOM で走れない場合は、File は
-どこにも届かず、ファイナライザが無いのでスロットは戻らない。これは `file_class_def` の注記が選んだ設計（GC に
-書き込み中のファイルを閉じさせない）の帰結で、変えるには API の判断が要る。
+**残したもの**（→ §4.2 で解決）: JS の側で、解決した File を受け取る継続（`await` の再開）自体が OOM で
+走れない場合は、File はどこにも届かず、ファイナライザが無いのでスロットは戻らない。
+
+### 4.2 参照の無い File はファイナライザで手放す（2026-09-27、`vm/fs-orphan`）
+
+§4.1 の残りは「JS が OOM から復帰できない」状況ではなく、アプリは動き続けたまま File 1 個が誰からも参照されなく
+なる状況だった（解決済みの Promise に継続を登録する確保が失敗し、File が Promise ごと捨てられる）。アプリを落とせば
+`pocket_fs_reset()` がスロットを閉じるが、それを判断するには「File が消えた」ことを知る必要があり、それを知らせる
+のがファイナライザなので、スロットだけを閉じれば足りる。
+
+- File にファイナライザを付けた。GC の中では印（`orphan`）を付けるだけで、`fclose`・`unlink`・セクタの解放は
+  次の `pocket_fs_pump()`（毎 tick、frame() の前、GC の外）が破棄として行う。
+- 以前の「ファイナライザ無し」の理由は「変数を落としたアプリが書き込み中のファイルを予測できない時点で失う」
+  だったが、参照の無い File はもう commit も close もできないので、失うものは `app_stop()` で失うものと同じ。
+  変わるのは、スロットと同じパスへの BUSY がアプリ終了まで続かなくなることだけ。
+- 実機の負荷 `^` に段 1 を足した: open は余裕のあるヒープで成功させ、`.then`（`await` が登録する継続）をヒープの
+  端で付ける。**ファイナライザ無し 3/3 回、段 1 でスロットが尽きて `two files are already open`**、
+  有り 5/5 回 `FSOOM ok`（継続を登録できなかった回数 `lost` 10〜13、拒否 0）。
+- 出荷構成: smoke 20 周・故障回復 6 種、settings、editor draft、`stress_app.py --seconds 60` PASS（29.6〜29.8 fps）、
+  memlog 予算内・DIRAM ±0。`filesystem-api.md` の close の項に 1 文足した。
 
 **別件（既存）**: `oom_sweep.sh` を `lazy_builtins.js` に 2,500 点かけると、1,075 番で終了時に
 `JS_FreeRuntime: Assertion list_empty(&rt->gc_obj_list)` になる。修正前の quickjs.c でも同じなので今回の変更では
