@@ -86,3 +86,5 @@ void pocket_bridge_pump(void);
 // Drops the session and its listeners while the guest is still alive. The calls
 // in flight belong to pocket_api_reset(), which runs after this.
 void pocket_bridge_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_bridge_resume(void);

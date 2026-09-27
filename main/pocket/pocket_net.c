@@ -529,6 +529,20 @@ static bool lease_payload(JSContext *ctx, int slot, void *user, JSValue *payload
     return true;
 }
 
+// Resident suspension (docs/vm/app-suspend-design.md sec.4): what the listeners
+// are told once the app wakes. Fixed rather than read from the link, which may
+// still be on its way down when the pump runs.
+static bool lease_lost_untold;
+static bool lost_payload(JSContext *ctx, int slot, void *user, JSValue *payload) {
+    (void)slot; (void)user;
+    JSValue o=JS_NewObject(ctx);
+    if(JS_IsException(o)) { *payload=o; return true; }
+    JS_SetPropertyStr(ctx,o,"state",JS_NewString(ctx,"disconnected"));
+    JS_SetPropertyStr(ctx,o,"address",JS_NULL);
+    *payload=o;
+    return true;
+}
+
 // True when this object still names the lease that exists now.
 static bool lease_live(JSValueConst self) {
     uint32_t h=(uint32_t)(uintptr_t)JS_GetOpaque(self,lease_class);
@@ -1296,6 +1310,12 @@ void pocket_net_pump(void) {
         lease.reported=now;
         if(lease_table.open) pocket_api_sub_deliver(&lease_table,lease_payload,NULL);
     }
+    // A lease a suspension took away is reported once, on the first pump after
+    // the wake -- to an app that is awake to hear it.
+    if(lease_lost_untold) {
+        lease_lost_untold=false;
+        if(lease_table.open) pocket_api_sub_deliver(&lease_table,lost_payload,NULL);
+    }
 }
 
 // ------------------------------------------------------------------- reset
@@ -1325,6 +1345,27 @@ void pocket_net_reset(void) {
     // mbedTLS's pool is a session-scoped loan, not a static buffer: an app that
     // never opened a socket never took it, and one that did gives it back here
     // rather than holding 20 KB across the next app's whole run.
+    lease_lost_untold=false;
+}
+
+// Resident suspension: the radio comes down (a raised link costs the home
+// screen about 37 KiB and serves nobody while the app sleeps), the request in
+// flight goes with it, and the listeners stay to be told on the wake. An
+// acquire or scan still waiting was stopped by pocket_api_cancel_all() and
+// settled by the pumps before this, so their fields are left as they are.
+void pocket_net_suspend(void) {
+    if(!built) return;
+    if(http.open_response || atomic_load(&http.alive)) {
+        http_ask_stop();
+        response_free();
+    }
+    if(lease.handle) {
+        lease_release();
+        lease_lost_untold=true;
+        ESP_LOGI(TAG,"LEASE_SUSPENDED");
+    } else if(wifi_time_link_state()==WIFI_TIME_LINK_CONNECTING) {
+        wifi_time_link_stop();
+    }
 }
 
 // ---------------------------------------------------------------- capability

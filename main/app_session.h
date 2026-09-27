@@ -55,6 +55,17 @@ void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
 // spent instead of predicting it.
 #define OVERLAY_GUEST_HEAP (160*1024)
 esp_err_t app_start_overlay(const char *source, size_t length);
+
+// Resident suspension (docs/vm/app-suspend-design.md). can_suspend: the running
+// app registered a resume hook and is not an overlay. suspend: keep it asleep
+// instead of stopping it; an error means the caller stops it the ordinary way.
+// resume: wake the kept app; the caller then runs it as usual. dormant_id: the
+// manifest id of the app kept asleep, "" when none. app_stop() on a kept app
+// ends it with stop("evict").
+bool app_can_suspend(void);
+esp_err_t app_suspend(void);
+esp_err_t app_resume(void);
+const char *app_dormant_id(void);
 // One turn of an overlay session. Guest JavaScript is advanced and its Kasane
 // transaction is closed here. Presentation remains shell-owned so it can load
 // the native scene into each strip before composing the APP layer.

@@ -31,6 +31,8 @@ esp_err_t pocket_workspace_install(JSContext *ctx, void *user_data);
 // request that ends the session, so it cannot be part of what the session's end
 // throws away.
 void pocket_workspace_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_workspace_suspend(void);
 
 // ------------------------------------------------------------- the host screen
 //

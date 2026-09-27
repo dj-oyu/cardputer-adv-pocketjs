@@ -393,6 +393,11 @@ void pocket_api_complete(pocket_request_t request, int32_t status);
 // they have not. Call once per frame from the JS task. Costs one load and one
 // branch when nothing is in flight.
 void pocket_api_pump(void);
+// Resident suspension: stop every armed operation with `code`; each settles on a
+// later pocket_api_pump() once its driver posts. pocket_api_open_count() is the
+// number of slots still claimed.
+void pocket_api_cancel_all(const char *code);
+unsigned pocket_api_open_count(void);
 
 // Ends the session's promises: each is asked to stop and its resolvers are
 // released without settling, there being nobody left to settle to. Call from

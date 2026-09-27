@@ -40,6 +40,8 @@ esp_err_t pocket_fs_install(JSContext *ctx, void *user_data);
 // outlives a session except 481 bytes of static tables; the 504-byte index is
 // rebuilt from 64 sector headers the next time an app touches a file.
 void pocket_fs_reset(void);
+// Resident suspension (docs/vm/app-suspend-design.md sec.4).
+void pocket_fs_suspend(void);
 
 // One frame's worth of "did the card change?". sd: is the only volume that
 // moves, and it moves in two places that cannot deliver an event themselves --

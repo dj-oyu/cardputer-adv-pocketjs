@@ -4109,3 +4109,21 @@ void pocket_fs_reset(void) {
     free(store);
     store=NULL;
 }
+
+// Resident suspension (docs/vm/app-suspend-design.md sec.4). What ends here is
+// what the end of a session ends -- the pickers, every handle (an uncommitted
+// create or replace loses its temporary version, as on Back), the card and its
+// grant -- but the program stays: its volume listeners and the index are kept,
+// and the unmount is NOT recorded as announced, so the first pump after the
+// wake tells onVolumeChange that the card went away. A File the app still
+// holds answers CLOSED; an sd: path needs the picker again.
+void pocket_fs_suspend(void) {
+    sd_picker_reset();
+    file_picker_reset();
+    if(built) {
+        for(int i=0;i<FS_MAX_HANDLES;i++)
+            if(files[i].handle) file_close(&files[i],true);
+        cursors_clear();
+    }
+    sd_media_unmount();
+}

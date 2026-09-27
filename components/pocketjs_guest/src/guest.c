@@ -974,7 +974,7 @@ esp_err_t pocketjs_guest_set_dormant(pocketjs_guest_t *guest, bool dormant) {
   /* A parked chain or queued jobs belong to the turn that made them; putting
    * them to sleep would resume them minutes later in a world their awaits
    * never saw. The host finishes the drain (the leave turn does) or stops. */
-  if (pocketjs_guest_work_pending(guest))
+  if (pocketjs_guest_work_pending(guest) || JS_IsJobPending(guest->runtime))
     return ESP_ERR_INVALID_STATE;
   /* What the app no longer reaches goes back to the system before the host
    * screens need it: the guest allocates block by block from the shared

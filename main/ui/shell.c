@@ -8,6 +8,7 @@
 #include "overlay.h"
 #include "pet_hub.h"
 #include "pocket_kasane.h"
+#include "app_session.h"
 #ifdef KASANE_P5_NOTICE_PROBE
 #include "system/sys_device.h"
 #endif
@@ -164,6 +165,12 @@ static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL"
 // (docs/api/common-api.md 9.1-9.1.3). apps/player, the shipped feature that uses the
 // same decoders, is a MUSIC overlay reached from the home screen, not a row here.
 #define APP_N (sizeof(apps)/sizeof(apps[0]))
+// The manifest id each row launches (main.c's shell_app() switch), NULL for the
+// rows that open a host screen. Only for the paused mark: a kept app's row
+// shows it (docs/vm/app-suspend-design.md sec.8-4). Same order as apps[].
+static const char *const app_ids[]={"local.hello",NULL,NULL,NULL,"local.imucal",
+                                    "local.pet","local.companion","local.stress"};
+_Static_assert(sizeof app_ids/sizeof app_ids[0]==APP_N,"app_ids follows apps[]");
 static float app_pos;
 unsigned shell_app(void) { return app; }
 static bool choices;
@@ -506,6 +513,18 @@ static void menu_layout(void) {
         if(visibility>0.01f) {
             if(c==0) {
                 menu_list(x,app_pos,apps,sizeof apps[0],APP_N,visibility,app_details[app]);
+                // The paused mark: in the 16 px left of the row, centred on its
+                // 14 rows, and faded with it -- so it moves with its row and
+                // adds no row of its own (test_settings.py and capture_home.py
+                // count rows).
+                const char *kept=app_dormant_id();
+                for(unsigned i=0;kept[0]&&i<APP_N;i++) {
+                    if(!app_ids[i]||strcmp(app_ids[i],kept)) continue;
+                    float strength=1-fminf(fabsf(i-app_pos),1)*0.70f;
+                    float y=item_y(i-app_pos);
+                    float clearance=fminf(fabsf(y-34)/20,1);
+                    label(x-13,(int)lroundf(y)+4,"||",1,visibility*strength*clearance);
+                }
             } else {
                 // An action row has no value to show under the list.
                 const setting_t *entry=&settings[setting];

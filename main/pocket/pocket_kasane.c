@@ -2670,7 +2670,11 @@ JSValue pocket_kasane_source_capability(JSContext *ctx,ksn_source_registry *regi
     return object;
 }
 
+// Resident suspension; see pocket_kasane_set_dormant().
+static bool dormant;
+
 bool pocket_kasane_reset(void) {
+    dormant=false;
     const pocket_app_view_provider *provider=state?state->provider:NULL;
     void *provider_state=state?state->provider_state:NULL;
     schema_state *schema=state?state->schema:NULL;
@@ -2686,9 +2690,20 @@ bool pocket_kasane_reset(void) {
     owner_now_us=0;
     return true;
 }
-bool pocket_kasane_active(void) { return state&&state->active; }
+// Resident suspension (docs/vm/app-suspend-design.md sec.4). The APP lease is
+// kept -- the provider, schema and refs live in its tail, and detaching would
+// free them under the sleeping app -- but for as long as the app sleeps the
+// host screens must see no APP at all: no notice composited into it, no
+// source deadline waking the loop, no system bands claimed. Home then draws
+// notices natively, as it does with no app. The wake repaints everything.
+void pocket_kasane_set_dormant(bool on) {
+    dormant=on;
+    if(!on) pocket_kasane_invalidate();
+}
+
+bool pocket_kasane_active(void) { return !dormant&&state&&state->active; }
 ksn_result pocket_kasane_update_notice(const sys_notice *notice,uint16_t variant){
-    if(!state||!state->active)return KSN_OK;
+    if(dormant||!state||!state->active)return KSN_OK;
     ksn_view *system=ksn_runtime_app_system_view(state->lease);
     if(!system)return KSN_BUSY;
     if(state->notice_tx.value){
@@ -2717,15 +2732,15 @@ ksn_result pocket_kasane_update_notice(const sys_notice *notice,uint16_t variant
     return KSN_OK;
 }
 bool pocket_kasane_notice_composited(void){
-    return state&&ksn_runtime_app_system_view(state->lease)&&
+    return !dormant&&state&&ksn_runtime_app_system_view(state->lease)&&
         (state->notice_displayed||(state->notice_tx.value&&state->notice_pending));
 }
-bool pocket_kasane_system_pending(void){return state&&ksn_runtime_app_system_view(state->lease)&&state->notice_tx.value;}
+bool pocket_kasane_system_pending(void){return !dormant&&state&&ksn_runtime_app_system_view(state->lease)&&state->notice_tx.value;}
 bool pocket_kasane_has_submission(void) {
     return ksn_runtime_has_submission();
 }
 uint32_t pocket_kasane_source_wait_ticks(uint64_t now_us,uint32_t cap,uint32_t hz){
-    if(!state||!state->schema||!hz)return cap;
+    if(dormant||!state||!state->schema||!hz)return cap;
     schema_sources *native=schema_native(state->schema);
     schema_externals *external=schema_external_state(state->schema);
     uint64_t next=native&&native->expiry_us?native->expiry_us:UINT64_MAX;
@@ -2755,7 +2770,7 @@ void pocket_kasane_invalidate_bands(uint32_t bands) {
     ksn_runtime_invalidate_bands(bands);
 }
 uint32_t pocket_kasane_opaque_system_bands(void){
-    return state&&state->active?ksn_runtime_opaque_system_bands():0;
+    return !dormant&&state&&state->active?ksn_runtime_opaque_system_bands():0;
 }
 void pocket_kasane_invalidate(void) {
     ksn_runtime_invalidate();

@@ -526,6 +526,21 @@ void pocket_api_pump(void) {
     }
 }
 
+// Resident suspension (docs/vm/app-suspend-design.md sec.4): every operation
+// still running is asked to stop, and settles through the ordinary pump once
+// its driver posts the completion -- the same path a cancel token takes. A
+// deadline is absolute, so an operation left armed across a suspension of
+// minutes would come back as a TIMEOUT that had nothing to do with it.
+void pocket_api_cancel_all(const char *code) {
+    if(!promise_open) return;
+    for(unsigned i=0;i<POCKET_MAX_PROMISES;i++) {
+        pocket_promise_t *p=&promises[i];
+        if(atomic_load(&p->request) && p->armed) promise_stop(p,code);
+    }
+}
+
+unsigned pocket_api_open_count(void) { return promise_open; }
+
 // Every static that pocket_api_class_ready() has filled in, so the end of a
 // session can clear them (see pocket_api.h). Twelve owners exist today; the
 // assert is for the surface that adds the seventeenth, not for runtime input.
