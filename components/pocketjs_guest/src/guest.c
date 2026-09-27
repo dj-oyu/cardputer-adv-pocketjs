@@ -130,12 +130,26 @@ typedef struct surface {
   struct surface *next;
 } surface_t;
 
+#if defined(ESP_PLATFORM) && defined(CONFIG_POCKET_VM_BLOCK_CACHE)
+#include "pocketjs/block_cache.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
+
 struct pocketjs_guest {
   JSRuntime *runtime;
   JSContext *context;
   JSValue frame;
   size_t heap_limit;
   bool prefer_psram;
+#if defined(ESP_PLATFORM) && defined(CONFIG_POCKET_VM_BLOCK_CACHE)
+  /* R3 (docs/vm/r3-small-block-cache.md): freed small blocks kept for the next
+   * allocation of their length. Used only from the task that created the
+   * guest; any other caller goes straight to heap_caps. */
+  block_cache_t block_cache;
+  TaskHandle_t owner_task;
+  bool block_cache_on;
+#endif
   atomic_uint interrupt_epoch;
   unsigned int handled_interrupt_epoch;
   rejection_t *rejections;
@@ -316,11 +330,76 @@ void pocketjs_guest_allocprobe_take(pocketjs_guest_allocprobe_t *out) {
 #define guest_realloc guest_realloc_impl
 #endif
 
+/* A block's length straight from its tlsf header -- the word before the
+ * pointer, low two bits flags (tlsf.c block_header_t.size; multi_heap adds no
+ * owner word without CONFIG_HEAP_TASK_TRACKING) -- instead of
+ * heap_caps_get_allocated_size(), which is in flash and scans the heap list
+ * (~110 cycles, docs/vm/allocator-cost.md). Used only after
+ * guest_tlsf_direct() has seen the two agree on this build's heap. */
+#ifdef CONFIG_POCKET_VM_BLOCK_CACHE
+static int g_tlsf_direct = -1;
+static inline size_t tlsf_header_length(const void *pointer) {
+  return *(const uint32_t *)((const char *)pointer - 4) & ~(uint32_t)3U;
+}
+static bool guest_tlsf_direct(void) {
+  if (g_tlsf_direct < 0) {
+    static const size_t sizes[] = {1, 12, 20, 48, 100, 300};
+    bool ok = true;
+    for (size_t i = 0; ok && i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+      void *p = heap_caps_malloc(sizes[i], GUEST_CAPS_INTERNAL);
+      if (p == NULL) {
+        ok = false;
+        break;
+      }
+      ok = tlsf_header_length(p) == heap_caps_get_allocated_size(p);
+      heap_caps_free(p);
+    }
+    g_tlsf_direct = ok;
+    ESP_LOGI("guest", "BLOCK_LENGTH direct=%d", (int)ok);
+  }
+  return g_tlsf_direct == 1;
+}
+static inline size_t guest_block_length(const void *pointer) {
+  return g_tlsf_direct == 1 ? tlsf_header_length(pointer)
+                            : heap_caps_get_allocated_size((void *)pointer);
+}
+static void *block_cache_heap_malloc(void *ctx, size_t size) {
+  (void)ctx;
+  return heap_caps_malloc(size, GUEST_CAPS_INTERNAL);
+}
+static void block_cache_heap_free(void *ctx, void *block) {
+  (void)ctx;
+  heap_caps_free(block);
+}
+static size_t block_cache_heap_length(void *ctx, const void *block) {
+  (void)ctx;
+  return guest_block_length(block);
+}
+static const block_cache_backend_t BLOCK_CACHE_HEAP = {
+    block_cache_heap_malloc, block_cache_heap_free, block_cache_heap_length, NULL};
+/* tlsf's own rounding of a request (adjust_request_size): what the cache's
+ * classes are keyed on. The cache only ever holds blocks whose real length
+ * is a class, so a hit is never shorter than this. */
+static inline size_t guest_tlsf_round(size_t size) {
+  size_t aligned = (size + 3U) & ~(size_t)3U;
+  return aligned < 12U ? 12U : aligned;
+}
+static inline bool guest_uses_block_cache(const pocketjs_guest_t *guest) {
+  return guest != NULL && guest->block_cache_on &&
+         xTaskGetCurrentTaskHandle() == guest->owner_task;
+}
+#endif
+
 static void *guest_malloc(void *opaque, size_t size) {
   pocketjs_guest_t *guest = opaque;
   if (size == 0U) {
     return NULL;
   }
+#ifdef CONFIG_POCKET_VM_BLOCK_CACHE
+  if (guest_uses_block_cache(guest)) {
+    return block_cache_malloc(&guest->block_cache, size, guest_tlsf_round(size));
+  }
+#endif
   void *memory = NULL;
   if (guest != NULL && guest->prefer_psram) {
     memory = heap_caps_malloc(size, GUEST_CAPS_PSRAM);
@@ -344,12 +423,23 @@ static void *guest_calloc(void *opaque, size_t count, size_t size) {
 }
 
 static void guest_free(void *opaque, void *pointer) {
+#ifdef CONFIG_POCKET_VM_BLOCK_CACHE
+  if (guest_uses_block_cache(opaque)) {
+    block_cache_free(&((pocketjs_guest_t *)opaque)->block_cache, pointer);
+    return;
+  }
+#else
   (void)opaque;
+#endif
   heap_caps_free(pointer);
 }
 
 static size_t guest_usable_size(const void *pointer) {
+#ifdef CONFIG_POCKET_VM_BLOCK_CACHE
+  return pointer == NULL ? 0U : guest_block_length(pointer);
+#else
   return pointer == NULL ? 0U : heap_caps_get_allocated_size((void *)pointer);
+#endif
 }
 
 static void *guest_realloc(void *opaque, void *pointer, size_t size) {
@@ -627,6 +717,18 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
   guest->frame = JS_UNDEFINED;
   guest->heap_limit = config->heap_limit;
   guest->prefer_psram = config->prefer_psram;
+#if defined(ESP_PLATFORM) && defined(CONFIG_POCKET_VM_BLOCK_CACHE)
+  {
+    /* Before the runtime exists: JS_NewRuntime2's own allocations already go
+     * through the allocator. PSRAM-preferring guests keep the plain path (the
+     * cache's heap is internal RAM). */
+    static const uint16_t classes[] = {12, 16, 32, 36, 48, 72, 80, 88};
+    guest->owner_task = xTaskGetCurrentTaskHandle();
+    guest->block_cache_on = !guest->prefer_psram && guest_tlsf_direct();
+    block_cache_init(&guest->block_cache, &BLOCK_CACHE_HEAP, classes,
+                     sizeof(classes) / sizeof(classes[0]), guest->block_cache_on);
+  }
+#endif
   atomic_init(&guest->interrupt_epoch, 0U);
   /* Unlimited until a host arms a turn. Evaluation is not a turn: the source
    * is parsed once, before any frame, and cutting its drain would leave an app
@@ -1245,6 +1347,10 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
   }
   if (guest->runtime != NULL) {
     JS_FreeRuntime(guest->runtime);
+#if defined(ESP_PLATFORM) && defined(CONFIG_POCKET_VM_BLOCK_CACHE)
+    /* The runtime's last frees (its own struct among them) may be cached. */
+    block_cache_flush(&guest->block_cache);
+#endif
   }
   while (guest->surfaces) {
     surface_t *entry = guest->surfaces;
@@ -1253,4 +1359,14 @@ void pocketjs_guest_destroy(pocketjs_guest_t *guest) {
     free(entry);
   }
   free(guest);
+}
+
+void pocketjs_guest_block_cache_flush(pocketjs_guest_t *guest) {
+#if defined(ESP_PLATFORM) && defined(CONFIG_POCKET_VM_BLOCK_CACHE)
+  if (guest != NULL && guest->block_cache_on &&
+      xTaskGetCurrentTaskHandle() == guest->owner_task)
+    block_cache_flush(&guest->block_cache);
+#else
+  (void)guest;
+#endif
 }

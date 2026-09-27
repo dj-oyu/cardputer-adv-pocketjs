@@ -126,7 +126,14 @@ static pocketjs_guest_t *guest;
 // JS_ThrowOutOfMemory's own allocation also fails, indistinguishable from the
 // script's own `throw null` without this. Not a contracted marker (the
 // CLAUDE.md list predates it); a new line costs nothing to add.
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+// backlog R3a: which call site found the rejection, and whether Kasane still
+// holds an unconsumed submission at that moment.
+#define report_oom_if_any() report_oom_at(__LINE__)
+static void report_oom_at(int site) {
+#else
 static void report_oom_if_any(void) {
+#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_drain();
 #endif
@@ -137,6 +144,9 @@ static void report_oom_if_any(void) {
         pocket_memory_oom(&canary,(uint64_t)esp_timer_get_time());
         ESP_LOGE("app","OOM n=%u first_req=%u used=%u",
                  (unsigned)canary.count,(unsigned)canary.first_req,(unsigned)canary.first_used);
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+        ESP_LOGW("app","R3A_OOM site=%d submission=%d",site,(int)pocket_kasane_has_submission());
+#endif
 #ifdef CONFIG_POCKET_VM_OOMPROBE
         oomprobe_canary(canary.count,canary.first_req,canary.first_used);
 #endif
@@ -158,6 +168,14 @@ static void sample_memory_pressure(void) {
         largest=heap_caps_get_largest_free_block(caps);
     }
     pocket_memory_sample(now,used,limit,native,free_bytes,largest);
+    // R3 (docs/vm/r3-small-block-cache.md sec.3.4): when the SYSTEM is short
+    // (free RAM or the largest free block), hand the guest allocator's cached
+    // small blocks back. Not on GUEST pressure: those blocks are already
+    // outside the guest's accounting, so returning them gives it no room.
+    static uint8_t last_mask;
+    const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
+    if(mask&~last_mask)pocketjs_guest_block_cache_flush(guest);
+    last_mask=mask;
 }
 static atomic_bool stop_requested;
 static int64_t deadline;
@@ -1654,6 +1672,21 @@ esp_err_t app_tick(uint32_t buttons) {
                 return ESP_OK;
             return present_frame();
         }
+        // The drain is done, but what it finished may have been a frame() the
+        // VM parked mid-call (L2c), and that frame() may have submitted its
+        // picture. Falling through would call the NEXT frame() in this same
+        // turn, whose patch/replace finds that ticket unconsumed and throws
+        // BUSY (backlog R3a: seen on the device right after an OOM's long
+        // collection got a frame parked). Give the ticket its display turn
+        // here, as the top-of-turn gate does, and hold this turn's keys for
+        // the next one. Back is not held: it is the guest's last save turn.
+        if(!leaving&&pocket_kasane_has_submission()) {
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+            ESP_LOGW("app","R3A_CONT_PRESENT");
+#endif
+            deferred_buttons|=buttons;
+            return present_frame();
+        }
     }
     continuation_turns=0;
     // The queue is empty, so this is the first moment since the exit() that
@@ -1685,6 +1718,9 @@ esp_err_t app_tick(uint32_t buttons) {
     // turn_us is frame() plus whatever job draining dispatch_guest() does
     // around it -- see vmprobe.h for why the two are not split further.
     vmprobe_frame_sample(guest,turn_us);
+#endif
+#ifdef CONFIG_POCKET_VM_ALLOCPROBE
+    if(e)ESP_LOGW("app","R3A_TURN e=0x%x submission=%d",(unsigned)e,(int)pocket_kasane_has_submission());
 #endif
     if(e)return e;
     return present_frame();

@@ -286,3 +286,7 @@ void pocket_memory_reset(void) {
     pressure=(pressure_state){.listener=JS_UNDEFINED};
     atomic_store(&native_failed,0);
 }
+
+uint8_t pocket_memory_mask(void) {
+    return pressure.mask;
+}

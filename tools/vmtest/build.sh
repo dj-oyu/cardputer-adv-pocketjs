@@ -79,6 +79,11 @@ build_variant() {
   # "-noli" builds the eager path ("-li" is still accepted).
   local lazyi="-DCONFIG_POCKET_VM_LAZY_INTRINSICS=1"
   if [[ $variant == *-noli* ]]; then lazyi=""; fi
+  # CONFIG_POCKET_VM_BLOCK_CACHE (R3, docs/vm/r3-small-block-cache.md): the
+  # small-block cache under the allocator (vmrun's storage layer, below the
+  # --fail-alloc numbering and the trace). Default n for now: "-bc" builds it.
+  local bcache=""
+  if [[ $variant == *-bc* ]]; then bcache="-DCONFIG_POCKET_VM_BLOCK_CACHE=1"; fi
   local core=${variant%-keepsrc}
   core=${core//-norom/}
   core=${core//-rom/}
@@ -86,6 +91,7 @@ build_variant() {
   core=${core//-lb/}
   core=${core//-noli/}
   core=${core//-li/}
+  core=${core//-bc/}
   local base=${core%-alloca}; base=${base%-recur}; base=${base%-flat}; base=${base%-yield}; base=${base%-tco}; base=${base%-callbench}; base=${base%-lazy}; base=${base%-eager}; base=${base%-noyield}; base=${base%-reloc}
   case "$core" in
     *-lazy-flat) ;;
@@ -127,7 +133,7 @@ build_variant() {
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
   local GUEST=components/pocketjs_guest
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield $strip $rom $lazyb $lazyi -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $segframes $flatcalls $lazy $yield $strip $rom $lazyb $lazyi $bcache -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,
@@ -153,7 +159,7 @@ build_variant() {
     return 1
   fi
   gcc -std=gnu11 $cflags -Wall -Wextra -Werror $defs -I "$QJS" \
-      tools/vmtest/vmrun.c "$GUEST/src/vm_sched.c" "$GUEST/src/vm_clock.c" \
+      tools/vmtest/vmrun.c "$GUEST/src/vm_sched.c" "$GUEST/src/vm_clock.c" "$GUEST/src/block_cache.c" \
       "${objs[@]}" -lm -lpthread -ldl -o "$OUT/vmrun-$variant"
   echo "built $OUT/vmrun-$variant"
 }
