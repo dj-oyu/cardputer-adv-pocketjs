@@ -537,6 +537,7 @@ static void menu_layout(void) {
 // to be computed here and read by wave and ocean is gone with them.
 // ---------------------------------------------------------------------------
 static int64_t frame_started;
+static glass_rain_frame flower_rain_frame;
 
 static void solar_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
     (void)variant;
@@ -546,6 +547,7 @@ static void flower_scene_prepare(float dt,int tilt_x,int tilt_y,unsigned variant
     (void)variant;
     flower_prepare_rotating(dt,tilt_x,tilt_y);
     glass_rain_prepare(dt,(uint32_t)frame_started);
+    glass_rain_capture(&flower_rain_frame);
 }
 static uint32_t solar_scene_draw(uint16_t *s,int y,int height) {
     // No inline assembly in this one: its cost is ordinary C and belongs in
@@ -556,7 +558,7 @@ static uint32_t solar_scene_draw(uint16_t *s,int y,int height) {
 static uint32_t flower_scene_draw(uint16_t *s,int y,int height) {
     uint32_t c0=esp_cpu_get_cycle_count();
     flower_draw(s,y,height);
-    glass_rain_draw(s,y,height);
+    glass_rain_draw_frame(&flower_rain_frame,s,y,height);
     return esp_cpu_get_cycle_count()-c0;
 }
 static void solar_labels(uint16_t *s,int y,int height) {

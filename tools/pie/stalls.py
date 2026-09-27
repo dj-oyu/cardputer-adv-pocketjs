@@ -52,7 +52,11 @@ def operands(op, qs):
     if op.endswith('.ld.incp'):                    # EE.<alu>.LD.INCP qu, as, qa, qx, qy
         base = op[:-len('.ld.incp')]
         return [(qs[0], 2), (qs[1], 2 if base in STAGE2 else 1)], qs[2:4]
-    if op in ('ee.vst.128.ip', 'ee.vmulas.u16.qacc', 'ee.mov.u16.qacc'):
+    # QACC forms read their QR operands but write the accumulator, not a QR.
+    # Both signed and unsigned spellings use every listed q operand (including
+    # the first operand of VMULAS), even when the same register was just loaded.
+    if op in ('ee.vst.128.ip', 'ee.vmulas.u16.qacc', 'ee.vmulas.s16.qacc',
+              'ee.mov.u16.qacc', 'ee.mov.s16.qacc'):
         return [], qs
     if op in ('ee.vunzip.16', 'ee.vzip.8'):
         return [(q, 1) for q in qs], qs

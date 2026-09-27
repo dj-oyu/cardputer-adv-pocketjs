@@ -78,6 +78,8 @@ static JSValue vm_storage_mark(JSContext *ctx, JSValueConst self,
 extern const char hello_start[] asm("_binary_main_js_start");
 extern const char hello_end[] asm("_binary_main_js_end");
 extern const char kasane_demo_start[] asm("_binary_demo_js_start");
+extern const char proc_megademo_start[] asm("_binary_proc_megademo_js_start");
+extern const char proc_news_zoom_start[] asm("_binary_proc_news_zoom_js_start");
 #ifdef KASANE_P0_PROBE
 extern const char wall_source_probe_start[] asm("_binary_wall_source_probe_js_start");
 extern const char pool_source_probe_start[] asm("_binary_pool_source_probe_js_start");
@@ -897,6 +899,8 @@ source_ready:;
     size_t length=user_source?user_length:(size_t)(hello_end-hello_start-1);
     // USB-only diagnostics exercise the same lifecycle and resource limits.
     switch(test) {
+        case 'J': source=proc_megademo_start; break;
+        case '(': source=proc_news_zoom_start; break;
         case '1': source="(() => {"; break;
         case '2': source="while(true){}"; break;
         case '3': source="globalThis.frame=()=>{while(true){}}"; break;

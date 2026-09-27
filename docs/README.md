@@ -80,7 +80,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 ## 主線3: デザインシステム Kasane — [`kasane/`](kasane/)
 
-固定容量の C 描画基盤、その上の汎用 mount/source/presenter、Systemとの所有権境界を扱う。履歴資料と日別実験ログは縮約し、現行の判断に必要な資料を次の4本へまとめた。
+固定容量の C 描画基盤、その上の汎用 mount/source/presenter、Systemとの所有権境界を扱う。履歴資料と日別実験ログは縮約し、動的描画の構想は現行 v1 の判断資料と分けて置く。
 
 | 文書 | 内容 |
 | --- | --- |
@@ -89,6 +89,8 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [判断台帳](kasane/decisions.md) | トレードオフ、不採用案と再検討条件 |
 | [検証](kasane/verification.md) | 固定実機ゲート、実測の達成範囲、計測の落とし穴 |
 | [残タスク](kasane/roadmap.md) | 実装・実測・未達を分けたロードマップ再評価用の表 |
+| [動的描画ロードマップ](kasane/dynamic-rendering-roadmap.md) | 関数アート・描画面・動画を、FLOWERとKasaneの実測を参照しながら段階的に進める構想 |
+| [手続き型描画の実機診断](kasane/procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。実測前の準備 |
 
 ## JS API — [`api/`](api/)
 

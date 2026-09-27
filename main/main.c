@@ -48,6 +48,14 @@
 #include <string.h>
 #include "hal/fpu_latency.h"
 static atomic_bool fpu_probe_requested;
+#ifdef KASANE_PROC_DEVICE_PROBE
+static atomic_bool proc_probe_requested;
+void ksn_proc_device_probe_run(void);
+#endif
+#ifdef KASANE_MEGADEMO_DEVICE_PROBE
+static atomic_bool megademo_probe_requested;
+void ksn_megademo_device_probe_run(void);
+#endif
 #ifdef KASANE_P5_NOTICE_PROBE
 static atomic_int p5_notice_probe_requested;
 #define P5_NOTICE_OWNER (UINT32_MAX-1u)
@@ -131,6 +139,14 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #endif
     if(pocket_bridge_usb((uint8_t)c))return false;
     if(pet_hub_usb((uint8_t)c))return false;
+#ifdef KASANE_PROC_DEVICE_PROBE
+    if(c=='|') { atomic_store(&proc_probe_requested,true); return false; }
+    if(c=='J') { atomic_store(&diagnostic,c); return false; }
+    if(c=='(') { atomic_store(&diagnostic,c); return false; }
+#endif
+#ifdef KASANE_MEGADEMO_DEVICE_PROBE
+    if(c=='`') { atomic_store(&megademo_probe_requested,true); return false; }
+#endif
     memset(k,0,sizeof(*k));
     if(atomic_load(&text_screen)) {
         // C-s is the editor's save, so the host capture moves to C-p.
@@ -208,7 +224,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
       ) { atomic_store(&diagnostic,c); return false; }
 #endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
-    if(c=='L'||c=='M'||c=='Y'||c=='Z') { atomic_store(&diagnostic,c); return false; }
+    if(c=='J'||c=='L'||c=='M'||c=='Y'||c=='Z') { atomic_store(&diagnostic,c); return false; }
     if(c=='['||c=='\\'||c==']') { atomic_store(&diagnostic,c); return false; }
 #endif
 #ifdef CONFIG_POCKET_VM_PROBE
@@ -758,6 +774,18 @@ static void ui_task(void *arg) {
     int64_t previous_overlay_frame_started=0;
 #endif
     while(1) {
+#ifdef KASANE_MEGADEMO_DEVICE_PROBE
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&megademo_probe_requested,false)){
+            ksn_megademo_device_probe_run();
+            ESP_LOGI("shell","HOME_READY");
+        }
+#endif
+#ifdef KASANE_PROC_DEVICE_PROBE
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&proc_probe_requested,false)){
+            ksn_proc_device_probe_run();
+            ESP_LOGI("shell","HOME_READY");
+        }
+#endif
 #ifdef CONFIG_KSN_DEVICE_PROBE
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&ksn_probe_requested,false)){
             ksn_device_probe_run();

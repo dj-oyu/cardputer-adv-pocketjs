@@ -22,7 +22,7 @@ Supported instructions (TRM section in brackets):
     ee.vmul.s16 [1.8.122]    ee.vmul.u16 [1.8.128]
     ee.andq [1.8.1]          ee.orq [1.8.45]          ee.xorq [1.8.214]
     ee.vunzip.16 [1.8.207]   ee.vzip.8 [1.8.212]      ee.zero.q [1.8.216]
-    ee.zero.qacc [1.8.217]   ee.mov.u16.qacc [1.8.116]
+    ee.zero.qacc [1.8.217]   ee.mov.u16.qacc [1.8.116]  ee.mov.s16.qacc [1.8.109]
     ee.vmulas.u16.qacc [1.8.163]  ee.vmulas.s16.qacc [1.8.160]
     ee.srcmb.s16.qacc [1.8.54]
     ee.vprelu.s16 [1.8.182]  and the fused forms ee.vadds.s16.ld.incp [1.8.71],
@@ -220,6 +220,9 @@ class Sim:
                 # under the other form and the accumulator test below would not
                 # have caught it).
                 self.qacc = [Q[qi(a[0])][i] for i in range(8)]
+            elif op == 'ee.mov.s16.qacc':
+                # 1.8.109: replace each QACC lane with the sign-extended S16 lane.
+                self.qacc = [s16(v) for v in Q[qi(a[0])]]
             elif op in ALU:
                 Q[qi(a[0])] = self._alu(op, Q[qi(a[1])], Q[qi(a[2])])
             elif op.endswith('.ld.incp'):

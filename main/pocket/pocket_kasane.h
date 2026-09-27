@@ -13,6 +13,10 @@
  * bookkeeping; a native SYSTEM owner keeps the shared storage alive.
  * Owner task only, reset outside guest/render callbacks. */
 esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data);
+/* Procedural adapter publishes a prepared candidate through the APP lease. */
+ksn_result pocket_kasane_proc_publish(void);
+/* Create an opaque Kasane image resource for the current procedural session. */
+JSValue pocket_kasane_proc_resource(JSContext *ctx);
 /* C service publishes a session-scoped, unforgeable source capability. The
  * registry and provider must outlive pocket_kasane_reset(); revoke by
  * unregistering the handle, which makes later binds/acquires stale. */

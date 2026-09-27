@@ -25,6 +25,24 @@ set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.
 set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
+list(APPEND KASANE_SOURCES
+    "pocket/pocket_proc.c" "ui/kasane/ksn_procedural.c"
+    "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
+    "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
+    "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
+option(KASANE_PROC_DEVICE_PROBE "USB-triggered procedural display and load diagnostic" OFF)
+option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
+option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
+if(KASANE_PROC_DEVICE_PROBE)
+    list(APPEND KASANE_SOURCES
+        "ui/kasane/ksn_procedural_surface.c"
+        "ui/kasane/ksn_procedural_layers.c" "ui/kasane/ksn_procedural_present.c"
+        "ui/kasane/ksn_procedural_device_probe.c"
+        "ui/kasane/ksn_proc_compiler_device_probe.c")
+endif()
+if(KASANE_MEGADEMO_DEVICE_PROBE)
+    list(APPEND KASANE_SOURCES "ui/kasane/ksn_megademo_device_probe.c")
+endif()
 list(APPEND KASANE_SOURCES "ui/kasane/ksn_source_pool.c")
 list(APPEND KASANE_SOURCES "ui/kasane/ksn_source_pool_adapter.c")
 option(KASANE_P0_PROBE "Instrument Kasane P0 device measurements (not for production)" OFF)
@@ -105,7 +123,7 @@ idf_component_register(SRCS "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_dec
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin")
 target_link_libraries(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=xQueueCreateMutex" "-Wl,--wrap=vQueueDelete")
@@ -130,6 +148,16 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 # firmware compiles and links exactly as before, and main.c's calls are compiled out.
 if(POCKET_PROBES)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_PROBES=1)
+endif()
+if(KASANE_PROC_DEVICE_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_DEVICE_PROBE=1)
+endif()
+if(KASANE_MEGADEMO_DEVICE_PROBE)
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../tools/kasane_contract")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEGADEMO_DEVICE_PROBE=1)
+endif()
+if(KASANE_PROC_JS_DIAGNOSTIC)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_JS_DIAGNOSTIC=1)
 endif()
 if(KASANE_P0_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_P0_PROBE=1)
@@ -204,6 +232,22 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra)
 # and other components retain the project's size optimization.
 target_sources(${COMPONENT_LIB} PRIVATE "scene/flower.c" "scene/flower_species.c" "scene/glass_rain.c" "scene/wave.c" "scene/ocean.c" "scene/garden.c" "scene/canopy_pie.c" "scene/garden_decor_pie.c")
 set_source_files_properties(ui/shell.c scene/solar_sail.c scene/flower.c scene/flower_species.c scene/glass_rain.c scene/wave.c scene/ocean.c scene/garden.c scene/canopy_pie.c scene/garden_decor_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
+set_source_files_properties(ui/kasane/ksn_procedural.c
+    ui/kasane/ksn_proc_analysis.c ui/kasane/ksn_proc_plan.c
+    ui/kasane/ksn_proc_plan_points.c ui/kasane/ksn_proc_points.c
+    ui/kasane/ksn_proc_points_pie.c ui/kasane/ksn_proc_points_dispatch.c
+    PROPERTIES COMPILE_OPTIONS "-O2")
+if(KASANE_PROC_DEVICE_PROBE)
+    set_source_files_properties(ui/kasane/ksn_procedural_surface.c
+        ui/kasane/ksn_procedural_layers.c
+        ui/kasane/ksn_procedural_present.c ui/kasane/ksn_procedural_device_probe.c
+        ui/kasane/ksn_proc_compiler_device_probe.c
+        PROPERTIES COMPILE_OPTIONS "-O2")
+endif()
+if(KASANE_MEGADEMO_DEVICE_PROBE)
+    set_source_files_properties(ui/kasane/ksn_megademo_device_probe.c
+        PROPERTIES COMPILE_OPTIONS "-O2")
+endif()
 
 # The VM probe (docs/vm/quickjs-freertos-vm-spec.md sec.5), off by default
 # (main/Kconfig.projbuild's CONFIG_POCKET_VM_PROBE). Both the source file and

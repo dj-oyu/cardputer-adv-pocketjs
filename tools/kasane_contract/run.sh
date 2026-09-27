@@ -12,6 +12,79 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   tools/kasane_contract/use_cases.c tools/kasane_contract/test_core.c -o "$out/core" main/ui/kasane/ksn_blend_pie.c
 "$out/core"
 for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural.c \
+    -lm -o "$out/procedural"
+  "$out/procedural"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_proc_analysis.c main/ui/kasane/ksn_procedural.c \
+    tools/kasane_contract/test_proc_analysis.c \
+    -lm -o "$out/proc-analysis"
+  "$out/proc-analysis"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
+    main/ui/kasane/ksn_proc_plan.c tools/kasane_contract/test_proc_plan.c \
+    -lm -o "$out/proc-plan"
+  "$out/proc-plan"
+  for point_gate in '' '-D__XTENSA__ -DCONFIG_IDF_TARGET_ESP32S3 -DKSN_PROC_PLAN_POINTS_STUB_PIE'; do
+    point_pie_source=main/ui/kasane/ksn_proc_points_pie.c
+    if [[ -n "$point_gate" ]]; then point_pie_source=; fi
+    cc -std=c11 -Wall -Wextra -Werror $options $point_gate -Imain/ui/kasane \
+      main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
+      main/ui/kasane/ksn_proc_plan.c main/ui/kasane/ksn_proc_plan_points.c \
+      main/ui/kasane/ksn_proc_points.c main/ui/kasane/ksn_proc_points_dispatch.c \
+      $point_pie_source tools/kasane_contract/test_proc_plan_points.c \
+      -lm -o "$out/proc-plan-points"
+    "$out/proc-plan-points"
+  done
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
+    main/ui/kasane/ksn_proc_plan.c tools/kasane_contract/test_proc_megademo.c \
+    -lm -o "$out/proc-megademo"
+  "$out/proc-megademo"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c \
+    tools/kasane_contract/test_proc_semantic_oracle.c \
+    -lm -o "$out/proc-semantic-oracle"
+  "$out/proc-semantic-oracle"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_proc_points.c tools/kasane_contract/test_proc_points.c \
+    -o "$out/proc-points"
+  "$out/proc-points"
+  for pie_model in '' '-DKSN_PROC_POINTS_PIE_MODEL'; do
+    cc -std=c11 -Wall -Wextra -Werror $options $pie_model -Imain/ui/kasane \
+      main/ui/kasane/ksn_proc_points.c main/ui/kasane/ksn_proc_points_pie.c \
+      tools/kasane_contract/test_proc_points_pie_host.c \
+      -o "$out/proc-points-pie-host"
+    "$out/proc-points-pie-host"
+  done
+  for target_gate in '' '-D__XTENSA__ -DCONFIG_IDF_TARGET_ESP32S3'; do
+    cc -std=c11 -Wall -Wextra -Werror $options $target_gate -Imain/ui/kasane \
+      main/ui/kasane/ksn_proc_points.c main/ui/kasane/ksn_proc_points_dispatch.c \
+      tools/kasane_contract/test_proc_points_dispatch.c \
+      -o "$out/proc-points-dispatch"
+    "$out/proc-points-dispatch"
+  done
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
+    tools/kasane_contract/test_procedural_surface.c -lm -o "$out/procedural-surface"
+  "$out/procedural-surface"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
+    main/ui/kasane/ksn_procedural_layers.c \
+    tools/kasane_contract/test_procedural_layers.c -lm -o "$out/procedural-layers"
+  "$out/procedural-layers"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
+    main/ui/kasane/ksn_procedural_layers.c \
+    tools/kasane_contract/test_procedural_pattern_matrix.c -lm -o "$out/procedural-patterns"
+  "$out/procedural-patterns"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
+    main/ui/kasane/ksn_procedural_layers.c main/ui/kasane/ksn_procedural_present.c \
+    tools/kasane_contract/test_procedural_present.c -lm -o "$out/procedural-present"
+  "$out/procedural-present"
   cc -std=c11 -Wall -Wextra -Werror $options -pthread \
     -Itools/kasane_contract/mutex_arena_hostshim \
     tools/kasane_contract/test_mutex_arena.c -o "$out/mutex-arena"
@@ -238,6 +311,8 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   "$out/stress" > "$out/stress.bin"
   python3 tools/kasane_contract/stress_reference.py "$out/stress.bin"
 done
+python3 tools/kasane_contract/run_proc_megademo_js.py
+python3 tools/kasane_contract/run_pocket_proc_qjs.py
 python3 tools/pie/test_frost.py
 python3 tools/kasane_contract/fill_pie.py
 # Boundary 4a's coarse 255 -> 256 arm (g_ksn_scale256, default 0 = the exact
