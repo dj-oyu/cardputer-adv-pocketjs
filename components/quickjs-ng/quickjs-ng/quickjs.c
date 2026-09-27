@@ -43934,6 +43934,35 @@ static inline void lazy_set_done(JSLazyList *l, int k)
     l->done[k >> 5] |= 1u << (k & 31);
 }
 
+static uint32_t lazy_first(JSRuntime *rt, JSObject *p);
+
+/* p's list for `tab`, found again: whatever materializes an entry allocates,
+   an allocation can collect, and freeing a lazy object moves rt->lazy
+   (lazy_remove), so a JSLazyList pointer or index taken before the call is
+   stale after it. */
+static JSLazyList *lazy_list_of(JSRuntime *rt, JSObject *p,
+                                const JSCFunctionListEntry *tab)
+{
+    for (uint32_t i = lazy_first(rt, p); i < rt->lazy_count && rt->lazy[i].obj == p; i++)
+        if (rt->lazy[i].tab == tab)
+            return &rt->lazy[i];
+    return NULL;
+}
+
+/* An entry is marked done before it is materialized; when that fails (out of
+   memory) the mark must come off again, or the name is in neither the shape
+   nor the list and reads as undefined for the rest of the run -- how
+   pocket.fs.open vanished after one refused first read (docs/vm/turn-cpi.md
+   sec.4). Same rule as JS_AutoInitProperty: a failure may fail the
+   operation, never leave a hole. */
+static void lazy_undo_done(JSRuntime *rt, JSObject *p,
+                           const JSCFunctionListEntry *tab, int k)
+{
+    JSLazyList *l = lazy_list_of(rt, p, tab);
+    if (l)
+        l->done[k >> 5] &= ~(1u << (k & 31));
+}
+
 /* Index of the first list of `p` in rt->lazy (sorted by object). */
 static uint32_t lazy_first(JSRuntime *rt, JSObject *p)
 {
@@ -44094,8 +44123,13 @@ static int js_lazy_touch(JSContext *ctx, JSObject *p, JSAtom atom)
             if (lazy_done(l, k) || !lazy_key_is(&key, l->tab[k].name))
                 continue;
             /* Marked first: add_property below looks the name up again. */
+            const JSCFunctionListEntry *tab = l->tab;
             lazy_set_done(l, k);
-            return lazy_define(l->realm, p, atom, &l->tab[k]) ? -1 : 1;
+            if (lazy_define(l->realm, p, atom, &tab[k])) {
+                lazy_undo_done(rt, p, tab, k);
+                return -1;
+            }
+            return 1;
         }
     }
     return 0;
@@ -44299,11 +44333,17 @@ static int js_lazy_all(JSContext *ctx, JSObject *p, bool enum_only)
             JSAtom atom = find_atom(l->realm, l->tab[k].name);
             if (atom == JS_ATOM_NULL)
                 return -1;
+            const JSCFunctionListEntry *tab = l->tab;
             lazy_set_done(l, k);
-            int ret = lazy_define(l->realm, p, atom, &l->tab[k]);
+            int ret = lazy_define(l->realm, p, atom, &tab[k]);
             JS_FreeAtom(ctx, atom);
-            if (ret)
+            if (ret) {
+                lazy_undo_done(rt, p, tab, k);
                 return -1;
+            }
+            /* A collection inside lazy_define can move p's lists down the
+               array (lazy_remove of a freed object before them). */
+            i = (uint32_t)(lazy_list_of(rt, p, tab) - rt->lazy);
         }
     }
     if (lazy_reorder(ctx, p))
@@ -44384,8 +44424,10 @@ static int lazy_register(JSContext *ctx, JSValueConst obj,
         lazy_set_done(&rt->lazy[idx], k);
         int ret = JS_InstantiateFunctionListItem(ctx, obj, atom, &tab[k]);
         JS_FreeAtom(ctx, atom);
-        if (ret)
+        if (ret) {
+            lazy_undo_done(rt, p, tab, k);
             return -1;
+        }
     }
     return 0;
 }

@@ -2399,11 +2399,24 @@ static fs_file_t *file_slot(void) {
     return NULL;
 }
 
-static JSValue file_wrap(JSContext *ctx, fs_file_t *f) {
+// The one way an open hands its slot to the app: a File settled into a
+// promise. Either step can be refused at the guest's limit, and a File has no
+// finalizer (see file_class_def), so a slot whose File never reached the app
+// would stay taken until the app ended -- STRESS LV3 ran out of both slots
+// that way (docs/vm/turn-cpi.md sec.4). pocket_api_settled frees the value
+// when it cannot build the promise, so the slot is closed here, by handle
+// because the object that carried it is gone.
+static JSValue file_settled(JSContext *ctx, fs_file_t *f) {
+    uint32_t handle=f->handle;
     JSValue o=JS_NewObjectClass(ctx,file_class);
     if(JS_IsException(o)) { file_close(f,true); return o; }
-    JS_SetOpaque(o,(void *)(uintptr_t)f->handle);
-    return o;
+    JS_SetOpaque(o,(void *)(uintptr_t)handle);
+    JSValue promise=pocket_api_settled(ctx,o,false);
+    if(JS_IsException(promise)) {
+        fs_file_t *left=file_of(handle);
+        if(left) file_close(left,true);
+    }
+    return promise;
 }
 
 static JSValue js_open(JSContext *ctx, JSValueConst self,
@@ -2478,7 +2491,7 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
         f->asset=(int8_t)a; f->size=asset_size(a); f->verified=-1;
         f->name_len=(uint8_t)name_len;
         memcpy(f->name,leaf,name_len);
-        return pocket_api_settled(ctx,file_wrap(ctx,f),false);
+        return file_settled(ctx,f);
     }
 
     // ---- app:
@@ -2537,7 +2550,7 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
     }
     if(mode==MODE_READ) {
         f->obj=id;
-        return pocket_api_settled(ctx,file_wrap(ctx,f),false);
+        return file_settled(ctx,f);
     }
 
     f->buf=malloc(FS_BLOCK_PAYLOAD);
@@ -2601,7 +2614,7 @@ static JSValue js_open(JSContext *ctx, JSValueConst self,
             } else f->next_index++;
         }
     }
-    return pocket_api_settled(ctx,file_wrap(ctx,f),false);
+    return file_settled(ctx,f);
 }
 
 // ------------------------------------------------------------------- copy
@@ -3589,7 +3602,7 @@ static JSValue sd_open(JSContext *ctx, const fs_path_t *p, uint8_t mode,
                        POCKET_OUTCOME_NOT_APPLIED);
     }
     f->handle=next_handle++;
-    return pocket_api_settled(ctx,file_wrap(ctx,f),false);
+    return file_settled(ctx,f);
 }
 
 // One write on an sd: handle. Section 5: the bytes are copied at acceptance --

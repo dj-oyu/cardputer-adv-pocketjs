@@ -173,10 +173,15 @@ JSValue pocket_api_settled(JSContext *ctx, JSValue value, bool rejected) {
     if(JS_IsException(promise)) { JS_FreeValue(ctx,value); return promise; }
     JSValue done=JS_Call(ctx,funcs[rejected?1:0],JS_UNDEFINED,1,
                          (JSValueConst *)&value);
-    JS_FreeValue(ctx,done);
     JS_FreeValue(ctx,funcs[0]);
     JS_FreeValue(ctx,funcs[1]);
     JS_FreeValue(ctx,value);
+    // A settle refused at the guest's limit would otherwise hand back a promise
+    // that never settles, with the refusal left pending on the context. The
+    // caller gets the exception instead, and one that owns something the value
+    // carried (a File's slot) can take it back.
+    if(JS_IsException(done)) { JS_FreeValue(ctx,promise); return done; }
+    JS_FreeValue(ctx,done);
     return promise;
 }
 
