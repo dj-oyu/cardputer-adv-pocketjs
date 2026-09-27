@@ -139,6 +139,14 @@ for f in corpus/*.js; do
     read -r -a extra <<< "${first#// vmrun-flags:}"
     flags+=("${extra[@]}")
   fi
+  # The same re-pinned attempt number run.sh appends: F1-F3 removed hundreds
+  # of allocations, so the first line's --fail-alloc N is now past the end of
+  # the run and injects nothing (this check failed on exactly those files).
+  tag_line=$(head -n20 "$f" | grep -m1 '^// vmrun-rom-lb-li-flags:' || true)
+  if [ -n "$tag_line" ]; then
+    read -r -a extra <<< "${tag_line#// vmrun-rom-lb-li-flags:}"
+    flags+=("${extra[@]}")
+  fi
   out=$(cd corpus && timeout 60 "$VMRUN" --stats "${flags[@]}" "$name.js" 2>&1 |
     sed -n 's/^#info oom count=\([0-9]*\).*/\1/p' | head -n1)
   # A file that injects an allocation failure through its own header is the

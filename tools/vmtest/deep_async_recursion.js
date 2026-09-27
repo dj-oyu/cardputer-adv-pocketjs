@@ -32,7 +32,10 @@ async function dive() { depth++; await dive(); }
 async function main() {
   try { await dive(); print("caught", "resolved"); }
   catch (e) { print("caught", e === null ? "null" : e.constructor.name); }
+  print("#info max_depth=" + depth);
 }
 try { main(); } catch (e) { syncKind = e === null ? "null" : e.constructor.name; }
 print("sync-try", syncKind);
-print("#info max_depth=" + depth);
+// Nothing that builds a string after this point at the top level: once F3c
+// lowered the startup floor the descent went deep enough that the depth line
+// above, when it was here, could not allocate and threw null before the drain.
