@@ -4,7 +4,7 @@
 # 8 B JSValue, 4 B pointers, 8-aligned doubles, i.e. the Xtensa layout) into
 # .cache/vmtest32 and links floor32.c against them. WSL only.
 #
-#   wsl -e bash tools/vmtest/floor/floor32.sh [VARIANT]   # default o2, e.g. o2-li
+#   wsl -e bash tools/vmtest/floor/floor32.sh [VARIANT]   # default o2
 set -e
 V=${1:-o2}
 cd "$(dirname "$0")/../../.."

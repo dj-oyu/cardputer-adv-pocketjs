@@ -13,6 +13,7 @@
 #include "ui/kasane/ksn_runtime.h"
 #include "text/ksn_font.h"
 #include "lessons.h"
+#include "sound.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,10 @@ bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
     (void)id;(void)out;return false;
 }
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
+// pocket_av_output_source.c (linked by build_kasane_test.sh) registers a PCM
+// observer; no lesson plays audio, so nothing is ever observed.
+void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
+void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
 void *__real_calloc(size_t count,size_t size);
 void __real_free(void *ptr);
 void __wrap_free(void *ptr) { __real_free(ptr); }

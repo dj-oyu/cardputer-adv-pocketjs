@@ -85,7 +85,13 @@ VM 系の Kconfig を、出荷経路の切り替えではなく診断だけに�
 - **残した（診断）**: `SELFTEST` `KSN_DEVICE_PROBE` `PROBE` `RELOC` `OOMPROBE`、および `POCKET_UI_TASK_CORE`。
 - **ホスト側**: `tools/vmtest/build.sh` の変種は `asan` / `o2`（と `-reloc`）だけになり、`expected-fair/` `expected-keepsrc/`、`sdkconfig.vm*.defaults` のうち消したオプション用の8本、TCO・callbench・async_audit・lazyfloor/lazyprobe・`device_floor.py` を削除した。
 - **確認（ホストと実機ビルド、2026-09-27）**: 出荷構成のファームは `vm/main` の既定ビルドと同じ 2,043,744 B、静的 DIRAM は ±0、flash は −12 B（assert の行番号）。残した診断5つを全部有効にしたビルドも通る。コーパス 79/79（asan・o2・`--force-yield`・`--budget-jobs 3`・`--vm-seg-size 88`・`asan-reloc`）、中断鎖の寿命 900/900、陰性対照 F1 4/4・F2 7/7・F3 4/4・R1 2/2、STRESS・テキスト入力・input・memory のホスト検査は PASS。実機: `smoke_device.py` 20 サイクル SMOKE_OK、`stress_app.py` 3/3 PASS（BUSY 0、LV1〜3 は 29.2〜29.7 fps、LV1 のターン 7.12〜7.14 ms）。
-- **この作業の前から落ちていたもの**（`vm/main` の `5db834f` でも同じ結果）: `budget_probe.sh` の `deep_async_recursion`（キャッシュ有無とも `oom=100` で期待と違う）、`tools/test_session_dispatch.py`（抜き出す範囲に `app_tick` 全体が入り宣言が足りない）、`build_lessons_test.sh` / `build_power_test.sh`（音の observer のスタブと `esp_err.h` が無くリンク・コンパイルできない）。
+- **この作業の前から落ちていたもの**（2026-09-27 に `vm/fix-host-checks` で直した。ホストだけの変更で、ファームのソースは触っていない）:
+  - `budget_probe.sh` の `deep_async_recursion`: F3c（`3ed6eff`、bisect で特定）が床を下げて降下が深くなり（深さ 81 → 158）、降下の後のトップレベルの `"#info max_depth=" + depth` が文字列を確保できず `null` を投げてジョブを流す前に終わっていた。D38 の主張（同期 try に届かない、予算は答えない、ヒープで終わる）は変わっていない。その行を後で走る async 関数の中へ移した。
+  - `oom_canary_probe.sh`: 先頭行の `--fail-alloc` しか読まず、F1〜F3 で確保が減った後は番号が走行の終わりより先になって何も注入していなかった。`run.sh` と同じく `// vmrun-rom-lb-li-flags:` を足して読む。
+  - **`corpus/oom_callsite_double_free.js` は F1 以降、何も検査せずに通っていた**（`--fail-alloc 1455` に対して走行全体で確保 527 回）。再固定の行がこのファイルだけ抜けていた。失敗の分岐に計装したコピーで掃いて `671`（添字 0、675 が添字 1 で、旧 1458/1462 と同じ間隔）を見つけ、ヘッダに足した後も番号が動かないこと、上流の修正を戻すと ASan で落ちることを確かめた。上の canary の検査（注入するファイルは必ず発火する）が本来これを捕まえるはずだった。
+  - `tools/test_session_dispatch.py`: `app_tick` に後から入った呼び出し（メモリ圧、presenter、P0 計測など）の代役が無かった。足したうえで、R3a の場合（継続が中断中の `frame()` を終えて提出したら、次の `frame()` の前に present する）と presenter の失敗の2件を加えた。R3a の修正を外すと落ちることも確かめた。
+  - `build_lessons_test.sh` / `build_power_test.sh`: 音の observer の代役と `esp_err.h` の include が無かった。`pocket_clock.c` が Kasane の source を登録するようになった分は、呼ばれたら止まる代役で済ませた（この検査は `wall()` だけを見る）。
+  - ビルドオプションの整理の取りこぼし: `pocket_api.c` などの `vm_wake_post()` がもう条件付きでないので、ホストの `vm_wake.h` の代役に空の定義を置いた。`quickjs-vm.c` をリンクしていなかった `build_pocket_capture_test.sh` / `build_pocket_random_test.sh` / `build_class_ids.sh` / `build_js_ledger.sh` / `build_lazy_test.sh` に足した（あわせて `/tmp` の共有キャッシュがヘッダの変更で作り直されるようにした）。`lifecycle.sh` は無印の `asan` に消毒器のフラグを付けていなかった。
 
 ## 確保失敗時のコンパイル経路（VM の段とは独立）
 

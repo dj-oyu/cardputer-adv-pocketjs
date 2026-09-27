@@ -8,13 +8,17 @@ QJS=components/quickjs-ng/quickjs-ng
 OUT=${OUT:-/tmp/test-class-ids}
 CACHE=${CACHE:-/tmp/qjs-host}
 mkdir -p "$CACHE"
-for f in dtoa libregexp libunicode quickjs; do
-  if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ]; then
-    gcc -c -O1 -g -w -D_GNU_SOURCE -I "$QJS" "$QJS/$f.c" -o "$CACHE/$f.o"
+# quickjs-vm: the VM hooks quickjs.c calls (L2c is not optional any more).
+# Headers count too: this cache is shared across scripts and trees.
+for f in dtoa libregexp libunicode quickjs quickjs-vm; do
+  if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] \
+     || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
+    gcc -c -O1 -g -w -DQUICKJS_NG_BUILD -D_GNU_SOURCE -I "$QJS" -I components/pocketjs_guest/include \
+      "$QJS/$f.c" -o "$CACHE/$f.o"
   fi
 done
 gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -I "$QJS" \
     tools/test_class_ids.c \
-    "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \
+    "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" "$CACHE/quickjs-vm.o" \
     -lm -o "$OUT"
 echo "built $OUT"
