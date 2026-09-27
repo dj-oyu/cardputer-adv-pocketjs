@@ -937,6 +937,11 @@ esp_err_t app_resume(void) {
     const app_manifest_t *manifest=app_registry_current();
     pocket_storage_set_owner(manifest->id);
     pocket_fs_set_owner(manifest->id);
+    // The home screen's backdrop scratch goes back, as it does on every
+    // foreground start: without this a resumed app ran 16 KiB short of a
+    // freshly started one (measured: the second suspension of the same app
+    // reported exactly 16,384 B less free).
+    scene_mem_release();
     pocketjs_guest_set_dormant(guest,false);
     pocket_kasane_set_dormant(false);
     pocket_imu_resume();

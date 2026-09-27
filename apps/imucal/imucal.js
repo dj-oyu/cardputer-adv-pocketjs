@@ -143,7 +143,7 @@
     show();
   }
 
-  pocket.app.start({ resume: function () { recent.length = 0; still = 0; moved = 0; } });
+  pocket.app.start({ resume: function () { still = 0; } });
   pocket.app.onFrame(step);
 
   show();

@@ -413,14 +413,18 @@ void shell_change_background(int direction) {
 // uses), which re-tested four bounds for each lit dot; now the
 // row is resolved once per row, blank glyph rows are skipped whole, and a run
 // that has left the screen ends the string.
+// The paused mark (docs/vm/app-suspend-design.md sec.8-4): two bars, drawn for
+// 0x7F because the font has no '|' (it came out as "??"). Symmetric, so the
+// bit order of a row does not matter.
+static const uint8_t PAUSE_GLYPH[7]={0x1b,0x1b,0x1b,0x1b,0x1b,0x1b,0x1b};
 static void text(int x,int y,const char *s,int scale,uint16_t color) {
     if(y>=strip_y+strip_h || y+7*scale<=strip_y) return;
     for(;*s;s++,x+=6*scale) {
         if(x>=LCD_W) return;
         if(x+5*scale<=0) continue;
         unsigned c=(unsigned char)*s;
-        if(c<32 || c>126) c='?';
-        const uint8_t *glyph=font_rows+(c-32)*7;
+        if(c!=0x7f && (c<32 || c>126)) c='?';
+        const uint8_t *glyph=c==0x7f?PAUSE_GLYPH:font_rows+(c-32)*7;
         for(int gy=0;gy<7;gy++) {
             unsigned bits=glyph[gy];
             if(!bits) continue;
@@ -513,8 +517,8 @@ static void menu_layout(void) {
         if(visibility>0.01f) {
             if(c==0) {
                 menu_list(x,app_pos,apps,sizeof apps[0],APP_N,visibility,app_details[app]);
-                // The paused mark: in the 16 px left of the row, centred on its
-                // 14 rows, and faded with it -- so it moves with its row and
+                // The paused mark: in the 16 px left of the row, as tall as its
+                // text (10 x 14 px at the row's scale), and faded with it -- so it moves with its row and
                 // adds no row of its own (test_settings.py and capture_home.py
                 // count rows).
                 const char *kept=app_dormant_id();
@@ -523,7 +527,7 @@ static void menu_layout(void) {
                     float strength=1-fminf(fabsf(i-app_pos),1)*0.70f;
                     float y=item_y(i-app_pos);
                     float clearance=fminf(fabsf(y-34)/20,1);
-                    label(x-13,(int)lroundf(y)+4,"||",1,visibility*strength*clearance);
+                    label(x-13,(int)lroundf(y),"\x7f",MENU_ITEM_SCALE,visibility*strength*clearance);
                 }
             } else {
                 // An action row has no value to show under the list.
