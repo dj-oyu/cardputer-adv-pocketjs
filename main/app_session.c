@@ -1020,26 +1020,33 @@ source_ready:;
             "return 0}globalThis.frame=()=>{try{f(60,1,2,3,4,5,6,7)}catch(x){k.length=0}};";
             break;
         // R4a (docs/vm/turn-cpi.md sec.4): fs.open at the limit must not keep
-        // a slot whose File never reached the app. Each frame fills the heap to
-        // the last byte, gives back a few of the smallest blocks, opens, then
-        // drops the fill so the File (if any) can be closed; the release walks
-        // 0..23 blocks ten times over (the heap's layout differs each round),
-        // so some step lands between the File and its promise. Then two opens at
-        // once must both succeed: "FSOOM ok", or "FSOOM leak" with the refusal.
+        // a slot whose File never reached the app. Stage 0: each frame fills
+        // the heap to the last byte, gives back a few of the smallest blocks,
+        // opens, then drops the fill so the File (if any) can be closed; the
+        // release walks 0..23 blocks ten times over (the heap's layout differs
+        // each round), so some step lands between the File and its promise.
         // The first read of fs.open is itself at the limit, which is how the
-        // lazy-list hole (quickjs.c lazy_undo_done) was found: "not a function".
+        // lazy-list hole (quickjs.c lazy_undo_done) was found. Stage 1 (sec.
+        // 4.2): the open succeeds with room to spare, and it is the .then --
+        // the continuation an await would queue -- that meets the limit; when
+        // it cannot be queued the File is dropped with its promise and only
+        // the finalizer gives the slot back. Then two opens at once must both
+        // succeed: "FSOOM ok", or "FSOOM leak" with the refusal.
         case '^': source=
             "const fs=pocket.fs,O={mode:'read'},N='assets:/hello.js',f=new Array(3000).fill(0);"
-            "let g=0,st=0,thr=0,got=0,rej=0,odd=0;"
-            "globalThis.frame=()=>{if(st===0){let p=null,n=0;"
-            "try{for(let s=2048;s>=1;s>>=1)while(n<3000){try{f[n]=new Uint8Array(s);n++}catch(e){break}}"
-            "for(let k=g%24;k>0&&n>0;k--)f[--n]=0;"
-            "p=fs.open(N,O)}catch(e){thr++}while(n>0)f[--n]=0;"
-            "if(p)p.then(h=>{got++;if(h&&typeof h.close==='function')h.close();else odd++},"
-            "e=>{rej++});if(++g>=240)st=1;return}"
-            "if(st===1){st=2;Promise.all([fs.open(N,O),fs.open(N,O)]).then("
-            "a=>{a[0].close();a[1].close();console.log('FSOOM ok thr='+thr+' got='+got+' rej='+rej+' odd='+odd)},"
-            "e=>console.log('FSOOM leak '+e.message+' thr='+thr+' got='+got+' rej='+rej+' odd='+odd))}};";
+            "let g=0,st=0,thr=0,got=0,rej=0,odd=0,lost=0;"
+            "function fill(){let n=0;for(let s=2048;s>=1;s>>=1)while(n<3000){try{f[n]=new Uint8Array(s);n++}catch(e){break}}"
+            "for(let k=g%24;k>0&&n>0;k--)f[--n]=0;return n}"
+            "function drop(n){while(n>0)f[--n]=0}"
+            "function took(h){got++;if(h&&typeof h.close==='function')h.close();else odd++}"
+            "globalThis.frame=()=>{if(st<2){let p=null,n=0;"
+            "if(st===1)try{p=fs.open(N,O)}catch(e){thr++}"
+            "try{n=fill();if(st===0)p=fs.open(N,O);if(p)p.then(took,e=>{rej++})}"
+            "catch(e){if(st===0)thr++;else lost++}drop(n);p=null;"
+            "if(++g>=240*(st+1))st++;return}"
+            "if(st===2){st=3;Promise.all([fs.open(N,O),fs.open(N,O)]).then("
+            "a=>{a[0].close();a[1].close();console.log('FSOOM ok thr='+thr+' got='+got+' rej='+rej+' odd='+odd+' lost='+lost)},"
+            "e=>console.log('FSOOM leak '+e.message+' thr='+thr+' got='+got+' rej='+rej+' odd='+odd+' lost='+lost))}};";
             break;
 #endif
 #ifdef CONFIG_POCKET_VM_RELOC

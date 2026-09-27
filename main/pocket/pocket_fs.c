@@ -1093,6 +1093,11 @@ typedef struct {
     uint8_t  nown;
     int16_t  verified;      // sector whose CRC a reader has already checked
     bool     broken;        // a failed write refuses everything afterwards
+    // Its File was collected without close() or commit(): nothing can reach
+    // this handle again, so the next pocket_fs_pump() discards it. Set by the
+    // finalizer, which runs inside a collection and so must not do the I/O a
+    // close is (fclose, unlink, sector release) itself.
+    bool     orphan;
     // sd: only. The handle carries the media generation it was opened under, so
     // a card swapped underneath it is detectable rather than merely unlucky --
     // section 3 requires that a removal invalidate handles and that reinsertion
@@ -1855,6 +1860,10 @@ static bool sd_volume_payload(JSContext *ctx, int slot, void *user,
 void pocket_fs_pump(void) {
     sd_media_service();
     if(!built) return;                 // nobody read pocket.fs; nothing to tell
+    // Before anything the app could open next: a collected File's slot is
+    // free again by the time JavaScript runs.
+    for(int i=0;i<FS_MAX_HANDLES;i++)
+        if(files[i].handle&&files[i].orphan) file_close(&files[i],true);
     const sd_media_t *m=sd_media();
     if(m->generation==sd_told_gen&&(uint8_t)m->state==sd_told_state) return;
     sd_told_now();
@@ -2405,7 +2414,8 @@ static fs_file_t *file_slot(void) {
 // would stay taken until the app ended -- STRESS LV3 ran out of both slots
 // that way (docs/vm/turn-cpi.md sec.4). pocket_api_settled frees the value
 // when it cannot build the promise, so the slot is closed here, by handle
-// because the object that carried it is gone.
+// because the object that carried it is gone. (The finalizer would mark it
+// for the next pump as well; closing now frees it before that.)
 static JSValue file_settled(JSContext *ctx, fs_file_t *f) {
     uint32_t handle=f->handle;
     JSValue o=JS_NewObjectClass(ctx,file_class);
@@ -3963,12 +3973,25 @@ static const JSCFunctionListEntry file_methods[] = {
     JS_CFUNC_DEF("close",  0, js_file_close),
 };
 
-// No finalizer, on purpose: a File is a slot in a fixed table, and letting the
-// collector close one would make an app that dropped its variable lose an open
-// writer at an unpredictable moment. close(), commit() and pocket_fs_reset()
-// are the three ways a handle ends -- the same rule pocket_ui.c states for its
-// nodes.
-static const JSClassDef file_class_def = { .class_name="PocketFile" };
+// A File is a slot in a fixed table of two. close(), commit() and
+// pocket_fs_reset() end a handle, and so does the collector: a File nothing
+// references can never be closed or committed again, so discarding it loses
+// nothing the app could still have saved -- it is what app_stop() would do to
+// it later, only without the slot staying taken until then. That used to be
+// the rule the other way round ("no finalizer, or an app that dropped its
+// variable loses an open writer"), and it cost both slots under OOM: an await
+// whose continuation could not be queued dropped the File it was handed, and
+// every open after that was "two files are already open" (docs/vm/turn-cpi.md
+// sec.4.2). The finalizer only marks the slot; pocket_fs_pump() closes it
+// outside the collection. close() clears the opaque, and a committed handle's
+// number is never reused, so neither is found here again.
+static void file_finalizer(JSRuntime *rt, JSValueConst val) {
+    (void)rt;
+    fs_file_t *f=file_of((uint32_t)(uintptr_t)JS_GetOpaque(val,file_class));
+    if(f) f->orphan=true;
+}
+static const JSClassDef file_class_def = { .class_name="PocketFile",
+                                           .finalizer=file_finalizer };
 
 static const JSCFunctionListEntry fs_methods[] = {
     JS_CFUNC_DEF("volumes",        0, js_volumes),
