@@ -176,7 +176,7 @@ static const ksn_image_entry *find_image(const ksn_core_impl *core,ksn_layer lay
 static ksn_result validate_image(const ksn_core_impl *core,ksn_layer layer,ksn_resource id,uint16_t variant,uint16_t frame){
     const ksn_image_entry *entry=find_image(core,layer,id);
     if(!entry)return KSN_STALE;
-    return variant<entry->port.variants&&frame<entry->port.frames?KSN_OK:KSN_INVALID;
+    return variant<entry->variants&&frame<entry->frames?KSN_OK:KSN_INVALID;
 }
 static ksn_result validate_image_window(const ksn_core_impl *core,ksn_layer layer,ksn_resource id,
                                        ksn_rect bounds,uint16_t x,uint16_t y,ksn_image_scale scale,
@@ -192,7 +192,7 @@ static ksn_result validate_image_window(const ksn_core_impl *core,ksn_layer laye
         if((width|height)&1u)return KSN_INVALID;
         width/=2;height/=2;
     }else if(scale==KSN_IMAGE_HALF){width*=2;height*=2;}
-    return (uint32_t)x+width<=entry->port.width&&(uint32_t)y+height<=entry->port.height?KSN_OK:KSN_INVALID;
+    return (uint32_t)x+width<=entry->width&&(uint32_t)y+height<=entry->height?KSN_OK:KSN_INVALID;
 }
 
 /* Only the published prefix of each layer can be read. Every new command is
@@ -775,7 +775,9 @@ ksn_result ksn_core_register_image(ksn_core *storage,ksn_layer layer,const ksn_i
     if(core->building||core->submitted||core->repairing)return KSN_BUSY;
     if(core->image_count==KSN_RESOURCES||last_resource==UINT32_MAX)return KSN_LIMIT;
     ksn_image_entry *entry=&core->images[core->image_count++];
-    *entry=(ksn_image_entry){*port,{++last_resource},layer};*out=entry->id;return KSN_OK;
+    *entry=(ksn_image_entry){port->ctx,port->width,port->height,port->variants,port->frames,
+                             port->read_span,{++last_resource},(uint8_t)layer,(uint8_t)port->opaque};
+    *out=entry->id;return KSN_OK;
 }
 bool ksn_core_has_submission(const ksn_core *storage){return storage&&cimpl(storage)->submitted;}
 ksn_submission ksn_core_poll(const ksn_core *storage){
@@ -783,7 +785,8 @@ ksn_submission ksn_core_poll(const ksn_core *storage){
 }
 bool ksn_core_needs_repair(const ksn_core *storage){
     return storage&&(cimpl(storage)->full_redraw||cimpl(storage)->invalidated||
-                     cimpl(storage)->repair_bands);
+                     cimpl(storage)->repair_bands||cimpl(storage)->invalidated_rects||
+                     cimpl(storage)->repair_rects);
 }
 void ksn_core_invalidate(ksn_core *storage){ksn_core_invalidate_bands(storage,KSN_BANDS_ALL);}
 void ksn_core_invalidate_bands(ksn_core *storage,uint32_t bands){
@@ -869,10 +872,11 @@ ksn_result ksn_core_presented(ksn_core *storage,ksn_tx ticket){
     ksn_core_impl *core=impl(storage);
     if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
     if(core->repairing){
-        core->repairing=false;core->full_redraw=false;core->repair_bands=0;return KSN_OK;
+        core->repairing=false;core->full_redraw=false;core->repair_bands=0;
+        core->repair_rects=0;return KSN_OK;
     }
     core->active=core->building_bank;core->submitted=false;core->full_redraw=false;
-    core->repair_bands=0;
+    core->repair_bands=0;core->repair_rects=0;
     core->outcome=(ksn_submission){ticket,KSN_PRESENTED,KSN_OK,core->layer};return KSN_OK;
 }
 ksn_result ksn_core_discard(ksn_core *storage,ksn_tx ticket){
@@ -935,6 +939,18 @@ ksn_result ksn_core_prepare_frame(ksn_core *storage,ksn_frame *out){
      * by repair_bands, which damage seeds and present clears. */
     if(core->invalidated==KSN_BANDS_ALL)core->full_redraw=true;
     core->repair_bands|=core->invalidated;core->invalidated=0;
+    for(unsigned band=0;band<17;band++)if(core->invalidated_rects&(1u<<band)){
+        uint32_t bit=1u<<band;
+        if(!(core->repair_rects&bit)){
+            core->repair_rects|=bit;
+            core->repair_x0[band]=core->invalid_x0[band];
+            core->repair_x1[band]=core->invalid_x1[band];
+        }else{
+            if(core->invalid_x0[band]<core->repair_x0[band])core->repair_x0[band]=core->invalid_x0[band];
+            if(core->invalid_x1[band]>core->repair_x1[band])core->repair_x1[band]=core->invalid_x1[band];
+        }
+    }
+    core->invalidated_rects=0;
     return ksn_core_frame(storage,out);
 }
 void ksn_core_defer_repair(ksn_core *storage,ksn_tx ticket){
@@ -1048,10 +1064,23 @@ ksn_result ksn_core_image_span(const ksn_core *storage,ksn_tx ticket,bool previo
         payload_read(command,&s,sizeof(s));p.variant=s.variant;p.frame=s.frame;}
     const ksn_image_entry *entry=find_image(core,layer,(ksn_resource){p.resource});
     if(!entry)return KSN_STALE;
-    if(y>=entry->port.height||x>entry->port.width||count>entry->port.width-x||
+    if(y>=entry->height||x>entry->width||count>entry->width-x||
        (count&&(!rgb565||!alpha)))return KSN_INVALID;
     if(!count)return KSN_OK;
-    return entry->port.read_span(entry->port.ctx,p.variant,p.frame,y,x,count,rgb565,alpha);
+    return entry->read_span(entry->ctx,p.variant,p.frame,y,x,count,rgb565,alpha);
+}
+
+bool ksn_core_image_opaque(const ksn_core *storage,ksn_tx ticket,ksn_layer layer,uint16_t index){
+    if(!storage||!valid_layer(layer))return false;
+    const ksn_core_impl *core=cimpl(storage);
+    if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return false;
+    const ksn_bank *bank=&core->banks[core->repairing?core->active:core->building_bank];
+    if(index>=bank->count[layer])return false;
+    const ksn_command_storage *command=bank_command_const(bank,command_base(layer)+index);
+    if(command->kind!=KSN_IMAGE)return false;
+    image_payload p;payload_read(command,&p,sizeof(p));
+    const ksn_image_entry *entry=find_image(core,layer,(ksn_resource){p.resource});
+    return entry&&entry->opaque;
 }
 
 /* The command's clipped box on the panel, or an empty rect when it paints
@@ -1090,6 +1119,32 @@ static void damage_add(ksn_damage *d,ksn_rect box){
             if(box.x1>d->x1[band])d->x1[band]=box.x1;
         }
     }
+}
+bool ksn_core_invalidate_image(ksn_core *storage,ksn_resource resource){
+    if(!storage||!resource.value)return false;
+    ksn_core_impl *core=impl(storage);
+    ksn_damage found={0};
+    unsigned banks=core->submitted?2u:1u;
+    for(unsigned bank_no=0;bank_no<banks;bank_no++){
+        const ksn_bank *bank=&core->banks[bank_no?core->building_bank:core->active];
+        for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<bank->count[layer];i++){
+            const ksn_command_storage *command=bank_command_const(bank,command_base((ksn_layer)layer)+i);
+            if(command->kind!=KSN_IMAGE)continue;
+            image_payload p;payload_read(command,&p,sizeof(p));
+            if(p.resource==resource.value)damage_add(&found,command_box(command));
+        }
+    }
+    for(unsigned band=0;band<17;band++)if(found.bands&(1u<<band)){
+        uint32_t bit=1u<<band;
+        if(!(core->invalidated_rects&bit)){
+            core->invalidated_rects|=bit;
+            core->invalid_x0[band]=found.x0[band];core->invalid_x1[band]=found.x1[band];
+        }else{
+            if(found.x0[band]<core->invalid_x0[band])core->invalid_x0[band]=found.x0[band];
+            if(found.x1[band]>core->invalid_x1[band])core->invalid_x1[band]=found.x1[band];
+        }
+    }
+    return found.bands!=0;
 }
 /* One scalar out of text the bank has already validated, so the checks
  * utf8_count makes on the way in are not repeated here. Returns 0 and consumes
@@ -1202,7 +1257,8 @@ ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,
     if(!storage||!out)return KSN_INVALID;
     const ksn_core_impl *core=cimpl(storage);
     if((!core->submitted&&!core->repairing)||ticket.value!=core->transaction.value)return KSN_STALE;
-    const ksn_bank *old=&core->banks[core->active],*next=&core->banks[core->building_bank];
+    const ksn_bank *old=&core->banks[core->active],
+                   *next=&core->banks[core->repairing?core->active:core->building_bank];
     memset(out,0,sizeof(*out));
     if(core->full_redraw||old->background[KSN_APP]!=next->background[KSN_APP]||
        old->generation[0]!=next->generation[0]||old->generation[1]!=next->generation[1]){
@@ -1246,5 +1302,9 @@ ksn_result ksn_core_damage(const ksn_core *storage,ksn_tx ticket,
      * diff put there. A repairing frame reads the same bank on both sides, so
      * the loop above found nothing and these are the only bands it has. */
     damage_widen(out,core->repair_bands);
+    for(unsigned band=0;band<17;band++)if(core->repair_rects&(1u<<band)){
+        damage_add(out,(ksn_rect){core->repair_x0[band],(int16_t)(band*8),
+                   core->repair_x1[band],(int16_t)((band==16)?135:(band+1)*8)});
+    }
     return KSN_OK;
 }

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define REQUIRE(x) do { if(!(x)){fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);} } while(0)
 static uint16_t actual[KSN_PROC_W*KSN_PROC_H], expected[KSN_PROC_W*KSN_PROC_H];
@@ -85,6 +86,26 @@ static void reference(unsigned tick){
         }
     }
 }
+static void check_image_rows(const ksn_image_port *image){
+    uint16_t span[KSN_PROC_W];uint8_t alpha[KSN_PROC_W];
+    /* Alternating bands, the short final band, and duplicate source rows
+     * exercise zoomed/reordered reads independently of sequential scans. */
+    static const uint16_t rows[]={134,0,7,8,15,16,128,133,129,134,64,63,64,0};
+    for(unsigned i=0;i<sizeof rows/sizeof rows[0];i++){
+        uint16_t y=rows[i];
+        REQUIRE(image->read_span(image->ctx,0,0,y,3,KSN_PROC_W-3,span,alpha)==KSN_OK);
+        REQUIRE(memcmp(span,expected+(unsigned)y*KSN_PROC_W+3,
+                       (KSN_PROC_W-3)*sizeof *span)==0);
+        for(unsigned x=0;x<KSN_PROC_W-3;x++)REQUIRE(alpha[x]==255);
+    }
+    for(unsigned y=0;y<KSN_PROC_H;y++){
+        /* A two-row source map makes each row appear twice during shrink. */
+        for(unsigned repeat=0;repeat<2;repeat++){
+            REQUIRE(image->read_span(image->ctx,0,0,y,0,KSN_PROC_W,span,alpha)==KSN_OK);
+            REQUIRE(memcmp(span,expected+(unsigned)y*KSN_PROC_W,sizeof span)==0);
+        }
+    }
+}
 int main(int argc,char **argv){
     REQUIRE(argc==2||argc==3);
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
@@ -98,6 +119,7 @@ int main(int argc,char **argv){
     REQUIRE(image.width==KSN_PROC_W&&image.height==KSN_PROC_H);
     REQUIRE(image.variants==1&&image.frames==1);
     uint16_t span[KSN_PROC_W];uint8_t alpha[KSN_PROC_W];
+    clock_t span_ticks=0;
     REQUIRE(image.read_span(image.ctx,1,0,0,0,1,span,alpha)==KSN_INVALID);
     REQUIRE(image.read_span(image.ctx,0,0,0,0,KSN_PROC_W,span,alpha)==KSN_OK);
     for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
@@ -117,6 +139,11 @@ int main(int argc,char **argv){
             REQUIRE(memcmp(span,expected+y*KSN_PROC_W,sizeof span)==0);
             for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(alpha[x]==255);
         }
+        clock_t span_start=clock();
+        for(unsigned pass=0;pass<10;pass++)for(unsigned y=0;y<KSN_PROC_H;y++)
+            REQUIRE(image.read_span(image.ctx,0,0,y,0,KSN_PROC_W,span,alpha)==KSN_OK);
+        span_ticks+=clock()-span_start;
+        check_image_rows(&image);
         if(argc==3){
             char path[1024];
             REQUIRE(snprintf(path,sizeof path,"%s/frame-%02u.rgb565",argv[2],tick)>0);
@@ -134,11 +161,15 @@ int main(int argc,char **argv){
             REQUIRE(memcmp(actual,expected,sizeof actual)==0);
             REQUIRE(image.read_span(image.ctx,0,0,25,7,31,span,alpha)==KSN_OK);
             REQUIRE(memcmp(span,expected+25*KSN_PROC_W+7,31*sizeof *span)==0);
+            check_image_rows(&image);
             pocket_proc_present_result(KSN_IO); /* repeated transfer failure */
             REQUIRE(pocket_proc_pending());
             REQUIRE(image.read_span(image.ctx,0,0,25,7,31,span,alpha)==KSN_OK);
             REQUIRE(memcmp(span,expected+25*KSN_PROC_W+7,31*sizeof *span)==0);
-            REQUIRE(invalidates>0);
+            check_image_rows(&image);
+            /* The image node's core ticket owns IO retry; no backdrop-wide
+             * invalidation is needed for its candidate. */
+            REQUIRE(invalidates==0);
             pocket_proc_present_result(KSN_OK); /* UI ticket and image ACK */
             REQUIRE(!pocket_proc_pending());
             REQUIRE(image.read_span(image.ctx,0,0,25,7,31,span,alpha)==KSN_OK);
@@ -179,6 +210,7 @@ int main(int argc,char **argv){
                 "pocket.kasane.procedural.commit()");
     pocket_proc_present_result(KSN_IO);
     REQUIRE(pocket_proc_has_frame());
+    REQUIRE(invalidates>0); /* Backdrop mode repairs the old committed frame. */
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)REQUIRE(actual[i]==0);
     pocket_proc_present_result(KSN_OK);
@@ -211,6 +243,7 @@ int main(int argc,char **argv){
     REQUIRE(!pocket_proc_pending());
     pocket_proc_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
-    puts("PASS real QuickJS procedural adapter: 48 candidate frames with typed points, exact RGB565, rollback, repair, malformed input, reset and reentrancy");
+    printf("PASS real QuickJS procedural adapter: 48 candidate frames with typed points, exact RGB565, rollback, repair, malformed input, reset and reentrancy; image span CPU %.1f ms\n",
+           1000.0*(double)span_ticks/CLOCKS_PER_SEC);
     return 0;
 }

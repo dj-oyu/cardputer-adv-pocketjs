@@ -15,6 +15,8 @@ OUT=ROOT/'.cache/kasane_pocket_proc_qjs'
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out',type=Path,help='write 48 RGB565 frames and SHA256 manifest')
+    parser.add_argument('--opt',choices=('0','2'),default='2',help='host compiler optimization level')
+    parser.add_argument('--proc-source',type=Path,help='alternate pocket_proc.c for baseline comparison')
     args=parser.parse_args()
     cc=shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
     if not cc:
@@ -23,7 +25,8 @@ def main():
     if not cc:raise SystemExit('No host C compiler found')
     OUT.mkdir(parents=True,exist_ok=True)
     suffix='.exe' if sys.platform=='win32' else ''
-    binary=OUT/('test_pocket_proc_qjs'+suffix)
+    label='_baseline' if args.proc_source else ''
+    binary=OUT/('test_pocket_proc_qjs'+label+'_O'+args.opt+suffix)
     sources=[*(QJS/name for name in ('dtoa.c','libregexp.c','libunicode.c','quickjs.c','quickjs-vm.c')),
              ROOT/'main/ui/kasane/ksn_procedural.c',
              ROOT/'main/ui/kasane/ksn_proc_analysis.c',
@@ -32,9 +35,9 @@ def main():
              ROOT/'main/ui/kasane/ksn_proc_points.c',
              ROOT/'main/ui/kasane/ksn_proc_points_pie.c',
              ROOT/'main/ui/kasane/ksn_proc_points_dispatch.c',
-             ROOT/'main/pocket/pocket_proc.c',
+             (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
-    command=[cc,'-std=gnu11','-O2','-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',
+    command=[cc,'-std=gnu11','-O'+args.opt,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',
              '-DKSN_PROC_HOST_TEST',
              '-I',str(QJS),'-I',str(ROOT/'main'),'-I',str(ROOT/'main/pocket'),
              '-I',str(ROOT/'main/ui/kasane'),'-I',str(ROOT/'tools/kasane_contract'),
@@ -47,7 +50,7 @@ def main():
         args.out.mkdir(parents=True,exist_ok=True)
         invocation.append(str(args.out.resolve()))
     subprocess.run(invocation,cwd=ROOT,env=env,check=True)
-    fake_binary=OUT/('test_pocket_proc_qjs_fake_pie'+suffix)
+    fake_binary=OUT/('test_pocket_proc_qjs_fake_pie'+label+'_O'+args.opt+suffix)
     fake_command=[argument for argument in command if argument!=str(ROOT/'main/ui/kasane/ksn_proc_points_pie.c')]
     fake_command[fake_command.index('-o')+1]=str(fake_binary)
     fake_command[1:1]=['-D__XTENSA__','-DCONFIG_IDF_TARGET_ESP32S3=1',

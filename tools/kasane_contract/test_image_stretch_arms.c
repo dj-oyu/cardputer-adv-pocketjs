@@ -13,6 +13,13 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef KSN_IDENTITY_BENCH
+#include <time.h>
+#endif
+
+#ifndef KSN_IDENTITY_EXPECTED_SPANS
+#define KSN_IDENTITY_EXPECTED_SPANS 1080
+#endif
 
 #define PANEL (240*135)
 static uint16_t panel[PANEL],strip[240*8];
@@ -23,7 +30,7 @@ static ksn_result send(void *p,uint16_t y,uint16_t rows,const uint16_t *pixels){
 static uint16_t source_color(unsigned x,unsigned y,unsigned frame){return (uint16_t)(x*313+y*937+frame*3001);}
 static uint8_t source_coverage(unsigned x,unsigned y){const uint8_t a[]={0,1,127,128,254,255};return a[(x+y*3)%6];}
 static ksn_result source(void *p,uint16_t variant,uint16_t frame,uint16_t y,uint16_t x,uint16_t n,uint16_t *rgb,uint8_t *alpha){
-    (void)p;assert(variant<1&&frame<2&&y<160&&x+n<=160&&n<=32);
+    (void)p;assert(variant<1&&frame<2&&y<160&&x+n<=240&&n<=32);
     fetches++;
     for(unsigned i=0;i<n;i++){rgb[i]=source_color(x+i,y,frame);alpha[i]=source_coverage(x+i,y);}
     return KSN_OK;
@@ -58,7 +65,7 @@ typedef struct {
 static uint32_t scene(const config *c,bool step,unsigned long long *fetch_count){
     KSN_TEST_CORE(core,);ksn_core_init(&core);
     ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_image_port port={NULL,160,160,1,2,source};ksn_resource image;
+    ksn_image_port port={NULL,240,160,1,2,source,false};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
     ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};
     ksn_render_stats stats;ksn_tx tx;ksn_ref ref;uint32_t hash=2166136261u;
@@ -107,7 +114,7 @@ static uint32_t animate_120(unsigned arm_mode,unsigned long long *fetch_count,un
     assert(ksn_core_enable_animation(&core,&blocks[0],&blocks[1])==KSN_OK);
     assert(ksn_core_animation_bytes(&core)<=1024);
     ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_image_port port={NULL,160,160,1,2,source};ksn_resource image;
+    ksn_image_port port={NULL,240,160,1,2,source,false};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
     ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};
     ksn_render_stats stats;ksn_tx tx;ksn_ref ref;uint32_t hash=2166136261u;unsigned frames=0;
@@ -213,6 +220,21 @@ int main(void){
      scene(&c,true,&fa);
      assert(fa==(unsigned long long)15*135);
      printf("stretched panel: %llu spans for 240x135 destination pixels\n",fa);
+     configs++;}
+    /* 8. Full-screen identity stretch reads eight 32-pixel chunks per row.
+     * The provider limit is unchanged and both switch settings agree. */
+    {unsigned long long fa=0,fb=0;
+     c.x=0;c.y=0;c.w=240;c.h=135;c.source_x=0;c.source_y=0;
+     c.source_w=240;c.source_h=135;c.steps=0;c.opacity=255;c.group=0;
+     uint32_t ha=scene(&c,true,&fa),hb=scene(&c,false,&fb);
+     assert(ha==hb&&fa==fb&&fa==KSN_IDENTITY_EXPECTED_SPANS);
+     printf("identity panel: %llu spans for 240x135 destination pixels, hash=%08x\n",fa,ha);
+#ifdef KSN_IDENTITY_BENCH
+     clock_t start=clock();
+     for(unsigned rep=0;rep<120;rep++)scene(&c,true,&fa);
+     printf("identity host bench: 120 frames, %.1f ms CPU time\n",
+            (double)(clock()-start)*1000.0/CLOCKS_PER_SEC);
+#endif
      configs++;}
     /* 7. 120-frame animated stretch track, both arms and an alternating arm. */
     {unsigned long long f_step,f_div,f_alt;unsigned n_step,n_div,n_alt;

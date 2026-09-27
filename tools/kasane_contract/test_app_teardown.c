@@ -41,7 +41,7 @@ int main(void){
         d.data.shape.color=0x00ff00ff;
         CHECK(ksn_view_cache_create(sys,&d,1,&s)==KSN_OK);
         CHECK(ksn_view_cache_create(app,&d,1,&a2)==KSN_OK);
-        ksn_image_port image={NULL,1,1,1,1,image_span};ksn_resource ar,sr;
+        ksn_image_port image={NULL,1,1,1,1,image_span,false};ksn_resource ar,sr;
         CHECK(ksn_core_register_image(&core,KSN_APP,&image,&ar)==KSN_OK);
         CHECK(ksn_core_register_image(&core,KSN_SYSTEM,&image,&sr)==KSN_OK);
         ksn_placement p={0,0,{0,0,240,135},255,true};

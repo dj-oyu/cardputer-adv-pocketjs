@@ -221,6 +221,14 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_image_render.c -lm -o "$out/image"
   "$out/image"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+    tools/kasane_contract/test_image_damage.c -o "$out/image-damage"
+  "$out/image-damage"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+    tools/kasane_contract/test_opaque_image_occlusion.c -o "$out/opaque-image-occlusion"
+  "$out/opaque-image-occlusion"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c tools/kasane_contract/test_image_rotate_arms.c -o "$out/image-rotate-arms"
   "$out/image-rotate-arms"

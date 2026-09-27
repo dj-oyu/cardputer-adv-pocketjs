@@ -23,7 +23,7 @@ int main(void){
     CHECK(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_OK&&tx.value==UINT32_MAX);
     app.ops->abort(app.ctx,tx);
     CHECK(app.ops->begin(app.ctx,KSN_PATCH,&tx)==KSN_LIMIT);
-    ksn_image_port port={NULL,1,1,1,1,dummy_span};ksn_resource id;
+    ksn_image_port port={NULL,1,1,1,1,dummy_span,false};ksn_resource id;
     last_resource=UINT32_MAX-1;
     CHECK(ksn_core_register_image(&core,KSN_APP,&port,&id)==KSN_OK&&id.value==UINT32_MAX);
     CHECK(ksn_core_register_image(&core,KSN_APP,&port,&id)==KSN_LIMIT);

@@ -78,5 +78,5 @@ static ksn_result read_span(void *ctx,uint16_t pet,uint16_t mood,uint16_t y,uint
 }
 ksn_result ksn_pet_image(const uint8_t *data,size_t bytes,ksn_image_port *out){
     if(!out||!pet_pixels_valid(data,bytes))return KSN_INVALID;
-    *out=(ksn_image_port){(void *)data,64,64,12,6,read_span};return KSN_OK;
+    *out=(ksn_image_port){(void *)data,64,64,12,6,read_span,false};return KSN_OK;
 }

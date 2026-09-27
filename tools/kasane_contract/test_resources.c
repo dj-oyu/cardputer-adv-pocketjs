@@ -11,7 +11,7 @@ static ksn_result span(void *ctx,uint16_t variant,uint16_t frame,uint16_t y,uint
 }
 int main(void){
     KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP),sys=ksn_core_client(&core,KSN_SYSTEM);
-    ksn_image_port port={NULL,64,64,2,3,span};ksn_resource image,other;
+    ksn_image_port port={NULL,64,64,2,3,span,false};ksn_resource image,other;
     CHECK(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
     port.width=1; /* The descriptor was copied. */
     CHECK(ksn_core_register_image(&core,KSN_SYSTEM,&port,&other)==KSN_OK);

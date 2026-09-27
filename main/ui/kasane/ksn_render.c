@@ -122,6 +122,7 @@ static void fill565(uint16_t *dst,unsigned count,uint16_t color){
  * presentation. Validity covers one ksn_render_rects call, so a retried frame
  * decodes again from scratch. Owner task only, like every entry point here. */
 int g_ksn_decode_once=1;
+int g_ksn_opaque_image_occlusion=1;
 typedef struct {
     ksn_draw draw;
     bool visible,group_begin,group_end;
@@ -153,6 +154,14 @@ static ksn_rgba image_color(uint16_t rgb,uint8_t alpha){
 static unsigned stretch_sample(unsigned offset,unsigned source,unsigned destination){
     /* Pixel centers, exact integer mapping. Source <=256 and dest <=65535. */
     return (offset*source+source/2)/destination;
+}
+/* Exact 1:1 stretch needs neither a quotient table nor 16-pixel reads. The
+ * existing image RGB/alpha scratch holds 32 source pixels; the group tile
+ * still requests only its own 16-pixel window. */
+static bool image_stretch_identity(const ksn_draw *d){
+    return !d->data.image.rotation&&d->data.image.scale==KSN_IMAGE_STRETCH&&
+           d->data.image.source_width==(unsigned)(d->bounds.x1-d->bounds.x0)&&
+           d->data.image.source_height==(unsigned)(d->bounds.y1-d->bounds.y0);
 }
 /* Stretched spans: a destination column maps to the source index
  * floor((dx*source_width + source_width/2)/width), and the index used inside a
@@ -414,6 +423,10 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
     if(d->data.image.scale==KSN_IMAGE_2X){n=((dx&1u)+*count+1)/2;dx/=2;dy/=2;}
     else if(d->data.image.scale==KSN_IMAGE_HALF){n=2*(*count)-1;dx=2*dx+1;dy=2*dy+1;}
     else if(d->data.image.scale==KSN_IMAGE_STRETCH){
+        if(image_stretch_identity(d))
+            return ksn_core_image_span(core,ticket,false,layer,(uint16_t)index,
+                (uint16_t)(d->data.image.source_y+dy),(uint16_t)(d->data.image.source_x+dx),
+                (uint16_t)n,scratch->image.rgb,scratch->image.alpha);
         unsigned source=d->data.image.source_width;
         unsigned width=(unsigned)(d->bounds.x1-d->bounds.x0);
         /* One numerator for both arms: the lookup divides it, the stepped arm
@@ -444,6 +457,7 @@ static ksn_result image_read(ksn_core *core,ksn_tx ticket,ksn_layer layer,unsign
 static unsigned image_sample_index(const ksn_draw *d,const ksn_span_scratch *scratch,int x,unsigned offset){
     if(d->data.image.rotation)return offset;
     if(d->data.image.scale==KSN_IMAGE_STRETCH){
+        if(image_stretch_identity(d))return offset;
         /* The span stepped these indices; the division arm re-derives them. */
         if(g_ksn_image_stretch_step)return scratch->image.stretch[offset];
         unsigned dx=(unsigned)(x-d->bounds.x0),width=(unsigned)(d->bounds.x1-d->bounds.x0);
@@ -1923,6 +1937,8 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     }
     const ksn_frame_view *command;
     uint32_t next_system_opaque=0;
+    unsigned app_start[17]={0};
+    bool app_group=false;
     for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
         {KSN_PROF_BEGIN();
         result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
@@ -1930,6 +1946,25 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
         if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
         if(command->draw.kind<KSN_RECT||command->draw.kind>KSN_IMAGE){
             ksn_core_defer_repair(core,frame.ticket);return KSN_UNSUPPORTED;
+        }
+        if(layer==KSN_APP){
+            if(command->group_begin)app_group=true;
+            const ksn_draw *d=&command->draw;
+            if(g_ksn_opaque_image_occlusion&&!app_group&&
+               !command->group_end&&command->visible&&d->opacity==255&&
+               d->kind==KSN_IMAGE&&d->data.image.rotation==0&&
+               d->data.image.scale==KSN_IMAGE_STRETCH&&
+               ksn_core_image_opaque(core,frame.ticket,KSN_APP,(uint16_t)i)){
+                for(unsigned band=0;band<17;band++){
+                    if(!(damage.bands&(1u<<band)))continue;
+                    int y0=(int)band*8,y1=y0+8;if(y1>135)y1=135;
+                    if(d->bounds.x0<=damage.x0[band]&&d->bounds.x1>=damage.x1[band]&&
+                       d->clip.x0<=damage.x0[band]&&d->clip.x1>=damage.x1[band]&&
+                       d->bounds.y0<=y0&&d->bounds.y1>=y1&&
+                       d->clip.y0<=y0&&d->clip.y1>=y1)app_start[band]=i;
+                }
+            }
+            if(command->group_end)app_group=false;
         }
         /* The first ungrouped SYSTEM command can establish a whole opaque
          * band before anything else in that layer reads the strip. This is
@@ -1979,7 +2014,8 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             else for(int r=0;r<rows;r++)
                 fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
             KSN_PROF_END(fill);}
-        for(unsigned layer=0;layer<2;layer++)for(unsigned i=0;i<frame.next[layer].commands;i++){
+        for(unsigned layer=0;layer<2;layer++)for(unsigned i=layer==KSN_APP?app_start[band]:0;
+                                                  i<frame.next[layer].commands;i++){
             if(layer==KSN_APP&&(next_system_opaque&(1u<<band)))break;
             {KSN_PROF_BEGIN();
             result=frame_command(core,frame.ticket,(ksn_layer)layer,(uint16_t)i,&command);
@@ -2088,12 +2124,16 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                 continue;
             }
             if(d->kind==KSN_IMAGE){
+                KSN_PROF_BEGIN();
+                bool identity=image_stretch_identity(d);
                 for(int py=y0;py<y1;py++)for(int x=x0;x<x1;){
-                    unsigned count=(unsigned)(x1-x);if(count>16)count=16;
+                    unsigned count=(unsigned)(x1-x),limit=identity?32u:16u;
+                    if(count>limit)count=limit;
                     result=image_read(core,frame.ticket,(ksn_layer)layer,i,d,x,py,&count,&scratch);
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     for(unsigned j=0;j<count;j++){
-                        unsigned source=image_sample_index(d,&scratch,x,j),index=(unsigned)((py-y)*240+x)+j;
+                        unsigned source=identity?j:image_sample_index(d,&scratch,x,j);
+                        unsigned index=(unsigned)((py-y)*240+x)+j;
                         uint16_t rgb=d->data.image.rotation?scratch.rotated.rgb[source]:scratch.image.rgb[source];
                         uint8_t alpha=d->data.image.rotation?scratch.rotated.alpha[source]:scratch.image.alpha[source];
                         if(!alpha)continue;
@@ -2106,6 +2146,7 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                     }
                     x+=(int)count;
                 }
+                KSN_PROF_END(image);
                 continue;
             }
             if(d->kind==KSN_RECT&&d->opacity==255&&(d->data.shape.color&255)==255){

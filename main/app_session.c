@@ -215,6 +215,7 @@ static void prof_accumulate(const ksn_render_prof *frame){
     prof_sum.tile_cy+=frame->tile_cy;prof_sum.tile_n+=frame->tile_n;
     prof_sum.blend_cy+=frame->blend_cy;prof_sum.blend_n+=frame->blend_n;
     prof_sum.read_cy+=frame->read_cy;prof_sum.read_n+=frame->read_n;
+    prof_sum.image_cy+=frame->image_cy;prof_sum.image_n+=frame->image_n;
 }
 // Borrowed for the length of a start; the Playground owns the bytes and does
 // not edit them while a run is up.
@@ -280,6 +281,10 @@ static bool overlay_session;
  * without charging every native frame for a JS turn. Reset per session. */
 static int64_t overlay_guest_last_us;
 static bool kasane_presented;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+static bool news_prof_active;
+static int news_prof_previous;
+#endif
 #ifdef KASANE_P2_REPAIR_PROBE
 /* 1: forced full repaint, 2: the next natural PATCH. USB task -> UI task. */
 static atomic_int p2_repair_request;
@@ -716,6 +721,9 @@ void app_stop(void) {
 #endif
     app_report();
     if(p0_had_guest)ksn_p0_probe_report(overlay_session?"overlay":"app");
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    if(news_prof_active){g_ksn_prof=news_prof_previous;news_prof_active=false;}
+#endif
 #ifdef KASANE_P4_DECODE_CYCLE_PROBE
     if(p0_had_guest)ksn_render_decode_cycle_report();
 #endif
@@ -900,7 +908,13 @@ source_ready:;
     // USB-only diagnostics exercise the same lifecycle and resource limits.
     switch(test) {
         case 'J': source=proc_megademo_start; break;
-        case '(': source=proc_news_zoom_start; break;
+        case '(': source=proc_news_zoom_start;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+                  news_prof_previous=g_ksn_prof;
+                  news_prof_active=true;
+                  g_ksn_prof=1;
+#endif
+                  break;
         case '1': source="(() => {"; break;
         case '2': source="while(true){}"; break;
         case '3': source="globalThis.frame=()=>{while(true){}}"; break;
@@ -1673,7 +1687,8 @@ static esp_err_t present_frame(void) {
                 ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f "
                          "bytes=%u bands=%u band_runs=%u band_mask=0x%05x prof=%d "
                          "fill_n=%u fill_cy=%u span_n=%u span_cy=%u tile_n=%u tile_cy=%u "
-                         "blend_n=%u blend_cy=%u read_n=%u read_cy=%u frames=%u",
+                         "blend_n=%u blend_cy=%u read_n=%u read_cy=%u "
+                         "image_n=%u image_cy=%u frames=%u",
                          ticks?turn_sum/ticks/1000.0:0.0,render_sum/30/1000.0,
                          present_sum/30/1000.0,(unsigned)stats.transferred_bytes,
                          band_count_last,band_runs_last,band_mask_last,g_ksn_prof,
@@ -1681,7 +1696,8 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.span_n,(unsigned)prof_sum.span_cy,
                          (unsigned)prof_sum.tile_n,(unsigned)prof_sum.tile_cy,
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
-                         (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,painted);
+                         (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
+                         (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
 #if KASANE_STRESS_GRAD_AB
                 ESP_LOGI("kasane","GRAD_AB window=%u pie=%d bytes_avg=%.1f",
                          grad_ab_window,g_ksn_vertical_gradient_pie,grad_ab_bytes/30.0);

@@ -28,7 +28,16 @@ typedef struct { ksn_track tracks[KSN_TRACKS]; } ksn_core_animation_block;
  * A typed member avoids accessing a declared byte array as an unrelated struct. */
 typedef struct ksn_core_impl ksn_core_impl;
 typedef struct { ksn_core_impl *core; ksn_layer layer; } ksn_endpoint;
-typedef struct { ksn_image_port port; ksn_resource id; ksn_layer layer; } ksn_image_entry;
+/* Compact copy of the public port: the two one-byte metadata fields occupy
+ * what was padding after the resource ID, preserving the core's SRAM budget. */
+typedef struct {
+    void *ctx;
+    uint16_t width,height,variants,frames;
+    ksn_result (*read_span)(void *,uint16_t,uint16_t,uint16_t,uint16_t,uint16_t,
+                            uint16_t *,uint8_t *);
+    ksn_resource id;
+    uint8_t layer,opaque;
+} ksn_image_entry;
 typedef struct {
     /* Keep clone_bank_metadata() in ksn_core.c in sync with logical fields
      * added here. Physical block identity must never cross candidate banks. */
@@ -75,6 +84,10 @@ struct ksn_core_impl {
      * occupies, which is the difference between a keystroke repainting the
      * field and a keystroke repainting the screen. */
     uint32_t invalidated,repair_bands;
+    /* External pixels changed without a command change. Pending requests are
+     * moved to the in-flight set by prepare_frame; later requests survive ACK. */
+    uint32_t invalidated_rects,repair_rects;
+    int16_t invalid_x0[17],invalid_x1[17],repair_x0[17],repair_x1[17];
     bool building,submitted,full_redraw,repairing;
 };
 
@@ -153,6 +166,9 @@ void ksn_core_invalidate(ksn_core *core);
  * invalidation stays available for owners that do not know. */
 #define KSN_BANDS_ALL ((1u<<17)-1u)
 void ksn_core_invalidate_bands(ksn_core *core,uint32_t bands);
+/* Invalidate the clipped display bounds of an image resource in both the
+ * committed bank and any submitted candidate. Returns false if absent. */
+bool ksn_core_invalidate_image(ksn_core *core,ksn_resource resource);
 /* Full-width 8-row bands whose displayed SYSTEM layer is independent of the
  * backdrop. Conservative: returns 0 while SYSTEM work/repair is in flight.
  * This is a read-only occlusion hint, never a substitute for submission damage. */
@@ -203,6 +219,9 @@ ksn_result ksn_core_read_active_ref(const ksn_core *core,ksn_layer layer,
 ksn_result ksn_core_image_span(const ksn_core *core,ksn_tx ticket,bool previous,
                             ksn_layer layer,uint16_t index,uint16_t y,uint16_t x,
                             uint16_t count,uint16_t *rgb565,uint8_t *alpha);
+/* Read the registered provider's all-pixel opacity promise for a sealed image
+ * command. Invalid/stale tickets and non-image commands return false. */
+bool ksn_core_image_opaque(const ksn_core *core,ksn_tx ticket,ksn_layer layer,uint16_t index);
 /* Cardputer's 17 bands, last one 7 rows, each with its column range. No state
  * mutation. A caller that cannot transfer a partial row widens every band to
  * [0,240) itself before compositing -- the renderer's narrow arm has to be a

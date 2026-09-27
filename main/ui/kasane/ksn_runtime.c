@@ -159,6 +159,9 @@ void ksn_runtime_invalidate(void){if(runtime)ksn_view_host_invalidate(&runtime->
 void ksn_runtime_invalidate_bands(uint32_t bands){
     if(runtime)ksn_view_host_invalidate_bands(&runtime->host,bands);
 }
+bool ksn_runtime_invalidate_image(ksn_resource resource){
+    return runtime&&ksn_view_host_invalidate_image(&runtime->host,resource);
+}
 uint32_t ksn_runtime_opaque_system_bands(void){
     return runtime?ksn_core_opaque_system_bands(&runtime->core):0;
 }

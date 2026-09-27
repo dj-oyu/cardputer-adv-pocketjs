@@ -33,11 +33,13 @@ static ksn_proc_frame *candidate,*scratch,*committed;
 static ksn_proc_vm *vm;
 static uint16_t candidate_color,committed_color;
 static bool building,pending,has_committed,repair_required,image_mode;
-/* The compositor usually requests multiple short spans from one source row. */
-static uint16_t image_row[KSN_PROC_W],image_row_y;
-static const ksn_proc_frame *image_row_frame;
-static uint16_t image_row_color;
-static bool image_row_valid;
+/* A source row can be requested repeatedly by scaled image draws. Cache the
+ * whole eight-row raster band so adjacent rows share one segment traversal. */
+#define PROC_IMAGE_BAND_ROWS 8u
+static uint16_t image_band[KSN_PROC_W*PROC_IMAGE_BAND_ROWS],image_band_y;
+static const ksn_proc_frame *image_band_frame;
+static uint16_t image_band_color;
+static bool image_band_valid;
 /* JS array elements may be accessors or Proxy traps. Nested calls must not
  * mutate a plan slot or frame while an outer call is still reading fields. */
 static bool js_call_active;
@@ -281,7 +283,7 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
                                    POCKET_ERR_BUSY,"Kasane presentation unavailable");
     candidate->ready=true;
     pending=true;
-    image_row_valid=false;
+    image_band_valid=false;
     building=false;
     return JS_UNDEFINED;
 }
@@ -338,7 +340,7 @@ void pocket_proc_reset(void){
     }
     free(candidate);free(scratch);free(committed);free(vm);
     candidate=scratch=committed=NULL;vm=NULL;
-    image_row_valid=false;image_row_frame=NULL;
+    image_band_valid=false;image_band_frame=NULL;
     building=pending=has_committed=repair_required=image_mode=js_call_active=false;
     candidate_color=committed_color=0;
     scalar_batches=pie_batches=0;
@@ -365,19 +367,23 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
     if(!count)return KSN_OK;
     const ksn_proc_frame *frame=pending?candidate:(has_committed?committed:NULL);
     uint16_t color=pending?candidate_color:(has_committed?committed_color:0);
-    if(!image_row_valid||image_row_y!=y||image_row_frame!=frame||
-       image_row_color!=color){
-        for(unsigned i=0;i<KSN_PROC_W;i++)image_row[i]=color;
-        if(frame&&!ksn_proc_render_band(frame,image_row,y,1))return KSN_INVALID;
-        image_row_y=y;image_row_frame=frame;image_row_color=color;
-        image_row_valid=true;
+    uint16_t band_y=(uint16_t)(y&~(PROC_IMAGE_BAND_ROWS-1u));
+    if(!image_band_valid||image_band_y!=band_y||image_band_frame!=frame||
+       image_band_color!=color){
+        unsigned rows=KSN_PROC_H-band_y;
+        if(rows>PROC_IMAGE_BAND_ROWS)rows=PROC_IMAGE_BAND_ROWS;
+        for(unsigned i=0;i<rows*KSN_PROC_W;i++)image_band[i]=color;
+        if(frame&&!ksn_proc_render_band(frame,image_band,band_y,(int)rows))return KSN_INVALID;
+        image_band_y=band_y;image_band_frame=frame;image_band_color=color;
+        image_band_valid=true;
     }
-    memcpy(rgb565,image_row+x,count*sizeof *rgb565);
+    memcpy(rgb565,image_band+(unsigned)(y-band_y)*KSN_PROC_W+x,count*sizeof *rgb565);
     memset(alpha,255,count);
     return KSN_OK;
 }
 void pocket_proc_image_port(ksn_image_port *out){
-    if(out)*out=(ksn_image_port){NULL,KSN_PROC_W,KSN_PROC_H,1,1,image_span};
+    if(out)*out=(ksn_image_port){.ctx=NULL,.width=KSN_PROC_W,.height=KSN_PROC_H,
+                              .variants=1,.frames=1,.read_span=image_span,.opaque=true};
 }
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
     (void)ctx;
@@ -394,11 +400,11 @@ void pocket_proc_present_result(ksn_result result){
             ksn_proc_frame *old=committed;committed=candidate;candidate=old;
             committed_color=candidate_color;
             has_committed=true;pending=false;
-            image_row_valid=false;
+            image_band_valid=false;
         }
         repair_required=false;
     }else if(result==KSN_IO){
-        image_row_valid=false;
+        image_band_valid=false;
         if(image_mode){
             /* Kasane retries a submitted UI patch against the same image
              * resource. Keep its pixels paired with that ticket until ACK. */
@@ -408,6 +414,6 @@ void pocket_proc_present_result(ksn_result result){
             /* A backdrop has no submitted image node: repaint the old frame. */
             repair_required=true;
         }
-        pocket_kasane_invalidate();
+        if(!image_mode)pocket_kasane_invalidate();
     }
 }

@@ -74,7 +74,7 @@ int main(void){
     CHECK(ksn_core_opaque_system_bands(&core)==0);
 
     pet_view view;
-    ksn_image_port image={NULL,64,64,16,16,test_image_span};ksn_resource resource;
+    ksn_image_port image={NULL,64,64,16,16,test_image_span,false};ksn_resource resource;
     CHECK(ksn_core_register_image(&core,KSN_APP,&image,&resource)==KSN_OK);
     CHECK(pet_view_build(app,resource,&view)==KSN_OK);
     CHECK(ksn_core_has_submission(&core));

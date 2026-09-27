@@ -2741,7 +2741,9 @@ ksn_result pocket_kasane_proc_publish(void){
     if(!ksn_runtime_app_view(state->lease))return KSN_STALE;
     state->active=true;
     ksn_runtime_app_activate(state->lease);
-    ksn_runtime_invalidate();
+    if(pocket_proc_is_image_mode()){
+        if(state->proc_resource.value)ksn_runtime_invalidate_image(state->proc_resource);
+    }else ksn_runtime_invalidate();
     return KSN_OK;
 }
 bool pocket_kasane_active(void) { return state&&state->active; }
@@ -2821,13 +2823,17 @@ void pocket_kasane_invalidate(void) {
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
     if(!stats) return KSN_INVALID;
     *stats=(ksn_render_stats){0};
-    if(pocket_proc_pending()&&!pocket_kasane_needs_present())ksn_runtime_invalidate();
+    if(pocket_proc_pending()&&!pocket_kasane_needs_present()){
+        if(pocket_proc_is_image_mode())pocket_proc_present_result(KSN_OK);
+        else ksn_runtime_invalidate();
+    }
     if(!pocket_kasane_needs_present()) return KSN_OK;
     bool proc_candidate=pocket_proc_pending();
     ksn_result result=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
         ksn_runtime_present_backdrop(display,pocket_proc_backdrop,false,stats):
         ksn_runtime_present(display,stats);
-    if(result==KSN_OK&&pocket_proc_pending()&&!stats->transferred_bytes)
+    if(result==KSN_OK&&pocket_proc_pending()&&!stats->transferred_bytes&&
+       !pocket_proc_is_image_mode())
         ksn_runtime_invalidate();
     else pocket_proc_present_result(result);
 #ifdef KASANE_PROC_JS_DIAGNOSTIC

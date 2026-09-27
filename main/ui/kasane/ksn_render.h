@@ -39,8 +39,8 @@ void ksn_render_decode_cycle_report(void);
  * exactly what they were before this existed; the instrument and every
  * optimization it is used to judge go in separate commits (pie-simd.md 6.1). */
 typedef struct {
-    uint32_t fill_cy,span_cy,tile_cy,blend_cy,read_cy;
-    uint32_t fill_n,span_n,tile_n,blend_n,read_n;
+    uint32_t fill_cy,span_cy,tile_cy,blend_cy,read_cy,image_cy;
+    uint32_t fill_n,span_n,tile_n,blend_n,read_n,image_n;
 } ksn_render_prof;
 extern int g_ksn_prof;
 extern ksn_render_prof g_ksn_render_prof;
@@ -59,6 +59,10 @@ unsigned ksn_render_band_runs(uint32_t mask);
  * compare read counts and frame time without a rebuild. Rendering is
  * pixel-neutral either way; only the number of ksn_core_read calls changes. */
 extern int g_ksn_decode_once;
+/* Skip APP commands before an ungrouped, fully opaque image when that image
+ * covers the entire damaged interval of an 8-row band. Zero is the reference
+ * composite path for same-binary pixel comparisons. */
+extern int g_ksn_opaque_image_occlusion;
 /* Rotated image spans map a destination pixel to a source column by
  * floor(u*source_width/(w*32768)) with u affine in x. With this switch on
  * (default) the quotient and remainder of that division are advanced by one

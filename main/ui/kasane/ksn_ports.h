@@ -46,6 +46,10 @@ typedef struct {
     ksn_result (*read_span)(void *,uint16_t variant,uint16_t frame,
                           uint16_t y,uint16_t x,uint16_t count,
                           uint16_t *rgb565,uint8_t *alpha);
+    /* Provider guarantee for every variant, frame and valid source pixel:
+     * each successful read_span writes alpha=255. Opt in only when this holds
+     * for the resource's entire lifetime, including animated frames. */
+    bool opaque;
 } ksn_image_port;
 /* Source spans, not destination spans. Compositor resolves crop/scale.
  * Provider fills outputs without heap/I/O. Pet/PPT2 types stay in its adapter.
