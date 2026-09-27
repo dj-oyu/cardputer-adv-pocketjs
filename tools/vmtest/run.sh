@@ -5,18 +5,10 @@
 #   tools/vmtest/run.sh --variant o2       # the -O2 build
 #   tools/vmtest/run.sh --force-yield      # L1+: yield at every checkpoint; output must not change
 #   tools/vmtest/run.sh --budget-jobs 3    # L1: cut every drain after 3 jobs; output must not change
-#   tools/vmtest/run.sh --fair             # L1: fair ordering (CONFIG_POCKET_VM_FAIR)
 #   tools/vmtest/run.sh --trace            # also write allocator traces
 #   tools/vmtest/run.sh --bless            # (re)write expected/ -- only for NEW files, see README
 #   tools/vmtest/run.sh closures generators  # a subset, by basename
 #   VMTEST_VMRUN_FLAGS="--vm-seg-size 88" tools/vmtest/run.sh   # L2a: sweep the segment size
-#
-# --fair diffs against expected-fair/<name>.txt when that file exists and
-# against expected/<name>.txt when it does not: the whole corpus must come out
-# byte-identical in both modes EXCEPT the handful of files written to show the
-# difference, which have one expected file per mode.
-# A "-keepsrc" variant (function source text kept) does the same with
-# expected-keepsrc/<name>.txt.
 #
 # Per-file flags come from a first-line "// vmrun-flags: ..." comment and are
 # appended after the default "--profile host", so they override it.
@@ -27,7 +19,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 HERE=$(pwd)
 OUT=${VMTEST_OUT:-$HERE/../../.cache/vmtest}
-variant=asan bless=0 force_yield=0 trace=0 budget_jobs= fair=0 fy_fault=
+variant=asan bless=0 force_yield=0 trace=0 budget_jobs= fy_fault=
 names=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -35,7 +27,6 @@ while [ $# -gt 0 ]; do
     --bless) bless=1 ;;
     --force-yield) force_yield=1 ;;
     --force-yield-fault) force_yield=1; fy_fault=$2; shift ;;
-    --fair) fair=1 ;;
     --budget-jobs) budget_jobs=$2; shift ;;
     --trace) trace=1 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
@@ -87,41 +78,15 @@ for name in "${names[@]}"; do
     read -r -a extra <<< "${first#// vmrun-flags:}"
     flags+=("${extra[@]}")
   fi
-  # A "-keepsrc" variant parses one js_strndup per function more than the
-  # shipping build, so a --fail-alloc attempt number shifts by the functions
-  # defined before its target. "// vmrun-keepsrc-flags: ..." in the first 20
-  # lines is appended after the above (last one wins) for those variants.
-  if [[ $variant == *-keepsrc ]]; then
-    keep_line=$(head -n20 "$src" | grep -m1 '^// vmrun-keepsrc-flags:' || true)
-    if [ -n "$keep_line" ]; then
-      read -r -a extra <<< "${keep_line#// vmrun-keepsrc-flags:}"
-      flags+=("${extra[@]}")
-    fi
-  fi
-  # Same for builtin names in flash (F1, default since 2026-09-25; every
-  # variant but "-norom"): ~440 fewer allocations before the program starts,
-  # plus one per builtin name the program turns into a string value.
-  # "// vmrun-flags:" keeps the heap-atom number; "// vmrun-rom-flags: ..."
-  # carries the re-pinned one, found by aligning the two allocator traces
-  # after "# ready" (the same-size allocation, not just the same output).
-  # The shifts of flash atoms (rom), lazy builtin lists (lb, F2) and kept
-  # source (keepsrc) do not simply add up, so each combination that differs
-  # from the heap-atom build carries its own line: the key is the tags
-  # present, in that order, e.g. "// vmrun-rom-lb-keepsrc-flags:". Looked up
-  # in the first 20 lines. A combination without a line falls back to the
-  # lines above, which a pinned file then fails -- the cue to pin it.
-  tags=()
-  [[ $variant != *-norom* ]] && tags+=(rom)
-  [[ $variant != *-nolb* ]] && tags+=(lb)
-  [[ $variant != *-noli* ]] && tags+=(li)   # F3b: fewer allocations at context creation
-  [[ $variant == *-keepsrc ]] && tags+=(keepsrc)
-  if [ ${#tags[@]} -gt 0 ] && [ "${tags[*]}" != keepsrc ]; then
-    key=$(IFS=-; echo "${tags[*]}")
-    tag_line=$(head -n20 "$src" | grep -m1 "^// vmrun-$key-flags:" || true)
-    if [ -n "$tag_line" ]; then
-      read -r -a extra <<< "${tag_line#// vmrun-$key-flags:}"
-      flags+=("${extra[@]}")
-    fi
+  # A --fail-alloc attempt number counts every allocation before its target,
+  # and flash atoms (F1), lazy builtin lists (F2) and lazy intrinsics (F3b)
+  # each removed some. "// vmrun-flags:" still carries the number the file
+  # was first pinned with; "// vmrun-rom-lb-li-flags: ..." in the first 20
+  # lines carries the one for today's engine and is appended last, so it wins.
+  tag_line=$(head -n20 "$src" | grep -m1 "^// vmrun-rom-lb-li-flags:" || true)
+  if [ -n "$tag_line" ]; then
+    read -r -a extra <<< "${tag_line#// vmrun-rom-lb-li-flags:}"
+    flags+=("${extra[@]}")
   fi
   # Appended LAST so they beat a per-file "// vmrun-flags:" budget: the
   # point of these two is to re-run the WHOLE corpus at a chosen budget and
@@ -130,19 +95,6 @@ for name in "${names[@]}"; do
   elif [ $force_yield = 1 ]; then flags+=(--force-yield)
   fi
   [ -n "$budget_jobs" ] && flags+=(--budget-jobs "$budget_jobs")
-  [ $fair = 1 ] && flags+=(--fair)
-  # ...unless the file says its budget is part of the case AND we are in fair
-  # ordering. Under fair ordering a file whose subject IS where host events
-  # meet the queue has an output that is a function of where the budget falls;
-  # a sweep that moved the budget would be asking it a different question. The
-  # same files are budget-independent under compat ordering -- there the host
-  # event always arrives after the drain, wherever the drain was cut -- so the
-  # compat sweep still sweeps them. Such a file says "// vmrun-pin-budget" on
-  # its second line and gets its own flags back, last.
-  if [ $fair = 1 ] && [ "$(sed -n 2p "$src")" = "// vmrun-pin-budget" ] &&
-     [ ${#extra[@]} -gt 0 ]; then
-    flags+=("${extra[@]}")
-  fi
   # VMTEST_VMRUN_FLAGS: extra vmrun flags for a sweep that must not change
   # the bytes out, appended after everything else so they win. Added for
   # L2a: `VMTEST_VMRUN_FLAGS="--vm-seg-size 88" run.sh` runs the corpus with
@@ -202,12 +154,6 @@ for name in "${names[@]}"; do
     fi
   fi
   exp=expected/$name.txt
-  # One expected file per mode, but only where the modes genuinely differ.
-  [ $fair = 1 ] && [ -f "expected-fair/$name.txt" ] && exp=expected-fair/$name.txt
-  # Same rule for CONFIG_POCKET_VM_STRIP_FN_SOURCE: expected/ is the shipping
-  # default (no source text); a "-keepsrc" variant reads expected-keepsrc/
-  # for the files whose output is a function's source.
-  [[ $variant == *-keepsrc ]] && [ -f "expected-keepsrc/$name.txt" ] && exp=expected-keepsrc/$name.txt
   if [ $bless = 1 ]; then
     cp "$OUT/actual-$variant/$name.txt" "$exp"
     echo "blessed $name"
@@ -228,7 +174,7 @@ for name in "${names[@]}"; do
   fi
 done
 [ $bless = 1 ] && exit 0
-echo "corpus [$variant$([ $force_yield = 1 ] && echo ,force-yield)$([ $fair = 1 ] && echo ,fair)${budget_jobs:+,budget-jobs=$budget_jobs}]: $pass passed, $fail failed${failed[*]:+ (${failed[*]})}${skipped_names[*]:+, $skipped skipped (${skipped_names[*]})}"
+echo "corpus [$variant$([ $force_yield = 1 ] && echo ,force-yield)${budget_jobs:+,budget-jobs=$budget_jobs}]: $pass passed, $fail failed${failed[*]:+ (${failed[*]})}${skipped_names[*]:+, $skipped skipped (${skipped_names[*]})}"
 echo "info: $info"
 [ $trace = 1 ] && echo "traces: $OUT/traces/"
 [ $fail -eq 0 ]

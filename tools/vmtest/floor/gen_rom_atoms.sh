@@ -3,7 +3,8 @@
 # this tree's JS_NewContext (docs/vm/builtin-floor-plan.md sec.5.1). WSL:
 #   wsl -e bash tools/vmtest/floor/gen_rom_atoms.sh          # write the headers
 #   wsl -e bash tools/vmtest/floor/gen_rom_atoms.sh --check  # fail if they are stale
-# The generator is built WITHOUT CONFIG_POCKET_VM_ROM_ATOMS: the table has to
+# The generator is built with POCKET_VM_GEN_ROM_ATOMS, which turns F1-F3 off
+# in quickjs.c (the only build that does): the table has to
 # describe the engine as it is before names move to flash.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
@@ -11,7 +12,7 @@ QJS=components/quickjs-ng/quickjs-ng
 OUT=.cache/vmtest-floor/gen
 mkdir -p "$OUT/include"
 [ -f "$OUT/include/sdkconfig.h" ] || echo "/* host stub */" > "$OUT/include/sdkconfig.h"
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1 -DCONFIG_POCKET_VM_LAZY_INPUTS=1 -DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1"
+DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DPOCKET_VM_GEN_ROM_ATOMS"
 for f in dtoa libregexp libunicode quickjs-vm; do
   gcc -std=gnu11 -c -O1 -w $DEFS -I "$OUT/include" -I components/pocketjs_guest/include -I $QJS $QJS/$f.c -o "$OUT/$f.o"
 done

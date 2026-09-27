@@ -6,7 +6,7 @@
 
 出典: `docs/vm/vm-L2-design.md`。状態は 2026-09-23 時点。
 
-未完了の項目は無い（2026-09-23）。L2c は実機統合まで終わり、`CONFIG_POCKET_VM_YIELD` は既定 y。TCO と FAIR は互換性の判断として n のまま残している。経緯と実測は vm-L2-results.md §8、設計は vm-L2-design.md §11。
+未完了の項目は無い（2026-09-23）。L2c は実機統合まで終わり、YIELD は既定 y を経て 2026-09-27 にビルドオプションではなくなった（下の「ビルドオプションの整理」）。TCO と FAIR は採らなかった実験として同日に削除した。経緯と実測は vm-L2-results.md §8、設計は vm-L2-design.md §11。
 
 
 ## L3 / L4（移動可能スタックとコンパクション）
@@ -74,6 +74,18 @@ L3/L4 が動かせるのはセグメントだけなので、退避（旧 #5、D5
 | R2 | 普段のターン（LV1/LV2）の内訳 | [allocator-cost.md](allocator-cost.md) | 計測済み（2026-09-27、実機）: **アロケータが JS のターンの 20.6%**（7.63 ms 中 1.56 ms、1 フレーム約 340 回、malloc 1 回約 1,270 サイクル） |
 | R3 | 小さいブロックの再利用とブロック長の直読み | [r3-small-block-cache.md](r3-small-block-cache.md) | 実装済み・**既定 y**（2026-09-27、R3a 解決後）: 実機でアロケータ 1.57 → 0.92 ms、LV1 のターン 7.62 → 7.08 ms |
 | R3a | キャッシュ有りで STRESS LV3 に Kasane の `BUSY`（3/3 回、無しでは 0/2）。frame の外の確保失敗の約 2 フレーム後 | r3-small-block-cache.md §6.2 | **解決**: キャッシュでなく `app_tick` の穴。中断された frame() を継続ターンが終えて提出したまま次の frame() を呼んでいた。修正後 実機 3/3 PASS |
+
+## ビルドオプションの整理（2026-09-27）
+
+VM 系の Kconfig を、出荷経路の切り替えではなく診断だけに絞った。**`5db834f` が外す前の最後の木**で、比較が要るときはそこを別の作業ツリーに出す。
+
+- **固定した（常に入る）**: `SCHED` `SEGFRAMES` `FLATCALLS` `YIELD` `LAZY_INPUTS` `STRIP_FN_SOURCE` `ROM_ATOMS` `LAZY_BUILTINS` `LAZY_INTRINSICS` `BLOCK_CACHE`。`#ifdef` は `unifdef` で機械的に畳んだ。F1〜F3 の3つだけは `quickjs.c` 内部のマクロ `POCKET_VM_*` として残り、ROM アトム表の生成器（`tools/vmtest/floor/gen_rom_atoms.sh`、`-DPOCKET_VM_GEN_ROM_ATOMS`）だけが切る — 表は熱心な `JS_NewContext` が作るものを写す必要があるため。`--check` で表がバイト一致することを確かめた。
+- **削除した（採らなかった実験）**: `TCO` `FAIR` `CCOUNT`。
+- **削除した（決着した計測）**: `ALLOCPROBE`（R2）、`FLOORPROBE`（F 系列）、`CALLBENCH`、`L1_CLOCKBENCH`。R3a の計装（`R3A_*`）は ALLOCPROBE の下にあったので一緒に消えた。
+- **残した（診断）**: `SELFTEST` `KSN_DEVICE_PROBE` `PROBE` `RELOC` `OOMPROBE`、および `POCKET_UI_TASK_CORE`。
+- **ホスト側**: `tools/vmtest/build.sh` の変種は `asan` / `o2`（と `-reloc`）だけになり、`expected-fair/` `expected-keepsrc/`、`sdkconfig.vm*.defaults` のうち消したオプション用の8本、TCO・callbench・async_audit・lazyfloor/lazyprobe・`device_floor.py` を削除した。
+- **確認（ホストと実機ビルド、2026-09-27）**: 出荷構成のファームは `vm/main` の既定ビルドと同じ 2,043,744 B、静的 DIRAM は ±0、flash は −12 B（assert の行番号）。残した診断5つを全部有効にしたビルドも通る。コーパス 79/79（asan・o2・`--force-yield`・`--budget-jobs 3`・`--vm-seg-size 88`・`asan-reloc`）、中断鎖の寿命 900/900、陰性対照 F1 4/4・F2 7/7・F3 4/4・R1 2/2、STRESS・テキスト入力・input・memory のホスト検査は PASS。実機: `smoke_device.py` 20 サイクル SMOKE_OK、`stress_app.py` 3/3 PASS（BUSY 0、LV1〜3 は 29.2〜29.7 fps、LV1 のターン 7.12〜7.14 ms）。
+- **この作業の前から落ちていたもの**（`vm/main` の `5db834f` でも同じ結果）: `budget_probe.sh` の `deep_async_recursion`（キャッシュ有無とも `oom=100` で期待と違う）、`tools/test_session_dispatch.py`（抜き出す範囲に `app_tick` 全体が入り宣言が足りない）、`build_lessons_test.sh` / `build_power_test.sh`（音の observer のスタブと `esp_err.h` が無くリンク・コンパイルできない）。
 
 ## 確保失敗時のコンパイル経路（VM の段とは独立）
 

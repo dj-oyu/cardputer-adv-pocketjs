@@ -103,9 +103,6 @@ extern "C" {
 // same JS_CallInternal activation that pushed it, which is only possible
 // when the frame is not on that activation's C stack. Kconfig says
 // "depends on"; the host passes -D by hand, so the header says it too.
-#if defined(CONFIG_POCKET_VM_FLATCALLS) && !defined(CONFIG_POCKET_VM_SEGFRAMES)
-#error "CONFIG_POCKET_VM_FLATCALLS requires CONFIG_POCKET_VM_SEGFRAMES"
-#endif
 
 #define JS_VM_SEG_ALIGN 16
 
@@ -939,7 +936,6 @@ static inline void js_vm_stack_reloc_finish(JSRuntime *rt, JSVMStack *st,
 // (the floor's is unused; a per-entry-path block layout would cost a branch
 // on every pop for 8 bytes on the floor only). Generator frames live in a
 // JSAsyncFunctionState and have no link; the JS_SF_SEG bit tells them apart.
-#ifdef CONFIG_POCKET_VM_FLATCALLS
 typedef struct JSVMLink {
     JSValue *caller_sp;     // the caller's sp at the call: func/this/args still on it
 } JSVMLink;
@@ -976,9 +972,6 @@ typedef struct JSVMLink {
 
 _Static_assert(sizeof(JSVMLink) % JS_VM_FRAME_ALIGN == 0,
                "the link must keep the JSStackFrame behind it frame-aligned");
-#else
-#define JS_VM_FRAME_PREFIX 0
-#endif
 
 // Defined in quickjs.c: the runtime's stack, or NULL when the build keeps
 // frames on the C stack (CONFIG_POCKET_VM_SEGFRAMES off).

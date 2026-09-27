@@ -9,7 +9,6 @@ for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] \
      || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
     gcc -std=gnu11 -c -O1 -g -w -DQUICKJS_NG_BUILD -D_GNU_SOURCE \
-      -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1 \
       -I "$QJS" -I components/pocketjs_guest/include "$QJS/$f.c" -o "$CACHE/$f.o"
   fi
 done

@@ -13,15 +13,11 @@
 
 ```bash
 # WSL: cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs-vm
-bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る（Kconfig の既定経路。all-alloca / all-recur / all-flat で他の経路）
-bash tools/vmtest/build.sh asan-tco            # 実験用strict TCO（yieldも有効、既定構成には入らない）
-python3 tools/vmtest/tco_probe.py              # 100/100000段の容量一致、値・所有権、毎中断GC
-bash tools/vmtest/tco_oom.sh asan-tco          # 大きいcalleeへのfallbackでOOM、捕捉値と再実行の回復
-bash tools/vmtest/tco_oom.sh asan-yield        # 同じ検査のTCO無効対照（各スクリプト内で再ビルド）
+bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る（ファームと同じ唯一の経路）
+bash tools/vmtest/build.sh asan-reloc          # + CONFIG_POCKET_VM_RELOC（L3a、--force-reloc 用）
 bash tools/vmtest/build.sh o2
 python3 tools/vmtest/segment_growth_probe.py  # 同一バイナリ、D42の6サイズ方針×6 workload（host値）
 # --vm-seg-growth FIRST MAX はcache方針を保持。固定サイズ用 --vm-seg-size と併用不可。
-# bytecode_dump.cはobj-o2-tco/*.oとリンクして、JSを実行せずpass2/finalを表示する診断用
 bash tools/vmtest/stack_probe.sh 2000 o2       # G1: 1 段あたりの C スタック（L2b 以降は NOT_PROPORTIONAL が正）
 bash tools/vmtest/stack_probe.sh 2000 o2 stack_probe_async.js   # G1 の async 版（L2b-async、設計 §12.2。flat で NOT_PROPORTIONAL、-recur で PROPORTIONAL）
 bash tools/vmtest/budget_probe.sh o2           # D10: 予算がヒープより先に答えるか（10 項目 + D38 の deep_async_recursion）
@@ -35,15 +31,10 @@ python3 tools/vmtest/trace_stats.py .cache/vmtest/traces/closures.trace   # ト�
 python3 tools/vmtest/test262.py --fetch        # 固定 revision を .cache/test262 へ（初回のみ、約2分）
 python3 tools/vmtest/test262.py -j 8           # 部分集合を実行し基準と比較（ASan で約1分）
 python3 tools/vmtest/test262.py --variant o2 --force-yield -j 8
-git -C .cache/test262 sparse-checkout disable # async全体監査用。固定revisionは変更しない
-python3 tools/vmtest/async_audit.py --output .cache/vmtest/async-audit.json -j 8
-python3 tools/vmtest/test_async_audit.py       # 監査の抽出条件
 python3 tools/vmtest/timing.py                 # 時間の計測（書き込みは --write）
 ```
 
 生成物はすべて `.cache/vmtest/`（git 管理外）: `vmrun-{asan,o2}`、`obj-*/`、`actual-<variant>/<name>.{txt,raw,diff}`、`info-<variant>.txt`、`traces/`、`test262-results-<variant>.txt`。
-
-`async_audit.py`は全checkoutの存在と固定revisionを検査し、async/await関連および再帰・スタック制限に言及するテストをファイル名によらず抽出する。既定の`o2-recur`/`o2`（先に両方ビルドする）を同じ集合で比較し、判定・失敗詳細に差があれば非0終了。JSONには全選択パス・再帰候補・各結果・実行バイナリSHA256を残す。両版共通の失敗は成功へ読み替えず記録し、baselineを更新しない。全文検索による選択は無言の深さ依存を数学的に排除する証明ではない。
 
 ## vmrun
 
@@ -108,11 +99,11 @@ L1 時点の結果（実測(host)）: コーパス 31 件が `--budget-jobs 1 / 
 
 **L2 で弱シンボルが埋まった**（`components/quickjs-ng/quickjs-ng/quickjs-vm.c`、`build.sh` がリンクし、`components/quickjs-ng/CMakeLists.txt` にも載せてある）。止まる地点は設計 §7.2 の分類 A の 7 地点だけ。`quickjs.c` 側の差分は、その 7 行の `js_poll_interrupts` → `js_poll_safepoint` の名前替え、スローパス `__js_poll_interrupts` の armed 分岐、frame pop 4 箇所と class-call の復帰 2 箇所の LEAVE フック、で、**既定経路の高速側（カウンタの減算）は無変更**。状態は `JSRuntime` のメンバではなくファイルスコープの 1 ポインタ — メンバにすると `JSRuntime` が 8 B 育ち、それだけで `gc_threshold_device.js`（じわじわ型 OOM）の結果が動いた（元の `quickjs.c` に 8 B のパディングだけ足して同じ落ち方を再現した。実測(host)）。**`JS_SetInterruptHandler` には乗せていない** — あれはセッション終了の述語で、終了と中断を同じ経路に通すと区別が消える（設計 §1.2）。armed 中はすべてのポーリングがスローパスに入るが、ホストの割り込みハンドラは影のカウンタで従来どおり 10,000 回に 1 回だけ呼ぶので、arm しても終了要求が読まれる地点は動かない。
 
-**既定off経路ではこの関所は意図的に赤い。** `asan` / `o2` は出荷既定（`CONFIG_POCKET_VM_YIELD=n`）なので、強制停止は従来の捕捉不能な`interrupted`になる。L2cを検査する専用変種は`asan-yield` / `o2-yield`（`build.sh all-yield`）。段3bでは分類Aの分岐と分類Bのpush完了後で中断し、ホスト所有鎖のTerminate/Discardを実装。実測(host、2026-09-16): asan-yieldの`--force-yield`は63/63、Test262は通常・強制yieldとも退行0。async/job所有床は次工程のため既定はoffのまま。
+L2c（中断と再開）は2026-09-23から既定で、2026-09-27にビルドオプションではなくなった。無印の`asan` / `o2`がその経路。実測(host、2026-09-16、当時の`asan-yield`): `--force-yield`は63/63、Test262は通常・強制yieldとも退行0。
 
 ### 中断鎖の寿命検査（段3b）
 
-`bash tools/vmtest/lifecycle.sh asan-yield`（先に同変種をbuild）で、7種類の所有形態（ホスト、await復帰、async generator、通常/async Promise handler、thenable、microtask）の各22〜23中断位置を再開・Terminate・Discard・runtime解放・OOM下のTerminateの5モードで検査する（計790ケース）。中断ごとにGCを走らせ、キューの先頭が拒否時に失われないこと、破棄後も捕捉変数が有効なこと、終了時にcatch/finallyを実行しないことを確認する。分岐だけの無限ループでwatchdogが動くことも検査する。
+`bash tools/vmtest/lifecycle.sh asan`（先に同変種をbuild）で、7種類の所有形態（ホスト、await復帰、async generator、通常/async Promise handler、thenable、microtask）の各22〜23中断位置を再開・Terminate・Discard・runtime解放・OOM下のTerminateの5モードで検査する（計790ケース）。中断ごとにGCを走らせ、キューの先頭が拒否時に失われないこと、破棄後も捕捉変数が有効なこと、終了時にcatch/finallyを実行しないことを確認する。分岐だけの無限ループでwatchdogが動くことも検査する。
 
 同じCテストを実機で走らせるには、独立sdkconfigで`SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.vm-l2c-selftest.defaults"`を使ってビルドする。`CONFIG_POCKET_VM_SELFTEST=y`のときだけUSBの`L`が有効になり、`python tools/vmtest/device_lifecycle.py --port COM3 --cycles 3`で駆動できる。通常ビルドにはテスト本体もUSBコマンドも入らない。
 
@@ -253,10 +244,8 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 ## ビルドの注意
 
 - ASan 版は QuickJS 自体も計装する（`tools/build_pocket_text_test.sh` は QuickJS を計装しない）。L1 以降で変わるのは `quickjs.c` だからで、変更した呼び出し経路の use-after-free を報告させるため。
-- `quickjs-vmprobe.h` は `__has_include("sdkconfig.h")` で分岐し、ホストでは `CONFIG_*` が未定義 = 出荷時の既定になる。`build.sh` が `.cache/vmtest/include/` に置く空の `sdkconfig.h` は、この分岐が入る前の名残で、なくても動く。**ただし既定 y のスイッチはこの規則に乗らない**: `CONFIG_POCKET_VM_SEGFRAMES`（L2a、`main/Kconfig.projbuild`）は `build.sh` が `-D` で明示的に渡す。渡さなければホストは firmware が出荷しない方の経路（alloca）を検査することになる。
-- **関数ソースを保持する上流の挙動は `-keepsrc` を末尾に付けたバリアントで作る**（どの変種にも付く。例 `o2-keepsrc`、`asan-yield-keepsrc`）。既定は `CONFIG_POCKET_VM_STRIP_FN_SOURCE` 有効で `Function.prototype.toString` は名前だけの形を返す。出力が変わるファイルは `expected-keepsrc/`、`--fail-alloc` の番号がずれるファイルは先頭5行の `// vmrun-keepsrc-flags:` で `-keepsrc` 用の番号を持つ（`docs/vm/vm-L2-results.md` §6）。
-- **L2a の旧経路（alloca）は `-alloca` 付きバリアントで作る**: `build.sh asan-alloca` / `o2-alloca` / `all-alloca`。コンパイルフラグは同じで define だけが無く、`run.sh --variant asan-alloca`・`stack_probe.sh 2000 o2-alloca`・`test262.py --variant asan-alloca` がそのまま使える。仕様 §12 の「戻せる」はこれで確かめる（L2a 着手前の結果と同一であること）。
-- **L2b は 3 経路になった**（設計 §10.2）: `-alloca`（L2a 以前）、`-recur`（segframes、C 再帰のまま = `CONFIG_POCKET_VM_FLATCALLS=n`）、`-flat`（segframes + フラット呼び出し）。**無印の `asan` / `o2` は `main/Kconfig.projbuild` の既定を写す**（`build.sh` の `segframes=` / `flatcalls=` の 2 行が Kconfig と一致していること）。今は既定 y なので無印 = フラット。関所の読み方: G1 はフラットで `bytes_per_call=0.000 … NOT_PROPORTIONAL`、`-recur` で 528.000、`-alloca` で 672.000（いずれも実測(host) o2）。`budget_probe.sh` は最初の 3 項目の期待を `#info vmstack flat=` から決めるので、フラットでは出荷値の走行で `budget_hits>0`（予算が答えている）、`-recur` では 0（C スタックのガードが先）。フラットビルドに `-DCONFIG_POCKET_VM_SEGFRAMES` が無いと `quickjs-vmstack.h` が `#error` で止める。
+- `quickjs-vmprobe.h` は `__has_include("sdkconfig.h")` で分岐し、ホストでは `CONFIG_*` が未定義 = 出荷時の既定になる。`build.sh` が `.cache/vmtest/include/` に置く空の `sdkconfig.h` は、この分岐が入る前の名残で、なくても動く。
+- **エンジンの経路は1本**（2026-09-27）: L1〜L2c・関数ソースの除去・F1〜F3・R3 はビルドオプションではなくなり、ホストもファームと同じものを必ず検査する。経路を切り替えていた変種（`-alloca` / `-recur` / `-flat` / `-noyield` / `-keepsrc` / `-norom` / `-nolb` / `-noli` / `-bc` / `-tco` / `-callbench` / `-lazy` / `-eager`）と `expected-fair/` / `expected-keepsrc/` は無くなった。比較が要るときは `5db834f` を別の作業ツリーに出す。コーパスの先頭行に残る `// vmrun-keepsrc-flags:` などは、書き換えるとソース長が変わり `--fail-alloc` の番号がずれるので消していない。F1〜F3 だけは `quickjs.c` 内部のマクロとして残り、ROM アトム表の生成器（`floor/gen_rom_atoms.sh`、`-DPOCKET_VM_GEN_ROM_ATOMS`）だけが切る。G1 はフラットで `bytes_per_call=0.000 … NOT_PROPORTIONAL`（当時の `-recur` は 528.000、`-alloca` は 672.000、いずれも実測(host) o2）。
 - **L2b-async（設計 §12.2、D32〜D34、D38）は同じ `-flat` / 無印の中**: JS から呼ぶ async 関数（`OP_call` 系）の最初の同期区間もフラットで走る。関所が 2 本増えた。(1) `stack_probe.sh 2000 o2 stack_probe_async.js` — 第 3 引数がプローブファイル（既定 `stack_probe.js`）。await の無い async 再帰で、flat は `0.000 … NOT_PROPORTIONAL`、`-recur` は PROPORTIONAL（実測は設計 §12.2 末尾の「段 A の着地」）。(2) `budget_probe.sh` の 11 項目目 `deep_async_recursion`（`tools/vmtest/deep_async_recursion.js`、コーパス外）: async の同期再帰は C スタックにもセグメントにも積まれないので予算が答えず（`budget_hits=0`）、ヒープ枯渇で終わる。**その終わり方は設計の予想（InternalError が `.catch` に届く）より汚い** — 実測(host、`--profile device`)では 77 段目で止まり、エラーオブジェクトを作る余裕も無いので理由は `null`、巻き戻しの途中で自分の `await` の反応登録に失敗した段の promise が未処理のまま残って終了コード 2。`-recur` は `RangeError` で終了コード 0。期待値は build ごとに別ファイル（`expected/deep_async_recursion.txt` = flat、`expected/deep_async_recursion-recur.txt`）で、diff するのは「同期 `try` に届かない」「外側の async の catch が見たクラス」「終了コード」だけ、深さと未処理件数は情報行。じわじわ型 OOM なので asan 変種で `build_backtrace` の ASan 報告が出たら失敗ではなく `known/oom_backtrace_uaf` の再現として記録する（o2 変種だけが拘束）。
 - **L2a のセグメント**（`quickjs-ng/quickjs-vmstack.h`、ヘッダのみ）: `vmrun --stats` が `#info vmstack seg_size=… depth_max=… live_max=… frame_max=… seg_live_max=… seg_mallocs=… dedicated=… fallbacks=… resident_max~=…` を出す。`--vm-seg-size N[K]` で標準セグメントを変えられる（最初の JS 呼び出しの前にだけ効く）。`live_max` はフレームが実際に使った最大バイト、`resident_max~` はその瞬間にセグメントが占めていた概算（ヘッダと整列の余白込み）。ホストの数字は 64bit の値であって実機の値ではない。
 - **L2a のセグメントは asan 版で毒を塗る**: `quickjs-vmstack.h` は ASan ビルドでセグメントの空き領域を `__asan_poison_memory_region` で毒にし、push した分だけ解毒、pop で再び毒にする。返却済みフレームへの生ポインタ（`close_var_refs` が閉じ損ねた `JSVarRef`、死んだフレームを歩くウォーカー、呼び出し先の argv を持ち越した呼び出し元）は、コーパスと Test262 の asan 走行で use-after-poison として鳴る。台帳07 §6 が「確保履歴では検査できない」と書いた、実物のフレームに対する検査がこれ。o2 と実機では何も展開されない。
@@ -265,31 +254,9 @@ gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Icomponents/pocketjs_guest/include -Ic
 - **`gc_threshold_device.js` はヒープの残量に敏感だった**（backlog #5 の修正前）: 上限までジワジワ OOM させる形だったため、`run.sh --trace`（asan）や `--vm-seg-size 2048`（o2）で catch 後の `print` 自体が OOM した。修正後は OOM に至らないのでこの脆さは無い。`gc_threshold_near_limit.js` は前半でヒープを OOM まで埋めるが、1/4 を解放してから出力する。
 - オブジェクトは `quickjs-ng/*.c`・`*.h`・`build.sh` のいずれかが新しければ作り直す。
 
-## 同一バイナリの呼び出し比較
+## ランナーの注意
 
-`build.sh o2-callbench` と `callbench.sh o2-callbench` で診断専用の比較を実行する。
-ASan検査は両方の引数を `asan-callbench` にする。通常ビルドには切り替え状態・分岐・APIは入らない。
-`vmrun-*-callbench --vm-call-mode flat|recur` で同じ実行ファイルの経路を選べる。
-idle runtimeだけで変更でき、実行中のnative callbackからの変更は拒否する。
-YIELDとの併用はコンパイル時に拒否する。
-
-現在のcallbenchビルドは`LAZY_INPUTS`も有効にする（旧ログ§3.5のimageは導入前）。
-`callbench.sh o2-callbench --inputs`は両側ともflatのまま、遅延復元／従来の即時復元を比較する。
-実機では集計コマンドに`--inputs`を付けるとUSB `U`を送る。`KIND inputs`とlazy/eagerの
-PATH（両方0B）を検査する。`KIND`のない旧ログはdispatch比較として読める。
-Kconfigを追加・変更した作業ツリーでは、既存の専用buildを`idf.py -B build_vm_callbench reconfigure build`
-で更新し、`sdkconfig`の`LAZY_INPUTS=y`と実際のimageを確認する。rootのsdkconfigは変更しない。
-
-`build.sh asan-lazy`は遅延復元・YIELD・TCOを合わせて検査する実験変種。
-`build.sh o2-lazy-flat` / `asan-lazy-flat`はLAZY_INPUTSだけを有効にし、
-CALLBENCH/YIELD/TCOを含めない通常経路の検査変種。
-2026-09-16の採用後は無印`o2` / `asan`もLAZY_INPUTS有効（Kconfig既定yと一致）。
-`o2-eager` / `asan-eager`は即時復元の対照を残す。`-alloca` / `-recur`では遅延復元を無効にする。
-既定の対応箇所は`build.sh`の`segframes` / `flatcalls` / `lazy`の3変数。
-`lifecycle.sh asan-lazy`もTCO検査を含める。出荷の3スイッチの既定を表す変種ではない。
 `lazy_call_inputs.js`はdefault引数のcall後のrest、arguments、generator/async、constructorを検査する。
-毎中断GCの`tco_guards`は`VMTEST_VMRUN_FLAGS='--gc-on-yield --vm-budget 64K'`で予算拒否を検査できる。
-7MiBのhost既定予算で同じ検査を行うと深い鎖への反復GCで300秒を超えたため、完走とは扱わない。
 
 `run.sh`は`VMTEST_START_MARKER=1`でrunnerのmain到達をstderrに記録する。
 main到達後のtimeout/ASan異常はstartupとして再試行しない（`test_runner_retry.py`で検査）。
@@ -297,18 +264,6 @@ runnerを更新した後は再ビルドしてから使う。
 `build.sh`は並列コンパイラをPIDごとに待ち、1件でも失敗したらリンクしない。
 引数なし`wait`では失敗を見逃して古いobjectをリンクしうるため、
 `test_build_failures.py`で6コンパイル単位それぞれの失敗と全成功の7条件を検査する。
-
-実機は専用ビルドで
-`idf.py -B build_vm_callbench -D SDKCONFIG=build_vm_callbench/sdkconfig -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.vm-callbench.defaults" build`。
-アプリ領域だけを書き込み、`python tools/vmtest/callbench_report.py .cache/vmtest/callbench-device.log --port COM3`
-でHOMEからUSB `N` を実行・採取する。検証後は元のアプリ領域を復元する。
-保存済みログの集計は `--port` なし。同じrunにPATH 2行・SAMPLE 128行・PASS 1行が必要。
-
-4負荷それぞれ8組のABBA/BAAB、各blockで2回ウォームアップして1回測定する。
-コンパイル・GC・出力は測定区間外。戻り値を毎回照合し、独立のnative callbackでCスタック増加
-（flat=0、recur>0）を実測して切り替えを証明する。通常ループは対照。
-これはflatインタープリタ内のdispatch比較であり、別コンパイルのL2a全体やアプリ全体の高速化率ではない。
-standalone runtimeの標準allocatorを使い、guestのallocator・スケジューラ・描画は計測しない。
 
 ### 実機Back入力と永続保存（SELFTEST専用）
 

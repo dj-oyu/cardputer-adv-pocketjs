@@ -37,10 +37,6 @@ extern "C" {
 #endif
 
 // Diagnostic-only, idle-runtime dispatch selection. No shipping symbol/field.
-#ifdef CONFIG_POCKET_VM_CALLBENCH
-int vmtest_call_mode(JSRuntime *rt, int recursive);
-int vmtest_call_inputs_eager(JSRuntime *rt, int eager);
-#endif
 
 // Where a stop opportunity was: what ended (and what started) a gap.
 typedef enum {

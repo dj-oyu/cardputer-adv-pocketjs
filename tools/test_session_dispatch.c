@@ -26,9 +26,6 @@ static void call(char c){size_t n=strlen(calls);assert(n+1<sizeof(calls));calls[
 static int64_t esp_timer_get_time(void){return now;}
 static void arm_turn(uint32_t b){armed=b;call('A');}
 static bool pocketjs_guest_work_pending(void *g){(void)g;return pending;}
-#ifdef CONFIG_POCKET_VM_FAIR
-static bool pocketjs_guest_suspended(void *g){(void)g;return false;}
-#endif
 static int pocketjs_guest_continue(void *g){(void)g;call('C');pending=remain;return guest_error;}
 static int pocketjs_guest_frame(void *g,const pocketjs_guest_frame_t *f){
     (void)g;assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
@@ -76,16 +73,10 @@ int main(void){
     assert(strstr(calls,"FEO")&&!strchr(calls,'P'));
     reset();pending=remain=true;assert(app_tick(0x20)==0);
     assert(turn_continued&&!strchr(calls,'F')&&strstr(calls,"ACEO"));
-#ifdef CONFIG_POCKET_VM_FAIR
-    assert(strstr(calls,"atiobncpfvkE")&&delivered==0x20);
-#else
     assert(!strchr(calls,'a')&&deferred_buttons==0x20);
-#endif
     calls[0]=0;remain=false;assert(app_tick(0)==0);
     assert(strchr(calls,'C')<strchr(calls,'a')&&strchr(calls,'a')<strchr(calls,'F'));
-#ifndef CONFIG_POCKET_VM_FAIR
     assert(delivered==0x20&&!deferred_buttons);
-#endif
     reset();pending=remain=true;exit_requested=true;assert(app_tick(0)==0);assert(!stopped);
     reset();pending=remain=true;assert(app_tick(0x2000)==0);
     assert(delivered==0x2000&&strchr(calls,'F')&&!turn_continued);

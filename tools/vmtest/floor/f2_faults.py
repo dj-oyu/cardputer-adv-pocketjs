@@ -20,10 +20,10 @@ FAULTS = {
                           "                        if (unlikely(p->is_exotic)) {\n                            /* XXX: should avoid the slow path for arrays\n                               and typed arrays by ensuring that 'prop' is\n                               not numeric */\n                            obj = JS_MKPTR(JS_TAG_OBJECT, p);\n                            goto get_field_slow_path;"),
     # N2b: a touched entry is not remembered as done, so full materialization
     # defines it a second time.
-    # (The anchor carries the FLOORPROBE counter that shares its line; without
-    # it this control silently stopped applying from 01df9b2 to F2-5.)
-    "no-done-mark": ("            /* Marked first: add_property below looks the name up again. */\n            lazy_set_done(l, k); FP_INC(rt, lazy_hit);\n",
-                     "            /* Marked first: add_property below looks the name up again. */\n            FP_INC(rt, lazy_hit);\n"),
+    # (The anchor must track that line exactly: when a FLOORPROBE counter was
+    # added to it, this control silently stopped applying from 01df9b2 to F2-5.)
+    "no-done-mark": ("            /* Marked first: add_property below looks the name up again. */\n            lazy_set_done(l, k);\n",
+                     "            /* Marked first: add_property below looks the name up again. */\n"),
     # F2-5: the matcher accepts an entry the key is only a prefix of.
     "key-prefix": ("    return t[key->len] == (key->open ? ']' : 0) && (!key->open || !t[key->len + 1]);\n",
                    "    return true;\n"),

@@ -5,10 +5,7 @@ QJS=components/quickjs-ng/quickjs-ng
 CACHE=${CACHE:-/tmp/qjs-kasane-host}
 OUT=${OUT:-/tmp/test-pocket-memory}
 mkdir -p "$CACHE"
-DEFS=(-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DCONFIG_POCKET_VM_SEGFRAMES=1
-      -DCONFIG_POCKET_VM_FLATCALLS=1 -DCONFIG_POCKET_VM_LAZY_INPUTS=1
-      -DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1
-      -DCONFIG_POCKET_VM_ROM_ATOMS=1 -DCONFIG_POCKET_VM_LAZY_BUILTINS=1)
+DEFS=(-DQUICKJS_NG_BUILD -D_GNU_SOURCE)
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] ||
      [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then

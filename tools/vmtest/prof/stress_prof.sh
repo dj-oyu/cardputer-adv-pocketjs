@@ -20,11 +20,7 @@ import pathlib, sys
 data = pathlib.Path('apps/pet/assets/pets-compact.bin').read_bytes()
 pathlib.Path(sys.argv[1]).write_text('static const uint8_t pet_test_data[] = {' + ','.join(map(str, data)) + '};\n')
 PY
-# main/Kconfig.projbuild's defaults (the firmware path).
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DCONFIG_POCKET_VM_SEGFRAMES=1 -DCONFIG_POCKET_VM_FLATCALLS=1
-  -DCONFIG_POCKET_VM_LAZY_INPUTS=1 -DCONFIG_POCKET_VM_YIELD=1 -DCONFIG_POCKET_VM_STRIP_FN_SOURCE=1
-  -DCONFIG_POCKET_VM_ROM_ATOMS=1 -DCONFIG_POCKET_VM_LAZY_BUILTINS=1 -DCONFIG_POCKET_VM_LAZY_INTRINSICS=1
-  ${PROF_DEFS:-}"
+DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE ${PROF_DEFS:-}"
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   gcc -std=gnu11 -c -O2 -g -w $F $DEFS -I "$QJS" -I components/pocketjs_guest/include \
       "$QJS/$f.c" -o "$CACHE/$f.o"

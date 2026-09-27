@@ -273,8 +273,6 @@ def main():
                     help="L1+: yield at every VM checkpoint; the pass set must not change")
     ap.add_argument("--force-reloc", action="store_true",
                     help="L3a: move the segments at every park; the pass set must not change")
-    ap.add_argument("--fair", action="store_true",
-                    help="L1: fair ordering (CONFIG_POCKET_VM_FAIR); the pass set must not change")
     ap.add_argument("filters", nargs="*")
     a = ap.parse_args()
     if a.force_yield:
