@@ -124,21 +124,34 @@ int main(int argc, char **argv) {
     REQUIRE(argc == 2);
     JSRuntime *runtime = JS_NewRuntime(); REQUIRE(runtime);
     JSContext *ctx = JS_NewContext(runtime); REQUIRE(ctx);
+    /* The view side is permissive (every tx method returns a ref); the
+     * procedural side records registrations, live handles and frames, and
+     * throws on a draw or unregister of a handle that is not live. The real
+     * validators run in run_megademo_app_host.py. */
     static const char mock[] =
-        "globalThis.__procCalls={registered:[],frames:[],active:null,images:[],resize:null};"
+        "globalThis.__procCalls={registered:[],live:new Set(),peak:0,unregistered:0,"
+        "frames:[],active:null,images:[],resize:[]};"
         "globalThis.console={log(){}};"
-        "const uiTx={background(){},gradient(){},rect(){},text(){},"
-        "image(spec){const i={visible:spec.visible!==false,setRect(){},"
-        "setVisible(tx,v){this.visible=v}};__procCalls.images.push(i);return i}};"
+        "const ref=()=>({visible:true,setRect(){},setClip(){},setColor(){},setText(){},"
+        "setReveal(){},setImageFrame(){},setRotation(){},place(){},"
+        "animate(){return {stop(){},finish(){},poll(){return 'running'}}},"
+        "setVisible(tx,v){this.visible=v}});"
+        "const uiTx=new Proxy({},{get(o,k){return k==='image'?"
+        "s=>{const i=ref();i.spec=s;__procCalls.images.push(i);return i}:()=>ref()}});"
         "globalThis.pocket={kasane:{replace(f){f(uiTx)},patch(f){f(uiTx)},"
-        "grid:{registerResizeSource(s){__procCalls.resize=s;return 77},"
-        "resource(h){if(h!==77)throw Error('resize handle');return {resized:true}}},procedural:{"
-        "resource(){return {}},"
-        "register(p,b){const id=__procCalls.registered.length;"
-        "__procCalls.registered.push({program:p,batch:b});return id},"
-        "beginFrame(c){if(__procCalls.active!==null)throw Error('nested frame');"
-        "__procCalls.active={backdrop:c,draws:[]}},"
-        "draw(h,i){__procCalls.active.draws.push([h,i])},"
+        "stats(){return {displayed:{commands:0}}},resource(){return {}},"
+        "cache:{create(){return {}}},pixel:{open(){return {}},stage(){return true}},"
+        "grid:{registerResizeSource(s){__procCalls.resize.push(s);return 76+__procCalls.resize.length},"
+        "resource(h){if(h!==77&&h!==78)throw Error('resize handle');return {resized:h}}},procedural:{"
+        "resource(){return {}},createSurface(){return 9},"
+        "register(p,b){const id=__procCalls.registered.length+1;"
+        "__procCalls.registered.push({program:p,batch:b});__procCalls.live.add(id);"
+        "if(__procCalls.live.size>__procCalls.peak)__procCalls.peak=__procCalls.live.size;return id},"
+        "unregister(h){if(!__procCalls.live.delete(h))throw Error('stale '+h);__procCalls.unregistered++},"
+        "beginFrame(c,s){if(__procCalls.active!==null)throw Error('nested frame');"
+        "__procCalls.active={backdrop:c,surface:s||0,draws:[]}},"
+        "draw(h,i){if(!__procCalls.live.has(h))throw Error('dead handle '+h);"
+        "__procCalls.active.draws.push([h,i])},"
         "commit(){__procCalls.frames.push(__procCalls.active);__procCalls.active=null}"
         "}}};";
     JSValue mock_result = JS_Eval(ctx, mock, sizeof mock - 1, "mock.js", JS_EVAL_TYPE_GLOBAL);
@@ -198,16 +211,16 @@ int main(int argc, char **argv) {
             ++layers_run;
         }
     }
+    /* Plans are registered per scene now: only Act I phase 0 at start, the
+     * next phase over the last frames of the running one. */
     static const char playback_check[] =
-        "if(__procCalls.registered.length!==15||typeof frame!=='function')"
+        "if(__procCalls.registered.length!==5||__procCalls.live.size!==5||typeof frame!=='function')"
         "throw Error('registration');"
-        "for(let phase=0;phase<3;phase++)for(let layer=0;layer<5;layer++){"
-        "const r=__procCalls.registered[phase*5+layer];"
-        "if(r.program.length!==procMegademo.program(phase,layer).length)"
-        "throw Error('registered program');"
-        "if(layer!==3){if(r.batch!==undefined||procMegademo.pointBatch(phase,layer)!==null)"
-        "throw Error('unexpected batch');continue}"
-        "const b=r.batch;"
+        "const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);"
+        "for(let layer=0;layer<5;layer++){const r=__procCalls.registered[layer];"
+        "if(!same(r.program,procMegademo.program(0,layer)))throw Error('registered program');"
+        "if((r.batch===undefined)!==(layer!==3))throw Error('unexpected batch')}"
+        "for(let phase=0;phase<3;phase++){const b=procMegademo.pointBatch(phase,3);"
         "if(!b||b.kind!=='affineQ14Points'||b.x.length!==40||b.y.length!==40||"
         "b.coeff.length!==6||!Number.isInteger(b.color)||b.color<0||b.color>65535)"
         "throw Error('batch shape');"
@@ -217,33 +230,38 @@ int main(int argc, char **argv) {
         "throw Error('source point');"
         "const x=Math.floor((b.coeff[0]*b.x[i]+b.coeff[1]*b.y[i]+b.coeff[4])/16384);"
         "const y=Math.floor((b.coeff[2]*b.x[i]+b.coeff[3]*b.y[i]+b.coeff[5])/16384);"
-        "if(x<0||x>=240||y<0||y>=135)throw Error('point bounds')}"
-        "}"
+        "if(x<0||x>=240||y<0||y>=135)throw Error('point bounds')}}"
         "for(let tick=0;tick<97;tick++)frame();"
         "if(__procCalls.frames.length!==97)throw Error('frame count');"
-        "if(__procCalls.registered.length!==15)throw Error('registered again');"
-        "for(let tick=0;tick<97;tick++){"
-        "const f=__procCalls.frames[tick],scene=tick%48,phase=Math.floor(scene/16);"
-        "if(f.backdrop!==procMegademo.backdrop(scene)||f.draws.length!==5)"
+        "for(let tick=0;tick<48;tick++){"
+        "const f=__procCalls.frames[tick],phase=Math.floor(tick/16);"
+        "if(f.backdrop!==procMegademo.backdrop(tick)||f.draws.length!==5||f.surface)"
         "throw Error('frame structure '+tick);"
-        "for(let layer=0;layer<5;layer++){const d=f.draws[layer];"
-        "if(d[0]!==phase*5+layer||d[1].length!==4)"
+        "for(let layer=0;layer<5;layer++){const d=f.draws[layer],r=__procCalls.registered[d[0]-1];"
+        "if(!same(r.program,procMegademo.program(phase,layer))||d[1].length!==4)"
         "throw Error('layer '+tick+','+layer)}}";
     JSValue check = JS_Eval(ctx, playback_check, sizeof playback_check - 1,
                             "playback-check.js", JS_EVAL_TYPE_GLOBAL);
     REQUIRE(!JS_IsException(check));
     JS_FreeValue(ctx, check);
+    /* Frame 97 is inside TWIST, whose set holds exactly two images: the
+     * procedural image and the resized monitor, the last two created. */
     static const char resize_check[] =
-        "if(__procCalls.resize.width!==112||__procCalls.resize.height!==63)"
+        "const rs=__procCalls.resize;"
+        "if(rs.length!==2||rs[0].width!==112||rs[0].height!==63||rs[0].sampling!==undefined||"
+        "rs[1].width!==60||rs[1].height!==34||rs[1].sampling!=='nearest')"
         "throw Error('resize registration');"
-        "if(__procCalls.images.length!==2||!__procCalls.images[0].visible||"
-        "__procCalls.images[1].visible)throw Error('initial images');"
+        "const im=__procCalls.images,main=im[im.length-2],mon=im[im.length-1];"
+        "if(!main.visible||mon.visible)throw Error('initial images');"
         "frame(0x4000);for(let i=1;i<44;i++)frame(0);"
-        "if(__procCalls.images[0].visible||!__procCalls.images[1].visible)"
-        "throw Error('fixed monitor selection');"
+        "if(main.visible||!mon.visible)throw Error('fixed monitor selection');"
         "frame(0x4000);"
-        "if(!__procCalls.images[0].visible||__procCalls.images[1].visible)"
-        "throw Error('dynamic zoom selection');";
+        "if(!main.visible||mon.visible)throw Error('dynamic zoom selection');"
+        /* Two more loops: live plans never above 32, more than 32 in total. */
+        "for(let i=0;i<800;i++)frame(0);"
+        "if(__procCalls.peak>32||__procCalls.registered.length<=32||!__procCalls.unregistered)"
+        "throw Error('loader '+__procCalls.peak+' '+__procCalls.registered.length);"
+        "globalThis.__loader=[__procCalls.peak,__procCalls.registered.length];";
     check = JS_Eval(ctx, resize_check, sizeof resize_check - 1,
                     "resize-check.js", JS_EVAL_TYPE_GLOBAL);
     REQUIRE(!JS_IsException(check));
@@ -252,7 +270,7 @@ int main(int argc, char **argv) {
     JS_FreeValue(ctx, global);
     JS_FreeContext(ctx);
     JS_FreeRuntime(runtime);
-    printf("PASS JS megademo: %u registered programs, 3 bounded Q14 batches, %u reference frames, %u native plan layer runs, exact base RGB565 pixels and 97 looping playback calls\n",
+    printf("PASS JS megademo: %u Act I programs equal to the C reference, 3 bounded Q14 batches, %u reference frames, %u native plan layer runs, exact base RGB565 pixels, per-scene plan loading over 942 playback calls\n",
            programs, PROC_MEGA_FRAMES, layers_run);
     return 0;
 }
