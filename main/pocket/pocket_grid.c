@@ -16,6 +16,14 @@ bool pocket_kasane_grid_source_port(JSContext *ctx, JSValueConst object,
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef ESP_PLATFORM
+#include "esp_timer.h"
+static int64_t grid_measure_now_us(void) { return esp_timer_get_time(); }
+#else
+#include <time.h>
+static int64_t grid_measure_now_us(void)
+{ return (int64_t)clock() * 1000000 / CLOCKS_PER_SEC; }
+#endif
 #if defined(KASANE_PROC_DEVICE_PROBE) && defined(ESP_PLATFORM)
 #include "esp_cpu.h"
 static pocket_grid_resize_profile resize_profile;
@@ -68,8 +76,11 @@ typedef struct {
     void *input_raw[KSN_GRID_BUFFERS];
     int16_t *input[KSN_GRID_BUFFERS];
     size_t input_capacity[KSN_GRID_BUFFERS];
+    size_t last_input_count[KSN_GRID_BUFFERS];
+    int32_t last_param[KSN_GRID_PARAMS];
     uint8_t committed_index, candidate_index;
     bool has_output, pending, resource, resize_pie, resize_nearest;
+    bool measure_ready;
 } grid_slot;
 
 static grid_slot slots[GRID_APP_SLOTS];
@@ -388,6 +399,7 @@ static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
                                   "source-backed resize runs during image reads");
     if (slot->pending) return fail(ctx, op, POCKET_ERR_BUSY,
                                    "previous grid image awaits presentation");
+    slot->measure_ready = false;
     ksn_grid_binding binding = {0};
     size_t total = 0;
     bool valid = true, oom = false;
@@ -469,6 +481,12 @@ static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
     if (!valid || status != KSN_GRID_OK)
         return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                     "grid bind or execution failed");
+    if (!slot->resize) {
+        for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i)
+            slot->last_input_count[i] = binding.count[i];
+        memcpy(slot->last_param, binding.param, sizeof slot->last_param);
+        slot->measure_ready = true;
+    }
     /* Image spans only read DEST. Do not retain pointers to released inputs. */
     for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i)
         if (i != KSN_GRID_DEST) next.execution.binding.data[i] = NULL;
@@ -484,6 +502,81 @@ static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
     }
     return JS_NewString(ctx, (slot->resize ? slot->resize_pie :
                          next.execution.pie_backend_selected) ? "PIE" : "scalar");
+}
+
+/* Compare the last copied input with the same bound native plan. Scratch
+ * outputs keep measurement away from the displayed candidate and its ACK. */
+static JSValue measure_impl(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    const char *op = "kasane.grid.measure";
+    grid_slot *slot = argc ? find(ctx, argv[0]) : NULL;
+    int64_t repeats = 8;
+    if (argc < 1 || argc > 2 || !slot || !slot->plan ||
+        !slot->measure_ready ||
+        (argc == 2 && !number(ctx, argv[1], 1, 16, &repeats)))
+        return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
+                    "expected a recent grid fold run and 1..16 repeats");
+    size_t count = (size_t)slot->shape.width * slot->shape.height;
+    void *raw[2] = {NULL, NULL};
+    int16_t *pixels[2] = {NULL, NULL};
+    if (!aligned_buffer(count, &raw[0], &pixels[0]) ||
+        !aligned_buffer(count, &raw[1], &pixels[1])) {
+        free(raw[0]); free(raw[1]);
+        return fail(ctx, op, POCKET_ERR_OUT_OF_MEMORY,
+                    "grid measurement scratch allocation failed");
+    }
+    ksn_grid_execution execution[2];
+    ksn_grid_binding binding = {0};
+    memcpy(binding.param, slot->last_param, sizeof binding.param);
+    for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i) {
+        if (i == KSN_GRID_DEST || !slot->last_input_count[i]) continue;
+        binding.data[i] = slot->input[i];
+        binding.count[i] = slot->last_input_count[i];
+    }
+    bool valid = true;
+    for (unsigned arm = 0; arm < 2; ++arm) {
+        binding.data[KSN_GRID_DEST] = pixels[arm];
+        binding.count[KSN_GRID_DEST] = count;
+        valid = valid && ksn_grid_begin(slot->plan, &slot->shape, &binding,
+                                         &execution[arm]) == KSN_GRID_OK;
+    }
+    const ksn_grid_pie_policy policy = {true, 8, 8, 8};
+    if (valid) {
+        valid = ksn_grid_run_scalar(&execution[0]) == KSN_GRID_OK &&
+                ksn_grid_run_auto(&execution[1], &policy) == KSN_GRID_OK &&
+                execution[1].pie_backend_selected &&
+                memcmp(pixels[0], pixels[1], count * sizeof(int16_t)) == 0;
+    }
+    int64_t elapsed[2] = {0, 0};
+    for (unsigned round = 0; valid && round < (unsigned)repeats; ++round) {
+        for (unsigned phase = 0; phase < 2; ++phase) {
+            unsigned arm = (round + phase) & 1u;
+            int64_t started = grid_measure_now_us();
+            ksn_grid_status status = arm == 0 ?
+                ksn_grid_run_scalar(&execution[0]) :
+                ksn_grid_run_auto(&execution[1], &policy);
+            elapsed[arm] += grid_measure_now_us() - started;
+            if (status != KSN_GRID_OK) { valid = false; break; }
+        }
+        if (valid) valid = execution[1].pie_backend_selected &&
+            memcmp(pixels[0], pixels[1], count * sizeof(int16_t)) == 0;
+    }
+    free(raw[0]); free(raw[1]);
+    if (!valid) return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
+                            "native scalar and PIE did not both match");
+    JSValue result = JS_NewObject(ctx);
+    if (JS_IsException(result)) return result;
+    if (JS_SetPropertyStr(ctx, result, "repeats",
+                          JS_NewInt32(ctx, (int32_t)repeats)) < 0 ||
+        JS_SetPropertyStr(ctx, result, "scalarUs",
+                          JS_NewFloat64(ctx, (double)elapsed[0])) < 0 ||
+        JS_SetPropertyStr(ctx, result, "pieUs",
+                          JS_NewFloat64(ctx, (double)elapsed[1])) < 0 ||
+        JS_SetPropertyStr(ctx, result, "equal", JS_NewBool(ctx, true)) < 0) {
+        JS_FreeValue(ctx, result);
+        return JS_EXCEPTION;
+    }
+    return result;
 }
 
 static ksn_result resize_span(void *ctx, uint16_t variant, uint16_t frame,
@@ -656,6 +749,9 @@ static JSValue js_register_resize_source(JSContext *ctx, JSValueConst self,
 static JSValue js_run(JSContext *ctx, JSValueConst self, int argc,
                       JSValueConst *argv)
 { (void)self; return guarded(ctx, argc, argv, run_impl); }
+static JSValue js_measure(JSContext *ctx, JSValueConst self, int argc,
+                          JSValueConst *argv)
+{ (void)self; return guarded(ctx, argc, argv, measure_impl); }
 static JSValue js_resource(JSContext *ctx, JSValueConst self, int argc,
                            JSValueConst *argv)
 { (void)self; return guarded(ctx, argc, argv, resource_impl); }
@@ -713,10 +809,11 @@ esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst ns)
         JS_CFUNC_DEF("registerResize", 1, js_register_resize),
         JS_CFUNC_DEF("registerResizeSource", 1, js_register_resize_source),
         JS_CFUNC_DEF("run", 3, js_run),
+        JS_CFUNC_DEF("measure", 2, js_measure),
         JS_CFUNC_DEF("resource", 1, js_resource),
         JS_CFUNC_DEF("explain", 1, js_explain),
     };
-    if (JS_SetPropertyFunctionList(ctx, grid, methods, 6) < 0) {
+    if (JS_SetPropertyFunctionList(ctx, grid, methods, 7) < 0) {
         JS_FreeValue(ctx, grid); return ESP_ERR_NO_MEM;
     }
     if (JS_SetPropertyStr(ctx, ns, "grid", grid) < 0) return ESP_ERR_NO_MEM;

@@ -318,6 +318,23 @@ uint64_t ksn_grid_pie_profile_key(const ksn_grid_execution *e)
         HASH((uintptr_t)e->binding.data[buffer] & 15u);
         HASH(memory_class(e->binding.data[buffer]));
     }
+    if (e->plan->mac.terms == 2) {
+        HASH(2);
+        const ksn_grid_mac_operand *extra[2] = {
+            &e->plan->mac.extra_left, &e->plan->mac.extra_right
+        };
+        for (unsigned side = 0; side < 2; ++side) {
+            const ksn_grid_mac_operand *op = extra[side];
+            HASH(op->is_load);
+            if (!op->is_load) continue;
+            unsigned slot = op->instruction;
+            unsigned buffer = e->plan->program.body[slot].buffer;
+            for (unsigned k = 0; k < 5; ++k) HASH(e->index[slot][k]);
+            HASH(e->binding.count[buffer]);
+            HASH((uintptr_t)e->binding.data[buffer] & 15u);
+            HASH(memory_class(e->binding.data[buffer]));
+        }
+    }
     HASH(e->binding.count[KSN_GRID_DEST]);
     HASH((uintptr_t)e->binding.data[KSN_GRID_DEST] & 15u);
     HASH(memory_class(e->binding.data[KSN_GRID_DEST]));
@@ -329,6 +346,8 @@ uint8_t ksn_grid_pie_candidates(const ksn_grid_execution *e)
 {
     if (!ksn_grid_pie_backend_available() || !ksn_grid_pie_eligible(e))
         return 0;
+    if (e->plan->mac.terms == 2)
+        return 1u << KSN_GRID_PIE_LOAD_GATHER;
     uint8_t mask = (1u << KSN_GRID_PIE_LOAD_GATHER) |
                    (1u << KSN_GRID_PIE_LOAD_AFFINE);
     ksn_grid_mac mac = e->plan->mac;
@@ -418,6 +437,20 @@ bool ksn_grid_pie_describe_access(const ksn_grid_execution *e,
 {
     if (!e || !info || !e->safe || !e->plan || !e->plan->mac.valid)
         return false;
+    if (e->plan->mac.terms == 2) {
+        *info = (ksn_grid_pie_access_info){0};
+        info->candidate_mask = ksn_grid_pie_candidates(e);
+        info->selected = KSN_GRID_PIE_LOAD_AUTO;
+        info->reason = KSN_GRID_SELECTION_NONE;
+        if (info->candidate_mask && !choose_route(e, info->candidate_mask,
+                ksn_grid_pie_profile_key(e), &info->selected, &info->reason))
+            return false;
+        info->input = KSN_GRID_ACCESS_GATHER;
+        info->coefficient = KSN_GRID_ACCESS_GATHER;
+        info->tap_issues = 6;
+        info->tap_stalls = 2;
+        return true;
+    }
     ksn_grid_mac mac = e->plan->mac;
     if (!mac.left.is_load && mac.right.is_load) {
         ksn_grid_mac_operand tmp = mac.left;
@@ -675,6 +708,71 @@ static void block8_dynamic(const ksn_grid_execution *e, unsigned x, unsigned y,
     TRACE(KSN_GRID_TRACE_FINISH, dest, NULL, p->final_shift);
 }
 
+/* A two-term expression uses the same QACC and preserves tap/term order.
+ * Gather is the only candidate until its load patterns have device profiles. */
+__attribute__((noinline))
+static void block8_dual(const ksn_grid_execution *e, unsigned x, unsigned y)
+{
+    const ksn_grid_program *p = &e->plan->program;
+    const ksn_grid_mac *mac = &e->plan->mac;
+    const ksn_grid_mac_operand *left[2] = {&mac->left, &mac->extra_left};
+    const ksn_grid_mac_operand *right[2] = {&mac->right, &mac->extra_right};
+    int16_t *dest = e->binding.data[KSN_GRID_DEST] +
+        (size_t)(e->output[0] + e->output[2] * y + x);
+    int16_t a[8] __attribute__((aligned(16)));
+    int16_t b[8] __attribute__((aligned(16)));
+    TRACE(KSN_GRID_TRACE_START_DYNAMIC, NULL, NULL, (int32_t)p->initial);
+#if KSN_GRID_HAS_PIE
+    pie_zero();
+    if (p->initial) pie_add_bias((int32_t)p->initial);
+#else
+    int64_t accum[8];
+    for (unsigned lane = 0; lane < 8; ++lane) accum[lane] = p->initial;
+#endif
+    for (unsigned ty = 0; ty < e->shape.tap_height; ++ty)
+        for (unsigned tx = 0; tx < e->shape.tap_width; ++tx)
+            for (unsigned term = 0; term < 2; ++term) {
+                const ksn_grid_mac_operand *input = left[term];
+                const ksn_grid_mac_operand *weight = right[term];
+                if (!input->is_load && weight->is_load) {
+                    input = right[term];
+                    weight = left[term];
+                }
+                for (unsigned lane = 0; lane < 8; ++lane) {
+                    a[lane] = operand_value(e, input, x + lane, y, tx, ty);
+                    if (weight->is_load)
+                        b[lane] = operand_value(e, weight, x + lane, y, tx, ty);
+                }
+                if (!weight->is_load) {
+#if KSN_GRID_HAS_PIE
+                    pie_tap_broadcast_coefficient(a, &weight->constant);
+#else
+                    for (unsigned lane = 0; lane < 8; ++lane)
+                        accum[lane] += (int32_t)a[lane] * weight->constant;
+#endif
+                    LOAD_COUNT(broadcast_taps);
+                    TRACE(KSN_GRID_TRACE_BROADCAST_COEFFICIENT,
+                          a, &weight->constant, 0);
+                    continue;
+                }
+#if KSN_GRID_HAS_PIE
+                pie_tap_dynamic(a, b);
+#else
+                for (unsigned lane = 0; lane < 8; ++lane)
+                    accum[lane] += (int32_t)a[lane] * b[lane];
+#endif
+                LOAD_COUNT(gather_taps);
+                TRACE(KSN_GRID_TRACE_DYNAMIC, a, b, 0);
+            }
+#if KSN_GRID_HAS_PIE
+    pie_finish(dest, p->final_shift);
+#else
+    for (unsigned lane = 0; lane < 8; ++lane)
+        dest[lane] = extract(accum[lane], p->final_shift);
+#endif
+    TRACE(KSN_GRID_TRACE_FINISH, dest, NULL, p->final_shift);
+}
+
 ksn_grid_status ksn_grid_run_pie(ksn_grid_execution *e)
 {
     if (!e || !ksn_grid_pie_backend_available() || !ksn_grid_pie_eligible(e))
@@ -682,6 +780,28 @@ ksn_grid_status ksn_grid_run_pie(ksn_grid_execution *e)
     if (!ksn_grid_pie_select(e)) return KSN_GRID_BAD_IR;
     const ksn_grid_program *p = &e->plan->program;
     ksn_grid_mac mac = e->plan->mac;
+    if (mac.terms == 2) {
+        for (unsigned y = 0; y < e->shape.height; ++y) {
+            unsigned x = 0;
+            for (; x + 8 <= e->shape.width; x += 8)
+                block8_dual(e, x, y);
+            for (; x < e->shape.width; ++x) {
+                int64_t sum = p->initial;
+                for (unsigned ty = 0; ty < e->shape.tap_height; ++ty)
+                    for (unsigned tx = 0; tx < e->shape.tap_width; ++tx) {
+                        sum += (int32_t)operand_value(e, &mac.left, x, y, tx, ty) *
+                               operand_value(e, &mac.right, x, y, tx, ty);
+                        sum += (int32_t)operand_value(e, &mac.extra_left,
+                                                      x, y, tx, ty) *
+                               operand_value(e, &mac.extra_right, x, y, tx, ty);
+                    }
+                size_t at = (size_t)(e->output[0] + e->output[2] * y + x);
+                e->binding.data[KSN_GRID_DEST][at] = extract(sum, p->final_shift);
+            }
+        }
+        e->pie_backend_selected = true;
+        return KSN_GRID_OK;
+    }
     /* A constant operand occupies q1 for the whole block. When both operands
      * are loads, q1 is gathered and reloaded for every tap. */
     if (!mac.left.is_load && mac.right.is_load) {
@@ -802,7 +922,9 @@ ksn_grid_status ksn_grid_run_auto(ksn_grid_execution *e,
     if (policy && policy->enable_pie && ksn_grid_pie_backend_available() &&
         ksn_grid_pie_eligible(e)) {
         const ksn_grid_mac *mac = &e->plan->mac;
-        bool loaded_weight = mac->left.is_load && mac->right.is_load;
+        bool loaded_weight = (mac->left.is_load && mac->right.is_load) ||
+            (mac->terms == 2 && mac->extra_left.is_load &&
+             mac->extra_right.is_load);
         uint16_t minimum = loaded_weight ? policy->min_loaded_weight_outputs :
                                            policy->min_outputs;
         if (minimum >= 8 && outputs >= minimum) return ksn_grid_run_pie(e);

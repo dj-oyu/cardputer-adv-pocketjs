@@ -84,7 +84,9 @@ typedef struct {
 
 typedef struct {
     bool valid;
+    uint8_t terms; /* one or two products in original expression order */
     ksn_grid_mac_operand left, right;
+    ksn_grid_mac_operand extra_left, extra_right;
 } ksn_grid_mac;
 
 /* Bind-time classification of the output-lane x stride. Alignment and extra

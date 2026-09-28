@@ -26,42 +26,142 @@ static bool valid_index(const ksn_grid_index *index)
     return true;
 }
 
-/* Match the expression graph, not register numbers or operand order. Every
- * instruction must contribute to the result: dropping a dead arithmetic op
- * could hide its checked-overflow failure in the scalar semantics. */
+typedef enum { MAC_UNKNOWN, MAC_ACC, MAC_LEAF, MAC_PRODUCT, MAC_SUM } mac_kind;
+typedef struct {
+    mac_kind kind;
+    uint16_t contributors;
+    ksn_grid_mac_operand left, right, extra_left, extra_right;
+} mac_value;
+
+static bool mac_term(const mac_value *value, ksn_grid_mac_operand *left,
+                     ksn_grid_mac_operand *right)
+{
+    if (value->kind != MAC_LEAF && value->kind != MAC_PRODUCT) return false;
+    *left = value->left;
+    *right = value->kind == MAC_PRODUCT ? value->right :
+             (ksn_grid_mac_operand){.constant = 1};
+    return true;
+}
+
+static bool mac_constant(const mac_value *value, int16_t number)
+{
+    return value->kind == MAC_LEAF && !value->left.is_load &&
+           value->left.constant == number;
+}
+
+static bool mac_scaled_load(const mac_value *value,
+                            ksn_grid_mac_operand *load, int16_t *coefficient)
+{
+    if (value->kind == MAC_LEAF && value->left.is_load) {
+        *load = value->left;
+        *coefficient = 1;
+        return true;
+    }
+    if (value->kind != MAC_PRODUCT ||
+        value->left.is_load == value->right.is_load) return false;
+    *load = value->left.is_load ? value->left : value->right;
+    *coefficient = value->left.is_load ? value->right.constant :
+                   value->left.constant;
+    return true;
+}
+
+/* Interpret the bounded register program as versioned values at registration.
+ * Fold only arithmetic whose intermediate value is known to fit int16, plus
+ * ADD 0 / MUL 1 identities. All instructions must reach the final result: a
+ * discarded checked operation could fail in the scalar VM. */
 static ksn_grid_mac normalize_mac(const ksn_grid_program *p)
 {
     ksn_grid_mac mac = {0};
-    if (p->count != 2 && p->count != 4) return mac;
-    const ksn_grid_instruction *add = &p->body[p->count - 1u];
     uint8_t acc = p->result_reg;
+    mac_value values[KSN_GRID_REGS] = {{0}};
+    values[acc].kind = MAC_ACC;
+    for (unsigned i = 0; i + 1u < p->count; ++i) {
+        const ksn_grid_instruction *in = &p->body[i];
+        if (in->dst == acc) return mac;
+        mac_value next = {.contributors = (uint16_t)(1u << i)};
+        if (in->op == KSN_GRID_LOAD || in->op == KSN_GRID_CONST) {
+            if (in->op == KSN_GRID_LOAD && in->buffer == KSN_GRID_DEST)
+                return mac;
+            next.kind = MAC_LEAF;
+            next.left = (ksn_grid_mac_operand){
+                .is_load = in->op == KSN_GRID_LOAD,
+                .instruction = (uint8_t)i,
+                .constant = in->immediate
+            };
+        } else {
+            mac_value a = values[in->a], b = values[in->b];
+            if (a.kind == MAC_UNKNOWN || b.kind == MAC_UNKNOWN ||
+                a.kind == MAC_ACC || b.kind == MAC_ACC) return mac;
+            next.contributors |= a.contributors | b.contributors;
+            if (in->op == KSN_GRID_ADD && mac_constant(&a, 0)) next = b;
+            else if (in->op == KSN_GRID_ADD && mac_constant(&b, 0)) next = a;
+            else if (in->op == KSN_GRID_MUL && mac_constant(&a, 1)) next = b;
+            else if (in->op == KSN_GRID_MUL && mac_constant(&b, 1)) next = a;
+            else if (a.kind == MAC_LEAF && b.kind == MAC_LEAF &&
+                     !a.left.is_load && !b.left.is_load) {
+                int64_t folded = 0;
+                if (in->op == KSN_GRID_ADD)
+                    folded = (int32_t)a.left.constant + b.left.constant;
+                else if (in->op == KSN_GRID_MUL)
+                    folded = (int32_t)a.left.constant * b.left.constant;
+                else if (in->op == KSN_GRID_MIN)
+                    folded = a.left.constant < b.left.constant ?
+                             a.left.constant : b.left.constant;
+                else return mac;
+                if (folded < INT16_MIN || folded > INT16_MAX) {
+                    if (in->op != KSN_GRID_MUL) return mac;
+                    next.kind = MAC_PRODUCT;
+                    next.left = a.left;
+                    next.right = b.left;
+                } else {
+                    next.kind = MAC_LEAF;
+                    next.left.constant = (int16_t)folded;
+                }
+            } else if (in->op == KSN_GRID_MUL && a.kind == MAC_LEAF &&
+                       b.kind == MAC_LEAF) {
+                next.kind = MAC_PRODUCT;
+                next.left = a.left;
+                next.right = b.left;
+            } else if (in->op == KSN_GRID_ADD) {
+                ksn_grid_mac_operand a_load, b_load;
+                int16_t a_coefficient, b_coefficient;
+                bool factor = mac_scaled_load(&a, &a_load, &a_coefficient) &&
+                              mac_scaled_load(&b, &b_load, &b_coefficient) &&
+                              a_load.instruction == b_load.instruction;
+                int32_t combined = factor ?
+                    (int32_t)a_coefficient + b_coefficient : 0;
+                if (factor && combined >= INT16_MIN && combined <= INT16_MAX) {
+                    next.kind = MAC_PRODUCT;
+                    next.left = a_load;
+                    next.right = (ksn_grid_mac_operand){
+                        .constant = (int16_t)combined};
+                } else if (mac_term(&a, &next.left, &next.right) &&
+                           mac_term(&b, &next.extra_left, &next.extra_right)) {
+                    next.kind = MAC_SUM;
+                } else return mac;
+            } else return mac;
+            next.contributors = (uint16_t)(next.contributors |
+                                  a.contributors | b.contributors | (1u << i));
+        }
+        values[in->dst] = next;
+    }
+    const ksn_grid_instruction *add = &p->body[p->count - 1u];
     if (add->op != KSN_GRID_ADD || add->dst != acc ||
         (add->a == acc) == (add->b == acc)) return mac;
-    uint8_t term = add->a == acc ? add->b : add->a;
-    unsigned sources = p->count == 2 ? 1u : 2u;
-    for (unsigned i = 0; i < sources; ++i) {
-        const ksn_grid_instruction *in = &p->body[i];
-        if ((in->op != KSN_GRID_LOAD && in->op != KSN_GRID_CONST) ||
-            in->dst == acc) return mac;
+    mac_value term = values[add->a == acc ? add->b : add->a];
+    if ((term.kind != MAC_LEAF && term.kind != MAC_PRODUCT &&
+         term.kind != MAC_SUM) ||
+        (unsigned)(term.contributors | (1u << (p->count - 1u))) !=
+            ((1u << p->count) - 1u)) return mac;
+    mac.left = term.left;
+    mac.right = term.kind == MAC_LEAF ?
+                (ksn_grid_mac_operand){.constant = 1} :
+                term.right;
+    mac.terms = term.kind == MAC_SUM ? 2 : 1;
+    if (mac.terms == 2) {
+        mac.extra_left = term.extra_left;
+        mac.extra_right = term.extra_right;
     }
-    if (sources == 1) {
-        if (term != p->body[0].dst) return mac;
-        mac.right.constant = 1;
-    } else {
-        const ksn_grid_instruction *mul = &p->body[2];
-        if (p->body[0].dst == p->body[1].dst ||
-            mul->op != KSN_GRID_MUL || mul->dst == acc ||
-            term != mul->dst ||
-            !((mul->a == p->body[0].dst && mul->b == p->body[1].dst) ||
-              (mul->b == p->body[0].dst && mul->a == p->body[1].dst)))
-            return mac;
-        mac.right.is_load = p->body[1].op == KSN_GRID_LOAD;
-        mac.right.instruction = 1;
-        mac.right.constant = p->body[1].immediate;
-    }
-    mac.left.is_load = p->body[0].op == KSN_GRID_LOAD;
-    mac.left.instruction = 0;
-    mac.left.constant = p->body[0].immediate;
     mac.valid = true;
     return mac;
 }

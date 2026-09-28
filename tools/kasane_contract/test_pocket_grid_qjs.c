@@ -159,6 +159,9 @@ int main(int argc, char **argv)
               "let route=kasane.grid.explain(h);"
               "if(route.backend!=='PIE'||route.strategy!=='FUSED'||"
               "route.reason!=='PROFILE')throw Error(JSON.stringify(route));"
+              "let measure=kasane.grid.measure(h,2);"
+              "if(!measure.equal||measure.repeats!==2||"
+              "measure.scalarUs<0||measure.pieUs<0)throw Error('measure');"
               "globalThis.resource=kasane.grid.resource(h);", false);
     CHECK(resources == 1 && !pocket_grid_pending());
     pixels(0);
@@ -188,6 +191,7 @@ int main(int argc, char **argv)
               "throw Error(JSON.stringify(r));"
               "globalThis.rr=kasane.grid.resource(hr);", false);
     CHECK(resources == 2 && !pocket_grid_pending());
+    eval(ctx, "kasane.grid.measure(hr)", true);
     uint16_t row[42]; uint8_t alpha[42];
     CHECK(resize_image.read_span(resize_image.ctx, 0, 0, 0, 0, 42,
                                  row, alpha) == KSN_OK);

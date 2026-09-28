@@ -278,6 +278,188 @@ static void test_alignment(void)
     assert(!e.pie_backend_selected);
 }
 
+static void test_registration_normalization(void)
+{
+    int16_t source[64 * 8] __attribute__((aligned(16)));
+    int16_t scalar[24 * 3] __attribute__((aligned(16)));
+    int16_t optimized[24 * 3] __attribute__((aligned(16)));
+    for (unsigned i = 0; i < 64u * 8u; ++i)
+        source[i] = (int16_t)((int)(i % 43u) - 21);
+    ksn_grid_shape shape = {16, 2, 2, 2};
+    ksn_grid_binding binding = {0};
+    binding.data[KSN_GRID_SOURCE] = source;
+    binding.count[KSN_GRID_SOURCE] = 64u * 8u;
+    binding.count[KSN_GRID_DEST] = 24u * 3u;
+    ksn_grid_pie_policy policy = {true, 8, 8, 8};
+
+    for (unsigned variant = 0; variant < 10; ++variant) {
+        ksn_grid_program p = program(3, 2);
+        if (variant == 0) { /* register reuse, reordered definitions, identities */
+            p.count = 8;
+            p.body[0].op = KSN_GRID_CONST;
+            p.body[0].dst = 4;
+            p.body[0].immediate = 0;
+            p.body[1].op = KSN_GRID_LOAD;
+            p.body[1].dst = 1;
+            p.body[1].index = index5(0, 2, 128, 1, 64);
+            p.body[2].op = KSN_GRID_ADD;
+            p.body[2].dst = 1;
+            p.body[2].a = 1;
+            p.body[2].b = 4;
+            p.body[3].op = KSN_GRID_CONST;
+            p.body[3].dst = 5;
+            p.body[3].immediate = 1;
+            p.body[4].op = KSN_GRID_MUL;
+            p.body[4].dst = 1;
+            p.body[4].a = 1;
+            p.body[4].b = 5;
+            p.body[5].op = KSN_GRID_CONST;
+            p.body[5].dst = 2;
+            p.body[5].immediate = 3;
+            p.body[6].op = KSN_GRID_MUL;
+            p.body[6].dst = 3;
+            p.body[6].a = 2;
+            p.body[6].b = 1;
+            p.body[7].op = KSN_GRID_ADD;
+            p.body[7].dst = 0;
+            p.body[7].a = 3;
+            p.body[7].b = 0;
+        } else if (variant == 1) { /* constant DAG folded to coefficient 3 */
+            p.count = 6;
+            p.body[1].immediate = 1;
+            p.body[2].op = KSN_GRID_CONST;
+            p.body[2].dst = 3;
+            p.body[2].immediate = 2;
+            p.body[3].op = KSN_GRID_ADD;
+            p.body[3].dst = 2;
+            p.body[3].a = 2;
+            p.body[3].b = 3;
+            p.body[4].op = KSN_GRID_MUL;
+            p.body[4].dst = 4;
+            p.body[4].a = 1;
+            p.body[4].b = 2;
+            p.body[5].op = KSN_GRID_ADD;
+            p.body[5].dst = 0;
+            p.body[5].a = 0;
+            p.body[5].b = 4;
+        } else if (variant == 2) { /* one load used as both PIE operands */
+            p.count = 3;
+            p.body[1].op = KSN_GRID_MUL;
+            p.body[1].dst = 2;
+            p.body[1].a = p.body[1].b = 1;
+            p.body[2].op = KSN_GRID_ADD;
+            p.body[2].dst = 0;
+            p.body[2].a = 0;
+            p.body[2].b = 2;
+        } else if (variant == 3) { /* nonzero add cannot become one MAC */
+            p.body[2].op = KSN_GRID_ADD;
+            p.body[2].a = 1;
+            p.body[2].b = 2;
+        } else if (variant == 4) { /* dead checked operation cannot be dropped */
+            p.count = 5;
+            p.body[4] = p.body[3];
+            p.body[3].op = KSN_GRID_CONST;
+            p.body[3].dst = 4;
+            p.body[3].immediate = 7;
+        } else if (variant == 5) { /* constant product exceeds int16 but fits one MAC */
+            p.body[0].op = KSN_GRID_CONST;
+            p.body[0].immediate = INT16_MAX;
+            p.body[1].immediate = INT16_MAX;
+            p.final_shift = 30;
+        } else if (variant == 6) { /* constant MIN folds without changing the tap value */
+            p.count = 6;
+            p.body[1].immediate = 3;
+            p.body[2].op = KSN_GRID_CONST;
+            p.body[2].dst = 4;
+            p.body[2].immediate = 4;
+            p.body[3].op = KSN_GRID_MIN;
+            p.body[3].dst = 2;
+            p.body[3].a = 2;
+            p.body[3].b = 4;
+            p.body[4].op = KSN_GRID_MUL;
+            p.body[4].dst = 3;
+            p.body[4].a = 1;
+            p.body[4].b = 2;
+            p.body[5].op = KSN_GRID_ADD;
+            p.body[5].dst = 0;
+            p.body[5].a = 0;
+            p.body[5].b = 3;
+        } else if (variant == 7 || variant == 8) {
+            /* Shared load factors when possible; otherwise uses two MACs. */
+            p.count = 7;
+            p.body[1].immediate = variant == 7 ? 7 : 30000;
+            p.body[3].op = KSN_GRID_CONST;
+            p.body[3].dst = 4;
+            p.body[3].immediate = variant == 7 ? -4 : 30000;
+            p.body[4].op = KSN_GRID_MUL;
+            p.body[4].dst = 5;
+            p.body[4].a = 1;
+            p.body[4].b = 4;
+            p.body[5].op = KSN_GRID_ADD;
+            p.body[5].dst = 6;
+            p.body[5].a = 3;
+            p.body[5].b = 5;
+            p.body[6].op = KSN_GRID_ADD;
+            p.body[6].dst = 0;
+            p.body[6].a = 0;
+            p.body[6].b = 6;
+        } else { /* two different loads use consecutive QACC products */
+            p.count = 8;
+            p.body[3].op = KSN_GRID_LOAD;
+            p.body[3].dst = 4;
+            p.body[3].index = index5(15, -1, 128, 1, 64);
+            p.body[4].op = KSN_GRID_CONST;
+            p.body[4].dst = 5;
+            p.body[4].immediate = 2;
+            p.body[5].op = KSN_GRID_MUL;
+            p.body[5].dst = 6;
+            p.body[5].a = 4;
+            p.body[5].b = 5;
+            p.body[6].op = KSN_GRID_ADD;
+            p.body[6].dst = 7;
+            p.body[6].a = 3;
+            p.body[6].b = 6;
+            p.body[7].op = KSN_GRID_ADD;
+            p.body[7].dst = 0;
+            p.body[7].a = 0;
+            p.body[7].b = 7;
+        }
+        ksn_grid_plan plan;
+        assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_OK);
+        assert(plan.mac.valid == (variant != 4));
+        if (variant != 4)
+            assert(plan.mac.terms ==
+                   ((variant == 3 || variant >= 8) ? 2 : 1));
+        memset(scalar, 0, sizeof scalar);
+        memset(optimized, 0, sizeof optimized);
+        binding.data[KSN_GRID_DEST] = scalar;
+        ksn_grid_execution e;
+        assert(ksn_grid_begin(&plan, &shape, &binding, &e) == KSN_GRID_OK);
+        if (variant >= 8) {
+            ksn_grid_pie_access_info access;
+            assert(ksn_grid_pie_describe_access(&e, &access));
+#ifdef KSN_GRID_PIE_MODEL
+            assert(access.candidate_mask ==
+                   (1u << KSN_GRID_PIE_LOAD_GATHER));
+            assert(access.selected == KSN_GRID_PIE_LOAD_GATHER);
+            assert(access.reason == KSN_GRID_SELECTION_FALLBACK);
+#else
+            assert(access.candidate_mask == 0);
+#endif
+        }
+        assert(ksn_grid_run_scalar(&e) == KSN_GRID_OK);
+        binding.data[KSN_GRID_DEST] = optimized;
+        assert(ksn_grid_begin(&plan, &shape, &binding, &e) == KSN_GRID_OK);
+        assert(ksn_grid_run_auto(&e, &policy) == KSN_GRID_OK);
+#ifdef KSN_GRID_PIE_MODEL
+        assert(e.pie_backend_selected == (variant != 4));
+#else
+        assert(!e.pie_backend_selected);
+#endif
+        assert(memcmp(scalar, optimized, sizeof scalar) == 0);
+    }
+}
+
 #ifdef KSN_GRID_PIE_MODEL
 static void test_affine_load_bounds(void)
 {
@@ -456,6 +638,7 @@ static void test_dependent_rows(void)
 int main(void)
 {
     profile_selection_case();
+    test_registration_normalization();
     static const unsigned width[] = {1, 7, 8, 9, 15, 16, 17};
     static const int16_t weight[] = {1, -1, 16384, INT16_MIN};
     static const uint8_t shift[] = {0, 2, 14, 30};

@@ -1,6 +1,7 @@
-"""Launch GRID LAB twice and verify three arbitrary resize ratios via PIE."""
+"""Launch GRID LAB twice and verify resize plus symbolic fold modes via PIE."""
 import argparse
 from pathlib import Path
+import re
 import time
 
 import serial
@@ -50,9 +51,9 @@ def main():
                     raise RuntimeError("GRID LAB launched under wrong identity")
                 start = len(log)
                 deadline = time.monotonic() + 20
-                while bytes(log[start:]).count(b"KASANE_PAINT") < 10:
+                while bytes(log[start:]).count(b"KASANE_PAINT") < 14:
                     if time.monotonic() > deadline:
-                        raise RuntimeError("GRID LAB did not paint 300 frames")
+                        raise RuntimeError("GRID LAB did not paint 420 frames")
                     log.extend(port.read(32768))
                     recent = bytes(log[start:])
                     if any(marker in recent for marker in
@@ -62,13 +63,23 @@ def main():
                     raise RuntimeError("GRID LAB did not keep selecting backend")
                 recent = bytes(log[start:])
                 for mode in (b"GRID_APP MODE 1 37x23 backend=PIE",
-                             b"GRID_APP MODE 2 30x15 backend=PIE"):
+                             b"GRID_APP MODE 2 30x15 backend=PIE",
+                             b"GRID_APP MODE 3 48x28 backend=PIE"):
                     if mode not in recent:
                         raise RuntimeError(f"GRID LAB did not reach {mode!r}")
+                measured = re.search(
+                    rb"GRID_APP MEASURE 3 repeats=8 scalar_us=(\d+) "
+                    rb"pie_us=(\d+) equal=1", recent)
+                if not measured:
+                    raise RuntimeError("GRID LAB native comparison missing")
+                scalar_us, pie_us = map(int, measured.groups())
+                if scalar_us <= 0 or pie_us <= 0:
+                    raise RuntimeError("GRID LAB native timing was zero")
                 stopped = key(b"q", b"HOME_READY")
                 if b"APP_STOPPED" not in stopped:
                     raise RuntimeError("GRID LAB did not stop")
-                print(f"GRID_LAB_RUN_{run} PASS")
+                print(f"GRID_LAB_RUN_{run} PASS scalar={scalar_us}us "
+                      f"pie={pie_us}us repeats=8")
     finally:
         args.out.write_bytes(log)
 

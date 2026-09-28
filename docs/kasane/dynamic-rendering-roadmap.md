@@ -340,3 +340,30 @@ D2通常APPのCOM3診断は[2面API契約](d2-multi-procedural-surface.md)の`KA
 D4通常JSのCOM3診断は[限定pixel API](d4-pixel-small-window.md)の`KASANE_D4_PIXEL_APP_PROBE`で2回実行した。最大112×63×8命令の同一資源を2画像ノードへ表示し、最初の2帯目送出を1回失敗させて再送。成功候補の表示は初回runで16.3–20.5 ms、UI task stack最小余裕23,708 B。診断image SHA-256 `ca0aa51e046560123fb2f8e3d57cc6f3c55ca0f4e4ca7e0f0755dc144a8f9d9b`、ログ`.cache/d4-pixel-app-device-20260928a/serial.log`。全画面18命令はspan化しても23.4 msの評価に加えて合成・LCDが必要で、2枚の全画面underlay確保も失敗するため、限定APIの上限を広げない。
 
 各診断の終了時にその時点の通常imageをアプリ領域へ復元し、flash verifyと`HOME_READY`を確認した。フラッシュ退避なし。FLOWER overlay診断フラグも加えた最終通常imageはSHA-256 `6d94ab7fae63f196bcbfe3d23aeb3a3a1315814b0d63ab2693256bf9013e0d55`、app 2,128,640 Bでビルド成功。これをアプリ領域へ書いてflash verifyと`HOME_READY`を再確認した。最終image上で通常VIDEO LABを2回、通常MEGADEMOの全画面→縮小小窓→全画面往復を2回実行して通過した。ログは`.cache/d2d4-overlay-final-video-lab-20260928.log`と`.cache/d2d4-overlay-final-megademo-20260928.log`。
+
+## D3a 登録時の積和認識を拡張（2026-09-29）
+
+[grid登録時解析](../../main/ui/kasane/ksn_proc_grid.c)の積和候補認識を、命令数と順序が固定された照合から、最大16命令のレジスタ定義ごとの値追跡へ変更した。レジスタ再利用、独立した定義の並べ替え、同一loadの再利用、`ADD 0`/`MUL 1`、int16に収まる定数式を正規化する。int16を超える定数の積は途中値を狭めず、2つの定数をPIEの積として保持する。最終結果は累積値への1回の加算と1つの積項に限り、すべての命令が結果に寄与する場合だけPIE候補にする。途中の検査付き演算を消しうる死んだ命令、非ゼロの加算項、複数の積和項はscalarへ戻す。実行時の独立性・alias・値域・QACC上限の検証は従来どおり別段で行う。
+
+追加したJS例を含む22式は実QuickJSから登録し、PIE命令シミュレータで通常・融合経路それぞれ94ベクトルブロックの出力一致を確認した。CのPIE模擬・非PIE経路は400ケース、通常アプリのgrid adapterも通過し、Xtensa向け通常imageはビルド成功。今回の認識拡張の実機時間は未測定で、候補範囲を広げたこと自体を速度改善とはみなさない。次は複数項の累積と依存行kernelの共通表現、登録費用と実測費用に基づく選択を検討する。float描画IRからQ14への暗黙変換は行わない。
+
+実機で遊べる確認用に、既存の[GRID LAB](../../apps/kasane/grid_lab.js)へ4番目の`FOLD ART`モードを追加した。Enterまたは120フレームごとの自動切替で、従来の3縮小モードから進める。48×28の動くRGB565模様をJSの`fold`式`acc+(load+0)*(1+2)`から登録し、nativeループの結果を通常Kasane画像として表示する。COM3へ通常image 2,138,192 B（SHA-256 `94fafd24229abfd7695f440884f5e67fb2cb77b114b09c221603c7d0b146b9cb`）をアプリ領域だけ書込み、書込時hash照合後、GRID LABを2回起動した。両runで既存3モードと新モードに到達し、新モードは`backend=PIE strategy=GATHER reason=FALLBACK`、終了後は`HOME_READY`。ログは`.cache/grid-lab-d3a-20260929/serial.log`。これは選択と表示の確認であり、scalarとの実機時間比較や画面の全画素読戻しではない。
+
+続いて同じloadを共有する`load*7+load*(-4)`を登録時に`load*3`へ縮約した。この段階では係数の和がsigned16を超える形をscalarへ戻していた。2つの積の途中値はsigned64の範囲に収まり、bind時の既存のQACC上限・独立性検査も通す。CのPIE模擬/非PIE経路で一致し、実QuickJSの24例とPIE命令シミュレータの通常/融合各95ベクトルブロックが通過した。GRID LABの`FOLD ART`もこの式へ更新し、通常image 2,138,416 B（SHA-256 `0aff44fe166407ca378385960fb5f539d8d5905d3190da2c3b6a051322dd8c42`）をアプリ領域だけ書込み、書込時hash照合と2回のGRID LAB全4モード・`HOME_READY`を確認した。新モードは両runで`PIE/GATHER/FALLBACK`。ログは`.cache/grid-lab-d3a-factored-20260929/serial.log`。実機のscalarとの速度比較はまだ行っていない。
+
+この速度比較のため、通常のgrid adapterに`measure(handle, repeats)`を追加した。直前に`run`へ渡したコピー済み入力を使い、表示中の候補/確定画像とは別の整列scratchでscalarとAUTO PIEを交互に測る。bindとJS入力生成は計時から除外し、両経路の全出力一致を各回で要求する。GRID LABのFOLD ARTは8回合計と1回平均をログ/画面へ表示する。COM3の2回の独立起動でscalar合計28,110 / 28,122 µs、PIE合計1,883 / 1,879 µs、全画素一致だった。1回あたり約3.514 ms対0.235 ms、約14.95倍である。PIEは両runで`GATHER/FALLBACK`を選び、4モードを表示後`HOME_READY`へ戻った。image 2,140,416 B（SHA-256 `476590105f4a26297a86d2ae71a277f1c13a5222bb5b11378c8efa1e6e0276fc`）をアプリ領域だけ更新し、書込時hash照合済み。ログは`.cache/grid-lab-d3a-measure-20260929/serial.log`。この比は特定の48×28・1tap式のnative kernel実行だけであり、同じ式を旧コンパイラで動かす場合のscalarとの差に相当する。登録費用、毎フレームのJS入力生成、画像合成、LCD転送を含むアプリ全体の倍率ではない。
+
+## D3a 2項の積和へ拡張（2026-09-29）
+
+1つの積へ縮約できない`termA+termB`を登録時planに最大2項の順序付き積として保持し、同じPIE QACCへ順に積和する経路を追加した。各項はint16 load/constantの積または直接値で、既存の独立性・QACC・alias・整列・出力検証を通る。出力に依存するloadはこの独立PIE候補から除外し、従来の依存行scan認識へ残す。2項は未知の実機費用を既存1項の選択表へ混ぜず、GATHER候補だけで開始した。1項のprofile keyと既存経路は変えない。係数の和がint16を超える共有load、非ゼロoffset、異なる位置の2 loadも新経路に入る。2項へ縮約できない3項以上と任意の依存式はまだscalar。
+
+JS前段の25例を実QuickJSから実行し、PIE命令シミュレータの通常/融合各98ベクトルブロックでCモデル・独立JS期待値と一致した。CのPIE模擬/非PIE経路各400ケース、通常アプリadapter試験を通した。GRID LABのFOLD ARTは元の画素×2と左右反転位置の画素を1tapで混ぜる48×28の動く絵へ更新し、既存の`measure`でnative scalar/PIEの全画素を毎回照合する。初期の2項PIEはCOM3の2起動で8回合計scalar 26,959 / 26,966 µs、PIE 8,364 / 8,384 µs。定数係数を毎回8レーン分組み立てる代わりに`EE.VLDBC.16`へ渡すと、別の2起動でPIE 7,191 / 7,189 µsとなり、初期経路より約14.2%短縮した。静的QR予測はこの差を示さず、C側の係数準備費用を含む実機測定が必要だった。
+
+最終image 2,141,616 B（SHA-256 `1ac5ad7e020d4d16bdc112b9f09a8d0821ef2669dcd162c6a7f7c81dfa2ac541`）をアプリ領域だけ更新し、書込時hash照合後、GRID LABを2回起動した。8回合計はscalar 26,969 / 26,968 µs、PIE 7,187 / 7,185 µsで全画素一致。1回あたり約3.371 ms対0.898 ms、約3.75倍。4モードを表示し、`PIE/GATHER/FALLBACK`と終了後`HOME_READY`を確認した。ログは`.cache/grid-lab-d3a-dual-final-20260929/serial.log`。これは登録済みkernelだけの費用であり、1項版と式・表示内容も異なるため、両者の速度差を2項追加の純粋なオーバーヘッドとは断定しない。次は2項のloadごとのcontiguous/reverse-stride判定と実機選択表、依存行kernelの共通表現を検討する。
+
+## 次のタスク（2026-09-29）
+
+1. **D3a: 2項のアクセス経路と費用選択。** 各loadの連続・逆順・broadcast・gatherを登録時に判定し、合法な2項PIE候補を比較する。GRID LABのFOLD ARTに加え、寸法・stride・係数を変えたJS例でscalarとの全画素一致を確認する。同じ通常imageで独立した実機runを繰り返し、遅い候補は選択表へ入れない。静的命令予測だけで採用しない。
+2. **D3a: 登録時解析と依存行kernelの共通化。** 現在の有界な値追跡を、live-in/out、依存、検査付き演算の副作用を明示できる共通表現へ整理する。2項を超える式と依存行の反復は、合法性と費用の両方を示せる範囲だけ拡張する。レジスタ再利用、alias、overflow、死んだ検査付き命令をhostで反例として通し、証明できない式はscalarに戻す。
+3. **JS APIと診断。** `fold`と画像用IRの記法を実際のbackend能力に合わせて整理し、登録失敗・scalar選択・PIE候補の理由を確認できる診断を付ける。実機で試すJS例は既存のGRID LABなどのテスト用アプリへ加える。float式からQ14への暗黙変換は導入しない。
+4. **表示全体の採否。** 登録、JS入力生成、kernel、Kasane合成、LCD送出、heap、フレーム停滞を別々に測り、全画面とUI内の小窓でscalar/PIEの体感上の差と余裕を確認する。D2のFLOWER＋2面、D5のSD動画＋音声との複合負荷は、単独のkernel倍率から外挿せず別のgateで判定する。

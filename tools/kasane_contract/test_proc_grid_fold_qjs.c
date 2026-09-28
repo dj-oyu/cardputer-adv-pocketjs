@@ -233,9 +233,10 @@ static void run_example(JSValueConst example)
                             pie ? "PIE" : scan_pie ? "SCAN" : "SCALAR");
     if (trace_file && pie) {
         uint8_t candidates = ksn_grid_pie_candidates(&execution);
-        execution.requested_strategy = trace_strategy == KSN_GRID_PIE_LOAD_FUSED &&
-            !(candidates & (1u << KSN_GRID_PIE_LOAD_FUSED)) ?
-            KSN_GRID_PIE_LOAD_AFFINE : trace_strategy;
+        execution.requested_strategy =
+            (candidates & (1u << trace_strategy)) ? trace_strategy :
+            (candidates & (1u << KSN_GRID_PIE_LOAD_AFFINE)) ?
+            KSN_GRID_PIE_LOAD_AFFINE : KSN_GRID_PIE_LOAD_GATHER;
     }
     CHECK(ksn_grid_run_auto(&execution, &policy) == KSN_GRID_OK);
     CHECK(execution.pie_backend_selected == (pie || scan_pie));
@@ -308,7 +309,7 @@ int main(int argc, char **argv)
     JSValue global = JS_GetGlobalObject(js);
     JSValue examples = prop(global, "gridFoldExamples");
     uint32_t count = length(examples);
-    CHECK(count == 19);
+    CHECK(count == 25);
     for (unsigned i = 0; i < count; ++i) {
         JSValue example = item(examples, i);
         run_example(example);

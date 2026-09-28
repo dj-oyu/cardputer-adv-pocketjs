@@ -40,6 +40,77 @@
     examples.push({name: "directSum", program, buffers: {0: source}, expected, pie: true});
   }
 
+  { // The body is no longer a fixed LOAD/CONST/MUL/ADD sequence.
+    const source = Array.from({length: 8}, (_, x) => x - 4);
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g =>
+      g.add(g.acc, g.mul(g.add(g.load(0, index(0, 1, 0, 0, 0)),
+                               g.constant(0)),
+                         g.add(g.constant(1), g.constant(2)))));
+    examples.push({name: "normalizedMac", program, buffers: {0: source},
+                   expected: source.map(value => value * 3), pie: true});
+  }
+
+  { // A shared load supplies both operands of a dynamic square.
+    const source = Array.from({length: 8}, (_, x) => x - 4);
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g => {
+      const sample = g.load(0, index(0, 1, 0, 0, 0));
+      return g.add(g.acc, g.mul(sample, sample));
+    });
+    examples.push({name: "sharedLoadSquare", program, buffers: {0: source},
+                   expected: source.map(value => value * value), pie: true});
+  }
+
+  { // Two products of one sampled value factor into a single MAC.
+    const source = Array.from({length: 8}, (_, x) => x - 4);
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g => {
+      const sample = g.load(0, index(0, 1, 0, 0, 0));
+      return g.add(g.acc,
+                   g.add(g.mul(sample, g.constant(7)),
+                         g.mul(sample, g.constant(-4))));
+    });
+    examples.push({name: "factoredSharedLoad", program, buffers: {0: source},
+                   expected: source.map(value => value * 3), pie: true});
+  }
+
+  { // The coefficient sum needs two MACs when it exceeds signed 16-bit.
+    const source = Array.from({length: 8}, (_, x) => x - 4);
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g => {
+      const sample = g.load(0, index(0, 1, 0, 0, 0));
+      return g.add(g.acc,
+                   g.add(g.mul(sample, g.constant(30000)),
+                         g.mul(sample, g.constant(30000))));
+    });
+    examples.push({name: "largeCoefficientDual", program,
+                   buffers: {0: source},
+                   expected: source.map(value => sat(value * 60000, 0)), pie: true});
+  }
+
+  { // A nonzero offset is a second, constant MAC term.
+    const source = Array.from({length: 8}, (_, x) => x - 4);
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g =>
+      g.add(g.acc, g.add(g.load(0, index(0, 1, 0, 0, 0)),
+                         g.constant(2))));
+    examples.push({name: "offsetTapDual", program, buffers: {0: source},
+                   expected: source.map(value => value + 2), pie: true});
+  }
+
+  { // Two different source positions feed the same QACC in original order.
+    const source = Array.from({length: 8}, (_, x) => x * 3 - 10);
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g =>
+      g.add(g.acc,
+            g.add(g.mul(g.load(0, index(0, 1, 0, 0, 0)), g.constant(2)),
+                  g.load(0, index(7, -1, 0, 0, 0)))));
+    examples.push({name: "mirrorBlendDual", program, buffers: {0: source},
+                   expected: source.map((value, x) => value * 2 + source[7 - x]),
+                   pie: true});
+  }
+
   { // Interleaved samples exercise the single-tap VUNZIP lowering.
     const source = Array.from({length: 16}, (_, i) => i * 17 - 100);
     const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
