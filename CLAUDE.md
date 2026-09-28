@@ -25,38 +25,11 @@ idf.py -B build_api -p COM3 monitor
 
 ## 実機テスト
 
-すべてUSBシリアル経由。ESP-IDFのPython環境（pyserial）で走らせる。
-
-```powershell
-python tools\smoke_device.py --port COM3 --cycles 20   # 起動/停止のライフサイクルとリーク
-python tools\test_settings.py --port COM3              # XMB設定・ミュート順序・画面遷移
-python tools\capture_home.py --port COM3               # 実ピクセル取得と30fps確認
-python tools\test_editor_draft.py --port COM3          # 未保存の編集がアプリ起動を跨いで残るか
-python tools\benchmark_app.py --port COM3              # JSアプリのPAINT内訳
-python tools\stress_app.py --port COM3                # STRESS TEST（メニュー最後の行）: ヒープ負荷3段階＋描画負荷、OOM回復とfps
-python tools\test_app_resume.py --port COM3           # Backで眠るアプリ（IMU CAL/PET/COMPANION）: 中断→同じ行で再開→別アプリで退去
-```
+コマンド一覧は [`docs/platform/test-commands.md`](docs/platform/test-commands.md)。すべてUSBシリアル経由で、ESP-IDFのPython環境（pyserial）で走らせる。実機側は `smoke_device.py` / `test_settings.py` / `capture_home.py` / `test_editor_draft.py` / `benchmark_app.py` / `stress_app.py` / `test_app_resume.py`。
 
 `test_settings.py` と `capture_home.py` は**押下回数を数えて**メニューを移動する。設定やアプリの行を増減させたら、この2つを同じ変更の中で直す。ログの大文字マーカー（`HOME_READY` / `CATEGORY %u` / `APP %u` / `SELECT %u` / `OPEN %u choice=%u` / `CHOICE %u` / `VALUE ...` / `LOADED ...` / `MODE %u %s` / `PERF ...` / `SFX %d played`）はこれらのスクリプトの契約なので、バイト単位で保つ。
 
-ホスト側のテスト（実機不要）:
-
-```bash
-python tools/test_flash_budget.py       # パーティション予約ガード
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_sail.c -lm -o /tmp/ts && /tmp/ts"
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_flower.c main/scene/canopy_pie.c main/scene/garden_decor_pie.c -I main/scene -I tools/hostshim -lm -o /tmp/tf && /tmp/tf"   # カーネル2ファイルも一緒にリンクする（flower.c単体では未定義参照）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_time.c -lm -o /tmp/t && /tmp/t"   # WSLのみ
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/test_sfx.py"   # 焼き込んだ効果音表と旧合成の差（WSLのみ。gccはWindows側に無い）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_font.py /tmp/cegen && gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I /tmp/cegen -I tools/hostshim -I main/hal -I main/ui -I main/text tools/test_codeedit.c tools/hostshim/hostshim.c main/ui/codeedit.c main/ui/paint.c main/ui/vimcmd.c main/text/jslex.c -o /tmp/t && /tmp/t"   # エディタの差分再描画と全面再描画が同じピクセルか（WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_pocket_text_test.sh && /tmp/test-pocket-text"   # pocket.input.text のセッション寿命を実物のQuickJSごとASanで（WSLのみ。番号を渡すと1件だけ）
-python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
-python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで模擬実行しスカラーと全画素比較
-python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_lessons_test.sh && /tmp/test-lessons"   # TUTORIALの全章とPlaygroundの既定ソースを実物のQuickJSとpocket.kasaneで実行（WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"   # STRESS TESTを実物のQuickJSとpocket.kasaneで900フレーム（Kasaneが断るシーンを焼く前に、WSLのみ）
-python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
-python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
-```
+ホスト側のテスト（実機不要）と `memlog.py` の呼び出しも同じ文書にある。
 
 **DRAMは `tools/memlog.py` が記録する。** ビルドのたびに静的値を `.cache/memlog/memory.jsonl`（git管理外）へ追記し、**動いたときだけ**書くので、ログはビルドの一覧ではなく変化の一覧になる。`--port` を付けると実機の空きヒープ（アイドル時とアプリ実行中）も一緒に残る。増減はファイル別に出るので「DRAMが6KiB増えた」ではなく「`pocket_io.c.obj +1113`」が読める。
 
@@ -97,5 +70,25 @@ JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EM
 ## 測定と主張
 
 数値は**実測か推定かを必ず区別する。** このプロジェクトでは、3体のエージェントが独立に同じ結論に達して全員間違っていた例（PIEの索引ロード）、推定1.2msが実測25.6msだった例（効果音の合成）、`--gc-sections` で削除済みのモジュールを測っていた例（Wi-Fiのサイズ）がある。測ったものが本当にバイナリに入っているかを `nm` / map で確かめる。
+
+## モデルの使い分け（ルーティング）
+
+モデルは速さと深さで3つに象徴する。切り替えは `/model`、サブエージェントは `Agent` の `model` で指定する。**振り分け役は Sonnet が担う**ので、Sonnet はこの節を読んで、迷ったら上へ回す。
+
+| ラベル | モデル | 得意 | 任せない |
+| --- | --- | --- | --- |
+| **FAST** | Sonnet 5.5 | 現状認識、症状から該当コードの絞り込み、事実の収集（file:line）、ビルドスクリプト・ブランチ管理・ホスト試験の実行と要約のような定型 | 解決策の決定、数値の決定、優先順位 |
+| **STEADY** | Opus 5.5（既定） | 実装・デバッグ・実機計測など普段のコーディング全般。大きなコンテキストで文書とCを一つの文脈に載せられる | 高コストな全面レビュー |
+| **SLOW** | Fable | 熟考が要る設計・仕様書・コードのレビューとブラッシュアップ。複雑な課題に対応するコードも書けるが高コストなので、普段の実装には使わない | 普段の実装 |
+
+**このプロジェクトでは、アタリ付けの速さと解決策の確かさは別物。** 癖のあるハードウェア（PSRAMなし、命令キャッシュ、PIE、Wi-Fiが食うDRAM）に高級なことをやらせるので、不具合のアタリは速く付けられても、その先の解決策は**かなり細い「正解の道」**を引かないと通らない。FAST が速く絞り込んだ結果は、そのまま修正の根拠にしない。
+
+**振り分けの規則**
+- 症状 → 疑わしい箇所の絞り込みは **FAST**。返すのは「範囲（file:line）、理由、確認した事実と推測の区別、そのコードが実際にビルドに入り呼ばれる経路かの確認の有無」まで。解決策は書かせない。
+- 修正の設計・実装、数値（上限・予算・閾値）の決定、優先順位、測定値の解釈は **STEADY 以上**。特にPIE・命令キャッシュ・DRAM/IRAM・タイミングに触れる判断は必ず STEADY。
+- 設計や仕様書の見直し、STEADY が出した方針の独立レビューは **SLOW**。実装は STEADY が済ませ、その差分と文書を SLOW が読む。
+- 迷ったら上へ回す。FAST が不確かなまま結論を出さない。
+
+**根拠（2026-09-29、既知の課題を伏せた検証、各1回）:** 上限の洗い出しでは FAST は STEADY の分析とほぼ一致し、見落とした穴も1件拾った。改善方針を出させると、行番号は正確でも、ビルド条件（プローブ専用ファイルを本番経路と誤認）とテストの検査対象を読み違え、その推測を優先順位1位の根拠にした（STEADY による判定で5観点が3/3/3/3/4）。1件ずつの結果で、一般化しない。
 
 複数セッションが1つの作業ツリーを共有するため、コミット時は `git show HEAD:<file>` に自分の変更だけを当てた blob を `git hash-object -w` + `git update-index --cacheinfo` で staging し、他セッションの未コミット変更を巻き込まない。
