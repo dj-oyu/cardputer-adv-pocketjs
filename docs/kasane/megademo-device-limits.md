@@ -19,7 +19,7 @@
 | 項目 | 値 |
 | --- | --- |
 | 基準 | `vm/mega-device`（`vm/main` 43b000b から）。本記録のコミットで変わるのは `apps/kasane/proc_megademo.js`、診断オプション `KASANE_MEGADEMO_TRACE`（既定 OFF）、試験スクリプト |
-| 通常 image | `idf.py -B build_megadev build`、2,172,832 B、SHA-256 `19197b038d4c6ec24d2f70057941ff4303c3d37732b6a4410a2e39380b4f0eb1`、DIRAM 171,900 B（基準と ±0、`tools/memlog.py`） |
+| 通常 image | `idf.py -B build_megadev build`、2,172,832 B、SHA-256 `19197b038d4c6ec24d2f70057941ff4303c3d37732b6a4410a2e39380b4f0eb1`、DIRAM 171,900 B（基準と ±0、`tools/memlog.py`）。コミット前の作業ツリーで作った image で、ソースは `8f677e1` と同じ（image の版文字列 `43b000b-dirty` だけが違う。記録後に機体へ書いた `2cb200a` の image は同じ大きさで SHA-256 `1c7b671ae85f1cbc2bb0fae83ef876b3a1e707f1a1bcfcf3157b07b56d4db820`） |
 | 診断 image | `idf.py -B build_megatrace -DKASANE_MEGADEMO_TRACE=ON build`。1 ターン1行の `MDT` ログ（JS／帯描画／転送／register／draw／空き heap／ターン内の最小空き／ゲストの malloc_size）と、HOME の `~` でゲスト heap 上限を次の起動だけ下げる機能 |
 | 駆動 | [`tools/kasane_contract/megademo_device.py`](../../tools/kasane_contract/megademo_device.py)（`run` で APPS メニューから起動・段階選択・キー送出・キャプチャ・Back、`analyze` で場面×段階の集計、`shots` でキャプチャの抽出と host 参照との比較） |
 | 回数 | 段階ごとの計測は診断 image で各 40 秒×2 回（段階を決める前と後）、通常 image で各 40 秒×1 回。長時間は HEAVY 95 秒（2,237 フレーム、約 6 周）。ログは `.cache/megadev/`（git 管理外） |
