@@ -371,6 +371,11 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   python3 tools/kasane_contract/stress_reference.py "$out/stress.bin"
 done
 python3 tools/kasane_contract/run_proc_megademo_js.py
+# MEGADEMO scenes: plan == debug-step plan == single-step VM and scalar ==
+# PIE model for every tier and frame, the adapter's limits, Act I against the
+# C reference; then the whole app on the real pocket.kasane (loader, view).
+python3 tools/kasane_contract/run_proc_megademo_scenes.py
+python3 tools/kasane_contract/run_megademo_app_host.py
 python3 tools/kasane_contract/run_pocket_proc_qjs.py
 python3 tools/kasane_contract/run_pocket_proc_limits_qjs.py
 python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py

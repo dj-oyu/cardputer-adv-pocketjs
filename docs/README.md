@@ -95,6 +95,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [残タスク](kasane/roadmap.md) | 実装・実測・未達を分けたロードマップ再評価用の表 |
 | [動的描画ロードマップ](kasane/dynamic-rendering-roadmap.md) | 関数アート・描画面・動画を、FLOWERとKasaneの実測を参照しながら段階的に進める構想 |
 | [手続き型描画の実機診断](kasane/procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。実測前の準備 |
+| [MEGADEMO Act II](kasane/megademo-limit-scenes.md) | 手続き面の上限を叩く3場面（ねじれ廊下・Apple II 風ZENITH・LIMIT）、場面ごとのplan登録/解除、プリミティブ網羅表、上限使用率とゲストヒープのhost実測（2026-09-29、実機未測定） |
 
 ## JS API — [`api/`](api/)
 

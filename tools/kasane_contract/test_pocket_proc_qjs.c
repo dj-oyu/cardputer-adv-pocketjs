@@ -55,7 +55,10 @@ JSValue pocket_kasane_proc_resource(JSContext *ctx){
         ksn_image_port port;pocket_proc_image_port_at(&port,0);
         REQUIRE(ksn_core_register_image(&multi_core,KSN_APP,&port,&multi_resource[0])==KSN_OK);
     }
-    return JS_NewObject(ctx);
+    /* Marked so the mock view can tell surface 0's image from the others. */
+    JSValue object=JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx,object,"__s0",JS_TRUE);
+    return object;
 }
 JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface){
     pocket_proc_image_mode_at(surface);
@@ -155,15 +158,23 @@ int main(int argc,char **argv){
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);
     JS_FreeValue(ctx,global);
+    /* The view side is a permissive mock; megaBounds follows the image of
+     * procedural surface 0, whose resource object is marked below. */
     eval_ok(ctx,
         "globalThis.megaBounds=[];globalThis.megaReplaces=0;"
         "globalThis.console={log(){}};"
-        "const uiTx={background(){},gradient(){},rect(){},text(){},"
-        "image(o){if(!o.resource.__monitor)megaBounds=o.bounds.slice();"
-        "return {setRect(tx,b){if(!o.resource.__monitor)megaBounds=b.slice()},"
-        "setVisible(){}}}};"
+        "const ref=()=>({setRect(){},setClip(){},setColor(){},setText(){},setReveal(){},"
+        "setImageFrame(){},setRotation(){},place(){},setVisible(){},"
+        "animate(){return {stop(){},finish(){},poll(){return 'running'}}}});"
+        "const uiTx=new Proxy({},{get(o,k){return k==='image'?s=>{const r=ref(),main=s.resource.__s0;"
+        "if(main)megaBounds=s.bounds.slice();"
+        "r.setRect=(tx,b)=>{if(main)megaBounds=b.slice()};return r}:()=>ref()}});"
         "pocket.kasane.replace=fn=>{megaReplaces++;fn(uiTx)};"
         "pocket.kasane.patch=fn=>fn(uiTx);"
+        "pocket.kasane.stats=()=>({displayed:{commands:0}});"
+        "pocket.kasane.resource=()=>({});"
+        "pocket.kasane.cache={create(){return {}}};"
+        "pocket.kasane.pixel={open(){return {}},stage(){return true}};"
         "pocket.kasane.grid={registerResizeSource(){return 1},"
         "resource(){return {__monitor:true}}}");
     ksn_image_port image;pocket_proc_image_port(&image);
@@ -260,14 +271,15 @@ int main(int argc,char **argv){
         REQUIRE(pocket_proc_pending());
         pocket_proc_present_result(KSN_OK);
     }
-    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==1)"
+    /* Frame 48 enters TWIST, whose set is a new REPLACE; the zoom carries over. */
+    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==2)"
                 "throw Error('Enter did not shrink into monitor')");
     for(unsigned i=0;i<44;i++){
         eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
         REQUIRE(pocket_proc_pending());
         pocket_proc_present_result(KSN_OK);
     }
-    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==1)"
+    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==2)"
                 "throw Error('Enter did not restore full screen')");
     eval_error(ctx,"pocket.kasane.procedural.register([[99,0,0,0,0,0]])");
     eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
