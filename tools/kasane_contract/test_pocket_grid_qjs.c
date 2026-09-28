@@ -175,6 +175,17 @@ int main(int argc, char **argv)
               "let forced=kasane.grid.measure(h,2,strategy);"
               "if(!forced.equal||forced.strategy!==strategy||forced.pieUs<0)"
               "throw Error('forced measure');}"
+              "let profile=kasane.grid.profile(h);"
+              "if(profile.runs!==1||profile.totalUs<profile.kernelUs||"
+              "profile.totalUs<profile.copyUs+profile.bindUs+profile.kernelUs||"
+              "kasane.grid.profile(h).runs!==0)throw Error('grid profile');"
+              "if(kasane.grid.run(h,{0:input},[32,16],{backend:'SCALAR'})"
+              "!=='scalar')throw Error('forced scalar');"
+              "if(kasane.grid.explain(h).scalarReason!=='POLICY_DISABLED')"
+              "throw Error('scalar policy');"
+              "if(kasane.grid.run(h,{0:input},[32,16],{backend:'AUTO'})"
+              "!=='PIE')throw Error('auto policy');"
+              "if(kasane.grid.profile(h).runs!==2)throw Error('profile runs');"
               "globalThis.resource=kasane.grid.resource(h);", false);
     CHECK(resources == 1 && !pocket_grid_pending());
     pixels(0);
