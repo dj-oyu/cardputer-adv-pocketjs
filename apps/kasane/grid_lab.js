@@ -57,6 +57,22 @@
               source: new Int16Array(weightWidth * weightHeight),
               weights: new Int16Array(weightWidth * weightHeight),
               handle: grid.register(weightProgram), resource: null});
+  for (let index = 3; index < modes.length; ++index) {
+    const mode = modes[index];
+    mode.registration = grid.registration(mode.handle);
+    const r = mode.registration;
+    console.log('GRID_APP REGISTER ' + index +
+                ' ir=' + r.irCount + ' plan=' + r.planBytes +
+                ' analysis=' + r.analysisBytes +
+                ' parse_us=' + r.parseUs +
+                ' prepare_us=' + r.prepareUs +
+                ' total_us=' + r.totalUs +
+                ' heap_before=' + r.heapBefore +
+                ' heap_plan=' + r.heapAfterPlan +
+                ' heap_after=' + r.heapAfter +
+                ' largest_before=' + r.largestBefore +
+                ' largest_after=' + r.largestAfter);
+  }
   const foldColors = new Int16Array(32);
   for (let v = 0; v < 32; ++v)
     foldColors[v] = ((v >> 1) << 11) | ((v * 2) << 5) | (31 - v);
@@ -129,7 +145,10 @@
                          ' A:' + Math.round(mode.affine.pieUs / 8) + ' us',
                    font: 'caption', color: 0xffd47aff});
         tx.text({bounds: [8, 99, 232, 115],
-                 text: 'ENTER: NEXT  /  AUTO: 120 FRAMES',
+                 text: mode.registration ?
+                   'REG ' + mode.registration.planBytes + 'B / ' +
+                   mode.registration.prepareUs + 'us  ENTER:NEXT' :
+                   'ENTER: NEXT  /  AUTO: 120 FRAMES',
                  font: 'caption', color: 0xa6bdc8ff});
         tx.text({bounds: [8, 117, 232, 133],
                  text: mode.kind === 'fold' ?
@@ -142,7 +161,10 @@
                   mode.height + ' backend=' + backend +
                   ' strategy=' + route.strategy +
                   ' reason=' + route.reason +
-                  ' key=' + route.profileKey);
+                  ' key=' + route.profileKey +
+                  ' kernel=' + route.kernel +
+                  ' scalar_reason=' + route.scalarReason +
+                  ' candidate_mask=' + (route.candidateMask || 0));
     } else if (tick % 48 === 0) {
       console.log('GRID_APP FRAME ' + tick + ' backend=' + backend);
     }

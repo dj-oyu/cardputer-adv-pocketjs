@@ -75,6 +75,22 @@ typedef enum {
     KSN_GRID_ARITH_OVERFLOW
 } ksn_grid_status;
 
+typedef enum {
+    KSN_GRID_IR_VALID = 0,
+    KSN_GRID_IR_HEADER,
+    KSN_GRID_IR_OUTPUT_INDEX,
+    KSN_GRID_IR_DEST_REGISTER,
+    KSN_GRID_IR_LOAD_BUFFER,
+    KSN_GRID_IR_LOAD_INDEX,
+    KSN_GRID_IR_UNDEFINED_INPUT,
+    KSN_GRID_IR_OPCODE
+} ksn_grid_ir_reason;
+
+typedef struct {
+    ksn_grid_ir_reason reason;
+    uint8_t instruction; /* KSN_GRID_VALUE_NONE for header/output */
+} ksn_grid_ir_diagnostic;
+
 /* Registration-time normal form for one independent signed 16-bit term.
  * A load retains its instruction slot so begin's resolved affine index is
  * reused without reparsing IR at every pixel. */
@@ -97,9 +113,9 @@ typedef struct {
  * it preserves every checked operation. Live masks describe register values
  * needed on either side of each instruction, including checked dead results. */
 typedef struct {
-    uint8_t a, b, live_in, live_out, effects;
-    uint16_t contributors;
     uint64_t magnitude_bound; /* valid only when range_proven is true */
+    uint16_t contributors;
+    uint8_t a, b, live_in, live_out, effects;
     bool range_proven;
 } ksn_grid_value;
 
@@ -172,6 +188,9 @@ typedef struct {
 
 ksn_grid_status ksn_grid_prepare(const ksn_grid_program *program,
                                  ksn_grid_plan *plan);
+ksn_grid_status ksn_grid_prepare_diagnose(const ksn_grid_program *program,
+                                          ksn_grid_plan *plan,
+                                          ksn_grid_ir_diagnostic *diagnostic);
 ksn_grid_status ksn_grid_begin(const ksn_grid_plan *plan,
                                const ksn_grid_shape *shape,
                                const ksn_grid_binding *binding,

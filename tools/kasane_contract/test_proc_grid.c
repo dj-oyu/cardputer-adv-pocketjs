@@ -256,7 +256,11 @@ static void test_rejections_and_limits(void)
     assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_BAD_IR);
     p = sum_program();
     p.body[2].a = 7;
-    assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_BAD_IR);
+    ksn_grid_ir_diagnostic diagnostic;
+    assert(ksn_grid_prepare_diagnose(&p, &plan, &diagnostic) ==
+           KSN_GRID_BAD_IR);
+    assert(diagnostic.reason == KSN_GRID_IR_UNDEFINED_INPUT &&
+           diagnostic.instruction == 2);
     p = sum_program();
     p.output.term[3].constant = 1;
     assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_OK);

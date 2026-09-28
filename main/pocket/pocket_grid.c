@@ -18,12 +18,25 @@ bool pocket_kasane_grid_source_port(JSContext *ctx, JSValueConst object,
 #include <string.h>
 #ifdef ESP_PLATFORM
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 static int64_t grid_measure_now_us(void) { return esp_timer_get_time(); }
+static uint32_t grid_internal_free(void)
+{ return (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); }
+static uint32_t grid_internal_largest(void)
+{ return (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); }
 #else
 #include <time.h>
 static int64_t grid_measure_now_us(void)
 { return (int64_t)clock() * 1000000 / CLOCKS_PER_SEC; }
+static uint32_t grid_internal_free(void) { return 0; }
+static uint32_t grid_internal_largest(void) { return 0; }
 #endif
+
+static uint32_t elapsed_us(int64_t start, int64_t end)
+{
+    int64_t delta = end - start;
+    return delta <= 0 ? 0 : delta > UINT32_MAX ? UINT32_MAX : (uint32_t)delta;
+}
 #if defined(KASANE_PROC_DEVICE_PROBE) && defined(ESP_PLATFORM)
 #include "esp_cpu.h"
 static pocket_grid_resize_profile resize_profile;
@@ -81,6 +94,9 @@ typedef struct {
     uint8_t committed_index, candidate_index;
     bool has_output, pending, resource, resize_pie, resize_nearest;
     bool measure_ready;
+    uint32_t register_parse_us, register_prepare_us, register_total_us;
+    uint32_t heap_before, heap_after_plan, heap_after;
+    uint32_t largest_before, largest_after;
 } grid_slot;
 
 static grid_slot slots[GRID_APP_SLOTS];
@@ -243,18 +259,41 @@ static JSValue register_impl(JSContext *ctx, int argc, JSValueConst *argv)
     while (free_slot < GRID_APP_SLOTS && slots[free_slot].handle) ++free_slot;
     if (free_slot == GRID_APP_SLOTS || next_handle == INT32_MAX)
         return fail(ctx, op, POCKET_ERR_LIMIT_EXCEEDED, "grid plan limit");
+    uint32_t heap_before = grid_internal_free();
+    uint32_t largest_before = grid_internal_largest();
+    int64_t started = grid_measure_now_us();
     ksn_grid_program program;
     ksn_grid_shape shape;
     if (!read_program(ctx, argv[0], &program, &shape))
         return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT, "invalid grid program");
+    int64_t parsed = grid_measure_now_us();
     grid_slot fresh = {0};
     fresh.plan = calloc(1, sizeof *fresh.plan);
     if (!fresh.plan) return fail(ctx, op, POCKET_ERR_OUT_OF_MEMORY,
                                  "grid plan allocation failed");
-    if (ksn_grid_prepare(&program, fresh.plan) != KSN_GRID_OK) {
+    uint32_t heap_after_plan = grid_internal_free();
+    int64_t prepare_started = grid_measure_now_us();
+    ksn_grid_ir_diagnostic diagnostic;
+    if (ksn_grid_prepare_diagnose(&program, fresh.plan,
+                                  &diagnostic) != KSN_GRID_OK) {
         free(fresh.plan);
-        return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT, "invalid grid IR");
+        static const char *const reasons[] = {
+            "valid", "invalid header", "invalid output index",
+            "invalid destination register", "invalid load buffer",
+            "invalid load index", "undefined input register",
+            "unknown opcode"};
+        const char *reason = diagnostic.reason <
+            sizeof reasons / sizeof reasons[0] ?
+            reasons[diagnostic.reason] : "invalid IR";
+        char message[96];
+        if (diagnostic.instruction == KSN_GRID_VALUE_NONE)
+            snprintf(message, sizeof message, "invalid grid IR: %s", reason);
+        else snprintf(message, sizeof message,
+                      "invalid grid IR at body[%u]: %s",
+                      diagnostic.instruction, reason);
+        return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT, message);
     }
+    int64_t prepared = grid_measure_now_us();
     size_t count = (size_t)shape.width * shape.height;
     if (!aligned_buffer(count, &fresh.output_raw[0], &fresh.output[0]) ||
         !aligned_buffer(count, &fresh.output_raw[1], &fresh.output[1])) {
@@ -267,8 +306,56 @@ static JSValue register_impl(JSContext *ctx, int argc, JSValueConst *argv)
     memset(fresh.output[1], 0, count * sizeof(int16_t));
     fresh.handle = ++next_handle;
     fresh.candidate_index = 1;
+    fresh.register_parse_us = elapsed_us(started, parsed);
+    fresh.register_prepare_us = elapsed_us(prepare_started, prepared);
+    fresh.register_total_us = elapsed_us(started, grid_measure_now_us());
+    fresh.heap_before = heap_before;
+    fresh.heap_after_plan = heap_after_plan;
+    fresh.heap_after = grid_internal_free();
+    fresh.largest_before = largest_before;
+    fresh.largest_after = grid_internal_largest();
     slots[free_slot] = fresh;
     return JS_NewInt32(ctx, (int32_t)fresh.handle);
+}
+
+static JSValue registration_impl(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    const char *op = "kasane.grid.registration";
+    grid_slot *slot = argc ? find(ctx, argv[0]) : NULL;
+    if (argc != 1 || !slot || !slot->plan)
+        return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
+                    "expected a registered grid fold handle");
+    JSValue info = JS_NewObject(ctx);
+    if (JS_IsException(info)) return info;
+    unsigned unproven = 0;
+    const ksn_grid_program *program = &slot->plan->program;
+    for (unsigned i = 0; i < program->count; ++i)
+        if (program->body[i].dst != program->result_reg &&
+            !slot->plan->analysis.value[i].range_proven)
+            ++unproven;
+#define REG_FIELD(name, value) \
+    (JS_SetPropertyStr(ctx, info, name, JS_NewUint32(ctx, value)) < 0)
+    if (REG_FIELD("irCount", slot->plan->program.count) ||
+        REG_FIELD("macTerms", slot->plan->mac.valid ?
+                  slot->plan->mac.terms : 0) ||
+        REG_FIELD("checkedOps", __builtin_popcount(
+                  slot->plan->analysis.checked_mask)) ||
+        REG_FIELD("unprovenIntermediateOps", unproven) ||
+        REG_FIELD("planBytes", sizeof *slot->plan) ||
+        REG_FIELD("analysisBytes", sizeof slot->plan->analysis) ||
+        REG_FIELD("parseUs", slot->register_parse_us) ||
+        REG_FIELD("prepareUs", slot->register_prepare_us) ||
+        REG_FIELD("totalUs", slot->register_total_us) ||
+        REG_FIELD("heapBefore", slot->heap_before) ||
+        REG_FIELD("heapAfterPlan", slot->heap_after_plan) ||
+        REG_FIELD("heapAfter", slot->heap_after) ||
+        REG_FIELD("largestBefore", slot->largest_before) ||
+        REG_FIELD("largestAfter", slot->largest_after)) {
+        JS_FreeValue(ctx, info);
+        return JS_EXCEPTION;
+    }
+#undef REG_FIELD
+    return info;
 }
 
 static JSValue register_resize_impl(JSContext *ctx, int argc,
@@ -705,6 +792,33 @@ static JSValue resource_impl(JSContext *ctx, int argc, JSValueConst *argv)
     return object;
 }
 
+static const char *scalar_reason(const ksn_grid_image *image)
+{
+    const ksn_grid_execution *e = &image->execution;
+    const ksn_grid_pie_policy *policy = &image->policy;
+    if (e->pie_backend_selected) return "NONE";
+    if (!policy->enable_pie) return "POLICY_DISABLED";
+    if (!ksn_grid_pie_backend_available()) return "BACKEND_UNAVAILABLE";
+    if (e->scan_rows_candidate)
+        return policy->min_scan_rows < 8 ||
+               e->shape.height < policy->min_scan_rows ?
+               "SCAN_COST_THRESHOLD" : "SCAN_ROUTE_UNAVAILABLE";
+    if (!e->independent) return "DEPENDENCY";
+    if (!e->reduction_shape) return "REDUCTION_SHAPE";
+    if (!e->qacc_legal) return "QACC_RANGE";
+    if (!e->plan->mac.valid) return "GENERAL_FORM";
+    if (!ksn_grid_pie_eligible(e)) return "VECTOR_LAYOUT";
+    const ksn_grid_mac *mac = &e->plan->mac;
+    bool loaded_weight = (mac->left.is_load && mac->right.is_load) ||
+        (mac->terms == 2 && mac->extra_left.is_load &&
+         mac->extra_right.is_load);
+    uint16_t minimum = loaded_weight ? policy->min_loaded_weight_outputs :
+                                       policy->min_outputs;
+    uint32_t outputs = (uint32_t)e->shape.width * e->shape.height;
+    if (minimum < 8 || outputs < minimum) return "MAC_COST_THRESHOLD";
+    return "ROUTE_UNAVAILABLE";
+}
+
 static JSValue explain_impl(JSContext *ctx, int argc, JSValueConst *argv)
 {
     const char *op = "kasane.grid.explain";
@@ -723,6 +837,10 @@ static JSValue explain_impl(JSContext *ctx, int argc, JSValueConst *argv)
             JS_SetPropertyStr(ctx, info, "reason",
                               JS_NewString(ctx, slot->resize_nearest ?
                                            "EXPLICIT" : "EXPERIMENT")) < 0 ||
+            JS_SetPropertyStr(ctx, info, "kernel",
+                              JS_NewString(ctx, "RESIZE")) < 0 ||
+            JS_SetPropertyStr(ctx, info, "scalarReason",
+                              JS_NewString(ctx, "NONE")) < 0 ||
             JS_SetPropertyStr(ctx, info, "profileKey",
                               JS_NewString(ctx, "0000000000000000")) < 0) {
             JS_FreeValue(ctx, info); return JS_EXCEPTION;
@@ -743,6 +861,15 @@ static JSValue explain_impl(JSContext *ctx, int argc, JSValueConst *argv)
     if (JS_IsException(info)) return info;
     if (JS_SetPropertyStr(ctx, info, "backend", JS_NewString(ctx,
             execution->pie_backend_selected ? "PIE" : "scalar")) < 0 ||
+        JS_SetPropertyStr(ctx, info, "kernel", JS_NewString(ctx,
+            !execution->pie_backend_selected ? "SCALAR" :
+            execution->scan_rows_candidate ? "SCAN_ROWS" : "MAC")) < 0 ||
+        JS_SetPropertyStr(ctx, info, "scalarReason", JS_NewString(ctx,
+            scalar_reason(&slot->image))) < 0 ||
+        JS_SetPropertyStr(ctx, info, "candidateMask", JS_NewUint32(ctx,
+            ksn_grid_pie_candidates(execution))) < 0 ||
+        JS_SetPropertyStr(ctx, info, "scanCandidate", JS_NewBool(ctx,
+            execution->scan_rows_candidate)) < 0 ||
         JS_SetPropertyStr(ctx, info, "strategy",
                           JS_NewString(ctx, strategies[strategy])) < 0 ||
         JS_SetPropertyStr(ctx, info, "reason",
@@ -768,6 +895,9 @@ static JSValue guarded(JSContext *ctx, int argc, JSValueConst *argv,
 static JSValue js_register(JSContext *ctx, JSValueConst self, int argc,
                            JSValueConst *argv)
 { (void)self; return guarded(ctx, argc, argv, register_impl); }
+static JSValue js_registration(JSContext *ctx, JSValueConst self, int argc,
+                               JSValueConst *argv)
+{ (void)self; return guarded(ctx, argc, argv, registration_impl); }
 static JSValue js_register_resize(JSContext *ctx, JSValueConst self, int argc,
                                   JSValueConst *argv)
 { (void)self; return guarded(ctx, argc, argv, register_resize_impl); }
@@ -834,6 +964,7 @@ esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst ns)
     if (JS_IsException(grid)) return ESP_ERR_NO_MEM;
     static const JSCFunctionListEntry methods[] = {
         JS_CFUNC_DEF("register", 1, js_register),
+        JS_CFUNC_DEF("registration", 1, js_registration),
         JS_CFUNC_DEF("registerResize", 1, js_register_resize),
         JS_CFUNC_DEF("registerResizeSource", 1, js_register_resize_source),
         JS_CFUNC_DEF("run", 3, js_run),
@@ -841,7 +972,7 @@ esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst ns)
         JS_CFUNC_DEF("resource", 1, js_resource),
         JS_CFUNC_DEF("explain", 1, js_explain),
     };
-    if (JS_SetPropertyFunctionList(ctx, grid, methods, 7) < 0) {
+    if (JS_SetPropertyFunctionList(ctx, grid, methods, 8) < 0) {
         JS_FreeValue(ctx, grid); return ESP_ERR_NO_MEM;
     }
     if (JS_SetPropertyStr(ctx, ns, "grid", grid) < 0) return ESP_ERR_NO_MEM;

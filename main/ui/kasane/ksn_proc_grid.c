@@ -7,6 +7,11 @@
 #define KSN_GRID_MAX_BODY_VISITS 2000000u
 #define KSN_GRID_QACC_MAX ((INT64_C(1) << 39) - 1)
 
+_Static_assert(sizeof(ksn_grid_value) == 16,
+               "keep registration value analysis compact");
+_Static_assert(sizeof(ksn_grid_analysis) <= 264,
+               "keep the sixteen-value graph within the RAM budget");
+
 static bool add64(int64_t a, int64_t b, int64_t *out)
 {
     return !__builtin_add_overflow(a, b, out);
@@ -248,33 +253,56 @@ static ksn_grid_mac normalize_mac(const ksn_grid_program *p,
     return mac;
 }
 
-ksn_grid_status ksn_grid_prepare(const ksn_grid_program *program,
-                                 ksn_grid_plan *plan)
+static ksn_grid_status bad_ir(ksn_grid_ir_diagnostic *diagnostic,
+                              ksn_grid_ir_reason reason, unsigned instruction)
 {
-    if (!plan) return KSN_GRID_BAD_IR;
+    if (diagnostic) {
+        diagnostic->reason = reason;
+        diagnostic->instruction = (uint8_t)instruction;
+    }
+    return KSN_GRID_BAD_IR;
+}
+
+ksn_grid_status ksn_grid_prepare_diagnose(const ksn_grid_program *program,
+                                          ksn_grid_plan *plan,
+                                          ksn_grid_ir_diagnostic *diagnostic)
+{
+    if (diagnostic)
+        *diagnostic = (ksn_grid_ir_diagnostic){KSN_GRID_IR_VALID,
+                                               KSN_GRID_VALUE_NONE};
+    if (!plan) return bad_ir(diagnostic, KSN_GRID_IR_HEADER,
+                             KSN_GRID_VALUE_NONE);
     memset(plan, 0, sizeof(*plan));
     if (!program || !program->count || program->count > KSN_GRID_CODE ||
-        program->result_reg >= KSN_GRID_REGS || program->final_shift > 30 ||
-        !valid_index(&program->output)) return KSN_GRID_BAD_IR;
+        program->result_reg >= KSN_GRID_REGS || program->final_shift > 30)
+        return bad_ir(diagnostic, KSN_GRID_IR_HEADER,
+                      KSN_GRID_VALUE_NONE);
+    if (!valid_index(&program->output))
+        return bad_ir(diagnostic, KSN_GRID_IR_OUTPUT_INDEX,
+                      KSN_GRID_VALUE_NONE);
     uint8_t defined = (uint8_t)(1u << program->result_reg);
     for (unsigned i = 0; i < program->count; ++i) {
         const ksn_grid_instruction *in = &program->body[i];
-        if (in->dst >= KSN_GRID_REGS) return KSN_GRID_BAD_IR;
+        if (in->dst >= KSN_GRID_REGS)
+            return bad_ir(diagnostic, KSN_GRID_IR_DEST_REGISTER, i);
         switch (in->op) {
         case KSN_GRID_CONST: break;
         case KSN_GRID_LOAD:
-            if (in->buffer >= KSN_GRID_BUFFERS || !valid_index(&in->index))
-                return KSN_GRID_BAD_IR;
+            if (in->buffer >= KSN_GRID_BUFFERS)
+                return bad_ir(diagnostic, KSN_GRID_IR_LOAD_BUFFER, i);
+            if (!valid_index(&in->index))
+                return bad_ir(diagnostic, KSN_GRID_IR_LOAD_INDEX, i);
             break;
         case KSN_GRID_ADD:
         case KSN_GRID_MUL:
         case KSN_GRID_MIN:
             if (in->a >= KSN_GRID_REGS || in->b >= KSN_GRID_REGS)
-                return KSN_GRID_BAD_IR;
+                return bad_ir(diagnostic, KSN_GRID_IR_UNDEFINED_INPUT, i);
             if (!(defined & (1u << in->a)) ||
-                !(defined & (1u << in->b))) return KSN_GRID_BAD_IR;
+                !(defined & (1u << in->b)))
+                return bad_ir(diagnostic, KSN_GRID_IR_UNDEFINED_INPUT, i);
             break;
-        default: return KSN_GRID_BAD_IR;
+        default: return bad_ir(diagnostic, KSN_GRID_IR_OPCODE, i);
         }
         defined |= (uint8_t)(1u << in->dst);
     }
@@ -283,6 +311,12 @@ ksn_grid_status ksn_grid_prepare(const ksn_grid_program *program,
     plan->mac = normalize_mac(&plan->program, &plan->analysis);
     plan->prepared = true;
     return KSN_GRID_OK;
+}
+
+ksn_grid_status ksn_grid_prepare(const ksn_grid_program *program,
+                                 ksn_grid_plan *plan)
+{
+    return ksn_grid_prepare_diagnose(program, plan, NULL);
 }
 
 static bool resolve_index(const ksn_grid_index *index,

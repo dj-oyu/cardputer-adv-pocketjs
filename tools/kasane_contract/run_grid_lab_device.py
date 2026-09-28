@@ -59,6 +59,26 @@ def main():
                 started = key(b"e", b"GRID_APP MODE 0 28x14 backend=PIE strategy=BILINEAR reason=EXPERIMENT", 20)
                 if b"APP_ID local.gridlab" not in started:
                     raise RuntimeError("GRID LAB launched under wrong identity")
+                registrations = re.findall(
+                    rb"GRID_APP REGISTER ([345]) ir=(\d+) plan=(\d+) "
+                    rb"analysis=(\d+) parse_us=(\d+) prepare_us=(\d+) "
+                    rb"total_us=(\d+) heap_before=(\d+) heap_plan=(\d+) "
+                    rb"heap_after=(\d+) largest_before=(\d+) largest_after=(\d+)",
+                    started)
+                if {int(fields[0]) for fields in registrations} != {3, 4, 5}:
+                    raise RuntimeError("GRID LAB registration diagnostics missing")
+                for fields in registrations:
+                    mode, ir, plan, analysis, parse_us, prepare_us, total_us, before, heap_plan, after, largest_before, largest_after = map(int, fields)
+                    if (not ir or plan < analysis or
+                            total_us < max(parse_us, prepare_us) or
+                            not before or not (before > heap_plan >= after) or
+                            largest_after > largest_before):
+                        raise RuntimeError(f"invalid registration sample: {fields!r}")
+                    print(f"GRID_LAB_REGISTER_{run}_{mode} ir={ir} "
+                          f"plan={plan} analysis={analysis} "
+                          f"parse={parse_us}us prepare={prepare_us}us "
+                          f"total={total_us}us heap={before}->{heap_plan}->{after} "
+                          f"largest={largest_before}->{largest_after}")
                 start = len(log)
                 deadline = time.monotonic() + 35
                 while bytes(log[start:]).count(b"KASANE_PAINT") < 23:
@@ -98,6 +118,12 @@ def main():
                     recent)
                 if {int(mode) for mode, _, _, _ in keys} != {3, 4, 5}:
                     raise RuntimeError("GRID LAB profile keys missing")
+                diagnostics = re.findall(
+                    rb"GRID_APP MODE ([345]) [^\r\n]+ kernel=MAC "
+                    rb"scalar_reason=NONE candidate_mask=(\d+)", recent)
+                if ({int(mode) for mode, _ in diagnostics} != {3, 4, 5} or
+                        any(int(mask) == 0 for _, mask in diagnostics)):
+                    raise RuntimeError("GRID LAB route diagnostics missing")
                 stopped = key(b"q", b"HOME_READY")
                 if b"APP_STOPPED" not in stopped:
                     raise RuntimeError("GRID LAB did not stop")

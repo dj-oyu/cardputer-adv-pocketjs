@@ -364,8 +364,8 @@ JS前段の25例を実QuickJSから実行し、PIE命令シミュレータの通
 ## 次のタスク（2026-09-29）
 
 1. **D3a: 2項のアクセス経路と費用選択（完了）。** 各loadの連続・逆順・broadcast・gatherを登録時に判定し、合法な2項PIE候補を比較した。GRID LABのFOLD ARTに加え、寸法・stride・係数を変えたJS例でscalarとの全画素一致を確認。同じ通常imageで独立した実機runを繰り返し、5%以上速い形状だけをAFFINEへ切り替えた。結果は下記。
-2. **D3a: 登録時解析と依存行kernelの共通化（host段階完了）。** 命令ごとの値バージョン、live-in/out、依存集合、検査付き演算、絶対値上界を共通グラフに記録し、MAC正規化・依存行の認識・QACC前段の上界証明で共有する。レジスタ再利用、alias、overflow、死んだ検査付き命令をhostで反例として通した。2項を超える式と別種の依存行反復は、合法性と費用の両方を示せるまではscalarに残す。実機の登録費用とRAM余裕は未測定。
-3. **JS APIと診断。** `fold`と画像用IRの記法を実際のbackend能力に合わせて整理し、登録失敗・scalar選択・PIE候補の理由を確認できる診断を付ける。実機で試すJS例は既存のGRID LABなどのテスト用アプリへ加える。float式からQ14への暗黙変換は導入しない。
+2. **D3a: 登録時解析と依存行kernelの共通化（完了）。** 命令ごとの値バージョン、live-in/out、依存集合、検査付き演算、絶対値上界を共通グラフに記録し、MAC正規化・依存行の認識・QACC前段の上界証明で共有する。レジスタ再利用、alias、overflow、死んだ検査付き命令をhostで反例として通し、実機で登録費用とRAMを測った。2項を超える式と別種の依存行反復は、合法性と費用の両方を示せるまではscalarに残す。
+3. **JS APIと診断（診断を実装、記法整理は継続）。** `grid.registration(handle)`は登録時の式形状、解析時間、planと内部heapの大きさを返す。登録失敗はIRの理由と命令番号を例外に含め、`grid.explain(handle)`は実行後のkernel、PIE候補とscalar選択理由を返す。GRID LABで登録時の値を表示・ログ化した。次に`fold`と画像用IRの記法をbackend能力に合わせて整理する。float式からQ14への暗黙変換は導入しない。
 4. **表示全体の採否。** 登録、JS入力生成、kernel、Kasane合成、LCD送出、heap、フレーム停滞を別々に測り、全画面とUI内の小窓でscalar/PIEの体感上の差と余裕を確認する。D2のFLOWER＋2面、D5のSD動画＋音声との複合負荷は、単独のkernel倍率から外挿せず別のgateで判定する。
 
 ## D3a 2項アクセス経路の実機選択（2026-09-29）
@@ -384,4 +384,12 @@ JSの独立期待値を持つ連続2 load・レーン別係数・broadcast係数
 
 登録時に各レジスタ書込みを不変の命令値として記録し、入力元の命令番号、累積依存集合、live-in/out、検査付き演算とDEST読取りの印、全入力に対して保証できる絶対値上界を持たせた。MAC正規化と依存行の認識は同じ値グラフを読み、bind時のQACC判定はそこで証明した上界を使う。命令の物理的な並びやレジスタ番号を式の同一性とみなさず、最終値が全命令を含まない場合は高速経路へ降ろさない。
 
-依存行は、前画素のDEST loadと独立したsource loadを、`source + coefficient * previous` のどちらの加算順でも認識する。sourceを先に定義し、previousとsourceのレジスタを途中で再利用する6命令をhostでscalar/scan PIE比較した。別buffer IDからのDEST alias、死んだ検査付きADD、前画素でないDEST indexは候補外になる。3段の自己乗算で上界が`int64`を超える例も候補外とし、scalar実行時のoverflowを確認した。JSの`iirReordered`を含む29例は実QuickJS→IR→PIEモデルで一致し、命令シミュレータの通常・融合それぞれ113ベクトルブロックが一致。CのPIE模擬と非PIE各400ケース、scalar/レーンモデル、通常アプリQuickJS adapterも通った。通常ファームのビルドは成功し、アプリサイズは2,145,456 B、flash予算残り1,000,272 B。plan本体はhostで976→1,240 Bとなった。Astraのチェックポイントレビューでも合法性の穴は見つからなかった。新しいscan形状の実機速度と登録時のRAM・時間はまだ測っておらず、実機へは書き込んでいない。
+依存行は、前画素のDEST loadと独立したsource loadを、`source + coefficient * previous` のどちらの加算順でも認識する。sourceを先に定義し、previousとsourceのレジスタを途中で再利用する6命令をhostでscalar/scan PIE比較した。別buffer IDからのDEST alias、死んだ検査付きADD、前画素でないDEST indexは候補外になる。3段の自己乗算で上界が`int64`を超える例も候補外とし、scalar実行時のoverflowを確認した。JSの`iirReordered`を含む29例は実QuickJS→IR→PIEモデルで一致し、命令シミュレータの通常・融合それぞれ113ベクトルブロックが一致。CのPIE模擬と非PIE各400ケース、scalar/レーンモデル、通常アプリQuickJS adapterも通った。初回の通常ファームビルドは成功し、アプリサイズは2,145,456 B、flash予算残り1,000,272 B。Astraのチェックポイントレビューでも合法性の穴は見つからなかった。その時点では新しいscan形状の実機速度と登録時のRAM・時間を測っていなかった。
+
+## D3a 登録費用とJS診断（2026-09-29）
+
+既存のGRID LABの3つのfold planを使ってCOM3で3回独立起動した。登録時にJS programの読取り、`ksn_grid_prepare`、出力2面の確保を個別に時計測した。フィールド配置の修正前は値グラフ392 B・plan 1,240 Bで、各planの確保直後に内部heapが1,284 B減った。詰め物を減らした後は値グラフ264 B・plan 1,112 Bとなり、同じ確保段階の減少は1,156 B。追加前のplan 848 Bはcommit `622582e`のヘッダを同じhost ABIで計測した値なので、新解析のplan本体の純増は264 B。allocatorの上乗せ44 Bは旧版実機で測った値ではないため、その差を旧版heapの実測とは扱わない。
+
+圧縮後の同一バイナリで9登録（3形状×3起動）の中央値は、JS program読取り786 µs、native prepare 97 µs、登録全体936 µs。prepareの最長標本は190 µsで、その要因は未分離。3番目のfold登録直後の内部heap空きは60,128〜60,256 B、最大連続空き31,744 B。これらは起動中の一点の標本であり、低水位ではない。出力2面とallocator費用も登録全体のheap差に含まれる。ログは`.cache/grid-lab-registration-20260929.log`（圧縮前）と`.cache/grid-lab-registration-compact-20260929.log`（圧縮後）。
+
+`grid.registration(handle)`にIR命令数、MAC項数、検査付き演算数、未証明の中間値数、plan/解析領域のbytes、各時間・内部heap標本を追加した。登録失敗の例外には`body[n]`と検証理由を含める。実行後の`grid.explain(handle)`は`kernel`、`candidateMask`、`scanCandidate`、`scalarReason`を返す。host QuickJSで不正dst registerと一般形MIN式、7画素幅、QACC範囲超過の各scalar理由を検証。通常ファーム最終imageは2,149,072 B、SHA-256 `5f7d17c94bbfa0d1e7da69aae8f76206bf59e6ede56667f3c29e03bb7a605747`。アプリ領域だけを書き、hash照合後にGRID LABの6モード、PIE候補理由、全画素比較、終了後`HOME_READY`を確認した。最終ログは`.cache/grid-lab-registration-diagnostics-final-20260929.log`。フラッシュ退避なし。新しい並び替えscan式そのものの実機速度は未測定。
