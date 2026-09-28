@@ -109,9 +109,16 @@ ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
     switch(i->op){
     case KSN_PROC_SET:vm->reg[i->dst]=i->value;break;
     case KSN_PROC_INPUT:vm->reg[i->dst]=vm->input[i->a];break;
-    case KSN_PROC_ADD:vm->reg[i->dst]=vm->reg[i->a]+vm->reg[i->b];break;
-    case KSN_PROC_MUL:vm->reg[i->dst]=vm->reg[i->a]*vm->reg[i->b];break;
-    case KSN_PROC_SIN:vm->reg[i->dst]=sinf(vm->reg[i->a]);break;
+    /* Only arithmetic can produce a non-finite register: SET values and inputs
+     * are checked at validation/begin, and every other op writes no register.
+     * Checking the one dst keeps a step O(1) in KSN_PROC_REGS; the former
+     * sweep of all registers doubled when the file grew from 8 to 16. */
+    case KSN_PROC_ADD:vm->reg[i->dst]=vm->reg[i->a]+vm->reg[i->b];goto finite;
+    case KSN_PROC_MUL:vm->reg[i->dst]=vm->reg[i->a]*vm->reg[i->b];goto finite;
+    case KSN_PROC_SIN:vm->reg[i->dst]=sinf(vm->reg[i->a]);
+    finite:
+        if(!isfinite(vm->reg[i->dst]))return vm->status=KSN_PROC_INVALID;
+        break;
     case KSN_PROC_REPEAT: case KSN_PROC_REPEAT_REG: {
         unsigned count=i->a;
         if(i->op==KSN_PROC_REPEAT_REG){
@@ -184,7 +191,6 @@ ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
     }
     default:return vm->status=KSN_PROC_INVALID;
     }
-    for(unsigned j=0;j<KSN_PROC_REGS;j++)if(!isfinite(vm->reg[j]))return vm->status=KSN_PROC_INVALID;
     if(vm->pc==vm->program->count){vm->frame->ready=true;return vm->status=KSN_PROC_DONE;}
     return vm->status;
 }

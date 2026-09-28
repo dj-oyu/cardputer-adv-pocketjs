@@ -26,8 +26,18 @@ void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
 }
 #endif
 
-#define PROC_HANDLES 16u
-#define PROC_POINT_MAX 64u
+/* Slots are reusable after unregister(); handles are not (next_handle only
+ * grows), so a released handle can never alias a later plan. Worst case with
+ * every slot holding a 128-point batch is 32*(plan+points) heap: see
+ * docs/kasane/procedural-ir-experiment.md for the byte count. */
+#define PROC_HANDLES 32u
+/* A multiple of 8 keeps whole PIE blocks; the dispatcher handles any tail. */
+#define PROC_POINT_MAX 128u
+/* Typed points share the VM's coordinate bound (ksn_procedural.c coordinate()):
+ * off-panel geometry is legal, the band renderer clips it, and a bounded
+ * range keeps every segment's raster walk bounded. */
+#define PROC_POINT_LOW (-480)
+#define PROC_POINT_HIGH 720
 #define PROC_SURFACES 2u
 
 typedef struct {
@@ -182,6 +192,14 @@ static bool surface_index(JSContext *ctx,JSValueConst value,unsigned *index){
     }
     return false;
 }
+/* Handle 0 is never issued and is also what an empty slot holds, so a
+ * lookup must require a plan, not just a matching number. */
+static proc_slot *find_slot(uint32_t handle){
+    if(!handle)return NULL;
+    for(unsigned i=0;i<PROC_HANDLES;i++)
+        if(slots[i].plan&&slots[i].handle==handle)return &slots[i];
+    return NULL;
+}
 static ksn_rect frame_damage(const proc_surface *surface){
     if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
         return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
@@ -198,6 +216,9 @@ static ksn_rect frame_damage(const proc_surface *surface){
         if(bx+1>x1)x1=bx+1;
         if(by+1>y1)y1=by+1;
     }
+    /* VM and typed segments may lie anywhere in -480..720. Clamping each edge
+     * keeps x0<=x1 and y0<=y1 for any non-empty set; a set wholly off one side
+     * collapses to a zero-width rectangle on that edge. */
     if(x0<0)x0=0;
     if(y0<0)y0=0;
     if(x1>KSN_PROC_W)x1=KSN_PROC_W;
@@ -255,6 +276,21 @@ static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
     slots[slot]=(proc_slot){handle,plan,point_allocation,points};
     return JS_NewInt32(ctx,(int32_t)handle);
 }
+static JSValue unregister_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.procedural.unregister";
+    uint32_t handle;
+    if(argc!=1||!integer(ctx,argv[0],INT32_MAX,&handle))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected one procedural handle");
+    proc_slot *slot=find_slot(handle);
+    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
+    /* Legal between beginFrame() and commit(): draw() copies the plan's
+     * segments into the candidate and the VM runs from its own code copy, so
+     * no frame, pending presentation or image band refers to a plan. */
+    free(slot->plan);free(slot->point_allocation);
+    *slot=(proc_slot){0};
+    return JS_UNDEFINED;
+}
 static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *op="kasane.procedural.beginFrame";
@@ -280,13 +316,14 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
     if(argc!=2||!integer(ctx,argv[0],INT32_MAX,&handle)||
-       !array_length(ctx,argv[1],&length)||length!=KSN_PROC_INPUTS)
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and four inputs");
-    proc_slot *slot=NULL;
-    for(unsigned i=0;i<PROC_HANDLES;i++)if(slots[i].handle==handle){slot=&slots[i];break;}
+       !array_length(ctx,argv[1],&length)||length>KSN_PROC_INPUTS)
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+    proc_slot *slot=find_slot(handle);
     if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
-    float input[KSN_PROC_INPUTS];
-    for(unsigned i=0;i<KSN_PROC_INPUTS;i++){
+    /* Short arrays are zero-padded, so a caller written for four inputs sees
+     * exactly the frame it saw when four were required. */
+    float input[KSN_PROC_INPUTS]={0};
+    for(unsigned i=0;i<length;i++){
         JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);double n;
         bool ok=!JS_IsException(v)&&number(ctx,v,&n)&&isfinite((float)n);
         JS_FreeValue(ctx,v);
@@ -312,10 +349,11 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         }
         typed_segments=p->count-1;
         for(unsigned i=0;i<p->count;i++){
-            if(p->out_x[i]<0||p->out_x[i]>=KSN_PROC_W||
-               p->out_y[i]<0||p->out_y[i]>=KSN_PROC_H){
+            if(p->out_x[i]<PROC_POINT_LOW||p->out_x[i]>PROC_POINT_HIGH||
+               p->out_y[i]<PROC_POINT_LOW||p->out_y[i]>PROC_POINT_HIGH){
                 building=false;
-                return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"typed point off panel");
+                return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
+                               "typed point outside -480..720");
             }
             if(i){
                 int dx=abs(p->out_x[i]-p->out_x[i-1]);
@@ -378,6 +416,9 @@ static JSValue guarded(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,register_impl);
 }
+static JSValue js_unregister(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    return guarded(ctx,self,argc,argv,unregister_impl);
+}
 static JSValue js_begin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,begin_impl);
 }
@@ -416,13 +457,15 @@ esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
     if(JS_IsException(procedural))return ESP_ERR_NO_MEM;
     static const JSCFunctionListEntry methods[]={
         JS_CFUNC_DEF("register",1,js_register),
+        JS_CFUNC_DEF("unregister",1,js_unregister),
         JS_CFUNC_DEF("beginFrame",1,js_begin),
         JS_CFUNC_DEF("draw",2,js_draw),
         JS_CFUNC_DEF("commit",0,js_commit),
         JS_CFUNC_DEF("resource",0,js_resource),
         JS_CFUNC_DEF("createSurface",0,js_create_surface),
     };
-    if(JS_SetPropertyFunctionList(ctx,procedural,methods,6)<0){
+    if(JS_SetPropertyFunctionList(ctx,procedural,methods,
+                                  (int)(sizeof methods/sizeof methods[0]))<0){
         JS_FreeValue(ctx,procedural);return ESP_ERR_NO_MEM;
     }
     return JS_SetPropertyStr(ctx,ns,"procedural",procedural)<0?ESP_ERR_NO_MEM:ESP_OK;

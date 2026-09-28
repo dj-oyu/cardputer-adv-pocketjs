@@ -6,10 +6,14 @@
 /* Host-first experiment. This is separate from the v1 UI command quota and is
  * not yet a JS or Kasane core API. The VM owns a validated program copy during
  * preparation; a completed frame owns its ordered drawing operations. */
-#define KSN_PROC_REGS 8
-#define KSN_PROC_INPUTS 4
+/* Registers, inputs and loop depth were widened from 8/4/4 without changing
+ * the instruction encoding: register and input indices are uint8_t fields.
+ * Register sets in ksn_proc_analysis.h are 16-bit masks, so 16 is a ceiling
+ * there; it is checked with a static assertion, not by convention. */
+#define KSN_PROC_REGS 16
+#define KSN_PROC_INPUTS 8
 #define KSN_PROC_CODE 64
-#define KSN_PROC_LOOP_DEPTH 4
+#define KSN_PROC_LOOP_DEPTH 8
 #define KSN_PROC_SEGMENTS 1024
 #define KSN_PROC_STEPS 10000
 #define KSN_PROC_RASTER_STEPS 8192
@@ -76,7 +80,8 @@ bool ksn_proc_capture_state(const ksn_proc_vm *vm,ksn_proc_state *state);
  * loop when a>b. PLOT_COLOR_REG and LINE_COLOR_REG use register dst as an
  * integral RGB565 color (0..65535). Every path remains subject to the step,
  * segment and raster caps. */
-/* CUBIC reads four (x,y) control points from registers 0..7 (dst=0), samples
+/* CUBIC reads four (x,y) control points from registers 0..7 (dst=0; r8..r15
+ * are never read, however many registers exist), samples
  * a segments (1..64) in a native loop, emits ordered lines of color, and
  * leaves the pen at the final control point. One debugger step covers the
  * entire bounded curve; the emitted segment/raster limits still apply. */

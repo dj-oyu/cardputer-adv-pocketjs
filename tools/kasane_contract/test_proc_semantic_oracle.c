@@ -183,7 +183,9 @@ static void draw_order_and_state(void){
         {2,3,2,3,0xf800},{2,3,2,3,0x07e0},{2,3,5,3,0x001f}
     };
     const float input[KSN_PROC_INPUTS]={0};
-    const float regs[KSN_PROC_REGS]={5,3,12,13,14,15,16,17};
+    /* r8..r15 are untouched and carry their initial 10+j through. */
+    const float regs[KSN_PROC_REGS]={5,3,12,13,14,15,16,17,
+                                     18,19,20,21,22,23,24,25};
     ksn_proc_state initial,captured;
     ksn_proc_vm vm;
     ksn_proc_frame frame;

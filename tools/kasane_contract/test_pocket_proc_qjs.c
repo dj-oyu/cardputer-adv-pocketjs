@@ -318,7 +318,8 @@ int main(int argc,char **argv){
                    "{kind:'affineQ14Points',x:[0,1],y:[0],coeff:[16384,0,0,16384,0,0],color:1})");
     eval_ok(ctx,"let off=pocket.kasane.procedural.register([[0,0,0,0,1,0]],"
                 "{kind:'affineQ14Points',x:[0,1],y:[0,0],"
-                "coeff:[16384,0,0,16384,4915200,0],color:1});"
+                /* x=721: one past the shared VM/typed bound of 720. */
+                "coeff:[16384,0,0,16384,11812864,0],color:1});"
                 "pocket.kasane.procedural.beginFrame(4)");
     eval_error(ctx,"pocket.kasane.procedural.draw(off,[0,0,0,0])");
     REQUIRE(!pocket_proc_pending());

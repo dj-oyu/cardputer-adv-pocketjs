@@ -2,8 +2,15 @@
 #include <math.h>
 #include <string.h>
 
-#define ALL_REGS ((uint8_t)((1u << KSN_PROC_REGS) - 1u))
-#define BIT(r) ((uint8_t)(1u << (r)))
+/* 32-bit arithmetic before narrowing: 1u<<16 is defined, and each cast names
+ * the mask type so no set can be truncated by an 8-bit leftover. */
+#define ALL_REGS ((ksn_pa_regs)(((uint32_t)1 << KSN_PROC_REGS) - 1u))
+#define BIT(r) ((ksn_pa_regs)((uint32_t)1 << (r)))
+/* CUBIC reads exactly the eight control-point registers from dst (always 0).
+ * Naming them keeps r8..r15 dead across a curve instead of the former
+ * ALL_REGS, which was exact only while the file had eight registers. */
+#define CUBIC_REGS(dst) ((ksn_pa_regs)((uint32_t)0xffu << (dst)))
+_Static_assert(KSN_PROC_REGS >= 8, "CUBIC needs r0..r7");
 
 static bool reg_ok(uint8_t r){ return r < KSN_PROC_REGS; }
 static void edge(ksn_pa_inst *i, uint8_t to){
@@ -82,7 +89,7 @@ bool ksn_proc_analyze(const ksn_proc_program *p, ksn_proc_analysis *out){
             break;
         case KSN_PROC_CUBIC:
             if(i->dst!=0||i->a<1||i->a>64)return false;
-            a->reads=ALL_REGS;
+            a->reads=CUBIC_REGS(i->dst);
             a->effects=KSN_PA_EFFECT_PEN|KSN_PA_EFFECT_DRAW;
             a->failure|=KSN_PA_FAIL_COORD|KSN_PA_FAIL_SEGMENTS|KSN_PA_FAIL_RASTER;
             break;
@@ -145,7 +152,7 @@ bool ksn_proc_analyze(const ksn_proc_program *p, ksn_proc_analysis *out){
         }
         ksn_pa_block *b=&out->block[out->block_count-1];
         b->last=pc;out->inst[pc].block=(uint8_t)(out->block_count-1);
-        b->use|=(uint8_t)(out->inst[pc].reads & ~b->def);
+        b->use|=(ksn_pa_regs)(out->inst[pc].reads & ~b->def);
         b->def|=out->inst[pc].writes;
     }
     for(uint8_t bi=0;bi<out->block_count;bi++){
@@ -168,13 +175,13 @@ bool ksn_proc_analyze(const ksn_proc_program *p, ksn_proc_analysis *out){
         changed=false;
         for(int bi=(int)out->block_count-1;bi>=0;bi--){
             ksn_pa_block *b=&out->block[bi];
-            uint8_t live=0;
+            ksn_pa_regs live=0;
             const ksn_pa_inst *tail=&out->inst[b->last];
             for(uint8_t j=0;j<tail->successor_count;j++)
                 if(tail->successor[j]==p->count)live|=ALL_REGS;
             for(uint8_t j=0;j<b->successor_count;j++)
                 live|=out->block[b->successor[j]].live_in;
-            uint8_t in=(uint8_t)(b->use | (live & ~b->def));
+            ksn_pa_regs in=(ksn_pa_regs)(b->use | (live & ~b->def));
             if(live!=b->live_out||in!=b->live_in){
                 b->live_out=live;b->live_in=in;changed=true;
             }
@@ -188,11 +195,11 @@ bool ksn_proc_analyze(const ksn_proc_program *p, ksn_proc_analysis *out){
         /* A count check belongs to the loop even when its body is pure.
          * Do not let an independent body authorize eliding a failing header. */
         if(out->inst[pc].failure)l->reasons|=KSN_PA_MAY_FAIL;
-        uint8_t must_def=0;
+        ksn_pa_regs must_def=0;
         for(uint8_t at=(uint8_t)(pc+1);at<l->end;at++){
             const ksn_pa_inst *a=&out->inst[at];
             l->reads|=a->reads;l->writes|=a->writes;
-            l->use_before_def|=(uint8_t)(a->reads & ~must_def);
+            l->use_before_def|=(ksn_pa_regs)(a->reads & ~must_def);
             /* A nested loop or break can skip subsequent definitions. */
             if(a->effects & KSN_PA_EFFECT_CONTROL)must_def=0;
             else must_def|=a->writes;
@@ -201,7 +208,7 @@ bool ksn_proc_analyze(const ksn_proc_program *p, ksn_proc_analysis *out){
             if(a->failure)l->reasons|=KSN_PA_MAY_FAIL;
             if(a->effects & KSN_PA_EFFECT_CONTROL)l->reasons|=KSN_PA_CONTROL;
         }
-        l->carried=(uint8_t)(l->writes & l->use_before_def);
+        l->carried=(ksn_pa_regs)(l->writes & l->use_before_def);
         if(l->carried)l->reasons|=KSN_PA_LOOP_CARRIED;
         if(!out->max_steps)l->reasons|=KSN_PA_STEP_LIMIT;
         l->independent=l->reasons==0;

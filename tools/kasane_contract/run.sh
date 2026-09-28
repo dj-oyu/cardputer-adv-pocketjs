@@ -372,6 +372,7 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
 done
 python3 tools/kasane_contract/run_proc_megademo_js.py
 python3 tools/kasane_contract/run_pocket_proc_qjs.py
+python3 tools/kasane_contract/run_pocket_proc_limits_qjs.py
 python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py
 python3 tools/kasane_contract/run_proc_grid_resize.py
 python3 tools/kasane_contract/run_pocket_grid_qjs.py

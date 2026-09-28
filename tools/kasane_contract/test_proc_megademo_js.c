@@ -84,9 +84,11 @@ static void read_program(JSContext *ctx, JSValueConst object, unsigned phase,
 static void read_inputs(JSContext *ctx, JSValueConst object, unsigned frame,
                         unsigned layer, float input[KSN_PROC_INPUTS]) {
     JSValue array = call2(ctx, object, "inputs", (int)frame, (int)layer);
-    REQUIRE(length(ctx, array) == KSN_PROC_INPUTS);
+    /* The demo passes four inputs; draw() zero-pads to KSN_PROC_INPUTS. */
+    const unsigned n = length(ctx, array);
+    REQUIRE(n == 4 && n <= KSN_PROC_INPUTS);
     for (unsigned i = 0; i < KSN_PROC_INPUTS; ++i)
-        input[i] = (float)number_at(ctx, array, i);
+        input[i] = i < n ? (float)number_at(ctx, array, i) : 0.0f;
     JS_FreeValue(ctx, array);
 }
 
