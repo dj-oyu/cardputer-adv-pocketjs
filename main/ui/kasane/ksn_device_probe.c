@@ -126,7 +126,7 @@ static ksn_result image_probe_span(void *ctx,uint16_t variant,uint16_t frame,uin
 }
 static ksn_result image_demo(void){
     ksn_core_bind(&probe_core,&probe_commands[0],&probe_commands[1],&probe_text[0],&probe_text[1]);
-    ksn_image_port source={NULL,32,32,1,2,image_probe_span};ksn_resource resource;
+    ksn_image_port source={NULL,32,32,1,2,image_probe_span,false};ksn_resource resource;
     ksn_client app=ksn_core_client(&probe_core,KSN_APP);ksn_tx tx;ksn_ref refs[3];
 #define I(call) do{ksn_result r=(call);if(r!=KSN_OK)return r;}while(0)
     I(ksn_core_register_image(&probe_core,KSN_APP,&source,&resource));

@@ -28,7 +28,7 @@ int main(void){
     ksn_core_animation_block animations[2];
     assert(ksn_core_enable_animation(&core,&animations[0],&animations[1])==KSN_OK);
     ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_image_port image={NULL,64,64,1,1,source};
+    ksn_image_port image={NULL,64,64,1,1,source,false};
     ksn_resource resource;
     assert(ksn_core_register_image(&core,KSN_APP,&image,&resource)==KSN_OK);
     ksn_draw draw={.kind=KSN_IMAGE,.bounds={10,20,42,52},.clip={0,0,240,135},.opacity=255,

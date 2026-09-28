@@ -47,6 +47,8 @@ bool ksn_runtime_has_submission(void);
 bool ksn_runtime_needs_present(void);
 void ksn_runtime_invalidate(void);
 void ksn_runtime_invalidate_bands(uint32_t bands);
+bool ksn_runtime_invalidate_image(ksn_resource resource);
+bool ksn_runtime_invalidate_image_source_rect(ksn_resource resource,ksn_rect source_rect);
 uint32_t ksn_runtime_opaque_system_bands(void);
 ksn_result ksn_runtime_present(const ksn_display_port *,ksn_render_stats *);
 ksn_result ksn_runtime_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,

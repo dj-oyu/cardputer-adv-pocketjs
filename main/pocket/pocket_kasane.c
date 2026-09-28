@@ -1,5 +1,13 @@
 #include "pocket_kasane.h"
 #include "pocket_api.h"
+#include "pocket_proc.h"
+#include "pocket_grid.h"
+#include "pocket_video.h"
+#include "pocket_pixel.h"
+#include "ui/kasane/ksn_procedural.h"
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+#include "esp_log.h"
+#endif
 #include "ui/kasane/ksn_runtime.h"
 #include "app_notice.h"
 #include "app_view_provider.h"
@@ -96,6 +104,11 @@ typedef struct {
     ksn_tx submitted;
     ksn_update_mode submitted_mode;
     struct {const pocket_app_image_asset *asset;ksn_resource resource;} images[4];
+    ksn_resource proc_resource[2];
+    ksn_resource video_resource;
+    ksn_resource pixel_resource;
+    ksn_resource grid_resources[4];
+    uint16_t grid_width[4],grid_height[4];
     ksn_resource notice_resource;
     ksn_tx notice_tx;
     uint32_t notice_displayed,notice_pending;
@@ -113,6 +126,9 @@ static kasane_state *state;
 static uint32_t ref_serial;
 static uint32_t schema_serial;
 static uint64_t owner_now_us;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+static uint32_t proc_log_frame;
+#endif
 static JSClassID tx_class, modal_class, ref_class, template_class;
 static JSClassID instance_class, ticket_class, image_class, animation_class;
 static JSClassID schema_class;
@@ -1047,6 +1063,155 @@ static JSValue js_resource(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     JS_SetOpaque(object,(void *)(uintptr_t)state->images[index].resource.value);return object;
 }
 
+JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface){
+    const char *op="kasane.procedural.resource";
+    if(surface>=2||(state&&state->building.value))return throw_result(ctx,KSN_BUSY,op);
+    /* Complete all fallible JS work before changing native display mode. */
+    JSValue object=JS_NewObjectClass(ctx,image_class);
+    if(JS_IsException(object))return object;
+    const struct {const char *name;int value;} metadata[]={
+        {"width",KSN_PROC_W},{"height",KSN_PROC_H},{"variants",1},{"frames",1}};
+    for(unsigned i=0;i<sizeof(metadata)/sizeof(metadata[0]);i++)
+        if(JS_DefinePropertyValueStr(ctx,object,metadata[i].name,
+                JS_NewInt32(ctx,metadata[i].value),JS_PROP_ENUMERABLE)<0){
+            JS_FreeValue(ctx,object);return JS_EXCEPTION;
+        }
+    if(!ensure_state(ctx,op)){JS_FreeValue(ctx,object);return JS_EXCEPTION;}
+    if(!state->proc_resource[surface].value){
+        ksn_image_port port;pocket_proc_image_port_at(&port,surface);
+        ksn_resource resource={0};
+        ksn_result result=ksn_view_host_register_image(view(),&port,&resource);
+        if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
+        state->proc_resource[surface]=resource;
+        pocket_proc_image_mode_at(surface);
+        if(surface==0){
+            /* Existing backdrop content is removed when image mode is selected. */
+            ksn_runtime_invalidate();
+        }
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)state->proc_resource[surface].value);
+    return object;
+}
+JSValue pocket_kasane_proc_resource(JSContext *ctx){
+    return pocket_kasane_proc_resource_at(ctx,0);
+}
+
+JSValue pocket_kasane_grid_resource(JSContext *ctx,unsigned slot,
+                                    const ksn_image_port *port){
+    const char *op="kasane.grid.resource";
+    if(slot>=4||!port||!port->width||!port->height||
+       (state&&state->building.value))return throw_result(ctx,KSN_INVALID,op);
+    JSValue object=JS_NewObjectClass(ctx,image_class);
+    if(JS_IsException(object))return object;
+    const struct {const char *name;int value;} metadata[]={
+        {"width",port->width},{"height",port->height},
+        {"variants",1},{"frames",1}};
+    for(unsigned i=0;i<sizeof(metadata)/sizeof(metadata[0]);i++)
+        if(JS_DefinePropertyValueStr(ctx,object,metadata[i].name,
+                JS_NewInt32(ctx,metadata[i].value),JS_PROP_ENUMERABLE)<0){
+            JS_FreeValue(ctx,object);return JS_EXCEPTION;
+        }
+    if(!ensure_state(ctx,op)){JS_FreeValue(ctx,object);return JS_EXCEPTION;}
+    if(!state->grid_resources[slot].value){
+        ksn_resource resource={0};
+        ksn_result result=ksn_view_host_register_image(view(),port,&resource);
+        if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
+        state->grid_resources[slot]=resource;
+        state->grid_width[slot]=port->width;
+        state->grid_height[slot]=port->height;
+    }else if(state->grid_width[slot]!=port->width||
+             state->grid_height[slot]!=port->height){
+        JS_FreeValue(ctx,object);return throw_result(ctx,KSN_INVALID,op);
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)state->grid_resources[slot].value);
+    return object;
+}
+JSValue pocket_kasane_video_resource(JSContext *ctx,const ksn_image_port *port){
+    const char *op="kasane.video.open";
+    if(!port||!port->width||!port->height||
+       (state&&state->building.value))return throw_result(ctx,KSN_INVALID,op);
+    JSValue object=JS_NewObjectClass(ctx,image_class);
+    if(JS_IsException(object))return object;
+    const struct {const char *name;int value;} metadata[]={
+        {"width",port->width},{"height",port->height},
+        {"variants",1},{"frames",1}};
+    for(unsigned i=0;i<sizeof(metadata)/sizeof(metadata[0]);i++)
+        if(JS_DefinePropertyValueStr(ctx,object,metadata[i].name,
+                JS_NewInt32(ctx,metadata[i].value),JS_PROP_ENUMERABLE)<0){
+            JS_FreeValue(ctx,object);return JS_EXCEPTION;
+        }
+    if(!ensure_state(ctx,op)){JS_FreeValue(ctx,object);return JS_EXCEPTION;}
+    if(!state->video_resource.value){
+        ksn_resource resource={0};
+        ksn_result result=ksn_view_host_register_image(view(),port,&resource);
+        if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
+        state->video_resource=resource;
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)state->video_resource.value);
+    return object;
+}
+JSValue pocket_kasane_pixel_resource(JSContext *ctx,const ksn_image_port *port){
+    const char *op="kasane.pixel.open";
+    if(!port||!port->width||!port->height||
+       (state&&state->building.value))return throw_result(ctx,KSN_INVALID,op);
+    JSValue object=JS_NewObjectClass(ctx,image_class);
+    if(JS_IsException(object))return object;
+    const struct {const char *name;int value;} metadata[]={
+        {"width",port->width},{"height",port->height},
+        {"variants",1},{"frames",1}};
+    for(unsigned i=0;i<sizeof(metadata)/sizeof(metadata[0]);i++)
+        if(JS_DefinePropertyValueStr(ctx,object,metadata[i].name,
+                JS_NewInt32(ctx,metadata[i].value),JS_PROP_ENUMERABLE)<0){
+            JS_FreeValue(ctx,object);return JS_EXCEPTION;
+        }
+    if(!ensure_state(ctx,op)){JS_FreeValue(ctx,object);return JS_EXCEPTION;}
+    if(!state->pixel_resource.value){
+        ksn_resource resource={0};
+        ksn_result result=ksn_view_host_register_image(view(),port,&resource);
+        if(result!=KSN_OK){JS_FreeValue(ctx,object);return throw_result(ctx,result,op);}
+        state->pixel_resource=resource;
+    }
+    JS_SetOpaque(object,(void *)(uintptr_t)state->pixel_resource.value);
+    return object;
+}
+void pocket_kasane_pixel_invalidate(void){
+    if(state&&state->pixel_resource.value){
+        ksn_runtime_invalidate_image(state->pixel_resource);
+        pocket_grid_source_invalidated(state->pixel_resource.value);
+    }
+}
+bool pocket_kasane_pixel_can_stage(void){
+    return state&&state->pixel_resource.value&&!state->building.value&&
+           !state->submitted.value&&!ksn_runtime_has_submission();
+}
+bool pocket_kasane_video_can_select(void){
+    return state&&state->video_resource.value&&!state->building.value&&
+           !state->submitted.value&&!ksn_runtime_has_submission();
+}
+void pocket_kasane_video_invalidate(void){
+    if(state&&state->video_resource.value){
+        ksn_runtime_invalidate_image(state->video_resource);
+        pocket_grid_source_invalidated(state->video_resource.value);
+    }
+}
+void pocket_kasane_grid_invalidate(unsigned slot){
+    if(state&&slot<4&&state->grid_resources[slot].value){
+        ksn_runtime_invalidate_image(state->grid_resources[slot]);
+        pocket_grid_source_invalidated(state->grid_resources[slot].value);
+    }
+}
+bool pocket_kasane_grid_source_port(JSContext *ctx,JSValueConst object,
+                                    ksn_image_port *out,uint32_t *id){
+    (void)ctx;
+    if(!out||!id||!state||!JS_IsObject(object))return false;
+    uint32_t value=opaque_value(object,image_class);
+    if(!value)return false;
+    if(ksn_view_host_image_port(view(),(ksn_resource){value},out)!=KSN_OK)
+        return false;
+    *id=value;
+    return true;
+}
+
 static JSValue js_tx_image(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     const char *op="kasane.image";ksn_tx tx=tx_from(ctx,self,op);
     if(!tx.value)return JS_EXCEPTION;
@@ -1068,10 +1233,16 @@ static JSValue js_tx_image(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     JS_FreeValue(ctx,scale);
     if(!ok||(n!=0.5&&n!=1&&n!=2))return throw_result(ctx,KSN_INVALID,op);
     draw.data.image.scale=stretch?KSN_IMAGE_STRETCH:n==0.5?KSN_IMAGE_HALF:n==2?KSN_IMAGE_2X:KSN_IMAGE_1X;
-    /* The currently exposed resource class contains only the 64x64 pet atlas.
-     * Source extents stay fixed when setRect changes the destination. */
-    uint16_t width=draw.data.image.source_x<64?64-draw.data.image.source_x:0;
-    uint16_t height=draw.data.image.source_y<64?64-draw.data.image.source_y:0;
+    /* Source extents stay fixed when setRect changes the destination. */
+    ksn_image_port source_port;
+    ksn_result port_result=ksn_view_host_image_port(view(),
+        draw.data.image.resource,&source_port);
+    if(port_result!=KSN_OK)return throw_result(ctx,port_result,op);
+    uint16_t source_w=source_port.width,source_h=source_port.height;
+    uint16_t width=draw.data.image.source_x<source_w?
+                   source_w-draw.data.image.source_x:0;
+    uint16_t height=draw.data.image.source_y<source_h?
+                    source_h-draw.data.image.source_y:0;
     if(!property_u16(ctx,spec,"sourceWidth",width,&draw.data.image.source_width,op)||
        !property_u16(ctx,spec,"sourceHeight",height,&draw.data.image.source_height,op))return JS_EXCEPTION;
     JSValue rotation=JS_GetPropertyStr(ctx,spec,"rotation");
@@ -2600,7 +2771,11 @@ static esp_err_t build_kasane(JSContext *ctx, JSValueConst ns, void *user) {
     if(JS_SetPropertyFunctionList(ctx,cache,cache_functions,2)<0) {
         JS_FreeValue(ctx,cache);return ESP_ERR_NO_MEM;
     }
-    return JS_SetPropertyStr(ctx,ns,"cache",cache)<0?ESP_ERR_NO_MEM:ESP_OK;
+    if(JS_SetPropertyStr(ctx,ns,"cache",cache)<0)return ESP_ERR_NO_MEM;
+    if(pocket_proc_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
+    if(pocket_grid_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
+    if(pocket_video_install(ctx,ns)!=ESP_OK)return ESP_ERR_NO_MEM;
+    return pocket_pixel_install(ctx,ns);
 }
 
 static const pocket_limit_t kasane_limits[]={
@@ -2679,6 +2854,10 @@ bool pocket_kasane_reset(void) {
     void *provider_state=state?state->provider_state:NULL;
     schema_state *schema=state?state->schema:NULL;
     if(state&&ksn_runtime_app_detach(state->lease)==KSN_BUSY)return false;
+    pocket_proc_reset();
+    pocket_grid_reset();
+    pocket_video_reset();
+    pocket_pixel_reset();
     if(provider)provider->destroy(provider_state);
     if(schema)free(schema_external_state(schema));
     if(schema)free(schema->owned_asset);
@@ -2688,6 +2867,9 @@ bool pocket_kasane_reset(void) {
     viewport=KASANE_SCREEN;
     overlay_profile=false;
     owner_now_us=0;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    proc_log_frame=0;
+#endif
     return true;
 }
 // Resident suspension (docs/vm/app-suspend-design.md sec.4). The APP lease is
@@ -2701,6 +2883,39 @@ void pocket_kasane_set_dormant(bool on) {
     if(!on) pocket_kasane_invalidate();
 }
 
+ksn_result pocket_kasane_proc_publish(void){
+    if(overlay_profile&&!pocket_proc_is_image_mode())return KSN_INVALID;
+    if(!state){
+        ksn_result result=attach_state("procedural.commit");
+        if(result!=KSN_OK)return result;
+    }
+    if(!ksn_runtime_app_view(state->lease))return KSN_STALE;
+    state->active=true;
+    ksn_runtime_app_activate(state->lease);
+    if(pocket_proc_is_image_mode()){
+        if(state->proc_resource[0].value){
+            ksn_runtime_invalidate_image(state->proc_resource[0]);
+            pocket_grid_source_invalidated(state->proc_resource[0].value);
+        }
+    }else ksn_runtime_invalidate();
+    return KSN_OK;
+}
+ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect source_damage){
+    if(surface>=2)return KSN_INVALID;
+    if(!state){
+        ksn_result result=attach_state("procedural.commit");
+        if(result!=KSN_OK)return result;
+    }
+    if(!ksn_runtime_app_view(state->lease)||!state->proc_resource[surface].value)
+        return KSN_STALE;
+    state->active=true;
+    ksn_runtime_app_activate(state->lease);
+    if(source_damage.x0<source_damage.x1&&source_damage.y0<source_damage.y1){
+        ksn_runtime_invalidate_image_source_rect(state->proc_resource[surface],source_damage);
+        pocket_grid_source_invalidated(state->proc_resource[surface].value);
+    }
+    return KSN_OK;
+}
 bool pocket_kasane_active(void) { return !dormant&&state&&state->active; }
 ksn_result pocket_kasane_update_notice(const sys_notice *notice,uint16_t variant){
     if(dormant||!state||!state->active)return KSN_OK;
@@ -2778,8 +2993,38 @@ void pocket_kasane_invalidate(void) {
 ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
     if(!stats) return KSN_INVALID;
     *stats=(ksn_render_stats){0};
+    if(pocket_proc_pending()&&!pocket_kasane_needs_present()){
+        if(pocket_proc_backdrop_pending())ksn_runtime_invalidate();
+        else pocket_proc_present_result(KSN_OK);
+    }
+    if(pocket_grid_pending()&&!pocket_kasane_needs_present())
+        pocket_grid_present_result(KSN_OK);
+    if(pocket_video_pending()&&!pocket_kasane_needs_present())
+        pocket_video_present_result(KSN_OK);
+    if(pocket_pixel_pending()&&!pocket_kasane_needs_present())
+        pocket_pixel_present_result(KSN_OK);
     if(!pocket_kasane_needs_present()) return KSN_OK;
-    ksn_result result=ksn_runtime_present(display,stats);
+    bool proc_candidate=pocket_proc_pending();
+    ksn_result result=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
+        ksn_runtime_present_backdrop(display,pocket_proc_backdrop,false,stats):
+        ksn_runtime_present(display,stats);
+    if(result==KSN_OK&&pocket_proc_backdrop_pending()&&!stats->transferred_bytes)
+        ksn_runtime_invalidate();
+    else pocket_proc_present_result(result);
+    pocket_grid_present_result(result);
+    pocket_video_present_result(result);
+    pocket_pixel_present_result(result);
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    if(proc_candidate&&result==KSN_OK&&stats->transferred_bytes){
+        uint32_t scalar=0,pie=0;
+        pocket_proc_batch_counts(&scalar,&pie);
+        ESP_LOGI("PROC_JS","frame=%lu scalar=%lu pie=%lu bytes=%lu",
+                 (unsigned long)proc_log_frame++,(unsigned long)scalar,
+                 (unsigned long)pie,(unsigned long)stats->transferred_bytes);
+    }
+#else
+    (void)proc_candidate;
+#endif
     apply_outcome();return result;
 }
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
@@ -2787,11 +3032,22 @@ ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
                                           ksn_render_stats *stats) {
     if(!stats||!load)return KSN_INVALID;
     *stats=(ksn_render_stats){0};
-    if(!pocket_kasane_needs_present())return KSN_OK;
+    if(!pocket_kasane_needs_present()){
+        pocket_proc_overlay_present_result(KSN_OK);
+        pocket_grid_present_result(KSN_OK);
+        pocket_video_present_result(KSN_OK);
+        pocket_pixel_present_result(KSN_OK);
+        return KSN_OK;
+    }
     ksn_result result=ksn_runtime_present_backdrop(display,load,occlusion_safe,stats);
+    pocket_proc_overlay_present_result(result);
+    pocket_grid_present_result(result);
+    pocket_video_present_result(result);
+    pocket_pixel_present_result(result);
     apply_outcome();return result;
 }
 void pocket_kasane_end_turn(void) {
+    pocket_proc_end_turn();
     if(state) { ksn_runtime_app_end_turn(state->lease); apply_outcome(); }
 }
 ksn_input_scope pocket_kasane_input_scope(bool host_priority) {

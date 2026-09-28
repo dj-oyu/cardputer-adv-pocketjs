@@ -74,7 +74,7 @@ static void note_anchor(void){
 static uint32_t scene(const config *c,unsigned arm,unsigned long long *fetch_count){
     KSN_TEST_CORE(core,);ksn_core_init(&core);
     ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_image_port port={NULL,160,160,1,2,source};ksn_resource image;
+    ksn_image_port port={NULL,160,160,1,2,source,false};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
     ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};
     ksn_render_stats stats;ksn_tx tx;ksn_ref ref;uint32_t hash=2166136261u;
@@ -122,7 +122,7 @@ static uint32_t animate_120(unsigned arm_mode,unsigned long long *fetch_count,un
     assert(ksn_core_enable_animation(&core,&blocks[0],&blocks[1])==KSN_OK);
     assert(ksn_core_animation_bytes(&core)<=1024);
     ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_image_port port={NULL,160,160,1,2,source};ksn_resource image;
+    ksn_image_port port={NULL,160,160,1,2,source,false};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
     ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};
     ksn_render_stats stats;ksn_tx tx;ksn_ref ref;uint32_t hash=2166136261u;unsigned frames=0;

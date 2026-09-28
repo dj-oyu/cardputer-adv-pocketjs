@@ -62,7 +62,7 @@ static void verify(const ksn_draw *d,bool grouped){
 }
 int main(void){
     KSN_TEST_CORE(core,);ksn_core_init(&core);ksn_client app=ksn_core_client(&core,KSN_APP);
-    ksn_image_port port={NULL,70,40,1,2,source};ksn_resource image;
+    ksn_image_port port={NULL,70,40,1,2,source,false};ksn_resource image;
     assert(ksn_core_register_image(&core,KSN_APP,&port,&image)==KSN_OK);
     ksn_display_port display={NULL,buffer,send,240,135,8,NULL,NULL};ksn_render_stats stats;ksn_tx tx;ksn_ref ref;
     ksn_draw d={.kind=KSN_IMAGE,.clip={2,7,110,65},.data.image={.source_x=3,.source_y=2}};

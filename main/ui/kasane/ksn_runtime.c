@@ -159,6 +159,12 @@ void ksn_runtime_invalidate(void){if(runtime)ksn_view_host_invalidate(&runtime->
 void ksn_runtime_invalidate_bands(uint32_t bands){
     if(runtime)ksn_view_host_invalidate_bands(&runtime->host,bands);
 }
+bool ksn_runtime_invalidate_image(ksn_resource resource){
+    return runtime&&ksn_view_host_invalidate_image(&runtime->host,resource);
+}
+bool ksn_runtime_invalidate_image_source_rect(ksn_resource resource,ksn_rect source_rect){
+    return runtime&&ksn_view_host_invalidate_image_source_rect(&runtime->host,resource,source_rect);
+}
 uint32_t ksn_runtime_opaque_system_bands(void){
     return runtime?ksn_core_opaque_system_bands(&runtime->core):0;
 }

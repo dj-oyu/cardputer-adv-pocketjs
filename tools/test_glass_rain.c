@@ -43,8 +43,29 @@ int main(void) {
         for(int y=0;y<RAIN_H;y++)glass_rain_draw(joined+y*RAIN_W,y,1);
         assert(!memcmp(whole,joined,sizeof whole));
     }
+    // A compositor can borrow one frame while the simulation advances. Repaint
+    // its bands in reverse order after that advance; the borrowed picture must
+    // still be the one rendered before the advance, including overlapping drops.
+    memset(drops,0,sizeof drops);
+    drops[0]=(RainDrop){.x=44,.y=57,.start=25,.speed=10,.age=2,.life=3,.radius=4};
+    drops[1]=(RainDrop){.x=47,.y=59,.start=27,.speed=9,.age=2,.life=3,.radius=3};
+    glass_rain_frame frozen;
+    glass_rain_capture(&frozen);
+    memcpy(whole,original,sizeof whole);
+    glass_rain_draw_frame(&frozen,whole,0,RAIN_H);
+    assert(memcmp(whole,original,sizeof whole));
+    for(int step=0;step<20;step++)glass_rain_prepare(1.0f/30,12345);
+    memcpy(joined,original,sizeof joined);
+    glass_rain_draw(joined,0,RAIN_H);
+    assert(memcmp(whole,joined,sizeof whole));
+    for(int band=(RAIN_H-1)/8;band>=0;band--) {
+        int y=band*8,h=RAIN_H-y<8?RAIN_H-y:8;
+        memcpy(joined+y*RAIN_W,original+y*RAIN_W,(size_t)h*RAIN_W*2);
+        glass_rain_draw_frame(&frozen,joined+y*RAIN_W,y,h);
+    }
+    assert(!memcmp(whole,joined,sizeof whole));
     memcpy(whole,original,sizeof whole);glass_rain_draw(whole,-1,8);
     assert(!memcmp(whole,original,sizeof whole));
-    printf("RAIN_OK: 300 simulated seconds, %u showers, %u wet / %u dry samples; strips 1..11, bounds and overlap; state %zu bytes\n",
-           shower_count,wet,dry,sizeof drops+sizeof source_row+sizeof rng+sizeof next_shower+sizeof shower_left+sizeof next_drop+sizeof remaining);
+    printf("RAIN_OK: 300 simulated seconds, %u showers, %u wet / %u dry samples; strips 1..11, bounds, overlap, frozen replay; state %zu bytes, frame %zu bytes\n",
+           shower_count,wet,dry,sizeof drops+sizeof source_row+sizeof rng+sizeof next_shower+sizeof shower_left+sizeof next_drop+sizeof remaining,sizeof frozen);
 }

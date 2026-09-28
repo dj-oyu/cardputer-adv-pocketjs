@@ -6,6 +6,9 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 2. [decisions.md](decisions.md) — 採用・不採用の理由と、再検討時に満たすべき条件。最適化案を出す前に読む。
 3. [verification.md](verification.md) — 実機の固定ゲート、確認済み範囲、測定上の注意。
 4. [roadmap.md](roadmap.md) — 現在の実装・実測・未達を分離した、再評価可能な作業一覧。
+5. [dynamic-rendering-roadmap.md](dynamic-rendering-roadmap.md) — 関数アート・動的描画面・動画の段階的な研究と実装の入口。現行能力の一覧ではない。
+6. [procedural-ir-experiment.md](procedural-ir-experiment.md) — host 上の逐次命令、native 反復、step デバッグ、帯再描画の実験記録。
+7. [procedural-device-probe.md](procedural-device-probe.md) — 手続き型描画の実機表示・負荷診断の起動方法とログ。実測前の準備。
 
 `design-schema.json` と `design-example.json` は制作時の**旧構想の機械可読例**として残す。現在の `mount({version:1,...})` の完全なランタイムスキーマではない。ランタイムの型・容量・APIの厳密な真実は `main/ui/kasane/ksn_schema*`、`main/pocket/pocket_kasane.c` と契約試験にある。文書の数値は対象 image と workload を伴う場合だけ測定値として扱い、設計予算・推定と混同しない。
 

@@ -50,6 +50,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [builtins-census.md](perf/builtins-census.md) | 記録 | マップの3視点（配置・取り込み理由・`--cref`）で「我々だけが理由でリンクに入っているライブラリ」を全数調査。`compiler_builtins` 16 会員 46,329 B の取り込み理由と、我々が入口になっている 3 会員（13,680 B） |
 | [flash-size-method.md](perf/flash-size-method.md) | 設計 | 容量削減の手順書: cref で薄さランキングを作り、薄い（我々だけが参照元の）ところから潰す。スタブビルドで「本当に落ちるか」を先に確かめる規律、罠、一般化まで |
 | [kasane-image-transform-stretch-step.md](perf/kasane-image-transform-stretch-step.md) | 記録 | 拡大縮小画像スパンの画素ごとの 32bit 除算 2 本を、商と剰余の加算ステップ（切替つき・厳密・既定は有効）へ。1 画素 18 命令/除算 2 本 → 15-16 命令/0 本。調査は [kasane-image-transform-recon.md](perf/kasane-image-transform-recon.md)、回転側の同型の仕事は [kasane-image-transform-step.md](perf/kasane-image-transform-step.md) |
+| [kasane-grid-sampling-host.md](perf/kasane-grid-sampling-host.md) | 記録 | 固定小窓の最近傍・bilinear・面積平均のhost画質と元画像アクセス量。登録時sampling policyの判断根拠と実機未測定の範囲 |
 | [kasane-image-transform-anchor.md](perf/kasane-image-transform-anchor.md) | 記録 | 回転スパンのアンカーを行ごとの表にし、libgcc の `__divdi3` 2 本を消した（切替つき・厳密・既定は有効）。アンカー代 37.8 → 10.0 命令/画素、表は実行時構築で `.bss` +308 B（flash は 0 B 増） |
 | [kasane-image-transform-reject.md](perf/kasane-image-transform-reject.md) | 記録 | 回転スパンの域外判定をスパン単位の区間判定にした（切替つき・厳密・既定は有効）。棄却画素の処理 −5.0 命令/転送画素、新しいデータは 1 バイトも持たない |
 | [kasane-blend-pie.md](perf/kasane-blend-pie.md) | 記録 | 565 ブレンド／パックの PIE カーネル（候補 4a）: 16bit レーンモデル、恒等式の総当たり、`piesim` での全画素一致、命令数とストール。文書自体は結線前のホスト記録で、結線（`g_ksn_blend_pie`、既定 ON）は後続コミット |
@@ -83,7 +84,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 ## 主線3: デザインシステム Kasane — [`kasane/`](kasane/)
 
-固定容量の C 描画基盤、その上の汎用 mount/source/presenter、Systemとの所有権境界を扱う。履歴資料と日別実験ログは縮約し、現行の判断に必要な資料を次の4本へまとめた。
+固定容量の C 描画基盤、その上の汎用 mount/source/presenter、Systemとの所有権境界を扱う。履歴資料と日別実験ログは縮約し、動的描画の構想は現行 v1 の判断資料と分けて置く。
 
 | 文書 | 内容 |
 | --- | --- |
@@ -92,6 +93,8 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [判断台帳](kasane/decisions.md) | トレードオフ、不採用案と再検討条件 |
 | [検証](kasane/verification.md) | 固定実機ゲート、実測の達成範囲、計測の落とし穴 |
 | [残タスク](kasane/roadmap.md) | 実装・実測・未達を分けたロードマップ再評価用の表 |
+| [動的描画ロードマップ](kasane/dynamic-rendering-roadmap.md) | 関数アート・描画面・動画を、FLOWERとKasaneの実測を参照しながら段階的に進める構想 |
+| [手続き型描画の実機診断](kasane/procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。実測前の準備 |
 
 ## JS API — [`api/`](api/)
 

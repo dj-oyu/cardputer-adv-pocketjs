@@ -33,7 +33,11 @@ gcc -std=gnu11 -O2 -g -w $F -fno-omit-frame-pointer \
   main/pet/ksn_pet.c main/pet/pet_pixels.c tools/hostshim/ksn_pet_builtin.c \
   main/pocket/pocket_clock_source.c main/pocket/pocket_clock.c main/pocket/pocket_av_playback_source.c \
   main/pocket/pocket_av_output_source.c main/pocket/app_view_assets.c main/pocket/app_view_provider.c \
-  main/pocket/app_music_view.c main/pocket/app_legacy_presenter.c main/pocket/pocket_kasane.c \
+  main/pocket/app_music_view.c main/pocket/app_legacy_presenter.c main/pocket/pocket_kasane.c main/pocket/pocket_proc.c \
+  main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
+  main/ui/kasane/ksn_proc_plan.c main/ui/kasane/ksn_proc_plan_points.c \
+  main/ui/kasane/ksn_proc_points.c main/ui/kasane/ksn_proc_points_pie.c \
+  main/ui/kasane/ksn_proc_points_dispatch.c \
   main/pocket/pocket_memory.c \
   main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_schema.c main/ui/kasane/ksn_schema_session.c \
   main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c main/ui/kasane/ksn_source_pool_adapter.c \

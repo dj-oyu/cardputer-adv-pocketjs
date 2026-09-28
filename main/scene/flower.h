@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // One UI-task owner; analytic parts and row scratch live in scene_mem.
@@ -30,6 +31,16 @@ void flower_prepare_rotating(float dt, int tilt_x, int tilt_y);
 flower_species_t flower_current_species(void);
 float flower_fade(void);
 void flower_draw(uint16_t *pixels, int y, int height);
+/* Owner-task frame lease. Capture after prepare, then draw the same frame even
+ * after a later prepare or scene_mem_release. A captured frame owns its derived
+ * data; row scratch remains local to each draw. No concurrent calls. */
+typedef struct flower_frame flower_frame;
+flower_frame *flower_frame_create(void);
+void flower_frame_destroy(flower_frame *frame);
+bool flower_frame_capture(flower_frame *frame);
+void flower_frame_draw(const flower_frame *frame, uint16_t *pixels, int y,
+                       int height);
+size_t flower_frame_bytes(const flower_frame *frame);
 // The grain's phase. It advances once a frame, so two renders of the same
 // moment only match if it is pinned -- which is what a test comparing them has
 // to do, and what nothing else should touch.

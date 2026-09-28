@@ -6,11 +6,8 @@
 
 #define RAIN_W 240
 #define RAIN_H 135
-#define RAIN_N 6
-typedef struct {
-    float x,y,start,speed,age,life,phase;
-    int radius;
-} RainDrop;
+#define RAIN_N GLASS_RAIN_MAX_DROPS
+typedef glass_rain_drop RainDrop;
 static RainDrop drops[RAIN_N];
 static uint16_t source_row[RAIN_W];
 static uint32_t rng;
@@ -61,7 +58,10 @@ void glass_rain_prepare(float dt,uint32_t seed) {
         }
     }
 }
-void glass_rain_draw(uint16_t *pixels,int y,int height) {
+void glass_rain_capture(glass_rain_frame *out) {
+    if(out)memcpy(out->drops,drops,sizeof drops);
+}
+static void glass_rain_draw_drops(const RainDrop *frame_drops,uint16_t *pixels,int y,int height) {
     if(!pixels||y<0||height<0||y>RAIN_H||height>RAIN_H-y)return;
     // No extra background samples or rays: refraction only reads the already
     // shaded row. A row copy makes the result independent of strip boundaries
@@ -70,7 +70,7 @@ void glass_rain_draw(uint16_t *pixels,int y,int height) {
         int py=y+j;bool copied=false;
         uint16_t *row=pixels+j*RAIN_W;
         for(int i=0;i<RAIN_N;i++) {
-            const RainDrop *d=&drops[i];if(d->life<=0)continue;
+            const RainDrop *d=&frame_drops[i];if(d->life<=0)continue;
             int cy=(int)d->y,ry=d->radius+3;
             int tail=(int)fmaxf(d->start,d->y-35);
             if(py<tail-ry||py>cy+ry)continue;
@@ -105,4 +105,10 @@ void glass_rain_draw(uint16_t *pixels,int y,int height) {
             }
         }
     }
+}
+void glass_rain_draw_frame(const glass_rain_frame *frame,uint16_t *pixels,int y,int height) {
+    if(frame)glass_rain_draw_drops(frame->drops,pixels,y,height);
+}
+void glass_rain_draw(uint16_t *pixels,int y,int height) {
+    glass_rain_draw_drops(drops,pixels,y,height);
 }

@@ -4,11 +4,21 @@
 #include "ocean.h"
 #include "solar_sail.h"
 #include "flower.h"
+#ifdef KASANE_FLOWER_D1_PROBE
+#include "flower_d1_species_probe.h"
+#include "flower_d1_pressure_probe.h"
+#endif
 #include "menu_rows.h"
 #include "overlay.h"
 #include "pet_hub.h"
 #include "pocket_kasane.h"
 #include "app_session.h"
+#ifdef KASANE_D2_OVERLAY_PROC_PROBE
+#include "pocket_proc.h"
+static bool d2_overlay_fault_injected;
+static bool d2_overlay_retry;
+static int d2_overlay_sends_before_failure=-1;
+#endif
 #ifdef KASANE_P5_NOTICE_PROBE
 #include "system/sys_device.h"
 #endif
@@ -28,6 +38,11 @@
 #include "esp_timer.h"
 #include "esp_cpu.h"
 #include "esp_log.h"
+#if defined(KASANE_FLOWER_FRAME_PROBE) || defined(KASANE_FLOWER_AUDIO_PROBE) || \
+    defined(KASANE_FLOWER_D1_PROBE) || \
+    defined(KASANE_D6_SD_AV_STREAM_PROBE)
+#include "esp_heap_caps.h"
+#endif
 #ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
 #include <stdatomic.h>
 #ifdef KASANE_P5_SEND_PHASE_PROBE
@@ -77,6 +92,56 @@ static void shell_lowheap_service(void) {
 static uint16_t *strip;
 static int strip_y, strip_h;
 static unsigned mode;
+#ifndef KASANE_FLOWER_FRAME_PROBE
+/* Keep the committed scene until the candidate has been fully presented. */
+static flower_frame *flower_scene_frames[2];
+static glass_rain_frame flower_scene_rain[2];
+static unsigned flower_scene_committed;
+static bool flower_scene_candidate,flower_scene_retry;
+static bool flower_scene_has_committed,flower_scene_use_committed;
+#ifdef KASANE_FLOWER_D1_PROBE
+static bool flower_d1_species_running,flower_d1_pressure_tried;
+static bool flower_d1_pressure_active,flower_d1_recovery_pending;
+static uint32_t flower_d1_before_hash;
+#endif
+#ifdef KASANE_FLOWER_ALLOC_FAULT_PROBE
+static unsigned flower_scene_fault_frames;
+#endif
+static void flower_scene_release(void) {
+#ifdef KASANE_FLOWER_D1_PROBE
+    flower_d1_pressure_end();
+    flower_d1_pressure_active=false;
+    flower_d1_recovery_pending=false;
+#endif
+    for(unsigned i=0;i<2;i++) {
+        flower_frame_destroy(flower_scene_frames[i]);
+        flower_scene_frames[i]=NULL;
+    }
+    flower_scene_candidate=flower_scene_retry=false;
+    flower_scene_has_committed=flower_scene_use_committed=false;
+#ifdef KASANE_FLOWER_ALLOC_FAULT_PROBE
+    flower_scene_fault_frames=0;
+#endif
+}
+#endif
+#ifdef KASANE_FLOWER_FRAME_PROBE
+static flower_frame *flower_probe_frames[2];
+static unsigned flower_probe_current;
+static bool flower_probe_valid;
+static bool flower_probe_arm;
+static unsigned flower_probe_windows;
+static uint64_t flower_probe_capture_us;
+static unsigned flower_probe_captures;
+static uint32_t flower_probe_min_free=UINT32_MAX;
+static uint32_t flower_probe_min_largest=UINT32_MAX;
+static void flower_probe_release(void) {
+    for(unsigned i=0;i<2;i++) {
+        flower_frame_destroy(flower_probe_frames[i]);
+        flower_probe_frames[i]=NULL;
+    }
+    flower_probe_valid=false;
+}
+#endif
 // The backgrounds. See scene_ops_t in scene/scene.h for why this is a table.
 // FLOWER MESH used to sit after FLOWER RAY and drew the same flower from a
 // stored vertex mesh. The mesh cost 17,472 bytes of .bss for the whole life of
@@ -147,6 +212,12 @@ static uint64_t hud_fmt_cy,hud_ovl_cy,hud_fps_cy,hud_menu_cy;
 #define HUD_FENCE __asm__ __volatile__("":::"memory")
 static uint64_t draw_sum;
 static float fps;
+#ifdef KASANE_FLOWER_AUDIO_PROBE
+static uint32_t flower_audio_min_free=UINT32_MAX;
+static uint32_t flower_audio_min_largest=UINT32_MAX;
+static unsigned flower_audio_windows;
+static bool flower_audio_active;
+#endif
 static unsigned category,setting,app;
 // APPEND to this table; do not insert. tools/capture_home.py and
 // tools/test_settings.py both leave this list for the settings category before
@@ -154,11 +225,14 @@ static unsigned category,setting,app;
 // does -- capture_home.py line 80 says as much about POCKET PET. A row in the
 // MIDDLE would renumber shell_app(), and with it main.c's switch, silently.
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
-                          "IMU CALIBRATION","POCKET PET","PET COMPANION","STRESS TEST"};
+                          "IMU CALIBRATION","POCKET PET","PET COMPANION","STRESS TEST",
+                          "MEGADEMO","GRID LAB","VIDEO LAB"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
-                                  "AI USAGE / ALARM / TIMER","HEAP CHURN + DRAWING LOAD"};
+                                  "AI USAGE / ALARM / TIMER","HEAP CHURN + DRAWING LOAD",
+                                  "PROCEDURAL 3D / GLITCH","TYPED GRID / AUTO PIE",
+                                  "RGB565 STREAM / UI"};
 // AUDIO STREAM / OPUS STREAM / OPUS + WI-FI / MP3 PLAYBACK used to be appended
 // here (apps/streamplay, apps/opusplay, apps/opusfit, apps/mp3play) -- dev/test
 // apps for the MP3 and Opus decoders, removed once those decoders were verified
@@ -169,7 +243,8 @@ static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL"
 // rows that open a host screen. Only for the paused mark: a kept app's row
 // shows it (docs/vm/app-suspend-design.md sec.8-4). Same order as apps[].
 static const char *const app_ids[]={"local.hello",NULL,NULL,NULL,"local.imucal",
-                                    "local.pet","local.companion","local.stress"};
+                                    "local.pet","local.companion","local.stress",
+                                    "local.megademo","local.gridlab","local.videolab"};
 _Static_assert(sizeof app_ids/sizeof app_ids[0]==APP_N,"app_ids follows apps[]");
 static float app_pos;
 unsigned shell_app(void) { return app; }
@@ -406,7 +481,17 @@ bool shell_key(board_key_t key) {
 }
 void shell_change_background(int direction) {
     mode=(unsigned)(((int)mode+(int)BACKGROUND_N+direction)%(int)BACKGROUND_N);
+#ifdef KASANE_FLOWER_FRAME_PROBE
+    if(mode!=3)flower_probe_release();
+    flower_probe_arm=false;flower_probe_windows=0;
+#else
+    if(mode!=3)flower_scene_release();
+#endif
     window_start=0;samples=0;max_us=0;draw_sum=0;fps=0;
+#ifdef KASANE_FLOWER_AUDIO_PROBE
+    flower_audio_min_free=flower_audio_min_largest=UINT32_MAX;
+    flower_audio_windows=0;flower_audio_active=false;
+#endif
     present_sum=prep_sum=loop_sum=hud_sum=0;
     hud_fmt_cy=hud_ovl_cy=hud_fps_cy=hud_menu_cy=0;
     ESP_LOGI("background","MODE %u %s",mode,scene()->name);
@@ -565,6 +650,7 @@ static void menu_layout(void) {
 // to be computed here and read by wave and ocean is gone with them.
 // ---------------------------------------------------------------------------
 static int64_t frame_started;
+static glass_rain_frame flower_rain_frame;
 
 static void solar_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
     (void)variant;
@@ -572,8 +658,88 @@ static void solar_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
 }
 static void flower_scene_prepare(float dt,int tilt_x,int tilt_y,unsigned variant) {
     (void)variant;
+#ifndef KASANE_FLOWER_FRAME_PROBE
+    if(flower_scene_retry)return;
+#endif
+#ifdef KASANE_FLOWER_FRAME_PROBE
+    /* Stabilize the visual workload after the first two-second warm-up.
+     * The A/B still alternates in one binary while the scene clock is held. */
+    if(flower_probe_windows>=1)dt=0;
+#endif
+#ifdef KASANE_FLOWER_D1_PROBE
+    flower_d1_species_running=flower_d1_species_prepare();
+    if(!flower_d1_species_running)flower_prepare_rotating(dt,tilt_x,tilt_y);
+#else
     flower_prepare_rotating(dt,tilt_x,tilt_y);
+#endif
+#ifdef KASANE_FLOWER_FRAME_PROBE
+    flower_probe_valid=false;
+    if(flower_probe_arm) {
+        unsigned next=flower_probe_current^1u;
+        if(!flower_probe_frames[next])flower_probe_frames[next]=flower_frame_create();
+        int64_t capture_start=esp_timer_get_time();
+        flower_probe_valid=flower_probe_frames[next] &&
+            flower_frame_capture(flower_probe_frames[next]);
+        flower_probe_capture_us+=(uint64_t)(esp_timer_get_time()-capture_start);
+        flower_probe_captures++;
+        flower_probe_current=next;
+    }
+    uint32_t free_bytes=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    uint32_t largest=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    if(free_bytes<flower_probe_min_free)flower_probe_min_free=free_bytes;
+    if(largest<flower_probe_min_largest)flower_probe_min_largest=largest;
+#endif
     glass_rain_prepare(dt,(uint32_t)frame_started);
+    glass_rain_capture(&flower_rain_frame);
+#ifndef KASANE_FLOWER_FRAME_PROBE
+    unsigned next=flower_scene_committed^1u;
+#ifdef KASANE_FLOWER_D1_PROBE
+    if(!flower_d1_species_running&&!flower_d1_pressure_tried&&
+       flower_scene_has_committed&&flower_scene_frames[flower_scene_committed]) {
+        flower_d1_pressure_tried=true;
+        flower_frame_destroy(flower_scene_frames[next]);
+        flower_scene_frames[next]=NULL;
+        flower_d1_before_hash=flower_d1_committed_hash(
+            flower_scene_frames[flower_scene_committed],
+            &flower_scene_rain[flower_scene_committed]);
+        size_t required=flower_d1_candidate_allocation_bytes();
+        flower_d1_pressure_active=flower_d1_pressure_begin(required);
+    }
+#endif
+#ifdef KASANE_FLOWER_ALLOC_FAULT_PROBE
+    bool forced_failure=flower_scene_has_committed&&
+        (++flower_scene_fault_frames%120u)==0u;
+    if(forced_failure){
+        flower_frame_destroy(flower_scene_frames[next]);
+        flower_scene_frames[next]=NULL;
+    }
+#else
+    bool forced_failure=false;
+#endif
+    if(!forced_failure&&!flower_scene_frames[next])
+        flower_scene_frames[next]=flower_frame_create();
+    flower_scene_candidate=flower_scene_frames[next]&&
+        flower_frame_capture(flower_scene_frames[next]);
+    if(flower_scene_candidate)flower_scene_rain[next]=flower_rain_frame;
+    /* An allocation failure pauses on the last complete frame. The live
+     * prepare state is never used to repair a partially transferred frame. */
+    flower_scene_use_committed=!flower_scene_candidate&&flower_scene_has_committed;
+#ifdef KASANE_FLOWER_D1_PROBE
+    if(flower_d1_pressure_active) {
+        ESP_LOGI("FLOWER_D1_ALLOC","ATTEMPT candidate=%u committed=%u fallback=%u free=%lu largest=%lu",
+                 (unsigned)flower_scene_candidate,(unsigned)flower_scene_has_committed,
+                 (unsigned)flower_scene_use_committed,
+                 (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    }
+#endif
+#ifdef KASANE_FLOWER_ALLOC_FAULT_PROBE
+    if(forced_failure)ESP_LOGI("FLOWER_ALLOC_FAULT",
+        "injected=1 candidate=%u committed=%u fallback=%u",
+        (unsigned)flower_scene_candidate,(unsigned)flower_scene_has_committed,
+        (unsigned)flower_scene_use_committed);
+#endif
+#endif
 }
 static uint32_t solar_scene_draw(uint16_t *s,int y,int height) {
     // No inline assembly in this one: its cost is ordinary C and belongs in
@@ -583,8 +749,26 @@ static uint32_t solar_scene_draw(uint16_t *s,int y,int height) {
 }
 static uint32_t flower_scene_draw(uint16_t *s,int y,int height) {
     uint32_t c0=esp_cpu_get_cycle_count();
+#ifdef KASANE_FLOWER_FRAME_PROBE
+    if(flower_probe_valid)
+        flower_frame_draw(flower_probe_frames[flower_probe_current],s,y,height);
+    else
+#else
+    if(flower_scene_candidate)
+        flower_frame_draw(flower_scene_frames[flower_scene_committed^1u],s,y,height);
+    else if(flower_scene_use_committed)
+        flower_frame_draw(flower_scene_frames[flower_scene_committed],s,y,height);
+    else
+#endif
     flower_draw(s,y,height);
-    glass_rain_draw(s,y,height);
+#ifndef KASANE_FLOWER_FRAME_PROBE
+    if(flower_scene_candidate)
+        glass_rain_draw_frame(&flower_scene_rain[flower_scene_committed^1u],s,y,height);
+    else if(flower_scene_use_committed)
+        glass_rain_draw_frame(&flower_scene_rain[flower_scene_committed],s,y,height);
+    else
+#endif
+    glass_rain_draw_frame(&flower_rain_frame,s,y,height);
     return esp_cpu_get_cycle_count()-c0;
 }
 static void solar_labels(uint16_t *s,int y,int height) {
@@ -622,6 +806,21 @@ static ksn_result shell_overlay_backdrop(void *opaque,uint16_t y,uint16_t rows,
 }
 static ksn_result shell_overlay_send(void *opaque,uint16_t y,uint16_t rows,
                                      const uint16_t *pixels) {
+#ifdef KASANE_D2_OVERLAY_PROC_PROBE
+    if(!d2_overlay_fault_injected&&pocket_proc_pending()) {
+        if(d2_overlay_sends_before_failure<0) {
+            d2_overlay_sends_before_failure=3;
+            ESP_LOGI("D2_OVERLAY","ARMED pending=1 after=3");
+        }
+        if(d2_overlay_sends_before_failure--==0) {
+            d2_overlay_fault_injected=true;
+            d2_overlay_retry=true;
+            ESP_LOGW("D2_OVERLAY","FAIL pending=1 y=%u rows=%u",
+                     (unsigned)y,(unsigned)rows);
+            return KSN_IO;
+        }
+    }
+#endif
 #ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
     if(overlay_repair_stage==1&&overlay_repair_remaining--==0) {
         overlay_repair_stage=2;
@@ -668,6 +867,13 @@ void shell_draw(const char *error, unsigned phase) {
     shell_lowheap_service();
 #endif
     strip=board_strip();
+#ifdef KASANE_D2_OVERLAY_PROC_PROBE
+    if(!overlay_kasane_active()) {
+        d2_overlay_fault_injected=false;
+        d2_overlay_retry=false;
+        d2_overlay_sends_before_failure=-1;
+    }
+#endif
 #ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
     if(!overlay_kasane_active()) {
 #ifdef KASANE_P5_SEND_PHASE_PROBE
@@ -710,6 +916,9 @@ void shell_draw(const char *error, unsigned phase) {
 #endif
     int64_t started=esp_timer_get_time();
     unsigned present_us=0, loop_us=0, hud_us=0;
+#ifndef KASANE_FLOWER_FRAME_PROBE
+    bool flower_scene_presented=true;
+#endif
 #ifdef KASANE_P5_NOTICE_PROBE
     uint32_t p5_bytes=0,p5_comp_us=0;
     unsigned p5_bands=0;
@@ -764,6 +973,21 @@ void shell_draw(const char *error, unsigned phase) {
         int64_t composite_began=esp_timer_get_time();
         ksn_result result=overlay_kasane_present(&port,shell_overlay_backdrop,
                                                   host_top_dynamic,&stats);
+#ifdef KASANE_D2_OVERLAY_PROC_PROBE
+        if(d2_overlay_fault_injected) {
+            ESP_LOGI("D2_OVERLAY","PRESENT result=%u bytes=%u pending=%u flower_mode=%u",
+                     (unsigned)result,(unsigned)stats.transferred_bytes,
+                     (unsigned)pocket_proc_pending(),(unsigned)(mode==3));
+            if(d2_overlay_retry&&result==KSN_OK&&stats.bands) {
+                ESP_LOGI("D2_OVERLAY","RETRY_OK bytes=%u",
+                         (unsigned)stats.transferred_bytes);
+                d2_overlay_retry=false;
+            }
+        }
+#endif
+#ifndef KASANE_FLOWER_FRAME_PROBE
+        flower_scene_presented=result==KSN_OK;
+#endif
 #ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
         if(overlay_repair_stage==2&&result==KSN_OK&&stats.bands) {
             ESP_LOGI("KSN_P5_REPAIR","REPAIR_OK bands=%u bytes=%u",
@@ -821,6 +1045,55 @@ void shell_draw(const char *error, unsigned phase) {
         ESP_ERROR_CHECK(board_present(strip_y,strip_h,strip));
         present_us+=(unsigned)(esp_timer_get_time()-sent);
     }
+#ifndef KASANE_FLOWER_FRAME_PROBE
+    if(mode==3) {
+        if(flower_scene_presented) {
+#ifdef KASANE_FLOWER_D1_PROBE
+            bool d1_candidate=flower_scene_candidate;
+            bool d1_fallback=flower_scene_use_committed;
+#endif
+            if(flower_scene_candidate) {
+                flower_scene_committed^=1u;
+                flower_scene_has_committed=true;
+            }
+#ifdef KASANE_FLOWER_D1_PROBE
+            if(flower_d1_pressure_active) {
+                uint32_t after=flower_d1_committed_hash(
+                    flower_scene_frames[flower_scene_committed],
+                    &flower_scene_rain[flower_scene_committed]);
+                ESP_LOGI("FLOWER_D1_ALLOC",
+                         "PRESSURE ready=1 candidate=%u committed=%u fallback=%u before=%08lx after=%08lx",
+                         (unsigned)d1_candidate,(unsigned)flower_scene_has_committed,
+                         (unsigned)d1_fallback,(unsigned long)flower_d1_before_hash,
+                         (unsigned long)after);
+                flower_d1_pressure_end();
+                flower_d1_pressure_active=false;
+                flower_d1_recovery_pending=true;
+            } else if(flower_d1_recovery_pending) {
+                uint32_t hash=flower_d1_committed_hash(
+                    flower_scene_frames[flower_scene_committed],
+                    &flower_scene_rain[flower_scene_committed]);
+                ESP_LOGI("FLOWER_D1_ALLOC",
+                         "RECOVERY candidate=%u committed=%u hash=%08lx",
+                         (unsigned)d1_candidate,(unsigned)flower_scene_has_committed,
+                         (unsigned long)hash);
+                flower_d1_recovery_pending=false;
+            }
+#endif
+            flower_scene_candidate=false;
+            flower_scene_retry=false;
+        } else {
+            flower_scene_retry=true;
+#ifdef KASANE_FLOWER_D1_PROBE
+            if(flower_d1_pressure_active) {
+                flower_d1_pressure_end();
+                flower_d1_pressure_active=false;
+                ESP_LOGE("FLOWER_D1_ALLOC","PRESENT_FAILED");
+            }
+#endif
+        }
+    }
+#endif
     unsigned elapsed=(unsigned)(esp_timer_get_time()-started);
     if(overlay_kasane_active()&&!board_capture_active()){
         ksn_p0_probe_sample(KSN_P0_OVERLAY_DRAW,elapsed);
@@ -855,6 +1128,14 @@ void shell_draw(const char *error, unsigned phase) {
     if(bus_trace)ksn_p0_bus_end_frame(present_us);
 #endif
     if(!window_start)window_start=started;
+#ifdef KASANE_FLOWER_AUDIO_PROBE
+    if(mode==3){
+        uint32_t free_now=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+        uint32_t largest_now=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+        if(free_now<flower_audio_min_free)flower_audio_min_free=free_now;
+        if(largest_now<flower_audio_min_largest)flower_audio_min_largest=largest_now;
+    }
+#endif
     samples++;draw_sum+=elapsed;present_sum+=present_us;
     prep_sum+=(unsigned)(after_prep-started);loop_sum+=loop_us;hud_sum+=hud_us;
     if(elapsed>max_us)max_us=elapsed;
@@ -877,6 +1158,39 @@ void shell_draw(const char *error, unsigned phase) {
             (double)hud_ovl_cy/samples/240000.0,(double)hud_fmt_cy/samples/240000.0,
             (double)hud_fps_cy/samples/240000.0,(double)hud_menu_cy/samples/240000.0,
             (double)present_sum/samples/1000.0);
+#ifdef KASANE_D6_SD_AV_STREAM_PROBE
+        if(mode==3) ESP_LOGI("D6_AV","HEAP free=%u largest=%u",
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+#endif
+#ifdef KASANE_FLOWER_AUDIO_PROBE
+        if(mode==3){
+            ESP_LOGI("FLOWER_AUDIO_PROBE",
+                "tone=%u available=%u free_min=%u largest_min=%u frames=%u",
+                (unsigned)flower_audio_active,(unsigned)sound_available(),
+                (unsigned)flower_audio_min_free,(unsigned)flower_audio_min_largest,
+                samples);
+            flower_audio_min_free=flower_audio_min_largest=UINT32_MAX;
+            flower_audio_active=(++flower_audio_windows%2u)!=0u;
+            if(flower_audio_active){
+                int32_t id=sound_tone(440,1900,0.12f,NULL,NULL);
+                ESP_LOGI("FLOWER_AUDIO_PROBE","tone_request=%ld",(long)id);
+            }
+        }
+#endif
+#ifdef KASANE_FLOWER_FRAME_PROBE
+        if(mode==3)ESP_LOGI("FLOWER_FRAME_PROBE",
+            "arm=%u captures=%u capture_us=%.1f old_bytes=%u current_bytes=%u min_free=%u min_largest=%u valid=%u",
+            (unsigned)flower_probe_arm,flower_probe_captures,
+            flower_probe_captures?(double)flower_probe_capture_us/flower_probe_captures:0.0,
+            (unsigned)flower_frame_bytes(flower_probe_frames[flower_probe_current^1u]),
+            (unsigned)flower_frame_bytes(flower_probe_frames[flower_probe_current]),
+            (unsigned)flower_probe_min_free,(unsigned)flower_probe_min_largest,
+            (unsigned)flower_probe_valid);
+        flower_probe_capture_us=0;flower_probe_captures=0;
+        flower_probe_min_free=flower_probe_min_largest=UINT32_MAX;
+        if(mode==3)flower_probe_arm=(++flower_probe_windows/2u)&1u;
+#endif
 #ifndef SCENE_AB
 #define SCENE_AB 0
 #endif

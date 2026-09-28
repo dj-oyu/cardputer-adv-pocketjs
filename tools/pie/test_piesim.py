@@ -127,6 +127,14 @@ class DecorInstructions(unittest.TestCase):
     move the constant into the wrong place rather than fail.
     """
 
+    def test_mov_s16_qacc_sign_extends_and_replaces_the_whole_accumulator(self):
+        mem = bytearray(0x100)
+        store16(mem, 0x80, [0x8000, 0x7FFF, 0xFFFF, 0, 1, 2, 3, 0x1234])
+        sim = Sim(mem)
+        sim.qacc = [123456789] * 8
+        sim.run('ee.vld.128.ip q0, a3, 0\nee.mov.s16.qacc q0\n', {'a3': 0x80})
+        self.assertEqual(sim.qacc, [-32768, 32767, -1, 0, 1, 2, 3, 0x1234])
+
     def test_mov_u16_qacc_zero_extends_and_replaces_the_whole_accumulator(self):
         mem = bytearray(0x100)
         # 0x8000 is -32768 signed and 32768 unsigned: the lane that tells the

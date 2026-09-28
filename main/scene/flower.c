@@ -4,6 +4,7 @@
 #include "../pocket/random_stream.h"
 #include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 // TEMPORARY (goes with the PIE kernel). The previous version of this counter
@@ -2124,4 +2125,108 @@ void flower_draw(uint16_t *pixels,int y,int height) {
         prof_horror=prof_horrorn=0;
     }
 #endif
+}
+
+/* A lease copies the prepared scene, not the pixels. The fast row kernels still
+ * run unchanged; only their frame inputs are installed for the duration of an
+ * owner-task draw. The mutable depth row is supplied separately on the stack. */
+typedef struct {
+    unsigned parts, grain_frame, garden_old_seed, garden_mix;
+    float time, camera_scale, camera_inverse, camera_x, camera_y, fade;
+    int grain_top, grain_b1, grain_b2;
+    float slopes[LAT], offsets[LAT], lo[LAT], hi[LAT], rmax2;
+#if FLOWER_HORROR
+    uint8_t horror_level;
+#endif
+} flower_frame_state;
+
+struct flower_frame {
+    flower_frame_state state;
+    void *raw;
+    size_t capacity;
+    bool ready;
+};
+
+static uint8_t *flower_frame_scene(const flower_frame *frame) {
+    uintptr_t address=(uintptr_t)frame->raw;
+    return (uint8_t *)((address+15u)&~(uintptr_t)15u);
+}
+
+static flower_frame_state flower_frame_current(void) {
+    flower_frame_state state={
+        .parts=count,.grain_frame=grain_frame,
+        .garden_old_seed=bloom_garden_old_seed,.garden_mix=bloom_garden_mix,
+        .time=elapsed,.camera_scale=cam_s,.camera_inverse=cam_inv,
+        .camera_x=cam_x,.camera_y=cam_y,.fade=bloom_fade,
+        .grain_top=grain_top,.grain_b1=grain_b1,.grain_b2=grain_b2,
+        .rmax2=bell_rmax2
+    };
+    memcpy(state.slopes,bell_slopes,sizeof state.slopes);
+    memcpy(state.offsets,bell_offsets,sizeof state.offsets);
+    memcpy(state.lo,bell_lo,sizeof state.lo);
+    memcpy(state.hi,bell_hi,sizeof state.hi);
+#if FLOWER_HORROR
+    state.horror_level=horror_level;
+#endif
+    return state;
+}
+
+static void flower_frame_install(const flower_frame_state *state) {
+    count=state->parts;grain_frame=state->grain_frame;
+    bloom_garden_old_seed=state->garden_old_seed;
+    bloom_garden_mix=state->garden_mix;
+    elapsed=state->time;cam_s=state->camera_scale;
+    cam_inv=state->camera_inverse;cam_x=state->camera_x;
+    cam_y=state->camera_y;bloom_fade=state->fade;
+    grain_top=state->grain_top;grain_b1=state->grain_b1;
+    grain_b2=state->grain_b2;bell_rmax2=state->rmax2;
+    memcpy(bell_slopes,state->slopes,sizeof bell_slopes);
+    memcpy(bell_offsets,state->offsets,sizeof bell_offsets);
+    memcpy(bell_lo,state->lo,sizeof bell_lo);
+    memcpy(bell_hi,state->hi,sizeof bell_hi);
+#if FLOWER_HORROR
+    horror_level=state->horror_level;
+#endif
+}
+
+flower_frame *flower_frame_create(void) { return calloc(1,sizeof(flower_frame)); }
+void flower_frame_destroy(flower_frame *frame) {
+    if(frame) { free(frame->raw);free(frame); }
+}
+size_t flower_frame_bytes(const flower_frame *frame) {
+    return frame?sizeof *frame+frame->capacity:0;
+}
+
+bool flower_frame_capture(flower_frame *frame) {
+    if(!frame||!petals||!depth||!seed_map||count>MAX_PARTS)return false;
+    size_t parts_bytes=(size_t)count*sizeof(Petal);
+    size_t needed=parts_bytes+32u*32u+sizeof(GardenFrame)+15u;
+    if(needed>frame->capacity) {
+        void *grown=realloc(frame->raw,needed);
+        if(!grown)return false;
+        frame->raw=grown;frame->capacity=needed;
+    }
+    uint8_t *scene=flower_frame_scene(frame);
+    frame->state=flower_frame_current();
+    memcpy(scene,petals,parts_bytes);
+    memcpy(scene+parts_bytes,seed_map,32u*32u+sizeof(GardenFrame));
+    frame->ready=true;
+    return true;
+}
+
+void flower_frame_draw(const flower_frame *frame,uint16_t *pixels,int y,int height) {
+    if(!frame||!frame->ready||!pixels||y<0||height<0||y>H||height>H-y)return;
+    flower_frame_state restore=flower_frame_current();
+    Petal *old_petals=petals;
+    float *old_depth=depth;
+    uint8_t *old_seed_map=seed_map;
+    float row_depth[FW];
+    uint8_t *scene=flower_frame_scene(frame);
+    flower_frame_install(&frame->state);
+    petals=(Petal *)scene;
+    depth=row_depth;
+    seed_map=scene+(size_t)frame->state.parts*sizeof(Petal);
+    flower_draw(pixels,y,height);
+    petals=old_petals;depth=old_depth;seed_map=old_seed_map;
+    flower_frame_install(&restore);
 }

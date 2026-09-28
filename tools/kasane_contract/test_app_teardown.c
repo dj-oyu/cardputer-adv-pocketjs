@@ -41,7 +41,7 @@ int main(void){
         d.data.shape.color=0x00ff00ff;
         CHECK(ksn_view_cache_create(sys,&d,1,&s)==KSN_OK);
         CHECK(ksn_view_cache_create(app,&d,1,&a2)==KSN_OK);
-        ksn_image_port image={NULL,1,1,1,1,image_span};ksn_resource ar,sr;
+        ksn_image_port image={NULL,1,1,1,1,image_span,false};ksn_resource ar,sr;
         CHECK(ksn_core_register_image(&core,KSN_APP,&image,&ar)==KSN_OK);
         CHECK(ksn_core_register_image(&core,KSN_SYSTEM,&image,&sr)==KSN_OK);
         ksn_placement p={0,0,{0,0,240,135},255,true};
@@ -78,6 +78,9 @@ int main(void){
             CHECK(core.state.repairing);fail_band=-1;
         }
         CHECK(ksn_view_host_reset_app(&host)==KSN_OK);
+        ksn_image_port retained;
+        CHECK(ksn_core_image_port(&core,KSN_APP,ar,&retained)==KSN_STALE);
+        CHECK(ksn_core_image_port(&core,KSN_SYSTEM,sr,&retained)==KSN_OK);
         CHECK(ksn_core_active_usage(&core,KSN_APP).commands==0);
         CHECK(ksn_core_submission_usage(&core,KSN_APP).commands==0);
         CHECK(host.modal.phase==KSN_MODAL_CLOSED&&host.modal.focus==0);
@@ -103,9 +106,13 @@ int main(void){
         /* Repeated exits reclaim the same quotas without resetting SYSTEM. */
         for(unsigned i=0;i<100;i++){
             CHECK(ksn_view_cache_create(app,&d,1,&a)==KSN_OK);
+            ksn_resource former=ar;
             CHECK(ksn_core_register_image(&core,KSN_APP,&image,&ar)==KSN_OK);
+            CHECK(ar.value!=former.value);
             CHECK(ksn_view_host_reset_app(&host)==KSN_OK);
             CHECK(ksn_cache_get_stats(&cache).templates==1&&core.state.image_count==1);
+            CHECK(ksn_core_image_port(&core,KSN_APP,ar,&retained)==KSN_STALE);
+            CHECK(ksn_core_image_port(&core,KSN_SYSTEM,sr,&retained)==KSN_OK);
         }
     }
     puts("APP teardown: PASS (SYSTEM committed/building/submitted, modal/cache/images, partial IO, reentry, 100 resets)");

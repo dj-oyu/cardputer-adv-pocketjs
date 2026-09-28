@@ -74,7 +74,11 @@ static void test_admission(void) {
     const app_manifest_t *cal=app_registry_find("local.imucal");
     const app_manifest_t *play=app_registry_find("local.playground");
     const app_manifest_t *hello=app_registry_find("local.hello");
+    const app_manifest_t *megademo=app_registry_find("local.megademo");
     CHECK(hello&&hello->runtime==APP_RUNTIME_POCKET);
+    CHECK(megademo && !strcmp(megademo->title,"MEGADEMO"));
+    CHECK(megademo && !strcmp(megademo->entry,"apps/kasane/proc_megademo.js"));
+    CHECK(megademo && megademo->works==APP_WORKS_NONE);
     missing="display.kasane";
     CHECK(!app_registry_admit(hello,"0.1.0",supported,NULL,reason,sizeof reason));
     CHECK(!strcmp(reason,"NEEDS display.kasane"));
@@ -104,6 +108,11 @@ static void test_admission(void) {
     CHECK(!app_registry_admit(play,"0.2.0",supported,NULL,reason,sizeof reason));
     CHECK(!strncmp(reason,"NEEDS API",9));
     CHECK(app_registry_admit(play,"0.1.0",supported,NULL,reason,sizeof reason));
+    CHECK(app_registry_admit(megademo,"0.1.0",supported,NULL,reason,sizeof reason));
+    missing="display.kasane";
+    CHECK(!app_registry_admit(megademo,"0.1.0",supported,NULL,reason,sizeof reason));
+    CHECK(!strcmp(reason,"NEEDS display.kasane"));
+    missing=NULL;
 
     // No manifest is not a refusal: a host that has not registered anything
     // still starts what it is asked to.
@@ -112,6 +121,8 @@ static void test_admission(void) {
     // Selection falls back rather than inheriting the last session's identity.
     app_registry_select("local.pet");
     CHECK(!strcmp(app_registry_current()->id,"local.pet"));
+    app_registry_select("local.megademo");
+    CHECK(!strcmp(app_registry_current()->id,"local.megademo"));
     app_registry_select("local.nothing");
     CHECK(!strcmp(app_registry_current()->id,APP_ID_DEFAULT));
     app_registry_select(NULL);

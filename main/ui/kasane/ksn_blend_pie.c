@@ -385,7 +385,7 @@ static void ksn_blend8_lane_dither(uint16_t *pixels,int blocks,const int16_t *ar
 /* The device kernel: two entry points, one asm block each. The dispatcher below
  * picks by the threshold pointer. Nothing here runs on a host build. */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(KSN_PROC_HOST_TEST)
 #define KSN_BLEND_PIE_ASM 1
 #else
 #define KSN_BLEND_PIE_ASM 0
