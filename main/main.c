@@ -53,6 +53,10 @@ static atomic_bool fpu_probe_requested;
 static atomic_bool proc_probe_requested;
 void ksn_proc_device_probe_run(void);
 #endif
+#ifdef KASANE_PROC_LIMITS_PROBE
+#include "ksn_proc_limits_device_probe.h"
+static atomic_bool limits_probe_requested;
+#endif
 #ifdef KASANE_MEGADEMO_DEVICE_PROBE
 static atomic_bool megademo_probe_requested;
 void ksn_megademo_device_probe_run(void);
@@ -154,6 +158,12 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #endif
 #ifdef KASANE_MEGADEMO_DEVICE_PROBE
     if(c=='`') { atomic_store(&megademo_probe_requested,true); return false; }
+#endif
+#ifdef KASANE_PROC_LIMITS_PROBE
+    /* Ahead of P2's '{'/'}' navigation aliases; the two probes are not built
+     * together. '{' measures natively at HOME, '}' starts the JS lifecycle app. */
+    if(c=='{') { atomic_store(&limits_probe_requested,true); return false; }
+    if(c=='}') { atomic_store(&diagnostic,c); return false; }
 #endif
     memset(k,0,sizeof(*k));
     if(atomic_load(&text_screen)) {
@@ -890,6 +900,12 @@ static void ui_task(void *arg) {
 #ifdef KASANE_MEGADEMO_DEVICE_PROBE
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&megademo_probe_requested,false)){
             ksn_megademo_device_probe_run();
+            ESP_LOGI("shell","HOME_READY");
+        }
+#endif
+#ifdef KASANE_PROC_LIMITS_PROBE
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&limits_probe_requested,false)){
+            ksn_proc_limits_device_probe_run();
             ESP_LOGI("shell","HOME_READY");
         }
 #endif

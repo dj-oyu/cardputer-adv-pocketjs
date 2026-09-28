@@ -40,6 +40,10 @@
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
 #include "pocket_proc.h"
 #endif
+#ifdef KASANE_PROC_LIMITS_PROBE
+#include "ksn_proc_limits_device_probe.h"
+extern const char proc_limits_probe_start[] asm("_binary_proc_limits_probe_js_start");
+#endif
 #include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_input.h"
 #include "ksn_font.h"
@@ -1195,6 +1199,12 @@ source_ready:;
     // USB-only diagnostics exercise the same lifecycle and resource limits.
     switch(test) {
         case 'J': source=proc_megademo_start; break;
+#ifdef KASANE_PROC_LIMITS_PROBE
+        case '}': source=proc_limits_probe_start;
+                  TRY(pocketjs_guest_quickjs_install_once(guest,"limits",
+                                                          ksn_proc_limits_js_install,NULL));
+                  break;
+#endif
         case '(': source=proc_news_zoom_start;
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
                   news_prof_previous=g_ksn_prof;

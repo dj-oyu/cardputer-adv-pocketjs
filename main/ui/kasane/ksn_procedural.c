@@ -191,9 +191,19 @@ ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
     }
     default:return vm->status=KSN_PROC_INVALID;
     }
+#ifdef KASANE_PROC_LIMITS_PROBE
+    /* The instruction cache moves one kernel by ~15% between builds, so the
+     * old sweep is re-created here behind a runtime switch instead of being
+     * compared across two images. */
+    for(unsigned j=0;j<g_ksn_proc_sweep_regs;j++)
+        if(!isfinite(vm->reg[j]))return vm->status=KSN_PROC_INVALID;
+#endif
     if(vm->pc==vm->program->count){vm->frame->ready=true;return vm->status=KSN_PROC_DONE;}
     return vm->status;
 }
+#ifdef KASANE_PROC_LIMITS_PROBE
+uint8_t g_ksn_proc_sweep_regs;
+#endif
 ksn_proc_status ksn_proc_run(ksn_proc_vm *vm){
     ksn_proc_status s;
     do{s=ksn_proc_step(vm);}while(s==KSN_PROC_RUNNING);

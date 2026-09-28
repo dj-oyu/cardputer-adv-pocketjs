@@ -86,6 +86,12 @@ bool ksn_proc_capture_state(const ksn_proc_vm *vm,ksn_proc_state *state);
  * leaves the pen at the final control point. One debugger step covers the
  * entire bounded curve; the emitted segment/raster limits still apply. */
 ksn_proc_status ksn_proc_step(ksn_proc_vm *vm);
+#ifdef KASANE_PROC_LIMITS_PROBE
+/* Diagnostic build only: sweep registers 0..n-1 after every step, as the
+ * code before c53f661 did (8 then, 16 if it had been kept). 0 is the shipped
+ * behaviour. Exists so both variants are timed in one binary. */
+extern uint8_t g_ksn_proc_sweep_regs;
+#endif
 ksn_proc_status ksn_proc_run(ksn_proc_vm *vm);
 /* Replays only the requested rows over an existing RGB565 backdrop. */
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height);
