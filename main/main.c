@@ -159,6 +159,11 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #ifdef KASANE_MEGADEMO_DEVICE_PROBE
     if(c=='`') { atomic_store(&megademo_probe_requested,true); return false; }
 #endif
+#ifdef KASANE_MEGADEMO_TRACE
+    // Guest heap cap for the next app start (app_session.c MDT_LIMITS). Read
+    // only at start, so pressing it while an app runs changes nothing live.
+    if(c=='~') { extern void app_trace_next_heap_limit(void); app_trace_next_heap_limit(); return false; }
+#endif
 #ifdef KASANE_PROC_LIMITS_PROBE
     /* Ahead of P2's '{'/'}' navigation aliases; the two probes are not built
      * together. '{' measures natively at HOME, '}' starts the JS lifecycle app. */

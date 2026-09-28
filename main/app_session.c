@@ -220,6 +220,70 @@ static void run_pumps(uint32_t buttons);
 static unsigned frames;
 static double render_sum, present_sum, turn_sum;
 static unsigned painted, ticks;
+#ifdef KASANE_MEGADEMO_TRACE
+// One MDT line per host turn, printed at the top of the NEXT app_tick() so
+// that every return path of the turn is covered by one print site. KASANE_PAINT
+// averages 30 frames and cannot split a 96-frame scene by tier or show the
+// one slow frame of a scene switch; this can. kind: F frame(), Q a frame()
+// the VM parked, C a continuation that finished it, P one that parked again,
+// D a display-only turn (a retained ticket or repair). The print itself sits
+// between two turns and so lengthens the frame period, not a turn.
+static struct {
+    int64_t began;
+    char kind;
+    uint32_t js_us,render_us,send_us,bytes,bands,presents,btn,fed;
+} mdt;
+static unsigned mdt_seq;
+// '~' at HOME cycles the guest heap cap for the next start, to find how much
+// of the 160 KiB the app needs to evaluate and run (docs/kasane/
+// megademo-device-limits.md). 0 keeps the shipping value.
+static const uint32_t MDT_LIMITS[]={0,144*1024,136*1024,128*1024,124*1024,
+                                    120*1024,116*1024,112*1024};
+static unsigned mdt_limit_index;
+void app_trace_next_heap_limit(void){
+    mdt_limit_index=(mdt_limit_index+1)%(sizeof MDT_LIMITS/sizeof MDT_LIMITS[0]);
+    ESP_LOGI("app","MDT_LIMIT %u",(unsigned)(MDT_LIMITS[mdt_limit_index]?
+             MDT_LIMITS[mdt_limit_index]:160*1024));
+}
+static void mdt_emit(void) {
+    if(!mdt.kind) return;
+    pocket_proc_trace p;
+    pocket_proc_trace_take(&p);
+    // gu: the guest's malloc_size, the counter its 160 KiB limit is charged
+    // against (cheap, unlike the walk below).
+    size_t gu=0,gl=0;
+    if(guest) JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),&gu,&gl);
+    ESP_LOGI("app","MDT %u %c t=%lld js=%u rn=%u sd=%u by=%u bd=%u pr=%u "
+             "reg=%u/%u prep=%u/%u un=%u draw=%u/%u/%u band=%u/%u free=%u lg=%u k=%x/%x mn=%u gu=%u",
+             mdt_seq++,mdt.kind,(long long)mdt.began,(unsigned)mdt.js_us,
+             (unsigned)mdt.render_us,(unsigned)mdt.send_us,(unsigned)mdt.bytes,
+             (unsigned)mdt.bands,(unsigned)mdt.presents,
+             (unsigned)p.reg_n,(unsigned)p.reg_us,(unsigned)p.prep_us,(unsigned)p.prep_max_us,
+             (unsigned)p.unreg_n,(unsigned)p.draw_n,(unsigned)p.draw_us,(unsigned)p.draw_max_us,
+             (unsigned)p.band_n,(unsigned)(p.band_cy/240),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+             (unsigned)mdt.btn,(unsigned)mdt.fed,
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+             (unsigned)gu);
+    // mn is the lowest free heap inside this turn (and the print above), not
+    // since boot: a turn's transient peak is what an allocation meets, and
+    // the boundary values above miss it. Restarted every turn.
+    heap_caps_monitor_local_minimum_free_size_stop();
+    heap_caps_monitor_local_minimum_free_size_start();
+    // The guest's own size walks every object (JS_ComputeMemoryUsage), a
+    // cost too large for every turn; one in 64, timed, so the reader can
+    // drop the turn it lengthened.
+    if(guest && !(mdt_seq&63)) {
+        int64_t t0=esp_timer_get_time();
+        pocketjs_guest_stats_t stats={.struct_size=sizeof(stats)};
+        pocketjs_guest_stats(guest,&stats);
+        ESP_LOGI("app","MDTJ js=%u cost_us=%u",(unsigned)stats.heap_used,
+                 (unsigned)(esp_timer_get_time()-t0));
+    }
+    mdt=(typeof(mdt)){0};
+}
+#endif
 #ifndef KASANE_STRESS_GRAD_AB
 #define KASANE_STRESS_GRAD_AB 0
 #endif
@@ -1104,6 +1168,10 @@ esp_err_t app_start_test(char test) {
     // 48. See NET_RADIO_MIN_FREE in pocket_net.c. The fix is ordering, not a
     // smaller cap for everyone -- most apps never touch the radio.
     gc.heap_limit=160*1024; gc.stack_limit=20*1024; gc.prefer_psram=false;
+#ifdef KASANE_MEGADEMO_TRACE
+    if(MDT_LIMITS[mdt_limit_index]) gc.heap_limit=MDT_LIMITS[mdt_limit_index];
+    mdt=(typeof(mdt)){0};
+#endif
     // An overlay runs WHILE a background scene is drawing, so it is sized for
     // what is left rather than for what a foreground app may take. 3.1 asks for
     // the check before the start rather than a failure during it; ui/overlay.c
@@ -1753,6 +1821,14 @@ esp_err_t app_tick(uint32_t buttons) {
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
     turn_continued=false;
+#ifdef KASANE_MEGADEMO_TRACE
+    mdt_emit();
+    mdt.began=esp_timer_get_time();
+    mdt.kind='D';
+    // k=btn/fed: the keys this turn was handed and the keys frame() got. A
+    // press held back behind a parked frame shows as btn without fed.
+    mdt.btn=buttons;
+#endif
     sample_memory_pressure();
     pocket_kasane_set_animation_time((uint64_t)esp_timer_get_time());
     /* A ticket retained from a prior turn keeps its dedicated display turn.
@@ -1828,6 +1904,10 @@ esp_err_t app_tick(uint32_t buttons) {
         end_guest_turn();
         uint32_t continuation_us=(uint32_t)(esp_timer_get_time()-cont_began);
         turn_sum+=(double)continuation_us; ticks++;
+#ifdef KASANE_MEGADEMO_TRACE
+        mdt.kind=pocketjs_guest_work_pending(guest)?'P':'C';
+        mdt.js_us=continuation_us;
+#endif
 #ifdef CONFIG_POCKET_VM_TURNPERF
         turnperf_cont_us+=continuation_us; turnperf_cont_n++;
 #endif
@@ -1890,6 +1970,9 @@ esp_err_t app_tick(uint32_t buttons) {
     // here, ahead of every other pump, and still does everything else it did).
     if(pocket_app_exit_requested()) app_request_stop();
     buttons|=deferred_buttons; deferred_buttons=0;
+#ifdef KASANE_MEGADEMO_TRACE
+    mdt.fed=buttons;
+#endif
     pocket_memory_pump((buttons&0x2000)!=0||atomic_load(&stop_requested));
     run_pumps(buttons);
     end_guest_turn();
@@ -1914,6 +1997,11 @@ esp_err_t app_tick(uint32_t buttons) {
 #endif
     int64_t turn_us=esp_timer_get_time()-turning;
     turn_sum+=(double)turn_us; ticks++;
+#ifdef KASANE_MEGADEMO_TRACE
+    // Q: a frame() the VM parked; its continuation is the next line.
+    mdt.kind=pocketjs_guest_work_pending(guest)?'Q':'F';
+    mdt.js_us=(uint32_t)turn_us;
+#endif
     ksn_p0_probe_sample(KSN_P0_APP_TURN,(uint32_t)turn_us);
     report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
@@ -2069,6 +2157,11 @@ static esp_err_t present_frame(void) {
         if(stats.bands) {
             painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
+#ifdef KASANE_MEGADEMO_TRACE
+            mdt.render_us+=whole-display_state.sent_us;mdt.send_us+=display_state.sent_us;
+            mdt.bytes+=stats.transferred_bytes;mdt.bands=ksn_render_band_count(stats.bands);
+            mdt.presents++;
+#endif
 #if KASANE_STRESS_GRAD_AB
             grad_ab_bytes+=stats.transferred_bytes;
 #endif
