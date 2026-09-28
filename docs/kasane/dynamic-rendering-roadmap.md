@@ -152,7 +152,7 @@ COM3 / ESP32-S3 rev0.2、240 MHz、IDF 6.0.1、SIZE最適化で同一バイナ�
 
 ## D3b grid PIE を通常アプリへ公開（2026-09-28）
 
-[通常アプリ用 adapter](../../main/pocket/pocket_grid.c)を追加し、`gridFold.fold(...)` で作った型付きIRを `pocket.kasane.grid.register(program)` で登録、`run(handle, {0: Int16Array, ...}, params)` で実行、`resource(handle)` でKasane画像として `tx.image` に渡せるようにした。`explain(handle)` は選択したbackend・strategy・reason・profile keyを返す。アプリ固有の命令分岐は設けず、全アプリが同じ登録・合法性検査・AUTO選択・PIE実行を通る。JS前段は初回使用時だけ読み込む。planはセッション内で最大4件、出力は最大4096画素、入力合計は8192個のint16要素まで。入力は16-byte整列したnative領域へコピーし、出力は2世代を保持して表示ACK後に切り替える。転送失敗時は未確定世代を保持し、次の表示で修復する。
+[通常アプリ用 adapter](../../main/pocket/pocket_grid.c)を追加し、`gridFold.fold(...)` で作った型付きIRを `pocket.kasane.grid.register(program)` で登録、`run(handle, {0: Int16Array, ...}, params)` で実行、`resource(handle)` でKasane画像として `tx.image` に渡せるようにした。`explain(handle)` は選択したbackend・strategy・reason・profile keyを返す。アプリ固有の命令分岐は設けず、全アプリが同じ登録・合法性検査・AUTO選択・PIE実行を通る。JS前段は初回使用時だけ読み込む。planはセッション内で最大6件、出力は最大4096画素、入力合計は8192個のint16要素まで。入力は16-byte整列したnative領域へコピーし、出力は2世代を保持して表示ACK後に切り替える。転送失敗時は未確定世代を保持し、次の表示で修復する。
 
 通常アプリの入力整列に合わせた固定係数2×2・16×12出力の追加probeを同一診断バイナリで3回実施した。各1024回の中央値はgather 80,073 µs、融合 61,590 µsで23.1%短い。profile key=`51df87624d6af998` を[選択表](../../main/ui/kasane/ksn_proc_grid_profile.h)へ追加した。選択表はbindで合法と判定された候補の順位だけを決める。[生成器のテスト](../../tools/kasane_contract/test_build_grid_profile.py)は、整列条件の不一致を拒否する例を含め6件通過した。[QuickJS結合試験](../../tools/kasane_contract/run_pocket_grid_qjs.py)は前段から画像画素と表示ACK・失敗修復まで通過した。
 
@@ -365,7 +365,7 @@ JS前段の25例を実QuickJSから実行し、PIE命令シミュレータの通
 
 1. **D3a: 2項のアクセス経路と費用選択（完了）。** 各loadの連続・逆順・broadcast・gatherを登録時に判定し、合法な2項PIE候補を比較した。GRID LABのFOLD ARTに加え、寸法・stride・係数を変えたJS例でscalarとの全画素一致を確認。同じ通常imageで独立した実機runを繰り返し、5%以上速い形状だけをAFFINEへ切り替えた。結果は下記。
 2. **D3a: 登録時解析と依存行kernelの共通化（完了）。** 命令ごとの値バージョン、live-in/out、依存集合、検査付き演算、絶対値上界を共通グラフに記録し、MAC正規化・依存行の認識・QACC前段の上界証明で共有する。レジスタ再利用、alias、overflow、死んだ検査付き命令をhostで反例として通し、実機で登録費用とRAMを測った。2項を超える式と別種の依存行反復は、合法性と費用の両方を示せるまではscalarに残す。
-3. **JS APIと診断（診断を実装、記法整理は継続）。** `grid.registration(handle)`は登録時の式形状、解析時間、planと内部heapの大きさを返す。登録失敗はIRの理由と命令番号を例外に含め、`grid.explain(handle)`は実行後のkernel、PIE候補とscalar選択理由を返す。GRID LABで登録時の値を表示・ログ化した。次に`fold`と画像用IRの記法をbackend能力に合わせて整理する。float式からQ14への暗黙変換は導入しない。
+3. **JS APIと診断（完了）。** `grid.registration(handle)`は登録時の式形状、解析時間、planと内部heapの大きさを返す。登録失敗はIRの理由と命令番号を例外に含め、`grid.explain(handle)`は実行後のkernel、PIE候補とscalar選択理由を返す。`gridFold.index({base,x,y,tapX,tapY})`と`view({buffer,...})`の座標引数をオブジェクトに統一し、動的係数も名前付きオブジェクトで記す。[JS記法](grid-js-notation.md)にnative反復とscalar fallbackの契約をまとめた。float式からQ14への暗黙変換は導入しない。
 4. **表示全体の採否。** 登録、JS入力生成、kernel、Kasane合成、LCD送出、heap、フレーム停滞を別々に測り、全画面とUI内の小窓でscalar/PIEの体感上の差と余裕を確認する。D2のFLOWER＋2面、D5のSD動画＋音声との複合負荷は、単独のkernel倍率から外挿せず別のgateで判定する。
 
 ## D3a 2項アクセス経路の実機選択（2026-09-29）
@@ -393,3 +393,7 @@ JSの独立期待値を持つ連続2 load・レーン別係数・broadcast係数
 圧縮後の同一バイナリで9登録（3形状×3起動）の中央値は、JS program読取り786 µs、native prepare 97 µs、登録全体936 µs。prepareの最長標本は190 µsで、その要因は未分離。3番目のfold登録直後の内部heap空きは60,128〜60,256 B、最大連続空き31,744 B。これらは起動中の一点の標本であり、低水位ではない。出力2面とallocator費用も登録全体のheap差に含まれる。ログは`.cache/grid-lab-registration-20260929.log`（圧縮前）と`.cache/grid-lab-registration-compact-20260929.log`（圧縮後）。
 
 `grid.registration(handle)`にIR命令数、MAC項数、検査付き演算数、未証明の中間値数、plan/解析領域のbytes、各時間・内部heap標本を追加した。登録失敗の例外には`body[n]`と検証理由を含める。実行後の`grid.explain(handle)`は`kernel`、`candidateMask`、`scanCandidate`、`scalarReason`を返す。host QuickJSで不正dst registerと一般形MIN式、7画素幅、QACC範囲超過の各scalar理由を検証。通常ファーム最終imageは2,149,072 B、SHA-256 `5f7d17c94bbfa0d1e7da69aae8f76206bf59e6ede56667f3c29e03bb7a605747`。アプリ領域だけを書き、hash照合後にGRID LABの6モード、PIE候補理由、全画素比較、終了後`HOME_READY`を確認した。最終ログは`.cache/grid-lab-registration-diagnostics-final-20260929.log`。フラッシュ退避なし。新しい並び替えscan式そのものの実機速度は未測定。
+
+`gridFold.index`を1個の名前付きオブジェクトへ統一した。5個の位置引数と動的係数の配列形式は拒否する。GRID LAB、29個のQuickJS→IR例、通常アプリadapterのテスト、実機診断用JSを移し、生成C assetも同期した。Astraのレビューでは`view`が`base`を無視する不一致を発見したため、`view({buffer,base,x,y,tapX,tapY})`へ統一し、非ゼロbaseの直接loadと同じIRになるテストを追加した。hostの29例は独立期待値との比較とPIE/scalar経路を通過。
+
+最終通常image 2,150,240 B、SHA-256 `9cc5cd85d91db97cbd5626bd13773dd6bb94364158255a250f7e1d548a5af449`をCOM3のアプリ領域だけに書き、書込時hashを検証した。既存GRID LABの最終起動で6モード、全画素一致、PIE経路と`HOME_READY`が通過。鏡像foldの8回合計はscalar 26,962 µs、PIE 2,857 µs。最終ログは`.cache/grid-lab-object-index-final-20260929.log`。レビュー前の2回独立起動ログは`.cache/grid-lab-named-index-20260929.log`。フラッシュ退避なし。次は表示全体の費用分解へ進む。

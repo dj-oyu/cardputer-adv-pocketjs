@@ -7,26 +7,48 @@
     if (!Number.isSafeInteger(n) || n < low || n > high) throw RangeError("grid integer");
     return n;
   };
-  const coefficient = (v) => {
-    if (typeof v === "number") return [int(v, -2147483648, 2147483647), 0, NO_PARAM];
+  const fields = (value, allowed, name) => {
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        Object.keys(value).some(key => !allowed.includes(key)))
+      throw TypeError(name);
+    return value;
+  };
+  const normalizedCoefficient = (v) => {
     if (!Array.isArray(v) || v.length !== 3) throw TypeError("grid coefficient");
     const param = v[2] === NO_PARAM ? NO_PARAM : int(v[2], 0, 7);
     return [int(v[0], -2147483648, 2147483647),
             int(v[1], -32768, 32767), param];
   };
-  const index = (...terms) => {
-    if (terms.length !== 5) throw TypeError("grid index needs five terms");
-    return terms.map(coefficient);
+  const coefficient = (v) => {
+    if (typeof v === "number")
+      return [int(v, -2147483648, 2147483647), 0, NO_PARAM];
+    fields(v, ["base", "scale", "param"], "grid coefficient");
+    const hasParam = v.param !== undefined;
+    if (!hasParam && v.scale !== undefined)
+      throw TypeError("grid coefficient scale needs param");
+    return [int(v.base === undefined ? 0 : v.base, -2147483648, 2147483647),
+            hasParam ? int(v.scale === undefined ? 1 : v.scale, -32768, 32767) : 0,
+            hasParam ? int(v.param, 0, 7) : NO_PARAM];
+  };
+  const index = (...args) => {
+    if (args.length !== 1) throw TypeError("grid index needs one axes object");
+    const axes = fields(args[0], ["base", "x", "y", "tapX", "tapY"],
+                        "grid index axes");
+    return [axes.base, axes.x, axes.y, axes.tapX, axes.tapY]
+      .map(term => coefficient(term === undefined ? 0 : term));
   };
   const checkedIndex = (value) => {
     if (!Array.isArray(value) || value.length !== 5) throw TypeError("grid index");
-    return index(...value);
+    return value.map(normalizedCoefficient);
   };
   const views = new WeakMap();
-  const view = (buffer, {offset = 0, x = 0, y = 0, tapX = 0, tapY = 0}) => {
+  const view = (...args) => {
+    if (args.length !== 1) throw TypeError("grid view needs one object");
+    const {buffer, ...axes} = fields(args[0],
+      ["buffer", "base", "x", "y", "tapX", "tapY"], "grid view");
     const value = Object.freeze({});
     views.set(value, {buffer: int(buffer, 0, 7),
-                      index: index(offset, x, y, tapX, tapY)});
+                      index: index(axes)});
     return value;
   };
   const fold = (spec, build) => {
@@ -100,7 +122,7 @@
       }
       body.push({op: node.op, dst, a, b, buffer: node.buffer || 0,
                  immediate: node.immediate || 0,
-                 index: node.index || index(0, 0, 0, 0, 0)});
+                 index: node.index || index({})});
       for (const operand of [node.a, node.b]) {
         if (!operand || !operand.op) continue;
         const remaining = uses.get(operand) - 1;
@@ -110,8 +132,9 @@
       if (dst) regs.set(node, dst);
     }
     return {count: body.length, result_reg: 0,
-            final_shift: int(spec.shift || 0, 0, 30),
-            initial: int(spec.initial || 0, -2147483648, 2147483647),
+            final_shift: int(spec.shift === undefined ? 0 : spec.shift, 0, 30),
+            initial: int(spec.initial === undefined ? 0 : spec.initial,
+                         -2147483648, 2147483647),
             body, output: checkedIndex(spec.output), shape};
   };
   global.gridFold = Object.freeze({fold, index, view});

@@ -317,7 +317,7 @@ int main(int argc, char **argv)
               "if(!detail.includes('body[0]')||"
               "!detail.includes('invalid destination register'))"
               "throw Error('IR diagnostic '+detail);"
-              "let at=gridFold.index(0,1,8,0,0);"
+              "let at=gridFold.index({x:1,y:8});"
               "let slow=gridFold.fold({width:8,height:1,tapWidth:1,"
               "tapHeight:1,output:at},g=>g.add(g.acc,g.min("
               "g.load(0,at),g.constant(0))));"
@@ -332,7 +332,7 @@ int main(int argc, char **argv)
               "slowRoute.candidateMask!==0)"
               "throw Error(JSON.stringify(slowRoute));", false);
     pocket_grid_reset();
-    eval(ctx, "let narrow=gridFold.index(0,1,7,0,0);"
+    eval(ctx, "let narrow=gridFold.index({x:1,y:7});"
               "let narrowPlan=gridFold.fold({width:7,height:1,tapWidth:1,"
               "tapHeight:1,output:narrow},g=>g.add(g.acc,g.load(0,narrow)));"
               "let narrowHandle=kasane.grid.register(narrowPlan);"
@@ -343,7 +343,7 @@ int main(int argc, char **argv)
               "narrowRoute.scalarReason!=='VECTOR_LAYOUT'||"
               "narrowRoute.candidateMask!==0)"
               "throw Error(JSON.stringify(narrowRoute));"
-              "let wide=gridFold.index(0,1,8,0,0);"
+              "let wide=gridFold.index({x:1,y:8});"
               "let rangePlan=gridFold.fold({width:8,height:1,tapWidth:1,"
               "tapHeight:1,output:wide},g=>{"
               "let sample=g.load(0,wide);let square=g.mul(sample,sample);"

@@ -16,8 +16,9 @@
     mode.resource = null;
   }
   const foldWidth = 48, foldHeight = 28;
-  const foldIndex = gridFold.index(0, 1, foldWidth, 0, 0);
-  const mirrorIndex = gridFold.index(foldWidth - 1, -1, foldWidth, 0, 0);
+  const foldIndex = gridFold.index({x: 1, y: foldWidth});
+  const mirrorIndex = gridFold.index({base: foldWidth - 1,
+                                     x: -1, y: foldWidth});
   const foldProgram = gridFold.fold({
     width: foldWidth, height: foldHeight, tapWidth: 1, tapHeight: 1,
     output: foldIndex, shift: 2
@@ -34,11 +35,11 @@
   const pairWidth = 48, pairHeight = 20, pairPitch = 64;
   const pairProgram = gridFold.fold({
     width: pairWidth, height: pairHeight, tapWidth: 1, tapHeight: 1,
-    output: gridFold.index(0, 1, pairWidth, 0, 0), shift: 2
+    output: gridFold.index({x: 1, y: pairWidth}), shift: 2
   }, g => g.add(g.acc, g.add(
-    g.mul(g.load(0, gridFold.index(0, 1, pairPitch, 0, 0)),
+    g.mul(g.load(0, gridFold.index({x: 1, y: pairPitch})),
           g.constant(2)),
-    g.load(0, gridFold.index(8, 1, pairPitch, 0, 0)))));
+    g.load(0, gridFold.index({base: 8, x: 1, y: pairPitch})))));
   modes.push({width: pairWidth, height: pairHeight, label: 'FOLD PAIR',
               kind: 'fold', sourceWidth: pairPitch,
               source: new Int16Array(pairPitch * pairHeight),
@@ -46,12 +47,12 @@
   const weightWidth = 40, weightHeight = 20;
   const weightProgram = gridFold.fold({
     width: weightWidth, height: weightHeight, tapWidth: 1, tapHeight: 1,
-    output: gridFold.index(0, 1, weightWidth, 0, 0), shift: 2
+    output: gridFold.index({x: 1, y: weightWidth}), shift: 2
   }, g => g.add(g.acc, g.add(
-    g.mul(g.load(0, gridFold.index(0, 1, weightWidth, 0, 0)),
-          g.load(2, gridFold.index(0, 1, weightWidth, 0, 0))),
-    g.load(0, gridFold.index(weightWidth - 1, -1,
-                             weightWidth, 0, 0)))));
+    g.mul(g.load(0, gridFold.index({x: 1, y: weightWidth})),
+          g.load(2, gridFold.index({x: 1, y: weightWidth}))),
+    g.load(0, gridFold.index({base: weightWidth - 1,
+                             x: -1, y: weightWidth})))));
   modes.push({width: weightWidth, height: weightHeight, label: 'FOLD WEIGHT',
               kind: 'fold', sourceWidth: weightWidth,
               source: new Int16Array(weightWidth * weightHeight),
