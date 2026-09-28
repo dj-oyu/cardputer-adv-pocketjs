@@ -17,6 +17,8 @@
 #define KSN_GRID_PARAMS 8
 #define KSN_GRID_BUFFERS 8
 #define KSN_GRID_NO_PARAM 255u
+#define KSN_GRID_VALUE_NONE 255u
+#define KSN_GRID_VALUE_ACC 254u
 
 typedef enum {
     KSN_GRID_CONST = 1,
@@ -89,6 +91,30 @@ typedef struct {
     ksn_grid_mac_operand extra_left, extra_right;
 } ksn_grid_mac;
 
+/* Register writes become immutable instruction values at registration. The
+ * ACC sentinel is the incoming reduction value. Contributors include the
+ * instruction itself and all transitive inputs, so a lowering can prove that
+ * it preserves every checked operation. Live masks describe register values
+ * needed on either side of each instruction, including checked dead results. */
+typedef struct {
+    uint8_t a, b, live_in, live_out, effects;
+    uint16_t contributors;
+    uint64_t magnitude_bound; /* valid only when range_proven is true */
+    bool range_proven;
+} ksn_grid_value;
+
+enum {
+    KSN_GRID_EFFECT_LOAD = 1u,
+    KSN_GRID_EFFECT_DEST_READ = 2u,
+    KSN_GRID_EFFECT_CHECKED = 4u,
+    KSN_GRID_EFFECT_ACC_WRITE = 8u
+};
+
+typedef struct {
+    ksn_grid_value value[KSN_GRID_CODE];
+    uint16_t checked_mask;
+} ksn_grid_analysis;
+
 /* Bind-time classification of the output-lane x stride. Alignment and extra
  * cells consumed by a vector load still need checks at each block. */
 typedef enum {
@@ -117,6 +143,7 @@ typedef enum {
 
 typedef struct {
     ksn_grid_program program; /* owned; caller may discard original */
+    ksn_grid_analysis analysis; /* versioned values shared by lowerings */
     ksn_grid_mac mac; /* exact LOAD/CONST product or direct sum */
     bool prepared;
 } ksn_grid_plan;

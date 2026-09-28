@@ -309,7 +309,7 @@ int main(int argc, char **argv)
     JSValue global = JS_GetGlobalObject(js);
     JSValue examples = prop(global, "gridFoldExamples");
     uint32_t count = length(examples);
-    CHECK(count == 28);
+    CHECK(count == 29);
     for (unsigned i = 0; i < count; ++i) {
         JSValue example = item(examples, i);
         run_example(example);

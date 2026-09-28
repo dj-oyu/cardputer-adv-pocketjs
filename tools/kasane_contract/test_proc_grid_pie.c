@@ -658,10 +658,100 @@ static void test_dependent_rows(void)
     assert(memcmp(scalar, optimized, sizeof scalar) == 0);
 }
 
+static void test_versioned_scan_analysis(void)
+{
+    enum { WIDTH = 16, HEIGHT = 9, PITCH = WIDTH + 1 };
+    ksn_grid_program p = {0};
+    p.count = 6;
+    p.final_shift = 1;
+    p.body[0].op = KSN_GRID_LOAD;
+    p.body[0].dst = 1;
+    p.body[0].buffer = KSN_GRID_SOURCE;
+    p.body[0].index = index5(0, 1, WIDTH, 0, 0);
+    p.body[1].op = KSN_GRID_LOAD;
+    p.body[1].dst = 2;
+    p.body[1].buffer = KSN_GRID_DEST;
+    p.body[1].index = index5(0, 1, PITCH, 0, 0);
+    p.body[2].op = KSN_GRID_CONST;
+    p.body[2].dst = 3;
+    p.body[2].immediate = -2;
+    p.body[3].op = KSN_GRID_MUL;
+    p.body[3].dst = 2; /* reuse the previous-value register */
+    p.body[3].a = 2;
+    p.body[3].b = 3;
+    p.body[4].op = KSN_GRID_ADD;
+    p.body[4].dst = 1; /* reuse the source-value register */
+    p.body[4].a = 2;
+    p.body[4].b = 1;
+    p.body[5].op = KSN_GRID_ADD;
+    p.body[5].dst = 0;
+    p.body[5].a = 0;
+    p.body[5].b = 1;
+    p.output = index5(1, 1, PITCH, 0, 0);
+    ksn_grid_plan plan;
+    assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_OK);
+    assert(plan.analysis.value[3].a == 1 && plan.analysis.value[3].b == 2);
+    assert(plan.analysis.value[4].a == 3 && plan.analysis.value[4].b == 0);
+    assert(plan.analysis.value[5].a == KSN_GRID_VALUE_ACC &&
+           plan.analysis.value[5].b == 4);
+    assert(plan.analysis.value[5].contributors == 0x3fu);
+    assert(plan.analysis.checked_mask == 0x38u);
+    assert(plan.analysis.value[3].live_in & (1u << 1));
+
+    int16_t source[WIDTH * HEIGHT] __attribute__((aligned(16)));
+    int16_t scalar[PITCH * HEIGHT] __attribute__((aligned(16))) = {0};
+    int16_t optimized[PITCH * HEIGHT] __attribute__((aligned(16))) = {0};
+    for (unsigned y = 0; y < HEIGHT; ++y) {
+        scalar[y * PITCH] = optimized[y * PITCH] =
+            y & 1 ? INT16_MIN : INT16_MAX;
+        for (unsigned x = 0; x < WIDTH; ++x)
+            source[y * WIDTH + x] = (x + y) & 1 ? -30000 : 30000;
+    }
+    ksn_grid_binding bind = {0};
+    bind.data[KSN_GRID_SOURCE] = source;
+    bind.count[KSN_GRID_SOURCE] = WIDTH * HEIGHT;
+    bind.data[KSN_GRID_DEST] = scalar;
+    bind.count[KSN_GRID_DEST] = PITCH * HEIGHT;
+    ksn_grid_shape shape = {WIDTH, HEIGHT, 1, 1};
+    ksn_grid_execution e;
+    assert(ksn_grid_begin(&plan, &shape, &bind, &e) == KSN_GRID_OK);
+    assert(e.scan_rows_candidate && e.scan_source_slot == 0 &&
+           e.scan_prev_coefficient == -2);
+    assert(ksn_grid_run_scalar(&e) == KSN_GRID_OK);
+    bind.data[KSN_GRID_DEST] = optimized;
+    assert(ksn_grid_begin(&plan, &shape, &bind, &e) == KSN_GRID_OK);
+    ksn_grid_pie_policy policy = {true, 8, 8, 8};
+    assert(ksn_grid_run_auto(&e, &policy) == KSN_GRID_OK);
+#ifdef KSN_GRID_PIE_MODEL
+    assert(e.pie_backend_selected);
+#else
+    assert(!e.pie_backend_selected);
+#endif
+    assert(memcmp(scalar, optimized, sizeof scalar) == 0);
+
+    bind.data[KSN_GRID_SOURCE] = optimized; /* alias through another ID */
+    bind.count[KSN_GRID_SOURCE] = PITCH * HEIGHT;
+    assert(ksn_grid_begin(&plan, &shape, &bind, &e) == KSN_GRID_OK);
+    assert(!e.scan_rows_candidate);
+    bind.data[KSN_GRID_SOURCE] = source;
+    bind.count[KSN_GRID_SOURCE] = WIDTH * HEIGHT;
+
+    p.count = 7;
+    p.body[6] = p.body[5];
+    p.body[5].op = KSN_GRID_ADD; /* checked, dead result */
+    p.body[5].dst = 7;
+    p.body[5].a = p.body[5].b = 3;
+    assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_OK);
+    assert(plan.analysis.checked_mask & (1u << 5));
+    assert(ksn_grid_begin(&plan, &shape, &bind, &e) == KSN_GRID_OK);
+    assert(!e.scan_rows_candidate);
+}
+
 int main(void)
 {
     profile_selection_case();
     test_registration_normalization();
+    test_versioned_scan_analysis();
     static const unsigned width[] = {1, 7, 8, 9, 15, 16, 17};
     static const int16_t weight[] = {1, -1, 16384, INT16_MIN};
     static const uint8_t shift[] = {0, 2, 14, 30};

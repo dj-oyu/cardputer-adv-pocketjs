@@ -371,6 +371,27 @@
                    initialDest, expected, pie: false, scanPie: true});
   }
 
+  { // The same dependency is recognized when source and multiply are reordered.
+    const width = 12, height = 8, pitch = width + 1;
+    const source = Array.from({length: width * height}, (_, i) => i % 7 - 3);
+    const initialDest = Array(pitch * height).fill(0);
+    for (let y = 0; y < height; y++) initialDest[y * pitch] = 50 - 4 * y;
+    const program = fold({width, height, tapWidth: 1, tapHeight: 1,
+                          output: index(1, 1, pitch, 0, 0), shift: 1}, g =>
+      g.add(g.acc,
+            g.add(g.load(0, index(0, 1, width, 0, 0)),
+                  g.mul(g.load(1, index(0, 1, pitch, 0, 0)),
+                        g.constant(-2)))));
+    const expected = [], rows = initialDest.slice();
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const at = y * pitch + x + 1;
+      rows[at] = sat(-2 * rows[at - 1] + source[y * width + x], 1);
+      expected.push(rows[at]);
+    }
+    examples.push({name: "iirReordered", program, buffers: {0: source},
+                   initialDest, expected, pie: false, scanPie: true});
+  }
+
   { // 2D path counts: left and upper outputs have already been stored.
     const width = 5, height = 5, pitch = width + 1;
     const initialDest = Array(pitch * (height + 1)).fill(0);
