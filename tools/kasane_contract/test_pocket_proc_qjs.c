@@ -169,6 +169,7 @@ int main(int argc,char **argv){
         "const uiTx=new Proxy({},{get(o,k){return k==='image'?s=>{const r=ref(),main=s.resource.__s0;"
         "if(main)megaBounds=s.bounds.slice();"
         "r.setRect=(tx,b)=>{if(main)megaBounds=b.slice()};return r}:()=>ref()}});"
+        "pocket.memory={info(){return {internalFreeBytes:1e9}}};"
         "pocket.kasane.replace=fn=>{megaReplaces++;fn(uiTx)};"
         "pocket.kasane.patch=fn=>fn(uiTx);"
         "pocket.kasane.stats=()=>({displayed:{commands:0}});"

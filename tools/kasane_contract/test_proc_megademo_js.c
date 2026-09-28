@@ -138,7 +138,8 @@ int main(int argc, char **argv) {
         "setVisible(tx,v){this.visible=v}});"
         "const uiTx=new Proxy({},{get(o,k){return k==='image'?"
         "s=>{const i=ref();i.spec=s;__procCalls.images.push(i);return i}:()=>ref()}});"
-        "globalThis.pocket={kasane:{replace(f){f(uiTx)},patch(f){f(uiTx)},"
+        "globalThis.pocket={memory:{info(){return {internalFreeBytes:1e9}}},"
+        "kasane:{replace(f){f(uiTx)},patch(f){f(uiTx)},"
         "stats(){return {displayed:{commands:0}}},resource(){return {}},"
         "cache:{create(){return {}}},pixel:{open(){return {}},stage(){return true}},"
         "grid:{registerResizeSource(s){__procCalls.resize.push(s);return 76+__procCalls.resize.length},"
@@ -148,7 +149,10 @@ int main(int argc, char **argv) {
         "__procCalls.registered.push({program:p,batch:b});__procCalls.live.add(id);"
         "if(__procCalls.live.size>__procCalls.peak)__procCalls.peak=__procCalls.live.size;return id},"
         "unregister(h){if(!__procCalls.live.delete(h))throw Error('stale '+h);__procCalls.unregistered++},"
-        "beginFrame(c,s){if(__procCalls.active!==null)throw Error('nested frame');"
+        /* A beginFrame with nothing drawn yet restarts, as the native one
+         * does: the app opens both surfaces once at start to allocate them. */
+        "beginFrame(c,s){if(__procCalls.active!==null&&__procCalls.active.draws.length)"
+        "throw Error('nested frame');"
         "__procCalls.active={backdrop:c,surface:s||0,draws:[]}},"
         "draw(h,i){if(!__procCalls.live.has(h))throw Error('dead handle '+h);"
         "__procCalls.active.draws.push([h,i])},"

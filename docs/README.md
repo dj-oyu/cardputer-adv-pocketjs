@@ -96,7 +96,8 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [動的描画ロードマップ](kasane/dynamic-rendering-roadmap.md) | 関数アート・描画面・動画を、FLOWERとKasaneの実測を参照しながら段階的に進める構想 |
 | [手続き型描画の実機診断](kasane/procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。実測前の準備 |
 | [手続き型描画の上限緩和の実機検証](kasane/procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
-| [MEGADEMO Act II](kasane/megademo-limit-scenes.md) | 手続き面の上限を叩く3場面（ねじれ廊下・Apple II 風ZENITH・LIMIT）、場面ごとのplan登録/解除、プリミティブ網羅表、上限使用率とゲストヒープのhost実測（2026-09-29、実機未測定） |
+| [MEGADEMO Act II](kasane/megademo-limit-scenes.md) | 手続き面の上限を叩く3場面（ねじれ廊下・Apple II 風ZENITH・LIMIT）、場面ごとのplan登録/解除、プリミティブ網羅表、上限使用率とゲストヒープのhost実測（2026-09-29） |
+| [MEGADEMO の負荷を実機で決める](kasane/megademo-device-limits.md) | 実機で初めて動かした結果（ZENITH で落ちていた）、場面×段階の JS/帯描画/転送/fps/heap 実測、破綻の境界（面の確保・plan の同時数・回転読み出し・登録時間・ゲストヒープ）、決めた `KN`/`LOAD` と既定段階、仕様上限が先に効く項目（2026-09-29 実測） |
 
 ## JS API — [`api/`](api/)
 

@@ -25,6 +25,18 @@ void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
     image_band_count=image_band_cycles=image_span_count=image_span_cycles=0;
 }
 #endif
+#ifdef KASANE_MEGADEMO_TRACE
+/* Separate from the JS diagnostic above, which is read per 30-frame window:
+ * the trace needs these per host turn, and it times the JS-visible calls
+ * (register includes reading the arrays, prepare is the analysis alone). */
+#include "esp_cpu.h"
+#include "esp_timer.h"
+static pocket_proc_trace trace;
+void pocket_proc_trace_take(pocket_proc_trace *out){
+    if(out)*out=trace;
+    trace=(pocket_proc_trace){0};
+}
+#endif
 
 /* Slots are reusable after unregister(); handles are not (next_handle only
  * grows), so a released handle can never alias a later plan. Worst case with
@@ -285,7 +297,16 @@ static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
     ksn_proc_plan *plan=calloc(1,sizeof *plan);
     if(!plan)return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"plan allocation failed");
     const ksn_proc_program program={code,(uint8_t)count};
+#ifdef KASANE_MEGADEMO_TRACE
+    int64_t prep_began=esp_timer_get_time();
+    bool prepared=ksn_proc_plan_prepare(plan,&program);
+    uint32_t prep_us=(uint32_t)(esp_timer_get_time()-prep_began);
+    trace.prep_us+=prep_us;
+    if(prep_us>trace.prep_max_us)trace.prep_max_us=prep_us;
+    if(!prepared){
+#else
     if(!ksn_proc_plan_prepare(plan,&program)){
+#endif
         free(plan);
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid procedural program");
     }
@@ -449,16 +470,35 @@ static JSValue guarded(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     return result;
 }
 static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+#ifdef KASANE_MEGADEMO_TRACE
+    int64_t began=esp_timer_get_time();
+    JSValue result=guarded(ctx,self,argc,argv,register_impl);
+    trace.reg_us+=(uint32_t)(esp_timer_get_time()-began);trace.reg_n++;
+    return result;
+#else
     return guarded(ctx,self,argc,argv,register_impl);
+#endif
 }
 static JSValue js_unregister(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+#ifdef KASANE_MEGADEMO_TRACE
+    trace.unreg_n++;
+#endif
     return guarded(ctx,self,argc,argv,unregister_impl);
 }
 static JSValue js_begin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,begin_impl);
 }
 static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+#ifdef KASANE_MEGADEMO_TRACE
+    int64_t began=esp_timer_get_time();
+    JSValue result=guarded(ctx,self,argc,argv,draw_impl);
+    uint32_t us=(uint32_t)(esp_timer_get_time()-began);
+    trace.draw_us+=us;trace.draw_n++;
+    if(us>trace.draw_max_us)trace.draw_max_us=us;
+    return result;
+#else
     return guarded(ctx,self,argc,argv,draw_impl);
+#endif
 }
 static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,commit_impl);
@@ -520,6 +560,9 @@ void pocket_proc_reset(void){
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
     image_band_count=image_band_cycles=image_span_count=image_span_cycles=0;
 #endif
+#ifdef KASANE_MEGADEMO_TRACE
+    trace=(pocket_proc_trace){0};
+#endif
 }
 void pocket_proc_batch_counts(uint32_t *scalar,uint32_t *pie){
     if(scalar)*scalar=scalar_batches;
@@ -567,7 +610,7 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
        image_band_color!=color){
         unsigned rows=KSN_PROC_H-band_y;
         if(rows>PROC_IMAGE_BAND_ROWS)rows=PROC_IMAGE_BAND_ROWS;
-#ifdef KASANE_PROC_JS_DIAGNOSTIC
+#if defined(KASANE_PROC_JS_DIAGNOSTIC)||defined(KASANE_MEGADEMO_TRACE)
         uint32_t band_start=esp_cpu_get_cycle_count();
 #endif
         for(unsigned i=0;i<rows*KSN_PROC_W;i++)image_band[i]=color;
@@ -575,6 +618,10 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
         image_band_cycles+=esp_cpu_get_cycle_count()-band_start;
         image_band_count++;
+#endif
+#ifdef KASANE_MEGADEMO_TRACE
+        trace.band_cy+=esp_cpu_get_cycle_count()-band_start;
+        trace.band_n++;
 #endif
         image_band_surface=index;image_band_y=band_y;
         image_band_frame=frame;image_band_color=color;
