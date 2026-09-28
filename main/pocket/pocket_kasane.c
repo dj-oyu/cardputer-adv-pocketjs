@@ -3048,6 +3048,14 @@ ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
 }
 void pocket_kasane_end_turn(void) {
     pocket_proc_end_turn();
+    pocket_kasane_park_turn();
+}
+/* The view builder is aborted either way: run_build() opens and submits it
+ * inside one native call, and a native re-entry is never a floor the VM may
+ * park on (vm-L2-design sec.11.2), so a builder still open here is a failed
+ * build. Only the procedural frame spans several native calls, and only it
+ * has to survive a park. */
+void pocket_kasane_park_turn(void) {
     if(state) { ksn_runtime_app_end_turn(state->lease); apply_outcome(); }
 }
 ksn_input_scope pocket_kasane_input_scope(bool host_priority) {

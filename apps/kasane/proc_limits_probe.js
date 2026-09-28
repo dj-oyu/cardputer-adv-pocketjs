@@ -68,12 +68,13 @@
     ' busy=' + st.busy + ' lost=' + st.lost + ' err=' + st.err + ' regs=' + regs);
   function draw(hs, bg) {
     try { P.beginFrame(bg || 0); } catch (e) { st.busy++; return false; }
-    // A frame parked by the 8 ms turn budget comes back with building reset
-    // (pocket_kasane_end_turn); count it instead of ending the probe.
+    // A lost frame is counted, not fatal. Before the turn fix, any frame the
+    // 8 ms budget parked was lost here with BUSY.
     try { for (const h of hs) P.draw(h, []); P.commit(); return true; }
     catch (e) { st.lost++; st.err = code(() => { throw e; }); return false; }
   }
-  let live = [], ph = 0, t = 0, m0 = null, m1 = null, t0 = 0, oldH = 0;
+  let live = [], ph = 0, t = 0, m0 = null, m1 = null, t0 = 0, oldH = 0, sinH = 0;
+  const BK = [1, 2, 3, 4, 6, 8, 9];
   const churnLive = n => { const out = []; rep(n, i => out.push(reg(dots[(regs + i) % 32], (i & 1) ? b32 : undefined))); return out; };
   const freeAll = hs => { for (const h of hs) P.unregister(h); };
   const phases = [
@@ -193,7 +194,14 @@
     () => { freeAll(live); live = []; L.gc(); const m = mem('end');
       log('LIMITS_DONE fails=' + fails + ' regs=' + regs + ' free_delta=' + (m[0] - m0[0]) + ' largest_delta=' + (m[1] - m0[1]));
       return true; },
-    () => { draw([]); return false; }
+    () => { const b40 = pts(40, i => i * 5, i => 20 + (i * 11) % 90, ID, 0x07e0); let n = 0, err = 'none';
+      try { for (; n < 32; n++) live.push(reg(NOP, b40)); } catch (e) { err = code(() => { throw e; }); }
+      mem('p40'); log('P40 n=' + n + ' err=' + err); freeAll(live); live = []; L.gc(); return true; },
+    () => { if (t === 0) sinH = reg(sinLoop);
+      const k = BK[(t / 6) | 0];
+      if (t % 6 === 0) { if (t) flush(); if (k === undefined) { log('BUDGET_DONE'); return true; } stat('budget' + k); }
+      draw(Array(k).fill(sinH)); return false; },
+    () => { if (t === 0) { stat('heavy4'); log('HEAVY_START'); } draw([sinH, sinH, sinH, sinH]); return false; }
   ];
   globalThis.frame = function () {
     const now = L.us();

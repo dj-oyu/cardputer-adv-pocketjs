@@ -16,6 +16,7 @@ typedef struct {int id;} sys_notice;
 static void *guest;
 static bool turn_continued,pending,remain,activate,need_present,submission;
 static bool runaway,exit_requested,stopped,cont_submits;
+static bool proc_commits,proc_pending;
 static ksn_result presenter_result;
 static atomic_bool stop_requested;
 static unsigned continuation_turns,ticks;
@@ -32,10 +33,13 @@ static bool pocketjs_guest_work_pending(void *g){(void)g;return pending;}
 /* cont_submits: the continuation finishes a frame() the VM parked mid-call,
  * and that frame() submits its picture (backlog R3a). */
 static int pocketjs_guest_continue(void *g){
-    (void)g;call('C');pending=remain;if(cont_submits)submission=need_present=true;return guest_error;
+    (void)g;call('C');pending=remain;if(proc_commits&&!remain)proc_pending=true;if(cont_submits)submission=need_present=true;return guest_error;
 }
+static bool frame_parks;
+/* A procedural commit() marks its frame pending; present_frame() clears it. */
+static bool pocket_proc_pending(void){return proc_pending;}
 static int pocketjs_guest_frame(void *g,const pocketjs_guest_frame_t *f){
-    (void)g;assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
+    (void)g;if(frame_parks)pending=true;assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
     assert(!f->touch_count&&!f->touches&&!f->touch_hits);
     delivered=f->buttons;call('F');if(activate)submission=need_present=true;return guest_error;
 }
@@ -51,11 +55,14 @@ static bool pocket_kasane_animation_pending(void){return native_animation;}
 static bool pocket_kasane_system_pending(void){return system_pending;}
 static int pocket_kasane_input_scope(bool b){(void)b;return scope;}
 static void pocket_kasane_end_turn(void){call('E');}
+/* 'Y': the host turn ended with the guest's turn still open (parked frame()
+ * or a cut drain), so the procedural frame under construction is kept. */
+static void pocket_kasane_park_turn(void){call('Y');}
 static void report_oom_if_any(void){call('O');}
 static bool drain_runaway(void){return runaway;}
 static bool pocket_app_exit_requested(void){return exit_requested;}
 static void app_request_stop(void){stopped=true;call('S');}
-static int present_frame(void){call('P');need_present=false;submission=false;return 0;}
+static int present_frame(void){call('P');need_present=false;submission=false;proc_pending=false;return 0;}
 /* Silent: the call strings below predate these, and none of them decides an
  * ordering this test checks. The presenter step can be made to fail. */
 static void sample_memory_pressure(void){}
@@ -69,12 +76,14 @@ PUMP(pocket_app_pump,'a') PUMP(pocket_text_pump,'t') PUMP(pocket_imu_pump,'i')
 PUMP(pocket_io_pump,'o') PUMP(pocket_bridge_pump,'b') PUMP(pocket_net_pump,'n')
 PUMP(pocket_capture_pump,'c') PUMP(pocket_api_pump,'p') PUMP(pocket_fs_pump,'f')
 PUMP(pocket_av_pump,'v')
+/* Silent, like the pumps added after the call strings were fixed. */
+static void pocket_video_sd_stream_reap(void){}
 static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
 #include "session_dispatch_impl.inc"
 static void reset(void){
     calls[0]=0;pending=remain=activate=need_present=submission=false;
     native_animation=system_pending=false;
-    runaway=exit_requested=stopped=turn_continued=cont_submits=false;scope=KSN_INPUT_APP;
+    runaway=exit_requested=stopped=turn_continued=cont_submits=frame_parks=proc_commits=proc_pending=false;scope=KSN_INPUT_APP;
     presenter_result=KSN_OK;
     deferred_buttons=delivered=armed=continuation_turns=ticks=0;
     guest_error=0;now=40000;last_present_us=0;turn_sum=0;
@@ -88,7 +97,7 @@ int main(void){
     reset();guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
     assert(strstr(calls,"FEO")&&!strchr(calls,'P'));
     reset();pending=remain=true;assert(app_tick(0x20)==0);
-    assert(turn_continued&&!strchr(calls,'F')&&strstr(calls,"ACEO"));
+    assert(turn_continued&&!strchr(calls,'F')&&strstr(calls,"ACYO"));
     assert(!strchr(calls,'a')&&deferred_buttons==0x20);
     calls[0]=0;remain=false;assert(app_tick(0)==0);
     assert(strchr(calls,'C')<strchr(calls,'a')&&strchr(calls,'a')<strchr(calls,'F'));
@@ -119,5 +128,21 @@ int main(void){
     // Back is the last save turn: it is not held back for that present.
     reset();pending=true;cont_submits=true;assert(app_tick(0x2000)==0);
     assert(strchr(calls,'F')&&delivered==0x2000);
+    // A frame() the budget parks keeps its procedural frame open ('Y', not
+    // 'E'); the continuation that finishes it ends the turn, and only then.
+    reset();frame_parks=true;assert(app_tick(0)==0);
+    assert(!strcmp(calls,"AatiobncpfvkEFYOP"));
+    calls[0]=0;frame_parks=false;remain=true;now+=1000;assert(app_tick(0)==0);
+    assert(!strncmp(calls,"ACYO",4)&&!strchr(calls,'E')&&!strchr(calls,'F')&&turn_continued);
+    calls[0]=0;remain=false;assert(app_tick(0)==0);
+    assert(!strncmp(calls,"ACEO",4)&&!strchr(calls,'Y'));
+    // The continuation finishes the parked frame() and its procedural
+    // commit(): that frame is presented before the next frame(), whose
+    // beginFrame() would otherwise meet it pending (BUSY).
+    reset();pending=true;proc_commits=true;assert(app_tick(0x20)==0);
+    assert(!strcmp(calls,"ACEOP")&&!strchr(calls,'F')&&deferred_buttons==0x20&&!proc_pending);
+    // A continuation that throws out of the parked frame is the end of it.
+    reset();pending=true;guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
+    assert(!strcmp(calls,"ACEO"));
     puts("session dispatch PASS: ordering, cleanup, Back, continuation, display turn, watchdog, parked-frame present");
 }
