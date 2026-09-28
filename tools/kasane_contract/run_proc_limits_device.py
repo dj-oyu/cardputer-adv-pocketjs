@@ -98,11 +98,22 @@ def main() -> int:
                 if not done or int(done[1]):
                     status = 2
                 read_until(port, log, lambda b: b'JS PARK' in b[start:], 10)
-                time.sleep(0.5)
+                # Frames of 1..9 x 25 ms draws, then a steady 100 ms frame that
+                # Back has to interrupt: how long the leave turn takes to reach
+                # home while every frame spans several turns.
+                if not read_until(port, log, lambda b: b'HEAVY_START' in b[start:] or
+                                  b'RUNAWAY' in b[start:], 60):
+                    print('HEAVY_START missing')
+                    status = 2
+                time.sleep(1.5)
+                back = len(log)
+                sent = time.monotonic()
                 port.write(b'q')
-                if not read_until(port, log, lambda b: b'HOME_READY' in b[start:], 20):
+                if not read_until(port, log, lambda b: b'HOME_READY' in b[back:], 20):
                     print('HOME_READY missing after JS probe')
                     status = 2
+                else:
+                    print(f'BACK_TO_HOME_MS {(time.monotonic() - sent) * 1000:.0f} (host clock, includes USB)')
     finally:
         args.out.write_bytes(log)
         for line in bytes(log).splitlines():

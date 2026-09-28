@@ -29,7 +29,8 @@ void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
 /* Slots are reusable after unregister(); handles are not (next_handle only
  * grows), so a released handle can never alias a later plan. Worst case with
  * every slot holding a 128-point batch is 32*(plan+points) heap: see
- * docs/kasane/procedural-ir-experiment.md for the byte count. */
+ * docs/kasane/procedural-ir-experiment.md for the byte count. A batch pays
+ * for its own point count, not for the cap (points_bytes() below). */
 #define PROC_HANDLES 32u
 /* A multiple of 8 keeps whole PIE blocks; the dispatcher handles any tail. */
 #define PROC_POINT_MAX 128u
@@ -40,15 +41,34 @@ void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
 #define PROC_POINT_HIGH 720
 #define PROC_SURFACES 2u
 
+/* One malloc per batch: this header, then four planes (x, y, out_x, out_y)
+ * of points_stride(count) elements each. It used to be four 128-element
+ * arrays whatever the count (1,055 B with the alignment slack), which is what
+ * put 32 plans of 40 points into OUT_OF_MEMORY next to a large guest
+ * (docs/kasane/procedural-limits-device.md sec.3).
+ *
+ * The stride is the count rounded up to whole eight-lane blocks, so every
+ * plane begins 16-byte aligned: the dispatcher sends an unaligned plane to the
+ * scalar path, so misalignment would cost speed, never memory safety. The
+ * round-up is not overrun room -- the PIE kernel loads and stores only
+ * [0, count) (whole blocks by PIE, the tail scalar), which
+ * tools/kasane_contract/test_proc_points_pie_host.c pins with a guard block. */
 typedef struct {
     uint16_t count,color;
-    _Alignas(16) int16_t x[PROC_POINT_MAX],y[PROC_POINT_MAX];
-    _Alignas(16) int16_t out_x[PROC_POINT_MAX],out_y[PROC_POINT_MAX];
 } proc_points;
+static size_t points_stride(unsigned count){return ((size_t)count+7u)&~(size_t)7u;}
+static size_t points_bytes(unsigned count){
+    /* +15: malloc aligns to 4 or 8, and the planes need 16. */
+    return sizeof(proc_points)+15u+4u*points_stride(count)*sizeof(int16_t);
+}
+static int16_t *points_plane(const proc_points *p,unsigned k){
+    uintptr_t base=((uintptr_t)(p+1)+15u)&~(uintptr_t)15u;
+    return (int16_t *)base+k*points_stride(p->count);
+}
+enum {PLANE_X,PLANE_Y,PLANE_OUT_X,PLANE_OUT_Y};
 typedef struct {
     uint32_t handle;
     ksn_proc_plan *plan;
-    void *point_allocation;
     proc_points *points;
 } proc_slot;
 static proc_slot slots[PROC_HANDLES];
@@ -123,15 +143,18 @@ static bool entry(JSContext *ctx,JSValueConst row,ksn_proc_inst *out){
                          (float)value,(uint16_t)color};
     return true;
 }
-static bool read_points(JSContext *ctx,JSValueConst descriptor,
-                        proc_points *points,KsnProcAffineQ14 *coeff){
-    if(!JS_IsObject(descriptor))return false;
+typedef enum {POINTS_OK,POINTS_INVALID,POINTS_NO_MEMORY} points_result;
+/* Sizes the batch from its own length, so the allocation happens after the
+ * descriptor's shape is known and before any element is read. */
+static points_result read_points(JSContext *ctx,JSValueConst descriptor,
+                                 proc_points **out,KsnProcAffineQ14 *coeff){
+    if(!JS_IsObject(descriptor))return POINTS_INVALID;
     JSValue kind=JS_GetPropertyStr(ctx,descriptor,"kind");
     const char *name=JS_IsString(kind)?JS_ToCString(ctx,kind):NULL;
     bool valid=name&&strcmp(name,"affineQ14Points")==0;
     if(name)JS_FreeCString(ctx,name);
     JS_FreeValue(ctx,kind);
-    if(!valid)return false;
+    if(!valid)return POINTS_INVALID;
     JSValue x=JS_GetPropertyStr(ctx,descriptor,"x");
     JSValue y=JS_GetPropertyStr(ctx,descriptor,"y");
     JSValue matrix=JS_GetPropertyStr(ctx,descriptor,"coeff");
@@ -141,7 +164,17 @@ static bool read_points(JSContext *ctx,JSValueConst descriptor,
           array_length(ctx,matrix,&nc)&&nx==ny&&nx>=2&&nx<=PROC_POINT_MAX&&
           nc==6&&integer(ctx,color,UINT16_MAX,&shade);
     int32_t terms[6]={0};
+    proc_points *points=NULL;
+    bool no_memory=false;
     if(valid){
+        points=malloc(points_bytes(nx));
+        no_memory=!points;
+        valid=!no_memory;
+    }
+    if(valid){
+        points->count=(uint16_t)nx;
+        int16_t *px_plane=points_plane(points,PLANE_X);
+        int16_t *py_plane=points_plane(points,PLANE_Y);
         for(uint32_t i=0;i<nx&&valid;i++){
             JSValue vx=JS_GetPropertyUint32(ctx,x,i);
             JSValue vy=JS_GetPropertyUint32(ctx,y,i);
@@ -150,7 +183,7 @@ static bool read_points(JSContext *ctx,JSValueConst descriptor,
                   signed_integer(ctx,vx,INT16_MIN,INT16_MAX,&px)&&
                   signed_integer(ctx,vy,INT16_MIN,INT16_MAX,&py);
             JS_FreeValue(ctx,vx);JS_FreeValue(ctx,vy);
-            points->x[i]=(int16_t)px;points->y[i]=(int16_t)py;
+            px_plane[i]=(int16_t)px;py_plane[i]=(int16_t)py;
         }
         for(unsigned i=0;i<6&&valid;i++){
             JSValue value=JS_GetPropertyUint32(ctx,matrix,i);
@@ -161,12 +194,13 @@ static bool read_points(JSContext *ctx,JSValueConst descriptor,
     }
     JS_FreeValue(ctx,x);JS_FreeValue(ctx,y);
     JS_FreeValue(ctx,matrix);JS_FreeValue(ctx,color);
-    if(!valid)return false;
-    points->count=(uint16_t)nx;points->color=(uint16_t)shade;
+    if(!valid){free(points);return no_memory?POINTS_NO_MEMORY:POINTS_INVALID;}
+    points->color=(uint16_t)shade;
     *coeff=(KsnProcAffineQ14){(int16_t)terms[0],(int16_t)terms[1],
                               (int16_t)terms[2],(int16_t)terms[3],
                               terms[4],terms[5]};
-    return true;
+    *out=points;
+    return POINTS_OK;
 }
 static bool buffers(proc_surface *surface){
     if(!surface->candidate)surface->candidate=calloc(1,sizeof *surface->candidate);
@@ -232,6 +266,15 @@ static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
     if((argc!=1&&argc!=2)||!array_length(ctx,argv[0],&count)||
        !count||count>KSN_PROC_CODE)
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected 1..64 instructions");
+    /* The limit is decided before any work or allocation: a full table must
+     * answer LIMIT_EXCEEDED, and a low heap used to turn the 33rd plan into
+     * OUT_OF_MEMORY because the plan and its points were allocated first.
+     * The slot stays free while the arrays below are read: a getter that calls
+     * back into procedural is refused by guarded(). */
+    unsigned slot=0;
+    while(slot<PROC_HANDLES&&slots[slot].plan)slot++;
+    if(slot==PROC_HANDLES||next_handle==INT32_MAX)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"procedural plan limit");
     ksn_proc_inst code[KSN_PROC_CODE];
     for(uint32_t i=0;i<count;i++){
         JSValue row=JS_GetPropertyUint32(ctx,argv[0],i);
@@ -246,34 +289,24 @@ static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
         free(plan);
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid procedural program");
     }
-    void *point_allocation=NULL;
     proc_points *points=NULL;
     if(argc==2&&!JS_IsUndefined(argv[1])&&!JS_IsNull(argv[1])){
-        point_allocation=malloc(sizeof(proc_points)+15);
-        if(!point_allocation){free(plan);
-            return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"point allocation failed");}
-        points=(proc_points *)(((uintptr_t)point_allocation+15u)&~(uintptr_t)15u);
-        memset(points,0,sizeof *points);
         KsnProcAffineQ14 coeff;
         /* Cardputer ADV calibration: at n=8/16/40 the PIE path beat scalar
          * across 2048 runs, with exact output parity. The dispatcher still
          * falls back on hosts or an unavailable/unaligned backend. */
         const KsnProcPointsPolicy policy={true,8};
-        if(!read_points(ctx,argv[1],points,&coeff)||
+        points_result read=read_points(ctx,argv[1],&points,&coeff);
+        if(read==POINTS_NO_MEMORY){free(plan);
+            return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"point allocation failed");}
+        if(read!=POINTS_OK||
            !ksn_proc_plan_register_points_affine(plan,&coeff,&policy)){
-            free(point_allocation);free(plan);
+            free(points);free(plan);
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid typed point batch");
         }
     }
-    unsigned slot=0;
-    while(slot<PROC_HANDLES&&slots[slot].plan)slot++;
-    if(slot==PROC_HANDLES||next_handle==INT32_MAX){
-        free(point_allocation);
-        free(plan);
-        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"procedural plan limit");
-    }
     uint32_t handle=++next_handle;
-    slots[slot]=(proc_slot){handle,plan,point_allocation,points};
+    slots[slot]=(proc_slot){handle,plan,points};
     return JS_NewInt32(ctx,(int32_t)handle);
 }
 static JSValue unregister_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -287,7 +320,7 @@ static JSValue unregister_impl(JSContext *ctx,JSValueConst self,int argc,JSValue
     /* Legal between beginFrame() and commit(): draw() copies the plan's
      * segments into the candidate and the VM runs from its own code copy, so
      * no frame, pending presentation or image band refers to a plan. */
-    free(slot->plan);free(slot->point_allocation);
+    free(slot->plan);free(slot->points);
     *slot=(proc_slot){0};
     return JS_UNDEFINED;
 }
@@ -341,23 +374,24 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     KsnProcPointsDecision decision={0};
     if(slot->points){
         proc_points *p=slot->points;
-        const KsnProcPointSrc src={p->x,p->y};
-        const KsnProcPointDst dst={p->out_x,p->out_y};
+        const KsnProcPointSrc src={points_plane(p,PLANE_X),points_plane(p,PLANE_Y)};
+        const KsnProcPointDst dst={points_plane(p,PLANE_OUT_X),points_plane(p,PLANE_OUT_Y)};
+        const int16_t *out_x=dst.x,*out_y=dst.y;
         if(!ksn_proc_plan_run_points_affine(slot->plan,dst,src,p->count,&decision)){
             building=false;
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"typed point run failed");
         }
         typed_segments=p->count-1;
         for(unsigned i=0;i<p->count;i++){
-            if(p->out_x[i]<PROC_POINT_LOW||p->out_x[i]>PROC_POINT_HIGH||
-               p->out_y[i]<PROC_POINT_LOW||p->out_y[i]>PROC_POINT_HIGH){
+            if(out_x[i]<PROC_POINT_LOW||out_x[i]>PROC_POINT_HIGH||
+               out_y[i]<PROC_POINT_LOW||out_y[i]>PROC_POINT_HIGH){
                 building=false;
                 return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
                                "typed point outside -480..720");
             }
             if(i){
-                int dx=abs(p->out_x[i]-p->out_x[i-1]);
-                int dy=abs(p->out_y[i]-p->out_y[i-1]);
+                int dx=abs(out_x[i]-out_x[i-1]);
+                int dy=abs(out_y[i]-out_y[i-1]);
                 typed_steps+=(unsigned)(dx>dy?dx:dy)+1u;
             }
         }
@@ -373,9 +407,10 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     candidate->raster_steps+=scratch->raster_steps;
     if(slot->points){
         const proc_points *p=slot->points;
+        const int16_t *out_x=points_plane(p,PLANE_OUT_X),*out_y=points_plane(p,PLANE_OUT_Y);
         for(unsigned i=1;i<p->count;i++)
             candidate->segments[candidate->count++]=(ksn_proc_segment){
-                p->out_x[i-1],p->out_y[i-1],p->out_x[i],p->out_y[i],p->color};
+                out_x[i-1],out_y[i-1],out_x[i],out_y[i],p->color};
         candidate->raster_steps+=(uint16_t)typed_steps;
         if(decision.backend==KSN_PROC_POINTS_PIE)pie_batches++;
         else scalar_batches++;
@@ -472,7 +507,7 @@ esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
 }
 void pocket_proc_reset(void){
     for(unsigned i=0;i<PROC_HANDLES;i++){
-        free(slots[i].plan);free(slots[i].point_allocation);slots[i]=(proc_slot){0};
+        free(slots[i].plan);free(slots[i].points);slots[i]=(proc_slot){0};
     }
     for(unsigned i=0;i<PROC_SURFACES;i++){
         free(surfaces[i].candidate);free(surfaces[i].committed);
@@ -492,7 +527,10 @@ void pocket_proc_batch_counts(uint32_t *scalar,uint32_t *pie){
 }
 void pocket_proc_end_turn(void){
     /* A thrown JS frame must not carry an unfinished candidate into the next
-     * owner turn. Previously committed or pending presentation stays intact. */
+     * owner turn. Previously committed or pending presentation stays intact.
+     * Not called at the end of a host turn that the VM parked: that frame()
+     * resumes in the continuation and still owns its candidate
+     * (pocket_kasane_park_turn, end_guest_turn in app_session.c). */
     building=false;
 }
 bool pocket_proc_has_frame(void){

@@ -26,6 +26,7 @@
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
 #include "pocket_kasane.h"
+#include "pocket_proc.h"
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 #include "pocket_pixel.h"
 #endif
@@ -36,9 +37,6 @@
 #ifdef KASANE_PROC_DEVICE_PROBE
 #include "pocket_grid.h"
 #include "ui/kasane/ksn_proc_grid_resize.h"
-#endif
-#ifdef KASANE_PROC_JS_DIAGNOSTIC
-#include "pocket_proc.h"
 #endif
 #ifdef KASANE_PROC_LIMITS_PROBE
 #include "ksn_proc_limits_device_probe.h"
@@ -67,6 +65,8 @@ extern const char proc_limits_probe_start[] asm("_binary_proc_limits_probe_js_st
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+// Defined next to dispatch_guest(); the evaluation and overlay turns use it too.
+static void end_guest_turn(void);
 #ifdef CONFIG_POCKET_VM_SELFTEST
 #include "quickjs-vm.h"
 // UI-task-only diagnostic state; never expose or mutate JS while it is parked.
@@ -504,6 +504,10 @@ void app_vm_prepare_stop(void) {
     if(guest) pocketjs_guest_reloc_report(guest);
 #endif
     if(guest) pocketjs_guest_prepare_stop(guest);
+    // A frame() parked with beginFrame() open has just been terminated, not
+    // finished. The stop hook runs next and must not find its half built
+    // procedural frame (end_guest_turn() kept it for a resume that is gone).
+    pocket_kasane_end_turn();
 }
 void app_request_stop(void) { atomic_store(&stop_requested,true); }
 
@@ -939,6 +943,9 @@ esp_err_t app_suspend(void) {
         ESP_LOGW("app","APP_SUSPEND_REFUSED work pending");
         return ESP_ERR_INVALID_STATE;
     }
+    // The drain above finished the logical turn outside app_tick(); close it
+    // as a turn would, before the suspend hook can run.
+    pocket_kasane_end_turn();
     if(!pocket_app_run_suspend(began+APP_SUSPEND_HOOK_US)) {
         ESP_LOGW("app","APP_SUSPEND_REFUSED suspend hook");
         return ESP_FAIL;
@@ -1482,7 +1489,7 @@ source_ready:;
         pocket_kasane_prepare();
     if(user_source) err=eval_user_source(source,length);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
-    pocket_kasane_end_turn();
+    end_guest_turn();
     if(err!=ESP_OK)goto fail;
 #ifdef CONFIG_POCKET_VM_PROBE
     // sec.5's fixed contention conditions, applied to a probe workload only.
@@ -1591,7 +1598,7 @@ esp_err_t app_overlay_tick(void) {
     // overlay does not install. The drain is resumed directly.
     if(pocketjs_guest_work_pending(guest)) {
         esp_err_t ce=pocketjs_guest_continue(guest);
-        pocket_kasane_end_turn();
+        end_guest_turn();
         report_oom_if_any();
 #ifdef CONFIG_POCKET_VM_PROBE
         vmprobe_continuation_sample(guest);
@@ -1633,7 +1640,7 @@ esp_err_t app_overlay_tick(void) {
     pocket_av_pump();
     pocketjs_guest_frame_t f={.struct_size=sizeof(f)};
     esp_err_t e=pocketjs_guest_frame(guest,&f);
-    pocket_kasane_end_turn();
+    end_guest_turn();
     frames++;
     report_oom_if_any();
     if(e!=ESP_OK)return e;
@@ -1712,6 +1719,19 @@ static void run_pumps(uint32_t buttons) {
     // The same mask the turn below is handed: pocket.input reports what the
     // host forwarded, never a second reading of the keyboard.
     pocket_input_pump(buttons);
+}
+
+// The end of a HOST turn is not always the end of the guest's turn. frame()
+// that the budget parked mid-body (L2c), or a drain cut between jobs (L1), is
+// resumed by the next continuation as the same logical turn, so a procedural
+// frame it opened with beginFrame() must still be open there -- dropping it
+// made every frame longer than VM_TURN_BUDGET_US uncommittable, whatever the
+// 33 ms period had left. Only a turn with nothing left to resume ends it: that
+// is a frame() that returned or threw, and a thrown one must not leave a half
+// built candidate for the next frame() to commit.
+static void end_guest_turn(void) {
+    if(pocketjs_guest_work_pending(guest)) pocket_kasane_park_turn();
+    else pocket_kasane_end_turn();
 }
 
 // One call into the guest. The Cardputer supplies a pad mask, centered analog
@@ -1805,7 +1825,7 @@ esp_err_t app_tick(uint32_t buttons) {
         // would make PAINT's turn_ms report only the cheap turns.
         int64_t cont_began=esp_timer_get_time();
         esp_err_t ce=dispatch_guest(true,0);
-        pocket_kasane_end_turn();
+        end_guest_turn();
         uint32_t continuation_us=(uint32_t)(esp_timer_get_time()-cont_began);
         turn_sum+=(double)continuation_us; ticks++;
 #ifdef CONFIG_POCKET_VM_TURNPERF
@@ -1852,7 +1872,14 @@ esp_err_t app_tick(uint32_t buttons) {
         // collection got a frame parked). Give the ticket its display turn
         // here, as the top-of-turn gate does, and hold this turn's keys for
         // the next one. Back is not held: it is the guest's last save turn.
-        if(!leaving&&pocket_kasane_has_submission()) {
+        //
+        // A procedural commit() is the same case without a ticket: it marks
+        // the frame pending and invalidates, and the next frame()'s
+        // beginFrame() would meet that pending frame and throw BUSY. Only
+        // possible since a parked frame keeps its procedural frame
+        // (end_guest_turn()); measured on the device as one lost frame after
+        // every frame that spanned a park.
+        if(!leaving&&(pocket_kasane_has_submission()||pocket_proc_pending())) {
             deferred_buttons|=buttons;
             return present_frame();
         }
@@ -1865,7 +1892,7 @@ esp_err_t app_tick(uint32_t buttons) {
     buttons|=deferred_buttons; deferred_buttons=0;
     pocket_memory_pump((buttons&0x2000)!=0||atomic_load(&stop_requested));
     run_pumps(buttons);
-    pocket_kasane_end_turn();
+    end_guest_turn();
     // The JS side of the frame: frame() in QuickJS. Timed on every tick, painted or not, so turn_ms is its own number
     // next to render_ms rather than hidden inside the frame period.
     int64_t turning=esp_timer_get_time();
@@ -1873,7 +1900,7 @@ esp_err_t app_tick(uint32_t buttons) {
     uint32_t tp0,tp1; turnperf_read(&tp0,&tp1);
 #endif
     esp_err_t e=dispatch_guest(false,buttons);
-    pocket_kasane_end_turn();
+    end_guest_turn();
 #ifdef CONFIG_POCKET_VM_TURNPERF
     turnperf_add(tp0,tp1,(uint32_t)(esp_timer_get_time()-turning));
 #endif

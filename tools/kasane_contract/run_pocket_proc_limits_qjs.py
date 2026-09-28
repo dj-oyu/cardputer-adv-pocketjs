@@ -47,10 +47,16 @@ def main():
     env=os.environ.copy()
     env.setdefault('ASAN_OPTIONS','detect_leaks=1:abort_on_error=1')
     env.setdefault('UBSAN_OPTIONS','halt_on_error=1:print_stacktrace=1')
+    # The turn contract (parked frame, limit before allocation, per-count
+    # points) is its own binary: it force-includes an allocation hook that
+    # must not reach the limits test's own leak accounting.
+    turn=[*sources[:-1],ROOT/'tools/kasane_contract/test_pocket_proc_turn_qjs.c']
+    hook=['-include',str(ROOT/'tools/kasane_contract/proc_alloc_hook.h')]
     for label,flags,extra in arms:
-        binary=OUT/f'test_pocket_proc_limits_{label}'
-        subprocess.run([*base,*flags,*(str(s) for s in [*sources,*extra]),*objects,
-                        '-lm','-o',str(binary)],cwd=ROOT,check=True)
-        subprocess.run([str(binary)],cwd=ROOT,env=env,check=True)
+        for name,srcs,more in (('limits',sources,[]),('turn',turn,hook)):
+            binary=OUT/f'test_pocket_proc_{name}_{label}'
+            subprocess.run([*base,*flags,*more,*(str(s) for s in [*srcs,*extra]),*objects,
+                            '-lm','-o',str(binary)],cwd=ROOT,check=True)
+            subprocess.run([str(binary)],cwd=ROOT,env=env,check=True)
 
 if __name__=='__main__':main()

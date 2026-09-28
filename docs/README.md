@@ -95,7 +95,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [残タスク](kasane/roadmap.md) | 実装・実測・未達を分けたロードマップ再評価用の表 |
 | [動的描画ロードマップ](kasane/dynamic-rendering-roadmap.md) | 関数アート・描画面・動画を、FLOWERとKasaneの実測を参照しながら段階的に進める構想 |
 | [手続き型描画の実機診断](kasane/procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。実測前の準備 |
-| [手続き型描画の上限緩和の実機検証](kasane/procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合、仕様上限の棚卸し（2026-09-29 実測） |
+| [手続き型描画の上限緩和の実機検証](kasane/procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
 
 ## JS API — [`api/`](api/)
 

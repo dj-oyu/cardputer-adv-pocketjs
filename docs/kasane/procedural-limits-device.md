@@ -122,6 +122,8 @@ native の確保はゲストの `heap_limit` に数えられないので、ア�
 
 ## 5. 見つかった不具合
 
+（3件とも `vm/proc-turn-budget` で修正した。原因の確定・修正・修正後の実測は §7。）
+
 ### フレームがターン予算で中断されると、組み立て中のフレームが消える
 
 再現（通常 image も同じ経路を通る。コードを読んだ判断で、通常 image での実行は未確認）:
@@ -170,9 +172,64 @@ globalThis.frame = () => {
 | 入力8・レジスタ16・入れ子8 | 実機で正しく動き、コストは測定誤差内 | 今回の緩和で足りている |
 | 登録数/フレーム（上限なし） | 128点 plan の登録は1本 1.7 ms。5本前後でターン予算を超える | 不具合の側で効く。上限を足す必要はない |
 
+## 7. 修正（`vm/proc-turn-budget`、2026-09-29）
+
+### 原因の確定
+
+`app_session.c` はホストのターン（frame() の呼出し1回、または継続1回）の終わりに毎回 `pocket_kasane_end_turn()` を呼び、そこから `pocket_proc_end_turn()` が `building=false` にしていた。前提は「ホストのターンの終わり＝ゲストのターンの終わり」で、L1（ジョブ列を予算で切る）と L2c（frame() 本体を opcode で park する）以降は成り立たない。park された frame() は次の継続で**同じ論理ターン**として再開する（`pocketjs_guest_work_pending()` が真の間）。`end_turn` の目的（例外で終わったフレームの候補を持ち越さない）に当たるのは「再開するものが残っていないターン」だけだった。
+
+Kasane の view builder（`replace`/`patch` の build）は同じ関数で abort されるが、こちらは1回のネイティブ呼出しの中で開いて閉じ、ネイティブからの再入は park できる床にならない（vm-L2-design §11.2）ので、park をまたいで開いていることはない。複数のネイティブ呼出しにまたがる状態を持つのは procedural だけだった。
+
+### 修正
+
+- `app_session.c` の `end_guest_turn()`: ゲストに再開する仕事が残っていれば `pocket_kasane_park_turn()`（view builder の abort と outcome の反映だけ）、残っていなければ従来の `pocket_kasane_end_turn()`。frame()・継続・overlay・起動時 eval の6か所をこれに置き換えた。
+- park 中に別の持ち主が来たとき: 停止（Back 後の teardown、`exit()`、runaway、別アプリ起動）は `app_vm_prepare_stop()` が park 中の鎖を終わらせた直後に `pocket_kasane_end_turn()` を呼ぶので、stop hook は開いたフレームを見ない。`app_suspend()` も自前の drain の後で閉じる。Back の leave ターンは yield しないので鎖は完了し、そのターンの終わりで閉じる。park 中の dormant 化は `pocketjs_guest_set_dormant()` が拒む（既存）。
+- 継続が park していた frame() を終え、その中の `commit()` が frame を pending にした場合、同じターンで次の frame() を呼ぶと `beginFrame()` が `BUSY` になる（実機で1回目の修正 image が `PocketError: previous frame awaits presentation` で止まって判明）。R3a の「継続が提出した ticket に表示ターンを与える」条件に `pocket_proc_pending()` を足した。
+- `register()`: 命令配列を読む前に空き slot と handle を確かめる。満杯なら配列の読み取りも確保もせずに `LIMIT_EXCEEDED`。
+- 点列: `proc_points` を「4 B の header＋4面×round8(点数)」の1確保にした（`19+8·round8(n)` B、round8 は8の倍数への切り上げ）。40点で 339 B（従来 1,055 B）、128点で 1,043 B。各面は16 B 整列を保ち、PIE kernel は [0,n) だけを読み書きする（`test_proc_points_pie_host.c` の末尾ガード）ので、kernel は変えていない。
+
+却下した案: (a) `end_turn` をやめる — 例外で終わったフレームの候補が次の frame() の `draw`/`commit` に混ざる。(b) 例外かどうかを guest 側で判定して渡す — 継続で投げた場合・ジョブで投げた場合で経路が分かれ、`work_pending` の1条件より壊れやすい。(c) 点数を固定の小さい上限に下げる — 仕様変更になる。
+
+### host の確認
+
+- `test_pocket_proc_turn_qjs.c`（実 QuickJS＋L2c VM、ASan/UBSan、scalar と PIE 走査模型の2腕）: `JS_VMCall` の frame() がネイティブからの yield 要求で park し、旧挙動（park 中に end_turn）では再開後の `draw` が `BUSY`、新挙動では1回・3回 park したフレームが commit でき画素が一致。park 中に終了させた／例外で終わったフレームは何も持ち越さない。満杯時は getter を1度も呼ばずに `LIMIT_EXCEEDED`、確保失敗を注入しても `LIMIT_EXCEEDED`、空きがあれば `OUT_OF_MEMORY`。2〜128点の11通りで確保量が式どおり、scalar 参照と全画素一致、PIE 腕は整列検査つき 16 B 単位の読み書きを ASan の下で通過。
+- `tools/test_session_dispatch.py`: park したターンは `park_turn`、完了・例外のターンは `end_turn`、継続が commit を終えたら次の frame() の前に present。この試験は `pocket_video_sd_stream_reap` の代役が無くコンパイルできない状態だったので、代役を足した。
+- `tools/kasane_contract/run.sh` 全通過。
+
+### 実機（診断 image `-DKASANE_PROC_LIMITS_PROBE=ON`、`--skip-native`）
+
+| 項目 | 修正前（§1・§5） | 修正後（実測） |
+| --- | --- | --- |
+| `PARK draw_after_12ms / commit` | BUSY / BUSY | OK / OK |
+| `VMDRAW`（10,000 step SIN、25.3 ms）の commit | BUSY | OK |
+| `VMFRAME`（4.3 ms の draw を n 回） | 2回まで | 6回まで全部（最大 50 ms） |
+| 場面切替（switch16b/c）の落ちたフレーム | 各1 | 0（そのフレームは 62.8 ms 後に表示） |
+| capture と host 参照 | 差 0 | 差 0 |
+| 累計登録・`LIMITS_DONE fails` | 2,285 / 0 | 2,282 / 0 |
+
+25 ms の SIN draw を1フレームに k 回入れたフレーム（各6フレーム、落ちたフレーム0、`busy`0）:
+
+| k | frame() の開始から終了（平均） | フレーム間隔 平均 / 最大 |
+| ---: | ---: | ---: |
+| 1 | 32.6 ms | 66.1 / 68.3 ms |
+| 2 | 60.4 ms | 68.7 / 70.4 ms |
+| 3 | 87.4 ms | 95.8 / 97.0 ms |
+| 4 | 114.7 ms | 123.3 / 124.0 ms |
+| 6 | 168.5 ms | 177.0 / 178.0 ms |
+| 8 | 222.6 ms | 231.2 / 232.0 ms |
+| 9 | 249.0 ms | 257.2 / 258.0 ms |
+
+実効のフレーム時間予算は 8 ms ではなくなり、上限は既存の `VM_FRAME_RUNAWAY_US`（250 ms、frame() の実行時間の累計）になった。k=9 はその 0.4% 手前で、k=10 は runaway でアプリが止まるはず（計算。実行していない）。新しい上限は導入していないので `limits` は変えていない。1回の draw は中断されないので、25 ms の draw の直後に park し、表示は継続ターンが 33 ms ごとに進める。100 ms のフレームを回している最中の Back はホームまで 110 ms（ホスト時計、USB 込み）。
+
+40点の点列付き plan は、2面目が残りゲスト 117 KB の状態（空き 41.8 KB）で30本まで登録でき、31本目が `OUT_OF_MEMORY`（そのとき最小空き 324 B）。従来の 1,055 B 確保ならこの空きでは約20本（計算: plan 872 B＋点列＋管理分 約 70 B で割った値）。
+
+### 通常 image（診断なし）
+
+MEGADEMO（APPS から起動→全画面→小窓→全画面→Back、2回）PASS、`smoke_device.py --cycles 20` SMOKE_OK（HELLO WORLD）、`stress_app.py` PASS、`test_app_resume.py`（IMU CAL/PET/COMPANION の中断・再開・退去）PASS。
+
 ## 追加で測るべきこと
 
-- ターン予算の不具合を直した image で、同じ `}` を回す（VMFRAME と場面切替の落ちるフレームが0になるか）。
+- ~~ターン予算の不具合を直した image で、同じ `}` を回す~~（§7 で実施）。
 - ゲストが小さい実アプリ（MEGADEMO など）の heap で、32本×128点がどこまで入るか。今回のゲストは約 112 KB で、通常アプリより大きい。
 - 音声・FLOWER・Wi-Fi 通信を同時に動かしたときの帯描画と VM の時間。
 - パネル側の表示は目視していない（capture は送信前バッファ）。
