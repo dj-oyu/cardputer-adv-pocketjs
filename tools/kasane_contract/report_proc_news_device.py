@@ -12,7 +12,8 @@ FRAME = re.compile(
 PAINT = re.compile(rb"KASANE_PAINT [^\n]*")
 NUMBER = re.compile(rb"\b([a-z_]+)=([\d.]+)")
 PHASES = (("monitor", 1, 19), ("zoom-in", 20, 63),
-          ("full", 64, 115), ("zoom-out", 116, 159))
+          ("full", 64, 115), ("zoom-out", 116, 159),
+          ("zoom-out-wide", 116, 139), ("zoom-out-narrow", 140, 159))
 
 
 def main() -> None:

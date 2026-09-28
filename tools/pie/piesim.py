@@ -24,6 +24,8 @@ Supported instructions (TRM section in brackets):
     ee.vunzip.16 [1.8.207]   ee.vzip.8 [1.8.212]      ee.zero.q [1.8.216]
     ee.zero.qacc [1.8.217]   ee.mov.u16.qacc [1.8.116]  ee.mov.s16.qacc [1.8.109]
     ee.vmulas.u16.qacc [1.8.163]  ee.vmulas.s16.qacc [1.8.160]
+    ee.vmulas.s16.qacc.ld.ip/.ld.xp/.ldbc.incp [1.8.140/142/144]
+    ee.vmulas.s16.qacc.ld.ip.qup [1.8.141]
     ee.srcmb.s16.qacc [1.8.54]
     ee.vprelu.s16 [1.8.182]  and the fused forms ee.vadds.s16.ld.incp [1.8.71],
     ee.vsubs.s16.ld.incp [1.8.199], ee.vmul.s16.ld.incp [1.8.123], ee.vmul.u16.ld.incp [1.8.129]
@@ -85,6 +87,17 @@ class Sim:
         for i in range(8):
             self.mem[a + 2 * i] = v[i] & 0xFF
             self.mem[a + 2 * i + 1] = (v[i] >> 8) & 0xFF
+
+    def _mac_s16_qacc(self, x, y):
+        lim = (1 << 39) - 1
+        self.qacc = [max(-(1 << 39), min(self.qacc[i] + s16(x[i]) * s16(y[i]), lim))
+                     for i in range(8)]
+
+    def _src_q(self, low, high):
+        bits = sum(v << (16 * i) for i, v in enumerate(low))
+        bits |= sum(v << (128 + 16 * i) for i, v in enumerate(high))
+        bits >>= (self.sar_byte & 15) * 8
+        return [(bits >> (16 * i)) & 0xFFFF for i in range(8)]
 
     # ---- lane arithmetic shared by the plain and the fused (.LD.INCP) forms ----
     def _alu(self, op, x, y):
@@ -249,10 +262,36 @@ class Sim:
             elif op == 'ee.vmulas.s16.qacc':
                 # 1.8.160: QACC_L[i] = clamp(QACC_L[i] + qx[16i+15:16i] * qy[16i+15:16i], -2^39, 2^39-1).
                 # Signed lanes, and the clamp is two-sided -- the unsigned form above is not a substitute.
-                x, y = Q[qi(a[0])], Q[qi(a[1])]
-                lim = (1 << 39) - 1
-                self.qacc = [max(-(1 << 39), min(self.qacc[i] + s16(x[i]) * s16(y[i]), lim))
-                             for i in range(8)]
+                self._mac_s16_qacc(Q[qi(a[0])], Q[qi(a[1])])
+            elif op in ('ee.vmulas.s16.qacc.ld.ip',
+                        'ee.vmulas.s16.qacc.ld.xp',
+                        'ee.vmulas.s16.qacc.ldbc.incp',
+                        'ee.vmulas.s16.qacc.ld.ip.qup'):
+                # TRM 1.8.140/141/142/144. Read every Q operand before the
+                # fused load: a destination may also be a multiplication input.
+                qu, addr = qi(a[0]), arv(a[1])
+                bc = op.endswith('.ldbc.incp')
+                xarg, yarg = (2, 3) if bc else (3, 4)
+                x, y = Q[qi(a[xarg])][:], Q[qi(a[yarg])][:]
+                if not bc and op.startswith('ee.vmulas.s16.qacc.ld.ip'):
+                    inc = int(a[2])  # encoded signed 6-bit immediate * 16
+                    if inc < -512 or inc > 496 or inc % 16:
+                        raise ValueError('LD.IP immediate must be -512..496 in steps of 16')
+                qup = op.endswith('.qup')
+                if qup:
+                    qs0, qs1 = qi(a[5]), qi(a[6])
+                    shifted = self._src_q(Q[qs0], Q[qs1])
+                self._mac_s16_qacc(x, y)
+                if bc:
+                    Q[qu] = [self.ld16(addr & ~1)] * 8
+                    inc = 2
+                else:
+                    Q[qu] = self.ldq(addr)  # load address rounds down to 16 B
+                    if op.startswith('ee.vmulas.s16.qacc.ld.xp'):
+                        inc = arv(a[2])
+                arset(a[1], addr + inc)
+                if qup:
+                    Q[qs0] = shifted
             elif op == 'ee.ld.128.usar.ip':
                 # 1.8.90: qu = load128(as & ~15); SAR_BYTE = as[3:0]; as += imm.
                 # The immediate is in bytes and a multiple of 16 -- checked against the Espressif
@@ -267,13 +306,7 @@ class Sim:
                 # when qs0 came from the USAR load that contained it. SAR_BYTE is SAR[3:0], so it is
                 # whatever wrote the shift last -- a USAR load or a plain `wsr.sar` (the FIR kernel
                 # walks the byte offset with wsr.sar and never loads through USAR).
-                low, high = Q[qi(a[1])], Q[qi(a[2])]
-                bits = 0
-                for i in range(8):
-                    bits |= low[i] << (16 * i)
-                    bits |= high[i] << (128 + 16 * i)
-                bits >>= (self.sar_byte & 15) * 8
-                Q[qi(a[0])] = [(bits >> (16 * i)) & 0xFFFF for i in range(8)]
+                Q[qi(a[0])] = self._src_q(Q[qi(a[1])], Q[qi(a[2])])
             elif op == 'ee.srs.accx':
                 # 1.8.65: ACCX >>= as[5:0] (in place); au = clamp(that, -2^31, 2^31-1).
                 n = arv(a[1]) & 63

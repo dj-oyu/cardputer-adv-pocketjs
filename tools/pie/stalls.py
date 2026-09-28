@@ -38,8 +38,10 @@ from piesim import extract_asm
 # Producers that define their QR result at pipeline stage 2 (TRM table 1.7-2).
 STAGE2 = {'ee.vld.128.ip', 'ee.vld.l.64.ip', 'ee.vldbc.16', 'ee.vldbc.16.ip', 'ee.ldxq.32',
           'ee.vmul.s16', 'ee.vmul.u16', 'ee.vrelu.s16', 'ee.vprelu.s16'}
+FUSED_MAC_LOAD = {'ee.vmulas.s16.qacc.ld.ip', 'ee.vmulas.s16.qacc.ld.xp',
+                  'ee.vmulas.s16.qacc.ldbc.incp', 'ee.vmulas.s16.qacc.ld.ip.qup'}
 MEMORY = {'ee.vld.128.ip', 'ee.vld.l.64.ip', 'ee.vldbc.16', 'ee.vldbc.16.ip', 'ee.ldxq.32',
-          'ee.vst.128.ip'}
+          'ee.vst.128.ip'} | FUSED_MAC_LOAD
 # Measured machine floor (docs/perf/pie-simd.md 2.1): one cycle per instruction, of
 # any kind -- loads, fused loads and indexed loads included. The store is the
 # only instruction that was measurably more.
@@ -49,6 +51,12 @@ SIZE = {'ee.ldxq.32': 4, 'mov': 2, 'addi': 2, 'wsr.sar': 3, 'loopgtz': 3, 'bnez'
 
 def operands(op, qs):
     """-> (defs, uses): defs as (register, stage) pairs, uses as registers."""
+    if op in FUSED_MAC_LOAD:
+        # Table 1.7-2: qu is the stage-2 load result; QUP additionally
+        # rewrites qs0 at stage 1. All source QRs are read before either write.
+        if op.endswith('.qup'):
+            return [(qs[3], 1), (qs[0], 2)], qs[1:5]
+        return [(qs[0], 2)], qs[1:3]
     if op.endswith('.ld.incp'):                    # EE.<alu>.LD.INCP qu, as, qa, qx, qy
         base = op[:-len('.ld.incp')]
         return [(qs[0], 2), (qs[1], 2 if base in STAGE2 else 1)], qs[2:4]
@@ -151,7 +159,7 @@ def main():
         print(f'{len(stalls)} stall(s): producer -> consumer (index: op) on register')
         for j, pop, i, cop, r in stalls:
             print(f'  {j:3}: {pop:<20} -> {i:3}: {cop:<20} {r}')
-    fused = sum(op.endswith('.ld.incp') for op, _, _ in body)
+    fused = sum(op.endswith('.ld.incp') or op in FUSED_MAC_LOAD for op, _, _ in body)
     stores = sum(op == 'ee.vst.128.ip' for op, _, _ in body)
     cycles = total + stores * STORE + len(stalls)
     print(f'estimated cycles per block: {cycles:.1f} ({total} issue'

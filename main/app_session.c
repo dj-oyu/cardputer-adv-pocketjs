@@ -8,6 +8,7 @@
 #include "pocket_random.h"
 #include "pocket_storage.h"
 #include "pocket_fs.h"
+#include "pocket_video_sd_stream.h"
 #include "pocket_imu.h"
 #include "pocket_av.h"
 #include "pocket_av_output_source.h"
@@ -25,6 +26,20 @@
 #include "pocket_workspace.h"
 #include "pocket_overlay.h"
 #include "pocket_kasane.h"
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+#include "pocket_pixel.h"
+#endif
+#if defined(KASANE_D4_PIXEL_APP_PROBE) || defined(KASANE_D2_MULTI_SURFACE_PROBE)
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
+#ifdef KASANE_PROC_DEVICE_PROBE
+#include "pocket_grid.h"
+#include "ui/kasane/ksn_proc_grid_resize.h"
+#endif
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+#include "pocket_proc.h"
+#endif
 #include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_input.h"
 #include "ksn_font.h"
@@ -281,6 +296,12 @@ static bool overlay_session;
  * without charging every native frame for a JS turn. Reset per session. */
 static int64_t overlay_guest_last_us;
 static bool kasane_presented;
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+/* Diagnostic image only: fail the second strip of the first pixel candidate.
+ * The pending program must survive and be reread on the following present. */
+static bool d4_pixel_injected, d4_pixel_retry;
+static int d4_pixel_fail_after=-1;
+#endif
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
 static bool news_prof_active;
 static int news_prof_previous;
@@ -317,6 +338,12 @@ static uint16_t *kasane_strip(void *opaque) {
 static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
                              const uint16_t *pixels) {
     kasane_display_t *display=opaque;
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+    if(d4_pixel_fail_after>=0&&d4_pixel_fail_after--==0){
+        ESP_LOGW("D4_PIXEL","FAIL second_send y=%u",(unsigned)y);
+        d4_pixel_retry=true;return KSN_IO;
+    }
+#endif
 #ifdef KASANE_P2_REPAIR_PROBE
     if(p2_repair_stage==1&&p2_capture_repair_only&&p2_sends_before_failure>=0)
         ESP_LOGI("KSN_P2","SEND_FULL y=%u rows=%u",(unsigned)y,(unsigned)rows);
@@ -343,6 +370,12 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
 static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t cols,
                                    uint16_t rows,const uint16_t *pixels) {
     kasane_display_t *display=opaque;
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+    if(d4_pixel_fail_after>=0&&d4_pixel_fail_after--==0){
+        ESP_LOGW("D4_PIXEL","FAIL second_send x=%u y=%u",(unsigned)x,(unsigned)y);
+        d4_pixel_retry=true;return KSN_IO;
+    }
+#endif
 #ifdef KASANE_P2_REPAIR_PROBE
     if(p2_repair_stage==1&&p2_capture_repair_only&&p2_sends_before_failure>=0)
         ESP_LOGI("KSN_P2","SEND_RECT x=%u y=%u cols=%u rows=%u",
@@ -1287,6 +1320,7 @@ esp_err_t app_overlay_tick(void) {
     // AFTER pocket_api_pump(), exactly as app_tick() has them: these two post
     // no completions of their own, they move bytes for work already promised.
     pocket_fs_pump();
+    pocket_video_sd_stream_reap();
     pocket_av_pump();
     pocketjs_guest_frame_t f={.struct_size=sizeof(f)};
     esp_err_t e=pocketjs_guest_frame(guest,&f);
@@ -1364,6 +1398,7 @@ static void run_pumps(uint32_t buttons) {
     // not ticked at all, so a grant is announced on the first frame after the
     // person chose, which is the first frame the app could act on it.
     pocket_fs_pump();
+    pocket_video_sd_stream_reap();
     pocket_av_pump();
     // The same mask the turn below is handed: pocket.input reports what the
     // host forwarded, never a second reading of the keyboard.
@@ -1630,8 +1665,35 @@ static esp_err_t present_frame(void) {
                               .width=LCD_W,.height=LCD_H,.strip_rows=STRIP_H,.text=&ksn_font_port,
                               .present_rect=board_capture_active()?NULL:kasane_send_rect};
         ksn_render_stats stats;
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+        bool d4_pixel_candidate=pocket_pixel_pending();
+        if(d4_pixel_candidate&&!d4_pixel_injected){
+            d4_pixel_injected=true;d4_pixel_fail_after=1;
+            ESP_LOGI("D4_PIXEL","ARMED second_send");
+        }
+#endif
         int64_t began=esp_timer_get_time();
         ksn_result result=pocket_kasane_present(&port,&stats);
+#ifdef KASANE_D2_MULTI_SURFACE_PROBE
+        ESP_LOGI("D2_MULTI","PRESENT result=%u bytes=%u duration_us=%u "
+                 "heap_free=%u heap_largest=%u stack_hwm_bytes=%u",
+                 (unsigned)result,(unsigned)stats.transferred_bytes,
+                 (unsigned)(esp_timer_get_time()-began),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+                 (unsigned)uxTaskGetStackHighWaterMark(NULL));
+#endif
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+        if(d4_pixel_candidate)
+            ESP_LOGI("D4_PIXEL","PRESENT result=%u duration_us=%u stack_hwm_bytes=%u",
+                     (unsigned)result,(unsigned)(esp_timer_get_time()-began),
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        if(d4_pixel_retry&&result==KSN_OK){
+            ESP_LOGI("D4_PIXEL","RETRY_OK stack_hwm_bytes=%u",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            d4_pixel_retry=false;
+        }
+#endif
         if(result==KSN_OK)pocket_kasane_animations_presented((uint64_t)esp_timer_get_time());
         unsigned whole=(unsigned)(esp_timer_get_time()-began);
         frames++;
@@ -1684,6 +1746,15 @@ static esp_err_t present_frame(void) {
             // the flag when a kasane session starts.
             if(!kasane_presented){kasane_presented=true;ESP_LOGI("kasane","KASANE_FRAME_PRESENTED");}
             if(painted==30) {
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+                if(news_prof_active){
+                    uint32_t band_n,band_cy,span_n,span_cy;
+                    pocket_proc_image_prof_read(&band_n,&band_cy,&span_n,&span_cy);
+                    ESP_LOGI("kasane","PROC_IMAGE band_n=%u band_cy=%u span_n=%u span_cy=%u frames=%u",
+                             (unsigned)band_n,(unsigned)band_cy,(unsigned)span_n,
+                             (unsigned)span_cy,painted);
+                }
+#endif
                 ESP_LOGI("kasane","KASANE_PAINT turn_ms=%.2f render_ms=%.2f send_ms=%.2f "
                          "bytes=%u bands=%u band_runs=%u band_mask=0x%05x prof=%d "
                          "fill_n=%u fill_cy=%u span_n=%u span_cy=%u tile_n=%u tile_cy=%u "
@@ -1698,6 +1769,23 @@ static esp_err_t present_frame(void) {
                          (unsigned)prof_sum.blend_n,(unsigned)prof_sum.blend_cy,
                          (unsigned)prof_sum.read_n,(unsigned)prof_sum.read_cy,
                          (unsigned)prof_sum.image_n,(unsigned)prof_sum.image_cy,painted);
+#ifdef KASANE_PROC_DEVICE_PROBE
+                {
+                    pocket_grid_resize_profile resize_prof;
+                    pocket_grid_resize_profile_read(&resize_prof);
+                    ESP_LOGI("kasane", "GRID_RESIZE_STREAM source_reads=%u source_cycles=%llu kernel_spans=%u kernel_cycles=%llu frames=%u",
+                             (unsigned)resize_prof.source_reads,
+                             (unsigned long long)resize_prof.source_cycles,
+                             (unsigned)resize_prof.kernel_spans,
+                             (unsigned long long)resize_prof.kernel_cycles,
+                             painted);
+                    ksn_grid_resize_routes routes;
+                    ksn_grid_resize_routes_read(&routes);
+                    ESP_LOGI("kasane", "GRID_RESIZE_ROUTES flat=%u sparse=%u dense=%u frames=%u",
+                             (unsigned)routes.flat, (unsigned)routes.sparse,
+                             (unsigned)routes.dense, painted);
+                }
+#endif
 #if KASANE_STRESS_GRAD_AB
                 ESP_LOGI("kasane","GRAD_AB window=%u pie=%d bytes_avg=%.1f",
                          grad_ab_window,g_ksn_vertical_gradient_pie,grad_ab_bytes/30.0);

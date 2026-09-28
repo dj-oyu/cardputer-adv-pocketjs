@@ -34,6 +34,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', default='COM3')
     parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--dynamic-flower', action='store_true',
+                        help='compare sent rows with the retry while FLOWER remains visible')
     args = parser.parse_args()
     if args.out.exists() and any(args.out.iterdir()):
         parser.error('--out must be a new or empty directory')
@@ -64,6 +66,37 @@ def main():
             return raw
 
         try:
+            if args.dynamic_flower:
+                # An interrupted backdrop present must retry the identical
+                # prepared scene. Compare only the three rows-bands already
+                # sent before failure; later frames may animate normally.
+                port.reset_input_buffer()
+                fault_raw = capture(b'^')
+                (args.out / 'fault-serial.log').write_bytes(fault_raw)
+                failed = fault_raw.find(b'KSN_P5_REPAIR: INJECT_FAIL y=24 after=3')
+                repaired = fault_raw.find(b'KSN_P5_REPAIR: REPAIR_OK bands=17 bytes=64800')
+                if failed < 0 or repaired < failed:
+                    raise RuntimeError('expected injected failure and complete repair')
+                first = rows(fault_raw[:failed])
+                if set(first) != set(range(24)):
+                    raise RuntimeError(f'expected first 24 rows before failure: {len(first)}')
+                repair_rows = rows(fault_raw[failed:repaired])
+                repaired_frame = full_frame(repair_rows)
+                (args.out / 'repair.rgb565').write_bytes(repaired_frame)
+                differences = sum(first[y][x:x + 2] != repair_rows[y][x:x + 2]
+                                  for y in range(24) for x in range(0, 480, 2))
+                summary = {
+                    'compared_pixels': 24 * 240,
+                    'sent_rows_sha256': hashlib.sha256(b''.join(first[y] for y in range(24))).hexdigest(),
+                    'repair_rows_sha256': hashlib.sha256(b''.join(repair_rows[y] for y in range(24))).hexdigest(),
+                    'difference_pixels': differences,
+                    'repair_bands_sent': 17,
+                }
+                (args.out / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+                print(json.dumps(summary, indent=2), flush=True)
+                if differences:
+                    raise RuntimeError(f'dynamic repair differs at {differences} pixels')
+                return
             # The music help presenter is full-screen black with static labels;
             # animation underneath it cannot change the expected RGB565 bytes.
             port.write(b'?')
@@ -112,6 +145,13 @@ def main():
             (args.out / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
             print(json.dumps(summary, indent=2), flush=True)
         finally:
+            # Leave the overlay cleanly before the caller restores firmware;
+            # otherwise its persisted start guard blocks the next boot.
+            at = len(events)
+            port.write(b'q')
+            deadline = time.monotonic() + 5
+            while b'HOME_READY' not in events[at:] and time.monotonic() < deadline:
+                events.extend(port.read(32768))
             (args.out / 'events.log').write_bytes(events)
 
 

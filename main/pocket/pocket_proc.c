@@ -1,8 +1,10 @@
 #include "pocket_proc.h"
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
+ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage);
 void pocket_kasane_invalidate(void);
 JSValue pocket_kasane_proc_resource(JSContext *ctx);
+JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #else
 #include "pocket_kasane.h"
 #endif
@@ -11,9 +13,22 @@ JSValue pocket_kasane_proc_resource(JSContext *ctx);
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+#include "esp_cpu.h"
+static uint32_t image_band_count,image_band_cycles,image_span_count,image_span_cycles;
+void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
+                                 uint32_t *span_count,uint32_t *span_cycles){
+    if(band_count)*band_count=image_band_count;
+    if(band_cycles)*band_cycles=image_band_cycles;
+    if(span_count)*span_count=image_span_count;
+    if(span_cycles)*span_cycles=image_span_cycles;
+    image_band_count=image_band_cycles=image_span_count=image_span_cycles=0;
+}
+#endif
 
 #define PROC_HANDLES 16u
 #define PROC_POINT_MAX 64u
+#define PROC_SURFACES 2u
 
 typedef struct {
     uint16_t count,color;
@@ -29,16 +44,26 @@ typedef struct {
 static proc_slot slots[PROC_HANDLES];
 static uint32_t next_handle;
 static uint32_t scalar_batches,pie_batches;
-static ksn_proc_frame *candidate,*scratch,*committed;
+typedef struct {
+    ksn_proc_frame *candidate,*committed;
+    uint16_t candidate_color,committed_color;
+    bool pending,has_committed,repair_required,image_mode;
+    uint32_t handle;
+    ksn_rect damage;
+} proc_surface;
+static proc_surface surfaces[PROC_SURFACES];
+static uint32_t next_surface_handle;
+static unsigned building_surface,pending_surface;
+static ksn_proc_frame *scratch;
 static ksn_proc_vm *vm;
-static uint16_t candidate_color,committed_color;
-static bool building,pending,has_committed,repair_required,image_mode;
+static bool building;
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
 #define PROC_IMAGE_BAND_ROWS 8u
 static uint16_t image_band[KSN_PROC_W*PROC_IMAGE_BAND_ROWS],image_band_y;
 static const ksn_proc_frame *image_band_frame;
 static uint16_t image_band_color;
+static unsigned image_band_surface;
 static bool image_band_valid;
 /* JS array elements may be accessors or Proxy traps. Nested calls must not
  * mutate a plan slot or frame while an outer call is still reading fields. */
@@ -133,12 +158,51 @@ static bool read_points(JSContext *ctx,JSValueConst descriptor,
                               terms[4],terms[5]};
     return true;
 }
-static bool buffers(void){
-    if(!candidate)candidate=calloc(1,sizeof *candidate);
+static bool buffers(proc_surface *surface){
+    if(!surface->candidate)surface->candidate=calloc(1,sizeof *surface->candidate);
     if(!scratch)scratch=calloc(1,sizeof *scratch);
-    if(!committed)committed=calloc(1,sizeof *committed);
+    if(!surface->committed)surface->committed=calloc(1,sizeof *surface->committed);
     if(!vm)vm=calloc(1,sizeof *vm);
-    return candidate&&scratch&&committed&&vm;
+    return surface->candidate&&scratch&&surface->committed&&vm;
+}
+static bool any_pending(void){
+    for(unsigned i=0;i<PROC_SURFACES;i++)if(surfaces[i].pending)return true;
+    return false;
+}
+static bool any_repair(void){
+    for(unsigned i=0;i<PROC_SURFACES;i++)if(surfaces[i].repair_required)return true;
+    return false;
+}
+static bool surface_index(JSContext *ctx,JSValueConst value,unsigned *index){
+    uint32_t handle;
+    if(!integer(ctx,value,INT32_MAX,&handle))return false;
+    if(handle==0){*index=0;return true;}
+    for(unsigned i=1;i<PROC_SURFACES;i++)if(surfaces[i].handle==handle){
+        *index=i;return true;
+    }
+    return false;
+}
+static ksn_rect frame_damage(const proc_surface *surface){
+    if(!surface->has_committed||surface->candidate_color!=surface->committed_color)
+        return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
+    int x0=KSN_PROC_W,y0=KSN_PROC_H,x1=0,y1=0;
+    const ksn_proc_frame *frames[]={surface->candidate,surface->committed};
+    for(unsigned f=0;f<2;f++)for(unsigned i=0;i<frames[f]->count;i++){
+        const ksn_proc_segment *seg=&frames[f]->segments[i];
+        int ax=seg->x0<seg->x1?seg->x0:seg->x1;
+        int bx=seg->x0>seg->x1?seg->x0:seg->x1;
+        int ay=seg->y0<seg->y1?seg->y0:seg->y1;
+        int by=seg->y0>seg->y1?seg->y0:seg->y1;
+        if(ax<x0)x0=ax;
+        if(ay<y0)y0=ay;
+        if(bx+1>x1)x1=bx+1;
+        if(by+1>y1)y1=by+1;
+    }
+    if(x0<0)x0=0;
+    if(y0<0)y0=0;
+    if(x1>KSN_PROC_W)x1=KSN_PROC_W;
+    if(y1>KSN_PROC_H)y1=KSN_PROC_H;
+    return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
 }
 static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
@@ -195,12 +259,17 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     (void)self;
     const char *op="kasane.procedural.beginFrame";
     uint32_t color;
-    if(argc!=1||!integer(ctx,argv[0],UINT16_MAX,&color))
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected RGB565 backdrop");
-    if(pending)return failure(ctx,op,POCKET_ERR_BUSY,"previous frame awaits presentation");
-    if(!buffers())return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame allocation failed");
-    memset(candidate,0,sizeof *candidate);
-    candidate_color=(uint16_t)color;
+    unsigned index=0;
+    if((argc!=1&&argc!=2)||!integer(ctx,argv[0],UINT16_MAX,&color)||
+       (argc==2&&!surface_index(ctx,argv[1],&index)))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected RGB565 and optional live surface ID");
+    if(any_pending()||any_repair())
+        return failure(ctx,op,POCKET_ERR_BUSY,"previous frame awaits presentation or repair");
+    proc_surface *surface=&surfaces[index];
+    if(!buffers(surface))return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame allocation failed");
+    memset(surface->candidate,0,sizeof *surface->candidate);
+    surface->candidate_color=(uint16_t)color;
+    building_surface=index;
     building=true;
     return JS_UNDEFINED;
 }
@@ -209,6 +278,7 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     const char *op="kasane.procedural.draw";
     uint32_t handle,length;
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    ksn_proc_frame *candidate=surfaces[building_surface].candidate;
     if(argc!=2||!integer(ctx,argv[0],INT32_MAX,&handle)||
        !array_length(ctx,argv[1],&length)||length!=KSN_PROC_INPUTS)
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and four inputs");
@@ -278,11 +348,18 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     (void)self;(void)argv;
     const char *op="kasane.procedural.commit";
     if(argc||!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
-    ksn_result result=pocket_kasane_proc_publish();
+    proc_surface *surface=&surfaces[building_surface];
+    surface->damage=frame_damage(surface);
+    if(building_surface&&!surface->image_mode)
+        return failure(ctx,op,POCKET_ERR_BUSY,"resource(surface ID) required");
+    ksn_result result=building_surface||surface->image_mode?
+        pocket_kasane_proc_publish_at(building_surface,surface->damage):
+        pocket_kasane_proc_publish();
     if(result!=KSN_OK)return failure(ctx,op,result==KSN_OOM?POCKET_ERR_OUT_OF_MEMORY:
                                    POCKET_ERR_BUSY,"Kasane presentation unavailable");
-    candidate->ready=true;
-    pending=true;
+    surface->candidate->ready=true;
+    surface->pending=true;
+    pending_surface=building_surface;
     image_band_valid=false;
     building=false;
     return JS_UNDEFINED;
@@ -311,13 +388,28 @@ static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     return guarded(ctx,self,argc,argv,commit_impl);
 }
 static JSValue resource_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;(void)argv;
-    if(argc)return failure(ctx,"kasane.procedural.resource",POCKET_ERR_INVALID_ARGUMENT,
-                           "expected no arguments");
-    return pocket_kasane_proc_resource(ctx);
+    (void)self;
+    unsigned index=0;
+    if(argc>1||(argc==1&&!surface_index(ctx,argv[0],&index)))
+        return failure(ctx,"kasane.procedural.resource",POCKET_ERR_INVALID_ARGUMENT,
+                       "expected optional live surface ID");
+    return index?pocket_kasane_proc_resource_at(ctx,index):pocket_kasane_proc_resource(ctx);
 }
 static JSValue js_resource(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,resource_impl);
+}
+static JSValue create_surface_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argv;
+    if(argc)return failure(ctx,"kasane.procedural.createSurface",POCKET_ERR_INVALID_ARGUMENT,
+                           "expected no arguments");
+    if(surfaces[1].handle||next_surface_handle==INT32_MAX)
+        return failure(ctx,"kasane.procedural.createSurface",POCKET_ERR_LIMIT_EXCEEDED,
+                       "two surfaces maximum");
+    surfaces[1].handle=++next_surface_handle;
+    return JS_NewInt32(ctx,(int32_t)surfaces[1].handle);
+}
+static JSValue js_create_surface(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    return guarded(ctx,self,argc,argv,create_surface_impl);
 }
 esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
     JSValue procedural=JS_NewObject(ctx);
@@ -328,8 +420,9 @@ esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
         JS_CFUNC_DEF("draw",2,js_draw),
         JS_CFUNC_DEF("commit",0,js_commit),
         JS_CFUNC_DEF("resource",0,js_resource),
+        JS_CFUNC_DEF("createSurface",0,js_create_surface),
     };
-    if(JS_SetPropertyFunctionList(ctx,procedural,methods,5)<0){
+    if(JS_SetPropertyFunctionList(ctx,procedural,methods,6)<0){
         JS_FreeValue(ctx,procedural);return ESP_ERR_NO_MEM;
     }
     return JS_SetPropertyStr(ctx,ns,"procedural",procedural)<0?ESP_ERR_NO_MEM:ESP_OK;
@@ -338,12 +431,17 @@ void pocket_proc_reset(void){
     for(unsigned i=0;i<PROC_HANDLES;i++){
         free(slots[i].plan);free(slots[i].point_allocation);slots[i]=(proc_slot){0};
     }
-    free(candidate);free(scratch);free(committed);free(vm);
-    candidate=scratch=committed=NULL;vm=NULL;
+    for(unsigned i=0;i<PROC_SURFACES;i++){
+        free(surfaces[i].candidate);free(surfaces[i].committed);
+        surfaces[i]=(proc_surface){0};
+    }
+    free(scratch);free(vm);scratch=NULL;vm=NULL;
     image_band_valid=false;image_band_frame=NULL;
-    building=pending=has_committed=repair_required=image_mode=js_call_active=false;
-    candidate_color=committed_color=0;
+    building=js_call_active=false;building_surface=pending_surface=0;
     scalar_batches=pie_batches=0;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    image_band_count=image_band_cycles=image_span_count=image_span_cycles=0;
+#endif
 }
 void pocket_proc_batch_counts(uint32_t *scalar,uint32_t *pie){
     if(scalar)*scalar=scalar_batches;
@@ -354,66 +452,107 @@ void pocket_proc_end_turn(void){
      * owner turn. Previously committed or pending presentation stays intact. */
     building=false;
 }
-bool pocket_proc_has_frame(void){return pending||has_committed||repair_required;}
-bool pocket_proc_pending(void){return pending;}
-bool pocket_proc_is_image_mode(void){return image_mode;}
-void pocket_proc_image_mode(void){image_mode=true;}
+bool pocket_proc_has_frame(void){
+    const proc_surface *s=&surfaces[0];
+    return s->pending||s->has_committed||s->repair_required;
+}
+bool pocket_proc_pending(void){return any_pending();}
+bool pocket_proc_backdrop_pending(void){return surfaces[0].pending&&!surfaces[0].image_mode;}
+bool pocket_proc_is_image_mode(void){return surfaces[0].image_mode;}
+void pocket_proc_image_mode_at(unsigned index){
+    if(index<PROC_SURFACES)surfaces[index].image_mode=true;
+}
+void pocket_proc_image_mode(void){pocket_proc_image_mode_at(0);}
 static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
                              uint16_t y,uint16_t x,uint16_t count,
                              uint16_t *rgb565,uint8_t *alpha){
-    (void)ctx;
+    uintptr_t key=(uintptr_t)ctx;
+    if(key<1||key>PROC_SURFACES)return KSN_STALE;
+    unsigned index=(unsigned)(key-1);
+    proc_surface *surface=&surfaces[index];
     if(variant||frame_number||y>=KSN_PROC_H||x>KSN_PROC_W||
        count>KSN_PROC_W-x||(count&&(!rgb565||!alpha)))return KSN_INVALID;
     if(!count)return KSN_OK;
-    const ksn_proc_frame *frame=pending?candidate:(has_committed?committed:NULL);
-    uint16_t color=pending?candidate_color:(has_committed?committed_color:0);
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    uint32_t span_start=esp_cpu_get_cycle_count();
+#endif
+    const ksn_proc_frame *frame=surface->pending?surface->candidate:
+        (surface->has_committed?surface->committed:NULL);
+    uint16_t color=surface->pending?surface->candidate_color:
+        (surface->has_committed?surface->committed_color:0);
     uint16_t band_y=(uint16_t)(y&~(PROC_IMAGE_BAND_ROWS-1u));
-    if(!image_band_valid||image_band_y!=band_y||image_band_frame!=frame||
+    if(!image_band_valid||image_band_surface!=index||
+       image_band_y!=band_y||image_band_frame!=frame||
        image_band_color!=color){
         unsigned rows=KSN_PROC_H-band_y;
         if(rows>PROC_IMAGE_BAND_ROWS)rows=PROC_IMAGE_BAND_ROWS;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+        uint32_t band_start=esp_cpu_get_cycle_count();
+#endif
         for(unsigned i=0;i<rows*KSN_PROC_W;i++)image_band[i]=color;
         if(frame&&!ksn_proc_render_band(frame,image_band,band_y,(int)rows))return KSN_INVALID;
-        image_band_y=band_y;image_band_frame=frame;image_band_color=color;
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+        image_band_cycles+=esp_cpu_get_cycle_count()-band_start;
+        image_band_count++;
+#endif
+        image_band_surface=index;image_band_y=band_y;
+        image_band_frame=frame;image_band_color=color;
         image_band_valid=true;
     }
     memcpy(rgb565,image_band+(unsigned)(y-band_y)*KSN_PROC_W+x,count*sizeof *rgb565);
     memset(alpha,255,count);
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+    image_span_cycles+=esp_cpu_get_cycle_count()-span_start;
+    image_span_count++;
+#endif
     return KSN_OK;
 }
-void pocket_proc_image_port(ksn_image_port *out){
-    if(out)*out=(ksn_image_port){.ctx=NULL,.width=KSN_PROC_W,.height=KSN_PROC_H,
+void pocket_proc_image_port_at(ksn_image_port *out,unsigned index){
+    if(out&&index<PROC_SURFACES)*out=(ksn_image_port){.ctx=(void *)(uintptr_t)(index+1),
+                              .width=KSN_PROC_W,.height=KSN_PROC_H,
                               .variants=1,.frames=1,.read_span=image_span,.opaque=true};
 }
+void pocket_proc_image_port(ksn_image_port *out){pocket_proc_image_port_at(out,0);}
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
     (void)ctx;
     if(!pixels||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;
-    const ksn_proc_frame *frame=pending?candidate:(has_committed?committed:NULL);
-    uint16_t color=pending?candidate_color:(has_committed?committed_color:0);
+    const proc_surface *surface=&surfaces[0];
+    const ksn_proc_frame *frame=surface->pending?surface->candidate:
+        (surface->has_committed?surface->committed:NULL);
+    uint16_t color=surface->pending?surface->candidate_color:
+        (surface->has_committed?surface->committed_color:0);
     for(unsigned i=0;i<(unsigned)rows*KSN_PROC_W;i++)pixels[i]=color;
     return !frame||ksn_proc_render_band(frame,pixels,y,rows)?KSN_OK:KSN_INVALID;
 }
 void pocket_proc_present_result(ksn_result result){
-    if(!pending&&!repair_required)return;
+    proc_surface *surface=&surfaces[pending_surface];
+    bool repairing=false;
+    for(unsigned i=0;i<PROC_SURFACES;i++)repairing|=surfaces[i].repair_required;
+    if(!surface->pending&&!repairing)return;
     if(result==KSN_OK){
-        if(pending){
-            ksn_proc_frame *old=committed;committed=candidate;candidate=old;
-            committed_color=candidate_color;
-            has_committed=true;pending=false;
+        if(surface->pending){
+            ksn_proc_frame *old=surface->committed;
+            surface->committed=surface->candidate;surface->candidate=old;
+            surface->committed_color=surface->candidate_color;
+            surface->has_committed=true;surface->pending=false;
             image_band_valid=false;
         }
-        repair_required=false;
+        for(unsigned i=0;i<PROC_SURFACES;i++)surfaces[i].repair_required=false;
     }else if(result==KSN_IO){
         image_band_valid=false;
-        if(image_mode){
+        if(surface->image_mode){
             /* Kasane retries a submitted UI patch against the same image
              * resource. Keep its pixels paired with that ticket until ACK. */
-            repair_required=true;
+            surface->repair_required=true;
         }else{
-            pending=false;
+            surface->pending=false;
             /* A backdrop has no submitted image node: repaint the old frame. */
-            repair_required=true;
+            surface->repair_required=true;
         }
-        if(!image_mode)pocket_kasane_invalidate();
+        if(!surface->image_mode)pocket_kasane_invalidate();
     }
+}
+void pocket_proc_overlay_present_result(ksn_result result){
+    if(any_pending()&&surfaces[pending_surface].image_mode)
+        pocket_proc_present_result(result);
 }

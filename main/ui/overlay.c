@@ -21,6 +21,18 @@ extern const char deskclock_end[]   asm("_binary_deskclock_js_end");
 extern const char overlay_fairness_probe_start[] asm("_binary_overlay_fairness_probe_js_start");
 extern const char overlay_fairness_probe_end[] asm("_binary_overlay_fairness_probe_js_end");
 #endif
+#ifdef KASANE_D6_VIDEO_OVERLAY_PROBE
+extern const char overlay_video_probe_start[] asm("_binary_overlay_video_probe_js_start");
+extern const char overlay_video_probe_end[] asm("_binary_overlay_video_probe_js_end");
+#endif
+#ifdef KASANE_D2_OVERLAY_PROC_PROBE
+extern const char overlay_proc_multi_probe_start[] asm("_binary_overlay_proc_multi_probe_js_start");
+extern const char overlay_proc_multi_probe_end[] asm("_binary_overlay_proc_multi_probe_js_end");
+#endif
+#ifdef KASANE_D6_SD_AV_STREAM_PROBE
+extern const char overlay_video_sd_stream_probe_start[] asm("_binary_overlay_video_sd_stream_probe_js_start");
+extern const char overlay_video_sd_stream_probe_end[] asm("_binary_overlay_video_sd_stream_probe_js_end");
+#endif
 extern const char player_start[] asm("_binary_player_js_start");
 extern const char player_end[]   asm("_binary_player_js_end");
 
@@ -143,7 +155,16 @@ void overlay_init(void) {
     // because a `.source` initialiser would need the address of an extern array
     // at file scope and that is fine -- but the END pointer is only ever used as
     // a length, and keeping both here puts the arithmetic in one place.
-#ifdef KASANE_P5_FAIRNESS_PROBE
+#ifdef KASANE_D2_OVERLAY_PROC_PROBE
+    deskclock_src=overlay_proc_multi_probe_start;
+    deskclock_src_end=overlay_proc_multi_probe_end;
+#elif defined(KASANE_D6_SD_AV_STREAM_PROBE)
+    deskclock_src=overlay_video_sd_stream_probe_start;
+    deskclock_src_end=overlay_video_sd_stream_probe_end;
+#elif defined(KASANE_D6_VIDEO_OVERLAY_PROBE)
+    deskclock_src=overlay_video_probe_start;
+    deskclock_src_end=overlay_video_probe_end;
+#elif defined(KASANE_P5_FAIRNESS_PROBE)
     deskclock_src=overlay_fairness_probe_start;
     deskclock_src_end=overlay_fairness_probe_end;
 #else

@@ -3,6 +3,8 @@
 #include "pocket_api.h"
 #include "proc_megademo.h"
 #include "ksn_proc_plan.h"
+#include "core_fixture.h"
+#include "ksn_render.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +14,26 @@
 static uint16_t actual[KSN_PROC_W*KSN_PROC_H], expected[KSN_PROC_W*KSN_PROC_H];
 static uint16_t previous[KSN_PROC_W*KSN_PROC_H];
 static unsigned publishes,invalidates;
+KSN_TEST_CORE(multi_core,static);
+static bool multi_active;
+static ksn_resource multi_resource[2];
+static uint16_t multi_panel[KSN_PROC_W*KSN_PROC_H],multi_strip[KSN_PROC_W*8];
+static unsigned multi_bytes;
+static int multi_fail_y=-1;
+static uint16_t *multi_buffer(void *ctx){(void)ctx;return multi_strip;}
+static ksn_result multi_send(void *ctx,uint16_t y,uint16_t rows,const uint16_t *pixels){
+    (void)ctx;multi_bytes+=(unsigned)rows*KSN_PROC_W*2;
+    memcpy(multi_panel+y*KSN_PROC_W,pixels,(size_t)rows*KSN_PROC_W*2);
+    return y==multi_fail_y?KSN_IO:KSN_OK;
+}
+static ksn_result multi_send_rect(void *ctx,uint16_t x,uint16_t y,uint16_t cols,
+                                  uint16_t rows,const uint16_t *pixels){
+    (void)ctx;multi_bytes+=(unsigned)rows*cols*2;
+    for(unsigned row=0;row<rows;row++)
+        memcpy(multi_panel+(y+row)*KSN_PROC_W+x,
+               pixels+(size_t)row*KSN_PROC_W+x,cols*2);
+    return y==multi_fail_y?KSN_IO:KSN_OK;
+}
 #ifdef KSN_PROC_HOST_FAKE_PIE
 void ksn_proc_points_affine_pie(KsnProcPointDst dst,KsnProcPointSrc src,
                                 size_t n,const KsnProcAffineQ14 *coeff){
@@ -20,9 +42,27 @@ void ksn_proc_points_affine_pie(KsnProcPointDst dst,KsnProcPointSrc src,
 #endif
 
 ksn_result pocket_kasane_proc_publish(void){publishes++;return KSN_OK;}
+ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage){
+    publishes++;
+    if(multi_active&&surface<2&&multi_resource[surface].value)
+        ksn_core_invalidate_image_source_rect(&multi_core,multi_resource[surface],damage);
+    return KSN_OK;
+}
 void pocket_kasane_invalidate(void){invalidates++;}
 JSValue pocket_kasane_proc_resource(JSContext *ctx){
     pocket_proc_image_mode();
+    if(multi_active&&!multi_resource[0].value){
+        ksn_image_port port;pocket_proc_image_port_at(&port,0);
+        REQUIRE(ksn_core_register_image(&multi_core,KSN_APP,&port,&multi_resource[0])==KSN_OK);
+    }
+    return JS_NewObject(ctx);
+}
+JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface){
+    pocket_proc_image_mode_at(surface);
+    if(multi_active&&surface<2&&!multi_resource[surface].value){
+        ksn_image_port port;pocket_proc_image_port_at(&port,surface);
+        REQUIRE(ksn_core_register_image(&multi_core,KSN_APP,&port,&multi_resource[surface])==KSN_OK);
+    }
     return JS_NewObject(ctx);
 }
 JSValue pocket_api_throw(JSContext *ctx,const char *code,const char *op,
@@ -115,6 +155,17 @@ int main(int argc,char **argv){
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);
     JS_FreeValue(ctx,global);
+    eval_ok(ctx,
+        "globalThis.megaBounds=[];globalThis.megaReplaces=0;"
+        "globalThis.console={log(){}};"
+        "const uiTx={background(){},gradient(){},rect(){},text(){},"
+        "image(o){if(!o.resource.__monitor)megaBounds=o.bounds.slice();"
+        "return {setRect(tx,b){if(!o.resource.__monitor)megaBounds=b.slice()},"
+        "setVisible(){}}}};"
+        "pocket.kasane.replace=fn=>{megaReplaces++;fn(uiTx)};"
+        "pocket.kasane.patch=fn=>fn(uiTx);"
+        "pocket.kasane.grid={registerResizeSource(){return 1},"
+        "resource(){return {__monitor:true}}}");
     ksn_image_port image;pocket_proc_image_port(&image);
     REQUIRE(image.width==KSN_PROC_W&&image.height==KSN_PROC_H);
     REQUIRE(image.variants==1&&image.frames==1);
@@ -127,6 +178,13 @@ int main(int argc,char **argv){
     REQUIRE(pocket_proc_is_image_mode());
     size_t bytes;char *source=read_file(argv[1],&bytes);
     JSValue result=JS_Eval(ctx,source,bytes,argv[1],JS_EVAL_TYPE_GLOBAL);
+    if(JS_IsException(result)){
+        JSValue error=JS_GetException(ctx);
+        const char *message=JS_ToCString(ctx,error);
+        fprintf(stderr,"megademo JS eval: %s\n",message?message:"<non-string exception>");
+        if(message)JS_FreeCString(ctx,message);
+        JS_FreeValue(ctx,error);
+    }
     REQUIRE(!JS_IsException(result));JS_FreeValue(ctx,result);free(source);
     for(unsigned tick=0;tick<PROC_MEGA_FRAMES;tick++){
         eval_ok(ctx,"frame()");
@@ -186,6 +244,8 @@ int main(int argc,char **argv){
         }
     }
     REQUIRE(publishes==PROC_MEGA_FRAMES);
+    eval_ok(ctx,"if(megaReplaces!==1||megaBounds.join(',')!=='0,0,240,135')"
+                "throw Error('initial full-screen image or repeat replace')");
     uint32_t scalar=0,pie=0;
     pocket_proc_batch_counts(&scalar,&pie);
 #ifdef KSN_PROC_HOST_FAKE_PIE
@@ -193,6 +253,22 @@ int main(int argc,char **argv){
 #else
     REQUIRE(scalar==PROC_MEGA_FRAMES&&pie==0);
 #endif
+    /* Two held Enter frames count as one press. The same resource reaches the
+     * monitor and then returns to an exact full-screen rectangle. */
+    for(unsigned i=0;i<44;i++){
+        eval_ok(ctx,i<2?"frame(0x4000)":"frame(0)");
+        REQUIRE(pocket_proc_pending());
+        pocket_proc_present_result(KSN_OK);
+    }
+    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==1)"
+                "throw Error('Enter did not shrink into monitor')");
+    for(unsigned i=0;i<44;i++){
+        eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
+        REQUIRE(pocket_proc_pending());
+        pocket_proc_present_result(KSN_OK);
+    }
+    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==1)"
+                "throw Error('Enter did not restore full screen')");
     eval_error(ctx,"pocket.kasane.procedural.register([[99,0,0,0,0,0]])");
     eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
     eval_error(ctx,"pocket.kasane.procedural.draw(1,[NaN,0,0,0])");
@@ -213,8 +289,13 @@ int main(int argc,char **argv){
     REQUIRE(invalidates>0); /* Backdrop mode repairs the old committed frame. */
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
     for(unsigned i=0;i<KSN_PROC_W*KSN_PROC_H;i++)REQUIRE(actual[i]==0);
+    eval_error(ctx,"pocket.kasane.procedural.beginFrame(0)"); /* Old backdrop owes repair. */
+    pocket_proc_overlay_present_result(KSN_OK); /* FLOWER cannot repair it. */
+    eval_error(ctx,"pocket.kasane.procedural.beginFrame(0)");
     pocket_proc_present_result(KSN_OK);
     REQUIRE(!pocket_proc_has_frame());
+    eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
+    pocket_proc_end_turn();
     pocket_proc_reset();
     eval_ok(ctx,
         "const proc=pocket.kasane.procedural;let nestedRegisterBusy=false;"
@@ -242,8 +323,108 @@ int main(int argc,char **argv){
     eval_error(ctx,"pocket.kasane.procedural.draw(off,[0,0,0,0])");
     REQUIRE(!pocket_proc_pending());
     pocket_proc_reset();
+    eval_ok(ctx,
+        "let curve=proc.register(["
+        "[0,0,0,0,10,0],[0,1,0,0,10,0],"
+        "[0,2,0,0,35,0],[1,3,0,0,0,0],"
+        "[0,4,0,0,75,0],[0,5,0,0,95,0],"
+        "[0,6,0,0,100,0],[0,7,0,0,10,0],"
+        "[14,0,16,0,0,2016]]);"
+        "proc.beginFrame(0);proc.draw(curve,[95,0,0,0]);proc.commit()");
+    REQUIRE(pocket_proc_pending());
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+    REQUIRE(actual[10*KSN_PROC_W+10]==0x07e0);
+    REQUIRE(actual[10*KSN_PROC_W+100]==0x07e0);
+    memcpy(previous,actual,sizeof previous);
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(curve,[25,0,0,0]);proc.commit()");
+    REQUIRE(pocket_proc_pending());
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+    REQUIRE(memcmp(previous,actual,sizeof actual)!=0);
+    pocket_proc_present_result(KSN_OK);
+    eval_error(ctx,"proc.register([[14,0,0,0,0,2016]])");
+    pocket_proc_reset();
+    /* Two image resources keep independent committed frames and reject a
+     * second writer until the first candidate's display ticket is retired. */
+    ksn_core_init(&multi_core);multi_active=true;
+    eval_ok(ctx,
+        "const layerId=proc.createSurface();"
+        "if(!Number.isInteger(layerId)||layerId<=0)throw Error('surface ID');"
+        "proc.beginFrame(0,layerId)");
+    eval_error(ctx,"proc.commit()"); /* An extra surface needs its image lease. */
+    pocket_proc_end_turn();
+    eval_ok(ctx,
+        "proc.resource();proc.resource(layerId);"
+        "const dotPlan=proc.register([[1,0,0,0,0,0],[1,1,1,0,0,0],"
+        "[8,0,0,1,0,63488]])");
+    ksn_client app=ksn_core_client(&multi_core,KSN_APP);
+    ksn_tx tx;ksn_ref refs[2];
+    REQUIRE(app.ops->begin(app.ctx,KSN_REPLACE,&tx)==KSN_OK);
+    REQUIRE(app.ops->background(app.ctx,tx,0x001f00ff)==KSN_OK);
+    for(unsigned i=0;i<2;i++){
+        int x=i?80:0;
+        ksn_draw draw={.kind=KSN_IMAGE,.bounds={(int16_t)x,0,(int16_t)(x+64),48},
+                       .clip={0,0,240,135},.opacity=255,
+                       .data.image={.resource=multi_resource[i],.source_width=64,
+                                    .source_height=48,.scale=KSN_IMAGE_1X}};
+        REQUIRE(app.ops->add(app.ctx,tx,&draw,&refs[i])==KSN_OK);
+    }
+    REQUIRE(app.ops->end(app.ctx,tx)==KSN_OK);
+    ksn_display_port multi_display={.strip=multi_buffer,.present=multi_send,
+        .present_rect=multi_send_rect,.width=240,.height=135,.strip_rows=8};
+    ksn_render_stats multi_stats;
+    REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_OK);
+    ksn_image_port first,second;
+    pocket_proc_image_port_at(&first,0);pocket_proc_image_port_at(&second,1);
+    REQUIRE(first.ctx!=second.ctx);
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(dotPlan,[10,10,0,0]);proc.commit()");
+    eval_error(ctx,"proc.beginFrame(0,layerId)");
+    multi_bytes=0;
+    REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_OK);
+    REQUIRE(multi_bytes==64*48*2&&multi_panel[10*240+10]==0xf800);
+    pocket_proc_overlay_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0,layerId);"
+                "proc.draw(dotPlan,[20,10,0,0]);proc.commit()");
+    REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK);
+    REQUIRE(span[0]==0xf800);
+    REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK);
+    REQUIRE(span[0]==0xf800);
+    multi_bytes=0;
+    REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_OK);
+    REQUIRE(multi_bytes==64*48*2&&multi_panel[10*240+100]==0xf800);
+    pocket_proc_overlay_present_result(KSN_OK);
+    REQUIRE(!pocket_proc_pending());
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(dotPlan,[11,10,0,0]);proc.commit()");
+    REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
+    multi_bytes=0;
+    REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_OK);
+    REQUIRE(multi_bytes==16*8*2&&multi_panel[10*240+10]==0&&
+            multi_panel[10*240+11]==0xf800&&multi_panel[10*240+100]==0xf800);
+    pocket_proc_overlay_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0,layerId);proc.draw(dotPlan,[21,10,0,0]);proc.commit()");
+    multi_fail_y=8;
+    REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_IO);
+    pocket_proc_overlay_present_result(KSN_IO);
+    REQUIRE(pocket_proc_pending());
+    multi_fail_y=-1;multi_bytes=0;
+    REQUIRE(ksn_render_rects(&multi_core,&multi_display,&multi_stats)==KSN_OK);
+    REQUIRE(multi_bytes==240*135*2&&multi_panel[10*240+100]==0&&
+            multi_panel[10*240+101]==0xf800&&multi_panel[10*240+11]==0xf800);
+    pocket_proc_overlay_present_result(KSN_OK);
+    REQUIRE(!pocket_proc_pending());
+    eval_error(ctx,"proc.createSurface()");
+    REQUIRE(ksn_core_reset_layer(&multi_core,KSN_APP)==KSN_OK);
+    ksn_image_port stale_port;
+    REQUIRE(ksn_core_image_port(&multi_core,KSN_APP,multi_resource[0],&stale_port)==KSN_STALE);
+    REQUIRE(ksn_core_image_port(&multi_core,KSN_APP,multi_resource[1],&stale_port)==KSN_STALE);
+    multi_active=false;
+    pocket_proc_reset();
+    eval_error(ctx,"proc.resource(layerId)");
+    eval_ok(ctx,"const newLayerId=proc.createSurface();"
+                "if(newLayerId===layerId)throw Error('stale surface ID reused')");
+    pocket_proc_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
-    printf("PASS real QuickJS procedural adapter: 48 candidate frames with typed points, exact RGB565, rollback, repair, malformed input, reset and reentrancy; image span CPU %.1f ms\n",
+    printf("PASS real QuickJS procedural adapter: 48 exact RGB565 frames, two independent image surfaces, 256 B rectangle damage, IO repair, stale resources, Enter toggle; image span CPU %.1f ms\n",
            1000.0*(double)span_ticks/CLOCKS_PER_SEC);
     return 0;
 }

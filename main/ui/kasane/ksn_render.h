@@ -59,10 +59,13 @@ unsigned ksn_render_band_runs(uint32_t mask);
  * compare read counts and frame time without a rebuild. Rendering is
  * pixel-neutral either way; only the number of ksn_core_read calls changes. */
 extern int g_ksn_decode_once;
-/* Skip APP commands before an ungrouped, fully opaque image when that image
- * covers the entire damaged interval of an 8-row band. Zero is the reference
- * composite path for same-binary pixel comparisons. */
+/* Skip APP commands before an ungrouped, fully opaque image inside its
+ * clipped rectangle; whole-band coverage also skips those commands outright.
+ * Zero is the reference composite path for same-binary pixel comparisons. */
 extern int g_ksn_opaque_image_occlusion;
+/* Cache the exact source coordinate of each destination column and row for
+ * one selected ungrouped STRETCH image per frame. Off uses span-local stepping. */
+extern bool g_ksn_image_stretch_map;
 /* Rotated image spans map a destination pixel to a source column by
  * floor(u*source_width/(w*32768)) with u affine in x. With this switch on
  * (default) the quotient and remainder of that division are advanced by one

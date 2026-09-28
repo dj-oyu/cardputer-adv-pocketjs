@@ -37,6 +37,9 @@ static bool valid_program(const ksn_proc_program *p,uint8_t loop_end[KSN_PROC_CO
         case KSN_PROC_MOVE: case KSN_PROC_PLOT: case KSN_PROC_LINE:
             if(!reg_ok(i->a)||!reg_ok(i->b))return false;
             break;
+        case KSN_PROC_CUBIC:
+            if(i->dst!=0||i->a<1||i->a>64)return false;
+            break;
         default:return false;
         }
     }
@@ -153,6 +156,32 @@ ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
         }
         vm->pen_x=x;vm->pen_y=y;vm->pen_valid=true;break;
     }
+    case KSN_PROC_CUBIC: {
+        float px[4],py[4];
+        for(unsigned p=0;p<4;p++){
+            px[p]=vm->reg[i->dst+2*p];
+            py[p]=vm->reg[i->dst+2*p+1];
+            if(!coordinate(px[p],&x)||!coordinate(py[p],&y))
+                return vm->status=KSN_PROC_INVALID;
+        }
+        int16_t previous_x,previous_y;
+        if(!coordinate(px[0],&previous_x)||!coordinate(py[0],&previous_y))
+            return vm->status=KSN_PROC_INVALID;
+        for(unsigned step=1;step<=i->a;step++){
+            float t=(float)step/(float)i->a,u=1.0f-t;
+            float bx=u*u*u*px[0]+3.0f*u*u*t*px[1]+
+                     3.0f*u*t*t*px[2]+t*t*t*px[3];
+            float by=u*u*u*py[0]+3.0f*u*u*t*py[1]+
+                     3.0f*u*t*t*py[2]+t*t*t*py[3];
+            if(!coordinate(bx,&x)||!coordinate(by,&y))
+                return vm->status=KSN_PROC_INVALID;
+            if(!emit(vm,previous_x,previous_y,x,y,i->color))
+                return vm->status=KSN_PROC_LIMIT;
+            previous_x=x;previous_y=y;
+        }
+        vm->pen_x=previous_x;vm->pen_y=previous_y;vm->pen_valid=true;
+        break;
+    }
     default:return vm->status=KSN_PROC_INVALID;
     }
     for(unsigned j=0;j<KSN_PROC_REGS;j++)if(!isfinite(vm->reg[j]))return vm->status=KSN_PROC_INVALID;
@@ -173,7 +202,29 @@ bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int
         if(ymax<y||ymin>=y+height)continue;
         int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
         int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
+        if(dy){
+            /* A band can be reached without replaying the line's prefix. The
+             * original Bresenham phase is reconstructed from its major-axis
+             * step count; clipping endpoints and restarting would change ties. */
+            int row=sy>0?y-s->y0:s->y0-(y+height-1);
+            if(row>0){
+                int major,minor,x_steps,y_steps;
+                if(dx>=dy){
+                    int64_t numerator=(int64_t)row*dx-(dx-1)/2;
+                    major=numerator>0?(int)((numerator+dy-1)/dy):0;
+                    minor=(int)(((int64_t)major*dy+(dx-1)/2)/dx);
+                    x_steps=major;y_steps=minor;
+                }else{
+                    major=row;
+                    minor=(int)(((int64_t)major*dx+(dy-1)/2)/dy);
+                    x_steps=minor;y_steps=major;
+                }
+                x+=sx*x_steps;yy+=sy*y_steps;
+                err=(int)((int64_t)dx-dy-(int64_t)x_steps*dy+(int64_t)y_steps*dx);
+            }
+        }
         for(;;){
+            if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
             if(x>=0&&x<KSN_PROC_W&&yy>=y&&yy<y+height)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
             if(x==s->x1&&yy==s->y1)break;
             int twice=2*err;

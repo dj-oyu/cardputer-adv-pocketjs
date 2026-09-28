@@ -35,6 +35,9 @@ def main():
              ROOT/'main/ui/kasane/ksn_proc_points.c',
              ROOT/'main/ui/kasane/ksn_proc_points_pie.c',
              ROOT/'main/ui/kasane/ksn_proc_points_dispatch.c',
+             ROOT/'main/ui/kasane/ksn_core.c',
+             ROOT/'main/ui/kasane/ksn_render.c',
+             ROOT/'main/ui/kasane/ksn_blend_pie.c',
              (args.proc_source.resolve() if args.proc_source else ROOT/'main/pocket/pocket_proc.c'),
              ROOT/'tools/kasane_contract/test_pocket_proc_qjs.c']
     command=[cc,'-std=gnu11','-O'+args.opt,'-DQUICKJS_NG_BUILD','-D_GNU_SOURCE',

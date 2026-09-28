@@ -43,7 +43,12 @@ ksn_result ksn_proc_layers_present(ksn_proc_layers *layers,ksn_core *core,
         if(!damage->bands){
             if(!ksn_proc_layers_finish(layers,layers->generation,true))return KSN_INVALID;
             candidate=false;
-        }else ksn_core_invalidate_bands(core,damage->bands);
+        }else for(unsigned band=0;band<KSN_PROC_BANDS;band++)if(damage->bands&(1u<<band)){
+            int y=(int)band*8;
+            int y1=y+8<KSN_PROC_H?y+8:KSN_PROC_H;
+            ksn_core_invalidate_rect(core,(ksn_rect){damage->x0[band],(int16_t)y,
+                                                    damage->x1[band],(int16_t)y1});
+        }
     }
     if(layers->repair_required)ksn_core_invalidate(core);
     if(!candidate&&!ksn_core_has_submission(core)&&

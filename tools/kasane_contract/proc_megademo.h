@@ -40,6 +40,9 @@ static inline bool proc_mega_inputs(unsigned frame, unsigned layer,
     } else {
         input[0] = (phase == 2 ? 9.0f : 17.0f) + (float)((frame * 7u) % 19u);
         input[1] = (float)((int)(frame % 5u) - 2) * (phase == 2 ? 2.0f : 1.0f);
+        input[2] = pulse * 12.0f +
+            (phase == 2 ? (float)((int)((frame * 3u) % 5u) - 2) * 2.0f : 0.0f);
+        input[3] = (1.0f - fabsf(pulse)) * 8.0f;
     }
     return true;
 }
@@ -125,6 +128,23 @@ static inline bool proc_mega_build(unsigned frame, unsigned layer,
         ADD(5,0,6); MOVE(2,5); LINE(3,5,neon[phase][0]);
         ADD(0,0,1); ADD(2,2,4); ADD(3,3,4);
         EMIT(KSN_PROC_END,0,0,0,0,0);
+
+        /* A faceted front diamond, four depth edges, and a shifted rear
+         * diamond. Reuse the same eight registers after the scanline loop. */
+        SET(0,88.0f); SET(1,152.0f); SET(2,32.0f); SET(3,98.0f);
+        SET(4,120.0f); SET(5,65.0f); INPUT(6,2); INPUT(7,3);
+        MOVE(4,2); LINE(1,5,neon[phase][2]); LINE(4,3,neon[phase][2]);
+        LINE(0,5,neon[phase][2]); LINE(4,2,neon[phase][2]);
+        MOVE(4,2); LINE(4,3,neon[phase][3]);
+        MOVE(0,5); LINE(1,5,neon[phase][3]);
+        MOVE(4,2); ADD(4,4,6); ADD(2,2,7); LINE(4,2,neon[phase][3]);
+        MOVE(1,5); ADD(1,1,6); ADD(5,5,7); LINE(1,5,neon[phase][3]);
+        SET(4,120.0f); MOVE(4,3); ADD(4,4,6); ADD(3,3,7);
+        LINE(4,3,neon[phase][3]);
+        SET(5,65.0f); MOVE(0,5); ADD(0,0,6); ADD(5,5,7);
+        LINE(0,5,neon[phase][3]);
+        MOVE(4,2); LINE(1,5,neon[phase][1]); LINE(4,3,neon[phase][1]);
+        LINE(0,5,neon[phase][1]); LINE(4,2,neon[phase][1]);
     }
     if (!proc_mega_inputs(frame,layer,input)) return false;
     program->code = code;

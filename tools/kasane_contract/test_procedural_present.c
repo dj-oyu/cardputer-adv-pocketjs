@@ -10,7 +10,7 @@ static ksn_proc_frame candidate;
 static uint16_t panel[240*135],strip_pixels[240*8];
 static int fail_y=-1;
 static int fail_load_y=-1;
-static unsigned loads,transfers;
+static unsigned loads,transfers,transfer_bytes;
 static bool load(void *ctx,uint16_t *pixels,int y,int rows){
     (void)ctx;loads++;
     if(y==fail_load_y)return false;
@@ -19,8 +19,15 @@ static bool load(void *ctx,uint16_t *pixels,int y,int rows){
 }
 static uint16_t *strip(void *ctx){(void)ctx;return strip_pixels;}
 static ksn_result present(void *ctx,uint16_t y,uint16_t rows,const uint16_t *pixels){
-    (void)ctx;transfers++;
+    (void)ctx;transfers++;transfer_bytes+=(unsigned)rows*240*2;
     memcpy(panel+y*240,pixels,(size_t)rows*240*sizeof *pixels);
+    return y==fail_y?KSN_IO:KSN_OK;
+}
+static ksn_result present_rect(void *ctx,uint16_t x,uint16_t y,uint16_t cols,
+                               uint16_t rows,const uint16_t *pixels){
+    (void)ctx;transfers++;transfer_bytes+=(unsigned)rows*cols*2;
+    for(unsigned row=0;row<rows;row++)
+        memcpy(panel+(y+row)*240+x,pixels+(size_t)row*240+x,cols*2);
     return y==fail_y?KSN_IO:KSN_OK;
 }
 static void dot(int x,int y,uint16_t color){
@@ -35,7 +42,7 @@ int main(void){
     ksn_proc_layers_init(&layers,load,0);
     assert(ksn_proc_layers_add(&layers,&lower));
     assert(ksn_proc_layers_add(&layers,&upper));
-    ksn_display_port display={.strip=strip,.present=present,
+    ksn_display_port display={.strip=strip,.present=present,.present_rect=present_rect,
         .width=240,.height=135,.strip_rows=8};
     ksn_render_stats stats;
     ksn_client app=ksn_core_client(&core,KSN_APP);
@@ -59,8 +66,10 @@ int main(void){
     dot(20,10,0xf800);
     uint32_t ticket=ksn_proc_layers_stage(&layers,0,&candidate);
     assert(ticket);
+    transfer_bytes=0;
     assert(ksn_proc_layers_present(&layers,&core,&display,&stats)==KSN_OK);
     assert(stats.bands==(1u<<1)&&at(20,10)==0xf800);
+    assert(transfer_bytes==16*8*2);
     dot(20,10,0x07e0);
     ticket=ksn_proc_layers_stage(&layers,1,&candidate);
     assert(ticket);
@@ -78,8 +87,10 @@ int main(void){
     assert(at(20,10)==0x07e0); /* Higher committed surface still masks lower. */
     fail_y=-1;
     unsigned before=transfers;
+    transfer_bytes=0;
     assert(ksn_proc_layers_present(&layers,&core,&display,&stats)==KSN_OK);
     assert(transfers-before==17&&!ksn_proc_layers_needs_repair(&layers));
+    assert(transfer_bytes==240*135*2);
     assert(at(40,10)==0x001f&&at(20,10)==0x07e0);
     assert(at(50,10)==0xffe0&&at(2,2)==0xf800);
 
@@ -125,7 +136,9 @@ int main(void){
     dot(300,10,0xf800);
     ticket=ksn_proc_layers_stage(&layers,0,&candidate);
     assert(ticket);
+    transfer_bytes=0;
     assert(ksn_proc_layers_present(&layers,&core,&display,&stats)==KSN_OK);
+    assert(transfer_bytes==16*8*2&&at(80,10)==0x001f);
     dot(301,10,0xf800);
     ticket=ksn_proc_layers_stage(&layers,0,&candidate);
     assert(ticket);

@@ -21,6 +21,7 @@
 #include "pet_hub.h"
 #include "pocket_capture.h"
 #include "pocket_av.h"
+#include "pocket_video_sd_stream.h"
 #ifdef KASANE_P0_PROBE
 #include "pocket/app_music_view.h"
 #include "pocket_mutex_arena.h"
@@ -127,6 +128,13 @@ static uint32_t last_frame_us;
 // USB drives the home screen with single letters, but an editor needs the
 // bytes themselves so a host script can type at it. 0x1b closes either way.
 static bool usb_stroke(char c, keystroke_t *k) {
+#if defined(KASANE_D6_VIDEO_OVERLAY_PROBE) && defined(KASANE_P5_NOTICE_PROBE)
+    /* Dedicated D6 aliases precede other diagnostic and guest USB handlers. */
+    if(c=='U'||c=='I') {
+        atomic_store(&p5_notice_probe_requested,c=='U'?'J':'C');
+        return false;
+    }
+#endif
 #ifdef KASANE_TEXT_PIE_DEVICE_PROBE
     /* Set, do not toggle: a host can safely retry after a lost USB/log byte.
      * This diagnostic path runs before guest input forwarding. */
@@ -180,10 +188,10 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #ifdef KASANE_P5_NOTICE_PROBE
     if(c=='J'||c=='C') { atomic_store(&p5_notice_probe_requested,c); return false; }
 #endif
-#ifdef KASANE_P1_OUTPUT_OVERLAY_PROBE
-    /* P0's USB 'u' starts a foreground diagnostic. Keep a distinct key for
-     * the music overlay's up action so the 33 ms probe stays in the overlay.
-     * Likewise, 'b' starts a P0 app, so settings navigation needs right. */
+#if defined(KASANE_P1_OUTPUT_OVERLAY_PROBE) || defined(KASANE_D6_VIDEO_OVERLAY_PROBE) || \
+    defined(KASANE_D2_OVERLAY_PROC_PROBE)
+    /* P0's USB 'u' starts a foreground diagnostic and 'b' starts a P0 app.
+     * These aliases keep overlay navigation available in combined probes. */
     if(c=='&') { k->nav=KEY_UP; return true; }
     if(c=='>') { k->nav=KEY_RIGHT; return true; }
 #endif
@@ -416,6 +424,28 @@ extern const char stress_start[] asm("_binary_stress_js_start");
 extern const char stress_end[] asm("_binary_stress_js_end");
 extern const char proc_megademo_start[] asm("_binary_proc_megademo_js_start");
 extern const char proc_megademo_end[] asm("_binary_proc_megademo_js_end");
+extern const char grid_lab_start[] asm("_binary_grid_lab_js_start");
+extern const char grid_lab_end[] asm("_binary_grid_lab_js_end");
+extern const char video_lab_start[] asm("_binary_video_lab_js_start");
+extern const char video_lab_end[] asm("_binary_video_lab_js_end");
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+extern const char pixel_lab_probe_start[] asm("_binary_pixel_lab_probe_js_start");
+extern const char pixel_lab_probe_end[] asm("_binary_pixel_lab_probe_js_end");
+#endif
+#ifdef KASANE_D2_MULTI_SURFACE_PROBE
+extern const char proc_multi_surface_probe_start[] asm("_binary_proc_multi_surface_probe_js_start");
+extern const char proc_multi_surface_probe_end[] asm("_binary_proc_multi_surface_probe_js_end");
+#endif
+#ifdef KASANE_D5_SD_STREAM_PROBE
+extern const char video_stream_lab_start[] asm("_binary_video_stream_lab_js_start");
+extern const char video_stream_lab_end[] asm("_binary_video_stream_lab_js_end");
+#endif
+#ifdef KASANE_D6_SD_AV_STREAM_PROBE
+extern const char video_sd_av_stage_start[] asm("_binary_video_sd_av_stage_js_start");
+extern const char video_sd_av_stage_end[] asm("_binary_video_sd_av_stage_js_end");
+extern const char video_sd_av_cleanup_start[] asm("_binary_video_sd_av_cleanup_js_start");
+extern const char video_sd_av_cleanup_end[] asm("_binary_video_sd_av_cleanup_js_end");
+#endif
 
 // shell_key() cannot say "hand the display to another screen": its bool already
 // means "launch the app shell_app() names". The request is left behind instead,
@@ -493,6 +523,33 @@ static bool home_key(const keystroke_t *k) {
         case 7: begin_run("local.stress",NULL,0,stress_start,(size_t)(stress_end-stress_start-1)); break;
         case 8: begin_run("local.megademo",NULL,0,proc_megademo_start,
                           (size_t)(proc_megademo_end-proc_megademo_start-1)); break;
+        case 9:
+#ifdef KASANE_D6_SD_AV_STREAM_PROBE
+            begin_run("local.gridlab",NULL,0,video_sd_av_cleanup_start,
+                      (size_t)(video_sd_av_cleanup_end-video_sd_av_cleanup_start-1));
+#else
+            begin_run("local.gridlab",NULL,0,grid_lab_start,
+                      (size_t)(grid_lab_end-grid_lab_start-1));
+#endif
+            break;
+        case 10:
+#ifdef KASANE_D4_PIXEL_APP_PROBE
+            begin_run("local.videolab",NULL,0,pixel_lab_probe_start,
+                      (size_t)(pixel_lab_probe_end-pixel_lab_probe_start-1));
+#elif defined(KASANE_D2_MULTI_SURFACE_PROBE)
+            begin_run("local.videolab",NULL,0,proc_multi_surface_probe_start,
+                      (size_t)(proc_multi_surface_probe_end-proc_multi_surface_probe_start-1));
+#elif defined(KASANE_D6_SD_AV_STREAM_PROBE)
+            begin_run("local.videolab",NULL,0,video_sd_av_stage_start,
+                      (size_t)(video_sd_av_stage_end-video_sd_av_stage_start-1));
+#elif defined(KASANE_D5_SD_STREAM_PROBE)
+            begin_run("local.videolab",NULL,0,video_stream_lab_start,
+                      (size_t)(video_stream_lab_end-video_stream_lab_start-1));
+#else
+            begin_run("local.videolab",NULL,0,video_lab_start,
+                      (size_t)(video_lab_end-video_lab_start-1));
+#endif
+            break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
@@ -778,6 +835,9 @@ static void ui_task(void *arg) {
     int64_t previous_overlay_frame_started=0;
 #endif
     while(1) {
+        /* App teardown can time out while an SD read is in progress. Reap its
+         * acknowledged lease even when HOME has no guest turns to pump. */
+        pocket_video_sd_stream_reap();
 #ifdef KASANE_MEGADEMO_DEVICE_PROBE
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&megademo_probe_requested,false)){
             ksn_megademo_device_probe_run();

@@ -123,8 +123,15 @@ int main(int argc, char **argv) {
     JSRuntime *runtime = JS_NewRuntime(); REQUIRE(runtime);
     JSContext *ctx = JS_NewContext(runtime); REQUIRE(ctx);
     static const char mock[] =
-        "globalThis.__procCalls={registered:[],frames:[],active:null};"
-        "globalThis.pocket={kasane:{procedural:{"
+        "globalThis.__procCalls={registered:[],frames:[],active:null,images:[],resize:null};"
+        "globalThis.console={log(){}};"
+        "const uiTx={background(){},gradient(){},rect(){},text(){},"
+        "image(spec){const i={visible:spec.visible!==false,setRect(){},"
+        "setVisible(tx,v){this.visible=v}};__procCalls.images.push(i);return i}};"
+        "globalThis.pocket={kasane:{replace(f){f(uiTx)},patch(f){f(uiTx)},"
+        "grid:{registerResizeSource(s){__procCalls.resize=s;return 77},"
+        "resource(h){if(h!==77)throw Error('resize handle');return {resized:true}}},procedural:{"
+        "resource(){return {}},"
         "register(p,b){const id=__procCalls.registered.length;"
         "__procCalls.registered.push({program:p,batch:b});return id},"
         "beginFrame(c){if(__procCalls.active!==null)throw Error('nested frame');"
@@ -222,6 +229,21 @@ int main(int argc, char **argv) {
         "throw Error('layer '+tick+','+layer)}}";
     JSValue check = JS_Eval(ctx, playback_check, sizeof playback_check - 1,
                             "playback-check.js", JS_EVAL_TYPE_GLOBAL);
+    REQUIRE(!JS_IsException(check));
+    JS_FreeValue(ctx, check);
+    static const char resize_check[] =
+        "if(__procCalls.resize.width!==112||__procCalls.resize.height!==63)"
+        "throw Error('resize registration');"
+        "if(__procCalls.images.length!==2||!__procCalls.images[0].visible||"
+        "__procCalls.images[1].visible)throw Error('initial images');"
+        "frame(0x4000);for(let i=1;i<44;i++)frame(0);"
+        "if(__procCalls.images[0].visible||!__procCalls.images[1].visible)"
+        "throw Error('fixed monitor selection');"
+        "frame(0x4000);"
+        "if(!__procCalls.images[0].visible||__procCalls.images[1].visible)"
+        "throw Error('dynamic zoom selection');";
+    check = JS_Eval(ctx, resize_check, sizeof resize_check - 1,
+                    "resize-check.js", JS_EVAL_TYPE_GLOBAL);
     REQUIRE(!JS_IsException(check));
     JS_FreeValue(ctx, check);
     JS_FreeValue(ctx, demo);

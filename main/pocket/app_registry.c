@@ -67,6 +67,14 @@ static const app_manifest_t MANIFESTS[] = {
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
 
+    {.id="local.gridlab", .title="GRID LAB", .entry="apps/kasane/grid_lab.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    {.id="local.videolab", .title="VIDEO LAB", .entry="apps/kasane/video_lab.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
     // Both of its capabilities are REQUIRED rather than optional, and that is
     // not strictness for its own sake: without the card there is nothing to
     // choose and without playback there is nothing to do with a choice, so an

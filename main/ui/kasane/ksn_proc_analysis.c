@@ -80,6 +80,12 @@ bool ksn_proc_analyze(const ksn_proc_program *p, ksn_proc_analysis *out){
                 a->failure|=KSN_PA_FAIL_SEGMENTS|KSN_PA_FAIL_RASTER;
             }
             break;
+        case KSN_PROC_CUBIC:
+            if(i->dst!=0||i->a<1||i->a>64)return false;
+            a->reads=ALL_REGS;
+            a->effects=KSN_PA_EFFECT_PEN|KSN_PA_EFFECT_DRAW;
+            a->failure|=KSN_PA_FAIL_COORD|KSN_PA_FAIL_SEGMENTS|KSN_PA_FAIL_RASTER;
+            break;
         default:return false;
         }
     }

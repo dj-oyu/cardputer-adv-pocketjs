@@ -21,7 +21,8 @@ typedef enum {
     KSN_PROC_SIN, KSN_PROC_REPEAT, KSN_PROC_END,
     KSN_PROC_MOVE, KSN_PROC_PLOT, KSN_PROC_LINE,
     KSN_PROC_REPEAT_REG, KSN_PROC_BREAK_IF_GT,
-    KSN_PROC_PLOT_COLOR_REG, KSN_PROC_LINE_COLOR_REG
+    KSN_PROC_PLOT_COLOR_REG, KSN_PROC_LINE_COLOR_REG,
+    KSN_PROC_CUBIC
 } ksn_proc_op;
 typedef struct {
     uint8_t op,dst,a,b;
@@ -75,6 +76,10 @@ bool ksn_proc_capture_state(const ksn_proc_vm *vm,ksn_proc_state *state);
  * loop when a>b. PLOT_COLOR_REG and LINE_COLOR_REG use register dst as an
  * integral RGB565 color (0..65535). Every path remains subject to the step,
  * segment and raster caps. */
+/* CUBIC reads four (x,y) control points from registers 0..7 (dst=0), samples
+ * a segments (1..64) in a native loop, emits ordered lines of color, and
+ * leaves the pen at the final control point. One debugger step covers the
+ * entire bounded curve; the emitted segment/raster limits still apply. */
 ksn_proc_status ksn_proc_step(ksn_proc_vm *vm);
 ksn_proc_status ksn_proc_run(ksn_proc_vm *vm);
 /* Replays only the requested rows over an existing RGB565 backdrop. */

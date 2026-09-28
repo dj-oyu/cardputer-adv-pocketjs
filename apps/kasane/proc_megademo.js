@@ -1,5 +1,6 @@
 // Procedural megademo scene description. Numeric opcodes match ksn_proc_op.
 // A host registers program(phase, layer) once, then supplies inputs each frame.
+// Enter moves the same procedural image between full screen and a studio monitor.
 (function () {
   'use strict';
   const SET = 0, INPUT = 1, ADD = 2, MUL = 3, SIN = 4;
@@ -85,6 +86,23 @@
       add(5, 0, 6); move(2, 5); line(3, 5, neon[0]);
       add(0, 0, 1); add(2, 2, 4); add(3, 3, 4);
       end();
+
+      // A faceted crystal: a fixed front diamond and a beat-shifted rear
+      // diamond. Four connecting edges make the depth motion unambiguous.
+      set(0, 88); set(1, 152); set(2, 32); set(3, 98);
+      set(4, 120); set(5, 65); input(6, 2); input(7, 3);
+      move(4, 2); line(1, 5, neon[2]); line(4, 3, neon[2]);
+      line(0, 5, neon[2]); line(4, 2, neon[2]);
+      move(4, 2); line(4, 3, neon[3]);
+      move(0, 5); line(1, 5, neon[3]);
+      move(4, 2); add(4, 4, 6); add(2, 2, 7); line(4, 2, neon[3]);
+      move(1, 5); add(1, 1, 6); add(5, 5, 7); line(1, 5, neon[3]);
+      set(4, 120); move(4, 3); add(4, 4, 6); add(3, 3, 7);
+      line(4, 3, neon[3]);
+      set(5, 65); move(0, 5); add(0, 0, 6); add(5, 5, 7);
+      line(0, 5, neon[3]);
+      move(4, 2); line(1, 5, neon[1]); line(4, 3, neon[1]);
+      line(0, 5, neon[1]); line(4, 2, neon[1]);
     }
     return code;
   }
@@ -111,6 +129,9 @@
     } else {
       result[0] = (phase === 2 ? 9 : 17) + ((frame * 7) % 19);
       result[1] = (frame % 5 - 2) * (phase === 2 ? 2 : 1);
+      result[2] = f32(f32(pulse * 12) +
+        (phase === 2 ? (((frame * 3) % 5) - 2) * 2 : 0));
+      result[3] = f32(f32(1 - Math.abs(pulse)) * 8);
     }
     return result;
   }
@@ -146,7 +167,19 @@
   };
 
   if (typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.procedural) {
-    const host = pocket.kasane.procedural;
+    const view = pocket.kasane;
+    const host = view.procedural;
+    const resource = host.resource();
+    // A registered image-to-image resize shares the native span/PIE path.
+    // The moving zoom keeps its changing geometry; the settled monitor reads
+    // a fixed 112x63 source without materializing either full frame in JS.
+    const monitorResize = view.grid.registerResizeSource({
+      source: resource, width: 112, height: 63
+    });
+    const monitorResource = view.grid.resource(monitorResize);
+    const full = [0, 0, 240, 135];
+    const monitor = [64, 20, 176, 83];
+    const zoomFrames = 44;
     const handles = [];
     for (let phase = 0; phase < 3; ++phase) {
       const scene = [];
@@ -157,13 +190,82 @@
       }
       handles.push(scene);
     }
-    let tick = 0;
-    globalThis.frame = function () {
+    let image, monitorImage;
+    function build(tx) {
+      tx.background(0x07101cff);
+      tx.gradient({bounds: [0, 0, 240, 90], axis: 'x',
+        from: 0x0d263bff, to: 0x18384aff});
+      tx.rect({bounds: [0, 0, 240, 15], color: 0x061521ff});
+      tx.text({bounds: [8, 2, 180, 14], text: 'POCKET NEWS  /  STUDIO 01',
+        font: 'caption', color: 0xd7f4ffff});
+      tx.rect({bounds: [11, 20, 17, 92], color: 0x40a8b8ff});
+      tx.rect({bounds: [20, 28, 25, 86], color: 0x21536cff});
+      tx.rect({bounds: [181, 21, 231, 88], color: 0x0b1c2bff});
+      tx.text({bounds: [186, 30, 228, 44], text: 'ON AIR',
+        font: 'caption', color: 0xff795cff});
+      tx.rect({bounds: [186, 49, 224, 51], color: 0x3d99aaff});
+      tx.rect({bounds: [186, 58, 217, 60], color: 0x285f77ff});
+      tx.rect({bounds: [186, 67, 226, 69], color: 0x285f77ff});
+      tx.rect({bounds: [60, 16, 180, 87], color: 0x02070bff});
+      tx.rect({bounds: [62, 18, 178, 85], color: 0x8aa7b1ff});
+      tx.rect({bounds: [0, 106, 240, 135], color: 0x06111eff});
+      tx.rect({bounds: [0, 106, 240, 109], color: 0x45cddaff});
+      tx.rect({bounds: [8, 113, 44, 128], color: 0xd93436ff});
+      tx.text({bounds: [12, 115, 41, 127], text: 'LIVE',
+        font: 'caption', color: 0xffffffff});
+      tx.text({bounds: [50, 112, 233, 124],
+        text: 'MEGADEMO  /  THE CANVAS REPORT',
+        font: 'caption', color: 0xffffffff});
+      tx.text({bounds: [50, 124, 232, 134],
+        text: 'ENTER FULL SCREEN   ESC HOME',
+        font: 'caption', color: 0x80d9e8ff});
+      // The opaque image is last: at full size it exactly covers the set.
+      image = tx.image({resource: resource, bounds: boundsAt(zoomStep), clip: full,
+        sourceWidth: 240, sourceHeight: 135});
+      monitorImage = tx.image({resource: monitorResource, bounds: monitor,
+        clip: full, sourceWidth: 112, sourceHeight: 63});
+      monitorImage.setVisible(tx, false);
+    }
+    function boundsAt(step) {
+      const t = step / zoomFrames;
+      const eased = t * t * (3 - 2 * t);
+      return [
+        Math.round(full[0] + (monitor[0] - full[0]) * eased),
+        Math.round(full[1] + (monitor[1] - full[1]) * eased),
+        Math.round(full[2] + (monitor[2] - full[2]) * eased),
+        Math.round(full[3] + (monitor[3] - full[3]) * eased)
+      ];
+    }
+    let tick = 0, zoomStep = 0, zoomTarget = 0, enterHeld = false;
+    let built = false, fixedMonitor = false;
+    globalThis.frame = function (buttons) {
+      const enter = !!(buttons & 0x4000);
+      if (enter && !enterHeld)
+        zoomTarget = zoomTarget === 0 ? zoomFrames : 0;
+      enterHeld = enter;
+      if (zoomStep < zoomTarget) ++zoomStep;
+      else if (zoomStep > zoomTarget) --zoomStep;
       const phase = Math.floor(tick / 16);
       host.beginFrame(backdrops[phase]);
       for (let layer = 0; layer < 5; ++layer)
         host.draw(handles[phase][layer], inputs(tick, layer));
       host.commit();
+      if (!built) { view.replace(build); built = true; }
+      else {
+        const fixed = zoomStep === zoomFrames;
+        const changed = fixed !== fixedMonitor;
+        view.patch(function (tx) {
+          image.setRect(tx, boundsAt(zoomStep));
+          if (changed) {
+            image.setVisible(tx, !fixed);
+            monitorImage.setVisible(tx, fixed);
+          }
+        });
+        if (changed) {
+          fixedMonitor = fixed;
+          console.log('MEGADEMO IMAGE ' + (fixed ? 'FIXED_PIE' : 'DYNAMIC_STRETCH'));
+        }
+      }
       tick = (tick + 1) % 48;
     };
   }

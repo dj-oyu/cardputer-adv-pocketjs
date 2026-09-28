@@ -151,7 +151,8 @@ static uint32_t animate_120(unsigned arm_mode,unsigned long long *fetch_count,un
 static void both_arms(const config *c,const char *what,unsigned index,
                       unsigned long long *compared,unsigned long long *worst){
     static uint16_t first[PANEL];
-    unsigned long long fa,fb;
+    unsigned long long fa,fb,fm;
+    g_ksn_image_stretch_map=false;
     uint32_t ha=scene(c,true,&fa);memcpy(first,panel,sizeof(panel));
     uint32_t hb=scene(c,false,&fb);
     (*compared)+=2;
@@ -159,6 +160,13 @@ static void both_arms(const config *c,const char *what,unsigned index,
         unsigned long long n=panel_diff(first,panel,worst);
         printf("image stretch arms MISMATCH %s=%u diff=%llu fetches=%llu/%llu hash=%08x/%08x\n",
             what,index,n,fa,fb,ha,hb);assert(false);}
+    g_ksn_image_stretch_map=true;
+    uint32_t hm=scene(c,true,&fm);
+    (*compared)++;
+    if(ha!=hm||memcmp(first,panel,sizeof(panel))!=0||fa!=fm){
+        unsigned long long n=panel_diff(first,panel,worst);
+        printf("image stretch map MISMATCH %s=%u diff=%llu fetches=%llu/%llu hash=%08x/%08x\n",
+               what,index,n,fa,fm,ha,hm);assert(false);}
 }
 int main(void){
     unsigned long long compared=0,configs=0,worst_step=0;
@@ -237,8 +245,9 @@ int main(void){
 #endif
      configs++;}
     /* 7. 120-frame animated stretch track, both arms and an alternating arm. */
-    {unsigned long long f_step,f_div,f_alt;unsigned n_step,n_div,n_alt;
+    {unsigned long long f_step,f_div,f_alt,f_map;unsigned n_step,n_div,n_alt,n_map;
      static uint16_t first[PANEL];
+     g_ksn_image_stretch_map=false;
      uint32_t h_step=animate_120(0,&f_step,&n_step);memcpy(first,panel,sizeof(panel));
      uint32_t h_div=animate_120(1,&f_div,&n_div);
      unsigned long long diff=panel_diff(first,panel,&worst_step);
@@ -251,6 +260,11 @@ int main(void){
      if(h_alt!=h_step||f_alt!=f_step){
          printf("image stretch arms MISMATCH alternating frames=%u fetches=%llu hash=%08x/%08x\n",
              n_alt,f_alt,h_alt,h_step);assert(false);}
+     g_ksn_image_stretch_map=true;
+     uint32_t h_map=animate_120(0,&f_map,&n_map);
+     compared++;
+     assert(h_map==h_step&&f_map==f_step&&n_map==n_step&&
+            memcmp(first,panel,sizeof(panel))==0);
      assert(f_step>0);
      printf("animated stretch track: %u frames both arms, alternating arm identical, %llu fetches\n",n_step,f_step);
      configs+=2;}

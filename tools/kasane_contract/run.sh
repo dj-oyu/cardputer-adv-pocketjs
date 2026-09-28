@@ -12,10 +12,35 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   tools/kasane_contract/use_cases.c tools/kasane_contract/test_core.c -o "$out/core" main/ui/kasane/ksn_blend_pie.c
 "$out/core"
 for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain \
+    main/ui/kasane/ksn_video_frames.c \
+    tools/kasane_contract/test_video_frames.c -o "$out/video-frames"
+  "$out/video-frames"
+  cc -std=c11 -Wall -Wextra -Werror $options \
+    -Imain -Imain/ui/kasane -Itools/kasane_contract \
+    main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c \
+    main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_video_frames.c \
+    main/ui/kasane/ksn_depth_lines.c \
+    tools/kasane_contract/test_video_image_present.c -lm -o "$out/video-image"
+  "$out/video-image"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_proc_grid.c tools/kasane_contract/test_proc_grid.c \
+    -o "$out/proc-grid"
+  "$out/proc-grid"
+  for grid_model in '' '-DKSN_GRID_PIE_MODEL'; do
+    cc -std=c11 -Wall -Wextra -Werror $options $grid_model -Imain/ui/kasane \
+      main/ui/kasane/ksn_proc_grid.c main/ui/kasane/ksn_proc_grid_pie.c \
+      tools/kasane_contract/test_proc_grid_pie.c -o "$out/proc-grid-pie"
+    "$out/proc-grid-pie"
+  done
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural.c \
     -lm -o "$out/procedural"
   "$out/procedural"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural_band_jump.c \
+    -lm -o "$out/procedural-band-jump"
+  "$out/procedural-band-jump"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_proc_analysis.c main/ui/kasane/ksn_procedural.c \
     tools/kasane_contract/test_proc_analysis.c \
@@ -79,6 +104,32 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_procedural_layers.c \
     tools/kasane_contract/test_procedural_pattern_matrix.c -lm -o "$out/procedural-patterns"
   "$out/procedural-patterns"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c \
+    tools/kasane_contract/test_proc_bezier.c -lm -o "$out/proc-bezier"
+  "$out/proc-bezier"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
+    main/ui/kasane/ksn_proc_plan.c main/ui/kasane/ksn_proc_points.c \
+    tools/kasane_contract/test_proc_path_float_decision.c \
+    -lm -o "$out/proc-path-float-decision"
+  "$out/proc-path-float-decision"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    -Itools/kasane_contract main/ui/kasane/ksn_core.c \
+    main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+    main/ui/kasane/ksn_depth_lines.c \
+    tools/kasane_contract/test_depth_lines.c -lm -o "$out/depth-lines"
+  "$out/depth-lines"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    -Itools/kasane_contract main/ui/kasane/ksn_core.c \
+    main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+    main/ui/kasane/ksn_pixel_function.c \
+    tools/kasane_contract/test_pixel_function.c -o "$out/pixel-function"
+  "$out/pixel-function"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_pixel_function.c main/ui/kasane/ksn_pixel_span.c \
+    tools/kasane_contract/test_pixel_span.c -o "$out/pixel-span"
+  "$out/pixel-span"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
     main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_procedural_surface.c \
@@ -321,6 +372,21 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
 done
 python3 tools/kasane_contract/run_proc_megademo_js.py
 python3 tools/kasane_contract/run_pocket_proc_qjs.py
+python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py
+python3 tools/kasane_contract/run_proc_grid_resize.py
+python3 tools/kasane_contract/run_pocket_grid_qjs.py
+python3 tools/kasane_contract/run_pocket_video_qjs.py
+python3 tools/kasane_contract/make_grid_fold_device_assets.py --check
+python3 tools/kasane_contract/test_build_grid_profile.py
+cc -std=c11 -Wall -Wextra -Werror -O2 -DKSN_GRID_PIE_MODEL \
+  -Imain/ui/kasane -Itools/kasane_contract \
+  main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c \
+  main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_proc_grid.c \
+  main/ui/kasane/ksn_proc_grid_pie.c main/ui/kasane/ksn_proc_grid_image.c \
+  tools/kasane_contract/test_grid_image_projection.c -o "$out/grid-image-projection"
+"$out/grid-image-projection"
+python3 tools/pie/test_proc_grid_pie.py
+python3 -m unittest discover -s tools/pie -p 'test_fused_mac_load*.py'
 python3 tools/pie/test_frost.py
 python3 tools/kasane_contract/fill_pie.py
 # Boundary 4a's coarse 255 -> 256 arm (g_ksn_scale256, default 0 = the exact

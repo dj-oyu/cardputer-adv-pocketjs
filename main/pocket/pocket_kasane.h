@@ -15,8 +15,20 @@
 esp_err_t pocket_kasane_install(JSContext *ctx, void *user_data);
 /* Procedural adapter publishes a prepared candidate through the APP lease. */
 ksn_result pocket_kasane_proc_publish(void);
+ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect source_damage);
 /* Create an opaque Kasane image resource for the current procedural session. */
 JSValue pocket_kasane_proc_resource(JSContext *ctx);
+JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
+JSValue pocket_kasane_grid_resource(JSContext *ctx, unsigned slot,
+                                    const ksn_image_port *port);
+JSValue pocket_kasane_video_resource(JSContext *ctx,const ksn_image_port *port);
+JSValue pocket_kasane_pixel_resource(JSContext *ctx,const ksn_image_port *port);
+void pocket_kasane_pixel_invalidate(void);
+bool pocket_kasane_pixel_can_stage(void);
+bool pocket_kasane_video_can_select(void);
+void pocket_kasane_video_invalidate(void);
+void pocket_kasane_grid_invalidate(unsigned slot);
+bool pocket_kasane_grid_source_port(JSContext *,JSValueConst,ksn_image_port *,uint32_t *);
 /* C service publishes a session-scoped, unforgeable source capability. The
  * registry and provider must outlive pocket_kasane_reset(); revoke by
  * unregistering the handle, which makes later binds/acquires stale. */

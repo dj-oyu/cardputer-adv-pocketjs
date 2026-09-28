@@ -122,6 +122,8 @@ ksn_client ksn_core_client(ksn_core *core,ksn_layer layer);
  * init, which must run outside provider callbacks and invalidate all clients.
  * Register only between submissions/builders. No per-frame retain/release. */
 ksn_result ksn_core_register_image(ksn_core *core,ksn_layer layer,const ksn_image_port *port,ksn_resource *out);
+/* Borrow a registered provider descriptor during the owner turn. */
+ksn_result ksn_core_image_port(const ksn_core *,ksn_layer,ksn_resource,ksn_image_port *);
 /* Read-only owner-turn validation against currently registered resources. */
 ksn_result ksn_core_check_draw(const ksn_core *,ksn_layer,const ksn_draw *);
 /* Optional caller-owned blocks, attached before the first animation. */
@@ -166,9 +168,17 @@ void ksn_core_invalidate(ksn_core *core);
  * invalidation stays available for owners that do not know. */
 #define KSN_BANDS_ALL ((1u<<17)-1u)
 void ksn_core_invalidate_bands(ksn_core *core,uint32_t bands);
+/* Owner damage for a half-open panel rectangle. Clipped to the display and
+ * merged by column range within each touched 8-row band. Requests made while
+ * a transfer is in flight remain pending for the following frame. */
+void ksn_core_invalidate_rect(ksn_core *core,ksn_rect rect);
 /* Invalidate the clipped display bounds of an image resource in both the
  * committed bank and any submitted candidate. Returns false if absent. */
 bool ksn_core_invalidate_image(ksn_core *core,ksn_resource resource);
+/* Invalidate only image pixels inside source_rect for 1:1 unrotated nodes.
+ * Other transforms conservatively invalidate the node's displayed bounds. */
+bool ksn_core_invalidate_image_source_rect(ksn_core *core,ksn_resource resource,
+                                           ksn_rect source_rect);
 /* Full-width 8-row bands whose displayed SYSTEM layer is independent of the
  * backdrop. Conservative: returns 0 while SYSTEM work/repair is in flight.
  * This is a read-only occlusion hint, never a substitute for submission damage. */
@@ -219,6 +229,26 @@ ksn_result ksn_core_read_active_ref(const ksn_core *core,ksn_layer layer,
 ksn_result ksn_core_image_span(const ksn_core *core,ksn_tx ticket,bool previous,
                             ksn_layer layer,uint16_t index,uint16_t y,uint16_t x,
                             uint16_t count,uint16_t *rgb565,uint8_t *alpha);
+/* Resolve a sealed image command once for repeated span reads during one
+ * presentation. The reader is a snapshot; do not retain it after present. */
+typedef struct {
+    void *ctx;
+    ksn_result (*read_span)(void *,uint16_t,uint16_t,uint16_t,uint16_t,uint16_t,
+                            uint16_t *,uint8_t *);
+    uint16_t width,height,variant,frame;
+    bool opaque;
+} ksn_image_reader;
+ksn_result ksn_core_image_reader(const ksn_core *core,ksn_tx ticket,bool previous,
+                                 ksn_layer layer,uint16_t index,ksn_image_reader *out);
+static inline ksn_result ksn_image_reader_span(const ksn_image_reader *reader,
+                                               uint16_t y,uint16_t x,uint16_t count,
+                                               uint16_t *rgb565,uint8_t *alpha){
+    if(!reader||!reader->read_span||y>=reader->height||x>reader->width||
+       count>reader->width-x||(count&&(!rgb565||!alpha)))return KSN_INVALID;
+    if(!count)return KSN_OK;
+    return reader->read_span(reader->ctx,reader->variant,reader->frame,
+                             y,x,count,rgb565,alpha);
+}
 /* Read the registered provider's all-pixel opacity promise for a sealed image
  * command. Invalid/stale tickets and non-image commands return false. */
 bool ksn_core_image_opaque(const ksn_core *core,ksn_tx ticket,ksn_layer layer,uint16_t index);

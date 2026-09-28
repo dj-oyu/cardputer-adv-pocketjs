@@ -26,11 +26,20 @@ set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
 list(APPEND KASANE_SOURCES
-    "pocket/pocket_proc.c" "ui/kasane/ksn_procedural.c"
+    "pocket/pocket_proc.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
+    "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
+    "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
+    "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
+    "ui/kasane/ksn_procedural.c" "ui/kasane/ksn_pixel_function.c"
+    "ui/kasane/ksn_pixel_span.c"
     "ui/kasane/ksn_proc_analysis.c" "ui/kasane/ksn_proc_plan.c"
     "ui/kasane/ksn_proc_plan_points.c" "ui/kasane/ksn_proc_points.c"
     "ui/kasane/ksn_proc_points_pie.c" "ui/kasane/ksn_proc_points_dispatch.c")
 option(KASANE_PROC_DEVICE_PROBE "USB-triggered procedural display and load diagnostic" OFF)
+option(KASANE_FLOWER_FRAME_PROBE "Measure two captured FLOWER frames on the device" OFF)
+option(KASANE_FLOWER_D1_PROBE "Verify fixed FLOWER species and heap-pressure repair on device" OFF)
+option(KASANE_FLOWER_ALLOC_FAULT_PROBE "Inject one FLOWER candidate allocation failure after first ACK" OFF)
+option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone and heap measurements" OFF)
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
 if(KASANE_PROC_DEVICE_PROBE)
@@ -38,13 +47,20 @@ if(KASANE_PROC_DEVICE_PROBE)
         "ui/kasane/ksn_procedural_surface.c"
         "ui/kasane/ksn_procedural_layers.c" "ui/kasane/ksn_procedural_present.c"
         "ui/kasane/ksn_procedural_device_probe.c"
-        "ui/kasane/ksn_proc_compiler_device_probe.c")
+        "ui/kasane/ksn_pixel_span_device_probe.c"
+        "ui/kasane/ksn_proc_compiler_device_probe.c"
+        "ui/kasane/ksn_grid_scan_cost_device_probe.c")
 endif()
 if(KASANE_MEGADEMO_DEVICE_PROBE)
     list(APPEND KASANE_SOURCES "ui/kasane/ksn_megademo_device_probe.c")
 endif()
+if(KASANE_FLOWER_D1_PROBE)
+    list(APPEND KASANE_SOURCES "scene/flower_d1_species_probe.c" "scene/flower_d1_pressure_probe.c")
+endif()
 list(APPEND KASANE_SOURCES "ui/kasane/ksn_source_pool.c")
 list(APPEND KASANE_SOURCES "ui/kasane/ksn_source_pool_adapter.c")
+list(APPEND KASANE_SOURCES "ui/kasane/ksn_video_frames.c"
+    "ui/kasane/ksn_depth_lines.c")
 option(KASANE_P0_PROBE "Instrument Kasane P0 device measurements (not for production)" OFF)
 option(KASANE_TEXT_PIE_DEVICE_PROBE "Toggle binary-text PIE over USB for same-image A/B (diagnostic only)" OFF)
 if(KASANE_TEXT_PIE_DEVICE_PROBE AND NOT KASANE_P0_PROBE)
@@ -56,6 +72,24 @@ option(KASANE_P0_COPY_PROBE "Count Kasane logical copies in the P0 diagnostic bu
 option(KASANE_P0_BUS_PROBE "Split LCD transfer phases and SD overlap in P0 diagnostic builds" OFF)
 option(KASANE_P2_REPAIR_PROBE "Inject one Kasane LCD send failure and capture repair (not for production)" OFF)
 option(KASANE_P5_FAIRNESS_PROBE "Drive a fast native source under the deskclock overlay (diagnostic only)" OFF)
+option(KASANE_D6_VIDEO_OVERLAY_PROBE "Run JS video over the native FLOWER backdrop in the deskclock overlay (diagnostic only)" OFF)
+option(KASANE_D6_SD_AV_STREAM_PROBE "Run SD KSV1 and SD MP3 together over FLOWER (diagnostic only)" OFF)
+option(KASANE_D5_SD_STREAM_PROBE "Replace VIDEO LAB with temporary SD stream diagnostic" OFF)
+option(KASANE_D4_PIXEL_APP_PROBE "Replace VIDEO LAB with bounded pixel function APP and inject second-band failure" OFF)
+option(KASANE_D2_MULTI_SURFACE_PROBE "Replace VIDEO LAB with two independent procedural image surfaces" OFF)
+option(KASANE_D2_OVERLAY_PROC_PROBE "Run two procedural image surfaces over FLOWER with one LCD failure" OFF)
+if(KASANE_D2_OVERLAY_PROC_PROBE AND
+   (KASANE_D4_PIXEL_APP_PROBE OR KASANE_D6_VIDEO_OVERLAY_PROBE OR KASANE_D6_SD_AV_STREAM_PROBE))
+    message(FATAL_ERROR "D2 overlay procedural probe requires other overlay/pixel probes OFF")
+endif()
+if(KASANE_D2_MULTI_SURFACE_PROBE AND
+   (KASANE_D4_PIXEL_APP_PROBE OR KASANE_D5_SD_STREAM_PROBE OR KASANE_D6_SD_AV_STREAM_PROBE))
+    message(FATAL_ERROR "D2 multi-surface VIDEO LAB probe requires other VIDEO LAB probes OFF")
+endif()
+set(KASANE_VIDEO_LAB_SOURCE "../apps/kasane/video_lab.js")
+if(KASANE_D5_SD_STREAM_PROBE)
+    set(KASANE_VIDEO_LAB_SOURCE "../apps/kasane/video_stream_lab.js")
+endif()
 option(KASANE_P1_OUTPUT_OVERLAY_PROBE "Enable 33 ms output source while the music overlay remains visible (diagnostic only)" OFF)
 option(KASANE_P1_OVERLAY_STAGE_PROBE "Split music overlay source/guest timings (adds diagnostic histogram BSS)" OFF)
 option(KASANE_P1_VISIBLE_33MS_PROBE "Render centiseconds from the 33 ms output source in the foreground diagnostic app" OFF)
@@ -123,7 +157,7 @@ idf_component_register(SRCS "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_dec
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin")
 target_link_libraries(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=xQueueCreateMutex" "-Wl,--wrap=vQueueDelete")
@@ -151,6 +185,18 @@ if(POCKET_PROBES)
 endif()
 if(KASANE_PROC_DEVICE_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_DEVICE_PROBE=1)
+endif()
+if(KASANE_FLOWER_FRAME_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_FLOWER_FRAME_PROBE=1)
+endif()
+if(KASANE_FLOWER_D1_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_FLOWER_D1_PROBE=1)
+endif()
+if(KASANE_FLOWER_ALLOC_FAULT_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_FLOWER_ALLOC_FAULT_PROBE=1)
+endif()
+if(KASANE_FLOWER_AUDIO_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_FLOWER_AUDIO_PROBE=1)
 endif()
 if(KASANE_MEGADEMO_DEVICE_PROBE)
     target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../tools/kasane_contract")
@@ -215,6 +261,31 @@ if(KASANE_P0_PROBE)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_P0_COPY_PROBE=1)
     endif()
 endif()
+if(KASANE_D6_VIDEO_OVERLAY_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D6_VIDEO_OVERLAY_PROBE=1)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/overlay_video_probe.js" TEXT)
+endif()
+if(KASANE_D6_SD_AV_STREAM_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D6_SD_AV_STREAM_PROBE=1)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/overlay_video_sd_stream_probe.js" TEXT)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/video_sd_av_stage.js" TEXT)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/video_sd_av_cleanup.js" TEXT)
+endif()
+if(KASANE_D5_SD_STREAM_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D5_SD_STREAM_PROBE=1)
+endif()
+if(KASANE_D4_PIXEL_APP_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D4_PIXEL_APP_PROBE=1)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/pixel_lab_probe.js" TEXT)
+endif()
+if(KASANE_D2_MULTI_SURFACE_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D2_MULTI_SURFACE_PROBE=1)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/proc_multi_surface_probe.js" TEXT)
+endif()
+if(KASANE_D2_OVERLAY_PROC_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_D2_OVERLAY_PROC_PROBE=1)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/overlay_proc_multi_probe.js" TEXT)
+endif()
 if(KASANE_P0_BUS_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_P0_BUS_PROBE=1)
 endif()
@@ -242,6 +313,7 @@ if(KASANE_PROC_DEVICE_PROBE)
         ui/kasane/ksn_procedural_layers.c
         ui/kasane/ksn_procedural_present.c ui/kasane/ksn_procedural_device_probe.c
         ui/kasane/ksn_proc_compiler_device_probe.c
+        ui/kasane/ksn_grid_scan_cost_device_probe.c
         PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 if(KASANE_MEGADEMO_DEVICE_PROBE)

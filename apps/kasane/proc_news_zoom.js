@@ -86,6 +86,22 @@
       add(5, 0, 6); move(2, 5); line(3, 5, neon[0]);
       add(0, 0, 1); add(2, 2, 4); add(3, 3, 4);
       end();
+
+      // The same beat-shifted crystal as the foreground megademo.
+      set(0, 88); set(1, 152); set(2, 32); set(3, 98);
+      set(4, 120); set(5, 65); input(6, 2); input(7, 3);
+      move(4, 2); line(1, 5, neon[2]); line(4, 3, neon[2]);
+      line(0, 5, neon[2]); line(4, 2, neon[2]);
+      move(4, 2); line(4, 3, neon[3]);
+      move(0, 5); line(1, 5, neon[3]);
+      move(4, 2); add(4, 4, 6); add(2, 2, 7); line(4, 2, neon[3]);
+      move(1, 5); add(1, 1, 6); add(5, 5, 7); line(1, 5, neon[3]);
+      set(4, 120); move(4, 3); add(4, 4, 6); add(3, 3, 7);
+      line(4, 3, neon[3]);
+      set(5, 65); move(0, 5); add(0, 0, 6); add(5, 5, 7);
+      line(0, 5, neon[3]);
+      move(4, 2); line(1, 5, neon[1]); line(4, 3, neon[1]);
+      line(0, 5, neon[1]); line(4, 2, neon[1]);
     }
     return code;
   }
@@ -112,6 +128,9 @@
     } else {
       result[0] = (phase === 2 ? 9 : 17) + ((frame * 7) % 19);
       result[1] = (frame % 5 - 2) * (phase === 2 ? 2 : 1);
+      result[2] = f32(f32(pulse * 12) +
+        (phase === 2 ? (((frame * 3) % 5) - 2) * 2 : 0));
+      result[3] = f32(f32(1 - Math.abs(pulse)) * 8);
     }
     return result;
   }
