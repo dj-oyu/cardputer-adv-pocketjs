@@ -97,14 +97,19 @@
   const WH = 0xffff, VI = 0xfa3f, GR = 0x17a7, BL = 0x167f, OR = 0xfb47;
   // [LIGHT, MID, HEAVY]. c: TWIST corridor (n frames, r ratio, m rungs per
   // frame, s arch segments, kf/ka first frame/arch, D twist); z: ZENITH;
-  // l: LIMIT. Derivation: docs/kasane/megademo-limit-scenes.md
+  // l: LIMIT; q: rotate the radar (ZENITH, LIMIT) and the thumbnail, each
+  // ~23 ms of band re-renders a frame on the device. Derivation:
+  // docs/kasane/megademo-limit-scenes.md, megademo-device-limits.md
+  // TWIST and ZENITH hold the display rate at HEAVY's load, so MID shares it.
+  const CH = {n: 26, r: .8, m: 3, s: 8, kf: 2, ka: 3, D: 6},
+    ZH = {st: 60, gl: 14, ln: 15, cr: 3, cc: 8, sa: 4, ts: 16, rr: 4};
   const KN = [
-    {c: {n: 12, r: .7, m: 2, s: 4, kf: 2, ka: 3, D: 4}, z: {st: 24, gl: 8, ln: 7, cr: 2, cc: 4, sa: 2, ts: 6, rr: 2},
+    {q: [0, 0, 0], c: {n: 12, r: .7, m: 2, s: 4, kf: 2, ka: 3, D: 4}, z: {st: 24, gl: 8, ln: 7, cr: 2, cc: 4, sa: 2, ts: 6, rr: 2},
      l: {n: 12, r: .7, m: 2, s: 4, kf: 2, ka: 3, D: 6, gl: 8, ln: 7, dn: 150, ai: 6, ao: 12, lt: 1.5}},
-    {c: {n: 18, r: .76, m: 3, s: 6, kf: 2, ka: 3, D: 5}, z: {st: 40, gl: 11, ln: 11, cr: 3, cc: 6, sa: 3, ts: 10, rr: 3},
+    {q: [0, 0, 0], c: CH, z: ZH,
      l: {n: 18, r: .76, m: 3, s: 6, kf: 2, ka: 3, D: 7, gl: 11, ln: 11, dn: 200, ai: 12, ao: 22, lt: 2.5}},
-    {c: {n: 26, r: .8, m: 3, s: 8, kf: 2, ka: 3, D: 6}, z: {st: 60, gl: 14, ln: 15, cr: 3, cc: 8, sa: 4, ts: 16, rr: 4},
-     l: {n: 26, r: .8, m: 3, s: 6, kf: 2, ka: 2, D: 8, gl: 14, ln: 15, dn: 285, ai: 16, ao: 34, lt: 4.6}}
+    {q: [1, 0, 0], c: CH, z: ZH,
+     l: {n: 26, r: .8, m: 3, s: 8, kf: 2, ka: 2, D: 8, gl: 14, ln: 15, dn: 285, ai: 16, ao: 37, lt: 5.7}}
   ];
   // Programs are text, decoded by one function (a generator function per
   // plan costs guest heap at compile time). A letter per ksn_proc_op in
@@ -284,6 +289,10 @@
   if (typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.procedural) {
     const V = pocket.kasane, H = V.procedural, G = V.grid;
     const res0 = H.resource(), surf1 = H.createSurface(), res1 = H.resource(surf1);
+    // Both surfaces' frames (5 x 10 KB) now, while the heap still has holes
+    // that size; ZENITH's first beginFrame(surf1) found none on the device.
+    H.beginFrame(0, surf1);
+    H.beginFrame(0);
     // Registered image-to-image resizes share the native span/PIE path: the
     // settled monitor (bilinear) and the radar thumbnail (nearest).
     const monRes = G.resource(G.registerResizeSource({source: res0, width: 112, height: 63}));
@@ -299,8 +308,10 @@
     MP[1] = VI;
     const FULL = [0, 0, 240, 135], MON = [64, 20, 176, 83], RAD = [4, 84, 52, 132], ZOOM = 44;
     // Loader: the next scene registers from LOAD[0] frames before the switch,
-    // at most LOAD[1] plans per frame.
-    const LOAD = [6, 4];
+    // LOAD[1] plans a frame, while the internal heap has LOAD[2] bytes free
+    // (a registration dips it by up to 14 KB on the device); the rest
+    // registers over the scene's first frames, which skip unloaded plans.
+    const LOAD = [16, 1, 22528], MEM = pocket.memory;
     // The Act I news set: [x0, y0, x1, y1, rgba, caption].
     const NEWS = [[0, 0, 240, 15, 0x061521ff], [8, 2, 180, 14, 0xd7f4ffff, 'POCKET NEWS  /  STUDIO 01'],
       [11, 20, 17, 92, 0x40a8b8ff], [20, 28, 25, 86, 0x21536cff], [181, 21, 231, 88, 0x0b1c2bff],
@@ -310,31 +321,31 @@
       [8, 113, 44, 128, 0xd93436ff], [12, 115, 41, 127, 0xffffffff, 'LIVE'],
       [50, 112, 233, 124, 0xffffffff, 'MEGADEMO  /  THE CANVAS REPORT'],
       [50, 124, 232, 134, 0x80d9e8ff, 'ENTER FULL SCREEN   ESC HOME']];
-    let tier = KN.length - 1, scene = 0, t = 0, tick = 0, live = [], next = null, loaded = 0;
+    let tier = KN.length - 1, scene = 0, t = 0, tick = 0, live = [], pend = [], next = null, loaded = 0;
     let img, mon, hud = [], R = {}, anim = null, built = -1, vis = false, shown = true;
     let zoom = 0, target = 0, held = 0, fixed = false;
     const drop = h => { for (let i = 0; i < h.length; ++i) H.unregister(h[i]); };
+    const reg = th => { const p = th(); ++loaded; return p[1] ? H.register(p[0], p[1]) : H.register(p[0]); };
     function prefetch(s, max) {
       if (next && (next.s !== s || next.k !== tier)) { drop(next.h); next = null; }
       if (!next) next = {s: s, k: tier, h: [], sp: specs(s, tier)};
-      while (max-- > 0 && next.h.length < next.sp.length) {
-        const p = next.sp[next.h.length]();
-        next.h.push(p[1] ? H.register(p[0], p[1]) : H.register(p[0]));
-        ++loaded;
-      }
+      while (max-- > 0 && next.h.length < next.sp.length && MEM.info().internalFreeBytes >= LOAD[2])
+        next.h.push(reg(next.sp[next.h.length]));
     }
-    // fresh: drop everything first (tier change, recovery); otherwise the
-    // prefetched set and the running one are live together until here.
+    // fresh: drop the prefetched set too (tier change, recovery). The old set
+    // goes before the rest registers: they overlap only as far as the
+    // memory gate let the prefetch run.
     function enter(s, fresh) {
-      if (fresh) { if (next) drop(next.h); next = null; drop(live); live = []; }
-      prefetch(s, 64);
+      if (fresh && next) { drop(next.h); next = null; }
+      prefetch(s, 0);
       const old = live.length;
-      drop(live); live = next.h; next = null; scene = s; t = 0;
+      drop(live); live = next.h; pend = next.sp.slice(live.length); next = null; scene = s; t = 0;
       console.log('MEGADEMO SCENE ' + NAMES[s] + ' tier=' + tier + ' plans=' + live.length +
         ' freed=' + old + ' registered=' + loaded);
     }
     const spin = tx => R.radar.animate(tx, {from: {bounds: RAD, rotation: 0},
-      to: {bounds: RAD, rotation: 360}, durationMs: 4000, easing: 'linear', repeat: 'loop'});
+      to: {bounds: RAD, rotation: 360 * KN[tier].q[scene === 4 ? 0 : 2]}, durationMs: 4000,
+      easing: 'linear', repeat: 'loop'});
     const boundsAt = step => {
       const u = step / ZOOM, e = u * u * (3 - 2 * u);
       return FULL.map((v, j) => rnd(v + (MON[j] - v) * e));
@@ -409,7 +420,7 @@
       if (!(t & 7)) R.score.setText(tx, NAMES[scene] + ' ' + String(1e6 + tick * 10).slice(1));
       R.lamp.setColor(tx, t & 8 ? 0xfb47ffff : 0x167fffff);
       if (scene === 4) {
-        R.thumb.setRotation(tx, -flight(t).roll * 57.3);
+        R.thumb.setRotation(tx, -flight(t).roll * 57.3 * KN[tier].q[1]);
         for (let i = 0; i < 3; ++i) R.lives[i].place(tx, {offset: [160 + i * 12, 4 + ((t + i * 3) >> 2) % 2]});
         R.lives[2].setVisible(tx, on && t < 48);
       } else {
@@ -420,6 +431,7 @@
       if (t === 90 && anim && on) { anim.stop(tx); console.log('MEGADEMO ANIM ' + anim.poll()); }
     }
     enter(0);
+    while (pend.length) live.push(reg(pend.shift()));
     globalThis.frame = function (buttons) {
       buttons |= 0;
       const press = buttons & ~held;
@@ -436,11 +448,16 @@
         f = frameOf(scene, tier, t);
         if (f.s) H.beginFrame(f.b, surf1);
         else H.beginFrame(f.b);
-        for (let i = 0; i < f.d.length; ++i) H.draw(live[f.d[i][0]], f.d[i][1]);
+        for (let i = 0; i < f.d.length; ++i) {
+          const h = live[f.d[i][0]];
+          if (h) H.draw(h, f.d[i][1]);
+        }
         H.commit();
-        // The next scene's plans register over the last frames: both sets
-        // are live together before the switch frees the old one.
-        if (t >= LEN[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, LOAD[1]);
+        // A plan decodes in ~13 ms on the device: one a frame, this scene's
+        // first, then the next scene's over the last frames.
+        let b = LOAD[1];
+        for (; b > 0 && pend.length; --b) live.push(reg(pend.shift()));
+        if (b && t >= LEN[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
       } catch (e) {
         if (!tier) throw e;
         --tier;
@@ -452,7 +469,7 @@
         MP[0] = 257 + tick * 3;
         V.pixel.stage(MC, MP, 6, 5);
       }
-      const key = scene < 3 ? 0 : scene;
+      const key = scene < 3 ? 0 : scene + 8 * tier;
       if (built !== key) {
         V.replace(build);
         built = key;

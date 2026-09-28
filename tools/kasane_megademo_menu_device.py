@@ -45,19 +45,24 @@ def main() -> None:
                 started = command(b"e", b"KASANE_FRAME_PRESENTED", 20)
                 if b"APP_ID local.megademo" not in started:
                     raise RuntimeError("MEGADEMO ran under an unexpected app identity")
-                # Four 30-frame paint windows prove the normal app survived
-                # more than two 48-frame cycles. Reject an unsolicited return
-                # home before Back is sent.
+                # One whole loop (368 frames: Act I, TWIST, ZENITH, LIMIT)
+                # proves every scene's plans load, draw and unload on the
+                # device: wait for LIMIT and then NEWS again. A DEGRADE means
+                # a tier failed and is a failure here. Reject an unsolicited
+                # return home before Back is sent.
                 start = len(log)
-                deadline = time.monotonic() + 15.0
-                while bytes(log[start:]).count(b"KASANE_PAINT") < 4:
-                    if time.monotonic() >= deadline:
-                        raise RuntimeError("MEGADEMO did not paint 120 frames")
-                    log.extend(port.read(32768))
+                deadline = time.monotonic() + 45.0
+                while True:
                     recent = bytes(log[start:])
+                    limit = recent.find(b"MEGADEMO SCENE LIMIT")
+                    if limit >= 0 and b"MEGADEMO SCENE NEWS" in recent[limit:]:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("MEGADEMO did not complete a 368-frame loop")
+                    log.extend(port.read(32768))
                     if any(marker in recent for marker in
-                           (b"APP_STOPPED", b"HOME_READY", b"START_FAILED",
-                            b"Guru Meditation", b"PRESENTER_STEP_FAILED")):
+                           (b"APP_STOPPED", b"HOME_READY", b"START_FAILED", b"MEGADEMO DEGRADE",
+                            b"Guru Meditation", b"PRESENTER_STEP_FAILED", b"RUNAWAY")):
                         raise RuntimeError(f"MEGADEMO stopped early: {recent[-1200:]!r}")
                 print(f"MEGADEMO_RUN_{run + 1} PASS")
             stopped = command(b"q", b"HOME_READY")
