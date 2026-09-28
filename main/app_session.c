@@ -47,6 +47,7 @@
 #include "pet_hub.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
+#include "ui/shell.h"
 #include "esp_heap_caps.h"
 #include "esp_cpu.h"
 #include "esp_log.h"
@@ -998,6 +999,7 @@ esp_err_t app_resume(void) {
     // foreground start: without this a resumed app ran 16 KiB short of a
     // freshly started one (measured: the second suspension of the same app
     // reported exactly 16,384 B less free).
+    shell_release_background_frames();
     scene_mem_release();
     pocketjs_guest_set_dormant(guest,false);
     pocket_kasane_set_dormant(false);
@@ -1063,7 +1065,10 @@ esp_err_t app_start_test(char test) {
     }
     /* Foreground ownership ends the background scratch lifetime on every
      * entry path, including USB diagnostics. Overlays still share the scene. */
-    if(!overlay_session)scene_mem_release();
+    if(!overlay_session){
+        shell_release_background_frames();
+        scene_mem_release();
+    }
     atomic_store(&stop_requested,false); frames=0;
     deferred_buttons=0; continuation_turns=0; turn_continued=false;
     last_present_us=0;

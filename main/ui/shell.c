@@ -118,6 +118,7 @@ static void flower_scene_release(void) {
         flower_scene_frames[i]=NULL;
     }
     flower_scene_candidate=flower_scene_retry=false;
+    flower_scene_committed=0;
     flower_scene_has_committed=flower_scene_use_committed=false;
 #ifdef KASANE_FLOWER_ALLOC_FAULT_PROBE
     flower_scene_fault_frames=0;
@@ -142,6 +143,17 @@ static void flower_probe_release(void) {
     flower_probe_valid=false;
 }
 #endif
+void shell_release_background_frames(void) {
+#ifdef KASANE_FLOWER_FRAME_PROBE
+    flower_probe_release();
+#else
+    size_t held=flower_frame_bytes(flower_scene_frames[0])+
+                flower_frame_bytes(flower_scene_frames[1]);
+    flower_scene_release();
+    if(held)ESP_LOGI("background","FLOWER_FRAMES_RELEASE bytes=%u",
+                     (unsigned)held);
+#endif
+}
 // The backgrounds. See scene_ops_t in scene/scene.h for why this is a table.
 // FLOWER MESH used to sit after FLOWER RAY and drew the same flower from a
 // stored vertex mesh. The mesh cost 17,472 bytes of .bss for the whole life of

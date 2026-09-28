@@ -623,7 +623,10 @@ static void enter(screen_id_t next) {
     // session it owns ends here. It has to be before the screen changes,
     // because app_stop() tears down surfaces that the arriving screen may
     // immediately build again.
-    if(next!=SCREEN_HOME) overlay_release();
+    if(next!=SCREEN_HOME) {
+        overlay_release();
+        shell_release_background_frames();
+    }
     if(SCREENS[screen].close) SCREENS[screen].close();
     screen=next;
     atomic_store(&text_screen,SCREENS[next].takes_text);
