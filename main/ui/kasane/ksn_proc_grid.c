@@ -424,6 +424,7 @@ ksn_grid_status ksn_grid_begin(const ksn_grid_plan *plan,
             execution->access[i] = stride == 0 ? KSN_GRID_ACCESS_BROADCAST :
                                    stride == 1 ? KSN_GRID_ACCESS_CONTIGUOUS :
                                    stride == 2 ? KSN_GRID_ACCESS_INTERLEAVED2 :
+                                   stride == -1 ? KSN_GRID_ACCESS_REVERSE :
                                                  KSN_GRID_ACCESS_GATHER;
         }
     }

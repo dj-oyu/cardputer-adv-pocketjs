@@ -107,8 +107,8 @@ typedef struct {
     ksn_resource proc_resource[2];
     ksn_resource video_resource;
     ksn_resource pixel_resource;
-    ksn_resource grid_resources[4];
-    uint16_t grid_width[4],grid_height[4];
+    ksn_resource grid_resources[POCKET_GRID_MAX_SLOTS];
+    uint16_t grid_width[POCKET_GRID_MAX_SLOTS],grid_height[POCKET_GRID_MAX_SLOTS];
     ksn_resource notice_resource;
     ksn_tx notice_tx;
     uint32_t notice_displayed,notice_pending;
@@ -1099,7 +1099,7 @@ JSValue pocket_kasane_proc_resource(JSContext *ctx){
 JSValue pocket_kasane_grid_resource(JSContext *ctx,unsigned slot,
                                     const ksn_image_port *port){
     const char *op="kasane.grid.resource";
-    if(slot>=4||!port||!port->width||!port->height||
+    if(slot>=POCKET_GRID_MAX_SLOTS||!port||!port->width||!port->height||
        (state&&state->building.value))return throw_result(ctx,KSN_INVALID,op);
     JSValue object=JS_NewObjectClass(ctx,image_class);
     if(JS_IsException(object))return object;
@@ -1195,7 +1195,7 @@ void pocket_kasane_video_invalidate(void){
     }
 }
 void pocket_kasane_grid_invalidate(unsigned slot){
-    if(state&&slot<4&&state->grid_resources[slot].value){
+    if(state&&slot<POCKET_GRID_MAX_SLOTS&&state->grid_resources[slot].value){
         ksn_runtime_invalidate_image(state->grid_resources[slot]);
         pocket_grid_source_invalidated(state->grid_resources[slot].value);
     }

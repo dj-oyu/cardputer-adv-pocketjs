@@ -95,7 +95,8 @@ typedef enum {
     KSN_GRID_ACCESS_GATHER = 0,
     KSN_GRID_ACCESS_CONTIGUOUS,
     KSN_GRID_ACCESS_INTERLEAVED2,
-    KSN_GRID_ACCESS_BROADCAST
+    KSN_GRID_ACCESS_BROADCAST,
+    KSN_GRID_ACCESS_REVERSE
 } ksn_grid_access_kind;
 
 /* Lowering choices are local to one bound execution. AUTO is a request, never

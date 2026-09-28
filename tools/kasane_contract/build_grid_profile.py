@@ -161,7 +161,11 @@ def render_profile(rows) -> str:
         medians = ", ".join(f"{name}={median(values):.0f}us" for name, values in times.items())
         lines.append(f"    /* {label} {width}x{height} taps={tx}x{ty}: {medians}; gain={gain:.1%} */")
         lines.append(f"    {{UINT64_C(0x{key:016x}), {NAMES[winner]}}},")
-    lines += ["};", "", "#endif", ""]
+    # The independently measured two-term routes share the table but have a
+    # separate input record and generator. Keep them when refreshing one-term
+    # probe measurements.
+    lines += ['#include "ksn_proc_grid_dual_profile.inc"',
+              "};", "", "#endif", ""]
     return "\n".join(lines)
 
 

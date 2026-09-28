@@ -162,6 +162,10 @@ int main(int argc, char **argv)
               "let measure=kasane.grid.measure(h,2);"
               "if(!measure.equal||measure.repeats!==2||"
               "measure.scalarUs<0||measure.pieUs<0)throw Error('measure');"
+              "for(const strategy of ['GATHER','AFFINE']){"
+              "let forced=kasane.grid.measure(h,2,strategy);"
+              "if(!forced.equal||forced.strategy!==strategy||forced.pieUs<0)"
+              "throw Error('forced measure');}"
               "globalThis.resource=kasane.grid.resource(h);", false);
     CHECK(resources == 1 && !pocket_grid_pending());
     pixels(0);

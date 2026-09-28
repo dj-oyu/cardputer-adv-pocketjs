@@ -247,6 +247,7 @@ typedef ksn_grid_access_kind load_mode;
 #define LOAD_CONTIGUOUS KSN_GRID_ACCESS_CONTIGUOUS
 #define LOAD_STRIDE2 KSN_GRID_ACCESS_INTERLEAVED2
 #define LOAD_BROADCAST KSN_GRID_ACCESS_BROADCAST
+#define LOAD_REVERSE KSN_GRID_ACCESS_REVERSE
 
 static uint64_t hash_word(uint64_t hash, uint64_t value)
 {
@@ -347,7 +348,8 @@ uint8_t ksn_grid_pie_candidates(const ksn_grid_execution *e)
     if (!ksn_grid_pie_backend_available() || !ksn_grid_pie_eligible(e))
         return 0;
     if (e->plan->mac.terms == 2)
-        return 1u << KSN_GRID_PIE_LOAD_GATHER;
+        return (1u << KSN_GRID_PIE_LOAD_GATHER) |
+               (1u << KSN_GRID_PIE_LOAD_AFFINE);
     uint8_t mask = (1u << KSN_GRID_PIE_LOAD_GATHER) |
                    (1u << KSN_GRID_PIE_LOAD_AFFINE);
     ksn_grid_mac mac = e->plan->mac;
@@ -427,6 +429,19 @@ static load_mode classify_load(const ksn_grid_execution *e,
     return mode;
 }
 
+static void dual_operands(const ksn_grid_mac_operand *a,
+                          const ksn_grid_mac_operand *b,
+                          const ksn_grid_mac_operand **input,
+                          const ksn_grid_mac_operand **weight)
+{
+    *input = a;
+    *weight = b;
+    if (!a->is_load && b->is_load) {
+        *input = b;
+        *weight = a;
+    }
+}
+
 /* Verified against tools/pie/stalls.py on the emitted assembly templates.
  * Compare issue + QR interlock cycles, never instruction count alone. */
 #define KSN_GRID_PAIR_ISSUES 5u
@@ -445,8 +460,17 @@ bool ksn_grid_pie_describe_access(const ksn_grid_execution *e,
         if (info->candidate_mask && !choose_route(e, info->candidate_mask,
                 ksn_grid_pie_profile_key(e), &info->selected, &info->reason))
             return false;
-        info->input = KSN_GRID_ACCESS_GATHER;
-        info->coefficient = KSN_GRID_ACCESS_GATHER;
+        ksn_grid_pie_load_strategy path = info->candidate_mask ?
+            info->selected : KSN_GRID_PIE_LOAD_GATHER;
+        const ksn_grid_mac *mac = &e->plan->mac;
+        const ksn_grid_mac_operand *input, *weight;
+        dual_operands(&mac->left, &mac->right, &input, &weight);
+        info->input = classify_load(e, input, true, path);
+        info->coefficient = classify_load(e, weight, false, path);
+        dual_operands(&mac->extra_left, &mac->extra_right, &input, &weight);
+        info->extra_input = classify_load(e, input, true, path);
+        info->extra_coefficient = classify_load(e, weight, false,
+                                                path);
         info->tap_issues = 6;
         info->tap_stalls = 2;
         return true;
@@ -506,6 +530,12 @@ static const int16_t *operand_lanes(const int16_t *source, size_t source_count,
         aligned_load(source, source_count, at, 8)) {
         LOAD_COUNT(direct_taps);
         return source + (size_t)at;
+    }
+    if (mode == LOAD_BROADCAST) {
+        for (unsigned lane = 0; lane < 8; ++lane)
+            scratch[lane] = source[(size_t)at];
+        LOAD_COUNT(broadcast_taps);
+        return scratch;
     }
     int64_t pos = at;
     for (unsigned lane = 0; lane < 8; ++lane) {
@@ -709,9 +739,11 @@ static void block8_dynamic(const ksn_grid_execution *e, unsigned x, unsigned y,
 }
 
 /* A two-term expression uses the same QACC and preserves tap/term order.
- * Gather is the only candidate until its load patterns have device profiles. */
+ * AFFINE takes only aligned contiguous loads directly. Reverse and failed
+ * per-block guards gather into scratch without changing the selected route. */
 __attribute__((noinline))
-static void block8_dual(const ksn_grid_execution *e, unsigned x, unsigned y)
+static void block8_dual(const ksn_grid_execution *e, unsigned x, unsigned y,
+                        ksn_grid_pie_load_strategy selected)
 {
     const ksn_grid_program *p = &e->plan->program;
     const ksn_grid_mac *mac = &e->plan->mac;
@@ -732,37 +764,65 @@ static void block8_dual(const ksn_grid_execution *e, unsigned x, unsigned y)
     for (unsigned ty = 0; ty < e->shape.tap_height; ++ty)
         for (unsigned tx = 0; tx < e->shape.tap_width; ++tx)
             for (unsigned term = 0; term < 2; ++term) {
-                const ksn_grid_mac_operand *input = left[term];
-                const ksn_grid_mac_operand *weight = right[term];
-                if (!input->is_load && weight->is_load) {
-                    input = right[term];
-                    weight = left[term];
-                }
-                for (unsigned lane = 0; lane < 8; ++lane) {
-                    a[lane] = operand_value(e, input, x + lane, y, tx, ty);
-                    if (weight->is_load)
-                        b[lane] = operand_value(e, weight, x + lane, y, tx, ty);
+                const ksn_grid_mac_operand *input, *weight;
+                dual_operands(left[term], right[term], &input, &weight);
+                const int16_t *values = a;
+                if (input->is_load) {
+                    unsigned slot = input->instruction;
+                    unsigned buffer = p->body[slot].buffer;
+                    const int64_t *index = e->index[slot];
+                    int64_t at = index[0] + index[1] * x + index[2] * y +
+                                 index[3] * tx + index[4] * ty;
+                    values = operand_lanes(e->binding.data[buffer],
+                        e->binding.count[buffer], at, index[1],
+                        classify_load(e, input, true, selected), a);
+                } else {
+                    for (unsigned lane = 0; lane < 8; ++lane)
+                        a[lane] = input->constant;
                 }
                 if (!weight->is_load) {
 #if KSN_GRID_HAS_PIE
-                    pie_tap_broadcast_coefficient(a, &weight->constant);
+                    pie_tap_broadcast_coefficient(values, &weight->constant);
 #else
                     for (unsigned lane = 0; lane < 8; ++lane)
-                        accum[lane] += (int32_t)a[lane] * weight->constant;
+                        accum[lane] += (int32_t)values[lane] * weight->constant;
 #endif
                     LOAD_COUNT(broadcast_taps);
                     TRACE(KSN_GRID_TRACE_BROADCAST_COEFFICIENT,
-                          a, &weight->constant, 0);
+                          values, &weight->constant, 0);
                     continue;
                 }
+                unsigned slot = weight->instruction;
+                unsigned buffer = p->body[slot].buffer;
+                const int64_t *index = e->index[slot];
+                int64_t at = index[0] + index[1] * x + index[2] * y +
+                             index[3] * tx + index[4] * ty;
+                load_mode weight_mode = classify_load(e, weight, false,
+                                                      selected);
+                if (weight_mode == LOAD_BROADCAST) {
 #if KSN_GRID_HAS_PIE
-                pie_tap_dynamic(a, b);
+                    pie_tap_broadcast_coefficient(values,
+                        e->binding.data[buffer] + (size_t)at);
+#else
+                    for (unsigned lane = 0; lane < 8; ++lane)
+                        accum[lane] += (int32_t)values[lane] *
+                            e->binding.data[buffer][(size_t)at];
+#endif
+                    LOAD_COUNT(broadcast_taps);
+                    TRACE(KSN_GRID_TRACE_BROADCAST_COEFFICIENT, values,
+                          e->binding.data[buffer] + (size_t)at, 0);
+                    continue;
+                }
+                const int16_t *factors = operand_lanes(
+                    e->binding.data[buffer], e->binding.count[buffer],
+                    at, index[1], weight_mode, b);
+#if KSN_GRID_HAS_PIE
+                pie_tap_dynamic(values, factors);
 #else
                 for (unsigned lane = 0; lane < 8; ++lane)
-                    accum[lane] += (int32_t)a[lane] * b[lane];
+                    accum[lane] += (int32_t)values[lane] * factors[lane];
 #endif
-                LOAD_COUNT(gather_taps);
-                TRACE(KSN_GRID_TRACE_DYNAMIC, a, b, 0);
+                TRACE(KSN_GRID_TRACE_DYNAMIC, values, factors, 0);
             }
 #if KSN_GRID_HAS_PIE
     pie_finish(dest, p->final_shift);
@@ -784,7 +844,7 @@ ksn_grid_status ksn_grid_run_pie(ksn_grid_execution *e)
         for (unsigned y = 0; y < e->shape.height; ++y) {
             unsigned x = 0;
             for (; x + 8 <= e->shape.width; x += 8)
-                block8_dual(e, x, y);
+                block8_dual(e, x, y, e->selected_strategy);
             for (; x < e->shape.width; ++x) {
                 int64_t sum = p->initial;
                 for (unsigned ty = 0; ty < e->shape.tap_height; ++ty)

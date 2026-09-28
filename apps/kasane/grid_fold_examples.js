@@ -111,6 +111,48 @@
                    pie: true});
   }
 
+  { // Both independent loads can use aligned contiguous PIE vectors.
+    const source = Array.from({length: 16}, (_, x) => x * 5 - 30);
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g =>
+      g.add(g.acc, g.add(
+        g.mul(g.load(0, index(0, 1, 0, 0, 0)), g.constant(2)),
+        g.load(0, index(8, 1, 0, 0, 0)))));
+    examples.push({name: "contiguousPairDual", program, buffers: {0: source},
+                   expected: source.slice(0, 8).map((v, x) => v * 2 + source[x + 8]),
+                   pie: true});
+  }
+
+  { // A lane-specific coefficient is followed by a reverse source load.
+    const source = Array.from({length: 8}, (_, x) => x * 7 - 20);
+    const weights = Array.from({length: 8}, (_, x) => 1 + x % 4);
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g =>
+      g.add(g.acc, g.add(
+        g.mul(g.load(0, index(0, 1, 0, 0, 0)),
+              g.load(2, index(0, 1, 0, 0, 0))),
+        g.load(0, index(7, -1, 0, 0, 0)))));
+    examples.push({name: "dynamicWeightDual", program,
+                   buffers: {0: source, 2: weights},
+                   expected: source.map((v, x) => v * weights[x] + source[7 - x]),
+                   pie: true});
+  }
+
+  { // A loaded coefficient shared by all lanes uses coefficient broadcast.
+    const source = Array.from({length: 8}, (_, x) => x * 9 - 15);
+    const weight = [3];
+    const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,
+                          output: index(0, 1, 0, 0, 0)}, g =>
+      g.add(g.acc, g.add(
+        g.mul(g.load(0, index(0, 1, 0, 0, 0)),
+              g.load(2, index(0, 0, 0, 0, 0))),
+        g.load(0, index(7, -1, 0, 0, 0)))));
+    examples.push({name: "broadcastWeightDual", program,
+                   buffers: {0: source, 2: weight},
+                   expected: source.map((v, x) => v * 3 + source[7 - x]),
+                   pie: true});
+  }
+
   { // Interleaved samples exercise the single-tap VUNZIP lowering.
     const source = Array.from({length: 16}, (_, i) => i * 17 - 100);
     const program = fold({width: 8, height: 1, tapWidth: 1, tapHeight: 1,

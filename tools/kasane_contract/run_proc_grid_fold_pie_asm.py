@@ -160,12 +160,12 @@ def check_trace(path, fused=False):
                 arguments["coefficient"] = COEFF
             sim.run(ASM[event], arguments)
             append(ASM[event])
-    assert example is None and len(seen_examples) == 25
+    assert example is None and len(seen_examples) == 28
     required = {"FUSED_PAIR" if fused else "PAIR", "STRIDE2",
                 "BROADCAST_INPUT", "BROADCAST_COEFFICIENT", "DYNAMIC",
                 "TAP", "SCAN"}
     assert required <= counts.keys(), required - counts.keys()
-    print("JS->IR->selected PIE assembly: 25 examples, "
+    print("JS->IR->selected PIE assembly: 28 examples, "
           f"{counts['FINISH']} vector blocks passed")
     print("selected paths: " + ", ".join(f"{name}={counts[name]}" for name in sorted(required)))
     print(f"static QR schedule: {issues} issued instructions, {stalls} predicted "

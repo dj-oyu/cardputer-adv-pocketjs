@@ -28,8 +28,46 @@
                  g.add(g.mul(sample, g.constant(2)), mirror));
   });
   modes.push({width: foldWidth, height: foldHeight, label: 'FOLD ART',
-              kind: 'fold', source: new Int16Array(foldWidth * foldHeight),
+              kind: 'fold', sourceWidth: foldWidth,
+              source: new Int16Array(foldWidth * foldHeight),
               handle: grid.register(foldProgram), resource: null});
+  const pairWidth = 48, pairHeight = 20, pairPitch = 64;
+  const pairProgram = gridFold.fold({
+    width: pairWidth, height: pairHeight, tapWidth: 1, tapHeight: 1,
+    output: gridFold.index(0, 1, pairWidth, 0, 0), shift: 2
+  }, g => g.add(g.acc, g.add(
+    g.mul(g.load(0, gridFold.index(0, 1, pairPitch, 0, 0)),
+          g.constant(2)),
+    g.load(0, gridFold.index(8, 1, pairPitch, 0, 0)))));
+  modes.push({width: pairWidth, height: pairHeight, label: 'FOLD PAIR',
+              kind: 'fold', sourceWidth: pairPitch,
+              source: new Int16Array(pairPitch * pairHeight),
+              handle: grid.register(pairProgram), resource: null});
+  const weightWidth = 40, weightHeight = 20;
+  const weightProgram = gridFold.fold({
+    width: weightWidth, height: weightHeight, tapWidth: 1, tapHeight: 1,
+    output: gridFold.index(0, 1, weightWidth, 0, 0), shift: 2
+  }, g => g.add(g.acc, g.add(
+    g.mul(g.load(0, gridFold.index(0, 1, weightWidth, 0, 0)),
+          g.load(2, gridFold.index(0, 1, weightWidth, 0, 0))),
+    g.load(0, gridFold.index(weightWidth - 1, -1,
+                             weightWidth, 0, 0)))));
+  modes.push({width: weightWidth, height: weightHeight, label: 'FOLD WEIGHT',
+              kind: 'fold', sourceWidth: weightWidth,
+              source: new Int16Array(weightWidth * weightHeight),
+              weights: new Int16Array(weightWidth * weightHeight),
+              handle: grid.register(weightProgram), resource: null});
+  const foldColors = new Int16Array(32);
+  for (let v = 0; v < 32; ++v)
+    foldColors[v] = ((v >> 1) << 11) | ((v * 2) << 5) | (31 - v);
+  for (const mode of modes) {
+    if (mode.kind !== 'fold') continue;
+    mode.phase = new Uint8Array(mode.source.length);
+    for (let y = 0; y < mode.height; ++y)
+      for (let x = 0; x < mode.sourceWidth; ++x)
+        mode.phase[y * mode.sourceWidth + x] =
+          (x * 3 + y * 7 + ((x ^ y) & 15)) & 31;
+  }
   let tick = 0, selected = -1, enterHeld = false;
   globalThis.frame = function (buttons) {
     const enter = !!(buttons & 0x4000);
@@ -40,13 +78,11 @@
     enterHeld = enter;
     const mode = modes[selected];
     if (mode.kind === 'fold') {
-      for (let y = 0; y < foldHeight; ++y) {
-        for (let x = 0; x < foldWidth; ++x) {
-          const v = (x * 3 + y * 7 + tick + ((x ^ y) & 15)) & 31;
-          mode.source[y * foldWidth + x] =
-            ((v >> 1) << 11) | ((v * 2) << 5) | (31 - v);
-        }
-      }
+      for (let i = 0; i < mode.source.length; ++i)
+        mode.source[i] = foldColors[(mode.phase[i] + tick) & 31];
+      if (mode.weights)
+        for (let i = 0; i < mode.weights.length; ++i)
+          mode.weights[i] = 1 + ((i + tick) & 3);
     } else {
       for (let y = 0; y < sourceHeight; ++y) {
         for (let x = 0; x < sourceWidth; ++x) {
@@ -56,16 +92,24 @@
         }
       }
     }
-    const backend = grid.run(mode.handle, {0: mode.source || source});
+    const buffers = {0: mode.source || source};
+    if (mode.weights) buffers[2] = mode.weights;
+    const backend = grid.run(mode.handle, buffers);
     if (!mode.resource) mode.resource = grid.resource(mode.handle);
     const inspect = tick === 0 || tick % 120 === 0 || advanced;
     if (mode.kind === 'fold' && inspect) {
       mode.measure = grid.measure(mode.handle, 8);
+      mode.gather = grid.measure(mode.handle, 8, 'GATHER');
+      mode.affine = grid.measure(mode.handle, 8, 'AFFINE');
       console.log('GRID_APP MEASURE ' + selected +
                   ' repeats=' + mode.measure.repeats +
                   ' scalar_us=' + mode.measure.scalarUs +
                   ' pie_us=' + mode.measure.pieUs +
                   ' equal=' + (mode.measure.equal ? 1 : 0));
+      console.log('GRID_APP ROUTES ' + selected +
+                  ' gather_us=' + mode.gather.pieUs +
+                  ' affine_us=' + mode.affine.pieUs +
+                  ' equal=' + (mode.gather.equal && mode.affine.equal ? 1 : 0));
     }
     if (inspect) {
       const left = Math.floor((240 - mode.width * 2) / 2);
@@ -80,8 +124,9 @@
                   scale: 2, sourceWidth: mode.width,
                   sourceHeight: mode.height});
         if (mode.measure) tx.text({bounds: [8, 82, 232, 98],
-                   text: 'NATIVE 8x  S:' + Math.round(mode.measure.scalarUs / 8) +
-                         '  P:' + Math.round(mode.measure.pieUs / 8) + ' us',
+                   text: 'S:' + Math.round(mode.measure.scalarUs / 8) +
+                         ' G:' + Math.round(mode.gather.pieUs / 8) +
+                         ' A:' + Math.round(mode.affine.pieUs / 8) + ' us',
                    font: 'caption', color: 0xffd47aff});
         tx.text({bounds: [8, 99, 232, 115],
                  text: 'ENTER: NEXT  /  AUTO: 120 FRAMES',
@@ -96,7 +141,8 @@
       console.log('GRID_APP MODE ' + selected + ' ' + mode.width + 'x' +
                   mode.height + ' backend=' + backend +
                   ' strategy=' + route.strategy +
-                  ' reason=' + route.reason);
+                  ' reason=' + route.reason +
+                  ' key=' + route.profileKey);
     } else if (tick % 48 === 0) {
       console.log('GRID_APP FRAME ' + tick + ' backend=' + backend);
     }

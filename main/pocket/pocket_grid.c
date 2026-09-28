@@ -42,9 +42,9 @@ void pocket_grid_resize_profile_read(pocket_grid_resize_profile *out)
 #define GRID_RESIZE_END(field, count, start) ((void)(start))
 #endif
 
-#define GRID_APP_SLOTS 4u
-/* No PSRAM is configured on this board. Two output generations and copied
- * inputs must fit beside the VM and Kasane arena. */
+#define GRID_APP_SLOTS POCKET_GRID_MAX_SLOTS
+/* No PSRAM is configured on this board. Compact plans may share the six
+ * slots, but two output generations and copied inputs retain per-plan caps. */
 #define GRID_APP_MAX_PIXELS 4096u
 #define GRID_APP_MAX_INPUTS 8192u
 
@@ -511,11 +511,30 @@ static JSValue measure_impl(JSContext *ctx, int argc, JSValueConst *argv)
     const char *op = "kasane.grid.measure";
     grid_slot *slot = argc ? find(ctx, argv[0]) : NULL;
     int64_t repeats = 8;
-    if (argc < 1 || argc > 2 || !slot || !slot->plan ||
+    if (argc < 1 || argc > 3 || !slot || !slot->plan ||
         !slot->measure_ready ||
-        (argc == 2 && !number(ctx, argv[1], 1, 16, &repeats)))
+        (argc >= 2 && !number(ctx, argv[1], 1, 16, &repeats)))
         return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                     "expected a recent grid fold run and 1..16 repeats");
+    ksn_grid_pie_load_strategy strategy = KSN_GRID_PIE_LOAD_AUTO;
+    if (argc == 3) {
+        if (!JS_IsString(argv[2]))
+            return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
+                        "strategy must be AUTO, GATHER or AFFINE");
+        const char *name = JS_ToCString(ctx, argv[2]);
+        if (!name) return JS_EXCEPTION;
+        bool valid_name = true;
+        if (!strcmp(name, "AUTO")) strategy = KSN_GRID_PIE_LOAD_AUTO;
+        else if (!strcmp(name, "GATHER"))
+            strategy = KSN_GRID_PIE_LOAD_GATHER;
+        else if (!strcmp(name, "AFFINE"))
+            strategy = KSN_GRID_PIE_LOAD_AFFINE;
+        else valid_name = false;
+        JS_FreeCString(ctx, name);
+        if (!valid_name)
+            return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
+                        "strategy must be AUTO, GATHER or AFFINE");
+    }
     size_t count = (size_t)slot->shape.width * slot->shape.height;
     void *raw[2] = {NULL, NULL};
     int16_t *pixels[2] = {NULL, NULL};
@@ -539,6 +558,11 @@ static JSValue measure_impl(JSContext *ctx, int argc, JSValueConst *argv)
         binding.count[KSN_GRID_DEST] = count;
         valid = valid && ksn_grid_begin(slot->plan, &slot->shape, &binding,
                                          &execution[arm]) == KSN_GRID_OK;
+    }
+    if (valid) {
+        execution[1].requested_strategy = strategy;
+        valid = strategy == KSN_GRID_PIE_LOAD_AUTO ||
+            (ksn_grid_pie_candidates(&execution[1]) & (1u << strategy));
     }
     const ksn_grid_pie_policy policy = {true, 8, 8, 8};
     if (valid) {
@@ -572,6 +596,10 @@ static JSValue measure_impl(JSContext *ctx, int argc, JSValueConst *argv)
                           JS_NewFloat64(ctx, (double)elapsed[0])) < 0 ||
         JS_SetPropertyStr(ctx, result, "pieUs",
                           JS_NewFloat64(ctx, (double)elapsed[1])) < 0 ||
+        JS_SetPropertyStr(ctx, result, "strategy",
+                          JS_NewString(ctx, strategy == KSN_GRID_PIE_LOAD_AFFINE ?
+                              "AFFINE" : strategy == KSN_GRID_PIE_LOAD_GATHER ?
+                              "GATHER" : "AUTO")) < 0 ||
         JS_SetPropertyStr(ctx, result, "equal", JS_NewBool(ctx, true)) < 0) {
         JS_FreeValue(ctx, result);
         return JS_EXCEPTION;

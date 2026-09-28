@@ -292,7 +292,7 @@ static void test_registration_normalization(void)
     binding.count[KSN_GRID_DEST] = 24u * 3u;
     ksn_grid_pie_policy policy = {true, 8, 8, 8};
 
-    for (unsigned variant = 0; variant < 10; ++variant) {
+    for (unsigned variant = 0; variant < 11; ++variant) {
         ksn_grid_program p = program(3, 2);
         if (variant == 0) { /* register reuse, reordered definitions, identities */
             p.count = 8;
@@ -405,6 +405,8 @@ static void test_registration_normalization(void)
             p.body[6].b = 6;
         } else { /* two different loads use consecutive QACC products */
             p.count = 8;
+            if (variant == 10)
+                p.body[0].index = index5(0, 1, 128, 1, 64);
             p.body[3].op = KSN_GRID_LOAD;
             p.body[3].dst = 4;
             p.body[3].index = index5(15, -1, 128, 1, 64);
@@ -440,7 +442,8 @@ static void test_registration_normalization(void)
             assert(ksn_grid_pie_describe_access(&e, &access));
 #ifdef KSN_GRID_PIE_MODEL
             assert(access.candidate_mask ==
-                   (1u << KSN_GRID_PIE_LOAD_GATHER));
+                   ((1u << KSN_GRID_PIE_LOAD_GATHER) |
+                    (1u << KSN_GRID_PIE_LOAD_AFFINE)));
             assert(access.selected == KSN_GRID_PIE_LOAD_GATHER);
             assert(access.reason == KSN_GRID_SELECTION_FALLBACK);
 #else
@@ -457,6 +460,26 @@ static void test_registration_normalization(void)
         assert(!e.pie_backend_selected);
 #endif
         assert(memcmp(scalar, optimized, sizeof scalar) == 0);
+#ifdef KSN_GRID_PIE_MODEL
+        if (variant >= 8) {
+            memset(optimized, 0, sizeof optimized);
+            assert(ksn_grid_begin(&plan, &shape, &binding, &e) == KSN_GRID_OK);
+            e.requested_strategy = KSN_GRID_PIE_LOAD_AFFINE;
+            ksn_grid_pie_access_info access;
+            assert(ksn_grid_pie_describe_access(&e, &access));
+            assert(access.selected == KSN_GRID_PIE_LOAD_AFFINE);
+            assert(access.reason == KSN_GRID_SELECTION_FORCED);
+            if (variant >= 9)
+                assert(access.extra_input == KSN_GRID_ACCESS_REVERSE);
+            if (variant == 10)
+                assert(access.input == KSN_GRID_ACCESS_CONTIGUOUS);
+            uint32_t direct = ksn_grid_pie_direct_taps;
+            assert(ksn_grid_run_pie(&e) == KSN_GRID_OK);
+            assert(memcmp(scalar, optimized, sizeof scalar) == 0);
+            if (variant == 10)
+                assert(ksn_grid_pie_direct_taps > direct);
+        }
+#endif
     }
 }
 

@@ -363,7 +363,19 @@ JS前段の25例を実QuickJSから実行し、PIE命令シミュレータの通
 
 ## 次のタスク（2026-09-29）
 
-1. **D3a: 2項のアクセス経路と費用選択。** 各loadの連続・逆順・broadcast・gatherを登録時に判定し、合法な2項PIE候補を比較する。GRID LABのFOLD ARTに加え、寸法・stride・係数を変えたJS例でscalarとの全画素一致を確認する。同じ通常imageで独立した実機runを繰り返し、遅い候補は選択表へ入れない。静的命令予測だけで採用しない。
+1. **D3a: 2項のアクセス経路と費用選択（完了）。** 各loadの連続・逆順・broadcast・gatherを登録時に判定し、合法な2項PIE候補を比較した。GRID LABのFOLD ARTに加え、寸法・stride・係数を変えたJS例でscalarとの全画素一致を確認。同じ通常imageで独立した実機runを繰り返し、5%以上速い形状だけをAFFINEへ切り替えた。結果は下記。
 2. **D3a: 登録時解析と依存行kernelの共通化。** 現在の有界な値追跡を、live-in/out、依存、検査付き演算の副作用を明示できる共通表現へ整理する。2項を超える式と依存行の反復は、合法性と費用の両方を示せる範囲だけ拡張する。レジスタ再利用、alias、overflow、死んだ検査付き命令をhostで反例として通し、証明できない式はscalarに戻す。
 3. **JS APIと診断。** `fold`と画像用IRの記法を実際のbackend能力に合わせて整理し、登録失敗・scalar選択・PIE候補の理由を確認できる診断を付ける。実機で試すJS例は既存のGRID LABなどのテスト用アプリへ加える。float式からQ14への暗黙変換は導入しない。
 4. **表示全体の採否。** 登録、JS入力生成、kernel、Kasane合成、LCD送出、heap、フレーム停滞を別々に測り、全画面とUI内の小窓でscalar/PIEの体感上の差と余裕を確認する。D2のFLOWER＋2面、D5のSD動画＋音声との複合負荷は、単独のkernel倍率から外挿せず別のgateで判定する。
+
+## D3a 2項アクセス経路の実機選択（2026-09-29）
+
+2項の各loadについて、bind時に出力レーンのstrideを連続・2間隔・broadcast・逆順・その他へ分類する。GATHERに加えてAFFINE候補を登録し、整列した連続8セルだけを直接PIEへ渡す。逆順と整列・余剰セル条件を満たさないブロックはscratchへ集める。係数loadがbroadcastなら1セルをPIEで広げる。QACCへの加算順、bind時のalias・範囲・QACC証明、scalar tailは維持した。profileのない2項式は引き続きGATHERを自動選択する。
+
+JSの独立期待値を持つ連続2 load・レーン別係数・broadcast係数を追加して28例とし、実QuickJS→IR→PIE命令シミュレータで通常・融合それぞれ101ベクトルブロックが一致した。CのPIE模擬/非PIE各400ケースと通常アプリadapterも通過。GRID LABには既存の3縮小＋FOLD ARTに加え、FOLD PAIRとFOLD WEIGHTをEnterで選べるようにした。2項測定APIはGATHER/AFFINEを強制でき、表示候補とは別scratchで各回scalarとの全画素一致を確認する。grid slotとKasane画像資源の枠を両方6へ揃えた。
+
+同一通常imageで3回独立起動した[計測記録](../../tools/kasane_contract/profiles/grid_dual_20260929.json)から[選択表生成器](../../tools/kasane_contract/build_grid_measure_profile.py)で[2項profile](../../main/ui/kasane/ksn_proc_grid_dual_profile.inc)を生成する。8回合計の中央値は、鏡像48×28がGATHER 2,852 µs、AFFINE 2,749 µs（3.6%短縮）、連続2 load 48×20が2,045→1,808 µs（11.6%）、動的係数40×20が2,339→2,167 µs（7.4%）。既存生成器と同じ5%の採用余裕を適用し、鏡像はGATHER、残り2形状だけをAFFINEにした。計測記録はバイナリSHA-256、COM3、3つの独立run ID、形状と両候補の全画素一致済み時間を持つ。全runで同じバイナリ・形状・候補集合でなければ生成を拒否する。
+
+最終image 2,145,136 B（SHA-256 `b8f605d97046f97f3d8392c976b4f8b6339175ea6773733dd4f298b5d23d355b`）をアプリ領域だけ書き、書込時hashを検証。独立2起動で鏡像`PIE/GATHER/PROFILE`、残り2形状`PIE/AFFINE/PROFILE`、全画素一致、6モード表示、終了後`HOME_READY`を確認した。最終ログは`.cache/grid-lab-d3a-profile-gated-final-20260929.log`。フラッシュ退避なし。Astraの敵対的レビューは、初稿の鏡像3.7%行が5%規則を破ることと生成経路の欠如を指摘し、上記の生成式とGATHER選択へ修正した。
+
+比較用に試した64×24の連続2 loadと40×24の動的係数は、JS模様の計算を事前化しても30フレーム窓の平均が約36.0/32.9 msだった。表示サイズを48×20/40×20へ調整した最終版では、同窓の平均24.49/27.60 ms、最大26.50/29.20 ms。鏡像48×28は平均26.03 ms。これはアプリ実行中の周期ログで、個々のフレーム最悪値、音声や他overlayとの同時負荷、画面画素の読戻しを保証しない。起動時の内部heap free標本は79,132/79,356 B、最大連続31,744 Bであり、実行中の低水位ではない。以前の2項GATHER約7.19 ms/8回から今回約2.85 ms/8回への短縮には、PIE命令の変更だけでなくCのレーン収集を1ブロック単位へまとめた効果も含む。次は登録時の共通依存表現と、JS・合成・LCDの費用分解を扱う。

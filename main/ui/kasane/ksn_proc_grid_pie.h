@@ -26,6 +26,7 @@ typedef struct {
  * latency, tails and preemption. Per-block guards can still choose gather. */
 typedef struct {
     ksn_grid_access_kind input, coefficient;
+    ksn_grid_access_kind extra_input, extra_coefficient;
     bool pair_candidate, pair_selected, fused_selected;
     uint8_t candidate_mask;
     ksn_grid_pie_load_strategy selected;
