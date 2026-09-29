@@ -41,6 +41,12 @@ extern const char *const overlay_choice_names[1+OVERLAY_APPS];
 // exists this frame.
 bool overlay_running(void);
 
+// Whether the next overlay_tick() will try to START one: armed and not up. The
+// start is gated on free heap (OVERLAY_FREE_FLOOR plus its expected cost), so
+// the radio has to be down before it -- net_autosync.c yields on this, as it
+// does before any other guest is built.
+bool overlay_starting(void);
+
 // One keystroke for the running overlay, from the home screen's loop.
 //
 // The shell has already taken its reserved key before this is called, and that

@@ -1004,6 +1004,8 @@ GPIO割込の上限や録音リング容量など未固定の値はcapability.li
 
 ESP32-S3はWi-FiとBLEでRF資源を共有し、IDFの共存機構にも組合せ別の制約がある。最初の無線profileはWi-Fiのみ／BLEのみを別々に成立させる。両方有効なprofileは対応設定と実機試験後に提供し、不対応profileで2つ目を要求したらBUSYとする。録音・TLS・JS日本語再構築を含む重い組合せは別途評価する。[IDF v6.0.1 共存ガイド](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-guides/coexist.html)
 
+ホスト自身も無線を使う。設定 AUTO TIME SYNC が ON で資格情報があると、ホームが10秒アイドルのときに一過性の時刻同期（接続→SNTP→停止、約48KBを数秒〜25秒）を行い、アプリ・別画面・オーバーレイの起動の前には必ず中断して無線を止め、ヒープが戻ってからゲストを作る。常駐の接続は既定にしない。ネイティブの保持者は参照カウントの `net_service` を通し、アプリの `net.wifi` の lease とは同じ無線を排他で使う（所有者でない側は他方のリンクを止められない）。一度無線を上げたブートは約4.8KiBが戻らない（`linkRetainedBytes`）。詳細と実機で測る項目は [docs/platform/wifi-autostart.md](../platform/wifi-autostart.md)。
+
 無線使用中に背景品質を下げる判断はホストが行う。アプリの論理時刻をFPSから推測しない。消費電力・接続速度・センサー精度はAPIシグネチャとは別の性能表で記録する。
 
 ## 15. アプリ例（実行可能。app/time/log/storage/ui/inputは実装済み）

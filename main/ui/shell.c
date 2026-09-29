@@ -10,6 +10,7 @@
 #endif
 #include "menu_rows.h"
 #include "overlay.h"
+#include "net_autosync.h"
 #include "pet_hub.h"
 #include "pocket_kasane.h"
 #include "app_session.h"
@@ -321,6 +322,8 @@ static void sound_set(unsigned v) {sfx=v!=0;sound_set_enabled(sfx);}
 
 static unsigned volume_get(void) { return sound_volume(); }
 static void volume_set(unsigned v) { sound_set_volume(v); }
+static unsigned autotime_get(void) { return net_autosync_enabled(); }
+static void autotime_set(unsigned v) { net_autosync_set_enabled(v!=0); }
 
 static const setting_t settings[]={
     {"BACKGROUND", SETTING_CHOICES, &SCENES[0].name, sizeof SCENES[0], BACKGROUND_N,
@@ -355,6 +358,13 @@ static const setting_t settings[]={
     // inserting would move every index below it silently.
     {"VOLUME",     SETTING_CHOICES, volumes, sizeof volumes[0], SOUND_VOLUME_STEPS,
      "volume",      volume_get,      volume_set,     SHELL_SCREEN_NONE},
+    // The switch for net_autosync.c: whether the home screen, left idle, may
+    // bring the radio up for a few seconds to set the clock. A value row, not
+    // a line on the Wi-Fi screen, because it is a standing preference and this
+    // table is where those persist. On by default; with no network stored it
+    // does nothing either way. APPENDED, for the same counted key presses.
+    {"AUTO TIME SYNC", SETTING_CHOICES, toggles, sizeof toggles[0], 2,
+     "autotime",    autotime_get,    autotime_set,   SHELL_SCREEN_NONE},
 };
 #define SETTING_N (sizeof(settings)/sizeof(settings[0]))
 // One value name out of a row's list, wherever that list keeps them.

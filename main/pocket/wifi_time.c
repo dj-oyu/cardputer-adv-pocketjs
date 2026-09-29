@@ -33,6 +33,11 @@ static const char *TAG = "wifi";
 // see terminal_reason().
 #define CONNECT_ATTEMPTS 3
 
+// How often the association wait looks up to see whether the link was asked
+// back. 100 ms is well under a frame of perceived delay on an app start and
+// costs one wake of an otherwise sleeping task.
+#define CONNECT_SLICE_MS 100
+
 #define NTP_SERVER "pool.ntp.org"
 
 #define BIT_GOT_IP  BIT0
@@ -67,6 +72,15 @@ wifi_time_status_t wifi_time_status(void) {
     taskEXIT_CRITICAL(&status_lock);
     return copy;
 }
+
+void wifi_time_status_settle(wifi_time_state_t state, wifi_time_stage_t stage,
+                             int reason) {
+    taskENTER_CRITICAL(&status_lock);
+    status.state=state; status.stage=stage; status.reason=reason;
+    taskEXIT_CRITICAL(&status_lock);
+}
+
+bool wifi_time_busy(void) { return atomic_load(&running); }
 
 const char *wifi_time_stage_name(wifi_time_stage_t stage) {
     switch(stage) {
@@ -180,6 +194,15 @@ static bool auto_connect;
 // means: for a clock sync, one more try; for a lease that already had an
 // address, the end of the lease. `linked` is that "already had an address".
 static bool hold_link, linked;
+// Who holds the link, and whether they asked for it back. Declared up here
+// because the association wait below reads the stop request: a link asked to
+// stop while it is still associating stops then, not after the full connect
+// timeout. Before that wait was sliced, a stop during association held the
+// caller for up to 15 s, which was tolerable for an app cancelling its own
+// acquire and is not for net_autosync.c yielding the radio to an app start
+// that is blocked on it.
+static atomic_bool link_stop_req;
+static atomic_int  link_owner_v;     // wifi_time_link_owner_t, 0 when no link
 
 // The disconnect reason is the only evidence of what actually went wrong, and
 // the split below is what the UI needs: "the network is not there" sends the
@@ -363,8 +386,15 @@ static esp_err_t associate_and_wait(const char *ssid, const char *psk) {
     if(err!=ESP_OK) return err;
     wifi_started=true;
 
-    EventBits_t bits=xEventGroupWaitBits(events,BIT_GOT_IP|BIT_GIVEN_UP,pdFALSE,pdFALSE,
-                                         pdMS_TO_TICKS(CONNECT_TIMEOUT_MS));
+    // In slices, so a link can be asked back mid-association (see link_stop_req).
+    // A sync has no one to ask it, and waits the same total either way.
+    EventBits_t bits=0;
+    for(int waited=0;waited<CONNECT_TIMEOUT_MS;waited+=CONNECT_SLICE_MS) {
+        bits=xEventGroupWaitBits(events,BIT_GOT_IP|BIT_GIVEN_UP,pdFALSE,pdFALSE,
+                                 pdMS_TO_TICKS(CONNECT_SLICE_MS));
+        if(bits&(BIT_GOT_IP|BIT_GIVEN_UP)) break;
+        if(hold_link&&atomic_load(&link_stop_req)) return ESP_ERR_NOT_FINISHED;
+    }
     if(!(bits&BIT_GOT_IP)) return ESP_ERR_WIFI_NOT_CONNECT;
 
     wifi_ap_record_t ap;
@@ -636,7 +666,6 @@ esp_err_t wifi_time_scan_start(void) {
 // as the app holds the lease.
 
 static atomic_int  link_state_v;     // wifi_time_link_t
-static atomic_bool link_stop_req;
 
 wifi_time_link_t wifi_time_link_state(void) {
     return (wifi_time_link_t)atomic_load(&link_state_v);
@@ -653,7 +682,21 @@ void wifi_time_link_ip(char *out, size_t size) {
     taskEXIT_CRITICAL(&status_lock);
 }
 
-void wifi_time_link_stop(void) { atomic_store(&link_stop_req,true); }
+wifi_time_link_owner_t wifi_time_link_owner(void) {
+    return (wifi_time_link_owner_t)atomic_load(&link_owner_v);
+}
+
+// Only the holder can give the link back. pocket_net.c's session teardown asks
+// for a stop whenever it sees CONNECTING, which was right when every link was
+// an app's and would take net_service's link down under it now that one may
+// not be. The owner is cleared by the task on its way out, so a stop that
+// arrives after the link already ended is a no-op rather than a stale request
+// waiting for the next start -- the start clears it anyway, as it always did.
+void wifi_time_link_stop_for(wifi_time_link_owner_t owner) {
+    if(atomic_load(&link_owner_v)==(int)owner) atomic_store(&link_stop_req,true);
+}
+
+void wifi_time_link_stop(void) { wifi_time_link_stop_for(WIFI_TIME_LINK_APP); }
 
 static void link_task(void *arg) {
     (void)arg;
@@ -681,6 +724,15 @@ static void link_task(void *arg) {
     hold_link=true;
 
     err=associate_and_wait(ssid,psk);
+    if(err!=ESP_OK && atomic_load(&link_stop_req)) {
+        // Asked back before it came up. Not a failure of the network, so the
+        // status says nothing was concluded rather than naming a stage that
+        // did not fail -- otherwise the Wi-Fi screen, entered right after the
+        // stop, would show "SYNCING assoc" for an attempt that no longer exists.
+        wifi_time_status_settle(WIFI_TIME_IDLE,WIFI_TIME_STAGE_NONE,0);
+        ESP_LOGI(TAG,"LINK_STOPPED while connecting");
+        goto done;
+    }
     if(err!=ESP_OK) {
         if(err==ESP_ERR_WIFI_NOT_CONNECT) {
             wifi_time_status_t now=wifi_time_status();
@@ -724,15 +776,17 @@ done:
     ESP_LOGI(TAG,"LINK_DOWN state=%d free=%u",
              (int)wifi_time_link_state(),(unsigned)esp_get_free_heap_size());
     atomic_store(&link_stop_req,false);
+    atomic_store(&link_owner_v,0);
     atomic_store(&running,false);
     vTaskDelete(NULL);
 }
 
-esp_err_t wifi_time_link_start(void) {
+esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner) {
     bool expected=false;
     if(!atomic_compare_exchange_strong(&running,&expected,true))
         return ESP_ERR_INVALID_STATE;
     atomic_store(&link_stop_req,false);
+    atomic_store(&link_owner_v,(int)owner);
     // Set before the task exists so that a caller polling immediately sees
     // connecting rather than the state the last lease left behind.
     atomic_store(&link_state_v,WIFI_TIME_LINK_CONNECTING);
@@ -740,8 +794,11 @@ esp_err_t wifi_time_link_start(void) {
     // LWIP have their own stacks sized by Kconfig.
     if(xTaskCreate(link_task,"wifi_link",4096,NULL,5,NULL)!=pdPASS) {
         atomic_store(&link_state_v,WIFI_TIME_LINK_DOWN);
+        atomic_store(&link_owner_v,0);
         atomic_store(&running,false);
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
 }
+
+esp_err_t wifi_time_link_start(void) { return wifi_time_link_start_for(WIFI_TIME_LINK_APP); }
