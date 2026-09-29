@@ -108,6 +108,9 @@ def run_variant(b, index, limit, frame_wait):
         m = re.search(r'EVAL_ERROR (.*)', l)
         if m:
             r['error'] = m.group(1)[:100]
+        m = re.search(r'HEAPPROBE (bc|chunk \d+) .*', l)
+        if m:
+            r.setdefault('loads', []).append(m.group(0)[10:])
         if 'HEAPPROBE no variant' in l:
             r['eval'] = 'NO_VARIANT'
             return r
@@ -127,6 +130,15 @@ def run_variant(b, index, limit, frame_wait):
             r['frame'] = 'OOM'
         if 'HP_FRAME ok' in l:
             r['frame'] = 'ok'
+            r['note'] = l.split('HP_FRAME ok', 1)[1].strip()
+        if 'HP_FRAME fail' in l:
+            r['frame'] = 'fail'
+            r['error'] = l.split('HP_FRAME fail', 1)[1].strip()[:100]
+        if 'HP_ALIVE' in l:
+            r['alive'] = True
+        m = re.search(r'HEAPPROBE (bc|chunk \d+) .*', l)
+        if m:
+            r.setdefault('loads', []).append(m.group(0)[10:])
         if re.search(r'E \(\d+\) js:|W \(\d+\) js:', l) and r['frame'] == '-':
             r['frame'] = 'error'
             r['error'] = l[:120]
@@ -183,7 +195,10 @@ def main():
                     results.append(r)
                     print(f'{i:2d} {names[i]:24s} eval={r["eval"]:10s} frame={r["frame"]:5s} '
                           f'before={r["before"]} used={r["used"]} oom={r["oom"]} '
-                          f'{r["error"] or ""}', flush=True)
+                          f'{r["error"] or ""}{r.get("note", "")}'
+                          f'{" alive" if r.get("alive") else ""}', flush=True)
+                    for x in r.get('loads', []):
+                        print('     ', x, flush=True)
         b.home()
     for r in results:
         r.pop('log', None)

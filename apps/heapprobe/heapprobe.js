@@ -87,3 +87,10 @@ const s = 'é'.normalize('NFD'), t = 'é'.normalize('NFC'); console.log('HP_EVA
 @derby-split3
 //@ derby-split4
 @derby-split4
+//@ derby-bc
+@derby-bc
+//@ lazy-frame-src
+@chunks3
+let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 20) { const t = Date.now(); try { __hpLoad(0); console.log('HP_FRAME ok ms=' + (Date.now() - t)); } catch (e) { console.log('HP_FRAME fail ' + e); } } else if (n === 40) console.log('HP_ALIVE ' + n); };
+//@ lazy-frame-bc
+let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 20) { const t = Date.now(); try { __hpLoadBC(); console.log('HP_FRAME ok ms=' + (Date.now() - t)); } catch (e) { console.log('HP_FRAME fail ' + e); } } else if (n === 40) console.log('HP_ALIVE ' + n); };

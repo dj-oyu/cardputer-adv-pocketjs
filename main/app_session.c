@@ -1195,10 +1195,18 @@ bool app_heapprobe_select(const char *arg, const char **source, size_t *length,
             hp_chunk_set=0; *source=entry3; *length=sizeof entry3-1;
         } else if(!strncmp(kind,"-split4",7)) {
             hp_chunk_set=1; *source=entry4; *length=sizeof entry4-1;
+        } else if(!strncmp(kind,"-bc",3)) {
+            static const char entry_bc[]="// pocket.kasane\n__hpLoadBC();";
+            *source=entry_bc; *length=sizeof entry_bc-1;
         } else {
             *source=hp_derby_start; *length=(size_t)(hp_derby_end-hp_derby_start-1);
         }
     } else {
+        // "@chunks3" on a section's first line: __hpLoad(k) loads DERBY
+        // WATCH's 3-chunk set, from a frame() rather than at evaluation.
+        if(*length>=9 && !memcmp(body,"@chunks3\n",9)) {
+            hp_chunk_set=0; body+=9; *length-=9;
+        }
         // A copy, because JS_Eval reads up to a NUL at source[length] and a
         // section in the middle of the file has the next one there instead.
         hp_copy=malloc(*length+1);
@@ -1229,12 +1237,43 @@ static JSValue hp_load(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     JS_GetMemoryCounters(rt,&used0,&limit);
     char name[16];
     snprintf(name,sizeof name,"chunk%d.js",(int)k);
+    const int64_t t0=esp_timer_get_time();
     JSValue r=JS_Eval(ctx,s,n,name,JS_EVAL_TYPE_GLOBAL);
+    const int64_t us=esp_timer_get_time()-t0;
     JS_GetMemoryCounters(rt,&used1,&limit);
-    ESP_LOGI("app","HEAPPROBE chunk %d bytes=%u used %u -> %u%s",(int)k,(unsigned)n,
-             (unsigned)used0,(unsigned)used1,JS_IsException(r)?" EXCEPTION":"");
+    ESP_LOGI("app","HEAPPROBE chunk %d bytes=%u used %u -> %u us=%lld%s",(int)k,(unsigned)n,
+             (unsigned)used0,(unsigned)used1,(long long)us,JS_IsException(r)?" EXCEPTION":"");
     return r;
 }
+
+#ifdef HP_HAVE_BC
+// Proposal (b)'s spike: DERBY WATCH compiled on the host (tools/vmtest/
+// compile_peak.py --write, the same quickjs.c built -m32) and embedded;
+// read with JS_ReadObject and run with JS_EvalFunction, no parser involved.
+extern const uint8_t hp_bc_start[] asm("_binary_derby_bc_start");
+extern const uint8_t hp_bc_end[] asm("_binary_derby_bc_end");
+static JSValue hp_load_bc(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    size_t used0=0,limit=0,used1=0,used2=0;
+    JSRuntime *rt=JS_GetRuntime(ctx);
+    JS_GetMemoryCounters(rt,&used0,&limit);
+    const int64_t t0=esp_timer_get_time();
+    JSValue fn=JS_ReadObject(ctx,hp_bc_start,(size_t)(hp_bc_end-hp_bc_start),JS_READ_OBJ_BYTECODE);
+    const int64_t t1=esp_timer_get_time();
+    JS_GetMemoryCounters(rt,&used1,&limit);
+    if(JS_IsException(fn)) {
+        ESP_LOGW("app","HEAPPROBE bc read failed us=%lld used %u -> %u",(long long)(t1-t0),
+                 (unsigned)used0,(unsigned)used1);
+        return fn;
+    }
+    JSValue r=JS_EvalFunction(ctx,fn);   // consumes fn
+    const int64_t t2=esp_timer_get_time();
+    JS_GetMemoryCounters(rt,&used2,&limit);
+    ESP_LOGI("app","HEAPPROBE bc bytes=%u read_us=%lld run_us=%lld used %u -> %u -> %u%s",
+             (unsigned)(hp_bc_end-hp_bc_start),(long long)(t1-t0),(long long)(t2-t1),
+             (unsigned)used0,(unsigned)used1,(unsigned)used2,JS_IsException(r)?" EXCEPTION":"");
+    return r;
+}
+#endif
 
 // After the evaluation, before the first turn: what the guest holds, by kind.
 // JS_ComputeMemoryUsage walks the heap and allocates nothing.
@@ -1722,10 +1761,14 @@ source_ready:;
        (user_prelude&&names_kasane(user_prelude,user_prelude_length)))
         pocket_kasane_prepare();
 #ifdef POCKET_HEAPPROBE
-    if(hp && hp_chunk_set>=0) {
+    if(hp) {
+        // Every variant gets both loaders: a few dozen bytes, the same for all.
         JSContext *ctx=pocketjs_guest_quickjs_context(guest);
         JSValue global=JS_GetGlobalObject(ctx);
         int installed=JS_SetPropertyStr(ctx,global,"__hpLoad",JS_NewCFunction(ctx,hp_load,"__hpLoad",1));
+#ifdef HP_HAVE_BC
+        installed|=JS_SetPropertyStr(ctx,global,"__hpLoadBC",JS_NewCFunction(ctx,hp_load_bc,"__hpLoadBC",0));
+#endif
         JS_FreeValue(ctx,global);
         if(installed<0) { err=ESP_ERR_NO_MEM; goto fail; }
     }
