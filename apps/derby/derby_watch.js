@@ -31,9 +31,9 @@
   // Arithmetic only, no Math.sin/exp: a seed replays bit for bit anywhere.
   // Per race a form offset the odds cannot see, and a slow random walk.
   function race(f, nz) {
-    const r = rng(f.seed ^ 0x5bd1e995), fm = z8(0);
-    if (nz) for (let i = 0; i < 8; ++i) fm[i] = (r() - .5) * FORM;
-    return {t: 0, x: z8(0), v: z8(0), e: f.h.map(h => h.st), sb: z8(0), px: z8(0), tc: z8(0), fm: fm, w: z8(0),
+    const r = rng(f.seed ^ 0x5bd1e995), fm = z8(0), e = [];
+    for (let i = 0; i < 8; ++i) { e[i] = f.h[i].st; if (nz) fm[i] = (r() - .5) * FORM; }
+    return {t: 0, x: z8(0), v: z8(0), e: e, sb: z8(0), px: z8(0), tc: z8(0), fm: fm, w: z8(0),
       r: r, nz: nz, done: 0};
   }
   function step(f, s, dt) {
@@ -58,15 +58,18 @@
       v += a > up ? up : a < -dt ? -dt : a;
       if (v > EB * h.top) s.e[i] -= (v / h.top - EB) * (gap < 1 ? WIND : 1) * dt;
       s.v[i] = v;
-      s.x[i] = x + v * dt;
-      if (x < D && s.x[i] >= D) { s.tc[i] = t0 + (D - x) / (s.x[i] - x) * dt; ++s.done; }
+      const y = s.x[i] = x + v * dt;
+      if (x < D && y >= D) { s.tc[i] = t0 + (D - x) / (y - x) * dt; ++s.done; }
     }
   }
   const order = s => [0, 1, 2, 3, 4, 5, 6, 7].sort((a, b) => (s.tc[a] || 1e9) - (s.tc[b] || 1e9) || s.x[b] - s.x[a] || a - b);
   // Win chance: softmax of the noise-free finish time (TAU fitted), 20% take.
   function odds(T) {
-    const m = mn.apply(null, T), p = T.map(t => M.exp((m - t) / TAU)), z = p.reduce((a, b) => a + b);
-    return p.map(q => mx(1.1, mn(99.9, rnd(8 * z / q) / 10)));
+    const m = mn.apply(null, T), p = [];
+    let z = 0, i;
+    for (i = 0; i < 8; ++i) z += p[i] = M.exp((m - T[i]) / TAU);
+    for (i = 0; i < 8; ++i) p[i] = mx(1.1, mn(99.9, rnd(8 * z / p[i]) / 10));
+    return p;
   }
   globalThis.derby = {field: field, race: race, step: step, order: order, odds: odds, D: D, DT: DT, TAU: TAU};
   if (typeof pocket === 'undefined') return;
@@ -80,7 +83,6 @@
       for (let j = 0; j < f.length; ++j) row[+f[j]] = v[j][0] === '$' ? arg[+v[j].slice(1)] : +v[j];
       c.push(row);
     }
-    if (c.length > 64) throw RangeError('64 instructions');
     return c;
   }
   // [LIGHT, MID, HEAVY]: stand tiers, crowd rows, dots per bay, roof arc
@@ -174,7 +176,7 @@
   // ---- Sound: audio.tone plays one note at a time; a short note queue.
   let A = null, notes = [], busy = 0;
   try { if (pocket.capabilities.get('audio.tone').available) A = pocket.audio; } catch (e) {}
-  const done = () => { busy = 0; }, nop = () => {};
+  const done = () => { busy = 0; }, nop = Boolean; // nop: any function without effects
   function sound() {
     if (!A || busy || !notes.length) return;
     const n = notes.splice(0, 2);
@@ -331,8 +333,8 @@
         STY[h.sty] + (od ? ' x' + od[pick] : ''), 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
       for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od ? od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]) : '-');
       R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
-      [(h.top - TOP) / SPR, (h.st - ST0) / ST1, (h.kick - KI0) / KI1].forEach((v, i) =>
-        R.bar[i].setRect(tx, [180, 43 + 12 * i, 182 + rnd(52 * mx(0, mn(1, v))), 49 + 12 * i]));
+      const v = [(h.top - TOP) / SPR, (h.st - ST0) / ST1, (h.kick - KI0) / KI1];
+      for (let i = 0; i < 3; ++i) R.bar[i].setRect(tx, [180, 43 + 12 * i, 182 + rnd(52 * mx(0, mn(1, v[i]))), 49 + 12 * i]);
     } else if (scene === 'res') {
       const o = fin.o, p = o.indexOf(pick);
       s = [(replay ? 'REPLAY  ' : 'WINNER  ') + num(o[0]) + ' ' + F.h[o[0]].n + '  ' + fin.mg,
@@ -348,6 +350,12 @@
     for (let i = 0; i < s.length; ++i) if (R.t[i].s !== s[i]) R.t[i].setText(tx, R.t[i].s = s[i]);
     R.dm.setVisible(tx, dm > 0 && !(t & 16));
   }
+  // The runners u of the way through the last sim step.
+  function at(u) {
+    const a = [];
+    for (let i = 0; i < 8; ++i) a[i] = rs.px[i] + (rs.x[i] - rs.px[i]) * u;
+    return a;
+  }
   // Finish: run the rest of the field unseen, then settle the bet.
   function settle() {
     while (rs.done < 8 && rs.t < 200) step(F, rs, DT);
@@ -358,11 +366,36 @@
     pts += dp;
     if (pts < 50) pts = 1000;
     fin = {o: o, mg: mg, dp: dp};
-    log('FINISH race=' + raceNo + ' seed=' + hex(F.seed) + ' order=' + o.map(i => i + 1) + ' t=' + o.map(i => rs.tc[i]) + ' margin=' + mg);
+    const n = [], c = [];
+    for (const i of o) { n.push(i + 1); c.push(rs.tc[i]); }
+    log('FINISH race=' + raceNo + ' seed=' + hex(F.seed) + ' order=' + n + ' t=' + c + ' margin=' + mg);
     if (!replay) { log('RESULT pick=' + (pick + 1) + ' place=' + (o.indexOf(pick) + 1) + ' delta=' + dp + ' points=' + pts); save(); }
     notes = (o[0] === pick ? WIN : LOSE).slice();
   }
 
+  // The screen's rect, then the frame's draws: the course (with the screen
+  // and its feed) for camera c, or HEAD ON; then extra (map, photo, conf).
+  function paint(c, xs, close, gate, extra) {
+    // Its face on this camera, or null out of view or over the map
+    // (y < 13): fill, bezel, feed and lettering all use these integers.
+    const p = c[0] / VS[1];
+    vr = [rnd(120 + (VS[0] - VS[2] - cx) * p), rnd(c[2] + (c[1] - VS[4]) * p), rnd(120 + (VS[0] + VS[2] - cx) * p), rnd(c[2] + (c[1] - VS[3]) * p)];
+    if (scene !== 'race' || cm > 5 || vr[0] > 239 || vr[2] < 1 || vr[1] < 13 || vr[1] > 134 || vr[2] - vr[0] < 8 || vr[2] - vr[0] > 160) vr = null;
+    if (vr) ++von;
+    let d = [['hd', []]];
+    if (cm > 5 && scene === 'race') {
+      // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
+      // down the course; each horse scaled by its own 1/z (JS divides),
+      // the last (farthest) first.
+      for (let i = 7; i >= 0; --i) {
+        const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
+        d.push(['fr', [120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s)]]);
+      }
+    } else d = course(c, cx, xs, close, gate);
+    H.beginFrame(4);
+    for (const e of d.concat(extra)) if (live[e[0]]) H.draw(live[e[0]], e[1]);
+    H.commit();
+  }
   function frame_() {
     const P = k => dk === 0 ? K.pressed(k) : k === dk;
     ++t;
@@ -393,13 +426,12 @@
           const w = order(rs)[0];
           if (w !== ld) { if (lead > 500) log('LEAD #' + (w + 1) + ' at ' + rnd(lead) + 'M'); if (lead > 400) dl = 60; ld = w; }
           // The photo: every runner where it was when the winner crossed.
-          if (!was && rs.done) { const u = (rs.tc[w] - rs.t + DT) / DT; photoX = rs.x.map((x, i) => rs.px[i] + (x - rs.px[i]) * u); }
+          if (!was && rs.done) photoX = at((rs.tc[w] - rs.t + DT) / DT);
         }
         if (live.gate && lead > 120) drop(['gate']);
         if (rs.done >= 3) { settle(); return enter('photo'); }
       }
-      const u = slow ? disp : 1;
-      xs = rs.x.map((x, i) => rs.px[i] + (x - rs.px[i]) * u);
+      xs = at(slow ? disp : 1);
       if (scene === 'gate') for (let i = 0; i < 8; ++i) if (!live['r' + i]) xs[i] = -999;
       if (hold > 0) --hold;
       if (dl > 0) --dl;
@@ -414,7 +446,8 @@
       c = shot(m % 6, xs, cl, scene === 'gate' || camT === 45);
       close = m === 1 ? cl : -1;
       gate = live.gate;
-      extra = [['map', rs.x.map(x => 8 + mn(x, D) * .224)]];
+      extra = [['map', z8(0)]];
+      for (let i = 0; i < 8; ++i) extra[0][1][i] = 8 + mn(rs.x[i], D) * .224;
     } else if (scene === 'photo') {
       c = shot(4, photoX);
       xs = photoX;
@@ -434,25 +467,7 @@
       c = shot(1, xs, l);
       close = l;
     }
-    // The screen's face on this camera, or null out of view or over the map
-    // (y < 13): fill, bezel, feed and lettering all use these integers.
-    const p = c[0] / VS[1];
-    vr = [rnd(120 + (VS[0] - VS[2] - cx) * p), rnd(c[2] + (c[1] - VS[4]) * p), rnd(120 + (VS[0] + VS[2] - cx) * p), rnd(c[2] + (c[1] - VS[3]) * p)];
-    if (scene !== 'race' || cm > 5 || vr[0] > 239 || vr[2] < 1 || vr[1] < 13 || vr[1] > 134 || vr[2] - vr[0] < 8 || vr[2] - vr[0] > 160) vr = null;
-    if (vr) ++von;
-    let d = [['hd', []]];
-    if (cm > 5 && scene === 'race') {
-      // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
-      // down the course; each horse scaled by its own 1/z (JS divides),
-      // the last (farthest) first.
-      for (let i = 7; i >= 0; --i) {
-        const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
-        d.push(['fr', [120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s)]]);
-      }
-    } else d = course(c, cx, xs, close, gate);
-    H.beginFrame(4);
-    for (const e of d.concat(extra)) if (live[e[0]]) H.draw(live[e[0]], e[1]);
-    H.commit();
+    paint(c, xs, close, gate, extra);
     const up = tx => {
       hud(tx);
       // The lettering follows the face (offsets LO from its left or right
@@ -472,7 +487,9 @@
   // ---- Demo: DEMO_IDLE_S of no key at the paddock (wall clock), then the
   // game plays itself, its keys fed to P(). Player state is set aside; races
   // 1e6+n are the demo's seeds; silent (A = null); no save.
-  const DEMO_IDLE_S = 15, DEMO_RES = 150, GK = [...'adesr1,/', 'tab'];
+  // GK by split, not [...'adesr1,/', 'tab']: that spread ran the guest out of
+  // heap on the device while evaluating (README).
+  const DEMO_IDLE_S = 15, DEMO_RES = 150, GK = 'a d e s r 1 , / tab'.split(' ');
   let dm = 0, dk = 0, dn = 0, idle = 0, kp = '', bk;
   function demo(on, n) {
     if (!on) { [pts, raceNo, pick, stake, A] = bk; notes = []; drop(RUN); drop(['photo']); }
