@@ -169,3 +169,19 @@ wifi_time_link_t wifi_time_link_state(void);
 // Copies the address the link holds, always NUL terminating; "" when it has
 // none. Safe from any task.
 void wifi_time_link_ip(char *out, size_t size);
+
+// SNTP over a link, for a holder on another task (net_autosync.c). The link
+// task's teardown also deinitialises SNTP, and ESP-IDF v6.0.1's
+// esp_netif_sntp_deinit() deletes the semaphore esp_netif_sntp_sync_wait() may
+// be blocked on -- a lost AP would do that under the waiter. These three and
+// the teardown take one mutex, so a deinit waits out a wait (one slice), and a
+// start after the link stopped being UP is refused rather than leaving SNTP
+// running past the event loop the teardown deletes.
+//
+// start: ESP_ERR_INVALID_STATE unless the link is UP. wait: one slice, as
+// esp_netif_sntp_sync_wait(); ESP_ERR_INVALID_STATE once the link is not UP
+// or SNTP was already torn down. stop: idempotent, and the caller's to make
+// before it releases the link.
+esp_err_t wifi_time_link_sntp_start(void);
+esp_err_t wifi_time_link_sntp_wait(unsigned slice_ms);
+void      wifi_time_link_sntp_stop(void);

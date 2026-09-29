@@ -8,6 +8,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -306,12 +307,33 @@ static esp_err_t radio_up(bool connect) {
     return err;
 }
 
+// Serialises every esp_netif_sntp_* call that can meet another task's: the
+// teardown below and the wifi_time_link_sntp_* trio a link holder uses. IDF's
+// deinit nulls its storage and then deletes the semaphore sync_wait blocks on,
+// with no lock of its own, so without this a link that loses its AP deletes a
+// semaphore with net_autosync.c's task waiting on it (FreeRTOS: undefined).
+// Held across one sync_wait slice (100 ms), which is therefore the most a
+// teardown waits. Static, and created by whichever task wins the `running`
+// lock first -- every user of it runs after one of those wins, and it is never
+// deleted, so the creation cannot race and the handle never goes stale.
+static StaticSemaphore_t sntp_lock_storage;
+static SemaphoreHandle_t sntp_lock;
+static void sntp_lock_ready(void) {
+    if(!sntp_lock) sntp_lock=xSemaphoreCreateMutexStatic(&sntp_lock_storage);
+}
+static void sntp_take(void) { xSemaphoreTake(sntp_lock,portMAX_DELAY); }
+static void sntp_give(void) { xSemaphoreGive(sntp_lock); }
+
 // Undoes exactly what radio_up() managed to do, in reverse, and is safe to call
 // after a partial failure. esp_netif_deinit() is deliberately absent: ESP-IDF
 // v6.0.1 documents it as unsupported and it returns ESP_ERR_NOT_SUPPORTED, so
 // the LWIP task and its buffers survive the first sync for the life of the boot.
+// SNTP goes first and under its lock: its sync callback posts to the default
+// event loop, which the last line may delete.
 static void tear_down(void) {
+    sntp_take();
     esp_netif_sntp_deinit();
+    sntp_give();
     if(wifi_started) { esp_wifi_disconnect(); esp_wifi_stop(); wifi_started=false; }
     if(ip_handler) {
         esp_event_handler_instance_unregister(IP_EVENT,IP_EVENT_STA_GOT_IP,ip_handler);
@@ -489,6 +511,7 @@ esp_err_t wifi_time_sync_start(void) {
     bool expected=false;
     if(!atomic_compare_exchange_strong(&running,&expected,true))
         return ESP_ERR_INVALID_STATE;
+    sntp_lock_ready();
     // 4 KiB covers this task's own frames; the driver and LWIP run on their own
     // tasks and are sized by Kconfig, not from here.
     if(xTaskCreate(sync_task,"wifi_time",4096,NULL,5,NULL)!=pdPASS) {
@@ -637,6 +660,7 @@ esp_err_t wifi_time_scan_start(void) {
     bool expected=false;
     if(!atomic_compare_exchange_strong(&running,&expected,true))
         return ESP_ERR_INVALID_STATE;
+    sntp_lock_ready();
     // Before the task exists, not inside it: a caller that polls immediately
     // would otherwise read the state the previous scan left behind and take it
     // for this one's answer.
@@ -785,6 +809,7 @@ esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner) {
     bool expected=false;
     if(!atomic_compare_exchange_strong(&running,&expected,true))
         return ESP_ERR_INVALID_STATE;
+    sntp_lock_ready();
     atomic_store(&link_stop_req,false);
     atomic_store(&link_owner_v,(int)owner);
     // Set before the task exists so that a caller polling immediately sees
@@ -802,3 +827,42 @@ esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner) {
 }
 
 esp_err_t wifi_time_link_start(void) { return wifi_time_link_start_for(WIFI_TIME_LINK_APP); }
+
+// ------------------------------------------------------------ SNTP on a link
+//
+// The UP checks are made under sntp_lock, and the link task leaves UP before
+// its teardown takes that lock (LINK_LOST and the stop path both store the new
+// state first). So a start that saw UP finishes before the teardown's deinit
+// begins and that deinit cleans it up; a start that did not see UP creates
+// nothing for a teardown that has already been.
+
+esp_err_t wifi_time_link_sntp_start(void) {
+    if(!sntp_lock) return ESP_ERR_INVALID_STATE;     // no link ever started
+    esp_sntp_config_t c=ESP_NETIF_SNTP_DEFAULT_CONFIG(NTP_SERVER);
+    // Stepped, not slewed, as the sync task does.
+    c.smooth_sync=false;
+    sntp_take();
+    esp_err_t err=atomic_load(&link_state_v)==WIFI_TIME_LINK_UP
+                  ? esp_netif_sntp_init(&c) : ESP_ERR_INVALID_STATE;
+    sntp_give();
+    return err;
+}
+
+esp_err_t wifi_time_link_sntp_wait(unsigned slice_ms) {
+    if(!sntp_lock) return ESP_ERR_INVALID_STATE;
+    sntp_take();
+    // Not UP: the teardown is coming for this SNTP (or has been), and waiting
+    // on it would only hold that teardown back by a slice.
+    esp_err_t err=atomic_load(&link_state_v)==WIFI_TIME_LINK_UP
+                  ? esp_netif_sntp_sync_wait(pdMS_TO_TICKS(slice_ms))
+                  : ESP_ERR_INVALID_STATE;
+    sntp_give();
+    return err;
+}
+
+void wifi_time_link_sntp_stop(void) {
+    if(!sntp_lock) return;
+    sntp_take();
+    esp_netif_sntp_deinit();         // a no-op once the teardown has run
+    sntp_give();
+}

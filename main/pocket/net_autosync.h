@@ -40,7 +40,7 @@
 
 typedef enum {
     AUTOSYNC_OK,          // the clock was set
-    AUTOSYNC_FAILED,      // the network or SNTP did not answer
+    AUTOSYNC_FAILED,      // the network or SNTP did not answer, or the AP left
     AUTOSYNC_ABORTED,     // yielded to an app or a screen
     AUTOSYNC_BUSY,        // the radio belonged to someone else
 } autosync_outcome_t;
@@ -89,6 +89,9 @@ typedef struct {
     esp_err_t (*sntp_start)(void);
     // One slice of the wait. ESP_OK once the clock has been stepped,
     // ESP_ERR_TIMEOUT when the slice ran out first, anything else is final.
+    // On the device these are wifi_time_link_sntp_*: start and wait refuse
+    // once the link is not UP, and stop is idempotent against the link's own
+    // teardown (wifi_time.h has why).
     esp_err_t (*sntp_wait)(unsigned slice_ms);
     void      (*sntp_stop)(void);
     void      (*set_synchronized)(void);

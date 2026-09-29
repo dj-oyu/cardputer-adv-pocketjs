@@ -3,8 +3,12 @@
 // What runs here is the real main/pocket/net_service.c and the policy and
 // attempt halves of main/pocket/net_autosync.c; what is faked is everything
 // they stand on -- wifi_time.c's link (a script of how long association,
-// SNTP and the teardown take), the clock (advanced only by the attempt's own
-// sleeps, so every deadline is exact), and the "an app wants to start" signal.
+// SNTP and the teardown take, and an AP that leaves after the link is UP), the
+// clock (advanced only by the attempt's own sleeps, so every deadline is
+// exact), and the "an app wants to start" signal. SNTP is faked as ESP-IDF
+// v6.0.1's esp_netif_sntp behaves plus wifi_time.c's sntp_lock around it, so
+// "deinit deleted the semaphore a wait was blocked on" is a counter here --
+// the fake is only as right as that model; the lock itself is device code.
 // The FreeRTOS task, net_autosync_poll() and net_autosync_yield() are device
 // only and are covered by the steps in docs/platform/wifi-autostart.md.
 //
@@ -29,6 +33,8 @@ static struct {
     // script
     int64_t up_after;               // association time; <0 never comes up
     int64_t fail_after;             // the link gives up at this age; <0 never
+    int64_t lost_after;             // an UP link loses its AP at this age; <0 never
+    bool lose_at_sntp_start;        // the AP goes between the attempt's look and its SNTP start
     int64_t teardown_ms;            // stop request to lock released
     esp_err_t start_result;         // what wifi_time_link_start_for returns
     // state
@@ -36,17 +42,29 @@ static struct {
     wifi_time_link_owner_t owner;
     wifi_time_link_t state;
     int64_t started_at, stop_at;    // stop_at: when the teardown completes, -1 none
+    bool teardown_blocked;          // waiting for sntp_lock (a wait slice holds it)
+    int64_t lost_at;                // when the AP went, -1 not
     int starts, stops_honoured, stops_ignored;
     wifi_time_status_t status;
 } radio;
 
+// esp_netif_sntp as ESP-IDF v6.0.1 implements it (esp_netif_sntp.c): one
+// storage block, whose semaphore sync_wait blocks on and deinit deletes with no
+// lock of its own -- and wifi_time.c's sntp_lock around it, which the link's
+// teardown and the wifi_time_link_sntp_* trio take. `lock_held` is true for
+// the length of a wait slice; a teardown that arrives inside one waits for it,
+// as the link task blocks in sntp_take() on the device.
 static struct {
     esp_err_t start_result;
     int64_t ok_after;               // <0 never answers
     esp_err_t final_error;          // returned instead of TIMEOUT once past ok_after, if set
-    bool active;
+    bool alive;                     // IDF's s_storage != NULL
+    bool lock_held;                 // a wait slice is blocked on the semaphore
     int64_t started_at;
-    int stops;
+    int inits, deinits;             // deinits that freed something
+    int stops;                      // wifi_time_link_sntp_stop calls
+    int deleted_under_waiter;       // vSemaphoreDelete with a task blocked on it
+    int init_while_alive;
     bool active_at_release;         // SNTP still up when the link was released
 } sntp;
 
@@ -55,18 +73,40 @@ static int64_t abort_at=-1;         // when "an app start" asks for the radio
 
 static void radio_reset(void) {
     memset(&radio,0,sizeof radio);
-    radio.up_after=3000; radio.fail_after=-1; radio.teardown_ms=200;
-    radio.start_result=ESP_OK; radio.stop_at=-1;
+    radio.up_after=3000; radio.fail_after=-1; radio.lost_after=-1;
+    radio.teardown_ms=200; radio.start_result=ESP_OK; radio.stop_at=-1; radio.lost_at=-1;
     memset(&sntp,0,sizeof sntp);
     sntp.ok_after=1500;
     synchronized_calls=0; abort_at=-1;
+}
+
+static void sntp_deinit(void) {
+    if(!sntp.alive) return;                          // IDF: a NULL storage is a no-op
+    if(sntp.lock_held) sntp.deleted_under_waiter++;
+    sntp.alive=false; sntp.deinits++;
+}
+
+// wifi_time.c's tear_down(): SNTP first, under sntp_lock, then the radio.
+static void link_teardown_begin(void) {
+    if(sntp.lock_held) { radio.teardown_blocked=true; return; }
+    sntp_deinit();
+    radio.stop_at=now+radio.teardown_ms;
+}
+
+static void lose_ap(void) {
+    // on_wifi(): the disconnect's stage and reason, state untouched (still the
+    // OK the link wrote on getting its address); link_task: FAILED, then down.
+    radio.state=WIFI_TIME_LINK_FAILED; radio.lost_at=now;
+    radio.status.stage=WIFI_TIME_STAGE_ASSOC; radio.status.reason=8;
+    link_teardown_begin();
 }
 
 // The link task, advanced to `now`.
 static void radio_advance(void) {
     if(!radio.running) return;
     if(radio.stop_at>=0 && now>=radio.stop_at) {
-        radio.running=false; radio.owner=0; radio.state=WIFI_TIME_LINK_DOWN;
+        radio.running=false; radio.owner=0;
+        if(radio.state!=WIFI_TIME_LINK_FAILED) radio.state=WIFI_TIME_LINK_DOWN;
         radio.stop_at=-1;
         return;
     }
@@ -82,6 +122,9 @@ static void radio_advance(void) {
             radio.status=(wifi_time_status_t){.state=WIFI_TIME_OK};
         }
     }
+    if(radio.state==WIFI_TIME_LINK_UP && radio.stop_at<0 && !radio.teardown_blocked &&
+       radio.lost_after>=0 && now-radio.started_at>=radio.lost_after)
+        lose_ap();
 }
 
 esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner) {
@@ -90,19 +133,26 @@ esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner) {
     if(radio.start_result!=ESP_OK) return radio.start_result;
     radio.running=true; radio.owner=owner; radio.state=WIFI_TIME_LINK_CONNECTING;
     radio.started_at=now; radio.stop_at=-1; radio.starts++;
+    radio.teardown_blocked=false; radio.lost_at=-1;
     radio.status=(wifi_time_status_t){.state=WIFI_TIME_RUNNING,.stage=WIFI_TIME_STAGE_ASSOC};
     return ESP_OK;
 }
 void wifi_time_link_stop_for(wifi_time_link_owner_t owner) {
     radio_advance();
-    if(radio.running && radio.owner==owner && radio.stop_at<0) {
-        radio.stop_at=now+radio.teardown_ms; radio.stops_honoured++;
-        if(sntp.active) sntp.active_at_release=true;
+    // A link that lost its AP has already left link_task's loop; a stop has
+    // nothing left to do there.
+    if(radio.running && radio.owner==owner && radio.stop_at<0 && !radio.teardown_blocked &&
+       radio.state!=WIFI_TIME_LINK_FAILED) {
+        radio.stops_honoured++;
+        if(sntp.alive) sntp.active_at_release=true;
+        radio.state=WIFI_TIME_LINK_DOWN;
+        link_teardown_begin();
     } else radio.stops_ignored++;
 }
 wifi_time_link_owner_t wifi_time_link_owner(void) { radio_advance(); return radio.owner; }
 wifi_time_link_t wifi_time_link_state(void) { radio_advance(); return radio.state; }
 bool wifi_time_busy(void) { radio_advance(); return radio.running; }
+wifi_time_status_t wifi_time_status(void) { return radio.status; }
 void wifi_time_status_settle(wifi_time_state_t state, wifi_time_stage_t stage, int reason) {
     radio.status.state=state; radio.status.stage=stage; radio.status.reason=reason;
 }
@@ -112,21 +162,35 @@ void wifi_time_status_settle(wifi_time_state_t state, wifi_time_stage_t stage, i
 static int64_t fake_now(void) { return now; }
 static void fake_sleep(unsigned ms) { now+=ms; radio_advance(); }
 static bool fake_abort(void) { return abort_at>=0 && now>=abort_at; }
+
+// wifi_time_link_sntp_start/wait/stop, under the same rules.
 static esp_err_t fake_sntp_start(void) {
+    if(radio.lose_at_sntp_start && radio.state==WIFI_TIME_LINK_UP) lose_ap();
+    if(radio.state!=WIFI_TIME_LINK_UP) return ESP_ERR_INVALID_STATE;
     if(sntp.start_result!=ESP_OK) return sntp.start_result;
-    sntp.active=true; sntp.started_at=now;
+    if(sntp.alive) { sntp.init_while_alive++; return ESP_ERR_INVALID_STATE; }
+    sntp.alive=true; sntp.inits++; sntp.started_at=now;
     return ESP_OK;
 }
 static esp_err_t fake_sntp_wait(unsigned slice) {
+    if(radio.state!=WIFI_TIME_LINK_UP || !sntp.alive) return ESP_ERR_INVALID_STATE;
     int64_t due=sntp.ok_after>=0 ? sntp.started_at+sntp.ok_after : -1;
+    esp_err_t r=ESP_ERR_TIMEOUT;
+    sntp.lock_held=true;
     if(due>=0 && now+slice>=due) {
         if(now<due) now=due;
-        return sntp.final_error?sntp.final_error:ESP_OK;
+        radio_advance();
+        r=sntp.final_error?sntp.final_error:ESP_OK;
+    } else {
+        // In 10 ms steps, so an AP lost mid-slice is lost mid-slice.
+        for(unsigned t=0;t<slice;t+=10) { now+=10; radio_advance(); }
     }
-    now+=slice; radio_advance();
-    return ESP_ERR_TIMEOUT;
+    sntp.lock_held=false;
+    // The teardown that was blocked in sntp_take() gets the lock now.
+    if(radio.teardown_blocked) { radio.teardown_blocked=false; link_teardown_begin(); }
+    return r;
 }
-static void fake_sntp_stop(void) { sntp.active=false; sntp.stops++; }
+static void fake_sntp_stop(void) { sntp.stops++; sntp_deinit(); }
 static void fake_synchronized(void) { synchronized_calls++; }
 
 static const autosync_ops_t ops={
@@ -345,6 +409,62 @@ static void attempt_abort_before(void) {
     CHECK(synchronized_calls==0 && !radio.running && net_service_holders()==0,"cleanly");
 }
 
+// The AP drops the association while the attempt is blocked in the SNTP wait.
+// The link task tears down; its deinit must not delete the semaphore under the
+// waiter (IDF deletes it unconditionally), must not run twice, and the attempt
+// must leave within a slice with the radio down and the hold given back.
+static void attempt_link_lost_during_sntp(void) {
+    radio_reset(); now=0;
+    sntp.ok_after=-1;                             // the answer never comes
+    radio.lost_after=radio.up_after+2000+35;      // mid-slice, 2 s into the wait
+    autosync_outcome_t out=autosync_attempt(&ops);
+    CHECK(out==AUTOSYNC_FAILED,"got %s",autosync_outcome_name(out));
+    CHECK(radio.lost_at>=0,"the script ran (lost at %lld)",(long long)radio.lost_at);
+    CHECK(sntp.deleted_under_waiter==0,"semaphore deleted under a waiter %d time(s)",
+          sntp.deleted_under_waiter);
+    CHECK(sntp.inits==1 && sntp.deinits==1 && !sntp.alive,
+          "one init, one deinit (%d/%d), nothing left", sntp.inits,sntp.deinits);
+    CHECK(sntp.init_while_alive==0,"no second init");
+    CHECK(synchronized_calls==0,"no sync");
+    CHECK(net_service_holders()==0,"the hold is given back");
+    CHECK(!radio.running && radio.owner==0,"the radio is down when the attempt returns");
+    CHECK(now-radio.lost_at<=AUTOSYNC_SLICE_MS+radio.teardown_ms+10,
+          "left a slice after the AP went, not after the SNTP wait (%lld ms)",
+          (long long)(now-radio.lost_at));
+    CHECK(radio.status.state==WIFI_TIME_FAILED && radio.status.stage==WIFI_TIME_STAGE_ASSOC,
+          "the Wi-Fi screen shows the lost network, not CLOCK SET or NTP (%d/%d)",
+          radio.status.state,radio.status.stage);
+    CHECK(radio.stops_honoured==0,"the release found the link already going");
+}
+
+// The AP goes between the attempt seeing UP and its SNTP start. Nothing may be
+// started for a teardown that has already run (it would outlive the event
+// loop that teardown deletes).
+static void attempt_link_lost_before_sntp(void) {
+    radio_reset(); now=0;
+    radio.lose_at_sntp_start=true;
+    autosync_outcome_t out=autosync_attempt(&ops);
+    CHECK(out==AUTOSYNC_FAILED,"got %s",autosync_outcome_name(out));
+    CHECK(sntp.inits==0 && !sntp.alive,"SNTP never started on a lost link");
+    CHECK(sntp.deleted_under_waiter==0,"nothing deleted under a waiter");
+    CHECK(net_service_holders()==0 && !radio.running,"cleaned up");
+    CHECK(radio.status.state==WIFI_TIME_FAILED && radio.status.stage==WIFI_TIME_STAGE_ASSOC,
+          "the link's stage, not SNTP's (%d/%d)",radio.status.state,radio.status.stage);
+}
+
+// Back to back after a lost link: the second attempt starts clean.
+static void attempt_after_lost_link(void) {
+    radio_reset(); now=0;
+    sntp.ok_after=-1; radio.lost_after=radio.up_after+500;
+    autosync_attempt(&ops);
+    radio.lost_after=-1; sntp.ok_after=1500;
+    autosync_outcome_t out=autosync_attempt(&ops);
+    CHECK(out==AUTOSYNC_OK,"the next attempt syncs (%s)",autosync_outcome_name(out));
+    CHECK(sntp.inits==2 && sntp.deinits==2 && sntp.init_while_alive==0,
+          "one init and one deinit each (%d/%d)",sntp.inits,sntp.deinits);
+    CHECK(net_service_holders()==0 && !radio.running,"cleaned up");
+}
+
 static void attempt_busy(void) {
     radio_reset(); now=0;
     radio.running=true;                          // the settings screen's scan
@@ -481,6 +601,9 @@ int main(void) {
     attempt_abort_connecting();
     attempt_abort_sntp();
     attempt_abort_before();
+    attempt_link_lost_during_sntp();
+    attempt_link_lost_before_sntp();
+    attempt_after_lost_link();
     attempt_busy();
     service_counts();
     service_table_full();

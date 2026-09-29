@@ -6,7 +6,6 @@
 #ifdef ESP_PLATFORM
 #include "system/sys_clock.h"
 #include "esp_heap_caps.h"
-#include "esp_netif_sntp.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -85,6 +84,15 @@ const char *autosync_outcome_name(autosync_outcome_t outcome) {
 
 #define HOLDER "time"
 
+// A link that was UP and lost its AP leaves the disconnect's stage and reason
+// in the status but not the state: that is still the OK it wrote on getting an
+// address, which the Wi-Fi screen reads as "clock set". The stage is kept --
+// "NETWORK WENT AWAY" is the true answer, not "NO ANSWER FROM NTP".
+static void settle_link_lost(void) {
+    wifi_time_status_t st=wifi_time_status();
+    wifi_time_status_settle(WIFI_TIME_FAILED,st.stage,st.reason);
+}
+
 autosync_outcome_t autosync_attempt(const autosync_ops_t *ops) {
     esp_err_t err=net_service_acquire(HOLDER);
     // The settings screen's sync or scan, or an app's lease. Its owner will
@@ -107,18 +115,29 @@ autosync_outcome_t autosync_attempt(const autosync_ops_t *ops) {
 
     err=ops->sntp_start();
     if(err!=ESP_OK) {
-        wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_SNTP,(int)err);
+        // Refused because the AP went between the look above and the start:
+        // that is the link's failure, and its stage is the one to show.
+        if(net_service_state()!=NET_SERVICE_UP) settle_link_lost();
+        else wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_SNTP,(int)err);
         goto release;
     }
     began=ops->now_ms();
+    bool lost=false;
     for(;;) {
         err=ops->sntp_wait(AUTOSYNC_SLICE_MS);
-        if(err!=ESP_ERR_TIMEOUT) break;               // set, or a final error
+        if(err==ESP_OK) break;                        // the clock was stepped
+        // An AP that drops the association mid-wait ends the link task, whose
+        // teardown deinitialises SNTP. The wait refuses once the link is not
+        // UP (wifi_time.c serialises the two), so this is seen within a slice
+        // rather than after the full SNTP wait on a radio that is gone.
+        if(net_service_state()!=NET_SERVICE_UP) { lost=true; break; }
+        if(err!=ESP_ERR_TIMEOUT) break;               // a final error
         if(ops->abort_requested()) { out=AUTOSYNC_ABORTED; break; }
         if(ops->now_ms()-began>=AUTOSYNC_SNTP_WAIT_MS) break;
     }
-    // Before the release, never after: the link task's teardown also deinits
-    // SNTP, and two tasks deinitialising it at once is a double free.
+    // This task started SNTP, so this task stops it, and before the release:
+    // after it, the link's teardown would be the one to do it. Idempotent, so
+    // a teardown that already ran (the lost link) leaves nothing to do here.
     ops->sntp_stop();
     if(err==ESP_OK) {
         // The only place this attempt changes anything outside itself. Not
@@ -127,6 +146,8 @@ autosync_outcome_t autosync_attempt(const autosync_ops_t *ops) {
         ops->set_synchronized();
         wifi_time_status_settle(WIFI_TIME_OK,WIFI_TIME_STAGE_NONE,0);
         out=AUTOSYNC_OK;
+    } else if(lost) {
+        settle_link_lost();
     } else if(out!=AUTOSYNC_ABORTED) {
         wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_SNTP,(int)err);
     }
@@ -151,9 +172,6 @@ release:
 #ifdef ESP_PLATFORM
 
 static const char *TAG = "autosync";
-
-// Same server as the settings screen's sync (wifi_time.c's NTP_SERVER).
-#define NTP_SERVER "pool.ntp.org"
 
 // THE FLOOR, AUTOSYNC_MIN_FREE. NET_RADIO_MIN_FREE (pocket_net.c, 56 KiB,
 // measured 2026-09-07) is what bringing the radio up costs; the 8 KiB on top is
@@ -180,16 +198,6 @@ static void dev_sleep_ms(unsigned ms) {
     vTaskDelay(t?t:1);
 }
 static bool dev_abort(void) { return atomic_load(&abort_req); }
-static esp_err_t dev_sntp_start(void) {
-    esp_sntp_config_t c=ESP_NETIF_SNTP_DEFAULT_CONFIG(NTP_SERVER);
-    // Stepped, not slewed, as the manual sync does (wifi_time.c).
-    c.smooth_sync=false;
-    return esp_netif_sntp_init(&c);
-}
-static esp_err_t dev_sntp_wait(unsigned ms) {
-    return esp_netif_sntp_sync_wait(pdMS_TO_TICKS(ms));
-}
-static void dev_sntp_stop(void) { esp_netif_sntp_deinit(); }
 // The single call site for this path, like wifi_time.c's for the manual one.
 // sys_clock_set_synchronized(false) is never made: a failed sync does not make
 // a clock that was once set wrong (docs/scenes/solar-sail.md).
@@ -197,7 +205,10 @@ static void dev_set_synchronized(void) { sys_clock_set_synchronized(true); }
 
 static const autosync_ops_t device_ops={
     .now_ms=dev_now_ms, .sleep_ms=dev_sleep_ms, .abort_requested=dev_abort,
-    .sntp_start=dev_sntp_start, .sntp_wait=dev_sntp_wait, .sntp_stop=dev_sntp_stop,
+    // wifi_time.c's, not esp_netif_sntp_* directly: the link task's teardown
+    // deinitialises SNTP too, and only those share its lock.
+    .sntp_start=wifi_time_link_sntp_start, .sntp_wait=wifi_time_link_sntp_wait,
+    .sntp_stop=wifi_time_link_sntp_stop,
     .set_synchronized=dev_set_synchronized, .radio_busy=wifi_time_busy,
 };
 
