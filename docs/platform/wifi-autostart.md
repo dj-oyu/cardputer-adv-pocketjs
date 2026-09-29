@@ -5,7 +5,7 @@
 ## 1. 結論
 
 - **常駐のオンラインは既定にしない。** 入れたのは「一過性の自動時刻同期」と「参照カウント付きの接続サービス（ネイティブのみ）」の2層。
-- **自動同期**: 資格情報が保存されていて、設定 AUTO TIME SYNC が ON（既定）のとき、**ホーム画面が10秒アイドル**になったら別タスクで 接続 → SNTP → 無線停止。成功したら次は12時間後。失敗は 1分・5分・30分で再試行し、**連続4回の失敗でそのブートは打ち切る**（設定を ON にし直すと再開）。1ブートの試行は最大32回。
+- **自動同期**: 資格情報が保存されていて、設定 AUTO TIME SYNC が ON（既定）のとき、**ホーム画面が10秒アイドル**になったら別タスクで 接続 → SNTP → 無線停止。成功したら次は12時間後。失敗は 1分・5分・30分で再試行し、**連続4回の失敗でそのブートは打ち切る**（設定を ON にし直すと再開）。1ブートの試行は最大32回（アプリへ譲った中断は数えない。§11.3）。
 - **アプリが優先**: 「アプリ・別画面・オーバーレイ・診断が動いている間は始めない」と「ゲストを作る直前に中断して、無線を止め、ヒープが戻るまで待つ」の**両方**を入れた（§3.3）。ゲームがホームの無線と同時に存在することはない。
 - **接続サービス** `net_service_acquire(reason)` / `net_service_release(reason)`。時刻同期が最初の利用者。`pocket.net` の lease とは**無線を共有しない**が、**所有者付きの停止**にして、互いのリンクを止められないようにした（§4）。
 - 静的 DIRAM は **+224 B**（計算: クリーンな HEAD とのマップ比較）。**動的なコストの本体は実機で測る**（ピーク、そして「一度無線を上げると約4.8KiB戻らない」がブートごとに必ず払われるようになる点、§5.3）。
@@ -30,9 +30,9 @@
 - オーバーレイが**起動しようとしていない**（`overlay_starting()`、今回 `ui/overlay.c` に足した getter）
 - 背景音楽が鳴っていない（約62KB を持ち、締め切りのある唯一のもの。無線の影響は未測定なので避けた）
 
-眠っているアプリ（常駐中断）は除外しない。中断は既に「ホームから無線を上げられる空き」（`APP_SUSPEND_MIN_FREE` 96KiB）を条件にしており、再開は `begin_run()` を通るので必ず譲る。**動いているオーバーレイ**も除外しない（§3.4）。
+~~眠っているアプリ（常駐中断）は除外しない。~~ **2026-09-30 のレビューで変更: 眠っているアプリがいる間は同期しない**（方針が `AUTOSYNC_APP_ASLEEP` で1分ずつ延期する。§11.2）。`main/main.c` の eligible の式は変えておらず、判定は `net_autosync_poll()` が `app_dormant_id()` を読んで行う。**動いているオーバーレイ**も除外しない（§3.4）。
 
-この状態が**キー入力なしで10秒**続き、方針（§3.2）が「期限到来」と言い、資格情報があり、空きが `AUTOSYNC_MIN_FREE` 以上なら、優先度4（UI タスクの5より下）の `autosync` タスクを立てる。資格情報は NVS を読むので、「ホームを離れたら無効化し、次に必要になったとき1回読む」キャッシュにした（資格情報は Wi-Fi 画面でしか変わらず、それはホームではないので正確）。資格情報が無ければ何も言わずに1分後にまた見る。
+この状態が**キー入力なしで10秒**続き、方針（§3.2）が「期限到来」と言い、資格情報があり、眠っているアプリが無く、空きが `AUTOSYNC_MIN_FREE` 以上かつ最大連続ブロックが `AUTOSYNC_MIN_LARGEST` 以上なら（§11.2）、優先度4（UI タスクの5より下）の `autosync` タスクを立てる。資格情報は NVS を読むので、「ホームを離れたら無効化し、次に必要になったとき1回読む」キャッシュにした（資格情報は Wi-Fi 画面でしか変わらず、それはホームではないので正確）。資格情報が無ければ何も言わずに1分後にまた見る。
 
 ブート直後の忙しさ（フォント・SKK・背景シーンの初期化）は、最初の `HOME_READY` から10秒のアイドルを待つことで避けている。
 
@@ -44,8 +44,9 @@
 | `AUTOSYNC_BACKOFF_*` | 1分・5分・30分 | 依頼の例どおり |
 | `AUTOSYNC_MAX_FAILURES` | 連続4回 | 最初＋再試行3回。1回あたり最大約25 sの無線と約48KBのヒープを使うので、届かない網に5回目は払わない |
 | `AUTOSYNC_RESYNC_MS` | 12 h | 依頼の12〜24 hの下端。RTC の日差は分単位に達しないが（推定）、長時間稼働で1日2回は安い |
-| `AUTOSYNC_RETRY_MS` | 1分 | 中断・無線が他で使用中・空き不足のとき。失敗には数えない。メニューとアプリを行き来するたびに無線を上げ下げしないため |
-| `AUTOSYNC_MAX_ATTEMPTS` | 32 / ブート | 何があっても有限にする安全網 |
+| `AUTOSYNC_RETRY_MS` | 1分 | 無線が他で使用中・空き不足・アプリが眠っているとき。失敗には数えない |
+| `AUTOSYNC_ABORT_RETRY_MS` | 5分 | 中断（アプリ・画面へ譲った）の後。試行にも失敗にも数えない（§11.3） |
+| `AUTOSYNC_MAX_ATTEMPTS` | 32 / ブート | 有限にする安全網。中断は数えない（§11.3） |
 | `AUTOSYNC_CONNECT_WAIT_MS` | 20 s | 外側の上限。リンク自身の期限は15 s（`CONNECT_TIMEOUT_MS`、3回まで再接続） |
 | `AUTOSYNC_SNTP_WAIT_MS` | 10 s | 手動同期の `SNTP_TIMEOUT_MS` と同じ。100 ms 刻みで中断を見る |
 
@@ -78,7 +79,7 @@ DESK CLOCK は時計なので、同期の恩恵が最も大きい。オーバー
 
 ### 3.6 ログの印
 
-`autosync` タグ: `AUTOSYNC_START free= largest=` / `AUTOSYNC_DONE <ok|failed|aborted|busy> stage= ms= free_before= min_free= free_after=` / `AUTOSYNC_NEXT in_s=` / `AUTOSYNC_GAVE_UP` / `AUTOSYNC_YIELD <why> waited_ms= [LATE] free=` / `AUTOSYNC_DEFERRED low_memory` / `AUTOSYNC_SKIP already synchronized` / `AUTOSYNC_ENABLED`。`net_service` タグ: `NET_ACQUIRE` / `NET_RELEASE` / `NET_ACQUIRE_REFUSED` / `NET_RELEASE_UNMATCHED`。`wifi` タグの既存の `RADIO_INIT ... cost=` / `LINK_UP free=` / `LINK_DOWN free=` と、新しい `LINK_STOPPED while connecting`。SSID は既存の `LINK_START ssid=` に出る（AP が放送する名前で、従来どおり）。**パスフレーズはどこにも出ない。**
+`autosync` タグ: `AUTOSYNC_START free= largest=` / `AUTOSYNC_DONE <ok|failed|aborted|busy> stage= ms= free_before= min_free= free_after=` / `AUTOSYNC_NEXT in_s=` / `AUTOSYNC_GAVE_UP` / `AUTOSYNC_YIELD <why> waited_ms= [LATE] free=` / `AUTOSYNC_DEFERRED low_memory free= floor= largest= block=` / `AUTOSYNC_DEFERRED app_asleep <id>` / `AUTOSYNC_SKIP already synchronized` / `AUTOSYNC_ENABLED`。`net_service` タグ: `NET_ACQUIRE` / `NET_RELEASE` / `NET_ACQUIRE_REFUSED` / `NET_RELEASE_UNMATCHED`。`wifi` タグの既存の `RADIO_INIT ... cost=`（2026-09-30 に末尾へ ` largest=` を追加） / `LINK_UP free=` / `LINK_DOWN free=` と、新しい `LINK_STOPPED while connecting`。SSID は既存の `LINK_START ssid=` に出る（AP が放送する名前で、従来どおり）。**パスフレーズはどこにも出ない。**
 
 `min_free` は `heap_caps_monitor_local_minimum_free_size_start/stop` による**その試行の区間の本当の最小値**で、§5 のピークを実機で置き換えるための数字。MEGADEMO のトレースビルドが同じ監視を使っているときは「(shared monitor)」と付く。
 
@@ -115,8 +116,9 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 | 無線を上げる床 `NET_RADIO_MIN_FREE` | 56 KiB | 実測に余裕を足した値（同上） |
 | 接続・DHCP・SNTP 中の動的 RX/TX バッファ、タスク stack（`autosync` 4 KiB、`wifi_link` 4 KiB） | 8 KiB 程度 | **推定**。stack の 8 KiB は計算、動的バッファは未測定 |
 | 自動同期の門 `AUTOSYNC_MIN_FREE` | 64 KiB | 上の和（床＋推定） |
+| 自動同期の門 `AUTOSYNC_MIN_LARGEST`（最大連続ブロック） | 16 KiB | **暫定（推定）**。§11.2 |
 
-ホーム画面の空き約274KiB（実測、CLAUDE.md）に対し、64KiB の門は十分に下（計算: 残り約210KiB）。ホームで門が効くのは、眠っているアプリ（96KiB 保証）かオーバーレイ（56KiB 保証）がいるときだけ。**この64KiB は `AUTOSYNC_DONE min_free=` の実測で置き換えること。**
+ホーム画面の空き約274KiB（実測、CLAUDE.md）に対し、64KiB の門は十分に下（計算: 残り約210KiB）。ホームで門が効くのは、オーバーレイ（56KiB 保証）がいるときだけ（眠っているアプリがいるときは門より先に延期する。§11.2）。**この64KiB は `AUTOSYNC_DONE min_free=` の実測で置き換えること。**
 
 ### 5.2 無線を止めた後
 
@@ -196,3 +198,93 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 - 中断の後片付けの時間（3 s の上限に対して）。
 - 同期中の CPU（Wi-Fi ドライバのタスク）がホームの fps とキー応答に与える影響。
 - デバッグ用のプローブ（`KASANE_*_PROBE`、`CONFIG_KSN_DEVICE_PROBE`）はホームで重い処理を走らせるが、譲らせていない（出荷ビルドでは無効）。
+
+## 11. 独立レビューへの対応（2026-09-30）
+
+ブランチ `vm/wifi-review-fixes`（`vm/main` ff7d809 から）。Fable（SLOW）の独立レビュー（総合「条件付き」）の指摘5件を、コードと ESP-IDF v6.0.1 のソースで確かめてから直した。**実機は使っていない**（COM3 は別の作業が使用中）。表記は §冒頭と同じく実測・計算・推定を分ける。
+
+| # | 重大度 | 指摘 | 検証 | 対応 |
+| --- | --- | --- | --- | --- |
+| 1 | 重大 | UP の後に AP が落ちると、SNTP を待つ autosync タスクの足元で link タスクが `esp_netif_sntp_deinit()` を呼ぶ | **正しい**。さらに2つ見つけた（下） | `wifi_time.c` に SNTP 用の mutex。autosync は落ちたリンクを1刻みで検出 |
+| 2 | 中 | 空きの門が合計だけで、最大連続ブロックを見ない。眠っているアプリがいても同期する | 前半は正しい。後半の「≒49KiB」は背景の二重計上の可能性（下） | 連続ブロックの門（暫定16KiB）と、眠っているアプリがいる間の延期 |
+| 3 | 低 | 中断が32回の上限に数えられる | **正しい**（1日で上限に届く） | 中断は試行にも連続失敗にも数えない。中断後は5分空ける |
+| 4 | 低 | 3 s の yield が尽きた（LATE）後、Wi-Fi 画面のスキャンが `SCAN BUSY` | **正しい**（`begin_scan()` は `latest.state` しか見ない） | 無線が他で使用中ならスキャンを待たせ、空いたら始める |
+| 5 | 低 | SSID が操作なしで毎ブートのログに出る | 正しい（`LINK_START ssid=`、`wifi_time.c`） | **変更しない**。ログを共有するときは伏せる運用（§8 の前提と同じ） |
+
+### 11.1 指摘1: リンク喪失と SNTP の後始末
+
+**確かめた事実。** `esp_netif_sntp_deinit()`（`components/esp_netif/lwip/esp_netif_sntp.c:144-163`）は、自前のロック無しに `s_storage=NULL` → `sntp_stop` → `vSemaphoreDelete(storage->sync_sem)` → `free` を行う。`esp_netif_sntp_sync_wait()`（`:165-178`）はその `sync_sem` に `xQueueSemaphoreTake` でブロックする。autosync は 100 ms 刻みで待ち、link タスクは `BIT_LINK_LOST` で抜けて `tear_down()` の先頭で deinit する。待ち手のいるセマフォの削除は FreeRTOS では未定義。手動同期（`sync_task`）は同じタスクで deinit するので起きない。Fable の記述どおり。
+
+**レビューに無かった2つ**（同じ根から）:
+
+- **開始との競合**: autosync が `UP` を見てから `esp_netif_sntp_init()` を呼ぶまでに AP が落ちると、init（`s_storage` を確保してから書き込む）と link の deinit（`s_storage` を見て解放する）が並行しうる。解放済みへの書き込みか、link の後始末の後に SNTP が動き出す。
+- **イベントループ**: SNTP の同期コールバックは既定のイベントループへ `esp_event_post` する。`tear_down()` は最後にそのループを削除する（`wifi_time.c` が作った場合。現状は常にそう）。SNTP がループより長生きすると、`esp_event_post` の NULL 検査と削除の間の競合になる。だから「link の後始末では SNTP に触らず、autosync に任せる」だけでは足りない — ループを消す前に SNTP が止まっていることが要る。
+
+**採った案（(c) の変形）。** `wifi_time.c` に静的 mutex `sntp_lock`（`StaticSemaphore_t`、84 B、map で確認）を置き、`tear_down()` の deinit と、新しい `wifi_time_link_sntp_start/wait/stop()` の3つをすべてその中で行う。autosync はこの3つを ops に使う。
+
+- deinit はロックを取るので、待ちの刻み（100 ms）が終わるまで待つ → **待ち手のいるセマフォは削除されない**。link の後始末の遅れは最大1刻み（計算）。
+- start と wait はロックの中で `link_state==UP` を確かめる。link タスクは状態を UP 以外にしてから `tear_down()` に入る（`LINK_LOST` は FAILED、停止は DOWN）ので、UP を見た start は deinit より前に終わり、その deinit が後始末する。UP でなければ何も作らない → **後始末の後に SNTP が生まれない**。
+- stop（deinit）は冪等（IDF が `s_storage==NULL` を見て何もしない）。link が先に後始末していれば何もしない → **二重解放にならない**。
+- mutex は `running` の CAS に勝ったタスクが最初に作る。作成は CAS で直列化され、削除しないので、作成の競合も古いハンドルも起きない。
+- autosync 側（`autosync_attempt()`）: 各刻みの後に `net_service_state()!=UP` を見て抜ける（SNTP の10 s を待たない）。status は「CLOCK SET」（link が UP で書いた OK が残る）でも「NO ANSWER FROM NTP」でもなく、**link の切断が残した段階（ASSOC、"NETWORK WENT AWAY"）で FAILED** にする。結果は FAILED（連続失敗に数える）。
+
+**却下した案。**
+
+- **(a) SNTP は始めたタスクだけが deinit し、link の後始末は SNTP に触らず、フラグで autosync に知らせる**: 上のイベントループの件で不足。link の後始末が「SNTP が止まるまで待つ」必要があり、結局は待ち合わせの仕組み（フラグ＋待ち、または mutex）が要る。フラグの待ちは上限と取り消しを別に書くことになり、mutex より長く、正しさの論証も長い。
+- **(b) sync_wait をリンクの状態と一緒に待つ（イベントグループで両方を待つ）**: IDF の `sync_sem` は `esp_netif_sntp.c` の static の中にあり、外から別の待ち物と束ねられない。同期コールバック（`sntp_set_time_sync_notification_cb`）を自前に差し替えて自前のイベントグループで待つ手はあるが、IDF の `esp_netif_sntp_init()` が自分のコールバックを登録し直すので、IDF の内部の手順に依存する。また (b) だけでは link の deinit が他タスクから走る事実は消えない。
+- **(c) の素朴形（sync_wait の全体、10 s をロックで包む）**: link の後始末が最大10 s 止まり、その間 `wifi_time_busy()` が真のまま → yield が3 s で LATE になる。刻みごとに取り直す形にして、待たせるのを最大100 ms にした。
+- **link の後始末から SNTP の deinit を外し、`sync_task` の終わりにだけ置く**: イベントループの件で不可（autosync の SNTP がループより長生きする窓が残る）。
+
+**ホスト試験**（`tools/test_net_autosync.c`）: 偽の SNTP を IDF v6.0.1 の振る舞い（1つの storage、deinit はロック無しでセマフォを消す）＋ `sntp_lock` の規則として書き、偽の無線に「UP の後に AP が落ちる」（`lost_after`）と「UP を見た直後、SNTP 開始の前に落ちる」（`lose_at_sntp_start`）を足した。検査: 待ち手のいるセマフォの削除0回、init 1・deinit 1・残り無し、二度目の init 無し、同期印0回、保持0、無線停止、喪失から1刻み＋後片付け以内に戻る、status が ASSOC の FAILED、続く試行が普通に成功する。**わざと壊した版**: (i) autosync の喪失検出を戻す → status の検査2件が落ちる、(ii) 偽の後始末がロックを無視する（＝修正前の `wifi_time.c`）→「待ち手のいるセマフォの削除 1回」で落ちる、(iii) 両方（＝修正前の全体）→ 3件落ちる。**限界**: ロックそのもの（`wifi_time.c`）はホストに載らない。偽はその規則を写したもので、試験が確かめるのは autosync 側の振る舞いと、規則が守られたときに不変条件が成り立つこと。
+
+### 11.2 指摘2: 最大連続ブロックと、眠っているアプリ
+
+**(i) 連続ブロック。** `esp_wifi_init` は1つでも確保に失敗すれば断り、それは FAILED として連続失敗に数えられる（4回でそのブートは終わり）。合計は足りても断片化した heap では、4回の無駄な無線起動で自動同期が止まる。方針の入力に `largest_bytes` を足し、`AUTOSYNC_MIN_LARGEST` 未満は `LOW_MEMORY`（延期、数えない）にした。
+
+値は **16 KiB、暫定（推定）**。根拠: この経路で確保される既知の最大の塊はタスクの stack（`autosync` と `wifi_link` 各 4 KiB、計算。イベントループのタスク 2,304 B、Kconfig の既定）で、ドライバ自身のタスク stack はライブラリの中で決まり数 KiB と推定。そのどれにも余裕があり、アイドルのホーム（空き約274KiB、実測）では断らない値として置いた。MEGADEMO が10KBの連続領域を得られなかった前例（§5.3）がある heap でだけ効く。**`RADIO_INIT` の行の末尾に `largest=`（`esp_wifi_init` 直前の最大連続ブロック）を足した**ので、実機で「どの largest で断られたか／通ったか」が取れる。定数は `net_autosync.h` の1か所。
+
+**(ii) 眠っているアプリ。** `app_dormant_id()`（`app_session.h`、眠っていなければ ""）を `net_autosync_poll()` が読み、方針が `AUTOSYNC_APP_ASLEEP` で1分ずつ延期する（数えない、ログ `AUTOSYNC_DEFERRED app_asleep <id>`）。再開か退去で眠りが終われば、次の1分で普通に始まる。`main/main.c` と `main/app_session.c` は触っていない。**`main/main.c` の `net_autosync_poll()` の直前のコメント「A kept app does not disqualify it ...」は古くなった**（振る舞いは poll の中で変わる）。main.c を触らない制約のため、この文書で訂正し、コメントの書き換えは次に main.c を触る変更に回す。
+
+**Fable の数字の検証（計算）**: 「96 KiB − 背景 30.6 KiB − 背景フレーム 16 KiB ≒ 49 KiB」は、SOLAR SAIL の scene_mem（30,671 B）と FLOWER のフレーム（16,384 B）を足しているが、`scene_mem.h` によれば背景は同時に1つ（FLOWER は scene_mem 7,845 B ＋フレーム16 KiB ≒ 24 KiB）。最悪は SOLAR SAIL の約30KiB で、ホームに戻った直後の空きは約66KiB（計算）。門64KiB の**すぐ上**で、無線を上げると10KiB 台が残る。結論（眠っている間は同期しない）は変わらない。96KiB は中断の時点の値で、ホームへ戻ってから他に何が確保されるかは未計上。
+
+### 11.3 指摘3: 中断を数えない
+
+`autosync_policy_record(ABORTED)` は `attempts` を1つ戻し、連続失敗も触らず、次を `AUTOSYNC_ABORT_RETRY_MS`（5分）後にする。BUSY は従来どおり試行に数え、1分後（上限32が有限性を保つ）。
+
+5分の根拠（推定・設計値）: 中断のたびにアプリの起動が「1刻み＋無線の後片付け」だけ遅れ、無線を上げる一過性のピークを払う。1分だとメニュー→アプリ→メニューの往復のたびにそれが起こりうる。5分なら1日の上限は288回（計算: 1440分÷5）で、実際にはホームで10 s 放置した直後にアプリを起動した場合にしか中断は起きない。一方でアプリ中心のブートでも数分の空きがあれば時計が合う。4.8KiB の恒常的な消費（§5.2）は最初の起動で払い済みで、回数では増えない（既存の記録からの推論）。
+
+ホスト試験: 中断は試行0・連続失敗不変・5分空く。失敗1回→中断→連続失敗は1のまま。1日（1分ごとに見て、始まるたびに中断）で打ち切りにならず、ちょうど288回。BUSY は32回で打ち切り。修正前の版では6件落ちる。
+
+### 11.4 指摘4: LATE の後の Wi-Fi 画面
+
+`enter()` の `net_autosync_yield("screen")` が3 s で LATE になると、無線のロックが残ったまま `wifi_ui_open()` の `begin_scan()` が走る。中断した試行は status を IDLE にしてから release するので、`latest.state==RUNNING` の分岐を通らず `wifi_time_scan_start()` が `ESP_ERR_INVALID_STATE` → `SCAN BUSY ESP_ERR_INVALID_STATE`。
+
+`wifi_ui.c` の変更は最小: `begin_scan()` が、表示中の同期ではない理由で `wifi_time_busy()` なら `scan_waiting` を立てて戻り、見出しは `WAITING FOR RADIO`。`wifi_ui_dirty()` が毎フレーム、`latest` の更新の後でロックが空いたのを見てスキャンを始める。手動同期の実行中に C-r した場合の従来の振る舞い（`SYNC RUNNING`）は変えていない。ホスト試験は試行の側だけ（後片付けが `AUTOSYNC_DOWN_WAIT_MS` を超えると、試行は ABORTED で戻り、無線はまだ保持中、その間の次の試行は BUSY で何も起こさない）。`wifi_ui.c` はホストに載らないので実機で見る。
+
+### 11.5 検証
+
+- ホスト試験 `bash tools/build_net_autosync_test.sh`（WSL、ASan/UBSan）: 既存の全件と、§11.1〜11.4 の新しい台本がすべて通過（`NET_AUTOSYNC_OK`）。わざと壊した版6種（§11.1 の3種、連続ブロックの門を外す、眠っているアプリの門を外す、中断を数える）で、それぞれ該当の検査が落ちることを確認。
+- 既存: `tools/kasane_contract/run.sh`（WSL の git が worktree を読めないため、`git show HEAD:apps/kasane/proc_megademo.js` を `.cache/kasane_megademo_app/proc_megademo_baseline.js` へ先に置いた）、`tools/test_overlay.c`、`tools/test_menu_rows.c`、`tools/test_codeedit.c`。
+- ビルド `idf.py -B build_wifireview build`: 新しい警告なし（既存の `flower.c` の未使用変数のみ）。map で `wifi_time_link_sntp_start/wait/stop` と `sntp_lock_storage` が入っていることを確認。
+- DIRAM（`tools/memlog.py`、ff7d809 のクリーンなビルドとの map 比較、計算）: 172,428 → 172,524 B（**+96**）。`wifi_time.c.obj` +88（`StaticSemaphore_t` 84 B とハンドル）、`wifi_ui.c.obj` +1。flash +528 B。
+
+### 11.6 実機で測る項目（人の作業を含む）
+
+前提は §8 と同じ（資格情報を保存した機体、ログは SSID を伏せてから共有）。
+
+| | 項目 | 手順 | 見るもの |
+| --- | --- | --- | --- |
+| (h) | UP の後の AP 喪失 | **人の作業**: `LINK_UP` が出てから2秒以内に AP（ルーターかテザリング）を切る。数回、タイミングを変えて | `Guru Meditation`・panic・`CORRUPT HEAP`・assert が無いこと。`LINK_LOST reason=` → `AUTOSYNC_DONE failed stage=assoc`（sntp ではない）、`ms=` が喪失から1 s 以内、`LINK_DOWN`。Wi-Fi 画面が「FAILED AT assoc / NETWORK WENT AWAY」 |
+| (i) | 門の値 | (a)(b) のログ | `AUTOSYNC_DONE min_free=`（`AUTOSYNC_MIN_FREE` の推定8KiB を置き換える）と `RADIO_INIT ... largest=`（`AUTOSYNC_MIN_LARGEST` の暫定16KiB を置き換える。断られた例があればその largest） |
+| (j) | ゲームの連続領域 | DERBY WATCH を自動同期 ON（同期後）と OFF で起動 | `internalFreeBytes` の差、MEGADEMO の起動時10KB の連続領域が取れるか（§8 (c) の続き） |
+| (k) | 眠っているアプリ | アプリ（IMU CAL など再開フックのあるもの）を Back で眠らせ、ホームで10 s 以上放置 | `AUTOSYNC_DEFERRED app_asleep <id>` が1分おき。無線が上がらない。アプリを再開または別アプリで退去した後、次の1分で `AUTOSYNC_START` |
+| (l) | yield の分布と LATE | §8 (d) を繰り返す | `AUTOSYNC_YIELD app waited_ms=` の分布、`LATE` の有無、yield 中のホームの停止時間。LATE が出たら直後に Wi-Fi 画面へ入り、見出しが `WAITING FOR RADIO` → `SCANNING` になり `SCAN BUSY` が出ないこと |
+| (m) | 中断の後の間隔 | ホームで10 s 放置 → `AUTOSYNC_START` を見てアプリ起動、を繰り返す | `AUTOSYNC_DONE aborted` の後の `AUTOSYNC_NEXT in_s=300`。何度繰り返しても `AUTOSYNC_GAVE_UP` が出ない |
+| (n) | 空きの記録 | 同期の前後 | `python tools/memlog.py --map build_wifireview/cardputer_pocketjs.map --port COM3 --check` を同期の前と `AUTOSYNC_DONE` の後で |
+
+### 11.7 確信の低い点
+
+- `AUTOSYNC_MIN_LARGEST` の16KiB（推定）。ドライバの内部の最大確保は測っていない。
+- `sntp_lock` の正しさは、「link タスクは UP 以外の状態を書いてから `tear_down()` に入る」という順序に依存する（`wifi_time.c` の現状の2経路で確認。経路を足すときはこの順序を保つこと、コメントに記した）。
+- IDF 側に残る競合: `sync_time_cb` は `s_storage` を2度読むので、deinit と tcpip スレッド上のコールバックが重なると NULL 参照の余地がある（IDF の内部、手動同期にも同じくある。今回の変更の外）。
+- 5分の中断間隔は設計値で、使い方の実測に基づかない。
