@@ -15,9 +15,20 @@
  * and from the VM segments (8-row bands) and compared pixel for pixel. The
  * adapter's limits are checked and per-frame statistics are written.
  *
+ * The demo (attract) mode, before the scripted game at MID: the idle clock
+ * is pocket.time.now(), which this harness drives (33.3 ms a frame, 100 ms
+ * to stand for dropped frames, or one jump), so 14.9 s and 15 s are exact.
+ * Three whole demos, then one cut short by a key in each scene, and a Back
+ * during a demo at the end; the player's points, race, pick, stake, next
+ * seed and the store must come through untouched, no tone, cue or
+ * storage.set may happen inside a demo, and the DEMO node (read from the
+ * panel) must blink inside a demo and be absent outside it.
+ *
  *   python3 tools/games/run_derby.py            (WSL)
  * Env: DERBY_TIER=0|2 (LIGHT or HEAVY, no replay), DERBY_PPM=<dir>,
- *      DERBY_CSV=<file>, DERBY_HEAP_LIMIT=<bytes>.
+ *      DERBY_CSV=<file>, DERBY_HEAP_LIMIT=<bytes>,
+ *      DERBY_NORMAL=<race>,<pick> (play that race by hand with that pick and
+ *      stop at the result: the reference a demo race must match).
  */
 #include "pocket_kasane.h"
 #include "pocket_input.h"
@@ -109,6 +120,15 @@ static char scene[16]="boot";
 static unsigned scene_t;
 static char finish[3][512];
 static unsigned finishes,loaded_seen,saves,go_seen,slow_at,lead_logs;
+/* Demo bookkeeping, fed by the DERBY DEMO / SCENE / PICK / TIER logs. */
+static bool in_demo;
+static unsigned demo_starts,demo_ends,demo_end_tick,picks,picks_at,tiers,tiers_at,results;
+static double now_ms=1000,dt_ms=1000.0/30,frame_ms,demo_start_ms;
+static char demo_start[160],demo_end[160],demo_path[96],demo_finish[3][512],demo_pick[3][96],demo_result[3][128];
+static char pad_seed[64],save_line[128],last_pick[96],last_result[128];
+static double demo_end_ms;
+static double at_start[3];                  /* storage.set calls, tones, cues when the demo began */
+static unsigned demo_on,demo_off,demo_px_outside;
 static int tier_env=1;   /* the app starts at MID */
 
 /* ---- the procedural oracle */
@@ -328,6 +348,11 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
 }
 
 /* ---- logs: the app's DERBY markers drive the script */
+static unsigned tones;
+static double gnum(const char *name){
+    JSValue g=JS_GetGlobalObject(ctx),v=JS_GetPropertyStr(ctx,g,name);double d=num(v);
+    JS_FreeValue(ctx,v);JS_FreeValue(ctx,g);return d;
+}
 static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *s=argc?JS_ToCString(c,argv[0]):NULL;
@@ -338,10 +363,38 @@ static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
         size_t k=sp?(size_t)(sp-n):strlen(n);
         if(k>=sizeof scene)k=sizeof scene-1;
         memcpy(scene,n,k);scene[k]=0;scene_t=0;
+        if(in_demo&&strlen(demo_path)+k+2<sizeof demo_path){strcat(demo_path," ");strcat(demo_path,scene);}
+        /* The next race the player would run: race number and seed. */
+        const char *r=strstr(s," race=");
+        if(!in_demo&&!strcmp(scene,"pad")&&r){const char *e=strstr(r," plans=");
+            snprintf(pad_seed,sizeof pad_seed,"%.*s",e?(int)(e-r):(int)strlen(r),r);}
     }
-    if(!strncmp(s,"DERBY FINISH ",13)&&finishes<3)snprintf(finish[finishes++],sizeof finish[0],"%s",s+13);
+    if(!strncmp(s,"DERBY DEMO START ",17)){
+        REQ(!in_demo);in_demo=true;demo_starts++;demo_start_ms=frame_ms;demo_path[0]=0;
+        snprintf(demo_start,sizeof demo_start,"%s",s+17);
+        at_start[0]=gnum("__sets");at_start[1]=tones;at_start[2]=gnum("__cues");
+    }
+    if(!strncmp(s,"DERBY DEMO END ",15)){
+        REQ(in_demo);in_demo=false;demo_ends++;demo_end_tick=tick;demo_end_ms=frame_ms;
+        snprintf(demo_end,sizeof demo_end,"%s",s+15);
+        /* Silent and unsaved: nothing reached the speaker or the store. */
+        REQ(gnum("__sets")==at_start[0]&&tones==at_start[1]&&gnum("__cues")==at_start[2]);
+        /* The player's points, race, pick and stake, exactly as put aside. */
+        if(strcmp(demo_start,demo_end))FAIL("demo changed the player:\n  start %s\n  end   %s",demo_start,demo_end);
+    }
+    if(!strncmp(s,"DERBY PICK ",11)){picks++;picks_at=tick;
+        if(in_demo){if(demo_starts<=3)snprintf(demo_pick[demo_starts-1],sizeof demo_pick[0],"%s",s+6);}
+        else snprintf(last_pick,sizeof last_pick,"%s",s+6);}
+    if(!strncmp(s,"DERBY RESULT ",13)){results++;
+        if(in_demo){if(demo_starts<=3)snprintf(demo_result[demo_starts-1],sizeof demo_result[0],"%s",s+6);}
+        else snprintf(last_result,sizeof last_result,"%s",s+6);}
+    if(!strncmp(s,"DERBY TIER",10)){tiers++;tiers_at=tick;}
+    if(!strncmp(s,"DERBY FINISH ",13)){
+        if(in_demo){if(demo_starts<=3)snprintf(demo_finish[demo_starts-1],sizeof demo_finish[0],"%s",s+13);}
+        else if(finishes<3)snprintf(finish[finishes++],sizeof finish[0],"%s",s+13);
+    }
     if(!strncmp(s,"DERBY LOADED",12))loaded_seen++;
-    if(!strncmp(s,"DERBY SAVE",10))saves++;
+    if(!strncmp(s,"DERBY SAVE",10)){saves++;snprintf(save_line,sizeof save_line,"%s",s+6);}
     if(!strncmp(s,"DERBY GO",8)){go_seen++;if(strstr(s,"LOADSTALL"))framefails++;}
     if(!strncmp(s,"DERBY SLOW",10))slow_at=tick;
     if(!strncmp(s,"DERBY LEAD",10))lead_logs++;
@@ -349,7 +402,6 @@ static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv
     JS_FreeCString(c,s);
     return JS_UNDEFINED;
 }
-static unsigned tones;
 static JSValue js_tone(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;(void)argv;tones++;return JS_UNDEFINED;
 }
@@ -397,14 +449,37 @@ static void ppm(const char *tag){
 static size_t heap_live_peak;
 static size_t heap_used(void){JSMemoryUsage m;JS_ComputeMemoryUsage(rt,&m);return (size_t)m.malloc_size;}
 
+/* The DEMO text node's box and colour (0xfffb96ff in RGB565), read back from
+ * the panel: the only way to see what the view actually showed. */
+#define DEMO_PX 0xffd2u
+static unsigned demo_pixels(void){
+    unsigned n=0;
+    for(int y=109;y<120;y++)for(int x=212;x<238;x++)n+=panel[y*240+x]==DEMO_PX;
+    return n;
+}
+static unsigned refs_max,refs_pad_max,cmds_max;
+static double eval_num(const char *expr){
+    JSValue v=JS_Eval(ctx,expr,strlen(expr),"<num>",JS_EVAL_TYPE_GLOBAL);double d=num(v);JS_FreeValue(ctx,v);return d;
+}
+
 /* One turn: pump keys, frame(buttons), present. */
 static void frame(unsigned buttons){
     pocket_input_pump(0);
     frame_regs=0;
-    char call[32];snprintf(call,sizeof call,"__turn=1;frame(%u)",buttons);
+    frame_ms=round(now_ms*1000)/1000;   /* what the guest reads (%.3f) */
+    char call[64];snprintf(call,sizeof call,"__turn=1;__now=%.3f;frame(%u)",now_ms,buttons);
+    now_ms+=dt_ms;
     eval(call,strlen(call),"frame.js");
     if(frame_regs>frame_reg_max)frame_reg_max=frame_regs;
     present((uint64_t)tick*33333u);
+    unsigned dp=demo_pixels();
+    if(in_demo){if(dp>20)demo_on++;else{REQ(!dp);demo_off++;}}
+    /* The Back turn ends a demo without drawing: the app is leaving. */
+    else if(dp&&!(buttons&0x2000))demo_px_outside++;
+    unsigned r=(unsigned)gnum("__refs"),cm=(unsigned)eval_num("kasane.stats().displayed.commands");
+    if(r>refs_max)refs_max=r;
+    if(!strcmp(scene,"pad")&&r>refs_pad_max)refs_pad_max=r;
+    if(cm>cmds_max)cmds_max=cm;
     size_t h=heap_used();(void)h;
     JS_RunGC(rt);
     h=heap_used();if(h>heap_live_peak)heap_live_peak=h;
@@ -414,6 +489,110 @@ static void tap(const char *k){edge(k,true);frame(0);edge(k,false);frame(0);}
 static void run_until(const char *s,unsigned limit){
     unsigned n=0;
     while(strcmp(scene,s)){frame(0);if(++n>limit)FAIL("scene %s not reached from %s",s,scene);}
+}
+
+/* ---- the demo */
+static const char *const DEMO_PATH=" pad gate race photo res";
+static char last_end[160];
+static void wait_start(void){
+    unsigned n0=demo_starts,i=0;
+    while(demo_starts==n0){frame(0);if(++i>2000)FAIL("no demo");}
+}
+/* Idle has been counting since the demo ended: one frame 15 s later starts
+ * the next (the clock may jump; only the wall clock counts). */
+static void jump_start(void){
+    now_ms+=15000;
+    unsigned n0=demo_starts;frame(0);REQ(demo_starts==n0+1);
+    /* Nothing touched the player between two demos. */
+    if(strcmp(demo_start,last_end))FAIL("player changed between demos:\n  %s\n  %s",last_end,demo_start);
+}
+static size_t pad_heap[16];
+static unsigned pad_plans[16],pads;
+/* After a demo: back at the paddock with the player's next race. */
+static void after_demo(const char *seed0){
+    snprintf(last_end,sizeof last_end,"%s",demo_end);
+    REQ(!strcmp(scene,"pad"));
+    for(unsigned i=0;i<30;i++)frame(0);
+    REQ(!strcmp(scene,"pad")&&!in_demo);
+    if(strcmp(pad_seed,seed0))FAIL("next race changed: %s -> %s",seed0,pad_seed);
+    JS_RunGC(rt);
+    if(pads<16){pad_heap[pads]=heap_used();pad_plans[pads++]=live_plans;}
+    printf("  after demo %u: plans live %u, guest heap after GC %zu\n",demo_ends,live_plans,heap_used());
+}
+static void full_demo(const char *seed0,bool shots){
+    unsigned e0=demo_ends,i=0;
+    while(demo_ends==e0){
+        frame(0);
+        if(shots){
+            if(!strcmp(scene,"pad")&&scene_t==5)ppm("demo_on");
+            if(!strcmp(scene,"pad")&&scene_t==20)ppm("demo_off");
+            if(!strcmp(scene,"race")&&scene_t==385)ppm("demo_race");
+            if(!strcmp(scene,"res")&&scene_t==40)ppm("demo_res");
+        }
+        if(++i>4000)FAIL("demo did not end");
+    }
+    REQ(!strcmp(demo_path,DEMO_PATH));
+    after_demo(seed0);
+}
+static void demo_phase(void){
+    char seed0[64];snprintf(seed0,sizeof seed0,"%s",pad_seed);
+    /* 1. The idle clock: a held key (q, which the game ignores) and a tap
+     * shorter than a frame (r, pressed and released between two turns)
+     * both restart it; 14.9 s does not start a demo, the 15 s frame does. */
+    edge("q",true);frame(0);edge("q",false);
+    const double t0=frame_ms;
+    while(now_ms<=t0+5000)frame(0);
+    ppm("title");
+    while(now_ms<=t0+14000)frame(0);
+    edge("r",true);edge("r",false);frame(0);
+    const double t1=frame_ms;
+    while(now_ms<=t1+14900)frame(0);
+    REQ(!demo_starts&&frame_ms>t0+15000);
+    wait_start();
+    printf("  demo 1 started %.1f ms after the last key (frame %.1f ms)\n",demo_start_ms-t1,dt_ms);
+    REQ(demo_start_ms-t1>=15000-1e-6&&demo_start_ms-t1<15000+dt_ms);
+    /* 2. A whole demo, normal speed. */
+    full_demo(seed0,true);
+    /* 3. At 10 fps the idle is still 15 s of wall clock, not 450 frames. */
+    dt_ms=100;
+    wait_start();
+    printf("  demo 2 started %.1f ms after demo 1 ended (frame %.1f ms)\n",demo_start_ms-demo_end_ms,dt_ms);
+    REQ(demo_start_ms-demo_end_ms>=15000-1e-6&&demo_start_ms-demo_end_ms<15000+dt_ms+1e-6);
+    if(strcmp(demo_start,last_end))FAIL("player changed between demos");
+    dt_ms=1000.0/30;
+    full_demo(seed0,false);
+    jump_start();
+    full_demo(seed0,false);
+    /* 4. A key anywhere ends the demo that frame, and is spent doing so:
+     * d (pick), tab (TIER), the pad bits of frame(buttons), 1 (PICK, or
+     * NEXT RACE with a save), e (stake). */
+    static const struct {const char *scene;unsigned at;const char *key;unsigned buttons;} CUT[]={
+        {"pad",20,"d",0},{"gate",5,"tab",0},{"race",130,NULL,0x80},{"race",0,"1",0},{"photo",30,"e",0},{"res",40,"1",0}};
+    for(unsigned c=0;c<sizeof CUT/sizeof CUT[0];c++){
+        jump_start();
+        const unsigned s0=slow_at;unsigned i=0;
+        for(;;){
+            bool here=!strcmp(scene,CUT[c].scene)&&(CUT[c].at?scene_t==CUT[c].at:slow_at!=s0&&tick>=slow_at+10);
+            if(here)break;
+            frame(0);if(++i>4000)FAIL("cut %u: %s not reached",c,CUT[c].scene);
+        }
+        const unsigned p0=picks,t0_=tiers,e0=demo_ends;const double w0=gnum("__sets");
+        if(CUT[c].key){edge(CUT[c].key,true);frame(0);}else frame(CUT[c].buttons);
+        REQ(demo_ends==e0+1&&demo_end_tick==tick-1&&!strcmp(scene,"pad"));
+        if(CUT[c].key)edge(CUT[c].key,false);
+        for(unsigned k=0;k<5;k++)frame(0);
+        REQ(picks==p0&&tiers==t0_&&gnum("__sets")==w0&&!strcmp(scene,"pad"));
+        printf("  cut %u: %s frame %u, %s\n",c,CUT[c].scene,CUT[c].at,CUT[c].key?CUT[c].key:"buttons 0x80");
+        after_demo(seed0);
+    }
+    /* No growth over the demos: plans and the guest heap at the paddock. */
+    for(unsigned i=1;i<pads;i++){
+        REQ(pad_plans[i]==pad_plans[0]);
+        if(pad_heap[i]>pad_heap[0]+1024)FAIL("guest heap grows over demos: %zu -> %zu",pad_heap[0],pad_heap[i]);
+    }
+    REQ(demo_on>0&&demo_off>0&&!demo_px_outside);
+    for(unsigned i=0;i<3;i++)printf("DEMO_FINISH %u %s\nDEMO_PICK %u %s\nDEMO_RESULT %u %s\n",i+1,demo_finish[i],
+                                   i+1,demo_pick[i],i+1,demo_result[i]);
 }
 
 /* The device interrupts a source evaluation after 2 s (app_session.c). The
@@ -430,18 +609,22 @@ static const char PRELUDE[]=
     "P.unregister=function(h){U.call(P,h);__unreg(h)};"
     "P.beginFrame=function(c,s){const r=s===undefined?B.call(P,c):B.call(P,c,s);__begin(c);return r};"
     "P.draw=function(h,i){D.call(P,h,i);__draw(h,i)};"
-    "P.commit=function(){C.call(P);__commit()};})();"
-    "globalThis.__turn=0;"
-    "globalThis.__store={'derby.v1':{v:1,pts:1500,race:3}};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,"
+    "P.commit=function(){C.call(P);__commit()};"
+    /* Count the draw references one replace() exposes (the limit is 32). */
+    "const V=kasane,X=V.replace;V.replace=function(f){return X.call(V,tx=>{let n=0;"
+    "for(const m of['text','rect','image']){const o=tx[m];tx[m]=function(a){n++;return o.call(tx,a)}}"
+    "f(tx);__refs=n})};})();"
+    "globalThis.__turn=0;globalThis.__now=0;globalThis.__refs=0;globalThis.__sets=0;globalThis.__cues=0;"
+    "globalThis.__store={'derby.v1':{v:1,pts:1500,race:__race}};"
+    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,time:{now:()=>__now},"
     /* The device samples the native heap at the start of a turn, so while the
      * source evaluates internalFreeBytes is null (2026-09-30: a startup loop
      * waiting on it spun into the 2 s evaluation deadline). Same here. */
     "capabilities:{get:n=>({name:n,supported:true,available:true})},"
     "memory:{info:()=>({internalFreeBytes:__turn?40000:null})},"
-    "audio:{cue:()=>true,tone:s=>{__tone(s.frequencyHz);return Promise.resolve()}},"
+    "audio:{cue:()=>{__cues++;return true},tone:s=>{__tone(s.frequencyHz);return Promise.resolve()}},"
     "storage:{get:k=>Promise.resolve(k in __store?{value:JSON.parse(JSON.stringify(__store[k])),revision:1}:null),"
-    "set:(k,v)=>{__store[k]=JSON.parse(JSON.stringify(v));return Promise.resolve({revision:1})}}};";
+    "set:(k,v)=>{__sets++;__store[k]=JSON.parse(JSON.stringify(v));return Promise.resolve({revision:1})}}};";
 
 int main(int argc,char **argv){
     const char *path=argc>1?argv[1]:"apps/derby/derby_watch.js";
@@ -463,6 +646,11 @@ int main(int argc,char **argv){
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
+    /* DERBY_NORMAL=<race>,<pick>: the stored race is the demo's, played by hand. */
+    unsigned normal_race=0,normal_pick=0;
+    if(getenv("DERBY_NORMAL")&&sscanf(getenv("DERBY_NORMAL"),"%u,%u",&normal_race,&normal_pick)!=2)return 2;
+    char race_js[48];snprintf(race_js,sizeof race_js,"globalThis.__race=%u",normal_race?normal_race:3u);
+    eval(race_js,strlen(race_js),"race.js");
     eval(PRELUDE,strlen(PRELUDE),"prelude.js");
     JS_RunGC(rt);
     const size_t before=cur_bytes;peak_bytes=cur_bytes;
@@ -494,6 +682,19 @@ int main(int argc,char **argv){
     REQ(loaded_seen==1);                    /* the stored points and race number */
     /* Paddock: let the plans load and the odds settle, cycle the tier. */
     for(unsigned i=0;i<20;i++)frame(0);
+    if(normal_race){
+        /* By hand, with the demo's pick and its stake (100, the default). */
+        for(unsigned i=1;i<normal_pick;i++)tap("d");
+        tap("1");
+        run_until("res",4000);
+        printf("NORMAL_FINISH %s\nNORMAL_PICK %s\nNORMAL_RESULT %s\n",finish[0],last_pick,last_result);
+        bool ok=!exceptions&&!bad_present&&!framefails&&finishes==1;
+        pocket_input_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+        printf("%s\n",ok?"DERBY_HOST PASS":"DERBY_HOST FAIL");
+        return ok?0:1;
+    }
+    bool full=tier_env==1;
+    if(full)demo_phase();
     unsigned taps=tier_env==1?3:(unsigned)(tier_env+2)%3;   /* tab cycles LIGHT MID HEAVY */
     for(unsigned i=0;i<taps;i++)tap("tab");
     for(unsigned i=0;i<30;i++)frame(0);
@@ -507,7 +708,6 @@ int main(int argc,char **argv){
     run_until("race",400);
     frame(0);frame(0);ppm("start");
     /* Race: WIDE, then CLOSE on the pick, FIELD, WIDE again. */
-    bool full=tier_env==1;
     unsigned lead_shot=0;
     while(!strcmp(scene,"race")){
         if(scene_t==200)edge("/",true);
@@ -545,14 +745,26 @@ int main(int argc,char **argv){
         tap("1");
         run_until("pad",10);
         for(unsigned i=0;i<40;i++)frame(0);
+        /* Back in the middle of a demo race: the save turn writes the
+         * player's points and race, never the demo's. */
+        now_ms+=15000;frame(0);REQ(in_demo);
+        run_until("race",400);
+        for(unsigned i=0;i<200;i++)frame(0);
+        const unsigned e0=demo_ends;
         frame(0x2000);                      /* Back: the save turn */
-        REQ(saves==1);
+        REQ(saves==1&&demo_ends==e0+1&&!in_demo);
+        if(strcmp(save_line,"SAVE points=1350 race=4"))FAIL("Back saved %s",save_line);
     }
     if(getenv("DERBY_MEMDUMP")){JS_RunGC(rt);JSMemoryUsage m;JS_ComputeMemoryUsage(rt,&m);JS_DumpMemoryUsage(stdout,&m,rt);}
     JSValue gs=JS_GetGlobalObject(ctx),store=JS_GetPropertyStr(ctx,gs,"__store"),rec=JS_GetPropertyStr(ctx,store,"derby.v1");
     JSValue js=JS_JSONStringify(ctx,rec,JS_UNDEFINED,JS_UNDEFINED);const char *jss=JS_ToCString(ctx,js);
     printf("stored %s\n",jss?jss:"?");
+    if(full&&(!jss||strcmp(jss,"{\"v\":1,\"pts\":1350,\"race\":4}")))FAIL("store after the demos: %s",jss?jss:"?");
     if(jss)JS_FreeCString(ctx,jss);
+    printf("demo: %u started, %u ended; DEMO node shown %u frames, hidden %u inside demos, %u frames outside with it; "
+           "view refs max %u/32 (paddock %u), commands max %u/80\n",demo_starts,demo_ends,demo_on,demo_off,
+           demo_px_outside,refs_max,refs_pad_max,cmds_max);
+    REQ(!demo_px_outside&&refs_max<=32&&cmds_max<=80);
     JS_FreeValue(ctx,js);JS_FreeValue(ctx,rec);JS_FreeValue(ctx,store);JS_FreeValue(ctx,gs);
 
     printf("\nscene  frames draws_max seg_max seg_avg raster_max raster_avg draw_raster_max draw_steps_max "
@@ -592,7 +804,8 @@ int main(int argc,char **argv){
            "live peak after GC %zu, whole-run peak %zu; device limit 163840\n",sizeof(void *)*8,before,eval_peak,
            eval_peak-before,after_eval,heap_live_peak,peak_bytes);
     bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0x7fffu&&frame_reg_max<=1&&go_seen>=1;
-    if(full)pass=pass&&finishes==2&&saves==1&&tones>0;
+    if(full)pass=pass&&finishes==2&&saves==1&&tones>0&&demo_starts==10&&demo_ends==10;
+    else pass=pass&&!demo_starts;
     if(csv)fclose(csv);
     pocket_input_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",pass?"DERBY_HOST PASS":"DERBY_HOST FAIL");

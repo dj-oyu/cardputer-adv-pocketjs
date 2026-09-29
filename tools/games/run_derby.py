@@ -8,11 +8,19 @@ then runs:
      identically, the next race and the Back turn; every procedural draw
      through the plan / debug-step / single-step VM oracle and every frame
      compared pixel for pixel;
-  2. one race at LIGHT and one at HEAVY (same cameras) for the statistics.
+     before the game, the demo (attract) mode: the idle clock, three whole
+     demos, a key in each scene, Back inside a demo;
+  2. each of the first three demo races again, played by hand from the same
+     stored race with the same pick: FINISH / PICK / RESULT must be the same
+     strings (the demo runs the game, not a copy of it);
+  3. one race at LIGHT and one at HEAVY (same cameras, no demo) for the
+     statistics; the player's race must finish identically in all three.
 --m32 builds for i386 with the device's 8-byte JSValue and 4-byte pointers
 (tools/vmtest/m32_sysroot.sh) so the guest heap figures match the firmware's
 object sizes; the default 64-bit build runs with ASan/UBSan. --ppm writes the
-composited panels and docs/apps/derby-watch-preview.png. WSL/Linux only; no
+composited panels, docs/apps/derby-watch-preview.png (its paddock panel now
+comes after the demos, so it differs from the committed sheet there) and
+docs/apps/derby-watch-demo-preview.png. WSL/Linux only; no
 device and no serial port.
 """
 from __future__ import annotations
@@ -96,17 +104,45 @@ def png(path: Path, images: list[bytes], columns: int) -> None:
 
 
 ORDER = ["pad", "gate", "start", "wide", "close", "field", "lead", "slow", "photo", "photo_zoom", "result"]
+DEMO_ORDER = ["title", "demo_on", "demo_off", "demo_race", "demo_res"]
 
 
-def sheet(folder: Path, out: Path) -> None:
+def sheet(folder: Path, out: Path, order: list[str], columns: int) -> None:
     header = b"P6\n240 135\n255\n"
     shots = {}
     for f in sorted(folder.glob("derby_*.ppm")):
         tag = f.stem.split("_", 2)[2]
         shots.setdefault(tag, f.read_bytes()[len(header):])
-    images = [shots[t] for t in ORDER if t in shots]
-    png(out, images, 4)
-    print(f"Wrote {out} ({len(images)} panels: {', '.join(t for t in ORDER if t in shots)})")
+    images = [shots[t] for t in order if t in shots]
+    png(out, images, columns)
+    print(f"Wrote {out} ({len(images)} panels: {', '.join(t for t in order if t in shots)})")
+
+
+def run(binary: Path, env: dict) -> str:
+    """Run the harness, echo its output, fail on a non-zero exit."""
+    p = subprocess.run([str(binary)], cwd=ROOT, env=env, capture_output=True, text=True)
+    print(p.stdout, end="", flush=True)
+    if p.returncode:
+        print(p.stderr, end="")
+        raise SystemExit(f"harness failed ({p.returncode})")
+    return p.stdout
+
+
+def check_demo_matches_play(binary: Path, env: dict, out: str) -> None:
+    """Each demo race, played again by hand from the same stored race with the
+    same pick: the FINISH (order, full-precision finish times, margin), PICK
+    and RESULT lines must be the same strings."""
+    for n in (1, 2, 3):
+        demo = {k: re.search(rf"^DEMO_{k} {n} (.*)$", out, re.M).group(1) for k in ("FINISH", "PICK", "RESULT")}
+        race = int(re.search(r"race=(\d+)", demo["FINISH"]).group(1))
+        pick = int(re.match(r"PICK (\d+)", demo["PICK"]).group(1))
+        print(f"==== demo {n} by hand: race {race}, pick {pick}", flush=True)
+        text = run(binary, dict(env, DERBY_NORMAL=f"{race},{pick}"))
+        for k, v in demo.items():
+            mine = re.search(rf"^NORMAL_{k} (.*)$", text, re.M).group(1)
+            if mine != v:
+                raise SystemExit(f"demo {n} {k} differs from play:\n  demo {v}\n  play {mine}")
+        print(f"demo {n} = play: {demo['FINISH']}")
 
 
 def main() -> None:
@@ -126,6 +162,7 @@ def main() -> None:
     env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
     env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
     runs = [1] if args.heap_limit else [1, 0, 2]
+    finish = {}
     for tier in runs:
         e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}.csv"))
         if args.heap_limit:
@@ -137,9 +174,17 @@ def main() -> None:
                 old.unlink()
             e["DERBY_PPM"] = str(ppm)
         print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]})", flush=True)
-        subprocess.run([str(binary)], cwd=ROOT, env=e, check=True)
+        out = run(binary, e)
+        finish[tier] = re.search(r"^finish: (.*)$", out, re.M).group(1)
+        if tier == 1 and not args.heap_limit:
+            check_demo_matches_play(binary, env, out)
+    # MID ran ten demos before its first race, LIGHT and HEAVY none: the
+    # player's race must not notice.
+    if len(set(finish.values())) > 1:
+        raise SystemExit(f"the player's race differs between runs: {finish}")
     if args.ppm:
-        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png")
+        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
+        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
 
 
 if __name__ == "__main__":
