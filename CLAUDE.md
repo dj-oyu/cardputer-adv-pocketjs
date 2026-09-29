@@ -65,7 +65,17 @@ JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EM
 - **`main/hal/keymap.c` は素の `` ` `` `;` `,` `.` `/` に `nav` を立てる。** テキストを受ける画面は `k->text` だけを読み `k->nav` を無視する（`codeedit.c` / `editor.c` / `wifi_ui.c` がそうしている）。
 - **命令キャッシュのアラインメントで、同じカーネルがビルド間で15%動く。** それ未満の差を主張するなら同一バイナリでの比較が要る。
 - **`board_capture` は byte swap と転送の前にバッファを写し、MISOは未配線。** 表示が正しいことをソフトウェアだけでは確認できない。物理確認を依頼する。
-- **Wi-Fiをリンクするだけで空きヒープが約37KiB減る。** 内訳は `.bss` だけでなく `.data` とIRAM常駐コード（S3ではDRAMと同じプール）。`esp_netif_deinit()` はIDF v6.0.1で `ESP_ERR_NOT_SUPPORTED` なので、一度無線を起動すると約4.8KiBは戻らない。
+- **Kasane のシーンには上限がある: ref 32個、アプリのコマンド 80個**（cache の instance も、中の矩形の数だけコマンドを使う）。`patch` ではノードを足せない（追加は `replace` のときだけ）。`setRect` は clip を動かさないので、動かす ref には行全体の clip を渡す。LCD CATCH と DERBY WATCH は、ここで設計を変えた。
+- **ソースの評価には2秒の期限があり、評価中の `pocket.memory.info().internalFreeBytes` は `null`**（ネイティブ heap の標本はターンの始めにしか採られない）。評価中に、空き heap の門で待つループを書かない（DERBY WATCH はこれで起動に失敗した。host の台本が固定値を返していたので、host では見つからなかった。host の台本は、実機で `null` になる値を、`null` で返す）。
+- **評価のピークは、評価後の定常の約2倍。** QuickJS は、関数の解析用の構造を、一番外側のスクリプトが確定するまで、まとめて保つ（`js_create_function`）。クロージャ1つで約 0.3〜0.5 KB のピークを使い、コメントは効かない。DERBY WATCH の評価の余裕は、実機で 3.8〜5.6 KB。**文字列のイテレータ（`[...'abc']`、`for...of`、分割代入、`Array.from(str)`）は、修正前の実機では壊れていた**（上流 quickjs-ng の `js_string_iterator_next` が `int *` 経由で `uint32_t` を書き、Xtensa の GCC が strict aliasing で書き込みを消した。host では `uint32_t` が `unsigned int` なので再現しない。修正 `f937388`、docs/vm/spread-eval-oom.md。同種の箇所が quickjs.c にあと6つ残る）。
+- **ゲームのキーは E/A/S/D と `;` `,` `.` `/` の8個。** キーボード行列のゴーストで、`f` `space` `enter` `z` は、他のキーの同時押しで押されたことになる（実機測定。docs/platform/keystate.md）。
+- **Wi-Fiをリンクするだけで空きヒープが約37KiB減る。** 内訳は `.bss` だけでなく `.data` とIRAM常駐コード（S3ではDRAMと同じプール）。`esp_netif_deinit()` はIDF v6.0.1で `ESP_ERR_NOT_SUPPORTED` なので、一度無線を起動すると約4.8KiBは戻らない。自動時刻同期（設定の AUTO TIME SYNC、既定 ON）が入ったので、同期が走ったブートは毎回これを払う（docs/platform/wifi-autostart.md。ゲームのネイティブ heap への影響は未測定）。
+
+## 並行作業（サブエージェントと実機）
+
+- サブエージェントは、`vm/main` から切った worktree（`.claude/worktrees/<名前>`、ブランチ `vm/<題目>`）で動かす。統合は `git merge --no-ff`、終わったら worktree とブランチを消す。新しい worktree では、最初に `python tools/prepare_dependencies.py`。WSL の git は worktree の gitdir を読めないことがあり、`tools/kasane_contract/run.sh` の baseline の読み込みで止まる（スクリプトの注記どおり、baseline を `.cache` に置く）。
+- 実機（COM3）を複数のエージェントが使うときは、`mkdir` で取るロックのディレクトリ（作業用の一時領域に置く）で順番を取り、1回の保持は10分まで（30分より古いロックは置き去り）。使い終わったら通常 image に戻し、変えた設定（音量など）を元へ戻す。
+- **実機が要る検証を、host だけで済んだことにしない。** 実機だけで起きた不具合が、すでにある（評価中の `null`、文字列のスプレッド、面のフレームの連続領域）。
 
 ## 測定と主張
 
