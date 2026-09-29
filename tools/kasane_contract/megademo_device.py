@@ -29,7 +29,8 @@ BAD = (b"Guru Meditation", b"START_FAILED", b"RUNAWAY", b"PRESENTER_STEP_FAILED"
 SCENE = re.compile(r"MEGADEMO SCENE (\w+) tier=(\d) plans=(\d+) freed=(\d+) registered=(\d+)")
 MDT = re.compile(r"MDT (\d+) (\w) t=(\d+) js=(\d+) rn=(\d+) sd=(\d+) by=(\d+) bd=(\d+) pr=(\d+) "
                  r"reg=(\d+)/(\d+) prep=(\d+)/(\d+) un=(\d+) draw=(\d+)/(\d+)/(\d+) band=(\d+)/(\d+) "
-                 r"free=(\d+) lg=(\d+) k=([0-9a-f]+)/([0-9a-f]+)(?: mn=(\d+))?(?: gu=(\d+))?")
+                 r"free=(\d+) lg=(\d+) k=([0-9a-f]+)/([0-9a-f]+)(?: mn=(\d+))?(?: gu=(\d+))?"
+                 r"(?: cv=(\d+)/(\d+)/(\d+))?")
 MDTJ = re.compile(r"MDTJ js=(\d+) cost_us=(\d+)")
 PAINT = re.compile(r"\((\d+)\) kasane: KASANE_PAINT turn_ms=([0-9.]+) render_ms=([0-9.]+) send_ms=([0-9.]+) "
                    r"bytes=(\d+) bands=(\d+)")
@@ -37,7 +38,7 @@ VARIANT = re.compile(r"MDX (?:zv=\d+ )?(.*)$")
 MEM = re.compile(r"MEM free=(\d+) largest=(\d+) js=(\d+)")
 FIELDS = ("seq", "kind", "t", "js", "rn", "sd", "by", "bd", "pr", "reg_n", "reg_us", "prep_us",
           "prep_max", "un", "draw_n", "draw_us", "draw_max", "band_n", "band_us", "free", "lg",
-          "btn", "fed", "mn", "gu")
+          "btn", "fed", "mn", "gu", "cm", "vw", "sp")
 
 
 def open_port(name: str):
@@ -175,6 +176,13 @@ def analyze(args) -> int:
                 row = dict(zip(FIELDS, m.groups()))
                 row["mn"] = row["mn"] or row["free"]
                 row["gu"] = row["gu"] or 0
+                for name in ("cm", "vw", "sp"):
+                    row[name] = row[name] or 0
+                # Frames this visit had completed when the turn began, and
+                # the visit before it: a split present at frame 0 pairs the
+                # new scene's image with the previous scene's view.
+                row["vf"] = visits[-1][1] if visits else 0
+                row["prev"] = visits[-2][0][1] if len(visits) > 1 else "-"
                 for name in FIELDS:
                     if name not in ("kind", "btn", "fed"):
                         row[name] = int(row[name])
@@ -265,6 +273,12 @@ def summarize_turns(turns, jheap, visits) -> None:
     if jheap:
         print(f"  guest heap samples: n={len(jheap)} max={max(j for _, j, _ in jheap)} "
               f"cost_us max={max(c for _, _, c in jheap)}")
+    split = [(key, row) for key, row in turns if row["sp"]]
+    if any("cm" in r and r["cm"] for _, r in turns):
+        first = [f"{row['prev']}->{key[1]}@{key[0]}({row['kind']})" for key, row in split if row["vf"] == 0]
+        print(f"  split presents (commit shown before its replace/patch): turns={len(split)} "
+              f"presents={sum(r['sp'] for _, r in split)} at a visit's first frame={len(first)}"
+              + (": " + ", ".join(first) if first else ""))
     loops = defaultdict(int)
     for k, n, _ in visits[:-1]:
         loops[k] = max(loops[k], n)

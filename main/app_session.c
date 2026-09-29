@@ -257,7 +257,8 @@ static void mdt_emit(void) {
     size_t gu=0,gl=0;
     if(guest) JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),&gu,&gl);
     ESP_LOGI("app","MDT %u %c t=%lld js=%u rn=%u sd=%u by=%u bd=%u pr=%u "
-             "reg=%u/%u prep=%u/%u un=%u draw=%u/%u/%u band=%u/%u free=%u lg=%u k=%x/%x mn=%u gu=%u",
+             "reg=%u/%u prep=%u/%u un=%u draw=%u/%u/%u band=%u/%u free=%u lg=%u k=%x/%x mn=%u gu=%u "
+             "cv=%u/%u/%u",
              mdt_seq++,mdt.kind,(long long)mdt.began,(unsigned)mdt.js_us,
              (unsigned)mdt.render_us,(unsigned)mdt.send_us,(unsigned)mdt.bytes,
              (unsigned)mdt.bands,(unsigned)mdt.presents,
@@ -268,7 +269,9 @@ static void mdt_emit(void) {
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
              (unsigned)mdt.btn,(unsigned)mdt.fed,
              (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
-             (unsigned)gu);
+             (unsigned)gu,(unsigned)p.commit_n,(unsigned)p.view_n,(unsigned)p.split_n);
+    // cv: commit()s, replace()/patch()es, and presents that showed a commit
+    // whose view update had not run yet (the new image under the old view).
     // mn is the lowest free heap inside this turn (and the print above), not
     // since boot: a turn's transient peak is what an allocation meets, and
     // the boundary values above miss it. Restarted every turn.
@@ -1958,7 +1961,7 @@ esp_err_t app_tick(uint32_t buttons) {
         // BUSY (backlog R3a: seen on the device right after an OOM's long
         // collection got a frame parked). Give the ticket its display turn
         // here, as the top-of-turn gate does, and hold this turn's keys for
-        // the next one. Back is not held: it is the guest's last save turn.
+        // the next one.
         //
         // A procedural commit() is the same case without a ticket: it marks
         // the frame pending and invalidates, and the next frame()'s
@@ -1966,9 +1969,22 @@ esp_err_t app_tick(uint32_t buttons) {
         // possible since a parked frame keeps its procedural frame
         // (end_guest_turn()); measured on the device as one lost frame after
         // every frame that spanned a park.
-        if(!leaving&&(pocket_kasane_has_submission()||pocket_proc_pending())) {
-            deferred_buttons|=buttons;
-            return present_frame();
+        //
+        // Back is not held: it is the guest's last save turn, and there is no
+        // later turn to deliver it on. It is the turn that meets this most
+        // surely, too -- its continuation cannot yield, so a parked frame()
+        // always runs to its commit() here. So Back gets the same present,
+        // then goes on to frame(0x2000) in this turn; without it an app that
+        // opens its frame first (MEGADEMO does) lost the save to BUSY and the
+        // session ended EXECUTION FAILED. The present's time comes out of the
+        // leave budget's job allowance, not the save: frame() is never cut.
+        if(pocket_kasane_has_submission()||pocket_proc_pending()) {
+            if(!leaving) {
+                deferred_buttons|=buttons;
+                return present_frame();
+            }
+            esp_err_t shown=present_frame();
+            if(shown!=ESP_OK) return shown;
         }
     }
     continuation_turns=0;
@@ -2168,6 +2184,7 @@ static esp_err_t present_frame(void) {
             mdt.render_us+=whole-display_state.sent_us;mdt.send_us+=display_state.sent_us;
             mdt.bytes+=stats.transferred_bytes;mdt.bands=ksn_render_band_count(stats.bands);
             mdt.presents++;
+            pocket_proc_trace_presented();
 #endif
 #if KASANE_STRESS_GRAD_AB
             grad_ab_bytes+=stats.transferred_bytes;

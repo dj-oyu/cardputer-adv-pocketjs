@@ -32,10 +32,14 @@ void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
 #include "esp_cpu.h"
 #include "esp_timer.h"
 static pocket_proc_trace trace;
+/* Survives trace_take(): a commit and its view update can be turns apart. */
+static bool trace_split;
 void pocket_proc_trace_take(pocket_proc_trace *out){
     if(out)*out=trace;
     trace=(pocket_proc_trace){0};
 }
+void pocket_proc_trace_view(void){trace.view_n++;trace_split=false;}
+void pocket_proc_trace_presented(void){if(trace_split)trace.split_n++;}
 #endif
 
 /* Slots are reusable after unregister(); handles are not (next_handle only
@@ -456,6 +460,9 @@ static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCons
     pending_surface=building_surface;
     image_band_valid=false;
     building=false;
+#ifdef KASANE_MEGADEMO_TRACE
+    trace.commit_n++;trace_split=true;
+#endif
     return JS_UNDEFINED;
 }
 typedef JSValue (*proc_js_method)(JSContext *,JSValueConst,int,JSValueConst *);
@@ -561,7 +568,7 @@ void pocket_proc_reset(void){
     image_band_count=image_band_cycles=image_span_count=image_span_cycles=0;
 #endif
 #ifdef KASANE_MEGADEMO_TRACE
-    trace=(pocket_proc_trace){0};
+    trace=(pocket_proc_trace){0};trace_split=false;
 #endif
 }
 void pocket_proc_batch_counts(uint32_t *scalar,uint32_t *pie){

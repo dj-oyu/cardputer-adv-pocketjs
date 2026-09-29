@@ -203,7 +203,9 @@
       draw(Array(k).fill(sinH)); return false; },
     () => { if (t === 0) { stat('heavy4'); log('HEAVY_START'); } draw([sinH, sinH, sinH, sinH]); return false; }
   ];
-  globalThis.frame = function () {
+  globalThis.frame = function (b) {
+    // Back's save turn opens a frame first, as MEGADEMO's frame() does.
+    if (b & 0x2000) { let m = 'OK'; try { P.beginFrame(0); } catch (e) { m = String(e); } log('LEAVE ph=' + ph + ' t=' + t + ' begin=' + m); }
     const now = L.us();
     if (st && last) { const dt = now - last; st.n++; st.sum += dt; if (dt > st.max) st.max = dt; }
     last = now;

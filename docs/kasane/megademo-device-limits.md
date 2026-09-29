@@ -175,3 +175,59 @@ host 側で変えたもの: `test_megademo_app_host.c` は `pocket.memory.info()
 - **回転を段階に含めた。** 回転は描画量ではなく読み出し方の負荷だが、実機では最も大きい単一の費用（23 ms）で、fps の下限を決めていた。
 - **1 フレーム 1 本の読み込みで、場面の頭が部分描画になる。** 旧・新を全部共存させる設計はメモリで成り立たず、切替時に一度に登録する設計は時間で成り立たない。先読みできる分は先読みし、残りを 1 本ずつにするのが両方の境界の内側に入る唯一の形だった。
 - **既定は HEAVY**（上記）。
+
+## 場面切替の最初のフレーム（`vm/leave-and-flash`、2026-09-29）
+
+ユーザーの観察: 「2周目以降の NEWS（LIMIT から戻った直後）の冒頭数フレームで、レーダーなどの旧い HUD が一瞬表示される」。仮説（コード読みのみ）は「frame() が plan の登録（1本 12〜20 ms）で 8 ms の予算を超えて park し、`H.commit()` 済みの新しい画像と、まだ `V.replace()` していない旧い view が、継続ターンの表示で重なる」だった。**この節の数値は断りのない限り実機の実測。**
+
+### 結論
+
+- **メニューから起動した MEGADEMO では、仮説の機構は起きない。** frame() は一度も park しない（診断 image、HEAVY 95 秒、2,228 ターンで park 0、JS の最長 57.5 ms でも park しない）。ソースを渡して起動するアプリは `app_session.c` の `FRAME_WRAP`（`globalThis.frame=function(){try{return f.apply(this,arguments)}…}`）を通り、本体は `Function.prototype.apply` からのネイティブ再入の床で走る。その床は `rt->current_stack_frame != NULL` なので止まってよい床にならない（vm-L2-design §11.2 D17r、§11.9「囲った経路」）。park が無いので commit と replace/patch は必ず同じホストターンに入り、表示は常に対応した組になる（計数 `cv` で「commit の後、replace/patch の前に表示した」回数 0）。
+- **LIMIT→NEWS の直後に送った画素に HUD は無い。** 2周目の NEWS の t=0〜3 を、強制再描画つきの capture（`s`）と、再描画を強制しない capture（診断 image の `S`、送った行だけを写して重ねる）の両方で見た。t=0 は背景色 0x080c 一色（NEWS の plan は空き heap の条件で1本も先読みされておらず、t=0 の draw は 0 本）、t=1 からゲート・道路…と1層ずつ現れる。t=0 は全画面 64,800 B を送っている。**ソフトウェアから見える範囲では、報告どおりの表示は再現しなかった。** パネル自身の残像（明るい LIMIT の後に暗い一色の画面が来る）を候補として挙げるが、未検証（MISO 未配線でパネルは読めない）。
+- **代わりに、場面の最初のフレームが `build()` の既定値のまま表示される不具合を見つけて直した（実測）。** replace のフレームでは `patch()` が呼ばれず、次のフレームで初めて場面の状態になる。
+  - 全画面で TWIST に入ると、1フレームだけ全画面の画像とタイトル全文が出て、次のフレームで小さな虹彩に縮み、タイトルが消えて打ち直される。
+  - 小窓（Enter で机のモニタへ縮めた状態）で場面に入ると、隠れているはずの HUD が1フレーム出る。LIMIT では得点・ランプ・**レーダー**（中身は直前の場面の面1）・プレート・メーター。TWIST ではタイトル。
+- 直し方: `V.replace(tx => (build(tx), patch(tx, f)))`。同じ transaction で `patch()` を当て、最初のフレームから場面の状態（ズームに応じた可視、虹彩、表示文字）で出す。修正後の capture で、TWIST の最初のフレームは虹彩の大きさでタイトルなし、小窓の TWIST・LIMIT は HUD なし。
+- **park できる経路では仮説の機構が実在した**ので、plan の登録を `beginFrame` の前（場面の切替の直後）へ移した。診断起動 `'J'`（`-DKASANE_PROC_DEVICE_PROBE=ON`、wrapper を通らない）では frame() が park し（約 20 秒で 263 回）、`cv` の「commit の後、replace/patch の前の表示」が 136 回、うち場面の最初のフレームで 17 回（NEWS→TWIST、TWIST→ZENITH、段階変更など）。移した後は 30 回、最初のフレームで 0 回。残り 30 回はすべて TWIST の通常フレームで、同じ view 木の前フレームの patch 状態（虹彩の大きさ）と組になる1フレームのずれ（見た目の差は小さいと推定、未検証）。メニュー起動では park しないので、この変更は現状では表示を変えない。wrapper の制約が外れた日の備え。
+
+### 仮説どおりの修正（登録を `replace` の後ろへ）を採らなかった理由
+
+- 登録は OOM で `DEGRADE` へ落ちる経路なので `try` の中に要る。`replace`/`patch` の後ろに置くと `try`/`catch` を2つにするか `catch` を関数にする必要があり、ソースが増える（ゲスト heap に効く）。
+- 次のフレームの先頭（場面の切替の直後、`beginFrame` の前）へ置くのは、フレームの並びで見れば「前フレームの replace/patch の後ろ」と同じ位置で、同じ `try` の中に収まる。park がここで起きると、表示は前のフレームの完全な組のまま。
+- 登録した plan はそのフレームから描かれる（従来は次のフレームから）。「未登録の plan の draw は飛ばす」はそのまま。場面の最初のフレームは1層多く描かれる。
+- commit と replace/patch の間に残る中断（`H.commit()` の最中に予算が尽きる、TWIST で 30 回）は、commit を replace/patch の後ろへ移しても「新しい view＋前の画像」に入れ替わるだけなので、そのままにした。切替フレームで HUD を先に隠す案は、上の `patch()` を同じ transaction で当てる修正に含まれる。
+
+### 負荷と heap（診断 image、HEAVY、95 秒。修正後の実行は Enter×2 と RIGHT/LEFT を含む）
+
+| 場面 | JS ms 中央値/p95（前→後） | 間隔 ms 中央値（前→後） | fps（前→後） | ターン内最小の空き（前→後） |
+| --- | --- | --- | --- | --- |
+| NEWS | 4.6/40.7 → 4.5/40.8 | 33.7 → 33.3 | 27.8 → 27.9 | 14,488 → 15,124 |
+| TWIST | 10.1/13.6 → 10.0/14.5 | 33.7 → 33.8 | 29.1 → 29.2 | 9,184 → 10,820 |
+| ZENITH | 8.3/13.2 → 8.3/13.4 | 55.1 → 53.4 | 18.6 → 19.4 | 6,544 → 7,572 |
+| LIMIT | 19.8/33.1 → 19.7/34.2 | 49.4 → 49.4 | 21.5 → 21.4 | 7,356 → 9,712 |
+
+- 切替のフレーム（登録と解放が同じフレーム）の間隔: 最大 63.7 → 77.7 ms、中央値 53.2 → 56.7 ms。場面の最初のフレームで plan を1本多く描くため。runaway 監視（250 ms）の半分の基準 125 ms の内側。
+- DEGRADE・OOM・runaway・Guru なし（前後とも）。park 0（前後とも）。
+- ソース 27,986 → 28,175 B（+189 B）。ゲスト heap（malloc_size）の最大 112,148 → 112,516 B。host の同じ harness で評価後 +136 B。
+- 通常 image の回帰は下の表。
+
+| 試験（通常 image） | 結果 |
+| --- | --- |
+| `tools/kasane_megademo_menu_device.py` | `MEGADEMO_RUN_1/2 PASS`、`MEGADEMO_MENU_RESTART PASS` |
+| `tools/kasane_contract/measure_megademo_menu_device.py --runs 2` | PASS。全画面 turn 9.88 ms・render 10.13 ms・send 7.24 ms（TWIST） |
+| `tools/smoke_device.py --cycles 20`（APPS のカーソルを先頭に戻してから） | `SMOKE_OK 20` |
+| `tools/stress_app.py` | `STRESS_APP_PASS` |
+| `tools/test_app_resume.py` | `TEST_APP_RESUME_OK` |
+| host: `run_megademo_app_host.py` | PASS（1,136 フレーム、例外・DEGRADE 0、ズームと段階変更を含む） |
+
+### 出所
+
+- 基準 `vm/main` a574ad4。診断 image `idf.py -B build_leaveflash_trace -DKASANE_MEGADEMO_TRACE=ON build`（修正後 2,174,896 B、SHA-256 `1d73e8ac3ee01c9e28d10bc61c69a2767f1fa38cda54722806499dd17f583915`）。通常 image `build_leaveflash`（2,173,040 B、`7045a050b70b1e510131827428294ce9f5adc97df3f21a6239a58ebdb41c46ff`）。どちらもコミット前の作業ツリーで作り、ソースは作業Aのコミットと同じ（通常 image は作業Bの修正も入っている）。修正前の値は同じツリーで JS だけ `HEAD` のものに戻して作った image。各実行のログの `RUN %u bytes` でアプリのソース長（27,986／28,175）を確かめた。
+- 回数: 前後の 95 秒を各1回、切替の capture は LIMIT→NEWS を強制あり 12 枚（t=0 は1枚）と強制なし6ターン×2回（修正前・後）、TWIST（全画面・小窓）と LIMIT（小窓）の入りを前後各1回。`'J'` 経路は前後各1回（どちらも約20秒後の ZENITH で OOM して止まる。`first_req` 504／528 B、最大連続 96／116 B。wrapper なしで park するときの heap の余裕の問題で、出荷経路ではないので追っていない）。
+- 診断 image に足した道具: `MDT` 行の `cv=commit/view/split`（commit・replace/patch の回数と、commit の後で replace/patch の前に表示した回数）と、USB の `S`（強制再描画なしで6ターン capture）。`megademo_device.py analyze` が split を場面の最初のフレームかどうかで数える。
+
+### 人が実パネルで確かめること
+
+1. 通常 image で APPS から MEGADEMO を起動し、2周目の LIMIT→NEWS（起動から約 16 秒後）の冒頭を見る。旧い HUD（左下のレーダー、左上の得点）が見えるなら、ソフトウェアは送っていないので、パネルの残像か別の経路。修正の前後で違いがあるか。
+2. Enter で小窓にしたまま TWIST・ZENITH・LIMIT に入り、場面の頭で HUD が一瞬出ないか（修正前は出ていた。capture で確認済み）。
+3. 全画面で TWIST に入った瞬間、全画面の画像とタイトルが一瞬出てから虹彩に縮む動きが消えたか。

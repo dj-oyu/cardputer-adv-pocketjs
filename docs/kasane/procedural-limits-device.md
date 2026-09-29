@@ -227,6 +227,64 @@ Kasane の view builder（`replace`/`patch` の build）は同じ関数で abort
 
 MEGADEMO（APPS から起動→全画面→小窓→全画面→Back、2回）PASS、`smoke_device.py --cycles 20` SMOKE_OK（HELLO WORLD）、`stress_app.py` PASS、`test_app_resume.py`（IMU CAL/PET/COMPANION の中断・再開・退去）PASS。
 
+## 8. Back の保存ターンで完走したフレームと `beginFrame`（`vm/leave-and-flash`、2026-09-29）
+
+独立レビュー（Fable）の指摘を、コードと実機で確かめて直した。§7 の修正（park 中のフレームを継続で確定できるようにした 4e4404c）で新しく出た失敗。
+
+### 原因（コードで確認）
+
+1. Back は `app_tick(0x2000)`。`arm_turn()` は leave で yield を切るので、park 中の frame() は継続で必ず最後まで走り、その `commit()` が面を pending にする（`pocket_proc.c` の `commit_impl`）。
+2. 継続の後の R3a の表示ゲートは `!leaving` 付きで、leave は表示せずに `run_pumps` → `frame(0x2000)` へ進む。ターン先頭のゲートは継続より前なので効かない。
+3. `frame(0x2000)` の最初の `beginFrame()` が `any_pending()` で `BUSY`（`previous frame awaits presentation or repair`）。同じフレームの `replace()`/`patch()` も、継続のフレームが出した ticket が残っていれば `BUSY`。
+
+MEGADEMO の frame() は先頭で `beginFrame` を呼び、`BUSY` を捕まえて `DEGRADE` した後の `replace()` が ticket の `BUSY` で投げるので、保存ターンが例外で終わり `main.c` の `end_run` が `EXECUTION FAILED` にする。
+
+**ただし APPS メニューから起動した MEGADEMO では起きない**（実測）。ソースを渡して起動するアプリは `app_session.c` の `FRAME_WRAP` を通り、本体が `f.apply()` のネイティブ再入の床で走るので park しない（[megademo-device-limits.md](megademo-device-limits.md) §場面切替、[../vm/backlog.md](../vm/backlog.md)）。起きるのは park できる frame() — 診断起動（`'}'` の limits probe、`'J'` の MEGADEMO）、`hello`、ジョブ（Promise handler）の中で描くアプリ — と、この wrapper の制約が外れた後のすべてのアプリ。
+
+### 修正
+
+`app_session.c` の継続直後のゲートで、leave でも pending な procedural フレームと ticket を**先に表示してから**、同じターンで `frame(0x2000)` へ進む（keys は持ち越さない。Back は止めない・押さえない、は変えていない）。表示が `ESP_OK` 以外を返したときは、ターン先頭のゲートと同じくそのまま返す。
+
+- 表示の時間は leave の予算（`VM_LEAVE_BUDGET_US`、ターン開始から 50 ms）から引かれる。leave は yield しないので frame() 自体は切られない。減るのは frame() の後のジョブの drain の枠で、残ったジョブは従来どおり stop hook の drain が受ける。予算の値は変えていない。
+- 残る穴: その表示が LCD 転送の失敗（`KSN_IO`）になると pending／repair が残り、保存フレームの `beginFrame` はまだ `BUSY`。ターン先頭のゲートが Back で受け入れている「表示の不調で保存を止めない」と同じ扱い（未測定、頻度はまれと推定）。
+
+却下した案:
+
+| 案 | 却下の理由 |
+| --- | --- |
+| leave の `beginFrame` は pending を捨てて新しい候補を受け付ける | procedural のネイティブ仕様の変更で、`pocket_proc.c` に「leave」を知らせる経路が要る。確定済みのフレームが一度も表示されずに消える。ticket 側の `replace()`/`patch()` の `BUSY` は残る |
+| Back で park 中のフレームを完走させず終了させる（`JS_VMTerminate`） | finally とそのフレームの仕事（ジョブで park したなら保存そのもの）を飛ばす。leave は鎖を完了させるという §7 と vm-L1-design §5.2 の決定に反する |
+| Back を次のターンへ持ち越す（非 leave と同じ） | 次のターンは無い（`main.c` は直後に停止を要求する）。既存コメントどおり保存が黙って落ちる |
+| 表示の後に予算を張り直す（`arm_turn` をもう一度） | 予算と watchdog の意味を変える。frame() は切られないので要らない |
+
+### 確認
+
+host:
+
+- `tools/test_session_dispatch.py`（本物の `app_tick` を抜き出して模型で動かす）: Back で継続が park 中のフレームを完走させ、commit と ticket を出したとき、`P`（表示）が `F`（`frame(0x2000)`）より前で、`frame()` が pending にも ticket にも会わない。修正前のコードではこの検査で abort することを確かめた。何も park していない Back は表示を足さない。模型の継続は、実物（`guest.c` の `jobs_pending = JS_IsJobPending(rt)`、例外で終わった継続でも読む）に合わせて「例外でもジョブが残れば仕事が残る」にした。例外で終わりジョブが残った継続は `end_turn` ではなく `park_turn`（`ACYO`）になり、そのままセッションが終わって `app_vm_prepare_stop()` が閉じる。leave でジョブが残った場合も表示が先（`ACYOP…`）。
+- `tools/kasane_contract/test_pocket_proc_turn_qjs.c`（実 QuickJS＋L2c VM）: park したフレームを継続で完走させると pending になり、そのまま保存フレームを呼ぶと `beginFrame` が `BUSY`（再現）、間で表示すると保存フレームが開いて描いて確定する（修正後の順序）。
+
+実機（この節の値はすべて実測、ホストの時計は USB 往復込み）:
+
+| 条件 | 修正前 | 修正後 |
+| --- | --- | --- |
+| limits probe（`-DKASANE_PROC_LIMITS_PROBE=ON`）、100 ms のフレーム（25 ms の draw×4、毎フレーム park）の最中に Back、5通りの時刻 | 保存フレームの `beginFrame` = `BUSY` 5/5 | `OK` 5/5 |
+| 同、25 ms のフレーム（park 1回）の最中に Back、2通り | `BUSY` 2/2 | `OK` 2/2 |
+| 同、park しない場面フェーズで Back | `OK` 1/1 | `OK` 1/1 |
+| Back からホームまで | 31〜156 ms | 62〜250 ms |
+| MEGADEMO を `'J'`（wrapper なし、`-DKASANE_PROC_DEVICE_PROBE=ON -DKASANE_MEGADEMO_TRACE=ON`）で起動し TWIST で Back、3〜6通りの時刻 | 1/3 で `MEGADEMO DEGRADE tier=1 PocketError: previous frame awaits presentation or repair` → `PocketError: BUSY` → 停止（`EXECUTION FAILED` の経路）。直前のターンが park していた2回のうち1回 | 6/6 で例外・DEGRADE なし（直前のターンが park していたのは3回） |
+
+probe の JS には、保存フレームの先頭で `beginFrame` を試して結果を `LEAVE ph=… begin=…` と出す1行を足した（診断 image だけに入る）。park していない瞬間の Back は元から通るので、修正前の `OK` が出るのはそこだけだった。
+
+image: limits probe `build_leaveflash_probe`（2,192,000 B、SHA-256 `99af0d5a0194f31faf6bf8e25d4c3a4f0cdca5ddb5618255b40681bef561f46c`、修正後）、`'J'` 用 `build_leaveflash_jtrace`（2,227,856 B、`174df4ef2fe9e574c9109f4af44f90f32ca604ce560549d634cd72d4a2383b79`、修正後）。どちらもコミット前の作業ツリーで作り、ソースは作業Bのコミットと同じ。修正前は同じツリーで該当の if だけを戻して作った。ログは `.cache/leaveflash/`（git 管理外）。
+
+**測定上の注意（実際に踏んだ）:** PowerShell の `Copy-Item` でファイルを戻すと更新時刻が元のまま残り、ninja が再コンパイルしない。修正を戻したつもりの image が修正前のままで、1回分の「修正後」の測定が無効になった（`BUSY` 6/7 と出て判明）。image に入ったソースは、ログの `RUN %u bytes`（アプリのソース長）やビルドの `Building C object …app_session.c.obj` の行で確かめる。
+
+### 低の指摘の確認（変更なし）
+
+- (b) `app_suspend()` の drain が確定させた pending フレームは resume まで残る。resume の最初のターンは `pocket_kasane_set_dormant(false)` の invalidate でターン先頭のゲートが表示し、そこで pending は消えるので、最初の `frame()` の `beginFrame` は通る。例外は resume hook（`app_resume()` の中で表示より前に走る）が `beginFrame` を呼ぶ場合だけだが、**resume hook を持つアプリ（IMU CAL／PET／COMPANION など）に procedural を使うものは無い**（procedural を使うのは MEGADEMO・NEWS ZOOM と診断 probe）。対象外として実機試験はしていない。
+- (c) overlay（`app_overlay_tick`）の継続の後には表示ゲートが無く、継続が park 中のフレームを完走させて commit すると、同じ呼び出しの `frame()` の `beginFrame` が `BUSY` になり得る（コード上）。procedural を使う overlay は `overlay_proc_multi_probe.js` だけで、`KASANE_D2_OVERLAY_PROC_PROBE` の診断 image にしか入らず、フレームは draw 1本で park しない。出荷経路では起きないので直していない。procedural を使う overlay を足すときは、継続の後に `pocket_kasane_needs_present()` で返す（ターン先頭と同じ）を足すこと。
+
 ## 追加で測るべきこと
 
 - ~~ターン予算の不具合を直した image で、同じ `}` を回す~~（§7 で実施）。
