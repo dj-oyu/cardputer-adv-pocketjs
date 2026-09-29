@@ -19,6 +19,17 @@ esp_err_t app_start_test(char test);
 void app_vm_reloc_request(void);
 #endif
 void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
+#ifdef POCKET_HEAPPROBE
+/* docs/vm/spread-eval-oom.md. `arg` is "<index>[,<heap limit>]": select that
+ * apps/heapprobe variant for the next start, the limit (0 = the usual 160 KiB)
+ * applying to it only. On success the source, its length and the manifest id
+ * are what the caller hands to the ordinary start path; false for an index
+ * with no variant. */
+bool app_heapprobe_select(const char *arg, const char **source, size_t *length,
+                          const char **app_id);
+/* Frees the variant's RAM copy, if it made one; call once the start returned. */
+void app_heapprobe_release(void);
+#endif
 
 // docs/api/common-api.md 3.1: a session the HOME SCREEN owns, running over the
 // background rather than instead of it. It gets a region-scoped Kasane APP

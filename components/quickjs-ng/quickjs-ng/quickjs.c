@@ -52393,8 +52393,16 @@ done:
     }
 
     start = idx;
-    c = string_getc(p, (int *)&idx);
-    it->idx = idx;
+    /* Through an int, not `(int *)&idx`: on Xtensa newlib uint32_t is
+       unsigned long, so string_getc's store through int * may not alias it,
+       and GCC -O2 dropped `it->idx = idx` as storing the value just loaded.
+       The iterator never advanced and every string spread / for-of / Array.from
+       ran until the heap limit (docs/vm/spread-eval-oom.md). */
+    {
+        int next = (int)idx;
+        c = string_getc(p, &next);
+        it->idx = (uint32_t)next;
+    }
     *pdone = false;
     if (c <= 0xffff) {
         return js_new_string_char(ctx, c);

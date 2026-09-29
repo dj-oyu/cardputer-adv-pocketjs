@@ -221,6 +221,62 @@ if(POCKET_KEYTEST)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_KEYTEST=1)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/keytest/keytest.js" TEXT)
 endif()
+# The evaluation heap probe (docs/vm/spread-eval-oom.md): apps/heapprobe's
+# variants, each a separate source started over USB ('Q<index>[,<limit>]\n')
+# through the same path a menu app takes, with the guest's heap reported after
+# the evaluation. OFF by default: no menu row, no USB byte, no flash.
+option(POCKET_HEAPPROBE "USB 'Q' evaluation heap probe (diagnostic only)" OFF)
+if(POCKET_HEAPPROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_HEAPPROBE=1)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/heapprobe.js" TEXT)
+    # DERBY WATCH with GK built by the spread again, the source that ran out
+    # of heap. Generated into flash rather than patched into a DRAM copy at
+    # run time: a 32 KB copy held through the evaluation took the room the
+    # Kasane frame needs ("frame allocation failed"), a failure of its own.
+    set(_hp_derby "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_watch.js")
+    set(_hp_spread "${CMAKE_CURRENT_BINARY_DIR}/heapprobe_derby_spread.js")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hp_derby}")
+    file(READ "${_hp_derby}" _hp_src)
+    string(FIND "${_hp_src}" "'a d e s r 1 , / tab'.split(' ')" _hp_at)
+    if(_hp_at LESS 0)
+        message(FATAL_ERROR "POCKET_HEAPPROBE: GK's split is gone from derby_watch.js")
+    endif()
+    string(REPLACE "'a d e s r 1 , / tab'.split(' ')" "[...'adesr1,/', 'tab']" _hp_src "${_hp_src}")
+    file(WRITE "${_hp_spread}" "${_hp_src}")
+    target_add_binary_data(${COMPONENT_LIB} "${_hp_spread}" TEXT)
+    # The same app unwrapped into one global script (flat) and cut into 3 and
+    # 4 global scripts (tools/heapprobe_split.py): the chunked-evaluation
+    # spike. Directories per count so the file names, and with them the
+    # embedded symbols, say which set a chunk belongs to.
+    execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_split.py"
+                    "${_hp_derby}" 1 "${CMAKE_CURRENT_BINARY_DIR}/hp" --flat
+                    RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
+    if(NOT _hp_rc EQUAL 0)
+        message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_split.py failed")
+    endif()
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/hp/derby_watch_flat.js" TEXT)
+    foreach(_hp_n 3 4)
+        set(_hp_dir "${CMAKE_CURRENT_BINARY_DIR}/hp${_hp_n}")
+        execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_split.py"
+                        "${_hp_derby}" ${_hp_n} "${_hp_dir}" RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
+        if(NOT _hp_rc EQUAL 0)
+            message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_split.py failed")
+        endif()
+        foreach(_hp_k RANGE 1 ${_hp_n})
+            file(RENAME "${_hp_dir}/derby_watch_c${_hp_k}.js" "${_hp_dir}/hp${_hp_n}_c${_hp_k}.js")
+            target_add_binary_data(${COMPONENT_LIB} "${_hp_dir}/hp${_hp_n}_c${_hp_k}.js" TEXT)
+        endforeach()
+    endforeach()
+    # Precompiled DERBY WATCH, if the host has made it (WSL:
+    #   python3 tools/vmtest/compile_peak.py apps/derby/derby_watch.js --write .cache/compile_peak/derby.bc)
+    # from this same quickjs.c. Absent: the derby-bc variants report no loader.
+    set(_hp_bc "${CMAKE_SOURCE_DIR}/.cache/compile_peak/derby.bc")
+    if(EXISTS "${_hp_bc}")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hp_bc}")
+        target_add_binary_data(${COMPONENT_LIB} "${_hp_bc}" BINARY)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE HP_HAVE_BC=1)
+    endif()
+endif()
 if(KASANE_PROC_LIMITS_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_LIMITS_PROBE=1)
     # Embedded only in the probe image, so a normal build's EMBED list and

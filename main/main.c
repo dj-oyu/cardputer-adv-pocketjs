@@ -131,6 +131,10 @@ extern void vmtest_lifecycle_device(void);
 // it: the same byte is a menu direction on the home screen and a character
 // everywhere else.
 static atomic_bool text_screen;
+#ifdef POCKET_HEAPPROBE
+// The argument of the last USB 'Q' (usb_stroke), read when it is dispatched.
+static char heapprobe_arg[24];
+#endif
 static bool pet_repaint;
 // How long the last full frame took, handed to overlay_tick() so that an
 // over-budget turn can be judged as a share of the frame rather than against a
@@ -166,6 +170,22 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // The key test app (apps/keytest), started like '1'..'6'. Not a menu row:
     // tools/test_settings.py and capture_home.py count presses down the menu.
     if(c=='r'&&!atomic_load(&text_screen)) { atomic_store(&diagnostic,c); return false; }
+#endif
+#ifdef POCKET_HEAPPROBE
+    // 'Q<index>[,<limit>]\n' starts an apps/heapprobe variant (app_session.c).
+    // The bytes after 'Q' are swallowed up to the newline, because digits are
+    // diagnostics of their own below. Home screen only, like 'r'.
+    {
+        static int n=-1;
+        if(n>=0) {
+            if(c=='\n'||c=='\r') {
+                heapprobe_arg[n]=0; n=-1;
+                atomic_store(&diagnostic,'Q');
+            } else if(n<(int)sizeof heapprobe_arg-1) heapprobe_arg[n++]=c;
+            return false;
+        }
+        if(c=='Q'&&!atomic_load(&text_screen)) { n=0; return false; }
+    }
 #endif
 #ifdef KASANE_PROC_DEVICE_PROBE
     if(c=='|') { atomic_store(&proc_probe_requested,true); return false; }
@@ -1200,6 +1220,20 @@ static void ui_task(void *arg) {
             // frame reaching the panel. Started from here anyway, so it cannot
             // begin while a guest owns the display.
             if(test=='9') { sound_capture_probe(); test=0; }
+#ifdef POCKET_HEAPPROBE
+            // Through begin_run, the path a menu app takes (identity, Kasane
+            // arena, eval_user_source), so a variant is evaluated exactly as
+            // an app would be.
+            if(test=='Q') {
+                const char *src,*id; size_t len;
+                if(!running && screen==SCREEN_HOME &&
+                   app_heapprobe_select(heapprobe_arg,&src,&len,&id)) {
+                    begin_run(id,NULL,0,src,len);
+                    app_heapprobe_release();
+                }
+                test=0;
+            }
+#endif
             if(test && !running && screen==SCREEN_HOME) {
                 overlay_release();
                 owner=SCREEN_HOME;
