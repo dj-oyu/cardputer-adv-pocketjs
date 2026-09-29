@@ -1703,12 +1703,24 @@ fail:
 static JSValue js_replace(JSContext *ctx, JSValueConst self, int argc,
                           JSValueConst *argv) {
     (void)self;
+#ifdef KASANE_MEGADEMO_TRACE
+    JSValue ticket=run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_REPLACE,"kasane.replace");
+    if(!JS_IsException(ticket))pocket_proc_trace_view();
+    return ticket;
+#else
     return run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_REPLACE,"kasane.replace");
+#endif
 }
 static JSValue js_patch(JSContext *ctx, JSValueConst self, int argc,
                         JSValueConst *argv) {
     (void)self;
+#ifdef KASANE_MEGADEMO_TRACE
+    JSValue ticket=run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
+    if(!JS_IsException(ticket))pocket_proc_trace_view();
+    return ticket;
+#else
     return run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
+#endif
 }
 
 static void scene_finalizer(JSRuntime *rt, JSValue value) {

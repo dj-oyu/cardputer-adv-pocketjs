@@ -445,6 +445,12 @@
         if (k !== tier && k >= 0 && k < KN.length) { tier = k; enter(scene, 1); }
         if (press & 0xa0) enter((scene + (press & 0x20 ? 1 : NAMES.length - 1)) % NAMES.length);
         else if (t >= LEN[scene]) enter((scene + 1) % NAMES.length);
+        // A plan decodes in ~13 ms on the device: one a frame, this scene's
+        // first, then the next scene's over the last frames. Before the
+        // frame: a park here must not show a new image under the old view.
+        let b = LOAD[1];
+        for (; b > 0 && pend.length; --b) live.push(reg(pend.shift()));
+        if (b && t >= LEN[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
         f = frameOf(scene, tier, t);
         if (f.s) H.beginFrame(f.b, surf1);
         else H.beginFrame(f.b);
@@ -453,11 +459,6 @@
           if (h) H.draw(h, f.d[i][1]);
         }
         H.commit();
-        // A plan decodes in ~13 ms on the device: one a frame, this scene's
-        // first, then the next scene's over the last frames.
-        let b = LOAD[1];
-        for (; b > 0 && pend.length; --b) live.push(reg(pend.shift()));
-        if (b && t >= LEN[scene] - LOAD[0]) prefetch((scene + 1) % NAMES.length, b);
       } catch (e) {
         if (!tier) throw e;
         --tier;
@@ -471,7 +472,8 @@
       }
       const key = scene < 3 ? 0 : scene + 8 * tier;
       if (built !== key) {
-        V.replace(build);
+        // Same tx: a scene's first frame must not show build()'s defaults.
+        V.replace(tx => (build(tx), patch(tx, f)));
         built = key;
       } else {
         // The set built at t = 0 has been presented by now.

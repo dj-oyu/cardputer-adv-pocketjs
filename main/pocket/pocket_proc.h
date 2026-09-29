@@ -30,8 +30,14 @@ void pocket_proc_batch_counts(uint32_t *scalar,uint32_t *pie);
 typedef struct {
     uint32_t reg_n,reg_us,prep_us,prep_max_us,unreg_n;
     uint32_t draw_n,draw_us,draw_max_us,band_n,band_cy;
+    /* commit(), replace()/patch(), and panel presents made while a commit
+     * had no view update after it yet: the picture that pairs a new image
+     * with the previous frame's view tree. */
+    uint32_t commit_n,view_n,split_n;
 } pocket_proc_trace;
 void pocket_proc_trace_take(pocket_proc_trace *out);
+void pocket_proc_trace_view(void);
+void pocket_proc_trace_presented(void);
 #endif
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
 void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,

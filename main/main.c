@@ -116,6 +116,11 @@ static QueueHandle_t keys;
 static atomic_bool stop;
 static atomic_bool capture;
 static atomic_int diagnostic;
+#ifdef KASANE_MEGADEMO_TRACE
+// 'S': capture the next ticks' presents WITHOUT the full redraw 's' forces,
+// so the PIX rows are exactly the damage the ordinary path sent.
+static atomic_int raw_capture;
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
 extern void vmtest_lifecycle_device(void);
 #endif
@@ -163,6 +168,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // Guest heap cap for the next app start (app_session.c MDT_LIMITS). Read
     // only at start, so pressing it while an app runs changes nothing live.
     if(c=='~') { extern void app_trace_next_heap_limit(void); app_trace_next_heap_limit(); return false; }
+    if(c=='S') { atomic_store(&raw_capture,6); return false; }
 #endif
 #ifdef KASANE_PROC_LIMITS_PROBE
     /* Ahead of P2's '{'/'}' navigation aliases; the two probes are not built
@@ -819,6 +825,9 @@ static void tick_run(bool have, const keystroke_t *stroke) {
 
     bool shot=atomic_exchange(&capture,false);
     if(shot) { board_capture(true); app_force_redraw(); }
+#ifdef KASANE_MEGADEMO_TRACE
+    if(!shot&&atomic_load(&raw_capture)>0) { atomic_fetch_sub(&raw_capture,1); shot=true; board_capture(true); }
+#endif
     if(!leave) {
         if(key==KEY_ENTER) sound_play(1);
         uint32_t buttons=key==KEY_ENTER?0x4000:key==KEY_UP?0x10:

@@ -254,7 +254,8 @@ static void mdt_emit(void) {
     size_t gu=0,gl=0;
     if(guest) JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),&gu,&gl);
     ESP_LOGI("app","MDT %u %c t=%lld js=%u rn=%u sd=%u by=%u bd=%u pr=%u "
-             "reg=%u/%u prep=%u/%u un=%u draw=%u/%u/%u band=%u/%u free=%u lg=%u k=%x/%x mn=%u gu=%u",
+             "reg=%u/%u prep=%u/%u un=%u draw=%u/%u/%u band=%u/%u free=%u lg=%u k=%x/%x mn=%u gu=%u "
+             "cv=%u/%u/%u",
              mdt_seq++,mdt.kind,(long long)mdt.began,(unsigned)mdt.js_us,
              (unsigned)mdt.render_us,(unsigned)mdt.send_us,(unsigned)mdt.bytes,
              (unsigned)mdt.bands,(unsigned)mdt.presents,
@@ -265,7 +266,9 @@ static void mdt_emit(void) {
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
              (unsigned)mdt.btn,(unsigned)mdt.fed,
              (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
-             (unsigned)gu);
+             (unsigned)gu,(unsigned)p.commit_n,(unsigned)p.view_n,(unsigned)p.split_n);
+    // cv: commit()s, replace()/patch()es, and presents that showed a commit
+    // whose view update had not run yet (the new image under the old view).
     // mn is the lowest free heap inside this turn (and the print above), not
     // since boot: a turn's transient peak is what an allocation meets, and
     // the boundary values above miss it. Restarted every turn.
@@ -2161,6 +2164,7 @@ static esp_err_t present_frame(void) {
             mdt.render_us+=whole-display_state.sent_us;mdt.send_us+=display_state.sent_us;
             mdt.bytes+=stats.transferred_bytes;mdt.bands=ksn_render_band_count(stats.bands);
             mdt.presents++;
+            pocket_proc_trace_presented();
 #endif
 #if KASANE_STRESS_GRAD_AB
             grad_ab_bytes+=stats.transferred_bytes;
