@@ -137,8 +137,8 @@
   H.beginFrame(0);
   const res = H.resource(), live = {}, queue = [];
   let reg = 0;
-  // One plan a frame (a decode is 12-20 ms on the device), and only above
-  // MEGADEMO's free-heap margin: a registration dips the heap by up to 14 KB.
+  // One plan a frame from frame 1 (info() is null while evaluating), only
+  // above MEGADEMO's free-heap margin: a register dips the heap up to 14 KB.
   function load() {
     const n = queue[0];
     if (!n) return;
@@ -398,6 +398,5 @@
     sound();
   };
   enter('pad');
-  while (queue.length && reg < 3) load();
   log('READY tones=' + !!A);
 })();
