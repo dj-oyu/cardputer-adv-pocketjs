@@ -42,6 +42,9 @@
 #include "ksn_proc_limits_device_probe.h"
 extern const char proc_limits_probe_start[] asm("_binary_proc_limits_probe_js_start");
 #endif
+#ifdef POCKET_KEYTEST
+extern const char keytest_start[] asm("_binary_keytest_js_start");
+#endif
 #include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_input.h"
 #include "ksn_font.h"
@@ -1439,6 +1442,10 @@ source_ready:;
         // The Kasane demo (ui/kasane via app_session.c's kasane_demo_start): the
         // one source that is not a VM self-test, so it sits outside the ifdef.
         case 'K': source=kasane_demo_start; break;
+#ifdef POCKET_KEYTEST
+        // apps/keytest: the pocket.input.keys diagnostic (docs/platform/keystate.md).
+        case 'r': source=keytest_start; break;
+#endif
 #ifdef KASANE_P0_PROBE
         case '7': source=wall_source_probe_start; break;
         case '0': source=pool_source_probe_start; break;

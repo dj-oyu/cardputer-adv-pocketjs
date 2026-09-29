@@ -387,9 +387,21 @@ esp_err_t board_init(void) {
 // The TCA8418 FIFO reports both edges: bit 7 set is a press, clear a release.
 // Text input needs the releases to track which modifiers are still held, so
 // this returns every event and leaves the interpretation to keymap.c.
+//
+// Overflow: the FIFO holds 10 events and CFG leaves OVR_FLOW_M at 0, so once it
+// is full the controller drops NEW events and latches OVR_FLOW_INT (INT_STAT
+// bit 3). The 0x1f written below clears that latch with the others, so it is
+// read here first -- and only when the count says the FIFO is full, the one
+// state in which anything can have been lost, so the ordinary path costs no
+// extra I2C transfer. Whether the latch sets with OVR_FLOW_IEN off (CFG is
+// 0x01) is a datasheet reading not yet confirmed on this board
+// (docs/platform/keystate.md). If it stays silent, a lost release leaves that
+// key reading as down until it is next pressed and released (keystate.h), and
+// an app started meanwhile does not see it (pocket_input.c) -- not forever.
 bool board_key_event(board_keyevent_t *out) {
-    uint8_t count=0, event=0;
+    uint8_t count=0, event=0, status=0;
     if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
+    out->overflow=(count & 15) >= 10 && kread(0x02, &status) == ESP_OK && (status & 0x08);
     if (kread(0x04, &event) != ESP_OK) return false;
     kwrite(0x02, 0x1f);
     int code=(event & 0x7f)-1;

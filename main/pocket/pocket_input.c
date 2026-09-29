@@ -1,5 +1,9 @@
 #include "pocket_input.h"
 #include "pocket_api.h"
+#include "pocket_kasane.h"
+#include "pocket_text.h"
+#include "keymap.h"
+#include "keystate.h"
 #include "esp_timer.h"
 #include <string.h>
 #define UI_ACTION_SUBS 4
@@ -80,11 +84,13 @@ static JSValue js_held(JSContext *ctx, JSValueConst self,
     return bad(ctx,"input.held","no such action");
 }
 
-// Section 6 gives onKey a key/code/modifiers shape, and this host has no channel
-// for it: main.c's keymap consumes the keyboard for the shell and hands a running
-// app a pad mask alone. Section 2 says an unimplemented feature keeps its name
-// and fails with UNSUPPORTED, which is a better answer than a subscription that
-// silently never fires.
+// Section 6 gives onKey a key/code/modifiers shape: a stream of events with the
+// typed character in it. That stream is still not delivered -- main.c's keymap
+// hands the translated keystrokes to the shell and a running app a pad mask --
+// and input.keys below answers the other question a game asks (what is down,
+// what went down since the last frame) from keystate instead. Section 2 says an
+// unimplemented feature keeps its name and fails with UNSUPPORTED, which is a
+// better answer than a subscription that silently never fires.
 static JSValue js_on_key(JSContext *ctx, JSValueConst self,
                          int argc, JSValueConst *argv) {
     (void)self; (void)argc; (void)argv;
@@ -100,7 +106,133 @@ static JSValue js_on_key(JSContext *ctx, JSValueConst self,
 // main.c hands it the keyboard for as long as it is open. It contributes to
 // this same namespace and defines input.text itself.
 
+// ------------------------------------------------------ pocket.input.keys
+//
+// The physical keys, read from keystate (main/hal/keystate.h) once per guest
+// turn, here in the pump, and nowhere else: every call inside one frame() sees
+// the same state, and pressed()/released() mean "since the previous turn's
+// reading", counted, so a tap shorter than a frame is still one press and one
+// release.
+//
+// A key that was already down when this surface last lost sight of the
+// keyboard is hidden until it comes up. "Lost sight" is a re-base: the start
+// of the session (the Enter that launched the app is usually still down),
+// the wake from a suspension (the Enter that chose the sleeping app, and
+// whatever the home screen was sent while it slept), and every turn in which
+// the host had the keyboard instead of the app -- an open text field, a
+// SYSTEM notice blocking input (the same test app_tick() zeroes the pad mask
+// with), and a picker screen, which main.c reports because the guest is not
+// ticked at all while it is up. Without that, the key that answered the
+// picker would arrive in the app as a press, and one held across a sleep as
+// a key that never came up.
+static uint8_t  key_seen_press[KEYSTATE_KEYS], key_seen_release[KEYSTATE_KEYS];
+static uint32_t key_hidden[KEYSTATE_WORDS];
+static uint32_t key_down[KEYSTATE_WORDS], key_pressed[KEYSTATE_WORDS],
+                key_released[KEYSTATE_WORDS];
+static bool     key_rebase=true;
+
+static void key_set(uint32_t *words,int i){words[i>>5]|=1u<<(i&31);}
+
+static void keys_pump(void){
+    keystate_snapshot_t now;
+    keystate_snapshot(&now);
+    bool rebase=key_rebase || pocket_text_active() ||
+                pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED;
+    key_rebase=false;
+    memset(key_down,0,sizeof(key_down));
+    memset(key_pressed,0,sizeof(key_pressed));
+    memset(key_released,0,sizeof(key_released));
+    if(rebase) memcpy(key_hidden,now.held,sizeof(key_hidden));
+    else for(int i=0;i<KEYSTATE_KEYS;i++) {
+        uint8_t presses=(uint8_t)(now.presses[i]-key_seen_press[i]);
+        uint8_t releases=(uint8_t)(now.releases[i]-key_seen_release[i]);
+        bool was_hidden=keystate_bit(key_hidden,i);
+        if(releases) key_hidden[i>>5]&=~(1u<<(i&31));
+        if(presses) key_set(key_pressed,i);
+        // A hidden key's first release ends a press the app never saw.
+        if(releases>(was_hidden?1:0)) key_set(key_released,i);
+        if(keystate_bit(now.held,i) && !keystate_bit(key_hidden,i)) key_set(key_down,i);
+    }
+    memcpy(key_seen_press,now.presses,sizeof(key_seen_press));
+    memcpy(key_seen_release,now.releases,sizeof(key_seen_release));
+}
+
+void pocket_input_keys_withhold(void){ key_rebase=true; }
+
+static void keys_forget(void){
+    key_rebase=true;
+    memset(key_down,0,sizeof(key_down));
+    memset(key_pressed,0,sizeof(key_pressed));
+    memset(key_released,0,sizeof(key_released));
+}
+
+// held/pressed/released share everything but the mask they read, which is the
+// function's magic.
+static JSValue js_key_query(JSContext *ctx, JSValueConst self,
+                            int argc, JSValueConst *argv, int magic) {
+    (void)self;
+    static const char *const OPS[]={"input.keys.held","input.keys.pressed",
+                                    "input.keys.released"};
+    const uint32_t *const MASKS[]={key_down,key_pressed,key_released};
+    if(argc<1 || !JS_IsString(argv[0]))
+        return bad(ctx,OPS[magic],"takes a key name");
+    const char *name=JS_ToCString(ctx,argv[0]);
+    if(!name) return JS_EXCEPTION;
+    int index=keymap_key_index(name);
+    JS_FreeCString(ctx,name);
+    if(index<0) return bad(ctx,OPS[magic],"no such key");
+    return JS_NewBool(ctx,keystate_bit(MASKS[magic],index));
+}
+
+static JSValue js_keys_down(JSContext *ctx, JSValueConst self,
+                            int argc, JSValueConst *argv) {
+    (void)self; (void)argc; (void)argv;
+    JSValue list=JS_NewArray(ctx);
+    if(JS_IsException(list)) return list;
+    uint32_t at=0;
+    for(int i=0;i<KEYSTATE_KEYS;i++) {
+        char name[8];
+        if(!keystate_bit(key_down,i) || !keymap_key_name(i,name)) continue;
+        JSValue value=JS_NewString(ctx,name);
+        if(JS_IsException(value) ||
+           JS_DefinePropertyValueUint32(ctx,list,at++,value,JS_PROP_C_W_E)<0) {
+            JS_FreeValue(ctx,list);
+            return JS_EXCEPTION;
+        }
+    }
+    return list;
+}
+
+// input.keys is built on its first read, like the namespaces themselves: an
+// app that only uses onAction pays for one getter, not for an object and four
+// functions. Same replace-the-accessor move as pocket_api.c's lazy namespace,
+// and the same promise -- nothing half-built is installed.
+static JSValue js_keys_build(JSContext *ctx, JSValueConst self,
+                             int argc, JSValueConst *argv) {
+    (void)argc; (void)argv;
+    JSValue keys=JS_NewObject(ctx);
+    if(JS_IsException(keys)) return keys;
+    static const char *const QUERIES[]={"held","pressed","released"};
+    bool ok=true;
+    for(int i=0;i<3 && ok;i++)
+        ok=JS_DefinePropertyValueStr(ctx,keys,QUERIES[i],
+               JS_NewCFunctionMagic(ctx,js_key_query,QUERIES[i],1,
+                                    JS_CFUNC_generic_magic,i),
+               JS_PROP_ENUMERABLE)>=0;
+    if(ok) ok=JS_DefinePropertyValueStr(ctx,keys,"down",
+                  JS_NewCFunction(ctx,js_keys_down,"down",0),JS_PROP_ENUMERABLE)>=0;
+    if(!ok) {
+        JS_FreeValue(ctx,keys);
+        return pocket_api_throw(ctx,POCKET_ERR_OUT_OF_MEMORY,"input.keys",
+                                "no memory to build input.keys",true,NULL);
+    }
+    JS_DefinePropertyValueStr(ctx,self,"keys",JS_DupValue(ctx,keys),
+                              JS_PROP_ENUMERABLE);
+    return keys;
+}
+
 void pocket_input_pump(uint32_t buttons){
+    keys_pump();
     int64_t now=0;
     uint32_t before=held_mask;
     held_mask=buttons;                    // held() works with no listener at all
@@ -129,11 +261,13 @@ void pocket_input_pump(uint32_t buttons){
 // report its release to an app that never saw the key come up.
 void pocket_input_suspend(void){
     held_mask=0;memset(repeat_at,0,sizeof(repeat_at));
+    keys_forget();
 }
 
 void pocket_input_reset(void){
     pocket_api_sub_close_all(&action_table);action_table.ctx=NULL;
     held_mask=0;memset(repeat_at,0,sizeof(repeat_at));
+    keys_forget();
 }
 // Preserve the existing capability declaration during extraction. tick_run()
 // now also forwards arrows and a final Back; reconcile this conservative
@@ -149,6 +283,11 @@ static const pocket_limit_t input_limits[] = {
 static const pocket_capability_t input_capability = {
     .name="input.action", .supported=true, .available=true, .limits=input_limits,
 };
+// No limits: how many keys the matrix reports down at once has not been
+// measured on this board (docs/platform/keystate.md), and nothing here caps it.
+static const pocket_capability_t keys_capability = {
+    .name="input.keys", .supported=true, .available=true,
+};
 
 static esp_err_t build_input(JSContext *ctx, JSValueConst ns, void *user) {
     (void)user;
@@ -158,6 +297,13 @@ static esp_err_t build_input(JSContext *ctx, JSValueConst ns, void *user) {
         JS_NewCFunction(ctx,js_on_key,"onKey",1),JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx,ns,"held",
         JS_NewCFunction(ctx,js_held,"held",1),JS_PROP_ENUMERABLE);
+    // Configurable only until the first read replaces it (js_keys_build).
+    JSAtom atom=JS_NewAtom(ctx,"keys");
+    int defined=JS_DefinePropertyGetSet(ctx,ns,atom,
+        JS_NewCFunction(ctx,js_keys_build,"keys",0),JS_UNDEFINED,
+        JS_PROP_ENUMERABLE|JS_PROP_CONFIGURABLE);
+    JS_FreeAtom(ctx,atom);
+    if(defined<0) return ESP_ERR_NO_MEM;
     // input.text belongs to pocket_text.c, which contributes to this namespace
     // after this does. See the note where the stub used to be.
     return ESP_OK;
@@ -169,5 +315,6 @@ esp_err_t pocket_input_install(JSContext *ctx,void *user_data){
     for(unsigned i=0;i<UI_ACTION_SUBS;i++)action_slots[i].callback=JS_UNDEFINED;
     action_table.ctx=ctx;
     esp_err_t result=pocket_api_register(&input_capability);
+    if(result==ESP_OK) result=pocket_api_register(&keys_capability);
     return result==ESP_OK?pocket_api_lazy(ctx,"input",build_input,NULL):result;
 }
