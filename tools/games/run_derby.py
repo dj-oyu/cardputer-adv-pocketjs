@@ -8,7 +8,11 @@ then runs:
      identically, the next race and the Back turn; every procedural draw
      through the plan / debug-step / single-step VM oracle and every frame
      compared pixel for pixel;
-  2. one race at LIGHT and one at HEAVY (same cameras) for the statistics.
+  2. one race at LIGHT and one at HEAVY (same cameras) for the statistics;
+  3. each tier with the director alone (no camera keys), and LIGHT and HEAVY
+     with the pick on #8 (the widest manual close-up).
+Every run checks the big screen: its face drawn exactly inside the bezel,
+nothing but the feed on the face, the view's lettering inside it.
 --m32 builds for i386 with the device's 8-byte JSValue and 4-byte pointers
 (tools/vmtest/m32_sysroot.sh) so the guest heap figures match the firmware's
 object sizes; the default 64-bit build runs with ASan/UBSan. --ppm writes the
@@ -96,17 +100,20 @@ def png(path: Path, images: list[bytes], columns: int) -> None:
 
 
 ORDER = ["pad", "gate", "start", "wide", "close", "field", "lead", "slow", "photo", "photo_zoom", "result"]
+# The big screen: switching on, the director's VISION shot and its pan, WIDE
+# after it, the replay's CLOSE (screen out of frame) and FIELD (small).
+VISION = ["vision_on", "vision", "pan", "wide_screen", "close_off", "field_screen", "lead", "head", "slow"]
 
 
-def sheet(folder: Path, out: Path) -> None:
+def sheet(folder: Path, out: Path, order: list[str] = ORDER) -> None:
     header = b"P6\n240 135\n255\n"
     shots = {}
     for f in sorted(folder.glob("derby_*.ppm")):
         tag = f.stem.split("_", 2)[2]
         shots.setdefault(tag, f.read_bytes()[len(header):])
-    images = [shots[t] for t in ORDER if t in shots]
+    images = [shots[t] for t in order if t in shots]
     png(out, images, 4)
-    print(f"Wrote {out} ({len(images)} panels: {', '.join(t for t in ORDER if t in shots)})")
+    print(f"Wrote {out} ({len(images)} panels: {', '.join(t for t in order if t in shots)})")
 
 
 def main() -> None:
@@ -125,21 +132,25 @@ def main() -> None:
     env = os.environ.copy()
     env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
     env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
-    runs = [1] if args.heap_limit else [1, 0, 2]
-    for tier in runs:
-        e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}.csv"))
+    # (tier, extra env): the scripted game at each tier, then the director
+    # alone (no camera keys) and the widest manual close-up (pick #8).
+    runs = [(1, {})] if args.heap_limit else [(1, {}), (0, {}), (2, {})] + [
+        (t, {"DERBY_NOCAM": "1"}) for t in (0, 1, 2)] + [(t, {"DERBY_PICK": "7"}) for t in (0, 2)]
+    for tier, extra in runs:
+        e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}{''.join(extra)}.csv"), **extra)
         if args.heap_limit:
             e["DERBY_HEAP_LIMIT"] = str(args.heap_limit)
-        if args.ppm and tier == 1:
+        if args.ppm and tier == 1 and not extra:
             ppm = CACHE / "ppm"
             ppm.mkdir(parents=True, exist_ok=True)
             for old in ppm.glob("*.ppm"):
                 old.unlink()
             e["DERBY_PPM"] = str(ppm)
-        print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]})", flush=True)
+        print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]}) {extra or ''}", flush=True)
         subprocess.run([str(binary)], cwd=ROOT, env=e, check=True)
     if args.ppm:
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png")
+        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-vision-preview.png", VISION)
 
 
 if __name__ == "__main__":

@@ -15,9 +15,17 @@
  * and from the VM segments (8-row bands) and compared pixel for pixel. The
  * adapter's limits are checked and per-frame statistics are written.
  *
+ * The big screen (docs/apps/derby-watch.md "大型画面と演出カメラ"): the 'vis'
+ * draw must fill exactly the face's interior row by row and ring it one pixel
+ * outside; every segment drawn after it must lie wholly on the face (the
+ * feed) or put no pixel on it (what stands in front of the screen); the
+ * view's lettering nodes (the refs clipped to the whole panel) must lie on
+ * the face of the frame they are shown with.
+ *
  *   python3 tools/games/run_derby.py            (WSL)
  * Env: DERBY_TIER=0|2 (LIGHT or HEAVY, no replay), DERBY_PPM=<dir>,
- *      DERBY_CSV=<file>, DERBY_HEAP_LIMIT=<bytes>.
+ *      DERBY_CSV=<file>, DERBY_HEAP_LIMIT=<bytes>, DERBY_NOCAM=1 (no camera
+ *      keys: the director alone), DERBY_PICK=<0..7>.
  */
 #include "pocket_kasane.h"
 #include "pocket_input.h"
@@ -104,7 +112,7 @@ static void edge(const char *name,bool pressed){
 static JSRuntime *rt;
 static JSContext *ctx;
 static uint16_t strip_pixels[240*8],panel[240*135];
-static unsigned tick,exceptions,bad_present,framefails;
+static unsigned tick,exceptions,bad_present,framefails,screen_seen,vision_shot,wide_shot,head_at;
 static char scene[16]="boot";
 static unsigned scene_t;
 static char finish[3][512];
@@ -127,9 +135,18 @@ typedef struct {
 } spec;
 static spec specs[SLOTS];
 static unsigned live_plans,live_max,registered,unregistered,ops_used,frame_regs,frame_reg_max;
-static ksn_proc_frame f_plan,f_debug,f_vm,cand_plan,cand_vm;
-static uint16_t pix_plan[240*135],pix_vm[240*135];
+static ksn_proc_frame f_plan,f_debug,f_vm,cand_plan,cand_vm,front;
+static uint16_t pix_plan[240*135],pix_vm[240*135],mask[240*135];
 static uint16_t cur_bg;
+/* The big screen: the 'vis' plan fills its face (the app's vrect()) and
+ * rings it with the bezel; the feed is drawn over the face; the view's
+ * lettering follows it. */
+static unsigned cur_surface,s1_frames,s0_frames,vis_drawn,vis_seg_end,vis_frames,occluded_frames,
+                occluded_pixels,rect_checked,rect_mismatch,refs_max,cmds_max,bezel_bad,feed_segments,
+                feed_frames,overlay_frames;
+static int vis_in[4],last_vis_in[4];
+static unsigned head_frames;
+static bool last_vis;
 static unsigned frame_draws,frame_steps,draw_raster_max,draw_steps_max,frame_points,frame_instr_max,frames_checked;
 static int pt_lo=32767,pt_hi=-32768;
 static uint64_t pixel_hash=1469598103934665603ull;
@@ -232,6 +249,8 @@ static JSValue js_cap_begin(JSContext *c,JSValueConst self,int argc,JSValueConst
     (void)c;(void)self;(void)argc;
     memset(&cand_plan,0,sizeof cand_plan);memset(&cand_vm,0,sizeof cand_vm);
     cur_bg=(uint16_t)num(argv[0]);
+    cur_surface=argc>1&&num(argv[1])?1u:0u;
+    vis_drawn=0;
     frame_draws=frame_steps=frame_points=frame_instr_max=0;
     return JS_UNDEFINED;
 }
@@ -272,6 +291,22 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
     frame_steps+=vr.steps;frame_draws++;
     if(s->program.count>frame_instr_max)frame_instr_max=s->program.count;
     append(&cand_plan,&f_plan);append(&cand_vm,&f_vm);
+    if(argc>2&&num(argv[2])==2&&!cur_surface)head_frames++;
+    if(argc>2&&num(argv[2])==1){
+        REQ(!cur_surface&&!vis_drawn&&f_plan.count>=4);
+        vis_drawn=1;vis_seg_end=cand_plan.count;
+        for(unsigned i=0;i<4;i++)vis_in[i]=(int)at(argv[1],i);
+        /* The face is filled row by row, exactly its interior, then the first
+         * bezel ring runs one pixel outside it. */
+        const ksn_proc_segment *g=f_plan.segments;
+        const int a=vis_in[0],b=vis_in[1],c2=vis_in[2],d=vis_in[3],rows=d-b-1;
+        REQ(rows>0&&(unsigned)rows+4<=f_plan.count);
+        for(int r=0;r<rows;r++)
+            if(!(g[r].x0==a+1&&g[r].x1==c2-1&&g[r].y0==b+1+r&&g[r].y1==b+1+r))bezel_bad++;
+        g+=rows;
+        if(!(g[0].x0==a&&g[0].y0==b&&g[0].x1==c2&&g[0].y1==b&&g[1].x1==c2&&g[1].y1==d&&
+             g[2].x1==a&&g[2].y1==d&&g[3].x1==a&&g[3].y1==b))bezel_bad++;
+    }
     if(s->has_points){
         const unsigned n=s->points;
         ksn_proc_points_affine_scalar((KsnProcPointDst){s->sx,s->sy},(KsnProcPointSrc){s->x,s->y},n,&s->coeff);
@@ -308,7 +343,37 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
     REQ(!memcmp(pix_plan,pix_vm,sizeof pix_plan));
     for(size_t i=0;i<sizeof pix_plan;i++){pixel_hash^=((const unsigned char *)pix_plan)[i];pixel_hash*=1099511628211ull;}
     frames_checked++;
-    scene_stats *st=stat_for(scene);
+    if(cur_surface)s1_frames++;
+    else{
+        s0_frames++;
+        last_vis=vis_drawn;
+        if(vis_drawn){
+            memcpy(last_vis_in,vis_in,sizeof vis_in);vis_frames++;
+            /* After the bezel come the feed (every segment wholly inside the
+             * face) and the objects in front of the screen. Rasterize every
+             * segment that is not wholly inside and count its pixels on the
+             * face: a front object over the screen, or the feed leaking. */
+            const int X0=vis_in[0]+1,Y0=vis_in[1]+1,X1=vis_in[2]-1,Y1=vis_in[3]-1;
+            memset(&front,0,sizeof front);
+            unsigned inside=0;
+            for(unsigned i=vis_seg_end;i<cand_plan.count;i++){
+                ksn_proc_segment g=cand_plan.segments[i];
+                if(g.x0>=X0&&g.x0<=X1&&g.x1>=X0&&g.x1<=X1&&g.y0>=Y0&&g.y0<=Y1&&g.y1>=Y0&&g.y1<=Y1){inside++;continue;}
+                g.color=0xffff;front.segments[front.count++]=g;
+            }
+            feed_segments+=inside;if(inside)feed_frames++;
+            front.ready=true;
+            memset(mask,0,sizeof mask);
+            REQ(ksn_proc_render_band(&front,mask,0,135));
+            unsigned hit=0;
+            for(int y=vis_in[1]+1;y<vis_in[3];y++)for(int x=vis_in[0]+1;x<vis_in[2];x++)
+                if(x>=0&&x<240&&y>=0&&y<135&&mask[y*240+x])hit++;
+            if(hit){occluded_frames++;occluded_pixels+=hit;
+                if(occluded_frames<=5)printf("  on the face: tick %u scene %s face %d,%d..%d,%d %u px\n",tick,scene,
+                                             vis_in[0]+1,vis_in[1]+1,vis_in[2],vis_in[3],hit);}
+        }
+    }
+    scene_stats *st=stat_for(cur_surface?"feed":scene);
     st->frames++;
     if(frame_draws>st->draws_max)st->draws_max=frame_draws;
     if(cand_plan.count>st->seg_max)st->seg_max=cand_plan.count;
@@ -320,7 +385,7 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
     if(live_plans>st->live_max)st->live_max=live_plans;
     if(frame_instr_max>st->instr_max)st->instr_max=frame_instr_max;
     if(frame_points>st->points_max)st->points_max=frame_points;
-    if(csv)fprintf(csv,"%u,%s,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",tick,scene,frame_draws,cand_plan.count,
+    if(csv)fprintf(csv,"%u,%s,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",tick,scene,cur_surface,vis_drawn,frame_draws,cand_plan.count,
                    cand_plan.raster_steps,draw_raster_max,draw_steps_max,frame_steps,live_plans,frame_points,
                    frame_instr_max,frame_regs);
     draw_raster_max=draw_steps_max=0;
@@ -397,11 +462,40 @@ static void ppm(const char *tag){
 static size_t heap_live_peak;
 static size_t heap_used(void){JSMemoryUsage m;JS_ComputeMemoryUsage(rt,&m);return (size_t)m.malloc_size;}
 
+/* After every turn: the screen node's state against the bezel of the surface-0
+ * frame on show (a surface-1 turn leaves both as they were), and the view's
+ * refs and commands. */
+static int probe_w;
+static JSValue js_probe(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)c;(void)self;(void)argc;
+    unsigned refs=(unsigned)num(argv[1]),cmds=(unsigned)num(argv[2]);
+    if(refs>refs_max)refs_max=refs;
+    if(cmds>cmds_max)cmds_max=cmds;
+    /* argv[0]: [visible, x0, y0, x1, y1] per lettering node. Shown only in a
+     * frame whose face was drawn, and then inside the face. */
+    const unsigned n=len(argv[0])/5;
+    probe_w=last_vis?last_vis_in[2]-last_vis_in[0]-1:0;
+    bool any=false;
+    for(unsigned k=0;k<n;k++){
+        if(!at(argv[0],5*k))continue;
+        any=true;rect_checked++;
+        const int x0=(int)at(argv[0],5*k+1),y0=(int)at(argv[0],5*k+2),x1=(int)at(argv[0],5*k+3),y1=(int)at(argv[0],5*k+4);
+        if(!last_vis||x0<last_vis_in[0]+1||y0<last_vis_in[1]+1||x1>last_vis_in[2]||y1>last_vis_in[3]){
+            rect_mismatch++;
+            if(rect_mismatch<=5)printf("  lettering off the face: tick %u scene %s node %d,%d..%d,%d face %d,%d..%d,%d (%s)\n",
+                tick,scene,x0,y0,x1,y1,last_vis_in[0]+1,last_vis_in[1]+1,last_vis_in[2],last_vis_in[3],last_vis?"drawn":"not drawn");
+        }
+    }
+    if(any)overlay_frames++;
+    return JS_UNDEFINED;
+}
+
 /* One turn: pump keys, frame(buttons), present. */
 static void frame(unsigned buttons){
     pocket_input_pump(0);
     frame_regs=0;
-    char call[32];snprintf(call,sizeof call,"__turn=1;frame(%u)",buttons);
+    char call[200];snprintf(call,sizeof call,"__turn=1;frame(%u);__probe([].concat.apply([],__ov.map(r=>"
+                            "[r.__v?1:0].concat(r.__r||[0,0,0,0]))),__refs,kasane.stats().displayed.commands)",buttons);
     eval(call,strlen(call),"frame.js");
     if(frame_regs>frame_reg_max)frame_reg_max=frame_regs;
     present((uint64_t)tick*33333u);
@@ -428,9 +522,21 @@ static const char PRELUDE[]=
     "(function(){const P=kasane.procedural,R=P.register,U=P.unregister,B=P.beginFrame,D=P.draw,C=P.commit;"
     "P.register=function(p,q){const h=q?R.call(P,p,q):R.call(P,p);__reg(h,p,q);return h};"
     "P.unregister=function(h){U.call(P,h);__unreg(h)};"
-    "P.beginFrame=function(c,s){const r=s===undefined?B.call(P,c):B.call(P,c,s);__begin(c);return r};"
-    "P.draw=function(h,i){D.call(P,h,i);__draw(h,i)};"
+    "P.beginFrame=function(c,s){const r=s===undefined?B.call(P,c):B.call(P,c,s);__begin(c,s?1:0);return r};"
+    "P.draw=function(h,i){try{D.call(P,h,i)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify(i));throw e}__draw(h,i,globalThis.derby&&derby.L?h===derby.L.vis?1:h===derby.L.hd?2:0:0)};"
     "P.commit=function(){C.call(P);__commit()};})();"
+    /* The screen's lettering: the refs the app clips to the whole panel
+     * (setRect keeps a clip), with their last rect and visibility. */
+    "globalThis.__refs=0;globalThis.__ov=[];"
+    "(function(){const K=kasane,RP=K.replace,PA=K.patch;"
+    "function ref(r){const p=Object.getPrototypeOf(r);if(p.__w)return;p.__w=1;const sr=p.setRect,sv=p.setVisible,sc=p.setClip;"
+    "p.setClip=function(t,b){if(!b[0]&&!b[1]&&b[2]===240&&b[3]===135&&!this.__o){this.__o=1;this.__v=true;this.__r=null;__ov.push(this)}return sc.call(this,t,b)};"
+    "p.setRect=function(t,b){if(this.__o)this.__r=b.slice();return sr.call(this,t,b)};"
+    "p.setVisible=function(t,v){if(this.__o)this.__v=v;return sv.call(this,t,v)}}"
+    "function wrap(t){const p=Object.getPrototypeOf(t);if(p.__w)return;p.__w=1;"
+    "for(const n of ['image','rect','text']){const f=p[n];p[n]=function(sp){const r=f.call(this,sp);__refs++;ref(r);return r}}}"
+    "K.replace=function(f){return RP.call(K,t=>{wrap(t);__refs=0;__ov=[];return f(t)})};"
+    "K.patch=function(f){return PA.call(K,t=>{wrap(t);return f(t)})};})();"
     "globalThis.__turn=0;"
     "globalThis.__store={'derby.v1':{v:1,pts:1500,race:3}};"
     "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,"
@@ -450,7 +556,7 @@ int main(int argc,char **argv){
     ppm_dir=getenv("DERBY_PPM");
     if(getenv("DERBY_TIER"))tier_env=atoi(getenv("DERBY_TIER"));
     if(getenv("DERBY_CSV"))csv=fopen(getenv("DERBY_CSV"),"w");
-    if(csv)fprintf(csv,"tick,scene,draws,segments,raster,draw_raster_max,draw_steps_max,frame_steps,live_plans,points,instr_max,registered\n");
+    if(csv)fprintf(csv,"tick,scene,surface,screen,draws,segments,raster,draw_raster_max,draw_steps_max,frame_steps,live_plans,points,instr_max,registered\n");
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);host_capabilities_clear();
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}
@@ -458,8 +564,8 @@ int main(int argc,char **argv){
     pocket_input_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
-        {"__log",js_log,1},{"__reg",js_cap_reg,3},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,1},
-        {"__draw",js_cap_draw,2},{"__commit",js_cap_commit,0},{"__tone",js_tone,1}};
+        {"__log",js_log,1},{"__reg",js_cap_reg,3},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
+        {"__draw",js_cap_draw,3},{"__commit",js_cap_commit,0},{"__tone",js_tone,1},{"__probe",js_probe,4}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -498,7 +604,10 @@ int main(int argc,char **argv){
     for(unsigned i=0;i<taps;i++)tap("tab");
     for(unsigned i=0;i<30;i++)frame(0);
     ppm("pad");
-    tap("d");tap("d");tap("e");tap("s");tap("e");
+    /* DERBY_PICK: how many horses on from #1 (default 2, #3): the manual
+     * CLOSE camera follows the pick, so #8 tries the widest close-up. */
+    for(int i=getenv("DERBY_PICK")?atoi(getenv("DERBY_PICK")):2;i>0;i--)tap("d");
+    tap("e");tap("s");tap("e");
     for(unsigned i=0;i<4;i++)frame(0);
     tap("1");
     run_until("gate",10);
@@ -509,15 +618,25 @@ int main(int argc,char **argv){
     /* Race: WIDE, then CLOSE on the pick, FIELD, WIDE again. */
     bool full=tier_env==1;
     unsigned lead_shot=0;
+    const bool keys=!getenv("DERBY_NOCAM");  /* DERBY_NOCAM: the director alone */
     while(!strcmp(scene,"race")){
-        if(scene_t==200)edge("/",true);
-        if(scene_t==201)edge("/",false);
-        if(scene_t==450)edge("/",true);
-        if(scene_t==451)edge("/",false);
-        if(scene_t==650)edge("/",true);
-        if(scene_t==651)edge("/",false);
+        if(keys&&scene_t==200)edge("/",true);
+        if(keys&&scene_t==201)edge("/",false);
+        if(keys&&scene_t==450)edge("/",true);
+        if(keys&&scene_t==451)edge("/",false);
+        if(keys&&scene_t==650)edge("/",true);
+        if(keys&&scene_t==651)edge("/",false);
         unsigned leads=lead_logs;
         frame(0);
+        /* The screen: switching on, the director's VISION shot, its pan,
+         * and WIDE after it (widths: VISION 153 px, WIDE 118, FIELD 68). */
+        const int vw=probe_w;
+        if(vw&&!screen_seen){screen_seen=tick;ppm("vision_on");}
+        if(vw>=140&&screen_seen&&tick>=screen_seen+40&&!vision_shot){vision_shot=tick;ppm("vision");}
+        if(vision_shot&&tick==vision_shot+30)ppm("pan");
+        if(vision_shot&&vw>100&&vw<130&&!wide_shot){wide_shot=tick;ppm("wide_screen");}
+        if(head_frames&&!head_at)head_at=tick;
+        if(head_at&&tick==head_at+24)ppm("head");
         if(scene_t==120)ppm("wide");
         if(scene_t==300)ppm("close");
         if(scene_t==520)ppm("field");
@@ -537,6 +656,20 @@ int main(int argc,char **argv){
         /* Replay: same seed, no camera changes; it must finish identically. */
         tap("r");
         run_until("race",400);
+        /* The replay's own cuts near the screen: CLOSE takes it out of
+         * the frame, FIELD shows it small; then the director again. */
+        unsigned on=0;
+        while(!strcmp(scene,"race")){
+            frame(0);
+            if(probe_w&&!on)on=tick;
+            if(on&&tick==on+40)edge("/",true);
+            if(on&&tick==on+41)edge("/",false);
+            if(on&&tick==on+48)ppm("close_off");
+            if(on&&tick==on+70)edge("/",true);
+            if(on&&tick==on+71)edge("/",false);
+            if(on&&tick==on+80)ppm("field_screen");
+            if(scene_t>3000)FAIL("replay did not end");
+        }
         run_until("photo",3000);
         run_until("res",200);
         REQ(finishes==2);
@@ -581,6 +714,10 @@ int main(int argc,char **argv){
         "REPEAT_REG","BREAK_IF_GT","PLOT_COLOR_REG","LINE_COLOR_REG","CUBIC"};
     printf("ops used:");for(unsigned o=0;o<15;o++)if(ops_used&(1u<<o))printf(" %s",OPN[o]);
     printf("\nops unused:");for(unsigned o=0;o<15;o++)if(!(ops_used&(1u<<o)))printf(" %s",OPN[o]);
+    printf("\nscreen: frames with the face %u (feed drawn in %u, %u segments wholly inside), fill/bezel errors %u, "
+           "frames with anything else on the face %u (%u px), lettering shown in %u frames (%u node checks, %u off the "
+           "face), refs max %u/32, commands max %u/80, HEAD ON frames %u\n",vis_frames,feed_frames,feed_segments,bezel_bad,
+           occluded_frames,occluded_pixels,overlay_frames,rect_checked,rect_mismatch,refs_max,cmds_max,head_frames);
     printf("\nplans: registered %u, unregistered %u, live max %u, most registrations in one frame %u\n",
            registered,unregistered,live_max,frame_reg_max);
     printf("frames %u (procedural frames checked %u): exceptions=%u bad_present=%u failures=%u tones=%u\n",
@@ -591,7 +728,9 @@ int main(int argc,char **argv){
     printf("guest heap (TLSF model, %zu-bit host): before eval %zu, peak during eval %zu (+%zu), after eval %zu, "
            "live peak after GC %zu, whole-run peak %zu; device limit 163840\n",sizeof(void *)*8,before,eval_peak,
            eval_peak-before,after_eval,heap_live_peak,peak_bytes);
-    bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0x7fffu&&frame_reg_max<=1&&go_seen>=1;
+    bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0x7fffu&&frame_reg_max<=1&&go_seen>=1&&
+              !rect_mismatch&&!bezel_bad&&!occluded_frames&&vis_frames&&feed_frames&&overlay_frames&&
+              refs_max<=32&&cmds_max<=80;
     if(full)pass=pass&&finishes==2&&saves==1&&tones>0;
     if(csv)fclose(csv);
     pocket_input_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
