@@ -14,7 +14,12 @@ then runs:
      stored race with the same pick: FINISH / PICK / RESULT must be the same
      strings (the demo runs the game, not a copy of it);
   3. one race at LIGHT and one at HEAVY (same cameras, no demo) for the
-     statistics; the player's race must finish identically in all three.
+     statistics;
+  4. each tier with the director alone (no camera keys), and LIGHT and HEAVY
+     with the pick on #8 (the widest manual close-up).
+The player's race must finish identically in every run. Every run checks the
+big screen: its face drawn exactly inside the bezel, nothing but the feed on
+the face, the view's lettering inside it.
 --m32 builds for i386 with the device's 8-byte JSValue and 4-byte pointers
 (tools/vmtest/m32_sysroot.sh) so the guest heap figures match the firmware's
 object sizes; the default 64-bit build runs with ASan/UBSan. --ppm writes the
@@ -105,6 +110,9 @@ def png(path: Path, images: list[bytes], columns: int) -> None:
 
 ORDER = ["pad", "gate", "start", "wide", "close", "field", "lead", "slow", "photo", "photo_zoom", "result"]
 DEMO_ORDER = ["title", "demo_on", "demo_off", "demo_race", "demo_res"]
+# The big screen: switching on, the director's VISION shot and its pan, WIDE
+# after it, the replay's CLOSE (screen out of frame) and FIELD (small).
+VISION = ["vision_on", "vision", "pan", "wide_screen", "close_off", "field_screen", "lead", "head", "slow"]
 
 
 def sheet(folder: Path, out: Path, order: list[str], columns: int) -> None:
@@ -161,30 +169,34 @@ def main() -> None:
     env = os.environ.copy()
     env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
     env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
-    runs = [1] if args.heap_limit else [1, 0, 2]
+    # (tier, extra env): the scripted game at each tier, then the director
+    # alone (no camera keys) and the widest manual close-up (pick #8).
+    runs = [(1, {})] if args.heap_limit else [(1, {}), (0, {}), (2, {})] + [
+        (t, {"DERBY_NOCAM": "1"}) for t in (0, 1, 2)] + [(t, {"DERBY_PICK": "7"}) for t in (0, 2)]
     finish = {}
-    for tier in runs:
-        e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}.csv"))
+    for tier, extra in runs:
+        e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}{''.join(extra)}.csv"), **extra)
         if args.heap_limit:
             e["DERBY_HEAP_LIMIT"] = str(args.heap_limit)
-        if args.ppm and tier == 1:
+        if args.ppm and tier == 1 and not extra:
             ppm = CACHE / "ppm"
             ppm.mkdir(parents=True, exist_ok=True)
             for old in ppm.glob("*.ppm"):
                 old.unlink()
             e["DERBY_PPM"] = str(ppm)
-        print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]})", flush=True)
+        print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]}) {extra or ''}", flush=True)
         out = run(binary, e)
-        finish[tier] = re.search(r"^finish: (.*)$", out, re.M).group(1)
-        if tier == 1 and not args.heap_limit:
+        finish[(tier, *extra)] = re.search(r"^finish: (.*)$", out, re.M).group(1)
+        if tier == 1 and not extra and not args.heap_limit:
             check_demo_matches_play(binary, env, out)
-    # MID ran ten demos before its first race, LIGHT and HEAVY none: the
-    # player's race must not notice.
+    # MID ran ten demos before its first race, the others none; neither the
+    # tier, the camera keys nor the pick may move the player's race.
     if len(set(finish.values())) > 1:
         raise SystemExit(f"the player's race differs between runs: {finish}")
     if args.ppm:
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
+        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-vision-preview.png", VISION, 4)
 
 
 if __name__ == "__main__":
