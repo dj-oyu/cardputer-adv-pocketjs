@@ -5,8 +5,8 @@
 
 #ifdef ESP_PLATFORM
 #include "system/sys_clock.h"
+#include "app_session.h"
 #include "esp_heap_caps.h"
-#include "esp_netif_sntp.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -32,7 +32,18 @@ autosync_decision_t autosync_policy_decide(autosync_policy_t *p,
         p->next_ms=now_ms+AUTOSYNC_RETRY_MS;
         return AUTOSYNC_NO_CREDENTIALS;
     }
-    if(in->free_bytes<AUTOSYNC_MIN_FREE) {
+    // A kept app was promised its room when it went to sleep, and that promise
+    // was sized for the backdrop and a radio with nothing to spare: the resume
+    // is the next thing to need the heap, and it should not find 48 KB of it
+    // in the air. The clock can wait until the app is resumed or evicted.
+    if(in->app_asleep) {
+        p->next_ms=now_ms+AUTOSYNC_RETRY_MS;
+        return AUTOSYNC_APP_ASLEEP;
+    }
+    // Both, because esp_wifi_init fails on either: enough in total but no
+    // piece large enough is still a refusal, and a refusal is counted as a
+    // FAILED attempt that four of end the boot's syncing for nothing.
+    if(in->free_bytes<AUTOSYNC_MIN_FREE || in->largest_bytes<AUTOSYNC_MIN_LARGEST) {
         p->next_ms=now_ms+AUTOSYNC_RETRY_MS;
         return AUTOSYNC_LOW_MEMORY;
     }
@@ -62,10 +73,21 @@ void autosync_policy_record(autosync_policy_t *p, autosync_outcome_t outcome,
         p->next_ms=now_ms+backoff[p->failures-1<2?p->failures-1:2];
         break;
     case AUTOSYNC_ABORTED:
+        // Someone started an app, which says nothing about the network: not a
+        // failure, and not an attempt either -- counting yields toward the
+        // per-boot cap let ten seconds of idling before each app start use it
+        // up within a day and end syncing until the setting was toggled. What
+        // bounds yields instead is this gap: long enough that the menu-app-
+        // menu rhythm does not raise the radio (and delay the app start by a
+        // teardown) every time, short enough that a boot spent mostly in apps
+        // still gets its clock.
+        if(p->attempts) p->attempts--;
+        p->next_ms=now_ms+AUTOSYNC_ABORT_RETRY_MS;
+        break;
     case AUTOSYNC_BUSY:
         // Not the network's fault, so not a failure; but not immediately
-        // again either, or someone flicking between the menu and an app
-        // would bring the radio up and down each time they came back.
+        // again either. Still an attempt: the cap is what bounds a radio that
+        // is somebody else's for the whole boot.
         p->next_ms=now_ms+AUTOSYNC_RETRY_MS;
         break;
     }
@@ -84,6 +106,15 @@ const char *autosync_outcome_name(autosync_outcome_t outcome) {
 // ----------------------------------------------------------------- attempt
 
 #define HOLDER "time"
+
+// A link that was UP and lost its AP leaves the disconnect's stage and reason
+// in the status but not the state: that is still the OK it wrote on getting an
+// address, which the Wi-Fi screen reads as "clock set". The stage is kept --
+// "NETWORK WENT AWAY" is the true answer, not "NO ANSWER FROM NTP".
+static void settle_link_lost(void) {
+    wifi_time_status_t st=wifi_time_status();
+    wifi_time_status_settle(WIFI_TIME_FAILED,st.stage,st.reason);
+}
 
 autosync_outcome_t autosync_attempt(const autosync_ops_t *ops) {
     esp_err_t err=net_service_acquire(HOLDER);
@@ -107,18 +138,29 @@ autosync_outcome_t autosync_attempt(const autosync_ops_t *ops) {
 
     err=ops->sntp_start();
     if(err!=ESP_OK) {
-        wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_SNTP,(int)err);
+        // Refused because the AP went between the look above and the start:
+        // that is the link's failure, and its stage is the one to show.
+        if(net_service_state()!=NET_SERVICE_UP) settle_link_lost();
+        else wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_SNTP,(int)err);
         goto release;
     }
     began=ops->now_ms();
+    bool lost=false;
     for(;;) {
         err=ops->sntp_wait(AUTOSYNC_SLICE_MS);
-        if(err!=ESP_ERR_TIMEOUT) break;               // set, or a final error
+        if(err==ESP_OK) break;                        // the clock was stepped
+        // An AP that drops the association mid-wait ends the link task, whose
+        // teardown deinitialises SNTP. The wait refuses once the link is not
+        // UP (wifi_time.c serialises the two), so this is seen within a slice
+        // rather than after the full SNTP wait on a radio that is gone.
+        if(net_service_state()!=NET_SERVICE_UP) { lost=true; break; }
+        if(err!=ESP_ERR_TIMEOUT) break;               // a final error
         if(ops->abort_requested()) { out=AUTOSYNC_ABORTED; break; }
         if(ops->now_ms()-began>=AUTOSYNC_SNTP_WAIT_MS) break;
     }
-    // Before the release, never after: the link task's teardown also deinits
-    // SNTP, and two tasks deinitialising it at once is a double free.
+    // This task started SNTP, so this task stops it, and before the release:
+    // after it, the link's teardown would be the one to do it. Idempotent, so
+    // a teardown that already ran (the lost link) leaves nothing to do here.
     ops->sntp_stop();
     if(err==ESP_OK) {
         // The only place this attempt changes anything outside itself. Not
@@ -127,6 +169,8 @@ autosync_outcome_t autosync_attempt(const autosync_ops_t *ops) {
         ops->set_synchronized();
         wifi_time_status_settle(WIFI_TIME_OK,WIFI_TIME_STAGE_NONE,0);
         out=AUTOSYNC_OK;
+    } else if(lost) {
+        settle_link_lost();
     } else if(out!=AUTOSYNC_ABORTED) {
         wifi_time_status_settle(WIFI_TIME_FAILED,WIFI_TIME_STAGE_SNTP,(int)err);
     }
@@ -152,19 +196,27 @@ release:
 
 static const char *TAG = "autosync";
 
-// Same server as the settings screen's sync (wifi_time.c's NTP_SERVER).
-#define NTP_SERVER "pool.ntp.org"
-
 // THE FLOOR, AUTOSYNC_MIN_FREE. NET_RADIO_MIN_FREE (pocket_net.c, 56 KiB,
 // measured 2026-09-07) is what bringing the radio up costs; the 8 KiB on top is
 // an ESTIMATE for what association, DHCP and one SNTP exchange add while it is
 // up (the driver's dynamic RX/TX buffers), which that measurement did not
 // cover. AUTOSYNC_DONE logs min_free for every attempt, and the first device
 // run should replace this estimate with that number. The home screen idles at
-// about 274 KiB, so the floor only matters with an app kept asleep (which is
-// guaranteed 96 KiB, APP_SUSPEND_MIN_FREE) or an overlay running (guaranteed
-// 56 KiB, OVERLAY_FREE_FLOOR) -- in the second case this can skip a sync the
-// overlay's floor would have allowed, which is the side to err on.
+// about 274 KiB, so the floor only matters with an overlay running (guaranteed
+// 56 KiB, OVERLAY_FREE_FLOOR) -- where this can skip a sync the overlay's
+// floor would have allowed, which is the side to err on. An app kept asleep
+// is not weighed here at all: the policy defers for it outright.
+//
+// THE BLOCK, AUTOSYNC_MIN_LARGEST, is PROVISIONAL. No measurement says what
+// the largest single allocation between esp_wifi_init and the end of SNTP is.
+// Known pieces: this task's and the link task's stacks (4 KiB each), the event
+// loop task's (2,304 B, Kconfig default); the driver's own task stack is set
+// inside the closed library and is an ESTIMATE of a few KiB. 16 KiB covers any
+// of those with room, and is well under what an idle home screen offers, so
+// it only refuses on a heap already cut into pieces -- the MEGADEMO precedent,
+// where 10 KB in one piece was not there. RADIO_INIT (wifi_time.c) logs the
+// largest block before esp_wifi_init; a failure there at a known largest is
+// the number that replaces this one.
 
 static autosync_policy_t policy;
 static bool enabled=true;
@@ -180,16 +232,6 @@ static void dev_sleep_ms(unsigned ms) {
     vTaskDelay(t?t:1);
 }
 static bool dev_abort(void) { return atomic_load(&abort_req); }
-static esp_err_t dev_sntp_start(void) {
-    esp_sntp_config_t c=ESP_NETIF_SNTP_DEFAULT_CONFIG(NTP_SERVER);
-    // Stepped, not slewed, as the manual sync does (wifi_time.c).
-    c.smooth_sync=false;
-    return esp_netif_sntp_init(&c);
-}
-static esp_err_t dev_sntp_wait(unsigned ms) {
-    return esp_netif_sntp_sync_wait(pdMS_TO_TICKS(ms));
-}
-static void dev_sntp_stop(void) { esp_netif_sntp_deinit(); }
 // The single call site for this path, like wifi_time.c's for the manual one.
 // sys_clock_set_synchronized(false) is never made: a failed sync does not make
 // a clock that was once set wrong (docs/scenes/solar-sail.md).
@@ -197,12 +239,18 @@ static void dev_set_synchronized(void) { sys_clock_set_synchronized(true); }
 
 static const autosync_ops_t device_ops={
     .now_ms=dev_now_ms, .sleep_ms=dev_sleep_ms, .abort_requested=dev_abort,
-    .sntp_start=dev_sntp_start, .sntp_wait=dev_sntp_wait, .sntp_stop=dev_sntp_stop,
+    // wifi_time.c's, not esp_netif_sntp_* directly: the link task's teardown
+    // deinitialises SNTP too, and only those share its lock.
+    .sntp_start=wifi_time_link_sntp_start, .sntp_wait=wifi_time_link_sntp_wait,
+    .sntp_stop=wifi_time_link_sntp_stop,
     .set_synchronized=dev_set_synchronized, .radio_busy=wifi_time_busy,
 };
 
 static size_t free_internal(void) {
     return heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+}
+static size_t largest_internal(void) {
+    return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
 }
 
 static void attempt_task(void *arg) {
@@ -216,7 +264,7 @@ static void attempt_task(void *arg) {
     // build), the minimum is still a true minimum, just over a longer window.
     bool mon=heap_caps_monitor_local_minimum_free_size_start()==ESP_OK;
     ESP_LOGI(TAG,"AUTOSYNC_START free=%u largest=%u",(unsigned)before,
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+             (unsigned)largest_internal());
     autosync_outcome_t out=autosync_attempt(&device_ops);
     size_t low=heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     if(mon) heap_caps_monitor_local_minimum_free_size_stop();
@@ -291,6 +339,7 @@ void net_autosync_poll(bool eligible, bool key) {
     autosync_inputs_t in={
         .enabled=enabled, .has_credentials=credentials>0,
         .idle_ms=now-eligible_since, .free_bytes=free_internal(),
+        .largest_bytes=largest_internal(), .app_asleep=app_dormant_id()[0]!='\0',
     };
     switch(autosync_policy_decide(&policy,&in,now)) {
     case AUTOSYNC_START:
@@ -305,8 +354,12 @@ void net_autosync_poll(bool eligible, bool key) {
         }
         break;
     case AUTOSYNC_LOW_MEMORY:
-        ESP_LOGW(TAG,"AUTOSYNC_DEFERRED low_memory free=%u floor=%u",
-                 (unsigned)in.free_bytes,(unsigned)AUTOSYNC_MIN_FREE);
+        ESP_LOGW(TAG,"AUTOSYNC_DEFERRED low_memory free=%u floor=%u largest=%u block=%u",
+                 (unsigned)in.free_bytes,(unsigned)AUTOSYNC_MIN_FREE,
+                 (unsigned)in.largest_bytes,(unsigned)AUTOSYNC_MIN_LARGEST);
+        break;
+    case AUTOSYNC_APP_ASLEEP:
+        ESP_LOGI(TAG,"AUTOSYNC_DEFERRED app_asleep %s",app_dormant_id());
         break;
     case AUTOSYNC_NO_CREDENTIALS:   // the ordinary state of a device never set up
     case AUTOSYNC_WAIT:

@@ -59,6 +59,7 @@ static wifi_time_network_t nets[WIFI_TIME_SCAN_MAX];
 static unsigned nets_n;
 static bool     nets_truncated;
 static wifi_time_state_t scan_shown=WIFI_TIME_IDLE;
+static bool     scan_waiting;         // a scan asked for while the radio was not ours
 static wifi_time_status_t latest;     // sampled by wifi_ui_dirty(), drawn by draw()
 
 // memset() on a buffer that is dead afterwards is exactly what the compiler is
@@ -93,11 +94,17 @@ static void follow_selection(void) {
 // back ESP_ERR_INVALID_STATE and read to the person as a broken button; the
 // state we already have says so without asking.
 static void begin_scan(bool announce) {
+    scan_waiting=false;
     if(wifi_time_scan_state()==WIFI_TIME_RUNNING) return;
     if(latest.state==WIFI_TIME_RUNNING) {
         if(announce) snprintf(notice,sizeof notice,"SYNC RUNNING");
         return;
     }
+    // Held, but not by a sync this screen shows: the home screen's clock sync
+    // still tearing down after its yield ran out (AUTOSYNC_YIELD ... LATE).
+    // That clears on its own within seconds, so the scan waits for it in
+    // wifi_ui_dirty() instead of failing as a busy radio nobody here started.
+    if(wifi_time_busy()) { scan_waiting=true; return; }
     esp_err_t err=wifi_time_scan_start();
     if(err!=ESP_OK) {
         snprintf(notice,sizeof notice,"SCAN BUSY %s",esp_err_to_name(err));
@@ -454,12 +461,16 @@ bool wifi_ui_dirty(void) {
         latest=now;
         dirty=true;
     }
+    // After `latest`, so a sync started the frame the lock cleared is seen by
+    // begin_scan() as the sync it is rather than raced into a busy scan.
+    if(scan_waiting && !wifi_time_busy()) { begin_scan(false); dirty=true; }
     return dirty;
 }
 
 // The scan's own line, which is a different thing from the sync's: running,
 // failed and found-nothing are three answers, not one empty list.
 static void scan_line(char *out, size_t size) {
+    if(scan_waiting) { snprintf(out,size,"WAITING FOR RADIO"); return; }
     switch(scan_shown) {
     case WIFI_TIME_RUNNING: snprintf(out,size,"SCANNING"); return;
     case WIFI_TIME_FAILED:  snprintf(out,size,"SCAN FAILED"); return;
