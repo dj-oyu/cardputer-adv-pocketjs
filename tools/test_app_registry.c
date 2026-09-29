@@ -79,6 +79,18 @@ static void test_admission(void) {
     CHECK(megademo && !strcmp(megademo->title,"MEGADEMO"));
     CHECK(megademo && !strcmp(megademo->entry,"apps/kasane/proc_megademo.js"));
     CHECK(megademo && megademo->works==APP_WORKS_NONE);
+    // The games: one row each, started from the home menu, no works library.
+    static const struct { const char *id, *title, *entry; } games[]={
+        {"local.lcdcatch","LCD CATCH","apps/lcdcatch/lcd_catch.js"},
+        {"local.derby","DERBY WATCH","apps/derby/derby_watch.js"},
+        {"local.bigwave","BIG WAVE","apps/bigwave/big_wave.js"},
+    };
+    for(unsigned i=0;i<sizeof games/sizeof games[0];i++) {
+        const app_manifest_t *game=app_registry_find(games[i].id);
+        CHECK(game && !strcmp(game->title,games[i].title));
+        CHECK(game && !strcmp(game->entry,games[i].entry));
+        CHECK(game && game->works==APP_WORKS_NONE);
+    }
     missing="display.kasane";
     CHECK(!app_registry_admit(hello,"0.1.0",supported,NULL,reason,sizeof reason));
     CHECK(!strcmp(reason,"NEEDS display.kasane"));

@@ -13,6 +13,9 @@
 
 static const char *const CAPS_NONE[]   = {NULL};
 static const char *const CAPS_KASANE[] = {"display.kasane", "input.action", NULL};
+// Games read held keys (pocket.input.keys, docs/platform/keystate.md) and make sound.
+static const char *const CAPS_GAME[]   = {"display.kasane", "input.action", "input.keys", NULL};
+static const char *const CAPS_GAME_OPT[]= {"audio.tone", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
 static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
 // pet.companion is optional rather than required so that a board without NVS
@@ -74,6 +77,20 @@ static const app_manifest_t MANIFESTS[] = {
     {.id="local.videolab", .title="VIDEO LAB", .entry="apps/kasane/video_lab.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
      .required=CAPS_KASANE, .optional=CAPS_NONE, .works=APP_WORKS_NONE},
+
+    // The three games. One row each, kept apart so that each game can change
+    // its own capabilities without touching its neighbours.
+    {.id="local.lcdcatch", .title="LCD CATCH", .entry="apps/lcdcatch/lcd_catch.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_GAME, .optional=CAPS_GAME_OPT, .works=APP_WORKS_NONE},
+
+    {.id="local.derby", .title="DERBY WATCH", .entry="apps/derby/derby_watch.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_GAME, .optional=CAPS_GAME_OPT, .works=APP_WORKS_NONE},
+
+    {.id="local.bigwave", .title="BIG WAVE", .entry="apps/bigwave/big_wave.js",
+     .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
+     .required=CAPS_GAME, .optional=CAPS_GAME_OPT, .works=APP_WORKS_NONE},
 
     // Both of its capabilities are REQUIRED rather than optional, and that is
     // not strictness for its own sake: without the card there is nothing to

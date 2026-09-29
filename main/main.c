@@ -458,6 +458,12 @@ extern const char grid_lab_start[] asm("_binary_grid_lab_js_start");
 extern const char grid_lab_end[] asm("_binary_grid_lab_js_end");
 extern const char video_lab_start[] asm("_binary_video_lab_js_start");
 extern const char video_lab_end[] asm("_binary_video_lab_js_end");
+extern const char lcd_catch_start[] asm("_binary_lcd_catch_js_start");
+extern const char lcd_catch_end[] asm("_binary_lcd_catch_js_end");
+extern const char derby_watch_start[] asm("_binary_derby_watch_js_start");
+extern const char derby_watch_end[] asm("_binary_derby_watch_js_end");
+extern const char big_wave_start[] asm("_binary_big_wave_js_start");
+extern const char big_wave_end[] asm("_binary_big_wave_js_end");
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 extern const char pixel_lab_probe_start[] asm("_binary_pixel_lab_probe_js_start");
 extern const char pixel_lab_probe_end[] asm("_binary_pixel_lab_probe_js_end");
@@ -585,6 +591,12 @@ static bool home_key(const keystroke_t *k) {
                       (size_t)(video_lab_end-video_lab_start-1));
 #endif
             break;
+        case 11: begin_run("local.lcdcatch",NULL,0,lcd_catch_start,
+                           (size_t)(lcd_catch_end-lcd_catch_start-1)); break;
+        case 12: begin_run("local.derby",NULL,0,derby_watch_start,
+                           (size_t)(derby_watch_end-derby_watch_start-1)); break;
+        case 13: begin_run("local.bigwave",NULL,0,big_wave_start,
+                           (size_t)(big_wave_end-big_wave_start-1)); break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
