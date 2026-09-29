@@ -25,6 +25,7 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall 
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_time.c -lm -o /tmp/t && /tmp/t"   # WSLのみ
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/test_sfx.py"   # 焼き込んだ効果音表と旧合成の差（WSLのみ。gccはWindows側に無い）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_font.py /tmp/cegen && gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I /tmp/cegen -I tools/hostshim -I main/hal -I main/ui -I main/text tools/test_codeedit.c tools/hostshim/hostshim.c main/ui/codeedit.c main/ui/paint.c main/ui/vimcmd.c main/text/jslex.c -o /tmp/t && /tmp/t"   # エディタの差分再描画と全面再描画が同じピクセルか（WSLのみ）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_net_autosync_test.sh"   # 自動時刻同期の方針・試行と net_service の参照カウントを、偽の無線と偽の時計でASanで（WSLのみ、docs/platform/wifi-autostart.md）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_pocket_text_test.sh && /tmp/test-pocket-text"   # pocket.input.text のセッション寿命を実物のQuickJSごとASanで（WSLのみ。番号を渡すと1件だけ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keystate_test.sh"   # 物理キーの押下集合（keystate）を1書き手・2読み手でASanとTSanに（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_input_test.sh && /tmp/test-pocket-input"   # pocket.input（onAction/held と input.keys）を実物のkeymap_poll・QuickJSで（WSLのみ）
