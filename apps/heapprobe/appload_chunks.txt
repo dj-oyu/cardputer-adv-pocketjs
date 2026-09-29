@@ -1,0 +1,9 @@
+# pocket.app.load()'s device and host checks (docs/vm/eval-peak.md section 7).
+# Embedded only in a POCKET_HEAPPROBE image (main/CMakeLists.txt); the host
+# test tools/test_app_load.c reads this same list.
+app local.hello
+ok    appload_ok.js
+bad   appload_bad.js
+thr   appload_throw.js
+self  appload_self.js
+mid   appload_mid.js
