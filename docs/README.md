@@ -138,6 +138,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [pet-asset-design.md](apps/pet-asset-design.md) | 設計 | ペット画像の省容量化（PPT2 形式） |
 | [mp3-implementation.md](apps/mp3-implementation.md) | 記録 | MP3 実装と実測 |
 | [opus-feasibility.md](apps/opus-feasibility.md) | 記録 | Opus 復号の実現性調査と、実装後の答え合わせ |
+| [big-wave.md](apps/big-wave.md) | 設計・記録 | BIG WAVE: 線分の疑似3Dで大波に乗るゲーム。世界固定の断面と 1/d の級数、host の台本とボット、全画素検証、負荷と上限の使用率、実機で詰める項目 |
 | [backlog.md](apps/backlog.md) | backlog | チュートリアルの見直し、オーバーレイの残り、日本語入力の残り |
 
 ## 過去の知見 — [`archive/`](archive/)
