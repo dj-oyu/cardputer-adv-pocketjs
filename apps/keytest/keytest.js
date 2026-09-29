@@ -12,12 +12,14 @@
     tx.background(INK);
     tx.text({bounds: [6, 4, 234, 18], text: 'KEY TEST   ` QUITS', font: 'body', color: SUN});
     row = [24, 46, 68, 90, 112].map(function (y, i) {
-      return tx.text({bounds: [6, y, 234, y + 16], text: '-', capacity: 160, font: 'body',
+      return tx.text({bounds: [6, y, 234, y + 16], text: '-', capacity: 128, font: 'body',
         color: i ? CYAN : MINT});
     });
   }
   function put(tx, d, ev) {
-    row[0].setText(tx, d.length ? d.join(' ') : '-');
+    // Kasane caps a text at 128 bytes; all 56 names joined would exceed it.
+    const s = d.join(' ');
+    row[0].setText(tx, s.length > 124 ? s.slice(0, 121) + '...' : (s || '-'));
     row[1].setText(tx, 'NOW ' + d.length + '  MAX ' + most);
     row[2].setText(tx, 'PRESS ' + p + '  RELEASE ' + r);
     row[3].setText(tx, ev.slice(0, 8).join(' ') || '-');
