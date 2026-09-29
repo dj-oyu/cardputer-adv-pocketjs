@@ -1,5 +1,6 @@
 #include "pocket_app.h"
 #include "pocket_api.h"
+#include "pocket_app_load.h"
 #include "app_session.h"
 #include "jsconsole.h"
 #include "pocket_clock.h"
@@ -981,6 +982,10 @@ esp_err_t pocket_app_install(JSContext *ctx, void *user_data) {
     // Registering second means info is defined first, as it was when the object
     // was built in one place.
     if((err=pocket_api_lazy(ctx,"device",build_metrics,NULL))!=ESP_OK) return err;
+    // pocket.app.load (pocket_app_load.c) joins this namespace from its own
+    // file, the way pocket_workspace.c does; installed from here so that
+    // app_session.c's list of surfaces does not grow for part of one.
+    if((err=pocket_app_load_install(ctx))!=ESP_OK) return err;
 
     JSValue global=JS_GetGlobalObject(ctx);
     JSValue console=JS_GetPropertyStr(ctx,global,"console");
