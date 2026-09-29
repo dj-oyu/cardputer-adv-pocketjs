@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "pocket_sub_impl.inc"
 
 /* ---- the guest allocator as the device charges it (TLSF lengths), as in
@@ -400,7 +401,7 @@ static size_t heap_used(void){JSMemoryUsage m;JS_ComputeMemoryUsage(rt,&m);retur
 static void frame(unsigned buttons){
     pocket_input_pump(0);
     frame_regs=0;
-    char call[32];snprintf(call,sizeof call,"frame(%u)",buttons);
+    char call[32];snprintf(call,sizeof call,"__turn=1;frame(%u)",buttons);
     eval(call,strlen(call),"frame.js");
     if(frame_regs>frame_reg_max)frame_reg_max=frame_regs;
     present((uint64_t)tick*33333u);
@@ -415,6 +416,13 @@ static void run_until(const char *s,unsigned limit){
     while(strcmp(scene,s)){frame(0);if(++n>limit)FAIL("scene %s not reached from %s",s,scene);}
 }
 
+/* The device interrupts a source evaluation after 2 s (app_session.c). The
+ * host is far faster, so this catches only a loop that never ends, which is
+ * what the device hit; without it the harness would hang instead of failing. */
+static double eval_deadline;
+static double now_s(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
+static int eval_interrupt(JSRuntime *r,void *u){(void)r;(void)u;return eval_deadline>0&&now_s()>eval_deadline;}
+
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
     "(function(){const P=kasane.procedural,R=P.register,U=P.unregister,B=P.beginFrame,D=P.draw,C=P.commit;"
@@ -423,9 +431,14 @@ static const char PRELUDE[]=
     "P.beginFrame=function(c,s){const r=s===undefined?B.call(P,c):B.call(P,c,s);__begin(c);return r};"
     "P.draw=function(h,i){D.call(P,h,i);__draw(h,i)};"
     "P.commit=function(){C.call(P);__commit()};})();"
+    "globalThis.__turn=0;"
     "globalThis.__store={'derby.v1':{v:1,pts:1500,race:3}};"
     "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,"
-    "capabilities:{get:n=>({name:n,supported:true,available:true})},memory:{info:()=>({internalFreeBytes:40000})},"
+    /* The device samples the native heap at the start of a turn, so while the
+     * source evaluates internalFreeBytes is null (2026-09-30: a startup loop
+     * waiting on it spun into the 2 s evaluation deadline). Same here. */
+    "capabilities:{get:n=>({name:n,supported:true,available:true})},"
+    "memory:{info:()=>({internalFreeBytes:__turn?40000:null})},"
     "audio:{cue:()=>true,tone:s=>{__tone(s.frequencyHz);return Promise.resolve()}},"
     "storage:{get:k=>Promise.resolve(k in __store?{value:JSON.parse(JSON.stringify(__store[k])),revision:1}:null),"
     "set:(k,v)=>{__store[k]=JSON.parse(JSON.stringify(v));return Promise.resolve({revision:1})}}};";
@@ -462,7 +475,9 @@ int main(int argc,char **argv){
         JS_FreeValue(ctx,fn);return 0;
     }
     edge("enter",true);                     /* the key that launched it */
+    eval_deadline=now_s()+2;JS_SetInterruptHandler(rt,eval_interrupt,NULL);
     bool ok=eval(src,n,path);
+    eval_deadline=0;
     const size_t eval_peak=peak_bytes;
     present(0);
     JS_RunGC(rt);
