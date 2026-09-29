@@ -179,7 +179,7 @@
   const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
     th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
   const ST = pocket.storage;
-  function save() { try { ST.set('derby.v1', {v: 1, pts: pts, race: raceNo}).then(nop, nop); } catch (e) {} }
+  function save() { if (dm) return; try { ST.set('derby.v1', {v: 1, pts: pts, race: raceNo}).then(nop, nop); } catch (e) {} }
   try {
     ST.get('derby.v1').then(r => {
       const v = r && r.value;
@@ -277,6 +277,7 @@
           tt([8 + 30 * i, 13, 32 + 30 * i, 24, 0xd8e8ffff, 4])));
       }
       R.t = TX[pad ? 0 : res0 ? 2 : 1].map(b => tt(b));
+      R.dm = tt([212, 109, 238, 120, 0xfffb96ff, 4], 'DEMO');
       up(tx);
     });
   }
@@ -284,7 +285,7 @@
     let s;
     if (scene === 'pad') {
       const h = F.h[pick];
-      s = ['RACE ' + raceNo + '  1000M STRAIGHT  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
+      s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M STRAIGHT  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
         STY[h.sty] + (od ? ' x' + od[pick] : ''), 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
       for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od ? od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]) : '-');
       R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
@@ -303,6 +304,7 @@
         ph2 ? (t < 50 ? (t & 8 ? 'PHOTO' : '') : num(fin.o[0])) : '', ph2 && t >= 50 ? fin.mg : ''];
     }
     for (let i = 0; i < s.length; ++i) R.t[i].setText(tx, s[i]);
+    R.dm.setVisible(tx, dm > 0 && !(t & 16));
   }
   // Finish: run the rest of the field unseen, then settle the bet.
   function settle() {
@@ -314,13 +316,13 @@
     pts += dp;
     if (pts < 50) pts = 1000;
     fin = {o: o, mg: mg, dp: dp};
-    log('FINISH race=' + raceNo + ' seed=' + hex(F.seed) + ' order=' + o.map(i => i + 1) + ' t=' + o.map(i => rs.tc[i].toFixed(3)) + ' margin=' + mg);
+    log('FINISH race=' + raceNo + ' seed=' + hex(F.seed) + ' order=' + o.map(i => i + 1) + ' t=' + o.map(i => rs.tc[i]) + ' margin=' + mg);
     if (!replay) { log('RESULT pick=' + (pick + 1) + ' place=' + (o.indexOf(pick) + 1) + ' delta=' + dp + ' points=' + pts); save(); }
     notes = (o[0] === pick ? WIN : LOSE).slice();
   }
 
   function frame_() {
-    const P = k => K.pressed(k);
+    const P = k => dk === 0 ? K.pressed(k) : k === dk;
     ++t;
     if (camT > 0) --camT;
     if (P('tab')) { tier = (tier + 1) % 3; drop(['stands', 'crowd']); want(['stands', 'crowd']); log('TIER ' + tier); }
@@ -392,9 +394,42 @@
     };
     if (need) { build(up); need = 0; } else V.patch(up);
   }
+  // ---- Demo: DEMO_IDLE_S of no key at the paddock (wall clock), then the
+  // game plays itself, its keys fed to P(). Player state is set aside; races
+  // 1e6+n are the demo's seeds; silent (A = null); no save.
+  const DEMO_IDLE_S = 15, DEMO_RES = 150, GK = [...'adesr1,/', 'tab'];
+  let dm = 0, dk = 0, dn = 0, idle = 0, kp = '', bk;
+  function demo(on, n) {
+    if (!on) { [pts, raceNo, pick, stake, A] = bk; notes = []; drop(RUN); drop(['photo']); }
+    log('DEMO ' + (on ? 'START ' : 'END ') + [pts, raceNo, pick, stake]);
+    if (on) { bk = [pts, raceNo, pick, stake, A]; A = null; raceNo = 1e6 + ++dn; pick = 0; stake = 100; }
+    dm = on; dk = ''; idle = n;
+    enter('pad');
+  }
+  // A key ends the demo and is spent doing so (dk '' matches no key).
+  function attract(b) {
+    const k = K.down().join(), n = pocket.time ? pocket.time.now() : 0;
+    let hit = b || k && k !== kp;
+    for (const x of GK) hit = hit || K.pressed(x);
+    kp = k;
+    if (!dm) {
+      dk = 0;
+      if (!idle || hit || k || scene !== 'pad') idle = n;
+      else if (n - idle >= DEMO_IDLE_S * 1e3) demo(1, n);
+      return;
+    }
+    if (hit || scene === 'res' && t > DEMO_RES) return demo(0, n);
+    dk = '';
+    // Favourite, then second favourite, one A/D step a time, then 1.
+    if (scene === 'pad' && od && t > 45 && !(t % 12)) {
+      const g = [0, 1, 2, 3, 4, 5, 6, 7].sort((a, c) => od[a] - od[c] || a - c)[1 - dn % 2];
+      dk = g === pick ? '1' : (g - pick + 8) % 8 > 4 ? 'a' : 'd';
+    }
+    if (scene === 'race' && t % 240 === 120) dk = '/';
+  }
   globalThis.frame = function (b) {
-    if (b & 0x2000) { save(); return log('SAVE points=' + pts + ' race=' + raceNo); }
-    try { frame_(); } catch (e) { log('FRAMEFAIL ' + scene + ' ' + e); throw e; }
+    if (b & 0x2000) { if (dm) demo(0); save(); return log('SAVE points=' + pts + ' race=' + raceNo); }
+    try { attract(b); frame_(); } catch (e) { log('FRAMEFAIL ' + scene + ' ' + e); throw e; }
     sound();
   };
   enter('pad');
