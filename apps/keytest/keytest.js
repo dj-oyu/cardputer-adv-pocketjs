@@ -12,7 +12,7 @@
     tx.background(INK);
     tx.text({bounds: [6, 4, 234, 18], text: 'KEY TEST   ` QUITS', font: 'body', color: SUN});
     row = [24, 46, 68, 90, 112].map(function (y, i) {
-      return tx.text({bounds: [6, y, 234, y + 16], text: '-', capacity: 64, font: 'body',
+      return tx.text({bounds: [6, y, 234, y + 16], text: '-', capacity: 160, font: 'body',
         color: i ? CYAN : MINT});
     });
   }
