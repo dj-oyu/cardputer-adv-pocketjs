@@ -1954,7 +1954,7 @@ esp_err_t app_tick(uint32_t buttons) {
         // BUSY (backlog R3a: seen on the device right after an OOM's long
         // collection got a frame parked). Give the ticket its display turn
         // here, as the top-of-turn gate does, and hold this turn's keys for
-        // the next one. Back is not held: it is the guest's last save turn.
+        // the next one.
         //
         // A procedural commit() is the same case without a ticket: it marks
         // the frame pending and invalidates, and the next frame()'s
@@ -1962,9 +1962,22 @@ esp_err_t app_tick(uint32_t buttons) {
         // possible since a parked frame keeps its procedural frame
         // (end_guest_turn()); measured on the device as one lost frame after
         // every frame that spanned a park.
-        if(!leaving&&(pocket_kasane_has_submission()||pocket_proc_pending())) {
-            deferred_buttons|=buttons;
-            return present_frame();
+        //
+        // Back is not held: it is the guest's last save turn, and there is no
+        // later turn to deliver it on. It is the turn that meets this most
+        // surely, too -- its continuation cannot yield, so a parked frame()
+        // always runs to its commit() here. So Back gets the same present,
+        // then goes on to frame(0x2000) in this turn; without it an app that
+        // opens its frame first (MEGADEMO does) lost the save to BUSY and the
+        // session ended EXECUTION FAILED. The present's time comes out of the
+        // leave budget's job allowance, not the save: frame() is never cut.
+        if(pocket_kasane_has_submission()||pocket_proc_pending()) {
+            if(!leaving) {
+                deferred_buttons|=buttons;
+                return present_frame();
+            }
+            esp_err_t shown=present_frame();
+            if(shown!=ESP_OK) return shown;
         }
     }
     continuation_turns=0;

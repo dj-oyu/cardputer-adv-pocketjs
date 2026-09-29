@@ -199,6 +199,45 @@ static void park_contract(JSContext *ctx){
     pocket_proc_reset();
 }
 
+/* Back's save turn (app_tick(0x2000)): yield is off, so the continuation runs
+ * the parked frame() to its commit() and leaves that frame pending; the save
+ * frame(0x2000) that follows in the same host turn opens a frame first, as
+ * MEGADEMO's does. Without a present between the two its beginFrame() is BUSY
+ * (the save is lost and the session ends EXECUTION FAILED); app_tick() now
+ * presents there, which is settle() here. */
+static void leave_contract(JSContext *ctx){
+    bool threw;
+    eval_ok(ctx,
+        "globalThis.a=proc.register(dotAt(10,10,0xffff));"
+        "globalThis.saving=false;"
+        "globalThis.frame=()=>{proc.beginFrame(0);if(!saving){requestYield();spin()}"
+        "proc.draw(a,[]);proc.commit()}");
+    /* Before: continuation, then the save frame at once. */
+    REQUIRE(call_frame(ctx,&threw));
+    REQUIRE(!resume(ctx,&threw)&&!threw);
+    pocket_proc_end_turn();
+    REQUIRE(pocket_proc_pending());
+    eval_ok(ctx,"saving=true");
+    REQUIRE(!call_frame(ctx,&threw)&&threw);
+    eval_ok(ctx,"expect(()=>proc.beginFrame(0),'BUSY')");
+    pocket_proc_end_turn();
+    settle(actual);
+    /* After: the finished frame is presented first; the save frame opens,
+     * draws and commits. */
+    eval_ok(ctx,"saving=false");
+    REQUIRE(call_frame(ctx,&threw));
+    REQUIRE(!resume(ctx,&threw)&&!threw);
+    pocket_proc_end_turn();
+    settle(actual);
+    REQUIRE(actual[10*KSN_PROC_W+10]==0xffff);
+    eval_ok(ctx,"saving=true");
+    REQUIRE(!call_frame(ctx,&threw)&&!threw);
+    pocket_proc_end_turn();
+    settle(actual);
+    REQUIRE(actual[10*KSN_PROC_W+10]==0xffff&&count_color(actual,0xffff)==1);
+    pocket_proc_reset();
+}
+
 /* Bug 2: the 33rd register() is LIMIT_EXCEEDED before any array is read or
  * any byte allocated, so a low heap cannot turn it into OUT_OF_MEMORY. */
 static void limit_contract(JSContext *ctx){
@@ -274,6 +313,7 @@ int main(void){
     JS_FreeValue(ctx,global);
     eval_ok(ctx,prelude);
     park_contract(ctx);
+    leave_contract(ctx);
     limit_contract(ctx);
     unsigned pie=0;
     sizing_contract(ctx,&pie);
@@ -287,7 +327,8 @@ int main(void){
     pocket_proc_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("PASS procedural turn: parked frame commits after 1 and 3 parks, terminated/thrown "
-           "frame carries nothing, limit before allocation, per-count points (%u PIE batches)\n",
+           "frame carries nothing, Back's save frame opens after the finished frame is presented, "
+           "limit before allocation, per-count points (%u PIE batches)\n",
            (unsigned)pie_batches);
     return 0;
 }
