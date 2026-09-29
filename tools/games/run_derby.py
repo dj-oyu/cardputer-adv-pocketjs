@@ -25,7 +25,8 @@ the face, the view's lettering inside it.
 object sizes; the default 64-bit build runs with ASan/UBSan. --ppm writes the
 composited panels, docs/apps/derby-watch-preview.png (its paddock panel now
 comes after the demos, so it differs from the committed sheet there) and
-docs/apps/derby-watch-demo-preview.png. WSL/Linux only; no
+docs/apps/derby-watch-demo-preview.png and derby-watch-dissolve-preview.png (the
+demo's curtain). WSL/Linux only; no
 device and no serial port.
 """
 from __future__ import annotations
@@ -110,6 +111,9 @@ def png(path: Path, images: list[bytes], columns: int) -> None:
 
 ORDER = ["pad", "gate", "start", "wide", "close", "field", "lead", "slow", "photo", "photo_zoom", "result"]
 DEMO_ORDER = ["title", "demo_on", "demo_off", "demo_race", "demo_res"]
+# The demo's curtain: the idle paddock to black, the card, the demo coming in
+# (fx01..10); a key in a demo race and the paddock fading back in (ex1..5).
+CURTAIN = [f"fx{i:02d}" for i in range(1, 11)] + [f"ex{i}" for i in range(1, 6)]
 # The big screen: switching on, the director's VISION shot and its pan, WIDE
 # after it, the replay's CLOSE (screen out of frame) and FIELD (small).
 VISION = ["vision_on", "vision", "pan", "wide_screen", "close_off", "field_screen", "lead", "head", "slow"]
@@ -197,6 +201,7 @@ def main() -> None:
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-vision-preview.png", VISION, 4)
+        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-dissolve-preview.png", CURTAIN, 5)
 
 
 if __name__ == "__main__":
