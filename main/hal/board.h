@@ -6,7 +6,9 @@
 #define LCD_H 135
 #define STRIP_H 8
 typedef enum { KEY_NONE, KEY_ENTER, KEY_BACK, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN } board_key_t;
-typedef struct { uint8_t row, col; bool pressed; } board_keyevent_t;
+// `overflow`: the controller's FIFO filled and dropped events after this one
+// (see board_key_event). The event itself is still valid.
+typedef struct { uint8_t row, col; bool pressed, overflow; } board_keyevent_t;
 esp_err_t board_init(void);
 // Brings up the SPI3 bus the microSD slot and the EXT connector share, once.
 // Idempotent, lazy, and never released: callers add a device, they do not own

@@ -26,8 +26,9 @@ PY
 
 gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Werror \
   -fno-omit-frame-pointer \
-  -I "$QJS" -I "$CACHE" -I tools/hostshim -I main -I main/pocket \
+  -I "$QJS" -I "$CACHE" -I tools/hostshim -I main -I main/pocket -I main/hal -I main/ui/kasane \
   tools/test_pocket_input.c tools/hostshim/pocket_api_stub.c main/pocket/pocket_input.c \
+  main/hal/keymap.c main/hal/keystate.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" \
   "$CACHE/quickjs-vm.o" \
   -lm -o "$OUT"

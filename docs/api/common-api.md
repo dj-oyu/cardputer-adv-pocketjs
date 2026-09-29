@@ -13,7 +13,7 @@
 | 3.1 | オーバーレイ | 実装済み（描画は`pocket.kasane`、region/inputは`pocket.overlay`） | `pocket_kasane.c`、`pocket_overlay.c`、`main/ui/overlay*.c` |
 | 4 | 共通エラー・cancel・Options | 実装済み | `pocket_api.c` |
 | 5 | app／time／log | 実装済み | `pocket_app.c` |
-| 6 | ui／input／input.text | 実装済み | `pocket_ui.c`、`pocket_text.c` |
+| 6 | ui／input／input.text／input.keys | 実装済み（`ui.basic` は未実装） | `pocket_input.c`、`pocket_text.c`、`main/hal/keystate.c` |
 | 7 | storage | 実装済み | `pocket_storage.c` |
 | 7 | fs（`pocket.fs`） | 実装済み。詳細は[ファイルシステムAPI](filesystem-api.md) | `pocket_fs.c` |
 | 7 | workspace（`pocket.workspace`） | 実装済み。srcstore 16スロットの上に構築 | `pocket_workspace.c` |
@@ -291,12 +291,23 @@ pocket.ui.toast(text: string, options?: {durationMs?: number}): void;
 pocket.input.onAction(fn: (e: ActionEvent) => void): Subscription;
 pocket.input.onKey(fn: (e: KeyEvent) => void): Subscription;
 pocket.input.held(action: string): boolean;
+pocket.input.keys: KeyState;                  // capability "input.keys"
 pocket.input.text.open(options: TextOptions): TextSession;
+type KeyState = {
+  held(key: string): boolean;                 // いま押されている
+  pressed(key: string): boolean;              // 前のターンから押された（1回以上）
+  released(key: string): boolean;             // 前のターンから離された（1回以上）
+  down(): string[];                           // 押されているキーの正規名、行→列の順
+};
 ```
 
 座標は左上原点、x右／y下、単位px。色は0xRRGGBBAA。fontは `small`（英字）、`body`（日本語12px）、`compact`（日本語8px）。文字サイズを自動縮小しない。TextSpecは矩形のほかtext、font、colorを必須とし、表示は矩形でclipする。折返し・省略は初版で暗黙実施せず、複数行は改行で指定する。ListSpec.itemsは上記配列、selectedはid。リストは選択変更の描画だけを担当し、操作イベントとの接続はアプリが行う。
 
 screenは非表示で生成、pushで有効化。popは画面を破棄し直前へ戻る。最後の画面からpopはapp.exitと同じ。最大画面深度を制限する。異なる画面のノードを混ぜた操作はINVALID_ARGUMENT。削除済みノード操作はCLOSED。表示・フォント確保のnative予算を先に確認してから変更を適用する。超過時は旧表示を維持する。
+
+**`pocket.input.keys`（実装済み、2026-09-29）は物理キーの状態。** ゲームの連続移動と同時押しのための面で、`onAction` が6アクションに縮約するものを、キー単位でそのまま返す。キー名は正規名が56個: 文字キーはキートップの素の文字（`"e"` `"1"` `";"` `` "`" ``、英字は小文字）、残りは `"del"` `"tab"` `"enter"` `"space"` `"fn"` `"shift"` `"ctrl"` `"opt"` `"alt"`。別名 `"up"` `"left"` `"down"` `"right"`（`;` `,` `.` `/`、Fnで矢印になるキー）と `"esc"` `"back"`（`` ` ``）も受け、名前はASCIIの大文字小文字を区別しない（`"E"` は `"e"`）。Shiftは独立したキーで、他のキーの名前を変えない。文字列でない引数と未知の名前は `INVALID_ARGUMENT`。`down()` は正規名だけを返す。
+
+状態は**ゲストのターンの頭で1回だけ読む**（`onAction` と同じポンプ）。1回の `frame()` の中で何度呼んでも同じ値で、`pressed`/`released` は前のターンの読み取りからの辺を数えたものなので、1フレームより短い押下も1回の押下と1回の解放として見える。**アプリが見ていない間に押されていたキーは、離されるまで見えない**: セッション開始（起動したEnter）、中断からの再開、ホストがキーボードを持っていたターン（テキスト欄、入力を止めるSYSTEM通知、ピッカー画面）の後。その間の押下・解放は辺として届かない。キーパッドのFIFOがあふれたら押されていたキーをすべて解放扱いにする（押しっぱなしで止まらず、離れたまま止まる側へ倒す）。`limits` は無い（同時押しの上限は実機で未測定で、コードも制限しない）。オーバーレイのセッションには `pocket.input` 自体が無い。実装と設計は[キー状態層](../platform/keystate.md)。
 
 ActionEventは `{action:"left"|"right"|"up"|"down"|"accept"|"back", phase:"press"|"repeat"|"release", timeMs:number}`。KeyEventは `{key:string, code:string, modifiers:{shift,ctrl,alt,fn,opt}, phase, timeMs}`で、文字の確定は含めない。key/codeの一覧は実装時にキーマップから公開する。onActionはIMEやホストに消費されなかった操作だけを受ける。back未購読時はホストがpopを行い、購読時はアプリが処理を担当する。ForceStopは購読不可で、アプリより先に処理する。
 

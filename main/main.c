@@ -33,6 +33,7 @@
 #endif
 #include "pocket_bridge.h"
 #include "pocket_text.h"
+#include "pocket_input.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "vmprobe.h"
@@ -151,6 +152,14 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #endif
     if(pocket_bridge_usb((uint8_t)c))return false;
     if(pet_hub_usb((uint8_t)c))return false;
+#ifdef POCKET_KEYTEST
+    // US-framed key presses and releases (keymap.c), ahead of the text and
+    // menu readings so a frame means the same thing on every screen.
+    if(keymap_inject_usb((uint8_t)c))return false;
+    // The key test app (apps/keytest), started like '1'..'6'. Not a menu row:
+    // tools/test_settings.py and capture_home.py count presses down the menu.
+    if(c=='r'&&!atomic_load(&text_screen)) { atomic_store(&diagnostic,c); return false; }
+#endif
 #ifdef KASANE_PROC_DEVICE_PROBE
     if(c=='|') { atomic_store(&proc_probe_requested,true); return false; }
     if(c=='J') { atomic_store(&diagnostic,c); return false; }
@@ -757,6 +766,10 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 // One frame of a running guest. Back returns to the screen that started it,
 // except from the home screen, where the whole app is what Back leaves.
 static void tick_run(bool have, const keystroke_t *stroke) {
+    // The three pickers below keep the guest from being ticked, so its
+    // input.keys cannot see that the keys pressed meanwhile were theirs.
+    if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal())
+        pocket_input_keys_withhold();
     // The works picker is a host screen over a live guest: while it is up the
     // guest is not ticked and the keys are the picker's. Its promise settles on
     // the turn after it closes, which is the first turn the guest runs again.
