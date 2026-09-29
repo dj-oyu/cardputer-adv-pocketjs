@@ -516,6 +516,7 @@ ksn_result overlay_kasane_present(const ksn_display_port *port,ksn_backdrop_load
 }
 
 bool overlay_running(void) { return state==OVERLAY_RUNNING; }
+bool overlay_starting(void) { return state==OVERLAY_STARTING; }
 
 // The residue, and nothing else reaches here. main.c takes the reserved key
 // first and never calls this with it -- structurally, by returning before this

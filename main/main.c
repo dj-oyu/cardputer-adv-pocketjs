@@ -7,6 +7,8 @@
 #include "editor.h"
 #include "codeedit.h"
 #include "wifi_ui.h"
+#include "net_autosync.h"
+#include "net_service.h"
 #include "tutorial.h"
 #include "jpfont.h"
 #include "skk_session.h"
@@ -668,6 +670,10 @@ static void enter(screen_id_t next) {
     if(next!=SCREEN_HOME) {
         overlay_release();
         shell_release_background_frames();
+        // Every other screen either starts a guest (the editors) or wants the
+        // radio itself (Wi-Fi: its scan starts on arrival and would be refused
+        // as busy). A home-screen clock sync gives way to both.
+        net_autosync_yield("screen");
     }
     if(SCREENS[screen].close) SCREENS[screen].close();
     screen=next;
@@ -733,6 +739,11 @@ static void take_pending_run(void) {
 static void begin_run(const char *app_id, const char *prelude, size_t prelude_len,
                       const char *source, size_t len) {
     owner=screen;
+    // APPS FIRST (docs/platform/wifi-autostart.md). A clock sync the idle home
+    // screen started holds about 48 KB while the radio is up; the guest below,
+    // or the resume of a kept one, is built only after it has given that back.
+    // A no-op when no sync is running, which is nearly always.
+    net_autosync_yield("app");
     // A kept app is resumed by opening it again from the menu (sec.8-4); any
     // other start ends it first -- stop("evict") is its last chance to save --
     // because there is one guest slot and this start is about to take it.
@@ -986,6 +997,9 @@ static void ui_task(void *arg) {
 #endif
         keystroke_t stroke={0};
         bool have=ui_key_receive(&stroke);
+        // For net_autosync_poll(): the home screen is idle only while nobody is
+        // typing at it, and `have` is consumed by the handlers below.
+        const bool key_seen=have;
 #ifdef CONFIG_KSN_DEVICE_PROBE
         /* Replay the visual diagnostic from the physical keyboard as well. */
         if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
@@ -1131,8 +1145,13 @@ static void ui_task(void *arg) {
             // frame to the next by anything like the factor this decides.
             // Not while an app is kept asleep (sec.8-3): an overlay would need
             // the guest slot and the Kasane lease the sleeping app holds.
-            if(!running && screen==SCREEN_HOME && !app_dormant_id()[0])
+            if(!running && screen==SCREEN_HOME && !app_dormant_id()[0]) {
+                // The overlay's start is gated on free heap and a refusal
+                // sticks until the person re-arms it, so a radio that happened
+                // to be up at that moment must not be what it measures.
+                if(overlay_starting()) net_autosync_yield("overlay");
                 overlay_tick(last_frame_us);
+            }
             const char *source=NULL; size_t len=0;
             if(!running && s->wants_run && s->wants_run(&source,&len)) {
                 const char *pre=NULL; size_t pre_len=0;
@@ -1158,6 +1177,9 @@ static void ui_task(void *arg) {
             // first, the way any other start ends it. Outside the SELFTEST
             // block: 'K', '1'..'6' and the sound checks are in every build.
             if(test && !running && screen==SCREEN_HOME && app_dormant_id()[0]) app_stop();
+            // Every diagnostic below builds a guest or measures the heap, and
+            // neither wants a radio in the middle of it.
+            if(test && !running && screen==SCREEN_HOME) net_autosync_yield("diagnostic");
 #ifdef CONFIG_POCKET_VM_SELFTEST
             if((test=='L'||test=='M') && !running && screen==SCREEN_HOME) {
                 overlay_release();
@@ -1205,6 +1227,21 @@ static void ui_task(void *arg) {
         // could not type into the field it just opened.
         atomic_store(&text_screen,
                      SCREENS[screen].takes_text || pocket_text_active());
+
+        // Once a frame, on every screen: a frame away from home is what resets
+        // the idle clock. Eligible means the menu (or an overlay that is up) is
+        // all there is -- no guest, no modal, no error waiting to be read, no
+        // overlay about to start. A kept app does not disqualify it: a
+        // suspension already guarantees the room for a radio
+        // (APP_SUSPEND_MIN_FREE), and the resume yields like any start.
+        // Background music does: it is the one thing on the home screen with a
+        // deadline, it holds about 62 KB, and the radio's effect on it has not
+        // been measured -- the clock can wait for the song to end.
+        net_service_pump();
+        net_autosync_poll(!running && screen==SCREEN_HOME && !home_modal() &&
+                          !home_error && !overlay_starting() &&
+                          !pocket_av_background_active(),
+                          key_seen);
 
         last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
 #ifdef KASANE_P0_PROBE
@@ -1321,6 +1358,8 @@ void app_main(void) {
 #endif
     ESP_ERROR_CHECK(board_init());
     nvs_init();
+    // Before shell_init(), which loads the AUTO TIME SYNC row into it.
+    net_autosync_init();
     pet_hub_init();
     shell_init();
     // After shell_init(), which is where the stored arming bit reaches the
