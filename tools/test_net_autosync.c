@@ -203,7 +203,8 @@ static const autosync_ops_t ops={
 
 static autosync_inputs_t ready(void) {
     return (autosync_inputs_t){.enabled=true,.has_credentials=true,
-                               .idle_ms=AUTOSYNC_IDLE_MS,.free_bytes=274*1024};
+                               .idle_ms=AUTOSYNC_IDLE_MS,.free_bytes=274*1024,
+                               .largest_bytes=100*1024};
 }
 
 static void policy_gates(void) {
@@ -233,6 +234,40 @@ static void policy_gates(void) {
     CHECK(p.attempts==1 && p.running,"counted and running");
     CHECK(autosync_policy_decide(&p,&in,2*AUTOSYNC_RETRY_MS+1)==AUTOSYNC_WAIT,
           "no second attempt while one runs");
+}
+
+// Enough in total is not enough: esp_wifi_init refuses without the piece, and
+// a refusal would be a FAILED attempt, four of which end the boot's syncing.
+static void policy_largest_block(void) {
+    autosync_policy_t p; autosync_policy_init(&p);
+    autosync_inputs_t in=ready();
+    in.largest_bytes=AUTOSYNC_MIN_LARGEST-1;
+    CHECK(autosync_policy_decide(&p,&in,0)==AUTOSYNC_LOW_MEMORY,"plenty free, no piece large enough");
+    CHECK(p.attempts==0 && p.failures==0 && !p.gave_up,"deferred, not counted");
+    CHECK(p.next_ms==AUTOSYNC_RETRY_MS,"looked at again in a minute");
+    for(int i=1;i<=10;i++)
+        CHECK(autosync_policy_decide(&p,&in,(int64_t)i*AUTOSYNC_RETRY_MS)==AUTOSYNC_LOW_MEMORY,
+              "a fragmented heap never becomes an attempt (%d)",i);
+    CHECK(p.attempts==0 && !p.gave_up,"so it never gives up either");
+    in.largest_bytes=AUTOSYNC_MIN_LARGEST;
+    CHECK(autosync_policy_decide(&p,&in,11*AUTOSYNC_RETRY_MS)==AUTOSYNC_START,"at the block");
+}
+
+// An app kept asleep holds the room its resume was promised; the clock waits.
+static void policy_app_asleep(void) {
+    autosync_policy_t p; autosync_policy_init(&p);
+    autosync_inputs_t in=ready();
+    in.app_asleep=true;
+    CHECK(autosync_policy_decide(&p,&in,0)==AUTOSYNC_APP_ASLEEP,"an app asleep defers it");
+    CHECK(p.attempts==0 && p.failures==0 && !p.running,"not counted, nothing running");
+    CHECK(autosync_policy_decide(&p,&in,AUTOSYNC_RETRY_MS-1)==AUTOSYNC_WAIT,"not asked again at once");
+    CHECK(autosync_policy_decide(&p,&in,AUTOSYNC_RETRY_MS)==AUTOSYNC_APP_ASLEEP,"still asleep");
+    in.app_asleep=false;
+    CHECK(autosync_policy_decide(&p,&in,2*AUTOSYNC_RETRY_MS)==AUTOSYNC_START,"evicted or resumed: go");
+    // Even with the heap well above both floors: sleeping is the reason, not room.
+    autosync_policy_init(&p);
+    in=ready(); in.app_asleep=true; in.free_bytes=200*1024;
+    CHECK(autosync_policy_decide(&p,&in,0)==AUTOSYNC_APP_ASLEEP,"asleep outranks a roomy heap");
 }
 
 static void policy_backoff(void) {
@@ -287,20 +322,47 @@ static void policy_aborts_and_cap(void) {
     CHECK(autosync_policy_decide(&p,&in,t)==AUTOSYNC_START,"first");
     autosync_policy_record(&p,AUTOSYNC_ABORTED,t);
     CHECK(p.failures==0 && !p.gave_up,"a yield is not a failure");
-    CHECK(p.next_ms==t+AUTOSYNC_RETRY_MS,"but it waits a minute");
-    autosync_policy_record(&p,AUTOSYNC_BUSY,t);
-    CHECK(p.failures==0,"nor is a busy radio");
+    CHECK(p.attempts==0,"nor an attempt (%u)",p.attempts);
+    CHECK(p.next_ms==t+AUTOSYNC_ABORT_RETRY_MS,"but it waits its own gap");
+    CHECK(AUTOSYNC_ABORT_RETRY_MS>AUTOSYNC_RETRY_MS,"longer than the busy/low-memory minute");
+    CHECK(autosync_policy_decide(&p,&in,t+AUTOSYNC_ABORT_RETRY_MS-1)==AUTOSYNC_WAIT,"not before it");
 
-    // Someone flicking between the menu and an app all day: bounded.
-    autosync_policy_init(&p);
+    // A failure streak survives a yield in the middle: the yield neither adds
+    // to it nor clears it.
+    autosync_policy_init(&p); t=0;
+    CHECK(autosync_policy_decide(&p,&in,t)==AUTOSYNC_START,"f1");
+    autosync_policy_record(&p,AUTOSYNC_FAILED,t);
+    t=p.next_ms;
+    CHECK(autosync_policy_decide(&p,&in,t)==AUTOSYNC_START,"then a yield");
+    autosync_policy_record(&p,AUTOSYNC_ABORTED,t);
+    CHECK(p.failures==1,"the streak is unchanged (%u)",p.failures);
+
+    // Idling ten seconds before every app start, all day: never "gave up".
+    autosync_policy_init(&p); t=0;
     unsigned started=0;
-    for(int i=0;i<200;i++) {
-        t+=AUTOSYNC_RETRY_MS;
+    for(int i=0;i<24*60;i++) {                          // a look every minute for a day
+        t+=60*1000;
         if(autosync_policy_decide(&p,&in,t)==AUTOSYNC_START) {
             started++;
             autosync_policy_record(&p,AUTOSYNC_ABORTED,t);
         }
     }
+    CHECK(!p.gave_up && p.attempts==0,"a day of yields ends nothing (attempts %u)",p.attempts);
+    CHECK(started==24*60*60*1000/AUTOSYNC_ABORT_RETRY_MS,
+          "and raised the radio once per gap: %u",started);
+    CHECK(autosync_policy_decide(&p,&in,t+AUTOSYNC_ABORT_RETRY_MS)==AUTOSYNC_START,
+          "the next idle home still syncs");
+
+    // BUSY is still an attempt, and the cap still bounds it.
+    autosync_policy_init(&p); t=0; started=0;
+    for(int i=0;i<200;i++) {
+        t+=AUTOSYNC_RETRY_MS;
+        if(autosync_policy_decide(&p,&in,t)==AUTOSYNC_START) {
+            started++;
+            autosync_policy_record(&p,AUTOSYNC_BUSY,t);
+        }
+    }
+    CHECK(p.failures==0,"a busy radio is not a failure");
     CHECK(started==AUTOSYNC_MAX_ATTEMPTS,"%u attempts, cap %d",started,AUTOSYNC_MAX_ATTEMPTS);
     CHECK(p.gave_up,"the cap ends it");
 }
@@ -465,6 +527,28 @@ static void attempt_after_lost_link(void) {
     CHECK(net_service_holders()==0 && !radio.running,"cleaned up");
 }
 
+// LATE: a teardown longer than the attempt is prepared to wait. The attempt
+// still returns (a yield is bounded), says ABORTED, and leaves the radio held
+// -- which is the state the Wi-Fi screen arrives into after a LATE yield, and
+// why wifi_ui.c waits for wifi_time_busy() rather than starting a scan. A
+// second attempt in that window is BUSY and touches nothing.
+static void attempt_abort_late(void) {
+    radio_reset(); now=0;
+    radio.teardown_ms=AUTOSYNC_DOWN_WAIT_MS+2000;
+    abort_at=1000;
+    autosync_outcome_t out=autosync_attempt(&ops);
+    CHECK(out==AUTOSYNC_ABORTED,"got %s",autosync_outcome_name(out));
+    CHECK(now-abort_at<=AUTOSYNC_SLICE_MS+AUTOSYNC_DOWN_WAIT_MS+10,
+          "bounded by the down wait (%lld ms)",(long long)(now-abort_at));
+    CHECK(radio.running,"the radio is still coming down: the LATE case");
+    CHECK(net_service_holders()==0,"but the hold is already given back");
+    abort_at=-1;
+    CHECK(autosync_attempt(&ops)==AUTOSYNC_BUSY,"an attempt inside the window is BUSY");
+    CHECK(radio.stops_honoured==1 && radio.starts==1,"and neither stops nor starts a link");
+    fake_sleep(2000);
+    CHECK(!radio.running,"the teardown finishes on its own");
+}
+
 static void attempt_busy(void) {
     radio_reset(); now=0;
     radio.running=true;                          // the settings screen's scan
@@ -591,6 +675,8 @@ int main(void) {
     policy_gates();
     policy_backoff();
     policy_success_and_resync();
+    policy_largest_block();
+    policy_app_asleep();
     policy_aborts_and_cap();
     attempt_ok();
     attempt_link_fails();
@@ -604,6 +690,7 @@ int main(void) {
     attempt_link_lost_during_sntp();
     attempt_link_lost_before_sntp();
     attempt_after_lost_link();
+    attempt_abort_late();
     attempt_busy();
     service_counts();
     service_table_full();

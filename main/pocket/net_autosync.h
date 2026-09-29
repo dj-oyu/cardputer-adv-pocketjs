@@ -11,12 +11,14 @@
 //
 //   when   the home screen has been idle (no key, no app, no modal, no
 //          overlay starting) for AUTOSYNC_IDLE_MS, credentials are stored, the
-//          AUTO TIME SYNC setting is on, and at least AUTOSYNC_MIN_FREE is free
+//          AUTO TIME SYNC setting is on, no app is kept asleep, and at least
+//          AUTOSYNC_MIN_FREE is free with a block of AUTOSYNC_MIN_LARGEST
 //   how    its own task: net_service_acquire("time") -> link up -> SNTP ->
 //          release -> wait for the radio lock to clear
 //   ends   on success (the clock is marked synchronized, the only side effect),
 //          on failure (backoff 1 / 5 / 30 min, AUTOSYNC_MAX_FAILURES in a row
-//          ends it for the boot), or on net_autosync_yield()
+//          ends it for the boot), or on net_autosync_yield() (not a failure;
+//          the next look is AUTOSYNC_ABORT_RETRY_MS later)
 //
 // APPS FIRST. Every path that builds a guest or leaves the home screen calls
 // net_autosync_yield() before it does, and that call returns only once the
@@ -30,26 +32,29 @@
 
 #define AUTOSYNC_IDLE_MS          10000     // home quiet this long before the radio
 #define AUTOSYNC_MIN_FREE         (64*1024) // see net_autosync.c
+#define AUTOSYNC_MIN_LARGEST      (16*1024) // see net_autosync.c; provisional
 #define AUTOSYNC_BACKOFF_1_MS     (60*1000)
 #define AUTOSYNC_BACKOFF_2_MS     (5*60*1000)
 #define AUTOSYNC_BACKOFF_3_MS     (30*60*1000)
 #define AUTOSYNC_MAX_FAILURES     4         // in a row: the first try and 3 retries
 #define AUTOSYNC_RESYNC_MS        (12LL*60*60*1000)
-#define AUTOSYNC_RETRY_MS         (60*1000) // after a yield, a busy radio or low memory
-#define AUTOSYNC_MAX_ATTEMPTS     32        // per boot, whatever their outcome
+#define AUTOSYNC_RETRY_MS         (60*1000) // a busy radio, low memory, an app asleep
+#define AUTOSYNC_ABORT_RETRY_MS   (5*60*1000) // after a yield to an app or a screen
+#define AUTOSYNC_MAX_ATTEMPTS     32        // per boot; yields are not counted
 
 typedef enum {
     AUTOSYNC_OK,          // the clock was set
     AUTOSYNC_FAILED,      // the network or SNTP did not answer, or the AP left
-    AUTOSYNC_ABORTED,     // yielded to an app or a screen
+    AUTOSYNC_ABORTED,     // yielded to an app or a screen; not counted at all
     AUTOSYNC_BUSY,        // the radio belonged to someone else
 } autosync_outcome_t;
 
 typedef enum {
     AUTOSYNC_WAIT,        // nothing to do this frame
     AUTOSYNC_START,       // start an attempt now (counted)
-    AUTOSYNC_LOW_MEMORY,  // due, but not enough heap; deferred, not counted
+    AUTOSYNC_LOW_MEMORY,  // due, but not enough heap in total or in one piece; deferred, not counted
     AUTOSYNC_NO_CREDENTIALS, // due, but nothing stored; deferred, not counted
+    AUTOSYNC_APP_ASLEEP,  // due, but an app is kept asleep; deferred, not counted
 } autosync_decision_t;
 
 typedef struct {
@@ -66,6 +71,8 @@ typedef struct {
     bool    has_credentials;
     int64_t idle_ms;          // how long the home screen has been eligible; <0 not now
     size_t  free_bytes;       // internal 8-bit heap free
+    size_t  largest_bytes;    // its largest free block
+    bool    app_asleep;       // an app is kept in resident suspension
 } autosync_inputs_t;
 
 void autosync_policy_init(autosync_policy_t *p);

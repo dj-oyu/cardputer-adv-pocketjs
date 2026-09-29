@@ -286,12 +286,17 @@ static esp_err_t radio_up(bool connect) {
     // failure prints the level it failed at -- which is the number anyone
     // deciding a guest heap cap actually needs.
     size_t before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    // The largest block too, appended so the existing fields keep their place:
+    // a refusal at a known largest block is what net_autosync.c's provisional
+    // AUTOSYNC_MIN_LARGEST is waiting to be replaced by.
+    size_t largest=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
     err=esp_wifi_init(&init);
     size_t after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
-    ESP_LOGI(TAG,"RADIO_INIT %s free=%u->%u cost=%d",
+    ESP_LOGI(TAG,"RADIO_INIT %s free=%u->%u cost=%d largest=%u",
              err==ESP_OK?"ok":esp_err_to_name(err),
-             (unsigned)before,(unsigned)after,(int)before-(int)after);
+             (unsigned)before,(unsigned)after,(int)before-(int)after,
+             (unsigned)largest);
     if(err!=ESP_OK) return err;
     wifi_inited=true;
 
