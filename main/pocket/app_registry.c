@@ -16,6 +16,8 @@ static const char *const CAPS_KASANE[] = {"display.kasane", "input.action", NULL
 // Games read held keys (pocket.input.keys, docs/platform/keystate.md) and make sound.
 static const char *const CAPS_GAME[]   = {"display.kasane", "input.action", "input.keys", NULL};
 static const char *const CAPS_GAME_OPT[]= {"audio.tone", NULL};
+// LCD CATCH also keeps its two high scores (apps/lcdcatch/README.md).
+static const char *const CAPS_LCD_OPT[] = {"audio.tone", "storage.kv", NULL};
 static const char *const CAPS_KV[]     = {"storage.kv", NULL};
 static const char *const CAPS_IMU[]    = {"sensors.imu", NULL};
 // pet.companion is optional rather than required so that a board without NVS
@@ -82,7 +84,7 @@ static const app_manifest_t MANIFESTS[] = {
     // its own capabilities without touching its neighbours.
     {.id="local.lcdcatch", .title="LCD CATCH", .entry="apps/lcdcatch/lcd_catch.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
-     .required=CAPS_GAME, .optional=CAPS_GAME_OPT, .works=APP_WORKS_NONE},
+     .required=CAPS_GAME, .optional=CAPS_LCD_OPT, .works=APP_WORKS_NONE},
 
     {.id="local.derby", .title="DERBY WATCH", .entry="apps/derby/derby_watch.js",
      .runtime=APP_RUNTIME_POCKET, .api=API_0_1,
