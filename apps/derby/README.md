@@ -147,6 +147,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - **キーで抜ける。** デモ中に押されたキー（`input.keys.down()` に新しく入ったキー、フレームの外で押して離したゲームのキー、`frame(buttons)` のパッドのビット）で、そのフレームのうちにパドックへ戻る。そのフレームは `dk = ''` なので、押したキーはゲームの操作として二度読まれない。途中で抜けたときは走者・写真の plan を解除して、タイトルと同じ 12 本に戻す。
 - **`DEMO` は view のテキスト 1 つ**（`R.dm`、場面を組むたびに作り、`setVisible` で出し入れ）。パドックの ref は 30→31（上限 32）、レースは大型画面の文字 3 つと合わせて 10。大型画面と `DEMO` は重ならない（画面と脚の下端は最も低い VISION でも y = 90、`DEMO` は y 109〜120）。通常のゲーム中は非表示で、LIGHT・HEAVY の全画素ハッシュは追加の前と同じ。
 - **デモ中のパドックの 1 行目は `RACE n` を出さない**（デモのレース番号 1000001 を見せても意味が無い）。
+- **デモの幕**（2026-09-30）。放置の最後の 0.5 秒でパドックが黒へ溶け、黒のままデモへ切り替え、0.7 秒黒を保ってから 0.3 秒で戻る。キーで抜けたときは状態をそのフレームで戻し、画だけが黒から 0.3 秒で戻る（入力は遅れない）。幕は全画面の黒い rect 1 つ（`R.fd`、`R.t` の後・`R.dm` の前）の α で、α 0 の間は `setVisible(false)`。α は壁時計だけから `frame_()` の頭で 1 式（`nw`・`idle`・`fe`）、ゲームは読まない。長さと段は `FX = [下りる ms, 黒の ms, 戻る ms, α の段数]` の 1 か所。パドックの ref は 32/32 で余りが無い。見出し（`DEMO PLAY`）は実機の評価の余裕を割ったので入れていない。詳細は docs の「デモの幕」。
 
 ## ゲスト heap とソースの書き方（デモと大型画面の統合、2026-09-30）
 
@@ -157,6 +158,8 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - **大きな関数を作らない。** 1 つの関数のバイトコードのバッファは 1.5 倍の段で伸びる（… 5,166 → 7,749 → 11,623 B）ので、段を越えると一度に数 KB 増える。大型画面の矩形と draw の組み立てを `frame_()` から `paint()` に出したのはこのため。
 - **コメントはピークに効かない**（host で確かめた。評価はソースを flash から直接読む）。CLAUDE.md の「ソースのバイト数がヒープを食う」は、コードの量については当たるが、コメントと字下げには当たらない（このアプリの host の実測）。
 - 変えたら `DERBY_COMPILE_ONLY=1` で host のピークを見る（最終 +116,880 B、実機の失敗は +122,444 B で観測）。ただし spread やフレームの連続領域のように host のピークに出ない失敗があるので、最後は実機で起動を確かめる。
+- **host のピークは実機の成否の順序すら外すことがある**（デモの幕、2026-09-30）。host で 500 B 低い版が、実機で詰め物 60 文を入れると OOM した。幕の見出しは 4 通りとも実機で詰め物 60 文が通らず、式 1 つの差で成否が反転した。**ソースを変えたら、実機で IIFE の末尾に何もしない 60 文の関数を足して起動すること**（余裕 3.8 KB の確認）。
+- `step()` は `const y = s.x[i] = x + (s.v[i] = v) * dt` などの書き方で、host のバイトコードのバッファが 2,296 B の段の 30 B 手前にいる（2026-09-30）。足すと host のピークが約 1.1 KB 跳ねる。
 
 ## 持ち点の保存
 
@@ -178,6 +181,6 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 # WSL。実物の QuickJS・pocket.kasane・pocket.input.keys で台本を通し、全 draw を 3 通りで実行・全画素比較
 python3 tools/games/run_derby.py            # ASan/UBSan、MID の全台本（デモ 10 回を含む）＋デモ 3 レースを手で走らせた照合＋LIGHT/HEAVY の1レース＋監督だけ・8 番の CLOSE
 python3 tools/games/run_derby.py --m32      # 実機と同じ 8 B JSValue でゲスト heap を測る
-python3 tools/games/run_derby.py --ppm      # docs/apps/derby-watch-preview.png・derby-watch-demo-preview.png・derby-watch-vision-preview.png を作り直す
+python3 tools/games/run_derby.py --ppm      # docs/apps/derby-watch-preview.png・derby-watch-demo-preview.png・derby-watch-vision-preview.png・derby-watch-dissolve-preview.png（デモの幕）を作り直す
 node tools/games/tune_derby.mjs 4000        # レースのモデルの Monte Carlo（Windows でも可）
 ```

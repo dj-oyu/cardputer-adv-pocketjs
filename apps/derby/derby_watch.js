@@ -46,20 +46,18 @@
       if (s.t < h.re) continue;
       // Early the field bunches and the leader pays for the wind; late, a
       // runner within BG m of the lead digs in.
-      let g = early ? top * (1 - PACE * h.sty) + mn(PK1, gap * PK0) : top * (1 + h.kick * (1 + KS * h.sty));
-      if (s.e[i] <= 0) g = top * FADE;
+      let g = s.e[i] <= 0 ? top * FADE : early ? top * (1 - PACE * h.sty) + mn(PK1, gap * PK0) : top * (1 + h.kick * (1 + KS * h.sty));
       if (!early && gap < BG) g += gap * BK;
       if (s.nz) {
         g += s.w[i] = s.w[i] * WR + (s.r() - .5) * WS;
         if (s.r() < .0006) s.sb[i] = .5;
-        if (s.sb[i] > 0) { s.sb[i] -= dt; g *= .9; }
+        if (s.sb[i] > 0) s.sb[i] -= dt, g *= .9;
       }
       const a = g - v, up = h.acc * dt;
       v += a > up ? up : a < -dt ? -dt : a;
       if (v > EB * h.top) s.e[i] -= (v / h.top - EB) * (gap < 1 ? WIND : 1) * dt;
-      s.v[i] = v;
-      const y = s.x[i] = x + v * dt;
-      if (x < D && y >= D) { s.tc[i] = t0 + (D - x) / (y - x) * dt; ++s.done; }
+      const y = s.x[i] = x + (s.v[i] = v) * dt;
+      if (x < D && y >= D) s.tc[i] = t0 + (D - x) / (y - x) * dt, ++s.done;
     }
   }
   const order = s => [0, 1, 2, 3, 4, 5, 6, 7].sort((a, b) => (s.tc[a] || 1e9) - (s.tc[b] || 1e9) || s.x[b] - s.x[a] || a - b);
@@ -321,6 +319,8 @@
           tt([8 + 30 * i, 13, 32 + 30 * i, 24, 0xd8e8ffff, 4])));
       }
       R.t = TX[pad ? 0 : res0 ? 2 : 1].map(b => tt(b));
+      // The curtain: a black rect over everything but DEMO.
+      R.fd = tx.rect({bounds: [0, 0, 240, 135], color: 0});
       R.dm = tt([212, 109, 238, 120, 0xfffb96ff, 4], 'DEMO');
       up(tx);
     });
@@ -348,7 +348,6 @@
         ph2 ? (t < 50 ? (t & 8 ? 'PHOTO' : '') : num(fin.o[0])) : '', ph2 && t >= 50 ? fin.mg : ''];
     }
     for (let i = 0; i < s.length; ++i) if (R.t[i].s !== s[i]) R.t[i].setText(tx, R.t[i].s = s[i]);
-    R.dm.setVisible(tx, dm > 0 && !(t & 16));
   }
   // The runners u of the way through the last sim step.
   function at(u) {
@@ -400,6 +399,8 @@
     const P = k => dk === 0 ? K.pressed(k) : k === dk;
     ++t;
     if (camT > 0) --camT;
+    // The curtain: wall clock only (attract's nw, fe); the game never reads it.
+    fa = rnd(mx(0, mn(1, mx(dm ? 0 : (nw - idle + FX[0]) / FX[0] - DEMO_IDLE_S * 1e3 / FX[0], 1 - (nw - fe) / FX[2]))) * FX[3]) * 255 / FX[3] | 0;
     if (P('tab')) { tier = (tier + 1) % 3; drop(['stands', 'crowd']); want(['stands', 'crowd']); log('TIER ' + tier); }
     load();
     let xs, c, l = pick, close = -1, gate = 0, extra = [];
@@ -470,6 +471,9 @@
     paint(c, xs, close, gate, extra);
     const up = tx => {
       hud(tx);
+      R.dm.setVisible(tx, dm > 0 && !(t & 16));
+      R.fd.setVisible(tx, fa > 0);
+      R.fd.setColor(tx, fa);
       // The lettering follows the face (offsets LO from its left or right
       // edge and its top); its text is the HUD's metres and first three.
       const v = !!vr && von > 10 && vr[2] - vr[0] > 99;
@@ -489,8 +493,10 @@
   // 1e6+n are the demo's seeds; silent (A = null); no save.
   // GK by split, not [...'adesr1,/', 'tab']: that spread ran the guest out of
   // heap on the device while evaluating (README).
-  const DEMO_IDLE_S = 15, DEMO_RES = 150, GK = 'a d e s r 1 , / tab'.split(' ');
-  let dm = 0, dk = 0, dn = 0, idle = 0, kp = '', bk;
+  // The curtain (README): FX = ms to black before the demo, ms held black,
+  // ms back in (also after a key), alpha steps.
+  const DEMO_IDLE_S = 15, DEMO_RES = 150, GK = 'a d e s r 1 , / tab'.split(' '), FX = [500, 700, 300, 8];
+  let dm = 0, dk = 0, dn = 0, idle = 0, kp = '', bk, fe = -1e9, fa = 0, nw = 0;
   function demo(on, n) {
     if (!on) { [pts, raceNo, pick, stake, A] = bk; notes = []; drop(RUN); drop(['photo']); }
     log('DEMO ' + (on ? 'START ' : 'END ') + [pts, raceNo, pick, stake]);
@@ -500,17 +506,17 @@
   }
   // A key ends the demo and is spent doing so (dk '' matches no key).
   function attract(b) {
-    const k = K.down().join(), n = pocket.time ? pocket.time.now() : 0;
+    const k = K.down().join(), n = nw = pocket.time ? pocket.time.now() : 0;
     let hit = b || k && k !== kp;
     for (const x of GK) hit = hit || K.pressed(x);
     kp = k;
     if (!dm) {
       dk = 0;
       if (!idle || hit || k || scene !== 'pad') idle = n;
-      else if (n - idle >= DEMO_IDLE_S * 1e3) demo(1, n);
+      else if (n - idle >= DEMO_IDLE_S * 1e3) demo(1, n), fe = n + FX[1];
       return;
     }
-    if (hit || scene === 'res' && t > DEMO_RES) return demo(0, n);
+    if (hit || scene === 'res' && t > DEMO_RES) return fe = n, demo(0, n);
     dk = '';
     // Favourite, then second favourite, one A/D step a time, then 1.
     if (scene === 'pad' && od && t > 45 && !(t % 12)) {

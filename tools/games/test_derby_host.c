@@ -22,7 +22,11 @@
  * during a demo at the end; the player's points, race, pick, stake, next
  * seed and the store must come through untouched, no tone, cue or
  * storage.set may happen inside a demo, and the DEMO node (read from the
- * panel) must blink inside a demo and be absent outside it.
+ * panel) must blink inside a demo and be absent outside it. The curtain
+ * (a black rect faded by the wall clock): the idle paddock darkens over the
+ * last 500 ms before the switch, the switch frame is black but for DEMO, and
+ * after a key the paddock is black on the key's frame (the game already back)
+ * and untouched 300 ms on; its frames go to the dissolve contact sheet.
  *
  * The big screen (docs/apps/derby-watch.md "大型画面と演出カメラ"): the 'vis'
  * draw must fill exactly the face's interior row by row and ring it one pixel
@@ -523,6 +527,31 @@ static unsigned demo_pixels(void){
     for(int y=109;y<120;y++)for(int x=212;x<238;x++)n+=panel[y*240+x]==DEMO_PX;
     return n;
 }
+/* The curtain (docs/apps/derby-watch.md "デモの幕"). Pixels read back from the
+ * panel: yellow HUD text (the paddock's bottom line is 0xfffb96ff) survives
+ * only where no curtain darkens it; a raised curtain leaves nothing lit but
+ * the DEMO node's box. */
+static unsigned yellow_rows(int y0,int y1){
+    unsigned n=0;
+    for(int y=y0;y<y1;y++)for(int x=0;x<240;x++)n+=panel[y*240+x]==DEMO_PX;
+    return n;
+}
+static unsigned lit_outside_demo(void){
+    unsigned n=0;
+    for(int y=0;y<135;y++)for(int x=0;x<240;x++)
+        n+=panel[y*240+x]!=0&&!(y>=109&&y<120&&x>=212&&x<238);
+    return n;
+}
+/* Contact-sheet frames, ms from the switch into the demo: the idle paddock
+ * going to black, held black, the demo's paddock coming in. */
+static const double FX_AT[]={-600,-450,-300,-150,0,350,700,800,900,1034};
+static unsigned fx_next,curtain_frames;
+static void fx_shot(double ms){
+    char tag[8];
+    while(fx_next<sizeof FX_AT/sizeof FX_AT[0]&&ms>=FX_AT[fx_next]-1e-6){
+        snprintf(tag,sizeof tag,"fx%02u",++fx_next);ppm(tag);
+    }
+}
 static unsigned refs_pad_max;
 /* After every turn: the screen node's state against the bezel of the surface-0
  * frame on show (a surface-1 turn leaves both as they were), and the view's
@@ -612,8 +641,10 @@ static void full_demo(const char *seed0,bool shots){
     while(demo_ends==e0){
         frame(0);
         if(shots){
-            if(!strcmp(scene,"pad")&&scene_t==5)ppm("demo_on");
-            if(!strcmp(scene,"pad")&&scene_t==20)ppm("demo_off");
+            /* After the curtain (t 36 and 52: DEMO lit, then blinked off). */
+            fx_shot(frame_ms-demo_start_ms);
+            if(!strcmp(scene,"pad")&&scene_t==37)ppm("demo_on");
+            if(!strcmp(scene,"pad")&&scene_t==53)ppm("demo_off");
             if(!strcmp(scene,"race")&&scene_t==385)ppm("demo_race");
             if(!strcmp(scene,"res")&&scene_t==40)ppm("demo_res");
         }
@@ -634,11 +665,26 @@ static void demo_phase(void){
     while(now_ms<=t0+14000)frame(0);
     edge("r",true);edge("r",false);frame(0);
     const double t1=frame_ms;
-    while(now_ms<=t1+14900)frame(0);
+    /* The curtain comes down over the last FX[0] ms of the idle paddock: the
+     * HUD's yellow is untouched 600 ms before the switch, gone in the last
+     * frame before it. */
+    unsigned y600=0,ylast=0;
+    while(now_ms<=t1+14900){
+        frame(0);fx_shot(frame_ms-t1-15000);
+        if(!y600&&frame_ms-t1>=14400)y600=yellow_rows(122,135)+1;
+        ylast=yellow_rows(122,135);
+        if(frame_ms-t1>14500)curtain_frames++;
+    }
     REQ(!demo_starts&&frame_ms>t0+15000);
     wait_start();
     printf("  demo 1 started %.1f ms after the last key (frame %.1f ms)\n",demo_start_ms-t1,dt_ms);
     REQ(demo_start_ms-t1>=15000-1e-6&&demo_start_ms-t1<15000+dt_ms);
+    /* The switch frame: black but for DEMO, which is lit. */
+    fx_shot(0);
+    const unsigned card=demo_pixels(),stray=lit_outside_demo();
+    printf("  curtain: HUD yellow px 600 ms before %u, last idle frame %u (%u idle frames under it); switch frame "
+           "DEMO %u px, lit elsewhere %u\n",y600-1,ylast,curtain_frames,card,stray);
+    REQ(y600>1&&!ylast&&card>20&&!stray);
     /* 2. A whole demo, normal speed. */
     full_demo(seed0,true);
     /* 3. At 10 fps the idle is still 15 s of wall clock, not 450 frames. */
@@ -665,10 +711,21 @@ static void demo_phase(void){
             frame(0);if(++i>4000)FAIL("cut %u: %s not reached",c,CUT[c].scene);
         }
         const unsigned p0=picks,t0_=tiers,e0=demo_ends;const double w0=gnum("__sets");
+        if(c==2)ppm("ex1");
         if(CUT[c].key){edge(CUT[c].key,true);frame(0);}else frame(CUT[c].buttons);
         REQ(demo_ends==e0+1&&demo_end_tick==tick-1&&!strcmp(scene,"pad"));
         if(CUT[c].key)edge(CUT[c].key,false);
-        for(unsigned k=0;k<5;k++)frame(0);
+        /* The game is back this frame; only the picture fades in: black on
+         * the key's frame, the HUD untouched FX[2] = 300 ms (9 frames) on. */
+        const unsigned lit=lit_outside_demo()+demo_pixels();
+        if(c==2)ppm("ex2");
+        for(unsigned k=1;k<=10;k++){
+            frame(0);
+            if(c==2&&(k==3||k==6))ppm(k==3?"ex3":"ex4");
+            if(k==9){REQ(yellow_rows(122,135)>0);if(c==2)ppm("ex5");}
+        }
+        printf("  cut %u: key frame lit px %u\n",c,lit);
+        REQ(!lit);
         REQ(picks==p0&&tiers==t0_&&gnum("__sets")==w0&&!strcmp(scene,"pad"));
         printf("  cut %u: %s frame %u, %s\n",c,CUT[c].scene,CUT[c].at,CUT[c].key?CUT[c].key:"buttons 0x80");
         after_demo(seed0);
