@@ -47,7 +47,12 @@ def generate():
     table=OUT/'rom_derby.c';shipped=OUT/'derby_prog_lowered.js'
     subprocess.run(['node',str(ROOT/'tools/kasane_ir/emit_rom_plans.mjs'),str(table),f'derby={app}',
                     '--json',str(OUT/'rom_derby.json')],cwd=ROOT,check=True)
-    subprocess.run(['node',str(ROOT/'tools/kasane_ir/lower_plans.mjs'),'--file',str(app),str(shipped)],
+    # The array path's rows: the same @plan functions packed, from a copy
+    # without the rom mark (DERBY ships them as the built-in table).
+    packed=OUT/'derby_prog.js'
+    packed.write_text(app.read_text(encoding='utf-8').replace('@planDecoder rom */','@planDecoder */'),
+                      encoding='utf-8')
+    subprocess.run(['node',str(ROOT/'tools/kasane_ir/lower_plans.mjs'),'--file',str(packed),str(shipped)],
                    cwd=ROOT,check=True)
     return table,shipped
 
