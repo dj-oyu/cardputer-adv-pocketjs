@@ -9,6 +9,11 @@
 // "@derby-flat" / "@derby-split3|4": the same app unwrapped into one global
 // script, or cut into 3 or 4 loaded by __hpLoad(k) (tools/heapprobe_split.py).
 // alias-*: the other int / int32_t pointer sites of quickjs.c, as checks.
+// "@derby-load3|4": the same 3 or 4 scripts through pocket.app.load('s3c1')..
+// appload-*: pocket.app.load() itself (docs/vm/eval-peak.md sec.7), on the
+// chunks of apps/heapprobe/appload_chunks.txt and `big` (derby's first third).
+// appload-oom wants a limit ('Q44,80000'): `big` must not fit beside the
+// ballast, and must once the ballast is gone.
 //@ baseline
 var n = 1; console.log('HP_EVAL ok'); globalThis.frame = () => {};
 //@ spread-mixed-top
@@ -94,3 +99,23 @@ const s = 'é'.normalize('NFD'), t = 'é'.normalize('NFC'); console.log('HP_EVA
 let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 20) { const t = Date.now(); try { __hpLoad(0); console.log('HP_FRAME ok ms=' + (Date.now() - t)); } catch (e) { console.log('HP_FRAME fail ' + e); } } else if (n === 40) console.log('HP_ALIVE ' + n); };
 //@ lazy-frame-bc
 let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 20) { const t = Date.now(); try { __hpLoadBC(); console.log('HP_FRAME ok ms=' + (Date.now() - t)); } catch (e) { console.log('HP_FRAME fail ' + e); } } else if (n === 40) console.log('HP_ALIVE ' + n); };
+//@ derby-load3
+@derby-load3
+//@ derby-load4
+@derby-load4
+//@ appload-api
+(() => { const L = pocket.app.load, R = []; function t(n, f) { try { R.push(n + '=' + f()); } catch (e) { R.push(n + '=' + e.code + '/' + e.outcome + '/' + e.retryable); } }
+t('cap', () => JSON.stringify(pocket.capabilities.get('app.load').limits)); t('ok', () => L('ok')); t('ok2', () => L('ok')); t('use', () => alF() + alV + alG + alC.n + alS);
+t('nf', () => L('nope')); t('arg', () => L(3)); t('bad', () => L('bad')); t('thr', () => L('thr')); t('thr2', () => L('thr')); t('self', () => L('self') + alSelf);
+console.log('HP_EVAL ' + R.slice(0, 6).join(' ')); console.log('HP_EVAL2 ' + R.slice(6).join(' ')); let n = 0;
+globalThis.frame = () => { if (++n === 10) { const t0 = Date.now(), a = L('mid'), t1 = Date.now(); let b; try { b = L('big'); } catch (e) { b = e.code + ' ' + e.message; }
+console.log('HP_FRAME ok mid=' + a + ' ' + (t1 - t0) + 'ms sum=' + alMid.sum() + ' big=' + b + ' ' + (Date.now() - t1) + 'ms'); } else if (n === 40) console.log('HP_ALIVE ' + n); }; })();
+//@ appload-oom
+(() => { const L = pocket.app.load; let n = 0, ballast = new Uint8Array(20000), a = 'none', b = 'none'; console.log('HP_EVAL ok');
+globalThis.frame = () => { ++n; if (n === 12) console.log('HP_FRAME ok first=' + a + ' retry=' + b); if (n === 40) console.log('HP_ALIVE ' + n); if (n !== 10) return;
+try { L('big'); a = 'loaded'; } catch (e) { a = e === null ? 'null' : e.code + '/' + e.retryable + '/' + e.outcome; }
+ballast = null; try { L('big'); b = 'loaded'; } catch (e) { b = e === null ? 'null' : e.code; } }; })();
+//@ appload-uncaught
+let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 5) pocket.app.load('bad'); };
+//@ appload-evalerr
+pocket.app.load('thr'); globalThis.frame = () => {};

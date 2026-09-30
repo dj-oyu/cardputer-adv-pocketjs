@@ -247,7 +247,11 @@ if(POCKET_HEAPPROBE)
     # The same app unwrapped into one global script (flat) and cut into 3 and
     # 4 global scripts (tools/heapprobe_split.py): the chunked-evaluation
     # spike. Directories per count so the file names, and with them the
-    # embedded symbols, say which set a chunk belongs to.
+    # embedded symbols, say which set a chunk belongs to. The chunks are
+    # embedded by the pocket.app.load() table below, as local.derby's
+    # s3c1..s3c3 and s4c1..s4c4 -- in this image only -- so the spike's
+    # __hpLoad(k) and the product's pocket.app.load('s3c1') read the same
+    # bytes under the same symbols.
     execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_split.py"
                     "${_hp_derby}" 1 "${CMAKE_CURRENT_BINARY_DIR}/hp" --flat
                     RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
@@ -264,9 +268,18 @@ if(POCKET_HEAPPROBE)
         endif()
         foreach(_hp_k RANGE 1 ${_hp_n})
             file(RENAME "${_hp_dir}/derby_watch_c${_hp_k}.js" "${_hp_dir}/hp${_hp_n}_c${_hp_k}.js")
-            target_add_binary_data(${COMPONENT_LIB} "${_hp_dir}/hp${_hp_n}_c${_hp_k}.js" TEXT)
+            string(APPEND _hp_list "s${_hp_n}c${_hp_k} hp${_hp_n}/hp${_hp_n}_c${_hp_k}.js\n")
         endforeach()
     endforeach()
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt" "app local.derby\n${_hp_list}")
+    # pocket.app.load()'s own device check (apps/heapprobe/appload_*.js):
+    # the error paths, and DERBY WATCH's first third as `big` for a load from
+    # frame(), as HELLO WORLD's chunks -- the identity the small variants run
+    # under.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt" "app local.hello\nbig hp3/hp3_c1.js\n")
+    list(APPEND POCKET_APP_CHUNK_LISTS "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt"
+         "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt"
+         "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/appload_chunks.txt")
     # Precompiled DERBY WATCH, if the host has made it (WSL:
     #   python3 tools/vmtest/compile_peak.py apps/derby/derby_watch.js --write .cache/compile_peak/derby.bc)
     # from this same quickjs.c. Absent: the derby-bc variants report no loader.
