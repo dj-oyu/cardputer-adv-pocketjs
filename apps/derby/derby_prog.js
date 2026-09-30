@@ -1,12 +1,15 @@
 'use strict';
 // ---- DERBY's procedural plans, as JS functions (docs/kasane/js-to-ir.md
-// section 5). The build lowers this file (tools/kasane_ir/lower_plans.mjs,
-// main/CMakeLists.txt): each @plan function becomes its compiled IR,
-// nibble-packed, and prog() the decoder that turns it into rows. The file
-// does not run unlowered (prog() throws). Comments before a plan and inside
-// it do not ship; every other comment here does, so keep those short.
-/** @planDecoder */
-function prog(plan, arg) {
+// section 5). The decoder is marked rom: they are the firmware's built-in
+// plans (docs/kasane/flash-plan.md). The build (tools/make_app_chunks.py,
+// main/CMakeLists.txt) compiles them into a const C table
+// (tools/kasane_ir/emit_rom_plans.mjs) and ships this file without them
+// (lower_plans.mjs --rom): the app registers 'derby.<name>' with the
+// function's arguments (load(), derby_view.js). The file does not run
+// unlowered (prog() throws). Comments before a plan and inside it do not
+// ship; every other comment here does, so keep those short.
+/** @planDecoder rom */
+function prog() {
   throw Error('plans are compiled at build time: tools/kasane_ir/lower_plans.mjs');
 }
 // [LIGHT, MID, HEAVY]: stand tiers, crowd rows, dots per bay, roof arc

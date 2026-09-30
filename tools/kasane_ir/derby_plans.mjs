@@ -43,33 +43,41 @@ function main() {
   // files; the table says whether each compiles to its .kjs file's IR.
   const jsFile = opt('--js'), sameAsKjs = [];
   const js = jsFile ? new Map(findPlans(fs.readFileSync(jsFile, 'utf8'), path.basename(jsFile)).map(p => [p.name, p])) : null;
-  for (const [name, text] of Object.entries(T)) {
+  // With --js, every @plan function is a case. Its compiled IR runs against
+  // the hand IR where the hand IR still describes it; against itself where
+  // there is none (the panning plans) or it is stale (crowd: the q27
+  // checkerboard, 64 instructions, changed what it draws; the hand IR froze
+  // at 40), so run_ir.c only checks the VM paths agree and check_js.mjs,
+  // the function against the VM, is the check that counts for those.
+  const STALE = new Set(['crowd']);
+  const names = js ? [...js.keys()] : Object.keys(T);
+  for (const name of names) {
     const file = path.join(dir, name + '.kjs');
-    if (argv.includes('--decompile') && (!fs.existsSync(file) || argv.includes('--force'))) fs.writeFileSync(file, `// ${name}: decompiled from apps/derby/derby_prog.js\n` + decompile(text));
-    if (!fs.existsSync(file)) { rows.push({name, error: 'no .kjs'}); continue; }
-    const hand = parseText(text), handDead = removeDead(hand.map(i => ({...i}))).removed;
+    const text = T[name] && !(js && STALE.has(name)) ? T[name] : null;
+    if (text && argv.includes('--decompile') && (!fs.existsSync(file) || argv.includes('--force'))) fs.writeFileSync(file, `// ${name}: decompiled from apps/derby/derby_prog.js\n` + decompile(text));
+    if (!js && !fs.existsSync(file)) { rows.push({name, error: 'no .kjs'}); continue; }
     let c;
     try {
-      c = compile(fs.readFileSync(file, 'utf8'));
       if (js) {
-        if (!js.has(name)) throw new Error(`no @plan ${name} in ${jsFile}`);
-        const j = compilePlan(js.get(name));
-        sameAsKjs.push(`${name} ${j.text === c.text ? 'same IR as .kjs' : 'IR DIFFERS from .kjs'}`);
-        c = j;
-      }
-    } catch (e) { rows.push({name, hand: hand.length, error: e.message}); continue; }
-    rows.push({name, hand: hand.length, handRegs: stats(hand).regs, handDead, out: c.count, outRegs: stats(c.code).regs,
-      dead: c.dead, remat: c.rematerialised.length, warnings: c.warnings, text: c.text});
-    cases.push({name, hand: text, compiled: c.text});
+        c = compilePlan(js.get(name));
+        if (fs.existsSync(file)) sameAsKjs.push(`${name} ${compile(fs.readFileSync(file, 'utf8')).text === c.text ? 'same IR as .kjs' : 'IR DIFFERS from .kjs'}`);
+      } else c = compile(fs.readFileSync(file, 'utf8'));
+    } catch (e) { rows.push({name, hand: text ? parseText(text).length : '-', error: e.message}); continue; }
+    const hand = parseText(text ?? c.text), handDead = removeDead(hand.map(i => ({...i}))).removed;
+    rows.push({name, hand: text ? hand.length : '-', handRegs: stats(hand).regs, handDead, out: c.count, outRegs: stats(c.code).regs,
+      dead: c.dead, remat: c.rematerialised.length, warnings: c.warnings, text: c.text,
+      note: text ? '' : T[name] ? '  (hand IR stale: against itself)' : '  (no hand IR: against itself)'});
+    cases.push({name, hand: text ?? c.text, compiled: c.text});
   }
   const pad = (s, n) => String(s).padStart(n);
   console.log('plan      hand  regs  dead-in-hand | compiled  regs  remat  diff');
   let th = 0, tc = 0;
   for (const r of rows) {
     if (r.error) { console.log(`${r.name.padEnd(8)} ${pad(r.hand ?? '-', 5)}  ERROR ${r.error}`); continue; }
-    th += r.hand; tc += r.out;
-    console.log(`${r.name.padEnd(8)} ${pad(r.hand, 5)} ${pad(r.handRegs, 5)} ${pad(r.handDead, 13)} | ${pad(r.out, 8)} ${pad(r.outRegs, 5)} ${pad(r.remat, 6)} ${pad((r.out - r.hand > 0 ? '+' : '') + (r.out - r.hand), 5)}` +
-      (r.warnings.length ? '  ' + r.warnings.join('; ') : ''));
+    const hn = typeof r.hand === 'number';
+    if (hn) { th += r.hand; tc += r.out; }
+    console.log(`${r.name.padEnd(8)} ${pad(r.hand, 5)} ${pad(r.handRegs, 5)} ${pad(r.handDead, 13)} | ${pad(r.out, 8)} ${pad(r.outRegs, 5)} ${pad(r.remat, 6)} ${pad(hn ? (r.out - r.hand > 0 ? '+' : '') + (r.out - r.hand) : '-', 5)}` +
+      (r.warnings.length ? '  ' + r.warnings.join('; ') : '') + (r.note || ''));
   }
   console.log(`total    ${pad(th, 5)}                     | ${pad(tc, 8)}              ${pad((tc - th > 0 ? '+' : '') + (tc - th), 5)}`);
   if (js) console.log(sameAsKjs.join('\n'));

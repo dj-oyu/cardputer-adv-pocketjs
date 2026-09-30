@@ -76,8 +76,21 @@ def kasane_sources() -> list[str]:
             if not s.startswith("tools/test_pocket_kasane")]
 
 
-def build(flags: list[str], cache: Path) -> Path:
+def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
+    """The firmware's built-in plan table for src (tools/kasane_ir/
+    emit_rom_plans.mjs, as main/CMakeLists.txt makes it): DERBY's @plan
+    functions when its decoder is marked rom, else an empty table."""
+    out = cache / "ksn_proc_rom_plans.c"
+    prog = src / "derby_prog.js"
+    rom = prog.exists() and re.search(r"@planDecoder\s+rom\b", prog.read_text(encoding="utf-8"))
+    subprocess.run(["node", str(ROOT / "tools/kasane_ir/emit_rom_plans.mjs"), str(out),
+                    *([f"derby={prog}"] if rom else [])], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
+    return out
+
+
+def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby") -> Path:
     cache.mkdir(parents=True, exist_ok=True)
+    table = rom_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
                    stdout=subprocess.DEVNULL)
     data = (ROOT / "apps/pet/assets/pets-compact.bin").read_bytes()
@@ -103,7 +116,7 @@ def build(flags: list[str], cache: Path) -> Path:
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    "tools/games/test_derby_host.c", *kasane_sources(), *EXTRA, *objects,
+                    "tools/games/test_derby_host.c", *kasane_sources(), *EXTRA, str(table), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
@@ -156,7 +169,9 @@ def sheet(folder: Path, out: Path, order: list[str], columns: int) -> None:
 
 def lower(src: Path, dst: Path) -> Path:
     """src (an apps/derby) as the firmware embeds it: every file copied, the
-    @plan functions compiled and prog() the decoder (lower_plans.mjs)."""
+    @plan functions compiled and prog() the decoder (lower_plans.mjs), or,
+    with the decoder marked rom, both removed (the plans are the built-in
+    table build() links, rom_table())."""
     shutil.rmtree(dst, ignore_errors=True)
     subprocess.run(["node", str(ROOT / "tools/kasane_ir/lower_plans.mjs"), str(src), str(dst)],
                    cwd=ROOT, check=True, stdout=subprocess.DEVNULL)

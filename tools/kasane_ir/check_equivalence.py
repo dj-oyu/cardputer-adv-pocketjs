@@ -58,10 +58,17 @@ def js_plans(d: Path) -> Path | None:
 def instrument(root: Path) -> None:
     d = root / "apps/derby"
     view = (d / "derby_view.js").read_text(encoding="utf-8")
-    m = re.search(r"^    else p = \[prog\(T\[n\], k\.concat\(1 / k\[2\].*\n", view, flags=re.M)
-    assert m, "derby_view.js: registration line moved"
-    anchor = m[0]
-    view = view.replace(anchor, anchor + "    __log('REG ' + n + ' ' + JSON.stringify(globalThis.__arg || []));\n")
+    # Built-in plans (the decoder marked rom): load() registers p[0] with
+    # the arguments p[1]. Before those, prog() made the rows and is patched
+    # below to record its arguments.
+    rom = "H.register('derby.' + p[0], p[1], p[2]);\n"
+    if rom in view:
+        view = view.replace(rom, rom + "    __log('REG ' + n + ' ' + JSON.stringify(p[1] || []));\n")
+    else:
+        m = re.search(r"^    else p = \[prog\(T\[n\], k\.concat\(1 / k\[2\].*\n", view, flags=re.M)
+        assert m, "derby_view.js: registration line moved"
+        anchor = m[0]
+        view = view.replace(anchor, anchor + "    __log('REG ' + n + ' ' + JSON.stringify(globalThis.__arg || []));\n")
     # Every draw goes through dr() (derby_view.js), as it is made.
     anchor = "const dr = (n, a) => { if (live[n]) H.draw(live[n], a); };"
     assert anchor in view, "derby_view.js: draw line moved"
@@ -70,6 +77,8 @@ def instrument(root: Path) -> None:
     (d / "derby_view.js").write_text(view, encoding="utf-8")
     # prog() as the app runs it (the decoder, or the text assembler of an
     # older DIR) records its arguments for the REG line.
+    if rom in view:
+        return
     prog, n = re.subn(r"^function prog\((\w+), (\w+)\) \{\n", r"\g<0>  globalThis.__arg = \2;\n",
                       (d / "derby_prog.js").read_text(encoding="utf-8"), flags=re.M)
     assert n == 1, "derby_prog.js: prog() not found"

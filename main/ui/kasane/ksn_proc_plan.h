@@ -107,6 +107,11 @@ typedef struct {
     const ksn_proc_patch *patch;
     uint8_t count,patches,params;
 } ksn_proc_rom_entry;
+/* The firmware's table: the build compiles the rom apps' @plan functions
+ * into it (tools/make_app_chunks.py, main/CMakeLists.txt), or leaves it
+ * empty (count 0). app_session.c hands it to pocket_proc_rom_plans(). */
+extern const ksn_proc_rom_entry ksn_proc_rom_plans[];
+extern const unsigned ksn_proc_rom_plans_count;
 
 /* The heap side of a registered built-in plan: the sized plan's header, a
  * pointer to the entry and the registration's arguments. The instructions are

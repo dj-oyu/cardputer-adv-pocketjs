@@ -13,7 +13,8 @@ function load() {
   if (!n) return;
   try {
     if (pocket.memory && pocket.memory.info().internalFreeBytes < 18432) return;
-    // The plan n: its code, and the points of a typed-point plan.
+    // The plan n: a built-in plan's name (derby_prog.js), exactly its
+    // declared arguments, and the points of a typed-point plan.
     const k = KN[tier], i = +n[1];
     let p;
     if (n[0] === 'g' && i >= 0) {
@@ -26,12 +27,12 @@ function load() {
         const a = .55 * sin(ph + u - 20), kx = jx + l * sin(a), ky = jy + l * M.cos(a), a2 = a - .9 * mx(0, sin(ph + u - 18.6));
         put(kx, ky); put(kx + l * sin(a2), ky + l * M.cos(a2)); put(kx, ky); put(jx, jy);
       }
-      p = [prog(T.nil), {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
-    } else if (n === 'hd') p = [prog(T.nil), {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
-    else if (n[0] === 'r' && i >= 0) p = [prog(T.runner, [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410])];
-    else if (n[0] === 't' && i >= 0) p = [prog(T.pt, [512 + 288 * i])];
-    else p = [prog(T[n], k.concat(1 / k[2], M.ceil(k[2] / 2)))];
-    live[n] = p[1] ? H.register(p[0], p[1]) : H.register(p[0]);
+      p = ['nil', [], {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
+    } else if (n === 'hd') p = ['nil', [], {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
+    else if (n[0] === 'r' && i >= 0) p = ['runner', [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410]];
+    else if (n[0] === 't' && i >= 0) p = ['pt', [512 + 288 * i]];
+    else p = [n, k.concat(1 / k[2], M.ceil(k[2] / 2)).slice(0, n === 'crowd' ? 8 : n === 'stands' ? 4 : n === 'pk' ? 2 : 0)];
+    live[n] = H.register('derby.' + p[0], p[1], p[2]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
 }

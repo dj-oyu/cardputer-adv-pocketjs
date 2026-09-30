@@ -1447,6 +1447,10 @@ esp_err_t app_start_test(char test) {
     // that was already failing.
     if(overlay_session) gc.heap_limit=OVERLAY_GUEST_HEAP;
 #define TRY(expr) do {err=(expr);if(err!=ESP_OK)goto fail;}while(0)
+    // The built-in plans register('derby.crowd', args) names
+    // (docs/kasane/flash-plan.md): a const table in flash, the same for
+    // every session; pocket_proc_reset() keeps it.
+    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     TRY(pocketjs_guest_create(&gc,&guest));
 #ifdef CONFIG_POCKET_VM_OOMPROBE
     oomprobe_set_runtime(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)));
