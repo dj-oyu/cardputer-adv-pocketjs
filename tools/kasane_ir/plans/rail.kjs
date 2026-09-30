@@ -1,0 +1,11 @@
+// rail: the running rail. Posts from the top rail to the ground, a top and
+// a mid rail from the first post to one post past the last.
+input x0 = 0, dx = 1, top = 2, ground = 3, posts = 4, mid = 5, colour = 6;
+let x = x0;
+const end = posts * dx + x;
+move(x, top); line(end, top, colour);
+move(x, mid); line(end, mid, colour);
+repeat (posts) {
+  move(x, top); line(x, ground, colour);
+  x += dx;
+}

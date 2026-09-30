@@ -1,0 +1,11 @@
+// silk: decompiled from apps/derby/derby_prog.js
+move(113, 96 + in(1));
+line(116, 92 + in(1), in(0));
+line(109, 84 + in(1), in(0));
+line(119, 74 + in(1), in(0));
+line(127, 80 + in(1), in(0));
+const r1f = 71 + in(1);
+const r3d = 66 + in(1);
+const r5d = 66 + in(1);
+const r7d = 71 + in(1);
+cubic(5, 65535, 120, r1f, 120, r3d, 128, r5d, 128, r7d);

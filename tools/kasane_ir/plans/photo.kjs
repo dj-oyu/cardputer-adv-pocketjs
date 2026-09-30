@@ -1,0 +1,21 @@
+// photo: decompiled from apps/derby/derby_prog.js
+move(in(0), 13);
+line(in(0), 127, 65535);
+const r0b = in(0) + 1;
+move(r0b, 13);
+line(r0b, 127, 63488);
+move(0, 13);
+line(239, 13, 50712);
+move(0, 127);
+line(239, 127, 50712);
+let r4 = 0;
+repeat (8) {
+  repeat (4) {
+    move(r4, 128);
+    line(r4, 131, 50712);
+    r4 += 6;
+  }
+  move(r4, 128);
+  line(r4, 133, 65535);
+  r4 += 6;
+}

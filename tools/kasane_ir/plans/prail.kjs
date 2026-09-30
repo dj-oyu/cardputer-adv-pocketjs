@@ -1,0 +1,21 @@
+// prail: decompiled from apps/derby/derby_prog.js
+let r0 = in(0);
+let r2 = in(2);
+let r5 = in(5);
+const r14 = r0 * r5;
+repeat (in(4)) {
+  const r8 = r0 * r5;
+  move(r8, r5 * in(7) + 28);
+  line(r8, r5 * 6 + 28, in(6));
+  r0 += in(1);
+  r2 += in(3);
+  const r5b = r5 * (r2 * r5 + 2);
+  const r5c = r5b * (r2 * r5b + 2);
+  r5 = r5c * (r2 * r5c + 2);
+}
+const r8b = r0 * r5;
+move(r14, in(5) * in(7) + 28);
+line(r8b, r5 * in(7) + 28, in(6));
+const r12c = (in(7) + 6) * .5;
+move(r14, in(5) * r12c + 28);
+line(r8b, r5 * r12c + 28, in(6));

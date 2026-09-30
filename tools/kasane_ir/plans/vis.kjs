@@ -1,0 +1,42 @@
+// vis: decompiled from apps/derby/derby_prog.js
+let r0 = in(0);
+let r1 = in(1);
+let r2 = in(2);
+let r3 = in(3);
+const r8 = r0 + 1;
+const r9 = r2 + (-1);
+let r10 = r1 + 1;
+repeat (r1 * (-1) + r3 + (-1)) {
+  move(r8, r10);
+  line(r9, r10, in(6));
+  r10 += 1;
+}
+repeat (in(4)) {
+  move(r0, r1);
+  line(r2, r1, 10565);
+  line(r2, r3, 10565);
+  line(r0, r3, 10565);
+  line(r0, r1, 10565);
+  r0 += (-1);
+  r1 += (-1);
+  r2 += 1;
+  r3 += 1;
+}
+move(r0, r1);
+line(r2, r1, 23275);
+const r8c = r0 * (-1) + r2;
+const r9d = r8c * .25 + r0;
+const r10b = r9d + r8c * .5;
+const r11e = in(4) * (-1);
+const r12 = r9d + r11e;
+move(r12, r3);
+line(r12, in(5), 19049);
+const r12b = r9d + in(4);
+move(r12b, r3);
+line(r12b, in(5), 19049);
+const r12c = r10b + r11e;
+move(r12c, r3);
+line(r12c, in(5), 19049);
+const r12d = r10b + in(4);
+move(r12d, r3);
+line(r12d, in(5), 19049);

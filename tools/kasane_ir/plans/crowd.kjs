@@ -1,0 +1,22 @@
+// crowd: the stand's spectators as dots. $1 rows of in(4) bays of $2 dots,
+// each dot swaying on its own phase; colours cycle through two values
+// (105642 minus the last) seeded by input 6.
+input x0 = 0, spread = 1, y0 = 2, rowGap = 3, bays = 4, sway = 5, seed = 6;
+let colour = seed * 12650 + 46496;
+const step = $6 * spread;
+let rowPhase = 0;
+let y = rowGap * .5 + y0;
+repeat ($1) {
+  let x = x0;
+  let phase = sway + rowPhase;
+  repeat (bays) {
+    repeat ($2) {
+      plot(sin(phase) * 1.5 + x, y, colour);
+      x += step;
+      phase += 2.39996;
+      colour = 105642 - colour;
+    }
+  }
+  y += rowGap;
+  rowPhase += .9;
+}
