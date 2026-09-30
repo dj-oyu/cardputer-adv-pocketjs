@@ -94,11 +94,12 @@ function course(c, x0, xs, close, gate, K) {
   };
   let q = f / 40, n;
   if (!K) {
-    // Stands and crowd at 40 m, a pillar every 12 m.
+    // Stands and crowd at 40 m, a pillar every 12 m. The crowd's phase is
+    // wrapped and centred on the row: the VM's sin slows 7x past |x| 201.
     const j = flo((x0 - 130 / q) / 12), a = sx(j * 12, 40), dx = 12 * q;
     n = mn(flo((700 - a) / dx), M.ceil((250 - a) / dx) + 1);
     d.push(['stands', [a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5)]],
-      ['crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996, (t >> 3) & 1]]);
+      ['crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191), (t >> 3) & 1]]);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
       const z = (vr[2] - vr[0]) / 120;
