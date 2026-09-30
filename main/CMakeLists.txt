@@ -43,6 +43,20 @@ option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone 
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
 option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
+option(KASANE_BGCOST_TRACE "BGC/BGP lines after MDT: VM steps, frame geometry, per-plan draw costs" OFF)
+if(KASANE_BGCOST_TRACE AND NOT KASANE_MEGADEMO_TRACE)
+    message(FATAL_ERROR "KASANE_BGCOST_TRACE requires KASANE_MEGADEMO_TRACE")
+endif()
+# The background-cost study (docs/kasane/derby-background-cost.md) runs its
+# measuring copies of DERBY WATCH, and a synthetic segment load, from the
+# DERBY WATCH row: a path relative to this file that replaces
+# apps/derby/derby_watch.js. The file must be named derby_watch.js, because
+# main.c finds the source by the symbol that name makes. Empty ships the app.
+set(DERBY_BGCOST_SOURCE "" CACHE STRING "Measuring source for the DERBY WATCH row (diagnostic only)")
+set(DERBY_WATCH_SOURCE "../apps/derby/derby_watch.js")
+if(DERBY_BGCOST_SOURCE)
+    set(DERBY_WATCH_SOURCE "${DERBY_BGCOST_SOURCE}")
+endif()
 option(KASANE_PROC_LIMITS_PROBE "USB-triggered procedural limits/lifecycle measurements ('{' native, '}' JS)" OFF)
 if(KASANE_PROC_LIMITS_PROBE)
     list(APPEND KASANE_SOURCES "ui/kasane/ksn_proc_limits_device_probe.c")
@@ -162,7 +176,7 @@ idf_component_register(SRCS "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_dec
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" "../apps/derby/derby_watch.js" "../apps/bigwave/big_wave.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin")
 target_link_libraries(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=xQueueCreateMutex" "-Wl,--wrap=vQueueDelete")
@@ -212,6 +226,9 @@ if(KASANE_PROC_JS_DIAGNOSTIC)
 endif()
 if(KASANE_MEGADEMO_TRACE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEGADEMO_TRACE=1)
+endif()
+if(KASANE_BGCOST_TRACE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_BGCOST_TRACE=1)
 endif()
 # The pocket.input.keys diagnostic (docs/platform/keystate.md): the key test app
 # on USB 'r', and US-framed key injection on the same USB stream. OFF by default

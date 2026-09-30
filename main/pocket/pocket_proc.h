@@ -38,6 +38,19 @@ typedef struct {
 void pocket_proc_trace_take(pocket_proc_trace *out);
 void pocket_proc_trace_view(void);
 void pocket_proc_trace_presented(void);
+#ifdef KASANE_BGCOST_TRACE
+/* Background-cost study (docs/kasane/derby-background-cost.md). Per turn: the
+ * VM steps of every draw and the geometry of the frame the bands last read --
+ * segments, segment-band intersections (the scan cost's partner) and the
+ * Bresenham iterations the bands walk (the paint cost's partner). Computed
+ * between turns, outside every timed span. Per plan: draws, microseconds,
+ * steps and segments summed over a window and printed as one BGP line. */
+typedef struct { uint32_t steps,seg,ras,hits,walk,commit_us,view_us; } pocket_proc_bgcost;
+void pocket_proc_bgcost_take(pocket_proc_bgcost *out);
+void pocket_proc_bgcost_plans_emit(void);
+/* kasane.patch() wall time, its callback (the HUD) included. */
+void pocket_proc_bgcost_view_us(uint32_t us);
+#endif
 #endif
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
 void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
