@@ -16,6 +16,7 @@
 #include "pocket_api.h"
 #include "ksn_proc_plan.h"
 #include "ksn_proc_points_pie.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -29,8 +30,12 @@ void *proc_test_malloc(size_t size){
     if(fail_alloc)return NULL;
     last_malloc=size;return (malloc)(size);
 }
+static size_t callocs[8];
+static unsigned calloc_n;
 void *proc_test_calloc(size_t count,size_t size){
     if(fail_alloc)return NULL;
+    if(calloc_n<8)callocs[calloc_n]=count*size;
+    calloc_n++;
     return (calloc)(count,size);
 }
 
@@ -301,6 +306,108 @@ static void sizing_contract(JSContext *ctx,unsigned *pie_expected){
     REQUIRE(4u+15u+4u*128u*2u<=1040u+15u);
 }
 
+/* Per-surface segment cap: createSurface({maxSegments}) sizes that surface's
+ * two frames to header + n entries, and draw() enforces n exactly as it
+ * enforces 1,024 on surface 0. ASan fails the run if any path (draw's copy,
+ * typed points, damage, image spans, the present swap) touches an entry past
+ * the short allocation; LeakSanitizer checks reset() frees both frames. */
+static void cap_contract(JSContext *ctx){
+    const size_t head=offsetof(ksn_proc_frame,segments);
+    const size_t full=sizeof(ksn_proc_frame);
+    REQUIRE(head==6u&&sizeof(ksn_proc_segment)==10u&&full==10246u);
+    pocket_proc_reset(); /* sizing_contract left surface 0's buffers allocated */
+    /* 128 PLOTs per draw: SET r0,r1; REPEAT 128 { PLOT } END. */
+    eval_ok(ctx,
+        "globalThis.p128=proc.register([[0,0,0,0,5,0],[0,1,0,0,7,0],"
+        "[5,0,128,0,0,0],[8,0,0,1,0,0xffe0],[6,0,0,0,0,0]]);"
+        "globalThis.dot=proc.register(dotAt(40,40,0xf800));"
+        "globalThis.typed=proc.register([[0,0,0,0,0,0]],mk(128));"
+        /* Options are refused before any surface exists. */
+        "for(const bad of [0,null,'x',{maxSegments:0},{maxSegments:1025},"
+        "{maxSegments:1.5},{maxSegments:'256'},{maxSegments:-1},{maxSegments:NaN}])"
+        "expect(()=>proc.createSurface(bad),'INVALID_ARGUMENT');"
+        "expect(()=>proc.createSurface({maxSegments:8},1),'INVALID_ARGUMENT')");
+    /* Surface 0 is unchanged: two full frames, scratch and the VM. */
+    calloc_n=0;
+    eval_ok(ctx,"proc.beginFrame(0)");
+    REQUIRE(calloc_n==4&&callocs[0]==full&&callocs[1]==full&&callocs[2]==full);
+    eval_ok(ctx,
+        "for(let i=0;i<8;i++)proc.draw(p128,[]);"
+        "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')");
+    pocket_proc_end_turn();
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(dot,[]);proc.commit()");
+    settle(actual);
+    REQUIRE(actual[40*KSN_PROC_W+40]==0xf800);
+
+    /* Surface 1 at 256: two frames of 6 + 2,560 B, nothing else allocated. */
+    eval_ok(ctx,"globalThis.small=proc.createSurface({maxSegments:256});proc.resource(small)");
+    fail_alloc=true;
+    eval_ok(ctx,"expect(()=>proc.beginFrame(0,small),'OUT_OF_MEMORY')");
+    fail_alloc=false;
+    calloc_n=0;
+    eval_ok(ctx,"proc.beginFrame(0,small)");
+    REQUIRE(calloc_n==2&&callocs[0]==head+256u*10u&&callocs[1]==head+256u*10u);
+    /* Exactly full through both paths (128 VM + 127 typed + 1 VM = 256), then
+     * one more is refused and the frame is closed. */
+    eval_ok(ctx,
+        "proc.draw(p128,[]);proc.draw(typed,[]);proc.draw(dot,[]);"
+        "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
+        "expect(()=>proc.commit(),'BUSY')");
+    pocket_proc_end_turn();
+    /* A refused draw closes the frame; a new one fills and commits. */
+    eval_ok(ctx,
+        "proc.beginFrame(0,small);proc.draw(p128,[]);proc.draw(p128,[]);"
+        "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED');"
+        "proc.beginFrame(0,small);proc.draw(p128,[]);proc.draw(typed,[]);proc.draw(dot,[]);"
+        "proc.commit()");
+    ksn_image_port port;pocket_proc_image_port_at(&port,1);
+    uint16_t span[KSN_PROC_W];uint8_t alpha[KSN_PROC_W];
+    REQUIRE(port.read_span(port.ctx,0,0,40,0,KSN_PROC_W,span,alpha)==KSN_OK);
+    REQUIRE(span[40]==0xf800);
+    REQUIRE(port.read_span(port.ctx,0,0,7,0,KSN_PROC_W,span,alpha)==KSN_OK);
+    REQUIRE(span[5]==0xffe0);
+    pocket_proc_present_result(KSN_OK);
+    REQUIRE(!pocket_proc_pending());
+    /* Presented, swapped, and drawn again into the other short frame. */
+    calloc_n=0;
+    eval_ok(ctx,"proc.beginFrame(0,small);proc.draw(dot,[]);proc.commit()");
+    REQUIRE(calloc_n==0);
+    REQUIRE(port.read_span(port.ctx,0,0,7,0,KSN_PROC_W,span,alpha)==KSN_OK);
+    REQUIRE(span[5]==0);
+    pocket_proc_present_result(KSN_OK);
+    /* Surface 0 keeps its own 1,024 while surface 1 is capped. */
+    eval_ok(ctx,
+        "proc.beginFrame(0);for(let i=0;i<8;i++)proc.draw(p128,[]);proc.commit()");
+    settle(actual);
+    eval_ok(ctx,"expect(()=>proc.createSurface({maxSegments:8}),'LIMIT_EXCEEDED')");
+    pocket_proc_reset();
+    /* Bounds of the option: 1 and 1,024; {} and undefined mean 1,024. */
+    static const struct {const char *create;unsigned segments;} cases[]={
+        {"proc.createSurface({maxSegments:1})",1},
+        {"proc.createSurface({maxSegments:1024})",1024},
+        {"proc.createSurface({})",1024},
+        {"proc.createSurface(undefined)",1024},
+        {"proc.createSurface()",1024},
+    };
+    for(unsigned k=0;k<sizeof cases/sizeof cases[0];k++){
+        char source[200];
+        snprintf(source,sizeof source,
+                 "globalThis.dot=proc.register(dotAt(1,1,1));"
+                 "globalThis.s=%s;proc.resource(s);proc.beginFrame(0)",cases[k].create);
+        eval_ok(ctx,source);
+        pocket_proc_end_turn();
+        calloc_n=0;
+        eval_ok(ctx,"proc.beginFrame(0,s)");
+        REQUIRE(calloc_n==2&&callocs[0]==head+cases[k].segments*10u);
+        snprintf(source,sizeof source,
+                 "for(let i=0;i<%u;i++)proc.draw(dot,[]);"
+                 "expect(()=>proc.draw(dot,[]),'LIMIT_EXCEEDED')",cases[k].segments);
+        eval_ok(ctx,source);
+        pocket_proc_end_turn();
+        pocket_proc_reset();
+    }
+}
+
 int main(void){
     JSRuntime *rt=JS_NewRuntime();REQUIRE(rt);
     JSContext *ctx=JS_NewContext(rt);REQUIRE(ctx);
@@ -324,11 +431,13 @@ int main(void){
 #else
     REQUIRE(pie_batches==0);
 #endif
+    /* After the batch count check: its reset() clears the counters. */
+    cap_contract(ctx);
     pocket_proc_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("PASS procedural turn: parked frame commits after 1 and 3 parks, terminated/thrown "
            "frame carries nothing, Back's save frame opens after the finished frame is presented, "
-           "limit before allocation, per-count points (%u PIE batches)\n",
+           "limit before allocation, per-count points (%u PIE batches), per-surface segment cap\n",
            (unsigned)pie_batches);
     return 0;
 }

@@ -11,6 +11,7 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "pocket_api.h"
 #include "ui/kasane/ksn_proc_plan.h"
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
@@ -66,6 +67,22 @@ static int bg_last=-1;
 #define PROC_POINT_LOW (-480)
 #define PROC_POINT_HIGH 720
 #define PROC_SURFACES 2u
+/* A surface's candidate and committed frames hold only the segments it
+ * declared (createSurface({maxSegments})), allocated as the ksn_proc_frame
+ * header plus that many entries. The full 1,024-entry frame is 10,246 B, and
+ * a second surface needs two of those as separate contiguous blocks: DERBY
+ * WATCH's heap had a largest free block of 10,240 B, so the second surface
+ * could not exist at all (docs/kasane/surface-segment-cap.md). Nothing reads a
+ * frame past count (render_band, damage, image spans), and nothing copies or
+ * clears a whole ksn_proc_frame here, which is what makes the short
+ * allocation safe; scratch and the VM stay full size because one plan may
+ * emit up to KSN_PROC_SEGMENTS before draw() checks the surface's room. */
+_Static_assert(offsetof(ksn_proc_frame,segments)+
+               KSN_PROC_SEGMENTS*sizeof(ksn_proc_segment)==sizeof(ksn_proc_frame),
+               "segments must be the frame's last member, with no tail padding");
+static size_t frame_bytes(unsigned segments){
+    return offsetof(ksn_proc_frame,segments)+(size_t)segments*sizeof(ksn_proc_segment);
+}
 
 /* One malloc per batch: this header, then four planes (x, y, out_x, out_y)
  * of points_stride(count) elements each. It used to be four 128-element
@@ -106,6 +123,7 @@ typedef struct {
     bool pending,has_committed,repair_required,image_mode;
     uint32_t handle;
     ksn_rect damage;
+    uint16_t max_segments; /* 0 = KSN_PROC_SEGMENTS (surface 0, or no option) */
 } proc_surface;
 static proc_surface surfaces[PROC_SURFACES];
 static uint32_t next_surface_handle;
@@ -228,10 +246,14 @@ static points_result read_points(JSContext *ctx,JSValueConst descriptor,
     *out=points;
     return POINTS_OK;
 }
+static unsigned surface_segments(const proc_surface *surface){
+    return surface->max_segments?surface->max_segments:KSN_PROC_SEGMENTS;
+}
 static bool buffers(proc_surface *surface){
-    if(!surface->candidate)surface->candidate=calloc(1,sizeof *surface->candidate);
+    const size_t bytes=frame_bytes(surface_segments(surface));
+    if(!surface->candidate)surface->candidate=calloc(1,bytes);
     if(!scratch)scratch=calloc(1,sizeof *scratch);
-    if(!surface->committed)surface->committed=calloc(1,sizeof *surface->committed);
+    if(!surface->committed)surface->committed=calloc(1,bytes);
     if(!vm)vm=calloc(1,sizeof *vm);
     return surface->candidate&&scratch&&surface->committed&&vm;
 }
@@ -371,7 +393,10 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
         return failure(ctx,op,POCKET_ERR_BUSY,"previous frame awaits presentation or repair");
     proc_surface *surface=&surfaces[index];
     if(!buffers(surface))return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"frame allocation failed");
-    memset(surface->candidate,0,sizeof *surface->candidate);
+    /* Header only: the frame may be shorter than sizeof(ksn_proc_frame). */
+    surface->candidate->count=0;
+    surface->candidate->raster_steps=0;
+    surface->candidate->ready=false;
     surface->candidate_color=(uint16_t)color;
     building_surface=index;
     building=true;
@@ -383,6 +408,7 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     uint32_t handle,length;
     if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
+    const unsigned room=surface_segments(&surfaces[building_surface]);
     if(argc!=2||!integer(ctx,argv[0],INT32_MAX,&handle)||
        !array_length(ctx,argv[1],&length)||length>KSN_PROC_INPUTS)
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
@@ -431,7 +457,7 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
             }
         }
     }
-    if((unsigned)scratch->count+typed_segments>(unsigned)KSN_PROC_SEGMENTS-candidate->count||
+    if((unsigned)scratch->count+typed_segments>room-candidate->count||
        (unsigned)scratch->raster_steps+typed_steps>(unsigned)UINT16_MAX-candidate->raster_steps){
         building=false;
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
@@ -550,13 +576,30 @@ static JSValue resource_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
 static JSValue js_resource(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     return guarded(ctx,self,argc,argv,resource_impl);
 }
+/* createSurface() or createSurface({maxSegments: 1..1024}). The option only
+ * shrinks the surface's two frames; it is enforced by draw() exactly as the
+ * 1,024 default is (LIMIT_EXCEEDED "frame drawing limit", candidate kept
+ * short of the draw). The limit is decided before the surface exists: a bad
+ * option issues no handle. */
 static JSValue create_surface_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;(void)argv;
-    if(argc)return failure(ctx,"kasane.procedural.createSurface",POCKET_ERR_INVALID_ARGUMENT,
-                           "expected no arguments");
+    (void)self;
+    const char *op="kasane.procedural.createSurface";
+    uint32_t segments=0;
+    if(argc>1)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
+                             "expected optional {maxSegments}");
+    if(argc==1&&!JS_IsUndefined(argv[0])){
+        if(!JS_IsObject(argv[0]))
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected optional {maxSegments}");
+        JSValue v=JS_GetPropertyStr(ctx,argv[0],"maxSegments");
+        bool ok=!JS_IsException(v)&&(JS_IsUndefined(v)||
+                (integer(ctx,v,KSN_PROC_SEGMENTS,&segments)&&segments>0));
+        JS_FreeValue(ctx,v);
+        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
+                              "maxSegments must be an integer 1..1024");
+    }
     if(surfaces[1].handle||next_surface_handle==INT32_MAX)
-        return failure(ctx,"kasane.procedural.createSurface",POCKET_ERR_LIMIT_EXCEEDED,
-                       "two surfaces maximum");
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"two surfaces maximum");
+    surfaces[1].max_segments=(uint16_t)segments;
     surfaces[1].handle=++next_surface_handle;
     return JS_NewInt32(ctx,(int32_t)surfaces[1].handle);
 }

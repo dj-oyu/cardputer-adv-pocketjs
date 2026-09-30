@@ -1,6 +1,6 @@
 # D2: JS手続き面を2枚にする最小経路
 
-既存の`kasane.procedural.beginFrame(color)`、`draw(handle, inputs)`、`commit()`、`resource()`は面0を使う。追加面はセッション内で一度だけ作れる。
+既存の`kasane.procedural.beginFrame(color)`、`draw(handle, inputs)`、`commit()`、`resource()`は面0を使う。追加面はセッション内で一度だけ作れる。`createSurface({maxSegments: n})`（n = 1〜1,024）でその面のフレームを n 本分に縮められる（[面ごとの線分上限](surface-segment-cap.md)）。
 
 ```js
 const proc = pocket.kasane.procedural;
