@@ -343,6 +343,116 @@ const T = {
   // nil: draws nothing; the code of the typed-point plans (gallop frames, hd).
   /** @plan nil inputs: */
   nil() {
+  },
+
+  // ---- The panning units (ser() in scene, README "首振りカメラ"). A series
+  // of points along the straight, far to near: X'' and -Z' step linearly,
+  // and 1/Z' comes from the point before by Newton, q *= (-Z') q + 2. The
+  // start is farther, so 1/Z' rises to the true value and cannot diverge.
+  // Screen x = X'' q, the height e at y = 28 + (6 - e) q (the units' height
+  // 6 m and horizon 28 are baked in).
+  // prail: posts from the height 6 - top down to the ground, and the top and
+  // mid lines from the first post to the point after the last.
+  /** @plan prail inputs: x, dx, z, dz, posts, r, colour, top */
+  prail() {
+    let px = x, pz = z, q = r;
+    const x0 = px * q;
+    for (let j = 0; j < posts; j++) {
+      const sx = px * q;
+      move(sx, q * top + 28);
+      line(sx, q * 6 + 28, colour);
+      px += dx;
+      pz += dz;
+      const a = q * (pz * q + 2);
+      const b = a * (pz * a + 2);
+      q = b * (pz * b + 2);
+    }
+    const x1 = px * q;
+    move(x0, r * top + 28);
+    line(x1, q * top + 28, colour);
+    const mid = (top + 6) * .5;
+    move(x0, r * mid + 28);
+    line(x1, q * mid + 28, colour);
+  },
+
+  // pt: turf stripes in one green ($0; t0 and t1 are the two), each from the
+  // far rail (farX, farZ past the near point) to the near one. The far 1/Z'
+  // starts from the near one (4 steps), then 3 a stripe; the near 4.
+  /** @plan pt inputs: x, dx, z, dz, stripes, r, farX, farZ */
+  pt(green) {
+    let px = x, pz = z, near = r;
+    const fz0 = pz + farZ;
+    const f1 = near * (fz0 * near + 2);
+    const f2 = f1 * (fz0 * f1 + 2);
+    const f3 = f2 * (fz0 * f2 + 2);
+    let far = f3 * (fz0 * f3 + 2);
+    for (let j = 0; j < stripes; j++) {
+      const fz = pz + farZ;
+      const g1 = far * (fz * far + 2);
+      const g2 = g1 * (fz * g1 + 2);
+      far = g2 * (fz * g2 + 2);
+      move((px + farX) * far, far * 6 + 28);
+      line(px * near, near * 6 + 28, green);
+      px += dx;
+      pz += dz;
+      const n1 = near * (pz * near + 2);
+      const n2 = n1 * (pz * n1 + 2);
+      const n3 = n2 * (pz * n2 + 2);
+      near = n3 * (pz * n3 + 2);
+    }
+  },
+
+  // pk: the crowd as the side view draws it (crowd), a column of $1 rows
+  // every 12/$2 m, row i at 1.2 + 2.4 i m (hh = 6 - that), half the dots a
+  // frame: rows of one parity in a column, the other in the next (the first
+  // column starts on row 0). Each dot swayed 1.5 px by sin of its phase, the
+  // column's + .9 i (phase is the first column's + 1.8; +2.39996 a column).
+  // The colour flips a column, as crowd's does when a row has an even count
+  // (with an odd count crowd's depends on the bays in view). Rows past the
+  // top stop at lo.
+  /** @plan pk inputs: x, dx, z, dz, cols, r, phase, colour */
+  pk(p0, rows) {
+    let dc = colour;
+    let px = x, pz = z, q = r, h = 4.8, a = phase;
+    const lo = rows * -2.4 + 6.2;
+    for (let j = 0; j < cols; j++) {
+      const sx = px * q;
+      let hh = h;
+      for (let k = 0; k < rows; k++) {
+        if (lo > hh) break;
+        plot(sin(hh * -.375 + a) * 1.5 + sx, hh * q + 28, dc);
+        hh += -4.8;
+      }
+      h = 7.2 - h;
+      dc = 105642 - dc;
+      a += 2.39996;
+      px += dx;
+      pz += dz;
+      const a1 = q * (pz * q + 2);
+      const a2 = a1 * (pz * a1 + 2);
+      q = a2 * (pz * a2 + 2);
+    }
+  },
+
+  // hl: lines between two ends (x0, 1/Z' r0) and (x1, r1): the first at the
+  // height coefficient c0, then cs a line, lines of them; the ends of the
+  // first and the last joined (the screen's face and bezel, stand tiers).
+  /** @plan hl inputs: x0, r0, x1, r1, c0, cs, lines, colour */
+  hl() {
+    let c = c0, ya = 0, yb = 0;
+    const y0 = r0 * c0 + 28;
+    const y1 = r1 * c0 + 28;
+    for (let j = 0; j < lines; j++) {
+      ya = r0 * c + 28;
+      move(x0, ya);
+      yb = r1 * c + 28;
+      line(x1, yb, colour);
+      c += cs;
+    }
+    move(x0, y0);
+    line(x0, ya, colour);
+    move(x1, y1);
+    line(x1, yb, colour);
   }
 };
 // The close-up horse: 6 gallop frames of one polyline (typed points, half
@@ -359,4 +469,4 @@ let F = null;
 const HD = [[120, -155, 120, 425, 120, -155, -63, 323, 425, 120, 85, 159, 120, 100, 142, 120, 184, 166, 166, 166, 156, 156, 166, 166, 184, 184, 189, 189, 196, 196, 204, 204, 214, 214, 227, 227, 240, 227, 227, 240, 227, 227, 120, 184],
   [50, 105, 50, 105, 50, 160, 123, 123, 160, 50, 64, 64, 50, 58, 58, 50, 56, 56, 40, 14, 21, 42, 40, 56, 56, 19, 17, 56, 57, 14, 10, 58, 59, 5, -1, 60, 61, 60, -1, -8, -1, 60, 50, 19]];
 const PAD = ['turf', 'rail', 'stands', 'silk', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'crowd', 'pole'],
-  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd'];
+  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd', 'prail', 't0', 't1', 'pk', 'hl'];

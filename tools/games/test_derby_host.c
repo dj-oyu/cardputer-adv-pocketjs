@@ -36,6 +36,16 @@
  * the face of the frame they are shown with. The demo races go through the
  * director and the screen too, and are checked the same way.
  *
+ * The panning units (WIDE far from the leader, apps/derby/README.md
+ * "首振りカメラ"): each point their VM series (prail, t0/t1, pk) emit is
+ * compared, unrounded, with the same program run in double with exact
+ * reciprocals (Newton's error, <0.1 px on the panel); a panning unit's view
+ * of the screen gets the face checks too (tag 3, the rect inside the face).
+ * Their frames are counted as scene "pan". Env DERBY_PAN=a[,b,c] sets the
+ * app's PAN, DERBY_JS runs a script after the app's, DERBY_PANFACE=1 checks
+ * only the panning units' faces (the screen moved), DERBY_SHOTS=tick:tag,...
+ * writes panels at those ticks, DERBY_NDEBUG=1 prints each new worst point.
+ *
  *   python3 tools/games/run_derby.py            (WSL)
  * Env: DERBY_TIER=0|2 (LIGHT or HEAVY, no replay), DERBY_PPM=<dir>,
  *      DERBY_CSV=<file>, DERBY_HEAP_LIMIT=<bytes>, DERBY_NOCAM=1 (no camera
@@ -297,9 +307,64 @@ static void append(ksn_proc_frame *cand,const ksn_proc_frame *f){
     REQ((unsigned)cand->raster_steps+f->raster_steps<=UINT16_MAX);
     cand->raster_steps=(uint16_t)(cand->raster_steps+f->raster_steps);
 }
+/* The panning units' series plans (prail, t0/t1, pk; tag 4): every point the
+ * float VM emits against the same program run in double, where each Newton
+ * step t=z*r; t=t+2; r'=r*t (operands in either order) is replaced by the
+ * exact r'=-1/z and the inputs are the JS doubles (not rounded to float):
+ * the pinhole-and-yaw projection the app set up, exactly. Compared before
+ * the VM rounds to pixels. */
+static double newton_max,newton_max_f,newton_screen,pan_f_lo=1e9,pan_f_hi,cur_pan_f;
+static unsigned long newton_points;
+static unsigned newton_draws,pan_frames,pan_face_frames;
+static unsigned exact_run(const spec *s,const double *in,double *ex,double *ey,unsigned cap){
+    double r[KSN_PROC_REGS]={0};
+    struct {unsigned pc,left;} st[KSN_PROC_LOOP_DEPTH];
+    unsigned depth=0,n=0,pc=0,end[KSN_PROC_CODE]={0},open[KSN_PROC_LOOP_DEPTH],od=0;
+    const ksn_proc_inst *c=s->code;const unsigned count=s->program.count;
+    for(unsigned i=0;i<count;i++){
+        if(c[i].op==KSN_PROC_REPEAT||c[i].op==KSN_PROC_REPEAT_REG)open[od++]=i;
+        else if(c[i].op==KSN_PROC_END){REQ(od);end[open[--od]]=i;}
+    }
+    while(pc<count){
+        const ksn_proc_inst *i=&c[pc];
+        switch(i->op){
+        case KSN_PROC_SET:r[i->dst]=i->value;break;
+        case KSN_PROC_INPUT:r[i->dst]=in[i->a];break;
+        case KSN_PROC_ADD:r[i->dst]=r[i->a]+r[i->b];break;
+        case KSN_PROC_SIN:r[i->dst]=sin(r[i->a]);break;
+        case KSN_PROC_MUL:
+            if(pc+2<count&&c[pc+1].op==KSN_PROC_ADD&&c[pc+1].dst==i->dst&&c[pc+2].op==KSN_PROC_MUL&&i->a!=i->dst&&i->b!=i->dst){
+                const ksn_proc_inst *a=&c[pc+1],*m=&c[pc+2];
+                const int two=a->a==i->dst?a->b:a->b==i->dst?a->a:-1;
+                const int q=m->b==i->dst?m->a:m->a==i->dst?m->b:-1;
+                if(two>=0&&r[two]==2.0&&(q==i->a||q==i->b)){
+                    const unsigned z=q==i->a?i->b:i->a;
+                    r[m->dst]=-1.0/r[z];r[i->dst]=1.0;pc+=3;continue;
+                }
+            }
+            r[i->dst]=r[i->a]*r[i->b];break;
+        case KSN_PROC_REPEAT:case KSN_PROC_REPEAT_REG:{
+            const unsigned k=i->op==KSN_PROC_REPEAT?i->a:(unsigned)r[i->a];
+            if(!k){pc=end[pc]+1;continue;}
+            REQ(depth<KSN_PROC_LOOP_DEPTH);st[depth].pc=pc;st[depth].left=k;depth++;break;
+        }
+        case KSN_PROC_END:REQ(depth);if(--st[depth-1].left){pc=st[depth-1].pc+1;continue;}depth--;break;
+        case KSN_PROC_BREAK_IF_GT:REQ(depth);if(r[i->a]>r[i->b]){pc=end[st[depth-1].pc]+1;depth--;continue;}break;
+        case KSN_PROC_MOVE:case KSN_PROC_PLOT:case KSN_PROC_LINE:case KSN_PROC_PLOT_COLOR_REG:case KSN_PROC_LINE_COLOR_REG:
+            REQ(n<cap);ex[n]=r[i->a];ey[n]=r[i->b];n++;break;
+        default:REQ(!"an op the pan plans do not use");
+        }
+        pc++;
+    }
+    return n;
+}
 static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;
     spec *s=find((int)num(argv[0]));REQ(s);
+    const unsigned tag=argc>2?(unsigned)num(argv[2]):0;
+    static float vx[4096],vy[4096];
+    static double ex[4096],ey[4096];
+    unsigned vn=0;
     unsigned ni=len(argv[1]);REQ(ni<=KSN_PROC_INPUTS);
     REQ(s->inputs_read<=ni||!s->inputs_read);
     if(ni>g_inputs_max)g_inputs_max=ni;
@@ -312,8 +377,28 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
     REQ(ksn_proc_plan_run(&vd,&s->plan,true)==KSN_PROC_DONE);
     REQ(ksn_proc_begin(&vr,&s->program,in,&f_vm)==KSN_PROC_RUNNING);
     ksn_proc_status st;unsigned singles=0;
-    do{st=ksn_proc_step(&vr);singles++;}while(st==KSN_PROC_RUNNING);
+    do{
+        if(tag==4){
+            const ksn_proc_inst *ci=&vr.program->code[vr.pc];
+            if(ci->op==KSN_PROC_MOVE||ci->op==KSN_PROC_PLOT||ci->op==KSN_PROC_LINE||ci->op==KSN_PROC_PLOT_COLOR_REG||
+               ci->op==KSN_PROC_LINE_COLOR_REG){REQ(vn<4096);vx[vn]=vr.reg[ci->a];vy[vn]=vr.reg[ci->b];vn++;}
+        }
+        st=ksn_proc_step(&vr);singles++;
+    }while(st==KSN_PROC_RUNNING);
     REQ(st==KSN_PROC_DONE);
+    if(tag==4){
+        double in64[KSN_PROC_INPUTS]={0};
+        for(unsigned i=0;i<ni;i++)in64[i]=at(argv[1],i);
+        REQ(exact_run(s,in64,ex,ey,4096)==vn);
+        const double f=argc>3?num(argv[3]):0;
+        for(unsigned i=0;i<vn;i++){
+            const double e=fmax(fabs(vx[i]-ex[i]),fabs(vy[i]-ey[i]));
+            if(e>newton_max){newton_max=e;newton_max_f=f;}
+            if(ex[i]>=0&&ex[i]<240&&ey[i]>=0&&ey[i]<135&&e>newton_screen){newton_screen=e;
+                if(getenv("DERBY_NDEBUG"))printf("NEWTON %.4f plan %u pt %u/%u f %.0f in %g %g %g %g %g %g %g %g ex %.2f %.2f\n",e,s->program.count,i,vn,f,in64[0],in64[1],in64[2],in64[3],in64[4],in64[5],in64[6],in64[7],ex[i],ey[i]);}
+        }
+        newton_points+=vn;newton_draws++;
+    }
     REQ(vp.steps==vr.steps&&vd.steps==vr.steps&&singles==vr.steps);
     const ksn_proc_frame *fs[2]={&f_debug,&f_vm};
     for(unsigned i=0;i<2;i++){
@@ -327,8 +412,19 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
     frame_steps+=vr.steps;frame_draws++;
     if(s->program.count>frame_instr_max)frame_instr_max=s->program.count;
     append(&cand_plan,&f_plan);append(&cand_vm,&f_vm);
-    if(argc>2&&num(argv[2])==2&&!cur_surface)head_frames++;
-    if(argc>2&&num(argv[2])==1){
+    if(tag==2&&!cur_surface)head_frames++;
+    if(tag==3){
+        /* A panning unit's view of the screen: its bezel (hl, the face's two
+         * edges joined) closes the face; the rect inside it is the app's vr
+         * rule, recomputed here from the edges [x, 1/Z'] of the draw, held
+         * as the vis inputs are (vr less one on the left and top). */
+        REQ(!cur_surface&&!vis_drawn);
+        vis_drawn=1;vis_seg_end=cand_plan.count;pan_face_frames++;
+        const double xl=at(argv[1],0),rl=at(argv[1],1),xr=at(argv[1],2),rr=at(argv[1],3);
+        vis_in[0]=(int)floor(fmin(xl,xr)+.5)-1;vis_in[1]=(int)ceil(28-10*fmin(rl,rr))-1;
+        vis_in[2]=(int)floor(fmax(xl,xr)+.5);vis_in[3]=28;
+    }
+    if(tag==1){
         REQ(!cur_surface&&!vis_drawn&&f_plan.count>=4);
         vis_drawn=1;vis_seg_end=cand_plan.count;
         for(unsigned i=0;i<4;i++)vis_in[i]=(int)at(argv[1],i);
@@ -370,7 +466,10 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
     return JS_UNDEFINED;
 }
 static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
-    (void)c;(void)self;(void)argc;(void)argv;
+    (void)c;(void)self;
+    /* argv[0]: the panning unit's f, 0 for a side unit. */
+    cur_pan_f=argc?num(argv[0]):0;
+    if(cur_pan_f>0){pan_frames++;if(cur_pan_f<pan_f_lo)pan_f_lo=cur_pan_f;if(cur_pan_f>pan_f_hi)pan_f_hi=cur_pan_f;}
     REQ(cand_plan.count==cand_vm.count&&!memcmp(cand_plan.segments,cand_vm.segments,cand_plan.count*sizeof cand_plan.segments[0]));
     cand_plan.ready=cand_vm.ready=true;
     for(unsigned i=0;i<240*135;i++)pix_plan[i]=pix_vm[i]=cur_bg;
@@ -383,7 +482,9 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
     else{
         s0_frames++;
         last_vis=vis_drawn;
-        if(vis_drawn){
+        /* DERBY_PANFACE: the screen was moved (DERBY_JS) for a panning unit
+         * to see it; the side units' faces are checked in the other runs. */
+        if(vis_drawn&&(!getenv("DERBY_PANFACE")||cur_pan_f>0)){
             memcpy(last_vis_in,vis_in,sizeof vis_in);vis_frames++;
             /* After the bezel come the feed (every segment wholly inside the
              * face) and the objects in front of the screen. Rasterize every
@@ -409,7 +510,7 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
                                              vis_in[0]+1,vis_in[1]+1,vis_in[2],vis_in[3],hit);}
         }
     }
-    scene_stats *st=stat_for(cur_surface?"feed":scene);
+    scene_stats *st=stat_for(cur_surface?"feed":cur_pan_f>0?"pan":scene);
     st->frames++;
     if(frame_draws>st->draws_max)st->draws_max=frame_draws;
     if(cand_plan.count>st->seg_max)st->seg_max=cand_plan.count;
@@ -617,6 +718,13 @@ static void frame(unsigned buttons){
     eval(call,strlen(call),"frame.js");
     if(frame_regs>frame_reg_max)frame_reg_max=frame_regs;
     present((uint64_t)tick*33333u);
+    /* DERBY_SHOTS=<tick>:<tag>,...: panels at those ticks (run_derby.py
+     * --ppm: the side-only run at the ticks of the panning shots). */
+    for(const char *p=getenv("DERBY_SHOTS");p&&*p;){
+        unsigned k=0;char tag[32]={0};
+        if(sscanf(p,"%u:%31[^,]",&k,tag)==2&&k==tick)ppm(tag);
+        p=strchr(p,',');if(p)p++;
+    }
     unsigned dp=demo_pixels();
     if(in_demo){if(dp>20)demo_on++;else{REQ(!dp);demo_off++;}}
     /* The Back turn ends a demo without drawing: the app is leaving. */
@@ -781,8 +889,14 @@ static const char PRELUDE[]=
     "P.register=function(p,q){const h=q?R.call(P,p,q):R.call(P,p);__reg(h,p,q);return h};"
     "P.unregister=function(h){U.call(P,h);__unreg(h)};"
     "P.beginFrame=function(c,s){const r=s===undefined?B.call(P,c):B.call(P,c,s);__begin(c,s?1:0);return r};"
-    "P.draw=function(h,i){try{D.call(P,h,i)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify(i));throw e}__draw(h,i,globalThis.derby&&derby.L?h===derby.L.vis?1:h===derby.L.hd?2:0:0)};"
-    "P.commit=function(){C.call(P);__commit()};})();"
+    /* Tags: 1 the screen's face (vis), 2 HEAD ON's still, 3 a panning unit's
+     * bezel on the screen (hl in 10565), 4 the panning series (Newton). The
+     * app's pc (the panning unit, f at 4) is a global of its scripts. */
+    "const pf=()=>{try{return pc?pc[4]:0}catch(e){return 0}};"
+    "P.draw=function(h,i){try{D.call(P,h,i)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify(i));throw e}"
+    "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&i[7]===10565?3:"
+    "h===L.prail||h===L.t0||h===L.t1||h===L.pk?4:0:0;__draw(h,i,t,t>2?pf():0)};"
+    "P.commit=function(){C.call(P);__commit(pf())};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
      * keeps a clip), with their last rect and visibility. */
@@ -838,7 +952,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__reg",js_cap_reg,3},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,3},{"__commit",js_cap_commit,0},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -879,6 +993,15 @@ int main(int argc,char **argv){
         return 0;
     }
     edge("enter",false);
+    /* DERBY_PAN=a[,b[,c]]: the app's PAN (the distance past which WIDE is a
+     * panning unit, the leader's px, the f cap): 0 pans for every WIDE (f
+     * from its least, 200), 1e9 never; 0,1 keeps f at 200, which brings the
+     * screen into a panning unit's view. */
+    if(getenv("DERBY_PAN")){char b[96];snprintf(b,sizeof b,"[%s].forEach((v,i)=>PAN[i]=v)",getenv("DERBY_PAN"));
+        REQ(eval(b,strlen(b),"pan.js"));}
+    /* DERBY_JS: any script run after the app's (e.g. moving the screen so
+     * that a panning unit sees it: run_derby.py). */
+    if(getenv("DERBY_JS"))REQ(eval(getenv("DERBY_JS"),strlen(getenv("DERBY_JS")),"env.js"));
     REQ(loaded_seen==1);                    /* the stored points and race number */
     /* Paddock: let the plans load and the odds settle, cycle the tier. */
     for(unsigned i=0;i<20;i++)frame(0);
@@ -936,6 +1059,17 @@ int main(int argc,char **argv){
         if(scene_t==300)ppm("close");
         if(scene_t==520)ppm("field");
         if(leads!=lead_logs&&!lead_shot&&scene_t>660){ppm("lead");lead_shot=1;}
+        /* The panning units, first seen near (f < 500), far (< 1000) and
+         * zoomed (1000 and up), 10 frames into the shot. */
+        static unsigned pan_at[3],pan_seen[3];
+        if(cur_pan_f>0){
+            const unsigned b=cur_pan_f<500?0:cur_pan_f<1000?1:2;
+            if(!pan_seen[b]&&(!pan_at[b]||tick>pan_at[b]))pan_at[b]=tick+10;
+            if(pan_at[b]==tick&&!pan_seen[b]){
+                static const char *const PT[]={"pan_near","pan_far","pan_tele"};
+                pan_seen[b]=1;ppm(PT[b]);printf("PANSHOT %s %u f %.0f\n",PT[b],tick,cur_pan_f);
+            }
+        }
         if(slow_at&&tick==slow_at+14)ppm("slow");
         if(scene_t>3000)FAIL("race did not end");
     }
@@ -1025,6 +1159,9 @@ int main(int argc,char **argv){
            "frames with anything else on the face %u (%u px), lettering shown in %u frames (%u node checks, %u off the "
            "face), refs max %u/32, commands max %u/80, HEAD ON frames %u\n",vis_frames,feed_frames,feed_segments,bezel_bad,
            occluded_frames,occluded_pixels,overlay_frames,rect_checked,rect_mismatch,refs_max,cmds_max,head_frames);
+    printf("\npanning units: frames %u, f %.0f..%.0f, the screen in view %u; Newton: %lu points in %u draws, "
+           "max error %.4f px (f %.0f) against the exact projection, %.4f px for points on the panel\n",pan_frames,
+           pan_frames?pan_f_lo:0,pan_f_hi,pan_face_frames,newton_points,newton_draws,newton_max,newton_max_f,newton_screen);
     printf("\nplans: registered %u, unregistered %u, live max %u, most registrations in one frame %u\n",
            registered,unregistered,live_max,frame_reg_max);
     printf("frames %u (procedural frames checked %u): exceptions=%u bad_present=%u failures=%u tones=%u\n",
@@ -1040,8 +1177,8 @@ int main(int argc,char **argv){
                "frame %zu B, freed only by the cycle collector %zu B\n",CHURN_SCENE[i],churn[i].frames,
                (double)churn[i].n/churn[i].frames,(double)churn[i].b/churn[i].frames,churn[i].hi,churn[i].gc);
     bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0x7fffu&&frame_reg_max<=1&&go_seen>=1&&
-              !rect_mismatch&&!bezel_bad&&!occluded_frames&&vis_frames&&feed_frames&&overlay_frames&&
-              refs_max<=32&&cmds_max<=80;
+              !rect_mismatch&&!bezel_bad&&!occluded_frames&&vis_frames&&feed_frames&&
+              (getenv("DERBY_PANFACE")?pan_face_frames>0:overlay_frames>0)&&refs_max<=32&&cmds_max<=80&&newton_screen<0.1;
     /* No cycles: the device would keep them until the heap is nearly full
      * (a recursive closure in the plan decoder left ~4 KB a race, LOADSTALL). */
     for(unsigned i=0;i<5;i++)pass=pass&&!churn[i].gc;
