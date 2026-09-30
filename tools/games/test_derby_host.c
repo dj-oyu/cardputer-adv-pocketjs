@@ -325,6 +325,7 @@ static unsigned exact_run(const spec *s,const double *in,double *ex,double *ey,u
                 r[c[pc+2].dst]=-1.0/r[i->a];r[i->dst]=1.0;pc+=3;continue;
             }
             r[i->dst]=r[i->a]*r[i->b];break;
+        case KSN_PROC_SIN:r[i->dst]=sin(r[i->a]);break;
         case KSN_PROC_REPEAT:case KSN_PROC_REPEAT_REG:{
             const unsigned k=i->op==KSN_PROC_REPEAT?i->a:(unsigned)r[i->a];
             if(!k){
@@ -402,13 +403,13 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
     if(tag==3){
         /* A panning unit's view of the screen: its bezel (hl, the face's two
          * edges joined) closes the face; the rect inside it is the app's vr
-         * rule, recomputed here from the edges [x, 1/Z'] of the draw, held
+         * rule, recomputed here from the bezel's two lines [x, y, dy], held
          * as the vis inputs are (vr less one on the left and top). */
         REQ(!cur_surface&&!vis_drawn);
         vis_drawn=1;vis_seg_end=cand_plan.count;pan_face_frames++;
-        const double xl=at(argv[1],0),rl=at(argv[1],1),xr=at(argv[1],2),rr=at(argv[1],3);
-        vis_in[0]=(int)floor(fmin(xl,xr)+.5)-1;vis_in[1]=(int)ceil(28-10*fmin(rl,rr))-1;
-        vis_in[2]=(int)floor(fmax(xl,xr)+.5);vis_in[3]=28;
+        const double xl=at(argv[1],0),yl=at(argv[1],1),dl=at(argv[1],2),xr=at(argv[1],3),yr=at(argv[1],4),dr=at(argv[1],5);
+        vis_in[0]=(int)floor(fmin(xl,xr)+.5)-1;vis_in[1]=(int)ceil(fmax(yl+dl,yr+dr))-1;
+        vis_in[2]=(int)floor(fmax(xl,xr)+.5);vis_in[3]=(int)floor(fmin(yl,yr));
     }
     if(tag==1){
         REQ(!cur_surface&&!vis_drawn&&f_plan.count>=4);
@@ -861,10 +862,10 @@ static const char PRELUDE[]=
     /* Tags: 1 the screen's face (vis), 2 HEAD ON's still, 3 a panning unit's
      * bezel on the screen (hl in 10565), 4 the panning series (Newton). The
      * app's pc (the panning unit, f at 4) is a global of its scripts. */
-    "const pf=()=>{try{return pc?pc[4]:0}catch(e){return 0}};"
+    "const pf=()=>{try{return pc&&pc[2]?pc[4]:0}catch(e){return 0}},ff=()=>{try{return pc?pc[4]:0}catch(e){return 0}};"
     "P.draw=function(h,i){try{D.call(P,h,i)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify(i));throw e}"
     "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&i[7]===10565?3:"
-    "h===L.prail||h===L.t0||h===L.t1||h===L.pc?4:0:0;__draw(h,i,t,t>2?pf():0)};"
+    "h===L.prail||h===L.t0||h===L.t1||h===L.c0||h===L.c1?4:0:0;__draw(h,i,t,t>2?ff():0)};"
     "P.commit=function(){C.call(P);__commit(pf())};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect

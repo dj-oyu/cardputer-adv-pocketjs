@@ -94,11 +94,12 @@ const CAMS = [[100, 9.7, 33, 880, 1, -1e9, 1e9], 0, [58, 15, 36, 880, 1, -1e9, 1
 // Panning units (rows 7..9, [least f, height, horizon y, g, w]): fixed in
 // the infield 25 m inside the rail, turned to the leader, zoomed to keep it
 // PAN[1] px long, f at most PAN[2]. WIDE takes the nearest when it is more
-// than PAN[0] m from the leader (1e9: side WIDE only). Height 6 and horizon
-// 28 are baked in the prail, t0/t1, pc and hl plans. pc: the unit in use,
-// [x, z, unit vector to the aim, f, distance to the aim], null for a side.
+// than PAN[0] m from the leader (1e9: side WIDE only).
 const PAN = [60, 14, 1500];
-let pc = null, vq = null, Lo, Hi, SQ, SU, SV;
+// pc: the camera of the frame, [x, z, unit view vector, f, distance to the
+// aim, height, horizon y, screen centre x]; a side unit looks along the
+// normal (0, 1) from (cx, 0). One projection draws every view (course()).
+let pc = null, vq = null, WX = null, Lo, Hi, SQ, SU, SV, ZM;
 function wide(g) {
   let m = 0, e = 1e9;
   for (let i = 7; i < CAMS.length; ++i) {
@@ -107,85 +108,34 @@ function wide(g) {
   }
   return e > PAN[0] * PAN[0] ? m : 0;
 }
-// Sets cx for shot m (1: locked on lane l) and returns the camera.
+// Sets cx and pc for shot m (1: locked on lane l) and returns [f, h, hy].
 function shot(m, xs, l, cut) {
-  pc = null;
+  let c = CAMS[m];
   if (m === 1) {
     const f = 24 * DL[l];
     cx = xs[l] - 12.5 * U - (HX - 120) * DL[l] / f;
-    return [f, 3, HY + 6 * HS - 72];
-  }
-  const c = CAMS[m];
-  if (m > 6) {
+    c = [f, 3, HY + 6 * HS - 72];
+  } else if (m > 6) {
     const q = pose(c[3], c[4]), a = pose(mx.apply(null, xs), (DNR + DFR) / 2), x = a[0] - q[0], z = a[1] - q[1], e = M.sqrt(x * x + z * z);
-    pc = [q[0], q[1], x / e, z / e, mn(PAN[2], mx(c[0], PAN[1] * e / 2.4)), e];
+    pc = [q[0], q[1], x / e, z / e, mn(PAN[2], mx(c[0], PAN[1] * e / 2.4)), e, c[1], c[2], 120];
     return [pc[4], c[1], c[2]];
+  } else {
+    const tgt = mx.apply(null, xs) - c[3] / c[0];
+    cx = mx(c[5], mn(c[6], c[4] ? cut ? tgt : cx + (tgt - cx) * .12 + mx.apply(null, rs.v) * DT * .88 : tgt));
   }
-  const tgt = mx.apply(null, xs) - c[3] / c[0];
-  cx = mx(c[5], mn(c[6], c[4] ? cut ? tgt : cx + (tgt - cx) * .12 + mx.apply(null, rs.v) * DT * .88 : tgt));
+  pc = [cx, 0, 0, 1, c[0], 1e9, c[1], c[2], 120];
   return c;
-}
-// One frame of the course as [plan, inputs], back to front, for camera c
-// at x0. K: the screen's face when this is its feed, a camera 6 m behind
-// the leader, low on the rail: rails and the leading FN[tier] runners,
-// those wholly inside K.
-function course(c, x0, xs, close, gate, K) {
-  if (!K && pc) return pan(xs);
-  const f = c[0], h = c[1], hy = c[2], k = KN[tier], d = [], o = K ? (K[0] + K[2]) / 2 : 120, R = K ? K[2] - 1 : 245,
-    sx = (w, d0) => o + (w - x0) * f / d0, gy = d0 => hy + h * f / d0, ty = (d0, e) => hy + (h - e) * f / d0;
-  const rail = (d0, col) => {
-    const p = f / d0, s = k[4] * p, a = sx((K ? M.ceil : flo)((x0 - (o - (K ? K[0] : -5)) / p) / k[4]) * k[4], d0);
-    return ['rail', [a, s, ty(d0, 1.1), gy(d0), mx(0, K ? flo((R - a) / s) : mn(flo((700 - a) / s), M.ceil((R - a) / s))), ty(d0, .55), col]];
-  };
-  let q = f / 40, n;
-  if (!K) {
-    // Stands and crowd at 40 m, a pillar every 12 m. The crowd's phase is
-    // wrapped and centred on the row: the VM's sin slows 7x past |x| 201.
-    const j = flo((x0 - 130 / q) / 12), a = sx(j * 12, 40), dx = 12 * q;
-    n = mn(flo((700 - a) / dx), M.ceil((250 - a) / dx) + 1);
-    d.push(['stands', [a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5)]],
-      ['crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191), (t >> 3) & 1]]);
-    // The screen in front of the stands: dark, a grey flash, then its feed.
-    if (vr) {
-      d.push(['vis', [vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866]]);
-      feed(d, xs, (vr[2] - vr[0]) / 120);
-    }
-  }
-  d.push(rail(DFR, 0xad55));
-  if (!K) {
-    // Turf stripes: lines of constant distance, so they meet at the vanishing
-    // point; none whose near end is left of -470 (the VM's -480 limit: a
-    // close-up of a far lane at LIGHT's 10 m spacing reached -499).
-    q = f / DFR;
-    const w = k[5], i0 = mx(flo((x0 - 125 / q) / w), M.ceil((x0 - 590 * DNR / f) / w)), xf = sx(i0 * w, DFR), xn = sx(i0 * w, DNR);
-    n = mx(0, mn(M.ceil((250 - xf) / (w * q)), flo((700 - xn) / (w * f / DNR))));
-    d.push(['turf', [xn, xf, w * f / DNR, w * q, gy(DNR), gy(DFR), n, i0 & 1]]);
-    for (let m = 200; m <= D; m += 200) {
-      const p = sx(m, DFR), e = m === D;
-      if (p > -40 && p < 280)
-        d.push(['pole', [p, gy(DFR), ty(DFR, e ? 4 : 2.6), (e ? .55 : .3) * q, e ? sx(m, DNR) : p, gy(e ? DNR : DFR), p, gy(DFR)]]);
-    }
-    // The gate at 0 m: 9 stall posts, lane boundaries one MUL apart in depth.
-    q = f * M.sqrt(Q) / DL[0];
-    if (gate && M.abs(x0 * q) < 400) d.push(['gate', [-x0 * q, h * q, (h - 2.6) * q, 1 / Q, hy]]);
-  }
-  for (let l = 7; l >= 0; --l) {
-    if (K && ro.indexOf(l) >= FN[tier]) continue;
-    const p = f / DL[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(DL[l]), a = ph[l];
-    if (l === close) {
-      const g = (flo(a * 3 / PI) % 6 + 6) % 6;
-      d.push(['g' + g, []], ['silk', [SILK[l], rnd(HS * bob(g))]]);
-    } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400)
-      d.push(rin(l, X, S, Y, a));
-  }
-  d.push(rail(DNR, 0xffff));
-  return d;
 }
 // A runner's inputs: hip x, back y, px per unit, ground y, four hooves.
 const rin = (l, X, S, Y, a) => ['r' + l, [X, Y - 6 * S + .6 * S * sin(2 * a), S, Y, X + S * (.5 + 3 * sin(a)), X + S * (.5 + 3 * sin(a + .8)),
   X + S * (8 + 3 * sin(a + 3.3)), X + S * (8 + 3 * sin(a + 4.1))]];
-// The screen's feed on its face vr at scale z: a low camera 6 m behind the leader.
+// The screen's feed on its face vr at scale z: a low camera 6 m behind the
+// leader, drawn inside vr (course() with the window vr).
 function feed(d, xs, z) {
-  if (von > 10) d.push.apply(d, course([85 * z, 3, vr[1] + 4.8 * z], mx.apply(null, xs) - 6, xs, -1, 0, vr));
+  if (von < 11) return;
+  const p = pc;
+  pc = [mx.apply(null, xs) - 6, 0, 0, 1, 85 * z, 1e9, 3, vr[1] + 4.8 * z, (vr[0] + vr[2]) / 2];
+  WX = vr;
+  d.push.apply(d, course(xs, -1, 0));
+  pc = p; WX = null;
 }
-

@@ -5,7 +5,7 @@ function frame_() {
   if (camT > 0) --camT;
   // The curtain: wall clock only (attract's nw, fe); the game never reads it.
   fa = rnd(mx(0, mn(1, mx(dm ? 0 : (nw - idle + FX[0]) / FX[0] - DEMO_IDLE_S * 1e3 / FX[0], 1 - (nw - fe) / FX[2]))) * FX[3]) * 255 / FX[3] | 0;
-  if (P('tab')) { tier = (tier + 1) % 3; drop(['stands', 'crowd']); want(['stands', 'crowd']); log('TIER ' + tier); }
+  if (P('tab')) { tier = (tier + 1) % 3; drop(['c0', 'c1']); want(['c0', 'c1']); log('TIER ' + tier); }
   load();
   let xs, c, l = pick, close = -1, gate = 0, extra = [];
   if (scene === 'pad') {

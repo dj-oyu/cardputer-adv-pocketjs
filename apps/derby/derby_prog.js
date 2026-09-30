@@ -15,10 +15,6 @@ function prog(src, arg) {
 const KN = [[3, 2, 3, 3, 8, 10], [4, 3, 4, 5, 5, 7], [5, 4, 6, 8, 4, 5]];
 let tier = 1;
 const T = {
-  rail: 'I0,0 I1,1 I2,2 I3,3 I4,4 I5,5 I8,6 S6,0 A6,6,0 M7,4,1 A7,7,0 V6,2 l8,7,2 V6,5 l8,7,5 Q4 V0,2 l8,0,3 A0,0,1 E',
-  turf: 'I0,0 I1,1 I2,2 I3,3 I4,4 I5,5 I6,6 I9,7 S10,288 M9,9,10 S8,512 A8,8,9 S11,-1 S12,1312 Q6 V0,4 l8,1,5 A0,0,2 A1,1,3 M8,8,11 A8,8,12 E',
-  stands: 'I8,0 I9,1 I10,2 I11,3 I12,4 I7,7 S15,0 S0,0 S2,239 A1,10,15 R$0 V0,1 L2,1,21130 A1,1,11 E I1,7 A3,7,11 A3,3,11 A5,3,15 Q12 A0,8,15 A2,8,15 A4,8,9 A6,8,9 V8,10 L8,7,31727 C$3,50712 A8,8,9 E',
-  crowd: 'I8,0 I9,1 I10,2 I11,3 I12,4 I14,6 S15,12650 M14,14,15 S15,46496 A14,14,15 S15,105642 S1,1.5 S2,2.39996 S4,-1 S3,$6 M3,3,9 S13,0 S7,.5 M5,11,7 A5,5,10 R$1 I0,0 I6,5 A6,6,13 Q12 R$2 N7,6 M7,7,1 A7,7,0 p14,7,5 A0,0,3 A6,6,2 M14,14,4 A14,14,15 E E A5,5,11 S7,.9 A13,13,7 E',
   runner: 'I0,0 I1,1 I2,2 I3,3 S4,2.5 M2,2,4 S4,-1 M4,4,2 A5,0,4 A6,0,2 A7,6,2 A8,7,2 A9,8,2 A10,9,2 A11,1,2 A12,1,4 A13,12,4 V5,11 L0,1,$0 L8,1,$0 L9,13,$0 L10,12,$0 L9,12,$0 I14,4 V0,1 L14,3,$0 I14,5 V0,1 L14,3,$0 I14,6 V8,1 L14,3,$0 I14,7 V8,1 L14,3,$0 V7,1 L7,12,$1 L8,13,$1 L9,12,$1 P8,13,$2',
   gate: 'I0,0 I1,1 I2,2 I3,3 I4,4 S5,120 R9 A6,5,0 A7,4,1 A8,4,2 L6,8,40147 L6,7,40147 V6,8 M0,0,3 M1,1,3 M2,2,3 E',
   pole: 'I8,0 I9,1 I10,2 I11,3 V8,9 L8,10,63488 S15,-1 M12,11,15 A13,10,12 S14,-1.33 M14,14,11 S15,0 A0,8,12 A1,13,15 A2,0,15 A3,13,14 A4,8,11 A5,3,15 A6,4,15 A7,13,15 C6,65535 S15,-1 M14,14,15 A3,13,14 A5,13,14 C6,65535 I0,4 I1,5 I2,6 I3,7 V0,1 L2,3,65535 S15,1 A0,0,15 A2,2,15 V0,1 L2,3,65535',
@@ -31,19 +27,21 @@ const T = {
   // The screen: its face filled row by row in colour input 6 (the feed
   // is drawn over it), b bezel rings round it, a top light, two legs.
   vis: 'I0,0 I1,1 I2,2 I3,3 I4,4 I5,5 I15,6 S6,-1 S7,1 A8,0,7 A9,2,6 A10,1,7 M11,1,6 A11,11,3 A11,11,6 Q11 V8,10 l15,9,10 A10,10,7 E Q4 V0,1 L2,1,10565 L2,3,10565 L0,3,10565 L0,1,10565 A0,0,6 A1,1,6 A2,2,7 A3,3,7 E V0,1 L2,1,23275 M8,0,6 A8,8,2 S9,.25 M9,8,9 A9,9,0 S11,.5 M8,8,11 A10,9,8 M11,4,6 A12,9,11 V12,3 L12,5,19049 A12,9,4 V12,3 L12,5,19049 A12,10,11 V12,3 L12,5,19049 A12,10,4 V12,3 L12,5,19049',
+  // One projection for every camera (course() in scene; README): each
+  // 1/Z~ by Newton, t=-Z~r, t+=2, r*=t, far to near, the first from 1.
+  // Inputs [X~, dX~, -Z~, -dZ~, count, a, b, horizon]. prail: posts from
+  // 1-e/h (b) down to the ground, colour a, the top and mid lines to the
+  // point after the last; pt (t0/t1): turf stripes from the near to the far
+  // rail (far = near + a, b; the first far 1/Z~ from 1 too); pc
+  // (c0/c1, the two blink phases): 12 m bays, rows (b a row) of dots
+  // scattered by sin like T.crowd, rows snaking; hl: m lines between two
+  // ends [x, y, dy], the ends joined.
+  prail: 'I0,0 I1,1 I2,2 I3,3 I4,4 I6,5 I12,6 I11,7 S10,2 S15,1 S5,1 R20 M7,2,5 A7,7,10 M5,5,7 E M13,0,5 M14,5,15 Q4 M8,0,5 M9,5,12 A9,9,11 V8,9 A9,5,11 l6,8,9 A0,0,1 A2,2,3 M7,2,5 A7,7,10 M5,5,7 M7,2,5 A7,7,10 M5,5,7 M7,2,5 A7,7,10 M5,5,7 E M8,0,5 M7,14,12 A7,7,11 V13,7 M9,5,12 A9,9,11 l6,8,9 A12,12,15 S4,.5 M12,12,4 M7,14,12 A7,7,11 V13,7 M9,5,12 A9,9,11 l6,8,9',
+  pt: 'I0,0 I1,1 I2,2 I3,3 I4,4 I6,5 I7,6 I13,7 S12,2 S15,$0 S5,1 R20 M8,2,5 A8,8,12 M5,5,8 E A10,2,7 S9,1 R20 M8,10,9 A8,8,12 M9,9,8 E Q4 A10,2,7 M8,10,9 A8,8,12 M9,9,8 M8,10,9 A8,8,12 M9,9,8 M8,10,9 A8,8,12 M9,9,8 A11,9,13 A10,0,6 M10,10,9 V10,11 M10,0,5 A11,5,13 l15,10,11 A0,0,1 A2,2,3 M8,2,5 A8,8,12 M5,5,8 M8,2,5 A8,8,12 M5,5,8 M8,2,5 A8,8,12 M5,5,8 M8,2,5 A8,8,12 M5,5,8 E',
+  pc: 'I0,0 I1,1 I2,2 I3,3 I4,5 I8,6 I6,7 S11,$0 S9,1.5 S15,2 S5,1 R20 M10,2,5 A10,10,15 M5,5,10 E I13,4 Q13 M14,0,5 A0,0,1 A2,2,3 M10,2,5 A10,10,15 M5,5,10 M10,2,5 A10,10,15 M5,5,10 M10,2,5 A10,10,15 M5,5,10 M12,0,5 S7,-1 M10,14,7 A12,12,10 S7,$3 M12,12,7 S7,.5 M13,8,7 S7,1 A13,13,7 R$1 M10,13,5 A10,10,6 R$2 N7,4 M7,7,9 A7,7,14 p11,7,10 A14,14,12 S7,2.39996 A4,4,7 S7,-1 M11,11,7 S7,105642 A11,11,7 E S7,-1 M12,12,7 A14,14,12 A13,13,8 E S7,$4 A4,4,7 E',
+  hl: 'I0,0 I1,1 I2,2 I3,3 I4,4 I5,5 I6,6 I7,7 S8,0 A8,8,1 S9,0 A9,9,4 Q6 V0,1 l7,3,4 A1,1,2 A4,4,5 E S10,-1 M11,2,10 A1,1,11 M11,5,10 A4,4,11 V0,8 l7,0,1 V3,9 l7,3,4',
   // A horse head on (HEAD ON cut): x, ground y, px per unit, coat, silk,
   // lift of each foreleg (px).
-  // Panning units (pan() in view; README): a Newton step t=-Z'r, t+=2,
-  // r*=t, far to near. prail: posts from 6-height (input 7) down to the
-  // ground, the top and mid lines to the point after the last; t0/t1: turf
-  // stripes from the near to the far rail (far = near + inputs 6, 7; the
-  // first far 1/Z' from the near one; 4 steps near, the wide base stride
-  // of LIGHT); pc: crowd columns, rows
-  // (input 7) snaking; hl: lines between two ends.
-  prail: 'I0,0 I1,1 I2,2 I3,3 I4,4 I5,5 I6,6 I12,7 S10,2 S11,28 S13,6 M14,0,5 I15,5 Q4 M8,0,5 M9,5,12 A9,9,11 V8,9 M9,5,13 A9,9,11 l6,8,9 A0,0,1 A2,2,3 M7,2,5 A7,7,10 M5,5,7 M7,2,5 A7,7,10 M5,5,7 M7,2,5 A7,7,10 M5,5,7 E M8,0,5 M7,15,12 A7,7,11 V14,7 M9,5,12 A9,9,11 l6,8,9 A12,12,13 S4,.5 M12,12,4 M7,15,12 A7,7,11 V14,7 M9,5,12 A9,9,11 l6,8,9',
-  pt: 'I0,0 I1,1 I2,2 I3,3 I4,4 I5,5 I6,6 I7,7 S12,2 S13,28 S14,6 S15,$0 A10,2,7 M8,10,5 A8,8,12 M9,5,8 M8,10,9 A8,8,12 M9,9,8 M8,10,9 A8,8,12 M9,9,8 M8,10,9 A8,8,12 M9,9,8 Q4 A10,2,7 M8,10,9 A8,8,12 M9,9,8 M8,10,9 A8,8,12 M9,9,8 M8,10,9 A8,8,12 M9,9,8 M11,9,14 A11,11,13 A10,0,6 M10,10,9 V10,11 M10,0,5 M11,5,14 A11,11,13 l15,10,11 A0,0,1 A2,2,3 M8,2,5 A8,8,12 M5,5,8 M8,2,5 A8,8,12 M5,5,8 M8,2,5 A8,8,12 M5,5,8 M8,2,5 A8,8,12 M5,5,8 E',
-  pc: 'I0,0 I1,1 I2,2 I3,3 I5,5 I6,6 S10,2 S11,28 S12,4.8 S13,-2.4 S14,-1 S15,105642 I4,4 Q4 I4,7 M8,0,5 Q4 M9,5,12 A9,9,11 p6,8,9 M6,6,14 A6,6,15 A12,12,13 E M13,13,14 A12,12,13 A0,0,1 A2,2,3 M7,2,5 A7,7,10 M5,5,7 M7,2,5 A7,7,10 M5,5,7 E',
-  hl: 'I0,0 I1,1 I2,2 I3,3 I4,4 I5,5 I6,6 I7,7 S8,28 M10,1,4 A10,10,8 M11,3,4 A11,11,8 Q6 M12,1,4 A12,12,8 V0,12 M9,3,4 A9,9,8 l7,2,9 A4,4,5 E V0,10 l7,0,12 V2,11 l7,2,9',
   fr: 'I0,0 I1,1 I2,2 I5,5 I6,6 I8,3 I9,4 S15,-1 M5,5,15 A5,5,1 M6,6,15 A6,6,1 S3,-1.2 M3,3,2 A3,3,0 M4,3,15 A4,4,0 A4,4,0 S7,-6 M7,7,2 A7,7,1 V3,7 l8,3,5 V4,7 l8,4,6 M14,2,15 M11,2,15 A11,11,0 A12,0,2 A10,11,14 A13,12,2 S5,-9.5 M5,5,2 A5,5,1 A6,5,2 V10,7 l8,10,6 l8,11,5 l8,12,5 l8,13,6 l8,13,7 l8,10,7 S7,-13 M7,7,2 A7,7,1 V3,5 l9,11,7 l9,12,7 l9,4,5 A7,7,14 p9,0,7 A6,6,2 A5,5,14 A5,5,14 V0,6 l8,0,5'
 };
 for (let k = 0; k < 8; ++k) T.map += ' I0,' + k + ' S1,' + (3 + k) + ' V0,1 A0,0,9 L0,1,' + SILK[k];
@@ -72,6 +70,7 @@ function spec(n) {
   if (n[0] === 'g' && i >= 0) return [prog('S0,0'), gallop(i)];
   if (n === 'hd') return [prog('S0,0'), {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
   if (n[0] === 't' && i >= 0) return [prog(T.pt, [512 + 288 * i])];
+  if (n[0] === 'c' && i >= 0) return [prog(T.pc, [46496 + 12650 * i, k[1], k[2], 1 / k[2], 2.39996 * (1 - k[1] * k[2])])];
   if (n[0] === 'r' && i >= 0) return [prog(T.runner, [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410])];
   return [prog(T[n], k.concat(1 / k[2]))];
 }
@@ -79,5 +78,5 @@ function spec(n) {
 // one polyline; points from the camera in README.
 const HD = [[120, -155, 120, 425, 120, -155, -63, 323, 425, 120, 85, 159, 120, 100, 142, 120, 184, 166, 166, 166, 156, 156, 166, 166, 184, 184, 189, 189, 196, 196, 204, 204, 214, 214, 227, 227, 240, 227, 227, 240, 227, 227, 120, 184],
   [50, 105, 50, 105, 50, 160, 123, 123, 160, 50, 64, 64, 50, 58, 58, 50, 56, 56, 40, 14, 21, 42, 40, 56, 56, 19, 17, 56, 57, 14, 10, 58, 59, 5, -1, 60, 61, 60, -1, -8, -1, 60, 50, 19]];
-const PAD = ['turf', 'rail', 'stands', 'silk', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'crowd', 'pole'],
-  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd', 'prail', 't0', 't1', 'pc', 'hl'];
+const PAD = ['prail', 't0', 't1', 'c0', 'c1', 'hl', 'silk', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'pole'],
+  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd'];
