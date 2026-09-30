@@ -13,6 +13,7 @@
 | 3.1 | オーバーレイ | 実装済み（描画は`pocket.kasane`、region/inputは`pocket.overlay`） | `pocket_kasane.c`、`pocket_overlay.c`、`main/ui/overlay*.c` |
 | 4 | 共通エラー・cancel・Options | 実装済み | `pocket_api.c` |
 | 5 | app／time／log | 実装済み | `pocket_app.c` |
+| 5.1 | app.load（チャンクの読み込み） | 実装済み | `pocket_app_load.c`、`tools/make_app_chunks.py` |
 | 6 | ui／input／input.text／input.keys | 実装済み（`ui.basic` は未実装） | `pocket_input.c`、`pocket_text.c`、`main/hal/keystate.c` |
 | 7 | storage | 実装済み | `pocket_storage.c` |
 | 7 | fs（`pocket.fs`） | 実装済み。詳細は[ファイルシステムAPI](filesystem-api.md) | `pocket_fs.c` |
@@ -268,6 +269,34 @@ startはソース評価中に1回登録する。新ランタイムではglobalTh
 通常終了は新規入力を止め、stop hookを最大200ms（初期案）だけ待ち、I/Oキャンセル、購読解除、画面解放、資源解放、guest破棄へ進む。強制停止・例外・電源断ではstop hookの実行や保存を保証しない。重要な状態は変更時に明示保存する。終了中に残ったnative workerはJS値を持たず、停止完了までホストがメモリを保持する。無理にfreeしない。
 
 イベント／completion用の制御領域は一般データキューと分け、Promise完了や停止通知を黙って落とさない。センサーの最新値は統合できるが、入力・通信の欠落はカウンターとoverflow状態で通知する。入力overflow時はheld状態をリセットして古いイベントを破棄する。
+
+### 5.1 チャンクの読み込み（`pocket.app.load`、実装、2026-09-30）
+
+```ts
+pocket.app.load(name: string): boolean;   // true: いま評価した。false: 読み込み済みで何もしなかった
+```
+
+アプリのソースを複数の**チャンク**（ビルドに埋め込んだ、そのアプリ自身のソース片）に分け、同期で1つずつ評価する。目的は評価のピークを下げること（QuickJSは1つのスクリプトの解析用の構造を、そのスクリプトの解析が終わるまで全部保つ。[評価のピーク](../vm/eval-peak.md) §7）。実装は `main/pocket/pocket_app_load.c`。
+
+- チャンクは、アプリと**同じrealmのグローバルスクリプト**として評価する。トップレベルの `function` 宣言・`var`・`globalThis.x = ...`・グローバルの `let`/`const` は、入口のソースと他のチャンクから見える（同じ束縛で、写しではない）。
+- **冪等**。読み込み済みの名前は評価せず `false` を返す。グローバルの `let`/`const` を持つスクリプトは、同じrealmへもう一度評価すると再宣言のSyntaxErrorになるので、二度目を評価しない。
+- チャンクの表は**アプリIDごと**（`apps/<アプリ>/chunks.txt`、[§7.2](../vm/eval-peak.md)）。セッション開始時のアプリIDで決まる。実行時にソースを受け取るアプリ（Playground・チュートリアル・作品）は表を持たず、どの名前も`NOT_FOUND`。
+- 評価（アプリ起動）中の呼び出しには評価の2秒の期限が、`frame()`などターンの中の呼び出しにはそのターンの250msの期限がかかる。**解析は割り込みを見ない**（実測・実機: 10.7KBで約45ms、30KBで約150ms）。期限は実行の最初のセーフポイントで効く。
+- capability `app.load`: 全セッションで`supported=true`（表の無いアプリも関数はあり、`NOT_FOUND`を返す）。`limits`は`maxChunks: 32`（1アプリのチャンク数。ビルドが33個目を断る）と`maxNameBytes: 31`（毎回の呼び出しで検査）。
+
+失敗はすべて同期のthrowで、`PocketError`（§4）。`message`は `chunk 'scene' did not compile: SyntaxError: ... at derby_scene.js:12:5` の形で、チャンクのファイル名と行を含む。`cause`に元の例外（スタック付き）を持つ。
+
+| 状況 | code | outcome | retryable | その名前の次の`load` |
+| --- | --- | --- | --- | --- |
+| 名前が文字列でない・0バイト・32バイト以上・NULを含む | `INVALID_ARGUMENT` | not-applied | false | — |
+| このアプリにその名前のチャンクが無い | `NOT_FOUND` | not-applied | false | 同じ |
+| 解析中にheap不足 | `OUT_OF_MEMORY` | not-applied | **true** | もう一度解析する（何も宣言されていない） |
+| 構文エラー | `CORRUPT_DATA` | not-applied | false | もう一度解析して同じエラー |
+| トップレベルの実行が例外を投げた | `CORRUPT_DATA`（heap不足なら`OUT_OF_MEMORY`、スタック超過なら`LIMIT_EXCEEDED`） | **unknown** | false | `CORRUPT_DATA`（二度と実行しない。途中までの宣言が残りうる） |
+| そのチャンクのトップレベルから自分自身（または読み込み中のチャンク）を`load` | `CONFLICT` | not-applied | false | — |
+| 期限切れ・停止要求 | PocketErrorにしない。捕まえられない例外のまま伝わり、アプリは止まる | | | |
+
+手放すAPIは無い。チャンクが作った関数は、参照を捨てればGCで解放される（トップレベルの関数宣言・`var`・`let`は値を`null`にする。`const`は捨てられない）。捨てた後も`load`は`false`を返し、再評価はしない。書き方の指針は[評価のピーク](../vm/eval-peak.md) §7.3。
 
 ## 6. UI・画面遷移・入力
 
