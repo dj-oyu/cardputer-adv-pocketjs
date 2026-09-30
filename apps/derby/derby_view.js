@@ -13,11 +13,29 @@ function load() {
   if (!n) return;
   try {
     if (pocket.memory && pocket.memory.info().internalFreeBytes < 18432) return;
-    const p = spec(n);
+    // The plan n: its code, and the points of a typed-point plan.
+    const k = KN[tier], i = +n[1];
+    let p;
+    if (n[0] === 'g' && i >= 0) {
+      // Gallop frame i of the close-up horse.
+      const x = [], y = [], ph = PI * i / 3, b = bob(i), put = (u, v) => { x.push(rnd(8 * u)); y.push(rnd(8 * v)); };
+      let jx = 0, jy = 0;
+      for (let j = 0; j < BODY.length; j += 2) {
+        const u = BODY[j], l = BODY[j + 1];
+        if (u < 20) { put(jx = u, jy = l + b); continue; }
+        const a = .55 * sin(ph + u - 20), kx = jx + l * sin(a), ky = jy + l * M.cos(a), a2 = a - .9 * mx(0, sin(ph + u - 18.6));
+        put(kx, ky); put(kx + l * sin(a2), ky + l * M.cos(a2)); put(kx, ky); put(jx, jy);
+      }
+      p = [prog(T.nil), {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
+    } else if (n === 'hd') p = [prog(T.nil), {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
+    else if (n[0] === 'r' && i >= 0) p = [prog(T.runner, [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410])];
+    else p = [prog(T[n], k.concat(1 / k[2]))];
     live[n] = p[1] ? H.register(p[0], p[1]) : H.register(p[0]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
 }
+// Draws plan n now if it is registered (inputs are copied: pocket_proc.c).
+const dr = (n, a) => { if (live[n]) H.draw(live[n], a); };
 const want = l => { for (const n of l) if (!live[n] && queue.indexOf(n) < 0) queue.push(n); };
 function drop(l) {
   for (const n of l) {
@@ -101,16 +119,16 @@ function shot(m, xs, l, cut) {
   cx = mx(c[5], mn(c[6], c[4] ? cut ? tgt : cx + (tgt - cx) * .12 + mx.apply(null, rs.v) * DT * .88 : tgt));
   return c;
 }
-// One frame of the course as [plan, inputs], back to front, for camera c
+// Draws one frame of the course (dr, no list), back to front, for camera c
 // at x0. K: the screen's face when this is its feed, a camera 6 m behind
 // the leader, low on the rail: rails and the leading FN[tier] runners,
 // those wholly inside K.
 function course(c, x0, xs, close, gate, K) {
-  const f = c[0], h = c[1], hy = c[2], k = KN[tier], d = [], o = K ? (K[0] + K[2]) / 2 : 120, R = K ? K[2] - 1 : 245,
+  const f = c[0], h = c[1], hy = c[2], k = KN[tier], o = K ? (K[0] + K[2]) / 2 : 120, R = K ? K[2] - 1 : 245,
     sx = (w, d0) => o + (w - x0) * f / d0, gy = d0 => hy + h * f / d0, ty = (d0, e) => hy + (h - e) * f / d0;
   const rail = (d0, col) => {
     const p = f / d0, s = k[4] * p, a = sx((K ? M.ceil : flo)((x0 - (o - (K ? K[0] : -5)) / p) / k[4]) * k[4], d0);
-    return ['rail', [a, s, ty(d0, 1.1), gy(d0), mx(0, K ? flo((R - a) / s) : mn(flo((700 - a) / s), M.ceil((R - a) / s))), ty(d0, .55), col]];
+    dr('rail', [a, s, ty(d0, 1.1), gy(d0), mx(0, K ? flo((R - a) / s) : mn(flo((700 - a) / s), M.ceil((R - a) / s))), ty(d0, .55), col]);
   };
   let q = f / 40, n;
   if (!K) {
@@ -118,16 +136,16 @@ function course(c, x0, xs, close, gate, K) {
     // wrapped and centred on the row: the VM's sin slows 7x past |x| 201.
     const j = flo((x0 - 130 / q) / 12), a = sx(j * 12, 40), dx = 12 * q;
     n = mn(flo((700 - a) / dx), M.ceil((250 - a) / dx) + 1);
-    d.push(['stands', [a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5)]],
-      ['crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191), (t >> 3) & 1]]);
+    dr('stands', [a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5)]);
+    dr('crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191), (t >> 3) & 1]);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
       const z = (vr[2] - vr[0]) / 120;
-      d.push(['vis', [vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866]]);
-      if (von > 10) d.push.apply(d, course([85 * z, 3, vr[1] + 4.8 * z], mx.apply(null, xs) - 6, xs, -1, 0, vr));
+      dr('vis', [vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866]);
+      if (von > 10) course([85 * z, 3, vr[1] + 4.8 * z], mx.apply(null, xs) - 6, xs, -1, 0, vr);
     }
   }
-  d.push(rail(DFR, 0xad55));
+  rail(DFR, 0xad55);
   if (!K) {
     // Turf stripes: lines of constant distance, so they meet at the vanishing
     // point; none whose near end is left of -470 (the VM's -480 limit: a
@@ -135,26 +153,26 @@ function course(c, x0, xs, close, gate, K) {
     q = f / DFR;
     const w = k[5], i0 = mx(flo((x0 - 125 / q) / w), M.ceil((x0 - 590 * DNR / f) / w)), xf = sx(i0 * w, DFR), xn = sx(i0 * w, DNR);
     n = mx(0, mn(M.ceil((250 - xf) / (w * q)), flo((700 - xn) / (w * f / DNR))));
-    d.push(['turf', [xn, xf, w * f / DNR, w * q, gy(DNR), gy(DFR), n, i0 & 1]]);
+    dr('turf', [xn, xf, w * f / DNR, w * q, gy(DNR), gy(DFR), n, i0 & 1]);
     for (let m = 200; m <= D; m += 200) {
       const p = sx(m, DFR), e = m === D;
       if (p > -40 && p < 280)
-        d.push(['pole', [p, gy(DFR), ty(DFR, e ? 4 : 2.6), (e ? .55 : .3) * q, e ? sx(m, DNR) : p, gy(e ? DNR : DFR), p, gy(DFR)]]);
+        dr('pole', [p, gy(DFR), ty(DFR, e ? 4 : 2.6), (e ? .55 : .3) * q, e ? sx(m, DNR) : p, gy(e ? DNR : DFR), p, gy(DFR)]);
     }
     // The gate at 0 m: 9 stall posts, lane boundaries one MUL apart in depth.
     q = f * M.sqrt(Q) / DL[0];
-    if (gate && M.abs(x0 * q) < 400) d.push(['gate', [-x0 * q, h * q, (h - 2.6) * q, 1 / Q, hy]]);
+    if (gate && M.abs(x0 * q) < 400) dr('gate', [-x0 * q, h * q, (h - 2.6) * q, 1 / Q, hy]);
   }
   for (let l = 7; l >= 0; --l) {
     if (K && ro.indexOf(l) >= FN[tier]) continue;
     const p = f / DL[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(DL[l]), a = ph[l];
     if (l === close) {
       const g = (flo(a * 3 / PI) % 6 + 6) % 6;
-      d.push(['g' + g, []], ['silk', [SILK[l], rnd(HS * bob(g))]]);
+      dr('g' + g, []);
+      dr('silk', [SILK[l], rnd(HS * bob(g))]);
     } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400)
-      d.push(['r' + l, [X, Y - 6 * S + .6 * S * sin(2 * a), S, Y, X + S * (.5 + 3 * sin(a)), X + S * (.5 + 3 * sin(a + .8)),
-        X + S * (8 + 3 * sin(a + 3.3)), X + S * (8 + 3 * sin(a + 4.1))]]);
+      dr('r' + l, [X, Y - 6 * S + .6 * S * sin(2 * a), S, Y, X + S * (.5 + 3 * sin(a)), X + S * (.5 + 3 * sin(a + .8)),
+        X + S * (8 + 3 * sin(a + 3.3)), X + S * (8 + 3 * sin(a + 4.1))]);
   }
-  d.push(rail(DNR, 0xffff));
-  return d;
+  rail(DNR, 0xffff);
 }
