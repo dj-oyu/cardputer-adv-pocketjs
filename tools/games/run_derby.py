@@ -23,7 +23,9 @@ the face, the view's lettering inside it.
 Seeds (pocket.random.seed() is DERBY_HW in the harness, fixed): every paddock
 seed the MID run logs must be tools/games/derby_seeds.py's formula; the same
 stored race under another hardware seed must be another race; the seed
-analysis (stream overlaps, chi-square) must pass.
+analysis (stream overlaps, chi-square) must pass. Odds: node runs
+tools/games/tune_derby.mjs 20000 --check (the bettor's return is 0.8 in every
+chance bin and popularity rank).
 --m32 builds for i386 with the device's 8-byte JSValue and 4-byte pointers
 (tools/vmtest/m32_sysroot.sh) so the guest heap figures match the firmware's
 object sizes; the default 64-bit build runs with ASan/UBSan. --ppm writes the
@@ -231,6 +233,10 @@ def main() -> None:
     # tier, the camera keys nor the pick may move the player's race.
     if len(set(finish.values())) > 1:
         raise SystemExit(f"the player's race differs between runs: {finish}")
+    if not args.heap_limit:
+        print("==== odds calibration (node tools/games/tune_derby.mjs 20000 --check)", flush=True)
+        if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check"], cwd=ROOT).returncode:
+            raise SystemExit("odds calibration check failed")
     if args.ppm:
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
