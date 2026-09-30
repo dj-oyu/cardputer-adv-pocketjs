@@ -37,6 +37,7 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [spread-eval-oom.md](vm/spread-eval-oom.md) | 記録 | 文字列のスプレッド・for-of が実機でだけ止まらなかった: `js_string_iterator_next` の `(int *)&idx` が Xtensa（`uint32_t`=`unsigned long`）の strict aliasing で消えていた。修正 `f937388`、同種の6箇所、再現アプリ `POCKET_HEAPPROBE` と変種の表 |
 | [aliasing-types.md](vm/aliasing-types.md) | 記録 | spread-eval-oom の同種6箇所と libunicode の正規化配列を、宣言の型を合わせて修正（機械語は修正前と同一＝今のビルドでは誤コンパイルなし）。`-Wno-incompatible-pointer-types` を quickjs-libc.c 以外から外した |
 | [eval-peak.md](vm/eval-peak.md) | 記録・比較 | 評価のピークの構成（pass-1 バイトコード 46%、JSFunctionDef 15%…、host の確保タグ）と下げる手段の実測: 分割（B 案）+18.5〜25.9 KB、事前コンパイル +26 KB・49 ms、パーサの余り返し host −11 KB、ES モジュール、遅延 import。推奨の順序と決めること。§7 製品化した `pocket.app.load`（チャンクの表・書き方・実機で 3 分割 +18.2 KB）、§8 静的 import への引き継ぎ |
+| [ゲストの行番号表を落とす](vm/strip-debug.md) | `CONFIG_POCKET_VM_STRIP_DEBUG`（既定 OFF）: 行番号表なしのコンパイル。アプリごとの効果（DERBY の評価の余裕 +2.7 KB、実機）、失う位置情報、DERBY の首振り（段階 3）には足りないこと、運用案（2026-09-30）|
 | [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
 
@@ -104,6 +105,8 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [DERBY WATCH の背景は何が重いか](kasane/derby-background-cost.md) | 観客席・観客・柵・刈り目の plan を外した差（カメラ×段階）、帯描画の費用モデル（1 線分・1 帯・1 画素）、VM の SIN が引数約 201 超で約 7〜9 倍遅い発見、画素キャッシュと透明な面の効果の上限とメモリ（2026-09-30 実測）|
 | [面ごとの線分上限](kasane/surface-segment-cap.md) | `createSurface({maxSegments})` で面1のフレームを n 本分に縮める API、1 面の確保量（256 本で 5.4 KB、既定 1,024 本で 21.5 KB）、DERBY WATCH の評価直後に面1が確保できる境目と plan 登録への影響（2026-09-30 実測）|
 | [JS 風の言語 → 手続き型 IR](kasane/js-to-ir.md) | plan を名前と式で書くコンパイラの試作（`tools/kasane_ir/`、手書き 13 本と出力一致、命令 −3%）、plan の文字列と `prog()` のゲスト常駐（評価後 7.1 KB、段階 3 で 8.1 KB。文字列を詰めても −1.6〜2.5 KB）、native の plan が命令数に依らず 872 B である点、flash の plan を id で登録する設計と優先順位（2026-09-30 host 実測・推定）|
+| [JS 風の言語 → 手続き型 IR](kasane/js-to-ir.md) | plan を名前と式で書くコンパイラの試作（`tools/kasane_ir/`、手書き 13 本と出力一致、命令 −3%）、plan の文字列と `prog()` のゲスト常駐（評価後 7.1 KB、段階 3 で 8.1 KB）、native の plan が命令数に依らず 872 B である点、flash の plan を id で登録する設計と優先順位（2026-09-30 host 実測・推定）|
+| [plan を命令数ぶんだけ確保する](kasane/plan-sized-alloc.md) | `ksn_proc_sized_plan`（40 + 12n B、以前は 872 B）、命令数ごとの heap のブロック、DERBY の 25 本 22.5 → 9.7 KB とターン内の最小 +11.4 KB、首振り段階 3 の LOADSTALL の解消、断片化（`lg`）、flash の id 登録への見通し（2026-09-30 実測）|
 
 ## JS API — [`api/`](api/)
 

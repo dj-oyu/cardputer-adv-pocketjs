@@ -38247,6 +38247,12 @@ static void add_pc2line_info(JSFunctionDef *s, uint32_t pc,
 
 static void compute_pc2line_info(JSFunctionDef *s)
 {
+#ifdef CONFIG_POCKET_VM_STRIP_DEBUG
+    /* No line table (main/Kconfig.projbuild): a runtime error's position is
+       the function's first line (find_line_num's fallback); parse errors
+       keep their exact position, which comes from the tokenizer. */
+    return;
+#endif
     if (s->source_loc_slots) {
         int last_line_num = s->line_num;
         int last_col_num = s->col_num;
@@ -40055,11 +40061,18 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     b->line_num = fd->line_num;
     b->col_num = fd->col_num;
 
+#ifdef CONFIG_POCKET_VM_STRIP_DEBUG
+    /* compute_pc2line_info() left the table empty: keep no block at all
+       (a zero-length realloc would still cost a heap block). */
+    b->pc2line_buf = NULL;
+    b->pc2line_len = 0;
+#else
     b->pc2line_buf = js_realloc(ctx, fd->pc2line.buf, fd->pc2line.size);
     if (!b->pc2line_buf) {
         b->pc2line_buf = fd->pc2line.buf;
     }
     b->pc2line_len = fd->pc2line.size;
+#endif
     b->source = fd->source;
     b->source_len = fd->source_len;
 
@@ -46434,7 +46447,8 @@ static JSValue js_function_toString(JSContext *ctx, JSValueConst this_val,
     }
 
     p = JS_VALUE_GET_OBJ(this_val);
-    /* CONFIG_POCKET_VM_STRIP_FN_SOURCE (main/Kconfig.projbuild, default y):
+    /* Pocket VM (no Kconfig switch; the name CONFIG_POCKET_VM_STRIP_FN_SOURCE
+       used here before never existed, docs/vm/strip-debug.md):
        the parser keeps no copy of any function's source text, so b->source
        is NULL for every function compiled from JS and control falls through
        to upstream's own no-source path below -- the one it already takes
