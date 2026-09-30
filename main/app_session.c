@@ -1207,6 +1207,15 @@ bool app_heapprobe_select(const char *arg, const char **source, size_t *length,
             hp_chunk_set=0; *source=entry3; *length=sizeof entry3-1;
         } else if(!strncmp(kind,"-split4",7)) {
             hp_chunk_set=1; *source=entry4; *length=sizeof entry4-1;
+        } else if(!strncmp(kind,"-load3",6)) {
+            // The same chunks through the product's loader: s3c1..s3c3 are
+            // local.derby's in this image (main/CMakeLists.txt's hp_chunks.txt).
+            // No binding of its own: the chunks' top-level names are global.
+            static const char entry[]="// pocket.kasane\npocket.app.load('s3c1');pocket.app.load('s3c2');pocket.app.load('s3c3');";
+            *source=entry; *length=sizeof entry-1;
+        } else if(!strncmp(kind,"-load4",6)) {
+            static const char entry[]="// pocket.kasane\npocket.app.load('s4c1');pocket.app.load('s4c2');pocket.app.load('s4c3');pocket.app.load('s4c4');";
+            *source=entry; *length=sizeof entry-1;
         } else if(!strncmp(kind,"-bc",3)) {
             static const char entry_bc[]="// pocket.kasane\n__hpLoadBC();";
             *source=entry_bc; *length=sizeof entry_bc-1;

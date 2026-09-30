@@ -153,3 +153,125 @@ QuickJS には遅延コンパイルが無いので、**使わない部分を読�
 6. (ii)(iii) と flash 常駐のバイトコードは、上の効果を見てから。
 
 ユーザーが決めること: (1) 静的 `import` の書き方をどこまで優先するか（A を採るか、B で足りるか）、(2) 事前コンパイルをビルドに入れるか（host の m32 ツールチェーンをビルドの前提にするか）、(3) パーサの (i) を上流との差分として持つか、(4) DERBY WATCH を場面ごとの遅延の単位に書き直すか。
+
+## 7. 製品化: `pocket.app.load`（B 案、2026-09-30）
+
+§3.2 の試作（`__hpLoad(k)`、`POCKET_HEAPPROBE` の中）を、通常の機能にした。仕様は [共通 API](../api/common-api.md) §5.1。ここには、作りの理由・ビルドの手順・アプリ作者向けの指針・検証の結果を置く。
+
+### 7.1 作り
+
+| 部品 | 場所 | 役割 |
+| --- | --- | --- |
+| 面 | `main/pocket/pocket_app_load.c` | `pocket.app.load`。`pocket_app_install()` の中から `pocket_app_load_install()` で入る（`pocket_workspace.c` と同じく `pocket.app` に lazy で足す）。capability `app.load` を `pocket_api_register()` で登録。`pocket_api.c` と `app_session.c` は変えていない |
+| 表の型 | `main/pocket/app_chunks.h` | アプリ ID → {名前, ファイル名, 開始, 終了}。ESP-IDF にも QuickJS にも依存しない |
+| 表の生成 | `tools/make_app_chunks.py` | `apps/*/chunks.txt` から `build/generated/app_chunks.c` と、埋め込むファイルの一覧を作る（configure のとき） |
+| host の表 | `tools/hostshim/app_chunks_host.c` | 同じ `chunks.txt` をファイルから読む（§7.4） |
+
+決めたこと（根拠）:
+
+- **表はセッション開始時のアプリ ID で引く**（`app_registry_current()` を install で1回読む）。眠っているアプリ（常駐中断）の realm が、あとで選ばれた別のアプリのチャンクに届かないように。オーバーレイは自分の ID を選んでから始まる（`ui/overlay.c`）。
+- **解析と実行を分ける**（`JS_Eval(COMPILE_ONLY)` → `JS_EvalFunction`）。解析の失敗は何も宣言していないので、もう一度頼める（heap 不足なら `retryable=true`）。実行の失敗は、グローバルの `let` が永久に TDZ のまま残るなど、途中までの宣言が残りうるので、その名前は二度と実行しない（`CORRUPT_DATA`、`outcome=unknown`）。
+- **冪等**（読み込み済みは `false`）。再評価はグローバルの `let`/`const` の再宣言の SyntaxError になり、アプリが書いていない行を指すため。
+- **読み込み中の自分自身は `CONFLICT`**。循環（A が B を、B が A を読む）を黙って `false` にすると、宣言が半分無いまま先へ進む。
+- **期限切れ（捕まえられない例外）は PocketError にしない**。変換すると try/catch で捕まり、アプリを止めるための期限を越えて走り続ける。
+- **heap 不足の判定は例外から**（`InternalError: out of memory` か、裸の `null`）。OOM の canary（`JS_TakeOOMCanary`）はターンの終わりに `report_oom_if_any()` が読むもので、ここで読むとその `OOM` 行を奪う。チャンクが自分で `throw null` すると OUT_OF_MEMORY と誤るのが代償。
+- 失敗の `message` は `String(e)` と、元の例外のスタックの1行目（`eval_reporting()` の `EVAL_ERROR` と同じ2つ）。捕まえずに `frame()` から出れば `FRAME_WRAP` の `__pjs_error` がそのまま表示し、評価中なら `EVAL_ERROR` の行に出る（書式は変えていない）。
+- ログ: 成功すると `APP_LOAD <名前> bytes=… compile_us=… run_us=… used=<前>><解析後>><実行後>`、失敗すると `APP_LOAD <名前> failed …`。契約のマーカーではない（診断ビルドなしで測れるように置いた）。
+- 費用（実測・map、`esp_idf_size --diff`、基準 `97553cd`）: DIRAM **+16 B**（`.bss`: 表のポインタと3つのマスク）、flash +2,184 B（コード +1,720、rodata +464）。capability の表は 32 枠のうち、前面アプリで 30（ペットのアプリ、計算）、lazy の表は 28 枠のうち 26（計算）。
+
+### 7.2 ビルドの手順（アプリにチャンクを持たせる）
+
+アプリのディレクトリに `chunks.txt` を置くだけ。`main/CMakeLists.txt` は `apps/*/chunks.txt` を glob するので、**CMake・`main.c`・`shell.c` の編集は要らない**。
+
+```text
+# apps/derby/chunks.txt
+app local.derby            ← app_registry.c のアプリ ID
+scene  derby_scene.js      ← load() に渡す名前（1〜31 バイトの [A-Za-z0-9_.-]）と、このファイルからの相対パス
+demo   derby_demo.js
+```
+
+- 入口のソースは従来どおり `EMBED_TXTFILES` と `begin_run(...)`。入口はチャンクに数えない。
+- 埋め込みのシンボルはファイル名から作られる（`_binary_derby_scene_js_start`）。**ファイル名は全アプリのチャンクと `EMBED_TXTFILES` で重複させない**（アプリ名の接頭辞を付ける）。チャンク同士の重複は `make_app_chunks.py` が configure で断り、`EMBED_TXTFILES` との重複は ESP-IDF の `build/<ファイル名>.S` の衝突で configure が止まる。
+- 表はシンボルを持ち、長さを持たない。**チャンクの中身の編集は再 configure 不要**。チャンクの追加・改名・削除は `chunks.txt` の変更で、configure の依存に入っている。
+- 断るもの（configure で止まる）: 名前の形式、同じアプリで同じ名前、1 アプリ 33 個以上、ファイルが無い、ファイル名の衝突。
+- 診断用の表: `POCKET_HEAPPROBE=ON` のときだけ、`POCKET_APP_CHUNK_LISTS` に一覧を足す（DERBY WATCH の 3/4 分割が `local.derby` の `s3c1`…`s4c4`、`apps/heapprobe/appload_chunks.txt` が `local.hello` の試験用）。通常の image の表は空（map で確認: `appload_`・`hp3_c` の記号 0 件）。
+
+### 7.3 アプリ作者向けの指針
+
+**分け方**
+
+- トップレベルの文の境目で切る（`tools/heapprobe_split.py` がその機械的な例）。各チャンクの先頭に `'use strict';`（スクリプト単位）。
+- **関数の巻き上げはチャンクをまたがない**。チャンク k のトップレベルの文が、後のチャンクの関数を**評価の時点で**呼ぶと ReferenceError。関数の中から呼ぶ（実行時）のは問題ない。読む順は、定義の順。
+- 効くのは「1 チャンクの大きさ」: ピークは最大のチャンクの解析の一時領域（ソース 1 B あたり約 3.7 B、§3.1）＋それまでに残ったもの。3〜4 個に均等に分けるのが目安（§1: 3 分割 +18.5 KB、4 分割 +25.9 KB、実測・実機）。
+
+**入口**
+
+- 入口は `pocket.app.load('a'); pocket.app.load('b'); …` だけでもよい。ただし **入口のソースに `pocket.kasane` という文字列を入れる**（コメントでよい）。Kasane の arena（約 9.9 KiB）を評価の前に一続きで確保する判定（`app_session.c` の `names_kasane`）は、入口のソースしか見ない。
+- `pocket.app.start()` は評価中にしか呼べない（§5）。`globalThis.frame` は評価の終わりに1度だけ読まれる（`bind-frame.js`）。**どちらも、評価中に読むチャンク（か入口）に置く**。`frame()` の中で後から読むチャンクで `globalThis.frame` を置き換えても、ホストは古い関数を呼び続ける。
+
+**共有の書き方**
+
+- 入口と全チャンクで、グローバルの名前空間は1つ。グローバルの `let` をそのまま共有してよい（同じ束縛。DERBY WATCH の `let pts` の形がそのまま動く）。
+- 名前の衝突（同じ `const`/`let` を2つのチャンクで宣言）は、後のチャンクの**実行の最初**の SyntaxError（`redeclaration of 'x'`、位置はそのチャンクの 1 行目。`CORRUPT_DATA`、`unknown`）。後のチャンクは1文も実行されず、先のチャンクの束縛はそのまま（host で確認）。短い接頭辞を付ける。
+- 評価の余裕を詰めたいアプリで、識別子を長くしない（atom は評価後も残る、§2）。
+
+**いつ・どこで読むか**
+
+- 評価のピークを下げるのが目的なら、**評価中に全部読む**のが簡単で十分（評価の時間は分割しても変わらない: 170 → 176 ms、実測・実機）。2 秒の期限は、入口の評価全体（中の `load` を含む）にかかる。
+- 遅らせて読む（使わない場面を読まない）なら、**場面の切れ目・演出の間**に1つずつ。`frame()` の中の読み込みはそのフレームを止める: 10.7 KB で約 45 ms（1〜2 フレーム）、30 KB で約 150 ms（実測・実機、§5.1）。ターンの期限 250 ms の内側だが、**1 チャンク 15 KB 程度まで**を目安にする（推定: 解析は割り込みを見ないので、期限は解析が終わった後の最初のセーフポイントで効き、捕まえられない）。同じフレームで2つ読まない。
+- 失敗は try/catch で捕まえて、その機能を諦められる（実機で確認、§7.5）。`OUT_OF_MEMORY` で `retryable=true` なら、何かを手放してから後でもう一度頼める。**トップレベルは宣言だけにして、重い確保（Kasane の場面や大きな表）は関数に入れて後で呼ぶ**。そうすれば、トップレベルの実行中の失敗（再試行できない）が起きにくい。
+
+**手放し方（アンロード）**
+
+- 手放す API は無い。チャンクが作った関数は、**参照を捨てれば GC で解放される**。トップレベルの関数そのもの（スクリプト本体）は評価の直後に解放され、残るのはクロージャが指す関数だけ（§3.3）。
+- ただし、トップレベルの関数宣言と `var` はグローバルオブジェクトの設定変更不可のプロパティ、`let` は束縛なので、消せない。値を `null` にする。`const` は捨てられない。**手放したいまとまりは、1つの `var`（か `let`）のオブジェクトの下に置く**（`var demo = { run() {…}, … }` → 使い終わったら `demo = null`）。
+- 実測（host 64 bit、`tools/test_app_load.c`）: 48 個のメソッドを1つの `var` に持つ 5,023 B のチャンクが、保持 26,630 B、`alMid = null` と GC で 25,543 B（96%）戻った。残りは atom とプロパティの枠。実機の値は未測定（JSValue が 8 B なので host より小さい、推定）。
+- 手放した後も `load(name)` は `false`（冪等）で、**もう一度評価はしない**。同じ場面を何度も読み書きする使い方は、今の API ではできない（§8 の課題）。
+
+### 7.4 host の検証の土台（ゲームのハーネスから使う）
+
+アプリを実物の QuickJS で評価している host のハーネス（`tools/games/test_*_host.c`、`tools/kasane_contract/` の試験）が `pocket.app.load` を使うアプリを動かすための部品。ハーネスそのものはこの作業では変えていない。
+
+1. リンクに足す: `main/pocket/pocket_app_load.c`、`main/pocket/app_registry.c`、`tools/hostshim/app_chunks_host.c`（インクルードに `-Imain/text`、`-Itools/hostshim`）。`pocket_api.c` か `tools/hostshim/pocket_api_stub.c` のどちらかは、ハーネスがすでに持っている。
+2. `main()` で、realm を作る前に `app_chunks_host_read("apps/derby/chunks.txt")`（ファームと同じ一覧。パスはリポジトリの根から）、realm ごとに `app_registry_select("local.derby")` と `pocket_app_load_install(ctx)`。終了時に `app_chunks_host_clear()`（ASan の漏れ検査のため）。
+3. `pocket_api_stub.c` の `pocket_api_lazy()` は名前空間を即座に `globalThis.app` に作る。ゲームのハーネスは `globalThis.pocket` を JS の前置きで組み立てているので、その前置きに `app: globalThis.app` を足す（`pocket_api.c` をリンクするハーネスなら、`pocket.app` は本物と同じく lazy に作られる）。
+4. スタックとエラーの `message` のファイル名は、チャンクのファイル名（`derby_scene.js:12`）。ハーネスの 2 秒の割り込みは、評価中の `load` にもそのままかかる。
+
+試験: `tools/build_app_load_test.sh`（WSL、ASan/UBSan）。本物の `pocket_app_load.c`・`pocket_api.c`・`app_registry.c` で、32 項目（capability と lazy、評価中と `frame()` からの読み込み、冪等、`let`/`const`/`var`/関数の共有、NOT_FOUND・INVALID_ARGUMENT・CORRUPT_DATA（解析／実行）・CONFLICT・OUT_OF_MEMORY からの再試行、期限の例外の素通し、チャンクの無いアプリ、3 セッション、解放の前後の heap）。
+
+### 7.5 実機の結果（2026-09-30、COM3、`POCKET_HEAPPROBE=ON` の image）
+
+`apps/heapprobe/heapprobe.js` の変種を `tools/heapprobe_device.py` で（索引は 41〜46）。
+
+| 変種 | 結果（実測・実機） |
+| --- | --- |
+| `appload-api`（評価中） | capability `{"maxChunks":32,"maxNameBytes":31}`、`ok`=true・2 回目 false、共有（`alF()+alV+alG+alC.n+alS`）=31、NOT_FOUND・INVALID_ARGUMENT・CORRUPT_DATA（解析: not-applied／実行: unknown、2 回目は not-applied）・自分自身の読み込み CONFLICT、どれも host と同じ |
+| `appload-api`（frame 10 の中） | `mid`（5.0 KB）53 ms（解析 50 ms）、`big`（DERBY WATCH の 1/3、10.7 KB）50 ms（解析 40 ms・実行 7 ms）。アプリは frame 40 まで生存 |
+| `appload-oom`（上限 80,000 と 90,000、20 KB の詰め物） | 1 回目 `OUT_OF_MEMORY`／retryable=true／not-applied を catch → 詰め物を捨てて 2 回目は読み込み成功、frame 40 まで生存 |
+| `appload-uncaught`（frame の中で捕まえない） | `W js: PocketError: chunk 'bad' did not compile: SyntaxError: variable name expected at appload_bad.js:3:1` でアプリが止まり、ホームへ戻る |
+| `appload-evalerr`（評価中に捕まえない） | `EVAL_ERROR PocketError: chunk 'thr' threw while it ran: TypeError: … (appload_throw.js:4:1)`、`START_FAILED`。書式は従来どおり |
+| `derby-load3` / `derby-load4` | DERBY WATCH の 3/4 分割を `pocket.app.load('s3c1')…` で。`READY`・`LOADED`・`ODDS`・`SAVE` の行が分割なしと同じ |
+
+評価できる最小のヒープ上限（二分探索、256 B 刻み、同じ image）:
+
+| 変種 | 最小の上限 | 余裕（163,840 − それ） |
+| --- | ---: | ---: |
+| `derby`（分割なし、この branch の DERBY WATCH） | 159,947 | **3,893** |
+| `derby-load3`（`pocket.app.load` で 3 分割） | 141,756 | **22,084**（+18.2 KB） |
+| `derby-load4`（4 分割） | 135,755 | **28,085**（+24.2 KB） |
+| `derby-split3`（試作の `__hpLoad`、参考） | 140,721 | 23,119 |
+
+`load3` と試作 `split3` の差 +1,035 B は、`pocket.app` の名前空間を作る分（DERBY WATCH は `pocket.app` を読まないので、試作では作られなかった）。3 分割の各チャンクの解析は 40〜50 ms（実測・実機）で、評価全体の時間は分割なしと同程度。
+
+満杯まで詰めた heap（`new Uint8Array(512)` を割り当てが断られるまで）で `load` を呼ぶ試しでは、アプリは `load` と無関係な所（詰め物のループの直後）でも裸の `null` を投げて止まった。heap を最後の 1 B まで使う状態は、`load` に限らず JS のどこでも回復できない（エラーのオブジェクトすら作れない）。上の `appload-oom` のように、上限の手前で失敗させるのが意味のある試験。
+
+## 8. 次: 静的 `import`（A 案）への引き継ぎ（設計メモ、未実装）
+
+B 案の実装で分かったことと、A 案で決めること。
+
+- **ローダの置き場所**: ゲストのランタイムにはモジュールローダが登録されていない（`quickjs-libc.c` の `JS_SetModuleLoaderFunc2` はワーカーの中だけ。`pocketjs_guest` の `guest.c` は `js_std_init_handlers` だけ）。A 案のローダは、`pocket_app_load.c` と同じ表（`app_chunks_for(アプリID)`）を引けばよく、モジュール名とチャンク名を対応させる（`import './scene.js'` → 名前 `scene`、あるいは表にファイル名で引く道を足す）。登録は `pocket_app_load_install()` の中で `JS_SetModuleLoaderFunc2(JS_GetRuntime(ctx), normalize, loader, NULL, NULL)` とすれば、`app_session.c` を触らずに済む（ランタイムに1つのスロットで、今は誰も使っていない）。ビルドの手順（`chunks.txt`）と host の部品（`app_chunks_host.c`）はそのまま使える。
+- **入口をモジュールとして評価するときの `eval_reporting()` の変更点**: (1) `JS_EVAL_TYPE_GLOBAL` 固定を、入口がモジュールのとき（マニフェストのフラグか、`import`/`export` の有無）`JS_EVAL_TYPE_MODULE` にする。(2) quickjs-ng のモジュールの評価は Promise を返す（トップレベル await 対応）。拒否を `JS_PromiseState`/`JS_PromiseResult` で読んで、今と同じ `EVAL_ERROR` の行に写す（書式は契約なので変えない）。未決のまま返ったら、ジョブを回して決着させる（2 秒の期限の内側で）。(3) モジュールのトップレベルの宣言はグローバルに出ない。`bind-frame.js` の `globalThis.frame` の読み直しと `FRAME_WRAP` は、入口が `globalThis.frame = …` と明示的に書くことが前提になる（モジュールの `function frame` は見えない）。(4) `names_kasane`・`uses_legacy_ui` が入口のソースしか見ないのは B 案と同じ（§7.3）。(5) vm-L2-design §11.2: モジュール本体の最初の同期区間は止まらない（yield しない）。トップレベル await の後は普通の async の床として止まる。ローダの中の解析はネイティブ呼び出しの中なので、止まれない。
+- **`pocket.app.load` との共存**: 表を共有すると、同じチャンクをグローバルのスクリプト（`load`）とモジュール（`import`）の両方で評価できてしまう（2 回、別物として）。`import`/`export` を含むチャンクを `load` すると解析で SyntaxError（`CORRUPT_DATA`）になるので、そこで区別はつくが、表にチャンクの種別（script / module）を持たせて、合わない読み方を `load` とローダの両方で断るのがよい。モジュールは手放せない（§3.3、`loaded_modules` に残る）ので、**起動時の分割は `import`、遅延の読み込みと手放しは `load`** という分担が自然。
+- **状態の共有**: import した束縛は読み取り専用（§3.3）。DERBY WATCH のように複数の部分が同じ `let` を書き換える作りは、B 案ではそのまま動いたが、A 案では状態をオブジェクトに移す書き換えが要る。
+- **事前コンパイル（§3.5）との合流**: `load` の `JS_Eval(COMPILE_ONLY)` を `JS_ReadObject` に替えれば、同じ API のまま事前コンパイルを出せる（表に「ソースかバイトコードか」を持たせる）。モジュールのローダも、`JS_ReadObject` で `JSModuleDef` を返せばよい。
+- B 案の費用で A 案にも効くもの: `pocket.app` の名前空間を作る分（実測・実機: `pocket.app` を読まない試作の `__hpLoad` との差 +1,035 B、§7.5）。入口の評価中に読む API を、`pocket` の既存の名前空間に置くかぎり、その名前空間の構築の分はかかる。A 案の `import` は名前空間を作らない。

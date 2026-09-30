@@ -166,7 +166,7 @@ endif()
 # scenes and mp3_decode.c) -- see the note at the top of this file about a row
 # arriving after its first caller.
 idf_component_register(SRCS "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
-    "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/net_service.c" "pocket/net_autosync.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
+    "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_app_load.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/net_service.c" "pocket/net_autosync.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
     "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../.cache/bmi270/bmi2.c" "../.cache/bmi270/bmi270.c"
     ${POCKET_RANDOM_SOURCES} ${POCKET_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${POCKET_PROBE_SOURCES}
     INCLUDE_DIRS "." "hal" "pocket" "vm" "pet" "ui" "ui/kasane" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../.cache/bmi270"
@@ -264,7 +264,11 @@ if(POCKET_HEAPPROBE)
     # The same app unwrapped into one global script (flat) and cut into 3 and
     # 4 global scripts (tools/heapprobe_split.py): the chunked-evaluation
     # spike. Directories per count so the file names, and with them the
-    # embedded symbols, say which set a chunk belongs to.
+    # embedded symbols, say which set a chunk belongs to. The chunks are
+    # embedded by the pocket.app.load() table below, as local.derby's
+    # s3c1..s3c3 and s4c1..s4c4 -- in this image only -- so the spike's
+    # __hpLoad(k) and the product's pocket.app.load('s3c1') read the same
+    # bytes under the same symbols.
     execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_split.py"
                     "${_hp_derby}" 1 "${CMAKE_CURRENT_BINARY_DIR}/hp" --flat
                     RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
@@ -281,9 +285,18 @@ if(POCKET_HEAPPROBE)
         endif()
         foreach(_hp_k RANGE 1 ${_hp_n})
             file(RENAME "${_hp_dir}/derby_watch_c${_hp_k}.js" "${_hp_dir}/hp${_hp_n}_c${_hp_k}.js")
-            target_add_binary_data(${COMPONENT_LIB} "${_hp_dir}/hp${_hp_n}_c${_hp_k}.js" TEXT)
+            string(APPEND _hp_list "s${_hp_n}c${_hp_k} hp${_hp_n}/hp${_hp_n}_c${_hp_k}.js\n")
         endforeach()
     endforeach()
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt" "app local.derby\n${_hp_list}")
+    # pocket.app.load()'s own device check (apps/heapprobe/appload_*.js):
+    # the error paths, and DERBY WATCH's first third as `big` for a load from
+    # frame(), as HELLO WORLD's chunks -- the identity the small variants run
+    # under.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt" "app local.hello\nbig hp3/hp3_c1.js\n")
+    list(APPEND POCKET_APP_CHUNK_LISTS "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt"
+         "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt"
+         "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/appload_chunks.txt")
     # Precompiled DERBY WATCH, if the host has made it (WSL:
     #   python3 tools/vmtest/compile_peak.py apps/derby/derby_watch.js --write .cache/compile_peak/derby.bc)
     # from this same quickjs.c. Absent: the derby-bc variants report no loader.
@@ -294,6 +307,25 @@ if(POCKET_HEAPPROBE)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE HP_HAVE_BC=1)
     endif()
 endif()
+# pocket.app.load()'s chunks (main/pocket/app_chunks.h, docs/vm/eval-peak.md
+# section 7): every apps/*/chunks.txt, plus any list a diagnostic option above
+# appended to POCKET_APP_CHUNK_LISTS. An app gains chunks by gaining a
+# chunks.txt; nothing in this file names them. The table is generated at
+# configure time and records symbols, not lengths, so editing a chunk needs no
+# reconfigure -- adding or renaming one does, and the lists are configure
+# dependencies for that (GLOB CONFIGURE_DEPENDS catches a new chunks.txt).
+file(GLOB _app_chunk_lists CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../apps/*/chunks.txt")
+list(APPEND _app_chunk_lists ${POCKET_APP_CHUNK_LISTS})
+execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py"
+                "${CMAKE_BINARY_DIR}/generated" ${_app_chunk_lists}
+                COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py" ${_app_chunk_lists})
+include("${CMAKE_BINARY_DIR}/generated/app_chunks.cmake")
+target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunks.c")
+foreach(_app_chunk IN LISTS APP_CHUNK_FILES)
+    target_add_binary_data(${COMPONENT_LIB} "${_app_chunk}" TEXT)
+endforeach()
 if(KASANE_PROC_LIMITS_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_LIMITS_PROBE=1)
     # Embedded only in the probe image, so a normal build's EMBED list and
