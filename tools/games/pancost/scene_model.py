@@ -118,8 +118,41 @@ def frame(tier, cam, route="vm", lod_px=2.0, crowd_lod=False, far=1e9):
         c["crowd"] = len(bays) * (PJ + LIT + DRAW) + sum(dots) * (DOT + 1.2)
     # Runners already divide once each; yaw adds a rotation (4 mul/add).
     c["runners"] = 8 * 4 * 2.4
+    # Segments in the frame (the limit is 1,024): posts and their 2 rail
+    # pieces, stripes, 6 per stands bay, dots, 8 runners x 13, map 10.
+    segs = 3 * n_posts + len(stripes) + 6 * len(bays) + sum(dots) + 104 + 10
     return {"cost": c, "ms": sum(c.values()) / 1000, "posts": n_posts, "stripes": len(stripes),
-            "bays": len(bays), "dots": sum(dots)}
+            "bays": len(bays), "dots": sum(dots), "segs": segs, "bay_list": bays, "k": k}
+
+
+# ---- Crowd variants (the "noise" question), measured by
+# tools/games/pancost/crowd/derby_watch.js: us of JS turn + band per unit.
+C_DOT, C_DOT_BAND, C_DRAW = 6.27, 1.15, 94.0      # M vc: today's crowd plan
+T_PT, T_PT_BAND, T_DRAW = 0.69, 1.44, 37.0        # M tt: registered typed tile
+R_PT, R_FIX = 5.45, 535.0                          # M tr: re-registered each frame
+LINE_JS = 5.7                                      # M band: one full-width line in a draw
+
+
+def crowd_variant(r, variant):
+    """Crowd cost (us) of frame result r under a variant."""
+    k, bays = r["k"], r["bay_list"]
+    full = k[1] * k[2]
+    if not bays:
+        return 0.0
+    if variant == "vm":        # one draw, per-bay Newton, today's dots (full density)
+        return 2 * PJ + LIT + C_DRAW + len(bays) * BAY_VM + len(bays) * full * (C_DOT + C_DOT_BAND)
+    if variant == "vm/4":      # a quarter of the dots
+        return 2 * PJ + LIT + C_DRAW + len(bays) * BAY_VM + len(bays) * full / 4 * (C_DOT + C_DOT_BAND)
+    if variant == "bands":     # 2 lines per row across the visible stands
+        w = max(p for p, _ in bays) - min(p for p, _ in bays) + 12 * r["f"] / max(d for _, d in bays)
+        return 2 * PJ + LIT + C_DRAW + 2 * k[1] * (LINE_JS + band_seg(min(240, w), False))
+    if variant == "tile":      # typed tile per bay, if draw took a translation (native change)
+        return len(bays) * (PJ + LIT + T_DRAW + full * (T_PT + T_PT_BAND))
+    if variant == "tile4":     # 4 bays a batch (128 points), same depth assumed
+        return math.ceil(len(bays) / 4) * (PJ + LIT + T_DRAW) + len(bays) * full * (T_PT + T_PT_BAND)
+    if variant == "rereg":     # re-registered every frame, 4 bays a batch
+        return math.ceil(len(bays) / 4) * (R_FIX + PJ) + len(bays) * full * (R_PT + T_PT_BAND)
+    raise ValueError(variant)
 
 
 def oval_extra(n, route):
@@ -219,6 +252,26 @@ def main():
                 fps = 1000 / max(1000 / 30, 27.6 + t[-1])
                 print(f"{tier} | {n} | {lod:.0f} | {'-' if far > 1e8 else f'{far:.0f}'} | {t[len(t) // 2]:.2f} | "
                       f"{t[int(len(t) * .9)]:.2f} | {t[-1]:.2f} | {100 * over:.0f}% | {fps:.1f}")
+    print("\n## crowd variants (median/max crowd ms over the frames; segs = the frame's segments, vm, lod 2)")
+    print("tier | cams | frames | vm | vm/4 | bands | tile (native) | tile4 (native) | rereg | segs max")
+    for tier in ("MID", "HEAVY"):
+        for n in (2, 4, 6):
+            for tele in (False, True):
+                rows = []
+                for L in range(0, 1001, 5):
+                    cam, f, _ = pan_camera(L, n)
+                    if not tele or f >= 500:
+                        r = frame(tier, cam, "vm")
+                        r["f"] = f
+                        rows.append(r)
+                if not rows:
+                    continue
+                cells = []
+                for v in ("vm", "vm/4", "bands", "tile", "tile4", "rereg"):
+                    xs = sorted(crowd_variant(r, v) / 1000 for r in rows)
+                    cells.append(f"{xs[len(xs) // 2]:.2f}/{xs[-1]:.2f}")
+                print(f"{tier} | {n} | {'tele f>=500' if tele else 'all'} ({len(rows)}) | " + " | ".join(cells)
+                      + f" | {max(r['segs'] for r in rows)}")
     print("\n## oval: one visible corner as polylines")
     for n in (10, 16, 24):
         print(f"n={n} | js {oval_extra(n, 'js') / 1000:.2f} ms | vm {oval_extra(n, 'vm') / 1000:.2f} ms")
