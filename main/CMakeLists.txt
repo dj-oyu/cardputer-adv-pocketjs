@@ -375,14 +375,34 @@ if(APP_CHUNK_LOWER)
     set(_kir "${CMAKE_SOURCE_DIR}/tools/kasane_ir")
     set(_lower ${APP_CHUNK_LOWER})
     while(_lower)
-        list(POP_FRONT _lower _src _dst)
+        # how: packed (the plans as packed strings and their decoder), or
+        # rom:APP (the plans removed; they ship as the table below).
+        list(POP_FRONT _lower _src _dst _how)
+        set(_mode "")
+        if(_how MATCHES "^rom:(.+)$")
+            set(_mode --rom "${CMAKE_MATCH_1}")
+        endif()
         add_custom_command(OUTPUT "${_dst}"
-            COMMAND "${POCKET_NODE}" "${_kir}/lower_plans.mjs" --file "${_src}" "${_dst}"
+            COMMAND "${POCKET_NODE}" "${_kir}/lower_plans.mjs" ${_mode} --file "${_src}" "${_dst}"
             DEPENDS "${_src}" "${_kir}/lower_plans.mjs" "${_kir}/plan_js.mjs" "${_kir}/kir.mjs" "${_kir}/pack.mjs"
             COMMENT "Compiling the @plan functions of ${_src}"
             VERBATIM)
     endwhile()
+    # The built-in plans (docs/kasane/flash-plan.md section 2): the rom apps'
+    # @plan functions as a const table in flash, made from the same sources
+    # in the same build as the JS that names them, so the two cannot drift.
+    if(APP_CHUNK_ROM)
+        add_custom_command(OUTPUT "${APP_CHUNK_ROM_C}"
+            COMMAND "${POCKET_NODE}" "${_kir}/emit_rom_plans.mjs" "${APP_CHUNK_ROM_C}" ${APP_CHUNK_ROM}
+            DEPENDS ${APP_CHUNK_ROM_SOURCES} "${_kir}/emit_rom_plans.mjs" "${_kir}/plan_js.mjs"
+                    "${_kir}/kir.mjs" "${_kir}/pack.mjs"
+            COMMENT "Compiling the built-in plans"
+            VERBATIM)
+    endif()
 endif()
+# The built-in plan table app_session.c hands to pocket.kasane.procedural:
+# the generated one above, or make_app_chunks.py's empty one.
+target_sources(${COMPONENT_LIB} PRIVATE "${APP_CHUNK_ROM_C}")
 foreach(_app_chunk IN LISTS APP_CHUNK_FILES)
     target_add_binary_data(${COMPONENT_LIB} "${_app_chunk}" TEXT)
 endforeach()
