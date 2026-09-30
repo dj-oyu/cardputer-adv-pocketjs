@@ -70,10 +70,16 @@
  * tools/kasane_contract/test_megademo_app_host.c. */
 typedef struct { size_t n; size_t pad[3]; } pk_hdr;
 static size_t cur_bytes,peak_bytes;
+/* The churn of the game's frame() alone (__churn(1) .. __churn(0) around
+ * it): allocations and reallocations, their bytes, and the high water above
+ * the heap at the start of the call (docs/apps/derby-pan-memory.md). */
+static size_t n_alloc,b_alloc,turn_hi;
 static size_t tlsf_len(size_t n){n=(n+3)&~(size_t)3;return n<12?12:n;}
-static void pk_count(size_t add,size_t sub){cur_bytes+=add;cur_bytes-=sub;if(cur_bytes>peak_bytes)peak_bytes=cur_bytes;}
+static void pk_count(size_t add,size_t sub){cur_bytes+=add;cur_bytes-=sub;if(cur_bytes>peak_bytes)peak_bytes=cur_bytes;
+    if(cur_bytes>turn_hi)turn_hi=cur_bytes;}
 static void *pk_malloc(void *o,size_t n){(void)o;if(!n)return NULL;
-    pk_hdr *h=malloc(sizeof *h+tlsf_len(n));if(!h)return NULL;h->n=n;pk_count(tlsf_len(n),0);return h+1;}
+    pk_hdr *h=malloc(sizeof *h+tlsf_len(n));if(!h)return NULL;h->n=n;n_alloc++;b_alloc+=tlsf_len(n);
+    pk_count(tlsf_len(n),0);return h+1;}
 static void *pk_calloc(void *o,size_t c,size_t n){void *p=pk_malloc(o,c*n);if(p)memset(p,0,c*n);return p;}
 static void pk_free(void *o,void *p){(void)o;if(!p)return;pk_hdr *h=(pk_hdr *)p-1;pk_count(0,tlsf_len(h->n));free(h);}
 static void *pk_realloc(void *o,void *p,size_t n){
@@ -81,6 +87,7 @@ static void *pk_realloc(void *o,void *p,size_t n){
     if(!n){pk_free(o,p);return NULL;}
     pk_hdr *h=(pk_hdr *)p-1;size_t old=h->n;
     pk_hdr *q=realloc(h,sizeof *q+tlsf_len(n));if(!q)return NULL;
+    n_alloc++;b_alloc+=tlsf_len(n);
     q->n=n;pk_count(tlsf_len(n),tlsf_len(old));return q+1;}
 static size_t pk_usable(const void *p){return p?tlsf_len(((const pk_hdr *)p-1)->n):0;}
 static const JSMallocFunctions PEAK_MF={pk_calloc,pk_malloc,pk_free,pk_realloc,pk_usable};
@@ -561,6 +568,19 @@ static unsigned refs_pad_max;
  * frame on show (a surface-1 turn leaves both as they were), and the view's
  * refs and commands. */
 static int probe_w;
+/* Per scene: frames, allocations, bytes, and the largest rise of one call. */
+static const char *const CHURN_SCENE[]={"pad","gate","race","photo","res"};
+static struct { unsigned frames; size_t n,b,hi,gc; } churn[5];
+static size_t churn_n,churn_b,churn_base;
+static JSValue js_churn(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)c;(void)self;(void)argc;
+    if(num(argv[0])){churn_n=n_alloc;churn_b=b_alloc;churn_base=turn_hi=cur_bytes;return JS_UNDEFINED;}
+    for(unsigned i=0;i<5;i++)if(!strcmp(scene,CHURN_SCENE[i])){
+        churn[i].frames++;churn[i].n+=n_alloc-churn_n;churn[i].b+=b_alloc-churn_b;
+        if(turn_hi-churn_base>churn[i].hi)churn[i].hi=turn_hi-churn_base;
+    }
+    return JS_UNDEFINED;
+}
 static JSValue js_probe(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;
     unsigned refs=(unsigned)num(argv[1]),cmds=(unsigned)num(argv[2]);
@@ -591,7 +611,7 @@ static void frame(unsigned buttons){
     pocket_input_pump(0);
     frame_regs=0;
     frame_ms=round(now_ms*1000)/1000;   /* what the guest reads (%.3f) */
-    char call[256];snprintf(call,sizeof call,"__turn=1;__now=%.3f;frame(%u);__probe([].concat.apply([],__ov.map(r=>"
+    char call[256];snprintf(call,sizeof call,"__turn=1;__now=%.3f;__churn(1);frame(%u);__churn(0);__probe([].concat.apply([],__ov.map(r=>"
                             "[r.__v?1:0].concat(r.__r||[0,0,0,0]))),__refs,kasane.stats().displayed.commands)",now_ms,buttons);
     now_ms+=dt_ms;
     eval(call,strlen(call),"frame.js");
@@ -601,8 +621,12 @@ static void frame(unsigned buttons){
     if(in_demo){if(dp>20)demo_on++;else{REQ(!dp);demo_off++;}}
     /* The Back turn ends a demo without drawing: the app is leaving. */
     else if(dp&&!(buttons&0x2000))demo_px_outside++;
-    size_t h=heap_used();(void)h;
+    size_t h=heap_used();
     JS_RunGC(rt);
+    /* What only the cycle collector frees: on the device it waits until the
+     * heap is near the limit (quickjs.c js_trigger_gc), so a cycle made every
+     * frame or plan stays resident there while this harness frees it here. */
+    {size_t g=heap_used();for(unsigned i=0;i<5;i++)if(!strcmp(scene,CHURN_SCENE[i]))churn[i].gc+=h>g?h-g:0;}
     h=heap_used();if(h>heap_live_peak)heap_live_peak=h;
     tick++;scene_t++;
 }
@@ -807,7 +831,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__reg",js_cap_reg,3},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,3},{"__commit",js_cap_commit,0},{"__tone",js_tone,1},{"__probe",js_probe,4}};
+        {"__draw",js_cap_draw,3},{"__commit",js_cap_commit,0},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -1004,9 +1028,16 @@ int main(int argc,char **argv){
     printf("guest heap (TLSF model, %zu-bit host): before eval %zu, peak during eval %zu (+%zu), after eval %zu, "
            "live peak after GC %zu, whole-run peak %zu; device limit 163840\n",sizeof(void *)*8,before,eval_peak,
            eval_peak-before,after_eval,heap_live_peak,peak_bytes);
+    for(unsigned i=0;i<5;i++)if(churn[i].frames)
+        printf("guest heap churn in frame(), %s: %u frames, %.1f allocations and %.0f B a frame, largest rise in one "
+               "frame %zu B, freed only by the cycle collector %zu B\n",CHURN_SCENE[i],churn[i].frames,
+               (double)churn[i].n/churn[i].frames,(double)churn[i].b/churn[i].frames,churn[i].hi,churn[i].gc);
     bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0x7fffu&&frame_reg_max<=1&&go_seen>=1&&
               !rect_mismatch&&!bezel_bad&&!occluded_frames&&vis_frames&&feed_frames&&overlay_frames&&
               refs_max<=32&&cmds_max<=80;
+    /* No cycles: the device would keep them until the heap is nearly full
+     * (a recursive closure in the plan decoder left ~4 KB a race, LOADSTALL). */
+    for(unsigned i=0;i<5;i++)pass=pass&&!churn[i].gc;
     if(full)pass=pass&&finishes==2&&saves==1&&tones>0&&demo_starts==10&&demo_ends==10;
     else pass=pass&&!demo_starts;
     if(csv)fclose(csv);

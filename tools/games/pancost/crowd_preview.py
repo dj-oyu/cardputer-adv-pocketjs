@@ -3,7 +3,7 @@ docs/apps/derby-pan-camera-cost.md ("観客をノイズにする案"). Draws the
 crowd of a MID WIDE side view four ways on 240 x 40 strips, stacked, scaled
 x3, as one PNG. The look is not judged here; this only hands the pictures over.
 
-  today   the crowd plan (apps/derby/derby_prog.js T.crowd) run in float32
+  today   the crowd plan (apps/derby/derby_prog_text.js T.crowd) run in float32
   tile    3 random-walk polyline tiles (typed points), chosen per bay by hash
   quarter today's dots, every 4th kept
   bands   2 full-width lines per row

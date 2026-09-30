@@ -92,7 +92,7 @@ function settle() {
 }
 
 // The screen's rect, then the frame's draws: the course (with the screen
-// and its feed) for camera c, or HEAD ON; then extra (map, photo, conf).
+// and its feed) for camera c, or HEAD ON; then extra ([plan, inputs] or null).
 function paint(c, xs, close, gate, extra) {
   // Its face on this camera, or null out of view or over the map
   // (y < 13): fill, bezel, feed and lettering all use these integers.
@@ -100,17 +100,17 @@ function paint(c, xs, close, gate, extra) {
   vr = [rnd(120 + (a[0] - cx) * p), rnd(c[2] + (c[1] - VS[4]) * p), rnd(120 + (b[0] - cx) * p), rnd(c[2] + (c[1] - VS[3]) * p)];
   if (scene !== 'race' || cm > 5 || vr[0] > 239 || vr[2] < 1 || vr[1] < 13 || vr[1] > 134 || vr[2] - vr[0] < 8 || vr[2] - vr[0] > 160) vr = null;
   if (vr) ++von;
-  let d = [['hd', []]];
+  H.beginFrame(4);
   if (cm > 5 && scene === 'race') {
+    dr('hd', []);
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
     // down the course; each horse scaled by its own 1/z (JS divides),
     // the last (farthest) first.
     for (let i = 7; i >= 0; --i) {
       const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
-      d.push(['fr', [120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s)]]);
+      dr('fr', [120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s)]);
     }
-  } else d = course(c, cx, xs, close, gate);
-  H.beginFrame(4);
-  for (const e of d.concat(extra)) if (live[e[0]]) H.draw(live[e[0]], e[1]);
+  } else course(c, cx, xs, close, gate);
+  if (extra) dr(extra[0], extra[1]);
   H.commit();
 }
