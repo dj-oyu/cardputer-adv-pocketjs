@@ -23,6 +23,8 @@ idf.py -B build_api -p COM3 monitor
 
 初回セットアップ: `python tools/prepare_dependencies.py`（BMI270・libopus・minimp3を固定revisionで取得）。Rust UIアーカイブとPocketJS上流のcheckoutは不要（旧UI経路は削除済み）。
 
+**アプリのチャンクに `@plan` の関数があると、ビルドに Node 16 以上が要る**（`tools/kasane_ir/lower_plans.mjs` が plan を IR の詰めた文字列に置き換える。この機体は Volta の v24 が PATH にある。IDF には入っていない）。無ければ configure が止まる。`@plan` が無いアプリは Node 不要。チャンクに初めて `@plan` を書いたら `idf.py reconfigure`。host の DERBY 検査は `wsl bash -lc` で走らせる（素の `bash -c` の PATH には node が無い）。詳細は `docs/platform/build-environment.md`、`docs/kasane/js-to-ir.md`。
+
 ## 実機テスト
 
 コマンド一覧は [`docs/platform/test-commands.md`](docs/platform/test-commands.md)。すべてUSBシリアル経由で、ESP-IDFのPython環境（pyserial）で走らせる。実機側は `smoke_device.py` / `test_settings.py` / `capture_home.py` / `test_editor_draft.py` / `benchmark_app.py` / `stress_app.py` / `test_app_resume.py`。
