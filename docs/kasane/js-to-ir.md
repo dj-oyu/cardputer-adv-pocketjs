@@ -247,7 +247,7 @@ const T = {
 
 ### 5.5 未実装・未確認
 
-- id 形（`--ids`）は生成だけで、受け取る native の API（§4 B）が無いので走らない。
+- id 形（`--ids`）は生成だけで、受け取る native の API（§4 B）が無いので走らない。（2026-10-01: native の API と表の生成器は [flash-plan.md](flash-plan.md) で実装した。firmware への組み込みと DERBY の移行はまだ）
 - 段階 3 の 4 本（`pt` など）は JS の関数に移していない。`.kjs` の式マクロ（`function` の式）と `unroll` は JS の部分集合に入れていない。
 - 実機の `sinf`（newlib）と Xtensa の GCC の積和の縮約（`MADD.S`）が、host の float32 の基準と 1 ulp も違わないかは直接は見ていない。実機の DERBY は画素を比べられない（`board_capture` は転送前のバッファ）ので、host の全画素ハッシュの一致と、実機で同じ着順・例外なしまでが確認の範囲。
 - MEGADEMO・LCD CATCH・BIG WAVE の plan は手書きの IR のまま（範囲外）。移すなら同じ `@plan` の形で、Node の要件はそのアプリのチャンクに `@plan` が入ったときに効く（入口の `EMBED_TXTFILES` のアプリは上の「入口のファイル」の変更が先に要る）。
