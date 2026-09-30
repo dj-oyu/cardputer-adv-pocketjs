@@ -1,7 +1,7 @@
 """The compiled DERBY WATCH plans against the hand IR on the real VM (host,
 WSL only).
 
-  python3 tools/kasane_ir/check_equivalence.py [--prog DIR]
+  python3 tools/kasane_ir/check_equivalence.py [--prog DIR] [--js PLANS.js] [--reuse]
 
 1. Captures what the game registers and draws: tools/games/test_derby_host.c
    (-m32) runs the scripted game at LIGHT, MID and HEAVY on a copy of
@@ -14,6 +14,10 @@ WSL only).
 3. tools/kasane_ir/run_ir.c runs hand and compiled IR through
    main/ui/kasane/ksn_procedural.c (and the compiled one also through
    ksn_proc_plan.c) and compares status, segments and raster steps.
+4. With --js, the plans come from JS functions (tools/kasane_ir/plan_js.mjs)
+   and tools/kasane_ir/check_js.mjs also runs those functions on every
+   vector (float32 per operation, and as written in double) against what
+   the VM drew from their compiled IR.
 """
 from __future__ import annotations
 
@@ -68,21 +72,32 @@ def capture(apps: Path) -> Path:
 
 
 def main() -> None:
-    apps = Path(sys.argv[2]) / "apps/derby" if sys.argv[1:2] == ["--prog"] else ROOT / "apps/derby"
-    draws = capture(apps)
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--prog", help="DIR whose apps/derby is measured instead of this tree's")
+    ap.add_argument("--js", help="plans as JS functions (plan_js.mjs): compiled from here, and the VM's "
+                                 "output compared with the functions run by check_js.mjs")
+    ap.add_argument("--reuse", action="store_true", help="skip the capture, reuse .cache/kasane_ir/draws.txt")
+    a = ap.parse_args()
+    apps = Path(a.prog) / "apps/derby" if a.prog else ROOT / "apps/derby"
+    draws = CACHE / "draws.txt" if a.reuse else capture(apps)
     cases = CACHE / "cases.txt"
     subprocess.run(["node", str(HERE / "derby_plans.mjs"), "--prog", str(apps / "derby_prog.js"),
-                    "--cases", str(draws), str(cases)], check=True)
+                    *(["--js", a.js] if a.js else []), "--cases", str(draws), str(cases)], check=True)
     binary = CACHE / "run_ir"
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Imain/ui/kasane", "tools/kasane_ir/run_ir.c",
                     "main/ui/kasane/ksn_procedural.c", "main/ui/kasane/ksn_proc_plan.c",
                     "main/ui/kasane/ksn_proc_analysis.c",
                     "-lm", "-o", str(binary)], cwd=ROOT, check=True)
+    dump = CACHE / "dump.txt"
     with cases.open() as f:
-        r = subprocess.run([str(binary)], stdin=f, capture_output=True, text=True)
+        r = subprocess.run([str(binary)], stdin=f, capture_output=True, text=True,
+                           env=dict(os.environ, RUN_IR_DUMP=str(dump)))
     print(r.stdout, end="")
     if r.returncode:
         raise SystemExit(r.stderr or "equivalence failed")
+    if a.js:
+        subprocess.run(["node", str(HERE / "check_js.mjs"), a.js, str(CACHE / "cases.json"), str(dump)], check=True)
 
 
 if __name__ == "__main__":

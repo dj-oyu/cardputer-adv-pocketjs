@@ -13,6 +13,9 @@
  * Both run through the reference VM (ksn_proc_begin/run); B also through
  * the registered plan (ksn_proc_plan_prepare/run), which pocket_proc.c uses.
  * Prints one line per case: vectors, mismatches, statuses, executed steps.
+ * RUN_IR_DUMP=FILE also writes B's result per vector, one line each:
+ * status (1 done, 2 invalid, 3 limit), segments, raster steps, then
+ * x0 y0 x1 y1 colour per segment (tools/kasane_ir/check_js.mjs reads it).
  */
 #include "ksn_proc_plan.h"
 #include <stdio.h>
@@ -38,6 +41,7 @@ static int same(const ksn_proc_frame *x, const ksn_proc_frame *y) {
 int main(void) {
     char word[64], name[64], tag[64];
     unsigned failures = 0;
+    FILE *dump = getenv("RUN_IR_DUMP") ? fopen(getenv("RUN_IR_DUMP"), "w") : NULL;
     while (scanf("%63s", word) == 1) {
         if (strcmp(word, "CASE")) { fprintf(stderr, "expected CASE, got %s\n", word); return 2; }
         if (scanf("%63s %63s", name, tag) != 2) return 2;
@@ -59,6 +63,15 @@ int main(void) {
             if (sa == KSN_PROC_RUNNING) sa = ksn_proc_run(&va);
             ksn_proc_status sb = ksn_proc_begin(&vb, &pb, in, &fb);
             if (sb == KSN_PROC_RUNNING) sb = ksn_proc_run(&vb);
+            if (dump) {
+                const unsigned n = sb == KSN_PROC_DONE ? fb.count : 0u;
+                fprintf(dump, "%d %u %u", (int)sb, n, n ? fb.raster_steps : 0u);
+                for (unsigned k = 0; k < n; k++) {
+                    const ksn_proc_segment *g = &fb.segments[k];
+                    fprintf(dump, " %d %d %d %d %u", g->x0, g->y0, g->x1, g->y1, g->color);
+                }
+                fputc('\n', dump);
+            }
             ksn_proc_status sp = prepared ? ksn_proc_plan_begin(&vp, &plan, in, &fp) : KSN_PROC_INVALID;
             if (sp == KSN_PROC_RUNNING) sp = ksn_proc_plan_run(&vp, &plan, false);
             int ok = sa == sb && sb == sp && (sa != KSN_PROC_DONE || (same(&fa, &fb) && same(&fb, &fp)));
@@ -72,6 +85,7 @@ int main(void) {
                name, tag, vectors, bad, bad ? (sprintf(word, " (first #%u)", first_bad), word) : "", done, failed, segs,
                steps_a, steps_b);
     }
+    if (dump) fclose(dump);
     printf(failures ? "EQUIVALENCE FAIL\n" : "EQUIVALENCE PASS\n");
     return failures ? 1 : 0;
 }
