@@ -4,6 +4,7 @@
 #include "pocketjs/guest_quickjs.h"
 #include "jsconsole.h"
 #include "pocket_api.h"
+#include "pocket_app_load.h"
 #include "pocket_memory.h"
 #include "pocket_random.h"
 #include "pocket_storage.h"
@@ -60,6 +61,14 @@ extern const char hp_flat_end[] asm("_binary_derby_watch_flat_js_end");
 #define HP_SYM(n,k) extern const char hp##n##_c##k##_start[] asm("_binary_hp" #n "_c" #k "_js_start"); \
                     extern const char hp##n##_c##k##_end[] asm("_binary_hp" #n "_c" #k "_js_end");
 HP_SYM(3,1) HP_SYM(3,2) HP_SYM(3,3) HP_SYM(4,1) HP_SYM(4,2) HP_SYM(4,3) HP_SYM(4,4)
+// The generated import comparison (tools/heapprobe_import_gen.py): the whole
+// program as one script, and the entries that load() or import its parts.
+extern const char hp_imp_all_start[] asm("_binary_imp_all_js_start");
+extern const char hp_imp_all_end[] asm("_binary_imp_all_js_end");
+extern const char hp_imp_load_start[] asm("_binary_imp_entry_load_js_start");
+extern const char hp_imp_load_end[] asm("_binary_imp_entry_load_js_end");
+extern const char hp_imp_import_start[] asm("_binary_imp_entry_import_mjs_start");
+extern const char hp_imp_import_end[] asm("_binary_imp_entry_import_mjs_end");
 // The chunk sets (tools/heapprobe_split.py), start/end pairs, [set][chunk].
 static const char *const HP_CHUNKS[2][4][2] = {
     {{hp3_c1_start,hp3_c1_end},{hp3_c2_start,hp3_c2_end},{hp3_c3_start,hp3_c3_end},{NULL,NULL}},
@@ -70,9 +79,15 @@ static bool hp_active;
 static unsigned hp_index;
 static size_t hp_limit;
 static char hp_name[32];
+// "@module" on a section's first line: the variant is evaluated as a module
+// entry (docs/vm/eval-peak.md section 9), whatever the identity's manifest
+// entry says.
+static bool hp_module;
 // A small variant's NUL-terminated copy; main.c frees it once the start has
 // returned (the guest parses straight out of it and keeps nothing).
 static char *hp_copy;
+// When the variant's evaluation began: the eval line reports its length.
+static int64_t hp_eval_t0;
 #endif
 #include "ui/kasane/ksn_p0_probe.h"
 #include "pocket_input.h"
@@ -714,12 +729,17 @@ static const char FRAME_WRAP[] =
 // One evaluation, with its exception reported the way the Playground needs it.
 // `filename` is what the learner is shown in the error, so the prelude and the
 // lesson are told apart when the failure is in the part nobody typed.
+// `module`: the source is the app's module entry (pocket_app_load.h), whose
+// failures -- its own or any imported chunk's, and a rejected module graph --
+// arrive here as the same pending exception a script's would, and so reach the
+// same EVAL_ERROR line.
 static esp_err_t eval_reporting(const char *source, size_t length,
-                                const char *filename) {
+                                const char *filename, bool module) {
     JSContext *ctx=pocketjs_guest_quickjs_context(guest);
     if(!ctx) return ESP_ERR_INVALID_STATE;
 
-    JSValue result=JS_Eval(ctx,source,length,filename,JS_EVAL_TYPE_GLOBAL);
+    JSValue result=module?pocket_app_eval_module(ctx,source,length,filename)
+                         :JS_Eval(ctx,source,length,filename,JS_EVAL_TYPE_GLOBAL);
     if(JS_IsException(result)) {
         JSValue exception=JS_GetException(ctx);
         char message[128]={0};
@@ -774,14 +794,18 @@ static esp_err_t eval_reporting(const char *source, size_t length,
 // evaluated twice into one realm. That case throws a SyntaxError for the
 // duplicate lexical binding, and it would arrive on the learner's second
 // Ctrl+R, naming a line they never wrote.
-static esp_err_t eval_user_source(const char *source, size_t length) {
+//
+// `module`: the source is an ES module entry (an app whose manifest entry ends
+// in .mjs). Its top-level declarations stay in the module, so FRAME_WRAP and
+// bind-frame.js find frame() only if the entry assigned globalThis.frame.
+static esp_err_t eval_user_source(const char *source, size_t length, bool module) {
     JSContext *ctx=pocketjs_guest_quickjs_context(guest);
     if(!ctx) return ESP_ERR_INVALID_STATE;
     if(user_prelude) {
-        esp_err_t pre=eval_reporting(user_prelude,user_prelude_length,"prelude.js");
+        esp_err_t pre=eval_reporting(user_prelude,user_prelude_length,"prelude.js",false);
         if(pre!=ESP_OK) return pre;
     }
-    esp_err_t err=eval_reporting(source,length,"user.js");
+    esp_err_t err=eval_reporting(source,length,"user.js",module);
     if(err!=ESP_OK) return err;
 
     JSValue wrap=JS_Eval(ctx,FRAME_WRAP,sizeof(FRAME_WRAP)-1,"wrap.js",JS_EVAL_TYPE_GLOBAL);
@@ -1164,6 +1188,7 @@ bool app_heapprobe_select(const char *arg, const char **source, size_t *length,
                           const char **app_id) {
     app_heapprobe_release();
     hp_chunk_set=-1;
+    hp_module=false;
     char *end;
     unsigned long index=strtoul(arg,&end,10);
     size_t limit=*end==','?(size_t)strtoul(end+1,NULL,10):0;
@@ -1222,11 +1247,25 @@ bool app_heapprobe_select(const char *arg, const char **source, size_t *length,
         } else {
             *source=hp_derby_start; *length=(size_t)(hp_derby_end-hp_derby_start-1);
         }
+    } else if(*length>=5 && !memcmp(body,"@imp-",5)) {
+        // HELLO WORLD's identity, whose chunk set holds the parts.
+        const char *kind=body+5;
+        if(!strncmp(kind,"single",6)) {
+            *source=hp_imp_all_start; *length=(size_t)(hp_imp_all_end-hp_imp_all_start-1);
+        } else if(!strncmp(kind,"load3",5)) {
+            *source=hp_imp_load_start; *length=(size_t)(hp_imp_load_end-hp_imp_load_start-1);
+        } else {
+            *source=hp_imp_import_start; *length=(size_t)(hp_imp_import_end-hp_imp_import_start-1);
+            hp_module=true;
+        }
     } else {
         // "@chunks3" on a section's first line: __hpLoad(k) loads DERBY
         // WATCH's 3-chunk set, from a frame() rather than at evaluation.
         if(*length>=9 && !memcmp(body,"@chunks3\n",9)) {
             hp_chunk_set=0; body+=9; *length-=9;
+        }
+        if(*length>=8 && !memcmp(body,"@module\n",8)) {
+            hp_module=true; body+=8; *length-=8;
         }
         // A copy, because JS_Eval reads up to a NUL at source[length] and a
         // section in the middle of the file has the next one there instead.
@@ -1302,8 +1341,11 @@ static void hp_report(const char *phase, esp_err_t err) {
     JSRuntime *rt=JS_GetRuntime(pocketjs_guest_quickjs_context(guest));
     size_t used=0,limit=0;
     JS_GetMemoryCounters(rt,&used,&limit);
-    ESP_LOGI("app","HEAPPROBE %s %u %s %s used=%u limit=%u",phase,hp_index,hp_name,
-             esp_err_to_name(err),(unsigned)used,(unsigned)limit);
+    const int64_t now=esp_timer_get_time();
+    if(!strcmp(phase,"before")) hp_eval_t0=now;
+    ESP_LOGI("app","HEAPPROBE %s %u %s %s used=%u limit=%u eval_us=%lld",phase,hp_index,hp_name,
+             esp_err_to_name(err),(unsigned)used,(unsigned)limit,
+             strcmp(phase,"before")?(long long)(now-hp_eval_t0):0LL);
     if(err==ESP_OK && !strcmp(phase,"eval")) {
         JSMemoryUsage m;
         JS_ComputeMemoryUsage(rt,&m);
@@ -1795,7 +1837,14 @@ source_ready:;
     }
     if(hp) hp_report("before",ESP_OK);
 #endif
-    if(user_source) err=eval_user_source(source,length);
+    // Read here, after pocket_app_load_install() has run for this session's
+    // identity (the install hook above), like everything else the start reads
+    // from app_registry_current().
+    bool module_entry=pocket_app_entry_is_module();
+#ifdef POCKET_HEAPPROBE
+    if(hp && hp_module) module_entry=true;
+#endif
+    if(user_source) err=eval_user_source(source,length,module_entry);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
 #ifdef POCKET_HEAPPROBE
     if(hp) hp_report("eval",err);

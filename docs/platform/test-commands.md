@@ -28,6 +28,7 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_net_autosync_test.sh"   # 自動時刻同期の方針・試行と net_service の参照カウントを、偽の無線と偽の時計でASanで（WSLのみ、docs/platform/wifi-autostart.md）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_pocket_text_test.sh && /tmp/test-pocket-text"   # pocket.input.text のセッション寿命を実物のQuickJSごとASanで（WSLのみ。番号を渡すと1件だけ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_app_load_test.sh"   # pocket.app.load（チャンクの読み込み）の全メソッド・全エラー・解放を実物のQuickJSとpocket_api.cでASanで（WSLのみ、docs/vm/eval-peak.md §7）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_app_import_test.sh"   # 静的import（.mjsの入口とチャンク）: 解決・断る場合とfile:line・動的import()とTLAの拒否・heap不足・単一/load/importの最小heap上限の比較をASanで（WSLのみ、docs/vm/eval-peak.md §9）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keystate_test.sh"   # 物理キーの押下集合（keystate）を1書き手・2読み手でASanとTSanに（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_input_test.sh && /tmp/test-pocket-input"   # pocket.input（onAction/held と input.keys）を実物のkeymap_poll・QuickJSで（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keytest_app_test.sh && /tmp/test-keytest-app"   # KEY TEST（apps/keytest）を実物のQuickJS・pocket.kasane・input.keysで、同時押し・タップ・FIFOあふれの台本（WSLのみ）

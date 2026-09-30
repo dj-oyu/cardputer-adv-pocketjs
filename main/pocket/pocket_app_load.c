@@ -149,6 +149,15 @@ static JSValue js_load(JSContext *ctx, JSValueConst this_val,
         return pocket_api_throw(ctx,POCKET_ERR_NOT_FOUND,OP,message,false,
                                 POCKET_OUTCOME_NOT_APPLIED);
     }
+    if(set->chunks[k].module) {
+        // Evaluated as a script it would be a SyntaxError at its first
+        // `import`/`export`; and one without either would become a second,
+        // unrelated copy of what the entry's import graph already holds.
+        snprintf(message,sizeof message,"chunk '%s' is a module (%s); import it from the "
+                 "app's module entry",name,set->chunks[k].file);
+        return pocket_api_throw(ctx,POCKET_ERR_INVALID_ARGUMENT,OP,message,false,
+                                POCKET_OUTCOME_NOT_APPLIED);
+    }
     const uint32_t bit=1u<<k;
     if(loaded&bit) return JS_FALSE;
     if(loading&bit) {
@@ -196,6 +205,155 @@ static JSValue js_load(JSContext *ctx, JSValueConst this_val,
     return JS_TRUE;
 }
 
+// ---------------------------------------------------------------- import
+//
+// Static `import` (docs/vm/eval-peak.md section 9): an app whose entry is a
+// module reaches its .mjs chunks by name -- `import { draw } from 'scene'` --
+// and each is parsed on its own, so the evaluation's parse peak is the
+// largest module's rather than the whole app's (js_create_function frees a
+// compilation's JSFunctionDefs only when that compilation ends; a module is
+// one compilation, the loader's JS_Eval below).
+//
+// Resolution is open only while pocket_app_eval_module() compiles the entry.
+// That is exactly the window in which QuickJS resolves static imports (the
+// compile of each module resolves its own before it returns, in
+// __JS_EvalInternal), so outside it the only caller left is a dynamic
+// import(), which is refused: it would compile a module from a job, after
+// the evaluation, into the resident module list that nothing can shrink, and
+// pocket.app.load() already covers loading later -- with release.
+static bool resolving;
+// Loader frames on the C stack: each level is a JS_Eval whose resolution
+// calls the next. A chain as long as the table would be 32 of them on the
+// UI task's stack; eight is more than any split needs (an entry importing
+// its parts is depth 1) and is what the refusal below enforces.
+#define IMPORT_DEPTH_MAX 8
+static int depth;
+
+static int find_file(const char *file) {
+    if(!set) return -1;
+    for(uint32_t i=0;i<set->count;i++)
+        if(!strcmp(set->chunks[i].file,file)) return (int)i;
+    return -1;
+}
+
+// The specifier is a chunk name and nothing else: no relative or absolute
+// paths, no URLs, nothing outside this app's chunks.txt. The normalized name
+// is the chunk's file, because QuickJS looks a module up in loaded_modules by
+// the name its compile was given, and that name is also what a stack shows
+// (derby_scene.mjs:12), so the two must be the same string.
+static char *module_normalize(JSContext *ctx, const char *base, const char *name, void *opaque) {
+    (void)opaque;
+    if(!resolving) {
+        JS_ThrowTypeError(ctx,"import('%s') in %s: dynamic import() is not supported; "
+                          "use pocket.app.load()",name,base);
+        return NULL;
+    }
+    const int k=find(name,strlen(name));
+    if(k<0) {
+        JS_ThrowReferenceError(ctx,"%s imports '%s': this app has no chunk '%s' "
+                               "(chunks.txt names them)",base,name,name);
+        return NULL;
+    }
+    if(!set->chunks[k].module) {
+        JS_ThrowReferenceError(ctx,"%s imports '%s': that chunk is a script (%s), not a "
+                               ".mjs module; pocket.app.load('%s') reads it",
+                               base,name,set->chunks[k].file,name);
+        return NULL;
+    }
+    return js_strdup(ctx,set->chunks[k].file);
+}
+
+static JSModuleDef *module_load(JSContext *ctx, const char *file, void *opaque,
+                                JSValueConst attributes) {
+    (void)opaque;
+    if(!JS_IsUndefined(attributes)) {
+        JS_ThrowTypeError(ctx,"import of %s: import attributes (with {...}) are not supported",file);
+        return NULL;
+    }
+    const int k=find_file(file);
+    if(k<0) {   // module_normalize() only returns table files
+        JS_ThrowReferenceError(ctx,"no module %s",file);
+        return NULL;
+    }
+    if(depth>=IMPORT_DEPTH_MAX) {
+        JS_ThrowRangeError(ctx,"import of %s: imports nest deeper than %d modules",
+                           file,IMPORT_DEPTH_MAX);
+        return NULL;
+    }
+    const app_chunk_t *chunk=&set->chunks[k];
+    const size_t bytes=(size_t)(chunk->end-chunk->start-1);
+    JSRuntime *rt=JS_GetRuntime(ctx);
+    size_t used0=0,used1=0,limit=0;
+    JS_GetMemoryCounters(rt,&used0,&limit);
+    const int64_t t0=esp_timer_get_time();
+    // Compiling a module also resolves its own imports, so this recurses
+    // through module_normalize/module_load for them before it returns --
+    // with this module's parse temporaries already freed.
+    depth++;
+    JSValue module=JS_Eval(ctx,chunk->start,bytes,chunk->file,
+                           JS_EVAL_TYPE_MODULE|JS_EVAL_FLAG_COMPILE_ONLY);
+    depth--;
+    if(JS_IsException(module)) return NULL;   // its SyntaxError, OOM or refusal stays pending
+    const int64_t t1=esp_timer_get_time();
+    JS_GetMemoryCounters(rt,&used1,&limit);
+    // Not a contracted marker. compile_us and the second heap figure include
+    // the modules this one imports, whose own lines come first.
+    ESP_LOGI(TAG,"APP_IMPORT %s bytes=%u compile_us=%lld used=%u>%u",chunk->name,
+             (unsigned)bytes,(long long)(t1-t0),(unsigned)used0,(unsigned)used1);
+    // The module stays referenced by ctx->loaded_modules; this value was the
+    // compile's own reference (quickjs-libc's loader does the same).
+    JSModuleDef *def=JS_VALUE_GET_PTR(module);
+    JS_FreeValue(ctx,module);
+    return def;
+}
+
+bool pocket_app_entry_is_module(void) {
+    const char *entry=app_registry_current()->entry;
+    const size_t n=entry?strlen(entry):0;
+    return n>4 && !strcmp(entry+n-4,".mjs");
+}
+
+JSValue pocket_app_eval_module(JSContext *ctx, const char *source, size_t length,
+                               const char *filename) {
+    // Compile, resolving every static import (each chunk its own compile), then
+    // link and run the graph: two steps so that the window above closes before
+    // any module's top level runs -- an import() written there is a job.
+    resolving=true;
+    depth=0;
+    JSValue module=JS_Eval(ctx,source,length,filename,
+                           JS_EVAL_TYPE_MODULE|JS_EVAL_FLAG_COMPILE_ONLY);
+    resolving=false;
+    if(JS_IsException(module)) return module;
+    // A module graph's evaluation answers with a promise (top-level await).
+    // Without an await it is settled before JS_EvalFunction returns: the
+    // module bodies' synchronous parts never park (vm-L2-design sec.11.2),
+    // and the startup evaluation has no turn to yield to.
+    JSValue promise=JS_EvalFunction(ctx,module);   // takes module
+    if(JS_IsException(promise)) return promise;
+    const JSPromiseStateEnum state=JS_PromiseState(ctx,promise);
+    if(state==JS_PROMISE_FULFILLED) { JS_FreeValue(ctx,promise); return JS_UNDEFINED; }
+    if(state==JS_PROMISE_REJECTED) {
+        // The exception a script would have thrown, with its own stack and
+        // file:line, for eval_reporting()'s EVAL_ERROR line. QuickJS has also
+        // handed this rejection (and the failing module's own) to the guest's
+        // rejection tracker as unhandled; nothing reports them, because a
+        // failed evaluation never reaches a drain -- the session does not
+        // start, and pocketjs_guest_destroy() frees the tracker's list.
+        JSValue reason=JS_PromiseResult(ctx,promise);
+        JS_FreeValue(ctx,promise);
+        return JS_Throw(ctx,reason);
+    }
+    // Pending: some module awaited at its top level. Refused rather than
+    // driven to completion: the rest of that module would run from the job
+    // queue after the evaluation has been declared finished and frame()
+    // bound, and a failure there would no longer be the evaluation's. The
+    // session is not started, so the guest -- and the suspended module with
+    // it -- is freed.
+    JS_FreeValue(ctx,promise);
+    return JS_ThrowSyntaxError(ctx,"%s: top-level await is not supported (the module graph "
+                               "must finish evaluating synchronously)",filename);
+}
+
 // Only values this file enforces: the name length is checked on every call,
 // and the chunk count is the width of the masks, refused at build time.
 static const pocket_limit_t load_limits[] = {
@@ -222,5 +380,11 @@ esp_err_t pocket_app_load_install(JSContext *ctx) {
     pocket_api_register(&load_capability);
     set=app_chunks_for(app_registry_current()->id);
     loaded=failed=loading=0;
+    resolving=false;
+    // The runtime's one module-loader slot (nothing else registers one: the
+    // guest leaves it empty and quickjs-libc sets it only for workers).
+    // Registered for every session, chunks or not, so that a dynamic import()
+    // anywhere meets the same refusal rather than QuickJS's "could not load".
+    JS_SetModuleLoaderFunc2(JS_GetRuntime(ctx),module_normalize,module_load,NULL,NULL);
     return pocket_api_lazy(ctx,"app",build_load,NULL);
 }

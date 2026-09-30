@@ -9,6 +9,11 @@ Each LIST is a chunks.txt:
   scene  derby_scene.js      <- a name for pocket.app.load(), then a file
   demo   derby_demo.js          relative to the chunks.txt
 
+A file ending in .mjs is an ES module: the app's module entry reaches it with
+a static `import ... from 'scene'` and load() refuses it; any other file is a
+global script for load() and the module loader refuses it
+(docs/vm/eval-peak.md section 9).
+
 Writes OUTDIR/app_chunks.c (the table, one set per app id; several lists may
 name the same app, and their chunks are merged) and OUTDIR/app_chunks.cmake,
 which sets APP_CHUNK_FILES for main/CMakeLists.txt to embed (TEXT, so a NUL
@@ -117,7 +122,8 @@ def main():
                 files.append(file.as_posix())
             c.append(f'extern const char {var}_start[] asm("_binary_{sym}_start");')
             c.append(f'extern const char {var}_end[] asm("_binary_{sym}_end");')
-            rows.append(f'    {{{c_string(name)}, {c_string(file.name)}, {var}_start, {var}_end}},')
+            module = 1 if file.suffix == '.mjs' else 0
+            rows.append(f'    {{{c_string(name)}, {c_string(file.name)}, {var}_start, {var}_end, {module}}},')
         var = f'SET_{len(sets)}'
         c.append(f'static const app_chunk_t {var}[] = {{')
         c += rows
@@ -153,7 +159,8 @@ def main():
           'set(APP_CHUNK_FILES ' + ' '.join(f'"{f}"' for f in files) + ')']
     write(out / 'app_chunks.cmake', '\n'.join(cm) + '\n')
     for app in sorted(apps):
-        print(f'{app}: ' + ', '.join(n for n, _ in apps[app]))
+        print(f'{app}: ' + ', '.join(n + (' (module)' if f.suffix == '.mjs' else '')
+                                     for n, f in apps[app]))
 
 
 if __name__ == '__main__':

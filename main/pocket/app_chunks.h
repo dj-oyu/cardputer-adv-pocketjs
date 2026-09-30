@@ -37,6 +37,15 @@ typedef struct {
     // NUL at start[length], and both producers of this table leave it there.
     const char *start;
     const char *end;
+    // 1 for an ES module (the file ends in .mjs): reached only by a static
+    // `import` from the app's module entry, never by load(). 0 for a global
+    // script, reached only by load(). The two are kept apart because a chunk
+    // evaluated both ways would be two unrelated copies in one realm, and a
+    // module stays resident for the realm's life (ctx->loaded_modules) where
+    // a script's top level is freed after it runs. The kind comes from the
+    // file name, the convention every other JS host uses, so chunks.txt
+    // needs no column for it.
+    uint8_t module;
 } app_chunk_t;
 
 typedef struct {
