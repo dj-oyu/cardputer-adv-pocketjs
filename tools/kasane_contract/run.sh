@@ -62,6 +62,13 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
       -lm -o "$out/proc-plan-points"
     "$out/proc-plan-points"
   done
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
+    main/ui/kasane/ksn_proc_plan.c main/ui/kasane/ksn_proc_plan_points.c \
+    main/ui/kasane/ksn_proc_points.c main/ui/kasane/ksn_proc_points_dispatch.c \
+    main/ui/kasane/ksn_proc_points_pie.c tools/kasane_contract/test_proc_sized_plan.c \
+    -lm -o "$out/proc-sized-plan"
+  "$out/proc-sized-plan"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
     main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
     main/ui/kasane/ksn_proc_plan.c tools/kasane_contract/test_proc_megademo.c \

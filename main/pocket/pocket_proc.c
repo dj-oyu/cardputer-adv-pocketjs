@@ -32,6 +32,8 @@ void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
  * (register includes reading the arrays, prepare is the analysis alone). */
 #include "esp_cpu.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
 static pocket_proc_trace trace;
 /* Survives trace_take(): a commit and its view update can be turns apart. */
 static bool trace_split;
@@ -111,7 +113,7 @@ static int16_t *points_plane(const proc_points *p,unsigned k){
 enum {PLANE_X,PLANE_Y,PLANE_OUT_X,PLANE_OUT_Y};
 typedef struct {
     uint32_t handle;
-    ksn_proc_plan *plan;
+    ksn_proc_sized_plan *plan;
     proc_points *points;
 } proc_slot;
 static proc_slot slots[PROC_HANDLES];
@@ -330,18 +332,30 @@ static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
         JS_FreeValue(ctx,row);
         if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid instruction entry");
     }
-    ksn_proc_plan *plan=calloc(1,sizeof *plan);
+    /* Sized to the program: a full-size plan was 872 B whatever the count
+     * (docs/kasane/plan-sized-alloc.md). count is 1..64 here, checked above. */
+#ifdef KASANE_MEGADEMO_TRACE
+    size_t plan_free0=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+#endif
+    ksn_proc_sized_plan *plan=calloc(1,ksn_proc_sized_plan_bytes(count));
+#ifdef KASANE_MEGADEMO_TRACE
+    /* What one plan costs the shared heap: the request, the block the
+     * allocator handed out, and the drop in free bytes (header included). */
+    if(plan)ESP_LOGI("proc","PLANSZ n=%u blk=%u took=%d",(unsigned)count,
+                     (unsigned)heap_caps_get_allocated_size(plan),
+                     (int)(plan_free0-heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+#endif
     if(!plan)return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"plan allocation failed");
     const ksn_proc_program program={code,(uint8_t)count};
 #ifdef KASANE_MEGADEMO_TRACE
     int64_t prep_began=esp_timer_get_time();
-    bool prepared=ksn_proc_plan_prepare(plan,&program);
+    bool prepared=ksn_proc_sized_plan_prepare(plan,count,&program);
     uint32_t prep_us=(uint32_t)(esp_timer_get_time()-prep_began);
     trace.prep_us+=prep_us;
     if(prep_us>trace.prep_max_us)trace.prep_max_us=prep_us;
     if(!prepared){
 #else
-    if(!ksn_proc_plan_prepare(plan,&program)){
+    if(!ksn_proc_sized_plan_prepare(plan,count,&program)){
 #endif
         free(plan);
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid procedural program");
@@ -357,7 +371,7 @@ static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
         if(read==POINTS_NO_MEMORY){free(plan);
             return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"point allocation failed");}
         if(read!=POINTS_OK||
-           !ksn_proc_plan_register_points_affine(plan,&coeff,&policy)){
+           !ksn_proc_sized_plan_register_points_affine(plan,&coeff,&policy)){
             free(points);free(plan);
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid typed point batch");
         }
@@ -424,8 +438,8 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
         input[i]=(float)n;
     }
-    ksn_proc_status status=ksn_proc_plan_begin(vm,slot->plan,input,scratch);
-    if(status==KSN_PROC_RUNNING)status=ksn_proc_plan_run(vm,slot->plan,false);
+    ksn_proc_status status=ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
+    if(status==KSN_PROC_RUNNING)status=ksn_proc_sized_plan_run(vm,slot->plan,false);
     if(status!=KSN_PROC_DONE){
         building=false;
         return failure(ctx,op,status==KSN_PROC_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:
@@ -438,7 +452,7 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         const KsnProcPointSrc src={points_plane(p,PLANE_X),points_plane(p,PLANE_Y)};
         const KsnProcPointDst dst={points_plane(p,PLANE_OUT_X),points_plane(p,PLANE_OUT_Y)};
         const int16_t *out_x=dst.x,*out_y=dst.y;
-        if(!ksn_proc_plan_run_points_affine(slot->plan,dst,src,p->count,&decision)){
+        if(!ksn_proc_sized_plan_run_points_affine(slot->plan,dst,src,p->count,&decision)){
             building=false;
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"typed point run failed");
         }
