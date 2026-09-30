@@ -17,6 +17,8 @@
 | IDF専用Python | `C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe`、3.11.7 |
 | S3 GCC | 15.2.0、`esp-15.2.0_20251204` |
 | CMake / Ninja | 4.0.3 / 1.12.1 |
+| Node（IDF の外） | v24.19.0、`C:Program FilesVolta
+ode.exe`（Volta）。IDF の環境を有効化した後も PATH にある |
 
 PocketJS調査版のIDF要求 `>=6.0,<6.2` にv6.0.1は含まれる。このバージョンを最初のビルド基準とする。
 依存取得、S3 Rustアーカイブ生成、ドライバー統合はM1でビルド・書き込み済み（当時の知見は[archive/findings.md](../archive/findings.md)）。
@@ -87,6 +89,15 @@ idf.py -B build size-components
 ```powershell
 eim run 'idf.py -B build build' v6.0.1 | Out-Host
 ```
+
+### plan を JS の関数で書いたアプリには Node が要る
+
+アプリのチャンクに `@plan` の関数（[手続き型描画の plan を JS の関数で書く](../kasane/js-to-ir.md) §5）があると、ビルドが `tools/kasane_ir/lower_plans.mjs` でそれを詰めた IR に置き換えてから埋め込む。そのとき **Node 16 以上**が PATH に要る。`@plan` を含むチャンクが無ければ Node は要らない。
+
+- IDF（EIM）は Node を入れない。別に入れる（このPCは Volta の Node v24.19.0）。確認は IDF を有効化したシェルで `node --version`。
+- 16 未満は動かない: Node 14 は `??=` の構文エラーで止まった。16・18・26 は同じ生成物をバイト単位で出した（2026-09-30、host）。
+- 無い・古いと、configure が「何が要るか（Node 16 以上）、どこに入れるか（PATH）」を出して止まる。
+- **2026-09-30 時点では未組み込み**（CMake と `make_app_chunks.py` への組み込みは DERBY の plan の書き換えと一緒に入る。js-to-ir.md §5.4）。
 
 ## 書き込みとログ
 
