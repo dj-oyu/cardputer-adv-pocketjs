@@ -6,7 +6,7 @@ WSL only).
 1. Captures what the game registers and draws: tools/games/test_derby_host.c
    (-m32) runs the scripted game at LIGHT, MID and HEAVY on a copy of
    apps/derby (or DIR/apps/derby) whose view logs each registration's
-   arguments (REG) and whose scene logs each draw's inputs (DRAW). The copy is
+   arguments (REG) and each draw's inputs (DRAW, in dr()). The copy is
    temporary; apps/ is not changed.
 2. node tools/kasane_ir/derby_plans.mjs compiles tools/kasane_ir/plans/*.kjs
    and writes the cases: per plan and argument set, the captured inputs
@@ -43,6 +43,11 @@ def instrument(root: Path) -> None:
     anchor = "    else p = [prog(T[n], k.concat(1 / k[2]))];\n"
     assert anchor in view, "derby_view.js: registration line moved"
     view = view.replace(anchor, anchor + "    __log('REG ' + n + ' ' + JSON.stringify(globalThis.__arg || []));\n")
+    # Every draw goes through dr() (derby_view.js), as it is made.
+    anchor = "const dr = (n, a) => { if (live[n]) H.draw(live[n], a); };"
+    assert anchor in view, "derby_view.js: draw line moved"
+    view = view.replace(anchor, "const dr = (n, a) => { if (live[n]) { __log('DRAW ' + n + ' ' + a.join(',')); "
+                                "H.draw(live[n], a); } };")
     (d / "derby_view.js").write_text(view, encoding="utf-8")
     # The plans as text: the shipped derby_prog.js is their packed form
     # (tools/kasane_ir/pack.mjs, the same rows), whose prog() has no anchor.
@@ -50,11 +55,6 @@ def instrument(root: Path) -> None:
     anchor = "function prog(src, arg) {\n"
     assert anchor in prog
     (d / "derby_prog.js").write_text(prog.replace(anchor, anchor + "  globalThis.__arg = arg;\n"), encoding="utf-8")
-    scene = (d / "derby_scene.js").read_text(encoding="utf-8")
-    anchor = "if (live[e[0]]) H.draw(live[e[0]], e[1]);"
-    assert anchor in scene, "derby_scene.js: draw line moved"
-    scene = scene.replace(anchor, "if (live[e[0]]) { __log('DRAW ' + e[0] + ' ' + e[1].join(',')); H.draw(live[e[0]], e[1]); }")
-    (d / "derby_scene.js").write_text(scene, encoding="utf-8")
 
 
 def capture(apps: Path) -> Path:
