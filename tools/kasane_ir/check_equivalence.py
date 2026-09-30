@@ -35,7 +35,7 @@ run_derby = derby_heap.run_derby
 def instrument(root: Path) -> None:
     d = root / "apps/derby"
     view = (d / "derby_view.js").read_text(encoding="utf-8")
-    anchor = "    const p = spec(n);\n"
+    anchor = "    else p = [prog(T[n], k.concat(1 / k[2]))];\n"
     assert anchor in view, "derby_view.js: registration line moved"
     view = view.replace(anchor, anchor + "    __log('REG ' + n + ' ' + JSON.stringify(globalThis.__arg || []));\n")
     (d / "derby_view.js").write_text(view, encoding="utf-8")
