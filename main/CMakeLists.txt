@@ -343,6 +343,46 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
              "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py" ${_app_chunk_lists})
 include("${CMAKE_BINARY_DIR}/generated/app_chunks.cmake")
 target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunks.c")
+# A chunk with @plan functions (procedural plans written as JS,
+# docs/kasane/js-to-ir.md section 5) is embedded lowered: at build time,
+# tools/kasane_ir/lower_plans.mjs replaces each plan by its compiled IR and
+# the @planDecoder by the decoder, into build/generated/apps/<app>/ under the
+# same base name, so the symbol and the chunk table do not change. Editing
+# the chunk re-lowers it without a reconfigure. Only then does the build need
+# Node, 16 or later (docs/platform/build-environment.md); without @plan it
+# does not look for it.
+if(APP_CHUNK_LOWER)
+    find_program(POCKET_NODE node)
+    set(_node_version "")
+    if(POCKET_NODE)
+        execute_process(COMMAND "${POCKET_NODE}" --version OUTPUT_VARIABLE _node_version
+                        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    if(NOT _node_version MATCHES "^v([0-9]+)\\." OR CMAKE_MATCH_1 LESS 16)
+        string(REPLACE ";" ", " _plans "${APP_CHUNK_PLANS}")
+        set(_found "no node on PATH")
+        if(POCKET_NODE)
+            set(_found "${POCKET_NODE} is ${_node_version}")
+        endif()
+        # Searched again at the next configure, after PATH is fixed.
+        unset(POCKET_NODE CACHE)
+        message(FATAL_ERROR "The app chunks ${_plans} have @plan functions, which the build "
+                "compiles with tools/kasane_ir/lower_plans.mjs: that needs Node 16 or later on PATH "
+                "(${_found}). Install Node (this project's machine uses Volta's Node v24) and put it "
+                "on the PATH of the shell that runs idf.py, or pass -DPOCKET_NODE=<path to node>; "
+                "then reconfigure. See docs/platform/build-environment.md.")
+    endif()
+    set(_kir "${CMAKE_SOURCE_DIR}/tools/kasane_ir")
+    set(_lower ${APP_CHUNK_LOWER})
+    while(_lower)
+        list(POP_FRONT _lower _src _dst)
+        add_custom_command(OUTPUT "${_dst}"
+            COMMAND "${POCKET_NODE}" "${_kir}/lower_plans.mjs" --file "${_src}" "${_dst}"
+            DEPENDS "${_src}" "${_kir}/lower_plans.mjs" "${_kir}/plan_js.mjs" "${_kir}/kir.mjs" "${_kir}/pack.mjs"
+            COMMENT "Compiling the @plan functions of ${_src}"
+            VERBATIM)
+    endwhile()
+endif()
 foreach(_app_chunk IN LISTS APP_CHUNK_FILES)
     target_add_binary_data(${COMPONENT_LIB} "${_app_chunk}" TEXT)
 endforeach()

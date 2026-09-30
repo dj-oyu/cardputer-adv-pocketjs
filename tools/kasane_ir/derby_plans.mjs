@@ -3,10 +3,11 @@
 //   node tools/kasane_ir/derby_plans.mjs [--prog FILE] [--decompile]
 //                                        [--vectors FILE] [--emit DIR]
 //
-// Reads T (the one-letter IR texts) from apps/derby/derby_prog_text.js (the
-// source of the packed derby_prog.js, tools/kasane_ir/pack.mjs) by running
-// the file with the entry's globals stubbed, and for each plan compiles
-// tools/kasane_ir/plans/<name>.kjs. --decompile writes the missing .kjs
+// Reads T (the one-letter IR texts) from tools/kasane_ir/derby_hand_ir.js
+// (DERBY's hand IR until e9b88bc; --prog another file of that form) by
+// running the file with the entry's globals stubbed, and for each plan
+// compiles tools/kasane_ir/plans/<name>.kjs, or with --js FILE the @plan
+// function of that name (apps/derby/derby_prog.js is DERBY's). --decompile writes the missing .kjs
 // files from the hand IR first (--force rewrites all of them, including the
 // ones edited by hand since). --vectors FILE writes the equivalence cases for
 // tools/kasane_ir/run_ir.c: every plan hand and compiled, with the inputs
@@ -18,11 +19,12 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {parseText, compile, decompile, assemble, stats, removeDead, formatText} from './kir.mjs';
+import {findPlans, compilePlan} from './plan_js.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(HERE, '../..');
 const argv = process.argv.slice(2), opt = k => { const i = argv.indexOf(k); return i < 0 ? null : argv[i + 1] ?? true; };
 
-export function derbyPlans(file = path.join(ROOT, 'apps/derby/derby_prog_text.js')) {
+export function derbyPlans(file = path.join(HERE, 'derby_hand_ir.js')) {
   const src = fs.readFileSync(file, 'utf8');
   const ctx = {Math};
   vm.createContext(ctx);
@@ -37,13 +39,25 @@ function main() {
   const dir = path.join(HERE, 'plans');
   fs.mkdirSync(dir, {recursive: true});
   const rows = [], cases = [];
+  // --js FILE: the plans as JS functions (plan_js.mjs) instead of the .kjs
+  // files; the table says whether each compiles to its .kjs file's IR.
+  const jsFile = opt('--js'), sameAsKjs = [];
+  const js = jsFile ? new Map(findPlans(fs.readFileSync(jsFile, 'utf8'), path.basename(jsFile)).map(p => [p.name, p])) : null;
   for (const [name, text] of Object.entries(T)) {
     const file = path.join(dir, name + '.kjs');
     if (argv.includes('--decompile') && (!fs.existsSync(file) || argv.includes('--force'))) fs.writeFileSync(file, `// ${name}: decompiled from apps/derby/derby_prog.js\n` + decompile(text));
     if (!fs.existsSync(file)) { rows.push({name, error: 'no .kjs'}); continue; }
     const hand = parseText(text), handDead = removeDead(hand.map(i => ({...i}))).removed;
     let c;
-    try { c = compile(fs.readFileSync(file, 'utf8')); } catch (e) { rows.push({name, hand: hand.length, error: e.message}); continue; }
+    try {
+      c = compile(fs.readFileSync(file, 'utf8'));
+      if (js) {
+        if (!js.has(name)) throw new Error(`no @plan ${name} in ${jsFile}`);
+        const j = compilePlan(js.get(name));
+        sameAsKjs.push(`${name} ${j.text === c.text ? 'same IR as .kjs' : 'IR DIFFERS from .kjs'}`);
+        c = j;
+      }
+    } catch (e) { rows.push({name, hand: hand.length, error: e.message}); continue; }
     rows.push({name, hand: hand.length, handRegs: stats(hand).regs, handDead, out: c.count, outRegs: stats(c.code).regs,
       dead: c.dead, remat: c.rematerialised.length, warnings: c.warnings, text: c.text});
     cases.push({name, hand: text, compiled: c.text});
@@ -58,6 +72,7 @@ function main() {
       (r.warnings.length ? '  ' + r.warnings.join('; ') : ''));
   }
   console.log(`total    ${pad(th, 5)}                     | ${pad(tc, 8)}              ${pad((tc - th > 0 ? '+' : '') + (tc - th), 5)}`);
+  if (js) console.log(sameAsKjs.join('\n'));
   if (opt('--show')) for (const r of rows) if (r.text && (opt('--show') === true || opt('--show') === r.name)) console.log(`${r.name}: ${r.text}`);
   if (opt('--emit')) fs.writeFileSync(opt('--emit'), emitC(cases));
   if (opt('--cases')) writeCases(cases, opt('--cases'), argv[argv.indexOf('--cases') + 2]);
@@ -100,7 +115,7 @@ function writeCases(cases, draws, out) {
   const rows = r => r.map(x => x.join(' ')).join('\n');
   const vec = s => { const v = s.split(',').filter(x => x !== '').map(Number); while (v.length < 8) v.push(0); return v; };
   let text = '';
-  const perPlan = new Map();
+  const perPlan = new Map(), side = [];
   for (const [name, set] of inputs) {
     // spec(): r0..r7 are the runner plan per horse, t0/t1 the panning turf.
     const plan = /^r\d$/.test(name) ? 'runner' : /^t\d$/.test(name) ? 'pt' : name;
@@ -125,8 +140,11 @@ function writeCases(cases, draws, out) {
         : Number.isInteger(x) && rand() < .9 ? x : x * (1 + (rand() - .5) * .4) + (rand() - .5) * 8));
     }
     text += head.replace('%s', 'fuzz' + n) + fz.map(x => 'I ' + x.join(' ')).join('\n') + '\nEND\n';
+    side.push({plan, tag: 'game' + n, args: a, inputs: take.map(vec)}, {plan, tag: 'fuzz' + n, args: a, inputs: fz});
   }
   fs.writeFileSync(out, text);
+  // The same cases as JSON (plan, arguments, inputs) for check_js.mjs.
+  fs.writeFileSync(out.replace(/\.txt$/, '') + '.json', JSON.stringify(side));
   const missing = cases.map(c => c.name).filter(p => ![...perPlan.values()].some(x => x.plan === p));
   if (missing.length) console.log('not drawn in the captured game: ' + missing.join(' '));
 }

@@ -331,6 +331,8 @@ function lower(ast) {
       switch (s.k) {
         case 'input': for (const d of s.d) names.set(d.n, {kind: 'alias', x: {t: 'i', k: d.k}}); break;
         case 'func': funcs.set(s.name, s); break;
+        // A registration argument by name (a plan function's parameter): $n.
+        case 'param': names.set(s.n, {kind: 'alias', x: {t: 'p', n: s.index}}); break;
         case 'unroll': for (let k = 0; k < s.n; ++k) stmts(s.body); break;
         case 'decl':
           for (const d of s.d) {
@@ -513,8 +515,11 @@ function emitPhysical(code, reg) {
   return out;
 }
 
-export function compile(src) {
-  const {code: lowered, vregs, warnings} = lower(parse(src));
+export function compile(src) { return compileAst(parse(src)); }
+// ast: the statements parse() makes (plan_js.mjs builds the same from a JS
+// function).
+export function compileAst(ast) {
+  const {code: lowered, vregs, warnings} = lower(ast);
   let code = placePools(lowered, vregs);
   let dead = 0, rematerialised = [];
   ({code, removed: dead} = removeDead(code));
@@ -535,6 +540,9 @@ export function compile(src) {
     ({code} = removeDead(code));
   }
   const out = emitPhysical(code, r.reg);
+  // register() takes 1..64 instructions: a plan that draws nothing of its own
+  // (it carries typed points, DERBY's 'S0,0') is one SET.
+  if (!out.length) out.push({op: O.SET, dst: 0, a: 0, b: 0, value: 0, lit: '0', color: 0, par: {}});
   return {code: out, text: formatText(out), count: out.length, dead, rematerialised, warnings, pressure: r.pressure};
 }
 
