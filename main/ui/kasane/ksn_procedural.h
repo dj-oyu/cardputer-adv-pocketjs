@@ -67,6 +67,29 @@ typedef struct {
 
 ksn_proc_status ksn_proc_begin(ksn_proc_vm *vm,const ksn_proc_program *program,
                                const float input[KSN_PROC_INPUTS],ksn_proc_frame *frame);
+
+/* Registration arguments of a const (flash) program. A patch names one field
+ * of one instruction that holds argument `param` instead of the constant in
+ * the program; the program keeps a placeholder there. Patches are sorted by
+ * pc. docs/kasane/flash-plan.md. */
+typedef enum { KSN_PROC_FIELD_A, KSN_PROC_FIELD_VALUE, KSN_PROC_FIELD_COLOR } ksn_proc_field;
+typedef struct { uint8_t pc,field,param; } ksn_proc_patch;
+typedef struct {
+    const ksn_proc_patch *patch;
+    const float *arg;
+    uint8_t patches,args;
+} ksn_proc_binding;
+/* Writes the binding's arguments into code[0..count). False (code partly
+ * written) for a patch outside count or args, an unknown field, a field
+ * value the instruction cannot hold (A: integer 0..255, COLOR: integer
+ * 0..65535, VALUE: finite), or patches out of pc order. */
+bool ksn_proc_apply_binding(ksn_proc_inst *code,uint8_t count,const ksn_proc_binding *binding);
+/* ksn_proc_begin for a const program with arguments: the VM copies the
+ * program, applies the binding to its own copy, then validates, so what runs
+ * is exactly what was validated, as in ksn_proc_begin. */
+ksn_proc_status ksn_proc_begin_bound(ksn_proc_vm *vm,const ksn_proc_program *program,
+                                     const ksn_proc_binding *binding,
+                                     const float input[KSN_PROC_INPUTS],ksn_proc_frame *frame);
 void ksn_proc_state_reset(ksn_proc_state *state);
 ksn_proc_status ksn_proc_begin_state(ksn_proc_vm *vm,const ksn_proc_program *program,
                                     const float input[KSN_PROC_INPUTS],

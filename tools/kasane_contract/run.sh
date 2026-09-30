@@ -385,6 +385,9 @@ python3 tools/kasane_contract/run_proc_megademo_scenes.py
 python3 tools/kasane_contract/run_megademo_app_host.py
 python3 tools/kasane_contract/run_pocket_proc_qjs.py
 python3 tools/kasane_contract/run_pocket_proc_limits_qjs.py
+# Built-in (flash) plans by name against the same plans as arrays, on DERBY's
+# captured draws (docs/kasane/flash-plan.md; the capture is made once).
+python3 tools/kasane_contract/run_pocket_proc_rom_qjs.py
 python3 tools/kasane_contract/run_proc_limits_scene.py
 python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py
 python3 tools/kasane_contract/run_proc_grid_resize.py

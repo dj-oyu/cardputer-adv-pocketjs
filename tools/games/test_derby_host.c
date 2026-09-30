@@ -45,6 +45,7 @@
  *      DERBY_HW=<uint32> (what pocket.random.seed() returns; fixed by default).
  */
 #include "pocket_kasane.h"
+#include "pocket_proc.h"
 #include "pocket_input.h"
 #include "pocket_api.h"
 #include "pocket_av.h"
@@ -237,28 +238,54 @@ static void analyse(spec *s){
     if(maxd>g_depth_max)g_depth_max=maxd;
     if(s->program.count>g_instr_max)g_instr_max=s->program.count;
 }
+/* __reg(handle, rows, points) for a plan registered as rows, or
+ * __reg(handle, name, args, points) for a built-in plan by name
+ * (docs/kasane/flash-plan.md): its rows are the table's with the arguments
+ * written in, the program the array path would have registered. */
 static JSValue js_cap_reg(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
-    (void)c;(void)self;(void)argc;
+    (void)c;(void)self;
     spec *s=NULL;
     for(unsigned i=0;i<SLOTS&&!s;i++)if(!specs[i].handle)s=&specs[i];
     REQ(s);
     memset(s,0,sizeof *s);
     s->handle=(int)num(argv[0]);
-    unsigned n=len(argv[1]);
-    REQ(n>=1&&n<=KSN_PROC_CODE);
-    for(unsigned i=0;i<n;i++){
-        JSValue row=JS_GetPropertyUint32(ctx,argv[1],i);
-        REQ(len(row)==6);
-        s->code[i]=(ksn_proc_inst){(uint8_t)at(row,0),(uint8_t)at(row,1),(uint8_t)at(row,2),(uint8_t)at(row,3),
-                                   (float)at(row,4),(uint16_t)at(row,5)};
-        JS_FreeValue(ctx,row);
+    unsigned n;
+    JSValueConst pts=JS_UNDEFINED;
+    if(JS_IsString(argv[1])){
+        const char *name=JS_ToCString(ctx,argv[1]);REQ(name);
+        const ksn_proc_rom_entry *e=NULL;
+        for(unsigned i=0;i<ksn_proc_rom_plans_count&&!e;i++)
+            if(!strcmp(ksn_proc_rom_plans[i].name,name))e=&ksn_proc_rom_plans[i];
+        JS_FreeCString(ctx,name);
+        REQ(e);
+        unsigned given=JS_IsArray(argv[2])?len(argv[2]):0;
+        REQ(given==e->params);
+        float arg[KSN_PROC_ROM_PARAMS];
+        for(unsigned i=0;i<given;i++)arg[i]=(float)at(argv[2],i);
+        n=e->count;
+        memcpy(s->code,e->code,n*sizeof *s->code);
+        const ksn_proc_binding b={e->patch,arg,e->patches,(uint8_t)given};
+        REQ(ksn_proc_apply_binding(s->code,(uint8_t)n,&b));
+        if(argc>3)pts=argv[3];
+    }else{
+        n=len(argv[1]);
+        REQ(n>=1&&n<=KSN_PROC_CODE);
+        for(unsigned i=0;i<n;i++){
+            JSValue row=JS_GetPropertyUint32(ctx,argv[1],i);
+            REQ(len(row)==6);
+            s->code[i]=(ksn_proc_inst){(uint8_t)at(row,0),(uint8_t)at(row,1),(uint8_t)at(row,2),(uint8_t)at(row,3),
+                                       (float)at(row,4),(uint16_t)at(row,5)};
+            JS_FreeValue(ctx,row);
+        }
+        if(argc>2)pts=argv[2];
     }
     s->program=(ksn_proc_program){s->code,(uint8_t)n};
     REQ(ksn_proc_plan_prepare(&s->plan,&s->program));
     analyse(s);
-    if(argc>2&&JS_IsObject(argv[2])){
-        JSValue x=JS_GetPropertyStr(ctx,argv[2],"x"),y=JS_GetPropertyStr(ctx,argv[2],"y"),
-                k=JS_GetPropertyStr(ctx,argv[2],"coeff"),col=JS_GetPropertyStr(ctx,argv[2],"color");
+    if(JS_IsObject(pts)){
+        JSValueConst p=pts;
+        JSValue x=JS_GetPropertyStr(ctx,p,"x"),y=JS_GetPropertyStr(ctx,p,"y"),
+                k=JS_GetPropertyStr(ctx,p,"coeff"),col=JS_GetPropertyStr(ctx,p,"color");
         s->points=len(x);
         REQ(s->points>=2&&s->points<=128&&len(y)==s->points&&len(k)==6);
         for(unsigned i=0;i<s->points;i++){s->x[i]=(int16_t)at(x,i);s->y[i]=(int16_t)at(y,i);}
@@ -778,7 +805,7 @@ static int eval_interrupt(JSRuntime *r,void *u){(void)r;(void)u;return eval_dead
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
     "(function(){const P=kasane.procedural,R=P.register,U=P.unregister,B=P.beginFrame,D=P.draw,C=P.commit;"
-    "P.register=function(p,q){const h=q?R.call(P,p,q):R.call(P,p);__reg(h,p,q);return h};"
+    "P.register=function(p,q,r){const h=R.apply(P,arguments);typeof p==='string'?__reg(h,p,q,r):__reg(h,p,q);return h};"
     "P.unregister=function(h){U.call(P,h);__unreg(h)};"
     "P.beginFrame=function(c,s){const r=s===undefined?B.call(P,c):B.call(P,c,s);__begin(c,s?1:0);return r};"
     "P.draw=function(h,i){try{D.call(P,h,i)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify(i));throw e}__draw(h,i,globalThis.derby&&derby.L?h===derby.L.vis?1:h===derby.L.hd?2:0:0)};"
@@ -833,11 +860,13 @@ int main(int argc,char **argv){
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}
     pocket_kasane_install(ctx,NULL);
+    /* The built-in plans (the firmware's app_session.c does the same). */
+    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     pocket_input_install(ctx,NULL);
     if(pocket_app_load_install(ctx)!=ESP_OK)return 2;
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
-        {"__log",js_log,1},{"__reg",js_cap_reg,3},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
+        {"__log",js_log,1},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
         {"__draw",js_cap_draw,3},{"__commit",js_cap_commit,0},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
