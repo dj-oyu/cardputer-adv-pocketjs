@@ -53,7 +53,7 @@ const TODAY = `/** @plan crowd inputs: x0, spread, y0, rowGap, bays, sway, seed 
   },`;
 // The dots-only form: every row starts at the frame's parity.
 const DOTS = `/** @plan crowd inputs: x0, spread, y0, rowGap, bays, sway, seed, parity */
-  crowd(p0, p1, p2, p3, p4, p5, p6, p7, p8) {
+  crowd(p0, p1, p2, p3, p4, p5, p6, p7) {
     let dc = seed * 12650 + 46496;
     const step = p6 * spread;
     const step2 = step + step;
@@ -64,13 +64,13 @@ const DOTS = `/** @plan crowd inputs: x0, spread, y0, rowGap, bays, sway, seed, 
     for (let j0 = 0; j0 < p1; j0++) {
       let x = xs;
       let phase = ps;
-      for (let j1 = 0; j1 < bays * p8; j1++) {
+      for (let j1 = 0; j1 < bays * p7; j1++) {
         if (x > lim) break;
         plot(sin(phase) * 1.5 + x, y, dc);
         x += step2;
         phase += 4.79992;
       }
-      for (let j2 = 0; j2 < bays * p7; j2++) {
+      for (let j2 = 0; j2 < (p7 + p7 - p2) * bays; j2++) {
         dc = 105642 - dc;
       }
       y += rowGap;
@@ -95,7 +95,7 @@ function inputs(cam, tier, x0, t) {
   const j = flo((x0 - 130 / q) / 12), a = sx(j * 12), dx = 12 * q;
   const n = Math.min(flo((700 - a) / dx), Math.ceil((250 - a) / dx) + 1);
   const sway = j * k[2] * 2.39996 % (2 * PI) - 2 * PI * Math.round(n * k[2] * .191);
-  const args = k.concat(1 / k[2]), args2 = args.concat(k[2] & 1, Math.ceil(k[2] / 2));
+  const args = k.concat(1 / k[2]), args2 = args.concat(Math.ceil(k[2] / 2));
   return {
     stands: [[a, dx, gy, -2.4 * q, n, 0, 0, ty(13.5)], args],
     today: [[a, dx, gy, -2.4 * q, n, sway, (t >> 3) & 1], args],

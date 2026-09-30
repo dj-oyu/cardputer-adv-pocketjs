@@ -76,10 +76,11 @@ const T = {
   // next frame draws the other half. Each row starts at the other parity (a
   // checkerboard). A frame's dots in a row are one colour, dc: input 6 is
   // today's seed xor the parity, and dc flips once a row (the start moved by
-  // one) and once a bay when a bay has an odd count ($7). The loop runs
-  // ceil(dots / 2) ($8) a bay and stops past the row's last index.
+  // one) and once a bay when a bay has an odd count ($7 + $7 - $2). The
+  // loop runs ceil(dots / 2) ($7) a bay and stops past the row's last index.
+  // (Packed plans carry 8 arguments, $0..$7.)
   /** @plan crowd inputs: x0, spread, y0, rowGap, bays, sway, seed, parity */
-  crowd(p0, p1, p2, p3, p4, p5, p6, p7, p8) {
+  crowd(p0, p1, p2, p3, p4, p5, p6, p7) {
     let dc = seed * 12650 + 46496;
     const step = p6 * spread;
     const step2 = step + step;
@@ -90,13 +91,13 @@ const T = {
     for (let j0 = 0; j0 < p1; j0++) {
       let x = off * step + x0;
       let phase = off * 2.39996 + ps;
-      for (let j1 = 0; j1 < bays * p8; j1++) {
+      for (let j1 = 0; j1 < bays * p7; j1++) {
         if (x > lim) break;
         plot(sin(phase) * 1.5 + x, y, dc);
         x += step2;
         phase += 4.79992;
       }
-      for (let j2 = 0; j2 < bays * p7; j2++) {
+      for (let j2 = 0; j2 < (p7 + p7 - p2) * bays; j2++) {
         dc = 105642 - dc;
       }
       dc = 105642 - dc;

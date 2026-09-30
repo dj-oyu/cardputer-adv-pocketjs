@@ -58,8 +58,9 @@ def js_plans(d: Path) -> Path | None:
 def instrument(root: Path) -> None:
     d = root / "apps/derby"
     view = (d / "derby_view.js").read_text(encoding="utf-8")
-    anchor = "    else p = [prog(T[n], k.concat(1 / k[2]))];\n"
-    assert anchor in view, "derby_view.js: registration line moved"
+    m = re.search(r"^    else p = \[prog\(T\[n\], k\.concat\(1 / k\[2\].*\n", view, flags=re.M)
+    assert m, "derby_view.js: registration line moved"
+    anchor = m[0]
     view = view.replace(anchor, anchor + "    __log('REG ' + n + ' ' + JSON.stringify(globalThis.__arg || []));\n")
     # Every draw goes through dr() (derby_view.js), as it is made.
     anchor = "const dr = (n, a) => { if (live[n]) H.draw(live[n], a); };"
