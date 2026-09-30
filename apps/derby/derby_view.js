@@ -69,6 +69,23 @@ const CAMS = [[100, 9.7, 33], 0, [58, 15, 36], [170, 7, 22], [300, 4, 30], [130,
 // The screen (README "Turf vision"): centre x, depth, half width, bottom
 // and top height (m), a 4:1 face.
 const VS = [840, 34, 20, 6, 16], FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30, -2, -26, 12, 12, 8];
+// The course: sections [m, curvature 1/m] from the start. pose(g, w): the
+// point g m along it, w m out from the side cameras' line (the side view's
+// depth: inner rail 11, screen 34, stands 40), as [x, z, tangent]. The
+// straight is one section and gives [g, w, 1, 0] exactly.
+const CRS = [[2e3, 0]];
+function pose(g, w) {
+  let x = 0, z = 0, a = 0;
+  for (const e of CRS) {
+    const s = mn(g, e[0]), b = a + e[1] * s;
+    if (e[1]) x += (sin(b) - sin(a)) / e[1], z -= (M.cos(b) - M.cos(a)) / e[1];
+    else x += s * M.cos(a), z += s * sin(a);
+    a = b; g -= s;
+    if (g <= 0) break;
+  }
+  x += g * M.cos(a); z += g * sin(a);
+  return [x - w * sin(a), z + w * M.cos(a), M.cos(a), sin(a)];
+}
 // Sets cx for shot m (1: locked on lane l) and returns the camera.
 function shot(m, xs, l, cut) {
   if (m === 1) {
