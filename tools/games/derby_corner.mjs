@@ -15,7 +15,8 @@
 //
 //   node tools/games/derby_corner.mjs verify [seeds]     straight == shipped, bit for bit
 //   node tools/games/derby_corner.mjs sweep [races] [a,s;a,s...] [--mode=x|g]
-//   node tools/games/derby_corner.mjs fit [races] a s [--mode=x|g]   refit the odds for that oval
+//   node tools/games/derby_corner.mjs fit [races] a s [--mode=x|g]   refit every weight (reference only)
+//   node tools/games/derby_corner.mjs public [races] a s [--json]  odds from public information only
 // a and s are fractions (0.005 = 0.5%). --mode=g multiplies the target speed
 // instead of the progress (the stamina then pays for the rail).
 import {readFileSync} from 'node:fs';
@@ -110,13 +111,15 @@ function runPar(N, a, s, mode) {
 // ---- Luce fit (conditional logit by Newton), as tune_derby.mjs, plus lane.
 const FEAT = ['top', 'st', 'sty>1', 'acc', 're', 'lane'];
 const X = r => r.h.map((v, i) => v.concat([(3.5 - i) / 3.5]));
-function fit(rows, K) {
+// Xf gives the features per runner; off, if given, a fixed score added to
+// each (its weight is not fitted).
+function fit(rows, K, Xf = X, off = null) {
   let b = Array(K).fill(0), L = 0;
   for (let it = 0; it < 40; ++it) {
     const g = Array(K).fill(0), H = [...Array(K)].map(() => Array(K).fill(0));
     L = 0;
     for (const r of rows) {
-      const x = X(r).map(v => v.slice(0, K)), u = x.map(v => v.reduce((q, c, k) => q + c * b[k], 0)), m = Math.max(...u);
+      const x = Xf(r).map(v => v.slice(0, K)), o = off ? off(r) : null, u = x.map((v, i) => v.reduce((q, c, k) => q + c * b[k], o ? o[i] : 0)), m = Math.max(...u);
       const e = u.map(v => Math.exp(v - m)), z = e.reduce((q, c) => q + c), p = e.map(v => v / z), mu = Array(K).fill(0);
       L += Math.log(p[r.w]);
       for (let i = 0; i < 8; ++i) for (let k = 0; k < K; ++k) mu[k] += p[i] * x[i][k];
@@ -245,6 +248,41 @@ async function main() {
       console.log(`    ranks pred->obs EV: ` + C.ranks.map(g => `${pc(g.pred)}->${pc(g.obs)} ${g.ev.toFixed(2)}`).join(' | '));
       console.log(`    bins EV: ` + C.bins.map(g => `${g.ev.toFixed(3)}±${g.se.toFixed(3)}`).join(' '));
     }
+    return;
+  }
+  if (cmd === 'public') {
+    // Odds from what the bettor sees before betting: the paddock figures,
+    // the course kind and the gate (the tote lists NO.1-8 by lane). The
+    // bend's per-runner draw never enters. (a) straight odds as shipped;
+    // (b) + a lane term, its weight the only thing fitted; (c) (b) with a
+    // temperature g on the whole score and the take k refitted (k sets the
+    // overall return back to 0.8). Fit on even races, measured on odd.
+    const N = +(pos[0] || 80000), a = +(pos[1] || 0), s = +(pos[2] || 0), rows = await runPar(N, a, s, mode);
+    const tr = rows.filter((_, n) => n % 2 === 0), te = rows.filter((_, n) => n % 2 === 1);
+    const U0 = r => r.h.map(k => 17.2 * k[0] + 2.6 * k[1] - 2.3 * k[4] + .5 * (k[3] + k[2]));
+    const LN = r => r.h.map((_, i) => [(3.5 - i) / 3.5]);
+    const fb = fit(tr, 1, LN, U0), lam = Math.round(fb.b[0] * 100) / 100;
+    const fc = fit(tr, 2, r => U0(r).map((u, i) => [u, (3.5 - i) / 3.5]));
+    const gam = Math.round(fc.b[0] * 100) / 100, lamc = Math.round(fc.b[1] * 100) / 100;
+    const oddsS = (u, k, c) => {
+      const e = u.map(v => Math.exp(v)), z = e.reduce((q, v) => q + v);
+      return e.map(v => { const q = z / v; return Math.max(1.1, Math.min(999, Math.round(10 * k * q * (1 + c * q)) / 10)); });
+    };
+    const Sb = r => U0(r).map((u, i) => u + lam * (3.5 - i) / 3.5), Sc = r => U0(r).map((u, i) => gam * u + lamc * (3.5 - i) / 3.5);
+    // The take: k so that the training half returns 0.8 overall.
+    let lo = .5, hi = 1.2;
+    for (let it = 0; it < 30; ++it) { const k = (lo + hi) / 2; calib(tr, r => oddsS(Sc(r), k, .0015)).all > .8 ? hi = k : lo = k; }
+    const kc = Math.round((lo + hi) / 2 * 1000) / 1000;
+    console.log(`public odds a ${a} s ${s}: (b) lane ${lam} (LL ${fb.L.toFixed(4)}); (c) temperature ${gam}, lane ${lamc}, take k ${kc} (LL ${fc.L.toFixed(4)})`);
+    const out = {a, s, lam, gam, lamc, kc};
+    for (const [name, od] of [['a', r => oddsS(U0(r), .8, .0015)], ['b', r => oddsS(Sb(r), .8, .0015)], ['c', r => oddsS(Sc(r), kc, .0015)]]) {
+      const C = calib(te, od), gs = C.bins.concat(C.ranks).filter(g => g.n), dev = Math.max(...gs.map(g => Math.abs(g.ev - .8)));
+      out[name] = {ranks: C.ranks.map(g => [g.pred, g.obs, g.ev, g.se]), bins: C.bins.map(g => [g.pred, g.obs, g.ev, g.se, g.n]), all: C.all, dev};
+      console.log(`  (${name}) overall ${C.all.toFixed(3)}, max |EV-0.8| ${dev.toFixed(3)}`);
+      console.log(`    ranks EV: ` + C.ranks.map(g => g.ev.toFixed(3)).join(' '));
+      console.log(`    bins EV:  ` + C.bins.map(g => g.n ? g.ev.toFixed(3) : '-').join(' '));
+    }
+    if (args.includes('--json')) console.log('JSON ' + JSON.stringify(out));
     return;
   }
   console.log('usage: derby_corner.mjs verify [seeds] | sweep [races] [a,s;...] [--mode=x|g] | fit [races] a s [--mode=x|g]');
