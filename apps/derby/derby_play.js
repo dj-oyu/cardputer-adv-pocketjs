@@ -42,11 +42,14 @@ function frame_() {
     // The director: a shot for each stretch of the race, a lead change
     // after 400 m cuts to the new leader, a cut is held 45 frames, HEAD ON
     // (a close finish) until the slow motion (README).
-    const o = ro = order(rs), L = rs.x[o[0]], m = slow ? 3 : man ? cam : scene !== 'race' ? 0 : hold > 0 || cm > 5 ? cm :
+    // WIDE away from every panning unit is the nearest one (wide()).
+    const o = ro = order(rs), L = rs.x[o[0]];
+    let m = slow ? 3 : man ? cam : scene !== 'race' ? 0 : hold > 0 || cm === 6 ? cm :
       L < 150 ? 0 : L < 400 ? 2 : L < 700 ? (dl > 0 ? 1 : 0) : L < VS[0] - 60 ? 1 : L < VS[0] + 60 ? 5 :
       L > D - 70 && L - rs.x[o[1]] < 1.5 ? 6 : 0;
+    if (!m && scene === 'race' && !live.gate) m = wide(L);
     if (m !== cm) { cl = man ? pick : o[0]; cm = m; hold = camT = 45; log('CAM ' + (NAMES[m] || m)); }
-    c = shot(m % 6, xs, cl, scene === 'gate' || camT === 45);
+    c = shot(m === 6 ? 0 : m, xs, cl, scene === 'gate' || camT === 45);
     close = m === 1 ? cl : -1;
     gate = live.gate;
     extra = [['map', z8(0)]];

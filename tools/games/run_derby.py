@@ -16,7 +16,15 @@ then runs:
   3. one race at LIGHT and one at HEAVY (same cameras, no demo) for the
      statistics;
   4. each tier with the director alone (no camera keys), and LIGHT and HEAVY
-     with the pick on #8 (the widest manual close-up).
+     with the pick on #8 (the widest manual close-up);
+  5. the panning units (docs/apps/derby-watch.md "首振りカメラ"): LIGHT and HEAVY
+     with every WIDE a panning unit (f from 200: LIGHT has the widest Newton
+     steps, HEAVY the most segments), and LIGHT with the screen moved to 700 m,
+     150 m deep and f held at 200, so that a panning unit sees it (its face,
+     feed and occlusion checked; the side units' faces are not, the screen
+     being out of place for them).
+Every run with a panning unit compares each point its VM series emit (Newton
+reciprocals, float) with the exact projection (<0.1 px on the panel).
 The player's race must finish identically in every run. Every run checks the
 big screen: its face drawn exactly inside the bezel, nothing but the feed on
 the face, the view's lettering inside it.
@@ -32,7 +40,8 @@ object sizes; the default 64-bit build runs with ASan/UBSan. --ppm writes the
 composited panels, docs/apps/derby-watch-preview.png (its paddock panel now
 comes after the demos, so it differs from the committed sheet there) and
 docs/apps/derby-watch-demo-preview.png and derby-watch-dissolve-preview.png (the
-demo's curtain). WSL/Linux only; no
+demo's curtain), and derby-pan-preview.png: each panning shot (near, far,
+zoomed) beside the same frame with side units only (a second run, PAN[0] 1e9). WSL/Linux only; no
 device and no serial port.
 """
 from __future__ import annotations
@@ -213,7 +222,9 @@ def main() -> None:
     # (tier, extra env): the scripted game at each tier, then the director
     # alone (no camera keys) and the widest manual close-up (pick #8).
     runs = [(1, {})] if args.heap_limit else [(1, {}), (0, {}), (2, {})] + [
-        (t, {"DERBY_NOCAM": "1"}) for t in (0, 1, 2)] + [(t, {"DERBY_PICK": "7"}) for t in (0, 2)]
+        (t, {"DERBY_NOCAM": "1"}) for t in (0, 1, 2)] + [(t, {"DERBY_PICK": "7"}) for t in (0, 2)] + [
+        (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0"}) for t in (0, 2)] + [
+        (0, {"DERBY_NOCAM": "1", "DERBY_PAN": "0,1", "DERBY_PANFACE": "1", "DERBY_JS": "VS[0]=700;VS[1]=150"})]
     finish = {}
     for tier, extra in runs:
         e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}{''.join(extra)}.csv"), **extra)
@@ -228,6 +239,8 @@ def main() -> None:
         print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]}) {extra or ''}", flush=True)
         out = run(binary, e)
         finish[(tier, *extra)] = re.search(r"^finish: (.*)$", out, re.M).group(1)
+        if args.ppm and tier == 1 and not extra:
+            pan_shots = re.findall(r"^PANSHOT (\w+) (\d+)", out, re.M)
         if tier == 1 and not extra and not args.heap_limit:
             check_demo_matches_play(binary, env, out)
             check_seeds(binary, env, out)
@@ -244,6 +257,18 @@ def main() -> None:
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-vision-preview.png", VISION, 4)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-dissolve-preview.png", CURTAIN, 5)
+        # The same frames with side units only: WIDE stays the side camera.
+        side = CACHE / "ppm_side"
+        side.mkdir(parents=True, exist_ok=True)
+        for old in side.glob("*.ppm"):
+            old.unlink()
+        shots = ",".join(f"{t}:side_{n[4:]}" for n, t in pan_shots)
+        run(binary, dict(env, DERBY_TIER="1", DERBY_PAN="1e9", DERBY_PPM=str(side), DERBY_SHOTS=shots,
+                         DERBY_CSV=str(CACHE / "frames_side.csv")))
+        for f in side.glob("derby_*_side_*.ppm"):
+            f.replace(CACHE / "ppm" / f.name)
+        order = [x for n, _ in pan_shots for x in (f"side_{n[4:]}", n)]
+        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-pan-preview.png", order, 2)
 
 
 if __name__ == "__main__":
