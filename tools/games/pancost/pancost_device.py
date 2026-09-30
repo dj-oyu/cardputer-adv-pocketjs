@@ -42,7 +42,7 @@ def main() -> int:
 
     def state_of(line, state):
         if m := BGS.search(line):
-            return (m[1], int(m[2])) if m[1] not in ("READY", "ERR") else state
+            return (m[1], int(m[2])) if m[1] not in ("READY", "ERR", "MEM") else state
         return state
 
     groups: dict = {}
@@ -52,21 +52,24 @@ def main() -> int:
         for line in bg.lines(path):
             if m := ERR.search(line):
                 print("ERROR", m[1])
+            elif "BGS MEM" in line:
+                print(line.strip())
     cases: dict = {}
     for (name, n), vs in groups.items():
         cases.setdefault(name, {})[n] = vs
     loop = None
     if "loop" in cases:
         loop = slope([(n, statistics.median([v["js"] for v in vs])) for n, vs in cases["loop"].items()])[0]
-    print("case | n: js median us (turns) | draw us | slope us/unit | net of loop | draw slope | intercept us")
+    print("case | n: js median us (turns) | draw us | slope us/unit | net of loop | draw slope | intercept us | band slope us/unit")
     for name, by_n in cases.items():
         pts = sorted((n, statistics.median([v["js"] for v in vs])) for n, vs in by_n.items())
         dr = sorted((n, statistics.median([v["draw_us"] for v in vs])) for n, vs in by_n.items())
+        bd = sorted((n, statistics.median([v["band_us"] for v in vs])) for n, vs in by_n.items())
         cells = " ".join(f"{n}:{js:.0f}({len(by_n[n])})" for n, js in pts)
         s, b = slope(pts)
         ds = slope(dr)[0]
         net = f"{s - loop:.3f}" if loop is not None and name in JS_CASES else "-"
-        print(f"{name} | {cells} | {' '.join(f'{d:.0f}' for _, d in dr)} | {s:.3f} | {net} | {ds:.3f} | {b:.0f}")
+        print(f"{name} | {cells} | {' '.join(f'{d:.0f}' for _, d in dr)} | {s:.3f} | {net} | {ds:.3f} | {b:.0f} | {slope(bd)[0]:.3f}")
     return 0
 
 
