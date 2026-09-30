@@ -41,7 +41,8 @@
  *      DERBY_CSV=<file>, DERBY_HEAP_LIMIT=<bytes>, DERBY_NOCAM=1 (no camera
  *      keys: the director alone), DERBY_PICK=<0..7>,
  *      DERBY_NORMAL=<race>,<pick> (play that race by hand with that pick and
- *      stop at the result: the reference a demo race must match).
+ *      stop at the result: the reference a demo race must match),
+ *      DERBY_HW=<uint32> (what pocket.random.seed() returns; fixed by default).
  */
 #include "pocket_kasane.h"
 #include "pocket_input.h"
@@ -776,6 +777,7 @@ static const char PRELUDE[]=
      * waiting on it spun into the 2 s evaluation deadline). Same here. */
     "capabilities:{get:n=>({name:n,supported:true,available:true})},"
     "memory:{info:()=>({internalFreeBytes:__turn?40000:null})},"
+    "random:{seed:()=>__hw},"
     "audio:{cue:()=>{__cues++;return true},tone:s=>{__tone(s.frequencyHz);return Promise.resolve()}},"
     "storage:{get:k=>Promise.resolve(k in __store?{value:JSON.parse(JSON.stringify(__store[k])),revision:1}:null),"
     "set:(k,v)=>{__sets++;__store[k]=JSON.parse(JSON.stringify(v));return Promise.resolve({revision:1})}}};";
@@ -803,7 +805,11 @@ int main(int argc,char **argv){
     /* DERBY_NORMAL=<race>,<pick>: the stored race is the demo's, played by hand. */
     unsigned normal_race=0,normal_pick=0;
     if(getenv("DERBY_NORMAL")&&sscanf(getenv("DERBY_NORMAL"),"%u,%u",&normal_race,&normal_pick)!=2)return 2;
-    char race_js[48];snprintf(race_js,sizeof race_js,"globalThis.__race=%u",normal_race?normal_race:3u);
+    /* DERBY_HW: what pocket.random.seed() returns. The device reads the
+     * hardware RNG; here it is fixed so every run of the script is the same
+     * game (and a demo race can be played again by hand). */
+    const unsigned hw=getenv("DERBY_HW")?(unsigned)strtoul(getenv("DERBY_HW"),NULL,0):0x2545f491u;
+    char race_js[96];snprintf(race_js,sizeof race_js,"globalThis.__race=%u;globalThis.__hw=%u",normal_race?normal_race:3u,hw);
     eval(race_js,strlen(race_js),"race.js");
     eval(PRELUDE,strlen(PRELUDE),"prelude.js");
     JS_RunGC(rt);

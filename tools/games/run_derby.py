@@ -20,6 +20,12 @@ then runs:
 The player's race must finish identically in every run. Every run checks the
 big screen: its face drawn exactly inside the bezel, nothing but the feed on
 the face, the view's lettering inside it.
+Seeds (pocket.random.seed() is DERBY_HW in the harness, fixed): every paddock
+seed the MID run logs must be tools/games/derby_seeds.py's formula; the same
+stored race under another hardware seed must be another race; the seed
+analysis (stream overlaps, chi-square) must pass. Odds: node runs
+tools/games/tune_derby.mjs 20000 --check (the bettor's return is 0.8 in every
+chance bin and popularity rank).
 --m32 builds for i386 with the device's 8-byte JSValue and 4-byte pointers
 (tools/vmtest/m32_sysroot.sh) so the guest heap figures match the firmware's
 object sizes; the default 64-bit build runs with ASan/UBSan. --ppm writes the
@@ -38,6 +44,8 @@ import struct
 import subprocess
 import zlib
 from pathlib import Path
+
+import derby_seeds
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / ".cache/derby_host"
@@ -140,21 +148,48 @@ def run(binary: Path, env: dict) -> str:
     return p.stdout
 
 
+HW = 0x2545F491          # the harness's pocket.random.seed() (test_derby_host.c)
+
+
 def check_demo_matches_play(binary: Path, env: dict, out: str) -> None:
     """Each demo race, played again by hand from the same stored race with the
     same pick: the FINISH (order, full-precision finish times, margin), PICK
-    and RESULT lines must be the same strings."""
+    and RESULT lines must be the same strings. The session's base mixes the
+    hardware seed with the stored race count (3 in the scripted game, the demo
+    race's number here), so the hardware seed given to the second run is the
+    one that makes the same base."""
     for n in (1, 2, 3):
         demo = {k: re.search(rf"^DEMO_{k} {n} (.*)$", out, re.M).group(1) for k in ("FINISH", "PICK", "RESULT")}
         race = int(re.search(r"race=(\d+)", demo["FINISH"]).group(1))
         pick = int(re.match(r"PICK (\d+)", demo["PICK"]).group(1))
         print(f"==== demo {n} by hand: race {race}, pick {pick}", flush=True)
-        text = run(binary, dict(env, DERBY_NORMAL=f"{race},{pick}"))
+        hw = HW ^ derby_seeds.imul(3, derby_seeds.PHI) ^ derby_seeds.imul(race, derby_seeds.PHI)
+        text = run(binary, dict(env, DERBY_NORMAL=f"{race},{pick}", DERBY_HW=str(hw)))
         for k, v in demo.items():
             mine = re.search(rf"^NORMAL_{k} (.*)$", text, re.M).group(1)
             if mine != v:
                 raise SystemExit(f"demo {n} {k} differs from play:\n  demo {v}\n  play {mine}")
         print(f"demo {n} = play: {demo['FINISH']}")
+
+
+def check_seeds(binary: Path, env: dict, out: str) -> None:
+    """The logged seeds are the formula's; another hardware seed makes the
+    same stored race (3, sn 3) another race; the same one, the same race."""
+    n = derby_seeds.check_log(out, HW, 3)
+    print(f"seeds: {n} paddock seeds in the MID run match the formula", flush=True)
+    finish = {}
+    for hw in (HW, HW ^ 1):
+        print(f"==== race 3 by hand with hardware seed {hw:08X}", flush=True)
+        text = run(binary, dict(env, DERBY_NORMAL="3,1", DERBY_HW=str(hw)))
+        derby_seeds.check_log(text, hw, 3)
+        finish[hw] = re.search(r"^NORMAL_FINISH (.*)$", text, re.M).group(1)
+    if finish[HW] == finish[HW ^ 1]:
+        raise SystemExit(f"another hardware seed ran the same race: {finish[HW]}")
+    if not out.count(finish[HW].split(" t=")[0]):
+        raise SystemExit(f"race 3 by hand differs from the scripted game's race 3: {finish[HW]}")
+    print("seeds: another hardware seed is another race; the same one is the same race")
+    if not derby_seeds.analyse(HW):
+        raise SystemExit("seed analysis failed")
 
 
 def main() -> None:
@@ -193,10 +228,15 @@ def main() -> None:
         finish[(tier, *extra)] = re.search(r"^finish: (.*)$", out, re.M).group(1)
         if tier == 1 and not extra and not args.heap_limit:
             check_demo_matches_play(binary, env, out)
+            check_seeds(binary, env, out)
     # MID ran ten demos before its first race, the others none; neither the
     # tier, the camera keys nor the pick may move the player's race.
     if len(set(finish.values())) > 1:
         raise SystemExit(f"the player's race differs between runs: {finish}")
+    if not args.heap_limit:
+        print("==== odds calibration (node tools/games/tune_derby.mjs 20000 --check)", flush=True)
+        if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check"], cwd=ROOT).returncode:
+            raise SystemExit("odds calibration check failed")
     if args.ppm:
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)

@@ -6,7 +6,7 @@
   const D = 1000, DT = .05, U = 1 / 6;
   // Race model, tuned by tools/games/tune_derby.mjs (README has the terms).
   const TOP = 16.6, SPR = .2, ST0 = .8, ST1 = 1, KI0 = .02, KI1 = .015, PACE = .015, FORM = .6, WR = .995,
-    WS = .02, FADE = .97, EB = .97, PK0 = .03, PK1 = .5, WIND = 1.5, KS = .25, BG = 4, BK = .15, TAU = .23;
+    WS = .02, FADE = .97, EB = .97, PK0 = .03, PK1 = .5, WIND = 1.5, KS = .25, BG = 4, BK = .15;
   // Lane depths grow geometrically: one MUL walks them in the VM (gate).
   const Q = 1.085, DL = [], DNR = 11, DFR = 22.6;
   for (let j = 0; j < 8; ++j) DL.push(12 * M.pow(Q, j));
@@ -30,11 +30,11 @@
   }
   // Arithmetic only, no Math.sin/exp: a seed replays bit for bit anywhere.
   // Per race a form offset the odds cannot see, and a slow random walk.
-  function race(f, nz) {
-    const r = rng(f.seed ^ 0x5bd1e995), fm = z8(0), e = [];
-    for (let i = 0; i < 8; ++i) { e[i] = f.h[i].st; if (nz) fm[i] = (r() - .5) * FORM; }
+  function race(f) {
+    const r = rng(f.seed + 0x5bd1e995), fm = z8(0), e = [];
+    for (let i = 0; i < 8; ++i) { e[i] = f.h[i].st; fm[i] = (r() - .5) * FORM; }
     return {t: 0, x: z8(0), v: z8(0), e: e, sb: z8(0), px: z8(0), tc: z8(0), fm: fm, w: z8(0),
-      r: r, nz: nz, done: 0};
+      r: r, done: 0};
   }
   function step(f, s, dt) {
     const t0 = s.t, xl = mx.apply(null, s.x);
@@ -48,11 +48,9 @@
       // runner within BG m of the lead digs in.
       let g = s.e[i] <= 0 ? top * FADE : early ? top * (1 - PACE * h.sty) + mn(PK1, gap * PK0) : top * (1 + h.kick * (1 + KS * h.sty));
       if (!early && gap < BG) g += gap * BK;
-      if (s.nz) {
-        g += s.w[i] = s.w[i] * WR + (s.r() - .5) * WS;
-        if (s.r() < .0006) s.sb[i] = .5;
-        if (s.sb[i] > 0) s.sb[i] -= dt, g *= .9;
-      }
+      g += s.w[i] = s.w[i] * WR + (s.r() - .5) * WS;
+      if (s.r() < .0006) s.sb[i] = .5;
+      if (s.sb[i] > 0) s.sb[i] -= dt, g *= .9;
       const a = g - v, up = h.acc * dt;
       v += a > up ? up : a < -dt ? -dt : a;
       if (v > EB * h.top) s.e[i] -= (v / h.top - EB) * (gap < 1 ? WIND : 1) * dt;
@@ -61,15 +59,15 @@
     }
   }
   const order = s => [0, 1, 2, 3, 4, 5, 6, 7].sort((a, b) => (s.tc[a] || 1e9) - (s.tc[b] || 1e9) || s.x[b] - s.x[a] || a - b);
-  // Win chance: softmax of the noise-free finish time (TAU fitted), 20% take.
-  function odds(T) {
-    const m = mn.apply(null, T), p = [];
-    let z = 0, i;
-    for (i = 0; i < 8; ++i) z += p[i] = M.exp((m - T[i]) / TAU);
-    for (i = 0; i < 8; ++i) p[i] = mx(1.1, mn(99.9, rnd(8 * z / p[i]) / 10));
+  // Win chance: a Luce model of the paddock figures (weights fitted), 20% take.
+  function odds(h) {
+    const p = [];
+    let z = 0, i, k;
+    for (i = 0; i < 8; ++i) k = h[i], z += p[i] = M.exp(17.2 * k.top + 2.6 * k.st - 2.3 * k.re + .5 * (k.acc + (k.sty > 1)));
+    for (i = 0; i < 8; ++i) k = z / p[i], p[i] = mx(1.1, mn(999, rnd(8 * k * (1 + .0015 * k)) / 10));
     return p;
   }
-  globalThis.derby = {field: field, race: race, step: step, order: order, odds: odds, D: D, DT: DT, TAU: TAU};
+  globalThis.derby = {field: field, race: race, step: step, order: order, odds: odds, D: D, DT: DT};
   if (typeof pocket === 'undefined') return;
 
   // ---- Programs as text, one letter per ksn_proc_op (MEGADEMO's form).
@@ -187,17 +185,19 @@
 
   // ---- State
   let pts = 1000, raceNo = 1, pick = 0, stake = 100, scene = '', t = 0, cam = 0, camT = 0, R = [], need = 0;
-  let rs = null, solo = null, od = null, fin = null, photoX = null, replay = 0, ph = z8(0);
+  let rs = null, od = null, fin = null, photoX = null, replay = 0, ph = z8(0);
   let cx = 0, disp = 0, slow = 0, ld = -1, cm = 0, hold = 0, dl = 0, man = 0, cl = 0, vr = null, von = 0, ro = [0, 1, 2, 3, 4, 5, 6, 7];
   const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
     th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
-  const ST = pocket.storage;
+  // Seeds: the hardware's, mixed with the stored race count (README).
+  const ST = pocket.storage, HW = pocket.random.seed();
+  let sn = 0;
   function save() { if (dm) return; try { ST.set('derby.v1', {v: 1, pts: pts, race: raceNo}).then(nop, nop); } catch (e) {} }
   try {
     ST.get('derby.v1').then(r => {
       const v = r && r.value;
       if (v && v.v === 1 && v.pts > 0 && v.race > 0 && scene === 'pad') {
-        pts = mx(50, v.pts | 0); raceNo = v.race | 0; enter('pad');
+        pts = mx(50, v.pts | 0); raceNo = sn = v.race | 0; enter('pad');
         log('LOADED points=' + pts + ' race=' + raceNo);
       }
     }, nop);
@@ -284,8 +284,8 @@
   // enter the stalls), race, photo (still), res (result).
   function enter(s) {
     scene = s; t = 0; need = 1;
-    if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((0x3e1b7 + M.imul(raceNo, 0x9e3779b9)) >>> 0); solo = race(F, 0); od = null; }
-    if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F, 1); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
+    if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h))); }
+    if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
     if (s === 'race') notes = BELL.slice();
     if (s === 'photo') want(['photo']);
     if (s === 'res') { drop(RUN); drop(['photo']); want(['conf']); }
@@ -330,8 +330,8 @@
     if (scene === 'pad') {
       const h = F.h[pick];
       s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M STRAIGHT  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
-        STY[h.sty] + (od ? ' x' + od[pick] : ''), 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
-      for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od ? od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]) : '-');
+        STY[h.sty] + ' x' + od[pick], 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
+      for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]));
       R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
       const v = [(h.top - TOP) / SPR, (h.st - ST0) / ST1, (h.kick - KI0) / KI1];
       for (let i = 0; i < 3; ++i) R.bar[i].setRect(tx, [180, 43 + 12 * i, 182 + rnd(52 * mx(0, mn(1, v[i]))), 49 + 12 * i]);
@@ -407,9 +407,7 @@
     if (scene === 'pad') {
       if (P('a') || P('d')) { pick = (pick + (P('d') ? 1 : 7)) % 8; if (A) A.cue('move'); }
       stake = mx(50, mn(stake + (P('e') ? 50 : P('s') ? -50 : 0), 500, pts));
-      for (let i = 0; i < 30 && solo.done < 8; ++i) step(F, solo, .25);
-      if (!od && solo.done === 8) { od = odds(solo.tc); log('ODDS ' + od); }
-      if (P('1') && od) { log('PICK ' + (pick + 1) + ' stake=' + stake + ' odds=' + od[pick]); if (A) A.cue('accept'); return enter('gate'); }
+      if (P('1')) { log('PICK ' + (pick + 1) + ' stake=' + stake + ' odds=' + od[pick]); if (A) A.cue('accept'); return enter('gate'); }
     } else if (scene === 'gate' || scene === 'race') {
       // A camera key overrides the director for 5 s.
       if (P(',') || P('/') || P('a') || P('d')) { cam = (cam + (P('/') || P('d') ? 1 : 2)) % 3; camT = 45; man = 150; }
@@ -519,7 +517,7 @@
     if (hit || scene === 'res' && t > DEMO_RES) return fe = n, demo(0, n);
     dk = '';
     // Favourite, then second favourite, one A/D step a time, then 1.
-    if (scene === 'pad' && od && t > 45 && !(t % 12)) {
+    if (scene === 'pad' && t > 45 && !(t % 12)) {
       const g = [0, 1, 2, 3, 4, 5, 6, 7].sort((a, c) => od[a] - od[c] || a - c)[1 - dn % 2];
       dk = g === pick ? '1' : (g - pick + 8) % 8 > 4 ? 'a' : 'd';
     }
