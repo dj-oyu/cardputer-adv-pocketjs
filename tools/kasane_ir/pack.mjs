@@ -49,7 +49,11 @@ function prog(s, a) {
 `;
 
 function field(x, lit) {
-  if (typeof x === 'object') return [200 + x.p];
+  // $8 would be 208, a zero-byte number: prog() read it as 0 (q27's crowd).
+  if (typeof x === 'object') {
+    if (!(x.p >= 0 && x.p < 8)) throw new Error(`argument $${x.p}: a packed plan has $0..$7`);
+    return [200 + x.p];
+  }
   if (lit != null && !/^-?\d+$/.test(lit)) {
     const s = lit.startsWith('-') ? lit.slice(1) : lit;
     return (lit.startsWith('-') ? [212] : []).concat([213, s.length], [...s].map(ch => ch.charCodeAt(0)));
