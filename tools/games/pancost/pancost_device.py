@@ -38,6 +38,7 @@ def slope(points):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("logs", nargs="+", type=Path)
+    ap.add_argument("--all-js", action="store_true", help="every case is a JS loop (tools/games/pancost/num)")
     args = ap.parse_args()
 
     def state_of(line, state):
@@ -68,7 +69,7 @@ def main() -> int:
         cells = " ".join(f"{n}:{js:.0f}({len(by_n[n])})" for n, js in pts)
         s, b = slope(pts)
         ds = slope(dr)[0]
-        net = f"{s - loop:.3f}" if loop is not None and name in JS_CASES else "-"
+        net = f"{s - loop:.3f}" if loop is not None and (args.all_js or name in JS_CASES) else "-"
         print(f"{name} | {cells} | {' '.join(f'{d:.0f}' for _, d in dr)} | {s:.3f} | {net} | {ds:.3f} | {b:.0f} | {slope(bd)[0]:.3f}")
     return 0
 
