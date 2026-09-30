@@ -41,6 +41,16 @@ void pocket_proc_trace_take(pocket_proc_trace *out){
 void pocket_proc_trace_view(void){trace.view_n++;trace_split=false;}
 void pocket_proc_trace_presented(void){if(trace_split)trace.split_n++;}
 #endif
+#ifdef KASANE_BGCOST_TRACE
+#include <stdio.h>
+#include "esp_log.h"
+static uint32_t bg_steps,bg_commit_us,bg_view_us;
+void pocket_proc_bgcost_view_us(uint32_t us){bg_view_us+=us;}
+/* Per slot, over one BGP window; bg_last is the slot draw_impl ran so that
+ * js_draw can charge its wall time to it. */
+static struct { uint32_t handle,n,us,steps,seg; } bg_plan[32];
+static int bg_last=-1;
+#endif
 
 /* Slots are reusable after unregister(); handles are not (next_handle only
  * grows), so a released handle can never alias a later plan. Worst case with
@@ -440,6 +450,14 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         if(decision.backend==KSN_PROC_POINTS_PIE)pie_batches++;
         else scalar_batches++;
     }
+#ifdef KASANE_BGCOST_TRACE
+    bg_steps+=vm->steps;
+    bg_last=(int)(slot-slots);
+    bg_plan[bg_last].handle=handle;
+    bg_plan[bg_last].n++;
+    bg_plan[bg_last].steps+=vm->steps;
+    bg_plan[bg_last].seg+=scratch->count+typed_segments;
+#endif
     return JS_UNDEFINED;
 }
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -502,13 +520,24 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     uint32_t us=(uint32_t)(esp_timer_get_time()-began);
     trace.draw_us+=us;trace.draw_n++;
     if(us>trace.draw_max_us)trace.draw_max_us=us;
+#ifdef KASANE_BGCOST_TRACE
+    if(bg_last>=0)bg_plan[bg_last].us+=us;
+    bg_last=-1;
+#endif
     return result;
 #else
     return guarded(ctx,self,argc,argv,draw_impl);
 #endif
 }
 static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+#ifdef KASANE_BGCOST_TRACE
+    int64_t began=esp_timer_get_time();
+    JSValue result=guarded(ctx,self,argc,argv,commit_impl);
+    bg_commit_us+=(uint32_t)(esp_timer_get_time()-began);
+    return result;
+#else
     return guarded(ctx,self,argc,argv,commit_impl);
+#endif
 }
 static JSValue resource_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
@@ -648,6 +677,42 @@ void pocket_proc_image_port_at(ksn_image_port *out,unsigned index){
                               .variants=1,.frames=1,.read_span=image_span,.opaque=true};
 }
 void pocket_proc_image_port(ksn_image_port *out){pocket_proc_image_port_at(out,0);}
+#ifdef KASANE_BGCOST_TRACE
+void pocket_proc_bgcost_take(pocket_proc_bgcost *out){
+    pocket_proc_bgcost r={.steps=bg_steps,.commit_us=bg_commit_us,.view_us=bg_view_us};
+    bg_steps=bg_commit_us=bg_view_us=0;
+    const proc_surface *s=&surfaces[0];
+    const ksn_proc_frame *f=s->pending?s->candidate:(s->has_committed?s->committed:NULL);
+    if(f){
+        r.seg=f->count;r.ras=f->raster_steps;
+        for(unsigned i=0;i<f->count;i++){
+            const ksn_proc_segment *g=&f->segments[i];
+            int y0=g->y0<g->y1?g->y0:g->y1,y1=g->y0>g->y1?g->y0:g->y1;
+            int dx=abs(g->x1-g->x0),dy=y1-y0,n=(dx>dy?dx:dy)+1;
+            int a=y0<0?0:y0,b=y1>KSN_PROC_H-1?KSN_PROC_H-1:y1;
+            if(a>b)continue;
+            /* Bands (PROC_IMAGE_BAND_ROWS) the segment is walked in, and its
+             * Bresenham iterations inside the panel's rows: the renderer
+             * walks off-panel columns too, but never off-panel rows. */
+            r.hits+=(unsigned)(b/PROC_IMAGE_BAND_ROWS-a/PROC_IMAGE_BAND_ROWS+1);
+            r.walk+=(uint32_t)((int64_t)n*(b-a+1)/(dy+1));
+        }
+    }
+    if(out)*out=r;
+}
+void pocket_proc_bgcost_plans_emit(void){
+    char line[400];
+    int at=snprintf(line,sizeof line,"BGP");
+    for(unsigned i=0;i<32&&at<(int)sizeof line-48;i++){
+        if(!bg_plan[i].n)continue;
+        at+=snprintf(line+at,sizeof line-at," %u=%u/%u/%u/%u",(unsigned)bg_plan[i].handle,
+                     (unsigned)bg_plan[i].n,(unsigned)bg_plan[i].us,
+                     (unsigned)bg_plan[i].steps,(unsigned)bg_plan[i].seg);
+    }
+    memset(bg_plan,0,sizeof bg_plan);
+    ESP_LOGI("app","%s",line);
+}
+#endif
 ksn_result pocket_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels){
     (void)ctx;
     if(!pixels||y>KSN_PROC_H||rows>KSN_PROC_H-y)return KSN_INVALID;

@@ -305,6 +305,18 @@ static void mdt_emit(void) {
              (unsigned)mdt.btn,(unsigned)mdt.fed,
              (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
              (unsigned)gu,(unsigned)p.commit_n,(unsigned)p.view_n,(unsigned)p.split_n);
+#ifdef KASANE_BGCOST_TRACE
+    // Its own line after the MDT it belongs to, so the MDT parsers keep
+    // their format (docs/kasane/derby-background-cost.md).
+    {
+        pocket_proc_bgcost b;
+        pocket_proc_bgcost_take(&b);
+        ESP_LOGI("app","BGC %u st=%u seg=%u ras=%u hit=%u walk=%u cm=%u vw=%u",mdt_seq-1,
+                 (unsigned)b.steps,(unsigned)b.seg,(unsigned)b.ras,(unsigned)b.hits,(unsigned)b.walk,
+                 (unsigned)b.commit_us,(unsigned)b.view_us);
+        if(!(mdt_seq%30))pocket_proc_bgcost_plans_emit();
+    }
+#endif
     // cv: commit()s, replace()/patch()es, and presents that showed a commit
     // whose view update had not run yet (the new image under the old view).
     // mn is the lowest free heap inside this turn (and the print above), not

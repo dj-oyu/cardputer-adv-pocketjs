@@ -19,6 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef KASANE_BGCOST_TRACE
+#include "esp_timer.h"
+#endif
 
 #define KASANE_REF_LIMIT 32u
 #define KASANE_REF_STORAGE 64u
@@ -1715,7 +1718,13 @@ static JSValue js_patch(JSContext *ctx, JSValueConst self, int argc,
                         JSValueConst *argv) {
     (void)self;
 #ifdef KASANE_MEGADEMO_TRACE
+#ifdef KASANE_BGCOST_TRACE
+    int64_t began=esp_timer_get_time();
+#endif
     JSValue ticket=run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
+#ifdef KASANE_BGCOST_TRACE
+    pocket_proc_bgcost_view_us((uint32_t)(esp_timer_get_time()-began));
+#endif
     if(!JS_IsException(ticket))pocket_proc_trace_view();
     return ticket;
 #else
