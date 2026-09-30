@@ -174,10 +174,10 @@ function hl(c0, cs, m, col) {
   if (Lo < Hi) dr('hl', [(SQ[0] + Lo * SV) / a, 1 / a, (SQ[0] + Hi * SV) / b, 1 / b, c0, cs, m, col]);
 }
 // One frame from pc: stands (pillars, roof, tiers), crowd, the screen, far
-// rail, turf, poles, runners, near rail. Nothing deeper than 150 m past the
-// leader (75 at HEAVY); posts 4 px apart at least (8 with the screen in view).
+// rail, turf, poles, runners, near rail. Nothing deeper than 75 m past the
+// leader (150 at LIGHT); posts 4 px apart at least (8 with the screen in view).
 function pan(xs) {
-  const k = KN[tier], zf = pc[5] + (tier > 1 ? 75 : 150), L = vr ? 8 : 4, q = 11.6 * pc[3] / pc[4];
+  const k = KN[tier], zf = pc[5] + (tier ? 75 : 150), L = vr ? 8 : 4, q = 11.6 * pc[3] / pc[4];
   ser('prail', 40, 12, 0, L, zf, 31727, -7.5);
   hl(6, -2.4, k[0], 21130);
   ser('pk', 40, 12 / k[2], 0, 0, zf, 0, 46496 + 12650 * ((t >> 3 ^ t) & 1));
