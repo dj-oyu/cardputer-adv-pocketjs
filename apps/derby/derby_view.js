@@ -13,7 +13,23 @@ function load() {
   if (!n) return;
   try {
     if (pocket.memory && pocket.memory.info().internalFreeBytes < 18432) return;
-    const p = spec(n);
+    // The plan n: its code, and the points of a typed-point plan.
+    const k = KN[tier], i = +n[1];
+    let p;
+    if (n[0] === 'g' && i >= 0) {
+      // Gallop frame i of the close-up horse.
+      const x = [], y = [], ph = PI * i / 3, b = bob(i), put = (u, v) => { x.push(rnd(8 * u)); y.push(rnd(8 * v)); };
+      let jx = 0, jy = 0;
+      for (let j = 0; j < BODY.length; j += 2) {
+        const u = BODY[j], l = BODY[j + 1];
+        if (u < 20) { put(jx = u, jy = l + b); continue; }
+        const a = .55 * sin(ph + u - 20), kx = jx + l * sin(a), ky = jy + l * M.cos(a), a2 = a - .9 * mx(0, sin(ph + u - 18.6));
+        put(kx, ky); put(kx + l * sin(a2), ky + l * M.cos(a2)); put(kx, ky); put(jx, jy);
+      }
+      p = [prog('S0,0'), {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
+    } else if (n === 'hd') p = [prog('S0,0'), {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
+    else if (n[0] === 'r' && i >= 0) p = [prog(T.runner, [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410])];
+    else p = [prog(T[n], k.concat(1 / k[2]))];
     live[n] = p[1] ? H.register(p[0], p[1]) : H.register(p[0]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }

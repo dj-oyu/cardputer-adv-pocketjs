@@ -139,6 +139,10 @@ const SILK = [0xffff, 0x8c71, 0xf800, 0x237f, 0xffe0, 0x07e0, 0xfd20, 0xf81f];
 """
 PROBE = """
 F = {h: [0, 1, 2, 3, 4, 5, 6, 7].map(i => ({coat: 0xdd8c}))};
+// load() (derby_view.js) builds a plan inline since spec() was folded into
+// it; its two text branches, as they were in spec().
+const spec = n => n === 'r0' ? [prog(T.runner, [F.h[0].coat, SILK[0], SILK[0] ^ 0x8410])] :
+  [prog(T[n], KN[tier].concat(1 / KN[tier][2]))];
 const report = [];
 for (const n of Object.keys(T).concat(['r0'])) {
   if (n === 'runner') continue;

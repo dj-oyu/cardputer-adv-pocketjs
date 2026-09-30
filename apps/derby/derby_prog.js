@@ -45,23 +45,6 @@ const BODY = [-2.4, 3.2, -1.6, 1.4, -.6, 0, .3, -.4, 3.8, .3, 7, -.9, 8.3, -3.1,
   12.7, -2.3, 12.5, -1.6, 10.4, -2.4, 9.3, -2, 8.6, .8, 7.4, 2.2, 23.14, 1.9, 23.64, 1.9, 4, 2.7, 1.2, 2, 20, 2,
   20.5, 2, -.5, 1.2, -.6, 0];
 let F = null;
-function spec(n) {
-  const k = KN[tier], i = +n[1];
-  if (n[0] === 'g' && i >= 0) {
-    const x = [], y = [], ph = PI * i / 3, b = bob(i), put = (u, v) => { x.push(rnd(8 * u)); y.push(rnd(8 * v)); };
-    let jx = 0, jy = 0;
-    for (let j = 0; j < BODY.length; j += 2) {
-      const u = BODY[j], l = BODY[j + 1];
-      if (u < 20) { put(jx = u, jy = l + b); continue; }
-      const a = .55 * sin(ph + u - 20), kx = jx + l * sin(a), ky = jy + l * M.cos(a), a2 = a - .9 * mx(0, sin(ph + u - 18.6));
-      put(kx, ky); put(kx + l * sin(a2), ky + l * M.cos(a2)); put(kx, ky); put(jx, jy);
-    }
-    return [prog('S0,0'), {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
-  }
-  if (n === 'hd') return [prog('S0,0'), {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
-  if (n[0] === 'r' && i >= 0) return [prog(T.runner, [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410])];
-  return [prog(T[n], k.concat(1 / k[2]))];
-}
 // HEAD ON's fixed set (rails, finish line, stands, the screen edge on) as
 // one polyline; points from the camera in README.
 const HD = [[120, -155, 120, 425, 120, -155, -63, 323, 425, 120, 85, 159, 120, 100, 142, 120, 184, 166, 166, 166, 156, 156, 166, 166, 184, 184, 189, 189, 196, 196, 204, 204, 214, 214, 227, 227, 240, 227, 227, 240, 227, 227, 120, 184],
