@@ -6,7 +6,8 @@ versus precompiled bytecode with and without line tables (host, WSL only).
       from apps/derby or from DIR (e.g. a `git show` export: WSL's git may not
       read a worktree's gitdir, CLAUDE.md); prints the three modes of
       tools/vmtest/retain_cost.c.
-  python3 tools/vmtest/retain_cost.py --parts [DIR]
+  python3 tools/vmtest/retain_cost.py --parts|--side [DIR]
+      (--side: the side view's course() and plan strings instead)
       stage 3 of the panning cameras (the wip commit on vm/pan-camera, docs/apps/
       derby-pan-memory.md): each of its top-level functions and plan strings
       removed in turn from those chunks (apps/derby or DIR), and what the
@@ -60,6 +61,9 @@ def charged(binary, mode, paths):
 
 # Stage 3's parts: (chunk, how to find the part). A function is cut from its
 # 'function NAME(' (or 'const NAME =') line to the next top-level line.
+SIDE = [("derby_view.js", "function course("), ("derby_prog.js", "  rail: '"), ("derby_prog.js", "  turf: '"),
+        ("derby_prog.js", "  stands: '"), ("derby_prog.js", "  crowd: '"), ("derby_prog.js", "  gate: '"),
+        ("derby_prog.js", "  pole: '")]
 PARTS = [("derby_scene.js", "function pan("), ("derby_scene.js", "function ser("), ("derby_scene.js", "function hl("),
          ("derby_scene.js", "function pj("), ("derby_scene.js", "function lim("), ("derby_scene.js", "function inr("),
          ("derby_view.js", "function wide("), ("derby_view.js", "const rin ="), ("derby_view.js", "function feed("),
@@ -84,12 +88,12 @@ def main():
     binary = build()
     with tempfile.TemporaryDirectory() as t:
         d = Path(t)
-        if sys.argv[1:2] == ['--parts']:
+        if sys.argv[1:2] in (['--parts'], ['--side']):
             src = sys.argv[2] if len(sys.argv) > 2 else None
             paths = files(src, d)
             whole, _ = charged(binary, 'src', paths)
             print(f"stage 3 chunks compiled: {whole} B")
-            for chunk, start in PARTS:
+            for chunk, start in (PARTS if sys.argv[1] == '--parts' else SIDE):
                 files(src, d)
                 p = d / chunk
                 p.write_text(cut(p.read_text(encoding='utf-8'), start), encoding='utf-8')

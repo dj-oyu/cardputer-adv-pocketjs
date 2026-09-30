@@ -1,0 +1,6 @@
+# CONFIG_POCKET_VM_STRIP_DEBUG overlay (docs/vm/strip-debug.md): guest JS is
+# compiled without line tables. NOT part of sdkconfig.defaults. Build its own
+# directory with its own sdkconfig, as sdkconfig.vmprobe.defaults explains:
+#   idf.py -B build_strip -D SDKCONFIG=build_strip/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.stripdebug.defaults" build
+CONFIG_POCKET_VM_STRIP_DEBUG=y
