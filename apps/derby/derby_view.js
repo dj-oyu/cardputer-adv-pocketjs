@@ -29,7 +29,7 @@ function load() {
       p = [prog(T.nil), {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
     } else if (n === 'hd') p = [prog(T.nil), {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
     else if (n[0] === 'r' && i >= 0) p = [prog(T.runner, [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410])];
-    else p = [prog(T[n], k.concat(1 / k[2]))];
+    else p = [prog(T[n], k.concat(1 / k[2], k[2] & 1, M.ceil(k[2] / 2)))];
     live[n] = p[1] ? H.register(p[0], p[1]) : H.register(p[0]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
@@ -137,7 +137,7 @@ function course(c, x0, xs, close, gate, K) {
     const j = flo((x0 - 130 / q) / 12), a = sx(j * 12, 40), dx = 12 * q;
     n = mn(flo((700 - a) / dx), M.ceil((250 - a) / dx) + 1);
     dr('stands', [a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5)]);
-    dr('crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191), (t >> 3) & 1]);
+    dr('crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191), (t >> 3 ^ t) & 1, t & 1]);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
       const z = (vr[2] - vr[0]) / 120;

@@ -71,25 +71,38 @@ const T = {
   // crowd: the stand's spectators as dots. $1 rows of in(4) bays of $2 dots,
   // each dot swaying on its own phase; colours cycle through two values
   // (105642 minus the last) seeded by input 6.
-  /** @plan crowd inputs: x0, spread, y0, rowGap, bays, sway, seed */
-  crowd(p0, p1, p2, p3, p4, p5, p6) {
-    let colour = seed * 12650 + 46496;
+  // q27 prototype (docs/kasane/derby-background-cost.md): half the dots per
+  // frame, every other index from `off` (input 7, the frame's parity); the
+  // next frame draws the other half. Each row starts at the other parity (a
+  // checkerboard). A frame's dots in a row are one colour, dc: input 6 is
+  // today's seed xor the parity, and dc flips once a row (the start moved by
+  // one) and once a bay when a bay has an odd count ($7). The loop runs
+  // ceil(dots / 2) ($8) a bay and stops past the row's last index.
+  /** @plan crowd inputs: x0, spread, y0, rowGap, bays, sway, seed, parity */
+  crowd(p0, p1, p2, p3, p4, p5, p6, p7, p8) {
+    let dc = seed * 12650 + 46496;
     const step = p6 * spread;
-    let rowPhase = 0;
+    const step2 = step + step;
+    const lim = bays * spread + x0 - step * .5;
+    let off = parity;
+    let ps = sway;
     let y = rowGap * .5 + y0;
     for (let j0 = 0; j0 < p1; j0++) {
-      let x = x0;
-      let phase = sway + rowPhase;
-      for (let j1 = 0; j1 < bays; j1++) {
-        for (let j2 = 0; j2 < p2; j2++) {
-          plot(sin(phase) * 1.5 + x, y, colour);
-          x += step;
-          phase += 2.39996;
-          colour = 105642 - colour;
-        }
+      let x = off * step + x0;
+      let phase = off * 2.39996 + ps;
+      for (let j1 = 0; j1 < bays * p8; j1++) {
+        if (x > lim) break;
+        plot(sin(phase) * 1.5 + x, y, dc);
+        x += step2;
+        phase += 4.79992;
       }
+      for (let j2 = 0; j2 < bays * p7; j2++) {
+        dc = 105642 - dc;
+      }
+      dc = 105642 - dc;
       y += rowGap;
-      rowPhase += .9;
+      ps += .9;
+      off = 1 - off;
     }
   },
 
