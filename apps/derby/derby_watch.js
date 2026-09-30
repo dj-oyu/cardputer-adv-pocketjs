@@ -31,7 +31,7 @@
   // Arithmetic only, no Math.sin/exp: a seed replays bit for bit anywhere.
   // Per race a form offset the odds cannot see, and a slow random walk.
   function race(f, nz) {
-    const r = rng(f.seed ^ 0x5bd1e995), fm = z8(0), e = [];
+    const r = rng(f.seed + 0x5bd1e995), fm = z8(0), e = [];
     for (let i = 0; i < 8; ++i) { e[i] = f.h[i].st; if (nz) fm[i] = (r() - .5) * FORM; }
     return {t: 0, x: z8(0), v: z8(0), e: e, sb: z8(0), px: z8(0), tc: z8(0), fm: fm, w: z8(0),
       r: r, nz: nz, done: 0};
@@ -191,13 +191,15 @@
   let cx = 0, disp = 0, slow = 0, ld = -1, cm = 0, hold = 0, dl = 0, man = 0, cl = 0, vr = null, von = 0, ro = [0, 1, 2, 3, 4, 5, 6, 7];
   const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
     th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
-  const ST = pocket.storage;
+  // Seeds: the hardware's, mixed with the stored race count (README).
+  const ST = pocket.storage, HW = pocket.random.seed();
+  let sn = 0;
   function save() { if (dm) return; try { ST.set('derby.v1', {v: 1, pts: pts, race: raceNo}).then(nop, nop); } catch (e) {} }
   try {
     ST.get('derby.v1').then(r => {
       const v = r && r.value;
       if (v && v.v === 1 && v.pts > 0 && v.race > 0 && scene === 'pad') {
-        pts = mx(50, v.pts | 0); raceNo = v.race | 0; enter('pad');
+        pts = mx(50, v.pts | 0); raceNo = sn = v.race | 0; enter('pad');
         log('LOADED points=' + pts + ' race=' + raceNo);
       }
     }, nop);
@@ -284,7 +286,7 @@
   // enter the stalls), race, photo (still), res (result).
   function enter(s) {
     scene = s; t = 0; need = 1;
-    if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((0x3e1b7 + M.imul(raceNo, 0x9e3779b9)) >>> 0); solo = race(F, 0); od = null; }
+    if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); solo = race(F, 0); od = null; }
     if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F, 1); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
     if (s === 'race') notes = BELL.slice();
     if (s === 'photo') want(['photo']);
