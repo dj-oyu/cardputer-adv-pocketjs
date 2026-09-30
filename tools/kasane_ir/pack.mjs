@@ -25,15 +25,17 @@ export const DECODER = `const FLD = ['14', '12', '123', '123', '12', '2', '', '2
 function prog(s, a) {
   const c = [];
   let i = 0;
+  // Not recursive: a closure that calls itself is a cycle, freed only by
+  // the cycle collector, which the device runs near the heap limit.
   const v = () => {
-    const x = s.charCodeAt(i++);
-    if (x < 200) return x;
-    if (x < 208) return a[x - 200];
-    if (x == 212) return -v();
-    if (x == 213) { const l = s.charCodeAt(i); i += l + 1; return +s.slice(i - l, i); }
+    let g = 1, x;
+    while ((x = s.charCodeAt(i++)) == 212) g = -g;
+    if (x < 200) return g * x;
+    if (x < 208) return g * a[x - 200];
+    if (x == 213) { const l = s.charCodeAt(i); i += l + 1; return g * s.slice(i - l, i); }
     let n = 0;
     for (let k = x - 208; k--;) n = n * 256 + s.charCodeAt(i++);
-    return n;
+    return g * n;
   };
   while (i < s.length) {
     const o = s.charCodeAt(i++);
@@ -85,15 +87,17 @@ export const DECODER_NIBBLE = `const FLD = ['14', '12', '123', '123', '12', '2',
 function prog(s, a) {
   const c = [];
   let i = 0;
+  // Not recursive: a closure that calls itself is a cycle, freed only by
+  // the cycle collector, which the device runs near the heap limit.
   const v = () => {
-    const x = s.charCodeAt(i++);
-    if (x < 200) return x;
-    if (x < 208) return a[x - 200];
-    if (x == 212) return -v();
-    if (x == 213) { const l = s.charCodeAt(i); i += l + 1; return +s.slice(i - l, i); }
+    let g = 1, x;
+    while ((x = s.charCodeAt(i++)) == 212) g = -g;
+    if (x < 200) return g * x;
+    if (x < 208) return g * a[x - 200];
+    if (x == 213) { const l = s.charCodeAt(i); i += l + 1; return g * s.slice(i - l, i); }
     let n = 0;
     for (let k = x - 208; k--;) n = n * 256 + s.charCodeAt(i++);
-    return n;
+    return g * n;
   };
   while (i < s.length) {
     let h = s.charCodeAt(i++);
