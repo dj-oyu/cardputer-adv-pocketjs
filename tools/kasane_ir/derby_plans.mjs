@@ -3,10 +3,11 @@
 //   node tools/kasane_ir/derby_plans.mjs [--prog FILE] [--decompile]
 //                                        [--vectors FILE] [--emit DIR]
 //
-// Reads T (the one-letter IR texts) from apps/derby/derby_prog_text.js (the
-// source of the packed derby_prog.js, tools/kasane_ir/pack.mjs) by running
-// the file with the entry's globals stubbed, and for each plan compiles
-// tools/kasane_ir/plans/<name>.kjs. --decompile writes the missing .kjs
+// Reads T (the one-letter IR texts) from tools/kasane_ir/derby_hand_ir.js
+// (DERBY's hand IR until e9b88bc; --prog another file of that form) by
+// running the file with the entry's globals stubbed, and for each plan
+// compiles tools/kasane_ir/plans/<name>.kjs, or with --js FILE the @plan
+// function of that name (apps/derby/derby_prog.js is DERBY's). --decompile writes the missing .kjs
 // files from the hand IR first (--force rewrites all of them, including the
 // ones edited by hand since). --vectors FILE writes the equivalence cases for
 // tools/kasane_ir/run_ir.c: every plan hand and compiled, with the inputs
@@ -23,7 +24,7 @@ import {findPlans, compilePlan} from './plan_js.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(HERE, '../..');
 const argv = process.argv.slice(2), opt = k => { const i = argv.indexOf(k); return i < 0 ? null : argv[i + 1] ?? true; };
 
-export function derbyPlans(file = path.join(ROOT, 'apps/derby/derby_prog_text.js')) {
+export function derbyPlans(file = path.join(HERE, 'derby_hand_ir.js')) {
   const src = fs.readFileSync(file, 'utf8');
   const ctx = {Math};
   vm.createContext(ctx);

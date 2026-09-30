@@ -12,7 +12,12 @@ the game with DERBY_EVAL_ONLY=1 for each form of derby_prog.js:
   ids        T's texts replaced by small integers, the T.map loop removed
              (its lines would be baked at build time), no prog();
   names      no T at all: a plan is named by the string the scene already
-             holds (PAD/RUN), the upper bound of the guest-side saving.
+             holds (PAD/RUN), the upper bound of the guest-side saving;
+  lowered    the file the firmware embeds (tools/kasane_ir/lower_plans.mjs
+             on apps/derby's @plan functions).
+The text forms start from DERBY's hand IR (tools/kasane_ir/derby_hand_ir.js
+since the plans became @plan functions) with the rest of that file frozen
+at e9b88bc; "lowered" is today's apps/derby.
 
 Each form only has to evaluate: registration is not called during the
 evaluation, so the forms that no longer assemble are measured, not run.
@@ -27,7 +32,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -114,14 +118,23 @@ FORMS = {"as is": lambda t: t, "packed": packed(), "nibble": packed("--nibble"),
          "nibble-nomacro": packed("--nibble", "--no-macro"), "no-asm": no_asm, "ids": ids, "names": names}
 
 
+def text_source(apps: Path) -> str:
+    """DERBY's plans as text: DIR's derby_prog_text.js or text derby_prog.js,
+    else (plans as @plan functions since e9b88bc) the frozen hand IR."""
+    for f in (apps / "derby_prog_text.js", apps / "derby_prog.js", Path(__file__).parent / "derby_hand_ir.js"):
+        if f.exists() and "const OPS = " in (t := f.read_text(encoding="utf-8")):
+            return t
+    raise SystemExit(f"{apps}: no plans as text")
+
+
 def eval_only(binary: Path, apps: Path, form) -> dict:
     with tempfile.TemporaryDirectory() as t:
         root = Path(t)
-        shutil.copytree(apps, root / "apps/derby")
-        p, t = root / "apps/derby/derby_prog.js", root / "apps/derby/derby_prog_text.js"
-        # Every form starts from the plans as text (the shipped file is the
-        # nibble form of derby_prog_text.js since the packing, js-to-ir.md).
-        p.write_text(form((t if t.exists() else p).read_text(encoding="utf-8")), encoding="utf-8")
+        run_derby.lower(apps, root / "apps/derby")
+        # Every form starts from the plans as text (text_source); "lowered"
+        # is the firmware build's file as is.
+        if form is not None:
+            (root / "apps/derby/derby_prog.js").write_text(form(text_source(apps)), encoding="utf-8")
         r = subprocess.run([str(binary), "apps/derby/derby_watch.js"], cwd=root, capture_output=True, text=True,
                            env=dict(os.environ, DERBY_EVAL_ONLY="1"))
         if r.returncode:
@@ -168,7 +181,7 @@ def probe(apps: Path, form=lambda t: t) -> str:
                     "tools/kasane_ir/heap_probe.c", *objs, "-lm", "-lpthread", "-o", str(binary)],
                    cwd=ROOT, check=True)
     script = out / "probe.js"
-    script.write_text(PRELUDE + form(((apps / "derby_prog_text.js") if (apps / "derby_prog_text.js").exists() else apps / "derby_prog.js").read_text(encoding="utf-8")).replace("'use strict';", "")
+    script.write_text(PRELUDE + form(text_source(apps)).replace("'use strict';", "")
                       + PROBE, encoding="utf-8")
     return subprocess.run([str(binary), str(script)], check=True, capture_output=True, text=True).stdout
 
@@ -182,7 +195,7 @@ def main() -> None:
     for label, apps in sets:
         base = peak0 = None
         print(f"==== {label}: guest heap after evaluation (host m32, TLSF charge)")
-        for name, form in FORMS.items():
+        for name, form in list(FORMS.items()) + [("lowered", None)]:
             r = eval_only(binary, apps, form)
             base, peak0 = base or r["after"], peak0 or r["peak"]
             print(f"  {name:<7} after {r['after']:7d}  diff {r['after'] - base:+6d}  "

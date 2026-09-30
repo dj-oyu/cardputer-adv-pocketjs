@@ -1,9 +1,11 @@
 'use strict';
 // ---- Programs as text, one letter per ksn_proc_op (MEGADEMO's form).
-// NOT loaded by the app: tools/kasane_ir/pack.mjs packs this file into
-// derby_prog.js (4-bit registers, ~1.6 KB less resident); edit here, then
-// node tools/kasane_ir/pack.mjs apps/derby/derby_prog_text.js
-// apps/derby/derby_prog.js --nibble (tools/games/run_derby.py checks it).
+// DERBY's hand-written IR as it shipped until e9b88bc (apps/derby/
+// derby_prog_text.js, packed into derby_prog.js). The plans are now the
+// @plan functions of apps/derby/derby_prog.js, compiled at build time; this
+// copy is kept, frozen, as what they are checked against:
+// tools/kasane_ir/check_equivalence.py runs both through the real VM, and
+// derby_plans.mjs compares each with its .kjs. Not loaded by the app.
 const OPS = 'SIAMNREVPLQBplC', FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25'];
 function prog(src, arg) {
   const c = [], w = src.split(' ');

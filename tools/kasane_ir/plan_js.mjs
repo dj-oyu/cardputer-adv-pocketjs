@@ -195,15 +195,17 @@ function parseBody(src, line0, inputs, params) {
   return body;
 }
 
-// Every /** ... @plan name ... inputs: a, b */ function f(args) { ... } in a file.
+// Every /** ... @plan name ... inputs: a, b */ function f(args) { ... } in a
+// file, and the method form f(args) { ... } (method: true), for a plan that
+// is a property of an object literal.
 export function findPlans(text, file = '') {
-  const re = /\/\*\*((?:(?!\*\/)[\s\S])*?@plan\s[\s\S]*?)\*\/\s*function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{/g, out = [];
+  const re = /\/\*\*((?:(?!\*\/)[\s\S])*?@plan\s[\s\S]*?)\*\/\s*(function\s+)?([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{/g, out = [];
   let m;
   while ((m = re.exec(text))) {
     const doc = m[1], name = /@plan\s+([\w.$-]+)/.exec(doc)[1];
     const inputs = (/inputs:\s*([^\n*]*)/.exec(doc)?.[1] ?? '').split(',').map(s => s.trim()).filter(Boolean);
     if (inputs.length > 8) throw new PlanError(`${file}: ${name}: more than 8 inputs`);
-    const params = m[3].split(',').map(s => s.trim()).filter(Boolean);
+    const params = m[4].split(',').map(s => s.trim()).filter(Boolean);
     const start = m.index + m[0].length, bodyLine = text.slice(0, start).split('\n').length;
     let depth = 1, i = start;
     for (; depth; ++i) {
@@ -214,8 +216,9 @@ export function findPlans(text, file = '') {
       if (text[i] === '}') depth--;
     }
     const fnStart = text.lastIndexOf('/**', m.index + 3);
-    out.push({name, fn: m[2], inputs, params, body: text.slice(start, i - 1), line: bodyLine,
-      start: fnStart, end: i, text: text.slice(m.index + m[0].indexOf('function'), i), file});
+    const head = m.index + m[0].length - m[0].replace(/^\/\*\*[\s\S]*?\*\/\s*/, '').length;
+    out.push({name, fn: m[3], method: !m[2], inputs, params, body: text.slice(start, i - 1), line: bodyLine,
+      start: fnStart, end: i, text: (m[2] ? '' : 'function ') + text.slice(head, i), file});
   }
   return out;
 }

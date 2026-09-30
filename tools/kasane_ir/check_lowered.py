@@ -1,27 +1,28 @@
-"""DERBY WATCH with its plans written as JS functions and lowered at build
-time, against the shipped apps/derby (host, WSL only).
+"""DERBY WATCH as the firmware build lowers it, against its hand IR (host,
+WSL only; node on PATH, so run it under bash -lc).
 
   python3 tools/kasane_ir/check_lowered.py
 
-1. tools/kasane_ir/migrate_derby.mjs turns a copy of apps/derby into the
-   source form with @plan functions (tools/kasane_ir/plans_js/derby_plans.js);
-2. tools/kasane_ir/lower_plans.mjs lowers that copy as the firmware build
-   would (plans nibble-packed, prog() the decoder);
+The plans are @plan JS functions in apps/derby/derby_prog.js, compiled at
+build time (tools/kasane_ir/lower_plans.mjs). The migration check:
+1. lowered: apps/derby through lower_plans.mjs, as main/CMakeLists.txt does;
+2. hand: the same copy with derby_prog.js replaced by the hand IR as it
+   shipped until e9b88bc (tools/kasane_ir/derby_hand_ir.js, packed by
+   pack.mjs --nibble; the rest of that file is frozen at e9b88bc, so this
+   compares only while the non-plan part of derby_prog.js is unchanged);
 3. tools/games/test_derby_host.c (-m32) runs the scripted game at LIGHT, MID
-   and HEAVY on both apps/derby and the lowered copy. The per-frame
-   statistics (segments, raster steps, draws, live plans...; not the VM
-   steps and instruction counts, which compiling shortens) and the finish
-   lines must be identical, both must pass the harness's own checks (every
-   draw through the plan, debug-step and single-step VM oracle, every frame
-   compared pixel for pixel), and the guest heap after evaluation is printed;
+   and HEAVY on both. The per-frame statistics (segments, raster steps,
+   draws, live plans...; not the VM steps and instruction counts, which
+   compiling shortens) and the finish lines must be identical, both must
+   pass the harness's own checks (every draw through the plan, debug-step
+   and single-step VM oracle, every frame compared pixel for pixel), and the
+   guest heap after evaluation is printed;
 4. no garbage only the cycle collector frees (the device runs it only near
    the guest heap limit, so a cycle made per plan or frame stays resident:
    pack.mjs's first decoder called itself, ~4 KB a race, LOADSTALL): the
    harness's per-scene "freed only by the cycle collector" must be 0 in
-   every scene of the lowered game (the line comes with vm/derby-trim's
-   test_derby_host.c; without it the check fails), and 20 rounds of every
-   plan's registration (spec() through the decoder, heap_probe.c) must leave
-   0 B for the cycle collector.
+   every scene of the lowered game, and 20 rounds of every plan's
+   registration (heap_probe.c) must leave 0 B for the cycle collector.
 apps/ is not changed.
 """
 from __future__ import annotations
@@ -46,7 +47,7 @@ ROOT, CACHE, run_derby = derby_heap.ROOT, derby_heap.CACHE, derby_heap.run_derby
 def game(binary: Path, apps: Path, tier: str, extra: dict | None = None) -> tuple[str, str]:
     with tempfile.TemporaryDirectory() as t:
         root = Path(t)
-        shutil.copytree(apps, root / "apps/derby")
+        shutil.copytree(apps, root / "apps/derby")   # already lowered
         csv = root / "frames.csv"
         r = subprocess.run([str(binary)], cwd=root, capture_output=True, text=True,
                            env=dict(os.environ, DERBY_TIER=tier, DERBY_CSV=str(csv), **(extra or {})))
@@ -98,14 +99,15 @@ def compare(ca: str, cb: str) -> tuple[bool, int, int]:
 def main() -> None:
     work = CACHE / "lowered_check"
     shutil.rmtree(work, ignore_errors=True)
-    future, lowered = work / "future", work / "lowered"
-    subprocess.run(["node", str(HERE / "migrate_derby.mjs"), str(ROOT / "apps/derby"),
-                    str(HERE / "plans_js/derby_plans.js"), str(future)], check=True)
-    subprocess.run(["node", str(HERE / "lower_plans.mjs"), str(future), str(lowered)], check=True)
+    lowered, hand = work / "lowered", work / "hand"
+    run_derby.lower(ROOT / "apps/derby", lowered)
+    run_derby.lower(ROOT / "apps/derby", hand)
+    subprocess.run(["node", str(HERE / "pack.mjs"), str(HERE / "derby_hand_ir.js"), str(hand / "derby_prog.js"),
+                    "--nibble"], check=True, stdout=subprocess.DEVNULL)
     binary = run_derby.build(derby_heap.m32_flags(), run_derby.CACHE / "m32")
     ok = True
     for tier in ("0", "1", "2"):
-        a, ca = game(binary, ROOT / "apps/derby", tier)
+        a, ca = game(binary, hand, tier)
         b, cb = game(binary, lowered, tier)
         fa = re.findall(r"^finish: .*$", a, re.M)
         fb = re.findall(r"^finish: .*$", b, re.M)
@@ -113,12 +115,11 @@ def main() -> None:
         cyc = cycles(b)
         ok &= same and fa == fb and bool(cyc) and not any(cyc.values())
         print(f"tier {tier}: lowered game, freed only by the cycle collector: " +
-              (", ".join(f"{k} {v} B" for k, v in cyc.items()) if cyc else
-               "NOT REPORTED (test_derby_host.c without vm/derby-trim's cycle count)"))
+              (", ".join(f"{k} {v} B" for k, v in cyc.items()) if cyc else "NOT REPORTED"))
         print(f"tier {tier}: {len(ca.splitlines()) - 1} frames, per-frame drawing statistics "
               f"{'identical' if same else 'DIFFER'}, finish {'identical' if fa == fb else 'DIFFERS'}, "
               f"VM steps {sa} -> {sb} ({100 * (sb - sa) / sa:+.1f}%)")
-    for label, apps in (("apps/derby", ROOT / "apps/derby"), ("lowered", lowered)):
+    for label, apps in (("hand IR", hand), ("lowered", lowered)):
         out, _ = game(binary, apps, "1", {"DERBY_EVAL_ONLY": "1"})
         m = re.search(r"peak during eval (\d+).*after eval (\d+)", out)
         print(f"{label:<10} guest heap after evaluation {m.group(2)} B, evaluation peak {m.group(1)} B (host m32)")

@@ -20,8 +20,10 @@ then runs:
 The player's race must finish identically in every run. Every run checks the
 big screen: its face drawn exactly inside the bezel, nothing but the feed on
 the face, the view's lettering inside it.
-Plans: derby_prog.js must be derby_prog_text.js packed by tools/kasane_ir/pack.mjs
-(--nibble --check, run first).
+Plans: apps/derby/derby_prog.js holds them as @plan JS functions, which the
+firmware build lowers (tools/kasane_ir/lower_plans.mjs, main/CMakeLists.txt);
+the harness runs the same lowering's copy, .cache/derby_host/lowered/apps/derby
+(DERBY_APP_DIR). Node 16 or later on PATH (WSL: bash -lc).
 Seeds (pocket.random.seed() is DERBY_HW in the harness, fixed): every paddock
 seed the MID run logs must be tools/games/derby_seeds.py's formula; the same
 stored race under another hardware seed must be another race; the seed
@@ -42,6 +44,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import struct
 import subprocess
 import zlib
@@ -142,6 +145,15 @@ def sheet(folder: Path, out: Path, order: list[str], columns: int) -> None:
     print(f"Wrote {out} ({len(images)} panels: {', '.join(t for t in order if t in shots)})")
 
 
+def lower(src: Path, dst: Path) -> Path:
+    """src (an apps/derby) as the firmware embeds it: every file copied, the
+    @plan functions compiled and prog() the decoder (lower_plans.mjs)."""
+    shutil.rmtree(dst, ignore_errors=True)
+    subprocess.run(["node", str(ROOT / "tools/kasane_ir/lower_plans.mjs"), str(src), str(dst)],
+                   cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
+    return dst
+
+
 def run(binary: Path, env: dict) -> str:
     """Run the harness, echo its output, fail on a non-zero exit."""
     p = subprocess.run([str(binary)], cwd=ROOT, env=env, capture_output=True, text=True)
@@ -202,10 +214,7 @@ def main() -> None:
     parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
     parser.add_argument("--heap-limit", type=int, help="run once with this guest heap limit (bytes)")
     args = parser.parse_args()
-    # The shipped derby_prog.js is the packed form of derby_prog_text.js
-    # (tools/kasane_ir/pack.mjs checks every plan's rows as it packs).
-    subprocess.run(["node", "tools/kasane_ir/pack.mjs", "apps/derby/derby_prog_text.js", "apps/derby/derby_prog.js",
-                    "--nibble", "--check"], cwd=ROOT, check=True)
+    app_dir = lower(ROOT / "apps/derby", CACHE / "lowered/apps/derby")
     if args.m32:
         env = dict(os.environ, M32_SYSROOT=str(ROOT / ".cache/kasane_megademo_app/m32sys"))
         flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=env,
@@ -213,7 +222,7 @@ def main() -> None:
         binary = build(flags, CACHE / "m32")
     else:
         binary = build(["-fsanitize=address,undefined"], CACHE / "asan")
-    env = os.environ.copy()
+    env = dict(os.environ, DERBY_APP_DIR=str(app_dir))
     env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
     env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
     # (tier, extra env): the scripted game at each tier, then the director

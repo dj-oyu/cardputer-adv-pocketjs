@@ -17,8 +17,7 @@
 | IDF専用Python | `C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe`、3.11.7 |
 | S3 GCC | 15.2.0、`esp-15.2.0_20251204` |
 | CMake / Ninja | 4.0.3 / 1.12.1 |
-| Node（IDF の外） | v24.19.0、`C:Program FilesVolta
-ode.exe`（Volta）。IDF の環境を有効化した後も PATH にある |
+| Node（IDF の外） | v24.19.0、`C:\Program Files\Volta\node.exe`（Volta）。IDF の環境を有効化した後も PATH にある。WSL は `bash -lc` のときだけ PATH に入る（`~/.local/bin/node`、v26） |
 
 PocketJS調査版のIDF要求 `>=6.0,<6.2` にv6.0.1は含まれる。このバージョンを最初のビルド基準とする。
 依存取得、S3 Rustアーカイブ生成、ドライバー統合はM1でビルド・書き込み済み（当時の知見は[archive/findings.md](../archive/findings.md)）。
@@ -96,8 +95,10 @@ eim run 'idf.py -B build build' v6.0.1 | Out-Host
 
 - IDF（EIM）は Node を入れない。別に入れる（このPCは Volta の Node v24.19.0）。確認は IDF を有効化したシェルで `node --version`。
 - 16 未満は動かない: Node 14 は `??=` の構文エラーで止まった。16・18・26 は同じ生成物をバイト単位で出した（2026-09-30、host）。
-- 無い・古いと、configure が「何が要るか（Node 16 以上）、どこに入れるか（PATH）」を出して止まる。
-- **2026-09-30 時点では未組み込み**（CMake と `make_app_chunks.py` への組み込みは DERBY の plan の書き換えと一緒に入る。js-to-ir.md §5.4）。
+- 無い・古いと、configure が「`@plan` を含むチャンク（`local.derby:prog` のように）、Node 16 以上が PATH に要ること、見つけた node の版」を出して止まる。PATH を直して `idf.py -B <dir> reconfigure`。PATH を変えずに `-DPOCKET_NODE=<node のパス>` を渡してもよい。止まったときは見つけた値を CMake のキャッシュから消すので、次の configure で探し直す。
+- 仕組み（`main/CMakeLists.txt`、`tools/make_app_chunks.py`）: configure で `make_app_chunks.py` が `@plan` を含むチャンクを見つけ、そのチャンクの埋め込み元を `build_*/generated/apps/<アプリのディレクトリ>/<同じファイル名>` に差し替える。変換はビルド時の `add_custom_command`（`node tools/kasane_ir/lower_plans.mjs --file 元 生成物`）。ファイル名が同じなので埋め込みシンボル（`_binary_derby_prog_js_start`）とチャンク表は変わらない。チャンクを編集すれば再 configure なしで変換し直す。**チャンクに初めて `@plan` を書いたときだけ** `reconfigure` が要る（どのチャンクを変換するかは configure で決まる）。アプリの `@plan` があるのに `@planDecoder` が 1 つでなければ configure が止まる。
+- 今 `@plan` を持つのは DERBY WATCH の `prog` チャンク（`apps/derby/derby_prog.js`）だけ。MEGADEMO・LCD CATCH・BIG WAVE は手書きの IR の文字列のままで、Node を要らない。
+- host の DERBY の検査（`tools/games/run_derby.py`、`tools/kasane_ir/check_*.py`）も同じ変換を通したコピーを走らせるので、WSL では `wsl bash -lc "..."` で起動する（素の `bash -c` の PATH には node が無い）。
 
 ## 書き込みとログ
 

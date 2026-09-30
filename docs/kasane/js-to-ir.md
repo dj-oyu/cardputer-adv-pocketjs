@@ -1,13 +1,13 @@
 # JS 風の言語 → 手続き型 IR のコンパイラと、「IR を flash に置き id で登録」の見積もり
 
-2026-09-30、ブランチ `vm/ir-compiler`（`vm/main` 909decd から）。DERBY WATCH の首振りカメラ（段階 3、`vm/pan-camera` 55956e9、マージしない）が実機の DRAM に収まらない件（`vm/pan-camera` の docs/apps/derby-pan-memory.md、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md)）への、ユーザーの提案「JS → IR コンパイラをチェックするのはどう」の調査と試作。**出荷コード（`apps/`・`main/`）は変えていない。** 試作は [`tools/kasane_ir/`](../../tools/kasane_ir/)。
+2026-09-30、ブランチ `vm/ir-compiler`（`vm/main` 909decd から）。DERBY WATCH の首振りカメラ（段階 3、`vm/pan-camera` 55956e9、マージしない）が実機の DRAM に収まらない件（`vm/pan-camera` の docs/apps/derby-pan-memory.md、[derby-pan-camera-cost.md](../apps/derby-pan-camera-cost.md)）への、ユーザーの提案「JS → IR コンパイラをチェックするのはどう」の調査と試作。**§1〜§4 の調査では出荷コード（`apps/`・`main/`）は変えていない**（§5 の実装で、DERBY の plan の書き方とビルドが変わった）。試作は [`tools/kasane_ir/`](../../tools/kasane_ir/)。
 
 数値の区別: **host 実測** は WSL の `-m32`（実機と同じ 8 B の JSValue、確保は実機の TLSF の長さで課金）。**ビルド確認** は ESP-IDF のツールチェーンで作ったオブジェクトの `nm`/`size`。**推定** は `sizeof` × 個数などの計算。実機は使っていない。
 
 ## 結論
 
 - **(i) コンパイラは作る価値がある。ただし DRAM を減らすのはコンパイラではなく、IR をゲストに持たせないこと。** 手書きの IR はすでにほぼ最適で、コンパイラは静的な命令数を 467 → 453（−3.0%）、DERBY の実入力での実行ステップを −1.6% しか減らさない（confetti だけ −7.5%）。価値は保守性と誤りの防止: 名前と式で書ける、16 レジスタ・64 命令・CUBIC の r0..r7 をビルド時に機械が守る、死んだ命令を見つける（crowd の `I8,0`）、式マクロと展開で同じ式の繰り返し（首振りのニュートン法 4 段）を 1 行にできる。コンパイラはビルド時（host）に走らせるもので、実機のゲストでは走らせない（走らせればゲストのヒープを食う）。
-- **(ii) 「IR を flash に置き id で登録」はゲスト側で約 7〜8 KB（host、評価後）効き、native 側の plan の常駐を直せばさらに 11〜24 KB（推定）効く。DERBY の不足（3〜11 KB）を紙の上では超える。** native を触らずに文字列を詰める案（§2.1）は、ゲストで −1.6〜2.5 KB（host）にとどまる。内訳:
+- **(ii) 「IR を flash に置き id で登録」はゲスト側で約 7〜8 KB（host、評価後）効き、native 側の plan の常駐を直せばさらに 11〜24 KB（推定）効く。DERBY の不足（3〜11 KB）を紙の上では超える。** native を触らずに文字列を詰める案（§2.1）は、ゲストで −1.6〜2.4 KB（host、修正後の復号器で測り直し）にとどまる。内訳:
   - ゲスト: plan の文字列 13 本と `prog()` を持たないと、評価後のヒープが **−7,108 B**（基準）/ **−8,104 B**（段階 3）、評価のピークが **−5,600 / −8,068 B**（host 実測）。実機では host の約 1.3 倍になった前例がある（derby-pan-memory.md）ので **−9〜10.5 KB 前後**（推定）。
   - 登録の一時的なピーク: 今は 1 本の登録で `prog()` が **3.1〜10.0 KB** を一時的に確保し、配列の配列 **2.1〜7.1 KB** を `register()` が返るまで保つ（host 実測、命令 1 つで約 119 B）。id 登録では引数の配列（8 個以下の数）だけになる。
   - native: **plan は命令数に依らず 1 本 872 B**（`code[64]` 固定、Xtensa のオブジェクトで確認）で、DERBY は同時に **25 本**（段階 3 で **30 本**）を持つ（host 実測）: **21.8 KB / 26.2 KB**。命令数ぶんだけ確保すれば **−11.0 / −12.0 KB**、flash の IR を指せば **−20 / −24 KB**（どちらも推定）。
@@ -52,7 +52,7 @@
 
 ### 2.1 文字列を詰める案（native を触らない代替、`pack.mjs`）
 
-ユーザーの問い「IR と 1:1 のテキストだから膨らんでいるのでは」への答え。**膨らんではいるが、詰めても効くのは 1.5〜2.5 KB で、flash 案（7.1〜8.1 KB）の 3 分の 1 以下。**
+ユーザーの問い「IR と 1:1 のテキストだから膨らんでいるのでは」への答え。**膨らんではいるが、詰めても効くのは 1.6〜2.4 KB で、flash 案（7.1〜8.1 KB）の 3 分の 1 以下。**
 
 [`pack.mjs`](../../tools/kasane_ir/pack.mjs) が `derby_prog.js` の `T` を Latin-1 の詰めた文字列（QuickJS では 1 文字 1 バイト）に置き換え、`prog()` を同じ行を返す復号器に替える。全 plan で復号した行が今の `prog()` と一致することを確かめてから書き出す（行が同じなので、登録される IR も同じ）。
 
@@ -63,18 +63,18 @@
 | 形 | 基準 13 本（`T.map` の 8 行込み） | 段階 3 込み 17 本 | 評価後のヒープ差（基準 / 段階 3） | 評価のピーク差 |
 | --- | ---: | ---: | ---: | ---: |
 | 今の文字列 | 3,182 字 | 4,337 字 | — | — |
-| byte 形（マクロあり） | 1,673 B | 2,216 B | −2,780 / −1,920 | −1,308 / −1,920 |
-| nibble 形（マクロあり） | **1,080 B** | **1,376 B** | **−1,604 / −2,464** | **−1,604 / −2,464** |
-| nibble 形（マクロなし） | 1,136 B | — | −1,552 / −2,364 | −1,552 / −2,364 |
-| 参考: flash の plan（文字列も `prog()` も無い） | 0 | 0 | −7,108 / −8,104 | −5,600 / −8,068 |
+| byte 形（マクロあり） | 1,673 B | 2,216 B | −1,264 / −1,872 | −1,264 / −1,872 |
+| nibble 形（マクロあり） | **1,080 B** | **1,376 B** | **−1,560 / −2,416** | **−1,560 / −2,416** |
+| nibble 形（マクロなし） | 1,136 B | — | −1,508 / −2,316 | −1,508 / −2,316 |
+| 参考: flash の plan（文字列も `prog()` も無い） | 0 | 0 | −7,156 / −8,104 | −5,684 / −8,068 |
 
-（host m32 実測。ヒープ差は §2 と同じく表の伸長の閾値で ±1.5 KB 揺れる。byte 形が nibble 形より多く減って見える基準の値はその揺れ）
+（host m32 実測、2026-09-30 に修正後の復号器（自己再帰なし、6a9d777）で測り直した。基準は e9b88bc の手書き IR（`tools/kasane_ir/derby_hand_ir.js`、評価後 107,964 B・ピーク 122,376 B）、段階 3 は 55956e9。最初の測定（自己再帰の復号器、基準 909decd）は byte 形 −2,780、nibble 形 −1,604 / −2,464 だった。ヒープ差は §2 と同じく表の伸長の閾値で揺れる）
 
-- **(a) 文字列の常駐**: atom は今 24,794 B。nibble 形で 22,885 B（**−1,909 B**）、byte 形で −1,347 B。plan の文字列が占める atom は今 約 3,525 B（flash 形で消える量）なので、nibble 形の文字列の常駐は **約 1.6 KB**。
-- **(b) 復号器の常駐**: 関数と bytecode は今の `prog()` より **+436 B**。`prog()` 自体が約 600 B（関数の構造体 313 B、bytecode 283 B）なので、復号器は **約 1.0 KB**。
-- **(c) 差し引き**: **−1.6 KB（基準）/ −2.5 KB（段階 3）**。段階 3 の plan 4 本（1.6 KB 相当の文字列）の分は −0.9 KB。
+- **(a) 文字列の常駐**: atom は今 24,855 B。nibble 形で 22,944 B（**−1,911 B**）、byte 形で 23,507 B（−1,348 B）。plan の文字列が占める atom は今 約 3,525 B（flash 形で消える量）なので、nibble 形の文字列の常駐は **約 1.6 KB**。
+- **(b) 復号器の常駐**: 関数と bytecode は今の `prog()` より **+476 B**（関数 +225、bytecode +251）。`prog()` 自体が約 600 B（関数の構造体 313 B、bytecode 283 B）なので、復号器は **約 1.1 KB**。
+- **(c) 差し引き**: **−1.6 KB（基準）/ −2.4 KB（段階 3）**。
 - **マクロと共有は効かない**: 先頭の入力のマクロは 56 B（ヒープで約 50 B）。13 本すべてを 1 本の deflate で圧縮しても、さらに 145 B（段階 3 で 239 B）しか縮まず、JS の展開器の方が大きい。短い並び（`V0,1`、`Q4` など）は 1〜2 バイトになった後で、共有して節約できる量が残らない。
-- **登録のピークは下がる**: 復号器は `split` の一時的な文字列を作らないので、fr の登録のピークは 9,556 → 7,024 B、pt は 10,020 → 7,456 B（配列の配列はほぼ同じで残る）。flash 形では引数の配列だけになる。
+- **登録のピークは下がる**: 復号器は `split` の一時的な文字列を作らないので、fr の登録のピークは 9,556 → 6,948 B（修正前の復号器では 7,024 B）、vis は 9,300 → 6,732 B、map は 8,580 → 6,192 B（配列の配列はほぼ同じで残る）。段階 3 の pt は修正前の測定で 10,020 → 7,456 B（`derby_heap.py` の登録の測定は、`spec()` を畳んだ derby-trim 以降、`spec` を自分で持つ段階 3 の書き出しでは名前が衝突して走らない）。flash 形では引数の配列だけになる。
 - **再登録**: plan は場面ごとに `want()`/`drop()` で登録と解除を繰り返すので、文字列（詰めた形でも）は保ち続ける必要があり、使ったら捨てることはできない。flash 形だけが、この常駐も無くす。
 - **判断**: 詰めた形は native を触らずに入る唯一の案だが、DERBY の不足（3〜11 KB）には足りない。flash 形か native の plan の縮小（§4 A）が要る。先に入れるなら、復号器が 1 つで済むので他のアプリ（MEGADEMO・BIG WAVE）にも使える点は利点。
 
@@ -159,30 +159,36 @@ repeat (96) {
 - **工数**: A を済ませた上で 2〜3 日（生成器と同期検査 0.5、native 1〜1.5、試験 0.5、DERBY の移行 0.5）＋実機測定 0.5 日（推定）。
 - **制約**: flash の plan は組み込みアプリにしか使えない（SD やエディタから入れたプログラムは配列の経路のまま）。plan を直すにはファームの再ビルドが要る。
 
-## 5. plan を普通の JS の関数で書く（2026-09-30、ブランチ `vm/ir-js`）
+## 5. plan を普通の JS の関数で書く（2026-09-30、ブランチ `vm/ir-js`、実装済み）
 
-ユーザーの指示「plan を別言語（`.kjs`）ではなく、アプリの JS ファイルの中の普通の JS の関数として書く」の実装と、出荷ソースから関数本体を消す変換の設計・試作。**`apps/` と CMake は変えていない**（`apps/derby` は derby-trim が別ブランチで編集中。組み込みはそのマージ後）。数値は host 実測。
+ユーザーの指示「plan を別言語（`.kjs`）ではなく、アプリの JS ファイルの中の普通の JS の関数として書く」と、決定「ビルドに Node を必須にする（`@plan` があるときだけ）」の実装。**DERBY WATCH の plan 14 本（13 本と点列用の `nil`）は、`apps/derby/derby_prog.js` の `@plan` の関数が原本になった。** ビルドがそれをコンパイルして 4 bit に詰めた IR の文字列（§2.1 の nibble 形）に置き換えてから埋め込む。MEGADEMO・LCD CATCH・BIG WAVE は手書きの IR の文字列のまま（範囲外）。数値は host 実測と実機実測を区別して書く。
 
 ### 5.1 流れ
 
-1. **書く**: アプリの `.js` に、JSDoc の `@plan` を付けた関数を置く。`inputs:` の名前が draw の入力 0..7（この順）、関数の引数が登録時の引数（今の `$0`, `$1`, …）。
+1. **書く**: アプリの `.js` に、JSDoc の `@plan` を付けた関数を置く。`inputs:` の名前が draw の入力 0..7（この順）、関数の引数が登録時の引数（今の `$0`, `$1`, …）。形は 2 つ: `function f() {}`（出荷形は `const f = '<詰めた IR>';`）と、オブジェクトリテラルの中のメソッド `f() {}`（出荷形は `f: '<詰めた IR>'`）。DERBY はメソッドの形で `T` の中に書く（下の「大きさ」: plan ごとのグローバルの `const` は評価のピークを 1.5 KB 上げた）。
 2. **host で走らせる**: [`plan_js.mjs`](../../tools/kasane_ir/plan_js.mjs) の `reference()` が、`move/line/plot/cubic` を線分を記録する偽物にして、その関数を Node で実行する。VM と同じ規則（座標の丸めと範囲、色の範囲、1,024 線分・8,192 ラスタ）で結果を返す。
-3. **ビルド時に消す**: [`lower_plans.mjs`](../../tools/kasane_ir/lower_plans.mjs) が `@plan` 関数を `const f = '<詰めた IR>';`（§2.1 の nibble 形）に置き換え、`@planDecoder` の印の付いた関数を復号器に置き換える。`--ids APP` なら `const f = 'APP.name';`（§4 B の flash の plan。native の API はまだ無い）。
-4. **実機**: 置き換えた後のソースだけが埋め込まれ、今と同じく `prog()` が行を作って `register()` する。
+3. **ビルド時に置き換える**: [`lower_plans.mjs`](../../tools/kasane_ir/lower_plans.mjs) が `@plan` の関数を詰めた IR に、`@planDecoder` の印の付いた関数（DERBY では例外を投げるだけの `prog()`）を復号器に置き換える。関数の直前の `//` コメント（とその上の空行 1 つ）も一緒に消えるので、**plan の説明は前と中のコメントに書けば出荷されない**。`--ids APP` なら `'APP.name'`（§4 B の flash の plan。native の API はまだ無い）。
+4. **実機**: 置き換えた後のソースだけが埋め込まれ、今と同じく `prog()` が行を作って `register()` する。`apps/derby/derby_prog.js` はそのままでは動かない（`prog()` が例外を投げる）。
 
 ```js
-/** @plan rail inputs: x0, dx, top, ground, posts, mid, colour */
-function rail() {
-  let x = x0;
-  const end = posts * dx + x;
-  move(x, top); line(end, top, colour);
-  move(x, mid); line(end, mid, colour);
-  for (let j0 = 0; j0 < posts; j0++) {
-    move(x, top); line(x, ground, colour);
-    x += dx;
-  }
-}
+const T = {
+  // rail: the running rail. ...   <- 出荷されない
+  /** @plan rail inputs: x0, dx, top, ground, posts, mid, colour */
+  rail() {
+    let x = x0;
+    const end = posts * dx + x;
+    move(x, top); line(end, top, colour);
+    move(x, mid); line(end, mid, colour);
+    for (let j0 = 0; j0 < posts; j0++) {
+      move(x, top); line(x, ground, colour);
+      x += dx;
+    }
+  },
+  ...
+};
 ```
+
+出荷形（`build_*/generated/apps/derby/derby_prog.js`）は `rail: 'a\x00Q@A...'` の行が並ぶ `T` で、e9b88bc までの `pack.mjs` の出力と、plan の文字列と生成物の見出し 2 行だけが違う（6,124 → 6,159 B）。
 
 ### 5.2 JS の部分集合と float32
 
@@ -201,28 +207,50 @@ function rail() {
 - **JS と VM が違うところ（コンパイラは直さない）**: ループ回数が整数でない・範囲外（`REPEAT_REG` は 0..255、定数・引数は 1..255）なら VM は draw ごと失敗するが、JS は切り上げた回数だけ回る。計算の途中が非有限なら VM は失敗する。`/` は定数でだけで、2 の冪以外は掛け算に直すので厳密ではない（警告が出る）。配列の表引き（`SILK[k]`）は書けないので、定数に焼き込むか引数で渡す（DERBY の `map` は焼き込んだ）。
 - **float32 の基準**: `reference()` は既定で、関数の各演算を `Math.fround` で丸め、非有限で失敗し、ループ回数の検査も VM と同じにした JS を実行する（パーサの AST から生成した JS。関数の文面をそのまま double で走らせる形も持ち、参考として数える）。`sin` は `Math.sin` を float32 に丸めた値で、host の glibc の `sinf` と全件一致した。実機の newlib の `sinf` と、Xtensa の GCC が積和を 1 命令（`MADD.S`）に縮約するかは見ていない（CUBIC の C の式に効きうる）。
 
-### 5.3 検証（host 実測）
+### 5.3 検証
 
-- **IR**: 13 本を JS の関数にした [`plans_js/derby_plans.js`](../../tools/kasane_ir/plans_js/derby_plans.js)（`.kjs` から変換。rail・turf・crowd・runner・conf は名前つき、残りは逆コンパイルの名前 `r8`・`in0` のまま）が、13 本とも `.kjs` と**同じ IR** になった（`derby_plans.mjs --js`）。`.kjs` は移行の間は残す。
-- **JS の関数 = VM**（`python3 tools/kasane_ir/check_equivalence.py --js tools/kasane_ir/plans_js/derby_plans.js`）: 捕獲した入力 6,971 本と摂動した入力 6,000 本で、float32 の JS の結果と、コンパイルした IR を実物の `ksn_procedural.c` で走らせた結果（状態・線分・色・ラスタ step）が**全件一致**（`JS REFERENCE PASS`）。摂動で VM が失敗した 1,032 本も、同じ種類の失敗で一致した。関数の文面を double のまま走らせると、捕獲した入力で 29 本（crowd・runner・pole・conf）、摂動で 176 本が 1 画素以上ずれる（単精度の VM との差で、誤りではない）。手書きの IR とコンパイル後の比較（§3）も同じ実行で `EQUIVALENCE PASS`。
-- **DERBY 全体**（`python3 tools/kasane_ir/check_lowered.py`）: `apps/derby` のコピーを JS の関数の形に移し（[`migrate_derby.mjs`](../../tools/kasane_ir/migrate_derby.mjs)）、`lower_plans.mjs` で出荷形にして host の全台本を LIGHT・MID・HEAVY で走らせた。元の `apps/derby` と比べて、フレームごとの描画の統計（線分、ラスタ、draw 数、同時の plan 数、点）と着順が**同一**（`LOWERED PASS`）。ハーネス自身の画素照合も通る。違うのは VM の実行ステップだけで −0.6〜−1.1%。
-- **大きさ**: 関数の形のソースは plan の部分が 6,896 B（コメントと名前込み）、出荷形は詰めた IR 1,109 B（14 本、`still` を含む）。評価後のゲストヒープは 108,244 → 106,692 B（**−1,552 B**、§2.1 の nibble 形と同じ効き）、評価のピークは 125,712 → 125,632 B（−80 B）。基準は vm/main bd6328e の `apps/derby`（§2 の 909decd から q24 段階 1・2 が入り、基準値が約 1.1 KB 上がった）。
+**host（WSL、`bash -lc` で node を PATH に入れて走らせる）**
 
-### 5.4 ビルドへの組み込みの設計（未実装）
+- **IR**: `apps/derby/derby_prog.js` の 14 本が、`.kjs`（§3）と 14 本とも**同じ IR** になった（`node tools/kasane_ir/derby_plans.mjs --js apps/derby/derby_prog.js`）。名前の無かった 8 本（stands・gate・pole・photo・silk・map・vis・fr）は入力と中間値に名前を付け、IR が変わらないことをこの比較で確かめた。命令は手書き 468 → 454（−14）。
+- **JS の関数 = VM**（`python3 tools/kasane_ir/check_equivalence.py`。`apps/derby/derby_prog.js` に `@plan` があれば `--js` は既定でそれ）: 捕獲した入力 6,971 本と摂動した入力 6,000 本で、float32 の JS の結果と、コンパイルした IR を実物の `ksn_procedural.c` で走らせた結果（状態・線分・色・ラスタ step）が**全件一致**（`JS REFERENCE PASS`）。摂動で VM が失敗した 1,032 本も同じ種類の失敗で一致。関数の文面を double のまま走らせると、捕獲した入力で 29 本、摂動で 176 本が 1 画素以上ずれる（単精度の VM との差）。手書きの IR（[`derby_hand_ir.js`](../../tools/kasane_ir/derby_hand_ir.js)、e9b88bc まで出荷していた原本を凍結）とコンパイル後の比較も `EQUIVALENCE PASS`。`nil` は捕獲したゲームで draw されない（点列の plan）。
+- **DERBY 全体**（`python3 tools/games/run_derby.py` と `--m32`）: 全 13 回（8 回の台本、デモ 3 本の手での再現、種の 2 回）の着順・完走時刻・デモ・種・オッズ・全画素ハッシュ（8 本）が、現行 e9b88bc と**全桁一致**（ASan と m32 の両方、結果の行 429 行が同一）。循環コレクタだけが解放したバイト数は全 40 場面で 0。
+- **移行の検査**（`python3 tools/kasane_ir/check_lowered.py`）: 変換後のコピーと、同じコピーの `derby_prog.js` を手書き IR の詰めた形に差し替えたものを、LIGHT・MID・HEAVY の全台本で比べた。フレームごとの描画の統計と着順が同一（`LOWERED PASS`）、VM の実行ステップは −0.6〜−1.1%、登録 20 巡でも循環コレクタだけのゴミは 0 B。
+- **大きさ**（host m32）: 評価後のゲスト 106,404 → 106,424 B（+20 B）、評価のピーク 120,816 → 120,836 B（+20 B）。コンパイルした IR は詰めると 1,109 B で、手書き（1,082 B）より 27 B 長い（命令は少ないのに長い理由は調べていない）。**plan を `function` の形で書いてグローバルの `const` にすると、評価のピークが +1,492 B**（評価後は同じ。トップレベルの束縛 14 個の解析用の構造が評価の終わりまで残るためと推測、確かめていない）。DERBY をメソッドの形にしたのはこのため。
+- **ESP-IDF のビルド**（`build_irjs`）: 通る。埋め込みシンボル 46 個（`_binary_*`）とチャンク表（`app_chunks.c`、パスのコメントを除く）が e9b88bc のビルドと同一。ビルドのログに `Compiling the @plan functions of .../apps/derby/derby_prog.js`。PATH に node が無いと configure が止まり（`The app chunks local.derby:prog have @plan functions ... needs Node 16 or later on PATH (no node on PATH)`）、`-DPOCKET_NODE` に v14 を返すものを渡しても `... is v14.21.3` で止まる（確認済み）。
 
-- **どこで変換するか**: `make_app_chunks.py`（configure 時）が、`@plan` を含むチャンクを見つけたら、そのファイルを「変換後の生成物」に差し替えた `APP_CHUNK_FILES` を書く。変換そのものはビルド時の `add_custom_command`（`OUTPUT ${CMAKE_BINARY_DIR}/generated/apps/<app>/<file>`、`DEPENDS` に元ファイルと `tools/kasane_ir/*.mjs`）で行う。configure 時に変換すると、plan を直すたびに再 configure が要る（今のチャンクは、編集では再 configure が要らない）。生成物は元と同じ base name にするので、埋め込みのシンボル（`_binary_derby_prog_js_start`）とチャンク表は変わらない。
-- **Node（ユーザーの決定: `@plan` を含むチャンクがあるときだけ必須）**: IDF の環境には無い（この機体の PATH には Volta の Node v24.19.0 がある）。`make_app_chunks.py` が `@plan` を含むチャンクを見つけたときだけ、configure が `find_program(POCKET_NODE node)` と `node --version` を確かめ、無いか 16 未満なら「`@plan` を含むチャンク名、Node 16 以上を PATH に入れること、docs/platform/build-environment.md」を出して止める。**最小は Node 16**: 変換器が使う一番新しい構文は `??=`（Node 15）で、Node 14 は構文エラーで止まり、16・18・26 は同じ生成物をバイト単位で出した（host、`npx node@N`）。`@plan` が無ければ Node は要らない。見送った案: 変換器を Python に移す（約 1,000 行）、生成物をコミットして host で同期を見る。
-- **入口のファイル**: `EMBED_TXTFILES` で埋め込む入口（`derby_watch.js`、今は plan を持たない）に plan を書く場合は、`DERBY_WATCH_SOURCE` と同じく生成物のパスへ差し替える。
-- **host のツールも同じ変換を通す**: `tools/games/test_derby_host.c` は cwd の `apps/derby/chunks.txt` を読むので、`DERBY_APP_DIR`（チャンク表と入口の場所）を足し、`tools/games/run_derby.py` は `lower_plans.mjs` で `.cache/derby_host/lowered/apps/derby` を作ってからそこを渡す。`check_equivalence.py`（捕獲）、`derby_heap.py`、`check_lowered.py` も同じ生成物を読む。`derby_plans.mjs` は plan を `T` の文字列ではなく `@plan` の関数から読む（`--js` の経路を既定に）。`tools/games/bgcost`・`pancost`、`apps/heapprobe/derby_v0` は凍結したコピーなので変えない。
-- **変更するファイル**（derby-trim のマージ後）: `tools/make_app_chunks.py`、`main/CMakeLists.txt`、`tools/hostshim/app_chunks_host.c` または `tools/games/test_derby_host.c`（`DERBY_APP_DIR`）、`tools/games/run_derby.py`、`tools/kasane_ir/derby_plans.mjs`・`derby_heap.py`・`check_equivalence.py`、`apps/derby/derby_prog.js`（`migrate_derby.mjs` の出力を手で整える: 名前の無い 8 本に名前、コメント）、`apps/derby/README.md`、`docs/platform/test-commands.md`（host の検査の手順）。
+**実機**（2026-09-30、COM3。基準は同じ日に焼いた e9b88bc の image。各 1〜2 回）
+
+| | 基準 e9b88bc | vm/ir-js | 差 |
+| --- | ---: | ---: | --- |
+| smoke（`smoke_device.py --cycles 20`、通常 image） | | `SMOKE_OK 20` | |
+| DERBY の一巡（診断 image、キー注入: パドック→ゲート→レース→写真→結果→R 再生→次のパドック→デモ→キーで抜ける→Back で保存→再起動） | | すべて到達、R 再生は同じ着順と完走時刻、`LOADSTALL` 等なし | |
+| 評価の余裕（heapprobe image、`derby` 変種、16 B 刻みの二分探索） | 33,840 / 33,915 B（130,000・129,925 で可） | 34,028 / 33,915 B（129,812・129,925 で可） | 揺れ（約 100 B）の範囲で同じ |
+| 評価後のゲスト（heapprobe の `used`） | 114,304 B | 114,268〜114,284 B | −20〜−36 B |
+| 評価後のゲスト（診断 image、`APP_LOAD play` の最後） | 118,232 B | 118,256 B | +24 B |
+| ゲストの最大（`gu`）MID、デモ 6 レース | 126,440〜126,508 B | 126,368〜126,528 B | 同じ |
+| ネイティブの空き、ターン境界の最小（`free`）MID | 37,888〜38,396 B | 37,848〜38,428 B | 同じ |
+| ネイティブの空き、ターン内の最小（`mn`）MID | 30,120〜31,684 B | 30,372〜31,688 B | 同じ |
+| `LOADSTALL`・`FRAMEFAIL`・`LOADFAIL`・`DEMOFAIL`・OOM | なし | なし | |
+
+- **レースを重ねてもゲストは増え続けない**（`gu` のレースごとの最大、1〜6 レース目）: 枝 126,368・126,444・126,528・126,464・126,476・126,472、基準 126,440・126,508・126,480・126,472・126,476・126,452。
+- 評価の余裕の記録（derby-pan-memory.md §8 の 34,071 B、129,769 で可）は、今日の基準では 129,767 で OOM・129,969 と 130,000 で可だった。同じ image でも 1 回の二分探索で約 100〜200 B 揺れる（前の粗い探索で枝が 130,172 までしか通らなかったのもこの揺れ。16 B 刻みを 2 回ずつ取って比べた）。
+- 同じ診断 image でも、起動から時間が経って（自動時刻同期の後）走らせると `free`・`mn` が約 5 KB 低い（枝で 32.6 KB / 25.1 KB）。無線を一度起こすと戻らない分（CLAUDE.md）と見られ、上の表は両方とも起動直後の値。
+
+### 5.4 ビルドへの組み込み
+
+- **どこで変換するか**: configure 時に [`make_app_chunks.py`](../../tools/make_app_chunks.py) が、ファイルに `/** ... @plan` を含むチャンクを見つけ、そのチャンクの埋め込み元を `build_*/generated/apps/<アプリのディレクトリ>/<同じファイル名>` に差し替えた `APP_CHUNK_FILES` と、元と生成物の組 `APP_CHUNK_LOWER`、チャンク名 `APP_CHUNK_PLANS` を書く。変換そのものは `main/CMakeLists.txt` のビルド時の `add_custom_command`（`node tools/kasane_ir/lower_plans.mjs --file 元 生成物`、`DEPENDS` に元と `lower_plans/plan_js/kir/pack.mjs`）。生成物は元と同じ base name なので、埋め込みのシンボル（`_binary_derby_prog_js_start`）とチャンク表は変わらない。チャンクを編集すれば再 configure なしで変換し直す。チャンクに**初めて** `@plan` を書いたときだけ `reconfigure` が要る。アプリに `@plan` があって `@planDecoder` が 1 つでなければ configure が止まる。
+- **Node**（`@plan` を含むチャンクがあるときだけ）: `find_program(POCKET_NODE node)` と `node --version` を確かめ、無いか 16 未満なら、チャンク名、Node 16 以上を PATH に入れること、見つけた版、docs/platform/build-environment.md を出して止める（見つけた値はキャッシュから消し、次の configure で探し直す）。**最小は Node 16**: 変換器が使う一番新しい構文は `??=`（Node 15）で、Node 14 は構文エラーで止まり、16・18・26 は同じ生成物をバイト単位で出した（host、`npx node@N`）。`@plan` が無ければ Node は探さない。見送った案: 変換器を Python に移す（約 1,000 行）、生成物をコミットして host で同期を見る。
+- **生成物はコミットしない**: `apps/derby/derby_prog.js` は `@plan` の原本だけで、出荷形は各ビルドディレクトリの `generated/` にだけある（e9b88bc までコミットしていた `pack.mjs` の生成物と、その原本 `derby_prog_text.js` は無くなった。原本の手書き IR は `tools/kasane_ir/derby_hand_ir.js` に凍結して等価性の検査に使う）。
+- **入口のファイル**: `EMBED_TXTFILES` で埋め込む入口（`derby_watch.js`）には plan を書けない（変換しない）。書くなら `DERBY_WATCH_SOURCE` と同じく生成物のパスへ差し替える変更が要る。
+- **host のツールも同じ変換を通す**: `tools/games/test_derby_host.c` は `DERBY_APP_DIR`（入口とチャンク表の場所、既定 `apps/derby`）を読み、`tools/games/run_derby.py` の `lower()` が `lower_plans.mjs` で `.cache/derby_host/lowered/apps/derby` を作ってそこを渡す。`check_equivalence.py`（捕獲）、`derby_heap.py`（`lowered` の行が増えた）、`check_lowered.py` も `lower()` を通したコピーを走らせる。`tools/games/bgcost`・`pancost`、`apps/heapprobe/derby_v0` は凍結したコピーなので変えていない。
+- **消したもの**: `migrate_derby.mjs`（移行が済んだ）、`plans_js/derby_plans.js`（`apps/derby/derby_prog.js` が原本になった）。`.kjs`（§3）は IR の比較のために残す（`nil.kjs` を足した）。
 
 ### 5.5 未実装・未確認
 
-- CMake への組み込み、`apps/derby` の書き換え、host ハーネスの `DERBY_APP_DIR`（§5.4、derby-trim の後）。
 - id 形（`--ids`）は生成だけで、受け取る native の API（§4 B）が無いので走らない。
-- 段階 3 の 4 本（`pt` など）は JS の関数に移していない。`.kjs` の式マクロ（`function` の式）と `unroll` は JS の部分集合に入れていない（JS では入れ子の関数と展開を書くことになる）。
-- 出荷形に plan の前のコメントが残る（評価のピークには効かなかった: −80 B の差は大半がソースの縮み）。消すなら変換で落とす。
-- 実機での確認（`sinf` の実装差、`MADD.S` の縮約、評価後ヒープ）。
+- 段階 3 の 4 本（`pt` など）は JS の関数に移していない。`.kjs` の式マクロ（`function` の式）と `unroll` は JS の部分集合に入れていない。
+- 実機の `sinf`（newlib）と Xtensa の GCC の積和の縮約（`MADD.S`）が、host の float32 の基準と 1 ulp も違わないかは直接は見ていない。実機の DERBY は画素を比べられない（`board_capture` は転送前のバッファ）ので、host の全画素ハッシュの一致と、実機で同じ着順・例外なしまでが確認の範囲。
+- MEGADEMO・LCD CATCH・BIG WAVE の plan は手書きの IR のまま（範囲外）。移すなら同じ `@plan` の形で、Node の要件はそのアプリのチャンクに `@plan` が入ったときに効く（入口の `EMBED_TXTFILES` のアプリは上の「入口のファイル」の変更が先に要る）。
 
 ## 確信の低い点
 
@@ -235,13 +263,15 @@ function rail() {
 ## 再現
 
 ```
-python3 tools/kasane_ir/derby_heap.py --stage3 DIR          # §2（WSL、DIR/apps/derby に 55956e9 の書き出し）
+python3 tools/kasane_ir/derby_heap.py --stage3 DIR          # §2・§2.1（WSL、DIR/apps/derby に 55956e9 の書き出し。基準は derby_hand_ir.js）
 node tools/kasane_ir/derby_plans.mjs [--prog FILE] [--show NAME] [--emit OUT.c]   # §3 の表
 python3 tools/kasane_ir/check_equivalence.py [--prog DIR]    # 等価性（WSL、約 1.5 分）
 node tools/kasane_ir/test_kir.mjs
 node tools/kasane_ir/test_plan_js.mjs                           # §5.2 の規則
-python3 tools/kasane_ir/check_equivalence.py --js tools/kasane_ir/plans_js/derby_plans.js   # §5.3（WSL）
-python3 tools/kasane_ir/check_lowered.py                        # §5.3 DERBY 全体（WSL）
+python3 tools/kasane_ir/check_equivalence.py                   # §5.3 JS の関数 = VM と手書き IR = コンパイル後（WSL、bash -lc）
+python3 tools/kasane_ir/check_lowered.py                        # §5.3 移行の検査（WSL、bash -lc）
+python3 tools/games/run_derby.py [--m32]                        # §5.3 DERBY 全体（WSL、bash -lc）
+node tools/kasane_ir/lower_plans.mjs apps/derby OUT_DIR         # 出荷形を見る（ビルドは --file で 1 ファイルずつ）
 node tools/kasane_ir/pack.mjs IN.js OUT.js [--nibble] [--no-macro]   # §2.1 の詰めた形（derby_heap.py が呼ぶ）
 ```
 

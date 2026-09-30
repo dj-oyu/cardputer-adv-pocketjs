@@ -810,7 +810,14 @@ static const char PRELUDE[]=
     "set:(k,v)=>{__sets++;__store[k]=JSON.parse(JSON.stringify(v));return Promise.resolve({revision:1})}}};";
 
 int main(int argc,char **argv){
-    const char *path=argc>1?argv[1]:"apps/derby/derby_watch.js";
+    /* DERBY_APP_DIR: the app as the firmware build embeds it, its @plan
+     * functions lowered (tools/games/run_derby.py makes the copy with
+     * tools/kasane_ir/lower_plans.mjs); apps/derby itself does not run. */
+    const char *app_dir=getenv("DERBY_APP_DIR")?getenv("DERBY_APP_DIR"):"apps/derby";
+    static char entry[512],list[512];
+    snprintf(entry,sizeof entry,"%s/derby_watch.js",app_dir);
+    snprintf(list,sizeof list,"%s/chunks.txt",app_dir);
+    const char *path=argc>1?argv[1]:entry;
     FILE *f=fopen(path,"rb");if(!f){printf("cannot open %s\n",path);return 2;}
     static char src[1<<16];size_t n=fread(src,1,sizeof src-1,f);fclose(f);src[n]=0;
     ppm_dir=getenv("DERBY_PPM");
@@ -819,7 +826,7 @@ int main(int argc,char **argv){
     if(csv)fprintf(csv,"tick,scene,surface,screen,draws,segments,raster,draw_raster_max,draw_steps_max,frame_steps,live_plans,points,instr_max,registered\n");
     /* The game's chunks (pocket.app.load), read from the list the firmware
      * build reads; the entry is still the file named above. */
-    if(app_chunks_host_read("apps/derby/chunks.txt"))return 2;
+    if(app_chunks_host_read(list))return 2;
     atexit(app_chunks_host_clear);
     app_registry_select("local.derby");
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);host_capabilities_clear();
