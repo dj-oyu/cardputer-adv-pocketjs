@@ -32,6 +32,11 @@ ROOT, CACHE = derby_heap.ROOT, derby_heap.CACHE
 run_derby = derby_heap.run_derby
 
 
+def text_prog(d: Path) -> Path:
+    t = d / "derby_prog_text.js"
+    return t if t.exists() else d / "derby_prog.js"
+
+
 def instrument(root: Path) -> None:
     d = root / "apps/derby"
     view = (d / "derby_view.js").read_text(encoding="utf-8")
@@ -39,7 +44,9 @@ def instrument(root: Path) -> None:
     assert anchor in view, "derby_view.js: registration line moved"
     view = view.replace(anchor, anchor + "    __log('REG ' + n + ' ' + JSON.stringify(globalThis.__arg || []));\n")
     (d / "derby_view.js").write_text(view, encoding="utf-8")
-    prog = (d / "derby_prog.js").read_text(encoding="utf-8")
+    # The plans as text: the shipped derby_prog.js is their packed form
+    # (tools/kasane_ir/pack.mjs, the same rows), whose prog() has no anchor.
+    prog = text_prog(d).read_text(encoding="utf-8")
     anchor = "function prog(src, arg) {\n"
     assert anchor in prog
     (d / "derby_prog.js").write_text(prog.replace(anchor, anchor + "  globalThis.__arg = arg;\n"), encoding="utf-8")
@@ -71,7 +78,7 @@ def main() -> None:
     apps = Path(sys.argv[2]) / "apps/derby" if sys.argv[1:2] == ["--prog"] else ROOT / "apps/derby"
     draws = capture(apps)
     cases = CACHE / "cases.txt"
-    subprocess.run(["node", str(HERE / "derby_plans.mjs"), "--prog", str(apps / "derby_prog.js"),
+    subprocess.run(["node", str(HERE / "derby_plans.mjs"), "--prog", str(text_prog(apps)),
                     "--cases", str(draws), str(cases)], check=True)
     binary = CACHE / "run_ir"
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Imain/ui/kasane", "tools/kasane_ir/run_ir.c",

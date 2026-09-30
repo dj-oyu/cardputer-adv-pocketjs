@@ -20,6 +20,8 @@ then runs:
 The player's race must finish identically in every run. Every run checks the
 big screen: its face drawn exactly inside the bezel, nothing but the feed on
 the face, the view's lettering inside it.
+Plans: derby_prog.js must be derby_prog_text.js packed by tools/kasane_ir/pack.mjs
+(--nibble --check, run first).
 Seeds (pocket.random.seed() is DERBY_HW in the harness, fixed): every paddock
 seed the MID run logs must be tools/games/derby_seeds.py's formula; the same
 stored race under another hardware seed must be another race; the seed
@@ -200,6 +202,10 @@ def main() -> None:
     parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
     parser.add_argument("--heap-limit", type=int, help="run once with this guest heap limit (bytes)")
     args = parser.parse_args()
+    # The shipped derby_prog.js is the packed form of derby_prog_text.js
+    # (tools/kasane_ir/pack.mjs checks every plan's rows as it packs).
+    subprocess.run(["node", "tools/kasane_ir/pack.mjs", "apps/derby/derby_prog_text.js", "apps/derby/derby_prog.js",
+                    "--nibble", "--check"], cwd=ROOT, check=True)
     if args.m32:
         env = dict(os.environ, M32_SYSROOT=str(ROOT / ".cache/kasane_megademo_app/m32sys"))
         flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=env,

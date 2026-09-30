@@ -177,7 +177,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 | 名前 | ファイル | 中身 | いつ読むか |
 | --- | --- | --- | --- |
 | （入口） | `derby_watch.js` | レースのモデル（`rng`〜`odds`、`globalThis.derby`） | 起動。host の `tune_derby.mjs` はこれだけを読む |
-| `prog` | `derby_prog.js` | plan のプログラム（`T`・`prog`・大写しの馬の点列の元・HEAD ON の線画） | 入口の評価中 |
+| `prog` | `derby_prog.js` | plan のプログラム（`T` は 4 bit に詰めた文字列、`prog` はその復号器。`derby_prog_text.js`（読み込まない、テキストの原本）から `tools/kasane_ir/pack.mjs --nibble` が生成し、`run_derby.py` が一致を検査）・大写しの馬の点列の元・HEAD ON の線画 | 入口の評価中 |
 | `view` | `derby_view.js` | plan の登録・音・状態・保存・カメラ・`course()` | 同 |
 | `scene` | `derby_scene.js` | `enter`・`build`・`hud`・`settle`・`paint` | 同 |
 | `play` | `derby_play.js` | `attract`・`globalThis.frame`（1 フレームの処理を関数に分けず、その中のラベル付きブロック `fr` に置く）・最初の `enter('pad')` | 同 |

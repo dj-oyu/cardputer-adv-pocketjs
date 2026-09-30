@@ -3,7 +3,8 @@
 //   node tools/kasane_ir/derby_plans.mjs [--prog FILE] [--decompile]
 //                                        [--vectors FILE] [--emit DIR]
 //
-// Reads T (the one-letter IR texts) from apps/derby/derby_prog.js by running
+// Reads T (the one-letter IR texts) from apps/derby/derby_prog_text.js (the
+// source of the packed derby_prog.js, tools/kasane_ir/pack.mjs) by running
 // the file with the entry's globals stubbed, and for each plan compiles
 // tools/kasane_ir/plans/<name>.kjs. --decompile writes the missing .kjs
 // files from the hand IR first (--force rewrites all of them, including the
@@ -21,7 +22,7 @@ import {parseText, compile, decompile, assemble, stats, removeDead, formatText} 
 const HERE = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(HERE, '../..');
 const argv = process.argv.slice(2), opt = k => { const i = argv.indexOf(k); return i < 0 ? null : argv[i + 1] ?? true; };
 
-export function derbyPlans(file = path.join(ROOT, 'apps/derby/derby_prog.js')) {
+export function derbyPlans(file = path.join(ROOT, 'apps/derby/derby_prog_text.js')) {
   const src = fs.readFileSync(file, 'utf8');
   const ctx = {Math};
   vm.createContext(ctx);

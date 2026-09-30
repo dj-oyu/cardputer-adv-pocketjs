@@ -118,8 +118,10 @@ def eval_only(binary: Path, apps: Path, form) -> dict:
     with tempfile.TemporaryDirectory() as t:
         root = Path(t)
         shutil.copytree(apps, root / "apps/derby")
-        p = root / "apps/derby/derby_prog.js"
-        p.write_text(form(p.read_text(encoding="utf-8")), encoding="utf-8")
+        p, t = root / "apps/derby/derby_prog.js", root / "apps/derby/derby_prog_text.js"
+        # Every form starts from the plans as text (the shipped file is the
+        # nibble form of derby_prog_text.js since the packing, js-to-ir.md).
+        p.write_text(form((t if t.exists() else p).read_text(encoding="utf-8")), encoding="utf-8")
         r = subprocess.run([str(binary), "apps/derby/derby_watch.js"], cwd=root, capture_output=True, text=True,
                            env=dict(os.environ, DERBY_EVAL_ONLY="1"))
         if r.returncode:
@@ -166,7 +168,7 @@ def probe(apps: Path, form=lambda t: t) -> str:
                     "tools/kasane_ir/heap_probe.c", *objs, "-lm", "-lpthread", "-o", str(binary)],
                    cwd=ROOT, check=True)
     script = out / "probe.js"
-    script.write_text(PRELUDE + form((apps / "derby_prog.js").read_text(encoding="utf-8")).replace("'use strict';", "")
+    script.write_text(PRELUDE + form(((apps / "derby_prog_text.js") if (apps / "derby_prog_text.js").exists() else apps / "derby_prog.js").read_text(encoding="utf-8")).replace("'use strict';", "")
                       + PROBE, encoding="utf-8")
     return subprocess.run([str(binary), str(script)], check=True, capture_output=True, text=True).stdout
 
