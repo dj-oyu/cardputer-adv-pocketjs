@@ -9,6 +9,11 @@
          per-segment slopes of band, draw and JS time for each geometry.
   paint  KASANE_PAINT windows of a non-trace image, grouped by the BGX state
          (a window is kept only if no BGX line fell inside it).
+  screen summarise a log of tools/games/bgcost/s1base or s1/derby_watch.js, whose
+         BGX mode is 0 no screen, 1 screen shown (a surface-0 turn), 2 a feed
+         turn (surface 1 committed, surface 0 held): per (tier, camera) the
+         turn and surface-0 picture rates while the screen is shown, and how
+         long surface 0 holds across a feed turn (docs/apps/derby-watch.md).
 
 The trace lines are KASANE_MEGADEMO_TRACE's MDT and KASANE_BGCOST_TRACE's BGC
 and BGP. An MDT line describes the turn before it and is printed at the top of
@@ -250,6 +255,52 @@ def paint(args) -> int:
     return 0
 
 
+def screen(args) -> int:
+    # Turns settle for 3 after a camera or tier change, not after a mode
+    # change: the feed copy changes mode every NF turns.
+    def load(path):
+        out, state, key, since, prev = [], None, None, 0, None
+        for line in lines(path):
+            if m := BGX.search(line):
+                state = (int(m[1]), int(m[2]), int(m[3]))
+                if state[:2] != key:
+                    key, since = state[:2], 0
+            elif (m := SCENE.search(line)) and m[1] != "race":
+                state = key = None
+            elif m := MDT.search(line):
+                v = dict(kind=m[2], t=int(m[3]), js=int(m[4]), rn=int(m[5]), sd=int(m[6]),
+                         band=int(m[19]), mn=int(m[24]))
+                if prev is not None:
+                    prev[1]["iv"] = v["t"] - prev[1]["t"]
+                prev = [state, v, since]
+                out.append(prev)
+                since += 1
+        return [(s, v, k) for s, v, k in out if s is not None and v["kind"] == "F" and "iv" in v]
+
+    runs = [load(p) for p in args.logs]
+    rows = [(s, v) for r in runs for s, v, k in r if k >= SETTLE]
+    print("tier cam | mode | n | js ms | render ms | band ms | compose ms | send ms | iv ms | min free")
+    for key in sorted({s[:2] for s, _ in rows}):
+        for b in (0, 1, 2):
+            g = [v for s, v in rows if s[:2] == key and s[2] == b]
+            if not g:
+                continue
+            f = {n: med([x[n] for x in g]) / 1e3 for n in ("js", "rn", "band", "sd", "iv")}
+            print(f"{TIERS[key[0]]} {CAMS.get(key[1], key[1])} | {b} | {len(g)} | {f['js']:.2f} | {f['rn']:.2f} | "
+                  f"{f['band']:.2f} | {f['rn'] - f['band']:.2f} | {f['sd']:.2f} | {f['iv']:.2f} | "
+                  f"{min(x['mn'] for x in g)}")
+        shown = [v for s, v in rows if s[:2] == key and s[2]]
+        if shown:
+            secs = sum(x["iv"] for x in shown) / 1e6
+            pictures = sum(1 for s, v in rows if s[:2] == key and s[2] == 1)
+            print(f"   screen shown: {len(shown) / secs:.1f} turns/s, {pictures / secs:.1f} surface-0 pictures/s")
+    hold = [(r[i][1]["iv"] + r[i + 1][1]["iv"]) / 1e3 for r in runs for i in range(len(r) - 1)
+            if r[i][0][2] == 2]
+    if hold:
+        print(f"surface 0 held across a feed turn: median {med(hold):.1f} ms, max {max(hold):.1f} ms, n {len(hold)}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -258,11 +309,11 @@ def main() -> int:
     r.add_argument("--row", type=int, default=12)
     r.add_argument("--seconds", type=float, default=300)
     r.add_argument("--out", type=Path, required=True)
-    for name in ("race", "synth", "paint"):
+    for name in ("race", "synth", "paint", "screen"):
         s = sub.add_parser(name)
         s.add_argument("logs", type=Path, nargs="+")
     args = ap.parse_args()
-    return {"run": run, "race": race, "synth": synth, "paint": paint}[args.cmd](args)
+    return {"run": run, "race": race, "synth": synth, "paint": paint, "screen": screen}[args.cmd](args)
 
 
 if __name__ == "__main__":
