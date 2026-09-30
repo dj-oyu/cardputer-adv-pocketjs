@@ -49,6 +49,9 @@
 #include "pocket_api.h"
 #include "pocket_av.h"
 #include "keymap.h"
+#include "app_chunks_host.h"
+#include "app_registry.h"
+#include "pocket_app_load.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_render.h"
 #include "ui/kasane/ksn_proc_plan.h"
@@ -771,7 +774,7 @@ static const char PRELUDE[]=
     "K.patch=function(f){return PA.call(K,t=>{wrap(t);return f(t)})};})();"
     "globalThis.__turn=0;globalThis.__now=0;globalThis.__sets=0;globalThis.__cues=0;"
     "globalThis.__store={'derby.v1':{v:1,pts:1500,race:__race}};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,time:{now:()=>__now},"
+    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,time:{now:()=>__now},"
     /* The device samples the native heap at the start of a turn, so while the
      * source evaluates internalFreeBytes is null (2026-09-30: a startup loop
      * waiting on it spun into the 2 s evaluation deadline). Same here. */
@@ -790,11 +793,17 @@ int main(int argc,char **argv){
     if(getenv("DERBY_TIER"))tier_env=atoi(getenv("DERBY_TIER"));
     if(getenv("DERBY_CSV"))csv=fopen(getenv("DERBY_CSV"),"w");
     if(csv)fprintf(csv,"tick,scene,surface,screen,draws,segments,raster,draw_raster_max,draw_steps_max,frame_steps,live_plans,points,instr_max,registered\n");
+    /* The game's chunks (pocket.app.load), read from the list the firmware
+     * build reads; the entry is still the file named above. */
+    if(app_chunks_host_read("apps/derby/chunks.txt"))return 2;
+    atexit(app_chunks_host_clear);
+    app_registry_select("local.derby");
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);host_capabilities_clear();
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}
     pocket_kasane_install(ctx,NULL);
     pocket_input_install(ctx,NULL);
+    if(pocket_app_load_install(ctx)!=ESP_OK)return 2;
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__reg",js_cap_reg,3},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},

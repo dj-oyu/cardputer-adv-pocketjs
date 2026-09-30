@@ -50,7 +50,9 @@ import derby_seeds
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / ".cache/derby_host"
 QJS = "components/quickjs-ng/quickjs-ng"
-EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c"]
+EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
+         # pocket.app.load and its table, read from apps/derby/chunks.txt
+         "main/pocket/pocket_app_load.c", "main/pocket/app_registry.c", "tools/hostshim/app_chunks_host.c"]
 
 
 def kasane_sources() -> list[str]:
