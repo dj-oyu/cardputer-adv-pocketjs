@@ -274,6 +274,50 @@ static void limit_contract(JSContext *ctx){
     pocket_proc_reset();
 }
 
+/* A plan allocates for its own instruction count (the full-size plan held 64
+ * whatever the count). Each size draws, and a churn of mixed sizes through
+ * all 32 slots runs under ASan, so a plan that reads or writes past its own
+ * count fails here rather than on the device's shared heap. */
+static void plan_size_contract(JSContext *ctx){
+    static const unsigned counts[]={1,2,3,8,16,32,63,64};
+    eval_ok(ctx,"globalThis.sized=(n,x,y,c)=>{if(n===1)return [[8,0,0,1,0,c]];"
+                "if(n===2)return [[0,0,0,0,x,0],[8,0,0,1,0,c]];"
+                "const p=[];for(let i=0;i<n-3;i++)p.push([2,2,2,2,0,0]);"
+                "return p.concat(dotAt(x,y,c))}");
+    for(unsigned k=0;k<sizeof counts/sizeof counts[0];k++){
+        const unsigned n=counts[k];
+        char source[200];
+        snprintf(source,sizeof source,
+                 "globalThis.ps=proc.register(sized(%u,40,50,0xffff))",n);
+        calloc_n=0;
+        eval_ok(ctx,source);
+        REQUIRE(calloc_n==1&&callocs[0]==ksn_proc_sized_plan_bytes(n));
+        REQUIRE(callocs[0]<sizeof(ksn_proc_plan));
+        eval_ok(ctx,"proc.beginFrame(3);proc.draw(ps,[]);proc.commit();proc.unregister(ps)");
+        settle(actual);
+        const unsigned at=n==1?0:n==2?40:50*KSN_PROC_W+40;
+        REQUIRE(actual[at]==0xffff&&count_color(actual,0xffff)==1);
+    }
+    eval_ok(ctx,"expect(()=>proc.register(sized(65,0,0,1)),'INVALID_ARGUMENT')");
+    eval_ok(ctx,"globalThis.sd=12345;globalThis.rnd=m=>(sd=(sd*1103515245+12345)&0x7fffffff)%m;"
+                "globalThis.live=new Array(32).fill(0)");
+    for(unsigned round=0;round<12;round++){
+        eval_ok(ctx,
+            "for(let it=0;it<50;it++){const i=rnd(32);"
+            "if(live[i]){proc.unregister(live[i]);live[i]=0}"
+            "else live[i]=proc.register(sized(1+rnd(64),rnd(240),rnd(135),1+rnd(65535)))}"
+            "proc.beginFrame(0);for(const h of live)if(h)proc.draw(h,[]);proc.commit()");
+        settle(actual);
+    }
+    eval_ok(ctx,
+        "for(let i=0;i<32;i++)if(!live[i])live[i]=proc.register(sized(64,i,i,1));"
+        "expect(()=>proc.register(sized(1,0,0,1)),'LIMIT_EXCEEDED');"
+        "proc.beginFrame(0);for(const h of live)proc.draw(h,[]);proc.commit()");
+    settle(actual);
+    pocket_proc_end_turn();
+    pocket_proc_reset();
+}
+
 /* Improvement 3: a batch allocates for its own count, rounded to whole
  * eight-lane planes, and draws the same pixels as the scalar reference. */
 static void sizing_contract(JSContext *ctx,unsigned *pie_expected){
@@ -422,6 +466,7 @@ int main(void){
     park_contract(ctx);
     leave_contract(ctx);
     limit_contract(ctx);
+    plan_size_contract(ctx);
     unsigned pie=0;
     sizing_contract(ctx,&pie);
     uint32_t scalar_batches=0,pie_batches=0;
@@ -437,7 +482,7 @@ int main(void){
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("PASS procedural turn: parked frame commits after 1 and 3 parks, terminated/thrown "
            "frame carries nothing, Back's save frame opens after the finished frame is presented, "
-           "limit before allocation, per-count points (%u PIE batches), per-surface segment cap\n",
+           "limit before allocation, per-count plans and points (%u PIE batches), per-surface segment cap\n",
            (unsigned)pie_batches);
     return 0;
 }

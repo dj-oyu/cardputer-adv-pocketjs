@@ -21,7 +21,7 @@
 
 **命令セット**（[ksn_procedural.h](../../main/ui/kasane/ksn_procedural.h)、15 op）: `SET INPUT ADD MUL SIN REPEAT END MOVE PLOT LINE REPEAT_REG BREAK_IF_GT PLOT_COLOR_REG LINE_COLOR_REG CUBIC`。除算・減算・比較分岐・sqrt・floor・レジスタ間の MOV は無い（減算は `×−1` と加算、コピーは `+0`）。`CUBIC` は r0..r7 の 4 点を読む（dst=0 固定、分割 1..64）。制約: レジスタ 16、入力 8、1 plan 64 命令、ループの深さ 8、`REPEAT` 1..255（0 は検証で拒否）、`REPEAT_REG` 0..255 の整数（0 は本体を飛ばす）、1 draw の step 10,000・線分 1,024・ラスタ 8,192、座標 −480..720。`draw()` のたびに `begin` がプログラムを VM へ写して検証し直し、**レジスタは毎回 +0 から始まる**（`pocket_proc.c` は状態を持ち越す `begin_state` を使わない）。算術の結果が非有限、`REPEAT_REG`・色レジスタが範囲外の整数でない、座標が範囲外、のどれでも draw 全体が失敗する。
 
-**メモリ**: `ksn_proc_inst` 12 B、`ksn_proc_plan` **872 B**（`code[64]` 768 B ＋ `fused_at[64]` ＋点列の係数）。Xtensa の `-Os` オブジェクトの `nm -S` で 0x368 = 872 B、m32 host でも同じ（ビルド確認）。plan は `calloc(1, sizeof *plan)` なので、1 命令の plan（DERBY の点列用 `S0,0` が 7 本）も 872 B を取る。VM（996 B）とフレームは共有で、plan の数に比例しない。
+**メモリ**: `ksn_proc_inst` 12 B、`ksn_proc_plan` **872 B**（`code[64]` 768 B ＋ `fused_at[64]` ＋点列の係数）。Xtensa の `-Os` オブジェクトの `nm -S` で 0x368 = 872 B、m32 host でも同じ（ビルド確認）。plan は `calloc(1, sizeof *plan)` なので、1 命令の plan（DERBY の点列用 `S0,0` が 7 本）も 872 B を取る。VM（996 B）とフレームは共有で、plan の数に比例しない。（その後 [plan-sized-alloc.md](plan-sized-alloc.md) で、`register()` の plan を 40 + 12n B にした。）
 
 ## 2. DERBY のメモリ（host 実測、`python3 tools/kasane_ir/derby_heap.py --stage3 DIR`）
 
