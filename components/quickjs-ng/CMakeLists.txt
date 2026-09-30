@@ -27,9 +27,13 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
 )
 
 # Third-party source files: suppress warnings that are noisy but harmless in upstream code.
+# -Wincompatible-pointer-types stays on (an error in GCC 14+): an int * handed to
+# an int32_t * parameter is a strict-aliasing miscompile on Xtensa, where
+# int32_t is long (docs/vm/aliasing-types.md). Only quickjs-libc.c keeps it off:
+# its 16 sites are in the std/os modules, which the firmware never registers
+# (none of them is in the ELF).
 set(_qjs_vendor_warnings
     -Wno-pointer-sign
-    -Wno-incompatible-pointer-types
     -Wno-cast-function-type
     -Wno-unused-parameter
     -Wno-unused-variable
@@ -66,7 +70,7 @@ set(_qjs_libc "${CMAKE_CURRENT_SOURCE_DIR}/quickjs-ng/quickjs-libc.c")
 set(_qjs_libc_compat "${CMAKE_CURRENT_SOURCE_DIR}/port/include/esp_libc_compat.h")
 set_source_files_properties(${_qjs_libc}
     PROPERTIES
-        COMPILE_OPTIONS "-include;${_qjs_libc_compat};${_qjs_vendor_warnings}"
+        COMPILE_OPTIONS "-include;${_qjs_libc_compat};${_qjs_vendor_warnings};-Wno-incompatible-pointer-types"
 )
 
 # newlib: poll and related declarations (quickjs-libc.c includes <poll.h> via port/include/poll.h).

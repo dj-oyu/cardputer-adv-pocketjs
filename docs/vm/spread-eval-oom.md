@@ -27,7 +27,7 @@ it->idx = idx;
 
 `int` の一時変数を通す（`int next = (int)idx; c = string_getc(p, &next); it->idx = (uint32_t)next;`）。バイトコードも意味も不変。host のコーパス（vmtest o2）80 件合格。実機では §3 の全変種が正しい値で通る。
 
-### 同じ種類の箇所（未修正。実機では今は正しく動く）
+### 同じ種類の箇所（2026-09-30 に型を合わせて修正。[aliasing-types.md](aliasing-types.md)）
 
 `-Wno-incompatible-pointer-types` を外して Xtensa 向けにコンパイルすると、`int *` を `int32_t *`（Xtensa では `long *`）に渡す箇所がさらに6つ出る。GCC 15 ではこれはエラー（permerror）で、`components/quickjs-ng/CMakeLists.txt` の抑止で隠れている。
 

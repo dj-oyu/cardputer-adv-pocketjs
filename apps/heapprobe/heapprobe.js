@@ -119,3 +119,21 @@ ballast = null; try { L('big'); b = 'loaded'; } catch (e) { b = e === null ? 'nu
 let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 5) pocket.app.load('bad'); };
 //@ appload-evalerr
 pocket.app.load('thr'); globalThis.frame = () => {};
+//@ alias-parseint2
+const v = [parseInt('z', 36), parseInt('10', 37), parseInt('0x1f'), parseInt('12', 0), parseInt('-7f', 16), parseInt('11', 1)]; console.log('HP_EVAL ok ' + v); globalThis.frame = () => {};
+//@ alias-promise-settled
+Promise.all([Promise.allSettled([1, Promise.reject(2), 3]), Promise.any([Promise.reject(1), Promise.resolve(5)]), Promise.all([])]).then(([s, v, e]) => console.log('HP_FRAME ok ' + s.map(x => x.status[0]).join('') + ' ' + v + ' ' + e.length)); console.log('HP_EVAL ok'); globalThis.frame = () => {};
+//@ alias-stack-line2
+globalThis.frame = () => {};
+function f() {
+    return   null.x;
+}
+function g() { return f(); }
+let a = ''; try { g(); } catch (e) { a = String(e.stack).replace(/\s+/g, ' '); }
+Error.prepareStackTrace = (e, cs) => cs.map(c => c.getLineNumber() + ':' + c.getColumnNumber()).join(',');
+let b = ''; try { g(); } catch (e) { b = e.stack; }
+console.log('HP_EVAL ok ' + a + ' | ' + b);
+//@ alias-normalize2
+const r = ['é'.normalize('NFC').charCodeAt(0), 'ạ́'.normalize('NFD').split('').map(c => c.charCodeAt(0).toString(16)).join('.'), '한'.normalize('NFD').length, '한'.normalize('NFD').normalize('NFC').charCodeAt(0).toString(16), 'ﬁ'.normalize('NFKC'), 'é'.localeCompare('é'), 'ẛ̣'.normalize('NFKC').charCodeAt(0).toString(16)]; console.log('HP_EVAL ok ' + r.join(' ')); globalThis.frame = () => {};
+//@ alias-atomics
+const ia = new Int32Array(new SharedArrayBuffer(8)); const r = [Atomics.notify(ia, 0, 1), Atomics.notify(ia, 1), Atomics.notify(ia, 0, 0), Atomics.notify(ia, 0, -3)]; console.log('HP_EVAL ok ' + r); globalThis.frame = () => {};
