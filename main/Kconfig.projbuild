@@ -99,6 +99,26 @@ menu "Pocket VM (diagnostics)"
             Measurement only. Build a separate build_* directory with its own
             sdkconfig (-D SDKCONFIG=<dir>/sdkconfig).
 
+    config POCKET_VM_STRIP_DEBUG
+        bool "Compile guest JS without line tables (runtime error positions)"
+        default n
+        help
+            The parser keeps no pc2line table for any function it compiles
+            (components/quickjs-ng/quickjs-ng/quickjs.c,
+            compute_pc2line_info). A runtime error's stack then names the
+            file and the FIRST line of each function instead of the line
+            that threw; SyntaxError and other parse errors keep their exact
+            file:line (they come from the tokenizer, not the table).
+
+            Saves the tables for every function an app keeps: measured on
+            DERBY WATCH, the heap a guest keeps after evaluating is lower
+            by the table's size (docs/vm/strip-debug.md). The function
+            source text is already never kept (js_function_toString's note:
+            that removal has no Kconfig switch of its own).
+
+            Off by default: development builds keep exact positions. A
+            shipping build may turn it on when an app needs the room.
+
     config POCKET_VM_TURNPERF
         bool "R4 probe: the JS turn's cycles against the core's own counters"
         default n
