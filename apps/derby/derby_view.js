@@ -61,11 +61,6 @@ try {
   }, nop);
 } catch (e) {}
 
-// ---- Cameras [f, height, horizon y]: WIDE, CLOSE (set per lane), FIELD,
-// FINISH (slow motion), PHOTO (along the line: the line is x=120), VISION
-// (low, held within 30 m of the screen).
-const CAMS = [[100, 9.7, 33], 0, [58, 15, 36], [170, 7, 22], [300, 4, 30], [130, 1.6, 84]],
-  NAMES = ['WIDE', 'CLOSE', 'FIELD', 'FINISH', '', 'VISION', 'HEAD ON'];
 // The screen (README "Turf vision"): centre x, depth, half width, bottom
 // and top height (m), a 4:1 face.
 const VS = [840, 34, 20, 6, 16], FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30, -2, -26, 12, 12, 8];
@@ -86,6 +81,15 @@ function pose(g, w) {
   x += g * M.cos(a); z += g * sin(a);
   return [x - w * sin(a), z + w * M.cos(a), M.cos(a), sin(a)];
 }
+// ---- Cameras, a row a unit: [f, height, horizon y, lead, smoothed, lo,
+// hi]. A side unit looks along the course's normal from cx: the leader
+// lead/f m ahead of it (eased when smoothed, set on a cut), cx held within
+// lo..hi. WIDE, CLOSE (set per lane), FIELD, FINISH (slow motion), PHOTO
+// (along the line: the line is x=120), VISION (low, within 30 m of the
+// screen); HEAD ON is a still (paint).
+const CAMS = [[100, 9.7, 33, 880, 1, -1e9, 1e9], 0, [58, 15, 36, 880, 1, -1e9, 1e9], [170, 7, 22, 640, 0, -1e9, D - 6],
+  [300, 4, 30, 880, 0, D, D], [130, 1.6, 84, 880, 1, VS[0] - 30, VS[0] + 30]],
+  NAMES = ['WIDE', 'CLOSE', 'FIELD', 'FINISH', '', 'VISION', 'HEAD ON'];
 // Sets cx for shot m (1: locked on lane l) and returns the camera.
 function shot(m, xs, l, cut) {
   if (m === 1) {
@@ -93,9 +97,8 @@ function shot(m, xs, l, cut) {
     cx = xs[l] - 12.5 * U - (HX - 120) * DL[l] / f;
     return [f, 3, HY + 6 * HS - 72];
   }
-  const c = CAMS[m], tgt = mx.apply(null, xs) - (m === 3 ? 640 : 880) / c[0];
-  cx = m === 4 ? D : m === 3 ? mn(tgt, D - 6) : cut ? tgt : cx + (tgt - cx) * .12 + mx.apply(null, rs.v) * DT * .88;
-  if (m === 5) cx = mx(VS[0] - 30, mn(VS[0] + 30, cx));
+  const c = CAMS[m], tgt = mx.apply(null, xs) - c[3] / c[0];
+  cx = mx(c[5], mn(c[6], c[4] ? cut ? tgt : cx + (tgt - cx) * .12 + mx.apply(null, rs.v) * DT * .88 : tgt));
   return c;
 }
 // One frame of the course as [plan, inputs], back to front, for camera c
