@@ -562,6 +562,13 @@ static double gnum(const char *name){
     JSValue g=JS_GetGlobalObject(ctx),v=JS_GetPropertyStr(ctx,g,name);double d=num(v);
     JS_FreeValue(ctx,v);JS_FreeValue(ctx,g);return d;
 }
+/* __hr(): wall time in us, for profiling the guest's functions from a
+ * DERBY_JS wrapper (host only; the device has no such clock). */
+static JSValue js_hr(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;(void)argc;(void)argv;
+    struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);
+    return JS_NewFloat64(c,t.tv_sec*1e6+t.tv_nsec*1e-3);
+}
 static JSValue js_log(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *s=argc?JS_ToCString(c,argv[0]):NULL;
@@ -980,7 +987,7 @@ int main(int argc,char **argv){
     if(pocket_app_load_install(ctx)!=ESP_OK)return 2;
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
-        {"__log",js_log,1},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
+        {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
         {"__draw",js_cap_draw,4},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
