@@ -107,7 +107,11 @@ int app_chunks_host_read(const char *list_path) {
         if(!bytes) { fprintf(stderr,"app_chunks_host: %s:%d: no file %s\n",list_path,number,path); result=-1; break; }
         const char *base=strrchr(b,'/');
         app_chunk_t *c=&current->chunks[current->set.count++];
-        *c=(app_chunk_t){.name=copy(a),.file=copy(base?base+1:b),.start=bytes,.end=bytes+length+1};
+        const size_t bn=strlen(b);
+        // .mjs is a module, as tools/make_app_chunks.py reads it.
+        const uint8_t module=bn>4 && !strcmp(b+bn-4,".mjs");
+        *c=(app_chunk_t){.name=copy(a),.file=copy(base?base+1:b),.start=bytes,.end=bytes+length+1,
+                         .module=module};
     }
     fclose(f);
     if(result==0 && !current) result=-1;

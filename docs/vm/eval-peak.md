@@ -265,7 +265,7 @@ demo   derby_demo.js
 
 満杯まで詰めた heap（`new Uint8Array(512)` を割り当てが断られるまで）で `load` を呼ぶ試しでは、アプリは `load` と無関係な所（詰め物のループの直後）でも裸の `null` を投げて止まった。heap を最後の 1 B まで使う状態は、`load` に限らず JS のどこでも回復できない（エラーのオブジェクトすら作れない）。上の `appload-oom` のように、上限の手前で失敗させるのが意味のある試験。
 
-## 8. 次: 静的 `import`（A 案）への引き継ぎ（設計メモ、未実装）
+## 8. 次: 静的 `import`（A 案）への引き継ぎ（設計メモ。実装は §9）
 
 B 案の実装で分かったことと、A 案で決めること。
 
@@ -275,3 +275,85 @@ B 案の実装で分かったことと、A 案で決めること。
 - **状態の共有**: import した束縛は読み取り専用（§3.3）。DERBY WATCH のように複数の部分が同じ `let` を書き換える作りは、B 案ではそのまま動いたが、A 案では状態をオブジェクトに移す書き換えが要る。
 - **事前コンパイル（§3.5）との合流**: `load` の `JS_Eval(COMPILE_ONLY)` を `JS_ReadObject` に替えれば、同じ API のまま事前コンパイルを出せる（表に「ソースかバイトコードか」を持たせる）。モジュールのローダも、`JS_ReadObject` で `JSModuleDef` を返せばよい。
 - B 案の費用で A 案にも効くもの: `pocket.app` の名前空間を作る分（実測・実機: `pocket.app` を読まない試作の `__hpLoad` との差 +1,035 B、§7.5）。入口の評価中に読む API を、`pocket` の既存の名前空間に置くかぎり、その名前空間の構築の分はかかる。A 案の `import` は名前空間を作らない。
+
+## 9. 静的 `import`（A 案、2026-09-30、実装）
+
+§8 の設計メモを実装した。仕様は [共通 API](../api/common-api.md) §5.2。ここには、決めたことの理由・作者向けの使い分け・測定を置く。
+
+### 9.1 作り
+
+| 部品 | 場所 | 役割 |
+| --- | --- | --- |
+| ローダ | `main/pocket/pocket_app_load.c` | `module_normalize` と `module_load`。`pocket_app_load_install()` が `JS_SetModuleLoaderFunc2` で毎セッション登録する（ランタイムに 1 つのスロットで、他に使う者はいない） |
+| 入口の評価 | 同 `pocket_app_eval_module()` | `JS_Eval(MODULE\|COMPILE_ONLY)`（この中で静的 import がすべて解決・解析される）→ `JS_EvalFunction` → 返る Promise の状態を読む |
+| 呼び出し | `main/app_session.c` の `eval_reporting()` | `module` の引数を足しただけ。失敗は従来と同じ `EVAL_ERROR` の行（書式は不変） |
+| 種別 | `app_chunks.h` の `module`、`make_app_chunks.py`、`app_chunks_host.c` | ファイル名が `.mjs` ならモジュール。`chunks.txt` の書式は変えていない |
+
+決めたこと（根拠）:
+
+- **入口がモジュールかどうかは、マニフェストの `entry` が `.mjs` で終わるか**（`pocket_app_entry_is_module()`）。ソースから推測しない: quickjs-ng の `JS_DetectModule` は新しいランタイムを作って全体を解析する（この機体では払えない）。字句の目視は、文字列・コメント・正規表現で誤る。`.mjs` は他の JS ホストと同じ約束で、`chunks.txt` のチャンクの種別も同じ規則にした。既存のアプリ（`.js`・Playground・チュートリアル）は一切変わらない。
+- **指定子はチャンクの名前だけ**（`import … from 'scene'`）。正規化した名前はチャンクの**ファイル名**（`derby_scene.mjs`）にする。QuickJS は `loaded_modules` を、そのモジュールを解析したときの名前で引くので、ファイル名にしておけば、スタックの `file:line` と引く名前が同じ文字列になる。相対・絶対パス・URL は、名前の文字集合（`/` を含まない）で自動的に断られる。
+- **`.js` のチャンクは `load` 専用、`.mjs` は `import` 専用**（§8 の「合わない読み方を両方で断る」）。`load('mjs のチャンク')` は `INVALID_ARGUMENT`（評価しない）、`.js` を import すると `ReferenceError`。
+- **解決は入口の解析の間だけ開く**（`resolving` の旗）。QuickJS は静的 import を、そのモジュールの `JS_Eval(COMPILE_ONLY)` の中で解決する（`__JS_EvalInternal` の `js_resolve_module`）。外で呼ばれる正規化は動的 `import()` だけなので、それを `TypeError: import('x') in y: dynamic import() is not supported; use pocket.app.load()` で断る。ジョブの中で解析してモジュールを増やす道（手放せない）を塞ぎ、後から読む道は `load` に一本化する。解決済みのモジュールへの `import()` も、正規化が先に呼ばれるので同じく断られる。
+- **トップレベル await は断る**。評価の後に Promise が未決なら `SyntaxError: user.js: top-level await is not supported`。モジュール本体の同期区間は park しない（vm-L2-design §11.2）、起動の評価はターンを持たない、の 2 点から、未決は TLA のときだけ。続きをジョブで走らせると、評価が終わったことにして `frame()` を結んだ後に、そのモジュールが走り、その失敗は評価の失敗として報告できない。セッションは始まらないので、止まったモジュールはゲストと一緒に消える。
+- **import attributes（`with {…}`）は断る**。import の入れ子は**深さ 8** まで（`RangeError`）。ローダの各段は `JS_Eval` の C 再帰（UI タスクのスタック）で、表の上限 32 段は積ませない。入口がいくつかの部品を import する形は深さ 1。
+- **循環 import は仕様どおり**許す（`cycle` の検査はしない）。B 案（`load`）の循環は `CONFLICT` にしたが、モジュールの循環は ES の正しいプログラムで、初期化前の束縛を読んだときだけ `ReferenceError`（`ta is not initialized`、位置は**読む側のモジュールの import の行**。QuickJS の位置の付け方）。
+- **拒否した評価の Promise**: QuickJS は、失敗したモジュールの内側の async 関数の Promise と、グラフの Promise を、ゲストの拒否の追跡に「未処理」として渡す。評価に失敗したセッションは drain に届かず（`START_FAILED`）、`pocketjs_guest_destroy()` が一覧を捨てるので、`Unhandled Promise rejection` の行は出ない。ハンドラを付けて消す処理は置かなかった（内側の Promise には届かない）。
+- heap 不足（解析中）は、B 案と違って**再試行の道がアプリに無い**（入口の評価そのものの失敗）。`EVAL_ERROR` と `OOM` の行が出て、アプリは起動せずホームへ戻る。落ちない（実機で確認、§9.4）。部品を小さくするか、`load` で後回しにする。
+- ログ: `APP_IMPORT <名前> bytes=… compile_us=… used=<前>><後>`（契約のマーカーではない）。`compile_us` と後の値は、そのモジュールが import する子の分を含む（子の行が先に出る）。
+
+費用（実測・map、`esp_idf_size --diff`、基準 `e15e6eb`、通常の image）: **DIRAM +16 B**（`.bss`: map で `depth` 4 B と `resolving` 1 B。残りは整列の詰め物と推定）、flash +1,448 B（コード +856、rodata +592）。capability は足していない（`pocket.*` の面ではないので。表の 32 枠を使わない）。
+
+### 9.2 測定（実機、2026-09-30、COM3、`POCKET_HEAPPROBE=ON` の image）
+
+同じ内容の 3 つの形（`tools/heapprobe_import_gen.py` が生成、31.6 KB、部品 3 つ × 10.5 KB。アプリ風の関数・クロージャ・メソッド付きのオブジェクト・数表。モジュール版は各部品の末尾に `export { pN_run };` の 1 行が付くだけ）。DERBY WATCH ではない理由: 部品同士がトップレベルの `let` を書き合うので、import の束縛（読み取り専用）では書き直さずに分けられない（§3.3）。変種の索引 47〜49、`tools/heapprobe_device.py --bisect`、256 B 刻み、各 1 回。
+
+| 形 | 評価できる最小のヒープ上限（実測・実機） | 評価直後のゲスト heap（上限 160 KiB） | 評価の時間（実測・実機） |
+| --- | ---: | ---: | ---: |
+| (a) 1 スクリプト | **評価できない**: 上限 160 KiB・180,000・200,000 で割り当て上限の OOM、240,000 では割り当て器そのものが 6.9 KB を断った（used 112,016） | — | —（失敗まで 92〜192 ms） |
+| (b) `pocket.app.load` で 3 分割 | **154,612** | 122,896 | 279 ms（部品の解析 64〜65 ms ×3） |
+| (c) 静的 `import` で 3 分割 | **144,139**（(b) より −10.5 KB） | 134,752（(b) より +11.9 KB） | 279 ms（同 64〜66 ms ×3） |
+
+host（64 bit、ASan、`tools/test_app_import.c`、同じ 3 形）: 最小の上限 (a) 258,773 / (b) 191,796 / (c) 181,601、評価後に残る量 (a) 158,476 / (b) 157,328 / (c) 173,162。実機と同じ向き（(c) がピークは最小、定常は最大）。
+
+読み方:
+
+- **分割そのものが効く**のは §3.2 と同じ（この内容では、1 スクリプトは 160 KiB に入らない）。
+- **ピークは import の方が低い**（実測・実機 −10.5 KB）。`APP_LOAD`／`APP_IMPORT` の行（実測・実機）では、load は各部品の**解析の直後にその実行**が走り、次の部品の解析はその実行の残り（部品 1 つ約 +3〜6 KB のオブジェクト）と `pocket.app` の名前空間の上で行われる。import は 3 つの解析がすべて先（35,460 → 60,336 → 83,436 → 106,468）で、実行は後。最後の解析の土台が load より低い（83,436 対 94,264）。
+- **定常は import の方が高い**（+11.9 KB）。モジュールは関数本体（トップレベルのバイトコード）とモジュールの記録・名前空間を realm の最後まで持つ（§3.3、`loaded_modules`）。load のトップレベル関数は実行の直後に解放される。
+- 時間は同じ（279 ms）。解析が支配的で、仕組みの差は見えない。
+- 注意: 実行が重い（トップレベルで Kasane の場面や大きな表を作る）アプリでは、import でも実行は解析の後にまとめて来るので、ピークは「全モジュールのバイトコード＋実行の一時領域」になる。この内容の実行は軽い（部品あたり 3 ms・+3〜6 KB）。**重い実行のアプリで import が load より低くなるとは限らない**（未測定）。
+
+### 9.3 作者向け: `import` と `load` の使い分け
+
+| 目的 | 使う | 理由 |
+| --- | --- | --- |
+| 起動時の評価のピークを下げたい（全部を起動時に読む） | **`import`**（入口を `.mjs`、部品を `.mjs` のチャンク） | 普通の JS の書き方。解析が 1 つずつ。ピークは load より低い（実測、§9.2）。ただし定常は +12 KB 前後（この内容で） |
+| 場面ごとに後から読む・使い終わったら手放す | **`load`**（`.js` のチャンク） | 動的 `import()` は断る。モジュールは手放せない |
+| 部品が同じ `let` を書き合う（DERBY WATCH の形） | **`load`**、または状態を 1 つのオブジェクトに移してから `import` | import の束縛は読み取り専用（`count = 1` は TypeError、host で確認） |
+| 定常の heap が厳しい（評価後に大きな確保をする） | **`load`** | import は評価後もモジュールの本体を持つ |
+
+**import の書き方**
+
+- マニフェスト（`app_registry.c`）の `entry` を `.mjs` にする。入口のファイルも `.mjs` にし、`main/CMakeLists.txt` の `EMBED_TXTFILES` で埋め込む（シンボルは `_binary_<名前>_mjs_start`）。
+- `chunks.txt` に `.mjs` のファイルを書く（`scene foo_scene.mjs`）。import の指定子はその名前（`from 'scene'`）。`'./foo_scene.mjs'` は書けない。
+- **入口で `globalThis.frame = …` と書く**。モジュールの `function frame` はグローバルに出ないので、ホストは見つけられない（bind-frame.js が `NOT_FOUND` を返し、アプリとして走らない）。`pocket.app.start()` など評価中にしか呼べないものも、入口か、入口が import するモジュールのトップレベルで。
+- 入口のソースに `pocket.kasane` の文字列を入れる（§7.3 と同じ。Kasane の arena の先取りは入口しか見ない）。
+- モジュールは strict で、`this` は `undefined`。部品の間の状態は export した関数か、export した 1 つのオブジェクトの中身を書き換える。
+- トップレベル await・`import()`・`with {…}` は使えない（§9.1）。
+- `load` との併用: 入口がモジュールでも `pocket.app.load('x')` は使える（`.js` のチャンクがグローバルスクリプトとして評価される。モジュールの名前はそこから見えない）。
+
+### 9.4 検証
+
+- host（`tools/build_app_import_test.sh`、WSL、ASan/UBSan、実物の `pocket_app_load.c`・`pocket_api.c`・`app_registry.c`）: 102 項目。名前での import、live binding、1 モジュール 1 インスタンス（2 か所から import した `imbase` の評価は 1 回）、無害な循環、import は読み取り専用、モジュールの名前はグローバルに出ない、`load` がモジュールを断る、構文エラー（`import_bad.mjs:3:1`）・トップレベルの例外（`import_throw.mjs:4:1`）・TDZ の循環（`import_tdz_b.mjs:1:1`）・未知の名前・相対／絶対パス・スクリプトのチャンク・attributes・深さ 9・TLA（子と入口の両方）・動的 `import()`（スクリプトから、モジュールのトップレベルから）、上限 120,000 での heap 不足（裸の `null`、落ちない）の後に別のセッションで成功、3 セッション、成功したセッションで未処理の reject が 0。既存の `tools/build_app_load_test.sh`（32 項目）もそのまま通る。
+- 実機（変種 50〜56）: `import-api` が `count=41 base=40 runs=1 cyc=ab ok loadModule=INVALID_ARGUMENT`、frame 10 で `dyn=TypeError: import('imbase') in user.js: dynamic import() is not supported; use pocket.app.load()`、frame 40 まで生存。構文エラー・例外・TDZ・未知・スクリプト・TLA は、それぞれ `EVAL_ERROR`（host と同じ文面・同じ `file:line`）と `START_FAILED` の後、次の変種がホームから普通に起動した（アプリは落ちない）。`Unhandled Promise rejection` の行は 0。heap 不足は (a) の `EVAL_ERROR InternalError: out of memory` と `OOM` の行、ホームへ戻る。
+- 回帰: `tools/kasane_contract/run.sh`（`GAMES_M32=0`）通過。
+
+### 9.5 事前コンパイル（§3.5）への引き継ぎ
+
+- **合流点は 2 か所**: `pocket_app_load.c` の `module_load()` の `JS_Eval(MODULE|COMPILE_ONLY)` と、`js_load()` の `JS_Eval(GLOBAL|COMPILE_ONLY)`。どちらも「解析して値を返す」だけなので、`JS_ReadObject(JS_READ_OBJ_BYTECODE)` に替えれば API は変わらない。表に「ソースかバイトコードか」を持たせる（`app_chunk_t` に 1 バイト足す。`.mjs` の種別と同じく、ファイル名の約束で決めてもよい）。
+- **モジュールを `JS_ReadObject` で読むときは、依存の解決を自分で呼ぶ**: ソースの `JS_Eval(COMPILE_ONLY)` は中で `js_resolve_module` まで済ませるが、`JS_ReadObject` は済ませない（quickjs.h の `JS_ResolveModule` の注記）。`module_load()` で読んだ後に `JS_ResolveModule(ctx, value)` を呼ぶ。この呼び出しも `resolving` の窓の中（入口の評価中）なので、動的 `import()` の拒否はそのまま効く。入口を事前コンパイルするなら、`pocket_app_eval_module()` の最初の `JS_Eval` を `JS_ReadObject` + `JS_ResolveModule` に替える。
+- **モジュール名**: バイトコードに入るモジュール名は、host でコンパイルしたときの `filename`。ローダが引く名前（チャンクのファイル名 `foo_scene.mjs`）と同じ文字列でコンパイルすること。違うと `loaded_modules` の検索に外れ、同じモジュールが 2 回読まれる。
+- **atom の書き換え**（§3.5）: `JS_ReadObject` はバイトコードを RAM に写して atom を書き換えるので、flash 常駐にはならない。import の定常 +12 KB（§9.2）は、事前コンパイルでも残る（モジュールの本体を持つのは同じ）。
+- **ピーク**: 事前コンパイルでは解析の一時領域が消えるので、import と load のピークの差（§9.2 の −10.5 KB は解析の順番の差）はほぼ消え、実行の一時領域と、評価後に残る量の差（import が多い）が残る見込み（推定、未測定）。
+- 検証の土台: `tools/test_app_import.c` の失敗の表（`file:line` を含む）は、`JS_WRITE_OBJ_STRIP_DEBUG` を使うと行番号が消える。行番号表を残すかどうかは、この試験で決められる。

@@ -14,6 +14,11 @@
 // chunks of apps/heapprobe/appload_chunks.txt and `big` (derby's first third).
 // appload-oom wants a limit ('Q44,80000'): `big` must not fit beside the
 // ballast, and must once the ballast is gone.
+// "@imp-single|load3|import3": one generated 32 KB program as one script,
+// three scripts through pocket.app.load(), three modules through static import
+// (tools/heapprobe_import_gen.py; docs/vm/eval-peak.md sec.9). "@module" on a
+// section's first line evaluates it as a module entry; import-*: its checks,
+// on apps/heapprobe/import_chunks.txt.
 //@ baseline
 var n = 1; console.log('HP_EVAL ok'); globalThis.frame = () => {};
 //@ spread-mixed-top
@@ -119,3 +124,34 @@ ballast = null; try { L('big'); b = 'loaded'; } catch (e) { b = e === null ? 'nu
 let n = 0; console.log('HP_EVAL ok'); globalThis.frame = () => { if (++n === 5) pocket.app.load('bad'); };
 //@ appload-evalerr
 pocket.app.load('thr'); globalThis.frame = () => {};
+//@ imp-single
+@imp-single
+//@ imp-load3
+@imp-load3
+//@ imp-import3
+@imp-import3
+//@ import-api
+@module
+import { count, bump, name } from 'imok'; import { base } from 'imbase'; import * as cyc from 'imcycb';
+bump(); let lm; try { pocket.app.load('imok'); lm = 'loaded'; } catch (e) { lm = e.code; }
+console.log('HP_EVAL ok count=' + count + ' base=' + base + ' runs=' + globalThis.imBaseRuns + ' cyc=' + cyc.cab() + ' ' + name + ' loadModule=' + lm);
+let n = 0, dyn = 'pending'; import('imbase').then(() => { dyn = 'resolved'; }, e => { dyn = String(e); });
+globalThis.frame = () => { if (++n === 10) console.log('HP_FRAME ok count=' + count + ' dyn=' + dyn); else if (n === 40) console.log('HP_ALIVE ' + n); };
+//@ import-syntax
+@module
+import { a } from 'imbad'; globalThis.frame = () => {};
+//@ import-throw
+@module
+import { before } from 'imthrow'; globalThis.frame = () => {};
+//@ import-tdz
+@module
+import { ta } from 'imtdza'; globalThis.frame = () => {};
+//@ import-unknown
+@module
+import { x } from 'nope'; globalThis.frame = () => {};
+//@ import-script
+@module
+import { x } from 'ok'; globalThis.frame = () => {};
+//@ import-tla
+@module
+import { x } from 'imtla'; globalThis.frame = () => {};

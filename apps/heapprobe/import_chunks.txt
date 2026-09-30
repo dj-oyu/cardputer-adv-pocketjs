@@ -1,0 +1,14 @@
+# Static import's device and host checks (docs/vm/eval-peak.md section 9).
+# Embedded only in a POCKET_HEAPPROBE image (main/CMakeLists.txt); the host
+# test tools/test_app_import.c reads this same list. .mjs = a module.
+app local.hello
+imok     import_ok.mjs
+imbase   import_base.mjs
+imbad    import_bad.mjs
+imthrow  import_throw.mjs
+imtla    import_tla.mjs
+imcyca   import_cyc_a.mjs
+imcycb   import_cyc_b.mjs
+imtdza   import_tdz_a.mjs
+imtdzb   import_tdz_b.mjs
+imdyn    import_dyn.mjs

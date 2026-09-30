@@ -14,6 +14,7 @@
 | 4 | 共通エラー・cancel・Options | 実装済み | `pocket_api.c` |
 | 5 | app／time／log | 実装済み | `pocket_app.c` |
 | 5.1 | app.load（チャンクの読み込み） | 実装済み | `pocket_app_load.c`、`tools/make_app_chunks.py` |
+| 5.2 | 静的 `import`（モジュールの入口） | 実装済み | `pocket_app_load.c`、`app_session.c` の `eval_reporting()` |
 | 6 | ui／input／input.text／input.keys | 実装済み（`ui.basic` は未実装） | `pocket_input.c`、`pocket_text.c`、`main/hal/keystate.c` |
 | 7 | storage | 実装済み | `pocket_storage.c` |
 | 7 | fs（`pocket.fs`） | 実装済み。詳細は[ファイルシステムAPI](filesystem-api.md) | `pocket_fs.c` |
@@ -289,6 +290,7 @@ pocket.app.load(name: string): boolean;   // true: いま評価した。false: �
 | 状況 | code | outcome | retryable | その名前の次の`load` |
 | --- | --- | --- | --- | --- |
 | 名前が文字列でない・0バイト・32バイト以上・NULを含む | `INVALID_ARGUMENT` | not-applied | false | — |
+| その名前のチャンクがモジュール（`.mjs`、§5.2） | `INVALID_ARGUMENT` | not-applied | false | 同じ（評価しない） |
 | このアプリにその名前のチャンクが無い | `NOT_FOUND` | not-applied | false | 同じ |
 | 解析中にheap不足 | `OUT_OF_MEMORY` | not-applied | **true** | もう一度解析する（何も宣言されていない） |
 | 構文エラー | `CORRUPT_DATA` | not-applied | false | もう一度解析して同じエラー |
@@ -297,6 +299,26 @@ pocket.app.load(name: string): boolean;   // true: いま評価した。false: �
 | 期限切れ・停止要求 | PocketErrorにしない。捕まえられない例外のまま伝わり、アプリは止まる | | | |
 
 手放すAPIは無い。チャンクが作った関数は、参照を捨てればGCで解放される（トップレベルの関数宣言・`var`・`let`は値を`null`にする。`const`は捨てられない）。捨てた後も`load`は`false`を返し、再評価はしない。書き方の指針は[評価のピーク](../vm/eval-peak.md) §7.3。
+
+### 5.2 静的 `import`（モジュールの入口、実装、2026-09-30）
+
+```js
+// apps/foo/foo.mjs（マニフェストの entry が .mjs のアプリ）
+import { drawScene } from 'scene';      // chunks.txt の名前。scene → foo_scene.mjs
+import * as demo from 'demo';
+globalThis.frame = () => drawScene();   // モジュールの名前はグローバルに出ない
+```
+
+`pocket.*` の面ではなく、言語の構文そのもの（capability は無い）。目的は §5.1 と同じ評価のピークの削減で、モジュールは1つずつ解析される。作りと測定は[評価のピーク](../vm/eval-peak.md) §9。
+
+- **入口がモジュールになる条件**: `app_registry.c` のマニフェストの `entry` が `.mjs` で終わる。それ以外（`.js`・Playground・チュートリアル・作品）は従来どおりグローバルスクリプトで、`import` 文は SyntaxError のまま。
+- **import できるもの**: そのアプリの `chunks.txt` にある、ファイル名が `.mjs` のチャンクだけ。指定子はチャンクの**名前**そのもの（`'scene'`）。相対・絶対パス・URL・他のアプリのチャンクは解決しない。`.js` のチャンクは `load` 専用、`.mjs` のチャンクは `import` 専用。
+- **入口の評価の中でだけ解決する**。動的 `import()` は、どこから呼んでも（モジュールのトップレベルでも、後の `frame()` でも）Promise の reject（`TypeError: ... dynamic import() is not supported; use pocket.app.load()`）。後から読むのは `pocket.app.load`。
+- **トップレベル await は断る**（`SyntaxError: ... top-level await is not supported`）。モジュールのグラフは評価の中で同期に終わる。
+- import attributes（`with { type: 'json' }`）は断る。import の入れ子は深さ 8 まで（`RangeError`）。循環 import は仕様どおり動く（初期化前の束縛を読めば `ReferenceError`）。
+- 失敗はすべて評価の失敗で、`EVAL_ERROR` の行に出てアプリは起動しない（`START_FAILED`、ホームへ戻る）。行の形は従来どおり: 構文エラー・トップレベルの例外はそのモジュールのファイル名と行（`SyntaxError: variable name expected at import_bad.mjs:3:1`）、解決の失敗は取り込む側のファイル名（`ReferenceError: user.js imports 'nope': this app has no chunk 'nope' (chunks.txt names them)`、行は無い）。heap 不足は `OOM` の行が別に出る。
+- 期限: 入口の評価の 2 秒が、全モジュールの解析と実行にかかる（解析は割り込みを見ない、§5.1 と同じ）。
+- 手放せない: 評価したモジュールは realm が壊れるまで残る（`ctx->loaded_modules`）。
 
 ## 6. UI・画面遷移・入力
 

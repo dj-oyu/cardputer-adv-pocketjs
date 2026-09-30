@@ -297,6 +297,23 @@ if(POCKET_HEAPPROBE)
     list(APPEND POCKET_APP_CHUNK_LISTS "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt"
          "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt"
          "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/appload_chunks.txt")
+    # Static import (docs/vm/eval-peak.md section 9): one generated program as
+    # one script, as three load()ed scripts and as three imported modules
+    # (tools/heapprobe_import_gen.py) -- the parts are HELLO WORLD's chunks
+    # imps1..3 and impm1..3 -- and the import checks' own small modules.
+    set(_hp_imp "${CMAKE_CURRENT_BINARY_DIR}/imp")
+    execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_import_gen.py"
+                    "${_hp_imp}" RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
+    if(NOT _hp_rc EQUAL 0)
+        message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_import_gen.py failed")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_SOURCE_DIR}/tools/heapprobe_import_gen.py")
+    foreach(_hp_f imp_all.js imp_entry_load.js imp_entry_import.mjs)
+        target_add_binary_data(${COMPONENT_LIB} "${_hp_imp}/${_hp_f}" TEXT)
+    endforeach()
+    list(APPEND POCKET_APP_CHUNK_LISTS "${_hp_imp}/imp_chunks.txt"
+         "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/import_chunks.txt")
     # Precompiled DERBY WATCH, if the host has made it (WSL:
     #   python3 tools/vmtest/compile_peak.py apps/derby/derby_watch.js --write .cache/compile_peak/derby.bc)
     # from this same quickjs.c. Absent: the derby-bc variants report no loader.
