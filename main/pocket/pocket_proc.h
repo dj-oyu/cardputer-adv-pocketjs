@@ -4,10 +4,16 @@
 #include "quickjs.h"
 #include "esp_err.h"
 #include "ui/kasane/ksn_ports.h"
+#include "ui/kasane/ksn_proc_plan.h"
 
 /* A small APP-session adapter for registered procedural IR. */
 esp_err_t pocket_proc_install(JSContext *ctx, JSValueConst kasane_namespace);
 void pocket_proc_reset(void);
+/* The built-in plans register('name', args) looks up (docs/kasane/flash-plan.md):
+ * a const table the firmware links, generated from the apps' @plan functions.
+ * The table must outlive every session; reset() keeps it. Without a call,
+ * or with count 0, every name is unknown (INVALID_ARGUMENT). */
+void pocket_proc_rom_plans(const ksn_proc_rom_entry *entries,unsigned count);
 void pocket_proc_end_turn(void);
 bool pocket_proc_has_frame(void);
 bool pocket_proc_pending(void);

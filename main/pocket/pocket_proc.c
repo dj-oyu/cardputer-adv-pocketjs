@@ -111,13 +111,19 @@ static int16_t *points_plane(const proc_points *p,unsigned k){
     return (int16_t *)base+k*points_stride(p->count);
 }
 enum {PLANE_X,PLANE_Y,PLANE_OUT_X,PLANE_OUT_Y};
+/* plan is a ksn_proc_sized_plan (rows registered as an array) or, when rom is
+ * set, a ksn_proc_rom_plan (a built-in plan registered by name: its code
+ * stays in the firmware's table). The kind bit sits in the handle's word, so
+ * the slot stays 12 B: handles never exceed INT32_MAX (register_impl). */
 typedef struct {
-    uint32_t handle;
-    ksn_proc_sized_plan *plan;
+    uint32_t handle:31,rom:1;
+    void *plan;
     proc_points *points;
 } proc_slot;
 static proc_slot slots[PROC_HANDLES];
 static uint32_t next_handle;
+static const ksn_proc_rom_entry *rom_table;
+static unsigned rom_count;
 static uint32_t scalar_batches,pie_batches;
 typedef struct {
     ksn_proc_frame *candidate,*committed;
@@ -309,8 +315,121 @@ static ksn_rect frame_damage(const proc_surface *surface){
     if(y1>KSN_PROC_H)y1=KSN_PROC_H;
     return (ksn_rect){(int16_t)x0,(int16_t)y0,(int16_t)x1,(int16_t)y1};
 }
+/* Typed points for a plan just prepared: none, attached, or the failure the
+ * caller returns (the plan is not yet in a slot, so the caller frees it). */
+static JSValue attach_points(JSContext *ctx,JSValueConst descriptor,bool rom,void *plan,
+                             proc_points **out){
+    const char *op="kasane.procedural.register";
+    *out=NULL;
+    if(JS_IsUndefined(descriptor)||JS_IsNull(descriptor))return JS_UNDEFINED;
+    KsnProcAffineQ14 coeff;
+    /* Cardputer ADV calibration: at n=8/16/40 the PIE path beat scalar
+     * across 2048 runs, with exact output parity. The dispatcher still
+     * falls back on hosts or an unavailable/unaligned backend. */
+    const KsnProcPointsPolicy policy={true,8};
+    proc_points *points=NULL;
+    points_result read=read_points(ctx,descriptor,&points,&coeff);
+    if(read==POINTS_NO_MEMORY)
+        return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"point allocation failed");
+    if(read!=POINTS_OK||
+       !(rom?ksn_proc_rom_plan_register_points_affine(plan,&coeff,&policy):
+             ksn_proc_sized_plan_register_points_affine(plan,&coeff,&policy))){
+        free(points);
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid typed point batch");
+    }
+    *out=points;
+    return JS_UNDEFINED;
+}
+/* register(name, args?, points?): a built-in plan (docs/kasane/flash-plan.md).
+ * The same checks as the array path, in the same order of kinds: the shape
+ * of the call, the slot limit before any allocation, the values, then the
+ * program. args must hold exactly the plan function's declared arguments
+ * (undefined or null for none), each a finite number; an argument that fills
+ * a field must also be what that field takes as an array row (REPEAT/CUBIC
+ * counts integers 0..255, colours 0..65535, values finite as float). */
+static JSValue register_rom(JSContext *ctx,int argc,JSValueConst *argv){
+    const char *op="kasane.procedural.register";
+    if(argc<1||argc>3)
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,
+                       "expected a plan name, its arguments and optional points");
+    size_t length=0;
+    const char *name=JS_ToCStringLen(ctx,&length,argv[0]);
+    if(!name)return JS_EXCEPTION;
+    const ksn_proc_rom_entry *rom=NULL;
+    for(unsigned i=0;i<rom_count&&!rom;i++)
+        if(rom_table[i].name&&strlen(rom_table[i].name)==length&&
+           !memcmp(rom_table[i].name,name,length))
+            rom=&rom_table[i];
+    JS_FreeCString(ctx,name);
+    if(!rom)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"unknown built-in plan");
+    /* The generator emits only valid entries; this keeps a bad table from
+     * sizing the arguments below (params) or the analysis's copy (count). */
+    if(!ksn_proc_rom_entry_valid(rom))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid built-in plan");
+    uint32_t given=0;
+    if(argc>=2&&!JS_IsUndefined(argv[1])&&!JS_IsNull(argv[1])&&
+       !array_length(ctx,argv[1],&given))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected an array of plan arguments");
+    if(given!=rom->params)
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"plan argument count mismatch");
+    unsigned slot=0;
+    while(slot<PROC_HANDLES&&slots[slot].plan)slot++;
+    if(slot==PROC_HANDLES||next_handle==INT32_MAX)
+        return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"procedural plan limit");
+    /* 40 + 4 * params B on the device, whatever the instruction count. */
+#ifdef KASANE_MEGADEMO_TRACE
+    size_t plan_free0=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+#endif
+    ksn_proc_rom_plan *plan=calloc(1,ksn_proc_rom_plan_bytes(rom->params));
+#ifdef KASANE_MEGADEMO_TRACE
+    if(plan)ESP_LOGI("proc","PLANSZ rom=%u blk=%u took=%d",(unsigned)rom->count,
+                     (unsigned)heap_caps_get_allocated_size(plan),
+                     (int)(plan_free0-heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+#endif
+    if(!plan)return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"plan allocation failed");
+    plan->params=rom->params;
+    double arg[KSN_PROC_ROM_PARAMS];
+    for(uint32_t i=0;i<given;i++){
+        JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);
+        bool ok=!JS_IsException(v)&&number(ctx,v,&arg[i]);
+        JS_FreeValue(ctx,v);
+        if(!ok){free(plan);
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid plan argument");}
+        plan->args[i]=(float)arg[i];
+    }
+    /* What entry() would have required of the row holding the argument. */
+    for(unsigned k=0;k<rom->patches;k++){
+        const ksn_proc_patch *p=&rom->patch[k];
+        const double v=arg[p->param];
+        bool ok=p->field==KSN_PROC_FIELD_A?v>=0&&v<=UINT8_MAX&&v==floor(v):
+                p->field==KSN_PROC_FIELD_COLOR?v>=0&&v<=UINT16_MAX&&v==floor(v):
+                isfinite((float)v);
+        if(!ok){free(plan);
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid instruction entry");}
+    }
+#ifdef KASANE_MEGADEMO_TRACE
+    int64_t prep_began=esp_timer_get_time();
+    bool prepared=ksn_proc_rom_plan_prepare(plan,rom);
+    uint32_t prep_us=(uint32_t)(esp_timer_get_time()-prep_began);
+    trace.prep_us+=prep_us;
+    if(prep_us>trace.prep_max_us)trace.prep_max_us=prep_us;
+    if(!prepared){
+#else
+    if(!ksn_proc_rom_plan_prepare(plan,rom)){
+#endif
+        free(plan);
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid procedural program");
+    }
+    proc_points *points=NULL;
+    JSValue attached=attach_points(ctx,argc==3?argv[2]:JS_UNDEFINED,true,plan,&points);
+    if(JS_IsException(attached)){free(plan);return attached;}
+    uint32_t handle=++next_handle;
+    slots[slot]=(proc_slot){.handle=handle,.rom=1,.plan=plan,.points=points};
+    return JS_NewInt32(ctx,(int32_t)handle);
+}
 static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
+    if(argc>=1&&JS_IsString(argv[0]))return register_rom(ctx,argc,argv);
     const char *op="kasane.procedural.register";
     uint32_t count;
     if((argc!=1&&argc!=2)||!array_length(ctx,argv[0],&count)||
@@ -361,23 +480,10 @@ static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
         return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid procedural program");
     }
     proc_points *points=NULL;
-    if(argc==2&&!JS_IsUndefined(argv[1])&&!JS_IsNull(argv[1])){
-        KsnProcAffineQ14 coeff;
-        /* Cardputer ADV calibration: at n=8/16/40 the PIE path beat scalar
-         * across 2048 runs, with exact output parity. The dispatcher still
-         * falls back on hosts or an unavailable/unaligned backend. */
-        const KsnProcPointsPolicy policy={true,8};
-        points_result read=read_points(ctx,argv[1],&points,&coeff);
-        if(read==POINTS_NO_MEMORY){free(plan);
-            return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"point allocation failed");}
-        if(read!=POINTS_OK||
-           !ksn_proc_sized_plan_register_points_affine(plan,&coeff,&policy)){
-            free(points);free(plan);
-            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid typed point batch");
-        }
-    }
+    JSValue attached=attach_points(ctx,argc==2?argv[1]:JS_UNDEFINED,false,plan,&points);
+    if(JS_IsException(attached)){free(plan);return attached;}
     uint32_t handle=++next_handle;
-    slots[slot]=(proc_slot){handle,plan,points};
+    slots[slot]=(proc_slot){.handle=handle,.rom=0,.plan=plan,.points=points};
     return JS_NewInt32(ctx,(int32_t)handle);
 }
 static JSValue unregister_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -438,8 +544,11 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
         input[i]=(float)n;
     }
-    ksn_proc_status status=ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
-    if(status==KSN_PROC_RUNNING)status=ksn_proc_sized_plan_run(vm,slot->plan,false);
+    ksn_proc_status status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
+                                     ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
+    if(status==KSN_PROC_RUNNING)
+        status=slot->rom?ksn_proc_rom_plan_run(vm,slot->plan,false):
+                         ksn_proc_sized_plan_run(vm,slot->plan,false);
     if(status!=KSN_PROC_DONE){
         building=false;
         return failure(ctx,op,status==KSN_PROC_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:
@@ -452,7 +561,8 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         const KsnProcPointSrc src={points_plane(p,PLANE_X),points_plane(p,PLANE_Y)};
         const KsnProcPointDst dst={points_plane(p,PLANE_OUT_X),points_plane(p,PLANE_OUT_Y)};
         const int16_t *out_x=dst.x,*out_y=dst.y;
-        if(!ksn_proc_sized_plan_run_points_affine(slot->plan,dst,src,p->count,&decision)){
+        if(!(slot->rom?ksn_proc_rom_plan_run_points_affine(slot->plan,dst,src,p->count,&decision):
+                       ksn_proc_sized_plan_run_points_affine(slot->plan,dst,src,p->count,&decision))){
             building=false;
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"typed point run failed");
         }
@@ -656,6 +766,9 @@ void pocket_proc_reset(void){
 #ifdef KASANE_MEGADEMO_TRACE
     trace=(pocket_proc_trace){0};trace_split=false;
 #endif
+}
+void pocket_proc_rom_plans(const ksn_proc_rom_entry *entries,unsigned count){
+    rom_table=entries;rom_count=entries?count:0;
 }
 void pocket_proc_batch_counts(uint32_t *scalar,uint32_t *pie){
     if(scalar)*scalar=scalar_batches;

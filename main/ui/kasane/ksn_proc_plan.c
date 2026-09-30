@@ -103,6 +103,8 @@ static ksn_proc_status scalar_step(ksn_proc_vm *vm,const ksn_proc_inst *i){
     if(vm->pc==vm->program->count){vm->frame->ready=true;return vm->status=KSN_PROC_DONE;}
     return vm->status;
 }
+static ksn_proc_status run_loop(ksn_proc_vm *vm,const ksn_proc_inst *code,
+                                const uint32_t fused[KSN_PROC_FUSED_WORDS],bool debug_step);
 /* valid is the caller's plan->valid; code/count/fused are its own storage. */
 static ksn_proc_status run_core(ksn_proc_vm *vm,bool valid,const ksn_proc_inst *code,
                                 uint8_t count,const uint32_t fused[KSN_PROC_FUSED_WORDS],
@@ -114,6 +116,11 @@ static ksn_proc_status run_core(ksn_proc_vm *vm,bool valid,const ksn_proc_inst *
        vm->program->count!=count||
        memcmp(vm->owned_code,code,count*sizeof code[0]))
         return ksn_proc_run(vm);
+    return run_loop(vm,code,fused,debug_step);
+}
+/* code is the VM's own program, already matched against the plan. */
+static ksn_proc_status run_loop(ksn_proc_vm *vm,const ksn_proc_inst *code,
+                                const uint32_t fused[KSN_PROC_FUSED_WORDS],bool debug_step){
     while(vm->status==KSN_PROC_RUNNING){
         uint8_t pc=vm->pc;
         if(!debug_step && fused_at(fused,pc)){
@@ -132,4 +139,89 @@ ksn_proc_status ksn_proc_sized_plan_run(ksn_proc_vm *vm,const ksn_proc_sized_pla
                                         bool debug_step){
     if(!plan)return run_core(vm,false,NULL,0,NULL,debug_step);
     return run_core(vm,plan->valid,plan->code,plan->count,plan->fused,debug_step);
+}
+
+/* ---- built-in (flash) plans: docs/kasane/flash-plan.md */
+size_t ksn_proc_rom_plan_bytes(unsigned params){
+    if(params>KSN_PROC_ROM_PARAMS)return 0;
+    const size_t bytes=offsetof(ksn_proc_rom_plan,args)+params*sizeof(float);
+    return bytes<sizeof(ksn_proc_rom_plan)?sizeof(ksn_proc_rom_plan):bytes;
+}
+bool ksn_proc_rom_entry_valid(const ksn_proc_rom_entry *rom){
+    if(!rom||!rom->code||!rom->count||rom->count>KSN_PROC_CODE||
+       rom->params>KSN_PROC_ROM_PARAMS||(rom->patches&&!rom->patch))return false;
+    for(unsigned k=0;k<rom->patches;k++){
+        const ksn_proc_patch *p=&rom->patch[k];
+        if(p->pc>=rom->count||p->param>=rom->params||p->field>KSN_PROC_FIELD_COLOR||
+           (k&&p->pc<rom->patch[k-1].pc))return false;
+    }
+    return true;
+}
+bool ksn_proc_rom_plan_prepare(ksn_proc_rom_plan *plan,const ksn_proc_rom_entry *rom){
+    if(!plan)return false;
+    plan->valid=false;plan->points_registered=false;
+    memset(plan->fused,0,sizeof plan->fused);plan->fused_count=0;
+    plan->rom=rom;
+    if(!ksn_proc_rom_entry_valid(rom)||plan->params!=rom->params)return false;
+    /* The rows the array path would have registered: the analysis and the
+     * fused marks see exactly them (the arguments decide REPEAT counts, which
+     * the analysis bounds and validates). 768 B of stack, as register() has
+     * for the rows it reads. */
+    ksn_proc_inst code[KSN_PROC_CODE];
+    memcpy(code,rom->code,rom->count*sizeof code[0]);
+    const ksn_proc_binding binding={rom->patch,plan->args,rom->patches,plan->params};
+    if(!ksn_proc_apply_binding(code,rom->count,&binding))return false;
+    if(!mark_fused(code,rom->count,plan->fused,&plan->fused_count))return false;
+    plan->valid=true;
+    return true;
+}
+ksn_proc_status ksn_proc_rom_plan_begin(ksn_proc_vm *vm,const ksn_proc_rom_plan *plan,
+                                        const float input[KSN_PROC_INPUTS],
+                                        ksn_proc_frame *frame){
+    if(!plan||!plan->valid)return ksn_proc_begin_state(vm,NULL,input,NULL,frame);
+    const ksn_proc_program program={plan->rom->code,plan->rom->count};
+    const ksn_proc_binding binding={plan->rom->patch,plan->args,plan->rom->patches,plan->params};
+    return ksn_proc_begin_bound(vm,&program,&binding,input,frame);
+}
+/* The fused path's guard, as run_core's memcmp: the VM must hold this plan's
+ * program with this registration's arguments. A patched field is compared
+ * with its argument, then put back to the entry's placeholder so the rest of
+ * the instruction (padding included) compares as bytes. */
+static bool rom_matches(const ksn_proc_vm *vm,const ksn_proc_rom_plan *plan){
+    const ksn_proc_rom_entry *rom=plan->rom;
+    if(!vm->program||vm->program!=&vm->owned_program||vm->program->count!=rom->count)
+        return false;
+    unsigned k=0;
+    for(unsigned pc=0;pc<rom->count;pc++){
+        if(k==rom->patches||rom->patch[k].pc!=pc){
+            if(memcmp(&vm->owned_code[pc],&rom->code[pc],sizeof rom->code[0]))return false;
+            continue;
+        }
+        ksn_proc_inst got;
+        memcpy(&got,&vm->owned_code[pc],sizeof got);
+        for(;k<rom->patches&&rom->patch[k].pc==pc;k++){
+            const ksn_proc_patch *p=&rom->patch[k];
+            const float want=plan->args[p->param];
+            switch(p->field){
+            case KSN_PROC_FIELD_A:
+                if((float)got.a!=want)return false;
+                got.a=rom->code[pc].a;break;
+            case KSN_PROC_FIELD_COLOR:
+                if((float)got.color!=want)return false;
+                got.color=rom->code[pc].color;break;
+            default:
+                if(memcmp(&got.value,&want,sizeof want))return false;
+                got.value=rom->code[pc].value;break;
+            }
+        }
+        if(memcmp(&got,&rom->code[pc],sizeof got))return false;
+    }
+    return true;
+}
+ksn_proc_status ksn_proc_rom_plan_run(ksn_proc_vm *vm,const ksn_proc_rom_plan *plan,
+                                      bool debug_step){
+    if(!vm)return KSN_PROC_INVALID;
+    if(vm->status!=KSN_PROC_RUNNING)return vm->status;
+    if(!plan||!plan->valid||!rom_matches(vm,plan))return ksn_proc_run(vm);
+    return run_loop(vm,vm->owned_code,plan->fused,debug_step);
 }

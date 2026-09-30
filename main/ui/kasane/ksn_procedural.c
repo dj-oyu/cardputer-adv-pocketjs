@@ -48,9 +48,35 @@ static bool valid_program(const ksn_proc_program *p,uint8_t loop_end[KSN_PROC_CO
 void ksn_proc_state_reset(ksn_proc_state *state){
     if(state)memset(state,0,sizeof *state);
 }
-ksn_proc_status ksn_proc_begin_state(ksn_proc_vm *vm,const ksn_proc_program *program,
-                                    const float input[KSN_PROC_INPUTS],
-                                    const ksn_proc_state *state,ksn_proc_frame *frame){
+bool ksn_proc_apply_binding(ksn_proc_inst *code,uint8_t count,const ksn_proc_binding *binding){
+    if(!code||!binding||(binding->patches&&(!binding->patch||!binding->arg)))return false;
+    for(unsigned k=0;k<binding->patches;k++){
+        const ksn_proc_patch *p=&binding->patch[k];
+        if(p->pc>=count||p->param>=binding->args||(k&&p->pc<binding->patch[k-1].pc))
+            return false;
+        const float v=binding->arg[p->param];
+        ksn_proc_inst *i=&code[p->pc];
+        switch(p->field){
+        /* An integer field takes only what the registration's number check
+         * would have taken (pocket_proc.c entry()): no truncation here. */
+        case KSN_PROC_FIELD_A:
+            if(!(v>=0.0f&&v<=255.0f)||v!=(float)(uint8_t)v)return false;
+            i->a=(uint8_t)v;break;
+        case KSN_PROC_FIELD_COLOR:
+            if(!(v>=0.0f&&v<=65535.0f)||v!=(float)(uint16_t)v)return false;
+            i->color=(uint16_t)v;break;
+        case KSN_PROC_FIELD_VALUE:
+            if(!isfinite(v))return false;
+            i->value=v;break;
+        default:return false;
+        }
+    }
+    return true;
+}
+static ksn_proc_status begin_core(ksn_proc_vm *vm,const ksn_proc_program *program,
+                                  const ksn_proc_binding *binding,
+                                  const float input[KSN_PROC_INPUTS],
+                                  const ksn_proc_state *state,ksn_proc_frame *frame){
     if(!vm||!frame)return KSN_PROC_INVALID;
     memset(vm,0,sizeof *vm);
     frame->ready=false;frame->count=0;frame->raster_steps=0;
@@ -60,6 +86,9 @@ ksn_proc_status ksn_proc_begin_state(ksn_proc_vm *vm,const ksn_proc_program *pro
     /* Copy before validation, so validation and execution see the same bytes. */
     memcpy(vm->owned_code,program->code,program->count*sizeof vm->owned_code[0]);
     vm->owned_program=(ksn_proc_program){vm->owned_code,program->count};
+    /* Arguments go into the VM's copy, before validation sees it. */
+    if(binding&&!ksn_proc_apply_binding(vm->owned_code,program->count,binding))
+        return vm->status;
     if(!valid_program(&vm->owned_program,vm->loop_end))return vm->status;
     for(unsigned j=0;j<KSN_PROC_INPUTS;j++)if(!isfinite(input[j]))return vm->status;
     if(state){
@@ -73,6 +102,22 @@ ksn_proc_status ksn_proc_begin_state(ksn_proc_vm *vm,const ksn_proc_program *pro
     memcpy(vm->input,input,sizeof vm->input);
     vm->program=&vm->owned_program;vm->frame=frame;vm->status=KSN_PROC_RUNNING;
     return vm->status;
+}
+ksn_proc_status ksn_proc_begin_state(ksn_proc_vm *vm,const ksn_proc_program *program,
+                                    const float input[KSN_PROC_INPUTS],
+                                    const ksn_proc_state *state,ksn_proc_frame *frame){
+    return begin_core(vm,program,NULL,input,state,frame);
+}
+ksn_proc_status ksn_proc_begin_bound(ksn_proc_vm *vm,const ksn_proc_program *program,
+                                     const ksn_proc_binding *binding,
+                                     const float input[KSN_PROC_INPUTS],ksn_proc_frame *frame){
+    /* NULL would silently run the placeholders: a bound begin needs one. */
+    if(!binding){
+        if(vm&&frame){memset(vm,0,sizeof *vm);vm->status=KSN_PROC_INVALID;
+            frame->ready=false;frame->count=0;frame->raster_steps=0;}
+        return KSN_PROC_INVALID;
+    }
+    return begin_core(vm,program,binding,input,NULL,frame);
 }
 ksn_proc_status ksn_proc_begin(ksn_proc_vm *vm,const ksn_proc_program *program,
                                const float input[KSN_PROC_INPUTS],ksn_proc_frame *frame){
