@@ -347,7 +347,7 @@ host（64 bit、ASan、`tools/test_app_import.c`、同じ 3 形）: 最小の上
 
 - host（`tools/build_app_import_test.sh`、WSL、ASan/UBSan、実物の `pocket_app_load.c`・`pocket_api.c`・`app_registry.c`）: 102 項目。名前での import、live binding、1 モジュール 1 インスタンス（2 か所から import した `imbase` の評価は 1 回）、無害な循環、import は読み取り専用、モジュールの名前はグローバルに出ない、`load` がモジュールを断る、構文エラー（`import_bad.mjs:3:1`）・トップレベルの例外（`import_throw.mjs:4:1`）・TDZ の循環（`import_tdz_b.mjs:1:1`）・未知の名前・相対／絶対パス・スクリプトのチャンク・attributes・深さ 9・TLA（子と入口の両方）・動的 `import()`（スクリプトから、モジュールのトップレベルから）、上限 120,000 での heap 不足（裸の `null`、落ちない）の後に別のセッションで成功、3 セッション、成功したセッションで未処理の reject が 0。既存の `tools/build_app_load_test.sh`（32 項目）もそのまま通る。
 - 実機（変種 50〜56）: `import-api` が `count=41 base=40 runs=1 cyc=ab ok loadModule=INVALID_ARGUMENT`、frame 10 で `dyn=TypeError: import('imbase') in user.js: dynamic import() is not supported; use pocket.app.load()`、frame 40 まで生存。構文エラー・例外・TDZ・未知・スクリプト・TLA は、それぞれ `EVAL_ERROR`（host と同じ文面・同じ `file:line`）と `START_FAILED` の後、次の変種がホームから普通に起動した（アプリは落ちない）。`Unhandled Promise rejection` の行は 0。heap 不足は (a) の `EVAL_ERROR InternalError: out of memory` と `OOM` の行、ホームへ戻る。
-- 回帰: `tools/kasane_contract/run.sh`（`GAMES_M32=0`）通過。
+- 回帰: `tools/kasane_contract/run.sh`（`GAMES_M32=0`）通過。実機（通常の image）で `smoke_device.py --cycles 20`（`SMOKE_OK 20`）、`stress_app.py`（`STRESS_APP_PASS`）、`test_app_resume.py`（`TEST_APP_RESUME_OK`）が通過。
 
 ### 9.5 事前コンパイル（§3.5）への引き継ぎ
 
