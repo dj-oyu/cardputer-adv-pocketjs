@@ -35,6 +35,7 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [gc-cap-backoff.md](vm/gc-cap-backoff.md) | 記録 | 上限の手前 1/32 の GC の天井が、生存量が天井を超えるとオブジェクトごとに GC を走らせていた（STRESS LV3 で JS 時間の 70%）。天井が起こした GC の後はヒープが伸びるまで待つ。GC 1,085 → 109 回、確保失敗の時点は同一。道具は `tools/vmtest/prof/` |
 | [builtin-floor-plan.md](vm/builtin-floor-plan.md) | 設計・計画 | F 系列（VM の段とは独立）: ゲストの起動床（実機レイアウトで js=64,420 B、うち組み込みの名前 21.7 KB と何も作っていない索引）を flash へ。F1 ROM atom・F2 遅延索引で 28,684 B（−55%、計算）。捨てた案 4 つ、`atom_array` 33 箇所の台帳、関所と負の対照。道具は `tools/vmtest/floor/` |
 | [spread-eval-oom.md](vm/spread-eval-oom.md) | 記録 | 文字列のスプレッド・for-of が実機でだけ止まらなかった: `js_string_iterator_next` の `(int *)&idx` が Xtensa（`uint32_t`=`unsigned long`）の strict aliasing で消えていた。修正 `f937388`、同種の6箇所、再現アプリ `POCKET_HEAPPROBE` と変種の表 |
+| [aliasing-types.md](vm/aliasing-types.md) | 記録 | spread-eval-oom の同種6箇所と libunicode の正規化配列を、宣言の型を合わせて修正（機械語は修正前と同一＝今のビルドでは誤コンパイルなし）。`-Wno-incompatible-pointer-types` を quickjs-libc.c 以外から外した |
 | [eval-peak.md](vm/eval-peak.md) | 記録・比較 | 評価のピークの構成（pass-1 バイトコード 46%、JSFunctionDef 15%…、host の確保タグ）と下げる手段の実測: 分割（B 案）+18.5〜25.9 KB、事前コンパイル +26 KB・49 ms、パーサの余り返し host −11 KB、ES モジュール、遅延 import。推奨の順序と決めること。§7 製品化した `pocket.app.load`（チャンクの表・書き方・実機で 3 分割 +18.2 KB）、§8 静的 import への引き継ぎ |
 | [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |

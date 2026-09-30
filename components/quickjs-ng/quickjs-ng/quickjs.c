@@ -9151,7 +9151,12 @@ static int find_line_num(JSContext *ctx, JSFunctionBytecode *b,
                          uint32_t pc_value, int *col)
 {
     const uint8_t *p_end, *p;
-    int new_line_num, new_col_num, line_num, col_num, pc, v, ret;
+    int new_line_num, new_col_num, line_num, col_num, pc, ret;
+    /* int32_t, not int: get_sleb128 stores through int32_t *, which on
+       Xtensa newlib is long *, and a long store may not alias an int.
+       The same mismatch let GCC drop a store in js_string_iterator_next
+       (docs/vm/spread-eval-oom.md, docs/vm/aliasing-types.md). */
+    int32_t v;
     unsigned int op;
 
     *col = 1;
@@ -50531,7 +50536,8 @@ static JSValue js_parseInt(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
     const char *str, *p;
-    int radix, flags;
+    int flags;
+    int32_t radix; /* JS_ToInt32 stores through int32_t * (long * on Xtensa) */
     JSValue ret;
 
     str = JS_ToCString(ctx, argv[0]);
@@ -60033,7 +60039,7 @@ static __exception int remainingElementsCount_add(JSContext *ctx,
                                                   int addend)
 {
     JSValue val;
-    int remainingElementsCount;
+    int32_t remainingElementsCount; /* JS_ToInt32Free takes int32_t * */
 
     val = JS_GetPropertyUint32(ctx, resolve_element_env, 0);
     if (JS_IsException(val)) {
@@ -60067,7 +60073,8 @@ static JSValue js_promise_all_resolve_element(JSContext *ctx,
     JSValueConst resolve = func_data[3];
     JSValueConst resolve_element_env = func_data[4];
     JSValue ret, obj;
-    int is_zero, index;
+    int is_zero;
+    int32_t index; /* JS_ToInt32 takes int32_t * */
 
     if (JS_ToInt32(ctx, &index, func_data[1])) {
         return JS_EXCEPTION;
@@ -67049,7 +67056,7 @@ static JSValue js_atomics_notify(JSContext *ctx,
 {
     struct list_head *el, *el1, waiter_list;
     int size_log2;
-    int32_t count, n;
+    int count, n; /* JS_ToInt32Clamp takes int *, not int32_t * (long * on Xtensa) */
     void *ptr;
     uint64_t idx;
     JSObject *p;
