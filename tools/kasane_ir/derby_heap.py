@@ -98,7 +98,20 @@ def names(text: str) -> str:
     return re.sub(r"\bT\.(\w+)", r"'\1'", text)
 
 
-FORMS = {"as is": lambda t: t, "no-asm": no_asm, "ids": ids, "names": names}
+def packed(*flags: str):
+    """T's texts packed by tools/kasane_ir/pack.mjs, prog() its decoder."""
+    def form(text: str) -> str:
+        with tempfile.TemporaryDirectory() as t:
+            src, out = Path(t) / "in.js", Path(t) / "out.js"
+            src.write_text(text, encoding="utf-8")
+            subprocess.run(["node", str(ROOT / "tools/kasane_ir/pack.mjs"), str(src), str(out), *flags],
+                           check=True, capture_output=True)
+            return out.read_text(encoding="utf-8")
+    return form
+
+
+FORMS = {"as is": lambda t: t, "packed": packed(), "nibble": packed("--nibble"),
+         "nibble-nomacro": packed("--nibble", "--no-macro"), "no-asm": no_asm, "ids": ids, "names": names}
 
 
 def eval_only(binary: Path, apps: Path, form) -> dict:
@@ -138,7 +151,7 @@ for (const n of Object.keys(T).concat(['r0'])) {
 """
 
 
-def probe(apps: Path) -> str:
+def probe(apps: Path, form=lambda t: t) -> str:
     out = CACHE / "m32"
     out.mkdir(parents=True, exist_ok=True)
     objs = [str(run_derby.CACHE / "m32" / f"{n}.o") for n in ("dtoa", "libregexp", "libunicode", "quickjs",
@@ -149,7 +162,7 @@ def probe(apps: Path) -> str:
                     "tools/kasane_ir/heap_probe.c", *objs, "-lm", "-lpthread", "-o", str(binary)],
                    cwd=ROOT, check=True)
     script = out / "probe.js"
-    script.write_text(PRELUDE + (apps / "derby_prog.js").read_text(encoding="utf-8").replace("'use strict';", "")
+    script.write_text(PRELUDE + form((apps / "derby_prog.js").read_text(encoding="utf-8")).replace("'use strict';", "")
                       + PROBE, encoding="utf-8")
     return subprocess.run([str(binary), str(script)], check=True, capture_output=True, text=True).stdout
 
@@ -172,6 +185,8 @@ def main() -> None:
     for label, apps in sets:
         print(f"==== {label}: registration in the guest (spec(name) until register returns)")
         print(probe(apps), end="")
+        print(f"==== {label}: the same with the nibble-packed texts and their decoder")
+        print(probe(apps, FORMS["nibble"]), end="")
 
 
 if __name__ == "__main__":
