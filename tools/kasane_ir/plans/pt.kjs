@@ -1,0 +1,19 @@
+// pt (the panning stage's turf, vm/pan-camera 55956e9, not merged): stripes
+// from the near rail to the far one. r approaches 1/Z by Newton steps
+// (z = -Z', r *= z*r + 2), four on the far end first, then three per stripe
+// on the far end and four on the near end as z steps along.
+input x = 0, dx = 1, z = 2, dz = 3, stripes = 4, r = 5, farX = 6, farZ = 7;
+function newton(r, z) { return r * (z * r + 2); }
+function sy(r) { return r * 6 + 28; }
+let px = x, pz = z, near = r;
+let far = newton(near, pz + farZ);
+unroll (3) { far = newton(far, pz + farZ); }
+repeat (stripes) {
+  const fz = pz + farZ;
+  unroll (3) { far = newton(far, fz); }
+  move((px + farX) * far, sy(far));
+  line(px * near, sy(near), $0);
+  px += dx;
+  pz += dz;
+  unroll (4) { near = newton(near, pz); }
+}

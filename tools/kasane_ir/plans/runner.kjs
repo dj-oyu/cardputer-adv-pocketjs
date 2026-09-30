@@ -1,0 +1,15 @@
+// runner: one horse on the gate / FIELD shots. Hip at (x, y), size s; the
+// body in coat $0, four legs to (leg0..3, hoof), the jockey in silk $1 and
+// a cap in $2 (silk ^ 0x8410).
+input x = 0, y = 1, s = 2, hoof = 3, leg0 = 4, leg1 = 5, leg2 = 6, leg3 = 7;
+const u = s * 2.5, up = -1 * u;
+const back = x + u + u, withers = back + u, head = withers + u;
+const high = y + up, higher = high + up;
+move(x + up, y + u);
+line(x, y, $0); line(withers, y, $0); line(head, higher, $0); line(head + u, high, $0); line(head, high, $0);
+move(x, y); line(leg0, hoof, $0);
+move(x, y); line(leg1, hoof, $0);
+move(withers, y); line(leg2, hoof, $0);
+move(withers, y); line(leg3, hoof, $0);
+move(back, y); line(back, high, $1); line(withers, higher, $1); line(head, high, $1);
+plot(withers, higher, $2);

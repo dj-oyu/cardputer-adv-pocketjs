@@ -1,0 +1,21 @@
+// map: decompiled from apps/derby/derby_prog.js
+move(8, 12);
+line(232, 12, 16904);
+move(232, 2);
+line(232, 12, 63488);
+move(in(0), 3);
+line(in(0) + (-4), 3, 65535);
+move(in(1), 4);
+line(in(1) + (-4), 4, 35953);
+move(in(2), 5);
+line(in(2) + (-4), 5, 63488);
+move(in(3), 6);
+line(in(3) + (-4), 6, 9087);
+move(in(4), 7);
+line(in(4) + (-4), 7, 65504);
+move(in(5), 8);
+line(in(5) + (-4), 8, 2016);
+move(in(6), 9);
+line(in(6) + (-4), 9, 64800);
+move(in(7), 10);
+line(in(7) + (-4), 10, 63519);

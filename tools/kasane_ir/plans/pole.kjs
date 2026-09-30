@@ -1,0 +1,23 @@
+// pole: decompiled from apps/derby/derby_prog.js
+move(in(0), in(1));
+line(in(0), in(2), 63488);
+const r12 = in(3) * (-1);
+const r13 = in(2) + r12;
+const r14b = (-1.33) * in(3);
+const r0 = in(0) + r12;
+const r1 = r13 + 0;
+const r2 = r0 + 0;
+const r3 = r13 + r14b;
+const r4 = in(0) + in(3);
+const r5 = r3 + 0;
+const r6 = r4 + 0;
+const r7 = r13 + 0;
+cubic(6, 65535, r0, r1, r2, r3, r4, r5, r6, r7);
+const r14c = r14b * (-1);
+const r3b = r13 + r14c;
+const r5b = r13 + r14c;
+cubic(6, 65535, r0, r1, r2, r3b, r4, r5b, r6, r7);
+move(in(4), in(5));
+line(in(6), in(7), 65535);
+move(in(4) + 1, in(5));
+line(in(6) + 1, in(7), 65535);

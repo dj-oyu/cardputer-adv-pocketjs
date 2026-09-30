@@ -1,0 +1,17 @@
+// hl: decompiled from apps/derby/derby_prog.js
+let r12b = 0;
+let r9b = 0;
+let r4 = in(4);
+const r10b = in(1) * r4 + 28;
+const r11b = in(3) * r4 + 28;
+repeat (in(6)) {
+  r12b = in(1) * r4 + 28;
+  move(in(0), r12b);
+  r9b = in(3) * r4 + 28;
+  line(in(2), r9b, in(7));
+  r4 += in(5);
+}
+move(in(0), r10b);
+line(in(0), r12b, in(7));
+move(in(2), r11b);
+line(in(2), r9b, in(7));

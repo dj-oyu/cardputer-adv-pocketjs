@@ -1,0 +1,20 @@
+// stands: decompiled from apps/derby/derby_prog.js
+let r8 = in(0);
+let r1 = in(2) + 0;
+repeat ($0) {
+  move(0, r1);
+  line(239, r1, 21130);
+  r1 += in(3);
+}
+const r3b = in(7) + in(3) + in(3);
+const r5 = r3b + 0;
+repeat (in(4)) {
+  const r0b = r8 + 0;
+  const r2b = r8 + 0;
+  const r4 = r8 + in(1);
+  const r6 = r8 + in(1);
+  move(r8, in(2));
+  line(r8, in(7), 31727);
+  cubic($3, 50712, r0b, in(7), r2b, r3b, r4, r5, r6, in(7));
+  r8 += in(1);
+}

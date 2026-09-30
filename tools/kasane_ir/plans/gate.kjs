@@ -1,0 +1,14 @@
+// gate: decompiled from apps/derby/derby_prog.js
+let r0 = in(0);
+let r1 = in(1);
+let r2 = in(2);
+repeat (9) {
+  const r6 = 120 + r0;
+  const r8 = in(4) + r2;
+  line(r6, r8, 40147);
+  line(r6, in(4) + r1, 40147);
+  move(r6, r8);
+  r0 *= in(3);
+  r1 *= in(3);
+  r2 *= in(3);
+}
