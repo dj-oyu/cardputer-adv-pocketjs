@@ -40,3 +40,7 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/bui
 python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
 python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
 ```
+
+## 最適化候補の通常実機検証 (PowerShell)
+
+[device_validation/README.md](../../tools/device_validation/README.md) は `89a71ae` と候補1本を専用worktreeでビルドする。既定はY。ビルドだけではserialを開かず、app-only flashとHELLO/GRID LABの通常検証は明示的なopt-inで分ける。故障注入・OOM試験は呼ばない。実機・LCDの未検証と性能の観測を区別する。
