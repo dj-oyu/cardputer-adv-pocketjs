@@ -157,6 +157,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [derby-corner-model.md](apps/derby-corner-model.md) | 試算 | DERBY WATCH の楕円コース案: カーブだけの内外差とばらつきの乗数、枠・本命・入れ替わりへの効き、楕円用のオッズの再推定（host の Monte Carlo）、実装の結果（中・(c)、直線は全桁一致） |
 | [derby-pan-camera-cost.md](apps/derby-pan-camera-cost.md) | 記録 | DERBY WATCH の首振りカメラ・楕円コースの計算コスト: JS 演算と投影の単価（実機）、VM の Newton 逆数による投影、台数・自動ズーム・LOD 別のフレーム費用の見積もり（2026-09-30） |
 | [derby-pan-memory.md](apps/derby-pan-memory.md) | 記録 | DERBY WATCH の首振りカメラ（段階 3）が常駐させるゲストのヒープの内訳（関数・atom・plan の文字列）、事前コンパイルと行番号表の削除の効果の上限、規模を削る案と受け入れ条件との差（2026-09-30、host 実測）、flash の plan を載せた再挑戦で (e) の fps だけが不足（§10、2026-10-01 実機）、`vm/main` b184202 への追従とマージ前の再測定・楕円（段階 4）への引き継ぎ（§11）、楕円（段階 4）の実装・増分・曲線の首振りの fps を上げた手順と実機の表（§12、2026-10-01） |
+| [derby-wide2-profile.md](apps/derby-wide2-profile.md) | 記録 | DERBY WATCH の楕円コーナーの首振り WIDE 2 の 1 フレームを、host の QuickJS の計装（`tools/vmtest/opprof/`）で命令・関数・配列・`Math` 単位に数え、実機の単価で µs に換算。実機の JS ターンとの一次式（4 構成で ±0.06 ms）、P5 の見積もりの検算（2026-10-01、host のみ） |
 | [big-wave.md](apps/big-wave.md) | 設計・記録 | BIG WAVE: 線分の疑似3Dで大波に乗るゲーム。世界固定の断面と 1/d の級数、host の台本とボット、全画素検証、負荷と上限の使用率、実機で詰める項目 |
 | [backlog.md](apps/backlog.md) | backlog | チュートリアルの見直し、オーバーレイの残り、日本語入力の残り |
 
