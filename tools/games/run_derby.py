@@ -25,7 +25,7 @@ then runs:
      being out of place for them).
 Every run with a panning unit compares each point its VM series emit (Newton
 reciprocals, float) with the exact projection (<0.1 px on the panel).
-The series run in C (pocket.derby, main/pocket/pocket_derby.c): three runs
+The series run in C (pocket.derby, main/pocket/pocket_derby.c): three runs of the 64-bit build
 (MID, and LIGHT and HEAVY panning for every WIDE, the director alone) carry
 DERBY_SER_ORACLE, which runs the JS ser() of vm/main
 (tools/games/derby_ser_oracle.js) beside the C on every call and on 4,000
@@ -299,6 +299,13 @@ def main() -> None:
         (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0", "DERBY_SER_ORACLE": "1"}) for t in (0, 2)]
     if args.oracle:
         runs = [(t, dict(x, DERBY_SER_ORACLE="1")) for t, x in runs if "DERBY_SER_ORACLE" not in x]
+    # i386 computes doubles on the x87 in 80 bits: the C (expressions kept in
+    # registers) and the interpreter (each operation stored) then differ in
+    # the last bit, which neither the device (IEEE soft float) nor the 64-bit
+    # host (SSE2) does. The oracle's verdict is the 64-bit build's; m32 is for
+    # the heap figures (its pixels still match: the inputs become floats).
+    if args.m32:
+        runs = [(t, x) for t, x in runs if "DERBY_SER_ORACLE" not in x]
     finish = {}
     for tier, extra in runs:
         e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}{''.join(extra)}.csv"), **extra)

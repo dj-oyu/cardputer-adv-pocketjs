@@ -78,7 +78,7 @@ type DeviceInfo = {
 
 **capabilityの登録はセッションごと。** 各面は注入時に登録し、`pocket_api_reset()`がセッション終了時に表を空にする。したがって`capabilities.get()`は「このセッションに注入された面」を答え、前のセッションが注入した面を引き継がない（オーバーレイは無線・バス等を注入しないので、それらはsupported=false）。
 
-**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[Kasaneの境界と契約](../kasane/architecture.md)を参照。
+**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。`pocket.derby`（capability `derby.series`、DERBY WATCH の首振りの列を C で描く。[derby-ser-native.md](../apps/derby-ser-native.md)）も同じ扱いで、`local.derby` のセッションにだけ注入する。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[Kasaneの境界と契約](../kasane/architecture.md)を参照。
 
 availableは予約ではなく観測値。確認直後に資源が変わり得るため、open/acquireの結果が最終判断となる。認可状態は別であり、available=trueだけでは利用権を得ない。limitsはそのビルドのハード上限、取得ハンドルは実際に割り当てられた値を返す。
 
