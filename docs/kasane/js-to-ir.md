@@ -194,7 +194,7 @@ const T = {
 
 | 規則 | 許すもの |
 | --- | --- |
-| R1 文 | `let`/`const`、`= += -= *=`、`for (let i = 0; i < n; i++)`、`if (a > b) break;`、`move/line/plot/cubic(...)` |
+| R1 文 | `let`/`const`、`= += -= *=`、`for (let i = 0; i < n; i++)`、`if (a > b) break;`、`move/line/plot/cubic/linePattern(...)` |
 | R2 式 | 数値、名前、`+ - *`、単項 `-`、定数での `/`、`sin()` か `Math.sin()`、`Math.PI`、括弧 |
 | R3 ループ | `for (let i = 0; i < n; i++)`（`++i`・`i += 1` も可）。`n` は本体で変わらない名前だけ、`i` は代入しない。`while`・`do`・`continue` は不可 |
 | R4 名前 | `inputs:` の名前、引数、使う前に宣言したローカル。外側の名前を隠す宣言と `const` への代入は不可 |
@@ -206,6 +206,24 @@ const T = {
 - **意味の対応**: `for` は `REPEAT`（回数が定数か引数）か `REPEAT_REG`（式）。本体がループ変数を読むときだけ、その変数を 0 から 1 ずつ増やす命令を足す（`break` では増やさない。JS の `i++` と同じ）。定数 0 回のループは消す。何も描かない plan は `S0,0` 1 命令（`register()` は 1 命令以上を要求する。DERBY の点列用の plan）。
 - **JS と VM が違うところ（コンパイラは直さない）**: ループ回数が整数でない・範囲外（`REPEAT_REG` は 0..255、定数・引数は 1..255）なら VM は draw ごと失敗するが、JS は切り上げた回数だけ回る。計算の途中が非有限なら VM は失敗する。`/` は定数でだけで、2 の冪以外は掛け算に直すので厳密ではない（警告が出る）。配列の表引き（`SILK[k]`）は書けないので、定数に焼き込むか引数で渡す（DERBY の `map` は焼き込んだ）。
 - **float32 の基準**: `reference()` は既定で、関数の各演算を `Math.fround` で丸め、非有限で失敗し、ループ回数の検査も VM と同じにした JS を実行する（パーサの AST から生成した JS。関数の文面をそのまま double で走らせる形も持ち、参考として数える）。`sin` は `Math.sin` を float32 に丸めた値で、host の glibc の `sinf` と全件一致した。実機の newlib の `sinf` と、Xtensa の GCC が積和を 1 命令（`MADD.S`）に縮約するかは見ていない（CUBIC の C の式に効きうる）。
+
+### 5.2.1 模様線 `linePattern`（2026-10-01、ブランチ `vm/crowd-p24`）
+
+`linePattern(x, y, pattern, colorA, colorB, u0, u1, w0, w1, period)` は、ペンから (x, y) へ模様線 `LINE_PATTERN`（op 15、[crowd-primitives-design.md](crowd-primitives-design.md)）を引く。
+
+| 引数 | 置き場 | 規則 |
+| --- | --- | --- |
+| `x`, `y` | 任意のレジスタ（`a`・`b`） | `line()` と同じ |
+| `colorA` | 命令の `color` 欄 | 定数（0..65535）か引数 `$n`（flash の plan の COLOR パッチ）。式は不可（`LINE_COLOR_REG` に当たる形は作っていない） |
+| `period` | 命令の `value` 欄 | 定数 1..24 か引数 `$n`（VALUE パッチ。登録後の検証が 1..24 を確かめる） |
+| `pattern`, `colorB`, `u0`, `u1`, `w0`, `w1` | **r10..r15 に固定**（6 本の連続ブロック、`dst` = 10） | 任意の式 |
+
+- ブロックを r10..r15 に固定するのは、`CUBIC` の r0..r7 と重ならないようにするため。残りの値は r0..r9 の 10 本に入る。
+- **スロットの割り当て**: plan の中のすべての `linePattern` で、あるスロットにいつも同じもの（同じ定数・入力・引数・変数の綴り）が来るなら、その値自体をスロットのレジスタに置く（ループの外で 1 回だけ設定。変数ならその変数がずっとそのレジスタに住む）。違うものが来るスロットは、呼ぶたびに直前で `SET`（定数・引数）か `INPUT` か複写（`ADD x, 0`）する（1 ステップ）。
+- 同じ値が 2 つのスロットに要るとき、2 つ目は複写になる。固定したレジスタの値は、再実体化（rematerialise）の対象から外す。
+- 文字形式の文字は `X`（`Xdst,a,b,period,colorA`）。nibble 形式では、op 15 は `INPUT` マクロの符号と重なるので、上位ニブル 0 の 15 をエスケープにして、次のバイトに最初のレジスタを置く（マクロは 2..14 個なので上位ニブル 0 は使っていない）。バイト形式（`encode()`）は模様線を受け付けない（DERBY は nibble 形式か flash の表だけ）。
+- `reference()` は VM と同じ弦の分割・8.8 の位相（`fmodf`・`lroundf`）を float32 で再現し、2 エントリ（形 + 4096、パラメータの行は負）を返す。
+- 試験: [`test_kir.mjs`](../../tools/kasane_ir/test_kir.mjs)（ブロックの位置、スロットごとの `SET`、範囲外の周期・式の色の拒否、nibble 形式の往復）、[`test_plan_js.mjs`](../../tools/kasane_ir/test_plan_js.mjs)（参照実行のエントリ、色の範囲）。DERBY の `crowd` は `check_equivalence.py` の `JS REFERENCE PASS` が全ベクトルで VM と照合する。
 
 ### 5.3 検証
 

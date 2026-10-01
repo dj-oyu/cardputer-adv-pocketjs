@@ -13,8 +13,10 @@ function prog() {
   throw Error('plans are compiled at build time: tools/kasane_ir/lower_plans.mjs');
 }
 // [LIGHT, MID, HEAVY]: stand tiers, crowd rows, dots per bay, roof arc
-// segments, rail post and turf stripe spacing (m).
-const KN = [[3, 2, 3, 3, 8, 10], [4, 3, 4, 5, 5, 7], [5, 4, 6, 8, 4, 5]];
+// segments, rail post and turf stripe spacing (m), the crowd's head and body
+// patterns; then the crowd's skin, cloths, row shift, empty, cells a m.
+const KN = [[3, 2, 3, 3, 8, 10, 263170, 921095], [4, 3, 4, 5, 5, 7, 1083458, 3792103],
+  [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1, 2.5]];
 let tier = 1;
 const T = {
   // rail: the running rail. Posts from the top rail to the ground, a top and
@@ -71,42 +73,36 @@ const T = {
     }
   },
 
-  // crowd: the stand's spectators as dots. $1 rows of in(4) bays of $2 dots,
-  // each dot swaying on its own phase; colours cycle through two values
-  // (105642 minus the last) seeded by input 6.
-  // q27 prototype (docs/kasane/derby-background-cost.md): half the dots per
-  // frame, every other index from `off` (input 7, the frame's parity); the
-  // next frame draws the other half. Each row starts at the other parity (a
-  // checkerboard). A frame's dots in a row are one colour, dc: input 6 is
-  // today's seed xor the parity, and dc flips once a row (the start moved by
-  // one) and once a bay when a bay has an odd count ($7 + $7 - $2). The
-  // loop runs ceil(dots / 2) ($7) a bay and stops past the row's last index.
-  // (Packed plans carry 8 arguments, $0..$7.)
-  /** @plan crowd inputs: x0, spread, y0, rowGap, bays, sway, seed, parity */
-  crowd(p0, p1, p2, p3, p4, p5, p6, p7) {
-    let dc = seed * 12650 + 46496;
-    const step = p6 * spread;
-    const step2 = step + step;
-    const lim = bays * spread + x0 - step * .5;
-    let off = parity;
-    let ps = sway;
-    let y = rowGap * .5 + y0;
-    for (let j0 = 0; j0 < p1; j0++) {
-      let x = off * step + x0;
-      let phase = off * 2.39996 + ps;
-      for (let j1 = 0; j1 < bays * p7; j1++) {
-        if (x > lim) break;
-        plot(sin(phase) * 1.5 + x, y, dc);
-        x += step2;
-        phase += 4.79992;
-      }
-      for (let j2 = 0; j2 < (p7 + p7 - p2) * bays; j2++) {
-        dc = 105642 - dc;
-      }
-      dc = 105642 - dc;
-      y += rowGap;
-      ps += .9;
-      off = 1 - off;
+  // crowd: the stand's spectators (P24, docs/kasane/crowd-primitives-design.md),
+  // one draw for the side view and for a stretch of the panning view: $0
+  // rows from (x0, y0) to (x1, y1), each row dy0, dy1 above the last at the
+  // two ends (-2.4 m / Z', so they are also the ends' depth weights: the VM
+  // lays the pattern in perspective). A row is three pattern lines of a
+  // 24-cell pattern: the body ($2, 2 px: on the row's line and 1 px above) in
+  // $4 or $5 (every other row), the heads ($1) 2 px above in $3. u0, u1 are
+  // the pattern's cells at the two ends; a row's pattern is moved $6 cells
+  // from the last. $7 is colour B, the empty cells' (-1: none). The loop draws
+  // two rows a turn (the two cloths are immediates) and stops after $0.
+  // The look's numbers are one table: KN (the tiers' patterns, KN[3] the rest).
+  /** @plan crowd inputs: x0, y0, x1, y1, dy0, dy1, u0, u1 */
+  crowd(rows, head, body, skin, cloth0, cloth1, shift, empty) {
+    let ya = y0, yb = y1, ua = u0, ub = u1, k = rows;
+    const s0 = dy0 + 2, s1 = dy1 + 2;
+    for (let j = 0; j < rows; j++) {
+      move(x0, ya); linePattern(x1, yb, body, cloth0, empty, ua, ub, dy0, dy1, 24);
+      ya += -1; yb += -1;
+      move(x0, ya); linePattern(x1, yb, body, cloth0, empty, ua, ub, dy0, dy1, 24);
+      ya += -1; yb += -1;
+      move(x0, ya); linePattern(x1, yb, head, skin, empty, ua, ub, dy0, dy1, 24);
+      ya += s0; yb += s1; ua += shift; ub += shift; k += -1;
+      if (.5 > k) break;
+      move(x0, ya); linePattern(x1, yb, body, cloth1, empty, ua, ub, dy0, dy1, 24);
+      ya += -1; yb += -1;
+      move(x0, ya); linePattern(x1, yb, body, cloth1, empty, ua, ub, dy0, dy1, 24);
+      ya += -1; yb += -1;
+      move(x0, ya); linePattern(x1, yb, head, skin, empty, ua, ub, dy0, dy1, 24);
+      ya += s0; yb += s1; ua += shift; ub += shift; k += -1;
+      if (.5 > k) break;
     }
   },
 
@@ -405,38 +401,6 @@ const T = {
     }
   },
 
-  // pk: the crowd as the side view draws it (crowd), a column of $1 rows
-  // every 12/$2 m, row i at 1.2 + 2.4 i m (hh = 6 - that), half the dots a
-  // frame: rows of one parity in a column, the other in the next (the first
-  // column starts on row 0). Each dot swayed 1.5 px by sin of its phase, the
-  // column's + .9 i (phase is the first column's + 1.8; +2.39996 a column).
-  // The colour flips a column, as crowd's does when a row has an even count
-  // (with an odd count crowd's depends on the bays in view). Rows past the
-  // top stop at lo.
-  /** @plan pk inputs: x, dx, z, dz, cols, r, phase, colour */
-  pk(p0, rows) {
-    let dc = colour;
-    let px = x, pz = z, q = r, h = 4.8, a = phase;
-    const lo = rows * -2.4 + 6.2;
-    for (let j = 0; j < cols; j++) {
-      const sx = px * q;
-      let hh = h;
-      for (let k = 0; k < rows; k++) {
-        if (lo > hh) break;
-        plot(sin(hh * -.375 + a) * 1.5 + sx, hh * q + 28, dc);
-        hh += -4.8;
-      }
-      h = 7.2 - h;
-      dc = 105642 - dc;
-      a += 2.39996;
-      px += dx;
-      pz += dz;
-      const a1 = q * (pz * q + 2);
-      const a2 = a1 * (pz * a1 + 2);
-      q = a2 * (pz * a2 + 2);
-    }
-  },
-
   // hl: lines between two ends (x0, 1/Z' r0) and (x1, r1): the first at the
   // height coefficient c0, then cs a line, lines of them; the ends of the
   // first and the last joined (the screen's face and bezel, stand tiers).
@@ -472,4 +436,4 @@ let F = null;
 const HD = [[120, -155, 120, 425, 120, -155, -63, 323, 425, 120, 85, 159, 120, 100, 142, 120, 184, 166, 166, 166, 156, 156, 166, 166, 184, 184, 189, 189, 196, 196, 204, 204, 214, 214, 227, 227, 240, 227, 227, 240, 227, 227, 120, 184],
   [50, 105, 50, 105, 50, 160, 123, 123, 160, 50, 64, 64, 50, 58, 58, 50, 56, 56, 40, 14, 21, 42, 40, 56, 56, 19, 17, 56, 57, 14, 10, 58, 59, 5, -1, 60, 61, 60, -1, -8, -1, 60, 50, 19]];
 const PAD = ['turf', 'rail', 'stands', 'silk', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'crowd', 'pole'],
-  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd', 'prail', 't0', 't1', 'pk', 'hl'];
+  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd', 'prail', 't0', 't1', 'hl'];

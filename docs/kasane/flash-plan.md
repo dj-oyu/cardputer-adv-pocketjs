@@ -239,6 +239,12 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 - **描画**: 横見の場面の `draw_us` は +0.07〜0.22 ms（基準 → 枝）だが、image が違う（段階 3 のコードも入る）ので flash の読みの分とは切り分けていない。同一バイナリでの比較（配列と名前を切り替える診断の分岐）はしていない。
 - DERBY の移行の前後で、host の全画素ハッシュ・着順・時計・種・デモ・R 再生・オッズが全桁一致（`run_derby.py` の ASan と `--m32`、全 16 回）。
 
+## 12. 模様線（LINE_PATTERN）を使う plan（2026-10-01、ブランチ `vm/crowd-p24`）
+
+- DERBY の観客 `derby.crowd` は模様線 6 本の plan（56 命令、引数 8 個、パッチ 16 個）になり、`pk` が消えた。表は 18 本・671 命令・22 パッチ → **17 本・607 命令・32 パッチ**（.rodata −656 B、ビルドの size）。
+- 模様線の色 A は命令の `color` 欄なので、引数（`$n`）は既存の COLOR パッチで入る。周期は `value` 欄なので VALUE パッチで入る。`begin_bound` は当てた後に検証するので、範囲外（周期 0 や 25）の引数は登録後の draw で INVALID になる（`test_proc_pattern_line.c`）。
+- 表の生成（`emit_rom_plans.mjs`）は変えていない。nibble 形式の op 15 のエスケープ（[js-to-ir.md](js-to-ir.md) §5.2.1）は、生成器が通す decoder の往復の検査（kir の `assemble()` と全件一致）で確かめている。
+
 ## 確信の低い点
 
 - 実機の値は各 1 回（基準も同じ日に 1 回）。

@@ -34,6 +34,30 @@ assert.ok(compile(tight).rematerialised.length > 0);
 const cubic = compile('input a = 0, b = 1; cubic(8, 65535, a, b, a, b, 10, 20, 10, 20);');
 const set = new Map(parseText(cubic.text).filter(i => i.op <= 1).map(i => [i.dst, i]));
 for (let r = 0; r < 8; ++r) assert.ok(set.has(r), `r${r} set before CUBIC`);
+// linePattern: colour A and the period are immediates; its six values sit in
+// r10..r15 (one SET or copy before the call for a slot that sees several
+// values, the value itself for a slot that always sees one).
+const lp = compile(`input x = 0, y = 1, u = 2;
+let v = u;
+repeat (3) {
+  move(x, y); linePattern(x + 10, y, 5, 4660, -1, v, v + 7, 1, 1, 24);
+  move(x, y + 1); linePattern(x + 10, y + 1, 6, 4661, -1, v, v + 7, 1, 1, 12);
+  v += 3;
+}`);
+const pi = parseText(lp.text).filter(i => i.op === 15);
+assert.equal(pi.length, 2);
+assert.deepEqual(pi.map(i => [i.dst, i.value, i.color]), [[10, 24, 4660], [10, 12, 4661]]);
+assert.match(lp.text, /S10,5 .*X10,.*S10,6 .*X10,/);   // the pattern slot: a SET each call
+assert.throws(() => compile('linePattern(1, 2, 3, 4, 5, 6, 7, 8, 9, 25);'), /period is 1\.\.24/);
+assert.throws(() => compile('input a = 0; linePattern(1, 2, 3, a, 5, 6, 7, 8, 9, 24);'), /colorA must be/);
+// The nibble form escapes op 15 (15 is also the INPUT macro) and decodes back.
+{
+  const {encodeNibble, DECODER_NIBBLE} = await import('./pack.mjs');
+  const {assemble} = await import('./kir.mjs');
+  const dec = new Function(DECODER_NIBBLE + 'return prog;')();
+  const code = parseText(lp.text);
+  assert.deepEqual(dec(encodeNibble(lp.text), []), assemble(code, []));
+}
 // A too-long plan is reported, not truncated.
 assert.ok(compile(Array.from({length: 70}, (_, k) => `plot(${k}, 0, 1);`).join('\n')).count > 64);
 console.log('test_kir: PASS');

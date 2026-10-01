@@ -37,7 +37,7 @@
  * director and the screen too, and are checked the same way.
  *
  * The panning units (WIDE far from the leader, apps/derby/README.md
- * "首振りカメラ"): each point their VM series (prail, t0/t1, pk) emit is
+ * "首振りカメラ"): each point their VM series (prail, t0/t1) emit is
  * compared, unrounded, with the same program run in double with exact
  * reciprocals (Newton's error, <0.1 px on the panel); a panning unit's view
  * of the screen gets the face checks too (tag 3, the rect inside the face).
@@ -242,6 +242,8 @@ static void analyse(spec *s){
             used|=1u<<c->a|1u<<c->b;break;
         case KSN_PROC_PLOT_COLOR_REG:case KSN_PROC_LINE_COLOR_REG:used|=1u<<c->dst|1u<<c->a|1u<<c->b;break;
         case KSN_PROC_CUBIC:used|=0xffu;break;
+        case KSN_PROC_LINE_PATTERN:
+            used|=1u<<c->a|1u<<c->b|((1u<<KSN_PROC_PATTERN_BLOCK)-1u)<<c->dst;break;
         default:REQ(!"opcode");
         }
     }
@@ -334,10 +336,11 @@ static void append(ksn_proc_frame *cand,const ksn_proc_frame *f){
     REQ((unsigned)cand->count+f->count<=KSN_PROC_SEGMENTS);
     memcpy(&cand->segments[cand->count],f->segments,f->count*sizeof f->segments[0]);
     cand->count=(uint16_t)(cand->count+f->count);
+    cand->ext|=f->ext;
     REQ((unsigned)cand->raster_steps+f->raster_steps<=UINT16_MAX);
     cand->raster_steps=(uint16_t)(cand->raster_steps+f->raster_steps);
 }
-/* The panning units' series plans (prail, t0/t1, pk; tag 4): every point the
+/* The panning units' series plans (prail, t0/t1; tag 4): every point the
  * float VM emits against the same program run in double, where each Newton
  * step t=z*r; t=t+2; r'=r*t (operands in either order) is replaced by the
  * exact r'=-1/z and the inputs are the JS doubles (not rounded to float):
@@ -523,8 +526,10 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
             const int X0=vis_in[0]+1,Y0=vis_in[1]+1,X1=vis_in[2]-1,Y1=vis_in[3]-1;
             memset(&front,0,sizeof front);
             unsigned inside=0;
-            for(unsigned i=vis_seg_end;i<cand_plan.count;i++){
-                ksn_proc_segment g=cand_plan.segments[i];
+            unsigned i=vis_seg_end,cost;
+            ksn_proc_segment g;
+            bool pattern;
+            while(ksn_proc_frame_next(&cand_plan,&i,&g,&pattern,&cost)){
                 if(g.x0>=X0&&g.x0<=X1&&g.x1>=X0&&g.x1<=X1&&g.y0>=Y0&&g.y0<=Y1&&g.y1>=Y0&&g.y1<=Y1){inside++;continue;}
                 g.color=0xffff;front.segments[front.count++]=g;
             }
@@ -934,7 +939,7 @@ static const char PRELUDE[]=
     "const pf=()=>{try{return pc?pc[4]:0}catch(e){return 0}};"
     "P.draw=function(h,i){try{D.call(P,h,i)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify(i));throw e}"
     "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&i[7]===10565?3:"
-    "h===L.prail||h===L.t0||h===L.t1||h===L.pk?4:0:0;__draw(h,i,t,t>2?pf():0)};"
+    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__draw(h,i,t,t>2?pf():0)};"
     "P.commit=function(){C.call(P);__commit(pf())};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
@@ -1202,9 +1207,9 @@ int main(int argc,char **argv){
            seg,100.0*seg/1024,ras,100.0*ras/65535,dras,100.0*dras/8192,dst,100.0*dst/10000,g_instr_max,g_regs_max,
            g_depth_max,g_inputs_max,live_max,pts,pt_lo,pt_hi);
     static const char *const OPN[]={"SET","INPUT","ADD","MUL","SIN","REPEAT","END","MOVE","PLOT","LINE",
-        "REPEAT_REG","BREAK_IF_GT","PLOT_COLOR_REG","LINE_COLOR_REG","CUBIC"};
-    printf("ops used:");for(unsigned o=0;o<15;o++)if(ops_used&(1u<<o))printf(" %s",OPN[o]);
-    printf("\nops unused:");for(unsigned o=0;o<15;o++)if(!(ops_used&(1u<<o)))printf(" %s",OPN[o]);
+        "REPEAT_REG","BREAK_IF_GT","PLOT_COLOR_REG","LINE_COLOR_REG","CUBIC","LINE_PATTERN"};
+    printf("ops used:");for(unsigned o=0;o<16;o++)if(ops_used&(1u<<o))printf(" %s",OPN[o]);
+    printf("\nops unused:");for(unsigned o=0;o<16;o++)if(!(ops_used&(1u<<o)))printf(" %s",OPN[o]);
     printf("\nscreen: frames with the face %u (feed drawn in %u, %u segments wholly inside), fill/bezel errors %u, "
            "frames with anything else on the face %u (%u px), lettering shown in %u frames (%u node checks, %u off the "
            "face), refs max %u/32, commands max %u/80, HEAD ON frames %u\n",vis_frames,feed_frames,feed_segments,bezel_bad,
@@ -1226,7 +1231,7 @@ int main(int argc,char **argv){
         printf("guest heap churn in frame(), %s: %u frames, %.1f allocations and %.0f B a frame, largest rise in one "
                "frame %zu B, freed only by the cycle collector %zu B\n",CHURN_SCENE[i],churn[i].frames,
                (double)churn[i].n/churn[i].frames,(double)churn[i].b/churn[i].frames,churn[i].hi,churn[i].gc);
-    bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0x7fffu&&frame_reg_max<=1&&go_seen>=1&&
+    bool pass=!exceptions&&!bad_present&&!framefails&&ops_used==0xffffu&&frame_reg_max<=1&&go_seen>=1&&
               !rect_mismatch&&!bezel_bad&&!occluded_frames&&vis_frames&&feed_frames&&
               (getenv("DERBY_PANFACE")?pan_face_frames>0:overlay_frames>0)&&refs_max<=32&&cmds_max<=80&&newton_screen<0.1;
     /* No cycles: the device would keep them until the heap is nearly full
