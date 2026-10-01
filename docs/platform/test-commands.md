@@ -20,6 +20,7 @@ python tools\test_app_resume.py --port COM3           # Backで眠るアプリ�
 
 ```bash
 python tools/test_flash_budget.py       # パーティション予約ガード
+python tools/test_precompile_apps.py --cc gcc  # 実験BCのmanifest・意味・OOM回復、--sanitizeでengine全体をASan/UBSan計装（docs/vm/precompile-build-experiment.md）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_sail.c -lm -o /tmp/ts && /tmp/ts"
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_flower.c main/scene/canopy_pie.c main/scene/garden_decor_pie.c -I main/scene -I tools/hostshim -lm -o /tmp/tf && /tmp/tf"   # カーネル2ファイルも一緒にリンクする（flower.c単体では未定義参照）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_time.c -lm -o /tmp/t && /tmp/t"   # WSLのみ
