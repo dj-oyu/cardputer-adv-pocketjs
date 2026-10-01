@@ -33,4 +33,8 @@ const program = gridFold.fold({
 
 `grid.run(handle, buffers, params, {backend: 'AUTO'|'SCALAR'})` の第4引数で比較用の実行経路を指定できる。通常は第4引数を省略して自動選択する。`SCALAR` はその実行だけPIEを無効にする。入力、出力、表示資源は同じhandleを使う。
 
+`grid.release(handle)` はplan、入力コピー、候補/確定出力を解放し、handleを閉じる。次の登録は空いたslotを使うがhandleと画像resource IDは再利用しない。古いhandle/resourceでの操作は拒否する。公開待ち・LCD修復中、Kasaneの構築/送出中、確定した画像node（非表示nodeも含む）または別のsource-backed gridがその画像を参照している間は `BUSY` として解放しない。画像nodeを除いた置換frameを正常送出し、依存するsource-backed gridを先にreleaseしてから再試行する。JS wrapperをGCで捨てるだけではnodeの参照は消えない。
+
+`grid.trim(handle)` は入力コピーの高水位容量だけを解放する。planと候補/確定画像を保持し、次のrunで必要な入力を再確保する。前回入力のsnapshotを捨てるため `measure` は次の成功runまで利用できない。公開待ち/修復中は `BUSY`。release/trim自体はJS返却値やnative heapを確保せず、低heapでも不要資源を返せる。runの入力再確保が失敗しても、前回の確定画像は保持する。
+
 `grid.profile(handle)` はそのhandleで成功した `run` の累計を返して計数をリセットする。返り値は `runs`、`copyUs`（JS入力の取得・native領域へのコピー）、`bindUs`（合法性検査と選択）、`kernelUs`、`totalUs`、`maxTotalUs`、`heapFree`、`heapLargest`、`heapMinFree`。時間はµs、heapは内部8-bit RAMのbyte。`totalUs` には候補画像の確定処理なども含むため、前3段の和より大きい。Kasaneの再合成とLCD送出はこの計数の外である。`heapMinFree` は起動以来の全体低水位で、profileの計数リセットでは戻らない。

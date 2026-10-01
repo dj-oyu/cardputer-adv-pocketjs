@@ -17,6 +17,17 @@ static ksn_image_port resize_image;
 static ksn_image_port stream_image;
 static ksn_image_port nearest_image;
 static unsigned invalidates, resources;
+static bool release_busy;
+static bool native_alloc_fail;
+void *pocket_grid_test_malloc(size_t bytes)
+{ return native_alloc_fail ? NULL : malloc(bytes); }
+static JSValue arm_oom(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv)
+{(void)self;(void)argc;(void)argv;JS_SetMemoryLimit(JS_GetRuntime(ctx),1);return JS_UNDEFINED;}
+ksn_result pocket_kasane_grid_release(unsigned slot)
+{
+    CHECK(slot < POCKET_GRID_MAX_SLOTS);
+    return release_busy ? KSN_BUSY : KSN_OK;
+}
 static unsigned source_reads, source_pixels, source_version;
 static int fail_source_y = -1;
 const char *pocket_grid_test_frontend;
@@ -144,6 +155,7 @@ int main(int argc, char **argv)
     JSRuntime *runtime = JS_NewRuntime(); CHECK(runtime);
     JSContext *ctx = JS_NewContext(runtime); CHECK(ctx);
     JSValue global = JS_GetGlobalObject(ctx);
+    CHECK(JS_SetPropertyStr(ctx,global,"armOom",JS_NewCFunction(ctx,arm_oom,"armOom",0))==1);
     JSValue ns = JS_NewObject(ctx);
     CHECK(pocket_grid_install(ctx, ns) == ESP_OK);
     CHECK(JS_SetPropertyStr(ctx, global, "kasane", ns) == 1);
@@ -193,13 +205,28 @@ int main(int argc, char **argv)
               "if(kasane.grid.run(h,{0:input},[32,16])!=='PIE')throw Error('backend');",
          false);
     CHECK(pocket_grid_pending() && invalidates == 1);
+    eval(ctx,"kasane.grid.release(h)",true);
+    eval(ctx,"kasane.grid.trim(h)",true);
     pixels(4);
     eval(ctx, "kasane.grid.run(h,{0:input},[32,16])", true);
     pocket_grid_present_result(KSN_IO);
     CHECK(pocket_grid_pending());
+    eval(ctx,"kasane.grid.release(h)",true);
+    eval(ctx,"kasane.grid.trim(h)",true);
     pixels(4);
     pocket_grid_present_result(KSN_OK);
     CHECK(!pocket_grid_pending());
+    release_busy=true;
+    eval(ctx,"kasane.grid.release(h)",true);
+    release_busy=false;
+    eval(ctx,"kasane.grid.trim(h)",false);
+    pixels(4);
+    eval(ctx,"kasane.grid.measure(h,1)",true);
+    native_alloc_fail=true;
+    eval(ctx,"kasane.grid.run(h,{0:input},[32,16])",true);
+    native_alloc_fail=false;
+    CHECK(!pocket_grid_pending());
+    pixels(4);
     eval(ctx, "kasane.grid.run(h,{0:new Uint8Array(768)},[32,16])", true);
     pixels(4);
     eval(ctx, "kasane.grid.run(h,{0:input},[32,16]);", false);
@@ -342,6 +369,22 @@ int main(int argc, char **argv)
               "slowRoute.scalarReason!=='GENERAL_FORM'||"
               "slowRoute.candidateMask!==0)"
               "throw Error(JSON.stringify(slowRoute));", false);
+    CHECK(pocket_grid_source_in_use(777));
+    eval(ctx,"kasane.grid.release(hs);kasane.grid.release(hn);",false);
+    CHECK(!pocket_grid_source_in_use(777));
+    /* Release is allocation-free, rejects stale handles and recycles slots
+     * without reusing numeric handles, even after more than six plans. */
+    eval(ctx,"armOom();kasane.grid.release(h);",false);
+    JS_SetMemoryLimit(runtime,0);
+    eval(ctx,"kasane.grid.release(h)",true);
+    eval(ctx,"kasane.grid.run(h,{0:input},[32,16])",true);
+    eval(ctx,"let previousHandle=0;for(let i=0;i<600;i++){"
+              "let fresh=kasane.grid.register(gridFoldDeviceProgram);"
+              "if(fresh<=previousHandle)throw Error('handle reused');"
+              "previousHandle=fresh;kasane.grid.run(fresh,{0:input},[32,16]);"
+              "kasane.grid.release(fresh);}",false);
+    eval(ctx,"armOom();kasane.grid.trim(hr);",false);
+    JS_SetMemoryLimit(runtime,0);
     pocket_grid_reset();
     eval(ctx, "let narrow=gridFold.index({x:1,y:7});"
               "let narrowPlan=gridFold.fold({width:7,height:1,tapWidth:1,"

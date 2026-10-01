@@ -4,6 +4,7 @@
 JSValue pocket_kasane_grid_resource(JSContext *ctx, unsigned slot,
                                     const ksn_image_port *port);
 void pocket_kasane_grid_invalidate(unsigned slot);
+ksn_result pocket_kasane_grid_release(unsigned slot);
 bool pocket_kasane_grid_source_port(JSContext *ctx, JSValueConst object,
                                     ksn_image_port *out, uint32_t *id);
 #else
@@ -16,6 +17,11 @@ bool pocket_kasane_grid_source_port(JSContext *ctx, JSValueConst object,
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(KSN_GRID_APP_HOST_TEST) && defined(POCKET_GRID_ALLOC_FAULT_TEST)
+/* Host-only injection: firmware continues to use the system allocator. */
+void *pocket_grid_test_malloc(size_t bytes);
+#define malloc pocket_grid_test_malloc
+#endif
 #ifdef ESP_PLATFORM
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -954,6 +960,38 @@ static JSValue explain_impl(JSContext *ctx, int argc, JSValueConst *argv)
 }
 
 typedef JSValue (*grid_method)(JSContext *, int, JSValueConst *);
+static void free_slot(grid_slot *slot)
+{
+    free(slot->plan); free(slot->resize); free(slot->stream);
+    free(slot->output_raw[0]); free(slot->output_raw[1]);
+    for (unsigned i=0;i<KSN_GRID_BUFFERS;i++) free(slot->input_raw[i]);
+    *slot=(grid_slot){0};
+}
+static JSValue release_impl(JSContext *ctx,int argc,JSValueConst *argv)
+{
+    const char *op="kasane.grid.release";
+    grid_slot *slot=argc==1?find(ctx,argv[0]):NULL;
+    if(!slot)return fail(ctx,op,POCKET_ERR_CLOSED,"expected live grid handle");
+    if(slot->pending)return fail(ctx,op,POCKET_ERR_BUSY,"image awaits presentation or repair");
+    ksn_result result=pocket_kasane_grid_release((unsigned)(slot-slots));
+    if(result!=KSN_OK)return fail(ctx,op,result==KSN_BUSY?POCKET_ERR_BUSY:POCKET_ERR_CLOSED,
+                                "image still referenced or unavailable");
+    free_slot(slot);
+    return JS_UNDEFINED;
+}
+static JSValue trim_impl(JSContext *ctx,int argc,JSValueConst *argv)
+{
+    const char *op="kasane.grid.trim";
+    grid_slot *slot=argc==1?find(ctx,argv[0]):NULL;
+    if(!slot)return fail(ctx,op,POCKET_ERR_CLOSED,"expected live grid handle");
+    if(slot->pending)return fail(ctx,op,POCKET_ERR_BUSY,"image awaits presentation or repair");
+    for(unsigned i=0;i<KSN_GRID_BUFFERS;i++){
+        free(slot->input_raw[i]);slot->input_raw[i]=NULL;slot->input[i]=NULL;
+        slot->input_capacity[i]=slot->last_input_count[i]=0;
+    }
+    slot->measure_ready=false;
+    return JS_UNDEFINED;
+}
 static JSValue guarded(JSContext *ctx, int argc, JSValueConst *argv,
                        grid_method method)
 {
@@ -976,6 +1014,10 @@ static JSValue js_register_resize(JSContext *ctx, JSValueConst self, int argc,
 static JSValue js_register_resize_source(JSContext *ctx, JSValueConst self,
                                          int argc, JSValueConst *argv)
 { (void)self; return guarded(ctx, argc, argv, register_resize_source_impl); }
+static JSValue js_release(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv)
+{(void)self;return guarded(ctx,argc,argv,release_impl);}
+static JSValue js_trim(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv)
+{(void)self;return guarded(ctx,argc,argv,trim_impl);}
 static JSValue js_run(JSContext *ctx, JSValueConst self, int argc,
                       JSValueConst *argv)
 { (void)self; return guarded(ctx, argc, argv, run_impl); }
@@ -1047,8 +1089,10 @@ esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst ns)
         JS_CFUNC_DEF("measure", 2, js_measure),
         JS_CFUNC_DEF("resource", 1, js_resource),
         JS_CFUNC_DEF("explain", 1, js_explain),
+        JS_CFUNC_DEF("release", 1, js_release),
+        JS_CFUNC_DEF("trim", 1, js_trim),
     };
-    if (JS_SetPropertyFunctionList(ctx, grid, methods, 9) < 0) {
+    if (JS_SetPropertyFunctionList(ctx, grid, methods, 11) < 0) {
         JS_FreeValue(ctx, grid); return ESP_ERR_NO_MEM;
     }
     if (JS_SetPropertyStr(ctx, ns, "grid", grid) < 0) return ESP_ERR_NO_MEM;
@@ -1074,17 +1118,16 @@ esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst ns)
 void pocket_grid_reset(void)
 {
     for (unsigned i = 0; i < GRID_APP_SLOTS; ++i) {
-        free(slots[i].plan);
-        free(slots[i].resize);
-        free(slots[i].stream);
-        free(slots[i].output_raw[0]);
-        free(slots[i].output_raw[1]);
-        for (unsigned j = 0; j < KSN_GRID_BUFFERS; ++j)
-            free(slots[i].input_raw[j]);
-        slots[i] = (grid_slot){0};
+        free_slot(&slots[i]);
     }
     js_call_active = false;
     frontend_loaded = false;
+}
+bool pocket_grid_source_in_use(uint32_t resource_id)
+{
+    for(unsigned i=0;i<GRID_APP_SLOTS;i++)
+        if(slots[i].stream&&slots[i].stream->source_id==resource_id)return true;
+    return false;
 }
 void pocket_grid_source_invalidated(uint32_t resource_id)
 {

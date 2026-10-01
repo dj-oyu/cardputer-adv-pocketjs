@@ -28,6 +28,7 @@ bool pocket_kasane_pixel_can_stage(void);
 bool pocket_kasane_video_can_select(void);
 void pocket_kasane_video_invalidate(void);
 void pocket_kasane_grid_invalidate(unsigned slot);
+ksn_result pocket_kasane_grid_release(unsigned slot);
 bool pocket_kasane_grid_source_port(JSContext *,JSValueConst,ksn_image_port *,uint32_t *);
 /* C service publishes a session-scoped, unforgeable source capability. The
  * registry and provider must outlive pocket_kasane_reset(); revoke by

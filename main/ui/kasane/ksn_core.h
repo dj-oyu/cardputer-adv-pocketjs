@@ -122,6 +122,9 @@ ksn_client ksn_core_client(ksn_core *core,ksn_layer layer);
  * init, which must run outside provider callbacks and invalidate all clients.
  * Register only between submissions/builders. No per-frame retain/release. */
 ksn_result ksn_core_register_image(ksn_core *core,ksn_layer layer,const ksn_image_port *port,ksn_resource *out);
+/* Reject while a transaction/repair or a visible command can use the port.
+ * Old resource IDs remain stale; registering again issues a fresh ID. */
+ksn_result ksn_core_unregister_image(ksn_core *,ksn_layer,ksn_resource);
 /* Borrow a registered provider descriptor during the owner turn. */
 ksn_result ksn_core_image_port(const ksn_core *,ksn_layer,ksn_resource,ksn_image_port *);
 /* Read-only owner-turn validation against currently registered resources. */

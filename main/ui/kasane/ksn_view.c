@@ -41,6 +41,11 @@ ksn_result ksn_view_host_register_image(ksn_view *v,const ksn_image_port *port,k
     if(v->host->presenting)return KSN_BUSY;
     return ksn_core_register_image(v->host->core,v->layer,port,out);
 }
+ksn_result ksn_view_host_unregister_image(ksn_view *v,ksn_resource resource){
+    if(!valid(v))return KSN_INVALID;
+    if(v->host->presenting)return KSN_BUSY;
+    return ksn_core_unregister_image(v->host->core,v->layer,resource);
+}
 ksn_result ksn_view_host_image_port(const ksn_view *v,ksn_resource resource,
                                     ksn_image_port *out){
     return valid(v)?ksn_core_image_port(v->host->core,v->layer,resource,out):KSN_INVALID;

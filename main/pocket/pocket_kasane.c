@@ -1197,6 +1197,18 @@ void pocket_kasane_video_invalidate(void){
         pocket_grid_source_invalidated(state->video_resource.value);
     }
 }
+ksn_result pocket_kasane_grid_release(unsigned slot){
+    if(slot>=POCKET_GRID_MAX_SLOTS)return KSN_INVALID;
+    if(!state||!state->grid_resources[slot].value)return KSN_OK;
+    ksn_resource resource=state->grid_resources[slot];
+    if(pocket_grid_source_in_use(resource.value))return KSN_BUSY;
+    ksn_result result=ksn_view_host_unregister_image(view(),resource);
+    if(result==KSN_OK){
+        state->grid_resources[slot]=(ksn_resource){0};
+        state->grid_width[slot]=state->grid_height[slot]=0;
+    }
+    return result;
+}
 void pocket_kasane_grid_invalidate(unsigned slot){
     if(state&&slot<POCKET_GRID_MAX_SLOTS&&state->grid_resources[slot].value){
         ksn_runtime_invalidate_image(state->grid_resources[slot]);

@@ -394,6 +394,7 @@ python3 tools/kasane_contract/run_proc_limits_scene.py
 python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py
 python3 tools/kasane_contract/run_proc_grid_resize.py
 python3 tools/kasane_contract/run_pocket_grid_qjs.py
+python3 tools/kasane_contract/run_image_release.py
 python3 tools/kasane_contract/run_pocket_video_qjs.py
 # The three games (tools/games/): scripted play on the real QuickJS, pocket.kasane and
 # pocket.input.keys. The --m32 runs use the device-sized guest heap, which is the

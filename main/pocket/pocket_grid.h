@@ -14,6 +14,7 @@ void pocket_grid_reset(void);
 bool pocket_grid_pending(void);
 void pocket_grid_present_result(ksn_result result);
 void pocket_grid_source_invalidated(uint32_t resource_id);
+bool pocket_grid_source_in_use(uint32_t resource_id);
 #ifdef KASANE_PROC_DEVICE_PROBE
 typedef struct {
     uint64_t source_cycles, kernel_cycles;

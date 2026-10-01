@@ -28,6 +28,7 @@ def main():
                ROOT / "tools/kasane_contract/test_pocket_grid_qjs.c"]
     command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE",
                "-DKSN_GRID_PIE_MODEL", "-DKSN_GRID_APP_HOST_TEST",
+               "-DPOCKET_GRID_ALLOC_FAULT_TEST",
                "-I", str(QJS), "-I", str(ROOT / "main"),
                "-I", str(ROOT / "main/pocket"),
                "-I", str(ROOT / "main/ui/kasane"),

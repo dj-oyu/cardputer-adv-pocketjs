@@ -779,6 +779,27 @@ ksn_result ksn_core_register_image(ksn_core *storage,ksn_layer layer,const ksn_i
                              port->read_span,{++last_resource},(uint8_t)layer,(uint8_t)port->opaque};
     *out=entry->id;return KSN_OK;
 }
+ksn_result ksn_core_unregister_image(ksn_core *storage,ksn_layer layer,ksn_resource resource){
+    if(!storage||!valid_layer(layer)||!resource.value)return KSN_INVALID;
+    ksn_core_impl *core=impl(storage);
+    if(core->building||core->submitted||core->repairing)return KSN_BUSY;
+    unsigned found=0;
+    while(found<core->image_count&&(core->images[found].layer!=layer||
+          core->images[found].id.value!=resource.value))found++;
+    if(found==core->image_count)return KSN_STALE;
+    const ksn_bank *bank=&core->banks[core->active];
+    for(unsigned l=0;l<2;l++)for(unsigned i=0;i<bank->count[l];i++){
+        const ksn_command_storage *command=bank_command_const(bank,command_base((ksn_layer)l)+i);
+        if(command->kind==KSN_IMAGE){
+            image_payload p;payload_read(command,&p,sizeof p);
+            if(p.resource==resource.value)return KSN_BUSY;
+        }
+    }
+    memmove(core->images+found,core->images+found+1,
+            (core->image_count-found-1u)*sizeof(*core->images));
+    memset(&core->images[--core->image_count],0,sizeof(*core->images));
+    return KSN_OK;
+}
 ksn_result ksn_core_image_port(const ksn_core *storage,ksn_layer layer,
                                ksn_resource resource,ksn_image_port *out){
     if(!storage||!out||!valid_layer(layer)||!resource.value)return KSN_INVALID;

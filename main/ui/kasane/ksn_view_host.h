@@ -29,6 +29,7 @@ ksn_view *ksn_view_host_endpoint(ksn_view_host *,ksn_layer);
 /* Register immutable borrowed sources between updates. Owner reset releases
  * descriptors; source bytes must outlive that reset. No per-frame selection. */
 ksn_result ksn_view_host_register_image(ksn_view *,const ksn_image_port *,ksn_resource *);
+ksn_result ksn_view_host_unregister_image(ksn_view *,ksn_resource);
 ksn_result ksn_view_host_image_port(const ksn_view *,ksn_resource,ksn_image_port *);
 ksn_result ksn_view_host_advance_animations(ksn_view_host *,uint64_t now_us,bool reduce_motion);
 /* Enable an optional bound cache only between guest updates. Does not reset
