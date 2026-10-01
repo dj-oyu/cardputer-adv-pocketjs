@@ -8533,6 +8533,9 @@ static void gc_free_cycles(JSRuntime *rt)
 
 void JS_RunGC(JSRuntime *rt)
 {
+    size_t limit = rt->malloc_state.malloc_limit;
+    bool trim_empty_arrays = limit != 0 &&
+        rt->malloc_state.malloc_size >= limit - (limit >> 3);
     /* decrement the reference of the children of each object. mark =
        1 after this pass. */
     gc_decref(rt);
@@ -8542,6 +8545,25 @@ void JS_RunGC(JSRuntime *rt)
 
     /* free the GC objects in a cycle */
     gc_free_cycles(rt);
+
+    /* Keep reusable capacity during ordinary collections. Under quota
+       pressure, empty fast arrays own no live elements, so their backing
+       allocation can be returned without conversion or allocation. */
+    if (trim_empty_arrays) {
+        struct list_head *el;
+        list_for_each(el, &rt->gc_obj_list) {
+            JSGCObjectHeader *h = list_entry(el, JSGCObjectHeader, link);
+            if (h->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT) {
+                JSObject *p = (JSObject *)h;
+                if (p->class_id == JS_CLASS_ARRAY && p->fast_array &&
+                    p->u.array.count == 0 && p->u.array.u.values != NULL) {
+                    js_free_rt(rt, p->u.array.u.values);
+                    p->u.array.u.values = NULL;
+                    p->u.array.u1.size = 0;
+                }
+            }
+        }
+    }
 }
 
 /* Return false if not an object or if the object has already been
