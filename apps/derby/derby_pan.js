@@ -79,9 +79,12 @@ function pan(xs) {
   const k = KN[tier], zf = pc[5] + (tier ? 75 : 150), L = vr ? 8 : 4;
   VE = CRS === OC && []; VC = VE ? [] : [0];
   if (VE) {
-    for (let a = 0; a < 4 * CH.length; a += 4) {
-      const x = CP[a] - pc[0], z = CP[a + 1] - pc[1], c = CP[a + 2], d = CP[a + 3];
-      VE.push(x * pc[3] - z * pc[2], x * pc[2] + z * pc[3], -d * pc[3] - c * pc[2], c * pc[3] - d * pc[2]);
+    // The bend's ends from CH.P by symmetry (README "楕円").
+    const e = OC[1], r = 1 / e[1] + DNR, S = CH.P, n = PAN[3], h = n / 2;
+    for (let j = 0; j < CH.length; ++j) {
+      const i = j - 1, b = i > h, s = S[b ? n - i : i], C = b ? S[i - h] : -S[h - i],
+        m = i < 0 || i > n ? pose(CH[j], 0) : [e[2] + (s - e[5]) * r, e[3] - (C - e[4]) * r, C, s], x = m[0] - pc[0], z = m[1] - pc[1];
+      VE.push(x * pc[3] - z * pc[2], x * pc[2] + z * pc[3], -m[3] * pc[3] - m[2] * pc[2], m[2] * pc[3] - m[3] * pc[2]);
     }
     for (let j = 1; j < CH.length; ++j) if (!ou(j - 1, 25.5, 30, zf)) VC.push(j - 1);
   }

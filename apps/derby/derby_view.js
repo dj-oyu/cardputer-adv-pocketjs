@@ -90,10 +90,10 @@ const VS = [840, 34, 20, 6, 16], FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30
 // screen 34, stands 40), as [x, z, tangent]; a bend's centre is 1/curvature
 // in from the rail. The straight gives [g, w, 1, 0] exactly. The oval (README
 // "楕円"): the back straight, a 120 m bend to the right, the home straight on
-// the straight's line from 650 m. CH: chord ends (ser()); CP: their poses at
-// w 0, flat, once a race (pan()).
+// the straight's line from 650 m. CH: chord ends (ser()); CH.P: sin of the
+// bend's end headings, half of them (pan()).
 const OB = 650 - 120 * PI, SC = [], OC = [[OB, 0, 650 + OB, -218, -1, 0], [120 * PI, -1 / 120, 650, -218, -1, 0, PI], [2e3, 0, 650, 0, 1, 0]];
-let CRS = SC, CH, CP, VC, VE;
+let CRS = SC, CH, VC, VE;
 function pose(g, w) {
   if (CRS === SC) return [g, w, 1, 0];
   let i = 0;

@@ -7,7 +7,8 @@ function enter(s) {
     CRS = F.o ? OC : SC; CH = [-1e4];
     if (F.o) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
     CH.push(1e4);
-    CP = [].concat.apply([], CH.map(g => pose(g, 0)));
+    CH.P = [];
+    for (let k = 0; k <= PAN[3] / 2; ++k) CH.P.push(sin(k * PI / PAN[3]));
   }
   if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
