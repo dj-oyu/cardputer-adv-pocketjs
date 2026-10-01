@@ -33,9 +33,9 @@ function count(out) {
   return { ...S.all, serPose: serPose / n, serPoseBend: serPoseBend / n, dv: dv / n, calls: calls / n, hidden: hidden / n };
 }
 
-const sets = [['楕円 w=-100 コーナー WIDE 2', -100, 8, range(Math.ceil(OB), 648, STEP)], ['楕円 u=14 コーナー WIDE 2', -14, 8, range(Math.ceil(OB), 648, STEP)],
+const sets = [['楕円 w=-100 コーナー WIDE 2', -100, 8, range(Math.ceil(OB), 648, STEP)], ['楕円 w=-14（u=25）コーナー WIDE 2', -14, 8, range(Math.ceil(OB), 648, STEP)], ['楕円 w=-3（u=14）コーナー WIDE 2', -3, 8, range(Math.ceil(OB), 648, STEP)],
   ['楕円 コーナー WIDE 1', -100, 7, range(Math.ceil(OB), 648, STEP)], ['楕円 コーナー WIDE 3', -100, 9, range(Math.ceil(OB), 648, STEP)],
-  ['楕円 u=14 ホームストレッチ 監督', -14, 0, range(650, 1000, STEP)]];
+  ['楕円 w=-14（u=25）ホームストレッチ 監督', -14, 0, range(650, 1000, STEP)], ['楕円 w=-3（u=14）ホームストレッチ 監督', -3, 0, range(650, 1000, STEP)]];
 const V = ['cull1', 'cull2', 'cull3', 'cull4', 'merge1', 'merge2', 'mergeF0.5', 'mergeF1', 'mergeF2'];
 const f1 = x => x.toFixed(1), f2 = x => x.toFixed(2);
 console.log('| 構成 | 案 | 本体 | draw | VM ステップ | 線分・点 | ser の pose | 判定の呼び出し | 推定の削減 ms（モデル） | 推定の削減 ms（実機の本体 1.2〜1.5 ms） |');

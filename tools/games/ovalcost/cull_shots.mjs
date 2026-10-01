@@ -17,7 +17,8 @@ import { patchApp } from './variants.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const CACHE = path.join(ROOT, '.cache/trigcull'), BIN = path.join(ROOT, '.cache/derby_host/asan/test-derby');
-const LOWERED = path.join(ROOT, '.cache/derby_host/lowered/apps/derby');
+// vm/main 44fce25 lowered by code_bytes.mjs (variants.mjs patches its text).
+const LOWERED = path.join(ROOT, '.cache/trigcull/code/low/apps/derby');
 const args = process.argv.slice(2);
 const VARIANTS = args.length ? args : ['vetab', 'cull4', 'merge1', 'merge2'];
 // The four panels of the sheet, and 28 points of the bend for the table (the
@@ -28,7 +29,8 @@ for (let m = 290; m <= 630; m += 40) AT.push(m);
 AT.sort((a, b) => a - b);
 const CONFIGS = [
   { name: 'w100', label: 'WIDE 2 の台 w=−100（今）', js: '', course: 'oval' },
-  { name: 'u14', label: 'WIDE 2 の台 u=14（w=−14）', js: 'CAMS[8][5]=-14', course: 'oval' },
+  { name: 'w14', label: 'WIDE 2 の台 w=−14（u=25）', js: 'CAMS[8][5]=-14', course: 'oval' },
+  { name: 'u14', label: 'WIDE 2 の台 w=−3（u=14、u = 11 − w）', js: 'CAMS[8][5]=-3', course: 'oval' },
   { name: 'straight', label: '直線コース WIDE 2', js: '', course: 'straight', at: [150, 250, 350, 450, 550, 650, 750, 850] },
 ];
 
@@ -147,14 +149,15 @@ for (const cfg of CONFIGS) {
       (cfg.name === 'straight' ? '' : `  (300/400/500/600 m: ${SHOW.map(m => (100 * diff(R[cfg.name].app[m], R[cfg.name][v][m]).n / (240 * 135)).toFixed(2)).join(' / ')} %)`));
   }
 }
-// Sheets: rows the leader at 300..600 m; columns the app (w -100), u 14, then
+// Sheets: rows the leader at 300..600 m; columns the app at w -100, -14
+// (u 25) and -3 (u 14), then
 // for each culling variant shown, its panel and its difference from the app
-// (magenta), for u 14.
+// (magenta), per placement.
 const DOCS = path.join(ROOT, 'docs/apps');
 const SHEET_V = VARIANTS.filter(v => v !== 'vetab');
-png(path.join(DOCS, 'derby-trig-cull-camera.png'), grid(SHOW.map(m => [R.w100.app[m], R.u14.app[m]])));
-for (const cfg of ['w100', 'u14'])
+png(path.join(DOCS, 'derby-trig-cull-camera.png'), grid(SHOW.map(m => [R.w100.app[m], R.w14.app[m], R.u14.app[m]])));
+for (const cfg of ['w100', 'w14', 'u14'])
   png(path.join(DOCS, `derby-trig-cull-${cfg}.png`), grid(SHOW.map(m => [R[cfg].app[m], ...SHEET_V.flatMap(v => [R[cfg][v][m], diff(R[cfg].app[m], R[cfg][v][m]).img])])));
-// GIFs: every 10 m of the bend, the app beside each variant, for u 14 and w -100.
-for (const cfg of ['w100', 'u14'])
+// GIFs: the bend's 28 points, the app beside each variant, per placement.
+for (const cfg of ['w100', 'w14', 'u14'])
   gif(path.join(DOCS, `derby-trig-cull-${cfg}.gif`), AT.map(m => grid([[R[cfg].app[m], ...SHEET_V.map(v => R[cfg][v][m])]])), 25);

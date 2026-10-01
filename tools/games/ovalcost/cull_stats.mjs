@@ -40,10 +40,10 @@ if (process.argv[1].endsWith('cull_stats.mjs')) {
   console.log(`variant ${VARIANT || 'none'}; leader every ${STEP} m (bend ${f1(OB)}..650)`);
   console.log('| 構成 | フレーム | 本体/フレーム | draw | VM ステップ | 線分・点 | 本体の推定 ms | 箱 <1 px の本体 | <2 | <3 | <4 | <2 px の本体の推定 ms | <4 px の推定 ms |');
   console.log('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
-  const rows = [['楕円 w=-100 コーナー WIDE 2', true, -100, bend, 8], ['楕円 w=-14 コーナー WIDE 2', true, -14, bend, 8],
-    ['楕円 w=-100 コーナー 監督', true, -100, bend, 0], ['楕円 w=-14 コーナー 監督', true, -14, bend, 0],
+  const rows = [['楕円 w=-100 コーナー WIDE 2', true, -100, bend, 8], ['楕円 w=-14（u=25）コーナー WIDE 2', true, -14, bend, 8], ['楕円 w=-3（u=14）コーナー WIDE 2', true, -3, bend, 8],
+    ['楕円 w=-100 コーナー 監督', true, -100, bend, 0], ['楕円 w=-14（u=25）コーナー 監督', true, -14, bend, 0], ['楕円 w=-3（u=14）コーナー 監督', true, -3, bend, 0],
     ['楕円 コーナー WIDE 1', true, -100, bend, 7], ['楕円 コーナー WIDE 3', true, -100, bend, 9],
-    ['楕円 w=-14 ホームストレッチ 監督', true, -14, range(650, 1000, STEP), 0],
+    ['楕円 w=-14（u=25）ホームストレッチ 監督', true, -14, range(650, 1000, STEP), 0], ['楕円 w=-3（u=14）ホームストレッチ 監督', true, -3, range(650, 1000, STEP), 0],
     ['直線 WIDE 2', false, -100, straight, 8]];
   const all = {};
   for (const [name, oval, w2, L, cam] of rows) {

@@ -4,7 +4,7 @@
 // variants.mjs applied. Tables a variant fills at run time (enter('pad')) are
 // not in it: the m32 game run's live peak shows those.
 //
-//   node tools/games/ovalcost/code_bytes.mjs [--ref 45f309f] [variant ...]   (WSL)
+//   node tools/games/ovalcost/code_bytes.mjs [--ref 44fce25] [variant ...]   (WSL)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { patchApp } from './variants.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const a = process.argv.slice(2), ri = a.indexOf('--ref'), REF = ri < 0 ? '45f309f' : a[ri + 1];
+const a = process.argv.slice(2), ri = a.indexOf('--ref'), REF = ri < 0 ? '44fce25' : a[ri + 1];
 const V = a.filter((x, i) => x !== '--ref' && x !== '--export' && x !== '--oval' && (ri < 0 || i !== ri + 1));
 const BIN = path.join(ROOT, '.cache/derby_host/m32/test-derby'), W = path.join(ROOT, '.cache/trigcull/code');
 // --export: write the ref's apps/derby to .cache/trigcull/code_src/<ref> and

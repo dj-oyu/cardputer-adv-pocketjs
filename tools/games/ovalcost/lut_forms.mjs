@@ -106,7 +106,7 @@ const est = o => (o.trig || 0) * P.trig + (o.mul || 0) * P.mul + (o.add || 0) * 
 // 2 at both of its places), VE's ends at w 11, 22.6 and 40.
 function frames() {
   const L = []; for (let x = Math.ceil(OB); x < 650; x += 5) L.push(x);
-  return [[-100, 0], [-14, 0], [-14, 8]].flatMap(([w2, cam]) => runSet(null, true, w2, L, cam).out);
+  return [[-100, 0], [-14, 0], [-14, 8], [-3, 0], [-3, 8]].flatMap(([w2, cam]) => runSet(null, true, w2, L, cam).out);
 }
 function errorOf(fr, name, N) {
   const f = FORMS[name];
@@ -131,7 +131,7 @@ function errorOf(fr, name, N) {
 
 // The m32 QuickJS: the app evaluated with the form appended to derby_view.js
 // (its table and __lk kept), then a timing loop of __lk against the trig one.
-const BIN = path.join(ROOT, '.cache/derby_host/m32/test-derby'), LOWERED = path.join(ROOT, '.cache/trigcull/code/low/apps/derby'); // code_bytes.mjs's lowered 45f309f
+const BIN = path.join(ROOT, '.cache/derby_host/m32/test-derby'), LOWERED = path.join(ROOT, '.cache/trigcull/code/low/apps/derby'); // code_bytes.mjs's lowered 44fce25
 function guest(name, N, time) {
   const f = FORMS[name], dir = path.join(ROOT, '.cache/trigcull/lut', `${name}${N}`, 'apps/derby');
   fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });

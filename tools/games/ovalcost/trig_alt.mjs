@@ -76,8 +76,8 @@ function lerpError(frames, N, f32) {
   return { m, px };
 }
 
-const sets = [['楕円 w=-100 コーナー 監督', true, -100, 0, x => x > OB && x < 650], ['楕円 w=-14 コーナー 監督', true, -14, 0, x => x > OB && x < 650],
-  ['楕円 w=-100 コーナー WIDE 2', true, -100, 8, x => x > OB && x < 650], ['楕円 w=-14 コーナー WIDE 2', true, -14, 8, x => x > OB && x < 650],
+const sets = [['楕円 w=-100 コーナー 監督', true, -100, 0, x => x > OB && x < 650], ['楕円 w=-14（u=25）コーナー 監督', true, -14, 0, x => x > OB && x < 650], ['楕円 w=-3（u=14）コーナー 監督', true, -3, 0, x => x > OB && x < 650],
+  ['楕円 w=-100 コーナー WIDE 2', true, -100, 8, x => x > OB && x < 650], ['楕円 w=-14（u=25）コーナー WIDE 2', true, -14, 8, x => x > OB && x < 650], ['楕円 w=-3（u=14）コーナー WIDE 2', true, -3, 8, x => x > OB && x < 650],
   ['楕円 w=-100 ホームストレッチ 監督', true, -100, 0, x => x >= 650], ['楕円 w=-100 バックストレッチ 監督', true, -100, 0, x => x <= OB],
   ['直線 監督', false, -100, 0, () => true], ['直線 WIDE 2', false, -100, 8, () => true]];
 const L = range(0, 1000, STEP), f1 = x => x.toFixed(1), f2 = x => (x / 1e3).toFixed(2);
@@ -122,11 +122,11 @@ for (const [name, oval, w2, cam, rf] of sets) {
 console.log(`\n単価（µs、推定を含む）: pose 曲線 ${POSE.bend}（実測）、楕円の直線区間 ${POSE.ovalStraight}（推定）、直線コースの近道 ${POSE.straight}（実測）、sin+cos ${TRIG2.toFixed(1)}（実測 18.7 × 2）、` +
   `(b) Map の get/set ${MAP.toFixed(1)}（推定）、(c) 補間 ${LERP.toFixed(1)}、(d) 回転 ${REC.toFixed(1)}、fp() ${FP.toFixed(1)}、VE の表の読み出しの差 ${VE_READ_EXTRA}（推定）`);
 
-console.log('\n### (c) 表 + 線形補間の誤差（曲線上の全 pose、VE は w 11・22.6・40 で。コーナーの監督 w=-100 と w=-14 の最悪）\n');
+console.log('\n### (c) 表 + 線形補間の誤差（曲線上の全 pose、VE は w 11・22.6・40 で。コーナーの監督 w=-100・-14・-3 の最悪）\n');
 console.log('| 分割数 N | 型 | 表の要素 | 表のバイト（データのみ） | 最大誤差 m | 最大誤差 px |');
 console.log('| ---: | --- | ---: | ---: | ---: | ---: |');
 for (const N of [64, 128, 256, 512]) for (const f32 of [true, false]) {
   let m = 0, px = 0;
-  for (const k of ['楕円 w=-100 コーナー 監督', '楕円 w=-14 コーナー 監督']) { const e = lerpError(base[k], N, f32); m = Math.max(m, e.m); px = Math.max(px, e.px); }
+  for (const k of ['楕円 w=-100 コーナー 監督', '楕円 w=-14（u=25）コーナー 監督', '楕円 w=-3（u=14）コーナー 監督']) { const e = lerpError(base[k], N, f32); m = Math.max(m, e.m); px = Math.max(px, e.px); }
   console.log(`| ${N} | ${f32 ? 'Float32Array' : '配列（double）'} | ${2 * (N + 1)} | ${2 * (N + 1) * (f32 ? 4 : 8)} | ${m.toExponential(2)} | ${px.toExponential(2)} |`);
 }

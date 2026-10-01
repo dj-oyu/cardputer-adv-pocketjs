@@ -24,6 +24,8 @@ export const P = { add: 2.27, mul: 2.50, div: 4.87, rd: 2.75, wr: 3.77, f32rd: 2
   trig: 18.7, trigLo: 12.1, sqrt: 7.42, arr4: 14, arr8: 22.7, drawFixed: 37.3, step: 0.46, sinExtra: 1.45,
   poseBend: 135, poseStraight: 26, serBodyLo: 1200, serBodyHi: 1500 };
 
+// The app's KN table (derby_prog.js: the tiers' rows, then the crowd's).
+const KNOF = src => { const m = /const KN = (\[[\s\S]*?\]\]);/.exec(src); if (!m) throw new Error('trig_cull.mjs: KN not found'); return new Function(`return ${m[1]};`)(); };
 function makeApp(variant) {
   const files = patchApp({ view: show('apps/derby/derby_view.js'), pan: show('apps/derby/derby_pan.js'),
     scene: show('apps/derby/derby_scene.js') }, variant);
@@ -48,7 +50,7 @@ function makeApp(variant) {
     M, PI: Math.PI, sin, flo: x => { bump('M.floor'); return Math.floor(x); }, rnd: x => { bump('M.round'); return Math.round(x); },
     mx: (...a) => { bump('M.max'); return Math.max(...a); }, mn: (...a) => { bump('M.min'); return Math.min(...a); },
     D: 1000, DT: .05, U: 1 / 6, DNR: 11, DFR: 22.6, DL: Array.from({ length: 8 }, (_, j) => 12 * 1.085 ** j),
-    KN: [[3, 2, 3, 3, 8, 10], [4, 3, 4, 5, 5, 7], [5, 4, 6, 8, 4, 5]], tier: TIER, t: 0, vr: null, von: 11, ph: [0, 1, 2, 3, 4, 5, 6, 7],
+    KN: KNOF(show('apps/derby/derby_prog.js')), tier: TIER, t: 0, vr: null, von: 11, ph: [0, 1, 2, 3, 4, 5, 6, 7],
     HX: 92, HY: 88, HS: 4, cx: 0, rs: { v: [0] }, scene: 'race', cm: 8,
     dr: (n, a) => { bump('dr'); bump('dr.' + n); st.draws.push([n, a.slice(), st.who, st.body]); },
     rin: (l, X, S, Y) => { bump('rin'); st.draws.push(['runner', [X, S, Y], 'runner', -1]); }, feed: () => {},
@@ -134,7 +136,7 @@ if ((process.argv[1] || "").endsWith("trig_cull.mjs")) {
   const regions = { 'バックストレッチ': x => x < OB, 'コーナー': x => x >= OB && x < 650, 'ホームストレッチ': x => x >= 650 };
   const res = {};
   console.log(`ref ${REF || 'working tree'}, tier ${TIER}, leader 0..1000 m every ${STEP} m; bend ${OB.toFixed(1)}..650 m`);
-  for (const [cfg, oval, w2] of [['楕円 w=-100', true, -100], ['楕円 w=-14', true, -14], ['直線', false, -100]]) {
+  for (const [cfg, oval, w2] of [['楕円 w=-100', true, -100], ['楕円 w=-14（u=25）', true, -14], ['楕円 w=-3（u=14）', true, -3], ['直線', false, -100]]) {
     for (const cam of [0, 7, 8, 9]) {
       const { out } = runSet(null, oval, w2, L, cam);
       for (const [rn, rf] of Object.entries(oval ? regions : { '直線': () => true })) {

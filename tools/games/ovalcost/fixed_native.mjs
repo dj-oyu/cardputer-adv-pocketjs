@@ -4,7 +4,7 @@
 // bend pose the panning frames make (trig_cull.mjs). Nothing here runs on the
 // device; no native code is changed.
 //
-//   node tools/games/ovalcost/fixed_native.mjs [--ref 45f309f]
+//   node tools/games/ovalcost/fixed_native.mjs [--ref 44fce25]
 import { runSet } from './trig_cull.mjs';
 
 const OB = 650 - 120 * Math.PI, DNR = 11;
@@ -37,7 +37,7 @@ function poseExact(g, w) {
 }
 
 const L = []; for (let x = Math.ceil(OB); x < 650; x += 5) L.push(x);
-const fr = [[-100, 0], [-14, 0], [-14, 8]].flatMap(([w2, cam]) => runSet(null, true, w2, L, cam).out);
+const fr = [[-100, 0], [-14, 0], [-14, 8], [-3, 0], [-3, 8]].flatMap(([w2, cam]) => runSet(null, true, w2, L, cam).out);
 console.log('| 1/4 周期の表 | 角度 | 要素 | flash B | 最大誤差 m | 最大誤差 px |');
 console.log('| --- | --- | ---: | ---: | ---: | ---: |');
 for (const [n, q, A] of [[64, 15, 16], [256, 30, 16], [64, 15, 28], [256, 15, 28], [64, 30, 28], [256, 30, 28], [1024, 30, 28]]) {
