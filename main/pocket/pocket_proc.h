@@ -15,6 +15,18 @@ void pocket_proc_reset(void);
  * or with count 0, every name is unknown (INVALID_ARGUMENT). */
 void pocket_proc_rom_plans(const ksn_proc_rom_entry *entries,unsigned count);
 void pocket_proc_end_turn(void);
+/* One draw() for a native caller (pocket_derby.c), with the inputs it would
+ * have put in the JS array: the same checks in the same order (beginFrame,
+ * reentrancy, stale handle, finite and float-finite inputs, the VM and frame
+ * limits) and the same PocketError. Returns JS_UNDEFINED or JS_EXCEPTION. */
+JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n);
+#ifdef POCKET_PROC_DRAW_HOOK
+/* Host harness only: called after each native draw that succeeded, with the
+ * inputs as given; with pocket_proc_hook_dry set, the draw is not run at all
+ * (the harness compares input lists without frames or plans). */
+void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n);
+extern bool pocket_proc_hook_dry;
+#endif
 bool pocket_proc_has_frame(void);
 bool pocket_proc_pending(void);
 bool pocket_proc_backdrop_pending(void);

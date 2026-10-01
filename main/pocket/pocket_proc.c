@@ -711,6 +711,48 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     return guarded(ctx,self,argc,argv,draw_impl);
 #endif
 }
+#ifdef POCKET_PROC_DRAW_HOOK
+bool pocket_proc_hook_dry;
+#endif
+JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
+    const char *op="kasane.procedural.draw";
+#ifdef POCKET_PROC_DRAW_HOOK
+    if(pocket_proc_hook_dry){pocket_proc_draw_hook(handle,in,n);return JS_UNDEFINED;}
+#endif
+    if(js_call_active)
+        return failure(ctx,"kasane.procedural",POCKET_ERR_BUSY,"reentrant procedural call");
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    if(handle>INT32_MAX||n>KSN_PROC_INPUTS)
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+    proc_slot *slot=find_slot(handle);
+    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
+    float input[KSN_PROC_INPUTS]={0};
+    for(unsigned i=0;i<n;i++){
+        if(!finite_input(in[i]))return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
+        input[i]=(float)in[i];
+    }
+    /* Timed and counted as js_draw() is, so the diagnostic VM draw time keeps
+     * covering every draw of a frame whoever issues it. */
+#ifdef KASANE_MEGADEMO_TRACE
+    int64_t began=esp_timer_get_time();
+#endif
+    js_call_active=true;
+    JSValue result=draw_run(ctx,slot,handle,input);
+    js_call_active=false;
+#ifdef KASANE_MEGADEMO_TRACE
+    uint32_t us=(uint32_t)(esp_timer_get_time()-began);
+    trace.draw_us+=us;trace.draw_n++;
+    if(us>trace.draw_max_us)trace.draw_max_us=us;
+#ifdef KASANE_BGCOST_TRACE
+    if(bg_last>=0)bg_plan[bg_last].us+=us;
+    bg_last=-1;
+#endif
+#endif
+#ifdef POCKET_PROC_DRAW_HOOK
+    if(!JS_IsException(result))pocket_proc_draw_hook(handle,in,n);
+#endif
+    return result;
+}
 static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
 #ifdef KASANE_BGCOST_TRACE
     int64_t began=esp_timer_get_time();
