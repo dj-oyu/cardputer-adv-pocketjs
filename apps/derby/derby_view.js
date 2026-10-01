@@ -90,9 +90,10 @@ const VS = [840, 34, 20, 6, 16], FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30
 // screen 34, stands 40), as [x, z, tangent]; a bend's centre is 1/curvature
 // in from the rail. The straight gives [g, w, 1, 0] exactly. The oval (README
 // "楕円"): the back straight, a 120 m bend to the right, the home straight on
-// the straight's line from 650 m. CH: chord ends (ser()).
+// the straight's line from 650 m. CH: chord ends (ser()); CP: their poses at
+// w 0, flat, once a race (pan()).
 const OB = 650 - 120 * PI, SC = [], OC = [[OB, 0, 650 + OB, -218, -1, 0], [120 * PI, -1 / 120, 650, -218, -1, 0, PI], [2e3, 0, 650, 0, 1, 0]];
-let CRS = SC, CH, VC, VE;
+let CRS = SC, CH, CP, VC, VE;
 function pose(g, w) {
   if (CRS === SC) return [g, w, 1, 0];
   let i = 0;
@@ -127,8 +128,9 @@ const PAN = [60, 14, 1500, 16];
 let pc = null, vq = null, Lo, Hi;
 function wide(g) {
   let m = 0, e = 1e9;
+  const a = pose(g, (DNR + DFR) / 2);
   for (let i = 7; i < 10; ++i) {
-    const q = pose(CAMS[i][3], CAMS[i][CRS === OC ? 5 : 4]), a = pose(g, (DNR + DFR) / 2), x = a[0] - q[0], z = a[1] - q[1];
+    const q = pose(CAMS[i][3], CAMS[i][CRS === OC ? 5 : 4]), x = a[0] - q[0], z = a[1] - q[1];
     if (x * x + z * z < e) e = x * x + z * z, m = i;
   }
   return e > PAN[0] * PAN[0] || CRS === OC && g > OB && g < 650 ? m : 0;

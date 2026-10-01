@@ -79,9 +79,9 @@ function pan(xs) {
   const k = KN[tier], zf = pc[5] + (tier ? 75 : 150), L = vr ? 8 : 4;
   VE = CRS === OC && []; VC = VE ? [] : [0];
   if (VE) {
-    for (const g of CH) {
-      const m = pose(g, 0), x = m[0] - pc[0], z = m[1] - pc[1];
-      VE.push(x * pc[3] - z * pc[2], x * pc[2] + z * pc[3], -m[3] * pc[3] - m[2] * pc[2], m[2] * pc[3] - m[3] * pc[2]);
+    for (let a = 0; a < 4 * CH.length; a += 4) {
+      const x = CP[a] - pc[0], z = CP[a + 1] - pc[1], c = CP[a + 2], d = CP[a + 3];
+      VE.push(x * pc[3] - z * pc[2], x * pc[2] + z * pc[3], -d * pc[3] - c * pc[2], c * pc[3] - d * pc[2]);
     }
     for (let j = 1; j < CH.length; ++j) if (!ou(j - 1, 25.5, 30, zf)) VC.push(j - 1);
   }
