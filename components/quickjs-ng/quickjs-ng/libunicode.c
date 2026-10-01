@@ -904,9 +904,16 @@ static int unicode_get_cc(uint32_t c)
     }
 }
 
-static void sort_cc(int *buf, int len)
+/* The normalization work array is uint32_t throughout: it is filled by
+   dbuf_put_u32 / memcpy from uint32_t and handed back as uint32_t *. Reading
+   and writing it through int * mixes int and unsigned long lvalues on Xtensa
+   newlib, which strict aliasing lets GCC reorder or drop (the same class as
+   js_string_iterator_next, docs/vm/aliasing-types.md). Code points fit in 21
+   bits, so the unsigned type changes no comparison. */
+static void sort_cc(uint32_t *buf, int len)
 {
-    int i, j, k, cc, cc1, start, ch1;
+    int i, j, k, cc, cc1, start;
+    uint32_t ch1;
 
     for (i = 0; i < len; i++) {
         cc = unicode_get_cc(buf[i]);
@@ -936,7 +943,7 @@ static void sort_cc(int *buf, int len)
 }
 
 static void to_nfd_rec(DynBuf *dbuf,
-                       const int *src, int src_len, int is_compat)
+                       const uint32_t *src, int src_len, int is_compat)
 {
     uint32_t c, v;
     int i, l;
@@ -956,7 +963,7 @@ static void to_nfd_rec(DynBuf *dbuf,
         } else {
             l = unicode_decomp_char(res, c, is_compat);
             if (l) {
-                to_nfd_rec(dbuf, (int *)res, l, is_compat);
+                to_nfd_rec(dbuf, res, l, is_compat);
             } else {
                 dbuf_put_u32(dbuf, c);
             }
@@ -984,14 +991,15 @@ int unicode_normalize(uint32_t **pdst, const uint32_t *src, int src_len,
                       UnicodeNormalizationEnum n_type,
                       void *opaque, DynBufReallocFunc *realloc_func)
 {
-    int *buf, buf_len, i, p, starter_pos, cc, last_cc, out_len;
+    uint32_t *buf;
+    int buf_len, i, p, starter_pos, cc, last_cc, out_len;
     bool is_compat;
     DynBuf dbuf_s, *dbuf = &dbuf_s;
 
     is_compat = n_type >> 1;
 
     dbuf_init2(dbuf, opaque, realloc_func);
-    if (dbuf_claim(dbuf, sizeof(int) * src_len)) {
+    if (dbuf_claim(dbuf, sizeof(uint32_t) * src_len)) {
         goto fail;
     }
 
@@ -1002,27 +1010,27 @@ int unicode_normalize(uint32_t **pdst, const uint32_t *src, int src_len,
                 goto not_latin1;
             }
         }
-        buf = (int *)dbuf->buf;
-        memcpy(buf, src, src_len * sizeof(int));
-        *pdst = (uint32_t *)buf;
+        buf = (uint32_t *)dbuf->buf;
+        memcpy(buf, src, src_len * sizeof(uint32_t));
+        *pdst = buf;
         return src_len;
 not_latin1: ;
     }
 
-    to_nfd_rec(dbuf, (const int *)src, src_len, is_compat);
+    to_nfd_rec(dbuf, src, src_len, is_compat);
     if (dbuf_error(dbuf)) {
 fail:
         *pdst = NULL;
         return -1;
     }
-    buf = (int *)dbuf->buf;
-    buf_len = dbuf->size / sizeof(int);
+    buf = (uint32_t *)dbuf->buf;
+    buf_len = dbuf->size / sizeof(uint32_t);
 
     sort_cc(buf, buf_len);
 
     if (buf_len <= 1 || (n_type & 1) != 0) {
         /* NFD / NFKD */
-        *pdst = (uint32_t *)buf;
+        *pdst = buf;
         return buf_len;
     }
 
@@ -1053,7 +1061,7 @@ next:
             buf[out_len++] = buf[i++];
         }
     }
-    *pdst = (uint32_t *)buf;
+    *pdst = buf;
     return out_len;
 }
 

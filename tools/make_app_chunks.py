@@ -1,0 +1,236 @@
+"""Generate the pocket.app.load() chunk table (main/pocket/app_chunks.h).
+
+  python tools/make_app_chunks.py OUTDIR LIST [LIST ...]
+
+Each LIST is a chunks.txt:
+
+  # comment
+  app local.derby            <- the app_registry.c id the chunks belong to
+  scene  derby_scene.js      <- a name for pocket.app.load(), then a file
+  demo   derby_demo.js          relative to the chunks.txt
+
+A file ending in .mjs is an ES module: the app's module entry reaches it with
+a static `import ... from 'scene'` and load() refuses it; any other file is a
+global script for load() and the module loader refuses it
+(docs/vm/eval-peak.md section 9).
+
+Writes OUTDIR/app_chunks.c (the table, one set per app id; several lists may
+name the same app, and their chunks are merged) and OUTDIR/app_chunks.cmake,
+which sets APP_CHUNK_FILES for main/CMakeLists.txt to embed (TEXT, so a NUL
+follows the bytes). The symbols are the ones target_add_binary_data derives
+from the base name (_binary_<C identifier>_start), the same rule every other
+embedded app follows, so code that already names an embedded file by its
+symbol keeps working when the file becomes a chunk. The
+table records the files' _start/_end symbols, not their lengths, so editing a
+chunk needs no reconfigure; adding, renaming or removing one does, and
+main/CMakeLists.txt makes every LIST a configure dependency for that.
+
+A chunk whose file has @plan functions (procedural plans written as JS,
+docs/kasane/js-to-ir.md section 5) is embedded lowered: the build runs
+tools/kasane_ir/lower_plans.mjs --file on it and embeds OUTDIR/apps/<the
+list's directory>/<the same base name>, so the symbol and the table stay
+the same. app_chunks.cmake then also sets APP_CHUNK_LOWER (source, output
+and how, in threes: `packed`, or `rom:APP`) and APP_CHUNK_PLANS (the chunks'
+"app:name" labels, for main/CMakeLists.txt's Node check). Which chunks are
+lowered is decided here, at configure: a chunk that gains its first @plan
+needs a reconfigure (one that loses its last is copied through unchanged).
+An app with @plan functions must have exactly one @planDecoder among its
+chunks, or the configure fails.
+
+An app whose decoder is marked `/** @planDecoder rom */` ships its plans as
+the firmware's built-in table (docs/kasane/flash-plan.md section 2): its
+@plan chunks are lowered with lower_plans.mjs --rom APP (the plans and the
+decoder removed; APP is the list's directory name, [a-z][a-z0-9_]*, and the
+app registers 'APP.name'), and APP_CHUNK_ROM lists them as APP=source for
+main/CMakeLists.txt to compile with tools/kasane_ir/emit_rom_plans.mjs into
+ksn_proc_rom_plans.c. With no such app, OUTDIR/ksn_proc_rom_plans_none.c
+(an empty table) is written here, so a build without @plan needs no Node;
+APP_CHUNK_ROM_C names whichever file the build compiles.
+
+Refused, so the build fails at configure rather than the app at run time:
+a name that is not 1..31 of [A-Za-z0-9_.-], a name twice in one app, more than
+32 chunks in one app (pocket_app_load.c keeps a bit per chunk), a missing file,
+and two chunk files with the same base name (ESP-IDF writes each embed to
+build/<base name>.S, so the second would overwrite the first).
+"""
+import re
+import sys
+from pathlib import Path
+
+NAME = re.compile(r'[A-Za-z0-9_.\-]{1,31}$')
+# lower_plans.mjs's markers (tools/kasane_ir/plan_js.mjs findPlans).
+PLAN = re.compile(r'/\*\*(?:(?!\*/)[\s\S])*?@plan\s')
+DECODER = re.compile(r'/\*\*\s*@planDecoder(\s+rom)?\s*\*/')
+ROM_APP = re.compile(r'[a-z][a-z0-9_]*$')
+APP_ID = re.compile(r'[A-Za-z0-9_.\-]{1,63}$')
+MAX_CHUNKS = 32
+
+
+def fail(msg):
+    sys.exit(f'make_app_chunks: {msg}')
+
+
+def c_ident(s):
+    """CMake's string(MAKE_C_IDENTIFIER): what data_file_embed_asm.cmake names
+    the symbols after."""
+    s = re.sub(r'[^A-Za-z0-9_]', '_', s)
+    return '_' + s if s[:1].isdigit() else s
+
+
+def c_string(s):
+    return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def read_list(path):
+    app, chunks = None, []
+    for n, raw in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+        line = raw.split('#', 1)[0].strip()
+        if not line:
+            continue
+        words = line.split()
+        if words[0] == 'app':
+            if len(words) != 2 or not APP_ID.match(words[1]):
+                fail(f'{path}:{n}: expected "app <id>"')
+            if app:
+                fail(f'{path}:{n}: a second "app" line')
+            app = words[1]
+            continue
+        if len(words) != 2:
+            fail(f'{path}:{n}: expected "<name> <file>"')
+        if not app:
+            fail(f'{path}:{n}: a chunk before the "app <id>" line')
+        name, rel = words
+        if not NAME.match(name):
+            fail(f'{path}:{n}: chunk name {name!r} is not 1..31 of [A-Za-z0-9_.-]')
+        file = (path.parent / rel).resolve()
+        if not file.is_file():
+            fail(f'{path}:{n}: no file {file}')
+        chunks.append((name, file))
+    if not app:
+        fail(f'{path}: no "app <id>" line')
+    return app, chunks
+
+
+def main():
+    if len(sys.argv) < 2:
+        fail('usage: make_app_chunks.py OUTDIR [LIST ...]')
+    out = Path(sys.argv[1])
+    lists = [Path(p).resolve() for p in sys.argv[2:]]
+    apps = {}          # id -> [(name, file)]
+    bases = {}         # base name -> file
+    for lst in lists:
+        app, chunks = read_list(lst)
+        have = apps.setdefault(app, [])
+        for name, file in chunks:
+            if any(name == n for n, _ in have):
+                fail(f'{lst}: chunk {name!r} named twice for {app}')
+            if file.name in bases and bases[file.name] != file:
+                fail(f'{lst}: {file.name} is also {bases[file.name]}; chunk files need '
+                     'distinct base names (the embed is build/<base name>.S)')
+            bases[file.name] = file
+            have.append((name, file))
+        if len(have) > MAX_CHUNKS:
+            fail(f'{app} has {len(have)} chunks; at most {MAX_CHUNKS}')
+
+    # Chunks with @plan functions are embedded lowered (the module comment).
+    lower, plans, embed, rom = [], [], {}, []
+    for app in sorted(apps):
+        decoders, planned, marks, files = 0, [], [], []
+        for name, file in apps[app]:
+            text = file.read_text(encoding='utf-8', errors='replace') if file.suffix in ('.js', '.mjs') else ''
+            found = DECODER.findall(text)
+            decoders += len(found)
+            marks += [bool(m) for m in found]
+            if PLAN.search(text):
+                planned.append(name)
+                if file not in embed:
+                    embed[file] = out / 'apps' / file.parent.name / file.name
+                    files.append(file)
+        if planned and decoders != 1:
+            fail(f'{app}: chunks {", ".join(planned)} have @plan functions and the app has {decoders} '
+                 '@planDecoder functions; it needs exactly 1 (tools/kasane_ir/lower_plans.mjs)')
+        how = 'packed'
+        if planned and marks[0]:
+            short = {f.parent.name for f in files}
+            if len(short) != 1 or not ROM_APP.match(next(iter(short))):
+                fail(f'{app}: built-in plans are named after the directory of the chunks, which must be one '
+                     f'[a-z][a-z0-9_]* name (found {", ".join(sorted(short))})')
+            how = 'rom:' + next(iter(short))
+            rom += [(how[4:], f) for f in files]
+        lower += [(f, embed[f], how) for f in files]
+        plans += [f'{app}:{n}' for n in planned]
+
+    files = []
+    c = ['// Generated by tools/make_app_chunks.py -- do not edit. From:']
+    c += [f'//   {p.as_posix()}' for p in lists] or ['//   (no chunks.txt)']
+    c += ['#include "app_chunks.h"', '#include <string.h>', '']
+    k = 0
+    sets = []
+    for app in sorted(apps):
+        rows = []
+        for name, file in apps[app]:
+            sym, var = c_ident(file.name), f'chunk_{k}'
+            k += 1
+            # One file may be two apps' chunk; it is embedded once.
+            if embed.get(file, file).as_posix() not in files:
+                files.append(embed.get(file, file).as_posix())
+            c.append(f'extern const char {var}_start[] asm("_binary_{sym}_start");')
+            c.append(f'extern const char {var}_end[] asm("_binary_{sym}_end");')
+            module = 1 if file.suffix == '.mjs' else 0
+            rows.append(f'    {{{c_string(name)}, {c_string(file.name)}, {var}_start, {var}_end, {module}}},')
+        var = f'SET_{len(sets)}'
+        c.append(f'static const app_chunk_t {var}[] = {{')
+        c += rows
+        c.append('};')
+        sets.append(f'    {{{c_string(app)}, {var}, {len(rows)}}},')
+    c.append('')
+    if sets:
+        c.append('static const app_chunk_set_t SETS[] = {')
+        c += sets
+        c.append('};')
+        c.append('')
+        c.append('const app_chunk_set_t *app_chunks_for(const char *app_id) {')
+        c.append('    if(!app_id) return NULL;')
+        c.append('    for(size_t i=0;i<sizeof SETS/sizeof SETS[0];i++)')
+        c.append('        if(!strcmp(SETS[i].app_id,app_id)) return &SETS[i];')
+        c.append('    return NULL;')
+        c.append('}')
+    else:
+        c.append('const app_chunk_set_t *app_chunks_for(const char *app_id) {')
+        c.append('    (void)app_id;')
+        c.append('    return NULL;')
+        c.append('}')
+    out.mkdir(parents=True, exist_ok=True)
+
+    def write(path, text):
+        # Unchanged output keeps its timestamp, so a reconfigure that moved
+        # nothing does not recompile the table.
+        if not path.exists() or path.read_text(encoding='utf-8') != text:
+            path.write_text(text, encoding='utf-8', newline='\n')
+
+    write(out / 'app_chunks.c', '\n'.join(c) + '\n')
+    cm = ['# Generated by tools/make_app_chunks.py -- do not edit.',
+          'set(APP_CHUNK_FILES ' + ' '.join(f'"{f}"' for f in files) + ')',
+          'set(APP_CHUNK_LOWER ' + ' '.join(f'"{a.as_posix()}" "{b.as_posix()}" "{h}"'
+                                            for a, b, h in lower) + ')',
+          'set(APP_CHUNK_PLANS ' + ' '.join(f'"{p}"' for p in plans) + ')',
+          'set(APP_CHUNK_ROM ' + ' '.join(f'"{a}={f.as_posix()}"' for a, f in rom) + ')',
+          'set(APP_CHUNK_ROM_SOURCES ' + ' '.join(f'"{f.as_posix()}"' for _, f in rom) + ')',
+          'set(APP_CHUNK_ROM_C "' + (out / ('ksn_proc_rom_plans.c' if rom else 'ksn_proc_rom_plans_none.c'))
+          .as_posix() + '")']
+    write(out / 'app_chunks.cmake', '\n'.join(cm) + '\n')
+    if not rom:
+        write(out / 'ksn_proc_rom_plans_none.c',
+              '/* Generated by tools/make_app_chunks.py: no app ships built-in plans. */\n'
+              '#include "ksn_proc_plan.h"\n'
+              'const ksn_proc_rom_entry ksn_proc_rom_plans[1] = {{0}};\n'
+              'const unsigned ksn_proc_rom_plans_count = 0;\n')
+    romfiles = {f for _, f in rom}
+    for app in sorted(apps):
+        print(f'{app}: ' + ', '.join(n + (' (module)' if f.suffix == '.mjs' else '') +
+                                     ((' (@plan, lowered, rom)' if f in romfiles else ' (@plan, lowered)')
+                                      if f in embed else '') for n, f in apps[app]))
+
+
+if __name__ == '__main__':
+    main()

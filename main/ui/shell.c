@@ -10,6 +10,7 @@
 #endif
 #include "menu_rows.h"
 #include "overlay.h"
+#include "net_autosync.h"
 #include "pet_hub.h"
 #include "pocket_kasane.h"
 #include "app_session.h"
@@ -118,6 +119,7 @@ static void flower_scene_release(void) {
         flower_scene_frames[i]=NULL;
     }
     flower_scene_candidate=flower_scene_retry=false;
+    flower_scene_committed=0;
     flower_scene_has_committed=flower_scene_use_committed=false;
 #ifdef KASANE_FLOWER_ALLOC_FAULT_PROBE
     flower_scene_fault_frames=0;
@@ -142,6 +144,17 @@ static void flower_probe_release(void) {
     flower_probe_valid=false;
 }
 #endif
+void shell_release_background_frames(void) {
+#ifdef KASANE_FLOWER_FRAME_PROBE
+    flower_probe_release();
+#else
+    size_t held=flower_frame_bytes(flower_scene_frames[0])+
+                flower_frame_bytes(flower_scene_frames[1]);
+    flower_scene_release();
+    if(held)ESP_LOGI("background","FLOWER_FRAMES_RELEASE bytes=%u",
+                     (unsigned)held);
+#endif
+}
 // The backgrounds. See scene_ops_t in scene/scene.h for why this is a table.
 // FLOWER MESH used to sit after FLOWER RAY and drew the same flower from a
 // stored vertex mesh. The mesh cost 17,472 bytes of .bss for the whole life of
@@ -226,13 +239,15 @@ static unsigned category,setting,app;
 // MIDDLE would renumber shell_app(), and with it main.c's switch, silently.
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
                           "IMU CALIBRATION","POCKET PET","PET COMPANION","STRESS TEST",
-                          "MEGADEMO","GRID LAB","VIDEO LAB"};
+                          "MEGADEMO","GRID LAB","VIDEO LAB",
+                          "LCD CATCH","DERBY WATCH","BIG WAVE"};
 static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
                                   "AI USAGE / ALARM / TIMER","HEAP CHURN + DRAWING LOAD",
                                   "PROCEDURAL 3D / GLITCH","TYPED GRID / AUTO PIE",
-                                  "RGB565 STREAM / UI"};
+                                  "RGB565 STREAM / UI",
+                                  "LCD SEGMENT ARCADE","WATCH THE RACE","3D SURF / EASD"};
 // AUDIO STREAM / OPUS STREAM / OPUS + WI-FI / MP3 PLAYBACK used to be appended
 // here (apps/streamplay, apps/opusplay, apps/opusfit, apps/mp3play) -- dev/test
 // apps for the MP3 and Opus decoders, removed once those decoders were verified
@@ -244,7 +259,8 @@ static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL"
 // shows it (docs/vm/app-suspend-design.md sec.8-4). Same order as apps[].
 static const char *const app_ids[]={"local.hello",NULL,NULL,NULL,"local.imucal",
                                     "local.pet","local.companion","local.stress",
-                                    "local.megademo","local.gridlab","local.videolab"};
+                                    "local.megademo","local.gridlab","local.videolab",
+                                    "local.lcdcatch","local.derby","local.bigwave"};
 _Static_assert(sizeof app_ids/sizeof app_ids[0]==APP_N,"app_ids follows apps[]");
 static float app_pos;
 unsigned shell_app(void) { return app; }
@@ -306,6 +322,8 @@ static void sound_set(unsigned v) {sfx=v!=0;sound_set_enabled(sfx);}
 
 static unsigned volume_get(void) { return sound_volume(); }
 static void volume_set(unsigned v) { sound_set_volume(v); }
+static unsigned autotime_get(void) { return net_autosync_enabled(); }
+static void autotime_set(unsigned v) { net_autosync_set_enabled(v!=0); }
 
 static const setting_t settings[]={
     {"BACKGROUND", SETTING_CHOICES, &SCENES[0].name, sizeof SCENES[0], BACKGROUND_N,
@@ -340,6 +358,13 @@ static const setting_t settings[]={
     // inserting would move every index below it silently.
     {"VOLUME",     SETTING_CHOICES, volumes, sizeof volumes[0], SOUND_VOLUME_STEPS,
      "volume",      volume_get,      volume_set,     SHELL_SCREEN_NONE},
+    // The switch for net_autosync.c: whether the home screen, left idle, may
+    // bring the radio up for a few seconds to set the clock. A value row, not
+    // a line on the Wi-Fi screen, because it is a standing preference and this
+    // table is where those persist. On by default; with no network stored it
+    // does nothing either way. APPENDED, for the same counted key presses.
+    {"AUTO TIME SYNC", SETTING_CHOICES, toggles, sizeof toggles[0], 2,
+     "autotime",    autotime_get,    autotime_set,   SHELL_SCREEN_NONE},
 };
 #define SETTING_N (sizeof(settings)/sizeof(settings[0]))
 // One value name out of a row's list, wherever that list keeps them.

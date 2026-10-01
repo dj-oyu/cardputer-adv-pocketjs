@@ -153,12 +153,39 @@ int main(int argc, char **argv)
     eval(ctx, program, false);
     free(frontend); free(program);
     eval(ctx, "globalThis.h=kasane.grid.register(gridFoldDeviceProgram);"
+              "let registered=kasane.grid.registration(h);"
+              "if(registered.irCount!==gridFoldDeviceProgram.count||"
+              "registered.planBytes<registered.analysisBytes||"
+              "registered.macTerms!==1||registered.checkedOps<1||"
+              "registered.totalUs<registered.prepareUs||"
+              "registered.heapAfter>registered.heapBefore)"
+              "throw Error('registration');"
               "globalThis.input=new Int16Array(768);"
               "for(let i=0;i<input.length;i++)input[i]=(i*7)&255;"
               "if(kasane.grid.run(h,{0:input},[32,16])!=='PIE')throw Error('backend');"
               "let route=kasane.grid.explain(h);"
-              "if(route.backend!=='PIE'||route.strategy!=='FUSED'||"
+              "if(route.backend!=='PIE'||route.kernel!=='MAC'||"
+              "route.scalarReason!=='NONE'||route.candidateMask===0||"
+              "route.strategy!=='FUSED'||"
               "route.reason!=='PROFILE')throw Error(JSON.stringify(route));"
+              "let measure=kasane.grid.measure(h,2);"
+              "if(!measure.equal||measure.repeats!==2||"
+              "measure.scalarUs<0||measure.pieUs<0)throw Error('measure');"
+              "for(const strategy of ['GATHER','AFFINE']){"
+              "let forced=kasane.grid.measure(h,2,strategy);"
+              "if(!forced.equal||forced.strategy!==strategy||forced.pieUs<0)"
+              "throw Error('forced measure');}"
+              "let profile=kasane.grid.profile(h);"
+              "if(profile.runs!==1||profile.totalUs<profile.kernelUs||"
+              "profile.totalUs<profile.copyUs+profile.bindUs+profile.kernelUs||"
+              "kasane.grid.profile(h).runs!==0)throw Error('grid profile');"
+              "if(kasane.grid.run(h,{0:input},[32,16],{backend:'SCALAR'})"
+              "!=='scalar')throw Error('forced scalar');"
+              "if(kasane.grid.explain(h).scalarReason!=='POLICY_DISABLED')"
+              "throw Error('scalar policy');"
+              "if(kasane.grid.run(h,{0:input},[32,16],{backend:'AUTO'})"
+              "!=='PIE')throw Error('auto policy');"
+              "if(kasane.grid.profile(h).runs!==2)throw Error('profile runs');"
               "globalThis.resource=kasane.grid.resource(h);", false);
     CHECK(resources == 1 && !pocket_grid_pending());
     pixels(0);
@@ -188,6 +215,7 @@ int main(int argc, char **argv)
               "throw Error(JSON.stringify(r));"
               "globalThis.rr=kasane.grid.resource(hr);", false);
     CHECK(resources == 2 && !pocket_grid_pending());
+    eval(ctx, "kasane.grid.measure(hr)", true);
     uint16_t row[42]; uint8_t alpha[42];
     CHECK(resize_image.read_span(resize_image.ctx, 0, 0, 0, 0, 42,
                                  row, alpha) == KSN_OK);
@@ -293,6 +321,52 @@ int main(int argc, char **argv)
     pocket_grid_source_invalidated(777);
     CHECK(invalidates==before_invalidates+2);
     eval(ctx, "kasane.grid.run(hs,{})", true);
+    eval(ctx, "let broken={...gridFoldDeviceProgram,body:"
+              "gridFoldDeviceProgram.body.map(row=>({...row}))};"
+              "broken.body[0].dst=8;let detail='';"
+              "try{kasane.grid.register(broken)}catch(error){detail=String(error)}"
+              "if(!detail.includes('body[0]')||"
+              "!detail.includes('invalid destination register'))"
+              "throw Error('IR diagnostic '+detail);"
+              "let at=gridFold.index({x:1,y:8});"
+              "let slow=gridFold.fold({width:8,height:1,tapWidth:1,"
+              "tapHeight:1,output:at},g=>g.add(g.acc,g.min("
+              "g.load(0,at),g.constant(0))));"
+              "let slowHandle=kasane.grid.register(slow);"
+              "if(kasane.grid.registration(slowHandle).macTerms!==0)"
+              "throw Error('form diagnostic');"
+              "if(kasane.grid.run(slowHandle,{0:new Int16Array(8).fill(-1)})"
+              "!=='scalar')throw Error('scalar route');"
+              "let slowRoute=kasane.grid.explain(slowHandle);"
+              "if(slowRoute.kernel!=='SCALAR'||"
+              "slowRoute.scalarReason!=='GENERAL_FORM'||"
+              "slowRoute.candidateMask!==0)"
+              "throw Error(JSON.stringify(slowRoute));", false);
+    pocket_grid_reset();
+    eval(ctx, "let narrow=gridFold.index({x:1,y:7});"
+              "let narrowPlan=gridFold.fold({width:7,height:1,tapWidth:1,"
+              "tapHeight:1,output:narrow},g=>g.add(g.acc,g.load(0,narrow)));"
+              "let narrowHandle=kasane.grid.register(narrowPlan);"
+              "if(kasane.grid.run(narrowHandle,{0:new Int16Array(7).fill(1)})"
+              "!=='scalar')throw Error('narrow route');"
+              "let narrowRoute=kasane.grid.explain(narrowHandle);"
+              "if(narrowRoute.kernel!=='SCALAR'||"
+              "narrowRoute.scalarReason!=='VECTOR_LAYOUT'||"
+              "narrowRoute.candidateMask!==0)"
+              "throw Error(JSON.stringify(narrowRoute));"
+              "let wide=gridFold.index({x:1,y:8});"
+              "let rangePlan=gridFold.fold({width:8,height:1,tapWidth:1,"
+              "tapHeight:1,output:wide},g=>{"
+              "let sample=g.load(0,wide);let square=g.mul(sample,sample);"
+              "return g.add(g.acc,g.mul(square,square));});"
+              "let rangeHandle=kasane.grid.register(rangePlan);"
+              "if(kasane.grid.run(rangeHandle,{0:new Int16Array(8).fill(1)})"
+              "!=='scalar')throw Error('range route');"
+              "let rangeRoute=kasane.grid.explain(rangeHandle);"
+              "if(rangeRoute.kernel!=='SCALAR'||"
+              "rangeRoute.scalarReason!=='QACC_RANGE'||"
+              "rangeRoute.candidateMask!==0)"
+              "throw Error(JSON.stringify(rangeRoute));", false);
     pocket_grid_reset();
     JS_FreeContext(ctx); JS_FreeRuntime(runtime);
     puts("grid fold, arbitrary resize and source-stream QuickJS->PIE->image passed");

@@ -1,4 +1,11 @@
-"""Capture actual LCD pixels and measure navigation with audio enabled."""
+"""Capture actual LCD pixels and measure navigation with audio enabled.
+
+Settings navigation here stays within rows 0..2, so the rows appended after
+them (HOME OVERLAY, VOLUME, AUTO TIME SYNC) move no press this script counts.
+AUTO TIME SYNC can matter to the numbers instead: a home screen left idle for
+ten seconds with a network stored brings the radio up for a clock sync, and a
+PERF line taken during one is not a quiet-home measurement. Such lines are
+kept, and marked, rather than dropped."""
 import argparse
 from pathlib import Path
 import struct
@@ -105,6 +112,9 @@ with serial.Serial(a.port, 115200, timeout=0.2) as s:
                 step += 1
                 next_key = time.monotonic() + 0.08
             line = s.readline().decode(errors='replace').strip()
+            if 'AUTOSYNC_' in line:
+                records.append('RADIO ' + line)
+                print('RADIO', line, flush=True)
             if 'PERF' in line:
                 records.append(line)
                 print('MOVING', line, flush=True)

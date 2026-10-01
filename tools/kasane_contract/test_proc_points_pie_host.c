@@ -6,8 +6,12 @@
 #include <stdio.h>
 #include <string.h>
 
+/* POINT_MAX mirrors PROC_POINT_MAX in pocket_proc.c (the JS batch cap); the
+ * extra eight elements are an untouched guard block after the longest batch. */
+#define POINT_MAX 128
+#define PLANE (POINT_MAX + 8)
 typedef struct __attribute__((aligned(16))) {
-    int16_t x[40], y[40], dx[40], dy[40];
+    int16_t x[PLANE], y[PLANE], dx[PLANE], dy[PLANE];
 } Planes;
 
 static uint32_t rng = UINT32_C(0x7a31c195);
@@ -32,8 +36,8 @@ static void check_case(size_t n, KsnProcAffineQ14 m, int alias)
 {
     Planes p;
     memset(&p, 0x5a, sizeof p);
-    int16_t ex[40], ey[40], original_x[40], original_y[40];
-    for (size_t i = 0; i < 40; ++i) {
+    int16_t ex[PLANE], ey[PLANE], original_x[PLANE], original_y[PLANE];
+    for (size_t i = 0; i < PLANE; ++i) {
         p.x[i] = (int16_t)next_random();
         p.y[i] = (int16_t)next_random();
     }
@@ -59,7 +63,7 @@ static void check_case(size_t n, KsnProcAffineQ14 m, int alias)
         assert(d.x[i] == ex[i]);
         assert(d.y[i] == ey[i]);
     }
-    for (size_t i = n; i < 40; ++i) {
+    for (size_t i = n; i < PLANE; ++i) {
         assert(d.x[i] == ((alias & 1) ? ex[i] : (int16_t)0x5a5a));
         assert(d.y[i] == ((alias & 2) ? ey[i] : (int16_t)0x5a5a));
     }
@@ -102,6 +106,12 @@ int main(void)
         for (size_t n = 0; n <= 39; ++n)
             for (int alias = 0; alias < 4; ++alias)
                 check_case(n, edges[e], alias);
+    /* Full-block and tail boundaries up to the 128-point cap. */
+    static const size_t long_n[] = {63, 64, 65, 120, 121, 127, 128};
+    for (size_t e = 0; e < sizeof edges / sizeof edges[0]; ++e)
+        for (size_t k = 0; k < sizeof long_n / sizeof long_n[0]; ++k)
+            for (int alias = 0; alias < 4; ++alias)
+                check_case(long_n[k], edges[e], alias);
     /* Translation decomposition changes at each multiple of 32768; test
      * both neighbors, including the final quotient requiring three terms. */
     for (int64_t t = INT32_MIN; t <= INT32_MAX; t += INT64_C(32768)) {
@@ -118,7 +128,7 @@ int main(void)
         KsnProcAffineQ14 m = {(int16_t)next_random(), (int16_t)next_random(),
                               (int16_t)next_random(), (int16_t)next_random(),
                               (int32_t)next_random(), (int32_t)next_random()};
-        check_case(next_random() % 40, m, trial & 3);
+        check_case(next_random() % (POINT_MAX + 1), m, trial & 3);
     }
     puts("proc-points-pie host contract: ok");
     return 0;

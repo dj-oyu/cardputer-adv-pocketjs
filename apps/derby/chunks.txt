@@ -1,0 +1,10 @@
+# DERBY WATCH's chunks (pocket.app.load; docs/vm/eval-peak.md section 7).
+# derby_watch.js (the entry: the race model) loads the first five while it
+# evaluates, in this order; demo loads when the demo first starts.
+app local.derby
+prog   derby_prog.js
+view   derby_view.js
+scene  derby_scene.js
+pan    derby_pan.js
+play   derby_play.js
+demo   derby_demo.js

@@ -18,6 +18,9 @@ unsigned shell_app(void);   // which Apps entry Enter would launch
 // after shell_key(); SHELL_SCREEN_NONE means stay on the home screen.
 shell_screen_t shell_pending_screen(void);
 void shell_draw(const char *error, unsigned phase);
+// The home backdrop is no longer read while another screen or a foreground
+// guest owns the display. Call after releasing a home overlay, if any.
+void shell_release_background_frames(void);
 #ifdef KASANE_P5_OVERLAY_REPAIR_PROBE
 void shell_overlay_repair_request(bool capture_pixels);
 #endif

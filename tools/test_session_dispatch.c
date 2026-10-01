@@ -16,6 +16,7 @@ typedef struct {int id;} sys_notice;
 static void *guest;
 static bool turn_continued,pending,remain,activate,need_present,submission;
 static bool runaway,exit_requested,stopped,cont_submits;
+static bool proc_commits,proc_pending;
 static ksn_result presenter_result;
 static atomic_bool stop_requested;
 static unsigned continuation_turns,ticks;
@@ -30,12 +31,27 @@ static int64_t esp_timer_get_time(void){return now;}
 static void arm_turn(uint32_t b){armed=b;call('A');}
 static bool pocketjs_guest_work_pending(void *g){(void)g;return pending;}
 /* cont_submits: the continuation finishes a frame() the VM parked mid-call,
- * and that frame() submits its picture (backlog R3a). */
+ * and that frame() submits its picture (backlog R3a). jobs_left: as in
+ * guest.c, whether work remains after a resume is JS_IsJobPending(), read
+ * whether or not the resumed frame() threw -- a failed continuation can
+ * still leave jobs queued. */
+static bool jobs_left;
 static int pocketjs_guest_continue(void *g){
-    (void)g;call('C');pending=remain;if(cont_submits)submission=need_present=true;return guest_error;
+    (void)g;call('C');pending=remain||jobs_left;
+    const bool finished=!remain&&!guest_error;
+    if(proc_commits&&finished)proc_pending=true;
+    if(cont_submits&&finished)submission=need_present=true;
+    return guest_error;
 }
+static bool frame_parks;
+/* What frame()'s first beginFrame()/patch() would meet: BUSY if the finished
+ * frame's pending procedural frame or ticket was not presented first. */
+static bool frame_met_pending;
+/* A procedural commit() marks its frame pending; present_frame() clears it. */
+static bool pocket_proc_pending(void){return proc_pending;}
 static int pocketjs_guest_frame(void *g,const pocketjs_guest_frame_t *f){
-    (void)g;assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
+    (void)g;frame_met_pending=proc_pending||submission;if(frame_parks)pending=true;
+    assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
     assert(!f->touch_count&&!f->touches&&!f->touch_hits);
     delivered=f->buttons;call('F');if(activate)submission=need_present=true;return guest_error;
 }
@@ -51,11 +67,14 @@ static bool pocket_kasane_animation_pending(void){return native_animation;}
 static bool pocket_kasane_system_pending(void){return system_pending;}
 static int pocket_kasane_input_scope(bool b){(void)b;return scope;}
 static void pocket_kasane_end_turn(void){call('E');}
+/* 'Y': the host turn ended with the guest's turn still open (parked frame()
+ * or a cut drain), so the procedural frame under construction is kept. */
+static void pocket_kasane_park_turn(void){call('Y');}
 static void report_oom_if_any(void){call('O');}
 static bool drain_runaway(void){return runaway;}
 static bool pocket_app_exit_requested(void){return exit_requested;}
 static void app_request_stop(void){stopped=true;call('S');}
-static int present_frame(void){call('P');need_present=false;submission=false;return 0;}
+static int present_frame(void){call('P');need_present=false;submission=false;proc_pending=false;return 0;}
 /* Silent: the call strings below predate these, and none of them decides an
  * ordering this test checks. The presenter step can be made to fail. */
 static void sample_memory_pressure(void){}
@@ -69,12 +88,15 @@ PUMP(pocket_app_pump,'a') PUMP(pocket_text_pump,'t') PUMP(pocket_imu_pump,'i')
 PUMP(pocket_io_pump,'o') PUMP(pocket_bridge_pump,'b') PUMP(pocket_net_pump,'n')
 PUMP(pocket_capture_pump,'c') PUMP(pocket_api_pump,'p') PUMP(pocket_fs_pump,'f')
 PUMP(pocket_av_pump,'v')
+/* Silent, like the pumps added after the call strings were fixed. */
+static void pocket_video_sd_stream_reap(void){}
 static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
 #include "session_dispatch_impl.inc"
 static void reset(void){
     calls[0]=0;pending=remain=activate=need_present=submission=false;
     native_animation=system_pending=false;
-    runaway=exit_requested=stopped=turn_continued=cont_submits=false;scope=KSN_INPUT_APP;
+    runaway=exit_requested=stopped=turn_continued=cont_submits=frame_parks=proc_commits=proc_pending=false;scope=KSN_INPUT_APP;
+    jobs_left=frame_met_pending=false;
     presenter_result=KSN_OK;
     deferred_buttons=delivered=armed=continuation_turns=ticks=0;
     guest_error=0;now=40000;last_present_us=0;turn_sum=0;
@@ -88,7 +110,7 @@ int main(void){
     reset();guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
     assert(strstr(calls,"FEO")&&!strchr(calls,'P'));
     reset();pending=remain=true;assert(app_tick(0x20)==0);
-    assert(turn_continued&&!strchr(calls,'F')&&strstr(calls,"ACEO"));
+    assert(turn_continued&&!strchr(calls,'F')&&strstr(calls,"ACYO"));
     assert(!strchr(calls,'a')&&deferred_buttons==0x20);
     calls[0]=0;remain=false;assert(app_tick(0)==0);
     assert(strchr(calls,'C')<strchr(calls,'a')&&strchr(calls,'a')<strchr(calls,'F'));
@@ -116,8 +138,43 @@ int main(void){
     assert(!strcmp(calls,"ACEOP")&&!strchr(calls,'F')&&deferred_buttons==0x20);
     calls[0]=0;cont_submits=false;assert(app_tick(0)==0);
     assert(strchr(calls,'F')&&delivered==0x20&&!deferred_buttons);
-    // Back is the last save turn: it is not held back for that present.
+    // Back is the last save turn: it is not held back for that present, but
+    // the present comes first, in the same turn, so the save frame() does not
+    // meet the unconsumed ticket.
     reset();pending=true;cont_submits=true;assert(app_tick(0x2000)==0);
-    assert(strchr(calls,'F')&&delivered==0x2000);
-    puts("session dispatch PASS: ordering, cleanup, Back, continuation, display turn, watchdog, parked-frame present");
+    assert(strchr(calls,'F')&&delivered==0x2000&&!frame_met_pending);
+    assert(strchr(calls,'P')<strchr(calls,'F'));
+    // The same with the parked frame's procedural commit(): the save frame's
+    // beginFrame() finds nothing pending (it was BUSY, EXECUTION FAILED).
+    reset();pending=true;proc_commits=true;cont_submits=true;assert(app_tick(0x2000)==0);
+    assert(!strcmp(calls,"ACEOPatiobncpfvkEFEOP")&&delivered==0x2000&&!frame_met_pending);
+    // Back with nothing parked: no extra present before the save frame.
+    reset();assert(app_tick(0x2000)==0);assert(!strcmp(calls,"AatiobncpfvkEFEOP"));
+    // Back whose continuation finished the frame but left jobs (the leave
+    // budget cut the drain): still presented first, and the turn stays open
+    // around the save frame (park, not end) because work remains.
+    reset();pending=true;proc_commits=true;jobs_left=true;assert(app_tick(0x2000)==0);
+    assert(!strcmp(calls,"ACYOPatiobncpfvkYFYOP")&&!frame_met_pending);
+    // A frame() the budget parks keeps its procedural frame open ('Y', not
+    // 'E'); the continuation that finishes it ends the turn, and only then.
+    reset();frame_parks=true;assert(app_tick(0)==0);
+    assert(!strcmp(calls,"AatiobncpfvkEFYOP"));
+    calls[0]=0;frame_parks=false;remain=true;now+=1000;assert(app_tick(0)==0);
+    assert(!strncmp(calls,"ACYO",4)&&!strchr(calls,'E')&&!strchr(calls,'F')&&turn_continued);
+    calls[0]=0;remain=false;assert(app_tick(0)==0);
+    assert(!strncmp(calls,"ACEO",4)&&!strchr(calls,'Y'));
+    // The continuation finishes the parked frame() and its procedural
+    // commit(): that frame is presented before the next frame(), whose
+    // beginFrame() would otherwise meet it pending (BUSY).
+    reset();pending=true;proc_commits=true;assert(app_tick(0x20)==0);
+    assert(!strcmp(calls,"ACEOP")&&!strchr(calls,'F')&&deferred_buttons==0x20&&!proc_pending);
+    // A continuation that throws out of the parked frame is the end of it.
+    reset();pending=true;guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
+    assert(!strcmp(calls,"ACEO"));
+    // Unless it left jobs queued (guest.c): the turn then only parks, and
+    // the half-built frame is closed by app_vm_prepare_stop() when the
+    // session ends on this error -- no frame() runs in between.
+    reset();pending=true;jobs_left=true;guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
+    assert(!strcmp(calls,"ACYO"));
+    puts("session dispatch PASS: ordering, cleanup, Back, continuation, display turn, watchdog, parked-frame present, Back present before the save frame");
 }

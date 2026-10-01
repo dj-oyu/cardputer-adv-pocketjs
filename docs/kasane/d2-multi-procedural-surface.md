@@ -1,6 +1,6 @@
 # D2: JS手続き面を2枚にする最小経路
 
-既存の`kasane.procedural.beginFrame(color)`、`draw(handle, inputs)`、`commit()`、`resource()`は面0を使う。追加面はセッション内で一度だけ作れる。
+既存の`kasane.procedural.beginFrame(color)`、`draw(handle, inputs)`、`commit()`、`resource()`は面0を使う。追加面はセッション内で一度だけ作れる。`createSurface({maxSegments: n})`（n = 1〜1,024）でその面のフレームを n 本分に縮められる（[面ごとの線分上限](surface-segment-cap.md)）。
 
 ```js
 const proc = pocket.kasane.procedural;
@@ -22,6 +22,8 @@ proc.beginFrame(0x0000, foreground);
 proc.draw(plan, [20, 10, 0, 0]);
 proc.commit();
 ```
+
+`proc.unregister(handle)` は登録済みplanと点列領域を解放し slot を空ける（引数はちょうど1つ、戻り値 `undefined`）。未登録・解除済みの handle は `draw` と同じく `CLOSED`、引数不正は `INVALID_ARGUMENT`。handle 番号は再利用しないので、解除済み handle が後の plan を指すことはない。`draw` は線分を候補 frame へ写し終えているため、`beginFrame`〜`commit` の間に解除しても既に描いた分は残る。
 
 登録済みplanは両面で共有できる。面の候補・確定frameは別々の2スロットで、描画中のscratchと8行画像cacheだけを共有する。表示待ち候補は全体で1面までとし、次の`beginFrame`はACKまたはrepairまで`BUSY`になる。面IDはAPPセッション終了で失効し、同じ番号を再利用しない。追加面は`resource(id)`を呼び出した後に`commit()`できる。APP終了ではnative画像資源を先に退役させてからframeを解放する。
 

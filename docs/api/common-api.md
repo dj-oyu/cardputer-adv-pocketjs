@@ -13,7 +13,9 @@
 | 3.1 | オーバーレイ | 実装済み（描画は`pocket.kasane`、region/inputは`pocket.overlay`） | `pocket_kasane.c`、`pocket_overlay.c`、`main/ui/overlay*.c` |
 | 4 | 共通エラー・cancel・Options | 実装済み | `pocket_api.c` |
 | 5 | app／time／log | 実装済み | `pocket_app.c` |
-| 6 | ui／input／input.text | 実装済み | `pocket_ui.c`、`pocket_text.c` |
+| 5.1 | app.load（チャンクの読み込み） | 実装済み | `pocket_app_load.c`、`tools/make_app_chunks.py` |
+| 5.2 | 静的 `import`（モジュールの入口） | 実装済み | `pocket_app_load.c`、`app_session.c` の `eval_reporting()` |
+| 6 | ui／input／input.text／input.keys | 実装済み（`ui.basic` は未実装） | `pocket_input.c`、`pocket_text.c`、`main/hal/keystate.c` |
 | 7 | storage | 実装済み | `pocket_storage.c` |
 | 7 | fs（`pocket.fs`） | 実装済み。詳細は[ファイルシステムAPI](filesystem-api.md) | `pocket_fs.c` |
 | 7 | workspace（`pocket.workspace`） | 実装済み。srcstore 16スロットの上に構築 | `pocket_workspace.c` |
@@ -76,7 +78,7 @@ type DeviceInfo = {
 
 **capabilityの登録はセッションごと。** 各面は注入時に登録し、`pocket_api_reset()`がセッション終了時に表を空にする。したがって`capabilities.get()`は「このセッションに注入された面」を答え、前のセッションが注入した面を引き継がない（オーバーレイは無線・バス等を注入しないので、それらはsupported=false）。
 
-**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[Kasaneの境界と契約](../kasane/architecture.md)を参照。
+**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。`pocket.derby`（capability `derby.series`、DERBY WATCH の首振りの列を C で描く。[derby-ser-native.md](../apps/derby-ser-native.md)）も同じ扱いで、`local.derby` のセッションにだけ注入する。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[Kasaneの境界と契約](../kasane/architecture.md)を参照。
 
 availableは予約ではなく観測値。確認直後に資源が変わり得るため、open/acquireの結果が最終判断となる。認可状態は別であり、available=trueだけでは利用権を得ない。limitsはそのビルドのハード上限、取得ハンドルは実際に割り当てられた値を返す。
 
@@ -269,6 +271,55 @@ startはソース評価中に1回登録する。新ランタイムではglobalTh
 
 イベント／completion用の制御領域は一般データキューと分け、Promise完了や停止通知を黙って落とさない。センサーの最新値は統合できるが、入力・通信の欠落はカウンターとoverflow状態で通知する。入力overflow時はheld状態をリセットして古いイベントを破棄する。
 
+### 5.1 チャンクの読み込み（`pocket.app.load`、実装、2026-09-30）
+
+```ts
+pocket.app.load(name: string): boolean;   // true: いま評価した。false: 読み込み済みで何もしなかった
+```
+
+アプリのソースを複数の**チャンク**（ビルドに埋め込んだ、そのアプリ自身のソース片）に分け、同期で1つずつ評価する。目的は評価のピークを下げること（QuickJSは1つのスクリプトの解析用の構造を、そのスクリプトの解析が終わるまで全部保つ。[評価のピーク](../vm/eval-peak.md) §7）。実装は `main/pocket/pocket_app_load.c`。
+
+- チャンクは、アプリと**同じrealmのグローバルスクリプト**として評価する。トップレベルの `function` 宣言・`var`・`globalThis.x = ...`・グローバルの `let`/`const` は、入口のソースと他のチャンクから見える（同じ束縛で、写しではない）。
+- **冪等**。読み込み済みの名前は評価せず `false` を返す。グローバルの `let`/`const` を持つスクリプトは、同じrealmへもう一度評価すると再宣言のSyntaxErrorになるので、二度目を評価しない。
+- チャンクの表は**アプリIDごと**（`apps/<アプリ>/chunks.txt`、[§7.2](../vm/eval-peak.md)）。セッション開始時のアプリIDで決まる。実行時にソースを受け取るアプリ（Playground・チュートリアル・作品）は表を持たず、どの名前も`NOT_FOUND`。
+- 評価（アプリ起動）中の呼び出しには評価の2秒の期限が、`frame()`などターンの中の呼び出しにはそのターンの250msの期限がかかる。**解析は割り込みを見ない**（実測・実機: 10.7KBで約45ms、30KBで約150ms）。期限は実行の最初のセーフポイントで効く。
+- capability `app.load`: 全セッションで`supported=true`（表の無いアプリも関数はあり、`NOT_FOUND`を返す）。`limits`は`maxChunks: 32`（1アプリのチャンク数。ビルドが33個目を断る）と`maxNameBytes: 31`（毎回の呼び出しで検査）。
+
+失敗はすべて同期のthrowで、`PocketError`（§4）。`message`は `chunk 'scene' did not compile: SyntaxError: ... at derby_scene.js:12:5` の形で、チャンクのファイル名と行を含む。`cause`に元の例外（スタック付き）を持つ。
+
+| 状況 | code | outcome | retryable | その名前の次の`load` |
+| --- | --- | --- | --- | --- |
+| 名前が文字列でない・0バイト・32バイト以上・NULを含む | `INVALID_ARGUMENT` | not-applied | false | — |
+| その名前のチャンクがモジュール（`.mjs`、§5.2） | `INVALID_ARGUMENT` | not-applied | false | 同じ（評価しない） |
+| このアプリにその名前のチャンクが無い | `NOT_FOUND` | not-applied | false | 同じ |
+| 解析中にheap不足 | `OUT_OF_MEMORY` | not-applied | **true** | もう一度解析する（何も宣言されていない） |
+| 構文エラー | `CORRUPT_DATA` | not-applied | false | もう一度解析して同じエラー |
+| トップレベルの実行が例外を投げた | `CORRUPT_DATA`（heap不足なら`OUT_OF_MEMORY`、スタック超過なら`LIMIT_EXCEEDED`） | **unknown** | false | `CORRUPT_DATA`（二度と実行しない。途中までの宣言が残りうる） |
+| そのチャンクのトップレベルから自分自身（または読み込み中のチャンク）を`load` | `CONFLICT` | not-applied | false | — |
+| 期限切れ・停止要求 | PocketErrorにしない。捕まえられない例外のまま伝わり、アプリは止まる | | | |
+
+手放すAPIは無い。チャンクが作った関数は、参照を捨てればGCで解放される（トップレベルの関数宣言・`var`・`let`は値を`null`にする。`const`は捨てられない）。捨てた後も`load`は`false`を返し、再評価はしない。書き方の指針は[評価のピーク](../vm/eval-peak.md) §7.3。
+
+### 5.2 静的 `import`（モジュールの入口、実装、2026-09-30）
+
+```js
+// apps/foo/foo.mjs（マニフェストの entry が .mjs のアプリ）
+import { drawScene } from 'scene';      // chunks.txt の名前。scene → foo_scene.mjs
+import * as demo from 'demo';
+globalThis.frame = () => drawScene();   // モジュールの名前はグローバルに出ない
+```
+
+`pocket.*` の面ではなく、言語の構文そのもの（capability は無い）。目的は §5.1 と同じ評価のピークの削減で、モジュールは1つずつ解析される。作りと測定は[評価のピーク](../vm/eval-peak.md) §9。
+
+- **入口がモジュールになる条件**: `app_registry.c` のマニフェストの `entry` が `.mjs` で終わる。それ以外（`.js`・Playground・チュートリアル・作品）は従来どおりグローバルスクリプトで、`import` 文は SyntaxError のまま。
+- **import できるもの**: そのアプリの `chunks.txt` にある、ファイル名が `.mjs` のチャンクだけ。指定子はチャンクの**名前**そのもの（`'scene'`）。相対・絶対パス・URL・他のアプリのチャンクは解決しない。`.js` のチャンクは `load` 専用、`.mjs` のチャンクは `import` 専用。
+- **入口の評価の中でだけ解決する**。動的 `import()` は、どこから呼んでも（モジュールのトップレベルでも、後の `frame()` でも）Promise の reject（`TypeError: ... dynamic import() is not supported; use pocket.app.load()`）。後から読むのは `pocket.app.load`。
+- **トップレベル await は断る**（`SyntaxError: ... top-level await is not supported`）。モジュールのグラフは評価の中で同期に終わる。
+- import attributes（`with { type: 'json' }`）は断る。import の入れ子は深さ 8 まで（`RangeError`）。循環 import は仕様どおり動く（初期化前の束縛を読めば `ReferenceError`）。
+- 失敗はすべて評価の失敗で、`EVAL_ERROR` の行に出てアプリは起動しない（`START_FAILED`、ホームへ戻る）。行の形は従来どおり: 構文エラー・トップレベルの例外はそのモジュールのファイル名と行（`SyntaxError: variable name expected at import_bad.mjs:3:1`）、解決の失敗は取り込む側のファイル名（`ReferenceError: user.js imports 'nope': this app has no chunk 'nope' (chunks.txt names them)`、行は無い）。heap 不足は `OOM` の行が別に出る。
+- 期限: 入口の評価の 2 秒が、全モジュールの解析と実行にかかる（解析は割り込みを見ない、§5.1 と同じ）。
+- 手放せない: 評価したモジュールは realm が壊れるまで残る（`ctx->loaded_modules`）。
+
 ## 6. UI・画面遷移・入力
 
 **`pocket.ui`（capability `ui.basic`）は実装していない。** 下の `pocket.ui.*` は当初案で、旧UIコアの上に載せた実装（`pocket_ui.c`）は旧UI経路とともに削除した。`capabilities.get("ui.basic")` は supported=false を返す。画面の描画は `pocket.kasane` を使う。入力（`pocket.input.*`）とTextSessionは実装済みで、TextSessionの編集欄はKasaneが描いた帯へホストが合成する。
@@ -291,12 +342,23 @@ pocket.ui.toast(text: string, options?: {durationMs?: number}): void;
 pocket.input.onAction(fn: (e: ActionEvent) => void): Subscription;
 pocket.input.onKey(fn: (e: KeyEvent) => void): Subscription;
 pocket.input.held(action: string): boolean;
+pocket.input.keys: KeyState;                  // capability "input.keys"
 pocket.input.text.open(options: TextOptions): TextSession;
+type KeyState = {
+  held(key: string): boolean;                 // いま押されている
+  pressed(key: string): boolean;              // 前のターンから押された（1回以上）
+  released(key: string): boolean;             // 前のターンから離された（1回以上）
+  down(): string[];                           // 押されているキーの正規名、行→列の順
+};
 ```
 
 座標は左上原点、x右／y下、単位px。色は0xRRGGBBAA。fontは `small`（英字）、`body`（日本語12px）、`compact`（日本語8px）。文字サイズを自動縮小しない。TextSpecは矩形のほかtext、font、colorを必須とし、表示は矩形でclipする。折返し・省略は初版で暗黙実施せず、複数行は改行で指定する。ListSpec.itemsは上記配列、selectedはid。リストは選択変更の描画だけを担当し、操作イベントとの接続はアプリが行う。
 
 screenは非表示で生成、pushで有効化。popは画面を破棄し直前へ戻る。最後の画面からpopはapp.exitと同じ。最大画面深度を制限する。異なる画面のノードを混ぜた操作はINVALID_ARGUMENT。削除済みノード操作はCLOSED。表示・フォント確保のnative予算を先に確認してから変更を適用する。超過時は旧表示を維持する。
+
+**`pocket.input.keys`（実装済み、2026-09-29）は物理キーの状態。** ゲームの連続移動と同時押しのための面で、`onAction` が6アクションに縮約するものを、キー単位でそのまま返す。キー名は正規名が56個: 文字キーはキートップの素の文字（`"e"` `"1"` `";"` `` "`" ``、英字は小文字）、残りは `"del"` `"tab"` `"enter"` `"space"` `"fn"` `"shift"` `"ctrl"` `"opt"` `"alt"`。別名 `"up"` `"left"` `"down"` `"right"`（`;` `,` `.` `/`、Fnで矢印になるキー）と `"esc"` `"back"`（`` ` ``）も受け、名前はASCIIの大文字小文字を区別しない（`"E"` は `"e"`）。Shiftは独立したキーで、他のキーの名前を変えない。文字列でない引数と未知の名前は `INVALID_ARGUMENT`。`down()` は正規名だけを返す。
+
+状態は**ゲストのターンの頭で1回だけ読む**（`onAction` と同じポンプ）。1回の `frame()` の中で何度呼んでも同じ値で、`pressed`/`released` は前のターンの読み取りからの辺を数えたものなので、1フレームより短い押下も1回の押下と1回の解放として見える。**アプリが見ていない間に押されていたキーは、離されるまで見えない**: セッション開始（起動したEnter）、中断からの再開、ホストがキーボードを持っていたターン（テキスト欄、入力を止めるSYSTEM通知、ピッカー画面）の後。その間の押下・解放は辺として届かない。キーパッドのFIFOがあふれたら押されていたキーをすべて解放扱いにする（押しっぱなしで止まらず、離れたまま止まる側へ倒す）。`limits` は無い（同時押しの上限は実機で未測定で、コードも制限しない）。オーバーレイのセッションには `pocket.input` 自体が無い。実装と設計は[キー状態層](../platform/keystate.md)。
 
 ActionEventは `{action:"left"|"right"|"up"|"down"|"accept"|"back", phase:"press"|"repeat"|"release", timeMs:number}`。KeyEventは `{key:string, code:string, modifiers:{shift,ctrl,alt,fn,opt}, phase, timeMs}`で、文字の確定は含めない。key/codeの一覧は実装時にキーマップから公開する。onActionはIMEやホストに消費されなかった操作だけを受ける。back未購読時はホストがpopを行い、購読時はアプリが処理を担当する。ForceStopは購読不可で、アプリより先に処理する。
 
@@ -992,6 +1054,8 @@ HTTPの全体期限はbody読み終わりまで継続し、各read期限との�
 GPIO割込の上限や録音リング容量など未固定の値はcapability.limitsで公開し、初期化時に決まっていない値を無制限として扱わない。
 
 ESP32-S3はWi-FiとBLEでRF資源を共有し、IDFの共存機構にも組合せ別の制約がある。最初の無線profileはWi-Fiのみ／BLEのみを別々に成立させる。両方有効なprofileは対応設定と実機試験後に提供し、不対応profileで2つ目を要求したらBUSYとする。録音・TLS・JS日本語再構築を含む重い組合せは別途評価する。[IDF v6.0.1 共存ガイド](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-guides/coexist.html)
+
+ホスト自身も無線を使う。設定 AUTO TIME SYNC が ON で資格情報があると、ホームが10秒アイドルのときに一過性の時刻同期（接続→SNTP→停止、約48KBを数秒〜25秒）を行い、アプリ・別画面・オーバーレイの起動の前には必ず中断して無線を止め、ヒープが戻ってからゲストを作る。常駐の接続は既定にしない。ネイティブの保持者は参照カウントの `net_service` を通し、アプリの `net.wifi` の lease とは同じ無線を排他で使う（所有者でない側は他方のリンクを止められない）。一度無線を上げたブートは約4.8KiBが戻らない（`linkRetainedBytes`）。詳細と実機で測る項目は [docs/platform/wifi-autostart.md](../platform/wifi-autostart.md)。
 
 無線使用中に背景品質を下げる判断はホストが行う。アプリの論理時刻をFPSから推測しない。消費電力・接続速度・センサー精度はAPIシグネチャとは別の性能表で記録する。
 

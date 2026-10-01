@@ -7,6 +7,11 @@
 #define KSN_GRID_MAX_BODY_VISITS 2000000u
 #define KSN_GRID_QACC_MAX ((INT64_C(1) << 39) - 1)
 
+_Static_assert(sizeof(ksn_grid_value) == 16,
+               "keep registration value analysis compact");
+_Static_assert(sizeof(ksn_grid_analysis) <= 264,
+               "keep the sixteen-value graph within the RAM budget");
+
 static bool add64(int64_t a, int64_t b, int64_t *out)
 {
     return !__builtin_add_overflow(a, b, out);
@@ -26,80 +31,292 @@ static bool valid_index(const ksn_grid_index *index)
     return true;
 }
 
-/* Match the expression graph, not register numbers or operand order. Every
- * instruction must contribute to the result: dropping a dead arithmetic op
- * could hide its checked-overflow failure in the scalar semantics. */
-static ksn_grid_mac normalize_mac(const ksn_grid_program *p)
+typedef enum { MAC_UNKNOWN, MAC_ACC, MAC_LEAF, MAC_PRODUCT, MAC_SUM } mac_kind;
+typedef struct {
+    mac_kind kind;
+    uint16_t contributors;
+    ksn_grid_mac_operand left, right, extra_left, extra_right;
+} mac_value;
+
+static mac_value mac_input(const mac_value values[KSN_GRID_CODE], uint8_t ref)
+{
+    if (ref == KSN_GRID_VALUE_ACC)
+        return (mac_value){.kind = MAC_ACC};
+    return ref == KSN_GRID_VALUE_NONE ? (mac_value){0} : values[ref];
+}
+
+static void analyze_values(const ksn_grid_program *p,
+                           ksn_grid_analysis *graph)
+{
+    uint8_t latest[KSN_GRID_REGS];
+    memset(latest, KSN_GRID_VALUE_NONE, sizeof(latest));
+    latest[p->result_reg] = KSN_GRID_VALUE_ACC;
+    for (unsigned i = 0; i < p->count; ++i) {
+        const ksn_grid_instruction *in = &p->body[i];
+        ksn_grid_value *node = &graph->value[i];
+        node->a = node->b = KSN_GRID_VALUE_NONE;
+        node->contributors = (uint16_t)(1u << i);
+        if (in->op == KSN_GRID_LOAD) {
+            node->effects = KSN_GRID_EFFECT_LOAD |
+                (in->buffer == KSN_GRID_DEST ? KSN_GRID_EFFECT_DEST_READ : 0);
+            node->magnitude_bound = 32768u;
+            node->range_proven = true;
+        } else if (in->op == KSN_GRID_CONST) {
+            int32_t number = in->immediate;
+            node->magnitude_bound = (uint64_t)(number < 0 ? -number : number);
+            node->range_proven = true;
+        } else if (in->op == KSN_GRID_ADD || in->op == KSN_GRID_MUL ||
+                   in->op == KSN_GRID_MIN) {
+            node->a = latest[in->a];
+            node->b = latest[in->b];
+            if (node->a < KSN_GRID_CODE)
+                node->contributors |= graph->value[node->a].contributors;
+            if (node->b < KSN_GRID_CODE)
+                node->contributors |= graph->value[node->b].contributors;
+            if (in->op != KSN_GRID_MIN) {
+                node->effects = KSN_GRID_EFFECT_CHECKED;
+                graph->checked_mask |= (uint16_t)(1u << i);
+            }
+            if (node->a < KSN_GRID_CODE && node->b < KSN_GRID_CODE &&
+                graph->value[node->a].range_proven &&
+                graph->value[node->b].range_proven) {
+                uint64_t a = graph->value[node->a].magnitude_bound;
+                uint64_t b = graph->value[node->b].magnitude_bound;
+                if (in->op == KSN_GRID_MIN) {
+                    node->magnitude_bound = a > b ? a : b;
+                    node->range_proven = true;
+                } else if (in->op == KSN_GRID_ADD &&
+                           a <= (uint64_t)INT64_MAX - b) {
+                    node->magnitude_bound = a + b;
+                    node->range_proven = true;
+                } else if (in->op == KSN_GRID_MUL &&
+                           (!b || a <= (uint64_t)INT64_MAX / b)) {
+                    node->magnitude_bound = a * b;
+                    node->range_proven = true;
+                }
+            }
+        }
+        if (in->dst == p->result_reg)
+            node->effects |= KSN_GRID_EFFECT_ACC_WRITE;
+        latest[in->dst] = (uint8_t)i;
+    }
+    uint8_t live = (uint8_t)(1u << p->result_reg);
+    for (unsigned i = p->count; i-- > 0;) {
+        const ksn_grid_instruction *in = &p->body[i];
+        ksn_grid_value *node = &graph->value[i];
+        node->live_out = live;
+        bool required = (live & (1u << in->dst)) ||
+                        (node->effects & KSN_GRID_EFFECT_CHECKED);
+        live &= (uint8_t)~(1u << in->dst);
+        if (required && (in->op == KSN_GRID_ADD || in->op == KSN_GRID_MUL ||
+                         in->op == KSN_GRID_MIN))
+            live |= (uint8_t)((1u << in->a) | (1u << in->b));
+        node->live_in = live;
+    }
+}
+
+static bool mac_term(const mac_value *value, ksn_grid_mac_operand *left,
+                     ksn_grid_mac_operand *right)
+{
+    if (value->kind != MAC_LEAF && value->kind != MAC_PRODUCT) return false;
+    *left = value->left;
+    *right = value->kind == MAC_PRODUCT ? value->right :
+             (ksn_grid_mac_operand){.constant = 1};
+    return true;
+}
+
+static bool mac_constant(const mac_value *value, int16_t number)
+{
+    return value->kind == MAC_LEAF && !value->left.is_load &&
+           value->left.constant == number;
+}
+
+static bool mac_scaled_load(const mac_value *value,
+                            ksn_grid_mac_operand *load, int16_t *coefficient)
+{
+    if (value->kind == MAC_LEAF && value->left.is_load) {
+        *load = value->left;
+        *coefficient = 1;
+        return true;
+    }
+    if (value->kind != MAC_PRODUCT ||
+        value->left.is_load == value->right.is_load) return false;
+    *load = value->left.is_load ? value->left : value->right;
+    *coefficient = value->left.is_load ? value->right.constant :
+                   value->left.constant;
+    return true;
+}
+
+/* Interpret the bounded register program as versioned values at registration.
+ * Fold only arithmetic whose intermediate value is known to fit int16, plus
+ * ADD 0 / MUL 1 identities. All instructions must reach the final result: a
+ * discarded checked operation could fail in the scalar VM. */
+static ksn_grid_mac normalize_mac(const ksn_grid_program *p,
+                                  const ksn_grid_analysis *graph)
 {
     ksn_grid_mac mac = {0};
-    if (p->count != 2 && p->count != 4) return mac;
-    const ksn_grid_instruction *add = &p->body[p->count - 1u];
     uint8_t acc = p->result_reg;
-    if (add->op != KSN_GRID_ADD || add->dst != acc ||
-        (add->a == acc) == (add->b == acc)) return mac;
-    uint8_t term = add->a == acc ? add->b : add->a;
-    unsigned sources = p->count == 2 ? 1u : 2u;
-    for (unsigned i = 0; i < sources; ++i) {
+    mac_value values[KSN_GRID_CODE] = {{0}};
+    for (unsigned i = 0; i + 1u < p->count; ++i) {
         const ksn_grid_instruction *in = &p->body[i];
-        if ((in->op != KSN_GRID_LOAD && in->op != KSN_GRID_CONST) ||
-            in->dst == acc) return mac;
+        const ksn_grid_value *node = &graph->value[i];
+        if (in->dst == acc) return mac;
+        mac_value next = {.contributors = (uint16_t)(1u << i)};
+        if (in->op == KSN_GRID_LOAD || in->op == KSN_GRID_CONST) {
+            if (in->op == KSN_GRID_LOAD && in->buffer == KSN_GRID_DEST)
+                return mac;
+            next.kind = MAC_LEAF;
+            next.left = (ksn_grid_mac_operand){
+                .is_load = in->op == KSN_GRID_LOAD,
+                .instruction = (uint8_t)i,
+                .constant = in->immediate
+            };
+        } else {
+            mac_value a = mac_input(values, node->a);
+            mac_value b = mac_input(values, node->b);
+            if (a.kind == MAC_UNKNOWN || b.kind == MAC_UNKNOWN ||
+                a.kind == MAC_ACC || b.kind == MAC_ACC) return mac;
+            next.contributors |= a.contributors | b.contributors;
+            if (in->op == KSN_GRID_ADD && mac_constant(&a, 0)) next = b;
+            else if (in->op == KSN_GRID_ADD && mac_constant(&b, 0)) next = a;
+            else if (in->op == KSN_GRID_MUL && mac_constant(&a, 1)) next = b;
+            else if (in->op == KSN_GRID_MUL && mac_constant(&b, 1)) next = a;
+            else if (a.kind == MAC_LEAF && b.kind == MAC_LEAF &&
+                     !a.left.is_load && !b.left.is_load) {
+                int64_t folded = 0;
+                if (in->op == KSN_GRID_ADD)
+                    folded = (int32_t)a.left.constant + b.left.constant;
+                else if (in->op == KSN_GRID_MUL)
+                    folded = (int32_t)a.left.constant * b.left.constant;
+                else if (in->op == KSN_GRID_MIN)
+                    folded = a.left.constant < b.left.constant ?
+                             a.left.constant : b.left.constant;
+                else return mac;
+                if (folded < INT16_MIN || folded > INT16_MAX) {
+                    if (in->op != KSN_GRID_MUL) return mac;
+                    next.kind = MAC_PRODUCT;
+                    next.left = a.left;
+                    next.right = b.left;
+                } else {
+                    next.kind = MAC_LEAF;
+                    next.left.constant = (int16_t)folded;
+                }
+            } else if (in->op == KSN_GRID_MUL && a.kind == MAC_LEAF &&
+                       b.kind == MAC_LEAF) {
+                next.kind = MAC_PRODUCT;
+                next.left = a.left;
+                next.right = b.left;
+            } else if (in->op == KSN_GRID_ADD) {
+                ksn_grid_mac_operand a_load, b_load;
+                int16_t a_coefficient, b_coefficient;
+                bool factor = mac_scaled_load(&a, &a_load, &a_coefficient) &&
+                              mac_scaled_load(&b, &b_load, &b_coefficient) &&
+                              a_load.instruction == b_load.instruction;
+                int32_t combined = factor ?
+                    (int32_t)a_coefficient + b_coefficient : 0;
+                if (factor && combined >= INT16_MIN && combined <= INT16_MAX) {
+                    next.kind = MAC_PRODUCT;
+                    next.left = a_load;
+                    next.right = (ksn_grid_mac_operand){
+                        .constant = (int16_t)combined};
+                } else if (mac_term(&a, &next.left, &next.right) &&
+                           mac_term(&b, &next.extra_left, &next.extra_right)) {
+                    next.kind = MAC_SUM;
+                } else return mac;
+            } else return mac;
+            next.contributors = (uint16_t)(next.contributors |
+                                  a.contributors | b.contributors | (1u << i));
+        }
+        values[i] = next;
     }
-    if (sources == 1) {
-        if (term != p->body[0].dst) return mac;
-        mac.right.constant = 1;
-    } else {
-        const ksn_grid_instruction *mul = &p->body[2];
-        if (p->body[0].dst == p->body[1].dst ||
-            mul->op != KSN_GRID_MUL || mul->dst == acc ||
-            term != mul->dst ||
-            !((mul->a == p->body[0].dst && mul->b == p->body[1].dst) ||
-              (mul->b == p->body[0].dst && mul->a == p->body[1].dst)))
-            return mac;
-        mac.right.is_load = p->body[1].op == KSN_GRID_LOAD;
-        mac.right.instruction = 1;
-        mac.right.constant = p->body[1].immediate;
+    const ksn_grid_instruction *add = &p->body[p->count - 1u];
+    const ksn_grid_value *final = &graph->value[p->count - 1u];
+    if (add->op != KSN_GRID_ADD || add->dst != acc ||
+        (final->a == KSN_GRID_VALUE_ACC) ==
+        (final->b == KSN_GRID_VALUE_ACC)) return mac;
+    mac_value term = mac_input(values, final->a == KSN_GRID_VALUE_ACC ?
+                              final->b : final->a);
+    if ((term.kind != MAC_LEAF && term.kind != MAC_PRODUCT &&
+         term.kind != MAC_SUM) ||
+        (unsigned)(term.contributors | (1u << (p->count - 1u))) !=
+            ((1u << p->count) - 1u)) return mac;
+    mac.left = term.left;
+    mac.right = term.kind == MAC_LEAF ?
+                (ksn_grid_mac_operand){.constant = 1} :
+                term.right;
+    mac.terms = term.kind == MAC_SUM ? 2 : 1;
+    if (mac.terms == 2) {
+        mac.extra_left = term.extra_left;
+        mac.extra_right = term.extra_right;
     }
-    mac.left.is_load = p->body[0].op == KSN_GRID_LOAD;
-    mac.left.instruction = 0;
-    mac.left.constant = p->body[0].immediate;
     mac.valid = true;
     return mac;
 }
 
-ksn_grid_status ksn_grid_prepare(const ksn_grid_program *program,
-                                 ksn_grid_plan *plan)
+static ksn_grid_status bad_ir(ksn_grid_ir_diagnostic *diagnostic,
+                              ksn_grid_ir_reason reason, unsigned instruction)
 {
-    if (!plan) return KSN_GRID_BAD_IR;
+    if (diagnostic) {
+        diagnostic->reason = reason;
+        diagnostic->instruction = (uint8_t)instruction;
+    }
+    return KSN_GRID_BAD_IR;
+}
+
+ksn_grid_status ksn_grid_prepare_diagnose(const ksn_grid_program *program,
+                                          ksn_grid_plan *plan,
+                                          ksn_grid_ir_diagnostic *diagnostic)
+{
+    if (diagnostic)
+        *diagnostic = (ksn_grid_ir_diagnostic){KSN_GRID_IR_VALID,
+                                               KSN_GRID_VALUE_NONE};
+    if (!plan) return bad_ir(diagnostic, KSN_GRID_IR_HEADER,
+                             KSN_GRID_VALUE_NONE);
     memset(plan, 0, sizeof(*plan));
     if (!program || !program->count || program->count > KSN_GRID_CODE ||
-        program->result_reg >= KSN_GRID_REGS || program->final_shift > 30 ||
-        !valid_index(&program->output)) return KSN_GRID_BAD_IR;
+        program->result_reg >= KSN_GRID_REGS || program->final_shift > 30)
+        return bad_ir(diagnostic, KSN_GRID_IR_HEADER,
+                      KSN_GRID_VALUE_NONE);
+    if (!valid_index(&program->output))
+        return bad_ir(diagnostic, KSN_GRID_IR_OUTPUT_INDEX,
+                      KSN_GRID_VALUE_NONE);
     uint8_t defined = (uint8_t)(1u << program->result_reg);
     for (unsigned i = 0; i < program->count; ++i) {
         const ksn_grid_instruction *in = &program->body[i];
-        if (in->dst >= KSN_GRID_REGS) return KSN_GRID_BAD_IR;
+        if (in->dst >= KSN_GRID_REGS)
+            return bad_ir(diagnostic, KSN_GRID_IR_DEST_REGISTER, i);
         switch (in->op) {
         case KSN_GRID_CONST: break;
         case KSN_GRID_LOAD:
-            if (in->buffer >= KSN_GRID_BUFFERS || !valid_index(&in->index))
-                return KSN_GRID_BAD_IR;
+            if (in->buffer >= KSN_GRID_BUFFERS)
+                return bad_ir(diagnostic, KSN_GRID_IR_LOAD_BUFFER, i);
+            if (!valid_index(&in->index))
+                return bad_ir(diagnostic, KSN_GRID_IR_LOAD_INDEX, i);
             break;
         case KSN_GRID_ADD:
         case KSN_GRID_MUL:
         case KSN_GRID_MIN:
             if (in->a >= KSN_GRID_REGS || in->b >= KSN_GRID_REGS)
-                return KSN_GRID_BAD_IR;
+                return bad_ir(diagnostic, KSN_GRID_IR_UNDEFINED_INPUT, i);
             if (!(defined & (1u << in->a)) ||
-                !(defined & (1u << in->b))) return KSN_GRID_BAD_IR;
+                !(defined & (1u << in->b)))
+                return bad_ir(diagnostic, KSN_GRID_IR_UNDEFINED_INPUT, i);
             break;
-        default: return KSN_GRID_BAD_IR;
+        default: return bad_ir(diagnostic, KSN_GRID_IR_OPCODE, i);
         }
         defined |= (uint8_t)(1u << in->dst);
     }
     plan->program = *program;
-    plan->mac = normalize_mac(&plan->program);
+    analyze_values(&plan->program, &plan->analysis);
+    plan->mac = normalize_mac(&plan->program, &plan->analysis);
     plan->prepared = true;
     return KSN_GRID_OK;
+}
+
+ksn_grid_status ksn_grid_prepare(const ksn_grid_program *program,
+                                 ksn_grid_plan *plan)
+{
+    return ksn_grid_prepare_diagnose(program, plan, NULL);
 }
 
 static bool resolve_index(const ksn_grid_index *index,
@@ -172,64 +389,82 @@ static bool unique_output(const int64_t index[5],
            (y && x > (uint64_t)(shape->height - 1u) * y);
 }
 
-/* The first load is exactly the preceding output in the same row. Another
- * load is immutable input, so eight rows can advance together without
- * changing the left-to-right order or per-cell saturation of any row. */
+static bool scan_factor(const ksn_grid_program *p,
+                        const ksn_grid_analysis *graph, uint8_t slot,
+                        uint8_t *previous, int16_t *coefficient)
+{
+    if (slot >= p->count) return false;
+    const ksn_grid_instruction *in = &p->body[slot];
+    if (in->op == KSN_GRID_LOAD && in->buffer == KSN_GRID_DEST) {
+        *previous = slot;
+        *coefficient = 1;
+        return true;
+    }
+    if (in->op != KSN_GRID_MUL) return false;
+    const ksn_grid_value *node = &graph->value[slot];
+    uint8_t refs[2] = {node->a, node->b};
+    for (unsigned side = 0; side < 2; ++side) {
+        uint8_t load = refs[side], constant = refs[1u - side];
+        if (load >= p->count || constant >= p->count) continue;
+        if (p->body[load].op == KSN_GRID_LOAD &&
+            p->body[load].buffer == KSN_GRID_DEST &&
+            p->body[constant].op == KSN_GRID_CONST) {
+            *previous = load;
+            *coefficient = p->body[constant].immediate;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The prior-output load and immutable source may appear in either order and
+ * registers may be reused. Versioned edges prove the exact expression; the
+ * contributor set rejects any discarded checked arithmetic. Each row still
+ * advances left to right with the original per-cell saturation. */
 static bool scan_rows(const ksn_grid_execution *e, uint8_t *source_slot,
                       int16_t *prev_coefficient)
 {
     const ksn_grid_program *p = &e->plan->program;
+    const ksn_grid_analysis *graph = &e->plan->analysis;
     if (e->shape.tap_width != 1 || e->shape.tap_height != 1 ||
-        (p->count != 3 && p->count != 4 && p->count != 6) || p->initial ||
+        p->count < 3 || p->initial ||
         e->output[0] < 1 || e->output[1] != 1 ||
         e->output[2] < (int64_t)e->shape.width + 1) return false;
-    const ksn_grid_instruction *prev = &p->body[0];
-    unsigned source = p->count == 6 ? 3u : 1u;
-    const ksn_grid_instruction *src = &p->body[source];
-    if (prev->op != KSN_GRID_LOAD || prev->buffer != KSN_GRID_DEST ||
-        src->op != KSN_GRID_LOAD || src->buffer == KSN_GRID_DEST ||
-        prev->dst == src->dst || prev->dst == p->result_reg ||
-        src->dst == p->result_reg) return false;
-    uint8_t term;
+    uint8_t last = (uint8_t)(p->count - 1u);
+    const ksn_grid_instruction *finish = &p->body[last];
+    const ksn_grid_value *final = &graph->value[last];
+    if (finish->op != KSN_GRID_ADD || finish->dst != p->result_reg ||
+        final->contributors != (uint16_t)((1u << p->count) - 1u))
+        return false;
+    uint8_t term_slot = last;
+    if (final->a == KSN_GRID_VALUE_ACC ||
+        final->b == KSN_GRID_VALUE_ACC) {
+        if ((final->a == KSN_GRID_VALUE_ACC) ==
+            (final->b == KSN_GRID_VALUE_ACC)) return false;
+        term_slot = final->a == KSN_GRID_VALUE_ACC ? final->b : final->a;
+    }
+    if (term_slot >= p->count || p->body[term_slot].op != KSN_GRID_ADD)
+        return false;
+    const ksn_grid_value *sum = &graph->value[term_slot];
+    uint8_t inputs[2] = {sum->a, sum->b};
+    uint8_t previous = KSN_GRID_VALUE_NONE;
+    uint8_t source = KSN_GRID_VALUE_NONE;
     int16_t coefficient = 1;
-    if (p->count == 6) {
-        const ksn_grid_instruction *constant = &p->body[1];
-        const ksn_grid_instruction *mul = &p->body[2];
-        const ksn_grid_instruction *sum = &p->body[4];
-        uint8_t defined = (uint8_t)(1u << p->result_reg);
-        for (unsigned i = 0; i < 5; ++i) {
-            uint8_t bit = (uint8_t)(1u << p->body[i].dst);
-            if (defined & bit) return false;
-            defined |= bit;
+    for (unsigned side = 0; side < 2; ++side) {
+        uint8_t candidate = inputs[1u - side];
+        if (candidate >= p->count ||
+            p->body[candidate].op != KSN_GRID_LOAD ||
+            p->body[candidate].buffer == KSN_GRID_DEST) continue;
+        if (scan_factor(p, graph, inputs[side], &previous, &coefficient)) {
+            source = candidate;
+            break;
         }
-        if (constant->op != KSN_GRID_CONST ||
-            mul->op != KSN_GRID_MUL ||
-            !((mul->a == prev->dst && mul->b == constant->dst) ||
-              (mul->b == prev->dst && mul->a == constant->dst)) ||
-            sum->op != KSN_GRID_ADD ||
-            !((sum->a == mul->dst && sum->b == src->dst) ||
-              (sum->b == mul->dst && sum->a == src->dst))) return false;
-        coefficient = constant->immediate;
-        term = sum->dst;
-    } else {
-        const ksn_grid_instruction *sum = &p->body[2];
-        if (sum->op != KSN_GRID_ADD ||
-            !((sum->a == prev->dst && sum->b == src->dst) ||
-              (sum->b == prev->dst && sum->a == src->dst))) return false;
-        term = sum->dst;
     }
-    if (p->count == 3) {
-        if (term != p->result_reg) return false;
-    } else {
-        const ksn_grid_instruction *finish = &p->body[p->count - 1u];
-        if (term == p->result_reg || finish->op != KSN_GRID_ADD ||
-            finish->dst != p->result_reg ||
-            !((finish->a == p->result_reg && finish->b == term) ||
-              (finish->b == p->result_reg && finish->a == term))) return false;
-    }
-    if (e->index[0][0] != e->output[0] - 1) return false;
+    if (source == KSN_GRID_VALUE_NONE || previous == KSN_GRID_VALUE_NONE ||
+        e->index[previous][0] != e->output[0] - 1) return false;
     for (unsigned k = 1; k < 5; ++k)
-        if (e->index[0][k] != e->output[k]) return false;
+        if (e->index[previous][k] != e->output[k]) return false;
+    const ksn_grid_instruction *src = &p->body[source];
     uintptr_t d = (uintptr_t)e->binding.data[KSN_GRID_DEST];
     uintptr_t s = (uintptr_t)e->binding.data[src->buffer];
     size_t dn = e->binding.count[KSN_GRID_DEST] * sizeof(int16_t);
@@ -244,10 +479,9 @@ static bool scan_rows(const ksn_grid_execution *e, uint8_t *source_slot,
 /* Recognize a single loop-carried add. Other registers must be computed
  * anew on every tap; their expression graph may use any supported pure op. */
 static bool reduction_bound(const ksn_grid_program *program,
+                            const ksn_grid_analysis *graph,
                             uint32_t taps, uint32_t *work, bool *qacc_legal)
 {
-    uint64_t bound[KSN_GRID_REGS] = {0};
-    uint8_t defined = 0;
     uint8_t acc = program->result_reg;
     unsigned updates = 0;
     *qacc_legal = true;
@@ -255,40 +489,29 @@ static bool reduction_bound(const ksn_grid_program *program,
     if (initial > (uint64_t)KSN_GRID_QACC_MAX) *qacc_legal = false;
     for (unsigned i = 0; i < program->count; ++i) {
         const ksn_grid_instruction *in = &program->body[i];
-        uint8_t dest_bit = (uint8_t)(1u << in->dst);
+        const ksn_grid_value *node = &graph->value[i];
         ++*work;
         if (in->op == KSN_GRID_LOAD) {
             if (in->buffer == KSN_GRID_DEST || in->dst == acc) return false;
-            bound[in->dst] = 32768u;
         } else if (in->op == KSN_GRID_CONST) {
             if (in->dst == acc) return false;
-            bound[in->dst] = magnitude(in->immediate);
         } else {
-            bool a_acc = in->a == acc, b_acc = in->b == acc;
-            if ((!a_acc && !(defined & (1u << in->a))) ||
-                (!b_acc && !(defined & (1u << in->b)))) return false;
+            bool a_acc = node->a == KSN_GRID_VALUE_ACC;
+            bool b_acc = node->b == KSN_GRID_VALUE_ACC;
             if (in->dst == acc) {
                 if (in->op != KSN_GRID_ADD || a_acc == b_acc ||
                     ++updates != 1 || i != program->count - 1u) return false;
-                uint64_t term = bound[a_acc ? in->b : in->a];
+                uint8_t term_slot = a_acc ? node->b : node->a;
+                if (term_slot >= program->count ||
+                    !graph->value[term_slot].range_proven) return false;
+                uint64_t term = graph->value[term_slot].magnitude_bound;
                 if (initial <= (uint64_t)KSN_GRID_QACC_MAX &&
                     term > ((uint64_t)KSN_GRID_QACC_MAX - initial) / taps)
                     *qacc_legal = false;
             } else {
-                if (a_acc || b_acc) return false;
-                uint64_t a = bound[in->a], b = bound[in->b];
-                if (in->op == KSN_GRID_ADD) {
-                    if (a > (uint64_t)INT64_MAX - b) return false;
-                    bound[in->dst] = a + b;
-                } else if (in->op == KSN_GRID_MUL) {
-                    if (b && a > (uint64_t)INT64_MAX / b) return false;
-                    bound[in->dst] = a * b;
-                } else {
-                    bound[in->dst] = a > b ? a : b;
-                }
+                if (a_acc || b_acc || !node->range_proven) return false;
             }
         }
-        if (in->dst != acc) defined |= dest_bit;
     }
     return updates == 1;
 }
@@ -324,6 +547,7 @@ ksn_grid_status ksn_grid_begin(const ksn_grid_plan *plan,
             execution->access[i] = stride == 0 ? KSN_GRID_ACCESS_BROADCAST :
                                    stride == 1 ? KSN_GRID_ACCESS_CONTIGUOUS :
                                    stride == 2 ? KSN_GRID_ACCESS_INTERLEAVED2 :
+                                   stride == -1 ? KSN_GRID_ACCESS_REVERSE :
                                                  KSN_GRID_ACCESS_GATHER;
         }
     }
@@ -353,7 +577,8 @@ ksn_grid_status ksn_grid_begin(const ksn_grid_plan *plan,
     execution->safe = true;
     execution->independent = disjoint(binding, used) &&
         unique_output(execution->output, shape);
-    execution->reduction_shape = reduction_bound(&plan->program, taps, work,
+    execution->reduction_shape = reduction_bound(&plan->program,
+                                                 &plan->analysis, taps, work,
                                                  &execution->qacc_legal);
     if (!execution->reduction_shape) execution->qacc_legal = false;
     execution->pie_candidate = execution->independent &&

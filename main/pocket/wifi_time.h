@@ -2,6 +2,7 @@
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // One-shot Wi-Fi clock synchronization. Connects, asks SNTP for the time,
 // hands it to solar_time, and takes the whole radio stack back down again.
@@ -71,6 +72,18 @@ esp_err_t wifi_time_sync_start(void);
 // Safe from any task at any time.
 wifi_time_status_t wifi_time_status(void);
 
+// Overwrites the status a finished attempt left. For net_autosync.c, which
+// syncs the clock over a link rather than through the sync task: the link
+// reports OK once it has an address, and the Wi-Fi screen would read that as
+// "clock set" whether or not SNTP then answered. Safe from any task.
+void wifi_time_status_settle(wifi_time_state_t state, wifi_time_stage_t stage,
+                             int reason);
+
+// Whether a sync, a scan or a link holds the radio right now -- the single
+// attempt lock itself. A caller that gave the radio back and must not build
+// anything until the heap has returned waits for this to go false.
+bool wifi_time_busy(void);
+
 // Whether the driver is initialised right now. A capability probe needs this to
 // tell "the radio is already up, so using it is free" from "the radio has to be
 // brought up, which costs about 48 KB and fails outright below that". Safe from
@@ -125,18 +138,50 @@ typedef enum {
     WIFI_TIME_LINK_FAILED       // never came up, or the AP took it away
 } wifi_time_link_t;
 
+// Who a link belongs to. One link exists at a time and only its holder can
+// stop it: pocket_net.c's teardown stops "the link" whenever it sees one
+// connecting, and without an owner that would include net_service.c's.
+typedef enum {
+    WIFI_TIME_LINK_APP=1,       // pocket.net's lease (pocket_net.c)
+    WIFI_TIME_LINK_SERVICE=2,   // net_service.c, for native holders
+} wifi_time_link_owner_t;
+
 // Starts the link task. Returns immediately; poll wifi_time_link_state().
 // ESP_ERR_INVALID_STATE when a sync, a scan or another link already has the
 // radio. Uses the credentials in NVS, exactly as the clock does.
-esp_err_t wifi_time_link_start(void);
+esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner);
+esp_err_t wifi_time_link_start(void);          // for WIFI_TIME_LINK_APP
 
 // Asks for the link back. Non-blocking and idempotent: the task tears the radio
 // down and clears the lock on its own. The stage of a failure is in
-// wifi_time_status(), which the link fills the same way a sync does.
-void wifi_time_link_stop(void);
+// wifi_time_status(), which the link fills the same way a sync does. A request
+// from anyone but the current owner is ignored. A stop that lands while the
+// link is still associating ends it within CONNECT_SLICE_MS (100 ms) plus the
+// teardown, and leaves the state DOWN rather than FAILED.
+void wifi_time_link_stop_for(wifi_time_link_owner_t owner);
+void wifi_time_link_stop(void);                // for WIFI_TIME_LINK_APP
+
+// The current holder, or 0 when no link exists.
+wifi_time_link_owner_t wifi_time_link_owner(void);
 
 wifi_time_link_t wifi_time_link_state(void);
 
 // Copies the address the link holds, always NUL terminating; "" when it has
 // none. Safe from any task.
 void wifi_time_link_ip(char *out, size_t size);
+
+// SNTP over a link, for a holder on another task (net_autosync.c). The link
+// task's teardown also deinitialises SNTP, and ESP-IDF v6.0.1's
+// esp_netif_sntp_deinit() deletes the semaphore esp_netif_sntp_sync_wait() may
+// be blocked on -- a lost AP would do that under the waiter. These three and
+// the teardown take one mutex, so a deinit waits out a wait (one slice), and a
+// start after the link stopped being UP is refused rather than leaving SNTP
+// running past the event loop the teardown deletes.
+//
+// start: ESP_ERR_INVALID_STATE unless the link is UP. wait: one slice, as
+// esp_netif_sntp_sync_wait(); ESP_ERR_INVALID_STATE once the link is not UP
+// or SNTP was already torn down. stop: idempotent, and the caller's to make
+// before it releases the link.
+esp_err_t wifi_time_link_sntp_start(void);
+esp_err_t wifi_time_link_sntp_wait(unsigned slice_ms);
+void      wifi_time_link_sntp_stop(void);

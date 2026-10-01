@@ -1,0 +1,9 @@
+// turf: mowing stripes from the near edge (x0, y0) to the far edge (x1, y1),
+// alternating between two greens (512 + 288 * phase, then 1312 minus it).
+input x0 = 0, x1 = 1, dx0 = 2, dx1 = 3, y0 = 4, y1 = 5, stripes = 6, phase = 7;
+let near = x0, far = x1, green = 512 + phase * 288;
+repeat (stripes) {
+  move(near, y0); line(far, y1, green);
+  near += dx0; far += dx1;
+  green = 1312 - green;
+}

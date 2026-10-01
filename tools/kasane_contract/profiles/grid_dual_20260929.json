@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "device": "COM3",
+  "binary_sha256": "641c66138414f4bf2b95e953dea51674874996ea514b10a0a3de7234741614d8",
+  "binary_bytes": 2145168,
+  "runs": [
+    {
+      "run_id": "2995fa1751984d209596f5aad8472d4b",
+      "cases": [
+        {
+          "mode": 3,
+          "width": 48,
+          "height": 28,
+          "key": "fb80aae64396bedd",
+          "gather_us": 2854,
+          "affine_us": 2749
+        },
+        {
+          "mode": 4,
+          "width": 48,
+          "height": 20,
+          "key": "0bf843af95aa27f9",
+          "gather_us": 2051,
+          "affine_us": 1808
+        },
+        {
+          "mode": 5,
+          "width": 40,
+          "height": 20,
+          "key": "807ffe64e5740077",
+          "gather_us": 2339,
+          "affine_us": 2164
+        }
+      ]
+    },
+    {
+      "run_id": "3cfd199ac28b4517bdf4fd17f60fd261",
+      "cases": [
+        {
+          "mode": 3,
+          "width": 48,
+          "height": 28,
+          "key": "fb80aae64396bedd",
+          "gather_us": 2852,
+          "affine_us": 2746
+        },
+        {
+          "mode": 4,
+          "width": 48,
+          "height": 20,
+          "key": "0bf843af95aa27f9",
+          "gather_us": 2045,
+          "affine_us": 1815
+        },
+        {
+          "mode": 5,
+          "width": 40,
+          "height": 20,
+          "key": "807ffe64e5740077",
+          "gather_us": 2325,
+          "affine_us": 2167
+        }
+      ]
+    },
+    {
+      "run_id": "bbc856796f9a4eb7bd32db5c70f66112",
+      "cases": [
+        {
+          "mode": 3,
+          "width": 48,
+          "height": 28,
+          "key": "fb80aae64396bedd",
+          "gather_us": 2842,
+          "affine_us": 2756
+        },
+        {
+          "mode": 4,
+          "width": 48,
+          "height": 20,
+          "key": "0bf843af95aa27f9",
+          "gather_us": 2043,
+          "affine_us": 1803
+        },
+        {
+          "mode": 5,
+          "width": 40,
+          "height": 20,
+          "key": "807ffe64e5740077",
+          "gather_us": 2341,
+          "affine_us": 2171
+        }
+      ]
+    }
+  ]
+}

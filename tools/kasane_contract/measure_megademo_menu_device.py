@@ -10,6 +10,7 @@ import serial
 
 
 PAINT = re.compile(rb"KASANE_PAINT .*?turn_ms=([0-9.]+) render_ms=([0-9.]+) send_ms=([0-9.]+)")
+SCENE = re.compile(rb"MEGADEMO SCENE (\w+) tier=(\d)")
 BAD = (b"START_FAILED", b"Guru Meditation", b"PRESENTER_STEP_FAILED", b"APP_STOPPED")
 
 
@@ -60,7 +61,12 @@ def main() -> None:
                     matches = list(PAINT.finditer(got))
                     while found < min(len(matches), count):
                         m = matches[found]
-                        rows.append((run, phase, found + 1, *(float(v) for v in m.groups())))
+                        # The loop is 368 frames over four scenes now; a
+                        # window is labelled with the scene it ended in.
+                        scenes = SCENE.findall(bytes(raw[:start]) + got[:m.start()])
+                        where = b"%s@%s" % scenes[-1] if scenes else b"?"
+                        rows.append((run, phase, found + 1, *(float(v) for v in m.groups()),
+                                     where.decode()))
                         found += 1
                 if found != count:
                     raise RuntimeError(f"only {found}/{count} paint windows in {phase}")
@@ -95,7 +101,8 @@ def main() -> None:
         base = phase.replace("_transition", "")
         selected = [row for row in rows if row[1] == base and row[2] in index]
         values = [[row[col] for row in selected] for col in (3, 4, 5)]
-        print(f"{phase} n={len(selected)} " + " ".join(
+        where = sorted({row[6] for row in selected})
+        print(f"{phase} n={len(selected)} scenes={','.join(where)} " + " ".join(
             f"{name}_median={statistics.median(v):.2f}ms range={min(v):.2f}-{max(v):.2f}"
             for name, v in zip(("turn", "render", "send"), values)))
 

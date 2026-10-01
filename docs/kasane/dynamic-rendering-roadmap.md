@@ -152,7 +152,7 @@ COM3 / ESP32-S3 rev0.2、240 MHz、IDF 6.0.1、SIZE最適化で同一バイナ�
 
 ## D3b grid PIE を通常アプリへ公開（2026-09-28）
 
-[通常アプリ用 adapter](../../main/pocket/pocket_grid.c)を追加し、`gridFold.fold(...)` で作った型付きIRを `pocket.kasane.grid.register(program)` で登録、`run(handle, {0: Int16Array, ...}, params)` で実行、`resource(handle)` でKasane画像として `tx.image` に渡せるようにした。`explain(handle)` は選択したbackend・strategy・reason・profile keyを返す。アプリ固有の命令分岐は設けず、全アプリが同じ登録・合法性検査・AUTO選択・PIE実行を通る。JS前段は初回使用時だけ読み込む。planはセッション内で最大4件、出力は最大4096画素、入力合計は8192個のint16要素まで。入力は16-byte整列したnative領域へコピーし、出力は2世代を保持して表示ACK後に切り替える。転送失敗時は未確定世代を保持し、次の表示で修復する。
+[通常アプリ用 adapter](../../main/pocket/pocket_grid.c)を追加し、`gridFold.fold(...)` で作った型付きIRを `pocket.kasane.grid.register(program)` で登録、`run(handle, {0: Int16Array, ...}, params)` で実行、`resource(handle)` でKasane画像として `tx.image` に渡せるようにした。`explain(handle)` は選択したbackend・strategy・reason・profile keyを返す。アプリ固有の命令分岐は設けず、全アプリが同じ登録・合法性検査・AUTO選択・PIE実行を通る。JS前段は初回使用時だけ読み込む。planはセッション内で最大6件、出力は最大4096画素、入力合計は8192個のint16要素まで。入力は16-byte整列したnative領域へコピーし、出力は2世代を保持して表示ACK後に切り替える。転送失敗時は未確定世代を保持し、次の表示で修復する。
 
 通常アプリの入力整列に合わせた固定係数2×2・16×12出力の追加probeを同一診断バイナリで3回実施した。各1024回の中央値はgather 80,073 µs、融合 61,590 µsで23.1%短い。profile key=`51df87624d6af998` を[選択表](../../main/ui/kasane/ksn_proc_grid_profile.h)へ追加した。選択表はbindで合法と判定された候補の順位だけを決める。[生成器のテスト](../../tools/kasane_contract/test_build_grid_profile.py)は、整列条件の不一致を拒否する例を含め6件通過した。[QuickJS結合試験](../../tools/kasane_contract/run_pocket_grid_qjs.py)は前段から画像画素と表示ACK・失敗修復まで通過した。
 
@@ -340,3 +340,85 @@ D2通常APPのCOM3診断は[2面API契約](d2-multi-procedural-surface.md)の`KA
 D4通常JSのCOM3診断は[限定pixel API](d4-pixel-small-window.md)の`KASANE_D4_PIXEL_APP_PROBE`で2回実行した。最大112×63×8命令の同一資源を2画像ノードへ表示し、最初の2帯目送出を1回失敗させて再送。成功候補の表示は初回runで16.3–20.5 ms、UI task stack最小余裕23,708 B。診断image SHA-256 `ca0aa51e046560123fb2f8e3d57cc6f3c55ca0f4e4ca7e0f0755dc144a8f9d9b`、ログ`.cache/d4-pixel-app-device-20260928a/serial.log`。全画面18命令はspan化しても23.4 msの評価に加えて合成・LCDが必要で、2枚の全画面underlay確保も失敗するため、限定APIの上限を広げない。
 
 各診断の終了時にその時点の通常imageをアプリ領域へ復元し、flash verifyと`HOME_READY`を確認した。フラッシュ退避なし。FLOWER overlay診断フラグも加えた最終通常imageはSHA-256 `6d94ab7fae63f196bcbfe3d23aeb3a3a1315814b0d63ab2693256bf9013e0d55`、app 2,128,640 Bでビルド成功。これをアプリ領域へ書いてflash verifyと`HOME_READY`を再確認した。最終image上で通常VIDEO LABを2回、通常MEGADEMOの全画面→縮小小窓→全画面往復を2回実行して通過した。ログは`.cache/d2d4-overlay-final-video-lab-20260928.log`と`.cache/d2d4-overlay-final-megademo-20260928.log`。
+
+## D3a 登録時の積和認識を拡張（2026-09-29）
+
+[grid登録時解析](../../main/ui/kasane/ksn_proc_grid.c)の積和候補認識を、命令数と順序が固定された照合から、最大16命令のレジスタ定義ごとの値追跡へ変更した。レジスタ再利用、独立した定義の並べ替え、同一loadの再利用、`ADD 0`/`MUL 1`、int16に収まる定数式を正規化する。int16を超える定数の積は途中値を狭めず、2つの定数をPIEの積として保持する。最終結果は累積値への1回の加算と1つの積項に限り、すべての命令が結果に寄与する場合だけPIE候補にする。途中の検査付き演算を消しうる死んだ命令、非ゼロの加算項、複数の積和項はscalarへ戻す。実行時の独立性・alias・値域・QACC上限の検証は従来どおり別段で行う。
+
+追加したJS例を含む22式は実QuickJSから登録し、PIE命令シミュレータで通常・融合経路それぞれ94ベクトルブロックの出力一致を確認した。CのPIE模擬・非PIE経路は400ケース、通常アプリのgrid adapterも通過し、Xtensa向け通常imageはビルド成功。今回の認識拡張の実機時間は未測定で、候補範囲を広げたこと自体を速度改善とはみなさない。次は複数項の累積と依存行kernelの共通表現、登録費用と実測費用に基づく選択を検討する。float描画IRからQ14への暗黙変換は行わない。
+
+実機で遊べる確認用に、既存の[GRID LAB](../../apps/kasane/grid_lab.js)へ4番目の`FOLD ART`モードを追加した。Enterまたは120フレームごとの自動切替で、従来の3縮小モードから進める。48×28の動くRGB565模様をJSの`fold`式`acc+(load+0)*(1+2)`から登録し、nativeループの結果を通常Kasane画像として表示する。COM3へ通常image 2,138,192 B（SHA-256 `94fafd24229abfd7695f440884f5e67fb2cb77b114b09c221603c7d0b146b9cb`）をアプリ領域だけ書込み、書込時hash照合後、GRID LABを2回起動した。両runで既存3モードと新モードに到達し、新モードは`backend=PIE strategy=GATHER reason=FALLBACK`、終了後は`HOME_READY`。ログは`.cache/grid-lab-d3a-20260929/serial.log`。これは選択と表示の確認であり、scalarとの実機時間比較や画面の全画素読戻しではない。
+
+続いて同じloadを共有する`load*7+load*(-4)`を登録時に`load*3`へ縮約した。この段階では係数の和がsigned16を超える形をscalarへ戻していた。2つの積の途中値はsigned64の範囲に収まり、bind時の既存のQACC上限・独立性検査も通す。CのPIE模擬/非PIE経路で一致し、実QuickJSの24例とPIE命令シミュレータの通常/融合各95ベクトルブロックが通過した。GRID LABの`FOLD ART`もこの式へ更新し、通常image 2,138,416 B（SHA-256 `0aff44fe166407ca378385960fb5f539d8d5905d3190da2c3b6a051322dd8c42`）をアプリ領域だけ書込み、書込時hash照合と2回のGRID LAB全4モード・`HOME_READY`を確認した。新モードは両runで`PIE/GATHER/FALLBACK`。ログは`.cache/grid-lab-d3a-factored-20260929/serial.log`。実機のscalarとの速度比較はまだ行っていない。
+
+この速度比較のため、通常のgrid adapterに`measure(handle, repeats)`を追加した。直前に`run`へ渡したコピー済み入力を使い、表示中の候補/確定画像とは別の整列scratchでscalarとAUTO PIEを交互に測る。bindとJS入力生成は計時から除外し、両経路の全出力一致を各回で要求する。GRID LABのFOLD ARTは8回合計と1回平均をログ/画面へ表示する。COM3の2回の独立起動でscalar合計28,110 / 28,122 µs、PIE合計1,883 / 1,879 µs、全画素一致だった。1回あたり約3.514 ms対0.235 ms、約14.95倍である。PIEは両runで`GATHER/FALLBACK`を選び、4モードを表示後`HOME_READY`へ戻った。image 2,140,416 B（SHA-256 `476590105f4a26297a86d2ae71a277f1c13a5222bb5b11378c8efa1e6e0276fc`）をアプリ領域だけ更新し、書込時hash照合済み。ログは`.cache/grid-lab-d3a-measure-20260929/serial.log`。この比は特定の48×28・1tap式のnative kernel実行だけであり、同じ式を旧コンパイラで動かす場合のscalarとの差に相当する。登録費用、毎フレームのJS入力生成、画像合成、LCD転送を含むアプリ全体の倍率ではない。
+
+## D3a 2項の積和へ拡張（2026-09-29）
+
+1つの積へ縮約できない`termA+termB`を登録時planに最大2項の順序付き積として保持し、同じPIE QACCへ順に積和する経路を追加した。各項はint16 load/constantの積または直接値で、既存の独立性・QACC・alias・整列・出力検証を通る。出力に依存するloadはこの独立PIE候補から除外し、従来の依存行scan認識へ残す。2項は未知の実機費用を既存1項の選択表へ混ぜず、GATHER候補だけで開始した。1項のprofile keyと既存経路は変えない。係数の和がint16を超える共有load、非ゼロoffset、異なる位置の2 loadも新経路に入る。2項へ縮約できない3項以上と任意の依存式はまだscalar。
+
+JS前段の25例を実QuickJSから実行し、PIE命令シミュレータの通常/融合各98ベクトルブロックでCモデル・独立JS期待値と一致した。CのPIE模擬/非PIE経路各400ケース、通常アプリadapter試験を通した。GRID LABのFOLD ARTは元の画素×2と左右反転位置の画素を1tapで混ぜる48×28の動く絵へ更新し、既存の`measure`でnative scalar/PIEの全画素を毎回照合する。初期の2項PIEはCOM3の2起動で8回合計scalar 26,959 / 26,966 µs、PIE 8,364 / 8,384 µs。定数係数を毎回8レーン分組み立てる代わりに`EE.VLDBC.16`へ渡すと、別の2起動でPIE 7,191 / 7,189 µsとなり、初期経路より約14.2%短縮した。静的QR予測はこの差を示さず、C側の係数準備費用を含む実機測定が必要だった。
+
+最終image 2,141,616 B（SHA-256 `1ac5ad7e020d4d16bdc112b9f09a8d0821ef2669dcd162c6a7f7c81dfa2ac541`）をアプリ領域だけ更新し、書込時hash照合後、GRID LABを2回起動した。8回合計はscalar 26,969 / 26,968 µs、PIE 7,187 / 7,185 µsで全画素一致。1回あたり約3.371 ms対0.898 ms、約3.75倍。4モードを表示し、`PIE/GATHER/FALLBACK`と終了後`HOME_READY`を確認した。ログは`.cache/grid-lab-d3a-dual-final-20260929/serial.log`。これは登録済みkernelだけの費用であり、1項版と式・表示内容も異なるため、両者の速度差を2項追加の純粋なオーバーヘッドとは断定しない。次は2項のloadごとのcontiguous/reverse-stride判定と実機選択表、依存行kernelの共通表現を検討する。
+
+## 次のタスク（2026-09-29）
+
+1. **D3a: 2項のアクセス経路と費用選択（完了）。** 各loadの連続・逆順・broadcast・gatherを登録時に判定し、合法な2項PIE候補を比較した。GRID LABのFOLD ARTに加え、寸法・stride・係数を変えたJS例でscalarとの全画素一致を確認。同じ通常imageで独立した実機runを繰り返し、5%以上速い形状だけをAFFINEへ切り替えた。結果は下記。
+2. **D3a: 登録時解析と依存行kernelの共通化（完了）。** 命令ごとの値バージョン、live-in/out、依存集合、検査付き演算、絶対値上界を共通グラフに記録し、MAC正規化・依存行の認識・QACC前段の上界証明で共有する。レジスタ再利用、alias、overflow、死んだ検査付き命令をhostで反例として通し、実機で登録費用とRAMを測った。2項を超える式と別種の依存行反復は、合法性と費用の両方を示せるまではscalarに残す。
+3. **JS APIと診断（完了）。** `grid.registration(handle)`は登録時の式形状、解析時間、planと内部heapの大きさを返す。登録失敗はIRの理由と命令番号を例外に含め、`grid.explain(handle)`は実行後のkernel、PIE候補とscalar選択理由を返す。`gridFold.index({base,x,y,tapX,tapY})`と`view({buffer,...})`の座標引数をオブジェクトに統一し、動的係数も名前付きオブジェクトで記す。[JS記法](grid-js-notation.md)にnative反復とscalar fallbackの契約をまとめた。float式からQ14への暗黙変換は導入しない。
+4. **表示全体の採否。** 登録、JS入力生成、kernel、Kasane合成、LCD送出、heap、フレーム停滞を別々に測り、全画面とUI内の小窓でscalar/PIEの体感上の差と余裕を確認する。D2のFLOWER＋2面、D5のSD動画＋音声との複合負荷は、単独のkernel倍率から外挿せず別のgateで判定する。
+
+## D3a 2項アクセス経路の実機選択（2026-09-29）
+
+2項の各loadについて、bind時に出力レーンのstrideを連続・2間隔・broadcast・逆順・その他へ分類する。GATHERに加えてAFFINE候補を登録し、整列した連続8セルだけを直接PIEへ渡す。逆順と整列・余剰セル条件を満たさないブロックはscratchへ集める。係数loadがbroadcastなら1セルをPIEで広げる。QACCへの加算順、bind時のalias・範囲・QACC証明、scalar tailは維持した。profileのない2項式は引き続きGATHERを自動選択する。
+
+JSの独立期待値を持つ連続2 load・レーン別係数・broadcast係数を追加して28例とし、実QuickJS→IR→PIE命令シミュレータで通常・融合それぞれ101ベクトルブロックが一致した。CのPIE模擬/非PIE各400ケースと通常アプリadapterも通過。GRID LABには既存の3縮小＋FOLD ARTに加え、FOLD PAIRとFOLD WEIGHTをEnterで選べるようにした。2項測定APIはGATHER/AFFINEを強制でき、表示候補とは別scratchで各回scalarとの全画素一致を確認する。grid slotとKasane画像資源の枠を両方6へ揃えた。
+
+同一通常imageで3回独立起動した[計測記録](../../tools/kasane_contract/profiles/grid_dual_20260929.json)から[選択表生成器](../../tools/kasane_contract/build_grid_measure_profile.py)で[2項profile](../../main/ui/kasane/ksn_proc_grid_dual_profile.inc)を生成する。8回合計の中央値は、鏡像48×28がGATHER 2,852 µs、AFFINE 2,749 µs（3.6%短縮）、連続2 load 48×20が2,045→1,808 µs（11.6%）、動的係数40×20が2,339→2,167 µs（7.4%）。既存生成器と同じ5%の採用余裕を適用し、鏡像はGATHER、残り2形状だけをAFFINEにした。計測記録はバイナリSHA-256、COM3、3つの独立run ID、形状と両候補の全画素一致済み時間を持つ。全runで同じバイナリ・形状・候補集合でなければ生成を拒否する。
+
+最終image 2,145,136 B（SHA-256 `b8f605d97046f97f3d8392c976b4f8b6339175ea6773733dd4f298b5d23d355b`）をアプリ領域だけ書き、書込時hashを検証。独立2起動で鏡像`PIE/GATHER/PROFILE`、残り2形状`PIE/AFFINE/PROFILE`、全画素一致、6モード表示、終了後`HOME_READY`を確認した。最終ログは`.cache/grid-lab-d3a-profile-gated-final-20260929.log`。フラッシュ退避なし。Astraの敵対的レビューは、初稿の鏡像3.7%行が5%規則を破ることと生成経路の欠如を指摘し、上記の生成式とGATHER選択へ修正した。
+
+比較用に試した64×24の連続2 loadと40×24の動的係数は、JS模様の計算を事前化しても30フレーム窓の平均が約36.0/32.9 msだった。表示サイズを48×20/40×20へ調整した最終版では、同窓の平均24.49/27.60 ms、最大26.50/29.20 ms。鏡像48×28は平均26.03 ms。これはアプリ実行中の周期ログで、個々のフレーム最悪値、音声や他overlayとの同時負荷、画面画素の読戻しを保証しない。起動時の内部heap free標本は79,132/79,356 B、最大連続31,744 Bであり、実行中の低水位ではない。以前の2項GATHER約7.19 ms/8回から今回約2.85 ms/8回への短縮には、PIE命令の変更だけでなくCのレーン収集を1ブロック単位へまとめた効果も含む。次は登録時の共通依存表現と、JS・合成・LCDの費用分解を扱う。
+
+## D3a 登録時の共通値グラフ（2026-09-29）
+
+登録時に各レジスタ書込みを不変の命令値として記録し、入力元の命令番号、累積依存集合、live-in/out、検査付き演算とDEST読取りの印、全入力に対して保証できる絶対値上界を持たせた。MAC正規化と依存行の認識は同じ値グラフを読み、bind時のQACC判定はそこで証明した上界を使う。命令の物理的な並びやレジスタ番号を式の同一性とみなさず、最終値が全命令を含まない場合は高速経路へ降ろさない。
+
+依存行は、前画素のDEST loadと独立したsource loadを、`source + coefficient * previous` のどちらの加算順でも認識する。sourceを先に定義し、previousとsourceのレジスタを途中で再利用する6命令をhostでscalar/scan PIE比較した。別buffer IDからのDEST alias、死んだ検査付きADD、前画素でないDEST indexは候補外になる。3段の自己乗算で上界が`int64`を超える例も候補外とし、scalar実行時のoverflowを確認した。JSの`iirReordered`を含む29例は実QuickJS→IR→PIEモデルで一致し、命令シミュレータの通常・融合それぞれ113ベクトルブロックが一致。CのPIE模擬と非PIE各400ケース、scalar/レーンモデル、通常アプリQuickJS adapterも通った。初回の通常ファームビルドは成功し、アプリサイズは2,145,456 B、flash予算残り1,000,272 B。Astraのチェックポイントレビューでも合法性の穴は見つからなかった。その時点では新しいscan形状の実機速度と登録時のRAM・時間を測っていなかった。
+
+## D3a 登録費用とJS診断（2026-09-29）
+
+既存のGRID LABの3つのfold planを使ってCOM3で3回独立起動した。登録時にJS programの読取り、`ksn_grid_prepare`、出力2面の確保を個別に時計測した。フィールド配置の修正前は値グラフ392 B・plan 1,240 Bで、各planの確保直後に内部heapが1,284 B減った。詰め物を減らした後は値グラフ264 B・plan 1,112 Bとなり、同じ確保段階の減少は1,156 B。追加前のplan 848 Bはcommit `622582e`のヘッダを同じhost ABIで計測した値なので、新解析のplan本体の純増は264 B。allocatorの上乗せ44 Bは旧版実機で測った値ではないため、その差を旧版heapの実測とは扱わない。
+
+圧縮後の同一バイナリで9登録（3形状×3起動）の中央値は、JS program読取り786 µs、native prepare 97 µs、登録全体936 µs。prepareの最長標本は190 µsで、その要因は未分離。3番目のfold登録直後の内部heap空きは60,128〜60,256 B、最大連続空き31,744 B。これらは起動中の一点の標本であり、低水位ではない。出力2面とallocator費用も登録全体のheap差に含まれる。ログは`.cache/grid-lab-registration-20260929.log`（圧縮前）と`.cache/grid-lab-registration-compact-20260929.log`（圧縮後）。
+
+`grid.registration(handle)`にIR命令数、MAC項数、検査付き演算数、未証明の中間値数、plan/解析領域のbytes、各時間・内部heap標本を追加した。登録失敗の例外には`body[n]`と検証理由を含める。実行後の`grid.explain(handle)`は`kernel`、`candidateMask`、`scanCandidate`、`scalarReason`を返す。host QuickJSで不正dst registerと一般形MIN式、7画素幅、QACC範囲超過の各scalar理由を検証。通常ファーム最終imageは2,149,072 B、SHA-256 `5f7d17c94bbfa0d1e7da69aae8f76206bf59e6ede56667f3c29e03bb7a605747`。アプリ領域だけを書き、hash照合後にGRID LABの6モード、PIE候補理由、全画素比較、終了後`HOME_READY`を確認した。最終ログは`.cache/grid-lab-registration-diagnostics-final-20260929.log`。フラッシュ退避なし。新しい並び替えscan式そのものの実機速度は未測定。
+
+`gridFold.index`を1個の名前付きオブジェクトへ統一した。5個の位置引数と動的係数の配列形式は拒否する。GRID LAB、29個のQuickJS→IR例、通常アプリadapterのテスト、実機診断用JSを移し、生成C assetも同期した。Astraのレビューでは`view`が`base`を無視する不一致を発見したため、`view({buffer,base,x,y,tapX,tapY})`へ統一し、非ゼロbaseの直接loadと同じIRになるテストを追加した。hostの29例は独立期待値との比較とPIE/scalar経路を通過。
+
+最終通常image 2,150,240 B、SHA-256 `9cc5cd85d91db97cbd5626bd13773dd6bb94364158255a250f7e1d548a5af449`をCOM3のアプリ領域だけに書き、書込時hashを検証した。既存GRID LABの最終起動で6モード、全画素一致、PIE経路と`HOME_READY`が通過。鏡像foldの8回合計はscalar 26,962 µs、PIE 2,857 µs。最終ログは`.cache/grid-lab-object-index-final-20260929.log`。レビュー前の2回独立起動ログは`.cache/grid-lab-named-index-20260929.log`。フラッシュ退避なし。次は表示全体の費用分解へ進む。
+
+## D3a 通常アプリの全表示経路を実機計測（2026-09-29）
+
+通常の[GRID LAB](../../apps/kasane/grid_lab.js)に、同じ48×28の`FOLD ART`入力・登録plan・画像資源を使う4つの切替モードを追加した。小窓（96×56）と全画面（240×135）、AUTO PIEと強制scalarを各180フレーム実行する。JS入力生成、`grid.run`全体、native入力コピー・bind・kernel、Kasane再合成、LCD送出を別々に記録する。`grid.profile(handle)`は成功runの累計を読み出してリセットする。フレーム間隔の最大値と50/75 ms超過、内部heapの空き・最大連続領域も記録する。[実機runner](../../tools/kasane_contract/measure_grid_pipeline_device.py)はモード順、180回のrun、描画窓、停止後の`HOME_READY`を検査する。既存6モードは維持し、Enterでも全10モードを選べる。
+
+COM3へ通常image 2,154,752 B（SHA-256 `c2033f7db139589fb286d6d8d2520f3599f54a9ae945940d59adec424bcdb284`）をアプリ領域だけ書込み、書込時hashを照合した。退避はしていない。同一imageで3回独立起動し、最後は`HOME_READY`。各モードの定常30フレーム描画窓の中央4窓の中央値と、180回の累計÷回数は次のとおり。値は3起動の代表範囲、単位ms/frame。LCDバイト数は各表示frameの中央値。
+
+| 表示・経路 | JS入力生成 | `grid.run` | native copy / bind / kernel | JS turn | Kasane render / LCD send | LCD B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 小窓・AUTO PIE | 23.19–23.20 | 1.037–1.039 | 0.135 / 0.091 / 0.483–0.484 | 24.88–24.89 | 2.38 / 2.59 | 14,336 |
+| 小窓・scalar | 23.20–23.21 | 3.955–3.959 | 0.134–0.135 / 0.093 / 3.407–3.408 | 27.80–27.82 | 2.37 / 2.59 | 14,336 |
+| 全画面・AUTO PIE | 23.20 | 1.049–1.052 | 0.136–0.137 / 0.092–0.093 / 0.483–0.484 | 24.91–24.92 | 17.50 / 7.34 | 64,800 |
+| 全画面・scalar | 23.20 | 3.965–3.975 | 0.135–0.136 / 0.092–0.093 / 3.408–3.409 | 27.83–27.84 | 17.55–17.57 / 7.34–7.35 | 64,800 |
+
+kernelは約7.1倍、`grid.run`全体は約3.8倍短くなる。表示全体では小窓のターン・再合成・送出の合計が約29.9対32.8 ms、全画面が約49.8対52.7 msであり、PIEによる差は約3 msに留まる。小窓はフレーム周期33 ms内に収まるが、全画面は約20 fps相当である。特に毎frameのJS入力配列生成が約23.2 msを占め、全画面stretchは再合成17.5 msとLCD送出7.34 msを使う。この画像資源は48×28を引き伸ばしており、240×135のgrid kernelを測った結果ではない。JS turn、再合成、送出の集計境界は異なるため、この合計はframe予算の概算とする。
+
+3起動とも全armで75 ms超のフレーム間隔は0。小窓は50 ms超も0、全画面では各armの179間隔すべてが50 ms超で、これは通常の全画面表示時間に対応する。初回の各arm末尾の内部heap空きは45.5–45.7 KiB、最大連続14,848 B。2回目は約34.2–34.5 KiB・7,680 Bへ下がり、3回目は約34.1–34.3 KiB・7,680 Bで横ばいだった。`heapMinFree`は起動以来の低水位でarm別のピークではない。ログは`.cache/grid-pipeline-device-20260929b.log`、`c.log`、`d.log`。LCD GRAM画素の読戻しは行っていない。
+
+この11,032 Bの低下はGRID LABの保持漏れではなく、ホーム背景FLOWERの確定・候補フレーム2本の成長だった。`flower_frame_capture`は種ごとの部品数に合わせて`raw`を`realloc`で拡張し、縮めない。`shell_change_background`で別背景へ切り替える時だけ両frameを解放するため、前景アプリ中も高水位容量を保持する。停止直後の実heapブロック差分では、短い起動の間に2本が各9,728 Bから10,924/11,264 Bとなり、空きが2,732 B減った。さらにホーム背景を動かした後は各15,244 Bへ成長し、空きが8,300 B減った。合計11,032 Bは元の連続起動差と一致し、その他の256 B以上の使用ブロック数と256 B未満の使用量は同じだった。短いGRID LABを続けて起動した場合、および全10モードを通した場合は停止後heapが同値だった。診断ログは`.cache/grid-heap-probe-20260929-first.log`、`.cache/grid-heap-probe-20260929-short2.log`、`.cache/grid-heap-probe-20260929.log`、`.cache/grid-heap-full-20260929.log`。一時診断コードは通常版へ戻した。
+
+FLOWERの確定・候補frameを、ホーム以外の画面へ入る時と前景アプリの開始・再開時に解放するようにした。overlayがある場合は先に終了させる。ホームへ戻ると従来の`prepare`が必要なframeを再確保し、表示失敗時の候補保持はホーム表示中にそのまま使う。通常image 2,154,976 BをCOM3のアプリ領域だけに書き、書込hashを照合した。GRID LAB全10モードを2回独立起動し、いずれも開始時に`FLOWER_FRAMES_RELEASE bytes=19774`、4計測arm各180回、終了時`APP_STOPPED`と`HOME_READY`を確認。各armの内部heap空きは約64.7 KiB、最大連続31,744 Bで両runが一致した。変更前は初回の同箇所が約45.5 KiB/14,848 B、背景frameが成長した後が約34.2 KiB/7,680 Bだった。停止後の空きは両runとも221,644 B。ホーム復帰後のFLOWERは3つの2秒窓で30.2/29.6/30.3 fps、fault 0。ログは`.cache/grid-flower-release-20260929a.log`と`b.log`。前景アプリ中にFLOWER背景を同時に合成する経路は今回の解放対象外であり、LCD失敗を伴う画面遷移は追加注入していない。フラッシュ退避なし。
+
+## D2 手続きIRの上限緩和と plan 解除（2026-09-29）
+
+`pocket.kasane.procedural` の上限を、レジスタ8→16、入力4→8、REPEAT入れ子4→8、登録plan 16→32、型付き点列 2〜64→2〜128点へ広げ、`unregister(handle)` を追加した（仕様は[2面API契約](d2-multi-procedural-surface.md)と[IR実験](procedural-ir-experiment.md)の上限の行）。`draw` の入力は0〜8要素で不足分を0で埋め、既存の4要素呼び出しは同じ frame になる。点列の変換後座標は画面内必須から VM と同じ −480〜720 へ揃え、帯描画と damage の clamp に任せた。登録時解析のレジスタ集合は16 bitへ広げ、`CUBIC` の読み集合を全レジスタではなく r0..r7 に絞った。VM の各 step は全レジスタへの `isfinite` をやめ、算術の書込み先だけを検査する。host では実QuickJS＋ASanで解除・slot再利用・33本目の拒否・600回の登録解除（LeakSanitizer で漏れ0、free を1つ外すと検出されることも確認）、入力0/4/8、r8〜r15 の読み書き集合と live を VM の摂動実行と照合、入れ子8段/9段、128点の scalar/PIEモデル一致、±境界の座標を通した。静的 DIRAM は `pocket_proc.c.obj` +256 B（slot 表）。最悪時 heap は plan＋点列で 61,664 B（計算値）。1 step の時間、登録時解析のスタック増（+704 B、計算値）、MEGADEMO での空き heap は実機未測定。

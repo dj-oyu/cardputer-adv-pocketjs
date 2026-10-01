@@ -7,6 +7,8 @@
 #include "editor.h"
 #include "codeedit.h"
 #include "wifi_ui.h"
+#include "net_autosync.h"
+#include "net_service.h"
 #include "tutorial.h"
 #include "jpfont.h"
 #include "skk_session.h"
@@ -33,6 +35,7 @@
 #endif
 #include "pocket_bridge.h"
 #include "pocket_text.h"
+#include "pocket_input.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "vmprobe.h"
@@ -52,6 +55,10 @@ static atomic_bool fpu_probe_requested;
 #ifdef KASANE_PROC_DEVICE_PROBE
 static atomic_bool proc_probe_requested;
 void ksn_proc_device_probe_run(void);
+#endif
+#ifdef KASANE_PROC_LIMITS_PROBE
+#include "ksn_proc_limits_device_probe.h"
+static atomic_bool limits_probe_requested;
 #endif
 #ifdef KASANE_MEGADEMO_DEVICE_PROBE
 static atomic_bool megademo_probe_requested;
@@ -112,6 +119,11 @@ static QueueHandle_t keys;
 static atomic_bool stop;
 static atomic_bool capture;
 static atomic_int diagnostic;
+#ifdef KASANE_MEGADEMO_TRACE
+// 'S': capture the next ticks' presents WITHOUT the full redraw 's' forces,
+// so the PIX rows are exactly the damage the ordinary path sent.
+static atomic_int raw_capture;
+#endif
 #ifdef CONFIG_POCKET_VM_SELFTEST
 extern void vmtest_lifecycle_device(void);
 #endif
@@ -119,6 +131,10 @@ extern void vmtest_lifecycle_device(void);
 // it: the same byte is a menu direction on the home screen and a character
 // everywhere else.
 static atomic_bool text_screen;
+#ifdef POCKET_HEAPPROBE
+// The argument of the last USB 'Q' (usb_stroke), read when it is dispatched.
+static char heapprobe_arg[24];
+#endif
 static bool pet_repaint;
 // How long the last full frame took, handed to overlay_tick() so that an
 // over-budget turn can be judged as a share of the frame rather than against a
@@ -147,6 +163,30 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #endif
     if(pocket_bridge_usb((uint8_t)c))return false;
     if(pet_hub_usb((uint8_t)c))return false;
+#ifdef POCKET_KEYTEST
+    // US-framed key presses and releases (keymap.c), ahead of the text and
+    // menu readings so a frame means the same thing on every screen.
+    if(keymap_inject_usb((uint8_t)c))return false;
+    // The key test app (apps/keytest), started like '1'..'6'. Not a menu row:
+    // tools/test_settings.py and capture_home.py count presses down the menu.
+    if(c=='r'&&!atomic_load(&text_screen)) { atomic_store(&diagnostic,c); return false; }
+#endif
+#ifdef POCKET_HEAPPROBE
+    // 'Q<index>[,<limit>]\n' starts an apps/heapprobe variant (app_session.c).
+    // The bytes after 'Q' are swallowed up to the newline, because digits are
+    // diagnostics of their own below. Home screen only, like 'r'.
+    {
+        static int n=-1;
+        if(n>=0) {
+            if(c=='\n'||c=='\r') {
+                heapprobe_arg[n]=0; n=-1;
+                atomic_store(&diagnostic,'Q');
+            } else if(n<(int)sizeof heapprobe_arg-1) heapprobe_arg[n++]=c;
+            return false;
+        }
+        if(c=='Q'&&!atomic_load(&text_screen)) { n=0; return false; }
+    }
+#endif
 #ifdef KASANE_PROC_DEVICE_PROBE
     if(c=='|') { atomic_store(&proc_probe_requested,true); return false; }
     if(c=='J') { atomic_store(&diagnostic,c); return false; }
@@ -154,6 +194,18 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #endif
 #ifdef KASANE_MEGADEMO_DEVICE_PROBE
     if(c=='`') { atomic_store(&megademo_probe_requested,true); return false; }
+#endif
+#ifdef KASANE_MEGADEMO_TRACE
+    // Guest heap cap for the next app start (app_session.c MDT_LIMITS). Read
+    // only at start, so pressing it while an app runs changes nothing live.
+    if(c=='~') { extern void app_trace_next_heap_limit(void); app_trace_next_heap_limit(); return false; }
+    if(c=='S') { atomic_store(&raw_capture,6); return false; }
+#endif
+#ifdef KASANE_PROC_LIMITS_PROBE
+    /* Ahead of P2's '{'/'}' navigation aliases; the two probes are not built
+     * together. '{' measures natively at HOME, '}' starts the JS lifecycle app. */
+    if(c=='{') { atomic_store(&limits_probe_requested,true); return false; }
+    if(c=='}') { atomic_store(&diagnostic,c); return false; }
 #endif
     memset(k,0,sizeof(*k));
     if(atomic_load(&text_screen)) {
@@ -428,6 +480,12 @@ extern const char grid_lab_start[] asm("_binary_grid_lab_js_start");
 extern const char grid_lab_end[] asm("_binary_grid_lab_js_end");
 extern const char video_lab_start[] asm("_binary_video_lab_js_start");
 extern const char video_lab_end[] asm("_binary_video_lab_js_end");
+extern const char lcd_catch_start[] asm("_binary_lcd_catch_js_start");
+extern const char lcd_catch_end[] asm("_binary_lcd_catch_js_end");
+extern const char derby_watch_start[] asm("_binary_derby_watch_js_start");
+extern const char derby_watch_end[] asm("_binary_derby_watch_js_end");
+extern const char big_wave_start[] asm("_binary_big_wave_js_start");
+extern const char big_wave_end[] asm("_binary_big_wave_js_end");
 #ifdef KASANE_D4_PIXEL_APP_PROBE
 extern const char pixel_lab_probe_start[] asm("_binary_pixel_lab_probe_js_start");
 extern const char pixel_lab_probe_end[] asm("_binary_pixel_lab_probe_js_end");
@@ -555,6 +613,12 @@ static bool home_key(const keystroke_t *k) {
                       (size_t)(video_lab_end-video_lab_start-1));
 #endif
             break;
+        case 11: begin_run("local.lcdcatch",NULL,0,lcd_catch_start,
+                           (size_t)(lcd_catch_end-lcd_catch_start-1)); break;
+        case 12: begin_run("local.derby",NULL,0,derby_watch_start,
+                           (size_t)(derby_watch_end-derby_watch_start-1)); break;
+        case 13: begin_run("local.bigwave",NULL,0,big_wave_start,
+                           (size_t)(big_wave_end-big_wave_start-1)); break;
         default: begin_run("local.hello",NULL,0,NULL,0);          // the built-in app
     }
     return true;
@@ -623,7 +687,14 @@ static void enter(screen_id_t next) {
     // session it owns ends here. It has to be before the screen changes,
     // because app_stop() tears down surfaces that the arriving screen may
     // immediately build again.
-    if(next!=SCREEN_HOME) overlay_release();
+    if(next!=SCREEN_HOME) {
+        overlay_release();
+        shell_release_background_frames();
+        // Every other screen either starts a guest (the editors) or wants the
+        // radio itself (Wi-Fi: its scan starts on arrival and would be refused
+        // as busy). A home-screen clock sync gives way to both.
+        net_autosync_yield("screen");
+    }
     if(SCREENS[screen].close) SCREENS[screen].close();
     screen=next;
     atomic_store(&text_screen,SCREENS[next].takes_text);
@@ -688,6 +759,11 @@ static void take_pending_run(void) {
 static void begin_run(const char *app_id, const char *prelude, size_t prelude_len,
                       const char *source, size_t len) {
     owner=screen;
+    // APPS FIRST (docs/platform/wifi-autostart.md). A clock sync the idle home
+    // screen started holds about 48 KB while the radio is up; the guest below,
+    // or the resume of a kept one, is built only after it has given that back.
+    // A no-op when no sync is running, which is nearly always.
+    net_autosync_yield("app");
     // A kept app is resumed by opening it again from the menu (sec.8-4); any
     // other start ends it first -- stop("evict") is its last chance to save --
     // because there is one guest slot and this start is about to take it.
@@ -739,6 +815,10 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 // One frame of a running guest. Back returns to the screen that started it,
 // except from the home screen, where the whole app is what Back leaves.
 static void tick_run(bool have, const keystroke_t *stroke) {
+    // The three pickers below keep the guest from being ticked, so its
+    // input.keys cannot see that the keys pressed meanwhile were theirs.
+    if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal())
+        pocket_input_keys_withhold();
     // The works picker is a host screen over a live guest: while it is up the
     // guest is not ticked and the keys are the picker's. Its promise settles on
     // the turn after it closes, which is the first turn the guest runs again.
@@ -801,6 +881,9 @@ static void tick_run(bool have, const keystroke_t *stroke) {
 
     bool shot=atomic_exchange(&capture,false);
     if(shot) { board_capture(true); app_force_redraw(); }
+#ifdef KASANE_MEGADEMO_TRACE
+    if(!shot&&atomic_load(&raw_capture)>0) { atomic_fetch_sub(&raw_capture,1); shot=true; board_capture(true); }
+#endif
     if(!leave) {
         if(key==KEY_ENTER) sound_play(1);
         uint32_t buttons=key==KEY_ENTER?0x4000:key==KEY_UP?0x10:
@@ -890,6 +973,12 @@ static void ui_task(void *arg) {
             ESP_LOGI("shell","HOME_READY");
         }
 #endif
+#ifdef KASANE_PROC_LIMITS_PROBE
+        if(!running&&screen==SCREEN_HOME&&atomic_exchange(&limits_probe_requested,false)){
+            ksn_proc_limits_device_probe_run();
+            ESP_LOGI("shell","HOME_READY");
+        }
+#endif
 #ifdef KASANE_PROC_DEVICE_PROBE
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&proc_probe_requested,false)){
             ksn_proc_device_probe_run();
@@ -928,6 +1017,9 @@ static void ui_task(void *arg) {
 #endif
         keystroke_t stroke={0};
         bool have=ui_key_receive(&stroke);
+        // For net_autosync_poll(): the home screen is idle only while nobody is
+        // typing at it, and `have` is consumed by the handlers below.
+        const bool key_seen=have;
 #ifdef CONFIG_KSN_DEVICE_PROBE
         /* Replay the visual diagnostic from the physical keyboard as well. */
         if(have&&!running&&screen==SCREEN_HOME&&stroke.len==1&&stroke.text[0]=='~'){
@@ -1073,8 +1165,13 @@ static void ui_task(void *arg) {
             // frame to the next by anything like the factor this decides.
             // Not while an app is kept asleep (sec.8-3): an overlay would need
             // the guest slot and the Kasane lease the sleeping app holds.
-            if(!running && screen==SCREEN_HOME && !app_dormant_id()[0])
+            if(!running && screen==SCREEN_HOME && !app_dormant_id()[0]) {
+                // The overlay's start is gated on free heap and a refusal
+                // sticks until the person re-arms it, so a radio that happened
+                // to be up at that moment must not be what it measures.
+                if(overlay_starting()) net_autosync_yield("overlay");
                 overlay_tick(last_frame_us);
+            }
             const char *source=NULL; size_t len=0;
             if(!running && s->wants_run && s->wants_run(&source,&len)) {
                 const char *pre=NULL; size_t pre_len=0;
@@ -1100,6 +1197,9 @@ static void ui_task(void *arg) {
             // first, the way any other start ends it. Outside the SELFTEST
             // block: 'K', '1'..'6' and the sound checks are in every build.
             if(test && !running && screen==SCREEN_HOME && app_dormant_id()[0]) app_stop();
+            // Every diagnostic below builds a guest or measures the heap, and
+            // neither wants a radio in the middle of it.
+            if(test && !running && screen==SCREEN_HOME) net_autosync_yield("diagnostic");
 #ifdef CONFIG_POCKET_VM_SELFTEST
             if((test=='L'||test=='M') && !running && screen==SCREEN_HOME) {
                 overlay_release();
@@ -1120,6 +1220,20 @@ static void ui_task(void *arg) {
             // frame reaching the panel. Started from here anyway, so it cannot
             // begin while a guest owns the display.
             if(test=='9') { sound_capture_probe(); test=0; }
+#ifdef POCKET_HEAPPROBE
+            // Through begin_run, the path a menu app takes (identity, Kasane
+            // arena, eval_user_source), so a variant is evaluated exactly as
+            // an app would be.
+            if(test=='Q') {
+                const char *src,*id; size_t len;
+                if(!running && screen==SCREEN_HOME &&
+                   app_heapprobe_select(heapprobe_arg,&src,&len,&id)) {
+                    begin_run(id,NULL,0,src,len);
+                    app_heapprobe_release();
+                }
+                test=0;
+            }
+#endif
             if(test && !running && screen==SCREEN_HOME) {
                 overlay_release();
                 owner=SCREEN_HOME;
@@ -1147,6 +1261,21 @@ static void ui_task(void *arg) {
         // could not type into the field it just opened.
         atomic_store(&text_screen,
                      SCREENS[screen].takes_text || pocket_text_active());
+
+        // Once a frame, on every screen: a frame away from home is what resets
+        // the idle clock. Eligible means the menu (or an overlay that is up) is
+        // all there is -- no guest, no modal, no error waiting to be read, no
+        // overlay about to start. A kept app does not disqualify it: a
+        // suspension already guarantees the room for a radio
+        // (APP_SUSPEND_MIN_FREE), and the resume yields like any start.
+        // Background music does: it is the one thing on the home screen with a
+        // deadline, it holds about 62 KB, and the radio's effect on it has not
+        // been measured -- the clock can wait for the song to end.
+        net_service_pump();
+        net_autosync_poll(!running && screen==SCREEN_HOME && !home_modal() &&
+                          !home_error && !overlay_starting() &&
+                          !pocket_av_background_active(),
+                          key_seen);
 
         last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
 #ifdef KASANE_P0_PROBE
@@ -1263,6 +1392,8 @@ void app_main(void) {
 #endif
     ESP_ERROR_CHECK(board_init());
     nvs_init();
+    // Before shell_init(), which loads the AUTO TIME SYNC row into it.
+    net_autosync_init();
     pet_hub_init();
     shell_init();
     // After shell_init(), which is where the stored arming bit reaches the

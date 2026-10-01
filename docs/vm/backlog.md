@@ -8,6 +8,8 @@
 
 未完了の項目は無い（2026-09-23）。L2c は実機統合まで終わり、YIELD は既定 y を経て 2026-09-27 にビルドオプションではなくなった（下の「ビルドオプションの整理」）。TCO と FAIR は採らなかった実験として同日に削除した。経緯と実測は vm-L2-results.md §8、設計は vm-L2-design.md §11。
 
+- **ソースを渡して起動するアプリの frame() は park しない（2026-09-29 に実測で判明、未対応）。** `app_session.c` の `FRAME_WRAP` が frame を `f.apply(this,arguments)` で包むので、本体は `Function.prototype.apply` からのネイティブ再入の床で走り、D17r の止まってよい床にならない（§11.9「囲った経路」）。APPS の MEGADEMO は HEAVY 95 秒・2,228 ターンで park 0（JS 最長 57.5 ms）、wrapper を通らない診断起動 `'J'` では約 20 秒で 263 回。APPS の組み込みアプリ（hello を除く）・Playground・work はすべてこの wrapper を通るので、8 ms のターン予算は frame() には効いておらず、L2c の frame() の中断が届くのは hello・診断起動・ジョブだけ。直す案（未検証）: 例外の報告を JS の `try` ではなくホストの例外経路で拾い、`f.apply` を使わない。直すと出荷アプリの frame() が park し始め、R3a・`end_guest_turn()`・Back の表示（[procedural-limits-device.md](../kasane/procedural-limits-device.md) §8）が初めて出荷経路で効く。wrapper なしの MEGADEMO は ZENITH で OOM した（[megademo-device-limits.md](../kasane/megademo-device-limits.md) §場面切替）ので、heap の余裕も同時に見る。
+
 
 ## L3 / L4（移動可能スタックとコンパクション）
 

@@ -256,7 +256,11 @@ static void test_rejections_and_limits(void)
     assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_BAD_IR);
     p = sum_program();
     p.body[2].a = 7;
-    assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_BAD_IR);
+    ksn_grid_ir_diagnostic diagnostic;
+    assert(ksn_grid_prepare_diagnose(&p, &plan, &diagnostic) ==
+           KSN_GRID_BAD_IR);
+    assert(diagnostic.reason == KSN_GRID_IR_UNDEFINED_INPUT &&
+           diagnostic.instruction == 2);
     p = sum_program();
     p.output.term[3].constant = 1;
     assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_OK);
@@ -354,6 +358,43 @@ static void test_sequential_fold(void)
     assert(dst[0] == 11);
 }
 
+static void test_versioned_overflow_bound(void)
+{
+    ksn_grid_program p = {0};
+    p.count = 5;
+    p.body[0].op = KSN_GRID_LOAD;
+    p.body[0].dst = 1;
+    p.body[0].index = affine(0, 0, 0, 0, 0);
+    for (unsigned i = 1; i < 4; ++i) {
+        p.body[i].op = KSN_GRID_MUL;
+        p.body[i].dst = 1;
+        p.body[i].a = p.body[i].b = 1;
+    }
+    p.body[4].op = KSN_GRID_ADD;
+    p.body[4].dst = 0;
+    p.body[4].a = 0;
+    p.body[4].b = 1;
+    p.output = affine(0, 1, 0, 0, 0);
+    ksn_grid_plan plan;
+    assert(ksn_grid_prepare(&p, &plan) == KSN_GRID_OK);
+    assert(plan.analysis.value[1].a == 0 &&
+           plan.analysis.value[2].a == 1 &&
+           plan.analysis.value[3].a == 2);
+    assert(plan.analysis.value[2].range_proven &&
+           !plan.analysis.value[3].range_proven);
+    int16_t src[1] = {INT16_MAX}, dst[1] = {0};
+    ksn_grid_binding bind = {0};
+    bind.data[KSN_GRID_SOURCE] = src;
+    bind.count[KSN_GRID_SOURCE] = 1;
+    bind.data[KSN_GRID_DEST] = dst;
+    bind.count[KSN_GRID_DEST] = 1;
+    ksn_grid_shape shape = {1, 1, 1, 1};
+    ksn_grid_execution exec;
+    assert(ksn_grid_begin(&plan, &shape, &bind, &exec) == KSN_GRID_OK);
+    assert(!exec.reduction_shape && !exec.pie_candidate);
+    assert(ksn_grid_run_scalar(&exec) == KSN_GRID_ARITH_OVERFLOW);
+}
+
 int main(void)
 {
     test_downsample_and_bind();
@@ -363,6 +404,7 @@ int main(void)
     test_rejections_and_limits();
     test_procedural_without_source();
     test_sequential_fold();
+    test_versioned_overflow_bound();
     printf("proc-grid: host scalar/lane model and legality cases passed; "
            "plan=%zu execution=%zu bytes\n",
            sizeof(ksn_grid_plan), sizeof(ksn_grid_execution));

@@ -55,7 +55,10 @@ JSValue pocket_kasane_proc_resource(JSContext *ctx){
         ksn_image_port port;pocket_proc_image_port_at(&port,0);
         REQUIRE(ksn_core_register_image(&multi_core,KSN_APP,&port,&multi_resource[0])==KSN_OK);
     }
-    return JS_NewObject(ctx);
+    /* Marked so the mock view can tell surface 0's image from the others. */
+    JSValue object=JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx,object,"__s0",JS_TRUE);
+    return object;
 }
 JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface){
     pocket_proc_image_mode_at(surface);
@@ -155,15 +158,24 @@ int main(int argc,char **argv){
     REQUIRE(JS_SetPropertyStr(ctx,pocket,"kasane",kasane)>=0);
     REQUIRE(JS_SetPropertyStr(ctx,global,"pocket",pocket)>=0);
     JS_FreeValue(ctx,global);
+    /* The view side is a permissive mock; megaBounds follows the image of
+     * procedural surface 0, whose resource object is marked below. */
     eval_ok(ctx,
         "globalThis.megaBounds=[];globalThis.megaReplaces=0;"
         "globalThis.console={log(){}};"
-        "const uiTx={background(){},gradient(){},rect(){},text(){},"
-        "image(o){if(!o.resource.__monitor)megaBounds=o.bounds.slice();"
-        "return {setRect(tx,b){if(!o.resource.__monitor)megaBounds=b.slice()},"
-        "setVisible(){}}}};"
+        "const ref=()=>({setRect(){},setClip(){},setColor(){},setText(){},setReveal(){},"
+        "setImageFrame(){},setRotation(){},place(){},setVisible(){},"
+        "animate(){return {stop(){},finish(){},poll(){return 'running'}}}});"
+        "const uiTx=new Proxy({},{get(o,k){return k==='image'?s=>{const r=ref(),main=s.resource.__s0;"
+        "if(main)megaBounds=s.bounds.slice();"
+        "r.setRect=(tx,b)=>{if(main)megaBounds=b.slice()};return r}:()=>ref()}});"
+        "pocket.memory={info(){return {internalFreeBytes:1e9}}};"
         "pocket.kasane.replace=fn=>{megaReplaces++;fn(uiTx)};"
         "pocket.kasane.patch=fn=>fn(uiTx);"
+        "pocket.kasane.stats=()=>({displayed:{commands:0}});"
+        "pocket.kasane.resource=()=>({});"
+        "pocket.kasane.cache={create(){return {}}};"
+        "pocket.kasane.pixel={open(){return {}},stage(){return true}};"
         "pocket.kasane.grid={registerResizeSource(){return 1},"
         "resource(){return {__monitor:true}}}");
     ksn_image_port image;pocket_proc_image_port(&image);
@@ -260,14 +272,15 @@ int main(int argc,char **argv){
         REQUIRE(pocket_proc_pending());
         pocket_proc_present_result(KSN_OK);
     }
-    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==1)"
+    /* Frame 48 enters TWIST, whose set is a new REPLACE; the zoom carries over. */
+    eval_ok(ctx,"if(megaBounds.join(',')!=='64,20,176,83'||megaReplaces!==2)"
                 "throw Error('Enter did not shrink into monitor')");
     for(unsigned i=0;i<44;i++){
         eval_ok(ctx,i==0?"frame(0x4000)":"frame(0)");
         REQUIRE(pocket_proc_pending());
         pocket_proc_present_result(KSN_OK);
     }
-    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==1)"
+    eval_ok(ctx,"if(megaBounds.join(',')!=='0,0,240,135'||megaReplaces!==2)"
                 "throw Error('Enter did not restore full screen')");
     eval_error(ctx,"pocket.kasane.procedural.register([[99,0,0,0,0,0]])");
     eval_ok(ctx,"pocket.kasane.procedural.beginFrame(0)");
@@ -318,7 +331,8 @@ int main(int argc,char **argv){
                    "{kind:'affineQ14Points',x:[0,1],y:[0],coeff:[16384,0,0,16384,0,0],color:1})");
     eval_ok(ctx,"let off=pocket.kasane.procedural.register([[0,0,0,0,1,0]],"
                 "{kind:'affineQ14Points',x:[0,1],y:[0,0],"
-                "coeff:[16384,0,0,16384,4915200,0],color:1});"
+                /* x=721: one past the shared VM/typed bound of 720. */
+                "coeff:[16384,0,0,16384,11812864,0],color:1});"
                 "pocket.kasane.procedural.beginFrame(4)");
     eval_error(ctx,"pocket.kasane.procedural.draw(off,[0,0,0,0])");
     REQUIRE(!pocket_proc_pending());
@@ -342,6 +356,35 @@ int main(int argc,char **argv){
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
     REQUIRE(memcmp(previous,actual,sizeof actual)!=0);
     pocket_proc_present_result(KSN_OK);
+    /* Numeric inputs (draw(h, a0, ..., a7)): the same frame as the array form,
+     * short lists zero-padded, trailing undefined arguments not passed. */
+    static const char *const SAME_AS_95[]={
+        "proc.draw(curve,95,0,0,0)","proc.draw(curve,95)",
+        "proc.draw(curve,95,0,undefined,undefined)","proc.draw(curve,[95,0,0,0],undefined)",
+        "proc.draw(curve,[95],undefined,undefined)"};
+    for(unsigned i=0;i<sizeof SAME_AS_95/sizeof SAME_AS_95[0];i++){
+        char js[160];
+        snprintf(js,sizeof js,"proc.beginFrame(0);%s;proc.commit()",SAME_AS_95[i]);
+        eval_ok(ctx,js);
+        REQUIRE(pocket_proc_pending());
+        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+        REQUIRE(memcmp(previous,actual,sizeof actual)==0);
+        pocket_proc_present_result(KSN_OK);
+    }
+    eval_ok(ctx,"proc.beginFrame(0)");
+    static const char *const BAD_NUMERIC[]={
+        "proc.draw(curve,95,undefined,0)",       /* a hole */
+        "proc.draw(curve,1,2,3,4,5,6,7,8,9)",    /* nine inputs */
+        "proc.draw(curve,NaN)","proc.draw(curve,95,Infinity)","proc.draw(curve,1e39)",
+        "proc.draw(curve,95,'1')","proc.draw(curve,'95')","proc.draw(curve,[95],0)",
+        "proc.draw(curve)","proc.draw(curve,undefined)","proc.draw(999999,95)"};
+    for(unsigned i=0;i<sizeof BAD_NUMERIC/sizeof BAD_NUMERIC[0];i++)eval_error(ctx,BAD_NUMERIC[i]);
+    /* This harness's pocket_api_throw() puts the code first in the message. */
+    eval_ok(ctx,"let code='';try{proc.draw(999999,95)}catch(e){code=e.message}"
+                "if(!code.startsWith('CLOSED'))throw Error('stale handle: '+code);"
+                "try{proc.draw(curve,95,undefined,0)}catch(e){code=e.message}"
+                "if(!code.startsWith('INVALID_ARGUMENT'))throw Error('hole: '+code)");
+    pocket_proc_end_turn();
     eval_error(ctx,"proc.register([[14,0,0,0,0,2016]])");
     pocket_proc_reset();
     /* Two image resources keep independent committed frames and reject a

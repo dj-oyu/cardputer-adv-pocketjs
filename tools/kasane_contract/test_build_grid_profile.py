@@ -1,10 +1,12 @@
 """Selection table requires reproducible wins and a verified probe run."""
 
+import json
 import tempfile
 from pathlib import Path
 import unittest
 
 from build_grid_profile import parse_logs, render_profile
+from build_grid_measure_profile import select_records, render
 
 
 class GridProfile(unittest.TestCase):
@@ -34,6 +36,7 @@ class GridProfile(unittest.TestCase):
             rows = parse_logs(logs)
             self.assertEqual(rows[0][3], "fused")
             self.assertIn("KSN_GRID_PIE_LOAD_FUSED", render_profile(rows))
+            self.assertIn('ksn_proc_grid_dual_profile.inc', render_profile(rows))
 
     def test_small_or_inconsistent_win_keeps_gather(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,6 +91,32 @@ class GridProfile(unittest.TestCase):
                 "source_align=0", "source_align=1"))
             with self.assertRaisesRegex(ValueError, "invalid aligned grid profile"):
                 parse_logs(logs)
+
+    def test_dual_measurement_margin_and_provenance(self):
+        record = (Path(__file__).resolve().parent / "profiles" /
+                  "grid_dual_20260929.json")
+        identity, count, rows = select_records([record])
+        self.assertEqual(count, 3)
+        self.assertEqual([row[-1] for row in rows],
+                         ["AFFINE", "AFFINE", "GATHER"])
+        self.assertIn(identity[1], render(identity, count, rows))
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            select_records([record, record])
+
+    def test_dual_measurement_rejects_mixed_binary(self):
+        record = (Path(__file__).resolve().parent / "profiles" /
+                  "grid_dual_20260929.json")
+        data = json.loads(record.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first.json"
+            second = Path(tmp) / "second.json"
+            first.write_text(json.dumps({**data, "runs": data["runs"][:2]}),
+                             encoding="utf-8")
+            second.write_text(json.dumps({**data, "runs": data["runs"][2:],
+                                          "binary_sha256": "0" * 64}),
+                              encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "different device or binary"):
+                select_records([first, second])
 
 
 if __name__ == "__main__":

@@ -41,6 +41,8 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_procedural_band_jump.c \
     -lm -o "$out/procedural-band-jump"
   "$out/procedural-band-jump"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane     main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c     main/ui/kasane/ksn_proc_plan.c main/ui/kasane/ksn_procedural_surface.c     tools/kasane_contract/test_proc_pattern_line.c -lm -o "$out/proc-pattern-line"
+  "$out/proc-pattern-line"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
     main/ui/kasane/ksn_proc_analysis.c main/ui/kasane/ksn_procedural.c \
     tools/kasane_contract/test_proc_analysis.c \
@@ -62,6 +64,13 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
       -lm -o "$out/proc-plan-points"
     "$out/proc-plan-points"
   done
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
+    main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
+    main/ui/kasane/ksn_proc_plan.c main/ui/kasane/ksn_proc_plan_points.c \
+    main/ui/kasane/ksn_proc_points.c main/ui/kasane/ksn_proc_points_dispatch.c \
+    main/ui/kasane/ksn_proc_points_pie.c tools/kasane_contract/test_proc_sized_plan.c \
+    -lm -o "$out/proc-sized-plan"
+  "$out/proc-sized-plan"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
     main/ui/kasane/ksn_procedural.c main/ui/kasane/ksn_proc_analysis.c \
     main/ui/kasane/ksn_proc_plan.c tools/kasane_contract/test_proc_megademo.c \
@@ -371,11 +380,32 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   python3 tools/kasane_contract/stress_reference.py "$out/stress.bin"
 done
 python3 tools/kasane_contract/run_proc_megademo_js.py
+# MEGADEMO scenes: plan == debug-step plan == single-step VM and scalar ==
+# PIE model for every tier and frame, the adapter's limits, Act I against the
+# C reference; then the whole app on the real pocket.kasane (loader, view).
+python3 tools/kasane_contract/run_proc_megademo_scenes.py
+python3 tools/kasane_contract/run_megademo_app_host.py
 python3 tools/kasane_contract/run_pocket_proc_qjs.py
+python3 tools/kasane_contract/run_pocket_proc_limits_qjs.py
+# Built-in (flash) plans by name against the same plans as arrays, on DERBY's
+# captured draws (docs/kasane/flash-plan.md; the capture is made once).
+python3 tools/kasane_contract/run_pocket_proc_rom_qjs.py
+python3 tools/kasane_contract/run_proc_limits_scene.py
 python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py
 python3 tools/kasane_contract/run_proc_grid_resize.py
 python3 tools/kasane_contract/run_pocket_grid_qjs.py
 python3 tools/kasane_contract/run_pocket_video_qjs.py
+# The three games (tools/games/): scripted play on the real QuickJS, pocket.kasane and
+# pocket.input.keys. The --m32 runs use the device-sized guest heap, which is the
+# guard on evaluation headroom (docs/apps/derby-watch.md): about 8.5 minutes in
+# all, so GAMES_M32=0 skips the two of them when only the C is being checked.
+bash tools/games/run_lcd_catch.sh
+python3 tools/games/run_derby.py
+python3 tools/games/run_big_wave.py
+if [ "${GAMES_M32:-1}" != "0" ]; then
+  python3 tools/games/run_derby.py --m32
+  python3 tools/games/run_big_wave.py --m32
+fi
 python3 tools/kasane_contract/make_grid_fold_device_assets.py --check
 python3 tools/kasane_contract/test_build_grid_profile.py
 cc -std=c11 -Wall -Wextra -Werror -O2 -DKSN_GRID_PIE_MODEL \

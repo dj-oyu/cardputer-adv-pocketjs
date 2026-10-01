@@ -81,5 +81,11 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,
                                  ksn_render_stats *stats);
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,
                                           bool occlusion_safe,ksn_render_stats *);
+// Ends the guest's logical turn: frame() and its drain have run to the end,
+// normally or by an exception, so an unfinished procedural frame is dropped.
 void pocket_kasane_end_turn(void);
+// Ends a host turn whose logical turn is still open (the VM parked frame() or
+// the drain was cut by the budget): the procedural frame under construction is
+// kept for the continuation that resumes it.
+void pocket_kasane_park_turn(void);
 ksn_input_scope pocket_kasane_input_scope(bool host_priority);

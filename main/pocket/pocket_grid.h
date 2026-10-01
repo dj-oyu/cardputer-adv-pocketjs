@@ -5,6 +5,8 @@
 #include "quickjs.h"
 #include "ui/kasane/ksn_ports.h"
 
+#define POCKET_GRID_MAX_SLOTS 6u
+
 /* Session-scoped typed grid adapter. An app owns the IR and the image node;
  * the backend owns two output generations until display acknowledgement. */
 esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst kasane_namespace);

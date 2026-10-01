@@ -1,0 +1,13 @@
+// conf: confetti. Up to 96 flakes (input 1 of them) on fixed sine tracks,
+// drifting with the time (input 0); yellow and 129055 - yellow alternate.
+input t = 0, count = 1;
+let i = 0, colour = 65504;
+repeat (96) {
+  i += 1;
+  if (i > count) break;
+  const x = sin(i * 1.7) * 110 + 120;
+  const y = sin(i * 2.1 + (i * .00041 + .037) * t) * 64 + 67;
+  move(x, y);
+  line(x + 1, y + 1 + 1, colour);
+  colour = 129055 - colour;
+}

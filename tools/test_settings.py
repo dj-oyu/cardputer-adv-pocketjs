@@ -1,7 +1,7 @@
 """Exercise settings. MP3 PLAYBACK is appended to Apps; category 1 and all
 settings row indices used below are unchanged. The overlay row is a three-way
-choice (OFF / DESK CLOCK / MUSIC) rather than a toggle, and VOLUME is appended
-after it."""
+choice (OFF / DESK CLOCK / MUSIC) rather than a toggle, VOLUME is appended
+after it, and AUTO TIME SYNC (index 6) after that."""
 import argparse
 import re
 import time
@@ -81,6 +81,20 @@ try:
     command('d','SELECT 4')
     line=command('e','OPEN 4');assert 'choice=' in line,line
     command('q','HOME_READY')
+    # AUTO TIME SYNC, appended at index 6 after VOLUME. Flipped and flipped
+    # back, so the device ends with the value it started with; each apply must
+    # reach the persisted summary as autotime=. Nothing here waits for a sync:
+    # one needs ten idle seconds on the home screen, and this script never
+    # pauses that long between keys.
+    command('d','SELECT 5');command('d','SELECT 6')
+    line=command('e','OPEN 6');m=re.search(r'choice=(\d+)',line);assert m,line
+    was=int(m.group(1))
+    command('u' if was else 'd',f'CHOICE {1-was}')
+    line=command('e','VALUE');assert f'autotime={1-was}' in line,line
+    line=command('e','OPEN 6');assert f'choice={1-was}' in line,line
+    command('d' if was else 'u',f'CHOICE {was}')
+    line=command('e','VALUE');assert f'autotime={was}' in line,line
+    command('u','SELECT 5');command('u','SELECT 4')
     command('b','CATEGORY 1');command('u','SELECT 3');command('u','SELECT 2')
     # POCKET PET is appended at index 5; existing settings/Hello indices stay fixed.
     command('a','CATEGORY 0');command('e','FRAME_PRESENTED');command('q','HOME_READY')
@@ -89,12 +103,12 @@ finally:
     # An assertion above can abort while SOUND is OFF, which then persists in NVS.
     # Walk back to Settings > SOUND > ON so the device is never left muted.
     try:
-        # home, Settings, top, SOUND, open, choose ON, apply. FIVE ups, one per
-        # row above SOUND plus one to spare: an abort can leave the cursor on
-        # VOLUME, the last row, and stopping short of the top would mute a
-        # different setting instead of unmuting this one. Ups past the top are
-        # free; ups short of it are not, which is why this is one more than the
-        # count and not exactly it.
-        for key in 'qbuuuuuddede':s.write(key.encode());time.sleep(0.4)
+        # home, Settings, top, SOUND, open, choose ON, apply. SEVEN ups: an
+        # abort can leave the cursor on AUTO TIME SYNC, the last row (index 6),
+        # and stopping short of the top would mute a different setting instead
+        # of unmuting this one -- or, two rows short, land Enter on WI-FI and
+        # leave for its screen. Ups past the top are free; ups short of it are
+        # not, which is why this is one more than the count and not exactly it.
+        for key in 'qb'+'u'*7+'ddede':s.write(key.encode());time.sleep(0.4)
     except Exception:pass
     s.close()

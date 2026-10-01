@@ -17,46 +17,21 @@ idf.py -B build_api -p COM3 flash
 idf.py -B build_api -p COM3 monitor
 ```
 
-**ビルドディレクトリは作業ごとに分ける。** 複数セッションが1つのツリーを共有するため、`build/` を同時に使うと `ninja: failed recompaction: Permission denied` になる。`build_*` は `.gitignore` 済み。`sdkconfig` も追跡外で、`sdkconfig.defaults` の変更は**全ビルドディレクトリの次回ビルドに効く**。
+**ビルドディレクトリは作業ごとに分ける。** 複数セッションが1つのツリーを共有するため、`build/` を同時に使うと `ninja: failed recompaction: Permission denied` になる。`build_*` は `.gitignore` 済み。`sdkconfig` も追跡外で、`sdkconfig.defaults` の変更は**全ビルドディレクトリの次回ビルドに効く**。 **ルートの `sdkconfig` はビルドディレクトリ間で共有される**ので、`sdkconfig.stripdebug.defaults` のようにオプションを重ねるビルドは `-DSDKCONFIG=<dir>/sdkconfig` でディレクトリごとに分ける（重ねたビルドがルートに書いた値が、あとの「既定のつもり」のビルドに残った事故があった）。
 
 `idf.py -B <dir> size` / `size-files` / `size-components` がサイズ計測の入口。`tools/check_flash.py` がSKK辞書・フォント領域の侵食をビルド時に止める。
 
 初回セットアップ: `python tools/prepare_dependencies.py`（BMI270・libopus・minimp3を固定revisionで取得）。Rust UIアーカイブとPocketJS上流のcheckoutは不要（旧UI経路は削除済み）。
 
+**アプリのチャンクに `@plan` の関数があると、ビルドに Node 16 以上が要る**（`tools/kasane_ir/lower_plans.mjs` が plan を IR の詰めた文字列に置き換える。この機体は Volta の v24 が PATH にある。IDF には入っていない）。無ければ configure が止まる。`@plan` が無いアプリは Node 不要。チャンクに初めて `@plan` を書いたら `idf.py reconfigure`。host の DERBY 検査は `wsl bash -lc` で走らせる（素の `bash -c` の PATH には node が無い）。詳細は `docs/platform/build-environment.md`、`docs/kasane/js-to-ir.md`。
+
 ## 実機テスト
 
-すべてUSBシリアル経由。ESP-IDFのPython環境（pyserial）で走らせる。
-
-```powershell
-python tools\smoke_device.py --port COM3 --cycles 20   # 起動/停止のライフサイクルとリーク
-python tools\test_settings.py --port COM3              # XMB設定・ミュート順序・画面遷移
-python tools\capture_home.py --port COM3               # 実ピクセル取得と30fps確認
-python tools\test_editor_draft.py --port COM3          # 未保存の編集がアプリ起動を跨いで残るか
-python tools\benchmark_app.py --port COM3              # JSアプリのPAINT内訳
-python tools\stress_app.py --port COM3                # STRESS TEST（メニュー最後の行）: ヒープ負荷3段階＋描画負荷、OOM回復とfps
-python tools\test_app_resume.py --port COM3           # Backで眠るアプリ（IMU CAL/PET/COMPANION）: 中断→同じ行で再開→別アプリで退去
-```
+コマンド一覧は [`docs/platform/test-commands.md`](docs/platform/test-commands.md)。すべてUSBシリアル経由で、ESP-IDFのPython環境（pyserial）で走らせる。実機側は `smoke_device.py` / `test_settings.py` / `capture_home.py` / `test_editor_draft.py` / `benchmark_app.py` / `stress_app.py` / `test_app_resume.py`。
 
 `test_settings.py` と `capture_home.py` は**押下回数を数えて**メニューを移動する。設定やアプリの行を増減させたら、この2つを同じ変更の中で直す。ログの大文字マーカー（`HOME_READY` / `CATEGORY %u` / `APP %u` / `SELECT %u` / `OPEN %u choice=%u` / `CHOICE %u` / `VALUE ...` / `LOADED ...` / `MODE %u %s` / `PERF ...` / `SFX %d played`）はこれらのスクリプトの契約なので、バイト単位で保つ。
 
-ホスト側のテスト（実機不要）:
-
-```bash
-python tools/test_flash_budget.py       # パーティション予約ガード
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_sail.c -lm -o /tmp/ts && /tmp/ts"
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_flower.c main/scene/canopy_pie.c main/scene/garden_decor_pie.c -I main/scene -I tools/hostshim -lm -o /tmp/tf && /tmp/tf"   # カーネル2ファイルも一緒にリンクする（flower.c単体では未定義参照）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_time.c -lm -o /tmp/t && /tmp/t"   # WSLのみ
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/test_sfx.py"   # 焼き込んだ効果音表と旧合成の差（WSLのみ。gccはWindows側に無い）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_font.py /tmp/cegen && gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I /tmp/cegen -I tools/hostshim -I main/hal -I main/ui -I main/text tools/test_codeedit.c tools/hostshim/hostshim.c main/ui/codeedit.c main/ui/paint.c main/ui/vimcmd.c main/text/jslex.c -o /tmp/t && /tmp/t"   # エディタの差分再描画と全面再描画が同じピクセルか（WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_pocket_text_test.sh && /tmp/test-pocket-text"   # pocket.input.text のセッション寿命を実物のQuickJSごとASanで（WSLのみ。番号を渡すと1件だけ）
-python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
-python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで模擬実行しスカラーと全画素比較
-python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_lessons_test.sh && /tmp/test-lessons"   # TUTORIALの全章とPlaygroundの既定ソースを実物のQuickJSとpocket.kasaneで実行（WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"   # STRESS TESTを実物のQuickJSとpocket.kasaneで900フレーム（Kasaneが断るシーンを焼く前に、WSLのみ）
-python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
-python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
-```
+ホスト側のテスト（実機不要）と `memlog.py` の呼び出しも同じ文書にある。
 
 **DRAMは `tools/memlog.py` が記録する。** ビルドのたびに静的値を `.cache/memlog/memory.jsonl`（git管理外）へ追記し、**動いたときだけ**書くので、ログはビルドの一覧ではなく変化の一覧になる。`--port` を付けると実機の空きヒープ（アイドル時とアプリ実行中）も一緒に残る。増減はファイル別に出るので「DRAMが6KiB増えた」ではなく「`pocket_io.c.obj +1113`」が読める。
 
@@ -92,10 +67,40 @@ JSアプリは `apps/<name>/<name>.js` に置き、`main/CMakeLists.txt` の `EM
 - **`main/hal/keymap.c` は素の `` ` `` `;` `,` `.` `/` に `nav` を立てる。** テキストを受ける画面は `k->text` だけを読み `k->nav` を無視する（`codeedit.c` / `editor.c` / `wifi_ui.c` がそうしている）。
 - **命令キャッシュのアラインメントで、同じカーネルがビルド間で15%動く。** それ未満の差を主張するなら同一バイナリでの比較が要る。
 - **`board_capture` は byte swap と転送の前にバッファを写し、MISOは未配線。** 表示が正しいことをソフトウェアだけでは確認できない。物理確認を依頼する。
-- **Wi-Fiをリンクするだけで空きヒープが約37KiB減る。** 内訳は `.bss` だけでなく `.data` とIRAM常駐コード（S3ではDRAMと同じプール）。`esp_netif_deinit()` はIDF v6.0.1で `ESP_ERR_NOT_SUPPORTED` なので、一度無線を起動すると約4.8KiBは戻らない。
+- **Kasane のシーンには上限がある: ref 32個、アプリのコマンド 80個**（cache の instance も、中の矩形の数だけコマンドを使う）。`patch` ではノードを足せない（追加は `replace` のときだけ）。`setRect` は clip を動かさないので、動かす ref には行全体の clip を渡す。LCD CATCH と DERBY WATCH は、ここで設計を変えた。
+- **ソースの評価には2秒の期限があり、評価中の `pocket.memory.info().internalFreeBytes` は `null`**（ネイティブ heap の標本はターンの始めにしか採られない）。評価中に、空き heap の門で待つループを書かない（DERBY WATCH はこれで起動に失敗した。host の台本が固定値を返していたので、host では見つからなかった。host の台本は、実機で `null` になる値を、`null` で返す）。
+- **評価のピークは、評価後の定常の約2倍。** QuickJS は、関数の解析用の構造を、一番外側のスクリプトが確定するまで、まとめて保つ（`js_create_function`）。クロージャ1つで約 0.3〜0.5 KB のピークを使い、コメントは効かない。DERBY WATCH の評価の余裕は、チャンク分割・plan を flash の表に置く変更の後で、実機（heapprobe の二分探索）で約 38 KB、首振りカメラ（段階3）を入れた後で約 28 KB、楕円コース（段階4）まで入れた後で約 22.7 KB（20 KB の線まで残り 2.7 KB。ゲスト最大も 138.7 KB で 140,000 B まで残り約 1.3 KB）（以前は 3.8〜5.6 KB。docs/apps/derby-pan-memory.md、docs/kasane/flash-plan.md）。**首振りの列 `ser()` を native（`pocket.derby`、`ser-native`）に下ろした後は、評価余裕 約 30.6 KB、ゲスト最大 約 133.3 KB（140,000 B まで約 6.7 KB）に戻り、FINISH・HEAD ON の演出（ダスト・帯。docs/apps/derby-finish-fx.md）を入れた後で評価余裕 約 28.9 KB、ゲスト最大 134.1〜134.8 KB（約 5.2 KB の余裕）**（実機の実測。docs/apps/derby-ser-native.md）。**文字列のイテレータ（`[...'abc']`、`for...of`、分割代入、`Array.from(str)`）は、修正前の実機では壊れていた**（上流 quickjs-ng の `js_string_iterator_next` が `int *` 経由で `uint32_t` を書き、Xtensa の GCC が strict aliasing で書き込みを消した。host では `uint32_t` が `unsigned int` なので再現しない。修正 `f937388`、docs/vm/spread-eval-oom.md。同種の6箇所と libunicode も型を合わせて修正し、`-Wincompatible-pointer-types` をエラーに戻した。docs/vm/aliasing-types.md）。
+- **ゲームのキーは E/A/S/D と `;` `,` `.` `/` の8個。** キーボード行列のゴーストで、`f` `space` `enter` `z` は、他のキーの同時押しで押されたことになる（実機測定。docs/platform/keystate.md）。
+- **Wi-Fiをリンクするだけで空きヒープが約37KiB減る。** 内訳は `.bss` だけでなく `.data` とIRAM常駐コード（S3ではDRAMと同じプール）。`esp_netif_deinit()` はIDF v6.0.1で `ESP_ERR_NOT_SUPPORTED` なので、一度無線を起動すると約4.8KiBは戻らない。自動時刻同期（設定の AUTO TIME SYNC、既定 ON）が入ったので、同期が走ったブートは毎回これを払う（docs/platform/wifi-autostart.md。ゲームのネイティブ heap への影響は未測定）。
+
+## 並行作業（サブエージェントと実機）
+
+- サブエージェントは、`vm/main` から切った worktree（`.claude/worktrees/<名前>`、ブランチ `vm/<題目>`）で動かす。統合は `git merge --no-ff`、終わったら worktree とブランチを消す。新しい worktree では、最初に `python tools/prepare_dependencies.py`。WSL の git は worktree の gitdir を読めないことがあり、`tools/kasane_contract/run.sh` の baseline の読み込みで止まる（スクリプトの注記どおり、baseline を `.cache` に置く）。
+- 実機（COM3）を複数のエージェントが使うときは、`mkdir` で取るロックのディレクトリ（作業用の一時領域に置く）で順番を取り、1回の保持は10分まで（30分より古いロックは置き去り）。使い終わったら通常 image に戻し、変えた設定（音量など）を元へ戻す。
+- **実機が要る検証を、host だけで済んだことにしない。** 実機だけで起きた不具合が、すでにある（評価中の `null`、文字列のスプレッド、面のフレームの連続領域）。
 
 ## 測定と主張
 
 数値は**実測か推定かを必ず区別する。** このプロジェクトでは、3体のエージェントが独立に同じ結論に達して全員間違っていた例（PIEの索引ロード）、推定1.2msが実測25.6msだった例（効果音の合成）、`--gc-sections` で削除済みのモジュールを測っていた例（Wi-Fiのサイズ）がある。測ったものが本当にバイナリに入っているかを `nm` / map で確かめる。
+
+## モデルの使い分け（ルーティング）
+
+モデルは速さと深さで3つに象徴する。切り替えは `/model`、サブエージェントは `Agent` の `model` で指定する。**振り分け役は Sonnet が担う**ので、Sonnet はこの節を読んで、迷ったら上へ回す。
+
+| ラベル | モデル | 得意 | 任せない |
+| --- | --- | --- | --- |
+| **FAST** | Sonnet 5.5 | 現状認識、症状から該当コードの絞り込み、事実の収集（file:line）、ビルドスクリプト・ブランチ管理・ホスト試験の実行と要約のような定型 | 解決策の決定、数値の決定、優先順位 |
+| **STEADY** | Opus 5.5（既定） | 実装・デバッグ・実機計測など普段のコーディング全般。大きなコンテキストで文書とCを一つの文脈に載せられる | 高コストな全面レビュー |
+| **SLOW** | Fable | 熟考が要る設計・仕様書・コードのレビューとブラッシュアップ。複雑な課題に対応するコードも書けるが高コストなので、普段の実装には使わない | 普段の実装 |
+
+**このプロジェクトでは、アタリ付けの速さと解決策の確かさは別物。** 癖のあるハードウェア（PSRAMなし、命令キャッシュ、PIE、Wi-Fiが食うDRAM）に高級なことをやらせるので、不具合のアタリは速く付けられても、その先の解決策は**かなり細い「正解の道」**を引かないと通らない。FAST が速く絞り込んだ結果は、そのまま修正の根拠にしない。
+
+**振り分けの規則**
+- 症状 → 疑わしい箇所の絞り込みは **FAST**。返すのは「範囲（file:line）、理由、確認した事実と推測の区別、そのコードが実際にビルドに入り呼ばれる経路かの確認の有無」まで。解決策は書かせない。
+- 修正の設計・実装、数値（上限・予算・閾値）の決定、優先順位、測定値の解釈は **STEADY 以上**。特にPIE・命令キャッシュ・DRAM/IRAM・タイミングに触れる判断は必ず STEADY。
+- 設計や仕様書の見直し、STEADY が出した方針の独立レビューは **SLOW**。実装は STEADY が済ませ、その差分と文書を SLOW が読む。
+- 迷ったら上へ回す。FAST が不確かなまま結論を出さない。
+
+**根拠（2026-09-29、既知の課題を伏せた検証、各1回）:** 上限の洗い出しでは FAST は STEADY の分析とほぼ一致し、見落とした穴も1件拾った。改善方針を出させると、行番号は正確でも、ビルド条件（プローブ専用ファイルを本番経路と誤認）とテストの検査対象を読み違え、その推測を優先順位1位の根拠にした（STEADY による判定で5観点が3/3/3/3/4）。1件ずつの結果で、一般化しない。
 
 複数セッションが1つの作業ツリーを共有するため、コミット時は `git show HEAD:<file>` に自分の変更だけを当てた blob を `git hash-object -w` + `git update-index --cacheinfo` で staging し、他セッションの未コミット変更を巻き込まない。

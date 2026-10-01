@@ -34,6 +34,10 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [turn-cpi.md](vm/turn-cpi.md) | 記録 | R4: JS のターンを Xtensa の性能カウンタで測った（`CONFIG_POCKET_VM_TURNPERF`）。IPC 0.17、サイクルの 70% が flash キャッシュのミス待ち。flash を QIO にして 1 フレームの JS 10.78 → 7.25 ms（同一配置） |
 | [gc-cap-backoff.md](vm/gc-cap-backoff.md) | 記録 | 上限の手前 1/32 の GC の天井が、生存量が天井を超えるとオブジェクトごとに GC を走らせていた（STRESS LV3 で JS 時間の 70%）。天井が起こした GC の後はヒープが伸びるまで待つ。GC 1,085 → 109 回、確保失敗の時点は同一。道具は `tools/vmtest/prof/` |
 | [builtin-floor-plan.md](vm/builtin-floor-plan.md) | 設計・計画 | F 系列（VM の段とは独立）: ゲストの起動床（実機レイアウトで js=64,420 B、うち組み込みの名前 21.7 KB と何も作っていない索引）を flash へ。F1 ROM atom・F2 遅延索引で 28,684 B（−55%、計算）。捨てた案 4 つ、`atom_array` 33 箇所の台帳、関所と負の対照。道具は `tools/vmtest/floor/` |
+| [spread-eval-oom.md](vm/spread-eval-oom.md) | 記録 | 文字列のスプレッド・for-of が実機でだけ止まらなかった: `js_string_iterator_next` の `(int *)&idx` が Xtensa（`uint32_t`=`unsigned long`）の strict aliasing で消えていた。修正 `f937388`、同種の6箇所、再現アプリ `POCKET_HEAPPROBE` と変種の表 |
+| [aliasing-types.md](vm/aliasing-types.md) | 記録 | spread-eval-oom の同種6箇所と libunicode の正規化配列を、宣言の型を合わせて修正（機械語は修正前と同一＝今のビルドでは誤コンパイルなし）。`-Wno-incompatible-pointer-types` を quickjs-libc.c 以外から外した |
+| [eval-peak.md](vm/eval-peak.md) | 記録・比較 | 評価のピークの構成（pass-1 バイトコード 46%、JSFunctionDef 15%…、host の確保タグ）と下げる手段の実測: 分割（B 案）+18.5〜25.9 KB、事前コンパイル +26 KB・49 ms、パーサの余り返し host −11 KB、ES モジュール、遅延 import。推奨の順序と決めること。§7 製品化した `pocket.app.load`（チャンクの表・書き方・実機で 3 分割 +18.2 KB）、§8 静的 import への引き継ぎ |
+| [ゲストの行番号表を落とす](vm/strip-debug.md) | `CONFIG_POCKET_VM_STRIP_DEBUG`（既定 OFF）: 行番号表なしのコンパイル。アプリごとの効果（DERBY の評価の余裕 +2.7 KB、実機）、失う位置情報、DERBY の首振り（段階 3）には足りないこと、運用案（2026-09-30）|
 | [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
 
@@ -95,6 +99,18 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [残タスク](kasane/roadmap.md) | 実装・実測・未達を分けたロードマップ再評価用の表 |
 | [動的描画ロードマップ](kasane/dynamic-rendering-roadmap.md) | 関数アート・描画面・動画を、FLOWERとKasaneの実測を参照しながら段階的に進める構想 |
 | [手続き型描画の実機診断](kasane/procedural-device-probe.md) | オプトインの表示・負荷診断コード、起動方法とログ項目。実測前の準備 |
+| [手続き型描画の上限緩和の実機検証](kasane/procedural-limits-device.md) | plan の動的登録・解除、新上限の全画素一致、最悪時 heap、step 時間、ターン予算で組み立て中のフレームが消える不具合とその修正（実効フレーム予算 8 ms→250 ms）、仕様上限の棚卸し（2026-09-29 実測） |
+| [MEGADEMO Act II](kasane/megademo-limit-scenes.md) | 手続き面の上限を叩く3場面（ねじれ廊下・Apple II 風ZENITH・LIMIT）、場面ごとのplan登録/解除、プリミティブ網羅表、上限使用率とゲストヒープのhost実測（2026-09-29） |
+| [MEGADEMO の負荷を実機で決める](kasane/megademo-device-limits.md) | 実機で初めて動かした結果（ZENITH で落ちていた）、場面×段階の JS/帯描画/転送/fps/heap 実測、破綻の境界（面の確保・plan の同時数・回転読み出し・登録時間・ゲストヒープ）、決めた `KN`/`LOAD` と既定段階、仕様上限が先に効く項目（2026-09-29 実測） |
+| [DERBY WATCH の背景は何が重いか](kasane/derby-background-cost.md) | 観客席・観客・柵・刈り目の plan を外した差（カメラ×段階）、帯描画の費用モデル（1 線分・1 帯・1 画素）、VM の SIN が引数約 201 超で約 7〜9 倍遅い発見、画素キャッシュと透明な面の効果の上限とメモリ（2026-09-30 実測）。追記に観客をフレームごとに半分描く試作（q27、出荷しない）の画・GIF・実機の費用 |
+| [DERBY の観客の見え方の候補](kasane/derby-background-cost.md) | 「点が観客に見えない」への候補 8 つ（人影の密度 3 段、頭の稜線＋塗り、服の帯＋明るい点、塗り＋紙吹雪、ウェーブ、手前の段だけ人影）を横見・首振りの @plan 対で作り、host の画・GIF（`docs/apps/derby-crowd-look-*`）、命令数（全部 64 以内）、費用の推定（今の 0.68〜2.4 倍）、首振りの区画内線形の誤差（6 m 以下で 1.8 px 以内）（2026-10-01、host のみ）|
+| [観客を「模様の線」と「タイル」で描く（試作）と、模様線 P24 の本実装](kasane/crowd-primitives-design.md) | 手続き描画の新しい命令 `LINE_PATTERN`（24 ビットの模様と 2 色目、遠近の弦）の設計・試作（タイルとノイズ線も）、実機の帯の単価（水平 0.061〜0.088 µs/画素、見積もりの 1.0〜1.4 倍）、本実装で変えたこと（パラメータのエントリの行を負に、色 A を命令に）、DERBY の観客の置き換えの費用（横見の VM draw + 帯 −0.27〜−1.18 ms）と画・GIF（`docs/apps/derby-crowd-p24-*`、2026-10-01）|
+| [面ごとの線分上限](kasane/surface-segment-cap.md) | `createSurface({maxSegments})` で面1のフレームを n 本分に縮める API、1 面の確保量（256 本で 5.4 KB、既定 1,024 本で 21.5 KB）、DERBY WATCH の評価直後に面1が確保できる境目と plan 登録への影響（2026-09-30 実測）|
+| [JS 風の言語 → 手続き型 IR](kasane/js-to-ir.md) | plan を名前と式で書くコンパイラの試作（`tools/kasane_ir/`、手書き 13 本と出力一致、命令 −3%）、plan の文字列と `prog()` のゲスト常駐（評価後 7.1 KB、段階 3 で 8.1 KB。文字列を詰めても −1.6〜2.4 KB）、native の plan が命令数に依らず 872 B である点、flash の plan を id で登録する設計と優先順位、plan を普通の JS の関数（`@plan`）で書きビルドが詰めた IR へ置き換える実装（DERBY で実装、Node 16 以上がそのときだけ要る。2026-09-30 host・実機実測、推定）|
+| [組み込みの plan を flash に置き名前で登録する](kasane/flash-plan.md) | `register('derby.crowd', args)` の API と誤り、表の生成器（`emit_rom_plans.mjs`）、引数を begin で当てる設計、`ksn_proc_rom_plan`（40 + 4 × 引数 B）、DERBY で native 9.9 → 1.2 KB（推定）・ゲスト −3.1〜5.7 KB（host 実測）、配列登録との全件一致の試験。firmware への組み込みと DERBY の 14 本の移行、実機でターン内の最小 +18 KB・評価の余裕 +4.8 KB・登録 1,252 → 570 µs・描画 +9〜17%（2026-10-01）|
+| [同、段階 3（首振り）を載せた実機](kasane/flash-plan.md) | `register('derby.crowd', args)` の API と誤り、表の生成器（`emit_rom_plans.mjs`）、引数を begin で当てる設計、`ksn_proc_rom_plan`（40 + 4 × 引数 B）、DERBY で native 9.9 → 1.2 KB（推定）・ゲスト −3.1〜5.7 KB（host 実測）、配列登録との全件一致の試験。firmware への組み込みと DERBY の移行、実機で登録 1,252 → 570 µs・ターン内の最小 +3.3 KB（2026-10-01）|
+| [plan を命令数ぶんだけ確保する](kasane/plan-sized-alloc.md) | `ksn_proc_sized_plan`（40 + 12n B、以前は 872 B）、命令数ごとの heap のブロック、DERBY の 25 本 22.5 → 9.7 KB とターン内の最小 +11.4 KB、首振り段階 3 の LOADSTALL の解消、断片化（`lg`）、flash の id 登録への見通し（2026-09-30 実測）|
+| [楕円・首振りの描画を速くする設計の考察](kasane/oval-pie-design.md) | 曲線 93 ms の内訳（`pose()` が 1 回 12 個の三角関数で 56%、計数と推定）、Möbius 変換と Newton の段数の条件、円弧の回転の漸化式（float32 の誤差）、有理ベジエ・チェビシェフを棄却した理由、VM の DIV の効果（+0.3 fps）、PIE が向く所と向かない所、区間の表（P0）と native のウォーカー（P5）の順序と合格基準、host の数値実験 `tools/games/ovalcost/` |
 
 ## JS API — [`api/`](api/)
 
@@ -111,6 +127,9 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [architecture.md](platform/architecture.md) | 設計 | 現在のディレクトリ構成、責務、アプリの状態遷移、起動と終了 |
 | [hardware-constraints.md](platform/hardware-constraints.md) | 仕様 | ハードウェア仕様と開発上の制約（RAM 表、配線、UI ノード数の崖） |
 | [build-environment.md](platform/build-environment.md) | 仕様 | Windows / EIM の開発環境とビルド手順 |
+| [test-commands.md](platform/test-commands.md) | 仕様 | 実機テストとホスト側テスト（PIE 3層、WSL のみのもの）のコマンド一覧。守る規則は CLAUDE.md |
+| [wifi-autostart.md](platform/wifi-autostart.md) | 設計 | Wi-Fi の自動起動: ホームのアイドルで一過性の時刻同期（アプリ優先で中断）、参照カウントの接続サービス `net_service`、常駐の背景サービスへの方針候補と実機で測る項目 |
+| [keystate.md](platform/keystate.md) | 設計 | 物理キーの押下集合（HAL の keystate）と `pocket.input.keys`: 入力経路と消費者の一覧、ライフサイクル、却下案、実機で測る同時押し・ゴースト・FIFO あふれ |
 | [idf-tls-txbuffer-report.md](platform/idf-tls-txbuffer-report.md) | 記録 | ESP-IDF の TLS 送信バッファの二重計上（上流への報告草稿、未送信） |
 | [backlog.md](platform/backlog.md) | backlog | srcstore とエディタの保存まわりの不具合2件（コードで再現確認済み）、入力キュー、Docs 機能 |
 
@@ -133,6 +152,18 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [pet-asset-design.md](apps/pet-asset-design.md) | 設計 | ペット画像の省容量化（PPT2 形式） |
 | [mp3-implementation.md](apps/mp3-implementation.md) | 記録 | MP3 実装と実測 |
 | [opus-feasibility.md](apps/opus-feasibility.md) | 記録 | Opus 復号の実現性調査と、実装後の答え合わせ |
+| [lcd-catch.md](apps/lcd-catch.md) | 設計・記録 | LCD CATCH: 固定セグメントの液晶ゲーム。Kasane の ref 32・コマンド 80 に収める設計、host の台本再生、実機で調整する項目 |
+| [derby-watch.md](apps/derby-watch.md) | 設計・記録 | DERBY WATCH: 線画の疑似 3D で観る競馬、再現できるレースのモデル、起動ごとの種、較正したオッズ、場面ごとの plan、host の全画素検証、`pocket.app.load` のチャンクへの分割 |
+| [derby-corner-model.md](apps/derby-corner-model.md) | 試算 | DERBY WATCH の楕円コース案: カーブだけの内外差とばらつきの乗数、枠・本命・入れ替わりへの効き、楕円用のオッズの再推定（host の Monte Carlo）、実装の結果（中・(c)、直線は全桁一致） |
+| [derby-pan-camera-cost.md](apps/derby-pan-camera-cost.md) | 記録 | DERBY WATCH の首振りカメラ・楕円コースの計算コスト: JS 演算と投影の単価（実機）、VM の Newton 逆数による投影、台数・自動ズーム・LOD 別のフレーム費用の見積もり（2026-09-30） |
+| [derby-pan-memory.md](apps/derby-pan-memory.md) | 記録 | DERBY WATCH の首振りカメラ（段階 3）が常駐させるゲストのヒープの内訳（関数・atom・plan の文字列）、事前コンパイルと行番号表の削除の効果の上限、規模を削る案と受け入れ条件との差（2026-09-30、host 実測）、flash の plan を載せた再挑戦で (e) の fps だけが不足（§10、2026-10-01 実機）、`vm/main` b184202 への追従とマージ前の再測定・楕円（段階 4）への引き継ぎ（§11）、楕円（段階 4）の実装・増分・曲線の首振りの fps を上げた手順と実機の表（§12、2026-10-01）、列を C にした S1b の増分（§14、2026-10-02） |
+| [derby-wide2-profile.md](apps/derby-wide2-profile.md) | 記録 | DERBY WATCH の楕円コーナーの首振り WIDE 2 の 1 フレームを、host の QuickJS の計装（`tools/vmtest/opprof/`）で命令・関数・配列・`Math` 単位に数え、実機の単価で µs に換算。実機の JS ターンとの一次式（4 構成で ±0.06 ms）、P5 の見積もりの検算（2026-10-01、host のみ） |
+| [derby-finish-fx.md](apps/derby-finish-fx.md) | 記録 | DERBY WATCH の FINISH のスローと HEAD ON のダスト（奥・中間・手前のボケ、馬群の範囲だけ）と手描き風の帯、スロー中の脚の位相の補間: plan 3 本（枠 31/32）、スクロールしても粒が保たれるスロットの列、既定 FINISH D・HEAD ON ①、調整前後と脚の補間の画と GIF、ser-native 統合後の実機の費用（FINISH JS +1.78 ms・render +0.48 ms、HEAD ON +0.71 ms、脚 +0.14 ms）、ゲストと評価の余裕（2026-10-02） |
+| [derby-trig-cull.md](apps/derby-trig-cull.md) | 記録 | DERBY WATCH の楕円の首振り: pose・三角関数の呼び出し元別の回数、キャッシュ・LUT・漸化式・固定点の表の比較、弦の culling と結合の本体数・画素差（画像・GIF）、弦の端を sin 9 個から対称性で作る変更（コードは tag `archive/trig-cull-B`。ゲスト +820 B で余裕を食うので vm/main には入れていない）。WIDE 2 の台は w −100・−14・−3（u=14）（2026-10-01、host のみ） |
+| [derby-trig-cull-device.md](apps/derby-trig-cull-device.md) | 記録 | trig-cull と WIDE 2 の u=14（w=−3）を実機で: 楕円コーナーの首振りの fps・JS・VM draw（4 構成、固定種）、ゲスト最大・評価余裕、u=14 の台の画像（2026-10-01） |
+| [derby-ser-native.md](apps/derby-ser-native.md) | 設計・記録 | DERBY WATCH の首振りの列 `ser()` を倍精度の C（`pocket.derby`、DERBY のセッションだけの面、capability `derby.series`）に写し `draw` を数値引数にした（S1b）: 境目の API、host の oracle（JS と C の draw の入力をビット単位で照合）、楕円コーナーの WIDE 2 が実機 15.9 → 24.6 fps、ゲスト −5.2 KB・評価の余裕 30.6 KB、画素・結果は全行一致（2026-10-02） |
+| [derby-native-survey.md](apps/derby-native-survey.md) | 設計・調査 | DERBY WATCH の首振り（楕円コーナーの WIDE 2）で native に下ろす候補 30 個の利得・費用・メモリ・工数・画素への影響、シナリオ別の fps（`ser()` に触らないと 20 fps に届かない、ウォーカーだけでは 27 fps の境目）、API の 3 案の比較と推奨（道の登録を共有する `path`／`pose`／`project`／`walk`）、実機で確かめる項目（2026-10-01、推定のみ・測定なし） |
+| [big-wave.md](apps/big-wave.md) | 設計・記録 | BIG WAVE: 線分の疑似3Dで大波に乗るゲーム。世界固定の断面と 1/d の級数、host の台本とボット、全画素検証、負荷と上限の使用率、実機で詰める項目 |
 | [backlog.md](apps/backlog.md) | backlog | チュートリアルの見直し、オーバーレイの残り、日本語入力の残り |
 
 ## 過去の知見 — [`archive/`](archive/)

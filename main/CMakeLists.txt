@@ -26,7 +26,7 @@ set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
 set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "pocket/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
 list(APPEND KASANE_SOURCES
-    "pocket/pocket_proc.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
+    "pocket/pocket_proc.c" "pocket/pocket_derby.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
     "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
@@ -42,6 +42,25 @@ option(KASANE_FLOWER_ALLOC_FAULT_PROBE "Inject one FLOWER candidate allocation f
 option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone and heap measurements" OFF)
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
+option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
+option(KASANE_BGCOST_TRACE "BGC/BGP lines after MDT: VM steps, frame geometry, per-plan draw costs" OFF)
+if(KASANE_BGCOST_TRACE AND NOT KASANE_MEGADEMO_TRACE)
+    message(FATAL_ERROR "KASANE_BGCOST_TRACE requires KASANE_MEGADEMO_TRACE")
+endif()
+# The background-cost study (docs/kasane/derby-background-cost.md) runs its
+# measuring copies of DERBY WATCH, and a synthetic segment load, from the
+# DERBY WATCH row: a path relative to this file that replaces
+# apps/derby/derby_watch.js. The file must be named derby_watch.js, because
+# main.c finds the source by the symbol that name makes. Empty ships the app.
+set(DERBY_BGCOST_SOURCE "" CACHE STRING "Measuring source for the DERBY WATCH row (diagnostic only)")
+set(DERBY_WATCH_SOURCE "../apps/derby/derby_watch.js")
+if(DERBY_BGCOST_SOURCE)
+    set(DERBY_WATCH_SOURCE "${DERBY_BGCOST_SOURCE}")
+endif()
+option(KASANE_PROC_LIMITS_PROBE "USB-triggered procedural limits/lifecycle measurements ('{' native, '}' JS)" OFF)
+if(KASANE_PROC_LIMITS_PROBE)
+    list(APPEND KASANE_SOURCES "ui/kasane/ksn_proc_limits_device_probe.c")
+endif()
 if(KASANE_PROC_DEVICE_PROBE)
     list(APPEND KASANE_SOURCES
         "ui/kasane/ksn_procedural_surface.c"
@@ -147,7 +166,7 @@ endif()
 # scenes and mp3_decode.c) -- see the note at the top of this file about a row
 # arriving after its first caller.
 idf_component_register(SRCS "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
-    "hal/keymap.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
+    "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_app_load.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/net_service.c" "pocket/net_autosync.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
     "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../.cache/bmi270/bmi2.c" "../.cache/bmi270/bmi270.c"
     ${POCKET_RANDOM_SOURCES} ${POCKET_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${POCKET_PROBE_SOURCES}
     INCLUDE_DIRS "." "hal" "pocket" "vm" "pet" "ui" "ui/kasane" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../.cache/bmi270"
@@ -157,7 +176,7 @@ idf_component_register(SRCS "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_dec
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/proc_news_zoom.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" "../apps/companion/companion.js" "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin")
 target_link_libraries(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=xQueueCreateMutex" "-Wl,--wrap=vQueueDelete")
@@ -204,6 +223,194 @@ if(KASANE_MEGADEMO_DEVICE_PROBE)
 endif()
 if(KASANE_PROC_JS_DIAGNOSTIC)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_JS_DIAGNOSTIC=1)
+endif()
+if(KASANE_MEGADEMO_TRACE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEGADEMO_TRACE=1)
+endif()
+if(KASANE_BGCOST_TRACE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_BGCOST_TRACE=1)
+endif()
+# The pocket.input.keys diagnostic (docs/platform/keystate.md): the key test app
+# on USB 'r', and US-framed key injection on the same USB stream. OFF by default
+# so the shipping USB byte table and flash layout are unchanged.
+option(POCKET_KEYTEST "USB 'r' key test app and USB key injection (diagnostic only)" OFF)
+if(POCKET_KEYTEST)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_KEYTEST=1)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/keytest/keytest.js" TEXT)
+endif()
+# The evaluation heap probe (docs/vm/spread-eval-oom.md): apps/heapprobe's
+# variants, each a separate source started over USB ('Q<index>[,<limit>]\n')
+# through the same path a menu app takes, with the guest's heap reported after
+# the evaluation. OFF by default: no menu row, no USB byte, no flash.
+option(POCKET_HEAPPROBE "USB 'Q' evaluation heap probe (diagnostic only)" OFF)
+if(POCKET_HEAPPROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_HEAPPROBE=1)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/heapprobe.js" TEXT)
+    # DERBY WATCH with GK built by the spread again, the source that ran out
+    # of heap. Generated into flash rather than patched into a DRAM copy at
+    # run time: a 32 KB copy held through the evaluation took the room the
+    # Kasane frame needs ("frame allocation failed"), a failure of its own.
+    # These variants (spread, flat, split, load3/4) are made from DERBY WATCH
+    # as one script, frozen before it became chunks (e15e6eb); the "derby"
+    # variant runs the shipped entry, chunks and all.
+    set(_hp_derby "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/derby_v0/derby_watch.js")
+    set(_hp_spread "${CMAKE_CURRENT_BINARY_DIR}/heapprobe_derby_spread.js")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hp_derby}")
+    file(READ "${_hp_derby}" _hp_src)
+    string(FIND "${_hp_src}" "'a d e s r 1 , / tab'.split(' ')" _hp_at)
+    if(_hp_at LESS 0)
+        message(FATAL_ERROR "POCKET_HEAPPROBE: GK's split is gone from derby_watch.js")
+    endif()
+    string(REPLACE "'a d e s r 1 , / tab'.split(' ')" "[...'adesr1,/', 'tab']" _hp_src "${_hp_src}")
+    file(WRITE "${_hp_spread}" "${_hp_src}")
+    target_add_binary_data(${COMPONENT_LIB} "${_hp_spread}" TEXT)
+    # The same app unwrapped into one global script (flat) and cut into 3 and
+    # 4 global scripts (tools/heapprobe_split.py): the chunked-evaluation
+    # spike. Directories per count so the file names, and with them the
+    # embedded symbols, say which set a chunk belongs to. The chunks are
+    # embedded by the pocket.app.load() table below, as local.derby's
+    # s3c1..s3c3 and s4c1..s4c4 -- in this image only -- so the spike's
+    # __hpLoad(k) and the product's pocket.app.load('s3c1') read the same
+    # bytes under the same symbols.
+    execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_split.py"
+                    "${_hp_derby}" 1 "${CMAKE_CURRENT_BINARY_DIR}/hp" --flat
+                    RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
+    if(NOT _hp_rc EQUAL 0)
+        message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_split.py failed")
+    endif()
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/hp/derby_watch_flat.js" TEXT)
+    foreach(_hp_n 3 4)
+        set(_hp_dir "${CMAKE_CURRENT_BINARY_DIR}/hp${_hp_n}")
+        execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_split.py"
+                        "${_hp_derby}" ${_hp_n} "${_hp_dir}" RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
+        if(NOT _hp_rc EQUAL 0)
+            message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_split.py failed")
+        endif()
+        foreach(_hp_k RANGE 1 ${_hp_n})
+            file(RENAME "${_hp_dir}/derby_watch_c${_hp_k}.js" "${_hp_dir}/hp${_hp_n}_c${_hp_k}.js")
+            string(APPEND _hp_list "s${_hp_n}c${_hp_k} hp${_hp_n}/hp${_hp_n}_c${_hp_k}.js\n")
+        endforeach()
+    endforeach()
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt" "app local.derby\n${_hp_list}")
+    # pocket.app.load()'s own device check (apps/heapprobe/appload_*.js):
+    # the error paths, and DERBY WATCH's first third as `big` for a load from
+    # frame(), as HELLO WORLD's chunks -- the identity the small variants run
+    # under.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt" "app local.hello\nbig hp3/hp3_c1.js\n")
+    list(APPEND POCKET_APP_CHUNK_LISTS "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt"
+         "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt"
+         "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/appload_chunks.txt")
+    # Static import (docs/vm/eval-peak.md section 9): one generated program as
+    # one script, as three load()ed scripts and as three imported modules
+    # (tools/heapprobe_import_gen.py) -- the parts are HELLO WORLD's chunks
+    # imps1..3 and impm1..3 -- and the import checks' own small modules.
+    set(_hp_imp "${CMAKE_CURRENT_BINARY_DIR}/imp")
+    execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_import_gen.py"
+                    "${_hp_imp}" RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
+    if(NOT _hp_rc EQUAL 0)
+        message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_import_gen.py failed")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_SOURCE_DIR}/tools/heapprobe_import_gen.py")
+    foreach(_hp_f imp_all.js imp_entry_load.js imp_entry_import.mjs)
+        target_add_binary_data(${COMPONENT_LIB} "${_hp_imp}/${_hp_f}" TEXT)
+    endforeach()
+    list(APPEND POCKET_APP_CHUNK_LISTS "${_hp_imp}/imp_chunks.txt"
+         "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/import_chunks.txt")
+    # Precompiled DERBY WATCH, if the host has made it (WSL:
+    #   python3 tools/vmtest/compile_peak.py apps/heapprobe/derby_v0/derby_watch.js --write .cache/compile_peak/derby.bc)
+    # from this same quickjs.c. Absent: the derby-bc variants report no loader.
+    set(_hp_bc "${CMAKE_SOURCE_DIR}/.cache/compile_peak/derby.bc")
+    if(EXISTS "${_hp_bc}")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hp_bc}")
+        target_add_binary_data(${COMPONENT_LIB} "${_hp_bc}" BINARY)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE HP_HAVE_BC=1)
+    endif()
+endif()
+# pocket.app.load()'s chunks (main/pocket/app_chunks.h, docs/vm/eval-peak.md
+# section 7): every apps/*/chunks.txt, plus any list a diagnostic option above
+# appended to POCKET_APP_CHUNK_LISTS. An app gains chunks by gaining a
+# chunks.txt; nothing in this file names them. The table is generated at
+# configure time and records symbols, not lengths, so editing a chunk needs no
+# reconfigure -- adding or renaming one does, and the lists are configure
+# dependencies for that (GLOB CONFIGURE_DEPENDS catches a new chunks.txt).
+file(GLOB _app_chunk_lists CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../apps/*/chunks.txt")
+list(APPEND _app_chunk_lists ${POCKET_APP_CHUNK_LISTS})
+execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py"
+                "${CMAKE_BINARY_DIR}/generated" ${_app_chunk_lists}
+                COMMAND_ERROR_IS_FATAL ANY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py" ${_app_chunk_lists})
+include("${CMAKE_BINARY_DIR}/generated/app_chunks.cmake")
+target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunks.c")
+# A chunk with @plan functions (procedural plans written as JS,
+# docs/kasane/js-to-ir.md section 5) is embedded lowered: at build time,
+# tools/kasane_ir/lower_plans.mjs replaces each plan by its compiled IR and
+# the @planDecoder by the decoder, into build/generated/apps/<app>/ under the
+# same base name, so the symbol and the chunk table do not change. Editing
+# the chunk re-lowers it without a reconfigure. Only then does the build need
+# Node, 16 or later (docs/platform/build-environment.md); without @plan it
+# does not look for it.
+if(APP_CHUNK_LOWER)
+    find_program(POCKET_NODE node)
+    set(_node_version "")
+    if(POCKET_NODE)
+        execute_process(COMMAND "${POCKET_NODE}" --version OUTPUT_VARIABLE _node_version
+                        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    if(NOT _node_version MATCHES "^v([0-9]+)\\." OR CMAKE_MATCH_1 LESS 16)
+        string(REPLACE ";" ", " _plans "${APP_CHUNK_PLANS}")
+        set(_found "no node on PATH")
+        if(POCKET_NODE)
+            set(_found "${POCKET_NODE} is ${_node_version}")
+        endif()
+        # Searched again at the next configure, after PATH is fixed.
+        unset(POCKET_NODE CACHE)
+        message(FATAL_ERROR "The app chunks ${_plans} have @plan functions, which the build "
+                "compiles with tools/kasane_ir/lower_plans.mjs: that needs Node 16 or later on PATH "
+                "(${_found}). Install Node (this project's machine uses Volta's Node v24) and put it "
+                "on the PATH of the shell that runs idf.py, or pass -DPOCKET_NODE=<path to node>; "
+                "then reconfigure. See docs/platform/build-environment.md.")
+    endif()
+    set(_kir "${CMAKE_SOURCE_DIR}/tools/kasane_ir")
+    set(_lower ${APP_CHUNK_LOWER})
+    while(_lower)
+        # how: packed (the plans as packed strings and their decoder), or
+        # rom:APP (the plans removed; they ship as the table below).
+        list(POP_FRONT _lower _src _dst _how)
+        set(_mode "")
+        if(_how MATCHES "^rom:(.+)$")
+            set(_mode --rom "${CMAKE_MATCH_1}")
+        endif()
+        add_custom_command(OUTPUT "${_dst}"
+            COMMAND "${POCKET_NODE}" "${_kir}/lower_plans.mjs" ${_mode} --file "${_src}" "${_dst}"
+            DEPENDS "${_src}" "${_kir}/lower_plans.mjs" "${_kir}/plan_js.mjs" "${_kir}/kir.mjs" "${_kir}/pack.mjs"
+            COMMENT "Compiling the @plan functions of ${_src}"
+            VERBATIM)
+    endwhile()
+    # The built-in plans (docs/kasane/flash-plan.md section 2): the rom apps'
+    # @plan functions as a const table in flash, made from the same sources
+    # in the same build as the JS that names them, so the two cannot drift.
+    if(APP_CHUNK_ROM)
+        add_custom_command(OUTPUT "${APP_CHUNK_ROM_C}"
+            COMMAND "${POCKET_NODE}" "${_kir}/emit_rom_plans.mjs" "${APP_CHUNK_ROM_C}" ${APP_CHUNK_ROM}
+            DEPENDS ${APP_CHUNK_ROM_SOURCES} "${_kir}/emit_rom_plans.mjs" "${_kir}/plan_js.mjs"
+                    "${_kir}/kir.mjs" "${_kir}/pack.mjs"
+            COMMENT "Compiling the built-in plans"
+            VERBATIM)
+    endif()
+endif()
+# The built-in plan table app_session.c hands to pocket.kasane.procedural:
+# the generated one above, or make_app_chunks.py's empty one.
+target_sources(${COMPONENT_LIB} PRIVATE "${APP_CHUNK_ROM_C}")
+foreach(_app_chunk IN LISTS APP_CHUNK_FILES)
+    target_add_binary_data(${COMPONENT_LIB} "${_app_chunk}" TEXT)
+endforeach()
+if(KASANE_PROC_LIMITS_PROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_PROC_LIMITS_PROBE=1)
+    # Embedded only in the probe image, so a normal build's EMBED list and
+    # flash layout are unchanged.
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/kasane/proc_limits_probe.js" TEXT)
 endif()
 if(KASANE_P0_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_P0_PROBE=1)
@@ -308,6 +515,9 @@ set_source_files_properties(ui/kasane/ksn_procedural.c
     ui/kasane/ksn_proc_plan_points.c ui/kasane/ksn_proc_points.c
     ui/kasane/ksn_proc_points_pie.c ui/kasane/ksn_proc_points_dispatch.c
     PROPERTIES COMPILE_OPTIONS "-O2")
+# DERBY's series in C must give the JS's draw inputs bit for bit
+# (docs/apps/derby-ser-native.md): no fused or reordered floating point.
+set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 if(KASANE_PROC_DEVICE_PROBE)
     set_source_files_properties(ui/kasane/ksn_procedural_surface.c
         ui/kasane/ksn_procedural_layers.c

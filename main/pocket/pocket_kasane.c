@@ -19,6 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef KASANE_BGCOST_TRACE
+#include "esp_timer.h"
+#endif
 
 #define KASANE_REF_LIMIT 32u
 #define KASANE_REF_STORAGE 64u
@@ -107,8 +110,8 @@ typedef struct {
     ksn_resource proc_resource[2];
     ksn_resource video_resource;
     ksn_resource pixel_resource;
-    ksn_resource grid_resources[4];
-    uint16_t grid_width[4],grid_height[4];
+    ksn_resource grid_resources[POCKET_GRID_MAX_SLOTS];
+    uint16_t grid_width[POCKET_GRID_MAX_SLOTS],grid_height[POCKET_GRID_MAX_SLOTS];
     ksn_resource notice_resource;
     ksn_tx notice_tx;
     uint32_t notice_displayed,notice_pending;
@@ -1099,7 +1102,7 @@ JSValue pocket_kasane_proc_resource(JSContext *ctx){
 JSValue pocket_kasane_grid_resource(JSContext *ctx,unsigned slot,
                                     const ksn_image_port *port){
     const char *op="kasane.grid.resource";
-    if(slot>=4||!port||!port->width||!port->height||
+    if(slot>=POCKET_GRID_MAX_SLOTS||!port||!port->width||!port->height||
        (state&&state->building.value))return throw_result(ctx,KSN_INVALID,op);
     JSValue object=JS_NewObjectClass(ctx,image_class);
     if(JS_IsException(object))return object;
@@ -1195,7 +1198,7 @@ void pocket_kasane_video_invalidate(void){
     }
 }
 void pocket_kasane_grid_invalidate(unsigned slot){
-    if(state&&slot<4&&state->grid_resources[slot].value){
+    if(state&&slot<POCKET_GRID_MAX_SLOTS&&state->grid_resources[slot].value){
         ksn_runtime_invalidate_image(state->grid_resources[slot]);
         pocket_grid_source_invalidated(state->grid_resources[slot].value);
     }
@@ -1703,12 +1706,30 @@ fail:
 static JSValue js_replace(JSContext *ctx, JSValueConst self, int argc,
                           JSValueConst *argv) {
     (void)self;
+#ifdef KASANE_MEGADEMO_TRACE
+    JSValue ticket=run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_REPLACE,"kasane.replace");
+    if(!JS_IsException(ticket))pocket_proc_trace_view();
+    return ticket;
+#else
     return run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_REPLACE,"kasane.replace");
+#endif
 }
 static JSValue js_patch(JSContext *ctx, JSValueConst self, int argc,
                         JSValueConst *argv) {
     (void)self;
+#ifdef KASANE_MEGADEMO_TRACE
+#ifdef KASANE_BGCOST_TRACE
+    int64_t began=esp_timer_get_time();
+#endif
+    JSValue ticket=run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
+#ifdef KASANE_BGCOST_TRACE
+    pocket_proc_bgcost_view_us((uint32_t)(esp_timer_get_time()-began));
+#endif
+    if(!JS_IsException(ticket))pocket_proc_trace_view();
+    return ticket;
+#else
     return run_build(ctx,argc?argv[0]:JS_UNDEFINED,NULL,KSN_PATCH,"kasane.patch");
+#endif
 }
 
 static void scene_finalizer(JSRuntime *rt, JSValue value) {
@@ -3048,6 +3069,14 @@ ksn_result pocket_kasane_present_backdrop(const ksn_display_port *display,
 }
 void pocket_kasane_end_turn(void) {
     pocket_proc_end_turn();
+    pocket_kasane_park_turn();
+}
+/* The view builder is aborted either way: run_build() opens and submits it
+ * inside one native call, and a native re-entry is never a floor the VM may
+ * park on (vm-L2-design sec.11.2), so a builder still open here is a failed
+ * build. Only the procedural frame spans several native calls, and only it
+ * has to survive a park. */
+void pocket_kasane_park_turn(void) {
     if(state) { ksn_runtime_app_end_turn(state->lease); apply_outcome(); }
 }
 ksn_input_scope pocket_kasane_input_scope(bool host_priority) {
