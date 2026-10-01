@@ -114,7 +114,7 @@ function pose(g, w) {
 // screen); HEAD ON is a still (paint).
 const CAMS = [[100, 9.7, 33, 880, 1, -1e9, 1e9], 0, [58, 15, 36, 880, 1, -1e9, 1e9], [170, 7, 22, 640, 0, -1e9, D - 6],
   [300, 4, 30, 880, 0, D, D], [130, 1.6, 84, 880, 1, VS[0] - 30, VS[0] + 30], 0,
-  [200, 6, 28, 100, -14, -14], [200, 6, 28, 460, -14, -100], [200, 6, 28, 820, -14, -14]],
+  [200, 6, 28, 100, -14, -14], [200, 6, 28, 460, -14, -3], [200, 6, 28, 820, -14, -14]],
   NAMES = ['WIDE', 'CLOSE', 'FIELD', 'FINISH', '', 'VISION', 'HEAD ON', 'WIDE 1', 'WIDE 2', 'WIDE 3'];
 // Panning units (rows 7..9, [least f, height, horizon y, g, w, w on the
 // oval: WIDE 2 near its bend's centre]; README):
