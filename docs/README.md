@@ -106,6 +106,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [面ごとの線分上限](kasane/surface-segment-cap.md) | `createSurface({maxSegments})` で面1のフレームを n 本分に縮める API、1 面の確保量（256 本で 5.4 KB、既定 1,024 本で 21.5 KB）、DERBY WATCH の評価直後に面1が確保できる境目と plan 登録への影響（2026-09-30 実測）|
 | [JS 風の言語 → 手続き型 IR](kasane/js-to-ir.md) | plan を名前と式で書くコンパイラの試作（`tools/kasane_ir/`、手書き 13 本と出力一致、命令 −3%）、plan の文字列と `prog()` のゲスト常駐（評価後 7.1 KB、段階 3 で 8.1 KB。文字列を詰めても −1.6〜2.4 KB）、native の plan が命令数に依らず 872 B である点、flash の plan を id で登録する設計と優先順位、plan を普通の JS の関数（`@plan`）で書きビルドが詰めた IR へ置き換える実装（DERBY で実装、Node 16 以上がそのときだけ要る。2026-09-30 host・実機実測、推定）|
 | [組み込みの plan を flash に置き名前で登録する](kasane/flash-plan.md) | `register('derby.crowd', args)` の API と誤り、表の生成器（`emit_rom_plans.mjs`）、引数を begin で当てる設計、`ksn_proc_rom_plan`（40 + 4 × 引数 B）、DERBY で native 9.9 → 1.2 KB（推定）・ゲスト −3.1〜5.7 KB（host 実測）、配列登録との全件一致の試験。firmware への組み込みと DERBY の 14 本の移行、実機でターン内の最小 +18 KB・評価の余裕 +4.8 KB・登録 1,252 → 570 µs・描画 +9〜17%（2026-10-01）|
+| [同、段階 3（首振り）を載せた実機](kasane/flash-plan.md) | `register('derby.crowd', args)` の API と誤り、表の生成器（`emit_rom_plans.mjs`）、引数を begin で当てる設計、`ksn_proc_rom_plan`（40 + 4 × 引数 B）、DERBY で native 9.9 → 1.2 KB（推定）・ゲスト −3.1〜5.7 KB（host 実測）、配列登録との全件一致の試験。firmware への組み込みと DERBY の移行、実機で登録 1,252 → 570 µs・ターン内の最小 +3.3 KB（2026-10-01）|
 | [plan を命令数ぶんだけ確保する](kasane/plan-sized-alloc.md) | `ksn_proc_sized_plan`（40 + 12n B、以前は 872 B）、命令数ごとの heap のブロック、DERBY の 25 本 22.5 → 9.7 KB とターン内の最小 +11.4 KB、首振り段階 3 の LOADSTALL の解消、断片化（`lg`）、flash の id 登録への見通し（2026-09-30 実測）|
 
 ## JS API — [`api/`](api/)
@@ -152,7 +153,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [derby-watch.md](apps/derby-watch.md) | 設計・記録 | DERBY WATCH: 線画の疑似 3D で観る競馬、再現できるレースのモデル、起動ごとの種、較正したオッズ、場面ごとの plan、host の全画素検証、`pocket.app.load` のチャンクへの分割 |
 | [derby-corner-model.md](apps/derby-corner-model.md) | 試算 | DERBY WATCH の楕円コース案: カーブだけの内外差とばらつきの乗数、枠・本命・入れ替わりへの効き、楕円用のオッズの再推定（host の Monte Carlo） |
 | [derby-pan-camera-cost.md](apps/derby-pan-camera-cost.md) | 記録 | DERBY WATCH の首振りカメラ・楕円コースの計算コスト: JS 演算と投影の単価（実機）、VM の Newton 逆数による投影、台数・自動ズーム・LOD 別のフレーム費用の見積もり（2026-09-30） |
-| [derby-pan-memory.md](apps/derby-pan-memory.md) | 記録 | DERBY WATCH の首振りカメラ（段階 3）が常駐させるゲストのヒープの内訳（関数・atom・plan の文字列）、事前コンパイルと行番号表の削除の効果の上限、規模を削る案と受け入れ条件との差（2026-09-30、host 実測） |
+| [derby-pan-memory.md](apps/derby-pan-memory.md) | 記録 | DERBY WATCH の首振りカメラ（段階 3）が常駐させるゲストのヒープの内訳（関数・atom・plan の文字列）、事前コンパイルと行番号表の削除の効果の上限、規模を削る案と受け入れ条件との差（2026-09-30、host 実測）、flash の plan を載せた再挑戦で (e) の fps だけが不足（§10、2026-10-01 実機）、`vm/main` b184202 への追従とマージ前の再測定・楕円（段階 4）への引き継ぎ（§11） |
 | [big-wave.md](apps/big-wave.md) | 設計・記録 | BIG WAVE: 線分の疑似3Dで大波に乗るゲーム。世界固定の断面と 1/d の級数、host の台本とボット、全画素検証、負荷と上限の使用率、実機で詰める項目 |
 | [backlog.md](apps/backlog.md) | backlog | チュートリアルの見直し、オーバーレイの残り、日本語入力の残り |
 

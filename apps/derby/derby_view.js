@@ -30,7 +30,8 @@ function load() {
       p = ['nil', [], {kind: 'affineQ14Points', x: x, y: y, color: 0xef5b, coeff: [8192, 0, 0, 8192, HX * 16384, HY * 16384]}];
     } else if (n === 'hd') p = ['nil', [], {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
     else if (n[0] === 'r' && i >= 0) p = ['runner', [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410]];
-    else p = [n, k.concat(1 / k[2], M.ceil(k[2] / 2)).slice(0, n === 'crowd' ? 8 : n === 'stands' ? 4 : 0)];
+    else if (n[0] === 't' && i >= 0) p = ['pt', [512 + 288 * i]];
+    else p = [n, k.concat(1 / k[2], M.ceil(k[2] / 2)).slice(0, n === 'crowd' ? 8 : n === 'stands' ? 4 : n === 'pk' ? 2 : 0)];
     live[n] = H.register('derby.' + p[0], p[1], p[2]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
@@ -107,16 +108,39 @@ function pose(g, w) {
 // (along the line: the line is x=120), VISION (low, within 30 m of the
 // screen); HEAD ON is a still (paint).
 const CAMS = [[100, 9.7, 33, 880, 1, -1e9, 1e9], 0, [58, 15, 36, 880, 1, -1e9, 1e9], [170, 7, 22, 640, 0, -1e9, D - 6],
-  [300, 4, 30, 880, 0, D, D], [130, 1.6, 84, 880, 1, VS[0] - 30, VS[0] + 30]],
-  NAMES = ['WIDE', 'CLOSE', 'FIELD', 'FINISH', '', 'VISION', 'HEAD ON'];
+  [300, 4, 30, 880, 0, D, D], [130, 1.6, 84, 880, 1, VS[0] - 30, VS[0] + 30], 0,
+  [200, 6, 28, 100, -14], [200, 6, 28, 460, -14], [200, 6, 28, 820, -14]],
+  NAMES = ['WIDE', 'CLOSE', 'FIELD', 'FINISH', '', 'VISION', 'HEAD ON', 'WIDE 1', 'WIDE 2', 'WIDE 3'];
+// Panning units (rows 7..9, [least f, height, horizon y, g, w]; README):
+// turned to the leader, f keeping it PAN[1] px long, at most PAN[2]. WIDE
+// takes the nearest when it is over PAN[0] m from the leader. Height 6 and
+// horizon 28 are baked in the pan plans. pc: the unit in use, [x, z, unit
+// vector to the aim, f, distance to the aim], null for a side unit.
+const PAN = [60, 14, 1500];
+let pc = null, vq = null, Lo, Hi, SQ, SU, SV;
+function wide(g) {
+  let m = 0, e = 1e9;
+  for (let i = 7; i < 10; ++i) {
+    const q = pose(CAMS[i][3], CAMS[i][4]), a = pose(g, (DNR + DFR) / 2), x = a[0] - q[0], z = a[1] - q[1];
+    if (x * x + z * z < e) e = x * x + z * z, m = i;
+  }
+  return e > PAN[0] * PAN[0] ? m : 0;
+}
 // Sets cx for shot m (1: locked on lane l) and returns the camera.
 function shot(m, xs, l, cut) {
+  pc = null;
   if (m === 1) {
     const f = 24 * DL[l];
     cx = xs[l] - 12.5 * U - (HX - 120) * DL[l] / f;
     return [f, 3, HY + 6 * HS - 72];
   }
-  const c = CAMS[m], tgt = mx.apply(null, xs) - c[3] / c[0];
+  const c = CAMS[m];
+  if (m > 6) {
+    const q = pose(c[3], c[4]), a = pose(mx.apply(null, xs), (DNR + DFR) / 2), x = a[0] - q[0], z = a[1] - q[1], e = M.sqrt(x * x + z * z);
+    pc = [q[0], q[1], x / e, z / e, mn(PAN[2], mx(c[0], PAN[1] * e / 2.4)), e];
+    return [pc[4], c[1], c[2]];
+  }
+  const tgt = mx.apply(null, xs) - c[3] / c[0];
   cx = mx(c[5], mn(c[6], c[4] ? cut ? tgt : cx + (tgt - cx) * .12 + mx.apply(null, rs.v) * DT * .88 : tgt));
   return c;
 }
@@ -125,6 +149,7 @@ function shot(m, xs, l, cut) {
 // the leader, low on the rail: rails and the leading FN[tier] runners,
 // those wholly inside K.
 function course(c, x0, xs, close, gate, K) {
+  if (!K && pc) return pan(xs);
   const f = c[0], h = c[1], hy = c[2], k = KN[tier], o = K ? (K[0] + K[2]) / 2 : 120, R = K ? K[2] - 1 : 245,
     sx = (w, d0) => o + (w - x0) * f / d0, gy = d0 => hy + h * f / d0, ty = (d0, e) => hy + (h - e) * f / d0;
   const rail = (d0, col) => {
@@ -141,9 +166,8 @@ function course(c, x0, xs, close, gate, K) {
     dr('crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191), (t >> 3 ^ t) & 1, t & 1]);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
-      const z = (vr[2] - vr[0]) / 120;
       dr('vis', [vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866]);
-      if (von > 10) course([85 * z, 3, vr[1] + 4.8 * z], mx.apply(null, xs) - 6, xs, -1, 0, vr);
+      feed(xs, (vr[2] - vr[0]) / 120);
     }
   }
   rail(DFR, 0xad55);
@@ -171,9 +195,14 @@ function course(c, x0, xs, close, gate, K) {
       const g = (flo(a * 3 / PI) % 6 + 6) % 6;
       dr('g' + g, []);
       dr('silk', [SILK[l], rnd(HS * bob(g))]);
-    } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400)
-      dr('r' + l, [X, Y - 6 * S + .6 * S * sin(2 * a), S, Y, X + S * (.5 + 3 * sin(a)), X + S * (.5 + 3 * sin(a + .8)),
-        X + S * (8 + 3 * sin(a + 3.3)), X + S * (8 + 3 * sin(a + 4.1))]);
+    } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400) rin(l, X, S, Y, a);
   }
   rail(DNR, 0xffff);
+}
+// A runner: hip x, back y, px per unit, ground y, four hooves.
+const rin = (l, X, S, Y, a) => dr('r' + l, [X, Y - 6 * S + .6 * S * sin(2 * a), S, Y, X + S * (.5 + 3 * sin(a)),
+  X + S * (.5 + 3 * sin(a + .8)), X + S * (8 + 3 * sin(a + 3.3)), X + S * (8 + 3 * sin(a + 4.1))]);
+// The screen's feed on its face vr at scale z: a low camera 6 m behind the leader.
+function feed(xs, z) {
+  if (von > 10) course([85 * z, 3, vr[1] + 4.8 * z], mx.apply(null, xs) - 6, xs, -1, 0, vr);
 }
