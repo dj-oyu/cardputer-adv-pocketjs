@@ -255,6 +255,12 @@ uint32_t ksn_render_rotate_anchor_state(int *base_x){
 }
 bool g_ksn_image_stretch_step=true;
 bool g_ksn_image_stretch_map=true;
+#ifdef KSN_EXPERIMENT_STABLE_IMAGE_ROWS
+/* Experiment only: opaque promises coverage, NOT immutable provider reads.
+ * Enable only in a harness whose providers guarantee a stable snapshot for
+ * the whole command. A production opt-in contract is required before use. */
+bool g_ksn_image_stable_rows=true;
+#endif
 /* Source extents are at most 256, so each exact sampled coordinate fits in a
  * byte. One selected command keeps both axes for the whole frame (375 B). */
 static struct {
@@ -2221,7 +2227,28 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                 const uint8_t *map_x=stretch_map.active&&layer==KSN_APP&&
                     i==stretch_map.index?stretch_map.x:NULL;
                 const uint8_t *map_y=map_x?stretch_map.y:NULL;
-                for(int py=y0;py<y1;py++)for(int x=x0;x<x1;){
+#ifdef KSN_EXPERIMENT_STABLE_IMAGE_ROWS
+                int previous_row=-1;
+                bool reuse=g_ksn_image_stable_rows&&reader.opaque&&d->opacity==255&&
+                    !d->data.image.rotation&&d->data.image.scale==KSN_IMAGE_STRETCH;
+                unsigned previous_source=0;
+#endif
+                for(int py=y0;py<y1;py++){
+#ifdef KSN_EXPERIMENT_STABLE_IMAGE_ROWS
+                    unsigned dy=(unsigned)(py-d->bounds.y0);
+                    unsigned source_y=reuse?(map_y?map_y[dy]:stretch_sample(dy,
+                        d->data.image.source_height,(unsigned)(d->bounds.y1-d->bounds.y0))):0;
+                    if(reuse&&previous_row>=0&&source_y==previous_source){
+                        /* This command has not yielded to another painter. Its
+                         * previous strip row is the already expanded source;
+                         * copy only clipped columns, with no extra row scratch. */
+                        memcpy(pixels+(py-y)*240+x0,pixels+(previous_row-y)*240+x0,
+                               (size_t)(x1-x0)*sizeof(*pixels));
+                        previous_row=py;
+                        continue;
+                    }
+#endif
+                    for(int x=x0;x<x1;){
                     unsigned count=(unsigned)(x1-x),limit=identity?32u:16u;
                     if(count>limit)count=limit;
                     result=image_read(core,frame.ticket,(ksn_layer)layer,i,d,x,py,&count,&scratch,
@@ -2248,6 +2275,10 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                                                  d->opacity,false,x+(int)j,py);
                     }
                     x+=(int)count;
+                }
+#ifdef KSN_EXPERIMENT_STABLE_IMAGE_ROWS
+                    previous_row=py;previous_source=source_y;
+#endif
                 }
                 KSN_PROF_END(image);
                 continue;
