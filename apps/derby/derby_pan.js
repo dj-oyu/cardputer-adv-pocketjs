@@ -22,10 +22,13 @@ function lim(c0, c1) { if (c1 > 0) Lo = mx(Lo, -c0 / c1); else if (c1 < 0) Hi = 
 // the chord's normal. The stands (b < 0): their tiers chord by chord, hl's
 // lines across the chord's view from the ground up, 2.4 m apart.
 function ser(n, w, s, g0, L, zf, a, b) {
-  ch: for (let j = 0; j < VC.length; j += 2) {
-    const ga = g0 + rnd((VC[j] - g0) / s) * s, gb = g0 + rnd((VC[j + 1] - g0) / s) * s, A = pose(ga, w), B = pose(gb, w),
-      dx = (B[0] - A[0]) / (gb - ga), dz = (B[1] - A[1]) / (gb - ga),
-      q = pj([A[0] + (g0 - ga) * dx, A[1] + (g0 - ga) * dz]), u = (dx * pc[2] + dz * pc[3]) / pc[4], v = dx * pc[3] - dz * pc[2] + 120 * u;
+  let P, pg;
+  for (let i = 0; i < VC.length; ++i) {
+    const j = VC[i];
+    if (VE && ou(j, w, s, zf)) continue;
+    const ga = g0 + rnd((CH[j] - g0) / s) * s, gb = g0 + rnd((CH[j + 1] - g0) / s) * s, A = ga === pg ? P : pose(ga, w), B = P = pose(pg = gb, w),
+      dx = (B[0] - A[0]) / (gb - ga), dz = (B[1] - A[1]) / (gb - ga), X = A[0] + (g0 - ga) * dx - pc[0], Y = A[1] + (g0 - ga) * dz - pc[1],
+      Q = (X * pc[2] + Y * pc[3]) / pc[4], q = [X * pc[3] - Y * pc[2] + 120 * Q, Q], u = (dx * pc[2] + dz * pc[3]) / pc[4], v = dx * pc[3] - dz * pc[2] + 120 * u;
     Lo = ga - g0; Hi = gb - g0;
     lim(q[1] - .02, u); lim(zf / pc[4] - q[1], -u); lim(q[0] + 40 * q[1], v + 40 * u); lim(280 * q[1] - q[0], 280 * u - v);
     if (!(Lo < Hi)) continue;
@@ -54,6 +57,14 @@ function ser(n, w, s, g0, L, zf, a, b) {
     }
   }
 }
+// Chord j (VC, VE) at depth w wholly out of view, by m m at least: both
+// ends behind the near or past the far depth, or left or right of the view.
+function ou(j, w, m, zf) {
+  const a = 4 * j, f = pc[4], k = m * M.sqrt(f * f + 25600), l = VE[a] + w * VE[a + 2], d = VE[a + 1] + w * VE[a + 3],
+    L = VE[a + 4] + w * VE[a + 6], D = VE[a + 5] + w * VE[a + 7];
+  return d < .02 * f - m && D < .02 * f - m || d > zf + m && D > zf + m || 160 * d + l * f < -k && 160 * D + L * f < -k ||
+    160 * d - l * f < -k && 160 * D - L * f < -k;
+}
 function inr(q, U, V, e) {
   const z = q[1] + e * U, x = (q[0] + e * V) / z;
   return z > .02 && x > -400 && x < 640;
@@ -61,14 +72,18 @@ function inr(q, U, V, e) {
 // One frame from pc: stands (pillars, roof, tiers), crowd, the screen, far
 // rail, turf, poles, runners, near rail. Nothing deeper than 75 m past the
 // leader (150 at LIGHT); posts 4 px apart at least (8 with the screen in view).
-// VC: the chords near the view (their middle at 25 m out within the view
-// widened by their size); a straight's whole section is one.
+// VE: each chord end (CH) from pc, [across, along the view] at w 0 and per m
+// of w; VC: the chords whose band (w 11..40) may be in view (ou()). The
+// straight is one chord, always in view.
 function pan(xs) {
   const k = KN[tier], zf = pc[5] + (tier ? 75 : 150), L = vr ? 8 : 4;
-  VC = [];
-  for (let j = 1; j < CH.length; ++j) {
-    const a = CH[j - 1], b = CH[j], m = pose((a + b) / 2, 25), x = m[0] - pc[0], z = m[1] - pc[1], Z = x * pc[2] + z * pc[3], r = (b - a) * .6 + 20;
-    if (b - a > 1e3 || Z > -r && Z < zf + r && M.abs(x * pc[3] - z * pc[2]) < (Z + r) * 160 / pc[4] + r) VC.push(a, b);
+  VE = CRS === OC && []; VC = VE ? [] : [0];
+  if (VE) {
+    for (const g of CH) {
+      const m = pose(g, 0), x = m[0] - pc[0], z = m[1] - pc[1];
+      VE.push(x * pc[3] - z * pc[2], x * pc[2] + z * pc[3], -m[3] * pc[3] - m[2] * pc[2], m[2] * pc[3] - m[3] * pc[2]);
+    }
+    for (let j = 1; j < CH.length; ++j) if (!ou(j - 1, 25.5, 30, zf)) VC.push(j - 1);
   }
   ser('prail', 40, 12, 0, L, zf, 31727, -7.5);
   ser('pk', 40, 12 / k[2], 0, 0, zf, 0, 46496 + 12650 * ((t >> 3 ^ t) & 1));
@@ -91,4 +106,5 @@ function pan(xs) {
     if (p[1] > .02 && X > -160 && X < 400) rin(l, X, r * U, 28 + 6 * r, ph[l]);
   }
   ser('prail', DNR, k[4], 0, L, zf, 0xffff, 4.9);
+  VE = VC = 0;
 }
