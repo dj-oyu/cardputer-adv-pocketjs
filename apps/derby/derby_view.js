@@ -31,7 +31,8 @@ function load() {
     } else if (n === 'hd') p = ['nil', [], {kind: 'affineQ14Points', x: HD[0], y: HD[1], color: 0xad55, coeff: [16384, 0, 0, 16384, 0, 0]}];
     else if (n[0] === 'r' && i >= 0) p = ['runner', [F.h[i].coat, SILK[i], SILK[i] ^ 0x8410]];
     else if (n[0] === 't' && i >= 0) p = ['pt', [512 + 288 * i]];
-    else p = [n, k.concat(1 / k[2], M.ceil(k[2] / 2)).slice(0, n === 'crowd' ? 8 : n === 'stands' ? 4 : n === 'pk' ? 2 : 0)];
+    else if (n === 'crowd') p = [n, [k[1], k[6], k[7]].concat(KN[3].slice(0, 5))];
+    else p = [n, k.slice(0, n === 'stands' ? 4 : 0)];
     live[n] = H.register('derby.' + p[0], p[1], p[2]);
     queue.shift(); ++reg;
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
@@ -165,12 +166,12 @@ function course(c, x0, xs, close, gate, K) {
   };
   let q = f / 40, n;
   if (!K) {
-    // Stands and crowd at 40 m, a pillar every 12 m. The crowd's phase is
-    // wrapped and centred on the row: the VM's sin slows 7x past |x| 201.
+    // Stands and crowd at 40 m, a pillar every 12 m; the crowd's pattern is
+    // fixed on the stand (cells from its pillar j).
     const j = flo((x0 - 130 / q) / 12), a = sx(j * 12, 40), dx = 12 * q;
     n = mn(flo((700 - a) / dx), M.ceil((250 - a) / dx) + 1);
     dr('stands', [a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5)]);
-    dr('crowd', [a, dx, gy(40), -2.4 * q, n, j * k[2] * 2.39996 % (2 * PI) - 2 * PI * rnd(n * k[2] * .191), (t >> 3 ^ t) & 1, t & 1]);
+    dr('crowd', [a, gy(40) - 1.2 * q, a + n * dx, gy(40) - 1.2 * q, -2.4 * q, -2.4 * q, j * 12 * KN[3][5], (j + n) * 12 * KN[3][5]]);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
       dr('vis', [vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866]);
