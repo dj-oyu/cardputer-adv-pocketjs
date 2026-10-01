@@ -2,7 +2,9 @@
 
 2026-10-01、ブランチ `vm/flash-plan`（`vm/main` 806b10b から）。[js-to-ir.md](js-to-ir.md) §4 B の設計を具体化し、native（`pocket_proc.c`・`ksn_proc_plan.*`・`ksn_procedural.*`）と表の生成器を実装して host で検証した。**firmware への表の組み込み（CMake・`make_app_chunks.py`）と DERBY の移行はしていない**（q34 の実機測定の後の別作業、§8）。`apps/` は変えていない。実機は使っていない。
 
-**2026-10-01 追記（q35、ブランチ `vm/pan-stage3` 61c5250）: §2 の組み込みと DERBY の移行を実装し、実機で測った（§10）。**
+**2026-10-01 追記（ブランチ `vm/rom-plans`、`vm/main` 806b10b から。首振り（段階 3）は含まない）: §2 の組み込みと DERBY の 14 本の移行を実装し、実機で測った（§10）。**
+
+**2026-10-01 追記（q35、ブランチ `vm/pan-stage3` 61c5250）: 同じ組み込みを段階 3 込みで別に実装し実機で測った（§11）。`vm/main` b184202 を取り込んだときに、組み込みは `vm/rom-plans` のもの（同一）に一本化した。**
 
 数値の区別: **host 実測**（WSL。m32 は実機と同じ 4 B ポインタ・8 B JSValue、確保は TLSF の長さで課金）、**ビルド確認**（ESP-IDF v6.0.1 の Xtensa `-Os` オブジェクトの `size`/`nm`）、**推定**（大きさの式 × host で測った本数など）。
 
@@ -59,18 +61,19 @@ node tools/kasane_ir/emit_rom_plans.mjs OUT.c derby=apps/derby/derby_prog.js [ap
 - 出力: `const ksn_proc_rom_entry ksn_proc_rom_plans[]` と `const unsigned ksn_proc_rom_plans_count`。項目は `{名前, 命令, patch, 命令数, patch 数, 宣言した引数の数}`。1..64 命令、引数 8 個以下、`$n` が宣言の範囲内、を生成時に検査。
 - DERBY: 14 本、480 命令、patch 19 個（stands 2、crowd 4、runner 13）。
 
-**firmware への組み込み**（q35 で設計どおり実装。違いは下の「実装での違い」）:
+**firmware への組み込み**（設計どおり実装。違いは下の「実装での違い」）:
 
 1. **アプリの選択**: `@planDecoder` の印に `rom` を付けたアプリ（`/** @planDecoder rom */`）だけを flash 形にする。`make_app_chunks.py` がそれを見て、そのアプリの `@plan` チャンクを `APP_CHUNK_ROM`（アプリ id と元ファイルの組）に入れ、`APP_CHUNK_LOWER` の変換を `lower_plans.mjs --ids APP --file`（`--file` に `--ids` を通す小改修）にする。印の無いアプリは今の詰めた形のまま。1 つのアプリが両方の形を持つことは configure で拒む。
 2. **CMake**: `add_custom_command(OUTPUT build/generated/ksn_proc_rom_plans.c COMMAND node emit_rom_plans.mjs OUT app=src ... DEPENDS 元ファイル emit_rom_plans.mjs plan_js.mjs kir.mjs pack.mjs)`、`target_sources` に追加。`APP_CHUNK_ROM` が空なら `make_app_chunks.py` が空の表（`count 0`）を Python で直接書く（**Node は今と同じく `@plan` があるときだけ要る**）。
 3. **登録**: `app_session.c` がゲストの生成前に 1 度 `pocket_proc_rom_plans(ksn_proc_rom_plans, ksn_proc_rom_plans_count)` を呼ぶ（`reset()` は表を保つ。呼ばなければ全部の名前が未知）。extern の宣言を `ksn_proc_plan.h` に足す。
 4. **host**: `tools/games/run_derby.py` の `lower()` が同じ `--ids` の変換を通し、`test_derby_host.c` が表をリンクして設定する。その oracle（`js_cap_reg` は行の配列を読む）は、名前と引数から表の行を組み立てる形に直す。
 
-**実装での違い**（61c5250）:
+**実装での違い**:
 
 - `lower_plans.mjs --rom APP` は `--ids` と別の形にした: plan を `'APP.name'` の文字列に置き換えず、plan と復号器を消し、空になったオブジェクトリテラル（DERBY の `const T = {};`）も消す（§6.2 の「`T` なし」の形）。アプリは `'derby.' + 名前` で登録する。ディレクトリの変換（`run_derby.py` の `lower()`）は印を見て自分で `--rom` にする。印と変換の形が合わなければ止まる。
-- `APP_CHUNK_LOWER` は `元 生成物 形` の 3 つ組（`packed` か `rom:APP`）、表は `APP_CHUNK_ROM`（`APP=元`）から `emit_rom_plans.mjs` が `build/generated/ksn_proc_rom_plans.c` に書く。rom のアプリが無ければ `make_app_chunks.py` が空の表 `ksn_proc_rom_plans_none.c` を書き、`APP_CHUNK_ROM_C` がどちらかを指す。
-- host の `test_derby_host.c` の oracle は、名前の登録では表の命令に引数を当てた行（`ksn_proc_apply_binding`）を配列の経路と同じ解析と検査に通す。`run_derby.py` の `build()` が同じ生成器で表を作ってリンクする。
+- `APP_CHUNK_LOWER` は `元 生成物 形` の 3 つ組（`packed` か `rom:APP`）、表は `APP_CHUNK_ROM`（`APP=元`）から `emit_rom_plans.mjs` が `build/generated/ksn_proc_rom_plans.c` に書く。rom のアプリが無ければ `make_app_chunks.py` が空の表 `ksn_proc_rom_plans_none.c` を書き、`APP_CHUNK_ROM_C` がどちらかを指す（Node は今までどおり `@plan` があるときだけ要る）。
+- host の `test_derby_host.c` の oracle は、名前の登録では表の命令に引数を当てた行（`ksn_proc_apply_binding`）を配列の経路と同じ解析と検査に通す。`run_derby.py` の `build()` が同じ生成器で表を作ってリンクする。`run_pocket_proc_rom_qjs.py` は、比較相手の詰めた形を rom の印を外したコピーから作る。
+- `check_equivalence.py`: crowd は q27 から手書き IR が古いので compiled 同士で比べ、JS の関数との比較（`JS REFERENCE PASS`）を実質の検査にした。`check_lowered.py` は手書き IR の時点（e9b88bc）の非 plan 部分が前提の移行時の道具で、q27 から成り立たない（直していない）。
 
 **版の管理**: アプリの JS と表は**同じビルドが同じ `@plan` 関数から作る**ので、組み込みアプリでは食い違いが起きない。ninja は両方を同じ元ファイルに依存させるので、片方だけ古くなることもない。食い違いうるのは firmware の外から入るプログラム（SD・エディタ・保存したプログラム）だけで、そのときは未知の名前（`INVALID_ARGUMENT`）か引数の数の不一致で止まる。plan の中身だけが変わり引数の数が同じ場合は検出できない。必要になったら、名前に内容のハッシュを付ける（`'derby.crowd#5f3a1c'`、名前の比較は完全一致なので native の変更は要らない。ゲストに 1 本 7 B 増える）。
 
@@ -191,7 +194,34 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 
 工数（推定）: §2 の組み込みと host の DERBY の oracle 0.5〜1 日、DERBY の移行 0.5 日、実機測定 0.5 日。
 
-## 10. 実機の結果（q35、2026-10-01）
+## 10. 実機の結果（ブランチ `vm/rom-plans`、2026-10-01）
+
+同じ日に焼いた `vm/main` 806b10b と比べた。各 1 回。診断 image（`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DPOCKET_KEYTEST=ON`）を書き込んだ同じコマンドで DERBY を開き（書き込みの約 8 秒後、無線のリンクの前）、キーを押さずにデモで MID 420 秒（6 レース）、パドックで tab を 1 回押して HEAVY 250 秒（4 レース）。評価の余裕は heapprobe image（`derby` 変種、16 B 刻みの二分探索、2 回）。どちらも行番号表 OFF（ビルドごとに `-DSDKCONFIG` を分けて確認）。
+
+| | 基準 806b10b | `vm/rom-plans` | 差 |
+| --- | ---: | ---: | ---: |
+| ターン内のネイティブ空きの最小（`mn`）MID / HEAVY | 30,052 / 30,040 B（ゲート） | **48,028 / 48,108 B**（レース中） | **+18.0 / +18.1 KB** |
+| ターン境界の最小（`free`）MID / HEAVY | 37,664 / 37,496 B | 52,480 / 52,448 B | +14.8 / +15.0 KB |
+| 最大の連続（`lg` の最小）MID / HEAVY | 20,480 / 21,504 B | 31,744 / 31,744 B | +11.3 / +10.2 KB |
+| 評価の余裕（163,840 − 評価できる最小の上限） | 33,838 / 34,088 B | **38,686 / 38,733 B** | **+4.8 KB** |
+| 評価後のゲスト（heapprobe の `used`） | 114,316 B | 108,144 B | −6,172 B |
+| レース中のゲストの最大（`gu`）MID / HEAVY | 126,632 / 126,664 B | **120,136 / 120,148 B** | −6.5 KB |
+| 6 レースのゲストの最大（MID） | 125,656・126,620・126,572・126,616・126,632・126,596 | 119,116・120,080・120,136・120,108・120,040・120,076 | 増え続けない |
+| 登録 1 本（`reg_us`/本の中央値） | 1,252 µs | 564〜570 µs | −55% |
+| 　うち解析（`prep_us`/本） | 171〜172 µs | 163〜166 µs | 同じ |
+| PLANSZ（1 本の確保） | 40 + 12n B | `took` 44〜76 B（`blk` 40〜72） | |
+| fps（WIDE・FIELD・CLOSE・FINISH・HEAD ON・VISION）MID | 29.8・29.4・29.9・29.9・30.3・25.7 | 29.8・29.4・29.7・29.5・29.5・25.5 | −0.0〜0.8 |
+| VM の draw（`draw_us` の中央値、同じ順）MID | 2.14・2.58・1.76・1.96・1.07・2.90 ms | 2.38・2.80・2.06・2.23・1.24・3.30 ms | **+0.17〜0.40 ms（+9〜17%）** |
+
+- `LOADSTALL`・`FRAMEFAIL`・`LOADFAIL`・`DEMOFAIL`・OOM なし。
+- **`mn` を決めるターンがゲートの登録からレース中に移った**: 登録 1 本の一時的なピーク（詰めた文字列の復号と行の配列の読み、6〜7 KB）が引数の配列だけになり、常駐の plan も 25 本で約 8.7 KB 減った（§6 の見込み、`free` の +14.8 KB は常駐の削減とゲストの縮小の和）。
+- **描画が 9〜17% 遅い**: 全場面で `draw_us` が 0.17〜0.40 ms 増えた。begin で命令を flash から写す分と、`rom_matches()` の比較の相手が flash になった分と見られるが、image が違う（命令キャッシュで同じカーネルが 15% 動く）ので切り分けていない。fps への影響は 0〜0.8 fps（HEAD ON の 30.3 → 29.5 が最大）。同じ image で配列と名前を切り替える比較は未実施。
+- 一巡（診断 image）: パドックで `1` → レース → 写真 → 結果 → `R` の再生（`FINISH` の全桁が一致）→ `1` で次のパドック → 放置でデモ → キーで `DEMO END` → Back（`SAVE`）→ 起動し直すと `LOADED`。KEYTEST（`r`）の起動と Back。
+- 回帰（通常 image）: `smoke_device.py --cycles 20`（`SMOKE_OK 20`）、`stress_app.py`（`STRESS_APP_PASS`）、`test_app_resume.py`（`TEST_APP_RESUME_OK`）、MEGADEMO（NEWS・TWIST・ZENITH・LIMIT の全場面）・LCD CATCH・BIG WAVE の起動と Back。
+- host: `run_derby.py` の ASan と `--m32` 全 16 回で、806b10b とヒープの行以外（全画素ハッシュ・着順・完走時刻・種・デモ・R 再生・オッズ）が全行一致、循環コレクタだけのゴミ 0。m32 の評価後 106,640 → 100,944 B、評価のピーク 121,052 → 116,864 B。`tools/kasane_contract/run.sh`（`GAMES_M32=0`）、`run_pocket_proc_rom_qjs.py`（`--mutate` も）、`check_equivalence.py`（`EQUIVALENCE PASS`・`JS REFERENCE PASS`）が通る。
+- flash: 表は `.rodata` に約 6.2 KB（14 本・480 命令）、出荷する `derby_prog.js` は 6.1 KB → 1,584 B。
+
+## 11. 段階 3（首振り）を載せた実機の結果（q35、ブランチ `vm/pan-stage3`、2026-10-01）
 
 詳細は [derby-pan-memory.md](../apps/derby-pan-memory.md) §10。段階 3（首振り、plan 18 本・同時 30 本）を載せた DERBY で、同じ日の `vm/main` 806b10b と比べた（各 1 回、MID 6 レース・HEAVY 4 レース）。
 
@@ -210,6 +240,10 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 - DERBY の移行の前後で、host の全画素ハッシュ・着順・時計・種・デモ・R 再生・オッズが全桁一致（`run_derby.py` の ASan と `--m32`、全 16 回）。
 
 ## 確信の低い点
+
+- 実機の値は各 1 回（基準も同じ日に 1 回）。
+- 描画の +9〜17% が flash の読みの分か image の差かは切り分けていない。
+- 一巡の実機の操作で、DERBY の保存（点数・レース数）が進んだ（`SAVE points=6370 race=15`）。戻していない。
 
 - 名前の経路の実機の検証は DERBY の台本なしのデモ（10 レース × 構成）と heapprobe だけ。一巡（パドック→R 再生→復帰）、smoke・stress・resume は、(e) が満たせなかったので走らせていない。
 - native の削減は、host で測った生きている plan の集合に実機の大きさの式と TLSF の丸めを当てた**推定**。実機の空き・`mn`・`lg` では測っていない。
