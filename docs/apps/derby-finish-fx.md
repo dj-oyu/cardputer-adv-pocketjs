@@ -2,6 +2,52 @@
 
 2026-10-02、ブランチ `vm/finish-fx`（`vm/main` fac3552 から。途中で `vm/main` ad3f4a6（ser-native・楕円 WIDE 2 の w=−3）をマージ、01c3f26）。ユーザーの決定（FINISH のスローを特別な画にする、残像・ブラーは高いので使わない、既定は FINISH D と HEAD ON ①、ダストは馬群のいる範囲に集める、スロー中の脚のコマを増やす）の実装と測定。数値には **実測（host）／実測（実機）／推定** を付ける。見た目の評価は書かない。**実機の数値はすべて vm/main をマージした後のコード**で取った。
 
+## 追記: 軽くした版（cd56cc8、2026-10-02）
+
+リードの指示（FINISH ≤ 1.0 ms、HEAD ON ≤ 0.5 ms）で費用を削った。**HEAD ON はほぼ届き（0.54 ms）、FINISH は届かなかった（約 1.76 ms）**。この節より下（§1〜§7）は削る前（dce2e78）の記録。
+
+- **変えたこと**:
+  - 奥と中間を 1 本のダストの列にまとめた。スロットのハッシュが `GR` を超えると粒（長さ `L`）、それ以外は点。パララックスは 1 本（FINISH 1、上昇 0.24 px/フレーム）。FINISH・HEAD ON とも draw が 1 回減る。
+  - 帯は 1 本 6 区間（10 → 6。`N`・`SEG`、傾き `TILT` は同じ勾配になるよう 0.59）。
+  - 点は FINISH で 20 px に 1 個（14）、HEAD ON で 14 px に 1 個（10）。ボケは 60 px に 1 個（48）。
+  - `KN[4]` は 0〜6 が FINISH、7〜13 が HEAD ON（範囲 4 つ、ダストとボケのスロット幅、帯の本数）。続いて 14 が上昇、15・16 がパララックス、17 が漂い、18 が t、19 が帯の間隔。
+- **host**（MID の台本の平均の増分）:
+  - FINISH: draw +3、線分 +91、ラスタ +1,794、ステップ +1,253（削る前は +4・+134・+1,868・+1,840）。
+  - HEAD ON: draw +1、ステップ +381（削る前は +2・+645）。
+  - スロー外の画素は vm/main と全行一致（m32・x64、種の混在と楕円）。
+  - ゲスト（m32）: 評価後 +1,272 B、評価のピーク +1,348 B、GC 後の最大 +1,572 B（vm/main ad3f4a6 比）。
+- **実機**: 統合後の診断 image（d9f1ce8 ＋ 種の固定と切り替えの一時変更）、MID、330 秒。全部ありは 2 本、ほかは各 1 本。
+
+| | FINISH 効果なし | FINISH 全部あり | 差 | HEAD ON 効果なし | HEAD ON ① | 差 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| JS のターン | 10.92 ms | 12.28 ms | **+1.35 ms** | 9.59 ms | 10.13 ms | **+0.54 ms** |
+| うち VM の draw | 1.73 ms | 2.62 ms | +0.89 ms | 1.09 ms | 1.42 ms | +0.34 ms |
+| render | 9.05 ms | 9.46 ms | +0.41 ms | 8.91 ms | 8.90 ms | 0 |
+| fps | 30.2 | 29.8 | | 29.4 | 29.9 | |
+| draw / ステップ / 線分 | 15 / 705 / 215 | 18 / 1,943 / 308 | +3 / +1,238 / +93 | 10 / 489 / 157 | 11 / 870 / 168 | +1 / +381 / +11 |
+
+- **FINISH の効果は約 1.76 ms**（JS 1.35 + render 0.41）。目標 1.0 ms まで 0.76 ms 足りない。
+- **HEAD ON ① は 0.54 ms**。目標 0.5 ms をわずかに超える。
+- **脚の補間**は JS +0.25 ms（脚の補間なし 12.03 → 全部あり 12.28 ms。1 本どうしで、前回の測定の +0.14 ms と揺れの幅が大きい）。
+- **メモリ（実機）**:
+  - ゲストの最大: 134,120〜134,964 B（6 レース、増え続けない）。
+  - 評価の余裕: **29,234 B**（heapprobe）。
+  - ターン内の最小: 32,288 B。ゲートのターンの最小: 34,212 B。
+  - plan の枠: 31。
+  - 失敗の記録は無い。
+- **回帰（通常 image）**: `SMOKE_OK 20`。DERBY・MEGADEMO・LCD CATCH・BIG WAVE の起動と Back を確認。DERBY の保存は 5870 / 19 のまま。最後に vm/main（89a71ae）の通常 image に戻し、`HOME_READY` を確認した。
+- **FINISH をあと 0.76 ms 削る余地**（推定）:
+  - 帯を片側 3 → 2 本: render −0.14 ms・VM 約 −0.1 ms。
+  - 帯のラスタ（全幅 6 本で約 1,500 画素、render 0.41 ms の大半）を短くする（全幅にしない）: render 最大 −0.2 ms。
+  - ボケを外す: VM 約 −0.2 ms、JS 約 −0.13 ms。
+  - 層ごとの JS（`flo`・`%`・パンの計算）を 2〜3 フレームに 1 回にする: 約 −0.1〜0.2 ms。
+  - 帯を 1 本の plan の中で上下とも 1 回の draw にまとめるのは、すでにしている。
+  - これらを全部入れて、ようやく 1.0 ms 前後（推定）。見た目の判断が要るので入れていない。
+- **画**:
+  - 削る前と後の並置: [derby-finish-fx-variants.png](derby-finish-fx-variants.png)・[derby-finish-fx-headon-variants.png](derby-finish-fx-headon-variants.png)。列は「効果なし・削る前（dce2e78）・削った後」。
+  - GIF: [derby-finish-fx-before.gif](derby-finish-fx-before.gif)・[derby-finish-fx.gif](derby-finish-fx.gif)・[derby-finish-fx-headon-before.gif](derby-finish-fx-headon-before.gif)・[derby-finish-fx-headon-after.gif](derby-finish-fx-headon-after.gif)。
+  - 脚の補間: [derby-finish-fx-legs.png](derby-finish-fx-legs.png)・[off](derby-finish-fx-legs-off.gif)・[on](derby-finish-fx-legs-on.gif)。
+
 ## 結論
 
 - **何を足したか**:

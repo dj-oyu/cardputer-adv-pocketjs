@@ -116,26 +116,27 @@ function paint(c, xs, close, gate, extra) {
   if (scene !== 'race' || cm === 6) vr = null;
   if (vr) ++von;
   H.beginFrame(4);
-  // The dust and the band (KN[4]; docs/apps/derby-finish-fx.md): layers 0, 1
-  // (dust: far, mid), HEAD ON's horses, 2 (bokeh), 3 (band). A layer's slots
-  // scroll by its parallax times d, the pan since the cut (cx, px at 16 m)
-  // and the drift, within the camera's area; t counts from the cut.
-  const e = KN[4], q = scene !== 'race' ? -1 : cm === 3 ? 0 : cm === 6 ? 9 : -1;
-  if (e[26] !== q) e[24] = t, e[25] = cx, e[26] = q;
-  if (q === 9) dr('hd', []);
+  // The dust and the band (KN[4]; docs/apps/derby-finish-fx.md): 0 the dust,
+  // HEAD ON's horses, 1 the bokeh, 2 the band. A row of slots scrolls by its
+  // parallax times d, the pan since the cut (cx, px at 16 m) and the drift,
+  // within the camera's area; t counts from the cut.
+  const e = KN[4], q = scene !== 'race' ? -1 : cm === 3 ? 0 : cm === 6 ? 7 : -1;
+  if (e[22] !== q) e[20] = t, e[21] = cx, e[22] = q;
+  if (q === 7) dr('hd', []);
   else course(c, cx, xs, close, gate);
-  for (let j = 0, f = t - e[24], d = e[21] * f - (q ? 0 : (cx - e[25]) * c[0] / 16); j < (q < 0 ? 0 : 4); ++j) {
+  for (let j = 0, f = t - e[20], d = e[17] * f - (q ? 0 : (cx - e[21]) * c[0] / 16), r = q ? 0 : e[14] * f; j < (q < 0 ? 0 : 3); ++j) {
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
     // down the course; each horse scaled by its own 1/z (JS divides),
     // the last (farthest) first.
-    if (j === 2 && q) for (let i = 7; i >= 0; --i) {
+    if (j === 1 && q) for (let i = 7; i >= 0; --i) {
       const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
       dr('fr', 120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s));
     }
-    const w = e[q + 4 + j], o = e[18 + j] * d, k = flo(-o / w) - 1, r = j ? 0 : e[q + 8] * f;
+    const w = e[q + 4 + j];
     if (!w) continue;
-    if (j > 2) dr('band', w, flo(f / e[23]) % 6);
-    else dr(j - 2 ? 'dust' : 'bokeh', f * e[22], e[q] + k * w + o, k * 2.39996 % (2 * PI), w, j * 2, e[q + 1], e[q + 2] - r, e[q + 3] + r);
+    if (j > 1) { dr('band', w, flo(f / e[19]) % 6); continue; }
+    const o = e[15 + j] * d, k = flo(-o / w) - 1;
+    dr(j ? 'bokeh' : 'dust', f * e[18], e[q] + k * w + o, k * 2.39996 % (2 * PI), w, e[q + 1], e[q + 2] - r, e[q + 3] + r);
   }
   if (extra) dr(extra[0], extra[1]);
   H.commit();
