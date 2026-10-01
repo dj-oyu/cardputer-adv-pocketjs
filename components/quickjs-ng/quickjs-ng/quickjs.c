@@ -27311,6 +27311,57 @@ static __exception int js_parse_function_decl(JSParseState *s,
                                               JSAtom func_name, const uint8_t *ptr,
                                               int start_line, int start_col);
 static JSFunctionDef *js_parse_function_class_fields_init(JSParseState *s);
+/* Optional capacity reclamation must not throw or trip the OOM canary.
+   The old allocation remains owned by the parser on allocator failure. */
+static bool js_parse_try_shrink(JSRuntime *rt, void *ptr, size_t size,
+                                void **out)
+{
+    size_t old_size;
+    void *next;
+    if (size == 0) {
+        js_free_rt(rt, ptr);
+        *out = NULL;
+        return true;
+    }
+    if (!ptr)
+        return false;
+    old_size = rt->mf.js_malloc_usable_size(ptr);
+    if (size >= old_size)
+        return false;
+    next = rt->mf.js_realloc(rt->malloc_state.opaque, ptr, size);
+    if (!next)
+        return false;
+    rt->malloc_state.malloc_size +=
+        rt->mf.js_malloc_usable_size(next) - old_size;
+    *out = next;
+    return true;
+}
+
+static void js_parse_trim_capacity(JSFunctionDef *fd)
+{
+    JSRuntime *rt = fd->ctx->rt;
+    void *next;
+    if (!dbuf_error(&fd->byte_code) &&
+        fd->byte_code.size < fd->byte_code.allocated_size &&
+        js_parse_try_shrink(rt, fd->byte_code.buf, fd->byte_code.size, &next)) {
+        fd->byte_code.buf = next;
+        fd->byte_code.allocated_size = fd->byte_code.size;
+    }
+#define TRIM_PARSE_ARRAY(field, count, capacity) \
+    do { \
+        if (fd->count < fd->capacity && \
+            js_parse_try_shrink(rt, fd->field, \
+                                sizeof(*fd->field) * fd->count, &next)) { \
+            fd->field = next; \
+            fd->capacity = fd->count; \
+        } \
+    } while (0)
+    TRIM_PARSE_ARRAY(label_slots, label_count, label_size);
+    TRIM_PARSE_ARRAY(vars, var_count, var_size);
+    TRIM_PARSE_ARRAY(cpool, cpool_count, cpool_size);
+#undef TRIM_PARSE_ARRAY
+}
+
 static __exception int js_parse_function_decl2(JSParseState *s,
                                                JSParseFunctionEnum func_type,
                                                JSFunctionKindEnum func_kind,
@@ -40833,6 +40884,8 @@ done:
        by just using next_token() here for normal functions, but it is
        necessary for arrow functions with an expression body. */
     reparse_ident_token(s);
+
+    js_parse_trim_capacity(fd);
 
     /* create the function object */
     {
