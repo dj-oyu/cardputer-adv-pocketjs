@@ -11,6 +11,8 @@
 //   node tools/games/pancost/crowd_look.mjs sheet [--out DIR]   one PNG, x3
 //   node tools/games/pancost/crowd_look.mjs gif [--out DIR]     8 frames a candidate
 //   node tools/games/pancost/crowd_look.mjs interp         linear-in-bay error (pan)
+//   --set look|bprime   the candidates shown (look: A4..F, the default;
+//                       bprime: B and B'1..3, derby-crowd-bprime-*)
 //
 // Scenes: LIGHT/MID/HEAVY x {side WIDE, panning WIDE} x leader at 300 / 800 m.
 // The panning unit is forced (the game takes it only past 60 m from a unit).
@@ -150,7 +152,7 @@ function pan(name, h) {
         rp += ${GOLD};
       }
       ${h.post || ''}
-      base += W;
+      ${h.end || 'base += W;'}
     }
   },`;
 }
@@ -173,6 +175,37 @@ const ridge = {pre: `let rc = ${RID0};`, row: `
         line((j * .15 + .5) * W + base, (j * .5 + 1.8) * ms + y, rc);
         line(base + W, vl, rc);
         rc = ${K(RID0, RID1)} - rc;`};
+// B'2: the ridge, half of it a frame. A cell is a pair of slots and each
+// cell-row draws one slot's head, the left on even rows and the right on odd
+// ones: [bs, bs + h] with bs += 2h and h = -h a row (the right slot's head
+// is drawn from its right end; its sway mirrors). Every cell starts on its
+// left slot, so the slots drawn form a checkerboard; the JS moves the whole
+// series one slot (4 m) on odd frames, so the drawn half swaps every frame
+// (today's crowd's hand). One colour: the row flip (4 instructions) does not
+// fit pan's 64 with this.
+const ridgeHalf = {
+  side: {cell: `
+      let h = W;
+      let bs = base;`, row: `
+        const j = sin(rp);
+        const vl = ms * .3 + y;
+        move(bs, vl);
+        line((j * .15 + .5) * h + bs, (j * .5 + 1.8) * ms + y, ${RID0});
+        line(bs + h, vl, ${RID0});
+        bs += h + h;
+        h = -h;`, post: 'base += W;'},
+  // pan: base itself walks (no copy, 2 instructions) and is set to the next
+  // cell's start, px q, at the end (W was px q - base).
+  pan: {cell: `
+      let h = W * .5;`, row: `
+        const j = sin(rp);
+        const vl = ms * .3 + y;
+        move(base, vl);
+        line((j * .15 + .5) * h + base, (j * .5 + 1.8) * ms + y, ${RID0});
+        line(base + h, vl, ${RID0});
+        base += h + h;
+        h = -h;`, end: 'base = px * q;'},
+};
 // Clothes: two strips a cell-row (break point moved by sin(rp)), colours
 // ca (flips a row) and cb (flips a cell); a dot above the break in colour
 // tp, which the JS swaps white / dim every 2 frames (all dots at once).
@@ -211,12 +244,22 @@ const CANDS = [
   {id: 'D', label: '塗り＋紙吹雪', h: confetti, per: 1, fill: {from: 0, solid: true, colour: BASE}, tp: t => t * 2.1 % (2 * PI)},
   {id: 'E', label: '人影 2＋ウェーブ', h: wave, per: 2, tp: t => t * .3 % (2 * PI)},
   {id: 'F', label: '手前 1 段だけ人影', h: person(), per: 3, front: true, fill: {from: 2.4 + .3, lines: 3, colour: STRIPE, upper: true}},
+  // B' (derby-background-cost.md, "B' の変形"): B without the fill, B'1 with
+  // half of it a frame (pair: a cell is two 4 m slots), B'1 with 6 m heads.
+  {id: 'B1', label: "B'1 稜線（塗りなし）", h: ridge, per: 3},
+  {id: 'B2', label: "B'2 B'1＋チェッカー", h: ridgeHalf, per: 3, pair: true},
+  {id: 'B3', label: "B'3 稜線 2 山/12 m（塗りなし）", h: ridge, per: 2},
 ];
+// Which candidates a sheet / GIF set shows, and the file names it writes.
+const SETS = {
+  look: {ids: ['A4', 'A2', 'A1', 'B', 'C', 'D', 'E', 'F'], sheet: 'derby-crowd-look-preview.png', gif: 'derby-crowd-look-'},
+  bprime: {ids: ['B', 'B1', 'B2', 'B3'], sheet: 'derby-crowd-bprime-preview.png', gif: 'derby-crowd-bprime-', gifIds: ['B1', 'B2', 'B3']},
+};
 const planCache = new Map();
 for (const c of CANDS) {
   const key = JSON.stringify(c.h);
   if (!planCache.has(key)) {
-    const src = side('s' + c.id, c.h) + '\n' + pan('p' + c.id, c.h), m = plansOf(src);
+    const src = side('s' + c.id, c.h.side || c.h) + '\n' + pan('p' + c.id, c.h.pan || c.h), m = plansOf(src);
     const e = {side: m.get('s' + c.id), pan: m.get('p' + c.id), src};
     for (const k of ['side', 'pan']) {
       const cp = compilePlan(e[k]);
@@ -250,6 +293,15 @@ function sideScene(tier, g, t) {
       const r0 = c.fill.upper ? k[1] - 1 : k[1], m = c.fill.solid ? Math.ceil(r0 * 2.4 * q) + 1 : r0 * c.fill.lines;
       if (r0 > 0) out.push(...hlSide(c.fill.from, c.fill.solid ? -r0 * 2.4 / (m - 1) : -2.4 / c.fill.lines, m, c.fill.colour));
     }
+    if (c.pair) {
+      // Pairs of slots (cw m) on a world grid, the grid moved one slot on odd
+      // frames; from one pair left of the first pillar, whole pairs up to
+      // today's crowd's right end.
+      const sl = 12 / m, cw = 2 * sl, sh = t & 1, ci = flo(j * 12 / cw) - 1, xs = sx(ci * cw + sh * sl);
+      const cells = flo((a + n * dx - xs) / (cw * q)), p = (ci * rows + sh * .5) * GOLD;
+      out.push({plan: c.side, in: [xs, sl * q, gy, -2.4 * q, cells, p % (2 * PI) - 2 * PI * rnd(cells * rows * GOLD / 4 / PI), 0, 0], args: [rows]});
+      return out;
+    }
     out.push({plan: c.side, in: [a, dx / m, gy, -2.4 * q, n * m, ph % (2 * PI) - 2 * PI * rnd(half / 2 / PI), 0, c.tp ? c.tp(t) : 0], args: [rows]});
     return out;
   };
@@ -269,9 +321,9 @@ function panScene(tier, g, t) {
   // ser() of derby_scene.js; parity false: no checkerboard drop (candidates),
   // ph: the per-point phase increment the plan adds (2.39996 a column for pk,
   // a bay's for the candidates).
-  function ser(plan, args, w, s, L, a, b, {parity = true, dph = 2.39996, plus = 1.8} = {}) {
+  function ser(plan, args, w, s, L, a, b, {parity = true, dph = 2.39996, plus = 1.8, off = 0} = {}) {
     const out = [];
-    const q = S.SQ = pj(0, w), uu = S.SU = pc[2] / pc[4], v = S.SV = pc[3] + 120 * uu;
+    const q = S.SQ = pj(off, w), uu = S.SU = pc[2] / pc[4], v = S.SV = pc[3] + 120 * uu;
     S.Lo = -1e9; S.Hi = 1e9;
     lim(q[1] - .02, uu); lim(zf / pc[4] - q[1], -uu); lim(q[0] + 40 * q[1], v + 40 * uu); lim(280 * q[1] - q[0], 280 * uu - v);
     if (!(S.Lo < S.Hi)) return out;
@@ -308,7 +360,9 @@ function panScene(tier, g, t) {
       const m = c.fill.solid ? Math.min(255, Math.ceil(r0 * 2.4 * qn) + 1) : r0 * c.fill.lines;
       if (r0 > 0) out.push(...hl(6 - c.fill.from, c.fill.solid ? -r0 * 2.4 / (m - 1) : -2.4 / c.fill.lines, m, c.fill.colour));
     }
-    out.push(...ser(c.pan, [rows], 40, 12 / c.per, 0, 0, c.tp ? c.tp(t) : 0, {parity: false, dph: rows * GOLD, plus: 0}));
+    // pair: cells of two slots, the series moved one slot (off) on odd frames.
+    const cw = (c.pair ? 24 : 12) / c.per;
+    out.push(...ser(c.pan, [rows], 40, cw, 0, 0, c.tp ? c.tp(t) : 0, {parity: false, dph: rows * GOLD, plus: c.pair ? (t & 1) * .5 * GOLD : 0, off: c.pair ? (t & 1) * cw / 2 : 0}));
     return out;
   };
   return {today, cand, pc, zf, pj, stands};
@@ -457,15 +511,18 @@ function frame(s, t, which, win, check) {
 }
 
 const argv = process.argv.slice(2), outDir = argv.includes('--out') ? path.resolve(argv[argv.indexOf('--out') + 1]) : path.join(ROOT, 'docs/apps');
-const COLS = ['today', ...CANDS];
+// --set look (A4..F, the first sheet) or bprime (B and its variants B'1..3).
+const SET = SETS[argv.includes('--set') ? argv[argv.indexOf('--set') + 1] : 'look'];
+if (!SET) { console.log('--set look|bprime'); process.exit(2); }
+const SHOWN = SET.ids.map(id => CANDS.find(c => c.id === id)), COLS = ['today', ...SHOWN];
 function table() {
   console.log('plans (instructions / registers, compiler): today crowd ' + compilePlan(TODAY.get('crowd')).count + ', pk ' + compilePlan(TODAY.get('pk')).count + ', hl ' + compilePlan(TODAY.get('hl')).count);
-  for (const c of CANDS) console.log(`${c.id} ${c.label}: side ${c.sideC.count} instr / ${c.sideC.regs} regs, pan ${c.panC.count} / ${c.panC.regs}${c.fill ? ' + hl (27)' : ''}${c.sideC.warnings.length ? ' warn ' + c.sideC.warnings : ''}`);
+  for (const c of SHOWN) console.log(`${c.id} ${c.label}: side ${c.sideC.count} instr / ${c.sideC.regs} regs, pan ${c.panC.count} / ${c.panC.regs}${c.fill ? ' + hl (27)' : ''}${c.sideC.warnings.length ? ' warn ' + c.sideC.warnings : ''}`);
   console.log('\nscene | form | draws | steps | SIN | points | lines | line px | draw us (est) | band us (est) | x today | plan only us (fill as a Kasane rect) | x today');
-  const sum = {}, sumP = {};
+  const sum = {}, sumP = {}, sumB = {};
   for (const s of SCENES) {
     const win = windowOf(s);
-    let base = 0;
+    let base = 0, baseB = 0;
     for (const c of COLS) {
       const id = c === 'today' ? 'today' : c.id;
       // Averaged over 8 frames (the checkerboard halves alternate).
@@ -476,6 +533,8 @@ function table() {
       }
       const us = usDraw(acc), up = usDraw(pa);
       if (id === 'today') base = us;
+      if (id === 'B') baseB = us;
+      if (baseB) (sumB[id] ??= []).push(us / baseB);
       (sum[id] ??= []).push(us / base);
       (sumP[id] ??= []).push(up / base);
       console.log(`${sceneName(s)} | ${id} | ${acc.draws.toFixed(1)} | ${acc.steps.toFixed(0)} | ${acc.sins.toFixed(0)} | ${acc.points.toFixed(0)} | ${acc.lines.toFixed(0)} | ${acc.linePx.toFixed(0)} | ${us.toFixed(0)} | ${usBand(acc).toFixed(0)} | ${(us / base).toFixed(2)} | ${up.toFixed(0)} | ${(up / base).toFixed(2)}`);
@@ -484,20 +543,21 @@ function table() {
   const mean = o => Object.entries(o).map(([k, v]) => `${k} ${(v.reduce((a, b) => a + b) / v.length).toFixed(2)}`).join(', ');
   console.log('\nmean ratio to today (draw us, 12 scenes): ' + mean(sum));
   console.log('the same, fill drawn by Kasane instead (plan only): ' + mean(sumP));
+  if (SET === SETS.bprime) console.log('mean ratio to B (draw us, 12 scenes): ' + mean(sumB));
   console.log('stepper = plan_js.mjs float32 reference on every draw: PASS');
 }
 function sheet() {
   const cells = SCENES.map(s => { const win = windowOf(s); return COLS.map(c => frame(s, 0, c === 'today' ? 'today' : c, win).I); });
-  png(path.join(outDir, 'derby-crowd-look-preview.png'), scale(grid(cells), +(process.env.SCALE || 3)));
+  png(path.join(outDir, SET.sheet), scale(grid(cells), +(process.env.SCALE || 3)));
   console.log('rows: ' + SCENES.map(sceneName).join(', '));
-  console.log('columns: today, ' + CANDS.map(c => c.id + ' ' + c.label).join(', ') + '; t = 0, x3');
+  console.log('columns: today, ' + SHOWN.map(c => c.id + ' ' + c.label).join(', ') + '; t = 0, x3');
 }
 function gifs() {
   const wins = SCENES.map(windowOf);
-  for (const c of CANDS) {
+  for (const c of (SET.gifIds || SET.ids).map(id => CANDS.find(c => c.id === id))) {
     const frames = [];
     for (let t = 0; t < 8; t++) frames.push(scale(grid(SCENES.map((s, i) => [frame(s, t, 'today', wins[i]).I, frame(s, t, c, wins[i]).I])), 2));
-    gif(path.join(outDir, `derby-crowd-look-${c.id}.gif`), frames, 3);
+    gif(path.join(outDir, `${SET.gif}${c.id}.gif`), frames, 3);
   }
   console.log('each GIF: columns today | candidate, rows as the sheet, t = 0..7 at race pace (16 m/s), x2, 30 ms a frame');
 }
@@ -534,6 +594,6 @@ if (!process.env.NOMAIN) switch (argv[0]) {
   case 'sheet': sheet(); break;
   case 'gif': gifs(); break;
   case 'interp': interp(); break;
-  case 'src': for (const c of CANDS) console.log(c.src); break;
+  case 'src': for (const c of SHOWN) console.log(c.src); break;
   default: console.log('usage: crowd_look.mjs table|sheet|gif|interp|src [--out DIR]'); process.exit(2);
 }
