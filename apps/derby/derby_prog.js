@@ -18,14 +18,14 @@ function prog() {
 const KN = [[3, 2, 3, 3, 8, 10, 263170, 921095], [4, 3, 4, 5, 5, 7, 1083458, 3792103],
   [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1, 2.5],
   // The dust and the band (docs/apps/derby-finish-fx.md; sizes and colours
-  // are the dust, bokeh and band plans' first lines). 0..8 FINISH, 9..17
-  // HEAD ON: the dust's area (x from, x to, y from, height), the layers far,
-  // mid (dust), near (bokeh) as slot px (0: off), the band's strokes a side,
-  // the far layer's rise px a frame. 18..20 each layer's parallax (1: the
-  // track at 16 m), 21 the drift px a frame a unit of parallax, 22 t a frame,
-  // 23 frames a band redraw. (24..26: the cut's frame, cx and camera,
+  // are the dust, bokeh and band plans' first lines). 0..6 FINISH, 7..13
+  // HEAD ON: the dust's area (x from, x to, y from, height), the dust's and
+  // the bokeh's slot px (0: off), the band's strokes a side. 14 the dust's
+  // rise px a frame (FINISH), 15, 16 the dust's and the bokeh's parallax (1:
+  // the track at 16 m), 17 the drift px a frame a unit of parallax, 18 t a
+  // frame, 19 frames a band redraw. (20..22: the cut's frame, cx and camera,
   // appended by paint().)
-  [20, 220, 50, 72, 14, 30, 48, 3, .24, 60, 180, 30, 50, 10, 20, 0, 0, 0, 1, .5, 1, .15, .003, 3]];
+  [20, 220, 50, 72, 20, 60, 3, 60, 180, 30, 50, 14, 0, 0, .24, 1, 1, .15, .003, 3]];
 let tier = 1;
 const T = {
   // rail: the running rail. Posts from the top rail to the ground, a top and
@@ -442,24 +442,24 @@ const T = {
   // look while the row scrolls. The row stops at xR; y within y0..y0 + yH.
   // Every sin argument stays within +-200: newlib's sinf takes a slow path
   // beyond about 201.
-  // dust: one layer of specks (l 0: far) or grains (a line l px long: mid),
-  // in C0 or C1, or in C2 while its twinkle (rate TW) is over SPK. y drifts
-  // with t (the JS scales it), x with o.
-  /** @plan dust inputs: t, o, h0, w, l, xR, y0, yH */
+  // dust: specks (1 px) and, on slots whose hash is over GR, grains (L px
+  // long), in C0 and C1, or in C2 while the twinkle (rate TW) is over SPK. y
+  // drifts with t (the JS scales it), x with o.
+  /** @plan dust inputs: t, o, h0, w, xR, y0, yH */
   dust() {
-    const SPK = .8, TW = 100, C0 = 0xffd9, C1 = 0xe695, C2 = 0xffff, GA = 2.39996;
-    let x = o, h = h0, c = C0;
-    for (let a = 0; a < 1; a++) {
-      if (.5 > l) break;
-      c = C1;
-    }
+    const SPK = .8, TW = 100, GR = .5, L = 2, C0 = 0xffd9, C1 = 0xe695, C2 = 0xffff, GA = 2.39996;
+    let x = o, h = h0;
     const hs = yH * .5, yc = y0 + hs, jx = w * .45, tw = t * TW;
     for (let i = 0; i < 40; i++) {
       if (x > xR) break;
       const u = sin(h);
       const cx = u * jx + x;
       const py = sin(u * 137 + t) * hs + yc;
-      let cu = c;
+      let cu = C0, l = 0;
+      for (let a = 0; a < 1; a++) {
+        if (GR > sin(u * 53)) break;
+        cu = C1; l = L;
+      }
       for (let a2 = 0; a2 < 1; a2++) {
         if (SPK > sin(u * 97 + tw)) break;
         cu = C2;
@@ -471,8 +471,8 @@ const T = {
 
   // bokeh: one layer of N octagons from radius R0 (+-30% by hash) inwards 1
   // px apart, the rim in RIM, the rest in FILL (N 1: a ring). y drifts with
-  // t (the JS scales it), x with o; l is not read (dust's inputs).
-  /** @plan bokeh inputs: t, o, h0, w, l, xR, y0, yH */
+  // t (the JS scales it), x with o.
+  /** @plan bokeh inputs: t, o, h0, w, xR, y0, yH */
   bokeh() {
     const R0 = 6, N = 1, RIM = 0x7b28, FILL = 0x3984, GA = 2.39996;
     let x = o, h = h0;
@@ -494,23 +494,23 @@ const T = {
     }
   },
 
-  // band: strokes hand-drawn lines at the top and the bottom, each 10
+  // band: strokes hand-drawn lines at the top and the bottom, each N
   // segments of SEG px with a jitter of AMP0 + AMP1 * stroke px re-drawn
   // whenever boil (0..5, the JS cycles it: six drawings, as cel boil) changes, tilted up to TILT px a segment; the top's first at
   // y BT, the bottom's at BS - BT, the next GAP px further in (lines close
   // together read as one thick stroke); in white, sepia0, sepia1 by turns.
   /** @plan band inputs: strokes, boil */
   band() {
-    const white = 0xffff, sepia0 = 0x7202, sepia1 = 0xcd0d, BT = 15, BS = 146, GAP = 2.5, TILT = .35, AMP0 = .8, AMP1 = .4, SEG = 25.2;
+    const white = 0xffff, sepia0 = 0x7202, sepia1 = 0xcd0d, BT = 15, BS = 146, GAP = 2.5, TILT = .59, AMP0 = .8, AMP1 = .4, N = 6, SEG = 42;
     let y0 = BT, sg = GAP, c0 = white, c1 = sepia0, c2 = sepia1, hb = boil * 2.29;
     for (let s = 0; s < 2; s++) {
       let yj = y0, amp = AMP0;
       for (let j = 0; j < strokes; j++) {
         const e = sin(hb * .161 + 1.3);
         const tilt = e * TILT;
-        let xb = -6, yb = yj + e - tilt * 5, hq = hb;
+        let xb = -6, yb = yj + e - tilt * (N * .5), hq = hb;
         move(xb, yb);
-        for (let q = 0; q < 10; q++) {
+        for (let q = 0; q < N; q++) {
           xb += SEG; yb += tilt; hq += 2.39996;
           line(xb, sin(hq) * amp + yb, c0);
         }
