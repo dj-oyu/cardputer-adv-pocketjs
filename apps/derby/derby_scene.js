@@ -3,7 +3,11 @@
 // enter the stalls), race, photo (still), res (result).
 function enter(s) {
   scene = s; t = 0; need = 1;
-  if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h))); }
+  if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h, F.o)) + (F.o ? ' OVAL' : ''));
+    CRS = F.o ? OC : SC; CH = [-1e4];
+    if (F.o) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
+    CH.push(1e4);
+  }
   if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
   if (s === 'photo') want(['photo']);
@@ -48,7 +52,7 @@ function hud(tx) {
   let s;
   if (scene === 'pad') {
     const h = F.h[pick];
-    s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M STRAIGHT  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
+    s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M ' + (F.o ? 'OVAL' : 'STRAIGHT') + '  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
       STY[h.sty] + ' x' + od[pick], 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
     for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]));
     R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
@@ -100,7 +104,7 @@ function paint(c, xs, close, gate, extra) {
   if (pc) {
     // Panning: the same tests on the four corners (the bottom edge is on
     // the horizon); vr the rect inside the face, vq its edges [x, 1/Z'].
-    const p = pj(a[0], a[1]), q = pj(b[0], b[1]), x0 = p[0] / p[1], x1 = q[0] / q[1];
+    const p = pj(a), q = pj(b), x0 = p[0] / p[1], x1 = q[0] / q[1];
     vq = [x0, 1 / p[1], x1, 1 / q[1]];
     vr = p[1] > .02 && q[1] > .02 && x0 <= 239 && x1 >= 1 && x1 - x0 >= 8 && x1 - x0 <= 160 && 28 - 10 * mx(vq[1], vq[3]) >= 13 ?
       [rnd(x0), M.ceil(28 - 10 * mn(vq[1], vq[3])), rnd(x1), 28] : null;
@@ -124,80 +128,4 @@ function paint(c, xs, close, gate, extra) {
   } else course(c, cx, xs, close, gate);
   if (extra) dr(extra[0], extra[1]);
   H.commit();
-}
-// ---- The panning view (README "首振りカメラ"). A world point in pc's view:
-// [X'', Z'], screen x = X''/Z', px per m 1/Z'.
-function pj(x, z) {
-  const a = x - pc[0], b = z - pc[1], Z = (a * pc[2] + b * pc[3]) / pc[4];
-  return [a * pc[3] - b * pc[2] + 120 * Z, Z];
-}
-// Narrows Lo..Hi to c0 + c1 g >= 0.
-function lim(c0, c1) { if (c1 > 0) Lo = mx(Lo, -c0 / c1); else if (c1 < 0) Hi = mn(Hi, -c0 / c1); else if (c0 < 0) Hi = -1e9; }
-// Plan n along the straight at depth w, a point every s m on g0's grid, in
-// view (x -40..280, depth .02f..zf) and one point past each end, far to
-// near: the VM finds each 1/Z' by Newton from the last one, which is
-// farther, so it rises to it and cannot diverge. Strides double toward the
-// far end where points close to L px, but never a step of more than .3 of
-// the depth (Newton's error, 3 steps: .3^8), the halves on the grid. Inputs
-// [X'', dX'', -Z', -dZ', count, 1/Z', a, b]; prail's lines reach the point
-// after the last (the next draw's first, or the one past the near end).
-// L 0: the crowd (pk), no LOD, its first column on row 0 of the checkerboard
-// and a its phase (a dot's is fixed on the course: pk adds 2.39996 a column).
-function ser(n, w, s, g0, L, zf, a, b) {
-  const q = SQ = pj(g0, w), u = SU = pc[2] / pc[4], v = SV = pc[3] + 120 * u;
-  Lo = -1e9; Hi = 1e9;
-  lim(q[1] - .02, u); lim(zf / pc[4] - q[1], -u); lim(q[0] + 40 * q[1], v + 40 * u); lim(280 * q[1] - q[0], 280 * u - v);
-  if (!(Lo < Hi)) return;
-  const o = u < 0 ? -1 : 1, U = u * o, V = v * o, t1 = o > 0 ? Hi : -Lo;
-  let k = s, Z = M.sqrt(M.abs(v * q[1] - q[0] * u) * s / L), n0 = flo((o > 0 ? Lo : -Hi) / s) * s, e;
-  while (Z < q[1] + t1 * U && 2 * k * U < .3 * (q[1] + t1 * U) && k < 64 * s) k *= 2, Z *= M.SQRT2;
-  e = M.ceil(t1 / k) * k;
-  if (!inr(q, U, V, e)) e -= k;
-  if (!inr(q, U, V, n0)) n0 += s;
-  if (!L && (rnd(o * e / s) + t) & 1) e -= s;
-  for (;;) {
-    Z /= M.SQRT2;
-    const h = k > s ? M.ceil(mx(U > 1e-7 ? (mx(Z, k * U / .3) - q[1]) / U : -1e9, n0) / k) * k : n0, c = rnd((e - h) / k), z = q[1] + e * U;
-    if (c > 0) dr(n, [q[0] + e * V, -V * k, -z, U * k, mn(255, c), 1 / z, L ? a : -e / s * 2.39996 % (2 * PI) - 2 * PI * rnd(c * .191) + 1.8, b]);
-    if (k === s) return;
-    e = mn(e, h); k /= 2;
-  }
-}
-function inr(q, U, V, e) {
-  const z = q[1] + e * U, x = (q[0] + e * V) / z;
-  return z > .02 && x > -400 && x < 640;
-}
-// Lines across the last ser()'s view: coefficient c0 (6 - height), then
-// cs a line, m of them, the two ends joined.
-function hl(c0, cs, m, col) {
-  const a = SQ[1] + Lo * SU, b = SQ[1] + Hi * SU;
-  if (Lo < Hi) dr('hl', [(SQ[0] + Lo * SV) / a, 1 / a, (SQ[0] + Hi * SV) / b, 1 / b, c0, cs, m, col]);
-}
-// One frame from pc: stands (pillars, roof, tiers), crowd, the screen, far
-// rail, turf, poles, runners, near rail. Nothing deeper than 75 m past the
-// leader (150 at LIGHT); posts 4 px apart at least (8 with the screen in view).
-function pan(xs) {
-  const k = KN[tier], zf = pc[5] + (tier ? 75 : 150), L = vr ? 8 : 4, q = 11.6 * pc[3] / pc[4];
-  ser('prail', 40, 12, 0, L, zf, 31727, -7.5);
-  hl(6, -2.4, k[0], 21130);
-  ser('pk', 40, 12 / k[2], 0, 0, zf, 0, 46496 + 12650 * ((t >> 3 ^ t) & 1));
-  if (vr) {
-    const m = M.ceil(10 * mx(vq[1], vq[3])) + 1;
-    dr('hl', vq.concat(0, -10 / (m - 1), m, von < 8 ? 0 : von < 11 ? 0x632c : 0x0866));
-    dr('hl', vq.concat(0, -10, 2, 10565));
-    feed(xs, mn((vr[2] - vr[0]) / 120, (vr[3] - vr[1] - 1) / 30));
-  }
-  ser('prail', DFR, k[4], 0, L, zf, 0xad55, 4.9);
-  ser('t0', DNR, 2 * k[5], 0, L, zf, 120 * q - 11.6 * pc[2], -q);
-  ser('t1', DNR, 2 * k[5], k[5], L, zf, 120 * q - 11.6 * pc[2], -q);
-  for (let m = 200; m <= D; m += 200) {
-    const p = pj(m, DFR), r = 1 / p[1], x = p[0] * r, e = m === D, n = e ? pj(m, DNR) : p, y = n[0] / n[1];
-    if (p[1] > .02 && n[1] > .02 && x > -40 && x < 280 && y > -400 && y < 640)
-      dr('pole', [x, 28 + 6 * r, 28 + (e ? 2 : 3.4) * r, (e ? .55 : .3) * r, y, 28 + 6 / n[1], x, 28 + 6 * r]);
-  }
-  for (let l = 7; l >= 0; --l) {
-    const p = pj(xs[l] - 12.5 * U, DL[l]), r = 1 / p[1], X = p[0] * r;
-    if (p[1] > .02 && X > -160 && X < 400) rin(l, X, r * U, 28 + 6 * r, ph[l]);
-  }
-  ser('prail', DNR, k[4], 0, L, zf, 0xffff, 4.9);
 }

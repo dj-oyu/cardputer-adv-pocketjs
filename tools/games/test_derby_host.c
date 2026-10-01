@@ -45,6 +45,9 @@
  * app's PAN, DERBY_JS runs a script after the app's, DERBY_PANFACE=1 checks
  * only the panning units' faces (the screen moved), DERBY_SHOTS=tick:tag,...
  * writes panels at those ticks, DERBY_NDEBUG=1 prints each new worst point.
+ * DERBY_EACH=<js> runs before every frame (e.g. a camera held: cam=2;man=9),
+ * DERBY_LEADSHOTS=<m>:<tag>,... writes a panel when the player's race's
+ * leader first passes m (the oval's preview, run_derby.py --ppm).
  *
  *   python3 tools/games/run_derby.py            (WSL)
  * Env: DERBY_TIER=0|2 (LIGHT or HEAVY, no replay), DERBY_PPM=<dir>,
@@ -746,8 +749,10 @@ static void frame(unsigned buttons){
     pocket_input_pump(0);
     frame_regs=0;
     frame_ms=round(now_ms*1000)/1000;   /* what the guest reads (%.3f) */
-    char call[256];snprintf(call,sizeof call,"__turn=1;__now=%.3f;__churn(1);frame(%u);__churn(0);__probe([].concat.apply([],__ov.map(r=>"
-                            "[r.__v?1:0].concat(r.__r||[0,0,0,0]))),__refs,kasane.stats().displayed.commands)",now_ms,buttons);
+    char call[512];snprintf(call,sizeof call,"__turn=1;__now=%.3f;%s__churn(1);frame(%u);__churn(0);__probe([].concat.apply([],__ov.map(r=>"
+                            "[r.__v?1:0].concat(r.__r||[0,0,0,0]))),__refs,kasane.stats().displayed.commands)%s",now_ms,
+                            getenv("DERBY_EACH")?getenv("DERBY_EACH"):"",buttons,
+                            getenv("DERBY_LEADSHOTS")?";__L=scene==='race'?Math.max.apply(null,rs.x):-1":"");
     now_ms+=dt_ms;
     eval(call,strlen(call),"frame.js");
     if(frame_regs>frame_reg_max)frame_reg_max=frame_regs;
@@ -1107,6 +1112,15 @@ int main(int argc,char **argv){
             }
         }
         if(slow_at&&tick==slow_at+14)ppm("slow");
+        /* DERBY_LEADSHOTS=<m>:<tag>,...: a panel when the leader first passes m. */
+        static unsigned shot_done;
+        unsigned shot_k=0;
+        for(const char *p=getenv("DERBY_LEADSHOTS");p&&*p;shot_k++){
+            unsigned m=0;char tag[32]={0};
+            if(sscanf(p,"%u:%31[^,]",&m,tag)==2&&!(shot_done&1u<<shot_k)&&gnum("__L")>=m){shot_done|=1u<<shot_k;ppm(tag);
+                printf("LEADSHOT %s %u lead %.1f f %.0f\n",tag,tick,gnum("__L"),cur_pan_f);}
+            p=strchr(p,',');if(p)p++;
+        }
         if(scene_t>3000)FAIL("race did not end");
     }
     REQ(!strcmp(scene,"photo"));

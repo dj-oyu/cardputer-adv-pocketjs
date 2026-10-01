@@ -22,12 +22,18 @@ function rng(s) {
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
 }
+// The course (README "楕円"): oval with chance OV[0]. On its bend (273..650 m
+// of a runner's own x) its progress is scaled by its lane (OV[1]) and a draw
+// (OV[2]) from a stream of its own (c), which also picks the course.
+const OV = [.5, .0025, .02];
 function field(seed) {
-  const r = rng(seed), p = POOL.slice(), h = [];
-  for (let i = 0; i < 8; ++i)
+  const r = rng(seed), c = rng(seed + 0x2545f491), p = POOL.slice(), h = [], m = [];
+  for (let i = 0; i < 8; ++i) {
     h.push({n: p.splice(flo(r() * p.length), 1)[0], top: TOP + SPR * r(), st: ST0 + ST1 * r(), kick: KI0 + KI1 * r(),
       sty: flo(r() * 3), re: .25 * r(), acc: 5 + 2 * r(), coat: [0xdd8c, 0xc460, 0xbdf7, 0xef5b][flo(r() * 4)]});
-  return {seed: seed, h: h};
+    m[i] = (1 + OV[1] * (3.5 - i) / 3.5) * (1 + (2 * c() - 1) * OV[2]);
+  }
+  return {seed: seed, h: h, m: m, o: c() < OV[0]};
 }
 // Arithmetic only, no Math.sin/exp: a seed replays bit for bit anywhere.
 // Per race a form offset the odds cannot see, and a slow random walk.
@@ -55,19 +61,20 @@ function step(f, s, dt) {
     const a = g - v, up = h.acc * dt;
     v += a > up ? up : a < -dt ? -dt : a;
     if (v > EB * h.top) s.e[i] -= (v / h.top - EB) * (gap < 1 ? WIND : 1) * dt;
-    const y = s.x[i] = x + (s.v[i] = v) * dt;
+    const y = s.x[i] = x + (s.v[i] = v) * dt * (f.o && x >= 273 && x < 650 ? f.m[i] : 1);
     if (x < D && y >= D) s.tc[i] = t0 + (D - x) / (y - x) * dt, ++s.done;
   }
 }
 const order = s => [0, 1, 2, 3, 4, 5, 6, 7].sort((a, b) => (s.tc[a] || 1e9) - (s.tc[b] || 1e9) || s.x[b] - s.x[a] || a - b);
-// Win chance: a Luce model of the paddock figures (weights fitted), 20% take.
-function odds(h) {
+// Win chance: a Luce model of the paddock figures (weights fitted), 20% take;
+// on the oval (o) a temperature, the lane and a take refitted (README).
+function odds(h, o) {
   const p = [];
   let z = 0, i, k;
-  for (i = 0; i < 8; ++i) k = h[i], z += p[i] = M.exp(17.2 * k.top + 2.6 * k.st - 2.3 * k.re + .5 * (k.acc + (k.sty > 1)));
-  for (i = 0; i < 8; ++i) k = z / p[i], p[i] = mx(1.1, mn(999, rnd(8 * k * (1 + .0015 * k)) / 10));
+  for (i = 0; i < 8; ++i) k = h[i], z += p[i] = M.exp((o ? .92 : 1) * (17.2 * k.top + 2.6 * k.st - 2.3 * k.re + .5 * (k.acc + (k.sty > 1))) + (o ? .15 * (3.5 - i) / 3.5 : 0));
+  for (i = 0; i < 8; ++i) k = z / p[i], p[i] = mx(1.1, mn(999, rnd((o ? 7.87 : 8) * k * (1 + .0015 * k)) / 10));
   return p;
 }
-globalThis.derby = {field: field, race: race, step: step, order: order, odds: odds, D: D, DT: DT};
+globalThis.derby = {OV: OV, field: field, race: race, step: step, order: order, odds: odds, D: D, DT: DT};
 if (typeof pocket !== 'undefined')
-  pocket.app.load('prog'), pocket.app.load('view'), pocket.app.load('scene'), pocket.app.load('play');
+  pocket.app.load('prog'), pocket.app.load('view'), pocket.app.load('scene'), pocket.app.load('pan'), pocket.app.load('play');

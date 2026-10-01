@@ -14,6 +14,7 @@
 // stream (seed + 0x5bd1e995) draws exactly what it draws on the straight.
 //
 //   node tools/games/derby_corner.mjs verify [seeds]     straight == shipped, bit for bit
+//   node tools/games/derby_corner.mjs app [seeds]        the app's oval (field().m, step()) == this trial, bit for bit
 //   node tools/games/derby_corner.mjs sweep [races] [a,s;a,s...] [--mode=x|g]
 //   node tools/games/derby_corner.mjs fit [races] a s [--mode=x|g]   refit every weight (reference only)
 //   node tools/games/derby_corner.mjs public [races] a s [--json]  odds from public information only
@@ -35,12 +36,16 @@ function load(src) {
   vm.runInContext(src, ctx);
   return ctx.derby;
 }
+// The app's step() carries its own oval (f.o, f.m); the patch puts back the
+// straight line, then this trial's multiplier on it.
 function patched(mode) {
-  const X = 'const y = s.x[i] = x + (s.v[i] = v) * dt;', G = 'const a = g - v, up = h.acc * dt;';
-  if (!SRC.includes(X) || !SRC.includes(G)) throw Error('derby_watch.js step() changed: update the patch');
+  const A = 'const y = s.x[i] = x + (s.v[i] = v) * dt * (f.o && x >= 273 && x < 650 ? f.m[i] : 1);',
+    X = 'const y = s.x[i] = x + (s.v[i] = v) * dt;', G = 'const a = g - v, up = h.acc * dt;';
+  if (!SRC.includes(A) || !SRC.includes(G)) throw Error('derby_watch.js step() changed: update the patch');
+  const S0 = SRC.replace(A, X);
   return load(mode === 'g'
-    ? SRC.replace(G, 'if (s.cm) g *= s.cm(i, x);\n    ' + G)
-    : SRC.replace(X, 'const y = s.x[i] = x + (s.v[i] = v) * dt * (s.cm ? s.cm(i, x) : 1);'));
+    ? S0.replace(G, 'if (s.cm) g *= s.cm(i, x);\n    ' + G)
+    : S0.replace(X, 'const y = s.x[i] = x + (s.v[i] = v) * dt * (s.cm ? s.cm(i, x) : 1);'));
 }
 const seedOf = n => (0x3e1b7 + Math.imul(n + 1, 0x9e3779b9)) >>> 0;
 
@@ -201,7 +206,9 @@ async function main() {
     const N = +(pos[0] || 2000), d0 = load(SRC), dx = patched('x'), dg = patched('g');
     let bad = 0;
     for (let n = 0; n < N; ++n) {
-      const f = d0.field(seedOf(n)), a = d0.race(f), b = dx.race(f), c = dg.race(f);
+      const f = d0.field(seedOf(n));
+      f.o = false;
+      const a = d0.race(f), b = dx.race(f), c = dg.race(f);
       while (a.done < 8 && a.t < 200) {
         d0.step(f, a, d0.DT); dx.step(f, b, dx.DT); dg.step(f, c, dg.DT);
         for (let i = 0; i < 8; ++i) if (a.x[i] !== b.x[i] || a.x[i] !== c.x[i] || a.v[i] !== b.v[i] || a.v[i] !== c.v[i] || a.e[i] !== b.e[i] || a.e[i] !== c.e[i]) bad++;
@@ -209,6 +216,28 @@ async function main() {
       for (let i = 0; i < 8; ++i) if (a.tc[i] !== b.tc[i] || a.tc[i] !== c.tc[i]) bad++;
     }
     console.log(`verify ${N} seeds: ${bad ? 'CORNER_VERIFY FAIL ' + bad : 'CORNER_VERIFY PASS (x, v, e every step and tc equal to the shipped step)'}`);
+    process.exit(bad ? 1 : 0);
+  }
+  if (cmd === 'app') {
+    // The app's oval: every seed run with f.o set, against this trial's
+    // multiplier on the straight step (x, v, e every step, tc).
+    const N = +(pos[0] || 2000), d0 = load(SRC), dx = patched('x'), A = d0.OV[1], S = d0.OV[2];
+    let bad = 0, ovals = 0;
+    for (let n = 0; n < N; ++n) {
+      const f = d0.field(seedOf(n));
+      ovals += f.o;
+      f.o = true;
+      const a = d0.race(f), b = dx.race(f), m = [];
+      for (let i = 0; i < 8; ++i) m[i] = (1 + A * (3.5 - i) / 3.5) * (1 + (2 * CR(f.seed + CSEED, i) - 1) * S);
+      b.cm = (i, x) => x >= B0 && x < B1 ? m[i] : 1;
+      while (a.done < 8 && a.t < 200) {
+        d0.step(f, a, d0.DT); dx.step(f, b, dx.DT);
+        for (let i = 0; i < 8; ++i) if (a.x[i] !== b.x[i] || a.v[i] !== b.v[i] || a.e[i] !== b.e[i]) bad++;
+      }
+      for (let i = 0; i < 8; ++i) if (a.tc[i] !== b.tc[i]) bad++;
+    }
+    console.log(`app ${N} seeds (a ${A}, s ${S}; the seeds picked the oval ${ovals} times): ` +
+      (bad ? 'CORNER_APP FAIL ' + bad : 'CORNER_APP PASS (x, v, e every step and tc equal to the reference)'));
     process.exit(bad ? 1 : 0);
   }
   if (cmd === 'sweep') {
