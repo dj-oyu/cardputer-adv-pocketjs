@@ -12203,6 +12203,14 @@ static int JS_SetPropertyValue(JSContext *ctx, JSValueConst this_obj,
             break;
         case JS_CLASS_INT8_ARRAY:
         case JS_CLASS_UINT8_ARRAY:
+            /* Experimental, default off: an immediate integer has neither
+               coercion side effects nor a reference to release. Keep the
+               ordinary conversion for every other tag, before all checks. */
+#if defined(POCKET_VM_TYPED_PUT_INT_FAST) && POCKET_VM_TYPED_PUT_INT_FAST
+            if (JS_VALUE_GET_TAG(val) == JS_TAG_INT)
+                v = JS_VALUE_GET_INT(val);
+            else
+#endif
             if (JS_ToInt32Free(ctx, &v, val)) {
                 goto ta_cvt_fail;
             }
@@ -12216,6 +12224,11 @@ static int JS_SetPropertyValue(JSContext *ctx, JSValueConst this_obj,
             break;
         case JS_CLASS_INT16_ARRAY:
         case JS_CLASS_UINT16_ARRAY:
+#if defined(POCKET_VM_TYPED_PUT_INT_FAST) && POCKET_VM_TYPED_PUT_INT_FAST
+            if (JS_VALUE_GET_TAG(val) == JS_TAG_INT)
+                v = JS_VALUE_GET_INT(val);
+            else
+#endif
             if (JS_ToInt32Free(ctx, &v, val)) {
                 goto ta_cvt_fail;
             }
@@ -12229,6 +12242,11 @@ static int JS_SetPropertyValue(JSContext *ctx, JSValueConst this_obj,
             break;
         case JS_CLASS_INT32_ARRAY:
         case JS_CLASS_UINT32_ARRAY:
+#if defined(POCKET_VM_TYPED_PUT_INT_FAST) && POCKET_VM_TYPED_PUT_INT_FAST
+            if (JS_VALUE_GET_TAG(val) == JS_TAG_INT)
+                v = JS_VALUE_GET_INT(val);
+            else
+#endif
             if (JS_ToInt32Free(ctx, &v, val)) {
                 goto ta_cvt_fail;
             }
