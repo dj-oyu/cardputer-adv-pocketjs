@@ -6,7 +6,7 @@ function enter(s) {
   if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h, F.o)) + (F.o ? ' OVAL' : ''));
     CRS = F.o ? OC : SC; CH = [-1e4];
     if (F.o) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
-    CH.push(1e4);
+    CH.push(1e4); S.course(CH, F.o ? OC : 0, DNR);
   }
   if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
