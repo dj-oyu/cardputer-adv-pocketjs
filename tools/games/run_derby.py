@@ -25,6 +25,12 @@ then runs:
      being out of place for them).
 Every run with a panning unit compares each point its VM series emit (Newton
 reciprocals, float) with the exact projection (<0.1 px on the panel).
+The series run in C (pocket.derby, main/pocket/pocket_derby.c): three runs of the 64-bit build
+(MID, and LIGHT and HEAVY panning for every WIDE, the director alone) carry
+DERBY_SER_ORACLE, which runs the JS ser() of vm/main
+(tools/games/derby_ser_oracle.js) beside the C on every call and on 4,000
+random cameras and courses, and requires every draw input equal bit for bit;
+--oracle puts it in every run (their guest heap figures then include it).
 The player's race must finish identically in every run. Every run checks the
 big screen: its face drawn exactly inside the bezel, nothing but the feed on
 the face, the view's lettering inside it.
@@ -73,7 +79,9 @@ CACHE = ROOT / ".cache/derby_host"
 QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
          # pocket.app.load and its table, read from apps/derby/chunks.txt
-         "main/pocket/pocket_app_load.c", "main/pocket/app_registry.c", "tools/hostshim/app_chunks_host.c"]
+         "main/pocket/pocket_app_load.c", "main/pocket/app_registry.c", "tools/hostshim/app_chunks_host.c",
+         # pocket.derby, the series in C (docs/apps/derby-ser-native.md)
+         "main/pocket/pocket_derby.c"]
 
 
 def kasane_sources() -> list[str]:
@@ -122,6 +130,7 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby") ->
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
+                    "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/games/test_derby_host.c", *kasane_sources(), *EXTRA, str(table), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
@@ -265,6 +274,7 @@ def main() -> None:
     parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
     parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
     parser.add_argument("--heap-limit", type=int, help="run once with this guest heap limit (bytes)")
+    parser.add_argument("--oracle", action="store_true", help="the JS ser() oracle in every run, not three")
     parser.add_argument("--course", choices=("seed", "straight", "oval"), default="seed",
                         help="every race on this course (the lowered copy's OV[0] set to 0 or 1); seed: as the seeds pick")
     args = parser.parse_args()
@@ -284,7 +294,18 @@ def main() -> None:
     runs = [(1, {})] if args.heap_limit else [(1, {}), (0, {}), (2, {})] + [
         (t, {"DERBY_NOCAM": "1"}) for t in (0, 1, 2)] + [(t, {"DERBY_PICK": "7"}) for t in (0, 2)] + [
         (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0"}) for t in (0, 2)] + [
-        (0, {"DERBY_NOCAM": "1", "DERBY_PAN": "0,1", "DERBY_PANFACE": "1", "DERBY_JS": "VS[0]=700;VS[1]=150"})]
+        (0, {"DERBY_NOCAM": "1", "DERBY_PAN": "0,1", "DERBY_PANFACE": "1", "DERBY_JS": "VS[0]=700;VS[1]=150"})] + [
+        (1, {"DERBY_NOCAM": "1", "DERBY_SER_ORACLE": "1"})] + [
+        (t, {"DERBY_NOCAM": "1", "DERBY_PAN": "0", "DERBY_SER_ORACLE": "1"}) for t in (0, 2)]
+    if args.oracle:
+        runs = [(t, dict(x, DERBY_SER_ORACLE="1")) for t, x in runs if "DERBY_SER_ORACLE" not in x]
+    # i386 computes doubles on the x87 in 80 bits: the C (expressions kept in
+    # registers) and the interpreter (each operation stored) then differ in
+    # the last bit, which neither the device (IEEE soft float) nor the 64-bit
+    # host (SSE2) does. The oracle's verdict is the 64-bit build's; m32 is for
+    # the heap figures (its pixels still match: the inputs become floats).
+    if args.m32:
+        runs = [(t, x) for t, x in runs if "DERBY_SER_ORACLE" not in x]
     finish = {}
     for tier, extra in runs:
         e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}{''.join(extra)}.csv"), **extra)

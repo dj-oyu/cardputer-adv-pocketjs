@@ -356,6 +356,35 @@ int main(int argc,char **argv){
     REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
     REQUIRE(memcmp(previous,actual,sizeof actual)!=0);
     pocket_proc_present_result(KSN_OK);
+    /* Numeric inputs (draw(h, a0, ..., a7)): the same frame as the array form,
+     * short lists zero-padded, trailing undefined arguments not passed. */
+    static const char *const SAME_AS_95[]={
+        "proc.draw(curve,95,0,0,0)","proc.draw(curve,95)",
+        "proc.draw(curve,95,0,undefined,undefined)","proc.draw(curve,[95,0,0,0],undefined)",
+        "proc.draw(curve,[95],undefined,undefined)"};
+    for(unsigned i=0;i<sizeof SAME_AS_95/sizeof SAME_AS_95[0];i++){
+        char js[160];
+        snprintf(js,sizeof js,"proc.beginFrame(0);%s;proc.commit()",SAME_AS_95[i]);
+        eval_ok(ctx,js);
+        REQUIRE(pocket_proc_pending());
+        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,actual)==KSN_OK);
+        REQUIRE(memcmp(previous,actual,sizeof actual)==0);
+        pocket_proc_present_result(KSN_OK);
+    }
+    eval_ok(ctx,"proc.beginFrame(0)");
+    static const char *const BAD_NUMERIC[]={
+        "proc.draw(curve,95,undefined,0)",       /* a hole */
+        "proc.draw(curve,1,2,3,4,5,6,7,8,9)",    /* nine inputs */
+        "proc.draw(curve,NaN)","proc.draw(curve,95,Infinity)","proc.draw(curve,1e39)",
+        "proc.draw(curve,95,'1')","proc.draw(curve,'95')","proc.draw(curve,[95],0)",
+        "proc.draw(curve)","proc.draw(curve,undefined)","proc.draw(999999,95)"};
+    for(unsigned i=0;i<sizeof BAD_NUMERIC/sizeof BAD_NUMERIC[0];i++)eval_error(ctx,BAD_NUMERIC[i]);
+    /* This harness's pocket_api_throw() puts the code first in the message. */
+    eval_ok(ctx,"let code='';try{proc.draw(999999,95)}catch(e){code=e.message}"
+                "if(!code.startsWith('CLOSED'))throw Error('stale handle: '+code);"
+                "try{proc.draw(curve,95,undefined,0)}catch(e){code=e.message}"
+                "if(!code.startsWith('INVALID_ARGUMENT'))throw Error('hole: '+code)");
+    pocket_proc_end_turn();
     eval_error(ctx,"proc.register([[14,0,0,0,0,2016]])");
     pocket_proc_reset();
     /* Two image resources keep independent committed frames and reject a

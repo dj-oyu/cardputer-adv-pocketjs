@@ -94,6 +94,7 @@ static int64_t hp_eval_t0;
 #include "ksn_font.h"
 #include "app_registry.h"
 #include "pet_hub.h"
+#include "pocket_derby.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "ui/shell.h"
@@ -965,6 +966,8 @@ void app_stop(void) {
     // Before pocket_api_reset(): a picker still on screen holds a promise slot,
     // and giving the screen back is what posts its completion.
     pocket_workspace_reset();
+    // Holds no guest values (docs/apps/derby-ser-native.md section 3).
+    pocket_derby_reset();
     if(pocket_kasane_reset()){
         pocket_clock_reset();
         pocket_av_output_source_reset(av_stopped);
@@ -1536,6 +1539,10 @@ surfaces_done:
     // notifications, timers or NVS through it (docs/api/common-api.md section 2).
     if(app_registry_wants(app_registry_current(),"pet.companion"))
         TRY(pocketjs_guest_quickjs_install_once(guest,"pet-hub",pet_hub_install,NULL));
+    // pocket.derby, DERBY WATCH's series in C, the same way: only for the
+    // manifest that names derby.series (docs/apps/derby-ser-native.md).
+    if(app_registry_wants(app_registry_current(),"derby.series"))
+        TRY(pocketjs_guest_quickjs_install_once(guest,"derby",pocket_derby_install,NULL));
 source_ready:;
     const char *source=user_source?user_source:hello_start;
     size_t length=user_source?user_length:(size_t)(hello_end-hello_start-1);
