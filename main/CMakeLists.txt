@@ -403,6 +403,40 @@ endif()
 # The built-in plan table app_session.c hands to pocket.kasane.procedural:
 # the generated one above, or make_app_chunks.py's empty one.
 target_sources(${COMPONENT_LIB} PRIVATE "${APP_CHUNK_ROM_C}")
+# Build-only precompile experiments use the final lowered sources. Bytecode
+# is not a firmware input until exact host/target compatibility is proven;
+# source loading remains the shipping path even when this option is enabled.
+option(POCKET_APP_PRECOMPILE_EXPERIMENT "Generate experimental host bytecode (no runtime change)" OFF)
+if(POCKET_APP_PRECOMPILE_EXPERIMENT)
+    find_program(POCKET_APP_HOST_CC NAMES gcc clang REQUIRED)
+    set(_bc_outputs)
+    foreach(_app_chunk IN LISTS APP_CHUNK_FILES)
+        get_filename_component(_bc_name "${_app_chunk}" NAME)
+        if(_bc_name MATCHES "\\.mjs$")
+            message(FATAL_ERROR "Experimental precompile does not support module graphs; retain source loading")
+        endif()
+        list(APPEND _bc_outputs "${CMAKE_BINARY_DIR}/experimental-bytecode/${_bc_name}.bc"
+                                "${CMAKE_BINARY_DIR}/experimental-bytecode/${_bc_name}.bc.json")
+    endforeach()
+    if(APP_CHUNK_FILES)
+        file(GLOB _bc_engine CONFIGURE_DEPENDS
+             "${CMAKE_SOURCE_DIR}/components/quickjs-ng/quickjs-ng/*.c"
+             "${CMAKE_SOURCE_DIR}/components/quickjs-ng/quickjs-ng/*.h")
+        file(GLOB_RECURSE _bc_guest_headers CONFIGURE_DEPENDS
+             "${CMAKE_SOURCE_DIR}/components/pocketjs_guest/include/*.h")
+        add_custom_command(OUTPUT ${_bc_outputs}
+            COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/precompile_apps.py"
+                    --cc "${POCKET_APP_HOST_CC}"
+                    --outdir "${CMAKE_BINARY_DIR}/experimental-bytecode" ${APP_CHUNK_FILES}
+            DEPENDS ${APP_CHUNK_FILES} ${_bc_engine} ${_bc_guest_headers}
+                    "${CMAKE_SOURCE_DIR}/components/quickjs-ng/CMakeLists.txt"
+                    "${CMAKE_SOURCE_DIR}/tools/precompile_app.c"
+                    "${CMAKE_SOURCE_DIR}/tools/precompile_apps.py"
+            COMMENT "Experimental app precompile (firmware retains source loader)"
+            VERBATIM)
+        add_custom_target(pocket_app_precompile_experiment ALL DEPENDS ${_bc_outputs})
+    endif()
+endif()
 foreach(_app_chunk IN LISTS APP_CHUNK_FILES)
     target_add_binary_data(${COMPONENT_LIB} "${_app_chunk}" TEXT)
 endforeach()
