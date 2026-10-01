@@ -38,6 +38,34 @@ VARIANTS.fixtab = { edits: [...HOIST, ...VETAB.map(e => e[0] !== 'scene' ? e : [
   ['scene', '  const a = pose(VS[0] - VS[2], VS[1]), b = pose(VS[0] + VS[2], VS[1]);', '  const a = fp(CH.length + 3), b = fp(CH.length + 4);'],
   ['pan', 'const p = pj(pose(m, DFR)), r = 1 / p[1], x = p[0] * r, e = m === D, n = e ? pj(pose(m, DNR)) : p', 'const p = pj(fp(CH.length + 4 + m / 200)), r = 1 / p[1], x = p[0] * r, e = m === D, n = e ? pj(fp(CH.length + 10)) : p'],
 ] };
+// vetabA: the same in a plain Array (the fewest guest bytes of the forms
+// lut_forms.mjs measured: a typed array carries a fixed cost of its own).
+VARIANTS.vetabA = { edits: [...HOIST, ...VETAB.map(e => e[0] === 'scene' ? [e[0], e[1], '    CH.push(1e4);\n    CP = [].concat.apply([], CH.map(g => pose(g, 0)));\n'] : e)] };
+// vetabL: vetabA built by a loop (one pose's array alive at a time, not the
+// map's 19 at once: the evaluation's peak).
+VARIANTS.vetabL = { edits: [...HOIST, ...VETAB.map(e => e[0] === 'scene' ? [e[0], e[1], '    CH.push(1e4);\n    CP = [];\n    for (const g of CH) CP.push.apply(CP, pose(g, 0));\n'] : e)] };
+// vetabH: no new global name (one more top-level binding stepped the
+// evaluation's peak +1.5 KB, code_bytes.mjs): the table rides on CH as CH.P.
+VARIANTS.vetabH = { edits: [...HOIST,
+  ['scene', '    CH.push(1e4);\n', '    CH.push(1e4);\n    CH.P = [];\n    for (const g of CH) CH.P.push.apply(CH.P, pose(g, 0));\n'],
+  ['pan', VETAB[2][1], VETAB[2][2].replace('    for (let a', '    const P = CH.P;\n    for (let a').replace(/CP\[/g, 'P[')]] };
+// vetabS: the bend's chord ends from 9 sines a race (PAN[3] / 2 + 1), by
+// symmetry: end j (1..PAN[3] + 1) heads pi - i pi/n (i = j - 1), so its sin
+// is sin(i pi/n) and its cos -cos(i pi/n) = -sin((n/2 - i) pi/n) (the swap),
+// mirrored past the middle (sin(pi - x) = sin x, cos(pi - x) = -cos x); the
+// point is pose()'s bend formula. The two straight sentinels are posed.
+VARIANTS.vetabS = { edits: [...HOIST,
+  ['scene', '    CH.push(1e4);\n', '    CH.push(1e4);\n    CH.P = [];\n    for (let k = 0; k <= PAN[3] / 2; ++k) CH.P.push(sin(k * PI / PAN[3]));\n'],
+  ['pan', VETAB[2][1], `    const e = OC[1], r = 1 / e[1] + DNR, S = CH.P, n = PAN[3], h = n / 2;
+    for (let j = 0; j < CH.length; ++j) {
+      const i = j - 1, b = i > h, s = S[b ? n - i : i], C = b ? S[i - h] : -S[h - i],
+        m = i < 0 || i > n ? pose(CH[j], 0) : [e[2] + (s - e[5]) * r, e[3] - (C - e[4]) * r, C, s], x = m[0] - pc[0], z = m[1] - pc[1];
+      VE.push(x * pc[3] - z * pc[2], x * pc[2] + z * pc[3], -m[3] * pc[3] - m[2] * pc[2], m[2] * pc[3] - m[3] * pc[2]);
+    }`]] };
+// For code_bytes.mjs only (not runnable): vetabL's edits one chunk at a time.
+VARIANTS._view = { edits: [...HOIST, VETAB[0]] };
+VARIANTS._scene = { edits: [VETAB[0], VARIANTS.vetabL.edits[2]] };
+VARIANTS._pan = { edits: [VETAB[0], VETAB[2]] };
 // vetab32: the same in a Float32Array (half the bytes; chord ends to ~1 mm).
 VARIANTS.vetab32 = { edits: [...HOIST, ...VETAB.map(e => e[0] === 'scene' ? [e[0], e[1], e[2].replace('Float64Array', 'Float32Array')] : e)] };
 

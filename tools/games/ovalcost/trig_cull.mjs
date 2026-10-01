@@ -36,7 +36,8 @@ function makeApp(variant) {
   const pc0 = scene.indexOf('  if (pc) {', scene.indexOf('function paint(')), pa = scene.lastIndexOf('\n  const a = ', pc0) + 1, pb = scene.indexOf('  } else {', pa);
   const paint = scene.slice(pa, pb) + '}';
   // A variant's once-a-race table (enter('pad') in derby_scene.js), if any.
-  const race = scene.split('\n').filter(l => /^\s+CP = new/.test(l)).join('\n');
+  // (the lines after enter('pad')'s CH.push(1e4) that fill CP or CH.P)
+  const race = scene.split('\n').filter(l => /^\s+(CP = |CP\.push|CH\.P|for \(.*(CP|CH\.P))/.test(l)).join('\n');
   const C = {}, bump = (k, n = 1) => { C[k] = (C[k] || 0) + n; };
   const st = { who: 'other', gs: new Map(), poses: [], bodies: [], draws: [] };
   const M = {};
@@ -128,7 +129,7 @@ function summarize(frames) {
   return S;
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/').replace(/^([A-Za-z]):/, '/$1:')}` || process.argv[1].endsWith('trig_cull.mjs')) {
+if ((process.argv[1] || "").endsWith("trig_cull.mjs")) {
   const L = range(0, 1000, STEP);
   const regions = { 'バックストレッチ': x => x < OB, 'コーナー': x => x >= OB && x < 650, 'ホームストレッチ': x => x >= 650 };
   const res = {};

@@ -23,6 +23,9 @@ const POSE = { bend: P.poseBend, ovalStraight: 70, straight: P.poseStraight };
 // loop's bound CH.length x 4): about 22 us against the for..of step and the 4
 // reads of m (about 16) around pose(): the saving is pose - 6 (estimate).
 const VE_READ_EXTRA = 6;
+// vetabS: a bend end rebuilt from the sines (2 reads, ~6 add, 2 mul, a compare:
+// 27 us, lut_forms.mjs ptabSym) and its 4-array (14) against the 16 around pose().
+const VE_SYM_EXTRA = 25;
 // fp(k): call, k*4, 3 index adds, 4 reads, a 4-array, CH.length + i - 7.
 const FP = P.call + P.mul + 3 * P.add + 4 * P.rd + P.arr4 + P.prop + 2 * P.add;
 // (b) a per-frame Map keyed by g: get on every bend pose, set on a miss.
@@ -80,12 +83,12 @@ const sets = [['楕円 w=-100 コーナー 監督', true, -100, 0, x => x > OB &
 const L = range(0, 1000, STEP), f1 = x => x.toFixed(1), f2 = x => (x / 1e3).toFixed(2);
 
 console.log('### 段階 2: 1 フレームの pose と三角関数（host の回数は実測、ms は実機の単価からの推定）\n');
-console.log('| 構成 | フレーム | pose | うち曲線上 | 曲線上の異なる g | sin+cos | pose の推定 ms | (b) g のキャッシュ | (c) 表+線形補間 | (d) VE の漸化式 | hoist | vetab | fixtab |');
-console.log('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
+console.log('| 構成 | フレーム | pose | うち曲線上 | 曲線上の異なる g | sin+cos | pose の推定 ms | (b) g のキャッシュ | (c) 表+線形補間 | (d) VE の漸化式 | hoist | vetab | vetabS（採用） | fixtab |');
+console.log('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
 const base = {};
 for (const [name, oval, w2, cam, rf] of sets) {
   const R = {};
-  for (const v of [null, 'hoist', 'vetab', 'fixtab']) { const { out } = runSet(v, oval, w2, L, cam); R[v] = out.filter(f => rf(f.L)); }
+  for (const v of [null, 'hoist', 'vetab', 'vetabS', 'fixtab']) { const { out } = runSet(v, oval, w2, L, cam); R[v] = out.filter(f => rf(f.L)); }
   const fr = R[null], n = fr.length;
   const pc = poseCost(fr, oval);
   let bend = 0, dg = 0, trig = 0, ve = 0;
@@ -105,6 +108,7 @@ for (const [name, oval, w2, cam, rf] of sets) {
     const veN = oval ? (R[null][0].g.CH.length) : 0, fpN = v === 'fixtab' ? (pc.n - c.n) - (oval ? veN : 0) - (v === 'fixtab' ? 0 : 0) : 0;
     let us = pc.us - c.us;
     if (v === 'vetab' || v === 'fixtab') us -= oval ? veN * VE_READ_EXTRA : 0;
+    if (v === 'vetabS') us -= oval ? 17 * VE_SYM_EXTRA : 0;
     if (v === 'fixtab') {
       // fp() calls: the units (wide() 3 when the director runs it, shot() 1), the screen 2, the poles 6.
       const fpCalls = (cam ? 1 : 4) + 2 + 6;
@@ -112,7 +116,7 @@ for (const [name, oval, w2, cam, rf] of sets) {
     }
     return us;
   };
-  console.log(`| ${name} | ${n} | ${f1(pc.n)} | ${f1(bend)} | ${f1(dg)} | ${f1(trig)} | ${f2(pc.us)} | ${f2(sB)} | ${f2(sC)} | ${f2(sD)} | ${f2(tab('hoist'))} | ${f2(tab('vetab'))} | ${f2(tab('fixtab'))} |`);
+  console.log(`| ${name} | ${n} | ${f1(pc.n)} | ${f1(bend)} | ${f1(dg)} | ${f1(trig)} | ${f2(pc.us)} | ${f2(sB)} | ${f2(sC)} | ${f2(sD)} | ${f2(tab('hoist'))} | ${f2(tab('vetab'))} | ${f2(tab('vetabS'))} | ${f2(tab('fixtab'))} |`);
   base[name] = fr;
 }
 console.log(`\n単価（µs、推定を含む）: pose 曲線 ${POSE.bend}（実測）、楕円の直線区間 ${POSE.ovalStraight}（推定）、直線コースの近道 ${POSE.straight}（実測）、sin+cos ${TRIG2.toFixed(1)}（実測 18.7 × 2）、` +
