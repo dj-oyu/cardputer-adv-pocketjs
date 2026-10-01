@@ -3,14 +3,14 @@
 // enter the stalls), race, photo (still), res (result).
 function enter(s) {
   scene = s; t = 0; need = 1;
-  if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h, F.o)) + (F.o ? ' OVAL' : ''));
+  if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h, F.o)) + (F.o ? ' OVAL' : ''));
     CRS = F.o ? OC : SC; CH = [-1e4];
     if (F.o) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
     CH.push(1e4);
   }
   if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
-  if (s === 'photo') want(['photo']);
+  if (s === 'photo') { drop(['band']); want(['photo']); }
   if (s === 'res') { drop(RUN); drop(['photo']); want(['conf']); }
   log('SCENE ' + s + ' race=' + raceNo + ' seed=' + hex(F.seed) + ' plans=' + Object.keys(live).length + ' reg=' + reg);
 }
@@ -116,16 +116,28 @@ function paint(c, xs, close, gate, extra) {
   if (scene !== 'race' || cm === 6) vr = null;
   if (vr) ++von;
   H.beginFrame(4);
-  if (cm === 6 && scene === 'race') {
-    dr('hd', []);
+  // The dust and the band (KN[4]; docs/apps/derby-finish-fx.md): layers 0, 1
+  // (dust: far, mid), HEAD ON's horses, 2 (bokeh), 3 (streaks), 4 (band). A
+  // layer's slots scroll by its parallax times d, the pan since the cut (cx,
+  // px at 16 m) and the drift; t counts from the cut.
+  const e = KN[4], q = scene !== 'race' ? -1 : cm === 3 ? 0 : cm === 6 ? 5 : -1;
+  if (e[19] !== q) e[17] = t, e[18] = cx, e[19] = q;
+  if (q === 5) dr('hd', []);
+  else course(c, cx, xs, close, gate);
+  for (let j = 0, f = t - e[17], d = e[14] * f - (q ? 0 : (cx - e[18]) * c[0] / 16); j < (q < 0 ? 0 : 5); ++j) {
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
     // down the course; each horse scaled by its own 1/z (JS divides),
     // the last (farthest) first.
-    for (let i = 7; i >= 0; --i) {
+    if (j === 2 && q) for (let i = 7; i >= 0; --i) {
       const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
       dr('fr', [120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s)]);
     }
-  } else course(c, cx, xs, close, gate);
+    const w = e[q + j];
+    if (!w) continue;
+    if (j > 3) { dr('band', [w, flo(f / e[16]) % 6]); continue; }
+    const o = e[10 + j] * d, k = flo(-o / w) - 1;
+    dr(j - 2 ? 'dust' : 'bokeh', [f * e[15], k * w + o, k * 2.39996 % (2 * PI), w, j]);
+  }
   if (extra) dr(extra[0], extra[1]);
   H.commit();
 }

@@ -65,7 +65,8 @@ globalThis.frame = function (b) {
             // The photo: every runner where it was when the winner crossed.
             if (!was && rs.done) photoX = at((rs.tc[w] - rs.t + DT) / DT);
           }
-          if (live.gate && lead > 120) drop(['gate']);
+          // The band's plan takes the gate's slot (README "plan の登録").
+          if (live.gate && lead > 120) { drop(['gate']); want(['band']); }
           if (rs.done >= 3) { settle(); { enter('photo'); break fr; } }
         }
         xs = at(slow ? disp : 1);

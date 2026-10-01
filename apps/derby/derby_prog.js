@@ -16,7 +16,18 @@ function prog() {
 // segments, rail post and turf stripe spacing (m), the crowd's head and body
 // patterns; then the crowd's skin, cloths, row shift, empty, cells a m.
 const KN = [[3, 2, 3, 3, 8, 10, 263170, 921095], [4, 3, 4, 5, 5, 7, 1083458, 3792103],
-  [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1, 2.5]];
+  [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1, 2.5],
+  // The dust and the band (docs/apps/derby-finish-fx.md; sizes and colours
+  // are the dust, bokeh and band plans' first lines). 0..4 FINISH, 5..9 HEAD
+  // ON: the layers far, mid (dust), near (bokeh), streak (dust) as slot px
+  // (0: off), then the band's strokes a side. Variants: FINISH A
+  // 16,0,48,0,3; B 16,34,48,0,3; C 16,34,48,90,3; D as B with the far
+  // parallax 1 and dust's RISE 80. HEAD ON (1) behind the horses
+  // 20,40,0,0,0; (2) and in front 20,40,60,0,0; (3) in front 0,0,60,0,0; (4)
+  // none. 10..13 each layer's parallax (1: the track at 16 m); the drift px a
+  // frame a unit of parallax, t a frame, frames a band redraw. (17..19: the
+  // cut's frame, cx and camera, appended by paint().)
+  [16, 34, 48, 0, 3, 20, 40, 0, 0, 0, .2, .5, 1, 1.2, .15, .003, 3]];
 let tier = 1;
 const T = {
   // rail: the running rail. Posts from the top rail to the ground, a top and
@@ -420,6 +431,103 @@ const T = {
     line(x0, ya, colour);
     move(x1, y1);
     line(x1, yb, colour);
+  },
+
+  // ---- The dust overlay and the hand-drawn band (FINISH's slow motion,
+  // HEAD ON; docs/apps/derby-finish-fx.md). Their numbers are one table:
+  // KN[4] (the JS half: layers, parallax, rates) and the constants on each
+  // plan's first line (shapes, colours). A dust layer is a row of slots w px
+  // wide that scrolls with the camera: the JS passes o (the first slot's x,
+  // -2w..-w) and h0 (its number times GA, mod 2 pi); slot i's particle is
+  // placed by u = sin(h0 + i GA) (GA the golden angle: no two slots alike)
+  // and sin(u * 137 ...) (chaotic in u), so it keeps its look while the row
+  // scrolls. Every sin argument stays within +-200: newlib's sinf takes a
+  // slow path beyond about 201. y from Y0 over YH px.
+  // dust: one layer of specks (layer 0: far), grains (1: mid) or streaks
+  // (3), a line L px long, in C, or in C2 while its twinkle (rate TW)
+  // is over SPK. y drifts with t (the JS scales it), x with o. The far layer
+  // spreads up by RISE px a unit of t (variant D: specks rising from the
+  // bottom, each at its own speed; 0 for none).
+  /** @plan dust inputs: t, o, h0, w, layer */
+  dust() {
+    const Y0 = 14, YH = 108, SPK = .8, TW = 100, RISE = 0, C2 = 0xffff, GA = 2.39996;
+    const L0 = 0, C0 = 0xffd9, L1 = 2, C1 = 0xe695, L3 = 14, C3 = 0xef7d;
+    let x = o, h = h0, l = L0, c = C0, rs = t * RISE;
+    for (let a = 0; a < 1; a++) {
+      if (.5 > layer) break;
+      l = L1; c = C1; rs = 0;
+      if (1.5 > layer) break;
+      l = L3; c = C3;
+    }
+    const hs = (rs + YH) * .5, yc = Y0 - rs + hs, jx = w * .45, tw = t * TW;
+    for (let i = 0; i < 40; i++) {
+      if (x > 244) break;
+      const u = sin(h);
+      const cx = u * jx + x;
+      const py = sin(u * 137 + t) * hs + yc;
+      let cu = c;
+      for (let a2 = 0; a2 < 1; a2++) {
+        if (SPK > sin(u * 97 + tw)) break;
+        cu = C2;
+      }
+      move(cx, py); line(cx + l, py, cu);
+      x += w; h += GA;
+    }
+  },
+
+  // bokeh: one layer of N octagons from radius R0 (+-30% by hash) inwards 1
+  // px apart, the rim in RIM, the rest in FILL (N 1: a ring). y drifts with
+  // t (the JS scales it), x with o.
+  /** @plan bokeh inputs: t, o, h0, w */
+  bokeh() {
+    const R0 = 6, N = 1, RIM = 0x7b28, FILL = 0x3984, GA = 2.39996;
+    let x = o, h = h0;
+    const jx = w * .45, rv = R0 * .3;
+    for (let i = 0; i < 24; i++) {
+      if (x > 252) break;
+      const u = sin(h);
+      const cx = u * jx + x;
+      const cy = sin(u * 137 + t) * 54 + 68;
+      let r = u * rv + R0, cc = RIM;
+      for (let q = 0; q < N; q++) {
+        const f = r * .7071;
+        const xa = cx + r, xb = cx + f, xc = cx - f, xd = cx - r, yb = cy + f, yc = cy - f;
+        move(xa, cy); line(xb, yb, cc); line(cx, cy + r, cc); line(xc, yb, cc); line(xd, cy, cc);
+        line(xc, yc, cc); line(cx, cy - r, cc); line(xb, yc, cc); line(xa, cy, cc);
+        r += -1; cc = FILL;
+      }
+      x += w; h += GA;
+    }
+  },
+
+  // band: strokes hand-drawn lines at the top and the bottom, each 10
+  // segments of SEG px with a jitter of AMP0 + AMP1 * stroke px re-drawn
+  // whenever boil (0..5, the JS cycles it: six drawings, as cel boil) changes, tilted up to TILT px a segment; the top's first at
+  // y BT, the bottom's at BS - BT, the next GAP px further in (lines close
+  // together read as one thick stroke); in white, sepia0, sepia1 by turns.
+  /** @plan band inputs: strokes, boil */
+  band() {
+    const white = 0xffff, sepia0 = 0x7202, sepia1 = 0xcd0d, BT = 15, BS = 146, GAP = 2.5, TILT = .35, AMP0 = .8, AMP1 = .4, SEG = 25.2;
+    let y0 = BT, sg = GAP, c0 = white, c1 = sepia0, c2 = sepia1, hb = boil * 2.29;
+    for (let s = 0; s < 2; s++) {
+      let yj = y0, amp = AMP0;
+      for (let j = 0; j < strokes; j++) {
+        const e = sin(hb * .161 + 1.3);
+        const tilt = e * TILT;
+        let xb = -6, yb = yj + e - tilt * 5, hq = hb;
+        move(xb, yb);
+        for (let q = 0; q < 10; q++) {
+          xb += SEG; yb += tilt; hq += 2.39996;
+          line(xb, sin(hq) * amp + yb, c0);
+        }
+        const tmp = c0;
+        c0 = c1; c1 = c2; c2 = tmp;
+        yj += sg; amp += AMP1; hb += 4.13;
+      }
+      y0 = BS - y0;
+      sg = sg * -1;
+      hb += 7.31;
+    }
   }
 };
 // The close-up horse: 6 gallop frames of one polyline (typed points, half
@@ -436,4 +544,4 @@ let F = null;
 const HD = [[120, -155, 120, 425, 120, -155, -63, 323, 425, 120, 85, 159, 120, 100, 142, 120, 184, 166, 166, 166, 156, 156, 166, 166, 184, 184, 189, 189, 196, 196, 204, 204, 214, 214, 227, 227, 240, 227, 227, 240, 227, 227, 120, 184],
   [50, 105, 50, 105, 50, 160, 123, 123, 160, 50, 64, 64, 50, 58, 58, 50, 56, 56, 40, 14, 21, 42, 40, 56, 56, 19, 17, 56, 57, 14, 10, 58, 59, 5, -1, 60, 61, 60, -1, -8, -1, 60, 50, 19]];
 const PAD = ['turf', 'rail', 'stands', 'silk', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'crowd', 'pole'],
-  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd', 'prail', 't0', 't1', 'hl'];
+  RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd', 'prail', 't0', 't1', 'hl', 'dust', 'bokeh'];

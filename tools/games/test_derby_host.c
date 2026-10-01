@@ -200,6 +200,7 @@ static bool last_vis;
 static unsigned frame_draws,frame_steps,draw_raster_max,draw_steps_max,frame_points,frame_instr_max,frames_checked;
 static int pt_lo=32767,pt_hi=-32768;
 static uint64_t pixel_hash=1469598103934665603ull;
+static int frame_cm;   /* the camera (cm) of the frame being drawn, for the CSV */
 static FILE *csv;
 
 typedef struct {
@@ -509,7 +510,10 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
     REQ(ksn_proc_render_band(&cand_plan,pix_plan,0,135));
     for(int y=0;y<135;y+=8)REQ(ksn_proc_render_band(&cand_vm,pix_vm+y*240,y,y+8<=135?8:135-y));
     REQ(!memcmp(pix_plan,pix_vm,sizeof pix_plan));
-    for(size_t i=0;i<sizeof pix_plan;i++){pixel_hash^=((const unsigned char *)pix_plan)[i];pixel_hash*=1099511628211ull;}
+    uint64_t fh=1469598103934665603ull;   /* this frame's pixels alone (the CSV's fh) */
+    if(csv){JSValue v=JS_Eval(c,"cm",2,"cm.js",0);frame_cm=(int)num(v);JS_FreeValue(c,v);}
+    for(size_t i=0;i<sizeof pix_plan;i++){pixel_hash^=((const unsigned char *)pix_plan)[i];pixel_hash*=1099511628211ull;
+        fh^=((const unsigned char *)pix_plan)[i];fh*=1099511628211ull;}
     frames_checked++;
     if(cur_surface)s1_frames++;
     else{
@@ -557,9 +561,9 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
     if(live_plans>st->live_max)st->live_max=live_plans;
     if(frame_instr_max>st->instr_max)st->instr_max=frame_instr_max;
     if(frame_points>st->points_max)st->points_max=frame_points;
-    if(csv)fprintf(csv,"%u,%s,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",tick,scene,cur_surface,vis_drawn,frame_draws,cand_plan.count,
+    if(csv)fprintf(csv,"%u,%s,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%016llx\n",tick,scene,cur_surface,vis_drawn,frame_draws,cand_plan.count,
                    cand_plan.raster_steps,draw_raster_max,draw_steps_max,frame_steps,live_plans,frame_points,
-                   frame_instr_max,frame_regs);
+                   frame_instr_max,frame_regs,frame_cm,(unsigned long long)fh);
     draw_raster_max=draw_steps_max=0;
     return JS_UNDEFINED;
 }
@@ -981,7 +985,7 @@ int main(int argc,char **argv){
     ppm_dir=getenv("DERBY_PPM");
     if(getenv("DERBY_TIER"))tier_env=atoi(getenv("DERBY_TIER"));
     if(getenv("DERBY_CSV"))csv=fopen(getenv("DERBY_CSV"),"w");
-    if(csv)fprintf(csv,"tick,scene,surface,screen,draws,segments,raster,draw_raster_max,draw_steps_max,frame_steps,live_plans,points,instr_max,registered\n");
+    if(csv)fprintf(csv,"tick,scene,surface,screen,draws,segments,raster,draw_raster_max,draw_steps_max,frame_steps,live_plans,points,instr_max,registered,cm,fh\n");
     /* The game's chunks (pocket.app.load), read from the list the firmware
      * build reads; the entry is still the file named above. */
     if(app_chunks_host_read(list))return 2;
