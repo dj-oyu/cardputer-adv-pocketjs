@@ -9,7 +9,9 @@
 // observed win rate and the bettor's return per point staked (EV; the 20%
 // take makes a fair book 0.8 everywhere), with its standard error.
 //
-//   node tools/games/tune_derby.mjs [races] [--check]
+//   node tools/games/tune_derby.mjs [races] [--check] [--course=oval]
+// --course=oval runs every race on the oval (its bend multipliers, odds(h, 1));
+// the default runs every race on the straight, whatever the seed picks.
 // --check exits 1 unless every bin and rank returns 0.8 within 0.06 plus 2.5
 // standard errors (the longshots win a few hundred times in 20,000 races, so
 // their EV carries +-0.05 of noise; the favourites' +-0.01).
@@ -32,13 +34,15 @@ vm.createContext(ctx);
 vm.runInContext(src, ctx);
 const {field, race, step, order, odds, D, DT} = ctx.derby;
 
-const args = process.argv.slice(2), check = args.includes('--check');
+const args = process.argv.slice(2), check = args.includes('--check'), oval = args.includes('--course=oval');
 const N = +(args.find(a => !a.startsWith('--')) || 3000);
-const styleWins = [0, 0, 0], styleCount = [0, 0, 0];
+const styleWins = [0, 0, 0], styleCount = [0, 0, 0], laneWins = [0, 0, 0, 0, 0, 0, 0, 0];
 let favWins = 0, times = [], margins = [], changes = [], rows = [];
 for (let n = 0; n < N; ++n) {
   const seed = (0x3e1b7 + Math.imul(n + 1, 0x9e3779b9)) >>> 0;
-  const f = field(seed), od = odds(f.h);
+  const f = field(seed);
+  f.o = oval;
+  const od = odds(f.h, f.o);
   const s = race(f, true);
   let lead = -1, ch = 0;
   while (s.done < 8 && s.t < 200) {
@@ -50,6 +54,7 @@ for (let n = 0; n < N; ++n) {
   const o = order(s), w = o[0];
   for (let i = 0; i < 8; ++i) styleCount[f.h[i].sty]++;
   styleWins[f.h[w].sty]++;
+  laneWins[w]++;
   if (od.indexOf(Math.min(...od)) === w) favWins++;
   times.push(s.tc[w]);
   margins.push((s.tc[o[1]] - s.tc[w]) * s.v[o[1]]);
@@ -58,7 +63,8 @@ for (let n = 0; n < N; ++n) {
 }
 const q = (a, p) => { const b = a.slice().sort((x, y) => x - y); return b[Math.floor(p * (b.length - 1))]; };
 const frac = (a, f) => a.filter(f).length / a.length;
-console.log(`races ${N}`);
+console.log(`races ${N} on the ${oval ? 'oval' : 'straight'}`);
+console.log(`win share by lane (1 = rail): ${laneWins.map(w => (100 * w / N).toFixed(1)).join(' ')}%`);
 console.log(`win share by style (FRONT/STALK/CLOSE): ${styleWins.map((w, i) => (100 * w / N).toFixed(1) + '%').join(' / ')}` +
   `  (field share ${styleCount.map(c => (100 * c / N / 8).toFixed(1) + '%').join(' / ')})`);
 console.log(`favourite (shortest odds, first of equals) wins: ${(100 * favWins / N).toFixed(1)}%  (uniform 12.5%)`);

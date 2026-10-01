@@ -32,6 +32,11 @@ Plans: apps/derby/derby_prog.js holds them as @plan JS functions, which the
 firmware build lowers (tools/kasane_ir/lower_plans.mjs, main/CMakeLists.txt);
 the harness runs the same lowering's copy, .cache/derby_host/lowered/apps/derby
 (DERBY_APP_DIR). Node 16 or later on PATH (WSL: bash -lc).
+Courses: each race's seed picks the straight or the oval (derby_watch.js OV);
+--course straight|oval runs every race on one (the lowered copy's OV[0] set
+to 0 or 1, host only). The oval's odds are checked like the straight's
+(tune_derby.mjs --course=oval) and its bend against the trial
+(derby_corner.mjs app: every step, every digit).
 Seeds (pocket.random.seed() is DERBY_HW in the harness, fixed): every paddock
 seed the MID run logs must be tools/games/derby_seeds.py's formula; the same
 stored race under another hardware seed must be another race; the seed
@@ -45,7 +50,9 @@ composited panels, docs/apps/derby-watch-preview.png (its paddock panel now
 comes after the demos, so it differs from the committed sheet there) and
 docs/apps/derby-watch-demo-preview.png and derby-watch-dissolve-preview.png (the
 demo's curtain), and derby-pan-preview.png: each panning shot (near, far,
-zoomed) beside the same frame with side units only (a second run, PAN[0] 1e9). WSL/Linux only; no
+zoomed) beside the same frame with side units only (a second run, PAN[0] 1e9),
+and derby-oval-preview.png: the player's race on the oval at four distances
+under four cameras (OVAL_AT, OVAL_CAMS). WSL/Linux only; no
 device and no serial port.
 """
 from __future__ import annotations
@@ -178,6 +185,27 @@ def lower(src: Path, dst: Path) -> Path:
     return dst
 
 
+def force_course(app_dir: Path, course: str) -> Path:
+    """Host only: every race on one course, the chance of the oval (OV[0] in
+    the lowered copy's derby_watch.js) set to 0 or 1."""
+    if course != "seed":
+        entry = app_dir / "derby_watch.js"
+        text = entry.read_text(encoding="utf-8")
+        if "const OV = [.5," not in text:
+            raise SystemExit("derby_watch.js: OV changed, update force_course()")
+        entry.write_text(text.replace("const OV = [.5,", f"const OV = [{int(course == 'oval')},"), encoding="utf-8")
+    return app_dir
+
+
+# The oval's preview (--ppm): the player's race on the oval, a panel when its
+# leader passes each distance (rows: into the bend, its middle, out of it, the
+# home straight), under each camera held (columns: the director, whose WIDE
+# is a panning unit on the bend; the side WIDE; FIELD; CLOSE on the pick).
+OVAL_AT = [(290, "in"), (460, "mid"), (610, "out"), (800, "home")]
+OVAL_CAMS = [("dir", {}), ("wide", {"DERBY_JS": "wide=()=>0", "DERBY_EACH": "cam=0;man=9;"}),
+             ("field", {"DERBY_EACH": "cam=2;man=9;"}), ("close", {"DERBY_EACH": "cam=1;man=9;"})]
+
+
 def run(binary: Path, env: dict) -> str:
     """Run the harness, echo its output, fail on a non-zero exit."""
     p = subprocess.run([str(binary)], cwd=ROOT, env=env, capture_output=True, text=True)
@@ -237,8 +265,10 @@ def main() -> None:
     parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
     parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
     parser.add_argument("--heap-limit", type=int, help="run once with this guest heap limit (bytes)")
+    parser.add_argument("--course", choices=("seed", "straight", "oval"), default="seed",
+                        help="every race on this course (the lowered copy's OV[0] set to 0 or 1); seed: as the seeds pick")
     args = parser.parse_args()
-    app_dir = lower(ROOT / "apps/derby", CACHE / "lowered/apps/derby")
+    app_dir = force_course(lower(ROOT / "apps/derby", CACHE / "lowered/apps/derby"), args.course)
     if args.m32:
         env = dict(os.environ, M32_SYSROOT=str(ROOT / ".cache/kasane_megademo_app/m32sys"))
         flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=env,
@@ -282,6 +312,11 @@ def main() -> None:
         print("==== odds calibration (node tools/games/tune_derby.mjs 20000 --check)", flush=True)
         if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check"], cwd=ROOT).returncode:
             raise SystemExit("odds calibration check failed")
+        print("==== oval: odds calibration, and the app's bend against the trial's reference", flush=True)
+        if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check", "--course=oval"], cwd=ROOT).returncode:
+            raise SystemExit("oval odds calibration check failed")
+        if subprocess.run(["node", "tools/games/derby_corner.mjs", "app", "500"], cwd=ROOT).returncode:
+            raise SystemExit("the app's oval differs from tools/games/derby_corner.mjs")
     if args.ppm:
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
@@ -299,6 +334,22 @@ def main() -> None:
             f.replace(CACHE / "ppm" / f.name)
         order = [x for n, _ in pan_shots for x in (f"side_{n[4:]}", n)]
         sheet(CACHE / "ppm", ROOT / "docs/apps/derby-pan-preview.png", order, 2)
+        oval_dir = force_course(lower(ROOT / "apps/derby", CACHE / "lowered_oval/apps/derby"), "oval")
+        ov = CACHE / "ppm_oval"
+        ov.mkdir(parents=True, exist_ok=True)
+        for old in ov.glob("*.ppm"):
+            old.unlink()
+        for cam, extra in OVAL_CAMS:
+            # Pictures only: the scripted game's checks expect the straight's
+            # results (its points), so a run's verdict is not read here.
+            p = subprocess.run([str(binary)], cwd=ROOT, capture_output=True, text=True, env=dict(
+                env, DERBY_APP_DIR=str(oval_dir), DERBY_TIER="1", DERBY_NOCAM="1", DERBY_PPM=str(ov),
+                DERBY_LEADSHOTS=",".join(f"{m}:oval_{n}_{cam}" for m, n in OVAL_AT),
+                DERBY_CSV=str(CACHE / f"frames_oval_{cam}.csv"), **extra))
+            for line in p.stdout.splitlines():
+                if line.startswith("LEADSHOT"):
+                    print(line)
+        sheet(ov, ROOT / "docs/apps/derby-oval-preview.png", [f"oval_{n}_{c}" for _, n in OVAL_AT for c, _ in OVAL_CAMS], 4)
 
 
 if __name__ == "__main__":

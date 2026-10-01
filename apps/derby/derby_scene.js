@@ -3,7 +3,7 @@
 // enter the stalls), race, photo (still), res (result).
 function enter(s) {
   scene = s; t = 0; need = 1;
-  if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h))); }
+  if (s === 'pad') { drop(['conf']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h, F.o)) + (F.o ? ' OVAL' : '')); }
   if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
   if (s === 'photo') want(['photo']);
@@ -48,7 +48,7 @@ function hud(tx) {
   let s;
   if (scene === 'pad') {
     const h = F.h[pick];
-    s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M STRAIGHT  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
+    s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M ' + (F.o ? 'OVAL' : 'STRAIGHT') + '  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
       STY[h.sty] + ' x' + od[pick], 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
     for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]));
     R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
