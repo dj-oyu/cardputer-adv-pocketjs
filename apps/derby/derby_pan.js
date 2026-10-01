@@ -46,15 +46,15 @@ function ser(n, w, s, g0, L, zf, a, b) {
     for (;;) {
       Z /= M.SQRT2;
       const h = k > s ? M.ceil(mx(U > 1e-7 ? (mx(Z, k * U / .3) - q[1]) / U : -1e9, n0) / k) * k : n0, c = rnd((e - h) / k), z = q[1] + e * U;
-      if (c > 0) dr(n, [q[0] + e * V, -V * k, -z, U * k, mn(255, c), 1 / z, L ? c0 : -e / s * 2.39996 % (2 * PI) - 2 * PI * rnd(c * .191) + 1.8, c1]);
+      if (c > 0) dr(n, q[0] + e * V, -V * k, -z, U * k, mn(255, c), 1 / z, L ? c0 : -e / s * 2.39996 % (2 * PI) - 2 * PI * rnd(c * .191) + 1.8, c1);
       if (k === s) break;
       e = mn(e, h); k /= 2;
     }
     if (b < 0) {
       const y = q[1] + Lo * u, z = q[1] + Hi * u;
       const xa = (q[0] + Lo * v) / y, xb = (q[0] + Hi * v) / z;
-      dr('hl', [xa, 1 / y, xb, 1 / z, 6, -2.4, KN[tier][0], 21130]);
-      dr('crowd', [xa, 28 + 4.8 / y, xb, 28 + 4.8 / z, -2.4 / y, -2.4 / z, Lo * KN[3][5], Hi * KN[3][5]]);
+      dr('hl', xa, 1 / y, xb, 1 / z, 6, -2.4, KN[tier][0], 21130);
+      dr('crowd', xa, 28 + 4.8 / y, xb, 28 + 4.8 / z, -2.4 / y, -2.4 / z, Lo * KN[3][5], Hi * KN[3][5]);
     }
   }
 }
@@ -89,8 +89,8 @@ function pan(xs) {
   ser('prail', 40, 12, 0, L, zf, 31727, -7.5);
   if (vr) {
     const m = M.ceil(10 * mx(vq[1], vq[3])) + 1;
-    dr('hl', vq.concat(0, -10 / (m - 1), m, von < 8 ? 0 : von < 11 ? 0x632c : 0x0866));
-    dr('hl', vq.concat(0, -10, 2, 10565));
+    dr('hl', vq[0], vq[1], vq[2], vq[3], 0, -10 / (m - 1), m, von < 8 ? 0 : von < 11 ? 0x632c : 0x0866);
+    dr('hl', vq[0], vq[1], vq[2], vq[3], 0, -10, 2, 10565);
     feed(xs, mn((vr[2] - vr[0]) / 120, (vr[3] - vr[1] - 1) / 30));
   }
   ser('prail', DFR, k[4], 0, L, zf, 0xad55, 4.9);
@@ -99,7 +99,7 @@ function pan(xs) {
   for (let m = 200; m <= D; m += 200) {
     const p = pj(pose(m, DFR)), r = 1 / p[1], x = p[0] * r, e = m === D, n = e ? pj(pose(m, DNR)) : p, y = n[0] / n[1];
     if (p[1] > .02 && n[1] > .02 && x > -40 && x < 280 && y > -400 && y < 640)
-      dr('pole', [x, 28 + 6 * r, 28 + (e ? 2 : 3.4) * r, (e ? .55 : .3) * r, y, 28 + 6 / n[1], x, 28 + 6 * r]);
+      dr('pole', x, 28 + 6 * r, 28 + (e ? 2 : 3.4) * r, (e ? .55 : .3) * r, y, 28 + 6 / n[1], x, 28 + 6 * r);
   }
   for (let l = 7; l >= 0; --l) {
     const p = pj(pose(xs[l] - 12.5 * U, DL[l])), r = 1 / p[1], X = p[0] * r;

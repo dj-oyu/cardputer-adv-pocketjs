@@ -123,7 +123,7 @@ function paint(c, xs, close, gate, extra) {
     // the last (farthest) first.
     for (let i = 7; i >= 0; --i) {
       const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
-      dr('fr', [120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s)]);
+      dr('fr', 120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s));
     }
   } else course(c, cx, xs, close, gate);
   if (extra) dr(extra[0], extra[1]);

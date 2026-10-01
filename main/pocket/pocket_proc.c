@@ -529,28 +529,18 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     building=true;
     return JS_UNDEFINED;
 }
-static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;
+/* The second half of draw(), shared by H.draw (array or numbers) and the
+ * native callers (pocket_proc_draw_numbers): the inputs are read and each one
+ * is a finite double that stays finite as a float. Short input lists are
+ * zero-padded, so a caller written for four inputs sees exactly the frame it
+ * saw when four were required. */
+static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const float *input){
     const char *op="kasane.procedural.draw";
-    uint32_t handle,length;
-    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
     const unsigned room=surface_segments(&surfaces[building_surface]);
-    if(argc!=2||!integer(ctx,argv[0],INT32_MAX,&handle)||
-       !array_length(ctx,argv[1],&length)||length>KSN_PROC_INPUTS)
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
-    proc_slot *slot=find_slot(handle);
-    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
-    /* Short arrays are zero-padded, so a caller written for four inputs sees
-     * exactly the frame it saw when four were required. */
-    float input[KSN_PROC_INPUTS]={0};
-    for(unsigned i=0;i<length;i++){
-        JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);double n;
-        bool ok=!JS_IsException(v)&&number(ctx,v,&n)&&isfinite((float)n);
-        JS_FreeValue(ctx,v);
-        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
-        input[i]=(float)n;
-    }
+#ifndef KASANE_BGCOST_TRACE
+    (void)handle;
+#endif
     ksn_proc_status status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
                                      ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
     if(status==KSN_PROC_RUNNING)
@@ -617,6 +607,40 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     bg_plan[bg_last].seg+=scratch->count+typed_segments;
 #endif
     return JS_UNDEFINED;
+}
+static bool finite_input(double n){return isfinite(n)&&isfinite((float)n);}
+/* draw(handle, inputs[]) or draw(handle, a0, ..., a7): a number as the second
+ * argument starts the numeric form, which builds no array. Trailing undefined
+ * arguments count as not passed (a wrapper like (n, a, ..., h) => draw(h, a,
+ * ..., h) forwards eight whatever its caller gave), so the numeric form is
+ * zero-padded like a short array and draw(h, array, undefined) is the array
+ * form. A hole (undefined before a number) is a non-finite input. */
+static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.procedural.draw";
+    uint32_t handle,length=0;
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    while(argc>2&&JS_IsUndefined(argv[argc-1]))argc--;
+    const bool numeric=argc>=2&&JS_IsNumber(argv[1]);
+    if(argc<2||!integer(ctx,argv[0],INT32_MAX,&handle)||
+       (numeric?(length=(uint32_t)argc-1u)>KSN_PROC_INPUTS:
+                (argc!=2||!array_length(ctx,argv[1],&length)||length>KSN_PROC_INPUTS)))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+    proc_slot *slot=find_slot(handle);
+    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
+    float input[KSN_PROC_INPUTS]={0};
+    for(unsigned i=0;i<length;i++){
+        double n;bool ok;
+        if(numeric)ok=number(ctx,argv[1+i],&n)&&finite_input(n);
+        else{
+            JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);
+            ok=!JS_IsException(v)&&number(ctx,v,&n)&&finite_input(n);
+            JS_FreeValue(ctx,v);
+        }
+        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
+        input[i]=(float)n;
+    }
+    return draw_run(ctx,slot,handle,input);
 }
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;

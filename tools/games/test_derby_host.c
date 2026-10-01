@@ -391,18 +391,19 @@ static unsigned exact_run(const spec *s,const double *in,double *ex,double *ey,u
     }
     return n;
 }
-static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
-    (void)c;(void)self;(void)argc;
-    spec *s=find((int)num(argv[0]));REQ(s);
-    const unsigned tag=argc>2?(unsigned)num(argv[2]):0;
+/* One draw that the real pocket_proc.c accepted: from the app's H.draw (the
+ * JS wrapper in PRELUDE, array or numeric inputs) or from pocket.derby.ser
+ * (pocket_proc_draw_hook below). in64: the inputs as the JS doubles. */
+static void cap_draw(int handle,const double *in64,unsigned ni,unsigned tag,double f){
+    spec *s=find(handle);REQ(s);
     static float vx[4096],vy[4096];
     static double ex[4096],ey[4096];
     unsigned vn=0;
-    unsigned ni=len(argv[1]);REQ(ni<=KSN_PROC_INPUTS);
+    REQ(ni<=KSN_PROC_INPUTS);
     REQ(s->inputs_read<=ni||!s->inputs_read);
     if(ni>g_inputs_max)g_inputs_max=ni;
     float in[KSN_PROC_INPUTS]={0};
-    for(unsigned i=0;i<ni;i++){in[i]=(float)at(argv[1],i);REQ(isfinite(in[i]));}
+    for(unsigned i=0;i<ni;i++){in[i]=(float)in64[i];REQ(isfinite(in[i]));}
     ksn_proc_vm vp,vd,vr;
     REQ(ksn_proc_plan_begin(&vp,&s->plan,in,&f_plan)==KSN_PROC_RUNNING);
     REQ(ksn_proc_plan_run(&vp,&s->plan,false)==KSN_PROC_DONE);
@@ -420,15 +421,14 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
     }while(st==KSN_PROC_RUNNING);
     REQ(st==KSN_PROC_DONE);
     if(tag==4){
-        double in64[KSN_PROC_INPUTS]={0};
-        for(unsigned i=0;i<ni;i++)in64[i]=at(argv[1],i);
-        REQ(exact_run(s,in64,ex,ey,4096)==vn);
-        const double f=argc>3?num(argv[3]):0;
+        double e64[KSN_PROC_INPUTS]={0};
+        for(unsigned i=0;i<ni;i++)e64[i]=in64[i];
+        REQ(exact_run(s,e64,ex,ey,4096)==vn);
         for(unsigned i=0;i<vn;i++){
             const double e=fmax(fabs(vx[i]-ex[i]),fabs(vy[i]-ey[i]));
             if(e>newton_max){newton_max=e;newton_max_f=f;}
             if(ex[i]>=0&&ex[i]<240&&ey[i]>=0&&ey[i]<135&&e>newton_screen){newton_screen=e;
-                if(getenv("DERBY_NDEBUG"))printf("NEWTON %.4f plan %u pt %u/%u f %.0f in %g %g %g %g %g %g %g %g ex %.2f %.2f\n",e,s->program.count,i,vn,f,in64[0],in64[1],in64[2],in64[3],in64[4],in64[5],in64[6],in64[7],ex[i],ey[i]);}
+                if(getenv("DERBY_NDEBUG"))printf("NEWTON %.4f plan %u pt %u/%u f %.0f in %g %g %g %g %g %g %g %g ex %.2f %.2f\n",e,s->program.count,i,vn,f,e64[0],e64[1],e64[2],e64[3],e64[4],e64[5],e64[6],e64[7],ex[i],ey[i]);}
         }
         newton_points+=vn;newton_draws++;
     }
@@ -453,14 +453,14 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
          * as the vis inputs are (vr less one on the left and top). */
         REQ(!cur_surface&&!vis_drawn);
         vis_drawn=1;vis_seg_end=cand_plan.count;pan_face_frames++;
-        const double xl=at(argv[1],0),rl=at(argv[1],1),xr=at(argv[1],2),rr=at(argv[1],3);
+        const double xl=in64[0],rl=in64[1],xr=in64[2],rr=in64[3];
         vis_in[0]=(int)floor(fmin(xl,xr)+.5)-1;vis_in[1]=(int)ceil(28-10*fmin(rl,rr))-1;
         vis_in[2]=(int)floor(fmax(xl,xr)+.5);vis_in[3]=28;
     }
     if(tag==1){
         REQ(!cur_surface&&!vis_drawn&&f_plan.count>=4);
         vis_drawn=1;vis_seg_end=cand_plan.count;
-        for(unsigned i=0;i<4;i++)vis_in[i]=(int)at(argv[1],i);
+        for(unsigned i=0;i<4;i++)vis_in[i]=(int)in64[i];
         /* The face is filled row by row, exactly its interior, then the first
          * bezel ring runs one pixel outside it. */
         const ksn_proc_segment *g=f_plan.segments;
@@ -496,6 +496,23 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
         append(&cand_plan,&typed);append(&cand_vm,&typed);
         frame_points+=n;
     }
+}
+/* __draw(handle, tag, f, args): args is the wrapper's arguments object, the
+ * handle then an input array or the numeric inputs, trailing undefined
+ * dropped (pocket_proc.c draw_impl's rule). */
+static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)c;(void)self;(void)argc;
+    double in64[KSN_PROC_INPUTS]={0};
+    unsigned n=len(argv[3]),ni=0;
+    JSValue first=n>1?JS_GetPropertyUint32(ctx,argv[3],1):JS_UNDEFINED;
+    if(JS_IsArray(first)){ni=len(first);REQ(ni<=KSN_PROC_INPUTS);for(unsigned i=0;i<ni;i++)in64[i]=at(first,i);}
+    else{
+        while(n>2){JSValue v=JS_GetPropertyUint32(ctx,argv[3],n-1);const bool u=JS_IsUndefined(v);JS_FreeValue(ctx,v);if(!u)break;n--;}
+        ni=n-1;REQ(ni<=KSN_PROC_INPUTS);
+        for(unsigned i=0;i<ni;i++)in64[i]=at(argv[3],i+1);
+    }
+    JS_FreeValue(ctx,first);
+    cap_draw((int)num(argv[0]),in64,ni,(unsigned)num(argv[1]),num(argv[2]));
     return JS_UNDEFINED;
 }
 static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -937,9 +954,11 @@ static const char PRELUDE[]=
      * bezel on the screen (hl in 10565), 4 the panning series (Newton). The
      * app's pc (the panning unit, f at 4) is a global of its scripts. */
     "const pf=()=>{try{return pc?pc[4]:0}catch(e){return 0}};"
-    "P.draw=function(h,i){try{D.call(P,h,i)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify(i));throw e}"
-    "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&i[7]===10565?3:"
-    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__draw(h,i,t,t>2?pf():0)};"
+    /* Inputs as an array or as numbers (N12): i is the array, or the 8th
+     * numeric input arguments[8]. */
+    "P.draw=function(h,i){try{D.apply(P,arguments)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify([].slice.call(arguments,1)));throw e}"
+    "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&(Array.isArray(i)?i[7]:arguments[8])===10565?3:"
+    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__draw(h,t,t>2?pf():0,arguments)};"
     "P.commit=function(){C.call(P);__commit(pf())};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
