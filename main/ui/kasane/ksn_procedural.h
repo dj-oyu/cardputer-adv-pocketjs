@@ -26,7 +26,8 @@ typedef enum {
     KSN_PROC_MOVE, KSN_PROC_PLOT, KSN_PROC_LINE,
     KSN_PROC_REPEAT_REG, KSN_PROC_BREAK_IF_GT,
     KSN_PROC_PLOT_COLOR_REG, KSN_PROC_LINE_COLOR_REG,
-    KSN_PROC_CUBIC
+    KSN_PROC_CUBIC,
+    KSN_PROC_LINE_PATTERN
 } ksn_proc_op;
 typedef struct {
     uint8_t op,dst,a,b;
@@ -35,12 +36,56 @@ typedef struct {
 } ksn_proc_inst;
 typedef struct { const ksn_proc_inst *code; uint8_t count; } ksn_proc_program;
 typedef struct { int16_t x0,y0,x1,y1; uint16_t color; } ksn_proc_segment;
+/* A pattern line (LINE_PATTERN) takes two consecutive entries, so the entry
+ * keeps its size and a frame without one is byte for byte what it was
+ * (docs/kasane/crowd-primitives-design.md):
+ *   geometry    x0 + KSN_PROC_EXT_PATTERN (no coordinate, -480..720, reaches
+ *               KSN_PROC_EXT_MIN), y0, x1, y1, color = colour A
+ *   parameters  x0 = pattern bits 0..15, y0 = 0x8000 | bits 16..23 |
+ *               period << 8 | has-B << 13, x1 = u0, y1 = 0x8000 | du (8.8
+ *               cells, each under period * 256), color = colour B
+ * The parameter entry's y0 and y1 are negative, so a renderer's vertical
+ * range test passes over it like an entry above the panel: only an entry
+ * that reaches a band pays the test for the bias. frame.ext (what was
+ * padding) says whether a frame holds any; a frame without takes the loop it
+ * always took. */
+#define KSN_PROC_EXT_PATTERN 4096
+#define KSN_PROC_EXT_MIN 2048
+#define KSN_PROC_PATTERN_BITS 24
+#define KSN_PROC_PATTERN_BLOCK 6
 typedef struct {
     uint16_t count;
     uint16_t raster_steps;
     bool ready;
+    uint8_t ext;
     ksn_proc_segment segments[KSN_PROC_SEGMENTS];
 } ksn_proc_frame;
+_Static_assert(sizeof(ksn_proc_frame)==6+KSN_PROC_SEGMENTS*sizeof(ksn_proc_segment),
+               "ext took the padding byte: the frame did not grow");
+/* For code that walks a frame's geometry (damage, validation): the entry at
+ * *i (a pattern line's with the bias removed), whether it is a pattern line,
+ * and its raster cost; *i moves past a pattern line's parameters. False at
+ * the end, or for a pattern line cut off by count or whose parameter entry
+ * is not one. */
+static inline bool ksn_proc_frame_next(const ksn_proc_frame *frame,unsigned *i,
+                                       ksn_proc_segment *geometry,bool *pattern,
+                                       unsigned *cost){
+    if(*i>=frame->count)return false;
+    *geometry=frame->segments[(*i)++];
+    *pattern=frame->ext&&geometry->x0>=KSN_PROC_EXT_MIN;
+    if(*pattern){
+        if(*i>=frame->count)return false;
+        const ksn_proc_segment *q=&frame->segments[(*i)++];
+        const unsigned period=(uint16_t)q->y0>>8&31u;
+        if(q->y0>=0||q->y1>=0||period<1||period>KSN_PROC_PATTERN_BITS||
+           (uint16_t)q->x1>=period*256u||((uint16_t)q->y1&0x7fffu)>=period*256u)return false;
+        geometry->x0=(int16_t)(geometry->x0-KSN_PROC_EXT_PATTERN);
+    }
+    unsigned dx=(unsigned)(geometry->x1>geometry->x0?geometry->x1-geometry->x0:geometry->x0-geometry->x1);
+    unsigned dy=(unsigned)(geometry->y1>geometry->y0?geometry->y1-geometry->y0:geometry->y0-geometry->y1);
+    *cost=(dx>dy?dx:dy)+1;
+    return true;
+}
 typedef enum { KSN_PROC_RUNNING, KSN_PROC_DONE, KSN_PROC_INVALID,
                KSN_PROC_LIMIT } ksn_proc_status;
 /* Explicit native simulation state. Copy into a VM at begin and copy out only
@@ -108,6 +153,20 @@ bool ksn_proc_capture_state(const ksn_proc_vm *vm,ksn_proc_state *state);
  * a segments (1..64) in a native loop, emits ordered lines of color, and
  * leaves the pen at the final control point. One debugger step covers the
  * entire bounded curve; the emitted segment/raster limits still apply. */
+/* LINE_PATTERN is LINE with a colour chosen per pixel: colour A is the
+ * instruction's color, as LINE's; registers dst..dst+5 (KSN_PROC_PATTERN_BLOCK)
+ * hold the pattern (an integer 0..2^24-1, exact in a float32), colour B
+ * (0..65535, or -1 for none), the pattern coordinate at the pen (u0) and at
+ * (a,b) (u1), in cells (|u| <= 2^20), and the two ends' depth weights w0, w1
+ * (1/Z, finite; equal for none); value is the period N, an integer 1..24. Pixel k of the line (0 at the pen, one a
+ * major-axis step, so a band reached mid-line sees the same pixel) reads
+ * cell floor(u0 + k * du) mod N, du = (u1 - u0) / (the line's steps) under
+ * 256 cells in size, both in 8.8 fixed point: bit set draws A, clear draws
+ * B, or nothing without a B. With weights of one sign and unlike size the
+ * line is cut into 2, 4 or 8 chords (two entries each), the coordinate at
+ * each cut the perspective-correct one, linear inside a chord: a row of a
+ * stand seen at an angle keeps its spacing receding. Its raster cost is a
+ * LINE's. It leaves the pen at (a,b) and draws nothing without a pen. */
 ksn_proc_status ksn_proc_step(ksn_proc_vm *vm);
 #ifdef KASANE_PROC_LIMITS_PROBE
 /* Diagnostic build only: sweep registers 0..n-1 after every step, as the
@@ -118,4 +177,9 @@ extern uint8_t g_ksn_proc_sweep_regs;
 ksn_proc_status ksn_proc_run(ksn_proc_vm *vm);
 /* Replays only the requested rows over an existing RGB565 backdrop. */
 bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height);
+#ifdef KASANE_BGCOST_TRACE
+/* Diagnostic A/B only (tools/games/bgcost/pattern): the band renderer as it
+ * was before LINE_PATTERN, in the same binary. */
+bool ksn_proc_render_band_base(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height);
+#endif
 #endif

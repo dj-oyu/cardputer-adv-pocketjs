@@ -11,12 +11,17 @@
 // (the VM would have failed the draw): the language's meaning is its visible
 // output, not the hand IR's failure points.
 
-export const OPS = 'SIAMNREVPLQBplC';
-const FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25'];
+export const OPS = 'SIAMNREVPLQBplCX';
+const FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25', '12345'];
 const FIELD = ['op', 'dst', 'a', 'b', 'value', 'color'];
 export const O = {SET: 0, INPUT: 1, ADD: 2, MUL: 3, SIN: 4, REPEAT: 5, END: 6, MOVE: 7, PLOT: 8, LINE: 9,
-  REPEAT_REG: 10, BREAK: 11, PLOTC: 12, LINEC: 13, CUBIC: 14};
+  REPEAT_REG: 10, BREAK: 11, PLOTC: 12, LINEC: 13, CUBIC: 14, LINEP: 15};
 export const REGS = 16, CODE = 64;
+// LINE_PATTERN takes colour A in its color field (as LINE) and six values
+// (pattern, colour B, u0, u1, w0, w1) from registers dst..dst+5; the
+// compiler always uses r10..r15, so the block never meets CUBIC's r0..r7.
+export const PBASE = REGS - 6, PARGS = 6;
+const SLOTS = [2, 4, 5, 6, 7, 8]; // linePattern's arguments in the block
 const f32 = Math.fround;
 
 // ---------------------------------------------------------------- text form
@@ -70,6 +75,7 @@ function uses(i) {
     case O.MOVE: case O.PLOT: case O.LINE: case O.BREAK: return [i.a, i.b];
     case O.PLOTC: case O.LINEC: return [i.dst, i.a, i.b];
     case O.CUBIC: return i.args ?? [0, 1, 2, 3, 4, 5, 6, 7];
+    case O.LINEP: return [i.a, i.b, ...(i.args ?? Array.from({length: PARGS}, (_, k) => i.dst + k))];
     default: return [];
   }
 }
@@ -225,6 +231,21 @@ function lower(ast) {
   const assigned = new Set();
   (function scan(s) { for (const x of s) { if (x.k === 'assign') assigned.add(x.n); if (x.body) scan(x.body); } })(ast);
   const pools = new Map(), pinned = new Map(), funcs = new Map();
+  // linePattern's parameter slots: a slot that always gets the same constant,
+  // input, argument or variable (by its spelling) keeps it in the slot's
+  // register; any other slot gets a fresh copy before each call.
+  const slotKeys = Array.from({length: PARGS}, () => new Set());
+  let unique = 0;
+  const spell = e => e.k === 'num' ? 'n' + e.lit : e.k === 'par' ? 'p' + e.n : e.k === 'name' ? 'v' + e.v
+    : e.k === 'neg' && e.a.k === 'num' ? 'n-' + e.a.lit : 'e' + unique++;
+  (function scanP(s) {
+    for (const x of s) {
+      if (x.k === 'draw' && x.f === 'linePattern' && x.args.length === 10)
+        SLOTS.forEach((a, k) => slotKeys[k].add(spell(x.args[a])));
+      if (x.body) scanP(x.body);
+    }
+  })(ast);
+  const shared = k => slotKeys[k].size === 1 && ![...slotKeys[k]][0].startsWith('e');
   let cse = new Map();
   const newReg = (kind, name) => (vregs.push({kind, name, pin: null}), vregs.length - 1);
   const key = x => x.t === 'c' ? 'c' + (Object.is(x.v, -0) ? '-0' : x.v) : x.t === 'p' ? 'p' + x.n : x.t === 'i' ? 'i' + x.k
@@ -389,6 +410,33 @@ function lower(ast) {
             if (c.par !== undefined) i.par.color = c.par;
             emit(i); break;
           }
+          if (f === 'linePattern') {
+            if (A.length !== 10) throw new Error(`line ${s.line}: linePattern(x, y, pattern, colorA, colorB, u0, u1, w0, w1, period)`);
+            const x = mat(ev(A[0])), y = mat(ev(A[1])), n = imm(ev(A[9]), 'period'), c = imm(ev(A[3]), 'colorA');
+            if (n.v !== undefined && !(n.v >= 1 && n.v <= 24)) throw new Error(`line ${s.line}: linePattern's period is 1..24`);
+            const args = SLOTS.map(a => A[a]).map((e, k) => {
+              const X = ev(e), R = PBASE + k;
+              if (shared(k)) {
+                // The one value of the slot lives in its register (also where
+                // the plan reads it otherwise).
+                const v = mat(X);
+                if ((!pinned.has(v) || pinned.get(v) === R) && (vregs[v].pin == null || vregs[v].pin === R)) {
+                  pinned.set(v, R); vregs[v].pin = R; return v;
+                }
+              }
+              const t = newReg('temp');
+              if (X.t === 'r') emit({op: O.ADD, dst: t, a: X.vr, b: pool(cst(0)), copy: X.vr});
+              else if (X.t === 'c') emit({op: O.SET, dst: t, value: X.v, lit: X.lit});
+              else if (X.t === 'p') emit({op: O.SET, dst: t, value: 0, par: {value: X.n}});
+              else emit({op: O.INPUT, dst: t, a: X.k});
+              pinned.set(t, R); vregs[t].pin = R; return t;
+            });
+            const i = {op: O.LINEP, dst: PBASE, a: x, b: y, value: n.v ?? 0, color: c.v ?? 0, par: {}, args};
+            if (n.par !== undefined) i.par.value = n.par;
+            if (c.par !== undefined) i.par.color = c.par;
+            if (c.v !== undefined && !(c.v >= 0 && c.v <= 65535)) throw new Error(`line ${s.line}: linePattern's colorA is 0..65535`);
+            emit(i); break;
+          }
           const op = {move: O.MOVE, plot: O.PLOT, line: O.LINE}[f];
           if (op === undefined) throw new Error(`line ${s.line}: unknown statement ${f}`);
           const x = mat(ev(A[0])), y = mat(ev(A[1]));
@@ -435,7 +483,7 @@ function remat(code, vregs, vr) {
         a: vregs[vr].def.a ?? 0, b: 0, color: 0});
       const sub = x => x === vr ? t : x;
       const j = {...i};
-      if (j.op === O.CUBIC) j.args = j.args.map(sub);
+      if (j.op === O.CUBIC || j.op === O.LINEP) { j.args = j.args.map(sub); if (j.op === O.LINEP) { j.a = sub(j.a); j.b = sub(j.b); } }
       else { for (const f of ['a', 'b']) if (uses(i).length && j[f] === vr && j.op !== O.REPEAT) j[f] = t; if ((j.op === O.PLOTC || j.op === O.LINEC) && j.dst === vr) j.dst = t; }
       out.push(j);
     } else out.push(i);
@@ -452,7 +500,7 @@ function color(code, vregs) {
   });
   // Values live together at a CUBIC must also hold distinct registers.
   code.forEach((i, pc) => {
-    if (i.op !== O.CUBIC) return;
+    if (i.op !== O.CUBIC && i.op !== O.LINEP) return;
     const live = new Set([...liveIn[pc]]);
     for (const a of live) for (const b of live) if (a < b) edge(a, b);
   });
@@ -461,8 +509,9 @@ function color(code, vregs) {
   // Pins (CUBIC reads r0..r7) first, then Chaitin's order.
   const pin = new Map();
   code.forEach(i => { if (i.op === O.CUBIC) i.args.forEach((v, k) => pin.set(v, pin.has(v) && pin.get(v) !== k ? -1 : k)); });
-  for (const [v, k] of pin) if (k < 0) return {fail: `value used as two CUBIC points: ${vregs[v].name ?? v}`};
-  for (const [v, k] of pin) for (const w of adj.get(v) ?? []) if (pin.get(w) === k) return {fail: `CUBIC r${k} is wanted by two live values`, pinConflict: [v, w]};
+  code.forEach(i => { if (i.op === O.LINEP) i.args.forEach((v, k) => pin.set(v, pin.has(v) && pin.get(v) !== PBASE + k ? -1 : PBASE + k)); });
+  for (const [v, k] of pin) if (k < 0) return {fail: `value used as two CUBIC points or linePattern slots: ${vregs[v].name ?? v}`};
+  for (const [v, k] of pin) for (const w of adj.get(v) ?? []) if (pin.get(w) === k) return {fail: `CUBIC/linePattern r${k} is wanted by two live values`, pinConflict: [v, w]};
   const deg = v => [...(adj.get(v) ?? [])].filter(w => rest.has(w)).length;
   const rest = new Set([...nodes].filter(v => !pin.has(v))), stack = [];
   while (rest.size) {
@@ -496,6 +545,10 @@ function emitPhysical(code, reg) {
     if ([O.SIN, O.REPEAT_REG].includes(i.op)) j.a = R(i.a);
     if ([O.MOVE, O.PLOT, O.LINE, O.BREAK].includes(i.op)) { j.a = R(i.a); j.b = R(i.b); }
     if ([O.PLOTC, O.LINEC].includes(i.op)) { j.dst = R(i.dst); j.a = R(i.a); j.b = R(i.b); }
+    if (i.op === O.LINEP) {
+      j.dst = PBASE; j.a = R(i.a); j.b = R(i.b);
+      i.args.forEach((v, k) => { if (R(v) !== PBASE + k) throw new Error(`linePattern slot ${k} not in r${PBASE + k}`); });
+    }
     if (i.op === O.SET && !('value' in j.par) && j.lit == null) j.lit = shortest(f32(j.value));
     if (i.copy !== undefined && R(i.copy) === j.dst) j.drop = true;
     return j;
@@ -532,7 +585,7 @@ export function compileAst(ast) {
       throw new Error(r.fail);
     }
     const counts = new Map();
-    code.forEach(i => { for (const u of uses(i)) if (vregs[u].kind === 'pool') counts.set(u, (counts.get(u) ?? 0) + 1); });
+    code.forEach(i => { for (const u of uses(i)) if (vregs[u].kind === 'pool' && vregs[u].pin == null) counts.set(u, (counts.get(u) ?? 0) + 1); });
     const pick = [...counts].sort((a, b) => a[1] - b[1])[0];
     if (!pick) throw new Error(r.fail);
     rematerialised.push(vregs[pick[0]].name);
@@ -665,6 +718,11 @@ export function decompile(src) {
       case O.MOVE: out.push(`${ind}move(${o(i.a)}, ${o(i.b)});`); return;
       case O.PLOT: case O.LINE: out.push(`${ind}${i.op === O.PLOT ? 'plot' : 'line'}(${o(i.a)}, ${o(i.b)}, ${'color' in i.par ? '$' + i.par.color : i.color});`); return;
       case O.PLOTC: case O.LINEC: out.push(`${ind}${i.op === O.PLOTC ? 'plot' : 'line'}(${o(i.a)}, ${o(i.b)}, ${o(i.dst)});`); return;
+      case O.LINEP: {
+        const r = k => o(i.dst + k), c = 'color' in i.par ? '$' + i.par.color : i.color;
+        out.push(`${ind}linePattern(${o(i.a)}, ${o(i.b)}, ${r(0)}, ${c}, ${[1, 2, 3, 4, 5].map(r).join(', ')}, ${'value' in i.par ? '$' + i.par.value : i.lit ?? i.value});`);
+        return;
+      }
       case O.CUBIC: out.push(`${ind}cubic(${'a' in i.par ? '$' + i.par.a : i.a}, ${'color' in i.par ? '$' + i.par.color : i.color}, ${[0, 1, 2, 3, 4, 5, 6, 7].map(o).join(', ')});`); return;
     }
     const w = find(pc);

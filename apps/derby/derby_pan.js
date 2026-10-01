@@ -16,11 +16,10 @@ function lim(c0, c1) { if (c1 > 0) Lo = mx(Lo, -c0 / c1); else if (c1 < 0) Hi = 
 // (Newton's error, 3 steps: .3^8), the halves on the grid. Inputs [X'',
 // dX'', -Z', -dZ', count, 1/Z', a, b]; prail's lines reach the point after
 // the last (the next draw's first, or the one past the near end).
-// L 0: the crowd (pk), no LOD, its first column on row 0 of the checkerboard
-// and a its phase (a dot's is fixed on the course: pk adds 2.39996 a column).
 // Turf (t0, t1): a is the far rail's distance, a, b its offset [X'', -Z'] off
 // the chord's normal. The stands (b < 0): their tiers chord by chord, hl's
-// lines across the chord's view from the ground up, 2.4 m apart.
+// lines across the chord's view from the ground up, 2.4 m apart, and the
+// crowd, one draw a chord.
 function ser(n, w, s, g0, L, zf, a, b) {
   let P, pg;
   for (let i = 0; i < VC.length; ++i) {
@@ -53,7 +52,9 @@ function ser(n, w, s, g0, L, zf, a, b) {
     }
     if (b < 0) {
       const y = q[1] + Lo * u, z = q[1] + Hi * u;
-      dr('hl', [(q[0] + Lo * v) / y, 1 / y, (q[0] + Hi * v) / z, 1 / z, 6, -2.4, KN[tier][0], 21130]);
+      const xa = (q[0] + Lo * v) / y, xb = (q[0] + Hi * v) / z;
+      dr('hl', [xa, 1 / y, xb, 1 / z, 6, -2.4, KN[tier][0], 21130]);
+      dr('crowd', [xa, 28 + 4.8 / y, xb, 28 + 4.8 / z, -2.4 / y, -2.4 / z, Lo * KN[3][5], Hi * KN[3][5]]);
     }
   }
 }
@@ -86,7 +87,6 @@ function pan(xs) {
     for (let j = 1; j < CH.length; ++j) if (!ou(j - 1, 25.5, 30, zf)) VC.push(j - 1);
   }
   ser('prail', 40, 12, 0, L, zf, 31727, -7.5);
-  ser('pk', 40, 12 / k[2], 0, 0, zf, 0, 46496 + 12650 * ((t >> 3 ^ t) & 1));
   if (vr) {
     const m = M.ceil(10 * mx(vq[1], vq[3])) + 1;
     dr('hl', vq.concat(0, -10 / (m - 1), m, von < 8 ? 0 : von < 11 ? 0x632c : 0x0866));

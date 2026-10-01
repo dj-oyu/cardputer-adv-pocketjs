@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {parseText, assemble} from './kir.mjs';
 
-const FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25'];
+const FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25', '12345'];
 const FIELD = ['op', 'dst', 'a', 'b', 'value', 'color'];
 export const DECODER = `const FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25'];
 function prog(s, a) {
@@ -66,6 +66,8 @@ function field(x, lit) {
 }
 export function encode(text, macro = true) {
   const code = parseText(text), out = [];
+  // The byte form's op byte 15 is the macro; LINE_PATTERN is nibble form only.
+  if (code.some(i => i.op === 15)) throw new RangeError('linePattern: use the nibble form');
   let pc = 0;
   if (macro) {
     let n = 0;
@@ -84,10 +86,12 @@ export function encode(text, macro = true) {
 }
 // The nibble form: the op in the low 4 bits of its byte and the first
 // register field in the high 4; further register fields two to a byte (high,
-// then low); other fields as above. 15 is the macro, its count the high nibble.
-const NR = [1, 2, 3, 3, 2, 0, 0, 2, 2, 2, 1, 2, 3, 3, 0];
-export const DECODER_NIBBLE = `const FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25'],
-  NR = [1, 2, 3, 3, 2, 0, 0, 2, 2, 2, 1, 2, 3, 3, 0];
+// then low); other fields as above. 15 is the macro, its count (2..14) the
+// high nibble; 15 with a high nibble of 0 escapes op 15 (LINE_PATTERN), whose
+// byte (first register high, low nibble 0) follows.
+const NR = [1, 2, 3, 3, 2, 0, 0, 2, 2, 2, 1, 2, 3, 3, 0, 3];
+export const DECODER_NIBBLE = `const FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25', '12345'],
+  NR = [1, 2, 3, 3, 2, 0, 0, 2, 2, 2, 1, 2, 3, 3, 0, 3];
 function prog(s, a) {
   const c = [];
   let i = 0;
@@ -106,7 +110,10 @@ function prog(s, a) {
   while (i < s.length) {
     let h = s.charCodeAt(i++);
     const o = h & 15, r = [o, 0, 0, 0, 0, 0], f = FLD[o];
-    if (o == 15) { for (let k = 0; k < h >> 4; ++k) c.push([1, k, k, 0, 0, 0]); continue; }
+    if (o == 15) {
+      if (h >> 4) { for (let k = 0; k < h >> 4; ++k) c.push([1, k, k, 0, 0, 0]); continue; }
+      h = s.charCodeAt(i++);
+    }
     for (let j = 0; j < f.length; ++j)
       r[+f[j]] = j >= NR[o] ? v() : j == 0 ? h >> 4 : j & 1 ? (h = s.charCodeAt(i++)) >> 4 : h & 15;
     c.push(r);
@@ -125,7 +132,8 @@ export function encodeNibble(text, macro = true) {
   for (; pc < code.length; ++pc) {
     const i = code[pc], f = FLD[i.op], regs = f.slice(0, NR[i.op]).split('').map(k => i[FIELD[+k]]);
     if (regs.some(r => r > 15)) throw new RangeError('register or input over 15');
-    out.push(i.op | (regs[0] ?? 0) << 4);
+    if (i.op === 15) out.push(15, (regs[0] ?? 0) << 4);
+    else out.push(i.op | (regs[0] ?? 0) << 4);
     for (let j = 1; j < regs.length; j += 2) out.push(regs[j] << 4 | (regs[j + 1] ?? 0));
     for (const k of f.slice(NR[i.op])) {
       const name = FIELD[+k];

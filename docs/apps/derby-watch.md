@@ -1258,3 +1258,13 @@ q24 の段階 3。WIDE を、コースの手前に立つ 3 台の首振りカメ
   | 評価の余裕 | 22.7〜22.8 KB | 27.9 KB |
 
 - 詳細・実機の表・fps を上げた手順は [derby-pan-memory.md](derby-pan-memory.md) §12、補正とオッズの試算は [derby-corner-model.md](derby-corner-model.md)、見た目は [derby-oval-preview.png](derby-oval-preview.png)（評価はユーザー）。
+
+## 観客を模様線に（P24、2026-10-01、ブランチ `vm/crowd-p24`）
+
+観客席の観客を、点（市松、`crowd`・`pk`）から模様線（`LINE_PATTERN`）に替えた。上の表の「観客の点のゆらぎ（`SIN`）」「観客（`PLOT_COLOR_REG`、明滅）」は以前の形で、今の観客は `SIN` も明滅も使わない。
+
+- plan は `crowd` 1 本（56 命令）で横見と首振りを描く。同時の plan は 30 → 29/32、首振りの plan は `prail`・`t0`・`t1`・`hl` の 4 本。
+- 見た目の値は `KN`（`derby_prog.js`）の 1 か所: 段階ごとの頭と体の 24 ビットの模様、`KN[3]` に肌・服 2 色・段ごとのずれ・空席の色・1 m あたりのセル数（[apps/derby/README.md](../../apps/derby/README.md) の「観客」）。
+- 画と GIF: [derby-crowd-p24-preview.png](derby-crowd-p24-preview.png)・[derby-crowd-p24.gif](derby-crowd-p24.gif)（host。左が以前の市松、右が P24）。
+- 実機の時間とメモリは [derby-pan-memory.md](derby-pan-memory.md) §13、命令の設計と帯の単価は [crowd-primitives-design.md](../kasane/crowd-primitives-design.md)。
+

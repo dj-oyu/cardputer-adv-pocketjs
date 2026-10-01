@@ -14,7 +14,7 @@
 import {compileAst} from './kir.mjs';
 
 export const RULES = {
-  R1: 'statements: let/const, = += -= *=, for (let i = 0; i < n; i++), if (a > b) break;, move/line/plot/cubic(...)',
+  R1: 'statements: let/const, = += -= *=, for (let i = 0; i < n; i++), if (a > b) break;, move/line/plot/cubic/linePattern(...)',
   R2: 'expressions: numbers, names, + - *, unary -, / by a constant, sin() or Math.sin(), Math.PI, parentheses',
   R3: 'loops: for (let i = 0; i < n; i++) with n not changed in the body and i not assigned; no while/do/continue',
   R4: 'names: the @plan inputs, the parameters, locals declared before use; no shadowing, no reassigned const',
@@ -145,11 +145,11 @@ function parseBody(src, line0, inputs, params) {
     if (x.k !== 'id') fail(line, 'R1', `a statement starting with ${x.k}`);
     const n = t[p++].v;
     if (peek('(')) {
-      if (!['move', 'line', 'plot', 'cubic'].includes(n)) fail(line, 'R5', `a call to ${n}()`);
+      if (!['move', 'line', 'plot', 'cubic', 'linePattern'].includes(n)) fail(line, 'R5', `a call to ${n}()`);
       take('('); const args = [];
       if (!peek(')')) do args.push(expr()); while (peek(',') && take(','));
       take(')'); take(';');
-      const want = {move: 2, line: 3, plot: 3, cubic: 10}[n];
+      const want = {move: 2, line: 3, plot: 3, cubic: 10, linePattern: 10}[n];
       if (args.length !== want) fail(line, 'R1', `${n}() takes ${want} arguments`);
       return [{k: 'draw', f: n, args, line}];
     }
@@ -239,7 +239,9 @@ export function compileFile(text, file) { return findPlans(text, file).map(compi
 // Runs a plan's JS for one draw with move/line/plot/cubic recording segments,
 // as ksn_procedural.c would: coordinates rounded half away from zero and
 // bounded to -480..720, colours integral 0..65535, 1,024 segments and 8,192
-// raster steps. f32: the function as the VM computes it, every + - * / and
+// raster steps; linePattern as ksn_procedural.c's LINE_PATTERN: its chords,
+// each a geometry entry (x0 + 4096) and a parameter entry (pattern() below).
+// f32: the function as the VM computes it, every + - * / and
 // sin rounded to float32 (Math.fround), a non-finite result fails the draw;
 // otherwise the function text runs as written, in double.
 const F = Math.fround;
@@ -256,6 +258,7 @@ function recorder() {
     if (raster + cost > 8192) stop('LIMIT');
     raster += cost; seg.push([x0, y0, x1, y1, c]);
   };
+  const whole = (v, lo, hi) => { if (!(v >= lo && v <= hi) || !Number.isInteger(v)) stop('INVALID'); return v; };
   const api = {
     move: (x, y) => { pen = [coord(x), coord(y)]; },
     plot: (x, y, c) => { c = colour(c); const X = coord(x), Y = coord(y); emit(X, Y, X, Y, c); pen = [X, Y]; },
@@ -272,8 +275,55 @@ function recorder() {
       }
       pen = [px, py];
     },
+    linePattern: (x, y, bits, a, b, u0, u1, w0, w1, n) => {
+      [bits, b, u0, u1, w0, w1] = [bits, b, u0, u1, w0, w1].map(F);
+      a = colour(a); whole(bits, 0, 16777215); whole(b, -1, 65535);
+      if (!(Math.abs(u0) <= 1048576) || !(Math.abs(u1) <= 1048576) || !Number.isFinite(w0) || !Number.isFinite(w1)) stop('INVALID');
+      const X = coord(F(x)), Y = coord(F(y));
+      if (pen) for (const c of pattern(pen[0], pen[1], X, Y, bits, a, b, u0, u1, w0, w1, n)) {
+        if (seg.length > 1022) stop('LIMIT');
+        if (raster + c.cost > 8192) stop('LIMIT');
+        if (!c.ok) stop('INVALID');
+        raster += c.cost; seg.push(c.geometry, c.parameters);
+      }
+      pen = [X, Y];
+    },
   };
   return {api, Stop, result: () => ({status, seg, raster}), stopped: s => { status = s; }};
+}
+// LINE_PATTERN's chords from pen (px, py) to (x, y), as ksn_procedural.c
+// computes them in float32: [{geometry, parameters, cost, ok}].
+const lround = v => Math.sign(v) * Math.floor(Math.abs(v) + .5);
+export function pattern(px, py, x, y, bits, a, b, u0, u1, w0, w1, n) {
+  const out = [], aw = Math.abs(w0), bw = Math.abs(w1);
+  let chords = 1;
+  if (F(w0 * w1) > 0) {
+    const ratio = aw > bw ? F(aw / bw) : F(bw / aw);
+    chords = ratio < F(1.02) ? 1 : ratio < F(1.2) ? 2 : ratio < F(1.6) ? 4 : 8;
+  }
+  const head = (bits >>> 16) | n << 8 | (b >= 0 ? 1 << 13 : 0);
+  let ax = px, ay = py, au = u0;
+  for (let j = 1; j <= chords; ++j) {
+    let bx = x, by = y, bu = u1, ok = true;
+    if (j < chords) {
+      const t = F(F(j) / F(chords)), near = F(aw * F(1 - t)), far = F(bw * t);
+      bu = F(F(F(u0 * near) + F(u1 * far)) / F(near + far));
+      const cx = F(F(px) + F(F(x - px) * t)), cy = F(F(py) + F(F(y - py) * t));
+      if (!(cx >= -480 && cx <= 720 && cy >= -480 && cy <= 720)) ok = false;
+      bx = lround(cx); by = lround(cy);
+    }
+    const steps = Math.max(Math.abs(bx - ax), Math.abs(by - ay)), wrap = n * 256;
+    const du = steps ? F(F(bu - au) / F(steps)) : 0;
+    if (!(du > -256 && du < 256)) ok = false;
+    let m = F(au % n);
+    if (m < 0) m = F(m + n);
+    const uq = lround(F(m * 256)) % wrap, dq = ((lround(F(du * 256)) % wrap) + wrap) % wrap;
+    out.push({geometry: [ax + 4096, ay, bx, by, a], parameters: [bits & 0xffff, 0x8000 | head, uq, 0x8000 | dq].map(v => v << 16 >> 16).concat(b >= 0 ? b : 0),
+      cost: steps + 1, ok});
+    if (!ok) break;
+    ax = bx; ay = by; au = bu;
+  }
+  return out;
 }
 // kir AST -> JS with every operation rounded to float32.
 function f32Js(ast, params) {
@@ -315,12 +365,12 @@ export function reference(plan, input, args, {f32 = true} = {}) {
     const src = f32
       ? `return function (__in, __args) {\n${f32Js(planAst(plan), plan.params)}\n}`
       : `return function (__in, __args) {\nconst [${plan.inputs.join(', ')}] = __in;\nconst sin = Math.sin;\nreturn (${plan.text})(...__args);\n}`;
-    fn = new Function('move', 'line', 'plot', 'cubic', '__F', '__G', '__stop', src);
+    fn = new Function('move', 'line', 'plot', 'cubic', 'linePattern', '__F', '__G', '__stop', src);
     cache.set(plan, {...cache.get(plan), [f32]: fn});
   }
   const G = v => { v = F(v); if (!Number.isFinite(v)) r.stopped('INVALID'), (() => { throw new r.Stop(); })(); return v; };
   try {
-    fn(r.api.move, r.api.line, r.api.plot, r.api.cubic, F, G, st => { r.stopped(st); throw new r.Stop(); })(input, args);
+    fn(r.api.move, r.api.line, r.api.plot, r.api.cubic, r.api.linePattern, F, G, st => { r.stopped(st); throw new r.Stop(); })(input, args);
   } catch (e) { if (!(e instanceof r.Stop)) throw e; }
   return r.result();
 }

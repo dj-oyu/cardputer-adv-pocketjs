@@ -93,6 +93,17 @@ bool ksn_proc_analyze(const ksn_proc_program *p, ksn_proc_analysis *out){
             a->effects=KSN_PA_EFFECT_PEN|KSN_PA_EFFECT_DRAW;
             a->failure|=KSN_PA_FAIL_COORD|KSN_PA_FAIL_SEGMENTS|KSN_PA_FAIL_RASTER;
             break;
+        case KSN_PROC_LINE_PATTERN:
+            /* The pen's two registers and the block dst..dst+5; a block value
+             * out of range fails as a colour register does. */
+            if(!reg_ok(i->a)||!reg_ok(i->b)||i->dst>KSN_PROC_REGS-KSN_PROC_PATTERN_BLOCK||
+               !(i->value>=1.0f&&i->value<=(float)KSN_PROC_PATTERN_BITS)||
+               i->value!=(float)(unsigned)i->value)return false;
+            a->reads=(ksn_pa_regs)(BIT(i->a)|BIT(i->b)|((((uint32_t)1<<KSN_PROC_PATTERN_BLOCK)-1u)<<i->dst));
+            a->effects=KSN_PA_EFFECT_PEN|KSN_PA_EFFECT_DRAW;
+            a->failure|=KSN_PA_FAIL_COORD|KSN_PA_FAIL_COLOR|
+                        KSN_PA_FAIL_SEGMENTS|KSN_PA_FAIL_RASTER;
+            break;
         default:return false;
         }
     }

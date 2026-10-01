@@ -5,21 +5,26 @@
 void ksn_proc_surface_init(ksn_proc_surface *s){if(s)memset(s,0,sizeof *s);}
 static bool valid_frame(const ksn_proc_frame *frame){
     if(!frame||!frame->ready||frame->count>KSN_PROC_SEGMENTS)return false;
-    unsigned steps=0;
-    for(unsigned i=0;i<frame->count;i++){
-        const ksn_proc_segment *seg=&frame->segments[i];
+    unsigned steps=0,i=0,cost;
+    ksn_proc_segment geometry;
+    bool pattern;
+    /* Geometry only: a pattern line's parameters are not coordinates. */
+    while(ksn_proc_frame_next(frame,&i,&geometry,&pattern,&cost)){
+        const ksn_proc_segment *seg=&geometry;
         if(seg->x0 < -480||seg->x0 > 720||seg->x1 < -480||seg->x1 > 720||
            seg->y0 < -480||seg->y0 > 720||seg->y1 < -480||seg->y1 > 720)return false;
-        unsigned dx=(unsigned)abs(seg->x1-seg->x0),dy=(unsigned)abs(seg->y1-seg->y0);
-        steps+=(dx>dy?dx:dy)+1;
+        steps+=cost;
         if(steps>KSN_PROC_RASTER_STEPS)return false;
     }
-    return steps==frame->raster_steps;
+    return i==frame->count&&steps==frame->raster_steps;
 }
 static void mark_frame(ksn_proc_damage *d,const ksn_proc_frame *f){
     if(!f)return;
-    for(unsigned i=0;i<f->count;i++){
-        const ksn_proc_segment *seg=&f->segments[i];
+    unsigned i=0,cost;
+    ksn_proc_segment geometry;
+    bool pattern;
+    while(ksn_proc_frame_next(f,&i,&geometry,&pattern,&cost)){
+        const ksn_proc_segment *seg=&geometry;
         int left=seg->x0<seg->x1?seg->x0:seg->x1;
         int right=seg->x0>seg->x1?seg->x0:seg->x1;
         int top=seg->y0<seg->y1?seg->y0:seg->y1;
@@ -47,6 +52,7 @@ uint32_t ksn_proc_surface_stage(ksn_proc_surface *s,const ksn_proc_frame *source
     dest->ready=false;
     dest->count=source->count;
     dest->raster_steps=source->raster_steps;
+    dest->ext=source->ext;
     memcpy(dest->segments,source->segments,(size_t)source->count*sizeof source->segments[0]);
     dest->ready=true;
     memset(&s->pending_damage,0,sizeof s->pending_damage);
