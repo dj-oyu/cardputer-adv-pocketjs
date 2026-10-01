@@ -253,7 +253,7 @@ function sideScene(tier, g, t) {
     out.push({plan: c.side, in: [a, dx / m, gy, -2.4 * q, n * m, ph % (2 * PI) - 2 * PI * rnd(half / 2 / PI), 0, c.tp ? c.tp(t) : 0], args: [rows]});
     return out;
   };
-  return {today, cand, window: [flo(ty(13.5) - 2 * 2.4 * q) - 2, Math.ceil(gy) + 3]};
+  return {today, cand, window: [flo(ty(13.5) - 2 * 2.4 * q) - 2, Math.ceil(gy) + 3], v: {q, x0, gy, k}};
 }
 function panScene(tier, g, t) {
   const k = KN[tier], units = [100, 460, 820];
@@ -286,7 +286,9 @@ function panScene(tier, g, t) {
       Z /= Math.SQRT2;
       const hh = kk > s ? Math.ceil(Math.max(U > 1e-7 ? (Math.max(Z, kk * U / .3) - q[1]) / U : -1e9, n0) / kk) * kk : n0, c = rnd((ee - hh) / kk), z = q[1] + ee * U;
       if (c > 0) out.push({plan, args, in: [q[0] + ee * V, -V * kk, -z, U * kk, Math.min(255, c), 1 / z,
-        L ? a : -ee / s * dph % (2 * PI) - 2 * PI * rnd(c * dph / 4 / PI) + plus, b]});
+        L ? a : -ee / s * dph % (2 * PI) - 2 * PI * rnd(c * dph / 4 / PI) + plus, b],
+        // (crowd_prim.mjs) the series' first point and its step along the stand, m
+        wx: o * ee, wk: -o * kk});
       if (kk === s) return out;
       ee = Math.min(ee, hh); kk /= 2;
     }
@@ -528,7 +530,7 @@ function interp() {
     console.log(`${sceneName(s)} | ${sc.pc[4].toFixed(0)} | ${row.join(' | ')}`);
   }
 }
-export {CANDS};
+export {CANDS, SCENES, TIERS, KN, TODAY, sceneName, build, windowOf, rowsOf, runIR, split, run, raster, grid, scale, png, gif, rgb, BG, ROOT};
 if (!process.env.NOMAIN) switch (argv[0]) {
   case 'table': table(); break;
   case 'sheet': sheet(); break;

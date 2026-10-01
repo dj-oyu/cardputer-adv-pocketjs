@@ -295,8 +295,13 @@ static ksn_rect frame_damage(const proc_surface *surface){
         return (ksn_rect){0,0,KSN_PROC_W,KSN_PROC_H};
     int x0=KSN_PROC_W,y0=KSN_PROC_H,x1=0,y1=0;
     const ksn_proc_frame *frames[]={surface->candidate,surface->committed};
-    for(unsigned f=0;f<2;f++)for(unsigned i=0;i<frames[f]->count;i++){
-        const ksn_proc_segment *seg=&frames[f]->segments[i];
+    for(unsigned f=0;f<2;f++){
+      unsigned i=0,cost;
+      ksn_proc_segment geometry;
+      ksn_proc_seg_kind kind;
+      /* Geometry only: an extended entry's parameters are not coordinates. */
+      while(ksn_proc_frame_next(frames[f],&i,&geometry,&kind,&cost)){
+        const ksn_proc_segment *seg=&geometry;
         int ax=seg->x0<seg->x1?seg->x0:seg->x1;
         int bx=seg->x0>seg->x1?seg->x0:seg->x1;
         int ay=seg->y0<seg->y1?seg->y0:seg->y1;
@@ -305,6 +310,7 @@ static ksn_rect frame_damage(const proc_surface *surface){
         if(ay<y0)y0=ay;
         if(bx+1>x1)x1=bx+1;
         if(by+1>y1)y1=by+1;
+      }
     }
     /* VM and typed segments may lie anywhere in -480..720. Clamping each edge
      * keeps x0<=x1 and y0<=y1 for any non-empty set; a set wholly off one side
@@ -517,6 +523,7 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     surface->candidate->count=0;
     surface->candidate->raster_steps=0;
     surface->candidate->ready=false;
+    surface->candidate->ext=0;
     surface->candidate_color=(uint16_t)color;
     building_surface=index;
     building=true;
@@ -590,6 +597,7 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
            scratch->count*sizeof scratch->segments[0]);
     candidate->count+=scratch->count;
     candidate->raster_steps+=scratch->raster_steps;
+    candidate->ext|=scratch->ext;
     if(slot->points){
         const proc_points *p=slot->points;
         const int16_t *out_x=points_plane(p,PLANE_OUT_X),*out_y=points_plane(p,PLANE_OUT_Y);

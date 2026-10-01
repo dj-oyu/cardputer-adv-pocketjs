@@ -87,6 +87,22 @@ bool ksn_proc_analyze(const ksn_proc_program *p, ksn_proc_analysis *out){
                 a->failure|=KSN_PA_FAIL_SEGMENTS|KSN_PA_FAIL_RASTER;
             }
             break;
+        case KSN_PROC_LINE_PATTERN:case KSN_PROC_TILE: {
+            /* Prototype ops: the pen's two registers and a block of
+             * parameters from dst (7 for a pattern line, 5 for a tile). A
+             * parameter out of range fails as a colour register does. */
+            const unsigned block=i->op==KSN_PROC_TILE?5u:7u;
+            if(!reg_ok(i->a)||!reg_ok(i->b)||i->dst>KSN_PROC_REGS-block)return false;
+            if(i->op==KSN_PROC_LINE_PATTERN&&
+               (!(i->value>=0.0f&&i->value<=(float)KSN_PROC_PATTERN_BITS)||
+                i->value!=(float)(unsigned)i->value))return false;
+            a->reads=(ksn_pa_regs)(BIT(i->a)|BIT(i->b)|
+                                   ((((uint32_t)1<<block)-1u)<<i->dst));
+            a->effects=KSN_PA_EFFECT_PEN|KSN_PA_EFFECT_DRAW;
+            a->failure|=KSN_PA_FAIL_COORD|KSN_PA_FAIL_COLOR|
+                        KSN_PA_FAIL_SEGMENTS|KSN_PA_FAIL_RASTER;
+            break;
+        }
         case KSN_PROC_CUBIC:
             if(i->dst!=0||i->a<1||i->a>64)return false;
             a->reads=CUBIC_REGS(i->dst);
