@@ -21,3 +21,5 @@ Kasane は Cardputer ADV（240×135、PSRAM なし）の固定容量 UI 基盤�
 - hostの全画素一致、注入 `KSN_IO` 後の全帯修復、音声共存の複合試験はある。ただし実LCD GRAM読戻し・実SPI故障・全条件同時・全アプリ/全曲網羅は未証明。旧music repair試験の1回はsend最大が固定上限を6 µs超え、不合格のまま保存。位相分類をOFFにした後続の独立boot×2は同じ固定線を全run通過したが、故障注入付き診断imageの結果を全probe OFF製品imageの実機性能とは呼ばない。
 
 `roadmap.md` は「製品として使える」と「選択的な最適化」を分ける。限定経路の1-copyを全経路の達成と呼ばず、copy回数のみを理由に安全な所有権契約を崩さない。
+
+- [typed-procedural-inputs.md](typed-procedural-inputs.md) — 再利用typed入力と小chunk bulk候補、失敗契約と未測定事項。

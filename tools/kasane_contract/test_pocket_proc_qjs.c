@@ -437,6 +437,104 @@ int main(int argc,char **argv){
     eval_ok(ctx,"const newLayerId=proc.createSurface();"
                 "if(newLayerId===layerId)throw Error('stale surface ID reused')");
     pocket_proc_reset();
+    /* Same plan and raster path: reusable typed single and bulk agree with Array. */
+    eval_ok(ctx,"const typedPlan=proc.register([[1,0,0,0,0,0],[1,1,1,0,0,0],[8,0,0,1,0,63488]]);"
+                "const typedInputs=new Float64Array([12,13,0,0,0,0,0,0]);"
+                "proc.beginFrame(0);proc.draw(typedPlan,[12,13]);proc.commit()");
+    uint16_t typed_reference[KSN_PROC_W*KSN_PROC_H],typed_actual[KSN_PROC_W*KSN_PROC_H];
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_reference)==KSN_OK);
+    pocket_proc_present_result(KSN_OK);
+    for(unsigned repetition=0;repetition<16;repetition++){
+        eval_ok(ctx,"proc.beginFrame(0);proc.draw(typedPlan,typedInputs);proc.commit()");
+        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+        REQUIRE(memcmp(typed_reference,typed_actual,sizeof typed_actual)==0);
+        pocket_proc_present_result(KSN_OK);
+        eval_ok(ctx,"proc.beginFrame(0);proc.drawBulk(new Int32Array([typedPlan]),typedInputs);proc.commit()");
+        REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+        REQUIRE(memcmp(typed_reference,typed_actual,sizeof typed_actual)==0);
+        pocket_proc_present_result(KSN_OK);
+    }
+    eval_ok(ctx,"proc.beginFrame(0);proc.drawBulk(new Int32Array([typedPlan,typedPlan]),"
+                "new Float64Array([12,13,0,0,0,0,0,0,12,13,0,0,0,0,0,0]));proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+    REQUIRE(memcmp(typed_reference,typed_actual,sizeof typed_actual)==0);
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0)");
+    eval_error(ctx,"proc.drawBulk(new Int32Array([typedPlan]),new Float64Array(7))");
+    eval_error(ctx,"proc.drawBulk(new Int32Array([typedPlan,2147483647]),new Float64Array(16))");
+    eval_error(ctx,"proc.draw(typedPlan,new Float32Array([12,13]))");
+    eval_error(ctx,"proc.draw(typedPlan,new Float64Array(new SharedArrayBuffer(64)))");
+    eval_ok(ctx,"const detachedInput=new Float64Array(8);detachedInput.buffer.transfer()");
+    eval_error(ctx,"proc.draw(typedPlan,detachedInput)");
+    eval_error(ctx,"proc.draw(typedPlan,new Float64Array([NaN]))");
+    eval_error(ctx,"proc.draw(typedPlan,new Float64Array([Infinity]))");
+    eval_error(ctx,"proc.draw(typedPlan,new Float64Array([1e300]))");
+    eval_error(ctx,"proc.drawBulk(new Int32Array(9),new Float64Array(72))");
+    eval_ok(ctx,"proc.draw(typedPlan,typedInputs);proc.commit()");
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0);for(let i=0;i<1023;i++)proc.draw(typedPlan,typedInputs)");
+    eval_error(ctx,"proc.drawBulk(new Int32Array([typedPlan,typedPlan]),new Float64Array(16))");
+    REQUIRE(!pocket_proc_pending());
+    eval_error(ctx,"proc.commit()");
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(typedPlan,typedInputs);proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+    REQUIRE(memcmp(typed_reference,typed_actual,sizeof typed_actual)==0);
+    pocket_proc_present_result(KSN_OK);
+    /* Offset view keeps the same binary64 values without requiring alignment assumptions. */
+    eval_ok(ctx,"const offsetInputs=new Float64Array(new ArrayBuffer(80),8,8);"
+                "offsetInputs.set(typedInputs);proc.beginFrame(0);proc.draw(typedPlan,offsetInputs);proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+    REQUIRE(memcmp(typed_reference,typed_actual,sizeof typed_actual)==0);
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(typedPlan,[]);proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_reference)==KSN_OK);
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(typedPlan,new Float64Array(0));proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+    REQUIRE(memcmp(typed_reference,typed_actual,sizeof typed_actual)==0);
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(typedPlan,new Float64Array([-0,5e-324]));proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+    REQUIRE(memcmp(typed_reference,typed_actual,sizeof typed_actual)==0);
+    pocket_proc_present_result(KSN_OK);
+    /* Unused inputs still undergo the public float conversion and validation. */
+    eval_ok(ctx,"const noopTyped=proc.register([[0,0,0,0,0,0]]);proc.beginFrame(0);"
+                "proc.draw(noopTyped,[3.4028234663852886e38,-3.4028234663852886e38]);"
+                "proc.draw(noopTyped,new Float64Array([3.4028234663852886e38,-3.4028234663852886e38]));"
+                "proc.draw(noopTyped,new Float64Array([3.4028235e38,-3.4028235e38]));"
+                "proc.draw(noopTyped,new Float64Array([0,-0,5e-324,-5e-324,1e-40,-1e-40]));proc.commit()");
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0)");
+    eval_error(ctx,"proc.draw(noopTyped,new Float64Array([3.4028236e38]))");
+    eval_error(ctx,"proc.draw(noopTyped,new Float64Array([-3.4028236e38]))");
+    pocket_proc_end_turn();
+    /* Overlapping different colors make both row order and row omission visible. */
+    eval_ok(ctx,"const orderedPlans=Array.from({length:8},(_,i)=>proc.register("
+                "[[1,0,0,0,0,0],[1,1,1,0,0,0],[8,0,0,1,0,4097+i],"
+                "[0,2,0,0,1+i,0],[0,3,0,0,1,0],[8,0,2,3,0,4097+i]]));"
+                "const orderedHandles=new Int32Array(orderedPlans),orderedInputs=new Float64Array(64);"
+                "for(let i=0;i<8;i++){orderedInputs[i*8]=12;orderedInputs[i*8+1]=13;}"
+                "proc.beginFrame(0);for(let i=0;i<8;i++)proc.draw(orderedPlans[i],[12,13]);proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_reference)==KSN_OK);
+    REQUIRE(typed_reference[13*KSN_PROC_W+12]==4104);
+    for(unsigned i=0;i<8;i++)REQUIRE(typed_reference[KSN_PROC_W+1+i]==4097+i);
+    pocket_proc_present_result(KSN_OK);
+    eval_ok(ctx,"proc.beginFrame(0);proc.drawBulk(orderedHandles,orderedInputs);proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+    REQUIRE(memcmp(typed_reference,typed_actual,sizeof typed_actual)==0);
+    pocket_proc_present_result(KSN_OK);
+    /* Invalid later rows must not append the valid first row. The current frame
+     * contains a different pixel, so partial submission cannot hide in overlap. */
+    eval_ok(ctx,"proc.beginFrame(0);proc.draw(typedPlan,[20,21])");
+    eval_error(ctx,"proc.drawBulk(new Int32Array([orderedPlans[0],2147483647]),orderedInputs.subarray(0,16))");
+    eval_error(ctx,"proc.drawBulk(orderedHandles,(()=>{const p=orderedInputs.slice();p[63]=NaN;return p})())");
+    eval_ok(ctx,"proc.draw(typedPlan,[22,23]);proc.commit()");
+    REQUIRE(pocket_proc_backdrop(NULL,0,KSN_PROC_H,typed_actual)==KSN_OK);
+    REQUIRE(typed_actual[13*KSN_PROC_W+12]==0);
+    REQUIRE(typed_actual[21*KSN_PROC_W+20]==0xf800);
+    REQUIRE(typed_actual[23*KSN_PROC_W+22]==0xf800);
+    pocket_proc_present_result(KSN_OK);
+    pocket_proc_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("PASS real QuickJS procedural adapter: 48 exact RGB565 frames, two independent image surfaces, 256 B rectangle damage, IO repair, stale resources, Enter toggle; image span CPU %.1f ms\n",
            1000.0*(double)span_ticks/CLOCKS_PER_SEC);

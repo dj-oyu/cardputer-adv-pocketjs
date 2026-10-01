@@ -11,6 +11,7 @@ JSValue pocket_kasane_proc_resource_at(JSContext *ctx,unsigned surface);
 #include "pocket_api.h"
 #include "ui/kasane/ksn_proc_plan.h"
 #include <math.h>
+#include <float.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -529,28 +530,24 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     building=true;
     return JS_UNDEFINED;
 }
-static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
-    (void)self;
-    const char *op="kasane.procedural.draw";
-    uint32_t handle,length;
-    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+/* No user callbacks between acquiring a typed view and copying its values.
+ * Buffer ownership lasts through the copy; memcpy also supports offset views. */
+static bool typed_view(JSContext *ctx,JSValueConst value,JSTypedArrayEnum type,size_t width,
+                       JSValue *buffer,const uint8_t **data,size_t *count){
+    if(JS_GetTypedArrayType(value)!=(int)type)return false;
+    size_t offset=0,bytes=0,per=0,size=0;
+    *buffer=JS_GetTypedArrayBuffer(ctx,value,&offset,&bytes,&per);
+    if(JS_IsException(*buffer)||!JS_IsArrayBuffer(*buffer))return false;
+    uint8_t *base=JS_GetArrayBuffer(ctx,&size,*buffer);
+    if(!base||per!=width||bytes%width||offset>size||bytes>size-offset)return false;
+    *data=base+offset;*count=bytes/width;return true;
+}
+static JSValue draw_inputs(JSContext *ctx,const char *op,uint32_t handle,proc_slot *slot,const float input[KSN_PROC_INPUTS]){
+#ifndef KASANE_BGCOST_TRACE
+    (void)handle;
+#endif
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
     const unsigned room=surface_segments(&surfaces[building_surface]);
-    if(argc!=2||!integer(ctx,argv[0],INT32_MAX,&handle)||
-       !array_length(ctx,argv[1],&length)||length>KSN_PROC_INPUTS)
-        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
-    proc_slot *slot=find_slot(handle);
-    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
-    /* Short arrays are zero-padded, so a caller written for four inputs sees
-     * exactly the frame it saw when four were required. */
-    float input[KSN_PROC_INPUTS]={0};
-    for(unsigned i=0;i<length;i++){
-        JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);double n;
-        bool ok=!JS_IsException(v)&&number(ctx,v,&n)&&isfinite((float)n);
-        JS_FreeValue(ctx,v);
-        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
-        input[i]=(float)n;
-    }
     ksn_proc_status status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
                                      ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
     if(status==KSN_PROC_RUNNING)
@@ -618,6 +615,69 @@ static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
 #endif
     return JS_UNDEFINED;
 }
+static JSValue draw_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="kasane.procedural.draw";
+    uint32_t handle,length;
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    if(argc!=2||!integer(ctx,argv[0],INT32_MAX,&handle))
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected handle and 0..8 inputs");
+    proc_slot *slot=find_slot(handle);
+    if(!slot)return failure(ctx,op,POCKET_ERR_CLOSED,"stale procedural handle");
+    float input[KSN_PROC_INPUTS]={0};
+    if(JS_GetTypedArrayType(argv[1])==JS_TYPED_ARRAY_FLOAT64){
+        JSValue buffer=JS_UNDEFINED;
+        const uint8_t *data;size_t count;
+        if(!typed_view(ctx,argv[1],JS_TYPED_ARRAY_FLOAT64,8,&buffer,&data,&count)){
+            JS_FreeValue(ctx,buffer);return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid Float64Array");
+        }
+        bool ok=count<=KSN_PROC_INPUTS;
+        for(size_t i=0;ok&&i<count;i++){
+            double n;memcpy(&n,data+8*i,8);ok=(float)n>=-FLT_MAX&&(float)n<=FLT_MAX;
+            input[i]=(float)n;
+        }
+        JS_FreeValue(ctx,buffer);
+        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite or excessive inputs");
+    }else{
+        if(!array_length(ctx,argv[1],&length)||length>KSN_PROC_INPUTS)
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected Array or Float64Array of 0..8 inputs");
+        for(unsigned i=0;i<length;i++){
+            JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);double n;
+            bool ok=!JS_IsException(v)&&number(ctx,v,&n)&&isfinite((float)n);
+            JS_FreeValue(ctx,v);
+            if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"non-finite input");
+            input[i]=(float)n;
+        }
+    }
+    return draw_inputs(ctx,op,handle,slot,input);
+}
+/* Eight rows bound native stack cost and avoid a full-frame parameter copy.
+ * Validation has no side effects. Execution failure aborts the entire candidate;
+ * committed/pending frames remain untouched, as for draw execution failure. */
+static JSValue bulk_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;const char *op="kasane.procedural.drawBulk";
+    if(!building)return failure(ctx,op,POCKET_ERR_BUSY,"beginFrame required");
+    JSValue hb=JS_UNDEFINED,pb=JS_UNDEFINED;
+    const uint8_t *hd=NULL,*pd=NULL;size_t hn=0,pn=0;
+    bool ok=argc==2&&typed_view(ctx,argv[0],JS_TYPED_ARRAY_INT32,4,&hb,&hd,&hn)&&
+        typed_view(ctx,argv[1],JS_TYPED_ARRAY_FLOAT64,8,&pb,&pd,&pn)&&hn>0&&hn<=8&&pn==hn*KSN_PROC_INPUTS;
+    uint32_t handles[8];proc_slot *plans[8];float inputs[8][KSN_PROC_INPUTS];
+    for(size_t i=0;ok&&i<hn;i++){
+        int32_t h;memcpy(&h,hd+4*i,4);handles[i]=(uint32_t)h;plans[i]=find_slot(handles[i]);
+        ok=h>0&&plans[i]!=NULL;
+        for(unsigned j=0;ok&&j<KSN_PROC_INPUTS;j++){
+            double n;memcpy(&n,pd+8*(i*KSN_PROC_INPUTS+j),8);
+            ok=(float)n>=-FLT_MAX&&(float)n<=FLT_MAX;inputs[i][j]=(float)n;
+        }
+    }
+    JS_FreeValue(ctx,hb);JS_FreeValue(ctx,pb);
+    if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected 1..8 live Int32 handles and eight finite Float64 inputs per row");
+    for(size_t i=0;i<hn;i++){
+        JSValue result=draw_inputs(ctx,op,handles[i],plans[i],inputs[i]);
+        if(JS_IsException(result)){building=false;return result;}
+    }
+    return JS_UNDEFINED;
+}
 static JSValue commit_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argv;
     const char *op="kasane.procedural.commit";
@@ -661,6 +721,9 @@ static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueCons
 #else
     return guarded(ctx,self,argc,argv,register_impl);
 #endif
+}
+static JSValue js_bulk(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    return guarded(ctx,self,argc,argv,bulk_impl);
 }
 static JSValue js_unregister(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
 #ifdef KASANE_MEGADEMO_TRACE
@@ -746,6 +809,7 @@ esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
         JS_CFUNC_DEF("unregister",1,js_unregister),
         JS_CFUNC_DEF("beginFrame",1,js_begin),
         JS_CFUNC_DEF("draw",2,js_draw),
+        JS_CFUNC_DEF("drawBulk",2,js_bulk),
         JS_CFUNC_DEF("commit",0,js_commit),
         JS_CFUNC_DEF("resource",0,js_resource),
         JS_CFUNC_DEF("createSurface",0,js_create_surface),
