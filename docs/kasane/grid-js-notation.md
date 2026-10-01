@@ -33,4 +33,6 @@ const program = gridFold.fold({
 
 `grid.run(handle, buffers, params, {backend: 'AUTO'|'SCALAR'})` の第4引数で比較用の実行経路を指定できる。通常は第4引数を省略して自動選択する。`SCALAR` はその実行だけPIEを無効にする。入力、出力、表示資源は同じhandleを使う。
 
+`run` は返却値のJS領域を確保してから候補画像を公開する。返却値の確保を含む失敗時は、前回の確定画像と公開待ち状態を変更しない。入力コピー用の容量や非公開の候補scratchは変わり得るため、失敗はnative heapの完全な巻戻しを意味しない。成功後のLCD送出失敗では候補を保持し、同じ画像を再送する。
+
 `grid.profile(handle)` はそのhandleで成功した `run` の累計を返して計数をリセットする。返り値は `runs`、`copyUs`（JS入力の取得・native領域へのコピー）、`bindUs`（合法性検査と選択）、`kernelUs`、`totalUs`、`maxTotalUs`、`heapFree`、`heapLargest`、`heapMinFree`。時間はµs、heapは内部8-bit RAMのbyte。`totalUs` には候補画像の確定処理なども含むため、前3段の和より大きい。Kasaneの再合成とLCD送出はこの計数の外である。`heapMinFree` は起動以来の全体低水位で、profileの計数リセットでは戻らない。

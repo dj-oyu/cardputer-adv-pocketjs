@@ -17,6 +17,15 @@ static ksn_image_port resize_image;
 static ksn_image_port stream_image;
 static ksn_image_port nearest_image;
 static unsigned invalidates, resources;
+static JSRuntime *oom_runtime;
+static bool oom_on_invalidate;
+static JSValue arm_oom(JSContext *ctx, JSValueConst self, int argc,
+                       JSValueConst *argv)
+{
+    (void)self; (void)argc; (void)argv;
+    JS_SetMemoryLimit(JS_GetRuntime(ctx), 1);
+    return JS_UNDEFINED;
+}
 static unsigned source_reads, source_pixels, source_version;
 static int fail_source_y = -1;
 const char *pocket_grid_test_frontend;
@@ -45,6 +54,7 @@ void pocket_kasane_grid_invalidate(unsigned slot)
 {
     CHECK(slot <= 3);
     ++invalidates;
+    if (oom_on_invalidate) JS_SetMemoryLimit(oom_runtime, 1);
 }
 static uint16_t source_pixel(unsigned x, unsigned y)
 {
@@ -143,7 +153,10 @@ int main(int argc, char **argv)
     CHECK(argc == 3);
     JSRuntime *runtime = JS_NewRuntime(); CHECK(runtime);
     JSContext *ctx = JS_NewContext(runtime); CHECK(ctx);
+    oom_runtime = runtime;
     JSValue global = JS_GetGlobalObject(ctx);
+    CHECK(JS_SetPropertyStr(ctx, global, "armOom",
+                           JS_NewCFunction(ctx, arm_oom, "armOom", 0)) == 1);
     JSValue ns = JS_NewObject(ctx);
     CHECK(pocket_grid_install(ctx, ns) == ESP_OK);
     CHECK(JS_SetPropertyStr(ctx, global, "kasane", ns) == 1);
@@ -185,13 +198,30 @@ int main(int argc, char **argv)
               "throw Error('scalar policy');"
               "if(kasane.grid.run(h,{0:input},[32,16],{backend:'AUTO'})"
               "!=='PIE')throw Error('auto policy');"
-              "if(kasane.grid.profile(h).runs!==2)throw Error('profile runs');"
-              "globalThis.resource=kasane.grid.resource(h);", false);
+              "if(kasane.grid.profile(h).runs!==2)throw Error('profile runs');", false);
+    /* Unmounted path: a failed result allocation must not swap DEST. */
+    eval(ctx, "globalThis.oomBuffers={0:input};globalThis.oomParams=[32,16];"
+              "input.fill(0);", false);
+    eval(ctx, "armOom();kasane.grid.run(h,oomBuffers,oomParams);", true);
+    JS_SetMemoryLimit(runtime, 0);
+    eval(ctx, "globalThis.resource=kasane.grid.resource(h);", false);
     CHECK(resources == 1 && !pocket_grid_pending());
     pixels(0);
+    /* The result allocation fails before native publication. Existing pixels
+     * and the pending flag must remain unchanged; retry is safe. */
+    eval(ctx, "globalThis.oomBuffers={0:input};globalThis.oomParams=[32,16];"
+              "input.fill(0);", false);
+    eval(ctx, "armOom();kasane.grid.run(h,oomBuffers,oomParams);", true);
+    JS_SetMemoryLimit(runtime, 0);
+    CHECK(!pocket_grid_pending() && invalidates == 0);
+    pixels(0);
+    /* OOM after invalidate cannot fail a successful call: result was reserved. */
+    oom_on_invalidate = true;
     eval(ctx, "for(let i=0;i<input.length;i++)input[i]=(i*7+4)&255;"
               "if(kasane.grid.run(h,{0:input},[32,16])!=='PIE')throw Error('backend');",
          false);
+    oom_on_invalidate = false;
+    JS_SetMemoryLimit(runtime, 0);
     CHECK(pocket_grid_pending() && invalidates == 1);
     pixels(4);
     eval(ctx, "kasane.grid.run(h,{0:input},[32,16])", true);

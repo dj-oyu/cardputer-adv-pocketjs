@@ -601,6 +601,11 @@ static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
     if (!valid || status != KSN_GRID_OK)
         return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                     "grid bind or execution failed");
+    /* Reserve the JS result before publishing or swapping the candidate.
+     * An OOM must not report failure after the native image was applied. */
+    JSValue result = JS_NewString(ctx, (slot->resize ? slot->resize_pie :
+                         next.execution.pie_backend_selected) ? "PIE" : "scalar");
+    if (JS_IsException(result)) return result;
     if (!slot->resize) {
         for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i)
             slot->last_input_count[i] = binding.count[i];
@@ -628,8 +633,7 @@ static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
     profile->kernel_us += elapsed_us(bound, ran);
     profile->total_us += total_us;
     if (total_us > profile->max_total_us) profile->max_total_us = total_us;
-    return JS_NewString(ctx, (slot->resize ? slot->resize_pie :
-                         next.execution.pie_backend_selected) ? "PIE" : "scalar");
+    return result;
 }
 
 /* Read and reset one handle's successful-run timings. Presentation happens
