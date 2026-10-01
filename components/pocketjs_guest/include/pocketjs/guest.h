@@ -63,6 +63,11 @@ esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,
                                const pocketjs_guest_frame_t *frame);
 
+/** Source-app compatibility: use the realm global as frame's receiver even
+ * for strict functions. Default false preserves the direct guest API's
+ * undefined receiver. Configure before the first frame, on the owner task. */
+void pocketjs_guest_set_frame_global_this(pocketjs_guest_t *guest, bool enabled);
+
 /** Arm this turn's job budget (docs/vm/vm-L1-design.md sec.1.3). NULL, or a
  * budget with limit_us <= 0, restores the pre-L1 "drain until empty"
  * behaviour exactly. Call once per turn, before any call into the guest. */

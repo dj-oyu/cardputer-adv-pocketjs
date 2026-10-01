@@ -84,8 +84,7 @@ static JSValue host_print(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-// __pjs_error(message, stack) — the frame wrapper's way of handing an exception
-// to the host before rethrowing it.
+// Legacy explicit error reporting remains available to scripts.
 static JSValue host_error(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv) {
     (void)this_val;
@@ -109,6 +108,49 @@ static JSValue host_error(JSContext *ctx, JSValueConst this_val,
     jsconsole_set_error(buffer);
     ESP_LOGW("js","%s",buffer);
     return JS_UNDEFINED;
+}
+
+void jsconsole_report_exception(JSContext *ctx, JSValueConst exception) {
+    char buffer[sizeof(error)]={0};
+    // String(symbol), used by the old wrapper, is allowed although implicit
+    // ToString(symbol) is not. Read its atom without calling mutable builtins.
+    bool symbol=JS_IsSymbol(exception);
+    JSValue printable=JS_DupValue(ctx,exception);
+    if(symbol) {
+        JSAtom atom=JS_ValueToAtom(ctx,exception);
+        JS_FreeValue(ctx,printable);
+        printable=JS_AtomToString(ctx,atom);
+        JS_FreeAtom(ctx,atom);
+    }
+    const char *text=JS_ToCString(ctx,printable);
+    if(text) {
+        snprintf(buffer,sizeof(buffer),symbol?"Symbol(%s)":"%s",text);
+        JS_FreeCString(ctx,text);
+    }
+    else if(JS_HasException(ctx)) JS_FreeValue(ctx,JS_GetException(ctx));
+    JS_FreeValue(ctx,printable);
+    // Match the old `e && e.stack`, including inherited primitive properties
+    // and its (unusual but visible) falsy-value second argument.
+    JSValue stack=JS_ToBool(ctx,exception)
+        ?JS_GetPropertyStr(ctx,exception,"stack"):JS_DupValue(ctx,exception);
+    if(JS_IsException(stack)) {
+        JS_FreeValue(ctx,JS_GetException(ctx));
+        stack=JS_UNDEFINED;
+    }
+    if(!JS_IsUndefined(stack)&&!JS_IsNull(stack)) {
+        const char *s=JS_ToCString(ctx,stack);
+        if(s) {
+            const char *nl=strchr(s,'\n');
+            int n=nl?(int)(nl-s):(int)strlen(s);
+            size_t used=strlen(buffer);
+            snprintf(buffer+used,sizeof(buffer)-used," %.*s",n,s);
+            JS_FreeCString(ctx,s);
+        }
+    }
+    JS_FreeValue(ctx,stack);
+    if(JS_HasException(ctx)) JS_FreeValue(ctx,JS_GetException(ctx));
+    jsconsole_set_error(buffer[0]?buffer:"frame failed");
+    ESP_LOGW("js","%s",error);
 }
 
 #ifdef CONFIG_POCKET_VM_PROBE

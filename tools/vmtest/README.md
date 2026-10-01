@@ -13,6 +13,8 @@
 
 ```bash
 # WSL: cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs-vm
+bash tools/vmtest/test_frame_entry.sh o2        # 本番 source entry + guest/console（Linux、詳細 docs/vm/frame-entry-direct.md）
+bash tools/vmtest/test_frame_entry.sh asan      # 同じ対象を engine ごと ASan+UBSan で検査
 bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る（ファームと同じ唯一の経路）
 bash tools/vmtest/build.sh asan-reloc          # + CONFIG_POCKET_VM_RELOC（L3a、--force-reloc 用）
 bash tools/vmtest/build.sh o2

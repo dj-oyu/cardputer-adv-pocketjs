@@ -136,8 +136,11 @@ struct pocketjs_guest {
   JSRuntime *runtime;
   JSContext *context;
   JSValue frame;
+  pocketjs_guest_frame_error_fn frame_error;
+  void *frame_error_opaque;
   size_t heap_limit;
   bool prefer_psram;
+  bool frame_global_this;
 #ifdef ESP_PLATFORM
   /* R3 (docs/vm/r3-small-block-cache.md): freed small blocks kept for the next
    * allocation of their length. Used only from the task that created the
@@ -245,6 +248,34 @@ struct pocketjs_guest {
   int (*watchdog)(void *);
   void *watchdog_opaque;
 };
+
+void pocketjs_guest_set_frame_global_this(pocketjs_guest_t *guest, bool enabled) {
+  if (guest) guest->frame_global_this = enabled;
+}
+
+void pocketjs_guest_set_frame_error_handler(pocketjs_guest_t *guest,
+                                            pocketjs_guest_frame_error_fn fn,
+                                            void *opaque) {
+  if (!guest) return;
+  guest->frame_error = fn;
+  guest->frame_error_opaque = opaque;
+}
+
+static void report_frame_error(pocketjs_guest_t *guest) {
+  if (guest->frame_error) {
+    JSValue exception = JS_GetException(guest->context);
+    guest->frame_error(guest->context, exception, guest->frame_error_opaque);
+    /* A formatter's getter or conversion must not replace the frame failure. */
+    if (JS_HasException(guest->context))
+      JS_FreeValue(guest->context, JS_GetException(guest->context));
+    JS_Throw(guest->context, exception);
+  }
+  js_std_dump_error(guest->context);
+  /* The stderr dumper also stringifies user values and reads Error.stack.
+   * Its own failed getter must not leave a second exception on the realm. */
+  if (JS_HasException(guest->context))
+    JS_FreeValue(guest->context, JS_GetException(guest->context));
+}
 
 /* The callback never keeps a guest pointer. Clearing this slot under the
  * same lock joins its last runtime access even if stop races a fired timer.
@@ -888,8 +919,14 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
   const int64_t vmprobe_call_begin = esp_timer_get_time();
 #endif
   const int64_t frame_begin = esp_timer_get_time();
-  JSValue result = JS_VMCall(guest->context, guest->frame, JS_UNDEFINED,
+  /* Source apps opt into the old sloppy wrapper's realm-global receiver,
+   * even for strict frames. Other guest callers retain undefined. The VM
+   * owns its receiver across a park, so this temporary reference can go. */
+  JSValue receiver = guest->frame_global_this
+      ? JS_GetGlobalObject(guest->context) : JS_UNDEFINED;
+  JSValue result = JS_VMCall(guest->context, guest->frame, receiver,
                            argument_count, arguments);
+  JS_FreeValue(guest->context, receiver);
   guest->frame_us = esp_timer_get_time() - frame_begin;
 #ifdef CONFIG_POCKET_VM_PROBE
   vmprobe_call_us += (uint32_t)(esp_timer_get_time() - vmprobe_call_begin);
@@ -915,7 +952,7 @@ static esp_err_t guest_frame_impl(pocketjs_guest_t *guest,
 #endif
   guest->frame_us = 0;
   if (JS_IsException(result)) {
-    js_std_dump_error(guest->context);
+    report_frame_error(guest);
     JS_FreeValue(guest->context, result);
     guest->frame_errors++;
     return ESP_FAIL;
@@ -1162,7 +1199,8 @@ static esp_err_t guest_continue_impl(pocketjs_guest_t *guest) {
 #endif
     guest->frame_us = 0;
     if (JS_IsException(result)) {
-      js_std_dump_error(guest->context);
+      if (frame) report_frame_error(guest);
+      else js_std_dump_error(guest->context);
       JS_FreeValue(guest->context, result);
       guest->frame_errors++;
       return ESP_FAIL;
