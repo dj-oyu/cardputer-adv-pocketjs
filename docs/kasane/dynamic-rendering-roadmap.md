@@ -353,6 +353,8 @@ D4通常JSのCOM3診断は[限定pixel API](d4-pixel-small-window.md)の`KASANE_
 
 この速度比較のため、通常のgrid adapterに`measure(handle, repeats)`を追加した。直前に`run`へ渡したコピー済み入力を使い、表示中の候補/確定画像とは別の整列scratchでscalarとAUTO PIEを交互に測る。bindとJS入力生成は計時から除外し、両経路の全出力一致を各回で要求する。GRID LABのFOLD ARTは8回合計と1回平均をログ/画面へ表示する。COM3の2回の独立起動でscalar合計28,110 / 28,122 µs、PIE合計1,883 / 1,879 µs、全画素一致だった。1回あたり約3.514 ms対0.235 ms、約14.95倍である。PIEは両runで`GATHER/FALLBACK`を選び、4モードを表示後`HOME_READY`へ戻った。image 2,140,416 B（SHA-256 `476590105f4a26297a86d2ae71a277f1c13a5222bb5b11378c8efa1e6e0276fc`）をアプリ領域だけ更新し、書込時hash照合済み。ログは`.cache/grid-lab-d3a-measure-20260929/serial.log`。この比は特定の48×28・1tap式のnative kernel実行だけであり、同じ式を旧コンパイラで動かす場合のscalarとの差に相当する。登録費用、毎フレームのJS入力生成、画像合成、LCD転送を含むアプリ全体の倍率ではない。
 
+この節の `measure(handle, repeats)` は当時のAPIである。現在は入力とparamsを明示する `measure(handle, buffers, params, repeats, strategy)` を使う。scoped borrowとscratch出力の契約は[Grid JS 記法](grid-js-notation.md#実行時間の計測)を参照。上記の実測値は当時の実装の記録として残す。
+
 ## D3a 2項の積和へ拡張（2026-09-29）
 
 1つの積へ縮約できない`termA+termB`を登録時planに最大2項の順序付き積として保持し、同じPIE QACCへ順に積和する経路を追加した。各項はint16 load/constantの積または直接値で、既存の独立性・QACC・alias・整列・出力検証を通る。出力に依存するloadはこの独立PIE候補から除外し、従来の依存行scan認識へ残す。2項は未知の実機費用を既存1項の選択表へ混ぜず、GATHER候補だけで開始した。1項のprofile keyと既存経路は変えない。係数の和がint16を超える共有load、非ゼロoffset、異なる位置の2 loadも新経路に入る。2項へ縮約できない3項以上と任意の依存式はまだscalar。

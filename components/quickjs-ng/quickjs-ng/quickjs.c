@@ -64035,6 +64035,24 @@ JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
     return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
 }
 
+/* PocketJS scoped native consumers need the current view extent. Keep the
+   existing public helper's behavior unchanged; track_rab updates array.count,
+   not ta->length. Neither this helper nor JS_GetArrayBuffer enters JS. */
+JSValue JS_GetTypedArrayBufferCurrent(JSContext *ctx, JSValueConst obj,
+                                      size_t *pbyte_offset,
+                                      size_t *pbyte_length,
+                                      size_t *pbytes_per_element)
+{
+    JSValue buffer = JS_GetTypedArrayBuffer(ctx, obj, pbyte_offset, NULL,
+                                            pbytes_per_element);
+    if (!JS_IsException(buffer) && pbyte_length) {
+        JSObject *p = JS_VALUE_GET_OBJ(obj);
+        *pbyte_length = (size_t)p->u.array.count <<
+                       typed_array_size_log2(p->class_id);
+    }
+    return buffer;
+}
+
 /* return NULL if exception. WARNING: any JS call can detach the
    buffer and render the returned pointer invalid */
 uint8_t *JS_GetUint8Array(JSContext *ctx, size_t *psize, JSValueConst obj)

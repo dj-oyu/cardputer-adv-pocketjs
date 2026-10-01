@@ -1,4 +1,5 @@
 """Compile the ordinary app grid adapter against real QuickJS and PIE model."""
+import argparse
 import os
 from pathlib import Path
 import shutil
@@ -11,13 +12,18 @@ OUT = ROOT / ".cache/kasane-pocket-grid-qjs"
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sanitize", action="store_true",
+                        help="run the functional suite under AddressSanitizer and UBSan")
+    args = parser.parse_args()
     cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
     if not cc and Path("C:/msys64/ucrt64/bin/gcc.exe").exists():
         cc = "C:/msys64/ucrt64/bin/gcc.exe"
     if not cc:
         raise SystemExit("No host C compiler")
     OUT.mkdir(parents=True, exist_ok=True)
-    binary = OUT / ("test_pocket_grid_qjs" + (".exe" if sys.platform == "win32" else ""))
+    binary = OUT / ("test_pocket_grid_qjs" + ("_asan" if args.sanitize else "") +
+                    (".exe" if sys.platform == "win32" else ""))
     sources = [*(QJS / name for name in
                  ("dtoa.c", "libregexp.c", "libunicode.c", "quickjs.c", "quickjs-vm.c")),
                ROOT / "main/ui/kasane/ksn_proc_grid.c",
@@ -26,7 +32,9 @@ def main():
                ROOT / "main/ui/kasane/ksn_proc_grid_resize.c",
                ROOT / "main/pocket/pocket_grid.c",
                ROOT / "tools/kasane_contract/test_pocket_grid_qjs.c"]
-    command = [cc, "-std=gnu11", "-O2", "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE",
+    flags = (["-O1", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
+             if args.sanitize else ["-O2"])
+    command = [cc, "-std=gnu11", *flags, "-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE",
                "-DKSN_GRID_PIE_MODEL", "-DKSN_GRID_APP_HOST_TEST",
                "-I", str(QJS), "-I", str(ROOT / "main"),
                "-I", str(ROOT / "main/pocket"),
@@ -35,9 +43,13 @@ def main():
                *(str(s) for s in sources), "-lm", "-o", str(binary)]
     env = os.environ.copy()
     env["PATH"] = str(Path(cc).parent) + os.pathsep + env.get("PATH", "")
+    if args.sanitize:
+        env.setdefault("ASAN_OPTIONS", "detect_leaks=1")
+        env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
     subprocess.run(command, cwd=ROOT, env=env, check=True)
     subprocess.run([str(binary), str(ROOT / "apps/kasane/grid_fold.js"),
-                    str(ROOT / "apps/kasane/grid_fold_device_probe.js")],
+                    str(ROOT / "apps/kasane/grid_fold_device_probe.js"),
+                    str(ROOT / "tools/kasane_contract/test_pocket_grid_scoped_inputs.js")],
                    cwd=ROOT, env=env, check=True)
 
 

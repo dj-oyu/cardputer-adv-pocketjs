@@ -60,7 +60,8 @@ void pocket_grid_resize_profile_read(pocket_grid_resize_profile *out)
 
 #define GRID_APP_SLOTS POCKET_GRID_MAX_SLOTS
 /* No PSRAM is configured on this board. Compact plans may share the six
- * slots, but two output generations and copied inputs retain per-plan caps. */
+ * slots; two owned output generations retain per-plan caps. Input bytes
+ * are borrowed only within a call (shared/unaligned storage is copied). */
 #define GRID_APP_MAX_PIXELS 4096u
 #define GRID_APP_MAX_INPUTS 8192u
 
@@ -94,14 +95,8 @@ typedef struct {
     ksn_grid_image image;
     void *output_raw[2];
     int16_t *output[2];
-    void *input_raw[KSN_GRID_BUFFERS];
-    int16_t *input[KSN_GRID_BUFFERS];
-    size_t input_capacity[KSN_GRID_BUFFERS];
-    size_t last_input_count[KSN_GRID_BUFFERS];
-    int32_t last_param[KSN_GRID_PARAMS];
     uint8_t committed_index, candidate_index;
     bool has_output, pending, resource, resize_pie, resize_nearest;
-    bool measure_ready;
     uint32_t register_parse_us, register_prepare_us, register_total_us;
     uint32_t heap_before, heap_after_plan, heap_after;
     uint32_t largest_before, largest_after;
@@ -484,6 +479,113 @@ static JSValue register_resize_source_impl(JSContext *ctx, int argc,
     return JS_NewInt32(ctx, (int32_t)fresh.handle);
 }
 
+/* All JS-visible reads finish before capture. Roots own views and backing
+ * buffers only for this call; no borrowed pointer escapes native execution. */
+typedef struct {
+    JSValue view[KSN_GRID_BUFFERS], buffer[KSN_GRID_BUFFERS];
+    void *copy_raw[KSN_GRID_BUFFERS];
+    ksn_grid_binding binding;
+} grid_inputs;
+
+static void inputs_init(grid_inputs *inputs)
+{
+    *inputs = (grid_inputs){0};
+    for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i) {
+        inputs->view[i] = JS_UNDEFINED;
+        inputs->buffer[i] = JS_UNDEFINED;
+    }
+}
+
+static void inputs_release(JSContext *ctx, grid_inputs *inputs)
+{
+    for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i) {
+        free(inputs->copy_raw[i]);
+        JS_FreeValue(ctx, inputs->buffer[i]);
+        JS_FreeValue(ctx, inputs->view[i]);
+    }
+}
+
+static bool inputs_resolve(JSContext *ctx, JSValueConst buffers,
+                            JSValueConst params, grid_inputs *inputs)
+{
+    for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i) {
+        if (i == KSN_GRID_DEST) continue;
+        JSValue input = JS_GetPropertyUint32(ctx, buffers, i);
+        inputs->view[i] = input;
+        if (JS_IsException(input)) return false;
+        /* Keep early type rejection, but defer all backing-store metadata
+         * until later map/parameter getters can no longer mutate it. */
+        if (!JS_IsUndefined(input) && !JS_IsNull(input) &&
+            JS_GetTypedArrayType(input) != JS_TYPED_ARRAY_INT16) return false;
+    }
+    if (!JS_IsUndefined(params)) {
+        uint32_t count;
+        if (!array_length(ctx, params, &count) || count > KSN_GRID_PARAMS)
+            return false;
+        for (unsigned i = 0; i < count; ++i) {
+            int64_t value;
+            if (!at(ctx, params, i, INT32_MIN, INT32_MAX, &value)) return false;
+            inputs->binding.param[i] = (int32_t)value;
+        }
+    }
+    return true;
+}
+
+static bool inputs_capture(JSContext *ctx, grid_inputs *inputs, bool *oom)
+{
+    size_t total = 0;
+    for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i) {
+        JSValueConst input = inputs->view[i];
+        if (JS_IsUndefined(input) || JS_IsNull(input)) continue;
+        size_t offset = 0, bytes = 0, per = 0, size = 0;
+        JSValue buffer = JS_GetTypedArrayBufferCurrent(ctx, input,
+                                                       &offset, &bytes, &per);
+        inputs->buffer[i] = buffer;
+        if (JS_IsException(buffer)) return false;
+        uint8_t *data = JS_GetArrayBuffer(ctx, &size, buffer);
+        if (JS_HasException(ctx)) return false;
+        size_t count = bytes / sizeof(int16_t);
+        if ((!data && size) || per != sizeof(int16_t) || bytes % per ||
+            offset > size || bytes > size - offset ||
+            count > GRID_APP_MAX_INPUTS - total) return false;
+        inputs->binding.count[i] = count;
+        total += count;
+        /* Empty external buffers may have NULL storage. Avoid even zero-byte
+         * pointer arithmetic on them. Bounds validation rejects used empties. */
+        if (!count) continue;
+        uint8_t *start = data + offset;
+        if (!JS_IsArrayBuffer(buffer) ||
+            (uintptr_t)start % _Alignof(int16_t)) {
+            /* Preserve shared and odd-address external-buffer acceptance.
+             * The caller must prevent concurrent writes/growth during capture;
+             * this copy isolates later kernels, not an atomic shared snapshot. */
+            if (!aligned_buffer(count, &inputs->copy_raw[i],
+                                  &inputs->binding.data[i])) {
+                *oom = true;
+                return false;
+            }
+            memcpy(inputs->binding.data[i], start, bytes);
+        } else {
+            inputs->binding.data[i] = (int16_t *)start;
+        }
+    }
+    return true;
+}
+
+static JSValue inputs_fail(JSContext *ctx, const char *op,
+                            grid_inputs *inputs, bool oom)
+{
+    inputs_release(ctx, inputs);
+    /* Preserve run's existing PocketError boundary for input/param failures,
+     * rather than exposing a getter or engine exception as a new API shape. */
+    if (JS_HasException(ctx)) {
+        JSValue exception = JS_GetException(ctx);
+        JS_FreeValue(ctx, exception);
+    }
+    return fail(ctx, op, oom ? POCKET_ERR_OUT_OF_MEMORY : POCKET_ERR_INVALID_ARGUMENT,
+                oom ? "grid input allocation failed" : "grid bind or execution failed");
+}
+
 static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
 {
     const char *op = "kasane.grid.run";
@@ -495,6 +597,7 @@ static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
                                   "source-backed resize runs during image reads");
     if (slot->pending) return fail(ctx, op, POCKET_ERR_BUSY,
                                    "previous grid image awaits presentation");
+    uint32_t handle = slot->handle;
     int64_t started = grid_measure_now_us();
     bool force_scalar = false;
     if (argc == 4) {
@@ -514,98 +617,52 @@ static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
             return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                         "backend option must be AUTO or SCALAR");
     }
-    slot->measure_ready = false;
-    ksn_grid_binding binding = {0};
-    size_t total = 0;
-    bool valid = true, oom = false;
-    for (unsigned i = 0; i < KSN_GRID_BUFFERS && valid; ++i) {
-        if (i == KSN_GRID_DEST) continue;
-        JSValue input = JS_GetPropertyUint32(ctx, argv[1], i);
-        if (JS_IsException(input)) { valid = false; JS_FreeValue(ctx, input); break; }
-        if (!JS_IsUndefined(input) && !JS_IsNull(input)) {
-            if (JS_GetTypedArrayType(input) != JS_TYPED_ARRAY_INT16) valid = false;
-            else {
-                size_t offset = 0, bytes = 0, per = 0, size = 0;
-                JSValue buffer = JS_GetTypedArrayBuffer(ctx, input,
-                                                        &offset, &bytes, &per);
-                uint8_t *data = JS_IsException(buffer) ? NULL :
-                                JS_GetArrayBuffer(ctx, &size, buffer);
-                size_t count = bytes / sizeof(int16_t);
-                if (!data || per != sizeof(int16_t) || bytes % 2 ||
-                    offset > size || bytes > size - offset ||
-                    count > GRID_APP_MAX_INPUTS - total) valid = false;
-                else {
-                    if (count > slot->input_capacity[i]) {
-                        void *new_raw = NULL;
-                        int16_t *new_aligned = NULL;
-                        if (!aligned_buffer(count, &new_raw, &new_aligned)) oom = true;
-                        else {
-                            free(slot->input_raw[i]);
-                            slot->input_raw[i] = new_raw;
-                            slot->input[i] = new_aligned;
-                            slot->input_capacity[i] = count;
-                        }
-                    }
-                    binding.data[i] = slot->input[i];
-                    if (oom) { JS_FreeValue(ctx, buffer); JS_FreeValue(ctx, input); break; }
-                    if (count) memcpy(binding.data[i], data + offset, bytes);
-                    binding.count[i] = count;
-                    total += count;
-                }
-                JS_FreeValue(ctx, buffer);
-            }
-        }
-        JS_FreeValue(ctx, input);
-        if (oom) break;
-    }
-    if (valid && !oom && argc >= 3 && !JS_IsUndefined(argv[2])) {
-        uint32_t count;
-        valid = array_length(ctx, argv[2], &count) && count <= KSN_GRID_PARAMS;
-        for (unsigned i = 0; valid && i < count; ++i) {
-            int64_t value;
-            valid = at(ctx, argv[2], i, INT32_MIN, INT32_MAX, &value);
-            if (valid) binding.param[i] = (int32_t)value;
-        }
-    }
+    grid_inputs inputs;
+    inputs_init(&inputs);
+    bool oom = false;
+    if (!inputs_resolve(ctx, argv[1], argc >= 3 ? argv[2] : JS_UNDEFINED,
+                        &inputs))
+        return inputs_fail(ctx, op, &inputs, false);
+    /* Grid JS methods are guarded against reentry; reset belongs to native
+     * session teardown. Revalidate once after getters before touching the plan. */
+    if (slot->handle != handle || slot->pending || slot->stream)
+        return inputs_fail(ctx, op, &inputs, false);
+    if (!inputs_capture(ctx, &inputs, &oom))
+        return inputs_fail(ctx, op, &inputs, oom);
+    ksn_grid_binding binding = inputs.binding;
+    /* From capture through the last kernel read: no JS callbacks, yields,
+     * detach/resize, or concurrent native writes to borrowed storage. DEST is
+     * private owned storage, never an input-map entry. Kernel bounds and PIE
+     * alignment/extent validation remain authoritative. */
     binding.data[KSN_GRID_DEST] = slot->output[slot->candidate_index];
     binding.count[KSN_GRID_DEST] = (size_t)slot->shape.width * slot->shape.height;
-    if (valid && !oom)
-        memcpy(binding.data[KSN_GRID_DEST],
-               slot->output[slot->committed_index],
-               binding.count[KSN_GRID_DEST] * sizeof(int16_t));
+    memcpy(binding.data[KSN_GRID_DEST], slot->output[slot->committed_index],
+           binding.count[KSN_GRID_DEST] * sizeof(int16_t));
     int64_t copied = grid_measure_now_us();
     ksn_grid_image next = {0};
     ksn_grid_status status = KSN_GRID_BAD_IR;
     int64_t bound = copied, ran = copied;
-    if (valid && !oom) {
-        if (slot->resize) {
-            bool only_source = argc < 3 || JS_IsUndefined(argv[2]);
-            for (unsigned i = 2; i < KSN_GRID_BUFFERS; ++i)
-                if (binding.count[i]) only_source = false;
-            if (only_source && ksn_grid_resize_run(slot->resize,
-                    binding.data[0], binding.count[0],
-                    binding.data[KSN_GRID_DEST], binding.count[KSN_GRID_DEST],
-                    !force_scalar, &slot->resize_pie)) status = KSN_GRID_OK;
-            ran = grid_measure_now_us();
-        } else {
-            const ksn_grid_pie_policy policy = {!force_scalar, 8, 8, 8};
-            status = ksn_grid_image_bind(&next, slot->plan, &slot->shape,
-                                         &binding, policy);
-            bound = grid_measure_now_us();
-            if (status == KSN_GRID_OK) status = ksn_grid_image_run(&next);
-            ran = grid_measure_now_us();
-        }
+    if (slot->resize) {
+        bool only_source = argc < 3 || JS_IsUndefined(argv[2]);
+        for (unsigned i = 2; i < KSN_GRID_BUFFERS; ++i)
+            if (binding.count[i]) only_source = false;
+        if (only_source && ksn_grid_resize_run(slot->resize,
+                binding.data[0], binding.count[0],
+                binding.data[KSN_GRID_DEST], binding.count[KSN_GRID_DEST],
+                !force_scalar, &slot->resize_pie)) status = KSN_GRID_OK;
+        ran = grid_measure_now_us();
+    } else {
+        const ksn_grid_pie_policy policy = {!force_scalar, 8, 8, 8};
+        status = ksn_grid_image_bind(&next, slot->plan, &slot->shape,
+                                     &binding, policy);
+        bound = grid_measure_now_us();
+        if (status == KSN_GRID_OK) status = ksn_grid_image_run(&next);
+        ran = grid_measure_now_us();
     }
-    if (oom) return fail(ctx, op, POCKET_ERR_OUT_OF_MEMORY,
-                         "grid input allocation failed");
-    if (!valid || status != KSN_GRID_OK)
+    if (status != KSN_GRID_OK) {
+        inputs_release(ctx, &inputs);
         return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                     "grid bind or execution failed");
-    if (!slot->resize) {
-        for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i)
-            slot->last_input_count[i] = binding.count[i];
-        memcpy(slot->last_param, binding.param, sizeof slot->last_param);
-        slot->measure_ready = true;
     }
     /* Image spans only read DEST. Do not retain pointers to released inputs. */
     for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i)
@@ -628,8 +685,11 @@ static JSValue run_impl(JSContext *ctx, int argc, JSValueConst *argv)
     profile->kernel_us += elapsed_us(bound, ran);
     profile->total_us += total_us;
     if (total_us > profile->max_total_us) profile->max_total_us = total_us;
-    return JS_NewString(ctx, (slot->resize ? slot->resize_pie :
-                         next.execution.pie_backend_selected) ? "PIE" : "scalar");
+    bool pie = slot->resize ? slot->resize_pie : next.execution.pie_backend_selected;
+    /* Release external buffers only after the last slot access: their native
+     * free callbacks belong to the embedding. totalUs excludes this cleanup. */
+    inputs_release(ctx, &inputs);
+    return JS_NewString(ctx, pie ? "PIE" : "scalar");
 }
 
 /* Read and reset one handle's successful-run timings. Presentation happens
@@ -663,24 +723,26 @@ static JSValue profile_impl(JSContext *ctx, int argc, JSValueConst *argv)
     return info;
 }
 
-/* Compare the last copied input with the same bound native plan. Scratch
- * outputs keep measurement away from the displayed candidate and its ACK. */
+/* Compare explicitly supplied inputs on the same plan. Scratch outputs start
+ * at zero and keep measurement away from the displayed candidate and its ACK.
+ * No prior run, source copy, parameter set, or DEST state is retained here. */
 static JSValue measure_impl(JSContext *ctx, int argc, JSValueConst *argv)
 {
     const char *op = "kasane.grid.measure";
     grid_slot *slot = argc ? find(ctx, argv[0]) : NULL;
     int64_t repeats = 8;
-    if (argc < 1 || argc > 3 || !slot || !slot->plan ||
-        !slot->measure_ready ||
-        (argc >= 2 && !number(ctx, argv[1], 1, 16, &repeats)))
+    if (argc < 3 || argc > 5 || !slot || !slot->plan ||
+        !JS_IsObject(argv[1]) ||
+        (argc >= 4 && !JS_IsUndefined(argv[3]) &&
+         !number(ctx, argv[3], 1, 16, &repeats)))
         return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
-                    "expected a recent grid fold run and 1..16 repeats");
+                    "expected handle, input buffers, params and 1..16 repeats");
     ksn_grid_pie_load_strategy strategy = KSN_GRID_PIE_LOAD_AUTO;
-    if (argc == 3) {
-        if (!JS_IsString(argv[2]))
+    if (argc == 5 && !JS_IsUndefined(argv[4])) {
+        if (!JS_IsString(argv[4]))
             return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                         "strategy must be AUTO, GATHER or AFFINE");
-        const char *name = JS_ToCString(ctx, argv[2]);
+        const char *name = JS_ToCString(ctx, argv[4]);
         if (!name) return JS_EXCEPTION;
         bool valid_name = true;
         if (!strcmp(name, "AUTO")) strategy = KSN_GRID_PIE_LOAD_AUTO;
@@ -694,23 +756,29 @@ static JSValue measure_impl(JSContext *ctx, int argc, JSValueConst *argv)
             return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                         "strategy must be AUTO, GATHER or AFFINE");
     }
+    grid_inputs inputs;
+    inputs_init(&inputs);
+    bool oom = false;
+    uint32_t handle = slot->handle;
+    if (!inputs_resolve(ctx, argv[1], argv[2], &inputs) ||
+        slot->handle != handle || !slot->plan)
+        return inputs_fail(ctx, op, &inputs, false);
+    if (!inputs_capture(ctx, &inputs, &oom))
+        return inputs_fail(ctx, op, &inputs, oom);
     size_t count = (size_t)slot->shape.width * slot->shape.height;
     void *raw[2] = {NULL, NULL};
     int16_t *pixels[2] = {NULL, NULL};
     if (!aligned_buffer(count, &raw[0], &pixels[0]) ||
         !aligned_buffer(count, &raw[1], &pixels[1])) {
         free(raw[0]); free(raw[1]);
+        inputs_release(ctx, &inputs);
         return fail(ctx, op, POCKET_ERR_OUT_OF_MEMORY,
                     "grid measurement scratch allocation failed");
     }
     ksn_grid_execution execution[2];
-    ksn_grid_binding binding = {0};
-    memcpy(binding.param, slot->last_param, sizeof binding.param);
-    for (unsigned i = 0; i < KSN_GRID_BUFFERS; ++i) {
-        if (i == KSN_GRID_DEST || !slot->last_input_count[i]) continue;
-        binding.data[i] = slot->input[i];
-        binding.count[i] = slot->last_input_count[i];
-    }
+    ksn_grid_binding binding = inputs.binding;
+    memset(pixels[0], 0, count * sizeof(int16_t));
+    memset(pixels[1], 0, count * sizeof(int16_t));
     bool valid = true;
     for (unsigned arm = 0; arm < 2; ++arm) {
         binding.data[KSN_GRID_DEST] = pixels[arm];
@@ -745,6 +813,7 @@ static JSValue measure_impl(JSContext *ctx, int argc, JSValueConst *argv)
             memcmp(pixels[0], pixels[1], count * sizeof(int16_t)) == 0;
     }
     free(raw[0]); free(raw[1]);
+    inputs_release(ctx, &inputs);
     if (!valid) return fail(ctx, op, POCKET_ERR_INVALID_ARGUMENT,
                             "native scalar and PIE did not both match");
     JSValue result = JS_NewObject(ctx);
@@ -1044,7 +1113,7 @@ esp_err_t pocket_grid_install(JSContext *ctx, JSValueConst ns)
         JS_CFUNC_DEF("registerResizeSource", 1, js_register_resize_source),
         JS_CFUNC_DEF("run", 4, js_run),
         JS_CFUNC_DEF("profile", 1, js_profile),
-        JS_CFUNC_DEF("measure", 2, js_measure),
+        JS_CFUNC_DEF("measure", 3, js_measure),
         JS_CFUNC_DEF("resource", 1, js_resource),
         JS_CFUNC_DEF("explain", 1, js_explain),
     };
@@ -1079,8 +1148,6 @@ void pocket_grid_reset(void)
         free(slots[i].stream);
         free(slots[i].output_raw[0]);
         free(slots[i].output_raw[1]);
-        for (unsigned j = 0; j < KSN_GRID_BUFFERS; ++j)
-            free(slots[i].input_raw[j]);
         slots[i] = (grid_slot){0};
     }
     js_call_active = false;

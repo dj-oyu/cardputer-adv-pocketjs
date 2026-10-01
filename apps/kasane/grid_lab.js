@@ -178,9 +178,9 @@
     const inspect = mode.profile ? modeTick === 0 :
                     tick === 0 || modeTick === 0 || advanced;
     if (mode.kind === 'fold' && inspect && !mode.profile) {
-      mode.measure = grid.measure(mode.handle, 8);
-      mode.gather = grid.measure(mode.handle, 8, 'GATHER');
-      mode.affine = grid.measure(mode.handle, 8, 'AFFINE');
+      mode.measure = grid.measure(mode.handle, buffers, undefined, 8);
+      mode.gather = grid.measure(mode.handle, buffers, undefined, 8, 'GATHER');
+      mode.affine = grid.measure(mode.handle, buffers, undefined, 8, 'AFFINE');
       console.log('GRID_APP MEASURE ' + selected +
                   ' repeats=' + mode.measure.repeats +
                   ' scalar_us=' + mode.measure.scalarUs +
