@@ -77,4 +77,4 @@ function odds(h, o) {
 }
 globalThis.derby = {OV: OV, field: field, race: race, step: step, order: order, odds: odds, D: D, DT: DT};
 if (typeof pocket !== 'undefined')
-  pocket.app.load('prog'), pocket.app.load('view'), pocket.app.load('scene'), pocket.app.load('play');
+  pocket.app.load('prog'), pocket.app.load('view'), pocket.app.load('scene'), pocket.app.load('pan'), pocket.app.load('play');

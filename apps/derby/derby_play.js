@@ -79,7 +79,7 @@ globalThis.frame = function (b) {
         // WIDE away from every panning unit is the nearest one (wide()).
         const o = ro = order(rs), L = rs.x[o[0]];
         let m = slow ? 3 : man ? cam : scene !== 'race' ? 0 : hold > 0 || cm === 6 ? cm :
-          L < 150 ? 0 : L < 400 ? 2 : L < 700 ? (dl > 0 ? 1 : 0) : L < VS[0] - 60 ? 1 : L < VS[0] + 60 ? 5 :
+          L < 150 ? 0 : L < (F.o ? OB : 400) ? 2 : L < 700 ? (dl > 0 ? 1 : 0) : L < VS[0] - 60 ? 1 : L < VS[0] + 60 ? 5 :
           L > D - 70 && L - rs.x[o[1]] < 1.5 ? 6 : 0;
         if (!m && scene === 'race' && !live.gate) m = wide(L);
         if (m !== cm) { cl = man ? pick : o[0]; cm = m; hold = camT = 45; log('CAM ' + (NAMES[m] || m)); }
