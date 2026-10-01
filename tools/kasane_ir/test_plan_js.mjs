@@ -45,6 +45,17 @@ const r = reference(ok, [3, 7, 0, 0, 0, 0, 0, 0], [6, 0xffff]);
 assert.equal(r.status, 'DONE');
 assert.equal(r.seg.length, 5);          // x = 3..7, then x > b breaks
 assert.deepEqual(r.seg[1].slice(0, 2), [6, 0]);
+// linePattern: the reference's entries are the VM's (geometry + 4096,
+// parameters with negative rows), chords where the weights differ.
+const lpp = plan(`move(a, b);
+linePattern(a + 100, b + 20, 5, c, -1, 1.5, 30.25, 1, 3, 24);`, 'inputs: a, b', 'c');
+const lr = reference(lpp, [10, 20, 0, 0, 0, 0, 0, 0], [0x1234]);
+assert.equal(lr.status, 'DONE');
+assert.equal(lr.seg.length, 16);                       // ratio 3: 8 chords
+assert.deepEqual(lr.seg[0].slice(0, 2), [10 + 4096, 20]);
+assert.ok(lr.seg[1][1] < 0 && lr.seg[1][3] < 0 && lr.seg[0][4] === 0x1234);
+assert.equal(reference(lpp, [10, 20, 0, 0, 0, 0, 0, 0], [70000]).status, 'INVALID');
+assert.ok(compilePlan(lpp).count > 0);
 // An empty plan is one SET (register() needs an instruction).
 assert.equal(compilePlan(plan('', 'inputs:')).text, 'S0,0');
 console.log('test_plan_js: PASS');
