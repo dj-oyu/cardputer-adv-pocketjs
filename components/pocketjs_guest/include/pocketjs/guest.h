@@ -57,7 +57,8 @@ esp_err_t pocketjs_guest_create(const pocketjs_guest_config_t *config,
 esp_err_t pocketjs_guest_eval(pocketjs_guest_t *guest, const char *source,
                               size_t source_size, const char *label);
 
-/** Call globalThis.frame(...) once and drain pending Promise jobs. An explicit
+/** Call globalThis.frame(...) with the realm global as its receiver, including
+ * strict functions, then drain pending Promise jobs. An explicit
  * globalThis.frame = null selects event-driven mode: jobs still drain, but no
  * JS frame call or argument allocation occurs. A missing frame is an error. */
 esp_err_t pocketjs_guest_frame(pocketjs_guest_t *guest,

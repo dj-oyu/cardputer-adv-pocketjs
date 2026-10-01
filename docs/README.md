@@ -24,6 +24,7 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [task-allocation-facade.md](vm/task-allocation-facade.md) | 設計 | FreeRTOS タスクの配置ファサード（`standalone/fp_ticket`、未接続） |
 | [vm-L0-report.md](vm/vm-L0-report.md) | 記録 | L0 の実機計測（ターン内訳、ヒープ、ジョブ単価） |
 | [vm-L1-report.md](vm/vm-L1-report.md) | 記録 | L1 の実測。時計読み出しのコスト（§8.7）、コア移行（§8.8）、スケジューラ定数の調律（§10） |
+| [frame-entry-direct.md](vm/frame-entry-direct.md) | 実装・検査 | source app の frame を直接呼び、ホストで例外表示を保つ。native host 回帰、実機未検証 |
 | [vm-L2-results.md](vm/vm-L2-results.md) | 記録 | L2 の実測と関所の結果（段ごと、host/device の別つき） |
 | [vm-L3-results.md](vm/vm-L3-results.md) | 記録 | L3a の実測。コーパス74件バイト一致、枝ごとの踏まれ方、毒の負の対照3種、Test262 7,036ファイル、移動の単価。**実機のサイズは `--gc-sections` で落ちるので測れない**（§2） |
 | [oom-parse-safety.md](vm/oom-parse-safety.md) | 記録 | 確保失敗時のコンパイル経路（VM の段とは独立）。全点掃引で見つけたメモリ安全性の穴（closures 71 点・generators 133 点 → 0）と、変数の捕捉が黙ってグローバル読みになる誤コンパイル。`DynBuf` のエラーが余りへの書き込みに効いていなかった根本原因。上流2系統とも未修正 |

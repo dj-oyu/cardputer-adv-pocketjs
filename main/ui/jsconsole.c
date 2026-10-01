@@ -84,8 +84,7 @@ static JSValue host_print(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-// __pjs_error(message, stack) — the frame wrapper's way of handing an exception
-// to the host before rethrowing it.
+// Legacy explicit error reporting remains available to scripts.
 static JSValue host_error(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv) {
     (void)this_val;
@@ -109,6 +108,35 @@ static JSValue host_error(JSContext *ctx, JSValueConst this_val,
     jsconsole_set_error(buffer);
     ESP_LOGW("js","%s",buffer);
     return JS_UNDEFINED;
+}
+
+void jsconsole_report_exception(JSContext *ctx, JSValueConst exception) {
+    char buffer[sizeof(error)]={0};
+    const char *text=JS_ToCString(ctx,exception);
+    if(text) { snprintf(buffer,sizeof(buffer),"%s",text); JS_FreeCString(ctx,text); }
+    else if(JS_HasException(ctx)) JS_FreeValue(ctx,JS_GetException(ctx));
+    JSValue stack=JS_UNDEFINED;
+    if(JS_IsObject(exception)) {
+        stack=JS_GetPropertyStr(ctx,exception,"stack");
+        if(JS_IsException(stack)) {
+            JS_FreeValue(ctx,JS_GetException(ctx));
+            stack=JS_UNDEFINED;
+        }
+    }
+    if(!JS_IsUndefined(stack)&&!JS_IsNull(stack)) {
+        const char *s=JS_ToCString(ctx,stack);
+        if(s) {
+            const char *nl=strchr(s,'\n');
+            int n=nl?(int)(nl-s):(int)strlen(s);
+            size_t used=strlen(buffer);
+            snprintf(buffer+used,sizeof(buffer)-used," %.*s",n,s);
+            JS_FreeCString(ctx,s);
+        }
+    }
+    JS_FreeValue(ctx,stack);
+    if(JS_HasException(ctx)) JS_FreeValue(ctx,JS_GetException(ctx));
+    jsconsole_set_error(buffer[0]?buffer:"frame failed");
+    ESP_LOGW("js","%s",error);
 }
 
 #ifdef CONFIG_POCKET_VM_PROBE

@@ -716,15 +716,16 @@ static bool capability_supported(const char *name, void *user) {
 // context is valid for the length of a synchronous owner-task call, so the
 // evaluation happens here and the exception is copied out before it is freed.
 //
-// Two more evaluations follow the user's source: a wrapper that hands a
-// runtime exception to the host before rethrowing it, and a trivial expression
-// whose only job is to make pocketjs_guest_eval re-read globalThis.frame —
+// A trivial evaluation follows the user's source, whose only job is to make
+// pocketjs_guest_eval re-read globalThis.frame —
 // that read is the only place the guest latches the frame function, and it is
 // also how a source without one reports ESP_ERR_NOT_FOUND.
-static const char FRAME_WRAP[] =
-    "(function(){var f=globalThis.frame;if(typeof f!=='function')return;"
-    "globalThis.frame=function(){try{return f.apply(this,arguments);}"
-    "catch(e){__pjs_error(String(e),e&&e.stack);throw e;}};})()";
+// Keep frame's bytecode entry direct: Function.apply creates a native floor
+// which cannot park. Error reporting runs after the completed host call instead.
+static void frame_error(JSContext *ctx, JSValueConst exception, void *opaque) {
+    (void)opaque;
+    jsconsole_report_exception(ctx,exception);
+}
 
 // One evaluation, with its exception reported the way the Playground needs it.
 // `filename` is what the learner is shown in the error, so the prelude and the
@@ -796,7 +797,7 @@ static esp_err_t eval_reporting(const char *source, size_t length,
 // Ctrl+R, naming a line they never wrote.
 //
 // `module`: the source is an ES module entry (an app whose manifest entry ends
-// in .mjs). Its top-level declarations stay in the module, so FRAME_WRAP and
+// in .mjs). Its top-level declarations stay in the module, so
 // bind-frame.js find frame() only if the entry assigned globalThis.frame.
 static esp_err_t eval_user_source(const char *source, size_t length, bool module) {
     JSContext *ctx=pocketjs_guest_quickjs_context(guest);
@@ -807,10 +808,6 @@ static esp_err_t eval_user_source(const char *source, size_t length, bool module
     }
     esp_err_t err=eval_reporting(source,length,"user.js",module);
     if(err!=ESP_OK) return err;
-
-    JSValue wrap=JS_Eval(ctx,FRAME_WRAP,sizeof(FRAME_WRAP)-1,"wrap.js",JS_EVAL_TYPE_GLOBAL);
-    if(JS_IsException(wrap)) JS_FreeValue(ctx,JS_GetException(ctx));
-    JS_FreeValue(ctx,wrap);
 
     // ESP_ERR_NOT_FOUND here means the source defined no frame; that is the
     // caller's cue to run it as an expression rather than as an app.
@@ -1473,6 +1470,7 @@ esp_err_t app_start_test(char test) {
     if(reloc_requested) pocketjs_guest_reloc_arm(guest,true);
 #endif
     pocketjs_guest_set_watchdog(guest,interrupt,NULL);
+    pocketjs_guest_set_frame_error_handler(guest,frame_error,NULL);
     // Replaces quickjs-libc's print, whose output only ever reaches stdout.
     jsconsole_clear();
     TRY(pocketjs_guest_quickjs_install_once(guest,"console",jsconsole_install,NULL));
