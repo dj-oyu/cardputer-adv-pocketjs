@@ -18,16 +18,14 @@ function prog() {
 const KN = [[3, 2, 3, 3, 8, 10, 263170, 921095], [4, 3, 4, 5, 5, 7, 1083458, 3792103],
   [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1, 2.5],
   // The dust and the band (docs/apps/derby-finish-fx.md; sizes and colours
-  // are the dust, bokeh and band plans' first lines). 0..4 FINISH, 5..9 HEAD
-  // ON: the layers far, mid (dust), near (bokeh), streak (dust) as slot px
-  // (0: off), then the band's strokes a side. Variants: FINISH A
-  // 16,0,48,0,3; B 16,34,48,0,3; C 16,34,48,90,3; D as B with the far
-  // parallax 1 and dust's RISE 80. HEAD ON (1) behind the horses
-  // 20,40,0,0,0; (2) and in front 20,40,60,0,0; (3) in front 0,0,60,0,0; (4)
-  // none. 10..13 each layer's parallax (1: the track at 16 m); the drift px a
-  // frame a unit of parallax, t a frame, frames a band redraw. (17..19: the
-  // cut's frame, cx and camera, appended by paint().)
-  [16, 34, 48, 0, 3, 20, 40, 0, 0, 0, .2, .5, 1, 1.2, .15, .003, 3]];
+  // are the dust, bokeh and band plans' first lines). 0..8 FINISH, 9..17
+  // HEAD ON: the dust's area (x from, x to, y from, height), the layers far,
+  // mid (dust), near (bokeh) as slot px (0: off), the band's strokes a side,
+  // the far layer's rise px a frame. 18..20 each layer's parallax (1: the
+  // track at 16 m), 21 the drift px a frame a unit of parallax, 22 t a frame,
+  // 23 frames a band redraw. (24..26: the cut's frame, cx and camera,
+  // appended by paint().)
+  [20, 220, 50, 72, 14, 30, 48, 3, .24, 60, 180, 30, 50, 10, 20, 0, 0, 0, 1, .5, 1, .15, .003, 3]];
 let tier = 1;
 const T = {
   // rail: the running rail. Posts from the top rail to the ground, a top and
@@ -435,33 +433,29 @@ const T = {
 
   // ---- The dust overlay and the hand-drawn band (FINISH's slow motion,
   // HEAD ON; docs/apps/derby-finish-fx.md). Their numbers are one table:
-  // KN[4] (the JS half: layers, parallax, rates) and the constants on each
-  // plan's first line (shapes, colours). A dust layer is a row of slots w px
-  // wide that scrolls with the camera: the JS passes o (the first slot's x,
-  // -2w..-w) and h0 (its number times GA, mod 2 pi); slot i's particle is
-  // placed by u = sin(h0 + i GA) (GA the golden angle: no two slots alike)
-  // and sin(u * 137 ...) (chaotic in u), so it keeps its look while the row
-  // scrolls. Every sin argument stays within +-200: newlib's sinf takes a
-  // slow path beyond about 201. y from Y0 over YH px.
-  // dust: one layer of specks (layer 0: far), grains (1: mid) or streaks
-  // (3), a line L px long, in C, or in C2 while its twinkle (rate TW)
-  // is over SPK. y drifts with t (the JS scales it), x with o. The far layer
-  // spreads up by RISE px a unit of t (variant D: specks rising from the
-  // bottom, each at its own speed; 0 for none).
-  /** @plan dust inputs: t, o, h0, w, layer */
+  // KN[4] (the JS half: areas, layers, parallax, rates) and the constants on
+  // each plan's first line (shapes, colours). A dust layer is a row of slots
+  // w px wide that scrolls with the camera: the JS passes o (the first slot's
+  // x, -2w..-w from the area's left) and h0 (its number times GA, mod 2 pi);
+  // slot i's particle is placed by u = sin(h0 + i GA) (GA the golden angle:
+  // no two slots alike) and sin(u * 137 ...) (chaotic in u), so it keeps its
+  // look while the row scrolls. The row stops at xR; y within y0..y0 + yH.
+  // Every sin argument stays within +-200: newlib's sinf takes a slow path
+  // beyond about 201.
+  // dust: one layer of specks (l 0: far) or grains (a line l px long: mid),
+  // in C0 or C1, or in C2 while its twinkle (rate TW) is over SPK. y drifts
+  // with t (the JS scales it), x with o.
+  /** @plan dust inputs: t, o, h0, w, l, xR, y0, yH */
   dust() {
-    const Y0 = 14, YH = 108, SPK = .8, TW = 100, RISE = 0, C2 = 0xffff, GA = 2.39996;
-    const L0 = 0, C0 = 0xffd9, L1 = 2, C1 = 0xe695, L3 = 14, C3 = 0xef7d;
-    let x = o, h = h0, l = L0, c = C0, rs = t * RISE;
+    const SPK = .8, TW = 100, C0 = 0xffd9, C1 = 0xe695, C2 = 0xffff, GA = 2.39996;
+    let x = o, h = h0, c = C0;
     for (let a = 0; a < 1; a++) {
-      if (.5 > layer) break;
-      l = L1; c = C1; rs = 0;
-      if (1.5 > layer) break;
-      l = L3; c = C3;
+      if (.5 > l) break;
+      c = C1;
     }
-    const hs = (rs + YH) * .5, yc = Y0 - rs + hs, jx = w * .45, tw = t * TW;
+    const hs = yH * .5, yc = y0 + hs, jx = w * .45, tw = t * TW;
     for (let i = 0; i < 40; i++) {
-      if (x > 244) break;
+      if (x > xR) break;
       const u = sin(h);
       const cx = u * jx + x;
       const py = sin(u * 137 + t) * hs + yc;
@@ -477,23 +471,23 @@ const T = {
 
   // bokeh: one layer of N octagons from radius R0 (+-30% by hash) inwards 1
   // px apart, the rim in RIM, the rest in FILL (N 1: a ring). y drifts with
-  // t (the JS scales it), x with o.
-  /** @plan bokeh inputs: t, o, h0, w */
+  // t (the JS scales it), x with o; l is not read (dust's inputs).
+  /** @plan bokeh inputs: t, o, h0, w, l, xR, y0, yH */
   bokeh() {
     const R0 = 6, N = 1, RIM = 0x7b28, FILL = 0x3984, GA = 2.39996;
     let x = o, h = h0;
     const jx = w * .45, rv = R0 * .3;
     for (let i = 0; i < 24; i++) {
-      if (x > 252) break;
+      if (x > xR) break;
       const u = sin(h);
       const cx = u * jx + x;
-      const cy = sin(u * 137 + t) * 54 + 68;
+      const cy = sin(u * 137 + t) * (yH * .5) + yH * .5 + y0;
       let r = u * rv + R0, cc = RIM;
       for (let q = 0; q < N; q++) {
         const f = r * .7071;
-        const xa = cx + r, xb = cx + f, xc = cx - f, xd = cx - r, yb = cy + f, yc = cy - f;
+        const xa = cx + r, xb = cx + f, xc = cx - f, xd = cx - r, yb = cy + f, yc2 = cy - f;
         move(xa, cy); line(xb, yb, cc); line(cx, cy + r, cc); line(xc, yb, cc); line(xd, cy, cc);
-        line(xc, yc, cc); line(cx, cy - r, cc); line(xb, yc, cc); line(xa, cy, cc);
+        line(xc, yc2, cc); line(cx, cy - r, cc); line(xb, yc2, cc); line(xa, cy, cc);
         r += -1; cc = FILL;
       }
       x += w; h += GA;

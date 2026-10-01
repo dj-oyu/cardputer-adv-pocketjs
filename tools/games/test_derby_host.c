@@ -59,6 +59,7 @@
  */
 #include "pocket_kasane.h"
 #include "pocket_proc.h"
+#include "pocket_derby.h"
 #include "pocket_input.h"
 #include "pocket_api.h"
 #include "pocket_av.h"
@@ -392,18 +393,19 @@ static unsigned exact_run(const spec *s,const double *in,double *ex,double *ey,u
     }
     return n;
 }
-static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
-    (void)c;(void)self;(void)argc;
-    spec *s=find((int)num(argv[0]));REQ(s);
-    const unsigned tag=argc>2?(unsigned)num(argv[2]):0;
+/* One draw that the real pocket_proc.c accepted: from the app's H.draw (the
+ * JS wrapper in PRELUDE, array or numeric inputs) or from pocket.derby.ser
+ * (pocket_proc_draw_hook below). in64: the inputs as the JS doubles. */
+static void cap_draw(int handle,const double *in64,unsigned ni,unsigned tag,double f){
+    spec *s=find(handle);REQ(s);
     static float vx[4096],vy[4096];
     static double ex[4096],ey[4096];
     unsigned vn=0;
-    unsigned ni=len(argv[1]);REQ(ni<=KSN_PROC_INPUTS);
+    REQ(ni<=KSN_PROC_INPUTS);
     REQ(s->inputs_read<=ni||!s->inputs_read);
     if(ni>g_inputs_max)g_inputs_max=ni;
     float in[KSN_PROC_INPUTS]={0};
-    for(unsigned i=0;i<ni;i++){in[i]=(float)at(argv[1],i);REQ(isfinite(in[i]));}
+    for(unsigned i=0;i<ni;i++){in[i]=(float)in64[i];REQ(isfinite(in[i]));}
     ksn_proc_vm vp,vd,vr;
     REQ(ksn_proc_plan_begin(&vp,&s->plan,in,&f_plan)==KSN_PROC_RUNNING);
     REQ(ksn_proc_plan_run(&vp,&s->plan,false)==KSN_PROC_DONE);
@@ -421,15 +423,14 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
     }while(st==KSN_PROC_RUNNING);
     REQ(st==KSN_PROC_DONE);
     if(tag==4){
-        double in64[KSN_PROC_INPUTS]={0};
-        for(unsigned i=0;i<ni;i++)in64[i]=at(argv[1],i);
-        REQ(exact_run(s,in64,ex,ey,4096)==vn);
-        const double f=argc>3?num(argv[3]):0;
+        double e64[KSN_PROC_INPUTS]={0};
+        for(unsigned i=0;i<ni;i++)e64[i]=in64[i];
+        REQ(exact_run(s,e64,ex,ey,4096)==vn);
         for(unsigned i=0;i<vn;i++){
             const double e=fmax(fabs(vx[i]-ex[i]),fabs(vy[i]-ey[i]));
             if(e>newton_max){newton_max=e;newton_max_f=f;}
             if(ex[i]>=0&&ex[i]<240&&ey[i]>=0&&ey[i]<135&&e>newton_screen){newton_screen=e;
-                if(getenv("DERBY_NDEBUG"))printf("NEWTON %.4f plan %u pt %u/%u f %.0f in %g %g %g %g %g %g %g %g ex %.2f %.2f\n",e,s->program.count,i,vn,f,in64[0],in64[1],in64[2],in64[3],in64[4],in64[5],in64[6],in64[7],ex[i],ey[i]);}
+                if(getenv("DERBY_NDEBUG"))printf("NEWTON %.4f plan %u pt %u/%u f %.0f in %g %g %g %g %g %g %g %g ex %.2f %.2f\n",e,s->program.count,i,vn,f,e64[0],e64[1],e64[2],e64[3],e64[4],e64[5],e64[6],e64[7],ex[i],ey[i]);}
         }
         newton_points+=vn;newton_draws++;
     }
@@ -454,14 +455,14 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
          * as the vis inputs are (vr less one on the left and top). */
         REQ(!cur_surface&&!vis_drawn);
         vis_drawn=1;vis_seg_end=cand_plan.count;pan_face_frames++;
-        const double xl=at(argv[1],0),rl=at(argv[1],1),xr=at(argv[1],2),rr=at(argv[1],3);
+        const double xl=in64[0],rl=in64[1],xr=in64[2],rr=in64[3];
         vis_in[0]=(int)floor(fmin(xl,xr)+.5)-1;vis_in[1]=(int)ceil(28-10*fmin(rl,rr))-1;
         vis_in[2]=(int)floor(fmax(xl,xr)+.5);vis_in[3]=28;
     }
     if(tag==1){
         REQ(!cur_surface&&!vis_drawn&&f_plan.count>=4);
         vis_drawn=1;vis_seg_end=cand_plan.count;
-        for(unsigned i=0;i<4;i++)vis_in[i]=(int)at(argv[1],i);
+        for(unsigned i=0;i<4;i++)vis_in[i]=(int)in64[i];
         /* The face is filled row by row, exactly its interior, then the first
          * bezel ring runs one pixel outside it. */
         const ksn_proc_segment *g=f_plan.segments;
@@ -497,6 +498,81 @@ static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst 
         append(&cand_plan,&typed);append(&cand_vm,&typed);
         frame_points+=n;
     }
+}
+/* __draw(handle, tag, f, args): args is the wrapper's arguments object, the
+ * handle then an input array or the numeric inputs, trailing undefined
+ * dropped (pocket_proc.c draw_impl's rule). */
+static JSValue js_cap_draw(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)c;(void)self;(void)argc;
+    double in64[KSN_PROC_INPUTS]={0};
+    unsigned n=len(argv[3]),ni=0;
+    JSValue first=n>1?JS_GetPropertyUint32(ctx,argv[3],1):JS_UNDEFINED;
+    if(JS_IsArray(first)){ni=len(first);REQ(ni<=KSN_PROC_INPUTS);for(unsigned i=0;i<ni;i++)in64[i]=at(first,i);}
+    else{
+        while(n>2){JSValue v=JS_GetPropertyUint32(ctx,argv[3],n-1);const bool u=JS_IsUndefined(v);JS_FreeValue(ctx,v);if(!u)break;n--;}
+        ni=n-1;REQ(ni<=KSN_PROC_INPUTS);
+        for(unsigned i=0;i<ni;i++)in64[i]=at(argv[3],i+1);
+    }
+    JS_FreeValue(ctx,first);
+    cap_draw((int)num(argv[0]),in64,ni,(unsigned)num(argv[1]),num(argv[2]));
+    return JS_UNDEFINED;
+}
+/* pocket.derby.ser's draws (pocket_proc.c calls this after each one that
+ * succeeded): into the same capture as the app's H.draw, tagged as the JS
+ * wrapper tags them (__nt: f for prail/t0/t1, else -1); and, with
+ * DERBY_SER_ORACLE, into the list __sercmp compares with the JS ser()'s. */
+static bool ser_oracle;
+static double ser_buf[1<<16];
+static unsigned ser_n,ser_bad;
+static bool ser_overflow;
+static unsigned long ser_calls,ser_fuzz_calls,ser_draws,ser_fuzz_draws;
+void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
+    if(ser_oracle){
+        if(ser_n+9<=sizeof ser_buf/sizeof ser_buf[0]){
+            ser_buf[ser_n++]=handle;
+            for(unsigned i=0;i<8;i++)ser_buf[ser_n++]=i<n?in[i]:0;
+        }else ser_overflow=true;
+    }
+    if(pocket_proc_hook_dry)return;
+    JSValue g=JS_GetGlobalObject(ctx),fn=JS_GetPropertyStr(ctx,g,"__nt"),h=JS_NewInt32(ctx,(int32_t)handle);
+    JSValue r=JS_Call(ctx,fn,g,1,&h);
+    REQ(!JS_IsException(r));
+    const double f=num(r);
+    JS_FreeValue(ctx,r);JS_FreeValue(ctx,fn);JS_FreeValue(ctx,g);
+    cap_draw((int)handle,in,n,f>=0?4u:0u,f>=0?f:0);
+}
+static JSValue js_serbegin(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)c;(void)self;(void)argc;(void)argv;
+    ser_n=0;ser_overflow=false;
+    return JS_UNDEFINED;
+}
+static JSValue js_serdry(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)c;(void)self;(void)argc;
+    pocket_proc_hook_dry=JS_ToBool(ctx,argv[0]);
+    return JS_UNDEFINED;
+}
+/* __sercmp(rec, fuzz): the JS ser()'s draws [handle, 8 inputs]... against the
+ * C's, every double bit for bit (two NaNs count as equal: such a draw is
+ * refused by draw() either way). */
+static JSValue js_sercmp(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)c;(void)self;(void)argc;
+    const unsigned n=len(argv[0]);
+    const bool fz=JS_ToBool(ctx,argv[1]);
+    if(fz){ser_fuzz_calls++;ser_fuzz_draws+=n/9;}else{ser_calls++;ser_draws+=n/9;}
+    REQ(!ser_overflow);
+    bool bad=n!=ser_n;
+    unsigned at_i=0;
+    for(unsigned i=0;i<n&&i<ser_n&&!bad;i++){
+        const double a=at(argv[0],i),b=ser_buf[i];
+        if(memcmp(&a,&b,sizeof a)&&!(isnan(a)&&isnan(b))){bad=true;at_i=i;}
+    }
+    if(bad&&ser_bad++<8){
+        printf("SER_ORACLE MISMATCH%s: JS %u draws, C %u draws",fz?" (fuzz)":"",n/9,ser_n/9);
+        if(n==ser_n)printf("; draw %u input %d: JS %.17g (%a) C %.17g (%a)",at_i/9,(int)(at_i%9)-1,
+                           at(argv[0],at_i),at(argv[0],at_i),ser_buf[at_i],ser_buf[at_i]);
+        printf("\n");
+    }
+    ser_n=0;
     return JS_UNDEFINED;
 }
 static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
@@ -941,9 +1017,13 @@ static const char PRELUDE[]=
      * bezel on the screen (hl in 10565), 4 the panning series (Newton). The
      * app's pc (the panning unit, f at 4) is a global of its scripts. */
     "const pf=()=>{try{return pc?pc[4]:0}catch(e){return 0}};"
-    "P.draw=function(h,i){try{D.call(P,h,i)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify(i));throw e}"
-    "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&i[7]===10565?3:"
-    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__draw(h,i,t,t>2?pf():0)};"
+    /* pocket.derby.ser's draws (pocket_proc_draw_hook): f for the series. */
+    "globalThis.__nt=h=>{const L=globalThis.derby&&derby.L;return L&&(h===L.prail||h===L.t0||h===L.t1)?pf():-1};"
+    /* Inputs as an array or as numbers (N12): i is the array, or the 8th
+     * numeric input arguments[8]. */
+    "P.draw=function(h,i){try{D.apply(P,arguments)}catch(e){console.log('DERBY DRAWFAIL '+Object.keys(derby.L).find(k=>derby.L[k]===h)+' '+JSON.stringify([].slice.call(arguments,1)));throw e}"
+    "const L=globalThis.derby&&derby.L,t=L?h===L.vis?1:h===L.hd?2:h===L.hl&&(Array.isArray(i)?i[7]:arguments[8])===10565?3:"
+    "h===L.prail||h===L.t0||h===L.t1?4:0:0;__draw(h,t,t>2?pf():0,arguments)};"
     "P.commit=function(){C.call(P);__commit(pf())};})();"
     /* The draw references one replace() exposes (the limit is 32), and the
      * screen's lettering: the refs the app clips to the whole panel (setRect
@@ -960,7 +1040,7 @@ static const char PRELUDE[]=
     "K.patch=function(f){return PA.call(K,t=>{wrap(t);return f(t)})};})();"
     "globalThis.__turn=0;globalThis.__now=0;globalThis.__sets=0;globalThis.__cues=0;"
     "globalThis.__store={'derby.v1':{v:1,pts:1500,race:__race}};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,time:{now:()=>__now},"
+    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,derby:globalThis.__pd,time:{now:()=>__now},"
     /* The device samples the native heap at the start of a turn, so while the
      * source evaluates internalFreeBytes is null (2026-09-30: a startup loop
      * waiting on it spun into the 2 s evaluation deadline). Same here. */
@@ -995,6 +1075,11 @@ int main(int argc,char **argv){
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}
     pocket_kasane_install(ctx,NULL);
+    {   /* pocket.derby (the firmware's lazy namespace, built here at once). */
+        JSValue g=JS_GetGlobalObject(ctx),ns=JS_NewObject(ctx);
+        REQ(pocket_derby_fill(ctx,ns,NULL)==ESP_OK);
+        JS_SetPropertyStr(ctx,g,"__pd",ns);JS_FreeValue(ctx,g);
+    }
     /* The built-in plans (the firmware's app_session.c does the same). */
     pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
     pocket_input_install(ctx,NULL);
@@ -1002,7 +1087,7 @@ int main(int argc,char **argv){
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__reg",js_cap_reg,4},{"__unreg",js_cap_unreg,1},{"__begin",js_cap_begin,2},
-        {"__draw",js_cap_draw,4},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
+        {"__draw",js_cap_draw,4},{"__serbegin",js_serbegin,0},{"__sercmp",js_sercmp,2},{"__serdry",js_serdry,1},{"__commit",js_cap_commit,1},{"__tone",js_tone,1},{"__probe",js_probe,4},{"__churn",js_churn,1}};
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
@@ -1052,6 +1137,19 @@ int main(int argc,char **argv){
     /* DERBY_JS: any script run after the app's (e.g. moving the screen so
      * that a panning unit sees it: run_derby.py). */
     if(getenv("DERBY_JS"))REQ(eval(getenv("DERBY_JS"),strlen(getenv("DERBY_JS")),"env.js"));
+    /* DERBY_SER_ORACLE=1: the JS ser() of vm/main beside the C on every call,
+     * then DERBY_SER_FUZZ random cases (default 4000) before the game. */
+    if(getenv("DERBY_SER_ORACLE")){
+        static char oracle[16384];
+        FILE *of=fopen("tools/games/derby_ser_oracle.js","rb");REQ(of);
+        const size_t on=fread(oracle,1,sizeof oracle-1,of);fclose(of);oracle[on]=0;
+        REQ(eval(oracle,on,"derby_ser_oracle.js"));
+        ser_oracle=true;
+        char fz[96];
+        snprintf(fz,sizeof fz,"__serfuzz(%d,%u)",getenv("DERBY_SER_FUZZ")?atoi(getenv("DERBY_SER_FUZZ")):4000,hw);
+        REQ(eval(fz,strlen(fz),"fuzz.js"));
+        printf("ser oracle fuzz: %lu calls, %lu draws, %u mismatches\n",ser_fuzz_calls,ser_fuzz_draws,ser_bad);
+    }
     REQ(loaded_seen==1);                    /* the stored points and race number */
     /* Paddock: let the plans load and the odds settle, cycle the tier. */
     for(unsigned i=0;i<20;i++)frame(0);
@@ -1062,7 +1160,7 @@ int main(int argc,char **argv){
         run_until("res",4000);
         printf("NORMAL_FINISH %s\nNORMAL_PICK %s\nNORMAL_RESULT %s\n",finish[0],last_pick,last_result);
         bool ok=!exceptions&&!bad_present&&!framefails&&finishes==1;
-        pocket_input_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+        pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
         printf("%s\n",ok?"DERBY_HOST PASS":"DERBY_HOST FAIL");
         return ok?0:1;
     }
@@ -1244,7 +1342,12 @@ int main(int argc,char **argv){
     if(full)pass=pass&&finishes==2&&saves==1&&tones>0&&demo_starts==10&&demo_ends==10;
     else pass=pass&&!demo_starts;
     if(csv)fclose(csv);
-    pocket_input_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    if(ser_oracle){
+        printf("ser oracle: %lu calls in the game, %lu draws, %lu fuzz calls, %u mismatches\n",ser_calls,ser_draws,
+               ser_fuzz_calls,ser_bad);
+        pass=pass&&!ser_bad&&ser_fuzz_calls>0;
+    }
+    pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",pass?"DERBY_HOST PASS":"DERBY_HOST FAIL");
     return pass?0:1;
 }

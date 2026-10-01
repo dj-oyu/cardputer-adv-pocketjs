@@ -38,7 +38,7 @@ function load() {
   } catch (e) { log('LOADFAIL ' + n + ' ' + e); queue.push(queue.shift()); }
 }
 // Draws plan n now if it is registered (inputs are copied: pocket_proc.c).
-const dr = (n, a) => { if (live[n]) H.draw(live[n], a); };
+const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) H.draw(live[n], a, b, c, d, e, f, g, h); };
 const want = l => { for (const n of l) if (!live[n] && queue.indexOf(n) < 0) queue.push(n); };
 function drop(l) {
   for (const n of l) {
@@ -91,9 +91,9 @@ const VS = [840, 34, 20, 6, 16], FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30
 // screen 34, stands 40), as [x, z, tangent]; a bend's centre is 1/curvature
 // in from the rail. The straight gives [g, w, 1, 0] exactly. The oval (README
 // "楕円"): the back straight, a 120 m bend to the right, the home straight on
-// the straight's line from 650 m. CH: chord ends (ser()).
+// the straight's line from 650 m. CH: chord ends (pocket.derby).
 const OB = 650 - 120 * PI, SC = [], OC = [[OB, 0, 650 + OB, -218, -1, 0], [120 * PI, -1 / 120, 650, -218, -1, 0, PI], [2e3, 0, 650, 0, 1, 0]];
-let CRS = SC, CH, VC, VE;
+let CRS = SC, CH;
 function pose(g, w) {
   if (CRS === SC) return [g, w, 1, 0];
   let i = 0;
@@ -114,7 +114,7 @@ function pose(g, w) {
 // screen); HEAD ON is a still (paint).
 const CAMS = [[100, 9.7, 33, 880, 1, -1e9, 1e9], 0, [58, 15, 36, 880, 1, -1e9, 1e9], [170, 7, 22, 640, 0, -1e9, D - 6],
   [300, 4, 30, 880, 0, D, D], [130, 1.6, 84, 880, 1, VS[0] - 30, VS[0] + 30], 0,
-  [200, 6, 28, 100, -14, -14], [200, 6, 28, 460, -14, -100], [200, 6, 28, 820, -14, -14]],
+  [200, 6, 28, 100, -14, -14], [200, 6, 28, 460, -14, -3], [200, 6, 28, 820, -14, -14]],
   NAMES = ['WIDE', 'CLOSE', 'FIELD', 'FINISH', '', 'VISION', 'HEAD ON', 'WIDE 1', 'WIDE 2', 'WIDE 3'];
 // Panning units (rows 7..9, [least f, height, horizon y, g, w, w on the
 // oval: WIDE 2 near its bend's centre]; README):
@@ -125,7 +125,7 @@ const CAMS = [[100, 9.7, 33, 880, 1, -1e9, 1e9], 0, [58, 15, 36, 880, 1, -1e9, 1
 // pc: the unit in use, [x, z, unit vector to the aim, f, distance to the
 // aim], null for a side unit.
 const PAN = [60, 14, 1500, 16];
-let pc = null, vq = null, Lo, Hi;
+let pc = null, vq = null;
 function wide(g) {
   let m = 0, e = 1e9;
   for (let i = 7; i < 10; ++i) {
@@ -162,7 +162,7 @@ function course(c, x0, xs, close, gate, K) {
     sx = (w, d0) => o + (w - x0) * f / d0, gy = d0 => hy + h * f / d0, ty = (d0, e) => hy + (h - e) * f / d0;
   const rail = (d0, col) => {
     const p = f / d0, s = k[4] * p, a = sx((K ? M.ceil : flo)((x0 - (o - (K ? K[0] : -5)) / p) / k[4]) * k[4], d0);
-    dr('rail', [a, s, ty(d0, 1.1), gy(d0), mx(0, K ? flo((R - a) / s) : mn(flo((700 - a) / s), M.ceil((R - a) / s))), ty(d0, .55), col]);
+    dr('rail', a, s, ty(d0, 1.1), gy(d0), mx(0, K ? flo((R - a) / s) : mn(flo((700 - a) / s), M.ceil((R - a) / s))), ty(d0, .55), col);
   };
   let q = f / 40, n;
   if (!K) {
@@ -170,11 +170,11 @@ function course(c, x0, xs, close, gate, K) {
     // fixed on the stand (cells from its pillar j).
     const j = flo((x0 - 130 / q) / 12), a = sx(j * 12, 40), dx = 12 * q;
     n = mn(flo((700 - a) / dx), M.ceil((250 - a) / dx) + 1);
-    dr('stands', [a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5)]);
-    dr('crowd', [a, gy(40) - 1.2 * q, a + n * dx, gy(40) - 1.2 * q, -2.4 * q, -2.4 * q, j * 12 * KN[3][5], (j + n) * 12 * KN[3][5]]);
+    dr('stands', a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5));
+    dr('crowd', a, gy(40) - 1.2 * q, a + n * dx, gy(40) - 1.2 * q, -2.4 * q, -2.4 * q, j * 12 * KN[3][5], (j + n) * 12 * KN[3][5]);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
-      dr('vis', [vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866]);
+      dr('vis', vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866);
       feed(xs, (vr[2] - vr[0]) / 120);
     }
   }
@@ -186,15 +186,15 @@ function course(c, x0, xs, close, gate, K) {
     q = f / DFR;
     const w = k[5], i0 = mx(flo((x0 - 125 / q) / w), M.ceil((x0 - 590 * DNR / f) / w)), xf = sx(i0 * w, DFR), xn = sx(i0 * w, DNR);
     n = mx(0, mn(M.ceil((250 - xf) / (w * q)), flo((700 - xn) / (w * f / DNR))));
-    dr('turf', [xn, xf, w * f / DNR, w * q, gy(DNR), gy(DFR), n, i0 & 1]);
+    dr('turf', xn, xf, w * f / DNR, w * q, gy(DNR), gy(DFR), n, i0 & 1);
     for (let m = 200; m <= D; m += 200) {
       const p = sx(m, DFR), e = m === D;
       if (p > -40 && p < 280)
-        dr('pole', [p, gy(DFR), ty(DFR, e ? 4 : 2.6), (e ? .55 : .3) * q, e ? sx(m, DNR) : p, gy(e ? DNR : DFR), p, gy(DFR)]);
+        dr('pole', p, gy(DFR), ty(DFR, e ? 4 : 2.6), (e ? .55 : .3) * q, e ? sx(m, DNR) : p, gy(e ? DNR : DFR), p, gy(DFR));
     }
     // The gate at 0 m: 9 stall posts, lane boundaries one MUL apart in depth.
     q = f * M.sqrt(Q) / DL[0];
-    if (gate && M.abs(x0 * q) < 400) dr('gate', [-x0 * q, h * q, (h - 2.6) * q, 1 / Q, hy]);
+    if (gate && M.abs(x0 * q) < 400) dr('gate', -x0 * q, h * q, (h - 2.6) * q, 1 / Q, hy);
   }
   for (let l = 7; l >= 0; --l) {
     if (K && ro.indexOf(l) >= FN[tier]) continue;
@@ -202,14 +202,14 @@ function course(c, x0, xs, close, gate, K) {
     if (l === close) {
       const g = (flo(a * 3 / PI) % 6 + 6) % 6;
       dr('g' + g, []);
-      dr('silk', [SILK[l], rnd(HS * bob(g))]);
+      dr('silk', SILK[l], rnd(HS * bob(g)));
     } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400) rin(l, X, S, Y, a);
   }
   rail(DNR, 0xffff);
 }
 // A runner: hip x, back y, px per unit, ground y, four hooves.
-const rin = (l, X, S, Y, a) => dr('r' + l, [X, Y - 6 * S + .6 * S * sin(2 * a), S, Y, X + S * (.5 + 3 * sin(a)),
-  X + S * (.5 + 3 * sin(a + .8)), X + S * (8 + 3 * sin(a + 3.3)), X + S * (8 + 3 * sin(a + 4.1))]);
+const rin = (l, X, S, Y, a) => dr('r' + l, X, Y - 6 * S + .6 * S * sin(2 * a), S, Y, X + S * (.5 + 3 * sin(a)),
+  X + S * (.5 + 3 * sin(a + .8)), X + S * (8 + 3 * sin(a + 3.3)), X + S * (8 + 3 * sin(a + 4.1)));
 // The screen's feed on its face vr at scale z: a low camera 6 m behind the leader.
 function feed(xs, z) {
   if (von > 10) course([85 * z, 3, vr[1] + 4.8 * z], mx.apply(null, xs) - 6, xs, -1, 0, vr);

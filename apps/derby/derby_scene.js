@@ -6,7 +6,7 @@ function enter(s) {
   if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field((rng(HW ^ M.imul(sn, 0x9e3779b9))() * 4294967296 + M.imul(raceNo, 0x9e3779b9)) >>> 0); log('ODDS ' + (od = odds(F.h, F.o)) + (F.o ? ' OVAL' : ''));
     CRS = F.o ? OC : SC; CH = [-1e4];
     if (F.o) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
-    CH.push(1e4);
+    CH.push(1e4); S.course(CH, F.o ? OC : 0, DNR);
   }
   if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
@@ -117,26 +117,25 @@ function paint(c, xs, close, gate, extra) {
   if (vr) ++von;
   H.beginFrame(4);
   // The dust and the band (KN[4]; docs/apps/derby-finish-fx.md): layers 0, 1
-  // (dust: far, mid), HEAD ON's horses, 2 (bokeh), 3 (streaks), 4 (band). A
-  // layer's slots scroll by its parallax times d, the pan since the cut (cx,
-  // px at 16 m) and the drift; t counts from the cut.
-  const e = KN[4], q = scene !== 'race' ? -1 : cm === 3 ? 0 : cm === 6 ? 5 : -1;
-  if (e[19] !== q) e[17] = t, e[18] = cx, e[19] = q;
-  if (q === 5) dr('hd', []);
+  // (dust: far, mid), HEAD ON's horses, 2 (bokeh), 3 (band). A layer's slots
+  // scroll by its parallax times d, the pan since the cut (cx, px at 16 m)
+  // and the drift, within the camera's area; t counts from the cut.
+  const e = KN[4], q = scene !== 'race' ? -1 : cm === 3 ? 0 : cm === 6 ? 9 : -1;
+  if (e[26] !== q) e[24] = t, e[25] = cx, e[26] = q;
+  if (q === 9) dr('hd', []);
   else course(c, cx, xs, close, gate);
-  for (let j = 0, f = t - e[17], d = e[14] * f - (q ? 0 : (cx - e[18]) * c[0] / 16); j < (q < 0 ? 0 : 5); ++j) {
+  for (let j = 0, f = t - e[24], d = e[21] * f - (q ? 0 : (cx - e[25]) * c[0] / 16); j < (q < 0 ? 0 : 4); ++j) {
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
     // down the course; each horse scaled by its own 1/z (JS divides),
     // the last (farthest) first.
     if (j === 2 && q) for (let i = 7; i >= 0; --i) {
       const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
-      dr('fr', [120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s)]);
+      dr('fr', 120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s));
     }
-    const w = e[q + j];
+    const w = e[q + 4 + j], o = e[18 + j] * d, k = flo(-o / w) - 1, r = j ? 0 : e[q + 8] * f;
     if (!w) continue;
-    if (j > 3) { dr('band', [w, flo(f / e[16]) % 6]); continue; }
-    const o = e[10 + j] * d, k = flo(-o / w) - 1;
-    dr(j - 2 ? 'dust' : 'bokeh', [f * e[15], k * w + o, k * 2.39996 % (2 * PI), w, j]);
+    if (j > 2) dr('band', w, flo(f / e[23]) % 6);
+    else dr(j - 2 ? 'dust' : 'bokeh', f * e[22], e[q] + k * w + o, k * 2.39996 % (2 * PI), w, j * 2, e[q + 1], e[q + 2] - r, e[q + 3] + r);
   }
   if (extra) dr(extra[0], extra[1]);
   H.commit();
