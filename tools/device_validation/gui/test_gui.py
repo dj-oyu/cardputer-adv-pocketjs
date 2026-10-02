@@ -274,8 +274,10 @@ class BrokerTests(unittest.TestCase):
         self.assertFalse(self.executions)
 
     def test_discovery_is_bounded_and_excludes_nonapps_symlinks(self):
-        (self.project / 'bootloader.bin').write_bytes(app_bytes())
-        (self.project / 'merged.bin').write_bytes(app_bytes())
+        bootloader = bytearray(app_bytes())
+        bootloader[32:36] = b'\0' * 4
+        (self.project / 'bootloader.bin').write_bytes(bootloader)
+        (self.project / 'merged.bin').write_bytes(b'\xff' * 0x10000 + app_bytes())
         (self.project / 'bad.bin').write_bytes(b'not an image')
         external = self.root / 'not-registered'
         external.mkdir()
@@ -295,6 +297,104 @@ class BrokerTests(unittest.TestCase):
         with patch.object(core, 'registered_worktrees', return_value=([self.project], [])), patch.object(core, 'MAX_SCAN_ENTRIES', 1):
             _, _, warnings = core.scan(self.project, threading.Event())
             self.assertTrue(warnings)
+
+    def test_flash_backup_exception_in_each_registered_worktree(self):
+        other = self.root / 'registered-worktree'
+        other.mkdir()
+        for worktree in (self.project, other):
+            backup = worktree / '.cache/flash_backup/generic-retained-image'
+            backup.mkdir(parents=True)
+            (backup / 'app_backup.bin').write_bytes(app_bytes(b'backup'))
+            elsewhere = worktree / '.cache/unrelated-cache'
+            elsewhere.mkdir()
+            (elsewhere / 'hidden.bin').write_bytes(app_bytes(b'unrelated'))
+        with patch.object(core, 'registered_worktrees', return_value=([self.project, other], [])):
+            candidates, _, _ = core.scan(self.project, threading.Event())
+        backup_rows = [c for c in candidates if c['name'] == 'app_backup.bin']
+        self.assertEqual(len(backup_rows), 2)
+        self.assertTrue(all(c['kind'] == 'app-candidate' for c in backup_rows))
+        self.assertFalse(any(c['name'] == 'hidden.bin' for c in candidates))
+
+    def test_backup_exception_rejects_symlink_and_preserves_limit(self):
+        outside = self.root / 'outside-cache'
+        outside.mkdir()
+        (outside / 'outside.bin').write_bytes(app_bytes())
+        cache = self.project / '.cache'
+        cache.mkdir()
+        try:
+            (cache / 'flash_backup').symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest('symlinks unavailable')
+        with patch.object(core, 'registered_worktrees', return_value=([self.project], [])):
+            candidates, _, warnings = core.scan(self.project, threading.Event())
+        self.assertFalse(any(c['name'] == 'outside.bin' for c in candidates))
+        self.assertTrue(any('Symlinks/junctions' in warning for warning in warnings))
+        with patch.object(core, 'registered_worktrees', return_value=([self.project], [])), patch.object(core, 'MAX_CANDIDATES', 1):
+            candidates, _, _ = core.scan(self.project, threading.Event())
+        self.assertLessEqual(len(candidates), 1)
+
+    def test_direct_app_import_rescan_revalidates_and_keeps_missing(self):
+        path = self.root / 'app_backup.bin'
+        path.write_bytes(app_bytes(b'manual'))
+        job = wait(self.broker, self.broker.import_app(str(path)))
+        self.assertEqual(job['status'], 'succeeded', job['error'])
+        candidate = job['result']['candidate']
+        self.assertEqual(candidate['source'], 'manual')
+        key = candidate['id']
+        self.assertIn(key, self.broker.candidates)
+        self.assertFalse(self.executions)
+        self.assertFalse(self.commands)
+        with patch.object(core, 'registered_worktrees', return_value=([self.project], [])):
+            self.assertEqual(wait(self.broker, self.broker.start_scan())['status'], 'succeeded')
+        self.assertEqual(self.broker.candidates[key]['kind'], 'app-candidate')
+        path.write_bytes(b'not an app')
+        with patch.object(core, 'registered_worktrees', return_value=([self.project], [])):
+            wait(self.broker, self.broker.start_scan())
+        self.assertEqual(self.broker.candidates[key]['kind'], 'excluded')
+        path.unlink()
+        with patch.object(core, 'registered_worktrees', return_value=([self.project], [])):
+            wait(self.broker, self.broker.start_scan())
+        self.assertIn('missing or unavailable', self.broker.candidates[key]['reason'])
+
+    def test_direct_import_validates_exact_file_not_filename(self):
+        backup = self.root / 'app_backup.bin'
+        backup.write_bytes(app_bytes(b'manual'))
+        self.assertEqual(wait(self.broker, self.broker.import_app(str(backup)))['status'], 'succeeded')
+        for name, content in [('firmware.bin', b'\xff' * 32 + app_bytes()),
+                              ('bootloader.bin', b'\xe9' + b'\0' * 64),
+                              ('app.bin', b'bad'), ('app.txt', app_bytes())]:
+            path = self.root / name
+            path.write_bytes(content)
+            self.assertEqual(wait(self.broker, self.broker.import_app(str(path)))['status'], 'failed')
+        self.assertEqual(wait(self.broker, self.broker.import_app(str(self.root / 'missing.bin')))['status'], 'failed')
+        link = self.root / 'linked-app.bin'
+        try:
+            link.symlink_to(backup)
+        except OSError:
+            return
+        self.assertEqual(wait(self.broker, self.broker.import_app(str(link)))['status'], 'failed')
+
+    def test_direct_import_plan_revalidates_changed_file(self):
+        path = self.root / 'app_backup.bin'
+        path.write_bytes(app_bytes(b'manual'))
+        candidate = wait(self.broker, self.broker.import_app(str(path)))['result']['candidate']
+        p = self.plan(recovery_id=candidate['id'])
+        path.write_bytes(app_bytes(b'changed-after-review'))
+        self.assertEqual(wait(self.broker, self.execute(p))['status'], 'failed')
+        self.assertFalse(self.executions)
+
+    def test_import_app_route_has_normal_security_and_strict_inputs(self):
+        client = TestClient(create_app(self.broker, 'fixture-token', 9999), base_url='http://127.0.0.1:9999')
+        body = {'path': str(self.recovery)}
+        self.assertEqual(client.post('/api/import-app', json=body).status_code, 401)
+        headers = {'X-Session-Token': 'fixture-token', 'Origin': 'https://wrong.example'}
+        self.assertEqual(client.post('/api/import-app', headers=headers, json=body).status_code, 403)
+        headers['Origin'] = 'http://127.0.0.1:9999'
+        self.assertEqual(client.post('/api/import-app', headers=headers, json={**body, 'execute': True}).status_code, 422)
+        response = client.post('/api/import-app', headers=headers, json=body)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(wait(self.broker, response.json())['status'], 'succeeded')
+        self.assertFalse(self.executions)
 
     def test_scan_cancel_and_plain_paths(self):
         cancel = threading.Event()

@@ -38,3 +38,15 @@ Run `..\Test-Offline.ps1` on Windows and inspect the GUI before approving any
 hardware action. There was no user-PC access, physical device operation, firmware
 rebuild, diagnostic/OOM/fault injection, reset, restore, push, or publication in
 these checks. Passing mocked tests does not establish a successful device run.
+
+
+## Discovery/direct-import regression checks
+
+The follow-on discovery fix passed 33 GUI Python tests and the updated offline
+DOM/API harness, plus the existing 130 Python tests. New synthetic cases cover
+`.cache/flash_backup` in both project and registered worktrees, other cache
+exclusion, linked backup directories, app-only backup names, malformed merged /
+bootloader images, explicit valid/missing/symlink paths, imported-candidate
+retention/revalidation, changed recovery hashes and authenticated import routes.
+No real user path or firmware is included in these fixtures. Hardware and browser
+rendering were not exercised by this fix.

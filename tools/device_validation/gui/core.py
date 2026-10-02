@@ -51,7 +51,7 @@ def plain_path(value, *, file=False):
     path = Path(value)
     require(path.is_absolute(), 'Use an absolute local path.')
     require(not str(path).startswith(('\\\\', '//')), 'Network/UNC paths are not supported.')
-    for part in (path, *path.parents):
+    for part in (*reversed(path.parents), path):
         info = part.lstat()
         require(not stat.S_ISLNK(info.st_mode) and not getattr(info, 'st_file_attributes', 0) & 0x400,
                 'Symlinks/junctions are not accepted: ' + str(part))
@@ -119,10 +119,10 @@ def app_metadata(path, worktree):
     path = plain_path(path, file=True)
     info = path.stat()
     reason = None
-    if not 0 < info.st_size <= MAX_APP:
+    if path.suffix.lower() != '.bin':
+        reason = 'Select an app .bin file.'
+    elif not 0 < info.st_size <= MAX_APP:
         reason = 'Empty or larger than the factory app partition.'
-    elif any(x in path.name.lower() for x in ('bootloader', 'partition', 'merged', 'full-flash', 'fullflash', 'backup')):
-        reason = 'Bootloader, partition table or full-flash/backup image is not an app candidate.'
     else:
         with path.open('rb') as stream:
             header = stream.read(36)
@@ -156,6 +156,15 @@ def scan(project, cancel):
     started = time.monotonic()
     for root in roots:
         pending = [(root, 0)]
+        # This exact backup subtree is the only exception to the .cache skip.
+        # Keep its depth relative to the worktree root and share every scan limit.
+        try:
+            backup = plain_path(root / '.cache' / 'flash_backup')
+            pending.append((backup, 2))
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as error:
+            warnings.append(str(error))
         while pending and not cancel.is_set():
             folder, depth = pending.pop()
             if folder in visited:
@@ -175,7 +184,7 @@ def scan(project, cancel):
                             continue
                         path = Path(item.path)
                         if item.is_dir(follow_symlinks=False):
-                            if item.name not in SKIP:
+                            if item.name.lower() not in SKIP:
                                 if depth < 10:
                                     pending.append((path, depth + 1))
                                 elif 'Depth limit reached; deeper folders were skipped.' not in warnings:
@@ -190,7 +199,7 @@ def scan(project, cancel):
                                     runs[run['id']] = run
                                 except (ValueError, OSError, TypeError):
                                     pass
-            except OSError as error:
+            except (OSError, ValueError) as error:
                 warnings.append(str(error))
     if cancel.is_set():
         warnings.append('Discovery cancelled; partial results only.')
@@ -250,6 +259,7 @@ class Broker:
         self.execute_fn = execute or self._execute_process
         self.lock = threading.RLock()
         self.jobs, self.plans, self.candidates, self.runs = {}, {}, {}, {}
+        self.imported_candidates = {}
         self.ports = []
         self.discovery = {'status': 'idle'}
         self.scan_cancel = threading.Event()
@@ -342,7 +352,17 @@ class Broker:
                 try:
                     candidates, runs, warnings = scan(self.project, self.scan_cancel)
                     with self.lock:
-                        self.candidates = {x['id']: x for x in candidates}
+                        refreshed = {}
+                        for key, previous in self.imported_candidates.items():
+                            try:
+                                current = app_metadata(Path(previous['path']), previous['worktree'])
+                            except (OSError, ValueError) as error:
+                                current = dict(previous, kind='excluded',
+                                    reason='Manually added file is missing or unavailable: ' + str(error))
+                            current['source'] = 'manual'
+                            refreshed[key] = current
+                        self.imported_candidates = refreshed
+                        self._merge_candidates(candidates, warnings)
                         self.runs.update({x['id']: x for x in runs})
                         self.discovery = {'status': 'cancelled' if self.scan_cancel.is_set() else 'complete',
                                           'warning': '\n'.join(warnings[:20])}
@@ -357,6 +377,33 @@ class Broker:
             except Exception:
                 self.discovery = {'status': 'idle'}
                 raise
+
+    def _merge_candidates(self, discovered, warnings):
+        # Explicit imports survive rescans; total visible candidates stay bounded.
+        manual = self.imported_candidates
+        others = [x for x in discovered if x['id'] not in manual]
+        room = MAX_CANDIDATES - len(manual)
+        if len(others) > room:
+            warnings.append('Candidate limit reached; manually added files were retained first.')
+        self.candidates = {x['id']: x for x in others[:room]}
+        self.candidates.update(manual)
+
+    def import_app(self, path):
+        def work(job):
+            candidate = app_metadata(Path(path), '')
+            require(candidate['kind'] == 'app-candidate', candidate['reason'] or 'Not an app candidate.')
+            candidate['source'] = 'manual'
+            with self.lock:
+                require(candidate['id'] in self.imported_candidates or len(self.imported_candidates) < 64,
+                        'At most 64 manually added app files are supported per session.')
+                self.imported_candidates[candidate['id']] = candidate
+                warnings = []
+                self._merge_candidates(list(self.candidates.values()), warnings)
+                if warnings:
+                    self.discovery['warning'] = '\n'.join(warnings)
+            self.log(job, 'Added an explicit app candidate; no file selected or device opened. Image-info runs in plan preflight.')
+            return {'candidate': candidate}
+        return self.submit('import-app', work)
 
     def import_run(self, path):
         def work(job):

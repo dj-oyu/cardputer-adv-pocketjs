@@ -11,7 +11,7 @@
   const $ = (id) => document.getElementById(id);
   const ACTIVE = new Set(['queued', 'running']);
   const STATUS = { queued: '待機中', running: '実行中', succeeded: '完了', failed: '失敗', cancelled: '中止' };
-  const KIND = { scan: '候補の探索', discovery: '候補の探索', plan: 'プラン作成', flash: 'アプリ書き込み', test: '実機テスト', ports: 'ポート取得', 'import-run': 'run の追加' };
+  const KIND = { scan: '候補の探索', discovery: '候補の探索', plan: 'プラン作成', flash: 'アプリ書き込み', test: '実機テスト', ports: 'ポート取得', 'import-run': 'run の追加', 'import-app': '復旧用アプリの追加' };
   const ACK_LABELS = {
     'replace-app': '選択したポートの機体にある現在のアプリが、このプランの統合ビルドに置き換わることを理解しました。自動復旧は行われません。',
     'device-free': 'この機体を自分が管理しており、他のシリアルモニター・テスト・書き込み処理をすべて停止しました。ポートが他の作業で使用されていないことを確認しました。',
@@ -152,16 +152,22 @@
   function renderCandidates(candidates) {
     const signature = JSON.stringify(candidates);
     if (signature === state.renderedCandidates) return;
+    const previous = state.renderedCandidates ? JSON.parse(state.renderedCandidates) : [];
+    const previousSelection = previous.find((item) => String(item.id) === state.recoveryId);
     state.renderedCandidates = signature;
     const selectable = candidates.filter((item) => item.kind === 'app-candidate');
     const excluded = candidates.filter((item) => item.kind !== 'app-candidate');
-    if (state.recoveryId && !selectable.some((item) => String(item.id) === state.recoveryId)) {
-      state.recoveryId = '';
+    const selected = selectable.find((item) => String(item.id) === state.recoveryId);
+    // The same candidate ID can refer to a file whose metadata has changed.
+    // Never preserve a reviewed plan or a known-good attestation across that change.
+    if (state.recoveryId && (!selected || JSON.stringify(previousSelection) !== JSON.stringify(selected))) {
+      if (!selected) state.recoveryId = '';
+      $('recovery-confidence').value = 'unverified-candidate';
       clearPlan();
     }
     const list = $('recovery-candidates');
     list.replaceChildren(node('legend', 'sr-only', '復旧用アプリの候補'));
-    if (!selectable.length) list.append(node('p', 'empty-state', '選択できる app 候補はありません。「候補を探す」でローカルの探索を開始してください。'));
+    if (!selectable.length) list.append(node('p', 'empty-state', '選択できる app 候補はありません。「候補を探す」か、下の絶対パス入力でファイルを追加してください。'));
     for (const candidate of selectable) {
       const label = node('label', 'candidate');
       const radio = node('input');
@@ -177,6 +183,7 @@
       body.append(node('span', 'candidate-path', candidate.path));
       const metadata = node('span', 'candidate-meta');
       metadata.append(node('span', '', bytes(candidate.bytes)), node('span', '', stamp(candidate.modifiedUtc)));
+      if (candidate.source === 'manual') metadata.append(node('span', 'tag', '手動追加'));
       if (candidate.worktree) metadata.append(node('span', '', 'worktree: ' + candidate.worktree));
       body.append(metadata);
       label.append(radio, body);
@@ -188,6 +195,7 @@
     for (const candidate of excluded) {
       const item = node('div', 'excluded-item');
       item.append(node('strong', '', candidate.name || candidate.path), node('div', 'mono', candidate.path));
+      if (candidate.source === 'manual') item.append(node('span', 'tag', '手動追加'));
       item.append(node('div', '', (candidate.reason || 'app 候補として認められないファイル') + ' · ' + bytes(candidate.bytes) + ' · ' + stamp(candidate.modifiedUtc)));
       $('excluded-files').append(item);
     }
@@ -358,6 +366,8 @@
     $('refresh-ports').disabled = unavailable || locked;
     $('import-run').disabled = unavailable || locked || !$('import-path').value.trim();
     $('import-path').disabled = locked;
+    $('import-app').disabled = unavailable || locked || !$('import-app-path').value.trim();
+    $('import-app-path').disabled = locked;
     for (const element of document.querySelectorAll('.plan-input, input[name="recovery"]')) element.disabled = locked;
     $('test-options').hidden = selectedAction() !== 'test';
     $('discard-plan').disabled = locked;
@@ -437,6 +447,7 @@
   }
   $('test-cycles').addEventListener('input', clearPlan);
   $('import-path').addEventListener('input', updateControls);
+  $('import-app-path').addEventListener('input', updateControls);
   $('refresh-state').addEventListener('click', () => { clearError(); refreshState(); });
   $('scan-candidates').addEventListener('click', () => { clearPlan(); mutate('/api/scan', {}); });
   $('cancel-scan').addEventListener('click', () => mutate('/api/cancel-scan', {}));
@@ -446,6 +457,12 @@
     if (!path) return;
     clearPlan();
     mutate('/api/import-run', { path }, () => { $('import-path').value = ''; });
+  });
+  $('import-app').addEventListener('click', () => {
+    const path = $('import-app-path').value.trim();
+    if (!path) return;
+    clearPlan();
+    mutate('/api/import-app', { path }, () => { $('import-app-path').value = ''; });
   });
   $('build-plan').addEventListener('click', () => {
     if (!selectionValid() || !idfReady()) return;

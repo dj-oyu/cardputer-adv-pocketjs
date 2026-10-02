@@ -44,6 +44,11 @@
           <div id="discovery-warning" class="notice warning compact" hidden></div>
           <fieldset id="recovery-candidates" class="candidate-list"><legend class="sr-only">復旧用アプリの候補</legend><p class="empty-state">候補を探して、使用するファイルを明示的に選択してください。</p></fieldset>
           <details id="excluded-section" hidden><summary id="excluded-summary">選択できないファイル</summary><div id="excluded-files" class="excluded-list"></div></details>
+          <div class="import-area">
+            <label for="import-app-path">復旧用 .bin を絶対パスで追加</label>
+            <div class="inline-input"><input id="import-app-path" type="text" placeholder="C:\work\backup\pocketjs.bin" autocomplete="off" spellcheck="false" aria-describedby="import-app-help"><button id="import-app" class="button secondary" type="button" disabled>候補に追加</button></div>
+            <p id="import-app-help" class="help small">GUI サーバーと同じ PC にある、3 MiB 以下の ESP32-S3 app ファイルを指定します。ファイルのアップロードは行いません。追加後も使用する候補は自分で選択してください。</p>
+          </div>
           <label for="recovery-confidence" class="spaced-label">この復旧用ファイルの確認状況</label>
           <select id="recovery-confidence" class="plan-input"><option value="unverified-candidate">未検証の候補（正常動作は未確認）</option><option value="user-attested-known-good">この正確なファイルでの正常動作を自分で確認済み</option></select>
           <p class="help small">「確認済み」は自己申告です。この画面が動作を検証したことにはなりません。</p>

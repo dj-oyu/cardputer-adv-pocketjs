@@ -129,6 +129,10 @@ def create_app(broker: Broker, token: str, port: int):
     def import_run(data: RunInput):
         return broker.import_run(data.path)
 
+    @app.post('/api/import-app', status_code=202)
+    def import_app(data: RunInput):
+        return broker.import_app(data.path)
+
     @app.post('/api/plan', status_code=202)
     def plan(data: PlanInput):
         return broker.create_plan(data.model_dump())

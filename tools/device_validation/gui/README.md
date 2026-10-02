@@ -37,10 +37,15 @@ uv run --frozen --no-dev python launch.py --project C:\work\pocketjs `
 ## 操作の流れ
 
 1. 起動時に project と `git worktree list` に登録された worktree を自動探索します。
-   「候補を探す」で再探索できます。
+   「候補を探す」で再探索できます。各ルートの `.cache/flash_backup` も対象です。
+   その他の `.cache` は探索しません。
    パス・サイズ・更新日時を見て復旧用 app を自分で選びます。最新のファイルを
    自動採用しません。bootloader、partition table、フルフラッシュ、サイズ超過、
-   ESP32-S3 app descriptor のない `.bin` は選択できません。
+   ESP32-S3 app descriptor のない `.bin` は選択できません。ファイル名に
+   `backup` が含まれるだけでは除外せず、サイズと image/app descriptor で判定します。
+   一覧にない app は「復旧用 .bin を直接追加」に絶対パスを貼り付けて追加できます。
+   ファイルのアップロード・自動選択はありません。追加だけでは実機に触れません。
+   直接追加した候補は再探索でも保持して再検査し、消失・形式変更時は選択不可として表示します。
 2. 統合ビルドの run を選びます。一覧にない外部の保持済み run は
    `manifest.json` のあるフォルダーの絶対パスを貼り付けて追加できます。
    元の絶対パスのまま保持してください。ファイルをブラウザーへアップロードしません。
@@ -95,7 +100,9 @@ Cookie / localStorage / sessionStorage には保存しません。Host、Origin�
 探索は最大 64 worktree、30,000 entry、深さ 10、300 `.bin`、30 秒で打ち切ります。
 symlink / junction / UNC はたどらず、全ドライブ探索はしません。
 探索は background job で中止できます。打切り・欠落は画面で通知されます。
-明示的に追加した run はその一つを読むだけで、親フォルダーを探索しません。
+明示的に追加した run / app はその一つを読むだけで、親フォルダーを探索しません。
+直接追加は session あたり最大 64 app、探索結果と合わせて最大 300 candidate です。
+元の app が追加後に変わっても、プラン作成・実行時の再検証と hash pin は省略されません。
 
 GUI の session log は OS ユーザーの一時フォルダーに保存され、場所は起動時に表示されます。
 1 job 約 1 MiB / 300 表示行、最大 40 job を保持します。終了後も調査用に残ります。

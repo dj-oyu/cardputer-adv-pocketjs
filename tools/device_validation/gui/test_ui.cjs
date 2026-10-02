@@ -119,13 +119,14 @@ const run={
 const candidate={
   id:'recovery1',name:'pocketjs.bin',path:'C:\\work\\good\\pocketjs.bin',bytes:2040000,modifiedUtc:'2026-10-01T00:00:00Z',kind:'app-candidate',worktree:'C:\\work'
 };
+const candidates=[candidate];
 const snapshot=()=>({
   project:'C:\\work',idf:{
     ready:idf
   },runs:[run],ports:[{
     device:'COM9999',description:'serial'
   }
-  ],candidates:[candidate],jobs,discovery:{
+  ],candidates,jobs,discovery:{
     status:'complete'
   }
 });
@@ -175,6 +176,15 @@ const context={
         out={
           job_id:job.id
         };
+      } else if(path==='/api/import-app'){
+        const imported={
+          id:'manual'+(++seq),name:'recovery.bin',path:body.path,bytes:1024000,
+          modifiedUtc:'2026-10-01T00:00:00Z',kind:'app-candidate',source:'manual'
+        };
+        candidates.push(imported);
+        const job={id:'job'+seq,kind:'import-app',status:'succeeded',log:['candidate added'],result:{candidate:imported}};
+        jobs.push(job);
+        out={job_id:job.id};
       } else if(path==='/api/execute'){
         const job={
           id:'job'+(++seq),kind:'flash',status:'running',log:['started']
@@ -214,6 +224,24 @@ const setAction=v=>{
   assert.equal(ids['port-select'].value,'');
   assert.equal(t.state.recoveryId,'');
   assert(ids['build-plan'].disabled);
+  assert.equal(ids['import-app-path'].type,'text','manual import is an absolute path, not a file upload');
+  assert(ids['import-app'].disabled);
+  ids['import-app-path'].value='   ';
+  ids['import-app-path'].emit('input');
+  assert(ids['import-app'].disabled,'blank path cannot be imported');
+  ids['import-app-path'].value='  C:\\work\\backup\\recovery.bin  ';
+  ids['import-app-path'].emit('input');
+  assert(!ids['import-app'].disabled);
+  ids['import-app'].emit('click');
+  await settle();
+  const firstImport=requests.find(x=>x.path==='/api/import-app');
+  assert.deepEqual(firstImport.body,{path:'C:\\work\\backup\\recovery.bin'});
+  assert.equal(ids['import-app-path'].value,'');
+  assert(ids['import-app'].disabled);
+  assert.equal(t.state.recoveryId,'','import must not select a recovery candidate');
+  assert.equal(document.querySelectorAll('input[name="recovery"]:checked').length,0);
+  assert(ids['recovery-candidates'].textContent.includes('手動追加'));
+  assert.equal(ids['log-title'].textContent,'復旧用アプリの追加');
   ids['run-select'].value='run1';
   ids['port-select'].value='COM9999';
   t.updateControls();
@@ -228,6 +256,17 @@ const setAction=v=>{
   assert.equal(ids.acknowledgements.querySelectorAll('input').length,2);
   assert(ids['plan-warnings'].textContent.includes('plan-level warning'));
   assert(ids['execute-plan'].disabled);
+  ids['import-app-path'].value='C:\\work\\backup\\another.bin';
+  ids['import-app-path'].emit('input');
+  ids['import-app'].emit('click');
+  assert(ids['plan-section'].hidden,'import must invalidate the visible plan before the request finishes');
+  assert.equal(t.state.plan,null);
+  assert(ids['import-app-path'].disabled,'import path is locked during the request');
+  await settle();
+  assert.equal(t.state.recoveryId,'','adding another candidate must not select it');
+  ids['build-plan'].emit('click');
+  await settle();
+  assert(!ids['plan-section'].hidden);
   ids['test-cycles'].value='21';
   ids['test-cycles'].emit('input');
   assert(ids['plan-section'].hidden);
@@ -265,6 +304,8 @@ const setAction=v=>{
   assert.equal(executed.plan_digest, 'b'.repeat(64));
   assert(ids['plan-section'].hidden);
   assert(ids['run-select'].disabled);
+  assert(ids['import-app-path'].disabled);
+  assert(ids['import-app'].disabled);
   assert.equal(t.state.jobs.get(t.state.executeJob).kind,'flash');
   jobs.at(-1).status='succeeded';
   jobs.at(-1).result={
@@ -303,6 +344,54 @@ const setAction=v=>{
   assert.equal(t.state.selectedJob, keep.id);
   assert.equal(ids['job-log'].textContent.split('\n').length, 300);
   assert(ids['job-log'].textContent.startsWith('line-200'));
+  // An unchanged ID is insufficient: metadata changes revoke both review and
+  // a user attestation. Unrelated new candidates must not revoke either.
+  idf=true;
+  unknownAck=false;
+  await t.refreshState();
+  ids['build-plan'].emit('click');
+  await settle();
+  assert(!ids['plan-section'].hidden);
+  assert.equal(ids['recovery-confidence'].value,'user-attested-known-good');
+  candidates.push({...candidates[1],id:'unrelated',path:'C:\\work\\backup\\unrelated.bin'});
+  await t.refreshState();
+  assert(!ids['plan-section'].hidden,'unrelated candidate changes preserve the reviewed selection');
+  assert.equal(ids['recovery-confidence'].value,'user-attested-known-good');
+  candidate.modifiedUtc='2026-10-02T00:00:00Z';
+  await t.refreshState();
+  assert(ids['plan-section'].hidden,'changed metadata invalidates the plan even when the ID is unchanged');
+  assert.equal(t.state.recoveryId,'recovery1');
+  assert.equal(ids['recovery-confidence'].value,'unverified-candidate');
+  // A pending plan for the old metadata must not return and restore execution.
+  const pendingPlan=jobs.filter(j=>j.kind==='plan').at(-1).result.plan;
+  t.state.pendingPlan={id:'pending-stale-plan',generation:t.state.generation,selection:JSON.stringify(t.selections())};
+  candidate.bytes+=1;
+  t.renderSnapshot(snapshot());
+  assert.equal(t.state.pendingPlan,null);
+  t.rememberJob({id:'pending-stale-plan',kind:'plan',status:'succeeded',result:{plan:pendingPlan}});
+  assert.equal(t.state.plan,null);
+  // Rescan snapshots retain imported rows without selecting them. Missing files
+  // arrive as excluded rows and cannot remain a selected recovery image.
+  const imported=candidates[1];
+  document.querySelectorAll('input[name="recovery"]').find(e=>e.value===imported.id).emit('change');
+  assert.equal(t.state.recoveryId,imported.id);
+  ids['recovery-confidence'].value='user-attested-known-good';
+  ids['recovery-confidence'].emit('change');
+  ids['build-plan'].emit('click');
+  await settle();
+  assert(!ids['plan-section'].hidden);
+  await t.refreshState();
+  assert.equal(t.state.recoveryId,imported.id,'unchanged manual candidate survives refreshed discovery');
+  imported.kind='excluded';
+  imported.reason='File no longer exists';
+  await t.refreshState();
+  assert.equal(t.state.recoveryId,'');
+  assert.equal(ids['recovery-confidence'].value,'unverified-candidate');
+  assert(ids['plan-section'].hidden);
+  assert(!ids['excluded-section'].hidden);
+  assert(ids['excluded-files'].textContent.includes('File no longer exists'));
+  assert(!document.querySelectorAll('input[name="recovery"]').some(e=>e.value===imported.id));
+  assert(ids['build-plan'].disabled);
   apiError='Exact FastAPI error';
   await assert.rejects(t.api('/api/plan',{}),/Exact FastAPI error/);
   console.log('PASS: offline UI safety-flow tests (mock DOM/APIs; no rendering or device verification).');
