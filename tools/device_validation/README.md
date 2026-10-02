@@ -272,6 +272,10 @@ is **not integrated** and the flash/test stage refuses F's candidate image.
 
 ```powershell
 .\Test-Offline.ps1 -Repo C:\devs\m5stack\cardputer-adv-pocketjs
+# Optional: select one installed Python explicitly (quote paths with spaces):
+.\Test-Offline.ps1 -Python 'C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe'
+# PowerShell-only resolution mocks (no Python installation needed):
+.\Test-PythonResolution.ps1
 # Python-only mocks (also works on Linux, no pyserial required):
 python .\test_safe_smoke.py
 # Integrated path's Python-only static guardrails:
@@ -279,7 +283,13 @@ python .\test_integrated_build.py
 ```
 
 `Test-Offline.ps1` parses every PowerShell file with PowerShell's own parser,
-runs the serial mocks and integrated-build static guards, checks `Invoke-Logged`
+runs isolated Python-resolution mocks, then resolves `-Python` once to the first
+application returned by command lookup (default: `python`). An explicit
+executable path is honored; no Python environment is guessed or substituted.
+That same single path runs the serial mocks, integrated-build static guards and
+the native fixture, even when several Python applications are on PATH. The
+resolution mocks cover multiple candidates, a spaced explicit path and a
+missing command. The runner checks `Invoke-Logged`
 with real Python processes that exit 0/7/0 (including stdout/stderr logs and a
 caller-local exit-code shadow),
 verifies both device stages reject an integrated build-only manifest before

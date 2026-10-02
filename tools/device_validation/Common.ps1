@@ -5,6 +5,14 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
     $PSNativeCommandUseErrorActionPreference = $false
 }
 
+function Resolve-PythonApplication {
+    param([string]$Python)
+    # An application name can match several PATH entries. Preserve resolution
+    # order, but return only one executable rather than stringifying Source[].
+    $command = Get-Command -Name $Python -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    return $command.Source
+}
+
 function Invoke-Logged {
     param([string]$Exe, [string[]]$Arguments, [string]$Log)
     Get-Command $Exe -ErrorAction Stop | Out-Null

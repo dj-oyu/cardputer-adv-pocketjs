@@ -8,14 +8,16 @@ foreach ($file in Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1') {
     [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
     if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 }
-& $Python (Join-Path $PSScriptRoot 'test_safe_smoke.py')
-if ($LASTEXITCODE -ne 0) { throw 'Offline Python tests failed.' }
-& $Python (Join-Path $PSScriptRoot 'test_integrated_build.py')
-if ($LASTEXITCODE -ne 0) { throw 'Integrated-build static guards failed.' }
 . (Join-Path $PSScriptRoot 'Common.ps1')
+& (Join-Path $PSScriptRoot 'Test-PythonResolution.ps1')
+# Resolve once so the suites and native fixture always use the same executable.
+$pythonExe = Resolve-PythonApplication $Python
+& $pythonExe (Join-Path $PSScriptRoot 'test_safe_smoke.py')
+if ($LASTEXITCODE -ne 0) { throw 'Offline Python tests failed.' }
+& $pythonExe (Join-Path $PSScriptRoot 'test_integrated_build.py')
+if ($LASTEXITCODE -ne 0) { throw 'Integrated-build static guards failed.' }
 function Test-LoggedNativeExit {
-    param([string]$NativePython)
-    $nativeExe = (Get-Command $NativePython -CommandType Application -ErrorAction Stop).Source
+    param([string]$NativeExe)
     # Deliberately shadow the automatic variable in the caller. Invoke-Logged
     # must read the native process result, not this local value or a stale one.
     $LASTEXITCODE = 123
@@ -46,7 +48,7 @@ function Test-LoggedNativeExit {
         }
     } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
 }
-Test-LoggedNativeExit $Python
+Test-LoggedNativeExit $pythonExe
 # A successful integrated build is still not a device-comparison manifest.
 # Exercise both consumers with their opt-ins, stopping before any tool or port.
 $isolated = Join-Path ([IO.Path]::GetTempPath()) ('pocketjs-integrated-schema-' + [guid]::NewGuid().ToString('N'))
@@ -96,4 +98,4 @@ if ($Repo) {
         if (!$blocked -or (Test-Path -LiteralPath $unused)) { throw 'Integrated full-SHA guard test failed.' }
     }
 }
-Write-Host 'PowerShell parse, native exit-code/logging, and offline mock checks passed. No device or firmware build was tested.'
+Write-Host 'PowerShell parse, Python resolution, native exit-code/logging, and offline mock checks passed. No device or firmware build was tested.'
