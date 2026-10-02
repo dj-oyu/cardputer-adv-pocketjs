@@ -105,7 +105,8 @@ allow space for a full new build. No native host C compiler is needed for F.
 This path fixes both optional experiments **OFF**, with no enable switches:
 
 - H: `-DCMAKE_C_FLAGS=-DPOCKET_VM_TYPED_PUT_INT_FAST=0`; the actual QuickJS
-  compile command must contain exactly one OFF definition
+  compile arguments, including referenced GCC `@response` files, must contain
+  exactly one OFF definition and no H undefine
 - F: `-DPOCKET_APP_PRECOMPILE_EXPERIMENT=OFF`; the generated CMake cache must
   confirm OFF and no experimental `.bc` outputs may exist. F's experimental
   tooling is included in source, but runtime bytecode loading is not integrated
@@ -129,6 +130,15 @@ changes stop a successful result. Failures preserve the partial worktree,
 logs and failed manifest; retry with a new RunRoot. A successful result means
 the integrated image built and passed these configuration/artifact guards,
 not that it booted or improved performance.
+
+ESP-IDF 6 moves `CMAKE_C_FLAGS` into `build_integrated/toolchain/cflags`.
+`verify_quickjs_flags.py` follows the actual QuickJS command's response files,
+including nested paths relative to the compiler working directory. It never
+executes that command. Missing/unreadable files, cycles, excessive expansion,
+ambiguous H definitions and H undefines stop verification. The
+`integrated-configure-flags.log` and `integrated-build-flags.log` records include
+response-file paths and SHA-256 hashes. The H comparison uses the same verifier
+with the requested OFF/ON value and writes `candidate-flags.log`.
 
 ## 3. Optional app-only flash, one image at a time
 

@@ -104,12 +104,10 @@ try {
             Get-GitText $entry.worktree @('status','--porcelain') | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $RunRoot "$role-worktree-status.log")
             # Verify the experimental flag reaches the real QuickJS compilation.
             if ($role -eq 'candidate' -and $Candidate -eq 'H') {
-                $compile = Get-Content -Raw -LiteralPath (Join-Path $entry.build 'compile_commands.json') | ConvertFrom-Json
-                $qjs = @($compile | Where-Object { $_.file -match '[/\\]quickjs\.c$' })
-                $enabled = if ($EnableTypedPut) { 1 } else { 0 }
-                if ($qjs.Count -ne 1 -or $qjs[0].command -notmatch "(?:^|\s)-DPOCKET_VM_TYPED_PUT_INT_FAST=$enabled(?:\s|$)") {
-                    throw 'Typed-store flag was not verified in the QuickJS compile command.'
-                }
+                $enabled = if ($EnableTypedPut) { '1' } else { '0' }
+                Invoke-Logged $python @((Join-Path $PSScriptRoot 'verify_quickjs_flags.py'),
+                    '--compile-commands',(Join-Path $entry.build 'compile_commands.json'),
+                    '--expected',$enabled) (Join-Path $RunRoot "$role-flags.log")
             }
             if ($role -eq 'candidate' -and $EnablePrecompileExperiment) {
                 $bytecode = @(Get-ChildItem -LiteralPath (Join-Path $entry.build 'experimental-bytecode') -Filter '*.bc' -File)

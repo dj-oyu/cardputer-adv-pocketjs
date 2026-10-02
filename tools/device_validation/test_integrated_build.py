@@ -48,9 +48,19 @@ class IntegratedBuildGuards(unittest.TestCase):
         self.assertLess(checks[0], compile_start)
         self.assertLess(compile_start, checks[1])
         for evidence in ('compile_commands.json', '^POCKET_APP_PRECOMPILE_EXPERIMENT:BOOL=OFF$',
-                         '$flags.Count -ne 1', "$flags[0].Groups[1].Value -ne '0'",
+                         'verify_quickjs_flags.py', "'--expected','0'",
                          'Unexpected diagnostic config', 'Unexpected F bytecode outputs'):
             self.assertIn(evidence, BUILD)
+
+    def test_response_helper_is_wired_to_both_build_paths(self):
+        comparison = (ROOT / 'Build-Validation.ps1').read_text()
+        offline = (ROOT / 'Test-Offline.ps1').read_text()
+        self.assertIn("'verify_quickjs_flags.py'", comparison)
+        self.assertIn("'--expected',$enabled", comparison)
+        self.assertIn("& $pythonExe (Join-Path $PSScriptRoot 'test_quickjs_flags.py')", offline)
+        self.assertIn("name='verify_quickjs_flags.py'; sha256=", BUILD)
+        self.assertIn('integrated-configure-flags.log', BUILD)
+        self.assertIn('integrated-build-flags.log', BUILD)
 
     def test_build_only_manifest_is_rejected_by_device_reader(self):
         self.assertIn("schema='pocketjs-integrated-build-v1'", BUILD)

@@ -9,7 +9,7 @@ param(
 . (Join-Path $PSScriptRoot 'Common.ps1')
 
 function Assert-IntegratedConfiguration {
-    param([string]$Build)
+    param([string]$Build, [string]$Python, [string]$Log)
     $config = Join-Path $Build 'sdkconfig'
     if (!(Select-String -LiteralPath $config -Pattern '^CONFIG_IDF_TARGET="esp32s3"$' -Quiet)) {
         throw 'Generated config target mismatch.'
@@ -21,14 +21,10 @@ function Assert-IntegratedConfiguration {
     if (!(Select-String -LiteralPath $cache -Pattern '^POCKET_APP_PRECOMPILE_EXPERIMENT:BOOL=OFF$' -Quiet)) {
         throw 'F must remain OFF in the generated CMake cache.'
     }
-    # Check the real translation unit rather than trusting the requested flag.
-    $compile = Get-Content -Raw -LiteralPath (Join-Path $Build 'compile_commands.json') | ConvertFrom-Json
-    $qjs = @($compile | Where-Object { $_.file -match '[/\\]quickjs\.c$' })
-    if ($qjs.Count -ne 1) { throw 'Expected exactly one QuickJS compile command.' }
-    $flags = [regex]::Matches($qjs[0].command, '(?:^|\s)-DPOCKET_VM_TYPED_PUT_INT_FAST(?:=(\S+))?(?=\s|$)')
-    if ($flags.Count -ne 1 -or $flags[0].Groups[1].Value -ne '0') {
-        throw 'H OFF was not verified in the QuickJS compile command.'
-    }
+    # IDF 6 stores CMAKE_C_FLAGS in @toolchain/cflags, not inline in JSON.
+    # Verify the real translation unit including its referenced response files.
+    Invoke-Logged $Python @((Join-Path $PSScriptRoot 'verify_quickjs_flags.py'),
+        '--compile-commands',(Join-Path $Build 'compile_commands.json'),'--expected','0') $Log
     $bytecode = Join-Path $Build 'experimental-bytecode'
     if ((Test-Path -LiteralPath $bytecode) -and @(Get-ChildItem -LiteralPath $bytecode -Recurse -File -Filter '*.bc').Count -ne 0) {
         throw 'Unexpected F bytecode outputs in the integrated build.'
@@ -90,7 +86,8 @@ $manifest = [ordered]@{
     builds=@($entry); deviceStatus='not run'; physicalChecks='not run'; failure=$null
     scripts=@(
         [ordered]@{name='Build-Integrated.ps1'; sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash},
-        [ordered]@{name='Common.ps1'; sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $PSScriptRoot 'Common.ps1')).Hash}
+        [ordered]@{name='Common.ps1'; sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $PSScriptRoot 'Common.ps1')).Hash},
+        [ordered]@{name='verify_quickjs_flags.py'; sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $PSScriptRoot 'verify_quickjs_flags.py')).Hash}
     )
 }
 if ($Plan) { $manifest | ConvertTo-Json -Depth 12; return }
@@ -124,12 +121,12 @@ try {
         $entry.status = 'configuring'
         Write-Json $manifest $manifestPath
         Invoke-Logged $python (@($idf,'-B',$build) + $options + @('reconfigure')) (Join-Path $RunRoot 'integrated-configure.log')
-        Assert-IntegratedConfiguration $build
+        Assert-IntegratedConfiguration $build $python (Join-Path $RunRoot 'integrated-configure-flags.log')
         $entry.configurationVerified = $true
         $entry.status = 'building'
         Write-Json $manifest $manifestPath
         Invoke-Logged $python (@($idf,'-B',$build) + $options + @('build')) (Join-Path $RunRoot 'integrated-build.log')
-        Assert-IntegratedConfiguration $build
+        Assert-IntegratedConfiguration $build $python (Join-Path $RunRoot 'integrated-build-flags.log')
         Invoke-Logged $python @($idf,'-B',$build,'size') (Join-Path $RunRoot 'integrated-size.log')
         Invoke-Logged $python @($idf,'-B',$build,'size-components') (Join-Path $RunRoot 'integrated-size-components.log')
         $binary = Join-Path $build 'cardputer_pocketjs.bin'
