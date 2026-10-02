@@ -18,6 +18,8 @@
 // hex-float, so the C compiler cannot round it differently from JS.
 // OUT.c defines `const ksn_proc_rom_entry NAME[]` (default ksn_proc_rom_plans)
 // and `const unsigned NAME_count`. Names are unique across the table.
+// Compiler warnings go to stderr and the optional JSON report, with their
+// source file and plan name; the generated C and arithmetic are unchanged.
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -73,7 +75,8 @@ export function romEntries(app, file) {
       }
     });
     patch.sort((x, y) => x.pc - y.pc || x.field - y.field);
-    out.push({name: `${app}.${p.name}`, sym: `${app}_${p.name}`, rows, patch, params, ir: c.text});
+    out.push({name: `${app}.${p.name}`, sym: `${app}_${p.name}`, rows, patch, params, ir: c.text,
+      file, warnings: c.warnings});
   }
   return out;
 }
@@ -118,10 +121,12 @@ function main() {
     entries.push(...romEntries(s.slice(0, at), s.slice(at + 1)));
     sources.push(path.basename(s.slice(at + 1)));
   }
+  for (const e of entries) for (const warning of e.warnings)
+    console.warn(`${e.file}: ${e.name}: warning: ${warning}`);
   const c = emitC(entries, symbol, sources);
   if (!fs.existsSync(out) || fs.readFileSync(out, 'utf8') !== c) fs.writeFileSync(out, c);
   if (json) fs.writeFileSync(json, JSON.stringify(entries.map(e => ({name: e.name, params: e.params,
-    count: e.rows.length, patches: e.patch.length, ir: e.ir})), null, 1));
+    count: e.rows.length, patches: e.patch.length, ir: e.ir, file: e.file, warnings: e.warnings})), null, 1));
   const n = entries.reduce((a, e) => a + e.rows.length, 0), p = entries.reduce((a, e) => a + e.patch.length, 0);
   console.log(`emit_rom_plans: ${entries.length} plans, ${n} instructions, ${p} patches -> ${out}`);
 }

@@ -1,5 +1,7 @@
 # docs 索引
 
+事前コンパイルのbuild-only候補: [生成・互換性検証の境界](vm/precompile-build-experiment.md)。
+
 このディレクトリの入口。**いま動いている主線は3本**（VM の高速化、PIE による描画の高速化、デザインシステム Kasane）で、それぞれにディレクトリがある。
 
 - **仕様**: いま守る契約。コードが従う。
@@ -24,6 +26,7 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [task-allocation-facade.md](vm/task-allocation-facade.md) | 設計 | FreeRTOS タスクの配置ファサード（`standalone/fp_ticket`、未接続） |
 | [vm-L0-report.md](vm/vm-L0-report.md) | 記録 | L0 の実機計測（ターン内訳、ヒープ、ジョブ単価） |
 | [vm-L1-report.md](vm/vm-L1-report.md) | 記録 | L1 の実測。時計読み出しのコスト（§8.7）、コア移行（§8.8）、スケジューラ定数の調律（§10） |
+| [frame-entry-direct.md](vm/frame-entry-direct.md) | 実装・検査 | source app の frame を直接呼び、ホストで例外表示を保つ。native host 回帰、実機未検証 |
 | [vm-L2-results.md](vm/vm-L2-results.md) | 記録 | L2 の実測と関所の結果（段ごと、host/device の別つき） |
 | [vm-L3-results.md](vm/vm-L3-results.md) | 記録 | L3a の実測。コーパス74件バイト一致、枝ごとの踏まれ方、毒の負の対照3種、Test262 7,036ファイル、移動の単価。**実機のサイズは `--gc-sections` で落ちるので測れない**（§2） |
 | [oom-parse-safety.md](vm/oom-parse-safety.md) | 記録 | 確保失敗時のコンパイル経路（VM の段とは独立）。全点掃引で見つけたメモリ安全性の穴（closures 71 点・generators 133 点 → 0）と、変数の捕捉が黙ってグローバル読みになる誤コンパイル。`DynBuf` のエラーが余りへの書き込みに効いていなかった根本原因。上流2系統とも未修正 |
@@ -36,6 +39,10 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [builtin-floor-plan.md](vm/builtin-floor-plan.md) | 設計・計画 | F 系列（VM の段とは独立）: ゲストの起動床（実機レイアウトで js=64,420 B、うち組み込みの名前 21.7 KB と何も作っていない索引）を flash へ。F1 ROM atom・F2 遅延索引で 28,684 B（−55%、計算）。捨てた案 4 つ、`atom_array` 33 箇所の台帳、関所と負の対照。道具は `tools/vmtest/floor/` |
 | [spread-eval-oom.md](vm/spread-eval-oom.md) | 記録 | 文字列のスプレッド・for-of が実機でだけ止まらなかった: `js_string_iterator_next` の `(int *)&idx` が Xtensa（`uint32_t`=`unsigned long`）の strict aliasing で消えていた。修正 `f937388`、同種の6箇所、再現アプリ `POCKET_HEAPPROBE` と変種の表 |
 | [aliasing-types.md](vm/aliasing-types.md) | 記録 | spread-eval-oom の同種6箇所と libunicode の正規化配列を、宣言の型を合わせて修正（機械語は修正前と同一＝今のビルドでは誤コンパイルなし）。`-Wno-incompatible-pointer-types` を quickjs-libc.c 以外から外した |
+| [integrated-validation.md](vm/integrated-validation.md) | 記録 | codex/vm-improvements: A/C/E/F/H/Y と compiler を最新 vm/main にまとめた通常ホスト検証、対象ビルド未実施、Windows build-only 手順 |
+| [parser-trim-validation.md](vm/parser-trim-validation.md) | 記録 | C: パーサ余剰容量のhost検証。縮小拒否・再成長・1,088点OOM・完全bytecode 161件一致。実機未検証 |
+| [array-pressure-trim-validation.md](vm/array-pressure-trim-validation.md) | 記録 | E: 空の配列の圧迫時容量返却。host の閾値・最小容量・OOM回復・意味論検証と実機未検証の範囲 |
+| [typed-put-int-validation.md](vm/typed-put-int-validation.md) | 記録 | H: TypedArray immediate-int store、macro OFF/ON の全コーパスと791検査。既定OFF、実機速度未測定 |
 | [eval-peak.md](vm/eval-peak.md) | 記録・比較 | 評価のピークの構成（pass-1 バイトコード 46%、JSFunctionDef 15%…、host の確保タグ）と下げる手段の実測: 分割（B 案）+18.5〜25.9 KB、事前コンパイル +26 KB・49 ms、パーサの余り返し host −11 KB、ES モジュール、遅延 import。推奨の順序と決めること。§7 製品化した `pocket.app.load`（チャンクの表・書き方・実機で 3 分割 +18.2 KB）、§8 静的 import への引き継ぎ |
 | [ゲストの行番号表を落とす](vm/strip-debug.md) | `CONFIG_POCKET_VM_STRIP_DEBUG`（既定 OFF）: 行番号表なしのコンパイル。アプリごとの効果（DERBY の評価の余裕 +2.7 KB、実機）、失う位置情報、DERBY の首振り（段階 3）には足りないこと、運用案（2026-09-30）|
 | [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
@@ -55,6 +62,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [flash-size-method.md](perf/flash-size-method.md) | 設計 | 容量削減の手順書: cref で薄さランキングを作り、薄い（我々だけが参照元の）ところから潰す。スタブビルドで「本当に落ちるか」を先に確かめる規律、罠、一般化まで |
 | [kasane-image-transform-stretch-step.md](perf/kasane-image-transform-stretch-step.md) | 記録 | 拡大縮小画像スパンの画素ごとの 32bit 除算 2 本を、商と剰余の加算ステップ（切替つき・厳密・既定は有効）へ。1 画素 18 命令/除算 2 本 → 15-16 命令/0 本。調査は [kasane-image-transform-recon.md](perf/kasane-image-transform-recon.md)、回転側の同型の仕事は [kasane-image-transform-step.md](perf/kasane-image-transform-step.md) |
 | [kasane-grid-sampling-host.md](perf/kasane-grid-sampling-host.md) | 記録 | 固定小窓の最近傍・bilinear・面積平均のhost画質と元画像アクセス量。登録時sampling policyの判断根拠と実機未測定の範囲 |
+| [kasane-grid-scoped-borrow-host.md](perf/kasane-grid-scoped-borrow-host.md) | 検証記録 | gridの呼び出し内入力借用、明示入力measure、現在のresizable view境界とhost回帰検査 |
 | [kasane-image-transform-anchor.md](perf/kasane-image-transform-anchor.md) | 記録 | 回転スパンのアンカーを行ごとの表にし、libgcc の `__divdi3` 2 本を消した（切替つき・厳密・既定は有効）。アンカー代 37.8 → 10.0 命令/画素、表は実行時構築で `.bss` +308 B（flash は 0 B 増） |
 | [kasane-image-transform-reject.md](perf/kasane-image-transform-reject.md) | 記録 | 回転スパンの域外判定をスパン単位の区間判定にした（切替つき・厳密・既定は有効）。棄却画素の処理 −5.0 命令/転送画素、新しいデータは 1 バイトも持たない |
 | [kasane-blend-pie.md](perf/kasane-blend-pie.md) | 記録 | 565 ブレンド／パックの PIE カーネル（候補 4a）: 16bit レーンモデル、恒等式の総当たり、`piesim` での全画素一致、命令数とストール。文書自体は結線前のホスト記録で、結線（`g_ksn_blend_pie`、既定 ON）は後続コミット |
@@ -128,6 +136,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | [hardware-constraints.md](platform/hardware-constraints.md) | 仕様 | ハードウェア仕様と開発上の制約（RAM 表、配線、UI ノード数の崖） |
 | [build-environment.md](platform/build-environment.md) | 仕様 | Windows / EIM の開発環境とビルド手順 |
 | [test-commands.md](platform/test-commands.md) | 仕様 | 実機テストとホスト側テスト（PIE 3層、WSL のみのもの）のコマンド一覧。守る規則は CLAUDE.md |
+| [device_validation/README.md](../tools/device_validation/README.md) | 手順 | Windows PowerShellで基点89a71aeと候補1本を隔離ビルドし、明示opt-inのapp-only flash・通常HELLO/GRID LABを記録する |
 | [wifi-autostart.md](platform/wifi-autostart.md) | 設計 | Wi-Fi の自動起動: ホームのアイドルで一過性の時刻同期（アプリ優先で中断）、参照カウントの接続サービス `net_service`、常駐の背景サービスへの方針候補と実機で測る項目 |
 | [keystate.md](platform/keystate.md) | 設計 | 物理キーの押下集合（HAL の keystate）と `pocket.input.keys`: 入力経路と消費者の一覧、ライフサイクル、却下案、実機で測る同時押し・ゴースト・FIFO あふれ |
 | [idf-tls-txbuffer-report.md](platform/idf-tls-txbuffer-report.md) | 記録 | ESP-IDF の TLS 送信バッファの二重計上（上流への報告草稿、未送信） |

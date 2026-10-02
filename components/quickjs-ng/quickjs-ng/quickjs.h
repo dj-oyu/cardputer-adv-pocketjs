@@ -1204,6 +1204,12 @@ JS_EXTERN JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
                                          size_t *pbyte_offset,
                                          size_t *pbyte_length,
                                          size_t *pbytes_per_element);
+/* PocketJS: callback-free current view metadata, including resized tracking
+   views. The retained buffer does not pin its storage across JS callbacks. */
+JS_EXTERN JSValue JS_GetTypedArrayBufferCurrent(JSContext *ctx, JSValueConst obj,
+                                                size_t *pbyte_offset,
+                                                size_t *pbyte_length,
+                                                size_t *pbytes_per_element);
 JS_EXTERN JSValue JS_NewUint8Array(JSContext *ctx, uint8_t *buf, size_t len,
                                    JSFreeArrayBufferDataFunc *free_func, void *opaque,
                                    bool is_shared);

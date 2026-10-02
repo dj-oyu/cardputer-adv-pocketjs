@@ -17,6 +17,10 @@ static ksn_image_port resize_image;
 static ksn_image_port stream_image;
 static ksn_image_port nearest_image;
 static unsigned invalidates, resources;
+static bool scoped_tests;
+static bool scoped_only;
+static ksn_image_port scoped_images[POCKET_GRID_MAX_SLOTS];
+static unsigned external_frees;
 static unsigned source_reads, source_pixels, source_version;
 static int fail_source_y = -1;
 const char *pocket_grid_test_frontend;
@@ -25,6 +29,14 @@ JSValue pocket_kasane_grid_resource(JSContext *ctx, unsigned slot,
                                     const ksn_image_port *port)
 {
     CHECK(port);
+    if (scoped_tests) {
+        CHECK(slot < POCKET_GRID_MAX_SLOTS);
+        CHECK(port->width == 8 && port->height == 1);
+        scoped_images[slot] = *port;
+        JSValue resource = JS_NewObject(ctx);
+        CHECK(JS_SetPropertyStr(ctx, resource, "slot", JS_NewUint32(ctx, slot)) == 1);
+        return resource;
+    }
     if (slot == 0) {
         CHECK(port->width == 16 && port->height == 12);
         image = *port;
@@ -43,7 +55,7 @@ JSValue pocket_kasane_grid_resource(JSContext *ctx, unsigned slot,
 }
 void pocket_kasane_grid_invalidate(unsigned slot)
 {
-    CHECK(slot <= 3);
+    CHECK(slot < POCKET_GRID_MAX_SLOTS);
     ++invalidates;
 }
 static uint16_t source_pixel(unsigned x, unsigned y)
@@ -111,6 +123,10 @@ static void eval(JSContext *ctx, const char *source, bool expect_error)
         const char *message = JS_ToCString(ctx, error);
         fprintf(stderr, "grid JS exception: %s\n", message ? message : "unknown");
         if (message) JS_FreeCString(ctx, message);
+        JSValue stack = JS_GetPropertyStr(ctx, error, "stack");
+        const char *trace = JS_ToCString(ctx, stack);
+        if (trace) { fprintf(stderr, "%s\n", trace); JS_FreeCString(ctx, trace); }
+        JS_FreeValue(ctx, stack);
         JS_FreeValue(ctx, error);
     }
     CHECK(JS_IsException(result) == expect_error);
@@ -138,11 +154,148 @@ static void pixels(unsigned add)
     }
 }
 
+/* Native helpers expose ordinary host actions that browser JS cannot perform.
+ * No allocator failure or test-only production hook participates in this suite. */
+static JSValue host_gc(JSContext *ctx, JSValueConst self, int argc,
+                       JSValueConst *argv)
+{
+    (void)self; (void)argc; (void)argv;
+    JS_RunGC(JS_GetRuntime(ctx));
+    return JS_UNDEFINED;
+}
+static JSValue host_detach(JSContext *ctx, JSValueConst self, int argc,
+                           JSValueConst *argv)
+{
+    (void)self; CHECK(argc == 1);
+    JS_DetachArrayBuffer(ctx, argv[0]);
+    return JS_UNDEFINED;
+}
+static JSValue host_ack(JSContext *ctx, JSValueConst self, int argc,
+                        JSValueConst *argv)
+{
+    (void)ctx; (void)self;
+    pocket_grid_present_result(argc && JS_ToBool(ctx, argv[0]) ? KSN_OK : KSN_IO);
+    return JS_UNDEFINED;
+}
+static JSValue host_pending(JSContext *ctx, JSValueConst self, int argc,
+                            JSValueConst *argv)
+{
+    (void)self; (void)argc; (void)argv;
+    return JS_NewBool(ctx, pocket_grid_pending());
+}
+static JSValue host_invalidates(JSContext *ctx, JSValueConst self, int argc,
+                                JSValueConst *argv)
+{
+    (void)self; (void)argc; (void)argv;
+    return JS_NewUint32(ctx, invalidates);
+}
+static JSValue host_pixels(JSContext *ctx, JSValueConst self, int argc,
+                           JSValueConst *argv)
+{
+    (void)self; CHECK(argc == 1);
+    uint32_t slot;
+    JSValue value = JS_GetPropertyStr(ctx, argv[0], "slot");
+    CHECK(JS_ToUint32(ctx, &slot, value) == 0);
+    JS_FreeValue(ctx, value);
+    CHECK(slot < POCKET_GRID_MAX_SLOTS);
+    const ksn_image_port *port = &scoped_images[slot];
+    CHECK(port->read_span);
+    uint16_t row[8]; uint8_t alpha[8];
+    CHECK(port->read_span(port->ctx, 0, 0, 0, 0, 8, row, alpha) == KSN_OK);
+    JSValue result = JS_NewArray(ctx);
+    for (unsigned i = 0; i < 8; ++i) {
+        CHECK(alpha[i] == 255);
+        CHECK(JS_SetPropertyUint32(ctx, result, i, JS_NewUint32(ctx, row[i])) == 1);
+    }
+    return result;
+}
+static void external_free(JSRuntime *rt, void *opaque, void *ptr)
+{
+    (void)rt; (void)ptr;
+    ++external_frees;
+    free(opaque);
+}
+static JSValue host_external(JSContext *ctx, JSValueConst self, int argc,
+                             JSValueConst *argv)
+{
+    (void)self;
+    int32_t count = 8, value = 1;
+    if (argc > 0) CHECK(JS_ToInt32(ctx, &count, argv[0]) == 0);
+    if (argc > 1) CHECK(JS_ToInt32(ctx, &value, argv[1]) == 0);
+    CHECK(count >= 0 && count <= 8192);
+    uint8_t *raw = malloc((size_t)count * 2 + 1); CHECK(raw);
+    CHECK(((uintptr_t)(raw + 1) & 1u) == 1);
+    int16_t sample = (int16_t)value;
+    for (int32_t i = 0; i < count; ++i)
+        memcpy(raw + 1 + i * 2, &sample, sizeof sample);
+    return JS_NewArrayBuffer(ctx, raw + 1, (size_t)count * 2,
+                             external_free, raw, false);
+}
+static JSValue host_empty_external(JSContext *ctx, JSValueConst self, int argc,
+                                   JSValueConst *argv)
+{
+    (void)self; (void)argc; (void)argv;
+    /* QuickJS normalizes NULL zero-length storage into a live empty buffer. */
+    return JS_NewArrayBuffer(ctx, NULL, 0, NULL, NULL, false);
+}
+static JSValue host_external_frees(JSContext *ctx, JSValueConst self, int argc,
+                                   JSValueConst *argv)
+{
+    (void)self; (void)argc; (void)argv;
+    return JS_NewUint32(ctx, external_frees);
+}
+static void *host_sab_alloc(void *opaque, size_t size)
+{
+    (void)opaque;
+    return malloc(size);
+}
+static void host_sab_free(void *opaque, void *ptr)
+{
+    (void)opaque;
+    free(ptr);
+}
+static JSValue host_reset(JSContext *ctx, JSValueConst self, int argc,
+                          JSValueConst *argv)
+{
+    (void)ctx; (void)self; (void)argc; (void)argv;
+    /* Simulate native embedding teardown, never a public guest grid method. */
+    pocket_grid_reset();
+    return JS_UNDEFINED;
+}
+static void install_host(JSContext *ctx)
+{
+    static const JSCFunctionListEntry helpers[] = {
+        JS_CFUNC_DEF("gc", 0, host_gc),
+        JS_CFUNC_DEF("reset", 0, host_reset),
+        JS_CFUNC_DEF("detach", 1, host_detach),
+        JS_CFUNC_DEF("ack", 1, host_ack),
+        JS_CFUNC_DEF("pending", 0, host_pending),
+        JS_CFUNC_DEF("invalidates", 0, host_invalidates),
+        JS_CFUNC_DEF("pixels", 1, host_pixels),
+        JS_CFUNC_DEF("externalOdd", 2, host_external),
+        JS_CFUNC_DEF("emptyExternal", 0, host_empty_external),
+        JS_CFUNC_DEF("externalFrees", 0, host_external_frees),
+    };
+    JSValue global = JS_GetGlobalObject(ctx), host = JS_NewObject(ctx);
+    CHECK(JS_SetPropertyStr(ctx, host, "functionalOnly", JS_NewBool(ctx, scoped_only)) == 1);
+    CHECK(JS_SetPropertyFunctionList(ctx, host, helpers,
+        sizeof helpers / sizeof helpers[0]) == 0);
+    CHECK(JS_SetPropertyStr(ctx, global, "gridTestHost", host) == 1);
+    JS_FreeValue(ctx, global);
+}
+
 int main(int argc, char **argv)
 {
-    CHECK(argc == 3);
+    scoped_only = argc == 5 && !strcmp(argv[1], "--scoped-only");
+    if (scoped_only) { --argc; ++argv; }
+    CHECK(argc == 4);
     JSRuntime *runtime = JS_NewRuntime(); CHECK(runtime);
+    const JSSharedArrayBufferFunctions sab = {
+        .sab_alloc = host_sab_alloc, .sab_free = host_sab_free,
+    };
+    JS_SetSharedArrayBufferFunctions(runtime, &sab);
     JSContext *ctx = JS_NewContext(runtime); CHECK(ctx);
+    install_host(ctx);
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue ns = JS_NewObject(ctx);
     CHECK(pocket_grid_install(ctx, ns) == ESP_OK);
@@ -152,6 +305,7 @@ int main(int argc, char **argv)
     pocket_grid_test_frontend = frontend;
     eval(ctx, program, false);
     free(frontend); free(program);
+    if (scoped_only) goto scoped_suite;
     eval(ctx, "globalThis.h=kasane.grid.register(gridFoldDeviceProgram);"
               "let registered=kasane.grid.registration(h);"
               "if(registered.irCount!==gridFoldDeviceProgram.count||"
@@ -168,11 +322,11 @@ int main(int argc, char **argv)
               "route.scalarReason!=='NONE'||route.candidateMask===0||"
               "route.strategy!=='FUSED'||"
               "route.reason!=='PROFILE')throw Error(JSON.stringify(route));"
-              "let measure=kasane.grid.measure(h,2);"
+              "let measure=kasane.grid.measure(h,{0:input},[32,16],2);"
               "if(!measure.equal||measure.repeats!==2||"
               "measure.scalarUs<0||measure.pieUs<0)throw Error('measure');"
               "for(const strategy of ['GATHER','AFFINE']){"
-              "let forced=kasane.grid.measure(h,2,strategy);"
+              "let forced=kasane.grid.measure(h,{0:input},[32,16],2,strategy);"
               "if(!forced.equal||forced.strategy!==strategy||forced.pieUs<0)"
               "throw Error('forced measure');}"
               "let profile=kasane.grid.profile(h);"
@@ -368,7 +522,15 @@ int main(int argc, char **argv)
               "rangeRoute.candidateMask!==0)"
               "throw Error(JSON.stringify(rangeRoute));", false);
     pocket_grid_reset();
+scoped_suite:
+    scoped_tests = true;
+    char *scoped = read_file(argv[3]);
+    eval(ctx, scoped, false);
+    free(scoped);
+    pocket_grid_reset();
     JS_FreeContext(ctx); JS_FreeRuntime(runtime);
-    puts("grid fold, arbitrary resize and source-stream QuickJS->PIE->image passed");
+    puts(scoped_only ?
+         "grid scoped functional inputs and measure QuickJS->PIE->image passed (I/O/ACK faults skipped)" :
+         "grid fold, resize, scoped inputs and measure QuickJS->PIE->image passed");
     return 0;
 }

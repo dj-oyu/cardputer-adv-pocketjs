@@ -9,10 +9,16 @@
 
 すべて WSL で動かす（Windows 側に gcc は無い）。実機・シリアルポートには一切触れない。
 
+## 統合版の通常検証
+
+A/C/E の `--functional-only` と Y の scoped 専用検査は、allocation fault/OOM を実行せず統合時の通常意味論を確認するための入口。既存 suite の既定動作は維持している。実測範囲と再実行コマンドは [統合検証](../../docs/vm/integrated-validation.md) を参照。
+
 ## コマンド
 
 ```bash
 # WSL: cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs-vm
+bash tools/vmtest/test_frame_entry.sh o2        # 本番 source entry + guest/console（Linux、詳細 docs/vm/frame-entry-direct.md）
+bash tools/vmtest/test_frame_entry.sh asan      # 同じ対象を engine ごと ASan+UBSan で検査
 bash tools/vmtest/build.sh all                 # vmrun-asan と vmrun-o2 を .cache/vmtest/ に作る（ファームと同じ唯一の経路）
 bash tools/vmtest/build.sh asan-reloc          # + CONFIG_POCKET_VM_RELOC（L3a、--force-reloc 用）
 bash tools/vmtest/build.sh o2

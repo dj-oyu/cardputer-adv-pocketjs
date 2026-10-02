@@ -171,7 +171,8 @@ function parseBody(src, line0, inputs, params) {
     take(';', 'R3');
     if (take('id', 'R3').v !== v) fail(line, 'R3', 'the condition must test the loop variable');
     take('<', 'R3');
-    scopes.push(new Map([[v, {kind: 'const'}]]));
+    scopes.push(new Map());
+    declare(v, 'const', line);
     const n = expr(); take(';', 'R3');
     if (peek('++') && peek(v, 1)) p += 2;
     else if (peek(v) && peek('++', 1)) p += 2;

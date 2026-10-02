@@ -21,3 +21,5 @@ esp_err_t jsconsole_install(JSContext *ctx, void *user_data);
 // The last error a script reported, or NULL. Owned here, bounded.
 const char *jsconsole_error(void);
 void jsconsole_set_error(const char *text);
+// Borrowed exception from a completed frame; formatter failures are cleared.
+void jsconsole_report_exception(JSContext *ctx, JSValueConst exception);

@@ -1,0 +1,3 @@
+typed-put NaN-index baseline coercions 0
+typed-put checks 791
+exit=0

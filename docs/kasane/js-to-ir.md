@@ -205,6 +205,7 @@ const T = {
 
 - **意味の対応**: `for` は `REPEAT`（回数が定数か引数）か `REPEAT_REG`（式）。本体がループ変数を読むときだけ、その変数を 0 から 1 ずつ増やす命令を足す（`break` では増やさない。JS の `i++` と同じ）。定数 0 回のループは消す。何も描かない plan は `S0,0` 1 命令（`register()` は 1 命令以上を要求する。DERBY の点列用の plan）。
 - **JS と VM が違うところ（コンパイラは直さない）**: ループ回数が整数でない・範囲外（`REPEAT_REG` は 0..255、定数・引数は 1..255）なら VM は draw ごと失敗するが、JS は切り上げた回数だけ回る。計算の途中が非有限なら VM は失敗する。`/` は定数でだけで、2 の冪以外は掛け算に直すので厳密ではない（警告が出る）。配列の表引き（`SILK[k]`）は書けないので、定数に焼き込むか引数で渡す（DERBY の `map` は焼き込んだ）。
+- **近似の警告**: `lower_plans.mjs`（`--file` を含む）と `emit_rom_plans.mjs` は、`ファイル: plan名: warning: x/3 compiled as x*... (not exact)` を標準エラーへ出す。`lowerText()` の `report` とディレクトリ変換の `plans.json`、ROM 生成の `--json` にも plan ごとの `warnings` 配列を残す（警告なしなら空）。警告はビルドを止めないので、丸めが描画へ影響する入力を JS reference と比べる。
 - **float32 の基準**: `reference()` は既定で、関数の各演算を `Math.fround` で丸め、非有限で失敗し、ループ回数の検査も VM と同じにした JS を実行する（パーサの AST から生成した JS。関数の文面をそのまま double で走らせる形も持ち、参考として数える）。`sin` は `Math.sin` を float32 に丸めた値で、host の glibc の `sinf` と全件一致した。実機の newlib の `sinf` と、Xtensa の GCC が積和を 1 命令（`MADD.S`）に縮約するかは見ていない（CUBIC の C の式に効きうる）。
 
 ### 5.2.1 模様線 `linePattern`（2026-10-01、ブランチ `vm/crowd-p24`）

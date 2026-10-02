@@ -27,6 +27,14 @@ pocketjs_guest_quickjs_install_once(pocketjs_guest_t *guest, const char *name,
 /** Valid only for the duration of a synchronous owner-task operation. */
 JSContext *pocketjs_guest_quickjs_context(pocketjs_guest_t *guest);
 
+/** Report a completed frame's exception, including a resumed frame. The value
+ * is borrowed and the original exception is preserved for the stderr dump.
+ * Called only after the VM has closed its chain, never while parked. */
+typedef void (*pocketjs_guest_frame_error_fn)(JSContext *, JSValueConst, void *);
+void pocketjs_guest_set_frame_error_handler(pocketjs_guest_t *guest,
+                                            pocketjs_guest_frame_error_fn fn,
+                                            void *opaque);
+
 #ifdef __cplusplus
 }
 #endif

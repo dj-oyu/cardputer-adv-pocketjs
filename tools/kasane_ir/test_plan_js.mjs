@@ -30,6 +30,22 @@ rejects('print(a);', 'R5');
 rejects('for (let i = 0; i < 2; i++) { const x = a; }\nmove(x, b);', 'R4', 5);
 rejects('move(a);', 'R1');
 
+// A for binding obeys the same no-shadowing rule as a body declaration,
+// even when its count is zero or the body never reads the counter.
+rejects('for (let a = 0; a < 2; a++) { move(a, b); }\nmove(a, b);', 'R4');
+rejects('for (let a = 0; a < 0; a++) { move(0, b); }', 'R4');
+rejects('let i = a;\nfor (let i = 0; i < 2; i++) { move(i, b); }', 'R4', 5);
+rejects('const i = a;\nfor (let i = 0; i < 2; i++) { move(i, b); }', 'R4', 5);
+rejects('for (let i = 0; i < 2; i++) {\nfor (let i = 0; i < 2; i++) { move(i, b); }\n}', 'R4', 5);
+rejects('for (let i = 0; i < 2; i++) {\nlet j = a;\nfor (let j = 0; j < 2; j++) { move(j, b); }\n}', 'R4', 6);
+rejects('for (let while = 0; while < 2; while++) { move(a, b); }', 'R4');
+assert.throws(() => compilePlan(plan('for (let i = 0; i < 2; i++) { move(i, b); }', 'inputs: a, b', 'i')),
+  /test\.js: t: line 4: i shadows a name already in scope \[R4:/);
+// Sibling loop scopes may reuse a counter, and distinct nested counters work.
+assert.ok(compilePlan(plan(`for (let i = 0; i < 2; i++) { move(i, b); }
+for (let i = 0; i < 2; i++) { move(i, b); }
+for (let i = 0; i < 2; i++) { for (let j = 0; j < 2; j++) { move(i, j); } }`)).count > 0);
+
 // Accepted: Math.sin, Math.PI, a counter read in the body, braced break,
 // a parameter as colour and count, a constant 0 count (no loop).
 const ok = plan(`let x = a;

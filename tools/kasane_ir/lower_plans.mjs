@@ -27,7 +27,8 @@
 // them) go with it: they describe code that no longer ships.
 // SRC_DIR -> OUT_DIR copies every file (a file without either marker byte
 // for byte), checks that an app with plans has exactly one @planDecoder, and
-// writes OUT_DIR/plans.json (each plan's name, file, IR and size). --file is
+// writes OUT_DIR/plans.json (each plan's name, file, IR, size and warnings).
+// Both CLI forms also print compiler warnings to stderr. --file is
 // the firmware build's form (main/CMakeLists.txt, one chunk per command;
 // tools/make_app_chunks.py checks the decoder count at configure time; OUT
 // is always rewritten, as the build's timestamps expect). A plan outside the
@@ -55,7 +56,7 @@ function withComments(text, at) {
 
 export function lowerText(text, file, ids = null, rom = null) {
   text = text.replace(/\r\n/g, '\n');
-  const plans = findPlans(text, file), report = [];
+  const plans = findPlans(text, file), report = [], removedMethods = [];
   let out = '', at = 0;
   for (const p of plans) {
     const c = compilePlan(p);
@@ -67,16 +68,24 @@ export function lowerText(text, file, ids = null, rom = null) {
       // Gone, with a method's comma and the rest of its line.
       const tail = /^[ \t]*,?[ \t]*\n?/.exec(text.slice(p.end))[0];
       out += text.slice(at, from);
+      if (p.method) removedMethods.push(out.length);
       at = p.end + tail.length;
     } else {
       out += text.slice(at, from) + indent + (p.method ? `${p.fn}: ${value}` : `const ${p.fn} = ${value};`);
       at = p.end;
     }
     report.push({name: p.name, file, ir: c.text, instructions: c.count, packedBytes: packed.length,
-      sourceBytes: p.end - p.start});
+      sourceBytes: p.end - p.start, warnings: c.warnings});
   }
   out += text.slice(at);
-  if (rom) out = out.replace(/^(?:const|let) [A-Za-z_$][\w$]* = \{\s*\};\n/gm, '');
+  // Only a container emptied by removing its plan methods may disappear.
+  // Offsets refer to out before this replace, so unrelated empty objects
+  // and comments are left alone, even beside several removed containers.
+  if (rom) out = out.replace(/^(?:const|let) [A-Za-z_$][\w$]* = \{(\s*)\};\n/gm,
+    (decl, body, offset) => {
+      const open = offset + decl.indexOf('{'), close = open + body.length + 1;
+      return removedMethods.some(at => at > open && at <= close) ? '' : decl;
+    });
   const dec = /\/\*\*\s*@planDecoder(?:\s+rom)?\s*\*\/\s*function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{[^]*?\n\}\n/.exec(out);
   if (dec) {
     if (!ids && !rom !== !dec[0].includes('rom'))
@@ -92,6 +101,11 @@ function writeIfChanged(file, text) {
   if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== text) fs.writeFileSync(file, text);
 }
 
+function printWarnings(report) {
+  for (const p of report) for (const warning of p.warnings)
+    console.warn(`${p.file}: ${p.name}: warning: ${warning}`);
+}
+
 function main() {
   const args = process.argv.slice(2);
   let ids = null, rom = null;
@@ -101,7 +115,9 @@ function main() {
     const [, src, dst] = args;
     const text = fs.readFileSync(src, 'utf8');
     fs.mkdirSync(path.dirname(dst), {recursive: true});
-    fs.writeFileSync(dst, /@plan/.test(text) ? lowerText(text, path.basename(src), ids, rom).text : text);
+    const r = /@plan/.test(text) ? lowerText(text, src, ids, rom) : {text, report: []};
+    printWarnings(r.report);
+    fs.writeFileSync(dst, r.text);
     return;
   }
   const [src, dst] = args;
@@ -119,6 +135,7 @@ function main() {
     const text = fs.readFileSync(from, 'utf8');
     if (!/@plan/.test(text)) { fs.copyFileSync(from, to); continue; }
     const r = lowerText(text, f, ids, rom);
+    printWarnings(r.report);
     writeIfChanged(to, r.text);
     report.push(...r.report); decoders += r.decoder;
   }

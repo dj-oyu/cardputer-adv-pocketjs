@@ -8533,6 +8533,9 @@ static void gc_free_cycles(JSRuntime *rt)
 
 void JS_RunGC(JSRuntime *rt)
 {
+    size_t limit = rt->malloc_state.malloc_limit;
+    bool trim_empty_arrays = limit != 0 &&
+        rt->malloc_state.malloc_size >= limit - (limit >> 3);
     /* decrement the reference of the children of each object. mark =
        1 after this pass. */
     gc_decref(rt);
@@ -8542,6 +8545,25 @@ void JS_RunGC(JSRuntime *rt)
 
     /* free the GC objects in a cycle */
     gc_free_cycles(rt);
+
+    /* Keep reusable capacity during ordinary collections. Under quota
+       pressure, empty fast arrays own no live elements, so their backing
+       allocation can be returned without conversion or allocation. */
+    if (trim_empty_arrays) {
+        struct list_head *el;
+        list_for_each(el, &rt->gc_obj_list) {
+            JSGCObjectHeader *h = list_entry(el, JSGCObjectHeader, link);
+            if (h->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT) {
+                JSObject *p = (JSObject *)h;
+                if (p->class_id == JS_CLASS_ARRAY && p->fast_array &&
+                    p->u.array.count == 0 && p->u.array.u.values != NULL) {
+                    js_free_rt(rt, p->u.array.u.values);
+                    p->u.array.u.values = NULL;
+                    p->u.array.u1.size = 0;
+                }
+            }
+        }
+    }
 }
 
 /* Return false if not an object or if the object has already been
@@ -12203,6 +12225,14 @@ static int JS_SetPropertyValue(JSContext *ctx, JSValueConst this_obj,
             break;
         case JS_CLASS_INT8_ARRAY:
         case JS_CLASS_UINT8_ARRAY:
+            /* Experimental, default off: an immediate integer has neither
+               coercion side effects nor a reference to release. Keep the
+               ordinary conversion for every other tag, before all checks. */
+#if defined(POCKET_VM_TYPED_PUT_INT_FAST) && POCKET_VM_TYPED_PUT_INT_FAST
+            if (JS_VALUE_GET_TAG(val) == JS_TAG_INT)
+                v = JS_VALUE_GET_INT(val);
+            else
+#endif
             if (JS_ToInt32Free(ctx, &v, val)) {
                 goto ta_cvt_fail;
             }
@@ -12216,6 +12246,11 @@ static int JS_SetPropertyValue(JSContext *ctx, JSValueConst this_obj,
             break;
         case JS_CLASS_INT16_ARRAY:
         case JS_CLASS_UINT16_ARRAY:
+#if defined(POCKET_VM_TYPED_PUT_INT_FAST) && POCKET_VM_TYPED_PUT_INT_FAST
+            if (JS_VALUE_GET_TAG(val) == JS_TAG_INT)
+                v = JS_VALUE_GET_INT(val);
+            else
+#endif
             if (JS_ToInt32Free(ctx, &v, val)) {
                 goto ta_cvt_fail;
             }
@@ -12229,6 +12264,11 @@ static int JS_SetPropertyValue(JSContext *ctx, JSValueConst this_obj,
             break;
         case JS_CLASS_INT32_ARRAY:
         case JS_CLASS_UINT32_ARRAY:
+#if defined(POCKET_VM_TYPED_PUT_INT_FAST) && POCKET_VM_TYPED_PUT_INT_FAST
+            if (JS_VALUE_GET_TAG(val) == JS_TAG_INT)
+                v = JS_VALUE_GET_INT(val);
+            else
+#endif
             if (JS_ToInt32Free(ctx, &v, val)) {
                 goto ta_cvt_fail;
             }
@@ -27311,6 +27351,57 @@ static __exception int js_parse_function_decl(JSParseState *s,
                                               JSAtom func_name, const uint8_t *ptr,
                                               int start_line, int start_col);
 static JSFunctionDef *js_parse_function_class_fields_init(JSParseState *s);
+/* Optional capacity reclamation must not throw or trip the OOM canary.
+   The old allocation remains owned by the parser on allocator failure. */
+static bool js_parse_try_shrink(JSRuntime *rt, void *ptr, size_t size,
+                                void **out)
+{
+    size_t old_size;
+    void *next;
+    if (size == 0) {
+        js_free_rt(rt, ptr);
+        *out = NULL;
+        return true;
+    }
+    if (!ptr)
+        return false;
+    old_size = rt->mf.js_malloc_usable_size(ptr);
+    if (size >= old_size)
+        return false;
+    next = rt->mf.js_realloc(rt->malloc_state.opaque, ptr, size);
+    if (!next)
+        return false;
+    rt->malloc_state.malloc_size +=
+        rt->mf.js_malloc_usable_size(next) - old_size;
+    *out = next;
+    return true;
+}
+
+static void js_parse_trim_capacity(JSFunctionDef *fd)
+{
+    JSRuntime *rt = fd->ctx->rt;
+    void *next;
+    if (!dbuf_error(&fd->byte_code) &&
+        fd->byte_code.size < fd->byte_code.allocated_size &&
+        js_parse_try_shrink(rt, fd->byte_code.buf, fd->byte_code.size, &next)) {
+        fd->byte_code.buf = next;
+        fd->byte_code.allocated_size = fd->byte_code.size;
+    }
+#define TRIM_PARSE_ARRAY(field, count, capacity) \
+    do { \
+        if (fd->count < fd->capacity && \
+            js_parse_try_shrink(rt, fd->field, \
+                                sizeof(*fd->field) * fd->count, &next)) { \
+            fd->field = next; \
+            fd->capacity = fd->count; \
+        } \
+    } while (0)
+    TRIM_PARSE_ARRAY(label_slots, label_count, label_size);
+    TRIM_PARSE_ARRAY(vars, var_count, var_size);
+    TRIM_PARSE_ARRAY(cpool, cpool_count, cpool_size);
+#undef TRIM_PARSE_ARRAY
+}
+
 static __exception int js_parse_function_decl2(JSParseState *s,
                                                JSParseFunctionEnum func_type,
                                                JSFunctionKindEnum func_kind,
@@ -40833,6 +40924,8 @@ done:
        by just using next_token() here for normal functions, but it is
        necessary for arrow functions with an expression body. */
     reparse_ident_token(s);
+
+    js_parse_trim_capacity(fd);
 
     /* create the function object */
     {
@@ -64033,6 +64126,24 @@ JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
         *pbytes_per_element = 1 << typed_array_size_log2(p->class_id);
     }
     return js_dup(JS_MKPTR(JS_TAG_OBJECT, ta->buffer));
+}
+
+/* PocketJS scoped native consumers need the current view extent. Keep the
+   existing public helper's behavior unchanged; track_rab updates array.count,
+   not ta->length. Neither this helper nor JS_GetArrayBuffer enters JS. */
+JSValue JS_GetTypedArrayBufferCurrent(JSContext *ctx, JSValueConst obj,
+                                      size_t *pbyte_offset,
+                                      size_t *pbyte_length,
+                                      size_t *pbytes_per_element)
+{
+    JSValue buffer = JS_GetTypedArrayBuffer(ctx, obj, pbyte_offset, NULL,
+                                            pbytes_per_element);
+    if (!JS_IsException(buffer) && pbyte_length) {
+        JSObject *p = JS_VALUE_GET_OBJ(obj);
+        *pbyte_length = (size_t)p->u.array.count <<
+                       typed_array_size_log2(p->class_id);
+    }
+    return buffer;
 }
 
 /* return NULL if exception. WARNING: any JS call can detach the

@@ -20,6 +20,8 @@ python tools\test_app_resume.py --port COM3           # Backで眠るアプリ�
 
 ```bash
 python tools/test_flash_budget.py       # パーティション予約ガード
+python tools/test_precompile_apps.py --cc gcc  # 実験BCのmanifest・意味・OOM回復、--sanitizeでengine全体をASan/UBSan計装（docs/vm/precompile-build-experiment.md）
+node tools/kasane_ir/test_kir.mjs && node tools/kasane_ir/test_plan_js.mjs && node tools/kasane_ir/test_lower_plans.mjs   # JS→IR・名前の規則・ROM loweringのソース保持・ビルド警告（実機不要）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_sail.c -lm -o /tmp/ts && /tmp/ts"
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_flower.c main/scene/canopy_pie.c main/scene/garden_decor_pie.c -I main/scene -I tools/hostshim -lm -o /tmp/tf && /tmp/tf"   # カーネル2ファイルも一緒にリンクする（flower.c単体では未定義参照）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_time.c -lm -o /tmp/t && /tmp/t"   # WSLのみ
@@ -40,3 +42,7 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/bui
 python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
 python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
 ```
+
+## 最適化候補の通常実機検証 (PowerShell)
+
+[device_validation/README.md](../../tools/device_validation/README.md) は `89a71ae` と候補1本を専用worktreeでビルドする。既定はY。ビルドだけではserialを開かず、app-only flashとHELLO/GRID LABの通常検証は明示的なopt-inで分ける。故障注入・OOM試験は呼ばない。実機・LCDの未検証と性能の観測を区別する。
