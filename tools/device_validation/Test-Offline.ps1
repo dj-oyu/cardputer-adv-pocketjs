@@ -18,6 +18,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Offline Python tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Integrated-build static guards failed.' }
 & $pythonExe (Join-Path $PSScriptRoot 'test_quickjs_flags.py')
 if ($LASTEXITCODE -ne 0) { throw 'QuickJS response-file flag tests failed.' }
+& (Join-Path $PSScriptRoot 'Test-IntegratedOffline.ps1') -PythonExe $pythonExe
 function Test-LoggedNativeExit {
     param([string]$NativeExe)
     # Deliberately shadow the automatic variable in the caller. Invoke-Logged
