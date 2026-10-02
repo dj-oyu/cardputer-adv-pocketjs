@@ -8,7 +8,8 @@ function enter(s) {
     if (F.o) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
     CH.push(1e4); S.course(CH, F.o ? OC : 0, DNR);
   }
-  if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
+  if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; rs.l = DL.slice(); F.k = z8(0);
+    for (let i = 0; i < 64; ++i) F.k[i >> 3] += F.m[i & 7] > F.m[i >> 3]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
   if (s === 'photo') { drop(['band']); want(['photo']); }
   if (s === 'res') { drop(RUN); drop(['photo']); want(['conf']); }
@@ -72,10 +73,13 @@ function hud(tx) {
   }
   for (let i = 0; i < s.length; ++i) if (R.t[i].s !== s[i]) R.t[i].setText(tx, R.t[i].s = s[i]);
 }
-// The runners u of the way through the last sim step.
+// The runners u of the way through the last sim step; their lanes (README
+// "レーンの横位置"): once a step the oval steers w at .8 m/s at most, lz sways.
 function at(u) {
-  const a = [];
-  for (let i = 0; i < 8; ++i) a[i] = rs.px[i] + (rs.x[i] - rs.px[i]) * u;
+  const a = [], L = mx.apply(null, rs.x), w = rs.l, k = F.k, n = rs.t > (w.t || 0);
+  w.t = rs.t;
+  for (let i = 0, x, s; i < 8; ++i) x = rs.x[i], s = F.h[i].sty, n && F.o && (w[i] += mx(-.04, mn(.04, 12 * M.pow(Q, x < 273 ? i * (.3 + .35 * s) : x < 650 ? k[i] : mn(7, k[i] + s)) - w[i]))), a[i] = rs.px[i] + (rs.x[i] - rs.px[i]) * u, lz[i] = w[i] + mn(.4, (L - a[i]) * .03) * sin(a[i] / 40 + 2.4 * i);
+  zo.sort((a, b) => lz[b] - lz[a]);
   return a;
 }
 // Finish: run the rest of the field unseen, then settle the bet.
@@ -130,7 +134,7 @@ function paint(c, xs, close, gate, extra) {
     // the last (farthest) first.
     if (j === 1 && q) for (let i = 7; i >= 0; --i) {
       const l = ro[i], q = 400 / (D + 12 - xs[l]), s = .25 * q * sin(ph[l]);
-      dr('fr', 120 + (DL[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s));
+      dr('fr', 120 + (lz[l] - 16.5) * q, 50 + 2.2 * q, q / 6, F.h[l].coat, SILK[l], mx(0, s), mx(0, -s));
     }
     const w = e[q + 4 + j];
     if (!w) continue;

@@ -29,8 +29,8 @@ function pan(xs) {
     if (p[1] > .02 && n[1] > .02 && x > -40 && x < 280 && y > -400 && y < 640)
       dr('pole', x, 28 + 6 * r, 28 + (e ? 2 : 3.4) * r, (e ? .55 : .3) * r, y, 28 + 6 / n[1], x, 28 + 6 * r);
   }
-  for (let l = 7; l >= 0; --l) {
-    const p = pj(pose(xs[l] - 12.5 * U, DL[l])), r = 1 / p[1], X = p[0] * r;
+  for (const l of zo) {
+    const p = pj(pose(xs[l] - 12.5 * U, lz[l])), r = 1 / p[1], X = p[0] * r;
     if (p[1] > .02 && X > -160 && X < 400) rin(l, X, r * U, 28 + 6 * r, ph[l]);
   }
   S.ser(live.prail, DNR, k[4], 0, L, 0xffff, 4.9);

@@ -66,6 +66,8 @@ const FANFARE = [523, 110, 659, 110, 784, 110, 1047, 260], BELL = [1568, 60, 156
 let pts = 1000, raceNo = 1, pick = 0, stake = 100, scene = '', t = 0, cam = 0, camT = 0, R = [], need = 0;
 let rs = null, od = null, fin = null, photoX = null, replay = 0, ph = z8(0);
 let cx = 0, disp = 0, slow = 0, ld = -1, cm = 0, hold = 0, dl = 0, man = 0, cl = 0, vr = null, von = 0, ro = [0, 1, 2, 3, 4, 5, 6, 7];
+// Lanes drawn, the order far to near (README "レーンの横位置").
+let lz = DL.slice(), zo = [7, 6, 5, 4, 3, 2, 1, 0];
 const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
   th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
 // Seeds: the hardware's, mixed with the stored race count (README).
@@ -138,8 +140,8 @@ function wide(g) {
 function shot(m, xs, l, cut) {
   pc = null;
   if (m === 1) {
-    const f = 24 * DL[l];
-    cx = xs[l] - 12.5 * U - (HX - 120) * DL[l] / f;
+    const f = 24 * lz[l];
+    cx = xs[l] - 12.5 * U - (HX - 120) / 24;
     return [f, 3, HY + 6 * HS - 72];
   }
   const c = CAMS[m];
@@ -199,9 +201,9 @@ function course(c, x0, xs, close, gate, K) {
   // Slow motion: the legs' phase between sim steps, as at() places the
   // runners (ph is the step's end; disp of the next step shown).
   const sp = slow && scene === 'race' ? 1 - disp : 0;
-  for (let l = 7; l >= 0; --l) {
+  for (const l of zo) {
     if (K && ro.indexOf(l) >= FN[tier]) continue;
-    const p = f / DL[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(DL[l]), a = ph[l];
+    const p = f / lz[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(lz[l]), a = ph[l];
     if (l === close) {
       const g = (flo(a * 3 / PI) % 6 + 6) % 6;
       dr('g' + g, []);
