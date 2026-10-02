@@ -220,6 +220,22 @@ class IntegratedRunTests(unittest.TestCase):
 
 
 class EntryPointGuards(unittest.TestCase):
+    def test_unverified_recovery_is_explicit_and_keeps_file_checks(self):
+        flash = (ROOT / 'Flash-Integrated.ps1').read_text()
+        self.assertIn('[Parameter(Mandatory=$true)][string]$RecoveryImage', flash)
+        self.assertIn('[switch]$AllowUnverifiedRecovery', flash)
+        self.assertIn("recoveryConfidence=$(if ($AllowUnverifiedRecovery) { 'unverified-candidate' } else { 'user-attested-known-good' })", flash)
+        self.assertIn('no verified rollback guarantee', flash)
+        self.assertIn("{ 'unverified-recovery-app.bin' } else { 'known-good-app.bin' }", flash)
+        self.assertIn('(Get-Item -LiteralPath $RecoveryImage).Length -le 0', flash)
+        self.assertIn('(Get-Item -LiteralPath $RecoveryImage).Length -gt 0x300000', flash)
+        self.assertIn('(Get-FileHash -Algorithm SHA256 -LiteralPath $recoveryCopy).Hash -ne $recoveryHash', flash)
+        self.assertIn("@('-m','esptool','image-info',$recoveryCopy)", flash)
+        self.assertLess(flash.index("'recovery-image-info.log'"), flash.index("@('write-flash'"))
+        fixture = (ROOT / 'Test-IntegratedOffline.ps1').read_text()
+        self.assertIn("$record.recoveryConfidence -ne 'user-attested-known-good'", fixture)
+        self.assertIn("$record.recoveryConfidence -ne 'unverified-candidate'", fixture)
+
     def test_git_ignores_inherited_repository_and_config_selectors(self):
         selectors = {'GIT_DIR': '/wrong/repository', 'GIT_WORK_TREE': '/wrong/tree',
                      'GIT_INDEX_FILE': '/wrong/index', 'GIT_COMMON_DIR': '/wrong/common',

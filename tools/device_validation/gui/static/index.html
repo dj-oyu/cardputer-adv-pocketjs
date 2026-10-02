@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <title>PocketJS · Device Validation</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">p.</span><span>PocketJS <span class="brand-sub">/ device validation</span></span></div>
+    <span class="local-badge"><span aria-hidden="true"></span>LOCAL ONLY</span>
+  </header>
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div><p class="eyebrow">CARDPUTER ADV · ESP32-S3</p><h1 id="page-title">実機検証を、ひとつずつ。</h1><p class="hero-copy">ファイルと接続先を選び、実行プランを確認してから進めます。</p></div>
+      <div class="device" aria-hidden="true"><div class="device-screen">POCKET<span>JS</span><small>VALIDATION CONSOLE</small></div><div class="device-keys">••••••••••••<br>••••••••••••<br>••••••••••••</div></div>
+    </section>
+    <div id="connection-status" class="notice neutral" role="status">ローカルサーバーに接続しています…</div>
+    <div id="error-banner" class="notice danger" role="alert" hidden></div>
+    <section class="environment" aria-label="実行環境">
+      <div><span class="label">ESP-IDF</span><strong id="idf-status">確認中</strong></div>
+      <div class="environment-path"><span class="label">PROJECT</span><span id="project-path" class="mono">—</span></div>
+      <button id="refresh-state" type="button" class="button subtle">状態を更新</button>
+    </section>
+    <div id="idf-error" class="notice warning" hidden></div>
+    <div class="layout">
+      <div class="workflow">
+        <section class="card" aria-labelledby="target-title">
+          <div class="section-heading"><span class="step">01</span><div><p class="eyebrow">TARGET IMAGE</p><h2 id="target-title">検証する統合ビルド</h2></div></div>
+          <p class="help">保持済みの integrated run を選択してください。復旧用ファイルとは別の入力です。</p>
+          <label for="run-select">対象の run</label>
+          <select id="run-select" class="plan-input"><option value="">run を選択してください</option></select>
+          <div id="run-details" class="selection-details" hidden></div>
+          <details class="import-area"><summary>一覧にない保持済み run を追加</summary><p class="help">manifest.json を含む、既存の run フォルダーの絶対パスを入力します。</p><div class="inline-input"><input id="import-path" type="text" placeholder="C:\work\retained-run" autocomplete="off" spellcheck="false" aria-label="追加する run の絶対パス"><button id="import-run" class="button secondary" type="button">追加</button></div><p class="help small">追加後も対象の run は自分で選択してください。</p></details>
+        </section>
+        <section class="card" aria-labelledby="recovery-title">
+          <div class="section-heading"><span class="step">02</span><div><p class="eyebrow">RECOVERY CANDIDATE</p><h2 id="recovery-title">復旧用アプリを用意</h2></div></div>
+          <p class="help">書き込み時に必要です。見つかった .bin は未検証の候補で、名前・更新日時だけでは正常動作を保証できません。</p>
+          <div class="toolbar"><div id="discovery-status" class="muted" role="status">候補はまだ確認されていません</div><div class="button-group"><button id="scan-candidates" class="button secondary" type="button">候補を探す</button><button id="cancel-scan" class="button subtle" type="button" hidden>探索を止める</button></div></div>
+          <div id="discovery-warning" class="notice warning compact" hidden></div>
+          <fieldset id="recovery-candidates" class="candidate-list"><legend class="sr-only">復旧用アプリの候補</legend><p class="empty-state">候補を探して、使用するファイルを明示的に選択してください。</p></fieldset>
+          <details id="excluded-section" hidden><summary id="excluded-summary">選択できないファイル</summary><div id="excluded-files" class="excluded-list"></div></details>
+          <label for="recovery-confidence" class="spaced-label">この復旧用ファイルの確認状況</label>
+          <select id="recovery-confidence" class="plan-input"><option value="unverified-candidate">未検証の候補（正常動作は未確認）</option><option value="user-attested-known-good">この正確なファイルでの正常動作を自分で確認済み</option></select>
+          <p class="help small">「確認済み」は自己申告です。この画面が動作を検証したことにはなりません。</p>
+        </section>
+        <section class="card" aria-labelledby="device-title">
+          <div class="section-heading"><span class="step">03</span><div><p class="eyebrow">DEVICE & ACTION</p><h2 id="device-title">接続先と操作</h2></div></div>
+          <label for="port-select">接続先のシリアルポート</label>
+          <div class="inline-input"><select id="port-select" class="plan-input"><option value="">ポートを選択してください</option></select><button id="refresh-ports" class="button secondary" type="button">再取得</button></div>
+          <p class="help small">自動選択しません。機体の接続先を確かめ、他のシリアルモニターを終了してください。</p>
+          <fieldset class="action-options"><legend>操作を選択</legend><label class="action-option"><input type="radio" name="action" value="flash" class="plan-input" checked><span><strong>アプリを書き込む</strong><small>現在のアプリを置き換える</small></span><span class="tag amber">FLASH</span></label><label class="action-option"><input type="radio" name="action" value="test" class="plan-input"><span><strong>テストを実行する</strong><small>書き込み・手動再起動後に実行</small></span><span class="tag">TEST</span></label></fieldset>
+          <div id="test-options" class="test-options" hidden><div><label for="test-cycles">繰り返し回数（1–20）</label><input id="test-cycles" class="plan-input" type="number" min="1" max="20" step="1" value="1" inputmode="numeric"></div><label class="checkbox-row"><input id="test-grid" class="plan-input" type="checkbox"><span>grid テストを含める</span></label></div>
+          <div class="plan-action"><p id="selection-summary" class="help">対象 run とポートを選択してください。書き込みには復旧用ファイルも必要です。</p><button id="build-plan" type="button" class="button primary" disabled>実行プランを確認 <span aria-hidden="true">→</span></button></div>
+          <p class="help small">このボタンでは実機への書き込みやテストは開始されません。</p>
+        </section>
+        <section id="plan-section" class="card plan-card" aria-labelledby="plan-title" hidden>
+          <div class="section-heading"><span class="step">04</span><div><p class="eyebrow">REVIEW & CONFIRM</p><h2 id="plan-title" tabindex="-1">実行前の最終確認</h2></div><span id="plan-action-tag" class="tag"></span></div>
+          <p id="plan-expires" class="help"></p>
+          <div id="plan-warnings"></div>
+          <dl id="plan-details" class="plan-details"></dl>
+          <details class="command-details"><summary>実行される固定コマンドを表示</summary><pre id="plan-command" class="command"></pre></details>
+          <div id="flash-warning" class="notice warning compact"><strong>アプリ領域への書き込みは、現在のアプリを置き換えます。</strong><p>対象は 0x10000 から最大 0x300000 バイトの app 領域です。インストール済み partition table は読み出し検証されません。書き込み後は手動で再起動してください。自動復旧は行われません。</p></div>
+          <fieldset id="acknowledgements" class="acknowledgements"><legend>内容を確認し、すべてにチェックしてください</legend></fieldset>
+          <div class="execute-row"><button id="discard-plan" type="button" class="button subtle">プランを破棄</button><button id="execute-plan" type="button" class="button destructive" disabled>確認して実行</button></div>
+        </section>
+      </div>
+      <aside class="sidebar">
+        <section class="card guide-card" aria-labelledby="guide-title"><p class="eyebrow">BEFORE YOU START</p><h2 id="guide-title">実機は、あなたの操作で。</h2><ol class="guide-list"><li><span>01</span><div><strong>選ぶ</strong><p>対象・復旧用アプリ・ポートを明示的に指定</p></div></li><li><span>02</span><div><strong>確かめる</strong><p>パスと SHA-256、操作範囲をプランで確認</p></div></li><li><span>03</span><div><strong>実行する</strong><p>確認事項に同意したあと、実行ボタンを押す</p></div></li></ol><div class="guide-divider"></div><p class="help small">探索・プラン作成は実機を操作しません。bootloader / partition table / フルフラッシュの書き込みは、この画面の対象外です。</p></section>
+        <section class="card jobs-card" aria-labelledby="jobs-title"><div class="jobs-heading"><div><p class="eyebrow">ACTIVITY</p><h2 id="jobs-title">実行状況</h2></div><span id="job-count" class="tag">0</span></div><div id="job-list" class="job-list"><p class="empty-state">まだ実行はありません。</p></div><div id="job-detail" hidden><div class="log-heading"><strong id="log-title">ログ</strong><span id="log-status" class="tag"></span></div><pre id="job-log" class="log-output" tabindex="0" aria-label="選択した処理のログ"></pre><p class="help small">表示は末尾 300 行まで。記録の全体は保持された run で確認してください。</p><div id="job-error" class="notice danger compact" hidden></div><div id="job-result" class="job-result" hidden></div></div></section>
+      </aside>
+    </div>
+    <footer><span>PocketJS · ローカル実機検証</span><span>選択を変更すると、確認済みプランは無効になります</span></footer>
+  </main>
+</body>
+</html>

@@ -41,6 +41,9 @@ function Invoke-Logged {
     if ($Arguments[0] -like '*verify_integrated_run.py') {
         if ($state.RejectPreflight) { throw 'mock artifact mismatch' }
         Write-Json $state.Entry $Log
+    } elseif ($Arguments[0] -like '*verify_port_identity.py') {
+        if ($state.RejectPort) { throw 'mock COM identity changed' }
+        'identity matched' | Set-Content -LiteralPath $Log
     } elseif ($Arguments -contains 'verify-flash') {
         if ($state.FailVerify) { throw 'mock verify failure' }
         'verified' | Set-Content -LiteralPath $Log
@@ -59,7 +62,7 @@ function Invoke-Logged {
     $commit = '2222222222222222222222222222222222222222'
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $binary).Hash
     $global:PocketIntegratedMock = @{
-        Root=$root; ToolChecks=0; Stages=0; RejectPreflight=$false; FailVerify=$false; FailSmoke=$false
+        Root=$root; ToolChecks=0; Stages=0; RejectPreflight=$false; FailVerify=$false; FailSmoke=$false; RejectPort=$false
         Commands=(New-Object 'System.Collections.Generic.List[string]')
         Entry=[pscustomobject]@{status='preflight-verified'; role='integrated'; sourceSha=$commit;
             binary=$binary; binarySha256=$hash; manifestSha256=('a' * 64); runRoot=$root}
@@ -82,14 +85,65 @@ function Invoke-Logged {
     $testParams.ConfirmDeviceFree = $true
     $testParams.ConfirmRunningImage = $true
     $testParams.Grid = $true
+    # GUI plan pins fail before write-flash, including a changed recovery source.
+    foreach ($name in @('ExpectedBinarySha256','ExpectedManifestSha256','ExpectedRecoverySha256')) {
+        $bad = $flashParams.Clone()
+        $bad[$name] = ('f' * 64)
+        $beforeWrites = @($global:PocketIntegratedMock.Commands | Where-Object { $_ -match '\|write-flash\|' }).Count
+        $blocked = $false
+        try { & (Join-Path $root 'Flash-Integrated.ps1') @bad }
+        catch { $blocked = $_.Exception.Message -match 'differs from the approved plan' }
+        if (!$blocked -or @($global:PocketIntegratedMock.Commands | Where-Object { $_ -match '\|write-flash\|' }).Count -ne $beforeWrites) {
+            throw "GUI pin did not stop a write: $name"
+        }
+    }
+    $flashParams.ExpectedBinarySha256 = $hash
+    $flashParams.ExpectedManifestSha256 = ('a' * 64)
+    $flashParams.ExpectedRecoverySha256 = $hash
+    $flashParams.ExpectedPortSignature = ('c' * 64)
+    $testParams.ExpectedBinarySha256 = $hash
+    $testParams.ExpectedManifestSha256 = ('a' * 64)
+    $testParams.ExpectedPortSignature = ('c' * 64)
     & (Join-Path $root 'Flash-Integrated.ps1') @flashParams
     $recordPath = Join-Path $root 'last-integrated-flash.json'
     $record = Get-Content -Raw -LiteralPath $recordPath | ConvertFrom-Json
     if ($record.status -ne 'flash-verified-awaiting-manual-reboot' -or $record.sourceSha -ne $commit) { throw 'Successful flash record mismatch.' }
+    if ($record.recoveryConfidence -ne 'user-attested-known-good' -or
+        (Split-Path -Leaf $record.recoveryImage) -ne 'known-good-app.bin') { throw 'Default recovery attestation was not recorded.' }
     $writes = @($global:PocketIntegratedMock.Commands | Where-Object { $_ -match '\|write-flash\|' })
     if ($writes.Count -ne 1 -or $writes[0] -notmatch '\|--before\|no-reset\|--after\|no-reset\|--no-stub\|write-flash\|0x10000\|') { throw 'App-only/no-reset command changed.' }
+    $flashParams.AllowUnverifiedRecovery = $true
+    $recoveryWarnings = @()
+    & (Join-Path $root 'Flash-Integrated.ps1') @flashParams -WarningVariable recoveryWarnings -WarningAction SilentlyContinue
+    $record = Get-Content -Raw -LiteralPath $recordPath | ConvertFrom-Json
+    if ($record.status -ne 'flash-verified-awaiting-manual-reboot' -or
+        $record.recoveryConfidence -ne 'unverified-candidate' -or
+        (Split-Path -Leaf $record.recoveryImage) -ne 'unverified-recovery-app.bin' -or
+        $record.recoverySha256 -ne $hash -or
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $record.recoveryImage).Hash -ne $hash -or
+        ($recoveryWarnings -join ' ') -notmatch 'no verified rollback guarantee') {
+        throw 'Unverified recovery confidence, warning or retained hash mismatch.'
+    }
     & (Join-Path $root 'Test-Integrated.ps1') @testParams
     if (!@($global:PocketIntegratedMock.Commands | Where-Object { $_ -match 'integrated_smoke.py.*\|--grid$' }).Count) { throw 'Ordinary GRID runner was not selected.' }
+    $badTest = $testParams.Clone()
+    $badTest.ExpectedFlashId = ('f' * 32)
+    $beforeTests = @($global:PocketIntegratedMock.Commands | Where-Object { $_ -match 'integrated_smoke.py' }).Count
+    $blocked = $false
+    try { & (Join-Path $root 'Test-Integrated.ps1') @badTest }
+    catch { $blocked = $_.Exception.Message -match 'differs from the approved plan' }
+    if (!$blocked -or @($global:PocketIntegratedMock.Commands | Where-Object { $_ -match 'integrated_smoke.py' }).Count -ne $beforeTests) {
+        throw 'GUI flash ID pin did not stop device tests.'
+    }
+    $global:PocketIntegratedMock.RejectPort = $true
+    $beforeWrites = @($global:PocketIntegratedMock.Commands | Where-Object { $_ -match '\|write-flash\|' }).Count
+    $blocked = $false
+    try { & (Join-Path $root 'Flash-Integrated.ps1') @flashParams }
+    catch { $blocked = $_.Exception.Message -match 'mock COM identity changed' }
+    if (!$blocked -or @($global:PocketIntegratedMock.Commands | Where-Object { $_ -match '\|write-flash\|' }).Count -ne $beforeWrites) {
+        throw 'Changed COM identity reached write-flash.'
+    }
+    $global:PocketIntegratedMock.RejectPort = $false
     $record.port = 'COM9998'
     $record | ConvertTo-Json -Depth 12 | Set-Content -Encoding UTF8 -LiteralPath $recordPath
     $count = @($global:PocketIntegratedMock.Commands | Where-Object { $_ -match 'integrated_smoke.py' }).Count

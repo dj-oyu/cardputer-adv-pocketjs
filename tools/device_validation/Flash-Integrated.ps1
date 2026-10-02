@@ -5,6 +5,11 @@ param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$Commit,
     [Parameter(Mandatory=$true)][ValidatePattern('^COM[1-9][0-9]*$')][string]$Port,
     [Parameter(Mandatory=$true)][string]$RecoveryImage,
+    [ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedPortSignature,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedBinarySha256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedManifestSha256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedRecoverySha256,
+    [switch]$AllowUnverifiedRecovery,
     [switch]$AllowFlash,
     [switch]$ConfirmCompatibleBootloaderAndPartitions,
     [switch]$ConfirmDeviceFree,
@@ -25,10 +30,16 @@ $record = $null
 try {
     $runLock = Enter-IntegratedRunLock $RunRoot
     $entry = Read-IntegratedEvidence $RunRoot $Commit $python (Join-Path $out 'preflight.json')
+    # Optional GUI plan pins are checked under the run lock, before any port use.
+    if (($ExpectedBinarySha256 -and $entry.binarySha256 -ne $ExpectedBinarySha256) -or
+        ($ExpectedManifestSha256 -and $entry.manifestSha256 -ne $ExpectedManifestSha256)) {
+        throw 'Integrated evidence differs from the approved plan; prepare it again.'
+    }
     $record = [ordered]@{
         schema='pocketjs-integrated-flash-v1'; role='integrated'; runRoot=$entry.runRoot
         flashId=[guid]::NewGuid().ToString('N'); port=$Port; sourceSha=$entry.sourceSha
         binarySha256=$entry.binarySha256; manifestSha256=$entry.manifestSha256
+        recoveryConfidence=$(if ($AllowUnverifiedRecovery) { 'unverified-candidate' } else { 'user-attested-known-good' })
         status='preflight'; runningImage='not verified'; startedUtc=[DateTime]::UtcNow.ToString('o'); failure=$null
     }
     # Invalidate old authorization before starting any new flash attempt.
@@ -37,7 +48,10 @@ try {
     if (!(Test-Path -LiteralPath $RecoveryImage -PathType Leaf) -or
         (Get-Item -LiteralPath $RecoveryImage).Length -le 0 -or
         (Get-Item -LiteralPath $RecoveryImage).Length -gt 0x300000) {
-        throw 'Supply a known-good factory app binary, not a full-flash backup.'
+        throw 'Supply a nonempty factory app binary within 0x300000 bytes, not a full-flash backup.'
+    }
+    if ($AllowUnverifiedRecovery) {
+        Write-Warning 'Recovery image is an unverified candidate. Chip, size and hash checks do not prove it boots; there is no verified rollback guarantee.'
     }
     # Flash an exact private snapshot; never pass a mutable build output to esptool.
     $image = Join-Path $out 'integrated-app.bin'
@@ -45,8 +59,12 @@ try {
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $image).Hash -ne $entry.binarySha256) {
         throw 'Built image changed while copying it; no device operation performed.'
     }
-    $recoveryCopy = Join-Path $out 'known-good-app.bin'
+    $recoveryName = if ($AllowUnverifiedRecovery) { 'unverified-recovery-app.bin' } else { 'known-good-app.bin' }
+    $recoveryCopy = Join-Path $out $recoveryName
     $recoveryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $RecoveryImage).Hash
+    if ($ExpectedRecoverySha256 -and $recoveryHash -ne $ExpectedRecoverySha256) {
+        throw 'Recovery image differs from the approved plan; prepare it again.'
+    }
     Copy-Item -LiteralPath $RecoveryImage -Destination $recoveryCopy -ErrorAction Stop
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $recoveryCopy).Hash -ne $recoveryHash) {
         throw 'Recovery image changed while copying it.'
@@ -75,7 +93,9 @@ try {
     $record.status = 'flashing'
     Write-Json $record (Join-Path $out 'result.json')
     Write-Json $record (Join-Path $RunRoot 'last-integrated-flash.json')
+    Assert-ExpectedPortIdentity $Port $ExpectedPortSignature $python (Join-Path $out 'port-before-write.log')
     Invoke-Logged $python ($esp + @('write-flash','0x10000',$image)) (Join-Path $out 'write.log')
+    Assert-ExpectedPortIdentity $Port $ExpectedPortSignature $python (Join-Path $out 'port-before-verify.log')
     Invoke-Logged $python ($esp + @('verify-flash','0x10000',$image)) (Join-Path $out 'verify.log')
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $image).Hash -ne $entry.binarySha256) {
         throw 'Staged image changed during flash verification.'

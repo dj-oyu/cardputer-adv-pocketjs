@@ -315,3 +315,13 @@ At authoring time the cloud environment ran Python mocks and syntax/whitespace
 checks only. PowerShell, Windows EIM/ESP-IDF, esptool and a device were unavailable:
 **PowerShell runtime, firmware builds, flashing and hardware behavior are not
 claimed tested**. Run the offline PowerShell check first on your Windows machine.
+
+
+## Local browser GUI (Windows 11)
+
+The optional [local validation GUI](gui/README.md) takes a required project path
+and an optional ESP-IDF path, discovers recovery app candidates in the project and
+registered Git worktrees, and uses retained integrated runs without rebuilding.
+It reuses the strict integrated Flash/Test path with explicit one-use approval
+plans and loopback-only session authentication. It is separate tooling, not
+firmware or an MCP server.

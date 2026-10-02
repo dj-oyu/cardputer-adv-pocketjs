@@ -20,7 +20,12 @@ monitors, other test runners and any agent using the port. Confirm the board is
 free and take control of it yourself. The scripts cannot discover every other
 serial user. Do not run two harnesses against one board under different port names.
 
-Retain a **known-good ESP32-S3 factory app binary**, not a whole-flash backup.
+Retain an **ESP32-S3 factory app binary**, not a whole-flash backup. By default,
+supplying it means you attest it is known-good. If its working state is unknown,
+add `-AllowUnverifiedRecovery` to retain it explicitly as an **unverified recovery
+candidate** instead. Its chip, size and hash are still checked, but those checks
+do not prove it boots: **there is no verified rollback guarantee**. A full-device
+backup and proof that this candidate works are not required by that option.
 You must already have a compatible bootloader and the matching partition layout:
 factory app at `0x10000`, size `0x300000`. The scripts do not install or repair
 bootloaders, partition tables, NVS, dictionary, fonts or storage. `write-flash`
@@ -88,11 +93,18 @@ $recovery = 'C:\path\to\known-good-factory-app.bin'
   -ConfirmCompatibleBootloaderAndPartitions -ConfirmDeviceFree -ConfirmDownloadMode
 ```
 
+If `$recovery` is only a candidate whose working state is unknown, append
+`-AllowUnverifiedRecovery` to that command. The script records
+`recoveryConfidence=unverified-candidate`, emits a warning, and retains the copy
+as `unverified-recovery-app.bin`. Without that switch it records
+`user-attested-known-good` and retains `known-good-app.bin`; neither label is an
+independent device test of the recovery file.
+
 The script verifies the artifacts, keeps private snapshots of both app images,
 checks their ESP32-S3 image headers, and writes/verifies **only `0x10000`** with
 esptool `--before no-reset --after no-reset --no-stub`. A failed verify invalidates
 the previous integrated flash success. No command resets, erase-alls, restores or
-reboots the board, including on failure. The known-good copy is retained for your
+reboots the board, including on failure. The recovery copy is retained for your
 own explicit recovery procedure; it is never flashed automatically.
 
 When flash verification succeeds, the port lock is released. **The device is

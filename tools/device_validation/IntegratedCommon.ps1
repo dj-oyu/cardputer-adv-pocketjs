@@ -32,3 +32,11 @@ function Assert-IntegratedFlashRecord {
         throw 'No matching integrated flash verification. Run Flash-Integrated.ps1 for this exact commit, run and port first.'
     }
 }
+
+function Assert-ExpectedPortIdentity {
+    param([string]$Port, [string]$Expected, [string]$Python, [string]$Log)
+    if ($Expected) {
+        Invoke-Logged $Python @((Join-Path $PSScriptRoot 'verify_port_identity.py'),
+            '--port',$Port,'--signature',$Expected) $Log
+    }
+}

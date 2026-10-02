@@ -4,6 +4,10 @@ param(
     [Parameter(Mandatory=$true)][string]$RunRoot,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$Commit,
     [Parameter(Mandatory=$true)][ValidatePattern('^COM[1-9][0-9]*$')][string]$Port,
+    [ValidatePattern('^[0-9a-f]{64}$')][string]$ExpectedPortSignature,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedBinarySha256,
+    [ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedManifestSha256,
+    [ValidatePattern('^[0-9a-f]{32}$')][string]$ExpectedFlashId,
     [ValidateRange(1,20)][int]$Cycles = 3,
     [switch]$Grid,
     [switch]$AllowDevice,
@@ -31,6 +35,11 @@ try {
     # Read flash state only under both locks, not before waiting for their owners.
     $flash = Get-Content -Raw -LiteralPath (Join-Path $RunRoot 'last-integrated-flash.json') | ConvertFrom-Json
     Assert-IntegratedFlashRecord $flash $entry $Port
+    if (($ExpectedBinarySha256 -and $entry.binarySha256 -ne $ExpectedBinarySha256) -or
+        ($ExpectedManifestSha256 -and $entry.manifestSha256 -ne $ExpectedManifestSha256) -or
+        ($ExpectedFlashId -and $flash.flashId -ne $ExpectedFlashId)) {
+        throw 'Integrated flash evidence differs from the approved plan; prepare it again.'
+    }
     $result.binarySha256 = $entry.binarySha256
     $result.manifestSha256 = $entry.manifestSha256
     $result.flashId = $flash.flashId
@@ -39,6 +48,7 @@ try {
     $arguments = @((Join-Path $PSScriptRoot 'integrated_smoke.py'),'--allow-device','--port',$Port,
         '--cycles',"$Cycles",'--out',(Join-Path $out 'ordinary'))
     if ($Grid) { $arguments += '--grid' }
+    Assert-ExpectedPortIdentity $Port $ExpectedPortSignature $python (Join-Path $out 'port-before-test.log')
     Invoke-Logged $python $arguments (Join-Path $out 'ordinary-console.log')
     $result.status = if ($Grid) { 'hello-and-grid-markers-passed' } else { 'hello-markers-passed' }
 } catch {
