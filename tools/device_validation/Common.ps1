@@ -8,12 +8,14 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
 function Invoke-Logged {
     param([string]$Exe, [string[]]$Arguments, [string]$Log)
     Get-Command $Exe -ErrorAction Stop | Out-Null
-    $LASTEXITCODE = $null
+    # Native commands update the global variable in Windows PowerShell 5.1 and 7.
+    # A local assignment shadows that value, even after a successful command.
+    $global:LASTEXITCODE = $null
     $old = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
         & $Exe @Arguments 2>&1 | Tee-Object -FilePath $Log | Out-Host
-        $code = $LASTEXITCODE
+        $code = $global:LASTEXITCODE
     } finally { $ErrorActionPreference = $old }
     if ($null -eq $code -or $code -ne 0) { throw "Command failed ($code): $Exe; see $Log" }
 }

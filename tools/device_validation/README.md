@@ -213,8 +213,10 @@ python .\test_safe_smoke.py
 ```
 
 `Test-Offline.ps1` parses every PowerShell file with PowerShell's own parser,
-runs the serial mocks, and optionally exercises the read-only Y plan. It does
-not run IDF or access any port. The Python tests exercise normal cycles, split
+runs the serial mocks, checks `Invoke-Logged` with real Python processes that
+exit 0/7/0 (including stdout/stderr logs and a caller-local exit-code shadow),
+and optionally exercises the read-only Y plan. It does not run IDF or access
+any port. The Python tests exercise normal cycles, split
 serial markers, wrong app, ANSI colors, error logging, bounded timeout, diagnostic-key
 rejection, missing/equal/unequal GRID records, CLI opt-in and static guardrails.
 
