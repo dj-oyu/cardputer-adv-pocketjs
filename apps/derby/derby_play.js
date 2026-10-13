@@ -63,7 +63,7 @@ globalThis.frame = function (b) {
             const w = order(rs)[0];
             if (w !== ld) { if (lead > 500) log('LEAD #' + (w + 1) + ' at ' + rnd(lead) + 'M'); if (lead > 400) dl = 60; ld = w; }
             // The photo: every runner where it was when the winner crossed.
-            if (!was && rs.done) photoX = at((rs.tc[w] - rs.t + DT) / DT);
+            if (!was && rs.done) photoX = photo((rs.tc[w] - rs.t + DT) / DT);
           }
           // The band's plan takes the gate's slot (README "plan の登録").
           if (live.gate && lead > 120) { drop(['gate']); want(['band']); }
@@ -90,8 +90,8 @@ globalThis.frame = function (b) {
         extra = ['map', z8(0)];
         for (let i = 0; i < 8; ++i) extra[1][i] = 8 + mn(rs.x[i], D) * .224;
       } else if (scene === 'photo') {
-        c = shot(4, photoX);
-        xs = photoX;
+        xs = photo();
+        c = shot(4, xs);
         extra = ['photo', [120]];
         if (t > 110 || t > 20 && P('1')) { enter('res'); break fr; }
       } else if (scene === 'res') {

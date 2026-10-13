@@ -82,6 +82,16 @@ function at(u) {
   zo.sort((a, b) => lz[b] - lz[a]);
   return a;
 }
+// Keep all projection inputs from the winner's crossing, before at() moves them.
+function photo(u) {
+  if (u !== undefined) {
+    const x = at(u);
+    x.z = lz.slice(); x.o = zo.slice();
+    return x;
+  }
+  lz = photoX.z; zo = photoX.o;
+  return photoX;
+}
 // Finish: run the rest of the field unseen, then settle the bet.
 function settle() {
   while (rs.done < 8 && rs.t < 200) step(F, rs, DT);
