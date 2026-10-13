@@ -1,26 +1,14 @@
-# libopus, decoder only, fixed point. FETCHED, NOT VENDORED.
-#
-# The sources live in .cache/codecs/opus-<tag>, which tools/prepare_dependencies.py
-# clones at a pinned release tag the same way it pins the PocketJS upstream. Nothing
-# from xiph/opus is committed to this tree; what is committed is this file, the list
-# it excludes, and licenses/libopus.txt.
-#
-# WHICH TAG, AND WHY IT IS NOT 1.5.2. The only decode-cost measurement this project
-# has (3,208 us mean per 20 ms frame, 2026-09-07, docs/apps/opus-feasibility.md §2) was
-# taken on master a6128f4 of 2026-09-06. v1.6.1 (2026-01-13) is the nearest release
-# behind that commit; v1.5.2 is 2024-04-10, two and a half years of CELT changes
-# further away. Pinning to the release closest to the tree that was measured is what
-# keeps that number describing this build. It is still not the same tree -- the
-# decode task logs its own mean and worst per stream (OPUSDEC in pocket/opus_feed.c)
-# so the shipped code reports its own cost rather than inheriting one.
+# libopus, decoder only, fixed point. Sources are initialized before build at the
+# parent repository's formal third_party/opus Gitlink, preserving release v1.6.1.
+# CMake never follows a tag/branch or downloads dependencies.
 set(OPUS_TAG "v1.6.1")
-set(OPUS_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.cache/codecs/opus-1.6.1")
+set(OPUS_DIR "${CMAKE_CURRENT_LIST_DIR}/../../third_party/opus")
 
 if(NOT EXISTS "${OPUS_DIR}/include/opus.h")
     message(FATAL_ERROR
-        "libopus sources are missing from ${OPUS_DIR}.\n"
-        "Run:  python tools/prepare_dependencies.py\n"
-        "It clones xiph/opus at ${OPUS_TAG} into .cache/. Nothing is vendored.")
+        "libopus Git submodule is missing. Run git submodule update --init --checkout "
+        "-- third_party/opus (or python tools/prepare_dependencies.py) before building. "
+        "CMake never downloads dependencies.")
 endif()
 
 file(GLOB CELT_SRC "${OPUS_DIR}/celt/*.c")
