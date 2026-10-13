@@ -22,7 +22,7 @@ if not bmi.exists():
 subprocess.run(['git','-C',str(bmi),'checkout','--detach','41129fcfe39c583ee5462d79195741945d51c1fe'],check=True)
 # libopus, for pocket.audio.player's Opus decoding. FETCHED AT A TAG, NOT VENDORED:
 # components/opus/CMakeLists.txt compiles these sources in place out of .cache/, the
-# same arrangement minimp3 uses, so this tree
+# minimp3 now uses its checked-in Git submodule instead; this tree
 # carries the build recipe and licenses/libopus.txt but none of xiph/opus's ~100 C files.
 #
 # v1.6.1 rather than the 1.5.2 the study named: the only decode-cost measurement

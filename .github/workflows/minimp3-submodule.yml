@@ -1,0 +1,28 @@
+name: Minimp3 submodule contract
+on:
+  pull_request:
+    paths:
+      - '.gitmodules'
+      - 'third_party/minimp3'
+      - 'components/minimp3/**'
+      - 'tools/prepare_minimp3.py'
+      - 'tools/test_minimp3_submodule.py'
+      - '.github/workflows/minimp3-submodule.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.gitmodules'
+      - 'third_party/minimp3'
+      - 'components/minimp3/**'
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Compile initialized codec and reject missing submodule without SDK or device
+        run: python3 tools/test_minimp3_submodule.py

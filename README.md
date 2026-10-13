@@ -4,6 +4,15 @@ M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェ�
 
 XMBホーム（背景は LEVEL WAVE / OCEAN + STARS / SOLAR SAIL / FLOWER）、JSアプリ、SKK日本語入力、JavaScript Playground、共通JS API `pocket.*` を実装しています。アプリの一覧は `main/ui/shell.c` の `apps[]` が正です。
 
+## 初回取得
+
+minimp3は `third_party/minimp3` の正式Git submoduleです。checkout後に
+`git submodule update --init --checkout -- third_party/minimp3` を実行してください。
+`python tools/prepare_minimp3.py` も親Gitlinkの固定commitを取得します。
+CMakeのビルド中には取得しません。BMI270/libopusなど他の未追跡依存と生成物は
+[clean checkout依存一覧](docs/platform/clean-checkout-dependencies.md)を参照してください。
+SDKはESP-IDF 6.0.1を使います。
+
 ## 設計ドキュメント
 
 入口は [docs/README.md](docs/README.md) です。いまの主線は VM の高速化（[docs/vm/](docs/vm/)）、PIE と描画の高速化（[docs/perf/](docs/perf/)）、デザインシステム Kasane（[docs/kasane/](docs/kasane/)）の3本です。よく使うもの:
