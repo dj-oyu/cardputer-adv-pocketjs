@@ -17,5 +17,6 @@ add_custom_target(flash_budget ALL
 # rather than of the builds.
 add_custom_target(memory_log ALL
     COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/memlog.py"
-            --map "${CMAKE_BINARY_DIR}/cardputer_pocketjs.map" --only-changes
+            --map "${CMAKE_BINARY_DIR}/cardputer_pocketjs.map"
+            --log "${CMAKE_BINARY_DIR}/memory.jsonl" --only-changes
     DEPENDS gen_project_binary VERBATIM)
