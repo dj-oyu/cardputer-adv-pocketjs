@@ -1,6 +1,8 @@
 """Verify all public fixed source dependencies with the merged broker importer."""
 
+import io
 import json
+import zipfile
 import os
 import shutil
 import subprocess
@@ -8,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from cardputer_mcp.config import BuildProject, Settings, SourceRepository
-from cardputer_mcp.source_snapshot import SourceSnapshots
+from cardputer_mcp.source_snapshot import SourceSnapshots, download, file_receipt
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORIES = [
@@ -53,7 +55,40 @@ def main() -> None:
                 )
             },
         )
-        sources = SourceSnapshots(settings)
+        def transport(url, deadline, live, limit):
+            data = download(url, deadline, live, limit)
+            for path, repository in zip(
+                ("third_party/bmi270", "third_party/minimp3", "third_party/opus"), REPOSITORIES
+            ):
+                if not url.startswith("https://codeload.github.com/" + repository + "/zip/"):
+                    continue
+                tracked = {}
+                for row in subprocess.check_output(
+                    ["git", "-C", str(ROOT / path), "ls-tree", "-rz", "HEAD"], text=True,
+                ).split("\0"):
+                    if not row:
+                        continue
+                    header, name = row.split("\t", 1)
+                    mode, kind, sha = header.split()
+                    tracked[name] = (mode, sha)
+                archived = {}
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                    for item in archive.infolist():
+                        if item.is_dir():
+                            continue
+                        name = item.filename.split("/", 1)[1]
+                        mode = "100755" if (item.external_attr >> 16) & 0o111 else "100644"
+                        archived[name] = (mode, file_receipt(archive.read(item), mode)["git_sha1"])
+                missing = sorted(set(tracked) - set(archived))
+                changed = sorted(name for name in archived if tracked.get(name) != archived[name])
+                print(json.dumps({
+                    "archive_repository": repository,
+                    "missing_paths": missing[:12], "missing_count": len(missing),
+                    "changed_paths": changed[:12], "changed_count": len(changed),
+                }), flush=True)
+            return data
+
+        sources = SourceSnapshots(settings, transport)
         plan = sources.prepare("cardputer", commit, "ci-owner") | {"job_id": "all-public-sources"}
         result = sources.fetch(plan, lambda: True, lambda _: None)
         source, metadata = sources.resolve("cardputer", result["source_receipt"], "ci-owner")
