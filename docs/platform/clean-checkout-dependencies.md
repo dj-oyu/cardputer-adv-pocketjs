@@ -1,37 +1,47 @@
 # Clean checkout dependency inventory
 
-This change moves only minimp3 to a formal Git submodule. The parent Gitlink at
-`third_party/minimp3` pins lieff/minimp3 commit
-`ea99364f61c14656440e8d77e9c233ccf3124633`. Initialize it before compilation:
+All required external source dependencies are formal Git submodules initialized
+before configure. The parent repository's mode-160000 Gitlinks are the sole
+revision authority; no independent dependency lock or branch tracking is added.
+
+| Path | Upstream | Fixed commit / prior version |
+| --- | --- | --- |
+| third_party/bmi270 | https://github.com/boschsensortec/BMI270_SensorAPI.git | 41129fcfe39c583ee5462d79195741945d51c1fe, unchanged from prepare_dependencies.py |
+| third_party/minimp3 | https://github.com/lieff/minimp3.git | ea99364f61c14656440e8d77e9c233ccf3124633, unchanged from prepare_minimp3.py |
+| third_party/opus | https://github.com/xiph/opus.git | 22244de5a79bd1d6d623c32e72bf1954b56235be, existing v1.6.1 annotated tag a5d6c1b6f4e582df97390f9ac5c6e7c51cbffffe |
 
 ```sh
-git submodule update --init --checkout -- third_party/minimp3
-# Equivalent explicit preparation:
+git submodule update --init --recursive --checkout
+# Equivalent explicit initialization of the required paths:
+python tools/prepare_dependencies.py
+# Only minimp3:
 python tools/prepare_minimp3.py
 ```
 
-The helper reads the parent Gitlink instead of maintaining a separate revision
-lock. No `--remote` or branch tracking is used. CMake reads the initialized
-submodule directly and never fetches it. For broker source snapshots, the importer
-materializes this same Gitlink into this path and records repository/commit/tree
-and content hashes; no Git metadata or preparation command is needed at build time.
+Preparation reads the parent Gitlinks and verifies each resulting HEAD. No
+`--remote` or latest branch is used. CMake reads third_party directly and fails
+if required sources are absent; it never downloads anything. Existing license
+notices in licenses/BMI270.txt, licenses/minimp3.txt and licenses/libopus.txt stay
+unchanged, and each upstream submodule retains its own license files.
 
-Other clean-checkout prerequisites found at main
-`6a139780b7eeececfaa17cf2ddee576a10a027f5`:
+For broker snapshots, the importer materializes the same fixed Gitlinks without
+Git metadata and records repository/commit/tree/archive/content hashes. Register
+all three upstream repositories in source_repository.submodule_repositories.
+Do not invoke preparation during SDK build.
+
+Other clean-checkout inputs:
 
 | Input | Status and consumer |
 | --- | --- |
-| BMI270 | **Untracked fetched dependency:** `.cache/bmi270/bmi2.c`, `bmi270.c`, headers are required by main/CMakeLists.txt. prepare_dependencies.py pins Bosch commit 41129fcfe39c583ee5462d79195741945d51c1fe. Still a clean snapshot build blocker. |
-| libopus | **Untracked fetched dependency:** `.cache/codecs/opus-1.6.1` is required by components/opus/CMakeLists.txt. prepare_dependencies.py fetches xiph/opus release tag v1.6.1. Still a clean snapshot build blocker; a tag is not a fixed Gitlink. |
-| QuickJS / PocketJS | Tracked under components/quickjs-ng and components/pocketjs_guest. No old PocketJS Rust/UI archives are needed by the current root CMake. |
-| dependencies.lock | Tracked but contains historical .cache/PocketJS component entries. Broker builds disable IDF component-manager fetching; this file is not proof that missing codec/sensor sources exist. |
-| ESP-IDF / toolchain | External ESP-IDF **6.0.1** plus its Python, CMake, Ninja and Xtensa tools. No SDK is supplied by this repository. |
-| Node | External Node 16+ is required for the tracked DERBY @plan generators. No node_modules installation is required by those generators. |
-| Font / SFX / scene tables / app chunks | Tracked generators run during configure and write under the chosen CMake build directory; not required as pre-populated source files. |
-| sdkconfig / build products / memory log | Generated outputs. Start from tracked sdkconfig.defaults; broker sets SDKCONFIG in its build directory. memory_log now writes in CMAKE_BINARY_DIR. |
-| heapprobe bytecode | Optional .cache/compile_peak/derby.bc only for diagnostic heapprobe builds; absence uses the existing no-loader behavior. |
+| QuickJS / PocketJS | Tracked under components/quickjs-ng and components/pocketjs_guest. No historical PocketJS Rust/UI archive is required by current root CMake. |
+| dependencies.lock | Tracked historical component-manager metadata still contains old .cache/PocketJS entries. It is not the source dependency authority. Broker builds use IDF_COMPONENT_MANAGER=0; standard builds resolve the current tracked IDF manifests. This PR does not regenerate that metadata. |
+| ESP-IDF / tools | External ESP-IDF **6.0.1**, its Python/CMake/Ninja/Xtensa tools; no SDK is bundled. |
+| Node | External Node 16+ for tracked DERBY @plan generators. Those generators need no node_modules install. |
+| Font / SFX / scene / app chunks | Tracked Python generators use standard-library imports and create outputs under CMAKE_BINARY_DIR; no pre-populated source files are required. |
+| sdkconfig / build products / memory log | Generated outputs. Start from tracked sdkconfig.defaults; broker places SDKCONFIG and memory log in its build directory. |
+| heapprobe bytecode | Optional .cache/compile_peak/derby.bc for explicit diagnostic heapprobe builds; absence keeps existing no-loader behavior. |
 
-This PR does not fetch or convert BMI270/libopus, regenerate the historical lock,
-or claim that the whole firmware compiles from a clean snapshot. Those changes
-need their own reviewed dependency decision before a network-free broker build.
-No device operation is part of validation.
+Required BMI270/libopus/minimp3 .cache dependencies are removed. Complete
+ESP-IDF cross-compilation and actual hardware acceptance still require the
+external SDK and authorized deployment; host contract CI is not device evidence.
+No game or device behavior is changed by this dependency relocation.

@@ -1,19 +1,22 @@
-name: Minimp3 submodule contract
+name: Source submodule contract
 on:
   pull_request:
     paths:
       - '.gitmodules'
-      - 'third_party/minimp3'
+      - 'third_party/**'
       - 'components/minimp3/**'
-      - 'tools/prepare_minimp3.py'
+      - 'components/opus/**'
+      - 'main/CMakeLists.txt'
+      - 'tools/prepare*'
       - 'tools/test_minimp3_submodule.py'
       - '.github/workflows/minimp3-submodule.yml'
   push:
     branches: [main]
     paths:
       - '.gitmodules'
-      - 'third_party/minimp3'
+      - 'third_party/**'
       - 'components/minimp3/**'
+      - 'components/opus/**'
 permissions:
   contents: read
 jobs:
@@ -22,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          submodules: true
+          submodules: recursive
           persist-credentials: false
-      - name: Compile initialized codec and reject missing submodule without SDK or device
+      - name: Compile initialized sources and reject missing dependencies without SDK or device
         run: python3 tools/test_minimp3_submodule.py

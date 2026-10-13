@@ -1,3 +1,9 @@
+[submodule "bmi270"]
+	path = third_party/bmi270
+	url = https://github.com/boschsensortec/BMI270_SensorAPI.git
 [submodule "minimp3"]
 	path = third_party/minimp3
 	url = https://github.com/lieff/minimp3.git
+[submodule "opus"]
+	path = third_party/opus
+	url = https://github.com/xiph/opus.git

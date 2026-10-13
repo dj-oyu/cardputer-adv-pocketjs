@@ -6,10 +6,10 @@ XMBホーム（背景は LEVEL WAVE / OCEAN + STARS / SOLAR SAIL / FLOWER）、J
 
 ## 初回取得
 
-minimp3は `third_party/minimp3` の正式Git submoduleです。checkout後に
-`git submodule update --init --checkout -- third_party/minimp3` を実行してください。
-`python tools/prepare_minimp3.py` も親Gitlinkの固定commitを取得します。
-CMakeのビルド中には取得しません。BMI270/libopusなど他の未追跡依存と生成物は
+BMI270・minimp3・libopusは `third_party/` の正式Git submoduleです。
+checkout後に `git submodule update --init --recursive --checkout` を実行してください。
+`python tools/prepare_dependencies.py` も親Gitlinkの固定commitだけを取得します。
+CMakeのビルド中には取得しません。revisionと生成物・外部SDKの前提は
 [clean checkout依存一覧](docs/platform/clean-checkout-dependencies.md)を参照してください。
 SDKはESP-IDF 6.0.1を使います。
 

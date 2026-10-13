@@ -62,7 +62,7 @@ eim shell v6.0.1
 
 ## 依存準備と標準ビルド
 
-リポジトリルートにCMakeLists.txtとmainがある。初回はIDF環境を有効化して `python tools/prepare_dependencies.py` を実行し、WSLで本リポジトリへ移動して `bash tools/build_native.sh` を実行する。後者はespupで用意したpocketjs-espツールチェーンと `.cache/tools/export-esp.sh` を前提とする。既存のアーカイブを使う通常の増分ビルドでは毎回Rustを構築しない。
+リポジトリルートにCMakeLists.txtとmainがある。初回は `git submodule update --init --recursive --checkout`（または `python tools/prepare_dependencies.py`）でBMI270/minimp3/libopusの親Gitlinkに固定されたソースを初期化する。ESP-IDF 6.0.1環境を有効化して `idf.py -B build build` を実行する。現在のroot CMakeはQuickJS/PocketJSを追跡済みcomponentsから読むため、歴史的なPocketJS Rust/UIアーカイブや `.cache/tools/export-esp.sh` は不要。CMakeは依存を取得しない。詳細は [clean checkout依存一覧](clean-checkout-dependencies.md)。
 
 ```powershell
 Set-Location C:\devs\m5stack\cardputer-adv-pocketjs
