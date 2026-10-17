@@ -136,6 +136,11 @@ int main(void){
     // Finishing capture restores ordinary dispatch on the very next turn.
     capture_active=false;calls[0]=0;assert(app_tick(0)==0);
     assert(strchr(calls,'F')&&strchr(calls,'P'));
+    // main.c can send a press and its release within one capture scope.
+    // Keep capture active across BOTH calls, as the real wrapper does.
+    reset();capture_active=need_present=activate=true;
+    assert(app_tick(0x20)==0);assert(app_tick(0)==0);
+    assert(!strcmp(calls,"P"));
     // Back still reaches its final save frame despite a capture flag.
     reset();capture_active=need_present=true;assert(app_tick(0x2000)==0);
     assert(delivered==0x2000&&strchr(calls,'F'));
