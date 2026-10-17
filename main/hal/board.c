@@ -125,12 +125,17 @@ static esp_err_t tx_reap(void) {
     tx_inflight = false;
     return e;
 }
-static bool capture;
+static bool capture,capture_turn_taken;
 void board_capture(bool enabled) {
-    capture=enabled;
+    capture=enabled;capture_turn_taken=false;
     printf(enabled?"CAPTURE_BEGIN 240 135\n":"CAPTURE_END\n");
 }
 bool board_capture_active(void) { return capture; }
+bool board_capture_take_turn(void) {
+    if(!capture||capture_turn_taken)return false;
+    capture_turn_taken=true;
+    return true;
+}
 
 static esp_err_t tx(bool data, const void *bytes, size_t n) {
     gpio_set_level(34, data);

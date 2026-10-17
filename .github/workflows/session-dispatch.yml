@@ -1,0 +1,23 @@
+name: Session dispatch host checks
+on:
+  pull_request:
+    paths:
+      - 'main/app_session.c'
+      - 'main/hal/board.c'
+      - 'main/hal/board.h'
+      - 'tools/test_session_dispatch.c'
+      - 'tools/test_session_dispatch.py'
+      - '.github/workflows/session-dispatch.yml'
+permissions:
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Actual session functions with synthetic ports, sanitizers and optimized build
+        run: python3 tools/test_session_dispatch.py

@@ -63,6 +63,10 @@ static bool pocket_kasane_needs_present(void){return need_present;}
 static bool pocket_kasane_has_submission(void){return submission;}
 static void pocket_kasane_set_animation_time(uint64_t now){(void)now;}
 static bool native_animation,system_pending;
+// Actual scope reset/claim functions, without printing protocol text in tests.
+#define printf(...) ((void)0)
+#include "capture_scope_impl.inc"
+#undef printf
 static bool pocket_kasane_animation_pending(void){return native_animation;}
 static bool pocket_kasane_system_pending(void){return system_pending;}
 static int pocket_kasane_input_scope(bool b){(void)b;return scope;}
@@ -94,7 +98,7 @@ static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
 #include "session_dispatch_impl.inc"
 static void reset(void){
     calls[0]=0;pending=remain=activate=need_present=submission=false;
-    native_animation=system_pending=false;
+    native_animation=system_pending=false;board_capture(false);
     runaway=exit_requested=stopped=turn_continued=cont_submits=frame_parks=proc_commits=proc_pending=false;scope=KSN_INPUT_APP;
     jobs_left=frame_met_pending=false;
     presenter_result=KSN_OK;
@@ -126,6 +130,28 @@ int main(void){
     reset();need_present=submission=true;assert(app_tick(0)==0);assert(!strcmp(calls,"P"));
     reset();need_present=submission=native_animation=true;assert(app_tick(0)==0);assert(calls[0]=='P'&&strchr(calls,'F'));
     reset();need_present=true;assert(app_tick(0)==0);assert(calls[0]=='P'&&strchr(calls,'F'));
+    // A diagnostic capture forces an owner redraw. Do not run JS and present
+    // its next picture inside the same CAPTURE_BEGIN/END interval: that emits
+    // row 0 again after row 134, invalidating the one-frame serial protocol.
+    reset();board_capture(true);need_present=activate=true;assert(board_capture_active());
+    assert(app_tick(0)==0);assert(!strcmp(calls,"P"));
+    // Finishing capture restores ordinary dispatch on the very next turn.
+    board_capture(false);calls[0]=0;assert(app_tick(0)==0);
+    assert(strchr(calls,'F')&&strchr(calls,'P'));
+    // main.c can send a press and its release within one capture scope.
+    // Keep capture active across BOTH calls, as the real wrapper does.
+    reset();board_capture(true);need_present=activate=true;
+    assert(app_tick(0x20)==0);assert(app_tick(0)==0);
+    assert(!strcmp(calls,"P"));
+    // Even new invalidation/native work cannot spend a second turn in this
+    // scope. Only closing and starting the NEXT scope replenishes its turn.
+    need_present=native_animation=true;assert(app_tick(0)==0);
+    assert(!strcmp(calls,"P"));
+    board_capture(false);board_capture(true);assert(app_tick(0)==0);
+    assert(!strcmp(calls,"PP"));
+    // Back still reaches its final save frame despite a capture flag.
+    reset();board_capture(true);need_present=true;assert(app_tick(0x2000)==0);
+    assert(delivered==0x2000&&strchr(calls,'F'));
     reset();need_present=submission=true;assert(app_tick(0x2000)==0);assert(delivered==0x2000);
     reset();scope=KSN_INPUT_BLOCKED;assert(app_tick(0x4000)==0);assert(!delivered);
     reset();pending=remain=true;now=1000;assert(app_tick(0)==0);assert(!strchr(calls,'P'));

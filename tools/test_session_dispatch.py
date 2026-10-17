@@ -10,6 +10,10 @@ end = source.index('// The half of a turn that is not JavaScript:', start)
 with tempfile.TemporaryDirectory(prefix='ksn-session-') as directory:
     path = Path(directory)
     (path / 'session_dispatch_impl.inc').write_text(source[start:end])
+    board = (root / 'main/hal/board.c').read_text()
+    capture_start = board.index('static bool capture,')
+    capture_end = board.index('static esp_err_t tx(', capture_start)
+    (path / 'capture_scope_impl.inc').write_text(board[capture_start:capture_end])
     for flags in (['-O1', '-g', '-fsanitize=address,undefined'], ['-O2', '-fstrict-aliasing']):
         exe = path / 'test'
         subprocess.run(['gcc', '-std=c11', '-Wall', '-Wextra', '-Werror',

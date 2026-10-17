@@ -2124,6 +2124,11 @@ esp_err_t app_tick(uint32_t buttons) {
     // instead would drop the save silently, and only for the apps that are
     // busy enough to still have a queue, which is when saving matters most.
     turn_continued=false;
+    // main.c may call both a press and release tick before closing capture.
+    // Claim the scope before any presenter/animation work can invalidate again.
+    // Back's final save remains host-priority (main.c runs it before capture).
+    if(!(buttons&0x2000)&&board_capture_active()&&!board_capture_take_turn())
+        return ESP_OK;
 #ifdef KASANE_MEGADEMO_TRACE
     mdt_emit();
     mdt.began=esp_timer_get_time();
@@ -2162,7 +2167,11 @@ esp_err_t app_tick(uint32_t buttons) {
         // indicators can invalidate every tick; returning here unconditionally
         // would starve the guest for the entire recording. Guest submissions
         // retain their existing dedicated display turn, and IO keeps retrying.
-        if(!(buttons&0x2000)&&(prior_submission||pocket_kasane_needs_present()))
+        // Capture's forced redraw is also a dedicated display turn: main.c
+        // wraps this tick in one BEGIN/END, so running JS and presenting again
+        // here would repeat PIX rows inside that single-frame interval.
+        if(!(buttons&0x2000)&&(prior_submission||board_capture_active()||
+                              pocket_kasane_needs_present()))
             return ESP_OK;
         // Back is host-priority and this is the guest's final save turn. Carry
         // it into JS even if LCD IO still needs retry, so display trouble cannot
