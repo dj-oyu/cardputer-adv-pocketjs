@@ -14,7 +14,7 @@ for (const oval of [0, 1]) {
     let slow=1,disp=.75,ld=0,dl=0,hold=0,man=0,cm=3,cl=0,cam=0,need=0,replay=0,photoX=null;
     let ph=Array(8).fill(0),lz=Array(8).fill(0),zo=[7,6,5,4,3,2,1,0],ro=[0,1,2,3,4,5,6,7];
     let F={o:${oval},k:[0,1,2,3,4,5,6,7],h:Array.from({length:8},()=>({sty:0}))};
-    let rs={t:10,done:0,x:[999.5,999.4,997,995,992,990,988,985],px:[],l:[12,${oval ? 11.941 : 11.981},13,14,15,16,17,18],v:Array(8).fill(20),tc:Array(8).fill(10.025)};
+    let rs={t:10,done:0,x:[999.5,999.4,997,995,992,990,988,985],px:[],l:[12,${oval ? 11.95768 : 11.99768},13,14,15,16,17,18],v:Array(8).fill(20),tc:Array(8).fill(10.025)};
     const K={down:()=>[],pressed:()=>false},pocket={},live={},queue=[],NAMES=[],V={patch:()=>{}};
     const log=()=>{},load=()=>{},drop=()=>{},want=()=>{},sound=()=>{},save=()=>{},hud=()=>{},build=()=>{};
     const z8=n=>Array(8).fill(n),order=()=>[0,1,2,3,4,5,6,7],wide=()=>0;

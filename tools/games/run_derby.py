@@ -278,6 +278,8 @@ def main() -> None:
     parser.add_argument("--course", choices=("seed", "straight", "oval"), default="seed",
                         help="every race on this course (the lowered copy's OV[0] set to 0 or 1); seed: as the seeds pick")
     args = parser.parse_args()
+    for test in ("test_derby_lanes.mjs", "test_derby_photo.mjs"):
+        subprocess.run(["node", str(ROOT / "tools/games" / test)], cwd=ROOT, check=True)
     app_dir = force_course(lower(ROOT / "apps/derby", CACHE / "lowered/apps/derby"), args.course)
     if args.m32:
         env = dict(os.environ, M32_SYSROOT=str(ROOT / ".cache/kasane_megademo_app/m32sys"))
