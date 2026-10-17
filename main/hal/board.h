@@ -48,6 +48,9 @@ void board_capture(bool enabled);
 // the untouched columns of the shared strip holding the previous band, and the
 // PIX lines print whole rows, so the caller that narrows has to ask first.
 bool board_capture_active(void);
+// One app display turn per BEGIN/END scope, including press/release wrappers.
+// UI-owner only, like board_capture(); the next scope resets the allowance.
+bool board_capture_take_turn(void);
 #ifdef KASANE_P0_BUS_PROBE
 // Observed by the SPI2 post-completion callback, not inferred from config.
 int board_lcd_isr_core(void);

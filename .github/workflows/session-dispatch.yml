@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'main/app_session.c'
+      - 'main/hal/board.c'
+      - 'main/hal/board.h'
       - 'tools/test_session_dispatch.c'
       - 'tools/test_session_dispatch.py'
       - '.github/workflows/session-dispatch.yml'
