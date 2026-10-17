@@ -2162,7 +2162,11 @@ esp_err_t app_tick(uint32_t buttons) {
         // indicators can invalidate every tick; returning here unconditionally
         // would starve the guest for the entire recording. Guest submissions
         // retain their existing dedicated display turn, and IO keeps retrying.
-        if(!(buttons&0x2000)&&(prior_submission||pocket_kasane_needs_present()))
+        // Capture's forced redraw is also a dedicated display turn: main.c
+        // wraps this tick in one BEGIN/END, so running JS and presenting again
+        // here would repeat PIX rows inside that single-frame interval.
+        if(!(buttons&0x2000)&&(prior_submission||board_capture_active()||
+                              pocket_kasane_needs_present()))
             return ESP_OK;
         // Back is host-priority and this is the guest's final save turn. Carry
         // it into JS even if LCD IO still needs retry, so display trouble cannot
