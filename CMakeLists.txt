@@ -13,7 +13,7 @@ project(cardputer_pocketjs)
 # This explicit diagnostic revision must prove ON in the actual output even
 # when built by the broker's fixed argv from a source archive without .git.
 add_custom_target(diagnostic_mode_proof ALL
-    COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/verify_diagnostic_build.py"
+    COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/verify_diagnostic_build.py"
             --build "${CMAKE_BINARY_DIR}"
     DEPENDS gen_project_binary VERBATIM)
 add_custom_target(flash_budget ALL

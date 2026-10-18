@@ -10,6 +10,10 @@ bytes embedded in the ELF, IDF 6.0.1 application descriptor, and matching BIN/EL
 hash. An existing OFF cache makes the build fail; it is not silently forced ON.
 CI supplies no telemetry mode override and independently requires ON in its
 exact-head source receipt. Its artifact includes `diagnostic-mode-proof.json`.
+The mandatory proof runs Python with `-B` so imported verification modules do
+not create bytecode in the immutable source snapshot. Regression validation
+hashes every source file before and after complete and incremental builds;
+only Git metadata and the explicitly selected build output are excluded.
 
 The proof also runs from a source archive without Git metadata. Source identity
 comes from the broker's existing source receipt and successful build manifest.

@@ -97,7 +97,7 @@ jobs:
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           # No mode override: the explicit source revision must select ON and
           # its mandatory ALL proof must accept the actual resulting image.
-          idf.py -B build_ci -D SDKCONFIG="$PWD/build_ci/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python -B tools/test_diagnostic_archive.py --build build_ci --project-version "${SOURCE_HEAD:0:12}"
           python tools/record_verification.py --build build_ci --expect-telemetry ON --out build_ci/verification.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -113,6 +113,7 @@ jobs:
             build_ci/memory.jsonl
             build_ci/verification.json
             build_ci/diagnostic-mode-proof.json
+            build_ci/source-immutability.json
             build_ci/SHA256SUMS
             build_ci/generated/derby_telemetry/derby_play.js
           if-no-files-found: error
