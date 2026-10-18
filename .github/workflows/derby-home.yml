@@ -1,0 +1,99 @@
+name: DERBY and HOME integration
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-home-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: espressif/esp-idf
+          ref: v6.0.1
+          path: .reference/esp-idf
+          persist-credentials: false
+      - name: Real IDF loss reproducer and HOME/console/session contracts
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          test "$(git -C .reference/esp-idf describe --tags --exact-match)" = v6.0.1
+          python tools/test_usb_console.py --idf .reference/esp-idf | tee artifacts/home.log
+          python tools/test_session_dispatch.py | tee artifacts/session.log
+          python tools/test_verification_receipt.py | tee artifacts/provenance.log
+      - name: Node regression and QuickJS with ASan/UBSan
+        run: |
+          set -euo pipefail
+          python tools/games/run_derby.py | tee artifacts/derby-asan.log
+      - name: Prepare i386 compiler and package index for the documented sysroot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+      - name: QuickJS with device-sized JSValues and pointers
+        run: |
+          set -euo pipefail
+          python tools/games/run_derby.py --m32 | tee artifacts/derby-m32.log
+          python tools/record_verification.py --out artifacts/host-receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-home-host-${{ env.SOURCE_HEAD }}
+          path: artifacts/
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container: espressif/idf:v6.0.1
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build exact source with ESP-IDF 6.0.1; no SDK dependency fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_ci -D SDKCONFIG="$PWD/build_ci/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          python tools/record_verification.py --build build_ci --out build_ci/verification.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cardputer-derby-home-${{ env.SOURCE_HEAD }}
+          path: |
+            build_ci/cardputer_pocketjs.bin
+            build_ci/cardputer_pocketjs.elf
+            build_ci/cardputer_pocketjs.map
+            build_ci/bootloader/bootloader.bin
+            build_ci/partition_table/partition-table.bin
+            build_ci/sdkconfig
+            build_ci/project_description.json
+            build_ci/memory.jsonl
+            build_ci/verification.json
+            build_ci/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

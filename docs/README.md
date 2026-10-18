@@ -9,6 +9,8 @@
 
 新しい文書は該当ディレクトリに置き、この表に1行足す。ファイル名は動かさない（本文や C のコメントが名前と節番号で参照している）。節番号を変えたら `git grep -n "<ファイル名>"` で参照元を直す。
 
+USB/HOME統合の送信回帰と同一head CI: [platform/usb-console-home.md](platform/usb-console-home.md)。
+
 ## 主線1: VM の高速化 — [`vm/`](vm/)
 
 QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替える（L0〜L5）。

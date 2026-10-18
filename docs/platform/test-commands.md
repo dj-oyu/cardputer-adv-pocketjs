@@ -18,6 +18,8 @@ python tools\test_app_resume.py --port COM3           # Backで眠るアプリ�
 
 ## ホスト側のテスト（実機不要）
 
+`python tools/test_usb_console.py --idf "$IDF_PATH"` は実IDFのLF欠落再現・USB送信/HOME回帰。`--idf` なしでも送信と実 `end_run()` の検査を実行できる。
+
 ```bash
 python tools/test_flash_budget.py       # パーティション予約ガード
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall -Wextra -Werror tools/test_solar_sail.c -lm -o /tmp/ts && /tmp/ts"
