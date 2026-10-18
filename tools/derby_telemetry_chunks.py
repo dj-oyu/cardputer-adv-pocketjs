@@ -2,15 +2,18 @@
 from pathlib import Path
 import sys
 
-def generate(source: Path, out: Path):
-    out.mkdir(parents=True, exist_ok=True)
-    play = (source / 'derby_play.js').read_text()
+def instrument(play: str):
+    play = play.replace('\r\n', '\n')
     marker = '      if (need) { build(up); need = 0; } else V.patch(up);'
     assert play.count(marker) == 1, 'frame completion marker changed'
     # Existing native function, primitive numbers only: no JS object/array/function.
     call = "\n  S.view(0,0,t,0,0,0,0,F.seed,raceNo,scene==='pad'?0:scene==='gate'?1:scene==='race'?2:scene==='photo'?3:4,scene==='photo'?4:scene==='pad'||scene==='res'?1:cm,rs?rnd(rs.t/DT):0,scene==='race'||scene==='gate'?(slow?disp:1):-1,tier);"
+    return play.replace(marker, marker + call)
+
+def generate(source: Path, out: Path):
+    out.mkdir(parents=True, exist_ok=True)
     target = out / 'derby_play.js'
-    target.write_text(play.replace(marker, marker + call))
+    target.write_bytes(instrument((source / 'derby_play.js').read_text()).encode('utf-8'))
     lines = ['app local.derby']
     for line in (source / 'chunks.txt').read_text().splitlines():
         cols = line.split()

@@ -2,6 +2,7 @@
   "option": "POCKET_DERBY_TELEMETRY=ON (default OFF)",
   "dependency": "Based on PR7; diagnostic image only. No changes to shipping game chunks when OFF.",
   "protocol": "DERBY_TLM v=1; maximum one attempted line per device second, 300 attempts per run, no retry",
+  "build_evidence": "verification.json binds explicit expected ON/OFF mode to the unique CMake cache setting/hash, exact required native symbols (or their absence), generated chunk presence/absence, and the exact play bytes embedded in the ELF. The BIN embeds that ELF hash. Artifact names alone never establish mode.",
   "storage": "Fixed C state and 768-byte stack serialization buffer; numeric arguments to an existing native function. No new per-frame guest arrays/objects/functions. Additional diagnostic bytecode/argument stack changes the baseline footprint.",
   "arming": "Generated play chunk arms context only after procedural paint and HUD update return normally. New guest frame disarms first. Parked/incomplete work, failed presentation, duplicate transfer and incomplete native procedural work cannot count. Late completion may omit a frame rather than falsely bind it.",
   "fields": {

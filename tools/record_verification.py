@@ -7,8 +7,49 @@ from pathlib import Path
 import platform
 import struct
 import subprocess
+from derby_telemetry_chunks import instrument
 
 ROOT = Path(__file__).resolve().parents[1]
+TELEMETRY_SYMBOLS = {
+    'derby_telemetry_reset', 'derby_telemetry_begin_frame', 'derby_telemetry_set',
+    'derby_telemetry_eval', 'derby_telemetry_io_us', 'derby_telemetry_present',
+    'derby_telemetry_write',
+}
+
+
+def elf_symbols(build):
+    text = command('xtensa-esp32s3-elf-nm', '--defined-only', str(build/'cardputer_pocketjs.elf'))
+    return {line.rsplit(None, 1)[-1] for line in text.splitlines() if line.strip()}
+
+
+def verify_mode(build, expected=None):
+    cache = (build/'CMakeCache.txt').read_bytes()
+    values = [line.split('=', 1)[1] for line in cache.decode().splitlines()
+              if line.startswith('POCKET_DERBY_TELEMETRY:BOOL=')]
+    if len(values)!=1 or values[0] not in ('ON','OFF'):
+        raise ValueError('missing or ambiguous telemetry CMake setting')
+    mode = values[0]
+    if expected is not None and mode!=expected:
+        raise ValueError('telemetry mode differs from requested artifact mode')
+    symbols = {s for s in elf_symbols(build) if s.startswith('derby_telemetry_')}
+    source = (ROOT/'apps/derby/derby_play.js').read_bytes()
+    generated = instrument(source.decode()).encode()
+    path = build/'generated/derby_telemetry/derby_play.js'
+    elf = (build/'cardputer_pocketjs.elf').read_bytes()
+    if mode=='ON':
+        if symbols!=TELEMETRY_SYMBOLS or not path.is_file() or path.read_bytes()!=generated:
+            raise ValueError('ON requires expected native symbols and exact generated chunk')
+        if generated+b'\0' not in elf or source+b'\0' in elf:
+            raise ValueError('ON ELF does not embed only the generated play chunk')
+        embedded=generated
+    else:
+        if symbols or path.exists() or generated+b'\0' in elf or source+b'\0' not in elf:
+            raise ValueError('OFF must omit telemetry symbols/generated chunk and embed shipping play')
+        embedded=source
+    return dict(telemetry_mode=mode, cmake_cache_sha256=hashlib.sha256(cache).hexdigest(),
+                native_symbols=sorted(symbols), generated_chunk_present=mode=='ON',
+                embedded_play_bytes=len(embedded), embedded_play_sha256=hashlib.sha256(embedded).hexdigest(),
+                source_play_sha256=hashlib.sha256(source).hexdigest(), elf_embedded_play_verified=True)
 
 
 def command(*args):
@@ -39,6 +80,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=Path)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--expect-telemetry", choices=('ON','OFF'))
     args = parser.parse_args()
     head = command("git", "rev-parse", "HEAD")
     expected = os.environ.get("SOURCE_HEAD", head)
@@ -51,6 +93,7 @@ def main():
     if args.build:
         build = args.build.resolve()
         description, elf_hash = verify_build(build, head)
+        report['build_mode'] = verify_mode(build, args.expect_telemetry)
         report["idf_version"] = "v6.0.1"
         report["embedded_elf_sha256"] = elf_hash
         report["project_version"] = description["project_version"]

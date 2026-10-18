@@ -5,11 +5,45 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from record_verification import ROOT, verify_build
+from record_verification import ROOT, verify_build, verify_mode, TELEMETRY_SYMBOLS
+from derby_telemetry_chunks import instrument
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_mode_requires_cache_symbols_exact_chunk_and_actual_elf_bytes(self):
+        source=(ROOT/'apps/derby/derby_play.js').read_bytes()
+        generated=instrument(source.decode()).encode()
+        with tempfile.TemporaryDirectory() as temp:
+            build=Path(temp);chunk=build/'generated/derby_telemetry/derby_play.js'
+            chunk.parent.mkdir(parents=True)
+            cache=build/'CMakeCache.txt';elf=build/'cardputer_pocketjs.elf'
+            cache.write_text('POCKET_DERBY_TELEMETRY:BOOL=ON\n')
+            chunk.write_bytes(generated);elf.write_bytes(b'ELF'+generated+b'\0')
+            with patch('record_verification.elf_symbols',return_value=TELEMETRY_SYMBOLS):
+                self.assertEqual(verify_mode(build,'ON')['telemetry_mode'],'ON')
+                with self.assertRaises(ValueError):verify_mode(build,'OFF')
+                chunk.write_bytes(generated+b'changed')
+                with self.assertRaises(ValueError):verify_mode(build,'ON')
+                chunk.write_bytes(generated);elf.write_bytes(b'ELF'+source+b'\0')
+                with self.assertRaises(ValueError):verify_mode(build,'ON')
+                elf.write_bytes(b'ELF'+generated+b'\0'+source+b'\0')
+                with self.assertRaises(ValueError):verify_mode(build,'ON')
+            elf.write_bytes(b'ELF'+generated+b'\0')
+            with patch('record_verification.elf_symbols',return_value=set()):
+                with self.assertRaises(ValueError):verify_mode(build,'ON')
+                cache.write_text('POCKET_DERBY_TELEMETRY:BOOL=OFF\n')
+                elf.write_bytes(b'ELF'+source+b'\0')
+                with self.assertRaises(ValueError):verify_mode(build,'OFF') # stale generated file
+                chunk.unlink()
+                self.assertEqual(verify_mode(build,'OFF')['telemetry_mode'],'OFF')
+                elf.write_bytes(b'ELF'+generated+b'\0')
+                with self.assertRaises(ValueError):verify_mode(build,'OFF')
+            elf.write_bytes(b'ELF'+source+b'\0')
+            with patch('record_verification.elf_symbols',return_value=TELEMETRY_SYMBOLS):
+                with self.assertRaises(ValueError):verify_mode(build,'OFF')
+
     def test_receipt_validates_actual_descriptor_and_rejects_relabelling(self):
         head = "123456789abc" + "d" * 28
         with tempfile.TemporaryDirectory() as temp:

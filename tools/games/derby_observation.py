@@ -35,11 +35,12 @@ def camera_windows(rows):
         # require every frame and every context in the interval accounted for.
         delta=b['frame']-a['frame']
         cam=b['cam']; na,ta=a['intervals'][cam]; nb,tb=b['intervals'][cam]
-        stable=all(a[k]==b[k] for k in ('run','seed','race','phase','cam','tier'))
+        stable=all(a[k]==b[k] for k in ('run','begin','seed','race','phase','cam','tier'))
         monotone=all(bn>=an and bt>=at for (an,at),(bn,bt) in zip(a['intervals'],b['intervals']))
-        valid=(stable and b['seq']==a['seq']+1 and b['us']>a['us'] and delta>0
+        other_cameras_unchanged=all(a['intervals'][i]==b['intervals'][i] for i in range(10) if i!=cam)
+        valid=(stable and b['seq']==a['seq']+1 and b['us']-a['us']>=1000000 and delta>0
                and b['ctx']-a['ctx']==delta and nb-na==delta and tb>ta
-               and tb-ta==b['us']-a['us'] and monotone
+               and tb-ta==b['us']-a['us'] and monotone and other_cameras_unchanged
                and a['refused']==b['refused']==0 and b['seq']<b['limit'])
         if valid:
             result.append({'camera':cam,'frames':delta,'device_interval_us':tb-ta,

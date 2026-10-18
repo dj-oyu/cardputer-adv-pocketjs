@@ -20,6 +20,12 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(camera_windows([a,b]),[])
         b['intervals'][8]=(59,1966667);a['intervals'][7]=(1,100)
         self.assertEqual(camera_windows([a,b]),[]) # another camera regressed
+        a['intervals'][7]=(0,0);b['intervals'][7]=(1,100)
+        self.assertEqual(camera_windows([a,b]),[]) # another camera cannot increase either
+        b['intervals'][7]=(0,0);b['begin']=1
+        self.assertEqual(camera_windows([a,b]),[])
+        b['begin']=0;b['us']=1500000;b['intervals'][8]=(59,1466667)
+        self.assertEqual(camera_windows([a,b]),[]) # equal durations but less than 1 s
     def test_duplicate_unknown_and_negative_rejected(self):
         for tail in ['v=1 v=1','v=2','v=1 run=-1']:
             with self.assertRaises((ValueError,KeyError)):parse_line('DERBY_TLM '+tail)

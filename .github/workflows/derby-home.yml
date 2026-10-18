@@ -60,6 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           python tools/games/run_derby.py --m32 | tee artifacts/derby-m32.log
+          python tools/games/run_derby.py --m32 --telemetry --heap-limit 163840 | tee artifacts/derby-m32-telemetry.log
           python tools/record_verification.py --out artifacts/host-receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -102,7 +103,7 @@ jobs:
               echo 'Telemetry must be absent in shipping ELF'; exit 1
             fi
           fi
-          python tools/record_verification.py --build build_ci --out build_ci/verification.json
+          python tools/record_verification.py --build build_ci --expect-telemetry '${{ matrix.telemetry }}' --out build_ci/verification.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: cardputer-derby-home-${{ env.SOURCE_HEAD }}-telemetry-${{ matrix.telemetry }}
@@ -117,5 +118,6 @@ jobs:
             build_ci/memory.jsonl
             build_ci/verification.json
             build_ci/SHA256SUMS
+            build_ci/generated/derby_telemetry/derby_play.js
           if-no-files-found: error
           retention-days: 14
