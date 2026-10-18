@@ -1,6 +1,9 @@
 #include "pocket_derby.h"
 #include "pocket_api.h"
 #include "pocket_proc.h"
+#ifdef POCKET_DERBY_TELEMETRY
+#include "derby_telemetry.h"
+#endif
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -194,6 +197,28 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
  * it computes VE and VC as pan() did. */
 static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
+#ifdef POCKET_DERBY_TELEMETRY
+    /* Diagnostic generated chunk: same function, numeric context only. No
+     * guest allocation and no mutation of the production projection state. */
+    if (argc == 14 && JS_IsNumber(argv[0])) {
+        double v[8];
+        bool valid = number(ctx, argv[0], &v[0]) && v[0] == 0;
+        for (unsigned i = 0; i < 7 && valid; ++i)
+            valid = number(ctx, argv[i + 7], &v[i]) && isfinite(v[i]);
+        if (!valid || v[0] < 0 || v[0] > UINT32_MAX || v[1] < 0 || v[1] > UINT32_MAX ||
+            v[2] < 0 || v[2] > 4 || v[3] < 0 || v[3] > 9 || v[4] < 0 || v[4] > UINT32_MAX ||
+            (v[5] != -1 && (v[5] < 0 || v[5] > 1)) || v[6] < 0 || v[6] > 2)
+            return fail(ctx, "derby.view", POCKET_ERR_INVALID_ARGUMENT, "invalid diagnostic context");
+        for (unsigned i = 0; i < 7; ++i)
+            if (i != 5 && v[i] != floor(v[i]))
+                return fail(ctx, "derby.view", POCKET_ERR_INVALID_ARGUMENT, "integer diagnostic context required");
+        derby_telemetry_set((derby_telemetry_context){
+            .seed=(uint32_t)v[0], .race=(uint32_t)v[1], .phase=(uint32_t)v[2],
+            .camera=(uint32_t)v[3], .step=(uint32_t)v[4],
+            .u_ppm=v[5] < 0 ? -1 : (int32_t)llround(v[5]*1000000), .tier=(uint32_t)v[6]});
+        return JS_UNDEFINED;
+    }
+#endif
     const char *op="derby.view";
     if(!course)return fail(ctx,op,POCKET_ERR_BUSY,"course required");
     uint32_t n=0;

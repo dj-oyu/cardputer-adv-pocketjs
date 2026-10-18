@@ -74,6 +74,10 @@
 #include "text/ksn_font.h"
 #include "sound.h"
 #include "esp_log.h"
+#ifdef POCKET_DERBY_TELEMETRY
+#include "derby_telemetry.h"
+bool derby_telemetry_write(const char *line,size_t length){(void)line;(void)length;return true;}
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

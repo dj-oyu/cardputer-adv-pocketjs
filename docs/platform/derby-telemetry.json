@@ -1,0 +1,39 @@
+{
+  "option": "POCKET_DERBY_TELEMETRY=ON (default OFF)",
+  "dependency": "Based on PR7; diagnostic image only. No changes to shipping game chunks when OFF.",
+  "protocol": "DERBY_TLM v=1; maximum one attempted line per device second, 300 attempts per run, no retry",
+  "storage": "Fixed C state and 768-byte stack serialization buffer; numeric arguments to an existing native function. No new per-frame guest arrays/objects/functions. Additional diagnostic bytecode/argument stack changes the baseline footprint.",
+  "arming": "Generated play chunk arms context only after procedural paint and HUD update return normally. New guest frame disarms first. Parked/incomplete work, failed presentation, duplicate transfer and incomplete native procedural work cannot count. Late completion may omit a frame rather than falsely bind it.",
+  "fields": {
+    "run": "Owner-task session serial, reset at app_stop; combine with broker epoch and build receipt",
+    "us/begin": "Monotonic device microseconds at completed banded presentation / first sampled presentation",
+    "frame": "Count of sampled successfully presented distinct completed guest contexts; not total renderer frames or LCD frames",
+    "ctx": "Fresh guest dispatch sequence; gaps disclose incomplete or unsampled contexts",
+    "seed/race/phase": "Game-reported field seed, race number, phase 0 pad/1 gate/2 race/3 photo/4 res",
+    "cam/tier": "Game camera ID (7/8/9 panning WIDE variants), load tier 0/1/2; pad/result mapped to CLOSE and photo to PHOTO",
+    "step": "Rounded rs.t/DT simulation step; does not encode all lane/camera history",
+    "u": "Interpolation in millionths for gate/race; -1 otherwise, including frozen photo",
+    "gu_sample_max/cap": "Maximum guest malloc counter observed at sampled presentations and current cap; LOWER BOUND on true peak",
+    "eval_used/eval_cap": "One checkpoint after entry evaluation returns; cap-used is checkpoint headroom, NOT minimum free evaluation margin; zeros mean unavailable",
+    "intervals": "Ten cumulative adjacent same-race/phase/camera/tier completed-context interval counts and device microseconds; skipped contexts/camera changes do not bridge",
+    "seq/limit": "Attempted output sequence / fixed 300-attempt ceiling; no final partial-window flush",
+    "refused/io_us_max": "Prior attempted writes refused / maximum prior write duration. Current output becomes visible only in a later record. Final write outcome is not known from that final line."
+  },
+  "throughput": "Diagnostic completed-context throughput only. Sink can block up to usb_console_frame timeout (about 100 ms plus tick rounding). No subtraction or extrapolation to ordinary firmware. Reject gaps, refusals, camera transitions and incomplete windows for thresholds; no data is unverified, not zero.",
+  "not_verified": ["Physical LCD transfer/appearance", "True allocator peak", "Minimum evaluation margin", "Complete frame/pixel identity from metadata alone", "Complete LOADSTALL or error counts"],
+  "mcp_minimum_contract": {
+    "operation": "Fixed bounded DERBY observation, no caller-provided keys, no automatic retries",
+    "request": "Existing exact build/flash binding; fixed duration/race/frame ceiling",
+    "response": "Principal-bound job report with broker epoch, build/flash receipt, device fingerprint, ordered device counters and bounded allowlisted DERBY scene/camera/error events. Include gap/truncation/refusal/limit flags.",
+    "images": "Fixed count of consecutive images with capture start/end, current observed run/race/seed/phase/camera/frame context and any changes during capture. Metadata does not attest pixel coherence.",
+    "oracle": "Exact controlled draw-input comparison additionally requires complete projection/lane/camera history or actual submitted draw inputs; the TLM line alone is insufficient."
+  },
+  "host_commands": [
+    "python tools/test_derby_telemetry.py",
+    "python tools/games/test_derby_observation.py",
+    "node tools/games/export_derby_oracle.mjs oracle.json (clean committed checkout required)",
+    "python tools/games/derby_observation.py --telemetry device.log",
+    "python tools/games/derby_observation.py --reference oracle.json --observed controlled-draw-inputs.json"
+  ],
+  "next_flash": "Separate commit and PR with same-head CI for OFF/ON builds plus host regressions and independent review. Reuse successful PR7/LKG until explicit normal device ownership and formal recovery/flash/readback/boot checks pass."
+}

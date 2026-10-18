@@ -95,6 +95,17 @@ static int64_t hp_eval_t0;
 #include "app_registry.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
+#ifdef POCKET_DERBY_TELEMETRY
+#include "derby_telemetry.h"
+#include "usb_console.h"
+#include "esp_timer.h"
+bool derby_telemetry_write(const char *line, size_t length) {
+    int64_t began=esp_timer_get_time();
+    bool ok=usb_console_frame(line, length) == ESP_OK;
+    derby_telemetry_io_us((uint32_t)(esp_timer_get_time()-began));
+    return ok;
+}
+#endif
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "ui/shell.h"
@@ -968,6 +979,9 @@ void app_stop(void) {
     pocket_workspace_reset();
     // Holds no guest values (docs/apps/derby-ser-native.md section 3).
     pocket_derby_reset();
+#ifdef POCKET_DERBY_TELEMETRY
+    derby_telemetry_reset();
+#endif
     if(pocket_kasane_reset()){
         pocket_clock_reset();
         pocket_av_output_source_reset(av_stopped);
@@ -1857,6 +1871,13 @@ source_ready:;
 #endif
     if(user_source) err=eval_user_source(source,length,module_entry);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
+#ifdef POCKET_DERBY_TELEMETRY
+    if(app_registry_wants(app_registry_current(),"derby.series")) {
+        size_t used=0, cap=0;
+        JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)), &used, &cap);
+        derby_telemetry_eval(used,cap);
+    }
+#endif
 #ifdef POCKET_HEAPPROBE
     if(hp) hp_report("eval",err);
 #endif
@@ -2108,6 +2129,9 @@ static void end_guest_turn(void) {
 // One call into the guest. The Cardputer supplies a pad mask, centered analog
 // axes and no touches; whatever the guest drew is already in Kasane's bank.
 static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
+#ifdef POCKET_DERBY_TELEMETRY
+    if(!continuing) derby_telemetry_begin_frame();
+#endif
     const pocketjs_guest_frame_t input={.struct_size=sizeof(input),
                                        .buttons=buttons,.analog=0x8080};
     return continuing?pocketjs_guest_continue(guest):
@@ -2480,6 +2504,14 @@ static esp_err_t present_frame(void) {
         }
 #endif
         if(stats.bands) {
+#ifdef POCKET_DERBY_TELEMETRY
+            if(app_registry_wants(app_registry_current(),"derby.series") &&
+               !pocketjs_guest_work_pending(guest) && !pocket_proc_pending()) {
+                size_t used=0, cap=0;
+                JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)), &used, &cap);
+                derby_telemetry_present(esp_timer_get_time(),used,cap);
+            }
+#endif
             painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
 #ifdef KASANE_MEGADEMO_TRACE
