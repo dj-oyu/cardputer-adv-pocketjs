@@ -61,7 +61,11 @@ jobs:
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    container: espressif/idf:v6.0.1
+    # GitHub ubuntu hosted workspaces belong to UID 1001. Keep Git ownership
+    # checks enabled by using that identity, and assert it before the build.
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
     env:
       IDF_COMPONENT_MANAGER: '0'
     steps:
@@ -77,6 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(id -u)" = "$(stat -c %u .)"
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_ci -D SDKCONFIG="$PWD/build_ci/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
