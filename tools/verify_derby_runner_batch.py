@@ -53,11 +53,12 @@ def verify(build: Path, expected: str, expected_clip=None, head=None):
         native=(ROOT/'main/pocket/pocket_derby.c').read_text()
         body=re.search(r'static struct \{(.*?)\} view;',native,re.S)
         if body is None:raise ValueError('clip state source layout missing')
-        # Compile a layout-only object; it is never linked into the firmware.
+        # The generic driver defaults to a different core/endianness. Use the
+        # same S3 ABI as the firmware; never link this layout-only object.
         probe=build/'clip-mode-layout.c';layout=build/'clip-mode-layout.o'
         probe.write_text('#include <stdint.h>\n#include <stdbool.h>\nstruct clip_layout {'+body[1]+'};\nconst uint32_t clip_layout_size=sizeof(struct clip_layout);\n')
         flags=['-DPOCKET_DERBY_CLIP_NORM=1'] if expected_clip=='ON' else []
-        subprocess.run(['xtensa-esp-elf-gcc','-std=c11',*flags,'-c',str(probe),'-o',str(layout)],check=True)
+        subprocess.run(['xtensa-esp32s3-elf-gcc','-std=c11',*flags,'-c',str(probe),'-o',str(layout)],check=True)
         size,data=object_symbol(layout.read_bytes(),'clip_layout_size')
         if size!=4 or data is None:raise ValueError('invalid target layout proof')
         expected_size=struct.unpack('<I',data)[0]
