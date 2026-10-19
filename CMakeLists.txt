@@ -20,3 +20,10 @@ add_custom_target(memory_log ALL
             --map "${CMAKE_BINARY_DIR}/cardputer_pocketjs.map"
             --log "${CMAKE_BINARY_DIR}/memory.jsonl" --only-changes
     DEPENDS gen_project_binary VERBATIM)
+
+if(POCKET_DERBY_RUNNER_BATCH)
+    add_custom_target(derby_runner_batch_proof ALL
+        COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/verify_derby_runner_batch.py"
+                --build "${CMAKE_BINARY_DIR}" --expect ON
+        DEPENDS gen_project_binary VERBATIM)
+endif()

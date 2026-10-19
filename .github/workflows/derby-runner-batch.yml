@@ -1,0 +1,102 @@
+name: DERBY runner batch experiment
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-runner-batch-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Exact native boundary, actual PAN and mode negative tests
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python tools/games/test_derby_runner_batch.py | tee artifacts/pan-layout.log
+          python tools/test_derby_runner_batch_proof.py | tee artifacts/mode.log
+          python tools/games/run_derby.py --runner-batch --heap-limit 524288 | tee artifacts/runner-oracle.log
+          python tools/games/compare_derby_runner_batch.py | tee artifacts/pixels-heap.log
+          cp .cache/derby_host/runner-comparison/result.json artifacts/
+      - name: Device-sized QuickJS object layout
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python tools/games/run_derby.py --m32 --runner-batch --heap-limit 163840 | tee artifacts/m32.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-runner-host-${{ env.SOURCE_HEAD }}
+          path: artifacts/
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - batch: 'OFF'
+            telemetry: 'OFF'
+          - batch: 'ON'
+            telemetry: 'OFF'
+          - batch: 'ON'
+            telemetry: 'ON'
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build and verify actual mode and BIN/ELF pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" = "$(stat -c %u .)"
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_ci -D SDKCONFIG="$PWD/build_ci/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D POCKET_DERBY_RUNNER_BATCH=${{ matrix.batch }} -D POCKET_DERBY_TELEMETRY=${{ matrix.telemetry }} build
+          python -B tools/verify_derby_runner_batch.py --build build_ci --expect '${{ matrix.batch }}'
+          python -B tools/record_verification.py --build build_ci --expect-telemetry '${{ matrix.telemetry }}' --out build_ci/verification.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: derby-runner-${{ env.SOURCE_HEAD }}-batch-${{ matrix.batch }}-telemetry-${{ matrix.telemetry }}
+          path: |
+            build_ci/cardputer_pocketjs.bin
+            build_ci/cardputer_pocketjs.elf
+            build_ci/cardputer_pocketjs.map
+            build_ci/bootloader/bootloader.bin
+            build_ci/partition_table/partition-table.bin
+            build_ci/sdkconfig
+            build_ci/project_description.json
+            build_ci/verification.json
+            build_ci/SHA256SUMS
+            build_ci/runner-batch-proof.json
+            build_ci/generated/derby_runner_batch/derby_pan.js
+            build_ci/generated/derby_telemetry/derby_play.js
+          if-no-files-found: error
+          retention-days: 14

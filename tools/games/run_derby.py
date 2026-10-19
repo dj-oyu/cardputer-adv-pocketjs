@@ -103,7 +103,7 @@ def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
     return out
 
 
-def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", telemetry=False) -> Path:
+def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", telemetry=False, runner_batch=False) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     table = rom_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
@@ -130,6 +130,7 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", te
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     diagnostic = ["-DPOCKET_DERBY_TELEMETRY"] if telemetry else []
+    diagnostic += ["-DPOCKET_DERBY_RUNNER_BATCH"] if runner_batch else []
     diagnostic_sources = ["main/pocket/derby_telemetry.c"] if telemetry else []
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *diagnostic, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
@@ -273,6 +274,7 @@ def check_seeds(binary: Path, env: dict, out: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--runner-batch", action="store_true", help="experimental bounded PAN runner bridge and bitwise oracle")
     parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
     parser.add_argument("--telemetry", action="store_true", help="exercise generated diagnostic play chunk and native boundary")
     parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
@@ -284,6 +286,9 @@ def main() -> None:
     for test in ("test_derby_lanes.mjs", "test_derby_photo.mjs", "test_derby_pan_order.mjs"):
         subprocess.run(["node", str(ROOT / "tools/games" / test)], cwd=ROOT, check=True)
     app_dir = force_course(lower(ROOT / "apps/derby", CACHE / "lowered/apps/derby"), args.course)
+    if args.runner_batch:
+        from derby_runner_batch import generate as generate_runners
+        generate_runners(app_dir)
     if args.telemetry:
         import sys
         sys.path.insert(0, str(ROOT / 'tools'))
@@ -295,10 +300,17 @@ def main() -> None:
         env = dict(os.environ, M32_SYSROOT=str(ROOT / ".cache/kasane_megademo_app/m32sys"))
         flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=env,
                                capture_output=True, text=True).stdout.split()
-        binary = build(flags, CACHE / "m32", telemetry=args.telemetry)
+        binary = build(flags, CACHE / "m32", telemetry=args.telemetry, runner_batch=args.runner_batch)
     else:
-        binary = build(["-fsanitize=address,undefined"], CACHE / "asan", telemetry=args.telemetry)
+        binary = build(["-fsanitize=address,undefined"], CACHE / "asan", telemetry=args.telemetry, runner_batch=args.runner_batch)
     env = dict(os.environ, DERBY_APP_DIR=str(app_dir))
+    if args.runner_batch and not args.m32:
+        view_source = (ROOT / "apps/derby/derby_view.js").read_text()
+        start = view_source.index("const rin = ") + len("const rin = ")
+        expression = view_source[start:view_source.index(";", start)]
+        oracle = CACHE / "runner-batch-oracle.js"
+        oracle.write_text((ROOT / "tools/games/derby_runner_batch_oracle.js").read_text().replace("__REFERENCE_RIN__", expression))
+        env["DERBY_RUNNER_BATCH_ORACLE"] = str(oracle)
     env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
     env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
     # (tier, extra env): the scripted game at each tier, then the director
