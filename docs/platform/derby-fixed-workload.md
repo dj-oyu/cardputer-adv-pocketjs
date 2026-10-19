@@ -70,10 +70,13 @@ The existing per-present memory checkpoint remains in observer; periodic
 telemetry and measurement writes are suppressed throughout this fixture.
 
 `c0`..`c9` are course calls, view calls, ser calls, clip predicate tests, square
-root evaluations, cache guard hits, cache guard misses, view cache refreshes,
+root evaluations at the clip/cache normalization hooks, cache guard hits,
+cache guard misses, view cache refreshes,
 runner batch calls and used batch rows. They count only inside the measured
 interval. A view refresh is not a cache guard miss. Baseline and batch have no
-clip cache; their square root count is one per clip predicate. The original
+clip cache; their c4 count is one normalization square root per clip predicate.
+This c4 value is not a count of all square root evaluations in the app or
+renderer. The original
 numeric expressions and draw order are retained. Counter overhead is present
 and is not estimated away. Batch may move time/calls between bridge and native;
 that movement itself is not a performance gain.
@@ -99,6 +102,80 @@ collector does not yet implement this finite protocol; before any hardware run
 it needs an explicit bounded collector and transport-quality contract. This
 implementation does not add a hardware operation or bypass its approval rules.
 
+The public parser is `tools/games/derby_fixed_result.py`. Its parsed result
+schema is `tools/games/derby_fixed_v1.schema.json`; the successful collector
+receipt schema is `tools/games/derby_fixed_transport.schema.json`. Complete host
+examples are `tools/games/fixtures/derby_fixed_v1.log`, `.parsed.json` and
+`.transport.json`. Their receipt is an illustrative assertion, not evidence
+of a hardware acquisition. `tools/test_derby_fixed_protocol.py` validates both
+schemas, the sample and rejection of transport loss/reset/truncation/limits.
+
+Protocol v1 is ASCII, space-separated `key=value` fields, one LF-terminated
+record per line, no duplicate/unknown/missing fields, at most 1024 bytes per
+diagnostic line including LF. Successful order is exactly three `DERBY_FIXED`
+records with `rep=seq=1,2,3`, then one `DERBY_FIXED_END`. Summary field names and
+string types are listed in the parsed schema's `$defs.summary`. All summaries
+must use one variant/session/fixture/manifest; identity and zero quality fields
+are fixed by the schema. The END fields are exactly `v=1 session=<same serial>
+reps=3 valid=1 quality=0 independent=0`. An abort may emit an invalid END without
+all summaries; that is a rejected whole trial. uint64 range checks, matching
+session/variant, END/order and `work_us + sum(pace_us) <= wall_us` are semantic
+parser checks in addition to the structural JSON schema.
+
+`parse_trial` and `parse_collected` share the comparison work gate with the
+host runner. Each repetition must have the following c0..c9 counts:
+
+| Variant | c0..c9 |
+|---|---|
+| baseline | 0,120,600,7735,7735,0,0,0,0,0 |
+| native | 0,120,600,7735,120,7735,0,120,0,0 |
+| batch | 0,120,600,7735,7735,0,0,0,120,960 |
+
+Bridge calls are 2086 for baseline/native and 1246 for batch. Bridge, native
+and procedural-build calls are fixed work and must match across the three
+repetitions; native and build work cannot be absent. Guest calls must equal
+120 plus the recorded continuation dispatches. VM calls must cover the build
+calls, raster/transfer calls must cover the 120 completed contexts, and measured
+output calls must be zero. VM/points/raster/transfer/observer calls can depend
+on continuation slicing or host/device instrumentation; their absolute values
+are not frozen to the host profile or required to match between repetitions.
+The no-continuation host runner additionally checks model-local determinism.
+
+Each stage self time must fit within wall time, zero calls imply zero self
+time, and the sum of the mutually exclusive stage self times must fit within
+direct work. No inclusive time is added. These checks reject impossible stage
+values; they do not calibrate or subtract clock overhead.
+
+Only comparison-qualified results have `format_valid=true`,
+`work_verified=true` and `all_repetitions_valid=true`; the public result schema
+requires these flags. `parse_trial_format` exists for synthetic controller
+tests and returns `work_verified=false` and `all_repetitions_valid=false` even
+when its format/identity/time checks pass. Such output cannot qualify a
+performance comparison. The collector and CLI always use the strict work gate.
+
+The owning collector starts bounded acquisition before app start through the
+existing formal operation. Protocol v1 limits acquisition to 200 seconds and
+65536 raw bytes; the device independently caps its fixture at 180 seconds.
+It must stop on the first END and preserve the full received bytes, including
+unrelated console lines. There are no automatic retries. A final LF/END alone
+does not certify that acquisition was complete. The owner must independently
+establish `complete=true` and `gaps=overflow=truncated=partial_tail=disconnect=
+reset=refused=false`, plus raw byte count, SHA256 and elapsed `duration_ms`.
+Bind that acquisition to the expected source head, paired image proof and
+variant outside the text protocol; never mix boots or infer provenance from
+the small per-boot session serial. Device identifiers and broker credentials
+belong to the private execution evidence, not a public result or PR.
+
+Call `parse_collected(raw, receipt)` or run
+`python3 tools/games/derby_fixed_result.py tools/games/fixtures/derby_fixed_v1.log
+--transport tools/games/fixtures/derby_fixed_v1.transport.json` to validate the
+receipt's quality, bounds, byte count and digest before parsing the whole trial.
+The legacy `parse_trial(..., transport_complete=True)` interface is for an
+owning caller that already established transport completeness. Neither parser
+can establish those physical transport facts from a caller's JSON assertion.
+No capture, injected input, storage, raw USB bypass, flash/restart or permission
+change is added by this protocol.
+
 ## Host checks and adoption rule
 
 Run `python3 -B tools/test_derby_fixed_workload.py` for deterministic controller,
@@ -115,9 +192,13 @@ explicitly zero. Synthetic wait tests exercise all target wait-accounting paths.
 The `DERBY finite fixed workload` CI runs those checks, the actual CMake chunk
 selection, and a `--m32` replay with a 163840-byte guest cap after installing
 system multilib. i386 uses the device's 8-byte JSValue/4-byte pointers and aligned
-doubles, but x87 intermediate precision differs: its C/JS input-bit oracle is
-disabled and explicitly reported false. The 64-bit run supplies that oracle;
-the 32-bit run checks the known rendered pixels, finish, counters and heap cap.
+doubles. This harness selects SSE2 binary64 evaluation rather than the i386
+default x87 extended intermediates. Its C/JS input-bit oracle remains disabled
+and explicitly reported false; the 64-bit run supplies that oracle. The 32-bit
+run must still match the same known rendered pixels, finish and work counters
+under the heap cap. It reports the exact compiler flags and guest cap. No pixel/work expectation is relaxed for this model. This SSE2 binary64,
+8-byte JSValue/4-byte pointer/163840-byte guest-cap model is not proof of
+Xtensa numeric behavior, device heap high-water or device performance.
 `DERBY_FIXED_SYSTEM_M32=1` selects installed system multilib; otherwise the
 existing user-local sysroot helper is used.
 

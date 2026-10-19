@@ -100,9 +100,9 @@ if(POCKET_DERBY_FIXED_WORKLOAD)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                  "${CMAKE_SOURCE_DIR}/tools/derby_fixed_workload_chunks.py"
                  "${CMAKE_SOURCE_DIR}/tools/derby_compare_chunks.py"
-                 "${CMAKE_SOURCE_DIR}/apps/derby/derby_watch.js"
-                 "${CMAKE_SOURCE_DIR}/apps/derby/derby_play.js"
-                 "${CMAKE_SOURCE_DIR}/apps/derby/derby_view.js")
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_watch.js"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_play.js"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_view.js")
 endif()
 option(KASANE_PROC_LIMITS_PROBE "USB-triggered procedural limits/lifecycle measurements ('{' native, '}' JS)" OFF)
 if(KASANE_PROC_LIMITS_PROBE)

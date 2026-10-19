@@ -18,7 +18,7 @@ import run_derby
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'tools'))
 from derby_fixed_workload_chunks import generate
-from derby_fixed_result import parse_trial
+from derby_fixed_result import parse_trial,verify_work
 
 def once(text,old,new):
     if text.count(old)!=1:raise ValueError('fixed host source drift: '+old[:80])
@@ -100,17 +100,13 @@ def check_result(result):
     if result.get('device_sized_model'):expected.pop('input_hash')
     if len(windows)!=3 or len(rows)!=3:raise ValueError('three dependent repetitions required')
     for i,(window,row) in enumerate(zip(windows,rows,strict=True),1):
-        if window['rep']!=i or any(window[k]!=v for k,v in expected.items()):raise ValueError('known fixture work/pixels differ')
-        if any(row[f'c{j}']!=rows[0][f'c{j}'] for j in range(10)):raise ValueError('non-deterministic work counters')
-        if any(row[f's{j}'].split(':')[1]!=rows[0][f's{j}'].split(':')[1] for j in range(10)):raise ValueError('non-deterministic stage calls')
-        counts=[int(row[f'c{j}']) for j in range(10)]
-        if counts[:4]!=[0,120,600,7735]:raise ValueError('known clip work differs')
-        if variant=='native':
-            if counts[4:]!=[120,7735,0,120,0,0]:raise ValueError('cache accounting differs')
-        elif variant=='batch':
-            if counts[4:]!=[7735,0,0,0,120,960]:raise ValueError('batch accounting differs')
-        elif counts[4:]!=[7735,0,0,0,0,0]:raise ValueError('baseline accounting differs')
-        if int(row['s1'].split(':')[1])!=(1246 if variant=='batch' else 2086):raise ValueError('bridge boundary calls differ')
+        mismatches={k:{'expected':v,'actual':window[k]} for k,v in expected.items() if window[k]!=v}
+        if window['rep']!=i or mismatches:raise ValueError('known fixture work/pixels differ: '+json.dumps({'rep':window['rep'],'mismatches':mismatches},sort_keys=True))
+        # This no-continuation host harness also checks all model-local calls.
+        # The device gate only freezes fixed work scopes; continuation/render
+        # scopes have their own invariants in the shared verifier.
+        if any(row[f's{j}'].split(':')[1]!=rows[0][f's{j}'].split(':')[1] for j in range(10)):raise ValueError('non-deterministic host stage calls')
+    verify_work(rows,variant)
     return result
 
 def main():
@@ -135,7 +131,7 @@ def main():
     harness=make_harness(out)
     options={'measure':True,'fixed_workload':True,'harness':harness}
     if variant=='batch':options['runner_batch']=True
-    cache=out/('build32' if args.m32 else 'build');cache.mkdir(exist_ok=True)
+    cache=out/('build32-sse2' if args.m32 else 'build');cache.mkdir(exist_ok=True)
     # Existing build() checks source timestamps before reusing these copied objects.
     for name in ('dtoa','libregexp','libunicode','quickjs','quickjs-vm'):
         old=ROOT/'.cache/derby_host/asan'/f'{name}.o'
@@ -144,6 +140,9 @@ def main():
     flags=['-fsanitize=address,undefined']
     if args.m32:
         flags=['-m32','-malign-double'] if os.environ.get('DERBY_FIXED_SYSTEM_M32')=='1' else subprocess.check_output(['bash','tools/vmtest/m32_sysroot.sh'],cwd=ROOT,text=True,env=os.environ).split()
+    if args.m32:
+        # Match binary64 evaluation rather than i386's default x87 intermediates.
+        flags += ['-msse2','-mfpmath=sse']
     binary=run_derby.build(flags,cache,**options)
     env=dict(os.environ,DERBY_APP_DIR=str(app),DERBY_HEAP_LIMIT='524288',DERBY_HW='0x2545F491',
              DERBY_DEVICE_FIXTURE_HOST='1',DERBY_SER_ORACLE='1',DERBY_SER_FUZZ='4000',
@@ -165,12 +164,14 @@ def main():
         if any(row[k]!=windows[0][k] for k in ('contexts','draws','input_hash','procedural_pixel_hash','panel_hash')):
             raise ValueError('repetition work/pixels differ')
     result={'variant':variant,'trial':trial,'windows':windows,'hardware_tested':False,
-            'device_sized_model':args.m32,'input_bit_oracle_verified':not args.m32,
-            'scope':'same-process dependent 3 replays; ASan/UBSan host oracle elapsed/self; no host pace wait, no target performance claim',
+            'device_sized_model':args.m32,'input_bit_oracle_verified':not args.m32,'compiler_flags':flags,
+            'guest_heap_limit_bytes':int(env['DERBY_HEAP_LIMIT']),
+            'scope':('same-process dependent 3 replays; i386/SSE2 heap model, no sanitizers; ' if args.m32 else 'same-process dependent 3 replays; ASan/UBSan host oracle; ')+'no host pace wait, no target performance claim',
             'harness_sha256':hashlib.sha256(harness.read_bytes()).hexdigest(),
             'generated':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in app.glob('*.js')}}
-    check_result(result)
+    # Keep complete diagnostics when the known-answer gate rejects this run.
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+    check_result(result)
     print(json.dumps({'variant':variant,'pass':True,'windows':windows,'result':str(out/'result.json')}),flush=True)
 
 if __name__=='__main__':main()

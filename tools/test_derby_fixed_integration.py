@@ -99,27 +99,34 @@ class Integration(unittest.TestCase):
             self.assertEqual(Path(pairs['play']).read_bytes(),(out/'fixed/derby_play.js').read_bytes())
             self.assertIn('S.runners(',Path(pairs['pan']).read_text())
 
-    @unittest.skipUnless(shutil.which('cmake'),'CMake unavailable; target configuration still required')
+    @unittest.skipUnless(shutil.which('cmake') and shutil.which('ninja'),'CMake/Ninja unavailable; target configuration still required')
     def test_real_cmake_chunk_selection_fragment(self):
         text=(ROOT/'main/CMakeLists.txt').read_text()
         start=text.index('if(POCKET_DERBY_TELEMETRY)\n    if(DERBY_BGCOST_SOURCE')
         end=text.index('execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py"',start)
-        fragment=text[start:end].replace('${CMAKE_CURRENT_LIST_DIR}',(ROOT/'main').as_posix())
+        early_start=text.index('if(POCKET_DERBY_FIXED_WORKLOAD)\n    if(NOT POCKET_DERBY_COMPARE_FIXED_HW')
+        early_end=text.index('option(KASANE_PROC_LIMITS_PROBE',early_start)
+        chunks_end=text.index('include("${CMAKE_BINARY_DIR}/generated/app_chunks.cmake")',end)
+        def source(fragment):
+            return fragment.replace('${CMAKE_CURRENT_LIST_DIR}',(ROOT/'main').as_posix()).replace('${CMAKE_SOURCE_DIR}',ROOT.as_posix())
+        fragment=source(text[start:end]);early=source(text[early_start:early_end]);chunks=source(text[end:chunks_end])
         batch=(ROOT/'tools/derby_runner_batch_chunks.py').exists()
         for enabled in (False,True):
             with tempfile.TemporaryDirectory() as tmp:
-                out=Path(tmp);fixed=out/'generated/derby_fixed_workload'
-                if enabled:generate(ROOT/'apps/derby',fixed)
-                script=out/'select.cmake'
+                out=Path(tmp);build=out/'build';fixed=build/'generated/derby_fixed_workload'
+                script=out/'CMakeLists.txt'
                 script.write_text('cmake_minimum_required(VERSION 3.22)\n'
-                    +f'set(PYTHON "{sys.executable}")\nset(CMAKE_SOURCE_DIR "{ROOT.as_posix()}")\nset(CMAKE_BINARY_DIR "{out.as_posix()}")\n'
+                    +'project(derby_fixture_selection NONE)\n'
+                    +f'set(PYTHON "{sys.executable}")\n'
                     +'set(POCKET_DERBY_TELEMETRY ON)\nset(POCKET_DERBY_COMPARE_FIXED_HW ON)\n'
                     +f'set(POCKET_DERBY_FIXED_WORKLOAD {"ON" if enabled else "OFF"})\n'
                     +f'set(POCKET_DERBY_RUNNER_BATCH {"ON" if batch else "OFF"})\n'
-                    +f'set(_derby_fixture "{fixed.as_posix()}")\nset(_app_chunk_lists "{(ROOT/"apps/derby/chunks.txt").as_posix()}")\n'
-                    +'function(set_property)\nendfunction()\n'+fragment
+                    +early
+                    +f'file(GLOB _app_chunk_lists CONFIGURE_DEPENDS "{(ROOT/"main").as_posix()}/../apps/derby/chunks.txt")\n'
+                    +fragment+chunks
                     +f'file(WRITE "{(out/"selected.txt").as_posix()}" "${{_app_chunk_lists}}")\n')
-                subprocess.run(['cmake','-P',str(script)],check=True,capture_output=True)
+                subprocess.run(['cmake','-G','Ninja','-S',str(out),'-B',str(build)],check=True,capture_output=True)
+                subprocess.run(['cmake','--build',str(build)],check=True,capture_output=True)
                 selected=(out/'selected.txt').read_text().split(';')
                 self.assertEqual(len(selected),1,'duplicate normal/telemetry/fixed app list')
                 pairs=dict(line.split() for line in Path(selected[0]).read_text().splitlines()[1:])
