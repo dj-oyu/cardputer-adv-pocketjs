@@ -99,9 +99,9 @@ if(POCKET_DERBY_FIXED_WORKLOAD)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                  "${CMAKE_SOURCE_DIR}/tools/derby_fixed_workload_chunks.py"
                  "${CMAKE_SOURCE_DIR}/tools/derby_compare_chunks.py"
-                 "${CMAKE_SOURCE_DIR}/apps/derby/derby_watch.js"
-                 "${CMAKE_SOURCE_DIR}/apps/derby/derby_play.js"
-                 "${CMAKE_SOURCE_DIR}/apps/derby/derby_view.js")
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_watch.js"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_play.js"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_view.js")
 endif()
 option(KASANE_PROC_LIMITS_PROBE "USB-triggered procedural limits/lifecycle measurements ('{' native, '}' JS)" OFF)
 if(KASANE_PROC_LIMITS_PROBE)
@@ -386,7 +386,7 @@ if(POCKET_DERBY_TELEMETRY)
     if(DERBY_BGCOST_SOURCE OR POCKET_HEAPPROBE)
         message(FATAL_ERROR "DERBY telemetry requires the normal game chunks")
     endif()
-    get_filename_component(_derby_source "${CMAKE_CURRENT_LIST_DIR}/../apps/derby" ABSOLUTE)
+    set(_derby_source "${CMAKE_CURRENT_LIST_DIR}/../apps/derby")
     set(_derby_trace "${CMAKE_BINARY_DIR}/generated/derby_telemetry")
     set(_derby_compare_arg "")
     if(POCKET_DERBY_COMPARE_FIXED_HW)
