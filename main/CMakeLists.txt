@@ -71,6 +71,18 @@ endif()
 if(POCKET_DERBY_COURSE_CACHE)
     add_compile_definitions(POCKET_DERBY_COURSE_CACHE=1)
 endif()
+option(POCKET_DERBY_CLIP_NORM "Experimental native DERBY clip-factor cache" OFF)
+option(POCKET_DERBY_RUNNER_BATCH "Experimental bounded native PAN runner submission" OFF)
+if((POCKET_DERBY_CLIP_NORM OR POCKET_DERBY_RUNNER_BATCH) AND
+   (POCKET_DERBY_RUNNER_AFFINE OR POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH))
+    message(FATAL_ERROR "Clip/runner batching must be evaluated separately from affine/projection experiments")
+endif()
+if(POCKET_DERBY_CLIP_NORM)
+    add_compile_definitions(POCKET_DERBY_CLIP_NORM=1)
+endif()
+if(POCKET_DERBY_RUNNER_BATCH)
+    add_compile_definitions(POCKET_DERBY_RUNNER_BATCH=1)
+endif()
 option(KASANE_BGCOST_TRACE "BGC/BGP lines after MDT: VM steps, frame geometry, per-plan draw costs" OFF)
 if(KASANE_BGCOST_TRACE AND NOT KASANE_MEGADEMO_TRACE)
     message(FATAL_ERROR "KASANE_BGCOST_TRACE requires KASANE_MEGADEMO_TRACE")
@@ -383,6 +395,22 @@ if(POCKET_DERBY_PROJECT_BATCH)
                  "${CMAKE_SOURCE_DIR}/tools/derby_project_batch_chunks.py"
                  "${CMAKE_SOURCE_DIR}/tools/games/derby_project_batch.py"
                  "${CMAKE_SOURCE_DIR}/apps/derby/derby_pan.js")
+endif()
+if(POCKET_DERBY_RUNNER_BATCH)
+    if(DERBY_BGCOST_SOURCE OR POCKET_HEAPPROBE)
+        message(FATAL_ERROR "DERBY runner batch requires the normal game chunks")
+    endif()
+    set(_runner_input "${CMAKE_SOURCE_DIR}/apps/derby")
+    set(_runner_output "${CMAKE_BINARY_DIR}/generated/derby_runner_batch")
+    execute_process(COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/derby_runner_batch_chunks.py"
+                    "${_runner_input}" "${_runner_output}" COMMAND_ERROR_IS_FATAL ANY)
+    get_filename_component(_runner_list "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/chunks.txt" ABSOLUTE)
+    list(REMOVE_ITEM _app_chunk_lists "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/chunks.txt" "${_runner_list}")
+    list(APPEND _app_chunk_lists "${_runner_output}/chunks.txt")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_SOURCE_DIR}/tools/derby_runner_batch_chunks.py"
+                 "${CMAKE_SOURCE_DIR}/tools/games/derby_runner_batch.py"
+                 "${_runner_input}/derby_pan.js" "${_runner_input}/chunks.txt")
 endif()
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py"
                 "${CMAKE_BINARY_DIR}/generated" ${_app_chunk_lists}

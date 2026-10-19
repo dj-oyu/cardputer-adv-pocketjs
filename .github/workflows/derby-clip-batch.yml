@@ -1,0 +1,84 @@
+name: DERBY clip cache and runner batch containment
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-clip-batch-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -B tools/games/test_derby_clip_norm.py
+      - run: python -B tools/games/run_derby_clip_batch.py --out artifacts/clip-batch
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-clip-batch-host-${{ env.SOURCE_HEAD }}
+          path: artifacts/clip-batch/
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        clip: ['OFF', 'ON']
+        batch: ['OFF', 'ON']
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build exact source and prove the selected runner mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_clip_batch -D SDKCONFIG="$PWD/build_clip_batch/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D POCKET_DERBY_CLIP_NORM=${{ matrix.clip }} -D POCKET_DERBY_RUNNER_BATCH=${{ matrix.batch }} build
+          grep -qx 'POCKET_DERBY_CLIP_NORM:BOOL=${{ matrix.clip }}' build_clip_batch/CMakeCache.txt
+          for option in POCKET_DERBY_RUNNER_AFFINE POCKET_DERBY_COURSE_CACHE POCKET_DERBY_PROJECT_BATCH; do
+            grep -qx "$option:BOOL=OFF" build_clip_batch/CMakeCache.txt
+          done
+          grep -qx 'POCKET_DERBY_RUNNER_AFFINE_PIE_MIN:STRING=0' build_clip_batch/CMakeCache.txt
+          python -B tools/verify_derby_runner_batch.py --build build_clip_batch --expect ${{ matrix.batch }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-clip-batch-${{ env.SOURCE_HEAD }}-clip-${{ matrix.clip }}-batch-${{ matrix.batch }}
+          path: |
+            build_clip_batch/cardputer_pocketjs.bin
+            build_clip_batch/cardputer_pocketjs.elf
+            build_clip_batch/cardputer_pocketjs.map
+            build_clip_batch/sdkconfig
+            build_clip_batch/CMakeCache.txt
+            build_clip_batch/runner-batch-proof.json
+          retention-days: 14

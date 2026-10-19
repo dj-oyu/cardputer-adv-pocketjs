@@ -188,3 +188,5 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | --- | --- | --- |
 | [derby-runner-affine-experiment.md](apps/derby-runner-affine-experiment.md) | Experiment | OFF by default; bounded runner geometry; device visual acceptance pending |
 | [derby-projection-experiment.md](apps/derby-projection-experiment.md) | Experiment | OFF by default; course cache / projection; device heap and performance acceptance pending |
+
+- [DERBY native clip cache](apps/derby-native-clip-norm.md) / [runner submission batch](apps/derby-runner-batch.md): OFF-only containment, separate from device enablement.

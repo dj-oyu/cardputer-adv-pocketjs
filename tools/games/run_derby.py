@@ -104,7 +104,8 @@ def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
 
 
 def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
-          runner_affine=False, camera_cache=False, project_batch=False, harness=None) -> Path:
+          runner_affine=False, camera_cache=False, project_batch=False, harness=None,
+          clip_norm=False, runner_batch=False) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     table = rom_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
@@ -130,8 +131,14 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     binary = cache / "test-derby"
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
+    if (clip_norm or runner_batch) and (runner_affine or camera_cache or project_batch):
+        raise ValueError("Clip/runner batching requires a separate experiment matrix")
     experiment_flags = []
     experiment_sources = []
+    if clip_norm:
+        experiment_flags += ["-DPOCKET_DERBY_CLIP_NORM"]
+    if runner_batch:
+        experiment_flags += ["-DPOCKET_DERBY_RUNNER_BATCH"]
     if runner_affine:
         experiment_flags += ["-DPOCKET_DERBY_RUNNER_AFFINE"]
         experiment_sources += ["main/pocket/derby_runner_affine.c"]
