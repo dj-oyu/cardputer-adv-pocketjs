@@ -51,6 +51,18 @@ option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone 
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
 option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
+option(POCKET_DERBY_RUNNER_AFFINE "Experimental bounded runner Q14 screen transform" OFF)
+set(POCKET_DERBY_RUNNER_AFFINE_PIE_MIN "0" CACHE STRING "Measured PIE point threshold; 0 keeps scalar")
+if(POCKET_DERBY_RUNNER_AFFINE)
+    if(NOT POCKET_DERBY_RUNNER_AFFINE_PIE_MIN MATCHES "^(0|[1-9][0-9]*)$" OR
+       POCKET_DERBY_RUNNER_AFFINE_PIE_MIN GREATER 128)
+        message(FATAL_ERROR "Runner PIE threshold must be an integer in 0..128")
+    endif()
+    list(APPEND KASANE_SOURCES "pocket/derby_runner_affine.c")
+    add_compile_definitions(POCKET_DERBY_RUNNER_AFFINE=1
+        POCKET_DERBY_RUNNER_AFFINE_PIE_MIN=${POCKET_DERBY_RUNNER_AFFINE_PIE_MIN})
+    set_source_files_properties(pocket/derby_runner_affine.c PROPERTIES COMPILE_OPTIONS "-O2;-fstack-usage")
+endif()
 option(POCKET_DERBY_TELEMETRY "Bounded DERBY sampled native metrics (diagnostic image)" OFF)
 if(POCKET_DERBY_TELEMETRY)
     list(APPEND KASANE_SOURCES "pocket/derby_telemetry.c")
