@@ -1,3 +1,4 @@
+#include "derby_detail.h"
 #include "derby_fixed_workload.h"
 #include "derby_measure.h"
 #include <inttypes.h>
@@ -15,6 +16,9 @@ static struct {
     uint64_t session_start,start,turn_start,wait_start,wall,work;
     uint64_t pace[DF_PACES],pace_calls[DF_PACES],requested[DF_PACES],counts[DF_COUNTERS];
     dm_snapshot before,after;
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    dd_snapshot detail;
+#endif
 } s;
 static unsigned serial;
 
@@ -35,6 +39,9 @@ static void final_record(void){
 }
 void df_fail(unsigned reason){
     if(s.phase==DF_OFF||s.phase==DF_ABORT||s.phase==DF_DONE)return;
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    dd_cancel();
+#endif
     s.quality|=reason;s.trial_quality|=s.quality;s.phase=DF_ABORT;
     s.turn_open=s.wait_open=false;final_record();
 }
@@ -49,6 +56,24 @@ void df_count(enum df_counter counter,uint64_t amount){
 static bool identity(unsigned rep,unsigned step,uint32_t seed,unsigned camera,unsigned tier){
     return rep==s.rep&&seed==UINT32_C(0x9112A7AB)&&camera==8&&tier==1&&step>=390&&step<=510;
 }
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+static bool detail_report(void){
+    char line[512];int n;
+    for(unsigned i=0;i<DD_STAGES;i++){
+        const dd_counter *c=&s.detail.stage[i];
+        n=snprintf(line,sizeof line,"DERBY_DETAIL v=1 session=%u rep=%u stage=%u inc_us=%"PRIu64" self_us=%"PRIu64" calls=%"PRIu64"\n",
+          serial,s.rep,i,c->inclusive_us,c->self_us,c->calls);
+        if(n<=0||(size_t)n>=sizeof line||!df_write(line,(size_t)n))return false;
+    }
+    for(unsigned i=0;i<DD_EVENTS;i++){
+        n=snprintf(line,sizeof line,"DERBY_DETAIL_BYTES v=1 session=%u rep=%u event=%u amount=%"PRIu64"\n",serial,s.rep,i,s.detail.event[i]);
+        if(n<=0||(size_t)n>=sizeof line||!df_write(line,(size_t)n))return false;
+    }
+    n=snprintf(line,sizeof line,"DERBY_DETAIL_END v=1 session=%u rep=%u stages=%u events=%u faults=%"PRIu64" pairs=%"PRIu64" elapsed=1 logical_bytes=1\n",
+       serial,s.rep,DD_STAGES,DD_EVENTS,s.detail.faults,s.detail.pairs);
+    return n>0&&(size_t)n<sizeof line&&df_write(line,(size_t)n);
+}
+#endif
 static void report(uint32_t finish){
     char line[1024];
     int n=snprintf(line,sizeof line,
@@ -70,6 +95,9 @@ static void report(uint32_t finish){
     }
     if(s.quality||n<=0||(size_t)n+1>=sizeof line){df_fail(s.quality?s.quality:DF_OUTPUT);return;}
     line[n++]='\n';
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    if(!detail_report()){df_fail(DF_OUTPUT);return;}
+#endif
     if(!df_write(line,(size_t)n)){df_fail(DF_OUTPUT);return;}
     ++s.reported;
     if(s.rep==3){s.phase=DF_DONE;final_record();}else s.phase=DF_READY;
@@ -124,6 +152,9 @@ void df_owner_begin(uint64_t now){
         memset(s.counts,0,sizeof s.counts);memset(s.pace,0,sizeof s.pace);
         memset(s.pace_calls,0,sizeof s.pace_calls);memset(s.requested,0,sizeof s.requested);
         s.wall=s.work=0;s.start=now;s.phase=DF_MEASURE;
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+        dd_start();
+#endif
     }
     if(df_measuring()){
         if(s.turn_open||s.wait_open){df_fail(DF_STATE);return;}
@@ -162,6 +193,9 @@ void df_owner_end(uint64_t now,bool running){
            s.after.dispatch_failures!=s.before.dispatch_failures||s.after.transfer_failures!=s.before.transfer_failures||
            s.after.contexts-s.before.contexts!=120||s.after.completed_contexts-s.before.completed_contexts!=120){df_fail(DF_MEASUREMENT);return;}
         if(s.after.capture_samples!=s.before.capture_samples){df_fail(DF_CAPTURE);return;}
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+        if(!dd_finish(&s.detail)||s.detail.faults){df_fail(DF_MEASUREMENT);return;}
+#endif
         s.phase=DF_TAIL;
     }
 }

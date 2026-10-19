@@ -70,7 +70,7 @@ globalThis.frame=function(b) {
 };
 '''
 
-def generate(source:Path,out:Path):
+def generate(source:Path,out:Path,detail=False):
     out.mkdir(parents=True,exist_ok=True)
     # A changed settlement predicate must be reviewed with the bounded tail.
     once((source/'derby_scene.js').read_text(),
@@ -93,15 +93,21 @@ def generate(source:Path,out:Path):
     watch=once((source/'derby_watch.js').read_text(),'const OV = [.5,','const OV = [1,')
     for name,text in [('view',view),('play',play),('watch',watch)]:
         (out/f'derby_{name}.js').write_bytes(text.encode())
+    if detail:
+        from derby_detail_chunks import instrument
+        for name in ('watch','view','play','pan'):
+            path=out/f'derby_{name}.js'
+            text=(source/path.name).read_text() if name=='pan' else path.read_text()
+            path.write_bytes(instrument(name,text).encode())
     lines=['app local.derby']
     for line in (source/'chunks.txt').read_text().splitlines():
         cols=line.split()
         if len(cols)!=2 or cols[0]=='app' or line.lstrip().startswith('#'):continue
-        path=out/f'derby_{cols[0]}.js' if cols[0] in ('view','play') else source/cols[1]
+        path=out/f'derby_{cols[0]}.js' if cols[0] in ('view','play') or detail and cols[0]=='pan' else source/cols[1]
         lines.append(cols[0]+' '+path.resolve().as_posix())
     (out/'chunks.txt').write_text('\n'.join(lines)+'\n')
     (out/'fixture.json').write_text(json.dumps({**FIXTURE,'manifest_sha256':MANIFEST_SHA256},indent=2)+'\n')
 
 if __name__=='__main__':
-    if len(sys.argv)!=3:raise SystemExit('usage: derby_fixed_workload_chunks.py SOURCE OUT')
-    generate(Path(sys.argv[1]).resolve(),Path(sys.argv[2]).resolve())
+    if len(sys.argv) not in (3,4):raise SystemExit('usage: derby_fixed_workload_chunks.py SOURCE OUT')
+    generate(Path(sys.argv[1]).resolve(),Path(sys.argv[2]).resolve(),len(sys.argv)==4 and sys.argv[3].upper() in ('ON','1','YES','TRUE','Y'))

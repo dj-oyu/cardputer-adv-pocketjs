@@ -1,3 +1,4 @@
+#include "derby_detail.h"
 #include "board.h"
 #include "motion.h"
 #include "sound.h"
@@ -91,6 +92,8 @@ static void IRAM_ATTR lcd_post_cb(spi_transaction_t *trans){
 // transfer's own error, or ESP_OK when there was nothing in flight.
 static esp_err_t tx_reap(void) {
     if (!tx_inflight) return ESP_OK;
+    DD_SCOPE(DD_TX_REAP);
+    DD_ADD(DD_TX_REAPS,1);
 #ifdef KASANE_P0_BUS_PROBE
     bool sd_before=ksn_p0_bus_sd_active();
     uint32_t sd_epoch_before=ksn_p0_bus_sd_epoch();
@@ -98,6 +101,7 @@ static esp_err_t tx_reap(void) {
 #endif
     spi_transaction_t *done = NULL;
     esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+    DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
 #ifdef KASANE_P0_BUS_PROBE
     uint32_t finished=(uint32_t)esp_timer_get_time();
     uint32_t elapsed=finished-(uint32_t)began;
@@ -490,6 +494,8 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         // `shared` is left as drawn. Then the previous result is reaped (one
         // transfer in flight at a time, which is what queue_size=1 allows) and
         // this strip is queued.
+        DD_OPEN(copy,DD_TX_COPY);
+        DD_ADD(DD_TX_COPY_BYTES,bytes);
         uint16_t *panel = tx_buf[tx_front];
         if (g_board_swap_into) {
             if(pie_swap) swap_pie(pixels,panel,(unsigned)(count*2/32));
@@ -504,6 +510,7 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
         ksn_p0_bus_phase_sample(KSN_P0_BUS_SWAP,
             (uint32_t)(esp_timer_get_time()-swap_began),false);
 #endif
+        DD_CLOSE(copy);
         e = tx_reap();
         if (e == ESP_OK) {
             // DC high: these bytes are pixel data and not a command. tx() is the
@@ -516,7 +523,11 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             tx_pending.user=&lcd_data_isr_us;
             int64_t queue_began=esp_timer_get_time();
 #endif
-            e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+            { DD_SCOPE(DD_TX_SUBMIT);
+              DD_ADD(DD_TX_SUBMITS,1);
+              e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+              DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+              DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
 #ifdef KASANE_P0_BUS_PROBE
             ksn_p0_bus_phase_sample(KSN_P0_BUS_QUEUE,
                 (uint32_t)(esp_timer_get_time()-queue_began),false);
@@ -525,10 +536,17 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             tx_front ^= 1;
         }
     } else {
+        DD_OPEN(copy,DD_TX_COPY);
         if(pie_swap) swap_pie(pixels,pixels,(unsigned)(count*2/32));
         else swap_scalar(pixels,pixels,count);
+        DD_CLOSE(copy);
         e = tx_reap();
-        if (e == ESP_OK) e = tx(true, pixels, bytes);
+        if (e == ESP_OK) {
+            DD_SCOPE(DD_TX_SUBMIT);DD_ADD(DD_TX_SUBMITS,1);
+            e = tx(true, pixels, bytes);
+            DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+            DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0);
+        }
     }
     // Where the pointer lands once these rows are in. At the bottom of the
     // window it wraps to the window's own top, which is only row 0 when this
@@ -576,6 +594,8 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     // make every packed row a whole number of the kernel's blocks at an aligned
     // address. Anything else falls to the scalar swap, which is the arm that
     // made the first narrow measurement slower than the full-width path.
+    DD_OPEN(copy,DD_TX_COPY);
+    DD_ADD(DD_TX_COPY_BYTES,bytes);
     uint16_t *panel = tx_buf[tx_front];
     bool aligned = pie_swap && (x%16)==0 && (cols%16)==0;
     for (int r=0;r<rows;r++) {
@@ -583,6 +603,7 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
         if (aligned) swap_pie(in, out, (unsigned)(cols*2/32));
         else swap_scalar(out, in, cols);
     }
+    DD_CLOSE(copy);
     if (g_board_async) {
         e = tx_reap();
         if (e == ESP_OK) {
@@ -592,13 +613,22 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
             atomic_store_explicit(&lcd_data_isr_us,0u,memory_order_relaxed);
             tx_pending.user=&lcd_data_isr_us;
 #endif
-            e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+            { DD_SCOPE(DD_TX_SUBMIT);
+              DD_ADD(DD_TX_SUBMITS,1);
+              e = spi_device_queue_trans(lcd, &tx_pending, portMAX_DELAY);
+              DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+              DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
             tx_inflight = (e == ESP_OK);
             tx_front ^= 1;
         }
     } else {
         e = tx_reap();
-        if (e == ESP_OK) e = tx(true, panel, bytes);
+        if (e == ESP_OK) {
+            DD_SCOPE(DD_TX_SUBMIT);DD_ADD(DD_TX_SUBMITS,1);
+            e = tx(true, panel, bytes);
+            DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+            DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0);
+        }
     }
     next_row = -1;
     return e;

@@ -1,0 +1,111 @@
+name: DERBY detailed measurement
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-detail-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Accounting, OFF preservation, generation and build-proof negatives
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python -m pip install jsonschema==4.23.0
+          git diff --check
+          python -B tools/test_derby_detail.py
+          python -B tools/test_derby_detail_generation.py
+          python -B tools/test_derby_detail_board.py
+          python -B tools/test_derby_detail_proof.py
+          python -B tools/test_derby_fixed_integration.py
+          python -B tools/test_diagnostic_build.py
+      - name: ASan and UBSan actual ON/OFF fixture, parser and pixels
+        run: |
+          set -euo pipefail
+          python -B tools/games/run_derby_fixed.py --out artifacts/off
+          python -B tools/games/run_derby_fixed.py --detail --out artifacts/on
+          python -B tools/test_derby_detail.py --log artifacts/on/trial.log
+          python -B tools/games/check_derby_detail_pair.py --off artifacts/off --on artifacts/on --out artifacts/asan-pair.json
+      - name: O2 functional overhead control
+        run: |
+          set -euo pipefail
+          python -B tools/games/run_derby_fixed.py --detail-fast --out artifacts/fast-off
+          python -B tools/games/run_derby_fixed.py --detail-fast --detail --out artifacts/fast-on
+          python -B tools/games/check_derby_detail_pair.py --off artifacts/fast-off --on artifacts/fast-on --out artifacts/fast-pair.json
+      - name: Device-sized detailed guest heap and objects
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          DERBY_FIXED_SYSTEM_M32=1 python -B tools/games/run_derby_fixed.py --m32 --detail --out artifacts/m32-on
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-detail-host-${{ env.SOURCE_HEAD }}
+          path: |
+            artifacts/**/*.json
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        detail: ['ON', 'OFF']
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Exact target link, mode proof and static resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" = "$(stat -c %u .)"
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_detail -D SDKCONFIG="$PWD/build_detail/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D POCKET_DERBY_DETAIL_MEASURE=${{ matrix.detail }} build
+          python -B tools/record_verification.py --build build_detail --expect-telemetry ON --expect-measure ON --out build_detail/verification.json
+          python -B tools/report_derby_fixed_stack.py --build build_detail
+          python -B tools/report_derby_detail_resources.py --build build_detail
+          idf.py -B build_detail size-files > build_detail/size-files.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-detail-target-${{ matrix.detail }}-${{ env.SOURCE_HEAD }}
+          path: |
+            build_detail/*.json
+            build_detail/*.map
+            build_detail/*.txt
+            build_detail/sdkconfig
+            build_detail/SHA256SUMS
+            build_detail/esp-idf/main/**/*.su
+          retention-days: 14
