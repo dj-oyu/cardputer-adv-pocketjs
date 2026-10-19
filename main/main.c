@@ -14,6 +14,7 @@
 #include "skk_session.h"
 #include "app_session.h"
 #include "pocket_kasane.h"
+#include "pocket/derby_fixed_workload.h"
 #include "vm_wake.h"
 #include "pocket_workspace.h"
 #include "sd_picker.h"
@@ -1008,6 +1009,7 @@ static void ui_task(void *arg) {
         }
 #endif
         int64_t frame_start=esp_timer_get_time();
+        DF_OWNER_BEGIN((uint64_t)frame_start);
 #ifdef KASANE_P0_PROBE
         if(overlay_running()) {
             if(previous_overlay_frame_started)
@@ -1278,6 +1280,7 @@ static void ui_task(void *arg) {
                           !pocket_av_background_active(),
                           key_seen);
 
+        DF_WORK_END((uint64_t)esp_timer_get_time());
         last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
 #ifdef KASANE_P0_PROBE
         // Unlike overlay_draw, this includes the synchronous SD producer.
@@ -1329,13 +1332,17 @@ static void ui_task(void *arg) {
                 // yield, and a yield is all a turn that just ran 8 ms of jobs
                 // owes the rest of the machine.
                 rest = (unsigned)held<VM_MIN_PERIOD_MS?VM_MIN_PERIOD_MS-(unsigned)held:1;
+                DF_PACE_BEGIN(DF_PACE_CONT,(uint64_t)esp_timer_get_time(),pdMS_TO_TICKS(rest));
                 vTaskDelay(pdMS_TO_TICKS(rest));
+                DF_PACE_END((uint64_t)esp_timer_get_time());
             } else {
                 unsigned since=(unsigned)((esp_timer_get_time()-period_began)/1000);
                 unsigned floor_ms = (unsigned)held<VM_MIN_PERIOD_MS?VM_MIN_PERIOD_MS-(unsigned)held:0;
                 if(floor_ms) {
                     // Not interruptible: this is the rate limit, not the cap.
+                    DF_PACE_BEGIN(DF_PACE_FLOOR,(uint64_t)esp_timer_get_time(),pdMS_TO_TICKS(floor_ms));
                     vTaskDelay(pdMS_TO_TICKS(floor_ms));
+                    DF_PACE_END((uint64_t)esp_timer_get_time());
                     since+=floor_ms;
                 }
                 rest = since<VM_DISPLAY_PERIOD_MS ? VM_DISPLAY_PERIOD_MS-since : 0;
@@ -1347,15 +1354,26 @@ static void ui_task(void *arg) {
                     uint64_t wait_now=(uint64_t)esp_timer_get_time();
                     uint32_t ticks=sys_device_wait_ticks(wait_now,pdMS_TO_TICKS(rest),
                                                          configTICK_RATE_HZ);
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+                    // Record the actual selected wait ticks without a second policy call.
+                    uint32_t df_wait_ticks=pocket_kasane_source_wait_ticks(
+                        wait_now,ticks,configTICK_RATE_HZ);
+                    DF_PACE_BEGIN(DF_PACE_CAP,(uint64_t)esp_timer_get_time(),df_wait_ticks);
+                    vm_wake_wait(df_wait_ticks);
+                    DF_PACE_END((uint64_t)esp_timer_get_time());
+#else
                     vm_wake_wait(pocket_kasane_source_wait_ticks(
                         wait_now,ticks,configTICK_RATE_HZ));
+#endif
                 }
                 // The next period starts where this one's wait ended, so the
                 // continuations that follow are charged to it exactly once.
                 period_began=esp_timer_get_time();
             }
+            DF_OWNER_END((uint64_t)esp_timer_get_time(),running);
             continue;
         }
+        DF_OWNER_END((uint64_t)esp_timer_get_time(),false);
         // No guest, so no display period is running: the next one starts
         // when a frame() first does, and this keeps a stale `period_began`
         // from making the first frame of a new session skip its wait.
