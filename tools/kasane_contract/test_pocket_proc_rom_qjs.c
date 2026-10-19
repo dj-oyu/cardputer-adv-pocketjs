@@ -32,12 +32,18 @@ ksn_proc_status __wrap_ksn_proc_run(ksn_proc_vm *vm){fallbacks++;return __real_k
 static bool fail_alloc,fail_malloc;
 static size_t callocs[8];
 static unsigned calloc_n;
+#ifdef KSN_PROC_VALIDATED_PLAN
+static unsigned fail_calloc_at;
+#endif
 void *proc_test_malloc(size_t size){
     if(fail_alloc||fail_malloc)return NULL;
     return (malloc)(size);
 }
 void *proc_test_calloc(size_t count,size_t size){
     if(fail_alloc)return NULL;
+#ifdef KSN_PROC_VALIDATED_PLAN
+    if(fail_calloc_at&&calloc_n+1==fail_calloc_at)return NULL;
+#endif
     if(calloc_n<8)callocs[calloc_n]=count*size;
     calloc_n++;
     return (calloc)(count,size);
@@ -180,7 +186,12 @@ static void equivalence(void){
         REQUIRE(!a->rom&&b->rom);
         const ksn_proc_sized_plan *pa=a->plan;
         const ksn_proc_rom_plan *pb=b->plan;
+#ifdef KSN_PROC_VALIDATED_PLAN
+        REQUIRE(calloc_n==2&&callocs[0]==ksn_proc_rom_plan_bytes(pb->params));
+        REQUIRE(callocs[1]==ksn_proc_validated_bytes(pb->rom->count));
+#else
         REQUIRE(calloc_n==1&&callocs[0]==ksn_proc_rom_plan_bytes(pb->params));
+#endif
         /* Same analysis: the same rows were accepted and marked. */
         REQUIRE(pa->valid&&pb->valid&&pa->count==pb->rom->count);
         REQUIRE(pa->fused_count==pb->fused_count&&!memcmp(pa->fused,pb->fused,sizeof pa->fused));
@@ -432,6 +443,43 @@ static void slots_contract(void){
     pocket_proc_reset();
 }
 
+#ifdef KSN_PROC_VALIDATED_PLAN
+static void validated_contract(void){
+    eval_ok("globalThis.IN=[[3,5,120,-4,5,1,2,80]];globalThis.hkeep=proc.register('derby.rail')");
+    proc_slot *keep=find_slot((uint32_t)eval_int("hkeep"));REQUIRE(keep&&keep->validated);
+    ksn_proc_validated_plan *original=keep->validated;
+    const uint32_t handle=next_handle;
+    for(unsigned kind=0;kind<2;kind++){
+        calloc_n=0;fail_calloc_at=2;
+        eval_ok(kind?"expect(()=>proc.register(prog(T.rail)),'OUT_OF_MEMORY')":
+                     "expect(()=>proc.register('derby.rail'),'OUT_OF_MEMORY')");
+        fail_calloc_at=0;REQUIRE(next_handle==handle&&keep->validated==original);
+    }
+    snap a,b;draw_one("hkeep",0,&a,seg_a);
+    /* Guarded getter/error paths cannot reset slots or change the ROM table. */
+    js_call_active=true;pocket_proc_reset();pocket_proc_rom_plans(NULL,0);js_call_active=false;
+    REQUIRE(keep->validated==original&&rom_table==ksn_proc_rom_plans);
+#ifdef KSN_PROC_VALIDATED_REFERENCE
+    ksn_proc_execution *execution=&vm->execution;
+#else
+    ksn_proc_execution *execution=vm;
+#endif
+    float input[KSN_PROC_INPUTS]={0};
+    REQUIRE(ksn_proc_validated_begin(execution,keep->validated,input,NULL,scratch)==KSN_PROC_RUNNING);
+    pocket_proc_reset();pocket_proc_rom_plans(NULL,0);
+    REQUIRE(keep->validated==original&&rom_table==ksn_proc_rom_plans);
+    ksn_proc_validated_end(execution);
+    /* Existing handles keep their original still-live ROM entry. Changing
+     * lookup tables does not authorize freeing an entry during a session. */
+    pocket_proc_rom_plans(NULL,0);REQUIRE(!keep->validated);
+    draw_one("hkeep",0,&b,seg_b);REQUIRE(same(&a,&b));
+    eval_ok("expect(()=>proc.register('derby.rail'),'INVALID_ARGUMENT');proc.unregister(hkeep)");
+    pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
+    pocket_proc_reset();
+    puts("VALIDATED_NATIVE_PASS cache_OOM_atomic handle_generation ROM_switch active_reset lease_cleanup");
+}
+#endif
+
 int main(int argc,char **argv){
     REQUIRE(argc==3);
     pocket_proc_rom_plans(ksn_proc_rom_plans,ksn_proc_rom_plans_count);
@@ -477,6 +525,9 @@ int main(int argc,char **argv){
     errors();
     bad_entries();
     slots_contract();
+#ifdef KSN_PROC_VALIDATED_PLAN
+    validated_contract();
+#endif
     pocket_proc_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("PASS built-in plans by name: same output as arrays, arity/name/value errors, bad table "

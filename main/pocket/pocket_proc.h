@@ -11,7 +11,10 @@ esp_err_t pocket_proc_install(JSContext *ctx, JSValueConst kasane_namespace);
 void pocket_proc_reset(void);
 /* The built-in plans register('name', args) looks up (docs/kasane/flash-plan.md):
  * a const table the firmware links, generated from the apps' @plan functions.
- * The table must outlive every session; reset() keeps it. Without a call,
+ * The table, entries, code and patches must outlive every session; reset()
+ * keeps the table. Replacing lookup tables does not release existing handles
+ * from their original entries. Experimental execution caches are invalidated.
+ * Without a call,
  * or with count 0, every name is unknown (INVALID_ARGUMENT). */
 void pocket_proc_rom_plans(const ksn_proc_rom_entry *entries,unsigned count);
 void pocket_proc_end_turn(void);
@@ -73,5 +76,10 @@ void pocket_proc_bgcost_view_us(uint32_t us);
 #ifdef KASANE_PROC_JS_DIAGNOSTIC
 void pocket_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
                                  uint32_t *span_count,uint32_t *span_cycles);
+#endif
+#if defined(KSN_PROC_VALIDATED_PLAN) && defined(KSN_PROC_VALIDATED_TRACE)
+/* Host-only operation/allocation accounting; no target speed claim. */
+typedef struct { uint32_t prepared,fast_draws,reference_draws;size_t live_bytes,peak_bytes; } pocket_proc_validated_trace;
+void pocket_proc_validated_trace_read(pocket_proc_validated_trace *out);
 #endif
 #endif

@@ -19,6 +19,22 @@ if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/../third_party/bmi270/bmi2.c" OR
         "CMake never downloads dependencies.")
 endif()
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
+option(KSN_PROC_VALIDATED_PLAN "Experimental owned validated procedural plan execution" OFF)
+option(KSN_PROC_VALIDATED_REFERENCE "Compare snapshot execution with validated plan storage" OFF)
+if(KSN_PROC_VALIDATED_REFERENCE AND NOT KSN_PROC_VALIDATED_PLAN)
+    message(FATAL_ERROR "Validated reference comparison requires the validated plan option")
+endif()
+if(KSN_PROC_VALIDATED_PLAN AND
+   (POCKET_DERBY_RUNNER_AFFINE OR POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH OR
+    POCKET_DERBY_CLIP_NORM OR POCKET_DERBY_RUNNER_BATCH))
+    message(FATAL_ERROR "Validated plan comparison requires other rendering experiments OFF")
+endif()
+if(KSN_PROC_VALIDATED_PLAN)
+    add_compile_definitions(KSN_PROC_VALIDATED_PLAN=1)
+endif()
+if(KSN_PROC_VALIDATED_REFERENCE)
+    add_compile_definitions(KSN_PROC_VALIDATED_REFERENCE=1)
+endif()
 set(POCKET_RANDOM_SOURCES "pocket/random_seed.c" "pocket/pocket_random.c")
 # The BLE / Opus / SD diagnostic probes (main/*_probe.c). They run at boot when the
 # option is on, so the default is OFF: the probes are kept in the tree, the shipped

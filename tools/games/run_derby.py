@@ -104,7 +104,10 @@ def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
 
 
 def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
-          runner_affine=False, camera_cache=False, project_batch=False, harness=None) -> Path:
+          runner_affine=False, camera_cache=False, project_batch=False, harness=None,
+          validated_plan=False, validated_reference=False, validated_trace=False) -> Path:
+    if validated_plan and (runner_affine or camera_cache or project_batch):
+        raise ValueError("Validated plan comparison requires other rendering experiments OFF")
     cache.mkdir(parents=True, exist_ok=True)
     table = rom_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
@@ -131,6 +134,11 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     experiment_flags = []
+    if validated_plan:experiment_flags += ["-DKSN_PROC_VALIDATED_PLAN"]
+    if validated_reference:
+        if not validated_plan:raise ValueError("Validated reference requires validated plan storage")
+        experiment_flags += ["-DKSN_PROC_VALIDATED_REFERENCE"]
+    if validated_trace:experiment_flags += ["-DKSN_PROC_VALIDATED_TRACE"]
     experiment_sources = []
     if runner_affine:
         experiment_flags += ["-DPOCKET_DERBY_RUNNER_AFFINE"]

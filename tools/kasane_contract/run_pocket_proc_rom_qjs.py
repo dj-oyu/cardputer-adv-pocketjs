@@ -90,6 +90,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--cases',type=Path,default=ROOT/'.cache/kasane_ir/cases.json')
     ap.add_argument('--mutate',action='store_true')
+    ap.add_argument('--validated',choices=('OFF','REFERENCE','ON'),default='OFF')
     a=ap.parse_args()
     if sys.platform=='win32':raise SystemExit('ASan/LeakSanitizer: run under WSL (bash -lc)')
     if not a.cases.exists():
@@ -109,6 +110,8 @@ def main():
     arms=[('scalar',[],[KASANE/'ksn_proc_points_pie.c']),
           ('fake_pie',['-D__XTENSA__','-DCONFIG_IDF_TARGET_ESP32S3=1','-DKSN_PROC_HOST_FAKE_PIE'],[])]
     for label,flags,extra in arms:
+        if a.validated!='OFF':flags=flags+['-DKSN_PROC_VALIDATED_PLAN']
+        if a.validated=='REFERENCE':flags=flags+['-DKSN_PROC_VALIDATED_REFERENCE']
         r=build_and_run(cc,objs,table,shipped,a.cases,label,flags,extra,KASANE/'ksn_proc_plan.c',None)
         print(r.stdout,end='')
         if r.returncode:raise SystemExit(f'{label}: failed\n{r.stderr[-4000:]}')

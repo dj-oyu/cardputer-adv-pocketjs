@@ -184,6 +184,8 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 ### DERBY opt-in experiments
 
+- [validated-plan-experiment.md](kasane/validated-plan-experiment.md): 登録済み描画planと実行状態の分離。OFF既定、実機比較前の独立P1候補。
+
 | Document | Kind | Scope |
 | --- | --- | --- |
 | [derby-runner-affine-experiment.md](apps/derby-runner-affine-experiment.md) | Experiment | OFF by default; bounded runner geometry; device visual acceptance pending |

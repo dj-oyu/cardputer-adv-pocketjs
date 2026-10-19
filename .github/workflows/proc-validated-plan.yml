@@ -1,0 +1,90 @@
+name: Procedural validated plan containment
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: proc-validated-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -B tools/test_proc_validated_proof.py
+      - run: python -B tools/test_proc_validated.py --out artifacts/contracts
+      - run: python -B tools/test_proc_validated_rom.py --out artifacts/native-rom
+      - run: python -B tools/games/run_proc_validated.py --out artifacts/game
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: proc-validated-host-${{ env.SOURCE_HEAD }}
+          path: artifacts/
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: ['OFF', 'REFERENCE', 'ON']
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build and prove the exact mode and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          mode='${{ matrix.mode }}'
+          enabled=ON
+          reference=OFF
+          if [ "$mode" = OFF ]; then enabled=OFF; fi
+          if [ "$mode" = REFERENCE ]; then reference=ON; fi
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          idf.py -B build_validated -D SDKCONFIG="$PWD/build_validated/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KSN_PROC_VALIDATED_PLAN="$enabled" -D KSN_PROC_VALIDATED_REFERENCE="$reference" build
+          python -B tools/verify_proc_validated.py --build build_validated --head "$SOURCE_HEAD" --mode "$mode"
+          idf.py -B build_validated size-files > build_validated/size-files.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: proc-validated-${{ env.SOURCE_HEAD }}-${{ matrix.mode }}
+          path: |
+            build_validated/cardputer_pocketjs.bin
+            build_validated/cardputer_pocketjs.elf
+            build_validated/cardputer_pocketjs.map
+            build_validated/project_description.json
+            build_validated/sdkconfig
+            build_validated/CMakeCache.txt
+            build_validated/validated-plan-proof.json
+            build_validated/size-files.txt
+          retention-days: 14

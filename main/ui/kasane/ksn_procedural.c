@@ -1,8 +1,17 @@
 #include "ksn_procedural.h"
+#ifdef KSN_PROC_VALIDATED_PLAN
+#include "ksn_proc_execution_internal.h"
+#endif
 #include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef KSN_PROC_VALIDATED_PLAN
+typedef ksn_proc_execution proc_execution;
+#else
+typedef ksn_proc_vm proc_execution;
+#endif
 
 static bool reg_ok(uint8_t r){return r<KSN_PROC_REGS;}
 static bool valid_program(const ksn_proc_program *p,uint8_t loop_end[KSN_PROC_CODE]){
@@ -84,6 +93,9 @@ static ksn_proc_status begin_core(ksn_proc_vm *vm,const ksn_proc_program *progra
                                   const ksn_proc_state *state,ksn_proc_frame *frame){
     if(!vm||!frame)return KSN_PROC_INVALID;
     memset(vm,0,sizeof *vm);
+#ifdef KSN_PROC_VALIDATED_PLAN
+    vm->loop_end=vm->owned_loop_end;
+#endif
     frame->ready=false;frame->count=0;frame->raster_steps=0;frame->ext=0;
     vm->status=KSN_PROC_INVALID;
     if(!input||!program||!program->code||!program->count||
@@ -94,7 +106,11 @@ static ksn_proc_status begin_core(ksn_proc_vm *vm,const ksn_proc_program *progra
     /* Arguments go into the VM's copy, before validation sees it. */
     if(binding&&!ksn_proc_apply_binding(vm->owned_code,program->count,binding))
         return vm->status;
+    #ifdef KSN_PROC_VALIDATED_PLAN
+    if(!valid_program(&vm->owned_program,vm->owned_loop_end))return vm->status;
+#else
     if(!valid_program(&vm->owned_program,vm->loop_end))return vm->status;
+#endif
     for(unsigned j=0;j<KSN_PROC_INPUTS;j++)if(!isfinite(input[j]))return vm->status;
     if(state){
         for(unsigned j=0;j<KSN_PROC_REGS;j++)if(!isfinite(state->reg[j]))return vm->status;
@@ -119,6 +135,9 @@ ksn_proc_status ksn_proc_begin_bound(ksn_proc_vm *vm,const ksn_proc_program *pro
     /* NULL would silently run the placeholders: a bound begin needs one. */
     if(!binding){
         if(vm&&frame){memset(vm,0,sizeof *vm);vm->status=KSN_PROC_INVALID;
+#ifdef KSN_PROC_VALIDATED_PLAN
+            vm->loop_end=vm->owned_loop_end;
+#endif
             frame->ready=false;frame->count=0;frame->raster_steps=0;frame->ext=0;}
         return KSN_PROC_INVALID;
     }
@@ -140,7 +159,7 @@ static bool coordinate(float f,int16_t *out){
     if(!isfinite(f)||f < -480.0f||f > 720.0f)return false;
     *out=(int16_t)lroundf(f);return true;
 }
-static bool emit(ksn_proc_vm *vm,int16_t x0,int16_t y0,int16_t x1,int16_t y1,uint16_t color){
+static bool emit(proc_execution *vm,int16_t x0,int16_t y0,int16_t x1,int16_t y1,uint16_t color){
     if(vm->frame->count==KSN_PROC_SEGMENTS)return false;
     unsigned dx=(unsigned)abs(x1-x0),dy=(unsigned)abs(y1-y0);
     unsigned cost=(dx>dy?dx:dy)+1;
@@ -173,7 +192,7 @@ static bool phase(float u0,float u1,unsigned steps,unsigned period,uint16_t *u0q
 }
 /* LINE_PATTERN from the pen to (x, y): its chords, two entries each. The
  * status to stop with, or RUNNING. */
-static ksn_proc_status pattern_line(ksn_proc_vm *vm,const ksn_proc_inst *i,int16_t x,int16_t y){
+static ksn_proc_status pattern_line(proc_execution *vm,const ksn_proc_inst *i,int16_t x,int16_t y){
     const float *r=&vm->reg[i->dst];
     int32_t bits,other;
     const unsigned n=(unsigned)i->value;
@@ -217,7 +236,11 @@ static ksn_proc_status pattern_line(ksn_proc_vm *vm,const ksn_proc_inst *i,int16
     }
     return KSN_PROC_RUNNING;
 }
+#ifdef KSN_PROC_VALIDATED_PLAN
+static ksn_proc_status execution_step(proc_execution *vm){
+#else
 ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
+#endif
     if(!vm)return KSN_PROC_INVALID;
     if(vm->status!=KSN_PROC_RUNNING)return vm->status;
     if(vm->steps==KSN_PROC_STEPS)return vm->status=KSN_PROC_LIMIT;
@@ -329,6 +352,46 @@ ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
 }
 #ifdef KASANE_PROC_LIMITS_PROBE
 uint8_t g_ksn_proc_sweep_regs;
+#endif
+#ifdef KSN_PROC_VALIDATED_PLAN
+ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
+    return execution_step(vm?&vm->execution:NULL);
+}
+bool ksn_proc_validate_program(const ksn_proc_program *program,uint8_t loop_end[KSN_PROC_CODE]){
+    return valid_program(program,loop_end);
+}
+ksn_proc_status ksn_proc_execution_begin(ksn_proc_execution *vm,
+    const ksn_proc_program *program,const uint8_t loop_end[KSN_PROC_CODE],
+    const float input[KSN_PROC_INPUTS],const ksn_proc_state *state,ksn_proc_frame *frame){
+    if(!vm||!frame)return KSN_PROC_INVALID;
+    memset(vm,0,sizeof *vm);
+    frame->ready=false;frame->count=0;frame->raster_steps=0;frame->ext=0;
+    vm->status=KSN_PROC_INVALID;
+    if(!program||!loop_end||!input)return vm->status;
+    for(unsigned j=0;j<KSN_PROC_INPUTS;j++)if(!isfinite(input[j]))return vm->status;
+    if(state){
+        for(unsigned j=0;j<KSN_PROC_REGS;j++)if(!isfinite(state->reg[j]))return vm->status;
+        if(state->pen_valid&&(state->pen_x < -480||state->pen_x > 720||
+                              state->pen_y < -480||state->pen_y > 720))return vm->status;
+        memcpy(vm->reg,state->reg,sizeof vm->reg);
+        vm->pen_x=state->pen_x;vm->pen_y=state->pen_y;vm->pen_valid=state->pen_valid;
+    }
+    memcpy(vm->input,input,sizeof vm->input);
+    vm->program=program;vm->loop_end=loop_end;vm->frame=frame;
+    return vm->status=KSN_PROC_RUNNING;
+}
+ksn_proc_status ksn_proc_execution_step(ksn_proc_execution *vm){return execution_step(vm);}
+ksn_proc_status ksn_proc_execution_run(ksn_proc_execution *vm){
+    if(!vm)return KSN_PROC_INVALID;
+    while(vm->status==KSN_PROC_RUNNING)execution_step(vm);
+    return vm->status;
+}
+bool ksn_proc_execution_capture(const ksn_proc_execution *vm,ksn_proc_state *state){
+    if(!vm||!state||vm->status!=KSN_PROC_DONE||!vm->frame||!vm->frame->ready)return false;
+    memcpy(state->reg,vm->reg,sizeof state->reg);
+    state->pen_x=vm->pen_x;state->pen_y=vm->pen_y;state->pen_valid=vm->pen_valid;
+    return true;
+}
 #endif
 ksn_proc_status ksn_proc_run(ksn_proc_vm *vm){
     ksn_proc_status s;

@@ -95,6 +95,42 @@ typedef struct {
     int16_t pen_x,pen_y;
     bool pen_valid;
 } ksn_proc_state;
+#ifdef KSN_PROC_VALIDATED_PLAN
+#include <stddef.h>
+typedef struct { uint8_t pc; uint16_t remaining; } ksn_proc_loop_frame;
+/* Shared interpreter state. A validated execution owns a pin, not code.
+ * Active executions are not copyable; inspect/capture values before end().
+ * The union keeps the public snapshot VM's field names available in this
+ * experimental build. Both views have the same common initial sequence. */
+#define KSN_PROC_EXECUTION_FIELDS \
+    const ksn_proc_program *program; \
+    ksn_proc_frame *frame; \
+    float input[KSN_PROC_INPUTS],reg[KSN_PROC_REGS]; \
+    uint8_t pc,last_pc,depth; \
+    const uint8_t *loop_end; \
+    ksn_proc_loop_frame loop[KSN_PROC_LOOP_DEPTH]; \
+    uint32_t steps; \
+    int16_t pen_x,pen_y; \
+    bool pen_valid; \
+    ksn_proc_status status; \
+    struct ksn_proc_validated_plan *lease; \
+    uint64_t generation;
+typedef struct { KSN_PROC_EXECUTION_FIELDS } ksn_proc_execution;
+typedef struct {
+    union {
+        ksn_proc_execution execution;
+        struct { KSN_PROC_EXECUTION_FIELDS };
+    };
+    ksn_proc_program owned_program;
+    ksn_proc_inst owned_code[KSN_PROC_CODE];
+    uint8_t owned_loop_end[KSN_PROC_CODE];
+} ksn_proc_vm;
+#undef KSN_PROC_EXECUTION_FIELDS
+_Static_assert(offsetof(ksn_proc_vm,generation)==offsetof(ksn_proc_execution,generation),
+               "public aliases share the exact execution prefix");
+_Static_assert(offsetof(ksn_proc_vm,owned_program)>=sizeof(ksn_proc_execution),
+               "snapshot storage follows the execution state");
+#else
 typedef struct {
     const ksn_proc_program *program;
     ksn_proc_program owned_program;
@@ -109,6 +145,8 @@ typedef struct {
     bool pen_valid;
     ksn_proc_status status;
 } ksn_proc_vm;
+
+#endif
 
 ksn_proc_status ksn_proc_begin(ksn_proc_vm *vm,const ksn_proc_program *program,
                                const float input[KSN_PROC_INPUTS],ksn_proc_frame *frame);

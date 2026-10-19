@@ -1,5 +1,14 @@
 #include "ksn_proc_plan.h"
 #include <math.h>
+#include <stdlib.h>
+#ifdef KSN_PROC_VALIDATED_PLAN
+#include "ksn_proc_execution_internal.h"
+typedef ksn_proc_execution plan_execution;
+#define EXECUTION(vm) (&(vm)->execution)
+#else
+typedef ksn_proc_vm plan_execution;
+#define EXECUTION(vm) (vm)
+#endif
 #include <string.h>
 
 static bool arithmetic(uint8_t op){
@@ -89,7 +98,7 @@ ksn_proc_status ksn_proc_sized_plan_begin(ksn_proc_vm *vm,const ksn_proc_sized_p
     const ksn_proc_program program={plan->code,plan->count};
     return ksn_proc_begin_state(vm,&program,input,NULL,frame);
 }
-static ksn_proc_status scalar_step(ksn_proc_vm *vm,const ksn_proc_inst *i){
+static ksn_proc_status scalar_step(plan_execution *vm,const ksn_proc_inst *i){
     if(vm->steps==KSN_PROC_STEPS)return vm->status=KSN_PROC_LIMIT;
     vm->last_pc=vm->pc;vm->pc++;vm->steps++;
     switch(i->op){
@@ -103,7 +112,7 @@ static ksn_proc_status scalar_step(ksn_proc_vm *vm,const ksn_proc_inst *i){
     if(vm->pc==vm->program->count){vm->frame->ready=true;return vm->status=KSN_PROC_DONE;}
     return vm->status;
 }
-static ksn_proc_status run_loop(ksn_proc_vm *vm,const ksn_proc_inst *code,
+static ksn_proc_status run_loop(plan_execution *vm,const ksn_proc_inst *code,
                                 const uint32_t fused[KSN_PROC_FUSED_WORDS],bool debug_step);
 /* valid is the caller's plan->valid; code/count/fused are its own storage. */
 static ksn_proc_status run_core(ksn_proc_vm *vm,bool valid,const ksn_proc_inst *code,
@@ -116,10 +125,10 @@ static ksn_proc_status run_core(ksn_proc_vm *vm,bool valid,const ksn_proc_inst *
        vm->program->count!=count||
        memcmp(vm->owned_code,code,count*sizeof code[0]))
         return ksn_proc_run(vm);
-    return run_loop(vm,code,fused,debug_step);
+    return run_loop(EXECUTION(vm),code,fused,debug_step);
 }
 /* code is the VM's own program, already matched against the plan. */
-static ksn_proc_status run_loop(ksn_proc_vm *vm,const ksn_proc_inst *code,
+static ksn_proc_status run_loop(plan_execution *vm,const ksn_proc_inst *code,
                                 const uint32_t fused[KSN_PROC_FUSED_WORDS],bool debug_step){
     while(vm->status==KSN_PROC_RUNNING){
         uint8_t pc=vm->pc;
@@ -127,7 +136,13 @@ static ksn_proc_status run_loop(ksn_proc_vm *vm,const ksn_proc_inst *code,
             scalar_step(vm,&code[pc]);
             if(vm->status==KSN_PROC_RUNNING)
                 scalar_step(vm,&code[pc+1]);
-        }else ksn_proc_step(vm);
+        }else {
+#ifdef KSN_PROC_VALIDATED_PLAN
+            ksn_proc_execution_step(vm);
+#else
+            ksn_proc_step(vm);
+#endif
+        }
     }
     return vm->status;
 }
@@ -223,5 +238,89 @@ ksn_proc_status ksn_proc_rom_plan_run(ksn_proc_vm *vm,const ksn_proc_rom_plan *p
     if(!vm)return KSN_PROC_INVALID;
     if(vm->status!=KSN_PROC_RUNNING)return vm->status;
     if(!plan||!plan->valid||!rom_matches(vm,plan))return ksn_proc_run(vm);
-    return run_loop(vm,vm->owned_code,plan->fused,debug_step);
+    return run_loop(EXECUTION(vm),vm->owned_code,plan->fused,debug_step);
 }
+
+#ifdef KSN_PROC_VALIDATED_PLAN
+struct ksn_proc_validated_plan {
+    ksn_proc_program program;
+    uint64_t generation;
+    uint32_t pins,fused[KSN_PROC_FUSED_WORDS];
+    uint8_t loop_end[KSN_PROC_CODE],capacity,fused_count;
+    bool valid;
+    ksn_proc_inst code[];
+};
+size_t ksn_proc_validated_bytes(unsigned capacity){
+    if(!capacity||capacity>KSN_PROC_CODE)return 0;
+    return offsetof(ksn_proc_validated_plan,code)+capacity*sizeof(ksn_proc_inst);
+}
+ksn_proc_validated_plan *ksn_proc_validated_create(unsigned capacity){
+    size_t bytes=ksn_proc_validated_bytes(capacity);
+    if(!bytes)return NULL;
+    ksn_proc_validated_plan *plan=calloc(1,bytes);
+    if(plan)plan->capacity=(uint8_t)capacity;
+    return plan;
+}
+size_t ksn_proc_validated_allocation_bytes(const ksn_proc_validated_plan *plan){
+    return plan?ksn_proc_validated_bytes(plan->capacity):0;
+}
+uint64_t ksn_proc_validated_generation(const ksn_proc_validated_plan *plan){
+    return plan?plan->generation:0;
+}
+bool ksn_proc_validated_prepare(ksn_proc_validated_plan *plan,
+    const ksn_proc_program *program,const ksn_proc_binding *binding){
+    if(!plan||plan->pins)return false;
+    plan->valid=false;
+    if(plan->generation==UINT64_MAX)return false;
+    ++plan->generation;
+    memset(plan->loop_end,0,sizeof plan->loop_end);
+    if(!program||!program->code||!program->count||program->count>plan->capacity)return false;
+    memmove(plan->code,program->code,program->count*sizeof plan->code[0]);
+    plan->program=(ksn_proc_program){plan->code,program->count};
+    if(binding&&!ksn_proc_apply_binding(plan->code,program->count,binding))return false;
+    if(!ksn_proc_validate_program(&plan->program,plan->loop_end)||
+       !mark_fused(plan->code,program->count,plan->fused,&plan->fused_count))return false;
+    return plan->valid=true;
+}
+bool ksn_proc_validated_destroy(ksn_proc_validated_plan *plan){
+    if(!plan)return true;
+    if(plan->pins)return false;
+    free(plan);return true;
+}
+ksn_proc_status ksn_proc_validated_begin(ksn_proc_execution *execution,
+    ksn_proc_validated_plan *plan,const float input[KSN_PROC_INPUTS],
+    const ksn_proc_state *state,ksn_proc_frame *frame){
+    /* Never lose a live pin through an accidental second begin. */
+    if(!execution||execution->lease)return KSN_PROC_INVALID;
+    ksn_proc_status result=ksn_proc_execution_begin(execution,
+        plan&&plan->valid?&plan->program:NULL,plan?plan->loop_end:NULL,input,state,frame);
+    if(result==KSN_PROC_RUNNING){
+        if(plan->pins==UINT32_MAX){execution->status=KSN_PROC_INVALID;return execution->status;}
+        ++plan->pins;execution->lease=plan;execution->generation=plan->generation;
+    }
+    return result;
+}
+static bool execution_pinned(const ksn_proc_execution *execution){
+    return execution&&execution->lease&&execution->lease->valid&&execution->lease->pins&&
+        execution->generation==execution->lease->generation&&
+        execution->program==&execution->lease->program&&execution->loop_end==execution->lease->loop_end;
+}
+ksn_proc_status ksn_proc_validated_step(ksn_proc_execution *execution){
+    if(!execution_pinned(execution))return KSN_PROC_INVALID;
+    return ksn_proc_execution_step(execution);
+}
+ksn_proc_status ksn_proc_validated_run(ksn_proc_execution *execution,bool debug_step){
+    if(!execution_pinned(execution))return KSN_PROC_INVALID;
+    return run_loop(execution,execution->lease->code,execution->lease->fused,debug_step);
+}
+bool ksn_proc_validated_capture(const ksn_proc_execution *execution,ksn_proc_state *state){
+    return execution_pinned(execution)&&ksn_proc_execution_capture(execution,state);
+}
+void ksn_proc_validated_end(ksn_proc_execution *execution){
+    if(!execution||!execution->lease)return;
+    /* An active execution is a unique owner of this pin until end(). */
+    --execution->lease->pins;execution->lease=NULL;
+    if(execution->status==KSN_PROC_RUNNING)execution->status=KSN_PROC_INVALID;
+    execution->program=NULL;execution->loop_end=NULL;
+}
+#endif

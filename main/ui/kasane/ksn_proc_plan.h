@@ -157,4 +157,27 @@ bool ksn_proc_rom_plan_register_points_affine(ksn_proc_rom_plan *plan,
 bool ksn_proc_rom_plan_run_points_affine(const ksn_proc_rom_plan *plan,
                                           KsnProcPointDst dst, KsnProcPointSrc src,
                                           size_t n, KsnProcPointsDecision *decision);
+#ifdef KSN_PROC_VALIDATED_PLAN
+/* Owned bound-code snapshot for internal registered handles. No pointers to
+ * source instructions, bindings, ROM entries or point descriptors survive
+ * preparation. APIs are owner-task-only, like pocket_proc's guarded slots.
+ * Prepare and destroy return false while any execution pins the plan.
+ * Zero-initialize executions, do not copy an active execution, and end every
+ * successful begin before reuse. Snapshot VM APIs above remain independent. */
+typedef struct ksn_proc_validated_plan ksn_proc_validated_plan;
+ksn_proc_validated_plan *ksn_proc_validated_create(unsigned capacity);
+bool ksn_proc_validated_prepare(ksn_proc_validated_plan *plan,
+    const ksn_proc_program *program,const ksn_proc_binding *binding);
+bool ksn_proc_validated_destroy(ksn_proc_validated_plan *plan);
+size_t ksn_proc_validated_bytes(unsigned capacity);
+size_t ksn_proc_validated_allocation_bytes(const ksn_proc_validated_plan *plan);
+uint64_t ksn_proc_validated_generation(const ksn_proc_validated_plan *plan);
+ksn_proc_status ksn_proc_validated_begin(ksn_proc_execution *execution,
+    ksn_proc_validated_plan *plan,const float input[KSN_PROC_INPUTS],
+    const ksn_proc_state *state,ksn_proc_frame *frame);
+ksn_proc_status ksn_proc_validated_step(ksn_proc_execution *execution);
+ksn_proc_status ksn_proc_validated_run(ksn_proc_execution *execution,bool debug_step);
+bool ksn_proc_validated_capture(const ksn_proc_execution *execution,ksn_proc_state *state);
+void ksn_proc_validated_end(ksn_proc_execution *execution);
+#endif
 #endif

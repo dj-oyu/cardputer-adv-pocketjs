@@ -130,6 +130,9 @@ typedef struct {
     uint32_t handle:31,rom:1;
     void *plan;
     proc_points *points;
+#ifdef KSN_PROC_VALIDATED_PLAN
+    ksn_proc_validated_plan *validated;
+#endif
 } proc_slot;
 static proc_slot slots[PROC_HANDLES];
 static uint32_t next_handle;
@@ -148,7 +151,15 @@ static proc_surface surfaces[PROC_SURFACES];
 static uint32_t next_surface_handle;
 static unsigned building_surface,pending_surface;
 static ksn_proc_frame *scratch;
+#if defined(KSN_PROC_VALIDATED_PLAN) && !defined(KSN_PROC_VALIDATED_REFERENCE)
+static ksn_proc_execution *vm;
+#else
 static ksn_proc_vm *vm;
+#endif
+#if defined(KSN_PROC_VALIDATED_PLAN) && defined(KSN_PROC_VALIDATED_TRACE)
+static pocket_proc_validated_trace validated_trace;
+void pocket_proc_validated_trace_read(pocket_proc_validated_trace *out){if(out)*out=validated_trace;}
+#endif
 static bool building;
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
@@ -364,6 +375,49 @@ static JSValue attach_points(JSContext *ctx,JSValueConst descriptor,bool rom,voi
  * (undefined or null for none), each a finite number; an argument that fills
  * a field must also be what that field takes as an array row (REPEAT/CUBIC
  * counts integers 0..255, colours 0..65535, values finite as float). */
+#ifdef KSN_PROC_VALIDATED_PLAN
+/* Registration and ROM-table refresh happen outside an execution lease.
+ * Cache allocation is transactional: a failure never publishes a slot. */
+static JSValue freeze_slot(JSContext *ctx,proc_slot *slot){
+    const char *op="kasane.procedural.register";
+    ksn_proc_program program;
+    ksn_proc_binding binding,*bound=NULL;
+    if(slot->rom){
+        const ksn_proc_rom_plan *plan=slot->plan;
+        if(!ksn_proc_rom_entry_valid(plan->rom)||plan->rom->params!=plan->params)
+            return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid built-in plan");
+        program=(ksn_proc_program){plan->rom->code,plan->rom->count};
+        binding=(ksn_proc_binding){plan->rom->patch,plan->args,plan->rom->patches,plan->params};
+        bound=&binding;
+    }else{
+        const ksn_proc_sized_plan *plan=slot->plan;
+        program=(ksn_proc_program){plan->code,plan->count};
+    }
+    ksn_proc_validated_plan *validated=ksn_proc_validated_create(program.count);
+    if(!validated)return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"validated plan allocation failed");
+    if(!ksn_proc_validated_prepare(validated,&program,bound)){
+        ksn_proc_validated_destroy(validated);
+        return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid validated plan");
+    }
+    slot->validated=validated;
+#ifdef KSN_PROC_VALIDATED_TRACE
+    ++validated_trace.prepared;
+    validated_trace.live_bytes+=ksn_proc_validated_allocation_bytes(validated);
+    if(validated_trace.live_bytes>validated_trace.peak_bytes)validated_trace.peak_bytes=validated_trace.live_bytes;
+#endif
+    return JS_UNDEFINED;
+}
+static bool drop_validated(proc_slot *slot){
+#ifdef KSN_PROC_VALIDATED_TRACE
+    const size_t bytes=ksn_proc_validated_allocation_bytes(slot->validated);
+#endif
+    if(!ksn_proc_validated_destroy(slot->validated))return false;
+#ifdef KSN_PROC_VALIDATED_TRACE
+    validated_trace.live_bytes-=bytes;
+#endif
+    slot->validated=NULL;return true;
+}
+#endif
 static JSValue register_rom(JSContext *ctx,int argc,JSValueConst *argv){
     const char *op="kasane.procedural.register";
     if(argc<1||argc>3)
@@ -440,8 +494,16 @@ static JSValue register_rom(JSContext *ctx,int argc,JSValueConst *argv){
     proc_points *points=NULL;
     JSValue attached=attach_points(ctx,argc==3?argv[2]:JS_UNDEFINED,true,plan,&points);
     if(JS_IsException(attached)){free(plan);return attached;}
+#ifdef KSN_PROC_VALIDATED_PLAN
+    proc_slot staged={.rom=1,.plan=plan,.points=points};
+    JSValue frozen=freeze_slot(ctx,&staged);
+    if(JS_IsException(frozen)){free(plan);free(points);return frozen;}
+    uint32_t handle=++next_handle;staged.handle=handle;
+    slots[slot]=staged;
+#else
     uint32_t handle=++next_handle;
     slots[slot]=(proc_slot){.handle=handle,.rom=1,.plan=plan,.points=points};
+#endif
     return JS_NewInt32(ctx,(int32_t)handle);
 }
 static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -499,8 +561,16 @@ static JSValue register_impl(JSContext *ctx,JSValueConst self,int argc,JSValueCo
     proc_points *points=NULL;
     JSValue attached=attach_points(ctx,argc==2?argv[1]:JS_UNDEFINED,false,plan,&points);
     if(JS_IsException(attached)){free(plan);return attached;}
+#ifdef KSN_PROC_VALIDATED_PLAN
+    proc_slot staged={.rom=0,.plan=plan,.points=points};
+    JSValue frozen=freeze_slot(ctx,&staged);
+    if(JS_IsException(frozen)){free(plan);free(points);return frozen;}
+    uint32_t handle=++next_handle;staged.handle=handle;
+    slots[slot]=staged;
+#else
     uint32_t handle=++next_handle;
     slots[slot]=(proc_slot){.handle=handle,.rom=0,.plan=plan,.points=points};
+#endif
     return JS_NewInt32(ctx,(int32_t)handle);
 }
 static JSValue unregister_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -514,6 +584,9 @@ static JSValue unregister_impl(JSContext *ctx,JSValueConst self,int argc,JSValue
     /* Legal between beginFrame() and commit(): draw() copies the plan's
      * segments into the candidate and the VM runs from its own code copy, so
      * no frame, pending presentation or image band refers to a plan. */
+#ifdef KSN_PROC_VALIDATED_PLAN
+    if(!drop_validated(slot))return failure(ctx,op,POCKET_ERR_BUSY,"plan execution active");
+#endif
     free(slot->plan);free(slot->points);
     *slot=(proc_slot){0};
     return JS_UNDEFINED;
@@ -573,11 +646,30 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
     if(affine)status=KSN_PROC_DONE;
     else
 #endif
+#if defined(KSN_PROC_VALIDATED_PLAN) && !defined(KSN_PROC_VALIDATED_REFERENCE)
+    {
+        if(!slot->validated){
+            JSValue frozen=freeze_slot(ctx,slot);
+            if(JS_IsException(frozen)){building=false;return frozen;}
+        }
+#ifdef KSN_PROC_VALIDATED_TRACE
+        ++validated_trace.fast_draws;
+#endif
+        status=ksn_proc_validated_begin(vm,slot->validated,input,NULL,scratch);
+        if(status==KSN_PROC_RUNNING)status=ksn_proc_validated_run(vm,false);
+        /* End before error allocation, typed points, append or any callback. */
+        ksn_proc_validated_end(vm);
+    }
+#else
+#if defined(KSN_PROC_VALIDATED_PLAN) && defined(KSN_PROC_VALIDATED_TRACE)
+    ++validated_trace.reference_draws;
+#endif
     status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
                                      ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
     if(status==KSN_PROC_RUNNING)
         status=slot->rom?ksn_proc_rom_plan_run(vm,slot->plan,false):
                          ksn_proc_sized_plan_run(vm,slot->plan,false);
+#endif
     if(status!=KSN_PROC_DONE){
         building=false;
         return failure(ctx,op,status==KSN_PROC_LIMIT?POCKET_ERR_LIMIT_EXCEEDED:
@@ -855,6 +947,11 @@ esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
     return JS_SetPropertyStr(ctx,ns,"procedural",procedural)<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 void pocket_proc_reset(void){
+#ifdef KSN_PROC_VALIDATED_PLAN
+    /* The UI owner resets between calls, never during getter/hook reentry. */
+    if(js_call_active||(vm&&vm->lease))return;
+    for(unsigned i=0;i<PROC_HANDLES;i++)if(!drop_validated(&slots[i]))return;
+#endif
     for(unsigned i=0;i<PROC_HANDLES;i++){
         free(slots[i].plan);free(slots[i].points);slots[i]=(proc_slot){0};
     }
@@ -874,6 +971,11 @@ void pocket_proc_reset(void){
 #endif
 }
 void pocket_proc_rom_plans(const ksn_proc_rom_entry *entries,unsigned count){
+#ifdef KSN_PROC_VALIDATED_PLAN
+    if(js_call_active||(vm&&vm->lease))return;
+    for(unsigned i=0;i<PROC_HANDLES;i++)
+        if(slots[i].rom&&!drop_validated(&slots[i]))return;
+#endif
     rom_table=entries;rom_count=entries?count:0;
 }
 void pocket_proc_batch_counts(uint32_t *scalar,uint32_t *pie){
