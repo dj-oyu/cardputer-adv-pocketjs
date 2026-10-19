@@ -24,6 +24,9 @@ with tempfile.TemporaryDirectory() as t:
     print('PASS detail OFF does not evaluate arguments or reference instrumentation at O0')
 if args.log:
     text=args.log.read_text();parse_detail(text,expected=True)
+    tagged=text.replace('APP_STOPPED\n','I (206206) app: APP_STOPPED\n').replace('HOME_READY\n','I (206206) shell: HOME_READY\n')
+    parse_detail(tagged,expected=True)
+    parse_detail(tagged.replace('I (206206) app: APP_STOPPED','\x1b[0;32mI (206206) app: APP_STOPPED\x1b[0m'),expected=True)
     lines=text.splitlines(keepends=True)
     stage=next(i for i,l in enumerate(lines) if l.startswith('DERBY_DETAIL v='))
     end=next(i for i,l in enumerate(lines) if l.startswith('DERBY_DETAIL_END'))
@@ -47,6 +50,25 @@ if args.log:
         'LOADSTALL':[text.replace('APP_STOPPED\n','DERBY LOADSTALL\nAPP_STOPPED\n')],
         'lost STOP':[text.replace('APP_STOPPED\n','')],
         'lost HOME':[text.replace('HOME_READY\n','')],
+        'wrong STOP tag':[tagged.replace('app: APP_STOPPED','shell: APP_STOPPED')],
+        'wrong HOME tag':[tagged.replace('shell: HOME_READY','app: HOME_READY')],
+        'warning STOP':[tagged.replace('I (206206) app:', 'W (206206) app:')],
+        'marker suffix':[tagged.replace('APP_STOPPED\n','APP_STOPPED extra\n')],
+        'fake payload':[text.replace('APP_STOPPED\n','print APP_STOPPED\n')],
+        'duplicate tagged STOP':[tagged.replace('APP_STOPPED\n','APP_STOPPED\nAPP_STOPPED\n')],
+        'duplicate tagged HOME':[tagged.replace('HOME_READY\n','HOME_READY\nHOME_READY\n')],
+        'HOME before STOP':[tagged.replace('app: APP_STOPPED','TEMP_STOP').replace('shell: HOME_READY','app: APP_STOPPED').replace('TEMP_STOP','shell: HOME_READY')],
+        'tagged runtime error':[tagged.replace('I (206206) app: APP_STOPPED','InternalError: interrupted\nI (206206) app: APP_STOPPED')],
+        'runtime error after HOME':[tagged+'InternalError: interrupted\n'],
+        'stop hook rejected':[tagged.replace('I (206206) app: APP_STOPPED','W (206205) pocket_app: hook rejected: failure\nI (206206) app: APP_STOPPED')],
+        'stop hook threw':[tagged.replace('I (206206) app: APP_STOPPED','W (206205) pocket_app: hook threw: Error: failure\nI (206206) app: APP_STOPPED')],
+        'stop hook timeout':[tagged.replace('I (206206) app: APP_STOPPED','W (206205) pocket_app: stop hook did not finish in 200ms\nI (206206) app: APP_STOPPED')],
+        'missing owner exit':[''.join(l for l in lines if not l.startswith('DERBY_DETAIL_EXIT '))],
+        'duplicate owner exit':[text.replace('DERBY_DETAIL_EXIT v=1','DERBY_DETAIL_EXIT v=1 session=1 clean=1\nDERBY_DETAIL_EXIT v=1')],
+        'unclean owner exit':[text.replace('clean=1','clean=0')],
+        'wrong owner session':[text.replace('DERBY_DETAIL_EXIT v=1 session=1','DERBY_DETAIL_EXIT v=1 session=2')],
+        'owner exit after STOP':[text.replace('DERBY_DETAIL_EXIT v=1 session=1 clean=1\n','').replace('APP_STOPPED\n','APP_STOPPED\nDERBY_DETAIL_EXIT v=1 session=1 clean=1\n')],
+        'owner exit after HOME':[text.replace('DERBY_DETAIL_EXIT v=1 session=1 clean=1\n','')+'DERBY_DETAIL_EXIT v=1 session=1 clean=1\n'],
     }
     for name,mutated in cases.items():
         try:parse_detail(''.join(mutated),expected=True)
@@ -55,4 +77,4 @@ if args.log:
     try:parse_detail(text,expected=False)
     except ValueError:pass
     else:raise AssertionError('OFF accepted detailed stream')
-    print('PASS actual detail stream; 19 missing/schema/order/quality/runtime/OFF failure cases rejected')
+    print(f'PASS bare/tagged/ANSI detail stream; {len(cases)+1} missing/schema/order/quality/runtime/OFF failure cases rejected')

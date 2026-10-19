@@ -12,6 +12,10 @@ void df_reset(void);
 bool df_session(void);
 bool df_measuring(void);
 unsigned df_status(void);
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+/* Owner boundary only, after successful guest return and full queue drain. */
+bool df_detail_exit_record(void);
+#endif
 void df_command(unsigned command,unsigned rep,unsigned step,uint32_t seed,unsigned camera,unsigned tier,uint32_t finish);
 void df_dispatch(bool continuing,bool failed,uint32_t buttons);
 void df_present(bool completed,bool capture,bool failed);

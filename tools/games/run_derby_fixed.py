@@ -103,6 +103,9 @@ MAIN=r'''
         for(unsigned i=0;i<3;i++)
             printf("DEVICE_TAIL {\"rep\":%u,\"steps\":%u,\"turns\":%u,\"max_steps\":%u,\"settles\":%u,\"guest_draws\":%u}\n",
                    i+1,fx_tail_total[i],fx_tail_turns[i],fx_tail_max[i],fx_settles[i],fx_tail_draws);
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+        REQ(df_detail_exit_record());
+#endif
         pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();
         puts("APP_STOPPED");puts("HOME_READY");
         JS_FreeContext(ctx);JS_FreeRuntime(rt);puts("DEVICE_FIXTURE_HOST PASS");return 0;

@@ -2180,6 +2180,14 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
     return result;
 }
 
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+bool app_derby_detail_finished(void) {
+    return guest && df_status()==DF_DONE && pocket_app_exit_requested() &&
+           !pocketjs_guest_work_pending(guest) && !atomic_load(&stop_requested);
+}
+bool app_derby_detail_deadline_ok(void) { return !interrupt(NULL); }
+#endif
+
 esp_err_t app_tick(uint32_t buttons) {
     // The Back turn is the guest's ONE last chance to save: main.c calls
     // app_tick(0x2000) and requests the stop on the next line, so there is no
@@ -2359,6 +2367,12 @@ esp_err_t app_tick(uint32_t buttons) {
     // The queue is empty, so this is the first moment since the exit() that
     // pre-L1 would also have acted on it (pocket_app_pump() read the flag
     // here, ahead of every other pump, and still does everything else it did).
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    // A completed continuation must reach the owner without starting another
+    // frame or turning the fixture's successful exit into a VM interrupt.
+    // Continuation errors and runaway checks above still return their error.
+    if(app_derby_detail_finished()) return ESP_OK;
+#endif
     if(pocket_app_exit_requested()) app_request_stop();
     buttons|=deferred_buttons; deferred_buttons=0;
 #ifdef KASANE_MEGADEMO_TRACE
