@@ -40,6 +40,17 @@ int main(void){
     reset();for(unsigned rep=1;rep<=3;rep++){prepare(rep);finish(rep);}
     assert(df_status()==DF_DONE&&writes==124);
     assert(strstr(output,"reps=3 valid=1 quality=0 independent=0"));
+    /* END and owner EXIT may share a tick, but not a live JS stack. */
+    uint64_t before_exit=clock_us;
+    assert(df_detail_exit_record()&&writes==125&&clock_us-before_exit==110000);
+    assert(strstr(output,"DERBY_DETAIL_EXIT v=1 session=1 clean=1"));
+    assert(!df_detail_exit_record()&&writes==125);
+    reset();assert(!df_detail_exit_record()&&!writes);
+    for(unsigned rep=1;rep<=3;rep++){prepare(rep);finish(rep);}
+    refuse_at=writes+1;assert(!df_detail_exit_record());
+    assert(!df_detail_exit_record()&&writes==125&&!strstr(output,"DERBY_DETAIL_EXIT"));
+    reset();for(unsigned rep=1;rep<=3;rep++){prepare(rep);finish(rep);}
+    clock_us=179950001;assert(!df_detail_exit_record()&&writes==124);
     for(unsigned fail=1;fail<=42;fail++){
         reset();for(unsigned rep=1;rep<3;rep++){prepare(rep);finish(rep);}
         prepare(3);refuse_at=writes+fail;

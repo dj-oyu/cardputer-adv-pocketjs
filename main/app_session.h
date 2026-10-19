@@ -96,6 +96,12 @@ void app_p2_request_repair_probe(void);
 void app_p2_request_patch_repair_probe(void);
 #endif
 esp_err_t app_tick(uint32_t buttons);
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+// Diagnostic only: returned normally, fixture DONE, no queued work or stop.
+bool app_derby_detail_finished(void);
+// Check the last armed guest deadline before owner acceptance, without rearm.
+bool app_derby_detail_deadline_ok(void);
+#endif
 // The display period the shell paces a RUNNING guest at (main.c's ui_task),
 // and the ceiling on how often a continuation turn reaches the panel
 // (app_session.c). One constant because the two are the same decision seen
