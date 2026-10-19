@@ -36,12 +36,17 @@ int main(void){
         clock_us+=1000000;dm_emit(12,100);dm_emit(12,100);
     }
     assert(writes==300);
-    dm_reset();dm_output_reset();refuse=1;clock_us+=1000000;dm_emit(12,100);
-    dm_snapshot s;assert(dm_read(&s)&&s.output_refused==1&&writes==301);
+    // The cap was reached 50 seconds ago; a new session may emit once.
+    dm_reset();dm_output_reset();dm_emit(12,100);assert(writes==301);
+    // Rapid re-evaluation must preserve the boot-global last attempt.
+    dm_reset();dm_output_reset();dm_emit(12,100);assert(writes==301);
+    clock_us+=999999;dm_emit(12,100);assert(writes==301);
+    clock_us+=1;refuse=1;dm_emit(12,100);
+    dm_snapshot s;assert(dm_read(&s)&&s.output_refused==1&&writes==302);
     assert(s.stage[DM_OBSERVER].calls==1&&s.stage[DM_OUTPUT].calls==1);
     dm_reset();dm_output_reset();refuse=0;wide_snapshot=expect_overflow=1;
     clock_us+=1000000;dm_emit(12,100);
     wide_snapshot=expect_overflow=0;
-    assert(dm_read(&s)&&s.output_refused==1&&writes==302);
+    assert(dm_read(&s)&&s.output_refused==1&&writes==303);
     puts("PASS USB <=1024, maximum-width overflow, short buffer, 1Hz/300 cap, reset/refusal/nesting");
 }

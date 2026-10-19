@@ -64,6 +64,7 @@ jobs:
       - name: QuickJS with device-sized JSValues and pointers
         run: |
           set -euo pipefail
+          python tools/test_derby_measure.py --m32 | tee artifacts/measure-accounting-m32.log
           python tools/games/run_derby.py --m32 | tee artifacts/derby-m32.log
           python tools/games/run_derby.py --m32 --telemetry --heap-limit 163840 | tee artifacts/derby-m32-telemetry.log
           python tools/record_verification.py --out artifacts/host-receipt.json

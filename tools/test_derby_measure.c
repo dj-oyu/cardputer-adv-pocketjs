@@ -12,6 +12,9 @@ static void nested(void){
     }
     now+=9;
 }
+static int failed_continuation(void){
+    DM_SCOPE(DM_GUEST);now+=3;dm_dispatch(1,1);return -1;
+}
 static void recursive(unsigned n){DM_SCOPE(DM_VM);if(n)recursive(n-1);now++;}
 int main(void){
     dm_reset();dm_calibrate();nested();dm_snapshot s;
@@ -30,6 +33,16 @@ int main(void){
     dm_heap(70,100);dm_heap(60,100);dm_batch(0);dm_batch(1);dm_refused();
     assert(dm_read(&s)&&s.sampled_heap_max==70&&s.scalar_batches==1&&s.pie_batches==1&&s.output_refused==1);
     {DM_SCOPE(DM_BRIDGE);assert(!dm_read(&s));}
+    dm_reset();dm_present(1,0);assert(dm_read(&s)&&!s.completed_contexts);
+    dm_dispatch(0,0);dm_present(0,0);dm_dispatch(1,0);
+    assert(failed_continuation()==-1);dm_present(0,0);
+    assert(dm_read(&s)&&s.contexts==1&&s.continuations==2&&s.dispatch_failures==1&&
+           !s.completed_contexts&&s.stage[DM_GUEST].self_us==3&&!s.faults);
+    // A newer context may complete; the abandoned one must not be counted.
+    dm_dispatch(0,0);dm_present(1,0);dm_present(1,0);
+    assert(dm_read(&s)&&s.completed_contexts==1);
+    dm_reset();assert(dm_read(&s)&&!s.contexts&&!s.continuations&&!s.completed_contexts&&
+                      !s.dispatch_failures&&!s.stage[DM_GUEST].max_self_us);
     dm_reset();recursive(30);assert(dm_read(&s)&&s.faults==7);
     dm_reset();{DM_SCOPE(DM_NATIVE);now=0;}assert(dm_read(&s)&&s.faults==1);
     puts("PASS exclusive scopes, early return, recursion overflow, clock regression, heap and backend counters");

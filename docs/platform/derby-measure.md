@@ -13,6 +13,7 @@ This patch does not optimize anything.
 ## Boundaries
 
 Each `sN` is `inclusive_us:self_us:calls:max_inclusive_us:max_self_us`.
+Maxima are reset-to-date maxima, never interval maxima obtained by subtraction.
 Owner-task stack depth is 24; every C return (also errors) closes its scope.
 A child subtracts its entire elapsed time from its parent once; repeated
 same-stage recursion therefore also has correct aggregate self time.
@@ -47,7 +48,7 @@ frame elapsed. Overlay work remains raster self.
 ## Bounded output and interpretation
 
 `DERBY_MEASURE v=1` records are cumulative from app evaluation, at most one
-attempt per device second and 300 attempts per app, without retries or guest
+attempt per device second across app resets and 300 attempts per app, without retries or guest
 allocation. A fixed 1024-byte local buffer and 536-byte snapshot are used (~1.6 KiB additional peak task stack). A snapshot that cannot fit the USB 1024-byte contract emits an explicit `overflow=1` invalid record and increments the refusal counter; it is never truncated into an apparently valid record. Counter/scope storage is fixed (~1.1 KiB);
 64-bit totals are adequate for the bounded experiment, not a perpetual service.
 `us` is monotonic sampling wall time; use differences for rates. Final partial

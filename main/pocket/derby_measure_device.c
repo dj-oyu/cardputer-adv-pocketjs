@@ -5,7 +5,8 @@
 #include <stdio.h>
 uint64_t dm_now_us(void){return (uint64_t)esp_timer_get_time();}
 static uint64_t last;static unsigned attempts;
-void dm_output_reset(void){last=0;attempts=0;}
+// Keep last attempt boot-global: rapid app re-evaluation must not evade 1 Hz.
+void dm_output_reset(void){attempts=0;}
 /* Keep each attempt within usb_console_frame's 1024-byte contract. A wide
  * snapshot becomes an explicit invalid record, never silent truncation. */
 size_t dm_format_record(char *line,size_t capacity,unsigned seq,uint64_t now,
