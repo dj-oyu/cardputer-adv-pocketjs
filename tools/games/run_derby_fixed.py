@@ -19,6 +19,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'tools'))
 from derby_fixed_workload_chunks import generate
 from derby_fixed_result import parse_trial,verify_work
+from derby_fixed_collector_check import check_collector
 
 def once(text,old,new):
     if text.count(old)!=1:raise ValueError('fixed host source drift: '+old[:80])
@@ -26,7 +27,7 @@ def once(text,old,new):
 
 HELPERS=r'''
 #include "derby_fixed_workload.h"
-static bool fx_record;static unsigned fx_rep;
+static bool fx_record;static unsigned fx_rep,fx_ready;
 static uint64_t fx_input_hash,fx_panel_hash,fx_draws;
 uint64_t df_now_us(void){return dm_now_us();}
 int df_write(const char *data,size_t size){return fwrite(data,1,size,stdout)==size;}
@@ -65,18 +66,24 @@ FRAME_END=r'''
 '''
 MAIN=r'''
     if(getenv("DERBY_DEVICE_FIXTURE_HOST")){
+        REQ(fx_ready==1&&df_status()==DF_READY&&tick==0);
         unsigned guard=0;
         while(!gnum("__dfExited")){
             frame(0);REQ(++guard<=2200&&df_status()!=DF_ABORT);
         }
         REQ(df_status()==DF_DONE&&fx_rep==3&&!exceptions&&!bad_present&&!framefails&&!ser_bad);
         pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();
+        puts("APP_STOPPED");puts("HOME_READY");
         JS_FreeContext(ctx);JS_FreeRuntime(rt);puts("DEVICE_FIXTURE_HOST PASS");return 0;
     }
 '''
 
 def make_harness(out):
     text=(ROOT/'tools/games/test_derby_host.c').read_text()
+    # A memory-only shell model supplies identity and post-cleanup stop/home;
+    # READY and all fixed summaries must come from the generated app/native C.
+    text=once(text,'    printf("  [%5u] %s\\n",tick,s);',
+              '    if(!strncmp(s,"DERBY READY",11)){REQ(tick==0&&df_status()==DF_READY&&++fx_ready==1);}\n    printf("%s\\n",s);')
     text=once(text,'/* ---- the procedural oracle */',HELPERS+'\n/* ---- the procedural oracle */')
     text=once(text,'    spec *s=find(handle);REQ(s);','    spec *s=find(handle);REQ(s);'+DRAW)
     text=once(text,'static void frame(unsigned buttons){','static void frame(unsigned buttons){'+FRAME_START)
@@ -89,7 +96,16 @@ def make_harness(out):
     text=once(text,marker,marker+'''
     const char *df_host="globalThis.__dfExited=0;app.exit=()=>{globalThis.__dfExited=1;};";
     REQ(eval(df_host,strlen(df_host),"fixture-host.js"));df_reset();
+    if(getenv("DERBY_FIXED_NO_TONES")){
+        const char *silent="pocket.capabilities.get=()=>({available:false})";
+        REQ(eval(silent,strlen(silent),"no-tones.js"));
+    }
+    if(getenv("DERBY_FIXED_INIT_FAIL")){
+        const char *fault="pocket.kasane.procedural.resource=()=>{throw Error('DF_INIT_TEST')};";
+        REQ(eval(fault,strlen(fault),"init-fault.js"));
+    }
 ''')
+    text=once(text,'    bool ok=eval(src,n,path);','    puts("APP_ID local.derby");\n    bool ok=eval(src,n,path);')
     text=once(text,'    REQ(loaded_seen==1);',MAIN+'\n    REQ(loaded_seen==1);')
     path=out/'test_derby_fixed_host.c';path.write_text(text);return path
 
@@ -118,6 +134,7 @@ def main():
     if args.verify_only:
         result=json.loads((out/'result.json').read_text());check_result(result)
         parse_trial((out/'trial.log').read_bytes(),transport_complete=True)
+        check_collector((out/'trial.log').read_bytes())
         print('PASS saved actual fixture identity, whole-trial quality and deterministic work counters');return
     native=(ROOT/'main/pocket/pocket_derby.c').read_text()
     variants=re.findall(r'const char \*df_variant\(void\)\{return "(baseline|native|batch)";\}',native)
@@ -172,6 +189,22 @@ def main():
     # Keep complete diagnostics when the known-answer gate rejects this run.
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
     check_result(result)
+    # This checks the actual app's initialization marker rather than inventing
+    # READY in a synthetic transport fixture (the previous host smoke missed it).
+    startup={}
+    for name,extra in [('no-tones',{'DERBY_FIXED_NO_TONES':'1','DERBY_EVAL_ONLY':'1'}),
+                       ('init-failure',{'DERBY_FIXED_INIT_FAIL':'1'})]:
+        probe=subprocess.run([str(binary)],cwd=ROOT,env=env|extra,capture_output=True,text=True)
+        raw=(probe.stdout+probe.stderr).encode();(out/(name+'.log')).write_bytes(raw)
+        ready=[line for line in raw.splitlines() if line.startswith(b'DERBY READY')]
+        if name=='no-tones':
+            if probe.returncode or ready!=[b'DERBY READY tones=false']:raise ValueError('actual no-tone initialization marker invalid')
+        elif probe.returncode==0 or ready or b'DF_INIT_TEST' not in raw:
+            raise ValueError('failed actual initialization emitted READY or did not fail')
+        startup[name]={'exit_code':probe.returncode,'ready_count':len(ready),'sha256':hashlib.sha256(raw).hexdigest()}
+    result['collector_contract']=check_collector(log.read_bytes())
+    result['startup_probes']=startup
+    (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps({'variant':variant,'pass':True,'windows':windows,'result':str(out/'result.json')}),flush=True)
 
 if __name__=='__main__':main()
