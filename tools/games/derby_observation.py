@@ -43,7 +43,11 @@ def camera_windows(rows):
                and tb-ta==b['us']-a['us'] and monotone and other_cameras_unchanged
                and a['refused']==b['refused']==0 and b['seq']<b['limit'])
         if valid:
-            result.append({'camera':cam,'frames':delta,'device_interval_us':tb-ta,
+            result.append({'camera':cam,'start_seq':a['seq'],'end_seq':b['seq'],
+                           'start_step':a['step'],'end_step':b['step'],
+                           'start_device_us':a['us'],'end_device_us':b['us'],
+                           'context_delta':b['ctx']-a['ctx'],
+                           'frames':delta,'device_interval_us':tb-ta,
                            'diagnostic_fps':delta*1e6/(tb-ta),
                            'io_us_max_prior_writes':b['io_us_max']})
     return result
