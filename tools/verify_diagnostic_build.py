@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 import struct
 
-from record_verification import verify_mode, verify_measure_mode, verify_fixed_mode, fixed_mode, fixed_expected
-from derby_compare_chunks import FIXED_SAVED_RACE, instrument as compare_view
+from record_verification import verify_mode, verify_measure_mode, verify_fixed_mode, fixed_expected
+from derby_compare_chunks import FIXED_SAVED_RACE
 from elf_symbol_value import symbol_u32
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +20,9 @@ FIXED_HW = 0x2545F491
 def prove(build):
     mode = verify_mode(build, 'ON')
     measure = verify_measure_mode(build, 'ON')
+    workload = verify_fixed_mode(build)
+    if workload['mode'] != 'ON':
+        raise ValueError('finite diagnostic source requires fixed workload ON')
     cache = (build/'CMakeCache.txt').read_text()
     fixed = [line.split('=', 1)[1] for line in cache.splitlines()
              if line.startswith('POCKET_DERBY_COMPARE_FIXED_HW:BOOL=')]
@@ -28,11 +31,8 @@ def prove(build):
     image = (build/'cardputer_pocketjs.bin').read_bytes()
     elf = (build/'cardputer_pocketjs.elf').read_bytes()
     source_view = (ROOT/'apps/derby/derby_view.js').read_bytes()
-    expected_view = compare_view(source_view.decode('utf-8')).encode('utf-8')
-    view_path = build/'generated/derby_telemetry/derby_view.js'
-    if fixed_mode(build)=='ON':
-        expected_view=fixed_expected()['derby_view.js']
-        view_path=build/'generated/derby_fixed_workload/derby_view.js'
+    expected_view = fixed_expected()['derby_view.js']
+    view_path = build/'generated/derby_fixed_workload/derby_view.js'
     if (not view_path.is_file() or view_path.read_bytes() != expected_view
             or expected_view+b'\0' not in elf or source_view+b'\0' in elf):
         raise ValueError('diagnostic comparison requires exact generated view in ELF')
@@ -44,7 +44,6 @@ def prove(build):
             or image[144:176].split(b'\0')[0] != b'v6.0.1'
             or image[176:208] != elf_hash):
         raise ValueError('diagnostic proof requires an IDF 6.0.1 BIN paired with the measured ELF')
-    workload=verify_fixed_mode(build)
     return dict(schema_version=1, build_mode=mode, build_measure=measure, fixed_workload=workload,
                 comparison_seed=dict(mode='fixed', hardware_seed=f'{FIXED_HW:08X}', saved_race=FIXED_SAVED_RACE,
                                      embedded_view_sha256=hashlib.sha256(expected_view).hexdigest(),

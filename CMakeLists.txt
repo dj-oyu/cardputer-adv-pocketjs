@@ -5,6 +5,7 @@ set(POCKET_DERBY_TELEMETRY ON CACHE BOOL "Explicit DERBY diagnostic source revis
 set(POCKET_DERBY_MEASURE ON CACHE BOOL "Explicit DERBY measurement source revision")
 set(POCKET_DERBY_RUNNER_BATCH ON CACHE BOOL "Explicit DERBY runner batch comparison source revision")
 set(POCKET_DERBY_COMPARE_FIXED_HW ON CACHE BOOL "Fixed diagnostic-only DERBY hardware seed")
+set(POCKET_DERBY_FIXED_WORKLOAD ON CACHE BOOL "Explicit finite DERBY diagnostic source revision")
 # quickjs-ng and pocketjs_guest are vendored under components/ (default search
 # path, no EXTRA_COMPONENT_DIRS needed). Every app draws through Kasane
 # (main/ui/kasane); the Rust UI core, its QuickJS binding and the rgb565

@@ -86,9 +86,9 @@ class Integration(unittest.TestCase):
             cache.write_text('POCKET_DERBY_FIXED_WORKLOAD:BOOL=ON\nPOCKET_DERBY_FIXED_WORKLOAD:BOOL=OFF\n')
             with self.assertRaises(ValueError):verify_fixed_mode(build)
 
-    def test_default_off_and_batch_composition(self):
+    def test_normal_option_off_diagnostic_source_on_and_batch_composition(self):
         self.assertIn('option(POCKET_DERBY_FIXED_WORKLOAD "Finite fixed DERBY workload diagnostic (not production)" OFF)',(ROOT/'main/CMakeLists.txt').read_text())
-        self.assertNotIn('set(POCKET_DERBY_FIXED_WORKLOAD ON',(ROOT/'CMakeLists.txt').read_text())
+        self.assertIn('set(POCKET_DERBY_FIXED_WORKLOAD ON CACHE BOOL "Explicit finite DERBY diagnostic source revision")\n',(ROOT/'CMakeLists.txt').read_text())
         if not (ROOT/'tools/derby_runner_batch_chunks.py').exists():return
         from derby_runner_batch_chunks import generate as batch
         with tempfile.TemporaryDirectory() as tmp:
