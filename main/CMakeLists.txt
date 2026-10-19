@@ -385,7 +385,11 @@ if(POCKET_DERBY_PROJECT_BATCH)
     execute_process(COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/derby_project_batch_chunks.py"
                     "${_project_input}" "${_project_out}" COMMAND_ERROR_IS_FATAL ANY)
     get_filename_component(_project_list "${_project_input}/chunks.txt" ABSOLUTE)
-    list(REMOVE_ITEM _app_chunk_lists "${_project_input}/chunks.txt" "${_project_list}")
+    # GLOB may retain main/../apps while _project_input is source-root based.
+    # Replace both spellings, as the telemetry composition above does.
+    get_filename_component(_project_normal "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/chunks.txt" ABSOLUTE)
+    list(REMOVE_ITEM _app_chunk_lists "${_project_input}/chunks.txt" "${_project_list}"
+         "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/chunks.txt" "${_project_normal}")
     list(APPEND _app_chunk_lists "${_project_out}/chunks.txt")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                  "${CMAKE_SOURCE_DIR}/tools/derby_project_batch_chunks.py"
