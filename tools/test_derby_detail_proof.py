@@ -30,6 +30,10 @@ with tempfile.TemporaryDirectory() as tmp:
             proof=prove(build)
             assert proof['detail_measurement']['mode']=='ON'
             assert proof['comparison_seed']['elf_embedded_view_verified']
+        if (R/'tools/verify_derby_runner_batch.py').exists():
+            from verify_derby_runner_batch import verify as verify_batch
+            with patch('verify_derby_runner_batch.subprocess.check_output',return_value='0 t js_runners\n'):
+                assert verify_batch(build,'ON')['detail_mode']=='ON'
         elf.write_bytes(good.replace(b'S.detail(0)',b'S.detail(1)'))
         try:verify_fixed_mode(build)
         except ValueError:pass

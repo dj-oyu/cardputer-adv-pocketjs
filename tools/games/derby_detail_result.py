@@ -8,6 +8,10 @@ SCHEMA=json.loads((Path(__file__).with_name('derby_detail_schema.json')).read_te
 def parse_detail(text,*,expected):
     trial=parse_trial(text.encode('ascii'),transport_complete=True)
     all_lines=text.splitlines()
+    # A valid trailer cannot qualify a run that faults afterwards, before HOME.
+    plain=re.sub(r'\x1b\[[0-9;]*m','',text)
+    if re.search(r'InternalError:|FRAME RUNAWAY|RUNAWAY|LOADSTALL|Guru Meditation|assert failed|stack overflow|watchdog|\bOOM\b|abort\(\)',plain,re.I):
+        raise ValueError('detail runtime fault in complete transport')
     stop=[i for i,l in enumerate(all_lines) if l=='APP_STOPPED']
     home=[i for i,l in enumerate(all_lines) if l=='HOME_READY']
     end=[i for i,l in enumerate(all_lines) if l.startswith('DERBY_FIXED_END ')]

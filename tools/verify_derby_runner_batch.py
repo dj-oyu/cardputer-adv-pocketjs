@@ -8,6 +8,7 @@ import struct
 import subprocess
 
 from games.derby_runner_batch import instrument
+from record_verification import detail_mode
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,7 +18,13 @@ def verify(build: Path, expected: str):
     modes = re.findall(rb'^POCKET_DERBY_RUNNER_BATCH:BOOL=(ON|OFF)\r?$', cache, re.M)
     if modes != [expected.encode()]:
         raise ValueError('runner batch cache mode mismatch or ambiguous')
-    source = (ROOT / 'apps/derby/derby_pan.js').read_bytes()
+    shipping = (ROOT / 'apps/derby/derby_pan.js').read_bytes()
+    detailed = detail_mode(build) == 'ON'
+    if detailed:
+        from derby_detail_chunks import instrument as detail_instrument
+        source = detail_instrument('pan', shipping.decode()).encode()
+    else:
+        source = shipping
     generated = instrument(source.decode()).encode()
     path = build / 'generated/derby_runner_batch/derby_pan.js'
     elf = (build / 'cardputer_pocketjs.elf').read_bytes()
@@ -28,7 +35,8 @@ def verify(build: Path, expected: str):
     if present != enabled:
         raise ValueError('runner batch native symbol mismatch')
     target, other = (generated, source) if enabled else (source, generated)
-    if target + b'\0' not in elf or other + b'\0' in elf:
+    if (target + b'\0' not in elf or other + b'\0' in elf
+            or detailed and shipping + b'\0' in elf):
         raise ValueError('actual embedded PAN does not match requested mode')
     if enabled and (not path.exists() or path.read_bytes() != generated):
         raise ValueError('generated PAN mismatch')
@@ -39,7 +47,7 @@ def verify(build: Path, expected: str):
     if (len(image) < 288 or image[0] != 0xE9 or struct.unpack_from('<I', image, 32)[0] != 0xABCD5432
             or image[144:176].split(b'\0')[0] != b'v6.0.1' or image[176:208] != elf_hash):
         raise ValueError('actual IDF 6.0.1 BIN/ELF pair mismatch')
-    return dict(runner_batch_mode=expected, native_symbol=present,
+    return dict(runner_batch_mode=expected, detail_mode='ON' if detailed else 'OFF', native_symbol=present,
                 cmake_cache_sha256=hashlib.sha256(cache).hexdigest(),
                 embedded_pan_sha256=hashlib.sha256(target).hexdigest(), embedded_pan_bytes=len(target),
                 bin_sha256=hashlib.sha256(image).hexdigest(), elf_sha256=elf_hash.hex())
