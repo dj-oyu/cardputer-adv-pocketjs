@@ -47,13 +47,16 @@ __attribute__((destructor)) static void close_clip_batch_stream(void){
             for name in ('dtoa','libregexp','libunicode','quickjs','quickjs-vm'):
                 shutil.copy2(out/'baseline'/'build'/f'{name}.o',build/f'{name}.o')
         binaries[label]=host.build(['-fsanitize=address,undefined'],build,harness=harness,clip_norm=clip,runner_batch=batch)
-        apps[label]=host.lower(host.ROOT/'apps/derby',out/label/'app')
-        if batch:generate(apps[label])
+        apps[label]={}
+        for course in ('seed','oval'):
+            app=host.force_course(host.lower(host.ROOT/'apps/derby',out/label/course/'app'),course)
+            if batch:generate(app)
+            apps[label][course]=app
     source=(host.ROOT/'apps/derby/derby_view.js').read_text();a=source.index('const rin = ')+len('const rin = ')
     oracle=out/'runner-oracle.js';oracle.write_text((host.ROOT/'tools/games/derby_runner_batch_oracle.js').read_text().replace('__REFERENCE_RIN__',source[a:source.index(';',a)]))
-    def trial(label,tier,with_oracle=False):
-        path=out/label/f'tier{tier}{"-oracle" if with_oracle else ""}';csv=path.with_suffix('.csv')
-        env=dict(os.environ,DERBY_APP_DIR=str(apps[label]),DERBY_TIER=str(tier),DERBY_HEAP_LIMIT='524288',DERBY_CSV=str(csv),
+    def trial(label,tier,course="seed",with_oracle=False):
+        path=out/label/f'{course}-tier{tier}{"-oracle" if with_oracle else ""}';csv=path.with_suffix('.csv')
+        env=dict(os.environ,DERBY_APP_DIR=str(apps[label][course]),DERBY_TIER=str(tier),DERBY_HEAP_LIMIT='524288',DERBY_CSV=str(csv),
                  ASAN_OPTIONS='detect_leaks=0:abort_on_error=1',UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
         for variable in ('DERBY_RUNNER_BATCH_ORACLE','DERBY_SER_ORACLE','DERBY_SER_FUZZ','DERBY_JS','DERBY_CLIP_BATCH_STREAM'):
             env.pop(variable,None)
@@ -62,19 +65,22 @@ __attribute__((destructor)) static void close_clip_batch_stream(void){
         process=subprocess.run([str(binaries[label])],cwd=host.ROOT,env=env,capture_output=True,text=True,timeout=600)
         log=process.stdout+process.stderr;path.with_suffix('.log').write_text(log)
         if process.returncode or not log.rstrip().endswith('DERBY_HOST PASS'):raise RuntimeError(str(path.with_suffix('.log')))
-        result=dict(mode=label,tier=tier,oracle=with_oracle,pixel_hash=re.search(r'^pixels hash (\w+)',log,re.M)[1],
+        result=dict(mode=label,tier=tier,course=course,oracle=with_oracle,pixel_hash=re.search(r'^pixels hash (\w+)',log,re.M)[1],
                     finish=re.search(r'^finish: (.+)$',log,re.M)[1],csv_sha256=digest(csv))
         if with_oracle:
-            result['boundary_stats']=json.loads(re.search(r'^RUNNER_BATCH stats (.+)$',log,re.M)[1])
+            result['boundary_stats']=json.loads(re.search(r'RUNNER_BATCH stats (.+)$',log,re.M)[1])
+            stats=result['boundary_stats']
+            assert stats['checked'] is True and stats['calls']>0 and stats['runners']>0,stats
+            assert 'RUNNER_BATCH 2000 randomized native-boundary cases complete' in log
         else:result['draw_sha256']=digest(path.with_suffix('.draws'))
         print('CLIP_BATCH_PASS',json.dumps(result),flush=True);return result
-    jobs=[(label,tier) for tier in (0,1,2) for label in binaries]
+    jobs=[(label,tier,'seed') for tier in (0,1,2) for label in binaries]+[(label,1,'oval') for label in binaries]
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:results=list(pool.map(lambda job:trial(*job),jobs))
-    for tier in (0,1,2):
-        rows=[r for r in results if r['tier']==tier]
+    for course,tier in [('seed',0),('seed',1),('seed',2),('oval',1)]:
+        rows=[r for r in results if r['tier']==tier and r['course']==course]
         for field in ('pixel_hash','finish','csv_sha256','draw_sha256'):assert len({r[field] for r in rows})==1,(tier,field,rows)
-    check=trial('combined',1,True);baseline=next(r for r in results if r['mode']=='baseline' and r['tier']==1)
-    assert check['pixel_hash']==baseline['pixel_hash'] and check['finish']==baseline['finish']
+    check=trial('combined',1,'oval',True);baseline=next(r for r in results if r['mode']=='baseline' and r['tier']==1 and r['course']=='oval')
+    assert check['finish']==baseline['finish']
     report=dict(scope='normal-game host correctness only; all experiment defaults OFF; no device acceptance or speed claim',
                 hardware_tested=False,results=results,boundary_oracle=check)
     (out/'result.json').write_text(json.dumps(report,indent=2)+'\n')

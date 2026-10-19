@@ -1,50 +1,24 @@
-# Native clip factor reuse experiment
+# DERBY clip正規化係数cache の通常OFF収容
 
-Baseline: local `970a3b5f3d02aa1b8311b186d99a3842499ec56a`, tree
-`11ab870bb53b811da89c771f247c390e23c092b4` (same tree as public PR8
-`f7d86c147e6498382be07cf323d2bb4818a95136`). This normal-OFF development
-baseline is distinct from installed diagnostic `9db14c88`; no hardware was used.
+PR14 `44f9c56121b5aab4fb2eca0fcf9fbe54d833a276` の係数cacheを移植する。
+`POCKET_DERBY_CLIP_NORM` はOFF既定。OFFでは元のou関数・state layoutを保ち、
+host -O2 objectがmainと完全一致することを確認した。
 
-`ou()` evaluates `m * sqrt(f*f + 25600)` at every tested course chord. `f` is
-camera-only; `m` varies with series and remains multiplied in the original
-order. Cache the double sqrt once per oval view, without reassociation,
-float32 conversion, fast-math, new API or racecore changes. Straight views do
-not compute it. The cache adds two doubles to static state (16 bytes). Because
-camera array getters and host draw hooks can reenter APIs, `ou()` also checks
-that the cached focal length still matches before using it. This adds one
-comparison per predicate and conservatively recomputes for NaN.
+ONでは楕円viewで `sqrt(f*f+25600)` を一度保存し、margin mとの積は元の順序のまま。
+getterやdraw hookがviewに再入してfを変えた場合はouで再計算する。NaNでも保守的に
+再計算する。static stateの追加は2 doubles、16 bytes。straight viewではrefreshしない。
 
-Operation-count evidence, not a hotspot timing result: the current oval has
-19 chord ends, so view alone tests 18 chords (18 sqrt calls becomes 1). A
-synthetic frame with all 18 chords surviving each of five series performs
-108 predicate calls (108 sqrt calls becomes 1). Actual visibility changes the
-series denominator. A compiler may eliminate some original work; this count
-is at source-expression level and does not prove a device-cycle saving.
+```
+python -B tools/games/test_derby_clip_norm.py
+python -B tools/games/run_derby_clip_batch.py --out artifacts/clip-batch
+```
 
-`python3 tools/games/test_derby_clip_norm.py` extracts the actual C predicate,
-compares 1,800,000 decisions with its previous double expression (random values,
-zero/signed zero, large focal length, infinities and NaN), checks the operation
-count fixture and changed-camera reentry. All pass with UBSan. CI runs it.
-ASan/UBSan MID game on the cache implementation also passed: 14,975 game ser
-calls / 57,002 draws and 32,000 fuzz calls, bit mismatches 0. Existing JS tests
-passed 100,094 lane frames, 2,923 PAN frames and finish-photo invariants. A final
-oval run is tracked separately in the handoff; no physical frame/LCD/fps claim
-is made. The subsequent reentry guard is additionally covered by the extracted
-predicate regression; it does not change the ordinary fixed-camera path.
+抽出した実predicateを元の式と180万件比較し、signed zero、巨大値、Inf、NaN、
+reentry、syntheticなsqrt回数を検査する。実アプリの4mode matrixには明示的な楕円MIDを
+含め、clipとrunner batchの組合せをdraw/pixel/work/raceで比較する。target側は
+CMake modeと、ELF中のsource-scoped view objectの実sizeを、同じtarget compilerで
+作ったlayout-only objectと照合する。layout用objectはfirmwareにリンクしない。
 
-Next: same-head CI and normal formal build, then a bounded device comparison
-using the same seed/step/camera/tier. Native exclusive timing must exclude VM
-and raster children; completed-context throughput is not LCD fps. If the
-comparison overhead outweighs saved sqrt work, reject this optimization.
-
-## Normal-main containment (2026-10-19)
-
-This port follows main's OFF experiment containers from PR18 and does not
-include the PR7/8/11/13 diagnostic foundation. Both POCKET_DERBY_CLIP_NORM
-and POCKET_DERBY_RUNNER_BATCH default OFF. The current app source and runner
-order are retained. The original branch evidence above is historical;
-this port requires its own same-head host matrix and target mode proofs.
-The clip/runner pair can be tested together, but combinations with the
-separate affine/course-cache/projection experiments are rejected until
-separately accepted. No device speed, heap/stack or combined normal-mode
-acceptance is claimed. The original diagnostic branches stay unchanged.
+[PR14](https://github.com/dj-oyu/cardputer-adv-pocketjs/pull/14) の元診断枝の単体実測は
+この移植の実機受入ではない。PR15の観測差と加算しない。実機速度・heap/stack・LCD・
+組合せ受入は未完了。通常OFF収容と有効化を分け、PR19の固定candidateは変更しない。
