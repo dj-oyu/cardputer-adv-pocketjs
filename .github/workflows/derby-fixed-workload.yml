@@ -31,6 +31,8 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
           command -v cmake
+          python -m pip install jsonschema==4.23.0
+          python -B tools/test_derby_fixed_protocol.py 2>&1 | tee artifacts/protocol.log
           python -B tools/test_derby_fixed_workload.py 2>&1 | tee artifacts/controller.log
           python -B tools/test_derby_fixed_integration.py 2>&1 | tee artifacts/integration.log
       - name: Actual generated fixture and dependent three replays

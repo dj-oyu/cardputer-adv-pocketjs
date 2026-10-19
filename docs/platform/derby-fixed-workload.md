@@ -99,6 +99,49 @@ collector does not yet implement this finite protocol; before any hardware run
 it needs an explicit bounded collector and transport-quality contract. This
 implementation does not add a hardware operation or bypass its approval rules.
 
+The public parser is `tools/games/derby_fixed_result.py`. Its parsed result
+schema is `tools/games/derby_fixed_v1.schema.json`; the successful collector
+receipt schema is `tools/games/derby_fixed_transport.schema.json`. Complete host
+examples are `tools/games/fixtures/derby_fixed_v1.log`, `.parsed.json` and
+`.transport.json`. Their receipt is an illustrative assertion, not evidence
+of a hardware acquisition. `tools/test_derby_fixed_protocol.py` validates both
+schemas, the sample and rejection of transport loss/reset/truncation/limits.
+
+Protocol v1 is ASCII, space-separated `key=value` fields, one LF-terminated
+record per line, no duplicate/unknown/missing fields, at most 1024 bytes per
+diagnostic line including LF. Successful order is exactly three `DERBY_FIXED`
+records with `rep=seq=1,2,3`, then one `DERBY_FIXED_END`. Summary field names and
+string types are listed in the parsed schema's `$defs.summary`. All summaries
+must use one variant/session/fixture/manifest; identity and zero quality fields
+are fixed by the schema. The END fields are exactly `v=1 session=<same serial>
+reps=3 valid=1 quality=0 independent=0`. An abort may emit an invalid END without
+all summaries; that is a rejected whole trial. uint64 range checks, matching
+session/variant, END/order and `work_us + sum(pace_us) <= wall_us` are semantic
+parser checks in addition to the structural JSON schema.
+
+The owning collector starts bounded acquisition before app start through the
+existing formal operation. Protocol v1 limits acquisition to 200 seconds and
+65536 raw bytes; the device independently caps its fixture at 180 seconds.
+It must stop on the first END and preserve the full received bytes, including
+unrelated console lines. There are no automatic retries. A final LF/END alone
+does not certify that acquisition was complete. The owner must independently
+establish `complete=true` and `gaps=overflow=truncated=partial_tail=disconnect=
+reset=refused=false`, plus raw byte count, SHA256 and elapsed `duration_ms`.
+Bind that acquisition to the expected source head, paired image proof and
+variant outside the text protocol; never mix boots or infer provenance from
+the small per-boot session serial. Device identifiers and broker credentials
+belong to the private execution evidence, not a public result or PR.
+
+Call `parse_collected(raw, receipt)` or run
+`python3 tools/games/derby_fixed_result.py tools/games/fixtures/derby_fixed_v1.log
+--transport tools/games/fixtures/derby_fixed_v1.transport.json` to validate the
+receipt's quality, bounds, byte count and digest before parsing the whole trial.
+The legacy `parse_trial(..., transport_complete=True)` interface is for an
+owning caller that already established transport completeness. Neither parser
+can establish those physical transport facts from a caller's JSON assertion.
+No capture, injected input, storage, raw USB bypass, flash/restart or permission
+change is added by this protocol.
+
 ## Host checks and adoption rule
 
 Run `python3 -B tools/test_derby_fixed_workload.py` for deterministic controller,
@@ -115,9 +158,12 @@ explicitly zero. Synthetic wait tests exercise all target wait-accounting paths.
 The `DERBY finite fixed workload` CI runs those checks, the actual CMake chunk
 selection, and a `--m32` replay with a 163840-byte guest cap after installing
 system multilib. i386 uses the device's 8-byte JSValue/4-byte pointers and aligned
-doubles, but x87 intermediate precision differs: its C/JS input-bit oracle is
-disabled and explicitly reported false. The 64-bit run supplies that oracle;
-the 32-bit run checks the known rendered pixels, finish, counters and heap cap.
+doubles. This harness selects SSE2 binary64 evaluation rather than the i386
+default x87 extended intermediates. Its C/JS input-bit oracle remains disabled
+and explicitly reported false; the 64-bit run supplies that oracle. The 32-bit
+run must still match the same known rendered pixels, finish and work counters
+under the heap cap. It reports the exact compiler flags and guest cap. No hash
+expectation is relaxed for this model.
 `DERBY_FIXED_SYSTEM_M32=1` selects installed system multilib; otherwise the
 existing user-local sysroot helper is used.
 
