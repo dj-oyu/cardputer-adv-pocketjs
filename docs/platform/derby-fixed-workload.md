@@ -1,9 +1,19 @@
 # Finite fixed DERBY workload (diagnostic only)
 
-`POCKET_DERBY_FIXED_WORKLOAD` defaults to OFF. The source images in these
-branches already enable the older telemetry/measurement/fixed-seed modes; this
-new workload is a separate opt-in. It requires measurement, fixed hardware input
-and ordinary app chunks. Normal OFF keeps the original owner/app path and native
+The generic `POCKET_DERBY_FIXED_WORKLOAD` option in `main/CMakeLists.txt` defaults
+to OFF. These three diagnostic-only source branches explicitly select ON in
+their root CMake, using the same non-FORCE cache declaration as their existing
+telemetry/measurement/fixed-seed modes. Registered fixed-argv builds therefore
+select the finite fixture without caller flags or project-setting changes.
+The mandatory `diagnostic_mode_proof ALL` requires workload ON and its exact
+fixture bytes, manifest, native symbols and paired BIN/ELF. Explicit/cached OFF,
+a missing mode setting or an ordinary image cannot pass this diagnostic source
+build, including an incremental build. A failed proof prevents the registered
+builder from publishing a successful artifact manifest, even if image files
+were produced. Normal branches and the generic option remain OFF.
+
+The fixture requires measurement, fixed hardware input and ordinary app chunks.
+Normal OFF keeps the original owner/app path and native
 machine-code text; the fixture API, counter storage, clocks and generated fixture
 bytes are omitted. No SIMD, scheduler policy, flash, recovery, authorization or
 readback rule changes are part of this work.
