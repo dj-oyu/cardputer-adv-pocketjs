@@ -181,3 +181,10 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 
 - **JS のソース**（`apps/**/*.js`、`tools/vmtest/**/*.js`）。ゲストは起動時にソースを解析するので、バイト数がそのままヒープを使う。OOM の境界を突くテストは、ヒープの余りがバイト単位で動くと結果が変わる。節番号の書き換えは同じバイト長で行った。
 - **上流へ出すパッチ**（`reports/upstream/*.patch`）。レビューした内容のまま保つ。
+
+### DERBY opt-in experiments
+
+| Document | Kind | Scope |
+| --- | --- | --- |
+| [derby-runner-affine-experiment.md](apps/derby-runner-affine-experiment.md) | Experiment | OFF by default; bounded runner geometry; device visual acceptance pending |
+| [derby-projection-experiment.md](apps/derby-projection-experiment.md) | Experiment | OFF by default; course cache / projection; device heap and performance acceptance pending |

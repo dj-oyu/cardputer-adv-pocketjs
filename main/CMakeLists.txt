@@ -51,6 +51,26 @@ option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone 
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
 option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
+option(POCKET_DERBY_RUNNER_AFFINE "Experimental bounded runner Q14 screen transform" OFF)
+set(POCKET_DERBY_RUNNER_AFFINE_PIE_MIN "0" CACHE STRING "Measured PIE point threshold; 0 keeps scalar")
+if(POCKET_DERBY_RUNNER_AFFINE)
+    if(NOT POCKET_DERBY_RUNNER_AFFINE_PIE_MIN MATCHES "^(0|[1-9][0-9]*)$" OR
+       POCKET_DERBY_RUNNER_AFFINE_PIE_MIN GREATER 128)
+        message(FATAL_ERROR "Runner PIE threshold must be an integer in 0..128")
+    endif()
+    list(APPEND KASANE_SOURCES "pocket/derby_runner_affine.c")
+    add_compile_definitions(POCKET_DERBY_RUNNER_AFFINE=1
+        POCKET_DERBY_RUNNER_AFFINE_PIE_MIN=${POCKET_DERBY_RUNNER_AFFINE_PIE_MIN})
+    set_source_files_properties(pocket/derby_runner_affine.c PROPERTIES COMPILE_OPTIONS "-O2;-fstack-usage")
+endif()
+option(POCKET_DERBY_COURSE_CACHE "Experimental registered course world-point cache" OFF)
+option(POCKET_DERBY_PROJECT_BATCH "Experimental double pose/camera/projection batch" OFF)
+if(POCKET_DERBY_PROJECT_BATCH)
+    add_compile_definitions(POCKET_DERBY_PROJECT_BATCH=1)
+endif()
+if(POCKET_DERBY_COURSE_CACHE)
+    add_compile_definitions(POCKET_DERBY_COURSE_CACHE=1)
+endif()
 option(KASANE_BGCOST_TRACE "BGC/BGP lines after MDT: VM steps, frame geometry, per-plan draw costs" OFF)
 if(KASANE_BGCOST_TRACE AND NOT KASANE_MEGADEMO_TRACE)
     message(FATAL_ERROR "KASANE_BGCOST_TRACE requires KASANE_MEGADEMO_TRACE")
@@ -344,6 +364,26 @@ endif()
 # dependencies for that (GLOB CONFIGURE_DEPENDS catches a new chunks.txt).
 file(GLOB _app_chunk_lists CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../apps/*/chunks.txt")
 list(APPEND _app_chunk_lists ${POCKET_APP_CHUNK_LISTS})
+if(POCKET_DERBY_PROJECT_BATCH)
+    if(DERBY_BGCOST_SOURCE OR POCKET_HEAPPROBE)
+        message(FATAL_ERROR "DERBY projection batch requires the normal game chunks")
+    endif()
+    set(_project_input "${CMAKE_SOURCE_DIR}/apps/derby")
+    set(_project_out "${CMAKE_BINARY_DIR}/generated/derby_project_batch")
+    execute_process(COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/derby_project_batch_chunks.py"
+                    "${_project_input}" "${_project_out}" COMMAND_ERROR_IS_FATAL ANY)
+    get_filename_component(_project_list "${_project_input}/chunks.txt" ABSOLUTE)
+    # GLOB may retain main/../apps while _project_input is source-root based.
+    # Replace both spellings, as the telemetry composition above does.
+    get_filename_component(_project_normal "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/chunks.txt" ABSOLUTE)
+    list(REMOVE_ITEM _app_chunk_lists "${_project_input}/chunks.txt" "${_project_list}"
+         "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/chunks.txt" "${_project_normal}")
+    list(APPEND _app_chunk_lists "${_project_out}/chunks.txt")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_SOURCE_DIR}/tools/derby_project_batch_chunks.py"
+                 "${CMAKE_SOURCE_DIR}/tools/games/derby_project_batch.py"
+                 "${CMAKE_SOURCE_DIR}/apps/derby/derby_pan.js")
+endif()
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py"
                 "${CMAKE_BINARY_DIR}/generated" ${_app_chunk_lists}
                 COMMAND_ERROR_IS_FATAL ANY)
@@ -526,6 +566,9 @@ set_source_files_properties(ui/kasane/ksn_procedural.c
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+if(POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
+    set_property(SOURCE pocket/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+endif()
 if(KASANE_PROC_DEVICE_PROBE)
     set_source_files_properties(ui/kasane/ksn_procedural_surface.c
         ui/kasane/ksn_procedural_layers.c

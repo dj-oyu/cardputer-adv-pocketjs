@@ -1,4 +1,15 @@
 #include "pocket_proc.h"
+#ifdef POCKET_DERBY_RUNNER_AFFINE
+#include "derby_runner_affine.h"
+#ifndef POCKET_DERBY_RUNNER_AFFINE_PIE_MIN
+#define POCKET_DERBY_RUNNER_AFFINE_PIE_MIN 0
+#endif
+static DerbyRunnerAffineCounts runner_affine_counts;
+void pocket_proc_runner_affine_counts(DerbyRunnerAffineCounts *out,bool reset){
+    if(out)*out=runner_affine_counts;
+    if(reset)runner_affine_counts=(DerbyRunnerAffineCounts){0};
+}
+#endif
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage);
@@ -541,7 +552,28 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
 #ifndef KASANE_BGCOST_TRACE
     (void)handle;
 #endif
-    ksn_proc_status status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
+    ksn_proc_status status;
+#ifdef POCKET_DERBY_RUNNER_AFFINE
+    const ksn_proc_rom_plan *rp=slot->rom?slot->plan:NULL;
+    bool affine=false;
+    if(rp&&rp->valid&&rp->params==3&&!slot->points&&
+       !strcmp(rp->rom->name,"derby.runner")){
+        ++runner_affine_counts.attempts;
+        const KsnProcPointsPolicy policy={POCKET_DERBY_RUNNER_AFFINE_PIE_MIN>0,
+                                          POCKET_DERBY_RUNNER_AFFINE_PIE_MIN};
+        KsnProcPointsDecision d;
+        affine=derby_runner_affine(input,rp->args,&policy,scratch,&d);
+        if(affine){
+            ++runner_affine_counts.accepted;
+            if(d.backend==KSN_PROC_POINTS_PIE)++runner_affine_counts.pie_batches;
+            else ++runner_affine_counts.scalar_batches;
+            vm->steps=0; /* Candidate path executes no VM instructions. */
+        }else ++runner_affine_counts.fallback;
+    }
+    if(affine)status=KSN_PROC_DONE;
+    else
+#endif
+    status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
                                      ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
     if(status==KSN_PROC_RUNNING)
         status=slot->rom?ksn_proc_rom_plan_run(vm,slot->plan,false):
