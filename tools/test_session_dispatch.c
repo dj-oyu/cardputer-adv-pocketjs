@@ -1,4 +1,6 @@
 // Production app_tick/run_pumps/dispatch_guest with deterministic host ports.
+// Keep production optional scopes compiled out with their actual OFF contract.
+#include "../main/pocket/derby_measure.h"
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>

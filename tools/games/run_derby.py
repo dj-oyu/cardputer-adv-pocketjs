@@ -103,8 +103,8 @@ def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
     return out
 
 
-def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
-          runner_affine=False, camera_cache=False, project_batch=False, harness=None) -> Path:
+def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", telemetry=False, measure=False, fixed_workload=False, harness=None,
+          runner_affine=False, camera_cache=False, project_batch=False) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     table = rom_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
@@ -130,6 +130,14 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     binary = cache / "test-derby"
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
+    diagnostic = ["-DPOCKET_DERBY_TELEMETRY"] if telemetry else []
+    diagnostic_sources = ["main/pocket/derby_telemetry.c"] if telemetry else []
+    if measure:
+        diagnostic += ["-DPOCKET_DERBY_MEASURE"]
+        diagnostic_sources += ["main/pocket/derby_measure.c", "tools/games/derby_measure_host.c"]
+    if fixed_workload:
+        diagnostic += ["-DPOCKET_DERBY_FIXED_WORKLOAD"]
+        diagnostic_sources += ["main/pocket/derby_fixed_workload.c"]
     experiment_flags = []
     experiment_sources = []
     if runner_affine:
@@ -139,10 +147,10 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
         experiment_flags += ["-DPOCKET_DERBY_COURSE_CACHE"]
     if project_batch:
         experiment_flags += ["-DPOCKET_DERBY_PROJECT_BATCH"]
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, "-DKSN_PROC_POINTS_PIE_MODEL",
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *diagnostic, *experiment_flags, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, *experiment_sources, str(table), *objects,
+                    (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, *diagnostic_sources, *experiment_sources, str(table), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
@@ -229,6 +237,8 @@ def run(binary: Path, env: dict) -> str:
     """Run the harness, echo its output, fail on a non-zero exit."""
     p = subprocess.run([str(binary)], cwd=ROOT, env=env, capture_output=True, text=True)
     print(p.stdout, end="", flush=True)
+    if "MEASURE_HOST" in p.stderr:
+        print(p.stderr, end="", flush=True)
     if p.returncode:
         print(p.stderr, end="")
         raise SystemExit(f"harness failed ({p.returncode})")
@@ -282,20 +292,31 @@ def check_seeds(binary: Path, env: dict, out: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
+    parser.add_argument("--measure", action="store_true", help="functional stage-counter coverage; host oracle work included, not device timing")
+    parser.add_argument("--telemetry", action="store_true", help="exercise generated diagnostic play chunk and native boundary")
     parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
     parser.add_argument("--heap-limit", type=int, help="run once with this guest heap limit (bytes)")
     parser.add_argument("--oracle", action="store_true", help="the JS ser() oracle in every run, not three")
     parser.add_argument("--course", choices=("seed", "straight", "oval"), default="seed",
                         help="every race on this course (the lowered copy's OV[0] set to 0 or 1); seed: as the seeds pick")
     args = parser.parse_args()
+    for test in ("test_derby_lanes.mjs", "test_derby_photo.mjs", "test_derby_pan_order.mjs"):
+        subprocess.run(["node", str(ROOT / "tools/games" / test)], cwd=ROOT, check=True)
     app_dir = force_course(lower(ROOT / "apps/derby", CACHE / "lowered/apps/derby"), args.course)
+    if args.telemetry:
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools'))
+        from derby_telemetry_chunks import generate
+        diagnostic = CACHE / 'telemetry-chunks'
+        generate(ROOT / 'apps/derby', diagnostic)
+        (app_dir / 'derby_play.js').write_bytes((diagnostic / 'derby_play.js').read_bytes())
     if args.m32:
         env = dict(os.environ, M32_SYSROOT=str(ROOT / ".cache/kasane_megademo_app/m32sys"))
         flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=env,
                                capture_output=True, text=True).stdout.split()
-        binary = build(flags, CACHE / "m32")
+        binary = build(flags, CACHE / "m32", telemetry=args.telemetry, measure=args.measure)
     else:
-        binary = build(["-fsanitize=address,undefined"], CACHE / "asan")
+        binary = build(["-fsanitize=address,undefined"], CACHE / "asan", telemetry=args.telemetry, measure=args.measure)
     env = dict(os.environ, DERBY_APP_DIR=str(app_dir))
     env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
     env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")

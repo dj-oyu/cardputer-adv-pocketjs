@@ -1,3 +1,4 @@
+#include "../../pocket/derby_measure.h"
 #include "ksn_proc_points_dispatch.h"
 
 #include "ksn_proc_points_pie.h"
@@ -49,6 +50,7 @@ KsnProcPointsDecision ksn_proc_points_affine_dispatch(
     KsnProcPointDst dst, KsnProcPointSrc src, size_t n,
     const KsnProcAffineQ14 *coeff, const KsnProcPointsPolicy *policy)
 {
+    DM_SCOPE(DM_POINTS);
     KsnProcPointsDecision d = ksn_proc_points_select_for_backend(
         dst, src, n, policy, ksn_proc_points_pie_backend_available());
     if (n == 0) return d;

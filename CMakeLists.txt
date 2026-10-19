@@ -7,6 +7,14 @@ cmake_minimum_required(VERSION 3.22)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 project(cardputer_pocketjs)
+# Archive-safe and mandatory on complete AND incremental fixed-argv builds.
+# -B prevents imported proof helpers from changing the immutable source snapshot.
+if(POCKET_DERBY_FIXED_WORKLOAD)
+    add_custom_target(diagnostic_mode_proof ALL
+        COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/verify_diagnostic_build.py"
+                --build "${CMAKE_BINARY_DIR}"
+        DEPENDS gen_project_binary VERBATIM)
+endif()
 add_custom_target(flash_budget ALL
     COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/check_flash.py" "${CMAKE_BINARY_DIR}/cardputer_pocketjs.bin"
     DEPENDS gen_project_binary VERBATIM)

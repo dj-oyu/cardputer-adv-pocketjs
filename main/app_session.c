@@ -1,3 +1,4 @@
+#include "pocket/derby_measure.h"
 #include "app_session.h"
 #include "board.h"
 #include "pocketjs/guest.h"
@@ -93,8 +94,20 @@ static int64_t hp_eval_t0;
 #include "pocket_input.h"
 #include "ksn_font.h"
 #include "app_registry.h"
+#include "pocket/derby_fixed_workload.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
+#ifdef POCKET_DERBY_TELEMETRY
+#include "derby_telemetry.h"
+#include "usb_console.h"
+#include "esp_timer.h"
+bool derby_telemetry_write(const char *line, size_t length) {
+    int64_t began=esp_timer_get_time();
+    bool ok=usb_console_frame(line, length) == ESP_OK;
+    derby_telemetry_io_us((uint32_t)(esp_timer_get_time()-began));
+    return ok;
+}
+#endif
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "ui/shell.h"
@@ -584,7 +597,14 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     // Kasane promotes its command bank only after acknowledged transfers.
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
-    esp_err_t result=board_present_sync(y,rows,(uint16_t *)pixels);
+#ifdef POCKET_DERBY_MEASURE
+    bool measure_capture=board_capture_active();
+#endif
+    esp_err_t result;
+    { DM_SCOPE(DM_TRANSFER);result=board_present_sync(y,rows,(uint16_t *)pixels); }
+#ifdef POCKET_DERBY_MEASURE
+    dm_transfer((size_t)rows*240u*2u,result!=ESP_OK,measure_capture);
+#endif
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
@@ -611,7 +631,14 @@ static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t c
     int64_t began=esp_timer_get_time();
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
-    esp_err_t result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels);
+#ifdef POCKET_DERBY_MEASURE
+    bool measure_capture=board_capture_active();
+#endif
+    esp_err_t result;
+    { DM_SCOPE(DM_TRANSFER);result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels); }
+#ifdef POCKET_DERBY_MEASURE
+    dm_transfer((size_t)rows*(size_t)cols*2u,result!=ESP_OK,measure_capture);
+#endif
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
@@ -968,6 +995,9 @@ void app_stop(void) {
     pocket_workspace_reset();
     // Holds no guest values (docs/apps/derby-ser-native.md section 3).
     pocket_derby_reset();
+#ifdef POCKET_DERBY_TELEMETRY
+    derby_telemetry_reset();
+#endif
     if(pocket_kasane_reset()){
         pocket_clock_reset();
         pocket_av_output_source_reset(av_stopped);
@@ -1855,8 +1885,21 @@ source_ready:;
 #ifdef POCKET_HEAPPROBE
     if(hp && hp_module) module_entry=true;
 #endif
+#ifdef POCKET_DERBY_MEASURE
+    dm_reset();dm_output_reset();dm_calibrate();
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+    if(app_registry_wants(app_registry_current(),"derby.series"))df_reset();
+#endif
+#endif
     if(user_source) err=eval_user_source(source,length,module_entry);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
+#ifdef POCKET_DERBY_TELEMETRY
+    if(app_registry_wants(app_registry_current(),"derby.series")) {
+        size_t used=0, cap=0;
+        JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)), &used, &cap);
+        derby_telemetry_eval(used,cap);
+    }
+#endif
 #ifdef POCKET_HEAPPROBE
     if(hp) hp_report("eval",err);
 #endif
@@ -2108,10 +2151,21 @@ static void end_guest_turn(void) {
 // One call into the guest. The Cardputer supplies a pad mask, centered analog
 // axes and no touches; whatever the guest drew is already in Kasane's bank.
 static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
+    DM_SCOPE(DM_GUEST);
+#ifdef POCKET_DERBY_TELEMETRY
+    if(!continuing) derby_telemetry_begin_frame();
+#endif
     const pocketjs_guest_frame_t input={.struct_size=sizeof(input),
                                        .buttons=buttons,.analog=0x8080};
-    return continuing?pocketjs_guest_continue(guest):
+    esp_err_t result=continuing?pocketjs_guest_continue(guest):
                       pocketjs_guest_frame(guest,&input);
+#ifdef POCKET_DERBY_MEASURE
+    dm_dispatch(continuing,result!=ESP_OK);
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+    df_dispatch(continuing,result!=ESP_OK,buttons);
+#endif
+#endif
+    return result;
 }
 
 esp_err_t app_tick(uint32_t buttons) {
@@ -2463,10 +2517,16 @@ static esp_err_t present_frame(void) {
                 if(p2_capture_repair_only)board_capture(true);
             }
 #endif
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+            df_present(false,board_capture_active(),true);
+#endif
             ESP_LOGW("kasane","LCD transfer failed; retaining display work for retry");
             return ESP_OK;
         }
         if(result!=KSN_OK) {
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+            df_present(false,board_capture_active(),true);
+#endif
             ESP_LOGE("kasane","present failed: %u",(unsigned)result);
             return ESP_FAIL;
         }
@@ -2480,6 +2540,32 @@ static esp_err_t present_frame(void) {
         }
 #endif
         if(stats.bands) {
+#ifdef POCKET_DERBY_MEASURE
+            if(app_registry_wants(app_registry_current(),"derby.series")) {
+                size_t used=0,cap=0;
+                { DM_SCOPE(DM_OBSERVER);
+                  JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),&used,&cap); }
+                dm_present(!pocketjs_guest_work_pending(guest)&&!pocket_proc_pending(),board_capture_active());
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+                df_present(!pocketjs_guest_work_pending(guest)&&!pocket_proc_pending(),board_capture_active(),false);
+                if(!df_session())dm_emit(used,cap);
+#else
+                dm_emit(used,cap);
+#endif
+            }
+#endif
+
+#ifdef POCKET_DERBY_TELEMETRY
+            if(app_registry_wants(app_registry_current(),"derby.series") &&
+               !pocketjs_guest_work_pending(guest) && !pocket_proc_pending()) {
+                size_t used=0, cap=0;
+                JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)), &used, &cap);
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+                if(!df_session())
+#endif
+                derby_telemetry_present(esp_timer_get_time(),used,cap);
+            }
+#endif
             painted++;render_sum+=whole-display_state.sent_us;
             present_sum+=display_state.sent_us;
 #ifdef KASANE_MEGADEMO_TRACE

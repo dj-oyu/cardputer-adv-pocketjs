@@ -1,6 +1,7 @@
 #include "pocket_bridge.h"
 #include "pocket_api.h"
 #include "driver/usb_serial_jtag.h"
+#include "usb_console.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -178,12 +179,9 @@ esp_err_t pocket_bridge_emit(const uint8_t *body, size_t len) {
         wire[at++]=(uint8_t)HEX[crc[i]&15];
     }
     wire[at++]='\n';
-    // One call, so the driver's tx_mux and its all-or-nothing ring send keep the
-    // frame contiguous against anything else writing to the same stream. A
-    // refusal writes nothing at all, which is why a timeout here is honest to
-    // report as "not applied" rather than as a guess.
-    return usb_serial_jtag_write_bytes(wire,at,pdMS_TO_TICKS(50))==(int)at
-               ? ESP_OK : ESP_ERR_TIMEOUT;
+    // Share stdio's lock and line boundary; the driver queues the whole frame
+    // in one call or refuses it, without replaying an operation.
+    return usb_console_frame(wire,at);
 }
 
 // ------------------------------------------------------------------ the link

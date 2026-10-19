@@ -1,6 +1,11 @@
+#include "derby_measure.h"
+#include "derby_fixed_workload.h"
 #include "pocket_derby.h"
 #include "pocket_api.h"
 #include "pocket_proc.h"
+#ifdef POCKET_DERBY_TELEMETRY
+#include "derby_telemetry.h"
+#endif
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -120,6 +125,7 @@ static void pose(double g,double w,double o[4]){
 }
 /* ou(j, w, m, zf): chord j at depth w wholly out of view by m m at least. */
 static bool ou(unsigned j,double w,double m,double zf){
+    DF_COUNT(DF_CLIP);DF_COUNT(DF_SQRT);
     const double *V=course->ve+4u*j,f=view.pc[4],k=m*sqrt(f*f+25600),
         l=V[0]+w*V[2],d=V[1]+w*V[3],L=V[4]+w*V[6],D=V[5]+w*V[7];
     return (d<.02*f-m&&D<.02*f-m)||(d>zf+m&&D>zf+m)||(160*d+l*f<-k&&160*D+L*f<-k)||
@@ -172,6 +178,8 @@ static JSValue draw(JSContext *ctx,uint32_t handle,const double in[8]){
 
 /* course(ends, sections, dnr): CH, OC (or falsy: the straight) and DNR. */
 static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DF_COUNT(DF_COURSE);
+    DM_SCOPE(DM_BRIDGE);
     (void)self;
     const char *op="derby.course";
     uint32_t ends=0,sections=0;
@@ -186,10 +194,10 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     const size_t doubles=ends+(size_t)SECTION_TERMS*sections+4u*ends;
 #ifdef POCKET_DERBY_COURSE_CACHE
     const size_t cache_doubles=sections?4u*ends:0;
-#else
-    const size_t cache_doubles=0;
-#endif
     derby_course *c=malloc(sizeof *c+(doubles+cache_doubles)*sizeof(double)+ends);
+#else
+    derby_course *c=malloc(sizeof *c+doubles*sizeof(double)+ends);
+#endif
     if(!c)return fail(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"course allocation failed");
     c->ends=ends;c->sections=sections;c->in_view=0;c->dnr=dnr;
     c->ch=(double *)(c+1);c->sec=c->ch+ends;c->ve=c->sec+SECTION_TERMS*sections;
@@ -236,7 +244,31 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
 /* view(pc, zf, t, hl, crowd, hlColor, cells): the frame's camera. On the oval
  * it computes VE and VC as pan() did. */
 static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DF_COUNT(DF_VIEW);
+    DM_SCOPE(DM_BRIDGE);
     (void)self;
+#ifdef POCKET_DERBY_TELEMETRY
+    /* Diagnostic generated chunk: same function, numeric context only. No
+     * guest allocation and no mutation of the production projection state. */
+    if (argc == 14 && JS_IsNumber(argv[0])) {
+        double v[8];
+        bool valid = number(ctx, argv[0], &v[0]) && v[0] == 0;
+        for (unsigned i = 0; i < 7 && valid; ++i)
+            valid = number(ctx, argv[i + 7], &v[i]) && isfinite(v[i]);
+        if (!valid || v[0] < 0 || v[0] > UINT32_MAX || v[1] < 0 || v[1] > UINT32_MAX ||
+            v[2] < 0 || v[2] > 4 || v[3] < 0 || v[3] > 9 || v[4] < 0 || v[4] > UINT32_MAX ||
+            (v[5] != -1 && (v[5] < 0 || v[5] > 1)) || v[6] < 0 || v[6] > 2)
+            return fail(ctx, "derby.view", POCKET_ERR_INVALID_ARGUMENT, "invalid diagnostic context");
+        for (unsigned i = 0; i < 7; ++i)
+            if (i != 5 && v[i] != floor(v[i]))
+                return fail(ctx, "derby.view", POCKET_ERR_INVALID_ARGUMENT, "integer diagnostic context required");
+        derby_telemetry_set((derby_telemetry_context){
+            .seed=(uint32_t)v[0], .race=(uint32_t)v[1], .phase=(uint32_t)v[2],
+            .camera=(uint32_t)v[3], .step=(uint32_t)v[4],
+            .u_ppm=v[5] < 0 ? -1 : (int32_t)llround(v[5]*1000000), .tier=(uint32_t)v[6]});
+        return JS_UNDEFINED;
+    }
+#endif
 #ifdef POCKET_DERBY_PROJECT_BATCH
     ++view_generation;
 #endif
@@ -254,6 +286,7 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
         return fail(ctx,op,!ok?POCKET_ERR_INVALID_ARGUMENT:POCKET_ERR_BUSY,
                     !ok?"expected camera, depth, frame, two plans and two numbers":"course required");
     }
+    DM_SCOPE(DM_NATIVE);
     const double *pc=view.pc;
     course->in_view=0;
     if(course->sections){
@@ -328,6 +361,8 @@ static JSValue js_project(JSContext *ctx,JSValueConst self,int argc,JSValueConst
 /* ser(h, w, s, g0, L, a, b): ser(n, w, s, g0, L, zf, a, b) of derby_pan.js,
  * zf from view(). b omitted: the turf (t0, t1). */
 static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DF_COUNT(DF_SER);
+    DM_SCOPE(DM_BRIDGE);
     (void)self;
     const char *op="derby.ser";
     uint32_t h;
@@ -338,6 +373,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
        (!turf&&!number(ctx,argv[6],&b)))
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected plan, w, s, g0, L, a and optional b");
     if(!course||!view.set)return fail(ctx,op,POCKET_ERR_BUSY,"view required");
+    DM_SCOPE(DM_NATIVE);
     const double *pc=view.pc,zf=view.zf;
     const bool ve=course->sections!=0;
     double P[4]={0},pg=0;
@@ -399,9 +435,23 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     return JS_UNDEFINED;
 }
 
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+const char *df_variant(void){return "baseline";}
+static JSValue js_fixture(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;double v[7];
+    if(argc!=7)return fail(ctx,"derby.fixture",POCKET_ERR_INVALID_ARGUMENT,"seven primitive integers required");
+    for(unsigned i=0;i<7;i++)if(!number(ctx,argv[i],&v[i])||!isfinite(v[i])||v[i]<0||v[i]>UINT32_MAX||v[i]!=floor(v[i]))
+        return fail(ctx,"derby.fixture",POCKET_ERR_INVALID_ARGUMENT,"unsigned primitive integers required");
+    df_command((unsigned)v[0],(unsigned)v[1],(unsigned)v[2],(uint32_t)v[3],(unsigned)v[4],(unsigned)v[5],(uint32_t)v[6]);
+    return JS_NewInt32(ctx,(int32_t)df_status());
+}
+#endif
 esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={
+        #ifdef POCKET_DERBY_FIXED_WORKLOAD
+        JS_CFUNC_DEF("fixture",7,js_fixture),
+#endif
         JS_CFUNC_DEF("course",3,js_course),
         JS_CFUNC_DEF("view",7,js_view),
 #ifdef POCKET_DERBY_PROJECT_BATCH

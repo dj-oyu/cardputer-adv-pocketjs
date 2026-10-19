@@ -51,6 +51,32 @@ option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone 
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
 option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
+option(POCKET_DERBY_MEASURE "Bounded owner-task DERBY stage timings" OFF)
+set(POCKET_DERBY_MEASURE_SOURCES "")
+if(POCKET_DERBY_MEASURE)
+    set(POCKET_DERBY_MEASURE_SOURCES "pocket/derby_measure.c" "pocket/derby_measure_device.c")
+    add_compile_definitions(POCKET_DERBY_MEASURE=1)
+endif()
+option(POCKET_DERBY_FIXED_WORKLOAD "Finite fixed DERBY workload diagnostic (not production)" OFF)
+if(POCKET_DERBY_FIXED_WORKLOAD)
+    if(POCKET_DERBY_RUNNER_AFFINE OR POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
+        message(FATAL_ERROR "Finite baseline fixture requires all rendering experiments OFF")
+    endif()
+    if(NOT POCKET_DERBY_MEASURE)
+        message(FATAL_ERROR "DERBY fixed workload requires measurement")
+    endif()
+    list(APPEND POCKET_DERBY_MEASURE_SOURCES "pocket/derby_fixed_workload.c" "pocket/derby_fixed_workload_device.c")
+    add_compile_definitions(POCKET_DERBY_FIXED_WORKLOAD=1)
+    set_source_files_properties(pocket/derby_fixed_workload.c PROPERTIES COMPILE_OPTIONS "-fstack-usage")
+endif()
+option(POCKET_DERBY_TELEMETRY "Bounded DERBY sampled native metrics (diagnostic image)" OFF)
+if(POCKET_DERBY_TELEMETRY)
+    list(APPEND KASANE_SOURCES "pocket/derby_telemetry.c")
+endif()
+option(POCKET_DERBY_COMPARE_FIXED_HW "Fixed hardware seed for a DERBY comparison image" OFF)
+if(POCKET_DERBY_COMPARE_FIXED_HW AND NOT (POCKET_DERBY_TELEMETRY AND POCKET_DERBY_MEASURE))
+    message(FATAL_ERROR "DERBY fixed seed requires telemetry and measurement")
+endif()
 option(POCKET_DERBY_RUNNER_AFFINE "Experimental bounded runner Q14 screen transform" OFF)
 set(POCKET_DERBY_RUNNER_AFFINE_PIE_MIN "0" CACHE STRING "Measured PIE point threshold; 0 keeps scalar")
 if(POCKET_DERBY_RUNNER_AFFINE)
@@ -84,6 +110,21 @@ set(DERBY_BGCOST_SOURCE "" CACHE STRING "Measuring source for the DERBY WATCH ro
 set(DERBY_WATCH_SOURCE "../apps/derby/derby_watch.js")
 if(DERBY_BGCOST_SOURCE)
     set(DERBY_WATCH_SOURCE "${DERBY_BGCOST_SOURCE}")
+endif()
+if(POCKET_DERBY_FIXED_WORKLOAD)
+    if(NOT POCKET_DERBY_COMPARE_FIXED_HW OR DERBY_BGCOST_SOURCE)
+        message(FATAL_ERROR "Fixed workload requires fixed hardware input and ordinary chunks")
+    endif()
+    set(_derby_fixture "${CMAKE_BINARY_DIR}/generated/derby_fixed_workload")
+    execute_process(COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/derby_fixed_workload_chunks.py"
+                    "${CMAKE_SOURCE_DIR}/apps/derby" "${_derby_fixture}" COMMAND_ERROR_IS_FATAL ANY)
+    set(DERBY_WATCH_SOURCE "${_derby_fixture}/derby_watch.js")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_SOURCE_DIR}/tools/derby_fixed_workload_chunks.py"
+                 "${CMAKE_SOURCE_DIR}/tools/derby_compare_chunks.py"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_watch.js"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_play.js"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_view.js")
 endif()
 option(KASANE_PROC_LIMITS_PROBE "USB-triggered procedural limits/lifecycle measurements ('{' native, '}' JS)" OFF)
 if(KASANE_PROC_LIMITS_PROBE)
@@ -193,12 +234,12 @@ endif()
 # trailing variables because both are called from files listed beside them (the
 # scenes and mp3_decode.c) -- see the note at the top of this file about a row
 # arriving after its first caller.
-idf_component_register(SRCS "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
+idf_component_register(SRCS ${POCKET_DERBY_MEASURE_SOURCES} "hal/usb_console.c" "hal/fpu_latency.c" "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/board.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
     "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_app_load.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/net_service.c" "pocket/net_autosync.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
     "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../third_party/bmi270/bmi2.c" "../third_party/bmi270/bmi270.c"
     ${POCKET_RANDOM_SOURCES} ${POCKET_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${POCKET_PROBE_SOURCES}
     INCLUDE_DIRS "." "hal" "pocket" "vm" "pet" "ui" "ui/kasane" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../third_party/bmi270"
-    REQUIRES pocketjs_guest
+    REQUIRES pocketjs_guest vfs
              skk_core ime_core
              esp_app_format esp_hw_support esp_driver_spi esp_driver_i2c esp_driver_gpio esp_driver_uart esp_driver_rmt esp_driver_usb_serial_jtag esp_timer esp_partition esp_driver_i2s esp_adc nvs_flash
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
@@ -364,11 +405,48 @@ endif()
 # dependencies for that (GLOB CONFIGURE_DEPENDS catches a new chunks.txt).
 file(GLOB _app_chunk_lists CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../apps/*/chunks.txt")
 list(APPEND _app_chunk_lists ${POCKET_APP_CHUNK_LISTS})
+if(POCKET_DERBY_TELEMETRY)
+    if(DERBY_BGCOST_SOURCE OR POCKET_HEAPPROBE)
+        message(FATAL_ERROR "DERBY telemetry requires the normal game chunks")
+    endif()
+    set(_derby_source "${CMAKE_CURRENT_LIST_DIR}/../apps/derby")
+    set(_derby_trace "${CMAKE_BINARY_DIR}/generated/derby_telemetry")
+    set(_derby_compare_arg "")
+    if(POCKET_DERBY_COMPARE_FIXED_HW)
+        set(_derby_compare_arg "--compare-fixed")
+    endif()
+    execute_process(COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/derby_telemetry_chunks.py"
+                    "${_derby_source}" "${_derby_trace}" ${_derby_compare_arg} COMMAND_ERROR_IS_FATAL ANY)
+    list(REMOVE_ITEM _app_chunk_lists "${_derby_source}/chunks.txt")
+    # GLOB returns normalized paths; remove the normalized spelling too.
+    get_filename_component(_derby_list "${_derby_source}/chunks.txt" ABSOLUTE)
+    list(REMOVE_ITEM _app_chunk_lists "${_derby_list}")
+    list(APPEND _app_chunk_lists "${_derby_trace}/chunks.txt")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_SOURCE_DIR}/tools/derby_telemetry_chunks.py"
+                 "${CMAKE_SOURCE_DIR}/tools/derby_compare_chunks.py"
+                 "${_derby_source}/derby_view.js"
+                 "${_derby_source}/derby_play.js" "${_derby_source}/chunks.txt")
+endif()
+if(POCKET_DERBY_FIXED_WORKLOAD)
+    if(POCKET_HEAPPROBE)
+        message(FATAL_ERROR "Fixed workload cannot use heapprobe chunks")
+    endif()
+    get_filename_component(_derby_normal_list "${CMAKE_SOURCE_DIR}/apps/derby/chunks.txt" ABSOLUTE)
+    list(REMOVE_ITEM _app_chunk_lists "${_derby_normal_list}" "${_derby_trace}/chunks.txt")
+    list(APPEND _app_chunk_lists "${_derby_fixture}/chunks.txt")
+endif()
 if(POCKET_DERBY_PROJECT_BATCH)
     if(DERBY_BGCOST_SOURCE OR POCKET_HEAPPROBE)
         message(FATAL_ERROR "DERBY projection batch requires the normal game chunks")
     endif()
+    if(POCKET_DERBY_FIXED_WORKLOAD)
+        message(FATAL_ERROR "Projection batching is not accepted for the finite baseline fixture")
+    endif()
     set(_project_input "${CMAKE_SOURCE_DIR}/apps/derby")
+    if(POCKET_DERBY_TELEMETRY)
+        set(_project_input "${_derby_trace}")
+    endif()
     set(_project_out "${CMAKE_BINARY_DIR}/generated/derby_project_batch")
     execute_process(COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/derby_project_batch_chunks.py"
                     "${_project_input}" "${_project_out}" COMMAND_ERROR_IS_FATAL ANY)
@@ -391,6 +469,12 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
              "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py" ${_app_chunk_lists})
 include("${CMAKE_BINARY_DIR}/generated/app_chunks.cmake")
 target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunks.c")
+if(POCKET_DERBY_TELEMETRY)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_DERBY_TELEMETRY=1)
+endif()
+if(POCKET_DERBY_COMPARE_FIXED_HW)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_DERBY_COMPARE_FIXED_HW=1)
+endif()
 # A chunk with @plan functions (procedural plans written as JS,
 # docs/kasane/js-to-ir.md section 5) is embedded lowered: at build time,
 # tools/kasane_ir/lower_plans.mjs replaces each plan by its compiled IR and

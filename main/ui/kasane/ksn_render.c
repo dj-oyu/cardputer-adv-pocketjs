@@ -1,3 +1,4 @@
+#include "../../pocket/derby_measure.h"
 #include "ksn_render.h"
 #include "ksn_image_transform.h"
 #include "ksn_p0_probe.h"
@@ -1938,6 +1939,7 @@ static unsigned outside_opaque(ksn_rect box,ksn_rect opaque,ksn_rect out[4]){
 static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                                ksn_backdrop_loader load_backdrop,bool occlusion_safe,
                                ksn_render_stats *stats){
+    DM_SCOPE(DM_RASTER);
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     stretch_map.active=false;
