@@ -1097,6 +1097,32 @@ int main(int argc,char **argv){
     for(unsigned i=0;i<sizeof fns/sizeof fns[0];i++)
         JS_SetPropertyStr(ctx,g,fns[i].n,JS_NewCFunction(ctx,fns[i].f,fns[i].n,fns[i].a));
     JS_FreeValue(ctx,g);
+#if defined(POCKET_DERBY_RUNNER_BATCH) && defined(POCKET_DERBY_MEASURE)
+    if(getenv("DERBY_RUNNER_SCOPE_TEST")){
+        dm_snapshot before,after;
+        REQ(dm_read(&before));
+        const char *valid="__pd.runners(new ArrayBuffer(320),0)";
+        const char *invalid="let caught=false;try{__pd.runners(new ArrayBuffer(0),0)}"
+                            "catch(e){caught=true}if(!caught)throw Error('missing error')";
+        {
+            DM_SCOPE(DM_GUEST);
+            REQ(eval(valid,strlen(valid),"runner-scope-valid.js"));
+            REQ(eval(invalid,strlen(invalid),"runner-scope-invalid.js"));
+        }
+        REQ(dm_read(&after));
+        REQ(after.stage[DM_GUEST].calls-before.stage[DM_GUEST].calls==1);
+        REQ(after.stage[DM_BRIDGE].calls-before.stage[DM_BRIDGE].calls==2);
+        REQ(after.stage[DM_NATIVE].calls-before.stage[DM_NATIVE].calls==1);
+        REQ(after.scope_pairs-before.scope_pairs==4&&after.faults==before.faults);
+        uint64_t self=0;
+        for(unsigned i=0;i<DM_STAGES;i++)
+            self+=after.stage[i].self_us-before.stage[i].self_us;
+        REQ(after.stage[DM_GUEST].inclusive_us-before.stage[DM_GUEST].inclusive_us==self);
+        puts("RUNNER_SCOPE_CALLS guest=1 bridge=2 native=1 pairs=4");
+        JS_FreeContext(ctx);JS_FreeRuntime(rt);
+        return 0;
+    }
+#endif
     /* DERBY_NORMAL=<race>,<pick>: the stored race is the demo's, played by hand. */
     unsigned normal_race=0,normal_pick=0;
     if(getenv("DERBY_NORMAL")&&sscanf(getenv("DERBY_NORMAL"),"%u,%u",&normal_race,&normal_pick)!=2)return 2;

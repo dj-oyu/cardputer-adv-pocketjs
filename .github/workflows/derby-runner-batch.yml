@@ -33,6 +33,7 @@ jobs:
           python tools/test_derby_runner_batch_proof.py | tee artifacts/mode.log
           python tools/games/run_derby.py --telemetry --measure --heap-limit 524288 | tee artifacts/baseline-measured.log
           python tools/games/run_derby.py --runner-batch --telemetry --measure --heap-limit 524288 --no-runner-oracle | tee artifacts/batch-measured.log
+          DERBY_RUNNER_SCOPE_TEST=1 DERBY_APP_DIR="$PWD/.cache/derby_host/lowered/apps/derby" ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .cache/derby_host/asan/test-derby 2>&1 | tee artifacts/runner-scope.log
           python tools/games/compare_derby_measured_logs.py artifacts/baseline-measured.log artifacts/batch-measured.log | tee artifacts/measured-equality.log
           python tools/games/run_derby.py --runner-batch --telemetry --measure --heap-limit 524288 | tee artifacts/runner-oracle.log
           python tools/games/compare_derby_runner_batch.py | tee artifacts/pixels-heap.log

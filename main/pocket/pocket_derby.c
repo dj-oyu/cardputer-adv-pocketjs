@@ -334,6 +334,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
  * records of [handle, X, scale, groundY, phase]. Snapshot before submitting;
  * no guest pointer or plan is retained. Same operation order as rin(). */
 static JSValue js_runners(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
     (void)self;
     const char *op="derby.runners";
     double count;
@@ -357,6 +358,7 @@ static JSValue js_runners(JSContext *ctx,JSValueConst self,int argc,JSValueConst
         if(rows[i][0]<0||rows[i][0]>INT32_MAX||rows[i][0]!=floor(rows[i][0]))
             return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid runner handle");
     }
+    DM_SCOPE(DM_NATIVE);
     for(unsigned i=0;i<n;i++){
         const double *v=rows[i],X=v[1],S=v[2],Y=v[3],a=v[4];
         if(v[0]==0)continue;

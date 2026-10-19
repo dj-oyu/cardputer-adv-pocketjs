@@ -76,7 +76,17 @@ adds the native method and runs a mandatory ALL proof on every successful
 build, including incremental builds. The proof checks actual ELF symbols and
 embedded PAN bytes plus the IDF BIN's embedded ELF hash; no `.git` is required.
 Configuration and proof imports use Python `-B`, preserving source snapshots.
-It composes with telemetry by preserving that generated play chunk. Both
-options default OFF; alternative bgcost/heapprobe chunks are refused. The
-separate target workflow checks OFF/ON firmware and host equivalence; ordinary
-shipping chunk bytes remain unchanged.
+It composes with telemetry by preserving that generated play chunk. The
+upstream CMake options default OFF. This comparison source revision explicitly
+sets telemetry, measurement and runner batch ON/ON/ON at the top level; its
+diagnostic image is not the ordinary shipping build. Alternative
+bgcost/heapprobe chunks are refused. The separate target workflow checks
+OFF/ON firmware and host equivalence; ordinary shipping chunk bytes remain
+unchanged.
+
+For stage accounting, the runner method's ArrayBuffer copy and input validation
+belong to `bridge`; only the validated per-runner calculation and procedural
+draw submissions belong to nested `native`. Guest, bridge, native and the draw
+path's child scopes use exclusive self time, so inclusive times must not be
+added together. The fixed MID host comparison checks the expected crossing
+count changes; its timing fields remain functional coverage, not device speed.
