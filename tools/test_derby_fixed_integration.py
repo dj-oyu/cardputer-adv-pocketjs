@@ -37,6 +37,14 @@ def off_path(source):
     return '\n'.join(x.strip() for x in out if x.strip())
 
 class Integration(unittest.TestCase):
+    def test_changed_settlement_terminal_contract_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'source';shutil.copytree(ROOT/'apps/derby',source)
+            scene=source/'derby_scene.js'
+            scene.write_text(scene.read_text().replace('rs.done < 8 && rs.t < 200','rs.done < 8 && rs.t < 201',1))
+            with self.assertRaisesRegex(ValueError,'source drift'):
+                generate(source,Path(tmp)/'generated')
+
     def test_normal_owner_and_app_paths_identical(self):
         for name in ('main/main.c','main/app_session.c'):
             old=subprocess.check_output(['git','show',BASE+':'+name],cwd=ROOT,text=True)
