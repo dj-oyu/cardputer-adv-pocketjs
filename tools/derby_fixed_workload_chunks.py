@@ -68,8 +68,10 @@ globalThis.frame=function(b) {
 def generate(source:Path,out:Path):
     out.mkdir(parents=True,exist_ok=True)
     view=compare_view((source/'derby_view.js').read_text())
+    # Keep the app's one READY after enter('pad') succeeds, before any fixture
+    # frame. Per-repetition enter('pad') calls do not emit this startup marker.
     view=once(view,"log = m => console.log('DERBY ' + m)",
-              "log = m => { if(m.indexOf('FAIL')>=0||m.indexOf('LOADSTALL')>=0||m.indexOf('DEGRADE')>=0) pocket.derby.fixture(4,0,0,0,0,0,0); }")
+              "log = m => { if(m==='READY tones=true'||m==='READY tones=false') console.log('DERBY ' + m); else if(m.indexOf('FAIL')>=0||m.indexOf('LOADSTALL')>=0||m.indexOf('DEGRADE')>=0) pocket.derby.fixture(4,0,0,0,0,0,0); }")
     a=view.index("try {\n  ST.get('derby.v1')")
     b=view.index('// The screen',a)
     view=view[:a]+'// Finite fixture: no player storage read or write.\n\n'+view[b:]
