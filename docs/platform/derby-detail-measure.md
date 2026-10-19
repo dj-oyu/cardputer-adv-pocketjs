@@ -79,3 +79,29 @@ python3 tools/games/compare_derby_detail.py \
 詳細ONは測定窓とbounded tailの完了後、各論理reporting frameから最大1行だけUSBへ出してreturnする。26 stage＋13 event＋detail END、coarse summary、最終whole-trial ENDを分け、最後のvalid ENDにも独立したframeを使う。各USB callのbounded waitを40回以上1native callへ積み上げない。詳細OFFの生成fixtureは元exact版のまま。遅い成功transport（1call110ms）で最大1write/return、42の拒否位置、最終valid前のsession timeoutを試験する。完全raw stream中のInternalError/RUNAWAY/LOADSTALL等もstrict detail parserで拒否し、valid END後の障害を黙って合格にしない。
 
 各qualifying出力の直前にsession残時間250msを確保し、不足時はDF_TIMEOUTで不合格にする。終端write開始時には180秒以内でも成功write中に境界を跨ぐケースを含め、valid ENDの遅延確定を拒否する。既存USB callの100ms＋tick rounding上限を変えない。
+
+## 有限診断の正常終了と実機ログ形式
+
+詳細ONの完了は、最後のframeが成功し、fixtureがDONE、終了要求あり、
+guestの継続/queueなし、既存stop要求なしの場合にforeground ownerが
+既存`end_run(ESP_OK)`へ渡す。終了要求後の新しいguest frameを実行して
+意図的interruptにする従来経路へは進めない。pending jobs/finallyを先に
+完了させ、frame/continuationの例外・runaway・forced stopを成功に変換しない。
+通常版/詳細OFFとoverlayの終了経路は変更しない。既存stop hookとI/O取消し・
+resource teardown・APP_STOPPED・HOME_READYの順序を使用する。
+
+strict parserはbare host markerと、正しいtagを持つ完全一致のESP-IDF
+`I (<decimal>) app: APP_STOPPED` / `I (<decimal>) shell: HOME_READY`
+（ANSI SGR可）を認識する。raw bytes/receipt/hashは変更しない。
+END後やHOME後のInternalError、watchdog、RUNAWAY、stop hook失敗を拒否する。
+END valid=1だけで正常終了とはしない。既存の失敗した実機captureを遡及的に
+合格へ変更しない。実機の正常終了と物理LCDの確認は、別の受入工程で必要。
+
+ownerの受入時に最後のguest turnの250ms期限を再armせず確認し、期限超過は
+直ちにtimeout teardownへ渡す。正常なownerだけが一度限りの
+`DERBY_DETAIL_EXIT v=1 session=<n> clean=1` を測定外で出力する。
+EXIT出力失敗/180秒session残量250ms未満も失敗であり、再試行しない。
+parserはEND→EXIT→STOP→HOMEを要求し、EXIT欠落/重複/別sessionを拒否する。
+ENDとEXITは同じowner tickとなり得るが、EXITはJS stackが返った後に書く。
+USBの各bounded writeを110msにしたhost対照では両者計220msであり、
+実機のpreemption込みowner tick上限や純transfer時間の証明ではない。

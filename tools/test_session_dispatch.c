@@ -8,6 +8,14 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef TEST_DERBY_DETAIL_EXIT
+#define POCKET_DERBY_DETAIL_MEASURE
+#define DD_RESUME() ((void)0)
+#define DD_SUSPEND() ((void)0)
+#include "../main/pocket/derby_fixed_workload.h"
+static unsigned fixture_phase;
+unsigned df_status(void){return fixture_phase;}
+#endif
 typedef int esp_err_t;
 enum {ESP_OK=0,ESP_FAIL=-1,ESP_ERR_TIMEOUT=-2,KSN_INPUT_APP,KSN_INPUT_BLOCKED};
 typedef int ksn_result;
@@ -25,12 +33,19 @@ static unsigned continuation_turns,ticks;
 static uint32_t deferred_buttons,delivered,armed;
 static int scope,guest_error;
 static int64_t now,last_present_us;
+#ifdef TEST_DERBY_DETAIL_EXIT
+static int64_t deadline,frame_elapsed,continuation_elapsed;
+#endif
 static double turn_sum;
 #define VM_DISPLAY_PERIOD_MS 33
 static char calls[1024];
 static void call(char c){size_t n=strlen(calls);assert(n+1<sizeof(calls));calls[n]=c;calls[n+1]=0;}
 static int64_t esp_timer_get_time(void){return now;}
-static void arm_turn(uint32_t b){armed=b;call('A');}
+static void arm_turn(uint32_t b){armed=b;call('A');
+#ifdef TEST_DERBY_DETAIL_EXIT
+    deadline=now+250000;
+#endif
+}
 static bool pocketjs_guest_work_pending(void *g){(void)g;return pending;}
 /* cont_submits: the continuation finishes a frame() the VM parked mid-call,
  * and that frame() submits its picture (backlog R3a). jobs_left: as in
@@ -41,11 +56,17 @@ static bool jobs_left;
 static int pocketjs_guest_continue(void *g){
     (void)g;call('C');pending=remain||jobs_left;
     const bool finished=!remain&&!guest_error;
+#ifdef TEST_DERBY_DETAIL_EXIT
+    now+=continuation_elapsed;
+#endif
     if(proc_commits&&finished)proc_pending=true;
     if(cont_submits&&finished)submission=need_present=true;
     return guest_error;
 }
 static bool frame_parks;
+#ifdef TEST_DERBY_DETAIL_EXIT
+static bool finish_in_frame;
+#endif
 /* What frame()'s first beginFrame()/patch() would meet: BUSY if the finished
  * frame's pending procedural frame or ticket was not presented first. */
 static bool frame_met_pending;
@@ -55,7 +76,13 @@ static int pocketjs_guest_frame(void *g,const pocketjs_guest_frame_t *f){
     (void)g;frame_met_pending=proc_pending||submission;if(frame_parks)pending=true;
     assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
     assert(!f->touch_count&&!f->touches&&!f->touch_hits);
-    delivered=f->buttons;call('F');if(activate)submission=need_present=true;return guest_error;
+    delivered=f->buttons;call('F');if(activate)submission=need_present=true;
+#ifdef TEST_DERBY_DETAIL_EXIT
+    if(finish_in_frame){fixture_phase=DF_DONE;exit_requested=true;}
+    now+=frame_elapsed;
+    if(atomic_load(&stop_requested))return ESP_FAIL;
+#endif
+    return guest_error;
 }
 static void *sys_device_notifications(void){return NULL;}
 static bool sys_notify_active(void *n,sys_notice *out){(void)n;(void)out;return false;}
@@ -79,7 +106,7 @@ static void pocket_kasane_park_turn(void){call('Y');}
 static void report_oom_if_any(void){call('O');}
 static bool drain_runaway(void){return runaway;}
 static bool pocket_app_exit_requested(void){return exit_requested;}
-static void app_request_stop(void){stopped=true;call('S');}
+static void app_request_stop(void){stopped=true;atomic_store(&stop_requested,true);call('S');}
 static int present_frame(void){call('P');need_present=false;submission=false;proc_pending=false;return 0;}
 /* Silent: the call strings below predate these, and none of them decides an
  * ordering this test checks. The presenter step can be made to fail. */
@@ -97,8 +124,67 @@ PUMP(pocket_av_pump,'v')
 /* Silent, like the pumps added after the call strings were fixed. */
 static void pocket_video_sd_stream_reap(void){}
 static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
+#ifdef TEST_DERBY_DETAIL_EXIT
+#include "detail_interrupt_impl.inc"
+#endif
 #include "session_dispatch_impl.inc"
+#ifdef TEST_DERBY_DETAIL_EXIT
+// Actual owner tick_run(), with UI/I/O ports quiet and teardown observable.
+typedef int board_key_t;
+enum {SCREEN_HOME=0,KEY_NONE=0,KEY_BACK,KEY_ENTER,KEY_UP,KEY_RIGHT,KEY_DOWN,KEY_LEFT};
+typedef struct {board_key_t nav;} keystroke_t;
+static int owner;
+static atomic_bool owner_capture;
+static bool ended,running;static int ended_result,run_started;
+static bool exit_write_ok=true;
+static bool df_detail_exit_record(void){call('R');return exit_write_ok;}
+static const char *home_error;
+typedef struct {void (*run_restore)(void);void (*ended)(esp_err_t,const char*);} screen_ops_t;
+static const screen_ops_t SCREENS[1]={{0}};
+static void *keys;
+static void xQueueReset(void *p){(void)p;}
+static void app_stop(void){ended=true;guest=NULL;call('T');}
+static const char *app_error(void){return "APP EXITED";}
+static void take_pending_run(void){}
+static void sound_play(int i){(void)i;}
+static void home_ready(const char *tag){assert(!strcmp(tag,"shell"));call('H');}
+#define ESP_LOGI(tag,...) home_ready(tag)
+#include "detail_end_run_impl.inc"
+static void observed_end_run(esp_err_t e){ended_result=e;call('X');end_run(e);}
+#define end_run observed_end_run
+#define FALSE_PORT(name) static bool name(void){return false;}
+FALSE_PORT(pocket_workspace_modal) FALSE_PORT(sd_picker_modal) FALSE_PORT(file_picker_modal)
+FALSE_PORT(pocket_workspace_modal_dirty) FALSE_PORT(sd_picker_modal_dirty) FALSE_PORT(file_picker_modal_dirty)
+FALSE_PORT(pocket_text_active) FALSE_PORT(app_can_suspend) FALSE_PORT(pocket_capture_take_dirty)
+FALSE_PORT(pocket_workspace_run_requested)
+#define QUIET_PORT(name) static void name(void){}
+QUIET_PORT(pocket_input_keys_withhold) QUIET_PORT(pocket_workspace_modal_draw)
+QUIET_PORT(sd_picker_modal_draw) QUIET_PORT(file_picker_modal_draw)
+QUIET_PORT(app_force_redraw) QUIET_PORT(suspend_run)
+#define KEY_PORT(name) static void name(const keystroke_t *s){(void)s;}
+KEY_PORT(pocket_workspace_modal_key) KEY_PORT(sd_picker_modal_key)
+KEY_PORT(file_picker_modal_key) KEY_PORT(pocket_text_key)
+static void app_force_redraw_bands(uint32_t b){(void)b;}
+static uint32_t pocket_text_take_dirty(void){return 0;}
+static esp_err_t app_suspend(void){return ESP_FAIL;}
+typedef struct {const char *id;} registry_t;
+static const registry_t registry={"local.derby"};
+static const registry_t *app_registry_current(void){return &registry;}
+#define APP_ID_WORK "local.work"
+#define capture owner_capture
+#include "detail_owner_impl.inc"
+#undef end_run
+#undef capture
+#endif
 static void reset(void){
+    guest=(void*)1;atomic_store(&stop_requested,false);
+#ifdef TEST_DERBY_DETAIL_EXIT
+    fixture_phase=DF_OFF;finish_in_frame=ended=false;
+    deadline=frame_elapsed=continuation_elapsed=0;
+    ended_result=0;atomic_store(&owner_capture,false);owner=SCREEN_HOME;
+    running=true;run_started=ESP_OK;home_error=NULL;
+    exit_write_ok=true;
+#endif
     calls[0]=0;pending=remain=activate=need_present=submission=false;
     native_animation=system_pending=false;board_capture(false);
     runaway=exit_requested=stopped=turn_continued=cont_submits=frame_parks=proc_commits=proc_pending=false;scope=KSN_INPUT_APP;
@@ -205,4 +291,49 @@ int main(void){
     reset();pending=true;jobs_left=true;guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
     assert(!strcmp(calls,"ACYO"));
     puts("session dispatch PASS: ordering, cleanup, Back, continuation, display turn, watchdog, parked-frame present, Back present before the save frame");
+#ifdef TEST_DERBY_DETAIL_EXIT
+    reset();fixture_phase=DF_DONE;exit_requested=true;
+    assert(app_derby_detail_finished());pending=true;assert(!app_derby_detail_finished());
+    pending=false;atomic_store(&stop_requested,true);assert(!app_derby_detail_finished());
+    atomic_store(&stop_requested,false);guest=NULL;assert(!app_derby_detail_finished());
+    reset();fixture_phase=DF_ABORT;exit_requested=true;assert(!app_derby_detail_finished());
+    reset();fixture_phase=DF_DONE;assert(!app_derby_detail_finished());
+    // The frame that emits END requests exit. Owner ends it before a second
+    // VM entry (including the release entry for a key press).
+    reset();finish_in_frame=true;tick_run(false,NULL);
+    assert(ended&&ended_result==ESP_OK&&!stopped&&!home_error&&!running);
+    assert(strchr(calls,'F')&&strchr(calls,'X')&&!strchr(calls,'S'));
+    assert(strchr(calls,'T')<strchr(calls,'H')&&strchr(calls,'H')==strrchr(calls,'H'));
+    assert(strchr(calls,'R')<strchr(calls,'T'));
+    reset();finish_in_frame=true;keystroke_t enter={KEY_ENTER};tick_run(true,&enter);
+    assert(ended&&ended_result==ESP_OK&&!stopped);
+    assert(strchr(calls,'F')==strrchr(calls,'F'));
+    // DONE alone never turns a genuine failing final frame into success.
+    reset();finish_in_frame=true;guest_error=ESP_FAIL;tick_run(false,NULL);
+    assert(ended&&ended_result==ESP_FAIL&&home_error);
+    assert(!strchr(calls,'R'));
+    reset();finish_in_frame=true;exit_write_ok=false;tick_run(false,NULL);
+    assert(ended&&ended_result==ESP_FAIL&&home_error&&strchr(calls,'R'));
+    // The real interrupt predicate catches a late successful VM return. It
+    // fails in this owner turn, instead of rearming and accepting next tick.
+    reset();finish_in_frame=true;frame_elapsed=250001;tick_run(false,NULL);
+    assert(ended&&ended_result==ESP_ERR_TIMEOUT&&home_error&&!strchr(calls,'R'));
+    reset();fixture_phase=DF_DONE;exit_requested=true;pending=true;
+    continuation_elapsed=250001;tick_run(false,NULL);
+    assert(ended&&ended_result==ESP_ERR_TIMEOUT&&!strchr(calls,'R'));
+    // Draining jobs after END is required; neither exit nor DONE skips them.
+    reset();fixture_phase=DF_DONE;exit_requested=true;pending=remain=true;
+    tick_run(false,NULL);assert(!ended&&!stopped&&strchr(calls,'C'));
+    calls[0]=0;remain=false;tick_run(false,NULL);
+    assert(ended&&ended_result==ESP_OK&&!strchr(calls,'F')&&!strchr(calls,'S'));
+    reset();fixture_phase=DF_DONE;exit_requested=true;pending=true;guest_error=ESP_FAIL;
+    tick_run(false,NULL);assert(ended&&ended_result==ESP_FAIL);
+    reset();fixture_phase=DF_DONE;exit_requested=true;pending=remain=runaway=true;
+    tick_run(false,NULL);assert(ended&&ended_result==ESP_ERR_TIMEOUT);
+    reset();fixture_phase=DF_DONE;exit_requested=true;app_request_stop();
+    tick_run(false,NULL);assert(ended&&ended_result==ESP_FAIL&&home_error);
+    reset();finish_in_frame=true;keystroke_t back={KEY_BACK};tick_run(true,&back);
+    assert(ended&&stopped&&delivered==0x2000);
+    puts("detailed owner exit PASS: final frame, release guard, full drain, errors/watchdog preserved");
+#endif
 }

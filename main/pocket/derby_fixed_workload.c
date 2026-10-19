@@ -19,6 +19,7 @@ static struct {
 #ifdef POCKET_DERBY_DETAIL_MEASURE
     dd_snapshot detail;
     unsigned detail_row;
+    bool exit_reported;
 #endif
 } s;
 static unsigned serial;
@@ -74,6 +75,17 @@ static bool detail_report_step(void){
     }
     if(n<=0||(size_t)n>=sizeof line||!df_write(line,(size_t)n))return false;
     ++s.detail_row;return true;
+}
+bool df_detail_exit_record(void){
+    uint64_t duration=0;
+    if(s.phase!=DF_DONE||s.trial_quality||s.reported!=3||s.exit_reported||
+       !elapsed(df_now_us(),s.session_start,&duration)||duration>180000000-250000)
+        return false;
+    /* One attempt: a refused/partial write can never be retried into success. */
+    s.exit_reported=true;
+    char line[128];
+    int n=snprintf(line,sizeof line,"DERBY_DETAIL_EXIT v=1 session=%u clean=1\n",serial);
+    return n>0&&(size_t)n<sizeof line&&df_write(line,(size_t)n);
 }
 #endif
 static void report(uint32_t finish){
