@@ -1,4 +1,5 @@
 #include "derby_measure.h"
+#include "derby_fixed_workload.h"
 #include "pocket_derby.h"
 #include "pocket_api.h"
 #include "pocket_proc.h"
@@ -103,6 +104,7 @@ static void pose(double g,double w,double o[4]){
 }
 /* ou(j, w, m, zf): chord j at depth w wholly out of view by m m at least. */
 static bool ou(unsigned j,double w,double m,double zf){
+    DF_COUNT(DF_CLIP);DF_COUNT(DF_SQRT);
     const double *V=course->ve+4u*j,f=view.pc[4],k=m*sqrt(f*f+25600),
         l=V[0]+w*V[2],d=V[1]+w*V[3],L=V[4]+w*V[6],D=V[5]+w*V[7];
     return (d<.02*f-m&&D<.02*f-m)||(d>zf+m&&D>zf+m)||(160*d+l*f<-k&&160*D+L*f<-k)||
@@ -155,6 +157,7 @@ static JSValue draw(JSContext *ctx,uint32_t handle,const double in[8]){
 
 /* course(ends, sections, dnr): CH, OC (or falsy: the straight) and DNR. */
 static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DF_COUNT(DF_COURSE);
     DM_SCOPE(DM_BRIDGE);
     (void)self;
     const char *op="derby.course";
@@ -198,6 +201,7 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
 /* view(pc, zf, t, hl, crowd, hlColor, cells): the frame's camera. On the oval
  * it computes VE and VC as pan() did. */
 static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DF_COUNT(DF_VIEW);
     DM_SCOPE(DM_BRIDGE);
     (void)self;
 #ifdef POCKET_DERBY_TELEMETRY
@@ -256,6 +260,7 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 /* ser(h, w, s, g0, L, a, b): ser(n, w, s, g0, L, zf, a, b) of derby_pan.js,
  * zf from view(). b omitted: the turf (t0, t1). */
 static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DF_COUNT(DF_SER);
     DM_SCOPE(DM_BRIDGE);
     (void)self;
     const char *op="derby.ser";
@@ -329,9 +334,23 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     return JS_UNDEFINED;
 }
 
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+const char *df_variant(void){return "baseline";}
+static JSValue js_fixture(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;double v[7];
+    if(argc!=7)return fail(ctx,"derby.fixture",POCKET_ERR_INVALID_ARGUMENT,"seven primitive integers required");
+    for(unsigned i=0;i<7;i++)if(!number(ctx,argv[i],&v[i])||!isfinite(v[i])||v[i]<0||v[i]>UINT32_MAX||v[i]!=floor(v[i]))
+        return fail(ctx,"derby.fixture",POCKET_ERR_INVALID_ARGUMENT,"unsigned primitive integers required");
+    df_command((unsigned)v[0],(unsigned)v[1],(unsigned)v[2],(uint32_t)v[3],(unsigned)v[4],(unsigned)v[5],(uint32_t)v[6]);
+    return JS_NewInt32(ctx,(int32_t)df_status());
+}
+#endif
 esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={
+        #ifdef POCKET_DERBY_FIXED_WORKLOAD
+        JS_CFUNC_DEF("fixture",7,js_fixture),
+#endif
         JS_CFUNC_DEF("course",3,js_course),
         JS_CFUNC_DEF("view",7,js_view),
         JS_CFUNC_DEF("ser",7,js_ser),

@@ -94,6 +94,7 @@ static int64_t hp_eval_t0;
 #include "pocket_input.h"
 #include "ksn_font.h"
 #include "app_registry.h"
+#include "pocket/derby_fixed_workload.h"
 #include "pet_hub.h"
 #include "pocket_derby.h"
 #ifdef POCKET_DERBY_TELEMETRY
@@ -1886,6 +1887,9 @@ source_ready:;
 #endif
 #ifdef POCKET_DERBY_MEASURE
     dm_reset();dm_output_reset();dm_calibrate();
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+    if(app_registry_wants(app_registry_current(),"derby.series"))df_reset();
+#endif
 #endif
     if(user_source) err=eval_user_source(source,length,module_entry);
     else err=pocketjs_guest_eval(guest,source,length,test?"diagnostic.js":"hello.js");
@@ -2157,6 +2161,9 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
                       pocketjs_guest_frame(guest,&input);
 #ifdef POCKET_DERBY_MEASURE
     dm_dispatch(continuing,result!=ESP_OK);
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+    df_dispatch(continuing,result!=ESP_OK,buttons);
+#endif
 #endif
     return result;
 }
@@ -2510,10 +2517,16 @@ static esp_err_t present_frame(void) {
                 if(p2_capture_repair_only)board_capture(true);
             }
 #endif
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+            df_present(false,board_capture_active(),true);
+#endif
             ESP_LOGW("kasane","LCD transfer failed; retaining display work for retry");
             return ESP_OK;
         }
         if(result!=KSN_OK) {
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+            df_present(false,board_capture_active(),true);
+#endif
             ESP_LOGE("kasane","present failed: %u",(unsigned)result);
             return ESP_FAIL;
         }
@@ -2533,7 +2546,12 @@ static esp_err_t present_frame(void) {
                 { DM_SCOPE(DM_OBSERVER);
                   JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),&used,&cap); }
                 dm_present(!pocketjs_guest_work_pending(guest)&&!pocket_proc_pending(),board_capture_active());
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+                df_present(!pocketjs_guest_work_pending(guest)&&!pocket_proc_pending(),board_capture_active(),false);
+                if(!df_session())dm_emit(used,cap);
+#else
                 dm_emit(used,cap);
+#endif
             }
 #endif
 
@@ -2542,6 +2560,9 @@ static esp_err_t present_frame(void) {
                !pocketjs_guest_work_pending(guest) && !pocket_proc_pending()) {
                 size_t used=0, cap=0;
                 JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)), &used, &cap);
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+                if(!df_session())
+#endif
                 derby_telemetry_present(esp_timer_get_time(),used,cap);
             }
 #endif
