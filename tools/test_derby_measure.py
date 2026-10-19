@@ -17,7 +17,8 @@ with tempfile.TemporaryDirectory() as directory:
         subprocess.run([str(exe)],check=True)
     off=out/'off.c';off.write_text('#include "derby_measure.h"\nvoid f(void){DM_SCOPE(DM_VM);DM_BATCH(1);}\n')
     obj=out/'off.o'
-    subprocess.run(['gcc',*model_flags,'-std=gnu11','-Wall','-Wextra','-Werror','-O0','-I',str(ROOT/'main/pocket'),'-c',str(off),'-o',str(obj)],check=True)
+    # i386 GCC defaults to PIE; its GOT thunk is unrelated to measurement calls.
+    subprocess.run(['gcc',*model_flags,'-fno-pie','-std=gnu11','-Wall','-Wextra','-Werror','-O0','-I',str(ROOT/'main/pocket'),'-c',str(off),'-o',str(obj)],check=True)
     assert not subprocess.check_output(['nm','-u',str(obj)],text=True).strip()
     print('PASS OFF scopes/backend counters have no undefined symbols at O0')
 
