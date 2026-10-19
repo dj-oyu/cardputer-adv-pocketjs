@@ -1,0 +1,84 @@
+name: DERBY course cache and projection comparison
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-projection-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -B tools/games/run_derby_projection.py --all-tiers --out artifacts/projection
+      - run: python -B tools/games/run_derby_projection.py --benchmark-only --out artifacts/projection-cost
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-projection-host-${{ env.SOURCE_HEAD }}
+          path: |
+            artifacts/projection/result.json
+            artifacts/projection/**/*.log
+            artifacts/projection/**/*.csv
+            artifacts/projection-cost/result.json
+            artifacts/projection-cost/**/*.log
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        cache: ['OFF','ON']
+        batch: ['OFF','ON']
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build exact source with independent comparison switches
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_projection -DPOCKET_DERBY_COURSE_CACHE=${{ matrix.cache }} -DPOCKET_DERBY_PROJECT_BATCH=${{ matrix.batch }} build
+          grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=${{ matrix.cache }}' build_projection/CMakeCache.txt
+          grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=${{ matrix.batch }}' build_projection/CMakeCache.txt
+          sha256sum build_projection/cardputer_pocketjs.bin build_projection/cardputer_pocketjs.elf > build_projection/SHA256SUMS
+          python -c 'from pathlib import Path; paths=sorted(Path("build_projection").rglob("*pocket_derby*.su")); Path("build_projection/projection-stack.txt").write_text("\n".join(str(p)+"\n"+p.read_text() for p in paths))'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: derby-projection-${{ env.SOURCE_HEAD }}-cache-${{ matrix.cache }}-batch-${{ matrix.batch }}
+          path: |
+            build_projection/cardputer_pocketjs.bin
+            build_projection/cardputer_pocketjs.elf
+            build_projection/cardputer_pocketjs.map
+            build_projection/CMakeCache.txt
+            build_projection/SHA256SUMS
+            build_projection/projection-stack.txt
+          retention-days: 14
