@@ -313,6 +313,10 @@ static JSValue js_project(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     size_t offset=0,bytes=0,per=0,size=0;
     JSValue buffer=JS_GetTypedArrayBuffer(ctx,argv[3],&offset,&bytes,&per);
     if(JS_IsException(buffer))return buffer;
+    if(JS_IsImmutableArrayBuffer(buffer)>0){
+        JS_FreeValue(ctx,buffer);
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"output buffer must be mutable");
+    }
     uint8_t *data=JS_GetArrayBuffer(ctx,&size,buffer);
     if(!data||per!=sizeof(double)||bytes<(size_t)n*4*sizeof(double)||offset>size||bytes>size-offset){
         JS_FreeValue(ctx,buffer);

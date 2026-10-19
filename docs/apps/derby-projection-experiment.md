@@ -43,7 +43,9 @@ All progress/depth values are read before borrowing output bytes. Course and
 view generation checks reject getter-driven replacement. Output must be a
 live Float64Array with enough bytes; typed-array type, offset, length and
 backing buffer are checked after getters, including detach. No JS callback
-runs while the output pointer is borrowed. Invalid input produces no internal
+runs while the output pointer is borrowed. Immutable backing buffers are
+rejected before any native write, including offset typed-array views.
+Invalid input produces no internal
 partial write. The C scratch arrays are bounded at 32 pairs (512 data bytes);
 target compiler stack reports are retained by CI.
 
@@ -74,11 +76,13 @@ MID also checks replay and adds a run comparing every native point directly
 with the original JS pose/pj expressions (including signed-zero equality).
 LIGHT/HEAVY use the existing non-replay harness scenarios.
 
-The preflight checks 19,208 points on straight/bend/section boundaries,
+The preflight checks over 19,200 points on straight/bend/section boundaries,
 close/follow/horizontal-orbit trajectories, Z=.02 and either side, zero and
 negative depths, and nonfinite/malformed inputs. It verifies detached buffers,
-getter-driven course replacement, typed output subview guards, maximum cache
-allocation, failed replacement, straight replacement and reset. Camera
+getter-driven course/view replacement, late-invalid inputs, immutable backing
+from both QuickJS APIs, typed output subview guards, maximum cache allocation,
+failed replacement, straight replacement and reset. Cache lifetime is checked
+in all four independent modes, with explicit 0/1024-byte expectations. Camera
 fixtures exercise the current horizontal PAN contract, not a new XYZ camera.
 
 Optimized, unsanitized costs are recorded separately and run serially; they

@@ -40,7 +40,10 @@ static JSValue js_projection_reset(JSContext *c,JSValueConst self,int argc,JSVal
 }
 static JSValue js_projection_stats(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;JSValue o=JS_NewObject(c);
-    uint32_t cache=0;
+    uint32_t cache=0;bool cache_enabled=false;
+#ifdef POCKET_DERBY_COURSE_CACHE
+    cache_enabled=true;
+#endif
 #if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
     DerbyProjectionCounts counts;pocket_derby_projection_counts(&counts);cache=counts.cache_bytes;
     JS_SetPropertyStr(c,o,"registration_poses",JS_NewUint32(c,counts.registration_poses));
@@ -50,6 +53,7 @@ static JSValue js_projection_stats(JSContext *c,JSValueConst self,int argc,JSVal
     JS_SetPropertyStr(c,o,"input_numbers",JS_NewUint32(c,counts.input_numbers));
     JS_SetPropertyStr(c,o,"output_numbers",JS_NewUint32(c,counts.output_numbers));
 #endif
+    JS_SetPropertyStr(c,o,"cache_enabled",JS_NewBool(c,cache_enabled));
     JS_SetPropertyStr(c,o,"cache_bytes",JS_NewUint32(c,cache));return o;
 }
 '''
@@ -126,6 +130,7 @@ def main():
             text=process.stdout
         assert ('PROJECTION_BENCH_ONLY PASS' if args.benchmark_only else 'DERBY_HOST PASS') in text
         bench=json.loads(re.search(r'PROJECTION_BENCH (\{[^\n]+\})',text)[1])
+        assert bench['counters']['cache_enabled']==(label in ('cache','combined'))
         pre=re.search(r'PROJECTION_PREFLIGHT (\{[^\n]+\})',text)
         if args.benchmark_only:return dict(mode=label,benchmark=bench,preflight=json.loads(pre[1]) if pre else None)
         replay=re.search(r'^replay: (.+)$',text,re.M)
