@@ -17,6 +17,8 @@
   "variant": "baseline",
   "session": "1",
   "independent_trials": false,
+  "format_valid": true,
+  "work_verified": true,
   "all_repetitions_valid": true,
   "repetitions": [
     {

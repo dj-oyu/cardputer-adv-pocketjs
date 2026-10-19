@@ -18,7 +18,7 @@ import run_derby
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'tools'))
 from derby_fixed_workload_chunks import generate
-from derby_fixed_result import parse_trial
+from derby_fixed_result import parse_trial,verify_work
 
 def once(text,old,new):
     if text.count(old)!=1:raise ValueError('fixed host source drift: '+old[:80])
@@ -102,16 +102,11 @@ def check_result(result):
     for i,(window,row) in enumerate(zip(windows,rows,strict=True),1):
         mismatches={k:{'expected':v,'actual':window[k]} for k,v in expected.items() if window[k]!=v}
         if window['rep']!=i or mismatches:raise ValueError('known fixture work/pixels differ: '+json.dumps({'rep':window['rep'],'mismatches':mismatches},sort_keys=True))
-        if any(row[f'c{j}']!=rows[0][f'c{j}'] for j in range(10)):raise ValueError('non-deterministic work counters')
-        if any(row[f's{j}'].split(':')[1]!=rows[0][f's{j}'].split(':')[1] for j in range(10)):raise ValueError('non-deterministic stage calls')
-        counts=[int(row[f'c{j}']) for j in range(10)]
-        if counts[:4]!=[0,120,600,7735]:raise ValueError('known clip work differs')
-        if variant=='native':
-            if counts[4:]!=[120,7735,0,120,0,0]:raise ValueError('cache accounting differs')
-        elif variant=='batch':
-            if counts[4:]!=[7735,0,0,0,120,960]:raise ValueError('batch accounting differs')
-        elif counts[4:]!=[7735,0,0,0,0,0]:raise ValueError('baseline accounting differs')
-        if int(row['s1'].split(':')[1])!=(1246 if variant=='batch' else 2086):raise ValueError('bridge boundary calls differ')
+        # This no-continuation host harness also checks all model-local calls.
+        # The device gate only freezes fixed work scopes; continuation/render
+        # scopes have their own invariants in the shared verifier.
+        if any(row[f's{j}'].split(':')[1]!=rows[0][f's{j}'].split(':')[1] for j in range(10)):raise ValueError('non-deterministic host stage calls')
+    verify_work(rows,variant)
     return result
 
 def main():

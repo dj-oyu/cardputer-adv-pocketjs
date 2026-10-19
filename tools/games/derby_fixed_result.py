@@ -7,6 +7,42 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from derby_fixed_workload_chunks import FIXTURE,MANIFEST_SHA256
 
 TRANSPORT_FLAGS=('gaps','overflow','truncated','partial_tail','disconnect','reset','refused')
+# c4 counts only the instrumented clip/cache-normalization sqrt sites.
+# It is not a count of all square roots in the app or renderer.
+EXPECTED_WORK={
+    'baseline':(0,120,600,7735,7735,0,0,0,0,0),
+    'native':(0,120,600,7735,120,7735,0,120,0,0),
+    'batch':(0,120,600,7735,7735,0,0,0,120,960),
+}
+EXPECTED_BRIDGE_CALLS={'baseline':2086,'native':2086,'batch':1246}
+# Guest calls follow continuation dispatches. VM/points/raster/transfer/observer
+# calls can depend on continuation slicing and host/device instrumentation.
+# Only the bridge/native/procedural-build work calls must repeat unchanged.
+FIXED_CALL_STAGES=(1,2,3)
+
+def verify_work(records,variant):
+    """Shared host/device comparison gate after format and time validation."""
+    if variant not in EXPECTED_WORK or len(records)!=3:
+        raise ValueError('work_variant_or_repetition_count')
+    first_calls=None
+    for row in records:
+        if tuple(int(row[f'c{i}']) for i in range(10))!=EXPECTED_WORK[variant]:
+            raise ValueError('known_work_counters_differ')
+        calls=[int(row[f's{i}'].split(':')[1]) for i in range(10)]
+        if calls[1]!=EXPECTED_BRIDGE_CALLS[variant]:
+            raise ValueError('known_bridge_calls_differ')
+        if not calls[2] or not calls[3]:
+            raise ValueError('native_or_build_work_missing')
+        fixed=tuple(calls[i] for i in FIXED_CALL_STAGES)
+        if first_calls is not None and fixed!=first_calls:
+            raise ValueError('fixed_work_calls_differ_between_repetitions')
+        first_calls=fixed
+        if calls[0]!=120+int(row['cont']):
+            raise ValueError('guest_calls_do_not_match_dispatches')
+        if calls[4]<calls[3] or calls[6]<120 or calls[7]<120:
+            raise ValueError('renderer_work_missing')
+        if calls[8]:
+            raise ValueError('output_inside_measured_work')
 
 def parse_collected(data:bytes,transport:dict):
     """Validate a bounded collector receipt, then the complete device trial.
@@ -28,7 +64,12 @@ def parse_collected(data:bytes,transport:dict):
         raise ValueError('diagnostic_line_limit')
     return parse_trial(data,transport_complete=True)
 
-def parse_trial(data:bytes,*,transport_complete:bool):
+def parse_trial_format(data:bytes,*,transport_complete:bool):
+    """Format/identity/time checks only; never qualifies a performance trial.
+
+    Synthetic controller tests use this entry point. Device collection and
+    comparison must use parse_trial/parse_collected instead.
+    """
     if not transport_complete or not data.endswith(b'\n'):
         raise ValueError('partial_or_incomplete_transport')
     text=data.decode('ascii')
@@ -66,11 +107,23 @@ def parse_trial(data:bytes,*,transport_complete:bool):
                 if len(values)!=width or any(not v.isdigit() or int(v)>2**64-1 for v in values):raise ValueError('invalid_tuple')
         pace=sum(int(row[f'p{j}'].split(':')[0]) for j in range(3))
         if pace+int(row['work_us'])>int(row['wall_us']):raise ValueError('direct_intervals_exceed_wall')
+        stages=[tuple(map(int,row[f's{j}'].split(':'))) for j in range(10)]
+        if any(self_us>int(row['wall_us']) or (not calls and self_us) for self_us,calls in stages):
+            raise ValueError('impossible_stage_self')
+        if sum(self_us for self_us,_ in stages)>int(row['work_us']):
+            raise ValueError('stage_self_sum_exceeds_direct_work')
     if end[0]!={'v':'1','session':session,'reps':'3','valid':'1','quality':'0','independent':'0'}:
         raise ValueError('invalid_whole_trial')
     return {'fixture':FIXTURE,'manifest_sha256':MANIFEST_SHA256,'variant':variant,
-            'session':session,'independent_trials':False,'all_repetitions_valid':True,
+            'session':session,'independent_trials':False,'format_valid':True,
+            'work_verified':False,'all_repetitions_valid':False,
             'repetitions':records,'transport_sha256':hashlib.sha256(data).hexdigest()}
+
+def parse_trial(data:bytes,*,transport_complete:bool):
+    trial=parse_trial_format(data,transport_complete=transport_complete)
+    verify_work(trial['repetitions'],trial['variant'])
+    trial.update(work_verified=True,all_repetitions_valid=True)
+    return trial
 
 if __name__=='__main__':
     import argparse

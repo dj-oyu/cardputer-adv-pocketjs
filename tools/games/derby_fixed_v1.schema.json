@@ -1,18 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "DERBY finite protocol v1 parsed whole trial",
-  "description": "Structural contract for parse_trial output. The parser additionally enforces uint64 ranges, matching session/variant, direct time relations, END and whole transport. This schema alone cannot certify transport or target performance.",
+  "description": "Comparison-qualified parse_trial/parse_collected output only. Synthetic parse_trial_format output is not work-verified and is rejected by this schema. Parser additionally enforces uint64, work counts, fixed-scope consistency, continuation invariants, self-time bounds, matching session/variant, END and transport.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "all_repetitions_valid",
     "fixture",
+    "format_valid",
     "independent_trials",
     "manifest_sha256",
     "repetitions",
     "session",
     "transport_sha256",
-    "variant"
+    "variant",
+    "work_verified"
   ],
   "properties": {
     "fixture": {
@@ -112,6 +114,12 @@
           ]
         }
       ]
+    },
+    "format_valid": {
+      "const": true
+    },
+    "work_verified": {
+      "const": true
     }
   },
   "$defs": {
@@ -310,7 +318,8 @@
         },
         "c4": {
           "type": "string",
-          "pattern": "^[0-9]{1,20}$"
+          "pattern": "^[0-9]{1,20}$",
+          "description": "Clip/cache-normalization sqrt sites only; not all sqrt evaluations in app/renderer."
         },
         "s4": {
           "type": "string",
@@ -356,7 +365,156 @@
           "type": "string",
           "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "variant": {
+                "const": "baseline"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "c0": {
+                "pattern": "^0+$"
+              },
+              "c1": {
+                "pattern": "^0*120$"
+              },
+              "c2": {
+                "pattern": "^0*600$"
+              },
+              "c3": {
+                "pattern": "^0*7735$"
+              },
+              "c4": {
+                "pattern": "^0*7735$"
+              },
+              "c5": {
+                "pattern": "^0+$"
+              },
+              "c6": {
+                "pattern": "^0+$"
+              },
+              "c7": {
+                "pattern": "^0+$"
+              },
+              "c8": {
+                "pattern": "^0+$"
+              },
+              "c9": {
+                "pattern": "^0+$"
+              },
+              "s1": {
+                "pattern": "^[0-9]{1,20}:0*2086$"
+              },
+              "s8": {
+                "pattern": "^0+:0+$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "variant": {
+                "const": "native"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "c0": {
+                "pattern": "^0+$"
+              },
+              "c1": {
+                "pattern": "^0*120$"
+              },
+              "c2": {
+                "pattern": "^0*600$"
+              },
+              "c3": {
+                "pattern": "^0*7735$"
+              },
+              "c4": {
+                "pattern": "^0*120$"
+              },
+              "c5": {
+                "pattern": "^0*7735$"
+              },
+              "c6": {
+                "pattern": "^0+$"
+              },
+              "c7": {
+                "pattern": "^0*120$"
+              },
+              "c8": {
+                "pattern": "^0+$"
+              },
+              "c9": {
+                "pattern": "^0+$"
+              },
+              "s1": {
+                "pattern": "^[0-9]{1,20}:0*2086$"
+              },
+              "s8": {
+                "pattern": "^0+:0+$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "variant": {
+                "const": "batch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "c0": {
+                "pattern": "^0+$"
+              },
+              "c1": {
+                "pattern": "^0*120$"
+              },
+              "c2": {
+                "pattern": "^0*600$"
+              },
+              "c3": {
+                "pattern": "^0*7735$"
+              },
+              "c4": {
+                "pattern": "^0*7735$"
+              },
+              "c5": {
+                "pattern": "^0+$"
+              },
+              "c6": {
+                "pattern": "^0+$"
+              },
+              "c7": {
+                "pattern": "^0+$"
+              },
+              "c8": {
+                "pattern": "^0*120$"
+              },
+              "c9": {
+                "pattern": "^0*960$"
+              },
+              "s1": {
+                "pattern": "^[0-9]{1,20}:0*1246$"
+              },
+              "s8": {
+                "pattern": "^0+:0+$"
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }
