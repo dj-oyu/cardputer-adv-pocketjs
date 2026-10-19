@@ -18,6 +18,7 @@ static struct {
     dm_snapshot before,after;
 #ifdef POCKET_DERBY_DETAIL_MEASURE
     dd_snapshot detail;
+    unsigned detail_row;
 #endif
 } s;
 static unsigned serial;
@@ -57,24 +58,40 @@ static bool identity(unsigned rep,unsigned step,uint32_t seed,unsigned camera,un
     return rep==s.rep&&seed==UINT32_C(0x9112A7AB)&&camera==8&&tier==1&&step>=390&&step<=510;
 }
 #ifdef POCKET_DERBY_DETAIL_MEASURE
-static bool detail_report(void){
-    char line[512];int n;
-    for(unsigned i=0;i<DD_STAGES;i++){
-        const dd_counter *c=&s.detail.stage[i];
+/* One output record per logical reporting frame, outside measured work. */
+static bool detail_report_step(void){
+    char line[512];int n;unsigned row=s.detail_row;
+    if(row<DD_STAGES){
+        const dd_counter *c=&s.detail.stage[row];
         n=snprintf(line,sizeof line,"DERBY_DETAIL v=1 session=%u rep=%u stage=%u inc_us=%"PRIu64" self_us=%"PRIu64" calls=%"PRIu64"\n",
-          serial,s.rep,i,c->inclusive_us,c->self_us,c->calls);
-        if(n<=0||(size_t)n>=sizeof line||!df_write(line,(size_t)n))return false;
+          serial,s.rep,row,c->inclusive_us,c->self_us,c->calls);
+    }else if(row<DD_STAGES+DD_EVENTS){
+        unsigned event=row-DD_STAGES;
+        n=snprintf(line,sizeof line,"DERBY_DETAIL_BYTES v=1 session=%u rep=%u event=%u amount=%"PRIu64"\n",serial,s.rep,event,s.detail.event[event]);
+    }else{
+        n=snprintf(line,sizeof line,"DERBY_DETAIL_END v=1 session=%u rep=%u stages=%u events=%u faults=%"PRIu64" pairs=%"PRIu64" elapsed=1 logical_bytes=1\n",
+          serial,s.rep,DD_STAGES,DD_EVENTS,s.detail.faults,s.detail.pairs);
     }
-    for(unsigned i=0;i<DD_EVENTS;i++){
-        n=snprintf(line,sizeof line,"DERBY_DETAIL_BYTES v=1 session=%u rep=%u event=%u amount=%"PRIu64"\n",serial,s.rep,i,s.detail.event[i]);
-        if(n<=0||(size_t)n>=sizeof line||!df_write(line,(size_t)n))return false;
-    }
-    n=snprintf(line,sizeof line,"DERBY_DETAIL_END v=1 session=%u rep=%u stages=%u events=%u faults=%"PRIu64" pairs=%"PRIu64" elapsed=1 logical_bytes=1\n",
-       serial,s.rep,DD_STAGES,DD_EVENTS,s.detail.faults,s.detail.pairs);
-    return n>0&&(size_t)n<sizeof line&&df_write(line,(size_t)n);
+    if(n<=0||(size_t)n>=sizeof line||!df_write(line,(size_t)n))return false;
+    ++s.detail_row;return true;
 }
 #endif
 static void report(uint32_t finish){
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    /* Reserve a full 250ms turn before any qualifying output. The device USB
+     * write is bounded to 100ms plus tick rounding, so even the final success
+     * cannot cross the 180s session limit before DONE suppresses owner checks. */
+    uint64_t duration=0;
+    if(!elapsed(df_now_us(),s.session_start,&duration)){df_fail(DF_CLOCK);return;}
+    if(duration>180000000-250000){df_fail(DF_TIMEOUT);return;}
+    if(s.detail_row<DD_STAGES+DD_EVENTS+1){
+        if(!detail_report_step())df_fail(DF_OUTPUT);
+        return;
+    }
+    if(s.detail_row==DD_STAGES+DD_EVENTS+2){
+        s.phase=DF_DONE;final_record();return;
+    }
+#endif
     char line[1024];
     int n=snprintf(line,sizeof line,
       "DERBY_FIXED v=1 fixture=%s manifest=%s variant=%s session=%u rep=%u seq=%u valid=%u quality=%u independent=0"
@@ -95,12 +112,13 @@ static void report(uint32_t finish){
     }
     if(s.quality||n<=0||(size_t)n+1>=sizeof line){df_fail(s.quality?s.quality:DF_OUTPUT);return;}
     line[n++]='\n';
-#ifdef POCKET_DERBY_DETAIL_MEASURE
-    if(!detail_report()){df_fail(DF_OUTPUT);return;}
-#endif
     if(!df_write(line,(size_t)n)){df_fail(DF_OUTPUT);return;}
     ++s.reported;
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    if(s.rep==3)++s.detail_row;else s.phase=DF_READY;
+#else
     if(s.rep==3){s.phase=DF_DONE;final_record();}else s.phase=DF_READY;
+#endif
 }
 void df_command(unsigned command,unsigned rep,unsigned step,uint32_t seed,unsigned camera,unsigned tier,uint32_t finish){
     if(command==0)return;
@@ -195,6 +213,7 @@ void df_owner_end(uint64_t now,bool running){
         if(s.after.capture_samples!=s.before.capture_samples){df_fail(DF_CAPTURE);return;}
 #ifdef POCKET_DERBY_DETAIL_MEASURE
         if(!dd_finish(&s.detail)||s.detail.faults){df_fail(DF_MEASUREMENT);return;}
+        s.detail_row=0;
 #endif
         s.phase=DF_TAIL;
     }

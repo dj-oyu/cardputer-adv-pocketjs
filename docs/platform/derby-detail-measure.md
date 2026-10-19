@@ -73,3 +73,9 @@ python3 tools/games/compare_derby_detail.py \
 ## 未実施
 
 実機受入は単独担当・登録済みbrokerの明示planでのみ行う。targetの詳細ON/OFF overhead、正確なELF/map/heap/stack、純bus transfer、実画面とUSB collectorは未検証。hostの3repは同一process内のdependent replayで、独立boot比較やtarget性能の証拠に使わない。最終の結果・hash・patch・再現ソースは外部checkpointのREPORT/JSONを参照する。
+
+## 診断出力のreturn境界
+
+詳細ONは測定窓とbounded tailの完了後、各論理reporting frameから最大1行だけUSBへ出してreturnする。26 stage＋13 event＋detail END、coarse summary、最終whole-trial ENDを分け、最後のvalid ENDにも独立したframeを使う。各USB callのbounded waitを40回以上1native callへ積み上げない。詳細OFFの生成fixtureは元exact版のまま。遅い成功transport（1call110ms）で最大1write/return、42の拒否位置、最終valid前のsession timeoutを試験する。完全raw stream中のInternalError/RUNAWAY/LOADSTALL等もstrict detail parserで拒否し、valid END後の障害を黙って合格にしない。
+
+各qualifying出力の直前にsession残時間250msを確保し、不足時はDF_TIMEOUTで不合格にする。終端write開始時には180秒以内でも成功write中に境界を跨ぐケースを含め、valid ENDの遅延確定を拒否する。既存USB callの100ms＋tick rounding上限を変えない。
