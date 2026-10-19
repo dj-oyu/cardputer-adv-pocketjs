@@ -1,0 +1,13 @@
+{
+  "complete": true,
+  "bytes": 1812,
+  "duration_ms": 180000,
+  "sha256": "ab1d7d3c63fa0c765b3c9f341c1648adee1b37624f81ea054adb47fabb694dc1",
+  "gaps": false,
+  "overflow": false,
+  "truncated": false,
+  "partial_tail": false,
+  "disconnect": false,
+  "reset": false,
+  "refused": false
+}

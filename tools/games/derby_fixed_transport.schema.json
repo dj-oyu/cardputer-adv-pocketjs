@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DERBY finite protocol v1 successful collector receipt",
+  "description": "Facts certified by the owning collector, not inferred from END/LF. parse_collected additionally binds bytes and digest to raw input. A failure receipt cannot be submitted as successful transport.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bytes",
+    "complete",
+    "disconnect",
+    "duration_ms",
+    "gaps",
+    "overflow",
+    "partial_tail",
+    "refused",
+    "reset",
+    "sha256",
+    "truncated"
+  ],
+  "properties": {
+    "complete": {
+      "const": true
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65536
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 200000
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gaps": {
+      "const": false
+    },
+    "overflow": {
+      "const": false
+    },
+    "truncated": {
+      "const": false
+    },
+    "partial_tail": {
+      "const": false
+    },
+    "disconnect": {
+      "const": false
+    },
+    "reset": {
+      "const": false
+    },
+    "refused": {
+      "const": false
+    }
+  }
+}

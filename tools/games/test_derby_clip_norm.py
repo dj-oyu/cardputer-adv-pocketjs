@@ -23,6 +23,7 @@ program = r'''
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
+#include "derby_fixed_workload.h"
 static struct {double ve[128];} data, *course=&data;
 static struct {double pc[6],clip_norm,clip_f;} view;
 static unsigned calls;
@@ -58,5 +59,5 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp)/'clip.c'
     c.write_text(program)
     binary = Path(tmp)/'clip'
-    subprocess.run(['cc','-std=c11','-O2','-ffp-contract=off','-fsanitize=undefined',str(c),'-lm','-o',str(binary)],check=True)
+    subprocess.run(['cc','-std=c11','-O2','-ffp-contract=off','-fsanitize=undefined','-I'+str(root/'main/pocket'),str(c),'-lm','-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)

@@ -6,6 +6,28 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from derby_fixed_workload_chunks import FIXTURE,MANIFEST_SHA256
 
+TRANSPORT_FLAGS=('gaps','overflow','truncated','partial_tail','disconnect','reset','refused')
+
+def parse_collected(data:bytes,transport:dict):
+    """Validate a bounded collector receipt, then the complete device trial.
+
+    The owner must establish these transport facts; matching JSON alone does
+    not prove that the underlying acquisition was lossless.
+    """
+    if set(transport)!={'complete','bytes','sha256','duration_ms',*TRANSPORT_FLAGS}:
+        raise ValueError('transport_schema')
+    if transport['complete'] is not True or any(transport[k] is not False for k in TRANSPORT_FLAGS):
+        raise ValueError('transport_quality')
+    if type(transport['bytes']) is not int or not 0<transport['bytes']<=65536 or transport['bytes']!=len(data):
+        raise ValueError('transport_byte_limit_or_length')
+    if type(transport['duration_ms']) is not int or not 0<=transport['duration_ms']<=200000:
+        raise ValueError('transport_deadline')
+    if transport['sha256']!=hashlib.sha256(data).hexdigest():
+        raise ValueError('transport_digest')
+    if any(len(line)>1024 for line in data.splitlines(keepends=True) if line.startswith(b'DERBY_FIXED')):
+        raise ValueError('diagnostic_line_limit')
+    return parse_trial(data,transport_complete=True)
+
 def parse_trial(data:bytes,*,transport_complete:bool):
     if not transport_complete or not data.endswith(b'\n'):
         raise ValueError('partial_or_incomplete_transport')
@@ -54,5 +76,9 @@ if __name__=='__main__':
     import argparse
     from pathlib import Path
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('log',type=Path)
-    p.add_argument('--complete-transport',action='store_true',required=True)
-    args=p.parse_args();print(json.dumps(parse_trial(args.log.read_bytes(),transport_complete=args.complete_transport),indent=2))
+    quality=p.add_mutually_exclusive_group(required=True)
+    quality.add_argument('--complete-transport',action='store_true',help='caller certifies complete transport')
+    quality.add_argument('--transport',type=Path,help='bounded collector receipt JSON')
+    args=p.parse_args();data=args.log.read_bytes()
+    result=parse_collected(data,json.loads(args.transport.read_text())) if args.transport else parse_trial(data,transport_complete=True)
+    print(json.dumps(result,indent=2))
