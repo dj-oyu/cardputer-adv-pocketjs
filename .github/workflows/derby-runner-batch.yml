@@ -93,5 +93,7 @@ jobs:
             build_ci/runner-batch-proof.json
             build_ci/generated/derby_runner_batch/derby_pan.js
             build_ci/generated/derby_telemetry/derby_play.js
+            build_ci/generated/derby_telemetry/derby_view.js
+            build_ci/diagnostic-mode-proof.json
           if-no-files-found: error
           retention-days: 14

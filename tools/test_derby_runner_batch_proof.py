@@ -6,9 +6,24 @@ import unittest
 from unittest.mock import patch
 
 import verify_derby_runner_batch as proof
+from derby_compare_chunks import instrument as compare_view
+from derby_runner_batch_chunks import generate as generate_batch
+from derby_telemetry_chunks import generate as generate_telemetry
 
 
 class Proof(unittest.TestCase):
+    def test_fixed_view_survives_runner_chunk_composition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = proof.ROOT / 'apps/derby'
+            telemetry, batch = root/'telemetry', root/'batch'
+            generate_telemetry(source, telemetry, True)
+            generate_batch(telemetry, batch)
+            expected = compare_view((source/'derby_view.js').read_text()).encode()
+            self.assertEqual((telemetry/'derby_view.js').read_bytes(), expected)
+            self.assertIn(str(telemetry/'derby_view.js'), (batch/'chunks.txt').read_text())
+            self.assertNotIn(str(source/'derby_view.js'), (batch/'chunks.txt').read_text())
+
     def fixture(self, root, enabled):
         root.mkdir(exist_ok=True)
         source = (proof.ROOT / 'apps/derby/derby_pan.js').read_bytes()
