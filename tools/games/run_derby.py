@@ -103,7 +103,8 @@ def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
     return out
 
 
-def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby") -> Path:
+def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
+          runner_affine=False, camera_cache=False, project_batch=False, harness=None) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     table = rom_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
@@ -129,10 +130,19 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby") ->
     binary = cache / "test-derby"
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
+    experiment_flags = []
+    experiment_sources = []
+    if runner_affine:
+        experiment_flags += ["-DPOCKET_DERBY_RUNNER_AFFINE"]
+        experiment_sources += ["main/pocket/derby_runner_affine.c"]
+    if camera_cache:
+        experiment_flags += ["-DPOCKET_DERBY_COURSE_CACHE"]
+    if project_batch:
+        experiment_flags += ["-DPOCKET_DERBY_PROJECT_BATCH"]
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    "tools/games/test_derby_host.c", *kasane_sources(), *EXTRA, str(table), *objects,
+                    (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, *experiment_sources, str(table), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary

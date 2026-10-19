@@ -1,0 +1,74 @@
+name: DERBY bounded runner affine experiment
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-runner-affine-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -B tools/games/run_derby_runner_affine.py --full --out artifacts/affine
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-runner-affine-host-${{ env.SOURCE_HEAD }}
+          path: artifacts/affine/
+          retention-days: 14
+  firmware-opt-in:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build opt-in scalar candidate; no device-calibrated PIE threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_affine -DPOCKET_DERBY_RUNNER_AFFINE=ON -DPOCKET_DERBY_RUNNER_AFFINE_PIE_MIN=0 build
+          grep -qx 'POCKET_DERBY_RUNNER_AFFINE:BOOL=ON' build_affine/CMakeCache.txt
+          grep -qx 'POCKET_DERBY_RUNNER_AFFINE_PIE_MIN:STRING=0' build_affine/CMakeCache.txt
+          sha256sum build_affine/cardputer_pocketjs.bin build_affine/cardputer_pocketjs.elf > build_affine/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: derby-runner-affine-opt-in-${{ env.SOURCE_HEAD }}
+          path: |
+            build_affine/cardputer_pocketjs.bin
+            build_affine/cardputer_pocketjs.elf
+            build_affine/cardputer_pocketjs.map
+            build_affine/CMakeCache.txt
+            build_affine/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

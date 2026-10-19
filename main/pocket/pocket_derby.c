@@ -37,6 +37,13 @@ typedef struct {
     uint8_t *vc;
 } derby_course;
 static derby_course *course;
+#if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
+static DerbyProjectionCounts projection_counts;
+void pocket_derby_projection_counts(DerbyProjectionCounts *out){if(out)*out=projection_counts;}
+#endif
+#ifdef POCKET_DERBY_PROJECT_BATCH
+static uint64_t course_generation,view_generation;
+#endif
 /* view(): the camera pc = [x, z, unit x, unit z, f, distance], the far depth,
  * the scene frame t, the stands' plans and their two constants. */
 static struct {
@@ -85,6 +92,20 @@ static int32_t js_int32(double d){
 
 /* pose(g, w) of derby_view.js: the point g m along the course, w m out. The
  * JS loop's bound 2 is its section count less one. */
+#ifdef POCKET_DERBY_COURSE_CACHE
+static void course_pose(const derby_course *path,double g,double w,double o[4]){
+    if(!path->sections){o[0]=g;o[1]=w;o[2]=1;o[3]=0;return;}
+    unsigned i=0;
+    while(i<path->sections-1u&&g>path->sec[SECTION_TERMS*i])g-=path->sec[SECTION_TERMS*i++];
+    const double *e=path->sec+SECTION_TERMS*i;
+    double x=e[2],z=e[3],c=e[4],d=e[5];
+    if(e[1]!=0){
+        const double r=1/e[1]+path->dnr,C=cos(e[6]+e[1]*g),S=sin(e[6]+e[1]*g);
+        x+=(S-d)*r;z-=(C-c)*r;c=C;d=S;g=0;
+    }
+    o[0]=x+g*c-w*d;o[1]=z+g*d+w*c;o[2]=c;o[3]=d;
+}
+#endif
 static void pose(double g,double w,double o[4]){
     if(!course->sections){o[0]=g;o[1]=w;o[2]=1;o[3]=0;return;}
     unsigned i=0;
@@ -163,11 +184,19 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"32 chord ends and 4 sections maximum");
     /* Read into a new block first: a bad argument leaves the old course. */
     const size_t doubles=ends+(size_t)SECTION_TERMS*sections+4u*ends;
-    derby_course *c=malloc(sizeof *c+doubles*sizeof(double)+ends);
+#ifdef POCKET_DERBY_COURSE_CACHE
+    const size_t cache_doubles=sections?4u*ends:0;
+#else
+    const size_t cache_doubles=0;
+#endif
+    derby_course *c=malloc(sizeof *c+(doubles+cache_doubles)*sizeof(double)+ends);
     if(!c)return fail(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"course allocation failed");
     c->ends=ends;c->sections=sections;c->in_view=0;c->dnr=dnr;
     c->ch=(double *)(c+1);c->sec=c->ch+ends;c->ve=c->sec+SECTION_TERMS*sections;
     c->vc=(uint8_t *)(c->ve+4u*ends);
+#ifdef POCKET_DERBY_COURSE_CACHE
+    if(sections)c->vc=(uint8_t *)(c->ve+8u*ends);
+#endif
     bool ok=true;
     for(uint32_t i=0;i<ends&&ok;i++)ok=element(ctx,argv[0],i,&c->ch[i])&&isfinite(c->ch[i]);
     for(uint32_t i=0;i<sections&&ok;i++){
@@ -185,8 +214,22 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         free(c);
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"chord ends and section terms must be finite numbers");
     }
+#ifdef POCKET_DERBY_COURSE_CACHE
+    /* Precompute against the validated new registration before publication. */
+    if(sections)for(unsigned i=0;i<ends;i++)course_pose(c,c->ch[i],0,c->ve+4u*ends+4u*i);
+#endif
     free(course);
     course=c;
+#ifdef POCKET_DERBY_PROJECT_BATCH
+    ++course_generation;
+#endif
+#if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
+    ++projection_counts.course_replacements;
+#endif
+#ifdef POCKET_DERBY_COURSE_CACHE
+    projection_counts.cache_bytes=(uint32_t)(sections?4u*ends*sizeof(double):0);
+    if(sections)projection_counts.registration_poses+=ends;
+#endif
     view.set=false;
     return JS_UNDEFINED;
 }
@@ -194,6 +237,9 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
  * it computes VE and VC as pan() did. */
 static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
+#ifdef POCKET_DERBY_PROJECT_BATCH
+    ++view_generation;
+#endif
     const char *op="derby.view";
     if(!course)return fail(ctx,op,POCKET_ERR_BUSY,"course required");
     uint32_t n=0;
@@ -212,8 +258,15 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     course->in_view=0;
     if(course->sections){
         for(unsigned i=0;i<course->ends;i++){
+#ifdef POCKET_DERBY_COURSE_CACHE
+            const double *m=course->ve+4u*course->ends+4u*i;
+#else
             double m[4];
             pose(course->ch[i],0,m);
+#ifdef POCKET_DERBY_PROJECT_BATCH
+            ++projection_counts.view_poses;
+#endif
+#endif
             const double x=m[0]-pc[0],z=m[1]-pc[1];
             double *V=course->ve+4u*i;
             V[0]=x*pc[3]-z*pc[2];V[1]=x*pc[2]+z*pc[3];V[2]=-m[3]*pc[3]-m[2]*pc[2];V[3]=m[2]*pc[3]-m[3]*pc[2];
@@ -224,6 +277,54 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     view.set=true;
     return JS_UNDEFINED;
 }
+#ifdef POCKET_DERBY_PROJECT_BATCH
+/* project(progress[], depths[], subtract, Float64Array output): four doubles
+ * per point [numerator, Z, screen-x, reciprocal-Z]. Uses exactly pose/pj's
+ * operation order, then 1/Z and numerator*(1/Z). The caller keeps visibility,
+ * sort and drawing. Arrays are read completely before borrowing output bytes:
+ * user getters may replace course/view or detach buffers. No JS executes
+ * after the validation/generation check. No guest result objects are allocated. */
+static JSValue js_project(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="derby.project";
+    if(!course||!view.set)return fail(ctx,op,POCKET_ERR_BUSY,"view required");
+    const uint64_t cg=course_generation,vg=view_generation;
+    uint32_t n=0,m=0;double subtract,g[32],w[32];
+    bool ok=argc==4&&length_of(ctx,argv[0],&n)&&length_of(ctx,argv[1],&m)&&
+            n==m&&n>0&&n<=32&&number(ctx,argv[2],&subtract)&&isfinite(subtract);
+    for(unsigned i=0;i<n&&ok;i++)
+        ok=element(ctx,argv[0],i,&g[i])&&isfinite(g[i])&&element(ctx,argv[1],i,&w[i])&&isfinite(w[i]);
+    if(!ok)return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"1..32 finite progress/depth pairs and subtract required");
+    if(!course||!view.set||cg!=course_generation||vg!=view_generation)
+        return fail(ctx,op,POCKET_ERR_BUSY,"course or view changed while reading input");
+    if(JS_GetTypedArrayType(argv[3])!=JS_TYPED_ARRAY_FLOAT64)
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"Float64Array output required");
+    size_t offset=0,bytes=0,per=0,size=0;
+    JSValue buffer=JS_GetTypedArrayBuffer(ctx,argv[3],&offset,&bytes,&per);
+    if(JS_IsException(buffer))return buffer;
+    if(JS_IsImmutableArrayBuffer(buffer)>0){
+        JS_FreeValue(ctx,buffer);
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"output buffer must be mutable");
+    }
+    uint8_t *data=JS_GetArrayBuffer(ctx,&size,buffer);
+    if(!data||per!=sizeof(double)||bytes<(size_t)n*4*sizeof(double)||offset>size||bytes>size-offset){
+        JS_FreeValue(ctx,buffer);
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"output buffer is detached or too short");
+    }
+    const double *pc=view.pc;
+    for(unsigned i=0;i<n;i++){
+        double P[4];pose(g[i]-subtract,w[i],P);
+        const double a=P[0]-pc[0],b=P[1]-pc[1],Z=(a*pc[2]+b*pc[3])/pc[4];
+        const double numerator=a*pc[3]-b*pc[2]+120*Z,r=1/Z;
+        const double result[4]={numerator,Z,numerator*r,r};
+        memcpy(data+offset+(size_t)i*4*sizeof(double),result,sizeof result);
+    }
+    JS_FreeValue(ctx,buffer);
+    ++projection_counts.project_calls;projection_counts.project_points+=n;
+    projection_counts.input_numbers+=2*n+1;projection_counts.output_numbers+=4*n;
+    return JS_UNDEFINED;
+}
+#endif
 /* ser(h, w, s, g0, L, a, b): ser(n, w, s, g0, L, zf, a, b) of derby_pan.js,
  * zf from view(). b omitted: the turf (t0, t1). */
 static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
@@ -303,6 +404,9 @@ esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
     static const JSCFunctionListEntry methods[]={
         JS_CFUNC_DEF("course",3,js_course),
         JS_CFUNC_DEF("view",7,js_view),
+#ifdef POCKET_DERBY_PROJECT_BATCH
+        JS_CFUNC_DEF("project",4,js_project),
+#endif
         JS_CFUNC_DEF("ser",7,js_ser),
     };
     return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?
@@ -324,5 +428,11 @@ esp_err_t pocket_derby_install(JSContext *ctx,void *unused){
 void pocket_derby_reset(void){
     free(course);
     course=NULL;
+#ifdef POCKET_DERBY_PROJECT_BATCH
+    ++course_generation;++view_generation;
+#endif
+#if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
+    projection_counts.cache_bytes=0;
+#endif
     memset(&view,0,sizeof view);
 }
