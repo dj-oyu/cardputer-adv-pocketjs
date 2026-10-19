@@ -57,6 +57,7 @@ if(POCKET_DERBY_MEASURE)
     set(POCKET_DERBY_MEASURE_SOURCES "pocket/derby_measure.c" "pocket/derby_measure_device.c")
     add_compile_definitions(POCKET_DERBY_MEASURE=1)
 endif()
+option(POCKET_DERBY_RUNNER_BATCH "Experimental bounded native PAN runner submission" OFF)
 option(POCKET_DERBY_TELEMETRY "Bounded DERBY sampled native metrics (diagnostic image)" OFF)
 if(POCKET_DERBY_TELEMETRY)
     list(APPEND KASANE_SOURCES "pocket/derby_telemetry.c")
@@ -371,6 +372,27 @@ if(POCKET_DERBY_TELEMETRY)
                  "${CMAKE_SOURCE_DIR}/tools/derby_telemetry_chunks.py"
                  "${_derby_source}/derby_play.js" "${_derby_source}/chunks.txt")
 endif()
+if(POCKET_DERBY_RUNNER_BATCH)
+    if(DERBY_BGCOST_SOURCE OR POCKET_HEAPPROBE)
+        message(FATAL_ERROR "DERBY runner batch requires the normal game chunks")
+    endif()
+    set(_derby_source "${CMAKE_CURRENT_LIST_DIR}/../apps/derby")
+    set(_derby_batch_input "${_derby_source}")
+    if(POCKET_DERBY_TELEMETRY)
+        set(_derby_batch_input "${_derby_trace}")
+    endif()
+    set(_derby_batch "${CMAKE_BINARY_DIR}/generated/derby_runner_batch")
+    # -B prevents imports from mutating a formally fetched source snapshot.
+    execute_process(COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/derby_runner_batch_chunks.py"
+                    "${_derby_batch_input}" "${_derby_batch}" COMMAND_ERROR_IS_FATAL ANY)
+    get_filename_component(_derby_batch_list "${_derby_batch_input}/chunks.txt" ABSOLUTE)
+    list(REMOVE_ITEM _app_chunk_lists "${_derby_batch_input}/chunks.txt" "${_derby_batch_list}")
+    list(APPEND _app_chunk_lists "${_derby_batch}/chunks.txt")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_SOURCE_DIR}/tools/derby_runner_batch_chunks.py"
+                 "${CMAKE_SOURCE_DIR}/tools/games/derby_runner_batch.py"
+                 "${_derby_source}/derby_pan.js" "${_derby_source}/chunks.txt")
+endif()
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py"
                 "${CMAKE_BINARY_DIR}/generated" ${_app_chunk_lists}
                 COMMAND_ERROR_IS_FATAL ANY)
@@ -378,6 +400,9 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
              "${CMAKE_SOURCE_DIR}/tools/make_app_chunks.py" ${_app_chunk_lists})
 include("${CMAKE_BINARY_DIR}/generated/app_chunks.cmake")
 target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunks.c")
+if(POCKET_DERBY_RUNNER_BATCH)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_DERBY_RUNNER_BATCH=1)
+endif()
 if(POCKET_DERBY_TELEMETRY)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_DERBY_TELEMETRY=1)
 endif()

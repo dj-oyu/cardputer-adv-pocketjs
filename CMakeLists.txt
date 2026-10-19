@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 # Do not FORCE existing cache settings: mandatory output proof rejects OFF.
 set(POCKET_DERBY_TELEMETRY ON CACHE BOOL "Explicit DERBY diagnostic source revision")
 set(POCKET_DERBY_MEASURE ON CACHE BOOL "Explicit DERBY measurement source revision")
+set(POCKET_DERBY_RUNNER_BATCH ON CACHE BOOL "Explicit DERBY runner batch comparison source revision")
 # quickjs-ng and pocketjs_guest are vendored under components/ (default search
 # path, no EXTRA_COMPONENT_DIRS needed). Every app draws through Kasane
 # (main/ui/kasane); the Rust UI core, its QuickJS binding and the rgb565
@@ -29,4 +30,9 @@ add_custom_target(memory_log ALL
     COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/memlog.py"
             --map "${CMAKE_BINARY_DIR}/cardputer_pocketjs.map"
             --log "${CMAKE_BINARY_DIR}/memory.jsonl" --only-changes
+    DEPENDS gen_project_binary VERBATIM)
+
+add_custom_target(derby_runner_batch_proof ALL
+    COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/verify_derby_runner_batch.py"
+            --build "${CMAKE_BINARY_DIR}" --expect ON
     DEPENDS gen_project_binary VERBATIM)

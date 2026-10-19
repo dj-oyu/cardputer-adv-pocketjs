@@ -1156,6 +1156,14 @@ int main(int argc,char **argv){
         REQ(eval(fz,strlen(fz),"fuzz.js"));
         printf("ser oracle fuzz: %lu calls, %lu draws, %u mismatches\n",ser_fuzz_calls,ser_fuzz_draws,ser_bad);
     }
+    if(getenv("DERBY_RUNNER_BATCH_ORACLE")){
+        static char oracle[16384];
+        FILE *of=fopen(getenv("DERBY_RUNNER_BATCH_ORACLE"),"rb");REQ(of);
+        const size_t on=fread(oracle,1,sizeof oracle-1,of);fclose(of);oracle[on]=0;
+        REQ(eval(oracle,on,"derby_runner_batch_oracle.js"));
+        ser_oracle=true;
+        REQ(eval("__runnerBatchFuzz()",19,"runner_fuzz.js"));
+    }
     REQ(loaded_seen==1);                    /* the stored points and race number */
     /* Paddock: let the plans load and the odds settle, cycle the tier. */
     for(unsigned i=0;i<20;i++)frame(0);
@@ -1352,6 +1360,10 @@ int main(int argc,char **argv){
         printf("ser oracle: %lu calls in the game, %lu draws, %lu fuzz calls, %u mismatches\n",ser_calls,ser_draws,
                ser_fuzz_calls,ser_bad);
         pass=pass&&!ser_bad&&ser_fuzz_calls>0;
+    }
+    if(getenv("DERBY_RUNNER_BATCH_ORACLE")){
+        const char *stats="console.log('RUNNER_BATCH stats '+JSON.stringify(__runnerBatchStats()))";
+        REQ(eval(stats,strlen(stats),"runner_stats.js"));
     }
     pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",pass?"DERBY_HOST PASS":"DERBY_HOST FAIL");

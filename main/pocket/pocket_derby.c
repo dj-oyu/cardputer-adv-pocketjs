@@ -329,12 +329,57 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
     return JS_UNDEFINED;
 }
 
+#ifdef POCKET_DERBY_RUNNER_BATCH
+/* Experimental PAN submission only. Native-endian Float64 layout, eight
+ * records of [handle, X, scale, groundY, phase]. Snapshot before submitting;
+ * no guest pointer or plan is retained. Same operation order as rin(). */
+static JSValue js_runners(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;
+    const char *op="derby.runners";
+    double count;
+    if(argc!=2||!JS_IsArrayBuffer(argv[0])||!number(ctx,argv[1],&count)||
+       !isfinite(count)||count<0||count>8||count!=floor(count))
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected ArrayBuffer and count 0..8");
+    size_t bytes;
+    const uint8_t *buf=JS_GetArrayBuffer(ctx,&bytes,argv[0]);
+    if(!buf&&JS_HasException(ctx))return JS_EXCEPTION; /* detached buffer: preserve engine exception */
+    if(bytes!=8u*5u*sizeof(double))
+        return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected 320-byte runner buffer");
+    double rows[8][5];
+    memcpy(rows,buf,sizeof rows);
+    const unsigned n=(unsigned)count;
+    /* Validate the entire used layout before the first draw. Stale/foreign
+     * handles are intentionally checked by the normal draw path in sequence,
+     * so an error there can follow earlier successful submissions, as JS can. */
+    for(unsigned i=0;i<n;i++){
+        for(unsigned j=0;j<5;j++)if(!isfinite(rows[i][j]))
+            return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"finite runner input required");
+        if(rows[i][0]<0||rows[i][0]>INT32_MAX||rows[i][0]!=floor(rows[i][0]))
+            return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid runner handle");
+    }
+    for(unsigned i=0;i<n;i++){
+        const double *v=rows[i],X=v[1],S=v[2],Y=v[3],a=v[4];
+        if(v[0]==0)continue;
+        const double in[8]={X,Y-6*S+.6*S*sin(2*a),S,Y,
+            X+S*(.5+3*sin(a)),X+S*(.5+3*sin(a+.8)),
+            X+S*(8+3*sin(a+3.3)),X+S*(8+3*sin(a+4.1))};
+        JSValue result=draw(ctx,(uint32_t)v[0],in);
+        if(JS_IsException(result))return result;
+        JS_FreeValue(ctx,result);
+    }
+    return JS_UNDEFINED;
+}
+#endif
+
 esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={
         JS_CFUNC_DEF("course",3,js_course),
         JS_CFUNC_DEF("view",7,js_view),
         JS_CFUNC_DEF("ser",7,js_ser),
+#ifdef POCKET_DERBY_RUNNER_BATCH
+        JS_CFUNC_DEF("runners",2,js_runners),
+#endif
     };
     return JS_SetPropertyFunctionList(ctx,ns,methods,(int)(sizeof methods/sizeof methods[0]))<0?
            ESP_ERR_NO_MEM:ESP_OK;
