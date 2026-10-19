@@ -28,6 +28,19 @@ def once(text,old,new):
 HELPERS=r'''
 #include "derby_fixed_workload.h"
 static bool fx_record;static unsigned fx_rep,fx_ready;
+static unsigned fx_tail_steps,fx_tail_rep,fx_tail_total[3],fx_tail_turns[3],fx_tail_max[3],fx_settles[3],fx_tail_draws;
+static double eval_deadline;
+static double now_s(void);
+static JSValue fx_tail_step(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;uint32_t rep=0;
+    if(argc!=1||JS_ToUint32(c,&rep,argv[0])<0||rep<1||rep>3)return JS_ThrowInternalError(c,"tail probe identity");
+    fx_tail_rep=rep;++fx_tail_steps;++fx_tail_total[rep-1];return JS_UNDEFINED;
+}
+static JSValue fx_tail_settle(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;uint32_t rep=0;
+    if(argc!=1||JS_ToUint32(c,&rep,argv[0])<0||rep<1||rep>3)return JS_ThrowInternalError(c,"settle probe identity");
+    ++fx_settles[rep-1];return JS_UNDEFINED;
+}
 static uint64_t fx_input_hash,fx_panel_hash,fx_draws;
 uint64_t df_now_us(void){return dm_now_us();}
 int df_write(const char *data,size_t size){return fwrite(data,1,size,stdout)==size;}
@@ -36,6 +49,7 @@ static void fx_hash(uint64_t *h,const void *p,size_t n){
 }
 '''
 DRAW=r'''
+    if(df_status()==DF_TAIL)++fx_tail_draws;
     if(fx_record){
         ++fx_draws;fx_hash(&fx_input_hash,&s->program.count,sizeof s->program.count);
         for(unsigned i=0;i<s->program.count;i++){
@@ -48,6 +62,7 @@ DRAW=r'''
     }
 '''
 FRAME_START=r'''
+    fx_tail_steps=0;eval_deadline=now_s()+.25;
     df_owner_begin(dm_now_us());
     if(df_measuring()&&!fx_record){
         ++fx_rep;fx_record=true;fx_draws=0;
@@ -56,6 +71,11 @@ FRAME_START=r'''
     if(fx_record)dm_dispatch(0,0);
 '''
 FRAME_END=r'''
+    eval_deadline=0;
+    if(fx_tail_steps){
+        ++fx_tail_turns[fx_tail_rep-1];
+        if(fx_tail_steps>fx_tail_max[fx_tail_rep-1])fx_tail_max[fx_tail_rep-1]=fx_tail_steps;
+    }
     df_owner_work_end(dm_now_us());df_owner_end(dm_now_us(),true);
     if(fx_record&&df_status()==DF_TAIL){
         printf("DEVICE_WINDOW {\"rep\":%u,\"contexts\":120,\"draws\":%llu,\"input_hash\":\"%016llx\",\"procedural_pixel_hash\":\"%016llx\",\"panel_hash\":\"%016llx\"}\n",
@@ -67,11 +87,19 @@ FRAME_END=r'''
 MAIN=r'''
     if(getenv("DERBY_DEVICE_FIXTURE_HOST")){
         REQ(fx_ready==1&&df_status()==DF_READY&&tick==0);
+        const char *tail_probe="const __dfStep=step,__dfSettle=settle;"
+            "step=function(f,s,dt){if(dfMode===3)__dfTailStep(dfRep);return __dfStep(f,s,dt)};"
+            "settle=function(){__dfTailSettle(dfRep);return __dfSettle()};";
+        REQ(eval(tail_probe,strlen(tail_probe),"tail-probe.js"));
         unsigned guard=0;
         while(!gnum("__dfExited")){
-            frame(0);REQ(++guard<=2200&&df_status()!=DF_ABORT);
+            frame(0);REQ(++guard<=2200&&df_status()!=DF_ABORT&&!exceptions);
         }
         REQ(df_status()==DF_DONE&&fx_rep==3&&!exceptions&&!bad_present&&!framefails&&!ser_bad);
+        REQ(!fx_tail_draws);
+        for(unsigned i=0;i<3;i++)
+            printf("DEVICE_TAIL {\"rep\":%u,\"steps\":%u,\"turns\":%u,\"max_steps\":%u,\"settles\":%u,\"guest_draws\":%u}\n",
+                   i+1,fx_tail_total[i],fx_tail_turns[i],fx_tail_max[i],fx_settles[i],fx_tail_draws);
         pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();
         puts("APP_STOPPED");puts("HOME_READY");
         JS_FreeContext(ctx);JS_FreeRuntime(rt);puts("DEVICE_FIXTURE_HOST PASS");return 0;
@@ -80,6 +108,15 @@ MAIN=r'''
 
 def make_harness(out):
     text=(ROOT/'tools/games/test_derby_host.c').read_text()
+    text=once(text,'static double eval_deadline;','')
+    # The old harness cleared its only deadline after app initialization. Arm
+    # the production 250ms turn backstop for frame calls too. A deterministic
+    # 32-step stress budget also exercises fatal QuickJS interruption on fast
+    # hosts; it is a test model, not an estimate of S3 execution time.
+    text=once(text,'return eval_deadline>0&&now_s()>eval_deadline;',
+              'return fx_tail_steps>32||(eval_deadline>0&&now_s()>eval_deadline);')
+    text=once(text,'{"__log",js_log,1},',
+              '{"__dfTailStep",fx_tail_step,1},{"__dfTailSettle",fx_tail_settle,1},{"__log",js_log,1},')
     # A memory-only shell model supplies identity and post-cleanup stop/home;
     # READY and all fixed summaries must come from the generated app/native C.
     text=once(text,'    printf("  [%5u] %s\\n",tick,s);',
@@ -189,6 +226,27 @@ def main():
     # Keep complete diagnostics when the known-answer gate rejects this run.
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
     check_result(result)
+    reference=json.loads(subprocess.check_output(['node',str(ROOT/'tools/games/derby_fixed_tail_oracle.js'),
+                         str(generated/'derby_watch.js'),str(generated/'fixture.json')],text=True))
+    tails=[json.loads(line[len('DEVICE_TAIL '):]) for line in process.stdout.splitlines() if line.startswith('DEVICE_TAIL ')]
+    if len(tails)!=3:raise ValueError('three tail records required')
+    for rep,tail in enumerate(tails,1):
+        if tail!={'rep':rep,'steps':reference['tail_steps'],'turns':92,'max_steps':8,'settles':1,'guest_draws':0}:
+            raise ValueError('tail work/return/settlement mismatch: '+json.dumps(tail))
+    # Restore just the previous synchronous tail in a copy of the actual
+    # generated app. The same binary must now reject it through QuickJS's fatal
+    # interrupt path, not quietly qualify the old fixture again on a fast host.
+    old=out/'old-tail-app';shutil.copytree(app,old,dirs_exist_ok=True)
+    path=old/'derby_play.js';text=path.read_text()
+    a=text.index('      // DF bounded tail:');b=text.index('      settle();',a)
+    path.write_text(text[:a]+text[b:])
+    bad=subprocess.run([str(binary)],cwd=ROOT,env=env|{'DERBY_APP_DIR':str(old)},capture_output=True,text=True)
+    bad_raw=(bad.stdout+bad.stderr).encode();(out/'old-tail-rejected.log').write_bytes(bad_raw)
+    if bad.returncode==0 or b'InternalError: interrupted' not in bad_raw or b'at settle' not in bad_raw or b'DERBY_FIXED v=' in bad_raw:
+        raise ValueError('old synchronous tail escaped watchdog regression')
+    result['tail_contract']={'reference':reference,'actual':tails,'old_tail_rejected':True,
+        'old_tail_exit_code':bad.returncode,'old_tail_raw_sha256':hashlib.sha256(bad_raw).hexdigest(),
+        'scope':'250ms host frame backstop plus deterministic 32-step stress interrupt; not target timing proof'}
     # This checks the actual app's initialization marker rather than inventing
     # READY in a synthetic transport fixture (the previous host smoke missed it).
     startup={}

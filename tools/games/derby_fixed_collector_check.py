@@ -127,6 +127,9 @@ def check_collector(raw):
     cases['invalid-end'] = raw.replace(protocol[5], protocol[5].replace(b'valid=1', b'valid=0'))
     cases['bad-end-session'] = raw.replace(protocol[5], protocol[5].replace(b'session=', b'session=99'))
     cases['bad-quality'] = raw.replace(b'quality=0', b'quality=1', 1)
+    aborted = b'\n'.join(protocol[:2]+protocol[6:]+[
+        re.sub(rb'reps=3 valid=1 quality=0',b'reps=0 valid=0 quality=2',protocol[5])])+b'\n'
+    cases['tail-abort-stop-home-before-end'] = aborted
     cases['partial-tail'] = raw+b'partial'
     cases['line-limit'] = raw+b'x'*1024+b'\n'
     cases['capacity'] = raw+b'x'*65536

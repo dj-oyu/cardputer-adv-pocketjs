@@ -55,11 +55,13 @@ jobs:
             artifacts/fixed-host/trial.log
             artifacts/fixed-host/no-tones.log
             artifacts/fixed-host/init-failure.log
+            artifacts/fixed-host/old-tail-rejected.log
             artifacts/fixed-host/fixture/fixture.json
             artifacts/fixed-m32/result.json
             artifacts/fixed-m32/trial.log
             artifacts/fixed-m32/no-tones.log
             artifacts/fixed-m32/init-failure.log
+            artifacts/fixed-m32/old-tail-rejected.log
           retention-days: 14
   firmware:
     runs-on: ubuntu-24.04
