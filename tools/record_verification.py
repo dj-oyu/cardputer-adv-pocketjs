@@ -30,6 +30,7 @@ FIXED_SYMBOLS = {'df_fixture_id','df_fixture_manifest','df_now_us','df_write','d
 
 # Pure same-TU helpers can be inlined and removed by section GC. Boundary APIs cannot.
 FIXED_REQUIRED=FIXED_SYMBOLS-{'df_measuring','df_fail'}
+DETAIL_FIXED_SYMBOLS={'df_detail_exit_record'}
 
 def fixed_mode(build):
     values=[line.split('=',1)[1] for line in (build/'CMakeCache.txt').read_text().splitlines()
@@ -70,8 +71,11 @@ def verify_fixed_mode(build):
         if symbols or b'DF fixture oval-pan8-390-510-v1' in elf:
             raise ValueError('OFF fixed workload must compile out code and fixture bytes')
         return dict(mode=mode,native_symbols=[])
-    if not FIXED_REQUIRED<=symbols or not symbols<=FIXED_SYMBOLS:raise ValueError('fixed workload ELF boundary symbols differ')
     detail=detail_mode(build)=='ON'
+    extra=DETAIL_FIXED_SYMBOLS if detail else set()
+    required=FIXED_REQUIRED|extra;allowed=FIXED_SYMBOLS|extra
+    if not required<=symbols or not symbols<=allowed:
+        raise ValueError('fixed workload ELF boundary symbols differ')
     for name,expected in fixed_expected(detail).items():
         path=build/'generated/derby_fixed_workload'/name
         source=(ROOT/'apps/derby'/name).read_bytes()
