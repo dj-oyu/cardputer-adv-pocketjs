@@ -39,6 +39,7 @@ jobs:
           python tools/test_usb_console.py --idf .reference/esp-idf | tee artifacts/home.log
           python tools/test_session_dispatch.py | tee artifacts/session.log
           python tools/test_verification_receipt.py | tee artifacts/provenance.log
+          python -B tools/test_diagnostic_build.py | tee artifacts/diagnostic-proof.log
           python tools/test_derby_telemetry.py | tee artifacts/telemetry.log
           python tools/test_derby_measure.py | tee artifacts/measure-accounting.log
           python tools/games/test_derby_observation.py | tee artifacts/observation.log
@@ -75,18 +76,6 @@ jobs:
           path: artifacts/
           retention-days: 14
   firmware:
-    strategy:
-      matrix:
-        include:
-          - variant: normal
-            telemetry: 'OFF'
-            measure: 'OFF'
-          - variant: telemetry
-            telemetry: 'ON'
-            measure: 'OFF'
-          - variant: measure
-            telemetry: 'ON'
-            measure: 'ON'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # GitHub ubuntu hosted workspaces belong to UID 1001. Keep Git ownership
@@ -112,16 +101,12 @@ jobs:
           test "$(id -u)" = "$(stat -c %u .)"
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_ci -D SDKCONFIG="$PWD/build_ci/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D POCKET_DERBY_TELEMETRY=${{ matrix.telemetry }} -D POCKET_DERBY_MEASURE=${{ matrix.measure }} build
-          if [ '${{ matrix.telemetry }}' = OFF ]; then
-            if xtensa-esp32s3-elf-nm build_ci/cardputer_pocketjs.elf | grep ' derby_telemetry_'; then
-              echo 'Telemetry must be absent in shipping ELF'; exit 1
-            fi
-          fi
-          python tools/record_verification.py --build build_ci --expect-telemetry '${{ matrix.telemetry }}' --expect-measure '${{ matrix.measure }}' --out build_ci/verification.json
+          # No mode argv: this source variant must default to ON/ON.
+          python -B tools/test_diagnostic_archive.py --build build_ci --project-version "${SOURCE_HEAD:0:12}"
+          python -B tools/record_verification.py --build build_ci --expect-telemetry ON --expect-measure ON --out build_ci/verification.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: cardputer-derby-home-${{ env.SOURCE_HEAD }}-${{ matrix.variant }}-telemetry-${{ matrix.telemetry }}-measure-${{ matrix.measure }}
+          name: cardputer-derby-measure-source-${{ env.SOURCE_HEAD }}-telemetry-ON-measure-ON
           path: |
             build_ci/cardputer_pocketjs.bin
             build_ci/cardputer_pocketjs.elf
@@ -132,6 +117,8 @@ jobs:
             build_ci/project_description.json
             build_ci/memory.jsonl
             build_ci/verification.json
+            build_ci/diagnostic-mode-proof.json
+            build_ci/source-immutability.json
             build_ci/SHA256SUMS
             build_ci/generated/derby_telemetry/derby_play.js
           if-no-files-found: error

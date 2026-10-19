@@ -97,3 +97,17 @@ the existing source/tree, actual BIN/ELF and embedded-JS checks and additionally
 checks the unique measurement CMake value against defined ELF symbols: no
 `dm_*` in OFF, the exact public measurement symbol set in ON. Artifact names
 include both modes, so the two telemetry-ON builds cannot overwrite one another.
+
+## Explicit source diagnostic variant
+
+This branch adds only ON/ON source defaults and mandatory ALL output proof to
+PR11. The normal branch remains OFF/OFF. Neither setting is FORCE; a stale or
+caller-supplied OFF cache fails the proof. The proof checks actual generated JS,
+telemetry and measurement defined ELF symbols, IDF 6.0.1 descriptor, and matching
+BIN/ELF SHA256. It runs without Git and writes only under the build directory;
+Python -B prevents pyc mutation. The broker's durable source receipt supplies
+full commit/tree identity externally; bind the same successful job's proof
+BIN/ELF hashes to its manifest, never just a local proof or mode label. Exact-head
+CI independently verifies provenance and both ON expectations. This branch's CI
+uses defaults (no mode overrides) and checks complete/incremental source
+immutability; it does not weaken the diagnostic guarantee to run an OFF matrix.
