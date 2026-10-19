@@ -40,6 +40,8 @@ jobs:
           python tools/test_session_dispatch.py | tee artifacts/session.log
           python tools/test_verification_receipt.py | tee artifacts/provenance.log
           python -B tools/test_diagnostic_build.py | tee artifacts/diagnostic-proof.log
+          python -B tools/test_derby_fixed_seed.py | tee artifacts/fixed-seed.log
+          python -B tools/test_derby_compare_chunks.py | tee artifacts/compare-chunks.log
           python tools/test_derby_telemetry.py | tee artifacts/telemetry.log
           python tools/test_derby_measure.py | tee artifacts/measure-accounting.log
           python tools/games/test_derby_observation.py | tee artifacts/observation.log
@@ -121,5 +123,6 @@ jobs:
             build_ci/source-immutability.json
             build_ci/SHA256SUMS
             build_ci/generated/derby_telemetry/derby_play.js
+            build_ci/generated/derby_telemetry/derby_view.js
           if-no-files-found: error
           retention-days: 14

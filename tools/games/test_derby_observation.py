@@ -10,7 +10,12 @@ class ObservationTests(unittest.TestCase):
         a=self.row();b=copy.deepcopy(a)
         b.update(us=2000000,frame=60,ctx=60,seq=2)
         b['intervals'][8]=(59,1966667)
-        self.assertEqual(camera_windows([a,b])[0]['diagnostic_fps'],30)
+        window=camera_windows([a,b])[0]
+        self.assertEqual(window['diagnostic_fps'],30)
+        self.assertEqual((window['start_seq'],window['end_seq'],window['start_step'],window['end_step']),
+                         (1,2,391,391))
+        self.assertEqual((window['start_device_us'],window['end_device_us'],window['context_delta']),
+                         (1000000,2000000,30))
         for field,value in [('ctx',61),('seq',3),('refused',1),('run',2),('cam',7),('us',1),('frame',30)]:
             c=copy.deepcopy(b);c[field]=value
             self.assertEqual(camera_windows([a,c]),[],field)

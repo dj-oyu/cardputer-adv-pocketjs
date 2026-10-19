@@ -100,9 +100,10 @@ include both modes, so the two telemetry-ON builds cannot overwrite one another.
 
 ## Explicit source diagnostic variant
 
-This branch adds only ON/ON source defaults and mandatory ALL output proof to
-PR11. The normal branch remains OFF/OFF. Neither setting is FORCE; a stale or
-caller-supplied OFF cache fails the proof. The proof checks actual generated JS,
+This branch adds ON/ON source defaults, fixed diagnostic seed and mandatory ALL
+output proof to PR11. The normal branch remains OFF/OFF with hardware seed.
+None of the settings is FORCE; a stale or caller-supplied OFF cache fails the
+proof. The proof checks actual generated JS,
 telemetry and measurement defined ELF symbols, IDF 6.0.1 descriptor, and matching
 BIN/ELF SHA256. It runs without Git and writes only under the build directory;
 Python -B prevents pyc mutation. The broker's durable source receipt supplies
@@ -111,3 +112,27 @@ BIN/ELF hashes to its manifest, never just a local proof or mode label. Exact-he
 CI independently verifies provenance and both ON expectations. This branch's CI
 uses defaults (no mode overrides) and checks complete/incremental source
 immutability; it does not weaken the diagnostic guarantee to run an OFF matrix.
+
+The comparison source also defaults `POCKET_DERBY_COMPARE_FIXED_HW=ON`: its
+native `pocket.random.seed()` returns `0x2545F491`, the host harness's existing
+`DERBY_HW` default. The option is OFF in ordinary product builds and requires
+telemetry and measurement when enabled. A normal build still calls
+`esp_random()`; the CI test compiles both actual C paths. The build proof
+rejects a stale OFF CMake cache and reads the fixed seed object returned by
+the provider from the ELF, instead of trusting the cache alone.
+
+Only the diagnostic image embeds a generated `derby_view.js` with `sn=19`
+regardless of the asynchronously loaded saved race number. Its `save()` is a
+no-op, so the comparison image cannot change the player's `derby.v1` NVS data;
+it may still read the saved race and points for the paddock. The product JS,
+storage behavior and race formula remain unchanged. The mandatory proof
+requires the exact generated view bytes in the ELF and rejects the shipping
+view bytes there. For demo race 1000001 the observed seed must be `9112A7AB`.
+
+The first device comparison may use only continuous, gap-free camera windows
+whose logged seed, tier, race, phase, camera and context progression agree.
+Record each window's start/end sample and device time, camera and context
+delta; reject capture, failures, missing telemetry and divergent conditions.
+Camera-change logs do not identify the simulation step, so equal camera names
+alone do not prove a whole-race identical trajectory. Mixed-camera aggregate
+FPS is not an optimization claim.
