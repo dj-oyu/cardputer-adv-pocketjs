@@ -4,7 +4,7 @@ import sys,tempfile,hashlib,struct
 from unittest.mock import patch
 R=Path(__file__).resolve().parents[1];sys.path.insert(0,str(R/'tools'))
 from derby_fixed_workload_chunks import generate,MANIFEST_SHA256
-from record_verification import verify_fixed_mode,verify_detail_mode,FIXED_SYMBOLS,DETAIL_REQUIRED
+from record_verification import verify_fixed_mode,verify_detail_mode,FIXED_SYMBOLS,DETAIL_REQUIRED,DETAIL_FIXED_SYMBOLS
 from verify_diagnostic_build import prove
 with tempfile.TemporaryDirectory() as tmp:
     build=Path(tmp);out=build/'generated/derby_fixed_workload';generate(R/'apps/derby',out,True)
@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory() as tmp:
         cache.write_text(cache.read_text()+'POCKET_DERBY_RUNNER_BATCH:BOOL=ON\n')
     good=b'\0'.join((out/f'derby_{n}.js').read_bytes() for n in ('watch','view','play'))+b'\0'+pan+b'\0'+MANIFEST_SHA256.encode()+b'\0'
     elf=build/'cardputer_pocketjs.elf';elf.write_bytes(good)
-    with patch('record_verification.elf_symbols',return_value=FIXED_SYMBOLS|DETAIL_REQUIRED):
+    with patch('record_verification.elf_symbols',return_value=FIXED_SYMBOLS|DETAIL_REQUIRED|DETAIL_FIXED_SYMBOLS):
         assert verify_fixed_mode(build)['mode']=='ON'
         assert verify_detail_mode(build)['mode']=='ON'
         # Exercise the actual archive/broker proof with detailed generated view.
@@ -48,4 +48,14 @@ with tempfile.TemporaryDirectory() as tmp:
         try:verify_detail_mode(build)
         except ValueError:pass
         else:raise AssertionError('missing continuation pause accepted')
+    # Match the real target regression: ON requires the newly linked owner
+    # EXIT boundary, while the coarse/OFF contract must still reject it.
+    for mode,symbols in [('ON',FIXED_SYMBOLS|DETAIL_REQUIRED),
+                         ('ON',FIXED_SYMBOLS|DETAIL_REQUIRED|DETAIL_FIXED_SYMBOLS|{'df_unknown'}),
+                         ('OFF',FIXED_SYMBOLS|DETAIL_FIXED_SYMBOLS)]:
+        cache.write_text(cache.read_text().replace('DETAIL_MEASURE:BOOL=ON','DETAIL_MEASURE:BOOL='+mode).replace('DETAIL_MEASURE:BOOL=OFF','DETAIL_MEASURE:BOOL='+mode))
+        with patch('record_verification.elf_symbols',return_value=symbols):
+            try:verify_fixed_mode(build)
+            except ValueError as error:assert str(error)=='fixed workload ELF boundary symbols differ'
+            else:raise AssertionError('incorrect owner EXIT boundary accepted: '+mode)
 print('PASS detailed generated watch/view/play/PAN ELF proof, mixed mode and missing pause rejection (synthetic ELF)')
