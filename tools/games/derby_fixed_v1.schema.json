@@ -1,0 +1,520 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DERBY finite protocol v1 parsed whole trial",
+  "description": "Comparison-qualified parse_trial/parse_collected output only. Synthetic parse_trial_format output is not work-verified and is rejected by this schema. Parser additionally enforces uint64, work counts, fixed-scope consistency, continuation invariants, self-time bounds, matching session/variant, END and transport.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "all_repetitions_valid",
+    "fixture",
+    "format_valid",
+    "independent_trials",
+    "manifest_sha256",
+    "repetitions",
+    "session",
+    "transport_sha256",
+    "variant",
+    "work_verified"
+  ],
+  "properties": {
+    "fixture": {
+      "const": {
+        "id": "oval-pan8-390-510-v1",
+        "seed": "9112A7AB",
+        "race": 1000001,
+        "oval": 1,
+        "tier": 1,
+        "camera": 8,
+        "start": 390,
+        "end": 510,
+        "contexts": 120,
+        "repetitions": 3,
+        "independent": false,
+        "finish": "5DC86E18"
+      }
+    },
+    "manifest_sha256": {
+      "const": "84e0341ee1ac10c232e3008f28f8aada8823155e19229f926e633d7780a2021d"
+    },
+    "variant": {
+      "enum": [
+        "baseline",
+        "native",
+        "batch"
+      ]
+    },
+    "session": {
+      "type": "string",
+      "pattern": "^[0-9]{1,20}$"
+    },
+    "independent_trials": {
+      "const": false
+    },
+    "all_repetitions_valid": {
+      "const": true
+    },
+    "transport_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "repetitions": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/summary"
+            },
+            {
+              "properties": {
+                "rep": {
+                  "const": "1"
+                },
+                "seq": {
+                  "const": "1"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/summary"
+            },
+            {
+              "properties": {
+                "rep": {
+                  "const": "2"
+                },
+                "seq": {
+                  "const": "2"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/summary"
+            },
+            {
+              "properties": {
+                "rep": {
+                  "const": "3"
+                },
+                "seq": {
+                  "const": "3"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "format_valid": {
+      "const": true
+    },
+    "work_verified": {
+      "const": true
+    }
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "c0",
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "c6",
+        "c7",
+        "c8",
+        "c9",
+        "cam",
+        "capture",
+        "cont",
+        "contexts",
+        "done",
+        "end",
+        "faults",
+        "finish",
+        "fixture",
+        "independent",
+        "manifest",
+        "oval",
+        "p0",
+        "p1",
+        "p2",
+        "quality",
+        "refused",
+        "rep",
+        "s0",
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5",
+        "s6",
+        "s7",
+        "s8",
+        "s9",
+        "seed",
+        "seq",
+        "session",
+        "start",
+        "tier",
+        "tx_fail",
+        "v",
+        "valid",
+        "variant",
+        "wall_us",
+        "work_us"
+      ],
+      "properties": {
+        "v": {
+          "const": "1"
+        },
+        "fixture": {
+          "const": "oval-pan8-390-510-v1"
+        },
+        "manifest": {
+          "const": "84e0341ee1ac10c232e3008f28f8aada8823155e19229f926e633d7780a2021d"
+        },
+        "valid": {
+          "const": "1"
+        },
+        "quality": {
+          "const": "0"
+        },
+        "independent": {
+          "const": "0"
+        },
+        "seed": {
+          "const": "9112A7AB"
+        },
+        "oval": {
+          "const": "1"
+        },
+        "tier": {
+          "const": "1"
+        },
+        "cam": {
+          "const": "8"
+        },
+        "start": {
+          "const": "390"
+        },
+        "end": {
+          "const": "510"
+        },
+        "contexts": {
+          "const": "120"
+        },
+        "done": {
+          "const": "120"
+        },
+        "capture": {
+          "const": "0"
+        },
+        "faults": {
+          "const": "0"
+        },
+        "refused": {
+          "const": "0"
+        },
+        "tx_fail": {
+          "const": "0"
+        },
+        "finish": {
+          "const": "5DC86E18"
+        },
+        "session": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "cont": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "wall_us": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "work_us": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "variant": {
+          "enum": [
+            "baseline",
+            "native",
+            "batch"
+          ]
+        },
+        "rep": {
+          "enum": [
+            "1",
+            "2",
+            "3"
+          ]
+        },
+        "seq": {
+          "enum": [
+            "1",
+            "2",
+            "3"
+          ]
+        },
+        "p0": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "p1": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "p2": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c0": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s0": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c1": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s1": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c2": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s2": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c3": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s3": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c4": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$",
+          "description": "Clip/cache-normalization sqrt sites only; not all sqrt evaluations in app/renderer."
+        },
+        "s4": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c5": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s5": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c6": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s6": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c7": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s7": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c8": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s8": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        },
+        "c9": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "s9": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}:[0-9]{1,20}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "variant": {
+                "const": "baseline"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "c0": {
+                "pattern": "^0+$"
+              },
+              "c1": {
+                "pattern": "^0*120$"
+              },
+              "c2": {
+                "pattern": "^0*600$"
+              },
+              "c3": {
+                "pattern": "^0*7735$"
+              },
+              "c4": {
+                "pattern": "^0*7735$"
+              },
+              "c5": {
+                "pattern": "^0+$"
+              },
+              "c6": {
+                "pattern": "^0+$"
+              },
+              "c7": {
+                "pattern": "^0+$"
+              },
+              "c8": {
+                "pattern": "^0+$"
+              },
+              "c9": {
+                "pattern": "^0+$"
+              },
+              "s1": {
+                "pattern": "^[0-9]{1,20}:0*2086$"
+              },
+              "s8": {
+                "pattern": "^0+:0+$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "variant": {
+                "const": "native"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "c0": {
+                "pattern": "^0+$"
+              },
+              "c1": {
+                "pattern": "^0*120$"
+              },
+              "c2": {
+                "pattern": "^0*600$"
+              },
+              "c3": {
+                "pattern": "^0*7735$"
+              },
+              "c4": {
+                "pattern": "^0*120$"
+              },
+              "c5": {
+                "pattern": "^0*7735$"
+              },
+              "c6": {
+                "pattern": "^0+$"
+              },
+              "c7": {
+                "pattern": "^0*120$"
+              },
+              "c8": {
+                "pattern": "^0+$"
+              },
+              "c9": {
+                "pattern": "^0+$"
+              },
+              "s1": {
+                "pattern": "^[0-9]{1,20}:0*2086$"
+              },
+              "s8": {
+                "pattern": "^0+:0+$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "variant": {
+                "const": "batch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "c0": {
+                "pattern": "^0+$"
+              },
+              "c1": {
+                "pattern": "^0*120$"
+              },
+              "c2": {
+                "pattern": "^0*600$"
+              },
+              "c3": {
+                "pattern": "^0*7735$"
+              },
+              "c4": {
+                "pattern": "^0*7735$"
+              },
+              "c5": {
+                "pattern": "^0+$"
+              },
+              "c6": {
+                "pattern": "^0+$"
+              },
+              "c7": {
+                "pattern": "^0+$"
+              },
+              "c8": {
+                "pattern": "^0*120$"
+              },
+              "c9": {
+                "pattern": "^0*960$"
+              },
+              "s1": {
+                "pattern": "^[0-9]{1,20}:0*1246$"
+              },
+              "s8": {
+                "pattern": "^0+:0+$"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

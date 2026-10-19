@@ -9,6 +9,8 @@
 
 新しい文書は該当ディレクトリに置き、この表に1行足す。ファイル名は動かさない（本文や C のコメントが名前と節番号で参照している）。節番号を変えたら `git grep -n "<ファイル名>"` で参照元を直す。
 
+USB/HOME統合の送信回帰と同一head CI: [platform/usb-console-home.md](platform/usb-console-home.md)。
+
 ## 主線1: VM の高速化 — [`vm/`](vm/)
 
 QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替える（L0〜L5）。
@@ -188,3 +190,5 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 | --- | --- | --- |
 | [derby-runner-affine-experiment.md](apps/derby-runner-affine-experiment.md) | Experiment | OFF by default; bounded runner geometry; device visual acceptance pending |
 | [derby-projection-experiment.md](apps/derby-projection-experiment.md) | Experiment | OFF by default; course cache / projection; device heap and performance acceptance pending |
+
+- [DERBY normal-default integration](platform/derby-normal-integration.md): PR7/8/11/13 correspondence, OFF defaults and pending device acceptance.

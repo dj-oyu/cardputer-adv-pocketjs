@@ -1,0 +1,116 @@
+name: DERBY finite fixed workload
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-fixed-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Controller, exact CMake selection, OFF preservation and proof negatives
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          command -v cmake
+          python -m pip install jsonschema==4.23.0
+          python -B tools/test_derby_fixed_protocol.py 2>&1 | tee artifacts/protocol.log
+          python -B tools/test_derby_fixed_workload.py 2>&1 | tee artifacts/controller.log
+          python -B tools/test_derby_fixed_integration.py 2>&1 | tee artifacts/integration.log
+      - name: Actual generated fixture and dependent three replays
+        run: |
+          set -euo pipefail
+          python -B tools/games/run_derby_fixed.py --out artifacts/fixed-host | tee artifacts/fixed-host.log
+      - name: Device-sized object layout and 163840-byte guest heap
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          DERBY_FIXED_SYSTEM_M32=1 python -B tools/games/run_derby_fixed.py --m32 --out artifacts/fixed-m32 | tee artifacts/fixed-m32.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-fixed-host-${{ env.SOURCE_HEAD }}
+          path: |
+            artifacts/*.log
+            artifacts/fixed-host/result.json
+            artifacts/fixed-host/trial.log
+            artifacts/fixed-host/no-tones.log
+            artifacts/fixed-host/init-failure.log
+            artifacts/fixed-host/old-tail-rejected.log
+            artifacts/fixed-host/fixture/fixture.json
+            artifacts/fixed-m32/result.json
+            artifacts/fixed-m32/trial.log
+            artifacts/fixed-m32/no-tones.log
+            artifacts/fixed-m32/init-failure.log
+            artifacts/fixed-m32/old-tail-rejected.log
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: ESP-IDF 6.0.1 opt-in link, image proof and resource evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" = "$(stat -c %u .)"
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          python -B tools/test_diagnostic_archive.py --build build_fixed --project-version "${SOURCE_HEAD:0:12}" --fixed-workload
+          python -B tools/record_verification.py --build build_fixed --expect-telemetry ON --expect-measure ON --out build_fixed/verification.json
+          idf.py -B build_fixed size 2>&1 | tee build_fixed/size.log
+          python -B tools/report_derby_fixed_stack.py --build build_fixed
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-fixed-firmware-${{ env.SOURCE_HEAD }}
+          path: |
+            build_fixed/cardputer_pocketjs.bin
+            build_fixed/cardputer_pocketjs.elf
+            build_fixed/cardputer_pocketjs.map
+            build_fixed/sdkconfig
+            build_fixed/project_description.json
+            build_fixed/source-immutability.json
+            build_fixed/verification.json
+            build_fixed/diagnostic-mode-proof.json
+            build_fixed/memory.jsonl
+            build_fixed/size.log
+            build_fixed/fixed-stack.json
+            build_fixed/SHA256SUMS
+            build_fixed/generated/derby_fixed_workload/*.js
+            build_fixed/generated/derby_fixed_workload/fixture.json
+            build_fixed/generated/derby_runner_batch/derby_pan.js
+          retention-days: 14
