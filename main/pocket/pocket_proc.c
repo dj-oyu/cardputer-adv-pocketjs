@@ -1,3 +1,4 @@
+#include "derby_detail.h"
 #include "derby_measure.h"
 #include "pocket_proc.h"
 #ifdef KSN_PROC_HOST_TEST
@@ -537,6 +538,7 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
  * saw when four were required. */
 static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const float *input){
     DM_SCOPE(DM_PROC_BUILD);
+    DD_SCOPE(DD_PROC_BUILD);
     const char *op="kasane.procedural.draw";
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
     const unsigned room=surface_segments(&surfaces[building_surface]);
@@ -585,11 +587,14 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
         building=false;
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
     }
+    { DD_SCOPE(DD_SEGMENT_APPEND);
+    DD_ADD(DD_SEGMENT_COPY_BYTES,scratch->count*sizeof scratch->segments[0]);
     memcpy(&candidate->segments[candidate->count],scratch->segments,
            scratch->count*sizeof scratch->segments[0]);
     candidate->count+=scratch->count;
     candidate->raster_steps+=scratch->raster_steps;
     candidate->ext|=scratch->ext;
+    }
     if(slot->points){
         const proc_points *p=slot->points;
         const int16_t *out_x=points_plane(p,PLANE_OUT_X),*out_y=points_plane(p,PLANE_OUT_Y);
@@ -879,6 +884,7 @@ void pocket_proc_image_mode(void){pocket_proc_image_mode_at(0);}
 static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
                              uint16_t y,uint16_t x,uint16_t count,
                              uint16_t *rgb565,uint8_t *alpha){
+    DD_SCOPE(DD_IMAGE_SPAN);
     uintptr_t key=(uintptr_t)ctx;
     if(key<1||key>PROC_SURFACES)return KSN_STALE;
     unsigned index=(unsigned)(key-1);
@@ -902,6 +908,8 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
 #if defined(KASANE_PROC_JS_DIAGNOSTIC)||defined(KASANE_MEGADEMO_TRACE)
         uint32_t band_start=esp_cpu_get_cycle_count();
 #endif
+        DD_SCOPE(DD_BAND_RASTER);
+        DD_ADD(DD_BAND_CLEAR_BYTES,rows*KSN_PROC_W*sizeof image_band[0]);
         for(unsigned i=0;i<rows*KSN_PROC_W;i++)image_band[i]=color;
 #ifdef KASANE_BGCOST_TRACE
         /* A/B of the band renderer in one binary: a background colour of 1
@@ -923,6 +931,9 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
         image_band_frame=frame;image_band_color=color;
         image_band_valid=true;
     }
+    DD_SCOPE(DD_SPAN_COPY);
+    DD_ADD(DD_SPAN_RGB_BYTES,count*sizeof *rgb565);
+    DD_ADD(DD_SPAN_ALPHA_BYTES,count);
     memcpy(rgb565,image_band+(unsigned)(y-band_y)*KSN_PROC_W+x,count*sizeof *rgb565);
     memset(alpha,255,count);
 #ifdef KASANE_PROC_JS_DIAGNOSTIC

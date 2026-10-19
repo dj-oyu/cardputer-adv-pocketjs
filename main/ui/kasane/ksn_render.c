@@ -1,3 +1,4 @@
+#include "../../pocket/derby_detail.h"
 #include "../../pocket/derby_measure.h"
 #include "ksn_render.h"
 #include "ksn_image_transform.h"
@@ -1940,6 +1941,8 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                                ksn_backdrop_loader load_backdrop,bool occlusion_safe,
                                ksn_render_stats *stats){
     DM_SCOPE(DM_RASTER);
+    DD_SCOPE(DD_RENDER);
+    DD_OPEN(prepare,DD_RENDER_PREPARE);
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
     stretch_map.active=false;
@@ -2077,11 +2080,13 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
     }
     uint16_t *pixels=display->strip(display->ctx);
     if(!pixels){ksn_core_defer_repair(core,frame.ticket);return KSN_OOM;}
+    DD_CLOSE(prepare);
     ksn_span_scratch scratch;
     for(unsigned band=0;band<17;band++){
         if(!(damage.bands&(1u<<band)))continue;
         int y=(int)band*8,rows=band==16?7:8;
         const int dx0=damage.x0[band],dx1=damage.x1[band];
+        DD_OPEN(backdrop,DD_BACKDROP);
         if(load_backdrop&&!(next_system_opaque&(1u<<band))){
             result=load_backdrop(display->ctx,(uint16_t)y,(uint16_t)rows,pixels);
             if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
@@ -2093,6 +2098,8 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             else for(int r=0;r<rows;r++)
                 fill565(pixels+r*240+dx0,(unsigned)(dx1-dx0),rgb565(frame.next_background));
             KSN_PROF_END(fill);}
+        DD_CLOSE(backdrop);
+        DD_OPEN(composite,DD_COMPOSITE);
         for(unsigned layer=0;layer<2;layer++)for(unsigned i=layer==KSN_APP?app_start[band]:0;
                                                   i<frame.next[layer].commands;i++){
             if(layer==KSN_APP&&(next_system_opaque&(1u<<band)))break;
@@ -2336,10 +2343,14 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
             KSN_PROF_END(blend);}
             }
         }
+        DD_CLOSE(composite);
+        DD_ADD(DD_SHARED_OUTPUT_BYTES,(uint64_t)rows*(unsigned)(dx1-dx0)*2u);
+        DD_OPEN(present,DD_TX_SYNC);
         result=(dx0==0&&dx1==240)?
             display->present(display->ctx,(uint16_t)y,(uint16_t)rows,pixels):
             display->present_rect(display->ctx,(uint16_t)dx0,(uint16_t)y,
                                   (uint16_t)(dx1-dx0),(uint16_t)rows,pixels);
+        DD_CLOSE(present);
         if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
         stats->bands|=1u<<band;
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;

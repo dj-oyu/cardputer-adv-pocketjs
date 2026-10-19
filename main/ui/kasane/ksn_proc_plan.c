@@ -1,3 +1,4 @@
+#include "../../pocket/derby_detail.h"
 #include "../../pocket/derby_measure.h"
 #include "ksn_proc_plan.h"
 #include <math.h>
@@ -112,16 +113,19 @@ static ksn_proc_status run_core(ksn_proc_vm *vm,bool valid,const ksn_proc_inst *
                                 bool debug_step){
     if(!vm)return KSN_PROC_INVALID;
     if(vm->status!=KSN_PROC_RUNNING)return vm->status;
+    DD_OPEN(match,DD_VM_MATCH);
     /* A VM from another registration takes the reference path. */
     if(!valid||!vm->program||vm->program!=&vm->owned_program||
        vm->program->count!=count||
        memcmp(vm->owned_code,code,count*sizeof code[0]))
-        return ksn_proc_run(vm);
+        { DD_CLOSE(match);return ksn_proc_run(vm); }
+    DD_CLOSE(match);
     return run_loop(vm,code,fused,debug_step);
 }
 /* code is the VM's own program, already matched against the plan. */
 static ksn_proc_status run_loop(ksn_proc_vm *vm,const ksn_proc_inst *code,
                                 const uint32_t fused[KSN_PROC_FUSED_WORDS],bool debug_step){
+    DD_SCOPE(DD_VM_RUN);
     while(vm->status==KSN_PROC_RUNNING){
         uint8_t pc=vm->pc;
         if(!debug_step && fused_at(fused,pc)){
@@ -191,6 +195,7 @@ ksn_proc_status ksn_proc_rom_plan_begin(ksn_proc_vm *vm,const ksn_proc_rom_plan 
  * with its argument, then put back to the entry's placeholder so the rest of
  * the instruction (padding included) compares as bytes. */
 static bool rom_matches(const ksn_proc_vm *vm,const ksn_proc_rom_plan *plan){
+    DD_SCOPE(DD_VM_MATCH);
     const ksn_proc_rom_entry *rom=plan->rom;
     if(!vm->program||vm->program!=&vm->owned_program||vm->program->count!=rom->count)
         return false;

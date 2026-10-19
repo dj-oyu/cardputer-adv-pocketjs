@@ -19,7 +19,12 @@ def instrument(source: str) -> str:
       rb[i] = live['r' + l] || 0; rb[i+1] = X; rb[i+2] = r * U;
       rb[i+3] = 28 + 6 * r; rb[i+4] = ph[l];
     }""")
-    return source[:a] + "  let rn = 0;\n" + replacement + "  S.runners(rb.buffer, rn);\n" + source[b:] + "\nconst rb = new Float64Array(40);\n"
+    closing = '  } finally { S.detail(-1); }\n'
+    submit = "  S.runners(rb.buffer, rn);\n"
+    if closing in replacement:
+        replacement = replacement.replace(closing, submit + closing)
+        submit = ""
+    return source[:a] + "  let rn = 0;\n" + replacement + submit + source[b:] + "\nconst rb = new Float64Array(40);\n"
 
 
 def generate(app_dir: Path) -> None:

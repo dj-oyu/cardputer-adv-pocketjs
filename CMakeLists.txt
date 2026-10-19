@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 # Do not FORCE existing cache settings: mandatory output proof rejects OFF.
 set(POCKET_DERBY_TELEMETRY ON CACHE BOOL "Explicit DERBY diagnostic source revision")
 set(POCKET_DERBY_MEASURE ON CACHE BOOL "Explicit DERBY measurement source revision")
+set(POCKET_DERBY_DETAIL_MEASURE ON CACHE BOOL "Explicit detailed finite DERBY diagnostic source revision")
 set(POCKET_DERBY_RUNNER_BATCH ON CACHE BOOL "Explicit DERBY runner batch comparison source revision")
 set(POCKET_DERBY_COMPARE_FIXED_HW ON CACHE BOOL "Fixed diagnostic-only DERBY hardware seed")
 set(POCKET_DERBY_FIXED_WORKLOAD ON CACHE BOOL "Explicit finite DERBY diagnostic source revision")

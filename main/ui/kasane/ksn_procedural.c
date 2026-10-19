@@ -1,3 +1,4 @@
+#include "../../pocket/derby_detail.h"
 #include "ksn_procedural.h"
 #include <math.h>
 #include <stddef.h>
@@ -6,6 +7,7 @@
 
 static bool reg_ok(uint8_t r){return r<KSN_PROC_REGS;}
 static bool valid_program(const ksn_proc_program *p,uint8_t loop_end[KSN_PROC_CODE]){
+    DD_SCOPE(DD_VM_VALIDATE);
     if(!p||!p->code||!p->count||p->count>KSN_PROC_CODE)return false;
     uint8_t open[KSN_PROC_LOOP_DEPTH];
     unsigned depth=0;
@@ -82,14 +84,18 @@ static ksn_proc_status begin_core(ksn_proc_vm *vm,const ksn_proc_program *progra
                                   const ksn_proc_binding *binding,
                                   const float input[KSN_PROC_INPUTS],
                                   const ksn_proc_state *state,ksn_proc_frame *frame){
+    DD_SCOPE(DD_VM_SETUP);
     if(!vm||!frame)return KSN_PROC_INVALID;
-    memset(vm,0,sizeof *vm);
+    { DD_SCOPE(DD_VM_ZERO); DD_ADD(DD_VM_ZERO_BYTES,sizeof *vm);
+      memset(vm,0,sizeof *vm); }
     frame->ready=false;frame->count=0;frame->raster_steps=0;frame->ext=0;
     vm->status=KSN_PROC_INVALID;
     if(!input||!program||!program->code||!program->count||
        program->count>KSN_PROC_CODE)return vm->status;
     /* Copy before validation, so validation and execution see the same bytes. */
-    memcpy(vm->owned_code,program->code,program->count*sizeof vm->owned_code[0]);
+    { DD_SCOPE(DD_VM_COPY);
+      DD_ADD(DD_VM_CODE_COPY_BYTES,program->count*sizeof vm->owned_code[0]);
+      memcpy(vm->owned_code,program->code,program->count*sizeof vm->owned_code[0]); }
     vm->owned_program=(ksn_proc_program){vm->owned_code,program->count};
     /* Arguments go into the VM's copy, before validation sees it. */
     if(binding&&!ksn_proc_apply_binding(vm->owned_code,program->count,binding))
@@ -331,6 +337,7 @@ ksn_proc_status ksn_proc_step(ksn_proc_vm *vm){
 uint8_t g_ksn_proc_sweep_regs;
 #endif
 ksn_proc_status ksn_proc_run(ksn_proc_vm *vm){
+    DD_SCOPE(DD_VM_RUN);
     ksn_proc_status s;
     do{s=ksn_proc_step(vm);}while(s==KSN_PROC_RUNNING);
     return s;

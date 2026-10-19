@@ -1,3 +1,4 @@
+#include "derby_detail.h"
 #include "derby_measure.h"
 #include "derby_fixed_workload.h"
 #include "pocket_derby.h"
@@ -241,6 +242,7 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
                     !ok?"expected camera, depth, frame, two plans and two numbers":"course required");
     }
     DM_SCOPE(DM_NATIVE);
+    DD_SCOPE(DD_NATIVE_SERIES);
     const double *pc=view.pc;
     course->in_view=0;
     if(course->sections){
@@ -273,6 +275,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected plan, w, s, g0, L, a and optional b");
     if(!course||!view.set)return fail(ctx,op,POCKET_ERR_BUSY,"view required");
     DM_SCOPE(DM_NATIVE);
+    DD_SCOPE(DD_NATIVE_SERIES);
     const double *pc=view.pc,zf=view.zf;
     const bool ve=course->sections!=0;
     double P[4]={0},pg=0;
@@ -352,6 +355,7 @@ static JSValue js_runners(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     if(bytes!=8u*5u*sizeof(double))
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected 320-byte runner buffer");
     double rows[8][5];
+    DD_ADD(DD_BRIDGE_SNAPSHOT_BYTES,sizeof rows);
     memcpy(rows,buf,sizeof rows);
     const unsigned n=(unsigned)count;
     DF_COUNT(DF_BATCH);DF_ADD(DF_ROWS,n);
@@ -391,9 +395,20 @@ static JSValue js_fixture(JSContext *ctx,JSValueConst self,int argc,JSValueConst
     return JS_NewInt32(ctx,(int32_t)df_status());
 }
 #endif
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+static JSValue js_detail(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    (void)self;int32_t stage;
+    if(argc!=1||!JS_IsNumber(argv[0])||JS_ToInt32(ctx,&stage,argv[0])<0||stage < -1||stage>=DD_STAGES)
+        return JS_ThrowTypeError(ctx,"detail stage");
+    dd_js(stage);return JS_UNDEFINED;
+}
+#endif
 esp_err_t pocket_derby_fill(JSContext *ctx,JSValueConst ns,void *unused){
     (void)unused;
     static const JSCFunctionListEntry methods[]={
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+        JS_CFUNC_DEF("detail",1,js_detail),
+#endif
         #ifdef POCKET_DERBY_FIXED_WORKLOAD
         JS_CFUNC_DEF("fixture",7,js_fixture),
 #endif
