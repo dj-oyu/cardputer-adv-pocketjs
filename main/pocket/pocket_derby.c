@@ -43,7 +43,7 @@ static derby_course *course;
 /* view(): the camera pc = [x, z, unit x, unit z, f, distance], the far depth,
  * the scene frame t, the stands' plans and their two constants. */
 static struct {
-    double pc[6],zf,t,hl_color,cells;
+    double pc[6],zf,t,hl_color,cells,clip_norm,clip_f;
     uint32_t hl,crowd;
     bool set;
 } view;
@@ -102,7 +102,11 @@ static void pose(double g,double w,double o[4]){
 }
 /* ou(j, w, m, zf): chord j at depth w wholly out of view by m m at least. */
 static bool ou(unsigned j,double w,double m,double zf){
-    const double *V=course->ve+4u*j,f=view.pc[4],k=m*sqrt(f*f+25600),
+    const double f=view.pc[4];
+    /* Camera getters and host draw hooks may reenter view()/ser(). A changed
+     * focal length must never use the previous camera's cached factor. */
+    if(f!=view.clip_f){view.clip_f=f;view.clip_norm=sqrt(f*f+25600);}
+    const double *V=course->ve+4u*j,k=m*view.clip_norm,
         l=V[0]+w*V[2],d=V[1]+w*V[3],L=V[4]+w*V[6],D=V[5]+w*V[7];
     return (d<.02*f-m&&D<.02*f-m)||(d>zf+m&&D>zf+m)||(160*d+l*f<-k&&160*D+L*f<-k)||
            (160*d-l*f<-k&&160*D-L*f<-k);
@@ -236,6 +240,10 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     const double *pc=view.pc;
     course->in_view=0;
     if(course->sections){
+        /* ou() uses this camera-only factor for every chord and series. Keep
+         * the original double expression and multiply by each margin in ou(). */
+        view.clip_f=pc[4];
+        view.clip_norm=sqrt(pc[4]*pc[4]+25600);
         for(unsigned i=0;i<course->ends;i++){
             double m[4];
             pose(course->ch[i],0,m);

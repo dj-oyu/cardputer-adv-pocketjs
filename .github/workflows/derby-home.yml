@@ -41,6 +41,7 @@ jobs:
           python tools/test_verification_receipt.py | tee artifacts/provenance.log
           python tools/test_derby_telemetry.py | tee artifacts/telemetry.log
           python tools/games/test_derby_observation.py | tee artifacts/observation.log
+          python tools/games/test_derby_clip_norm.py | tee artifacts/clip-norm.log
           node tools/games/export_derby_oracle.mjs artifacts/derby-oracle.json
       - name: Node regression and QuickJS with ASan/UBSan
         run: |
