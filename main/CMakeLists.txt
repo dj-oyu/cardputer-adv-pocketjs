@@ -51,6 +51,7 @@ option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone 
 option(KASANE_MEGADEMO_DEVICE_PROBE "USB-triggered 48-frame procedural megademo display diagnostic" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
 option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
+option(POCKET_DERBY_DETAIL_MEASURE "Fixed-size detailed DERBY elapsed/copy accounting" OFF)
 option(POCKET_DERBY_MEASURE "Bounded owner-task DERBY stage timings" OFF)
 set(POCKET_DERBY_MEASURE_SOURCES "")
 if(POCKET_DERBY_MEASURE)
@@ -65,6 +66,12 @@ if(POCKET_DERBY_FIXED_WORKLOAD)
     list(APPEND POCKET_DERBY_MEASURE_SOURCES "pocket/derby_fixed_workload.c" "pocket/derby_fixed_workload_device.c")
     add_compile_definitions(POCKET_DERBY_FIXED_WORKLOAD=1)
     set_source_files_properties(pocket/derby_fixed_workload.c PROPERTIES COMPILE_OPTIONS "-fstack-usage")
+endif()
+if(POCKET_DERBY_DETAIL_MEASURE)
+    if(NOT POCKET_DERBY_MEASURE OR NOT POCKET_DERBY_FIXED_WORKLOAD)
+        message(FATAL_ERROR "DERBY detail requires MEASURE and FIXED_WORKLOAD")
+    endif()
+    add_compile_definitions(POCKET_DERBY_DETAIL_MEASURE=1)
 endif()
 option(POCKET_DERBY_TELEMETRY "Bounded DERBY sampled native metrics (diagnostic image)" OFF)
 if(POCKET_DERBY_TELEMETRY)
@@ -94,11 +101,13 @@ if(POCKET_DERBY_FIXED_WORKLOAD)
     endif()
     set(_derby_fixture "${CMAKE_BINARY_DIR}/generated/derby_fixed_workload")
     execute_process(COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/derby_fixed_workload_chunks.py"
-                    "${CMAKE_SOURCE_DIR}/apps/derby" "${_derby_fixture}" COMMAND_ERROR_IS_FATAL ANY)
+                    "${CMAKE_SOURCE_DIR}/apps/derby" "${_derby_fixture}" "${POCKET_DERBY_DETAIL_MEASURE}" COMMAND_ERROR_IS_FATAL ANY)
     set(DERBY_WATCH_SOURCE "${_derby_fixture}/derby_watch.js")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                  "${CMAKE_SOURCE_DIR}/tools/derby_fixed_workload_chunks.py"
                  "${CMAKE_SOURCE_DIR}/tools/derby_compare_chunks.py"
+                 "${CMAKE_SOURCE_DIR}/tools/derby_detail_chunks.py"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_pan.js"
                  "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_watch.js"
                  "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_play.js"
                  "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_view.js")
@@ -402,6 +411,8 @@ if(POCKET_DERBY_TELEMETRY)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                  "${CMAKE_SOURCE_DIR}/tools/derby_telemetry_chunks.py"
                  "${CMAKE_SOURCE_DIR}/tools/derby_compare_chunks.py"
+                 "${CMAKE_SOURCE_DIR}/tools/derby_detail_chunks.py"
+                 "${CMAKE_CURRENT_LIST_DIR}/../apps/derby/derby_pan.js"
                  "${_derby_source}/derby_view.js"
                  "${_derby_source}/derby_play.js" "${_derby_source}/chunks.txt")
 endif()
@@ -601,6 +612,10 @@ set_source_files_properties(ui/kasane/ksn_procedural.c
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
 set_source_files_properties(pocket/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# Append after per-source optimization flags so both diagnostic modes retain stack evidence.
+if(POCKET_DERBY_FIXED_WORKLOAD)
+    set_property(SOURCE pocket/derby_measure.c pocket/pocket_derby.c pocket/pocket_proc.c app_session.c hal/board.c ui/kasane/ksn_procedural.c ui/kasane/ksn_proc_plan.c ui/kasane/ksn_render.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+endif()
 if(KASANE_PROC_DEVICE_PROBE)
     set_source_files_properties(ui/kasane/ksn_procedural_surface.c
         ui/kasane/ksn_procedural_layers.c

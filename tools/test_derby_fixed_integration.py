@@ -21,7 +21,7 @@ def off_path(source):
         p=line.strip()
         if p=='#include "pocket/derby_fixed_workload.h"':continue
         if p.startswith(('#if ','#ifdef ','#ifndef ')):
-            if p=='#ifdef POCKET_DERBY_FIXED_WORKLOAD':stack.append(('fixed',False));continue
+            if p in ('#ifdef POCKET_DERBY_FIXED_WORKLOAD','#ifdef POCKET_DERBY_DETAIL_MEASURE'):stack.append(('fixed',False));continue
             if keep():out.append(line)
             stack.append(('other',True));continue
         if p=='#else' or p.startswith('#elif '):
@@ -119,7 +119,7 @@ class Integration(unittest.TestCase):
             return fragment.replace('${CMAKE_CURRENT_LIST_DIR}',(ROOT/'main').as_posix()).replace('${CMAKE_SOURCE_DIR}',ROOT.as_posix())
         fragment=source(text[start:end]);early=source(text[early_start:early_end]);chunks=source(text[end:chunks_end])
         batch=(ROOT/'tools/derby_runner_batch_chunks.py').exists()
-        for enabled in (False,True):
+        for enabled,detail in ((False,False),(True,False),(True,True)):
             with tempfile.TemporaryDirectory() as tmp:
                 out=Path(tmp);build=out/'build';fixed=build/'generated/derby_fixed_workload'
                 script=out/'CMakeLists.txt'
@@ -127,6 +127,7 @@ class Integration(unittest.TestCase):
                     +'project(derby_fixture_selection NONE)\n'
                     +f'set(PYTHON "{sys.executable}")\n'
                     +'set(POCKET_DERBY_TELEMETRY ON)\nset(POCKET_DERBY_COMPARE_FIXED_HW ON)\n'
+                    +f'set(POCKET_DERBY_DETAIL_MEASURE {"ON" if detail else "OFF"})\n'
                     +f'set(POCKET_DERBY_FIXED_WORKLOAD {"ON" if enabled else "OFF"})\n'
                     +f'set(POCKET_DERBY_RUNNER_BATCH {"ON" if batch else "OFF"})\n'
                     +early

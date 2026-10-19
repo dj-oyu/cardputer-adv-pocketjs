@@ -41,7 +41,7 @@ static JSValue fx_tail_settle(JSContext *c,JSValueConst self,int argc,JSValueCon
     if(argc!=1||JS_ToUint32(c,&rep,argv[0])<0||rep<1||rep>3)return JS_ThrowInternalError(c,"settle probe identity");
     ++fx_settles[rep-1];return JS_UNDEFINED;
 }
-static uint64_t fx_input_hash,fx_panel_hash,fx_draws;
+static uint64_t fx_input_hash,fx_panel_hash,fx_draws,fx_pixels,fx_equal,fx_strips,fx_equal_strips;
 uint64_t df_now_us(void){return dm_now_us();}
 int df_write(const char *data,size_t size){return fwrite(data,1,size,stdout)==size;}
 static void fx_hash(uint64_t *h,const void *p,size_t n){
@@ -65,7 +65,7 @@ FRAME_START=r'''
     fx_tail_steps=0;eval_deadline=now_s()+.25;
     df_owner_begin(dm_now_us());
     if(df_measuring()&&!fx_record){
-        ++fx_rep;fx_record=true;fx_draws=0;
+        ++fx_rep;fx_record=true;fx_draws=0;fx_pixels=fx_equal=fx_strips=fx_equal_strips=0;
         fx_input_hash=fx_panel_hash=pixel_hash=1469598103934665603ull;
     }
     if(fx_record)dm_dispatch(0,0);
@@ -81,6 +81,9 @@ FRAME_END=r'''
         printf("DEVICE_WINDOW {\"rep\":%u,\"contexts\":120,\"draws\":%llu,\"input_hash\":\"%016llx\",\"procedural_pixel_hash\":\"%016llx\",\"panel_hash\":\"%016llx\"}\n",
                fx_rep,(unsigned long long)fx_draws,(unsigned long long)fx_input_hash,
                (unsigned long long)pixel_hash,(unsigned long long)fx_panel_hash);
+        printf("DEVICE_TRANSFER {\"rep\":%u,\"pixels\":%llu,\"equal_previous_pixels\":%llu,\"strips\":%llu,\"equal_previous_strips\":%llu}\n",
+               fx_rep,(unsigned long long)fx_pixels,(unsigned long long)fx_equal,
+               (unsigned long long)fx_strips,(unsigned long long)fx_equal_strips);
         fx_record=false;
     }
 '''
@@ -123,7 +126,14 @@ def make_harness(out):
               '    if(!strncmp(s,"DERBY READY",11)){REQ(tick==0&&df_status()==DF_READY&&++fx_ready==1);}\n    printf("%s\\n",s);')
     text=once(text,'/* ---- the procedural oracle */',HELPERS+'\n/* ---- the procedural oracle */')
     text=once(text,'    spec *s=find(handle);REQ(s);','    spec *s=find(handle);REQ(s);'+DRAW)
-    text=once(text,'static void frame(unsigned buttons){','static void frame(unsigned buttons){'+FRAME_START)
+    text=once(text,'    (void)o;memcpy(panel+y*240,p,rows*240*sizeof *p);return KSN_OK;',r"""
+    if(fx_record){
+        uint64_t equal=0;size_t count=(size_t)rows*240;
+        for(size_t i=0;i<count;i++)equal+=panel[(size_t)y*240+i]==p[i];
+        fx_pixels+=count;fx_equal+=equal;fx_strips++;fx_equal_strips+=equal==count;
+    }
+    (void)o;memcpy(panel+y*240,p,rows*240*sizeof *p);return KSN_OK;""")
+    text=once(text,'static void frame(unsigned buttons){' ,'static void frame(unsigned buttons){'+FRAME_START)
     marker='    if(frame_regs>frame_reg_max)frame_reg_max=frame_regs;'
     text=once(text,marker,'    df_dispatch(false,false,buttons);\n'+marker)
     marker='    present((uint64_t)tick*33333u);'
@@ -166,12 +176,17 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out',type=Path,default=ROOT/'.cache/derby_fixed_host')
     parser.add_argument('--verify-only',action='store_true')
+    parser.add_argument('--detail',action='store_true',help='owner-task detail and logical copy counters')
+    parser.add_argument('--detail-fast',action='store_true',help='optimized functional overhead control without sanitizers')
     parser.add_argument('--m32',action='store_true',help='device-sized heap model; x87 input-bit oracle disabled')
     args=parser.parse_args();out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
     if args.verify_only:
         result=json.loads((out/'result.json').read_text());check_result(result)
         parse_trial((out/'trial.log').read_bytes(),transport_complete=True)
         check_collector((out/'trial.log').read_bytes())
+        from derby_detail_result import parse_detail
+        if parse_detail((out/'trial.log').read_text(),expected=result.get('detail_enabled',False))!=result.get('detail',[]):
+            raise ValueError('saved detailed result/log mismatch')
         print('PASS saved actual fixture identity, whole-trial quality and deterministic work counters');return
     native=(ROOT/'main/pocket/pocket_derby.c').read_text()
     variants=re.findall(r'const char \*df_variant\(void\)\{return "(baseline|native|batch)";\}',native)
@@ -179,17 +194,20 @@ def main():
     variant=variants[0];generated=out/'fixture';generate(ROOT/'apps/derby',generated)
     app=run_derby.lower(ROOT/'apps/derby',out/'app')
     for name in ('watch','view','play'):shutil.copy2(generated/f'derby_{name}.js',app/f'derby_{name}.js')
+    if args.detail:
+        from derby_detail_chunks import apply
+        apply(app)
     if variant=='batch':
         from derby_runner_batch import generate as batch_generate
         batch_generate(app)
     harness=make_harness(out)
     options={'measure':True,'fixed_workload':True,'harness':harness}
     if variant=='batch':options['runner_batch']=True
-    cache=out/('build32-sse2' if args.m32 else 'build');cache.mkdir(exist_ok=True)
+    cache=out/(('build32-sse2' if args.m32 else 'build')+('-fast' if args.detail_fast else '-asan')+('-detail' if args.detail else '-off'));cache.mkdir(exist_ok=True)
     # Existing build() checks source timestamps before reusing these copied objects.
     for name in ('dtoa','libregexp','libunicode','quickjs','quickjs-vm'):
         old=ROOT/'.cache/derby_host/asan'/f'{name}.o'
-        if args.m32:continue
+        if args.m32 or args.detail_fast:continue
         if old.exists() and not (cache/f'{name}.o').exists():shutil.copy2(old,cache/f'{name}.o')
     flags=['-fsanitize=address,undefined']
     if args.m32:
@@ -197,6 +215,9 @@ def main():
     if args.m32:
         # Match binary64 evaluation rather than i386's default x87 intermediates.
         flags += ['-msse2','-mfpmath=sse']
+    if args.detail_fast:
+        flags=[*flags,'-O2'] if args.m32 else ['-O2']
+    if args.detail:flags += ['-DPOCKET_DERBY_DETAIL_MEASURE']
     binary=run_derby.build(flags,cache,**options)
     env=dict(os.environ,DERBY_APP_DIR=str(app),DERBY_HEAP_LIMIT='524288',DERBY_HW='0x2545F491',
              DERBY_DEVICE_FIXTURE_HOST='1',DERBY_SER_ORACLE='1',DERBY_SER_FUZZ='4000',
@@ -212,15 +233,20 @@ def main():
     log=out/'trial.log';log.write_text(process.stdout+process.stderr)
     if process.returncode:raise RuntimeError('finite fixture failed; inspect '+str(log))
     trial=parse_trial(log.read_bytes(),transport_complete=True)
+    from derby_detail_result import parse_detail
+    detail=parse_detail(log.read_text(),expected=args.detail)
     windows=[json.loads(x[len('DEVICE_WINDOW '):]) for x in process.stdout.splitlines() if x.startswith('DEVICE_WINDOW ')]
     if len(windows)!=3:raise ValueError('three dependent repetitions required')
     for row in windows:
         if any(row[k]!=windows[0][k] for k in ('contexts','draws','input_hash','procedural_pixel_hash','panel_hash')):
             raise ValueError('repetition work/pixels differ')
-    result={'variant':variant,'trial':trial,'windows':windows,'hardware_tested':False,
+    transfers=[json.loads(x[len('DEVICE_TRANSFER '):]) for x in process.stdout.splitlines() if x.startswith('DEVICE_TRANSFER ')]
+    if len(transfers)!=3 or any(t!={'rep':i,'pixels':3888000,'equal_previous_pixels':3499706,'strips':2040,'equal_previous_strips':449} for i,t in enumerate(transfers,1)):
+        raise ValueError('host previous-pixel/strip observation changed')
+    result={'transfers':transfers,'detail_enabled':args.detail,'detail':detail,'variant':variant,'trial':trial,'windows':windows,'hardware_tested':False,
             'device_sized_model':args.m32,'input_bit_oracle_verified':not args.m32,'compiler_flags':flags,
             'guest_heap_limit_bytes':int(env['DERBY_HEAP_LIMIT']),
-            'scope':('same-process dependent 3 replays; i386/SSE2 heap model, no sanitizers; ' if args.m32 else 'same-process dependent 3 replays; ASan/UBSan host oracle; ')+'no host pace wait, no target performance claim',
+            'scope':('same-process dependent 3 replays; i386/SSE2 heap model, no sanitizers; ' if args.m32 else ('same-process dependent 3 replays; optimized host oracle, no sanitizers; ' if args.detail_fast else 'same-process dependent 3 replays; ASan/UBSan host oracle; '))+'no host pace wait, no target performance claim',
             'harness_sha256':hashlib.sha256(harness.read_bytes()).hexdigest(),
             'generated':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in app.glob('*.js')}}
     # Keep complete diagnostics when the known-answer gate rejects this run.

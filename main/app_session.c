@@ -1,3 +1,6 @@
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+#include "pocket/derby_detail.h"
+#endif
 #include "pocket/derby_measure.h"
 #include "app_session.h"
 #include "board.h"
@@ -941,6 +944,9 @@ void app_report(void) {
         (unsigned)stats.heap_used,frames);
 }
 void app_stop(void) {
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    dd_cancel();
+#endif
     bool p0_had_guest=guest!=NULL;
 #ifdef KASANE_P2_REPAIR_PROBE
     if(p2_repair_stage)board_capture(false);
@@ -2157,8 +2163,14 @@ static esp_err_t dispatch_guest(bool continuing,uint32_t buttons) {
 #endif
     const pocketjs_guest_frame_t input={.struct_size=sizeof(input),
                                        .buttons=buttons,.analog=0x8080};
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    DD_RESUME();
+#endif
     esp_err_t result=continuing?pocketjs_guest_continue(guest):
                       pocketjs_guest_frame(guest,&input);
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+    DD_SUSPEND();
+#endif
 #ifdef POCKET_DERBY_MEASURE
     dm_dispatch(continuing,result!=ESP_OK);
 #ifdef POCKET_DERBY_FIXED_WORKLOAD
