@@ -37,6 +37,9 @@ typedef struct {
     unsigned ends,sections,in_view;
     double dnr;
     double *ch,*sec,*ve;
+#ifdef POCKET_DERBY_COURSE_CACHE
+    double *world;
+#endif
     uint8_t *vc;
 } derby_course;
 static derby_course *course;
@@ -88,18 +91,19 @@ static int32_t js_int32(double d){
 
 /* pose(g, w) of derby_view.js: the point g m along the course, w m out. The
  * JS loop's bound 2 is its section count less one. */
-static void pose(double g,double w,double o[4]){
-    if(!course->sections){o[0]=g;o[1]=w;o[2]=1;o[3]=0;return;}
+static void course_pose(const derby_course *path,double g,double w,double o[4]){
+    if(!path->sections){o[0]=g;o[1]=w;o[2]=1;o[3]=0;return;}
     unsigned i=0;
-    while(i<course->sections-1u&&g>course->sec[SECTION_TERMS*i])g-=course->sec[SECTION_TERMS*i++];
-    const double *e=course->sec+SECTION_TERMS*i;
+    while(i<path->sections-1u&&g>path->sec[SECTION_TERMS*i])g-=path->sec[SECTION_TERMS*i++];
+    const double *e=path->sec+SECTION_TERMS*i;
     double x=e[2],z=e[3],c=e[4],d=e[5];
     if(e[1]!=0){
-        const double r=1/e[1]+course->dnr,C=cos(e[6]+e[1]*g),S=sin(e[6]+e[1]*g);
+        const double r=1/e[1]+path->dnr,C=cos(e[6]+e[1]*g),S=sin(e[6]+e[1]*g);
         x+=(S-d)*r;z-=(C-c)*r;c=C;d=S;g=0;
     }
     o[0]=x+g*c-w*d;o[1]=z+g*d+w*c;o[2]=c;o[3]=d;
 }
+static void pose(double g,double w,double o[4]){course_pose(course,g,w,o);}
 /* ou(j, w, m, zf): chord j at depth w wholly out of view by m m at least. */
 static bool ou(unsigned j,double w,double m,double zf){
     const double *V=course->ve+4u*j,f=view.pc[4],k=m*sqrt(f*f+25600),
@@ -165,12 +169,19 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
     if(ends>DERBY_ENDS_MAX||sections>DERBY_SECTIONS_MAX)
         return fail(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"32 chord ends and 4 sections maximum");
     /* Read into a new block first: a bad argument leaves the old course. */
-    const size_t doubles=ends+(size_t)SECTION_TERMS*sections+4u*ends;
+    size_t doubles=ends+(size_t)SECTION_TERMS*sections+4u*ends;
+#ifdef POCKET_DERBY_COURSE_CACHE
+    if(sections)doubles+=4u*ends;
+#endif
     derby_course *c=malloc(sizeof *c+doubles*sizeof(double)+ends);
     if(!c)return fail(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"course allocation failed");
     c->ends=ends;c->sections=sections;c->in_view=0;c->dnr=dnr;
     c->ch=(double *)(c+1);c->sec=c->ch+ends;c->ve=c->sec+SECTION_TERMS*sections;
     c->vc=(uint8_t *)(c->ve+4u*ends);
+#ifdef POCKET_DERBY_COURSE_CACHE
+    c->world=sections?c->ve+4u*ends:NULL;
+    if(sections)c->vc=(uint8_t *)(c->world+4u*ends);
+#endif
     bool ok=true;
     for(uint32_t i=0;i<ends&&ok;i++)ok=element(ctx,argv[0],i,&c->ch[i])&&isfinite(c->ch[i]);
     for(uint32_t i=0;i<sections&&ok;i++){
@@ -188,6 +199,11 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
         free(c);
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"chord ends and section terms must be finite numbers");
     }
+#ifdef POCKET_DERBY_COURSE_CACHE
+    /* Compute against the fully validated new registration, before publishing
+     * it. Replacing/failed course() and reset() keep their atomic lifetime. */
+    if(c->world)for(unsigned i=0;i<ends;i++)course_pose(c,c->ch[i],0,c->world+4u*i);
+#endif
     free(course);
     course=c;
     view.set=false;
@@ -237,8 +253,12 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     course->in_view=0;
     if(course->sections){
         for(unsigned i=0;i<course->ends;i++){
+#ifdef POCKET_DERBY_COURSE_CACHE
+            const double *m=course->world+4u*i;
+#else
             double m[4];
             pose(course->ch[i],0,m);
+#endif
             const double x=m[0]-pc[0],z=m[1]-pc[1];
             double *V=course->ve+4u*i;
             V[0]=x*pc[3]-z*pc[2];V[1]=x*pc[2]+z*pc[3];V[2]=-m[3]*pc[3]-m[2]*pc[2];V[3]=m[2]*pc[3]-m[3]*pc[2];
