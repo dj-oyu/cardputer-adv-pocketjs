@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from record_verification import ROOT, verify_build, verify_mode, TELEMETRY_SYMBOLS
+from record_verification import ROOT, verify_build, verify_mode, TELEMETRY_SYMBOLS, verify_measure_mode, MEASURE_SYMBOLS
 from derby_telemetry_chunks import instrument
 
 
@@ -43,6 +43,25 @@ class ReceiptTests(unittest.TestCase):
             elf.write_bytes(b'ELF'+source+b'\0')
             with patch('record_verification.elf_symbols',return_value=TELEMETRY_SYMBOLS):
                 with self.assertRaises(ValueError):verify_mode(build,'OFF')
+
+    def test_measure_mode_checks_actual_cache_and_defined_symbols(self):
+        with tempfile.TemporaryDirectory() as temp:
+            build=Path(temp);cache=build/'CMakeCache.txt'
+            for mode in ('ON','OFF'):
+                cache.write_text('POCKET_DERBY_MEASURE:BOOL='+mode+'\n')
+                symbols=MEASURE_SYMBOLS if mode=='ON' else set()
+                with patch('record_verification.elf_symbols',return_value=symbols):
+                    report=verify_measure_mode(build,mode)
+                    self.assertEqual(report['measure_mode'],mode)
+                    self.assertEqual(report['cmake_cache_sha256'],hashlib.sha256(cache.read_bytes()).hexdigest())
+                    with self.assertRaises(ValueError):verify_measure_mode(build,'OFF' if mode=='ON' else 'ON')
+                bad=symbols-{'dm_enter'} if mode=='ON' else {'dm_enter'}
+                with patch('record_verification.elf_symbols',return_value=bad):
+                    with self.assertRaises(ValueError):verify_measure_mode(build,mode)
+            for text in ('', 'POCKET_DERBY_MEASURE:BOOL=INVALID\n',
+                         'POCKET_DERBY_MEASURE:BOOL=ON\nPOCKET_DERBY_MEASURE:BOOL=OFF\n'):
+                cache.write_text(text)
+                with self.assertRaises(ValueError):verify_measure_mode(build)
 
     def test_receipt_validates_actual_descriptor_and_rejects_relabelling(self):
         head = "123456789abc" + "d" * 28

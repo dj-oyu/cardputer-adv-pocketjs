@@ -1,3 +1,4 @@
+#include "derby_measure.h"
 #include "pocket_proc.h"
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
@@ -535,6 +536,7 @@ static JSValue begin_impl(JSContext *ctx,JSValueConst self,int argc,JSValueConst
  * zero-padded, so a caller written for four inputs sees exactly the frame it
  * saw when four were required. */
 static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const float *input){
+    DM_SCOPE(DM_PROC_BUILD);
     const char *op="kasane.procedural.draw";
     ksn_proc_frame *candidate=surfaces[building_surface].candidate;
     const unsigned room=surface_segments(&surfaces[building_surface]);
@@ -595,6 +597,7 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
             candidate->segments[candidate->count++]=(ksn_proc_segment){
                 out_x[i-1],out_y[i-1],out_x[i],out_y[i],p->color};
         candidate->raster_steps+=(uint16_t)typed_steps;
+        DM_BATCH(decision.backend==KSN_PROC_POINTS_PIE);
         if(decision.backend==KSN_PROC_POINTS_PIE)pie_batches++;
         else scalar_batches++;
     }
@@ -677,6 +680,7 @@ static JSValue guarded(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
     return result;
 }
 static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
 #ifdef KASANE_MEGADEMO_TRACE
     int64_t began=esp_timer_get_time();
     JSValue result=guarded(ctx,self,argc,argv,register_impl);
@@ -687,15 +691,18 @@ static JSValue js_register(JSContext *ctx,JSValueConst self,int argc,JSValueCons
 #endif
 }
 static JSValue js_unregister(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
 #ifdef KASANE_MEGADEMO_TRACE
     trace.unreg_n++;
 #endif
     return guarded(ctx,self,argc,argv,unregister_impl);
 }
 static JSValue js_begin(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
     return guarded(ctx,self,argc,argv,begin_impl);
 }
 static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
 #ifdef KASANE_MEGADEMO_TRACE
     int64_t began=esp_timer_get_time();
     JSValue result=guarded(ctx,self,argc,argv,draw_impl);
@@ -715,6 +722,7 @@ static JSValue js_draw(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 bool pocket_proc_hook_dry;
 #endif
 JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n){
+    DM_SCOPE(DM_NATIVE);
     const char *op="kasane.procedural.draw";
 #ifdef POCKET_PROC_DRAW_HOOK
     if(pocket_proc_hook_dry){pocket_proc_draw_hook(handle,in,n);return JS_UNDEFINED;}
@@ -754,6 +762,7 @@ JSValue pocket_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in
     return result;
 }
 static JSValue js_commit(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
 #ifdef KASANE_BGCOST_TRACE
     int64_t began=esp_timer_get_time();
     JSValue result=guarded(ctx,self,argc,argv,commit_impl);

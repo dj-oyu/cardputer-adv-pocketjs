@@ -16,6 +16,28 @@ TELEMETRY_SYMBOLS = {
     'derby_telemetry_write',
 }
 
+MEASURE_SYMBOLS = {
+    'dm_now_us', 'dm_enter', 'dm_leave', 'dm_reset', 'dm_read', 'dm_heap',
+    'dm_batch', 'dm_calibrate', 'dm_dispatch', 'dm_present', 'dm_transfer',
+    'dm_output_reset', 'dm_refused', 'dm_format_record', 'dm_emit',
+}
+
+
+def verify_measure_mode(build, expected=None):
+    cache = (build/'CMakeCache.txt').read_bytes()
+    values = [line.split('=', 1)[1] for line in cache.decode().splitlines()
+              if line.startswith('POCKET_DERBY_MEASURE:BOOL=')]
+    if len(values)!=1 or values[0] not in ('ON','OFF'):
+        raise ValueError('missing or ambiguous measure CMake setting')
+    mode = values[0]
+    if expected is not None and mode!=expected:
+        raise ValueError('measure mode differs from requested artifact mode')
+    symbols = {s for s in elf_symbols(build) if s.startswith('dm_')}
+    if (mode=='OFF' and symbols) or (mode=='ON' and symbols!=MEASURE_SYMBOLS):
+        raise ValueError('measure ELF symbols do not match the actual CMake mode')
+    return dict(measure_mode=mode, native_symbols=sorted(symbols),
+                cmake_cache_sha256=hashlib.sha256(cache).hexdigest())
+
 
 def elf_symbols(build):
     text = command('xtensa-esp32s3-elf-nm', '--defined-only', str(build/'cardputer_pocketjs.elf'))
@@ -81,6 +103,7 @@ def main():
     parser.add_argument("--build", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--expect-telemetry", choices=('ON','OFF'))
+    parser.add_argument("--expect-measure", choices=("ON","OFF"))
     args = parser.parse_args()
     head = command("git", "rev-parse", "HEAD")
     expected = os.environ.get("SOURCE_HEAD", head)
@@ -94,6 +117,7 @@ def main():
         build = args.build.resolve()
         description, elf_hash = verify_build(build, head)
         report['build_mode'] = verify_mode(build, args.expect_telemetry)
+        report['build_measure'] = verify_measure_mode(build, args.expect_measure)
         report["idf_version"] = "v6.0.1"
         report["embedded_elf_sha256"] = elf_hash
         report["project_version"] = description["project_version"]

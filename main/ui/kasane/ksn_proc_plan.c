@@ -1,3 +1,4 @@
+#include "../../pocket/derby_measure.h"
 #include "ksn_proc_plan.h"
 #include <math.h>
 #include <string.h>
@@ -132,11 +133,13 @@ static ksn_proc_status run_loop(ksn_proc_vm *vm,const ksn_proc_inst *code,
     return vm->status;
 }
 ksn_proc_status ksn_proc_plan_run(ksn_proc_vm *vm,const ksn_proc_plan *plan,bool debug_step){
+    DM_SCOPE(DM_VM);
     if(!plan)return run_core(vm,false,NULL,0,NULL,debug_step);
     return run_core(vm,plan->valid,plan->code,plan->program.count,plan->fused,debug_step);
 }
 ksn_proc_status ksn_proc_sized_plan_run(ksn_proc_vm *vm,const ksn_proc_sized_plan *plan,
                                         bool debug_step){
+    DM_SCOPE(DM_VM);
     if(!plan)return run_core(vm,false,NULL,0,NULL,debug_step);
     return run_core(vm,plan->valid,plan->code,plan->count,plan->fused,debug_step);
 }
@@ -220,6 +223,7 @@ static bool rom_matches(const ksn_proc_vm *vm,const ksn_proc_rom_plan *plan){
 }
 ksn_proc_status ksn_proc_rom_plan_run(ksn_proc_vm *vm,const ksn_proc_rom_plan *plan,
                                       bool debug_step){
+    DM_SCOPE(DM_VM);
     if(!vm)return KSN_PROC_INVALID;
     if(vm->status!=KSN_PROC_RUNNING)return vm->status;
     if(!plan||!plan->valid||!rom_matches(vm,plan))return ksn_proc_run(vm);

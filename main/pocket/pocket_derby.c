@@ -1,3 +1,4 @@
+#include "derby_measure.h"
 #include "pocket_derby.h"
 #include "pocket_api.h"
 #include "pocket_proc.h"
@@ -154,6 +155,7 @@ static JSValue draw(JSContext *ctx,uint32_t handle,const double in[8]){
 
 /* course(ends, sections, dnr): CH, OC (or falsy: the straight) and DNR. */
 static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
     (void)self;
     const char *op="derby.course";
     uint32_t ends=0,sections=0;
@@ -196,6 +198,7 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
 /* view(pc, zf, t, hl, crowd, hlColor, cells): the frame's camera. On the oval
  * it computes VE and VC as pan() did. */
 static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
     (void)self;
 #ifdef POCKET_DERBY_TELEMETRY
     /* Diagnostic generated chunk: same function, numeric context only. No
@@ -233,6 +236,7 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
         return fail(ctx,op,!ok?POCKET_ERR_INVALID_ARGUMENT:POCKET_ERR_BUSY,
                     !ok?"expected camera, depth, frame, two plans and two numbers":"course required");
     }
+    DM_SCOPE(DM_NATIVE);
     const double *pc=view.pc;
     course->in_view=0;
     if(course->sections){
@@ -252,6 +256,7 @@ static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *a
 /* ser(h, w, s, g0, L, a, b): ser(n, w, s, g0, L, zf, a, b) of derby_pan.js,
  * zf from view(). b omitted: the turf (t0, t1). */
 static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
+    DM_SCOPE(DM_BRIDGE);
     (void)self;
     const char *op="derby.ser";
     uint32_t h;
@@ -262,6 +267,7 @@ static JSValue js_ser(JSContext *ctx,JSValueConst self,int argc,JSValueConst *ar
        (!turf&&!number(ctx,argv[6],&b)))
         return fail(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"expected plan, w, s, g0, L, a and optional b");
     if(!course||!view.set)return fail(ctx,op,POCKET_ERR_BUSY,"view required");
+    DM_SCOPE(DM_NATIVE);
     const double *pc=view.pc,zf=view.zf;
     const bool ve=course->sections!=0;
     double P[4]={0},pg=0;

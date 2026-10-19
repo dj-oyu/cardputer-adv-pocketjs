@@ -1,3 +1,4 @@
+#include "derby_measure.h"
 /* apps/derby/derby_watch.js as the firmware runs it, on the host: the real
  * QuickJS, the real pocket.kasane (view + procedural) and the real renderer
  * presenting into a 240x135 panel after every frame(), with key edges fed
@@ -730,6 +731,7 @@ static bool eval(const char *src,size_t n,const char *name){
 }
 static uint16_t *get_strip(void *o){(void)o;return strip_pixels;}
 static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *p){
+    DM_SCOPE(DM_TRANSFER);
     (void)o;memcpy(panel+y*240,p,rows*240*sizeof *p);return KSN_OK;
 }
 static void present(uint64_t now_us){
@@ -843,7 +845,7 @@ static void frame(unsigned buttons){
                             getenv("DERBY_EACH")?getenv("DERBY_EACH"):"",buttons,
                             getenv("DERBY_LEADSHOTS")?";__L=scene==='race'?Math.max.apply(null,rs.x):-1":"");
     now_ms+=dt_ms;
-    eval(call,strlen(call),"frame.js");
+    { DM_SCOPE(DM_GUEST);eval(call,strlen(call),"frame.js"); }
     if(frame_regs>frame_reg_max)frame_reg_max=frame_regs;
     present((uint64_t)tick*33333u);
     /* DERBY_SHOTS=<tick>:<tag>,...: panels at those ticks (run_derby.py

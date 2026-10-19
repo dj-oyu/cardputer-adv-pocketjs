@@ -40,6 +40,7 @@ jobs:
           python tools/test_session_dispatch.py | tee artifacts/session.log
           python tools/test_verification_receipt.py | tee artifacts/provenance.log
           python tools/test_derby_telemetry.py | tee artifacts/telemetry.log
+          python tools/test_derby_measure.py | tee artifacts/measure-accounting.log
           python tools/games/test_derby_observation.py | tee artifacts/observation.log
           node tools/games/export_derby_oracle.mjs artifacts/derby-oracle.json
       - name: Node regression and QuickJS with ASan/UBSan
@@ -52,6 +53,10 @@ jobs:
         run: |
           set -euo pipefail
           python tools/games/run_derby.py --telemetry --heap-limit 524288 | tee artifacts/derby-telemetry.log
+      - name: Stage accounting with unchanged guest and real renderer
+        run: |
+          set -euo pipefail
+          python tools/games/run_derby.py --measure --heap-limit 524288 | tee artifacts/derby-measure.log
       - name: Prepare i386 compiler and package index for the documented sysroot
         run: |
           sudo apt-get update
@@ -71,7 +76,16 @@ jobs:
   firmware:
     strategy:
       matrix:
-        telemetry: ['OFF', 'ON']
+        include:
+          - variant: normal
+            telemetry: 'OFF'
+            measure: 'OFF'
+          - variant: telemetry
+            telemetry: 'ON'
+            measure: 'OFF'
+          - variant: measure
+            telemetry: 'ON'
+            measure: 'ON'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # GitHub ubuntu hosted workspaces belong to UID 1001. Keep Git ownership
@@ -97,16 +111,16 @@ jobs:
           test "$(id -u)" = "$(stat -c %u .)"
           . "$IDF_PATH/export.sh"
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
-          idf.py -B build_ci -D SDKCONFIG="$PWD/build_ci/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D POCKET_DERBY_TELEMETRY=${{ matrix.telemetry }} build
+          idf.py -B build_ci -D SDKCONFIG="$PWD/build_ci/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D POCKET_DERBY_TELEMETRY=${{ matrix.telemetry }} -D POCKET_DERBY_MEASURE=${{ matrix.measure }} build
           if [ '${{ matrix.telemetry }}' = OFF ]; then
             if xtensa-esp32s3-elf-nm build_ci/cardputer_pocketjs.elf | grep ' derby_telemetry_'; then
               echo 'Telemetry must be absent in shipping ELF'; exit 1
             fi
           fi
-          python tools/record_verification.py --build build_ci --expect-telemetry '${{ matrix.telemetry }}' --out build_ci/verification.json
+          python tools/record_verification.py --build build_ci --expect-telemetry '${{ matrix.telemetry }}' --expect-measure '${{ matrix.measure }}' --out build_ci/verification.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: cardputer-derby-home-${{ env.SOURCE_HEAD }}-telemetry-${{ matrix.telemetry }}
+          name: cardputer-derby-home-${{ env.SOURCE_HEAD }}-${{ matrix.variant }}-telemetry-${{ matrix.telemetry }}-measure-${{ matrix.measure }}
           path: |
             build_ci/cardputer_pocketjs.bin
             build_ci/cardputer_pocketjs.elf
