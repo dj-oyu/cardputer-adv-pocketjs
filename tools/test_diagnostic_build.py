@@ -31,6 +31,7 @@ class DiagnosticProofTests(unittest.TestCase):
             (build/'CMakeCache.txt').write_text('POCKET_DERBY_COMPARE_FIXED_HW:BOOL=ON\n')
             with patch('verify_diagnostic_build.verify_mode', return_value={'telemetry_mode':'ON'}) as mode, \
                  patch('verify_diagnostic_build.verify_measure_mode', return_value={'measure_mode':'ON'}) as measure, \
+                 patch('verify_diagnostic_build.verify_fixed_mode', return_value={'mode':'OFF'}), \
                  patch('verify_diagnostic_build.symbol_u32', return_value=0x2545F491) as seed:
                 self.assertEqual(prove(build)['artifacts']['cardputer_pocketjs.bin']['sha256'], hashlib.sha256(image).hexdigest())
                 mode.assert_called_once_with(build, 'ON')

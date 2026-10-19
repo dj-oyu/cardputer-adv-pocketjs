@@ -103,7 +103,7 @@ def rom_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
     return out
 
 
-def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", telemetry=False, measure=False) -> Path:
+def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", telemetry=False, measure=False, fixed_workload=False, harness=None) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     table = rom_table(cache, rom_src)
     subprocess.run(["python3", "tools/make_font.py", str(cache)], cwd=ROOT, check=True,
@@ -134,10 +134,13 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", te
     if measure:
         diagnostic += ["-DPOCKET_DERBY_MEASURE"]
         diagnostic_sources += ["main/pocket/derby_measure.c", "tools/games/derby_measure_host.c"]
+    if fixed_workload:
+        diagnostic += ["-DPOCKET_DERBY_FIXED_WORKLOAD"]
+        diagnostic_sources += ["main/pocket/derby_fixed_workload.c"]
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *diagnostic, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
-                    "tools/games/test_derby_host.c", *kasane_sources(), *EXTRA, *diagnostic_sources, str(table), *objects,
+                    (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, *diagnostic_sources, str(table), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)
     return binary
