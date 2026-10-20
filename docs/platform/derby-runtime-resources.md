@@ -23,6 +23,9 @@ reserve, then again after output with zero reserve; no deadline is rearmed by
 the observer. Existing 250 ms
 guest watchdog, 180 s session, output bounds, STOP/HOME and owner checks remain.
 This observation has no retry. Native allocator queries do not allocate memory.
+Resource failure poisons the trial without a second USB write, including an
+invalid END attempt. This keeps a slow observation plus failed output from
+adding another 100 ms native wait. Missing END cannot qualify as completion.
 
 | Field | Meaning, in bytes |
 | --- | --- |

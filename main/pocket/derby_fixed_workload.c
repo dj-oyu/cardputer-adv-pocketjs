@@ -127,7 +127,15 @@ static void report(uint32_t finish){
     if(duration>180000000-250000){df_fail(DF_TIMEOUT);return;}
     if(s.end_pending){
         if(!s.resources_reported){
-            if(!resource_record()){df_fail(DF_MEASUREMENT);return;}
+            if(!resource_record()){
+                /* Observation plus one USB attempt already consumes this turn's
+                 * budget. No second invalid-END write: missing END fails closed. */
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+                dd_cancel();
+#endif
+                s.quality|=DF_MEASUREMENT;s.trial_quality|=s.quality;s.phase=DF_ABORT;
+                s.turn_open=s.wait_open=false;return;
+            }
             s.resources_reported=true;return;
         }
         s.phase=DF_DONE;final_record();return;
