@@ -101,6 +101,11 @@ static esp_err_t tx_reap(void) {
 #endif
     spi_transaction_t *done = NULL;
     esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
+#ifdef KASANE_DMA_OVERLAP
+    /* A successful driver status without our descriptor is still a failed
+     * reap. Normalize before counting, while retaining the driver's borrow. */
+    if(e==ESP_OK&&done!=&tx_pending)e=ESP_ERR_INVALID_STATE;
+#endif
     DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
 #ifdef KASANE_P0_BUS_PROBE
     uint32_t finished=(uint32_t)esp_timer_get_time();
@@ -126,7 +131,13 @@ static esp_err_t tx_reap(void) {
         }
     }
 #endif
+#ifdef KASANE_DMA_OVERLAP
+    /* A DMA-failed completion still returns our descriptor. Timeout or an
+     * invalid handle does not: retain ownership until the driver returns it. */
+    tx_inflight = done != &tx_pending;
+#else
     tx_inflight = false;
+#endif
     return e;
 }
 static bool capture,capture_turn_taken;
@@ -157,8 +168,14 @@ static esp_err_t command(uint8_t c, const void *data, size_t n) {
     // Any command at all ends the RAMWR session, so nothing may be in flight
     // when one starts: reap first (the queued strip is still ordered before it).
     // next_row is -1 either way, because a command ends the session.
+#ifdef KASANE_DMA_OVERLAP
+    esp_err_t prior=tx_reap();
+    next_row=-1;
+    if(prior!=ESP_OK)return prior;
+#else
     (void)tx_reap();
     next_row = -1;
+#endif
     esp_err_t e = tx(false, &c, 1);
     return e == ESP_OK && n ? tx(true, data, n) : e;
 }
@@ -649,3 +666,20 @@ esp_err_t board_present_sync(int y, int rows, uint16_t *pixels) {
     if(e!=ESP_OK) next_row=-1;
     return e;
 }
+
+#ifdef KASANE_DMA_OVERLAP
+esp_err_t board_present_finish(void) {
+    esp_err_t e;
+    /* portMAX_DELAY normally cannot time out. If it does, the driver still
+     * owns the descriptor, so keep draining rather than releasing a borrow. */
+    do { e=tx_reap(); } while(e==ESP_ERR_TIMEOUT);
+    if(e!=ESP_OK)next_row=-1;
+    return e;
+}
+esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels) {
+    esp_err_t e=board_present_finish();
+    if(e==ESP_OK)e=board_present_rect(x,y,cols,rows,pixels);
+    if(e!=ESP_OK)next_row=-1;
+    return e;
+}
+#endif

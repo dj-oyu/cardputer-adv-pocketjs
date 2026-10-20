@@ -21,6 +21,8 @@ def off_path(source):
         p=line.strip()
         if p=='#include "pocket/derby_fixed_workload.h"':continue
         if p.startswith(('#if ','#ifdef ','#ifndef ')):
+            if p=='#ifdef KASANE_DMA_OVERLAP':stack.append(('fixed',False));continue
+            if p=='#ifndef KASANE_DMA_OVERLAP':stack.append(('fixed',True));continue
             if p in ('#ifdef POCKET_DERBY_FIXED_WORKLOAD','#ifdef POCKET_DERBY_DETAIL_MEASURE'):stack.append(('fixed',False));continue
             if keep():out.append(line)
             stack.append(('other',True));continue

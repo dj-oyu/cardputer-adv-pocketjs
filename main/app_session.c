@@ -573,7 +573,54 @@ void app_force_redraw_bands(uint32_t bands) {
     if(bands) pocket_kasane_invalidate_bands(bands);
 }
 static esp_err_t present_frame(void);
+#ifdef KASANE_DMA_OVERLAP
+typedef struct {
+    unsigned sent_us;
+    size_t pending_bytes;
+    bool pending_capture;
+} kasane_display_t;
+#else
 typedef struct { unsigned sent_us; } kasane_display_t;
+#endif
+#ifdef KASANE_DMA_OVERLAP
+/* Called inside the send's existing scopes, or the frame-final scopes below.
+ * No scope or sent_us accounting here: recursive DD_TX_SYNC would count twice. */
+static esp_err_t kasane_drain(kasane_display_t *display) {
+    esp_err_t result=board_present_finish();
+#ifdef POCKET_DERBY_MEASURE
+    if(display->pending_bytes){
+        dm_transfer(display->pending_bytes,result!=ESP_OK,display->pending_capture);
+        display->pending_bytes=0;
+    }
+#else
+    (void)display;
+#endif
+    return result;
+}
+static esp_err_t kasane_dma_submit(kasane_display_t *display,int x,int y,int cols,
+                                   int rows,uint16_t *pixels) {
+    esp_err_t result=kasane_drain(display);
+    if(result!=ESP_OK)return result;
+    result=board_present_submit(x,y,cols,rows,pixels);
+#ifdef POCKET_DERBY_MEASURE
+    /* Queue acceptance is not a completed transfer. Preserve J1's successful
+     * completion byte/count meaning until the next drain returns its result. */
+    if(result==ESP_OK){
+        display->pending_bytes=(size_t)rows*(size_t)cols*2u;
+        display->pending_capture=board_capture_active();
+    }else dm_transfer((size_t)rows*(size_t)cols*2u,true,board_capture_active());
+#endif
+    return result;
+}
+static ksn_result kasane_finish(void *opaque) {
+    kasane_display_t *display=opaque;
+    int64_t began=esp_timer_get_time();
+    esp_err_t result;
+    { DM_SCOPE(DM_TRANSFER);DD_SCOPE(DD_TX_SYNC);result=kasane_drain(display); }
+    display->sent_us+=(unsigned)(esp_timer_get_time()-began);
+    return result==ESP_OK?KSN_OK:KSN_IO;
+}
+#endif
 static uint16_t *kasane_strip(void *opaque) {
     (void)opaque;return board_strip();
 }
@@ -600,13 +647,21 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     // Kasane promotes its command bank only after acknowledged transfers.
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+#ifndef KASANE_DMA_OVERLAP
 #ifdef POCKET_DERBY_MEASURE
     bool measure_capture=board_capture_active();
 #endif
+#endif
     esp_err_t result;
+#ifdef KASANE_DMA_OVERLAP
+    { DM_SCOPE(DM_TRANSFER);result=kasane_dma_submit(display,0,y,LCD_W,rows,(uint16_t *)pixels); }
+#else
     { DM_SCOPE(DM_TRANSFER);result=board_present_sync(y,rows,(uint16_t *)pixels); }
+#endif
+#ifndef KASANE_DMA_OVERLAP
 #ifdef POCKET_DERBY_MEASURE
     dm_transfer((size_t)rows*240u*2u,result!=ESP_OK,measure_capture);
+#endif
 #endif
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
@@ -634,13 +689,21 @@ static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t c
     int64_t began=esp_timer_get_time();
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+#ifndef KASANE_DMA_OVERLAP
 #ifdef POCKET_DERBY_MEASURE
     bool measure_capture=board_capture_active();
 #endif
+#endif
     esp_err_t result;
+#ifdef KASANE_DMA_OVERLAP
+    { DM_SCOPE(DM_TRANSFER);result=kasane_dma_submit(display,x,y,cols,rows,(uint16_t *)pixels); }
+#else
     { DM_SCOPE(DM_TRANSFER);result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels); }
+#endif
+#ifndef KASANE_DMA_OVERLAP
 #ifdef POCKET_DERBY_MEASURE
     dm_transfer((size_t)rows*(size_t)cols*2u,result!=ESP_OK,measure_capture);
+#endif
 #endif
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
@@ -2515,7 +2578,12 @@ static esp_err_t present_frame(void) {
         }
 #endif
         int64_t began=esp_timer_get_time();
+#ifdef KASANE_DMA_OVERLAP
+        const ksn_display_completion completion={.ctx=&display_state,.finish=kasane_finish};
+        ksn_result result=pocket_kasane_present_complete(&port,&completion,&stats);
+#else
         ksn_result result=pocket_kasane_present(&port,&stats);
+#endif
 #ifdef KASANE_D2_MULTI_SURFACE_PROBE
         ESP_LOGI("D2_MULTI","PRESENT result=%u bytes=%u duration_us=%u "
                  "heap_free=%u heap_largest=%u stack_hwm_bytes=%u",
