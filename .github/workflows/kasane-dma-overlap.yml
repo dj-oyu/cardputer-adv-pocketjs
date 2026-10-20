@@ -10,6 +10,35 @@ concurrency:
 env:
   SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
+  consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          path: producer
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: dj-oyu/esp-device-broker-mcp
+          ref: c85412b2e10e4919ad7d8d8e0e2d7f95a39f2406
+          path: consumer
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.16'
+      - name: Install pinned consumer verification environment
+        working-directory: consumer
+        run: |
+          python -m pip install --disable-pip-version-check --no-deps uv==0.12.19
+          uv sync --frozen --python python
+      - name: Actual consumer binding through host r2 with synthetic records
+        working-directory: consumer
+        env:
+          PYTHONPATH: ${{ github.workspace }}/consumer/src:${{ github.workspace }}/consumer/tests
+        run: |
+          uv run --frozen python -m pytest -q ../producer/tools/test_derby_mcp59_composition.py tests/test_dma_modeproof.py tests/test_dma_collector_binding.py
   host:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -120,5 +149,40 @@ jobs:
             build_dma/size.txt
             build_dma/SHA256SUMS
             build_dma/CMakeCache.txt
+            build_dma/generated/derby_fixed_workload/derby_view.js
             build_dma/log/
           retention-days: 14
+  firmware_consumer:
+    needs: firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        overlap: ['OFF', 'ON']
+        detail: ['OFF', 'ON']
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          path: producer
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: dj-oyu/esp-device-broker-mcp
+          ref: c85412b2e10e4919ad7d8d8e0e2d7f95a39f2406
+          path: consumer
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.16'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: kasane-dma-${{ matrix.overlap }}-detail-${{ matrix.detail }}-${{ env.SOURCE_HEAD }}
+          path: target-proof
+      - name: Consume the new head's actual BIN ELF cache and typed proof
+        working-directory: consumer
+        env:
+          PYTHONPATH: ${{ github.workspace }}/consumer/src
+        run: |
+          python ../producer/tools/games/verify_derby_dma_consumer.py --build ../target-proof --expect-head "$SOURCE_HEAD" --expect-detail '${{ matrix.detail }}' --expect-dma '${{ matrix.overlap }}'

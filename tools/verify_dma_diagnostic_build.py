@@ -8,13 +8,20 @@ import hashlib
 import json
 from pathlib import Path
 
-from record_verification import elf_symbols
+from record_verification import command, elf_symbols
 from verify_diagnostic_build import prove
 
 CONTRACT = 'derby-dma-diagnostic-v1'
 DMA_SYMBOLS = frozenset(('board_present_submit', 'board_present_finish'))
 AXES = {'dma_overlap': 'KASANE_DMA_OVERLAP',
         'detail_measurement': 'POCKET_DERBY_DETAIL_MEASURE'}
+
+
+def dma_function_symbols(build):
+    """Require linked code symbols, not data bearing the same names."""
+    text = command('xtensa-esp32s3-elf-nm', '--defined-only', str(build / 'cardputer_pocketjs.elf'))
+    return {parts[-1] for line in text.splitlines()
+            if len(parts := line.split()) >= 3 and parts[-2] in ('T', 't', 'W', 'w')}
 
 
 def prove_dma(build, *, dma_overlap, detail_measurement):
@@ -24,8 +31,8 @@ def prove_dma(build, *, dma_overlap, detail_measurement):
     cache = (build / 'CMakeCache.txt').read_bytes()
     lines = cache.decode().splitlines()
     for axis, setting in AXES.items():
-        values = [line.split('=', 1)[1] for line in lines if line.startswith(setting + ':BOOL=')]
-        if values != [requested[axis]]:
+        values = [line for line in lines if line.startswith((setting + ':', setting + '='))]
+        if values != [setting + ':BOOL=' + requested[axis]]:
             raise ValueError('requested/cache axis mismatch: ' + axis)
     # Existing proof checks generated fixture, fixed seed, owner completion,
     # linked detail value, SDK and the actual BIN-to-ELF hash pair.
@@ -35,6 +42,8 @@ def prove_dma(build, *, dma_overlap, detail_measurement):
     symbols = DMA_SYMBOLS & elf_symbols(build)
     if symbols != (DMA_SYMBOLS if dma_overlap == 'ON' else set()):
         raise ValueError('requested/cache/linked DMA axis mismatch')
+    if dma_overlap == 'ON' and not DMA_SYMBOLS <= dma_function_symbols(build):
+        raise ValueError('DMA symbols must be linked functions')
     return dict(schema_version=1, proof_contract=CONTRACT, requested_axes=requested,
                 verified_axes=dict(requested),
                 dma_overlap=dict(mode=dma_overlap, symbol_contract='board-present-submit-finish-v1',
