@@ -191,3 +191,5 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 - [DERBY最適化の合流点](platform/derby-integration-junctions.md) — 固定base、lane所有境界、合流受入条件。
 
 - [固定計測のON/OFF共通正常終了](platform/derby-fixed-completion.md) — mode・BIN/ELF・flash・collectorの照合。
+
+- [J1 DMA単独比較の検証条件](platform/derby-j1-dma-validation.md) — PR31/30合流、同一head CI、J1基準とDMA OFF/ONの対照。

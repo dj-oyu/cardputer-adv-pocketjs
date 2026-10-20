@@ -55,6 +55,33 @@ def js_plans(d: Path) -> Path | None:
     return p if "@plan" in p.read_text(encoding="utf-8") else None
 
 
+def instrument_draw(view: str) -> str:
+    """Capture either retained draw wrapper without changing its native call."""
+    wrappers = []
+    for args in ("a", "a, b, c, d, e, f, g, h"):
+        anchor = f"const dr = (n, {args}) => {{ if (live[n]) H.draw(live[n], {args}); }};"
+        wrappers.extend((anchor, args) for _ in range(view.count(anchor)))
+    if len(wrappers) != 1:
+        raise AssertionError("derby_view.js: expected exactly one known draw wrapper")
+    anchor, args = wrappers[0]
+    # draw_impl accepts an array or numeric arguments, trimming only trailing
+    # undefined from the latter. Invoke the unchanged native call first. Array
+    # capture accepts own data elements only: rereading guest getters could log
+    # different inputs, and a guest-owned slice/join method must never run here.
+    replacement = (
+        f"const dr = (n, {args}) => {{ if (live[n]) {{ "
+        f"H.draw(live[n], {args}); "
+        "let values; if (Array.isArray(a)) { values = []; "
+        "for (let i = 0; i < a.length; ++i) { const d = Object.getOwnPropertyDescriptor(a, i); "
+        "if (!d || !Object.prototype.hasOwnProperty.call(d, 'value')) "
+        "throw Error('DRAW capture requires data-array inputs'); values.push(d.value); } "
+        f"}} else {{ values = [{args}]; "
+        "while (values.length && values[values.length - 1] === undefined) values.pop(); } "
+        "__log('DRAW ' + n + ' ' + values.join(',')); } };"
+    )
+    return view.replace(anchor, replacement, 1)
+
+
 def instrument(root: Path) -> None:
     d = root / "apps/derby"
     view = (d / "derby_view.js").read_text(encoding="utf-8")
@@ -69,11 +96,8 @@ def instrument(root: Path) -> None:
         assert m, "derby_view.js: registration line moved"
         anchor = m[0]
         view = view.replace(anchor, anchor + "    __log('REG ' + n + ' ' + JSON.stringify(globalThis.__arg || []));\n")
-    # Every draw goes through dr() (derby_view.js), as it is made.
-    anchor = "const dr = (n, a) => { if (live[n]) H.draw(live[n], a); };"
-    assert anchor in view, "derby_view.js: draw line moved"
-    view = view.replace(anchor, "const dr = (n, a) => { if (live[n]) { __log('DRAW ' + n + ' ' + a.join(',')); "
-                                "H.draw(live[n], a); } };")
+    # Every accepted draw goes through dr(), in submission order.
+    view = instrument_draw(view)
     (d / "derby_view.js").write_text(view, encoding="utf-8")
     # prog() as the app runs it (the decoder, or the text assembler of an
     # older DIR) records its arguments for the REG line.

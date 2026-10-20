@@ -72,6 +72,33 @@ jobs:
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_dma -D SDKCONFIG="$PWD/build_dma/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_DMA_OVERLAP=${{ matrix.overlap }} -D POCKET_DERBY_DETAIL_MEASURE=${{ matrix.detail }} build
           python -B tools/record_verification.py --build build_dma --expect-telemetry ON --expect-measure ON --out build_dma/verification.json
+          python -B - '${{ matrix.overlap }}' '${{ matrix.detail }}' <<'PY'
+          import hashlib, json, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools')
+          from record_verification import detail_mode, elf_symbols
+          build = Path('build_dma')
+          overlap, detail = sys.argv[1:]
+          cache = (build / 'CMakeCache.txt').read_bytes()
+          selected = [line.split('=', 1)[1] for line in cache.decode().splitlines()
+                      if line.startswith('KASANE_DMA_OVERLAP:BOOL=')]
+          assert selected == [overlap], 'DMA cache/selection mismatch'
+          assert detail_mode(build) == detail, 'detail cache/selection mismatch'
+          required = {'board_present_submit', 'board_present_finish'}
+          linked = required & elf_symbols(build)
+          assert linked == (required if overlap == 'ON' else set()), 'DMA linked mode mismatch'
+          images = {}
+          for suffix in ('bin', 'elf'):
+              path = build / ('cardputer_pocketjs.' + suffix)
+              data = path.read_bytes()
+              images[suffix] = dict(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+          proof = dict(schema_version=1, source_head=subprocess.check_output(
+              ['git', 'rev-parse', 'HEAD'], text=True).strip(), dma_mode=overlap,
+              detail_mode=detail, linked_dma_symbols=sorted(linked),
+              cmake_cache_sha256=hashlib.sha256(cache).hexdigest(), images=images)
+          (build / 'dma-mode-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
+          print(json.dumps(proof))
+          PY
           python -B tools/report_derby_fixed_stack.py --build build_dma
           python -B tools/report_derby_detail_resources.py --build build_dma
           idf.py -B build_dma size-files > build_dma/size-files.txt
