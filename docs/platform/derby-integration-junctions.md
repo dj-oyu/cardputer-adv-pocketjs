@@ -83,7 +83,7 @@ copyされる。in-flightのTX/descriptorはHALが所有し、未知のcompletio
 - `board_present_submit(x,y,cols,rows,pixels)` / `board_present_finish()` — HALのcopied submitと最終drain。
 - `ksn_display_completion { ctx, finish }` — reentryやcore変更をしないowner task callback。
 - `ksn_render_rects_complete()` → `ksn_runtime_present_complete()` → `ksn_view_host_present_complete()` →
-  `pocket_kasane_present_complete()` — 成功/失敗/無damageを含む全returnでfinishしてからframe ACK/promotion。
+  `pocket_kasane_present_complete()` — renderer completeへ進んだ描画経路と無damageの正常経路ではfinishしてからframe ACK/promotion。上層のinvalid引数/reentry/BUSY早期拒否は既存guardを維持し、他のpresentationのfinishを呼ばない。
 - app sessionの `kasane_finish()` — 最終drainをsend elapsedへ加える。`KASANE_DMA_OVERLAP` は既定OFF。
 
 所有の追加範囲はDMA担当が上記completion APIの宣言・伝播・retry/cancel/reset/teardownを持つ。
