@@ -9,7 +9,8 @@
 | J0 baseline | PR25 `dc2c5e044429a4904e91564aa7f9cb30d7d4cbbb` | 実機試験中のheadを凍結 |
 | J0 native | PR26 `3fafcadbd72ecbd0d799cbe9d29f037ff62c05d5` | J0系列の単独比較専用 |
 | J0 batch | PR27 `711f94fa91c6e0d6ba7bc00def75ad686b724c7d` | J0系列の単独比較専用 |
-| J1共通比較base | branch `exp/derby-fixed-completion-20261020`、親は上記PR25 | このDraftの最終CI/review済みheadを受領票へfull SHAで固定する |
+| J1共通比較base | PR29 `b561aea1c0798feb28055a00d36681fae81ac58a`、親は上記PR25 | このDraftの最終CI/review済みheadを受領票へfull SHAで固定する |
+| B DMA重なりの供給元 | PR28 `4f8855d134b8f475633b7be1decac6be577a6697`、base main `e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267` | 既定OFF、実機未受入、J1へ必要な差分だけ移植 |
 | A plan再利用の供給元 | PR24 `7a9379367516340fd759ecb63264cba1e38483fd` | J1へ必要な変更だけを移植し既定OFF |
 | 通常動作基盤 | PR19 `c47084d087faf3376831b821e4c03de87a3495d5` | 通常動作の実機受入待ち。J1と同じbranchとは扱わない |
 | native/batchの通常OFF収容 | PR20 `49e09d05a605ea04872220d43a93e54b7647667b` | PR19受入後に再統合する別段階 |
@@ -67,3 +68,53 @@ PR24の他実験禁止guardは現段階で維持する。組合せが必要な�
 小差は命令cache/layout交絡を分離した同一バイナリ比較などの根拠が必要。単独改善率を足し算しない。
 main向けにはPR19の受入済み通常基盤へ既定OFF差分を整理し、診断ON root設定を持ち込まない。
 受入前にmain mergeしない。18bootの試験計画を自動起動しない。既存Spaceページは編集しない。
+
+
+## PR28をJ1へ移植する際の固定境界
+
+供給元はPR28 head `4f8855d134b8f475633b7be1decac6be577a6697`。実装base main
+`e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267` との差分20pathだけを移植候補にし、branch全体をmergeしない。
+J1の計測用headはPR29 `b561aea1c0798feb28055a00d36681fae81ac58a` のまま凍結する。
+この文書追補のbranchは計測baseではない。J1の最終全CI確認と、移植後headの全CI/再測定は別のgate。
+
+API境界は以下に固定する。既存 `ksn_display_port` のlayoutを変えず、入力pixelはpresent callbackのreturn前に
+copyされる。in-flightのTX/descriptorはHALが所有し、未知のcompletionでは隔離して再利用しない。
+
+- `board_present_submit(x,y,cols,rows,pixels)` / `board_present_finish()` — HALのcopied submitと最終drain。
+- `ksn_display_completion { ctx, finish }` — reentryやcore変更をしないowner task callback。
+- `ksn_render_rects_complete()` → `ksn_runtime_present_complete()` → `ksn_view_host_present_complete()` →
+  `pocket_kasane_present_complete()` — 成功/失敗/無damageを含む全returnでfinishしてからframe ACK/promotion。
+- app sessionの `kasane_finish()` — 最終drainをsend elapsedへ加える。`KASANE_DMA_OVERLAP` は既定OFF。
+
+所有の追加範囲はDMA担当が上記completion APIの宣言・伝播・retry/cancel/reset/teardownを持つ。
+`main/ui/kasane/ksn_ports.h`、render/runtime/viewの対応header・実装、`main/pocket/pocket_kasane.*`、
+`main/app_session.c` のdisplay adapterが共有接点になる。A担当のplan/stateファイルと同時編集しない。
+renderのscope、app display adapterの計測hook、`main/CMakeLists.txt` のflag組込は合流担当が調整する。
+fixture/controller/END/owner EXIT/collector/schemaはDMA laneから変更しない。
+
+J1には既にsend callbackの `DM_SCOPE(DM_TRANSFER)`、renderer内の `DD_TX_SYNC` と
+HALの `DD_TX_COPY/SUBMIT/REAP` がある。PR28をそのまま貼ると最終finishがrender bodyの外へ移り、
+区分計測からdrainが落ちる。次を移植時の必須変更として扱い、単独PR28のCIを流用しない。
+
+1. `DM_RASTER` と `DD_RENDER` の全体scopeをcomplete wrapperへ移し、finishとACKまで含める。
+2. 新しい `kasane_finish()` の待ちを `DM_TRANSFER` と `DD_TX_SYNC` に含め、`sent_us` に足す。
+   残待ちをrender self/JS selfへ誤分類せず、payload/copy byteをfinishで二重加算しない。
+3. completion失敗をtransfer failure/present failureへ伝播し、owner完了やACKを先行させない。
+   既存TX submit/reapの実call境界とfailure計数はHAL側のまま保つ。
+4. raw schema/fixture/seed/capsは維持する。変更が必要な計測意味は先に合意しversion化する。
+
+再試験は全OFFの通常回帰、DMA OFF/ONのboard1700strips・renderer100frames＋60damageケース、
+shared poison/descriptor寿命、prior/final/error/timeout/未知completion隔離、retry/cancel/reset、
+procedural pendingとlease/cache、repair、最終7rows/full/narrow/polling/in-place切替を含む。
+J1のON/OFF固定fixture・全raw fatal/transport/END-ownerEXIT-STOP-HOME・proof負例も通す。
+最終headのtarget OFF/ON link、linked mode・BIN/ELF/flash/readback/capture receipt、全CI、独立reviewが必要。
+
+PR28単独では専用CIと関連owner/repair検証、OFF/ON target linkが成功し、親報告は5workflow/12jobs成功。
+main baseで静的DIRAM増なし、ON Flash Code +56B。これはJ1とのmemory差や実機改善率ではない。
+広い `tools/kasane_contract/run.sh` は32bit sysroot準備 `m32_sysroot.sh` のexit100で未完走。
+未実行部分は、環境が用意できたときに完走させるか、同等範囲を通した明示的CI証拠が必要。
+単独実機比較はまだで、改善率は未実測。
+
+実機は唯一担当01a155b9が新しいJ1移植headでON基準を取り直し、DMA OFF/ONを単独比較する。
+whole workは最終drain込み、bands/bytes/hash、heap/largest/eval/stack、修復、終了、物理panel整合を確認する。
+小差はlayout交絡を除いた同一binary A/B等が必要。単独受入前にA/Cとの組合せ採用やmain mergeをしない。
