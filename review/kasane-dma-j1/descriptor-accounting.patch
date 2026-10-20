@@ -1,0 +1,135 @@
+--- a/main/hal/board.c
++++ b/main/hal/board.c
+@@ -101,6 +101,11 @@
+ #endif
+     spi_transaction_t *done = NULL;
+     esp_err_t e = spi_device_get_trans_result(lcd, &done, portMAX_DELAY);
++#ifdef KASANE_DMA_OVERLAP
++    /* A successful driver status without our descriptor is still a failed
++     * reap. Normalize before counting, while retaining the driver's borrow. */
++    if(e==ESP_OK&&done!=&tx_pending)e=ESP_ERR_INVALID_STATE;
++#endif
+     DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
+ #ifdef KASANE_P0_BUS_PROBE
+     uint32_t finished=(uint32_t)esp_timer_get_time();
+@@ -130,7 +135,6 @@
+     /* A DMA-failed completion still returns our descriptor. Timeout or an
+      * invalid handle does not: retain ownership until the driver returns it. */
+     tx_inflight = done != &tx_pending;
+-    if(tx_inflight&&e==ESP_OK)e=ESP_ERR_INVALID_STATE;
+ #else
+     tx_inflight = false;
+ #endif
+--- a/tools/test_board_dma_overlap.py
++++ b/tools/test_board_dma_overlap.py
+@@ -18,7 +18,9 @@
+ #define DD_SCOPE(stage) ((void)0)
+ #define DD_OPEN(name,stage) ((void)0)
+ #define DD_CLOSE(name) ((void)0)
+-#define DD_ADD(event,amount) ((void)0)
++enum {DD_TX_FAILURES,DD_TX_REAPS,DD_TX_COPY_BYTES,DD_TX_SUBMITS,DD_TX_PAYLOAD_BYTES,DD_EVENTS};
++static unsigned detail[DD_EVENTS];
++#define DD_ADD(event,amount) (detail[event]+=(unsigned)(amount))
+ #define ESP_OK 0
+ #define ESP_ERR_INVALID_ARG 22
+ #define ESP_ERR_TIMEOUT 23
+@@ -46,13 +48,19 @@
+ static esp_err_t tx_reap(void);
+ static int next_row=-1;
+ static esp_err_t command(uint8_t,const void *,size_t);
+-static int timeout_once, unknown_once, dma_fail_once;
++static int timeout_once, unknown_once, dma_fail_once, descriptor_once;
++static spi_transaction_t foreign_descriptor;
+ static esp_err_t spi_device_get_trans_result(int device,spi_transaction_t **done,int wait){
+  (void)device;(void)wait;assert(tx_inflight);
+  assert(borrow==tx_pending.tx_buffer);
+  assert(memcmp(borrow,saved,borrowed_bytes)==0);
+  if(timeout_once){timeout_once=0;return ESP_ERR_TIMEOUT;}
+  if(unknown_once){unknown_once=0;return ESP_ERR_INVALID_ARG;}
++ if(descriptor_once){
++  int mode=descriptor_once;descriptor_once=0;
++  *done=mode==1?NULL:&foreign_descriptor;
++  return mode==3?ESP_ERR_INVALID_ARG:ESP_OK;
++ }
+  *done=&tx_pending;reaps++;
+  if(dma_fail_once){dma_fail_once=0;return ESP_ERR_INVALID_STATE;}
+  return ESP_OK;
+@@ -101,6 +109,29 @@
+  unknown_once=1;c=command_calls;
+  assert(command(0x2c,NULL,0)==ESP_ERR_INVALID_ARG&&tx_inflight);
+  assert(command_calls==c&&board_present_finish()==ESP_OK);
++ /* Missing/foreign descriptors count the normalized failure once per reap.
++  * Quarantined DMA storage and all payload/copy/submit meanings survive. */
++ for(int mode=1;mode<=3;mode++){
++  assert(board_present_submit(0,0,240,8,shared)==ESP_OK);
++  unsigned failures=detail[DD_TX_FAILURES],attempts=detail[DD_TX_REAPS];
++  unsigned payload=detail[DD_TX_PAYLOAD_BYTES],copies=detail[DD_TX_COPY_BYTES];
++  unsigned submits=detail[DD_TX_SUBMITS];c=command_calls;q=queues;
++  old_borrow=borrow;old_descriptor=tx_pending;
++  descriptor_once=mode;
++  assert(board_present_finish()==(mode==3?ESP_ERR_INVALID_ARG:ESP_ERR_INVALID_STATE));
++  assert(tx_inflight&&next_row==-1&&detail[DD_TX_FAILURES]==failures+1);
++  assert(detail[DD_TX_REAPS]==attempts+1&&borrow==old_borrow);
++  assert(memcmp(&old_descriptor,&tx_pending,sizeof(tx_pending))==0);
++  descriptor_once=mode;
++  assert(board_present_submit(16,8,32,8,shared)==(mode==3?ESP_ERR_INVALID_ARG:ESP_ERR_INVALID_STATE));
++  assert(tx_inflight&&command_calls==c&&queues==q);
++  assert(detail[DD_TX_FAILURES]==failures+2&&detail[DD_TX_REAPS]==attempts+2);
++  assert(detail[DD_TX_PAYLOAD_BYTES]==payload&&detail[DD_TX_COPY_BYTES]==copies);
++  assert(detail[DD_TX_SUBMITS]==submits);
++  assert(board_present_finish()==ESP_OK&&!tx_inflight);
++  assert(board_present_finish()==ESP_OK&&detail[DD_TX_FAILURES]==failures+2);
++  assert(detail[DD_TX_REAPS]==attempts+3);
++ }
+  /* Cancellation/exit must drain even if no next submit occurs. */
+  assert(board_present_submit(16,0,32,8,shared)==ESP_OK);
+  assert(board_present_finish()==ESP_OK&&!tx_inflight);
+--- a/tools/kasane_contract/test_dma_measurement.c
++++ b/tools/kasane_contract/test_dma_measurement.c
+@@ -15,7 +15,7 @@
+ #ifdef KASANE_DMA_OVERLAP
+ static unsigned pending_y;
+ static int fail_completion_y=-1,fail_queue_y=-1;
+-static bool capture_flag;
++static bool capture_flag,unknown_descriptor;
+ #endif
+ static uint16_t pixels[240*8];
+ typedef struct { unsigned sent_us; size_t pending_bytes; bool pending_capture; } kasane_display_t;
+@@ -26,7 +26,9 @@
+ static esp_err_t board_present_finish(void){
+  if(!pending)return ESP_OK;
+  DD_SCOPE(DD_TX_REAP);DD_ADD(DD_TX_REAPS,1);
+- clock_us+=37;pending=false;
++ clock_us+=37;
++ if(unknown_descriptor){DD_ADD(DD_TX_FAILURES,1);return 9;}
++ pending=false;
+  if((late_failure&&pending_y==128)||(int)pending_y==fail_completion_y){DD_ADD(DD_TX_FAILURES,1);return 7;}return ESP_OK;
+ }
+ #endif
+@@ -120,5 +122,26 @@
+   assert(d.event[DD_TX_PAYLOAD_BYTES]==(failure<2?3840:7680));
+  }
+ #endif
++#ifdef KASANE_DMA_OVERLAP
++ /* Unknown descriptor failures retain DMA ownership, but settle the strip's
++  * coarse outcome only once; repeated reap failures remain detail events. */
++ {
++  kasane_display_t display={0};dm_snapshot m;dd_snapshot d;
++  pending=false;late_failure=false;capture_flag=false;
++  fail_completion_y=fail_queue_y=-1;clock_us=0;dm_reset();dd_start();
++  assert(kasane_dma_submit(&display,0,0,240,8,pixels)==ESP_OK);
++  unknown_descriptor=true;
++  assert(kasane_finish(&display)==KSN_IO&&pending&&!display.pending_bytes);
++  assert(kasane_finish(&display)==KSN_IO&&pending&&!display.pending_bytes);
++  unknown_descriptor=false;
++  assert(kasane_finish(&display)==KSN_OK&&!pending);
++  assert(kasane_finish(&display)==KSN_OK);
++  assert(dm_read(&m)&&dd_finish(&d)&&!m.faults&&!d.faults);
++  assert(m.transfer_success==0&&m.transfer_bytes==0&&m.transfer_failures==1);
++  assert(d.event[DD_TX_FAILURES]==2&&d.event[DD_TX_REAPS]==3);
++  assert(d.event[DD_TX_PAYLOAD_BYTES]==3840&&d.event[DD_TX_COPY_BYTES]==3840);
++  assert(d.event[DD_TX_SUBMITS]==1&&display.sent_us==111);
++ }
++#endif
+  puts("J1 DMA fake-clock accounting: final drain in raster/transfer inclusive; no raster/guest self leakage or duplicate bytes; late failure prevents ACK: PASS");
+ }

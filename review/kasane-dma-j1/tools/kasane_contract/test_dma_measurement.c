@@ -15,7 +15,7 @@ static bool pending,late_failure;
 #ifdef KASANE_DMA_OVERLAP
 static unsigned pending_y;
 static int fail_completion_y=-1,fail_queue_y=-1;
-static bool capture_flag;
+static bool capture_flag,unknown_descriptor;
 #endif
 static uint16_t pixels[240*8];
 typedef struct { unsigned sent_us; size_t pending_bytes; bool pending_capture; } kasane_display_t;
@@ -26,7 +26,9 @@ static bool board_capture_active(void){return capture_flag;}
 static esp_err_t board_present_finish(void){
  if(!pending)return ESP_OK;
  DD_SCOPE(DD_TX_REAP);DD_ADD(DD_TX_REAPS,1);
- clock_us+=37;pending=false;
+ clock_us+=37;
+ if(unknown_descriptor){DD_ADD(DD_TX_FAILURES,1);return 9;}
+ pending=false;
  if((late_failure&&pending_y==128)||(int)pending_y==fail_completion_y){DD_ADD(DD_TX_FAILURES,1);return 7;}return ESP_OK;
 }
 #endif
@@ -118,6 +120,27 @@ int main(void){
   assert(m.transfer_failures==(failure<2?1:0)&&m.capture_samples==1);
   assert(d.event[DD_TX_FAILURES]==(failure<2?1:0));
   assert(d.event[DD_TX_PAYLOAD_BYTES]==(failure<2?3840:7680));
+ }
+#endif
+#ifdef KASANE_DMA_OVERLAP
+ /* Unknown descriptor failures retain DMA ownership, but settle the strip's
+  * coarse outcome only once; repeated reap failures remain detail events. */
+ {
+  kasane_display_t display={0};dm_snapshot m;dd_snapshot d;
+  pending=false;late_failure=false;capture_flag=false;
+  fail_completion_y=fail_queue_y=-1;clock_us=0;dm_reset();dd_start();
+  assert(kasane_dma_submit(&display,0,0,240,8,pixels)==ESP_OK);
+  unknown_descriptor=true;
+  assert(kasane_finish(&display)==KSN_IO&&pending&&!display.pending_bytes);
+  assert(kasane_finish(&display)==KSN_IO&&pending&&!display.pending_bytes);
+  unknown_descriptor=false;
+  assert(kasane_finish(&display)==KSN_OK&&!pending);
+  assert(kasane_finish(&display)==KSN_OK);
+  assert(dm_read(&m)&&dd_finish(&d)&&!m.faults&&!d.faults);
+  assert(m.transfer_success==0&&m.transfer_bytes==0&&m.transfer_failures==1);
+  assert(d.event[DD_TX_FAILURES]==2&&d.event[DD_TX_REAPS]==3);
+  assert(d.event[DD_TX_PAYLOAD_BYTES]==3840&&d.event[DD_TX_COPY_BYTES]==3840);
+  assert(d.event[DD_TX_SUBMITS]==1&&display.sent_us==111);
  }
 #endif
  puts("J1 DMA fake-clock accounting: final drain in raster/transfer inclusive; no raster/guest self leakage or duplicate bytes; late failure prevents ACK: PASS");

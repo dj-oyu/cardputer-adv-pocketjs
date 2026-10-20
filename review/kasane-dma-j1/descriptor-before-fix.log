@@ -1,0 +1,8 @@
+unfixed HAL with expanded regression harness: exit=1
+test: /tmp/kasane-dma-board-wr7sx9lm/test.c:395: main: Assertion `tx_inflight&&next_row==-1&&detail[DD_TX_FAILURES]==failures+1' failed.
+Traceback (most recent call last):
+  File "/tmp/tmpfk9kfi53/regression.py", line 165, in <module>
+    subprocess.run([str(exe)],check=True)
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/tmp/kasane-dma-board-wr7sx9lm/test']' died with <Signals.SIGABRT: 6>.

@@ -1,0 +1,4 @@
+J1 DMA fake-clock accounting: final drain in raster/transfer inclusive; no raster/guest self leakage or duplicate bytes; late failure prevents ACK: PASS
+J1 DMA fake-clock accounting: final drain in raster/transfer inclusive; no raster/guest self leakage or duplicate bytes; late failure prevents ACK: PASS
+J1 DMA fake-clock accounting: final drain in raster/transfer inclusive; no raster/guest self leakage or duplicate bytes; late failure prevents ACK: PASS
+J1 DMA fake-clock accounting: final drain in raster/transfer inclusive; no raster/guest self leakage or duplicate bytes; late failure prevents ACK: PASS
