@@ -26,11 +26,11 @@ MEASURE_SYMBOLS = {
 
 FIXED_SYMBOLS = {'df_fixture_id','df_fixture_manifest','df_now_us','df_write','df_variant',
     'df_reset','df_session','df_measuring','df_status','df_command','df_dispatch','df_present',
-    'df_owner_begin','df_owner_work_end','df_pace_begin','df_pace_end','df_owner_end','df_count','df_fail'}
+    'df_fixed_exit_record','df_detail_enabled','df_completion_contract','df_owner_begin','df_owner_work_end','df_pace_begin','df_pace_end','df_owner_end','df_count','df_fail'}
 
 # Pure same-TU helpers can be inlined and removed by section GC. Boundary APIs cannot.
 FIXED_REQUIRED=FIXED_SYMBOLS-{'df_measuring','df_fail'}
-DETAIL_FIXED_SYMBOLS={'df_detail_exit_record'}
+DETAIL_FIXED_SYMBOLS=set()  # Owner completion is mandatory in both detail modes.
 
 def fixed_mode(build):
     values=[line.split('=',1)[1] for line in (build/'CMakeCache.txt').read_text().splitlines()
@@ -95,7 +95,8 @@ def verify_fixed_mode(build):
         if not path.is_file() or path.read_bytes()!=pan.encode() or pan.encode()+b'\0' not in elf:
             raise ValueError('detail PAN exact embedded bytes required')
     if MANIFEST_SHA256.encode()+b'\0' not in elf:raise ValueError('fixed workload manifest missing in ELF')
-    return dict(mode=mode,native_symbols=sorted(symbols),fixture=FIXTURE,manifest_sha256=MANIFEST_SHA256)
+    return dict(mode=mode,native_symbols=sorted(symbols),fixture=FIXTURE,manifest_sha256=MANIFEST_SHA256,
+                owner_completion=dict(contract='fixed-owner-v1',record='DERBY_DETAIL_EXIT',detail_mode=detail_mode(build)))
 
 
 def verify_measure_mode(build, expected=None):

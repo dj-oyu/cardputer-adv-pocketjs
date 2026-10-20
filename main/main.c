@@ -816,13 +816,17 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
 
 // One frame of a running guest. Back returns to the screen that started it,
 // except from the home screen, where the whole app is what Back leaves.
-#ifdef POCKET_DERBY_DETAIL_MEASURE
-static bool end_derby_detail_run(esp_err_t result) {
-    if(result!=ESP_OK || !app_derby_detail_finished()) return false;
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+static bool end_derby_fixed_run(esp_err_t result) {
+    if(result!=ESP_OK || !app_derby_fixed_finished()) return false;
     // A late return must fail now, before another tick can rearm its deadline.
-    if(!app_derby_detail_deadline_ok()) { end_run(ESP_ERR_TIMEOUT); return true; }
+    if(!app_derby_fixed_deadline_ok(125000)) { end_run(ESP_ERR_TIMEOUT); return true; }
     // Use the ordinary owner teardown; do not dispatch an interrupting turn.
-    end_run(df_detail_exit_record()?ESP_OK:ESP_FAIL);
+    const bool wrote=df_fixed_exit_record();
+    if(!app_derby_fixed_deadline_ok(0)) {
+        ESP_LOGE("app","DERBY owner watchdog timeout");
+        end_run(ESP_ERR_TIMEOUT);
+    }else end_run(wrote?ESP_OK:ESP_FAIL);
     return true;
 }
 #endif
@@ -902,8 +906,8 @@ static void tick_run(bool have, const keystroke_t *stroke) {
                          key==KEY_RIGHT?0x20:key==KEY_DOWN?0x40:key==KEY_LEFT?0x80:0;
         e=app_tick(buttons);
         // A release frame, so consecutive queued presses stay distinct.
-#ifdef POCKET_DERBY_DETAIL_MEASURE
-        if(e==ESP_OK && buttons && !app_derby_detail_finished()) e=app_tick(0);
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+        if(e==ESP_OK && buttons && !app_derby_fixed_finished()) e=app_tick(0);
 #else
         if(e==ESP_OK && buttons) e=app_tick(0);
 #endif
@@ -922,8 +926,8 @@ static void tick_run(bool have, const keystroke_t *stroke) {
 
     // Accepted this turn, so no further input reaches the app: the session ends
     // here and end_run() starts what it asked for.
-#ifdef POCKET_DERBY_DETAIL_MEASURE
-    if(!leave && end_derby_detail_run(e)) return;
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+    if(!leave && end_derby_fixed_run(e)) return;
 #endif
     if(!leave && e==ESP_OK && pocket_workspace_run_requested()) { end_run(ESP_OK); return; }
     if(leave || e!=ESP_OK) end_run(e);

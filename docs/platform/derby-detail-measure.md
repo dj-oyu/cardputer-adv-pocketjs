@@ -6,7 +6,7 @@
 
 ## 計測の契約
 
-一般optionの `POCKET_DERBY_DETAIL_MEASURE` は既定 OFF。この診断revisionのroot設定はONを指定し、OFF対照は `-DPOCKET_DERBY_DETAIL_MEASURE=OFF` で選ぶ。ON には既存の MEASURE / FIXED_WORKLOAD が必要。固定 fixture の seed / camera / 390→510 の120 completed contexts / 3 dependent repetitions / END / STOP / HOME、250ms watchdog、180秒 session、最大8step/frameでreturnする未計測tailを維持する。通常アプリの JS は変更しない。詳細OFFの生成JSと主要5 CオブジェクトのO0 .text を exact base と比較する。
+一般optionの `POCKET_DERBY_DETAIL_MEASURE` は既定 OFF。この診断revisionのroot設定はONを指定し、OFF対照は `-DPOCKET_DERBY_DETAIL_MEASURE=OFF` で選ぶ。ON には既存の MEASURE / FIXED_WORKLOAD が必要。固定 fixture の seed / camera / 390→510 の120 completed contexts / 3 dependent repetitions / END / STOP / HOME、250ms watchdog、180秒 session、最大8step/frameでreturnする未計測tailを維持する。通常アプリの JS は変更しない。J1ではOFFのcontroller終了待ちを変更する。controller以外の生成JSと主要5 CオブジェクトのO0 .text をexact baseと比較する。
 
 26区分と13イベントの固定配列を使い、heap割当・大きなhistogram・ISRからのstack操作を追加しない。各repの測定窓で開始し、終了時にsnapshotを確定、tail後に512B未満の行で出力する。出力失敗・不正scope・clock逆行は品質不合格。abort / app stopで計測をcancelする。
 
@@ -76,18 +76,18 @@ python3 tools/games/compare_derby_detail.py \
 
 ## 診断出力のreturn境界
 
-詳細ONは測定窓とbounded tailの完了後、各論理reporting frameから最大1行だけUSBへ出してreturnする。26 stage＋13 event＋detail END、coarse summary、最終whole-trial ENDを分け、最後のvalid ENDにも独立したframeを使う。各USB callのbounded waitを40回以上1native callへ積み上げない。詳細OFFの生成fixtureは元exact版のまま。遅い成功transport（1call110ms）で最大1write/return、42の拒否位置、最終valid前のsession timeoutを試験する。完全raw stream中のInternalError/RUNAWAY/LOADSTALL等もstrict detail parserで拒否し、valid END後の障害を黙って合格にしない。
+詳細ONは測定窓とbounded tailの完了後、各論理reporting frameから最大1行だけUSBへ出してreturnする。26 stage＋13 event＋detail END、coarse summary、最終whole-trial ENDを分け、最後のvalid ENDにも独立したframeを使う。各USB callのbounded waitを40回以上1native callへ積み上げない。J1の詳細OFFにも共通report待ちを適用する。遅い成功transport（1call110ms）で最大1write/return、42の拒否位置、最終valid前のsession timeoutを試験する。完全raw stream中のInternalError/RUNAWAY/LOADSTALL等もstrict detail parserで拒否し、valid END後の障害を黙って合格にしない。
 
 各qualifying出力の直前にsession残時間250msを確保し、不足時はDF_TIMEOUTで不合格にする。終端write開始時には180秒以内でも成功write中に境界を跨ぐケースを含め、valid ENDの遅延確定を拒否する。既存USB callの100ms＋tick rounding上限を変えない。
 
 ## 有限診断の正常終了と実機ログ形式
 
-詳細ONの完了は、最後のframeが成功し、fixtureがDONE、終了要求あり、
+固定fixtureの詳細ON/OFFの完了は、最後のframeが成功し、fixtureがDONE、終了要求あり、
 guestの継続/queueなし、既存stop要求なしの場合にforeground ownerが
 既存`end_run(ESP_OK)`へ渡す。終了要求後の新しいguest frameを実行して
 意図的interruptにする従来経路へは進めない。pending jobs/finallyを先に
 完了させ、frame/continuationの例外・runaway・forced stopを成功に変換しない。
-通常版/詳細OFFとoverlayの終了経路は変更しない。既存stop hookとI/O取消し・
+通常版（FIXED OFF）とoverlayの終了経路は変更しない。既存stop hookとI/O取消し・
 resource teardown・APP_STOPPED・HOME_READYの順序を使用する。
 
 strict parserはbare host markerと、正しいtagを持つ完全一致のESP-IDF
@@ -98,10 +98,14 @@ END valid=1だけで正常終了とはしない。既存の失敗した実機cap
 合格へ変更しない。実機の正常終了と物理LCDの確認は、別の受入工程で必要。
 
 ownerの受入時に最後のguest turnの250ms期限を再armせず確認し、期限超過は
-直ちにtimeout teardownへ渡す。正常なownerだけが一度限りの
+直ちにtimeout teardownへ渡す。出力前に最後のturn期限から125ms以上の余裕を要求し、出力後も期限を再確認する。
+期限超過はwatchdog timeoutとして不合格とし、期限を再armしない。
+正常なownerだけが一度限りの
 `DERBY_DETAIL_EXIT v=1 session=<n> clean=1` を測定外で出力する。
 EXIT出力失敗/180秒session残量250ms未満も失敗であり、再試行しない。
 parserはEND→EXIT→STOP→HOMEを要求し、EXIT欠落/重複/別sessionを拒否する。
 ENDとEXITは同じowner tickとなり得るが、EXITはJS stackが返った後に書く。
 USBの各bounded writeを110msにしたhost対照では両者計220msであり、
 実機のpreemption込みowner tick上限や純transfer時間の証明ではない。
+
+J1のmode/画像/flash/collectorの照合は[共通正常終了契約](derby-fixed-completion.md)を参照。

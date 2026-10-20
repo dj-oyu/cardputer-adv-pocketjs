@@ -186,3 +186,7 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 - **上流へ出すパッチ**（`reports/upstream/*.patch`）。レビューした内容のまま保つ。
 
 - [固定DERBY診断controllerの分割](apps/derby-fixed-controller.md) — strict/load/失敗境界と比較条件。
+
+- [DERBY最適化の合流点](platform/derby-integration-junctions.md) — 固定base、lane所有境界、合流受入条件。
+
+- [固定計測のON/OFF共通正常終了](platform/derby-fixed-completion.md) — mode・BIN/ELF・flash・collectorの照合。

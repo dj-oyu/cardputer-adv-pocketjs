@@ -28,7 +28,10 @@ static void context(unsigned rep,unsigned step){
     df_owner_end(clock_us,true);
 }
 static void complete(unsigned rep){for(unsigned i=391;i<=510;i++)context(rep,i);assert(df_status()==DF_TAIL);}
-static void finish(unsigned rep){df_command(3,rep,510,0x9112A7AB,8,1,0x5DC86E18);}
+static void finish(unsigned rep){
+    df_command(3,rep,510,0x9112A7AB,8,1,0x5DC86E18);
+    if(rep==3&&df_status()==DF_TAIL)df_command(3,rep,510,0x9112A7AB,8,1,0x5DC86E18);
+}
 int main(void){
     reset();
     /* Warmup counts and cache calls must be outside the snapshot interval. */

@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as tmp:
         from games.derby_runner_batch import instrument
         batch=build/'generated/derby_runner_batch';batch.mkdir();pan=instrument(pan.decode()).encode();(batch/'derby_pan.js').write_bytes(pan)
         cache.write_text(cache.read_text()+'POCKET_DERBY_RUNNER_BATCH:BOOL=ON\n')
-    good=b'\0'.join((out/f'derby_{n}.js').read_bytes() for n in ('watch','view','play','fixed'))+b'\0'+pan+b'\0'+MANIFEST_SHA256.encode()+b'\0'
+    good=b'\0'.join((out/f'derby_{n}.js').read_bytes() for n in ('watch','view','play','fixed'))+b'\0'+pan+b'\0'+MANIFEST_SHA256.encode()+b'\0DERBY_DETAIL_EXIT v=1 session=%u clean=1\n\0'
     elf=build/'cardputer_pocketjs.elf';elf.write_bytes(good)
     with patch('record_verification.elf_symbols',return_value=FIXED_SYMBOLS|DETAIL_REQUIRED|DETAIL_FIXED_SYMBOLS):
         assert verify_fixed_mode(build)['mode']=='ON'
@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory() as tmp:
         (build/'cardputer_pocketjs.bin').write_bytes(image)
         with patch('verify_diagnostic_build.verify_mode',return_value={'telemetry_mode':'ON'}), \
              patch('verify_diagnostic_build.verify_measure_mode',return_value={'measure_mode':'ON'}), \
-             patch('verify_diagnostic_build.symbol_u32',return_value=0x2545F491):
+             patch('verify_diagnostic_build.symbol_u32',side_effect=lambda elf,name: 1 if name=='df_detail_enabled' else 0x2545F491):
             proof=prove(build)
             assert proof['detail_measurement']['mode']=='ON'
             assert proof['comparison_seed']['elf_embedded_view_verified']
@@ -60,14 +60,12 @@ with tempfile.TemporaryDirectory() as tmp:
         try:verify_detail_mode(build)
         except ValueError:pass
         else:raise AssertionError('missing continuation pause accepted')
-    # Match the real target regression: ON requires the newly linked owner
-    # EXIT boundary, while the coarse/OFF contract must still reject it.
-    for mode,symbols in [('ON',FIXED_SYMBOLS|DETAIL_REQUIRED),
-                         ('ON',FIXED_SYMBOLS|DETAIL_REQUIRED|DETAIL_FIXED_SYMBOLS|{'df_unknown'}),
-                         ('OFF',FIXED_SYMBOLS|DETAIL_FIXED_SYMBOLS)]:
+    # The common owner boundary must be linked in both detail modes.
+    for mode in ('ON','OFF'):
         cache.write_text(cache.read_text().replace('DETAIL_MEASURE:BOOL=ON','DETAIL_MEASURE:BOOL='+mode).replace('DETAIL_MEASURE:BOOL=OFF','DETAIL_MEASURE:BOOL='+mode))
-        with patch('record_verification.elf_symbols',return_value=symbols):
-            try:verify_fixed_mode(build)
-            except ValueError as error:assert str(error)=='fixed workload ELF boundary symbols differ'
-            else:raise AssertionError('incorrect owner EXIT boundary accepted: '+mode)
-print('PASS detailed generated watch/view/play/PAN ELF proof, mixed mode and missing pause rejection (synthetic ELF)')
+        for symbols in (FIXED_SYMBOLS-{'df_fixed_exit_record'},FIXED_SYMBOLS|{'df_unknown'}):
+            with patch('record_verification.elf_symbols',return_value=symbols):
+                try:verify_fixed_mode(build)
+                except ValueError as error:assert str(error)=='fixed workload ELF boundary symbols differ'
+                else:raise AssertionError('incorrect owner EXIT boundary accepted: '+mode)
+print('PASS detailed generated ELF proof and common owner boundary required in both modes (synthetic ELF)')

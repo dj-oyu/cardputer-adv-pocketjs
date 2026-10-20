@@ -103,9 +103,7 @@ MAIN=r'''
         for(unsigned i=0;i<3;i++)
             printf("DEVICE_TAIL {\"rep\":%u,\"steps\":%u,\"turns\":%u,\"max_steps\":%u,\"settles\":%u,\"guest_draws\":%u}\n",
                    i+1,fx_tail_total[i],fx_tail_turns[i],fx_tail_max[i],fx_settles[i],fx_tail_draws);
-#ifdef POCKET_DERBY_DETAIL_MEASURE
-        REQ(df_detail_exit_record());
-#endif
+        REQ(df_fixed_exit_record());
         pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();
         puts("APP_STOPPED");puts("HOME_READY");
         JS_FreeContext(ctx);JS_FreeRuntime(rt);puts("DEVICE_FIXTURE_HOST PASS");return 0;
@@ -313,7 +311,7 @@ def main():
             raise ValueError('controller startup failure swallowed: '+name)
         startup[name]={'exit_code':probe.returncode,'ready_count':0,
                        'sha256':hashlib.sha256(raw).hexdigest()}
-    result['collector_contract']=check_collector(log.read_bytes())
+    result['collector_contract']=check_collector(log.read_bytes(),detail_enabled=args.detail)
     result['startup_probes']=startup
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps({'variant':variant,'pass':True,'windows':windows,'result':str(out/'result.json')}),flush=True)

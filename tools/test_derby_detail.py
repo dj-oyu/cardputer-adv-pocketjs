@@ -13,9 +13,10 @@ with tempfile.TemporaryDirectory() as t:
         exe=out/'detail'
         subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-DPOCKET_DERBY_MEASURE','-DPOCKET_DERBY_DETAIL_MEASURE','-DESP_PLATFORM',*flags,'-I',str(out),'-I',str(R/'main/pocket'),str(R/'tools/test_derby_detail.c'),str(R/'main/pocket/derby_measure.c'),'-o',str(exe)],check=True)
         subprocess.run([exe],check=True)
-    for flags in (['-O1','-fsanitize=address,undefined'],['-O2']):
+    for detail in (False,True):
+      for flags in (['-O1','-fsanitize=address,undefined'],['-O2']):
         exe=out/'output'
-        subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-DPOCKET_DERBY_MEASURE','-DPOCKET_DERBY_FIXED_WORKLOAD','-DPOCKET_DERBY_DETAIL_MEASURE',*flags,'-I',str(R/'main/pocket'),str(R/'tools/test_derby_detail_output.c'),str(R/'main/pocket/derby_fixed_workload.c'),str(R/'main/pocket/derby_measure.c'),'-o',str(exe)],check=True)
+        subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-DPOCKET_DERBY_MEASURE','-DPOCKET_DERBY_FIXED_WORKLOAD',*(['-DPOCKET_DERBY_DETAIL_MEASURE'] if detail else []),*flags,'-I',str(R/'main/pocket'),str(R/'tools/test_derby_detail_output.c'),str(R/'main/pocket/derby_fixed_workload.c'),str(R/'main/pocket/derby_measure.c'),'-o',str(exe)],check=True)
         subprocess.run([exe],check=True)
     off=out/'off.c';off.write_text('#include "derby_detail.h"\nvoid f(void){DD_OPEN(a,DD_VM_RUN);DD_ADD(DD_VM_ZERO_BYTES,unknown++);DD_CLOSE(a);DD_SCOPE(DD_RENDER);}\n')
     obj=out/'off.o'

@@ -8,10 +8,16 @@
 /* Owner task only. No heap, retry, pacing-policy change or asynchronous access. */
 const char df_fixture_id[]="oval-pan8-390-510-v1";
 const char df_fixture_manifest[]="84e0341ee1ac10c232e3008f28f8aada8823155e19229f926e633d7780a2021d";
+#ifdef POCKET_DERBY_DETAIL_MEASURE
+const volatile uint32_t df_detail_enabled=1;
+#else
+const volatile uint32_t df_detail_enabled=0;
+#endif
+const char df_completion_contract[]="DERBY_DETAIL_EXIT v=1 session=%u clean=1\n";
 static struct {
     enum df_phase phase;
     unsigned rep,seen,presented,dispatches,continuations,quality,trial_quality,reported;
-    bool arm_presented,turn_open,wait_open,work_ended;
+    bool arm_presented,turn_open,wait_open,work_ended,end_pending,exit_reported;
     unsigned wait_kind;
     uint64_t session_start,start,turn_start,wait_start,wall,work;
     uint64_t pace[DF_PACES],pace_calls[DF_PACES],requested[DF_PACES],counts[DF_COUNTERS];
@@ -19,7 +25,6 @@ static struct {
 #ifdef POCKET_DERBY_DETAIL_MEASURE
     dd_snapshot detail;
     unsigned detail_row;
-    bool exit_reported;
 #endif
 } s;
 static unsigned serial;
@@ -76,32 +81,30 @@ static bool detail_report_step(void){
     if(n<=0||(size_t)n>=sizeof line||!df_write(line,(size_t)n))return false;
     ++s.detail_row;return true;
 }
-bool df_detail_exit_record(void){
+#endif
+bool df_fixed_exit_record(void){
     uint64_t duration=0;
-    if(s.phase!=DF_DONE||s.trial_quality||s.reported!=3||s.exit_reported||
+    if(df_detail_enabled>1||s.phase!=DF_DONE||s.trial_quality||s.reported!=3||s.exit_reported||
        !elapsed(df_now_us(),s.session_start,&duration)||duration>180000000-250000)
         return false;
     /* One attempt: a refused/partial write can never be retried into success. */
     s.exit_reported=true;
     char line[128];
-    int n=snprintf(line,sizeof line,"DERBY_DETAIL_EXIT v=1 session=%u clean=1\n",serial);
+    int n=snprintf(line,sizeof line,df_completion_contract,serial);
     return n>0&&(size_t)n<sizeof line&&df_write(line,(size_t)n);
 }
-#endif
 static void report(uint32_t finish){
-#ifdef POCKET_DERBY_DETAIL_MEASURE
     /* Reserve a full 250ms turn before any qualifying output. The device USB
      * write is bounded to 100ms plus tick rounding, so even the final success
      * cannot cross the 180s session limit before DONE suppresses owner checks. */
     uint64_t duration=0;
     if(!elapsed(df_now_us(),s.session_start,&duration)){df_fail(DF_CLOCK);return;}
     if(duration>180000000-250000){df_fail(DF_TIMEOUT);return;}
+    if(s.end_pending){s.phase=DF_DONE;final_record();return;}
+#ifdef POCKET_DERBY_DETAIL_MEASURE
     if(s.detail_row<DD_STAGES+DD_EVENTS+1){
         if(!detail_report_step())df_fail(DF_OUTPUT);
         return;
-    }
-    if(s.detail_row==DD_STAGES+DD_EVENTS+2){
-        s.phase=DF_DONE;final_record();return;
     }
 #endif
     char line[1024];
@@ -126,11 +129,9 @@ static void report(uint32_t finish){
     line[n++]='\n';
     if(!df_write(line,(size_t)n)){df_fail(DF_OUTPUT);return;}
     ++s.reported;
-#ifdef POCKET_DERBY_DETAIL_MEASURE
-    if(s.rep==3)++s.detail_row;else s.phase=DF_READY;
-#else
-    if(s.rep==3){s.phase=DF_DONE;final_record();}else s.phase=DF_READY;
-#endif
+    /* END has its own return boundary in both modes, keeping the final
+     * summary + END + owner record out of a single 250ms guest turn. */
+    if(s.rep==3)s.end_pending=true;else s.phase=DF_READY;
 }
 void df_command(unsigned command,unsigned rep,unsigned step,uint32_t seed,unsigned camera,unsigned tier,uint32_t finish){
     if(command==0)return;

@@ -39,6 +39,12 @@ def prove(build):
         raise ValueError('diagnostic comparison requires exact generated view in ELF')
     if symbol_u32(elf, 'pocket_derby_comparison_hw_seed') != FIXED_HW:
         raise ValueError('diagnostic ELF does not contain the provider hardware seed')
+    # Read the linked mode value; cache labels and self-reported logs alone
+    # cannot qualify an OFF/ON comparison after a mismatched link.
+    if symbol_u32(elf,'df_detail_enabled') != int(detail['mode']=='ON'):
+        raise ValueError('linked owner detail mode differs from verified build mode')
+    if b'DERBY_DETAIL_EXIT v=1 session=%u clean=1\n\0' not in elf:
+        raise ValueError('linked fixed owner completion contract missing')
     elf_hash = hashlib.sha256(elf).digest()
     if (len(image) < 288 or image[0] != 0xE9
             or struct.unpack_from('<I', image, 32)[0] != 0xABCD5432

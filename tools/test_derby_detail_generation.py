@@ -18,9 +18,12 @@ with tempfile.TemporaryDirectory() as tmp:
         if p.name=='derby_play.js':
             controller=(out/'off/derby_fixed.js').read_bytes()
             assert controller.startswith(CONTROLLER_STRICT.encode())
-            current=current.replace(CONTROLLER_LOAD.encode(),controller[len(CONTROLLER_STRICT):],1)
+            assert 'if(dfMode===5)' in controller.decode()
+            oldplay=p.read_bytes();begin=oldplay.index(b'\n// DF fixture oval-pan8-390-510-v1:')
+            end=oldplay.index(b"\nenter('pad');",begin)
+            current=current.replace(CONTROLLER_LOAD.encode(),oldplay[begin:end],1)
         assert p.read_bytes()==current,p.name
-    print('PASS repeated ON/OFF generation; inlining strict controller exactly reconstructs comparison-base OFF play')
+    print('PASS repeated ON/OFF generation; replacing only reviewed controller exactly reconstructs comparison-base OFF play')
     # Native VM/procedural/renderer code must compile to identical .text at O0.
     headers=['components/quickjs-ng/quickjs-ng','components/pocketjs_guest/include','tools/hostshim','main','main/pocket','main/ui','main/ui/kasane','main/text','main/hal']
     (out/'main/ui/kasane').mkdir(parents=True);(out/'main/pocket').symlink_to(R/'main/pocket',target_is_directory=True)

@@ -16,3 +16,8 @@ post-initialization READY, causing `measure-derby-pr13-e93500d-20261019` to time
 out. The fix only passes that existing marker; rep resets remain quiet. Old
 source/build/flash receipts and failed raw bytes remain evidence for the old
 heads and must not be relabelled as evidence for these new heads.
+
+`broker_v2/` は dj-oyu/esp-device-broker-mcp commit
+`88890ed79b9a7e48d99ffe5982cd03862c5eabec` の `derby_fixed.py` と
+`device_faults.py` の未改変copy。SHA-256をloaderで固定し、v2のowner EXITと全rawのfatal拒否を使う。
+旧PR47 copyは履歴のため保持する。実機やserialへ接続するコードはこのfixtureに含まれない。

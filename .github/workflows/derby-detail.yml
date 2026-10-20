@@ -33,6 +33,8 @@ jobs:
           python -m pip install jsonschema==4.23.0
           git diff --check
           python -B tools/test_derby_detail.py
+          python -B tools/test_derby_fixed_completion.py
+          python -B tools/test_session_dispatch.py
           python -B tools/test_derby_detail_generation.py
           python -B tools/test_derby_detail_board.py
           python -B tools/test_derby_detail_proof.py
@@ -44,12 +46,14 @@ jobs:
           python -B tools/games/run_derby_fixed.py --out artifacts/off
           python -B tools/games/run_derby_fixed.py --detail --out artifacts/on
           python -B tools/test_derby_detail.py --log artifacts/on/trial.log
+          python -B tools/test_derby_fixed_completion.py --off-log artifacts/off/trial.log --on-log artifacts/on/trial.log
           python -B tools/games/check_derby_detail_pair.py --off artifacts/off --on artifacts/on --out artifacts/asan-pair.json
       - name: O2 functional overhead control
         run: |
           set -euo pipefail
           python -B tools/games/run_derby_fixed.py --detail-fast --out artifacts/fast-off
           python -B tools/games/run_derby_fixed.py --detail-fast --detail --out artifacts/fast-on
+          python -B tools/test_derby_fixed_completion.py --off-log artifacts/fast-off/trial.log --on-log artifacts/fast-on/trial.log
           python -B tools/games/check_derby_detail_pair.py --off artifacts/fast-off --on artifacts/fast-on --out artifacts/fast-pair.json
       - name: Device-sized detailed guest heap and objects
         run: |
@@ -63,6 +67,7 @@ jobs:
           name: derby-detail-host-${{ env.SOURCE_HEAD }}
           path: |
             artifacts/**/*.json
+            artifacts/**/trial.log
           retention-days: 14
   firmware:
     runs-on: ubuntu-24.04

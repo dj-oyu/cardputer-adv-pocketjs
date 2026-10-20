@@ -22,7 +22,7 @@ class DiagnosticProofTests(unittest.TestCase):
             generated_path = fixture/'derby_view.js'
             generated_view = generated_path.read_bytes()
             elf = b'example ELF' + b'\0'.join((fixture/name).read_bytes() for name in
-                ('derby_watch.js','derby_view.js','derby_play.js','derby_fixed.js')) + b'\0' + MANIFEST_SHA256.encode() + b'\0'
+                ('derby_watch.js','derby_view.js','derby_play.js','derby_fixed.js')) + b'\0' + MANIFEST_SHA256.encode() + b'\0DERBY_DETAIL_EXIT v=1 session=%u clean=1\n\0'
             (build/'cardputer_pocketjs.elf').write_bytes(elf)
             image = bytearray(288)
             image[0] = 0xE9
@@ -37,11 +37,11 @@ class DiagnosticProofTests(unittest.TestCase):
             with patch('verify_diagnostic_build.verify_mode', return_value={'telemetry_mode':'ON'}) as mode, \
                  patch('verify_diagnostic_build.verify_measure_mode', return_value={'measure_mode':'ON'}) as measure, \
                  patch('record_verification.elf_symbols', return_value=FIXED_SYMBOLS), \
-                 patch('verify_diagnostic_build.symbol_u32', return_value=0x2545F491) as seed:
+                 patch('verify_diagnostic_build.symbol_u32', side_effect=lambda elf,name: 0 if name=='df_detail_enabled' else 0x2545F491) as seed:
                 self.assertEqual(prove(build)['artifacts']['cardputer_pocketjs.bin']['sha256'], hashlib.sha256(image).hexdigest())
                 mode.assert_called_once_with(build, 'ON')
                 measure.assert_called_once_with(build, 'ON')
-                seed.assert_called_with(elf, 'pocket_derby_comparison_hw_seed')
+                seed.assert_any_call(elf, 'pocket_derby_comparison_hw_seed')
                 self.assertEqual(prove(build)['build_measure']['measure_mode'],'ON')
                 self.assertEqual(prove(build)['comparison_seed']['hardware_seed'],'2545F491')
                 self.assertEqual(prove(build)['comparison_seed']['saved_race'],19)

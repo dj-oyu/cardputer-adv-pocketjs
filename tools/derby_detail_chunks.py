@@ -18,12 +18,6 @@ def instrument(name,text):
     if name=='watch':return function(text,'step',1)
     if name=='view':return function(text,'shot',2)
     if name=='play':
-        text=once(text,'let dfRep=1,dfMode=0,dfTicks=0,dfTailTicks=0,dfNext=391;',
-            'let ddFinish=0;\nlet dfRep=1,dfMode=0,dfTicks=0,dfTailTicks=0,dfNext=391;')
-        text=once(text,'    if (dfMode===0) {',
-            "    if(dfMode===5){\n      const state=S.fixture(3,dfRep,510,F.seed,cm,tier,ddFinish);\n      if(state===4)return;\n      if(state!==1&&state!==5)throw Error('DF_REPORT');\n      if(++dfRep>3){dfMode=4;pocket.app.exit();}else dfMode=0;\n      return;\n    }\n    if (dfMode===0) {")
-        text=once(text,'      S.fixture(3,dfRep,510,F.seed,cm,tier,digest);\n      if(++dfRep>3){dfMode=4;pocket.app.exit();}else dfMode=0;',
-            '      ddFinish=digest;dfMode=5;return;')
         text=once(text,'      const up = tx => {','      const up = tx => {\n        S.detail(5);try {')
         text=once(text,'      };\n      if (need)', '        } finally { S.detail(-1); }\n      };\n      if (need)')
         return once(text,'const dfFrame=globalThis.frame;',

@@ -13,11 +13,11 @@ with tempfile.TemporaryDirectory(prefix='ksn-session-') as directory:
     (path/'detail_interrupt_impl.inc').write_text(source[source.index('static int interrupt('):source.index('void app_vm_watchdog(')])
     owner=(root/'main/main.c').read_text()
     (path/'detail_end_run_impl.inc').write_text(owner[owner.index('static void end_run('):owner.index('// Resident suspension')])
-    begin=owner.index('static bool end_derby_detail_run(')
+    begin=owner.index('static bool end_derby_fixed_run(')
     finish=owner.index('// Repaint, and report what one costs.',begin)
     # The leading #ifdef belongs to the helper, and the real closing #endif
     # follows it. Include both with the complete production tick_run body.
-    (path/'detail_owner_impl.inc').write_text('#ifdef POCKET_DERBY_DETAIL_MEASURE\n'+owner[begin:finish])
+    (path/'detail_owner_impl.inc').write_text('#ifdef POCKET_DERBY_FIXED_WORKLOAD\n'+owner[begin:finish])
     board = (root / 'main/hal/board.c').read_text()
     capture_start = board.index('static bool capture,')
     capture_end = board.index('static esp_err_t tx(', capture_start)
@@ -28,7 +28,9 @@ with tempfile.TemporaryDirectory(prefix='ksn-session-') as directory:
                         *flags, '-I', str(path),
                         str(root / 'tools/test_session_dispatch.c'), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
-        subprocess.run(['gcc', '-std=c11', '-Wall', '-Wextra', '-Werror',
-                        *flags, '-DTEST_DERBY_DETAIL_EXIT', '-I', str(path),
-                        str(root/'tools/test_session_dispatch.c'), '-o', str(exe)],check=True)
-        subprocess.run([str(exe)],check=True)
+        for detail in (False,True):
+            subprocess.run(['gcc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                            *flags, '-DTEST_DERBY_FIXED_EXIT',
+                            *(['-DTEST_DETAIL_ON'] if detail else []), '-I', str(path),
+                            str(root/'tools/test_session_dispatch.c'), '-o', str(exe)],check=True)
+            subprocess.run([str(exe)],check=True)

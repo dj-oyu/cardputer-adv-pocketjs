@@ -1,4 +1,4 @@
-"""Actual generated fixture -> pinned PR47 collector, with memory-only transport.
+"""Actual generated fixture -> pinned v2 collector, with memory-only transport.
 
 The fixture host supplies APP_ID and post-cleanup STOP/HOME as a shell model.
 READY, three summaries and END are actual generated JS/native C output. This
@@ -11,16 +11,25 @@ import re
 import sys
 
 UPSTREAM = 'dj-oyu/esp-device-broker-mcp'
-COMMIT = '4f31347859824300bd71f1232f56c450d817ef4e'
+COMMIT = '88890ed79b9a7e48d99ffe5982cd03862c5eabec'
 SOURCE = 'src/cardputer_mcp/derby_fixed.py'
-SHA256 = '901bec0c05333be0314f19a0a8d2231397745205414ef10eb9de4309436838c6'
+SHA256 = 'c23d435f123b65e5a65473d526803cc0d77208a8cd43ff43ee11fb32fda6e6ab'
+FAULT_SHA256 = 'da8d2c2cc8ac222dad5da8ed5c6ffc6560d4458e4b051da26903a10d91366402'
 
 
 def load_collector():
-    path = Path(__file__).parent/'fixtures/pr47_derby_fixed.py'
-    if hashlib.sha256(path.read_bytes()).hexdigest() != SHA256:
-        raise ValueError('pinned PR47 collector changed')
-    spec = importlib.util.spec_from_file_location('pr47_derby_fixed', path)
+    directory = Path(__file__).parent/'fixtures/broker_v2'
+    path = directory/'derby_fixed.py'
+    if (hashlib.sha256(path.read_bytes()).hexdigest() != SHA256 or
+        hashlib.sha256((directory/'device_faults.py').read_bytes()).hexdigest() != FAULT_SHA256):
+        raise ValueError('pinned v2 collector changed')
+    import types
+    package = 'derby_fixed_broker_v2'
+    if package not in sys.modules:
+        module = types.ModuleType(package)
+        module.__path__ = [str(directory)]
+        sys.modules[package] = module
+    spec = importlib.util.spec_from_file_location(package+'.derby_fixed', path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -35,7 +44,7 @@ class MemoryReader:
     """No serial imports or port access. Model framing and fixed navigation.
 
     Every complete wire line reaches phase_observer in order, including lines
-    coalesced after READY/HOME, as in PR47 serial_backend.Reader.read_once.
+    coalesced after READY/HOME, as in broker serial_backend.Reader.read_once.
     """
     def __init__(self, raw, chunk):
         self.parts = iter(raw[at:at+chunk] for at in range(0, len(raw), chunk))
@@ -89,7 +98,9 @@ class MemoryReader:
             if self.now >= self.deadline: raise Rejected('serial_deadline')
 
 
-def check_collector(raw):
+def check_collector(raw, *, detail_enabled=False):
+    from derby_fixed_completion import parse_completion
+    parse_completion(raw,detail_enabled=detail_enabled)
     module = load_collector()
     assert (module.MAX_SECONDS, module.MAX_BYTES, module.MAX_LINE) == (200, 65536, 1024)
     lines = raw.splitlines()
@@ -112,12 +123,18 @@ def check_collector(raw):
         for chunk in (1, 17, 4096):
             reader = MemoryReader(wire, chunk)
             trial = module.execute_fixed(reader)
+            parse_completion(trial.raw,detail_enabled=detail_enabled)
             assert trial.valid and trial.parsed['work_verified']
             assert trial.raw == wire
             assert trial.receipt['sha256'] == hashlib.sha256(wire).hexdigest()
             assert reader.launch_timeouts == [20]
             positives += 1
-    cases = {}
+    owner=next(line for line in lines if line.startswith(b'DERBY_DETAIL_EXIT '))
+    cases = {'missing-owner':raw.replace(owner+b'\n',b''),
+             'duplicate-owner':raw.replace(owner,owner+b'\n'+owner),
+             'wrong-owner-session':raw.replace(owner,owner.replace(b'session=',b'session=9')),
+             'fatal-after-END':raw.replace(b'APP_STOPPED',b'InternalError: interrupted\nAPP_STOPPED'),
+             'fatal-after-HOME':raw+b'InternalError: interrupted\n'}
     for name, line in [('identity',protocol[0]), ('ready',protocol[1]),
                        ('summary',protocol[3]), ('end',protocol[5]),
                        ('stop',protocol[6]), ('home',protocol[7])]:
@@ -138,6 +155,7 @@ def check_collector(raw):
         for chunk in (17,4096):
             try:
                 trial = module.execute_fixed(MemoryReader(damaged, chunk))
+                parse_completion(trial.raw,detail_enabled=detail_enabled)
             except (Rejected, ValueError):
                 pass
             else:
@@ -152,4 +170,5 @@ def check_collector(raw):
     return {'repository':UPSTREAM, 'commit':COMMIT, 'path':SOURCE, 'sha256':SHA256,
             'positive_cases':positives, 'negative_cases':negatives+2,
             'raw_sha256':hashlib.sha256(raw).hexdigest(),
-            'scope':'actual generated fixture; memory-only shell/transport; no hardware acceptance'}
+            'owner_contract':'fixed-owner-v1','detail_mode':'ON' if detail_enabled else 'OFF',
+            'scope':'pinned collector plus shared owner/fatal gate; memory-only shell/transport; no hardware acceptance'}

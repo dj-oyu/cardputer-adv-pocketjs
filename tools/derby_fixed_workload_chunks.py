@@ -20,6 +20,7 @@ def once(text,old,new):
 WRAPPER=r'''
 // DF fixture oval-pan8-390-510-v1: three dependent replays in one boot.
 const dfFrame=globalThis.frame;
+let dfFinish=0;
 let dfRep=1,dfMode=0,dfTicks=0,dfTailTicks=0,dfNext=391;
 function dfAbort() { S.fixture(4,0,0,0,0,0,0); pocket.app.exit(); }
 function dfIdentity() {
@@ -28,6 +29,13 @@ function dfIdentity() {
 globalThis.frame=function(b) {
   try {
     if (b || K.down().length || GK.some(k=>K.pressed(k))) return dfAbort();
+    if(dfMode===5){
+      const state=S.fixture(3,dfRep,510,F.seed,cm,tier,dfFinish);
+      if(state===4)return;
+      if(state!==1&&state!==5)throw Error('DF_REPORT');
+      if(++dfRep>3){dfMode=4;pocket.app.exit();}else dfMode=0;
+      return;
+    }
     if (dfMode===0) {
       if (S.fixture(0,0,0,0,0,0,0)===6) return pocket.app.exit();
       drop(Object.keys(live));queue.length=0;
@@ -66,8 +74,7 @@ globalThis.frame=function(b) {
       let digest=2166136261;
       for(let i=0;i<text.length;i++)digest=M.imul(digest^text.charCodeAt(i),16777619)>>>0;
       if(digest!==0x5DC86E18)throw Error('DF_FINISH');
-      S.fixture(3,dfRep,510,F.seed,cm,tier,digest);
-      if(++dfRep>3){dfMode=4;pocket.app.exit();}else dfMode=0;
+      dfFinish=digest;dfMode=5;return;
     }
   } catch(e) { dfAbort(); }
 };

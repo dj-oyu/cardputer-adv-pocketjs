@@ -8,8 +8,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
+#define POCKET_DERBY_FIXED_WORKLOAD
+#ifdef TEST_DETAIL_ON
 #define POCKET_DERBY_DETAIL_MEASURE
+#endif
 #define DD_RESUME() ((void)0)
 #define DD_SUSPEND() ((void)0)
 #include "../main/pocket/derby_fixed_workload.h"
@@ -33,7 +36,7 @@ static unsigned continuation_turns,ticks;
 static uint32_t deferred_buttons,delivered,armed;
 static int scope,guest_error;
 static int64_t now,last_present_us;
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
 static int64_t deadline,frame_elapsed,continuation_elapsed;
 #endif
 static double turn_sum;
@@ -42,7 +45,7 @@ static char calls[1024];
 static void call(char c){size_t n=strlen(calls);assert(n+1<sizeof(calls));calls[n]=c;calls[n+1]=0;}
 static int64_t esp_timer_get_time(void){return now;}
 static void arm_turn(uint32_t b){armed=b;call('A');
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
     deadline=now+250000;
 #endif
 }
@@ -56,7 +59,7 @@ static bool jobs_left;
 static int pocketjs_guest_continue(void *g){
     (void)g;call('C');pending=remain||jobs_left;
     const bool finished=!remain&&!guest_error;
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
     now+=continuation_elapsed;
 #endif
     if(proc_commits&&finished)proc_pending=true;
@@ -64,7 +67,7 @@ static int pocketjs_guest_continue(void *g){
     return guest_error;
 }
 static bool frame_parks;
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
 static bool finish_in_frame;
 #endif
 /* What frame()'s first beginFrame()/patch() would meet: BUSY if the finished
@@ -77,7 +80,7 @@ static int pocketjs_guest_frame(void *g,const pocketjs_guest_frame_t *f){
     assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
     assert(!f->touch_count&&!f->touches&&!f->touch_hits);
     delivered=f->buttons;call('F');if(activate)submission=need_present=true;
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
     if(finish_in_frame){fixture_phase=DF_DONE;exit_requested=true;}
     now+=frame_elapsed;
     if(atomic_load(&stop_requested))return ESP_FAIL;
@@ -124,11 +127,11 @@ PUMP(pocket_av_pump,'v')
 /* Silent, like the pumps added after the call strings were fixed. */
 static void pocket_video_sd_stream_reap(void){}
 static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
 #include "detail_interrupt_impl.inc"
 #endif
 #include "session_dispatch_impl.inc"
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
 // Actual owner tick_run(), with UI/I/O ports quiet and teardown observable.
 typedef int board_key_t;
 enum {SCREEN_HOME=0,KEY_NONE=0,KEY_BACK,KEY_ENTER,KEY_UP,KEY_RIGHT,KEY_DOWN,KEY_LEFT};
@@ -137,7 +140,8 @@ static int owner;
 static atomic_bool owner_capture;
 static bool ended,running;static int ended_result,run_started;
 static bool exit_write_ok=true;
-static bool df_detail_exit_record(void){call('R');return exit_write_ok;}
+static int64_t exit_write_elapsed;
+bool df_fixed_exit_record(void){call('R');now+=exit_write_elapsed;return exit_write_ok;}
 static const char *home_error;
 typedef struct {void (*run_restore)(void);void (*ended)(esp_err_t,const char*);} screen_ops_t;
 static const screen_ops_t SCREENS[1]={{0}};
@@ -178,12 +182,12 @@ static const registry_t *app_registry_current(void){return &registry;}
 #endif
 static void reset(void){
     guest=(void*)1;atomic_store(&stop_requested,false);
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
     fixture_phase=DF_OFF;finish_in_frame=ended=false;
     deadline=frame_elapsed=continuation_elapsed=0;
     ended_result=0;atomic_store(&owner_capture,false);owner=SCREEN_HOME;
     running=true;run_started=ESP_OK;home_error=NULL;
-    exit_write_ok=true;
+    exit_write_ok=true;exit_write_elapsed=0;
 #endif
     calls[0]=0;pending=remain=activate=need_present=submission=false;
     native_animation=system_pending=false;board_capture(false);
@@ -291,13 +295,13 @@ int main(void){
     reset();pending=true;jobs_left=true;guest_error=ESP_FAIL;assert(app_tick(0)==ESP_FAIL);
     assert(!strcmp(calls,"ACYO"));
     puts("session dispatch PASS: ordering, cleanup, Back, continuation, display turn, watchdog, parked-frame present, Back present before the save frame");
-#ifdef TEST_DERBY_DETAIL_EXIT
+#ifdef TEST_DERBY_FIXED_EXIT
     reset();fixture_phase=DF_DONE;exit_requested=true;
-    assert(app_derby_detail_finished());pending=true;assert(!app_derby_detail_finished());
-    pending=false;atomic_store(&stop_requested,true);assert(!app_derby_detail_finished());
-    atomic_store(&stop_requested,false);guest=NULL;assert(!app_derby_detail_finished());
-    reset();fixture_phase=DF_ABORT;exit_requested=true;assert(!app_derby_detail_finished());
-    reset();fixture_phase=DF_DONE;assert(!app_derby_detail_finished());
+    assert(app_derby_fixed_finished());pending=true;assert(!app_derby_fixed_finished());
+    pending=false;atomic_store(&stop_requested,true);assert(!app_derby_fixed_finished());
+    atomic_store(&stop_requested,false);guest=NULL;assert(!app_derby_fixed_finished());
+    reset();fixture_phase=DF_ABORT;exit_requested=true;assert(!app_derby_fixed_finished());
+    reset();fixture_phase=DF_DONE;assert(!app_derby_fixed_finished());
     // The frame that emits END requests exit. Owner ends it before a second
     // VM entry (including the release entry for a key press).
     reset();finish_in_frame=true;tick_run(false,NULL);
@@ -321,6 +325,14 @@ int main(void){
     reset();fixture_phase=DF_DONE;exit_requested=true;pending=true;
     continuation_elapsed=250001;tick_run(false,NULL);
     assert(ended&&ended_result==ESP_ERR_TIMEOUT&&!strchr(calls,'R'));
+    // The last turn is not rearmed for owner output. Reserve output room,
+    // then check again so preemption during the write cannot qualify success.
+    reset();finish_in_frame=true;frame_elapsed=240000;exit_write_elapsed=110000;
+    tick_run(false,NULL);assert(ended&&ended_result==ESP_ERR_TIMEOUT&&!strchr(calls,'R'));
+    reset();finish_in_frame=true;frame_elapsed=110000;exit_write_elapsed=110000;
+    tick_run(false,NULL);assert(ended&&ended_result==ESP_OK&&strchr(calls,'R'));
+    reset();finish_in_frame=true;frame_elapsed=110000;exit_write_elapsed=140001;
+    tick_run(false,NULL);assert(ended&&ended_result==ESP_ERR_TIMEOUT&&strchr(calls,'R'));
     // Draining jobs after END is required; neither exit nor DONE skips them.
     reset();fixture_phase=DF_DONE;exit_requested=true;pending=remain=true;
     tick_run(false,NULL);assert(!ended&&!stopped&&strchr(calls,'C'));
@@ -334,6 +346,6 @@ int main(void){
     tick_run(false,NULL);assert(ended&&ended_result==ESP_FAIL&&home_error);
     reset();finish_in_frame=true;keystroke_t back={KEY_BACK};tick_run(true,&back);
     assert(ended&&stopped&&delivered==0x2000);
-    puts("detailed owner exit PASS: final frame, release guard, full drain, errors/watchdog preserved");
+    puts("fixed ON/OFF owner exit PASS: final frame, release guard, full drain, errors/watchdog preserved");
 #endif
 }
