@@ -1,0 +1,83 @@
+name: DERBY capture full contracts
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/derby-capture-contracts.yml'
+      - 'tools/kasane_ir/check_equivalence.py'
+      - 'tools/kasane_ir/test_check_equivalence.py'
+      - 'tools/kasane_contract/run.sh'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-capture-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  HARNESS_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: main-base
+            source: e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267
+          - name: dma-candidate
+            source: 6e4b855cb1105077d6e203eaf6368e62cb8cf6a1
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.HARNESS_HEAD }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.source }}
+          path: source
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Apply only the common test overlay and record its source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/artifacts
+          git -C source rev-parse HEAD > source/artifacts/source-head.txt
+          git -C harness rev-parse HEAD > source/artifacts/harness-head.txt
+          for path in tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh; do
+            cp "harness/$path" "source/$path"
+          done
+          git -C source add -- tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh
+          git -C source diff --cached > source/artifacts/test-overlay.patch
+          git -C source write-tree > source/artifacts/overlay-tree.txt
+          (cd source && sha256sum tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh) > source/artifacts/test-overlay.sha256
+          git -C source diff HEAD --exit-code -- . ':!tools/kasane_ir/check_equivalence.py' ':!tools/kasane_ir/test_check_equivalence.py' ':!tools/kasane_contract/run.sh'
+      - name: Prepare official 32-bit dependencies
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          M32_SYSROOT="$PWD/.cache/kasane_megademo_app/m32sys" \
+            bash tools/vmtest/m32_sysroot.sh > artifacts/m32-flags.txt 2> artifacts/m32-prepare.log
+      - name: Run the complete contract script including capture and m32 games
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          GAMES_M32=1 bash tools/kasane_contract/run.sh > artifacts/full-contracts.log 2>&1
+          sha256sum --check artifacts/test-overlay.sha256
+          git diff HEAD --exit-code -- . ':!tools/kasane_ir/check_equivalence.py' ':!tools/kasane_ir/test_check_equivalence.py' ':!tools/kasane_contract/run.sh'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-capture-${{ matrix.name }}-${{ env.HARNESS_HEAD }}
+          path: source/artifacts/
+          retention-days: 14

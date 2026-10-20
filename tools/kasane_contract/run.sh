@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+python3 -m unittest discover -s tools/kasane_ir -p test_check_equivalence.py
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 cc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
