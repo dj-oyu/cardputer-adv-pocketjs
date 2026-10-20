@@ -1,0 +1,48 @@
+name: Kasane full host contracts
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: kasane-full-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Prepare official 32-bit dependencies without system installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          # Existing repository helper downloads official distro packages and
+          # unpacks them below the workspace. It needs neither sudo nor dpkg -i.
+          M32_SYSROOT="$PWD/.cache/kasane_megademo_app/m32sys" \
+            bash tools/vmtest/m32_sysroot.sh > artifacts/m32-flags.txt 2> artifacts/m32-prepare.log
+      - name: Run complete tracked contract script including m32 captures and games
+        shell: bash
+        run: |
+          set -euo pipefail
+          GAMES_M32=1 bash tools/kasane_contract/run.sh > artifacts/full-contracts.log 2>&1
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: kasane-full-${{ env.SOURCE_HEAD }}
+          path: artifacts/
+          retention-days: 14
