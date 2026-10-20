@@ -1,13 +1,13 @@
 {
-  "source_commit": "8a883c516720bfdc662c029f473f2e53e53c4e5f",
-  "source_tree": "ec8b3410358030cf6a32c83811ab78d206060d81",
+  "source_commit": "b7d257adf8326c41bc982852c072acf64e3fbee5",
+  "source_tree": "3665aebdd654201d7d9f8598e20d98ae8c92ab1b",
   "python": "3.12.14",
   "node": "v24.19.0",
   "hardware_tested": false,
   "submodule_gitlinks": "160000 commit 41129fcfe39c583ee5462d79195741945d51c1fe\tthird_party/bmi270\n160000 commit ea99364f61c14656440e8d77e9c233ccf3124633\tthird_party/minimp3\n160000 commit 22244de5a79bd1d6d623c32e72bf1954b56235be\tthird_party/opus",
   "build_mode": {
     "telemetry_mode": "ON",
-    "cmake_cache_sha256": "98203275df8ef76af93c21e63efe42f334bfb6e69f9e2efa5f17e04c0d43ef24",
+    "cmake_cache_sha256": "1e827f4e282c0a89c0526d08f24da264d75ee694956d5ef5d4a7ee7d309c9077",
     "native_symbols": [
       "derby_telemetry_begin_frame",
       "derby_telemetry_eval",
@@ -42,7 +42,7 @@
       "dm_reset",
       "dm_transfer"
     ],
-    "cmake_cache_sha256": "98203275df8ef76af93c21e63efe42f334bfb6e69f9e2efa5f17e04c0d43ef24"
+    "cmake_cache_sha256": "1e827f4e282c0a89c0526d08f24da264d75ee694956d5ef5d4a7ee7d309c9077"
   },
   "fixed_workload": {
     "mode": "ON",
@@ -114,16 +114,16 @@
     ]
   },
   "idf_version": "v6.0.1",
-  "embedded_elf_sha256": "c410c0df4dbc049a73ec26bf78dcd62a8b0449c921cd73856326edd75c6f2b9d",
-  "project_version": "8a883c516720",
+  "embedded_elf_sha256": "278fadfa06ec501035297aee280ac5e47feb2d7f1c73cc3008db7b8367f9aa00",
+  "project_version": "b7d257adf832",
   "artifacts": {
     "cardputer_pocketjs.bin": {
       "bytes": 2296976,
-      "sha256": "f3651cdb34451c21077db4806e788939fcfd1548d84687fdf48087dcf973a6d1"
+      "sha256": "927674ba30beb09de15ee9da69b5055372e178433d1dbf8826f70a29781d3c6b"
     },
     "cardputer_pocketjs.elf": {
       "bytes": 20002708,
-      "sha256": "c410c0df4dbc049a73ec26bf78dcd62a8b0449c921cd73856326edd75c6f2b9d"
+      "sha256": "278fadfa06ec501035297aee280ac5e47feb2d7f1c73cc3008db7b8367f9aa00"
     },
     "cardputer_pocketjs.map": {
       "bytes": 11809961,
@@ -135,7 +135,7 @@
     },
     "project_description.json": {
       "bytes": 210080,
-      "sha256": "57eee1454a9fdce91e826eb4213d408f5978e324ad6ff1cd67af2a936916c3f1"
+      "sha256": "ca8bb528d3b467aa10cfb2a4b5baf1c0b188fc8601a993d17a9715986f360ee9"
     },
     "bootloader/bootloader.bin": {
       "bytes": 22528,

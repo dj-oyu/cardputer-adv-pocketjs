@@ -1,0 +1,180 @@
+{
+  "source_commit": "b7d257adf8326c41bc982852c072acf64e3fbee5",
+  "source_tree": "3665aebdd654201d7d9f8598e20d98ae8c92ab1b",
+  "base_commit": "b561aea1c0798feb28055a00d36681fae81ac58a",
+  "hardware_tested": false,
+  "workflow_count": 6,
+  "job_count": 14,
+  "runs": [
+    {
+      "id": 39389261596,
+      "name": "Session dispatch host checks",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261596",
+      "head_sha": "b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "id": 118516543012,
+          "name": "dispatch",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 39389261642,
+      "name": "Source submodule contract",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261642",
+      "head_sha": "b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "id": 118516543742,
+          "name": "contract",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 39389261682,
+      "name": "Kasane copied DMA overlap",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261682",
+      "head_sha": "b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "id": 118516544046,
+          "name": "firmware (ON, OFF)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 118516544309,
+          "name": "firmware (OFF, OFF)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 118516544336,
+          "name": "firmware (OFF, ON)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 118516544411,
+          "name": "host",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 118516544423,
+          "name": "firmware (ON, ON)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 39389261719,
+      "name": "DERBY finite fixed workload",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261719",
+      "head_sha": "b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "id": 118516544145,
+          "name": "firmware",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 118516544609,
+          "name": "host",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 39389261619,
+      "name": "DERBY detailed measurement",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261619",
+      "head_sha": "b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "id": 118516543441,
+          "name": "host",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 118516543443,
+          "name": "firmware (ON)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 118516544278,
+          "name": "firmware (OFF)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 39389261617,
+      "name": "DERBY and HOME integration",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261617",
+      "head_sha": "b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "id": 118516965418,
+          "name": "firmware",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 118516965527,
+          "name": "host",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "dma_artifacts": [
+    {
+      "id": 12249285405,
+      "name": "kasane-dma-ON-detail-OFF-b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "size_in_bytes": 10565469,
+      "digest": "sha256:d62d550f83e0f3e303195bce45afe1cf654b04bc901f3f99cef095fe195452fd",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261682/artifacts/12249285405"
+    },
+    {
+      "id": 12248778137,
+      "name": "kasane-dma-OFF-detail-OFF-b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "size_in_bytes": 10563090,
+      "digest": "sha256:995aaba364c832537c6fd0ba4da2701ec69bd9bf11c8d93928197551a62ef6b6",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261682/artifacts/12248778137"
+    },
+    {
+      "id": 12248703286,
+      "name": "kasane-dma-OFF-detail-ON-b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "size_in_bytes": 10572499,
+      "digest": "sha256:0ce2c0b4da7fb920c5cf4fbcbd7c07ea09b2693cae75a30bd1feac1b3465d951",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261682/artifacts/12248703286"
+    },
+    {
+      "id": 12248074765,
+      "name": "kasane-dma-ON-detail-ON-b7d257adf8326c41bc982852c072acf64e3fbee5",
+      "size_in_bytes": 10576475,
+      "digest": "sha256:e921481017b80b35ebe7d3eae4d289dba7b04bcd8933e9650497ace820d7c920",
+      "url": "https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39389261682/artifacts/12248074765"
+    }
+  ],
+  "independent_review": "8a883c5 full implementation and OFF object preservation reviewed/tested; b7d257ad additional include reviewed against exact GitHub diff; no unresolved findings",
+  "full_contract_scope": "PR30 3a0b0888070e4e316e546bfdbb4f6bdfd95545f9 full-contract run39385450215 succeeded separately; PR31 + PR30 integration not performed"
+}

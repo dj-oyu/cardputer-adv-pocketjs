@@ -387,8 +387,9 @@
       }
     }
   },
-  "source_commit": "8a883c516720bfdc662c029f473f2e53e53c4e5f",
+  "source_commit": "b7d257adf8326c41bc982852c072acf64e3fbee5",
   "base_commit": "b561aea1c0798feb28055a00d36681fae81ac58a",
   "sdkconfig_sha256": "1089b905c7e7c5825ac5843e7a4236d393e37b0a685344cc05147a540b64e123",
-  "hardware_tested": false
+  "hardware_tested": false,
+  "source_tree": "3665aebdd654201d7d9f8598e20d98ae8c92ab1b"
 }
