@@ -76,7 +76,6 @@ jobs:
           python -B tools/report_derby_detail_resources.py --build build_dma
           idf.py -B build_dma size-files > build_dma/size-files.txt
           idf.py -B build_dma size > build_dma/size.txt
-          sha256sum build_dma/*.elf build_dma/*.bin > build_dma/SHA256SUMS
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -89,6 +88,7 @@ jobs:
             build_dma/*.map
             build_dma/*.bin
             build_dma/sdkconfig
+            build_dma/size-files.txt
             build_dma/size.txt
             build_dma/SHA256SUMS
             build_dma/CMakeCache.txt

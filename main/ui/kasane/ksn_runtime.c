@@ -168,6 +168,7 @@ bool ksn_runtime_invalidate_image_source_rect(ksn_resource resource,ksn_rect sou
 uint32_t ksn_runtime_opaque_system_bands(void){
     return runtime?ksn_core_opaque_system_bands(&runtime->core):0;
 }
+#ifdef KASANE_DMA_OVERLAP
 ksn_result ksn_runtime_present_complete(const ksn_display_port *port,ksn_backdrop_loader load,
                                         bool occlusion_safe,const ksn_display_completion *completion,
                                         ksn_render_stats *stats){
@@ -177,6 +178,7 @@ ksn_result ksn_runtime_present_complete(const ksn_display_port *port,ksn_backdro
         ksn_view_host_present_complete(&runtime->host,port,load,occlusion_safe,completion,stats):
         (completion&&completion->finish?completion->finish(completion->ctx):KSN_OK);
 }
+#endif
 ksn_result ksn_runtime_present(const ksn_display_port *port,ksn_render_stats *stats){
     if(!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};

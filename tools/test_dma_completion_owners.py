@@ -37,7 +37,7 @@ int main(void){""")
         exe = temp / "runtime"
         sources = ["ksn_core.c", "ksn_render.c", "ksn_blend_pie.c", "ksn_cache.c",
                    "ksn_modal.c", "ksn_view.c"]
-        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", *flags,
+        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DKASANE_DMA_OVERLAP=1", *flags,
                         "-I", str(root / "main/ui/kasane"),
                         *[str(root / "main/ui/kasane" / s) for s in sources],
                         str(source), "-o", str(exe)], check=True)
@@ -104,6 +104,7 @@ void pocket_grid_source_invalidated(uint32_t r){(void)r;}
     source = temp / "pocket.c"
     source.write_text(pocket)
     env = dict(os.environ, TEST_SOURCE=str(source), OUT=str(temp / "pocket"),
-               CACHE=str(temp / "qjs"))
+               CACHE=str(temp / "qjs"),
+               CFLAGS="-O1 -g -fsanitize=address,undefined -DKASANE_DMA_OVERLAP=1")
     subprocess.run(["bash", "tools/build_kasane_test.sh"], cwd=root, env=env, check=True)
     subprocess.run([str(temp / "pocket")], cwd=root, check=True)

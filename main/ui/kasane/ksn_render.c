@@ -1937,9 +1937,17 @@ static unsigned outside_opaque(ksn_rect box,ksn_rect opaque,ksn_rect out[4]){
     if(y1<box.y1)out[count++]=(ksn_rect){x0,y1,x1,box.y1};
     return count;
 }
+#ifdef KASANE_DMA_OVERLAP
 static ksn_result render_rects_body(ksn_core *core,const ksn_display_port *display,
                                ksn_backdrop_loader load_backdrop,bool occlusion_safe,
                                ksn_render_stats *stats,ksn_tx *prepared){
+#else
+static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
+                               ksn_backdrop_loader load_backdrop,bool occlusion_safe,
+                               ksn_render_stats *stats){
+    DM_SCOPE(DM_RASTER);
+    DD_SCOPE(DD_RENDER);
+#endif
     DD_OPEN(prepare,DD_RENDER_PREPARE);
     if(!core||!display||!stats||!display->strip||!display->present||
        display->width!=240||display->height!=135||display->strip_rows!=8)return KSN_INVALID;
@@ -1951,11 +1959,17 @@ static ksn_result render_rects_body(ksn_core *core,const ksn_display_port *displ
         ksn_core_opaque_system_bands(core):0;
     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
     if(result!=KSN_OK)return result;
+#ifdef KASANE_DMA_OVERLAP
     *prepared=frame.ticket;
+#endif
     ksn_damage damage;result=ksn_core_damage(core,frame.ticket,display->text,&damage);
     if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
     damage.bands&=~occluded;
+#ifdef KASANE_DMA_OVERLAP
     if(!damage.bands)return KSN_OK;
+#else
+    if(!damage.bands)return ksn_core_presented(core,frame.ticket);
+#endif
     /* Narrowing is a decision taken here, before any pixel is written: a band
      * composited over part of its width leaves the rest of the shared strip
      * holding the previous band's pixels, so a port that can only send whole
@@ -2354,8 +2368,13 @@ static ksn_result render_rects_body(ksn_core *core,const ksn_display_port *displ
         stats->bands|=1u<<band;
         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
     }
+#ifndef KASANE_DMA_OVERLAP
+    return ksn_core_presented(core,frame.ticket);
+#else
     return KSN_OK;
+#endif
 }
+#ifdef KASANE_DMA_OVERLAP
 ksn_result ksn_render_rects_complete(ksn_core *core,const ksn_display_port *display,
                                      ksn_backdrop_loader load,bool occlusion_safe,
                                      const ksn_display_completion *completion,
@@ -2377,12 +2396,21 @@ ksn_result ksn_render_rects_complete(ksn_core *core,const ksn_display_port *disp
     if(result==KSN_OK)return ksn_core_presented(core,prepared);
     return result;
 }
+#endif
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
+#ifdef KASANE_DMA_OVERLAP
     return ksn_render_rects_complete(core,display,NULL,false,NULL,stats);
+#else
+    return render_rects(core,display,NULL,false,stats);
+#endif
 }
 ksn_result ksn_render_rects_backdrop(ksn_core *core,const ksn_display_port *display,
                                      ksn_backdrop_loader load,bool occlusion_safe,
                                      ksn_render_stats *stats){
     if(!load)return KSN_INVALID;
+#ifdef KASANE_DMA_OVERLAP
     return ksn_render_rects_complete(core,display,load,occlusion_safe,NULL,stats);
+#else
+    return render_rects(core,display,load,occlusion_safe,stats);
+#endif
 }

@@ -186,6 +186,7 @@ ksn_result ksn_view_modal_close(ksn_view *v,ksn_tx tx){
     return mutation(v,tx,ksn_modal_prepare_close(&v->host->modal,v->host->core,tx));
 }
 void ksn_view_host_end_turn(ksn_view_host *h){if(h)abort_builder(h);}
+#ifdef KASANE_DMA_OVERLAP
 ksn_result ksn_view_host_present_complete(ksn_view_host *h,const ksn_display_port *port,
                                           ksn_backdrop_loader load,bool occlusion_safe,
                                           const ksn_display_completion *completion,
@@ -202,6 +203,7 @@ ksn_result ksn_view_host_present_complete(ksn_view_host *h,const ksn_display_por
     if(r==KSN_OK&&submitted)resolve(h);
     return r;
 }
+#endif
 ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,ksn_render_stats *stats){
     if(!h||!h->core||!stats)return KSN_INVALID;
     *stats=(ksn_render_stats){0};

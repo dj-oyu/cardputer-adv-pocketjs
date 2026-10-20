@@ -80,7 +80,7 @@ int main(void){
   assert(display.sent_us==37);
   unsigned tx_time=17*3+17*37;
 #else
-  ksn_result r=ksn_render_rects_complete(&core,&port,backdrop,false,NULL,&stats);
+  ksn_result r=ksn_render_rects_backdrop(&core,&port,backdrop,false,&stats);
   assert(r==KSN_OK&&ksn_core_poll(&core).status==KSN_PRESENTED);
   unsigned tx_time=17*14;
 #endif

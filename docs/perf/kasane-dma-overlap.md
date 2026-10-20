@@ -21,6 +21,8 @@ ON時はband nを既存TXへcopyしてqueueし、shared stripでband n+1をraste
 
 ## 公開APIと所有権
 
+既定OFFでは従来のrenderer/pocket入口をそのままコンパイルし、追加completion API本体はON時だけ含める。J1既存の診断OFF `.text` 比較を維持する。
+
 既存 `ksn_display_port` のlayoutは不変。別の `ksn_display_completion { ctx, finish }` を渡す追加APIを用意する。
 
 - `board_present_submit(x,y,cols,rows,pixels)` / `board_present_finish()` は実験ON時のみ。
