@@ -1,6 +1,9 @@
 #ifdef POCKET_DERBY_DETAIL_MEASURE
 #include "pocket/derby_detail.h"
 #endif
+#ifdef KASANE_DMA_OVERLAP
+#include "pocket/derby_detail.h"
+#endif
 #include "pocket/derby_measure.h"
 #include "app_session.h"
 #include "board.h"
