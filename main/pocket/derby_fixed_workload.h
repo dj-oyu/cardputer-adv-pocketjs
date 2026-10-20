@@ -8,6 +8,14 @@ enum df_phase { DF_OFF,DF_READY,DF_ARMED,DF_MEASURE,DF_TAIL,DF_DONE,DF_ABORT };
 enum df_error { DF_IDENTITY=1,DF_STATE=2,DF_CONTEXT=4,DF_MEASUREMENT=8,DF_CAPTURE=16,
                 DF_OUTPUT=32,DF_CLOCK=64,DF_TIMEOUT=128,DF_INPUT=256,DF_PRESENT=512 };
 #ifdef POCKET_DERBY_FIXED_WORKLOAD
+/* Device values are bytes. Host adapters must identify synthetic evidence. */
+typedef struct {
+    uint32_t ui_stack_free,internal_free,internal_largest,guest_used,guest_cap;
+    bool synthetic;
+} df_resources;
+bool derby_runtime_resources_read(df_resources *out);
+bool derby_runtime_resources_deadline_ok(uint32_t reserve_us);
+void derby_runtime_resources_bind_ui_task(void);
 void df_reset(void);
 bool df_session(void);
 bool df_measuring(void);

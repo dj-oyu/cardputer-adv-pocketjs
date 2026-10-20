@@ -97,6 +97,8 @@ void app_p2_request_patch_repair_probe(void);
 #endif
 esp_err_t app_tick(uint32_t buttons);
 #ifdef POCKET_DERBY_FIXED_WORKLOAD
+// Current QuickJS allocation counters, not a peak; UI owner checks live in adapter.
+bool app_derby_fixed_guest_memory(size_t *used,size_t *cap);
 // Diagnostic only: returned normally, fixture DONE, no queued work or stop.
 bool app_derby_fixed_finished(void);
 // Check the last armed guest deadline before owner acceptance, without rearm.

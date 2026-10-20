@@ -4,6 +4,7 @@ No broker, device, admitted source or physical trial is represented by these
 receipts. Local prove_dma still verifies the actual BIN/ELF/cache/fixture pair.
 """
 import argparse
+import base64
 import copy
 import hashlib
 import json
@@ -18,6 +19,8 @@ from derby_manifest_export_fixture import project
 from test_derby_manifest_export import sample, recommit_schema_fixture
 from verify_derby_recorded_trial import digest
 from verify_dma_diagnostic_build import prove_dma
+from record_verification import elf_symbols
+from test_derby_runtime_resources import RESOURCE, FLOOR
 
 
 def main():
@@ -28,7 +31,14 @@ def main():
     parser.add_argument('--expect-dma', choices=('OFF', 'ON'), required=True)
     args = parser.parse_args()
     proof = prove_dma(args.build, dma_overlap=args.expect_dma, detail_measurement=args.expect_detail)
+    assert {'derby_runtime_resources_read', 'derby_runtime_resources_deadline_ok',
+            'derby_runtime_resources_bind_ui_task', 'app_derby_fixed_guest_memory'} <= set(elf_symbols(args.build))
     records, options = sample(args.expect_detail, args.expect_dma)
+    # Wholly synthetic runtime observation, bound to the same synthetic raw
+    # receipt. Actual local images are proved independently below.
+    records[0] = records[0].replace(b'DERBY_FIXED_END', RESOURCE+b'DERBY_FIXED_END', 1)
+    records[1].update(bytes=len(records[0]), sha256=hashlib.sha256(records[0]).hexdigest())
+    records[8]['fixed_trial'].update(raw_base64=base64.b64encode(records[0]).decode(), receipt=records[1])
     records[2] = proof
     original = copy.deepcopy(records[3])
     original['source_provenance']['commit'] = args.expect_head
@@ -68,6 +78,9 @@ def main():
             '--expect-detail', args.expect_detail, '--expect-dma', args.expect_dma,
             '--expect-entry-sha256', '9' * 64, '--expect-flash-plan-sha256', anchor,
             '--out', str(root / 'result.json')]
+        command += ['--require-runtime-resources']
+        for key, value in FLOOR.items():
+            command += ['--min-' + key.replace('_', '-'), str(value)]
         for key, path in paths.items():
             command += ['--' + key, str(path)]
         result = subprocess.run(command, capture_output=True, text=True)
@@ -78,8 +91,10 @@ def main():
         assert report['manifest_export']['original_manifest_recomputed'] is False
         assert report['app_bin_sha256'] == image and report['elf_sha256'] == elf
         assert report['hardware_tested'] is False
+        assert report['runtime_resources']['resource_verified'] is True
         negatives = []
-        for damage in ('anchor', 'null_commitment', 'rehashed_export', 'plan_owner_rehash'):
+        for damage in ('anchor', 'null_commitment', 'rehashed_export', 'plan_owner_rehash',
+                       'resource_floor', 'resource_policy_missing'):
             changed = list(command)
             if damage == 'anchor':
                 changed[changed.index('--expect-flash-plan-sha256') + 1] = 'e' * 64
@@ -93,13 +108,18 @@ def main():
                 path = root / 'changed-export.json'
                 path.write_text(json.dumps(value))
                 changed[changed.index('--manifest-export') + 1] = str(path)
-            else:
+            elif damage == 'plan_owner_rehash':
                 plan = dict(records[4], flash_principal='other-owner')
                 job = dict(records[5], plan_hash=digest(plan))
                 for flag, value in (('--flash-plan', plan), ('--flash-job', job)):
                     path = root / (flag[2:] + '-changed.json')
                     path.write_text(json.dumps(value))
                     changed[changed.index(flag) + 1] = str(path)
+            elif damage == 'resource_floor':
+                changed[changed.index('--min-ui-stack-free-bytes') + 1] = str(FLOOR['ui_stack_free_bytes'] + 1)
+            else:
+                offset = changed.index('--min-ui-stack-free-bytes')
+                del changed[offset:offset + 2]
             denied = subprocess.run(changed, capture_output=True, text=True)
             assert denied.returncode != 0, 'CLI accepted ' + damage
             negatives.append(damage)

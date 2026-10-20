@@ -209,6 +209,13 @@ extern const char companion_start[] asm("_binary_companion_js_start");
 extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
 static pocketjs_guest_t *guest;
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+bool app_derby_fixed_guest_memory(size_t *used,size_t *cap){
+    if(!guest||!used||!cap||df_status()!=DF_TAIL)return false;
+    JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),used,cap);
+    return *used>0&&*used<=*cap;
+}
+#endif
 
 // Called after any turn or evaluation that ran JavaScript -- app_tick's two
 // paths, app_overlay_tick's, and eval_reporting's parse -- because an

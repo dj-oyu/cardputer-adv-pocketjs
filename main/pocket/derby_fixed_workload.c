@@ -17,7 +17,7 @@ const char df_completion_contract[]="DERBY_DETAIL_EXIT v=1 session=%u clean=1\n"
 static struct {
     enum df_phase phase;
     unsigned rep,seen,presented,dispatches,continuations,quality,trial_quality,reported;
-    bool arm_presented,turn_open,wait_open,work_ended,end_pending,exit_reported;
+    bool arm_presented,turn_open,wait_open,work_ended,end_pending,exit_reported,resources_reported;
     unsigned wait_kind;
     uint64_t session_start,start,turn_start,wait_start,wall,work;
     uint64_t pace[DF_PACES],pace_calls[DF_PACES],requested[DF_PACES],counts[DF_COUNTERS];
@@ -28,6 +28,31 @@ static struct {
 #endif
 } s;
 static unsigned serial;
+
+/* Dedicated post-trial return boundary: never sampled inside timed work.
+ * HWM includes this observer's stack and the UI task's earlier history. */
+static __attribute__((noinline)) bool resource_record(void){
+    df_resources r={0};
+    uint64_t began=df_now_us(),now;
+    if(s.phase!=DF_TAIL||s.reported!=3||!derby_runtime_resources_deadline_ok(125000)||
+       !derby_runtime_resources_read(&r))return false;
+    now=df_now_us();
+    if(now<began||now-began>125000||now<s.session_start||
+       now-s.session_start>180000000-250000||
+       !r.ui_stack_free||r.ui_stack_free>32768||!r.internal_largest||
+       r.internal_largest>r.internal_free||!r.guest_cap||!r.guest_used||r.guest_used>r.guest_cap)
+        return false;
+    char line[384];
+    int n=snprintf(line,sizeof line,
+      "DERBY_RESOURCE v=1 session=%u reps=3 phase=post_trial_tail valid=1 task=ui unit=bytes"
+      " source=%s stack_scope=task_lifetime heap_scope=current"
+      " stack_free=%"PRIu32" internal_free=%"PRIu32" internal_largest=%"PRIu32
+      " guest_used=%"PRIu32" guest_cap=%"PRIu32"\n",
+      serial,r.synthetic?"synthetic":"esp-idf-6.0.1",r.ui_stack_free,r.internal_free,
+      r.internal_largest,r.guest_used,r.guest_cap);
+    return n>0&&(size_t)n<sizeof line&&derby_runtime_resources_deadline_ok(125000)&&
+           df_write(line,(size_t)n)&&derby_runtime_resources_deadline_ok(0);
+}
 
 static bool elapsed(uint64_t now,uint64_t began,uint64_t *out){
     if(now<began){s.quality|=DF_CLOCK;return false;}
@@ -100,7 +125,13 @@ static void report(uint32_t finish){
     uint64_t duration=0;
     if(!elapsed(df_now_us(),s.session_start,&duration)){df_fail(DF_CLOCK);return;}
     if(duration>180000000-250000){df_fail(DF_TIMEOUT);return;}
-    if(s.end_pending){s.phase=DF_DONE;final_record();return;}
+    if(s.end_pending){
+        if(!s.resources_reported){
+            if(!resource_record()){df_fail(DF_MEASUREMENT);return;}
+            s.resources_reported=true;return;
+        }
+        s.phase=DF_DONE;final_record();return;
+    }
 #ifdef POCKET_DERBY_DETAIL_MEASURE
     if(s.detail_row<DD_STAGES+DD_EVENTS+1){
         if(!detail_report_step())df_fail(DF_OUTPUT);

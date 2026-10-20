@@ -978,6 +978,9 @@ static bool ui_key_receive(keystroke_t *stroke) {
 
 static void ui_task(void *arg) {
     (void)arg;
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+    derby_runtime_resources_bind_ui_task();
+#endif
     // Before anything can post: every producer of a completion runs on a task
     // this one starts, or on an interrupt armed from it.
     vm_wake_bind();
