@@ -9,6 +9,9 @@ FIXTURE={"id":"oval-pan8-390-510-v1","seed":"9112A7AB","race":1000001,
          "oval":1,"tier":1,"camera":8,"start":390,"end":510,"contexts":120,
          "repetitions":3,"independent":False,"finish":"5DC86E18"}
 MANIFEST_SHA256=hashlib.sha256(json.dumps(FIXTURE,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+CONTROLLER_MARKER='\n// DF fixture oval-pan8-390-510-v1: three dependent replays in one boot.'
+CONTROLLER_LOAD="\npocket.app.load('fixed');"
+CONTROLLER_STRICT="'use strict';"
 
 def once(text,old,new):
     if text.count(old)!=1:raise ValueError('fixed workload source drift: '+old[:80])
@@ -99,12 +102,21 @@ def generate(source:Path,out:Path,detail=False):
             path=out/f'derby_{name}.js'
             text=(source/path.name).read_text() if name=='pan' else path.read_text()
             path.write_bytes(instrument(name,text).encode())
+    # Compile the controller after the normal frame's parser temporaries die.
+    # Keep its global bindings, strict semantics and position before enter/READY;
+    # a failed nested load must escape the original play load, without fallback.
+    path=out/'derby_play.js';play=path.read_text()
+    begin=play.index(CONTROLLER_MARKER)
+    end=play.index("\nenter('pad');",begin)
+    (out/'derby_fixed.js').write_bytes((CONTROLLER_STRICT+play[begin:end]).encode())
+    path.write_bytes((play[:begin]+CONTROLLER_LOAD+play[end:]).encode())
     lines=['app local.derby']
     for line in (source/'chunks.txt').read_text().splitlines():
         cols=line.split()
         if len(cols)!=2 or cols[0]=='app' or line.lstrip().startswith('#'):continue
         path=out/f'derby_{cols[0]}.js' if cols[0] in ('view','play') or detail and cols[0]=='pan' else source/cols[1]
         lines.append(cols[0]+' '+path.resolve().as_posix())
+    lines.append('fixed '+(out/'derby_fixed.js').resolve().as_posix())
     (out/'chunks.txt').write_text('\n'.join(lines)+'\n')
     (out/'fixture.json').write_text(json.dumps({**FIXTURE,'manifest_sha256':MANIFEST_SHA256},indent=2)+'\n')
 

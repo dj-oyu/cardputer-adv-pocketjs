@@ -8,7 +8,7 @@ import unittest
 import sys
 import shutil
 from unittest.mock import patch
-from derby_fixed_workload_chunks import generate,MANIFEST_SHA256
+from derby_fixed_workload_chunks import generate,MANIFEST_SHA256,CONTROLLER_LOAD,CONTROLLER_STRICT
 from record_verification import verify_fixed_mode,verify_mode,FIXED_SYMBOLS,TELEMETRY_SYMBOLS
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -37,6 +37,28 @@ def off_path(source):
     return '\n'.join(x.strip() for x in out if x.strip())
 
 class Integration(unittest.TestCase):
+    def test_controller_preserves_strict_global_scope_load_order_and_ready_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for detail in (False,True):
+                out=Path(tmp)/str(detail);generate(ROOT/'apps/derby',out,detail)
+                play=(out/'derby_play.js').read_text();controller=(out/'derby_fixed.js').read_text()
+                self.assertTrue(controller.startswith(CONTROLLER_STRICT+'\n'))
+                self.assertEqual(play.count(CONTROLLER_LOAD),1)
+                self.assertLess(play.index(CONTROLLER_LOAD),play.index("\nenter('pad');"))
+                self.assertLess(play.index("\nenter('pad');"),play.index("\nlog('READY tones='"))
+                self.assertNotIn("log('READY tones='",controller)
+                watch=(out/'derby_watch.js').read_text()
+                self.assertIn("pocket.app.load('prog'), pocket.app.load('view'), pocket.app.load('scene'), pocket.app.load('pan'), pocket.app.load('play');",watch)
+                self.assertEqual((out/'chunks.txt').read_text().count('fixed '),1)
+                # Global lexical state remains shared with play; strict-mode
+                # unbound writes throw instead of creating a silent global.
+                probe="const vm=require('vm');const fs=require('fs');const c=vm.createContext({frame(){}});" \
+                      +"vm.runInContext(fs.readFileSync(process.argv[1],'utf8'),c);" \
+                      +"if(vm.runInContext('dfRep',c)!==1)throw Error('scope');" \
+                      +"const bad=fs.readFileSync(process.argv[1],'utf8').replace(\"'use strict';\",\"'use strict'; __dfUnbound=1;\");" \
+                      +"try{vm.runInContext(bad,vm.createContext({frame(){}}));throw Error('accepted');}catch(e){if(e.name!=='ReferenceError')throw e;}"
+                subprocess.run(['node','-e',probe,str(out/'derby_fixed.js')],check=True)
+
     def test_changed_settlement_terminal_contract_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             source=Path(tmp)/'source';shutil.copytree(ROOT/'apps/derby',source)
@@ -70,7 +92,7 @@ class Integration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             build=Path(tmp);out=build/'generated/derby_fixed_workload';generate(ROOT/'apps/derby',out)
             cache=build/'CMakeCache.txt';cache.write_text('POCKET_DERBY_FIXED_WORKLOAD:BOOL=ON\nPOCKET_DERBY_TELEMETRY:BOOL=ON\n')
-            chunks=[(out/name).read_bytes() for name in ('derby_watch.js','derby_view.js','derby_play.js')]
+            chunks=[(out/name).read_bytes() for name in ('derby_watch.js','derby_view.js','derby_play.js','derby_fixed.js')]
             elf=b'fixture'+b'\0'.join(chunks)+b'\0'+MANIFEST_SHA256.encode()+b'\0'
             path=build/'cardputer_pocketjs.elf';path.write_bytes(elf)
             with patch('record_verification.elf_symbols',return_value=FIXED_SYMBOLS):
@@ -140,8 +162,10 @@ class Integration(unittest.TestCase):
                 self.assertEqual(len(selected),1,'duplicate normal/telemetry/fixed app list')
                 pairs=dict(line.split() for line in Path(selected[0]).read_text().splitlines()[1:])
                 if enabled:
-                    for key in ('view','play'):self.assertEqual(Path(pairs[key]).read_bytes(),(fixed/f'derby_{key}.js').read_bytes())
-                else:self.assertNotIn('derby_fixed_workload',pairs['play'])
+                    for key in ('view','play','fixed'):self.assertEqual(Path(pairs[key]).read_bytes(),(fixed/f'derby_{key}.js').read_bytes())
+                else:
+                    self.assertNotIn('derby_fixed_workload',pairs['play'])
+                    self.assertNotIn('fixed',pairs)
                 if batch:self.assertIn('S.runners(',Path(pairs['pan']).read_text())
 
 if __name__=='__main__':unittest.main()

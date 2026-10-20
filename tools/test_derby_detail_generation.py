@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys,subprocess,tempfile,hashlib,json,re
 R=Path(__file__).resolve().parents[1];sys.path.insert(0,str(R/'tools'))
-from derby_fixed_workload_chunks import generate
+from derby_fixed_workload_chunks import generate,CONTROLLER_LOAD,CONTROLLER_STRICT
 VARIANT=re.search(r'df_variant\(void\)\{return "(baseline|native|batch)";', (R/'main/pocket/pocket_derby.c').read_text())[1]
 BASE=json.loads((R/'tools/derby_detail_bases.json').read_text())[VARIANT]
 with tempfile.TemporaryDirectory() as tmp:
@@ -13,8 +13,14 @@ with tempfile.TemporaryDirectory() as tmp:
     oldmod=out/'old_generator.py';oldmod.write_bytes(subprocess.check_output(['git','show',BASE+':tools/derby_fixed_workload_chunks.py'],cwd=R))
     subprocess.run([sys.executable,str(oldmod),str(R/'apps/derby'),str(out/'old')],env=__import__('os').environ|{'PYTHONPATH':str(R/'tools')},check=True)
     generate(R/'apps/derby',out/'off')
-    for p in (out/'old').glob('*.js'):assert p.read_bytes()==(out/'off'/p.name).read_bytes()
-    print('PASS repeated ON and ON/OFF/ON generation; OFF generated JS equals exact comparison-base generator')
+    for p in (out/'old').glob('*.js'):
+        current=(out/'off'/p.name).read_bytes()
+        if p.name=='derby_play.js':
+            controller=(out/'off/derby_fixed.js').read_bytes()
+            assert controller.startswith(CONTROLLER_STRICT.encode())
+            current=current.replace(CONTROLLER_LOAD.encode(),controller[len(CONTROLLER_STRICT):],1)
+        assert p.read_bytes()==current,p.name
+    print('PASS repeated ON/OFF generation; inlining strict controller exactly reconstructs comparison-base OFF play')
     # Native VM/procedural/renderer code must compile to identical .text at O0.
     headers=['components/quickjs-ng/quickjs-ng','components/pocketjs_guest/include','tools/hostshim','main','main/pocket','main/ui','main/ui/kasane','main/text','main/hal']
     (out/'main/ui/kasane').mkdir(parents=True);(out/'main/pocket').symlink_to(R/'main/pocket',target_is_directory=True)

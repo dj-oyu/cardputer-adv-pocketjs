@@ -3,7 +3,9 @@
 const fs = require('node:fs'), vm = require('node:vm');
 const [watch, manifest] = process.argv.slice(2);
 const fixture = JSON.parse(fs.readFileSync(manifest, 'utf8'));
-const context = {fixture};
+// Detailed watch has accounting boundaries around step(); the pure Node
+// simulation oracle has no elapsed clock or guest task to account for.
+const context = {fixture, S: {detail() {}}};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(watch, 'utf8'), context, {filename: watch});
 const result = vm.runInContext(`(() => {

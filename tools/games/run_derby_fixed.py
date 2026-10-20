@@ -194,12 +194,11 @@ def main():
     native=(ROOT/'main/pocket/pocket_derby.c').read_text()
     variants=re.findall(r'const char \*df_variant\(void\)\{return "(baseline|native|batch)";\}',native)
     if len(variants)!=1:raise ValueError('unique variant required')
-    variant=variants[0];generated=out/'fixture';generate(ROOT/'apps/derby',generated)
+    variant=variants[0];generated=out/'fixture';generate(ROOT/'apps/derby',generated,args.detail)
     app=run_derby.lower(ROOT/'apps/derby',out/'app')
-    for name in ('watch','view','play'):shutil.copy2(generated/f'derby_{name}.js',app/f'derby_{name}.js')
-    if args.detail:
-        from derby_detail_chunks import apply
-        apply(app)
+    for name in ('watch','view','play','fixed'):shutil.copy2(generated/f'derby_{name}.js',app/f'derby_{name}.js')
+    chunks=app/'chunks.txt';chunks.write_text(chunks.read_text()+'\nfixed derby_fixed.js\n')
+    if args.detail:shutil.copy2(generated/'derby_pan.js',app/'derby_pan.js')
     if variant=='batch':
         from derby_runner_batch import generate as batch_generate
         batch_generate(app)
@@ -266,7 +265,7 @@ def main():
     # generated app. The same binary must now reject it through QuickJS's fatal
     # interrupt path, not quietly qualify the old fixture again on a fast host.
     old=out/'old-tail-app';shutil.copytree(app,old,dirs_exist_ok=True)
-    path=old/'derby_play.js';text=path.read_text()
+    path=old/'derby_fixed.js';text=path.read_text()
     a=text.index('      // DF bounded tail:');b=text.index('      settle();',a)
     path.write_text(text[:a]+text[b:])
     bad=subprocess.run([str(binary)],cwd=ROOT,env=env|{'DERBY_APP_DIR':str(old)},capture_output=True,text=True)
@@ -289,6 +288,31 @@ def main():
         elif probe.returncode==0 or ready or b'DF_INIT_TEST' not in raw:
             raise ValueError('failed actual initialization emitted READY or did not fail')
         startup[name]={'exit_code':probe.returncode,'ready_count':len(ready),'sha256':hashlib.sha256(raw).hexdigest()}
+    # The nested controller load is part of startup, never an optional feature.
+    # A missing/invalid/throwing chunk must escape play before enter/READY.
+    for name,code,expected in [
+            ('controller-missing',None,b"no chunk 'fixed'"),
+            ('controller-syntax','(',b"chunk 'fixed' did not compile"),
+            ('controller-throw',"throw Error('DF_CONTROLLER_TEST');",b'DF_CONTROLLER_TEST'),
+            ('controller-strict',"__dfUndeclared=1;",b'__dfUndeclared')]:
+        probe_app=out/name;shutil.copytree(app,probe_app,dirs_exist_ok=True)
+        if code is None:
+            path=probe_app/'chunks.txt'
+            path.write_text('\n'.join(line for line in path.read_text().splitlines()
+                                       if not line.startswith('fixed '))+'\n')
+        else:
+            path=probe_app/'derby_fixed.js';text=path.read_text()
+            directive="'use strict';";assert text.startswith(directive)
+            path.write_text(directive+'\n'+code+'\n'+text[len(directive):])
+        probe=subprocess.run([str(binary)],cwd=ROOT,
+                             env=env|{'DERBY_APP_DIR':str(probe_app),'DERBY_EVAL_ONLY':'1'},
+                             capture_output=True,text=True)
+        raw=(probe.stdout+probe.stderr).encode();(out/(name+'.log')).write_bytes(raw)
+        if (probe.returncode==0 or expected not in raw or b'DERBY READY' in raw
+                or b'DERBY_FIXED v=' in raw):
+            raise ValueError('controller startup failure swallowed: '+name)
+        startup[name]={'exit_code':probe.returncode,'ready_count':0,
+                       'sha256':hashlib.sha256(raw).hexdigest()}
     result['collector_contract']=check_collector(log.read_bytes())
     result['startup_probes']=startup
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
