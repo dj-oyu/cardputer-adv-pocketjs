@@ -195,3 +195,4 @@ ESP32-S3 の PIE（SIMD）と、このコアでのスカラーコードの最適
 - [J1 DMA単独比較の検証条件](platform/derby-j1-dma-validation.md) — PR31/30合流、同一head CI、J1基準とDMA OFF/ONの対照。
 - [J1 host r2とDMAの専用合流点](platform/derby-j1-host-dma-integration.md) — MCP59 consumer合成、四構成proof、新head検査と未実施の実機受入。
 - [DERBY manifest export v1のFW受け口](platform/derby-manifest-export-v1.md) — 成功planへのcommitment、秘匿済みmanifest、legacy互換と固定hash負例。
+- [固定試験のruntime stack/heap観測](platform/derby-runtime-resources.md) — UI lifetime HWM、post-trial heap、明示floorと欠落拒否。未登録・実機未受入。

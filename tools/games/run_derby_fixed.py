@@ -43,6 +43,11 @@ static JSValue fx_tail_settle(JSContext *c,JSValueConst self,int argc,JSValueCon
 }
 static uint64_t fx_input_hash,fx_panel_hash,fx_draws,fx_pixels,fx_equal,fx_strips,fx_equal_strips;
 uint64_t df_now_us(void){return dm_now_us();}
+bool derby_runtime_resources_deadline_ok(uint32_t reserve_us){return eval_deadline>now_s()+reserve_us/1000000.0;}
+/* Format-only host stub; cannot qualify runtime resource acceptance. */
+bool derby_runtime_resources_read(df_resources *out){
+    *out=(df_resources){8192,100000,80000,100000,163840,true};return df_status()==DF_TAIL;
+}
 int df_write(const char *data,size_t size){return fwrite(data,1,size,stdout)==size;}
 static void fx_hash(uint64_t *h,const void *p,size_t n){
     const unsigned char *b=p;for(size_t i=0;i<n;i++){*h^=b[i];*h*=1099511628211ull;}

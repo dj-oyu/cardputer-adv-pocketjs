@@ -8,12 +8,17 @@
 #else
 #define REPORT_ROWS 0u
 #endif
-#define REPORT_WRITES (3u*(REPORT_ROWS+1u)+1u)
+#define REPORT_WRITES (3u*(REPORT_ROWS+1u)+2u)
 static uint64_t clock_us;
 static unsigned writes,refuse_at;
 static char output[16384];static size_t used;
 uint64_t dm_now_us(void){return clock_us;}
 uint64_t df_now_us(void){return clock_us;}
+bool derby_runtime_resources_deadline_ok(uint32_t reserve_us){(void)reserve_us;return true;}
+bool derby_runtime_resources_read(df_resources *out){
+    assert(df_status()==DF_TAIL&&!df_measuring());
+    *out=(df_resources){8192,100000,80000,100000,163840,true};return true;
+}
 const char *df_variant(void){return "baseline";}
 int df_write(const char *data,size_t size){
     assert(size<=1024&&used+size<sizeof output);
@@ -39,8 +44,8 @@ static void record(unsigned rep){
     df_owner_end(clock_us,true);
 }
 static void finish(unsigned rep){
-    unsigned turns=0;do{record(rep);assert(++turns<=REPORT_ROWS+2);}while(df_status()==DF_TAIL);
-    assert(turns==REPORT_ROWS+(rep==3?2:1));
+    unsigned turns=0;do{record(rep);assert(++turns<=REPORT_ROWS+3);}while(df_status()==DF_TAIL);
+    assert(turns==REPORT_ROWS+(rep==3?3:1));
 }
 int main(void){
     reset();for(unsigned rep=1;rep<=3;rep++){prepare(rep);finish(rep);}
@@ -57,7 +62,7 @@ int main(void){
     assert(!df_fixed_exit_record()&&writes==REPORT_WRITES+1&&!strstr(output,"DERBY_DETAIL_EXIT"));
     reset();for(unsigned rep=1;rep<=3;rep++){prepare(rep);finish(rep);}
     clock_us=179950001;assert(!df_fixed_exit_record()&&writes==REPORT_WRITES);
-    for(unsigned fail=1;fail<=REPORT_ROWS+2;fail++){
+    for(unsigned fail=1;fail<=REPORT_ROWS+3;fail++){
         reset();for(unsigned rep=1;rep<3;rep++){prepare(rep);finish(rep);}
         prepare(3);refuse_at=writes+fail;
         for(unsigned i=0;i<fail;i++)record(3);
@@ -73,5 +78,5 @@ int main(void){
     for(unsigned i=0;i<REPORT_ROWS+1;i++)record(3);
     clock_us=180000002;df_owner_begin(clock_us);
     assert(df_status()==DF_ABORT&&strstr(output,"reps=3 valid=0")&&!strstr(output,"reps=3 valid=1"));
-    puts("PASS slow successful output: one record/return, 110ms native writes, all 42 refusal positions, timeout before final validity");
+    puts("PASS slow successful output: one record/return, 110ms native writes, all report refusal positions including resources, timeout before final validity");
 }

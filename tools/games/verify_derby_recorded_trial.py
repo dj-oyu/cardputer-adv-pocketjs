@@ -20,6 +20,7 @@ from derby_fixed_collector_check import load_collector
 from verify_diagnostic_build import prove
 from verify_dma_diagnostic_build import CONTRACT, prove_dma
 from derby_manifest_export import ABSENT, bind_export, export_digest, read_export_response
+from derby_runtime_resources import FLOORS, parse_resources
 
 
 def digest(value):
@@ -35,7 +36,7 @@ def verify_recorded_trial(raw, transport, proof, manifest, flash_plan, flash_job
                           flash_summary, collection_plan, collection_job, *, expected_head, expected_detail,
                           expected_dma=None, expected_entry_sha256=None, manifest_export=ABSENT,
                           manifest_export_sha256=ABSENT, expected_flash_plan_hash=None,
-                          expected_cache_bytes=None):
+                          expected_cache_bytes=None, require_runtime_resources=False, resource_floors=None):
     """Check exported record relationships after local build proof recomputation.
 
     No latest/current receipt is guessed from a matching app hash. The caller
@@ -203,11 +204,13 @@ def verify_recorded_trial(raw, transport, proof, manifest, flash_plan, flash_job
     load_collector().parse_collected(raw, transport)
     owner = parse_completion(raw, detail_enabled=expected_detail == 'ON')
     detail = parse_detail(raw.decode('ascii'), expected=expected_detail == 'ON')
+    resources = parse_resources(raw, session=trial['session'], required=require_runtime_resources,
+                                floors=resource_floors)
     require(proof['fixed_workload']['manifest_sha256'] == trial['manifest_sha256'], 'fixture_manifest_mismatch')
     result = dict(recorded_chain_matches=True, source_commit=expected_head, detail_mode=expected_detail,
                 app_bin_sha256=image, elf_sha256=elf, flash_job_id=flash_job['id'],
                 collection_job_id=collection_plan['job_id'], raw_sha256=hashlib.sha256(raw).hexdigest(),
-                owner=owner, trial=trial, detail=detail, hardware_tested=False,
+                owner=owner, trial=trial, detail=detail, runtime_resources=resources, hardware_tested=False,
                 scope='offline consistency of owner-exported records; instrumentation overhead control; no physical acceptance')
     if export_report is not None:
         result['manifest_export'] = export_report
@@ -237,8 +240,16 @@ def main():
     parser.add_argument('--expect-detail', choices=('ON', 'OFF'), required=True)
     parser.add_argument('--expect-dma', choices=('ON', 'OFF'))
     parser.add_argument('--expect-entry-sha256')
+    parser.add_argument('--require-runtime-resources', action='store_true',
+                        help='Require device resource record and all four explicit positive floors')
+    for key in FLOORS:
+        parser.add_argument('--min-' + key.replace('_', '-'), type=int)
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
+    floors = {key: getattr(args, 'min_' + key) for key in FLOORS}
+    if not args.require_runtime_resources:
+        require(all(value is None for value in floors.values()), 'resource_floors_without_requirement')
+        floors = None
     require(args.raw.stat().st_size <= 65536, 'capture_capacity')
     proof = (prove(args.build) if args.expect_dma is None else
              prove_dma(args.build, dma_overlap=args.expect_dma, detail_measurement=args.expect_detail))
@@ -255,7 +266,9 @@ def main():
                                     ('flash_plan', 'flash_job', 'flash_summary', 'collection_plan', 'collection_job')),
                                   expected_head=args.expect_head, expected_detail=args.expect_detail,
                                   expected_dma=args.expect_dma, expected_entry_sha256=args.expect_entry_sha256,
-                                  expected_flash_plan_hash=args.expect_flash_plan_sha256, **export_options)
+                                  expected_flash_plan_hash=args.expect_flash_plan_sha256,
+                                  require_runtime_resources=args.require_runtime_resources,
+                                  resource_floors=floors, **export_options)
     args.out.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({k: v for k, v in result.items() if k not in ('trial', 'detail')}))
 
