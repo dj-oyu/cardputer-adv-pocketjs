@@ -38,7 +38,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/consumer/src:${{ github.workspace }}/consumer/tests
         run: |
-          uv run --frozen python -m pytest -q ../producer/tools/test_derby_mcp59_composition.py tests/test_dma_modeproof.py tests/test_dma_collector_binding.py
+          uv run --frozen python -m pytest -q ../producer/tools/test_derby_mcp59_composition.py ../producer/tools/test_derby_manifest_export.py tests/test_dma_modeproof.py tests/test_dma_collector_binding.py
   host:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -131,6 +131,7 @@ jobs:
           PY
           python -B tools/report_derby_fixed_stack.py --build build_dma
           python -B tools/report_derby_detail_resources.py --build build_dma
+          python -B tools/test_derby_manifest_export_cli.py --build build_dma --expect-head "$SOURCE_HEAD" --expect-detail '${{ matrix.detail }}' --expect-dma '${{ matrix.overlap }}'
           idf.py -B build_dma size-files > build_dma/size-files.txt
           idf.py -B build_dma size > build_dma/size.txt
           git diff --exit-code
