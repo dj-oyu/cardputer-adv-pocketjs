@@ -1,0 +1,23 @@
+--- a/main/ui/kasane/ksn_render.c
++++ b/main/ui/kasane/ksn_render.c
+@@ -2364,6 +2364,8 @@
+     DD_SCOPE(DD_RENDER);
+     ksn_tx prepared={0};
+     ksn_result result=render_rects_body(core,display,load,occlusion_safe,stats,&prepared);
++    /* A rejected caller owns no display work and must not drain another frame. */
++    if(!prepared.value)return result;
+     /* Even a provider failure after an earlier band must release the display
+      * borrow. Preserve the first error; completion failure must never ACK. */
+     ksn_result finished=completion&&completion->finish?
+--- a/main/ui/kasane/ksn_render.h
++++ b/main/ui/kasane/ksn_render.h
+@@ -134,7 +134,8 @@
+  * schedules retry/discard; callbacks may request invalidation, but must not
+  * otherwise mutate the core or reenter JS/presentation. prepare_frame consumes
+  * preexisting invalidation; later invalidation survives the acknowledgement. */
+-/* Optional completion runs on every return, before successful frame ACK.
++/* After successful frame preparation, optional completion runs on success
++ * and error before frame ACK. Rejection before preparation does not finish.
+  * load may be NULL for the normal background. No input pixel borrow may
+  * survive a present callback; only board-owned copies may remain in flight. */
+ ksn_result ksn_render_rects_complete(ksn_core *,const ksn_display_port *,

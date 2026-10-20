@@ -1,0 +1,16 @@
+--- a/tools/kasane_contract/test_dma_overlap.c
++++ b/tools/kasane_contract/test_dma_overlap.c
+@@ -101,6 +101,12 @@
+  /* Invalid calls cannot accidentally ACK an unprepared ticket. */
+  before=b.finishes;
+  assert(ksn_render_rects_complete(NULL,&bp,NULL,false,&completion,&bst)==KSN_INVALID);
+- assert(b.finishes==before+1);
++ assert(b.finishes==before);
++ /* A builder rejection owns no presentation and must not finish another one. */
++ ksn_client busy_client=ksn_core_client(&async,KSN_APP);ksn_tx busy_tx;
++ assert(busy_client.ops->begin(busy_client.ctx,KSN_PATCH,&busy_tx)==KSN_OK);
++ before=b.finishes;
++ assert(ksn_render_rects_complete(&async,&bp,NULL,false,&completion,&bst)==KSN_BUSY);
++ assert(b.finishes==before);
+  puts("DMA completion renderer: 100 pixel-oracle frames + 60 narrow/full damage; ACK, final 7 rows, provider/send/finish failures, retry/cancel/reset/no-damage: PASS");
+ }
