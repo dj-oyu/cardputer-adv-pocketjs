@@ -1,0 +1,298 @@
+diff --git a/main/hal/board.c b/main/hal/board.c
+index 10dd4df..a7b1c39 100644
+--- a/main/hal/board.c
++++ b/main/hal/board.c
+@@ -126,7 +126,14 @@ static esp_err_t tx_reap(void) {
+         }
+     }
+ #endif
++#ifdef KASANE_DMA_OVERLAP
++    /* A DMA-failed completion still returns our descriptor. Timeout or an
++     * invalid handle does not: retain ownership until the driver returns it. */
++    tx_inflight = done != &tx_pending;
++    if(tx_inflight&&e==ESP_OK)e=ESP_ERR_INVALID_STATE;
++#else
+     tx_inflight = false;
++#endif
+     return e;
+ }
+ static bool capture,capture_turn_taken;
+@@ -157,8 +164,14 @@ static esp_err_t command(uint8_t c, const void *data, size_t n) {
+     // Any command at all ends the RAMWR session, so nothing may be in flight
+     // when one starts: reap first (the queued strip is still ordered before it).
+     // next_row is -1 either way, because a command ends the session.
++#ifdef KASANE_DMA_OVERLAP
++    esp_err_t prior=tx_reap();
++    next_row=-1;
++    if(prior!=ESP_OK)return prior;
++#else
+     (void)tx_reap();
+     next_row = -1;
++#endif
+     esp_err_t e = tx(false, &c, 1);
+     return e == ESP_OK && n ? tx(true, data, n) : e;
+ }
+@@ -649,3 +662,20 @@ esp_err_t board_present_sync(int y, int rows, uint16_t *pixels) {
+     if(e!=ESP_OK) next_row=-1;
+     return e;
+ }
++
++#ifdef KASANE_DMA_OVERLAP
++esp_err_t board_present_finish(void) {
++    esp_err_t e;
++    /* portMAX_DELAY normally cannot time out. If it does, the driver still
++     * owns the descriptor, so keep draining rather than releasing a borrow. */
++    do { e=tx_reap(); } while(e==ESP_ERR_TIMEOUT);
++    if(e!=ESP_OK)next_row=-1;
++    return e;
++}
++esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels) {
++    esp_err_t e=board_present_finish();
++    if(e==ESP_OK)e=board_present_rect(x,y,cols,rows,pixels);
++    if(e!=ESP_OK)next_row=-1;
++    return e;
++}
++#endif
+diff --git a/main/hal/board.h b/main/hal/board.h
+index b7270ee..7ccc225 100644
+--- a/main/hal/board.h
++++ b/main/hal/board.h
+@@ -42,6 +42,13 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
+ // A transfer failure invalidates the panel write position.
+ esp_err_t board_present_sync(int y, int rows, uint16_t *pixels);
+ esp_err_t board_present_rect_sync(int x, int y, int cols, int rows, uint16_t *pixels);
++#ifdef KASANE_DMA_OVERLAP
++// UI owner only. Copies pixels before return; TX/descriptor remain board-owned
++// until finish. Never acknowledge a frame until finish succeeds. A non-timeout
++// driver error without descriptor return quarantines TX until a later finish.
++esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels);
++esp_err_t board_present_finish(void);
++#endif
+ uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
+ void board_capture(bool enabled);
+ // Whether board_capture is dumping rows. A partial-width transfer would leave
+diff --git a/main/pocket/pocket_kasane.c b/main/pocket/pocket_kasane.c
+index 1d54ad8..430fad6 100644
+--- a/main/pocket/pocket_kasane.c
++++ b/main/pocket/pocket_kasane.c
+@@ -3012,8 +3012,19 @@ void pocket_kasane_invalidate(void) {
+     ksn_runtime_invalidate();
+ }
+ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stats *stats) {
++    return pocket_kasane_present_complete(display,NULL,stats);
++}
++ksn_result pocket_kasane_present_complete(const ksn_display_port *display,
++                                          const ksn_display_completion *completion,
++                                          ksn_render_stats *stats) {
+     if(!stats) return KSN_INVALID;
+     *stats=(ksn_render_stats){0};
++    /* No renderer will run on the empty path below. Complete any earlier
++     * board work before its no-damage native acknowledgements as well. */
++    if(!pocket_kasane_needs_present()&&completion&&completion->finish){
++        ksn_result done=completion->finish(completion->ctx);
++        if(done!=KSN_OK)return done;
++    }
+     if(pocket_proc_pending()&&!pocket_kasane_needs_present()){
+         if(pocket_proc_backdrop_pending())ksn_runtime_invalidate();
+         else pocket_proc_present_result(KSN_OK);
+@@ -3026,9 +3037,9 @@ ksn_result pocket_kasane_present(const ksn_display_port *display,ksn_render_stat
+         pocket_pixel_present_result(KSN_OK);
+     if(!pocket_kasane_needs_present()) return KSN_OK;
+     bool proc_candidate=pocket_proc_pending();
+-    ksn_result result=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
+-        ksn_runtime_present_backdrop(display,pocket_proc_backdrop,false,stats):
+-        ksn_runtime_present(display,stats);
++    ksn_backdrop_loader load=pocket_proc_has_frame()&&!pocket_proc_is_image_mode()?
++        pocket_proc_backdrop:NULL;
++    ksn_result result=ksn_runtime_present_complete(display,load,false,completion,stats);
+     if(result==KSN_OK&&pocket_proc_backdrop_pending()&&!stats->transferred_bytes)
+         ksn_runtime_invalidate();
+     else pocket_proc_present_result(result);
+diff --git a/main/pocket/pocket_kasane.h b/main/pocket/pocket_kasane.h
+index ecf6317..f5afc01 100644
+--- a/main/pocket/pocket_kasane.h
++++ b/main/pocket/pocket_kasane.h
+@@ -77,6 +77,8 @@ void pocket_kasane_invalidate(void);
+ // The same, for an owner that knows which 8-row bands its overlay covers.
+ void pocket_kasane_invalidate_bands(uint32_t bands);
+ uint32_t pocket_kasane_opaque_system_bands(void);
++ksn_result pocket_kasane_present_complete(const ksn_display_port *,
++                                          const ksn_display_completion *,ksn_render_stats *);
+ ksn_result pocket_kasane_present(const ksn_display_port *display,
+                                  ksn_render_stats *stats);
+ ksn_result pocket_kasane_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,
+diff --git a/main/ui/kasane/ksn_ports.h b/main/ui/kasane/ksn_ports.h
+index dd3ee54..1ef3ba0 100644
+--- a/main/ui/kasane/ksn_ports.h
++++ b/main/ui/kasane/ksn_ports.h
+@@ -36,6 +36,15 @@ typedef struct {
+     ksn_result (*present_rect)(void *,uint16_t x,uint16_t y,uint16_t cols,
+                                uint16_t rows,const uint16_t *pixels);
+ } ksn_display_port;
++/* Owner-task completion boundary for a copied asynchronous display port.
++ * present callbacks must release their input before returning. finish drains
++ * all submitted work, including after a raster/send error, before frame ACK.
++ * It must not reenter presentation or mutate the core. Kept separate from the
++ * stable display-port layout and its positional initializers. */
++typedef struct {
++    void *ctx;
++    ksn_result (*finish)(void *);
++} ksn_display_completion;
+ /* Optional host backdrop for ksn_render_rects_backdrop. Called once per band
+  * instead of clearing to the APP background. It must fill width*rows pixels. */
+ typedef ksn_result (*ksn_backdrop_loader)(void *,uint16_t y,uint16_t rows,uint16_t *pixels);
+diff --git a/main/ui/kasane/ksn_render.c b/main/ui/kasane/ksn_render.c
+index 1678b7a..0e67947 100644
+--- a/main/ui/kasane/ksn_render.c
++++ b/main/ui/kasane/ksn_render.c
+@@ -1937,9 +1937,9 @@ static unsigned outside_opaque(ksn_rect box,ksn_rect opaque,ksn_rect out[4]){
+     if(y1<box.y1)out[count++]=(ksn_rect){x0,y1,x1,box.y1};
+     return count;
+ }
+-static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
++static ksn_result render_rects_body(ksn_core *core,const ksn_display_port *display,
+                                ksn_backdrop_loader load_backdrop,bool occlusion_safe,
+-                               ksn_render_stats *stats){
++                               ksn_render_stats *stats,ksn_tx *prepared){
+     DM_SCOPE(DM_RASTER);
+     DD_SCOPE(DD_RENDER);
+     DD_OPEN(prepare,DD_RENDER_PREPARE);
+@@ -1953,10 +1953,11 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
+         ksn_core_opaque_system_bands(core):0;
+     ksn_frame frame;ksn_result result=ksn_core_prepare_frame(core,&frame);
+     if(result!=KSN_OK)return result;
++    *prepared=frame.ticket;
+     ksn_damage damage;result=ksn_core_damage(core,frame.ticket,display->text,&damage);
+     if(result!=KSN_OK){ksn_core_defer_repair(core,frame.ticket);return result;}
+     damage.bands&=~occluded;
+-    if(!damage.bands)return ksn_core_presented(core,frame.ticket);
++    if(!damage.bands)return KSN_OK;
+     /* Narrowing is a decision taken here, before any pixel is written: a band
+      * composited over part of its width leaves the rest of the shared strip
+      * holding the previous band's pixels, so a port that can only send whole
+@@ -2355,14 +2356,31 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
+         stats->bands|=1u<<band;
+         stats->transferred_bytes+=(uint32_t)rows*(uint32_t)(dx1-dx0)*2u;
+     }
+-    return ksn_core_presented(core,frame.ticket);
++    return KSN_OK;
++}
++ksn_result ksn_render_rects_complete(ksn_core *core,const ksn_display_port *display,
++                                     ksn_backdrop_loader load,bool occlusion_safe,
++                                     const ksn_display_completion *completion,
++                                     ksn_render_stats *stats){
++    ksn_tx prepared={0};
++    ksn_result result=render_rects_body(core,display,load,occlusion_safe,stats,&prepared);
++    /* Even a provider failure after an earlier band must release the display
++     * borrow. Preserve the first error; completion failure must never ACK. */
++    ksn_result finished=completion&&completion->finish?
++        completion->finish(completion->ctx):KSN_OK;
++    if(finished!=KSN_OK){
++        if(prepared.value)ksn_core_failed(core,prepared);
++        if(result==KSN_OK)result=finished;
++    }
++    if(result==KSN_OK)return ksn_core_presented(core,prepared);
++    return result;
+ }
+ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats){
+-    return render_rects(core,display,NULL,false,stats);
++    return ksn_render_rects_complete(core,display,NULL,false,NULL,stats);
+ }
+ ksn_result ksn_render_rects_backdrop(ksn_core *core,const ksn_display_port *display,
+                                      ksn_backdrop_loader load,bool occlusion_safe,
+                                      ksn_render_stats *stats){
+     if(!load)return KSN_INVALID;
+-    return render_rects(core,display,load,occlusion_safe,stats);
++    return ksn_render_rects_complete(core,display,load,occlusion_safe,NULL,stats);
+ }
+diff --git a/main/ui/kasane/ksn_render.h b/main/ui/kasane/ksn_render.h
+index 7154639..7460214 100644
+--- a/main/ui/kasane/ksn_render.h
++++ b/main/ui/kasane/ksn_render.h
+@@ -134,6 +134,12 @@ extern int g_ksn_tile_pixels,g_ksn_tile_reach,g_ksn_tile_smooth;
+  * schedules retry/discard; callbacks may request invalidation, but must not
+  * otherwise mutate the core or reenter JS/presentation. prepare_frame consumes
+  * preexisting invalidation; later invalidation survives the acknowledgement. */
++/* Optional completion runs on every return, before successful frame ACK.
++ * load may be NULL for the normal background. No input pixel borrow may
++ * survive a present callback; only board-owned copies may remain in flight. */
++ksn_result ksn_render_rects_complete(ksn_core *,const ksn_display_port *,
++                                     ksn_backdrop_loader,bool occlusion_safe,
++                                     const ksn_display_completion *,ksn_render_stats *);
+ ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats);
+ /* As ksn_render_rects, but load the host's replayable scene below the command
+  * layers. Kept as a separate entry point so the stable display-port ABI and
+diff --git a/main/ui/kasane/ksn_runtime.c b/main/ui/kasane/ksn_runtime.c
+index c7f3ef1..430c125 100644
+--- a/main/ui/kasane/ksn_runtime.c
++++ b/main/ui/kasane/ksn_runtime.c
+@@ -168,6 +168,15 @@ bool ksn_runtime_invalidate_image_source_rect(ksn_resource resource,ksn_rect sou
+ uint32_t ksn_runtime_opaque_system_bands(void){
+     return runtime?ksn_core_opaque_system_bands(&runtime->core):0;
+ }
++ksn_result ksn_runtime_present_complete(const ksn_display_port *port,ksn_backdrop_loader load,
++                                        bool occlusion_safe,const ksn_display_completion *completion,
++                                        ksn_render_stats *stats){
++    if(!stats)return KSN_INVALID;
++    *stats=(ksn_render_stats){0};
++    return ksn_runtime_needs_present()?
++        ksn_view_host_present_complete(&runtime->host,port,load,occlusion_safe,completion,stats):
++        (completion&&completion->finish?completion->finish(completion->ctx):KSN_OK);
++}
+ ksn_result ksn_runtime_present(const ksn_display_port *port,ksn_render_stats *stats){
+     if(!stats)return KSN_INVALID;
+     *stats=(ksn_render_stats){0};
+diff --git a/main/ui/kasane/ksn_runtime.h b/main/ui/kasane/ksn_runtime.h
+index 286cc50..bbcfd4d 100644
+--- a/main/ui/kasane/ksn_runtime.h
++++ b/main/ui/kasane/ksn_runtime.h
+@@ -50,6 +50,8 @@ void ksn_runtime_invalidate_bands(uint32_t bands);
+ bool ksn_runtime_invalidate_image(ksn_resource resource);
+ bool ksn_runtime_invalidate_image_source_rect(ksn_resource resource,ksn_rect source_rect);
+ uint32_t ksn_runtime_opaque_system_bands(void);
++ksn_result ksn_runtime_present_complete(const ksn_display_port *,ksn_backdrop_loader,bool,
++                                        const ksn_display_completion *,ksn_render_stats *);
+ ksn_result ksn_runtime_present(const ksn_display_port *,ksn_render_stats *);
+ ksn_result ksn_runtime_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,
+                                         bool occlusion_safe,ksn_render_stats *);
+diff --git a/main/ui/kasane/ksn_view.c b/main/ui/kasane/ksn_view.c
+index 6e5cf42..95416ef 100644
+--- a/main/ui/kasane/ksn_view.c
++++ b/main/ui/kasane/ksn_view.c
+@@ -186,6 +186,22 @@ ksn_result ksn_view_modal_close(ksn_view *v,ksn_tx tx){
+     return mutation(v,tx,ksn_modal_prepare_close(&v->host->modal,v->host->core,tx));
+ }
+ void ksn_view_host_end_turn(ksn_view_host *h){if(h)abort_builder(h);}
++ksn_result ksn_view_host_present_complete(ksn_view_host *h,const ksn_display_port *port,
++                                          ksn_backdrop_loader load,bool occlusion_safe,
++                                          const ksn_display_completion *completion,
++                                          ksn_render_stats *stats){
++    if(!h||!h->core||!stats)return KSN_INVALID;
++    *stats=(ksn_render_stats){0};
++    if(h->presenting)return KSN_BUSY;
++    bool submitted=ksn_core_has_submission(h->core);
++    if(!submitted&&!ksn_core_needs_repair(h->core))
++        return completion&&completion->finish?completion->finish(completion->ctx):KSN_OK;
++    h->presenting=true;
++    ksn_result r=ksn_render_rects_complete(h->core,port,load,occlusion_safe,completion,stats);
++    h->presenting=false;
++    if(r==KSN_OK&&submitted)resolve(h);
++    return r;
++}
+ ksn_result ksn_view_host_present(ksn_view_host *h,const ksn_display_port *port,ksn_render_stats *stats){
+     if(!h||!h->core||!stats)return KSN_INVALID;
+     *stats=(ksn_render_stats){0};
+diff --git a/main/ui/kasane/ksn_view_host.h b/main/ui/kasane/ksn_view_host.h
+index a5da863..361d9ee 100644
+--- a/main/ui/kasane/ksn_view_host.h
++++ b/main/ui/kasane/ksn_view_host.h
+@@ -46,6 +46,9 @@ void ksn_view_host_end_turn(ksn_view_host *);
+ /* Render then resolve cache/modal before guest/input resumes. IO retains the
+  * submission for retry/cancel; partial transfer blocks app input until repair.
+  * Without a submission, redraw the committed bank when repair is pending. */
++ksn_result ksn_view_host_present_complete(ksn_view_host *,const ksn_display_port *,
++                                          ksn_backdrop_loader,bool,
++                                          const ksn_display_completion *,ksn_render_stats *);
+ ksn_result ksn_view_host_present(ksn_view_host *,const ksn_display_port *,ksn_render_stats *);
+ ksn_result ksn_view_host_present_backdrop(ksn_view_host *,const ksn_display_port *,
+                                           ksn_backdrop_loader,bool occlusion_safe,ksn_render_stats *);
