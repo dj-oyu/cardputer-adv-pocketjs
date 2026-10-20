@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as tmp:
         from games.derby_runner_batch import instrument
         batch=build/'generated/derby_runner_batch';batch.mkdir();pan=instrument(pan.decode()).encode();(batch/'derby_pan.js').write_bytes(pan)
         cache.write_text(cache.read_text()+'POCKET_DERBY_RUNNER_BATCH:BOOL=ON\n')
-    good=b'\0'.join((out/f'derby_{n}.js').read_bytes() for n in ('watch','view','play'))+b'\0'+pan+b'\0'+MANIFEST_SHA256.encode()+b'\0'
+    good=b'\0'.join((out/f'derby_{n}.js').read_bytes() for n in ('watch','view','play','fixed'))+b'\0'+pan+b'\0'+MANIFEST_SHA256.encode()+b'\0'
     elf=build/'cardputer_pocketjs.elf';elf.write_bytes(good)
     with patch('record_verification.elf_symbols',return_value=FIXED_SYMBOLS|DETAIL_REQUIRED|DETAIL_FIXED_SYMBOLS):
         assert verify_fixed_mode(build)['mode']=='ON'
@@ -39,6 +39,18 @@ with tempfile.TemporaryDirectory() as tmp:
         except ValueError:pass
         else:raise AssertionError('mixed JS detail code accepted')
         elf.write_bytes(good)
+        controller=out/'derby_fixed.js';controller_bytes=controller.read_bytes()
+        for replacement in (b'',controller_bytes.replace(b"'use strict';",b'/* no strict */',1)):
+            elf.write_bytes(good.replace(controller_bytes+b'\0',replacement+b'\0'))
+            try:verify_fixed_mode(build)
+            except ValueError:pass
+            else:raise AssertionError('missing or altered controller ELF bytes accepted')
+        elf.write_bytes(good)
+        controller.write_bytes(b'wrong')
+        try:verify_fixed_mode(build)
+        except ValueError:pass
+        else:raise AssertionError('wrong generated controller accepted')
+        controller.write_bytes(controller_bytes)
         cache.write_text(cache.read_text().replace('DETAIL_MEASURE:BOOL=ON','DETAIL_MEASURE:BOOL=OFF'))
         try:verify_detail_mode(build)
         except ValueError:pass

@@ -22,7 +22,7 @@ class DiagnosticProofTests(unittest.TestCase):
             generated_path = fixture/'derby_view.js'
             generated_view = generated_path.read_bytes()
             elf = b'example ELF' + b'\0'.join((fixture/name).read_bytes() for name in
-                ('derby_watch.js','derby_view.js','derby_play.js')) + b'\0' + MANIFEST_SHA256.encode() + b'\0'
+                ('derby_watch.js','derby_view.js','derby_play.js','derby_fixed.js')) + b'\0' + MANIFEST_SHA256.encode() + b'\0'
             (build/'cardputer_pocketjs.elf').write_bytes(elf)
             image = bytearray(288)
             image[0] = 0xE9
