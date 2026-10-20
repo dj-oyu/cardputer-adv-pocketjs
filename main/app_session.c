@@ -558,6 +558,15 @@ void app_force_redraw_bands(uint32_t bands) {
 }
 static esp_err_t present_frame(void);
 typedef struct { unsigned sent_us; } kasane_display_t;
+#ifdef KASANE_DMA_OVERLAP
+static ksn_result kasane_finish(void *opaque) {
+    kasane_display_t *display=opaque;
+    int64_t began=esp_timer_get_time();
+    esp_err_t result=board_present_finish();
+    display->sent_us+=(unsigned)(esp_timer_get_time()-began);
+    return result==ESP_OK?KSN_OK:KSN_IO;
+}
+#endif
 static uint16_t *kasane_strip(void *opaque) {
     (void)opaque;return board_strip();
 }
@@ -584,7 +593,11 @@ static ksn_result kasane_send(void *opaque,uint16_t y,uint16_t rows,
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     // Kasane promotes its command bank only after acknowledged transfers.
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+#ifdef KASANE_DMA_OVERLAP
+    esp_err_t result=board_present_submit(0,y,LCD_W,rows,(uint16_t *)pixels);
+#else
     esp_err_t result=board_present_sync(y,rows,(uint16_t *)pixels);
+#endif
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
@@ -611,7 +624,11 @@ static ksn_result kasane_send_rect(void *opaque,uint16_t x,uint16_t y,uint16_t c
     int64_t began=esp_timer_get_time();
     pocket_text_overlay((uint16_t *)pixels,(int)y,(int)rows);
     pet_hub_overlay_suppress(pocket_kasane_notice_composited());
+#ifdef KASANE_DMA_OVERLAP
+    esp_err_t result=board_present_submit(x,y,cols,rows,(uint16_t *)pixels);
+#else
     esp_err_t result=board_present_rect_sync(x,y,cols,rows,(uint16_t *)pixels);
+#endif
     pet_hub_overlay_suppress(false);
     display->sent_us+=(unsigned)(esp_timer_get_time()-began);
     return result==ESP_OK?KSN_OK:KSN_IO;
@@ -2431,7 +2448,12 @@ static esp_err_t present_frame(void) {
         }
 #endif
         int64_t began=esp_timer_get_time();
+#ifdef KASANE_DMA_OVERLAP
+        const ksn_display_completion completion={.ctx=&display_state,.finish=kasane_finish};
+        ksn_result result=pocket_kasane_present_complete(&port,&completion,&stats);
+#else
         ksn_result result=pocket_kasane_present(&port,&stats);
+#endif
 #ifdef KASANE_D2_MULTI_SURFACE_PROBE
         ESP_LOGI("D2_MULTI","PRESENT result=%u bytes=%u duration_us=%u "
                  "heap_free=%u heap_largest=%u stack_hwm_bytes=%u",

@@ -134,6 +134,12 @@ extern int g_ksn_tile_pixels,g_ksn_tile_reach,g_ksn_tile_smooth;
  * schedules retry/discard; callbacks may request invalidation, but must not
  * otherwise mutate the core or reenter JS/presentation. prepare_frame consumes
  * preexisting invalidation; later invalidation survives the acknowledgement. */
+/* Optional completion runs on every return, before successful frame ACK.
+ * load may be NULL for the normal background. No input pixel borrow may
+ * survive a present callback; only board-owned copies may remain in flight. */
+ksn_result ksn_render_rects_complete(ksn_core *,const ksn_display_port *,
+                                     ksn_backdrop_loader,bool occlusion_safe,
+                                     const ksn_display_completion *,ksn_render_stats *);
 ksn_result ksn_render_rects(ksn_core *core,const ksn_display_port *display,ksn_render_stats *stats);
 /* As ksn_render_rects, but load the host's replayable scene below the command
  * layers. Kept as a separate entry point so the stable display-port ABI and

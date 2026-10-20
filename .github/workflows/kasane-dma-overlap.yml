@@ -1,0 +1,88 @@
+name: Kasane copied DMA overlap
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: kasane-dma-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Actual board and renderer boundaries with delayed completion and faults
+        run: |
+          python3 tools/test_board_present_sync.py
+          python3 tools/test_board_dma_overlap.py
+          python3 tools/test_kasane_dma_overlap.py
+          python3 tools/test_dma_completion_owners.py
+      - name: Existing renderer and owner contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for options in '-O2 -fstrict-aliasing' '-g -fsanitize=address,undefined'; do
+            for test in render view runtime app_teardown repair; do
+              cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
+                main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c \
+                main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c \
+                tools/kasane_contract/test_$test.c -lm -o /tmp/dma-contract
+              /tmp/dma-contract
+            done
+          done
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        overlap: ['OFF', 'ON']
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Compile and link independent DMA switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_dma -DSDKCONFIG=build_dma/sdkconfig -DKASANE_DMA_OVERLAP=${{ matrix.overlap }} build
+          idf.py -B build_dma size > build_dma/size.txt
+          sha256sum build_dma/*.elf build_dma/*.bin > build_dma/SHA256SUMS
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: kasane-dma-${{ matrix.overlap }}-${{ env.SOURCE_HEAD }}
+          path: |
+            build_dma/*.elf
+            build_dma/*.map
+            build_dma/*.bin
+            build_dma/sdkconfig
+            build_dma/size.txt
+            build_dma/SHA256SUMS
+            build_dma/CMakeCache.txt
+            build_dma/log/
+          retention-days: 14

@@ -77,6 +77,8 @@ void pocket_kasane_invalidate(void);
 // The same, for an owner that knows which 8-row bands its overlay covers.
 void pocket_kasane_invalidate_bands(uint32_t bands);
 uint32_t pocket_kasane_opaque_system_bands(void);
+ksn_result pocket_kasane_present_complete(const ksn_display_port *,
+                                          const ksn_display_completion *,ksn_render_stats *);
 ksn_result pocket_kasane_present(const ksn_display_port *display,
                                  ksn_render_stats *stats);
 ksn_result pocket_kasane_present_backdrop(const ksn_display_port *,ksn_backdrop_loader,
