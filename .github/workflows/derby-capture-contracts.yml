@@ -7,6 +7,8 @@ on:
       - 'tools/kasane_ir/test_check_equivalence.py'
       - 'tools/kasane_contract/run.sh'
       - 'tools/games/verify_derby_recorded_trial.py'
+      - 'tools/games/derby_manifest_export.py'
+      - 'tools/test_derby_manifest_export.py'
       - 'tools/games/verify_derby_dma_consumer.py'
       - 'tools/test_derby_mcp59_composition.py'
       - 'tools/verify_dma_diagnostic_build.py'

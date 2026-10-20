@@ -134,6 +134,8 @@ def load_tests(loader, tests, pattern):
     # Keep the new synthetic gate on the existing completion CI entry point.
     from test_derby_recorded_trial_r2 import R2Tests
     tests.addTests(loader.loadTestsFromTestCase(R2Tests))
+    from test_derby_manifest_export import ManifestExportTests
+    tests.addTests(loader.loadTestsFromTestCase(ManifestExportTests))
     return tests
 
 

@@ -1,5 +1,8 @@
 # J1 host r2 と DMA の専用合流点
 
+本書は PR37 の合流点を記録する。後続の正式 export 受け口は
+[manifest export v1](derby-manifest-export-v1.md) の別候補で検証し、PR37 自体は変更しない。
+
 通常 main とは分けた検証候補。測定済み PR29 `b561aea1c0798feb28055a00d36681fae81ac58a`
 を変更せず、PR31 → PR32 → PR33 の DMA/contract/proof 成果へ、PR35 の host r2 を合成する。
 PR34 は PR33 と同じ commit の CI 起動用であり、追加実装として重ねない。

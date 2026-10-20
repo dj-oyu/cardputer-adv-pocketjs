@@ -25,6 +25,7 @@ from test_derby_fixed_completion import receipts
 from test_derby_recorded_trial_r2 import synthetic_raw
 from derby_fixed_workload_chunks import MANIFEST_SHA256
 from verify_derby_recorded_trial import digest, verify_recorded_trial
+from derby_manifest_export_fixture import project
 
 
 def complete_chain(chain):
@@ -49,6 +50,15 @@ def complete_chain(chain):
 
 def exported_args(chain, detail, dma):
     entry = complete_chain(chain)
+    export_options = {}
+    if dma is not None:
+        # The pinned MCP59 has no v1 producer. This is explicitly a synthetic
+        # contract projection; future producer-head composition is a separate gate.
+        wrapper, commitment = project(chain.manifest)
+        chain.flash['manifest_export_sha256'] = commitment
+        rebind(chain)
+        export_options = dict(manifest_export=wrapper, manifest_export_sha256=commitment,
+                              expected_flash_plan_hash=chain.jobs['public-flash']['plan_hash'])
     # These are actual consumer outputs, never a hand-written binding substitute.
     details = prepare_collector(chain.resident, 'public-flash', 'owner')
     plan = dict(test='derby_fixed_workload', **details)
@@ -58,6 +68,8 @@ def exported_args(chain, detail, dma):
     args = receipts(synthetic_raw(detail), detail)
     args[2] = copy.deepcopy(chain.manifest['diagnostic_modeproof']['proof'])
     args[3] = copy.deepcopy(chain.manifest)
+    if dma is not None:
+        args[3] = copy.deepcopy(wrapper['manifest'])
     args[4] = copy.deepcopy(chain.flash)
     args[5] = dict(id='public-flash', **chain.jobs['public-flash'])
     args[6] = dict(requested_job_id='public-flash', flash_summary=copy.deepcopy(chain.summary))
@@ -69,7 +81,7 @@ def exported_args(chain, detail, dma):
                    expected_firmware_sha256=chain.flash['expected_elf_sha256'], principal_id='owner',
                    flash_receipt=copy.deepcopy(details['collector_binding']))
     options = dict(expected_head=entry.commit, expected_detail=detail,
-                   expected_entry_sha256=entry.sha256, expected_dma=dma)
+                   expected_entry_sha256=entry.sha256, expected_dma=dma, **export_options)
     return args, options
 
 
@@ -127,7 +139,7 @@ def test_host_rejects_changed_actual_binding(make_dma_chain, field, record, dama
 
 
 @pytest.mark.parametrize('damage', ['nested_hash', 'downgrade', 'public_redaction', 'missing_expectation'])
-def test_host_outer_proof_and_internal_manifest_required(make_dma_chain, damage):
+def test_host_outer_proof_and_committed_export_required(make_dma_chain, damage):
     args, options = exported_args(make_dma_chain('OFF', 'ON'), 'OFF', 'ON')
     if damage == 'nested_hash':
         for binding in (args[7]['collector_binding'], args[8]['fixed_trial']['binding']['flash_receipt']):
@@ -137,10 +149,10 @@ def test_host_outer_proof_and_internal_manifest_required(make_dma_chain, damage)
     elif damage == 'missing_expectation':
         options['expected_entry_sha256'] = None
     else:
-        # Public redacted exports cannot replace the digest-bound retained manifest.
-        envelope = args[3]['diagnostic_modeproof']
-        envelope.pop('cmake_cache')
-        envelope['cache_evidence'] = dict(retained_private=True, bytes=1, sha256='a' * 64)
+        # Redacted DMA exports have no legacy fallback without their commitment.
+        options.pop('manifest_export')
+        options.pop('manifest_export_sha256')
+        args[4].pop('manifest_export_sha256')
     args[8]['plan_hash'] = digest(args[7])
     args[8]['fixed_trial']['binding']['plan_hash'] = args[8]['plan_hash']
     with pytest.raises((ValueError, KeyError)):
