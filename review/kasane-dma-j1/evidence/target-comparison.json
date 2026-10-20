@@ -1,0 +1,394 @@
+{
+  "base": {
+    "size": {
+      "version": "1.2",
+      "total_size": 2296860,
+      "layout": [
+        {
+          "name": "Flash Code",
+          "total": 0,
+          "used": 1558472,
+          "free": 0,
+          "parts": {
+            ".text": {
+              "size": 1558472
+            }
+          }
+        },
+        {
+          "name": "Flash Data",
+          "total": 0,
+          "used": 644852,
+          "free": 0,
+          "parts": {
+            ".rodata": {
+              "size": 644580
+            },
+            ".appdesc": {
+              "size": 256
+            },
+            ".tdata": {
+              "size": 16
+            }
+          }
+        },
+        {
+          "name": "DIRAM",
+          "total": 341760,
+          "used": 178572,
+          "free": 163188,
+          "parts": {
+            ".bss": {
+              "size": 85072
+            },
+            ".text": {
+              "size": 70579
+            },
+            ".data": {
+              "size": 21893
+            },
+            ".vectors": {
+              "size": 1028
+            }
+          }
+        },
+        {
+          "name": "RTC SLOW",
+          "total": 8192,
+          "used": 36,
+          "free": 8156,
+          "parts": {
+            ".force_slow": {
+              "size": 36
+            }
+          }
+        },
+        {
+          "name": "RTC FAST",
+          "total": 8192,
+          "used": 24,
+          "free": 8168,
+          "parts": {
+            ".rtc_reserved": {
+              "size": 24
+            }
+          }
+        }
+      ]
+    },
+    "selected_compiler_stack": [
+      {
+        "function": "present_frame",
+        "bytes": 240
+      },
+      {
+        "function": "render_rects",
+        "bytes": 1376
+      },
+      {
+        "function": "ksn_render_rects",
+        "bytes": 32
+      },
+      {
+        "function": "ksn_render_rects_backdrop",
+        "bytes": 32
+      }
+    ],
+    "buffer_symbols": [
+      "3fca1930 00000f00 b shared",
+      "3fc9fb30 00001e00 b tx_buf",
+      "3fc9fb00 00000028 b tx_pending"
+    ],
+    "detail_state_bytes": 2304,
+    "static_memory": {
+      "Flash Code": {
+        "used": 1558472,
+        "total": 0
+      },
+      "Flash Data": {
+        "used": 644852,
+        "total": 0
+      },
+      "DIRAM": {
+        "used": 178572,
+        "total": 341760
+      },
+      "RTC SLOW": {
+        "used": 36,
+        "total": 8192
+      },
+      "RTC FAST": {
+        "used": 24,
+        "total": 8192
+      }
+    }
+  },
+  "off": {
+    "size": {
+      "version": "1.2",
+      "total_size": 2296860,
+      "layout": [
+        {
+          "name": "Flash Code",
+          "total": 0,
+          "used": 1558472,
+          "free": 0,
+          "parts": {
+            ".text": {
+              "size": 1558472
+            }
+          }
+        },
+        {
+          "name": "Flash Data",
+          "total": 0,
+          "used": 644852,
+          "free": 0,
+          "parts": {
+            ".rodata": {
+              "size": 644580
+            },
+            ".appdesc": {
+              "size": 256
+            },
+            ".tdata": {
+              "size": 16
+            }
+          }
+        },
+        {
+          "name": "DIRAM",
+          "total": 341760,
+          "used": 178572,
+          "free": 163188,
+          "parts": {
+            ".bss": {
+              "size": 85072
+            },
+            ".text": {
+              "size": 70579
+            },
+            ".data": {
+              "size": 21893
+            },
+            ".vectors": {
+              "size": 1028
+            }
+          }
+        },
+        {
+          "name": "RTC SLOW",
+          "total": 8192,
+          "used": 36,
+          "free": 8156,
+          "parts": {
+            ".force_slow": {
+              "size": 36
+            }
+          }
+        },
+        {
+          "name": "RTC FAST",
+          "total": 8192,
+          "used": 24,
+          "free": 8168,
+          "parts": {
+            ".rtc_reserved": {
+              "size": 24
+            }
+          }
+        }
+      ]
+    },
+    "selected_compiler_stack": [
+      {
+        "function": "present_frame",
+        "bytes": 240
+      },
+      {
+        "function": "render_rects",
+        "bytes": 1376
+      },
+      {
+        "function": "ksn_render_rects",
+        "bytes": 32
+      },
+      {
+        "function": "ksn_render_rects_backdrop",
+        "bytes": 32
+      }
+    ],
+    "buffer_symbols": [
+      "3fca1930 00000f00 b shared",
+      "3fc9fb30 00001e00 b tx_buf",
+      "3fc9fb00 00000028 b tx_pending"
+    ],
+    "detail_state_bytes": 2304,
+    "static_memory": {
+      "Flash Code": {
+        "used": 1558472,
+        "total": 0
+      },
+      "Flash Data": {
+        "used": 644852,
+        "total": 0
+      },
+      "DIRAM": {
+        "used": 178572,
+        "total": 341760
+      },
+      "RTC SLOW": {
+        "used": 36,
+        "total": 8192
+      },
+      "RTC FAST": {
+        "used": 24,
+        "total": 8192
+      }
+    }
+  },
+  "on": {
+    "size": {
+      "version": "1.2",
+      "total_size": 2297192,
+      "layout": [
+        {
+          "name": "Flash Code",
+          "total": 0,
+          "used": 1558804,
+          "free": 0,
+          "parts": {
+            ".text": {
+              "size": 1558804
+            }
+          }
+        },
+        {
+          "name": "Flash Data",
+          "total": 0,
+          "used": 644852,
+          "free": 0,
+          "parts": {
+            ".rodata": {
+              "size": 644580
+            },
+            ".appdesc": {
+              "size": 256
+            },
+            ".tdata": {
+              "size": 16
+            }
+          }
+        },
+        {
+          "name": "DIRAM",
+          "total": 341760,
+          "used": 178572,
+          "free": 163188,
+          "parts": {
+            ".bss": {
+              "size": 85072
+            },
+            ".text": {
+              "size": 70579
+            },
+            ".data": {
+              "size": 21893
+            },
+            ".vectors": {
+              "size": 1028
+            }
+          }
+        },
+        {
+          "name": "RTC SLOW",
+          "total": 8192,
+          "used": 36,
+          "free": 8156,
+          "parts": {
+            ".force_slow": {
+              "size": 36
+            }
+          }
+        },
+        {
+          "name": "RTC FAST",
+          "total": 8192,
+          "used": 24,
+          "free": 8168,
+          "parts": {
+            ".rtc_reserved": {
+              "size": 24
+            }
+          }
+        }
+      ]
+    },
+    "selected_compiler_stack": [
+      {
+        "function": "present_frame",
+        "bytes": 256
+      },
+      {
+        "function": "kasane_drain",
+        "bytes": 32
+      },
+      {
+        "function": "kasane_finish",
+        "bytes": 48
+      },
+      {
+        "function": "kasane_dma_submit",
+        "bytes": 48
+      },
+      {
+        "function": "render_rects_body.constprop",
+        "bytes": 1360
+      },
+      {
+        "function": "ksn_render_rects_complete",
+        "bytes": 80
+      },
+      {
+        "function": "ksn_render_rects",
+        "bytes": 32
+      },
+      {
+        "function": "ksn_render_rects_backdrop",
+        "bytes": 32
+      }
+    ],
+    "buffer_symbols": [
+      "3fca1930 00000f00 b shared",
+      "3fc9fb30 00001e00 b tx_buf",
+      "3fc9fb00 00000028 b tx_pending"
+    ],
+    "detail_state_bytes": 2304,
+    "static_memory": {
+      "Flash Code": {
+        "used": 1558804,
+        "total": 0
+      },
+      "Flash Data": {
+        "used": 644852,
+        "total": 0
+      },
+      "DIRAM": {
+        "used": 178572,
+        "total": 341760
+      },
+      "RTC SLOW": {
+        "used": 36,
+        "total": 8192
+      },
+      "RTC FAST": {
+        "used": 24,
+        "total": 8192
+      }
+    }
+  },
+  "source_commit": "8a883c516720bfdc662c029f473f2e53e53c4e5f",
+  "base_commit": "b561aea1c0798feb28055a00d36681fae81ac58a",
+  "sdkconfig_sha256": "1089b905c7e7c5825ac5843e7a4236d393e37b0a685344cc05147a540b64e123",
+  "hardware_tested": false
+}

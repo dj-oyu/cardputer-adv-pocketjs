@@ -1,0 +1,149 @@
+{
+  "source_commit": "8a883c516720bfdc662c029f473f2e53e53c4e5f",
+  "source_tree": "ec8b3410358030cf6a32c83811ab78d206060d81",
+  "python": "3.12.14",
+  "node": "v24.19.0",
+  "hardware_tested": false,
+  "submodule_gitlinks": "160000 commit 41129fcfe39c583ee5462d79195741945d51c1fe\tthird_party/bmi270\n160000 commit ea99364f61c14656440e8d77e9c233ccf3124633\tthird_party/minimp3\n160000 commit 22244de5a79bd1d6d623c32e72bf1954b56235be\tthird_party/opus",
+  "build_mode": {
+    "telemetry_mode": "ON",
+    "cmake_cache_sha256": "f5eeb78e9278a9adf6104fd8c1da79610a4b7244c37f040c20a0bb4d8797dd7b",
+    "native_symbols": [
+      "derby_telemetry_begin_frame",
+      "derby_telemetry_eval",
+      "derby_telemetry_io_us",
+      "derby_telemetry_present",
+      "derby_telemetry_reset",
+      "derby_telemetry_set",
+      "derby_telemetry_write"
+    ],
+    "generated_chunk_present": true,
+    "embedded_play_bytes": 7055,
+    "embedded_play_sha256": "b876b6a7bed75f2265034c9a17ac40bd626988dee24e535f79cbf4b4eeb0c807",
+    "source_play_sha256": "a6c2240b648ac0e328a15c5c7ded9e1157e45dc3a2d381707ff4461d4bdb5078",
+    "elf_embedded_play_verified": true
+  },
+  "build_measure": {
+    "measure_mode": "ON",
+    "native_symbols": [
+      "dm_batch",
+      "dm_calibrate",
+      "dm_dispatch",
+      "dm_emit",
+      "dm_enter",
+      "dm_format_record",
+      "dm_heap",
+      "dm_leave",
+      "dm_now_us",
+      "dm_output_reset",
+      "dm_present",
+      "dm_read",
+      "dm_refused",
+      "dm_reset",
+      "dm_transfer"
+    ],
+    "cmake_cache_sha256": "f5eeb78e9278a9adf6104fd8c1da79610a4b7244c37f040c20a0bb4d8797dd7b"
+  },
+  "fixed_workload": {
+    "mode": "ON",
+    "native_symbols": [
+      "df_command",
+      "df_completion_contract",
+      "df_count",
+      "df_detail_enabled",
+      "df_dispatch",
+      "df_fail",
+      "df_fixed_exit_record",
+      "df_fixture_id",
+      "df_fixture_manifest",
+      "df_now_us",
+      "df_owner_begin",
+      "df_owner_end",
+      "df_owner_work_end",
+      "df_pace_begin",
+      "df_pace_end",
+      "df_present",
+      "df_reset",
+      "df_session",
+      "df_status",
+      "df_variant",
+      "df_write"
+    ],
+    "fixture": {
+      "id": "oval-pan8-390-510-v1",
+      "seed": "9112A7AB",
+      "race": 1000001,
+      "oval": 1,
+      "tier": 1,
+      "camera": 8,
+      "start": 390,
+      "end": 510,
+      "contexts": 120,
+      "repetitions": 3,
+      "independent": false,
+      "finish": "5DC86E18"
+    },
+    "manifest_sha256": "84e0341ee1ac10c232e3008f28f8aada8823155e19229f926e633d7780a2021d",
+    "owner_completion": {
+      "contract": "fixed-owner-v1",
+      "record": "DERBY_DETAIL_EXIT",
+      "detail_mode": "ON"
+    }
+  },
+  "detail_measurement": {
+    "mode": "ON",
+    "native_symbols": [
+      "dd_active",
+      "dd_add",
+      "dd_cancel",
+      "dd_depth",
+      "dd_enter",
+      "dd_finish",
+      "dd_js",
+      "dd_leave",
+      "dd_owned",
+      "dd_owner",
+      "dd_resume",
+      "dd_saved",
+      "dd_saved_depth",
+      "dd_stack",
+      "dd_start",
+      "dd_suspend",
+      "dd_suspended_at",
+      "dd_totals"
+    ]
+  },
+  "idf_version": "v6.0.1",
+  "embedded_elf_sha256": "8671e0ccf95ac703c6847e1dd680c8414756e3d1b30580a9911e42ff983db550",
+  "project_version": "8a883c516720",
+  "artifacts": {
+    "cardputer_pocketjs.bin": {
+      "bytes": 2297312,
+      "sha256": "c68d40a194a738265d53be9e33543262048f80717107d65132835720604e4969"
+    },
+    "cardputer_pocketjs.elf": {
+      "bytes": 20010964,
+      "sha256": "8671e0ccf95ac703c6847e1dd680c8414756e3d1b30580a9911e42ff983db550"
+    },
+    "cardputer_pocketjs.map": {
+      "bytes": 11813272,
+      "sha256": "ac813eb63d936f49131d0a6baa8a54363a9054e5d26d6a7e0512dbfe1d545bfe"
+    },
+    "sdkconfig": {
+      "bytes": 75924,
+      "sha256": "1089b905c7e7c5825ac5843e7a4236d393e37b0a685344cc05147a540b64e123"
+    },
+    "project_description.json": {
+      "bytes": 209961,
+      "sha256": "409c1c5b5792e03e1b75d74f8ad9c2a955f962785a7d67c10ef1f21d9d2939a0"
+    },
+    "bootloader/bootloader.bin": {
+      "bytes": 22528,
+      "sha256": "b8925c59783e870481803c1cd6bf2de385fe7c0a1782f6c8ab34ef09441fecd6"
+    },
+    "partition_table/partition-table.bin": {
+      "bytes": 3072,
+      "sha256": "5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361"
+    }
+  }
+}
