@@ -29,6 +29,7 @@ jobs:
           python3 tools/test_kasane_dma_overlap.py
           python3 tools/test_dma_completion_owners.py
           python3 tools/test_dma_measurement.py
+          python3 tools/test_dma_diagnostic_build.py
       - name: Existing renderer and owner contracts
         shell: bash
         run: |

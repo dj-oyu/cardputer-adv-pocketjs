@@ -20,6 +20,20 @@ add_custom_target(diagnostic_mode_proof ALL
     COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/verify_diagnostic_build.py"
             --build "${CMAKE_BINARY_DIR}"
     DEPENDS gen_project_binary VERBATIM)
+# A separate contract keeps legacy detail proof from qualifying a new DMA lane.
+set(_dma_proof_mode OFF)
+set(_detail_proof_mode OFF)
+if(KASANE_DMA_OVERLAP)
+    set(_dma_proof_mode ON)
+endif()
+if(POCKET_DERBY_DETAIL_MEASURE)
+    set(_detail_proof_mode ON)
+endif()
+add_custom_target(dma_diagnostic_mode_proof ALL
+    COMMAND "${PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/verify_dma_diagnostic_build.py"
+            --build "${CMAKE_BINARY_DIR}" --expect-dma "${_dma_proof_mode}"
+            --expect-detail "${_detail_proof_mode}"
+    DEPENDS gen_project_binary VERBATIM)
 add_custom_target(flash_budget ALL
     COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/check_flash.py" "${CMAKE_BINARY_DIR}/cardputer_pocketjs.bin"
     DEPENDS gen_project_binary VERBATIM)

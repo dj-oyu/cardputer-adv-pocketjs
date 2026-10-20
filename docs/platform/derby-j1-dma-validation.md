@@ -66,3 +66,37 @@ DMA効果と断定しない。既存copy/transfer elapsedはowner経過時間で
 MISO未配線のため、software panel hashだけでglass到達を受入済みにしない。
 
 単独受入と残gateが揃ってから、親が次の適用/組合せを判断する。この検証branchからmain mergeしない。
+
+## 隔離した型付きDMA proof案
+
+別branch `proof/derby-dma-typed-mode-20261020` だけにarchive-safe追加proofを置く。
+元のJ1/PR31/合流headは書き換えず、既存の診断proofも保持する。runtime C/JSや終了wireは変えない。
+既存linked関数でmodeを判別できるため、新たなFW常駐markerは追加しない。
+
+新laneの要求は `dma_mode: "OFF"|"ON"` と `detail_mode: "OFF"|"ON"` を別々の必須enumとする。
+省略・null・boolean・AUTO・未知値を拒否し、自由なCMake flagやsource URLを受け取らない。
+sourceはregistryが保持する承認済みfull SHAに固定する。新entry/headの受理は別承認が必要で、
+既存J1専用entryへDMAや新headを暗黙に追加しない。J1のdetail proofをDMA証明に流用しない。
+
+`tools/verify_dma_diagnostic_build.py --build <builddir> --expect-dma OFF|ON --expect-detail OFF|ON`
+は `dma-diagnostic-mode-proof.json` を生成する。CMakeの追加ALL targetは両要求値を正規化して明示する。
+
+| フィールド | 固定した意味 |
+| --- | --- |
+| `proof_contract` / `schema_version` | `derby-dma-diagnostic-v1` / `1`。既存detail proofとは別契約 |
+| `requested_axes` / `verified_axes` | `dma_overlap`・`detail_measurement` の両enum。要求・cache・実ELFの一致時だけ出力 |
+| `dma_overlap.symbol_contract` | `board-present-submit-finish-v1` |
+| `dma_overlap.native_symbols` | ONでは実ELFの `board_present_submit` と `board_present_finish` の両方、OFFでは両方不在。片方だけは拒否 |
+| `dma_overlap.cmake_cache_sha256` | 両axisを検査したactual cacheのSHA-256。cache欠落/重複/不一致も拒否 |
+| `diagnostic` | 既存診断proof全体。fixture/seed/linked detail値/owner終了/IDF/BIN-ELF組を引き続き検証 |
+| `artifacts` | nested diagnosticと同じactual BIN/ELF bytes・SHA-256 |
+| `hardware_tested` | `false` |
+
+MCPが新laneを扱う場合は、要求enum、registry固定head、archive/source receipt、build manifest、
+このproofの両axisとBIN/ELF hashを一致させ、prepare/commit/durable結果と後続flash/captureへ保持する。
+既存schemaだけ、mode文字列だけ、CI artifactだけ、同じhashのlatest記録だけでは受理しない。
+cache/ELF拒否はbuild失敗として扱い、登録済みJ1へのfallbackやガード緩和をしない。
+producer追加だけで旧consumerの受理を防げるわけではない。MCP/consumer側の新契約必須gateは未実装・未受入として残す。
+
+この案と隔離host/CIはMCP実装済み・runtime新head許可・実機性能受入を意味しない。
+新headの実登録/配備/実機操作は実施しない。B0/B1/D1、独立boot、固定fixture、物理表示と余裕の条件は上記を維持する。
