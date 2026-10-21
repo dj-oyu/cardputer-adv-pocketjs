@@ -59,6 +59,19 @@ class HostBuildTests(unittest.TestCase):
         self.assertEqual(len(set(objects)), 1)
         self.assertEqual(objects[0].read_bytes(), original)
 
+    def test_corrupt_metadata_is_a_miss_and_rebuilt_atomically(self):
+        obj = self.obj()
+        original = obj.read_bytes()
+        metadata = obj.parent / 'inputs.json'
+        for broken in ('', '{"inputs":', '[]', '{}'):
+            with self.subTest(metadata=broken):
+                metadata.write_text(broken)
+                self.assertEqual(self.obj().read_bytes(), original)
+                import json
+                rebuilt = json.loads(metadata.read_text())
+                self.assertEqual(rebuilt['object'], hb.digest(obj))
+                self.assertIn(str(self.header), rebuilt['inputs'])
+
     def test_every_build_relinks_and_link_failure_propagates(self):
         main = self.root / 'main.c'
         main.write_text('int value(void); int main(void) { return value() != 1; }\n')

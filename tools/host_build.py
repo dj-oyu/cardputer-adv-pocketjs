@@ -56,8 +56,12 @@ def compile_object(compiler, source, flags):
         volatile = any(token in Path(p).read_bytes() for p in dependencies
                        for token in (b'__DATE__', b'__TIME__', b'__TIMESTAMP__'))
         if not volatile and obj.exists() and meta.exists():
-            previous = json.loads(meta.read_text())
-            if previous.get('inputs') == inputs and previous.get('object') == digest(obj):
+            try:
+                previous = json.loads(meta.read_text())
+            except (OSError, ValueError):
+                previous = None
+            if (isinstance(previous, dict) and previous.get('inputs') == inputs
+                    and previous.get('object') == digest(obj)):
                 return obj
         temporary = Path(tmp) / 'unit.o'
         launcher = [shutil.which('ccache')] if shutil.which('ccache') else []
@@ -72,7 +76,9 @@ def compile_object(compiler, source, flags):
         dependencies = shlex.split(depfile.read_text().split(':', 1)[1].replace('\\\n', ''))
         inputs = {str(Path(p).resolve()): digest(p) for p in dependencies}
         temporary.replace(obj)
-        meta.write_text(json.dumps({'inputs': inputs, 'object': digest(obj)}, sort_keys=True))
+        temporary_meta = Path(tmp) / 'inputs.json'
+        temporary_meta.write_text(json.dumps({'inputs': inputs, 'object': digest(obj)}, sort_keys=True))
+        temporary_meta.replace(meta)
     return obj
 
 
