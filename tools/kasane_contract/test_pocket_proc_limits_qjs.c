@@ -285,7 +285,19 @@ static void off_panel(JSContext *ctx,uint32_t *scalar_expected){
         REQUIRE(memcmp(span,expected+y*KSN_PROC_W,sizeof span)==0);
     }
     pocket_proc_present_result(KSN_OK);
-    *scalar_expected+=3;
+    /* Keep the same committed raster cached, then overwrite its workspace
+     * with a successful, abandoned VM run and with an invalid typed batch. */
+    eval_ok(ctx,"proc.beginFrame(9);proc.draw(away,[])");
+    pocket_proc_end_turn();
+    REQUIRE(image.read_span(image.ctx,0,0,0,0,KSN_PROC_W,span,alpha)==KSN_OK);
+    REQUIRE(memcmp(span,expected,sizeof span)==0);
+    eval_ok(ctx,
+        "const bad=proc.register([[0,0,0,0,0,0]],batch([-481,0],[0,0]));"
+        "proc.beginFrame(9);expect(()=>proc.draw(bad,[]),'INVALID_ARGUMENT');"
+        "proc.unregister(bad)");
+    REQUIRE(image.read_span(image.ctx,0,0,0,0,KSN_PROC_W,span,alpha)==KSN_OK);
+    REQUIRE(memcmp(span,expected,sizeof span)==0);
+    *scalar_expected+=4;
 }
 
 int main(void){

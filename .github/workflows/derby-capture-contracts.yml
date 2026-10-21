@@ -17,6 +17,10 @@ on:
       - 'main/app_session.c'
       - 'main/pocket/pocket_memory.c'
       - 'main/pocket/pocket_memory.h'
+      # Procedural workspace ownership and its real-QuickJS contracts.
+      - 'main/pocket/pocket_proc.c'
+      - 'tools/kasane_contract/test_pocket_proc*.c'
+      - 'tools/kasane_contract/run_pocket_proc*.py'
       - 'tools/build_memory_test.sh'
       - 'tools/test_block_cache.c'
       - 'tools/test_pocket_memory.c'
