@@ -3,6 +3,19 @@ on:
   pull_request:
     paths:
       - '.github/workflows/derby-capture-contracts.yml'
+      # Native guest-cache pressure policy and its direct host contracts.
+      - 'components/pocketjs_guest/include/pocketjs/block_cache.h'
+      - 'components/pocketjs_guest/include/pocketjs/guest.h'
+      - 'components/pocketjs_guest/src/block_cache.c'
+      - 'components/pocketjs_guest/src/guest.c'
+      - 'main/app_session.c'
+      - 'main/pocket/pocket_memory.c'
+      - 'main/pocket/pocket_memory.h'
+      - 'tools/build_memory_test.sh'
+      - 'tools/test_block_cache.c'
+      - 'tools/test_pocket_memory.c'
+      - 'tools/test_guest_cache_pressure.py'
+      - 'tools/test_derby_fixed_integration.py'
       - 'tools/kasane_ir/check_equivalence.py'
       - 'tools/kasane_ir/test_check_equivalence.py'
       - 'tools/kasane_contract/run.sh'
