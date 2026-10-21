@@ -21,6 +21,11 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# Shared dependency-aware compiler cache, also used outside CI.
+import sys
+sys.path.insert(0, str(ROOT / "tools"))
+import host_build
 CACHE = ROOT / ".cache/bigwave_host"
 QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c"]
@@ -55,22 +60,18 @@ def build(m32: bool) -> Path:
     b = api.index("// ------------------------------------------------------- async completions", a)
     (cache / "pocket_sub_impl.inc").write_text(api[a:b])
     defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]
-    objects = []
-    for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm"):
-        obj, src = cache / f"{name}.o", ROOT / QJS / f"{name}.c"
-        if not obj.exists() or src.stat().st_mtime > obj.stat().st_mtime:
-            subprocess.run(["gcc", "-std=gnu11", "-c", "-O1", "-g", "-w", *flags, *defs, "-I", QJS,
-                            "-I", "components/pocketjs_guest/include", str(src), "-o", str(obj)],
-                           cwd=ROOT, check=True)
-        objects.append(str(obj))
+    objects = [str(host_build.compile_object("gcc", ROOT / QJS / f"{name}.c",
+                ["-std=gnu11", "-O1", "-g", "-w", *flags, *defs, "-I", QJS,
+                 "-I", "components/pocketjs_guest/include"]))
+               for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm")]
     binary = cache / "test-big-wave"
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
+    host_build.build(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/games/test_big_wave_host.c", *kasane_sources(), *EXTRA, *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
-                   cwd=ROOT, check=True)
+                   cwd=ROOT)
     return binary
 
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+gcc() { python3 tools/host_build.py gcc "$@"; }
 QJS=components/quickjs-ng/quickjs-ng
 OUT=${OUT:-/tmp/test-pocket-kasane}
 TEST_SOURCE=${TEST_SOURCE:-tools/test_pocket_kasane.c}
@@ -16,11 +17,8 @@ PY
 # different defines, and invalidate it on header or build-script changes.
 DEFS=(-DQUICKJS_NG_BUILD -D_GNU_SOURCE)
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
-  if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] || [ "$0" -nt "$CACHE/$f.o" ] \
-     || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
     gcc -std=gnu11 -c -O1 -g -w "${DEFS[@]}" -I "$QJS" -I components/pocketjs_guest/include \
         "$QJS/$f.c" -o "$CACHE/$f.o"
-  fi
 done
 gcc -std=gnu11 ${CFLAGS:--O1 -g -fsanitize=address,undefined} -Wall -Wextra -Werror \
   -fno-omit-frame-pointer \

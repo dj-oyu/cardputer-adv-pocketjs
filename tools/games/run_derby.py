@@ -75,6 +75,11 @@ from pathlib import Path
 import derby_seeds
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# Shared dependency-aware compiler cache, also used outside CI.
+import sys
+sys.path.insert(0, str(ROOT / "tools"))
+import host_build
 CACHE = ROOT / ".cache/derby_host"
 QJS = "components/quickjs-ng/quickjs-ng"
 EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
@@ -117,15 +122,10 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", te
     b = api.index("// ------------------------------------------------------- async completions", a)
     (cache / "pocket_sub_impl.inc").write_text(api[a:b])
     defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]
-    objects = []
-    for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm"):
-        obj = cache / f"{name}.o"
-        src = ROOT / QJS / f"{name}.c"
-        if not obj.exists() or src.stat().st_mtime > obj.stat().st_mtime:
-            subprocess.run(["gcc", "-std=gnu11", "-c", "-O1", "-g", "-w", *flags, *defs, "-I", QJS,
-                            "-I", "components/pocketjs_guest/include", str(src), "-o", str(obj)],
-                           cwd=ROOT, check=True)
-        objects.append(str(obj))
+    objects = [str(host_build.compile_object("gcc", ROOT / QJS / f"{name}.c",
+                ["-std=gnu11", "-O1", "-g", "-w", *flags, *defs, "-I", QJS,
+                 "-I", "components/pocketjs_guest/include"]))
+               for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm")]
     binary = cache / "test-derby"
     includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
@@ -137,12 +137,12 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby", te
     if fixed_workload:
         diagnostic += ["-DPOCKET_DERBY_FIXED_WORKLOAD"]
         diagnostic_sources += ["main/pocket/derby_fixed_workload.c"]
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *diagnostic, "-DKSN_PROC_POINTS_PIE_MODEL",
+    host_build.build(["gcc", "-std=gnu11", "-O1", "-g", *flags, *diagnostic, "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, *diagnostic_sources, str(table), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-lm", "-o", str(binary)],
-                   cwd=ROOT, check=True)
+                   cwd=ROOT)
     return binary
 
 

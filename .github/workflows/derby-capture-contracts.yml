@@ -19,6 +19,13 @@ on:
       - 'tools/kasane_ir/check_equivalence.py'
       - 'tools/kasane_ir/test_check_equivalence.py'
       - 'tools/kasane_contract/run.sh'
+      - 'tools/host_build.py'
+      - 'tools/test_host_build.py'
+      - 'tools/build_kasane_test.sh'
+      - 'tools/kasane_contract/run_qjs_utf8_cost.sh'
+      - 'tools/games/run_derby.py'
+      - 'tools/games/run_big_wave.py'
+      - 'tools/kasane_contract/run_megademo_app_host.py'
       - 'tools/games/verify_derby_recorded_trial.py'
       - 'tools/games/derby_manifest_export.py'
       - 'tools/test_derby_manifest_export.py'
@@ -73,17 +80,29 @@ jobs:
           mkdir -p source/artifacts
           git -C source rev-parse HEAD > source/artifacts/source-head.txt
           git -C harness rev-parse HEAD > source/artifacts/harness-head.txt
-          for path in tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh; do
+          for path in tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh tools/host_build.py tools/test_host_build.py tools/build_kasane_test.sh tools/kasane_contract/run_qjs_utf8_cost.sh tools/games/run_derby.py tools/games/run_big_wave.py tools/kasane_contract/run_megademo_app_host.py; do
+            mkdir -p "source/$(dirname "$path")"
             cp "harness/$path" "source/$path"
           done
-          git -C source add -- tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh
+          git -C source add -- tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh tools/host_build.py tools/test_host_build.py tools/build_kasane_test.sh tools/kasane_contract/run_qjs_utf8_cost.sh tools/games/run_derby.py tools/games/run_big_wave.py tools/kasane_contract/run_megademo_app_host.py
           git -C source diff --cached > source/artifacts/test-overlay.patch
           git -C source write-tree > source/artifacts/overlay-tree.txt
           if [ '${{ matrix.name }}' = j1-dma-combined ]; then
             test "$(git -C source rev-parse 'HEAD^{tree}')" = "$(cat source/artifacts/overlay-tree.txt)"
           fi
-          (cd source && sha256sum tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh) > source/artifacts/test-overlay.sha256
-          git -C source diff HEAD --exit-code -- . ':!tools/kasane_ir/check_equivalence.py' ':!tools/kasane_ir/test_check_equivalence.py' ':!tools/kasane_contract/run.sh'
+          (cd source && sha256sum tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh tools/host_build.py tools/test_host_build.py tools/build_kasane_test.sh tools/kasane_contract/run_qjs_utf8_cost.sh tools/games/run_derby.py tools/games/run_big_wave.py tools/kasane_contract/run_megademo_app_host.py) > source/artifacts/test-overlay.sha256
+          git -C source diff HEAD --exit-code -- . ':!tools/kasane_ir/check_equivalence.py' ':!tools/kasane_ir/test_check_equivalence.py' ':!tools/kasane_contract/run.sh' ':!tools/host_build.py' ':!tools/test_host_build.py' ':!tools/build_kasane_test.sh' ':!tools/kasane_contract/run_qjs_utf8_cost.sh' ':!tools/games/run_derby.py' ':!tools/games/run_big_wave.py' ':!tools/kasane_contract/run_megademo_app_host.py'
+      # Only compiler objects and dependency metadata; never fixtures, executables,
+      # test results, firmware images, or source/tree verification artifacts.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: source/.cache/host-objects-v1
+          key: host-objects-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-${{ hashFiles('harness/tools/host_build.py') }}-${{ env.HARNESS_HEAD }}
+          restore-keys: |
+            host-objects-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.name }}-${{ hashFiles('harness/tools/host_build.py') }}-
+      - name: Verify dependency-aware host compiler reuse
+        working-directory: source
+        run: python -B tools/test_host_build.py
       - name: Prepare official 32-bit dependencies
         working-directory: source
         shell: bash
@@ -96,12 +115,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! GAMES_M32=1 bash tools/kasane_contract/run.sh > artifacts/full-contracts.log 2>&1; then
+          if ! CONTRACT_LOG_DIR=artifacts/contract-sections GAMES_M32=1 bash tools/kasane_contract/run.sh > artifacts/full-contracts.log 2>&1; then
             tail -n 120 artifacts/full-contracts.log
             exit 1
           fi
           sha256sum --check artifacts/test-overlay.sha256
-          git diff HEAD --exit-code -- . ':!tools/kasane_ir/check_equivalence.py' ':!tools/kasane_ir/test_check_equivalence.py' ':!tools/kasane_contract/run.sh'
+          git diff HEAD --exit-code -- . ':!tools/kasane_ir/check_equivalence.py' ':!tools/kasane_ir/test_check_equivalence.py' ':!tools/kasane_contract/run.sh' ':!tools/host_build.py' ':!tools/test_host_build.py' ':!tools/build_kasane_test.sh' ':!tools/kasane_contract/run_qjs_utf8_cost.sh' ':!tools/games/run_derby.py' ':!tools/games/run_big_wave.py' ':!tools/kasane_contract/run_megademo_app_host.py'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
