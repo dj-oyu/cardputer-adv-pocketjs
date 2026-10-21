@@ -352,6 +352,11 @@ def main() -> None:
 
 
 def run_suite(args, cache):
+    # Outputs are never cache evidence. Discard previous subset/preview CSVs
+    # while the profile lock excludes all readers of this output namespace.
+    results = cache / 'results'
+    shutil.rmtree(results, ignore_errors=True)
+    results.mkdir(parents=True)
     for test in ("test_derby_lanes.mjs", "test_derby_photo.mjs", "test_derby_pan_order.mjs"):
         subprocess.run(["node", str(ROOT / "tools/games" / test)], cwd=ROOT, check=True)
     app_dir = force_course(lower(ROOT / "apps/derby", cache / "lowered/apps/derby"), args.course)
@@ -369,7 +374,7 @@ def run_suite(args, cache):
         binary = build(flags, cache / "m32", telemetry=args.telemetry, measure=args.measure)
     else:
         binary = build(["-fsanitize=address,undefined"], cache / "asan", telemetry=args.telemetry, measure=args.measure)
-    env = dict(os.environ, DERBY_APP_DIR=str(app_dir), DERBY_CSV=str(cache / "replays.csv"))
+    env = dict(os.environ, DERBY_APP_DIR=str(app_dir), DERBY_CSV=str(results / "replays.csv"))
     # Image output is owned by --ppm below, rather than inherited by every case.
     env.pop("DERBY_PPM", None)
     env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
@@ -381,13 +386,13 @@ def run_suite(args, cache):
     mid_output = None
     cases = []
     for index, (tier, extra) in enumerate(runs):
-        case_dir = cache / 'cases' / f'{index:02d}'
+        case_dir = results / 'cases' / f'{index:02d}'
         case_dir.mkdir(parents=True, exist_ok=True)
         e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(case_dir / 'frames.csv'), **extra)
         if args.heap_limit:
             e["DERBY_HEAP_LIMIT"] = str(args.heap_limit)
         if args.ppm and tier == 1 and not extra:
-            ppm = cache / "ppm"
+            ppm = results / "ppm"
             ppm.mkdir(parents=True, exist_ok=True)
             for old in ppm.glob("*.ppm"):
                 old.unlink()
@@ -432,24 +437,24 @@ def run_suite(args, cache):
                 if result.returncode:
                     raise SystemExit(failure)
     if args.ppm:
-        sheet(cache / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
-        sheet(cache / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
-        sheet(cache / "ppm", ROOT / "docs/apps/derby-watch-vision-preview.png", VISION, 4)
-        sheet(cache / "ppm", ROOT / "docs/apps/derby-watch-dissolve-preview.png", CURTAIN, 5)
+        sheet(results / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
+        sheet(results / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
+        sheet(results / "ppm", ROOT / "docs/apps/derby-watch-vision-preview.png", VISION, 4)
+        sheet(results / "ppm", ROOT / "docs/apps/derby-watch-dissolve-preview.png", CURTAIN, 5)
         # The same frames with side units only: WIDE stays the side camera.
-        side = cache / "ppm_side"
+        side = results / "ppm_side"
         side.mkdir(parents=True, exist_ok=True)
         for old in side.glob("*.ppm"):
             old.unlink()
         shots = ",".join(f"{t}:side_{n[4:]}" for n, t in pan_shots)
         run(binary, dict(env, DERBY_TIER="1", DERBY_PAN="1e9", DERBY_PPM=str(side), DERBY_SHOTS=shots,
-                         DERBY_CSV=str(cache / "frames_side.csv")))
+                         DERBY_CSV=str(results / "frames_side.csv")))
         for f in side.glob("derby_*_side_*.ppm"):
-            f.replace(cache / "ppm" / f.name)
+            f.replace(results / "ppm" / f.name)
         order = [x for n, _ in pan_shots for x in (f"side_{n[4:]}", n)]
-        sheet(cache / "ppm", ROOT / "docs/apps/derby-pan-preview.png", order, 2)
+        sheet(results / "ppm", ROOT / "docs/apps/derby-pan-preview.png", order, 2)
         oval_dir = force_course(lower(ROOT / "apps/derby", cache / "lowered_oval/apps/derby"), "oval")
-        ov = cache / "ppm_oval"
+        ov = results / "ppm_oval"
         ov.mkdir(parents=True, exist_ok=True)
         for old in ov.glob("*.ppm"):
             old.unlink()
@@ -459,7 +464,7 @@ def run_suite(args, cache):
             p = subprocess.run([str(binary)], cwd=ROOT, capture_output=True, text=True, env=dict(
                 env, DERBY_APP_DIR=str(oval_dir), DERBY_TIER="1", DERBY_NOCAM="1", DERBY_PPM=str(ov),
                 DERBY_LEADSHOTS=",".join(f"{m}:oval_{n}_{cam}" for m, n in OVAL_AT),
-                DERBY_CSV=str(cache / f"frames_oval_{cam}.csv"), **extra))
+                DERBY_CSV=str(results / f"frames_oval_{cam}.csv"), **extra))
             for line in p.stdout.splitlines():
                 if line.startswith("LEADSHOT"):
                     print(line)

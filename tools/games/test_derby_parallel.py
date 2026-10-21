@@ -75,6 +75,9 @@ class ParallelContracts(unittest.TestCase):
     def exercise(self, failure=None):
         with tempfile.TemporaryDirectory() as tmp:
             cache = Path(tmp)
+            stale = cache/'results/cases/stale.csv'
+            stale.parent.mkdir(parents=True)
+            stale.write_text('old subset result')
             ready = threading.Event()
             barrier = threading.Barrier(2)
             seen, commands, replays = [], [], []
@@ -109,6 +112,7 @@ class ParallelContracts(unittest.TestCase):
                 stack.enter_context(patch.object(runner.os, 'cpu_count', return_value=2))
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 runner.run_suite(options(), cache)
+            self.assertFalse(stale.exists())
             self.assertEqual(len(seen), 14)
             self.assertEqual(len({e['DERBY_CSV'] for e in seen}), 14)
             self.assertEqual(len({e['DERBY_APP_DIR'] for e in seen}), 1)
