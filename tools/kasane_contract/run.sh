@@ -393,6 +393,10 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   "$out/stress" > "$out/stress.bin"
   python3 tools/kasane_contract/stress_reference.py "$out/stress.bin"
 done
+# Keep the parser/layout experiment in this existing lane; no extra worker.
+# It consumes the same prepared m32 sysroot and shared compiler-object cache.
+python3 tools/vmtest/prepare/run.py
+python3 tools/vmtest/prepare/run.py --m32
 }
 
 section_quickjs() {
