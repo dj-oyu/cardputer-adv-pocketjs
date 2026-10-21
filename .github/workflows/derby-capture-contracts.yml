@@ -52,6 +52,10 @@ jobs:
         include:
           - name: j1-baseline
             source: b561aea1c0798feb28055a00d36681fae81ac58a
+          # Independent A snapshot from the same d41aadc8 product base.
+          # This executes the unchanged complete suite, including m32/capture.
+          - name: tx-single-A
+            source: '2fd8e9d8eede67be0cb6a57ad00df84149c5e3e4'
           - name: j1-dma-combined
             source: ''
     steps:
@@ -87,7 +91,7 @@ jobs:
           git -C source add -- tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh tools/host_build.py tools/test_host_build.py tools/build_kasane_test.sh tools/kasane_contract/run_qjs_utf8_cost.sh tools/games/run_derby.py tools/games/run_big_wave.py tools/kasane_contract/run_megademo_app_host.py
           git -C source diff --cached > source/artifacts/test-overlay.patch
           git -C source write-tree > source/artifacts/overlay-tree.txt
-          if [ '${{ matrix.name }}' = j1-dma-combined ]; then
+          if [ '${{ matrix.name }}' != j1-baseline ]; then
             test "$(git -C source rev-parse 'HEAD^{tree}')" = "$(cat source/artifacts/overlay-tree.txt)"
           fi
           (cd source && sha256sum tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh tools/host_build.py tools/test_host_build.py tools/build_kasane_test.sh tools/kasane_contract/run_qjs_utf8_cost.sh tools/games/run_derby.py tools/games/run_big_wave.py tools/kasane_contract/run_megademo_app_host.py) > source/artifacts/test-overlay.sha256
