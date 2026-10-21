@@ -437,6 +437,31 @@ int main(int argc,char **argv){
     REQUIRE(multi_bytes==64*48*2&&multi_panel[10*240+100]==0xf800);
     pocket_proc_overlay_present_result(KSN_OK);
     REQUIRE(!pocket_proc_pending());
+    /* A VM draw overwrites the shared raster workspace even if the caller
+     * abandons the candidate. Re-reading the same cached row must still use
+     * the committed frame, on either surface. Exercise both phase orders. */
+    for(unsigned target=0;target<2;target++){
+        REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
+        eval_ok(ctx,target?"proc.beginFrame(0,layerId);proc.draw(dotPlan,[42,10,0,0])":
+                           "proc.beginFrame(0);proc.draw(dotPlan,[42,10,0,0])");
+        REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
+        REQUIRE(first.read_span(first.ctx,0,0,8,0,KSN_PROC_W,span,alpha)==KSN_OK);
+        for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
+        pocket_proc_end_turn();
+        REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
+        eval_ok(ctx,target?"proc.beginFrame(0,layerId);proc.draw(dotPlan,[43,10,0,0])":
+                           "proc.beginFrame(0);proc.draw(dotPlan,[43,10,0,0])");
+        REQUIRE(first.read_span(first.ctx,0,0,8,0,KSN_PROC_W,span,alpha)==KSN_OK);
+        for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
+        pocket_proc_end_turn();
+        REQUIRE(second.read_span(second.ctx,0,0,8,0,KSN_PROC_W,span,alpha)==KSN_OK);
+        for(unsigned x=0;x<KSN_PROC_W;x++)REQUIRE(span[x]==0&&alpha[x]==255);
+        REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
+    }
+    REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
+    eval_ok(ctx,"proc.beginFrame(0)");
+    eval_error(ctx,"proc.draw(dotPlan,[721,10,0,0])");
+    REQUIRE(first.read_span(first.ctx,0,0,10,10,1,span,alpha)==KSN_OK&&span[0]==0xf800);
     eval_ok(ctx,"proc.beginFrame(0);proc.draw(dotPlan,[11,10,0,0]);proc.commit()");
     REQUIRE(second.read_span(second.ctx,0,0,10,20,1,span,alpha)==KSN_OK&&span[0]==0xf800);
     multi_bytes=0;

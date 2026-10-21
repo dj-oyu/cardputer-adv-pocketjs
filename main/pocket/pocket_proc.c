@@ -138,13 +138,22 @@ typedef struct {
 static proc_surface surfaces[PROC_SURFACES];
 static uint32_t next_surface_handle;
 static unsigned building_surface,pending_surface;
-static ksn_proc_frame *scratch;
+/* Plan execution and image rasterization are synchronous owner-task phases.
+ * No VM callback reads an image, and no image renderer executes a plan. Keep
+ * the eight-row cache in the full-size VM workspace between draw() calls. */
+#define PROC_IMAGE_BAND_ROWS 8u
+typedef union {
+    ksn_proc_frame frame;
+    uint16_t band[KSN_PROC_W*PROC_IMAGE_BAND_ROWS];
+} proc_workspace;
+_Static_assert(sizeof(proc_workspace)==sizeof(ksn_proc_frame),
+               "image raster cache must not enlarge the VM workspace");
+static proc_workspace *workspace;
 static ksn_proc_vm *vm;
 static bool building;
 /* A source row can be requested repeatedly by scaled image draws. Cache the
  * whole eight-row raster band so adjacent rows share one segment traversal. */
-#define PROC_IMAGE_BAND_ROWS 8u
-static uint16_t image_band[KSN_PROC_W*PROC_IMAGE_BAND_ROWS],image_band_y;
+static uint16_t image_band_y;
 static const ksn_proc_frame *image_band_frame;
 static uint16_t image_band_color;
 static unsigned image_band_surface;
@@ -262,10 +271,10 @@ static unsigned surface_segments(const proc_surface *surface){
 static bool buffers(proc_surface *surface){
     const size_t bytes=frame_bytes(surface_segments(surface));
     if(!surface->candidate)surface->candidate=calloc(1,bytes);
-    if(!scratch)scratch=calloc(1,sizeof *scratch);
+    if(!workspace)workspace=calloc(1,sizeof *workspace);
     if(!surface->committed)surface->committed=calloc(1,bytes);
     if(!vm)vm=calloc(1,sizeof *vm);
-    return surface->candidate&&scratch&&surface->committed&&vm;
+    return surface->candidate&&workspace&&surface->committed&&vm;
 }
 static bool any_pending(void){
     for(unsigned i=0;i<PROC_SURFACES;i++)if(surfaces[i].pending)return true;
@@ -545,8 +554,11 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
 #ifndef KASANE_BGCOST_TRACE
     (void)handle;
 #endif
-    ksn_proc_status status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,scratch):
-                                     ksn_proc_sized_plan_begin(vm,slot->plan,input,scratch);
+    /* Every plan execution overwrites the cached raster, including failed
+     * draws and draws later abandoned without commit(). Invalidate first. */
+    image_band_valid=false;
+    ksn_proc_status status=slot->rom?ksn_proc_rom_plan_begin(vm,slot->plan,input,&workspace->frame):
+                                     ksn_proc_sized_plan_begin(vm,slot->plan,input,&workspace->frame);
     if(status==KSN_PROC_RUNNING)
         status=slot->rom?ksn_proc_rom_plan_run(vm,slot->plan,false):
                          ksn_proc_sized_plan_run(vm,slot->plan,false);
@@ -582,18 +594,18 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
             }
         }
     }
-    if((unsigned)scratch->count+typed_segments>room-candidate->count||
-       (unsigned)scratch->raster_steps+typed_steps>(unsigned)UINT16_MAX-candidate->raster_steps){
+    if((unsigned)workspace->frame.count+typed_segments>room-candidate->count||
+       (unsigned)workspace->frame.raster_steps+typed_steps>(unsigned)UINT16_MAX-candidate->raster_steps){
         building=false;
         return failure(ctx,op,POCKET_ERR_LIMIT_EXCEEDED,"frame drawing limit");
     }
     { DD_SCOPE(DD_SEGMENT_APPEND);
-    DD_ADD(DD_SEGMENT_COPY_BYTES,scratch->count*sizeof scratch->segments[0]);
-    memcpy(&candidate->segments[candidate->count],scratch->segments,
-           scratch->count*sizeof scratch->segments[0]);
-    candidate->count+=scratch->count;
-    candidate->raster_steps+=scratch->raster_steps;
-    candidate->ext|=scratch->ext;
+    DD_ADD(DD_SEGMENT_COPY_BYTES,workspace->frame.count*sizeof workspace->frame.segments[0]);
+    memcpy(&candidate->segments[candidate->count],workspace->frame.segments,
+           workspace->frame.count*sizeof workspace->frame.segments[0]);
+    candidate->count+=workspace->frame.count;
+    candidate->raster_steps+=workspace->frame.raster_steps;
+    candidate->ext|=workspace->frame.ext;
     }
     if(slot->points){
         const proc_points *p=slot->points;
@@ -612,7 +624,7 @@ static JSValue draw_run(JSContext *ctx,proc_slot *slot,uint32_t handle,const flo
     bg_plan[bg_last].handle=handle;
     bg_plan[bg_last].n++;
     bg_plan[bg_last].steps+=vm->steps;
-    bg_plan[bg_last].seg+=scratch->count+typed_segments;
+    bg_plan[bg_last].seg+=workspace->frame.count+typed_segments;
 #endif
     return JS_UNDEFINED;
 }
@@ -844,7 +856,7 @@ void pocket_proc_reset(void){
         free(surfaces[i].candidate);free(surfaces[i].committed);
         surfaces[i]=(proc_surface){0};
     }
-    free(scratch);free(vm);scratch=NULL;vm=NULL;
+    free(workspace);free(vm);workspace=NULL;vm=NULL;
     image_band_valid=false;image_band_frame=NULL;
     building=js_call_active=false;building_surface=pending_surface=0;
     scalar_batches=pie_batches=0;
@@ -899,10 +911,19 @@ static ksn_result image_span(void *ctx,uint16_t variant,uint16_t frame_number,
         (surface->has_committed?surface->committed:NULL);
     uint16_t color=surface->pending?surface->candidate_color:
         (surface->has_committed?surface->committed_color:0);
+    /* Before the first frame (or after reset) there is no workspace. A blank
+     * image needs no allocation and must remain readable even under OOM. */
+    if(!frame){
+        for(unsigned i=0;i<count;i++)rgb565[i]=color;
+        memset(alpha,255,count);
+        return KSN_OK;
+    }
+    uint16_t *image_band=workspace->band;
     uint16_t band_y=(uint16_t)(y&~(PROC_IMAGE_BAND_ROWS-1u));
     if(!image_band_valid||image_band_surface!=index||
        image_band_y!=band_y||image_band_frame!=frame||
        image_band_color!=color){
+        image_band_valid=false;
         unsigned rows=KSN_PROC_H-band_y;
         if(rows>PROC_IMAGE_BAND_ROWS)rows=PROC_IMAGE_BAND_ROWS;
 #if defined(KASANE_PROC_JS_DIAGNOSTIC)||defined(KASANE_MEGADEMO_TRACE)
