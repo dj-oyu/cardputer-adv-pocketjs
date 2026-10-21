@@ -61,9 +61,9 @@ int g_board_swap_into = 1;
 // (17 call sites hold that pointer for a whole frame), so the asynchronous path
 // COPIES a strip here instead of handing the caller a second buffer: 3,840 bytes
 // of memcpy is ~10 us against the ~440 us of SPI the copy lets the CPU skip.
-// Two buffers, because one is in flight while the next strip is copied.
-static uint16_t tx_buf[2][LCD_W * STRIP_H] __attribute__((aligned(16)));
-static int tx_front;
+// One TX payload; every write waits for the exact previous descriptor.
+// Native UI loses copy/DMA overlap; the stable shared drawing strip remains.
+static uint16_t tx_buf[LCD_W * STRIP_H] __attribute__((aligned(16)));
 static bool tx_inflight;
 // The descriptor must outlive the queued transaction: spi_device_queue_trans
 // keeps the pointer until the result is reaped.
@@ -487,22 +487,19 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     // stayed a call and the transfer went from 16.5 ms to 24.2 ms.
     int count=LCD_W*rows;
     size_t bytes = (size_t)LCD_W * rows * 2;
-    esp_err_t e;
+    // Commands may have drained already. A continued window has not: the
+    // same TX payload/descriptor cannot be touched while the driver owns it.
+    esp_err_t e=tx_reap();
+    if(e!=ESP_OK){next_row=-1;return e;}
     if (g_board_async) {
 #ifdef KASANE_P0_BUS_PROBE
         int64_t swap_began=esp_timer_get_time();
 #endif
-        // THE PIPELINE. The strip queued on the previous call has been going out
-        // during everything above (~440 us of SPI against ~2.2 ms of drawing and
-        // layout). The panel buffer that is NOT in flight is tx_buf[tx_front], so
-        // the swap writes straight into it while that transfer is still going:
-        // the swap and the copy are one pass, and neither waits for the wire.
-        // `shared` is left as drawn. Then the previous result is reaped (one
-        // transfer in flight at a time, which is what queue_size=1 allows) and
-        // this strip is queued.
+        // Drawing/overlays may overlap DMA; the single TX copy starts only
+        // after ownership is returned by the reap above.
         DD_OPEN(copy,DD_TX_COPY);
         DD_ADD(DD_TX_COPY_BYTES,bytes);
-        uint16_t *panel = tx_buf[tx_front];
+        uint16_t *panel = tx_buf;
         if (g_board_swap_into) {
             if(pie_swap) swap_pie(pixels,panel,(unsigned)(count*2/32));
             else swap_scalar(panel,pixels,count);
@@ -517,7 +514,6 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
             (uint32_t)(esp_timer_get_time()-swap_began),false);
 #endif
         DD_CLOSE(copy);
-        e = tx_reap();
         if (e == ESP_OK) {
             // DC high: these bytes are pixel data and not a command. tx() is the
             // only other place that touches the line and it cannot be used here,
@@ -539,14 +535,12 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
                 (uint32_t)(esp_timer_get_time()-queue_began),false);
 #endif
             tx_inflight = (e == ESP_OK);
-            tx_front ^= 1;
         }
     } else {
         DD_OPEN(copy,DD_TX_COPY);
         if(pie_swap) swap_pie(pixels,pixels,(unsigned)(count*2/32));
         else swap_scalar(pixels,pixels,count);
         DD_CLOSE(copy);
-        e = tx_reap();
         if (e == ESP_OK) {
             DD_SCOPE(DD_TX_SUBMIT);DD_ADD(DD_TX_SUBMITS,1);
             e = tx(true, pixels, bytes);
@@ -597,17 +591,18 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     // Rows are packed as they are swapped, so the window leaves the strip in one
     // pass exactly as the full-width path does. Both arms pack into a panel
     // buffer rather than in place: the strip's rows are 240 apart and the
-    // window's are `cols` apart, so there is a copy either way, and packing into
-    // the buffer that is not in flight keeps the queued arm's overlap.
+    // window's are `cols` apart. Reap before writing the one TX payload.
     //
     // The kernel arm is the reason ksn_render rounds its window out to 16
     // pixels: 16 pixels is 32 bytes, so an aligned x and a multiple-of-16 cols
     // make every packed row a whole number of the kernel's blocks at an aligned
     // address. Anything else falls to the scalar swap, which is the arm that
     // made the first narrow measurement slower than the full-width path.
+    e=tx_reap();
+    if(e!=ESP_OK){next_row=-1;return e;}
     DD_OPEN(copy,DD_TX_COPY);
     DD_ADD(DD_TX_COPY_BYTES,bytes);
-    uint16_t *panel = tx_buf[tx_front];
+    uint16_t *panel = tx_buf;
     bool aligned = pie_swap && (x%16)==0 && (cols%16)==0;
     for (int r=0;r<rows;r++) {
         uint16_t *in = pixels+r*LCD_W+x, *out = panel+r*cols;
@@ -616,7 +611,6 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
     }
     DD_CLOSE(copy);
     if (g_board_async) {
-        e = tx_reap();
         if (e == ESP_OK) {
             gpio_set_level(34, 1);
             tx_pending = (spi_transaction_t){.length = bytes * 8, .tx_buffer = panel};
@@ -630,10 +624,8 @@ esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels)
               DD_ADD(DD_TX_FAILURES,e!=ESP_OK);
               DD_ADD(DD_TX_PAYLOAD_BYTES,e==ESP_OK?bytes:0); }
             tx_inflight = (e == ESP_OK);
-            tx_front ^= 1;
         }
     } else {
-        e = tx_reap();
         if (e == ESP_OK) {
             DD_SCOPE(DD_TX_SUBMIT);DD_ADD(DD_TX_SUBMITS,1);
             e = tx(true, panel, bytes);

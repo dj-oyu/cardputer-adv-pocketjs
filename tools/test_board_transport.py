@@ -32,7 +32,7 @@ DECLARATIONS = '\n'.join(re.findall(
     r'(?:shared|tx_buf|tx_front|tx_inflight|tx_pending|next_row|window_x|window_cols)\b[^;]*;',
     source, re.M))
 CONTINUATION = 'void board_present_frame_end(' in source
-EXPECTED_TX_BYTES = 7680
+EXPECTED_TX_BYTES = 3840
 HEADER = r'''
 #include <assert.h>
 #include <stdbool.h>
