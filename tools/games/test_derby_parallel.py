@@ -45,6 +45,12 @@ class ParallelContracts(unittest.TestCase):
                     self.assertEqual(runner.run_matrix(options(m32=m32, oracle=oracle, heap_limit=heap)), expected)
         self.assertEqual(len(ORIGINAL), 14)
 
+    def test_long_mid_cases_start_first_without_changing_the_result_order(self):
+        cases=[(tier,extra,{}) for tier,extra in ORIGINAL]
+        order=runner.case_order(cases)
+        self.assertEqual(order[:3],[11,0,4])
+        self.assertEqual(sorted(order),list(range(14)))
+
     def test_all_generator_and_binary_profiles_are_distinct_and_stable(self):
         paths = {runner.profile_cache(options(m32=m, telemetry=t, measure=d, course=c))
                  for m in (False, True) for t in (False, True)

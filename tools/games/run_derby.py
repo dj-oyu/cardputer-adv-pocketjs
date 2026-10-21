@@ -259,6 +259,15 @@ def profile_cache(args) -> Path:
     return CACHE / 'profiles' / f"{'m32' if args.m32 else 'asan'}-{features}-{args.course}"
 
 
+def case_order(cases):
+    # MID performs demo/replay work; its SER oracle is the longest case.
+    # Start those independent processes first, while consuming logs/results in
+    # their original order. This avoids a long single-worker tail.
+    return sorted(range(len(cases)),
+                  key=lambda i: (cases[i][0] == 1, 'DERBY_SER_ORACLE' in cases[i][1]),
+                  reverse=True)
+
+
 def capture_case(binary: Path, env: dict):
     return subprocess.run([str(binary)], cwd=ROOT, env=env,
                           capture_output=True, text=True)
@@ -444,7 +453,9 @@ def run_suite(args, cache):
     # Two workers on the usual two-vCPU host; never one process per case.
     # Every future is consumed, in the original order, before the finish gate.
     with ThreadPoolExecutor(max_workers=min(2, os.cpu_count() or 1)) as pool:
-        futures = [pool.submit(capture_case, binary, e) for _, _, e in cases]
+        futures = [None] * len(cases)
+        for index in case_order(cases):
+            futures[index] = pool.submit(capture_case, binary, cases[index][2])
         for (tier, extra, _), future in zip(cases, futures):
             print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]}) {extra or ''}", flush=True)
             out = checked_result(future.result())

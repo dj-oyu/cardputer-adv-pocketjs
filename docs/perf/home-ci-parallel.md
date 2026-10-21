@@ -56,6 +56,18 @@ options are fingerprinted before/after validation and around every profile.
 Changed inputs fail that invocation. Standalone run_derby.py still runs the
 three checks unconditionally. No persisted success stamp or proof is read.
 
+The first ordinary run observed HOME10:09 versus the prior9:44: default ASan
+improved to4:17.5, while telemetry/measure each took about71.5s. That result did
+not demonstrate overall speedup. The follow-up schedules long MID/SER cases
+first, and overlaps the two single-case diagnostic profiles in separate spawned
+processes. Each has its own profile and process-local output FDs; no Python
+thread redirects another mode's stdout. Multi-case profiles retain their own
+bounded case pool and are not paired with another profile. At most two test
+processes execute at once within the complete HOME entry. Results remain in the
+original mode/case order, and any child exception or aborted SystemExit(0)
+fails the complete suite. The artifact root has an additional writer lock so
+concurrent invocations using the same --out cannot replace logs/proof.
+
 Per-mode logs retain their former artifact names. derby-complete.json is a
 fresh output with the exact source, Node fingerprint, original mode options
 and each successful duration. It is written only after every mode passes and

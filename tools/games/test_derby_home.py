@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import os
+import time
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +22,26 @@ EXPECTED = (
 )
 
 
+def sentinel_process(name, options, validation, out):
+    out=Path(out)
+    (out/(name+'.started')).write_text(str(os.getpid()))
+    began=time.monotonic()
+    while len(list(out.glob('*.started'))) != 2:
+        if time.monotonic()-began > 10:
+            raise RuntimeError('both mode processes did not overlap')
+        time.sleep(.01)
+    (out/(name+'.log')).write_text(name+' isolated log\n')
+    if name.endswith('failure'):
+        raise SystemExit(7)
+    if name.endswith('zero'):
+        raise SystemExit(0)
+    return dict(name=name,status='PASS',seconds=.01)
+
+
+def serial_fake_pair(modes, validation, out):
+    return [home._single_mode(name,args,validation,out) for name,args in modes]
+
+
 class CompleteHome(unittest.TestCase):
     def test_same_five_profiles_and_one_node_validation(self):
         self.assertEqual(home.MODES, EXPECTED)
@@ -27,6 +49,7 @@ class CompleteHome(unittest.TestCase):
         seen = []
         with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
             out = Path(tmp)
+            stack.enter_context(patch.object(home, '_parallel_modes', side_effect=serial_fake_pair))
             stack.enter_context(patch.object(runner, 'validate_node_sources', return_value='fresh'))
             verify = stack.enter_context(patch.object(runner, 'require_node_inputs'))
             def profile(args, proof):
@@ -62,6 +85,7 @@ class CompleteHome(unittest.TestCase):
     def test_last_device_sized_mode_failure_cannot_write_success(self):
         with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
             out = Path(tmp)
+            stack.enter_context(patch.object(home, '_parallel_modes', side_effect=serial_fake_pair))
             stack.enter_context(patch.object(runner, 'validate_node_sources', return_value='fresh'))
             stack.enter_context(patch.object(runner, 'require_node_inputs'))
             count = []
@@ -72,7 +96,7 @@ class CompleteHome(unittest.TestCase):
             stack.enter_context(patch.object(runner, 'run_profile', profile))
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
-            with self.assertRaises(SystemExit):
+            with self.assertRaises(RuntimeError):
                 home.complete(out)
             self.assertEqual(len(count),5)
             self.assertFalse((out/'derby-complete.json').exists())
@@ -96,6 +120,49 @@ class CompleteHome(unittest.TestCase):
             stack.enter_context(patch.object(runner,'run_suite',side_effect=lambda *args:source.write_text('changed')))
             with self.assertRaisesRegex(SystemExit,'Node validation inputs changed'):
                 runner.run_profile(runner.parse_args([]),validation)
+
+    def test_real_mode_processes_overlap_and_keep_output_separate(self):
+        modes=(('diagnostic-a',('--heap-limit','524288')),('diagnostic-b',('--heap-limit','524288')))
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            out=Path(tmp)
+            result=home._parallel_modes(modes,'fresh',out,worker=sentinel_process)
+            self.assertEqual([x['name'] for x in result],['diagnostic-a','diagnostic-b'])
+            self.assertNotEqual((out/'diagnostic-a.started').read_text(),(out/'diagnostic-b.started').read_text())
+            self.assertEqual((out/'diagnostic-a.log').read_text(),'diagnostic-a isolated log\n')
+
+    def test_mode_process_failure_cannot_return_success(self):
+        modes=(('diagnostic-a',('--heap-limit','524288')),('diagnostic-failure',('--heap-limit','524288')))
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                home._parallel_modes(modes,'fresh',Path(tmp),worker=sentinel_process)
+
+    def test_zero_exit_aborts_in_a_mode_process_cannot_pass(self):
+        modes=(('diagnostic-a',('--heap-limit','524288')),('diagnostic-zero',('--heap-limit','524288')))
+        with tempfile.TemporaryDirectory() as tmp,contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                home._parallel_modes(modes,'fresh',Path(tmp),worker=sentinel_process)
+
+    def test_zero_exit_aborts_in_the_owner_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(runner,'run_profile',side_effect=SystemExit(0)),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                home._single_mode('diagnostic',(),'fresh',Path(tmp))
+
+    def test_multi_case_modes_cannot_oversubscribe_the_process_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                home._parallel_modes((home.MODES[0],home.MODES[1]),'fresh',Path(tmp))
+
+    def test_complete_output_root_is_locked_before_cleanup_or_node_checks(self):
+        events=[]
+        @contextlib.contextmanager
+        def lock(path):
+            events.append(('lock',path))
+            yield
+            events.append(('unlock',path))
+        with tempfile.TemporaryDirectory() as tmp,patch.object(runner,'workspace_lock',lock),patch.object(home,'_complete_locked',side_effect=lambda out:events.append(('run',out))):
+            out=Path(tmp)
+            home.complete(out)
+        self.assertEqual([x[0] for x in events],['lock','run','unlock'])
 
     def test_preview_export_lock_precedes_the_profile_writer_lock(self):
         calls=[]
