@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 python3 -m unittest discover -s tools/kasane_ir -p test_check_equivalence.py
+cc() { python3 tools/host_build.py cc "$@"; }
 out=$(mktemp -d)
 # One complete suite: these lanes only change scheduling, never acceptance.
 # Each lane has its own temporary output directory. The QuickJS adapter tests
@@ -403,8 +404,6 @@ python3 tools/kasane_contract/run_proc_megademo_scenes.py
 python3 tools/kasane_contract/run_megademo_app_host.py
 python3 tools/kasane_contract/run_pocket_proc_qjs.py
 python3 tools/kasane_contract/run_pocket_proc_limits_qjs.py
-# Built-in (flash) plans by name against the same plans as arrays, on DERBY's
-# captured draws (docs/kasane/flash-plan.md; the capture is made once).
 python3 tools/kasane_contract/run_proc_limits_scene.py
 python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py
 python3 tools/kasane_contract/run_proc_grid_resize.py
