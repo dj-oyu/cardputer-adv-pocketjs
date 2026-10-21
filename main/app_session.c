@@ -2592,6 +2592,7 @@ static esp_err_t present_frame(void) {
 #else
         ksn_result result=pocket_kasane_present(&port,&stats);
 #endif
+        board_present_frame_end();
 #ifdef KASANE_D2_MULTI_SURFACE_PROBE
         ESP_LOGI("D2_MULTI","PRESENT result=%u bytes=%u duration_us=%u "
                  "heap_free=%u heap_largest=%u stack_hwm_bytes=%u",

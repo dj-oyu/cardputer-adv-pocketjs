@@ -34,9 +34,9 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels);
 // Columns [x, x+cols) of `rows` strip rows, each row read at pixels+row*240+x.
 // The rest of the strip is not read and not sent, which is the point: a caller
 // that recomposited six columns of a band pays for six columns on the wire. The
-// panel is re-addressed for the window, so a partial-width transfer always
-// costs the three commands the full-width path avoids -- worth it below roughly
-// 200 columns, not worth it at 240, and board_present stays the way to say 240.
+// panel window is reused for contiguous bands with identical x/cols. A change
+// of bounds or a discontinuity costs three commands. The existing renderer
+// narrow threshold and 16-pixel alignment are unchanged.
 esp_err_t board_present_rect(int x, int y, int cols, int rows, uint16_t *pixels);
 // Owner-task barrier: acknowledges completed transfer, including prior work.
 // A transfer failure invalidates the panel write position.
@@ -50,6 +50,9 @@ esp_err_t board_present_submit(int x,int y,int cols,int rows,uint16_t *pixels);
 esp_err_t board_present_finish(void);
 #endif
 uint16_t board_rgb(unsigned r, unsigned g, unsigned b);
+// Owner-task frame boundary, after transfer completion (success or failure).
+// Ends window reuse only; it does not drain DMA or acknowledge a transfer.
+void board_present_frame_end(void);
 void board_capture(bool enabled);
 // Whether board_capture is dumping rows. A partial-width transfer would leave
 // the untouched columns of the shared strip holding the previous band, and the

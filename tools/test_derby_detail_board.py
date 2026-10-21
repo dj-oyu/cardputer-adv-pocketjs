@@ -22,8 +22,8 @@ typedef int esp_err_t;
 #define pdMS_TO_TICKS(x) (x)
 typedef struct {size_t length;const void *tx_buffer;} spi_transaction_t;
 static bool tx_inflight,capture,g_board_async=true,g_board_swap_into=true,pie_swap;
-static int lcd,next_row=-1,fail_queue,fail_reap;
-static uint16_t tx_buf[240*8];
+static int lcd,next_row=-1,window_x,window_cols,tx_front,fail_queue,fail_reap;
+static uint16_t storage[2][240*8],*tx_buf[2]={storage[0],storage[1]};
 static spi_transaction_t tx_pending;
 static uint64_t now;
 uint64_t dm_now_us(void){return now;}

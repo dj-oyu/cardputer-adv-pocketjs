@@ -32,7 +32,7 @@ DECLARATIONS = '\n'.join(re.findall(
     r'(?:shared|tx_buf|tx_front|tx_inflight|tx_pending|next_row|window_x|window_cols)\b[^;]*;',
     source, re.M))
 CONTINUATION = 'void board_present_frame_end(' in source
-EXPECTED_TX_BYTES = 3840
+EXPECTED_TX_BYTES = 7680
 HEADER = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -178,7 +178,7 @@ int main(void){
 #if CONTINUATION
  reset();send(16,0,32,8);verify();assert(next_row==8);
  board_present_frame_end();assert(next_row==-1);
- unsigned n=commands;send(16,8,32,8);verify();assert(commands==n+3);
+ unsigned frame_commands=commands;send(16,8,32,8);verify();assert(commands==frame_commands+3);
 #endif
  /* Native copy overlap is deliberately removed only by the single-TX case.
   * Kasane submit already drains first, independently of TX buffer count. */
