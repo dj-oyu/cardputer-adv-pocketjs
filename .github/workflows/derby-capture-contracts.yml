@@ -1,5 +1,11 @@
 name: DERBY J1 DMA integration full contracts
 on:
+  # PR merge-ref caches cannot seed sibling PRs. Normal approved base updates
+  # run this same complete suite and save objects in an inheritable base scope.
+  push:
+    branches:
+      - main
+      - integration/derby-j1-dma-host-r2-20261020
   pull_request:
     paths:
       - '.github/workflows/derby-capture-contracts.yml'
@@ -36,6 +42,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Keep base push and PR refs separate: a PR update must not cancel base seeding.
 concurrency:
   group: derby-capture-${{ github.ref }}
   cancel-in-progress: true
