@@ -32,8 +32,8 @@ def parse_completion(raw, *, detail_enabled):
     def positions(pattern):
         return [i for i, line in enumerate(lines) if re.fullmatch(pattern, line)]
 
-    identity = positions(r'APP_ID local\.derby')
-    ready = positions(r'DERBY READY tones=(?:true|false)')
+    identity = positions(r'(?:I \([0-9]+\) app: )?APP_ID local\.derby')
+    ready = positions(r'(?:I \([0-9]+\) js: )?DERBY READY tones=(?:true|false)')
     end = positions(r'DERBY_FIXED_END .*')
     owner = positions(r'DERBY_DETAIL_EXIT v=1 session=' + re.escape(trial['session']) + r' clean=1')
     stop = positions(r'(?:I \([0-9]+\) app: )?APP_STOPPED')
@@ -45,8 +45,12 @@ def parse_completion(raw, *, detail_enabled):
     # Reject all malformed/legacy owner records, even alongside a valid one.
     if sum(OWNER in line for line in lines) != 1:
         raise ValueError('completion_owner_schema')
-    if sum(line.startswith('APP_ID') for line in lines) != 1 or sum('DERBY READY' in line for line in lines) != 1:
+    if sum('APP_ID' in line for line in lines) != 1 or sum('DERBY READY' in line for line in lines) != 1:
         raise ValueError('completion_relaunch')
+    # A malformed extra terminal record must not hide beside a valid one.
+    if any(sum(marker in line for line in lines) != 1
+           for marker in ('DERBY_FIXED_END', 'APP_STOPPED', 'HOME_READY')):
+        raise ValueError('completion_terminal_schema')
     if not detail_enabled and any('DERBY_DETAIL' in line and not line.startswith(OWNER+' ') for line in lines):
         raise ValueError('completion_detail_present_in_OFF')
     return dict(contract=CONTRACT, detail_mode='ON' if detail_enabled else 'OFF',

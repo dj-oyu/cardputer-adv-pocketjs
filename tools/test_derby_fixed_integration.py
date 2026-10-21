@@ -7,12 +7,17 @@ import tempfile
 import unittest
 import sys
 import shutil
+import os
 from unittest.mock import patch
 from derby_fixed_workload_chunks import generate,MANIFEST_SHA256,CONTROLLER_LOAD,CONTROLLER_STRICT
 from record_verification import verify_fixed_mode,verify_mode,FIXED_SYMBOLS,TELEMETRY_SYMBOLS
 
 ROOT=Path(__file__).resolve().parents[1]
 BASE=json.loads((ROOT/'tools/derby_fixed_base.json').read_text())['base_tree']
+# The reviewed cache-pressure policy intentionally changes ordinary owner
+# behavior. Freeze that source separately; keep the original diagnostic-OFF
+# baseline for every other path and prove the reference transition below.
+PRESSURE_OWNER_BASE='1d5fa05b18d04ff36f45dc36106d41fe8c4da9e5'
 
 def off_path(source):
     out=[];stack=[]
@@ -71,8 +76,40 @@ class Integration(unittest.TestCase):
 
     def test_normal_owner_and_app_paths_identical(self):
         for name in ('main/main.c','main/app_session.c'):
-            old=subprocess.check_output(['git','show',BASE+':'+name],cwd=ROOT,text=True)
+            reference=PRESSURE_OWNER_BASE if name=='main/app_session.c' else BASE
+            old=subprocess.check_output(['git','show',reference+':'+name],cwd=ROOT,text=True)
             self.assertEqual(off_path(old),off_path((ROOT/name).read_text()),name)
+
+    def test_pressure_reference_changes_only_the_pressure_sampler(self):
+        def without_sampler(source):
+            marker='static void sample_memory_pressure(void) {'
+            self.assertEqual(source.count(marker),1)
+            start=source.index(marker)
+            end=source.index('\n}',start)+2
+            return source[:start]+source[end:]
+        sources=[subprocess.check_output(['git','show',reference+':main/app_session.c'],
+                                         cwd=ROOT,text=True)
+                 for reference in (BASE,PRESSURE_OWNER_BASE)]
+        self.assertEqual(*(off_path(without_sampler(source)) for source in sources))
+
+    def test_native_pressure_cache_contracts(self):
+        # Check the intentional normal-path change behaviorally, in addition
+        # to the frozen-source comparison. No device allocator/RTOS claim.
+        with tempfile.TemporaryDirectory() as tmp:
+            out=Path(tmp)
+            env=dict(os.environ,CACHE=str(out/'qjs'),OUT=str(out/'memory'),
+                     UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1')
+            subprocess.run(['bash','tools/build_memory_test.sh'],cwd=ROOT,env=env,check=True)
+            subprocess.run([env['OUT']],cwd=ROOT,env=env,check=True)
+            binary=out/'block-cache'
+            subprocess.run(['gcc','-std=gnu11','-O1','-g','-Wall','-Wextra','-Werror',
+                            '-fsanitize=address,undefined','-fno-omit-frame-pointer',
+                            '-Icomponents/pocketjs_guest/include','tools/test_block_cache.c',
+                            'components/pocketjs_guest/src/block_cache.c','-o',str(binary)],
+                           cwd=ROOT,check=True)
+            subprocess.run([str(binary)],cwd=ROOT,env=env,check=True)
+            subprocess.run([sys.executable,'-B','tools/test_guest_cache_pressure.py'],
+                           cwd=ROOT,env=env,check=True)
 
     def test_actual_derby_off_text_identical_at_O0(self):
         with tempfile.TemporaryDirectory() as tmp:

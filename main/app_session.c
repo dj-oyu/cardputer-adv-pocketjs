@@ -209,6 +209,13 @@ extern const char companion_start[] asm("_binary_companion_js_start");
 extern const char vmp_cond_start[] asm("_binary_condition_js_start");
 #endif
 static pocketjs_guest_t *guest;
+#ifdef POCKET_DERBY_FIXED_WORKLOAD
+bool app_derby_fixed_guest_memory(size_t *used,size_t *cap){
+    if(!guest||!used||!cap||df_status()!=DF_TAIL)return false;
+    JS_GetMemoryCounters(JS_GetRuntime(pocketjs_guest_quickjs_context(guest)),used,cap);
+    return *used>0&&*used<=*cap;
+}
+#endif
 
 // Called after any turn or evaluation that ran JavaScript -- app_tick's two
 // paths, app_overlay_tick's, and eval_reporting's parse -- because an
@@ -255,14 +262,12 @@ static void sample_memory_pressure(void) {
         largest=heap_caps_get_largest_free_block(caps);
     }
     pocket_memory_sample(now,used,limit,native,free_bytes,largest);
-    // R3 (docs/vm/r3-small-block-cache.md sec.3.4): when the SYSTEM is short
-    // (free RAM or the largest free block), hand the guest allocator's cached
-    // small blocks back. Not on GUEST pressure: those blocks are already
-    // outside the guest's accounting, so returning them gives it no room.
-    static uint8_t last_mask;
+    // Return cached blocks and stop retaining later frees for the whole native
+    // pressure episode, including recovery hysteresis. A one-time flush lets
+    // the next JS turn retain them again while RAM is still short. GUEST-only
+    // pressure is different: these blocks are outside the guest's accounting.
     const uint8_t mask=pocket_memory_mask()&(POCKET_MEMORY_FREE|POCKET_MEMORY_LARGEST);
-    if(mask&~last_mask)pocketjs_guest_block_cache_flush(guest);
-    last_mask=mask;
+    pocketjs_guest_block_cache_set_pressure(guest,mask!=0);
 }
 static atomic_bool stop_requested;
 static int64_t deadline;

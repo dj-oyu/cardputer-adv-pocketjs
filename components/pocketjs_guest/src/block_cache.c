@@ -37,6 +37,12 @@ void block_cache_init(block_cache_t *cache, const block_cache_backend_t *backend
   }
 }
 
+void block_cache_set_enabled(block_cache_t *cache, bool enabled) {
+  if (cache->enabled == enabled) return;
+  if (!enabled) block_cache_flush(cache);
+  cache->enabled = enabled;
+}
+
 static int class_index(const block_cache_t *cache, size_t length) {
   if (length > BLOCK_CACHE_MAX_SIZE || (length & 3U)) return -1;
   return (int)cache->class_of[length / 4U] - 1;

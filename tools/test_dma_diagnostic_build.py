@@ -23,7 +23,8 @@ class DmaDiagnosticProofTests(unittest.TestCase):
                           artifacts={'cardputer_pocketjs.elf': dict(bytes=3, sha256='a' * 64)},
                           hardware_tested=False)
         with patch('verify_dma_diagnostic_build.prove', return_value=diagnostic, side_effect=error), \
-             patch('verify_dma_diagnostic_build.elf_symbols', return_value=set(symbols)):
+             patch('verify_dma_diagnostic_build.elf_symbols', return_value=set(symbols)), \
+             patch('verify_dma_diagnostic_build.dma_function_symbols', return_value=set(symbols)):
             return prove_dma(self.build, dma_overlap=dma, detail_measurement=detail)
 
     def test_all_four_axes_and_actual_hash_binding(self):
@@ -67,6 +68,22 @@ class DmaDiagnosticProofTests(unittest.TestCase):
                     self.prove(**{axis: value})
         with self.assertRaises(ValueError):
             self.prove(verified_detail='ON')
+
+    def test_shadow_cache_types_are_not_ignored(self):
+        for key in ('KASANE_DMA_OVERLAP', 'POCKET_DERBY_DETAIL_MEASURE'):
+            for suffix in (':STRING=OFF', '=OFF', ':INTERNAL=OFF'):
+                self.cache('OFF', 'OFF')
+                with (self.build / 'CMakeCache.txt').open('a') as cache:
+                    cache.write(key + suffix + '\n')
+                with self.subTest(key=key, suffix=suffix), self.assertRaises(ValueError):
+                    self.prove()
+
+    def test_data_symbols_cannot_stand_in_for_dma_functions(self):
+        from verify_dma_diagnostic_build import dma_function_symbols
+        for kind in ('B', 'D', 'R', 'A'):
+            text = '\n'.join('00000100 ' + kind + ' ' + name for name in DMA_SYMBOLS)
+            with patch('verify_dma_diagnostic_build.command', return_value=text):
+                self.assertFalse(DMA_SYMBOLS & dma_function_symbols(self.build))
 
     def test_existing_diagnostic_failure_is_not_bypassed(self):
         self.cache('OFF', 'OFF')

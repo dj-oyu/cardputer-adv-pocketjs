@@ -27,14 +27,18 @@ def receipts(raw, mode):
                      manifest_sha256=MANIFEST_SHA256, owner_completion=dict(
                          contract='fixed-owner-v1', record='DERBY_DETAIL_EXIT', detail_mode=mode)))
     manifest = dict(schema_version=1, idf_version='6.0.1', target='esp32s3', build_job_id='build1',
+                    build_plan_hash='4'*64,
                     source_provenance=dict(repository='dj-oyu/cardputer-adv-pocketjs', commit=head,
                                            source_receipt='1'*64, source_sha256='2'*64),
                     artifacts=[dict(name=name, **item) for name, item in artifacts.items()])
     plan = dict(test='firmware_flash', flash_operation='flash', backend='serial', job_id='flash1',
                 build_job_id='build1', manifest_sha256=digest(manifest), expected_app_bin_sha256=image,
                 expected_elf_sha256=elf, device_fingerprint='d'*64)
+    plan.update(flash_principal='synthetic-owner', device_id='synthetic-device',
+                broker_epoch='3'*32, session_id='synthetic-session')
     job = dict(id='flash1', state='succeeded', plan_hash=digest(plan))
     summary = dict(readback_verified=True, boot_observed=True, passive_boot_verified=True,
+                   last_known_good_receipt='5'*64,
                    boot_log_matches_expected_artifact=True, target='esp32s3', observed_idf_version='6.0.1',
                    observed_elf_sha256_prefix=elf[:12],
                    verification_basis='full_segment_sha256_readback_and_boot_elf_prefix')
@@ -42,6 +46,16 @@ def receipts(raw, mode):
     collection = dict(test='derby_fixed_workload', backend='serial', protocol='pocketjs-derby-fixed-v2',
                       fixed_workload=load_collector().FIXED_PLAN, expected_firmware_sha256=elf,
                       device_fingerprint='d'*64, job_id='capture1', broker_epoch='3'*32)
+    collection.update(session_id=plan['session_id'], firmware_verification='successful_flash_receipt',
+                      flash_job_id=job['id'])
+    collection['collector_binding'] = dict(schema_version=1, principal_id=plan['flash_principal'],
+        device_id=plan['device_id'], device_fingerprint=plan['device_fingerprint'],
+        flash_job_id=job['id'], flash_plan_hash=job['plan_hash'],
+        firmware_receipt=summary['flash_summary']['last_known_good_receipt'],
+        build_job_id=manifest['build_job_id'], build_plan_hash=manifest['build_plan_hash'],
+        source_receipt=manifest['source_provenance']['source_receipt'], source_commit=head,
+        manifest_sha256=digest(manifest), modeproof_sha256=digest(proof), derby_detail_mode=mode,
+        expected_elf_sha256=elf, expected_app_bin_sha256=image)
     receipt = dict(complete=True, bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest(), duration_ms=10000,
                    **{key: False for key in ('gaps','overflow','truncated','partial_tail','disconnect','reset','refused')})
     collected = dict(id='capture1', state='succeeded', plan_hash=digest(collection))
@@ -49,7 +63,10 @@ def receipts(raw, mode):
         terminal_contract='owner_exit_v2', validation_error=None, receipt=receipt,
         raw_base64=base64.b64encode(raw).decode(), binding=dict(job_id='capture1', plan_hash=collected['plan_hash'],
             broker_epoch=collection['broker_epoch'], device_fingerprint='d'*64,
-            configured_expected_firmware_sha256=elf))
+            expected_firmware_sha256=elf, principal_id=plan['flash_principal'],
+            protocol_parser_commit=collection['fixed_workload']['parser_commit'],
+            installed_boot_source_image='unverified', device_reported_session='1',
+            flash_receipt=copy.deepcopy(collection['collector_binding'])))
     return [raw, receipt, proof, manifest, plan, job, summary, collection, collected]
 
 
@@ -111,6 +128,15 @@ class CompletionTests(unittest.TestCase):
                      raw.replace(b'HOME_READY',b'I (1) app: HOME_READY')]
             for bad in cases:
                 with self.assertRaises(ValueError): verify(receipts(bad, mode), mode)
+
+
+def load_tests(loader, tests, pattern):
+    # Keep the new synthetic gate on the existing completion CI entry point.
+    from test_derby_recorded_trial_r2 import R2Tests
+    tests.addTests(loader.loadTestsFromTestCase(R2Tests))
+    from test_derby_manifest_export import ManifestExportTests
+    tests.addTests(loader.loadTestsFromTestCase(ManifestExportTests))
+    return tests
 
 
 if __name__ == '__main__':
