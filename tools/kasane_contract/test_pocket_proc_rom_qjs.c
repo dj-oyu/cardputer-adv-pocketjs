@@ -114,6 +114,7 @@ typedef struct {
 } snap;
 static ksn_proc_segment seg_a[2][KSN_PROC_SEGMENTS],seg_b[2][KSN_PROC_SEGMENTS];
 static void take(snap *s,ksn_proc_segment seg[2][KSN_PROC_SEGMENTS],const char *code){
+    const ksn_proc_frame *scratch=&workspace->frame;
     memset(s,0,sizeof *s);
     snprintf(s->code,sizeof s->code,"%s",code);
     s->status=vm->status;s->steps=vm->steps;s->pc=vm->pc;s->last_pc=vm->last_pc;
