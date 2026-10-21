@@ -64,7 +64,9 @@ For a 32-column run of all 17 bands, including the final 7 rows:
 These are model-observed software calls, not a hardware timing measurement.
 B keeps the existing narrow threshold and 16-pixel alignment. It extends the
 window to the panel bottom and retains it only while x/width/next-row match.
-Any command, failure, capture scope or completed owner frame invalidates it.
+Any command, transport/control failure, capture scope or completed owner frame
+invalidates it. Existing full-width invalid-argument early returns preserve the
+position; this does not claim that every rejected API call invalidates it.
 The ordinary owner source guard permits exactly one new window-end call,
 strictly after both present paths return and before any ACK/error branching;
 negative tests reject its removal or movement before present.

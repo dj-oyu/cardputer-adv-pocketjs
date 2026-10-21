@@ -215,6 +215,25 @@ int main(void){
   assert(drain()==ESP_OK&&!bus_pending&&!tx_inflight);
   next_row=-1;send(0,0,240,8);verify();
  }
+ /* A continued narrow second band must not mutate a borrowed TX/descriptor.
+  * Test each no-return fault directly, before any command can drain it. */
+ for(int f=1;f<=3;f++){
+  reset();send(16,0,32,8);assert(bus_pending&&tx_inflight);
+  spi_transaction_t descriptor=tx_pending;
+  unsigned q=queues,c=commands,controls=control_calls;
+  fault=f;fill(8,8);
+  esp_err_t e=board_present_rect(16,8,32,8,shared);
+  assert(e==(f==1?ESP_ERR_TIMEOUT:f==2?ESP_ERR_INVALID_ARG:ESP_ERR_INVALID_STATE));
+  assert(next_row==-1&&bus_pending&&tx_inflight);check_borrow();
+  assert(memcmp(&descriptor,&tx_pending,sizeof(descriptor))==0);
+  assert(queues==q&&commands==c&&control_calls==controls);
+  fault=2;
+  assert(board_present_rect(16,8,32,8,shared)==ESP_ERR_INVALID_ARG);
+  assert(queues==q&&commands==c&&control_calls==controls);check_borrow();
+  assert(memcmp(&descriptor,&tx_pending,sizeof(descriptor))==0);
+  assert(drain()==ESP_OK&&!bus_pending&&!tx_inflight);
+  send(16,8,32,8);assert(commands==c+3&&control_calls==controls+5);verify();
+ }
  /* Every CASET/RASET/RAMWR command or parameter failure invalidates B. */
  for(int step=1;step<=5;step++){
   reset();control_error_at=step;fill(0,8);
