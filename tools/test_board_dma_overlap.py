@@ -1,6 +1,7 @@
 """Fault-inject the actual copied DMA boundary; no firmware or hardware imports."""
 from pathlib import Path
 import os
+import re
 import subprocess
 import tempfile
 root=Path(__file__).resolve().parents[1]
@@ -33,8 +34,9 @@ static unsigned detail[DD_EVENTS];
 #define vTaskDelay(x) ((void)(x))
 #define gpio_set_level(x,y) ((void)(x),(void)(y))
 typedef struct {size_t length; const void *tx_buffer;} spi_transaction_t;
-static uint16_t tx_buf[2][240*8], shared[240*8], saved[240*8];
-static int tx_front, g_board_async=1, g_board_swap_into=1;
+@TX_DECL@
+static uint16_t shared[240*8], saved[240*8];
+static int g_board_async=1, g_board_swap_into=1;
 static bool tx_inflight, capture, pie_swap;
 static spi_transaction_t tx_pending;
 static int lcd, queues, reaps, command_calls, fail_queue;
@@ -148,10 +150,11 @@ CASES = r'''int main(void){
  assert(board_present_finish()==ESP_OK);g_board_async=1;g_board_swap_into=0;
  assert(board_present_submit(0,0,240,8,shared)==ESP_OK&&tx_inflight);
  memset(shared,0x5a,sizeof(shared));assert(board_present_finish()==ESP_OK);
- assert(sizeof(tx_buf)==7680&&sizeof(shared)==3840);
- puts("actual board submit/finish: 1700 strips; lifetime, full/narrow, final 7 rows, prior/queue/final failure, cancel/exit, fixed TX 7680 B: PASS");
+ assert(sizeof(tx_buf)==3840&&sizeof(shared)==3840);
+ puts("actual board submit/finish: 1700 strips; lifetime, full/narrow, final 7 rows, prior/queue/final failure, cancel/exit, fixed TX 3840 B: PASS");
 }'''
 
+HARNESS=HARNESS.replace('@TX_DECL@',re.search(r'^static uint16_t tx_buf\[.*?;',source,re.M).group())
 parts=[function(s) for s in ['static esp_err_t tx_reap(', 'static esp_err_t command(',
     'esp_err_t board_present(', 'esp_err_t board_present_rect(',
     'esp_err_t board_present_sync(', 'esp_err_t board_present_rect_sync(',
