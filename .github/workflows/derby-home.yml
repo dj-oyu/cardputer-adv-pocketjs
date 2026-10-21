@@ -46,31 +46,20 @@ jobs:
           python tools/test_derby_measure.py | tee artifacts/measure-accounting.log
           python tools/games/test_derby_observation.py | tee artifacts/observation.log
           node tools/games/export_derby_oracle.mjs artifacts/derby-oracle.json
-      - name: Node regression and QuickJS with ASan/UBSan
-        run: |
-          set -euo pipefail
-          python tools/games/run_derby.py | tee artifacts/derby-asan.log
-      # Diagnostic JS has a different baseline footprint; this is a functional
-      # ASan regression, never a device heap acceptance threshold.
-      - name: Diagnostic generated chunk and native boundary
-        run: |
-          set -euo pipefail
-          python tools/games/run_derby.py --telemetry --heap-limit 524288 | tee artifacts/derby-telemetry.log
-      - name: Stage accounting with unchanged guest and real renderer
-        run: |
-          set -euo pipefail
-          python tools/games/run_derby.py --measure --heap-limit 524288 | tee artifacts/derby-measure.log
+          python -B tools/games/test_derby_parallel.py
+          python -B tools/games/test_derby_home.py
       - name: Prepare i386 compiler and package index for the documented sysroot
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib
-      - name: QuickJS with device-sized JSValues and pointers
+      - name: Complete DERBY ASan, telemetry, measure and device-sized matrix
+        shell: bash
         run: |
           set -euo pipefail
           python tools/test_derby_measure.py --m32 | tee artifacts/measure-accounting-m32.log
-          python tools/games/run_derby.py --m32 | tee artifacts/derby-m32.log
-          python tools/games/run_derby.py --m32 --telemetry --heap-limit 163840 | tee artifacts/derby-m32-telemetry.log
+          python -B tools/games/run_derby_home.py --out artifacts
           python tools/record_verification.py --out artifacts/host-receipt.json
+          git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
