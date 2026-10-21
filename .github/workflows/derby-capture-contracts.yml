@@ -1,5 +1,11 @@
 name: DERBY J1 DMA integration full contracts
 on:
+  # PR merge-ref caches cannot seed sibling PRs. Normal approved base updates
+  # run this same complete suite and save objects in an inheritable base scope.
+  push:
+    branches:
+      - main
+      - integration/derby-j1-dma-host-r2-20261020
   pull_request:
     paths:
       - '.github/workflows/derby-capture-contracts.yml'
@@ -36,6 +42,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Keep base push and PR refs separate: a PR update must not cancel base seeding.
 concurrency:
   group: derby-capture-${{ github.ref }}
   cancel-in-progress: true
@@ -87,7 +94,7 @@ jobs:
           git -C source add -- tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh tools/host_build.py tools/test_host_build.py tools/build_kasane_test.sh tools/kasane_contract/run_qjs_utf8_cost.sh tools/games/run_derby.py tools/games/run_big_wave.py tools/kasane_contract/run_megademo_app_host.py
           git -C source diff --cached > source/artifacts/test-overlay.patch
           git -C source write-tree > source/artifacts/overlay-tree.txt
-          if [ '${{ matrix.name }}' = j1-dma-combined ]; then
+          if [ '${{ matrix.name }}' != j1-baseline ]; then
             test "$(git -C source rev-parse 'HEAD^{tree}')" = "$(cat source/artifacts/overlay-tree.txt)"
           fi
           (cd source && sha256sum tools/kasane_ir/check_equivalence.py tools/kasane_ir/test_check_equivalence.py tools/kasane_contract/run.sh tools/host_build.py tools/test_host_build.py tools/build_kasane_test.sh tools/kasane_contract/run_qjs_utf8_cost.sh tools/games/run_derby.py tools/games/run_big_wave.py tools/kasane_contract/run_megademo_app_host.py) > source/artifacts/test-overlay.sha256

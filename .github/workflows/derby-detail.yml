@@ -99,6 +99,7 @@ jobs:
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_detail -D SDKCONFIG="$PWD/build_detail/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D POCKET_DERBY_DETAIL_MEASURE=${{ matrix.detail }} build
           python -B tools/record_verification.py --build build_detail --expect-telemetry ON --expect-measure ON --out build_detail/verification.json
+          python -B tools/report_board_transport.py --build build_detail
           python -B tools/report_derby_fixed_stack.py --build build_detail
           python -B tools/report_derby_detail_resources.py --build build_detail
           idf.py -B build_detail size-files > build_detail/size-files.txt

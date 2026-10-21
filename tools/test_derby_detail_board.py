@@ -14,6 +14,7 @@ head=r'''
 typedef int esp_err_t;
 #define ESP_OK 0
 #define ESP_ERR_INVALID_ARG 7
+#define ESP_ERR_INVALID_STATE 8
 #define LCD_W 240
 #define LCD_H 135
 #define STRIP_H 8
@@ -21,8 +22,8 @@ typedef int esp_err_t;
 #define pdMS_TO_TICKS(x) (x)
 typedef struct {size_t length;const void *tx_buffer;} spi_transaction_t;
 static bool tx_inflight,capture,g_board_async=true,g_board_swap_into=true,pie_swap;
-static int lcd,next_row=-1,tx_front,fail_queue,fail_reap;
-static uint16_t storage[2][240*8],*tx_buf[2]={storage[0],storage[1]};
+static int lcd,next_row=-1,window_x,window_cols,fail_queue,fail_reap;
+static uint16_t tx_buf[240*8];
 static spi_transaction_t tx_pending;
 static uint64_t now;
 uint64_t dm_now_us(void){return now;}

@@ -90,6 +90,7 @@ jobs:
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_fixed -D SDKCONFIG="$PWD/build_fixed/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D POCKET_DERBY_FIXED_WORKLOAD=ON build
           python -B tools/record_verification.py --build build_fixed --expect-telemetry ON --expect-measure ON --out build_fixed/verification.json
+          python -B tools/report_board_transport.py --build build_fixed
           idf.py -B build_fixed size 2>&1 | tee build_fixed/size.log
           python -B tools/report_derby_fixed_stack.py --build build_fixed
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -102,6 +103,7 @@ jobs:
             build_fixed/cardputer_pocketjs.map
             build_fixed/sdkconfig
             build_fixed/project_description.json
+            build_fixed/board-transport.json
             build_fixed/verification.json
             build_fixed/diagnostic-mode-proof.json
             build_fixed/memory.jsonl

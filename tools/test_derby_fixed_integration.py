@@ -43,6 +43,17 @@ def off_path(source):
     if stack:raise ValueError('unbalanced source preprocessor')
     return '\n'.join(x.strip() for x in out if x.strip())
 
+def without_window_end(source):
+    # This is the sole ordinary owner change allowed for the window cache.
+    # It must follow both complete (DMA ON) and synchronous (DMA OFF) present,
+    # before any success/failure branch or animation acknowledgement.
+    anchor = ('        ksn_result result=pocket_kasane_present(&port,&stats);\n'
+              '#endif\n        board_present_frame_end();\n')
+    if source.count('board_present_frame_end();') != 1 or source.count(anchor) != 1:
+        raise ValueError('window end moved outside the completed present boundary')
+    return source.replace('        board_present_frame_end();\n', '', 1)
+
+
 class Integration(unittest.TestCase):
     def test_controller_preserves_strict_global_scope_load_order_and_ready_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -78,7 +89,19 @@ class Integration(unittest.TestCase):
         for name in ('main/main.c','main/app_session.c'):
             reference=PRESSURE_OWNER_BASE if name=='main/app_session.c' else BASE
             old=subprocess.check_output(['git','show',reference+':'+name],cwd=ROOT,text=True)
-            self.assertEqual(off_path(old),off_path((ROOT/name).read_text()),name)
+            current=(ROOT/name).read_text()
+            if name=='main/app_session.c':current=without_window_end(current)
+            self.assertEqual(off_path(old),off_path(current),name)
+
+    def test_window_end_cannot_move_before_or_disappear_from_present(self):
+        source=(ROOT/'main/app_session.c').read_text()
+        self.assertIn('board_present_frame_end();',off_path(source))
+        without_window_end(source)
+        line='        board_present_frame_end();\n'
+        with self.assertRaises(ValueError):without_window_end(source.replace(line,''))
+        early=source.replace(line,'').replace('        kasane_display_t display_state={0};',
+                                               line+'        kasane_display_t display_state={0};')
+        with self.assertRaises(ValueError):without_window_end(early)
 
     def test_pressure_reference_changes_only_the_pressure_sampler(self):
         def without_sampler(source):
