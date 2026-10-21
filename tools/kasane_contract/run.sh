@@ -3,7 +3,19 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 python3 -m unittest discover -s tools/kasane_ir -p test_check_equivalence.py
 out=$(mktemp -d)
-trap 'rm -rf "$out"' EXIT
+# One complete suite: these lanes only change scheduling, never acceptance.
+# Each lane has its own temporary output directory. The QuickJS adapter tests
+# retain their original order because some generate fixtures for later tests.
+pids=()
+cleanup() {
+  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  rm -rf "$out"
+}
+trap cleanup EXIT
+logs=${CONTRACT_LOG_DIR:-$out/logs}
+mkdir -p "$logs"
+
+section_c() {
 cc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   -DKSN_CONTRACT_HOST -Imain/ui/kasane \
   tools/kasane_contract/use_cases.c tools/kasane_contract/probe.c -o "$out/probe"
@@ -380,6 +392,9 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   "$out/stress" > "$out/stress.bin"
   python3 tools/kasane_contract/stress_reference.py "$out/stress.bin"
 done
+}
+
+section_quickjs() {
 python3 tools/kasane_contract/run_proc_megademo_js.py
 # MEGADEMO scenes: plan == debug-step plan == single-step VM and scalar ==
 # PIE model for every tier and frame, the adapter's limits, Act I against the
@@ -390,23 +405,32 @@ python3 tools/kasane_contract/run_pocket_proc_qjs.py
 python3 tools/kasane_contract/run_pocket_proc_limits_qjs.py
 # Built-in (flash) plans by name against the same plans as arrays, on DERBY's
 # captured draws (docs/kasane/flash-plan.md; the capture is made once).
-python3 tools/kasane_contract/run_pocket_proc_rom_qjs.py
 python3 tools/kasane_contract/run_proc_limits_scene.py
 python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py
 python3 tools/kasane_contract/run_proc_grid_resize.py
 python3 tools/kasane_contract/run_pocket_grid_qjs.py
 python3 tools/kasane_contract/run_pocket_video_qjs.py
-# The three games (tools/games/): scripted play on the real QuickJS, pocket.kasane and
-# pocket.input.keys. The --m32 runs use the device-sized guest heap, which is the
-# guard on evaluation headroom (docs/apps/derby-watch.md): about 8.5 minutes in
-# all, so GAMES_M32=0 skips the two of them when only the C is being checked.
-bash tools/games/run_lcd_catch.sh
+}
+
+section_derby() {
+# ROM fixtures are generated afresh before their consumer; capture and the
+# ordinary DERBY runs share derby_host/m32 and must remain in this lane.
+python3 tools/kasane_contract/run_pocket_proc_rom_qjs.py --cases "$out/cases.json"
 python3 tools/games/run_derby.py
-python3 tools/games/run_big_wave.py
 if [ "${GAMES_M32:-1}" != "0" ]; then
   python3 tools/games/run_derby.py --m32
+fi
+}
+
+section_bigwave() {
+python3 tools/games/run_big_wave.py
+if [ "${GAMES_M32:-1}" != "0" ]; then
   python3 tools/games/run_big_wave.py --m32
 fi
+}
+
+section_models() {
+bash tools/games/run_lcd_catch.sh
 python3 tools/kasane_contract/make_grid_fold_device_assets.py --check
 python3 tools/kasane_contract/test_build_grid_profile.py
 cc -std=c11 -Wall -Wextra -Werror -O2 -DKSN_GRID_PIE_MODEL \
@@ -468,3 +492,22 @@ cc -std=c11 -Wall -Wextra -Werror -O2 -fno-inline -finstrument-functions -DKSN_C
 "$out/blend-lut-count"
 printf '#include "ksn_api.h"\n#include "ksn_ports.h"\n#include "ksn_core.h"\n#include "ksn_cache.h"\n#include "ksn_modal.h"\n#include "ksn_view_host.h"\n#include "ksn_runtime.h"\n' | \
   c++ -std=c++17 -Wall -Wextra -Werror -Imain/ui/kasane -x c++ -fsyntax-only -
+}
+
+for section in c quickjs derby bigwave models; do
+  mkdir -p "$out/$section"
+  (
+    out="$out/$section"
+    started=$SECONDS
+    trap 'rc=$?; printf "CONTRACT_SECTION %s seconds=%s status=%s\n" "$section" "$((SECONDS-started))" "$rc"; exit "$rc"' EXIT
+    "section_$section"
+  ) > "$logs/$section.log" 2>&1 &
+  pids+=("$!")
+done
+status=0
+for index in "${!pids[@]}"; do
+  if wait "${pids[$index]}"; then :; else status=1; fi
+done
+pids=()
+for section in c quickjs derby bigwave models; do cat "$logs/$section.log"; done
+exit "$status"
