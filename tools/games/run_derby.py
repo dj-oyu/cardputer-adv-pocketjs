@@ -67,6 +67,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, ExitStack
 import fcntl
+import hashlib
 import os
 import re
 import shutil
@@ -330,7 +331,41 @@ def run_matrix(args):
     return runs
 
 
-def main() -> None:
+NODE_TESTS = ("test_derby_lanes.mjs", "test_derby_photo.mjs", "test_derby_pan_order.mjs")
+
+
+def node_inputs():
+    """Node checks read original app files, never ABI/diagnostic generated copies."""
+    node = Path(shutil.which('node') or 'node').resolve()
+    files = [Path(__file__), *(ROOT / 'tools/games' / name for name in NODE_TESTS),
+             *sorted(p for p in (ROOT / 'apps/derby').rglob('*') if p.is_file())]
+    h = hashlib.sha256()
+    for p in [node, *files]:
+        h.update(str(p).encode() + bytes([0]))
+        h.update(hashlib.sha256(p.read_bytes()).digest())
+    h.update(repr((os.environ.get('NODE_OPTIONS'), os.environ.get('LANG'),
+                   os.environ.get('LC_ALL'), os.environ.get('TZ'))).encode())
+    return h.hexdigest()
+
+
+def require_node_inputs(validation):
+    if validation != node_inputs():
+        raise SystemExit('Node validation inputs changed during the complete suite')
+
+
+def validate_node_sources():
+    validation = node_inputs()
+    for test in NODE_TESTS:
+        result = subprocess.run(['node', str(ROOT / 'tools/games' / test)], cwd=ROOT,
+                                capture_output=True, text=True)
+        print(result.stdout, end='', flush=True)
+        print(result.stderr, end='', file=sys.stderr, flush=True)
+        result.check_returncode()
+    require_node_inputs(validation)
+    return validation
+
+
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
     parser.add_argument("--measure", action="store_true", help="functional stage-counter coverage; host oracle work included, not device timing")
@@ -340,7 +375,11 @@ def main() -> None:
     parser.add_argument("--oracle", action="store_true", help="the JS ser() oracle in every run, not three")
     parser.add_argument("--course", choices=("seed", "straight", "oval"), default="seed",
                         help="every race on this course (the lowered copy's OV[0] set to 0 or 1); seed: as the seeds pick")
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def run_profile(args, validation):
+    require_node_inputs(validation)
     with ExitStack() as locks:
         # Preview exports intentionally have fixed documented paths. Serialize
         # only those invocations, across profiles, rather than racing PNG writes.
@@ -349,6 +388,12 @@ def main() -> None:
         cache = profile_cache(args)
         locks.enter_context(workspace_lock(cache / 'workspace.lock'))
         run_suite(args, cache)
+    require_node_inputs(validation)
+
+
+def main() -> None:
+    args = parse_args()
+    run_profile(args, validate_node_sources())
 
 
 def run_suite(args, cache):
@@ -357,8 +402,6 @@ def run_suite(args, cache):
     results = cache / 'results'
     shutil.rmtree(results, ignore_errors=True)
     results.mkdir(parents=True)
-    for test in ("test_derby_lanes.mjs", "test_derby_photo.mjs", "test_derby_pan_order.mjs"):
-        subprocess.run(["node", str(ROOT / "tools/games" / test)], cwd=ROOT, check=True)
     app_dir = force_course(lower(ROOT / "apps/derby", cache / "lowered/apps/derby"), args.course)
     if args.telemetry:
         sys.path.insert(0, str(ROOT / 'tools'))
