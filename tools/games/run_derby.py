@@ -64,6 +64,9 @@ device and no serial port.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, ExitStack
+import fcntl
 import os
 import re
 import shutil
@@ -223,9 +226,8 @@ OVAL_CAMS = [("dir", {}), ("wide", {"DERBY_JS": "wide=()=>0", "DERBY_EACH": "cam
              ("field", {"DERBY_EACH": "cam=2;man=9;"}), ("close", {"DERBY_EACH": "cam=1;man=9;"})]
 
 
-def run(binary: Path, env: dict) -> str:
-    """Run the harness, echo its output, fail on a non-zero exit."""
-    p = subprocess.run([str(binary)], cwd=ROOT, env=env, capture_output=True, text=True)
+def checked_result(p) -> str:
+    """Report complete process output on the owner thread; fail on any error."""
     print(p.stdout, end="", flush=True)
     if "MEASURE_HOST" in p.stderr:
         print(p.stderr, end="", flush=True)
@@ -233,6 +235,32 @@ def run(binary: Path, env: dict) -> str:
         print(p.stderr, end="")
         raise SystemExit(f"harness failed ({p.returncode})")
     return p.stdout
+
+
+def run(binary: Path, env: dict) -> str:
+    return checked_result(subprocess.run([str(binary)], cwd=ROOT, env=env,
+                                        capture_output=True, text=True))
+
+
+@contextmanager
+def workspace_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a+') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def profile_cache(args) -> Path:
+    # Stable generated include paths preserve dependency-aware compiler reuse.
+    # Hold its lock through all readers; no other invocation may rewrite a
+    # binary or lowered fixture while this suite is using it.
+    features = '-'.join(name for name in ('telemetry', 'measure') if getattr(args, name)) or 'plain'
+    return CACHE / 'profiles' / f"{'m32' if args.m32 else 'asan'}-{features}-{args.course}"
+
+
+def capture_case(binary: Path, env: dict):
+    return subprocess.run([str(binary)], cwd=ROOT, env=env,
+                          capture_output=True, text=True)
 
 
 HW = 0x2545F491          # the harness's pocket.random.seed() (test_derby_host.c)
@@ -251,7 +279,8 @@ def check_demo_matches_play(binary: Path, env: dict, out: str) -> None:
         pick = int(re.match(r"PICK (\d+)", demo["PICK"]).group(1))
         print(f"==== demo {n} by hand: race {race}, pick {pick}", flush=True)
         hw = HW ^ derby_seeds.imul(3, derby_seeds.PHI) ^ derby_seeds.imul(race, derby_seeds.PHI)
-        text = run(binary, dict(env, DERBY_NORMAL=f"{race},{pick}", DERBY_HW=str(hw)))
+        text = run(binary, dict(env, DERBY_NORMAL=f"{race},{pick}", DERBY_HW=str(hw),
+                               DERBY_CSV=str(Path(env["DERBY_CSV"]).with_name(f"demo-{n}.csv"))))
         for k, v in demo.items():
             mine = re.search(rf"^NORMAL_{k} (.*)$", text, re.M).group(1)
             if mine != v:
@@ -267,7 +296,8 @@ def check_seeds(binary: Path, env: dict, out: str) -> None:
     finish = {}
     for hw in (HW, HW ^ 1):
         print(f"==== race 3 by hand with hardware seed {hw:08X}", flush=True)
-        text = run(binary, dict(env, DERBY_NORMAL="3,1", DERBY_HW=str(hw)))
+        text = run(binary, dict(env, DERBY_NORMAL="3,1", DERBY_HW=str(hw),
+                               DERBY_CSV=str(Path(env["DERBY_CSV"]).with_name(f"seed-{hw}.csv"))))
         derby_seeds.check_log(text, hw, 3)
         finish[hw] = re.search(r"^NORMAL_FINISH (.*)$", text, re.M).group(1)
     if finish[HW] == finish[HW ^ 1]:
@@ -279,37 +309,7 @@ def check_seeds(binary: Path, env: dict, out: str) -> None:
         raise SystemExit("seed analysis failed")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
-    parser.add_argument("--measure", action="store_true", help="functional stage-counter coverage; host oracle work included, not device timing")
-    parser.add_argument("--telemetry", action="store_true", help="exercise generated diagnostic play chunk and native boundary")
-    parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
-    parser.add_argument("--heap-limit", type=int, help="run once with this guest heap limit (bytes)")
-    parser.add_argument("--oracle", action="store_true", help="the JS ser() oracle in every run, not three")
-    parser.add_argument("--course", choices=("seed", "straight", "oval"), default="seed",
-                        help="every race on this course (the lowered copy's OV[0] set to 0 or 1); seed: as the seeds pick")
-    args = parser.parse_args()
-    for test in ("test_derby_lanes.mjs", "test_derby_photo.mjs", "test_derby_pan_order.mjs"):
-        subprocess.run(["node", str(ROOT / "tools/games" / test)], cwd=ROOT, check=True)
-    app_dir = force_course(lower(ROOT / "apps/derby", CACHE / "lowered/apps/derby"), args.course)
-    if args.telemetry:
-        import sys
-        sys.path.insert(0, str(ROOT / 'tools'))
-        from derby_telemetry_chunks import generate
-        diagnostic = CACHE / 'telemetry-chunks'
-        generate(ROOT / 'apps/derby', diagnostic)
-        (app_dir / 'derby_play.js').write_bytes((diagnostic / 'derby_play.js').read_bytes())
-    if args.m32:
-        env = dict(os.environ, M32_SYSROOT=str(ROOT / ".cache/kasane_megademo_app/m32sys"))
-        flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=env,
-                               capture_output=True, text=True).stdout.split()
-        binary = build(flags, CACHE / "m32", telemetry=args.telemetry, measure=args.measure)
-    else:
-        binary = build(["-fsanitize=address,undefined"], CACHE / "asan", telemetry=args.telemetry, measure=args.measure)
-    env = dict(os.environ, DERBY_APP_DIR=str(app_dir))
-    env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
-    env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
+def run_matrix(args):
     # (tier, extra env): the scripted game at each tier, then the director
     # alone (no camera keys) and the widest manual close-up (pick #8).
     runs = [(1, {})] if args.heap_limit else [(1, {}), (0, {}), (2, {})] + [
@@ -327,57 +327,129 @@ def main() -> None:
     # the heap figures (its pixels still match: the inputs become floats).
     if args.m32:
         runs = [(t, x) for t, x in runs if "DERBY_SER_ORACLE" not in x]
+    return runs
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--m32", action="store_true", help="device-sized i386 build, no sanitizers")
+    parser.add_argument("--measure", action="store_true", help="functional stage-counter coverage; host oracle work included, not device timing")
+    parser.add_argument("--telemetry", action="store_true", help="exercise generated diagnostic play chunk and native boundary")
+    parser.add_argument("--ppm", action="store_true", help="write panels and the preview sheet")
+    parser.add_argument("--heap-limit", type=int, help="run once with this guest heap limit (bytes)")
+    parser.add_argument("--oracle", action="store_true", help="the JS ser() oracle in every run, not three")
+    parser.add_argument("--course", choices=("seed", "straight", "oval"), default="seed",
+                        help="every race on this course (the lowered copy's OV[0] set to 0 or 1); seed: as the seeds pick")
+    args = parser.parse_args()
+    with ExitStack() as locks:
+        # Preview exports intentionally have fixed documented paths. Serialize
+        # only those invocations, across profiles, rather than racing PNG writes.
+        if args.ppm:
+            locks.enter_context(workspace_lock(CACHE / 'preview.lock'))
+        cache = profile_cache(args)
+        locks.enter_context(workspace_lock(cache / 'workspace.lock'))
+        run_suite(args, cache)
+
+
+def run_suite(args, cache):
+    for test in ("test_derby_lanes.mjs", "test_derby_photo.mjs", "test_derby_pan_order.mjs"):
+        subprocess.run(["node", str(ROOT / "tools/games" / test)], cwd=ROOT, check=True)
+    app_dir = force_course(lower(ROOT / "apps/derby", cache / "lowered/apps/derby"), args.course)
+    if args.telemetry:
+        sys.path.insert(0, str(ROOT / 'tools'))
+        from derby_telemetry_chunks import generate
+        diagnostic = cache / 'telemetry-chunks'
+        generate(ROOT / 'apps/derby', diagnostic)
+        (app_dir / 'derby_play.js').write_bytes((diagnostic / 'derby_play.js').read_bytes())
+    if args.m32:
+        env = dict(os.environ, M32_SYSROOT=str(ROOT / ".cache/kasane_megademo_app/m32sys"))
+        with workspace_lock(ROOT / '.cache/kasane_megademo_app/m32-prepare.lock'):
+            flags = subprocess.run(["bash", "tools/vmtest/m32_sysroot.sh"], cwd=ROOT, check=True, env=env,
+                                   capture_output=True, text=True).stdout.split()
+        binary = build(flags, cache / "m32", telemetry=args.telemetry, measure=args.measure)
+    else:
+        binary = build(["-fsanitize=address,undefined"], cache / "asan", telemetry=args.telemetry, measure=args.measure)
+    env = dict(os.environ, DERBY_APP_DIR=str(app_dir), DERBY_CSV=str(cache / "replays.csv"))
+    # Image output is owned by --ppm below, rather than inherited by every case.
+    env.pop("DERBY_PPM", None)
+    env.setdefault("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+    env.setdefault("UBSAN_OPTIONS", "halt_on_error=1:print_stacktrace=1")
+    runs = run_matrix(args)
+    # All generation/linking above finishes before any worker reads its inputs.
+    # Each process owns its CSV; the executable and lowered app are read-only.
     finish = {}
-    for tier, extra in runs:
-        e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(CACHE / f"frames_tier{tier}{''.join(extra)}.csv"), **extra)
+    mid_output = None
+    cases = []
+    for index, (tier, extra) in enumerate(runs):
+        case_dir = cache / 'cases' / f'{index:02d}'
+        case_dir.mkdir(parents=True, exist_ok=True)
+        e = dict(env, DERBY_TIER=str(tier), DERBY_CSV=str(case_dir / 'frames.csv'), **extra)
         if args.heap_limit:
             e["DERBY_HEAP_LIMIT"] = str(args.heap_limit)
         if args.ppm and tier == 1 and not extra:
-            ppm = CACHE / "ppm"
+            ppm = cache / "ppm"
             ppm.mkdir(parents=True, exist_ok=True)
             for old in ppm.glob("*.ppm"):
                 old.unlink()
             e["DERBY_PPM"] = str(ppm)
-        print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]}) {extra or ''}", flush=True)
-        out = run(binary, e)
-        finish[(tier, *extra)] = re.search(r"^finish: (.*)$", out, re.M).group(1)
-        if args.ppm and tier == 1 and not extra:
-            pan_shots = re.findall(r"^PANSHOT (\w+) (\d+)", out, re.M)
-        if tier == 1 and not extra and not args.heap_limit:
-            check_demo_matches_play(binary, env, out)
-            check_seeds(binary, env, out)
+        cases.append((tier, extra, e))
+    # Two workers on the usual two-vCPU host; never one process per case.
+    # Every future is consumed, in the original order, before the finish gate.
+    with ThreadPoolExecutor(max_workers=min(2, os.cpu_count() or 1)) as pool:
+        futures = [pool.submit(capture_case, binary, e) for _, _, e in cases]
+        for (tier, extra, _), future in zip(cases, futures):
+            print(f"==== tier {tier} ({['LIGHT', 'MID', 'HEAVY'][tier]}) {extra or ''}", flush=True)
+            out = checked_result(future.result())
+            finish[(tier, *extra)] = re.search(r"^finish: (.*)$", out, re.M).group(1)
+            if args.ppm and tier == 1 and not extra:
+                pan_shots = re.findall(r"^PANSHOT (\w+) (\d+)", out, re.M)
+            if tier == 1 and not extra and not args.heap_limit:
+                mid_output = out
+    if mid_output is not None:
+        # This exact MID output is the prerequisite for replay/seed checks.
+        # Run after the worker pool joins, keeping the total process budget two.
+        check_demo_matches_play(binary, env, mid_output)
+        check_seeds(binary, env, mid_output)
     # MID ran ten demos before its first race, the others none; neither the
     # tier, the camera keys nor the pick may move the player's race.
     if len(set(finish.values())) > 1:
         raise SystemExit(f"the player's race differs between runs: {finish}")
     if not args.heap_limit:
-        print("==== odds calibration (node tools/games/tune_derby.mjs 20000 --check)", flush=True)
-        if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check"], cwd=ROOT).returncode:
-            raise SystemExit("odds calibration check failed")
-        print("==== oval: odds calibration, and the app's bend against the trial's reference", flush=True)
-        if subprocess.run(["node", "tools/games/tune_derby.mjs", "20000", "--check", "--course=oval"], cwd=ROOT).returncode:
-            raise SystemExit("oval odds calibration check failed")
-        if subprocess.run(["node", "tools/games/derby_corner.mjs", "app", "500"], cwd=ROOT).returncode:
-            raise SystemExit("the app's oval differs from tools/games/derby_corner.mjs")
+        odds = [(["node", "tools/games/tune_derby.mjs", "20000", "--check"],
+                 "odds calibration check failed"),
+                (["node", "tools/games/tune_derby.mjs", "20000", "--check", "--course=oval"],
+                 "oval odds calibration check failed"),
+                (["node", "tools/games/derby_corner.mjs", "app", "500"],
+                 "the app's oval differs from tools/games/derby_corner.mjs")]
+        print("==== straight/oval odds calibration and app bend reference", flush=True)
+        with ThreadPoolExecutor(max_workers=min(2, os.cpu_count() or 1)) as pool:
+            futures = [pool.submit(subprocess.run, command, cwd=ROOT,
+                                   capture_output=True, text=True) for command, _ in odds]
+            for (_, failure), future in zip(odds, futures):
+                result = future.result()
+                print(result.stdout, end="", flush=True)
+                print(result.stderr, end="", file=sys.stderr, flush=True)
+                if result.returncode:
+                    raise SystemExit(failure)
     if args.ppm:
-        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
-        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
-        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-vision-preview.png", VISION, 4)
-        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-watch-dissolve-preview.png", CURTAIN, 5)
+        sheet(cache / "ppm", ROOT / "docs/apps/derby-watch-preview.png", ORDER, 4)
+        sheet(cache / "ppm", ROOT / "docs/apps/derby-watch-demo-preview.png", DEMO_ORDER, 3)
+        sheet(cache / "ppm", ROOT / "docs/apps/derby-watch-vision-preview.png", VISION, 4)
+        sheet(cache / "ppm", ROOT / "docs/apps/derby-watch-dissolve-preview.png", CURTAIN, 5)
         # The same frames with side units only: WIDE stays the side camera.
-        side = CACHE / "ppm_side"
+        side = cache / "ppm_side"
         side.mkdir(parents=True, exist_ok=True)
         for old in side.glob("*.ppm"):
             old.unlink()
         shots = ",".join(f"{t}:side_{n[4:]}" for n, t in pan_shots)
         run(binary, dict(env, DERBY_TIER="1", DERBY_PAN="1e9", DERBY_PPM=str(side), DERBY_SHOTS=shots,
-                         DERBY_CSV=str(CACHE / "frames_side.csv")))
+                         DERBY_CSV=str(cache / "frames_side.csv")))
         for f in side.glob("derby_*_side_*.ppm"):
-            f.replace(CACHE / "ppm" / f.name)
+            f.replace(cache / "ppm" / f.name)
         order = [x for n, _ in pan_shots for x in (f"side_{n[4:]}", n)]
-        sheet(CACHE / "ppm", ROOT / "docs/apps/derby-pan-preview.png", order, 2)
-        oval_dir = force_course(lower(ROOT / "apps/derby", CACHE / "lowered_oval/apps/derby"), "oval")
-        ov = CACHE / "ppm_oval"
+        sheet(cache / "ppm", ROOT / "docs/apps/derby-pan-preview.png", order, 2)
+        oval_dir = force_course(lower(ROOT / "apps/derby", cache / "lowered_oval/apps/derby"), "oval")
+        ov = cache / "ppm_oval"
         ov.mkdir(parents=True, exist_ok=True)
         for old in ov.glob("*.ppm"):
             old.unlink()
@@ -387,7 +459,7 @@ def main() -> None:
             p = subprocess.run([str(binary)], cwd=ROOT, capture_output=True, text=True, env=dict(
                 env, DERBY_APP_DIR=str(oval_dir), DERBY_TIER="1", DERBY_NOCAM="1", DERBY_PPM=str(ov),
                 DERBY_LEADSHOTS=",".join(f"{m}:oval_{n}_{cam}" for m, n in OVAL_AT),
-                DERBY_CSV=str(CACHE / f"frames_oval_{cam}.csv"), **extra))
+                DERBY_CSV=str(cache / f"frames_oval_{cam}.csv"), **extra))
             for line in p.stdout.splitlines():
                 if line.startswith("LEADSHOT"):
                     print(line)
