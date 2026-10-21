@@ -4,12 +4,19 @@ Common source: `d41aadc8a9de106d8290ae5e398288fa29fb7a6d`.
 The device comparison source `93d9fc09` is not replaced. These candidates have
 not been flashed, registered, or merged into ordinary main.
 
-The local snapshots are independent: A changes TX storage, B retains two TX
-buffers and changes narrow addressing. The current review tree is B only.
-A/B must each pass the unchanged complete contract script and the board/owner
-checks before a combined candidate is assembled. The workflow pins A to `2fd8e9d8eede67be0cb6a57ad00df84149c5e3e4`. The frozen B product tree is
-`c0d09d759d3037a471ac938d5b7f60ce241598f6`; the PR head adds only CI/documentation to B and
-is tested as the exact current combined-workflow source. There is no fast/full user choice.
+A and B were validated independently from that common product base, before
+assembling the current combined candidate. Frozen A is
+`2fd8e9d8eede67be0cb6a57ad00df84149c5e3e4`; frozen B is
+`c0d09d759d3037a471ac938d5b7f60ce241598f6` (two TX buffers).
+The independent validation head `1e68c10038d8ccced2f4fb6b84be786f9fdcc2f5`
+passed all six workflows, including all three complete source suites in
+[run 39611144211](https://github.com/dj-oyu/cardputer-adv-pocketjs/actions/runs/39611144211).
+The full workflow took 12:21, all CI 13:16; all three object caches missed.
+This is independent validation evidence, not a measurement of the combined candidate.
+
+After that phase the temporary third full-suite source and duplicate board-host
+matrix are removed. The normal baseline/current-head complete workflow and all
+original acceptance conditions remain. There is no fast/full user choice.
 
 ## Evidence available locally
 
@@ -24,10 +31,14 @@ whole-firmware link result and not measured free or contiguous heap.
 | Common base | 3,840 B | 7,680 B | 4 B | 0 B | 12,754 B |
 | A: single TX | 3,840 B | 3,840 B | 0 B | 0 B | 8,910 B |
 | B: narrow continuation | 3,840 B | 7,680 B | 4 B | 4 B | 12,758 B |
+| Combined | 3,840 B | 3,840 B | 0 B | 4 B | 8,914 B |
 
 A removes 3,840 bytes of TX storage plus the 4-byte selector. B adds two
-16-bit horizontal bounds. Alignment of shared/TX remains 16 bytes. A combined
-result is deliberately not claimed before independent full validation.
+16-bit horizontal bounds. Alignment of shared/TX remains 16 bytes. Combined board-object static storage
+is 3,840 B smaller than the common base in both DMA configurations. Each of the
+eight existing firmware builds also checks actual linked ELF symbols, writing
+`board-transport.json` with the exact source and ELF digest. The named-storage
+comparison includes shared/TX/selector/window bounds; other symbols are unchanged.
 
 The panel/ownership model executes the production functions with DMA OFF and
 ON, ASan/UBSan and O2/strict aliasing, queued and polling sends, scalar and PIE
@@ -37,7 +48,9 @@ x=0), changed widths, gaps, a last 7-row band, partial frame end, capture scope,
 unaligned scalar fallback, command/parameter failures, queue rejection,
 timeout, foreign/unreturned descriptors and failed completions. A separate read-only source pass inventoried every native caller. An additional
 3,000-operation seeded fault sequence passed in all eight A/B, DMA OFF/ON and
-ASan/O2 configurations without changing the reviewed product sources. Existing
+ASan/O2 configurations without changing the reviewed product sources. The
+combined candidate passed the same ten host groups and four additional
+3,000-operation DMA OFF/ON, ASan/O2 sequences. Existing
 renderer ownership, final ACK, cancellation/exit, source guards, pressure and
 session-dispatch tests are retained.
 
@@ -46,7 +59,7 @@ For a 32-column run of all 17 bands, including the final 7 rows:
 | Source | CASET/RASET/RAMWR commands | control SPI calls | pixel payload |
 | --- | ---: | ---: | ---: |
 | A (original window policy) | 51 | 85 | 8,640 B |
-| B | 3 | 5 | 8,640 B |
+| B and combined | 3 | 5 | 8,640 B |
 
 These are model-observed software calls, not a hardware timing measurement.
 B keeps the existing narrow threshold and 16-pixel alignment. It extends the
@@ -93,15 +106,12 @@ M5GFX is comparison material, not a firmware dependency. Inspected commit:
 
 ## Remaining gates
 
-The cloud's local apt index and m32 sysroot are absent. An official Debian
-fetch failed with a proxy 503; no auth/proxy/network configuration was changed.
-Thus the existing full suite has not been claimed as locally passed. Its same
-entry point, normal/m32 games, capture, baseline/combined and source/tree/overlay
-proofs will run for the isolated snapshots in CI after publication is allowed.
-Publication is authorized for one short-lived branch/Draft PR. Independent
-complete CI is pending; neither a combined product nor a hardware result is
-claimed at this stage.
+The combined exact head must pass the same complete CI before acceptance.
+Normal/m32 games, ASan/O2, capture, baseline/current source, overlay/tree proofs,
+all firmware mode proofs and consumer gates remain required. Local m32 setup is
+unavailable; complete-suite success is established by CI, without skipping cases.
 
-A combined candidate remains unassembled. Real native timing, pixel/capture
-behavior and the independent DMA OFF/ON memory gates remain Windows/device
-work. No device action is part of this change.
+Real native timing, pixel/capture behavior and the independent DMA OFF/ON memory
+gates remain Windows/device work. Native copy/DMA overlap is lost with one TX;
+static savings do not establish largest-block or guest-headroom acceptance.
+No device action is part of this change.

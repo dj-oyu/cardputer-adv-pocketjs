@@ -106,6 +106,7 @@ jobs:
           # No mode argv: this source variant must default to ON/ON.
           python -B tools/test_diagnostic_archive.py --build build_ci --project-version "${SOURCE_HEAD:0:12}"
           python -B tools/record_verification.py --build build_ci --expect-telemetry ON --expect-measure ON --out build_ci/verification.json
+          python -B tools/report_board_transport.py --build build_ci
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: cardputer-derby-measure-source-${{ env.SOURCE_HEAD }}-telemetry-ON-measure-ON
@@ -118,6 +119,7 @@ jobs:
             build_ci/sdkconfig
             build_ci/project_description.json
             build_ci/memory.jsonl
+            build_ci/board-transport.json
             build_ci/verification.json
             build_ci/diagnostic-mode-proof.json
             build_ci/source-immutability.json

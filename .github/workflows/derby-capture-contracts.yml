@@ -52,10 +52,6 @@ jobs:
         include:
           - name: j1-baseline
             source: b561aea1c0798feb28055a00d36681fae81ac58a
-          # Independent A snapshot from the same d41aadc8 product base.
-          # This executes the unchanged complete suite, including m32/capture.
-          - name: tx-single-A
-            source: '2fd8e9d8eede67be0cb6a57ad00df84149c5e3e4'
           - name: j1-dma-combined
             source: ''
     steps:

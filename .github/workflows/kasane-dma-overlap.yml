@@ -42,31 +42,23 @@ jobs:
   host:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: tx-single-A
-            source: '2fd8e9d8eede67be0cb6a57ad00df84149c5e3e4'
-          - name: narrow-window-B
-            source: ''
-    name: host (${{ matrix.name }})
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ matrix.source || env.SOURCE_HEAD }}
+          ref: ${{ env.SOURCE_HEAD }}
           submodules: recursive
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - name: Verify exact independent source snapshot
+      - name: Verify exact combined source
         env:
-          EXPECTED_HOST_HEAD: ${{ matrix.source || env.SOURCE_HEAD }}
+          EXPECTED_HOST_HEAD: ${{ env.SOURCE_HEAD }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HOST_HEAD"
       - name: Actual board and renderer boundaries with delayed completion and faults
         run: |
           python3 tools/test_board_transport.py
+          python3 tools/test_board_transport_report.py
           python3 tools/test_board_present_sync.py
           python3 tools/test_board_dma_overlap.py
           python3 tools/test_kasane_dma_overlap.py
@@ -118,6 +110,7 @@ jobs:
           test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
           idf.py -B build_dma -D SDKCONFIG="$PWD/build_dma/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" -D KASANE_DMA_OVERLAP=${{ matrix.overlap }} -D POCKET_DERBY_DETAIL_MEASURE=${{ matrix.detail }} build
           python -B tools/record_verification.py --build build_dma --expect-telemetry ON --expect-measure ON --out build_dma/verification.json
+          python -B tools/report_board_transport.py --build build_dma
           python -B - '${{ matrix.overlap }}' '${{ matrix.detail }}' <<'PY'
           import hashlib, json, subprocess, sys
           from pathlib import Path
