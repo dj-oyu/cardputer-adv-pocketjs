@@ -69,7 +69,7 @@ let cx = 0, disp = 0, slow = 0, ld = -1, cm = 0, hold = 0, dl = 0, man = 0, cl =
 // Lanes drawn, the order far to near (README "レーンの横位置").
 let lz = DL.slice(), zo = [7, 6, 5, 4, 3, 2, 1, 0];
 const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
-  th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
+  th = p => (p + 1) + (p === 0 ? 'ST' : p === 1 ? 'ND' : p === 2 ? 'RD' : 'TH');
 // Seeds: the hardware's, mixed with the stored race count (README).
 const ST = pocket.storage, HW = pocket.random.seed();
 let sn = 0;
