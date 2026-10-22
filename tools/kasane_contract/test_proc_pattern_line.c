@@ -245,6 +245,25 @@ static void pattern_depth(void){
     CHECK(run(code,13,&frame)==KSN_PROC_DONE&&frame.count==8);
     same_in_bands(&frame);
 }
+static void plain_hline_band(void){
+    const ksn_proc_inst forward[]={SET(0,-20),SET(1,0),SET(2,260),MOVE(0,1),LINE(2,1,0x1234)};
+    CHECK(run(forward,5,&frame)==KSN_PROC_DONE&&frame.ext==0&&frame.count==1);
+    render_full(&frame,full);
+    for(int y=0;y<H;y++)for(int x=0;x<W;x++)CHECK(full[y*W+x]==(y==0?0x1234:BACK));
+    same_in_bands(&frame);
+
+    const ksn_proc_inst reverse[]={SET(0,260),SET(1,H-1),SET(2,-20),MOVE(0,1),LINE(2,1,0x4321)};
+    CHECK(run(reverse,5,&frame)==KSN_PROC_DONE&&frame.ext==0&&frame.count==1);
+    render_full(&frame,full);
+    for(int y=0;y<H;y++)for(int x=0;x<W;x++)CHECK(full[y*W+x]==(y==H-1?0x4321:BACK));
+    same_in_bands(&frame);
+
+    const ksn_proc_inst clipped[]={SET(0,-30),SET(1,17),SET(2,-5),MOVE(0,1),LINE(2,1,0x4321)};
+    CHECK(run(clipped,5,&frame)==KSN_PROC_DONE&&frame.ext==0&&frame.count==1);
+    render_full(&frame,full);
+    for(unsigned i=0;i<W*H;i++)CHECK(full[i]==BACK);
+    same_in_bands(&frame);
+}
 static void walkers_and_plain(void){
     /* A plain line, a pattern line over it, a plain line over that: order. */
     const ksn_proc_inst code[]={
@@ -436,6 +455,7 @@ int main(void){
     pattern_slanted();
     pattern_random();
     pattern_depth();
+    plain_hline_band();
     walkers_and_plain();
     limits_and_rejections();
     analysis_and_plan();
