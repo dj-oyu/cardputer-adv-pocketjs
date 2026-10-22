@@ -1,5 +1,9 @@
+static int fa_function_allocation_active;
+static unsigned fa_force_shift;
+static unsigned long fa_function_raw_attempts;
 /* Include the real private frame type and the actual segment allocator. */
 #include "quickjs.c"
+#include "bytecode_alignment.h"
 
 #ifdef FA_EXPECT_ALIGN8
 _Static_assert(_Alignof(JSStackFrame) == 8, "official 32-bit ABI requires alignment 8");
@@ -9,6 +13,7 @@ _Static_assert(sizeof(JSVMLink) == 8, "32-bit prefix includes 4 bytes of padding
 
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
     JSRuntime *rt = JS_NewRuntime();
     assert(rt != NULL);
     JSVMStack st;
@@ -90,6 +95,10 @@ int main(void)
     printf("frame alignment PASS ptr=%zu value=%zu frame=%zu frame_align=%zu link=%zu block_align=%d odd_charge=%zu\n",
            sizeof(void *), sizeof(JSValue), sizeof(JSStackFrame), _Alignof(JSStackFrame),
            sizeof(JSVMLink), JS_VM_FRAME_ALIGN, rounded);
+    for (fa_force_shift=0;fa_force_shift<=4;fa_force_shift+=4) {
+        fa_shift_gc_test();
+        fa_bc_test(rt);
+    }
     JS_FreeRuntime(rt);
     return 0;
 }

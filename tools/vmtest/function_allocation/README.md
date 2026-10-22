@@ -57,7 +57,8 @@ only this allocation change in a private source copy. No shared expected output,
 prepare source or existing workflow is modified. Source/output directories are
 separated by architecture, mode, variant and negative control. All three engines
 retain the frame alignment repair below; baseline reverses only the function
-zeroing optimization. The pre-repair sanitizer failure remains recorded by the
+zeroing optimization. All three also retain the constant-pool repair below.
+The pre-repair sanitizer failures remain recorded by the
 earlier CI head, rather than being accepted or suppressed in the matrix.
 
 Debug native output must match the checked-in expected corpus. Strip debug changes
@@ -179,3 +180,67 @@ The installed Xtensa ESP32-S3 GCC 15.2 compiled the actual engine/test source wi
 alignment is 8 and link size is 8. This is a compile/layout check, not a device run.
 Native and m32 CI must pass again at the new head; the previous head's otherwise
 passing workflows are not evidence for the repaired head.
+
+## Compact function header and function-only raw alignment
+
+The intermediate value-aligned header fix is preserved locally as the 96-byte
+comparison baseline. This change reuses the actual GC-unused `header.dummy2`
+member for the 12 function flag bits and a thirteenth `has_vardefs` bit. Mask
+accessors preserve other bits; no union aliasing is introduced. Constant pools
+are derived from `b + 1`; vardefs follow the pool and preserve NULL via their
+presence bit. Compiler cpool_count is set before the first vardefs copy.
+Stored closure_var and byte_code_buf remain: reader local_count is independent
+of arg/var counts, and partial-reader NULL bytecode controls atom cleanup.
+Wire flags retain their original encoding order. Source/debug buffers keep their
+existing ownership. Debug/strip use the same header type.
+
+| ABI/layout | Original | Aligned comparison | Compact header | Raw allocation request |
+| --- | ---: | ---: | ---: | ---: |
+| Xtensa / m32-malign-double | 92/4 | 96/8 | 80/8 | 84 + payload |
+| native64 | 136/8 | 136/8 | 112/8 | 116 + payload |
+
+Sizes before `/` are bytes; numbers after it are alignment. These are requested
+sizes, not allocator bucket or peak measurements. No speed gain is established.
+The target request is 12 bytes smaller than the 96-byte comparison, while the
+header itself is 16 bytes smaller. Additional payload bytes are unchanged.
+
+The guest's ordinary heap capabilities guarantee only four-byte raw alignment.
+Only the two function-bytecode allocation sites reserve four extra bytes and
+advance the object by 0 or 4 to an eight-byte boundary. The actual shift is saved
+in GC-unused `header.dummy1` AFTER compiler memset / reader memcpy, before GC
+registration. Function bytecode is never reallocated. Both normal destruction
+and the terminal cycle-GC free recover the raw pointer before calling js_free_rt,
+so usable-size, quota and free see the original allocation exactly once. All
+guest allocator/realloc/cache implementations remain unchanged. The size+reserve
+addition rejects overflow before allocation. This does not claim to repair or
+measure alignment of every other engine allocation on hardware.
+
+The real-type regression forces raw shift0 and shift4 ONLY for the first
+function allocation request, consuming the hook before a failed allocation can
+construct its OOM exception. It checks overflow, compiler/reader, partial reads,
+RC destruction, cycle GC, teardown, and rejects interior pointers reaching free
+or usable_size. Dense compiler/reader/writer failure sweeps check complete
+teardown; writer failure additionally requires NULL, size0, and an OOM exception.
+The prior test incorrectly demanded zero total allocations while throwing an
+OOM exception, and the prior forcing hook could affect exception objects; these
+were fixture defects, not product fixes. The matrix runs the regression in debug
+and strip builds, native/m32 O2 and ASan/UBSan, without sanitizer suppression.
+
+## Writer allocation-failure propagation (separate commit)
+
+The new dense writer test exposed two existing failures: ignored atom-index
+allocation errors could return bytes with an OOM exception still pending; ignored
+atom-table DynBuf errors could concatenate a NULL buffer. Atom-index failure now
+sets the existing sticky buffer error. Payload error is checked before atom-table
+construction, and atom-table error before concatenation. Existing failure paths
+free the payload and atom buffers once and return NULL/size0 with the existing
+OOM exception. Successful bytecode wire output is intended to remain identical.
+
+Local diagnostic regression currently passes both shifts, eight roundtrips and
+271 failure points per shift (compiler214, reader19, writer38). Prior native full
+corpus passed80 under O2 and ASan/UBSan; the final exact head must rerun every CI
+gate. Native strip output historically differs from debug expectations in five
+cases; baseline equivalence, not ignoring sanitizer errors, checks those cases.
+Local m32 runtime packages are unavailable (snapshot mirror HTTP503); compile-only
+layout evidence is not m32 execution. Target heap buckets/peak and device CPU
+cost remain unmeasured. No device operations are part of this change.

@@ -40,7 +40,7 @@ def main():
     begin = source.index('static JSValue js_create_function(')
     end = source.index('static void free_function_bytecode(', begin)
     body = source[begin:end]
-    assert body.count('b = js_malloc(ctx, function_size);') == 1
+    assert body.count('b = js_alloc_function_bytecode(ctx, function_size, false, &allocation_shift);') == 1
     assert body.count('memset(b, 0, sizeof(*b));') == 1
     modes = [a.only] if a.only else ['baseline', 'candidate', 'poison']
     if a.only in ['candidate', 'poison'] and not negative:
@@ -54,7 +54,7 @@ def main():
         shutil.copytree(QJS, folder, dirs_exist_ok=True)
         modified = body
         if mode == 'baseline':
-            modified = modified.replace('b = js_malloc(ctx, function_size);', 'b = js_mallocz(ctx, function_size);')
+            modified = modified.replace('function_size, false, &allocation_shift)', 'function_size, true, &allocation_shift)')
             modified = modified.replace('    memset(b, 0, sizeof(*b));\n', '')
         if mode == 'poison':
             modified = modified.replace('    memset(b, 0, sizeof(*b));', '''    /* Test-only: dirty every byte, including header padding, before init. */
@@ -78,23 +78,23 @@ def main():
     assert(cpool_offset == sizeof(*b));
     assert(vardefs_offset == cpool_offset + fd->cpool_count * sizeof(*fd->cpool));
     assert(closure_var_offset == vardefs_offset +
-           (fd->arg_count + fd->var_count) * sizeof(*b->vardefs));
+           (fd->arg_count + fd->var_count) * sizeof(*fa_vardefs(b)));
     assert(byte_code_offset == closure_var_offset +
            fd->closure_var_count * sizeof(*fd->closure_var));
     assert(function_size == byte_code_offset + fd->byte_code.size);''')
             # Copy lengths and destination intervals must form a complete partition.
             # Existing copies cover each interval exactly; zero counts need NULLs.
             modified = modified.replace('        memcpy(', '        FA_COPY(').replace('    memcpy(b->byte_code_buf', '    FA_COPY(b->byte_code_buf')
-            modified = modified.replace('    b->stack_size = stack_size;', '''    assert((b->cpool_count != 0) == (b->cpool != NULL));
-    assert((b->arg_count + b->var_count != 0) == (b->vardefs != NULL));
+            modified = modified.replace('    b->stack_size = stack_size;', '''    assert((b->cpool_count != 0) == (fa_cpool(b) != NULL));
+    assert((b->arg_count + b->var_count != 0) == (fa_vardefs(b) != NULL));
     b->stack_size = stack_size;''')
-            modified = modified.replace('    b->has_prototype = fd->has_prototype;', '''    for (size_t test_i = sizeof(*b); test_i < function_size; test_i++)
+            modified = modified.replace('    fa_set_has_prototype(b, fd->has_prototype);', '''    for (size_t test_i = sizeof(*b); test_i < function_size; test_i++)
         assert(test_coverage[test_i] == 1);
     (free)(test_coverage);
 #undef FA_COPY
     printf("#info function_allocation header=%zu payload=%zu\\n", sizeof(*b), function_size - sizeof(*b));
     assert((b->closure_var_count != 0) == (b->closure_var != NULL));
-    b->has_prototype = fd->has_prototype;''')
+    fa_set_has_prototype(b, fd->has_prototype);''')
         if negative:
             assert mode == 'poison', 'negative controls require --only poison'
             if a.negative:
@@ -111,14 +111,28 @@ def main():
                            VMTEST_CFLAGS=flags + (' -DCONFIG_POCKET_VM_STRIP_DEBUG=1' if debug == 'strip' else ''),
                            JOBS=os.environ.get('JOBS', '8'))
                 run(label + '-build', ['bash', 'tools/vmtest/build.sh', variant], env)
-                if mode == 'candidate' and debug == 'debug':
+                if mode == 'candidate':
                     cflags = ['-O2', '-g'] if variant == 'o2' else [
                         '-O1', '-g', '-fno-omit-frame-pointer', '-fsanitize=address,undefined',
                         '-fno-sanitize-recover=undefined']
                     objects = OUT / label / ('obj-' + variant)
                     executable = OUT / label / 'frame-alignment'
+                    # Force only the first raw function allocation; an OOM
+                    # exception must continue to use naturally aligned objects.
+                    frame_source = OUT / label / 'frame-source'
+                    shutil.copytree(folder, frame_source, dirs_exist_ok=True)
+                    frame_code = (frame_source / 'quickjs.c').read_text()
+                    frame_code = frame_code.replace(
+                        '    raw = zero ? js_mallocz(ctx, size + JS_FUNCTION_RESERVE) :',
+                        '    fa_function_allocation_active = 1;\n'
+                        '    raw = zero ? js_mallocz(ctx, size + JS_FUNCTION_RESERVE) :')
+                    frame_code = frame_code.replace(
+                        '                 js_malloc(ctx, size + JS_FUNCTION_RESERVE);',
+                        '                 js_malloc(ctx, size + JS_FUNCTION_RESERVE);\n'
+                        '    fa_function_allocation_active = 0;')
+                    (frame_source / 'quickjs.c').write_text(frame_code)
                     command = ['gcc', '-std=gnu11', '-w', '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
-                        '-I', str(OUT / label / 'include'), '-I', str(folder), *cflags,
+                        '-I', str(OUT / label / 'include'), '-I', str(frame_source), *cflags,
                         *shlex.split(env['VMTEST_CFLAGS']),
                         *(['-DFA_EXPECT_ALIGN8'] if a.m32 else []),
                         'tools/vmtest/function_allocation/frame_alignment.c',
