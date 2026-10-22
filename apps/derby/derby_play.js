@@ -41,7 +41,7 @@ globalThis.frame = function (b) {
       fa = rnd(mx(0, mn(1, mx(dm ? 0 : (nw - idle + FX[0]) / FX[0] - DEMO_IDLE_S * 1e3 / FX[0], 1 - (nw - fe) / FX[2]))) * FX[3]) * 255 / FX[3] | 0;
       if (P('tab')) { tier = (tier + 1) % 3; const l = ['stands', 'crowd'].filter(n => live[n] || queue.indexOf(n) >= 0); drop(l); want(l); log('TIER ' + tier); }
       load();
-      let xs, c, l = pick, close = -1, gate = 0, extra = null;
+      let xs, c, l = pick, close = -1, gate = 0, extra = null, rank;
       if (scene === 'pad') {
         if (P('a') || P('d')) { pick = (pick + (P('d') ? 1 : 7)) % 8; if (A) A.cue('move'); }
         stake = mx(50, mn(stake + (P('e') ? 50 : P('s') ? -50 : 0), 500, pts));
@@ -60,7 +60,7 @@ globalThis.frame = function (b) {
             const was = rs.done;
             step(F, rs, DT);
             for (let i = 0; i < 8; ++i) ph[i] += rs.v[i] * DT / 6.5 * 2 * PI;
-            const w = order(rs)[0];
+            const w = (rank = order(rs))[0];
             if (w !== ld) { if (lead > 500) log('LEAD #' + (w + 1) + ' at ' + rnd(lead) + 'M'); if (lead > 400) dl = 60; ld = w; }
             // The photo: every runner where it was when the winner crossed.
             if (!was && rs.done) photoX = photo((rs.tc[w] - rs.t + DT) / DT);
@@ -78,7 +78,7 @@ globalThis.frame = function (b) {
         // after 400 m cuts to the new leader, a cut is held 45 frames, HEAD ON
         // (a close finish) until the slow motion (README).
         // WIDE away from every panning unit is the nearest one (wide()).
-        const o = ro = order(rs), L = rs.x[o[0]];
+        const o = ro = rank || order(rs), L = rs.x[o[0]];
         let m = slow ? 3 : man ? cam : scene !== 'race' ? 0 : hold > 0 || cm === 6 ? cm :
           L < 150 ? 0 : L < (F.o ? OB : 400) ? 2 : L < 700 ? (dl > 0 ? 1 : 0) : L < VS[0] - 60 ? 1 : L < VS[0] + 60 ? 5 :
           L > D - 70 && L - rs.x[o[1]] < 1.5 ? 6 : 0;
