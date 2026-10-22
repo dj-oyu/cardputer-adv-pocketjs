@@ -441,7 +441,7 @@ static void pattern_band(const ksn_proc_segment *g,const ksn_proc_segment *q,
  * parameter entry's negative rows fail the range test; the bias is looked at
  * only for an entry that reached the band. Out of line, so a frame without
  * pattern lines runs the loop below as it always did. */
-static __attribute__((noinline)) void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
+static void render_band_ext(const ksn_proc_frame *frame,uint16_t *pixels,int y,int height){
     for(unsigned j=0;j<frame->count;j++){
         const ksn_proc_segment *s=&frame->segments[j];
         int ymin=s->y0<s->y1?s->y0:s->y1;
