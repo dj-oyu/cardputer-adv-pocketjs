@@ -1,0 +1,43 @@
+{
+  "workload": "derby-app-result-120-v2",
+  "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "head": "2779910aaf542f760da91efb9c79aae18ed02786",
+  "source_dirty": true,
+  "binary_sha256": "bf7a5c0817c6d104791f6cbfcb41c37541258ea796546ad28fefc20d26d7cf62",
+  "workload_sha256": {
+    "baseline": "859aadfb48d9f2791529f6aa4b5a311f79003f30da46ed223c3643d4bc6eeb39",
+    "candidate": "859aadfb48d9f2791529f6aa4b5a311f79003f30da46ed223c3643d4bc6eeb39"
+  },
+  "rows": {
+    "baseline": {
+      "frames": 120,
+      "pixels": "ed13886faa1bb74e",
+      "panel_hash": "33c5d4ed94087e34",
+      "down": 120,
+      "queries": 1440,
+      "requests": 29280,
+      "charged_bytes": 1634880,
+      "setup": {
+        "turns": 158,
+        "steps": 1258,
+        "max_steps": 8
+      },
+      "csv_sha256": "63ce7be87d1f84a70467deb7fdad1fc4102f1ed0f18e4b1fc7c5bbf7d1fe6e8b"
+    },
+    "candidate": {
+      "frames": 120,
+      "pixels": "ed13886faa1bb74e",
+      "panel_hash": "33c5d4ed94087e34",
+      "down": 120,
+      "queries": 1440,
+      "requests": 25440,
+      "charged_bytes": 1434240,
+      "setup": {
+        "turns": 158,
+        "steps": 1258,
+        "max_steps": 8
+      },
+      "csv_sha256": "63ce7be87d1f84a70467deb7fdad1fc4102f1ed0f18e4b1fc7c5bbf7d1fe6e8b"
+    }
+  }
+}

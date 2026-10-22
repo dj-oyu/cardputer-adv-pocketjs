@@ -6,7 +6,7 @@ import argparse,hashlib,json,subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[3]
 TEMPLATE=Path(__file__).with_name('device_diag')
-WORKLOAD='derby-app-result-120-v1'
+WORKLOAD='derby-app-result-120-v2'
 # Derived from PR54 e80ad33f09eabee85e905fa243d28986321758fa and PR50; isolated diagnostic copies.
 def change(s,old,new):
     assert s.count(old)==1,old
@@ -67,7 +67,7 @@ static void *diag_realloc(void *p,void *v,size_t n){++derby_diag_realloc;derby_d
     write('apps/derby/derby_play.js',read('apps/derby/derby_play.js')+'\n'+s)
     diff=subprocess.check_output(['git','diff','--binary'],cwd=dst)
     (dst/'diagnostic.patch').write_bytes(diff)
-    manifest=dict(source=head,workload=WORKLOAD,product_scene_sha256=hashlib.sha256((dst/'apps/derby/derby_scene.js').read_bytes()).hexdigest(),allocator='production GUEST_ALLOCATOR delegated unchanged via request counters',changed_files=modified,
+    manifest=dict(source=head,workload=WORKLOAD,setup_steps_per_turn=8,setup_total_step_limit=6000,product_scene_sha256=hashlib.sha256((dst/'apps/derby/derby_scene.js').read_bytes()).hexdigest(),allocator='production GUEST_ALLOCATOR delegated unchanged via request counters',changed_files=modified,
                   sha256={name:hashlib.sha256((dst/name).read_bytes()).hexdigest() for name in modified},patch_sha256=hashlib.sha256(diff).hexdigest())
     (dst/'diagnostic.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps(manifest,indent=2))

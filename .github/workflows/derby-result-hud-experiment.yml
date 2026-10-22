@@ -102,7 +102,7 @@ jobs:
               import shutil
               for n in ('diagnostic.json','diagnostic.patch'): shutil.copy2(n,b/n)
               manifest=json.loads(Path('diagnostic.json').read_text())
-              assert manifest['source']==sys.argv[2] and manifest['workload']=='derby-app-result-120-v1'
+              assert manifest['source']==sys.argv[2] and manifest['workload']=='derby-app-result-120-v2'
           config=(b/'sdkconfig').read_text()
           assert 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' in config
           assert 'CONFIG_COMPILER_OPTIMIZATION_SIZE=y' in config
@@ -111,7 +111,7 @@ jobs:
               assert key+':BOOL=OFF' in cache,key
           names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
           images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}
-          (b/'experiment.json').write_text(json.dumps(dict(mode=sys.argv[1],source_head=sys.argv[2],experiment_head=os.environ['SOURCE_HEAD'],idf='6.0.1',diagnostic=diagnostic,hardware_tested=False,workload='derby-app-result-120-v1' if diagnostic else None,images=images),indent=2)+'\n')
+          (b/'experiment.json').write_text(json.dumps(dict(mode=sys.argv[1],source_head=sys.argv[2],experiment_head=os.environ['SOURCE_HEAD'],idf='6.0.1',diagnostic=diagnostic,hardware_tested=False,workload='derby-app-result-120-v2' if diagnostic else None,images=images),indent=2)+'\n')
           (b/'SHA256SUMS').write_text(''.join(v['sha256']+'  '+n+'\n' for n,v in images.items()))
           print((b/'experiment.json').read_text())
           PY
