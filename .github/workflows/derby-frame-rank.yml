@@ -19,17 +19,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 1e68b268a4b91ec54e88f408118de3e39b8b6bc5
-          path: tools-source
-          persist-credentials: false
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 146128065e81bb3493985e0b1b7123ff819baaf4
-          path: guard-source
-          persist-credentials: false
-      - run: python3 -B tools/games/prepare_derby_frame_rank_diag.py --common tools-source/tools/games/prepare_derby_app_diag.py --guard guard-source/tools/games/prepare_derby_pad_bars_diag.py --self-test
       - run: python3 -B tools/games/run_derby_frame_rank.py --sanitize --verify-only --out .cache/rank-asan
       - run: python3 -B tools/games/run_derby_frame_rank.py --pairs 15 --out .cache/rank-timing
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -58,13 +47,8 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 1e68b268a4b91ec54e88f408118de3e39b8b6bc5
+          ref: 5bf332368d6e793cd40a8a18a48b4da4ac270622
           path: tools-source
-          persist-credentials: false
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 146128065e81bb3493985e0b1b7123ff819baaf4
-          path: guard-source
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -75,14 +59,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ env.SOURCE_HEAD }}
-          path: experiment-tools
-          persist-credentials: false
       - name: Prepare finite diagnostic in disposable checkout
         if: matrix.profile == 'oval'
-        run: python3 -B experiment-tools/tools/games/prepare_derby_frame_rank_diag.py --common tools-source/tools/games/prepare_derby_app_diag.py --guard guard-source/tools/games/prepare_derby_pad_bars_diag.py --checkout diagnostic-source
+        run: python3 -B tools-source/tools/games/prepare_derby_app_diag.py --profile oval --checkout diagnostic-source
       - name: Build with product settings and partition
         working-directory: diagnostic-source
         shell: bash

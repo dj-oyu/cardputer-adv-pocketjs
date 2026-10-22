@@ -59,15 +59,18 @@ full lifecycle/observer logs are included in the dedicated CI host artifact.
 
 ## Finite product diagnostic
 
-The wrapper reuses PR50's pinned common generator `1e68b268` with its unchanged
-`derby-app-oval-120-v1` workload. It imports PR56's strict deadline guard at
-`146128065e81bb3493985e0b1b7123ff819baaf4`; shared files/references are not changed.
-Both A/B disposable checkouts receive the same instrumentation.
+The diagnostic directly uses repaired PR50 common generator
+`5bf332368d6e793cd40a8a18a48b4da4ac270622` and
+`derby-app-oval-120-v2`. It includes the strict deadline guard, so the previous
+wrapper/PR56 guard import is no longer needed. PR50's parent device v1 baseline
+stopped inside synchronous preparation (`interrupted`, samples=0); v2 advances
+at most eight model steps per normal frame callback. Product watchdog, scheduler,
+pacing and 24-second deadline remain unchanged. The shared host regression
+matches v1 pixel/draw bytes and endpoints; target completion remains unverified.
+Do not mix v1/v2 artifacts. The product rank-reuse change is unchanged.
 
 ```
-python3 -B tools/games/prepare_derby_frame_rank_diag.py \
-  --common /path/to/pr50/tools/games/prepare_derby_app_diag.py \
-  --guard /path/to/pr56/tools/games/prepare_derby_pad_bars_diag.py \
+python3 -B /path/to/pr50/tools/games/prepare_derby_app_diag.py --profile oval \
   --checkout /path/to/clean-disposable-checkout
 ```
 
