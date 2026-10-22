@@ -351,7 +351,7 @@ static inline __attribute__((always_inline)) int band_entry(const ksn_proc_segme
         x_steps=major;y_steps=minor;
     }else{
         major=row;
-        minor=(int)(((int64_t)major*dx+(dy-1)/2)/dy);
+        minor=dy==2*dx?major/2:(int)(((int64_t)major*dx+(dy-1)/2)/dy);
         x_steps=minor;y_steps=major;
     }
     *x+=sx*x_steps;*yy+=sy*y_steps;
