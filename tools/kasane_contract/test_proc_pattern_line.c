@@ -322,6 +322,25 @@ static void walkers_and_plain(void){
     CHECK(!memcmp(full,split,sizeof full));
     same_in_bands(&mixed);
 }
+static void plain_horizontal_edges(void){
+    /* Plain-only frames use ksn_proc_render_band's local walker, not
+     * plain_band(). Cover clipped, reversed horizontal lines at both rows. */
+    const ksn_proc_inst code[]={
+        SET(0,-10),SET(1,0),SET(2,W+10),
+        MOVE(0,1),LINE(2,1,0x5151),
+        SET(0,W+10),SET(1,H-1),SET(2,-10),
+        MOVE(0,1),LINE(2,1,0x6262),
+    };
+    CHECK(run(code,sizeof code/sizeof code[0],&frame)==KSN_PROC_DONE);
+    CHECK(frame.ext==0&&frame.count==2);
+    render_full(&frame,full);
+    for(int x=0;x<W;x++){
+        CHECK(full[x]==0x5151);
+        CHECK(full[(H-1)*W+x]==0x6262);
+    }
+    for(int y=1;y<H-1;y++)for(int x=0;x<W;x++)CHECK(full[y*W+x]==BACK);
+    same_in_bands(&frame);
+}
 static void limits_and_rejections(void){
     /* Two entries each: 512 pattern lines fill a frame, 513 do not. */
     ksn_proc_inst many[]={
@@ -437,6 +456,7 @@ int main(void){
     pattern_random();
     pattern_depth();
     walkers_and_plain();
+    plain_horizontal_edges();
     limits_and_rejections();
     analysis_and_plan();
     printf(failures?"PATTERN LINE FAIL (%u)\n":"PATTERN LINE PASS\n",failures);
