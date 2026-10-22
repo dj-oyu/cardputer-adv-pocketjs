@@ -3,6 +3,7 @@
 #include "pocket_kasane.h"
 #include "pocket_text.h"
 #include "keymap.h"
+#include "keystate.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
@@ -59,6 +60,60 @@ static bool key_edge(int row,int col,bool pressed,bool overflow,keystroke_t *k){
 #define SHIFT 2,1
 #define ENTER 2,13
 #define BACKQ 0,0
+
+static void key_name_index_round(void){
+    int expected[128];
+    for(int i=0;i<128;i++) expected[i]=-1;
+    for(int i=0;i<KEYSTATE_KEYS;i++) {
+        char name[8];
+        if(!keymap_key_name(i,name) || strlen(name)!=1) continue;
+        unsigned char ch=(unsigned char)name[0];
+        if(expected[ch]>=0) { failures++; continue; }
+        expected[ch]=i;
+    }
+    for(int ch=0;ch<128;ch++) {
+        char name[2]={(char)ch,0};
+        int want=(ch>='A'&&ch<='Z')?expected[ch-'A'+'a']:expected[ch];
+        if(keymap_key_index(name)!=want) {
+            fprintf(stderr,"ascii %02x got %d expected %d\n",ch,keymap_key_index(name),want);
+            failures++;
+        }
+        if(ch>='a'&&ch<='z') {
+            name[0]=(char)(ch-'a'+'A');
+            if(keymap_key_index(name)!=expected[ch]) failures++;
+        }
+    }
+    for(int ch=128;ch<256;ch++) {
+        char name[2]={(char)ch,0};
+        if(keymap_key_index(name)!=-1) failures++;
+    }
+    for(int i=0;i<KEYSTATE_KEYS;i++) {
+        char name[8],upper[8];
+        if(!keymap_key_name(i,name)) continue;
+        if(keymap_key_index(name)!=i) failures++;
+        size_t n=strlen(name);
+        for(size_t j=0;j<=n;j++)
+            upper[j]=(name[j]>='a'&&name[j]<='z')?
+                     (char)(name[j]-'a'+'A'):name[j];
+        if(keymap_key_index(upper)!=i) failures++;
+    }
+    const struct {const char *name; int index;} aliases[]={
+        {"up",2*KEYSTATE_COLS+11}, {"left",3*KEYSTATE_COLS+10},
+        {"down",3*KEYSTATE_COLS+11}, {"right",3*KEYSTATE_COLS+12},
+        {"esc",0}, {"back",0},
+    };
+    for(size_t i=0;i<sizeof(aliases)/sizeof(aliases[0]);i++) {
+        char upper[8];
+        size_t n=strlen(aliases[i].name);
+        for(size_t j=0;j<=n;j++)
+            upper[j]=(aliases[i].name[j]>='a'&&aliases[i].name[j]<='z')?
+                     (char)(aliases[i].name[j]-'a'+'A'):aliases[i].name[j];
+        if(keymap_key_index(aliases[i].name)!=aliases[i].index ||
+           keymap_key_index(upper)!=aliases[i].index) failures++;
+    }
+    if(keymap_key_index("")!=-1 || keymap_key_index("!")!=-1 ||
+       keymap_key_index("12345678")!=-1) failures++;
+}
 
 static void keys_round(void){
     // A fresh session: the pumps above have used up the install's re-base.
@@ -191,6 +246,7 @@ static void keys_round(void){
 }
 
 int main(void){
+    key_name_index_round();
     for(unsigned round=0;round<2;round++){
         JSRuntime *rt=JS_NewRuntime();ctx=JS_NewContext(rt);host_capabilities_clear();
         if(pocket_input_install(ctx,NULL)!=ESP_OK)return 1;
