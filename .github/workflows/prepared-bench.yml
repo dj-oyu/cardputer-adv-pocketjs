@@ -36,6 +36,7 @@ jobs:
           args=()
           if [ '${{ matrix.arch }}' = m32 ]; then args+=(--m32); fi
           python3 tools/vmtest/prepare/bench/run.py "${args[@]}" --pairs 1000
+          python3 tools/vmtest/prepare/bench/run.py "${args[@]}" --compact-check
           python3 tools/vmtest/prepare/run.py "${args[@]}"
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -72,9 +73,10 @@ jobs:
           test "$(git rev-parse HEAD)" = "$BENCH_HEAD"
           idf.py -C tools/vmtest/prepare/bench/device -B "$PWD/build_prepared_bench" -D SDKCONFIG="$PWD/build_prepared_bench/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${BENCH_HEAD:0:12}" build
           idf.py -C tools/vmtest/prepare/bench/device -B "$PWD/build_prepared_bench" size-files > build_prepared_bench/size-files.txt
+          python tools/vmtest/prepare/bench/run.py --verify-device-build "$PWD/build_prepared_bench"
           git rev-parse HEAD > build_prepared_bench/source-head.txt
           cp docs/vm/prepared-runtime-benchmark.md build_prepared_bench/README.md
-          (cd build_prepared_bench && sha256sum *.bin *.elf *.map bootloader/*.bin partition_table/*.bin flasher_args.json sdkconfig source-head.txt > SHA256SUMS)
+          (cd build_prepared_bench && sha256sum *.bin *.elf *.map bootloader/*.bin partition_table/*.bin flasher_args.json device-proof.json sdkconfig source-head.txt > SHA256SUMS)
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

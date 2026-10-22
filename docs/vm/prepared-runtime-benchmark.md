@@ -77,31 +77,68 @@ PR48's engine hooks and code placement. This does not measure their cost
 relative to the old integration. Product-size builds compare those versions
 separately; an old/new runtime timing comparison would be additional work.
 
-Device rows include internal 8-bit heap free before evaluation, local minimum
+Device output is `prepared-bench-compact-v1`: eight per-case/pass/mode
+summary rows, metadata and a verified completion footer, then the DONE marker.
+All 512 recorded trials and 64 warmup trials remain; no sample is dropped to
+fit the broker. Each summary keeps all 64 elapsed times, sorts them after the
+interval, and emits the exact arithmetic median of indices31/32 and exact
+p95 at sorted index60 (zero based, matching the host quantile convention).
+These are sample quantiles, not approximations or confidence intervals. Per
+metric allocator/heap ranges are exact min/max, not quantiles; accounting-pass
+time is diagnostic only. Device paired-ratio distributions are not retained;
+the full host samples and their paired-ratio reporting remain unchanged.
+
+Two reusable groups cost 1,520 B static RAM (compile-time bound 2 KiB); the
+ordering/overflow/boundary selftest temporarily uses 512 B stack. No summary
+allocation or sorting occurs inside a measured interval. This extra BSS reduces
+free heap equally for both modes, so absolute free heap differs from the old
+raw-output image. Host `--compact-check` executes the same aggregator and
+checks the 11-line/<8 KiB output and malformed completion controls. That
+leaves room for INFO startup inside the unchanged broker's 64 KiB RX and
+256-line/32 KiB retention limits. Broker capture remains 30 seconds; firmware
+rejects a run exceeding24 seconds after app_main measurement starts rather
+than claiming successful completion. Total hardware boot/capture duration
+still needs measurement; no guard is disabled.
+
+Device summary ranges include internal 8-bit heap free before evaluation, local minimum
 free during evaluation and largest block afterward. IDF sums per-region
 low watermarks, which may occur at different times: this is not a simultaneous
 whole-heap peak. The monitor is restarted
 for each trial, read/stopped before validation/logging, and includes allocator
 rounding and any concurrent system allocation. Requested guest/native peak
 accounting remains separate. No JS_ComputeMemoryUsage heap walk occurs in the
-interval. Scheduler yields occur only after teardown. Serial output happens
-between trials and can affect later cache/scheduling state; repeat sessions
-and reverse ordering in a follow-up if a small difference is observed.
+interval. Scheduler yields occur only after teardown. Device output/sorting
+happens after each complete case/pass; host raw output remains between trials.
+This change in cache/logging conditions must be recorded when comparing with
+the previous diagnostic image. Product defaults also restore the product1000Hz
+tick (old dedicated image100Hz):576 one-tick yields now total about0.576s,
+not a measurement of complete target runtime.
 
 CI artifact `cardputer-prepared-bench-<head>` contains the image, bootloader,
-partition table, flasher_args.json, ELF/map, sdkconfig, source-head and
+partition table, flasher_args.json, ELF/map, sdkconfig, device-proof.json, source-head and
 SHA256SUMS. The artifact is build-verified, **not hardware-tested**. This task
 does not access USB, flash or alter a device. An authorized operator can:
 
 1. Check the artifact's exact source head and `sha256sum -c SHA256SUMS`.
-2. Treat it as a standalone image with its own partition table; preserve the
-   existing firmware/data using the established device procedure first.
+2. It inherits product defaults/security and uses the exact product partition
+   table: NVS0x9000/24KiB, PHY0xf000/4KiB, factory0x10000/3MiB,
+   skk_dict0x310000/2MiB, jp_font0x510000/512KiB, storage0x590000/2496KiB.
+   CI verifies binary equality with product partitions.csv, disabled secure
+   boot/flash encryption/anti-rollback, INFO Application information in ELF,
+   and startup log level3. Preserve existing firmware/data under the established
+   device procedure first; application execution does no persistent writes.
 3. If separately authorized, install using the artifact's flasher_args.json
    and capture a complete fresh-boot serial log through `{"complete":true}`
    and `PREPARED_BENCH_DONE`. Keep board/clock/image hash with the log.
 4. Parse only JSON lines with
    `python3 tools/vmtest/prepare/bench/run.py --summarize capture.log`.
-   Missing completion, rows, hits or plan-result assertions invalidate a run.
+   The summary parser auto-detects the compact schema. Require full head,
+   pointer_bytes4, eight unique64-sample groups,576 verified trials,144 total
+   prepared hits (128 recorded), complete:true and PREPARED_BENCH_DONE.
+   Missing completion, groups, hits or plan-result assertions invalidate a run.
+   Normal boot includes INFO app_init Application information; no product GUI,
+   app-control or MCP server is added. The older WARN/single-factory artifact
+   is superseded for this preflight contract.
 
 ## Product size
 
