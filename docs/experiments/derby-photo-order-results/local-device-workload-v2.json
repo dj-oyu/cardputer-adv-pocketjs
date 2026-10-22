@@ -1,0 +1,44 @@
+{
+  "workload": "derby-app-photo-60-v2",
+  "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "head": "fd3facfb75ef9d07cd8259f664dc4ed8d1ec603f",
+  "binary_sha256": "0c4a025d829ec6fa6034d074e0f38e27edf34f929f1ccecd246c867e8fcd2730",
+  "workload_sha256": {
+    "baseline": "ff10af9a558f43aee911b0abd05d4a79bc6c38ab7176d11aa26be3f3d4c3fb5c",
+    "candidate": "ff10af9a558f43aee911b0abd05d4a79bc6c38ab7176d11aa26be3f3d4c3fb5c"
+  },
+  "rows": {
+    "baseline": {
+      "frames": 60,
+      "pixels": "3a703f4302ace546",
+      "panel_hash": "e5d051365eaed7fb",
+      "down": 60,
+      "queries": 650,
+      "requests": 15942,
+      "charged_bytes": 928092,
+      "setup": {
+        "turns": 158,
+        "steps": 1258,
+        "max_steps": 8
+      },
+      "csv_sha256": "2856f28bd67eb2f2cf5af377dd6053353aca20209c37ce8b16ced1594f41d89e"
+    },
+    "candidate": {
+      "frames": 60,
+      "pixels": "3a703f4302ace546",
+      "panel_hash": "e5d051365eaed7fb",
+      "down": 60,
+      "queries": 650,
+      "requests": 15402,
+      "charged_bytes": 868812,
+      "setup": {
+        "turns": 158,
+        "steps": 1258,
+        "max_steps": 8
+      },
+      "csv_sha256": "2856f28bd67eb2f2cf5af377dd6053353aca20209c37ce8b16ced1594f41d89e"
+    }
+  },
+  "unbounded_setup_rejected": true,
+  "source_dirty": true
+}
