@@ -28,6 +28,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--m32', action='store_true')
     p.add_argument('--oom', action='store_true')
+    p.add_argument('--variant', choices=['all', 'o2', 'asan'], default='all')
     p.add_argument('--only', choices=['candidate', 'baseline', 'poison'])
     p.add_argument('--negative', action='store_true', help='omit header memset in poison source; must be rejected')
     p.add_argument('--negative-copy', action='store_true', help='omit bytecode copy; coverage oracle must reject it')
@@ -48,7 +49,7 @@ def main():
         flags += ' ' + subprocess.check_output(['bash', 'tools/vmtest/m32_sysroot.sh'], cwd=ROOT, text=True).strip()
     for mode in modes:
         suffix = '-negative-header' if a.negative else '-negative-copy' if a.negative_copy else ''
-        folder = OUT / f'source-{"m32" if a.m32 else "native"}-{mode}{suffix}'
+        folder = OUT / f'source-{"m32" if a.m32 else "native"}-{mode}-{a.variant}{suffix}'
         shutil.copytree(QJS, folder, dirs_exist_ok=True)
         modified = body
         if mode == 'baseline':
@@ -103,7 +104,7 @@ def main():
                 modified = modified.replace(needle, '(void)0; /* negative: missing bytecode copy */')
         (folder / 'quickjs.c').write_text(source[:begin] + modified + source[end:])
         for debug in ['debug', 'strip']:
-            for variant in ['o2', 'asan']:
+            for variant in (['o2', 'asan'] if a.variant == 'all' else [a.variant]):
                 label = f'{"m32" if a.m32 else "native"}-{mode}-{debug}-{variant}' + suffix
                 env = dict(os.environ, VMTEST_QJS=str(folder), VMTEST_OUT=str(OUT / label),
                            VMTEST_CFLAGS=flags + (' -DCONFIG_POCKET_VM_STRIP_DEBUG=1' if debug == 'strip' else ''),
@@ -126,6 +127,9 @@ def main():
                 assert {p.stem for p in actual.glob('*.txt')} == expected_names
                 for name in expected_names:
                     output = (actual / (name + '.txt')).read_bytes()
+                    if re.search(rb'(?:Address|Leak|UndefinedBehavior|Memory)Sanitizer|runtime error:', output):
+                        print(f'{label}/{name}: sanitizer diagnostic follows', flush=True)
+                        print(output.decode(errors='replace'), flush=True)
                     assert not re.search(rb'(?:Address|Leak|UndefinedBehavior|Memory)Sanitizer', output), (label, name)
                     assert b'runtime error:' not in output, (label, name)
                     status = int(re.search(rb'exit=(\d+)\s*$', output).group(1))

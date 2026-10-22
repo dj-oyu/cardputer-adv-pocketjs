@@ -125,3 +125,10 @@ Local m32 preparation was blocked: packages were unavailable in the empty apt
 index, and fetching the configured Debian snapshot index returned proxy HTTP 503.
 No local m32 success is claimed. Publishing uses new GitHub objects/branch only;
 force push, main updates, merges, deployment and device operations are excluded.
+
+The first exact-head m32 CI (`ed9c761`) reached the old-code baseline but rejected
+a UBSan `runtime error:` in `l2b_floor_argc` before candidate execution. This is an
+unresolved baseline validation blocker, not an accepted exception. O2 and sanitizer
+jobs are separate so independent m32 O2 coverage can finish. Diagnostics are printed
+to the job console as well as retained in artifacts. Production changes outside
+the final function allocation remain out of scope.
