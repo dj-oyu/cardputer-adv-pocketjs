@@ -323,7 +323,8 @@
     const ob = [], c = s.course;
     c.rocks.forEach(r => { const f2 = face(r.p, curlAt(r.x), heightAt(r.x)), p = proj(r.x, f2[0], f2[1], far);
       if (p) ob.push([p[2], 'ro', [p[0], p[1], p[2] * co, p[2] * si]]); });
-    c.riders.forEach(r => { const q = rider(r), f2 = face(q[1], curlAt(q[0]), heightAt(q[0])), p = proj(q[0], f2[0], f2[1], far);
+    c.riders.forEach(r => { const q = rider(r), depth = q[0] - s.cx; if (depth < C.dn || depth > far) return;
+      const f2 = face(q[1], curlAt(q[0]), heightAt(q[0])), p = proj(q[0], f2[0], f2[1], far);
       if (p) ob.push([p[2], 'ri', [p[0], p[1], p[2] * co, p[2] * si, 1, r.c]]); });
     const fin = K.len[s.set], pf = proj(fin, 3, 0, far), pt = proj(fin, 3, 3, far);
     if (pf && pt) ob.push([pf[2], 'ln', [pf[0], pf[1], pt[0], pt[1], 0xf800]]);
