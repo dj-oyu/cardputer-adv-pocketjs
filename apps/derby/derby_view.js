@@ -158,13 +158,14 @@ function shot(m, xs, l, cut) {
 // at x0. K: the screen's face when this is its feed, a camera 6 m behind
 // the leader, low on the rail: rails and the leading FN[tier] runners,
 // those wholly inside K.
+const gy = (hy, h, f, d0) => hy + h * f / d0;
 function course(c, x0, xs, close, gate, K) {
   if (!K && pc) return pan(xs);
   const f = c[0], h = c[1], hy = c[2], k = KN[tier], o = K ? (K[0] + K[2]) / 2 : 120, R = K ? K[2] - 1 : 245,
-    sx = (w, d0) => o + (w - x0) * f / d0, gy = d0 => hy + h * f / d0, ty = (d0, e) => hy + (h - e) * f / d0;
+    sx = (w, d0) => o + (w - x0) * f / d0, ty = (d0, e) => hy + (h - e) * f / d0;
   const rail = (d0, col) => {
     const p = f / d0, s = k[4] * p, a = sx((K ? M.ceil : flo)((x0 - (o - (K ? K[0] : -5)) / p) / k[4]) * k[4], d0);
-    dr('rail', a, s, ty(d0, 1.1), gy(d0), mx(0, K ? flo((R - a) / s) : mn(flo((700 - a) / s), M.ceil((R - a) / s))), ty(d0, .55), col);
+    dr('rail', a, s, ty(d0, 1.1), gy(hy, h, f, d0), mx(0, K ? flo((R - a) / s) : mn(flo((700 - a) / s), M.ceil((R - a) / s))), ty(d0, .55), col);
   };
   let q = f / 40, n;
   if (!K) {
@@ -172,11 +173,11 @@ function course(c, x0, xs, close, gate, K) {
     // fixed on the stand (cells from its pillar j).
     const j = flo((x0 - 130 / q) / 12), a = sx(j * 12, 40), dx = 12 * q;
     n = mn(flo((700 - a) / dx), M.ceil((250 - a) / dx) + 1);
-    dr('stands', a, dx, gy(40), -2.4 * q, n, 0, 0, ty(40, 13.5));
-    dr('crowd', a, gy(40) - 1.2 * q, a + n * dx, gy(40) - 1.2 * q, -2.4 * q, -2.4 * q, j * 12 * KN[3][5], (j + n) * 12 * KN[3][5]);
+    dr('stands', a, dx, gy(hy, h, f, 40), -2.4 * q, n, 0, 0, ty(40, 13.5));
+    dr('crowd', a, gy(hy, h, f, 40) - 1.2 * q, a + n * dx, gy(hy, h, f, 40) - 1.2 * q, -2.4 * q, -2.4 * q, j * 12 * KN[3][5], (j + n) * 12 * KN[3][5]);
     // The screen in front of the stands: dark, a grey flash, then its feed.
     if (vr) {
-      dr('vis', vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866);
+      dr('vis', vr[0] - 1, vr[1] - 1, vr[2], vr[3], mx(1, rnd(f / VS[1] * .4)), gy(hy, h, f, VS[1]), von < 8 ? 0 : von < 11 ? 0x632c : 0x0866);
       feed(xs, (vr[2] - vr[0]) / 120);
     }
   }
@@ -188,11 +189,11 @@ function course(c, x0, xs, close, gate, K) {
     q = f / DFR;
     const w = k[5], i0 = mx(flo((x0 - 125 / q) / w), M.ceil((x0 - 590 * DNR / f) / w)), xf = sx(i0 * w, DFR), xn = sx(i0 * w, DNR);
     n = mx(0, mn(M.ceil((250 - xf) / (w * q)), flo((700 - xn) / (w * f / DNR))));
-    dr('turf', xn, xf, w * f / DNR, w * q, gy(DNR), gy(DFR), n, i0 & 1);
+    dr('turf', xn, xf, w * f / DNR, w * q, gy(hy, h, f, DNR), gy(hy, h, f, DFR), n, i0 & 1);
     for (let m = 200; m <= D; m += 200) {
       const p = sx(m, DFR), e = m === D;
       if (p > -40 && p < 280)
-        dr('pole', p, gy(DFR), ty(DFR, e ? 4 : 2.6), (e ? .55 : .3) * q, e ? sx(m, DNR) : p, gy(e ? DNR : DFR), p, gy(DFR));
+        dr('pole', p, gy(hy, h, f, DFR), ty(DFR, e ? 4 : 2.6), (e ? .55 : .3) * q, e ? sx(m, DNR) : p, gy(hy, h, f, e ? DNR : DFR), p, gy(hy, h, f, DFR));
     }
     // The gate at 0 m: 9 stall posts, lane boundaries one MUL apart in depth.
     q = f * M.sqrt(Q) / DL[0];
@@ -203,7 +204,7 @@ function course(c, x0, xs, close, gate, K) {
   const sp = slow && scene === 'race' ? 1 - disp : 0;
   for (const l of zo) {
     if (K && ro.indexOf(l) >= FN[tier]) continue;
-    const p = f / lz[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(lz[l]), a = ph[l];
+    const p = f / lz[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(hy, h, f, lz[l]), a = ph[l];
     if (l === close) {
       const g = (flo(a * 3 / PI) % 6 + 6) % 6;
       dr('g' + g, []);
