@@ -47,9 +47,9 @@ static uint64_t course_generation,view_generation;
 /* view(): the camera pc = [x, z, unit x, unit z, f, distance], the far depth,
  * the scene frame t, the stands' plans and their two constants. */
 static struct {
-    double pc[6],zf,t,hl_color,cells;
+    double pc[6],zf,t,hl_color,cells,ou_f,ou_norm;
     uint32_t hl,crowd;
-    bool set;
+    bool set,ou_valid;
 } view;
 
 /* ---- QuickJS's Math, as quickjs.c has it (js_math_round, js_fmin, js_fmax,
@@ -120,7 +120,13 @@ static void pose(double g,double w,double o[4]){
 }
 /* ou(j, w, m, zf): chord j at depth w wholly out of view by m m at least. */
 static bool ou(unsigned j,double w,double m,double zf){
-    const double *V=course->ve+4u*j,f=view.pc[4],k=m*sqrt(f*f+25600),
+    const double f=view.pc[4];
+    /* A camera getter may reenter ser() while view() is still reading pc.
+     * Key by the current f too, retaining the original double expression. */
+    if(!view.ou_valid||view.ou_f!=f){
+        view.ou_f=f;view.ou_norm=sqrt(f*f+25600);view.ou_valid=true;
+    }
+    const double *V=course->ve+4u*j,k=m*view.ou_norm,
         l=V[0]+w*V[2],d=V[1]+w*V[3],L=V[4]+w*V[6],D=V[5]+w*V[7];
     return (d<.02*f-m&&D<.02*f-m)||(d>zf+m&&D>zf+m)||(160*d+l*f<-k&&160*D+L*f<-k)||
            (160*d-l*f<-k&&160*D-L*f<-k);
@@ -237,6 +243,7 @@ static JSValue js_course(JSContext *ctx,JSValueConst self,int argc,JSValueConst 
  * it computes VE and VC as pan() did. */
 static JSValue js_view(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
+    view.ou_valid=false;
 #ifdef POCKET_DERBY_PROJECT_BATCH
     ++view_generation;
 #endif
