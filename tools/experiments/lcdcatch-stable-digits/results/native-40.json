@@ -1,0 +1,288 @@
+{
+  "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "source_commit": "d09525422d9f404f84e84f022daec95597e12018",
+  "pairs": 40,
+  "source_hashes": {
+    "baseline": "88448998a9ea6ac3ff8135e9055d966516ec2d3a6021967b8535fa29f6a5b815",
+    "candidate": "14a6582c7f3b3bb8c7bfbec30201a631c9d5bed5428b5c32e0fe0bd4d8a3eef5"
+  },
+  "binary_sha256": "2576d408fffdcdd65e1ff595f0e666c27789e3b1f45c1c0fc05c56da7481c276",
+  "harness_sha256": "45e538b47ae56e624eea5b18291a71cd560398575154401b68fdc0b41b906c87",
+  "compiler": "gcc (Debian 14.2.0-19) 14.2.0",
+  "sample_fields": [
+    "js_wall_ns",
+    "js_cpu_ns",
+    "present_ns",
+    "successful_allocations",
+    "charged_bytes",
+    "peak_rise",
+    "mode",
+    "score"
+  ],
+  "groups": {
+    "natural": {
+      "baseline": {
+        "median_mean_js_ns": 10748.095833333333,
+        "median_mean_present_ns": 14059.558333333334,
+        "mean_successful_allocations": 3.7583333333333333,
+        "mean_charged_bytes": 230.86666666666667,
+        "max_peak_rise": 1660,
+        "mode_frames": {
+          "0": 0,
+          "1": 0,
+          "2": 84,
+          "3": 36,
+          "4": 0
+        },
+        "heap_eval": [
+          39468
+        ],
+        "heap_eval_peak_delta": [
+          49088
+        ],
+        "retained_before": [
+          90512
+        ],
+        "retained_after": [
+          90512
+        ],
+        "window_peak": [
+          92172
+        ],
+        "whole_peak": [
+          92172
+        ],
+        "frame_live_peak": [
+          92172
+        ],
+        "bytecode": [
+          3311
+        ]
+      },
+      "candidate": {
+        "median_mean_js_ns": 6767.65,
+        "median_mean_present_ns": 14154.5125,
+        "mean_successful_allocations": 3.7583333333333333,
+        "mean_charged_bytes": 230.86666666666667,
+        "max_peak_rise": 1660,
+        "mode_frames": {
+          "0": 0,
+          "1": 0,
+          "2": 84,
+          "3": 36,
+          "4": 0
+        },
+        "heap_eval": [
+          39636
+        ],
+        "heap_eval_peak_delta": [
+          49284
+        ],
+        "retained_before": [
+          90680
+        ],
+        "retained_after": [
+          90680
+        ],
+        "window_peak": [
+          92340
+        ],
+        "whole_peak": [
+          92340
+        ],
+        "frame_live_peak": [
+          92340
+        ],
+        "bytecode": [
+          3357
+        ]
+      },
+      "wall_ratio": 0.6351365687815305,
+      "wall_bootstrap95": [
+        0.6128360568105768,
+        0.6551819218377662
+      ],
+      "cpu_ratio": 0.6465758163188051,
+      "cpu_bootstrap95": [
+        0.6208539426467978,
+        0.664803236818584
+      ]
+    },
+    "input": {
+      "baseline": {
+        "median_mean_js_ns": 16058.85,
+        "median_mean_present_ns": 138273.5625,
+        "mean_successful_allocations": 25.891666666666666,
+        "mean_charged_bytes": 1592.4666666666667,
+        "max_peak_rise": 1660,
+        "mode_frames": {
+          "0": 0,
+          "1": 0,
+          "2": 84,
+          "3": 36,
+          "4": 0
+        },
+        "heap_eval": [
+          39468
+        ],
+        "heap_eval_peak_delta": [
+          49088
+        ],
+        "retained_before": [
+          90512
+        ],
+        "retained_after": [
+          90512
+        ],
+        "window_peak": [
+          92172
+        ],
+        "whole_peak": [
+          92172
+        ],
+        "frame_live_peak": [
+          92172
+        ],
+        "bytecode": [
+          3311
+        ]
+      },
+      "candidate": {
+        "median_mean_js_ns": 12065.495833333334,
+        "median_mean_present_ns": 137338.4375,
+        "mean_successful_allocations": 25.891666666666666,
+        "mean_charged_bytes": 1592.4666666666667,
+        "max_peak_rise": 1660,
+        "mode_frames": {
+          "0": 0,
+          "1": 0,
+          "2": 84,
+          "3": 36,
+          "4": 0
+        },
+        "heap_eval": [
+          39636
+        ],
+        "heap_eval_peak_delta": [
+          49284
+        ],
+        "retained_before": [
+          90680
+        ],
+        "retained_after": [
+          90680
+        ],
+        "window_peak": [
+          92340
+        ],
+        "whole_peak": [
+          92340
+        ],
+        "frame_live_peak": [
+          92340
+        ],
+        "bytecode": [
+          3357
+        ]
+      },
+      "wall_ratio": 0.7452831761640264,
+      "wall_bootstrap95": [
+        0.7365271003207678,
+        0.7726093019843354
+      ],
+      "cpu_ratio": 0.7490174264065106,
+      "cpu_bootstrap95": [
+        0.7393100597741902,
+        0.7770552388652006
+      ]
+    },
+    "title": {
+      "baseline": {
+        "median_mean_js_ns": 9983.629166666668,
+        "median_mean_present_ns": 3596.633333333333,
+        "mean_successful_allocations": 0.9333333333333333,
+        "mean_charged_bytes": 59.2,
+        "max_peak_rise": 760,
+        "mode_frames": {
+          "0": 0,
+          "1": 120,
+          "2": 0,
+          "3": 0,
+          "4": 0
+        },
+        "heap_eval": [
+          39468
+        ],
+        "heap_eval_peak_delta": [
+          49088
+        ],
+        "retained_before": [
+          89512
+        ],
+        "retained_after": [
+          89512
+        ],
+        "window_peak": [
+          90272
+        ],
+        "whole_peak": [
+          90696
+        ],
+        "frame_live_peak": [
+          90272
+        ],
+        "bytecode": [
+          3311
+        ]
+      },
+      "candidate": {
+        "median_mean_js_ns": 6334.204166666666,
+        "median_mean_present_ns": 3564.0,
+        "mean_successful_allocations": 0.9333333333333333,
+        "mean_charged_bytes": 59.2,
+        "max_peak_rise": 760,
+        "mode_frames": {
+          "0": 0,
+          "1": 120,
+          "2": 0,
+          "3": 0,
+          "4": 0
+        },
+        "heap_eval": [
+          39636
+        ],
+        "heap_eval_peak_delta": [
+          49284
+        ],
+        "retained_before": [
+          89680
+        ],
+        "retained_after": [
+          89680
+        ],
+        "window_peak": [
+          90440
+        ],
+        "whole_peak": [
+          90864
+        ],
+        "frame_live_peak": [
+          90440
+        ],
+        "bytecode": [
+          3357
+        ]
+      },
+      "wall_ratio": 0.652002383653741,
+      "wall_bootstrap95": [
+        0.6060165154624798,
+        0.6634192106640646
+      ],
+      "cpu_ratio": 0.6594427507262659,
+      "cpu_bootstrap95": [
+        0.615334326332234,
+        0.6743137515522788
+      ]
+    }
+  }
+}
