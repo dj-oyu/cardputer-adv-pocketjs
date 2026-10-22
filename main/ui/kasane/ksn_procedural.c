@@ -401,6 +401,17 @@ static void pattern_band(const ksn_proc_segment *g,const ksn_proc_segment *q,
         /* 32 bits hold it: u0 and du are under 2^13, k at most 1,200. */
         uint32_t u=(u0+k*du)%wrap;
         uint16_t *row=pixels+(g->y0-y)*KSN_PROC_W;
+        if(forward&&du==256u){
+            const unsigned cell=u>>8;
+            const uint32_t mask=(1u<<n)-1u;
+            uint32_t ring=((bits>>cell)|(bits<<(n-cell)))&mask;
+            for(int x=left;x<=right;x++){
+                const uint32_t on=ring&1u;
+                if(on)row[x]=ca;else if(has_b)row[x]=cb;
+                ring=(ring>>1)|(on<<(n-1));
+            }
+            return;
+        }
         for(int x=left;x<=right;x++){
             PATTERN_PIXEL(row[x]);
             u+=step;if(u>=wrap)u-=wrap;
