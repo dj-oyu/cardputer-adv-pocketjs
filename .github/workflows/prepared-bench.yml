@@ -1,0 +1,141 @@
+name: Prepared runtime benchmark
+on:
+  pull_request:
+    paths:
+      - 'tools/vmtest/prepare/bench/**'
+      - '.github/workflows/prepared-bench.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: prepared-bench-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  BENCH_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [native, m32]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.BENCH_HEAD }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Exact-source alternating benchmark and regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BENCH_HEAD"
+          args=()
+          if [ '${{ matrix.arch }}' = m32 ]; then args+=(--m32); fi
+          python3 tools/vmtest/prepare/bench/run.py "${args[@]}" --pairs 1000
+          python3 tools/vmtest/prepare/run.py "${args[@]}"
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: prepared-bench-host-${{ matrix.arch }}-${{ env.BENCH_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/prepared-bench/${{ matrix.arch }}/
+            .cache/prepare-api/*results.json
+          retention-days: 14
+  device:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.BENCH_HEAD }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build dedicated Cardputer ADV benchmark; never flash
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          test "$(git rev-parse HEAD)" = "$BENCH_HEAD"
+          idf.py -C tools/vmtest/prepare/bench/device -B "$PWD/build_prepared_bench" -D SDKCONFIG="$PWD/build_prepared_bench/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${BENCH_HEAD:0:12}" build
+          idf.py -C tools/vmtest/prepare/bench/device -B "$PWD/build_prepared_bench" size-files > build_prepared_bench/size-files.txt
+          git rev-parse HEAD > build_prepared_bench/source-head.txt
+          cp docs/vm/prepared-runtime-benchmark.md build_prepared_bench/README.md
+          (cd build_prepared_bench && sha256sum *.bin *.elf *.map bootloader/*.bin partition_table/*.bin flasher_args.json sdkconfig source-head.txt > SHA256SUMS)
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: cardputer-prepared-bench-${{ env.BENCH_HEAD }}
+          path: |
+            build_prepared_bench/*.bin
+            build_prepared_bench/*.elf
+            build_prepared_bench/*.map
+            build_prepared_bench/*.json
+            build_prepared_bench/*.txt
+            build_prepared_bench/*.md
+            build_prepared_bench/SHA256SUMS
+            build_prepared_bench/sdkconfig
+            build_prepared_bench/bootloader/*.bin
+            build_prepared_bench/partition_table/*.bin
+          retention-days: 14
+  product-size:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ['578d552384c992cb852822d40e2635e7b317d498', '879da5aaa818c497d29cd6c3b67d9134cd315abe']
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.source }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Same-setting original product link and resource report
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          test "$(git rev-parse HEAD)" = '${{ matrix.source }}'
+          idf.py -B build_size -D SDKCONFIG="$PWD/build_size/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER=prepared-size-comparison build
+          idf.py -B build_size size | tee build_size/size.txt
+          idf.py -B build_size size-files | tee build_size/size-files.txt
+          git rev-parse HEAD > build_size/source-head.txt
+          (cd build_size && sha256sum *.elf *.map *.bin sdkconfig > SHA256SUMS)
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: prepared-product-size-${{ matrix.source }}-${{ env.BENCH_HEAD }}
+          path: |
+            build_size/*.elf
+            build_size/*.map
+            build_size/*.bin
+            build_size/*.txt
+            build_size/*.json
+            build_size/sdkconfig
+            build_size/SHA256SUMS
+          retention-days: 14
