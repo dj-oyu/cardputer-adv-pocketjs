@@ -106,8 +106,21 @@ finite DERBY fixed-workload diagnostic (detail ON, DMA overlap OFF defaults). No
 prepared machinery is added. Compare the emitted workload identities and existing
 finite frame/bridge timing/resource records; do not infer FPS from host batches.
 Artifacts contain app, bootloader, partition table, ELF/map, flash arguments,
-verification/transport/stack evidence and SHA256SUMS. Standard flash offsets are
+verification/transport/stack evidence, CMakeCache/generated fixture JS and
+SHA256SUMS (also required to rerun the existing image proof). Standard flash offsets are
 bootloader 0x0, table 0x8000, app 0x10000; verify flasher_args.json and hashes.
 Firmware execution/flash is delegated separately. No USB actions are performed
 by this experiment's author. Both source heads and artifact identities must be
 recorded by the device operator; revert to the original firmware afterward.
+
+The firmware boots to HOME with ordinary INFO application/version logs. Start
+local.derby through the existing formal app operation/menu (main.c menu index12),
+not PR47 app control. Acquire before app start with the existing finite-trial
+collector: device cap180 seconds, acquisition cap200 seconds/65536 raw bytes.
+Do not substitute the generic30-second serial capture or add broker mechanisms.
+The normal completion is three dependent120-context replays, DERBY_FIXED_END,
+owner DERBY_DETAIL_EXIT, APP_STOPPED, HOME_READY and quiet close. Preserve complete
+transport evidence and workload/finish identities; no median/p95 from three
+dependent repetitions. See docs/platform/derby-fixed-completion.md. No storage,
+heap or stack budgets are changed by this experiment. Device writes/flash are
+owned by the separate operator task.

@@ -100,8 +100,10 @@ jobs:
             build_length/*.log
             build_length/SHA256SUMS
             build_length/sdkconfig
+            build_length/CMakeCache.txt
             build_length/flash_args
             build_length/bootloader/bootloader.bin
             build_length/partition_table/partition-table.bin
+            build_length/generated/derby_fixed_workload/*.js
             build_length/generated/derby_fixed_workload/*.json
           retention-days: 14
