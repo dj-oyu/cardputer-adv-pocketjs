@@ -41735,6 +41735,9 @@ static int bc_put_atom(BCWriterState *s, JSAtom atom)
         v = (__JS_AtomToUInt32(atom) << 1) | 1;
     } else {
         if (bc_atom_to_idx(s, &v, atom)) {
+            /* Some tag emitters use the sticky buffer error rather than
+               checking this return value. Keep atom-index OOM sticky too. */
+            dbuf_set_error(&s->dbuf);
             return -1;
         }
         v <<= 1;
@@ -42379,7 +42382,10 @@ static int JS_WriteObjectAtoms(BCWriterState *s)
             JS_WriteString(s, p);
         }
     }
-    /* XXX: should check for OOM in above phase */
+    /* The put helpers record failures in the sticky DynBuf error. Do not
+       concatenate a failed (possibly NULL) atom table or report success. */
+    if (dbuf_error(&s->dbuf))
+        goto fail;
 
     /* move the atoms at the start */
     /* XXX: could just append dbuf1 data, but it uses more memory if
@@ -42422,7 +42428,7 @@ uint8_t *JS_WriteObject2(JSContext *ctx, size_t *psize, JSValueConst obj,
     js_dbuf_init(ctx, &s->dbuf);
     js_object_list_init(&s->object_list);
 
-    if (JS_WriteObjectRec(s, obj)) {
+    if (JS_WriteObjectRec(s, obj) || dbuf_error(&s->dbuf)) {
         goto fail;
     }
     if (JS_WriteObjectAtoms(s)) {
