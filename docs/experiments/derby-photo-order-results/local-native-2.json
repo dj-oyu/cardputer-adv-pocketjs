@@ -1,0 +1,95 @@
+{
+  "inputs": {
+    "baseline": {
+      "README.md": "f25c0282c84c97d58d325ee569c8d752e3b2afee17b14a95a25e40f8e7528252",
+      "chunks.txt": "7201d3e2e9be7af413847f419c175e25f6f57a44d7c2f840482d9415ed3b52e4",
+      "derby_demo.js": "5f2ed4a5b3f4717fd7aed206bcee5f5ea873e54d923382b273e35f0e4d805481",
+      "derby_pan.js": "61f1cd97ee3dd4ab90f93457850372c1d3064ec6d31751d698166f5d6a47b2b3",
+      "derby_play.js": "a6c2240b648ac0e328a15c5c7ded9e1157e45dc3a2d381707ff4461d4bdb5078",
+      "derby_prog.js": "f9a54bd832eed741ed97f45e73a4e00c515c9a1e1d25387fa7985154330bae1b",
+      "derby_scene.js": "48c82534a323a17d9d561280b5482f62c73ff3a0841ce9208b97d7c12a6cdd61",
+      "derby_view.js": "309d5375a4c620f863436e369f08e68e05c7e96eb53d90695cbb090f77dfb105",
+      "derby_watch.js": "716246c50394dac02318f38259dbb00db0a3823477ae639b2f158abf65f7125e",
+      "plans.json": "c03e08fc943a1951218e4af4c5917089206a4ca563150461486b512f31db2dd5"
+    },
+    "candidate": {
+      "README.md": "f25c0282c84c97d58d325ee569c8d752e3b2afee17b14a95a25e40f8e7528252",
+      "chunks.txt": "7201d3e2e9be7af413847f419c175e25f6f57a44d7c2f840482d9415ed3b52e4",
+      "derby_demo.js": "5f2ed4a5b3f4717fd7aed206bcee5f5ea873e54d923382b273e35f0e4d805481",
+      "derby_pan.js": "61f1cd97ee3dd4ab90f93457850372c1d3064ec6d31751d698166f5d6a47b2b3",
+      "derby_play.js": "a6c2240b648ac0e328a15c5c7ded9e1157e45dc3a2d381707ff4461d4bdb5078",
+      "derby_prog.js": "f9a54bd832eed741ed97f45e73a4e00c515c9a1e1d25387fa7985154330bae1b",
+      "derby_scene.js": "fdd4b221a4227238a0d5080f2e85d41b4ce0c91c9cd17add126eb2d60d8cb3c0",
+      "derby_view.js": "309d5375a4c620f863436e369f08e68e05c7e96eb53d90695cbb090f77dfb105",
+      "derby_watch.js": "716246c50394dac02318f38259dbb00db0a3823477ae639b2f158abf65f7125e",
+      "plans.json": "c03e08fc943a1951218e4af4c5917089206a4ca563150461486b512f31db2dd5"
+    }
+  },
+  "baseline": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "binary_sha256": "8329f3638316d6e7b60145e44f291a37f5d0ffba27f4ea35f67aa76c2c061101",
+  "harness_sha256": "1878bfa9b33abbd96b98047e922b7c43511c183a97f1a79b9003abf0f91ed3b5",
+  "candidate_scene_sha256": "fdd4b221a4227238a0d5080f2e85d41b4ce0c91c9cd17add126eb2d60d8cb3c0",
+  "compiler": "gcc (Debian 14.2.0-19) 14.2.0",
+  "cpu_affinity": [
+    0
+  ],
+  "pairs": 40,
+  "frames_per_trial": 60,
+  "sample_fields": [
+    "wall_ns",
+    "thread_cpu_ns",
+    "js_requests",
+    "tlsf_charged_bytes",
+    "peak_rise"
+  ],
+  "groups": {
+    "photo": {
+      "baseline": {
+        "median_trial_mean_wall_ns": 62756.5,
+        "p95_frame_wall_ns": 99179,
+        "mean_js_requests": 116.7,
+        "mean_tlsf_charged_bytes": 6694.2,
+        "max_peak_rise": 2032,
+        "median_trial_mean_cpu_ns": 63135.325
+      },
+      "candidate": {
+        "median_trial_mean_wall_ns": 58680.95,
+        "p95_frame_wall_ns": 90721,
+        "mean_js_requests": 107.7,
+        "mean_tlsf_charged_bytes": 5706.2,
+        "max_peak_rise": 2032,
+        "median_trial_mean_cpu_ns": 59170.26666666666
+      },
+      "paired_mean_wall_ratio": 0.92551101287965,
+      "paired_mean_wall_ratio_bootstrap95": [
+        0.8817762297886218,
+        0.9667578159898854
+      ],
+      "paired_mean_cpu_ratio": 0.9256524302111538
+    },
+    "pad": {
+      "baseline": {
+        "median_trial_mean_wall_ns": 48839.66666666667,
+        "p95_frame_wall_ns": 74506,
+        "mean_js_requests": 126,
+        "mean_tlsf_charged_bytes": 6720,
+        "max_peak_rise": 2204,
+        "median_trial_mean_cpu_ns": 49215.425
+      },
+      "candidate": {
+        "median_trial_mean_wall_ns": 50450.183333333334,
+        "p95_frame_wall_ns": 77584,
+        "mean_js_requests": 126,
+        "mean_tlsf_charged_bytes": 6720,
+        "max_peak_rise": 2204,
+        "median_trial_mean_cpu_ns": 50858.76666666666
+      },
+      "paired_mean_wall_ratio": 1.0368921098672026,
+      "paired_mean_wall_ratio_bootstrap95": [
+        0.9695207231566012,
+        1.0734247733400286
+      ],
+      "paired_mean_cpu_ratio": 1.0368478762218762
+    }
+  }
+}
