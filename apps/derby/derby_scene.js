@@ -53,7 +53,7 @@ function hud(tx) {
   let s;
   if (scene === 'pad') {
     const h = F.h[pick];
-    s = [(dm ? '' : 'RACE ' + raceNo + '  ') + '1000M ' + (F.o ? 'OVAL' : 'STRAIGHT') + '  SEED ' + hex(F.seed), num(pick) + ' ' + h.n,
+    s = [R.t[0].s || ((dm ? '' : 'RACE ' + raceNo + '  ') + '1000M ' + (F.o ? 'OVAL' : 'STRAIGHT') + '  SEED ' + hex(F.seed)), num(pick) + ' ' + h.n,
       STY[h.sty] + ' x' + od[pick], 'BET ' + stake + '  PTS ' + pts + '   A/D HORSE E/S BET 1 GO'];
     for (let i = 0; i < 8; ++i) R.od[i].setText(tx, od[i] < 10 ? od[i].toFixed(1) : '' + rnd(od[i]));
     R.sel.setRect(tx, [1 + 30 * pick, 13, 31 + 30 * pick, 24]);
