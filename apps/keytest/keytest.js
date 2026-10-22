@@ -30,12 +30,12 @@
 
   globalThis.frame = function () {
     f++;
-    const ev = [];
+    let ev;
     for (let i = 0; i < N.length; i++) {
-      if (K.pressed(N[i])) { p++; ev.push('+' + N[i]); }
-      if (K.released(N[i])) { r++; ev.push('-' + N[i]); }
+      if (K.pressed(N[i])) { p++; (ev || (ev = [])).push('+' + N[i]); }
+      if (K.released(N[i])) { r++; (ev || (ev = [])).push('-' + N[i]); }
     }
-    if (!ev.length) return;
+    if (!ev) return;
     const d = K.down();
     if (d.length > most) most = d.length;
     console.log('KEYTEST f=' + f + ' ' + ev.join(' ') + ' down=' + d.join(',') +
