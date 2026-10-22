@@ -309,6 +309,10 @@ static void walkers_and_plain(void){
         const int16_t c=(int16_t)((int)(next()%800)-280),e=(int16_t)((int)(next()%500)-180);
         plain_only.segments[plain_only.count++]=(ksn_proc_segment){a,b,c,e,(uint16_t)(k*97u)};
     }
+    static const int16_t one_to_five[][4]={{20,10,80,310},{80,310,20,10},{-30,20,90,620},{90,620,-30,20}};
+    for(unsigned k=0;k<sizeof one_to_five/sizeof one_to_five[0];k++)
+        plain_only.segments[plain_only.count++]=(ksn_proc_segment){one_to_five[k][0],one_to_five[k][1],
+            one_to_five[k][2],one_to_five[k][3],(uint16_t)(0xd100u+k)};
     plain_only.ready=true;
     mixed=plain_only;
     const ksn_proc_inst dot[]={SET(0,500),SET(1,500),SET(4,1),SET(15,0),SET(5,-1),SET(6,0),SET(7,0),
