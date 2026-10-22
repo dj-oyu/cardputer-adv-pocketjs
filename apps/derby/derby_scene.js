@@ -136,7 +136,7 @@ function paint(c, xs, close, gate, extra) {
   // within the camera's area; t counts from the cut.
   const e = KN[4], q = scene !== 'race' ? -1 : cm === 3 ? 0 : cm === 6 ? 7 : -1;
   if (e[22] !== q) e[20] = t, e[21] = cx, e[22] = q;
-  if (q === 7) dr('hd', []);
+  if (q === 7) dr('hd', 0);
   else course(c, cx, xs, close, gate);
   for (let j = 0, f = t - e[20], d = e[17] * f - (q ? 0 : (cx - e[21]) * c[0] / 16), r = q ? 0 : e[14] * f; j < (q < 0 ? 0 : 3); ++j) {
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back

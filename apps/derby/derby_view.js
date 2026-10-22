@@ -206,7 +206,7 @@ function course(c, x0, xs, close, gate, K) {
     const p = f / lz[l], S = p * U, X = o + (xs[l] - 12.5 * U - x0) * p, Y = gy(lz[l]), a = ph[l];
     if (l === close) {
       const g = (flo(a * 3 / PI) % 6 + 6) % 6;
-      dr('g' + g, []);
+      dr('g' + g, 0);
       dr('silk', SILK[l], rnd(HS * bob(g)));
     } else if (K ? X - 2.5 * S >= K[0] && X + 12.5 * S <= R : X > -160 && X < 400) rin(l, X, S, Y, sp ? a - sp * rs.v[l] * DT / 6.5 * 2 * PI : a);
   }
