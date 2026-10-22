@@ -67,7 +67,7 @@ hashes. ABI measurements are not cross-device time predictions.
 ## Finite device diagnostic
 
 Isolated copies reuse PR57/PR54 and PR50's product UI-owner boot method.
-Workload derby-app-photo-60-v1 uses product app_tick/GUEST_ALLOCATOR/scheduler/
+Workload derby-app-photo-60-v2 uses product app_tick/GUEST_ALLOCATOR/scheduler/
 LCD. Seed0x2545f491, race1, oval, MID; native input APIs execute with the empty
 physical snapshot. Storage reads no prior value/writes no-op and sound is muted.
 After40 real warm frames and empty load queue, an unmeasured capped6000-step
@@ -109,3 +109,22 @@ cache/affine switchesOFF. Offsets bootloader0,table0x8000,app0x10000; factory3Mi
 dictionary0x310000,font0x510000,storage0x590000. Ordinary product images boot HOME,
 local.derby/menu12 with ordinary storage; no PR47 app-control. Parent owns
 hardware capture/recovery. No USB, flash, merge or shared frozen-reference edits.
+
+## Diagnostic setup revision v2
+
+The v1 firmware performed hundreds/thousands of model steps synchronously; a
+related real-device baseline reported InternalError interrupted during setup.
+This is a shared risk, not proof of the precise watchdog cause. All previous v1
+diagnostic ZIPs are superseded. Product optimization and host benchmark remain
+unchanged. Setup now yields to the existing UI owner after at most8 actual model
+steps per original frame callback, with total6000-step bound. Result/photo also
+advance the remaining settlement field in those batches, then call original
+settle() only after done8 or the existing time200 cap. Update/interpolation order
+is preserved. No watchdog/guard/heap/stack/scheduler budget is disabled or raised.
+
+A host-only observer counts actual step() calls, requires max8 and multiple
+turns, and removes itself before measured frames. The owner deadline remains24s
+including setup; a late or unfinished run is incomplete. Batching can increase
+wall time, so final target completion/watchdog fit still requires capture. The
+photo regression also removes the batch bound as a negative and must reject it.
+Use only the new exact-head v2 artifacts; ordinary product behavior is unchanged.

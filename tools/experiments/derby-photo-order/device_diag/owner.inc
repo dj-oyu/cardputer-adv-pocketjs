@@ -14,7 +14,7 @@ static void diag_owner_step(void){
     if(!diag_owner_ran){
         diag_owner_ran=true;diag_owner_active=true;
         diag_owner_deadline=esp_timer_get_time()+24000000;
-        printf("DERBY_APP_DIAG START workload=@WORKLOAD@ source=@SOURCE@ allocator=GUEST_ALLOCATOR owner=ui_task lcd=product n=60 deadline_ms=24000\n");
+        printf("DERBY_APP_DIAG START workload=@WORKLOAD@ source=@SOURCE@ allocator=GUEST_ALLOCATOR owner=ui_task lcd=product n=60 deadline_ms=24000 setup_steps_per_turn=8\n");
         begin_run("local.derby",diag_prelude,sizeof(diag_prelude)-1,derby_watch_start,(size_t)(derby_watch_end-derby_watch_start-1));
     }
     const int64_t diag_now=esp_timer_get_time();

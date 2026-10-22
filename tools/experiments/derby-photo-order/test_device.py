@@ -79,6 +79,21 @@ int main(void){
  subprocess.run(['gcc','-std=c11','-Wall','-Wextra','-Werror',str(source),'-o',str(binary)],check=True)
  subprocess.run([str(binary)],check=True)
 
+
+SETUP_OBSERVER=r'''
+// Host regression only: count calls through actual step, then restore it.
+globalThis.__diagSetupMax=0;globalThis.__diagSetupTurns=0;globalThis.__diagSetupCalls=0;
+(()=>{const originalStep=step,originalFrame=globalThis.frame;let calls=0;
+ step=function(a,b,c){++calls;return originalStep(a,b,c)};
+ globalThis.frame=function(b){calls=0;const result=originalFrame(b);
+  if(calls>8)throw Error('diagnostic setup exceeded per-turn step bound');
+  if(calls){++__diagSetupTurns;__diagSetupCalls+=calls;__diagSetupMax=Math.max(__diagSetupMax,calls);}
+  if(diagReady){step=originalStep;globalThis.frame=originalFrame;}
+  return result;
+ };
+})();
+'''
+
 def main():
  out=R/'.cache/photo-order-device-host';out.mkdir(exist_ok=True)
  owner_boundary(out)
@@ -90,8 +105,10 @@ def main():
  pre='pocket.derby._diag=__attractDiag;pocket.random.seed=()=>0x2545f491;pocket.storage.get=()=>Promise.resolve({value:null,revision:0});pocket.storage.set=()=>Promise.resolve()'
  s=once(s,'    eval(PRELUDE,strlen(PRELUDE),"prelude.js");','    eval(PRELUDE,strlen(PRELUDE),"prelude.js");\n    {const char *s='+json.dumps(pre)+';REQ(eval(s,strlen(s),"diag-pre.js"));}')
  s=once(s,'    REQ(loaded_seen==1);',r'''
-    for(unsigned i=0;i<250&&diag_frames<60;i++)frame(0);
+    for(unsigned i=0;i<1024&&diag_frames<60;i++)frame(0);
     REQ(diag_frames==60&&!exceptions&&!bad_present&&!framefails);
+    REQ(gnum("__diagSetupMax")<=8&&gnum("__diagSetupMax")>0&&gnum("__diagSetupTurns")>1);
+    printf("DIAGNOSTIC_SETUP turns=%.0f steps=%.0f max_steps=%.0f\n",gnum("__diagSetupTurns"),gnum("__diagSetupCalls"),gnum("__diagSetupMax"));
     printf("PHOTO_ORDER_DEVICE_HOST {\"frames\":%u,\"pixels\":\"%016llx\",\"panel_hash\":\"%016llx\",\"down\":%u,\"queries\":%u,\"requests\":%zu,\"charged_bytes\":%zu}\n",diag_frames,(unsigned long long)pixel_hash,(unsigned long long)result_diag_panel_hash,diag_down,diag_queries,diag_requests,diag_bytes);
     pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     return 0;
@@ -114,7 +131,7 @@ def main():
   p=src/'derby_play.js'
   workload=device.workload()
   workload_hashes[mode]=hashlib.sha256(workload.encode()).hexdigest()
-  p.write_text(p.read_text()+'\n'+workload)
+  p.write_text(p.read_text()+'\n'+workload+'\n'+SETUP_OBSERVER)
   p=src/'derby_watch.js';p.write_text(once(p.read_text(),'const OV = [.5,','const OV = [1,'))
   app=run_derby.lower(src,out/mode/'app')
   csv=out/mode/'frames.csv'
@@ -123,12 +140,25 @@ def main():
   (out/mode/'run.log').write_text(proc.stdout+proc.stderr)
   assert proc.returncode==0,proc.stdout[-2000:]+proc.stderr[-2000:]
   row=json.loads(next(l.removeprefix('PHOTO_ORDER_DEVICE_HOST ') for l in proc.stdout.splitlines() if l.startswith('PHOTO_ORDER_DEVICE_HOST ')))
+  setup=next(l for l in proc.stdout.splitlines() if l.startswith('DIAGNOSTIC_SETUP '))
+  row['setup']={k:int(v) for k,v in (part.split('=') for part in setup.split()[1:])}
+  assert row['setup']['max_steps']<=8 and row['setup']['turns']>1,row
   row['csv_sha256']=hashlib.sha256(csv.read_bytes()).hexdigest();rows[mode]=row
  a,b=rows.values()
- assert all(a[k]==b[k] for k in ('frames','pixels','panel_hash','csv_sha256'))
+ assert all(a[k]==b[k] for k in ('frames','pixels','panel_hash','csv_sha256','setup'))
  assert (a['down'],b['down'],a['queries'],b['queries'])==(60,60,650,650),rows
  # The photo path skips exactly one eight-runner array/sort per frame.
  assert a['requests']-b['requests']==9*60 and a['charged_bytes']-b['charged_bytes']==988*60,rows
- report={'workload':device.WORKLOAD,'base':BASE,'head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=R,text=True).strip(),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'workload_sha256':workload_hashes,'rows':rows}
+ # One shared failure shape: removing the per-turn bound must be rejected.
+ neg=out/'unbounded-source'
+ if neg.exists():shutil.rmtree(neg)
+ shutil.copytree(out/'candidate/source',neg)
+ p=neg/'derby_play.js';p.write_text(once(p.read_text(),'batch<8&&!diagReady','batch<6000&&!diagReady'))
+ bad_app=run_derby.lower(neg,out/'unbounded-app')
+ env={**{k:v for k,v in os.environ.items() if not k.startswith(('DERBY_','PHOTO_ORDER_'))},'DERBY_APP_DIR':str(bad_app),'DERBY_TIER':'2','DERBY_HEAP_LIMIT':'524288'}
+ bad=subprocess.run([str(binary)],cwd=R,env=env,capture_output=True,text=True)
+ (out/'unbounded-negative.log').write_text(bad.stdout+bad.stderr)
+ assert bad.returncode!=0 and 'diagnostic setup exceeded per-turn step bound' in bad.stdout+bad.stderr
+ report={'workload':device.WORKLOAD,'base':BASE,'head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=R,text=True).strip(),'source_dirty':bool(subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],cwd=R,text=True)),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'workload_sha256':workload_hashes,'rows':rows,'unbounded_setup_rejected':True}
  (out/'result.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2));print('PHOTO_ORDER_DEVICE_WORKLOAD PASS')
 if __name__=='__main__':main()
