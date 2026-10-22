@@ -1,0 +1,49 @@
+{
+  "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "head": "0249544efbd4e85e52e1dee5d90ed8a723a37b6c",
+  "inputs": {
+    "baseline": {
+      "README.md": "f25c0282c84c97d58d325ee569c8d752e3b2afee17b14a95a25e40f8e7528252",
+      "chunks.txt": "7201d3e2e9be7af413847f419c175e25f6f57a44d7c2f840482d9415ed3b52e4",
+      "derby_demo.js": "5f2ed4a5b3f4717fd7aed206bcee5f5ea873e54d923382b273e35f0e4d805481",
+      "derby_pan.js": "61f1cd97ee3dd4ab90f93457850372c1d3064ec6d31751d698166f5d6a47b2b3",
+      "derby_play.js": "a6c2240b648ac0e328a15c5c7ded9e1157e45dc3a2d381707ff4461d4bdb5078",
+      "derby_prog.js": "f9a54bd832eed741ed97f45e73a4e00c515c9a1e1d25387fa7985154330bae1b",
+      "derby_scene.js": "48c82534a323a17d9d561280b5482f62c73ff3a0841ce9208b97d7c12a6cdd61",
+      "derby_view.js": "309d5375a4c620f863436e369f08e68e05c7e96eb53d90695cbb090f77dfb105",
+      "derby_watch.js": "716246c50394dac02318f38259dbb00db0a3823477ae639b2f158abf65f7125e",
+      "plans.json": "c03e08fc943a1951218e4af4c5917089206a4ca563150461486b512f31db2dd5"
+    },
+    "candidate": {
+      "README.md": "f25c0282c84c97d58d325ee569c8d752e3b2afee17b14a95a25e40f8e7528252",
+      "chunks.txt": "7201d3e2e9be7af413847f419c175e25f6f57a44d7c2f840482d9415ed3b52e4",
+      "derby_demo.js": "5f2ed4a5b3f4717fd7aed206bcee5f5ea873e54d923382b273e35f0e4d805481",
+      "derby_pan.js": "61f1cd97ee3dd4ab90f93457850372c1d3064ec6d31751d698166f5d6a47b2b3",
+      "derby_play.js": "a6c2240b648ac0e328a15c5c7ded9e1157e45dc3a2d381707ff4461d4bdb5078",
+      "derby_prog.js": "f9a54bd832eed741ed97f45e73a4e00c515c9a1e1d25387fa7985154330bae1b",
+      "derby_scene.js": "7dbcb379229311f84f37e0db716d684e9ec38813763cc67f37c7f54f940fe469",
+      "derby_view.js": "309d5375a4c620f863436e369f08e68e05c7e96eb53d90695cbb090f77dfb105",
+      "derby_watch.js": "716246c50394dac02318f38259dbb00db0a3823477ae639b2f158abf65f7125e",
+      "plans.json": "c03e08fc943a1951218e4af4c5917089206a4ca563150461486b512f31db2dd5"
+    }
+  },
+  "binary_sha256": "a588423f17e32594ac31cbc4ee3f048850d9213edc632ec97916b1e8223dd972",
+  "harness_sha256": "3d88f4dff005b5958fc2a3eff172192b5a7ceb8dbdbc2116a89ecd136727cffc",
+  "rows": [
+    {
+      "case": "normal",
+      "all_panel_bytes_equal": true,
+      "presents": 14564,
+      "panel_bytes": 64800,
+      "panel_sha256": "7f77895204acb48d5447ae901cd8218182c8149647fcc14641d3cbec10ada16d"
+    },
+    {
+      "case": "rebuild",
+      "all_panel_bytes_equal": true,
+      "presents": 1509,
+      "panel_bytes": 64800,
+      "panel_sha256": "ebc3b44915fc9144eb8acb43696430152d90f5ae6a900f4a7ce0c762a2781540"
+    }
+  ],
+  "negative_contract_detected": true
+}

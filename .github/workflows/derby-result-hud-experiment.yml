@@ -1,0 +1,139 @@
+name: DERBY result HUD experiment
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-result-hud-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_HEAD: e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Common O2 binary actual MID compatibility and native A/B
+        run: |
+          set -euo pipefail
+          python3 tools/experiments/derby-result-hud/verify.py
+          python3 tools/experiments/derby-result-hud/bench.py --pairs 40
+      - name: Device-sized O2 MID compatibility and A/B
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 tools/experiments/derby-result-hud/verify.py --m32
+          python3 tools/experiments/derby-result-hud/bench.py --m32 --pairs 40
+      - name: Exact finite device workload path and output verification
+        run: python3 tools/experiments/derby-result-hud/test_device.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-result-hud-host-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/result-hud*/bench-*/*.json
+            .cache/result-hud-verify*/result.json
+            .cache/result-hud-verify*/*.csv
+            .cache/result-hud-verify*/*.log
+            .cache/result-hud-device-host/result.json
+            .cache/result-hud-device-host/*/*.csv
+            .cache/result-hud-device-host/*/*.log
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, candidate]
+        profile: [product, result]
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.mode == 'baseline' && env.BASE_HEAD || env.SOURCE_HEAD }}
+          path: diagnostic-source
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Prepare isolated finite result diagnostic
+        if: matrix.profile == 'result'
+        run: python3 tools/experiments/derby-result-hud/prepare_device.py --checkout diagnostic-source
+      - name: Product configuration and exact flash artifact
+        working-directory: diagnostic-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          build_head=$(git rev-parse HEAD)
+          idf.py -B build_result -D SDKCONFIG="$PWD/build_result/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${build_head:0:12}" build
+          idf.py -B build_result size > build_result/size.log
+          python3 -B - '${{ matrix.mode }}' "$build_head" '${{ matrix.profile }}' <<'PY'
+          import hashlib,json,os,subprocess,sys
+          from pathlib import Path
+          b=Path('build_result')
+          diagnostic=sys.argv[3]=='result'
+          if not diagnostic: assert not subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],text=True)
+          else:
+              import shutil
+              for n in ('diagnostic.json','diagnostic.patch'): shutil.copy2(n,b/n)
+              manifest=json.loads(Path('diagnostic.json').read_text())
+              assert manifest['source']==sys.argv[2] and manifest['workload']=='derby-app-result-120-v2'
+          config=(b/'sdkconfig').read_text()
+          assert 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' in config
+          assert 'CONFIG_COMPILER_OPTIMIZATION_SIZE=y' in config
+          cache=(b/'CMakeCache.txt').read_text().splitlines()
+          for key in ('POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):
+              assert key+':BOOL=OFF' in cache,key
+          names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
+          images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}
+          (b/'experiment.json').write_text(json.dumps(dict(mode=sys.argv[1],source_head=sys.argv[2],experiment_head=os.environ['SOURCE_HEAD'],idf='6.0.1',diagnostic=diagnostic,hardware_tested=False,workload='derby-app-result-120-v2' if diagnostic else None,images=images),indent=2)+'\n')
+          (b/'SHA256SUMS').write_text(''.join(v['sha256']+'  '+n+'\n' for n,v in images.items()))
+          print((b/'experiment.json').read_text())
+          PY
+          if test '${{ matrix.profile }}' = product; then git diff --exit-code; fi
+          python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_result/expected-partition.bin
+          cmp build_result/expected-partition.bin build_result/partition_table/partition-table.bin
+          python3 -c 'from pathlib import Path; assert b"Application information:" in Path("build_result/cardputer_pocketjs.elf").read_bytes(); c=Path("build_result/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT","CONFIG_SECURE_BOOT_V2_ENABLED","CONFIG_SECURE_FLASH_ENC_ENABLED","CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-result-hud-${{ matrix.profile }}-${{ matrix.mode }}-${{ env.SOURCE_HEAD }}
+          path: |
+            diagnostic-source/build_result/*.bin
+            diagnostic-source/build_result/*.elf
+            diagnostic-source/build_result/*.map
+            diagnostic-source/build_result/*.json
+            diagnostic-source/build_result/*.log
+            diagnostic-source/build_result/SHA256SUMS
+            diagnostic-source/build_result/sdkconfig
+            diagnostic-source/build_result/CMakeCache.txt
+            diagnostic-source/build_result/diagnostic.patch
+            diagnostic-source/build_result/flash_args
+            diagnostic-source/build_result/bootloader/bootloader.bin
+            diagnostic-source/build_result/partition_table/partition-table.bin
+          retention-days: 14

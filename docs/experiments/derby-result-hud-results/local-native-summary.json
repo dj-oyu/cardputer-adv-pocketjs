@@ -1,0 +1,95 @@
+{
+  "inputs": {
+    "baseline": {
+      "README.md": "f25c0282c84c97d58d325ee569c8d752e3b2afee17b14a95a25e40f8e7528252",
+      "chunks.txt": "7201d3e2e9be7af413847f419c175e25f6f57a44d7c2f840482d9415ed3b52e4",
+      "derby_demo.js": "5f2ed4a5b3f4717fd7aed206bcee5f5ea873e54d923382b273e35f0e4d805481",
+      "derby_pan.js": "61f1cd97ee3dd4ab90f93457850372c1d3064ec6d31751d698166f5d6a47b2b3",
+      "derby_play.js": "a6c2240b648ac0e328a15c5c7ded9e1157e45dc3a2d381707ff4461d4bdb5078",
+      "derby_prog.js": "f9a54bd832eed741ed97f45e73a4e00c515c9a1e1d25387fa7985154330bae1b",
+      "derby_scene.js": "48c82534a323a17d9d561280b5482f62c73ff3a0841ce9208b97d7c12a6cdd61",
+      "derby_view.js": "309d5375a4c620f863436e369f08e68e05c7e96eb53d90695cbb090f77dfb105",
+      "derby_watch.js": "716246c50394dac02318f38259dbb00db0a3823477ae639b2f158abf65f7125e",
+      "plans.json": "c03e08fc943a1951218e4af4c5917089206a4ca563150461486b512f31db2dd5"
+    },
+    "candidate": {
+      "README.md": "f25c0282c84c97d58d325ee569c8d752e3b2afee17b14a95a25e40f8e7528252",
+      "chunks.txt": "7201d3e2e9be7af413847f419c175e25f6f57a44d7c2f840482d9415ed3b52e4",
+      "derby_demo.js": "5f2ed4a5b3f4717fd7aed206bcee5f5ea873e54d923382b273e35f0e4d805481",
+      "derby_pan.js": "61f1cd97ee3dd4ab90f93457850372c1d3064ec6d31751d698166f5d6a47b2b3",
+      "derby_play.js": "a6c2240b648ac0e328a15c5c7ded9e1157e45dc3a2d381707ff4461d4bdb5078",
+      "derby_prog.js": "f9a54bd832eed741ed97f45e73a4e00c515c9a1e1d25387fa7985154330bae1b",
+      "derby_scene.js": "7dbcb379229311f84f37e0db716d684e9ec38813763cc67f37c7f54f940fe469",
+      "derby_view.js": "309d5375a4c620f863436e369f08e68e05c7e96eb53d90695cbb090f77dfb105",
+      "derby_watch.js": "716246c50394dac02318f38259dbb00db0a3823477ae639b2f158abf65f7125e",
+      "plans.json": "c03e08fc943a1951218e4af4c5917089206a4ca563150461486b512f31db2dd5"
+    }
+  },
+  "baseline": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "binary_sha256": "00a27a6ec983b44288b1e21f2cd81b810f46a8dde18d9ed8aad927c63d360285",
+  "harness_sha256": "0b4911400a5cdb54d14115629ab90a98e0b537968212f3b1c44be0513b11b0d0",
+  "candidate_scene_sha256": "7dbcb379229311f84f37e0db716d684e9ec38813763cc67f37c7f54f940fe469",
+  "compiler": "gcc (Debian 14.2.0-19) 14.2.0",
+  "cpu_affinity": [
+    0
+  ],
+  "pairs": 40,
+  "frames_per_trial": 300,
+  "sample_fields": [
+    "wall_ns",
+    "thread_cpu_ns",
+    "js_requests",
+    "tlsf_charged_bytes",
+    "peak_rise"
+  ],
+  "groups": {
+    "res": {
+      "baseline": {
+        "median_trial_mean_wall_ns": 56484.03333333333,
+        "p95_frame_wall_ns": 89953,
+        "mean_js_requests": 111,
+        "mean_tlsf_charged_bytes": 5956,
+        "max_peak_rise": 2444,
+        "median_trial_mean_cpu_ns": 56830.975
+      },
+      "candidate": {
+        "median_trial_mean_wall_ns": 51456.46333333333,
+        "p95_frame_wall_ns": 75984,
+        "mean_js_requests": 78,
+        "mean_tlsf_charged_bytes": 4228,
+        "max_peak_rise": 2444,
+        "median_trial_mean_cpu_ns": 51900.02333333333
+      },
+      "paired_mean_wall_ratio": 0.912934531307028,
+      "paired_mean_wall_ratio_bootstrap95": [
+        0.8883145084273807,
+        0.9240988498293087
+      ],
+      "paired_mean_cpu_ratio": 0.9140482606007091
+    },
+    "pad": {
+      "baseline": {
+        "median_trial_mean_wall_ns": 48837.246666666666,
+        "p95_frame_wall_ns": 72300,
+        "mean_js_requests": 126,
+        "mean_tlsf_charged_bytes": 6720,
+        "max_peak_rise": 2204,
+        "median_trial_mean_cpu_ns": 49208.543333333335
+      },
+      "candidate": {
+        "median_trial_mean_wall_ns": 48756.278333333335,
+        "p95_frame_wall_ns": 72070,
+        "mean_js_requests": 126,
+        "mean_tlsf_charged_bytes": 6720,
+        "max_peak_rise": 2204,
+        "median_trial_mean_cpu_ns": 49205.03
+      },
+      "paired_mean_wall_ratio": 0.9944292083546697,
+      "paired_mean_wall_ratio_bootstrap95": [
+        0.9810664050890724,
+        1.0127792383498904
+      ],
+      "paired_mean_cpu_ratio": 0.9929724009354618
+    }
+  }
+}
