@@ -1,0 +1,17 @@
+{
+  "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "binary_sha256": "c3a6324f03e2ddbc02d859ba223f3d477847a60c1366cf0b11e96d43575560df",
+  "play_sha256": "b0c1b6bcddf76fb3753913848f42cbd1cd9363da0491be96c766deacd6d00b48",
+  "results": {
+    "baseline": {
+      "csv_sha256": "f80da9e732cdc19f27a2e38d34f97ba07bac9d63d831e240b43bdb3bec5b0695",
+      "pixels": "pixels hash 789dd8aa345ffcf3",
+      "frames": "frames 14563 (procedural frames checked 14527): exceptions=0 bad_present=0 failures=0 tones=20"
+    },
+    "candidate": {
+      "csv_sha256": "f80da9e732cdc19f27a2e38d34f97ba07bac9d63d831e240b43bdb3bec5b0695",
+      "pixels": "pixels hash 789dd8aa345ffcf3",
+      "frames": "frames 14563 (procedural frames checked 14527): exceptions=0 bad_present=0 failures=0 tones=20"
+    }
+  }
+}

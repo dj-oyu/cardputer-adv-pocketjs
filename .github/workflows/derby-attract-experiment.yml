@@ -1,0 +1,114 @@
+name: DERBY attract scan experiment
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: derby-attract-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_HEAD: e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Common O2 binary actual MID compatibility and native A/B
+        run: |
+          set -euo pipefail
+          python3 tools/experiments/derby-attract/run.py
+          python3 tools/experiments/derby-attract/bench.py --pairs 40
+      - name: Device-sized O2 MID compatibility and A/B
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 tools/experiments/derby-attract/run.py --m32
+          python3 tools/experiments/derby-attract/bench.py --m32 --pairs 40
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-attract-host-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/attract-deep*/20*/result.json
+            .cache/attract-deep*/20*/*.csv
+            .cache/attract-deep*/20*/*.log
+            .cache/attract-deep*/bench-*/*.json
+          retention-days: 14
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, candidate]
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.mode == 'baseline' && env.BASE_HEAD || env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Ordinary product configuration and exact flash artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          build_head=$(git rev-parse HEAD)
+          idf.py -B build_attract -D SDKCONFIG="$PWD/build_attract/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${build_head:0:12}" build
+          idf.py -B build_attract size > build_attract/size.log
+          python3 -B - '${{ matrix.mode }}' "$build_head" <<'PY'
+          import hashlib,json,os,subprocess,sys
+          from pathlib import Path
+          b=Path('build_attract')
+          assert not subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],text=True)
+          config=(b/'sdkconfig').read_text()
+          assert 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' in config
+          assert 'CONFIG_COMPILER_OPTIMIZATION_SIZE=y' in config
+          cache=(b/'CMakeCache.txt').read_text().splitlines()
+          for key in ('POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):
+              assert key+':BOOL=OFF' in cache,key
+          names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
+          images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}
+          (b/'experiment.json').write_text(json.dumps(dict(mode=sys.argv[1],source_head=sys.argv[2],experiment_head=os.environ['SOURCE_HEAD'],idf='6.0.1',diagnostic=False,hardware_tested=False,images=images),indent=2)+'\n')
+          (b/'SHA256SUMS').write_text(''.join(v['sha256']+'  '+n+'\n' for n,v in images.items()))
+          print((b/'experiment.json').read_text())
+          PY
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: derby-attract-normal-${{ matrix.mode }}-${{ env.SOURCE_HEAD }}
+          path: |
+            build_attract/*.bin
+            build_attract/*.elf
+            build_attract/*.map
+            build_attract/*.json
+            build_attract/*.log
+            build_attract/SHA256SUMS
+            build_attract/sdkconfig
+            build_attract/CMakeCache.txt
+            build_attract/flash_args
+            build_attract/bootloader/bootloader.bin
+            build_attract/partition_table/partition-table.bin
+          retention-days: 14
