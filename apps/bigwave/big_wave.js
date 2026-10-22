@@ -292,7 +292,7 @@
     const s = S, F = C.F, co = s.co, si = s.si, far = TIER[s.tier][0], d = C.D;
     const w = [-F * (s.lc * co + s.vc * si), -F * (s.lc * si - s.vc * co)], e = [F * co, F * si];
     const m0 = M.ceil((s.cx + C.dn) / d), m1 = M.floor((s.cx + far) / d), y = m => 1 / (m * d - s.cx);
-    const add = (k, i) => { if (PL[k]) D.push([PL[k], i]); };
+    const add = (k, i) => { if (PL[k]) D.push(PL[k], i); };
     add('sk', e.concat(w, [1 / C.dn]));
     add('se', e.concat(w, [y(m0), m1 - m0 + 1, s.t * .21]));
     if (s.st === 3) return;
@@ -403,7 +403,7 @@
       const D = [];
       draws(D);
       P.beginFrame(SETS[s.set].bg);
-      for (let i = 0; i < D.length; ++i) P.draw(D[i][0], D[i][1]);
+      for (let i = 0; i < D.length; i += 2) P.draw(D[i], D[i + 1]);
       P.commit();
     }
     if (!built) { V.replace(ui); built = fr; } else hud();
