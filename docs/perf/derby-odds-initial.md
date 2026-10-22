@@ -58,7 +58,7 @@ Product allocator and device FPS remain unmeasured.
 
 Dedicated CI runs host verification and produces paired product and finite
 paddock diagnostic images. The latter reuses PR50's exact generator at
-6e5fbdbcd612526df8b6600dd55aae1327205b93: `derby-app-pad-120-v1`, real product
+1e68b268a4b91ec54e88f408118de3e39b8b6bc5: `derby-app-pad-120-v1`, real product
 GUEST_ALLOCATOR/app_tick/LCD, 50 warmup +120 measured frames, 24-second cooperative
 deadline, no persistent storage writes. Product partition/security/INFO defaults
 are retained. Parent owns bounded broker observation (30s/32KiB/256 lines);
