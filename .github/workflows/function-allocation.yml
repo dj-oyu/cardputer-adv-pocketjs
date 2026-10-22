@@ -1,0 +1,70 @@
+name: Function allocation leaf
+on:
+  pull_request:
+    paths:
+      - 'components/quickjs-ng/quickjs-ng/**'
+      - 'tools/vmtest/function_allocation/**'
+      - '.github/workflows/function-allocation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  LEAF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  allocation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [native, m32]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.LEAF_HEAD }}
+          persist-credentials: false
+      - name: Record exact source head
+        run: |
+          mkdir -p .cache/function_allocation/evidence
+          git rev-parse HEAD | tee .cache/function_allocation/evidence/head.txt
+          test "$(git rev-parse HEAD)" = "$LEAF_HEAD"
+      - name: Full baseline, candidate and poisoned corpus with OOM sweeps
+        run: |
+          args=()
+          if [ '${{ matrix.arch }}' = m32 ]; then args+=(--m32); fi
+          python3 tools/vmtest/function_allocation/run.py "${args[@]}" --oom
+          python3 tools/vmtest/function_allocation/run.py "${args[@]}" --only poison --negative
+          python3 tools/vmtest/function_allocation/run.py "${args[@]}" --only poison --negative-copy
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: function-allocation-${{ matrix.arch }}-${{ env.LEAF_HEAD }}
+          path: .cache/function_allocation/evidence/
+          retention-days: 14
+  full-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.LEAF_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Full contracts including capture and m32 games
+        run: |
+          mkdir -p artifacts
+          git rev-parse HEAD | tee artifacts/head.txt
+          test "$(git rev-parse HEAD)" = "$LEAF_HEAD"
+          M32_SYSROOT="$PWD/.cache/kasane_megademo_app/m32sys" bash tools/vmtest/m32_sysroot.sh > artifacts/m32-flags.txt 2> artifacts/m32-prepare.log
+          CONTRACT_LOG_DIR=artifacts/contract-sections GAMES_M32=1 bash tools/kasane_contract/run.sh > artifacts/full-contracts.log 2>&1
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: function-allocation-full-${{ env.LEAF_HEAD }}
+          path: artifacts/
+          retention-days: 14

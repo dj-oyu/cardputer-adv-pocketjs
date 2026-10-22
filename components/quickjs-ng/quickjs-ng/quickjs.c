@@ -40015,10 +40015,13 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     byte_code_offset = function_size;
     function_size += fd->byte_code.size;
 
-    b = js_mallocz(ctx, function_size);
+    b = js_malloc(ctx, function_size);
     if (!b) {
         goto fail;
     }
+    /* Keep all header fields and padding initialized. The packed payload
+       below is completely overwritten by the existing copies. */
+    memset(b, 0, sizeof(*b));
     b->header.ref_count = 1;
 
     b->byte_code_buf = (void *)((uint8_t*)b + byte_code_offset);
