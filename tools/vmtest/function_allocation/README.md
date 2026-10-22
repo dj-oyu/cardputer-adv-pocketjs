@@ -80,6 +80,9 @@ counted first and increase that limit if necessary, so every allocation in those
 workloads is covered. OOM sweeps check memory safety and hangs rather than matching
 normal output. This is not an exhaustive sweep of every corpus file or every
 combination of multiple allocation failures.
+The existing OOM sweep disables LeakSanitizer; normal full-corpus runs retain
+leak detection and explicitly reject AddressSanitizer, LeakSanitizer and UBSan
+diagnostics, including in configurations compared against their own baseline.
 
 All execution logs and traces are under `.cache/function_allocation/evidence/`.
 Poison logs also include per-success header and payload byte sizes; these are

@@ -126,7 +126,8 @@ def main():
                 assert {p.stem for p in actual.glob('*.txt')} == expected_names
                 for name in expected_names:
                     output = (actual / (name + '.txt')).read_bytes()
-                    assert b'ERROR: AddressSanitizer' not in output and b'runtime error:' not in output
+                    assert not re.search(rb'(?:Address|Leak|UndefinedBehavior|Memory)Sanitizer', output), (label, name)
+                    assert b'runtime error:' not in output, (label, name)
                     status = int(re.search(rb'exit=(\d+)\s*$', output).group(1))
                     assert status < 128 and status != 124, (label, name, status)
                 if mode == 'baseline' and debug == 'strip' and not a.m32:
@@ -146,7 +147,7 @@ def main():
                     for name in ['closures', 'generators']:
                         trace = OUT / 'evidence' / f'{label}-{name}.trace'
                         run(label + '-trace-' + name, [str(OUT / label / ('vmrun-' + variant)),
-                            '--profile', 'host', '--trace', str(trace), f'tools/vmtest/corpus/{name}.js'], env)
+                            '--trace', str(trace), f'tools/vmtest/corpus/{name}.js'], env)
                         attempts = sum(line.startswith(('+ ', '~ ', '! ', '!~ ')) for line in trace.read_text().splitlines())
                         count = max(count, attempts)
                     run(label + '-oom', ['bash', 'tools/vmtest/oom_sweep.sh', '-n', str(count)], dict(env, VARIANT=variant))

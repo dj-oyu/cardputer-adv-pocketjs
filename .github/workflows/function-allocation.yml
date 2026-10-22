@@ -8,6 +8,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: function-allocation-${{ github.ref }}
+  cancel-in-progress: true
 env:
   LEAF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
