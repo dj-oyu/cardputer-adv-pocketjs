@@ -72,22 +72,73 @@ Local summaries and compatibility identity are committed alongside this note;
 CI artifacts retain complete per-frame samples/CSV/logs. Local full raw path:
 .cache/attract-deep/bench-20261022T195802Z/raw.json.
 
-## Device artifact boundary
+## Finite device diagnostic
 
-CI packages ordinary baseline/candidate product images with identical defaults,
-IDF6.0.1, INFO startup logging, real guest allocator and unchanged partitions,
-security and budgets. These boot HOME; local.derby is menu index12. PR47 app
-control is absent. ZIPs include app, bootloader, table, flash arguments, ELF/map,
-config/cache and checksums/provenance. Verify source heads and app/ELF hashes;
-standard offsets0x0/0x8000/0x10000 are also recorded in flasher_args.json. No
-flash or USB operation is performed here.
+The existing integration fixed fixture deletes attract(b), so it cannot measure
+this path. Instead this PR reuses PR50's real-app boot diagnostic method and
+isolated templates from commit 1e68b268a4b91ec54e88f408118de3e39b8b6bc5
+([method](https://github.com/dj-oyu/cardputer-adv-pocketjs/blob/1e68b268a4b91ec54e88f408118de3e39b8b6bc5/docs/perf/derby-app-diagnostic.md)).
+No PR50 math optimization or PR53 odds change is imported. Normal product code,
+shared generator/CI/frozen references, heap/stack budgets and renderer lifetime
+remain unchanged. The new generator edits only a separate clean checkout.
 
-These are ordinary images for functional/preflight work, **not a complete fixed
-performance experiment**. Existing integration finite-fixture generation at
-tools/derby_fixed_workload_chunks.py replaces attract(b) with fixed state, so
-it cannot measure this path. That discovery stops reuse of that fixture. Shared
-CI/generation/frozen references remain untouched. A device comparison needs an
-owner-coordinated diagnostic retaining attract and fixing input/seed, or a
-separately accepted normal-app protocol. Do not compare random races as equal
-work or infer device benefit from these host samples. Normal app storage
-behavior remains (reads and saves); no storage operation is added by the patch.
+```
+git worktree add --detach /tmp/attract-diag <exact-source-head>
+python3 tools/experiments/derby-attract/prepare_device.py --checkout /tmp/attract-diag
+python3 tools/experiments/derby-attract/test_device.py
+```
+
+Workload `derby-app-attract-race-120-v1` boots once through begin_run(local.derby),
+UI-owner app_tick, the product scheduler/GUEST_ALLOCATOR and LCD. Same seed
+0x2545f491, race1, forced oval, HEAVY tier, camera8 on both variants. Real setup
+frames register plans; after40 warm frames and empty load queue the model is
+advanced unmeasured to lead390m. Ten further actual frames settle the scene,
+then120 manual-race frames run. This is a selected fixed race window, not
+normal-game steady FPS. The original attract(b), native down(), query() and
+allocation behavior remain. Diagnostic-only keys_pump replaces its physical
+snapshot with zero; JS input APIs are not replaced. Every measured call requires
+dm=0 and scene=race. Storage reads return no saved state, writes are no-ops and
+audio is silent. Hardware inputs do not select the measured scene.
+
+Six short diagnostic lines plus at most16 guest console calls fit the existing
+30-second /32KiB /256-line bounded broker observation. No broker/USB mechanism
+is added. START identifies full source head, workload and allocator. END must
+say `status=complete frames=120 complete:true`, followed by `EXIT running=0`.
+The24-second deadline is checked cooperatively between owner turns; even a final
+turn crossing it reports timeout, never complete. It cannot preempt a blocked
+turn. Reporting and teardown are outside the measured interval. Missing END/EXIT,
+app_error, timeout, input_mismatch or present_pending is incomplete/failed.
+Do not feed this workload to the old derby_fixed parser or relax its guards.
+
+Measured native input counts must be baseline down120/query1680 and candidate
+down0/query600; success rejects any other counts. Those counters prove that the
+real native API was reached or skipped, rather than replacing it with a fixture
+constant. The exact diagnostic JS and generated native input copy pass the host
+120-frame test: pixel2ecc984362eaf8ce and CSV SHA256
+51521411a7289d188e1afa68545503d608cf457f90a219e9906bfde4cbb499c0 are equal.
+Native64 host delta is840 allocation requests/42,720 charged B per120frames;
+this is a compatibility/path test, not device timing or guest-allocator evidence.
+The original full MID test and host timing/raw samples are retained.
+
+Summary metrics follow PR50: original frame entry-to-return wall time (including
+scheduler continuation/preemption gaps), first-entry to last-return window time
+(owner pacing, excluding last presentation), and summed owner tick wall time
+(including normal app_tick/LCD). They are not exclusive CPU cycles or completed
+LCD FPS. `median_x2` is twice the exact median in microseconds, preserving half-us;
+p95 is nearest-rank ceil(0.95*n), max is exact. Sorting/reporting and boundary heap
+queries are outside the frame timer. A static120-element unsigned array costs480B;
+input counters add24B static state, with no per-frame sample allocation. Existing
+allocator counters forward unchanged callbacks and count requests/bytes including
+failures, not physical TLSF occupancy. Boundary free minimum is sampled before
+frames; free_end is before teardown, neither is transient peak heap. Counter and
+wrapper overhead applies to both variants and is diagnostic instrumentation.
+
+CI builds ordinary product and finite diagnostic A/B images with unchanged
+partitions/security/INFO settings, IDF6.0.1, cache/affine switches OFF. Artifacts
+include app/bootloader/table/flash_args, ELF/map, sdkconfig/cache, image checksums,
+source head, diagnostic.patch and per-generated-file hashes. Check profile as
+well as source SHA before device use. Bootloader0x0, table0x8000, app0x10000;
+3MiB factory and dictionary/font/storage layout are unchanged. Normal product
+images boot HOME -> local.derby menu12, have no auto benchmark/END marker and
+retain ordinary storage behavior. PR47 app-control is absent. Parent owns all
+sanctioned hardware observation/stop actions; no USB/flash/merge is performed here.
