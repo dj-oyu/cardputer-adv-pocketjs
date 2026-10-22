@@ -129,9 +129,10 @@ const CAMS = [[100, 9.7, 33, 880, 1, -1e9, 1e9], 0, [58, 15, 36, 880, 1, -1e9, 1
 const PAN = [60, 14, 1500, 16];
 let pc = null, vq = null;
 function wide(g) {
+  const a = pose(g, (DNR + DFR) / 2);
   let m = 0, e = 1e9;
   for (let i = 7; i < 10; ++i) {
-    const q = pose(CAMS[i][3], CAMS[i][CRS === OC ? 5 : 4]), a = pose(g, (DNR + DFR) / 2), x = a[0] - q[0], z = a[1] - q[1];
+    const q = pose(CAMS[i][3], CAMS[i][CRS === OC ? 5 : 4]), x = a[0] - q[0], z = a[1] - q[1];
     if (x * x + z * z < e) e = x * x + z * z, m = i;
   }
   return e > PAN[0] * PAN[0] || CRS === OC && g > OB && g < 650 ? m : 0;
