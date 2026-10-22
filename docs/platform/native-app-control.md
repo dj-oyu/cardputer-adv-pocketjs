@@ -61,6 +61,15 @@ quality gates remain independent; transport success does not imply benchmark
 quality success. GCC `-fstack-usage` records compiler stack estimates for the
 owner/control/transport sources; these are not measured stack high-water marks.
 
+The fixed-workload diagnostic-OFF gate keeps its historical source comparison
+against pre-feature head `10fbed312682a122011f447290ba82891c16e8fd`.
+It additionally compares the current ordinary owner paths against independently
+reviewed native-feature head `6087f329146f4373569e7f82e0b1477ac51d13a4`.
+Negative controls reject changed action delivery and instance-generation fences;
+the diagnostic stripper and the other benchmark/machine-code gates are unchanged.
+The native feature stays in its own commit so a later PR #46 device A/B can
+apply the same control/measurement mechanism to both firmware variants.
+
 ## Integration prerequisites
 
 This change is stacked on firmware PR #46 at
