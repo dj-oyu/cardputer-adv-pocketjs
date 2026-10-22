@@ -1,6 +1,7 @@
 #include "derby_detail.h"
 #include "derby_measure.h"
 #include "pocket_proc.h"
+#include "quickjs-prepared.h"
 #ifdef KSN_PROC_HOST_TEST
 ksn_result pocket_kasane_proc_publish(void);
 ksn_result pocket_kasane_proc_publish_at(unsigned surface,ksn_rect damage);
@@ -126,6 +127,33 @@ static proc_slot slots[PROC_HANDLES];
 static uint32_t next_handle;
 static const ksn_proc_rom_entry *rom_table;
 static unsigned rom_count;
+/* Existing adapter state is UI-owner-task confined. Scopes borrow one
+ * descriptor on the synchronous loader's C stack; no runtime pool or heap.
+ * The native function stays rooted only during its descriptor scope. */
+typedef struct prepared_scope {
+    struct prepared_scope *previous;
+    JSContext *ctx;
+    const PJSPreparedCall *call;
+    const ksn_proc_rom_entry *table,*rom;
+    unsigned count;
+    JSValue binding;
+    bool has_binding;
+} prepared_scope;
+static prepared_scope *prepared_active;
+static const PJSPreparedCall *prepared_consuming;
+#ifdef POCKET_PREPARED_TEST
+static unsigned prepared_hits,prepared_misses;
+#endif
+void pjs_prepared_binding_created(JSContext *ctx,JSValueConst value,const void *bytecode,unsigned pc) {
+    prepared_scope *s=prepared_active;
+    /* Capture only a lazy original instantiated during this loader scope.
+     * An already materialized binding is conservatively generic. Never retain
+     * an unused function/realm after an unsupported source or after eval. */
+    if(s && s->ctx==ctx && !s->has_binding && s->call->bytecode==bytecode &&
+       s->call->lookup_pc==pc) {
+        s->binding=JS_DupValue(ctx,value);s->has_binding=true;
+    }
+}
 static uint32_t scalar_batches,pie_batches;
 typedef struct {
     ksn_proc_frame *candidate,*committed;
@@ -357,6 +385,38 @@ static JSValue attach_points(JSContext *ctx,JSValueConst descriptor,bool rom,voi
     *out=points;
     return JS_UNDEFINED;
 }
+/* The selected descriptor owns literal float inputs. Keep native calloc
+ * before element getters, read every original element exactly once, and
+ * defer field-domain failure until all numeric reads have completed, as the
+ * generic path does. A changed value uses that same scalar as its fallback;
+ * never call register_rom again or reread a getter. */
+static JSValue prepared_arguments(JSContext *ctx,JSValueConst array,
+        ksn_proc_rom_plan *plan,const ksn_proc_rom_entry *rom,
+        const PJSPreparedCall *call) {
+    const char *op="kasane.procedural.register";
+    bool fields=true,matched=true;
+    for(unsigned i=0;i<rom->params;i++) {
+        JSValue v=JS_GetPropertyUint32(ctx,array,i);double n;
+        bool ok=!JS_IsException(v)&&number(ctx,v,&n);
+        JS_FreeValue(ctx,v);
+        if(!ok)return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid plan argument");
+        bool same=!memcmp(&n,&call->numbers[i],sizeof n);
+        matched&=same;
+        plan->args[i]=same?call->args[i]:(float)n;
+        for(unsigned k=0;k<rom->patches;k++)if(rom->patch[k].param==i) {
+            unsigned f=rom->patch[k].field;
+            fields&=f==KSN_PROC_FIELD_A?n>=0&&n<=UINT8_MAX&&n==floor(n):
+                    f==KSN_PROC_FIELD_COLOR?n>=0&&n<=UINT16_MAX&&n==floor(n):
+                    isfinite((float)n);
+        }
+    }
+#ifdef POCKET_PREPARED_TEST
+    if(matched)prepared_hits++;else prepared_misses++;
+#else
+    (void)matched;
+#endif
+    return fields?JS_UNDEFINED:failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid instruction entry");
+}
 /* register(name, args?, points?): a built-in plan (docs/kasane/flash-plan.md).
  * The same checks as the array path, in the same order of kinds: the shape
  * of the call, the slot limit before any allocation, the values, then the
@@ -405,6 +465,11 @@ static JSValue register_rom(JSContext *ctx,int argc,JSValueConst *argv){
 #endif
     if(!plan)return failure(ctx,op,POCKET_ERR_OUT_OF_MEMORY,"plan allocation failed");
     plan->params=rom->params;
+    if(prepared_consuming && prepared_active && prepared_active->rom==rom) {
+        JSValue read=prepared_arguments(ctx,argc>=2?argv[1]:JS_UNDEFINED,
+                                       plan,rom,prepared_consuming);
+        if(JS_IsException(read)){free(plan);return read;}
+    } else {
     double arg[KSN_PROC_ROM_PARAMS];
     for(uint32_t i=0;i<given;i++){
         JSValue v=JS_GetPropertyUint32(ctx,argv[1],i);
@@ -423,6 +488,7 @@ static JSValue register_rom(JSContext *ctx,int argc,JSValueConst *argv){
                 isfinite((float)v);
         if(!ok){free(plan);
             return failure(ctx,op,POCKET_ERR_INVALID_ARGUMENT,"invalid instruction entry");}
+    }
     }
 #ifdef KASANE_MEGADEMO_TRACE
     int64_t prep_began=esp_timer_get_time();
@@ -834,7 +900,8 @@ esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
     JSValue procedural=JS_NewObject(ctx);
     if(JS_IsException(procedural))return ESP_ERR_NO_MEM;
     static const JSCFunctionListEntry methods[]={
-        JS_CFUNC_DEF("register",1,js_register),
+        {"register",JS_PROP_WRITABLE|JS_PROP_CONFIGURABLE,JS_DEF_CFUNC,
+         PJS_PREPARED_REGISTER_MAGIC,{.func={1,JS_CFUNC_generic,{.generic=js_register}}}},
         JS_CFUNC_DEF("unregister",1,js_unregister),
         JS_CFUNC_DEF("beginFrame",1,js_begin),
         JS_CFUNC_DEF("draw",2,js_draw),
@@ -849,6 +916,7 @@ esp_err_t pocket_proc_install(JSContext *ctx,JSValueConst ns){
     return JS_SetPropertyStr(ctx,ns,"procedural",procedural)<0?ESP_ERR_NO_MEM:ESP_OK;
 }
 void pocket_proc_reset(void){
+
     for(unsigned i=0;i<PROC_HANDLES;i++){
         free(slots[i].plan);free(slots[i].points);slots[i]=(proc_slot){0};
     }
@@ -1050,4 +1118,56 @@ void pocket_proc_present_result(ksn_result result){
 void pocket_proc_overlay_present_result(ksn_result result){
     if(any_pending()&&surfaces[pending_surface].image_mode)
         pocket_proc_present_result(result);
+}
+
+/* The only private engine entry into this adapter. No namespace lookup: the
+ * native dispatcher supplies the already evaluated and rooted function and
+ * argv at its ordinary stack/realm boundary. Registry mutation declines. */
+bool pjs_prepared_dispatch(JSContext *ctx,JSValueConst callee,JSValueConst self,
+        int argc,JSValueConst *argv,const void *bytecode,unsigned next_pc,JSValue *out) {
+    prepared_scope *s=prepared_active;
+    if(!s || s->call->bytecode!=bytecode || s->call->next_pc!=next_pc)
+        return false;
+    bool consume=s->ctx==ctx && s->has_binding &&
+       JS_VALUE_GET_TAG(callee)==JS_TAG_OBJECT &&
+       JS_VALUE_GET_PTR(callee)==JS_VALUE_GET_PTR(s->binding) &&
+       argc==(int)s->call->argc && rom_table==s->table && rom_count==s->count &&
+       !prepared_consuming;
+    if(consume) {
+        prepared_consuming=s->call;
+        *out=js_register(ctx,self,argc,argv);
+        prepared_consuming=NULL;
+    }
+    /* The VM operand/native frame still owns callee here. Do not retain an
+     * otherwise dead function through later statements in the same eval. */
+    if(s->has_binding){JS_FreeValue(s->ctx,s->binding);s->has_binding=false;}
+    return consume;
+}
+JSValue pocket_proc_eval_prepared(JSContext *ctx,const char *source,size_t length,
+                                  const char *filename) {
+    /* Large/unsupported source still uses the normal compiler and execution.
+     * COMPILE_ONLY then EvalFunction is the engine's own global-eval path;
+     * preparation allocates nothing and never evaluates fixture code. */
+    if(length>16384 || !rom_table || !rom_count)
+        return JS_Eval(ctx,source,length,filename,JS_EVAL_TYPE_GLOBAL);
+    JSValue compiled=JS_Eval(ctx,source,length,filename,
+                            JS_EVAL_TYPE_GLOBAL|JS_EVAL_FLAG_COMPILE_ONLY);
+    if(JS_IsException(compiled))return compiled;
+    PJSPreparedCall call;
+    prepared_scope scope={.previous=prepared_active,.ctx=ctx,.call=&call,
+                           .table=rom_table,.count=rom_count};
+    if(pjs_prepare_literal_call(ctx,compiled,&call)) {
+        for(unsigned i=0;i<rom_count;i++)if(rom_table[i].name &&
+                !strcmp(rom_table[i].name,call.name) &&
+                rom_table[i].params==call.params && ksn_proc_rom_entry_valid(&rom_table[i])) {
+            scope.rom=&rom_table[i];break;
+        }
+    }
+    /* A nested source cannot borrow its parent's descriptor. The parent
+     * remains alive on its C stack and is restored after success or throw. */
+    prepared_active=scope.rom?&scope:NULL;
+    JSValue result=JS_EvalFunction(ctx,compiled); /* consumes compiled */
+    prepared_active=scope.previous;
+    if(scope.has_binding)JS_FreeValue(ctx,scope.binding);
+    return result;
 }

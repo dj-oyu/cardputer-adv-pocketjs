@@ -45,6 +45,7 @@
 #include "cutils.h"
 #include "list.h"
 #include "quickjs.h"
+#include "quickjs-prepared.h"
 #include "libregexp.h"
 #include "dtoa.h"
 // F1-F3 (docs/vm/builtin-floor-plan.md): builtin names in flash, builtin
@@ -19538,6 +19539,8 @@ static void close_lexical_var(JSContext *ctx, JSFunctionBytecode *b,
 #define JS_CALL_FLAG_COPY_ARGV   (1 << 1)
 #define JS_CALL_FLAG_GENERATOR   (1 << 2)
 #define JS_CALL_FLAG_VM_RESUME   (1 << 3)
+/* Private, set only when the VM operand itself is the marked native object. */
+#define JS_CALL_FLAG_PREPARED_DIRECT (1 << 4)
 
 static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
                                   JSValueConst this_obj,
@@ -19600,6 +19603,22 @@ not_a_constructor:
     /* here this_obj is new_target */
     /* fall thru */
     case JS_CFUNC_generic:
+        /* The ordinary VM has already evaluated and rooted callee/argv,
+         * checked the native stack, installed its frame and selected realm.
+         * A private marker leaves other native functions on their usual path.
+         * A declined descriptor falls through exactly once. */
+        if (cproto == JS_CFUNC_generic && (flags & JS_CALL_FLAG_PREPARED_DIRECT) &&
+            !(flags & JS_CALL_FLAG_CONSTRUCTOR) &&
+            p->u.cfunc.magic == PJS_PREPARED_REGISTER_MAGIC && prev_sf &&
+            JS_VALUE_GET_TAG(prev_sf->cur_func) == JS_TAG_OBJECT) {
+            JSObject *caller = JS_VALUE_GET_OBJ(prev_sf->cur_func);
+            if (caller->class_id == JS_CLASS_BYTECODE_FUNCTION) {
+                JSFunctionBytecode *b = caller->u.func.function_bytecode;
+                if (pjs_prepared_dispatch(ctx, func_obj, this_obj, argc, arg_buf,
+                        b, (unsigned)(prev_sf->cur_pc - b->byte_code_buf), &ret_val))
+                    break;
+            }
+        }
         ret_val = func.generic(ctx, this_obj, argc, arg_buf);
         break;
     case JS_CFUNC_constructor_magic:
@@ -20564,9 +20583,22 @@ has_call_argc:
                 if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
+                /* A bound function or Proxy can forward to the same native
+                 * target. Only the object captured by this VM operand may
+                 * authorize a descriptor; forwarded JS_Call calls never get
+                 * this private flag. No extra JS evaluation or allocation. */
+                int prepared_direct = 0;
+                if (opcode == OP_call_method &&
+                    JS_VALUE_GET_TAG(call_argv[-1]) == JS_TAG_OBJECT) {
+                    JSObject *captured = JS_VALUE_GET_OBJ(call_argv[-1]);
+                    if (captured->class_id == JS_CLASS_C_FUNCTION &&
+                        captured->u.cfunc.cproto == JS_CFUNC_generic &&
+                        captured->u.cfunc.magic == PJS_PREPARED_REGISTER_MAGIC)
+                        prepared_direct = JS_CALL_FLAG_PREPARED_DIRECT;
+                }
                 ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
                                           JS_UNDEFINED, call_argc,
-                                          vc(call_argv), 0);
+                                          vc(call_argv), prepared_direct);
                 if (unlikely(JS_IsException(ret_val))) {
                     goto exception;
                 }
@@ -43933,6 +43965,19 @@ static JSValue JS_InstantiateFunctionListItem2(JSContext *ctx, JSObject *p,
     case JS_DEF_CFUNC:
         val = JS_NewCFunction2(ctx, e->u.func.cfunc.generic,
                                e->name, e->u.func.length, e->u.func.cproto, e->magic);
+        if (!JS_IsException(val) && e->magic == PJS_PREPARED_REGISTER_MAGIC &&
+            e->u.func.cproto == JS_CFUNC_generic)
+        {
+            JSStackFrame *caller=ctx->rt->current_stack_frame;
+            if (caller && JS_VALUE_GET_TAG(caller->cur_func)==JS_TAG_OBJECT) {
+                JSObject *owner=JS_VALUE_GET_OBJ(caller->cur_func);
+                if (owner->class_id==JS_CLASS_BYTECODE_FUNCTION) {
+                    JSFunctionBytecode *b=owner->u.func.function_bytecode;
+                    pjs_prepared_binding_created(ctx,val,b,
+                            (unsigned)(caller->cur_pc-b->byte_code_buf));
+                }
+            }
+        }
         break;
     case JS_DEF_PROP_STRING:
         val = JS_NewAtomString(ctx, e->u.str);
@@ -68728,3 +68773,5 @@ static int js_lazy_class_ensure(JSContext *ctx, int class_id)
     return 0;
 }
 #endif
+
+#include "quickjs-prepared.inc"
