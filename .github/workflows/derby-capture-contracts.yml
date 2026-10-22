@@ -8,6 +8,12 @@ on:
       - integration/derby-j1-dma-host-r2-20261020
   pull_request:
     paths:
+      - 'main/main.c'
+      - 'main/pocket/app_control.*'
+      - 'main/pocket/pocket_wire.h'
+      - 'main/pocket/pocket_bridge.*'
+      - 'main/hal/usb_console.c'
+      - 'tools/test_app_control*'
       - '.github/workflows/derby-capture-contracts.yml'
       # Native guest-cache pressure policy and its direct host contracts.
       - 'components/pocketjs_guest/include/pocketjs/block_cache.h'

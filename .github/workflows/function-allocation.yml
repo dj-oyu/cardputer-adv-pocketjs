@@ -2,6 +2,13 @@ name: Function allocation leaf
 on:
   pull_request:
     paths:
+      - 'main/main.c'
+      - 'main/app_session.*'
+      - 'main/pocket/app_control.*'
+      - 'main/pocket/pocket_wire.h'
+      - 'main/pocket/pocket_bridge.*'
+      - 'main/hal/usb_console.c'
+      - 'tools/test_app_control*'
       - 'components/quickjs-ng/quickjs-ng/**'
       - 'tools/vmtest/function_allocation/**'
       - '.github/workflows/function-allocation.yml'

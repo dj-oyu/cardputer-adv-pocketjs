@@ -52,6 +52,16 @@ static ssize_t transmit(int stream, const void *data, size_t size, bool frame) {
     while(done<size) {
         size_t n=size-done;
         if(!frame && n>TX_CHUNK) n=TX_CHUNK;
+        if(!frame) {
+            /* Console strings are untrusted observations. Only the frame
+             * writer may emit GS: printing a valid CRC cannot forge an ACK. */
+            const unsigned char *gs=memchr(bytes+done,0x1d,n);
+            if(gs==bytes+done) {
+                if(!send_bytes("\\x1d",4,deadline))goto refused;
+                done++;last_stream=stream;line_open=true;continue;
+            }
+            if(gs)n=(size_t)(gs-(bytes+done));
+        }
         if(!send_bytes(bytes+done,n,deadline)) goto refused;
         done+=n;
         last_stream=stream;
