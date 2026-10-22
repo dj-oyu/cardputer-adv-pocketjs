@@ -309,6 +309,12 @@ static void walkers_and_plain(void){
         const int16_t c=(int16_t)((int)(next()%800)-280),e=(int16_t)((int)(next()%500)-180);
         plain_only.segments[plain_only.count++]=(ksn_proc_segment){a,b,c,e,(uint16_t)(k*97u)};
     }
+    static const ksn_proc_segment exact_diagonals[]={
+        {0,0,H-1,H-1,0xf800},{W-1,0,W-H,H-1,0x07e0},
+        {0,H-1,H-1,0,0x001f},{W-1,H-1,W-H,0,0xffe0},
+    };
+    for(unsigned k=0;k<sizeof exact_diagonals/sizeof exact_diagonals[0];k++)
+        plain_only.segments[plain_only.count++]=exact_diagonals[k];
     plain_only.ready=true;
     mixed=plain_only;
     const ksn_proc_inst dot[]={SET(0,500),SET(1,500),SET(4,1),SET(15,0),SET(5,-1),SET(6,0),SET(7,0),
