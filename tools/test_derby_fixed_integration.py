@@ -18,6 +18,12 @@ BASE=json.loads((ROOT/'tools/derby_fixed_base.json').read_text())['base_tree']
 # behavior. Freeze that source separately; keep the original diagnostic-OFF
 # baseline for every other path and prove the reference transition below.
 PRESSURE_OWNER_BASE='1d5fa05b18d04ff36f45dc36106d41fe8c4da9e5'
+# Native control intentionally adds ordinary owner work. Preserve the original
+# diagnostic-OFF proof against the last reviewed pre-feature tree, then freeze
+# the separately reviewed native owner additions at their exact published head.
+# These references do not authorize changing benchmark or diagnostic behavior.
+PRE_NATIVE_OWNER_BASE='10fbed312682a122011f447290ba82891c16e8fd'
+NATIVE_OWNER_BASE='6087f329146f4373569e7f82e0b1477ac51d13a4'
 
 def off_path(source):
     out=[];stack=[]
@@ -89,9 +95,29 @@ class Integration(unittest.TestCase):
         for name in ('main/main.c','main/app_session.c'):
             reference=PRESSURE_OWNER_BASE if name=='main/app_session.c' else BASE
             old=subprocess.check_output(['git','show',reference+':'+name],cwd=ROOT,text=True)
+            previous=subprocess.check_output(['git','show',PRE_NATIVE_OWNER_BASE+':'+name],cwd=ROOT,text=True)
+            # Retain the complete historical proof, including its one allowed
+            # completed-present boundary change, against the pre-feature code.
+            if name=='main/app_session.c':previous=without_window_end(previous)
+            self.assertEqual(off_path(old),off_path(previous),name+' historical diagnostic OFF')
+            approved=subprocess.check_output(['git','show',NATIVE_OWNER_BASE+':'+name],cwd=ROOT,text=True)
             current=(ROOT/name).read_text()
-            if name=='main/app_session.c':current=without_window_end(current)
-            self.assertEqual(off_path(old),off_path(current),name)
+            self.assertEqual(off_path(approved),off_path(current),name+' reviewed native owner')
+
+    def test_native_owner_reference_rejects_unexpected_normal_path_changes(self):
+        # Negative controls prove the new pin does not mask ordinary guest
+        # input delivery or the native instance-generation fence. Diagnostic
+        # stripping remains precisely the existing off_path implementation.
+        changes={
+            'main/main.c':('        e=app_tick(buttons);','        e=app_tick(0);'),
+            'main/app_session.c':('    if(++guest_generation==0)++guest_generation;',
+                                  '    guest_generation=1;'),
+        }
+        for name,(before,after) in changes.items():
+            approved=subprocess.check_output(['git','show',NATIVE_OWNER_BASE+':'+name],cwd=ROOT,text=True)
+            self.assertEqual(approved.count(before),1,name)
+            mutated=approved.replace(before,after,1)
+            self.assertNotEqual(off_path(approved),off_path(mutated),name)
 
     def test_window_end_cannot_move_before_or_disappear_from_present(self):
         source=(ROOT/'main/app_session.c').read_text()

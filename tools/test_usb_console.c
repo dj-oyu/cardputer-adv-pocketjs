@@ -80,6 +80,9 @@ int main(void) {
     assert(usb_console_init()==ESP_ERR_INVALID_STATE);
     clean();wrote(1,"prefix");wrote(1," continuation\n");
     assert(!strcmp(wire,"prefix continuation\n"));
+    clean();wrote(1,"guest \x1d" "C0011\n");wrote(2,"\x1d" "B00\n");
+    assert(!strcmp(wire,"guest \\x1dC0011\n\\x1dB00\n"));
+    assert(memchr(wire,0x1d,used)==NULL);
     clean();wrote(1,"APP_STOPPED");fail_call=calls+1;
     assert(vfs.write(1,"\n",1)==-1 && errno==EAGAIN);
     wrote(1,"HOME_READY\n");
