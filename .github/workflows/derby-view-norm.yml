@@ -21,6 +21,7 @@ jobs:
           node-version: '24'
       - run: python3 -B tools/games/run_derby_view_norm.py --sanitize --pairs 1 --out .cache/norm-asan
       - run: python3 -B tools/games/run_derby_view_norm.py --pairs 7 --out .cache/norm-timing
+      - run: python3 -B tools/games/test_derby_app_diag.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -31,6 +32,8 @@ jobs:
             .cache/norm-*/*/*.log
             .cache/norm-*/*/*.times
             .cache/norm-*/*/*.csv
+            .cache/device-diag-host/result.json
+            .cache/device-diag-host/*/*/*.log
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -85,3 +88,69 @@ jobs:
             build_norm/CMakeCache.txt
             build_norm/source-head.txt
             build_norm/SHA256SUMS
+
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [base, reuse]
+        profile: [oval, straight]
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          path: tools-source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.mode == 'base' && 'e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267' || env.SOURCE_HEAD }}
+          path: diagnostic-source
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Prepare finite diagnostic in disposable checkout
+        run: python3 -B tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source --profile ${{ matrix.profile }}
+      - name: Build with product settings and partition
+        working-directory: diagnostic-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_diag -D SDKCONFIG=build_diag/sdkconfig build
+          git rev-parse HEAD > build_diag/source-head.txt
+          grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_diag/sdkconfig
+          grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_diag/CMakeCache.txt
+          grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=OFF' build_diag/CMakeCache.txt
+          python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_diag/expected-partition.bin
+          cmp build_diag/expected-partition.bin build_diag/partition_table/partition-table.bin
+          python -c 'from pathlib import Path; e=Path("build_diag/cardputer_pocketjs.elf").read_bytes(); assert b"Application information:" in e and b"DERBY_APP_DIAG START workload=" in e and b"DERBY_APP_DIAG EXIT" in e; c=Path("build_diag/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
+          cp diagnostic.json diagnostic.patch build_diag/
+          sha256sum build_diag/cardputer_pocketjs.bin build_diag/cardputer_pocketjs.elf build_diag/bootloader/bootloader.bin build_diag/partition_table/partition-table.bin build_diag/diagnostic.json build_diag/diagnostic.patch > build_diag/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: derby-app-diag-${{ matrix.mode }}-${{ matrix.profile }}-${{ env.SOURCE_HEAD }}
+          path: |
+            diagnostic-source/build_diag/cardputer_pocketjs.bin
+            diagnostic-source/build_diag/cardputer_pocketjs.elf
+            diagnostic-source/build_diag/cardputer_pocketjs.map
+            diagnostic-source/build_diag/bootloader/bootloader.bin
+            diagnostic-source/build_diag/partition_table/partition-table.bin
+            diagnostic-source/build_diag/ota_data_initial.bin
+            diagnostic-source/build_diag/flasher_args.json
+            diagnostic-source/build_diag/flash_args
+            diagnostic-source/build_diag/sdkconfig
+            diagnostic-source/build_diag/CMakeCache.txt
+            diagnostic-source/build_diag/source-head.txt
+            diagnostic-source/build_diag/diagnostic.json
+            diagnostic-source/build_diag/diagnostic.patch
+            diagnostic-source/build_diag/SHA256SUMS
