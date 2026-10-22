@@ -65,7 +65,9 @@ function step(f, s, dt) {
     if (x < D && y >= D) s.tc[i] = t0 + (D - x) / (y - x) * dt, ++s.done;
   }
 }
-const order = s => [0, 1, 2, 3, 4, 5, 6, 7].sort((a, b) => (s.tc[a] || 1e9) - (s.tc[b] || 1e9) || s.x[b] - s.x[a] || a - b);
+const order = s => [0, 1, 2, 3, 4, 5, 6, 7].sort(s.done === 0 ?
+  (a, b) => s.x[b] - s.x[a] || a - b :
+  (a, b) => (s.tc[a] || 1e9) - (s.tc[b] || 1e9) || s.x[b] - s.x[a] || a - b);
 // Win chance: a Luce model of the paddock figures (weights fitted), 20% take;
 // on the oval (o) a temperature, the lane and a take refitted (README).
 function odds(h, o) {
