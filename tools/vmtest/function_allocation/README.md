@@ -244,3 +244,11 @@ cases; baseline equivalence, not ignoring sanitizer errors, checks those cases.
 Local m32 runtime packages are unavailable (snapshot mirror HTTP503); compile-only
 layout evidence is not m32 execution. Target heap buckets/peak and device CPU
 cost remain unmeasured. No device operations are part of this change.
+
+## Pinned-engine inspection overlay compatibility
+
+The J1 full-contract workflow also overlays prepare inspection onto the pinned
+older engine. Its local `prep_cpool` uses that translation unit's actual header
+size, matching both generations' packed pool placement. It preserves empty-pool
+NULL and the existing bounds checks, without requiring the newer private accessor,
+changing the baseline engine, or skipping any prepare fixtures.
