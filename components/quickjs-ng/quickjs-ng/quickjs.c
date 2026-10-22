@@ -492,6 +492,13 @@ typedef struct JSStackFrame {
     uint32_t ret_shape; /* JS_RET_SHAPE (quickjs-vmstack.h); offset 44-47, was tail padding */
 } JSStackFrame;
 
+_Static_assert(JS_VM_FRAME_ALIGN >= _Alignof(JSStackFrame),
+               "frame blocks must satisfy the actual JSStackFrame alignment");
+_Static_assert(JS_VM_FRAME_PREFIX % _Alignof(JSStackFrame) == 0,
+               "the link prefix must preserve JSStackFrame alignment");
+_Static_assert(sizeof(JSStackFrame) % _Alignof(JSValue) == 0,
+               "value slots after the frame must stay aligned");
+
 /* JSStackFrame.coro_kind */
 enum {
     JS_CORO_NONE = 0,
@@ -915,24 +922,13 @@ typedef enum JSFunctionKindEnum {
 } JSFunctionKindEnum;
 
 typedef struct JSFunctionBytecode {
-    JSGCObjectHeader header; /* must come first */
-    uint8_t is_strict_mode : 1;
-    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
-    uint8_t has_simple_parameter_list : 1;
-    uint8_t is_derived_class_constructor : 1;
-    /* true if home_object needs to be initialized */
-    uint8_t need_home_object : 1;
-    uint8_t func_kind : 2;
-    uint8_t new_target_allowed : 1;
-    uint8_t super_call_allowed : 1;
-    uint8_t super_allowed : 1;
-    uint8_t arguments_allowed : 1;
-    uint8_t backtrace_barrier : 1; /* stop backtrace on this function */
-    /* XXX: 5 bits available */
+    /* The packed constant pool immediately follows this type. Align the
+       type too, so sizeof(*b) preserves JSValue alignment on 32-bit ABIs. */
+    _Alignas(JSValue) JSGCObjectHeader header; /* must come first */
+    /* Function flags occupy the existing GC-unused dummy2. */
     uint8_t *byte_code_buf; /* (self pointer) */
     int byte_code_len;
     JSAtom func_name;
-    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
     JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
     uint16_t arg_count;
     uint16_t var_count;
@@ -942,7 +938,6 @@ typedef struct JSFunctionBytecode {
     uint16_t closure_var_count;
     int cpool_count;
     JSContext *realm; /* function realm */
-    JSValue *cpool; /* constant pool (self pointer) */
     JSAtom filename;
     int line_num;
     int col_num;
@@ -951,6 +946,64 @@ typedef struct JSFunctionBytecode {
     uint8_t *pc2line_buf;
     char *source;
 } JSFunctionBytecode;
+
+_Static_assert(_Alignof(JSFunctionBytecode) >= _Alignof(JSValue) &&
+               sizeof(JSFunctionBytecode) % _Alignof(JSValue) == 0,
+               "the packed function constant pool must stay JSValue-aligned");
+
+/* Function accessors; no union overlay or type punning. */
+static inline unsigned fa_get_is_strict_mode(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 0) & 1; }
+static inline void fa_set_is_strict_mode(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 0)) | ((v & 1u) << 0); }
+static inline unsigned fa_get_has_prototype(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 1) & 1; }
+static inline void fa_set_has_prototype(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 1)) | ((v & 1u) << 1); }
+static inline unsigned fa_get_has_simple_parameter_list(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 2) & 1; }
+static inline void fa_set_has_simple_parameter_list(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 2)) | ((v & 1u) << 2); }
+static inline unsigned fa_get_is_derived_class_constructor(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 3) & 1; }
+static inline void fa_set_is_derived_class_constructor(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 3)) | ((v & 1u) << 3); }
+static inline unsigned fa_get_need_home_object(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 4) & 1; }
+static inline void fa_set_need_home_object(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 4)) | ((v & 1u) << 4); }
+static inline unsigned fa_get_func_kind(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 5) & 3; }
+static inline void fa_set_func_kind(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(3u << 5)) | ((v & 3u) << 5); }
+static inline unsigned fa_get_new_target_allowed(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 7) & 1; }
+static inline void fa_set_new_target_allowed(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 7)) | ((v & 1u) << 7); }
+static inline unsigned fa_get_super_call_allowed(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 8) & 1; }
+static inline void fa_set_super_call_allowed(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 8)) | ((v & 1u) << 8); }
+static inline unsigned fa_get_super_allowed(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 9) & 1; }
+static inline void fa_set_super_allowed(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 9)) | ((v & 1u) << 9); }
+static inline unsigned fa_get_arguments_allowed(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 10) & 1; }
+static inline void fa_set_arguments_allowed(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 10)) | ((v & 1u) << 10); }
+static inline unsigned fa_get_backtrace_barrier(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 11) & 1; }
+static inline void fa_set_backtrace_barrier(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 11)) | ((v & 1u) << 11); }
+static inline unsigned fa_get_has_vardefs(const JSFunctionBytecode *b)
+{ return (b->header.dummy2 >> 12) & 1; }
+static inline void fa_set_has_vardefs(JSFunctionBytecode *b, unsigned v)
+{ b->header.dummy2 = (b->header.dummy2 & ~(1u << 12)) | ((v & 1u) << 12); }
+static inline JSValue *fa_cpool(const JSFunctionBytecode *b)
+{ return b->cpool_count ? (JSValue *)(b + 1) : NULL; }
+static inline JSVarDef *fa_vardefs(const JSFunctionBytecode *b)
+{ return fa_get_has_vardefs(b) ? (JSVarDef *)((JSValue *)(b + 1) + b->cpool_count) : NULL; }
 
 typedef struct JSBoundFunction {
     JSValue func_obj;
@@ -2081,6 +2134,47 @@ void *js_mallocz(JSContext *ctx, size_t size)
         return NULL;
     }
     return ptr;
+}
+
+/* The guest heap promises at least four-byte raw alignment. Only function
+   bytecode needs this adjustment; all ordinary allocation/realloc paths stay
+   unchanged. Reserve the largest possible shift, not another allocation. */
+#define JS_FUNCTION_RAW_ALIGN 4u
+#define JS_FUNCTION_ALIGN ((size_t)_Alignof(JSFunctionBytecode))
+#define JS_FUNCTION_RESERVE (JS_FUNCTION_ALIGN > JS_FUNCTION_RAW_ALIGN ? \
+                             JS_FUNCTION_ALIGN - JS_FUNCTION_RAW_ALIGN : 0)
+_Static_assert((JS_FUNCTION_ALIGN & (JS_FUNCTION_ALIGN - 1)) == 0 &&
+               JS_FUNCTION_ALIGN <= 256 &&
+               JS_FUNCTION_ALIGN % JS_FUNCTION_RAW_ALIGN == 0,
+               "function shift must fit the GC-unused byte");
+
+static JSFunctionBytecode *js_alloc_function_bytecode(JSContext *ctx, size_t size,
+                                                    bool zero, uint8_t *shift)
+{
+    void *raw;
+    if (size > SIZE_MAX - JS_FUNCTION_RESERVE) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    raw = zero ? js_mallocz(ctx, size + JS_FUNCTION_RESERVE) :
+                 js_malloc(ctx, size + JS_FUNCTION_RESERVE);
+    if (!raw)
+        return NULL;
+    assert(((uintptr_t)raw & (JS_FUNCTION_RAW_ALIGN - 1)) == 0);
+    *shift = (-(uintptr_t)raw) & (JS_FUNCTION_ALIGN - 1);
+    assert(*shift <= JS_FUNCTION_RESERVE);
+    return (JSFunctionBytecode *)((uint8_t *)raw + *shift);
+}
+
+static void js_free_function_bytecode_allocation(JSRuntime *rt,
+                                                JSFunctionBytecode *b)
+{
+    /* dummy1 belongs to this type, including while queued by cycle GC.
+       Only the original raw allocation may reach usable_size/free. */
+    uint8_t shift = b->header.dummy1;
+    assert(shift <= JS_FUNCTION_RESERVE &&
+           (shift % JS_FUNCTION_RAW_ALIGN) == 0);
+    js_free_rt(rt, (uint8_t *)b - shift);
 }
 
 void js_free(JSContext *ctx, void *ptr)
@@ -7152,7 +7246,7 @@ static void js_method_set_home_object(JSContext *ctx, JSValue func_obj,
         return;
     }
     b = p->u.func.function_bytecode;
-    if (b->need_home_object) {
+    if (fa_get_need_home_object(b)) {
         p1 = p->u.func.home_object;
         if (p1) {
             JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, p1));
@@ -8362,7 +8456,7 @@ static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
         JSFunctionBytecode *b = (JSFunctionBytecode *)gp;
         int i;
         for (i = 0; i < b->cpool_count; i++) {
-            JS_MarkValue(rt, b->cpool[i], mark_func);
+            JS_MarkValue(rt, fa_cpool(b)[i], mark_func);
         }
         if (b->realm) {
             mark_func(rt, &b->realm->header);
@@ -8525,7 +8619,10 @@ static void gc_free_cycles(JSRuntime *rt)
         p = list_entry(el, JSGCObjectHeader, link);
         assert(p->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT ||
                p->gc_obj_type == JS_GC_OBJ_TYPE_FUNCTION_BYTECODE);
-        js_free_rt(rt, p);
+        if (p->gc_obj_type == JS_GC_OBJ_TYPE_FUNCTION_BYTECODE)
+            js_free_function_bytecode_allocation(rt, (JSFunctionBytecode *)p);
+        else
+            js_free_rt(rt, p);
     }
 
     init_list_head(&rt->gc_zero_ref_count_list);
@@ -8588,13 +8685,13 @@ static void compute_bytecode_size(JSFunctionBytecode *b, JSMemoryUsage_helper *h
 
     memory_used_count = 0;
     js_func_size = sizeof(*b);
-    if (b->vardefs) {
-        js_func_size += (b->arg_count + b->var_count) * sizeof(*b->vardefs);
+    if (fa_vardefs(b)) {
+        js_func_size += (b->arg_count + b->var_count) * sizeof(JSVarDef);
     }
-    if (b->cpool) {
-        js_func_size += b->cpool_count * sizeof(*b->cpool);
+    if (fa_cpool(b)) {
+        js_func_size += b->cpool_count * sizeof(JSValue);
         for (i = 0; i < b->cpool_count; i++) {
-            JSValue val = b->cpool[i];
+            JSValue val = fa_cpool(b)[i];
             compute_value_size(val, hp);
         }
     }
@@ -9374,7 +9471,7 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
 
         if (js_class_has_bytecode(p->class_id)) {
             b = p->u.func.function_bytecode;
-            backtrace_barrier = b->backtrace_barrier;
+            backtrace_barrier = fa_get_backtrace_barrier(b);
         }
 
         if (has_prepare) {
@@ -9747,8 +9844,8 @@ static JSValue JS_ThrowReferenceErrorUninitialized2(JSContext *ctx,
         atom = b->closure_var[idx].var_name;
     } else {
         /* not present if the function is stripped and contains no eval() */
-        if (b->vardefs) {
-            atom = b->vardefs[b->arg_count + idx].var_name;
+        if (fa_vardefs(b)) {
+            atom = fa_vardefs(b)[b->arg_count + idx].var_name;
         }
     }
     return JS_ThrowReferenceErrorUninitialized(ctx, atom);
@@ -18152,7 +18249,7 @@ static JSValue js_throw_type_error(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
 {
     JSFunctionBytecode *b = JS_GetFunctionBytecode(this_val);
-    if (!b || b->is_strict_mode || !b->has_prototype) {
+    if (!b || fa_get_is_strict_mode(b) || !fa_get_has_prototype(b)) {
         return JS_ThrowTypeError(ctx, "invalid property access");
     }
     return JS_UNDEFINED;
@@ -19083,10 +19180,10 @@ static JSVarRef *get_var_ref(JSContext *ctx, JSStackFrame *sf, int var_idx,
     b = p->u.func.function_bytecode;
 
     if (is_arg) {
-        vd = &b->vardefs[var_idx];
+        vd = &fa_vardefs(b)[var_idx];
         pvalue = &sf->arg_buf[var_idx];
     } else {
-        vd = &b->vardefs[b->arg_count + var_idx];
+        vd = &fa_vardefs(b)[b->arg_count + var_idx];
         pvalue = &sf->var_buf[var_idx];
     }
 
@@ -19227,7 +19324,7 @@ static JSValue js_closure(JSContext *ctx, JSValue bfunc,
     JSAtom name_atom;
 
     b = JS_VALUE_GET_PTR(bfunc);
-    func_obj = JS_NewObjectClass(ctx, func_kind_to_class_id[b->func_kind]);
+    func_obj = JS_NewObjectClass(ctx, func_kind_to_class_id[fa_get_func_kind(b)]);
     if (JS_IsException(func_obj)) {
         JS_FreeValue(ctx, bfunc);
         return JS_EXCEPTION;
@@ -19244,12 +19341,12 @@ static JSValue js_closure(JSContext *ctx, JSValue bfunc,
     js_function_set_properties(ctx, func_obj, name_atom,
                                b->defined_arg_count);
 
-    if (b->func_kind & JS_FUNC_GENERATOR) {
+    if (fa_get_func_kind(b) & JS_FUNC_GENERATOR) {
         JSValue proto;
         int proto_class_id;
         /* generators have a prototype field which is used as
            prototype for the generator object */
-        if (b->func_kind == JS_FUNC_ASYNC_GENERATOR) {
+        if (fa_get_func_kind(b) == JS_FUNC_ASYNC_GENERATOR) {
             proto_class_id = JS_CLASS_ASYNC_GENERATOR;
         } else {
             proto_class_id = JS_CLASS_GENERATOR;
@@ -19260,7 +19357,7 @@ static JSValue js_closure(JSContext *ctx, JSValue bfunc,
         }
         JS_DefinePropertyValue(ctx, func_obj, JS_ATOM_prototype, proto,
                                JS_PROP_WRITABLE);
-    } else if (b->has_prototype) {
+    } else if (fa_get_has_prototype(b)) {
         /* add the 'prototype' property: delay instantiation to avoid
            creating cycles for every javascript function. The prototype
            object is created on the fly when first accessed */
@@ -19319,7 +19416,7 @@ static int js_op_define_class(JSContext *ctx, JSValue *sp,
     }
 
     b = JS_VALUE_GET_PTR(bfunc);
-    assert(b->func_kind == JS_FUNC_NORMAL);
+    assert(fa_get_func_kind(b) == JS_FUNC_NORMAL);
     ctor = JS_NewObjectProtoClass(ctx, parent_class,
                                   JS_CLASS_BYTECODE_FUNCTION);
     if (JS_IsException(ctor)) {
@@ -19430,7 +19527,7 @@ static void close_lexical_var(JSContext *ctx, JSFunctionBytecode *b,
     JSVarRef *var_ref;
     int var_ref_idx;
 
-    var_ref_idx = b->vardefs[b->arg_count + var_idx].var_ref_idx;
+    var_ref_idx = fa_vardefs(b)[b->arg_count + var_idx].var_ref_idx;
     var_ref = sf->var_refs[var_ref_idx];
     if (var_ref) {
         close_var_ref(ctx->rt, var_ref);
@@ -19649,7 +19746,7 @@ static inline bool js_vm_flat_callable(JSRuntime *rt, JSValueConst func_obj)
         return false;
     p = JS_VALUE_GET_OBJ(func_obj);
     return (p->class_id == JS_CLASS_BYTECODE_FUNCTION &&
-            p->u.func.function_bytecode->func_kind == JS_FUNC_NORMAL) ||
+            fa_get_func_kind(p->u.func.function_bytecode) == JS_FUNC_NORMAL) ||
            p->class_id == JS_CLASS_ASYNC_FUNCTION;
 }
 
@@ -19979,7 +20076,7 @@ not_a_function:
     // with the same set, so one copy of the prologue serves both entries.
 frame_pushed:
     call_inputs_valid = true;
-    sf->is_strict_mode = b->is_strict_mode;
+    sf->is_strict_mode = fa_get_is_strict_mode(b);
     arg_buf = (JSValue *)argv;
     sf->arg_count = argc;
     sf->cur_func = unsafe_unconst(func_obj);
@@ -20048,7 +20145,7 @@ restart:
             pc += 4;
             BREAK;
             CASE(OP_push_const):
-                *sp++ = js_dup(b->cpool[get_u32(pc)]);
+                *sp++ = js_dup(fa_cpool(b)[get_u32(pc)]);
             pc += 4;
             BREAK;
             CASE(OP_push_minus1):
@@ -20071,10 +20168,10 @@ restart:
             pc += 2;
             BREAK;
             CASE(OP_push_const8):
-                *sp++ = js_dup(b->cpool[*pc++]);
+                *sp++ = js_dup(fa_cpool(b)[*pc++]);
             BREAK;
             CASE(OP_fclosure8):
-                *sp++ = js_closure(ctx, js_dup(b->cpool[*pc++]), var_refs, sf);
+                *sp++ = js_closure(ctx, js_dup(fa_cpool(b)[*pc++]), var_refs, sf);
             if (unlikely(JS_IsException(sp[-1]))) {
                 goto exception;
             }
@@ -20142,7 +20239,7 @@ get_length_slow_path:
                 /* OP_push_this is only called at the start of a function */
             {
                 JSValue val;
-                if (!b->is_strict_mode) {
+                if (!fa_get_is_strict_mode(b)) {
                     uint32_t tag = JS_VALUE_GET_TAG(this_obj);
                     if (likely(tag == JS_TAG_OBJECT)) {
                         goto normal_this;
@@ -20377,7 +20474,7 @@ normal_this:
             BREAK;
 
             CASE(OP_fclosure): {
-                JSValue bfunc = js_dup(b->cpool[get_u32(pc)]);
+                JSValue bfunc = js_dup(fa_cpool(b)[get_u32(pc)]);
                 pc += 4;
                 *sp++ = js_closure(ctx, bfunc, var_refs, sf);
                 if (unlikely(JS_IsException(sp[-1]))) {
@@ -22897,7 +22994,7 @@ exception:
     /* the local variables are freed by the caller in the generator
        case. Hence the label 'done' should never be reached in a
        generator function. */
-    if (b->func_kind != JS_FUNC_NORMAL) {
+    if (fa_get_func_kind(b) != JS_FUNC_NORMAL) {
 done_generator:
         sf->cur_pc = pc;
         sf->cur_sp = sp;
@@ -22980,7 +23077,7 @@ done:
     // of the segment stack itself (is sf its top block?) because nothing
     // else here says so reliably: `flags` is reused as a scratch variable by
     // several opcodes above (OP_define_field, OP_for_of_start, ...), and
-    // b->func_kind does not say how the frame was ENTERED -- a module body
+    // fa_get_func_kind(b) does not say how the frame was ENTERED -- a module body
     // is compiled as an ASYNC function (__JS_EvalInternal, `<eval>` name)
     // yet js_inner_module_linking calls it through plain JS_Call with
     // this=true to initialise its hoisted declarations, so it pushed here
@@ -23412,7 +23509,7 @@ not_a_function:
     }
 
     b = p->u.func.function_bytecode;
-    if (b->is_derived_class_constructor) {
+    if (fa_get_is_derived_class_constructor(b)) {
         return JS_CallInternal(ctx, func_obj, JS_UNDEFINED, new_target, argc, argv, flags);
     } else {
         JSValue obj, ret;
@@ -23484,7 +23581,7 @@ static __exception int async_func_init(JSContext *ctx, JSAsyncFunctionState *s,
     sf = &s->frame;
     p = JS_VALUE_GET_OBJ(func_obj);
     b = p->u.func.function_bytecode;
-    sf->is_strict_mode = b->is_strict_mode;
+    sf->is_strict_mode = fa_get_is_strict_mode(b);
     sf->cur_pc = b->byte_code_buf;
     arg_buf_len = max_int(b->arg_count, argc);
     local_count = arg_buf_len + b->var_count + b->stack_size;
@@ -35987,7 +36084,7 @@ static __maybe_unused void dump_single_byte_code(JSContext *ctx,
 {
     JSVarDef *args, *vars;
 
-    args = vars = b->vardefs;
+    args = vars = fa_vardefs(b);
     if (vars) {
         vars = &vars[b->arg_count];
     }
@@ -35995,7 +36092,7 @@ static __maybe_unused void dump_single_byte_code(JSContext *ctx,
     dump_byte_code(ctx, /*pass*/3, pc, short_opcode_info(*pc).size,
                    args, b->arg_count, vars, b->var_count,
                    b->closure_var, b->closure_var_count,
-                   b->cpool, b->cpool_count,
+                   fa_cpool(b), b->cpool_count,
                    NULL, b->line_num,
                    NULL, b, start_pos);
 }
@@ -36078,20 +36175,20 @@ static __maybe_unused void js_dump_function_bytecode(JSContext *ctx, JSFunctionB
     }
 
     str = JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf), b->func_name);
-    printf("function: %s%s\n", &"*"[b->func_kind != JS_FUNC_GENERATOR], str);
-    printf("  mode: %s\n", b->is_strict_mode ? "strict" : "sloppy");
-    if (b->arg_count && b->vardefs) {
+    printf("function: %s%s\n", &"*"[fa_get_func_kind(b) != JS_FUNC_GENERATOR], str);
+    printf("  mode: %s\n", fa_get_is_strict_mode(b) ? "strict" : "sloppy");
+    if (b->arg_count && fa_vardefs(b)) {
         printf("  args:");
         for (i = 0; i < b->arg_count; i++) {
             printf(" %s", JS_AtomGetStr(ctx, atom_buf, sizeof(atom_buf),
-                                        b->vardefs[i].var_name));
+                                        fa_vardefs(b)[i].var_name));
         }
         printf("\n");
     }
-    if (b->var_count && b->vardefs) {
+    if (b->var_count && fa_vardefs(b)) {
         printf("  locals:\n");
         for (i = 0; i < b->var_count; i++) {
-            JSVarDef *vd = &b->vardefs[b->arg_count + i];
+            JSVarDef *vd = &fa_vardefs(b)[b->arg_count + i];
             printf("%5d: %s %s", i,
                    vd->var_kind == JS_VAR_CATCH ? "catch" :
                    (vd->var_kind == JS_VAR_FUNCTION_DECL ||
@@ -36153,10 +36250,10 @@ static __maybe_unused void js_dump_function_bytecode(JSContext *ctx, JSFunctionB
     }
     printf("  opcodes: %d\n", i);
     dump_byte_code(ctx, 3, b->byte_code_buf, b->byte_code_len,
-                   b->vardefs, b->arg_count,
-                   b->vardefs ? b->vardefs + b->arg_count : NULL, b->var_count,
+                   fa_vardefs(b), b->arg_count,
+                   fa_vardefs(b) ? fa_vardefs(b) + b->arg_count : NULL, b->var_count,
                    b->closure_var, b->closure_var_count,
-                   b->cpool, b->cpool_count,
+                   fa_cpool(b), b->cpool_count,
                    b->source, b->line_num, NULL, b, 0);
 #ifdef ENABLE_DUMPS // JS_DUMP_BYTECODE_PC2LINE
     if (check_dump_flag(ctx->rt, JS_DUMP_BYTECODE_PC2LINE)) {
@@ -37438,7 +37535,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
     }
     /* Add lexical variables in scope at the point of evaluation */
     for (i = scope_idx; i >= 0;) {
-        vd = &b->vardefs[b->arg_count + i];
+        vd = &fa_vardefs(b)[b->arg_count + i];
         if (vd->scope_level > 0) {
             JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
             set_closure_from_var(ctx, cv, vd, i);
@@ -37450,7 +37547,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
         /* Add argument variables */
         for (i = 0; i < b->arg_count; i++) {
             JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
-            vd = &b->vardefs[i];
+            vd = &fa_vardefs(b)[i];
             cv->closure_type = JS_CLOSURE_ARG;
             cv->is_const = false;
             cv->is_lexical = false;
@@ -37460,7 +37557,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
         }
         /* Add local non lexical variables */
         for (i = 0; i < b->var_count; i++) {
-            vd = &b->vardefs[b->arg_count + i];
+            vd = &fa_vardefs(b)[b->arg_count + i];
             if (vd->scope_level == 0 && vd->var_name != JS_ATOM__ret_) {
                 JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
                 set_closure_from_var(ctx, cv, vd, i);
@@ -37469,7 +37566,7 @@ static __exception int add_closure_variables(JSContext *ctx, JSFunctionDef *s,
     } else {
         /* only add pseudo variables */
         for (i = 0; i < b->var_count; i++) {
-            vd = &b->vardefs[b->arg_count + i];
+            vd = &fa_vardefs(b)[b->arg_count + i];
             if (vd->scope_level == 0 && is_var_in_arg_scope(vd)) {
                 JSClosureVar *cv = &s->closure_var[s->closure_var_count++];
                 set_closure_from_var(ctx, cv, vd, i);
@@ -40009,16 +40106,21 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     cpool_offset = function_size;
     function_size += fd->cpool_count * sizeof(*fd->cpool);
     vardefs_offset = function_size;
-    function_size += (fd->arg_count + fd->var_count) * sizeof(*b->vardefs);
+    function_size += (fd->arg_count + fd->var_count) * sizeof(JSVarDef);
     closure_var_offset = function_size;
     function_size += fd->closure_var_count * sizeof(*fd->closure_var);
     byte_code_offset = function_size;
     function_size += fd->byte_code.size;
 
-    b = js_mallocz(ctx, function_size);
+    uint8_t allocation_shift;
+    b = js_alloc_function_bytecode(ctx, function_size, false, &allocation_shift);
     if (!b) {
         goto fail;
     }
+    /* Keep all header fields and padding initialized. The packed payload
+       below is completely overwritten by the existing copies. */
+    memset(b, 0, sizeof(*b));
+    b->header.dummy1 = allocation_shift;
     b->header.ref_count = 1;
 
     b->byte_code_buf = (void *)((uint8_t*)b + byte_code_offset);
@@ -40027,14 +40129,15 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     js_free(ctx, fd->byte_code.buf);
     fd->byte_code.buf = NULL;
 
+    b->cpool_count = fd->cpool_count;
     b->func_name = fd->func_name;
     if (fd->arg_count + fd->var_count > 0) {
-        b->vardefs = (void *)((uint8_t*)b + vardefs_offset);
+        fa_set_has_vardefs(b, 1);
         if (fd->arg_count > 0) {
-            memcpy(b->vardefs, fd->args, fd->arg_count * sizeof(fd->args[0]));
+            memcpy(fa_vardefs(b), fd->args, fd->arg_count * sizeof(fd->args[0]));
         }
         if (fd->var_count > 0) {
-            memcpy(b->vardefs + fd->arg_count, fd->vars, fd->var_count * sizeof(fd->vars[0]));
+            memcpy(fa_vardefs(b) + fd->arg_count, fd->vars, fd->var_count * sizeof(fd->vars[0]));
         }
         b->var_count = fd->var_count;
         b->arg_count = fd->arg_count;
@@ -40046,8 +40149,7 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     }
     b->cpool_count = fd->cpool_count;
     if (b->cpool_count) {
-        b->cpool = (void *)((uint8_t*)b + cpool_offset);
-        memcpy(b->cpool, fd->cpool, b->cpool_count * sizeof(*b->cpool));
+        memcpy(fa_cpool(b), fd->cpool, b->cpool_count * sizeof(JSValue));
     }
     js_free(ctx, fd->cpool);
     fd->cpool = NULL;
@@ -40088,18 +40190,18 @@ static JSValue js_create_function(JSContext *ctx, JSFunctionDef *fd)
     js_free(ctx, fd->closure_var);
     fd->closure_var = NULL;
 
-    b->has_prototype = fd->has_prototype;
-    b->has_simple_parameter_list = fd->has_simple_parameter_list;
-    b->is_strict_mode = fd->is_strict_mode;
-    b->is_derived_class_constructor = fd->is_derived_class_constructor;
-    b->func_kind = fd->func_kind;
-    b->need_home_object = (fd->home_object_var_idx >= 0 ||
-                           fd->need_home_object);
-    b->new_target_allowed = fd->new_target_allowed;
-    b->super_call_allowed = fd->super_call_allowed;
-    b->super_allowed = fd->super_allowed;
-    b->arguments_allowed = fd->arguments_allowed;
-    b->backtrace_barrier = fd->backtrace_barrier;
+    fa_set_has_prototype(b, fd->has_prototype);
+    fa_set_has_simple_parameter_list(b, fd->has_simple_parameter_list);
+    fa_set_is_strict_mode(b, fd->is_strict_mode);
+    fa_set_is_derived_class_constructor(b, fd->is_derived_class_constructor);
+    fa_set_func_kind(b, fd->func_kind);
+    fa_set_need_home_object(b, (fd->home_object_var_idx >= 0 ||
+                           fd->need_home_object));
+    fa_set_new_target_allowed(b, fd->new_target_allowed);
+    fa_set_super_call_allowed(b, fd->super_call_allowed);
+    fa_set_super_allowed(b, fd->super_allowed);
+    fa_set_arguments_allowed(b, fd->arguments_allowed);
+    fa_set_backtrace_barrier(b, fd->backtrace_barrier);
     b->realm = JS_DupContext(ctx);
 
     add_gc_object(ctx->rt, &b->header, JS_GC_OBJ_TYPE_FUNCTION_BYTECODE);
@@ -40132,13 +40234,13 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
         free_bytecode_atoms(rt, b->byte_code_buf, b->byte_code_len, true);
     }
 
-    if (b->vardefs) {
+    if (fa_vardefs(b)) {
         for (i = 0; i < b->arg_count + b->var_count; i++) {
-            JS_FreeAtomRT(rt, b->vardefs[i].var_name);
+            JS_FreeAtomRT(rt, fa_vardefs(b)[i].var_name);
         }
     }
     for (i = 0; i < b->cpool_count; i++) {
-        JS_FreeValueRT(rt, b->cpool[i]);
+        JS_FreeValueRT(rt, fa_cpool(b)[i]);
     }
 
     for (i = 0; i < b->closure_var_count; i++) {
@@ -40158,7 +40260,7 @@ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
     if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && b->header.ref_count != 0) {
         list_add_tail(&b->header.link, &rt->gc_zero_ref_count_list);
     } else {
-        js_free_rt(rt, b);
+        js_free_function_bytecode_allocation(rt, b);
     }
 }
 
@@ -41127,7 +41229,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
         assert(js_class_has_bytecode(p->class_id));
         b = p->u.func.function_bytecode;
         var_refs = p->u.func.var_refs;
-        is_strict_mode = b->is_strict_mode;
+        is_strict_mode = fa_get_is_strict_mode(b);
     } else {
         sf = NULL;
         b = NULL;
@@ -41154,10 +41256,10 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     fd->has_this_binding = (eval_type != JS_EVAL_TYPE_DIRECT);
     fd->backtrace_barrier = ((flags & JS_EVAL_FLAG_BACKTRACE_BARRIER) != 0);
     if (eval_type == JS_EVAL_TYPE_DIRECT) {
-        fd->new_target_allowed = b->new_target_allowed;
-        fd->super_call_allowed = b->super_call_allowed;
-        fd->super_allowed = b->super_allowed;
-        fd->arguments_allowed = b->arguments_allowed;
+        fd->new_target_allowed = fa_get_new_target_allowed(b);
+        fd->super_call_allowed = fa_get_super_call_allowed(b);
+        fd->super_allowed = fa_get_super_allowed(b);
+        fd->arguments_allowed = fa_get_arguments_allowed(b);
     } else {
         fd->new_target_allowed = false;
         fd->super_call_allowed = false;
@@ -41633,6 +41735,9 @@ static int bc_put_atom(BCWriterState *s, JSAtom atom)
         v = (__JS_AtomToUInt32(atom) << 1) | 1;
     } else {
         if (bc_atom_to_idx(s, &v, atom)) {
+            /* Some tag emitters use the sticky buffer error rather than
+               checking this return value. Keep atom-index OOM sticky too. */
+            dbuf_set_error(&s->dbuf);
             return -1;
         }
         v <<= 1;
@@ -41784,20 +41889,20 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
 
     bc_put_u8(s, BC_TAG_FUNCTION_BYTECODE);
     flags = idx = 0;
-    bc_set_flags(&flags, &idx, b->has_prototype, 1);
-    bc_set_flags(&flags, &idx, b->has_simple_parameter_list, 1);
-    bc_set_flags(&flags, &idx, b->is_derived_class_constructor, 1);
-    bc_set_flags(&flags, &idx, b->need_home_object, 1);
-    bc_set_flags(&flags, &idx, b->func_kind, 2);
-    bc_set_flags(&flags, &idx, b->new_target_allowed, 1);
-    bc_set_flags(&flags, &idx, b->super_call_allowed, 1);
-    bc_set_flags(&flags, &idx, b->super_allowed, 1);
-    bc_set_flags(&flags, &idx, b->arguments_allowed, 1);
-    bc_set_flags(&flags, &idx, b->backtrace_barrier, 1);
+    bc_set_flags(&flags, &idx, fa_get_has_prototype(b), 1);
+    bc_set_flags(&flags, &idx, fa_get_has_simple_parameter_list(b), 1);
+    bc_set_flags(&flags, &idx, fa_get_is_derived_class_constructor(b), 1);
+    bc_set_flags(&flags, &idx, fa_get_need_home_object(b), 1);
+    bc_set_flags(&flags, &idx, fa_get_func_kind(b), 2);
+    bc_set_flags(&flags, &idx, fa_get_new_target_allowed(b), 1);
+    bc_set_flags(&flags, &idx, fa_get_super_call_allowed(b), 1);
+    bc_set_flags(&flags, &idx, fa_get_super_allowed(b), 1);
+    bc_set_flags(&flags, &idx, fa_get_arguments_allowed(b), 1);
+    bc_set_flags(&flags, &idx, fa_get_backtrace_barrier(b), 1);
     bc_set_flags(&flags, &idx, s->allow_debug, 1);
     assert(idx <= 16);
     bc_put_u16(s, flags);
-    bc_put_u8(s, b->is_strict_mode);
+    bc_put_u8(s, fa_get_is_strict_mode(b));
     bc_put_atom(s, b->func_name);
 
     bc_put_leb128(s, b->arg_count);
@@ -41808,11 +41913,11 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     bc_put_leb128(s, b->closure_var_count);
     bc_put_leb128(s, b->cpool_count);
     bc_put_leb128(s, b->byte_code_len);
-    if (b->vardefs) {
+    if (fa_vardefs(b)) {
         /* XXX: this field is redundant */
         bc_put_leb128(s, b->arg_count + b->var_count);
         for (i = 0; i < b->arg_count + b->var_count; i++) {
-            JSVarDef *vd = &b->vardefs[i];
+            JSVarDef *vd = &fa_vardefs(b)[i];
             bc_put_atom(s, vd->var_name);
             bc_put_leb128(s, vd->scope_level);
             bc_put_leb128(s, vd->scope_next + 1);
@@ -41847,7 +41952,7 @@ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
     // write constant pool before code so code can be disassembled
     // on the fly at read time
     for (i = 0; i < b->cpool_count; i++) {
-        if (JS_WriteObjectRec(s, b->cpool[i])) {
+        if (JS_WriteObjectRec(s, fa_cpool(b)[i])) {
             goto fail;
         }
     }
@@ -42277,7 +42382,10 @@ static int JS_WriteObjectAtoms(BCWriterState *s)
             JS_WriteString(s, p);
         }
     }
-    /* XXX: should check for OOM in above phase */
+    /* The put helpers record failures in the sticky DynBuf error. Do not
+       concatenate a failed (possibly NULL) atom table or report success. */
+    if (dbuf_error(&s->dbuf))
+        goto fail;
 
     /* move the atoms at the start */
     /* XXX: could just append dbuf1 data, but it uses more memory if
@@ -42320,7 +42428,7 @@ uint8_t *JS_WriteObject2(JSContext *ctx, size_t *psize, JSValueConst obj,
     js_dbuf_init(ctx, &s->dbuf);
     js_object_list_init(&s->object_list);
 
-    if (JS_WriteObjectRec(s, obj)) {
+    if (JS_WriteObjectRec(s, obj) || dbuf_error(&s->dbuf)) {
         goto fail;
     }
     if (JS_WriteObjectAtoms(s)) {
@@ -42763,21 +42871,21 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
         goto fail;
     }
     idx = 0;
-    bc.has_prototype = bc_get_flags(v16, &idx, 1);
-    bc.has_simple_parameter_list = bc_get_flags(v16, &idx, 1);
-    bc.is_derived_class_constructor = bc_get_flags(v16, &idx, 1);
-    bc.need_home_object = bc_get_flags(v16, &idx, 1);
-    bc.func_kind = bc_get_flags(v16, &idx, 2);
-    bc.new_target_allowed = bc_get_flags(v16, &idx, 1);
-    bc.super_call_allowed = bc_get_flags(v16, &idx, 1);
-    bc.super_allowed = bc_get_flags(v16, &idx, 1);
-    bc.arguments_allowed = bc_get_flags(v16, &idx, 1);
-    bc.backtrace_barrier = bc_get_flags(v16, &idx, 1);
+    fa_set_has_prototype(&bc, bc_get_flags(v16, &idx, 1));
+    fa_set_has_simple_parameter_list(&bc, bc_get_flags(v16, &idx, 1));
+    fa_set_is_derived_class_constructor(&bc, bc_get_flags(v16, &idx, 1));
+    fa_set_need_home_object(&bc, bc_get_flags(v16, &idx, 1));
+    fa_set_func_kind(&bc, bc_get_flags(v16, &idx, 2));
+    fa_set_new_target_allowed(&bc, bc_get_flags(v16, &idx, 1));
+    fa_set_super_call_allowed(&bc, bc_get_flags(v16, &idx, 1));
+    fa_set_super_allowed(&bc, bc_get_flags(v16, &idx, 1));
+    fa_set_arguments_allowed(&bc, bc_get_flags(v16, &idx, 1));
+    fa_set_backtrace_barrier(&bc, bc_get_flags(v16, &idx, 1));
     has_debug_info = bc_get_flags(v16, &idx, 1);
     if (bc_get_u8(s, &v8)) {
         goto fail;
     }
-    bc.is_strict_mode = (v8 > 0);
+    fa_set_is_strict_mode(&bc, (v8 > 0));
     if (bc_get_atom(s, &bc.func_name)) {
         goto fail;
     }
@@ -42811,30 +42919,31 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
 
     function_size = sizeof(*b);
     cpool_offset = function_size;
-    function_size += bc.cpool_count * sizeof(*bc.cpool);
+    function_size += bc.cpool_count * sizeof(JSValue);
     vardefs_offset = function_size;
-    function_size += local_count * sizeof(*bc.vardefs);
+    function_size += local_count * sizeof(JSVarDef);
     closure_var_offset = function_size;
     function_size += bc.closure_var_count * sizeof(*bc.closure_var);
     byte_code_offset = function_size;
     function_size += bc.byte_code_len;
 
-    b = js_mallocz(ctx, function_size);
+    uint8_t allocation_shift;
+    b = js_alloc_function_bytecode(ctx, function_size, true, &allocation_shift);
     if (!b) {
         goto fail;
     }
 
     memcpy(b, &bc, sizeof(*b));
+    b->header.dummy1 = allocation_shift;
     bc.func_name = JS_ATOM_NULL;
     b->header.ref_count = 1;
     if (local_count != 0) {
-        b->vardefs = (void *)((uint8_t*)b + vardefs_offset);
+        fa_set_has_vardefs(b, 1);
     }
     if (b->closure_var_count != 0) {
         b->closure_var = (void *)((uint8_t*)b + closure_var_offset);
     }
     if (b->cpool_count != 0) {
-        b->cpool = (void *)((uint8_t*)b + cpool_offset);
     }
 
     add_gc_object(ctx->rt, &b->header, JS_GC_OBJ_TYPE_FUNCTION_BYTECODE);
@@ -42860,7 +42969,7 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
         bc_read_trace(s, "vars {\n");
         bc_read_trace(s, "off flags scope name\n");
         for (i = 0; i < local_count; i++) {
-            JSVarDef *vd = &b->vardefs[i];
+            JSVarDef *vd = &fa_vardefs(b)[i];
             if (bc_get_atom(s, &vd->var_name)) {
                 goto fail;
             }
@@ -42942,7 +43051,7 @@ static JSValue JS_ReadFunctionTag(BCReaderState *s)
             if (JS_IsException(val)) {
                 goto fail;
             }
-            b->cpool[i] = val;
+            fa_cpool(b)[i] = val;
         }
         bc_read_trace(s, "}\n");
     }

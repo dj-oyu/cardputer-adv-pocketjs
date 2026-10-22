@@ -3,6 +3,12 @@
 #include "quickjs.c"
 #include "bytecode.h"
 
+/* The shared inspection overlay also runs against the pinned older engine.
+ * Both versions pack the pool immediately after their actual header type. */
+static JSValue *prep_cpool(const JSFunctionBytecode *b) {
+    return b->cpool_count ? (JSValue *)(b + 1) : NULL;
+}
+
 typedef struct {prep_value stack[PREP_STACK];unsigned top;} prep_scratch;
 static prep_value unknown(void){return (prep_value){0};}
 static bool atom_is(JSContext *ctx,JSAtom atom,const char *word){
@@ -52,7 +58,7 @@ static bool function(JSContext *ctx,JSFunctionBytecode *b,prep_report *r,prep_sc
         case OP_push_const:case OP_push_const8:{
             unsigned k=op==OP_push_const?get_u32(p+1):p[1];
             if(k>=(unsigned)b->cpool_count)return false;
-            a=literal(ctx,b->cpool[k]);put=true;break;
+            a=literal(ctx,prep_cpool(b)[k]);put=true;break;
         }
         case OP_push_atom_value:{
             JSValue v=JS_AtomToValue(ctx,get_u32(p+1));a=literal(ctx,v);JS_FreeValue(ctx,v);put=true;break;
@@ -106,8 +112,8 @@ static bool function(JSContext *ctx,JSFunctionBytecode *b,prep_report *r,prep_sc
     /* Reuse the same bounded scratch for every function, not a stack per
      * closure. A failed bound rejects all sites, never a partial artifact. */
     for(int i=0;i<b->cpool_count;i++)
-        if(JS_VALUE_GET_TAG(b->cpool[i])==JS_TAG_FUNCTION_BYTECODE&&
-           !function(ctx,JS_VALUE_GET_PTR(b->cpool[i]),r,w))return false;
+        if(JS_VALUE_GET_TAG(prep_cpool(b)[i])==JS_TAG_FUNCTION_BYTECODE&&
+           !function(ctx,JS_VALUE_GET_PTR(prep_cpool(b)[i]),r,w))return false;
     return true;
 }
 bool prep_analyze(JSContext *ctx,JSValueConst compiled,prep_report *r){
