@@ -41,7 +41,7 @@ globalThis.frame = function (b) {
       fa = rnd(mx(0, mn(1, mx(dm ? 0 : (nw - idle + FX[0]) / FX[0] - DEMO_IDLE_S * 1e3 / FX[0], 1 - (nw - fe) / FX[2]))) * FX[3]) * 255 / FX[3] | 0;
       if (P('tab')) { tier = (tier + 1) % 3; const l = ['stands', 'crowd'].filter(n => live[n] || queue.indexOf(n) >= 0); drop(l); want(l); log('TIER ' + tier); }
       load();
-      let xs, c, l = pick, close = -1, gate = 0, extra = null;
+      let xs, c, l = pick, close = -1, gate = 0, extra = null, ei;
       if (scene === 'pad') {
         if (P('a') || P('d')) { pick = (pick + (P('d') ? 1 : 7)) % 8; if (A) A.cue('move'); }
         stake = mx(50, mn(stake + (P('e') ? 50 : P('s') ? -50 : 0), 500, pts));
@@ -87,18 +87,18 @@ globalThis.frame = function (b) {
         c = shot(m === 6 ? 0 : m, xs, cl, scene === 'gate' || camT === 45);
         close = m === 1 ? cl : -1;
         gate = live.gate;
-        extra = ['map', z8(0)];
-        for (let i = 0; i < 8; ++i) extra[1][i] = 8 + mn(rs.x[i], D) * .224;
+        extra = 'map'; ei = z8(0);
+        for (let i = 0; i < 8; ++i) ei[i] = 8 + mn(rs.x[i], D) * .224;
       } else if (scene === 'photo') {
         xs = photo();
         c = shot(4, xs);
-        extra = ['photo', [120]];
+        extra = 'photo'; ei = [120];
         if (t > 110 || t > 20 && P('1')) { enter('res'); break fr; }
       } else if (scene === 'res') {
         if (P('1')) { ++raceNo; save(); { enter('pad'); break fr; } }
         if (P('r')) { replay = 1; { enter('gate'); break fr; } }
         l = fin.o[0];
-        extra = ['conf', [t, mn(96, t)]];
+        extra = 'conf'; ei = [t, mn(96, t)];
       }
       if (!xs) {
         // Paddock warm-up and the winner's canter: a lone horse, camera locked.
@@ -108,7 +108,7 @@ globalThis.frame = function (b) {
         c = shot(1, xs, l);
         close = l;
       }
-      paint(c, xs, close, gate, extra);
+      paint(c, xs, close, gate, extra, ei);
       const up = tx => {
         hud(tx);
         R.dm.setVisible(tx, dm > 0 && !(t & 16));

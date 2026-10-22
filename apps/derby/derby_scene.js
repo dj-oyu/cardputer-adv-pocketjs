@@ -110,8 +110,8 @@ function settle() {
 }
 
 // The screen's rect, then the frame's draws: the course (with the screen
-// and its feed) for camera c, or HEAD ON; then extra ([plan, inputs] or null).
-function paint(c, xs, close, gate, extra) {
+// and its feed) for camera c, or HEAD ON; then extra (plan or null) and its inputs.
+function paint(c, xs, close, gate, extra, ei) {
   // Its face on this camera, or null out of view or over the map
   // (y < 13): fill, bezel, feed and lettering all use these integers.
   const a = pose(VS[0] - VS[2], VS[1]), b = pose(VS[0] + VS[2], VS[1]);
@@ -152,6 +152,6 @@ function paint(c, xs, close, gate, extra) {
     const o = e[15 + j] * d, k = flo(-o / w) - 1;
     dr(j ? 'bokeh' : 'dust', f * e[18], e[q] + k * w + o, k * 2.39996 % (2 * PI), w, e[q + 1], e[q + 2] - r, e[q + 3] + r);
   }
-  if (extra) dr(extra[0], extra[1]);
+  if (extra) dr(extra, ei);
   H.commit();
 }
