@@ -57,6 +57,28 @@ static void same_in_bands(const ksn_proc_frame *f){
 /* Colour A is the instruction's; the arrays keep a SET where it was set
  * before (r15, unused), so their indices still name the same values. */
 
+static void plain_point_in_pattern_frame(void){
+    static const int points[][2]={{20,20},{0,0},{W-1,H-1},{-1,20},{W,20},{20,-1},{20,H}};
+    for(unsigned i=0;i<sizeof points/sizeof points[0];i++){
+        ksn_proc_inst code[]={
+            SET(0,0),SET(1,0),SET(2,0),SET(3,0),
+            SET(4,0xffffff),SET(15,0),SET(5,-1),SET(6,0),SET(7,0),
+            MOVE(0,1),PATTERN(4,2,3,24,0xf800),
+            MOVE(2,3),LINE(2,3,0x07e0),
+        };
+        code[0].value=code[2].value=(float)points[i][0];
+        code[1].value=code[3].value=(float)points[i][1];
+        CHECK(run(code,13,&frame)==KSN_PROC_DONE&&frame.ext==1&&frame.count==3);
+        render_full(&frame,full);
+        unsigned green=0;
+        for(int p=0;p<W*H;p++)green+=full[p]==0x07e0;
+        const bool visible=points[i][0]>=0&&points[i][0]<W&&points[i][1]>=0&&points[i][1]<H;
+        CHECK(green==(unsigned)visible);
+        if(visible)CHECK(full[points[i][1]*W+points[i][0]]==0x07e0);
+        same_in_bands(&frame);
+    }
+}
+
 static void pattern_horizontal(void){
     /* Period 5, bits 10110b, cells 2..52 (one a pixel), from x = 10 to 60 on
      * row 20; colour A where the bit is set, B elsewhere. */
@@ -432,6 +454,7 @@ static void analysis_and_plan(void){
     CHECK(ksn_proc_begin_bound(&vm,&p,&binding,ZERO,&other)==KSN_PROC_INVALID);
 }
 int main(void){
+    plain_point_in_pattern_frame();
     pattern_horizontal();
     pattern_slanted();
     pattern_random();
