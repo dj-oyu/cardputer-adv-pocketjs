@@ -1,0 +1,107 @@
+name: Procedural length experiment
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: proc-length-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_HEAD: 578d552384c992cb852822d40e2635e7b317d498
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Native O2 pipeline A/B and boundary matrix
+        run: python3 tools/vmtest/length-read/run.py --pairs 100 --loops 100000 --out artifacts/length-read
+      - name: Device-sized O2 pipeline A/B and boundary matrix
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          LENGTH_READ_SYSTEM_M32=1 python3 tools/vmtest/length-read/run.py --m32 --pairs 100 --loops 100000 --out artifacts/length-read
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: proc-length-host-${{ env.SOURCE_HEAD }}
+          path: |
+            artifacts/length-read/**/summary.json
+            artifacts/length-read/**/trials.json
+          retention-days: 14
+  firmware:
+    needs: host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, candidate]
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.mode == 'baseline' && env.BASE_HEAD || env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Product fixed-workload build and flash evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          build_head=$(git rev-parse HEAD)
+          export EXPERIMENT_HEAD="$SOURCE_HEAD"
+          export SOURCE_HEAD="$build_head"
+          idf.py -B build_length -D SDKCONFIG="$PWD/build_length/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${build_head:0:12}" -D POCKET_DERBY_FIXED_WORKLOAD=ON build
+          python3 -B tools/record_verification.py --build build_length --expect-telemetry ON --expect-measure ON --out build_length/verification.json
+          python3 -B tools/report_board_transport.py --build build_length
+          python3 -B tools/report_derby_fixed_stack.py --build build_length
+          idf.py -B build_length size > build_length/size.log
+          python3 -B - '${{ matrix.mode }}' "$build_head" <<'PY'
+          import hashlib,json,sys
+          from pathlib import Path
+          b=Path('build_length')
+          names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','flasher_args.json']
+          images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}
+          (b/'experiment.json').write_text(json.dumps(dict(mode=sys.argv[1],source_head=sys.argv[2],experiment_head=__import__('os').environ['EXPERIMENT_HEAD'],idf='6.0.1',images=images),indent=2)+'\n')
+          with (b/'SHA256SUMS').open('a') as f:
+              for n,v in images.items():f.write(v['sha256']+'  '+n+'\n')
+          print((b/'experiment.json').read_text())
+          PY
+          git diff --exit-code
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: proc-length-${{ matrix.mode }}-${{ env.SOURCE_HEAD }}
+          path: |
+            build_length/*.bin
+            build_length/*.elf
+            build_length/*.map
+            build_length/*.json
+            build_length/*.log
+            build_length/SHA256SUMS
+            build_length/sdkconfig
+            build_length/flash_args
+            build_length/bootloader/bootloader.bin
+            build_length/partition_table/partition-table.bin
+            build_length/generated/derby_fixed_workload/*.json
+          retention-days: 14
