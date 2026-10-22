@@ -8,7 +8,7 @@ function enter(s) {
     if (F.o) for (let j = 0; j <= PAN[3]; ++j) CH.push(OB + j * 120 * PI / PAN[3]);
     CH.push(1e4); S.course(CH, F.o ? OC : 0, DNR);
   }
-  if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; rs.l = DL.slice(); F.k = z8(0);
+  if (s === 'gate') { drop(['conf']); want(RUN); rs = race(F); ph = [0, 1, 2, 3, 4, 5, 6, 7]; rs.l = DL.slice(); zo = [7, 6, 5, 4, 3, 2, 1, 0]; F.k = z8(0);
     for (let i = 0; i < 64; ++i) F.k[i >> 3] += F.m[i & 7] > F.m[i >> 3]; cam = disp = slow = cm = hold = dl = man = von = 0; ld = -1; notes = FANFARE.slice(); }
   if (s === 'race') notes = BELL.slice();
   if (s === 'photo') { drop(['band']); want(['photo']); }
@@ -79,7 +79,7 @@ function at(u) {
   const a = [], L = mx.apply(null, rs.x), w = rs.l, k = F.k, n = rs.t > (w.t || 0);
   w.t = rs.t;
   for (let i = 0, x, s; i < 8; ++i) x = rs.x[i], s = F.h[i].sty, n && F.o && (w[i] += mx(-.04, mn(.04, 12 * M.pow(Q, x < 273 ? i * (.3 + .35 * s) : x < 650 ? k[i] : mn(7, k[i] + s)) - w[i]))), a[i] = rs.px[i] + (rs.x[i] - rs.px[i]) * u, lz[i] = w[i] + mn(.4, (L - a[i]) * .03) * sin(a[i] / 40 + 2.4 * i);
-  zo.sort((a, b) => lz[b] - lz[a]);
+  if (F.o) zo.sort((a, b) => lz[b] - lz[a]);
   return a;
 }
 // Keep all projection inputs from the winner's crossing, before at() moves them.
