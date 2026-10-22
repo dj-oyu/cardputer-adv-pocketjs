@@ -245,6 +245,23 @@ static void pattern_depth(void){
     CHECK(run(code,13,&frame)==KSN_PROC_DONE&&frame.count==8);
     same_in_bands(&frame);
 }
+static void plain_vertical(void){
+    static const int ends[][4]={{7,-12,7,H+15},{W-1,H+10,W-1,-2},{-1,0,-1,H-1},
+                                {W,0,W,H-1},{0,0,0,0},{23,40,23,40}};
+    for(unsigned i=0;i<sizeof ends/sizeof ends[0];i++){
+        const ksn_proc_inst code[]={SET(0,ends[i][0]),SET(1,ends[i][1]),SET(2,ends[i][2]),SET(3,ends[i][3]),
+                                    MOVE(0,1),LINE(2,3,0x5aa5)};
+        CHECK(run(code,6,&frame)==KSN_PROC_DONE&&frame.ext==0&&frame.count==1);
+        render_full(&frame,full);
+        const int lo=ends[i][1]<ends[i][3]?ends[i][1]:ends[i][3];
+        const int hi=ends[i][1]>ends[i][3]?ends[i][1]:ends[i][3];
+        for(int y=0;y<H;y++)for(int x=0;x<W;x++){
+            const bool on=ends[i][0]>=0&&ends[i][0]<W&&x==ends[i][0]&&y>=lo&&y<=hi;
+            CHECK(full[y*W+x]==(on?0x5aa5:BACK));
+        }
+        same_in_bands(&frame);
+    }
+}
 static void walkers_and_plain(void){
     /* A plain line, a pattern line over it, a plain line over that: order. */
     const ksn_proc_inst code[]={
@@ -436,6 +453,7 @@ int main(void){
     pattern_slanted();
     pattern_random();
     pattern_depth();
+    plain_vertical();
     walkers_and_plain();
     limits_and_rejections();
     analysis_and_plan();

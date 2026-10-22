@@ -461,6 +461,14 @@ bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int
         int ymin=s->y0<s->y1?s->y0:s->y1;
         int ymax=s->y0>s->y1?s->y0:s->y1;
         if(ymax<y||ymin>=y+height)continue;
+        if(s->x0==s->x1){
+            if((unsigned)s->x0<(unsigned)KSN_PROC_W){
+                int first=ymin<y?y:ymin,last=ymax>=y+height?y+height-1:ymax;
+                uint16_t *dst=pixels+(first-y)*KSN_PROC_W+s->x0;
+                for(int row=first;row<=last;row++,dst+=KSN_PROC_W)*dst=s->color;
+            }
+            continue;
+        }
         int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
         int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
         if(dy){
