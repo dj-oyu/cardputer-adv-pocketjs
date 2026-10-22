@@ -1,4 +1,4 @@
-"""Build and verify the host-only preparation/layout experiment.
+"""Verify the host experiment and the synchronous product runtime connection.
 
 One acceptance entry runs native O2 + ASan/UBSan; the full suite also invokes
 --m32 for the device-width ABI. This does not select fast/full acceptance.
@@ -129,10 +129,16 @@ def main():
     lock = (OUT/('m32.lock' if args.m32 else 'native.lock')).open('a+')
     fcntl.flock(lock, fcntl.LOCK_EX)
     report = {}
+    runtime_supported = (QJS/'quickjs-prepared.h').exists()
+    table = OUT/'runtime-rom.c'
+    if runtime_supported:
+        subprocess.run(['node', str(ROOT/'tools/kasane_ir/emit_rom_plans.mjs'),
+                        str(table), f"derby={ROOT/'apps/derby/derby_prog.js'}"],
+                       cwd=ROOT, check=True)
     for name, options in variants:
         binary = OUT/name
         flags = ['-std=gnu11', *abi, *options, '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
-                 '-DKSN_PROC_HOST_TEST', '-Wno-unused-parameter',
+                 '-DKSN_PROC_HOST_TEST', '-DPOCKET_PREPARED_TEST', '-Wno-unused-parameter',
                  *[x for d in (QJS, ROOT/'main', ROOT/'main/pocket', KASANE,
                                 ROOT/'tools/hostshim', HERE) for x in ('-I',str(d))]]
         command = [sys.executable, str(ROOT/'tools/host_build.py'), 'cc', *flags,
@@ -141,12 +147,24 @@ def main():
         import struct
         report[name] = verify(binary, 4 if args.m32 else struct.calcsize('P'))
         print(f'PREPARE_CONTRACT {name} PASS: real parser, identity guards, layout/generic parity, side effects, bounded fallback', flush=True)
+        if runtime_supported:
+            runtime_binary = OUT/(name+'-runtime')
+            runtime_sources = [s for s in SOURCES if s != HERE/'probe.c'] + [HERE/'runtime.c', table]
+            subprocess.run([sys.executable, str(ROOT/'tools/host_build.py'), 'cc',
+                            *flags, *map(str,runtime_sources), '-lm', '-o', str(runtime_binary)],
+                           cwd=ROOT, check=True)
+            subprocess.run([str(runtime_binary), str(HERE/'fixtures/runtime-startup.js')],
+                           cwd=ROOT, check=True)
     metadata = {'source_head': subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
-                'runtime_connected': False, 'cases': report,
+                'runtime_connected': runtime_supported, 'cases': report,
                 'inputs': {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                            for p in [HERE/'run.py',HERE/'bytecode.c',HERE/'bytecode.h',HERE/'probe.c',
                                      ROOT/'main/pocket/pocket_proc.c',KASANE/'ksn_proc_plan.c',
-                                     KASANE/'ksn_proc_plan.h',QJS/'quickjs.c',QJS/'quickjs-opcode.h']}}
+                                     KASANE/'ksn_proc_plan.h',QJS/'quickjs.c',QJS/'quickjs-opcode.h',
+                                     *([HERE/'runtime.c', HERE/'fixtures/runtime-startup.js',
+                                        QJS/'quickjs-prepared.h', QJS/'quickjs-prepared.inc',
+                                        ROOT/'tools/kasane_ir/emit_rom_plans.mjs']
+                                       if runtime_supported else [])]}}
     results = Path(os.environ['CONTRACT_LOG_DIR'])/'prepare' if 'CONTRACT_LOG_DIR' in os.environ else OUT
     results.mkdir(parents=True, exist_ok=True)
     (results/('m32-results.json' if args.m32 else 'native-results.json')).write_text(json.dumps(metadata,indent=2)+'\n')

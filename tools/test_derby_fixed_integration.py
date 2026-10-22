@@ -54,6 +54,19 @@ def without_window_end(source):
     return source.replace('        board_present_frame_end();\n', '', 1)
 
 
+def without_prepared_loader(source):
+    # The prepared-input leaf deliberately replaces this one global-script
+    # call. Preserve the surrounding module selection and error reporting;
+    # every other ordinary owner byte still has its frozen reference check.
+    old = ("    JSValue result=module?pocket_app_eval_module(ctx,source,length,filename)\n"
+           "                         :JS_Eval(ctx,source,length,filename,JS_EVAL_TYPE_GLOBAL);")
+    new = ("    JSValue result=module?pocket_app_eval_module(ctx,source,length,filename)\n"
+           "                         :pocket_proc_eval_prepared(ctx,source,length,filename);")
+    if source.count('pocket_proc_eval_prepared(') != 1 or source.count(new) != 1:
+        raise ValueError('prepared loader moved outside global-script reporting boundary')
+    return source.replace(new, old, 1)
+
+
 class Integration(unittest.TestCase):
     def test_controller_preserves_strict_global_scope_load_order_and_ready_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -90,8 +103,21 @@ class Integration(unittest.TestCase):
             reference=PRESSURE_OWNER_BASE if name=='main/app_session.c' else BASE
             old=subprocess.check_output(['git','show',reference+':'+name],cwd=ROOT,text=True)
             current=(ROOT/name).read_text()
-            if name=='main/app_session.c':current=without_window_end(current)
+            if name=='main/app_session.c':
+                current=without_prepared_loader(without_window_end(current))
             self.assertEqual(off_path(old),off_path(current),name)
+
+    def test_prepared_loader_is_only_the_global_script_reporting_call(self):
+        source=(ROOT/'main/app_session.c').read_text()
+        normalized=without_prepared_loader(source)
+        self.assertNotIn('pocket_proc_eval_prepared(',normalized)
+        call='pocket_proc_eval_prepared(ctx,source,length,filename)'
+        for changed in (source.replace(call,'JS_UNDEFINED'),
+                        source.replace(call,call+';'+call),
+                        source.replace(call,'pocket_proc_eval_prepared(ctx,source,length,"wrong.js")'),
+                        source.replace('result=module?pocket_app_eval_module',
+                                       'result=!module?pocket_app_eval_module')):
+            with self.assertRaises(ValueError):without_prepared_loader(changed)
 
     def test_window_end_cannot_move_before_or_disappear_from_present(self):
         source=(ROOT/'main/app_session.c').read_text()

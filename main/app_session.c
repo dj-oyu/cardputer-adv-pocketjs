@@ -841,7 +841,7 @@ static esp_err_t eval_reporting(const char *source, size_t length,
     if(!ctx) return ESP_ERR_INVALID_STATE;
 
     JSValue result=module?pocket_app_eval_module(ctx,source,length,filename)
-                         :JS_Eval(ctx,source,length,filename,JS_EVAL_TYPE_GLOBAL);
+                         :pocket_proc_eval_prepared(ctx,source,length,filename);
     if(JS_IsException(result)) {
         JSValue exception=JS_GetException(ctx);
         char message[128]={0};

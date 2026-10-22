@@ -9,6 +9,9 @@
 /* A small APP-session adapter for registered procedural IR. */
 esp_err_t pocket_proc_install(JSContext *ctx, JSValueConst kasane_namespace);
 void pocket_proc_reset(void);
+/* Synchronous global-script loader. Unsupported calls stay generic; the
+ * stack-owned prepared descriptor expires before this function returns. */
+JSValue pocket_proc_eval_prepared(JSContext *,const char *,size_t,const char *);
 /* The built-in plans register('name', args) looks up (docs/kasane/flash-plan.md):
  * a const table the firmware links, generated from the apps' @plan functions.
  * The table must outlive every session; reset() keeps it. Without a call,
