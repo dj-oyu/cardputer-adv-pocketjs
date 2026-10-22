@@ -114,20 +114,21 @@ function settle() {
 function paint(c, xs, close, gate, extra) {
   // Its face on this camera, or null out of view or over the map
   // (y < 13): fill, bezel, feed and lettering all use these integers.
-  const a = pose(VS[0] - VS[2], VS[1]), b = pose(VS[0] + VS[2], VS[1]);
-  if (pc) {
-    // Panning: the same tests on the four corners (the bottom edge is on
-    // the horizon); vr the rect inside the face, vq its edges [x, 1/Z'].
-    const p = pj(a), q = pj(b), x0 = p[0] / p[1], x1 = q[0] / q[1];
-    vq = [x0, 1 / p[1], x1, 1 / q[1]];
-    vr = p[1] > .02 && q[1] > .02 && x0 <= 239 && x1 >= 1 && x1 - x0 >= 8 && x1 - x0 <= 160 && 28 - 10 * mx(vq[1], vq[3]) >= 13 ?
-      [rnd(x0), M.ceil(28 - 10 * mn(vq[1], vq[3])), rnd(x1), 28] : null;
-  } else {
-    const p = c[0] / a[1];
-    vr = [rnd(120 + (a[0] - cx) * p), rnd(c[2] + (c[1] - VS[4]) * p), rnd(120 + (b[0] - cx) * p), rnd(c[2] + (c[1] - VS[3]) * p)];
-    if (vr[0] > 239 || vr[2] < 1 || vr[1] < 13 || vr[1] > 134 || vr[2] - vr[0] < 8 || vr[2] - vr[0] > 160) vr = null;
-  }
-  if (scene !== 'race' || cm === 6) vr = null;
+  if (scene === 'race' && cm !== 6) {
+    const a = pose(VS[0] - VS[2], VS[1]), b = pose(VS[0] + VS[2], VS[1]);
+    if (pc) {
+      // Panning: the same tests on the four corners (the bottom edge is on
+      // the horizon); vr the rect inside the face, vq its edges [x, 1/Z'].
+      const p = pj(a), q = pj(b), x0 = p[0] / p[1], x1 = q[0] / q[1];
+      vq = [x0, 1 / p[1], x1, 1 / q[1]];
+      vr = p[1] > .02 && q[1] > .02 && x0 <= 239 && x1 >= 1 && x1 - x0 >= 8 && x1 - x0 <= 160 && 28 - 10 * mx(vq[1], vq[3]) >= 13 ?
+        [rnd(x0), M.ceil(28 - 10 * mn(vq[1], vq[3])), rnd(x1), 28] : null;
+    } else {
+      const p = c[0] / a[1];
+      vr = [rnd(120 + (a[0] - cx) * p), rnd(c[2] + (c[1] - VS[4]) * p), rnd(120 + (b[0] - cx) * p), rnd(c[2] + (c[1] - VS[3]) * p)];
+      if (vr[0] > 239 || vr[2] < 1 || vr[1] < 13 || vr[1] > 134 || vr[2] - vr[0] < 8 || vr[2] - vr[0] > 160) vr = null;
+    }
+  } else vr = null;
   if (vr) ++von;
   H.beginFrame(4);
   // The dust and the band (KN[4]; docs/apps/derby-finish-fx.md): 0 the dust,
