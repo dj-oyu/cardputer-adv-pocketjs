@@ -10,7 +10,9 @@ const DEMO_IDLE_S = 15, DEMO_RES = 150, GK = 'a d e s r 1 , / tab'.split(' '), F
 let dm = 0, dk = 0, dn = 0, idle = 0, kp = '', bk, fe = -1e9, fa = 0, nw = 0;
 // A key ends the demo and is spent doing so (dk '' matches no key).
 function attract(b) {
-  const k = K.down().join(), n = nw = pocket.time ? pocket.time.now() : 0;
+  const n = nw = pocket.time ? pocket.time.now() : 0;
+  if (!dm && scene !== 'pad') { dk = 0; idle = n; return; }
+  const k = K.down().join();
   let hit = b || k && k !== kp;
   for (const x of GK) hit = hit || K.pressed(x);
   kp = k;
