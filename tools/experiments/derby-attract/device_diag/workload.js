@@ -3,25 +3,27 @@
 A=null;notes=[];tier=@TIER@;
 const diagFrame=globalThis.frame,diagMark=S._diag;
 diagMark(2,@OPTIMIZED@); // Startup validation only; identical native C in A/B.
-let diagWarm=0,diagFrames=0,diagReady=false;
+let diagWarm=0,diagFrames=0,diagReady=false,diagAdvancing=false,diagSteps=0;
 if('@PROFILE@'!=='pad')enter('gate');
 globalThis.frame=function(b){
   // Keep attract idle and reject external inputs in this finite fixed workload.
   idle=0;
   if(!diagReady){
-    diagFrame(0);++diagWarm;
-    if(diagWarm>=40&&!queue.length){
-      if('@PROFILE@'!=='pad'){
-        enter('race');
-        while(mx.apply(null,rs.x)<390){
-          step(F,rs,DT);
-          for(let i=0;i<8;++i)ph[i]+=rs.v[i]*DT/6.5*2*PI;
-          at(1);
-        }
-        drop(['gate']);want(['band']);
-        wide=()=>8;
-      }
-      diagReady=true;
+    if(!diagAdvancing){
+      diagFrame(0);++diagWarm;
+      if(diagWarm<40||queue.length)return;
+      if('@PROFILE@'==='pad'){diagReady=true;return;}
+      enter('race');diagAdvancing=true;
+    }
+    // Return to the owner after at most eight model steps; retain its watchdog.
+    for(let batch=0;batch<8&&mx.apply(null,rs.x)<390;++batch){
+      if(++diagSteps>6000)throw Error('attract diagnostic setup step limit');
+      step(F,rs,DT);
+      for(let i=0;i<8;++i)ph[i]+=rs.v[i]*DT/6.5*2*PI;
+      at(1);
+    }
+    if(mx.apply(null,rs.x)>=390){
+      drop(['gate']);want(['band']);wide=()=>8;diagReady=true;
     }
     return;
   }

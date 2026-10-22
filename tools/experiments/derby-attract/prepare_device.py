@@ -6,7 +6,7 @@ import argparse,hashlib,json,subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[3]
 TEMPLATE=Path(__file__).with_name('device_diag')
-WORKLOAD='derby-app-attract-race-120-v1'
+WORKLOAD='derby-app-attract-race-120-v2'
 # Derived from PR50 1e68b268a4b91ec54e88f408118de3e39b8b6bc5; isolated templates.
 def change(s,old,new):
     assert s.count(old)==1,old
@@ -71,7 +71,7 @@ static void *diag_realloc(void *p,void *v,size_t n){++derby_diag_realloc;derby_d
     write('apps/derby/derby_play.js',read('apps/derby/derby_play.js')+'\n'+s)
     diff=subprocess.check_output(['git','diff','--binary'],cwd=dst)
     (dst/'diagnostic.patch').write_bytes(diff)
-    manifest=dict(source=head,workload=WORKLOAD,allocator='production GUEST_ALLOCATOR delegated unchanged via request counters',changed_files=modified,
+    manifest=dict(source=head,workload=WORKLOAD,setup_steps_per_turn=8,setup_total_step_limit=6000,allocator='production GUEST_ALLOCATOR delegated unchanged via request counters',changed_files=modified,
                   sha256={name:hashlib.sha256((dst/name).read_bytes()).hexdigest() for name in modified},patch_sha256=hashlib.sha256(diff).hexdigest())
     (dst/'diagnostic.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps(manifest,indent=2))

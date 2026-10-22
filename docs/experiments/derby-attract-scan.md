@@ -88,7 +88,7 @@ python3 tools/experiments/derby-attract/prepare_device.py --checkout /tmp/attrac
 python3 tools/experiments/derby-attract/test_device.py
 ```
 
-Workload `derby-app-attract-race-120-v1` boots once through begin_run(local.derby),
+Workload `derby-app-attract-race-120-v2` boots once through begin_run(local.derby),
 UI-owner app_tick, the product scheduler/GUEST_ALLOCATOR and LCD. Same seed
 0x2545f491, race1, forced oval, HEAVY tier, camera8 on both variants. Real setup
 frames register plans; after40 warm frames and empty load queue the model is
@@ -145,3 +145,21 @@ well as source SHA before device use. Bootloader0x0, table0x8000, app0x10000;
 images boot HOME -> local.derby menu12, have no auto benchmark/END marker and
 retain ordinary storage behavior. PR47 app-control is absent. Parent owns all
 sanctioned hardware observation/stop actions; no USB/flash/merge is performed here.
+
+## Diagnostic setup revision v2
+
+The v1 firmware performed hundreds/thousands of model steps synchronously; a
+related real-device baseline reported InternalError interrupted during setup.
+This is a shared risk, not proof of the precise watchdog cause. All previous v1
+diagnostic ZIPs are superseded. Product optimization and host benchmark remain
+unchanged. Setup now yields to the existing UI owner after at most8 actual model
+steps per original frame callback, with total6000-step bound. Result/photo also
+advance the remaining settlement field in those batches, then call original
+settle() only after done8 or the existing time200 cap. Update/interpolation order
+is preserved. No watchdog/guard/heap/stack/scheduler budget is disabled or raised.
+
+A host-only observer counts actual step() calls, requires max8 and multiple
+turns, and removes itself before measured frames. The owner deadline remains24s
+including setup; a late or unfinished run is incomplete. Batching can increase
+wall time, so final target completion/watchdog fit still requires capture. The shared photo regression additionally checks an unbounded-setup negative.
+Use only the new exact-head v2 artifacts; ordinary product behavior is unchanged.
