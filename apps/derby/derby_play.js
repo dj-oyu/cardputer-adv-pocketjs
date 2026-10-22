@@ -120,7 +120,7 @@ globalThis.frame = function (b) {
         if (R.v && v !== R.vs) for (let i = 0; i < 3; ++i) R.v[i].setVisible(tx, R.vs = v);
         if (v) for (let i = 0; i < 3; ++i) R.v[i].setRect(tx, [vr[i && 2] + LO[i], vr[1] + LO[i + 3], vr[2] + LO[i + 6], vr[1] + LO[i + 9]]);
         if (v && !(t & 3)) { R.v[2].setColor(tx, t & 8 ? 0xff2020ff : 0x401010ff); R.v[0].setText(tx, R.t[1].s + ' ' + R.t[0].s.slice(0, 5)); }
-        if (scene === 'photo') {
+        if (scene === 'photo' && (t <= 30 || need)) {
           // Magnify 2x about the line and the runners' feet.
           const z = mn(1, t / 30), e = z * z * (3 - 2 * z);
           R[0].setRect(tx, [rnd(-120 * e), rnd(-100 * e), rnd(240 + 120 * e), rnd(135 + 35 * e)]);
