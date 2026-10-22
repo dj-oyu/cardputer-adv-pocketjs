@@ -345,9 +345,14 @@ static inline __attribute__((always_inline)) int band_entry(const ksn_proc_segme
     if(!dy||row<=0)return 0;
     int major,minor,x_steps,y_steps;
     if(dx>=dy){
-        int64_t numerator=(int64_t)row*dx-(dx-1)/2;
-        major=numerator>0?(int)((numerator+dy-1)/dy):0;
-        minor=(int)(((int64_t)major*dy+(dx-1)/2)/dx);
+        if(dx==3*dy){
+            major=3*row-1;
+            minor=row;
+        }else{
+            int64_t numerator=(int64_t)row*dx-(dx-1)/2;
+            major=numerator>0?(int)((numerator+dy-1)/dy):0;
+            minor=(int)(((int64_t)major*dy+(dx-1)/2)/dx);
+        }
         x_steps=major;y_steps=minor;
     }else{
         major=row;
