@@ -139,6 +139,20 @@ static const struct { const char *name; uint8_t row, col; } WORDS[] = {
 };
 #define WORD_NAMES 9      // the first nine are canonical
 
+// A one-byte key name is an ASCII cell from PLAIN. Store index+1 so zero
+// remains the miss value and index zero (the backtick key) is representable.
+static const uint8_t ASCII_KEY_INDEX[128] = {
+    ['`']=1, ['1']=2, ['2']=3, ['3']=4, ['4']=5, ['5']=6, ['6']=7,
+    ['7']=8, ['8']=9, ['9']=10, ['0']=11, ['-']=12, ['=']=13,
+    ['q']=16, ['w']=17, ['e']=18, ['r']=19, ['t']=20, ['y']=21,
+    ['u']=22, ['i']=23, ['o']=24, ['p']=25, ['[']=26, [']']=27,
+    ['\\']=28,
+    ['a']=31, ['s']=32, ['d']=33, ['f']=34, ['g']=35, ['h']=36,
+    ['j']=37, ['k']=38, ['l']=39, [';']=40, ['\'']=41,
+    ['z']=46, ['x']=47, ['c']=48, ['v']=49, ['b']=50, ['n']=51,
+    ['m']=52, [',']=53, ['.']=54, ['/']=55,
+};
+
 bool keymap_key_name(int index, char buf[8]) {
     if(index<0 || index>=4*COLS) return false;
     int r=index/COLS, c=index%COLS;
@@ -162,8 +176,11 @@ int keymap_key_index(const char *name) {
     }
     low[n]=0;
     if(n==1) {
-        for(int r=0;r<4;r++) for(int c=0;c<COLS;c++)
-            if(PLAIN[r][c]==low[0] && low[0]>' ') return r*COLS+c;
+        unsigned char ch=(unsigned char)low[0];
+        if(ch<sizeof(ASCII_KEY_INDEX) && ch>' ') {
+            uint8_t index=ASCII_KEY_INDEX[ch];
+            if(index) return (int)index-1;
+        }
         return -1;
     }
     for(size_t i=0;i<sizeof(WORDS)/sizeof(WORDS[0]);i++)
