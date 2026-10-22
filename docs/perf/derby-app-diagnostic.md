@@ -48,7 +48,8 @@ Collect at most 30 seconds / 32KiB / 256 lines through the **existing broker's
 bounded observation/log retrieval**; parent owns all hardware actions. Do not
 select the old `derby_fixed` parser, spoof its markers, or relax its guards.
 A missing END/EXIT, app exception, load failure or timeout is a failed/incomplete
-run, not evidence of performance. No hardware action is performed by these tools.
+run, not evidence of performance. The final owner result must still be running
+and have no pending presentation to report complete. No hardware action is performed by these tools.
 
 Reported metrics:
 

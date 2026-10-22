@@ -17,7 +17,8 @@ static void diag_owner_step(void){
         begin_run("local.derby",diag_prelude,sizeof(diag_prelude)-1,derby_watch_start,(size_t)(derby_watch_end-derby_watch_start-1));
     }
     if(diag_owner_active&&(derby_diag_finished()||!running||esp_timer_get_time()>=diag_owner_deadline)){
-        const char *status=derby_diag_finished()?"complete":!running?"app_error":"timeout";
+        const char *status=!running?"app_error":!derby_diag_finished()?"timeout":
+            pocket_kasane_needs_present()?"present_pending":"complete";
         derby_diag_finish(status);
         if(running)end_run(ESP_OK);
         diag_owner_active=false;
