@@ -245,6 +245,70 @@ static void pattern_depth(void){
     CHECK(run(code,13,&frame)==KSN_PROC_DONE&&frame.count==8);
     same_in_bands(&frame);
 }
+static void add_unit_line(ksn_proc_inst *code,unsigned *count,int x0,int y0,int x1,int y1,float color){
+    code[(*count)++]=(ksn_proc_inst)SET(0,x0);
+    code[(*count)++]=(ksn_proc_inst)SET(1,y0);
+    code[(*count)++]=(ksn_proc_inst)SET(2,x1);
+    code[(*count)++]=(ksn_proc_inst)SET(3,y1);
+    code[(*count)++]=(ksn_proc_inst)MOVE(0,1);
+    code[(*count)++]=(ksn_proc_inst)LINE(2,3,color);
+}
+static unsigned begin_unit_frame(ksn_proc_inst *code,int x,int y){
+    const ksn_proc_inst pattern[]={
+        SET(0,x),SET(1,y),SET(2,x+1),SET(3,y),
+        SET(4,0xffffff),SET(15,0),SET(5,-1),SET(6,0),SET(7,1),
+        MOVE(0,1),PATTERN(4,2,3,24,0x1111),
+    };
+    memcpy(code,pattern,sizeof pattern);
+    return sizeof pattern/sizeof pattern[0];
+}
+static void plain_unit_segments(void){
+    ksn_proc_inst code[KSN_PROC_CODE];
+    unsigned count=begin_unit_frame(code,100,50);
+    add_unit_line(code,&count,10,10,11,10,0x1001);       /* horizontal */
+    add_unit_line(code,&count,20,20,19,20,0x1002);       /* reverse */
+    add_unit_line(code,&count,30,30,30,31,0x1003);       /* vertical */
+    add_unit_line(code,&count,40,41,40,40,0x1004);       /* reverse */
+    add_unit_line(code,&count,50,50,51,51,0x1005);       /* diagonal */
+    add_unit_line(code,&count,61,60,60,61,0x1006);       /* reverse slope */
+    CHECK(run(code,count,&frame)==KSN_PROC_DONE);
+    CHECK(frame.ext==1&&frame.count==8&&frame.raster_steps==14);
+    render_full(&frame,full);
+    CHECK(full[50*W+100]==0x1111&&full[50*W+101]==0x1111);
+    static const int inner[][5]={
+        {10,10,11,10,0x1001},{20,20,19,20,0x1002},
+        {30,30,30,31,0x1003},{40,41,40,40,0x1004},
+        {50,50,51,51,0x1005},{61,60,60,61,0x1006},
+    };
+    for(unsigned i=0;i<sizeof inner/sizeof inner[0];i++){
+        for(unsigned endpoint=0;endpoint<2;endpoint++){
+            const int x=inner[i][endpoint?2:0],y=inner[i][endpoint?3:1];
+            CHECK(full[y*W+x]==(uint16_t)inner[i][4]);
+        }
+    }
+    same_in_bands(&frame);
+
+    count=begin_unit_frame(code,100,100);
+    add_unit_line(code,&count,0,70,-1,70,0x1007);        /* left edge */
+    add_unit_line(code,&count,W-1,71,W,71,0x1008);       /* right edge */
+    add_unit_line(code,&count,10,0,10,-1,0x1009);        /* top edge */
+    add_unit_line(code,&count,11,H-1,11,H,0x1010);       /* bottom edge */
+    CHECK(run(code,count,&frame)==KSN_PROC_DONE);
+    CHECK(frame.ext==1&&frame.count==6&&frame.raster_steps==10);
+    render_full(&frame,full);
+    static const int lines[][5]={
+        {0,70,-1,70,0x1007},{W-1,71,W,71,0x1008},
+        {10,0,10,-1,0x1009},{11,H-1,11,H,0x1010},
+    };
+    for(unsigned i=0;i<sizeof lines/sizeof lines[0];i++){
+        const int x0=lines[i][0],y0=lines[i][1],x1=lines[i][2],y1=lines[i][3];
+        for(unsigned endpoint=0;endpoint<2;endpoint++){
+            const int x=endpoint?x1:x0,y=endpoint?y1:y0;
+            if(x>=0&&x<W&&y>=0&&y<H)CHECK(full[y*W+x]==(uint16_t)lines[i][4]);
+        }
+    }
+    same_in_bands(&frame);
+}
 static void walkers_and_plain(void){
     /* A plain line, a pattern line over it, a plain line over that: order. */
     const ksn_proc_inst code[]={
@@ -436,6 +500,7 @@ int main(void){
     pattern_slanted();
     pattern_random();
     pattern_depth();
+    plain_unit_segments();
     walkers_and_plain();
     limits_and_rejections();
     analysis_and_plan();
