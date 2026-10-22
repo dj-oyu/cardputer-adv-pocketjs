@@ -16,8 +16,9 @@ static void diag_owner_step(void){
         printf("DERBY_APP_DIAG START workload=@WORKLOAD@ source=@SOURCE@ allocator=GUEST_ALLOCATOR owner=ui_task lcd=product n=120 deadline_ms=24000\n");
         begin_run("local.derby",diag_prelude,sizeof(diag_prelude)-1,derby_watch_start,(size_t)(derby_watch_end-derby_watch_start-1));
     }
-    if(diag_owner_active&&(derby_diag_finished()||!running||esp_timer_get_time()>=diag_owner_deadline)){
-        const char *status=!running?"app_error":!derby_diag_finished()?"timeout":
+    const int64_t diag_now=esp_timer_get_time();
+    if(diag_owner_active&&(derby_diag_finished()||!running||diag_now>=diag_owner_deadline)){
+        const char *status=!running?"app_error":diag_now>=diag_owner_deadline?"timeout":!derby_diag_finished()?"timeout":
             pocket_kasane_needs_present()?"present_pending":"complete";
         derby_diag_finish(status);
         if(running)end_run(ESP_OK);

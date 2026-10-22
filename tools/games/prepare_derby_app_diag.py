@@ -35,7 +35,7 @@ static void *diag_realloc(void *p,void *v,size_t n){++derby_diag_realloc;derby_d
     s=change(s,'static const JSMallocFunctions GUEST_ALLOCATOR = {',wrappers+'\nstatic const JSMallocFunctions GUEST_ALLOCATOR = {')
     for n in ('malloc','calloc','realloc'):s=change(s,f'.js_{n} = guest_{n},',f'.js_{n} = diag_{n},')
     write('components/pocketjs_guest/src/guest.c',s)
-    owner=(TEMPLATE/'owner.inc').read_text().replace('@WORKLOAD@',f'derby-app-{profile}-120-v1').replace('@SOURCE@',head)
+    owner=(TEMPLATE/'owner.inc').read_text().replace('@WORKLOAD@',f'derby-app-{profile}-120-v{1 if profile=="pad" else 2}').replace('@SOURCE@',head)
     s=read('main/main.c')
     s=change(s,'static void ui_task(void *arg) {',owner+'\nstatic void ui_task(void *arg) {')
     s=change(s,'    while(1) {\n        /* App teardown','    while(1) {\n        diag_owner_step();\n        /* App teardown')
@@ -51,7 +51,9 @@ static void *diag_realloc(void *p,void *v,size_t n){++derby_diag_realloc;derby_d
     write('apps/derby/derby_play.js',read('apps/derby/derby_play.js')+'\n'+s)
     diff=subprocess.check_output(['git','diff','--binary'],cwd=dst)
     (dst/'diagnostic.patch').write_bytes(diff)
-    manifest=dict(source=head,workload=f'derby-app-{profile}-120-v1',allocator='production GUEST_ALLOCATOR delegated unchanged via request counters',changed_files=modified,
+    manifest=dict(source=head,workload=f'derby-app-{profile}-120-v{1 if profile=="pad" else 2}',allocator='production GUEST_ALLOCATOR delegated unchanged via request counters',changed_files=modified,
+                  preparation='warm40 then max8 simulation steps per frame callback to leader390, settle10' if profile!='pad' else 'warm40 settle10',
+                  completion_guard='deadline observed before success',
                   sha256={name:hashlib.sha256((dst/name).read_bytes()).hexdigest() for name in modified},patch_sha256=hashlib.sha256(diff).hexdigest())
     (dst/'diagnostic.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(json.dumps(manifest,indent=2))

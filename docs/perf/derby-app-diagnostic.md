@@ -28,11 +28,14 @@ The dedicated PR50 workflow prepares baseline e0fe98a8 and candidate with the
 same generator, ESP-IDF v6.0.1 and options. Artifacts contain the generated patch,
 source SHA, workload ID, per-file SHA256, BIN/ELF/map, sdkconfig and flash inputs.
 
-Workloads `derby-app-oval-120-v1` and `derby-app-straight-120-v1` use hardware seed
+Workloads `derby-app-oval-120-v2` and `derby-app-straight-120-v2` use hardware seed
 0x2545f491, race 1, forced course, HEAVY tier and fixed camera 8. Storage reads
 return no saved state and writes are no-ops; audio is silent. Initial gate frames
 load the real app plans. After at least 40 warmup frames and an empty load queue,
-the actual model advances unmeasured until lead >=390m. Ten further app frames
+the actual model advances unmeasured until lead >=390m, at most eight steps per
+normal frame callback (63 extra callbacks in both fixed courses). These setup
+callbacks return to the unchanged UI owner and do not draw or collect samples.
+Ten further app frames
 settle the race scene and band plan; 120 subsequent real frame calls are timed.
 The last leader is approximately 497.35m oval / 497.79m straight. These are
 selected race windows, **not the earlier full-race host workload nor normal-game
@@ -70,3 +73,30 @@ Reported metrics:
 real QuickJS/native-renderer host harness. It checks termination and A/B equality
 of draw bytes and pixels for all three profiles. It does not emulate product
 allocator, UI scheduling or LCD. Device execution remains required.
+
+## Device-discovered preparation failure (v1)
+
+The 2026-10-22 baseline oval device attempt verified flash/readback/expected ELF,
+then stopped in the synchronous preparation `step()` with `InternalError:
+interrupted`, `END status=app_error frames=0`. This is no performance result.
+The session arms a 250ms watchdog each normal turn (`main/app_session.c`);
+the unbounded preparation is consistent with exceeding it, but that attempt did
+not report an explicit watchdog reason. The parent restored the original FW and
+settings successfully at 21:37:58 UTC.
+
+v2 bounds preparation without disabling, resetting or enlarging any watchdog,
+runaway budget, scheduler period or 24-second owner deadline. Completion at or
+after the deadline is timeout, including if the last sample has already returned.
+Host regression requires the previous v1 complete pixel and draw-stream hashes,
+120 samples, and leader endpoints. A step-budget observer rejects the old loop
+and checks a maximum of eight steps per callback in v2. Both race profiles finish
+in 233 host callbacks (pad remains 170); real target time is still unmeasured.
+The host test also compiles the actual owner deadline/error/pending logic and
+checks six boundary cases. It cannot establish device watchdog headroom.
+
+Affected existing consumers: PR50 and PR55 oval/straight, PR58 oval. Their v1
+race artifacts must not be used as a valid timed run. PR53/56/60 pad never enters
+the preparation loop and is unaffected by this failure. Frozen old generator
+references and existing artifacts remain reproducible; consumers must explicitly
+select the repaired generator for race v2. No product optimization is changed by
+this repair. Do not mix v1 and v2 firmware in a pair.
