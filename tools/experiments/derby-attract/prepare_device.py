@@ -18,8 +18,12 @@ def input_source(s):
     s='extern unsigned derby_diag_down,derby_diag_queries;\n'+s
     return s
 
-def workload():
-    return (TEMPLATE/'workload.js').read_text().replace('@PROFILE@','oval').replace('@TIER@','2')
+def is_optimized(play):
+    assert play.count('    attract(b);')==1 and play.count('K.down().join()')==1
+    return "if (!dm && scene !== 'pad') { dk = 0; idle = n; return; }" in play
+
+def workload(optimized):
+    return (TEMPLATE/'workload.js').read_text().replace('@PROFILE@','oval').replace('@TIER@','2').replace('@OPTIMIZED@','1' if optimized else '0')
 
 def prepare(dst):
     profile="oval"
@@ -32,9 +36,8 @@ def prepare(dst):
         (dst/name).write_text(s);modified.append(name)
     def read(name):return (dst/name).read_text()
     play=read('apps/derby/derby_play.js')
-    assert play.count('    attract(b);')==1 and play.count('K.down().join()')==1
-    optimized="if (!dm && scene !== 'pad') { dk = 0; idle = n; return; }" in play
-    runtime=(TEMPLATE/'runtime.inc').read_text().replace('@DOWN@','0' if optimized else '120').replace('@QUERIES@','600' if optimized else '1680')
+    optimized=is_optimized(play)
+    runtime=(TEMPLATE/'runtime.inc').read_text()
     s=read('main/pocket/pocket_derby.c')
     s=change(s,'#include <math.h>','#include <math.h>\n'+runtime)
     s=change(s,'static bool ou(unsigned j,double w,double m,double zf){','static bool ou(unsigned j,double w,double m,double zf){\n    ++derby_diag_ou;')
@@ -64,7 +67,7 @@ static void *diag_realloc(void *p,void *v,size_t n){++derby_diag_realloc;derby_d
         s=read('apps/derby/derby_watch.js')
         s=change(s,'const OV = [.5,',f"const OV = [{'1' if profile=='oval' else '0'},")
         write('apps/derby/derby_watch.js',s)
-    s=workload()
+    s=workload(optimized)
     write('apps/derby/derby_play.js',read('apps/derby/derby_play.js')+'\n'+s)
     diff=subprocess.check_output(['git','diff','--binary'],cwd=dst)
     (dst/'diagnostic.patch').write_bytes(diff)

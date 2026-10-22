@@ -13,11 +13,12 @@ static unsigned diag_us[120],diag_alloc,diag_bytes,diag_realloc;
 static unsigned diag_a0,diag_b0,diag_r0,diag_v0,diag_o0,diag_s0;
 static int64_t diag_begin,diag_window,diag_last,diag_tick_sum;
 static bool diag_sampling,diag_done;
+static int diag_optimized;
 static double diag_lead_first,diag_lead_last;
 static unsigned diag_views,diag_ou,diag_sqrt;
 static int diag_cmp(const void *a,const void *b){unsigned x=*(const unsigned*)a,y=*(const unsigned*)b;return (x>y)-(x<y);}
 bool derby_diag_finished(void){return diag_done;}
-bool derby_diag_valid(void){return diag_n==120&&diag_down==@DOWN@&&diag_queries==@QUERIES@;}
+bool derby_diag_valid(void){return diag_n==120&&diag_down==(diag_optimized?0u:120u)&&diag_queries==(diag_optimized?600u:1680u);}
 void derby_diag_owner_tick(unsigned us,bool continued){
     if(diag_sampling){diag_ticks++;diag_tick_sum+=us;diag_cont+=continued;}
 }
@@ -33,6 +34,11 @@ void derby_diag_finish(const char *status){
 static JSValue js_diag(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;int32_t op=0;double lead=0;
     if(argc<1||JS_ToInt32(ctx,&op,argv[0]))return JS_EXCEPTION;
+    if(op==2){
+        int32_t optimized;
+        if(argc<2||JS_ToInt32(ctx,&optimized,argv[1])||optimized<0||optimized>1)return JS_ThrowInternalError(ctx,"diagnostic variant");
+        diag_optimized=optimized;return JS_UNDEFINED;
+    }
     if(op==0){
         if(diag_n>=120||diag_done)return JS_ThrowInternalError(ctx,"diagnostic frame limit");
         unsigned free_bytes=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);

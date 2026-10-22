@@ -116,16 +116,19 @@ real native API was reached or skipped, rather than replacing it with a fixture
 constant. The exact diagnostic JS and generated native input copy pass the host
 120-frame test: pixel2ecc984362eaf8ce and CSV SHA256
 51521411a7289d188e1afa68545503d608cf457f90a219e9906bfde4cbb499c0 are equal.
+Expected counts are supplied as an unmeasured startup JS literal; generated
+pocket_derby.c, pocket_input.c and guest.c are byte-identical between variants,
+so validation constants do not shift native hot-code layout.
 Native64 host delta is840 allocation requests/42,720 charged B per120frames;
 this is a compatibility/path test, not device timing or guest-allocator evidence.
 The original full MID test and host timing/raw samples are retained.
 
-Summary metrics follow PR50: original frame entry-to-return wall time (including
-scheduler continuation/preemption gaps), first-entry to last-return window time
-(owner pacing, excluding last presentation), and summed owner tick wall time
-(including normal app_tick/LCD). They are not exclusive CPU cycles or completed
+Summary metrics follow PR50: native _diag markers bracket the original frame,
+including marker/call overhead, the post-frame lead reduction and scheduler
+continuation/preemption gaps. Window time includes owner pacing and ends before
+the last presentation; summed owner tick wall time includes normal app_tick/LCD. They are not exclusive CPU cycles or completed
 LCD FPS. `median_x2` is twice the exact median in microseconds, preserving half-us;
-p95 is nearest-rank ceil(0.95*n), max is exact. Sorting/reporting and boundary heap
+p95 is the nearest-rank114th sample at120 complete frames, max is exact. Sorting/reporting and boundary heap
 queries are outside the frame timer. A static120-element unsigned array costs480B;
 input counters add24B static state, with no per-frame sample allocation. Existing
 allocator counters forward unchanged callbacks and count requests/bytes including

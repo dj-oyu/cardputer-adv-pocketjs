@@ -20,6 +20,7 @@ static unsigned diag_frames,diag_d0,diag_q0,diag_down,diag_queries;
 static size_t diag_a0,diag_b0,diag_requests,diag_bytes;
 static JSValue diag_mark(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
  (void)self;int32_t op=0;REQ(argc>0&&!JS_ToInt32(c,&op,argv[0]));
+ if(op==2)return JS_UNDEFINED;
  if(op==0){diag_d0=derby_diag_down;diag_q0=derby_diag_queries;diag_a0=n_alloc;diag_b0=b_alloc;}
  else{REQ(op==1&&diag_frames<120);diag_down+=derby_diag_down-diag_d0;diag_queries+=derby_diag_queries-diag_q0;diag_requests+=n_alloc-diag_a0;diag_bytes+=b_alloc-diag_b0;++diag_frames;}
  return JS_UNDEFINED;
@@ -101,14 +102,16 @@ def main():
   obj=R/'.cache/attract-deep/build'/(n+'.o')
   if obj.exists():shutil.copy2(obj,out/'build'/obj.name)
  binary=run_derby.build(['-O2'],out/'build',harness=h)
- rows={}
+ rows={};workload_hashes={}
  for mode in ('baseline','candidate'):
   src=out/mode/'source'
   if src.exists():shutil.rmtree(src)
   shutil.copytree(R/'apps/derby',src)
   p=src/'derby_play.js'
   if mode=='baseline':p.write_bytes(subprocess.check_output(['git','show',BASE+':apps/derby/derby_play.js'],cwd=R))
-  p.write_text(p.read_text()+'\n'+device.workload())
+  workload=device.workload(device.is_optimized(p.read_text()))
+  workload_hashes[mode]=hashlib.sha256(workload.encode()).hexdigest()
+  p.write_text(p.read_text()+'\n'+workload)
   p=src/'derby_watch.js';p.write_text(once(p.read_text(),'const OV = [.5,','const OV = [1,'))
   app=run_derby.lower(src,out/mode/'app')
   csv=out/mode/'frames.csv'
@@ -122,6 +125,6 @@ def main():
  assert all(a[k]==b[k] for k in ('frames','pixels','csv_sha256'))
  assert (a['down'],b['down'],a['queries'],b['queries'])==(120,0,1680,600),rows
  assert a['requests']-b['requests']==840 and a['charged_bytes']-b['charged_bytes']==120*356,rows
- report={'workload':device.WORKLOAD,'base':BASE,'head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=R,text=True).strip(),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'workload_sha256':hashlib.sha256(device.workload().encode()).hexdigest(),'rows':rows}
+ report={'workload':device.WORKLOAD,'base':BASE,'head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=R,text=True).strip(),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'workload_sha256':workload_hashes,'rows':rows}
  (out/'result.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2));print('ATTRACT_DEVICE_WORKLOAD PASS')
 if __name__=='__main__':main()

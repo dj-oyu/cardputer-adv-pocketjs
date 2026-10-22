@@ -2,6 +2,7 @@
 // State advancement is unmeasured setup, not a full-race FPS claim.
 A=null;notes=[];tier=@TIER@;
 const diagFrame=globalThis.frame,diagMark=S._diag;
+diagMark(2,@OPTIMIZED@); // Startup validation only; identical native C in A/B.
 let diagWarm=0,diagFrames=0,diagReady=false;
 if('@PROFILE@'!=='pad')enter('gate');
 globalThis.frame=function(b){
