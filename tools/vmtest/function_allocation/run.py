@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 
@@ -110,6 +111,22 @@ def main():
                            VMTEST_CFLAGS=flags + (' -DCONFIG_POCKET_VM_STRIP_DEBUG=1' if debug == 'strip' else ''),
                            JOBS=os.environ.get('JOBS', '8'))
                 run(label + '-build', ['bash', 'tools/vmtest/build.sh', variant], env)
+                if mode == 'candidate' and debug == 'debug':
+                    cflags = ['-O2', '-g'] if variant == 'o2' else [
+                        '-O1', '-g', '-fno-omit-frame-pointer', '-fsanitize=address,undefined',
+                        '-fno-sanitize-recover=undefined']
+                    objects = OUT / label / ('obj-' + variant)
+                    executable = OUT / label / 'frame-alignment'
+                    command = ['gcc', '-std=gnu11', '-w', '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
+                        '-I', str(OUT / label / 'include'), '-I', str(folder), *cflags,
+                        *shlex.split(env['VMTEST_CFLAGS']),
+                        *(['-DFA_EXPECT_ALIGN8'] if a.m32 else []),
+                        'tools/vmtest/function_allocation/frame_alignment.c',
+                        *[str(objects / (name + '.o')) for name in
+                          ['dtoa', 'libregexp', 'libunicode', 'quickjs-libc', 'quickjs-vm']],
+                        '-lm', '-lpthread', '-ldl', '-o', str(executable)]
+                    run(label + '-frame-build', command, env)
+                    run(label + '-frame', [str(executable)], env)
                 if negative:
                     result = subprocess.run([str(OUT / label / ('vmrun-' + variant)),
                                              '--profile', 'host', 'tools/vmtest/corpus/closures.js'],

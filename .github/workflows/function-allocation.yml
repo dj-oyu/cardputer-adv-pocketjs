@@ -41,6 +41,14 @@ jobs:
             python3 tools/vmtest/function_allocation/run.py "${args[@]}" --variant o2 --only poison --negative
             python3 tools/vmtest/function_allocation/run.py "${args[@]}" --variant o2 --only poison --negative-copy
           fi
+          if [ '${{ matrix.arch }}' = native ] && [ '${{ matrix.variant }}' = asan ]; then
+            export VMTEST_OUT="$PWD/.cache/function_allocation/reloc"
+            bash tools/vmtest/build.sh asan-reloc > .cache/function_allocation/evidence/reloc-build.log 2>&1
+            VMTEST_VMRUN_FLAGS=--force-reloc bash tools/vmtest/run.sh --variant asan-reloc > .cache/function_allocation/evidence/reloc-corpus.log 2>&1
+          fi
+          if [ '${{ matrix.arch }}' = native ] && [ '${{ matrix.variant }}' = o2 ]; then
+            VMTEST_OUT="$PWD/.cache/function_allocation/native-candidate-debug-o2" bash tools/vmtest/budget_probe.sh o2 > .cache/function_allocation/evidence/native-budget.log 2>&1
+          fi
           git diff --exit-code
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

@@ -492,6 +492,13 @@ typedef struct JSStackFrame {
     uint32_t ret_shape; /* JS_RET_SHAPE (quickjs-vmstack.h); offset 44-47, was tail padding */
 } JSStackFrame;
 
+_Static_assert(JS_VM_FRAME_ALIGN >= _Alignof(JSStackFrame),
+               "frame blocks must satisfy the actual JSStackFrame alignment");
+_Static_assert(JS_VM_FRAME_PREFIX % _Alignof(JSStackFrame) == 0,
+               "the link prefix must preserve JSStackFrame alignment");
+_Static_assert(sizeof(JSStackFrame) % _Alignof(JSValue) == 0,
+               "value slots after the frame must stay aligned");
+
 /* JSStackFrame.coro_kind */
 enum {
     JS_CORO_NONE = 0,
