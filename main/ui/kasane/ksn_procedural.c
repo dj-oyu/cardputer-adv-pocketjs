@@ -363,6 +363,20 @@ static inline __attribute__((always_inline)) void plain_band(const ksn_proc_segm
     int x=s->x0,yy=s->y0,dx=abs(s->x1-s->x0),dy=abs(s->y1-s->y0);
     int sx=x<s->x1?1:-1,sy=yy<s->y1?1:-1,err=dx-dy;
     band_entry(s,s->x0,y,height,&x,&yy,&err);
+    if(dy&&dx==2*dy){
+        int step=abs(x-s->x0);
+        for(;;){
+            if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
+            if(x>=0&&x<KSN_PROC_W&&yy>=y&&yy<y+height)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
+            if(x==s->x1&&yy==s->y1)break;
+            x+=sx;
+            if((++step&1)==0){
+                yy+=sy;
+                if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
+            }
+        }
+        return;
+    }
     for(;;){
         if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
         if(x>=0&&x<KSN_PROC_W&&yy>=y&&yy<y+height)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
