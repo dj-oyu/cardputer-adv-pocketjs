@@ -415,13 +415,24 @@ static void pattern_band(const ksn_proc_segment *g,const ksn_proc_segment *q,
     uint16_t *row=pixels+(yy-y)*KSN_PROC_W;
     const int stride=sy*KSN_PROC_W;
     if(dx>=dy){
-        for(;;){
-            if((unsigned)x<(unsigned)KSN_PROC_W)PATTERN_PIXEL(row[x]);
-            if(x==g->x1)break;
-            const int twice=2*err;
-            if(twice>-dy){err-=dy;x+=sx;}
-            if(twice<dx){err+=dx;yy+=sy;if(yy<y||yy>=y+height)break;row+=stride;}
-            u+=du;if(u>=wrap)u-=wrap;
+        if((unsigned)x0<KSN_PROC_W&&(unsigned)g->x1<KSN_PROC_W){
+            for(;;){
+                PATTERN_PIXEL(row[x]);
+                if(x==g->x1)break;
+                const int twice=2*err;
+                if(twice>-dy){err-=dy;x+=sx;}
+                if(twice<dx){err+=dx;yy+=sy;if(yy<y||yy>=y+height)break;row+=stride;}
+                u+=du;if(u>=wrap)u-=wrap;
+            }
+        }else{
+            for(;;){
+                if((unsigned)x<(unsigned)KSN_PROC_W)PATTERN_PIXEL(row[x]);
+                if(x==g->x1)break;
+                const int twice=2*err;
+                if(twice>-dy){err-=dy;x+=sx;}
+                if(twice<dx){err+=dx;yy+=sy;if(yy<y||yy>=y+height)break;row+=stride;}
+                u+=du;if(u>=wrap)u-=wrap;
+            }
         }
     }else{
         for(;;){
