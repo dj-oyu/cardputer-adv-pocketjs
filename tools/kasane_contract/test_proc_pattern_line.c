@@ -322,6 +322,33 @@ static void walkers_and_plain(void){
     CHECK(!memcmp(full,split,sizeof full));
     same_in_bands(&mixed);
 }
+static void plain_horizontal_ext_boundaries(void){
+    static const struct { int x0,x1,row,band_y,band_height; } cases[]={
+        {-480,720,0,0,1}, {720,-480,7,0,8}, {-20,0,8,0,8}, {0,-20,8,8,1},
+        {239,300,127,120,8}, {300,239,134,127,8}, {100,100,64,64,1},
+        {-480,-400,64,64,8}, {240,720,64,64,8}, {10,20,-1,0,8}, {10,20,135,127,8},
+    };
+    static uint16_t expected[W*8],actual[W*8];
+    for(unsigned n=0;n<sizeof cases/sizeof cases[0];n++){
+        const uint16_t color=(uint16_t)(0x4001u+n*137u);
+        frame=(ksn_proc_frame){.count=3,.ready=true,.ext=1};
+        frame.segments[0]=(ksn_proc_segment){cases[n].x0,cases[n].row,cases[n].x1,cases[n].row,color};
+        /* A valid off-panel pattern pair routes through render_band_ext but
+         * contributes no pixels to the hand-built reference row. */
+        frame.segments[1]=(ksn_proc_segment){KSN_PROC_EXT_PATTERN-500,134,-500,134,0xffff};
+        frame.segments[2]=(ksn_proc_segment){0,(int16_t)(0x8000u|1u<<8),0,(int16_t)0x8000u,0};
+        const size_t bytes=(size_t)W*cases[n].band_height*sizeof(uint16_t);
+        for(size_t i=0;i<(size_t)W*cases[n].band_height;i++)expected[i]=actual[i]=BACK;
+        /* Pixel membership is independent of the clipped span implementation. */
+        for(int row=0;row<cases[n].band_height;row++)for(int x=0;x<W;x++){
+            const bool between=(x>=cases[n].x0&&x<=cases[n].x1)||
+                               (x>=cases[n].x1&&x<=cases[n].x0);
+            if(cases[n].band_y+row==cases[n].row&&between)expected[row*W+x]=color;
+        }
+        CHECK(ksn_proc_render_band(&frame,actual,cases[n].band_y,cases[n].band_height));
+        CHECK(!memcmp(expected,actual,bytes));
+    }
+}
 static void limits_and_rejections(void){
     /* Two entries each: 512 pattern lines fill a frame, 513 do not. */
     ksn_proc_inst many[]={
@@ -437,6 +464,7 @@ int main(void){
     pattern_random();
     pattern_depth();
     walkers_and_plain();
+    plain_horizontal_ext_boundaries();
     limits_and_rejections();
     analysis_and_plan();
     printf(failures?"PATTERN LINE FAIL (%u)\n":"PATTERN LINE PASS\n",failures);
