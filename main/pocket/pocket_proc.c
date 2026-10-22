@@ -180,10 +180,11 @@ static bool signed_integer(JSContext *ctx,JSValueConst value,int32_t low,int32_t
 }
 static bool array_length(JSContext *ctx,JSValueConst array,uint32_t *length){
     if(!JS_IsArray(array))return false;
-    JSValue v=JS_GetPropertyStr(ctx,array,"length");
-    if(JS_IsException(v))return false;
-    bool ok=integer(ctx,v,UINT32_MAX,length);
-    JS_FreeValue(ctx,v);return ok;
+    /* JS_IsArray accepts actual arrays, excluding Proxy in this engine.
+     * Their own length is a non-configurable uint32 data property. */
+    int64_t n;
+    if(JS_GetLength(ctx,array,&n)<0)return false;
+    *length=(uint32_t)n;return true;
 }
 static bool entry(JSContext *ctx,JSValueConst row,ksn_proc_inst *out){
     uint32_t length,fields[4];double value;
