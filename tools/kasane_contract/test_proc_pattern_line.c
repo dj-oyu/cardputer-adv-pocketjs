@@ -260,6 +260,11 @@ static void walkers_and_plain(void){
     render_full(&frame,full);
     for(int x=11;x<=29;x++)CHECK(full[10*W+x]==0xcccc);
     CHECK(full[10*W+30]==0xdddd&&full[10*W+10]==0xcccc&&full[15*W+10]==0xbbbb);
+    memcpy(split,full,sizeof full);
+    static const int empty_rows[]={0,10,15,H};
+    for(unsigned r=0;r<sizeof empty_rows/sizeof empty_rows[0];r++)
+        CHECK(ksn_proc_render_band(&frame,split+empty_rows[r]*W,empty_rows[r],0));
+    CHECK(!memcmp(full,split,sizeof full));
     same_in_bands(&frame);
 
     /* A walker sees four geometries with their own costs, never the
