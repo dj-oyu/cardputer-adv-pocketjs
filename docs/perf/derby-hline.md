@@ -69,3 +69,14 @@ Parent runs the existing broker observation route, bounded to 30 seconds,
 and EXIT; reject app_error, timeout or present_pending. Use matched profiles and
 alternate baseline/candidate captures. This is not the broker's old fixed
 fixture. No USB operation, broker change or merge is part of this experiment.
+
+
+The race diagnostics now pin common generator
+`5bf332368d6e793cd40a8a18a48b4da4ac270622`, with
+`derby-app-oval-120-v2` / `derby-app-straight-120-v2`. The parent device run of
+PR50 baseline v1 stopped inside synchronous setup (`interrupted`, samples=0).
+v2 advances at most eight steps per normal frame callback and keeps product
+watchdog/scheduler/pacing and the 24-second deadline. Its common host regression
+matches all v1 pixel/draw hashes and sample endpoints, but target completion is
+still unverified. Both sides use the same v2 generator. Production hline math
+is unchanged. Old v1 artifacts must not be paired with v2.
