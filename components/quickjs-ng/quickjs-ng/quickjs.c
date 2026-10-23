@@ -19572,6 +19572,99 @@ not_a_constructor:
     return ret_val;
 }
 
+static JSValue js_math_min_max(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv, int magic);
+static JSValue js_math_imul(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv);
+
+// Math fast call (docs/vm/math-call-fast.md). The bytecode call opcodes try
+// this before the generic native call, which re-enters JS_CallInternal (a
+// 300 B window frame, the prologue poll, the class dispatch) and then runs
+// js_call_c_function (stack check, a pushed JSStackFrame, the cproto switch,
+// JS_ToFloat64 per argument, the frame pop): about ten C functions for one
+// Math.sin. Here it is one call to this function plus the libm call.
+//
+// The guard is the callee object itself, read at the moment of the call, so
+// nothing has to be invalidated: a reassigned Math, a replaced Math.sin, an
+// alias (`const sin = Math.sin`), or a Math.sin stored anywhere else all
+// reach the call opcode as whatever function value they are, and only the
+// builtins below match. It is taken only when skipping the native frame is
+// unobservable:
+//  - every argument is already a number, so no valueOf/toString runs, no
+//    conversion allocates or throws;
+//  - the callee is f_f / f_f_f (a pure double function that is never given
+//    a ctx, so it cannot throw, allocate, re-enter JS or read the stack), or
+//    Math.min / max / imul, which with number arguments do none of those
+//    either (they only use ctx for the conversions that cannot fail here).
+// So no exception can be raised from here, and a backtrace can never show
+// the missing native frame. What is skipped and is observable at all: one
+// decrement of the interrupt counter per call (the loop's own safepoints
+// still poll) and the opprof native-call hook (patched in by
+// tools/vmtest/opprof/patch_quickjs.py at this function too).
+// Returns false, with *pret untouched, for everything else.
+static no_inline bool js_call_math_fast(JSValueConst func_obj, int argc,
+                                        JSValueConst *argv, JSValue *pret)
+{
+    JSObject *p;
+    JSCFunctionType f;
+    double d1, d2;
+    int i;
+
+    if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(func_obj);
+    if (p->class_id != JS_CLASS_C_FUNCTION || argc < p->u.cfunc.length)
+        return false;
+    for (i = 0; i < argc; i++) {
+        uint32_t tag = JS_VALUE_GET_TAG(argv[i]);
+        if (tag != JS_TAG_INT && !JS_TAG_IS_FLOAT64(tag))
+            return false;
+    }
+    f = p->u.cfunc.c_function;
+    switch (p->u.cfunc.cproto) {
+    case JS_CFUNC_f_f:
+        // argc is tested, not just length: JS_NewCFunction2 lets an
+        // embedder declare an f_f with length 0.
+        if (argc < 1)
+            return false;
+        d1 = JS_VALUE_GET_TAG(argv[0]) == JS_TAG_INT ?
+            JS_VALUE_GET_INT(argv[0]) : JS_VALUE_GET_FLOAT64(argv[0]);
+        *pret = js_number(f.f_f(d1));
+        break;
+    case JS_CFUNC_f_f_f:
+        // Math.pow and Math.atan2.
+        if (argc < 2)
+            return false;
+        d1 = JS_VALUE_GET_TAG(argv[0]) == JS_TAG_INT ?
+            JS_VALUE_GET_INT(argv[0]) : JS_VALUE_GET_FLOAT64(argv[0]);
+        d2 = JS_VALUE_GET_TAG(argv[1]) == JS_TAG_INT ?
+            JS_VALUE_GET_INT(argv[1]) : JS_VALUE_GET_FLOAT64(argv[1]);
+        *pret = js_number(f.f_f_f(d1, d2));
+        break;
+    case JS_CFUNC_generic_magic:
+        if (f.generic_magic != js_math_min_max)
+            return false;
+        *pret = js_math_min_max(p->u.cfunc.realm, JS_UNDEFINED, argc, argv,
+                                p->u.cfunc.magic);
+        break;
+    case JS_CFUNC_generic:
+        if (f.generic != js_math_imul || argc < 2)
+            return false;
+        if (JS_VALUE_GET_TAG(argv[0]) == JS_TAG_INT &&
+            JS_VALUE_GET_TAG(argv[1]) == JS_TAG_INT) {
+            // ToUint32 of an int is its bit pattern; the product wraps.
+            *pret = js_int32((int32_t)((uint32_t)JS_VALUE_GET_INT(argv[0]) *
+                                       (uint32_t)JS_VALUE_GET_INT(argv[1])));
+        } else {
+            *pret = js_math_imul(p->u.cfunc.realm, JS_UNDEFINED, argc, argv);
+        }
+        break;
+    default:
+        return false;
+    }
+    return true;
+}
+
 static JSValue js_call_bound_function(JSContext *ctx, JSValueConst func_obj,
                                       JSValueConst this_obj,
                                       int argc, JSValueConst *argv, int flags)
@@ -20419,9 +20512,13 @@ has_call_argc:
                 if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
-                ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
-                                          JS_UNDEFINED, call_argc,
-                                          vc(call_argv), 0);
+                // A pure Math builtin on numbers: no native frame (see
+                // js_call_math_fast). The frees below are the same.
+                if (!js_call_math_fast(call_argv[-1], call_argc, vc(call_argv),
+                                       &ret_val))
+                    ret_val = JS_CallInternal(ctx, call_argv[-1], JS_UNDEFINED,
+                                              JS_UNDEFINED, call_argc,
+                                              vc(call_argv), 0);
                 if (unlikely(JS_IsException(ret_val))) {
                     goto exception;
                 }
@@ -20467,9 +20564,11 @@ has_call_argc:
                 if (js_vm_flat_callable(rt, call_argv[-1])) {
                     goto flat_call;
                 }
-                ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
-                                          JS_UNDEFINED, call_argc,
-                                          vc(call_argv), 0);
+                if (!js_call_math_fast(call_argv[-1], call_argc, vc(call_argv),
+                                       &ret_val))
+                    ret_val = JS_CallInternal(ctx, call_argv[-1], call_argv[-2],
+                                              JS_UNDEFINED, call_argc,
+                                              vc(call_argv), 0);
                 if (unlikely(JS_IsException(ret_val))) {
                     goto exception;
                 }
