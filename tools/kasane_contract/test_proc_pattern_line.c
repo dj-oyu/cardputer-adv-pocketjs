@@ -322,6 +322,31 @@ static void walkers_and_plain(void){
     CHECK(!memcmp(full,split,sizeof full));
     same_in_bands(&mixed);
 }
+static void band_entry_start_in_band(void){
+    /* Both plain lines start inside their first visible band. The off-panel
+     * pattern marker selects mixed-frame rendering without changing pixels. */
+    const ksn_proc_inst mixed_code[]={
+        SET(0,20),SET(1,12),SET(2,80),SET(3,115),
+        SET(4,1),SET(15,0),SET(5,-1),SET(6,0),SET(7,1),
+        MOVE(0,1),LINE(2,3,0x1234),
+        SET(0,220),SET(1,120),SET(2,160),SET(3,10),
+        MOVE(0,1),LINE(2,3,0x5678),
+        SET(0,250),SET(1,5),SET(2,260),SET(3,5),
+        MOVE(0,1),PATTERN(4,2,1,1,0xabcd),
+    };
+    const ksn_proc_inst plain_code[]={
+        SET(0,20),SET(1,12),SET(2,80),SET(3,115),
+        MOVE(0,1),LINE(2,3,0x1234),
+        SET(0,220),SET(1,120),SET(2,160),SET(3,10),
+        MOVE(0,1),LINE(2,3,0x5678),
+    };
+    CHECK(run(mixed_code,23,&frame)==KSN_PROC_DONE&&frame.ext==1);
+    CHECK(run(plain_code,12,&other)==KSN_PROC_DONE&&other.ext==0);
+    render_full(&frame,full);
+    render_full(&other,split);
+    CHECK(!memcmp(full,split,sizeof full));
+    same_in_bands(&frame);
+}
 static void limits_and_rejections(void){
     /* Two entries each: 512 pattern lines fill a frame, 513 do not. */
     ksn_proc_inst many[]={
@@ -437,6 +462,7 @@ int main(void){
     pattern_random();
     pattern_depth();
     walkers_and_plain();
+    band_entry_start_in_band();
     limits_and_rejections();
     analysis_and_plan();
     printf(failures?"PATTERN LINE FAIL (%u)\n":"PATTERN LINE PASS\n",failures);
