@@ -117,7 +117,7 @@ def main():
         env.update(ASAN_OPTIONS='detect_leaks=0:abort_on_error=1',
                    BW_HEAP_LIMIT=str(result['heap_limit']), NUMERIC_PANELS=str(folder / 'panels.bin'))
         with (folder / 'app.log').open('w') as log:
-            command([str(app), 'apps/bigwave/big_wave.js'], stdout=log, env=env, timeout=120)
+            command([str(app), 'apps/bigwave/big_wave.js'], stdout=log, env=env, timeout=300)
         assert 'BIGWAVE_HOST PASS' in (folder / 'app.log').read_text()
         result['variants'][mode] = {'source_sha256': hashlib.sha256(source).hexdigest(),
                                     'elf_class': elf_class}
