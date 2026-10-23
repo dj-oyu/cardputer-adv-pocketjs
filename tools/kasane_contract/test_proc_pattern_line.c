@@ -309,6 +309,9 @@ static void walkers_and_plain(void){
         const int16_t c=(int16_t)((int)(next()%800)-280),e=(int16_t)((int)(next()%500)-180);
         plain_only.segments[plain_only.count++]=(ksn_proc_segment){a,b,c,e,(uint16_t)(k*97u)};
     }
+    plain_only.segments[plain_only.count++]=(ksn_proc_segment){-5,3,-1,H-4,0x0111};
+    plain_only.segments[plain_only.count++]=(ksn_proc_segment){W,H-4,W+5,3,0x0222};
+    plain_only.segments[plain_only.count++]=(ksn_proc_segment){-5,30,W+5,35,0x0333};
     plain_only.ready=true;
     mixed=plain_only;
     const ksn_proc_inst dot[]={SET(0,500),SET(1,500),SET(4,1),SET(15,0),SET(5,-1),SET(6,0),SET(7,0),
@@ -320,6 +323,7 @@ static void walkers_and_plain(void){
     render_full(&plain_only,split);
     render_full(&mixed,full);
     CHECK(!memcmp(full,split,sizeof full));
+    same_in_bands(&plain_only);
     same_in_bands(&mixed);
 }
 static void limits_and_rejections(void){
