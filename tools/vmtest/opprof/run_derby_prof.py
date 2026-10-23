@@ -86,8 +86,10 @@ def build(flags: list[str]) -> Path:
     binary = obj_dir / "test-derby-opprof"
     includes = [f"-I{d}" for d in (qjs, "tools/hostshim", "main", "main/pocket", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(obj_dir))]
+    # Same defines as run_derby.build(): the harness references
+    # pocket_proc_hook_dry, which exists only under POCKET_PROC_DRAW_HOOK.
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
-                    "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
+                    "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/games/test_derby_host.c", *run_derby.kasane_sources(), *run_derby.EXTRA, str(table), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-Wl,--wrap=JS_NewContext", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)

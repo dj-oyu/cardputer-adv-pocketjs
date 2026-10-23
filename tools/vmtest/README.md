@@ -26,6 +26,7 @@ bash tools/vmtest/run.sh --variant o2          # コーパス（-O2）
 bash tools/vmtest/run.sh --force-yield         # L1 以降: 全チェックポイントで yield させても出力が同じか（L2: opcode 粒度。L2c まで赤、FORCED-YIELD の節）
 bash tools/vmtest/run.sh g5_gaps               # G5: 最長の中断禁止区間を info-<variant>.txt の "#info g5" 行に出す
 bash tools/vmtest/run.sh --budget-jobs 3      # L1: 全 drain を 3 件で切っても出力が同じか
+bash tools/vmtest/tdz_elision.sh               # TDZ 検査の消去: 残る検査の数を固定（docs/vm/tdz-elision.md）
 bash tools/vmtest/run.sh --trace               # 同時に .cache/vmtest/traces/<name>.trace を書く
 python3 tools/vmtest/trace_stats.py .cache/vmtest/traces/closures.trace   # トレースの検証と要約
 python3 tools/vmtest/test262.py --fetch        # 固定 revision を .cache/test262 へ（初回のみ、約2分）
