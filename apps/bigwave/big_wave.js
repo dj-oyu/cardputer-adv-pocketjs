@@ -119,10 +119,11 @@
       q < K.sh - 4 ? .2 * (1 - (q - K.pocket) / (K.sh - 4 - K.pocket)) : 0;
     const s = S.course.secs;
     for (let i = 0; i < s.length; ++i) {
-      const a = secAmp(s[i]);
-      if (!a) continue;
       const u = x - s[i].x, w = s[i].w;
-      if (u > -4 && u < w + 4) c += .8 * a * (u < 0 ? 1 + u / 4 : u > w ? 1 - (u - w) / 4 : 1);
+      if (u > -4 && u < w + 4) {
+        const a = secAmp(s[i]);
+        if (a) c += .8 * a * (u < 0 ? 1 + u / 4 : u > w ? 1 - (u - w) / 4 : 1);
+      }
     }
     return M.min(c, 1);
   }
