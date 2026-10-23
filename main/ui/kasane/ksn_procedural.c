@@ -486,7 +486,7 @@ bool ksn_proc_render_band(const ksn_proc_frame *frame,uint16_t *pixels,int y,int
         }
         for(;;){
             if((sy>0&&yy>=y+height)||(sy<0&&yy<y))break;
-            if(x>=0&&x<KSN_PROC_W&&yy>=y&&yy<y+height)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
+            if(x>=0&&x<KSN_PROC_W)pixels[(yy-y)*KSN_PROC_W+x]=s->color;
             if(x==s->x1&&yy==s->y1)break;
             int twice=2*err;
             if(twice>-dy){err-=dy;x+=sx;}

@@ -145,6 +145,13 @@ static void pattern_slanted(void){
         render_full(&other,split);
         render_full(&frame,full);
         CHECK(!memcmp(full,split,sizeof full));
+        same_in_bands(&other);
+        static const int empty_y[]={0,10,H-1};
+        for(unsigned k=0;k<sizeof empty_y/sizeof empty_y[0];k++){
+            clear(split);
+            CHECK(ksn_proc_render_band(&other,split+empty_y[k]*W,empty_y[k],0));
+            for(unsigned p=0;p<W*H;p++)CHECK(split[p]==BACK);
+        }
         same_in_bands(&frame);
         /* Period 3, bits 001b: every third pixel of the walk, counted from
          * the pen (the walk's major axis moves one a pixel). */
