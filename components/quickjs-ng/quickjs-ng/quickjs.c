@@ -38461,6 +38461,216 @@ static void put_short_code(DynBuf *bc_out, int op, int idx)
     dbuf_put_u16(bc_out, idx);
 }
 
+/* PocketJS: compile-time TDZ elision (docs/vm/tdz-elision.md).
+
+   Every read or assignment of a block-scoped local (let/const/class) is
+   emitted as get_loc_check / put_loc_check, and every entry into its block
+   as set_loc_uninitialized, which on the device is an out-of-line
+   set_value -> JS_FreeValue -> JS_FreeValueRT chain. In DERBY's frame these
+   are about a fifth of all dispatches, and almost all of them are reads that
+   come after the declaration in straight-line code.
+
+   This is a forward must-be-initialized dataflow over the bytecode that
+   resolve_variables produced (labels still symbolic, every variable access
+   already a concrete loc op). The state is a bit per local, for locals
+   0..31; higher locals are never tracked and keep every check. Facts:
+
+   - gen: get_loc_check / put_loc_check / put_loc_check_init (each either
+     finds the slot initialized or throws, leaving the path), put_loc and
+     set_loc (resolve_variables emits a lexical's initialization as put_loc;
+     closures and plain stores never write JS_UNINITIALIZED).
+   - kill: set_loc_uninitialized, the only instruction that puts
+     JS_UNINITIALIZED into a slot of this frame. (The derived-constructor
+     'this' kill is added later, in resolve_labels' prologue; this pass sees
+     no gen for it before its init and keeps its checks.)
+   - Function entry knows nothing. A label meets its forward and backward
+     edges (with_* jumps included). A catch handler knows nothing, since an
+     exception can arrive from anywhere in the try. After a gosub nothing is
+     known either (the finally body runs in between). The code after an
+     unconditional transfer is unreachable until the next label.
+
+   The per-label state lives in LabelSlot.addr, which resolve_labels asserts
+   is -1 before it assigns it; -1 is also "all bits set", the optimistic
+   start for a must-analysis. Passes repeat until no label changes (greatest
+   fixpoint); the state is reset to -1 before returning. No allocation, so
+   nothing is added to the guest's eval peak and --fail-alloc numbering is
+   unchanged.
+
+   On the fixpoint, a check whose bit is set on entry is proven not to
+   throw and is rewritten in place to get_loc / put_loc (same length, so no
+   position moves); resolve_labels' peepholes then also apply to it.
+
+   set_loc_uninitialized of a local is dropped (the returned mask) only when
+   nothing can observe the marker: the local is a plain let/const
+   (JS_VAR_NORMAL), not captured by any closure or eval (children are
+   compiled before their parent, so is_captured is final here), and every
+   access to it in this function was a proven check or a store. The proof of
+   each read does not depend on the kill: every path to a proven read passes
+   an initializing store after the last kill, and without the kill that same
+   store is still the last write before the read. The only difference is that
+   a value from the previous entry into the block is released at the next
+   store instead of at block entry.
+
+   Anything unexpected (an unknown label-carrying format, a truncated
+   instruction, no fixpoint within the pass bound) leaves the bytecode
+   unchanged. Top-level code runs once and is skipped. */
+#define TDZ_MAX_PASSES 8
+
+/* Meets st into a label's state; true if the state shrank. */
+static bool tdz_meet(LabelSlot *ls, uint32_t st)
+{
+    uint32_t old = (uint32_t)ls->addr;
+    if ((old & st) == old)
+        return false;
+    ls->addr = (int)(old & st);
+    return true;
+}
+
+/* One walk over the bytecode. Returns 1 if a label's state shrank, 0 if
+   not, -1 on an instruction this pass does not understand. With rewrite
+   (only on a fixpoint) it also turns proven checks into plain accesses and
+   collects the kill / observe masks. */
+static int tdz_walk(JSFunctionDef *s, bool rewrite, uint32_t *killed,
+                    uint32_t *observed)
+{
+    uint8_t *bc_buf = s->byte_code.buf;
+    int bc_len = s->byte_code.size;
+    LabelSlot *ls = s->label_slots;
+    uint32_t cur = 0, bit;  /* entry: nothing is initialized */
+    int pos, len, op, idx, label, changed = 0;
+
+    for (pos = 0; pos < bc_len; pos += len) {
+        op = bc_buf[pos];
+        len = opcode_info[op].size;
+        if (pos + len > bc_len)
+            return -1;
+        switch (opcode_info[op].fmt) {
+        case OP_FMT_label:
+            label = get_u32(bc_buf + pos + 1);
+            if (label < 0 || label >= s->label_count)
+                return -1;
+            if (op == OP_label) {
+                changed |= tdz_meet(&ls[label], cur);
+                cur = (uint32_t)ls[label].addr;
+            } else if (op == OP_catch) {
+                changed |= tdz_meet(&ls[label], 0);
+            } else {
+                /* if_false, if_true, goto, gosub */
+                changed |= tdz_meet(&ls[label], cur);
+                if (op == OP_goto)
+                    cur = UINT32_MAX;   /* unreachable until a label */
+                else if (op == OP_gosub)
+                    cur = 0;
+            }
+            continue;
+        case OP_FMT_atom_label_u8:      /* with_*: may jump */
+            label = get_u32(bc_buf + pos + 5);
+            if (label < 0 || label >= s->label_count)
+                return -1;
+            changed |= tdz_meet(&ls[label], cur);
+            continue;
+        case OP_FMT_label8:
+        case OP_FMT_label16:
+        case OP_FMT_label_u16:
+        case OP_FMT_atom_label_u16:
+            return -1;                  /* not expected before resolve_labels */
+        case OP_FMT_none_loc:
+        case OP_FMT_loc8:
+            /* Short forms are made by resolve_labels, not before it. A
+               store missed here only makes the analysis conservative; a
+               read would be an access the drop rule did not see. */
+            *observed = UINT32_MAX;
+            continue;
+        case OP_FMT_atom_u16:
+            if (op == OP_make_loc_ref) {
+                idx = get_u16(bc_buf + pos + 5);
+                if (idx < 32)
+                    *observed |= (uint32_t)1 << idx;
+            }
+            continue;
+        case OP_FMT_loc:
+            break;
+        default:
+            switch (op) {
+            case OP_return:
+            case OP_return_undef:
+            case OP_throw:
+            case OP_throw_error:
+            case OP_tail_call:
+            case OP_tail_call_method:
+            case OP_ret:
+                cur = UINT32_MAX;       /* unreachable until a label */
+                break;
+            }
+            continue;
+        }
+        idx = get_u16(bc_buf + pos + 1);
+        if (idx >= 32)
+            continue;
+        bit = (uint32_t)1 << idx;
+        switch (op) {
+        case OP_set_loc_uninitialized:
+            cur &= ~bit;
+            *killed |= bit;
+            break;
+        case OP_get_loc_check:
+        case OP_put_loc_check:
+            if (rewrite) {
+                if (cur & bit)
+                    bc_buf[pos] = (op == OP_get_loc_check) ? OP_get_loc : OP_put_loc;
+                else
+                    *observed |= bit;
+            }
+            cur |= bit;     /* past it the slot is initialized, or we threw */
+            break;
+        case OP_put_loc:
+        case OP_set_loc:
+            cur |= bit;
+            break;
+        case OP_put_loc_check_init:
+            *observed |= bit;
+            cur |= bit;
+            break;
+        default:            /* get_loc, close_loc, any other reader */
+            *observed |= bit;
+            break;
+        }
+    }
+    return changed;
+}
+
+/* Returns the locals whose set_loc_uninitialized resolve_labels may drop. */
+static uint32_t tdz_elide_checks(JSFunctionDef *s)
+{
+    uint32_t killed = 0, observed = 0, drop = 0;
+    int pass, i, r = -1;
+
+    if (!s->parent || dbuf_error(&s->byte_code))
+        return 0;
+    for (pass = 0; pass < TDZ_MAX_PASSES; pass++) {
+        r = tdz_walk(s, false, &killed, &observed);
+        if (r <= 0)
+            break;
+    }
+    if (r == 0) {
+        /* A fixpoint: this walk changes no label, so every state it reads
+           is final when it reads it. */
+        killed = observed = 0;
+        tdz_walk(s, true, &killed, &observed);
+        for (i = 0; i < 32 && i < s->var_count; i++) {
+            JSVarDef *vd = &s->vars[i];
+            if (vd->is_lexical && !vd->is_captured &&
+                vd->var_kind == JS_VAR_NORMAL)
+                drop |= (uint32_t)1 << i;
+        }
+        drop &= killed & ~observed;
+    }
+    /* Give LabelSlot.addr back to resolve_labels as it found it. */
+    for (i = 0; i < s->label_count; i++)
+        s->label_slots[i].addr = -1;
+    return drop;
+}
+
 /* peephole optimizations and resolve goto/labels */
 static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
 {
@@ -38472,8 +38682,11 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
     CodeContext cc;
     int label;
     JumpSlot *jp;
+    uint32_t tdz_drop;
 
     label_slots = s->label_slots;
+    /* PocketJS: before anything below reads the input or the labels */
+    tdz_drop = tdz_elide_checks(s);
 
     line_num = s->line_num;
     col_num = s->col_num;
@@ -38577,6 +38790,14 @@ static __exception int resolve_labels(JSContext *ctx, JSFunctionDef *s)
             line_num = get_u32(bc_buf + pos + 1);
             col_num = get_u32(bc_buf + pos + 5);
             break;
+
+        case OP_set_loc_uninitialized: {
+            /* PocketJS: a TDZ marker nothing can observe (tdz_elide_checks) */
+            int idx = get_u16(bc_buf + pos + 1);
+            if (idx < 32 && (tdz_drop >> idx) & 1)
+                break;
+        }
+            goto no_change;
 
         case OP_label: {
             label = get_u32(bc_buf + pos + 1);
