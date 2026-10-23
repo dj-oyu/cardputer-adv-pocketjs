@@ -1,0 +1,49 @@
+name: BIG WAVE rock distance experiment
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bigwave-rock-distance-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_HEAD: e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Common O2 binary actual BIG WAVE compatibility and native A/B
+        run: |
+          set -euo pipefail
+          node tools/experiments/bigwave-rock-distance/boundary.mjs
+          python3 tools/experiments/bigwave-rock-distance/verify.py
+          python3 tools/experiments/bigwave-rock-distance/bench.py --pairs 40
+      - name: Device-sized O2 compatibility and A/B
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 tools/experiments/bigwave-rock-distance/verify.py --m32
+          python3 tools/experiments/bigwave-rock-distance/bench.py --m32 --pairs 40
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: bigwave-rock-distance-host-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/bigwave-rock*/bench-*/*.json
+            .cache/bigwave-rock-verify*/result.json
+            .cache/bigwave-rock-verify*/*.log
+          retention-days: 14
