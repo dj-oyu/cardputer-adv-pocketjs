@@ -25,6 +25,32 @@ bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){(void)id;(void)out
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
 void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
+// pocket_kasane.c now installs and polls the proc/grid/video/pixel surfaces.
+// STRESS uses none of them, and their real sources pull in the DERBY runner
+// and PIE kernels, so they are stubbed as tools/test_keytest_app.c does. On
+// the device each per-turn call is a flag test of a few instructions.
+#include "pocket_proc.h"
+esp_err_t pocket_proc_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void pocket_proc_end_turn(void){}
+bool pocket_proc_has_frame(void){return false;}
+bool pocket_proc_pending(void){return false;}
+bool pocket_proc_backdrop_pending(void){return false;}
+bool pocket_proc_is_image_mode(void){return false;}
+ksn_result pocket_proc_backdrop(void *o,uint16_t y,uint16_t rows,uint16_t *px){(void)o;(void)y;(void)rows;(void)px;return KSN_OK;}
+void pocket_proc_present_result(ksn_result r){(void)r;}
+esp_err_t pocket_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void pocket_grid_reset(void){}
+bool pocket_grid_pending(void){return false;}
+void pocket_grid_present_result(ksn_result r){(void)r;}
+void pocket_grid_source_invalidated(uint32_t id){(void)id;}
+esp_err_t pocket_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void pocket_video_reset(void){}
+bool pocket_video_pending(void){return false;}
+void pocket_video_present_result(ksn_result r){(void)r;}
+esp_err_t pocket_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void pocket_pixel_reset(void){}
+bool pocket_pixel_pending(void){return false;}
+void pocket_pixel_present_result(ksn_result r){(void)r;}
 
 extern const char stress_js_start[] asm("_binary_stress_js_start");
 extern const char stress_js_end[] asm("_binary_stress_js_end");
