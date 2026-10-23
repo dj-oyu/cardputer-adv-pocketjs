@@ -24,6 +24,12 @@ jobs:
         with:
           ref: ${{ env.SOURCE_HEAD }}
           persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        if: matrix.model == 'm32'
+        with:
+          ref: e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267
+          path: baseline-pattern
+          persist-credentials: false
       - name: Install 32-bit compiler libraries
         if: matrix.model == 'm32'
         run: sudo apt-get update && sudo apt-get install -y gcc-multilib
@@ -33,7 +39,9 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/entry
           flags=(-O2 -fstrict-aliasing)
-          if [ '${{ matrix.model }}' = m32 ]; then flags+=(-m32); fi
+          # Keep the existing float threshold contract at float precision.
+          # The x87 default fails its 1.02f chord case on unchanged main too.
+          if [ '${{ matrix.model }}' = m32 ]; then flags+=(-m32 -msse2 -mfpmath=sse); fi
           if [ '${{ matrix.model }}' = sanitize ]; then flags=(-O1 -g -fsanitize=address,undefined -fno-pie -no-pie); fi
           export ASAN_OPTIONS=detect_leaks=1:abort_on_error=1
           export UBSAN_OPTIONS=halt_on_error=1
@@ -42,6 +50,10 @@ jobs:
           artifacts/entry/boundary | tee artifacts/entry/boundary.log
           gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -Imain/ui/kasane "${common[@]}" main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_proc_pattern_line.c -lm -o artifacts/entry/pattern
           artifacts/entry/pattern | tee artifacts/entry/pattern.log
+          if [ '${{ matrix.model }}' = m32 ]; then
+            (cd baseline-pattern && gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -Imain/ui/kasane "${common[@]}" main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_proc_pattern_line.c -lm -o ../artifacts/entry/pattern-base)
+            artifacts/entry/pattern-base | tee artifacts/entry/pattern-base.log
+          fi
           file artifacts/entry/boundary | tee artifacts/entry/abi.log
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
