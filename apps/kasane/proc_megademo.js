@@ -421,7 +421,7 @@
       R.lamp.setColor(tx, t & 8 ? 0xfb47ffff : 0x167fffff);
       if (scene === 4) {
         R.thumb.setRotation(tx, -flight(t).roll * 57.3 * KN[tier].q[1]);
-        for (let i = 0; i < 3; ++i) R.lives[i].place(tx, {offset: [160 + i * 12, 4 + ((t + i * 3) >> 2) % 2]});
+        for (let i = 0; i < 3; ++i) if (!t || zoom === 1 || !((t + i * 3) & 3)) R.lives[i].place(tx, {offset: [160 + i * 12, 4 + ((t + i * 3) >> 2) % 2]});
         R.lives[2].setVisible(tx, on && t < 48);
       } else {
         const n = f ? f.d.length : 0;
