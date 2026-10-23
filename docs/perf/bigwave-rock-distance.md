@@ -19,4 +19,23 @@ python tools/experiments/bigwave-rock-distance/verify.py --m32
 python tools/experiments/bigwave-rock-distance/bench.py --m32 --pairs 40
 ```
 
-Independent read-only review and m32 validation are in progress. Device diagnostic CI will follow if the effect remains; no USB/hardware/flash/merge has been performed.
+Independent read-only review found no product/boundary/timer/finite-diagnostic blocker. First independent CI GCC13 native40pair ride120.969→116.047us, ratio0.96378 [0.95664,0.96769]; m32 at163840B178.037→170.642us, ratio0.95912 [0.95119,0.96486]. Pause controls include1, title also improves on both ABIs. Full7279 native panels match on both ABIs with explicit caps. m32 retained+132B (nativeCI+144B; local+140B); successfulalloc-6.875 and m32chargedbytes-166.17/frame. Final exact-head CI must be checked separately. Initial run39876685268/head8e4ceac45b052c52858a04f4209d8a021db3d7d0 supplies this result.
+
+## Finite device diagnostic (not hardware tested)
+
+`prepare_device.py` only patches a separate clean checkout and emits exact source/workload/patch hashes; no USB access. The dedicated workflow builds product and diagnostic baseline/candidate separately with ESP-IDF6.0.1, product partition/security/INFO/size settings. Source main e0 and candidate head remain independent of PR42/44 and PR48/49. Product builds have no instrumentation. ELF/map, sdkconfig, bootloader/partition/app images, flasher_args.json, experiment.json and SHA256SUMS identify each artifact. Use the artifact offsets0x0/0x8000/0x10000 and existing factory/dict/font/storage layout; no app-control PR47.
+
+Workload `bigwave-rock-ride-120-v1` starts automatically via normal begin_run/app_tick/owner/scheduler/LCD/GUEST_ALLOCATOR. There are40title frames, one native start press, one empty frame and40bot warm frames, then120ride frames. The existing read-only host bot logic runs before the JS timer; its native key state/edge masks feed unchanged product key queries. No state/physics acceleration or synthetic benchmark fastpath. The full product source is captured before the wrapper. No synchronous setup loop or increased watchdog/guest/stack budget. The app does not call storage; diagnostic adds no storage/random hooks or persistent writes.
+
+The host fixture compiles the exact injected native marker/workload: ordinary real-FIFO bot, diagnostic baseline and diagnostic candidate each produce203 byte-identical full panels and final state1/x50.909642993 with zero exception/present/oracle failures. m32 repeats this check at the product cap in final CI. Host geometry fixtures/full replay are separate checks.
+
+120unsigned samples occupy480B in each diagnostic. Median_x2 is the exact twice-median; p95 uses nearest rank, no approximate quantiles/raw stream. Expected about202owner frames (~6.7s at30Hz), cooperative deadline24s; seven diagnostic lines plus capped app logs fit existing30s/64KiB receive/256lines32KiB retention. No broker/guard changes. Timed JS includes constant marker argument/entry overhead; excludes bot and native present. Owner tick totals include bot/normal tick/present and cannot be treated as uninstrumented FPS. Allocator counts/requestedbytes are requests, not successful/charged host bytes. Internal free memory is sampled before timer at frame boundaries/end, not a transient peak heap statistic.
+
+Accept only INFO `Application information:` with expected source-derived version/ELF, fullhead START, pointer_bytes=4, frames120/ride120/other0, tier1 active path, END status=complete complete:true, then EXIT running=0. Host x progresses12.983918476→50.909642993; device values/timing remain unmeasured. timeout/app_error/input_mismatch/present_pending invalidates the run. Hardware/USB/flash/merge has not been performed.
+
+```sh
+python tools/experiments/bigwave-rock-distance/test_device.py
+python tools/experiments/bigwave-rock-distance/test_device.py --m32
+# Only a separate clean checkout:
+python tools/experiments/bigwave-rock-distance/prepare_device.py --checkout /path/to/disposable-checkout
+```

@@ -1,0 +1,504 @@
+[
+  {
+    "out": "/home/runner/work/cardputer-adv-pocketjs/cardputer-adv-pocketjs/.cache/bigwave-rock/bench-20261023T001345Z",
+    "heap_limit": 524288,
+    "initial_gc_threshold_clamp": 262144,
+    "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+    "head": "8e4ceac45b052c52858a04f4209d8a021db3d7d0",
+    "pairs": 40,
+    "frames_per_trial": 120,
+    "inputs": {
+      "baseline": "530e389056f8099ebd71b606f3aec339ca370558abb0d2991d6c302ff7f494a9",
+      "candidate": "61f318db6fc93c979042724ed53e79f016b1cb8b01e6f9c437878098666c8c92"
+    },
+    "binary_sha256": "9ce516af828780acd057aad7e4e36dc519d9b1b74c79966127bbd3e14f9706bf",
+    "harness_sha256": "cf6b3ad1fc2fa0428d68f543528e15f96d692699f520e5e84f7701d63fa78b5a",
+    "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "engine_build_sha256": "bda291c0645c209ec10dacdfc85371fa1772d3414968d5bf4a3d25cb94b1d60f",
+    "cpu_affinity": [
+      0
+    ],
+    "source_bytes": {
+      "baseline": 22372,
+      "candidate": 22445
+    },
+    "groups": {
+      "title": {
+        "baseline": {
+          "median_trial_mean_wall_ns": 110064.86666666667,
+          "p95_frame_wall_ns": 123462,
+          "mean_successful_allocations": 260,
+          "mean_charged_bytes": 14249,
+          "max_peak_rise": 4632,
+          "eval_retained": [
+            126452
+          ],
+          "eval_peak": [
+            156724
+          ],
+          "retained_before": [
+            132092
+          ],
+          "retained_after": [
+            132092
+          ],
+          "measured_window_peak": [
+            136724
+          ],
+          "whole_workload_peak": [
+            156724
+          ],
+          "js_func_code_size": [
+            10970
+          ],
+          "js_func_size": [
+            14594
+          ],
+          "frame_live_peak": [
+            136724
+          ]
+        },
+        "candidate": {
+          "median_trial_mean_wall_ns": 105914.9125,
+          "p95_frame_wall_ns": 119094,
+          "mean_successful_allocations": 254,
+          "mean_charged_bytes": 14025,
+          "max_peak_rise": 4632,
+          "eval_retained": [
+            126596
+          ],
+          "eval_peak": [
+            157072
+          ],
+          "retained_before": [
+            132236
+          ],
+          "retained_after": [
+            132236
+          ],
+          "measured_window_peak": [
+            136868
+          ],
+          "whole_workload_peak": [
+            157072
+          ],
+          "js_func_code_size": [
+            11023
+          ],
+          "js_func_size": [
+            14630
+          ],
+          "frame_live_peak": [
+            136868
+          ]
+        },
+        "paired_ratio": 0.9592408824333138,
+        "bootstrap95": [
+          0.9561602897277033,
+          0.9690675871884755
+        ]
+      },
+      "ride": {
+        "baseline": {
+          "median_trial_mean_wall_ns": 120968.95000000001,
+          "p95_frame_wall_ns": 139713,
+          "mean_successful_allocations": 266.65,
+          "mean_charged_bytes": 15006.366666666667,
+          "max_peak_rise": 4776,
+          "eval_retained": [
+            126452
+          ],
+          "eval_peak": [
+            156724
+          ],
+          "retained_before": [
+            133748
+          ],
+          "retained_after": [
+            133892
+          ],
+          "measured_window_peak": [
+            139520
+          ],
+          "whole_workload_peak": [
+            156724
+          ],
+          "js_func_code_size": [
+            10970
+          ],
+          "js_func_size": [
+            14594
+          ],
+          "frame_live_peak": [
+            138532
+          ]
+        },
+        "candidate": {
+          "median_trial_mean_wall_ns": 116046.51250000001,
+          "p95_frame_wall_ns": 133100,
+          "mean_successful_allocations": 259.775,
+          "mean_charged_bytes": 14747.366666666667,
+          "max_peak_rise": 4776,
+          "eval_retained": [
+            126596
+          ],
+          "eval_peak": [
+            157072
+          ],
+          "retained_before": [
+            133892
+          ],
+          "retained_after": [
+            134036
+          ],
+          "measured_window_peak": [
+            139664
+          ],
+          "whole_workload_peak": [
+            157072
+          ],
+          "js_func_code_size": [
+            11023
+          ],
+          "js_func_size": [
+            14630
+          ],
+          "frame_live_peak": [
+            138676
+          ]
+        },
+        "paired_ratio": 0.9637778744068336,
+        "bootstrap95": [
+          0.9566363749128673,
+          0.9676878202026834
+        ]
+      },
+      "pause": {
+        "baseline": {
+          "median_trial_mean_wall_ns": 9765.795833333334,
+          "p95_frame_wall_ns": 11101,
+          "mean_successful_allocations": 48,
+          "mean_charged_bytes": 2472,
+          "max_peak_rise": 880,
+          "eval_retained": [
+            126452
+          ],
+          "eval_peak": [
+            156724
+          ],
+          "retained_before": [
+            133036
+          ],
+          "retained_after": [
+            133036
+          ],
+          "measured_window_peak": [
+            138664
+          ],
+          "whole_workload_peak": [
+            156724
+          ],
+          "js_func_code_size": [
+            10970
+          ],
+          "js_func_size": [
+            14594
+          ],
+          "frame_live_peak": [
+            133916
+          ]
+        },
+        "candidate": {
+          "median_trial_mean_wall_ns": 9770.070833333333,
+          "p95_frame_wall_ns": 11201,
+          "mean_successful_allocations": 48,
+          "mean_charged_bytes": 2472,
+          "max_peak_rise": 880,
+          "eval_retained": [
+            126596
+          ],
+          "eval_peak": [
+            157072
+          ],
+          "retained_before": [
+            133180
+          ],
+          "retained_after": [
+            133180
+          ],
+          "measured_window_peak": [
+            138808
+          ],
+          "whole_workload_peak": [
+            157072
+          ],
+          "js_func_code_size": [
+            11023
+          ],
+          "js_func_size": [
+            14630
+          ],
+          "frame_live_peak": [
+            134060
+          ]
+        },
+        "paired_ratio": 0.9992038998954111,
+        "bootstrap95": [
+          0.9906731323834143,
+          1.0094259165660517
+        ]
+      }
+    }
+  },
+  {
+    "out": "/home/runner/work/cardputer-adv-pocketjs/cardputer-adv-pocketjs/.cache/bigwave-rock-m32/bench-20261023T001533Z",
+    "heap_limit": 163840,
+    "initial_gc_threshold_clamp": 81920,
+    "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+    "head": "8e4ceac45b052c52858a04f4209d8a021db3d7d0",
+    "pairs": 40,
+    "frames_per_trial": 120,
+    "inputs": {
+      "baseline": "530e389056f8099ebd71b606f3aec339ca370558abb0d2991d6c302ff7f494a9",
+      "candidate": "61f318db6fc93c979042724ed53e79f016b1cb8b01e6f9c437878098666c8c92"
+    },
+    "binary_sha256": "94f6c5e7fe22bfe3f9c15a9f1655497cd84f33f41e5e0fa6c24e551e6752154a",
+    "harness_sha256": "cf6b3ad1fc2fa0428d68f543528e15f96d692699f520e5e84f7701d63fa78b5a",
+    "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "engine_build_sha256": "41a911208de9080e0e70d47f2994d085f28a74b2335cee4b31781d36341d9341",
+    "cpu_affinity": [
+      0
+    ],
+    "source_bytes": {
+      "baseline": 22372,
+      "candidate": 22445
+    },
+    "groups": {
+      "title": {
+        "baseline": {
+          "median_trial_mean_wall_ns": 168865.4625,
+          "p95_frame_wall_ns": 183254,
+          "mean_successful_allocations": 260,
+          "mean_charged_bytes": 9209,
+          "max_peak_rise": 2816,
+          "eval_retained": [
+            91016
+          ],
+          "eval_peak": [
+            124452
+          ],
+          "retained_before": [
+            94212
+          ],
+          "retained_after": [
+            94212
+          ],
+          "measured_window_peak": [
+            97028
+          ],
+          "whole_workload_peak": [
+            124452
+          ],
+          "js_func_code_size": [
+            10970
+          ],
+          "js_func_size": [
+            11434
+          ],
+          "frame_live_peak": [
+            97028
+          ]
+        },
+        "candidate": {
+          "median_trial_mean_wall_ns": 160056.29583333334,
+          "p95_frame_wall_ns": 174859,
+          "mean_successful_allocations": 254,
+          "mean_charged_bytes": 9065,
+          "max_peak_rise": 2816,
+          "eval_retained": [
+            91148
+          ],
+          "eval_peak": [
+            124780
+          ],
+          "retained_before": [
+            94344
+          ],
+          "retained_after": [
+            94344
+          ],
+          "measured_window_peak": [
+            97160
+          ],
+          "whole_workload_peak": [
+            124780
+          ],
+          "js_func_code_size": [
+            11023
+          ],
+          "js_func_size": [
+            11470
+          ],
+          "frame_live_peak": [
+            97160
+          ]
+        },
+        "paired_ratio": 0.9513977694143148,
+        "bootstrap95": [
+          0.9460992395984058,
+          0.9568179822597545
+        ]
+      },
+      "ride": {
+        "baseline": {
+          "median_trial_mean_wall_ns": 178037.31666666668,
+          "p95_frame_wall_ns": 202841,
+          "mean_successful_allocations": 266.65,
+          "mean_charged_bytes": 9777.4,
+          "max_peak_rise": 2944,
+          "eval_retained": [
+            91016
+          ],
+          "eval_peak": [
+            124452
+          ],
+          "retained_before": [
+            95308
+          ],
+          "retained_after": [
+            95436
+          ],
+          "measured_window_peak": [
+            100336
+          ],
+          "whole_workload_peak": [
+            124452
+          ],
+          "js_func_code_size": [
+            10970
+          ],
+          "js_func_size": [
+            11434
+          ],
+          "frame_live_peak": [
+            98328
+          ]
+        },
+        "candidate": {
+          "median_trial_mean_wall_ns": 170641.725,
+          "p95_frame_wall_ns": 195868,
+          "mean_successful_allocations": 259.775,
+          "mean_charged_bytes": 9611.233333333334,
+          "max_peak_rise": 2944,
+          "eval_retained": [
+            91148
+          ],
+          "eval_peak": [
+            124780
+          ],
+          "retained_before": [
+            95440
+          ],
+          "retained_after": [
+            95568
+          ],
+          "measured_window_peak": [
+            100468
+          ],
+          "whole_workload_peak": [
+            124780
+          ],
+          "js_func_code_size": [
+            11023
+          ],
+          "js_func_size": [
+            11470
+          ],
+          "frame_live_peak": [
+            98460
+          ]
+        },
+        "paired_ratio": 0.9591183318040979,
+        "bootstrap95": [
+          0.9511912562505611,
+          0.9648624265357355
+        ]
+      },
+      "pause": {
+        "baseline": {
+          "median_trial_mean_wall_ns": 12592.6625,
+          "p95_frame_wall_ns": 14447,
+          "mean_successful_allocations": 48,
+          "mean_charged_bytes": 1744,
+          "max_peak_rise": 584,
+          "eval_retained": [
+            91016
+          ],
+          "eval_peak": [
+            124452
+          ],
+          "retained_before": [
+            94828
+          ],
+          "retained_after": [
+            94828
+          ],
+          "measured_window_peak": [
+            99728
+          ],
+          "whole_workload_peak": [
+            124452
+          ],
+          "js_func_code_size": [
+            10970
+          ],
+          "js_func_size": [
+            11434
+          ],
+          "frame_live_peak": [
+            95412
+          ]
+        },
+        "candidate": {
+          "median_trial_mean_wall_ns": 12518.283333333333,
+          "p95_frame_wall_ns": 14628,
+          "mean_successful_allocations": 48,
+          "mean_charged_bytes": 1744,
+          "max_peak_rise": 584,
+          "eval_retained": [
+            91148
+          ],
+          "eval_peak": [
+            124780
+          ],
+          "retained_before": [
+            94960
+          ],
+          "retained_after": [
+            94960
+          ],
+          "measured_window_peak": [
+            99860
+          ],
+          "whole_workload_peak": [
+            124780
+          ],
+          "js_func_code_size": [
+            11023
+          ],
+          "js_func_size": [
+            11470
+          ],
+          "frame_live_peak": [
+            95544
+          ]
+        },
+        "paired_ratio": 0.9968952287385935,
+        "bootstrap95": [
+          0.9832476309008313,
+          1.0050778398976281
+        ]
+      }
+    }
+  }
+]

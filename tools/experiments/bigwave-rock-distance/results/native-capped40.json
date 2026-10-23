@@ -1,0 +1,250 @@
+{
+  "heap_limit": 524288,
+  "initial_gc_threshold_clamp": 262144,
+  "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "head": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "pairs": 40,
+  "frames_per_trial": 120,
+  "inputs": {
+    "baseline": "530e389056f8099ebd71b606f3aec339ca370558abb0d2991d6c302ff7f494a9",
+    "candidate": "61f318db6fc93c979042724ed53e79f016b1cb8b01e6f9c437878098666c8c92"
+  },
+  "binary_sha256": "6e647d2686768e1256e5c6992c675ccf6f1404aa5b822344800616f28296a325",
+  "harness_sha256": "cf6b3ad1fc2fa0428d68f543528e15f96d692699f520e5e84f7701d63fa78b5a",
+  "compiler": "gcc (Debian 14.2.0-19) 14.2.0",
+  "engine_build_sha256": "a738ee5071c649af6f28536013783db7857011aceeb6f3dd0a74eb5fd3e1b15b",
+  "cpu_affinity": [
+    0
+  ],
+  "source_bytes": {
+    "baseline": 22372,
+    "candidate": 22445
+  },
+  "groups": {
+    "title": {
+      "baseline": {
+        "median_trial_mean_wall_ns": 98084.54166666667,
+        "p95_frame_wall_ns": 144853,
+        "mean_successful_allocations": 260,
+        "mean_charged_bytes": 14249,
+        "max_peak_rise": 4632,
+        "eval_retained": [
+          126424
+        ],
+        "eval_peak": [
+          156696
+        ],
+        "retained_before": [
+          132064
+        ],
+        "retained_after": [
+          132064
+        ],
+        "measured_window_peak": [
+          136696
+        ],
+        "whole_workload_peak": [
+          156696
+        ],
+        "js_func_code_size": [
+          10970
+        ],
+        "js_func_size": [
+          14594
+        ],
+        "frame_live_peak": [
+          136696
+        ]
+      },
+      "candidate": {
+        "median_trial_mean_wall_ns": 96561.91666666666,
+        "p95_frame_wall_ns": 143769,
+        "mean_successful_allocations": 254,
+        "mean_charged_bytes": 14025,
+        "max_peak_rise": 4632,
+        "eval_retained": [
+          126564
+        ],
+        "eval_peak": [
+          157040
+        ],
+        "retained_before": [
+          132204
+        ],
+        "retained_after": [
+          132204
+        ],
+        "measured_window_peak": [
+          136836
+        ],
+        "whole_workload_peak": [
+          157040
+        ],
+        "js_func_code_size": [
+          11023
+        ],
+        "js_func_size": [
+          14630
+        ],
+        "frame_live_peak": [
+          136836
+        ]
+      },
+      "paired_ratio": 0.9680576066664242,
+      "bootstrap95": [
+        0.9535235270594749,
+        1.0014065362064168
+      ]
+    },
+    "ride": {
+      "baseline": {
+        "median_trial_mean_wall_ns": 113018.7375,
+        "p95_frame_wall_ns": 177586,
+        "mean_successful_allocations": 266.65,
+        "mean_charged_bytes": 15006.366666666667,
+        "max_peak_rise": 4776,
+        "eval_retained": [
+          126424
+        ],
+        "eval_peak": [
+          156696
+        ],
+        "retained_before": [
+          133720
+        ],
+        "retained_after": [
+          133864
+        ],
+        "measured_window_peak": [
+          139492
+        ],
+        "whole_workload_peak": [
+          156696
+        ],
+        "js_func_code_size": [
+          10970
+        ],
+        "js_func_size": [
+          14594
+        ],
+        "frame_live_peak": [
+          138504
+        ]
+      },
+      "candidate": {
+        "median_trial_mean_wall_ns": 107960.70833333333,
+        "p95_frame_wall_ns": 154665,
+        "mean_successful_allocations": 259.775,
+        "mean_charged_bytes": 14747.366666666667,
+        "max_peak_rise": 4776,
+        "eval_retained": [
+          126564
+        ],
+        "eval_peak": [
+          157040
+        ],
+        "retained_before": [
+          133860
+        ],
+        "retained_after": [
+          134004
+        ],
+        "measured_window_peak": [
+          139632
+        ],
+        "whole_workload_peak": [
+          157040
+        ],
+        "js_func_code_size": [
+          11023
+        ],
+        "js_func_size": [
+          14630
+        ],
+        "frame_live_peak": [
+          138644
+        ]
+      },
+      "paired_ratio": 0.9577421491568108,
+      "bootstrap95": [
+        0.9170316322362092,
+        0.9835927894940355
+      ]
+    },
+    "pause": {
+      "baseline": {
+        "median_trial_mean_wall_ns": 7614.295833333334,
+        "p95_frame_wall_ns": 9261,
+        "mean_successful_allocations": 48,
+        "mean_charged_bytes": 2472,
+        "max_peak_rise": 880,
+        "eval_retained": [
+          126424
+        ],
+        "eval_peak": [
+          156696
+        ],
+        "retained_before": [
+          133008
+        ],
+        "retained_after": [
+          133008
+        ],
+        "measured_window_peak": [
+          138636
+        ],
+        "whole_workload_peak": [
+          156696
+        ],
+        "js_func_code_size": [
+          10970
+        ],
+        "js_func_size": [
+          14594
+        ],
+        "frame_live_peak": [
+          133888
+        ]
+      },
+      "candidate": {
+        "median_trial_mean_wall_ns": 7672.362499999999,
+        "p95_frame_wall_ns": 9378,
+        "mean_successful_allocations": 48,
+        "mean_charged_bytes": 2472,
+        "max_peak_rise": 880,
+        "eval_retained": [
+          126564
+        ],
+        "eval_peak": [
+          157040
+        ],
+        "retained_before": [
+          133148
+        ],
+        "retained_after": [
+          133148
+        ],
+        "measured_window_peak": [
+          138776
+        ],
+        "whole_workload_peak": [
+          157040
+        ],
+        "js_func_code_size": [
+          11023
+        ],
+        "js_func_size": [
+          14630
+        ],
+        "frame_live_peak": [
+          134028
+        ]
+      },
+      "paired_ratio": 1.029482284186758,
+      "bootstrap95": [
+        0.9587070992540403,
+        1.1138808673026257
+      ]
+    }
+  }
+}

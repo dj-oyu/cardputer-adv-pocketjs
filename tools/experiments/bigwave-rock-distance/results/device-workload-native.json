@@ -1,0 +1,17 @@
+{
+  "control": {
+    "panels": 203,
+    "sha256": "2152d88bbb10be39d9fc1044582b32de9ece7835b6f960a86bcd72b6f7b619e1",
+    "state": "ROCK_DEVICE frames=202 state=1 x=50.909642993 exceptions=0 present=0 oracle=0"
+  },
+  "baseline": {
+    "panels": 203,
+    "sha256": "2152d88bbb10be39d9fc1044582b32de9ece7835b6f960a86bcd72b6f7b619e1",
+    "state": "ROCK_DEVICE frames=202 state=1 x=50.909642993 exceptions=0 present=0 oracle=0"
+  },
+  "candidate": {
+    "panels": 203,
+    "sha256": "2152d88bbb10be39d9fc1044582b32de9ece7835b6f960a86bcd72b6f7b619e1",
+    "state": "ROCK_DEVICE frames=202 state=1 x=50.909642993 exceptions=0 present=0 oracle=0"
+  }
+}
