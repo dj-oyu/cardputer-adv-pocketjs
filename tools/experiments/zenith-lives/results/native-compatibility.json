@@ -1,0 +1,23 @@
+{
+  "heap_limit": 524288,
+  "positive": {
+    "panels": 4964,
+    "all_panels_equal": true,
+    "different_frames": [],
+    "state_bytes": 277984,
+    "state_sha256": "b56a1b9ff3273873f118a4d829e79aefe3ad9081351102e0d98ea31ee53f5f0a",
+    "panel_sha256": "be33a6a931fea2e7f6f631e3cdf073c263e237fe75ab628c66af8ca2ec162f8e",
+    "logs_equal": true
+  },
+  "negative": {
+    "panels": 488,
+    "all_panels_equal": false,
+    "different_frames": [
+      388
+    ],
+    "state_bytes": 27328,
+    "state_sha256": "69b77fd14be227eeade8286b3883806fd2d3cb8a56ef4a058792a8f90e7cda22",
+    "panel_sha256": "a6701af59f3de7fc653cf77e58d05158525345becd23dcea8402e2417bfe69fc",
+    "logs_equal": true
+  }
+}

@@ -1,0 +1,45 @@
+name: ZENITH lives placement host validation
+on:
+  push:
+    branches: [experiment/zenith-lives-deep-20261023]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: zenith-lives-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - name: Native explicit-cap long state/zoom/tier matrix and natural-loop A/B
+        run: |
+          python3 tools/experiments/zenith-lives/verify.py
+          python3 tools/experiments/zenith-lives/bench.py --pairs 15
+      - name: m32 product-cap long equivalence and independent natural-loop A/B
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 tools/experiments/zenith-lives/verify.py --m32
+          python3 tools/experiments/zenith-lives/bench.py --m32 --pairs 15
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: zenith-lives-host-${{ env.SOURCE_HEAD }}
+          include-hidden-files: true
+          path: |
+            .cache/zenith-lives*/bench-*/*.json
+            .cache/zenith-verify*/result.json
+            .cache/zenith-verify*/*.state
+            .cache/zenith-verify*/*.log
+          retention-days: 14

@@ -1,0 +1,402 @@
+{
+  "heap_limit": 524288,
+  "initial_gc_threshold_clamp": 262144,
+  "base": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "local_head": "e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267",
+  "pairs": 15,
+  "inputs": {
+    "baseline": "22c9d6b0a8e8593afa8526da129244fe7971d7803125c6f2f80b9ac36b715f9c",
+    "candidate": "eef08585d29bb621160d973deebb7e2c163503fc71be7d4531d5b43bc647f3d1"
+  },
+  "binary_sha256": "ca5ae2af78c5afa2389debb8307e1e88db53f2d166fc18982e07f5e6abebac56",
+  "harness_sha256": "4eb196a4abdc84e14d7f85d9df4fbc2e17af71eb6550d34566fbe6ee349f03ad",
+  "compiler": "gcc (Debian 14.2.0-19) 14.2.0",
+  "sample_fields": [
+    "js_wall_ns",
+    "js_cpu_ns",
+    "present_wall_ns",
+    "successful_allocations",
+    "charged_bytes",
+    "peak_rise",
+    "scene",
+    "registrations",
+    "pow_audit_count"
+  ],
+  "groups": {
+    "all": {
+      "baseline": {
+        "mean_js_wall_ns": 91319.0579710145,
+        "mean_js_cpu_ns": 91715.71557971014,
+        "mean_present_ns": 273535.3088768116,
+        "allocations": 285.69565217391306,
+        "charged_bytes": 14730.369565217392,
+        "frames": 1104,
+        "eval_peak": [
+          146964
+        ],
+        "retained_before": [
+          137036
+        ],
+        "retained_after": [
+          137036
+        ],
+        "window_peak": [
+          155804
+        ],
+        "whole_peak": [
+          155804
+        ],
+        "frame_live_peak": [
+          155804
+        ],
+        "bytecode": [
+          9358
+        ]
+      },
+      "candidate": {
+        "mean_js_wall_ns": 90247.25724637682,
+        "mean_js_cpu_ns": 90661.98913043478,
+        "mean_present_ns": 273415.41485507245,
+        "allocations": 281.625,
+        "charged_bytes": 14516.369565217392,
+        "frames": 1104,
+        "eval_peak": [
+          147300
+        ],
+        "retained_before": [
+          137076
+        ],
+        "retained_after": [
+          137076
+        ],
+        "window_peak": [
+          155844
+        ],
+        "whole_peak": [
+          155844
+        ],
+        "frame_live_peak": [
+          155844
+        ],
+        "bytecode": [
+          9389
+        ]
+      },
+      "wall_ratio": 0.9953407802394733,
+      "wall_bootstrap95": [
+        0.9710480896955446,
+        1.0127348236129807
+      ],
+      "cpu_ratio": 0.9953404765490855,
+      "cpu_bootstrap95": [
+        0.9705641134542513,
+        1.015693527131247
+      ],
+      "js_plus_present_ratio": 1.0053340321528146,
+      "js_plus_present_bootstrap95": [
+        0.9781732914623174,
+        1.0154008842295101
+      ]
+    },
+    "NEWS": {
+      "baseline": {
+        "mean_js_wall_ns": 61261.368055555555,
+        "mean_js_cpu_ns": 61603.17361111111,
+        "mean_present_ns": 87716.06944444444,
+        "allocations": 387.5625,
+        "charged_bytes": 19599.583333333332,
+        "frames": 144,
+        "eval_peak": [
+          146964
+        ],
+        "retained_before": [
+          137036
+        ],
+        "retained_after": [
+          137036
+        ],
+        "window_peak": [
+          155804
+        ],
+        "whole_peak": [
+          155804
+        ],
+        "frame_live_peak": [
+          155804
+        ],
+        "bytecode": [
+          9358
+        ]
+      },
+      "candidate": {
+        "mean_js_wall_ns": 61130.95138888889,
+        "mean_js_cpu_ns": 61468.3125,
+        "mean_present_ns": 87522.51388888889,
+        "allocations": 387.5625,
+        "charged_bytes": 19599.583333333332,
+        "frames": 144,
+        "eval_peak": [
+          147300
+        ],
+        "retained_before": [
+          137076
+        ],
+        "retained_after": [
+          137076
+        ],
+        "window_peak": [
+          155844
+        ],
+        "whole_peak": [
+          155844
+        ],
+        "frame_live_peak": [
+          155844
+        ],
+        "bytecode": [
+          9389
+        ]
+      },
+      "wall_ratio": 0.9918548945561009,
+      "wall_bootstrap95": [
+        0.9605456613944597,
+        1.0135436314144415
+      ],
+      "cpu_ratio": 0.9919053492671346,
+      "cpu_bootstrap95": [
+        0.9622074075703958,
+        1.0135760276600108
+      ],
+      "js_plus_present_ratio": 0.9990474896720285,
+      "js_plus_present_bootstrap95": [
+        0.9465065636440795,
+        1.0218522011144207
+      ]
+    },
+    "TWIST": {
+      "baseline": {
+        "mean_js_wall_ns": 75216.90364583333,
+        "mean_js_cpu_ns": 75588.52604166667,
+        "mean_present_ns": 176125.9765625,
+        "allocations": 229.78125,
+        "charged_bytes": 11447.3125,
+        "frames": 384,
+        "eval_peak": [
+          146964
+        ],
+        "retained_before": [
+          137036
+        ],
+        "retained_after": [
+          137036
+        ],
+        "window_peak": [
+          155804
+        ],
+        "whole_peak": [
+          155804
+        ],
+        "frame_live_peak": [
+          155804
+        ],
+        "bytecode": [
+          9358
+        ]
+      },
+      "candidate": {
+        "mean_js_wall_ns": 75374.81770833333,
+        "mean_js_cpu_ns": 75800.38020833333,
+        "mean_present_ns": 175187.78645833334,
+        "allocations": 229.78125,
+        "charged_bytes": 11447.3125,
+        "frames": 384,
+        "eval_peak": [
+          147300
+        ],
+        "retained_before": [
+          137076
+        ],
+        "retained_after": [
+          137076
+        ],
+        "window_peak": [
+          155844
+        ],
+        "whole_peak": [
+          155844
+        ],
+        "frame_live_peak": [
+          155844
+        ],
+        "bytecode": [
+          9389
+        ]
+      },
+      "wall_ratio": 0.9859584581057005,
+      "wall_bootstrap95": [
+        0.9451565696455343,
+        1.0085766962353586
+      ],
+      "cpu_ratio": 0.987049871221614,
+      "cpu_bootstrap95": [
+        0.9452035093798031,
+        1.0086638679483855
+      ],
+      "js_plus_present_ratio": 0.9977171810339661,
+      "js_plus_present_bootstrap95": [
+        0.9686582071798734,
+        1.0068575351416118
+      ]
+    },
+    "ZENITH": {
+      "baseline": {
+        "mean_js_wall_ns": 59471.802083333336,
+        "mean_js_cpu_ns": 59865.208333333336,
+        "mean_present_ns": 448118.9861111111,
+        "allocations": 247.05208333333334,
+        "charged_bytes": 13240.083333333334,
+        "frames": 288,
+        "eval_peak": [
+          146964
+        ],
+        "retained_before": [
+          137036
+        ],
+        "retained_after": [
+          137036
+        ],
+        "window_peak": [
+          155804
+        ],
+        "whole_peak": [
+          155804
+        ],
+        "frame_live_peak": [
+          155804
+        ],
+        "bytecode": [
+          9358
+        ]
+      },
+      "candidate": {
+        "mean_js_wall_ns": 58325.40277777778,
+        "mean_js_cpu_ns": 58751.256944444445,
+        "mean_present_ns": 451380.3923611111,
+        "allocations": 231.44791666666666,
+        "charged_bytes": 12419.75,
+        "frames": 288,
+        "eval_peak": [
+          147300
+        ],
+        "retained_before": [
+          137076
+        ],
+        "retained_after": [
+          137076
+        ],
+        "window_peak": [
+          155844
+        ],
+        "whole_peak": [
+          155844
+        ],
+        "frame_live_peak": [
+          155844
+        ],
+        "bytecode": [
+          9389
+        ]
+      },
+      "wall_ratio": 0.9738627920208999,
+      "wall_bootstrap95": [
+        0.918158963870445,
+        0.9928025660907356
+      ],
+      "cpu_ratio": 0.9739076621990274,
+      "cpu_bootstrap95": [
+        0.9184046636619504,
+        0.9937874774320966
+      ],
+      "js_plus_present_ratio": 0.984885553629327,
+      "js_plus_present_bootstrap95": [
+        0.9615630989503939,
+        1.0137516002084084
+      ]
+    },
+    "LIMIT": {
+      "baseline": {
+        "mean_js_wall_ns": 156574.30555555556,
+        "mean_js_cpu_ns": 157022.9375,
+        "mean_present_ns": 318257.71180555556,
+        "allocations": 347.9583333333333,
+        "charged_bytes": 18163.458333333332,
+        "frames": 288,
+        "eval_peak": [
+          146964
+        ],
+        "retained_before": [
+          137036
+        ],
+        "retained_after": [
+          137036
+        ],
+        "window_peak": [
+          155804
+        ],
+        "whole_peak": [
+          155804
+        ],
+        "frame_live_peak": [
+          155804
+        ],
+        "bytecode": [
+          9358
+        ]
+      },
+      "candidate": {
+        "mean_js_wall_ns": 156209.44444444444,
+        "mean_js_cpu_ns": 156656.96527777778,
+        "mean_present_ns": 320262.8958333333,
+        "allocations": 347.9583333333333,
+        "charged_bytes": 18163.458333333332,
+        "frames": 288,
+        "eval_peak": [
+          147300
+        ],
+        "retained_before": [
+          137076
+        ],
+        "retained_after": [
+          137076
+        ],
+        "window_peak": [
+          155844
+        ],
+        "whole_peak": [
+          155844
+        ],
+        "frame_live_peak": [
+          155844
+        ],
+        "bytecode": [
+          9389
+        ]
+      },
+      "wall_ratio": 1.002454919911962,
+      "wall_bootstrap95": [
+        0.980419188222967,
+        1.0423156828431654
+      ],
+      "cpu_ratio": 1.0025746556379544,
+      "cpu_bootstrap95": [
+        0.9805951809868707,
+        1.0487431145542152
+      ],
+      "js_plus_present_ratio": 1.0158836015920198,
+      "js_plus_present_bootstrap95": [
+        0.9726163589948585,
+        1.0352038067129496
+      ]
+    }
+  }
+}
