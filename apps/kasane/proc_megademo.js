@@ -120,7 +120,10 @@
   function prog(src, arg) {
     const c = [], w = src.split(' ');
     for (let i = 0; i < w.length; ++i) {
-      const t = w[i], v = t.slice(1).split(',').map(x => x[0] === '$' ? arg[x[1]] : +x);
+      const t = w[i], v = t.slice(1).split(',');
+      for (let j = 0; j < v.length; ++j) {
+        const x = v[j]; v[j] = x[0] === '$' ? arg[x[1]] : +x;
+      }
       if (t[0] === 'U') {
         for (let j = 0; j < v[0]; ++j) c.push([1, (v[1] || 0) + j, j, 0, 0, 0]);
       } else if (t[0] === 'X') {
