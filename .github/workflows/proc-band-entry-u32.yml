@@ -39,15 +39,36 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/entry
           flags=(-O2 -fstrict-aliasing)
-          # Keep the existing float threshold contract at float precision.
-          # The x87 default fails its 1.02f chord case on unchanged main too.
-          if [ '${{ matrix.model }}' = m32 ]; then flags+=(-m32 -msse2 -mfpmath=sse); fi
+          if [ '${{ matrix.model }}' = m32 ]; then flags+=(-m32); fi
           if [ '${{ matrix.model }}' = sanitize ]; then flags=(-O1 -g -fsanitize=address,undefined -fno-pie -no-pie); fi
           export ASAN_OPTIONS=detect_leaks=1:abort_on_error=1
           export UBSAN_OPTIONS=halt_on_error=1
           common=(main/ui/kasane/ksn_proc_analysis.c main/ui/kasane/ksn_proc_plan.c main/ui/kasane/ksn_procedural_surface.c)
           gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -Imain/ui/kasane "${common[@]}" tools/kasane_contract/test_proc_band_entry_u32.c -lm -o artifacts/entry/boundary
           artifacts/entry/boundary | tee artifacts/entry/boundary.log
+          if [ '${{ matrix.model }}' = m32 ]; then
+            # Preserve x87 evidence before running the full float-width contract.
+            # Accept a pass, or only the known single pre-existing threshold failure.
+            output="$PWD/artifacts/entry"
+            for mode in base candidate; do
+              source=.; if [ "$mode" = base ]; then source=baseline-pattern; fi
+              (cd "$source" && gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -mfpmath=387 -Imain/ui/kasane "${common[@]}" main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_proc_pattern_line.c -lm -o "$output/pattern-x87-$mode")
+              status=0
+              "$output/pattern-x87-$mode" > "$output/pattern-x87-$mode.log" 2>&1 || status=$?
+              echo "$status" > "$output/pattern-x87-$mode.status.log"
+              if [ "$status" = 1 ]; then
+                test "$(wc -l < "$output/pattern-x87-$mode.log")" = 2
+                grep -Fx 'FAIL tools/kasane_contract/test_proc_pattern_line.c:241 run(code,13,&frame)==KSN_PROC_DONE&&frame.count==2*(unsigned)flat[k][2]' "$output/pattern-x87-$mode.log"
+                grep -Fx 'PATTERN LINE FAIL (1)' "$output/pattern-x87-$mode.log"
+              else
+                test "$status" = 0
+              fi
+            done
+            cmp "$output/pattern-x87-base.status.log" "$output/pattern-x87-candidate.status.log"
+            cmp "$output/pattern-x87-base.log" "$output/pattern-x87-candidate.log"
+            # SSE avoids excess precision in the 1.02f comparison constant.
+            flags+=(-msse2 -mfpmath=sse)
+          fi
           gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -Imain/ui/kasane "${common[@]}" main/ui/kasane/ksn_procedural.c tools/kasane_contract/test_proc_pattern_line.c -lm -o artifacts/entry/pattern
           artifacts/entry/pattern | tee artifacts/entry/pattern.log
           if [ '${{ matrix.model }}' = m32 ]; then
