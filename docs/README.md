@@ -40,6 +40,7 @@ QuickJS を FreeRTOS 上で中断・再開できる実行基盤に作り替え�
 | [ゲストの行番号表を落とす](vm/strip-debug.md) | `CONFIG_POCKET_VM_STRIP_DEBUG`（既定 OFF）: 行番号表なしのコンパイル。アプリごとの効果（DERBY の評価の余裕 +2.7 KB、実機）、失う位置情報、DERBY の首振り（段階 3）には足りないこと、運用案（2026-09-30）|
 | [tdz-elision.md](vm/tdz-elision.md) | 設計・記録 | TDZ 検査（`get_loc_check`・`put_loc_check`・`set_loc_uninitialized`）をコンパイル時のデータフロー解析で消す。DERBY の 1 フレーム 12,375 → 11,506 命令（host 計数）、評価のピーク −2.6 KB、確保なし。規則と正しさの根拠、検査 |
 | [vm-ledger/](vm/vm-ledger/) | 記録 | QuickJS 内部の台帳 01〜09（呼び出し経路、フレームへの生ポインタ、ジョブと割り込み、opcode チェックポイント、メモリ確保、アロケータ比較、セグメント検査、スラブと最大空きブロック、**09: L2 後のセグメントを指す入口の再監査**） |
+| [math-call-fast.md](vm/math-call-fast.md) | 試作 | `Math.sin(x)` など純粋な組み込みを、数値の引数なら native フレームなしで呼ぶ（`js_call_math_fast`）。今の経路（C 関数約18種）、DERBY の Math 163.5 回/フレーム（host）、別名・IC・呼び出し箇所の特殊化との比較。host 検査済み、実機の速度は未測定 |
 | [backlog.md](vm/backlog.md) | backlog | L2 の未完了条件、L1 の範囲外として残った決定、VM とは独立の不具合（GC 閾値、確保ヘッダ 12B など） |
 
 ## 主線2: PIE と描画の高速化 — [`perf/`](perf/)
