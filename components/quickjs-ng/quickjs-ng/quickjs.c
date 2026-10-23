@@ -111,7 +111,12 @@ static JSVMState *js_vm_armed;
 #define __extension__
 #endif
 
-#ifndef NDEBUG
+// Pocket: QJS_DISABLE_DUMPS drops the dump hooks without defining NDEBUG,
+// so assert() stays live. The firmware sets it (components/quickjs-ng/
+// CMakeLists.txt): with dumps on, every dispatch tests rt->dump_flags for
+// JS_DUMP_BYTECODE_STEP, which costs icache in JS_CallInternal
+// (docs/vm/interpreter-stages.md sec.4.1). Host builds choose either way.
+#if !defined(NDEBUG) && !defined(QJS_DISABLE_DUMPS)
 #define ENABLE_DUMPS
 #endif
 
