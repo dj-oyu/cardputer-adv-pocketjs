@@ -1,0 +1,177 @@
+name: Opaque identity image copy comparison
+on:
+  pull_request:
+    paths:
+      - main/ui/kasane/ksn_render.c
+      - tools/kasane_contract/test_image_identity_copy.c
+      - .github/workflows/image-identity-copy.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [x64, m32, sanitize]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install 32-bit compiler libraries
+        if: matrix.model == 'm32'
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      - name: Check copy boundaries and existing image controls on both revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/image
+          flags=(-Os -fstrict-aliasing)
+          if [ '${{ matrix.model }}' = m32 ]; then flags+=(-m32 -malign-double); fi
+          if [ '${{ matrix.model }}' = sanitize ]; then flags=(-O1 -g -fsanitize=address,undefined -fno-pie -no-pie); fi
+          export ASAN_OPTIONS=detect_leaks=1:abort_on_error=1
+          export UBSAN_OPTIONS=halt_on_error=1
+          git show e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267:main/ui/kasane/ksn_render.c > artifacts/image/base.c
+          cp main/ui/kasane/ksn_render.c artifacts/image/candidate.c
+          for test in image_identity_copy opaque_image_occlusion image_stretch_arms image_rotate_arms; do
+            for mode in base candidate; do
+              gcc -std=c11 -Wall -Wextra -Werror "${flags[@]}" -Imain/ui/kasane -Itools/kasane_contract main/ui/kasane/ksn_core.c "artifacts/image/$mode.c" main/ui/kasane/ksn_blend_pie.c "tools/kasane_contract/test_$test.c" -o "artifacts/image/$test-$mode"
+              "artifacts/image/$test-$mode" > "artifacts/image/$test-$mode.log"
+            done
+            cmp "artifacts/image/$test-base.log" "artifacts/image/$test-candidate.log"
+            cat "artifacts/image/$test-candidate.log"
+          done
+          file artifacts/image/image_identity_copy-candidate > artifacts/image/abi.log
+          git rev-parse HEAD > artifacts/image/source-head.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: image-identity-copy-${{ matrix.model }}-${{ env.SOURCE_HEAD }}
+          path: artifacts/image/*.log
+          retention-days: 14
+  product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [base, candidate]
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.mode == 'base' && 'e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267' || env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build normal product with unchanged partition and security defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_image -D SDKCONFIG=build_image/sdkconfig build
+          git rev-parse HEAD > build_image/source-head.txt
+          grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_image/sdkconfig
+          grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_image/CMakeCache.txt
+          grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=OFF' build_image/CMakeCache.txt
+          grep -qx 'POCKET_DERBY_RUNNER_AFFINE:BOOL=OFF' build_image/CMakeCache.txt
+          python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_image/expected-partition.bin
+          cmp build_image/expected-partition.bin build_image/partition_table/partition-table.bin
+          python -c 'from pathlib import Path; e=Path("build_image/cardputer_pocketjs.elf").read_bytes(); assert b"Application information:" in e; c=Path("build_image/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
+          sha256sum build_image/cardputer_pocketjs.bin build_image/cardputer_pocketjs.elf build_image/bootloader/bootloader.bin build_image/partition_table/partition-table.bin > build_image/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: image-identity-copy-product-${{ matrix.mode }}-${{ env.SOURCE_HEAD }}
+          path: |
+            build_image/cardputer_pocketjs.bin
+            build_image/cardputer_pocketjs.elf
+            build_image/cardputer_pocketjs.map
+            build_image/bootloader/bootloader.bin
+            build_image/partition_table/partition-table.bin
+            build_image/ota_data_initial.bin
+            build_image/flasher_args.json
+            build_image/flash_args
+            build_image/sdkconfig
+            build_image/CMakeCache.txt
+            build_image/source-head.txt
+            build_image/SHA256SUMS
+          retention-days: 14
+
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [base, candidate]
+        profile: [oval, straight]
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 5bf332368d6e793cd40a8a18a48b4da4ac270622
+          path: tools-source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.mode == 'base' && 'e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267' || env.SOURCE_HEAD }}
+          path: diagnostic-source
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Prepare finite diagnostic in disposable checkout
+        run: python3 -B tools-source/tools/games/prepare_derby_app_diag.py --checkout diagnostic-source --profile ${{ matrix.profile }}
+      - name: Build with product settings and partition
+        working-directory: diagnostic-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          idf.py -B build_diag -D SDKCONFIG=build_diag/sdkconfig build
+          git rev-parse HEAD > build_diag/source-head.txt
+          grep -qx 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' build_diag/sdkconfig
+          grep -qx 'POCKET_DERBY_COURSE_CACHE:BOOL=OFF' build_diag/CMakeCache.txt
+          grep -qx 'POCKET_DERBY_PROJECT_BATCH:BOOL=OFF' build_diag/CMakeCache.txt
+          python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_diag/expected-partition.bin
+          cmp build_diag/expected-partition.bin build_diag/partition_table/partition-table.bin
+          python -c 'from pathlib import Path; e=Path("build_diag/cardputer_pocketjs.elf").read_bytes(); assert b"Application information:" in e and b"DERBY_APP_DIAG START workload=" in e and b"DERBY_APP_DIAG EXIT" in e; c=Path("build_diag/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT", "CONFIG_SECURE_BOOT_V2_ENABLED", "CONFIG_SECURE_FLASH_ENC_ENABLED", "CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
+          cp diagnostic.json diagnostic.patch build_diag/
+          sha256sum build_diag/cardputer_pocketjs.bin build_diag/cardputer_pocketjs.elf build_diag/bootloader/bootloader.bin build_diag/partition_table/partition-table.bin build_diag/diagnostic.json build_diag/diagnostic.patch > build_diag/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: image-identity-copy-diag-${{ matrix.mode }}-${{ matrix.profile }}-${{ env.SOURCE_HEAD }}
+          path: |
+            diagnostic-source/build_diag/cardputer_pocketjs.bin
+            diagnostic-source/build_diag/cardputer_pocketjs.elf
+            diagnostic-source/build_diag/cardputer_pocketjs.map
+            diagnostic-source/build_diag/bootloader/bootloader.bin
+            diagnostic-source/build_diag/partition_table/partition-table.bin
+            diagnostic-source/build_diag/ota_data_initial.bin
+            diagnostic-source/build_diag/flasher_args.json
+            diagnostic-source/build_diag/flash_args
+            diagnostic-source/build_diag/sdkconfig
+            diagnostic-source/build_diag/CMakeCache.txt
+            diagnostic-source/build_diag/source-head.txt
+            diagnostic-source/build_diag/diagnostic.json
+            diagnostic-source/build_diag/diagnostic.patch
+            diagnostic-source/build_diag/SHA256SUMS

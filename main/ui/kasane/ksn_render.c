@@ -2229,8 +2229,9 @@ static ksn_result render_rects(ksn_core *core,const ksn_display_port *display,
                     if(result!=KSN_OK){ksn_core_failed(core,frame.ticket);return result;}
                     if(reader.opaque&&d->opacity==255){
                         uint16_t *dest=pixels+(unsigned)((py-y)*240+x);
-                        for(unsigned j=0;j<count;j++)
-                            dest[j]=scratch.image.rgb[identity?j:image_sample_index(d,&scratch,map_x,x,j)];
+                        if(identity)memcpy(dest,scratch.image.rgb,count*sizeof(*dest));
+                        else for(unsigned j=0;j<count;j++)
+                            dest[j]=scratch.image.rgb[image_sample_index(d,&scratch,map_x,x,j)];
                         x+=(int)count;
                         continue;
                     }
