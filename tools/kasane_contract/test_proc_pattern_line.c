@@ -245,6 +245,74 @@ static void pattern_depth(void){
     CHECK(run(code,13,&frame)==KSN_PROC_DONE&&frame.count==8);
     same_in_bands(&frame);
 }
+static void add_short_line(ksn_proc_inst *code,unsigned *count,int x0,int y0,int x1,int y1,float color){
+    code[(*count)++]=(ksn_proc_inst)SET(0,x0);
+    code[(*count)++]=(ksn_proc_inst)SET(1,y0);
+    code[(*count)++]=(ksn_proc_inst)SET(2,x1);
+    code[(*count)++]=(ksn_proc_inst)SET(3,y1);
+    code[(*count)++]=(ksn_proc_inst)MOVE(0,1);
+    code[(*count)++]=(ksn_proc_inst)LINE(2,3,color);
+}
+static unsigned begin_short_frame(ksn_proc_inst *code,int x,int y){
+    const ksn_proc_inst pattern[]={
+        SET(0,x),SET(1,y),SET(2,x+1),SET(3,y),
+        SET(4,0xffffff),SET(15,0),SET(5,-1),SET(6,0),SET(7,1),
+        MOVE(0,1),PATTERN(4,2,3,24,0x1111),
+    };
+    memcpy(code,pattern,sizeof pattern);
+    return sizeof pattern/sizeof pattern[0];
+}
+static void plain_three_step_segments(void){
+    ksn_proc_inst code[KSN_PROC_CODE];
+    unsigned count=begin_short_frame(code,100,100);
+    add_short_line(code,&count,10,10,13,10,0x1301);      /* horizontal */
+    add_short_line(code,&count,23,20,20,20,0x1302);      /* reverse */
+    add_short_line(code,&count,30,30,30,33,0x1303);      /* vertical */
+    add_short_line(code,&count,40,43,40,40,0x1304);     /* reverse */
+    add_short_line(code,&count,50,50,53,51,0x1305);     /* x-major */
+    add_short_line(code,&count,63,51,60,50,0x1306);     /* reverse x-major */
+    add_short_line(code,&count,70,70,71,73,0x1307);     /* y-major */
+    add_short_line(code,&count,83,73,82,70,0x1308);     /* reverse y-major */
+    CHECK(run(code,count,&frame)==KSN_PROC_DONE);
+    CHECK(frame.ext==1&&frame.count==10&&frame.raster_steps==34);
+    render_full(&frame,full);
+    clear(split);
+    static const int inner[][3]={
+        {100,100,0x1111},{101,100,0x1111},
+        {10,10,0x1301},{11,10,0x1301},{12,10,0x1301},{13,10,0x1301},
+        {23,20,0x1302},{22,20,0x1302},{21,20,0x1302},{20,20,0x1302},
+        {30,30,0x1303},{30,31,0x1303},{30,32,0x1303},{30,33,0x1303},
+        {40,43,0x1304},{40,42,0x1304},{40,41,0x1304},{40,40,0x1304},
+        {50,50,0x1305},{51,50,0x1305},{52,51,0x1305},{53,51,0x1305},
+        {63,51,0x1306},{62,51,0x1306},{61,50,0x1306},{60,50,0x1306},
+        {70,70,0x1307},{70,71,0x1307},{71,72,0x1307},{71,73,0x1307},
+        {83,73,0x1308},{83,72,0x1308},{82,71,0x1308},{82,70,0x1308},
+    };
+    for(unsigned i=0;i<sizeof inner/sizeof inner[0];i++)split[inner[i][1]*W+inner[i][0]]=(uint16_t)inner[i][2];
+    CHECK(!memcmp(full,split,sizeof full));
+    same_in_bands(&frame);
+
+    count=begin_short_frame(code,100,100);
+    add_short_line(code,&count,-3,90,0,90,0x1401);       /* left edge */
+    add_short_line(code,&count,W+2,91,W-1,91,0x1402);   /* right edge */
+    add_short_line(code,&count,10,-3,10,0,0x1403);      /* top edge */
+    add_short_line(code,&count,11,H+2,11,H-1,0x1404);   /* bottom edge */
+    add_short_line(code,&count,20,-2,23,1,0x1405);      /* top diagonal */
+    add_short_line(code,&count,W-3,H-1,W,H+2,0x1406);  /* bottom diagonal */
+    add_short_line(code,&count,-3,0,0,3,0x1407);        /* corner diagonal */
+    CHECK(run(code,count,&frame)==KSN_PROC_DONE);
+    CHECK(frame.ext==1&&frame.count==9&&frame.raster_steps==30);
+    render_full(&frame,full);
+    clear(split);
+    static const int edges[][3]={
+        {100,100,0x1111},{101,100,0x1111},
+        {0,90,0x1401},{W-1,91,0x1402},{10,0,0x1403},{11,H-1,0x1404},
+        {22,0,0x1405},{23,1,0x1405},{W-3,H-1,0x1406},{0,3,0x1407},
+    };
+    for(unsigned i=0;i<sizeof edges/sizeof edges[0];i++)split[edges[i][1]*W+edges[i][0]]=(uint16_t)edges[i][2];
+    CHECK(!memcmp(full,split,sizeof full));
+    same_in_bands(&frame);
+}
 static void walkers_and_plain(void){
     /* A plain line, a pattern line over it, a plain line over that: order. */
     const ksn_proc_inst code[]={
@@ -436,6 +504,7 @@ int main(void){
     pattern_slanted();
     pattern_random();
     pattern_depth();
+    plain_three_step_segments();
     walkers_and_plain();
     limits_and_rejections();
     analysis_and_plan();
