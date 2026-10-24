@@ -42,6 +42,9 @@ def name(op: str, code: int) -> str:
     if op in UNARY:
         return T[code]
     if op in PROP:
+        if code >= 32:
+            why = ["special", "exotic", "lazy", "?"][min((code - 32) // 8, 3)]
+            return f"slow:{why}@{(code - 32) % 8}"
         if 8 <= code < 16:
             return "prim:" + T[code - 8]
         return ("fast:" if code >= 16 else "") + P[code % 16 if code % 16 < 8 else 7]

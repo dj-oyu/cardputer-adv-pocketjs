@@ -351,3 +351,17 @@ handover の「約 80 組」より多いが、増えた分は型に依らない�
 | `put_var` の lexical | 14 | 1 | 回数が少ないので保留 |
 
 **T1 だけなら `OP_ext` は要らない**（3〜4 枠で収まる）。T2 の 7 パターンまで入れると足りなくなるので、`OP_ext` は T2 に進むと決めたときの作業にする。
+
+### 9.4 `get_field` の inline cache は DERBY では割に合わない（host の数え上げ）
+
+opprof の分類を、ハンドラと同じたどり方で、遅い経路（`get_field_slow_path`）に落ちる理由（getter などの特殊なプロパティ、exotic、lazy）まで記録するようにした。DERBY では:
+
+| 経路 | 回数/ターン |
+| --- | --- |
+| 自分のプロパティ（ハンドラ内のハッシュ検索 1 回） | 約 540（`get_field` 415＋7、`get_field2` 104、配列の自分 13） |
+| prototype 1 段 | 9 |
+| 遅い経路（exotic 5、lazy 2） | 7（1.3%） |
+
+今のハンドラは IC が無くても自分のプロパティを inline のハッシュ検索で読むので、IC が省けるのはその検索（推定 15〜25 cycle）と shape 比較（推定 5〜8）の差だけになる。約 540 × 10〜15 cycle ≒ 5〜8 k cycle/ターンで、DERBY の JS ターン（14.5〜44 ms、実機）の 0.1〜0.3%（推定）。shape と添字の置き場（命令には atom の 4 B しか無い）に DRAM も要る。**T1 の IC は DERBY を理由には入れない。** STRESS では `get_field_slow_path` が 204 回/ターン（`turn-working-set.md` §4）で事情が違うので、入れるなら STRESS の内訳（exotic と lazy のどちらか）を数えてからにする。
+
+ここまでで、DERBY の命令の数から見える guard 無しの取り分（P0）はおおむね取った。残る大きな手は配置（P1: T1 ループを IRAM、ジャンプテーブルを DRAM）で、これは実機の I_STALL でしか判断できない。

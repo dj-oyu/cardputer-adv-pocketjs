@@ -185,7 +185,13 @@ static int opprof_tclass(JSValueConst v)
 }
 
 /* Where get_field would find atom on v: own, which prototype level, or not
- * at all. Walks shapes only (no getters run, no exotic hooks). */
+ * at all. Walks shapes only (no getters run, no exotic hooks). The handler's
+ * own walk leaves for get_field_slow_path when it meets an accessor or
+ * special property, or an exotic or lazy object before the property: those
+ * are coded OPPROF_P_SLOW + reason (+ depth class), so the IC design can see
+ * what the generic path is actually paying for. */
+enum { OPPROF_P_SLOW = 32,         /* + 0 accessor/special, 8 exotic, 16 lazy; + min(depth, 7) */
+       OPPROF_P_SLOW_SPECIAL = 0, OPPROF_P_SLOW_EXOTIC = 8, OPPROF_P_SLOW_LAZY = 16 };
 static int opprof_where(JSValueConst v, JSAtom atom)
 {
     if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT) return OPPROF_P_PRIM + opprof_tclass(v);
@@ -194,6 +200,10 @@ static int opprof_where(JSValueConst v, JSAtom atom)
     for (int depth = 0; p && depth < 8; depth++, p = p->shape->proto) {
         JSProperty *pr;
         JSShapeProperty *prs = find_own_property(&pr, p, atom);
+        int d = depth < 7 ? depth : 7;
+        if (prs && (prs->flags & JS_PROP_TMASK)) return OPPROF_P_SLOW + OPPROF_P_SLOW_SPECIAL + d;
+        if (!prs && p->is_exotic) return OPPROF_P_SLOW + OPPROF_P_SLOW_EXOTIC + d;
+        if (!prs && js_obj_lazy(p)) return OPPROF_P_SLOW + OPPROF_P_SLOW_LAZY + d;
         if (!prs) continue;
         if ((prs->flags & JS_PROP_TMASK) != JS_PROP_NORMAL) return base + (depth ? OPPROF_P_PROTO1 + (depth > 3 ? 2 : depth - 1) : OPPROF_P_OWN_SPECIAL);
         if (depth == 0) return base + (p->shape->prop_count > 16 ? OPPROF_P_OWN_BIG : OPPROF_P_OWN);
