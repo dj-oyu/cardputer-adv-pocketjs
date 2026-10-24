@@ -372,6 +372,9 @@ DEF(typeof_is_function, 1, 1, 1, none)
    see the object itself), so properties are only appended and the index
    never moves. Appended last so no existing opcode number changes. */
 DEF(get_var_lex, 5, 0, 1, u32)
+/* obj key -> obj key': to_propkey2 that does nothing (and does not throw)
+   when obj is null/undefined. Emitted for obj[key] = val. */
+DEF(to_propkey_obj, 1, 2, 2, none)
 
 #undef DEF
 #undef def

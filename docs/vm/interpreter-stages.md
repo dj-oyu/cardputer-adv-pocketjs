@@ -327,8 +327,11 @@ handover の「約 80 組」より多いが、増えた分は型に依らない�
 | `+ − × ÷ < <= > >=` の int/float 混在と float 同士をインタプリタ内で計算（`js_both_number`）。`÷` は float 同士の経路も無かった | 遅い helper への呼び出し 約 470 /ターン減（推定） | `9fdff07` |
 | `get_array_el` / `get_array_el2`: 素の配列・範囲内の int 添字をハンドラ内で読む | 2段の関数呼び出しが 約 940 /ターン減 | この節と同じ commit |
 | `get_var` → `get_var_lex`: グローバルの let/const を初回に見つけたら、オペランドを `global_var_obj` の添字に書き換える | ハッシュ検索 892 → 1 /ターン | この節と同じ commit |
+| `obj[key] = val` の右辺前の 8 命令（`swap dup is_undefined_or_null if_true swap to_propkey swap swap`）を、新しい命令 `to_propkey_obj`（obj が null/undefined なら何もしない `to_propkey2`）1 つにする。上流の FIXME の提案どおり | dispatch 11,338 → 10,946 /ターン | 本節の更新と同じ commit |
 
 いずれも DERBY の決着（順位と時刻、全桁）が変わらないことを確かめた。vmtest（asan・o2）と test262 の結果は各 commit に書く。
+
+**test262 の範囲の穴。** `tools/vmtest/test262.py` の `SUBSET` には代入・算術・比較・グローバル変数のディレクトリが入っていない。上の変更が触る評価順は、既定の実行では確かめられない。そこで `assignment`・`compound-assignment`・`logical-assignment`・`for-in`・`addition`・`subtraction`・`multiplication`・`division`・4 つの大小比較・`member-expression`・`object`・`global-code`・`let`・`const`・`class`（7,352 ファイル、14,224 項目）を、変更前（`d8dd273`）と変更後で走らせ、項目ごとの結果が全部一致することを確かめた（通過 14,170、失敗 53、スキップ 1。失敗は両方で同じ）。`SUBSET` に足すかは、基準線を L0 で取り直す規則（`tools/vmtest/README.md`）に従って別に決める。
 
 **`get_var_lex` が guard 無しで正しい理由。** グローバルの let/const は `global_var_obj` に入る。この object から消す経路は無い（`JS_DeleteGlobalVar` は lexical を断る。object 自体はスクリプトから見えない）ので、プロパティは末尾に足されるだけで添字は動かない。lexical は global object より先に引かれるので、一度見つかれば以後も同じ束縛を指す。書き換えるのは初期化済みのときだけで、束縛は TDZ に戻らないので、書き換え後のハンドラに検査は要らない。オペランドは atom でなくなるので、書き換え時に atom の参照を返す。`JS_WriteFunctionBytecode` は元の `get_var` と atom に戻して書く。`define_global_var` の flag には `JS_PROP_CONFIGURABLE` が付いているが、消す経路が無いので添字の安定には効かない（根拠は flag ではなく経路）。
 
@@ -344,7 +347,7 @@ handover の「約 80 組」より多いが、増えた分は型に依らない�
 | --- | --- | --- | --- |
 | `get_var_lex` | 891 | 1（使用済み） | T0（guard 無し、書き換えは一度きり） |
 | `get_field` / `get_field2` の inline cache（自分のプロパティ） | 415 / 104 | 2 | T1。shape と添字の置き場（命令の中に入らない。atom 4 B しかない）が設計の要 |
-| 代入の右辺前の key 変換（`swap dup is_undefined_or_null if_true swap to_propkey swap swap`、8命令） | 56 回 × 8 | 1 | T0。新しい命令 1 つにまとめる（obj がオブジェクトで key が int なら何もしない） |
+| 代入の右辺前の key 変換（`swap dup is_undefined_or_null if_true swap to_propkey swap swap`、8命令） | 56 回 × 8 | 1（使用済み） | T0。`to_propkey_obj` として実施（§9.2） |
 | `put_var` の lexical | 14 | 1 | 回数が少ないので保留 |
 
 **T1 だけなら `OP_ext` は要らない**（3〜4 枠で収まる）。T2 の 7 パターンまで入れると足りなくなるので、`OP_ext` は T2 に進むと決めたときの作業にする。
