@@ -1,104 +1,147 @@
-# P1: インタプリタの熱い部分を IRAM に置く（設計・素案、2026-10-25）
+# P1: 1ターンに触るコードを IRAM に置く（設計・素案 v2、2026-10-25）
 
-`interpreter-stages.md` §9 の続き。P0（guard の要らない T0 の変更）で、DERBY の命令の数から見える取り分はおおむね取った（dispatch −4.9%、host）。残る大きな手は、1ターンに触るコードを flash の命令キャッシュから外すこと（P1）。この文書はその作り方・予算・測り方を決める。**数字は実測（実機）/ 実測（host・静的）/ 推定を必ず書き分ける。実機ではまだ何も測っていない。**
+`interpreter-stages.md` §9 の続き。P0（guard の要らない T0 の変更）で、DERBY の命令の数から見える取り分はおおむね取った（dispatch −4.9%、host）。残る大きな手は、1ターンに触るコードを flash の命令キャッシュから外すこと（P1）。**数字は実測（実機）/ 実測（host・静的）/ 模型 / 推定を書き分ける。今日の変更は実機ではまだ何も測っていない。**
 
-## 0. 結論（素案）
+v1（同日）を SLOW（Fable）がレビューし、予算の見積もりと、比べる相手の選び方に重大な誤りがあった。v2 はそれを直した版。指摘の要約は §8。
 
-1. **`JS_CallInternal` を丸ごと IRAM に置くのは大きすぎる**（約 21〜25 KB、静的）。熱い部分だけを置くには、冷たいハンドラを手で別関数に出す（outline）しかない。Xtensa の GCC は関数の中の hot/cold 分割をしない（§2.1、実測）。
-2. outline の後に IRAM に置く本体は **約 8〜10 KB（推定）**。前例（R5、helper 8 KiB を IRAM へ。実機で JS −15%、空き −8.7 KiB）と同じく、DRAM を 1:1 で払う。前例は「STRESS は 30 fps に届いている」としてユーザーが見送った。**DERBY の JS ターンは 14.5〜44 ms（実測、構成別）で、重い構成は 33 ms を超える。** 見送りの記録にある再開の条件（30 fps に届かないアプリ）に当たる。
-3. 進め方: (a) outline は単独でも害が無い変更（flash のまま、命令キャッシュの行の密度が上がるだけ）として先に入れ、host の検査を通す。(b) IRAM 配置は Kconfig（既定 n）で切り替え、同じソースの A/B/A を実機で測る。(c) 入れるかは、JS ターンの短縮と空きの減少を並べて、ユーザーが決める（前例と同じ）。
-4. ジャンプテーブル（`dispatch_table`、1 KiB、flash の `.rodata`）を DRAM に置くことも同じ切り替えに含め、別の Kconfig で単独の効果も測る。
+## 0. 結論（素案 v2）
+
+1. **インタプリタ本体（`JS_CallInternal`）を IRAM に置く案は、今の時点では第一候補にしない。** 冷たい命令を出しても本体は 13〜16 KB 残る（推定、§2.3）。模型の上では、本体は 1 KiB あたりの効きが R5 の helper 群の半分程度（推定、§2.4）。DRAM は 1:1 で払うので、同じ予算なら helper 群が先。
+2. 比べる相手を揃える: 「本体」「helper 群（R5 の候補を選び直したもの）」「両方」を、**同じ DRAM の予算で、検証済みの模型（`tools/r5sim/icache.py model`）に通して順位を付けてから**、実機へ行く。R5 §4 の再開手順（そのアプリで模型を回し直し、候補を選び直す）どおり。
+3. DERBY の現状（実測、`docs/apps/derby-pan-memory.md`）: 横見 WIDE の JS ターン 14.5〜15.7 ms、首振り WIDE 21.6 ms（フレーム間隔 41.0 ms、25.3 fps）。27 fps には JS ターンを約 4 ms 縮める必要がある。P1 の論拠は「30 fps に届く」ではなく「何 ms 削れるか」で書く。R5 と同率（−15%）なら首振り WIDE で約 3.2 ms（推定）。
+4. 先にできる安い手: upstream の 1 行呼び出しのハンドラ（`OP_for_of_next` 193 B、`OP_for_in_next` 205 B、`OP_in` 164 B、`OP_delete` 156 B など、静的）は -Os で helper が inline されて膨らんでいる。**helper に `no_inline` を付けるだけ**で、正しさの検査をほぼ要さずに本体が数 KB 縮む（推定）。flash のままでも、熱いハンドラの密度が上がる。
+5. ジャンプテーブル（`dispatch_table`、1 KiB、flash の `.rodata`）を DRAM に置く手は、本体の配置とは独立に測れる（別 Kconfig）。
 
 ## 1. 前提（既存の記録）
 
 | 事実 | 区分 | 出典 |
 | --- | --- | --- |
-| JS のターンのサイクルの 70% が flash キャッシュのミス待ち（IPC 0.17） | 実測（実機） | `turn-cpi.md` |
-| STRESS の 1ターンが触るコード 41.8 KiB（core 7.40、helpers 13.93、object/alloc 5.65、builtins 6.07、native 8.51） | 模型 | `turn-working-set.md` §2.2 |
-| `JS_CallInternal` のうち 1ターンに何度も通る行は 約 6 KiB（core の床） | 模型 | `turn-working-set.md` §4 |
-| helper 8 KiB（95 関数）を IRAM へ: STRESS の JS 7.00 → 5.93 ms（−15%）、`I_STALL_BUSY` 819K → 588K、空き −8,752 B | 実測（実機） | `r5-icache.md` §3.4 |
-| 同じ 8 KiB は見送り（ユーザーの判断、2026-09-27）。再開の条件は 30 fps に届かないアプリ | 記録 | `r5-icache.md` §4 |
-| icache のアラインメントだけで同じカーネルが 15% 動く | 実測（実機） | `CLAUDE.md` |
+| QIO の今、JS のターンのサイクルの 57% が flash キャッシュのミス待ち（IPC 0.25）。DIO のときは 70%・0.17 | 実測（実機） | `turn-cpi.md` §3 |
+| **STRESS** の 1ターンが触るコード 41.8 KiB（core 7.40、helpers 13.93、object/alloc 5.65、builtins 6.07、native 8.51）。`JS_CallInternal` のミスは warm 158/1,071（15%）、cold 305/1,630（19%） | 模型 | `turn-working-set.md` §2.2・§3 |
+| helper 8 KiB（95 関数）を IRAM へ: STRESS の JS 7.00 → 5.93 ms（−15%）、`I_STALL_BUSY` 819K → 588K、空き −8,752 B、最大連続ブロック 139,264 → 131,072 B。模型の予測（ミス 496 回減 × 約 450 サイクル）と合った | 実測（実機） | `r5-icache.md` §3.4 |
+| 同じ 8 KiB は見送り（ユーザーの判断、2026-09-27）。再開の条件は 30 fps に届かないアプリで、模型を回し直して候補を選び直す | 記録 | `r5-icache.md` §4 |
+| 同一バイナリでも揺れる: R5 の基準 1 → 基準 2 で LV3 が 7.09 → 7.75 ms（+9%）。アラインメントだけで同じカーネルが 15% 動く | 実測（実機） | `r5-icache.md` §3.4、`CLAUDE.md` |
 
-## 2. 調べたこと（2026-10-25）
+注意: 41.8 KiB と core の床（約 6 KiB）は STRESS の値で、DERBY の host opprof と同じアプリの数字ではない。r5sim は今 STRESS しか回せない（DERBY は `pocket.derby` などの面が無い）。
+
+## 2. 調べたこと
 
 ### 2.1 GCC に hot/cold 分割を任せられるか — できない（実測、コンパイラ）
 
-computed goto の小さなインタプリタ（熱い op と、`__attribute__((cold))` のラベルを付けた冷たい op）を、IDF v6.0.1 の `xtensa-esp-elf-gcc` 15.2.0（`-mdynconfig=xtensa_esp32s3.so -mlongcalls -ffunction-sections`）で `-O2` / `-O2 -freorder-blocks-and-partition` / `-Os -freorder-blocks-and-partition` に通した。どれも `.text.run` 1 つだけで、`.text.unlikely` は作られなかった。profile のフィードバック（`-fprofile-use`）があれば分けるかもしれないが、IRAM（0x4037_xxxx）と flash（0x42xx_xxxx）の間は Xtensa の分岐命令の届く範囲を超えるので、分けられても飛び先の作りに別の問題が出る（未確認）。**分割は手で関数を分ける。**
+computed goto の小さなインタプリタ（熱い op と、`__attribute__((cold))` のラベルの冷たい op）を、IDF v6.0.1 の `xtensa-esp-elf-gcc` 15.2.0（`-mdynconfig=xtensa_esp32s3.so -mlongcalls -ffunction-sections`）で `-O2` / `-O2 -freorder-blocks-and-partition` / `-Os -freorder-blocks-and-partition` に通すと、どれも `.text.run` 1 つだった。理由は Xtensa 固有ではなく、profile が無いと GCC は「決して走らない」と言えるブロック（noreturn の後など）しか cold にしないため（レビューの指摘）。profile（`-fprofile-use`）で分けても、分割された部分の間の `j` は IRAM と flash の間の距離を越えられない。**分割は手で関数を分ける。**
 
-### 2.2 `JS_CallInternal` の命令ごとの大きさ（実測、静的）
+### 2.2 `JS_CallInternal` の命令ごとの大きさ（実測、静的。系統誤差あり）
 
-PR #69 の image（`92c9822d`。`quickjs.c` は main `e0fe98a` と同一、本番のダンプ処理がまだ入った版）の ELF を逆アセンブルし、命令ごとに `addr2line -i` の一番外側の `quickjs.c` の行を、その行を含む `CASE(OP_x)` か関数内のラベルの領域に割り当てた（道具は scratch の `case_sizes.py`。リポジトリに入れるなら `tools/r5sim/` の隣）。`JS_CallInternal` は 25,498 B。DERBY（host opprof、`oval_w2_mid_w100`）の命令の使い方と突き合わせると:
+PR #69 の image（`92c9822d`。`quickjs.c` は main `e0fe98a` と同一で、本番のダンプ処理がまだ入っている）の ELF を逆アセンブルし、命令ごとに `addr2line -i` の一番外側の `quickjs.c` の行を、その行を含む `CASE(OP_x)` か関数内のラベルの領域に割り当てた（scratch の `case_sizes.py`）。`JS_CallInternal` は 25,498 B。
 
-| 区分 | バイト | 割合 |
-| --- | ---: | ---: |
-| DERBY で 1ターン 4 回以上使う命令（85 種）のハンドラ | 6,495 | 25% |
-| まれに使う命令（15 種） | 746 | 3% |
-| **DERBY で使わない命令** | **13,001** | **51%** |
-| 入口・フレーム・呼び出し・戻り・例外などのラベル領域と prologue | 5,256 | 21% |
+DERBY の opprof（OPS 行、449 窓）で分類し直した値（レビューの再集計）:
 
-ラベル領域の大きいもの: prologue 910、`flat_async_call` 462、`done` 345、`frame_pushed` 340、`not_a_function` 309、`flat_call` 258、`restore_call_inputs` 247、`exception` 243、`vm_yield` 227、`has_call_argc` 200。このうち DERBY で熱いのは呼び出しと戻りの経路（`flat_call`・`frame_pushed`・`has_call_argc`・`call_inputs_ready`・`done`・prologue の一部）で、`flat_async_call`・`not_a_function`・`vm_yield`・`exception` は冷たい（推定。ターンの記録で確かめる）。
+| 区分 | バイト |
+| --- | ---: |
+| 入口・フレーム・呼び出し・戻り・例外などのラベル領域と prologue（**outline できない**。すべての局所変数を触る） | 5,256 |
+| DERBY で 1ターン 4 回以上使う命令のハンドラ | 5,535 |
+| まれに使う命令 | 668 |
+| DERBY で使わない命令 | 14,039 |
 
-注意: 領域の割り当ては行の範囲で切っているので、共有するコード（`OP_xor` の 874 B は二項の論理演算の共通部分を含むと思われる）や、隣の領域へのはみ出しで数百 B は動く。ダンプ処理を消した今のブランチ（`53af3d2` 以降）では、各ハンドラがさらに小さい（`JS_CallInternal` 26,602 → 21,742 B、別ビルドの値）。
+この割り当ての系統誤差（レビューの指摘。今のブランチの ELF で取り直すまで、数字は目安）:
+- 8 つの比較命令は `OP_CMP` マクロ 1 行で展開され、`CASE\(` の正規表現に掛からず、直前の `OP_xor` に帰属していた（`OP_xor` 874 B の正体。v1 の「論理演算の共通部分」は誤診）。比較は DERBY で 425 回/ターン（host）の熱い命令。
+- 連続した `CASE` ラベル（`push_0`〜`push_7` など）は末尾のラベルに全部帰属する。
+- -Os の cross-jumping で共通化された `goto exception` の尾は 1 つの領域に落ちる。
+- ダンプありの `BREAK` は 1 ハンドラ 25〜40 B を足す（`OP_nop` 39 B、`OP_undefined` 51 B）。ダンプ無しの縮みは小さな熱いハンドラに集中するので、全体の 18% を一律に当てるのは誤り。
 
-### 2.3 IRAM に置く本体の見積もり（推定）
+### 2.3 outline の後の本体の大きさ（推定）
 
-熱いハンドラ 6.5 KB ＋ 熱いラベル領域 約 3.5 KB ＝ 約 10 KB（ダンプあり）。ダンプ無しの縮み（約 18%）を当てると **約 8〜9 KB**。DERBY 以外のアプリ（STRESS、MEGADEMO、BIG WAVE）の熱い命令は DERBY と重なりが大きいはずだが、未確認。足りない命令は flash の outline 関数で動く（遅くなるだけで、正しさは変わらない）。
+ラベル領域 5.3 KB と熱いハンドラ 5.5 KB の計 **10.8 KB が、冷たい命令を全部ただで出せた場合の床**（ダンプあり）。outline した命令にも呼び出しの stub（約 28 B、ダンプあり）が残るので、現実の取り分は（レビューの見積もり）:
 
-## 3. 作り方
+| 出す範囲 | 領域数 | 正味 | 本体 |
+| --- | ---: | ---: | ---: |
+| 未使用・まれで 150 B 超 | 23 | −4.5 KB | 21.0 KB |
+| 同 100 B 超 | 36 | −5.7 KB | 19.8 KB |
+| 同 60 B 超 | 117 | −9.6 KB | 15.9 KB |
 
-### 3.1 outline（単独でも入れられる変更）
+ダンプ無しの縮みを当てても **13〜16 KB**。さらに、IRAM に置いた本体から flash の関数への `call8` はリンカの緩和を受けられず `l32r＋callx8` に戻るので、呼び出し 1 箇所あたり +7 B 前後（推定。箇所数は未計測で、数百なら +2〜3 KB）。v1 の「8〜10 KB」は成立しない。
 
-冷たい `CASE` の本体を `static no_inline` の関数に移し、インタプリタには呼び出しだけを残す。
+### 2.4 本体と helper 群の効きの比（推定、模型の値の比）
+
+STRESS の模型で、`JS_CallInternal` が占めるミスは warm 15%・cold 19%。本体を 13 KB 以上 IRAM に出して取れるのはこの範囲。R5 の helper 8 KiB は warm −37%・cold −26%（模型）、実機 −15%。**1 KiB あたりでは本体は helper 群の半分程度**。R5 の模型が「バイトあたりのフェッチ回数」で候補を選んだので、当然そうなる。
+
+## 3. 作り方（模型の順位が出た後に、勝った側を作る）
+
+### 3.1 helper の `no_inline`（先にやる。単独で入れられる）
+
+upstream の 1 行呼び出しのハンドラ（`js_for_of_next`、`js_for_in_next`、`js_operator_in`、`js_operator_delete` など）が -Os で inline されて膨らんでいるものに `no_inline` を付ける。意味は変わらない。今のブランチの ELF で `case_sizes` を取り直し、どれだけ縮むかを静的に確定する。flash のままでも、熱いハンドラの並びが詰まる。
+
+### 3.2 outline（本体を IRAM に置くと決めた場合）
+
+冷たい `CASE` の本体を `static no_inline` の関数に移す。**局所変数のアドレスを渡さない**（`&sp, &pc` を渡すと、GCC は関数全体でそれらを「呼び出しで変わりうる」と扱い、熱い経路のすべての呼び出しの前後で store/reload が入る）。値で渡し、戻り値で返す:
 
 ```c
-CASE(OP_define_class): {
-    sf->cur_pc = pc;
-    if (unlikely(js_op_define_class(ctx, sf, &sp, &pc)))   /* flash */
-        goto exception;
+typedef struct { JSValue *sp; const uint8_t *pc; } JSOpResult;   /* a2/a3 の 2 語で返る */
+CASE(OP_define_method): {
+    JSOpResult r = js_op_define_method(ctx, sf, sp, pc, opcode);  /* flash */
+    sp = r.sp; pc = r.pc;
+    if (unlikely(!pc)) goto exception;   /* 失敗の印。sp は「元のコードが goto exception に着いた時点」の値 */
 }
 BREAK;
 ```
 
-- **移せる命令の条件**: 本体が `ctx`・`sf`・`sp`・`pc`（とオペランド）だけを読み書きし、出口が `BREAK` か `goto exception` だけのもの。`var_buf`・`arg_buf`・`var_refs`・`b`・`this_obj` などの局所変数を使うものは、引数を足すか移さない。`goto` で別の領域へ飛ぶもの（`flat_call`、`done`、フレームの出入り、`park`/`yield` の検査点）は移さない。
-- **移す順**: §2.2 の「DERBY で使わない命令」から大きい順。`with_*`（6）、`define_class*`、`define_method*`、private field 系、`eval`/`apply_eval`、`for_in`/`for_of`/iterator 系、`special_object`、super 系、`delete`/`define_var`/`check_define_var` など。13 KB のうち 8〜10 KB を出せれば、本体は 10 KB 台前半になる（推定）。
-- **正しさの検査**: vmtest（asan・o2）、test262 の既定の範囲と、移した命令が出てくるディレクトリ（`with`、`class`、`for-in`/`for-of`、`eval-code`、private 系）の変更前後の項目ごとの一致（§9.2 と同じ方法）。例外のときの `cur_pc`（行番号）が変わらないこと。
-- **outline 単独の効果**: flash のままでも、熱いハンドラが詰まって並ぶので、1ターンに触る行が少し減るかもしれない（模型で、`turnset.py` を新しい ELF に写して測る）。悪くなる要因は、移した命令の呼び出し 1 回分だけ（使う命令ではない）。
+- 例外のときの `sp` は、元のコードが `goto exception` に着いた時点の値を返す（`with_put_var` のように pop してから失敗する命令がある）。`exception:` の `while (sp > stack_buf)` の巻き戻しが参照の数を合わせるので、これを守れば参照の数は今と同じ。
+- `sf->cur_pc` を、今は設定していない命令（`define_var`・`regexp`・`get_super`（Proxy の trap で JS に再入する）・`set_proto`・`define_field`・`check_brand`）にも書くと、trap の中で投げた例外の backtrace の行が変わる。改善だが挙動の変更なので、意図した変更として記録する。
+- 移せる（本体を読んで確認、レビュー）: `with_*`（6。`opcode` と分岐の `pc` を返す）、`define_method(_computed)`、`eval`/`apply_eval`、private field 3 種、`private_in`、`check_define_var`/`define_var`/`define_func`/`delete_var`、`put_ref_value`/`get_ref_value`、`make_var_ref(_ref)`、`get/put_super_value`、`iterator_call`、`regexp`、`set_proto`、`copy_data_properties`、`throw_error`。
+- 条件付きで移せる: `special_object`（572 B、最大の候補）と `rest` は、`ENSURE_CALL_INPUTS` の後なら `argc`・`argv`・`new_target` を値で渡せる（マクロの `inputs_ready_*:` ラベルはインタプリタ側に残す）。`define_class`/`fclosure` は `var_refs`・`sf`・`b` を渡せば可。`nip_catch` の `stack_buf` は `sf->var_buf + b->var_count` から出せる。`close_loc` は `b`・`sf`。
+- 移さない: `goto done`（`return`/`return_undef`・`call_method`・`has_call_argc` の tail call）、`goto done_generator`（`await`・`yield`・`yield_star`・`async_yield_star`・`return_async`・`initial_yield`）、`goto flat_call`、`goto vm_yield`、`JS_VM_POLL_SAFEPOINT` を含む分岐命令（`goto`・`goto16`・`goto8`・`if_true`・`if_false`・`if_true8`・`if_false8`）。`gosub`/`ret`/`catch` は小さすぎて価値が無い。
+- VM スタックの segment は動かない（`quickjs-vmstack.h`）ので、outline 関数の中のポインタが古くなる経路は無い。generator/async のフレームはヒープにあり `sf` 経由なので影響しない。
 
-### 3.2 IRAM 配置（Kconfig で切り替え）
+### 3.3 配置（Kconfig、既定 n）
 
-- `CONFIG_POCKET_VM_INTERP_IRAM`（既定 n）: `JS_CallInternal` を IRAM に置く linker fragment（`noflash`）。outline の後でなければ IRAM が足りない。
-- `CONFIG_POCKET_VM_DISPATCH_DRAM`（既定 n）: `dispatch_table` を DRAM に置く。`quickjs.c` は host でも組むので、置き場所は IDF のときだけ定義されるマクロ（`JS_DISPATCH_TABLE_ATTR`）にする。1 KiB。
-- 断片を差し替えたら `idf.py reconfigure`（`r5-icache.md` §4 の注意）。A/B は同じソースで Kconfig だけ変える。
+- 本体: `noflash` ではなく `noflash_text` の linker fragment にする。`noflash` はエラー文字列や GCC の switch 表（`restore_call_inputs`・`special_object`・`with_*`）まで DRAM へ移し、予算外のバイトになる。
+- `dispatch_table`: 関数内の static なので `.rodata.dispatch_table.N` になり、fragment の規則に掛からない。IDF のときだけ定義するマクロ（`JS_DISPATCH_TABLE_ATTR`）で `DRAM_ATTR` を付ける。
+- 断片を差し替えたら `idf.py reconfigure`（`r5-icache.md` §4）。
 
 ## 4. 予算
 
 | 項目 | 量 | 区分 |
 | --- | --- | --- |
-| IRAM 本体 | 約 8〜10 KB → 静的 DIRAM が同じだけ増え、空きヒープが同じだけ減る | 推定 |
+| 本体を IRAM に置く場合 | 13〜16 KB ＋ 呼び出しの緩和の喪失 +2〜3 KB → 空きヒープが同じだけ減る | 推定 |
+| helper 群（R5 の 8 KiB 版） | +8,705 B（静的 DIRAM）、空き −8,752 B | 実測（実機） |
 | `dispatch_table` | 1 KiB | 静的 |
 | ホーム画面の空き | 274 KiB 前後（Wi-Fi リンク後） | 実測（実機、`CLAUDE.md`） |
-| DERBY の評価の余裕 / ゲスト最大 | 約 28.9 KB（線 20 KB）/ 134.1〜134.8 KB（140,000 B まで 約 5 KB） | 実測（実機） |
+| DERBY の評価の余裕 / ゲスト最大 | 約 28.9 KB（線 20 KB）/ 134.1〜134.8 KB | 実測（実機） |
 
-ゲストのヒープ上限（160 KiB）は別枠なので、評価の余裕とゲスト最大は直接は動かないはずだが、ネイティブの heap と最大連続ブロックが減る（R5 では 139,264 → 131,072 B）。**`memlog.py --port --check` の実測を受け入れ基準に入れる。**
+最大連続ブロックが段で落ちる（R5 で 139,264 → 131,072 B）。**`memlog.py --port --check` の空きと最大連続ブロックを、DERBY の評価の余裕と並べて受け入れ基準にする。**
 
-## 5. 測り方（すべて実機、同一ソース、Kconfig だけを変える）
+## 5. 測り方
 
-1. outline だけ（IRAM n）: 基準と outline 版の A/B/A。DERBY の固定台本（`derby_fixed_workload`）のフレーム時間と、評価の余裕・ゲスト最大。悪くなっていないことの確認。
-2. IRAM y、DRAM n / IRAM n、DRAM y / 両方 y: それぞれ A/B/A。TURNPERF ビルドで `I_STALL_BUSY` / ターンと JS ターンの ms。
-3. 同じターンを 2 回呼ぶプローブ（`interpreter-stages.md` §6.2(a)）: 1 回目と 2 回目の I_STALL の差で、ターン間の追い出し（描画・転送が触る量）を読む。IRAM 化の後に、残りの flash のコードが毎ターン取り直されているかが分かる。
-4. `memlog.py --port --check`: 静的 DIRAM、ホームとアプリ実行中の空き、最大連続ブロック。
+### 5.1 実機の前（模型）
 
-icache のアラインメントで 15% 動くので、それ未満の差は同じ image の中の比較（2 の Kconfig 違いは別 image なので、A/B/A の往復で揺れを見る）で判断する。
+1. 今のブランチの ELF で `case_sizes` を取り直す（比較命令の帰属を直し、ダンプ無しで）。§3.1 の `no_inline` の前後も。
+2. `icache.py model --iram-kib` で「本体」「R5 の候補を選び直したもの」「両方」を、同じ DRAM の予算で比べる（STRESS）。DERBY で決めるなら、先に r5sim に DERBY を載せる（`pocket.derby` などの面）。
+
+### 5.2 実機（模型で勝った構成だけ）
+
+- **配置の揺れを分ける**: (a) IRAM=n の側でも、動かす関数を flash の text の末尾に置く断片を使い、抜いても他の関数の番地が動かないようにする。(b) 各構成で 0/32/64/96 B の padding を入れた 3〜4 通りの配置を作り、分布で比べる。
+- **読む値**: ms ではなく `I_STALL_BUSY` と退役命令数を主にする（TURNPERF。R5 §3.4 と同じ）。outline は命令数を、IRAM は待ちだけを変えるので、2 段を分けて読める。
+- **反復**: 各脚 3 回以上、`turn_ms_med` の中央値で比べる（同一バイナリでも +9% 動いた）。
+- **ターン間の追い出し**: 同じターンを 2 回呼ぶプローブ（`interpreter-stages.md` §6.2(a)）。IRAM 化の後に残る flash のコードの取り直し量が読める。
+- **DMA**: LCD の転送は非同期で、JS のターン中に DMA が SRAM を読む。IRAM の命令フェッチと同じプールなので、IRAM 化しても `I_STALL` が残るならこれを疑う。
+- `memlog.py --port --check`（§4）。
 
 ## 6. 決めること（ユーザー）
 
-- IRAM 本体を入れるか: JS ターンの短縮（ms）と空きの減少（KB）を並べて判断する。前例は −1.07 ms 対 −8.7 KiB で見送り。
-- outline だけを先に入れるか（IRAM を入れない場合も、作業集合の密度と、将来の IRAM 化の準備になる）。
+- 模型の順位が出た後で、どの構成を実機で試すか。
+- 入れるか: 削れる ms と空きの減少（KB）を並べて判断する。前例は −1.07 ms 対 −8.7 KiB で見送り。
 
-## 7. リスク
+## 7. 他の文書との関係
 
-1. outline で例外の位置（`cur_pc`）や参照の数を取り違える。命令ごとに vmtest と test262 の該当ディレクトリで確かめる。
-2. 熱い命令の集合がアプリで違う。DERBY だけで選ぶと他のアプリが遅くなるかもしれない（outline された命令は呼び出し 1 回分遅いだけ）。STRESS・MEGADEMO・BIG WAVE で opprof を取り直してから集合を固定する。
-3. IRAM に置いた本体から flash の helper を呼ぶのは今と同じ（`-mlongcalls`）。IRAM の中のコードが flash のリテラルを読むことは無い（リテラルは同じセクションに置かれる）が、ビルド後に `nm` と map で確かめる。
-4. 測定の揺れ（アラインメント 15%）より小さい効果は主張しない。
+- `interpreter-stages.md` §9.2 は「cold への追い出しは作業集合の 3〜4% で優先しない」（模型）とした。ここでの outline の目的は作業集合ではなく「IRAM に収める大きさ」で、別の理由。§3.1 の `no_inline` は両方に効く。
+- P1 は T0 だけの配置を扱う。T1 の専用ハンドラ（`interpreter-stages.md` §9.3）を入れると本体の熱い部分は増えるので、T1 を入れるときは予算を書き直す。
+
+## 8. v1 へのレビュー（SLOW、2026-10-25）の要約
+
+重大度順。すべて v2 に反映した。
+
+1. 本体の見積もり「8〜10 KB」は成立しない。ラベル領域 5.3 KB は出せず、stub と呼び出しの緩和の喪失を足すと 13〜16 KB＋α（§2.3）。
+2. 検証済みの代替（helper 群を IRAM）と比べていない。模型も使っていない。1 KiB あたりの効きは本体が helper 群の半分程度（§2.4）。R5 の再開手順（模型を回し直す）を飛ばしていた。
+3. outline の雛形が `&sp, &pc` を渡しており、熱い経路全体に store/reload を入れる。値で渡して戻り値で返す。先に既存 helper の `no_inline` で数 KB 取れる（§3.1・§3.2）。
+4. 測り方が 15% の揺れに足りない。配置の固定、padding の分布、`I_STALL` と命令数、各脚 3 回（§5.2）。
+5. 引用の誤り: 70%/0.17 は DIO の値（今は 57%/0.25）。41.8 KiB は STRESS の値。「DERBY の JS ターン 14.5〜44 ms」の 44 ms は記録に無い（引き継ぎの誤り。実測は §0-3）。`OP_xor` 874 B は比較命令の帰属の誤り。`noflash` は rodata まで DRAM に移す。
