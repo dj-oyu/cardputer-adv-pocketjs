@@ -184,8 +184,23 @@ def model(a):
             chosen.append(n); used += fw[n][1]
         return chosen, used
 
-    iram, iram_bytes = pick(a.iram_kib) if a.iram_kib else ([], 0)
-    iram = set(iram)
+    # Forced functions go first and use the budget's bytes at their firmware
+    # size; --force-cost replaces that size (e.g. JS_CallInternal after its
+    # cold handlers are outlined, which this model cannot see: the outlined
+    # parts are not executed, so only the placement of the rest matters).
+    forced = [n for n in (a.force or []) if n in fw]
+    forced_bytes = int(a.force_cost) if a.force_cost else sum(fw[n][1] for n in forced)
+    iram, iram_bytes = [], 0
+    if a.iram_kib:
+        ranked = sorted((n for n in touched if n in fw and n not in forced), key=lambda n: -uses[n] / fw[n][1])
+        for n in ranked:
+            if forced_bytes + iram_bytes + fw[n][1] > a.iram_kib * 1024:
+                continue
+            iram.append(n); iram_bytes += fw[n][1]
+    if forced:
+        print(f'  forced: {", ".join(forced)} counted as {forced_bytes} B')
+    iram = set(iram) | set(forced)
+    iram_bytes += forced_bytes
     pack, pack_bytes = pick(a.pack_kib) if a.pack_kib else ([], 0)
     base = {}
     if pack:
@@ -260,6 +275,8 @@ def main():
     m.add_argument('--full', action='store_true', help='fully associative: no conflict misses')
     m.add_argument('--iram-kib', type=float, default=0, help='take the hottest functions out of the cache up to this size')
     m.add_argument('--pack-kib', type=float, default=0, help='pack the hottest functions contiguously up to this size')
+    m.add_argument('--force', action='append', help='put this function in IRAM first (repeatable)')
+    m.add_argument('--force-cost', type=float, default=0, help='bytes to charge for the forced functions (default: their size)')
     m.add_argument('--top', type=int, default=0)
     m.add_argument('--emit', help='write the packed (or IRAM) function names here, one per line')
     for p in (e, m):
