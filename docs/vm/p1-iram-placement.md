@@ -87,6 +87,19 @@ ms への換算（推定、ミス 1 回 450 サイクル・240 MHz、`r5-icache.
 
 **P1 の結論（v2.1）: IRAM の予算は helper 群に使う。インタプリタ本体の outline と IRAM 配置は採らない。** 残る判断は予算の大きさ（DRAM との交換）で、ユーザーが決める。候補の関数の一覧は、実際のファームの ELF に写して選び直す（`--emit`。r5sim と本番で関数の大きさが違う）。
 
+### 2.6 本番の ELF に写した候補（模型、2026-10-25）
+
+今日の P0 を含むファーム（`8e410547`、broker でビルド、焼いていない）を Xtensa でビルドできることを確かめ、その ELF に模型を写した（記録は §2.5 と同じ STRESS の B）。`JS_CallInternal` は 22,289 B（ダンプ無し、P0 込み）。命令ごとの大きさは `tools/r5sim/case_sizes.py`（比較命令の `OP_CMP` / `OP_CMP_NUM` の展開を数えるように直した。`OP_lt` などは各 193 B、`OP_xor` は 67 B）。
+
+| 予算 | 関数（fragment に書けた数） | ミス/ターン warm | cold | 推定の短縮（cold の減少 × 450 サイクル、240 MHz） |
+| --- | --- | ---: | ---: | ---: |
+| 0 | — | 1,241 | 1,791 | — |
+| 4 KiB | 72（68） | 793 | 1,368 | 約 0.8 ms |
+| 8 KiB | 98（93） | 599 | 1,175 | 約 1.2 ms |
+| 14.5 KB | 128（122） | 366 | 975 | 約 1.5 ms |
+
+fragment は `tools/r5sim/candidates/p1_iram{4,8,145}.lf`。`noflash` ではなく `noflash_text`（コードだけ IRAM、rodata は flash に残す。IDF v6.0.1 の `esp_system/app.lf` にある scheme）。`$constprop` / `$isra` の付いた名前は fragment に書けないので、各 4〜6 関数が外れる。どれも STRESS で選んだ候補で、DERBY での効きは未確認。
+
 ## 3. 作り方（模型の順位が出た後に、勝った側を作る）
 
 ### 3.1 helper の `no_inline`（先にやる。単独で入れられる）
