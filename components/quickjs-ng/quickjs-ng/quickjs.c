@@ -16935,6 +16935,31 @@ exception:
     return -1;
 }
 
+/* Both operands are numbers, int or float64: their values as the slow
+   helpers would read them (ToFloat64 of an int is exact). The interpreter
+   tests int/int first, so here at least one is a float64. Used to keep mixed
+   int/float arithmetic and comparison out of js_*_slow, which produce the
+   same js_float64 / js_bool from the same doubles: DERBY mixes small int
+   literals into double math (about 470 such ops a turn). */
+static inline __attribute__((always_inline))
+bool js_both_number(JSValueConst a, JSValueConst b, double *pa, double *pb)
+{
+    int ta = JS_VALUE_GET_TAG(a), tb = JS_VALUE_GET_TAG(b);
+    if (ta == JS_TAG_INT)
+        *pa = JS_VALUE_GET_INT(a);
+    else if (JS_TAG_IS_FLOAT64(ta))
+        *pa = JS_VALUE_GET_FLOAT64(a);
+    else
+        return false;
+    if (tb == JS_TAG_INT)
+        *pb = JS_VALUE_GET_INT(b);
+    else if (JS_TAG_IS_FLOAT64(tb))
+        *pb = JS_VALUE_GET_FLOAT64(b);
+    else
+        return false;
+    return true;
+}
+
 static no_inline __exception int js_binary_arith_slow(JSContext *ctx, JSValue *sp,
                                                       OPCodeEnum op)
 {
@@ -21947,6 +21972,7 @@ put_field_slow_path:
 
             CASE(OP_add): {
                 JSValue op1, op2;
+                double d1, d2;
                 op1 = sp[-2];
                 op2 = sp[-1];
                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
@@ -21958,10 +21984,9 @@ put_field_slow_path:
                         sp[-2] = js_int32(r);
                     }
                     sp--;
-                } else if (JS_VALUE_IS_BOTH_FLOAT(op1, op2)) {
+                } else if (js_both_number(op1, op2, &d1, &d2)) {
                     JS_X87_FPCW_SAVE_AND_ADJUST(fpcw);
-                    sp[-2] = js_float64(JS_VALUE_GET_FLOAT64(op1) +
-                                        JS_VALUE_GET_FLOAT64(op2));
+                    sp[-2] = js_float64(d1 + d2);
                     JS_X87_FPCW_RESTORE(fpcw);
                     sp--;
                 } else {
@@ -22021,6 +22046,7 @@ put_field_slow_path:
             BREAK;
             CASE(OP_sub): {
                 JSValue op1, op2;
+                double d1, d2;
                 op1 = sp[-2];
                 op2 = sp[-1];
                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
@@ -22032,10 +22058,9 @@ put_field_slow_path:
                         sp[-2] = js_int32(r);
                     }
                     sp--;
-                } else if (JS_VALUE_IS_BOTH_FLOAT(op1, op2)) {
+                } else if (js_both_number(op1, op2, &d1, &d2)) {
                     JS_X87_FPCW_SAVE_AND_ADJUST(fpcw);
-                    sp[-2] = js_float64(JS_VALUE_GET_FLOAT64(op1) -
-                                        JS_VALUE_GET_FLOAT64(op2));
+                    sp[-2] = js_float64(d1 - d2);
                     JS_X87_FPCW_RESTORE(fpcw);
                     sp--;
                 } else {
@@ -22045,7 +22070,7 @@ put_field_slow_path:
             BREAK;
             CASE(OP_mul): {
                 JSValue op1, op2;
-                double d;
+                double d, d1, d2;
                 op1 = sp[-2];
                 op2 = sp[-1];
                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
@@ -22065,9 +22090,9 @@ put_field_slow_path:
                     }
                     sp[-2] = js_int32(r);
                     sp--;
-                } else if (JS_VALUE_IS_BOTH_FLOAT(op1, op2)) {
+                } else if (js_both_number(op1, op2, &d1, &d2)) {
                     JS_X87_FPCW_SAVE_AND_ADJUST(fpcw);
-                    d = JS_VALUE_GET_FLOAT64(op1) * JS_VALUE_GET_FLOAT64(op2);
+                    d = d1 * d2;
                     JS_X87_FPCW_RESTORE(fpcw);
 mul_fp_res:
                     sp[-2] = js_float64(d);
@@ -22079,6 +22104,7 @@ mul_fp_res:
             BREAK;
             CASE(OP_div): {
                 JSValue op1, op2;
+                double d1, d2;
                 op1 = sp[-2];
                 op2 = sp[-1];
                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
@@ -22086,6 +22112,13 @@ mul_fp_res:
                     v1 = JS_VALUE_GET_INT(op1);
                     v2 = JS_VALUE_GET_INT(op2);
                     sp[-2] = js_number((double)v1 / (double)v2);
+                    sp--;
+                } else if (js_both_number(op1, op2, &d1, &d2)) {
+                    /* js_binary_arith_slow's handle_float64: js_float64,
+                       not js_number (int/int above keeps js_number). */
+                    JS_X87_FPCW_SAVE_AND_ADJUST(fpcw);
+                    sp[-2] = js_float64(d1 / d2);
+                    JS_X87_FPCW_RESTORE(fpcw);
                     sp--;
                 } else {
                     goto binary_arith_slow;
@@ -22439,10 +22472,35 @@ dec_loc_slow:
                 }                                                       \
             BREAK
 
-            OP_CMP(OP_lt, <, js_relational_slow(ctx, sp, opcode));
-            OP_CMP(OP_lte, <=, js_relational_slow(ctx, sp, opcode));
-            OP_CMP(OP_gt, >, js_relational_slow(ctx, sp, opcode));
-            OP_CMP(OP_gte, >=, js_relational_slow(ctx, sp, opcode));
+            /* Relational: also compare int/float64 mixes and float64 pairs
+               here, as js_relational_slow's float64_compare does (NaN
+               compares false either way). */
+#define OP_CMP_NUM(opcode, binary_op)                                   \
+            CASE(opcode):                                               \
+                {                                                       \
+                JSValue op1, op2;                                       \
+                double d1, d2;                                          \
+                op1 = sp[-2];                                           \
+                op2 = sp[-1];                                           \
+                if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {           \
+                    sp[-2] = js_bool(JS_VALUE_GET_INT(op1) binary_op JS_VALUE_GET_INT(op2)); \
+                    sp--;                                               \
+                } else if (js_both_number(op1, op2, &d1, &d2)) {        \
+                    sp[-2] = js_bool(d1 binary_op d2);                  \
+                    sp--;                                               \
+                } else {                                                \
+                    sf->cur_pc = pc;                                    \
+                    if (js_relational_slow(ctx, sp, opcode))            \
+                        goto exception;                                 \
+                    sp--;                                               \
+                }                                                       \
+                }                                                       \
+            BREAK
+
+            OP_CMP_NUM(OP_lt, <);
+            OP_CMP_NUM(OP_lte, <=);
+            OP_CMP_NUM(OP_gt, >);
+            OP_CMP_NUM(OP_gte, >=);
             OP_CMP(OP_eq, ==, js_eq_slow(ctx, sp, 0));
             OP_CMP(OP_neq, !=, js_eq_slow(ctx, sp, 1));
             OP_CMP(OP_strict_eq, ==, js_strict_eq_slow(ctx, sp, 0));
@@ -39476,6 +39534,29 @@ has_constant_test:
                 }
                 pos_next = cc.pos;
                 break;
+            }
+            /* transformation: swap to_propkey swap [insert3] put_array_el
+               -> [insert3] put_array_el (obj[key] = val converts key again
+               after val; insert3 when the assignment's value is used).
+               put_array_el's slow path converts the key itself
+               (JS_ValueToAtom in JS_SetPropertyValue) before it stores or
+               throws, and swap / insert3 only move values, so the
+               conversion still happens once, after val, in the same order.
+               If obj is an object the key was already converted before val
+               and the triple was a no-op. */
+            if (code_match(&cc, pos_next, OP_to_propkey, OP_swap, -1)) {
+                CodeContext cc2 = cc;
+                if (code_match(&cc2, cc.pos, OP_put_array_el, -1) ||
+                    code_match(&cc2, cc.pos, OP_insert3, OP_put_array_el, -1)) {
+                    if (cc.line_num >= 0) {
+                        line_num = cc.line_num;
+                    }
+                    if (cc.col_num >= 0) {
+                        col_num = cc.col_num;
+                    }
+                    pos_next = cc.pos;      /* resume at put_array_el */
+                    break;
+                }
             }
             goto no_change;
 
