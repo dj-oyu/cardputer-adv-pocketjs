@@ -20851,11 +20851,45 @@ non_ctor_call:
                 pc += 4;
                 sf->cur_pc = pc;
 
+                {
+                    /* A global lexical binding stays where it is for good
+                       (nothing deletes from global_var_obj: see
+                       OP_get_var_lex in quickjs-opcode.h), and it shadows
+                       the global object, which JS_GetGlobalVar looks at only
+                       after it. So once found, this instruction can
+                       read the slot directly: rewrite it in place, same
+                       length. The operand stops being an atom, so give back
+                       the bytecode's reference to it (the shape keeps its
+                       own). DERBY: ~890 reads a turn, each a hash lookup. */
+                    JSObject *gp = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+                    JSProperty *gpr;
+                    JSShapeProperty *gprs = find_own_property(&gpr, gp, atom);
+                    if (gprs && (gprs->flags & JS_PROP_TMASK) == JS_PROP_NORMAL &&
+                        !JS_IsUninitialized(gpr->u.value)) {
+                        uint32_t idx = gpr - gp->prop;
+                        pc[-5] = OP_get_var_lex;
+                        put_u32((uint8_t *)pc - 4, idx);
+                        JS_FreeAtom(ctx, atom);
+                        *sp++ = js_dup(gpr->u.value);
+                        BREAK;
+                    }
+                }
                 val = JS_GetGlobalVar(ctx, atom, opcode - OP_get_var_undef);
                 if (unlikely(JS_IsException(val))) {
                     goto exception;
                 }
                 *sp++ = val;
+            }
+            BREAK;
+
+            CASE(OP_get_var_lex): {
+                /* Rewritten from get_var only once the binding was
+                   initialized, and a binding never goes back to the TDZ, so
+                   no check is needed here. */
+                JSObject *gp = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+                uint32_t idx = get_u32(pc);
+                pc += 4;
+                *sp++ = js_dup(gp->prop[idx].u.value);
             }
             BREAK;
 
@@ -21759,6 +21793,23 @@ put_field_slow_path:
             CASE(OP_get_array_el): {
                 JSValue val;
 
+                /* Plain array, int index in range: what
+                   js_get_fast_array_element returns, without the two calls
+                   and its class switch. DERBY reads ~940 elements a turn,
+                   98% of them this way. */
+                if (likely(JS_VALUE_GET_TAG(sp[-2]) == JS_TAG_OBJECT &&
+                           JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_INT)) {
+                    JSObject *p = JS_VALUE_GET_OBJ(sp[-2]);
+                    uint32_t idx = JS_VALUE_GET_INT(sp[-1]);
+                    if (likely(p->class_id == JS_CLASS_ARRAY &&
+                               idx < (uint32_t)p->u.array.count)) {
+                        val = js_dup(p->u.array.u.values[idx]);
+                        JS_FreeValue(ctx, sp[-2]);
+                        sp[-2] = val;
+                        sp--;
+                        BREAK;
+                    }
+                }
                 sf->cur_pc = pc;
                 val = JS_GetPropertyValue(ctx, sp[-2], sp[-1]);
                 JS_FreeValue(ctx, sp[-2]);
@@ -21773,6 +21824,17 @@ put_field_slow_path:
             CASE(OP_get_array_el2): {
                 JSValue val;
 
+                /* obj prop -> obj value: same plain-array path as above. */
+                if (likely(JS_VALUE_GET_TAG(sp[-2]) == JS_TAG_OBJECT &&
+                           JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_INT)) {
+                    JSObject *p = JS_VALUE_GET_OBJ(sp[-2]);
+                    uint32_t idx = JS_VALUE_GET_INT(sp[-1]);
+                    if (likely(p->class_id == JS_CLASS_ARRAY &&
+                               idx < (uint32_t)p->u.array.count)) {
+                        sp[-1] = js_dup(p->u.array.u.values[idx]);
+                        BREAK;
+                    }
+                }
                 sf->cur_pc = pc;
                 val = JS_GetPropertyValue(ctx, sp[-2], sp[-1]);
                 sp[-1] = val;
@@ -42091,6 +42153,16 @@ static int JS_WriteFunctionBytecode(BCWriterState *s,
     pos = 0;
     while (pos < bc_len) {
         op = bc_buf[pos];
+        if (op == OP_get_var_lex) {
+            /* Runtime-only rewrite of get_var (same length): write the
+               original back, with the binding's name from the realm's
+               global_var_obj, so the output never depends on this
+               runtime's slot layout. */
+            JSObject *gp = JS_VALUE_GET_OBJ(b->realm->global_var_obj);
+            uint32_t idx = get_u32(bc_buf + pos + 1);
+            bc_buf[pos] = op = OP_get_var;
+            put_u32(bc_buf + pos + 1, gp->shape->prop[idx].atom);
+        }
         len = short_opcode_info(op).size;
         switch (short_opcode_info(op).fmt) {
         case OP_FMT_atom:

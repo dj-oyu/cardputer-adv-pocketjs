@@ -364,6 +364,15 @@ DEF(is_null, 1, 1, 1, none)
 DEF(typeof_is_undefined, 1, 1, 1, none)
 DEF(typeof_is_function, 1, 1, 1, none)
 
+/* Runtime-only: never emitted by the compiler, never serialized. get_var /
+   get_var_undef rewrite themselves to this the first time they find a
+   global lexical binding (let/const/class at script top level). The operand
+   is the binding's index in the realm's global_var_obj. Nothing deletes from
+   that object (JS_DeleteGlobalVar refuses lexical bindings, and scripts never
+   see the object itself), so properties are only appended and the index
+   never moves. Appended last so no existing opcode number changes. */
+DEF(get_var_lex, 5, 0, 1, u32)
+
 #undef DEF
 #undef def
 #endif  /* DEF */

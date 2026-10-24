@@ -1,0 +1,14 @@
+tdz throws ok
+after init ok
+live reads ok
+const ok
+class ok
+typeof lexical ok
+global object ok
+global object live ok
+global object deleted ok
+builtin ok
+mix ok
+mix after store ok
+closure ok
+exit=0

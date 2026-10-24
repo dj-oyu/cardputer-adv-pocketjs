@@ -301,3 +301,50 @@ T0/T1/T2 の採用判定では、読み込み peak・定常保持・最悪 turn 
 読み込み、定常、最悪の論理ターン、停止後を分ける。実機では交互 A/B と独立 boot の反復を行い、同じ boot 内の連続 frame を独立した試行として扱わない。保持量や peak の差が診断自身の割当・配置の差でないことも確認する。
 
 例外・評価順・副作用、OOM/GC、所有権、park/resume、budget yield の契約を維持し、固定台本で状態と最終描画を比較する。host の意味論検査、同じ head の CI、実機のメモリ・時間の受入は別工程として記録する。本節の追記自体では新しい実機計測を行っていない。
+
+## 9. P0 の実施と、T1 の命令番号の見直し（2026-10-25）
+
+数字はすべて host（DERBY `oval_w2_mid_w100`、449 フレーム、`tools/vmtest/opprof/`）。実機では何も測っていない（broker の LKG 照合で書き込みが止まっている）。
+
+### 9.1 1ターンに使う（命令, 型）の組
+
+opprof に、命令ごとにオペランドの型を読む記録（`TY` 行）を足し、`opprof_ty.py` で数えた（`747fc1b`）。
+
+| 項目 | 値 |
+| --- | --- |
+| 1ターンの組 | 155〜157（レース中ほぼ一定。全体でも 157） |
+| dispatch の 99% / 99.9% を覆う組 | 114 / 146 |
+| T1 の入口でまとめた組（算術は int/int・number・汎用、要素は配列[int]・汎用、など） | 127（型を見る 67、型に依らない 60） |
+| まとめた後も汎用に落ちる dispatch | 1.5%（171/ターン） |
+
+handover の「約 80 組」より多いが、増えた分は型に依らない単純な命令（`get_loc8`・`push_0`・`dup` など 60 種、1つ 16〜24 B と推定）。下限の h 項は 67 × 32〜64 B ＋ 60 × 16〜24 B ≒ 3〜5.6 KiB（推定）で、下限 約 14〜16 KiB は変わらない。
+
+### 9.2 T0 に入れたもの（guard 無し）
+
+| 変更 | 効果（host） | commit |
+| --- | --- | --- |
+| peephole: `swap to_propkey swap [insert3] put_array_el` → `[insert3] put_array_el` | dispatch 11,506 → 11,338 /ターン | `9fdff07` |
+| `+ − × ÷ < <= > >=` の int/float 混在と float 同士をインタプリタ内で計算（`js_both_number`）。`÷` は float 同士の経路も無かった | 遅い helper への呼び出し 約 470 /ターン減（推定） | `9fdff07` |
+| `get_array_el` / `get_array_el2`: 素の配列・範囲内の int 添字をハンドラ内で読む | 2段の関数呼び出しが 約 940 /ターン減 | この節と同じ commit |
+| `get_var` → `get_var_lex`: グローバルの let/const を初回に見つけたら、オペランドを `global_var_obj` の添字に書き換える | ハッシュ検索 892 → 1 /ターン | この節と同じ commit |
+
+いずれも DERBY の決着（順位と時刻、全桁）が変わらないことを確かめた。vmtest（asan・o2）と test262 の結果は各 commit に書く。
+
+**`get_var_lex` が guard 無しで正しい理由。** グローバルの let/const は `global_var_obj` に入る。この object から消す経路は無い（`JS_DeleteGlobalVar` は lexical を断る。object 自体はスクリプトから見えない）ので、プロパティは末尾に足されるだけで添字は動かない。lexical は global object より先に引かれるので、一度見つかれば以後も同じ束縛を指す。書き換えるのは初期化済みのときだけで、束縛は TDZ に戻らないので、書き換え後のハンドラに検査は要らない。オペランドは atom でなくなるので、書き換え時に atom の参照を返す。`JS_WriteFunctionBytecode` は元の `get_var` と atom に戻して書く。`define_global_var` の flag には `JS_PROP_CONFIGURABLE` が付いているが、消す経路が無いので添字の安定には効かない（根拠は flag ではなく経路）。
+
+**ジャンプテーブルの場所（未変更）。** `dispatch_table` は flash の `.rodata`（`0x3c1e2f84`、0x400 B、PR #69 の image の map）。dcache は 32 KiB・8-way・32 B 行。DRAM へ移すと 1 KiB を払う。効果は実機でしか分からないので P1 の IRAM 配置と一緒に決める。
+
+**cold への追い出し（後回し）。** `turn-working-set.md` §4 で、`JS_CallInternal` 7.40 KiB のうち稀な行は 1.18 KiB、遅い経路の名前の領域を足しても 約 1.5 KiB。作業集合 41.8 KiB の 3〜4% で、優先しない。
+
+### 9.3 T1 の命令番号の見直し
+
+空きは 10 枠（`DEF` 246、`get_var_lex` で 1 つ使って残り 9）。P0 で算術と要素読みを T0 に入れたので、handover で見込んでいた T1 の算術の入口（6〜8 枠）は要らなくなった。T1 に入口を作っても、省けるのは int/int の検査 1 つだけになる。
+
+| 候補 | 回数/ターン | 枠 | 置き場所 |
+| --- | --- | --- | --- |
+| `get_var_lex` | 891 | 1（使用済み） | T0（guard 無し、書き換えは一度きり） |
+| `get_field` / `get_field2` の inline cache（自分のプロパティ） | 415 / 104 | 2 | T1。shape と添字の置き場（命令の中に入らない。atom 4 B しかない）が設計の要 |
+| 代入の右辺前の key 変換（`swap dup is_undefined_or_null if_true swap to_propkey swap swap`、8命令） | 56 回 × 8 | 1 | T0。新しい命令 1 つにまとめる（obj がオブジェクトで key が int なら何もしない） |
+| `put_var` の lexical | 14 | 1 | 回数が少ないので保留 |
+
+**T1 だけなら `OP_ext` は要らない**（3〜4 枠で収まる）。T2 の 7 パターンまで入れると足りなくなるので、`OP_ext` は T2 に進むと決めたときの作業にする。
