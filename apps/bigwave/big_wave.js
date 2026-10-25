@@ -293,8 +293,8 @@
     const w = [-F * (s.lc * co + s.vc * si), -F * (s.lc * si - s.vc * co)], e = [F * co, F * si];
     const m0 = M.ceil((s.cx + C.dn) / d), m1 = M.floor((s.cx + far) / d), y = m => 1 / (m * d - s.cx);
     const add = (k, i) => { if (PL[k]) D.push([PL[k], i]); };
-    add('sk', e.concat(w, [1 / C.dn]));
-    add('se', e.concat(w, [y(m0), m1 - m0 + 1, s.t * .21]));
+    add('sk', [e[0], e[1], w[0], w[1], 1 / C.dn]);
+    add('se', [e[0], e[1], w[0], w[1], y(m0), m1 - m0 + 1, s.t * .21]);
     if (s.st === 3) return;
     // Wave runs: slices grouped between breakpoints, each run overlaps the last
     // slice of the previous one so the lip rail stays connected.
@@ -309,15 +309,15 @@
       while (b < m1 && (j >= bp.length || (b + 1) * d < bp[j])) ++b;
       const s0 = a > ms ? a - 1 : a, n = b - s0 + 1, x0 = s0 * d, x1 = b * d, sh = a * d >= s.xc + K.sh;
       const f = sh ? heightAt : curlAt, q0 = f(x0), dq = n > 1 ? (f(x1) - q0) / (n - 1) : 0;
-      add(sh ? 'sh' : 'cu', (sh ? e : ex).concat(w, [y(s0), n, q0, dq]));
+      add(sh ? 'sh' : 'cu', [sh ? e[0] : ex[0], sh ? e[1] : ex[1], w[0], w[1], y(s0), n, q0, dq]);
       a = b + 1;
     }
     // Whitewater behind the curl, and the splash of a wipeout.
     const fb = M.min(m1, M.floor(s.xc / d));
-    if (fb >= m0) add('fo', e.concat(w, [y(m0), fb - m0 + 1, s.t * .4, .12 * H]));
+    if (fb >= m0) add('fo', [e[0], e[1], w[0], w[1], y(m0), fb - m0 + 1, s.t * .4, .12 * H]);
     if (s.st === 2 && s.wt < 30) {
       const a0 = M.max(m0, M.ceil((s.wx - 2) / d));
-      add('fo', e.concat(w, [y(a0), 3, s.t * .7, .3 + s.wt * .02]));
+      add('fo', [e[0], e[1], w[0], w[1], y(a0), 3, s.t * .7, .3 + s.wt * .02]);
     }
     // Obstacles, far to near.
     const ob = [], c = s.course;
