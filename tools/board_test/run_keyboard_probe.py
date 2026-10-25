@@ -13,6 +13,10 @@ stubs={
 }
 for name,text in stubs.items():
  q=out/'include'/name;q.parent.mkdir(parents=True,exist_ok=True);q.write_text(text)
+board=(R/'main/hal/board.c').read_text()
+start=board.index('    esp_err_t keyboard_error = keyboard_probe_startup(ih);')
+end=board.index('    battery_init();',start)
+(out/'include/keyboard_stage.inc').write_text(board[start:end])
 for hz in [100,1000]:
  binary=out/f'keyboard-probe-{hz}'
  flags=['-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie'] if a.sanitize else ['-O2']

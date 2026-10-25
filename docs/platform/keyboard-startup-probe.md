@@ -55,6 +55,10 @@ Run `python3 tools/board_test/run_keyboard_probe.py` and the same command with
 persistent NACK/timeout, nonretryable errors and the exact/one-us-before retry
 window boundaries. It checks original return values/log codes/pins, max3 calls,
 no delay after terminal failure and no retry after sampled window expiry.
+The actual keyboard-configuration tail from board.c is compiled too: recovery
+configures once, while a post-ACK write error stays fatal with no configured
+message/retry. A successful SDK call taking60ms is not rejected as though50ms
+were a whole-call deadline.
 The dedicated CI also builds the normal ESP32-S3 product with IDF6.0.1; no
 automatic performance diagnostic or guest/stack/watchdog change is included.
 
