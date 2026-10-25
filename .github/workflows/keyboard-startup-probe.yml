@@ -1,0 +1,91 @@
+name: Keyboard startup probe recovery
+on:
+  pull_request:
+    paths:
+      - 'main/hal/keyboard_probe.*'
+      - 'main/hal/board.c'
+      - 'main/CMakeLists.txt'
+      - 'tools/board_test/**'
+      - '.github/workflows/keyboard-startup-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: keyboard-startup-probe-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          persist-credentials: false
+      - run: python3 tools/board_test/run_keyboard_probe.py
+      - run: python3 tools/board_test/run_keyboard_probe.py --sanitize
+  firmware:
+    needs: host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: espressif/idf:v6.0.1
+      options: --user 1001:1001
+    env:
+      IDF_COMPONENT_MANAGER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Build normal product; preserve configuration and guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          test "$(idf.py --version)" = 'ESP-IDF v6.0.1'
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          idf.py -B build_keyboard -D SDKCONFIG="$PWD/build_keyboard/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${SOURCE_HEAD:0:12}" build
+          idf.py -B build_keyboard size > build_keyboard/size.log
+          python3 - <<'PY'
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          b=Path('build_keyboard');c=(b/'sdkconfig').read_text()
+          assert 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' in c
+          assert 'CONFIG_COMPILER_OPTIMIZATION_SIZE=y' in c
+          assert not any(k+'=y' in c for k in ('CONFIG_SECURE_BOOT','CONFIG_SECURE_BOOT_V2_ENABLED','CONFIG_SECURE_FLASH_ENC_ENABLED','CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK'))
+          assert hashlib.sha256((b/'sdkconfig').read_bytes()).hexdigest()=='1089b905c7e7c5825ac5843e7a4236d393e37b0a685344cc05147a540b64e123'
+          assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='5acbaec11eac9d189e0b3312cd7a43fad967b946854e46fbd14ba6ed59d50361'
+          cache=(b/'CMakeCache.txt').read_text().splitlines()
+          for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','POCKET_DERBY_RUNNER_AFFINE','KASANE_MEGADEMO_TRACE'):
+              assert k+':BOOL=OFF' in cache,k
+          elf=(b/'cardputer_pocketjs.elf').read_bytes()
+          assert b'Application information:' in elf and b'KBD_PROBE' in elf
+          names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
+          images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}
+          (b/'experiment.json').write_text(json.dumps(dict(source_head=os.environ['SOURCE_HEAD'],idf='6.0.1',profile='normal-product-keyboard-startup',hardware_tested=False,images=images),indent=2)+'\n')
+          (b/'SHA256SUMS').write_text(''.join(v['sha256']+'  '+n+'\n' for n,v in images.items()))
+          print((b/'experiment.json').read_text())
+          assert not subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],text=True)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: keyboard-startup-product-${{ env.SOURCE_HEAD }}
+          path: |
+            build_keyboard/*.bin
+            build_keyboard/*.elf
+            build_keyboard/*.map
+            build_keyboard/*.json
+            build_keyboard/*.log
+            build_keyboard/SHA256SUMS
+            build_keyboard/sdkconfig
+            build_keyboard/CMakeCache.txt
+            build_keyboard/bootloader/bootloader.bin
+            build_keyboard/partition_table/partition-table.bin
+          retention-days: 14

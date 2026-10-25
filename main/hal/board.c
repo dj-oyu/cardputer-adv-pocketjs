@@ -1,4 +1,5 @@
 #include "board.h"
+#include "keyboard_probe.h"
 #include "motion.h"
 #include "sound.h"
 #include "ui/kasane/ksn_p0_probe.h"
@@ -375,7 +376,8 @@ esp_err_t board_init(void) {
     ESP_ERROR_CHECK(i2c_new_master_bus(&ib, &ih));
     i2c_device_config_t kd = {.dev_addr_length=I2C_ADDR_BIT_LEN_7, .device_address=0x34, .scl_speed_hz=400000};
     ESP_ERROR_CHECK(i2c_master_bus_add_device(ih, &kd, &keyboard));
-    if (i2c_master_probe(ih, 0x34, 50) != ESP_OK) return ESP_ERR_NOT_FOUND;
+    esp_err_t keyboard_error = keyboard_probe_startup(ih);
+    if (keyboard_error != ESP_OK) return keyboard_error;
     // TCA8418: 7 electrical rows x 8 columns, internal debouncing enabled.
     ESP_ERROR_CHECK(kwrite(0x1d, 0x7f)); ESP_ERROR_CHECK(kwrite(0x1e, 0xff));
     ESP_ERROR_CHECK(kwrite(0x1f, 0));
