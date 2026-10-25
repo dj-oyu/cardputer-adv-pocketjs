@@ -4,7 +4,7 @@ import hashlib,json,subprocess,sys
 R=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(R/'tools/games'))
 import run_big_wave as game
-BASE='e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267'
+BASE='6db9244d585fa3caad899853ff8c7fbe96c5d7d3'
 def once(s,a,b):
  assert s.count(a)==1,a[:100]
  return s.replace(a,b)

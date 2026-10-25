@@ -46,3 +46,31 @@ Diagnostic workload `lcdcatch-natural-120-v1` auto-starts LCD CATCH through norm
 The JS interval includes constant marker-entry/argument overhead and excludes native present. Separate owner tick totals include the product tick/present path. Allocation metrics are production allocator request counts/requested bytes, not success counts or charged bytes. Internal free memory is sampled at frame boundaries before the timer and after measurement, not a transient peak measurement. The 120 unsigned samples occupy 480 B static RAM in both diagnostic variants. Exact median is printed as `median_x2`, p95 uses nearest rank; no approximate quantile or raw frame stream is used. About 193 frames (~6.5 s at 30 Hz), deadline 24 s, fewer than 16 summary/app lines: fits the 30 s / 64 KiB receive / 256 lines / 32 KiB retention broker limits. Application INFO boot must show `Application information:` and matching ELF/version before accepting results.
 
 Accept only full source head in START, `pointer_bytes=4`, frames=120/play=84/miss=36, END `status=complete complete:true`, then EXIT `running=0`. Any timeout/app_error/input_mismatch/present_pending invalidates the measurement. `test_device.py` builds the exact injected native marker and workload and verifies this state sequence and final A/B panel/log equality on host; it does not validate device timing or the production scheduler. Hardware capture/flash remains a separate task.
+
+
+## Current-main comparison (2026-10-25)
+
+The active comparison baseline is `6db9244d585fa3caad899853ff8c7fbe96c5d7d3` (merged PR65/68/69),
+not the historical e0fe98a8 baseline reported above. The candidate keeps that
+main product and adds only this PR's original application change. Prior numerical
+results remain historical; they do not establish the current-main device effect.
+The existing dedicated CI now checks both arms against this pinned baseline.
+
+Reuse the finite workload `lcdcatch-natural-120-v1` unchanged: 120 measured frames,
+production guest allocator, scheduler/owner and LCD path, 24-second cooperative
+deadline, normal product INFO/partition/security settings and existing guards.
+No synchronous model preparation, budget bypass, persistent storage writes or
+new normal-firmware measurement hook is introduced.
+
+Device comparison: verify source/ELF/manifest and complete retained logs for each
+boot; use one A1/B1/B2/A2 block with fresh boot contexts and identical input.
+Compare summed `owner_tick_us` over the complete matched 120-frame windows.
+Keep each boot's JS median and p95 separate. `window_us` includes pacing and is
+not an FPS measurement; boundary-free samples are not exact transient peak heap.
+Accept a runtime improvement only when both paired directions agree and the
+owner reduction exceeds observed same-arm variability, with matching semantic
+markers and no new error, continuation, timeout or unexplained memory regression.
+Otherwise hold the candidate and inspect the discrepancy; do not reinterpret
+JS-only gains as whole-device benefits or add retries merely to obtain a win.
+Existing host panel/state/boundary oracles remain the output-equivalence evidence.
+No device result or merge is claimed by this preparation.

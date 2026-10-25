@@ -344,14 +344,16 @@ static inline __attribute__((always_inline)) int band_entry(const ksn_proc_segme
     const int row=sy>0?y-s->y0:s->y0-(y+height-1);
     if(!dy||row<=0)return 0;
     int major,minor,x_steps,y_steps;
+    /* int16 endpoints and a panel band bound row by 32768 + KSN_PROC_H.
+     * The positive division numerators fit uint32_t, including rounding. */
     if(dx>=dy){
-        int64_t numerator=(int64_t)row*dx-(dx-1)/2;
-        major=numerator>0?(int)((numerator+dy-1)/dy):0;
-        minor=(int)(((int64_t)major*dy+(dx-1)/2)/dx);
+        uint32_t numerator=(uint32_t)row*dx-(dx-1)/2;
+        major=numerator>0?(int)((numerator+dy-1)/(unsigned)dy):0;
+        minor=(int)(((uint32_t)major*dy+(dx-1)/2)/(unsigned)dx);
         x_steps=major;y_steps=minor;
     }else{
         major=row;
-        minor=(int)(((int64_t)major*dx+(dy-1)/2)/dy);
+        minor=(int)(((uint32_t)major*dx+(dy-1)/2)/(unsigned)dy);
         x_steps=minor;y_steps=major;
     }
     *x+=sx*x_steps;*yy+=sy*y_steps;
