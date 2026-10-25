@@ -6,7 +6,7 @@ import os,sys,subprocess,hashlib,json,datetime,argparse,shutil
 R=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(R/'tools/games'))
 import run_derby
-BASE='e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267'
+BASE='6db9244d585fa3caad899853ff8c7fbe96c5d7d3'
 
 def prepare(out):
  changed=set(subprocess.check_output(['git','diff','--name-only',BASE,'--','apps/derby'],cwd=R,text=True).splitlines());assert changed <= {'apps/derby/derby_scene.js'},changed

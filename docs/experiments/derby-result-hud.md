@@ -132,3 +132,31 @@ turns, and removes itself before measured frames. The owner deadline remains24s
 including setup; a late or unfinished run is incomplete. Batching can increase
 wall time, so final target completion/watchdog fit still requires capture. The shared photo regression additionally checks an unbounded-setup negative.
 Use only the new exact-head v2 artifacts; ordinary product behavior is unchanged.
+
+
+## Current-main comparison (2026-10-25)
+
+The active comparison baseline is `6db9244d585fa3caad899853ff8c7fbe96c5d7d3` (merged PR65/68/69),
+not the historical e0fe98a8 baseline reported above. The candidate keeps that
+main product and adds only this PR's original application change. Prior numerical
+results remain historical; they do not establish the current-main device effect.
+The existing dedicated CI now checks both arms against this pinned baseline.
+
+Reuse the finite workload `derby-app-result-120-v2` unchanged: 120 measured frames,
+production guest allocator, scheduler/owner and LCD path, 24-second cooperative
+deadline, normal product INFO/partition/security settings and existing guards.
+No synchronous model preparation, budget bypass, persistent storage writes or
+new normal-firmware measurement hook is introduced.
+
+Device comparison: verify source/ELF/manifest and complete retained logs for each
+boot; use one A1/B1/B2/A2 block with fresh boot contexts and identical input.
+Compare summed `owner_tick_us` over the complete matched 120-frame windows.
+Keep each boot's JS median and p95 separate. `window_us` includes pacing and is
+not an FPS measurement; boundary-free samples are not exact transient peak heap.
+Accept a runtime improvement only when both paired directions agree and the
+owner reduction exceeds observed same-arm variability, with matching semantic
+markers and no new error, continuation, timeout or unexplained memory regression.
+Otherwise hold the candidate and inspect the discrepancy; do not reinterpret
+JS-only gains as whole-device benefits or add retries merely to obtain a win.
+Existing host panel/state/boundary oracles remain the output-equivalence evidence.
+No device result or merge is claimed by this preparation.

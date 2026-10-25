@@ -8,7 +8,7 @@ R=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(R/'tools/games'))
 import run_derby
 import prepare_device as device
-BASE='e0fe98a8c2a3de3b48c8d547c1ff3c8d99863267'
+BASE='6db9244d585fa3caad899853ff8c7fbe96c5d7d3'
 
 def once(s,old,new):
  assert s.count(old)==1,old
