@@ -1,0 +1,13 @@
+{
+  "replay": {
+    "frames": 2918,
+    "panel_sha256": "cb81d59c371b28179d51d6897ee81d6592a0691c05fe1c078a4c60b039fe5176",
+    "logs_equal": true
+  },
+  "boundary": {
+    "frames": 54,
+    "panel_sha256": "417f1a8e2a651c9f7b3b73622fd213e7e6a570df843b59dceb03dc09ed23fcff",
+    "logs_equal": true
+  },
+  "negative_sentinel_rejected": true
+}

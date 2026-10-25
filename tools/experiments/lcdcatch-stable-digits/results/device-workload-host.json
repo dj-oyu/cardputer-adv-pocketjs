@@ -1,0 +1,8 @@
+{
+  "workload": "lcdcatch-natural-120-v1",
+  "frames": 120,
+  "setup_frames": 73,
+  "panel_sha256": "514f16e3328e13e32559e359d39828747fa193cf16574ba3581cb372c08dbeb7",
+  "logs_equal": true,
+  "host_only": true
+}

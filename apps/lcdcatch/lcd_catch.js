@@ -127,17 +127,19 @@
     }
     if (S.mode === 1 || S.mode === 4) S.wait = 1e9;
   }
+  let digits;
   function paint() {
     const m = S.mode, t = m === 1;
-    fw.fill(m ? 0 : 1); iw.fill(m ? 0 : 1);
-    if (!m) { for (let y = 0; y < 5; y++) mw[y] = y & 3; return; }
+    fw.fill(m ? 0 : 1, 0, 5); iw.fill(m ? 0 : 1);
+    if (!m) { fw.fill(1, 5); digits = undefined; for (let y = 0; y < 5; y++) mw[y] = y & 3; return; }
     fw[S.game] = !t || (S.fc / T.blinkF | 0) % 2 === 0;
     fw[4] = t; fw[2] = S.paused; fw[3] = m === 4;
     const v = t ? S.hi[S.game] : S.score;
-    for (let d = 0, p = 100; d < 3; d++, p /= 10) {
+    if (v !== digits) for (let d = 0, p = 100; d < 3; d++, p /= 10) {
       const bits = v >= p || p === 1 ? DG[(v / p | 0) % 10] : 0;
       for (let k = 0; k < 7; k++) fw[5 + d * 7 + k] = bits >> k & 1;
     }
+    digits = v;
     iw[S.pl] = 1;
     for (let i = 0; i < S.misses; i++) iw[4 + i] = 1;
     mw.fill(-1);
