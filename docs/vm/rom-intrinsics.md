@@ -460,3 +460,44 @@ wsl -e bash tools/vmtest/floor/rom_walk.sh     # §2: 生まれたての context
 
 `rom_walk.c` は `quickjs.c` を `#include` する（`floor_parts.c` と同じ）。出力の「accounted」行は global の shape を二重に数えるので、
 §2.1 の表は手で引き直した値である。
+
+## 12. 実装の記録（2026-10-26〜27、`vm/rom-builtins`）
+
+R1 と R2 を実装した。区分は §0 と同じ（実測(host)／実測(device)／推定）。
+
+### 12.1 R1: 解放しない値（`822f09d6`）
+
+- `js_dup` は符号が負なら書かない（分岐 1 つ）。`JS_FreeValueRT` と `js_free_string` は、上流がすでに持つ分岐の後ろに store を移した。RAM の値では命令数が同じ。
+- GC の子のコールバック 3 つは、解放しない子を数えない。
+- C 関数の `realm` が NULL なら呼び手の context で動く（`js_cfunc_realm`。Math の速い経路は `ctx` を受け取るようにした）。
+- 先に検査してから書く: `is_prototype`、`extensible`。直列化（`tmp_mark`）は拒否。弱参照の対象にできない（RD6）。**harden で固めた組み込みも弱参照の対象から外した**。ROM の有無で JS から見える答えが変わらないようにするため。
+- host の検査: `vmrun --harden --immortal` は、全組み込みを作ってから RAM のまま「解放しない」にする（`JS_PocketImmortalizeIntrinsics`、host のみ）。コーパスは harden のみの出力と 3 変種で一致した。違うのは `--fail-alloc` の 3 件だけで、これは番号をずらすと同じ出力になる（539・447・557）。test262 の合格の集合も一致（20,459）。負の対照 `r1_faults.sh`: 守りを外したエンジン 3 つが、どれも検出された。
+- `--immortal=lazy`（組み込みを作らずに適用）は、最初の遅延生成が「解放しない」shape に書いて assert で落ちる。ROM では起きない書き込みを、検査が拾っている。
+
+### 12.2 F1 の表の欠け（`b211e5b6`）
+
+`Math`・`JSON`・`Atomics` は AUTOINIT で、中身は最初の読みで作られる。F1 の生成器はそれを作らずに名前を集めていたので、メソッド名 67 個が表に無かった（`Math` を触るアプリは、今のファームでもその分の heap atom を作っていた）。表は 558 → 625 番（flash 約 +0.8 KB）。ROM では、表に無い atom は番号が実行時に決まるので焼けない。
+
+### 12.3 R2: 生成器と ROM の context（`28b31c9b`、`CONFIG_POCKET_VM_ROM_INTRINSICS`、既定 n）
+
+- `tools/vmtest/floor/gen_rom_intrinsics.sh` が `quickjs-rom-intrinsics.h` を書く。オブジェクト 613（C 関数 548）、shape 101、プロパティ 1,861、文字列 531、Symbol 13、global の束縛 65。欄は名前で書くので、64 bit の host と NaN boxing の実機で同じ生成物がコンパイルできる。NaN boxing でポインタを持つ JSValue は 64 bit 整数の定数にできないので、2 語の union の欄（`JSProperty.u.getset`、`JSObject.u.array`）を通して「下位にアドレス、上位にタグ」で書く。C 関数は生成器自身のシンボル表（`nm`）から名前で書く。`--check` で陳腐化を止める。
+- ROM の context: `JS_NewContext` は ROM の番地を配り、RAM の部分だけを作る。global object（65 の束縛を表から）、`global_var_obj`、雛形 shape 5 個、`JS_AddIntrinsic*` が兼ねていた runtime のクラス登録（RawJSON、Proxy、Promise と async 群、WeakRef、FinalizationRegistry、CallSite、DOMException）、`performance`。
+- **`performance` は ROM に置かない。** `timeOrigin` が context を作った時刻を値として持つため。RAM に作ってから固める。
+- 13 の well-known symbol は、`JS_InitAtoms` がその atom 番号に ROM の struct を置く。ROM のプロパティと runtime が同じ symbol を指す。
+- RD5 のとおり `Array.fromAsync`・`Iterator.zip`・`Iterator.zipKeyed` は無い（`Array.fromAsync` は async 関数だった）。
+- 生成器で見つかった漏れ: 最初の使用で prototype を作るクラス（Map と Set の iterator）を、展開の段で作っていなかった。ROM 版で null になり、`Map.prototype.entries()` の prototype が null になった。
+- ROM の文字列は atom に昇格させない（`__JS_NewAtom` は写しを作る）。runtime の後始末は ROM の symbol を解放しない。
+
+**host の結果（実測(host)、asan、`--harden`）:**
+
+- コーパス: ROM 版は harden のみの RAM 版と、3 変種（素・force-yield・budget-jobs 3）とも、`--fail-alloc` の 3 件を除いて一致した。
+- test262: RAM の harden 版 20,459 に対し ROM 版 20,446（失った 7 件はすべて `$262.createRealm` を使う試験）。ROM では 2 つ目の realm も harden されて生まれ、eval が断られる。ファームは context を 1 つしか作らない（RD2 の想定の範囲）。
+- 32 bit の host（NaN boxing、`-m32`）でも同じ出力。
+
+| ヒープ（`qjs_malloc_size`、実機レイアウトの 32 bit） | RAM（harden） | ROM | 差 |
+|---|---:|---:|---:|
+| 空のスクリプト | 28,788 B（確保 384） | 14,004 B（確保 58） | −14.8 KB |
+| `Math`・`JSON`・`Map`・`Promise` を少し触る | 30,220 B | 14,004 B | −16.2 KB |
+| 小さな検査（`r2_smoke.js`） | 42,828 B | 15,920 B | −26.9 KB |
+
+実機の `js=` は確保ごとに 8 B を足すので、確保の数が減る分（384 → 58 で約 2.6 KB）がさらに乗る（計算）。
